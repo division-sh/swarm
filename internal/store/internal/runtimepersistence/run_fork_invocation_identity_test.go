@@ -155,7 +155,7 @@ func TestSelectedForkLatestPreparationRetainsCapturedSelectorBothStores(t *testi
 			hostile := request
 			hostile.At = uuid.NewString()
 			if got, err := owner.MaterializeRunForkForSelectedContractExecution(ctx, hostile); err == nil || got.ForkRunID != "" ||
-				!strings.Contains(err.Error(), "fork selector differs from fixed revision point") {
+				!strings.Contains(err.Error(), "run.fork invocation requires its original durable operation") {
 				t.Fatalf("foreign request selector bypassed captured point: child=%+v err=%v", got, err)
 			}
 			historicalContextRequireUnchanged(t, before, historicalContextDatabaseRows(t, fixture.db, backend.name == "postgres"))

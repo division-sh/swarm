@@ -253,7 +253,6 @@ func TestReceiverCompositionForkBothStores(t *testing.T) {
 						// This pre-handoff refusal retains the component's discard reach,
 						// not a durable operation's separately retained failure history.
 						execution.ForkOperation = nil
-						execution.LiveRuntime, execution.LiveContexts, execution.LiveRuns = nil, nil, nil
 					}
 					result, err := family.Execute(use.WorkContext(), execution)
 					if admitted {

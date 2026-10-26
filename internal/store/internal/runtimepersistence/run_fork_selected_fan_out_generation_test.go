@@ -149,7 +149,10 @@ func admitSelectedForkFanOutForTest(t *testing.T, ctx context.Context, fixture a
 	}
 	ctx = worklifetime.WithProcess(ctx, work.process)
 	ctx = worklifetime.WithOccurrence(ctx, consumer.work)
-	ctx = startupownership.WithGenerationGrantEvidence(ctx, evidence)
+	ctx, err = startupownership.WithRuntimeMutationAuthority(ctx, grant)
+	if err != nil {
+		t.Fatal(err)
+	}
 	ctx = correlation.WithRunID(ctx, child.ForkRunID)
 	ctx, err = consumer.receiver.Bind(ctx, effects.ExecutionModeLive)
 	if err != nil {
