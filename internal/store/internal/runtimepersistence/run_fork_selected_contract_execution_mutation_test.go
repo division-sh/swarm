@@ -649,6 +649,15 @@ func TestSelectedContractExecutionActivationKeepsPostFrontierActiveDeliveryFailC
 		"review.ready", events.EventProducerAgent, "validation-coordinator", entityID, "", []byte(`{}`), forkAt)
 	captureRunForkTestRevision(t, db, sourceRunID)
 	request := canonicalSelectedContractExecutionStoreRequest(t, ctx, pg, sourceRunID, forkPointEventID, runfork.RunForkContractSelection{Mode: "selected_contracts"}, mustStoreTestSourceArtifactFact(mustCanonicalSelectedContractStoreHash(t)))
+	for _, fixed := range []bool{false, true} {
+		query := runfork.RunForkPlanRequest{SourceRunID: sourceRunID, At: forkPointEventID}
+		if fixed {
+			query.ResolvedPoint = &request.Preparation.ForkPoint
+		}
+		observed, planErr := pg.PlanRunFork(ctx, query)
+		fingerprint, hashErr := runfork.SelectedPreparationPlanFingerprint(observed, request.FrontierAdmission, request.RecipientPlanning, request.Preparation.DeclarationPlanFingerprint)
+		t.Logf("source coupling fixed=%t plan=%+v fingerprint=%s expected=%s errors=%v/%v", fixed, observed, fingerprint, request.Preparation.Coordinates.AdmittedPlanFingerprint, planErr, hashErr)
+	}
 	materialized, err := pg.MaterializeRunForkForSelectedContractExecution(ctx, request)
 	if err != nil {
 		t.Fatalf("MaterializeRunForkForSelectedContractExecution: %v", err)

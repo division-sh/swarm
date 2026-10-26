@@ -6,6 +6,7 @@ import (
 	"encoding/json"
 	"errors"
 	"reflect"
+	"strings"
 	"sync"
 	"testing"
 	"time"
@@ -88,6 +89,11 @@ func TestIssue642ServedPublishedBarrierReachesFinalConsumerBothStores(t *testing
 			case original = <-probe.claims:
 			case <-phase.Done():
 				t.Logf("published barrier source events: %+v", rt.events(t, seed.RunID, ""))
+				for name, table := range readWorkspaceProofApplication(t, rt.selected) {
+					if strings.Contains(name, "fan_out") || strings.Contains(name, "schedule") {
+						t.Logf("published barrier native %s: %+v", name, table)
+					}
+				}
 				t.Logf("published barrier runtime output: %s", process.outputString())
 				t.Fatal(phase.Err())
 			}

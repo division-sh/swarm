@@ -110,6 +110,12 @@ func issue642StagedOrdinaryTimerFork(t *testing.T, backend string) {
 		t.Fatal(err)
 	}
 	staged, operation := issue642MaterializePausedTimer(t, ctx, owners, rt, reader, plan, sourceTimer)
+	execute := owners.executor.ExecuteSelectedContractRunFork
+	owners.executor.ExecuteSelectedContractRunFork = func(ctx context.Context, request runforkexecution.SelectedContractExecutionRequest) (runforkexecution.SelectedContractExecutionResult, error) {
+		result, err := execute(ctx, request)
+		t.Logf("staged durable operation result=%+v point=%+v err=%v", result, operation.ResolvedPoint, err)
+		return result, err
+	}
 	activation, err := owners.executor.ExecuteRunFork(ctx, apiv1.RunForkExecutionRequest{
 		SourceRunID: plan.SourceRunID, ForkEventID: plan.ForkPoint.EventID, BundleHash: rt.BundleHash,
 		AllowSourceFreeze: true, ContractSelection: operation.ContractSelection, ForkOperation: operation,
