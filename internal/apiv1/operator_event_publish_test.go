@@ -360,7 +360,7 @@ func TestOperatorEventPublishSQLiteIdempotentFirstEventPublishesWithoutLock(t *t
 		t.Fatalf("sqlite event rows after conflict = %d, want 1", count)
 	}
 
-	nonIDEM := rpcCall(t, handler, eventPublishBody("", runStartTestBundleHash, "scan.requested", `{"topic":"second"}`, "", ""))
+	nonIDEM := rpcCall(t, handler, eventPublishBody(runID, runStartTestBundleHash, "scan.requested", `{"topic":"second"}`, "", ""))
 	if nonIDEM.Error != nil {
 		t.Fatalf("sqlite non-idempotent event.publish error = %#v", nonIDEM.Error)
 	}

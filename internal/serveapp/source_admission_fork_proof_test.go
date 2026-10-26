@@ -230,6 +230,15 @@ func Test2376ForkSourceAndPinsFollowSourceRunBothStores(t *testing.T) {
 			opts, start := lifecycleRestartHarness(t, backend, rootC)
 			c, selectedC := start()
 			hashC := selectedC.BundleHash
+			retainedC := requireServedEventPublishRPCResult(t, selectedC.Endpoint, map[string]any{
+				"event_name": "work.requested", "bundle_hash": hashC,
+				"payload": map[string]any{"seed": true}, "idempotency_key": "2376-retained-target-c",
+			})
+			requireServedEventPublishEntityState(t, selectedC.DB, backend, retainedC.RunID, "", "review")
+			waitServedRunDeliveryQuiescence(t, selectedC.ReadRunDeliveries, retainedC.RunID)
+			requireServedOKJSONRPC(t, selectedC.Endpoint, "run.pause", map[string]any{
+				"run_id": retainedC.RunID, "idempotency_key": "2376-pause-target-c",
+			})
 			if code := c.stop(); code != 0 {
 				t.Fatalf("C stop=%d", code)
 			}

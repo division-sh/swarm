@@ -155,6 +155,10 @@ func executeDeploymentRunStart(ctx context.Context, req Request, opts EventPubli
 	}
 	committed, err := owner.StartDeploymentRunAcknowledged(ctx, command, idempotency)
 	if err != nil {
+		var live *runtimerunlifecycle.LiveRunConflictError
+		if errors.As(err, &live) {
+			return nil, runControlError(command.RunID, err)
+		}
 		if errors.Is(err, worklifetime.ErrPublicCompletionCapacity) {
 			return nil, NewApplicationError(EventPublishFailedCode, true, map[string]any{"reason": err.Error()})
 		}

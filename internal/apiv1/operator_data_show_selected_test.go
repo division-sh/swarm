@@ -584,7 +584,7 @@ func TestDataShowOperationReadFamilyAcrossSelectedStores(t *testing.T) {
 						t.Fatalf("pin evidence=%#v", wire)
 					}
 					pins, err := fixture.primary.LoadDataPruneOperationPins(ctx, prune.PruneInvocationID)
-					if err != nil || len(pins) != 2 || !dataRunHasPin(pins, runID, "running") || !dataRunHasPin(pins, secondRunID, "running") {
+					if err != nil || len(pins) != 2 || !dataRunHasPin(pins, runID, "paused") || !dataRunHasPin(pins, secondRunID, "live") {
 						t.Fatalf("complete durable pins=%#v/%v", pins, err)
 					}
 					assertDataShowEvidence(t, handler, dataShowOperationParams("prune", prune.PruneInvocationID, "pins"), pins)

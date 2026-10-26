@@ -713,11 +713,15 @@ func (e *publicationRunCreationFailure) Error() string { return e.cause.Error() 
 func (e *publicationRunCreationFailure) Unwrap() error { return e.cause }
 
 func classifyPublicationFailure(ctx context.Context, store eventCommitTxStore, command runtimebus.PublicationCommand, err error) error {
+	return classifyRunCreationFailure(ctx, store, publicationLiveScope(command), command.Commit.Event.Event().RunID(), err)
+}
+
+func classifyRunCreationFailure(ctx context.Context, store eventCommitTxStore, scope runlifecycle.LiveRunScope, runID string, err error) error {
 	var creation *publicationRunCreationFailure
 	if !errors.As(err, &creation) {
 		return err
 	}
-	return store.ClassifyLiveRunCreationFailure(ctx, publicationLiveScope(command), command.Commit.Event.Event().RunID(), err)
+	return store.ClassifyLiveRunCreationFailure(ctx, scope, runID, err)
 }
 
 func (s *EventPostgresOwner) CommitPublicationTx(ctx context.Context, attempt *mutationprotocol.Attempt, command runtimebus.PublicationCommand) (runtimebus.CommittedPublication, error) {
