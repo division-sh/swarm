@@ -19,6 +19,7 @@ import (
 	"github.com/division-sh/swarm/internal/apiv1"
 	"github.com/division-sh/swarm/internal/events"
 	"github.com/division-sh/swarm/internal/operatorread"
+	"github.com/division-sh/swarm/internal/runtime/agenttopology"
 	"github.com/division-sh/swarm/internal/runtime/authoractivity"
 	"github.com/division-sh/swarm/internal/runtime/core/managedexecution"
 	"github.com/division-sh/swarm/internal/runtime/core/worklifetime"
@@ -275,11 +276,40 @@ func TestIssue642FutureProviderRecoveryProcessHelper(t *testing.T) {
 		default:
 		}
 		probe.mu.Lock()
-		operationID, operations, preparation := probe.operationID, probe.operations, probe.preparation
+		operationID, operations := probe.operationID, probe.operations
 		probe.mu.Unlock()
-		if operationID == "" || preparation == nil || preparation.MaterializationRequired || !preparation.MaterializationSupported ||
-			len(preparation.ConfiguredAgentPlans) != 0 || len(preparation.AgentRecipientPlans) != 0 {
-			t.Fatalf("start-cut preparation invented a future actor: operation=%s preparation=%+v", operationID, preparation)
+		if operationID == "" {
+			t.Fatal("claimed child lost its durable operation identity")
+		}
+		storage, err := storetest.ReadSelectedForkApplicationStorageSnapshot(t.Context(), rt.selected)
+		if err != nil {
+			t.Fatal(err)
+		}
+		rows, err := storetest.DecodeSelectedForkSnapshotRows(storage["run_fork_selected_contract_runtime_executions"])
+		if err != nil {
+			t.Fatal(err)
+		}
+		matched := 0
+		for _, row := range rows {
+			id, err := row["execution_id"].Text()
+			if err != nil {
+				t.Fatal(err)
+			}
+			if id != proof.Claim.ExecutionID {
+				continue
+			}
+			matched++
+			preparationRaw, prepErr := row["preparation_binding"].Text()
+			declarationRaw, declarationErr := row["declaration_plan"].Text()
+			var preparation runfork.SelectedForkPreparationBinding
+			var declaration agenttopology.SelectedDeclarationPlan
+			if prepErr != nil || declarationErr != nil || json.Unmarshal([]byte(preparationRaw), &preparation) != nil || json.Unmarshal([]byte(declarationRaw), &declaration) != nil ||
+				preparation.Validate() != nil || declaration.Validate() != nil || preparation.ForkRunID != proof.Claim.RunID || len(preparation.Actors) != 0 || len(declaration.Agents) != 0 {
+				t.Fatalf("native start-cut preparation invented an actor before construction: preparation=%s declarations=%s", preparationRaw, declarationRaw)
+			}
+		}
+		if matched != 1 {
+			t.Fatalf("claim has %d native preparation rows, want one", matched)
 		}
 		var found bool
 		proof.Operation, found, err = operations.LoadForkOperationByID(t.Context(), operationID)
@@ -393,7 +423,6 @@ type issue642FutureRecoveryProbe struct {
 	operations  apiv1.RunForkOperationReader
 	retire      func(context.Context) error
 	operationID string
-	preparation *runforkexecution.SelectedContractAgentRuntimeMaterialization
 	grants      map[string]startupownership.GenerationGrant
 	claims      int
 	observed    chan issue642FutureClaimObservation
@@ -487,11 +516,7 @@ func issue642InstallFutureRecoveryProbe(t *testing.T, mode string, minted bool, 
 				probe.operationID = req.ForkOperation.OperationID
 				probe.mu.Unlock()
 			}
-			result, err := execute(ctx, req)
-			probe.mu.Lock()
-			probe.preparation = result.AgentRuntimeMaterialization
-			probe.mu.Unlock()
-			return result, err
+			return execute(ctx, req)
 		}
 		caps.RunFork = executor
 		caps.SelectedForkProcess = &issue642FutureRecoveryOwner{selectedForkProcessOwner: caps.SelectedForkProcess, probe: probe}
