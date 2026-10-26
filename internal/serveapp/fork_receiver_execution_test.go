@@ -193,6 +193,7 @@ func TestSelectedForkReceiverEffectOnlyFailureSettlementBothStores(t *testing.T)
 					}
 					request.ContractSelection = runfork.RunForkContractSelection{Mode: runfork.RunForkContractSelectionModeBundleHash, BundleHash: fact.BundleHash()}
 					request.ExpectedBundleHash = fact.BundleHash()
+					request.LiveRuntime = nil
 				}
 				request.ForkOperation = &runfork.ForkOperationRequest{
 					OperationID: uuid.NewString(), Actor: "receiver-settlement", IdempotencyKey: name, TransportHash: name,
@@ -343,7 +344,7 @@ func TestSelectedForkReceiverEffectOnlyFailureSettlementBothStores(t *testing.T)
 					t.Fatal("fork receiver execution or settlement mutated source domain")
 				}
 				if !unavailable {
-					requireSelectedForkPublicControlBoundary(t, rt.Endpoint, selected.RuntimeDeps().EventStore, rt.BundleHash, claim.RunID(), claimed.signal.EventID, declaredAgent, 1)
+					requireSelectedForkPublicControlBoundary(t, rt.Endpoint, selected.RuntimeDeps().EventStore, request.ExpectedBundleHash, claim.RunID(), claimed.signal.EventID, declaredAgent, 1)
 				}
 			})
 		}
@@ -414,69 +415,19 @@ func requireSelectedForkPublicControlBoundary(t *testing.T, endpoint string, own
 			time.Sleep(10 * time.Millisecond)
 		}
 	}
-	// Delivery completion precedes the completion worker's await-mutation
-	// projection. Observe that durable handoff before measuring API mutations;
-	// the full snapshots below must still include the candidate columns.
-	// A different selected bundle has no completion worker in this loaded runtime.
-	deadline := time.Now().Add(servedProofPollDeadline)
-	var storage storetest.SelectedForkControlStorage
-	for {
-		var err error
-		storage, err = storetest.ReadSelectedForkControlStorage(context.Background(), owner, runID, loadedBundleHash, "same-name")
-		if err != nil {
-			t.Fatal(err)
-		}
-		if storage.AwaitingMutation {
-			break
-		}
-		if time.Now().After(deadline) {
-			summary, err := storetest.ReadServedRunDebugSummary(context.Background(), owner, runID)
-			t.Fatalf("selected fork did not finish its completion candidate: %s error=%v", summary, err)
-		}
-		time.Sleep(10 * time.Millisecond)
-	}
-	bindingID := storage.BindingID
-	type controlCase struct {
-		method string
-		params map[string]any
-	}
-	cases := []controlCase{
-		{"run.pause", map[string]any{"run_id": runID}},
-		{"run.continue", map[string]any{"run_id": runID}},
-		{"agent.restart", map[string]any{"run_id": runID, "agent_id": "same-name"}},
-		{"agent.send_directive", map[string]any{"run_id": runID, "agent_id": "same-name", "directive": "must not execute"}},
-		{"event.publish", map[string]any{"run_id": runID, "event_name": "start.requested", "source_event_id": eventID, "payload": map[string]any{"token": "must-not-execute"}}},
-		{"event.replay", map[string]any{"event_id": eventID}},
-	}
 	if declaredAgent {
-		if storage.AgentCount != 1 {
-			t.Logf("agent rows: %v", readWorkspaceProofApplication(t, owner)["agents"])
-			t.Fatalf("selected declaration did not materialize the control target: count=%d", storage.AgentCount)
-		}
-		cases = append(cases, controlCase{"agent.replay", map[string]any{"run_id": runID, "agent_id": "same-name", "event_id": eventID}})
 		requireSelectedForkDeclaredAgentReads(t, endpoint, owner, loadedBundleHash, runID, completionCount)
 	}
-	for _, test := range cases {
-		t.Run(test.method, func(t *testing.T) {
-			before := readWorkspaceProofApplication(t, owner)
-			err := requireServedJSONRPCError(t, endpoint, test.method, test.params)
-			if err.Data["code"] != "SELECTED_FORK_CONTROL_UNSUPPORTED" {
-				t.Fatalf("selected control escaped through loaded same-hash runtime: %+v", err)
-			}
-			details, ok := err.Data["details"].(map[string]any)
-			if !ok || details["operation"] != test.method || details["run_id"] != runID || details["binding_id"] != bindingID {
-				t.Fatalf("selected refusal lost exact binding: %+v", err)
-			}
-			after := readWorkspaceProofApplication(t, owner)
-			if !reflect.DeepEqual(before, after) {
-				for table, rows := range before {
-					if !reflect.DeepEqual(rows, after[table]) {
-						t.Errorf("refused %s changed %s: before=%v after=%v", test.method, table, rows, after[table])
-					}
-				}
-				t.Fatal("refused selected control changed the database")
-			}
-		})
+	// The immutable ACK has transferred this child to ordinary live authority.
+	for _, control := range []struct{ method, status string }{{"run.pause", "paused"}, {"run.continue", "live"}} {
+		requireServedOKJSONRPC(t, endpoint, control.method, map[string]any{"run_id": runID, "idempotency_key": uuid.NewString()})
+		var readback struct {
+			Run struct{ Status string } `json:"run"`
+		}
+		requireServedJSONRPCResult(t, endpoint, "run.get", map[string]any{"run_id": runID}, &readback)
+		if readback.Run.Status != control.status {
+			t.Fatalf("acknowledged child %s: %+v", control.method, readback)
+		}
 	}
 	var result struct {
 		OK bool `json:"ok"`
