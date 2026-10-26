@@ -7,6 +7,7 @@ import (
 	"time"
 
 	"github.com/division-sh/swarm/internal/config"
+	"github.com/division-sh/swarm/internal/runtime/authoractivity"
 	"github.com/division-sh/swarm/internal/runtime/core/worklifetime"
 	"github.com/division-sh/swarm/internal/runtime/correlation"
 	"github.com/division-sh/swarm/internal/runtime/effects"
@@ -76,14 +77,17 @@ func selectedStoreActivationGateForTest(t *testing.T, ctx context.Context, selec
 		if err != nil {
 			return runfork.RunForkActivation{}, err
 		}
-		child, err := fixed.RequireMaterializedRunForkForSelectedContractExecution(ctx, original.ForkRunID, request)
+		scope, err := authoractivity.BundleScopeForTarget(ctx, request.SourceArtifactFact.BundleHash())
+		if err != nil {
+			return runfork.RunForkActivation{}, err
+		}
+		nativeCtx := authoractivity.WithScope(correlation.WithSourceArtifactFact(ctx, request.SourceArtifactFact), scope)
+		child, err := fixed.RequireMaterializedRunForkForSelectedContractExecution(nativeCtx, original.ForkRunID, request)
 		if err != nil {
 			return runfork.RunForkActivation{}, err
 		}
 		original.InheritedSchedules = request.Readiness
-		phaseCtx, _, _ := admitSelectedForkNativePhaseForTest(t, correlation.WithSourceArtifactFact(ctx, request.SourceArtifactFact), authorActivityReceiptFixture{store: selected.(authorActivityReceiptStore)}, original.ExecutionSource, child, request)
-		actualSource, _ := correlation.SourceArtifactFactFromContext(phaseCtx)
-		t.Logf("native component source: request=%s authority=%s child=%s", request.SourceArtifactFact.BundleHash(), actualSource.BundleHash(), child.ForkRunID)
+		phaseCtx, _, _ := admitSelectedForkNativePhaseForTest(t, nativeCtx, authorActivityReceiptFixture{store: selected.(authorActivityReceiptStore)}, original.ExecutionSource, child, request)
 		// This fixture intentionally has no ordinary target: passing all native
 		// validation must still refuse an ACK at the durable-operation boundary.
 		original.ForkOperation = nil

@@ -1523,11 +1523,8 @@ func TestSelectedContractActivationRejectsUncausedForkLocalRuntimeLogDiagnostic(
 
 		return requireSelectedStoreFinalSettlement(t, preparedCtx, pg, prepared)
 	})
-	if err != nil {
-		t.Fatalf("committed activation acknowledgement failed: %v", err)
-	}
-	if !activation.Activated {
-		t.Fatalf("final settlement refusal lost committed activation ACK: %#v", activation)
+	if err == nil || !strings.Contains(err.Error(), "fork_events_not_selected_contract_lineage") || activation.Activated {
+		t.Fatalf("unowned event escaped native pre-handoff settlement validation: %+v err=%v", activation, err)
 	}
 }
 
@@ -1556,11 +1553,8 @@ func TestSelectedContractActivationRejectsUncausedForkLocalToolExecutorRuntimeLo
 
 		return requireSelectedStoreFinalSettlement(t, preparedCtx, pg, prepared)
 	})
-	if err != nil {
-		t.Fatalf("committed activation acknowledgement failed: %v", err)
-	}
-	if !activation.Activated {
-		t.Fatalf("final settlement refusal lost committed activation ACK: %#v", activation)
+	if err == nil || !strings.Contains(err.Error(), "fork_events_not_selected_contract_lineage") || activation.Activated {
+		t.Fatalf("unowned event escaped native pre-handoff settlement validation: %+v err=%v", activation, err)
 	}
 }
 
@@ -1589,11 +1583,8 @@ func TestSelectedContractActivationRejectsUnownedPlatformEventWithSelectedParent
 
 		return requireSelectedStoreFinalSettlement(t, preparedCtx, pg, prepared)
 	})
-	if err != nil {
-		t.Fatalf("committed activation acknowledgement failed: %v", err)
-	}
-	if !activation.Activated {
-		t.Fatalf("final settlement refusal lost committed activation ACK: %#v", activation)
+	if err == nil || !strings.Contains(err.Error(), "fork_events_not_selected_contract_lineage") || activation.Activated {
+		t.Fatalf("unowned event escaped native pre-handoff settlement validation: %+v err=%v", activation, err)
 	}
 }
 
