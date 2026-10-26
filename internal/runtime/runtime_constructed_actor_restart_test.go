@@ -346,6 +346,11 @@ func proveNativeConstructedActorSourceSetRebind(t *testing.T, ctx context.Contex
 	if err != nil {
 		t.Fatal(err)
 	}
+	if err := capability.CheckSourceSetReplacement(ctx, agenttopology.SourceSetCommitRequest{
+		OperationID: uuid.NewString(), ExpectedRevision: current.Revision, Plan: empty, RequirePausedRemoval: true,
+	}); !errors.Is(err, runcontrol.ErrNotPaused) {
+		t.Fatalf("source removal inspection did not refuse its executing run: %v", err)
+	}
 	if _, err := capability.RestoreSourceSet(ctx, agenttopology.SourceSetCommitRequest{
 		OperationID: uuid.NewString(), ExpectedRevision: current.Revision, Plan: empty, RequirePausedRemoval: true,
 	}); !errors.Is(err, runcontrol.ErrNotPaused) {

@@ -25,6 +25,7 @@ import (
 	"github.com/division-sh/swarm/internal/runtime/runfork"
 	"github.com/division-sh/swarm/internal/runtime/runforkexecution"
 	"github.com/division-sh/swarm/internal/runtime/semanticview"
+	"github.com/division-sh/swarm/internal/runtime/startupownership"
 	"github.com/division-sh/swarm/internal/runtime/testfixtures/canonicalrouting"
 	"github.com/division-sh/swarm/internal/servedparity"
 	"github.com/division-sh/swarm/internal/store/storetest"
@@ -57,11 +58,16 @@ func proveSelectedForkPublicChangedTargetExecutionBothStores(t *testing.T, optio
 	for _, backend := range []servedparity.Backend{servedparity.BackendDefaultSQLite, servedparity.BackendExplicitPostgres} {
 		t.Run(string(backend), func(t *testing.T) {
 			supervisors := make(chan *processLifecycleSupervisor, 1)
+			var removalFault *liveRemovalFaultCapability
 			{
 				prior := buildSelectedAPICapabilities
 				var once sync.Once
 				buildSelectedAPICapabilities = func(owner *selectedStoreOwner, req selectedAPICapabilityRequest) (selectedAPICapabilities, error) {
-					once.Do(func() { supervisors <- req.RuntimeSupervisor })
+					once.Do(func() {
+						removalFault = &liveRemovalFaultCapability{ProcessCapability: req.RuntimeSupervisor.processCapability}
+						req.RuntimeSupervisor.processCapability = removalFault
+						supervisors <- req.RuntimeSupervisor
+					})
 					caps, err := prior(owner, req)
 					if prepare := caps.PrepareRunRuntime; prepare != nil {
 						caps.PrepareRunRuntime = func(ctx context.Context, runID string) error {
@@ -305,7 +311,7 @@ func proveSelectedForkPublicChangedTargetExecutionBothStores(t *testing.T, optio
 			if nativeRead {
 				completionCount = 2
 			}
-			requireForkLivePublicControls(t, rt.Endpoint, supervisor, selected.RuntimeDeps().EventStore, seed.RunID, rt.BundleHash, fork.ForkRunID, childHash)
+			requireForkLivePublicControls(t, rt.Endpoint, supervisor, selected.RuntimeDeps().EventStore, seed.RunID, rt.BundleHash, fork.ForkRunID, childHash, removalFault)
 			t.Run("live_public_readback", func(t *testing.T) {
 				requireSelectedForkDeclaredAgentReads(t, rt.Endpoint, selected.RuntimeDeps().EventStore, rt.BundleHash, fork.ForkRunID, completionCount)
 				requireSelectedForkMixedBusinessMutation(t, rt.Endpoint, selected.RuntimeDeps().EventStore, fork.ForkRunID, childEvent, rows["consumer"].ID)
@@ -424,7 +430,7 @@ func requireForkSourceSelfReleaseConservation(t *testing.T, owner runtimebus.Eve
 	}
 }
 
-func requireForkLivePublicControls(t *testing.T, endpoint string, supervisor *processLifecycleSupervisor, owner runtimebus.EventStore, sourceRunID, sourceHash, childRunID, childHash string) {
+func requireForkLivePublicControls(t *testing.T, endpoint string, supervisor *processLifecycleSupervisor, owner runtimebus.EventStore, sourceRunID, sourceHash, childRunID, childHash string, removalFault *liveRemovalFaultCapability) {
 	t.Helper()
 	status := func(runID, want string) {
 		var result struct {
@@ -496,6 +502,32 @@ func requireForkLivePublicControls(t *testing.T, endpoint string, supervisor *pr
 	conflict(sourceRunID, childRunID, childHash)
 	control("run.pause", childRunID)
 	status(childRunID, "paused")
+	for _, fault := range []string{"precheck", "definitive", "uncertain"} {
+		removalFault.arm(sourceHash, fault)
+		beforeRuntime := supervisor.CurrentRuntime()
+		refused := requestServedJSONRPC(t, endpoint, "run.continue", map[string]any{"run_id": sourceRunID, "idempotency_key": uuid.NewString()})
+		if refused.Error == nil {
+			t.Fatalf("%s source replacement unexpectedly succeeded", fault)
+		}
+		lookup := supervisor.runtimeContexts.LookupBundleHashStatus(childHash)
+		if fault == "uncertain" {
+			if lookup.Loaded() {
+				t.Fatal("uncertain source replacement reopened predecessor execution")
+			}
+			continue
+		}
+		if refused.Error.Data["code"] != apiv1.RunNotPausedCode || !lookup.Loaded() {
+			t.Fatalf("%s refusal lost the predecessor service: %+v lookup=%+v", fault, refused.Error, lookup)
+		}
+		if fault == "precheck" && supervisor.CurrentRuntime() != beforeRuntime {
+			t.Fatal("precheck refusal replaced the serving occurrence")
+		}
+		if fault == "definitive" && supervisor.CurrentRuntime() == beforeRuntime {
+			t.Fatal("post-shutdown refusal reused a retired occurrence")
+		}
+		status(sourceRunID, "paused")
+		status(childRunID, "paused")
+	}
 	control("run.continue", sourceRunID)
 	status(sourceRunID, "live")
 	status(childRunID, "paused")
@@ -513,6 +545,52 @@ func requireForkLivePublicControls(t *testing.T, endpoint string, supervisor *pr
 	}
 	status(sourceRunID, "cancelled")
 	status(childRunID, "live")
+}
+
+type liveRemovalFaultCapability struct {
+	startupownership.ProcessCapability
+	mu         sync.Mutex
+	bundleHash string
+	fault      string
+}
+
+func (p *liveRemovalFaultCapability) arm(bundleHash, fault string) {
+	p.mu.Lock()
+	defer p.mu.Unlock()
+	p.bundleHash, p.fault = bundleHash, fault
+}
+
+func (p *liveRemovalFaultCapability) take(request agenttopology.SourceSetCommitRequest, precheck bool) string {
+	p.mu.Lock()
+	defer p.mu.Unlock()
+	if len(request.Plan.Sources) != 1 || request.Plan.Sources[0].BundleHash != p.bundleHash || (p.fault == "precheck") != precheck {
+		return ""
+	}
+	fault := p.fault
+	p.fault = ""
+	return fault
+}
+
+func (p *liveRemovalFaultCapability) CheckSourceSetReplacement(ctx context.Context, request agenttopology.SourceSetCommitRequest) error {
+	if err := p.ProcessCapability.CheckSourceSetReplacement(ctx, request); err != nil {
+		return err
+	}
+	if p.take(request, true) != "" {
+		return &runcontrol.StateError{Err: runcontrol.ErrNotPaused}
+	}
+	return nil
+}
+
+func (p *liveRemovalFaultCapability) RestoreSourceSet(ctx context.Context, request agenttopology.SourceSetCommitRequest) (agenttopology.SourceSetCommitResult, error) {
+	fault := p.take(request, false)
+	if fault == "definitive" {
+		return agenttopology.SourceSetCommitResult{}, &runcontrol.StateError{Err: runcontrol.ErrNotPaused}
+	}
+	result, err := p.ProcessCapability.RestoreSourceSet(ctx, request)
+	if fault == "uncertain" && err == nil {
+		err = errors.New("source replacement acknowledgement lost")
+	}
+	return result, err
 }
 
 func readWorkspaceProofSourceDomain(t *testing.T, owner runtimebus.EventStore, runID string) map[string]storetest.SelectedForkStorageTableSnapshot {

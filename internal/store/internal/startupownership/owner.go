@@ -360,6 +360,12 @@ func (s *postgresSession) CommitSourceSet(ctx context.Context, req runtimeagentt
 	return result, err
 }
 
+func (s *postgresSession) CheckSourceSetReplacement(ctx context.Context, req runtimeagenttopology.SourceSetCommitRequest) error {
+	return s.lease.RunTransaction(ctx, func(ctx context.Context, tx *sql.Tx) error {
+		return checkSourceSetReplacementTx(ctx, tx, req, false)
+	})
+}
+
 func (s *postgresSession) ApplyDestructiveResetCleanup(ctx context.Context, req runtimedestructivereset.CleanupRequest, topology *runtimeagenttopology.SourceSetCommitRequest) (runtimedestructivereset.CleanupResult, error) {
 	var result runtimedestructivereset.CleanupResult
 	committed, err := postgresbackend.RunAuthorityTransactionOutcome(ctx, s.lease.Session(), func(txctx context.Context, tx *sql.Tx) error {
@@ -576,6 +582,12 @@ func (s *sqliteSession) CommitSourceSet(ctx context.Context, req runtimeagenttop
 		return err
 	})
 	return result, err
+}
+
+func (s *sqliteSession) CheckSourceSetReplacement(ctx context.Context, req runtimeagenttopology.SourceSetCommitRequest) error {
+	return s.owner.backend.RunTransaction(ctx, "check agent topology source replacement", func(ctx context.Context, tx *sql.Tx) error {
+		return checkSourceSetReplacementTx(ctx, tx, req, true)
+	})
 }
 
 func (s *sqliteSession) ApplyDestructiveResetCleanup(ctx context.Context, req runtimedestructivereset.CleanupRequest, topology *runtimeagenttopology.SourceSetCommitRequest) (result runtimedestructivereset.CleanupResult, err error) {
@@ -974,6 +986,14 @@ func commitSourceSetTx(ctx context.Context, tx *sql.Tx, req runtimeagenttopology
 		}
 	}
 	return result, err
+}
+
+func checkSourceSetReplacementTx(ctx context.Context, tx *sql.Tx, req runtimeagenttopology.SourceSetCommitRequest, sqlite bool) error {
+	previous, exists, err := loadSourceSetTx(ctx, tx, sqlite)
+	if err != nil {
+		return err
+	}
+	return requireSourceSetPredecessor(ctx, tx, req, previous, exists, sqlite)
 }
 
 func requireSourceSetPredecessor(ctx context.Context, tx *sql.Tx, req runtimeagenttopology.SourceSetCommitRequest, previous runtimeagenttopology.SourceSetPlan, hasPrevious, sqlite bool) error {

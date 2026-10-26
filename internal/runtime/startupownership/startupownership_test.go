@@ -135,6 +135,10 @@ func (s *retainedSessionProbe) LoadSourceSet(context.Context) (runtimeagenttopol
 	return s.plan, s.plan.Revision != "", s.loadSourceErr
 }
 
+func (*retainedSessionProbe) CheckSourceSetReplacement(context.Context, runtimeagenttopology.SourceSetCommitRequest) error {
+	return nil
+}
+
 func (s *retainedSessionProbe) CommitSourceSet(_ context.Context, req runtimeagenttopology.SourceSetCommitRequest) (runtimeagenttopology.SourceSetCommitResult, error) {
 	s.mu.Lock()
 	defer s.mu.Unlock()

@@ -9,6 +9,7 @@ import (
 	"github.com/division-sh/swarm/internal/cliapp"
 	"github.com/division-sh/swarm/internal/runtime"
 	"github.com/division-sh/swarm/internal/runtime/agenttopology"
+	"github.com/division-sh/swarm/internal/runtime/runcontrol"
 	"github.com/division-sh/swarm/internal/runtime/runlifecycle"
 	"github.com/division-sh/swarm/internal/runtime/semanticview"
 	"github.com/division-sh/swarm/internal/runtime/startupownership"
@@ -24,6 +25,10 @@ func (s *processLifecycleSupervisor) acquireLiveTargetRuntime(ctx context.Contex
 	}
 	s.operationMu.Lock()
 	defer s.operationMu.Unlock()
+	return s.acquireLiveTargetRuntimeLocked(ctx, bundleHash)
+}
+
+func (s *processLifecycleSupervisor) acquireLiveTargetRuntimeLocked(ctx context.Context, bundleHash string) (_ *runtime.RuntimeContextUse, retErr error) {
 	s.mu.RLock()
 	manager, resetting := s.runtimeContexts, s.resetting
 	requests := append([]serveRuntimeBundleContextRequest(nil), s.resetRequests...)
@@ -170,6 +175,12 @@ func (s *processLifecycleSupervisor) acquireCurrentLiveSource(ctx context.Contex
 }
 
 func (s *processLifecycleSupervisor) replaceLiveSourceSet(ctx context.Context, manager *runtime.RuntimeContextManager, current, plan agenttopology.SourceSetPlan, bundleHash, runtimeInstanceID string) (startupownership.LiveGenerationGrant, error) {
+	request := agenttopology.SourceSetCommitRequest{
+		OperationID: uuid.NewString(), ExpectedRevision: current.Revision, Plan: plan, RequirePausedRemoval: true,
+	}
+	if err := s.processCapability.CheckSourceSetReplacement(ctx, request); err != nil {
+		return nil, err
+	}
 	// Only a bundle swap reaches this join; an ordinary pause keeps processes.
 	for _, source := range current.Sources {
 		if result := manager.DeactivateBundleHashWithOptions(source.BundleHash, runtime.RuntimeContextCauseUnloaded, s.shutdownOptions); result.ShutdownErr != nil {
@@ -187,9 +198,24 @@ func (s *processLifecycleSupervisor) replaceLiveSourceSet(ctx context.Context, m
 	if err != nil {
 		return nil, err
 	}
-	if _, err := s.processCapability.RestoreSourceSet(ctx, agenttopology.SourceSetCommitRequest{
-		OperationID: uuid.NewString(), ExpectedRevision: current.Revision, Plan: plan, RequirePausedRemoval: true,
-	}); err != nil {
+	if _, err := s.processCapability.RestoreSourceSet(ctx, request); err != nil {
+		if errors.Is(err, runcontrol.ErrNotPaused) {
+			// This refusal precedes every write. Rebuild only after observing the
+			// exact predecessor, never on an attempted or uncertain commit.
+			if abortErr := transition.Abort(); abortErr != nil {
+				return nil, errors.Join(err, abortErr)
+			}
+			recoveryCtx := context.WithoutCancel(ctx)
+			observed, exists, readErr := s.processCapability.CurrentSourceSet(recoveryCtx)
+			if readErr != nil || !exists || observed.Revision != current.Revision || len(current.Sources) != 1 {
+				return nil, errors.Join(err, readErr, errors.New("refused source replacement lost its exact predecessor"))
+			}
+			use, restoreErr := s.acquireLiveTargetRuntimeLocked(recoveryCtx, current.Sources[0].BundleHash)
+			if use != nil {
+				restoreErr = errors.Join(restoreErr, use.Done())
+			}
+			return nil, errors.Join(err, restoreErr)
+		}
 		// An uncertain commit must keep stale grants withdrawn until re-observed.
 		transition.RetainForRetry()
 		return nil, err
