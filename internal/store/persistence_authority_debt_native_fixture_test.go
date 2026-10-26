@@ -17,7 +17,7 @@ func debtReviewedNativeSelectedImport(path, alias string, file *ast.File) bool {
 	var pins map[string]string
 	switch path {
 	case "internal/runtime/pipeline/fork_fan_out_crash_external_test.go":
-		pins = map[string]string{"TestIssue642MixedFanOutCrashRestartBothStores": "48de2ed84a9b34a5844c95cdcb86632eb993301293e411f0c9e0692b9bfc1114"}
+		pins = map[string]string{"TestIssue642MixedFanOutCrashRestartBothStores": "834ea778967e2c3dac02b6d6bf4f32f752851175608796e141fd12799312913f"}
 	case "internal/runtime/pipeline/fork_fan_out_refork_external_test.go":
 		pins = map[string]string{"proveMixedFanOutChildRefork": "4d722cc930b51a0278ad79589717099e66f9206c4667259573e1d9fc9d1e3b79"}
 	case "internal/runtime/pipeline/fork_published_barrier_crash_external_test.go":

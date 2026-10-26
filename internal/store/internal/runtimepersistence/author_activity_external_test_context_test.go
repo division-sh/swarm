@@ -33,8 +33,16 @@ const authorActivityTestRuntimeInstanceID = "11111111-1111-1111-1111-11111111111
 
 func originalStoreFixtureContext(t testing.TB, ctx context.Context, selected any) context.Context {
 	t.Helper()
+	if _, found := worklifetime.ProcessFromContext(ctx); !found {
+		ctx = storeTestWorkContext(t, ctx)
+	}
 	if startupownership.HasMutationAuthority(ctx) {
-		if _, err := startupownership.CaptureMutationAuthority(ctx); err != nil {
+		original, err := startupownership.CaptureMutationAuthority(ctx)
+		if err != nil {
+			t.Fatal(err)
+		}
+		process, _ := worklifetime.ProcessFromContext(ctx)
+		if err := process.BindOriginalProcess(original.ProcessAuthority().LeaseStamp()); err != nil {
 			t.Fatal(err)
 		}
 		return ctx
@@ -43,11 +51,7 @@ func originalStoreFixtureContext(t testing.TB, ctx context.Context, selected any
 	if !ok {
 		t.Fatalf("original fixture context requires its selected lifecycle owner: %T", selected)
 	}
-	process, err := agentfixture.ProcessCapability(t, ctx, store)
-	if err != nil {
-		t.Fatal(err)
-	}
-	ctx, err = startupownership.WithProcessMutationAuthority(ctx, process)
+	ctx, err := agentfixture.ProcessContext(t, ctx, store)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -61,7 +65,7 @@ type externalStoreTestWorkFixture struct {
 
 var externalStoreTestWorkFixtures sync.Map
 
-func storeTestWorkOwner(t *testing.T) *worklifetime.RuntimeOccurrence {
+func storeTestWorkOwner(t testing.TB) *worklifetime.RuntimeOccurrence {
 	t.Helper()
 	if existing, ok := externalStoreTestWorkFixtures.Load(t); ok {
 		return existing.(*externalStoreTestWorkFixture).runtime
@@ -96,7 +100,7 @@ func storeTestWorkOwner(t *testing.T) *worklifetime.RuntimeOccurrence {
 	return owner
 }
 
-func storeTestWorkContext(t *testing.T, ctx context.Context) context.Context {
+func storeTestWorkContext(t testing.TB, ctx context.Context) context.Context {
 	t.Helper()
 	owner := storeTestWorkOwner(t)
 	value, _ := externalStoreTestWorkFixtures.Load(t)

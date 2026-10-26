@@ -836,7 +836,7 @@ func TestPersistenceAuthorityDebtRatchet(t *testing.T) {
 		if err != nil {
 			t.Fatal(err)
 		}
-		if collector == debtSelectedFixtureComposedCollectorTo || collector == debtSelectedFixtureLandedCollectorTo {
+		if collector == debtSelectedFixtureComposedCollectorTo || collector == debtSelectedFixtureLandedCollectorTo || collector == debtS2FixtureCollectorTo {
 			if err := debtSelectedFixtureSourcePins(root, baseRoot); err != nil {
 				t.Fatal(err)
 			}
@@ -938,6 +938,11 @@ func debtValidateCollectorIdentity(base, current string, trusted, head authority
 	}
 	if base == current && trusted.Collector == current && head.Collector == current {
 		return nil
+	}
+	if base == debtSelectedFixtureLandedCollectorTo && trusted.Collector == base &&
+		current == debtS2FixtureCollectorTo && head.Collector == current &&
+		debtSitesEqual(head.Sites, trusted.Sites) {
+		return nil // R19: exact native fixture body correspondence; debt identities are unchanged.
 	}
 	if base == debtSelectedFixtureComposedCollectorTo && trusted.Collector == base &&
 		current == debtSelectedFixtureLandedCollectorTo && head.Collector == current &&

@@ -48,6 +48,7 @@ type activeInputStore interface {
 type activeInputFixture struct {
 	nativeProcess startupownership.ProcessCapability
 	nativeContext context.Context
+	nativeWork    *worklifetime.Process
 	ctx           context.Context
 	claimEvent    capturedEvent
 	claim         operatorchannel.InboundClaim
@@ -110,7 +111,10 @@ func newActiveInputFixtureWithTarget(t *testing.T, backend string, outbound, sav
 	if err != nil {
 		t.Fatal(err)
 	}
-	process := worklifetime.NewProcess()
+	process := f.nativeWork
+	if process == nil {
+		t.Fatal("active input fixture lost its acquired process work owner")
+	}
 	if err := process.BindOriginalProcess(original.LeaseStamp()); err != nil {
 		t.Fatal(err)
 	}
@@ -187,7 +191,7 @@ func newActiveInputFixtureWithTarget(t *testing.T, backend string, outbound, sav
 		t.Fatal(err)
 	}
 	f.ctx = worklifetime.WithOccurrence(f.ctx, f.workOwner)
-	f.nativeContext = f.ctx
+	f.nativeContext = authoractivity.WithScope(correlation.WithSourceArtifactFact(f.nativeContext, source), authoractivity.BundleScope(f.source.Coordinate.RuntimeInstanceID, source.BundleHash()))
 	acquireLogoutProcessFixture(t, f, f.operation.Coordinate.RuntimeInstanceID)
 	initialWorkOwner := f.workOwner
 	t.Cleanup(func() {

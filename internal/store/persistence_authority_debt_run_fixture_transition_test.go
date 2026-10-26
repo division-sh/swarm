@@ -22,6 +22,8 @@ const debtSelectedFixtureComposedCollectorTo = "db0de72a381af1ab7ee26a4e0748565c
 // #2727/6388897450: source-pin validation for an already-landed composed endpoint.
 const debtSelectedFixtureLandedCollectorTo = "1b48c6bd1c1b6d6100ee6df74bb9fe3d239372befa4c8f96f02243602fa9f646"
 
+const debtS2FixtureCollectorTo = "ee94ba2b37ec8abc6bd52f9b503e307138f34652b6bef5c8783da6dd46982c30"
+
 func debtRunFixtureTransitionStates() (map[string]authorityDebtSite, map[string]authorityDebtSite) {
 	old, current := debtControlSet(), debtControlSet()
 	for _, pair := range debtRunFixtureSignatureTransitions() {
