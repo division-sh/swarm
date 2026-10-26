@@ -144,7 +144,6 @@
         "source": "inferred",
         "agents": []
       },
-      "primary_entity_error": "flow telegram-ingress has no state.yaml",
       "input_pins": [
         {
           "event": "inbound.telegram",

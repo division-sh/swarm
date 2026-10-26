@@ -67,7 +67,6 @@
         "source": "inferred",
         "agents": []
       },
-      "primary_entity_error": "flow ingress has no state.yaml",
       "input_pins": [
         {
           "event": "operating.report.triggered",
