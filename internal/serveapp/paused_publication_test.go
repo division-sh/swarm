@@ -19,7 +19,7 @@ func TestPausedAcceptedTimerAndDecisionPublicBothStores(t *testing.T) {
 				if family == "timer" {
 					root = canonicalrouting.CopyLifecycleEmitterCompetingExit(t, true)
 				}
-				rt := startServedTestSetupEntitiesProofRuntimeFromSource(t, backend, root)
+			rt := startServedLiveFlowProofRuntimeFromSource(t, backend, root)
 				supervisor := <-captured
 				rt.Contexts = supervisor.runtimeContexts
 				created := requireServedEventPublishRPCResult(t, rt.Endpoint, map[string]any{

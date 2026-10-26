@@ -43,8 +43,9 @@ func runLifecycleRootForkPolicy(t *testing.T) {
 		t.Run(string(backend), func(t *testing.T) {
 			root := canonicalrouting.CopyLifecycleForkSource(t, false)
 			publication := newExactOriginPublicationProbe(t)
-			rt := startServedTestSetupEntitiesProofRuntimeFromSource(t, backend, root)
+			rt := startServedLiveFlowProofRuntimeFromSource(t, backend, root)
 			seed := requireServedEventPublishRPCResult(t, rt.Endpoint, map[string]any{"event_name": "work.requested", "bundle_hash": rt.BundleHash, "payload": map[string]any{"seed": true}, "idempotency_key": "fork-seed"})
+			requireServedLiveRootMode(t, rt, seed.RunID, seed.EventID)
 			origins := []string{seed.EventID}
 			entityID := requireServedEventPublishEntityState(t, rt.DB, rt.Backend, seed.RunID, seed.RunID, "waiting")
 			loopStart := requireServedEventPublishRPCResult(t, rt.Endpoint, map[string]any{"event_name": "loop.start", "run_id": seed.RunID, "source_event_id": seed.EventID, "payload": map[string]any{"seed": true}, "idempotency_key": "fork-loop-start"})

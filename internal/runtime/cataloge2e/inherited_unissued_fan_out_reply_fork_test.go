@@ -48,7 +48,7 @@ func TestIssue642InheritedUnissuedFanOutReturnsOwnChildReplyBothStores(t *testin
 		t.Run(string(backend), func(t *testing.T) {
 			root := canonicalrouting.CopyUnissuedFanOutReply(t)
 			held := &unissuedReplyChunkHold{claimed: make(chan fanoutobligation.Claim, 1), resume: make(chan struct{})}
-			h := newRuntimeHarnessWithTerminalProvider(t, root, backend, true, nil, nil, held.observe)
+			h := newLiveForkCatalogHarness(t, root, backend, held.observe)
 			t.Cleanup(held.close)
 			var selected unclaimedFanOutReplyStore = h.pg
 			if h.sqlite != nil {
@@ -137,7 +137,7 @@ func TestIssue642InheritedUnissuedFanOutReturnsOwnChildReplyBothStores(t *testin
 			if baseline != 0 {
 				t.Fatalf("completed source retained process work before selected activation: %d", baseline)
 			}
-			executed, err := runforkexecution.ExecuteSelectedContractRunFork(h.ctx, runforkexecution.SelectedContractExecutionRequest{
+			executed, err := executeCatalogLiveFork(t, h, h.ctx, runforkexecution.SelectedContractExecutionRequest{
 				SourceRunID: catalogRuntimeRunID, At: cut, ForkOperation: &operation, AllowSourceFreeze: true, Owner: owner, SourceLoader: loader,
 				ContractSelection: selection, AgentRuntime: options,
 			})

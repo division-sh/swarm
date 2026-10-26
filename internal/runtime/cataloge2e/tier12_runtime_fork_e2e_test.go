@@ -50,7 +50,7 @@ func TestTier12RuntimeFork_SelectedContractForkExecutionFixture(t *testing.T) {
 	var expected catalogExpectedDocument
 	loadYAML(t, catalogExpectedPath(fixtureRoot), &expected)
 
-	h := newRuntimeHarness(t, fixtureRoot, true)
+	h := newLiveForkCatalogHarness(t, fixtureRoot, catalogBackendPostgres)
 	// Source execution is paused at T; register recipient evidence through runtime APIs before publishing.
 	declarationOwner, ok := semanticview.AgentDeclarationOwner(semanticview.Wrap(h.bundle), ".", "test-agent")
 	if !ok {
@@ -106,7 +106,7 @@ func TestTier12RuntimeFork_SelectedContractForkExecutionFixture(t *testing.T) {
 	cfg.LLM.Backend = "anthropic"
 	executionCtx := worklifetime.WithOccurrence(h.ctx, h.rt.WorkOccurrence())
 	executionOwner := selectedContractExecutionOwnerForCatalogHarness(t, h)
-	result, err := runtimerunforkexecution.ExecuteSelectedContractRunFork(executionCtx, runtimerunforkexecution.SelectedContractExecutionRequest{
+	result, err := executeCatalogLiveFork(t, h, executionCtx, runtimerunforkexecution.SelectedContractExecutionRequest{
 		SourceRunID:       sourceRunID,
 		At:                forkAt,
 		AllowSourceFreeze: true,
@@ -132,8 +132,8 @@ func TestTier12RuntimeFork_SelectedContractForkExecutionFixture(t *testing.T) {
 	if result.Owner != runfork.RunForkSelectedContractExecutionOwner ||
 		result.Materialization.ForkRunID == "" ||
 		!result.Activation.Activated ||
-		result.ExecutedEventCount != 0 ||
-		len(result.ForkEvents) != 0 {
+		result.ExecutedEventCount != 1 ||
+		len(result.ForkEvents) != 1 {
 		t.Fatalf("selected execution result = %#v", result)
 	}
 	if result.AgentRuntimeMaterialization == nil ||

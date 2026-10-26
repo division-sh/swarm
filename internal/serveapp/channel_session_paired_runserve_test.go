@@ -283,7 +283,8 @@ func testRunServeWhatsAppSignedPairing(t *testing.T, proof servedNativeJourneyPr
 			}
 			select {
 			case sent := <-peer.sent:
-				t.Fatal("completed confirmation was resent during ordinary restart", sent.ID)
+				t.Fatalf("unexpected queued send during ordinary restart: original_confirmation_operation_id=%s expected_confirmation_message_id=%s expected_confirmation_body=%q actual_message_id=%s actual_body=%s",
+					completed.ConfirmationOperationID, strings.ReplaceAll(completed.ConfirmationOperationID, "-", ""), "Swarm channel connected.", sent.ID, sent.Body.String())
 			default:
 			}
 			if proof.noticeAcknowledgment {

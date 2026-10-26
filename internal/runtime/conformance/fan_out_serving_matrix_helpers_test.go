@@ -10,6 +10,7 @@ import (
 	"time"
 
 	"github.com/division-sh/swarm/internal/runtime/correlation"
+	"github.com/division-sh/swarm/internal/runtime/executionposture"
 	"github.com/division-sh/swarm/internal/runtime/fanoutobligation"
 	"github.com/division-sh/swarm/internal/runtime/pipeline"
 	"github.com/division-sh/swarm/internal/runtime/pipelineobligation"
@@ -282,7 +283,7 @@ func newServingMatrixFixture(t *testing.T, backend string, workers *int, probes 
 	f.topology = newNotifyAllChildrenProcessTopology(t, testAuthorActivityContext(context.Background()), f.selected, f.sources...)
 	for i, probe := range probes {
 		runtime := newNotifyAllChildrenRuntime(t, f.selected, f.db, f.sources[i], time.Now, notifyAllChildrenRuntimeOptions{
-			processTopology: f.topology, fanOutWorkers: workers,
+			processTopology: f.topology, fanOutWorkers: workers, executionPosture: executionposture.MockOnly,
 			fanOutExecutor: func(pc *pipeline.PipelineCoordinator) startupownership.FanOutExecutor {
 				probe.PipelineCoordinator = pc
 				return probe
@@ -307,7 +308,11 @@ func (f *servingMatrixFixture) startRun(t *testing.T, runtimeIndex int) (context
 
 		f.started[runtimeIndex] = true
 	}
-	publishNotifyAllChildrenRunCreatingEvent(t, ctx, rt, f.sources[runtimeIndex], runID, "portfolio.opened", map[string]any{"portfolio_id": runID, "threshold": 75})
+	eventID := publishNotifyAllChildrenRunCreatingEvent(t, ctx, rt, f.sources[runtimeIndex], runID, "portfolio.opened", map[string]any{"portfolio_id": runID, "threshold": 75})
+	event := storetest.LoadCanonicalEventRecord(t, ctx, f.selected, eventID)
+	if event.RunID() != runID || event.ExecutionMode() != executionposture.MockOnly.RootMode() {
+		t.Fatalf("private serving component changed its exact root mode: run=%s mode=%s", event.RunID(), event.ExecutionMode())
+	}
 	ctx, err := rt.bus.AdmitSourceArtifactFact(ctx)
 	if err != nil {
 		t.Fatal(err)

@@ -15,11 +15,12 @@ func TestSelectedForkMailboxControlRefusalsBothStores(t *testing.T) {
 		t.Run(string(backend), func(t *testing.T) {
 			root := canonicalrouting.CopyForkReceiverMailboxGate(t)
 			publication := newExactOriginPublicationProbe(t)
-			rt := startServedTestSetupEntitiesProofRuntimeFromSource(t, backend, root)
+			rt := startServedLiveFlowProofRuntimeFromSource(t, backend, root)
 			seed := requireServedEventPublishRPCResult(t, rt.Endpoint, map[string]any{
 				"event_name": "start.seeded", "bundle_hash": rt.BundleHash,
 				"payload": map[string]any{"token": "receiver-proof"}, "idempotency_key": "selected-card-seed",
 			})
+			requireServedLiveRootMode(t, rt, seed.RunID, seed.EventID)
 			waitForkReceiverSourceCompletion(t, rt, seed.RunID)
 			requested := requireServedEventPublishRPCResult(t, rt.Endpoint, map[string]any{
 				"event_name": "start.requested", "run_id": seed.RunID, "source_event_id": seed.EventID,

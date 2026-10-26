@@ -16,7 +16,7 @@ func TestServedForkRootSourceIngressBothStores(t *testing.T) {
 	for _, backend := range []servedparity.Backend{servedparity.BackendDefaultSQLite, servedparity.BackendExplicitPostgres} {
 		t.Run(string(backend), func(t *testing.T) {
 			publication := newExactOriginPublicationProbe(t)
-			rt := startServedTestSetupEntitiesProofRuntimeFromSource(t, backend, canonicalrouting.CopyRootIngressServedFollowUp(t))
+			rt := startServedLiveFlowProofRuntimeFromSource(t, backend, canonicalrouting.CopyRootIngressServedFollowUp(t))
 			var started struct {
 				RunID string `json:"run_id"`
 			}
@@ -31,6 +31,7 @@ func TestServedForkRootSourceIngressBothStores(t *testing.T) {
 				t.Fatal("run.start lacks exact acknowledged initial publication evidence")
 			}
 			initialEventID := receipt.RunCreation.EventID
+			requireServedLiveRootMode(t, rt, started.RunID, initialEventID)
 			waitServedRunDeliveryQuiescence(t, rt.ReadRunDeliveries, started.RunID)
 			published := requireServedEventPublishRPCResult(t, rt.Endpoint, map[string]any{
 				"bundle_hash": rt.BundleHash, "run_id": started.RunID, "event_name": "item.processed",

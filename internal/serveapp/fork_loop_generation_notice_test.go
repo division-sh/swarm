@@ -36,7 +36,7 @@ func TestServedForkLoopGenerationStateEffectBothStores(t *testing.T) {
 				t.Fatalf("original input declaration: %+v %v %v", role, found, err)
 			}
 			publication := newExactOriginPublicationProbe(t)
-			rt := startServedTestSetupEntitiesProofRuntimeFromSource(t, backend, root)
+			rt := startServedLiveFlowProofRuntimeFromSource(t, backend, root)
 			started := requireServedEventPublishRPCResult(t, rt.Endpoint, map[string]any{
 				"event_name": "work.requested", "bundle_hash": rt.BundleHash,
 				"payload": map[string]any{"token": "loop-notice-proof"}, "idempotency_key": "loop-notice-start",

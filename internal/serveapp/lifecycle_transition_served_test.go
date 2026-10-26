@@ -27,12 +27,13 @@ func TestServedCompiledTransitionSelectedCarrierEvidenceOnBothStores(t *testing.
 		for _, reordered := range []bool{false, true} {
 			t.Run(fmt.Sprintf("%s/reordered_%t", backend, reordered), func(t *testing.T) {
 				probe := newExactOriginPublicationProbe(t)
-				rt := startServedTestSetupEntitiesProofRuntimeFromSource(t, backend, canonicalrouting.CopyLifecycleSelectedCarriers(t, reordered))
+				rt := startServedLiveFlowProofRuntimeFromSource(t, backend, canonicalrouting.CopyLifecycleSelectedCarriers(t, reordered))
 				for _, handler := range []string{"first", "second"} {
 					for _, choice := range []string{"alpha", "beta"} {
 						t.Run(handler+"/"+choice, func(t *testing.T) {
 							key := handler + "/" + choice
 							seed := requireServedEventPublishRPCResult(t, rt.Endpoint, map[string]any{"event_name": "work.seeded", "bundle_hash": rt.BundleHash, "payload": map[string]any{"seed": true}, "idempotency_key": key + "/seed"})
+							requireServedLiveRootMode(t, rt, seed.RunID, seed.EventID)
 							if err := waitLifecycleCarrierSeedSettlement(t.Context(), probe, seed); err != nil {
 								t.Fatal(err)
 							}

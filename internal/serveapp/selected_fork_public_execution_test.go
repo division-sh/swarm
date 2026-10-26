@@ -18,6 +18,7 @@ import (
 	"github.com/division-sh/swarm/internal/runtime/core/activityidentity"
 	"github.com/division-sh/swarm/internal/runtime/core/worklifetime"
 	"github.com/division-sh/swarm/internal/runtime/deliverylifecycle"
+	"github.com/division-sh/swarm/internal/runtime/executionmode"
 	"github.com/division-sh/swarm/internal/runtime/llm"
 	"github.com/division-sh/swarm/internal/runtime/manager"
 	"github.com/division-sh/swarm/internal/runtime/pipeline"
@@ -150,6 +151,10 @@ func proveSelectedForkPublicChangedTargetExecutionBothStores(t *testing.T, optio
 				"event_name": "start.seeded", "bundle_hash": rt.BundleHash,
 				"payload": map[string]any{"token": "receiver-proof"}, "idempotency_key": "public-selected-seed",
 			})
+			rootEvent := storetest.LoadCanonicalEventRecord(t, t.Context(), rt.Events, seed.EventID)
+			if rootEvent.RunID() != seed.RunID || rootEvent.ExecutionMode() != rt.Runtime.ExecutionPosture.RootMode() {
+				t.Fatalf("selected source changed its exact root mode: run=%s mode=%s", rootEvent.RunID(), rootEvent.ExecutionMode())
+			}
 			if nativeRead {
 				if err := waitExactOriginPublications(t.Context(), publication, seed.EventID); err != nil {
 					t.Fatal(err)
@@ -604,13 +609,17 @@ func readWorkspaceProofSourceDomain(t *testing.T, owner runtimebus.EventStore, r
 
 func requireSelectedForkNativeMCPRead(t *testing.T, owner runtimebus.EventStore, runID, eventID string) {
 	t.Helper()
+	event := storetest.LoadCanonicalEventRecord(t, context.Background(), owner, eventID)
+	if event.RunID() != runID || event.ExecutionMode() != executionmode.Mock {
+		t.Fatalf("private MCP turn event run=%s mode=%s, want run=%s mode=mock", event.RunID(), event.ExecutionMode(), runID)
+	}
 	rows, err := storetest.ReadManagedAgentTurnStorage(context.Background(), owner, runID, "same-name")
 	if err != nil {
 		t.Fatal(err)
 	}
 	count, sessionID := 0, ""
 	for _, row := range rows {
-		if row.TriggerEventID != eventID || row.ExecutionMode != "mock" {
+		if row.TriggerEventID != eventID || row.ExecutionMode != string(executionmode.Mock) {
 			continue
 		}
 		callsRaw, responseRaw, emittedRaw, currentSession := row.ToolCalls, row.ResponsePayload, row.EmittedEvents, row.SessionID

@@ -103,7 +103,7 @@ func requireSelectedForkDurablePublicReads(t *testing.T, endpoint string, owner 
 			t.Fatalf("selected turn detail lost execution/frame evidence: %+v", turn)
 		}
 		if turn.Turn.Tokens == nil || turn.Turn.Tokens.Input != 1 || turn.Turn.Tokens.Output != 1 {
-			t.Fatalf("selected turn did not retain target mock usage: %+v", turn.Turn.Tokens)
+			t.Fatalf("selected turn did not retain target provider usage: %+v", turn.Turn.Tokens)
 		}
 	}
 	var eventList operatorread.OperatorEventListResult

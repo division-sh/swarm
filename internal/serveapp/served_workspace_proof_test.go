@@ -4,6 +4,8 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"net/http"
+	"net/http/httptest"
 	"path/filepath"
 	"testing"
 	"time"
@@ -19,6 +21,7 @@ import (
 	"github.com/division-sh/swarm/internal/runtime/core/flowidentity"
 	"github.com/division-sh/swarm/internal/runtime/core/identity"
 	"github.com/division-sh/swarm/internal/runtime/deliverylifecycle"
+	"github.com/division-sh/swarm/internal/runtime/executionposture"
 	"github.com/division-sh/swarm/internal/runtime/inboundpublication"
 	"github.com/division-sh/swarm/internal/runtime/manager"
 	"github.com/division-sh/swarm/internal/runtime/pipeline"
@@ -69,6 +72,16 @@ func configureHostWorkspaceProofLifecycle(t *testing.T) {
 
 func startWorkspaceGatewayProofRuntime(t *testing.T, backend servedparity.Backend, sourceRoot, targetBackend string, factory func(*sourceartifact.RuntimeProjection, semanticview.Source) (cliapp.ServeWorkspaceLifecycle, error), mcpListen string, hooks ...pipeline.WorkflowNodeHandlerStartHook) servedWorkspaceProofRuntime {
 	t.Helper()
+	return startWorkspaceGatewayProofRuntimeWithPosture(t, backend, sourceRoot, targetBackend, factory, mcpListen, executionposture.MockOnly, hooks...)
+}
+
+func startWorkspaceLiveGatewayProofRuntime(t *testing.T, backend servedparity.Backend, sourceRoot, targetBackend string, factory func(*sourceartifact.RuntimeProjection, semanticview.Source) (cliapp.ServeWorkspaceLifecycle, error), mcpListen string, hooks ...pipeline.WorkflowNodeHandlerStartHook) servedWorkspaceProofRuntime {
+	t.Helper()
+	return startWorkspaceGatewayProofRuntimeWithPosture(t, backend, sourceRoot, targetBackend, factory, mcpListen, executionposture.Live, hooks...)
+}
+
+func startWorkspaceGatewayProofRuntimeWithPosture(t *testing.T, backend servedparity.Backend, sourceRoot, targetBackend string, factory func(*sourceartifact.RuntimeProjection, semanticview.Source) (cliapp.ServeWorkspaceLifecycle, error), mcpListen string, posture executionposture.Posture, hooks ...pipeline.WorkflowNodeHandlerStartHook) servedWorkspaceProofRuntime {
+	t.Helper()
 	if len(hooks) > 1 {
 		t.Fatal("at most one handler-start barrier is supported")
 	}
@@ -102,6 +115,19 @@ func startWorkspaceGatewayProofRuntime(t *testing.T, backend servedparity.Backen
 		APIListenAddr: "127.0.0.1:0", MCPListenAddr: mcpListen, SelfCheck: true, Verbose: true,
 		TestOutboxSweeperConfig: servedEventPublishProofOutboxSweeperConfig(),
 	}
+	if posture == executionposture.Live {
+		provider := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, request *http.Request) {
+			if request.URL.Path != "/v1/messages" || request.Header.Get("x-api-key") != "workspace-live-proof-key" {
+				http.Error(w, "unexpected controlled provider request", http.StatusBadRequest)
+				return
+			}
+			w.Header().Set("Content-Type", "application/json")
+			_, _ = w.Write([]byte(`{"model":"claude-test","usage":{"input_tokens":1,"output_tokens":1},"content":[{"type":"text","text":"Observed delivery."}]}`))
+		}))
+		t.Cleanup(provider.Close)
+		redirectExternalHosts(t, map[string]string{"api.anthropic.com": provider.URL})
+		setDoctorProviderSecret(t, "ANTHROPIC_API_KEY", "workspace-live-proof-key")
+	}
 	if len(hooks) == 1 {
 		opts.TestWorkflowNodeHandlerStartHook = hooks[0]
 	}
@@ -110,6 +136,9 @@ func startWorkspaceGatewayProofRuntime(t *testing.T, backend servedparity.Backen
 		unsetStoreSelectorEnv(t)
 		proof.Backend = "sqlite"
 		opts.ConfigPath = writeMockAgentRuntimeConfig(t, storebackend.BackendSQLite.String(), filepath.Join(t.TempDir(), ".swarm", "dev.db"))
+		if posture == executionposture.Live {
+			opts.ConfigPath = writeStoreBackendRuntimeConfig(t, storebackend.BackendSQLite.String(), filepath.Join(t.TempDir(), ".swarm", "dev.db"))
+		}
 	case servedparity.BackendExplicitPostgres:
 		proof.Backend = "postgres"
 		dsn := testutil.StartEmptyPostgresDSN(t)
@@ -124,6 +153,9 @@ func startWorkspaceGatewayProofRuntime(t *testing.T, backend servedparity.Backen
 		}
 		t.Cleanup(func() { buildStoresForServe = previous })
 		opts.ConfigPath = writeMockAgentRuntimeConfig(t, storebackend.BackendPostgres.String(), "")
+		if posture == executionposture.Live {
+			opts.ConfigPath = writeStoreBackendRuntimeConfig(t, storebackend.BackendPostgres.String(), "")
+		}
 		opts.StoreMode, opts.StoreModeSet = "postgres", true
 	default:
 		t.Fatalf("unknown served workspace backend %q", backend)
@@ -131,10 +163,13 @@ func startWorkspaceGatewayProofRuntime(t *testing.T, backend servedparity.Backen
 	retainedRoot := ownedMockLifecycleRoot(t)
 	var process *serveRuntimeTestProcess
 	start := func() {
-		process = startOwnedMockLifecycleTestProcess(t, repoRootForTest(), retainedRoot, opts)
+		process = startOwnedLifecycleTestProcess(t, repoRootForTest(), retainedRoot, opts, posture)
 		process.waitForReadyLine()
 		proof.Endpoint = "http://" + serveRuntimeAPIListenerFromOutput(t, process.outputString()) + "/v1/rpc"
 		proof.Runtime = servedTestProcessRuntime(t, process)
+		if proof.Runtime.ExecutionPosture != posture {
+			t.Fatalf("retained runtime posture=%s, want %s", proof.Runtime.ExecutionPosture, posture)
+		}
 		proof.ForkRuntime = *forkOptions
 	}
 	proof.Restart = func() servedWorkspaceProofRuntime {
@@ -246,13 +281,18 @@ func requireWorkspaceProofMockTurn(t *testing.T, proof servedWorkspaceProofRunti
 
 func workspaceProofMockTurns(t *testing.T, proof servedWorkspaceProofRuntime, runID, agentID, eventID string) []storetest.ManagedAgentTurnStorageRow {
 	t.Helper()
+	event := storetest.LoadCanonicalEventRecord(t, context.Background(), proof.Events, eventID)
+	mode := proof.Runtime.ExecutionPosture.RootMode()
+	if event.RunID() != runID || event.ExecutionMode() != mode {
+		t.Fatalf("exact turn event run=%s mode=%s, want run=%s mode=%s", event.RunID(), event.ExecutionMode(), runID, mode)
+	}
 	rows, err := storetest.ReadManagedAgentTurnStorage(context.Background(), proof.Events, runID, agentID)
 	if err != nil {
 		t.Fatal(err)
 	}
 	var matches []storetest.ManagedAgentTurnStorageRow
 	for _, row := range rows {
-		if row.ExecutionMode == "mock" && row.TriggerEventID == eventID {
+		if row.ExecutionMode == string(mode) && row.TriggerEventID == eventID {
 			matches = append(matches, row)
 		}
 	}

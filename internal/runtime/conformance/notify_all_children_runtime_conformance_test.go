@@ -100,6 +100,7 @@ type notifyAllChildrenRuntime struct {
 
 type notifyAllChildrenRuntimeOptions struct {
 	diagnosticOverlap      bool
+	executionPosture       executionposture.Posture
 	realMockAgents         bool
 	agentGate              *notifyAllChildrenAgentGate
 	processTopology        *notifyAllChildrenProcessTopology
@@ -2207,7 +2208,7 @@ func newNotifyAllChildrenRuntime(
 		opts = options[0]
 	}
 	posture := executionposture.Live
-	if opts.realMockAgents {
+	if opts.realMockAgents || opts.executionPosture == executionposture.MockOnly {
 		posture = executionposture.MockOnly
 	}
 	sourceArtifactFact := opts.sourceArtifactFact

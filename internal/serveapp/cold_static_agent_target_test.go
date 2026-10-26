@@ -72,6 +72,11 @@ func TestServedColdStaticAgentConstructionBothStores(t *testing.T) {
 				if err != nil || len(turns) == 0 {
 					t.Fatalf("cold actor has no actual provider-turn evidence: %v", err)
 				}
+				for _, turn := range turns {
+					if turn.ExecutionMode != "mock" {
+						t.Fatalf("private cold actor changed its original mock mode: %+v", turn)
+					}
+				}
 			}
 			for _, path := range []string{"templ/child", "templ/audit"} {
 				name := eventidentity.ExternalizeForFlow(instances[path].InstancePath, []string{"work.ready"}, "work.ready")
@@ -128,11 +133,10 @@ func waitColdStaticProviderCompletion(t *testing.T, rt issue2564ServedFixture, r
 		if err != nil {
 			t.Fatal(err)
 		}
-		if header.Status != "live" || header.EndedAt != nil || header.Failure != nil || summary.DeadLetter != 0 || summary.Canceled != 0 {
+		if header.Status != "running" && header.Status != "completed" || header.Failure != nil || summary.DeadLetter != 0 || summary.Canceled != 0 {
 			t.Fatalf("cold-provider completion rejected: header=%+v deliveries=%+v\n%s", header, summary, issue2564H2CompletionReceipt(t, rt, runID))
 		}
-		if summary.Pending == 0 && summary.InProgress == 0 {
-			waitIssue2564LiveRunSettlement(t, rt, runID)
+		if header.Status == "completed" && header.EndedAt != nil && summary.Pending == 0 && summary.InProgress == 0 {
 			return
 		}
 		time.Sleep(25 * time.Millisecond)

@@ -120,7 +120,7 @@ func TestSelectedForkReceiverEffectOnlyFailureSettlementBothStores(t *testing.T)
 						requireWorkspaceProofBusinessMutation(t, endpoint, selected.RuntimeDeps().EventStore, selected.RuntimeDeps().DeliveryStore, runID, eventID, entityID)
 					}
 				}
-				rt := startWorkspaceGatewayProofRuntime(t, backend, root, "", nil, "127.0.0.1:0")
+				rt := startWorkspaceLiveGatewayProofRuntime(t, backend, root, "", nil, "127.0.0.1:0")
 				fieldReader := rt.WorkflowTargets
 				if fieldReader == nil {
 					t.Fatal("source proof requires its original receiver target reader")
@@ -135,6 +135,10 @@ func TestSelectedForkReceiverEffectOnlyFailureSettlementBothStores(t *testing.T)
 					"event_name": "start.seeded", "bundle_hash": rt.BundleHash,
 					"payload": map[string]any{"token": "receiver-proof"}, "idempotency_key": "fork-settlement-seed",
 				})
+				rootEvent := storetest.LoadCanonicalEventRecord(t, t.Context(), rt.Events, seed.EventID)
+				if rootEvent.RunID() != seed.RunID || rootEvent.ExecutionMode() != rt.Runtime.ExecutionPosture.RootMode() {
+					t.Fatalf("live receiver source changed its root mode: run=%s mode=%s", rootEvent.RunID(), rootEvent.ExecutionMode())
+				}
 				waitWorkspaceProofPipelineHandoff(t, servedWorkspaceProofRuntime{Events: selected.RuntimeDeps().EventStore}, seed.RunID)
 				requested := requireServedEventPublishRPCResult(t, rt.Endpoint, map[string]any{
 					"event_name": "start.requested", "run_id": seed.RunID, "source_event_id": seed.EventID,
@@ -456,7 +460,7 @@ func requireSelectedForkDeclaredAgentReads(t *testing.T, endpoint string, owner 
 	params := map[string]any{"run_id": runID, "agent_id": "same-name", "flow_instance": "consumer"}
 	var detail operatorread.OperatorAgentDetail
 	requireServedJSONRPCResult(t, endpoint, "agent.get", params, &detail)
-	if detail.Agent.AgentID != "same-name" || detail.Agent.FlowInstance != "consumer" || detail.Agent.Role != "observer" || detail.Agent.ExecutionMode != "mock" {
+	if detail.Agent.AgentID != "same-name" || detail.Agent.FlowInstance != "consumer" || detail.Agent.Role != "observer" || detail.Agent.ExecutionMode != "live" {
 		t.Fatalf("selected agent read lost persisted target: %+v", detail)
 	}
 	var diagnosis operatorread.OperatorAgentDiagnosis
@@ -479,8 +483,8 @@ func requireSelectedForkDeclaredAgentReads(t *testing.T, endpoint string, owner 
 	}
 	var usage operatorread.OperatorAgentUsage
 	requireServedJSONRPCResult(t, endpoint, "agent.usage", params, &usage)
-	if usage.AgentID != "same-name" || usage.Usage.Estimated.LedgerEntries != completionCount || usage.Usage.Exact.LedgerEntries != 0 {
-		t.Fatalf("selected agent usage lost its exact mock turn: %+v", usage)
+	if usage.AgentID != "same-name" || usage.Usage.Exact.LedgerEntries != completionCount || usage.Usage.Estimated.LedgerEntries != 0 {
+		t.Fatalf("selected agent usage lost its exact live turn: %+v", usage)
 	}
 	requireSelectedForkDurablePublicReads(t, endpoint, owner, loadedBundleHash, runID, completionCount)
 	after := readWorkspaceProofApplication(t, owner)

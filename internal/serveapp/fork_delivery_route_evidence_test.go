@@ -125,7 +125,7 @@ func TestServedForkConnectedDeliveryRouteEvidenceOnBothStores(t *testing.T) {
 				return previous(owner)
 			}
 			t.Cleanup(func() { projectRuntimePersistenceForServe = previous })
-			rt := startServedTestSetupEntitiesProofRuntimeFromSource(t, backend, canonicalrouting.CopyForkDeliveryRouteEvidence(t))
+			rt := startServedLiveFlowProofRuntimeFromSource(t, backend, canonicalrouting.CopyForkDeliveryRouteEvidence(t))
 			seed := requireServedEventPublishRPCResult(t, rt.Endpoint, map[string]any{
 				"event_name": "parent.seeded", "bundle_hash": rt.BundleHash,
 				"payload": map[string]any{"work_id": "fork-connected-history"}, "idempotency_key": "fork-history-seed",

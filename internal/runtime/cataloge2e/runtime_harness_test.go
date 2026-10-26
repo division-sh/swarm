@@ -36,6 +36,7 @@ import (
 	runtimemanager "github.com/division-sh/swarm/internal/runtime/manager"
 	runtimepipeline "github.com/division-sh/swarm/internal/runtime/pipeline"
 	"github.com/division-sh/swarm/internal/runtime/runforkexecution"
+	"github.com/division-sh/swarm/internal/runtime/runlifecycle"
 	"github.com/division-sh/swarm/internal/runtime/semanticview"
 	runtimestartupownership "github.com/division-sh/swarm/internal/runtime/startupownership"
 	"github.com/division-sh/swarm/internal/store"
@@ -182,6 +183,7 @@ type runtimeHarness struct {
 	sqlite          *store.SQLiteRuntimeStore
 	reopenedSQLite  *store.SQLiteRuntimeStore
 	rt              *runtime.Runtime
+	liveContexts    *runtime.RuntimeContextManager
 	processOwner    *worklifetime.Process
 	selectedOwners  []runforkexecution.SelectedContractExecutionOwner
 	processTopology runtimestartupownership.ProcessCapability
@@ -248,6 +250,22 @@ func newRuntimeHarnessFromTranscript(t *testing.T, fixtureRoot string, backend c
 }
 
 func newRuntimeHarnessWithTerminalProvider(t *testing.T, fixtureRoot string, backend catalogRuntimeBackend, start bool, transcript *catalogExecutionTranscript, provider *terminalProviderProbe, chunkObserver func(context.Context, runtimepipeline.FanOutChunkCommand), additionalRunIDs ...string) *runtimeHarness {
+	return newRuntimeHarnessWithScope(t, fixtureRoot, backend, start, transcript, provider, chunkObserver, runlifecycle.LiveRunScope{}, additionalRunIDs...)
+}
+
+func newLiveForkCatalogHarness(t *testing.T, fixtureRoot string, backend catalogRuntimeBackend, chunkObserver ...func(context.Context, runtimepipeline.FanOutChunkCommand)) *runtimeHarness {
+	t.Helper()
+	var observer func(context.Context, runtimepipeline.FanOutChunkCommand)
+	if len(chunkObserver) > 1 {
+		t.Fatal("live fork fixture accepts one exact chunk observer")
+	}
+	if len(chunkObserver) == 1 {
+		observer = chunkObserver[0]
+	}
+	return newRuntimeHarnessWithScope(t, fixtureRoot, backend, true, nil, nil, observer, runlifecycle.LiveRunScope{FlowPath: "."})
+}
+
+func newRuntimeHarnessWithScope(t *testing.T, fixtureRoot string, backend catalogRuntimeBackend, start bool, transcript *catalogExecutionTranscript, provider *terminalProviderProbe, chunkObserver func(context.Context, runtimepipeline.FanOutChunkCommand), scope runlifecycle.LiveRunScope, additionalRunIDs ...string) *runtimeHarness {
 	t.Helper()
 	strictCatalogFixtureStartupPolicy().apply(t)
 	bundle := loadFixtureBundle(t, fixtureRoot)
@@ -309,6 +327,10 @@ func newRuntimeHarnessWithTerminalProvider(t *testing.T, fixtureRoot string, bac
 	fixture := storetest.RunFixture{
 		Origin: storetest.ScenarioSetupOrigin(), RunID: catalogRuntimeRunID,
 		BundleHash: sourceArtifactFact.BundleHash(), Artifact: bundle.SourceArtifact,
+		LiveScope: scope,
+	}
+	if !scope.Empty() {
+		fixture.Origin = runlifecycle.DeploymentRunOrigin()
 	}
 	// Scenario fixtures are setup, not live runtime mutations. Admit every
 	// requested run before constructing a runtime that can start store writers.

@@ -16,7 +16,7 @@ func TestServedCompiledTransitionStaticForkEvidenceOnBothStores(t *testing.T) {
 	for _, backend := range []servedparity.Backend{servedparity.BackendDefaultSQLite, servedparity.BackendExplicitPostgres} {
 		t.Run(string(backend), func(t *testing.T) {
 			publication := newExactOriginPublicationProbe(t)
-			rt := startServedTestSetupEntitiesProofRuntimeFromSource(t, backend, canonicalrouting.CopyLifecycleSelectedCarriers(t, false))
+			rt := startServedLiveFlowProofRuntimeFromSource(t, backend, canonicalrouting.CopyLifecycleSelectedCarriers(t, false))
 			seed := requireServedEventPublishRPCResult(t, rt.Endpoint, map[string]any{
 				"event_name": "work.seeded", "bundle_hash": rt.BundleHash, "payload": map[string]any{"seed": true}, "idempotency_key": "static-fork-seed",
 			})

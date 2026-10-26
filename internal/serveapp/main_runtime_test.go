@@ -2398,6 +2398,26 @@ func startServedTestSetupEntitiesProofRuntimeFromSource(t *testing.T, backend se
 }
 
 func startServedTestSetupEntitiesProofRuntimeConfigured(t *testing.T, backend servedparity.Backend, sourceRoot string, realWorkspace bool, hooks ...runtimepipeline.WorkflowNodeHandlerStartHook) servedControlProofRuntime {
+	return startServedTestSetupEntitiesProofRuntimeWithPosture(t, backend, sourceRoot, realWorkspace, executionposture.MockOnly, hooks...)
+}
+
+func startServedLiveFlowProofRuntimeFromSource(t *testing.T, backend servedparity.Backend, sourceRoot string, hooks ...runtimepipeline.WorkflowNodeHandlerStartHook) servedControlProofRuntime {
+	return startServedTestSetupEntitiesProofRuntimeWithPosture(t, backend, sourceRoot, false, executionposture.Live, hooks...)
+}
+
+func requireServedLiveRootMode(t *testing.T, rt servedControlProofRuntime, runID, eventID string) {
+	t.Helper()
+	var selected any = rt.SQLite
+	if rt.Postgres != nil {
+		selected = rt.Postgres
+	}
+	event := storetest.LoadCanonicalEventRecord(t, t.Context(), selected, eventID)
+	if rt.Runtime.ExecutionPosture != executionposture.Live || event.RunID() != runID || event.ExecutionMode() != executionmode.Live {
+		t.Fatalf("live fixture changed root authority: posture=%s run=%s mode=%s", rt.Runtime.ExecutionPosture, event.RunID(), event.ExecutionMode())
+	}
+}
+
+func startServedTestSetupEntitiesProofRuntimeWithPosture(t *testing.T, backend servedparity.Backend, sourceRoot string, realWorkspace bool, posture executionposture.Posture, hooks ...runtimepipeline.WorkflowNodeHandlerStartHook) servedControlProofRuntime {
 	t.Helper()
 	var contexts *runtimepkg.RuntimeContextManager
 	captureContexts := func(manager *runtimepkg.RuntimeContextManager) { contexts = manager }
@@ -2447,7 +2467,7 @@ func startServedTestSetupEntitiesProofRuntimeConfigured(t *testing.T, backend se
 		if realWorkspace {
 			configPath = writeMockAgentRuntimeConfig(t, storebackend.BackendSQLite.String(), sqlitePath)
 		}
-		endpoint, rt := startOwnedMockLifecycleFollowUpRuntime(t, cliapp.ServeOptions{
+		endpoint, rt := startOwnedLifecycleFollowUpRuntime(t, cliapp.ServeOptions{
 			ConfigPath:                       configPath,
 			TestRuntimeContextsReadyHook:     captureContexts,
 			SourceRoot:                       sourceRoot,
@@ -2457,7 +2477,7 @@ func startServedTestSetupEntitiesProofRuntimeConfigured(t *testing.T, backend se
 			SelfCheck:                        true,
 			Verbose:                          true,
 			TestOutboxSweeperConfig:          servedEventPublishProofOutboxSweeperConfig(),
-		})
+		}, posture)
 		if servedDB == nil {
 			t.Fatal("served sqlite SQLDB is required for test.setup_entities served parity proof")
 		}
@@ -2472,7 +2492,7 @@ func startServedTestSetupEntitiesProofRuntimeConfigured(t *testing.T, backend se
 		if realWorkspace {
 			configPath = writeMockAgentRuntimeConfig(t, storebackend.BackendPostgres.String(), "")
 		}
-		endpoint, rt := startOwnedMockLifecycleFollowUpRuntime(t, cliapp.ServeOptions{
+		endpoint, rt := startOwnedLifecycleFollowUpRuntime(t, cliapp.ServeOptions{
 			ConfigPath:                       configPath,
 			TestRuntimeContextsReadyHook:     captureContexts,
 			SourceRoot:                       sourceRoot,
@@ -2484,7 +2504,7 @@ func startServedTestSetupEntitiesProofRuntimeConfigured(t *testing.T, backend se
 			SelfCheck:                        true,
 			Verbose:                          true,
 			TestOutboxSweeperConfig:          servedEventPublishProofOutboxSweeperConfig(),
-		})
+		}, posture)
 		return servedControlProofRuntime{ReadRunDeliveries: deliveryReader, Endpoint: endpoint, DB: db, Postgres: pg, Backend: "postgres", BundleHash: bundleHash, Runtime: rt, Contexts: contexts, ForkRuntime: *forkOptions, ReceiverStateReader: receiverReader}
 	default:
 		t.Fatalf("unknown served test.setup_entities backend %q", backend)
@@ -8265,11 +8285,16 @@ func startServeRuntimeTestProcessAtRepo(t *testing.T, repo string, opts cliapp.S
 
 func startOwnedMockLifecycleTestProcess(t *testing.T, repo, retainedRoot string, opts cliapp.ServeOptions) *serveRuntimeTestProcess {
 	t.Helper()
-	t.Log("proof_surface=H in-process retained mock lifecycle; not public serve/test")
+	return startOwnedLifecycleTestProcess(t, repo, retainedRoot, opts, executionposture.MockOnly)
+}
+
+func startOwnedLifecycleTestProcess(t *testing.T, repo, retainedRoot string, opts cliapp.ServeOptions, posture executionposture.Posture) *serveRuntimeTestProcess {
+	t.Helper()
+	t.Logf("proof_surface=H in-process retained lifecycle posture=%s; not public serve/test", posture)
 	return startRuntimeTestProcessWithRunner(t, repo, opts, func(ctx context.Context, root string, opts cliapp.ServeOptions) int {
 		code, err := runOwnedLifecycle(ctx, root, retainedRoot, opts, apiv1.AuthTokenResolution{
 			Tokens: []string{apiv1.DefaultLoopbackAPIToken}, Source: "internal-lifecycle-parent", Explicit: true,
-		}, executionposture.MockOnly, "")
+		}, posture, "")
 		if err != nil {
 			fmt.Fprintf(opts.Output, "internal lifecycle setup: %v\n", err)
 		}
