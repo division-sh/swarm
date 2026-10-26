@@ -757,14 +757,6 @@ func issue642RequireFutureSourceStartupDiagnostic(t *testing.T, ctx context.Cont
 			}
 		}
 		if len(originals) != 0 || len(added) > 1 {
-			rows, decodeErr := storetest.DecodeSelectedForkSnapshotRows(storetest.SelectedForkStorageTableSnapshot{Columns: current.Columns, Rows: added})
-			if decodeErr == nil {
-				for _, row := range rows {
-					name, _ := row["event_name"].Text()
-					payload, _ := row["payload"].Text()
-					t.Logf("source startup addition %s: %s", name, payload)
-				}
-			}
 			t.Fatalf("normal startup rewrote source events: removed=%d added=%d", len(originals), len(added))
 		}
 		if len(added) == 0 {
