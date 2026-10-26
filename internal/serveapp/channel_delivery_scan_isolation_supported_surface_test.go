@@ -30,6 +30,9 @@ func TestChannelDeliveryCompiledRenderFailureDoesNotStarveReceiptUpdates(t *test
 				})
 				cards[index] = waitChannelAnchorCard(t, db, seed.RunID, decisioncard.AnchorKindStageGate, "reviews")
 				messages[index] = waitChannelAnchorReceipt(t, db, cards[index])
+				requireServedOKJSONRPC(t, h.rpcEndpoint(), "run.pause", map[string]any{
+					"run_id": seed.RunID, "idempotency_key": fmt.Sprintf("scan-isolation-pause-%d", index),
+				})
 			}
 			// Negative fault injection only: neither source cards nor authority are fabricated.
 			injectionCtx, cancelInjection := context.WithTimeout(context.Background(), 5*time.Second)

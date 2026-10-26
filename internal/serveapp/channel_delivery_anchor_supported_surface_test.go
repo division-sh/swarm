@@ -218,6 +218,9 @@ func TestChannelDeliveryRealAnchorProducersPublicJourney(t *testing.T) {
 					}
 					post(838000+messageID, "double-tap-"+cardID)
 					waitChannelAnchorRejectedIntent(t, reader, interfaceKey, fmt.Sprint(838000+messageID))
+					requireServedOKJSONRPC(t, h.rpcEndpoint(), "run.pause", map[string]any{
+						"run_id": seed.RunID, "idempotency_key": "channel-anchor-pause-" + string(kind),
+					})
 					var events struct {
 						Events []struct {
 							RunID     string `json:"run_id"`
@@ -387,11 +390,14 @@ func startChannelAnchorPublicJourney(t *testing.T, backend servedparity.Backend,
 		t.Fatalf("anchor journey requires one admitted source: %+v", identity)
 	}
 	if withSummary {
-		requireServedEventPublishRPCResult(t, h.rpcEndpoint(), map[string]any{
+		notice := requireServedEventPublishRPCResult(t, h.rpcEndpoint(), map[string]any{
 			"event_name": "notice.requested", "bundle_hash": identity.SourceArtifacts[0].BundleHash,
 			"payload": map[string]any{"seed": true}, "idempotency_key": "uncertainty-summary-notice",
 		})
 		onlyPublicChannelNoticeID(t, h.rpcEndpoint(), "")
+		requireServedOKJSONRPC(t, h.rpcEndpoint(), "run.pause", map[string]any{
+			"run_id": notice.RunID, "idempotency_key": "uncertainty-summary-pause",
+		})
 	}
 	runChannelOnboardingCLIJourney(t, h.opts.ConfigPath, h.endpoint, h.provider, "connect", token, 1001, "private", 0)
 	return h, identity.SourceArtifacts[0].BundleHash

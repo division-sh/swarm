@@ -61,6 +61,9 @@ func TestChannelDeliveryHumanTemporalReceiptPublicJourney(t *testing.T) {
 					h.start(t)
 					fragment, terminal = "The decision expired. No action was taken.", true
 				case "stop_supersedes":
+					requireServedJSONRPCResult(t, h.rpcEndpoint(), "run.pause", map[string]any{
+						"run_id": seed.RunID, "idempotency_key": "temporal-pause",
+					}, &response)
 					requireServedJSONRPCResult(t, h.rpcEndpoint(), "run.stop", map[string]any{
 						"run_id": seed.RunID, "idempotency_key": "temporal-stop",
 					}, &response)

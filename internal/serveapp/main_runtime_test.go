@@ -2410,6 +2410,8 @@ func startServedTestSetupEntitiesProofRuntimeFromSource(t *testing.T, backend se
 
 func startServedTestSetupEntitiesProofRuntimeConfigured(t *testing.T, backend servedparity.Backend, sourceRoot string, realWorkspace bool, hooks ...runtimepipeline.WorkflowNodeHandlerStartHook) servedControlProofRuntime {
 	t.Helper()
+	var contexts *runtimepkg.RuntimeContextManager
+	captureContexts := func(manager *runtimepkg.RuntimeContextManager) { contexts = manager }
 	var deliveryReader servedRunDeliveryReader
 	captureSelectedRuntimePersistence(t, func(p serveRuntimePersistence) { deliveryReader = p.deps.DeliveryStore.SummarizeRun })
 	forkOptions := captureServedForkRuntimeOptions(t)
@@ -2458,6 +2460,7 @@ func startServedTestSetupEntitiesProofRuntimeConfigured(t *testing.T, backend se
 		}
 		endpoint, rt := startOwnedMockLifecycleFollowUpRuntime(t, cliapp.ServeOptions{
 			ConfigPath:                       configPath,
+			TestRuntimeContextsReadyHook:     captureContexts,
 			SourceRoot:                       sourceRoot,
 			TestWorkflowNodeHandlerStartHook: handlerStart,
 			APIListenAddr:                    "127.0.0.1:0",
@@ -2469,7 +2472,7 @@ func startServedTestSetupEntitiesProofRuntimeConfigured(t *testing.T, backend se
 		if servedDB == nil {
 			t.Fatal("served sqlite SQLDB is required for test.setup_entities served parity proof")
 		}
-		return servedControlProofRuntime{ReadRunDeliveries: deliveryReader, Endpoint: endpoint, DB: servedDB, SQLite: servedSQLite, Backend: "sqlite", BundleHash: bundleHash, Runtime: rt, ForkRuntime: *forkOptions, ReceiverStateReader: receiverReader}
+		return servedControlProofRuntime{ReadRunDeliveries: deliveryReader, Endpoint: endpoint, DB: servedDB, SQLite: servedSQLite, Backend: "sqlite", BundleHash: bundleHash, Runtime: rt, Contexts: contexts, ForkRuntime: *forkOptions, ReceiverStateReader: receiverReader}
 	case servedparity.BackendExplicitPostgres:
 		_, db, pg := installServeRuntimeEmptyPostgresTestStores(t, func() cliapp.ServeWorkspaceLifecycle {
 			return serveRuntimeWorkspaceStub{}
@@ -2482,6 +2485,7 @@ func startServedTestSetupEntitiesProofRuntimeConfigured(t *testing.T, backend se
 		}
 		endpoint, rt := startOwnedMockLifecycleFollowUpRuntime(t, cliapp.ServeOptions{
 			ConfigPath:                       configPath,
+			TestRuntimeContextsReadyHook:     captureContexts,
 			SourceRoot:                       sourceRoot,
 			TestWorkflowNodeHandlerStartHook: handlerStart,
 			StoreMode:                        "postgres",
@@ -2492,7 +2496,7 @@ func startServedTestSetupEntitiesProofRuntimeConfigured(t *testing.T, backend se
 			Verbose:                          true,
 			TestOutboxSweeperConfig:          servedEventPublishProofOutboxSweeperConfig(),
 		})
-		return servedControlProofRuntime{ReadRunDeliveries: deliveryReader, Endpoint: endpoint, DB: db, Postgres: pg, Backend: "postgres", BundleHash: bundleHash, Runtime: rt, ForkRuntime: *forkOptions, ReceiverStateReader: receiverReader}
+		return servedControlProofRuntime{ReadRunDeliveries: deliveryReader, Endpoint: endpoint, DB: db, Postgres: pg, Backend: "postgres", BundleHash: bundleHash, Runtime: rt, Contexts: contexts, ForkRuntime: *forkOptions, ReceiverStateReader: receiverReader}
 	default:
 		t.Fatalf("unknown served test.setup_entities backend %q", backend)
 		return servedControlProofRuntime{}
