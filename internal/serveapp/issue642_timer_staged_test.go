@@ -16,6 +16,7 @@ import (
 	"github.com/division-sh/swarm/internal/runtime/runforkreadiness"
 	storeselected "github.com/division-sh/swarm/internal/store/selected"
 	"github.com/division-sh/swarm/internal/store/storetest"
+	"github.com/google/uuid"
 )
 
 type issue642TimerStagedOwners struct {
@@ -108,12 +109,12 @@ func issue642StagedOrdinaryTimerFork(t *testing.T, backend string) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	staged := issue642MaterializePausedTimer(t, ctx, owners, rt, reader, plan, sourceTimer)
-	activation, err := owners.family.Activate(ctx, runforkexecution.SelectedContractActivationGateRequest{
-		ForkRunID: staged.ForkRunID, AllowSourceFreeze: true,
-		SourceLoader: owners.executor.SourceLoader, AgentRuntime: owners.executor.AgentRuntime,
+	staged, operation := issue642MaterializePausedTimer(t, ctx, owners, rt, reader, plan, sourceTimer)
+	activation, err := owners.executor.ExecuteRunFork(ctx, apiv1.RunForkExecutionRequest{
+		SourceRunID: plan.SourceRunID, ForkEventID: plan.ForkPoint.EventID, BundleHash: rt.BundleHash,
+		AllowSourceFreeze: true, ContractSelection: operation.ContractSelection, ForkOperation: operation,
 	})
-	if err != nil || !activation.Activated || activation.ForkRunID != staged.ForkRunID || activation.ForkPoint != plan.ForkPoint ||
+	if err != nil || activation.ForkRunStatus != runfork.RunForkLiveStatus || activation.ForkRunID != staged.ForkRunID || activation.ForkRevision != plan.ForkPoint.Revision || activation.ForkPointKind != string(plan.ForkPoint.Kind) || activation.ForkEventID != plan.ForkPoint.EventID ||
 		activation.SourceRunID != seed.RunID || activation.SourceRunStatus != "paused" || activation.SourceFrozen {
 		t.Fatalf("native staged activation did not acknowledge exact historical timer authority: activation=%+v err=%v", activation, err)
 	}
@@ -137,7 +138,7 @@ func issue642StagedOrdinaryTimerFork(t *testing.T, backend string) {
 		backend, seed.RunID, staged.ForkRunID, plan.ForkPoint.Revision, sourceTimer.FireAt.Format(time.RFC3339Nano))
 }
 
-func issue642MaterializePausedTimer(t *testing.T, ctx context.Context, owners issue642TimerStagedOwners, rt issue2564ServedFixture, reader issue642TimerContinuationReaders, plan runfork.RunForkPlan, source pipeline.WorkflowTimerActivation) runfork.RunForkMaterialization {
+func issue642MaterializePausedTimer(t *testing.T, ctx context.Context, owners issue642TimerStagedOwners, rt issue2564ServedFixture, reader issue642TimerContinuationReaders, plan runfork.RunForkPlan, source pipeline.WorkflowTimerActivation) (runfork.RunForkMaterialization, *runfork.ForkOperationRequest) {
 	t.Helper()
 	prepared, err := owners.family.Prepare(ctx, runforkexecution.SelectedContractExecutionRequest{
 		SourceRunID: plan.SourceRunID, At: plan.ForkPoint.EventID, ExpectedBundleHash: rt.BundleHash,
@@ -155,6 +156,12 @@ func issue642MaterializePausedTimer(t *testing.T, ctx context.Context, owners is
 	request, err := prepared.MaterializationRequest()
 	if err != nil {
 		t.Fatal(err)
+	}
+	point := plan.ForkPoint
+	request.ForkOperation = &runfork.ForkOperationRequest{
+		OperationID: uuid.NewString(), Actor: "native-staged-timer", IdempotencyKey: uuid.NewString(), TransportHash: "native-staged-timer",
+		SourceRunID: plan.SourceRunID, ForkEventID: point.EventID, ResolvedPoint: &point,
+		TargetBundleHash: rt.BundleHash, ContractSelection: request.ContractSelection, AllowSourceFreeze: true,
 	}
 	if request.SourceRunID != plan.SourceRunID || request.At != plan.ForkPoint.EventID || request.SourceArtifactFact.BundleHash() != rt.BundleHash {
 		t.Fatalf("native staged request lost its exact source/cut/artifact: %+v", request)
@@ -183,7 +190,7 @@ func issue642MaterializePausedTimer(t *testing.T, ctx context.Context, owners is
 	}
 	t.Logf("ISSUE642_NATIVE_STAGED_TIMER_PAUSED backend=%s child=%s timer=%s due=%s preparation_closed=true publications=0",
 		rt.Backend, staged.ForkRunID, timer.Ref.ActivationID, timer.FireAt.Format(time.RFC3339Nano))
-	return staged
+	return staged, request.ForkOperation
 }
 
 func issue642RequirePausedStagedTimer(t *testing.T, rt issue2564ServedFixture, reader issue642TimerContinuationReaders, staged runfork.RunForkMaterialization, source pipeline.WorkflowTimerActivation) (operatorread.RunHeader, pipeline.WorkflowTimerActivation) {

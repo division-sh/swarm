@@ -156,7 +156,7 @@ func admitSelectedForkNativePhaseForTest(t *testing.T, ctx context.Context, fixt
 	if err != nil {
 		t.Fatal(err)
 	}
-	ctx = worklifetime.WithProcess(ctx, work.process)
+	ctx = worklifetime.WithProcess(testAuthorActivityContextForBundle(request.SourceArtifactFact.BundleHash()), work.process)
 	ctx = worklifetime.WithOccurrence(ctx, consumer.work)
 	ctx, err = startupownership.WithRuntimeMutationAuthority(ctx, grant)
 	if err != nil {

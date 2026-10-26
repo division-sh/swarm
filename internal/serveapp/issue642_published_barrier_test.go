@@ -87,6 +87,8 @@ func TestIssue642ServedPublishedBarrierReachesFinalConsumerBothStores(t *testing
 			select {
 			case original = <-probe.claims:
 			case <-phase.Done():
+				t.Logf("published barrier source events: %+v", rt.events(t, seed.RunID, ""))
+				t.Logf("published barrier runtime output: %s", process.outputString())
 				t.Fatal(phase.Err())
 			}
 			plan, err := reader.PlanRunFork(phase, runfork.RunForkPlanRequest{SourceRunID: seed.RunID, At: original.event})
