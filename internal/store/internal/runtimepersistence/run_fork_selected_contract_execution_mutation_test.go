@@ -1682,6 +1682,12 @@ func canonicalSelectedContractExecutionStoreRequest(t *testing.T, ctx context.Co
 	if !request.SourceArtifactFact.Matches(fact) {
 		t.Fatalf("prepared source differs from requested fixture artifact: got %s want %s", request.SourceArtifactFact.BundleHash(), fact.BundleHash())
 	}
+	point := request.Preparation.ForkPoint
+	request.ForkOperation = &runfork.ForkOperationRequest{
+		OperationID: uuid.NewString(), Actor: "selected-native-activation", IdempotencyKey: uuid.NewString(), TransportHash: "selected-native-activation",
+		SourceRunID: sourceRunID, ForkEventID: request.At, ResolvedPoint: &point,
+		TargetBundleHash: fact.BundleHash(), ContractSelection: request.ContractSelection,
+	}
 	return request
 }
 

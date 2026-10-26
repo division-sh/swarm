@@ -16,6 +16,7 @@ import (
 	"github.com/division-sh/swarm/internal/runtime/runfork"
 	"github.com/division-sh/swarm/internal/runtime/runforkexecution"
 	"github.com/division-sh/swarm/internal/runtime/runforkreadiness"
+	"github.com/division-sh/swarm/internal/runtime/runlifecycle"
 	"github.com/division-sh/swarm/internal/runtime/testfixtures/canonicalrouting"
 )
 
@@ -115,9 +116,25 @@ func selectedStoreActivationGateForTest(t *testing.T, ctx context.Context, selec
 				Config: &config.Config{LLM: config.LLMConfig{Backend: llmselection.BackendAnthropic}},
 			},
 		}
+		request.ForkOperation = original.ForkOperation
 		if original.ForkOperation != nil {
 			request.DataPinOverrides = original.ForkOperation.DataPinOverrides
 		}
+		loaded, err := loader.LoadRunForkSelectedContractSourceForRequest(ctx, runforkexecution.SelectedContractSourceLoadRequest{
+			SourceRunID: binding.SourceRunID, BundleHash: binding.ContractSelection.BundleHash, Selection: binding.ContractSelection,
+		})
+		if err != nil {
+			return runfork.RunForkActivation{}, err
+		}
+		if loaded.Cleanup != nil {
+			t.Cleanup(func() {
+				if err := loaded.Cleanup(); err != nil {
+					t.Error(err)
+				}
+			})
+		}
+		request.LiveRuntime, request.LiveContexts = c4LiveTimerRuntime(t, ctx, selected, loaded, capability)
+		request.LiveRuns = selected.(runlifecycle.LiveRunReader)
 		result, err := runforkexecution.ExecuteSelectedContractRunFork(ctx, request)
 		err = errors.Join(err, owner.RetireSelectedContexts(context.Background()))
 		if !reached {
