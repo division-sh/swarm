@@ -3621,7 +3621,7 @@ func createServedControlWaitingRun(t *testing.T, rt servedControlProofRuntime, s
 	}
 	waitForServedEventPublishNodeDeliveryLifecycleForNode(t, rt.DB, rt.Backend, result.RunID, result.EventID, identitytest.RootNode(t, "item-handler").Key(), rt.Probe)
 	entityID = requireServedEventPublishEntityState(t, rt.DB, rt.Backend, result.RunID, "", "waiting")
-	requireServedRunStatus(t, rt.Endpoint, result.RunID, "running")
+	requireServedRunStatus(t, rt.Endpoint, result.RunID, "live")
 	return result.RunID, result.EventID, entityID
 }
 

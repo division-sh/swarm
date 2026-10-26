@@ -519,7 +519,7 @@ func requireIssue2564Pending(t *testing.T, rt issue2564ServedFixture, runID, kin
 		t.Fatal(err)
 	}
 	status, ended := header.Status, header.EndedAt != nil
-	if pending != 1 || status != "running" || ended {
+	if pending != 1 || status != "live" || ended {
 		t.Fatalf("premature completion/lost obligation: %s %s pending=%d run=%s ended=%v", kind, event, pending, status, ended)
 	}
 	if deliveryID == "" {
@@ -534,7 +534,7 @@ func requireIssue2564Pending(t *testing.T, rt issue2564ServedFixture, runID, kin
 		TestQuiescence operatorread.RunTestQuiescence `json:"test_quiescence"`
 	}
 	requireServedJSONRPCResult(t, rt.Endpoint, "run.diagnose", map[string]any{"run_id": runID}, &diagnosis)
-	if diagnosis.Run.Status != "running" || diagnosis.TestQuiescence.Ready || diagnosis.TestQuiescence.ActiveDeliveries < 1 {
+	if diagnosis.Run.Status != "live" || diagnosis.TestQuiescence.Ready || diagnosis.TestQuiescence.ActiveDeliveries < 1 {
 		t.Fatalf("public diagnosis falsely completed pending result: %+v", diagnosis)
 	}
 }
