@@ -157,7 +157,12 @@ func newStoreTestEventBus(t *testing.T, selected externalStoreTestDurableEventBu
 		opts.RuntimeInstanceID = authorActivityTestRuntimeInstanceID
 	}
 	setupCtx := runtimecorrelation.WithRuntimeInstanceID(testAuthorActivityContext(), opts.RuntimeInstanceID)
-	setupCtx = runtimeauthoractivity.WithScope(setupCtx, runtimeauthoractivity.BundleScope(opts.RuntimeInstanceID, sourceartifactfixture.BundleHash))
+	setupBundle := sourceartifactfixture.BundleHash
+	if opts.SourceArtifactFact.Validate() == nil {
+		setupBundle = opts.SourceArtifactFact.BundleHash()
+		setupCtx = runtimecorrelation.WithSourceArtifactFact(setupCtx, opts.SourceArtifactFact)
+	}
+	setupCtx = runtimeauthoractivity.WithScope(setupCtx, runtimeauthoractivity.BundleScope(opts.RuntimeInstanceID, setupBundle))
 	if opts.MutationContext != nil {
 		var err error
 		setupCtx, err = opts.MutationContext(setupCtx)
