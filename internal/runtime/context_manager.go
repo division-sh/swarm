@@ -595,6 +595,7 @@ func (m *RuntimeContextManager) register(contextDef BundleContext, activateOccur
 	return nil
 }
 
+// W1 deletes the standing branch with item 4.
 func (m *RuntimeContextManager) rollbackRegistrationLocked(hash string, previous *runtimeContextEntry, standing map[string]*worklifetime.StandingOccurrence) error {
 	if previous != nil {
 		m.contexts[hash] = previous
