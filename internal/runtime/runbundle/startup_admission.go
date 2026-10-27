@@ -238,8 +238,11 @@ func (c *upgradeCheck) instance(instance UpgradeInstance) error {
 	if instance.Status != "active" {
 		return nil
 	}
-	if instance.Stage != "" && !slices.Contains(c.candidate.FlowStates(instance.FlowID), instance.Stage) {
-		c.add(instance.Route.InstancePath, instance.EntityID, instance.FlowID, "stage_removed", instance.Stage, "schema", "stages")
+	if instance.Stage != "" {
+		topology, exists := semanticview.WorkflowStageTopology(c.candidate, instance.FlowID)
+		if _, err := topology.ResolveStoredStage(instance.Stage); !exists || err != nil {
+			c.add(instance.Route.InstancePath, instance.EntityID, instance.FlowID, "stage_removed", instance.Stage, "schema", "stages")
+		}
 	}
 	if err := checkUpgradeFields(c.candidate, instance); err != nil {
 		c.add(instance.Route.InstancePath, instance.EntityID, instance.FlowID, "field_value_incompatible", err.Error(), "entities", "")
