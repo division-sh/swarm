@@ -461,7 +461,7 @@ func TestServeSessionBootstrapInstallsIncomingOwnersBothStores(t *testing.T) {
 					}
 					current, err := f.adapter.store.GetChannelOnboarding(f.ctx, f.op.OperationID)
 					if err != nil || current.Revision != f.op.Revision || current.SessionAccount != (operatorchannel.SessionAccountAdmission{}) ||
-						current.IdentityOperationID != "" || current.ActivationRevision != 0 || current.Coordinate != (channelonboarding.ChannelRuntimeContextCoordinate{}) {
+						current.IdentityOperationID != "" || current.ActivationRevision != 0 || current.Coordinate != f.op.Coordinate {
 						t.Fatal("incoming installation manufactured account, claim or business authority", current, err)
 					}
 					if err := connection.Close(f.ctx); err != nil {

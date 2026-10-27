@@ -95,14 +95,19 @@ func TestServedClockStartupAndFiniteHostFrontierBothStores(t *testing.T) {
 							Runs []operatorread.RunHeader `json:"runs"`
 						}
 						requireServedJSONRPCResult(t, endpoint, "run.list", map[string]any{"limit": 100}, &page)
-						generations := 0
+						flow := "."
+						if nested {
+							flow = "clock"
+						}
+						landing := requireServedLandingRun(t, servedTestProcessRuntime(t, process), flow)
+						selected := 0
 						for _, run := range page.Runs {
-							if string(run.Origin.Kind()) == "standing_generation" {
-								generations++
+							if run.RunID == landing.RunID && run.FlowPath == flow && run.Status == "live" {
+								selected++
 							}
 						}
-						if generations != 1 {
-							t.Fatalf("deployment frontier did not publish one generation: %+v", page)
+						if selected != 1 {
+							t.Fatalf("deployment frontier did not publish one selected flow run: %+v", page)
 						}
 					}
 					if code := process.stop(); code != 0 {

@@ -324,6 +324,7 @@ type publicationCompletionAudit struct {
 	claimDisposed       chan struct{}
 	claimDisposeOnce    sync.Once
 	claimDisposeCount   int
+	claimReleaseCount   int
 	claimDisposeError   error
 	enterOnce           sync.Once
 	releaseOnce         sync.Once
