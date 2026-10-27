@@ -73,7 +73,11 @@ func TestReceiverCompositionForkBothStores(t *testing.T) {
 					observer = publication
 				}
 				configureOwnedMockLifecycleProbe(t, observer)
-				rt := startServedTestSetupEntitiesProofRuntimeFromSource(t, backend, root, func(ctx context.Context, _ string, evt events.Event) error {
+				start := startServedTestSetupEntitiesProofRuntimeFromSource
+				if admitted {
+					start = startServedLiveFlowProofRuntimeFromSource
+				}
+				rt := start(t, backend, root, func(ctx context.Context, _ string, evt events.Event) error {
 					if surface != "pending_refusal" || evt.Type() != "work.requested" {
 						return nil
 					}
@@ -91,6 +95,9 @@ func TestReceiverCompositionForkBothStores(t *testing.T) {
 				params := map[string]any{"event_name": "work.requested", "bundle_hash": rt.BundleHash, "payload": map[string]any{"seed": true}, "idempotency_key": "fork-request"}
 				if !fieldless {
 					seed := requireServedEventPublishRPCResult(t, rt.Endpoint, map[string]any{"event_name": "work.seeded", "bundle_hash": rt.BundleHash, "payload": map[string]any{"seed": true}, "idempotency_key": "fork-seed"})
+					if admitted {
+						requireServedLiveRootMode(t, rt, seed.RunID, seed.EventID)
+					}
 					seedEventID = seed.EventID
 					requireServedEventPublishEntityState(t, rt.DB, rt.Backend, seed.RunID, "", "active")
 					if admitted {
@@ -100,6 +107,7 @@ func TestReceiverCompositionForkBothStores(t *testing.T) {
 					params = map[string]any{"event_name": "work.requested", "run_id": seed.RunID, "source_event_id": seed.EventID, "payload": map[string]any{"seed": true}, "idempotency_key": "fork-request"}
 				} else {
 					seed := requireServedEventPublishRPCResult(t, rt.Endpoint, map[string]any{"event_name": "fork.seeded", "bundle_hash": rt.BundleHash, "payload": map[string]any{}, "idempotency_key": "empty-fork-seed"})
+					requireServedLiveRootMode(t, rt, seed.RunID, seed.EventID)
 					seedEventID = seed.EventID
 					waitServedRunDeliveryQuiescence(t, rt.ReadRunDeliveries, seed.RunID)
 					params = map[string]any{"event_name": "work.requested", "run_id": seed.RunID, "source_event_id": seed.EventID, "payload": map[string]any{"seed": true}, "idempotency_key": "fork-request"}
@@ -272,6 +280,14 @@ func TestReceiverCompositionForkBothStores(t *testing.T) {
 							t.Fatalf("unsupported replay did not fail closed: %v activated=%t sourceFrozen=%t", err, result.Activation.Activated, result.Activation.SourceFrozen)
 						}
 						t.Logf("refused receiver fork cleanup: run=%s err=%v", result.Materialization.ForkRunID, err)
+						if result.Materialization.ForkRunID == "" {
+							var children int
+							if err := rt.DB.QueryRow(`SELECT COUNT(*) FROM runs WHERE forked_from_run_id=$1`, request.RunID).Scan(&children); err != nil || children != 0 {
+								t.Fatalf("pre-materialization refusal retained child runs: count=%d err=%v", children, err)
+							}
+							checkSource("after pre-materialization refusal")
+							return
+						}
 						// The canonical discard retains completion evidence in a cancelled
 						// run tombstone, but removes executable fork state and deliveries.
 						var status string
