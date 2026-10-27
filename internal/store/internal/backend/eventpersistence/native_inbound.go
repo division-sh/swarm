@@ -3,6 +3,7 @@ package eventpersistence
 import (
 	"context"
 	"database/sql"
+	"errors"
 	"fmt"
 
 	"github.com/division-sh/swarm/internal/packs"
@@ -10,6 +11,26 @@ import (
 	inbound "github.com/division-sh/swarm/internal/runtime/inboundpublication"
 	"github.com/division-sh/swarm/internal/store/internal/backend/channelonboarding"
 )
+
+func admitInboundLandingRunTx(ctx context.Context, tx *sql.Tx, postgres bool, command inbound.CommitCommand) error {
+	request := command.Request.Normalized()
+	query := `SELECT run_id,bundle_hash,status FROM runs WHERE flow_path=$1 AND landing_run=TRUE`
+	if postgres {
+		query += ` FOR UPDATE`
+	}
+	var runID, bundleHash, state string
+	if err := tx.QueryRowContext(ctx, query, request.FlowPath).Scan(&runID, &bundleHash, &state); err != nil {
+		if errors.Is(err, sql.ErrNoRows) {
+			return fmt.Errorf("flow %s has no landing run", request.FlowPath)
+		}
+		return fmt.Errorf("lock inbound landing run: %w", err)
+	}
+	source, found := correlation.SourceArtifactFactFromContext(ctx)
+	if !found || source.BundleHash() != bundleHash || runID != request.ResolvedRunID || (state != "live" && state != "paused") {
+		return fmt.Errorf("stale, foreign or unavailable inbound landing run")
+	}
+	return nil
+}
 
 func admitNativeInboundPublicationTx(ctx context.Context, tx *sql.Tx, postgres bool, command inbound.CommitCommand) error {
 	input, native := command.Admission.NativeInput()
