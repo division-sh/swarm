@@ -113,7 +113,11 @@ func q1ExecuteSelectedPhaseComponent(t *testing.T, ctx context.Context, request 
 	if err := c.attachment.runtime.startExecution(ctx, c.attachment.pipeline, c.diagnostics, false); err != nil {
 		return out, err
 	}
-	continuations, err := deliverycontinuation.NewSelected(c.ports.busDurable.DeliveryLifecycle, c.attachment.deliveryAuthority, prepared.operation.selected, c.attachment.runtime.bus, func(_ context.Context, cause error) { c.attachment.cancel(cause) })
+	reconcile, err := c.selectedBarrierReconciler()
+	if err != nil {
+		return out, err
+	}
+	continuations, err := deliverycontinuation.NewSelected(c.ports.busDurable.DeliveryLifecycle, c.attachment.deliveryAuthority, prepared.operation.selected, c.attachment.runtime.bus, func(_ context.Context, cause error) { c.attachment.cancel(cause) }, reconcile)
 	if err != nil {
 		return out, err
 	}

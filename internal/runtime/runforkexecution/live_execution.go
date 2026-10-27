@@ -165,7 +165,11 @@ func (c selectedContractForkLocalRuntimeContainer) activateLive(p *PreparedSelec
 	if err := runtime.startExecution(c.attachment.ctx, c.attachment.pipeline, c.diagnostics, p.recoveryFromExecutionID != ""); err != nil {
 		return out, err
 	}
-	continuations, err := deliverycontinuation.NewSelected(c.ports.busDurable.DeliveryLifecycle, c.attachment.deliveryAuthority, p.operation.selected, runtime.bus, func(_ context.Context, cause error) { c.attachment.cancel(cause) })
+	reconcile, err := c.selectedBarrierReconciler()
+	if err != nil {
+		return out, err
+	}
+	continuations, err := deliverycontinuation.NewSelected(c.ports.busDurable.DeliveryLifecycle, c.attachment.deliveryAuthority, p.operation.selected, runtime.bus, func(_ context.Context, cause error) { c.attachment.cancel(cause) }, reconcile)
 	if err != nil {
 		return out, err
 	}

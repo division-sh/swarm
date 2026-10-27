@@ -629,17 +629,9 @@ func (c selectedContractForkLocalRuntimeContainer) serveCommittedAttachment() (f
 		return fmt.Errorf("start activated selected execution: %w", err)
 	}
 	bus, pipeline := agentRuntime.bus, attachment.pipeline
-	grant, err := agentRuntime.generationGrant.Evidence()
+	reconcile, err := c.selectedBarrierReconciler()
 	if err != nil {
-		return fmt.Errorf("load selected barrier recovery grant: %w", err)
-	}
-	owner, err := c.ports.deploymentFanOut.BindSelectedFanOutGrant(grant)
-	if err != nil {
-		return fmt.Errorf("bind selected barrier recovery: %w", err)
-	}
-	barriers, ok := owner.(runtimepipeline.SelectedFanOutObligationOwner)
-	if !ok {
-		return errors.New("selected fan-out owner lacks barrier reconciliation")
+		return err
 	}
 	continuationFailures := make(chan error, 1)
 	continuations, err := runtimedeliverycontinuation.NewSelected(
@@ -651,7 +643,7 @@ func (c selectedContractForkLocalRuntimeContainer) serveCommittedAttachment() (f
 			}
 			attachment.cancel(cause)
 		},
-		func(ctx context.Context) error { return pipeline.ReconcileSelectedFanOutBarriers(ctx, barriers) },
+		reconcile,
 	)
 	if err != nil {
 		return fmt.Errorf("create selected delivery continuation owner: %w", err)
@@ -705,6 +697,24 @@ func (c selectedContractForkLocalRuntimeContainer) serveCommittedAttachment() (f
 		}
 	}
 	return c.awaitTerminalSettlement(runCtx, continuationFailures)
+}
+
+func (c selectedContractForkLocalRuntimeContainer) selectedBarrierReconciler() (func(context.Context) error, error) {
+	grant, err := c.attachment.runtime.generationGrant.Evidence()
+	if err != nil {
+		return nil, fmt.Errorf("load selected barrier recovery grant: %w", err)
+	}
+	owner, err := c.ports.deploymentFanOut.BindSelectedFanOutGrant(grant)
+	if err != nil {
+		return nil, fmt.Errorf("bind selected barrier recovery: %w", err)
+	}
+	barriers, ok := owner.(runtimepipeline.SelectedFanOutObligationOwner)
+	if !ok {
+		return nil, errors.New("selected fan-out owner lacks barrier reconciliation")
+	}
+	return func(ctx context.Context) error {
+		return c.attachment.pipeline.ReconcileSelectedFanOutBarriers(ctx, barriers)
+	}, nil
 }
 
 func (c selectedContractForkLocalRuntimeContainer) startSelectedServing(ctx context.Context) error {

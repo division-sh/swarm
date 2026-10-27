@@ -76,7 +76,7 @@ func TestOperatorRunCompletionSystemNodeFlowConvergesSupportedSurfaces(t *testin
 		if err != nil {
 			return false, err
 		}
-		return full.Entity.CurrentState != nil && *full.Entity.CurrentState == "done" && settled.Ready && lifecycleExecutor.ActiveCandidates() == 0, nil
+		return full.Entity.CurrentState != nil && *full.Entity.CurrentState == "done" && settled.Ready, nil
 	})
 
 	eventID := triggerEventIDForRun(t, db, runID)

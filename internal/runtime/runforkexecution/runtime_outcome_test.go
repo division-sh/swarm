@@ -230,7 +230,7 @@ func (p *selectedRuntimeOutcomeProbe) ActivateRunForkForSelectedContractExecutio
 	if activation.Activated {
 		p.prepared.bindMu.Lock()
 		if runtime := p.prepared.retainedRuntime; runtime != nil {
-			p.diagnostics = runtime.completionDiagnostics
+			p.diagnostics = runtime.diagnostics
 		}
 		p.prepared.bindMu.Unlock()
 	}

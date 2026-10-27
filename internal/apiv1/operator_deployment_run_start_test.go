@@ -9,7 +9,6 @@ import (
 	"testing"
 
 	"github.com/division-sh/swarm/internal/durabledata"
-	"github.com/division-sh/swarm/internal/operatorread"
 	runtimecontracts "github.com/division-sh/swarm/internal/runtime/contracts"
 
 	"github.com/division-sh/swarm/internal/runtime/semanticview"
@@ -116,12 +115,9 @@ func TestDeploymentRunStartFeedOnlyAcrossSelectedStores(t *testing.T) {
 						if response.Error != nil {
 							t.Fatalf("empty feed diagnosis: %#v", response.Error)
 						}
-						settled, err := fixture.reconstructed.LoadRunDebugReport(ctx, runID, operatorread.RunDebugQueryOptions{})
-						if err != nil {
-							t.Fatal(err)
-						}
-						if header.Status == "live" && settled.TestQuiescence.Ready {
-							break
+						report := asMap(t, response.Result)
+						if status := asMap(t, report["run"])["status"]; status != "live" {
+							t.Fatalf("empty feed changed run status: %v", status)
 						}
 						return asMap(t, report["test_quiescence"])["ready"] == true, nil
 					})
