@@ -70,6 +70,7 @@ func TestOrdinaryForkAbsentCutFaultOwnsExactOriginCAS(t *testing.T) {
 func TestRunLifecycleOwnershipBoundaryGuard(t *testing.T) {
 	root := repoRootForRuntimeWriterGuard(t)
 	allowedWrites := map[string]bool{
+		"internal/store/internal/backend/runlifecycle/live_selection.go":                true,
 		"internal/store/internal/backend/runlifecycle/counterprojection/event_count.go": true,
 		"internal/store/internal/backend/runlifecycle/run_lifecycle_candidates.go":      true,
 		"internal/store/internal/backend/runlifecycle/run_lifecycle_mutation.go":        true,
