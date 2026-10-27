@@ -19,6 +19,7 @@ const debtCompletedSelectedFixturePinCollectorTo = "f28178924493fb28094b3bd1fb48
 const debtW3LandedFixtureCollectorTo = "895137c088b18e51143008b7c47e32b76a573054322d87c0072781adcf1c9626"
 const debtW1ComparisonCollectorTo = "e15497e25a763bd9e57c71221b045640ca92517d809095ed618eb93c741f8127"
 const debtW1RebasedComparisonCollectorTo = "58217e03fdd7a5276ef4ac1b0a763fb2b2508423763415bc875ddcb6469c78d0"
+const debtW4ComparisonCollectorTo = "b8ba4d46c7965cb22a5e74ee59e3abb701a3c4e6554afd530995f845fe02f398"
 
 // #2727/6388897450: source-pin validation for an already-landed composed endpoint.
 const debtSelectedFixtureLandedCollectorTo = "1b48c6bd1c1b6d6100ee6df74bb9fe3d239372befa4c8f96f02243602fa9f646"
@@ -415,6 +416,49 @@ func TestPersistenceAuthorityDebtRunFixtureCollectorTransitionIsPinned(t *testin
 							t.Fatalf("metadata-only edge: %v", err)
 						}
 					})
+				}
+			})
+		}
+	})
+	t.Run("w4-comparison-metadata-only", func(t *testing.T) {
+		for _, mutation := range []string{"exact", "foreign-base", "trusted-collector", "foreign-current", "head-collector", "unreviewed", "foreign-review", "reverse", "bootstrap", "remove-site", "add-site", "multiplicity", "replace-site"} {
+			t.Run(mutation, func(t *testing.T) {
+				before := authorityDebtBaseline{BootstrapSource: trusted.BootstrapSource, Collector: debtCompletedSelectedFixturePinCollectorTo, Sites: debtControlSet(legacy)}
+				after := before
+				after.Collector, after.Sites = debtW4ComparisonCollectorTo, maps.Clone(before.Sites)
+				base, collector, reviewed := before.Collector, after.Collector, after.Collector
+				switch mutation {
+				case "foreign-base":
+					base = strings.Repeat("b", 64)
+				case "trusted-collector":
+					before.Collector = strings.Repeat("b", 64)
+				case "foreign-current":
+					collector, after.Collector, reviewed = strings.Repeat("b", 64), strings.Repeat("b", 64), strings.Repeat("b", 64)
+				case "head-collector":
+					after.Collector = before.Collector
+				case "unreviewed":
+					reviewed = ""
+				case "foreign-review":
+					reviewed = strings.Repeat("b", 64)
+				case "reverse":
+					before, after = after, before
+					base, collector, reviewed = before.Collector, after.Collector, after.Collector
+				case "bootstrap":
+					after.BootstrapSource = strings.Repeat("b", 40)
+				case "remove-site":
+					delete(after.Sites, legacy.identity())
+				case "add-site":
+					after.Sites[escape.identity()] = escape
+				case "multiplicity":
+					changed := legacy
+					changed.Multiplicity--
+					after.Sites[changed.identity()] = changed
+				case "replace-site":
+					delete(after.Sites, legacy.identity())
+					after.Sites[replacement.identity()] = replacement
+				}
+				if err := debtValidateCollectorIdentity(base, collector, before, after, reviewed); (err == nil) != (mutation == "exact") {
+					t.Fatalf("metadata-only edge: %v", err)
 				}
 			})
 		}

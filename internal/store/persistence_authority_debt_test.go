@@ -1016,6 +1016,11 @@ func debtValidateCollectorIdentity(base, current string, trusted, head authority
 		debtSitesEqual(head.Sites, trusted.Sites) {
 		return nil // Compose the landed W4 matcher and reviewed W1 pairs; unchanged baseline.
 	}
+	if base == debtCompletedSelectedFixturePinCollectorTo && trusted.Collector == base &&
+		current == debtW4ComparisonCollectorTo && head.Collector == current && reviewedTransition == current &&
+		debtSitesEqual(head.Sites, trusted.Sites) {
+		return nil // #2807/6453836470: exact W4 comparison edge; baseline sites are unchanged.
+	}
 	if base == debtSelectedFixtureComposedCollectorTo && trusted.Collector == base &&
 		current == debtSelectedFixtureLandedCollectorTo && head.Collector == current &&
 		debtSitesEqual(head.Sites, trusted.Sites) {
