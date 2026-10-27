@@ -538,11 +538,11 @@ func (am *AgentManager) verifyDynamicFlowRuntimeProcessTopology(ctx context.Cont
 	if err != nil {
 		return err
 	}
-	comparisonRecords, err := am.flowReadinessComparisonRecords(plan, source.source, records)
+	records, selectedRootReadiness, err := am.flowReadinessOwnedAgentRecords(plan, source.source, records)
 	if err != nil {
 		return err
 	}
-	if err := verifyDynamicFlowAgentExpectations(comparisonRecords, plan.Agents); err != nil {
+	if err := verifyDynamicFlowAgentExpectations(records, plan.Agents); err != nil {
 		return err
 	}
 	topologyAuthority, err := DynamicFlowAgentTopologyAdmission(plan)
@@ -560,7 +560,7 @@ func (am *AgentManager) verifyDynamicFlowRuntimeProcessTopology(ctx context.Cont
 	if err != nil {
 		return err
 	}
-	if err := am.verifyDynamicFlowAgents(ctx, flowIdentity, records, topologyAuthority); err != nil {
+	if err := am.verifyDynamicFlowAgents(ctx, flowIdentity, records, topologyAuthority, selectedRootReadiness); err != nil {
 		return err
 	}
 	return am.workflowInstances.VerifyDynamicFlowRuntimeActivationAttempt(ctx, active.receipt)

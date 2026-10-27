@@ -150,11 +150,11 @@ func (am *AgentManager) reconcileDynamicFlowRuntimeReadinessOnce(
 	if err != nil {
 		return err
 	}
-	comparisonRecords, err := am.flowReadinessComparisonRecords(plan, source, records)
+	records, selectedRootReadiness, err := am.flowReadinessOwnedAgentRecords(plan, source, records)
 	if err != nil {
 		return err
 	}
-	if err := verifyDynamicFlowAgentExpectations(comparisonRecords, plan.Agents); err != nil {
+	if err := verifyDynamicFlowAgentExpectations(records, plan.Agents); err != nil {
 		return fmt.Errorf("dynamic flow runtime readiness %s: %w", readiness.InstancePath, err)
 	}
 	if admission.preAdmission {
@@ -173,7 +173,7 @@ func (am *AgentManager) reconcileDynamicFlowRuntimeReadinessOnce(
 		if err != nil {
 			return fmt.Errorf("load standing flow agents for %s: %w", readiness.InstancePath, err)
 		}
-		if err := am.reconcileDynamicFlowAgentSet(ctx, source, flowIdentity, records, persistedAgents, topologyAuthority, false); err != nil {
+		if err := am.reconcileDynamicFlowAgentSet(ctx, source, flowIdentity, records, persistedAgents, topologyAuthority, false, selectedRootReadiness); err != nil {
 			return fmt.Errorf("prepare standing flow agents for %s: %w", readiness.InstancePath, err)
 		}
 		if am.lifecycle.phaseSnapshot() != runtimeLifecycleStopped {
@@ -266,11 +266,11 @@ func (am *AgentManager) reconcileDynamicFlowRuntimeReadinessOnce(
 		if err != nil {
 			return fmt.Errorf("load dynamic flow agents for %s: %w", readiness.InstancePath, err)
 		}
-		if err := am.reconcileDynamicFlowAgentSet(ctx, source, flowIdentity, records, persistedAgents, topologyAuthority, true); err != nil {
+		if err := am.reconcileDynamicFlowAgentSet(ctx, source, flowIdentity, records, persistedAgents, topologyAuthority, true, selectedRootReadiness); err != nil {
 			return fmt.Errorf("reconcile dynamic flow agent set for %s: %w", readiness.InstancePath, err)
 		}
 	}
-	if err := am.verifyDynamicFlowAgents(ctx, flowIdentity, records, topologyAuthority); err != nil {
+	if err := am.verifyDynamicFlowAgents(ctx, flowIdentity, records, topologyAuthority, selectedRootReadiness); err != nil {
 		if am.cleanReadinessShutdownReadCancellation(ctx, err) {
 			cleanupCtx, cancel := context.WithTimeout(context.WithoutCancel(ctx), dynamicFlowRuntimeReadinessCleanupTimeout)
 			defer cancel()

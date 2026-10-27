@@ -170,6 +170,10 @@ func deploymentForkServerAt(t *testing.T, f *deploymentResourceFixture, owner ru
 			ExecuteSelectedContractRunFork: func(ctx context.Context, req runforkexecution.SelectedContractExecutionRequest) (runforkexecution.SelectedContractExecutionResult, error) {
 				req.Owner = owner
 				req = deploymentLiveForkRequest(t, f, req)
+				if req.ForkOperation != nil {
+					operation := *req.ForkOperation
+					f.forkRequest.Store(&operation)
+				}
 				result, err := runforkexecution.ExecuteSelectedContractRunFork(ctx, req)
 				if err != nil {
 					t.Logf("selected fork executor diagnosis: %v", err)
@@ -911,7 +915,22 @@ func TestDeploymentSourceDynamicReceiverSelectedForkRefusesWithoutMutation(t *te
 	for _, backend := range []string{"sqlite", "postgres"} {
 		t.Run(backend, func(t *testing.T) {
 			f := selectedDeploymentResourceFixture(t, backend, "dynamic")
-			f.runtime.fanOutServing.Close()
+			setup := make(chan struct{})
+			releaseSetup := sync.OnceFunc(func() { close(setup) })
+			t.Cleanup(releaseSetup)
+			var holdSetup sync.Once
+			empty := make(chan struct{})
+			f.runtime.fanOutServing.SetTestScanObserver(func(_ startupownership.FanOutCandidate, found bool, err error) {
+				if !found && err == nil {
+					holdSetup.Do(func() { close(empty); <-setup })
+				}
+			})
+			f.runtime.fanOutServing.Wake()
+			select {
+			case <-empty:
+			case <-time.After(5 * time.Second):
+				t.Fatal("dynamic source setup did not join an empty fan-out scan")
+			}
 			server := f.operatorServer(t)
 			start := func(name, accountID string) string {
 				t.Helper()
@@ -923,6 +942,8 @@ func TestDeploymentSourceDynamicReceiverSelectedForkRefusesWithoutMutation(t *te
 			}
 			sourceRunID := start("source", "source")
 			pauseDeploymentFixtureRun(t, f, sourceRunID)
+			releaseSetup()
+			f.runtime.fanOutServing.Wake()
 			changedRunID := start("changed", "changed")
 			var changedVersion string
 			if err := f.db.QueryRowContext(f.ctx, `SELECT version_id FROM resource_version_pins WHERE run_id=$1 AND flow_path='.' AND event_name='root.ready'`, changedRunID).Scan(&changedVersion); err != nil {
@@ -944,11 +965,8 @@ func TestDeploymentSourceDynamicReceiverSelectedForkRefusesWithoutMutation(t *te
 				t.Fatalf("dynamic receiver lost its exact changed-pin child: result=%+v error=%s", result, rpcErr)
 			}
 			rows := []byte("{\"account_id\":\"changed\",\"document\":{\"route\":\"dynamic\"}}\n")
-			assertSelectedDeploymentRowsWithClosedExecutions(t, f, server, result.ForkRunID, "dynamic", changedVersion, rows, 0)
-			closed, err := owner.PublishSelectedFixtureCloseForTest(f.ctx, result.ForkRunID, runforkexecution.SelectedFixtureCloseInputForTest{AccountID: "changed"})
-			if err != nil || closed.RunID != result.ForkRunID {
-				t.Fatalf("dynamic selected child could not consume its authored close: %+v err=%v", closed, err)
-			}
+			assertSelectedDeploymentRowsWithClosedExecutions(t, f, server, result.ForkRunID, "dynamic", changedVersion, rows, 1)
+			publishNotifyAllChildrenEvent(t, f.ctx, f.runtime, f.source, result.ForkRunID, "fixture.close.requested", map[string]any{"account_id": "changed"})
 			assertSelectedDeploymentRows(t, f, server, result.ForkRunID, "dynamic", changedVersion, rows)
 			replayed, rpcErr := deploymentForkRPC(t, f.ctx, forkServer, params)
 			if len(rpcErr) != 0 || !reflect.DeepEqual(result, replayed) {
