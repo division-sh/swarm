@@ -103,6 +103,7 @@ type notifyAllChildrenRuntime struct {
 
 type notifyAllChildrenRuntimeOptions struct {
 	ordinaryContext        bool
+	ordinaryConfig         *config.Config
 	diagnosticOverlap      bool
 	executionPosture       executionposture.Posture
 	realMockAgents         bool
@@ -2260,6 +2261,9 @@ func newNotifyAllChildrenRuntime(
 				LLMRuntime:     conformanceNoopLLMRuntime{},
 			},
 		}
+		if opts.ordinaryConfig != nil {
+			deps.Config = opts.ordinaryConfig
+		}
 		switch selected := backend.(type) {
 		case *store.PostgresStore:
 			deps = stageLifecycleIdentityPostgresDeps(deps, selected)
@@ -2349,7 +2353,12 @@ func newNotifyAllChildrenRuntime(
 		agentFactory runtimemanager.AgentFactory
 		sessionStore runtimesessions.Registry
 		llmBackend   string
+		modelAliases llmselection.ModelAliases
 	)
+	if opts.ordinaryConfig != nil {
+		llmBackend = opts.ordinaryConfig.LLM.Backend
+		modelAliases = opts.ordinaryConfig.LLM.Models
+	}
 	workflowPersistence := runtimepipeline.NewWorkflowPersistence(backend)
 	switch sqliteStore := backend.(type) {
 	case *store.SQLiteRuntimeStore:
@@ -2503,18 +2512,20 @@ func newNotifyAllChildrenRuntime(
 		roles = gateLifecycleDiagnosticOverlap(t, db, roles)
 	}
 	manager = ownConformanceTestAgentManager(t, runtimemanager.NewAgentManagerWithOptions(eventBus, agentFactory, runtimemanager.AgentManagerOptions{
-		ExecutionPosture:     posture,
-		BaseContext:          originalConformanceFixtureContext(t, runtimeeffects.WithExecutionMode(testAuthorActivityContextForBundle(context.Background(), sourceArtifactFact), posture.RootMode()), backend),
-		CarryMutationContext: runtimestartupownership.CarryMutationAuthority,
-		SourceArtifactFact:   sourceArtifactFact,
-		WorkflowInstances:    coordinator,
-		WorkOwner:            workOwner,
-		DeliveryStore:        deliveryLifecycle,
-		LifecycleStore:       lifecycleStore,
-		SemanticSource:       source,
-		Sessions:             sessionStore,
-		LLMBackend:           llmBackend,
-		PersistenceRoles:     roles, ReceiverExecution: eventreceiver.NormalExecution(),
+		ExecutionPosture:       posture,
+		BaseContext:            originalConformanceFixtureContext(t, runtimeeffects.WithExecutionMode(testAuthorActivityContextForBundle(context.Background(), sourceArtifactFact), posture.RootMode()), backend),
+		CarryMutationContext:   runtimestartupownership.CarryMutationAuthority,
+		SourceArtifactFact:     sourceArtifactFact,
+		WorkflowInstances:      coordinator,
+		WorkOwner:              workOwner,
+		DeliveryStore:          deliveryLifecycle,
+		LifecycleStore:         lifecycleStore,
+		SemanticSource:         source,
+		Sessions:               sessionStore,
+		LLMBackend:             llmBackend,
+		ModelAliases:           modelAliases,
+		RequireModelResolution: opts.ordinaryConfig != nil,
+		PersistenceRoles:       roles, ReceiverExecution: eventreceiver.NormalExecution(),
 	}, backend))
 	eventBus.SetCommittedAgentReadinessFinalizer(runtimebus.CommittedAgentReadinessFinalizerFunc(manager.FinalizeCommittedAgentReadiness))
 	if contextRuntime == nil {

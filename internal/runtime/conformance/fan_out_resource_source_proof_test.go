@@ -10,6 +10,8 @@ import (
 	"testing"
 	"time"
 
+	"github.com/division-sh/swarm/internal/config"
+
 	runtimepkg "github.com/division-sh/swarm/internal/runtime"
 	"github.com/division-sh/swarm/internal/runtime/contracts"
 	"github.com/division-sh/swarm/internal/runtime/pipeline"
@@ -58,6 +60,7 @@ type deploymentResourceFixture struct {
 	topology     *notifyAllChildrenProcessTopology
 	ctx          context.Context
 	liveContexts *runtimepkg.RuntimeContextManager
+	config       *config.Config
 }
 
 type deploymentFanOutDiagnostic struct {
@@ -79,9 +82,15 @@ func newDeploymentResourceFixtureWithAgent(t *testing.T, backend string, include
 	return newDeploymentResourceFixtureWithSource(t, backend, deploymentResourceSourceWithAgent(t, includeAgent))
 }
 
-func newDeploymentResourceFixtureWithSource(t *testing.T, backend string, source semanticview.Source) *deploymentResourceFixture {
+func newDeploymentResourceFixtureWithSource(t *testing.T, backend string, source semanticview.Source, configs ...*config.Config) *deploymentResourceFixture {
 	t.Helper()
 	f := &deploymentResourceFixture{source: source}
+	if len(configs) > 1 {
+		t.Fatal("deployment fixture accepts one ordinary runtime configuration")
+	}
+	if len(configs) == 1 {
+		f.config = configs[0]
+	}
 	switch backend {
 	case "sqlite":
 		selected := storetest.StartSQLiteRuntimeStore(t)
@@ -107,6 +116,7 @@ func (f *deploymentResourceFixture) boot(t *testing.T) {
 	f.liveContexts = nil
 	f.runtime = newNotifyAllChildrenRuntime(t, f.selected, f.db, f.source, time.Now, notifyAllChildrenRuntimeOptions{
 		ordinaryContext: true,
+		ordinaryConfig:  f.config,
 		processTopology: f.topology,
 		fanOutExecutor: func(coordinator *pipeline.PipelineCoordinator) startupownership.FanOutExecutor {
 			return deploymentFanOutDiagnostic{FanOutExecutor: coordinator, t: t}

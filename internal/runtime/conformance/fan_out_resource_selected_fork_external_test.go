@@ -55,7 +55,14 @@ func selectedExternalResourceFixture(t *testing.T, backend string) *deploymentRe
 	if err != nil {
 		t.Fatal(err)
 	}
-	f := newDeploymentResourceFixtureWithSource(t, backend, semanticview.Wrap(bundle))
+	cfg := &config.Config{LLM: config.LLMConfig{
+		Backend: llmselection.BackendOpenAICompatible,
+		Models: llmselection.ModelAliases{llmselection.ModelAliasRegular: {
+			llmselection.BackendOpenAICompatible: "gpt-selected-external-proof",
+		}},
+		Session: config.LLMSessionConfig{LockTTL: time.Second, RotateAfterTurns: 40, RotateOnParseFailures: 3},
+	}}
+	f := newDeploymentResourceFixtureWithSource(t, backend, semanticview.Wrap(bundle), cfg)
 	f.runtime.fanOutServing.Close()
 	return f
 }
@@ -69,13 +76,7 @@ func selectedExternalForkServer(t *testing.T, f *deploymentResourceFixture, owne
 	if err := credentials.Set(f.ctx, llmselection.OpenAICompatibleCredentialEnv, "selected-external-test-key"); err != nil {
 		t.Fatal(err)
 	}
-	cfg := &config.Config{LLM: config.LLMConfig{
-		Backend: llmselection.BackendOpenAICompatible,
-		Models: llmselection.ModelAliases{llmselection.ModelAliasRegular: {
-			llmselection.BackendOpenAICompatible: "gpt-selected-external-proof",
-		}},
-		Session: config.LLMSessionConfig{LockTTL: time.Second, RotateAfterTurns: 40, RotateOnParseFailures: 3},
-	}}
+	cfg := f.config
 	cfg.LLM.OpenAICompatible.BaseURL = providerURL
 	artifacts, ok := f.selected.(runforkexecution.SourceArtifactSelectedContractSourceStore)
 	if !ok {
