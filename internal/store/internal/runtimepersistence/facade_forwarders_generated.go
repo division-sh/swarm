@@ -160,20 +160,8 @@ func (s *PostgresStore) BeginDynamicFlowRuntimeActivation(ctx context.Context, r
 	return s.pipelinePostgresOwner.BeginDynamicFlowRuntimeActivation(ctx, request)
 }
 
-func (s *PostgresStore) BindActivityGrant(evidence startupownership.GrantEvidence) (pipeline.ActivityAttemptJournal, error) {
-	return s.activityPostgresOwner.BindActivityGrant(evidence)
-}
-
-func (s *PostgresStore) BindActivityJournalRole(role startupownership.ActivityJournalGrantBinder) error {
-	return s.startupPostgresOwner.BindActivityJournalRole(role)
-}
-
 func (s *PostgresStore) BindAgentSession(ctx context.Context, claim deliverylifecycle.Claim, sessionID string) (deliverylifecycle.ClaimCommit, error) {
 	return s.deliveryPostgresOwner.BindAgentSession(ctx, claim, sessionID)
-}
-
-func (s *PostgresStore) BindLifecycleCandidates(candidates *runhandoff.CandidateCoordinator) error {
-	return s.startupPostgresOwner.BindLifecycleCandidates(candidates)
 }
 
 func (s *PostgresStore) BindOperatorChannelFromProof(ctx context.Context, req operatorchannel.BootBindRequest) (operatorchannel.Binding, error) {
@@ -362,10 +350,6 @@ func (s *PostgresStore) DeliveryLifecycleSnapshotPageForAgent(ctx context.Contex
 
 func (s *PostgresStore) DeliverySnapshotsForEvent(ctx context.Context, eventID string) ([]deliverylifecycle.Snapshot, error) {
 	return s.deliveryPostgresOwner.DeliverySnapshotsForEvent(ctx, eventID)
-}
-
-func (s *PostgresStore) DeploymentOperations() channelonboarding.OperationStore {
-	return s.channelOnboardingPostgresOwner.DeploymentOperations()
 }
 
 func (s *PostgresStore) DiscardMaterializedSelectedContractExecutionFork(ctx context.Context, forkRunID string) error {
@@ -726,6 +710,10 @@ func (s *PostgresStore) LoadHumanTaskContinuation(ctx context.Context, cardID st
 
 func (s *PostgresStore) LoadInboundPublicationByIdentity(ctx context.Context, identity inboundpublication.Identity) (inboundpublication.Record, bool, error) {
 	return s.eventPostgresOwner.LoadInboundPublicationByIdentity(ctx, identity)
+}
+
+func (s *PostgresStore) LoadLandingRun(ctx context.Context, scope runlifecycle.LiveRunScope) (runlifecycle.LandingRun, bool, error) {
+	return s.runLifecyclePostgresOwner.LoadLandingRun(ctx, scope)
 }
 
 func (s *PostgresStore) LoadLatestPublicConversationTurn(ctx context.Context, sessionID string) (*operatorread.OperatorPublicConversationTurn, error) {
@@ -1332,10 +1320,6 @@ func (s *PostgresStore) UpsertConversation(ctx context.Context, lease *sessions.
 	return s.lLMPostgresOwner.UpsertConversation(ctx, lease, rec)
 }
 
-func (s *PostgresStore) ValidateDisplacedRecovery() error {
-	return s.activityPostgresOwner.ValidateDisplacedRecovery()
-}
-
 func (s *PostgresStore) ValidateInboundPublicationIntegrity(ctx context.Context) error {
 	return s.eventPostgresOwner.ValidateInboundPublicationIntegrity(ctx)
 }
@@ -1452,20 +1436,8 @@ func (s *SQLiteRuntimeStore) BeginDynamicFlowRuntimeActivation(ctx context.Conte
 	return s.pipelineSQLiteOwner.BeginDynamicFlowRuntimeActivation(ctx, request)
 }
 
-func (s *SQLiteRuntimeStore) BindActivityGrant(evidence startupownership.GrantEvidence) (pipeline.ActivityAttemptJournal, error) {
-	return s.activitySQLiteOwner.BindActivityGrant(evidence)
-}
-
-func (s *SQLiteRuntimeStore) BindActivityJournalRole(role startupownership.ActivityJournalGrantBinder) error {
-	return s.startupSQLiteOwner.BindActivityJournalRole(role)
-}
-
 func (s *SQLiteRuntimeStore) BindAgentSession(ctx context.Context, claim deliverylifecycle.Claim, sessionID string) (deliverylifecycle.ClaimCommit, error) {
 	return s.deliverySQLiteOwner.BindAgentSession(ctx, claim, sessionID)
-}
-
-func (s *SQLiteRuntimeStore) BindLifecycleCandidates(candidates *runhandoff.CandidateCoordinator) error {
-	return s.startupSQLiteOwner.BindLifecycleCandidates(candidates)
 }
 
 func (s *SQLiteRuntimeStore) BindOperatorChannelFromProof(ctx context.Context, req operatorchannel.BootBindRequest) (operatorchannel.Binding, error) {
@@ -1654,10 +1626,6 @@ func (s *SQLiteRuntimeStore) DeliveryLifecycleSnapshotPageForAgent(ctx context.C
 
 func (s *SQLiteRuntimeStore) DeliverySnapshotsForEvent(ctx context.Context, eventID string) ([]deliverylifecycle.Snapshot, error) {
 	return s.deliverySQLiteOwner.DeliverySnapshotsForEvent(ctx, eventID)
-}
-
-func (s *SQLiteRuntimeStore) DeploymentOperations() channelonboarding.OperationStore {
-	return s.channelOnboardingSQLiteOwner.DeploymentOperations()
 }
 
 func (s *SQLiteRuntimeStore) DestructiveResetDeliveryQuiesced(ctx context.Context, eventID string, subscriberType string, subscriberID string) (bool, error) {
@@ -1998,6 +1966,10 @@ func (s *SQLiteRuntimeStore) LoadHumanTaskContinuation(ctx context.Context, card
 
 func (s *SQLiteRuntimeStore) LoadInboundPublicationByIdentity(ctx context.Context, identity inboundpublication.Identity) (inboundpublication.Record, bool, error) {
 	return s.eventSQLiteOwner.LoadInboundPublicationByIdentity(ctx, identity)
+}
+
+func (s *SQLiteRuntimeStore) LoadLandingRun(ctx context.Context, scope runlifecycle.LiveRunScope) (runlifecycle.LandingRun, bool, error) {
+	return s.runLifecycleSQLiteOwner.LoadLandingRun(ctx, scope)
 }
 
 func (s *SQLiteRuntimeStore) LoadLatestPublicConversationTurn(ctx context.Context, sessionID string) (*operatorread.OperatorPublicConversationTurn, error) {
@@ -2598,10 +2570,6 @@ func (s *SQLiteRuntimeStore) UpdateLiveSessionWatchdog(ctx context.Context, leas
 
 func (s *SQLiteRuntimeStore) UpsertConversation(ctx context.Context, lease *sessions.Lease, rec llm.ConversationRecord) error {
 	return s.lLMSQLiteOwner.UpsertConversation(ctx, lease, rec)
-}
-
-func (s *SQLiteRuntimeStore) ValidateDisplacedRecovery() error {
-	return s.activitySQLiteOwner.ValidateDisplacedRecovery()
 }
 
 func (s *SQLiteRuntimeStore) ValidateInboundPublicationIntegrity(ctx context.Context) error {

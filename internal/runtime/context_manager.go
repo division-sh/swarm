@@ -336,8 +336,9 @@ type RuntimeContextDeactivationResult struct {
 type RuntimeContextManager struct {
 	mu                         sync.RWMutex
 	sourceSetMu                sync.Mutex
-	liveSelectionMu            sync.Mutex
+	liveSelectionMu            sync.RWMutex
 	availability               RunBundleAvailabilityReader
+	landingRuns                runtimerunlifecycle.LandingRunReader
 	contexts                   map[string]*runtimeContextEntry
 	order                      []string
 	primaryBundleHash          string
@@ -394,8 +395,10 @@ func NewRuntimeContextManager(availability RunBundleAvailabilityReader, contexts
 }
 
 func newRuntimeContextManagerState(availability RunBundleAvailabilityReader) *RuntimeContextManager {
+	landing, _ := availability.(runtimerunlifecycle.LandingRunReader)
 	return &RuntimeContextManager{
 		availability:               availability,
+		landingRuns:                landing,
 		contexts:                   map[string]*runtimeContextEntry{},
 		suppressedStandingServices: map[string]struct{}{},
 	}
@@ -2325,8 +2328,7 @@ func (p *PreparedRuntimeSourceSetTransition) publishCommittedVisibility() error 
 	return p.manager.publishRuntimeContextVisibilityLocked(updates...)
 }
 
-// Serialize the native selection and its post-ACK reconciliation, not preparation
-// or source-set replacement. Durable writers still enforce their own fences.
+// Fork preparation and selection are exclusive with inbound publication.
 func (m *RuntimeContextManager) BeginLiveRunSelection() func() {
 	m.liveSelectionMu.Lock()
 	return m.liveSelectionMu.Unlock
@@ -2356,6 +2358,13 @@ func (m *RuntimeContextManager) AcquireIngress(ctx context.Context, alias, provi
 	if m == nil {
 		return nil, RuntimeIngressContextLookup{State: RuntimeContextStateUnloaded, Cause: RuntimeContextCauseNotLoaded}, nil
 	}
+	m.liveSelectionMu.RLock()
+	releaseSelection := true
+	defer func() {
+		if releaseSelection {
+			m.liveSelectionMu.RUnlock()
+		}
+	}()
 	provider = strings.TrimSpace(provider)
 	m.mu.RLock()
 	defer m.mu.RUnlock()
@@ -2391,6 +2400,19 @@ func (m *RuntimeContextManager) AcquireIngress(ctx context.Context, alias, provi
 				return nil, lookup, nil
 			}
 			lookup.Context = entry.context
+			if m.landingRuns == nil {
+				return nil, lookup, fmt.Errorf("inbound requires the deployment landing-run reader")
+			}
+			landing, found, err := m.landingRuns.LoadLandingRun(ctx, runtimerunlifecycle.LiveRunScope{FlowPath: target.FlowPath})
+			if err != nil {
+				return nil, lookup, err
+			}
+			if !found || !landing.Source.Matches(entry.context.SourceArtifactFact) ||
+				(landing.State != runtimerunlifecycle.StateLive && landing.State != runtimerunlifecycle.StatePaused) {
+				lookup.State, lookup.Cause = RuntimeContextStateUnloaded, RuntimeContextCauseUnavailable
+				return nil, lookup, nil
+			}
+			lookup.Target.RunID = landing.RunID
 			use, err := m.acquireEntryLocked(ctx, entry)
 			if err != nil {
 				return nil, lookup, err
@@ -2407,6 +2429,14 @@ func (m *RuntimeContextManager) AcquireIngress(ctx context.Context, alias, provi
 			}
 			use.leases = []*worklifetime.Lease{use.lease, standingLease}
 			use.lease = nil
+			priorRelease := use.releaseAdmission
+			use.releaseAdmission = func() {
+				if priorRelease != nil {
+					priorRelease()
+				}
+				m.liveSelectionMu.RUnlock()
+			}
+			releaseSelection = false
 			return use, lookup, nil
 		}
 	}

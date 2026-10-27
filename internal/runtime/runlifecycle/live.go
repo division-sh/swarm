@@ -33,6 +33,16 @@ type LiveRunReader interface {
 	LoadRunLiveScope(context.Context, string) (LiveRunScope, error)
 }
 
+// LandingRun remains selected during pause; execution still uses LiveRunReader.
+type LandingRun struct {
+	LiveRun
+	State State
+}
+
+type LandingRunReader interface {
+	LoadLandingRun(context.Context, LiveRunScope) (LandingRun, bool, error)
+}
+
 type LiveRunConflictError struct {
 	Scope     LiveRunScope
 	LiveRunID string

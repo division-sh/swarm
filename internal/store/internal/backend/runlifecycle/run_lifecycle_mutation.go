@@ -472,6 +472,11 @@ func (m postgresRunLifecycleMutation) Create(
 	if !inserted {
 		return runtimerunlifecycle.MutationExactNoop, nil
 	}
+	if status == runtimerunlifecycle.StateLive {
+		if err := selectLandingRunTx(ctx, m.tx, request.RunID); err != nil {
+			return "", err
+		}
+	}
 	if err := mutationprotocol.InvalidateActiveRunSource(ctx, m.tx, request.RunID); err != nil {
 		return "", err
 	}
@@ -527,6 +532,11 @@ func (m sqliteRunLifecycleMutation) Create(
 	}
 	if rows == 0 {
 		return m.classifyCreateExisting(ctx, request)
+	}
+	if status == runtimerunlifecycle.StateLive {
+		if err := selectLandingRunTx(ctx, m.tx, request.RunID); err != nil {
+			return "", err
+		}
 	}
 	if err := mutationprotocol.InvalidateActiveRunSource(ctx, m.tx, request.RunID); err != nil {
 		return "", err
@@ -702,6 +712,11 @@ func (m postgresRunLifecycleMutation) TransitionActive(
 	if rows, rowsErr := result.RowsAffected(); rowsErr != nil || rows != 1 {
 		return "", errors.Join(fmt.Errorf("transition PostgreSQL run lifecycle affected %d rows", rows), rowsErr)
 	}
+	if request.State == runtimerunlifecycle.StateLive {
+		if err := selectLandingRunTx(ctx, m.tx, request.RunID); err != nil {
+			return "", err
+		}
+	}
 	if err := mutationprotocol.InvalidateActiveRunSource(ctx, m.tx, request.RunID); err != nil {
 		return "", err
 	}
@@ -754,6 +769,11 @@ func (m sqliteRunLifecycleMutation) TransitionActive(
 	}
 	if rows, rowsErr := result.RowsAffected(); rowsErr != nil || rows != 1 {
 		return "", errors.Join(fmt.Errorf("transition SQLite run lifecycle affected %d rows", rows), rowsErr)
+	}
+	if request.State == runtimerunlifecycle.StateLive {
+		if err := selectLandingRunTx(ctx, m.tx, request.RunID); err != nil {
+			return "", err
+		}
 	}
 	if err := mutationprotocol.InvalidateActiveRunSource(ctx, m.tx, request.RunID); err != nil {
 		return "", err

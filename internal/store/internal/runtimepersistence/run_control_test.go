@@ -33,8 +33,16 @@ func requireLiveRunControlSelection(t *testing.T, fixture runLifecycleCandidateP
 		RequestCompletionCandidate(context.Context, runtimerunlifecycle.CandidateRequest) (runtimerunlifecycle.CandidateRequestDisposition, error)
 	})
 	reader := fixture.store.(runtimerunlifecycle.LiveRunReader)
+	landingReader := fixture.store.(runtimerunlifecycle.LandingRunReader)
 	scope := runtimerunlifecycle.LiveRunScope{FlowPath: "."}
 	source, _ := runtimecorrelation.SourceArtifactFactFromContext(ctx)
+	requireLanding := func(runID string, state runtimerunlifecycle.State) {
+		t.Helper()
+		landing, found, err := landingReader.LoadLandingRun(ctx, scope)
+		if err != nil || !found || landing.RunID != runID || landing.State != state || !landing.Source.Matches(source) {
+			t.Fatalf("landing selection=%+v found=%v err=%v; want %s/%s", landing, found, err, runID, state)
+		}
+	}
 	first, second := uuid.NewString(), uuid.NewString()
 	request := runtimerunlifecycle.CreateRequest{RunID: first, Source: source, Origin: runtimerunlifecycle.DeploymentRunOrigin(), StartedAt: time.Now().UTC(), LiveScope: scope}
 	for _, invalid := range []string{"../source", "one//two", `one\two`, " first"} {
@@ -47,6 +55,7 @@ func requireLiveRunControlSelection(t *testing.T, fixture runLifecycleCandidateP
 	if _, err := owner.CreateRun(ctx, request); err != nil {
 		t.Fatalf("create live run: %v", err)
 	}
+	requireLanding(first, runtimerunlifecycle.StateLive)
 	if observed, err := reader.LoadRunLiveScope(ctx, first); err != nil || observed != scope {
 		t.Fatalf("live scope does not retain the admitted source flow: %+v %v", observed, err)
 	}
@@ -81,9 +90,11 @@ func requireLiveRunControlSelection(t *testing.T, fixture runLifecycleCandidateP
 	if _, err := owner.PauseRunControlOutcome(ctx, runtimeruncontrol.TransitionRequest{RunID: first}); err != nil {
 		t.Fatal(err)
 	}
+	requireLanding(first, runtimerunlifecycle.StatePaused)
 	if _, err := owner.CreateRun(ctx, request); err != nil {
 		t.Fatal(err)
 	}
+	requireLanding(second, runtimerunlifecycle.StateLive)
 	if _, err := owner.ContinueRunControlOutcome(ctx, runtimeruncontrol.TransitionRequest{RunID: first}); !errors.As(err, &conflict) || conflict.LiveRunID != second {
 		t.Fatalf("continue ignored its live sibling: %v", err)
 	}
@@ -93,6 +104,7 @@ func requireLiveRunControlSelection(t *testing.T, fixture runLifecycleCandidateP
 	if _, err := owner.ContinueRunControlOutcome(ctx, runtimeruncontrol.TransitionRequest{RunID: first}); err != nil {
 		t.Fatal(err)
 	}
+	requireLanding(first, runtimerunlifecycle.StateLive)
 	rollback := errors.New("rollback live switch")
 	err := runSelectedFixtureMutation(ctx, fixture.store, "live switch rollback", func(ctx context.Context, attempt *mutationprotocol.Attempt) error {
 		if previous, err := owner.SelectLiveRunTx(ctx, attempt, second, time.Now().UTC()); err != nil || previous != first {
@@ -103,6 +115,7 @@ func requireLiveRunControlSelection(t *testing.T, fixture runLifecycleCandidateP
 	if !errors.Is(err, rollback) {
 		t.Fatal(err)
 	}
+	requireLanding(first, runtimerunlifecycle.StateLive)
 	if live, found, err := reader.LoadLiveRun(ctx, scope); err != nil || !found || live.RunID != first {
 		t.Fatalf("rolled-back switch changed selection: %+v/%v/%v", live, found, err)
 	}
@@ -124,6 +137,7 @@ func requireLiveRunControlSelection(t *testing.T, fixture runLifecycleCandidateP
 	if live, found, err := reader.LoadLiveRun(ctx, scope); err != nil || !found || live.RunID != second {
 		t.Fatalf("committed switch lost selection: %+v/%v/%v", live, found, err)
 	}
+	requireLanding(second, runtimerunlifecycle.StateLive)
 	for runID, want := range map[string]bool{first: true, second: false} {
 		if blocked, err := owner.RunDispatchBlocked(ctx, runID); err != nil || blocked != want {
 			t.Fatalf("committed switch dispatch gate %s: blocked=%v, want %v; err=%v", runID, blocked, want, err)
@@ -153,6 +167,7 @@ func requireLiveRunControlSelection(t *testing.T, fixture runLifecycleCandidateP
 	if live, found, err := reader.LoadLiveRun(ctx, scope); err != nil || !found || live.RunID != third {
 		t.Fatalf("fork lost its inherited flow selection: %+v found=%v err=%v", live, found, err)
 	}
+	requireLanding(third, runtimerunlifecycle.StateLive)
 	for runID, want := range map[string]string{first: "paused", second: "paused", third: "live"} {
 		state, err := fixture.store.LoadRunLifecycleSnapshot(ctx, runID)
 		if err != nil || state.Status != want {
