@@ -96,17 +96,6 @@ func executeSelectedContractRunFork(ctx context.Context, req SelectedContractExe
 			return result, err
 		}
 	}
-	if req.LiveContexts != nil && req.LiveRuns != nil && req.SourceRunID != "" {
-		scope, err := req.LiveRuns.LoadRunLiveScope(ctx, req.SourceRunID)
-		if err != nil {
-			return out, err
-		}
-		if !scope.Empty() {
-			release := req.LiveContexts.BeginLiveRunSelection()
-			defer release()
-			req.liveSelectionHeld = true
-		}
-	}
 	prepared, err := req.Owner.prepareWithOperation(ctx, req, reserved)
 	if err != nil {
 		return SelectedContractExecutionResult{Owner: runfork.RunForkSelectedContractExecutionOwner}, err
