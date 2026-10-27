@@ -996,9 +996,13 @@ func TestFileRow2456DefaultBundleAndHeadPinReplayBothStores(t *testing.T) {
 			f.topology.completeSources = []semanticview.Source{oldSource, f.source}
 			retireNotifyAllChildrenRuntimeForReplacement(t, oldRuntime)
 			f.boot(t)
-			retained := *f
-			retained.source = oldSource
-			retained.ctx = testAuthorActivityContextForBundle(context.Background(), oldRuntime.sourceArtifactFact)
+			retained := &deploymentResourceFixture{
+				selected: f.selected, db: f.db, postgresDSN: f.postgresDSN,
+				source: oldSource, topology: f.topology,
+				ctx:    testAuthorActivityContextForBundle(context.Background(), oldRuntime.sourceArtifactFact),
+				config: f.config, forkAgents: f.forkAgents,
+			}
+			retained.forkRequest.Store(f.forkRequest.Load())
 			retained.boot(t)
 			oldRuntime = retained.runtime
 			server = textFileTwoBundleOperator2456(t, f, oldSource, oldRuntime)
