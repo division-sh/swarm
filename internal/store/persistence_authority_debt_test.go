@@ -946,6 +946,11 @@ func debtValidateCollectorIdentity(base, current string, trusted, head authority
 	if base == current && trusted.Collector == current && head.Collector == current {
 		return nil
 	}
+	if base == debtCompletedSelectedFixturePinCollectorTo && trusted.Collector == base &&
+		current == debtW3LandedFixtureCollectorTo && reviewedTransition == current && head.Collector == current &&
+		debtSitesEqual(head.Sites, trusted.Sites) {
+		return nil // #2728/6449928830: same 22 W4 identities on their already-landed source.
+	}
 	if base == debtSelectedFixtureComposedCollectorTo && trusted.Collector == base &&
 		current == debtSelectedFixtureLandedCollectorTo && head.Collector == current &&
 		debtSitesEqual(head.Sites, trusted.Sites) {
@@ -1257,13 +1262,15 @@ func debtW4LiveFixtureComparisons(actual, head, base, source map[string]authorit
 	compositionAllowed := actual[mockReturn.identity()] == mockReturn && source[mockReturn.identity()] == mockReturn
 	for _, site := range composition {
 		compositionAllowed = compositionAllowed && actual[site.identity()] == site &&
-			source[site.identity()].Multiplicity == 0 && base[site.identity()].Multiplicity == 0
+			(source[site.identity()].Multiplicity == 0 || source[site.identity()] == site) && base[site.identity()].Multiplicity == 0
 	}
 	for _, pair := range pairs {
 		old, current := pair[0], pair[1]
+		beforeTransfer := source[old.identity()] == old && source[current.identity()].Multiplicity == 0
+		landedTransfer := source[current.identity()] == current && source[old.identity()].Multiplicity == 0
 		if actual[current.identity()] == current && actual[old.identity()].Multiplicity == 0 &&
-			base[old.identity()] == old && source[old.identity()] == old &&
-			base[current.identity()].Multiplicity == 0 && source[current.identity()].Multiplicity == 0 {
+			base[old.identity()] == old && base[current.identity()].Multiplicity == 0 &&
+			(beforeTransfer || landedTransfer) {
 			head = debtForwardQuiescenceUncertainty(head, old, current)
 			base = debtForwardQuiescenceUncertainty(base, old, current)
 			source = debtForwardQuiescenceUncertainty(source, old, current)
