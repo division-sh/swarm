@@ -92,6 +92,54 @@ func WithRuntimeMutationAuthority(ctx context.Context, grant GenerationGrant) (c
 	return ctx, nil
 }
 
+// WithLentOrdinaryMutationAuthority lends only this frozen process's own grant
+// to one call, preserving the parent transaction's ordering and custody.
+func WithLentOrdinaryMutationAuthority(ctx context.Context, grant any, use func(context.Context) error) error {
+	if ctx == nil || use == nil {
+		return ErrMutationAuthorityMissing
+	}
+	original, frozen := ctx.Value(mutationAuthorityContextKey{}).(MutationAuthority)
+	var target *generationGrant
+	switch grant := grant.(type) {
+	case *liveGenerationGrant:
+		if grant != nil {
+			target = grant.generationGrant
+		}
+	case *generationGrant:
+		target = grant
+	}
+	if !frozen || original.grant != nil || target == nil || target.owner == nil || target.owner != original.owner {
+		return errors.New("runtime mutation cannot replace its original generation owner")
+	}
+	if err := original.Validate(); err != nil {
+		return err
+	}
+	evidence, err := target.Evidence()
+	if err != nil {
+		return err
+	}
+	if evidence.State != GrantAdmitted || evidence.SelectedFork != nil {
+		return errors.New("lent mutation requires an admitted ordinary generation grant")
+	}
+	source, err := correlation.NewSourceArtifactFact(evidence.BundleHash)
+	if err != nil {
+		return err
+	}
+	lent := context.WithValue(ctx, mutationAuthorityContextKey{}, MutationAuthority{
+		owner: original.owner, grant: target, process: original.process, evidence: evidence,
+	})
+	lent = correlation.WithRuntimeInstanceID(lent, evidence.RuntimeInstanceID)
+	lent = correlation.WithSourceArtifactFact(lent, source)
+	lent = authoractivity.WithScope(lent, authoractivity.BundleScope(evidence.RuntimeInstanceID, evidence.BundleHash))
+	lent = WithGenerationGrantEvidence(lent, evidence)
+	// Ordinary run-level mutation has no agent-turn effects authority.
+	lent = effects.WithAuthority(lent, effects.Authority{})
+	if _, err := CaptureMutationAuthority(lent); err != nil {
+		return err
+	}
+	return use(lent)
+}
+
 // CaptureMutationAuthority freezes one command's facts. Every native retry
 // consumes this same value rather than recapturing a later grant state.
 func CaptureMutationAuthority(ctx context.Context) (MutationAuthority, error) {

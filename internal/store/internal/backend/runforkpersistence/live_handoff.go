@@ -29,7 +29,7 @@ type selectedHandoffEffectOwner interface {
 // immutable ACK and transfer. None of them requires fictional run terminality.
 func commitSelectedLiveHandoffTx(ctx context.Context, tx *sql.Tx, attempt *mutationprotocol.Attempt, evidence runForkSelectedContractActivationEvidence,
 	selectLive func(context.Context, *mutationprotocol.Attempt, string, time.Time) (string, error),
-	effectOwner selectedHandoffEffectOwner, deliveries *storedelivery.Adapter, sqlite bool,
+	effectOwner selectedHandoffEffectOwner, deliveries *storedelivery.Adapter, candidates mutationprotocol.CandidateWriter, sqlite bool,
 ) (string, error) {
 	grant, present := startupownership.GenerationGrantEvidenceFromContext(ctx)
 	if !present {
@@ -103,6 +103,12 @@ func commitSelectedLiveHandoffTx(ctx context.Context, tx *sql.Tx, attempt *mutat
 	}
 	if unfinished != 0 {
 		return "", errors.New("live handoff awaits canonical pipeline acknowledgement")
+	}
+	if err := startupownership.WithLentOrdinaryMutationAuthority(ctx, evidence.request.OrdinaryGenerationGrant, func(ordinary context.Context) error {
+		_, err := attempt.RequestCompletion(ordinary, candidates, evidence.lineage.ForkRunID, nil)
+		return err
+	}); err != nil {
+		return "", err
 	}
 	return sourceStatus, nil
 }

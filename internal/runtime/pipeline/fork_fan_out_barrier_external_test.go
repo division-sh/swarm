@@ -35,8 +35,6 @@ import (
 
 type forkBarrierCompletionProbe struct {
 	*lifecycleprobe.Probe
-	completed chan string
-	once      sync.Once
 	claimed   chan forkEngineObservation
 	claimOnce sync.Once
 	mu        sync.Mutex
@@ -50,9 +48,6 @@ func (p *forkBarrierCompletionProbe) NotifyLifecycle(ctx context.Context, signal
 	p.mu.Unlock()
 	if signal.Kind == lifecycleprobe.DeliveryStatusChanged && signal.EventType == "producer/work.ready" && signal.Status == "in_progress" {
 		p.claimOnce.Do(func() { p.claimed <- forkEngineObservation{ctx: ctx, id: signal.EventID} })
-	}
-	if signal.Kind == lifecycleprobe.DeliveryStatusChanged && signal.EventType == "producer/batch.completed" && signal.Status == "delivered" {
-		p.once.Do(func() { p.completed <- signal.EventID })
 	}
 }
 
@@ -78,7 +73,7 @@ func TestIssue642FanOutBarrierFrontierBothStores(t *testing.T) {
 					t.Fatal(err)
 				}
 				sourceProbe := &mixedFanOutSourceProbe{runID: runID, receiver: consumer.Key(), history: lifecycleprobe.New(),
-					claimed: make(chan forkEngineObservation, 1), cut: make(chan string, 1), resume: make(chan struct{})}
+					claimed: make(chan forkEngineObservation, 1), completed: make(chan forkEngineObservation, 1), cut: make(chan string, 1), resume: make(chan struct{})}
 				root := canonicalrouting.CopyForkFanOutBarrierReceiver(t)
 				rt, selected, repo, capability, _, _ := startForkEngineRuntimeOwner(t, backend, root, sourceProbe)
 				var sourceRelease sync.Once
@@ -142,6 +137,14 @@ func TestIssue642FanOutBarrierFrontierBothStores(t *testing.T) {
 				// Preserve the unfinished historical cut, then join the source's
 				// deliberately held claim before requesting its live replacement.
 				sourceRelease.Do(func() { close(sourceProbe.resume) })
+				select {
+				case completed := <-sourceProbe.completed:
+					if claim, ok := deliverylifecycle.ClaimFromContext(completed.ctx); !ok || claim.RunID() != runID {
+						t.Fatal("source barrier outcome belongs to another run")
+					}
+				case <-phase.Done():
+					t.Fatal(phase.Err())
+				}
 				waitForkEngineCompletion(t, storetest.DatabaseForTest(selected.RuntimeDeps().EventStore), runID)
 				sourceRoot := mixedFanOutEntity(t, plan, runID)
 				beforeSource, err := selected.Entities().LoadOperatorEntity(phase, sourceRoot.EntityID, runID)
@@ -157,7 +160,7 @@ func TestIssue642FanOutBarrierFrontierBothStores(t *testing.T) {
 				if err != nil {
 					t.Fatal(err)
 				}
-				probe := &forkBarrierCompletionProbe{Probe: lifecycleprobe.New(), completed: make(chan string, 1), claimed: make(chan forkEngineObservation, 1)}
+				probe := &forkBarrierCompletionProbe{Probe: lifecycleprobe.New(), claimed: make(chan forkEngineObservation, 1)}
 				result, err := family.Execute(phase, forkEngineLiveRequest(t, rt, selected, runforkexecution.SelectedContractExecutionRequest{
 					SourceRunID: runID, At: cutID, ExpectedBundleHash: rt.Options.SourceArtifactFact.BundleHash(), AllowSourceFreeze: true,
 					SourceLoader:      runforkexecution.SourceArtifactSelectedContractSourceLoader{RepoRoot: repo, Store: selected.SourceArtifactStore()},
@@ -188,10 +191,19 @@ func TestIssue642FanOutBarrierFrontierBothStores(t *testing.T) {
 					claim.RunID() != proof.ForkRunID || observed.id == sourceClaim.id {
 					t.Fatal("barrier continuation reused source execution authority")
 				}
-				var completedID string
+				var completed forkEngineObservation
 				select {
-				case completedID = <-probe.completed:
+				case completed = <-sourceProbe.completed:
 				case <-phase.Done():
+					t.Fatal(phase.Err())
+				}
+				finalClaim, finalClaimed := deliverylifecycle.ClaimFromContext(completed.ctx)
+				if !finalClaimed || finalClaim.RunID() != proof.ForkRunID {
+					t.Fatal("barrier outcome reused another run's delivery")
+				}
+				final, err := sourceProbe.history.Wait(phase, lifecycleprobe.Signal{Kind: lifecycleprobe.DeliveryStatusChanged,
+					EventID: completed.id, EventType: "producer/batch.completed", SubscriberType: "node", SubscriberID: finalConsumer.Key(), Status: "delivered"})
+				if err != nil {
 					probe.mu.Lock()
 					t.Logf("child lifecycle evidence: %+v", probe.history)
 					probe.mu.Unlock()
@@ -201,11 +213,6 @@ func TestIssue642FanOutBarrierFrontierBothStores(t *testing.T) {
 					t.Logf("child durable evidence: run=%s fanout=%+v deliveries=%+v quiescence=%+v read_error=%v",
 						report.RunTableStatus, report.FanOut, report.Deliveries, report.TestQuiescence, readErr)
 					t.Fatalf("selected barrier did not publish its outcome: %v", phase.Err())
-				}
-				final, err := probe.Wait(phase, lifecycleprobe.Signal{Kind: lifecycleprobe.DeliveryStatusChanged,
-					EventID: completedID, SubscriberType: "node", SubscriberID: finalConsumer.Key(), Status: "delivered"})
-				if err != nil {
-					t.Fatalf("selected barrier did not reach its real final consumer: %v", err)
 				}
 				child, err := selected.Entities().LoadOperatorEntity(phase, proof.ForkRunID, proof.ForkRunID)
 				if err != nil || child.Fields["completed_total"] != json.Number("1") || forkFixtureEntityRevision(t, child.Entity.Revision) != 2 {

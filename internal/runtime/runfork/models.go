@@ -1403,16 +1403,17 @@ type RunForkSelectedContractAgentTopology struct {
 }
 
 type RunForkSelectedContractExecutionActivateRequest struct {
-	InheritedSchedules    InheritedScheduleSelection `json:"-"`
-	ForkOperation         *ForkOperationRequest
-	ExecutedEventCount    int
-	DataPins              []durabledata.Pin
-	ExecutionSource       semanticview.Source
-	ForkRunID             string
-	AllowedSourceEventIDs []string
-	FrontierAdmission     RunForkContractFrontierAdmission
-	RouteTopology         RunForkSelectedContractRouteTopology
-	RecipientPlanning     RunForkSelectedContractRecipientPlanning
+	InheritedSchedules      InheritedScheduleSelection `json:"-"`
+	OrdinaryGenerationGrant any                        `json:"-"`
+	ForkOperation           *ForkOperationRequest
+	ExecutedEventCount      int
+	DataPins                []durabledata.Pin
+	ExecutionSource         semanticview.Source
+	ForkRunID               string
+	AllowedSourceEventIDs   []string
+	FrontierAdmission       RunForkContractFrontierAdmission
+	RouteTopology           RunForkSelectedContractRouteTopology
+	RecipientPlanning       RunForkSelectedContractRecipientPlanning
 }
 
 type RunForkSelectedContractSourceEvent struct {

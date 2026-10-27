@@ -221,7 +221,11 @@ func (c selectedContractForkLocalRuntimeContainer) activateLive(p *PreparedSelec
 		return out, err
 	}
 	req.LiveRuntime = target
-	evidence, err := req.LiveRuntime.CurrentStartupGrantEvidence()
+	ordinaryGrant, err := req.LiveRuntime.CurrentStartupGrant()
+	if err != nil {
+		return out, err
+	}
+	evidence, err := ordinaryGrant.Evidence()
 	if err != nil {
 		return out, err
 	}
@@ -258,7 +262,8 @@ func (c selectedContractForkLocalRuntimeContainer) activateLive(p *PreparedSelec
 		}
 	}
 	activation, err := c.activate(ctx, runfork.RunForkSelectedContractExecutionActivateRequest{
-		InheritedSchedules: p.readiness, ForkOperation: p.forkOperation, DataPins: result.Materialization.DataPins,
+		OrdinaryGenerationGrant: ordinaryGrant,
+		InheritedSchedules:      p.readiness, ForkOperation: p.forkOperation, DataPins: result.Materialization.DataPins,
 		ExecutionSource: p.loadedSource.Source, ForkRunID: result.Materialization.ForkRunID,
 		AllowedSourceEventIDs: selectedContractExecutionFrontierEventIDs(p.frontier.FrontierEvents),
 		FrontierAdmission:     p.frontier, RouteTopology: p.routeTopology, RecipientPlanning: *p.model.RecipientPlanning,

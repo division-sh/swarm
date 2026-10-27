@@ -426,7 +426,7 @@ func postgresRunForkSelectedContractActivationPort(s *RunForkPostgresOwner) runF
 			return requireExactMaterializedRunForkDeploymentFeeds(ctx, tx, true, evidence.lineage.ForkRunID, evidence.lineage.ForkBundleHash, s.durableData, evidence.plan, evidence.request.DataPins)
 		},
 		liveHandoff: func(ctx context.Context, tx *sql.Tx, attempt *mutationprotocol.Attempt, evidence runForkSelectedContractActivationEvidence) (string, error) {
-			return commitSelectedLiveHandoffTx(ctx, tx, attempt, evidence, s.RunLifecyclePostgresOwner.SelectLiveRunTx, s.EffectPostgresOwner, postgresDeliveryAdapter, false)
+			return commitSelectedLiveHandoffTx(ctx, tx, attempt, evidence, s.RunLifecyclePostgresOwner.SelectLiveRunTx, s.EffectPostgresOwner, postgresDeliveryAdapter, s.RunLifecyclePostgresOwner, false)
 		},
 	}
 }
@@ -470,7 +470,7 @@ func sqliteRunForkSelectedContractActivationPort(s *RunForkSQLiteOwner) runForkS
 			return requireExactMaterializedRunForkDeploymentFeeds(ctx, tx, false, evidence.lineage.ForkRunID, evidence.lineage.ForkBundleHash, s.durableData, evidence.plan, evidence.request.DataPins)
 		},
 		liveHandoff: func(ctx context.Context, tx *sql.Tx, attempt *mutationprotocol.Attempt, evidence runForkSelectedContractActivationEvidence) (string, error) {
-			return commitSelectedLiveHandoffTx(ctx, tx, attempt, evidence, s.RunLifecycleSQLiteOwner.SelectLiveRunTx, s.EffectSQLiteOwner, sqliteDeliveryAdapter, true)
+			return commitSelectedLiveHandoffTx(ctx, tx, attempt, evidence, s.RunLifecycleSQLiteOwner.SelectLiveRunTx, s.EffectSQLiteOwner, sqliteDeliveryAdapter, s.RunLifecycleSQLiteOwner, true)
 		},
 	}
 }

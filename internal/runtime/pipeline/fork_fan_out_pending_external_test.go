@@ -35,6 +35,7 @@ type mixedFanOutSourceProbe struct {
 	runID, receiver string
 	history         *lifecycleprobe.Probe
 	claimed         chan forkEngineObservation
+	completed       chan forkEngineObservation
 	cut             chan string
 	resume          chan struct{}
 	once, cutOnce   sync.Once
@@ -42,6 +43,11 @@ type mixedFanOutSourceProbe struct {
 
 func (p *mixedFanOutSourceProbe) NotifyLifecycle(ctx context.Context, signal lifecycleprobe.Signal) {
 	p.history.NotifyLifecycle(ctx, signal)
+	if p.completed != nil && signal.Kind == lifecycleprobe.DeliveryStatusChanged && signal.EventType == "producer/batch.completed" && signal.Status == "delivered" {
+		if _, ok := deliverylifecycle.ClaimFromContext(ctx); ok {
+			p.completed <- forkEngineObservation{ctx: ctx, id: signal.EventID}
+		}
+	}
 	if signal.Kind == lifecycleprobe.EventPersisted && signal.EventType == "work.cut" {
 		p.cutOnce.Do(func() { p.cut <- signal.EventID })
 	}
