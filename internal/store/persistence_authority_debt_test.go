@@ -305,7 +305,34 @@ func debtRunFixtureSignatureComparisons(actual, head, base, source map[string]au
 			base = debtForwardQuiescenceUncertainty(base, old, current)
 		}
 	}
+	// #2807/6456279584: this one pair is predecessor-source-only, not a selected-fixture landed-source extension.
+	old, current := debtCatalogRuntimeRowsSignatureTransition()
+	for _, state := range []map[string]authorityDebtSite{actual, head, base, source} {
+		if state[old.identity()].Multiplicity > 0 && state[current.identity()].Multiplicity > 0 {
+			return head, base, source, []string{"both reviewed catalog runtime-row signatures survive: " + old.Declaration}
+		}
+	}
+	if actual[current.identity()] == current && actual[old.identity()].Multiplicity == 0 &&
+		base[old.identity()] == old && base[current.identity()].Multiplicity == 0 &&
+		source[old.identity()] == old && source[current.identity()].Multiplicity == 0 {
+		head = debtForwardQuiescenceUncertainty(head, old, current)
+		base = debtForwardQuiescenceUncertainty(base, old, current)
+		source = debtForwardQuiescenceUncertainty(source, old, current)
+	}
 	return head, base, source, nil
+}
+
+func debtCatalogRuntimeRowsSignatureTransition() (authorityDebtSite, authorityDebtSite) {
+	old := authorityDebtSite{
+		Kind: "raw-operation", File: "internal/runtime/cataloge2e/tier12_runtime_fork_e2e_test.go",
+		Declaration: "TestTier12RuntimeFork_SelectedContractForkExecutionFixture",
+		Operation:   "call:github.com/division-sh/swarm/internal/runtime/cataloge2e.assertSelectedContractForkRuntimeRows",
+		Resolved:    "func=func(t testing.TB, db *database/sql.DB, forkRunID string, forkEventID string)|recv=<nil>|arg=*testing.T|arg=*database/sql.DB|arg=string|arg=string|results=()",
+		Family:      "lifecycle", Replacement: "selected run lifecycle/candidate/source owner and bounded lifecycle observation", Multiplicity: 1,
+	}
+	current := old
+	current.Resolved = "func=func(t testing.TB, db *database/sql.DB, instances github.com/division-sh/swarm/internal/runtime/pipeline.WorkflowInstancePersistenceReader, forkRunID string, forkEventID string)|recv=<nil>|arg=*testing.T|arg=*database/sql.DB|arg=*github.com/division-sh/swarm/internal/store.PostgresStore|arg=string|arg=string|results=()"
+	return old, current
 }
 
 func debtQuiescenceUncertaintyTransition() (authorityDebtSite, authorityDebtSite) {
