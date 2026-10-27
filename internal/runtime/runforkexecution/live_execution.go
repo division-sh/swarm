@@ -215,6 +215,11 @@ func (c selectedContractForkLocalRuntimeContainer) activateLive(p *PreparedSelec
 	if err := runtime.stopExecutionWork(); err != nil {
 		return out, err
 	}
+	return c.activateLiveHandoff(p, req, out)
+}
+
+func (c selectedContractForkLocalRuntimeContainer) activateLiveHandoff(p *PreparedSelectedFork, req SelectedContractExecutionRequest, result SelectedContractExecutionResult) (out SelectedContractExecutionResult, finalErr error) {
+	out = result
 	target, use, err := p.acquireOrdinaryLiveTarget(req)
 	if use != nil {
 		defer func() { finalErr = errors.Join(finalErr, use.Done()) }()

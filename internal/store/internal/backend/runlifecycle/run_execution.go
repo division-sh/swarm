@@ -184,14 +184,7 @@ func requireRunExecutionTx(ctx context.Context, tx *sql.Tx, postgres bool, runID
 			return err
 		}
 		if handedOff {
-			original, err := startupownership.CaptureMutationAuthority(ctx)
-			if err != nil || !original.HasRuntimeGrant() {
-				return errors.Join(err, fmt.Errorf("%w: live handoff requires its ordinary generation grant", runtimerunlifecycle.ErrRunExecutionAuthority))
-			}
-			if evidence, present := startupownership.GenerationGrantEvidenceFromContext(ctx); present && !reflect.DeepEqual(evidence, original.GrantEvidence()) {
-				return fmt.Errorf("%w: live handoff grant evidence differs from its original owner", runtimerunlifecycle.ErrRunExecutionAuthority)
-			}
-			return generationauthority.RequireAdmittedOrdinaryGrantTx(ctx, tx, original.GrantEvidence(), fact.BundleHash(), !postgres)
+			return requireLiveHandoffGrantTx(ctx, tx, postgres, fact)
 		}
 	}
 	if state != runtimerunlifecycle.StateRunning {
@@ -207,6 +200,17 @@ func requireRunExecutionTx(ctx context.Context, tx *sql.Tx, postgres bool, runID
 		}
 	}
 	return requireSelectedRunAuthorityTx(ctx, tx, runID, fact.BundleHash(), owner)
+}
+
+func requireLiveHandoffGrantTx(ctx context.Context, tx *sql.Tx, postgres bool, fact runtimecorrelation.SourceArtifactFact) error {
+	original, err := startupownership.CaptureMutationAuthority(ctx)
+	if err != nil || !original.HasRuntimeGrant() {
+		return errors.Join(err, fmt.Errorf("%w: live handoff requires its ordinary generation grant", runtimerunlifecycle.ErrRunExecutionAuthority))
+	}
+	if evidence, present := startupownership.GenerationGrantEvidenceFromContext(ctx); present && !reflect.DeepEqual(evidence, original.GrantEvidence()) {
+		return fmt.Errorf("%w: live handoff grant evidence differs from its original owner", runtimerunlifecycle.ErrRunExecutionAuthority)
+	}
+	return generationauthority.RequireAdmittedOrdinaryGrantTx(ctx, tx, original.GrantEvidence(), fact.BundleHash(), !postgres)
 }
 
 func executionRunState(ctx context.Context, q sourceadmission.RowQueryer, postgres bool, runID string) (runtimerunlifecycle.State, error) {

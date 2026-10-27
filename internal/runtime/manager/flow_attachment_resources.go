@@ -72,7 +72,7 @@ func (am *AgentManager) reconcileDynamicFlowAgentSet(
 		}
 		removedIdentities := make(map[runtimeagentidentity.Identity]struct{})
 		for identity := range persisted {
-			if selectedRootReadiness && identity.Route.Presence == runtimeagentidentity.RouteRoot {
+			if !flowReadinessOwnsAgentIdentity(identity, selectedRootReadiness) {
 				continue
 			}
 			if _, ok := expectedIdentities[identity]; !ok {
@@ -84,7 +84,7 @@ func (am *AgentManager) reconcileDynamicFlowAgentSet(
 			if err != nil {
 				return err
 			}
-			if !flowIdentity.MatchesAgentRoute(identity) || (selectedRootReadiness && identity.Route.Presence == runtimeagentidentity.RouteRoot) {
+			if !flowReadinessMatchesAgentIdentity(flowIdentity, identity, selectedRootReadiness) {
 				continue
 			}
 			if _, ok := expectedIdentities[identity]; !ok {
@@ -273,7 +273,7 @@ func (am *AgentManager) verifyDynamicFlowAgents(
 			if err != nil {
 				return err
 			}
-			if flowIdentity.MatchesAgentRoute(identity) && (!selectedRootReadiness || identity.Route.Presence != runtimeagentidentity.RouteRoot) {
+			if flowReadinessMatchesAgentIdentity(flowIdentity, identity, selectedRootReadiness) {
 				persistedByIdentity[identity] = rec
 			}
 		}
@@ -284,7 +284,7 @@ func (am *AgentManager) verifyDynamicFlowAgents(
 		if err != nil {
 			return err
 		}
-		if flowIdentity.MatchesAgentRoute(identity) && (!selectedRootReadiness || identity.Route.Presence != runtimeagentidentity.RouteRoot) {
+		if flowReadinessMatchesAgentIdentity(flowIdentity, identity, selectedRootReadiness) {
 			processByIdentity[identity] = cfg
 		}
 	}
@@ -338,6 +338,14 @@ func (am *AgentManager) verifyDynamicFlowAgents(
 		}
 	}
 	return nil
+}
+
+func flowReadinessOwnsAgentIdentity(identity runtimeagentidentity.Identity, selectedRootReadiness bool) bool {
+	return !selectedRootReadiness || identity.Route.Presence != runtimeagentidentity.RouteRoot
+}
+
+func flowReadinessMatchesAgentIdentity(flowIdentity runtimeflowidentity.RunScopedFlowInstance, identity runtimeagentidentity.Identity, selectedRootReadiness bool) bool {
+	return flowIdentity.MatchesAgentRoute(identity) && flowReadinessOwnsAgentIdentity(identity, selectedRootReadiness)
 }
 
 func (am *AgentManager) flowReadinessOwnedAgentRecords(plan runtimepipeline.DynamicFlowRuntimeReadinessPlan, source semanticview.Source, records []PersistedAgent) ([]PersistedAgent, bool, error) {
