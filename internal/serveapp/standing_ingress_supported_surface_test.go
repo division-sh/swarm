@@ -468,7 +468,7 @@ func assertServedStandingInvalidChildCommands(t *testing.T, backend servedparity
 	if err := transition.Wait(ctx); err != nil {
 		t.Fatal(err)
 	}
-	refuse("fenced", "active", "running")
+	refuse("fenced", "active", "live")
 	if err := transition.Restore(ctx); err != nil {
 		t.Fatal(err)
 	}
@@ -491,7 +491,7 @@ func assertServedStandingInvalidChildCommands(t *testing.T, backend servedparity
 	if err != nil || resumed.CommittedMutation != runtimerunlifecycle.MutationApplied {
 		t.Fatalf("create explicit durable active/missing-child counterexample: result=%+v err=%v", resumed, err)
 	}
-	refuse("active-missing", "active", "running")
+	refuse("active-missing", "active", "live")
 }
 
 func waitForServedStandingFence(t *testing.T, owner worklifetime.Occurrence) {
