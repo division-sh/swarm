@@ -40,10 +40,19 @@ func TestBundleUpgradeAdmissionPreservesLiveWorkBothStores(t *testing.T) {
 	candidateFiles["schema.yaml"] = strings.Replace(files["schema.yaml"], "  removed: {every: 1h, emit: clock.removed}\n", "", 1)
 	candidateFiles["review/schema.yaml"] = strings.Replace(files["review/schema.yaml"], "  pending:\n    timers:\n      - {id: pending.timeout, after: 1h, emit: timer.elapsed}", "  pending: {}", 1)
 	for _, backend := range []string{"sqlite", "postgres"} {
-		for _, paused := range []bool{false, true} {
+		for _, scenario := range []struct{ paused, retainedTimer bool }{{}, {paused: true}, {retainedTimer: true}, {paused: true, retainedTimer: true}} {
+			paused, retainedTimer := scenario.paused, scenario.retainedTimer
+			selectedFiles := maps.Clone(candidateFiles)
+			if retainedTimer {
+				selectedFiles["review/schema.yaml"] = strings.ReplaceAll(strings.Replace(files["review/schema.yaml"], "after: 1h", "after: 2h", 1), "timer.elapsed", "timer.changed")
+				selectedFiles["review/events.yaml"] = files["review/events.yaml"] + "timer.changed:\n"
+			}
 			name := backend + "/live"
 			if paused {
 				name = backend + "/parked"
+			}
+			if retainedTimer {
+				name += "/retained_successor"
 			}
 			t.Run(name, func(t *testing.T) {
 				f := newReceiverConfigActivationFixtureWithDocuments(t, backend, false, files, nil)
@@ -98,7 +107,7 @@ func TestBundleUpgradeAdmissionPreservesLiveWorkBothStores(t *testing.T) {
 						t.Fatal(err)
 					}
 				}
-				candidate := loadLifecyclePersistenceFixtureForTest(t, candidateFiles)
+				candidate := loadLifecyclePersistenceFixtureForTest(t, selectedFiles)
 				view := semanticview.Wrap(candidate)
 				prepared, err := runbundle.AdmitPinnedSources(f.ctx, reader, view, load)
 				if err != nil {
@@ -227,6 +236,20 @@ func TestBundleUpgradeAdmissionPreservesLiveWorkBothStores(t *testing.T) {
 				if paused {
 					if availability.BundleHash != f.bundle.SourceArtifact.BundleHash() || !reflect.DeepEqual(timer, beforeTimer) {
 						t.Fatal("upgrade changed a parked run or its timer hold")
+					}
+				} else if retainedTimer {
+					selected, err := pipeline.SelectWorkflowTimerSuccessor(semanticview.Wrap(f.bundle), view, beforeTimer, activation.Instance)
+					if err != nil || selected == nil || selected.Ref.ActivationID == beforeTimer.Ref.ActivationID {
+						t.Fatalf("changed retained timer lacks a distinct successor: %+v, %v", selected, err)
+					}
+					successor, found, err := timerReader.LoadWorkflowTimerActivation(original, selected.Ref.ActivationID)
+					if err != nil || !found || !reflect.DeepEqual(successor, *selected) || !successor.FireAt.Equal(beforeTimer.CreatedAt.Add(2*time.Hour)) {
+						t.Fatalf("successor did not preserve its original cause: %+v, found=%t err=%v", successor, found, err)
+					}
+					expected := beforeTimer
+					expected.Status = "cancelled"
+					if availability.BundleHash != candidate.SourceArtifact.BundleHash() || !reflect.DeepEqual(timer, expected) {
+						t.Fatalf("successor rewrote its predecessor or lost uncaused cancellation: %+v", timer)
 					}
 				} else if availability.BundleHash != candidate.SourceArtifact.BundleHash() || timer.Status != "cancelled" || timer.CancelCause != pipeline.WorkflowTimerCancelCauseRuleRemoved || timer.CancelledAt.IsZero() || timer.SourceTimerID != "" || !timer.FireAt.Equal(beforeTimer.FireAt) {
 					t.Fatalf("timer and run did not switch atomically: run=%+v timer=%+v", availability, timer)

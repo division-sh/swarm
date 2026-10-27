@@ -25,6 +25,7 @@ import (
 	"github.com/division-sh/swarm/internal/runtime/executionposture"
 	runtimefailures "github.com/division-sh/swarm/internal/runtime/failures"
 	"github.com/division-sh/swarm/internal/runtime/semanticview"
+	"github.com/google/uuid"
 )
 
 type workflowTimerCauseKind string
@@ -673,6 +674,35 @@ func SelectInheritedWorkflowTimer(
 		return nil, fmt.Errorf("validate selected inherited workflow timer: %w", err)
 	}
 	return &projected, nil
+}
+
+// A source upgrade replaces a changed arm; it never rewrites its accepted row.
+func SelectWorkflowTimerSuccessor(current, selected semanticview.Source, activation WorkflowTimerActivation, instance WorkflowInstance) (*WorkflowTimerActivation, error) {
+	projected, err := SelectInheritedWorkflowTimer(selected, activation, instance)
+	if err != nil || projected == nil || projected.Ref.DeclarationRevision == activation.Ref.DeclarationRevision {
+		return projected, err
+	}
+	declaration, _ := workflowTimerDeclarationForInstance(selected, instance, activation.Ref.DeclarationKey)
+	interval := workflowTimerDuration(declaration, workflowTimerPolicy(selected, declaration.OwningFlowID()))
+	if interval <= 0 {
+		return nil, fmt.Errorf("workflow timer successor has no executable positive delay")
+	}
+	projected.Ref.ActivationID = uuid.NewSHA1(uuid.MustParse(activation.Ref.ActivationID), []byte(projected.Ref.DeclarationRevision)).String()
+	if activation.Ref.Cause == timeridentity.WorkflowTimerActivationCauseInitial && activation.SourceTimerID == "" {
+		stage := current.FlowInitialStage(instance.WorkflowName)
+		arm, err := workflowTimerActivationForCause(selected, activation.RunID, activation.EntityID, activation.Route, declaration, activation.Ref.Generation,
+			workflowTimerCause{Kind: workflowTimerCauseInitial, EventType: "state:" + stage, ToState: stage, OccurredAt: activation.armedAt(), ExecutionMode: activation.ExecutionMode}, interval)
+		if err != nil {
+			return nil, err
+		}
+		projected.Ref.ActivationID = arm.Ref.ActivationID
+	}
+	projected.FireAt = canonicalWorkflowTimerTime(activation.armedAt().Add(interval))
+	projected.Recurring, projected.RecurrenceInterval = declaration.Recurring, 0
+	if declaration.Recurring {
+		projected.RecurrenceInterval = interval
+	}
+	return projected, projected.Validate()
 }
 
 func validateWorkflowTimerTopology(source semanticview.Source, timer runtimecontracts.WorkflowTimerContract) error {

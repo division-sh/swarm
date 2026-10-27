@@ -72,7 +72,7 @@ func commitBundleUpgrade(ctx context.Context, attempt *mutationprotocol.Attempt,
 			return err
 		}
 		for _, runID := range slices.Sorted(maps.Keys(fresh.Runs)) {
-			if err := cancelRemovedUpgradeTimers(ctx, tx, attempt, sqlite, runID, candidate); err != nil {
+			if err := cancelRemovedUpgradeTimers(ctx, tx, attempt, sqlite, runID, fresh.Sources[fresh.Runs[runID]], candidate); err != nil {
 				return err
 			}
 			if err := cancelRemovedUpgradeClocks(ctx, tx, attempt, owner.genericScheduleTxOwner(), sqlite, runID, candidate); err != nil {
@@ -112,7 +112,7 @@ func cancelRemovedUpgradeClocks(ctx context.Context, tx *sql.Tx, attempt *mutati
 	return nil
 }
 
-func cancelRemovedUpgradeTimers(ctx context.Context, tx *sql.Tx, attempt *mutationprotocol.Attempt, sqlite bool, runID string, candidate semanticview.Source) error {
+func cancelRemovedUpgradeTimers(ctx context.Context, tx *sql.Tx, attempt *mutationprotocol.Attempt, sqlite bool, runID string, current, candidate semanticview.Source) error {
 	timers, err := listWorkflowTimerActivations(ctx, tx, sqlite, runID, "", true)
 	if err != nil || len(timers) == 0 {
 		return err
@@ -132,12 +132,19 @@ func cancelRemovedUpgradeTimers(ctx context.Context, tx *sql.Tx, attempt *mutati
 		if header == nil {
 			return fmt.Errorf("bundle upgrade timer %s lacks its exact instance", timer.Ref.ActivationID)
 		}
-		selected, err := runtimepipeline.SelectInheritedWorkflowTimer(candidate, timer, *header)
+		selected, err := runtimepipeline.SelectWorkflowTimerSuccessor(current, candidate, timer, *header)
 		if err != nil {
 			return err
 		}
 		if selected == nil {
 			if _, err := cancelWorkflowEngineTimerActivation(ctx, tx, !sqlite, attempt, timer, runtimepipeline.WorkflowTimerCancelCauseRuleRemoved, time.Now().UTC()); err != nil {
+				return err
+			}
+		} else if selected.Ref != timer.Ref {
+			if _, err := cancelWorkflowEngineTimerActivation(ctx, tx, !sqlite, attempt, timer, "", time.Time{}); err != nil {
+				return err
+			}
+			if _, err := insertWorkflowEngineTimerActivation(ctx, tx, !sqlite, attempt, *selected); err != nil {
 				return err
 			}
 		}
