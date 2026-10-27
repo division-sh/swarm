@@ -231,6 +231,14 @@ func (s *runtimeTestRetainedSession) InspectRunExecutionOwnership(ctx context.Co
 	return runtimemanager.RunExecutionOwned, nil
 }
 
+func (s *runtimeTestRetainedSession) ObserveStartupRunSource(ctx context.Context, evidence runtimestartupownership.GrantEvidence, runID string) (bool, error) {
+	if evidence.SelectedFork != nil || (evidence.State != runtimestartupownership.GrantPrepared && evidence.State != runtimestartupownership.GrantProbeSettled) {
+		return false, errors.New("runtime fixture startup source observation requires its ordinary preparation grant")
+	}
+	ownership, err := s.InspectRunExecutionOwnership(ctx, evidence, runID)
+	return ownership == runtimemanager.RunExecutionOwned && err == nil, err
+}
+
 func (*runtimeTestRetainedSession) RebindFlowReadinessSourceSet(context.Context, runtimemanager.FlowReadinessSourceSetRebindRequest, runtimemanager.ProcessExecutionBinding) (runtimemanager.FlowReadinessSourceSetRebindResult, error) {
 	return runtimemanager.FlowReadinessSourceSetRebindResult{}, errors.New("runtime test session has no readiness row")
 }
