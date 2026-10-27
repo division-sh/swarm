@@ -60,6 +60,7 @@ func requireServedReplacementHeldFirstQR(t *testing.T, backend string) {
 	owners := make(chan *serveSessionBootstrap, 1)
 	newServeSessionBootstrap = func(selectRuntime serveSessionBootstrapRuntime, store channelonboarding.Store,
 		credentials operatorchannel.CredentialCurrentness, directory string, invocation *sessionprovider.InvocationState,
+		enabled channelonboarding.TargetEnablementReader,
 	) (serveSessionBootstrapOwner, error) {
 		selected := func(ctx context.Context, candidate channelonboarding.Candidate) (context.Context, *sessionprovider.RuntimeIncomingOptions, processbinding.Binding, func() error, error) {
 			owned, incoming, binding, done, err := selectRuntime(ctx, candidate)
@@ -69,7 +70,7 @@ func requireServedReplacementHeldFirstQR(t *testing.T, backend string) {
 			selections.Add(1)
 			return owned, incoming, binding, func() error { releases.Add(1); return done() }, nil
 		}
-		owner, err := prior(selected, store, credentials, directory, invocation)
+		owner, err := prior(selected, store, credentials, directory, invocation, enabled)
 		if err == nil {
 			owners <- owner.(*serveSessionBootstrap)
 		}

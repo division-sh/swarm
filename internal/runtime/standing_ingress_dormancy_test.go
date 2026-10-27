@@ -34,8 +34,19 @@ func TestStandingIngressCredentialAbsenceAcrossVerifiedProviders(t *testing.T) {
 				WorkflowModule: semanticOnlyWorkflowRuntime{source: source}, ProviderTriggerCatalog: catalog,
 				ProviderCredentials: file, SourceArtifactFact: testSourceArtifactFact(t, runtimeContextTestHashA),
 			}}
+			selector := standingIngressSelector("ingress", tc.provider)
+			if _, err := rt.StandingIngressEnabled(selector); err == nil {
+				t.Fatal("uncomputed admission returned an enablement value")
+			}
 			if targets, err := rt.PlanStandingTargets(); err != nil || len(targets) != 0 {
 				t.Fatalf("absent credential granted execution = %#v, %v", targets, err)
+			}
+			selector = standingIngressSelector(rt.standingCredentialAdmission.declarations[0].FlowPath, tc.provider)
+			if enabled, err := rt.StandingIngressEnabled(selector); err != nil || enabled {
+				t.Fatalf("frozen absent-credential binding enabled=%t err=%v", enabled, err)
+			}
+			if _, err := rt.StandingIngressEnabled(selector + ":missing"); err == nil {
+				t.Fatal("missing selector returned an enablement value")
 			}
 			candidates, err := rt.PlanLiveFlowScopes()
 			if err != nil || len(candidates) != 1 {
@@ -47,6 +58,9 @@ func TestStandingIngressCredentialAbsenceAcrossVerifiedProviders(t *testing.T) {
 			restarted := &Runtime{Options: rt.Options}
 			if targets, err := restarted.PlanStandingTargets(); err != nil || len(targets) != 1 || targets[0].Provider != tc.provider {
 				t.Fatalf("provisioned restart targets = %#v, %v", targets, err)
+			}
+			if enabled, err := restarted.StandingIngressEnabled(selector); err != nil || !enabled {
+				t.Fatalf("frozen provisioned binding enabled=%t err=%v", enabled, err)
 			}
 		})
 	}

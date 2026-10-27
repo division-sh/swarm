@@ -26,6 +26,7 @@ type serveSessionBootstrap struct {
 	mu              sync.Mutex
 	connections     map[string]*serveSessionBootstrapAttempt
 	selectRuntime   serveSessionBootstrapRuntime
+	targetEnabled   channelonboarding.TargetEnablementReader
 	store           channelonboarding.Store
 	credentials     operatorchannel.CredentialCurrentness
 	directory       string
@@ -107,9 +108,10 @@ func init() {
 
 func newNativeServeSessionBootstrap(selectRuntime serveSessionBootstrapRuntime, store channelonboarding.Store,
 	credentials operatorchannel.CredentialCurrentness, directory string, invocationState *sessionprovider.InvocationState,
+	targetEnabled channelonboarding.TargetEnablementReader,
 ) (serveSessionBootstrapOwner, error) {
 	return &serveSessionBootstrap{connections: make(map[string]*serveSessionBootstrapAttempt),
-		selectRuntime: selectRuntime, store: store, credentials: credentials, directory: directory, invocationState: invocationState}, nil
+		selectRuntime: selectRuntime, targetEnabled: targetEnabled, store: store, credentials: credentials, directory: directory, invocationState: invocationState}, nil
 }
 
 func (s *serveSessionBootstrap) QualifySessionPlan(candidate channelonboarding.Candidate) error {
@@ -263,6 +265,16 @@ func (s *serveSessionBootstrap) RollSessionSource(ctx context.Context, op channe
 	}
 	if err := s.validateRetainedSessionOperation(ctx, op); err != nil {
 		return op, err
+	}
+	if s.targetEnabled == nil {
+		return op, channelonboarding.ErrInvalidRequest
+	}
+	enabled, err := s.targetEnabled(ctx, candidate)
+	if err != nil {
+		return op, err
+	}
+	if enabled {
+		return op, channelonboarding.ErrRevisionConflict
 	}
 	if connection := s.connection(op.OperationID); connection != nil {
 		if err := connection.PrepareSourceRollover(ctx); err != nil {

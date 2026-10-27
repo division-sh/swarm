@@ -41,8 +41,9 @@ func installServedNativeLogoutReservationCut(t *testing.T) {
 	previous := newServeSessionBootstrap
 	newServeSessionBootstrap = func(selectRuntime serveSessionBootstrapRuntime, store channelonboarding.Store,
 		credentials operatorchannel.CredentialCurrentness, directory string, invocationState *sessionprovider.InvocationState,
+		enabled channelonboarding.TargetEnablementReader,
 	) (serveSessionBootstrapOwner, error) {
-		owner, err := previous(selectRuntime, store, credentials, directory, invocationState)
+		owner, err := previous(selectRuntime, store, credentials, directory, invocationState, enabled)
 		if err != nil {
 			return nil, err
 		}

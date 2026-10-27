@@ -84,7 +84,7 @@ func TestOverdueIdentityTerminalizesOnboardingAndReleasesWrittenCredentials(t *t
 		OperationID: identityOperationID, State: operatorchannel.StateAwaitingClaim, Revision: 1, ExpiresAt: now.Add(-time.Second),
 	}}
 	activations := &cancellationTestActivations{}
-	service, err := NewService(ServiceOptions{LandingRuns: testLandingRunReader{},
+	service, err := NewService(ServiceOptions{LandingRuns: testLandingRunReader{}, TargetEnabled: testTargetEnabled,
 		Store: store, Identities: identities, Credentials: credentials,
 		Catalog: func() (*CandidateCatalog, error) { return catalog, nil }, Activations: activations,
 		Confirmation: cancellationTestConfirmation{}, Readiness: cancellationTestReadiness{}, Now: func() time.Time { return now },
@@ -138,7 +138,7 @@ func TestOverdueAwaitingConfirmationTerminalizesParentOperation(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	service, err := NewService(ServiceOptions{LandingRuns: testLandingRunReader{},
+	service, err := NewService(ServiceOptions{LandingRuns: testLandingRunReader{}, TargetEnabled: testTargetEnabled,
 		Store: store, Identities: identities, Credentials: credentials,
 		Catalog: func() (*CandidateCatalog, error) { return catalog, nil }, Activations: &cancellationTestActivations{},
 		Confirmation: cancellationTestConfirmation{}, Readiness: cancellationTestReadiness{}, Now: func() time.Time { return now },
@@ -194,7 +194,7 @@ func TestRecoveryTerminalizesOperationWhoseRuntimeContextIsNoLongerCurrent(t *te
 	op.SlotKey = StartRequest{Provider: op.Provider, Interface: op.Interface, Coordinate: op.Coordinate, TargetSelector: op.TargetSelector}.SlotKey()
 	store := &cancellationTestStore{op: op}
 	activations := &cancellationTestActivations{}
-	service, err := NewService(ServiceOptions{LandingRuns: testLandingRunReader{},
+	service, err := NewService(ServiceOptions{LandingRuns: testLandingRunReader{}, TargetEnabled: testTargetEnabled,
 		Store: store, Identities: &cancellationTestIdentities{}, Credentials: credentials,
 		Catalog: func() (*CandidateCatalog, error) { return emptyCatalog, nil }, Activations: activations,
 		Confirmation: cancellationTestConfirmation{}, Readiness: cancellationTestReadiness{}, Now: func() time.Time { return now },
@@ -243,7 +243,7 @@ func TestRecoveryFailsClosedWhenCurrentCandidateCatalogCannotBeBuilt(t *testing.
 	op.SlotKey = StartRequest{Provider: op.Provider, Interface: op.Interface, Coordinate: op.Coordinate, TargetSelector: op.TargetSelector}.SlotKey()
 	store := &cancellationTestStore{op: op}
 	activations := &cancellationTestActivations{}
-	service, err := NewService(ServiceOptions{LandingRuns: testLandingRunReader{},
+	service, err := NewService(ServiceOptions{LandingRuns: testLandingRunReader{}, TargetEnabled: testTargetEnabled,
 		Store: store, Identities: &cancellationTestIdentities{}, Credentials: credentials,
 		Catalog: func() (*CandidateCatalog, error) {
 			return nil, fmt.Errorf("%w: duplicate current coordinates", ErrConflict)
@@ -314,7 +314,7 @@ func TestReadbackUsesCurrentActivationOwningOperationInsteadOfLaterFailedAttempt
 	if err != nil {
 		t.Fatal(err)
 	}
-	service, err := NewService(ServiceOptions{LandingRuns: testLandingRunReader{},
+	service, err := NewService(ServiceOptions{LandingRuns: testLandingRunReader{}, TargetEnabled: testTargetEnabled,
 		Store: store, Identities: identities, Credentials: credentials,
 		Catalog: func() (*CandidateCatalog, error) { return catalog, nil }, Activations: &cancellationTestActivations{},
 		Confirmation: cancellationTestConfirmation{}, Readiness: readiness, Now: func() time.Time { return now },
@@ -350,7 +350,7 @@ func TestCredentialRequiredErrorCarriesExactOperationForEveryVerb(t *testing.T) 
 				Phase: PhasePreparing, Revision: 1, CredentialReservations: credentialReservations(candidate), RequestedAt: now, UpdatedAt: now,
 			}
 			op.SlotKey = StartRequest{Provider: op.Provider, Interface: op.Interface, Coordinate: op.Coordinate, TargetSelector: op.TargetSelector}.SlotKey()
-			service, err := NewService(ServiceOptions{LandingRuns: testLandingRunReader{},
+			service, err := NewService(ServiceOptions{LandingRuns: testLandingRunReader{}, TargetEnabled: testTargetEnabled,
 				Store: &cancellationTestStore{op: op}, Identities: &cancellationTestIdentities{}, Credentials: testCredentialWriter(t),
 				Catalog: func() (*CandidateCatalog, error) { return catalog, nil }, Activations: &cancellationTestActivations{},
 				Confirmation: cancellationTestConfirmation{}, Readiness: cancellationTestReadiness{}, Now: func() time.Time { return now },
@@ -422,7 +422,7 @@ func TestCredentialRotationBeforeConfirmationResetsParentAndAdmitsReplacement(t 
 					binding: operatorchannel.Binding{PrincipalID: "principal-a", Interface: candidate.Interface, Revision: 3, Status: operatorchannel.BindingCurrent},
 				}
 				store := &cancellationTestStore{op: op}
-				service, err := NewService(ServiceOptions{LandingRuns: testLandingRunReader{},
+				service, err := NewService(ServiceOptions{LandingRuns: testLandingRunReader{}, TargetEnabled: testTargetEnabled,
 					Store: store, Identities: identities, Credentials: credentials,
 					Catalog: func() (*CandidateCatalog, error) { return catalog, nil }, Activations: &cancellationTestActivations{},
 					Confirmation: successfulTestConfirmation{}, Readiness: cancellationTestReadiness{}, Now: func() time.Time { return now },
@@ -481,7 +481,7 @@ func TestCredentialStaleIdentityRestartResetsParentWithoutExternalEffects(t *tes
 		OperationID: identityID, OnboardingOperationID: parentID, State: operatorchannel.StateCredentialStale, Revision: 3,
 	}}
 	activations := &cancellationTestActivations{}
-	service, err := NewService(ServiceOptions{LandingRuns: testLandingRunReader{},
+	service, err := NewService(ServiceOptions{LandingRuns: testLandingRunReader{}, TargetEnabled: testTargetEnabled,
 		Store: store, Identities: identities, Credentials: testCredentialWriter(t),
 		Catalog: func() (*CandidateCatalog, error) { return catalog, nil }, Activations: activations,
 		Confirmation: successfulTestConfirmation{}, Readiness: cancellationTestReadiness{}, Now: func() time.Time { return now },
@@ -561,7 +561,7 @@ func TestBoundCredentialStaleIdentityResetsParentIntoExactReconnect(t *testing.T
 		bindingErr: operatorchannel.ErrCredentialStale,
 	}
 	store := &cancellationTestStore{op: op}
-	service, err := NewService(ServiceOptions{LandingRuns: testLandingRunReader{},
+	service, err := NewService(ServiceOptions{LandingRuns: testLandingRunReader{}, TargetEnabled: testTargetEnabled,
 		Store: store, Identities: identities, Credentials: credentials,
 		Catalog: func() (*CandidateCatalog, error) { return catalog, nil }, Activations: &cancellationTestActivations{},
 		Confirmation: successfulTestConfirmation{}, Readiness: cancellationTestReadiness{}, Now: func() time.Time { return now },
@@ -614,7 +614,7 @@ func TestReadbackRetainsEveryActiveOperationAcrossExactContexts(t *testing.T) {
 		t.Fatal(err)
 	}
 	identity := operatorchannel.Readback{PrincipalID: "principal-a", Interface: firstCandidate.Interface, Status: operatorchannel.BindingCurrent, BindingRevision: 3}
-	service, err := NewService(ServiceOptions{LandingRuns: testLandingRunReader{},
+	service, err := NewService(ServiceOptions{LandingRuns: testLandingRunReader{}, TargetEnabled: testTargetEnabled,
 		Store: &readbackTestStore{cancellationTestStore: &cancellationTestStore{}, operations: operations},
 		Identities: &readbackTestIdentities{
 			cancellationTestIdentities: &cancellationTestIdentities{binding: operatorchannel.Binding{PrincipalID: "principal-a", Interface: firstCandidate.Interface, Revision: 3, Status: operatorchannel.BindingCurrent}},
@@ -689,7 +689,7 @@ func TestReadbackIgnoresTerminalOperationWithoutRetainedIdentity(t *testing.T) {
 		}},
 		rows: []operatorchannel.Readback{{PrincipalID: "principal-a", Interface: candidate.Interface, Status: operatorchannel.BindingCurrent, BindingRevision: 3}},
 	}
-	service, err := NewService(ServiceOptions{LandingRuns: testLandingRunReader{},
+	service, err := NewService(ServiceOptions{LandingRuns: testLandingRunReader{}, TargetEnabled: testTargetEnabled,
 		Store: store, Identities: identities, Credentials: testCredentialWriter(t),
 		Catalog: func() (*CandidateCatalog, error) { return catalog, nil }, Activations: &cancellationTestActivations{},
 		Confirmation: cancellationTestConfirmation{}, Readiness: &operationReadinessProjector{readyOperationID: current.OperationID}, Now: func() time.Time { return now },
@@ -727,7 +727,7 @@ func TestReadbackRetainsExactRowsForMultipleCurrentContexts(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	service, err := NewService(ServiceOptions{LandingRuns: testLandingRunReader{},
+	service, err := NewService(ServiceOptions{LandingRuns: testLandingRunReader{}, TargetEnabled: testTargetEnabled,
 		Store: store, Identities: identities, Credentials: testCredentialWriter(t),
 		Catalog: func() (*CandidateCatalog, error) { return catalog, nil }, Activations: &cancellationTestActivations{},
 		Confirmation: cancellationTestConfirmation{}, Readiness: cancellationTestReadiness{}, Now: func() time.Time { return now },
@@ -780,7 +780,7 @@ func TestReplacementCredentialHandoffPreservesPredecessorOnFailureAndRetiresItAf
 			predecessor.CredentialAdmissions = predecessorAdmissions
 			store := &cancellationTestStore{activation: testCurrentActivation(predecessor, predecessorAdmissions, now), history: []Operation{predecessor}}
 			identities := &cancellationTestIdentities{bindOnBegin: true, binding: operatorchannel.Binding{PrincipalID: "principal-a", Interface: candidate.Interface, ConversationRef: "conversation-a", Revision: 3, Status: operatorchannel.BindingCurrent}}
-			service, err := NewService(ServiceOptions{LandingRuns: testLandingRunReader{},
+			service, err := NewService(ServiceOptions{LandingRuns: testLandingRunReader{}, TargetEnabled: testTargetEnabled,
 				Store: store, Identities: identities, Credentials: credentials, Catalog: func() (*CandidateCatalog, error) { return catalog, nil },
 				Activations: &cancellationTestActivations{err: test.activationError}, Confirmation: successfulTestConfirmation{}, Readiness: cancellationTestReadiness{}, Now: func() time.Time { return now },
 			})
@@ -849,7 +849,7 @@ func TestReplacementCredentialPreflightFailureKeepsOperationRetryableAndPredeces
 				Revision: 3, Status: operatorchannel.BindingCurrent,
 			}}
 			activations := &cancellationTestActivations{preflightErr: errors.New("telegram rejected replacement token")}
-			service, err := NewService(ServiceOptions{LandingRuns: testLandingRunReader{},
+			service, err := NewService(ServiceOptions{LandingRuns: testLandingRunReader{}, TargetEnabled: testTargetEnabled,
 				Store: store, Identities: identities, Credentials: credentials,
 				Catalog: func() (*CandidateCatalog, error) { return catalog, nil }, Activations: activations,
 				Confirmation: successfulTestConfirmation{}, Readiness: cancellationTestReadiness{}, Now: func() time.Time { return now },
@@ -922,7 +922,7 @@ func TestRejectedCredentialCorrectionSerializesSameReceiptResumeAndSurvivesRecov
 	activations := &blockingCredentialRetryActivations{
 		entered: make(chan struct{}), release: make(chan struct{}),
 	}
-	service, err := NewService(ServiceOptions{LandingRuns: testLandingRunReader{},
+	service, err := NewService(ServiceOptions{LandingRuns: testLandingRunReader{}, TargetEnabled: testTargetEnabled,
 		Store: store, Identities: identities, Credentials: credentials,
 		Catalog: func() (*CandidateCatalog, error) { return catalog, nil }, Activations: activations,
 		Confirmation: successfulTestConfirmation{}, Readiness: cancellationTestReadiness{}, Now: func() time.Time { return now },
@@ -988,7 +988,7 @@ func TestRejectedCredentialCorrectionSerializesSameReceiptResumeAndSurvivesRecov
 	if err != nil {
 		t.Fatal(err)
 	}
-	restarted, err := NewService(ServiceOptions{LandingRuns: testLandingRunReader{},
+	restarted, err := NewService(ServiceOptions{LandingRuns: testLandingRunReader{}, TargetEnabled: testTargetEnabled,
 		Store: store, Identities: identities, Credentials: reopenedCredentials,
 		Catalog: func() (*CandidateCatalog, error) { return catalog, nil }, Activations: &cancellationTestActivations{},
 		Confirmation: successfulTestConfirmation{}, Readiness: cancellationTestReadiness{}, Now: func() time.Time { return now.Add(time.Minute) },
@@ -1051,7 +1051,7 @@ func TestReconnectRequiresFreshConfirmationWhenRequestedProofPostureIsNotCurrent
 			if err != nil {
 				t.Fatal(err)
 			}
-			service, err := NewService(ServiceOptions{LandingRuns: testLandingRunReader{},
+			service, err := NewService(ServiceOptions{LandingRuns: testLandingRunReader{}, TargetEnabled: testTargetEnabled,
 				Store: store, Identities: identities, Credentials: testCredentialWriter(t),
 				Catalog: func() (*CandidateCatalog, error) { return catalog, nil }, Activations: &cancellationTestActivations{},
 				Confirmation: successfulTestConfirmation{}, Readiness: cancellationTestReadiness{}, Now: func() time.Time { return now },
@@ -1117,7 +1117,7 @@ func TestStartupLocalReconciliationSettlesOnlyProcessIndependentStates(t *testin
 				OperationID: identityOperationID, State: test.state, Revision: 2, ExpiresAt: test.expiresAt,
 			}}
 			activations := &cancellationTestActivations{}
-			service, err := NewService(ServiceOptions{LandingRuns: testLandingRunReader{},
+			service, err := NewService(ServiceOptions{LandingRuns: testLandingRunReader{}, TargetEnabled: testTargetEnabled,
 				Store: store, Identities: identities, Credentials: testCredentialWriter(t),
 				Catalog: func() (*CandidateCatalog, error) { return test.catalog, nil }, Activations: activations,
 				Confirmation: successfulTestConfirmation{}, Readiness: cancellationTestReadiness{}, Now: func() time.Time { return now },
@@ -1168,7 +1168,7 @@ func TestChannelOnboardingRecoversStagedCredentialAfterAdmissionCommitFailure(t 
 					Revision: 3, Status: operatorchannel.BindingCurrent,
 				}
 			}
-			service, err := NewService(ServiceOptions{LandingRuns: testLandingRunReader{},
+			service, err := NewService(ServiceOptions{LandingRuns: testLandingRunReader{}, TargetEnabled: testTargetEnabled,
 				Store: store, Identities: identities, Credentials: credentials,
 				Catalog: func() (*CandidateCatalog, error) { return catalog, nil }, Activations: &cancellationTestActivations{},
 				Confirmation: successfulTestConfirmation{}, Readiness: cancellationTestReadiness{}, Now: func() time.Time { return now },
@@ -1240,7 +1240,7 @@ func TestRetiredPreparingOperationReleasesUncommittedStagedCredentials(t *testin
 					}
 				}
 				newService := func(writer *CredentialWriter) *Service {
-					service, serviceErr := NewService(ServiceOptions{LandingRuns: testLandingRunReader{},
+					service, serviceErr := NewService(ServiceOptions{LandingRuns: testLandingRunReader{}, TargetEnabled: testTargetEnabled,
 						Store: store, Identities: identities, Credentials: writer,
 						Catalog: func() (*CandidateCatalog, error) { return catalog, nil }, Activations: &cancellationTestActivations{},
 						Confirmation: successfulTestConfirmation{}, Readiness: cancellationTestReadiness{}, Now: func() time.Time { return now },
@@ -1327,7 +1327,7 @@ func TestChannelOnboardingIdentityExpiryRevisionRaceConvergesParent(t *testing.T
 				expiryRaceState: successorState,
 				binding:         operatorchannel.Binding{PrincipalID: "principal-a", Interface: candidate.Interface, ConversationRef: "conversation-a", Revision: 2, Status: operatorchannel.BindingCurrent},
 			}
-			service, err := NewService(ServiceOptions{LandingRuns: testLandingRunReader{},
+			service, err := NewService(ServiceOptions{LandingRuns: testLandingRunReader{}, TargetEnabled: testTargetEnabled,
 				Store: store, Identities: identities, Credentials: testCredentialWriter(t),
 				Catalog: func() (*CandidateCatalog, error) { return catalog, nil }, Activations: &cancellationTestActivations{},
 				Confirmation: successfulTestConfirmation{}, Readiness: cancellationTestReadiness{}, Now: func() time.Time { return now },
@@ -1367,7 +1367,7 @@ func TestChannelOnboardingIdentityBeginCrashReplaysExactChildBeforeCheckpoint(t 
 	identities := &cancellationTestIdentities{}
 	crashErr := errors.New("injected crash after identity begin")
 	barrierCalls := 0
-	service, err := NewService(ServiceOptions{LandingRuns: testLandingRunReader{},
+	service, err := NewService(ServiceOptions{LandingRuns: testLandingRunReader{}, TargetEnabled: testTargetEnabled,
 		Store: store, Identities: identities, Credentials: credentials,
 		Catalog: func() (*CandidateCatalog, error) { return catalog, nil }, Activations: &cancellationTestActivations{},
 		Confirmation: successfulTestConfirmation{}, Readiness: cancellationTestReadiness{}, Now: func() time.Time { return now },
@@ -1423,7 +1423,7 @@ func TestChannelOnboardingRecoveryRetriesProcessPublicationBeforePromotion(t *te
 	op.CredentialAdmissions = writeTestOperationCredentials(t, credentials, op, "process-publication")
 	store := &cancellationTestStore{op: op}
 	activations := &cancellationTestActivations{publishErrOnce: errors.New("process publication unavailable")}
-	service, err := NewService(ServiceOptions{LandingRuns: testLandingRunReader{},
+	service, err := NewService(ServiceOptions{LandingRuns: testLandingRunReader{}, TargetEnabled: testTargetEnabled,
 		Store: store,
 		Identities: &cancellationTestIdentities{binding: operatorchannel.Binding{
 			PrincipalID: "principal-a", Interface: candidate.Interface, ConversationRef: "conversation-a", Revision: 3, Status: operatorchannel.BindingCurrent,
@@ -1490,7 +1490,7 @@ func TestReplacementRecoveryRetiresPredecessorCredentialAfterDurableHandoff(t *t
 	activation := testCurrentActivation(successor, successorAdmissions, now)
 	store := &cancellationTestStore{op: successor, activation: activation, history: []Operation{predecessor}}
 	identities := &cancellationTestIdentities{binding: operatorchannel.Binding{PrincipalID: "principal-a", Interface: candidate.Interface, ConversationRef: "conversation-a", Revision: 3, Status: operatorchannel.BindingCurrent}}
-	service, err := NewService(ServiceOptions{LandingRuns: testLandingRunReader{},
+	service, err := NewService(ServiceOptions{LandingRuns: testLandingRunReader{}, TargetEnabled: testTargetEnabled,
 		Store: store, Identities: identities, Credentials: credentials, Catalog: func() (*CandidateCatalog, error) { return catalog, nil },
 		Activations: &cancellationTestActivations{}, Confirmation: successfulTestConfirmation{}, Readiness: cancellationTestReadiness{}, Now: func() time.Time { return now },
 	})
@@ -1546,7 +1546,7 @@ func TestPermanentActivationFailureTerminalizesAndReleasesWrittenCredentials(t *
 	}
 	store := &cancellationTestStore{}
 	activations := &cancellationTestActivations{err: NewTerminalActivationError("public_ingress_unavailable", errors.New("public ingress is disabled"))}
-	service, err := NewService(ServiceOptions{LandingRuns: testLandingRunReader{},
+	service, err := NewService(ServiceOptions{LandingRuns: testLandingRunReader{}, TargetEnabled: testTargetEnabled,
 		Store: store, Identities: &cancellationTestIdentities{}, Credentials: credentials,
 		Catalog: func() (*CandidateCatalog, error) { return catalog, nil }, Activations: activations,
 		Confirmation: cancellationTestConfirmation{}, Readiness: cancellationTestReadiness{}, Now: func() time.Time { return now },
@@ -1589,7 +1589,7 @@ func TestChannelOnboardingClientCancellationStopsNarrationNotOperation(t *testin
 	if err != nil {
 		t.Fatal(err)
 	}
-	service, err := NewService(ServiceOptions{LandingRuns: testLandingRunReader{},
+	service, err := NewService(ServiceOptions{LandingRuns: testLandingRunReader{}, TargetEnabled: testTargetEnabled,
 		Store: store, Identities: identities, Credentials: credentials,
 		Catalog:     func() (*CandidateCatalog, error) { return catalog, nil },
 		Activations: activations, Confirmation: cancellationTestConfirmation{}, Readiness: cancellationTestReadiness{},
@@ -1701,7 +1701,7 @@ func TestChannelOnboardingRecoveryEveryNonterminalPhase(t *testing.T) {
 			}
 			activations := &cancellationTestActivations{events: &events}
 			confirmation := &recordingTestConfirmation{events: &events, disposition: EffectRebindDisposition{RetryAllowed: true}}
-			service, err := NewService(ServiceOptions{LandingRuns: testLandingRunReader{},
+			service, err := NewService(ServiceOptions{LandingRuns: testLandingRunReader{}, TargetEnabled: testTargetEnabled,
 				Store: store, Identities: identities, Credentials: credentials,
 				Catalog:     func() (*CandidateCatalog, error) { return catalog, nil },
 				Activations: activations, Confirmation: confirmation, Readiness: cancellationTestReadiness{},
@@ -1847,7 +1847,7 @@ func TestStartupLocalReconciliationRebindsSucceededActivationToSuccessorOccurren
 			activation := testCurrentActivation(op, nil, now.Add(-time.Hour))
 			activation.Revision = op.ActivationRevision
 			store := &cancellationTestStore{op: op, activation: activation}
-			service, err := NewService(ServiceOptions{LandingRuns: testLandingRunReader{},
+			service, err := NewService(ServiceOptions{LandingRuns: testLandingRunReader{}, TargetEnabled: testTargetEnabled,
 				Store: store, Identities: &cancellationTestIdentities{}, Credentials: testCredentialWriter(t),
 				Catalog: func() (*CandidateCatalog, error) { return catalog, nil }, Activations: &cancellationTestActivations{},
 				Confirmation: successfulTestConfirmation{}, Readiness: cancellationTestReadiness{}, Now: func() time.Time { return now },
@@ -1900,7 +1900,7 @@ func TestChannelOnboardingRestartResolvesExactDurableSourceAcrossContextOrder(t 
 			}
 			op.SlotKey = StartRequest{Provider: op.Provider, Interface: op.Interface, Coordinate: op.Coordinate, TargetSelector: op.TargetSelector}.SlotKey()
 			store := &cancellationTestStore{op: op}
-			service, err := NewService(ServiceOptions{LandingRuns: testLandingRunReader{},
+			service, err := NewService(ServiceOptions{LandingRuns: testLandingRunReader{}, TargetEnabled: testTargetEnabled,
 				Store: store, Identities: &cancellationTestIdentities{}, Credentials: testCredentialWriter(t),
 				Catalog: func() (*CandidateCatalog, error) { return catalog, nil }, Activations: &cancellationTestActivations{},
 				Confirmation: successfulTestConfirmation{}, Readiness: cancellationTestReadiness{}, Now: func() time.Time { return now },
@@ -1970,6 +1970,8 @@ type cancellationTestStore struct {
 }
 
 type testLandingRunReader struct{}
+
+func testTargetEnabled(context.Context, Candidate) (bool, error) { return true, nil }
 
 func (testLandingRunReader) LoadLandingRun(_ context.Context, scope runlifecycle.LiveRunScope) (runlifecycle.LandingRun, bool, error) {
 	source, err := correlation.DecodeSourceArtifactFact(testCoordinate().BundleHash)

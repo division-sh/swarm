@@ -8,6 +8,7 @@ import (
 
 	"github.com/division-sh/swarm/internal/channelonboarding"
 	"github.com/division-sh/swarm/internal/operatorchannel"
+	runtimepkg "github.com/division-sh/swarm/internal/runtime"
 	"github.com/division-sh/swarm/internal/runtime/credentials"
 	"github.com/division-sh/swarm/internal/servedparity"
 )
@@ -199,6 +200,13 @@ func TestChannelOnboardingEarlyReconnectConfirmationRestartE2E(t *testing.T) {
 				}
 				registrations, deliveries := harness.provider.Counts()
 				harness.stop(t)
+				harness.opts.TestRuntimeReadyHook = func(rt *runtimepkg.Runtime) {
+					enabled, err := rt.StandingIngressEnabled(committed.Operation.TargetSelector)
+					t.Logf("pending reconnect ingress enablement: enabled=%t err=%v", enabled, err)
+					if err != nil || enabled {
+						t.Errorf("pending reconnect must retain the plan's disabled binding: enabled=%t err=%v", enabled, err)
+					}
+				}
 				harness.start(t)
 				reset := getChannelOnboardingRPC(t, harness, begun.Operation.OperationID)
 				// Startup settles the confirmed child, but cannot adopt predecessor
