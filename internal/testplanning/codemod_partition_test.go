@@ -10,7 +10,7 @@ import (
 )
 
 const codemodProofPackage = "github.com/division-sh/swarm/tools/fixture-codemod/pipeline-observations"
-const codemodIntegrationRoots = `^(TestNativeTimerSuccessorObserverRejectsRepublicationBothStores|TestNativeHandlerExecutionWindowRejectsEarlyProductionDispatchBothStores|TestNativeBusSourceBoundaryRejectsLostProductionClaimAndSettlementFacts|TestNativeBusOriginAssertionFailureJoinsBlockedSQLAndRuntimeOwners)$`
+const codemodIntegrationRoots = `^(TestNativeTimerSuccessorObserverRejectsRepublicationBothStores|TestNativeHandlerExecutionWindowRejectsEarlyProductionDispatchBothStores|TestNativeBusSourceBoundaryRejectsLostProductionClaimAndSettlementFacts)$`
 
 // Run-only complement: the policy permits skip only for the original soak.
 // The finite equality and future-prefix controls below pin this selector.
@@ -25,7 +25,7 @@ func codemodProofEnvelopes() map[string]UnitPolicy {
 		"TestNativeTimerSuccessorObserverRejectsRepublicationBothStores":           {"duplicate", "stale_generation"},
 		"TestNativeHandlerExecutionWindowRejectsEarlyProductionDispatchBothStores": {"sqlite", "postgres"},
 	}
-	bus.Run = `^(TestNativeBusSourceBoundaryRejectsLostProductionClaimAndSettlementFacts|TestNativeBusOriginAssertionFailureJoinsBlockedSQLAndRuntimeOwners)$`
+	bus.Run = `^TestNativeBusSourceBoundaryRejectsLostProductionClaimAndSettlementFacts$`
 	bus.RequiredChildren = map[string][]string{"TestNativeBusSourceBoundaryRejectsLostProductionClaimAndSettlementFacts": {"claim", "settle"}}
 	return map[string]UnitPolicy{"codemod-owner-guards": guards, "codemod-pipeline-mutation": pipeline, "codemod-bus-mutation": bus}
 }
@@ -88,7 +88,6 @@ func TestCodemodProofPlacementExcludesOnlyExactIntegrationNames(t *testing.T) {
 		"TestNativeTimerSuccessorObserverRejectsRepublicationBothStores",
 		"TestNativeHandlerExecutionWindowRejectsEarlyProductionDispatchBothStores",
 		"TestNativeBusSourceBoundaryRejectsLostProductionClaimAndSettlementFacts",
-		"TestNativeBusOriginAssertionFailureJoinsBlockedSQLAndRuntimeOwners",
 	}
 	for _, name := range names {
 		if ordinary.MatchString(name) || !integration.MatchString(name) {

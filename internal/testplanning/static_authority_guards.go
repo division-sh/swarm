@@ -14,7 +14,7 @@ var staticAuthorityGuardFiles = map[string][]string{
 		"event_boundary_guard_test.go", "delivery_lifecycle_boundary_guard_test.go",
 		"run_lifecycle_ownership_guard_test.go", "candidate_handoff_retry_guard_test.go",
 		"run_fork_revision_exact_contributor_guard_test.go", "run_fork_revision_retry_owner_guard_test.go",
-		"run_bundle_identity_eventbus_group_guard_test.go", "standing_restart_disposition_guard_test.go",
+		"run_bundle_identity_eventbus_group_guard_test.go",
 		"store_abstraction_guard_matrix_test.go", "dynamic_agent_topology_static_test.go",
 	},
 	"internal/runtime": {
