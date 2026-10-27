@@ -103,21 +103,16 @@ func newDeploymentResourceFixtureWithAgent(t *testing.T, backend string, include
 	return newDeploymentResourceFixtureWithSource(t, backend, deploymentResourceSourceWithAgent(t, includeAgent))
 }
 
-func newDeploymentResourceFixtureWithSource(t *testing.T, backend string, source semanticview.Source, configs ...*config.Config) *deploymentResourceFixture {
+func newDeploymentResourceFixtureWithSource(t *testing.T, backend string, source semanticview.Source, options ...notifyAllChildrenRuntimeOptions) *deploymentResourceFixture {
 	t.Helper()
-	if len(configs) > 1 {
+	if len(options) > 1 {
 		t.Fatal("deployment fixture accepts one ordinary runtime configuration")
 	}
-	var cfg *config.Config
-	if len(configs) == 1 {
-		cfg = configs[0]
+	var opts notifyAllChildrenRuntimeOptions
+	if len(options) == 1 {
+		opts = options[0]
 	}
-	return newDeploymentResourceFixtureWithSourceAndProvider(t, backend, source, cfg, nil)
-}
-
-func newDeploymentResourceFixtureWithSourceAndProvider(t *testing.T, backend string, source semanticview.Source, cfg *config.Config, credentials runtimecredentials.Store) *deploymentResourceFixture {
-	t.Helper()
-	f := &deploymentResourceFixture{source: source, config: cfg, ordinaryProviderCredentials: credentials}
+	f := &deploymentResourceFixture{source: source, config: opts.ordinaryConfig, ordinaryProviderCredentials: opts.ordinaryProviderCredentials}
 	switch backend {
 	case "sqlite":
 		selected := storetest.StartSQLiteRuntimeStore(t)

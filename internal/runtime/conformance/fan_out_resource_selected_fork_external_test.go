@@ -67,7 +67,7 @@ func selectedExternalResourceFixture(t *testing.T, backend string, providerURLs 
 		Session: config.LLMSessionConfig{LockTTL: time.Second, RotateAfterTurns: 40, RotateOnParseFailures: 3},
 	}}
 	if len(providerURLs) == 0 {
-		return newDeploymentResourceFixtureWithSource(t, backend, semanticview.Wrap(bundle), cfg)
+		return newDeploymentResourceFixtureWithSource(t, backend, semanticview.Wrap(bundle), notifyAllChildrenRuntimeOptions{ordinaryConfig: cfg})
 	}
 	if len(providerURLs) != 1 {
 		t.Fatal("external fixture requires one ordinary provider endpoint")
@@ -80,7 +80,7 @@ func selectedExternalResourceFixture(t *testing.T, backend string, providerURLs 
 	if err := credentials.Set(t.Context(), llmselection.OpenAICompatibleCredentialEnv, "ordinary-external-test-key"); err != nil {
 		t.Fatal(err)
 	}
-	return newDeploymentResourceFixtureWithSourceAndProvider(t, backend, semanticview.Wrap(bundle), cfg, credentials)
+	return newDeploymentResourceFixtureWithSource(t, backend, semanticview.Wrap(bundle), notifyAllChildrenRuntimeOptions{ordinaryConfig: cfg, ordinaryProviderCredentials: credentials})
 }
 
 func selectedExternalSourcePoint(t *testing.T, f *deploymentResourceFixture, runID string) string {
