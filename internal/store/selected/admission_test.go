@@ -152,7 +152,7 @@ func TestAdmissionInspectionRealReadScopeBothStores(t *testing.T) {
 					t.Fatalf("empty manager inventory: %+v, %v", state, err)
 				}
 				decision, err := runtimecore.InspectStartupRecoveryAdmission(ctx, runtimecore.StartupRecoveryReadRequest{
-					SourceArtifact: source, ObservedAt: time.Now().UTC(), Delivery: snapshot, Timers: snapshot,
+					SourceArtifact: source, ObservedAt: time.Now().UTC(), Delivery: snapshot, Timers: snapshot, FlowRuns: snapshot,
 					ReadManagerState: func(ctx context.Context) (manager.RecoverableStateSnapshot, error) {
 						return manager.InspectRecoverableStateSnapshot(ctx, source, snapshot)
 					},

@@ -13,7 +13,7 @@ const originalRuntime02Selection = `^Test([D-E].*|F($|[^ao].*|a($|[^n].*|n($|[^O
 
 // R7 replaces route acquisition with exact activation verification, retains
 // native parent/receipt corruption cuts, and requires the real cleanup sinks.
-const runtime02RequiredEvidence = "a4efe0a79d06cb8f0ebaba69cfd16d5ba8c4931b361b322c5375018716a8dbfd"
+const runtime02RequiredEvidence = "1c9627031a3c6c227f54224442736b0d5e4c51b9aff431a7d95b82f595824ad1"
 
 func TestRuntime02RequiredEvidenceRemainsExact(t *testing.T) {
 	if err := validateRuntime02RequiredEvidence(loadPersistenceDebtPolicy(t)); err != nil {

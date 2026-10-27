@@ -401,7 +401,12 @@ func TestWhatsAppSessionPublicationRollbackAndHistoricalResetBothStores(t *testi
 			if err := spool.retirePublished(f.ctx, event, f.selected); err != nil {
 				t.Fatal(err)
 			}
-			if _, err := f.selected.StopRunControlOutcome(f.ctx, runcontrol.TransitionRequest{RunID: f.standing.RunID, Reason: "historical duplicate proof", ControlledBy: "test", Now: time.Now().UTC()}); err != nil {
+			transition := runcontrol.TransitionRequest{RunID: f.standing.RunID, Reason: "historical duplicate proof", ControlledBy: "test", Now: time.Now().UTC()}
+			if _, err := f.selected.PauseRunControlOutcome(f.ctx, transition); err != nil {
+				t.Fatal(err)
+			}
+			transition.Now = time.Now().UTC()
+			if _, err := f.selected.StopRunControlOutcome(f.ctx, transition); err != nil {
 				t.Fatal(err)
 			}
 			if err := db.Close(); err != nil {
