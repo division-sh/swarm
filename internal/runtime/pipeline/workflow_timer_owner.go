@@ -678,6 +678,16 @@ func SelectInheritedWorkflowTimer(
 
 // A source upgrade replaces a changed arm; it never rewrites its accepted row.
 func SelectWorkflowTimerSuccessor(current, selected semanticview.Source, activation WorkflowTimerActivation, instance WorkflowInstance) (*WorkflowTimerActivation, error) {
+	if current == nil {
+		return nil, fmt.Errorf("workflow timer successor requires its admitted predecessor source")
+	}
+	previous, err := SelectInheritedWorkflowTimer(current, activation, instance)
+	if err != nil || previous == nil {
+		return nil, errors.Join(err, fmt.Errorf("workflow timer successor lacks its predecessor declaration"))
+	}
+	if err := activation.ValidateCauseReplay(*previous); err != nil {
+		return nil, err
+	}
 	projected, err := SelectInheritedWorkflowTimer(selected, activation, instance)
 	if err != nil || projected == nil || projected.Ref.DeclarationRevision == activation.Ref.DeclarationRevision {
 		return projected, err
