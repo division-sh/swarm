@@ -969,13 +969,8 @@ func commitSourceSetTx(ctx context.Context, tx *sql.Tx, req runtimeagenttopology
 	if err := requireSourceSetPredecessor(ctx, tx, req, previous, hasPrevious, sqlite); err != nil {
 		return runtimeagenttopology.SourceSetCommitResult{}, err
 	}
-	if req.BundleUpgrade != nil {
-		if len(upgrade) != 1 || !sourceSetHasBundle(req.Plan, req.BundleUpgrade.BundleHash) {
-			return runtimeagenttopology.SourceSetCommitResult{}, errors.New("bundle upgrade requires its exact native source transition")
-		}
-		if err := upgrade[0].commit(ctx, req.BundleUpgrade); err != nil {
-			return runtimeagenttopology.SourceSetCommitResult{}, err
-		}
+	if err := applySourceSetUpgrade(ctx, req, upgrade); err != nil {
+		return runtimeagenttopology.SourceSetCommitResult{}, err
 	}
 	changes, err := runtimeagenttopology.Diff(previous, req.Plan)
 	if err != nil {

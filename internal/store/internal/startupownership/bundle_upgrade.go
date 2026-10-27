@@ -28,6 +28,16 @@ func sourceSetHasBundle(plan agenttopology.SourceSetPlan, hash string) bool {
 	return len(plan.Sources) == 1 && plan.Sources[0].BundleHash == hash
 }
 
+func applySourceSetUpgrade(ctx context.Context, req agenttopology.SourceSetCommitRequest, upgrades []sourceSetUpgrade) error {
+	if req.BundleUpgrade == nil {
+		return nil
+	}
+	if len(upgrades) != 1 || !sourceSetHasBundle(req.Plan, req.BundleUpgrade.BundleHash) {
+		return errors.New("bundle upgrade requires its exact native source transition")
+	}
+	return upgrades[0].commit(ctx, req.BundleUpgrade)
+}
+
 func (s *postgresSession) commitBundleUpgrade(ctx context.Context, req agenttopology.SourceSetCommitRequest) (agenttopology.SourceSetCommitResult, error) {
 	commit := mutationprotocol.RunRetainedPostgres(ctx, s.lease.Session(), mutationprotocol.Story, mutationprotocol.Ordinary, nil, s.owner.lifecycleCandidates, func(ctx context.Context, attempt *mutationprotocol.Attempt) (result agenttopology.SourceSetCommitResult, err error) {
 		err = attempt.WithSQL(ctx, func(ctx context.Context, tx *sql.Tx) error {

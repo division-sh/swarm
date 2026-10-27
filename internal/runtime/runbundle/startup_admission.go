@@ -208,12 +208,8 @@ func CheckUpgrade(ctx context.Context, current, candidate semanticview.Source, s
 		}
 	}
 	for _, barrier := range state.Barriers {
-		if barrier.Registration.IntentKey.RunID != state.RunID {
-			return nil, errors.New("bundle upgrade barrier belongs to another run")
-		}
-		if barrier.Status.BlocksCompletion() {
-			registration := barrier.Registration
-			check.add(registration.Route.InstancePath, registration.EntityID, registration.IntentKey.ElementRef.FlowPath, "join_in_flight", registration.IntentKey.String(), "nodes", "")
+		if err := check.barrier(barrier); err != nil {
+			return nil, err
 		}
 	}
 	return check.blockers, ctx.Err()
@@ -295,6 +291,17 @@ func (c *upgradeCheck) card(card decisioncard.ListItem) error {
 	}
 	if _, exists := c.candidate.WorkflowGateForStage(anchor.FlowID, anchor.Stage); !exists {
 		c.add(anchor.Route.InstancePath, anchor.EntityID, anchor.FlowID, "gate_removed", anchor.Stage, "schema", "stages")
+	}
+	return nil
+}
+
+func (c *upgradeCheck) barrier(barrier fanoutbarrier.Barrier) error {
+	if barrier.Registration.IntentKey.RunID != c.runID {
+		return errors.New("bundle upgrade barrier belongs to another run")
+	}
+	if barrier.Status.BlocksCompletion() {
+		registration := barrier.Registration
+		c.add(registration.Route.InstancePath, registration.EntityID, registration.IntentKey.ElementRef.FlowPath, "join_in_flight", registration.IntentKey.String(), "nodes", "")
 	}
 	return nil
 }
