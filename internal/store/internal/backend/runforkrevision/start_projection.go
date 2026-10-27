@@ -246,14 +246,16 @@ func publishStart(ctx context.Context, tx revisionSQL, postgres bool, runID stri
 	return nil
 }
 
-func LoadStartProjection(ctx context.Context, tx *sql.Tx, runID string) (int64, StartProjection, error) {
-	if tx == nil {
+func LoadStartProjection(ctx context.Context, q interface {
+	QueryRowContext(context.Context, string, ...any) *sql.Row
+}, runID string) (int64, StartProjection, error) {
+	if q == nil || q == (*sql.Tx)(nil) {
 		return 0, StartProjection{}, fmt.Errorf("run start lookup requires a selected snapshot")
 	}
 	var revision int64
 	var raw []byte
 	var origin, firstTurn string
-	if err := tx.QueryRowContext(ctx, `SELECT h.start_revision, h.start_projection,
+	if err := q.QueryRowContext(ctx, `SELECT h.start_revision, h.start_projection,
 		r.origin_kind, COALESCE(CAST(r.trigger_event_id AS TEXT),'')
 		FROM run_fork_revision_heads h JOIN runs r ON r.run_id=h.run_id
 		WHERE h.run_id=$1 AND h.start_revision IS NOT NULL`, runID).Scan(&revision, &raw, &origin, &firstTurn); err != nil {
