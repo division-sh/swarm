@@ -71,10 +71,13 @@ func runChannelOnboardingCrashBoundaryE2E(t *testing.T, boundary channelonboardi
 			predecessorCallback, predecessorSigning := "", ""
 			var recoveredPublication channelOnboardingPersistedHandoff
 			var command channelOnboardingCLICommand
-			if boundary == channelonboarding.TestAfterCredentialWriteBeforeCheckpoint || boundary == channelonboarding.TestAfterActivationCommitBeforePublication {
+			if boundary == channelonboarding.TestAfterCredentialWriteBeforeCheckpoint || boundary == channelonboarding.TestAfterActivationCommitBeforePublication || boundary == channelonboarding.TestAfterProcessPublicationBeforePromotion {
 				chatID := int64(7213)
 				if boundary == channelonboarding.TestAfterActivationCommitBeforePublication {
 					chatID = 7214
+				}
+				if boundary == channelonboarding.TestAfterProcessPublicationBeforePromotion {
+					chatID = 7216
 				}
 				predecessor = runChannelOnboardingCLIJourney(t, harness.opts.ConfigPath, harness.endpoint, harness.provider, "connect", "crash-boundary-token", chatID, "private", 0)
 				if predecessor.Operation == nil || predecessor.Activation == nil || predecessor.Readiness == nil || !predecessor.Readiness.Ready {
@@ -91,6 +94,9 @@ func runChannelOnboardingCrashBoundaryE2E(t *testing.T, boundary channelonboardi
 				t.Cleanup(func() { _ = db.Close() })
 				// Neither crash cut may interrupt the predecessor's provider write.
 				cardMessageID := waitChannelCardMessageID(t, db, driver, "telegram-ingress")
+				if card := harness.provider.Delivery(cardMessageID - 1); card == nil || !strings.HasPrefix(fmt.Sprint(card["text"]), "Retire service") {
+					t.Fatalf("%s %s predecessor card = %#v", backend, boundary, card)
+				}
 				if boundary == channelonboarding.TestAfterCredentialWriteBeforeCheckpoint {
 					native := waitNativeQualification(t, harness, predecessor.Operation.OperationID, channelnative.QualificationQualified, time.Time{})
 					t.Logf("E2E-13 predecessor settled before credential cut: operation=%s setting=%s generation=%d locale=%s/%d observed=%s card_message_id=%d", predecessor.Operation.OperationID, native.SettingID, native.SettingGeneration, native.ClientLanguage, native.LocaleRevision, native.ObservedAt.Format(time.RFC3339Nano), cardMessageID)
@@ -110,10 +116,6 @@ func runChannelOnboardingCrashBoundaryE2E(t *testing.T, boundary channelonboardi
 				claim := submitChannelOnboardingClaimWithChatType(t, successorCallback, successorSigning, challenge, 7214, 8214, -9214, "group", "crash_boundary_rebind")
 				requireChannelClaimDisposition(t, "E2E-14 successor claim", claim, "consumed_by_binding")
 			} else if boundary == channelonboarding.TestAfterProcessPublicationBeforePromotion {
-				predecessor = runChannelOnboardingCLIJourney(t, harness.opts.ConfigPath, harness.endpoint, harness.provider, "connect", "crash-boundary-token", 7216, "private", 0)
-				if predecessor.Activation == nil || predecessor.Readiness == nil || !predecessor.Readiness.Ready {
-					t.Fatalf("%s E2E-16 predecessor = %#v", backend, predecessor)
-				}
 				barrier.Arm()
 				command = startChannelOnboardingCLICommand(t, harness.opts.ConfigPath, harness.endpoint, []string{"channel", "reconnect", "telegram", "--yes"}, "")
 			} else {
@@ -176,8 +178,8 @@ func runChannelOnboardingCrashBoundaryE2E(t *testing.T, boundary channelonboardi
 				if beforeRow.Readiness == nil || beforeRow.Readiness.Ready {
 					t.Fatalf("%s E2E-16 reported READY before registration promotion: %#v", backend, beforeRow.Readiness)
 				}
-				if registrations, deliveries := harness.provider.Counts(); registrations != 1 || deliveries != 1 {
-					t.Fatalf("%s E2E-16 effects before promotion = %d/%d, want predecessor 1/1", backend, registrations, deliveries)
+				if registrations, deliveries := harness.provider.Counts(); registrations != 1 || deliveries != 2 {
+					t.Fatalf("%s E2E-16 effects before promotion = %d/%d, want predecessor registration, confirmation, and joined card 1/2", backend, registrations, deliveries)
 				}
 			}
 
@@ -245,7 +247,7 @@ func runChannelOnboardingCrashBoundaryE2E(t *testing.T, boundary channelonboardi
 				}
 			}
 			if boundary == channelonboarding.TestAfterProcessPublicationBeforePromotion {
-				wantRegistrations, wantDeliveries = 2, 2
+				wantRegistrations, wantDeliveries = 2, 3
 				afterRow := requireChannelOnboardingOperationRow(t, harness, responsibilityID)
 				assertChannelOnboardingIdentityPreserved(t, string(backend)+" E2E-16 restart", predecessor, afterRow)
 				if afterRow.Activation == nil || predecessor.Activation == nil || afterRow.Activation.Revision <= predecessor.Activation.Revision ||
