@@ -45125,6 +45125,28 @@ filesystem_source_model:
     process_epoch_rule: |
       Serve admits its source directory once before runtime publication and keeps it fixed for the process epoch. Editing the original directory cannot replace a live runtime source. A different local artifact requires a new serve process; public persisted-hash boot, project reload and dynamic project replacement are retired rather than emulated. Internal retained contexts remain exact stored-artifact authority.
       Retained-source destructive reset is an execution-lifetime reconstruction of that identical admitted set, not source replacement. It consumes the already admitted artifact bytes and canonical serve construction inputs to mint fresh runtime and projection lifetimes. It does not restore retired bundle-management helpers or admit edited source bytes.
+    startup_bundle_upgrade:
+      policy_owner: internal/runtime/runbundle.AdmitPinnedSources
+      commit_owner: internal/store/internal/startupownership.commitSourceSetTx
+      rule: |
+        A new serve process admits the directory as its candidate bundle. A different hash alone is not a refusal.
+        Verify reads the same admission policy through the selected-store snapshot. Before any live-run or source-set
+        write, serve refuses if an instance occupies a removed stage; a claimed or queued delivery targets a removed
+        node, agent or handler; an open decision card targets a removed gate; a join or barrier obligation is in flight;
+        a field type is incompatible with its held value; or a queued event's schema changed. The refusal is typed,
+        names every blocked instance and source location using verify's text, and exits 3 without starting serve.
+        One blocked instance prevents deployment startup until the directory is fixed. The admitted run source and
+        retained state remain unchanged on refusal; held values are validated, never migrated by this policy.
+        The retained source-set transition rechecks native state before writing. Run source bindings, removed-rule
+        workflow timer cancellation and their facts commit or roll back with the source head. Removed-rule timers
+        are canceled with cause rule_removed, not blockers; parked instances retain their existing timer holds.
+        Local timer execution is restored only after acknowledged admission. No alternate writer or reload router exists.
+      restart_recovery: |
+        Existing recovery settles and dead-letters interrupted attempts before replacement and dispatch, without
+        re-driving them. Startup reports successfully returned nonzero process-wide counts as attempts abandoned
+        before launch and attempts whose outcome is unconfirmed. It names swarm event list --delivery-status dead_letter
+        as the command listing dead-lettered deliveries, not every counted external-effect attempt. Recovery errors
+        and existing run-status dead-letter reporting remain unchanged; no new persisted notice or pump is introduced.
   startup_integrity:
     owner: internal/runtime/startuprecovery.Recover
     rule: Both selected stores expose the read-only StartupRecovery availability product. Before runtime startup or readiness, serve checks all active non-standing run source references, then reads each distinct available source artifact through the selected artifact reader and validates canonical bytes and exact requested hash with sourceartifact.Persisted.Validate. Row presence alone is not integrity. Missing, corrupt, mismatched, or unreadable artifacts fail closed with the affected run and hash; this path never deletes or terminalizes run history, removes containers, or restores source files. Pending destructive-reset recovery is a separate operation and must settle before ordinary startup.

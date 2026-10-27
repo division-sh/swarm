@@ -50,7 +50,7 @@ func AdmitPinnedSources(ctx context.Context, reader UpgradeReader, candidate sem
 	}
 	hash, err := upgradeSourceHash(candidate)
 	if err != nil {
-		return nil, err
+		return nil, runtimefailures.Wrap(runtimefailures.ClassSchemaInvalid, "pinned_source_hash_invalid", "run-bundle", "admit_sources", nil, err)
 	}
 	plan := &UpgradePlan{BundleHash: hash, Runs: map[string]string{}, Sources: map[string]semanticview.Source{hash: candidate}}
 	availabilities, err := reader.ActiveNonStandingRunBundleAvailabilities(ctx)
@@ -76,7 +76,7 @@ func AdmitPinnedSources(ctx context.Context, reader UpgradeReader, candidate sem
 			}
 			before, err := upgradeSourceHash(current)
 			if err != nil || before != available.BundleHash {
-				return nil, errors.Join(fmt.Errorf("bundle upgrade source differs from run %s", available.RunID), err)
+				return nil, runtimefailures.Wrap(runtimefailures.ClassSchemaInvalid, "pinned_source_hash_invalid", "run-bundle", "admit_sources", nil, errors.Join(fmt.Errorf("bundle upgrade source differs from run %s", available.RunID), err))
 			}
 			plan.Sources[available.BundleHash] = current
 		}
@@ -392,8 +392,8 @@ func upgradeLocation(source semanticview.Source, flow, family, member string) st
 	}
 	if family == "events" && member != "" {
 		proof := semanticview.ResolveFlowEventProof(source, flow, member)
-		if proof.CatalogKey != "" {
-			member = "[" + strconv.Quote(proof.CatalogKey) + "]"
+		if proof.Local != "" {
+			member = "[" + strconv.Quote(proof.Local) + "]"
 		}
 	}
 	if location, found := bundle.IntroductionLocation(file, member, false); found {
