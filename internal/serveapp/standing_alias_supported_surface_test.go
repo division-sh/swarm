@@ -214,7 +214,7 @@ func proveA9CrossContextAliasPromotion(t *testing.T, backend string) {
 	}
 	rt := servedTestProcessRuntime(t, first)
 	before, err := readServedLandingRuns(t.Context(), rt)
-	if err != nil || len(before) != 1 {
+	if err != nil || len(before) != 2 {
 		t.Fatalf("incumbent status=%+v err=%v", before, err)
 	}
 	definition := *contextDef
@@ -253,8 +253,8 @@ func proveA9EnabledAliasAdmission(t *testing.T, backend string) {
 	rt := servedTestProcessRuntime(t, process)
 	manager := <-managers
 	before, err := readServedLandingRuns(t.Context(), rt)
-	if err != nil || len(before) != 1 {
-		t.Fatalf("dormant sibling acquired a generation: %+v err=%v", before, err)
+	if err != nil || len(before) != 2 {
+		t.Fatalf("declared flows did not retain their own native runs: %+v err=%v", before, err)
 	}
 	owner, err := credentials.NewSnapshotOwner(file)
 	if err != nil {

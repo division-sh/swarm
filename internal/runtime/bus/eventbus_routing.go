@@ -823,6 +823,9 @@ func (eb *EventBus) DispatchDeliveryContinuation(ctx context.Context, evt events
 	// Keep the accepted runtime carrier through receiver dispatch so retirement
 	// can cancel and join it without acquiring fresh runtime work.
 	receiverParent := ctx
+	if err := ctx.Err(); err != nil {
+		return runtimedeliverycontinuation.Fatal(err)
+	}
 	ctx = WithCurrentRuntimeEpoch(ctx)
 	if err := ensurePublishEpoch(ctx); err != nil {
 		return runtimedeliverycontinuation.Fatal(err)

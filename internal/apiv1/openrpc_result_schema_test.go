@@ -528,7 +528,7 @@ func successfulOperatorChannelRuntimeResult(methodName string) any {
 			"bundle_hash":     "bundle-v2:sha256:" + strings.Repeat("a", 64),
 			"bundle_identity": "support@1.0.0#bundle", "pack_inventory_generation": "inventory",
 			"runtime_instance_id":            "11111111-1111-4111-8111-111111111111",
-			"context_publication_generation": 1, "plan_generation": "plan", "target_generation": 1,
+			"context_publication_generation": 1, "plan_generation": "plan",
 		}
 		operation := map[string]any{
 			"operation_id": "00000000-0000-0000-0000-000000000806", "principal_id": "00000000-0000-0000-0000-000000000801",
@@ -546,9 +546,9 @@ func successfulOperatorChannelRuntimeResult(methodName string) any {
 				"actions_as_text": true, "edit": true, "acknowledgment": true, "inbox_listing": true,
 			},
 			"target": map[string]any{
-				"selector": "ingress:support:telegram", "service_id": "00000000-0000-0000-0000-000000000807",
-				"flow_path": "support", "flow_id": "telegram", "alias": "telegram", "provider": "telegram",
-				"generation": 1, "publication_sequence": 1, "admission_generation": strings.Repeat("b", 64),
+				"selector":  "ingress:support:telegram",
+				"flow_path": "support", "alias": "telegram", "provider": "telegram",
+				"admission_generation": strings.Repeat("b", 64),
 			},
 			"activation_posture": "webhook_registration", "identity_ceremony": "authenticated_text_challenge",
 			"provider_credential_role": "bot_token", "signing_credential_role": "signing_secret", "confirmation_operation": "send_message",

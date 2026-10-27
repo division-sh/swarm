@@ -46,7 +46,7 @@ func (s *serveRegistrationSelection) Release() {
 	})
 }
 
-func resolveServeRegistrationPairs(snapshot serveChannelActivationSnapshot, manager *runtime.RuntimeContextManager) (*serveRegistrationSelection, error) {
+func resolveServeRegistrationPairs(ctx context.Context, snapshot serveChannelActivationSnapshot, manager *runtime.RuntimeContextManager) (*serveRegistrationSelection, error) {
 	if manager == nil {
 		return nil, fmt.Errorf("runtime context manager is required for provider registration")
 	}
@@ -89,6 +89,13 @@ func resolveServeRegistrationPairs(snapshot serveChannelActivationSnapshot, mana
 		contextDef, err := exactActivationContext(contexts, activation.Coordinate)
 		if err != nil {
 			return fail(fmt.Errorf("channels.bindings.%s.register: %w", binding.BindingID(), err))
+		}
+		enabled, err := serveDeclaredRegistrationEnabled(ctx, manager, contextDef, binding)
+		if err != nil {
+			return fail(err)
+		}
+		if !enabled {
+			continue
 		}
 		target, err := exactContextTarget(contextDef, rawSelector)
 		if err != nil {
