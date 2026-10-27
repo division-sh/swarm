@@ -251,6 +251,38 @@ func TestBundleUpgradeAdmissionPreservesLiveWorkBothStores(t *testing.T) {
 					if availability.BundleHash != candidate.SourceArtifact.BundleHash() || !reflect.DeepEqual(timer, expected) {
 						t.Fatalf("successor rewrote its predecessor or lost uncaused cancellation: %+v", timer)
 					}
+					backSource := semanticview.Wrap(f.bundle)
+					back, err := runbundle.AdmitPinnedSources(original, reader, backSource, func(_ context.Context, hash string) (semanticview.Source, error) {
+						if hash == candidate.SourceArtifact.BundleHash() {
+							return view, nil
+						}
+						return backSource, nil
+					})
+					if err != nil {
+						t.Fatal(err)
+					}
+					backSet, err := agenttopology.NewSourceSetPlan([]agenttopology.SourceCoordinate{{BundleHash: back.BundleHash}}, nil)
+					if err != nil {
+						t.Fatal(err)
+					}
+					if _, err := capability.RestoreSourceSet(original, agenttopology.SourceSetCommitRequest{
+						OperationID: uuid.NewString(), ExpectedRevision: currentHead.Revision, Plan: backSet, BundleUpgrade: back,
+					}); err != nil {
+						t.Fatalf("return compatible source B to A: %v", err)
+					}
+					active, err := timerReader.ListWorkflowTimerActivations(original, runID, activation.Instance.EntityID, true)
+					if err != nil || len(active) != 1 || active[0].Ref.ActivationID == beforeTimer.Ref.ActivationID || active[0].Ref.ActivationID == successor.Ref.ActivationID {
+						t.Fatalf("A -> B -> A lost its genuinely new active successor: %+v, %v", active, err)
+					}
+					backArm, err := pipeline.SelectWorkflowTimerSuccessor(view, backSource, successor, activation.Instance)
+					if err != nil || backArm == nil || !reflect.DeepEqual(active[0], *backArm) || !active[0].FireAt.Equal(beforeTimer.FireAt) {
+						t.Fatalf("returning A arm lost original cause or selected facts: %+v, %v", active, err)
+					}
+					cancelledB, found, err := timerReader.LoadWorkflowTimerActivation(original, successor.Ref.ActivationID)
+					successor.Status = "cancelled"
+					if err != nil || !found || !reflect.DeepEqual(cancelledB, successor) || !reflect.DeepEqual(readTimer(), expected) {
+						t.Fatalf("returning A revived history or rewrote B: %+v, %v", cancelledB, err)
+					}
 				} else if availability.BundleHash != candidate.SourceArtifact.BundleHash() || timer.Status != "cancelled" || timer.CancelCause != pipeline.WorkflowTimerCancelCauseRuleRemoved || timer.CancelledAt.IsZero() || timer.SourceTimerID != "" || !timer.FireAt.Equal(beforeTimer.FireAt) {
 					t.Fatalf("timer and run did not switch atomically: run=%+v timer=%+v", availability, timer)
 				}
