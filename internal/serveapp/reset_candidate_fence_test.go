@@ -259,7 +259,7 @@ func TestResetCandidateSetFencesConsumersWhileSecondPreparesBothStores(t *testin
 					if err != nil {
 						t.Fatal(err)
 					}
-					assertRegisteredStartupAbort(t, cancel, release, candidates, manager, failure == "normal_active_release")
+					assertRegisteredStartupAbort(t, ctx, cancel, release, candidates, manager, failure == "normal_active_release")
 					return
 				}
 				if err := manager.StageRecoveredRuntimeContexts(definitions...); err != nil {
@@ -387,14 +387,14 @@ func TestResetCandidateSetFencesConsumersWhileSecondPreparesBothStores(t *testin
 					t.Fatal(prepared.err)
 				}
 				if failure == "registered_release" {
-					assertRegisteredStartupAbort(t, cancel, prepared.release, candidates, manager, false)
+					assertRegisteredStartupAbort(t, ctx, cancel, prepared.release, candidates, manager, false)
 					return
 				}
 				if err := manager.ReleaseResetExecution(definitions...); err != nil {
 					t.Fatal(err)
 				}
 				if failure == "reset_active_release" {
-					assertRegisteredStartupAbort(t, cancel, prepared.release, candidates, manager, true)
+					assertRegisteredStartupAbort(t, ctx, cancel, prepared.release, candidates, manager, true)
 					return
 				}
 				if err := prepared.release(); err != nil {
@@ -419,7 +419,7 @@ func TestResetCandidateSetFencesConsumersWhileSecondPreparesBothStores(t *testin
 	}
 }
 
-func assertRegisteredStartupAbort(t *testing.T, cancel context.CancelFunc, release func() error, candidates []serveRuntimeBundleContext, manager *runtime.RuntimeContextManager, active bool) {
+func assertRegisteredStartupAbort(t *testing.T, ctx context.Context, cancel context.CancelFunc, release func() error, candidates []serveRuntimeBundleContext, manager *runtime.RuntimeContextManager, active bool) {
 	t.Helper()
 	var accepted *runtime.RuntimeContextUse
 	if active {
@@ -428,7 +428,7 @@ func assertRegisteredStartupAbort(t *testing.T, cancel context.CancelFunc, relea
 			t.Fatal("registered composition has no declared ingress target", err)
 		}
 		target := targets[0]
-		accepted, _, err = manager.AcquireIngress(context.Background(), target.Alias, target.Provider)
+		accepted, _, err = manager.AcquireIngress(ctx, target.Alias, target.Provider)
 		if err != nil || accepted == nil {
 			t.Fatalf("acquire actual standing ingress work: %v", err)
 		}
@@ -438,6 +438,14 @@ func assertRegisteredStartupAbort(t *testing.T, cancel context.CancelFunc, relea
 	aborted := make(chan error, 1)
 	go func() { aborted <- release() }()
 	if accepted != nil {
+		waitForServeStory(t, func() bool {
+			for _, candidate := range candidates {
+				if manager.LookupBundleHashStatus(candidate.sourceArtifactFact.BundleHash()).Loaded() {
+					return false
+				}
+			}
+			return true
+		})
 		select {
 		case <-accepted.WorkContext().Done():
 		case <-time.After(10 * time.Second):

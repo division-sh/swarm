@@ -83,7 +83,7 @@ func readChannelDeliverySettlementDiagnostic(ctx context.Context, db *sql.DB, de
 			a.bundle_hash, a.bundle_identity, a.pack_inventory_generation,
 			CAST(a.runtime_instance_id AS TEXT) AS runtime_instance_id,
 			CAST(a.context_publication_generation AS TEXT) AS context_publication_generation,
-			a.plan_generation, CAST(a.target_generation AS TEXT) AS target_generation,
+			a.plan_generation,
 			CAST(a.conversation_reference=p.conversation_reference AS TEXT) AS conversation_matches,
 			CAST(o.operation_id AS TEXT) AS onboarding_operation_id, o.phase AS onboarding_phase,
 			CAST(o.identity_operation_id AS TEXT) AS identity_operation_id
@@ -141,7 +141,7 @@ func readChannelDeliverySettlementDiagnostic(ctx context.Context, db *sql.DB, de
 			"previous_receipt_operation_id", "principal_id", "interface_key", "delivery_epoch",
 			"binding_revision", "activation_id", "activation_revision", "bundle_hash", "bundle_identity",
 			"pack_inventory_generation", "runtime_instance_id", "context_publication_generation",
-			"plan_generation", "target_generation"} {
+			"plan_generation"} {
 			if value, found := authority[key]; found {
 				coordinate[key] = value
 			}

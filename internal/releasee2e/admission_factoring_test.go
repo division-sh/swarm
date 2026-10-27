@@ -143,7 +143,7 @@ func proveFactoringCompiledStandingSubjects(t *testing.T, binary, backend string
 		}
 		return p
 	}
-	p := start(0)
+	p := start(2)
 	for _, flow := range []string{".", "beta"} {
 		if !strings.Contains(p.output.String(), "DORMANT ingress "+flow+"/telegram") {
 			t.Fatalf("lost distinct dormant declaration %s\n%s", flow, p.output.String())
