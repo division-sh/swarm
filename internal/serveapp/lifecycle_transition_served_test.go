@@ -244,8 +244,9 @@ func TestServedCompiledLoopEscapeSuppressesOrdinaryRepeatOnBothStores(t *testing
 			currentHistory := func() []pipeline.WorkflowTransitionRecord {
 				return decodeLifecycleTransitionHistory(t, storetest.ObserveWriterFlow(t, context.Background(), rt.selected, started.RunID, entityID).Config)
 			}
+			receiverStateReader := requireReceiverProofStateReader(t, rt.selected)
 			readLoop := func() loopruntime.PublicActivation {
-				return readLifecycleLoop(t, servedControlProofRuntime{ReceiverStateReader: requireReceiverProofStateReader(t, rt.selected)}, started.RunID, entityID)
+				return readLifecycleLoop(t, receiverStateReader, started.RunID, entityID)
 			}
 			snapshot := func() string {
 				stored, err := storetest.ReadSelectedForkApplicationStorageSnapshot(context.Background(), rt.selected)

@@ -46,12 +46,12 @@ func TestServedLifecycleEmitterLoopEscapeJourney(t *testing.T) {
 			}
 			publish("loop.start", "loop-start", map[string]any{"seed": true})
 			requireServedEventPublishEntityState(t, rt.DB, rt.Backend, started.RunID, entityID, "drafting")
-			first := readLifecycleLoop(t, rt, started.RunID, entityID)
+			first := readLifecycleLoop(t, rt.ReceiverStateReader, started.RunID, entityID)
 			if first.Attempt != 1 || first.MaxAttempts != 2 || first.Status != loopruntime.StatusOpen {
 				t.Fatalf("first loop=%#v", first)
 			}
 			for attempt := 1; attempt <= 2; attempt++ {
-				current := readLifecycleLoop(t, rt, started.RunID, entityID)
+				current := readLifecycleLoop(t, rt.ReceiverStateReader, started.RunID, entityID)
 				if current.Attempt != attempt {
 					t.Fatalf("attempt=%#v", current)
 				}
@@ -65,7 +65,7 @@ func TestServedLifecycleEmitterLoopEscapeJourney(t *testing.T) {
 				}
 				requireServedEventPublishEntityState(t, rt.DB, rt.Backend, started.RunID, entityID, state)
 			}
-			closed := readLifecycleLoop(t, rt, started.RunID, entityID)
+			closed := readLifecycleLoop(t, rt.ReceiverStateReader, started.RunID, entityID)
 			if closed.Status != loopruntime.StatusClosed || closed.CloseReason != "escaped" || closed.Attempt != 2 || closed.RevisionID == first.RevisionID {
 				t.Fatalf("closed loop=%#v", closed)
 			}
@@ -83,11 +83,11 @@ func TestServedLifecycleEmitterLoopEscapeJourney(t *testing.T) {
 	}
 }
 
-func readLifecycleLoop(t *testing.T, rt servedControlProofRuntime, runID, entityID string) loopruntime.PublicActivation {
+func readLifecycleLoop(t *testing.T, reader receiverProofStateReader, runID, entityID string) loopruntime.PublicActivation {
 	t.Helper()
 	var loops []loopruntime.PublicActivation
-	err := rt.ReceiverStateReader.InspectSnapshot(t.Context(), func(ctx context.Context) error {
-		instances, err := rt.ReceiverStateReader.ListWorkflowInstances(ctx, runID)
+	err := reader.InspectSnapshot(t.Context(), func(ctx context.Context) error {
+		instances, err := reader.ListWorkflowInstances(ctx, runID)
 		if err != nil {
 			return err
 		}
@@ -97,7 +97,7 @@ func readLifecycleLoop(t *testing.T, rt servedControlProofRuntime, runID, entity
 				continue
 			}
 			matches++
-			_, exact, err := loadReceiverTargetState(ctx, rt.ReceiverStateReader, runID, instance.WorkflowName, instance.StorageRef, entityID)
+			_, exact, err := loadReceiverTargetState(ctx, reader, runID, instance.WorkflowName, instance.StorageRef, entityID)
 			if err != nil {
 				return err
 			}

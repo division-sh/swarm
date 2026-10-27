@@ -106,9 +106,13 @@ func publishedJoinFixture(t *testing.T) string {
 	if err := os.WriteFile(path, data, 0o600); err != nil {
 		t.Fatal(err)
 	}
+	preparationDeclaration := "join.prepared:\n  expected: [text]\n"
+	if flowID == "orders" {
+		preparationDeclaration += "  order_id: text\n"
+	}
 	for name, replacement := range map[string][2]string{
 		"schema.yaml": {"stages:\n  awaiting:", "stages:\n  preparing: {}\n  awaiting:"},
-		"events.yaml": {"item.completed:\n", "join.prepared:\n  expected: [text]\nitem.completed:\n  expected: [text]\n"},
+		"events.yaml": {"item.completed:\n", preparationDeclaration + "item.completed:\n  expected: [text]\n"},
 		"nodes.yaml":  {"  event_handlers:\n", "  event_handlers:\n    join.prepared:\n      data_accumulation:\n        writes: [expected]\n      advances_to: awaiting\n"},
 	} {
 		path := filepath.Join(root, flowID, name)
@@ -122,7 +126,32 @@ func publishedJoinFixture(t *testing.T) string {
 		if strings.Count(string(body), replacement[0]) != 1 {
 			t.Fatalf("published join fixture lost its exact %s preparation cut", name)
 		}
-		if err := os.WriteFile(path, []byte(strings.Replace(string(body), replacement[0], replacement[1], 1)), 0o600); err != nil {
+		updated := strings.Replace(string(body), replacement[0], replacement[1], 1)
+		if name == "schema.yaml" {
+			const input = "    - item.completed\n"
+			if strings.Count(updated, input) != 1 {
+				t.Fatal("published join fixture lost its exact input declaration")
+			}
+			updated = strings.Replace(updated, input, input+"    - join.prepared\n", 1)
+		}
+		if err := os.WriteFile(path, []byte(updated), 0o600); err != nil {
+			t.Fatal(err)
+		}
+	}
+	if flowID == "orders" {
+		path := filepath.Join(root, "schema.yaml")
+		body, err := os.ReadFile(path)
+		if err != nil {
+			t.Fatal(err)
+		}
+		const inputs = "inputs: [item.completed]"
+		const connection = "  - {event: item.completed, from: ., to: orders, resolution: select}\n"
+		if strings.Count(string(body), inputs) != 1 || strings.Count(string(body), connection) != 1 {
+			t.Fatal("published orders join fixture lost its exact root input handoff")
+		}
+		updated := strings.Replace(string(body), inputs, "inputs: [item.completed, join.prepared]", 1)
+		updated = strings.Replace(updated, connection, connection+"  - {event: join.prepared, from: ., to: orders, resolution: select}\n", 1)
+		if err := os.WriteFile(path, []byte(updated), 0o600); err != nil {
 			t.Fatal(err)
 		}
 	}
@@ -243,12 +272,28 @@ func seedPublishedJoinSource(t *testing.T, ctx context.Context, selected any, ow
 	if !node.Valid() || matched != 1 || target.InstancePath == "" {
 		t.Fatal("published join preparation lost its exact constructed node")
 	}
-	preparation := eventtest.ExistingRunRootIngressWithRoutingSourceAndMode(uuid.NewString(), "join.prepared", "source-runtime", "",
-		[]byte(`{"expected":[]}`), 0, runID, events.EventEnvelope{}, events.NoRoutingSource(), at, executionmode.Mock)
+	preparationPayload := []byte(`{"expected":[]}`)
 	if target.TemplateID == "orders" {
-		preparation = eventtest.ExistingRunRootIngressWithRoutingSourceAndMode(preparation.ID(), "orders/join.prepared", "source-runtime", "",
-			preparation.Payload(), 0, runID, events.EventEnvelope{}, events.NoRoutingSource(), at, executionmode.Mock)
+		var fields map[string]json.RawMessage
+		if err := json.Unmarshal(event.Payload(), &fields); err != nil {
+			t.Fatal(err)
+		}
+		orderID, found := fields["order_id"]
+		if !found {
+			t.Fatal("published orders join preparation lost its creating input key")
+		}
+		var err error
+		preparationPayload, err = json.Marshal(map[string]json.RawMessage{"expected": json.RawMessage(`[]`), "order_id": orderID})
+		if err != nil {
+			t.Fatal(err)
+		}
 	}
+	preparationInput := semanticview.ResolveFlowEventProof(loaded.Source, target.TemplateID, "join.prepared")
+	if !preparationInput.HasSchema {
+		t.Fatal("published join preparation lost its admitted input declaration")
+	}
+	preparation := eventtest.ExistingRunRootIngressWithRoutingSourceAndMode(uuid.NewString(), events.EventType(preparationInput.EventKey()), "source-runtime", "",
+		preparationPayload, 0, runID, events.EventEnvelope{}, events.NoRoutingSource(), at, executionmode.Mock)
 	admission, err := rootruntime.NewRuntimePayloadAdmitter(nil, loaded.Source, loaded.SourceArtifactFact)(ctx, preparation, target.TemplateID)
 	if err != nil {
 		t.Fatal(err)
@@ -342,10 +387,21 @@ func seedPublishedOrdersJoinConstruction(t *testing.T, ctx context.Context, sele
 		t.Fatal(err)
 	}
 	constructors, err := pipeline.CompileFlowConstructors(loaded.Source, "orders")
-	if err != nil || len(constructors) != 1 {
-		t.Fatalf("orders fixture requires its exact existing constructor pin: count=%d err=%v", len(constructors), err)
+	if err != nil {
+		t.Fatal(err)
 	}
-	input := constructors[0].Input()
+	var input string
+	matched := 0
+	for _, constructor := range constructors {
+		declaration := semanticview.ResolveFlowEventProof(loaded.Source, "orders", constructor.Input())
+		if declaration.CatalogKey == "item.completed" {
+			input = constructor.Input()
+			matched++
+		}
+	}
+	if matched != 1 {
+		t.Fatalf("orders fixture requires one exact item.completed constructor pin: count=%d", matched)
+	}
 	declaration := semanticview.ResolveFlowEventProof(loaded.Source, "orders", input)
 	producer := semanticview.ResolveFlowEventProof(loaded.Source, semanticview.RootExecutionFlowID(loaded.Source), declaration.CatalogKey)
 	authoredSchema := declaration.IsAuthored(loaded.Source) ||

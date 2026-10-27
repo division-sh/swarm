@@ -10,6 +10,9 @@ import (
 	"strings"
 	"testing"
 	"time"
+
+	"github.com/division-sh/swarm/internal/runtime/pipeline"
+	"github.com/division-sh/swarm/internal/store/storetest"
 )
 
 // Fixed public contract expectations, independent of the implementation codec.
@@ -315,25 +318,32 @@ func executeNodeIdentityWork(t *testing.T, process *releaseServeProcess, hash, s
 // Fieldless flows have headers but no entity_state companion. Public commands
 // above prove execution; this inspection preserves the exact constructor IDs.
 func readNodeIdentityInstances(ctx context.Context, store goldenStoreSelection, runID string) ([]goldenEntitySummary, error) {
-	db, err := openLifecycleFailureInspection(store)
+	backend, location := "sqlite", store.inspectionSQLitePath
+	if store.inspectionPostgresDSN != "" {
+		backend, location = "postgres", store.inspectionPostgresDSN
+	}
+	selected, err := storetest.OpenReleaseProcessReadOnlyInspection(backend, location)
 	if err != nil {
 		return nil, err
 	}
-	defer db.Close()
-	rows, err := db.QueryContext(ctx, `SELECT entity_id, instance_path, current_state FROM flow_instances WHERE run_id=$1 ORDER BY instance_path`, runID)
-	if err != nil {
-		return nil, err
+	defer selected.Close()
+	reader, ok := selected.(pipeline.WorkflowInstancePersistenceReader)
+	if !ok {
+		return nil, fmt.Errorf("selected read-only inspection has no native workflow instance reader")
 	}
-	defer rows.Close()
 	var instances []goldenEntitySummary
-	for rows.Next() {
-		instance := goldenEntitySummary{RunID: runID}
-		if err := rows.Scan(&instance.EntityID, &instance.FlowInstance, &instance.CurrentState); err != nil {
-			return nil, err
+	err = selected.InspectSnapshot(ctx, func(ctx context.Context) error {
+		headers, err := reader.ListWorkflowInstances(ctx, runID)
+		if err != nil {
+			return err
 		}
-		instances = append(instances, instance)
-	}
-	return instances, rows.Err()
+		for _, header := range headers {
+			instances = append(instances, goldenEntitySummary{RunID: runID, EntityID: header.EntityID,
+				FlowInstance: header.StorageRef, CurrentState: header.CurrentState})
+		}
+		return nil
+	})
+	return instances, err
 }
 
 func assertNodeIdentityConstructedTree(t *testing.T, entities []goldenEntitySummary, runID, selectedScope string) {
