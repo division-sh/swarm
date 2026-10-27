@@ -37577,22 +37577,14 @@ api_specification:
         additionalProperties: false
         required:
           - selector
-          - service_id
           - flow_path
-          - flow_id
           - alias
           - provider
-          - generation
-          - publication_sequence
           - admission_generation
         properties:
           selector: {type: string, minLength: 1}
-          service_id: {$ref: '#/components/schemas/OpaqueId'}
-          flow_id: {type: string, minLength: 1}
           alias: {type: string, minLength: 1}
           provider: {type: string, minLength: 1}
-          generation: {type: integer, minimum: 0}
-          publication_sequence: {type: integer, minimum: 0}
           admission_generation: {type: string, pattern: '^[0-9a-f]{64}$'}
           signing_credential_key: {type: string}
           flow_path:

@@ -584,7 +584,7 @@ func TestResolveServeRegistrationPairsRejectsUnsignedIngressTarget(t *testing.T)
 		t.Fatal(err)
 	}
 	snapshot := serveChannelActivationSnapshot{}
-	selection, err := resolveServeRegistrationPairs(snapshot, manager)
+	selection, err := resolveServeRegistrationPairs(context.Background(), snapshot, manager)
 	var pairs []runtimepublicingress.RegistrationPair
 	if selection != nil {
 		defer selection.Release()

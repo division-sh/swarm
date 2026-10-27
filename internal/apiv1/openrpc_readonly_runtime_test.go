@@ -1007,7 +1007,7 @@ func readOnlyOnboardingProbeResult() map[string]any {
 	coordinate := map[string]any{
 		"bundle_hash": readOnlyProbeBundleHash, "bundle_identity": "probe@1.0.0#bundle",
 		"pack_inventory_generation": "sha256:inventory", "context_publication_generation": 1,
-		"plan_generation": "sha256:plan", "target_generation": 1,
+		"plan_generation": "sha256:plan",
 	}
 	return map[string]any{
 		"operation": map[string]any{
@@ -1021,9 +1021,9 @@ func readOnlyOnboardingProbeResult() map[string]any {
 		"candidate": map[string]any{
 			"provider": "telegram", "interface": identity, "coordinate": coordinate,
 			"target": map[string]any{
-				"selector": "ingress:probe:telegram", "service_id": "00000000-0000-4000-8000-000000000209",
-				"flow_path": "probe", "flow_id": "telegram", "alias": "telegram", "provider": "telegram",
-				"generation": 1, "publication_sequence": 1, "admission_generation": strings.Repeat("a", 64),
+				"selector":  "ingress:probe:telegram",
+				"flow_path": "probe", "alias": "telegram", "provider": "telegram",
+				"admission_generation": strings.Repeat("a", 64),
 			},
 			"activation_posture": "webhook_registration", "identity_ceremony": "authenticated_text_challenge",
 			"provider_credential_role": "bot_token", "confirmation_operation": "telegram.send_message",

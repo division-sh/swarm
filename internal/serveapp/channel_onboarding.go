@@ -395,7 +395,7 @@ func reconcileServeProviderRegistrations(ctx context.Context, generation runtime
 	if err != nil {
 		return err
 	}
-	selection, err := resolveServeRegistrationPairs(snapshot, manager)
+	selection, err := resolveServeRegistrationPairs(ctx, snapshot, manager)
 	if err != nil {
 		return err
 	}

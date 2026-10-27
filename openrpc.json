@@ -15393,32 +15393,17 @@
             "minLength": 1,
             "type": "string"
           },
-          "flow_id": {
-            "minLength": 1,
-            "type": "string"
-          },
           "flow_path": {
             "minLength": 1,
             "type": "string"
-          },
-          "generation": {
-            "minimum": 0,
-            "type": "integer"
           },
           "provider": {
             "minLength": 1,
             "type": "string"
           },
-          "publication_sequence": {
-            "minimum": 0,
-            "type": "integer"
-          },
           "selector": {
             "minLength": 1,
             "type": "string"
-          },
-          "service_id": {
-            "$ref": "#/components/schemas/OpaqueId"
           },
           "signing_credential_key": {
             "type": "string"
@@ -15426,13 +15411,9 @@
         },
         "required": [
           "selector",
-          "service_id",
           "flow_path",
-          "flow_id",
           "alias",
           "provider",
-          "generation",
-          "publication_sequence",
           "admission_generation"
         ],
         "type": "object"
