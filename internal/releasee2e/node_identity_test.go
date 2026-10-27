@@ -228,7 +228,7 @@ func executeNodeIdentityWork(t *testing.T, process *releaseServeProcess, hash, s
 	}
 	emittedEntityIDs := map[string]string{
 		"work.processed":             admitted.RunID,
-		"work.routed":                admitted.RunID,
+		"work.routed":                "84ed5257-7dbc-5111-855e-827abd36948b", // Cross-flow publication carries its target identity.
 		"left/work.processed":        "84ed5257-7dbc-5111-855e-827abd36948b",
 		"left/work.observed":         "84ed5257-7dbc-5111-855e-827abd36948b",
 		"right/work.processed":       "60897d8d-cc87-5daa-b159-577bf736383b",
