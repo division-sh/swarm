@@ -20,6 +20,17 @@ import (
 	"github.com/division-sh/swarm/internal/checkoutsource"
 )
 
+func TestDevModeDoesNotImplicitlyAbandonRuns(t *testing.T) {
+	root := repoRootForRuntimeWriterGuard(t)
+	body, err := os.ReadFile(filepath.Join(root, "internal", "cliapp", "cli.go"))
+	if err != nil {
+		t.Fatalf("read serve CLI composition: %v", err)
+	}
+	if strings.Contains(string(body), "AbandonActiveRuns = true") {
+		t.Fatal("serve CLI restored implicit active-run abandonment")
+	}
+}
+
 func TestOrdinaryForkAbsentCutFaultOwnsExactOriginCAS(t *testing.T) {
 	path := filepath.Join(repoRootForRuntimeWriterGuard(t), "internal/store/internal/backend/runlifecycle/test_receiver_fork_cut.go")
 	file, err := parser.ParseFile(token.NewFileSet(), path, nil, 0)
