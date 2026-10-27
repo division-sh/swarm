@@ -430,7 +430,10 @@ func runFullLifecycleDevFreshJourney(
 	if restartedHash := requireFullLifecycleHealth(t, process.rpc); restartedHash != bundleHash {
 		t.Fatalf("fresh dev epoch bundle = %s, want unchanged source %s", restartedHash, bundleHash)
 	}
-	fresh := waitForFullLifecycleStandingRun(t, process.rpc, bundleHash, standing.RunID)
+	fresh := waitForFullLifecycleStandingRun(t, process.rpc, bundleHash, "")
+	if fresh.RunID == standing.RunID {
+		t.Fatalf("fresh dev epoch reused predecessor run %s", standing.RunID)
+	}
 	if !fresh.StartedAt.After(standing.StartedAt) {
 		t.Fatalf("fresh dev standing started_at = %s, want later than predecessor %s (checkpoint=%#v)", fresh.StartedAt, standing.StartedAt, checkpoint)
 	}
