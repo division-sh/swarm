@@ -35,7 +35,7 @@ import (
 	"github.com/google/uuid"
 )
 
-func selectedExternalResourceFixture(t *testing.T, backend string) *deploymentResourceFixture {
+func selectedExternalResourceFixture(t *testing.T, backend string, providerURLs ...string) *deploymentResourceFixture {
 	t.Helper()
 	repo := conformanceRepoRoot(t)
 	root := filepath.Join(t.TempDir(), "contracts")
@@ -66,8 +66,21 @@ func selectedExternalResourceFixture(t *testing.T, backend string) *deploymentRe
 		}},
 		Session: config.LLMSessionConfig{LockTTL: time.Second, RotateAfterTurns: 40, RotateOnParseFailures: 3},
 	}}
-	f := newDeploymentResourceFixtureWithSource(t, backend, semanticview.Wrap(bundle), cfg)
-	return f
+	if len(providerURLs) == 0 {
+		return newDeploymentResourceFixtureWithSource(t, backend, semanticview.Wrap(bundle), cfg)
+	}
+	if len(providerURLs) != 1 {
+		t.Fatal("external fixture requires one ordinary provider endpoint")
+	}
+	cfg.LLM.OpenAICompatible.BaseURL = providerURLs[0]
+	credentials, err := runtimecredentials.NewFileStore(filepath.Join(t.TempDir(), "ordinary-provider-credentials.json"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := credentials.Set(t.Context(), llmselection.OpenAICompatibleCredentialEnv, "ordinary-external-test-key"); err != nil {
+		t.Fatal(err)
+	}
+	return newDeploymentResourceFixtureWithSourceAndProvider(t, backend, semanticview.Wrap(bundle), cfg, credentials)
 }
 
 func selectedExternalSourcePoint(t *testing.T, f *deploymentResourceFixture, runID string) string {

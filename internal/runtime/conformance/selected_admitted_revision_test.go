@@ -14,6 +14,7 @@ import (
 	"github.com/division-sh/swarm/internal/apiv1"
 	"github.com/division-sh/swarm/internal/events"
 	"github.com/division-sh/swarm/internal/events/eventtest"
+	"github.com/division-sh/swarm/internal/runtime/effects"
 	"github.com/division-sh/swarm/internal/runtime/runfork"
 	"github.com/division-sh/swarm/internal/runtime/runforkexecution"
 	"github.com/division-sh/swarm/internal/runtime/runforkreadiness"
@@ -54,7 +55,14 @@ func (f *admittedRevisionForkFixture) MaterializeRunForkForSelectedContractExecu
 func TestIssue2655ServedDeploymentKeepsAdmittedRevisionBothStores(t *testing.T) {
 	for _, backend := range []string{"sqlite", "postgres"} {
 		t.Run(backend, func(t *testing.T) {
-			f := selectedExternalResourceFixture(t, backend)
+			var calls atomic.Int64
+			provider := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+				calls.Add(1)
+				w.Header().Set("Content-Type", "application/json")
+				_, _ = w.Write([]byte(`{"model":"gpt-selected-external-proof","choices":[{"message":{"role":"assistant","content":"complete","tool_calls":[{"id":"emit-1","type":"function","function":{"name":"emit_task_completed","arguments":"{}"}}]}}],"usage":{"prompt_tokens":11,"completion_tokens":4,"total_tokens":15}}`))
+			}))
+			t.Cleanup(provider.Close)
+			f := selectedExternalResourceFixture(t, backend, provider.URL)
 			server := f.operatorServer(t)
 			path := filepath.Join(t.TempDir(), "row.jsonl")
 			if err := os.WriteFile(path, []byte("{}\n"), 0o600); err != nil {
@@ -63,13 +71,6 @@ func TestIssue2655ServedDeploymentKeepsAdmittedRevisionBothStores(t *testing.T) 
 			sourceRun := startDeploymentResourceRun(t, f, server, "--data", "task.assigned="+path)
 			atCutVersion := issue2655RunPinnedVersion(t, f, sourceRun)
 			postCutEvent := uuid.NewString()
-			var calls atomic.Int64
-			provider := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-				calls.Add(1)
-				w.Header().Set("Content-Type", "application/json")
-				_, _ = w.Write([]byte(`{"model":"gpt-selected-external-proof","choices":[{"message":{"role":"assistant","content":"complete","tool_calls":[{"id":"emit-1","type":"function","function":{"name":"emit_task_completed","arguments":"{}"}}]}}],"usage":{"prompt_tokens":11,"completion_tokens":4,"total_tokens":15}}`))
-			}))
-			t.Cleanup(provider.Close)
 			probe := &admittedRevisionForkFixture{SelectedContractForkLifecycle: f.selected.(runforkexecution.SelectedContractForkLifecycle)}
 			probe.advance = func(ctx context.Context, runID string) {
 				ctx = startupownership.CarryMutationAuthority(ctx, f.ctx)
@@ -109,6 +110,17 @@ func TestIssue2655ServedDeploymentKeepsAdmittedRevisionBothStores(t *testing.T) 
 			}
 			waitSelectedDeploymentExecutionClosed(t, ctx, f, result.ForkRunID)
 			assertIssue2655ChildCutContents(t, f.ctx, f, sourceRun, result.ForkRunID, probe.point, postCutEvent, atCutVersion)
+			for {
+				observed := selectedExternalAttempts(t, f, result.ForkRunID)
+				if len(observed) == 1 && observed[0].State == effects.StateSettled {
+					break
+				}
+				select {
+				case <-ctx.Done():
+					t.Fatalf("ordinary successor did not settle its provider attempt within the original bound: attempts=%+v err=%v", observed, ctx.Err())
+				case <-time.After(10 * time.Millisecond):
+				}
+			}
 			if calls.Load() != 1 {
 				t.Fatalf("provider calls=%d want one", calls.Load())
 			}

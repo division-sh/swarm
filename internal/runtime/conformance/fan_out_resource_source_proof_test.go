@@ -15,6 +15,7 @@ import (
 
 	runtimepkg "github.com/division-sh/swarm/internal/runtime"
 	"github.com/division-sh/swarm/internal/runtime/contracts"
+	runtimecredentials "github.com/division-sh/swarm/internal/runtime/credentials"
 	"github.com/division-sh/swarm/internal/runtime/pipeline"
 	"github.com/division-sh/swarm/internal/runtime/runfork"
 	"github.com/division-sh/swarm/internal/runtime/runforkexecution"
@@ -69,17 +70,18 @@ func deploymentResourceSourceWithAgent(t *testing.T, includeAgent bool) semantic
 }
 
 type deploymentResourceFixture struct {
-	selected     notifyAllChildrenStore
-	db           *sql.DB
-	postgresDSN  string
-	source       semanticview.Source
-	runtime      notifyAllChildrenRuntime
-	topology     *notifyAllChildrenProcessTopology
-	ctx          context.Context
-	liveContexts *runtimepkg.RuntimeContextManager
-	config       *config.Config
-	forkAgents   runforkexecution.SelectedContractAgentRuntimeOptions
-	forkRequest  atomic.Pointer[runfork.ForkOperationRequest]
+	selected                    notifyAllChildrenStore
+	db                          *sql.DB
+	postgresDSN                 string
+	source                      semanticview.Source
+	runtime                     notifyAllChildrenRuntime
+	topology                    *notifyAllChildrenProcessTopology
+	ctx                         context.Context
+	liveContexts                *runtimepkg.RuntimeContextManager
+	config                      *config.Config
+	ordinaryProviderCredentials runtimecredentials.Store
+	forkAgents                  runforkexecution.SelectedContractAgentRuntimeOptions
+	forkRequest                 atomic.Pointer[runfork.ForkOperationRequest]
 }
 
 type deploymentFanOutDiagnostic struct {
@@ -103,13 +105,19 @@ func newDeploymentResourceFixtureWithAgent(t *testing.T, backend string, include
 
 func newDeploymentResourceFixtureWithSource(t *testing.T, backend string, source semanticview.Source, configs ...*config.Config) *deploymentResourceFixture {
 	t.Helper()
-	f := &deploymentResourceFixture{source: source}
 	if len(configs) > 1 {
 		t.Fatal("deployment fixture accepts one ordinary runtime configuration")
 	}
+	var cfg *config.Config
 	if len(configs) == 1 {
-		f.config = configs[0]
+		cfg = configs[0]
 	}
+	return newDeploymentResourceFixtureWithSourceAndProvider(t, backend, source, cfg, nil)
+}
+
+func newDeploymentResourceFixtureWithSourceAndProvider(t *testing.T, backend string, source semanticview.Source, cfg *config.Config, credentials runtimecredentials.Store) *deploymentResourceFixture {
+	t.Helper()
+	f := &deploymentResourceFixture{source: source, config: cfg, ordinaryProviderCredentials: credentials}
 	switch backend {
 	case "sqlite":
 		selected := storetest.StartSQLiteRuntimeStore(t)
@@ -134,9 +142,10 @@ func (f *deploymentResourceFixture) boot(t *testing.T) {
 	t.Helper()
 	f.liveContexts = nil
 	f.runtime = newNotifyAllChildrenRuntime(t, f.selected, f.db, f.source, time.Now, notifyAllChildrenRuntimeOptions{
-		ordinaryContext: true,
-		ordinaryConfig:  f.config,
-		processTopology: f.topology,
+		ordinaryContext:             true,
+		ordinaryConfig:              f.config,
+		ordinaryProviderCredentials: f.ordinaryProviderCredentials,
+		processTopology:             f.topology,
 		fanOutExecutor: func(coordinator *pipeline.PipelineCoordinator) startupownership.FanOutExecutor {
 			return deploymentFanOutDiagnostic{FanOutExecutor: coordinator, t: t}
 		},

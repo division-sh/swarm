@@ -34,6 +34,7 @@ import (
 	runtimeflowidentity "github.com/division-sh/swarm/internal/runtime/core/flowidentity"
 	"github.com/division-sh/swarm/internal/runtime/core/worklifetime"
 	runtimecorrelation "github.com/division-sh/swarm/internal/runtime/correlation"
+	runtimecredentials "github.com/division-sh/swarm/internal/runtime/credentials"
 	runtimedeliverycontinuation "github.com/division-sh/swarm/internal/runtime/deliverycontinuation"
 	runtimedelivery "github.com/division-sh/swarm/internal/runtime/deliverylifecycle"
 	runtimeeffects "github.com/division-sh/swarm/internal/runtime/effects"
@@ -102,22 +103,23 @@ type notifyAllChildrenRuntime struct {
 }
 
 type notifyAllChildrenRuntimeOptions struct {
-	ordinaryContext        bool
-	ordinaryConfig         *config.Config
-	diagnosticOverlap      bool
-	executionPosture       executionposture.Posture
-	realMockAgents         bool
-	agentGate              *notifyAllChildrenAgentGate
-	processTopology        *notifyAllChildrenProcessTopology
-	sourceArtifactFact     runtimecorrelation.SourceArtifactFact
-	enableGenericSchedules bool
-	maintenanceInterval    time.Duration
-	fanOutExecutor         func(*runtimepipeline.PipelineCoordinator) runtimestartupownership.FanOutExecutor
-	fanOutWorkers          *int
-	nestedPublications     *nestedPublicationLifetime
-	testLifecycleProbe     runtimelifecycleprobe.Observer
-	deliveryLifecycle      runtimedelivery.Store
-	deferContinuationStart bool
+	ordinaryContext             bool
+	ordinaryConfig              *config.Config
+	ordinaryProviderCredentials runtimecredentials.Store
+	diagnosticOverlap           bool
+	executionPosture            executionposture.Posture
+	realMockAgents              bool
+	agentGate                   *notifyAllChildrenAgentGate
+	processTopology             *notifyAllChildrenProcessTopology
+	sourceArtifactFact          runtimecorrelation.SourceArtifactFact
+	enableGenericSchedules      bool
+	maintenanceInterval         time.Duration
+	fanOutExecutor              func(*runtimepipeline.PipelineCoordinator) runtimestartupownership.FanOutExecutor
+	fanOutWorkers               *int
+	nestedPublications          *nestedPublicationLifetime
+	testLifecycleProbe          runtimelifecycleprobe.Observer
+	deliveryLifecycle           runtimedelivery.Store
+	deferContinuationStart      bool
 }
 
 func retireNotifyAllChildrenRuntimeForReplacement(t *testing.T, runtime notifyAllChildrenRuntime) {
@@ -2366,7 +2368,7 @@ func newNotifyAllChildrenRuntime(
 	case *failingNotifyAllChildrenSQLiteStore:
 		workflowPersistence = runtimepipeline.NewWorkflowPersistence(sqliteStore)
 	}
-	if opts.realMockAgents {
+	if opts.realMockAgents || opts.ordinaryProviderCredentials != nil {
 		if bundle, ok := semanticview.Bundle(source); !ok || bundle == nil {
 			t.Fatal("notify-all-children mock runtime requires a bundle-backed source")
 		}
@@ -2389,6 +2391,12 @@ func newNotifyAllChildrenRuntime(
 		cfg := &config.Config{}
 		cfg.LLM.Backend = llmselection.BackendAnthropic
 		cfg.LLM.Session.LockTTL = time.Minute
+		if opts.ordinaryProviderCredentials != nil {
+			if !opts.ordinaryContext || opts.ordinaryConfig == nil || posture != executionposture.Live {
+				t.Fatal("ordinary provider fixture requires its configured Live context")
+			}
+			cfg = opts.ordinaryConfig
+		}
 		projection, err := sourceartifact.MaterializeRuntimeProjection(bundle.SourceArtifact)
 		if err != nil {
 			t.Fatalf("materialize mock conformance workspace source: %v", err)
@@ -2427,13 +2435,19 @@ func newNotifyAllChildrenRuntime(
 			t.Fatal(err)
 		}
 		sessionStore = runtimesessions.NewInMemoryRegistry(cfg.LLM.Session.LockTTL)
+		var liveSessions runtimellm.LiveSessionAcquirer
+		if opts.ordinaryProviderCredentials != nil {
+			sessionStore = backend.(runtimesessions.Registry)
+			liveSessions = backend.(runtimellm.LiveSessionAcquirer)
+		}
 		profile, err := llmselection.ResolveLiveBackend(cfg.LLM.Backend)
 		if err != nil {
 			t.Fatalf("resolve configured live profile: %v", err)
 		}
 		modelRuntimes, err := runtimellm.NewAgentRuntimeSet(profile, runtimellm.RuntimeFactory{
-			Cfg: cfg, Sessions: sessionStore, Conversations: conversations, Events: eventBus,
-			Workspaces: workspaces, MCPTurns: turns, ToolGateway: binding,
+			Cfg: cfg, Sessions: sessionStore, LiveSessions: liveSessions, Conversations: conversations, Events: eventBus,
+			Credentials: opts.ordinaryProviderCredentials,
+			Workspaces:  workspaces, MCPTurns: turns, ToolGateway: binding,
 			LockOwner:            "notify-all-children-conformance",
 			CompletionController: runtimeeffects.NewCompletionController(effectStore, completionStore, heartbeatStore, discardCompletionSpendProjection{}).WithExecutionPosture(posture),
 		}, nil)
