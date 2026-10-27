@@ -4,8 +4,6 @@ package runtimepersistence
 import (
 	context "context"
 	json "encoding/json"
-	time "time"
-
 	apiidempotency "github.com/division-sh/swarm/internal/apiidempotency"
 	channelonboarding "github.com/division-sh/swarm/internal/channelonboarding"
 	events "github.com/division-sh/swarm/internal/events"
@@ -59,6 +57,7 @@ import (
 	workflowroute "github.com/division-sh/swarm/internal/runtime/workflowroute"
 	authority "github.com/division-sh/swarm/internal/sessionprovider/authority"
 	runhandoff "github.com/division-sh/swarm/internal/store/internal/runhandoff"
+	time "time"
 )
 
 func (s *PostgresStore) AbandonDynamicFlowRuntimeActivationAttempt(ctx context.Context, attempt pipeline.DynamicFlowRuntimeActivationAttempt) error {
@@ -161,8 +160,20 @@ func (s *PostgresStore) BeginDynamicFlowRuntimeActivation(ctx context.Context, r
 	return s.pipelinePostgresOwner.BeginDynamicFlowRuntimeActivation(ctx, request)
 }
 
+func (s *PostgresStore) BindActivityGrant(evidence startupownership.GrantEvidence) (pipeline.ActivityAttemptJournal, error) {
+	return s.activityPostgresOwner.BindActivityGrant(evidence)
+}
+
+func (s *PostgresStore) BindActivityJournalRole(role startupownership.ActivityJournalGrantBinder) error {
+	return s.startupPostgresOwner.BindActivityJournalRole(role)
+}
+
 func (s *PostgresStore) BindAgentSession(ctx context.Context, claim deliverylifecycle.Claim, sessionID string) (deliverylifecycle.ClaimCommit, error) {
 	return s.deliveryPostgresOwner.BindAgentSession(ctx, claim, sessionID)
+}
+
+func (s *PostgresStore) BindLifecycleCandidates(candidates *runhandoff.CandidateCoordinator) error {
+	return s.startupPostgresOwner.BindLifecycleCandidates(candidates)
 }
 
 func (s *PostgresStore) BindOperatorChannelFromProof(ctx context.Context, req operatorchannel.BootBindRequest) (operatorchannel.Binding, error) {
@@ -187,6 +198,10 @@ func (s *PostgresStore) ClaimReplyContext(ctx context.Context, id string, replyE
 
 func (s *PostgresStore) ClaimRunForkSelectedContractRuntimeExecution(ctx context.Context, issued runfork.SelectedContractRuntimeExecution, owner string, lease time.Duration) (effects.Authority, error) {
 	return s.runForkPostgresOwner.ClaimRunForkSelectedContractRuntimeExecution(ctx, issued, owner, lease)
+}
+
+func (s *PostgresStore) ClassifyLiveRunCreationFailure(ctx context.Context, scope runlifecycle.LiveRunScope, runID string, err error) error {
+	return s.runLifecyclePostgresOwner.ClassifyLiveRunCreationFailure(ctx, scope, runID, err)
 }
 
 func (s *PostgresStore) CloseRunForkSelectedContractRuntimeExecution(ctx context.Context, executionID string) (bool, error) {
@@ -349,6 +364,10 @@ func (s *PostgresStore) DeliverySnapshotsForEvent(ctx context.Context, eventID s
 	return s.deliveryPostgresOwner.DeliverySnapshotsForEvent(ctx, eventID)
 }
 
+func (s *PostgresStore) DeploymentOperations() channelonboarding.OperationStore {
+	return s.channelOnboardingPostgresOwner.DeploymentOperations()
+}
+
 func (s *PostgresStore) DiscardMaterializedSelectedContractExecutionFork(ctx context.Context, forkRunID string) error {
 	return s.runForkPostgresOwner.DiscardMaterializedSelectedContractExecutionFork(ctx, forkRunID)
 }
@@ -475,6 +494,10 @@ func (s *PostgresStore) InspectDynamicFlowRuntimeReadinessForRun(ctx context.Con
 
 func (s *PostgresStore) InspectDynamicFlowRuntimeReadinessForSource(ctx context.Context, source correlation.SourceArtifactFact) (pipeline.DynamicFlowRuntimeReadinessProjection, error) {
 	return s.pipelinePostgresOwner.InspectDynamicFlowRuntimeReadinessForSource(ctx, source)
+}
+
+func (s *PostgresStore) InspectSelectedMaterializationReplay(ctx context.Context, plan runfork.RunForkPlan) ([]runfork.RunForkUnsupportedBlocker, error) {
+	return s.runForkPostgresOwner.InspectSelectedMaterializationReplay(ctx, plan)
 }
 
 func (s *PostgresStore) IsExternalEffectAuthorityCurrent(ctx context.Context, authority effects.Authority) (bool, error) {
@@ -1309,6 +1332,10 @@ func (s *PostgresStore) UpsertConversation(ctx context.Context, lease *sessions.
 	return s.lLMPostgresOwner.UpsertConversation(ctx, lease, rec)
 }
 
+func (s *PostgresStore) ValidateDisplacedRecovery() error {
+	return s.activityPostgresOwner.ValidateDisplacedRecovery()
+}
+
 func (s *PostgresStore) ValidateInboundPublicationIntegrity(ctx context.Context) error {
 	return s.eventPostgresOwner.ValidateInboundPublicationIntegrity(ctx)
 }
@@ -1425,8 +1452,20 @@ func (s *SQLiteRuntimeStore) BeginDynamicFlowRuntimeActivation(ctx context.Conte
 	return s.pipelineSQLiteOwner.BeginDynamicFlowRuntimeActivation(ctx, request)
 }
 
+func (s *SQLiteRuntimeStore) BindActivityGrant(evidence startupownership.GrantEvidence) (pipeline.ActivityAttemptJournal, error) {
+	return s.activitySQLiteOwner.BindActivityGrant(evidence)
+}
+
+func (s *SQLiteRuntimeStore) BindActivityJournalRole(role startupownership.ActivityJournalGrantBinder) error {
+	return s.startupSQLiteOwner.BindActivityJournalRole(role)
+}
+
 func (s *SQLiteRuntimeStore) BindAgentSession(ctx context.Context, claim deliverylifecycle.Claim, sessionID string) (deliverylifecycle.ClaimCommit, error) {
 	return s.deliverySQLiteOwner.BindAgentSession(ctx, claim, sessionID)
+}
+
+func (s *SQLiteRuntimeStore) BindLifecycleCandidates(candidates *runhandoff.CandidateCoordinator) error {
+	return s.startupSQLiteOwner.BindLifecycleCandidates(candidates)
 }
 
 func (s *SQLiteRuntimeStore) BindOperatorChannelFromProof(ctx context.Context, req operatorchannel.BootBindRequest) (operatorchannel.Binding, error) {
@@ -1451,6 +1490,10 @@ func (s *SQLiteRuntimeStore) ClaimReplyContext(ctx context.Context, id string, r
 
 func (s *SQLiteRuntimeStore) ClaimRunForkSelectedContractRuntimeExecution(ctx context.Context, issued runfork.SelectedContractRuntimeExecution, owner string, lease time.Duration) (effects.Authority, error) {
 	return s.runForkSQLiteOwner.ClaimRunForkSelectedContractRuntimeExecution(ctx, issued, owner, lease)
+}
+
+func (s *SQLiteRuntimeStore) ClassifyLiveRunCreationFailure(ctx context.Context, scope runlifecycle.LiveRunScope, runID string, err error) error {
+	return s.runLifecycleSQLiteOwner.ClassifyLiveRunCreationFailure(ctx, scope, runID, err)
 }
 
 func (s *SQLiteRuntimeStore) CloseRunForkSelectedContractRuntimeExecution(ctx context.Context, executionID string) (bool, error) {
@@ -1613,6 +1656,10 @@ func (s *SQLiteRuntimeStore) DeliverySnapshotsForEvent(ctx context.Context, even
 	return s.deliverySQLiteOwner.DeliverySnapshotsForEvent(ctx, eventID)
 }
 
+func (s *SQLiteRuntimeStore) DeploymentOperations() channelonboarding.OperationStore {
+	return s.channelOnboardingSQLiteOwner.DeploymentOperations()
+}
+
 func (s *SQLiteRuntimeStore) DestructiveResetDeliveryQuiesced(ctx context.Context, eventID string, subscriberType string, subscriberID string) (bool, error) {
 	return s.runLifecycleSQLiteOwner.DestructiveResetDeliveryQuiesced(ctx, eventID, subscriberType, subscriberID)
 }
@@ -1743,6 +1790,10 @@ func (s *SQLiteRuntimeStore) InspectDynamicFlowRuntimeReadinessForRun(ctx contex
 
 func (s *SQLiteRuntimeStore) InspectDynamicFlowRuntimeReadinessForSource(ctx context.Context, source correlation.SourceArtifactFact) (pipeline.DynamicFlowRuntimeReadinessProjection, error) {
 	return s.pipelineSQLiteOwner.InspectDynamicFlowRuntimeReadinessForSource(ctx, source)
+}
+
+func (s *SQLiteRuntimeStore) InspectSelectedMaterializationReplay(ctx context.Context, plan runfork.RunForkPlan) ([]runfork.RunForkUnsupportedBlocker, error) {
+	return s.runForkSQLiteOwner.InspectSelectedMaterializationReplay(ctx, plan)
 }
 
 func (s *SQLiteRuntimeStore) IsExternalEffectAuthorityCurrent(ctx context.Context, authority effects.Authority) (bool, error) {
@@ -2547,6 +2598,10 @@ func (s *SQLiteRuntimeStore) UpdateLiveSessionWatchdog(ctx context.Context, leas
 
 func (s *SQLiteRuntimeStore) UpsertConversation(ctx context.Context, lease *sessions.Lease, rec llm.ConversationRecord) error {
 	return s.lLMSQLiteOwner.UpsertConversation(ctx, lease, rec)
+}
+
+func (s *SQLiteRuntimeStore) ValidateDisplacedRecovery() error {
+	return s.activitySQLiteOwner.ValidateDisplacedRecovery()
 }
 
 func (s *SQLiteRuntimeStore) ValidateInboundPublicationIntegrity(ctx context.Context) error {

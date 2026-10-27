@@ -45,8 +45,8 @@ func (o *Postgres) LoadActive(ctx context.Context, identity runtimeflowidentity.
 		JOIN runs run ON run.run_id = fi.run_id
 		LEFT JOIN entity_state es ON es.run_id = fi.run_id AND es.flow_instance = fi.instance_path
 		WHERE fi.run_id = $1::uuid AND fi.instance_path = $2
-			AND fi.status = 'active' AND fi.terminated_at IS NULL AND run.status IN ($3, $4)
-	`, identity.RunID, identity.Route.InstancePath, active[0], active[1]), identity.Route.InstancePath)
+			AND fi.status = 'active' AND fi.terminated_at IS NULL AND run.status IN ($3, $4, $5)
+	`, identity.RunID, identity.Route.InstancePath, active[0], active[1], active[2]), identity.Route.InstancePath)
 }
 
 func (o *SQLite) LoadActive(ctx context.Context, identity runtimeflowidentity.RunScopedFlowInstance) (runtimeworkflowroute.RecoveryRecord, error) {
@@ -63,8 +63,8 @@ func (o *SQLite) LoadActive(ctx context.Context, identity runtimeflowidentity.Ru
 		JOIN runs run ON run.run_id = fi.run_id
 		LEFT JOIN entity_state es ON es.run_id = fi.run_id AND es.flow_instance = fi.instance_path
 		WHERE fi.run_id = ? AND fi.instance_path = ?
-			AND fi.status = 'active' AND fi.terminated_at IS NULL AND run.status IN (?, ?)
-	`, identity.RunID, identity.Route.InstancePath, active[0], active[1]), identity.Route.InstancePath)
+			AND fi.status = 'active' AND fi.terminated_at IS NULL AND run.status IN (?, ?, ?)
+	`, identity.RunID, identity.Route.InstancePath, active[0], active[1], active[2]), identity.Route.InstancePath)
 }
 
 type rowScanner interface{ Scan(...any) error }

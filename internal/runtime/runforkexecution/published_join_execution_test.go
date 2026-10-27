@@ -39,7 +39,6 @@ import (
 	"github.com/division-sh/swarm/internal/runtime/runlifecycle"
 	"github.com/division-sh/swarm/internal/runtime/semanticview"
 	"github.com/division-sh/swarm/internal/runtime/startupownership"
-	"github.com/division-sh/swarm/internal/runtime/testfixtures/canonicalrouting"
 	"github.com/division-sh/swarm/internal/store/storetest"
 	"github.com/division-sh/swarm/internal/testutil"
 	"github.com/division-sh/swarm/internal/testutil/flowactivationfixture"
@@ -82,7 +81,7 @@ func publishedJoinFixture(t *testing.T) string {
 	t.Helper()
 	// The existing crash subprocess inherits this test-scoped fixture selection.
 	flowID := os.Getenv(publishedJoinFlowEnv)
-	root := canonicalrouting.CopyExactJoinEventBusProof(t, flowID)
+	root := supportedArrivalJoinFixture(t, flowID)
 	path := filepath.Join(root, flowID, "nodes.yaml")
 	data, err := os.ReadFile(path)
 	if err != nil {
@@ -93,6 +92,15 @@ func publishedJoinFixture(t *testing.T) string {
 		t.Fatal("published join fixture lost its exact deadline variant")
 	}
 	data = []byte(strings.ReplaceAll(string(data), deadline, ""))
+	if err := os.WriteFile(path, data, 0o600); err != nil {
+		t.Fatal(err)
+	}
+	path = filepath.Join(root, flowID, "schema.yaml")
+	data, err = os.ReadFile(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	data = []byte(strings.Replace(string(data), "  attention:\n    final: true\n", "", 1))
 	if err := os.WriteFile(path, data, 0o600); err != nil {
 		t.Fatal(err)
 	}
@@ -123,7 +131,7 @@ func seedPublishedJoinSource(t *testing.T, ctx context.Context, selected any, ow
 	}
 	ctx = originalSelectedFixtureContext(t, ctx, any(selected).(startupownership.Store))
 	storetest.RequireRun(t, ctx, selected.(storetest.RunFixtureStore), storetest.RunFixture{RunID: runID,
-		Origin: storetest.ScenarioSetupOrigin(), Artifact: bundle.SourceArtifact, BundleHash: loaded.SourceArtifactFact.BundleHash(), StartedAt: at})
+		Origin: runlifecycle.DeploymentRunOrigin(), LiveScope: runlifecycle.LiveRunScope{FlowPath: "."}, Artifact: bundle.SourceArtifact, BundleHash: loaded.SourceArtifactFact.BundleHash(), StartedAt: at})
 	event := eventtest.ExistingRunRootIngressWithRoutingSourceAndMode(uuid.NewString(), "item.completed", "source-runtime", "",
 		[]byte(`{"member_id":"source","result":{"value":"source"}}`), 0, runID, events.EventEnvelope{}, events.NoRoutingSource(), at, executionmode.Mock)
 	identity := flowidentity.Stored(loaded.Source, semanticview.RootExecutionFlowID(loaded.Source), runID, runID, runID, "")
@@ -240,7 +248,8 @@ func seedPublishedOrdersJoinConstruction(t *testing.T, ctx context.Context, sele
 	if committedParent.Plan.Identity != root || committedParent.Plan.Readiness.Identity != root {
 		t.Fatalf("source parent construction lost its complete identity/readiness: %+v", committedParent.Plan)
 	}
-	identity, err := flowidentity.KeyedChild(loaded.Source, committedParent.Plan.Identity, "orders", uuid.NewString())
+	orderKey := uuid.NewString()
+	identity, err := flowidentity.KeyedChild(loaded.Source, committedParent.Plan.Identity, "orders", orderKey)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -250,11 +259,26 @@ func seedPublishedOrdersJoinConstruction(t *testing.T, ctx context.Context, sele
 	}
 	input := constructors[0].Input()
 	declaration := semanticview.ResolveFlowEventProof(loaded.Source, "orders", input)
-	if !declaration.HasSchema || !declaration.IsAuthored(loaded.Source) || declaration.EventKey() == "item.completed" {
+	producer := semanticview.ResolveFlowEventProof(loaded.Source, semanticview.RootExecutionFlowID(loaded.Source), declaration.CatalogKey)
+	authoredSchema := declaration.IsAuthored(loaded.Source) ||
+		producer.HasSchema && producer.IsAuthored(loaded.Source) && producer.EventKey() == declaration.CatalogKey
+	if !declaration.HasSchema || !authoredSchema || declaration.FlowID != "orders" || declaration.EventKey() == "item.completed" {
 		t.Fatalf("orders creating input lacks its canonical scoped declaration: %+v", declaration)
 	}
+	payload := event.Payload()
+	if !declaration.IsAuthored(loaded.Source) {
+		var fields map[string]any
+		if err := json.Unmarshal(payload, &fields); err != nil {
+			t.Fatal(err)
+		}
+		fields["order_id"] = orderKey
+		payload, err = json.Marshal(fields)
+		if err != nil {
+			t.Fatal(err)
+		}
+	}
 	event = eventtest.ExistingRunRootIngressWithRoutingSourceAndMode(event.ID(), events.EventType(declaration.EventKey()), "source-runtime", "",
-		event.Payload(), 0, root.InstancePath, events.EventEnvelope{}, events.NoRoutingSource(), at, executionmode.Mock)
+		payload, 0, root.InstancePath, events.EventEnvelope{}, events.NoRoutingSource(), at, executionmode.Mock)
 	admission, err := rootruntime.NewRuntimePayloadAdmitter(nil, loaded.Source, loaded.SourceArtifactFact)(ctx, event, "orders")
 	if err != nil {
 		t.Fatal(err)
@@ -311,7 +335,12 @@ func TestIssue642PublishedJoinCrashRestartBothStores(t *testing.T) {
 					LoadForkOperation(context.Context, string, string, string) (runfork.ForkOperationRecord, bool, error)
 				})
 				acknowledged, found, err := operations.LoadForkOperation(t.Context(), "retained-crash", "fixed-cut", "retained-crash-transport")
-				if err != nil || !found || acknowledged.Status != runfork.ForkOperationActivated || acknowledged.ForkRunID != checkpoint.ForkRun || acknowledged.Result == nil || acknowledged.Request.ResolvedPoint == nil {
+				beforeACK := cut == "retained_join_event_committed"
+				wantStatus := runfork.ForkOperationActivated
+				if beforeACK {
+					wantStatus = runfork.ForkOperationMaterialized
+				}
+				if err != nil || !found || acknowledged.Status != wantStatus || acknowledged.ForkRunID != checkpoint.ForkRun || (acknowledged.Result == nil) != beforeACK || acknowledged.Failure != nil || acknowledged.Request.ResolvedPoint == nil {
 					t.Fatalf("published join lost permanent activation acknowledgment: %+v found=%v err=%v", acknowledged, found, err)
 				}
 				plan, err := selected.(SelectedContractForkLifecycle).PlanRunFork(t.Context(), runfork.RunForkPlanRequest{
@@ -325,6 +354,7 @@ func TestIssue642PublishedJoinCrashRestartBothStores(t *testing.T) {
 				if err != nil {
 					t.Fatal(err)
 				}
+				sourceDelivery := pendingSourceDeliveryForReboot(t, t.Context(), selected, before, checkpoint.SourceRun)
 				ctx := runForkTestContext(t)
 				capability := selectedContractTestProcessCapability(t, ctx, selected)
 				process, _ := worklifetime.ProcessFromContext(ctx)
@@ -339,15 +369,42 @@ func TestIssue642PublishedJoinCrashRestartBothStores(t *testing.T) {
 					}
 				})
 				loader := SourceArtifactSelectedContractSourceLoader{RepoRoot: runForkExecutionRepoRoot(t), Store: selected.(SourceArtifactSelectedContractSourceStore)}
+				binding, err := owner.ports.fork.RequireRunForkSelectedContractBinding(ctx, checkpoint.ForkRun)
+				if err != nil {
+					t.Fatal(err)
+				}
+				loaded, err := loader.LoadRunForkSelectedContractSourceForRequest(ctx, SelectedContractSourceLoadRequest{SourceRunID: checkpoint.ForkRun, Selection: binding.ContractSelection})
+				if err != nil {
+					t.Fatal(err)
+				}
+				ordinary, contexts := ordinaryForkRuntimeFixture(t, ctx, selected, owner, loaded, executionposture.MockOnly)
+				rebootGrant, err := ordinary.CurrentStartupGrantEvidence()
+				if err != nil {
+					t.Fatal(err)
+				}
+				rebootAuthority, err := deliverylifecycle.NewNormalExecutionAuthority(loaded.SourceArtifactFact, rebootGrant.GrantID, rebootGrant.RuntimeGeneration)
+				if err != nil {
+					t.Fatal(err)
+				}
 				recovered, err := owner.RecoverSelectedForkContexts(ctx, effects.NewRecoveryRequest(time.Now().UTC(), executionposture.MockOnly), SelectedForkRecoveryEnvironment{
-					SourceLoader: loader, AgentRuntime: SelectedContractAgentRuntimeOptions{ExecutionPosture: executionposture.MockOnly, ProcessCapability: capability}})
-				if err != nil || len(recovered) != 1 || recovered[0].RunID != checkpoint.ForkRun || recovered[0].Disposition != runfork.SelectedForkRecoveryResume {
+					SourceLoader: loader, AgentRuntime: SelectedContractAgentRuntimeOptions{ExecutionPosture: executionposture.MockOnly, ProcessCapability: capability},
+					LiveContexts: contexts, LiveRuns: selected.(runlifecycle.LiveRunReader),
+					AcquireLiveRuntime: func(ctx context.Context, hash string) (*rootruntime.RuntimeContextUse, error) {
+						use, _, err := contexts.AcquireBundleHash(ctx, hash)
+						return use, err
+					}})
+				wantRecovery := runfork.SelectedForkRecoveryControlOnly
+				if beforeACK {
+					wantRecovery = runfork.SelectedForkRecoveryResume
+				}
+				if err != nil || len(recovered) != 1 || recovered[0].RunID != checkpoint.ForkRun || recovered[0].Disposition != wantRecovery {
 					t.Fatalf("published occurrence successor recovery: %+v err=%v", recovered, err)
 				}
 				wait, cancel := context.WithTimeout(t.Context(), 15*time.Second)
 				defer cancel()
 				reader := selected.(interface {
 					LoadRunHeader(context.Context, string) (operatorread.RunHeader, error)
+					LoadRunTestQuiescence(context.Context, string, time.Time) (operatorread.RunTestQuiescence, error)
 				})
 				for {
 					header, err := reader.LoadRunHeader(wait, checkpoint.ForkRun)
@@ -357,7 +414,11 @@ func TestIssue642PublishedJoinCrashRestartBothStores(t *testing.T) {
 					if header.Failure != nil {
 						t.Fatalf("recovered published occurrence failed: %+v", *header.Failure)
 					}
-					if header.Status == "completed" && header.EndedAt != nil && process.ActiveCount() == baseline {
+					settled, err := reader.LoadRunTestQuiescence(wait, checkpoint.ForkRun, time.Now().UTC())
+					if err != nil {
+						t.Fatal(err)
+					}
+					if header.Status == "live" && header.EndedAt == nil && settled.Ready {
 						break
 					}
 					select {
@@ -384,13 +445,16 @@ func TestIssue642PublishedJoinCrashRestartBothStores(t *testing.T) {
 				requirePublishedJoinChildReceiver(t, wait, selected, owner, source, child)
 				requirePublishedJoinNoChildTimers(t, wait, selected, child)
 				retry, found, err := operations.LoadForkOperation(wait, acknowledged.Request.Actor, acknowledged.Request.IdempotencyKey, acknowledged.Request.TransportHash)
-				if err != nil || !found || !reflect.DeepEqual(acknowledged, retry) {
+				if err != nil || !found || retry.Status != runfork.ForkOperationActivated || retry.Result == nil || retry.ForkRunID != checkpoint.ForkRun || !reflect.DeepEqual(acknowledged.Request, retry.Request) || (!beforeACK && !reflect.DeepEqual(acknowledged, retry)) {
 					t.Fatalf("successor recovery changed permanent acknowledgment: %+v err=%v", retry, err)
 				}
-				after, err := storetest.ReadSelectedForkSourceDomain(wait, selected, checkpoint.SourceRun)
-				if err != nil || !reflect.DeepEqual(before, after) {
-					t.Fatalf("published occurrence recovery changed source business facts: %v", err)
+				if err := ordinary.Shutdown(); err != nil {
+					t.Fatal(err)
 				}
+				if err := owner.RetireSelectedContexts(wait); err != nil || process.ActiveCount() != baseline {
+					t.Fatalf("recovery did not join exact resources: work=%d baseline=%d err=%v", process.ActiveCount(), baseline, err)
+				}
+				requirePendingSourceRebootConservation(t, wait, selected, before, sourceDelivery, rebootAuthority)
 			})
 		}
 	}
@@ -457,10 +521,18 @@ func TestIssue642PublishedJoinContinuesExactDeliveryBothStores(t *testing.T) {
 			operation := runfork.ForkOperationRequest{OperationID: uuid.NewString(), Actor: "published-join", IdempotencyKey: "fixed-cut",
 				TransportHash: "published-join-transport", SourceRunID: sourceRun, ForkEventID: marker,
 				TargetBundleHash: loaded.SourceArtifactFact.BundleHash(), AllowSourceFreeze: true, ContractSelection: selection}
+			liveRuntime, liveContexts := liveForkRuntimeFixture(t, ctx, selected, owner, loaded, sourceRun, executionposture.MockOnly)
+			sourceBefore, err = storetest.ReadSelectedForkSourceDomain(ctx, selected, sourceRun)
+			if err != nil {
+				t.Fatal(err)
+			}
 			result, err := ExecuteSelectedContractRunFork(ctx, SelectedContractExecutionRequest{SourceRunID: sourceRun, At: marker, AllowSourceFreeze: true,
 				Owner: owner, ForkOperation: &operation, SourceLoader: loader, ContractSelection: selection,
+				LiveRuntime: liveRuntime, LiveContexts: liveContexts, LiveRuns: selected.(runlifecycle.LiveRunReader),
 				AgentRuntime: SelectedContractAgentRuntimeOptions{ExecutionPosture: executionposture.MockOnly, ProcessCapability: owner.ports.contexts.capability}})
 			if err != nil || !result.Activation.Activated {
+				diagnostic, diagnosticErr := storetest.ReadServedRunDebugSummary(context.WithoutCancel(ctx), selected, result.Materialization.ForkRunID)
+				t.Logf("PUBLISHED_JOIN_HANDOFF diagnostic=%s err=%v", diagnostic, diagnosticErr)
 				t.Fatalf("selected published-join activation: %+v err=%v", result, err)
 			}
 			child := result.Materialization.ForkRunID
@@ -475,13 +547,18 @@ func TestIssue642PublishedJoinContinuesExactDeliveryBothStores(t *testing.T) {
 			defer cancel()
 			reader := selected.(interface {
 				LoadRunHeader(context.Context, string) (operatorread.RunHeader, error)
+				LoadRunTestQuiescence(context.Context, string, time.Time) (operatorread.RunTestQuiescence, error)
 			})
 			for {
 				header, err := reader.LoadRunHeader(wait, child)
 				if err != nil {
 					t.Fatal(err)
 				}
-				if header.Status == "completed" && header.EndedAt != nil && header.Failure == nil && process.ActiveCount() == baseline {
+				settled, err := reader.LoadRunTestQuiescence(wait, child, time.Now().UTC())
+				if err != nil {
+					t.Fatal(err)
+				}
+				if header.Status == "live" && header.EndedAt == nil && header.Failure == nil && settled.Ready {
 					break
 				}
 				if header.Failure != nil {
@@ -539,6 +616,9 @@ func TestIssue642PublishedJoinContinuesExactDeliveryBothStores(t *testing.T) {
 			retry, found, err := operations.LoadForkOperation(wait, operation.Actor, operation.IdempotencyKey, operation.TransportHash)
 			if err != nil || !found || !reflect.DeepEqual(acknowledged, retry) {
 				t.Fatalf("published occurrence settlement changed permanent acknowledgment: %+v err=%v", retry, err)
+			}
+			if err := liveRuntime.Shutdown(); err != nil || process.ActiveCount() != baseline {
+				t.Fatalf("ordinary published join did not join its resources: work=%d baseline=%d err=%v", process.ActiveCount(), baseline, err)
 			}
 		})
 	}

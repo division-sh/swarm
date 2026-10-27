@@ -186,6 +186,10 @@ func (s *runtimeTestRetainedSession) LoadSourceSet(context.Context) (runtimeagen
 	return s.plan, s.plan.Revision != "", nil
 }
 
+func (*runtimeTestRetainedSession) CheckSourceSetReplacement(context.Context, runtimeagenttopology.SourceSetCommitRequest) error {
+	return nil
+}
+
 func (s *runtimeTestRetainedSession) CommitSourceSet(_ context.Context, req runtimeagenttopology.SourceSetCommitRequest) (runtimeagenttopology.SourceSetCommitResult, error) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
@@ -225,6 +229,14 @@ func (s *runtimeTestRetainedSession) InspectRunExecutionOwnership(ctx context.Co
 		return runtimemanager.RunExecutionOtherNormalSource, nil
 	}
 	return runtimemanager.RunExecutionOwned, nil
+}
+
+func (s *runtimeTestRetainedSession) ObserveStartupRunSource(ctx context.Context, evidence runtimestartupownership.GrantEvidence, runID string) (bool, error) {
+	if evidence.SelectedFork != nil || (evidence.State != runtimestartupownership.GrantPrepared && evidence.State != runtimestartupownership.GrantProbeSettled) {
+		return false, errors.New("runtime fixture startup source observation requires its ordinary preparation grant")
+	}
+	ownership, err := s.InspectRunExecutionOwnership(ctx, evidence, runID)
+	return ownership == runtimemanager.RunExecutionOwned && err == nil, err
 }
 
 func (*runtimeTestRetainedSession) RebindFlowReadinessSourceSet(context.Context, runtimemanager.FlowReadinessSourceSetRebindRequest, runtimemanager.ProcessExecutionBinding) (runtimemanager.FlowReadinessSourceSetRebindResult, error) {

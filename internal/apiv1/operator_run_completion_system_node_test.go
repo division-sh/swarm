@@ -9,6 +9,7 @@ import (
 	"runtime"
 	"strings"
 	"testing"
+	"time"
 
 	runtimebus "github.com/division-sh/swarm/internal/runtime/bus"
 	runtimecontracts "github.com/division-sh/swarm/internal/runtime/contracts"
@@ -57,7 +58,7 @@ func TestOperatorRunCompletionSystemNodeFlowConvergesSupportedSurfaces(t *testin
 		DeliveryRuntime:     bus,
 		PipelineObligations: pg.PipelineObligations(),
 		RunLifecycle:        pg,
-		SourceArtifactFact:  runStartTestSourceArtifactFact(),
+		SourceArtifactFact:  bundleFact,
 	}))
 
 	runID := "11111111-1111-4111-8111-111111111111"
@@ -65,13 +66,20 @@ func TestOperatorRunCompletionSystemNodeFlowConvergesSupportedSurfaces(t *testin
 	if started.Error != nil {
 		t.Fatalf("run.start error = %#v", started.Error)
 	}
-	if result := asMap(t, started.Result); result["run_id"] != runID || result["status"] != "running" {
-		t.Fatalf("run.start result = %#v, want running run %s", result, runID)
+	if result := asMap(t, started.Result); result["run_id"] != runID || result["status"] != "live" {
+		t.Fatalf("run.start result = %#v, want live run %s", result, runID)
 	}
-	run := waitForRunGetStatus(t, handler, db, lifecycleExecutor, runID, "completed")
-	if run["run_id"] != runID {
-		t.Fatalf("run.get run_id = %#v, want %s", run["run_id"], runID)
-	}
+	requireAPIV1Convergence(t, "live instance final stage and settled work", func() (bool, error) {
+		full, err := pg.LoadOperatorEntity(context.Background(), runtimepipeline.FlowInstanceEntityID("discovery"), runID)
+		if err != nil {
+			return false, err
+		}
+		settled, err := pg.LoadRunTestQuiescence(context.Background(), runID, time.Now().UTC())
+		if err != nil {
+			return false, err
+		}
+		return full.Entity.CurrentState != nil && *full.Entity.CurrentState == "done" && settled.Ready && lifecycleExecutor.ActiveCandidates() == 0, nil
+	})
 
 	eventID := triggerEventIDForRun(t, db, runID)
 	pipelineNodeID := identitytest.FlowNode(t, "discovery", "pipeline").Key()
@@ -88,20 +96,12 @@ func TestOperatorRunCompletionSystemNodeFlowConvergesSupportedSurfaces(t *testin
 		t.Fatalf("run.diagnose error = %#v", diagnose.Error)
 	}
 	diagnosis := asMap(t, diagnose.Result)
-	if diagnosis["operational_state"] != "completed" {
-		t.Fatalf("run.diagnose operational_state = %#v, want completed", diagnosis["operational_state"])
+	if settled := asMap(t, diagnosis["test_quiescence"]); settled["ready"] != true {
+		t.Fatalf("run.diagnose work is not settled: %#v", settled)
 	}
 	diagnosisRun := asMap(t, diagnosis["run"])
-	if diagnosisRun["status"] != "completed" {
-		t.Fatalf("run.diagnose run.status = %#v, want completed", diagnosisRun["status"])
-	}
-
-	terminalPublish := rpcCall(t, handler, eventPublishBody(runID, bundleHash, "flow.started", `{"topic":"after-terminal"}`, "", "idem-after-terminal"))
-	if terminalPublish.Error == nil {
-		t.Fatal("event.publish --run-id terminal error = nil")
-	}
-	if data := asMap(t, terminalPublish.Error.Data); data["code"] != RunAlreadyTerminalCode {
-		t.Fatalf("event.publish --run-id terminal data = %#v, want %s", data, RunAlreadyTerminalCode)
+	if diagnosisRun["run_id"] != runID || diagnosisRun["status"] != "live" {
+		t.Fatalf("run.diagnose lost the live run: %#v", diagnosisRun)
 	}
 	if count := countEventsByName(t, pg, "flow.started"); count != 1 {
 		t.Fatalf("flow.started event count after terminal publish = %d, want 1", count)
@@ -189,38 +189,6 @@ func (m runCompletionSystemNodeModule) WorkflowNodes() []runtimepipeline.Workflo
 
 func (m runCompletionSystemNodeModule) GuardRegistry() runtimepipeline.GuardRegistry {
 	return m.guards
-}
-
-func waitForRunGetStatus(
-	t *testing.T,
-	handler *Handler,
-	db *sql.DB,
-	executor *runtimerunlifecycle.Executor,
-	runID,
-	wantStatus string,
-) map[string]any {
-	t.Helper()
-	var run map[string]any
-	requireAPIV1Convergence(t, fmt.Sprintf("run.get status for %s", runID), func() (bool, error) {
-		get := rpcCall(t, handler, fmt.Sprintf(`{"jsonrpc":"2.0","id":"get","method":"run.get","params":{"run_id":%q}}`, runID))
-		if get.Error != nil {
-			t.Fatalf("run.get error = %#v", get.Error)
-		}
-		run = asMap(t, asMap(t, get.Result)["run"])
-		if run["status"] == wantStatus {
-			return true, nil
-		}
-		var revision int64
-		var dueAt sql.NullTime
-		if err := db.QueryRow(`SELECT completion_revision, completion_due_at FROM runs WHERE run_id = $1::uuid`, runID).Scan(&revision, &dueAt); err != nil {
-			return false, err
-		}
-		return false, fmt.Errorf(
-			"status=%#v, want %s; completion_revision=%d due_present=%t active_candidates=%d",
-			run["status"], wantStatus, revision, dueAt.Valid, executor.ActiveCandidates(),
-		)
-	})
-	return run
 }
 
 func triggerEventIDForRun(t *testing.T, db *sql.DB, runID string) string {

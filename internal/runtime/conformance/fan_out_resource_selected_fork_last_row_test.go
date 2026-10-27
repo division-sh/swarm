@@ -18,8 +18,15 @@ import (
 func TestDeploymentSourceSelectedLastRowPendingBlocksQuiescenceBothStores(t *testing.T) {
 	for _, backend := range []string{"sqlite", "postgres"} {
 		t.Run(backend, func(t *testing.T) {
-			f := selectedDeploymentResourceFixture(t, backend, "root")
-			f.runtime.fanOutServing.Close()
+			gate := &selectedDeploymentClaimGate{kind: runtimedelivery.ExecutionAuthorityNormalRuntime, entered: make(chan string, 16)}
+			observed := newSelectedDeploymentSettlementObservation()
+			decorate := func(executor startupownership.FanOutExecutor) startupownership.FanOutExecutor {
+				return &selectedDeploymentSettlementExecutor{FanOutExecutor: executor, observed: observed}
+			}
+			f := selectedDeploymentResourceFixtureWithDelivery(t, backend, "root", nil, func(owner runtimedelivery.Store) runtimedelivery.Store {
+				gate.Store = owner
+				return gate
+			}, decorate)
 			server := f.operatorServer(t)
 			start := func(name string, rows []byte) string {
 				t.Helper()
@@ -32,16 +39,21 @@ func TestDeploymentSourceSelectedLastRowPendingBlocksQuiescenceBothStores(t *tes
 			sourceRows := []byte("{\"account_id\":\"source\",\"document\":{\"version\":1}}\n")
 			changedRows := []byte("{\"account_id\":\"changed\",\"document\":{\"version\":2}}\n")
 			sourceRunID := start("source", sourceRows)
+			if err := f.runtime.bus.WaitForQuiescence(f.ctx); err != nil {
+				t.Fatal(err)
+			}
 			changed := selectedDeploymentVersion(t, f, changedRows)
+			pauseDeploymentFixtureRun(t, f, sourceRunID)
 			_ = start("changed", changedRows)
-			gate := &selectedDeploymentClaimGate{kind: runtimedelivery.ExecutionAuthoritySelectedContractFork, entered: make(chan string, 16)}
+			if err := f.runtime.bus.WaitForQuiescence(f.ctx); err != nil {
+				t.Fatal(err)
+			}
+			observed.mu.Lock()
+			observed.evaluated, observed.committed = nil, nil
+			observed.mu.Unlock()
 			gate.held.Store(true)
 			t.Cleanup(func() { gate.held.Store(false) })
-			gate.Store = f.selected
-			observed := newSelectedDeploymentSettlementObservation()
-			owner, recovered := deploymentForkOwnerWithExecutor(t, f, gate, nil, nil, func(executor startupownership.FanOutExecutor) startupownership.FanOutExecutor {
-				return &selectedDeploymentSettlementExecutor{FanOutExecutor: executor, observed: observed}
-			})
+			owner, recovered := deploymentForkOwnerWithExecutor(t, f, gate, nil, nil, decorate)
 			defer func() { _ = owner.FenceSelectedContexts() }()
 			if len(recovered) != 0 {
 				t.Fatalf("fresh R6a source has selected recovery: %+v", recovered)
@@ -72,7 +84,7 @@ func TestDeploymentSourceSelectedLastRowPendingBlocksQuiescenceBothStores(t *tes
 			var result forkResult
 			select {
 			case result = <-finished:
-				if result.err != nil || len(result.rpcErr) != 0 || result.result.ForkRunStatus != "running" {
+				if result.err != nil || len(result.rpcErr) != 0 || result.result.ForkRunStatus != "live" {
 					t.Fatalf("R6a activation did not acknowledge its retained owner: %+v", result)
 				}
 			case <-ctx.Done():
@@ -122,7 +134,7 @@ func TestDeploymentSourceSelectedLastRowPendingBlocksQuiescenceBothStores(t *tes
 					t.Fatal(err)
 				}
 			}
-			if operationState != "activated" || executionState != "running" || feedStatus != "closed" || cursor != 1 || cardinality != 1 || outcomes != 1 || receipts != 1 || deliveryStatus != "pending" || !handoff || attempts != 0 || gate.deferred.Load() == 0 || childID != result.result.ForkRunID {
+			if operationState != "activated" || executionState != "closed" || feedStatus != "closed" || cursor != 1 || cardinality != 1 || outcomes != 1 || receipts != 1 || deliveryStatus != "pending" || !handoff || attempts != 0 || gate.deferred.Load() == 0 || childID != result.result.ForkRunID {
 				t.Fatalf("R6a final-row pending cut: operation=%s execution=%s feed=%s cursor=%d/%d outcomes=%d receipts=%d delivery=%s handoff=%t attempts=%d deferred=%d", operationState, executionState, feedStatus, cursor, cardinality, outcomes, receipts, deliveryStatus, handoff, attempts, gate.deferred.Load())
 			}
 			if err := owner.FenceSelectedContexts(); err != nil {

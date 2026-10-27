@@ -46,6 +46,7 @@ type selectedAPICapabilities struct {
 	SelectedForkProcess       selectedForkProcessOwner
 	SelectedForkRecovery      runtimerunforkexecution.SelectedForkRecoveryEnvironment
 	RuntimeContexts           *runtime.RuntimeContextManager
+	PrepareRunRuntime         func(context.Context, string) error
 	ResetCoordinator          apiv1.DestructiveResetCoordinator
 }
 
@@ -106,6 +107,8 @@ func constructSelectedAPICapabilities(owner *storeselected.Owner, req selectedAP
 		executor := apiv1.SelectedContractRunForkExecutor{
 			ExecuteSelectedContractRunFork: family.Execute,
 			SourceLoader:                   loader,
+			RuntimeContexts:                req.RuntimeContextManager,
+			LiveRuns:                       owner.LiveRuns(),
 			AgentRuntime: runtimerunforkexecution.SelectedContractAgentRuntimeOptions{
 				Config: req.Config, ExecutionPosture: req.ExecutionPosture,
 				EntityStore: deps.ToolEntityStore, HumanTaskStore: deps.HumanTaskStore,
@@ -119,6 +122,12 @@ func constructSelectedAPICapabilities(owner *storeselected.Owner, req selectedAP
 		caps.SelectedForkRecovery = runtimerunforkexecution.SelectedForkRecoveryEnvironment{
 			SourceLoader: loader, SourceInspector: loader, AgentRuntime: executor.AgentRuntime,
 		}
+		if req.RuntimeSupervisor != nil {
+			executor.AcquireLiveRuntime = req.RuntimeSupervisor.acquireLiveTargetRuntime
+			caps.PrepareRunRuntime = req.RuntimeSupervisor.prepareLiveRunRuntime
+		}
+		caps.SelectedForkRecovery.AcquireLiveRuntime = executor.AcquireLiveRuntime
+		caps.SelectedForkRecovery.LiveContexts, caps.SelectedForkRecovery.LiveRuns = executor.RuntimeContexts, executor.LiveRuns
 		caps.RunForkAvailability = family.Availability()
 		caps.RunForkOperations = family.Operations()
 		caps.RunFork = executor

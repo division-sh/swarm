@@ -37,7 +37,7 @@ func require(ctx context.Context, db QueryRower, query, runID string) error {
 		return fmt.Errorf("load gate route run %s: %w", runID, err)
 	}
 	state, err := runtimerunlifecycle.ParseState(status)
-	if err != nil || state != runtimerunlifecycle.StateRunning {
+	if err != nil || (state != runtimerunlifecycle.StateRunning && state != runtimerunlifecycle.StateLive) {
 		return fmt.Errorf("gate route run %s is not routable in status %s", runID, strings.TrimSpace(status))
 	}
 	return nil

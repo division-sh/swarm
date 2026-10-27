@@ -2,6 +2,7 @@ package runforkexecution
 
 import (
 	"context"
+	"errors"
 	"os"
 	"path/filepath"
 	"reflect"
@@ -43,7 +44,7 @@ import (
 func armedArrivalFixture(t *testing.T) string {
 	t.Helper()
 	flowID := os.Getenv(publishedJoinFlowEnv)
-	root := canonicalrouting.CopyExactJoinEventBusProof(t, flowID)
+	root := supportedArrivalJoinFixture(t, flowID)
 	path := filepath.Join(root, flowID, "entities.yaml")
 	data, err := os.ReadFile(path)
 	if err != nil {
@@ -59,6 +60,26 @@ func armedArrivalFixture(t *testing.T) string {
 	return root
 }
 
+func supportedArrivalJoinFixture(t *testing.T, flowID string) string {
+	t.Helper()
+	root := canonicalrouting.CopyExactJoinEventBusProof(t, flowID)
+	if flowID == "orders" {
+		for _, name := range []string{"types.yaml"} {
+			body, err := os.ReadFile(filepath.Join(root, flowID, name))
+			if err != nil {
+				t.Fatal(err)
+			}
+			writeSelectedContractFixtureFile(t, filepath.Join(root, name), string(body))
+		}
+		writeSelectedContractFixtureFile(t, filepath.Join(root, "events.yaml"), "item.completed:\n  order_id: text\n  member_id: text\n  result: JoinResult\n")
+		writeSelectedContractFixtureFile(t, filepath.Join(root, "schema.yaml"), "name: join-eventbus-proof\npins:\n  inputs: [item.completed]\nconnect:\n  - {event: item.completed, from: ., to: orders, resolution: select}\n")
+		if err := os.Remove(filepath.Join(root, flowID, "events.yaml")); err != nil {
+			t.Fatal(err)
+		}
+	}
+	return root
+}
+
 func seedArmedArrivalSource(t *testing.T, ctx context.Context, selected any, owner SelectedContractExecutionOwner, loaded LoadedSelectedContractSource, runID string) (string, genericschedule.Activation, joinruntime.Activation) {
 	t.Helper()
 	ctx = effects.WithExecutionMode(correlation.WithRunID(ctx, runID), executionmode.Mock)
@@ -69,7 +90,8 @@ func seedArmedArrivalSource(t *testing.T, ctx context.Context, selected any, own
 	}
 	ctx = originalSelectedFixtureContext(t, ctx, any(selected).(startupownership.Store))
 	storetest.RequireRun(t, ctx, selected.(storetest.RunFixtureStore), storetest.RunFixture{
-		RunID: runID, Origin: storetest.ScenarioSetupOrigin(), Artifact: bundle.SourceArtifact,
+		RunID: runID, Origin: runlifecycle.DeploymentRunOrigin(), Artifact: bundle.SourceArtifact,
+		LiveScope:  runlifecycle.LiveRunScope{FlowPath: "."},
 		BundleHash: loaded.SourceArtifactFact.BundleHash(), StartedAt: at,
 	})
 	marker := eventtest.ExistingRunRootIngressWithRoutingSourceAndMode(uuid.NewString(), "item.completed", "source-runtime", "",
@@ -286,8 +308,20 @@ func TestIssue642ArmedArrivalTimeoutContinuesExactDeliveryBothStores(t *testing.
 			operation := runfork.ForkOperationRequest{OperationID: uuid.NewString(), Actor: "armed-arrival", IdempotencyKey: "fixed-cut",
 				TransportHash: "armed-arrival-transport", SourceRunID: sourceRun, ForkEventID: marker,
 				TargetBundleHash: loaded.SourceArtifactFact.BundleHash(), AllowSourceFreeze: true, ContractSelection: selection}
+			liveRuntime, liveContexts := liveForkRuntimeFixture(t, ctx, selected, owner, loaded, sourceRun, executionposture.MockOnly)
+			preservedSource := joinLiveForkFixtureClock(t, ctx, liveRuntime, selected, sourceRun, source.ID)
+			sourceCount, err := storetest.ReadLifecycleEventCardinality(ctx, selected, sourceRun, "platform.join_timeout")
+			if err != nil {
+				t.Fatal(err)
+			}
+			sourceBefore, err = storetest.ReadSelectedForkSourceDomain(ctx, selected, sourceRun)
+			if err != nil {
+				t.Fatal(err)
+			}
+			baseline = process.ActiveCount()
 			result, err := ExecuteSelectedContractRunFork(ctx, SelectedContractExecutionRequest{
 				SourceRunID: sourceRun, At: marker, AllowSourceFreeze: true, Owner: owner, ForkOperation: &operation,
+				LiveRuntime: liveRuntime, LiveContexts: liveContexts, LiveRuns: selected.(runlifecycle.LiveRunReader),
 				SourceLoader: loader, ContractSelection: selection,
 				AgentRuntime: SelectedContractAgentRuntimeOptions{ExecutionPosture: executionposture.MockOnly, ProcessCapability: owner.ports.contexts.capability},
 			})
@@ -307,7 +341,9 @@ func TestIssue642ArmedArrivalTimeoutContinuesExactDeliveryBothStores(t *testing.
 			defer cancel()
 			reader := selected.(interface {
 				LoadRunHeader(context.Context, string) (operatorread.RunHeader, error)
+				LoadRunTestQuiescence(context.Context, string, time.Time) (operatorread.RunTestQuiescence, error)
 			})
+			workflow := flowidentity.RunScopedFlowInstance{RunID: child, Route: flowidentity.StoredRoute(".", child, child)}
 			for {
 				header, err := reader.LoadRunHeader(wait, child)
 				if err != nil {
@@ -319,16 +355,23 @@ func TestIssue642ArmedArrivalTimeoutContinuesExactDeliveryBothStores(t *testing.
 				owner.ports.contexts.mu.Lock()
 				retained := len(owner.ports.contexts.entries)
 				owner.ports.contexts.mu.Unlock()
-				if header.Status == "completed" && header.EndedAt != nil && process.ActiveCount() == baseline && retained == 0 {
+				instance, found, err := owner.ports.workflow.LoadWorkflowInstance(wait, workflow)
+				if err != nil {
+					t.Fatal(err)
+				}
+				settlement, err := reader.LoadRunTestQuiescence(wait, child, time.Now().UTC())
+				if err != nil {
+					t.Fatal(err)
+				}
+				if found && instance.CurrentState == "attention" && settlement.Ready && header.Status == "live" && header.EndedAt == nil && process.ActiveCount() == baseline && retained == 0 {
 					break
 				}
 				select {
 				case <-wait.Done():
-					t.Fatalf("armed arrival did not complete and release resources: header=%+v contexts=%d leases=%d baseline=%d", header, retained, process.ActiveCount(), baseline)
+					t.Fatalf("armed arrival did not settle its final instance: header=%+v contexts=%d leases=%d baseline=%d instance=%+v found=%t settlement=%+v", header, retained, process.ActiveCount(), baseline, instance, found, settlement)
 				case <-time.After(10 * time.Millisecond):
 				}
 			}
-			workflow := flowidentity.RunScopedFlowInstance{RunID: child, Route: flowidentity.StoredRoute(".", child, child)}
 			header, found, err := owner.ports.workflow.LoadWorkflowInstance(wait, workflow)
 			if err != nil || !found || header.CurrentState != "attention" || header.EntityID != child || header.WorkflowName != "." {
 				t.Fatalf("exact timeout receiver did not reach attention: %+v found=%v err=%v", header, found, err)
@@ -398,15 +441,29 @@ func TestIssue642ArmedArrivalTimeoutContinuesExactDeliveryBothStores(t *testing.
 			if err != nil || settlement.Total != 1 || settlement.Delivered != 1 {
 				t.Fatalf("child did not settle exactly one timeout obligation: %+v err=%v", settlement, err)
 			}
+			evidence, err := liveRuntime.CurrentStartupGrantEvidence()
+			if err != nil {
+				t.Fatal(err)
+			}
+			processOnly := originalSelectedFixtureContext(t, correlation.WithRunID(ctx, child), selected)
+			copied := startupownership.WithGenerationGrantEvidence(processOnly, evidence)
+			if _, err := selected.(genericschedule.Store).CancelGenericScheduleOutcome(copied, genericschedule.CancelCommand{
+				ActivationID: actual.ID, Cause: "copied_grant_refused", CancelledAt: time.Now().UTC(),
+			}); !errors.Is(err, runlifecycle.ErrRunExecutionAuthority) {
+				t.Fatalf("copied ordinary grant replaced original mutation custody: %v", err)
+			}
+			unchanged, found, err := selected.(genericschedule.Store).LoadGenericScheduleActivation(wait, actual.ID)
+			if err != nil || !found || !reflect.DeepEqual(unchanged, actual) {
+				t.Fatalf("refused copied-grant cancellation changed the original child clock: %+v err=%v", unchanged, err)
+			}
 			original, found, err := selected.(genericschedule.Store).LoadGenericScheduleActivation(correlation.WithRunID(ctx, sourceRun), source.ID)
 			if err != nil || !found {
 				t.Fatalf("source deadline disappeared: found=%v err=%v", found, err)
 			}
-			afterDigest, err := original.EvidenceDigest()
-			if err != nil || afterDigest != sourceDigest || original.Status != genericschedule.StatusActive || original.CurrentEventID != "" {
+			if !reflect.DeepEqual(original, preservedSource) {
 				t.Fatalf("selected timeout changed or published its source deadline: %+v err=%v", original, err)
 			}
-			if count, err := storetest.ReadLifecycleEventCardinality(wait, selected, sourceRun, "platform.join_timeout"); err != nil || count != 0 {
+			if count, err := storetest.ReadLifecycleEventCardinality(wait, selected, sourceRun, "platform.join_timeout"); err != nil || count != sourceCount {
 				t.Fatalf("source deadline was published: count=%d err=%v", count, err)
 			}
 			sourceAfter, err := storetest.ReadSelectedForkSourceDomain(wait, selected, sourceRun)

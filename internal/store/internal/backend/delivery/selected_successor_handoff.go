@@ -7,9 +7,85 @@ import (
 	"time"
 
 	runtimedelivery "github.com/division-sh/swarm/internal/runtime/deliverylifecycle"
+	"github.com/division-sh/swarm/internal/runtime/effects"
+	"github.com/division-sh/swarm/internal/runtime/startupownership"
+	"github.com/division-sh/swarm/internal/store/internal/backend/generationauthority"
 	"github.com/division-sh/swarm/internal/store/internal/backend/mutationprotocol"
+	privaterunforkrevision "github.com/division-sh/swarm/internal/store/internal/backend/runforkrevision"
+	"github.com/division-sh/swarm/internal/store/internal/backend/runlifecycle/sourceadmission"
 	"github.com/google/uuid"
 )
+
+func RequireRunContinuationsParkedTx(ctx context.Context, tx *sql.Tx, runID string) error {
+	var active int
+	if err := tx.QueryRowContext(ctx, `SELECT COUNT(*) FROM event_deliveries WHERE run_id=$1 AND status='in_progress'`, runID).Scan(&active); err != nil {
+		return err
+	}
+	if active != 0 {
+		return fmt.Errorf("live run pause awaits %d admitted delivery claims", active)
+	}
+	return nil
+}
+
+// TransferSelectedLiveAuthority moves only the exact fenced executor's parked
+// continuations. Attempt, claim, route, publication and terminal facts stay intact.
+func (a *Adapter) TransferSelectedLiveAuthority(ctx context.Context, attempt *mutationprotocol.Attempt, predecessor effects.Authority, successor runtimedelivery.ExecutionAuthority) error {
+	return attempt.WithSQL(ctx, func(ctx context.Context, tx *sql.Tx) error {
+		if !predecessor.Valid() || predecessor.Kind != effects.AuthoritySelectedContractFork || successor.Kind() != runtimedelivery.ExecutionAuthorityNormalRuntime {
+			return fmt.Errorf("live delivery handoff requires exact selected and ordinary authorities")
+		}
+		if err := successor.Validate(); err != nil {
+			return err
+		}
+		grant, present := startupownership.GenerationGrantEvidenceFromContext(ctx)
+		if !present || grant.GrantID != successor.ExecutionID() || grant.RuntimeGeneration != successor.Generation() {
+			return fmt.Errorf("live delivery handoff contradicts its ordinary generation")
+		}
+		if err := generationauthority.RequireAdmittedOrdinaryGrantTx(ctx, tx, grant, successor.SourceArtifact().BundleHash(), a.dialect == DialectSQLite); err != nil {
+			return err
+		}
+		runID := predecessor.SelectedFork.ForkRunID
+		handedOff, err := sourceadmission.ObserveLiveHandoff(ctx, tx, runID, successor.SourceArtifact().BundleHash())
+		if err != nil {
+			return err
+		}
+		if !handedOff {
+			return fmt.Errorf("live delivery handoff lacks its exact committed transition")
+		}
+		var closed bool
+		if err := tx.QueryRowContext(ctx, `SELECT EXISTS (SELECT 1 FROM run_fork_selected_contract_runtime_executions
+			WHERE execution_id=$1 AND fork_run_id=$2 AND generation=$3 AND fence_generation=$4
+			AND state='closed' AND lease_expires_at IS NULL AND failure IS NULL AND execution_owner=$5)`,
+			predecessor.ID, runID, predecessor.SelectedFork.Generation, predecessor.FenceGeneration+1, predecessor.ExecutionOwner).Scan(&closed); err != nil {
+			return err
+		}
+		if !closed {
+			return fmt.Errorf("live delivery handoff has a foreign or unfenced predecessor")
+		}
+		var blocked int
+		if err := tx.QueryRowContext(ctx, `SELECT COUNT(*) FROM event_deliveries WHERE run_id=$1
+			AND execution_authority_kind='selected_contract_fork'
+			AND (continuation_handoff_at IS NULL OR (status IN ('pending','failed','in_progress')
+			AND (selected_execution_id<>$2 OR selected_execution_generation<>$3 OR authority_bundle_hash<>$4
+			OR current_attempt_open IS NOT NULL OR status='in_progress')))`,
+			runID, predecessor.ID, predecessor.SelectedFork.Generation, grant.BundleHash).Scan(&blocked); err != nil {
+			return err
+		}
+		if blocked != 0 {
+			return fmt.Errorf("live delivery handoff has %d unparked or foreign continuations", blocked)
+		}
+		if _, err := tx.ExecContext(ctx, `UPDATE event_deliveries SET execution_authority_kind='normal_runtime',
+			execution_authority_id=$1,execution_authority_generation=$2,selected_execution_id=NULL,
+			selected_fork_run_id=NULL,selected_execution_generation=NULL
+			WHERE run_id=$3 AND execution_authority_kind='selected_contract_fork' AND selected_execution_id=$4
+			AND selected_execution_generation=$5 AND authority_bundle_hash=$6 AND continuation_handoff_at IS NOT NULL
+			AND status IN ('pending','failed') AND current_attempt_open IS NULL`,
+			grant.GrantID, grant.RuntimeGeneration, runID, predecessor.ID, predecessor.SelectedFork.Generation, grant.BundleHash); err != nil {
+			return err
+		}
+		return attempt.AddWholeFamily(runID, privaterunforkrevision.FamilyEventDeliveries)
+	})
+}
 
 // TransferSelectedSuccessorAuthority moves only one fenced selected fork's
 // unsettled delivery continuations to its freshly issued execution generation.

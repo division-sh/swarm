@@ -13,6 +13,7 @@ const (
 	Event              Kind = "event"
 	DeploymentRevision Kind = "deployment_revision"
 	RunStart           Kind = "run_start"
+	StateRevision      Kind = "state_revision"
 )
 
 // ValidateIdentity is the shared persisted identity law for historical points.
@@ -32,6 +33,10 @@ func ValidateIdentity(kind Kind, revision int64, eventID string) error {
 	case RunStart:
 		if eventID != "" {
 			return fmt.Errorf("run start fork point forbids event ID")
+		}
+	case StateRevision:
+		if eventID != "" {
+			return fmt.Errorf("state revision fork point forbids event ID")
 		}
 	default:
 		return fmt.Errorf("unsupported fork point kind %q", kind)

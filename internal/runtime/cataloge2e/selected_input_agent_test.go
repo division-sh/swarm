@@ -16,7 +16,7 @@ func TestSelectedForkPendingRootAgentInputBothStores(t *testing.T) {
 	for _, backend := range []catalogRuntimeBackend{catalogBackendSQLite, catalogBackendPostgres} {
 		t.Run(string(backend), func(t *testing.T) {
 			root := catalogRuntimeFixture(t, "catalog.runtime.selected_contract_fork", "test-selected-contract-fork-execution").Root
-			h := newRuntimeHarnessForBackend(t, root, backend, true)
+			h := newLiveForkCatalogHarness(t, root, backend)
 			h.seedInitialState(pipeline.FlowInstanceEntityID(catalogRuntimeRunID))
 			ctx := worklifetime.WithOccurrence(catalogRunContext(h, catalogRuntimeRunID), h.rt.WorkOccurrence())
 			if _, err := runScopedCatalogStore(t, h).PauseRunControlOutcome(ctx, runcontrol.TransitionRequest{RunID: catalogRuntimeRunID, Reason: "pending root agent input", ControlledBy: "cataloge2e"}); err != nil {
@@ -50,7 +50,7 @@ func TestSelectedForkPendingRootAgentInputBothStores(t *testing.T) {
 			loader, selection, _ := selectedContractForkFixtureSelection(t, ctx, repoRootFromCatalogE2E(t), root, artifact)
 			cfg := testRuntimeConfig()
 			cfg.LLM.Backend = "anthropic"
-			result, err := runforkexecution.ExecuteSelectedContractRunFork(ctx, runforkexecution.SelectedContractExecutionRequest{
+			result, err := executeCatalogLiveFork(t, h, ctx, runforkexecution.SelectedContractExecutionRequest{
 				SourceRunID: catalogRuntimeRunID, At: point, AllowSourceFreeze: true,
 				Owner: selectedContractExecutionOwnerForCatalogHarness(t, h), SourceLoader: loader, ContractSelection: selection,
 				AgentRuntime: selectedContractAgentRuntimeOptionsForCatalogHarness(h, cfg),
@@ -58,7 +58,7 @@ func TestSelectedForkPendingRootAgentInputBothStores(t *testing.T) {
 			if err != nil {
 				t.Fatal(err)
 			}
-			if !result.Activation.Activated || result.ExecutedEventCount != 0 || len(result.ForkEvents) != 0 {
+			if !result.Activation.Activated || result.ExecutedEventCount != 1 || len(result.ForkEvents) != 1 {
 				t.Fatalf("root agent input execution: %+v", result)
 			}
 			child := result.Materialization.ForkRunID
@@ -66,7 +66,7 @@ func TestSelectedForkPendingRootAgentInputBothStores(t *testing.T) {
 				t.Fatal("missing exact selected child")
 			}
 			observed, err := observeCatalogSelectedExecution(t, h, child)
-			if err != nil || observed.ExecutedEventCount != 1 {
+			if err != nil || observed.ExecutedEventCount != 1 || len(observed.ForkEvents) != 1 || observed.ForkEvents[0] != result.ForkEvents[0] {
 				t.Fatalf("retained input execution=%+v error=%v", observed, err)
 			}
 			var count int

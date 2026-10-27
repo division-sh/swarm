@@ -15,6 +15,7 @@ const debtSelectedFixtureComposedCurrentSource = "d3fd1308470056da34276aaf08e212
 const debtSelectedFixtureComposedOldSHA256 = "2abd9424b866dbda517bcd44726bf04179a5a53ca75443588c86742370285681"
 const debtSelectedFixtureComposedCurrentSHA256 = "cdb196a9aeb5f87d51e656249b6bb533003d0af1ed7322cc858a2d9bd9d81fae"
 const debtSelectedFixtureComposedCollectorTo = "db0de72a381af1ab7ee26a4e0748565cde6c124a25a02ac3f79e2bbbc3464801"
+const debtCompletedSelectedFixturePinCollectorTo = "f28178924493fb28094b3bd1fb4814564680387608f43984fcd532afb01636a6"
 
 // #2727/6388897450: source-pin validation for an already-landed composed endpoint.
 const debtSelectedFixtureLandedCollectorTo = "1b48c6bd1c1b6d6100ee6df74bb9fe3d239372befa4c8f96f02243602fa9f646"
@@ -42,8 +43,14 @@ func TestPersistenceAuthorityDebtRunFixtureSignatureTransitionIsExact(t *testing
 		if failures := authorityDebtRatchet(after, before, before, before); len(failures) != 0 {
 			t.Fatal(failures)
 		}
-		if failures := authorityDebtRatchet(after, before, before, after); len(failures) != 0 {
-			t.Fatal("landed selected source must preserve all five baseline occurrences:", failures)
+		originalBefore, originalAfter := maps.Clone(before), maps.Clone(after)
+		for _, head := range []map[string]authorityDebtSite{before, after} {
+			if failures := authorityDebtRatchet(after, head, before, after); len(failures) != 0 {
+				t.Fatal("exact landed selected source rejected: ", failures)
+			}
+		}
+		if !maps.Equal(before, originalBefore) || !maps.Equal(after, originalAfter) {
+			t.Fatal("comparison normalization mutated baseline or source evidence")
 		}
 		if failures := authorityDebtRatchet(before, before, after, after); len(failures) == 0 {
 			t.Fatal("reverse original-owner signature continuation admitted")
@@ -51,8 +58,23 @@ func TestPersistenceAuthorityDebtRunFixtureSignatureTransitionIsExact(t *testing
 		if failures := authorityDebtRatchet(after, after, before, debtControlSet()); len(failures) == 0 {
 			t.Fatal("original-owner signature continuation admitted without its source")
 		}
+		if failures := authorityDebtRatchet(before, before, before, after); len(failures) == 0 {
+			t.Fatal("landed selected source admitted old-call resurrection")
+		}
+		added := maps.Clone(after)
+		unrelated := debtControlSite("call:Exec", 1)
+		added[unrelated.identity()] = unrelated
+		if failures := authorityDebtRatchet(added, added, before, after); len(failures) == 0 {
+			t.Fatal("landed selected source paid for an unrelated addition")
+		}
 		for _, pair := range debtSelectedFixtureSignatureTransitions() {
-			debtRunFixtureSignatureHostileControls(t, pair, before, after)
+			for _, landed := range []bool{false, true} {
+				name := "forward/" + pair[0].Declaration
+				if landed {
+					name = "landed/" + pair[0].Declaration
+				}
+				t.Run(name, func(t *testing.T) { debtRunFixtureSignatureHostileControls(t, pair, before, after, landed) })
+			}
 		}
 	})
 	if authorityDebtCount(old) != 9 || authorityDebtCount(current) != 9 {
@@ -67,7 +89,7 @@ func TestPersistenceAuthorityDebtRunFixtureSignatureTransitionIsExact(t *testing
 		{"forward-refresh", current, old, old, old, true},
 		{"forward-refreshed", current, current, old, old, true},
 		{"landed-inert", current, current, current, current, true},
-		{"unreviewed-landed-unrefreshed", current, old, old, current, false},
+		{"landed-source-does-not-extend-nine-pair-family", current, old, old, current, false},
 		{"reverse", old, old, current, current, false},
 		{"old-source-resurrection", old, old, old, current, false},
 		{"foreign-source", current, current, old, debtControlSet(), false},
@@ -83,7 +105,7 @@ func TestPersistenceAuthorityDebtRunFixtureSignatureTransitionIsExact(t *testing
 	}
 	for _, pair := range debtRunFixtureSignatureTransitions() {
 		t.Run(pair[0].Declaration, func(t *testing.T) {
-			debtRunFixtureSignatureHostileControls(t, pair, old, current)
+			debtRunFixtureSignatureHostileControls(t, pair, old, current, false)
 		})
 	}
 	t.Run("forward-cannot-pay-for-unrelated-addition", func(t *testing.T) {
@@ -107,11 +129,15 @@ func TestPersistenceAuthorityDebtRunFixtureSignatureTransitionIsExact(t *testing
 	}
 }
 
-func debtRunFixtureSignatureHostileControls(t *testing.T, pair [2]authorityDebtSite, old, current map[string]authorityDebtSite) {
+func debtRunFixtureSignatureHostileControls(t *testing.T, pair [2]authorityDebtSite, old, current map[string]authorityDebtSite, landed bool) {
 	t.Helper()
+	source := old
+	if landed {
+		source = current
+	}
 	for slot := range 4 {
 		t.Run([]string{"coexists-actual", "coexists-head", "coexists-baseline", "coexists-source"}[slot], func(t *testing.T) {
-			states := [4]map[string]authorityDebtSite{current, current, old, old}
+			states := [4]map[string]authorityDebtSite{current, current, old, source}
 			states[slot] = maps.Clone(states[slot])
 			states[slot][pair[0].identity()] = pair[0]
 			states[slot][pair[1].identity()] = pair[1]
@@ -148,7 +174,7 @@ func debtRunFixtureSignatureHostileControls(t *testing.T, pair [2]authorityDebtS
 			actual := maps.Clone(current)
 			delete(actual, pair[1].identity())
 			actual[changed.identity()] = changed
-			if failures := authorityDebtRatchet(actual, actual, old, old); len(failures) == 0 {
+			if failures := authorityDebtRatchet(actual, actual, old, source); len(failures) == 0 {
 				t.Fatal("non-reviewed identity or duplicate call admitted")
 			}
 		})
@@ -156,10 +182,14 @@ func debtRunFixtureSignatureHostileControls(t *testing.T, pair [2]authorityDebtS
 	for slot := range 2 {
 		for _, mutation := range []string{"missing", "duplicate", "changed"} {
 			t.Run(mutation+[]string{"-baseline-predecessor", "-source-predecessor"}[slot], func(t *testing.T) {
-				states := [2]map[string]authorityDebtSite{maps.Clone(old), maps.Clone(old)}
-				delete(states[slot], pair[0].identity())
+				states := [2]map[string]authorityDebtSite{maps.Clone(old), maps.Clone(source)}
+				predecessor := pair[0]
+				if slot == 1 && landed {
+					predecessor = pair[1]
+				}
+				delete(states[slot], predecessor.identity())
 				if mutation != "missing" {
-					changed := pair[0]
+					changed := predecessor
 					if mutation == "duplicate" {
 						changed.Multiplicity++
 					} else {

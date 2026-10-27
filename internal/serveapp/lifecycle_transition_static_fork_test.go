@@ -16,7 +16,7 @@ func TestServedCompiledTransitionStaticForkEvidenceOnBothStores(t *testing.T) {
 	for _, backend := range []servedparity.Backend{servedparity.BackendDefaultSQLite, servedparity.BackendExplicitPostgres} {
 		t.Run(string(backend), func(t *testing.T) {
 			publication := newExactOriginPublicationProbe(t)
-			rt := startServedTestSetupEntitiesProofRuntimeFromSource(t, backend, canonicalrouting.CopyLifecycleSelectedCarriers(t, false))
+			rt := startServedLiveFlowProofRuntimeFromSource(t, backend, canonicalrouting.CopyLifecycleSelectedCarriers(t, false))
 			seed := requireServedEventPublishRPCResult(t, rt.Endpoint, map[string]any{
 				"event_name": "work.seeded", "bundle_hash": rt.BundleHash, "payload": map[string]any{"seed": true}, "idempotency_key": "static-fork-seed",
 			})
@@ -36,7 +36,7 @@ func TestServedCompiledTransitionStaticForkEvidenceOnBothStores(t *testing.T) {
 			before := lifecycleStoredSnapshot(t, rt, seed.RunID)
 			params := map[string]any{"source_run_id": seed.RunID, "fork_event_id": frontier.EventID, "allow_source_freeze": true, "idempotency_key": "static-fork"}
 			fork := requireSelectedForkExecutionRPCResult(t, rt.Endpoint, params)
-			if fork.ForkRunID == "" || fork.ForkRunID == seed.RunID || fork.ExecutedEventCount != 0 {
+			if fork.ForkRunID == "" || fork.ForkRunID == seed.RunID || fork.ExecutedEventCount != 1 || fork.ForkRunStatus != "live" || fork.SourceRunStatus != "paused" || fork.SourceFrozen {
 				t.Fatalf("invalid static fork result: %+v", fork)
 			}
 			childEvent := waitServedSelectedForkFrontier(t, rt.ReceiverStateReader, rt.ReadRunDeliveries, fork.ForkRunID, frontier.EventID)

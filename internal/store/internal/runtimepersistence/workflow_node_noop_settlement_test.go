@@ -308,7 +308,7 @@ func TestWorkflowNodeNoopSettlementAcknowledgementBothStores(t *testing.T) {
 	for _, backend := range []string{"sqlite", "postgres"} {
 		for _, phase := range []string{"healthy", "commit_refused", "commit_ack_lost", "handoff_failed"} {
 			t.Run(backend+"/"+phase, func(t *testing.T) {
-				f, control := openCompletionOutcomeFixture(t, backend)
+				f, control := openCompletionSettlementOutcomeFixture(t, backend)
 				ctx, runID := f.context, f.authority.Target.RunID
 				event := eventtest.ExistingRunRootIngress(uuid.NewString(), "node.noop", "fixture", "", []byte(`{}`), 0, runID, events.EventEnvelope{}, time.Now().UTC())
 				route := testEntitylessNodeDeliveryRoute("noop")

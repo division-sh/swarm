@@ -19,7 +19,6 @@ import (
 )
 
 func TestRunForkSelectedSourceAdvancedFanOutConsumersBothStores(t *testing.T) {
-	const code = "source_fan_out_obligations_advanced_after_fork_point"
 	for _, backend := range eventRecordContractBackends() {
 		liveBackend := eventRecordContractBackend{name: backend.name, open: func(t *testing.T) authorActivityReceiptFixture {
 			opened := backend.open(t)
@@ -86,14 +85,10 @@ func TestRunForkSelectedSourceAdvancedFanOutConsumersBothStores(t *testing.T) {
 				activation, err := activate(request, staged.ForkPoint, func(ctx context.Context, prepared runfork.RunForkSelectedContractExecutionActivateRequest) (runfork.RunForkActivation, error) {
 					return f.store.(runforkexecution.SelectedContractForkLifecycle).ActivateRunForkForSelectedContractExecution(ctx, prepared)
 				})
-				if err != nil || !activation.Activated {
-					t.Fatalf("supported activation: %+v err=%v", activation, err)
-				}
+				requireSelectedNativeValidationBeforeHandoff(t, activation, err)
 				if position == "after_frontier" {
-					if !activation.SourceAdvancedAfterFork || activation.SourceFrozen || activation.BranchDivergence == nil ||
-						!reflect.DeepEqual(activation.BranchDivergence.SourceAdvancedFacts, []string{code}) ||
-						activation.BranchDivergence.Policy != runfork.RunForkSelectedContractSourceAdvancedBranchPolicy {
-						t.Fatalf("selected advancement must be exact branch lineage: %+v", activation)
+					if !activation.SourceAdvancedAfterFork || activation.BranchDivergence != nil {
+						t.Fatalf("selected source progress must remain post-cut lineage before handoff: %+v", activation)
 					}
 				} else if activation.SourceAdvancedAfterFork || activation.BranchDivergence != nil {
 					t.Fatalf("at/before-frontier fan-out must not count as source advancement: %+v", activation)

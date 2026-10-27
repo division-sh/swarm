@@ -14,7 +14,6 @@ import (
 	runtimeruncontrol "github.com/division-sh/swarm/internal/runtime/runcontrol"
 	runtimerunlifecycle "github.com/division-sh/swarm/internal/runtime/runlifecycle"
 	"github.com/division-sh/swarm/internal/testutil"
-	"github.com/division-sh/swarm/internal/testutil/stagecatalogfixture"
 	"github.com/google/uuid"
 )
 
@@ -57,10 +56,8 @@ func TestStandingRestartDispositionSelectedStoreParity(t *testing.T) {
 			assertStandingDisposition(t, ctx, fixture, orphaned.RunID, runtimerunlifecycle.StandingRestartOrphaned)
 
 			for _, terminal := range []runtimerunlifecycle.State{
-				runtimerunlifecycle.StateCompleted,
 				runtimerunlifecycle.StateFailed,
 				runtimerunlifecycle.StateCancelled,
-				runtimerunlifecycle.StateForked,
 			} {
 				declared := fixture.create(t, ctx, "terminal-declared-"+string(terminal))
 				fixture.terminalize(t, ctx, declared.RunID, terminal)
@@ -124,7 +121,7 @@ func TestStandingReconciliationNormalizesRunPauseForActiveDeclarationParity(t *t
 			}
 			if reconciled.RunID != created.RunID || reconciled.Generation != created.Generation ||
 				reconciled.RestartDisposition.Kind != runtimerunlifecycle.StandingRestartActiveIntrinsic ||
-				reconciled.RestartDisposition.RunState != string(runtimerunlifecycle.StateRunning) {
+				reconciled.RestartDisposition.RunState != string(runtimerunlifecycle.StateLive) {
 				t.Fatalf("operator-paused reconciliation = %#v", reconciled)
 			}
 			query := `SELECT status, reason, controlled_by FROM runs JOIN run_control_state USING (run_id) WHERE run_id=?`
@@ -136,7 +133,7 @@ func TestStandingReconciliationNormalizesRunPauseForActiveDeclarationParity(t *t
 			if err := fixture.db.QueryRowContext(ctx, query, args...).Scan(&status, &reason, &controlledBy); err != nil {
 				t.Fatalf("read operator-paused standing state: %v", err)
 			}
-			if status != string(runtimerunlifecycle.StateRunning) || reason != "standing_reconcile" || controlledBy != "runtime" {
+			if status != string(runtimerunlifecycle.StateLive) || reason != "standing_reconcile" || controlledBy != "runtime" {
 				t.Fatalf("active standing reconciliation did not normalize run pause: status=%s reason=%s controlled_by=%s", status, reason, controlledBy)
 			}
 		})
@@ -232,7 +229,7 @@ func TestInvalidStandingMemberDoesNotAbortOrMutateCompleteSetParity(t *testing.T
 				t.Fatalf("healthy sibling was not executable: %#v", results)
 			}
 			disposition := assertStandingDisposition(t, ctx, fixture, invalid.RunID, runtimerunlifecycle.StandingRestartInvalidCurrent)
-			if !disposition.DeclarationPresent || disposition.EffectiveState != "suspended" || disposition.OperatorOverride != "suspended" || disposition.RunState != "running" {
+			if !disposition.DeclarationPresent || disposition.EffectiveState != "suspended" || disposition.OperatorOverride != "suspended" || disposition.RunState != "live" {
 				t.Fatalf("invalid member was mutated during complete-set reconciliation: %#v", disposition)
 			}
 		})
@@ -701,46 +698,6 @@ func (f standingDispositionParityFixture) setDesiredState(t *testing.T, serviceI
 
 func (f standingDispositionParityFixture) terminalize(t *testing.T, ctx context.Context, runID string, state runtimerunlifecycle.State) {
 	t.Helper()
-	if state == runtimerunlifecycle.StateForked {
-		childRunID := uuid.NewString()
-		if err := ensureEphemeralRunForTest(ctx, f.selected, childRunID, time.Now().UTC()); err != nil {
-			t.Fatalf("create standing fork continuation %s: %v", childRunID, err)
-		}
-		if _, _, err := forkRunForTest(ctx, f.selected, runtimerunlifecycle.ForkSourceRequest{
-			RunID: runID, ContinuedAsRunID: childRunID, EndedAt: time.Now().UTC(),
-		}); err != nil {
-			t.Fatalf("fork standing run %s: %v", runID, err)
-		}
-		return
-	}
-	if state == runtimerunlifecycle.StateCompleted {
-		owner, ok := f.selected.(runLifecycleTerminalTestStore)
-		if !ok {
-			t.Fatalf("selected store %T does not own run completion", f.selected)
-		}
-		if err := materializeCompletedRunEntityForTest(ctx, f.selected, runID); err != nil {
-			t.Fatalf("materialize completed standing entity for %s: %v", runID, err)
-		}
-		if disposition, err := owner.RequestCompletionCandidate(ctx, runtimerunlifecycle.ImmediateCandidate(runID)); err != nil {
-			t.Fatalf("request standing completion candidate for %s: %v", runID, err)
-		} else if disposition != runtimerunlifecycle.CandidateRequested {
-			t.Fatalf("standing completion candidate disposition for %s = %s, want requested", runID, disposition)
-		}
-		result, err := executeRunCompletionCandidateForRun(
-			ctx,
-			owner,
-			f.hash,
-			runID,
-			stagecatalogfixture.NewFinalCatalog(nil, map[string][]string{semanticRunFixtureFlow: {"completed"}}),
-		)
-		if err != nil {
-			t.Fatalf("complete standing run %s: %v", runID, err)
-		}
-		if result.Outcome != runtimerunlifecycle.OutcomeTerminallyEligible && result.Outcome != runtimerunlifecycle.OutcomeExactNoop {
-			t.Fatalf("standing completion outcome for %s = %s, want terminally eligible", runID, result.Outcome)
-		}
-		return
-	}
 	var failure *runtimefailures.Envelope
 	if state == runtimerunlifecycle.StateFailed {
 		envelope, ok := runtimefailures.EnvelopeFromError(runtimefailures.New(runtimefailures.ClassInternalFailure, "standing_disposition_test_failure", "standing-test", "terminalize", nil))

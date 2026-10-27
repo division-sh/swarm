@@ -40,7 +40,7 @@ func TestRuntimeLogForkHistoryExclusionBothStores(t *testing.T) {
 					t.Fatal(err)
 				}
 				original, err := store.PlanRunFork(ctx, runfork.RunForkPlanRequest{SourceRunID: root.RunID()})
-				if err != nil || original.ForkPoint.EventID != root.ID() {
+				if err != nil || original.ForkPoint.Kind != runfork.RunForkPointStateRevision || original.ForkPoint.Revision < 1 || original.ForkPoint.EventID != "" {
 					t.Fatalf("original business cut: plan=%+v err=%v", original, err)
 				}
 				probe, restore, err := InstallTransactionProbeForTest(fixture.store, transactiontest.Options{})

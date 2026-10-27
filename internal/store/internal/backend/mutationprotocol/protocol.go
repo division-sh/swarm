@@ -89,7 +89,7 @@ func (b *Baseline) AddWholeFamily(runID string, family privatefork.Family) error
 // CandidateWriter is the canonical durable request writer. The protocol invokes
 // it and reserves its returned candidate inside the same transaction attempt.
 type CandidateWriter interface {
-	WriteCompletionCandidateTx(context.Context, *sql.Tx, string, *time.Time) (runtimelifecycle.CandidateRequestResult, error)
+	WriteCompletionCandidateTx(context.Context, *Attempt, string, *time.Time) (runtimelifecycle.CandidateRequestResult, error)
 }
 
 // ClaimRetirement closes a settled pipeline claim before its committed
@@ -262,14 +262,14 @@ func (a *Attempt) RequestCompletion(ctx context.Context, writer CandidateWriter,
 	if a.kind == WholeParentDeletion {
 		return runtimelifecycle.CandidateRequestResult{}, errors.New("whole-parent deletion cannot request completion")
 	}
-	result, err := writer.WriteCompletionCandidateTx(ctx, a.tx, runID, dueAt)
+	result, err := writer.WriteCompletionCandidateTx(ctx, a, runID, dueAt)
 	if err != nil {
 		return runtimelifecycle.CandidateRequestResult{}, err
 	}
 	if err := result.Validate(); err != nil {
 		return runtimelifecycle.CandidateRequestResult{}, err
 	}
-	if result.RequiresRepresentation() && result.Candidate.RunID != strings.TrimSpace(runID) {
+	if (result.RequiresRepresentation() || len(result.GenericScheduleActivations) != 0) && result.Candidate.RunID != strings.TrimSpace(runID) {
 		return runtimelifecycle.CandidateRequestResult{}, errors.New("completion candidate request returned a different run")
 	}
 	if err := a.handoff.Prepare(a.candidates, result); err != nil {

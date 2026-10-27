@@ -15,7 +15,6 @@ import (
 	"github.com/division-sh/swarm/internal/runtime/authoractivity"
 	"github.com/division-sh/swarm/internal/runtime/contracts"
 	"github.com/division-sh/swarm/internal/runtime/core/identity"
-	"github.com/division-sh/swarm/internal/runtime/core/managedexecution"
 	"github.com/division-sh/swarm/internal/runtime/core/worklifetime"
 	"github.com/division-sh/swarm/internal/runtime/correlation"
 	"github.com/division-sh/swarm/internal/runtime/deliverylifecycle"
@@ -35,6 +34,7 @@ type mixedFanOutSourceProbe struct {
 	runID, receiver string
 	history         *lifecycleprobe.Probe
 	claimed         chan forkEngineObservation
+	completed       chan forkEngineObservation
 	cut             chan string
 	resume          chan struct{}
 	once, cutOnce   sync.Once
@@ -42,6 +42,11 @@ type mixedFanOutSourceProbe struct {
 
 func (p *mixedFanOutSourceProbe) NotifyLifecycle(ctx context.Context, signal lifecycleprobe.Signal) {
 	p.history.NotifyLifecycle(ctx, signal)
+	if p.completed != nil && signal.Kind == lifecycleprobe.DeliveryStatusChanged && signal.EventType == "producer/batch.completed" && signal.Status == "delivered" {
+		if _, ok := deliverylifecycle.ClaimFromContext(ctx); ok {
+			p.completed <- forkEngineObservation{ctx: ctx, id: signal.EventID}
+		}
+	}
 	if signal.Kind == lifecycleprobe.EventPersisted && signal.EventType == "work.cut" {
 		p.cutOnce.Do(func() { p.cut <- signal.EventID })
 	}
@@ -159,6 +164,15 @@ func runMixedFanOutPendingMatrixWithCrash(t *testing.T, refork bool, crash *mixe
 				if err != nil || beforeSource.Fields["processed_token"] != "seeded" {
 					t.Fatalf("source pending receiver changed before fork: %+v err=%v", beforeSource, err)
 				}
+				sourceRelease.Do(func() { close(sourceProbe.resume) })
+				if _, err := sourceProbe.history.Wait(phaseCtx, lifecycleprobe.Signal{Kind: lifecycleprobe.DeliveryStatusChanged,
+					EventID: sourceClaim.id, SubscriberType: "node", SubscriberID: consumer.Key(), Status: "delivered"}); err != nil {
+					t.Fatalf("source pending claim did not join after capturing its historical cut: %v", err)
+				}
+				beforeSource, err = selected.Entities().LoadOperatorEntity(ctx, sourceConsumer.EntityID, runID)
+				if err != nil || beforeSource.Fields["processed_token"] != token {
+					t.Fatalf("source continuation did not commit before the fork conservation baseline: %+v err=%v", beforeSource, err)
+				}
 				bundle, err := contracts.LoadWorkflowContractBundleWithOverrides(repo, root, filepath.Join(repo, "platform-spec.yaml"))
 				if err != nil {
 					t.Fatal(err)
@@ -186,30 +200,45 @@ func runMixedFanOutPendingMatrixWithCrash(t *testing.T, refork bool, crash *mixe
 						AllowSourceFreeze: true, ContractSelection: executionRequest.ContractSelection,
 					}
 				}
-				result, err := family.Execute(forkCtx, executionRequest)
-				if err != nil || !result.Activation.Activated || result.ForkLocalRuntimeContainer == nil {
-					t.Fatalf("mixed fan-out activation acknowledgment: %+v err=%v", result, err)
-				}
+				executionRequest = forkEngineLiveRequest(t, rt, selected, executionRequest)
+				acknowledged := make(chan forkEngineAcknowledgment, 1)
+				done := make(chan struct{})
+				go func() {
+					defer close(done)
+					result, err := family.Execute(forkCtx, executionRequest)
+					acknowledged <- forkEngineAcknowledgment{result: result, err: err}
+				}()
+				t.Cleanup(func() {
+					forkCancel()
+					release.Do(func() { close(probe.resume) })
+					releaseSettlement.Do(func() { close(probe.resumeSettled) })
+					select {
+					case <-done:
+					case <-time.After(10 * time.Second):
+						t.Error("mixed fan-out execution did not join")
+					}
+				})
 				var observed forkEngineObservation
 				select {
 				case observed = <-probe.claimed:
+				case ack := <-acknowledged:
+					t.Fatalf("mixed fan-out returned before its controlled claim: %+v err=%v", ack.result, ack.err)
 				case <-forkCtx.Done():
 					t.Fatalf("child did not acquire the exact owed receiver: %v", forkCtx.Err())
 				}
 				claim, claimed := deliverylifecycle.ClaimFromContext(observed.ctx)
-				admission, admitted := managedexecution.FromContext(observed.ctx)
-				proof := result.ForkLocalRuntimeContainer
-				if !claimed || !admitted || !admission.AuthorizesSelected(proof.RuntimeExecutionID, proof.ForkRunID, proof.RuntimeGeneration) ||
-					claim.RunID() != proof.ForkRunID || claim.RunID() == runID || observed.id == sourceClaim.id {
+				if !claimed || claim.RunID() == runID || observed.id == sourceClaim.id {
 					t.Fatal("mixed continuation reused historical execution authority")
 				}
 				snapshot, err := selected.RuntimeDeps().DeliveryStore.Snapshot(forkCtx, claim.DeliveryID())
 				if err != nil || snapshot.Route.Recipient.ID() != consumer.Key() || snapshot.Status != deliverylifecycle.StatusInProgress {
 					t.Fatalf("child executed settled or wrong recipient: %+v err=%v", snapshot, err)
 				}
-				request := forkEngineExecutionProofRequest(t, result, sourceClaim.id, observed.id, claim)
+				request := forkEngineClaimProofRequest(t, forkCtx, selected, runID, sourceClaim.id, observed)
 				claimedProof := readForkEngineExecutionProof(t, forkCtx, selected, request)
-				assertForkEngineCommittedEvidence(t, claimedProof, result, cutID)
+				if claimedProof.SourceEventID != cutID || claimedProof.BindingID != request.BindingID || claimedProof.ExecutionCount != 1 || claimedProof.PublicationCount != 1 {
+					t.Fatalf("pending continuation lacks its exact committed cut and native executor: %+v", claimedProof)
+				}
 				childPlan, err := family.Plan(forkCtx, runfork.RunForkPlanRequest{SourceRunID: claim.RunID(), At: observed.id})
 				if err != nil {
 					t.Fatalf("continuing child publication is not itself a valid cut: %v", err)
@@ -243,6 +272,15 @@ func runMixedFanOutPendingMatrixWithCrash(t *testing.T, refork bool, crash *mixe
 				}
 				releaseSettlement.Do(func() { close(probe.resumeSettled) })
 				waitForkEnginePipelineSettlement(t, forkCtx, selected, request, settlement)
+				select {
+				case ack := <-acknowledged:
+					if ack.err != nil || !ack.result.Activation.Activated || request != forkEngineExecutionProofRequest(t, ack.result, sourceClaim.id, observed.id, claim) {
+						t.Fatalf("mixed fan-out lost its exact post-settlement handoff: %+v err=%v", ack.result, ack.err)
+					}
+					assertForkEngineCommittedEvidence(t, claimedProof, ack.result, cutID)
+				case <-forkCtx.Done():
+					t.Fatal(forkCtx.Err())
+				}
 				afterChild, err := selected.Entities().LoadOperatorEntity(forkCtx, childEntity, claim.RunID())
 				if err != nil || afterChild.Fields["processed_token"] != token || forkFixtureEntityRevision(t, afterChild.Entity.Revision) != forkFixtureEntityRevision(t, beforeChild.Entity.Revision)+1 {
 					t.Fatalf("child did not write exactly once: before=%+v after=%+v err=%v", beforeChild, afterChild, err)

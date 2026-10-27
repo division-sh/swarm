@@ -155,19 +155,13 @@ func TestIssue642FreshPendingEffectReturnsOwnNestedReplyBothStores(t *testing.T)
 			if err != nil {
 				t.Fatal(err)
 			}
-			result, err := ExecuteSelectedContractRunFork(ctx, SelectedContractExecutionRequest{SourceRunID: staged.ForkRunID, AtStart: true, AllowSourceFreeze: true,
+			childAttachment := q1StageBranchPointComponent(t, ctx, SelectedContractExecutionRequest{SourceRunID: staged.ForkRunID, AtStart: true, AllowSourceFreeze: true,
 				Owner: owner, SourceLoader: loader, ContractSelection: selection, AgentRuntime: options,
 				ForkOperation: &runfork.ForkOperationRequest{OperationID: uuid.NewString(), Actor: "pending-reply-proof", IdempotencyKey: uuid.NewString(),
 					TransportHash: "pending-reply-proof", SourceRunID: staged.ForkRunID, AtStart: true, TargetBundleHash: loaded.SourceArtifactFact.BundleHash(),
 					AllowSourceFreeze: true, ContractSelection: selection}})
-			if err != nil || !result.Activation.Activated {
-				t.Fatalf("activate pending effect child: %+v error=%v", result, err)
-			}
-			if !result.Activation.SourceFrozen {
-				t.Fatal("current staged frontier did not retain its mandatory source freeze")
-			}
-			stagedCard = requirePendingReplySourceFreeze(t, ctx, store, stagedCard)
-			child := result.Materialization.ForkRunID
+			childAttachment.serveSelectedControls(t)
+			child := childAttachment.materialized.ForkRunID
 			projected := requirePendingReplyCard(t, ctx, store, child)
 			pending, err := store.LoadProposedEffectContinuation(ctx, projected.CardID)
 			childRows, rowsErr := storetest.ReadReplyContextRecords(ctx, selected, child)
@@ -214,21 +208,6 @@ func TestIssue642FreshPendingEffectReturnsOwnNestedReplyBothStores(t *testing.T)
 			}
 		})
 	}
-}
-
-func requirePendingReplySourceFreeze(t *testing.T, ctx context.Context, store pendingReplyExecutionStore, original decisioncard.Card) decisioncard.Card {
-	t.Helper()
-	run, err := store.LoadRunLifecycleSnapshot(ctx, original.RunID)
-	if err != nil || run.Status != runfork.RunForkSourceFrozenStatus || run.EndedAt == nil {
-		t.Fatalf("source freeze lacks its exact lifecycle settlement: %+v error=%v", run, err)
-	}
-	expected := original
-	expected.Status, expected.SupersededReason, expected.UpdatedAt = decisioncard.StatusSuperseded, "run_forked", *run.EndedAt
-	actual, err := store.GetDecisionCard(ctx, original.CardID)
-	if err != nil || !reflect.DeepEqual(expected, actual) {
-		t.Fatalf("source freeze changed more than its exact card settlement: expected=%+v actual=%+v error=%v", expected, actual, err)
-	}
-	return actual
 }
 
 func publishPendingReplyInput(t *testing.T, ctx context.Context, eventBus *bus.EventBus, runID, name string, payload []byte) {

@@ -19,6 +19,7 @@ import (
 	"github.com/division-sh/swarm/internal/apiv1"
 	"github.com/division-sh/swarm/internal/events"
 	"github.com/division-sh/swarm/internal/operatorread"
+	"github.com/division-sh/swarm/internal/runtime/agenttopology"
 	"github.com/division-sh/swarm/internal/runtime/authoractivity"
 	"github.com/division-sh/swarm/internal/runtime/core/managedexecution"
 	"github.com/division-sh/swarm/internal/runtime/core/worklifetime"
@@ -118,10 +119,11 @@ type issue642FutureExecutionRow struct {
 type issue642FutureRecoveryProof struct {
 	SourceRunID, SourceKey string
 	ProcessBaseline        uint64
-	ACK                    runfork.ForkOperationRecord
+	Operation              runfork.ForkOperationRecord
 	Claim                  issue642FutureClaimFacts
 	RecoveredClaim         *issue642FutureClaimFacts
 	SourceDomain           map[string]storetest.SelectedForkStorageTableSnapshot
+	SourceStartupGrant     *startupownership.GrantEvidence
 	Executions             []issue642FutureExecutionRow
 }
 
@@ -211,7 +213,7 @@ func TestIssue642FutureProviderRecoveryProcessHelper(t *testing.T) {
 	mode := os.Getenv("TEST_642_PHASE")
 	minted := os.Getenv("TEST_642_MINTED") == "true"
 	probe := issue642InstallFutureRecoveryProbe(t, mode, minted, proof)
-	_, start := issue2564ServeHarnessAtLocation(t, os.Getenv("TEST_642_BACKEND"), os.Getenv("TEST_642_SOURCE"), true, os.Getenv("TEST_642_LOCATION"))
+	_, start := issue2564LiveServeHarness(t, os.Getenv("TEST_642_BACKEND"), os.Getenv("TEST_642_SOURCE"), os.Getenv("TEST_642_LOCATION"))
 	process, rt := start()
 	t.Cleanup(func() {
 		probe.release()
@@ -233,6 +235,7 @@ func TestIssue642FutureProviderRecoveryProcessHelper(t *testing.T) {
 		if err := json.Unmarshal(response.Result, &seed); err != nil {
 			t.Fatal(err)
 		}
+		requireIssue2564LiveRootMode(t, rt, seed.RunID, seed.EventID)
 		ctx, cancel := context.WithTimeout(t.Context(), 30*time.Second)
 		err := issue642WaitRecoveryBusiness(ctx, rt, seed.RunID)
 		cancel()
@@ -242,6 +245,7 @@ func TestIssue642FutureProviderRecoveryProcessHelper(t *testing.T) {
 		rt.waitDeliveries(t, seed.RunID)
 		issue2564H2CompletionWaitReceipt(t, rt, seed.RunID, seed.EventID)
 		issue642RequireKeyedProviderResult(t, rt, seed.RunID)
+		pauseIssue2564SettledSource(t, rt, seed.RunID)
 		proof = &issue642FutureRecoveryProof{SourceRunID: seed.RunID, ProcessBaseline: rt.Runtime.Options.ProcessWorkOwner.ActiveCount()}
 		if minted {
 			proof.SourceKey = issue642RequireMintedProviderIdentity(t, rt, seed.RunID)
@@ -251,39 +255,74 @@ func TestIssue642FutureProviderRecoveryProcessHelper(t *testing.T) {
 			t.Fatal(err)
 		}
 		emit("source")
-		fork := requireSelectedForkExecutionRPCResult(t, rt.Endpoint, map[string]any{
-			"source_run_id": seed.RunID, "at_start": true, "allow_source_freeze": true,
-			"idempotency_key": "future-recovery-start-cut",
-		})
-		if fork.SourceRunID != seed.RunID || fork.ForkRunID == "" || fork.ForkRunID == seed.RunID ||
-			fork.ForkPointKind != string(runfork.RunForkPointRunStart) || fork.ForkEventID != "" || fork.ForkRunStatus != runfork.RunForkActivatedStatus {
-			t.Fatalf("native start-cut ACK: %+v", fork)
-		}
+		forkCtx, cancelFork := context.WithCancel(t.Context())
+		defer cancelFork()
+		forkResponse := make(chan publicationAuditHTTPResult, 1)
+		go func() {
+			forkResponse <- publicationCompletionHTTPMethod(forkCtx, rt.Endpoint, "run.fork", map[string]any{
+				"source_run_id": seed.RunID, "at_start": true, "allow_source_freeze": true,
+				"idempotency_key": "future-recovery-start-cut",
+			})
+		}()
 		observation := probe.waitClaim(t)
 		if observation.err != nil {
 			t.Fatal(observation.err)
 		}
 		proof.Claim = observation.facts
-		if proof.Claim.RunID != fork.ForkRunID || (minted && proof.Claim.ConstructedKey == proof.SourceKey) {
+		if proof.Claim.RunID == "" || proof.Claim.RunID == seed.RunID || (minted && proof.Claim.ConstructedKey == proof.SourceKey) {
 			t.Fatalf("native construction escaped its child: %+v", proof.Claim)
 		}
+		select {
+		case result := <-forkResponse:
+			t.Fatalf("fork returned before its held physical provider work settled: %+v", result)
+		default:
+		}
 		probe.mu.Lock()
-		operationID, operations, preparation := probe.operationID, probe.operations, probe.preparation
+		operationID, operations := probe.operationID, probe.operations
 		probe.mu.Unlock()
-		if operationID == "" || preparation == nil || preparation.MaterializationRequired || !preparation.MaterializationSupported ||
-			len(preparation.ConfiguredAgentPlans) != 0 || len(preparation.AgentRecipientPlans) != 0 {
-			t.Fatalf("start-cut preparation invented a future actor: operation=%s preparation=%+v", operationID, preparation)
+		if operationID == "" {
+			t.Fatal("claimed child lost its durable operation identity")
+		}
+		storage, err := storetest.ReadSelectedForkApplicationStorageSnapshot(t.Context(), rt.selected)
+		if err != nil {
+			t.Fatal(err)
+		}
+		rows, err := storetest.DecodeSelectedForkSnapshotRows(storage["run_fork_selected_contract_runtime_executions"])
+		if err != nil {
+			t.Fatal(err)
+		}
+		matched := 0
+		for _, row := range rows {
+			id, err := row["execution_id"].Text()
+			if err != nil {
+				t.Fatal(err)
+			}
+			if id != proof.Claim.ExecutionID {
+				continue
+			}
+			matched++
+			preparationRaw, prepErr := row["preparation_binding"].Text()
+			declarationRaw, declarationErr := row["declaration_plan"].Text()
+			var preparation runfork.SelectedForkPreparationBinding
+			var declaration agenttopology.SelectedDeclarationPlan
+			if prepErr != nil || declarationErr != nil || json.Unmarshal([]byte(preparationRaw), &preparation) != nil || json.Unmarshal([]byte(declarationRaw), &declaration) != nil ||
+				preparation.Validate() != nil || declaration.Validate() != nil || preparation.ForkRunID != proof.Claim.RunID || len(preparation.Actors) != 0 || len(declaration.Agents) != 0 {
+				t.Fatalf("native start-cut preparation invented an actor before construction: preparation=%s declarations=%s", preparationRaw, declarationRaw)
+			}
+		}
+		if matched != 1 {
+			t.Fatalf("claim has %d native preparation rows, want one", matched)
 		}
 		var found bool
-		proof.ACK, found, err = operations.LoadForkOperationByID(t.Context(), operationID)
-		if err != nil || !found || proof.ACK.Validate() != nil || proof.ACK.Status != runfork.ForkOperationActivated ||
-			proof.ACK.ForkRunID != fork.ForkRunID || proof.ACK.Result.ForkRunStatus != fork.ForkRunStatus {
-			t.Fatalf("activation did not retain its permanent ACK: %+v err=%v", proof.ACK, err)
+		proof.Operation, found, err = operations.LoadForkOperationByID(t.Context(), operationID)
+		if err != nil || !found || proof.Operation.Validate() != nil || proof.Operation.Status != runfork.ForkOperationMaterialized || proof.Operation.Result != nil ||
+			proof.Operation.ForkRunID != proof.Claim.RunID || !proof.Operation.Request.AtStart || proof.Operation.Request.ResolvedPoint == nil || proof.Operation.Request.ResolvedPoint.Kind != runfork.RunForkPointRunStart {
+			t.Fatalf("pre-ACK claim lost its exact durable materialized operation: %+v err=%v", proof.Operation, err)
 		}
 		issue642RequireFutureClaimCut(t, rt, proof.Claim)
-		proof.Executions, err = issue642ReadFutureExecutions(t.Context(), rt.selected, fork.ForkRunID)
+		proof.Executions, err = issue642ReadFutureExecutions(t.Context(), rt.selected, proof.Claim.RunID)
 		if err != nil || len(proof.Executions) != 1 || proof.Executions[0].ExecutionID != proof.Claim.ExecutionID ||
-			proof.Executions[0].BindingID != proof.ACK.BindingID || proof.Executions[0].Generation != proof.Claim.Generation ||
+			proof.Executions[0].BindingID != proof.Operation.BindingID || proof.Executions[0].Generation != proof.Claim.Generation ||
 			proof.Executions[0].Fence != proof.Claim.Fence || proof.Executions[0].State != "running" || !proof.Executions[0].Clean {
 			t.Fatalf("claim cut lost its one running native executor: %+v err=%v", proof.Executions, err)
 		}
@@ -300,11 +339,11 @@ func TestIssue642FutureProviderRecoveryProcessHelper(t *testing.T) {
 	probe.mu.Unlock()
 	want := runfork.SelectedForkRecoveryResume
 	if mode == "terminal" {
-		want = runfork.SelectedForkRecoveryTerminal
+		want = runfork.SelectedForkRecoveryControlOnly
 	}
 	if len(recovered) != 1 || recovered[0].RunID != proof.Claim.RunID || recovered[0].Disposition != want ||
-		!reflect.DeepEqual(recovered[0].Operation, &proof.ACK) {
-		t.Fatalf("actual native recovery lost ACK/disposition: %+v", recovered)
+		!reflect.DeepEqual(recovered[0].Operation, &proof.Operation) {
+		t.Fatalf("actual native recovery lost Operation/disposition: %+v", recovered)
 	}
 	phase, cancel := context.WithTimeout(t.Context(), 30*time.Second)
 	defer cancel()
@@ -340,9 +379,18 @@ func TestIssue642FutureProviderRecoveryProcessHelper(t *testing.T) {
 			t.Fatalf("native recovery process work=%d baseline=%d: %v", work, proof.ProcessBaseline, phase.Err())
 		}
 	}
-	ack, found, err := probe.operations.LoadForkOperationByID(t.Context(), proof.ACK.Request.OperationID)
-	if err != nil || !found || !reflect.DeepEqual(ack, proof.ACK) {
-		t.Fatalf("terminal child recast the permanent running ACK: %+v err=%v", ack, err)
+	ack, found, err := probe.operations.LoadForkOperationByID(t.Context(), proof.Operation.Request.OperationID)
+	if err != nil || !found {
+		t.Fatalf("recovered child lost its durable operation: %+v err=%v", ack, err)
+	}
+	if mode == "resume" {
+		if ack.Status != runfork.ForkOperationActivated || ack.Result == nil || ack.Result.ForkRunID != proof.Claim.RunID || ack.Result.ForkRunStatus != runfork.RunForkLiveStatus ||
+			ack.BindingID != proof.Operation.BindingID || ack.SemanticHash != proof.Operation.SemanticHash || !reflect.DeepEqual(ack.Request, proof.Operation.Request) {
+			t.Fatalf("recovered work did not establish its one exact live ACK: %+v", ack)
+		}
+		proof.Operation = ack
+	} else if !reflect.DeepEqual(ack, proof.Operation) {
+		t.Fatalf("terminal recovery rewrote the immutable live ACK: %+v", ack)
 	}
 	issue642RequireKeyedProviderResult(t, rt, proof.Claim.RunID)
 	issue642RequireFutureRecoveredOutcome(t, rt, proof)
@@ -377,7 +425,6 @@ type issue642FutureRecoveryProbe struct {
 	operations  apiv1.RunForkOperationReader
 	retire      func(context.Context) error
 	operationID string
-	preparation *runforkexecution.SelectedContractAgentRuntimeMaterialization
 	grants      map[string]startupownership.GenerationGrant
 	claims      int
 	observed    chan issue642FutureClaimObservation
@@ -471,11 +518,7 @@ func issue642InstallFutureRecoveryProbe(t *testing.T, mode string, minted bool, 
 				probe.operationID = req.ForkOperation.OperationID
 				probe.mu.Unlock()
 			}
-			result, err := execute(ctx, req)
-			probe.mu.Lock()
-			probe.preparation = result.AgentRuntimeMaterialization
-			probe.mu.Unlock()
-			return result, err
+			return execute(ctx, req)
 		}
 		caps.RunFork = executor
 		caps.SelectedForkProcess = &issue642FutureRecoveryOwner{selectedForkProcessOwner: caps.SelectedForkProcess, probe: probe}
@@ -613,8 +656,8 @@ func (o *issue642FutureRecoveryOwner) RecoverSelectedForkContexts(ctx context.Co
 		return results, err
 	}
 	p := o.probe
-	if p.expected == nil || len(results) != 1 || results[0].RunID != p.expected.Claim.RunID || !reflect.DeepEqual(results[0].Operation, &p.expected.ACK) {
-		return results, fmt.Errorf("native recovery omitted the exact permanent selected ACK: %+v", results)
+	if p.expected == nil || len(results) != 1 || results[0].RunID != p.expected.Claim.RunID || !reflect.DeepEqual(results[0].Operation, &p.expected.Operation) {
+		return results, fmt.Errorf("native recovery omitted the exact permanent selected Operation: %+v", results)
 	}
 	// Observe the native acknowledgment without delaying ordinary startup.
 	// Pending dispatch and readiness consumers must start before we await work.
@@ -622,8 +665,15 @@ func (o *issue642FutureRecoveryOwner) RecoverSelectedForkContexts(ctx context.Co
 		if results[0].Disposition != runfork.SelectedForkRecoveryResume || results[0].ExecutionID != p.expected.Claim.ExecutionID {
 			return results, fmt.Errorf("selected claim cut was not resumed by its native predecessor: %+v", results)
 		}
-	} else if results[0].Disposition != runfork.SelectedForkRecoveryTerminal {
-		return results, fmt.Errorf("terminal re-recovery was executable: %+v", results)
+	} else {
+		header, err := p.fixture.selected.LoadRunHeader(ctx, results[0].RunID)
+		if err != nil {
+			return results, err
+		}
+		if p.expected.RecoveredClaim == nil || results[0].Disposition != runfork.SelectedForkRecoveryControlOnly || results[0].ExecutionID != p.expected.RecoveredClaim.ExecutionID ||
+			results[0].Continuation != nil || header.Status != "live" || header.EndedAt != nil || header.Failure != nil {
+			return results, fmt.Errorf("settled re-recovery lost its live control-only handoff: result=%+v run=%+v", results, header)
+		}
 	}
 	p.mu.Lock()
 	p.recovered = results
@@ -643,10 +693,10 @@ func issue642WaitRecoveryBusiness(ctx context.Context, fixture issue2564ServedFi
 		if err != nil {
 			return err
 		}
-		if header.Status == "completed" && header.EndedAt != nil && header.Failure == nil && summary.Settled() && summary.DeadLetter+summary.Canceled == 0 {
+		if header.Status == "live" && header.EndedAt == nil && header.Failure == nil && summary.Settled() && summary.DeadLetter+summary.Canceled == 0 {
 			return nil
 		}
-		if header.Failure != nil || summary.DeadLetter+summary.Canceled != 0 || (header.Status != "running" && header.Status != "completed") {
+		if header.Failure != nil || summary.DeadLetter+summary.Canceled != 0 || header.Status != "live" || header.EndedAt != nil {
 			return fmt.Errorf("native future provider cannot complete: header=%+v deliveries=%+v", header, summary)
 		}
 		select {
@@ -715,7 +765,7 @@ func issue642RequireFutureSourceStartupDiagnostic(t *testing.T, ctx context.Cont
 				added = append(added, row)
 			}
 		}
-		if len(originals) != 0 || len(added) > 1 {
+		if len(originals) != 0 {
 			t.Fatalf("normal startup rewrote source events: removed=%d added=%d", len(originals), len(added))
 		}
 		if len(added) == 0 {
@@ -727,55 +777,95 @@ func issue642RequireFutureSourceStartupDiagnostic(t *testing.T, ctx context.Cont
 			}
 		}
 		rows, err := storetest.DecodeSelectedForkSnapshotRows(storetest.SelectedForkStorageTableSnapshot{Columns: current.Columns, Rows: added})
-		if err != nil || len(rows) != 1 {
+		if err != nil {
 			t.Fatalf("decode exact source startup append: %v", err)
 		}
-		row := rows[0]
-		for column, want := range map[string]string{
-			"run_id": proof.SourceRunID, "event_name": "platform.runtime_log", "event_class": "diagnostic_direct",
-			"produced_by": "runtime", "produced_by_type": "platform", "routing_source_kind": "absent",
-			"source_route": "{}", "target_route": "{}", "target_set": "[]",
-		} {
-			value, err := row[column].Text()
-			if err != nil || value != want {
-				t.Fatalf("source startup diagnostic %s=%q, want %q: %v", column, value, want, err)
-			}
-		}
-		payload, err := row["payload_bytes"].Text()
+		diagnostics, err := storetest.ReadSelectedForkLifecycleDiagnosticStorage(ctx, fixture.selected, proof.SourceRunID)
 		if err != nil {
 			t.Fatal(err)
 		}
-		var log struct {
-			Details struct {
-				Action  string `json:"action"`
-				RunID   string `json:"run_id"`
-				Binding struct {
-					GrantID           string `json:"generation_grant_id"`
-					ProcessAuthority  string `json:"process_authority_id"`
-					ProcessOwner      string `json:"process_owner_id"`
-					ProcessBoot       string `json:"process_boot_id"`
-					BundleHash        string `json:"bundle_hash"`
-					RuntimeInstance   string `json:"runtime_instance_id"`
-					RuntimeGeneration uint64 `json:"runtime_generation"`
-				} `json:"process_binding"`
-				Provenance struct {
-					Origin struct{ Owner, Causality string }
-				} `json:"diagnostic_provenance"`
-			} `json:"details"`
+		for _, row := range rows {
+			for column, want := range map[string]string{
+				"run_id": proof.SourceRunID, "event_name": "platform.runtime_log", "event_class": "diagnostic_direct",
+				"produced_by": "runtime", "produced_by_type": "platform", "routing_source_kind": "absent",
+				"source_route": "{}", "target_route": "{}", "target_set": "[]",
+			} {
+				value, err := row[column].Text()
+				if err != nil || value != want {
+					t.Fatalf("source startup diagnostic %s=%q, want %q: %v", column, value, want, err)
+				}
+			}
+			payload, err := row["payload_bytes"].Text()
+			if err != nil {
+				t.Fatal(err)
+			}
+			var log struct {
+				Details struct {
+					Action  string `json:"action"`
+					RunID   string `json:"run_id"`
+					Binding struct {
+						GrantID           string `json:"generation_grant_id"`
+						ProcessAuthority  string `json:"process_authority_id"`
+						ProcessOwner      string `json:"process_owner_id"`
+						ProcessBoot       string `json:"process_boot_id"`
+						BundleHash        string `json:"bundle_hash"`
+						RuntimeInstance   string `json:"runtime_instance_id"`
+						RuntimeGeneration uint64 `json:"runtime_generation"`
+					} `json:"process_binding"`
+					Provenance struct {
+						Origin struct{ Owner, Causality string }
+					} `json:"diagnostic_provenance"`
+				} `json:"details"`
+			}
+			if err := json.Unmarshal([]byte(payload), &log); err != nil {
+				t.Fatal(err)
+			}
+			var expectedPayload map[string]any
+			if err := json.Unmarshal([]byte(payload), &expectedPayload); err != nil {
+				t.Fatal(err)
+			}
+			eventID, err := row["event_id"].Text()
+			if err != nil {
+				t.Fatal(err)
+			}
+			matched := 0
+			for _, native := range diagnostics.Receipts {
+				var receipt struct {
+					EventID string         `json:"event_id"`
+					RunID   string         `json:"run_id"`
+					Payload map[string]any `json:"payload"`
+				}
+				if err := json.Unmarshal(native.Projection, &receipt); err != nil {
+					t.Fatal(err)
+				}
+				if receipt.EventID == eventID {
+					details, _ := expectedPayload["details"].(map[string]any)
+					if receipt.RunID != proof.SourceRunID || details["outbox_id"] != native.OutboxID || !reflect.DeepEqual(receipt.Payload, expectedPayload) {
+						t.Fatal("source startup append differs from its exact native lifecycle receipt")
+					}
+					matched++
+				}
+			}
+			if matched != 1 {
+				t.Fatal("source startup append lacks its unique immutable lifecycle receipt")
+			}
+			binding := log.Details.Binding
+			matchesGrant := func(expected startupownership.GrantEvidence) bool {
+				return binding.GrantID == expected.GrantID && binding.ProcessAuthority == expected.ProcessAuthorityID &&
+					binding.ProcessOwner == expected.ProcessOwnerID && binding.ProcessBoot == expected.ProcessBootID &&
+					binding.BundleHash == expected.BundleHash && binding.RuntimeInstance == expected.RuntimeInstanceID && binding.RuntimeGeneration == expected.RuntimeGeneration
+			}
+			currentStartup := matchesGrant(grant)
+			priorShutdown := proof.SourceStartupGrant != nil && matchesGrant(*proof.SourceStartupGrant)
+			if log.Details.Action != "platform.agent_lifecycle_transition" || log.Details.RunID != proof.SourceRunID ||
+				log.Details.Provenance.Origin.Owner != "normal" || log.Details.Provenance.Origin.Causality != "observation" ||
+				(!currentStartup && !priorShutdown) {
+				t.Fatalf("source append did not come from this normal startup grant: log=%+v grant=%+v", log, grant)
+			}
 		}
-		if err := json.Unmarshal([]byte(payload), &log); err != nil {
-			t.Fatal(err)
-		}
-		binding := log.Details.Binding
-		if log.Details.Action != "platform.agent_lifecycle_transition" || log.Details.RunID != proof.SourceRunID ||
-			log.Details.Provenance.Origin.Owner != "normal" || log.Details.Provenance.Origin.Causality != "observation" ||
-			binding.GrantID != grant.GrantID || binding.ProcessAuthority != grant.ProcessAuthorityID ||
-			binding.ProcessOwner != grant.ProcessOwnerID || binding.ProcessBoot != grant.ProcessBootID ||
-			binding.BundleHash != grant.BundleHash || binding.RuntimeInstance != grant.RuntimeInstanceID || binding.RuntimeGeneration != grant.RuntimeGeneration {
-			t.Fatalf("source append did not come from this normal startup grant: log=%+v grant=%+v", log, grant)
-		}
-		t.Logf("source_startup_diagnostic run=%s grant=%s original_rows_unchanged=%d append=1", proof.SourceRunID, grant.GrantID, len(before.Rows))
+		t.Logf("source_startup_diagnostic run=%s grant=%s original_rows_unchanged=%d exact_receipt_appends=%d", proof.SourceRunID, grant.GrantID, len(before.Rows), len(rows))
 		proof.SourceDomain = after
+		proof.SourceStartupGrant = &grant
 		return
 	}
 }
@@ -822,18 +912,18 @@ func issue642RequireFutureRecoveredOutcome(t *testing.T, fixture issue2564Served
 		t.Fatalf("recovery did not retain exactly two native executors: %+v err=%v", rows, err)
 	}
 	for _, row := range rows {
-		wantFence, wantGeneration := next.Fence, next.Generation
+		wantFence, wantGeneration := next.Fence+1, next.Generation
 		if row.ExecutionID == proof.Claim.ExecutionID {
 			wantFence, wantGeneration = proof.Claim.Fence+1, proof.Claim.Generation
 		} else if row.ExecutionID != next.ExecutionID {
 			t.Fatalf("recovery admitted an unobserved executor: %+v", row)
 		}
-		if row.BindingID != proof.ACK.BindingID || row.Generation != wantGeneration || row.Fence != wantFence || row.State != "closed" || !row.Terminal || !row.LeaseEmpty || !row.Clean {
+		if row.BindingID != proof.Operation.BindingID || row.Generation != wantGeneration || row.Fence != wantFence || row.State != "closed" || !row.Terminal || !row.LeaseEmpty || !row.Clean {
 			t.Fatalf("native executor did not fence and close cleanly: %+v", row)
 		}
 	}
 	state, err := storetest.ReadSelectedExecutionStorage(t.Context(), fixture.selected, next.RunID)
-	if err != nil || state.State != "closed" || state.RunStatus != "completed" || state.Occurrences != 2 {
+	if err != nil || state.State != "closed" || state.RunStatus != "live" || state.Occurrences != 2 {
 		t.Fatalf("native recovered terminal state: %+v err=%v", state, err)
 	}
 	after, err := storetest.ReadSelectedForkSourceDomain(t.Context(), fixture.selected, proof.SourceRunID)

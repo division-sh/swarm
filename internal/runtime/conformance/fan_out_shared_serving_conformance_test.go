@@ -7,6 +7,7 @@ import (
 	"time"
 
 	"github.com/division-sh/swarm/internal/runtime/correlation"
+	"github.com/division-sh/swarm/internal/runtime/executionposture"
 	"github.com/division-sh/swarm/internal/runtime/semanticview"
 	"github.com/division-sh/swarm/internal/runtime/testfixtures/notifyallchildren"
 	"github.com/division-sh/swarm/internal/store/storetest"
@@ -42,7 +43,7 @@ func TestFanOutSharedServingAcrossRealBundleGrantsOnBothBackends(t *testing.T) {
 			topology := newNotifyAllChildrenProcessTopology(t, testAuthorActivityContext(context.Background()), selected, sources...)
 			runtimes := make([]notifyAllChildrenRuntime, len(sources))
 			for i, source := range sources {
-				runtimes[i] = newNotifyAllChildrenRuntime(t, selected, db, source, time.Now, notifyAllChildrenRuntimeOptions{processTopology: topology})
+				runtimes[i] = newNotifyAllChildrenRuntime(t, selected, db, source, time.Now, notifyAllChildrenRuntimeOptions{processTopology: topology, executionPosture: executionposture.MockOnly})
 			}
 			plan, exists, err := topology.capability.CurrentSourceSet(context.Background())
 			if err != nil || !exists || len(plan.Sources) != 2 || plan.Sources[0].BundleHash == plan.Sources[1].BundleHash {

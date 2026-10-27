@@ -278,7 +278,7 @@ func runServedStandingServiceLifecycleBackendProof(t *testing.T, backend servedp
 		return second.outputString() + "\n" + servedEventPublishDebugSummary(t, db, debugBackend, firstRunID)
 	})
 	telegramGate.waitForStart(t, resetRouteStarted, backend, "reset")
-	assertServedStandingState(t, db, string(backend), serviceID, firstRunID, firstGeneration, "active", "running")
+	assertServedStandingState(t, db, string(backend), serviceID, firstRunID, firstGeneration, "active", "live")
 
 	resetKey := "standing-reset-" + string(backend)
 	resetOutcome := startServedStandingOperation(secondEndpoint, "standing.reset", serviceID, resetKey)
@@ -312,7 +312,7 @@ func runServedStandingServiceLifecycleBackendProof(t *testing.T, backend servedp
 	if err := freshUse.Done(); err != nil {
 		t.Fatalf("%s settle reset successor ingress: %v", backend, err)
 	}
-	assertServedStandingState(t, db, string(backend), serviceID, reset.RunID, reset.Generation, "active", "running")
+	assertServedStandingState(t, db, string(backend), serviceID, reset.RunID, reset.Generation, "active", "live")
 	debugRun := func(runID string) func() string {
 		return func() string { return servedEventPublishDebugSummary(t, db, debugBackend, runID) }
 	}
@@ -347,7 +347,7 @@ func assertServedStandingResetAndShutdownJoin(t *testing.T, backend servedparity
 		t.Fatalf("process reset passed unsettled standing mutation: %+v", outcome)
 	default:
 	}
-	assertServedStandingState(t, db, string(backend), current.ServiceID, current.RunID, current.Generation, "active", "running")
+	assertServedStandingState(t, db, string(backend), current.ServiceID, current.RunID, current.Generation, "active", "live")
 	if err := held.Done(); err != nil {
 		t.Fatal(err)
 	}
@@ -367,7 +367,7 @@ func assertServedStandingResetAndShutdownJoin(t *testing.T, backend servedparity
 	if serviceID != current.ServiceID || generation != 1 {
 		t.Fatalf("fresh epoch did not reconstruct the declared generation: %s/%s/%d", serviceID, runID, generation)
 	}
-	assertServedStandingState(t, db, string(backend), serviceID, runID, generation, "active", "running")
+	assertServedStandingState(t, db, string(backend), serviceID, runID, generation, "active", "live")
 	use, lookup, err := manager.AcquireIngress(context.Background(), "chat", "telegram")
 	if err != nil || use == nil || !lookup.Found {
 		t.Fatalf("reconstructed standing ingress unavailable: lookup=%+v err=%v", lookup, err)
@@ -468,7 +468,7 @@ func assertServedStandingInvalidChildCommands(t *testing.T, backend servedparity
 	if err := transition.Wait(ctx); err != nil {
 		t.Fatal(err)
 	}
-	refuse("fenced", "active", "running")
+	refuse("fenced", "active", "live")
 	if err := transition.Restore(ctx); err != nil {
 		t.Fatal(err)
 	}
@@ -491,7 +491,7 @@ func assertServedStandingInvalidChildCommands(t *testing.T, backend servedparity
 	if err != nil || resumed.CommittedMutation != runtimerunlifecycle.MutationApplied {
 		t.Fatalf("create explicit durable active/missing-child counterexample: result=%+v err=%v", resumed, err)
 	}
-	refuse("active-missing", "active", "running")
+	refuse("active-missing", "active", "live")
 }
 
 func waitForServedStandingFence(t *testing.T, owner worklifetime.Occurrence) {
@@ -1345,7 +1345,7 @@ func TestStandingRestartMixedHealthyAndTerminalProcessParity(t *testing.T) {
 			requireStandingTelegramCalls(t, calls, selectedStore, 84)
 			waitForStandingDeliveryQuiescence(t, selectedStore)
 			assertNoStandingTelegramCall(t, calls, backend)
-			assertServedStandingState(t, db, backend, healthyService, healthyRun, healthyGeneration, "active", "running")
+			assertServedStandingState(t, db, backend, healthyService, healthyRun, healthyGeneration, "active", "live")
 			assertServedStandingState(t, db, backend, terminalService, terminalRun, terminalGeneration, "active", "cancelled")
 			if code := second.stop(); code != 0 {
 				t.Fatalf("%s second mixed standing serve exit = %d", backend, code)

@@ -11,8 +11,10 @@ import (
 
 	"github.com/division-sh/swarm/internal/durabledata"
 	"github.com/division-sh/swarm/internal/operatorread"
+	"github.com/division-sh/swarm/internal/runtime/authoractivity"
 	"github.com/division-sh/swarm/internal/runtime/core/activityidentity"
 	"github.com/division-sh/swarm/internal/runtime/core/identity"
+	"github.com/division-sh/swarm/internal/runtime/correlation"
 	"github.com/division-sh/swarm/internal/runtime/fanoutobligation"
 	"github.com/division-sh/swarm/internal/runtime/runfork"
 	"github.com/division-sh/swarm/internal/runtime/semanticview"
@@ -127,7 +129,7 @@ func proveSelectedPinnedOperationReplay(t *testing.T, backend string, rows int, 
 		retained := len(request.Owner.ports.contexts.entries)
 		request.Owner.ports.contexts.mu.Unlock()
 		run, runErr := storetest.ReadRuntimeLogRunSnapshot(ctx, loader.Store, materialized.ForkRunID)
-		if runErr != nil || run.Failure != nil || retained == 0 && (summary.Owed != 0 || summary.Unsettled != 0 || pending != 0) {
+		if runErr != nil || run.Failure != nil || run.State != "live" {
 			if run.Failure != nil {
 				t.Logf("pin-feed retained failure: %+v", *run.Failure)
 			}
@@ -168,7 +170,17 @@ func proveSelectedPinnedOperationReplay(t *testing.T, backend string, rows int, 
 			t.Fatalf("actual pinned row did not settle through its exact receiver: deliveries=%+v err=%v", deliveries, err)
 		}
 	}
-	waitSelectedRuntimeStartup(t, ctx, request.Owner, materialized.ForkRunID)
+	use, lookup, _, err := request.LiveContexts.AcquireRun(ctx, materialized.ForkRunID)
+	if use != nil {
+		defer func() {
+			if err := use.Done(); err != nil {
+				t.Error(err)
+			}
+		}()
+	}
+	if err != nil || use == nil || !lookup.Loaded() || use.Runtime() != request.LiveRuntime || !use.Context.SourceArtifactFact.Matches(loaded.SourceArtifactFact) {
+		t.Fatalf("pin replay lost its exact ordinary successor: lookup=%+v error=%v", lookup, err)
+	}
 	logs := loader.Store.(interface {
 		ListOperatorRuntimeLogs(context.Context, operatorread.OperatorRuntimeLogListOptions) (operatorread.OperatorRuntimeLogListResult, error)
 	})
@@ -190,26 +202,28 @@ func proveSelectedPinnedOperationReplay(t *testing.T, backend string, rows int, 
 		case <-time.After(10 * time.Millisecond):
 		}
 	}
-	request.Owner.ports.contexts.mu.Lock()
-	var runtime *selectedContractAgentRuntime
-	for _, entry := range request.Owner.ports.contexts.entries {
-		if entry.binding.ForkRunID == materialized.ForkRunID && entry.retained != nil {
-			runtime = entry.retained.retainedRuntime
-		}
-	}
-	request.Owner.ports.contexts.mu.Unlock()
-	if runtime == nil {
-		t.Fatal("exact root receiver retired before replay without terminal business work")
-	}
 	deadline, bounded := ctx.Deadline()
 	if !bounded {
 		t.Fatal("pin replay proof lost its original fixture deadline")
 	}
-	quiescence, cancelQuiescence := context.WithDeadline(runtime.controlContext, deadline)
-	defer cancelQuiescence()
-	if err := runtime.WaitForQuiescence(quiescence, runtime.bus); err != nil {
-		t.Fatalf("join actual receiver/publication work before the replay baseline: %v", err)
+	ordinaryCtx := correlation.WithRuntimeInstanceID(use.WorkContext(), use.Runtime().Options.RuntimeInstanceID)
+	ordinaryCtx = correlation.WithSourceArtifactFact(ordinaryCtx, use.Runtime().Options.SourceArtifactFact)
+	ordinaryCtx = authoractivity.WithScope(ordinaryCtx, authoractivity.BundleScope(use.Runtime().Options.RuntimeInstanceID, use.Runtime().Options.SourceArtifactFact.BundleHash()))
+	parkCtx, cancelPark := context.WithDeadline(ordinaryCtx, deadline)
+	defer cancelPark()
+	scope, err := request.LiveRuns.LoadRunLiveScope(parkCtx, materialized.ForkRunID)
+	if err != nil {
+		t.Fatal(err)
 	}
+	live, found, err := request.LiveRuns.LoadLiveRun(parkCtx, scope)
+	if err != nil || !found || live.RunID != materialized.ForkRunID || !live.Source.Matches(loaded.SourceArtifactFact) {
+		t.Fatalf("pin replay lost its exact live flow: %+v found=%v error=%v", live, found, err)
+	}
+	_, release, err := use.Runtime().ParkLiveRun(parkCtx, live)
+	if err != nil {
+		t.Fatalf("join exact run work before the replay baseline: %v", err)
+	}
+	defer release()
 	before, err := storetest.ReadSelectedForkApplicationStorageSnapshot(ctx, loader.Store)
 	if err != nil {
 		t.Fatal(err)
@@ -217,7 +231,7 @@ func proveSelectedPinnedOperationReplay(t *testing.T, backend string, rows int, 
 	replayed, err := ExecuteSelectedContractRunFork(ctx, request)
 	activatedPins := slices.Clone(materialized.DataPins)
 	for i := range activatedPins {
-		activatedPins[i].RunState = runfork.RunForkActivatedStatus
+		activatedPins[i].RunState = runfork.RunForkLiveStatus
 	}
 	if err != nil || !replayed.Activation.Activated || replayed.Materialization.ForkRunID != materialized.ForkRunID ||
 		!slices.Equal(replayed.Materialization.DataPins, activatedPins) {

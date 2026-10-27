@@ -7,23 +7,30 @@ import (
 	"os"
 	"path/filepath"
 	"reflect"
+	"slices"
 	"sync"
 	"testing"
 	"time"
 
 	"github.com/division-sh/swarm/internal/apiv1"
+	"github.com/division-sh/swarm/internal/runtime/agenttopology"
 	runtimebus "github.com/division-sh/swarm/internal/runtime/bus"
 	"github.com/division-sh/swarm/internal/runtime/core/activityidentity"
 	"github.com/division-sh/swarm/internal/runtime/core/worklifetime"
 	"github.com/division-sh/swarm/internal/runtime/deliverylifecycle"
+	"github.com/division-sh/swarm/internal/runtime/executionmode"
 	"github.com/division-sh/swarm/internal/runtime/llm"
+	"github.com/division-sh/swarm/internal/runtime/manager"
 	"github.com/division-sh/swarm/internal/runtime/pipeline"
 	"github.com/division-sh/swarm/internal/runtime/runcontrol"
 	"github.com/division-sh/swarm/internal/runtime/runfork"
+	"github.com/division-sh/swarm/internal/runtime/runforkexecution"
 	"github.com/division-sh/swarm/internal/runtime/semanticview"
+	"github.com/division-sh/swarm/internal/runtime/startupownership"
 	"github.com/division-sh/swarm/internal/runtime/testfixtures/canonicalrouting"
 	"github.com/division-sh/swarm/internal/servedparity"
 	"github.com/division-sh/swarm/internal/store/storetest"
+	"github.com/google/uuid"
 )
 
 // Artifact admission below is private setup. This proves the public fork and
@@ -52,12 +59,37 @@ func proveSelectedForkPublicChangedTargetExecutionBothStores(t *testing.T, optio
 	for _, backend := range []servedparity.Backend{servedparity.BackendDefaultSQLite, servedparity.BackendExplicitPostgres} {
 		t.Run(string(backend), func(t *testing.T) {
 			supervisors := make(chan *processLifecycleSupervisor, 1)
-			if reset {
+			var removalFault *liveRemovalFaultCapability
+			{
 				prior := buildSelectedAPICapabilities
 				var once sync.Once
 				buildSelectedAPICapabilities = func(owner *selectedStoreOwner, req selectedAPICapabilityRequest) (selectedAPICapabilities, error) {
-					once.Do(func() { supervisors <- req.RuntimeSupervisor })
-					return prior(owner, req)
+					once.Do(func() {
+						removalFault = &liveRemovalFaultCapability{ProcessCapability: req.RuntimeSupervisor.processCapability}
+						supervisors <- req.RuntimeSupervisor
+					})
+					caps, err := prior(owner, req)
+					if prepare := caps.PrepareRunRuntime; prepare != nil {
+						caps.PrepareRunRuntime = func(ctx context.Context, runID string) error {
+							err := prepare(ctx, runID)
+							if err != nil {
+								t.Logf("W4 continue runtime preparation for %s: %v", runID, err)
+							}
+							return err
+						}
+					}
+					if executor, ok := caps.RunFork.(apiv1.SelectedContractRunForkExecutor); err == nil && ok {
+						execute := executor.ExecuteSelectedContractRunFork
+						executor.ExecuteSelectedContractRunFork = func(ctx context.Context, request runforkexecution.SelectedContractExecutionRequest) (runforkexecution.SelectedContractExecutionResult, error) {
+							result, err := execute(ctx, request)
+							if err != nil {
+								t.Logf("selected changed-target owner error: %v", err)
+							}
+							return result, err
+						}
+						caps.RunFork = executor
+					}
+					return caps, err
 				}
 				t.Cleanup(func() { buildSelectedAPICapabilities = prior })
 			}
@@ -72,8 +104,8 @@ func proveSelectedForkPublicChangedTargetExecutionBothStores(t *testing.T, optio
 			publication := newExactOriginPublicationProbe(t)
 			writeSelectedForkAgentProofFixture(t, root, "loaded-decoy", "[receiver.closed]", "SOURCE CONFIGURATION MUST NOT EXECUTE IN THE FORK", "return {'text': 'Source-only delivery.', 'usage': {'input_tokens': 2, 'output_tokens': 2}}")
 			rt, gatewayFault := startSelectedForkTransportProofRuntime(t, backend, root, options)
+			supervisor := <-supervisors
 			if reset {
-				supervisor := <-supervisors
 				predecessor := supervisor.selected
 				params := map[string]any{"include_source_artifacts": false, "idempotency_key": "selected-reset"}
 				response := requestServedJSONRPC(t, rt.Endpoint, "runtime.nuke", params)
@@ -86,7 +118,7 @@ func proveSelectedForkPublicChangedTargetExecutionBothStores(t *testing.T, optio
 				if predecessor == nil || successor == nil || predecessor == successor {
 					t.Fatal("reset reused selected family instead of constructing a successor")
 				}
-				if _, _, err := predecessor.StopSelectedFork(context.Background(), runcontrol.TransitionRequest{RunID: "late-predecessor"}); !errors.Is(err, worklifetime.ErrRetired) {
+				if _, _, err := predecessor.StopSelectedFork(context.Background(), runcontrol.TransitionRequest{RunID: uuid.NewString()}); !errors.Is(err, worklifetime.ErrRetired) {
 					t.Fatalf("predecessor stop did not remain retired: %v", err)
 				}
 				expireWorkspaceProofResetTransportCache(t, selected.Idempotency(), selected.RuntimeDeps().EventStore)
@@ -118,6 +150,10 @@ func proveSelectedForkPublicChangedTargetExecutionBothStores(t *testing.T, optio
 				"event_name": "start.seeded", "bundle_hash": rt.BundleHash,
 				"payload": map[string]any{"token": "receiver-proof"}, "idempotency_key": "public-selected-seed",
 			})
+			rootEvent := storetest.LoadCanonicalEventRecord(t, t.Context(), rt.Events, seed.EventID)
+			if rootEvent.RunID() != seed.RunID || rootEvent.ExecutionMode() != rt.Runtime.ExecutionPosture.RootMode() {
+				t.Fatalf("selected source changed its exact root mode: run=%s mode=%s", rootEvent.RunID(), rootEvent.ExecutionMode())
+			}
 			if nativeRead {
 				if err := waitExactOriginPublications(t.Context(), publication, seed.EventID); err != nil {
 					t.Fatal(err)
@@ -203,8 +239,11 @@ func proveSelectedForkPublicChangedTargetExecutionBothStores(t *testing.T, optio
 				return
 			}
 			fork := requireSelectedForkExecutionRPCResult(t, rt.Endpoint, params)
-			if fork.SourceRunID != seed.RunID || fork.ForkRunID == "" || fork.ForkRunID == seed.RunID || fork.ExecutedEventCount != 0 {
+			if fork.SourceRunID != seed.RunID || fork.ForkRunID == "" || fork.ForkRunID == seed.RunID || fork.ExecutedEventCount != 1 {
 				t.Fatalf("public fork lost execution/source evidence: %+v", fork)
+			}
+			if replay := requireSelectedForkExecutionRPCResult(t, rt.Endpoint, params); !reflect.DeepEqual(fork, replay) {
+				t.Fatalf("synchronous fork ACK changed on replay: first=%+v replay=%+v", fork, replay)
 			}
 			waitWorkspaceProofPipelineReceipt(t, rt.Events, fork.ForkRunID, activityidentity.ForkLineageEventID(fork.ForkRunID, frontier), "success")
 			waitServedRunDeliveryQuiescence(t, func(ctx context.Context, runID string) (deliverylifecycle.RunSummary, error) {
@@ -228,6 +267,11 @@ func proveSelectedForkPublicChangedTargetExecutionBothStores(t *testing.T, optio
 			if len(diagnostics.Receipts) == 0 {
 				t.Fatal("selected agent lifecycle produced no diagnostic receipts")
 			}
+			ordinaryGrant, err := supervisor.CurrentRuntime().CurrentStartupGrantEvidence()
+			if err != nil || ordinaryGrant.SelectedFork != nil {
+				t.Fatalf("handoff lost its ordinary generation: %+v %v", ordinaryGrant, err)
+			}
+			selectedDiagnostics, ordinaryDiagnostics := 0, 0
 			for _, row := range diagnostics.Receipts {
 				id := row.OutboxID
 				var receipt map[string]any
@@ -242,28 +286,327 @@ func proveSelectedForkPublicChangedTargetExecutionBothStores(t *testing.T, optio
 				requireWorkspaceProofDiagnosticEventCount(t, diagnostics.Logs, id, fork.ForkRunID, 1)
 				payload, _ := receipt["payload"].(map[string]any)
 				details, _ := payload["details"].(map[string]any)
-				if receipt["run_id"] != fork.ForkRunID || receipt["parent_event_id"] != "" || receipt["lineage_disposition"] != "parentless" ||
-					details["runtime_lineage_run_id"] != fork.ForkRunID || details["runtime_lineage_selected_fork_context"] != true ||
-					details["runtime_lineage_owner"] != runfork.RunForkSelectedContractForkLocalRuntimeTypedLineageOwner {
+				if receipt["run_id"] != fork.ForkRunID || receipt["parent_event_id"] != "" || receipt["lineage_disposition"] != "parentless" {
 					t.Fatalf("selected lifecycle diagnostic %s lost its exact parentless producer authority: %+v", id, receipt)
 				}
+				provenance, _ := details["diagnostic_provenance"].(map[string]any)
+				origin, _ := provenance["origin"].(map[string]any)
+				switch origin["owner"] {
+				case string(manager.LifecycleDiagnosticSelectedFork):
+					selectedDiagnostics++
+					if details["runtime_lineage_run_id"] != fork.ForkRunID || details["runtime_lineage_selected_fork_context"] != true || details["runtime_lineage_owner"] != runfork.RunForkSelectedContractForkLocalRuntimeTypedLineageOwner {
+						t.Fatalf("selected diagnostic %s lost its exact owner: %+v", id, receipt)
+					}
+				case string(manager.LifecycleDiagnosticNormal):
+					ordinaryDiagnostics++
+					binding, _ := details["process_binding"].(map[string]any)
+					if binding["generation_grant_id"] != ordinaryGrant.GrantID || binding["bundle_hash"] != fact.BundleHash() || details["runtime_lineage_selected_fork_context"] == true {
+						t.Fatalf("ordinary diagnostic %s borrowed selected authority: %+v", id, receipt)
+					}
+				default:
+					t.Fatalf("lifecycle diagnostic %s has no exact execution owner: %+v", id, receipt)
+				}
 			}
-			if !reflect.DeepEqual(sourceBefore, readWorkspaceProofSourceDomain(t, selected.RuntimeDeps().EventStore, seed.RunID)) {
-				t.Fatal("public selected execution changed source domain")
+			if selectedDiagnostics == 0 || ordinaryDiagnostics == 0 {
+				t.Fatalf("handoff did not retain both diagnostic owners: selected=%d ordinary=%d", selectedDiagnostics, ordinaryDiagnostics)
 			}
+			requireForkSourceSelfReleaseConservation(t, selected.RuntimeDeps().EventStore, seed.RunID, sourceBefore)
 			completionCount := 1
 			if nativeRead {
 				completionCount = 2
 			}
-			requireSelectedForkPublicControlBoundary(t, rt.Endpoint, selected.RuntimeDeps().EventStore, rt.BundleHash, fork.ForkRunID, childEvent, true, completionCount)
-			t.Run("terminal_public_readback", func(t *testing.T) {
+			func() {
+				supervisor.operationMu.Lock()
+				original := supervisor.processCapability
+				removalFault.ProcessCapability = original
+				supervisor.processCapability = removalFault
+				supervisor.operationMu.Unlock()
+				defer func() {
+					supervisor.operationMu.Lock()
+					supervisor.processCapability = original
+					supervisor.operationMu.Unlock()
+				}()
+				requireForkLivePublicControls(t, rt.Endpoint, supervisor, selected.RuntimeDeps().EventStore, seed.RunID, rt.BundleHash, fork.ForkRunID, childHash, removalFault)
+			}()
+			t.Run("live_public_readback", func(t *testing.T) {
 				requireSelectedForkDeclaredAgentReads(t, rt.Endpoint, selected.RuntimeDeps().EventStore, rt.BundleHash, fork.ForkRunID, completionCount)
-				if !reflect.DeepEqual(sourceBefore, readWorkspaceProofSourceDomain(t, selected.RuntimeDeps().EventStore, seed.RunID)) {
-					t.Fatal("terminal selected readback changed source domain")
-				}
+				requireSelectedForkMixedBusinessMutation(t, rt.Endpoint, selected.RuntimeDeps().EventStore, fork.ForkRunID, childEvent, rows["consumer"].ID)
 			})
 		})
 	}
+}
+
+func requireForkSourceSelfReleaseConservation(t *testing.T, owner runtimebus.EventStore, runID string, before map[string]storetest.SelectedForkStorageTableSnapshot) {
+	t.Helper()
+	after := readWorkspaceProofSourceDomain(t, owner, runID)
+	eventsBefore, eventsAfter := before["events"], after["events"]
+	if len(eventsAfter.Rows) != len(eventsBefore.Rows)+1 || !reflect.DeepEqual(eventsBefore.Columns, eventsAfter.Columns) {
+		t.Fatal("source handoff must add exactly one lifecycle receipt event")
+	}
+	var added []string
+	for _, row := range eventsAfter.Rows {
+		if !slices.Contains(eventsBefore.Rows, row) {
+			added = append(added, row)
+		}
+	}
+	if len(added) != 1 {
+		t.Fatal("source handoff replaced an original event or added extra events")
+	}
+	decoded, err := storetest.DecodeSelectedForkSnapshotRows(storetest.SelectedForkStorageTableSnapshot{Columns: eventsAfter.Columns, Rows: added})
+	if err != nil {
+		t.Fatal(err)
+	}
+	text := func(column string) string {
+		value, err := decoded[0][column].Text()
+		if err != nil {
+			t.Fatal(err)
+		}
+		return value
+	}
+	var payload map[string]any
+	if err := json.Unmarshal([]byte(text("payload")), &payload); err != nil {
+		t.Fatal(err)
+	}
+	details, _ := payload["details"].(map[string]any)
+	if text("run_id") != runID || text("event_name") != "platform.runtime_log" || text("event_class") != "diagnostic_direct" ||
+		details["action"] != "platform.agent_lifecycle_transition" ||
+		details["previous_phase"] != "running" || details["phase"] != "registered" || details["run_mode"] != "stopped" ||
+		details["previous_generation"] != details["generation"] || details["previous_epoch"] != details["runtime_epoch"] {
+		t.Fatalf("source handoff added something other than its exact self-release: %+v", payload)
+	}
+	operations, err := storetest.DecodeSelectedForkSnapshotRows(readWorkspaceProofApplication(t, owner)["agent_lifecycle_operations"])
+	if err != nil {
+		t.Fatal(err)
+	}
+	matchedOperation := false
+	for _, operation := range operations {
+		id, err := operation["operation_id"].Text()
+		if err != nil {
+			t.Fatal(err)
+		}
+		if id != details["operation_id"] {
+			continue
+		}
+		kind, kindErr := operation["operation_kind"].Text()
+		actor, actorErr := operation["agent_id"].Text()
+		run, runErr := operation["run_id"].Text()
+		if kindErr != nil || actorErr != nil || runErr != nil || kind != "self_release" || actor != details["agent_id"] || run != runID {
+			t.Fatal("source lifecycle receipt is not its actor's native self-release operation")
+		}
+		matchedOperation = true
+	}
+	if !matchedOperation {
+		t.Fatal("source self-release has no native operation")
+	}
+	diagnostics, err := storetest.ReadSelectedForkLifecycleDiagnosticStorage(t.Context(), owner, runID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	matched, original := 0, false
+	for _, row := range diagnostics.Receipts {
+		var receipt struct {
+			EventID string         `json:"event_id"`
+			RunID   string         `json:"run_id"`
+			Payload map[string]any `json:"payload"`
+		}
+		if err := json.Unmarshal(row.Projection, &receipt); err != nil {
+			t.Fatal(err)
+		}
+		if receipt.EventID == text("event_id") {
+			if receipt.RunID != runID || details["outbox_id"] != row.OutboxID || !reflect.DeepEqual(receipt.Payload, payload) {
+				t.Fatalf("source self-release differs from its native receipt: %+v", receipt)
+			}
+			matched++
+		}
+		prior, _ := receipt.Payload["details"].(map[string]any)
+		if receipt.RunID == runID && prior["phase"] == "running" && prior["generation"] != nil &&
+			reflect.DeepEqual(prior["generation"], details["generation"]) &&
+			reflect.DeepEqual(prior["agent_identity"], details["agent_identity"]) && prior["agent_identity"] != nil &&
+			reflect.DeepEqual(prior["process_binding"], details["process_binding"]) && prior["process_binding"] != nil {
+			for _, encoded := range eventsBefore.Rows {
+				rows, err := storetest.DecodeSelectedForkSnapshotRows(storetest.SelectedForkStorageTableSnapshot{Columns: eventsBefore.Columns, Rows: []string{encoded}})
+				if err != nil {
+					t.Fatal(err)
+				}
+				id, err := rows[0]["event_id"].Text()
+				if err != nil {
+					t.Fatal(err)
+				}
+				original = original || id == receipt.EventID
+			}
+		}
+	}
+	if matched != 1 || !original {
+		t.Fatal("source self-release lacks its receipt or changed the original actor generation/process binding")
+	}
+	eventsAfter.Rows = slices.DeleteFunc(slices.Clone(eventsAfter.Rows), func(row string) bool { return row == added[0] })
+	after["events"] = eventsAfter
+	if !reflect.DeepEqual(before, after) {
+		t.Fatal("source handoff changed original business rows or another source table")
+	}
+}
+
+func requireForkLivePublicControls(t *testing.T, endpoint string, supervisor *processLifecycleSupervisor, owner runtimebus.EventStore, sourceRunID, sourceHash, childRunID, childHash string, removalFault *liveRemovalFaultCapability) {
+	t.Helper()
+	status := func(runID, want string) {
+		var result struct {
+			Run struct{ Status string } `json:"run"`
+		}
+		requireServedJSONRPCResult(t, endpoint, "run.get", map[string]any{"run_id": runID}, &result)
+		if result.Run.Status != want {
+			t.Fatalf("run %s status=%s, want %s", runID, result.Run.Status, want)
+		}
+	}
+	control := func(method, runID string) {
+		var result struct{ OK bool }
+		requireServedJSONRPCResult(t, endpoint, method, map[string]any{"run_id": runID, "idempotency_key": uuid.NewString()}, &result)
+		if !result.OK {
+			t.Fatalf("%s did not acknowledge %s", method, runID)
+		}
+	}
+	conflict := func(runID, liveID, hash string) {
+		before := readWorkspaceProofApplication(t, owner)
+		err := requireServedJSONRPCError(t, endpoint, "run.continue", map[string]any{"run_id": runID, "idempotency_key": uuid.NewString()})
+		if err.Data["code"] != apiv1.RunFlowAlreadyLiveCode {
+			t.Fatalf("continue escaped live-run selection: %+v", err)
+		}
+		details, _ := err.Data["details"].(map[string]any)
+		if details["live_run_id"] != liveID || !reflect.DeepEqual(before, readWorkspaceProofApplication(t, owner)) {
+			t.Fatalf("conflicting continue changed state or lost the live sibling: %+v", err)
+		}
+		grant, grantErr := supervisor.CurrentRuntime().CurrentStartupGrantEvidence()
+		if grantErr != nil || grant.BundleHash != hash {
+			t.Fatalf("conflicting continue replaced the live bundle: %+v %v", grant, grantErr)
+		}
+	}
+	status(sourceRunID, "paused")
+	status(childRunID, "live")
+	// Refusing removal of a bundle with live work must not retire its service.
+	current, found, err := supervisor.processCapability.CurrentSourceSet(t.Context())
+	if err != nil || !found {
+		t.Fatalf("read live predecessor: found=%t err=%v", found, err)
+	}
+	target, err := agenttopology.NewSourceSetPlan([]agenttopology.SourceCoordinate{{BundleHash: sourceHash}}, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	beforeRuntime := supervisor.CurrentRuntime()
+	grant, err := beforeRuntime.CurrentStartupGrantEvidence()
+	if err != nil {
+		t.Fatal(err)
+	}
+	supervisor.operationMu.Lock()
+	_, removalErr := supervisor.replaceLiveSourceSet(t.Context(), supervisor.runtimeContexts, current, target, sourceHash, grant.RuntimeInstanceID)
+	supervisor.operationMu.Unlock()
+	if !errors.Is(removalErr, runcontrol.ErrNotPaused) {
+		t.Fatalf("source removal did not retain its live-work refusal: %v", removalErr)
+	}
+	use, lookup, err := supervisor.runtimeContexts.AcquireBundleHash(t.Context(), childHash)
+	if err != nil || !lookup.Loaded() || use == nil {
+		t.Fatalf("refused source removal retired the serving runtime: lookup=%+v err=%v", lookup, err)
+	}
+	if use.Runtime() != beforeRuntime {
+		t.Error("pre-shutdown refusal replaced the live runtime")
+	}
+	if err := use.Done(); err != nil {
+		t.Fatal(err)
+	}
+	unchanged, found, err := supervisor.processCapability.CurrentSourceSet(t.Context())
+	if err != nil || !found || unchanged.Revision != current.Revision {
+		t.Fatalf("refused source removal changed committed membership: %+v found=%t err=%v", unchanged, found, err)
+	}
+	conflict(sourceRunID, childRunID, childHash)
+	control("run.pause", childRunID)
+	status(childRunID, "paused")
+	for _, fault := range []string{"precheck", "definitive", "uncertain"} {
+		removalFault.arm(sourceHash, fault)
+		beforeRuntime := supervisor.CurrentRuntime()
+		refused := requestServedJSONRPC(t, endpoint, "run.continue", map[string]any{"run_id": sourceRunID, "idempotency_key": uuid.NewString()})
+		if refused.Error == nil {
+			t.Fatalf("%s source replacement unexpectedly succeeded", fault)
+		}
+		lookup := supervisor.runtimeContexts.LookupBundleHashStatus(childHash)
+		if fault == "uncertain" {
+			if lookup.Loaded() {
+				t.Fatal("uncertain source replacement reopened predecessor execution")
+			}
+			continue
+		}
+		if refused.Error.Data["code"] != apiv1.RunNotPausedCode || !lookup.Loaded() {
+			t.Fatalf("%s refusal lost the predecessor service: %+v lookup=%+v", fault, refused.Error, lookup)
+		}
+		if fault == "precheck" && supervisor.CurrentRuntime() != beforeRuntime {
+			t.Fatal("precheck refusal replaced the serving occurrence")
+		}
+		if fault == "definitive" && supervisor.CurrentRuntime() == beforeRuntime {
+			t.Fatal("post-shutdown refusal reused a retired occurrence")
+		}
+		status(sourceRunID, "paused")
+		status(childRunID, "paused")
+	}
+	control("run.continue", sourceRunID)
+	status(sourceRunID, "live")
+	status(childRunID, "paused")
+	conflict(childRunID, sourceRunID, sourceHash)
+	control("run.pause", sourceRunID)
+	control("run.continue", childRunID)
+	status(sourceRunID, "paused")
+	status(childRunID, "live")
+	stop := map[string]any{"run_id": sourceRunID, "idempotency_key": "W4-unloaded-source-stop"}
+	var stopped, replayed map[string]any
+	requireServedJSONRPCResult(t, endpoint, "run.stop", stop, &stopped)
+	requireServedJSONRPCResult(t, endpoint, "run.stop", stop, &replayed)
+	if stopped["ok"] != true || !reflect.DeepEqual(stopped, replayed) {
+		t.Fatalf("paused unloaded stop lost its canonical replay: first=%v replay=%v", stopped, replayed)
+	}
+	status(sourceRunID, "cancelled")
+	status(childRunID, "live")
+}
+
+type liveRemovalFaultCapability struct {
+	startupownership.ProcessCapability
+	mu         sync.Mutex
+	bundleHash string
+	fault      string
+}
+
+func (p *liveRemovalFaultCapability) arm(bundleHash, fault string) {
+	p.mu.Lock()
+	defer p.mu.Unlock()
+	p.bundleHash, p.fault = bundleHash, fault
+}
+
+func (p *liveRemovalFaultCapability) take(request agenttopology.SourceSetCommitRequest, precheck bool) string {
+	p.mu.Lock()
+	defer p.mu.Unlock()
+	if len(request.Plan.Sources) != 1 || request.Plan.Sources[0].BundleHash != p.bundleHash || (p.fault == "precheck") != precheck {
+		return ""
+	}
+	fault := p.fault
+	p.fault = ""
+	return fault
+}
+
+func (p *liveRemovalFaultCapability) CheckSourceSetReplacement(ctx context.Context, request agenttopology.SourceSetCommitRequest) error {
+	if err := p.ProcessCapability.CheckSourceSetReplacement(ctx, request); err != nil {
+		return err
+	}
+	if p.take(request, true) != "" {
+		return &runcontrol.StateError{Err: runcontrol.ErrNotPaused}
+	}
+	return nil
+}
+
+func (p *liveRemovalFaultCapability) RestoreSourceSet(ctx context.Context, request agenttopology.SourceSetCommitRequest) (agenttopology.SourceSetCommitResult, error) {
+	fault := p.take(request, false)
+	if fault == "definitive" {
+		return agenttopology.SourceSetCommitResult{}, &runcontrol.StateError{Err: runcontrol.ErrNotPaused}
+	}
+	result, err := p.ProcessCapability.RestoreSourceSet(ctx, request)
+	if fault == "uncertain" && err == nil {
+		err = errors.New("source replacement acknowledgement lost")
+	}
+	return result, err
 }
 
 func readWorkspaceProofSourceDomain(t *testing.T, owner runtimebus.EventStore, runID string) map[string]storetest.SelectedForkStorageTableSnapshot {
@@ -277,13 +620,17 @@ func readWorkspaceProofSourceDomain(t *testing.T, owner runtimebus.EventStore, r
 
 func requireSelectedForkNativeMCPRead(t *testing.T, owner runtimebus.EventStore, runID, eventID string) {
 	t.Helper()
+	event := storetest.LoadCanonicalEventRecord(t, context.Background(), owner, eventID)
+	if event.RunID() != runID || event.ExecutionMode() != executionmode.Live {
+		t.Fatalf("public MCP turn event run=%s mode=%s, want run=%s mode=live", event.RunID(), event.ExecutionMode(), runID)
+	}
 	rows, err := storetest.ReadManagedAgentTurnStorage(context.Background(), owner, runID, "same-name")
 	if err != nil {
 		t.Fatal(err)
 	}
 	count, sessionID := 0, ""
 	for _, row := range rows {
-		if row.TriggerEventID != eventID || row.ExecutionMode != "mock" {
+		if row.TriggerEventID != eventID || row.ExecutionMode != string(executionmode.Live) {
 			continue
 		}
 		callsRaw, responseRaw, emittedRaw, currentSession := row.ToolCalls, row.ResponsePayload, row.EmittedEvents, row.SessionID
@@ -308,9 +655,12 @@ func requireSelectedForkNativeMCPRead(t *testing.T, owner runtimebus.EventStore,
 			}
 		case 1:
 			var response struct {
-				Text string `json:"text"`
+				Content []struct {
+					Type string `json:"type"`
+					Text string `json:"text"`
+				} `json:"content"`
 			}
-			if err := json.Unmarshal([]byte(responseRaw), &response); err != nil || response.Text != "selected-only-mcp-resource verified" || len(calls) != 0 {
+			if err := json.Unmarshal([]byte(responseRaw), &response); err != nil || len(response.Content) != 1 || response.Content[0].Type != "text" || response.Content[0].Text != "selected-only-mcp-resource verified" || len(calls) != 0 {
 				t.Fatalf("selected child did not consume the target resource result: %s, calls=%s err=%v", responseRaw, callsRaw, err)
 			}
 		default:

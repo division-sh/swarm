@@ -370,6 +370,10 @@ func TestOwnedMockLifecycleProbeStaysWithinExactSubtest(t *testing.T) {
 }
 
 func startOwnedMockLifecycleFollowUpRuntime(t *testing.T, opts cliapp.ServeOptions) (string, *runtimepkg.Runtime) {
+	return startOwnedLifecycleFollowUpRuntime(t, opts, executionposture.MockOnly)
+}
+
+func startOwnedLifecycleFollowUpRuntime(t *testing.T, opts cliapp.ServeOptions, posture executionposture.Posture) (string, *runtimepkg.Runtime) {
 	t.Helper()
 	if observer, ok := ownedMockLifecycleProbes.Load(t); ok {
 		if opts.TestLifecycleProbe != nil {
@@ -378,7 +382,7 @@ func startOwnedMockLifecycleFollowUpRuntime(t *testing.T, opts cliapp.ServeOptio
 		opts.TestLifecycleProbe = observer.(lifecycleprobe.Observer)
 	}
 	root := ownedMockLifecycleRoot(t)
-	process := startOwnedMockLifecycleTestProcess(t, repoRootForTest(), root, opts)
+	process := startOwnedLifecycleTestProcess(t, repoRootForTest(), root, opts, posture)
 	process.waitForReadyLine()
 	return "http://" + serveRuntimeAPIListenerFromOutput(t, process.outputString()) + "/v1/rpc", servedTestProcessRuntime(t, process)
 }

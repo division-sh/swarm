@@ -54,8 +54,9 @@ func TestRootInputFeedLocalAndConnectedCLIExecuteBothStores(t *testing.T) {
 				if connected.err != nil {
 					t.Fatalf("connected input-only feed %s: %v\n%s", selector, connected.err, connected.output)
 				}
-				waitForFullLifecycleRunStatus(t, process.rpc, id, "completed")
+				waitForGoldenTerminalRun(t, process, goldenStoreSelection{name: backend}, id, goldenStartupTimeout)
 				assertRootInputFeedBinaryRows(t, process, id, binary, root, config, env)
+				pauseFullLifecycleRun(t, process.rpc, id)
 			}
 			if err := process.stopAndWait(goldenShutdownGrace); err != nil {
 				t.Fatalf("input-only feed shutdown: %v\n%s", err, process.output.String())

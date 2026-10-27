@@ -115,7 +115,7 @@ func issue642SustainedRecurringTimerFork(t *testing.T, backend string) {
 		t.Fatal("sustained cut lost its real creating-handler cause")
 	}
 	rt.waitEntityStage(t, seed.RunID, seed.RunID, "checked")
-	sourceCompleted := issue2564H2CompletionWaitRun(t, rt, seed.RunID)
+	sourceCompleted := pauseIssue2564SettledSource(t, rt, seed.RunID)
 	rt.waitDeliveries(t, seed.RunID)
 	issue2564H2CompletionWaitReceipt(t, rt, seed.RunID, seed.EventID)
 	plan, sourceArm := issue642RecurringTimerPlan(t, reader, seed.RunID, marker.EventID)
@@ -128,7 +128,7 @@ func issue642SustainedRecurringTimerFork(t *testing.T, backend string) {
 	}
 	sourceTicks := issue642RecurringTimerOccurrences(t, rt, settledSource, sourceArm.FireAt)
 	issue642RequireRecurringProgress(t, sourceArm, settledSource, len(sourceTicks))
-	sourceEffects := issue642RequireSustainedEffects(t, rt, sourceCompleted, sourceTicks, marker.Source)
+	sourceEffects := issue642RequireSustainedEffects(t, rt, sourceCompleted, sourceTicks, marker.Source, "paused")
 	sourceBefore, err := storetest.ReadSelectedForkSourceDomain(t.Context(), rt.selected, seed.RunID)
 	if err != nil {
 		t.Fatal(err)
@@ -139,11 +139,11 @@ func issue642SustainedRecurringTimerFork(t *testing.T, backend string) {
 		"allow_source_freeze": true, "idempotency_key": "issue642-sustained-recurring-fork",
 	}, &fork)
 	if fork.SourceRunID != seed.RunID || fork.ForkRunID == "" || fork.ForkRunID == seed.RunID ||
-		fork.ForkEventID != marker.EventID || fork.ForkRevision != plan.ForkPoint.Revision || fork.SourceFrozen || fork.SourceRunStatus != "completed" {
+		fork.ForkEventID != marker.EventID || fork.ForkRevision != plan.ForkPoint.Revision || fork.SourceFrozen || fork.SourceRunStatus != "paused" {
 		t.Fatalf("sustained fork lost the exact active cut and independent completed source: %+v", fork)
 	}
 	rt.waitEntityStage(t, fork.ForkRunID, fork.ForkRunID, "checked")
-	completed := issue2564H2CompletionWaitRun(t, rt, fork.ForkRunID)
+	completed := waitIssue2564LiveRunSettlement(t, rt, fork.ForkRunID)
 	rt.waitDeliveries(t, fork.ForkRunID)
 	if !sourceArm.FireAt.Before(completed.StartedAt) {
 		t.Fatal("sustained child must retain the original overdue coordinate")
@@ -166,7 +166,7 @@ func issue642SustainedRecurringTimerFork(t *testing.T, backend string) {
 	if !actual.SourceArmedAt.Equal(sourceArm.CreatedAt) || actual.RecurrenceInterval != sourceArm.RecurrenceInterval {
 		t.Fatalf("sustained child reset the original arm or cadence: source=%+v child=%+v", sourceArm, actual)
 	}
-	childEffects := issue642RequireSustainedEffects(t, rt, completed, childTicks, marker.Source)
+	childEffects := issue642RequireSustainedEffects(t, rt, completed, childTicks, marker.Source, "live")
 	issue642WaitSustainedExecutionClosed(t, rt, fork.ForkRunID)
 	if observed := storetest.ObserveWorkflowTimerReplayStorage(t, t.Context(), rt.selected, fork.ForkRunID, fork.ForkRunID); observed.Timers != 1 || observed.ActiveTimers != 0 {
 		t.Fatalf("sustained child leaked an extra or active timer: %+v", observed)
@@ -183,10 +183,10 @@ func issue642SustainedRecurringTimerFork(t *testing.T, backend string) {
 	if err != nil || !reflect.DeepEqual(sourceCompleted, sourceAfterCompletion) {
 		t.Fatalf("sustained child changed source completion/counts: %v", err)
 	}
-	t.Logf("ISSUE642_SUSTAINED_TIMER_CONTINUED backend=%s source=%s child=%s cut=%d timer=%s original_arm=%s first_due=%s cadence=%s source_effects=%d child_effects=%d child_occurrences=%d next_due=%s completed=%s",
+	t.Logf("ISSUE642_SUSTAINED_TIMER_CONTINUED backend=%s source=%s child=%s cut=%d timer=%s original_arm=%s first_due=%s cadence=%s source_effects=%d child_effects=%d child_occurrences=%d next_due=%s settled_run=%s",
 		backend, seed.RunID, fork.ForkRunID, plan.ForkPoint.Revision, actual.Ref.ActivationID,
 		actual.SourceArmedAt.Format(time.RFC3339Nano), sourceArm.FireAt.Format(time.RFC3339Nano), actual.RecurrenceInterval,
-		sourceEffects, childEffects, len(childTicks), actual.FireAt.Format(time.RFC3339Nano), completed.EndedAt.Format(time.RFC3339Nano))
+		sourceEffects, childEffects, len(childTicks), actual.FireAt.Format(time.RFC3339Nano), completed.RunID)
 }
 
 func issue642SustainedInteger(t *testing.T, value any) int {
@@ -202,7 +202,7 @@ func issue642SustainedInteger(t *testing.T, value any) int {
 	return count
 }
 
-func issue642RequireSustainedEffects(t *testing.T, rt issue2564ServedFixture, completed operatorread.RunHeader, occurrences []timeridentity.WorkflowTimerOccurrenceRef, node string) int {
+func issue642RequireSustainedEffects(t *testing.T, rt issue2564ServedFixture, completed operatorread.RunHeader, occurrences []timeridentity.WorkflowTimerOccurrenceRef, node, status string) int {
 	t.Helper()
 	entity, err := rt.selected.LoadOperatorEntity(t.Context(), completed.RunID, completed.RunID)
 	if err != nil || entity.Entity.CurrentState == nil || *entity.Entity.CurrentState != "checked" {
@@ -254,8 +254,8 @@ func issue642RequireSustainedEffects(t *testing.T, rt issue2564ServedFixture, co
 	if all := rt.events(t, completed.RunID, ""); completed.EventCount != len(all) || report.EventCount != len(all) {
 		t.Fatalf("sustained run count does not match exact persisted publications: header=%d report=%d publications=%d", completed.EventCount, report.EventCount, len(all))
 	}
-	if completed.BundleHash != rt.BundleHash || completed.Status != "completed" || completed.EndedAt == nil || completed.Failure != nil {
-		t.Fatalf("sustained serving is not actual selected run completion: %+v", completed)
+	if completed.BundleHash != rt.BundleHash || completed.Status != status || completed.EndedAt != nil || completed.Failure != nil {
+		t.Fatalf("sustained effects changed the run's %s lifetime: %+v", status, completed)
 	}
 	summary, err := rt.selected.SummarizeRun(t.Context(), completed.RunID)
 	if err != nil || !summary.Settled() || summary.DeadLetter != 0 {
@@ -273,7 +273,7 @@ func issue642WaitSustainedExecutionClosed(t *testing.T, rt issue2564ServedFixtur
 		if err != nil {
 			t.Fatal(err)
 		}
-		if storage.State == "closed" && storage.RunStatus == "completed" && storage.Occurrences == 1 {
+		if storage.State == "closed" && storage.RunStatus == "live" && storage.Occurrences == 1 {
 			return
 		}
 		time.Sleep(10 * time.Millisecond)

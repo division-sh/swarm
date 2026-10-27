@@ -9,6 +9,7 @@ import (
 
 	"github.com/division-sh/swarm/internal/apiidempotency"
 	"github.com/division-sh/swarm/internal/durabledata"
+	runtimepkg "github.com/division-sh/swarm/internal/runtime"
 	runtimecontracts "github.com/division-sh/swarm/internal/runtime/contracts"
 	"github.com/division-sh/swarm/internal/runtime/diaglog"
 	"github.com/division-sh/swarm/internal/runtime/runbundle"
@@ -18,11 +19,6 @@ import (
 	"github.com/division-sh/swarm/internal/sourceartifact"
 	"github.com/google/uuid"
 )
-
-func activeRunStatus(raw string) bool {
-	state, err := runtimerunlifecycle.ParseState(raw)
-	return err == nil && state.Active()
-}
 
 type RunForkAvailabilityStore interface {
 	LoadRunBundleAvailability(context.Context, string) (runbundle.Availability, error)
@@ -71,6 +67,9 @@ type SelectedContractRunForkExecutor struct {
 	ExecuteSelectedContractRunFork SelectedContractRunForkExecutionFunc
 	SourceLoader                   runtimerunforkexecution.SelectedContractSourceLoader
 	AgentRuntime                   runtimerunforkexecution.SelectedContractAgentRuntimeOptions
+	RuntimeContexts                *runtimepkg.RuntimeContextManager
+	LiveRuns                       runtimerunlifecycle.LiveRunReader
+	AcquireLiveRuntime             func(context.Context, string) (*runtimepkg.RuntimeContextUse, error)
 }
 
 func (e SelectedContractRunForkExecutor) ExecuteRunFork(ctx context.Context, req RunForkExecutionRequest) (RunForkExecutionResult, error) {
@@ -80,18 +79,40 @@ func (e SelectedContractRunForkExecutor) ExecuteRunFork(ctx context.Context, req
 	if e.ExecuteSelectedContractRunFork == nil {
 		return RunForkExecutionResult{}, fmt.Errorf("run.fork requires selected-contract executor")
 	}
-	result, err := e.ExecuteSelectedContractRunFork(ctx, runtimerunforkexecution.SelectedContractExecutionRequest{
+	var liveRuntime *runtimepkg.Runtime
+	if e.RuntimeContexts != nil && e.AcquireLiveRuntime == nil {
+		var selected selectedRuntimeContext
+		var err error
+		ctx, selected, err = runtimeBundleContextByHash(ctx, e.RuntimeContexts, req.BundleHash, req.SourceRunID)
+		if err != nil {
+			return RunForkExecutionResult{}, err
+		}
+		liveRuntime = selected.Runtime
+		if liveRuntime == nil {
+			return RunForkExecutionResult{}, errors.New("run.fork requires its admitted runtime")
+		}
+	}
+	runtimeRequest := runtimerunforkexecution.SelectedContractExecutionRequest{
 		ForkOperation:      req.ForkOperation,
 		SourceRunID:        strings.TrimSpace(req.SourceRunID),
 		At:                 strings.TrimSpace(req.ForkEventID),
 		AtStart:            req.AtStart,
 		ExpectedBundleHash: strings.TrimSpace(req.BundleHash),
 		AllowSourceFreeze:  req.AllowSourceFreeze,
+		LiveRuntime:        liveRuntime,
+		AcquireLiveRuntime: e.AcquireLiveRuntime,
+		LiveContexts:       e.RuntimeContexts,
+		LiveRuns:           e.LiveRuns,
 		DataPinOverrides:   req.DataPinOverrides,
 		SourceLoader:       e.SourceLoader,
 		ContractSelection:  req.ContractSelection,
 		AgentRuntime:       e.AgentRuntime,
-	})
+	}
+	result, err := e.ExecuteSelectedContractRunFork(ctx, runtimeRequest)
+	return selectedRunForkResult(req, result, err)
+}
+
+func selectedRunForkResult(req RunForkExecutionRequest, result runtimerunforkexecution.SelectedContractExecutionResult, err error) (RunForkExecutionResult, error) {
 	acknowledged := exactSelectedForkActivation(req, result)
 	if result.Activation.Activated && !acknowledged {
 		return RunForkExecutionResult{}, errors.Join(err, fmt.Errorf("selected fork activation has no exact acknowledged identity"))
@@ -145,7 +166,7 @@ func exactSelectedForkActivation(req RunForkExecutionRequest, result runtimerunf
 		activation.ForkPoint.Kind == materialization.ForkPoint.Kind &&
 		activation.ForkPoint.Revision == materialization.ForkPoint.Revision &&
 		activation.ForkPoint.EventID == materialization.ForkPoint.EventID &&
-		activation.ForkRunStatus == runfork.RunForkActivatedStatus &&
+		(activation.ForkRunStatus == runfork.RunForkActivatedStatus || activation.ForkRunStatus == runfork.RunForkLiveStatus) &&
 		(req.SourceRunID == "" || materialization.SourceRunID == req.SourceRunID) &&
 		(req.ForkEventID == "" || materialization.ForkPoint.EventID == req.ForkEventID)
 }
@@ -208,12 +229,6 @@ func executeRunFork(ctx context.Context, req Request, opts RunForkHandlerOptions
 		}
 		if !availability.Available() {
 			return nil, NewApplicationError(BundleUnavailableCode, false, runForkAvailabilityDetails(availability))
-		}
-		if activeRunStatus(availability.Status) && !params.AllowSourceFreeze {
-			return nil, NewInvalidParamsError(map[string]any{
-				"field":  "allow_source_freeze",
-				"reason": "must be true to allow permanent source freeze if it has not advanced beyond the fork point. A frozen source cannot resume; an advanced source stays independently live. Without this permission, no fork is started",
-			})
 		}
 		sourceBundleHash := strings.TrimSpace(availability.BundleHash)
 		targetBundleHash := strings.TrimSpace(params.BundleHash)
@@ -336,13 +351,9 @@ func validateRunForkExecutionResult(result RunForkExecutionResult) error {
 		if result.ForkEventID == "" {
 			return fmt.Errorf("event run.fork result has no exact event identity")
 		}
-	case string(runfork.RunForkPointDeploymentRevision):
+	case string(runfork.RunForkPointDeploymentRevision), string(runfork.RunForkPointRunStart), string(runfork.RunForkPointStateRevision):
 		if result.ForkEventID != "" {
-			return fmt.Errorf("deployment revision run.fork result invented an event identity")
-		}
-	case string(runfork.RunForkPointRunStart):
-		if result.ForkEventID != "" {
-			return fmt.Errorf("run start run.fork result invented an event identity")
+			return fmt.Errorf("%s run.fork result invented an event identity", result.ForkPointKind)
 		}
 	default:
 		return fmt.Errorf("run.fork result has invalid point kind %q", result.ForkPointKind)

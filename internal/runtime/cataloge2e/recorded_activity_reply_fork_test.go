@@ -191,7 +191,7 @@ func runCopiedActivityReplyReturnOutcome(t *testing.T, backend catalogRuntimeBac
 			t.Fatal(err)
 		}
 	}
-	h := newRuntimeHarnessForBackend(t, root, backend, true)
+	h := newLiveForkCatalogHarness(t, root, backend)
 	step := catalogTriggerStep{Event: "request.started", Payload: map[string]any{"account_id": accountID, "request_id": requestID},
 		eventID: uuid.NewString(), createdAt: time.Now().UTC(), sourceAgent: "cataloge2e", inputKind: catalogReplayInputRootIngress}
 	h.publishAndWait(step, 20*time.Second)
@@ -342,7 +342,7 @@ func runCopiedActivityReplyReturnOutcome(t *testing.T, backend catalogRuntimeBac
 		loader = runforkexecution.SourceArtifactSelectedContractSourceLoader{RepoRoot: repoRootFromCatalogE2E(t), Store: selected}
 		options = selectedContractAgentRuntimeOptionsForCatalogHarness(h, testRuntimeConfig())
 	} else {
-		executed, err := runforkexecution.ExecuteSelectedContractRunFork(h.ctx, runforkexecution.SelectedContractExecutionRequest{
+		executed, err := executeCatalogLiveFork(t, h, h.ctx, runforkexecution.SelectedContractExecutionRequest{
 			SourceRunID: catalogRuntimeRunID, At: cut, ForkOperation: &operations[0], AllowSourceFreeze: true, Owner: owner, SourceLoader: loader, ContractSelection: selection, AgentRuntime: options,
 		})
 		if err != nil || !executed.Activation.Activated || executed.Materialization.ForkRunID != staged.ForkRunID {
@@ -471,7 +471,7 @@ func proveCopiedTwoLevelReplySibling(t *testing.T, h *runtimeHarness, selected c
 			}
 		}
 	}
-	executed, err := runforkexecution.ExecuteSelectedContractRunFork(ctx, runforkexecution.SelectedContractExecutionRequest{
+	executed, err := executeCatalogLiveFork(t, h, ctx, runforkexecution.SelectedContractExecutionRequest{
 		SourceRunID: catalogRuntimeRunID, At: sourceAttempt.RequestEventID, ForkOperation: &operation, AllowSourceFreeze: true,
 		Owner: owner, SourceLoader: loader, ContractSelection: selection, AgentRuntime: options,
 	})
@@ -550,7 +550,7 @@ func proveCopiedTwoLevelReplyRefork(t *testing.T, h *runtimeHarness, selected co
 		t.Fatalf("refork did not use the immediate source's two open levels: %+v rows=%+v error=%v", staged, grandchildRows, err)
 	}
 	inner := requireReforkedOpenReplyRows(t, beforeRows, grandchildRows, staged.ForkRunID)
-	executed, err := runforkexecution.ExecuteSelectedContractRunFork(ctx, runforkexecution.SelectedContractExecutionRequest{
+	executed, err := executeCatalogLiveFork(t, h, ctx, runforkexecution.SelectedContractExecutionRequest{
 		SourceRunID: sourceRun, At: cut, ForkOperation: &operation, AllowSourceFreeze: true, Owner: owner, SourceLoader: loader, ContractSelection: selection, AgentRuntime: options,
 	})
 	if err != nil || !executed.Activation.Activated || executed.Materialization.ForkRunID != staged.ForkRunID {

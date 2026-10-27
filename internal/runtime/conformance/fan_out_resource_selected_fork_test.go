@@ -18,6 +18,8 @@ import (
 	"github.com/division-sh/swarm/internal/apiv1"
 	"github.com/division-sh/swarm/internal/durabledata"
 	"github.com/division-sh/swarm/internal/operatorread"
+	"github.com/division-sh/swarm/internal/packadmission"
+	runtimepkg "github.com/division-sh/swarm/internal/runtime"
 	"github.com/division-sh/swarm/internal/runtime/authoractivity"
 	"github.com/division-sh/swarm/internal/runtime/bus"
 	"github.com/division-sh/swarm/internal/runtime/contracts"
@@ -29,6 +31,7 @@ import (
 	"github.com/division-sh/swarm/internal/runtime/pipeline"
 	"github.com/division-sh/swarm/internal/runtime/runfork"
 	"github.com/division-sh/swarm/internal/runtime/runforkexecution"
+	"github.com/division-sh/swarm/internal/runtime/runlifecycle"
 	"github.com/division-sh/swarm/internal/runtime/semanticview"
 	"github.com/division-sh/swarm/internal/runtime/startupownership"
 	"github.com/division-sh/swarm/internal/runtime/testfixtures/canonicalrouting"
@@ -117,6 +120,7 @@ func selectedDeploymentResourceFixtureConfigured(t *testing.T, backend, route st
 			deliveryLifecycle = wrapDelivery(f.selected)
 		}
 		f.runtime = newNotifyAllChildrenRuntime(t, f.selected, f.db, f.source, time.Now, notifyAllChildrenRuntimeOptions{
+			ordinaryContext: true,
 			processTopology: f.topology, testLifecycleProbe: probe, deliveryLifecycle: deliveryLifecycle,
 			fanOutExecutor: func(coordinator *pipeline.PipelineCoordinator) startupownership.FanOutExecutor {
 				executor := startupownership.FanOutExecutor(deploymentFanOutDiagnostic{FanOutExecutor: coordinator, t: t})
@@ -165,6 +169,11 @@ func deploymentForkServerAt(t *testing.T, f *deploymentResourceFixture, owner ru
 		Executor: apiv1.SelectedContractRunForkExecutor{
 			ExecuteSelectedContractRunFork: func(ctx context.Context, req runforkexecution.SelectedContractExecutionRequest) (runforkexecution.SelectedContractExecutionResult, error) {
 				req.Owner = owner
+				req = deploymentLiveForkRequest(t, f, req)
+				if req.ForkOperation != nil {
+					operation := *req.ForkOperation
+					f.forkRequest.Store(&operation)
+				}
 				result, err := runforkexecution.ExecuteSelectedContractRunFork(ctx, req)
 				if err != nil {
 					t.Logf("selected fork executor diagnosis: %v", err)
@@ -193,6 +202,51 @@ func deploymentForkServerAt(t *testing.T, f *deploymentResourceFixture, owner ru
 	}))
 	t.Cleanup(server.Close)
 	return server
+}
+
+func deploymentLiveForkRequest(t *testing.T, f *deploymentResourceFixture, req runforkexecution.SelectedContractExecutionRequest) runforkexecution.SelectedContractExecutionRequest {
+	t.Helper()
+	selected, ok := f.selected.(interface {
+		runtimepkg.RunBundleAvailabilityReader
+		runlifecycle.LiveRunReader
+	})
+	if !ok {
+		t.Fatalf("selected store %T lacks live-run custody", f.selected)
+	}
+	if f.liveContexts == nil {
+		bundle, ok := semanticview.Bundle(f.source)
+		if !ok {
+			t.Fatal("live deployment fixture requires its admitted source bundle")
+		}
+		projection, err := packadmission.Admit(bundle.PackInventory, bundle.Platform)
+		if err != nil {
+			t.Fatal(err)
+		}
+		bundle.PackAdmission = projection
+		subjects, err := projection.ProviderTriggers.InstalledCapabilitySubjects()
+		if err != nil {
+			t.Fatal(err)
+		}
+		f.liveContexts, err = runtimepkg.NewRuntimeContextManager(selected, runtimepkg.BundleContext{
+			SourceArtifactFact: f.runtime.sourceArtifactFact, Source: f.source,
+			Runtime: f.runtime.contextRuntime, WorkOwner: f.runtime.workOwner,
+			PackInventoryDigest:       bundle.PackInventory.Digest(),
+			ProviderTriggerGeneration: projection.ProviderTriggers.Generation(), InstalledTriggerSubjects: subjects,
+		})
+		if err != nil {
+			t.Fatal(err)
+		}
+	}
+	req.LiveRuntime = f.runtime.contextRuntime
+	req.LiveContexts, req.LiveRuns = f.liveContexts, selected
+	req.AcquireLiveRuntime = func(ctx context.Context, hash string) (*runtimepkg.RuntimeContextUse, error) {
+		use, lookup, err := f.liveContexts.AcquireBundleHash(ctx, hash)
+		if err == nil && !lookup.Loaded() {
+			return nil, fmt.Errorf("deployment fork target %s is not its registered ordinary runtime", hash)
+		}
+		return use, err
+	}
+	return req
 }
 
 func logSelectedDeploymentForkFailure(t *testing.T, selected any, forkRunID string) {
@@ -338,13 +392,15 @@ func deploymentForkOwnerWithExecutor(t *testing.T, f *deploymentResourceFixture,
 	if !ok {
 		t.Fatalf("selected store %T lacks source artifact loader", f.selected)
 	}
+	live := deploymentLiveForkRequest(t, f, runforkexecution.SelectedContractExecutionRequest{})
+	agents := f.forkAgents
+	agents.ExecutionPosture, agents.ProcessCapability = executionposture.Live, f.topology.capability
 	recovered, err := owner.RecoverSelectedForkContexts(f.ctx, effects.NewRecoveryRequest(time.Now().UTC(), executionposture.Live), runforkexecution.SelectedForkRecoveryEnvironment{
+		AcquireLiveRuntime: live.AcquireLiveRuntime, LiveContexts: live.LiveContexts, LiveRuns: live.LiveRuns,
 		SourceLoader: runforkexecution.SourceArtifactSelectedContractSourceLoader{
 			RepoRoot: conformanceRepoRoot(t), Store: artifacts,
 		},
-		AgentRuntime: runforkexecution.SelectedContractAgentRuntimeOptions{
-			ExecutionPosture: executionposture.Live, ProcessCapability: f.topology.capability,
-		},
+		AgentRuntime: agents,
 	})
 	if err != nil {
 		t.Fatal(err)
@@ -570,7 +626,7 @@ func assertSelectedDeploymentRowSet(t *testing.T, f *deploymentResourceFixture, 
 }
 
 func TestDeploymentSourceChangedPinPublicForkReplayAfterReconstruction(t *testing.T) {
-	proveSourceChangedPinPublicForkAndLostResponse(t, runfork.RunForkPointDeploymentRevision)
+	proveSourceChangedPinPublicForkAndLostResponse(t, runfork.RunForkPointStateRevision)
 }
 
 func TestEventSourceChangedPinPublicForkReplayAfterReconstruction(t *testing.T) {
@@ -606,6 +662,7 @@ func proveSourceChangedPinPublicForkAndLostResponse(t *testing.T, pointKind runf
 					if err := os.WriteFile(changedPath, changedRows, 0o600); err != nil {
 						t.Fatal(err)
 					}
+					pauseDeploymentFixtureRun(t, f, sourceRunID)
 					changedSourceID := startDeploymentResourceRun(t, f, server, "--data", selectedDeploymentEvent+"="+changedPath)
 					waitDeploymentForkRowEvent(t, f.ctx, f.selected, changedSourceID, f.runtime.fanOutServing.Wake)
 					assertSelectedDeploymentRows(t, f, server, changedSourceID, route, string(changed.VersionID), changedRows)
@@ -653,11 +710,21 @@ func proveSourceChangedPinPublicForkAndLostResponse(t *testing.T, pointKind runf
 					assertForkRows := func() {
 						assertSelectedDeploymentRowSet(t, f, server, result.ForkRunID, route, string(changed.VersionID), forkRows, 1)
 						lifecycle, err := storetest.ReadRuntimeLogRunSnapshot(f.ctx, f.selected, result.ForkRunID)
-						if err != nil || lifecycle.RunID != result.ForkRunID || lifecycle.State != "completed" || lifecycle.EndedAt == nil || lifecycle.Failure != nil {
-							t.Fatalf("selected fixture did not complete successfully: %+v error=%v", lifecycle, err)
+						instances, instanceErr := f.selected.ListWorkflowInstances(f.ctx, result.ForkRunID)
+						finals := 0
+						for _, instance := range instances {
+							if instance.StageDefined {
+								if instance.CurrentState != "done" {
+									t.Fatalf("closed fixture retained a nonfinal instance: %+v", instance)
+								}
+								finals++
+							}
+						}
+						if err != nil || instanceErr != nil || finals == 0 || lifecycle.RunID != result.ForkRunID || lifecycle.State != "live" || lifecycle.EndedAt != nil || lifecycle.Failure != nil {
+							t.Fatalf("selected fixture did not retain live/final/settled facts: %+v instances=%+v errors=%v/%v", lifecycle, instances, err, instanceErr)
 						}
 					}
-					assertSelectedDeploymentRowSet(t, f, server, result.ForkRunID, route, string(changed.VersionID), forkRows, 0)
+					assertSelectedDeploymentRowSet(t, f, server, result.ForkRunID, route, string(changed.VersionID), forkRows, 1)
 					beforeRefusals, err := storetest.ReadSelectedForkSourceDomain(f.ctx, f.selected, result.ForkRunID)
 					if err != nil {
 						t.Fatal(err)
@@ -685,14 +752,35 @@ func proveSourceChangedPinPublicForkAndLostResponse(t *testing.T, pointKind runf
 					if err != nil || !reflect.DeepEqual(afterRefusals, beforeRefusals) {
 						t.Fatalf("refused fixture inputs changed child state: error=%v", err)
 					}
-					closeResult, err := owner.PublishSelectedFixtureCloseForTest(f.ctx, result.ForkRunID,
-						runforkexecution.SelectedFixtureCloseInputForTest{AccountID: "changed"})
+					snapshot, err := storetest.ReadSelectedForkApplicationStorageSnapshot(f.ctx, f.selected)
 					if err != nil {
-						t.Fatalf("close settled selected fixture through retained child: %v", err)
+						t.Fatal(err)
 					}
-					if closeResult.RunID != result.ForkRunID || closeResult.BindingID == "" || closeResult.ExecutionID == "" || closeResult.Generation != 1 || closeResult.EventID == "" {
-						t.Fatalf("fixture close lost retained execution evidence: %+v", closeResult)
+					executions, err := storetest.DecodeSelectedForkSnapshotRows(snapshot["run_fork_selected_contract_runtime_executions"])
+					if err != nil {
+						t.Fatal(err)
 					}
+					var executionID string
+					closed := 0
+					for _, execution := range executions {
+						child, childErr := execution["fork_run_id"].Text()
+						state, stateErr := execution["state"].Text()
+						var generation uint64
+						if err := json.Unmarshal(execution["generation"].Value, &generation); err != nil || childErr != nil || stateErr != nil {
+							t.Fatalf("decode exact predecessor: generation=%v child=%v state=%v", err, childErr, stateErr)
+						}
+						if child == result.ForkRunID && state == "closed" && generation == 1 {
+							executionID, err = execution["execution_id"].Text()
+							if err != nil {
+								t.Fatal(err)
+							}
+							closed++
+						}
+					}
+					if closed != 1 || executionID == "" {
+						t.Fatalf("fixture lost its exact closed selected predecessor: matches=%d execution=%s", closed, executionID)
+					}
+					publishNotifyAllChildrenEvent(t, f.ctx, f.runtime, f.source, result.ForkRunID, "fixture.close.requested", map[string]any{"account_id": "changed"})
 					assertForkRows()
 					if closes, err := storetest.CountRunEventNameStorage(f.ctx, f.selected, result.ForkRunID, "fixture.close.requested"); err != nil || closes != 1 {
 						t.Fatalf("selected fixture close publication count=%d, want one: %v", closes, err)
@@ -781,7 +869,7 @@ func proveSourceChangedPinPublicForkAndLostResponse(t *testing.T, pointKind runf
 					for _, entry := range recovery {
 						if entry.RunID == result.ForkRunID {
 							matched++
-							if entry.Disposition != runfork.SelectedForkRecoveryTerminal || entry.ExecutionID != closeResult.ExecutionID || entry.Continuation != nil || len(entry.PendingCancellations) != 0 ||
+							if entry.Disposition != runfork.SelectedForkRecoveryControlOnly || entry.ExecutionID != executionID || entry.Continuation != nil || len(entry.PendingCancellations) != 0 ||
 								entry.Operation == nil || entry.Operation.Status != runfork.ForkOperationActivated || entry.Operation.ForkRunID != result.ForkRunID || entry.Operation.Result == nil {
 								t.Fatalf("completed child lost its exact terminal recovery and activated result: %+v", entry)
 							}
@@ -827,7 +915,22 @@ func TestDeploymentSourceDynamicReceiverSelectedForkRefusesWithoutMutation(t *te
 	for _, backend := range []string{"sqlite", "postgres"} {
 		t.Run(backend, func(t *testing.T) {
 			f := selectedDeploymentResourceFixture(t, backend, "dynamic")
-			f.runtime.fanOutServing.Close()
+			setup := make(chan struct{})
+			releaseSetup := sync.OnceFunc(func() { close(setup) })
+			t.Cleanup(releaseSetup)
+			var holdSetup sync.Once
+			empty := make(chan struct{})
+			f.runtime.fanOutServing.SetTestScanObserver(func(_ startupownership.FanOutCandidate, found bool, err error) {
+				if !found && err == nil {
+					holdSetup.Do(func() { close(empty); <-setup })
+				}
+			})
+			f.runtime.fanOutServing.Wake()
+			select {
+			case <-empty:
+			case <-time.After(5 * time.Second):
+				t.Fatal("dynamic source setup did not join an empty fan-out scan")
+			}
 			server := f.operatorServer(t)
 			start := func(name, accountID string) string {
 				t.Helper()
@@ -838,6 +941,9 @@ func TestDeploymentSourceDynamicReceiverSelectedForkRefusesWithoutMutation(t *te
 				return startDeploymentResourceRun(t, f, server, "--data", selectedDeploymentEvent+"="+path)
 			}
 			sourceRunID := start("source", "source")
+			pauseDeploymentFixtureRun(t, f, sourceRunID)
+			releaseSetup()
+			f.runtime.fanOutServing.Wake()
 			changedRunID := start("changed", "changed")
 			var changedVersion string
 			if err := f.db.QueryRowContext(f.ctx, `SELECT version_id FROM resource_version_pins WHERE run_id=$1 AND flow_path='.' AND event_name='root.ready'`, changedRunID).Scan(&changedVersion); err != nil {
@@ -859,11 +965,8 @@ func TestDeploymentSourceDynamicReceiverSelectedForkRefusesWithoutMutation(t *te
 				t.Fatalf("dynamic receiver lost its exact changed-pin child: result=%+v error=%s", result, rpcErr)
 			}
 			rows := []byte("{\"account_id\":\"changed\",\"document\":{\"route\":\"dynamic\"}}\n")
-			assertSelectedDeploymentRowsWithClosedExecutions(t, f, server, result.ForkRunID, "dynamic", changedVersion, rows, 0)
-			closed, err := owner.PublishSelectedFixtureCloseForTest(f.ctx, result.ForkRunID, runforkexecution.SelectedFixtureCloseInputForTest{AccountID: "changed"})
-			if err != nil || closed.RunID != result.ForkRunID {
-				t.Fatalf("dynamic selected child could not consume its authored close: %+v err=%v", closed, err)
-			}
+			assertSelectedDeploymentRowsWithClosedExecutions(t, f, server, result.ForkRunID, "dynamic", changedVersion, rows, 1)
+			publishNotifyAllChildrenEvent(t, f.ctx, f.runtime, f.source, result.ForkRunID, "fixture.close.requested", map[string]any{"account_id": "changed"})
 			assertSelectedDeploymentRows(t, f, server, result.ForkRunID, "dynamic", changedVersion, rows)
 			replayed, rpcErr := deploymentForkRPC(t, f.ctx, forkServer, params)
 			if len(rpcErr) != 0 || !reflect.DeepEqual(result, replayed) {

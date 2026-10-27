@@ -30,6 +30,17 @@ type diagnosticForkActivationProbe struct {
 	settled  chan error
 }
 
+func (p *diagnosticForkActivationProbe) ActivateRunForkForSelectedContractExecution(ctx context.Context, req runfork.RunForkSelectedContractExecutionActivateRequest) (runfork.RunForkActivation, error) {
+	authority, ok := effects.AuthorityFromContext(ctx)
+	if !ok {
+		p.t.Fatal("activation probe requires its exact selected authority")
+	}
+	if err := p.RequireRunForkSelectedContractExecutionSettlement(ctx, authority, req.AllowedSourceEventIDs, req.ExecutionSource); err != nil {
+		return runfork.RunForkActivation{}, err
+	}
+	return p.SelectedContractForkLifecycle.ActivateRunForkForSelectedContractExecution(ctx, req)
+}
+
 func (p *diagnosticForkActivationProbe) RequireRunForkSelectedContractExecutionSettlement(ctx context.Context, authority effects.Authority, allowed []string, source semanticview.Source) (err error) {
 	defer func() { p.settled <- err }()
 	forkRunID := authority.SelectedFork.ForkRunID
@@ -109,7 +120,7 @@ func TestLifecycleDiagnosticForkActivationBothStores(t *testing.T) {
 			for _, scenario := range []string{"clean", "forged_tags", "observation_child", "corrupt_ack"} {
 				t.Run(scenario, func(t *testing.T) {
 					root := localReadinessFixture(t, 1, "agent")
-					h := newRuntimeHarnessForBackend(t, root, backend, true)
+					h := newLiveForkCatalogHarness(t, root, backend)
 					ctx := worklifetime.WithOccurrence(catalogRunContext(h, catalogRuntimeRunID), h.rt.WorkOccurrence())
 					frontierID := activateLocalReadinessFrontier(t, ctx, h, "worker.ready")
 					var sourceStore interface {
@@ -129,13 +140,16 @@ func TestLifecycleDiagnosticForkActivationBothStores(t *testing.T) {
 						SelectedContractRuntimeExecutionLifecycle: forkStore.(forkexecution.SelectedContractRuntimeExecutionLifecycle),
 						t: t, h: h, scenario: scenario, settled: make(chan error, 1),
 					}
-					result, err := forkexecution.ExecuteSelectedContractRunFork(ctx, forkexecution.SelectedContractExecutionRequest{
+					result, err := executeCatalogLiveFork(t, h, ctx, forkexecution.SelectedContractExecutionRequest{
 						SourceRunID: catalogRuntimeRunID, At: frontierID, AllowSourceFreeze: true,
 						Owner: selectedContractExecutionOwnerForCatalogHarness(t, h, probe), SourceLoader: loader, ContractSelection: selection,
 						AgentRuntime: selectedContractAgentRuntimeOptionsForCatalogHarness(h, cfg),
 					})
-					if err != nil || !result.Activation.Activated {
+					if scenario == "clean" && (err != nil || !result.Activation.Activated) {
 						t.Fatalf("activation acknowledgment: %+v err=%v", result.Activation, err)
+					}
+					if scenario != "clean" && (err == nil || result.Activation.Activated) {
+						t.Fatalf("hostile diagnostic crossed the live handoff: %+v err=%v", result.Activation, err)
 					}
 					select {
 					case err = <-probe.settled:

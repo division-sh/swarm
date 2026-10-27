@@ -67,6 +67,9 @@ func TestChannelDraftTerminalRestartPublicJourney(t *testing.T) {
 					requireServedJSONRPCResult(t, h.rpcEndpoint(), "mailbox.decide", params, &response)
 					cardStatus, decisions = "decided", 1
 				case "run_stop":
+					requireServedJSONRPCResult(t, h.rpcEndpoint(), "run.pause", map[string]any{
+						"run_id": seed.RunID, "idempotency_key": "draft-run-pause",
+					}, &response)
 					requireServedJSONRPCResult(t, h.rpcEndpoint(), "run.stop", map[string]any{
 						"run_id": seed.RunID, "idempotency_key": "draft-run-stop",
 					}, &response)

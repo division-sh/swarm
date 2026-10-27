@@ -7,11 +7,13 @@ import (
 	"time"
 
 	"github.com/division-sh/swarm/internal/operatorread"
+	rootruntime "github.com/division-sh/swarm/internal/runtime"
 	"github.com/division-sh/swarm/internal/runtime/core/activityidentity"
 	"github.com/division-sh/swarm/internal/runtime/core/worklifetime"
 	"github.com/division-sh/swarm/internal/runtime/effects"
 	"github.com/division-sh/swarm/internal/runtime/executionposture"
 	"github.com/division-sh/swarm/internal/runtime/runfork"
+	"github.com/division-sh/swarm/internal/runtime/runlifecycle"
 	"github.com/division-sh/swarm/internal/runtime/startupownership"
 	"github.com/division-sh/swarm/internal/store/storetest"
 	"github.com/division-sh/swarm/internal/testutil"
@@ -94,9 +96,27 @@ func TestIssue642PublishedChildHistoricalClosureBothStores(t *testing.T) {
 				}
 				baseline := process.ActiveCount()
 				loader := SourceArtifactSelectedContractSourceLoader{RepoRoot: runForkExecutionRepoRoot(t), Store: selected.(SourceArtifactSelectedContractSourceStore)}
+				binding, err := owner.ports.fork.RequireRunForkSelectedContractBinding(ctx, checkpoint.ForkRun)
+				if err != nil {
+					t.Fatal(err)
+				}
+				loaded, err := loader.LoadRunForkSelectedContractSourceForRequest(ctx, SelectedContractSourceLoadRequest{SourceRunID: checkpoint.ForkRun, Selection: binding.ContractSelection})
+				if err != nil {
+					t.Fatal(err)
+				}
+				ordinary, contexts := ordinaryForkRuntimeFixture(t, ctx, selected, owner, loaded, executionposture.MockOnly)
 				recovered, err := owner.RecoverSelectedForkContexts(ctx, effects.NewRecoveryRequest(time.Now().UTC(), executionposture.MockOnly), SelectedForkRecoveryEnvironment{
-					SourceLoader: loader, AgentRuntime: SelectedContractAgentRuntimeOptions{ExecutionPosture: executionposture.MockOnly, ProcessCapability: capability}})
-				if err != nil || len(recovered) != 1 || recovered[0].Disposition != runfork.SelectedForkRecoveryResume {
+					SourceLoader: loader, AgentRuntime: SelectedContractAgentRuntimeOptions{ExecutionPosture: executionposture.MockOnly, ProcessCapability: capability},
+					LiveContexts: contexts, LiveRuns: selected.(runlifecycle.LiveRunReader),
+					AcquireLiveRuntime: func(ctx context.Context, hash string) (*rootruntime.RuntimeContextUse, error) {
+						use, _, err := contexts.AcquireBundleHash(ctx, hash)
+						return use, err
+					}})
+				wantRecovery := runfork.SelectedForkRecoveryControlOnly
+				if cut == "retained_join_event_committed" {
+					wantRecovery = runfork.SelectedForkRecoveryResume
+				}
+				if err != nil || len(recovered) != 1 || recovered[0].RunID != checkpoint.ForkRun || recovered[0].Disposition != wantRecovery {
 					t.Fatalf("recover exact transferred work: %+v err=%v", recovered, err)
 				}
 				waitPublishedChildCompletion(t, selected, process, baseline, checkpoint.ForkRun)
@@ -125,6 +145,7 @@ func TestIssue642PublishedChildHistoricalClosureBothStores(t *testing.T) {
 					SourceRunID: checkpoint.ForkRun, ForkEventID: id, TargetBundleHash: availability.BundleHash, AllowSourceFreeze: true, ContractSelection: selection}
 				result, err := ExecuteSelectedContractRunFork(ctx, SelectedContractExecutionRequest{SourceRunID: checkpoint.ForkRun, At: id, AllowSourceFreeze: true,
 					Owner: owner, ForkOperation: &operation, SourceLoader: loader, ContractSelection: selection,
+					LiveRuntime: ordinary, LiveContexts: contexts, LiveRuns: selected.(runlifecycle.LiveRunReader),
 					AgentRuntime: SelectedContractAgentRuntimeOptions{ExecutionPosture: executionposture.MockOnly, ProcessCapability: capability}})
 				if err != nil || !result.Activation.Activated {
 					t.Fatalf("child-as-source exact owed delivery: %+v err=%v", result, err)
@@ -162,13 +183,18 @@ func waitPublishedChildCompletion(t *testing.T, selected any, process *worklifet
 	defer cancel()
 	reader := selected.(interface {
 		LoadRunHeader(context.Context, string) (operatorread.RunHeader, error)
+		LoadRunTestQuiescence(context.Context, string, time.Time) (operatorread.RunTestQuiescence, error)
 	})
 	for {
 		header, err := reader.LoadRunHeader(ctx, runID)
 		if err != nil || header.Failure != nil {
 			t.Fatalf("continued child failed: %+v err=%v", header, err)
 		}
-		if header.Status == "completed" && header.EndedAt != nil && process.ActiveCount() == baseline {
+		settled, err := reader.LoadRunTestQuiescence(ctx, runID, time.Now().UTC())
+		if err != nil {
+			t.Fatal(err)
+		}
+		if header.Status == "live" && header.EndedAt == nil && settled.Ready {
 			return
 		}
 		select {

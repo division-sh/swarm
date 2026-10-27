@@ -489,6 +489,7 @@ func proveCompletion2270ServedSelected(t *testing.T, rt completion2270ServedProo
 		"payload": map[string]any{"token": "completion-2270"}, "idempotency_key": "completion-2270-selected-request"})
 	waitWorkspaceProofPipelineHandoff(t, workspaceProof, seed.RunID)
 	eventID := requireWorkspaceProofWorkReadyEvent(t, rt.Endpoint, owner, seed.RunID)
+	requireServedOKJSONRPC(t, rt.Endpoint, "run.pause", map[string]any{"run_id": seed.RunID, "idempotency_key": "completion-2270-source-pause"})
 	parent := readWorkspaceProofSourceDomain(t, owner, seed.RunID)
 	root := canonicalrouting.CopyForkReceiverBusinessMutationOwnership(t, false)
 	writeSelectedForkAgentProofFixture(t, root, "selected observer", "[work.ready]", "Observe the admitted selected frontier.", "return {'text': 'observed', 'usage': {'input_tokens': 1, 'output_tokens': 1}}")
@@ -530,9 +531,10 @@ func proveCompletion2270ServedSelected(t *testing.T, rt completion2270ServedProo
 	var replay apiv1.RunForkExecutionResult
 	requireServedJSONRPCResult(t, rt.Endpoint, "run.fork", params, &replay)
 	requireCompletion2270BusinessInvocation(t, rt.AuthorContext, rt.Selected.Effects(), profileID, calls, proof, attemptID)
-	if !reflect.DeepEqual(fork, replay) || !reflect.DeepEqual(parent, readWorkspaceProofSourceDomain(t, owner, seed.RunID)) {
-		t.Fatal("served-selected replay changed parent evidence or repeated the provider effect")
+	if !reflect.DeepEqual(fork, replay) {
+		t.Fatal("served-selected replay changed its immutable acknowledgement")
 	}
+	requireForkSourceSelfReleaseConservation(t, owner, seed.RunID, parent)
 }
 
 func buildCompletion2270CLIImage(t *testing.T) string {

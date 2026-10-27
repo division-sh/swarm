@@ -30,6 +30,7 @@ func TestServedWhatsAppOrderedInputRestartBothStores(t *testing.T) {
 			endpoint := process.endpoint(t) + "/v1/rpc"
 			peer.onACKTimeout = func(id string) { logServedNativeWait(t, endpoint, peer, "ordered_input_ack:"+id) }
 			ready := requireServedNativeProcessPairing(t, endpoint, peer)
+			pairingRunID := requireServedNativePairingRun(t, endpoint, ready.Operation.Coordinate.BundleHash)
 			reader, err := storetest.OpenChannelObservation(backend, location)
 			if err != nil {
 				t.Fatal(err)
@@ -40,7 +41,7 @@ func TestServedWhatsAppOrderedInputRestartBothStores(t *testing.T) {
 				}
 			})
 			seed := requireServedEventPublishRPCResult(t, endpoint, map[string]any{
-				"event_name": "work.requested", "bundle_hash": ready.Operation.Coordinate.BundleHash,
+				"event_name": "work.requested", "bundle_hash": ready.Operation.Coordinate.BundleHash, "run_id": pairingRunID,
 				"payload": map[string]any{"detail": "Native ordered input"}, "idempotency_key": "native-ordered-input"})
 			cardID := waitServedNativePendingCard(t, endpoint)
 			card := awaitServedNativeInputMessage(t, peer, "\nReference: "+cardID+"\n")
@@ -108,6 +109,32 @@ func TestServedWhatsAppOrderedInputRestartBothStores(t *testing.T) {
 			requireServedNativeDisconnect(t, peer)
 		})
 	}
+}
+
+func requireServedNativePairingRun(t *testing.T, endpoint, bundleHash string) string {
+	t.Helper()
+	var runs struct {
+		Runs       []operatorread.RunHeader `json:"runs"`
+		NextCursor string                   `json:"next_cursor"`
+	}
+	requireServedJSONRPCResult(t, endpoint, "run.list", map[string]any{"bundle_hash": bundleHash, "limit": 500}, &runs)
+	if runs.NextCursor != "" {
+		t.Fatal("pairing fixture did not observe all runs")
+	}
+	var live string
+	for _, run := range runs.Runs {
+		if run.Status != "live" {
+			continue
+		}
+		if live != "" {
+			t.Fatal("pairing fixture has more than one live run")
+		}
+		live = run.RunID
+	}
+	if live == "" {
+		t.Fatal("pairing fixture has no live confirmation run")
+	}
+	return live
 }
 
 func servedNativeInputActionObservation(t *testing.T, endpoint, bundleHash string, text render.IntentObservationQuery) render.IntentObservationQuery {

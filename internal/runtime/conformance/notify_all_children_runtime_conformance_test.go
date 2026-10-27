@@ -23,6 +23,7 @@ import (
 	"github.com/division-sh/swarm/internal/events"
 	"github.com/division-sh/swarm/internal/events/eventtest"
 	"github.com/division-sh/swarm/internal/operatorread"
+	"github.com/division-sh/swarm/internal/packadmission"
 	runtimepkg "github.com/division-sh/swarm/internal/runtime"
 	runtimeagents "github.com/division-sh/swarm/internal/runtime/agents"
 	runtimeagenttopology "github.com/division-sh/swarm/internal/runtime/agenttopology"
@@ -33,6 +34,7 @@ import (
 	runtimeflowidentity "github.com/division-sh/swarm/internal/runtime/core/flowidentity"
 	"github.com/division-sh/swarm/internal/runtime/core/worklifetime"
 	runtimecorrelation "github.com/division-sh/swarm/internal/runtime/correlation"
+	runtimecredentials "github.com/division-sh/swarm/internal/runtime/credentials"
 	runtimedeliverycontinuation "github.com/division-sh/swarm/internal/runtime/deliverycontinuation"
 	runtimedelivery "github.com/division-sh/swarm/internal/runtime/deliverylifecycle"
 	runtimeeffects "github.com/division-sh/swarm/internal/runtime/effects"
@@ -47,6 +49,7 @@ import (
 	runtimemcp "github.com/division-sh/swarm/internal/runtime/mcp"
 	runtimepipeline "github.com/division-sh/swarm/internal/runtime/pipeline"
 	runtimepipelineobligation "github.com/division-sh/swarm/internal/runtime/pipelineobligation"
+	"github.com/division-sh/swarm/internal/runtime/runcontrol"
 	runtimerunlifecycle "github.com/division-sh/swarm/internal/runtime/runlifecycle"
 	"github.com/division-sh/swarm/internal/runtime/semanticview"
 	runtimesessions "github.com/division-sh/swarm/internal/runtime/sessions"
@@ -96,22 +99,27 @@ type notifyAllChildrenRuntime struct {
 	posture            executionposture.Posture
 	fanOutServing      *runtimestartupownership.FanOutServingRegistration
 	contextRuntime     *runtimepkg.Runtime
+	lifecycle          *notifyAllChildrenLifecycleOwner
 }
 
 type notifyAllChildrenRuntimeOptions struct {
-	diagnosticOverlap      bool
-	realMockAgents         bool
-	agentGate              *notifyAllChildrenAgentGate
-	processTopology        *notifyAllChildrenProcessTopology
-	sourceArtifactFact     runtimecorrelation.SourceArtifactFact
-	enableGenericSchedules bool
-	maintenanceInterval    time.Duration
-	fanOutExecutor         func(*runtimepipeline.PipelineCoordinator) runtimestartupownership.FanOutExecutor
-	fanOutWorkers          *int
-	nestedPublications     *nestedPublicationLifetime
-	testLifecycleProbe     runtimelifecycleprobe.Observer
-	deliveryLifecycle      runtimedelivery.Store
-	deferContinuationStart bool
+	ordinaryContext             bool
+	ordinaryConfig              *config.Config
+	ordinaryProviderCredentials runtimecredentials.Store
+	diagnosticOverlap           bool
+	executionPosture            executionposture.Posture
+	realMockAgents              bool
+	agentGate                   *notifyAllChildrenAgentGate
+	processTopology             *notifyAllChildrenProcessTopology
+	sourceArtifactFact          runtimecorrelation.SourceArtifactFact
+	enableGenericSchedules      bool
+	maintenanceInterval         time.Duration
+	fanOutExecutor              func(*runtimepipeline.PipelineCoordinator) runtimestartupownership.FanOutExecutor
+	fanOutWorkers               *int
+	nestedPublications          *nestedPublicationLifetime
+	testLifecycleProbe          runtimelifecycleprobe.Observer
+	deliveryLifecycle           runtimedelivery.Store
+	deferContinuationStart      bool
 }
 
 func retireNotifyAllChildrenRuntimeForReplacement(t *testing.T, runtime notifyAllChildrenRuntime) {
@@ -2207,7 +2215,7 @@ func newNotifyAllChildrenRuntime(
 		opts = options[0]
 	}
 	posture := executionposture.Live
-	if opts.realMockAgents {
+	if opts.realMockAgents || opts.executionPosture == executionposture.MockOnly {
 		posture = executionposture.MockOnly
 	}
 	sourceArtifactFact := opts.sourceArtifactFact
@@ -2234,7 +2242,53 @@ func newNotifyAllChildrenRuntime(
 	var coordinator *runtimepipeline.PipelineCoordinator
 	var manager *runtimemanager.AgentManager
 	generationLifecycle := &notifyAllChildrenLifecycleOwner{}
-	workOwner := conformanceTestRuntimeOccurrence(t, sourceArtifactFact.BundleHash())
+	var contextRuntime *runtimepkg.Runtime
+	var workOwner *worklifetime.RuntimeOccurrence
+	if opts.ordinaryContext {
+		projection, err := packadmission.Admit(bundle.PackInventory, bundle.Platform)
+		if err != nil {
+			t.Fatal(err)
+		}
+		bundle.PackAdmission = projection
+		nodes, err := runtimepipeline.LoadWorkflowNodes(source)
+		if err != nil {
+			t.Fatal(err)
+		}
+		deps := runtimepkg.RuntimeDeps{
+			Config: &config.Config{LLM: config.LLMConfig{Backend: "anthropic"}},
+			Options: runtimepkg.RuntimeOptions{
+				ExecutionPosture: posture, SourceArtifactFact: sourceArtifactFact,
+				RuntimeInstanceID: authorActivityTestRuntimeInstanceID, ProcessWorkOwner: conformanceTestProcessOwner(t),
+				WorkflowModule: conformanceLoadedWorkflowModule{source: source, nodes: nodes, guards: runtimepipeline.NewContractGuardRegistry(source)},
+				LLMRuntime:     conformanceNoopLLMRuntime{},
+			},
+		}
+		if opts.ordinaryConfig != nil {
+			deps.Config = opts.ordinaryConfig
+		}
+		switch selected := backend.(type) {
+		case *store.PostgresStore:
+			deps = stageLifecycleIdentityPostgresDeps(deps, selected)
+		case *store.SQLiteRuntimeStore:
+			deps = stageLifecycleIdentitySQLiteDeps(deps, selected)
+		default:
+			t.Fatalf("ordinary context requires its native store, got %T", backend)
+		}
+		contextRuntime, err = runtimepkg.NewRuntime(testAuthorActivityContextForBundle(context.Background(), sourceArtifactFact), deps)
+		if err != nil {
+			t.Fatalf("construct ordinary fixture context: %v", err)
+		}
+		workOwner = contextRuntime.WorkOccurrence()
+		t.Cleanup(func() {
+			ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+			defer cancel()
+			if _, err := workOwner.RetireAndWait(ctx); err != nil {
+				t.Errorf("join ordinary fixture context: %v", err)
+			}
+		})
+	} else {
+		workOwner = conformanceTestRuntimeOccurrence(t, sourceArtifactFact.BundleHash())
+	}
 	var runtimeControlEvents []string
 	if opts.enableGenericSchedules {
 		runtimeControlEvents = append(runtimeControlEvents, "platform.join_complete")
@@ -2301,7 +2355,12 @@ func newNotifyAllChildrenRuntime(
 		agentFactory runtimemanager.AgentFactory
 		sessionStore runtimesessions.Registry
 		llmBackend   string
+		modelAliases llmselection.ModelAliases
 	)
+	if opts.ordinaryConfig != nil {
+		llmBackend = opts.ordinaryConfig.LLM.Backend
+		modelAliases = opts.ordinaryConfig.LLM.Models
+	}
 	workflowPersistence := runtimepipeline.NewWorkflowPersistence(backend)
 	switch sqliteStore := backend.(type) {
 	case *store.SQLiteRuntimeStore:
@@ -2309,7 +2368,7 @@ func newNotifyAllChildrenRuntime(
 	case *failingNotifyAllChildrenSQLiteStore:
 		workflowPersistence = runtimepipeline.NewWorkflowPersistence(sqliteStore)
 	}
-	if opts.realMockAgents {
+	if opts.realMockAgents || opts.ordinaryProviderCredentials != nil {
 		if bundle, ok := semanticview.Bundle(source); !ok || bundle == nil {
 			t.Fatal("notify-all-children mock runtime requires a bundle-backed source")
 		}
@@ -2332,6 +2391,12 @@ func newNotifyAllChildrenRuntime(
 		cfg := &config.Config{}
 		cfg.LLM.Backend = llmselection.BackendAnthropic
 		cfg.LLM.Session.LockTTL = time.Minute
+		if opts.ordinaryProviderCredentials != nil {
+			if !opts.ordinaryContext || opts.ordinaryConfig == nil || posture != executionposture.Live {
+				t.Fatal("ordinary provider fixture requires its configured Live context")
+			}
+			cfg = opts.ordinaryConfig
+		}
 		projection, err := sourceartifact.MaterializeRuntimeProjection(bundle.SourceArtifact)
 		if err != nil {
 			t.Fatalf("materialize mock conformance workspace source: %v", err)
@@ -2370,13 +2435,19 @@ func newNotifyAllChildrenRuntime(
 			t.Fatal(err)
 		}
 		sessionStore = runtimesessions.NewInMemoryRegistry(cfg.LLM.Session.LockTTL)
+		var liveSessions runtimellm.LiveSessionAcquirer
+		if opts.ordinaryProviderCredentials != nil {
+			sessionStore = backend.(runtimesessions.Registry)
+			liveSessions = backend.(runtimellm.LiveSessionAcquirer)
+		}
 		profile, err := llmselection.ResolveLiveBackend(cfg.LLM.Backend)
 		if err != nil {
 			t.Fatalf("resolve configured live profile: %v", err)
 		}
 		modelRuntimes, err := runtimellm.NewAgentRuntimeSet(profile, runtimellm.RuntimeFactory{
-			Cfg: cfg, Sessions: sessionStore, Conversations: conversations, Events: eventBus,
-			Workspaces: workspaces, MCPTurns: turns, ToolGateway: binding,
+			Cfg: cfg, Sessions: sessionStore, LiveSessions: liveSessions, Conversations: conversations, Events: eventBus,
+			Credentials: opts.ordinaryProviderCredentials,
+			Workspaces:  workspaces, MCPTurns: turns, ToolGateway: binding,
 			LockOwner:            "notify-all-children-conformance",
 			CompletionController: runtimeeffects.NewCompletionController(effectStore, completionStore, heartbeatStore, discardCompletionSpendProjection{}).WithExecutionPosture(posture),
 		}, nil)
@@ -2455,21 +2526,30 @@ func newNotifyAllChildrenRuntime(
 		roles = gateLifecycleDiagnosticOverlap(t, db, roles)
 	}
 	manager = ownConformanceTestAgentManager(t, runtimemanager.NewAgentManagerWithOptions(eventBus, agentFactory, runtimemanager.AgentManagerOptions{
-		ExecutionPosture:     posture,
-		BaseContext:          originalConformanceFixtureContext(t, runtimeeffects.WithExecutionMode(testAuthorActivityContextForBundle(context.Background(), sourceArtifactFact), posture.RootMode()), backend),
-		CarryMutationContext: runtimestartupownership.CarryMutationAuthority,
-		SourceArtifactFact:   sourceArtifactFact,
-		WorkflowInstances:    coordinator,
-		WorkOwner:            workOwner,
-		DeliveryStore:        deliveryLifecycle,
-		LifecycleStore:       lifecycleStore,
-		SemanticSource:       source,
-		Sessions:             sessionStore,
-		LLMBackend:           llmBackend,
-		PersistenceRoles:     roles, ReceiverExecution: eventreceiver.NormalExecution(),
+		ExecutionPosture:       posture,
+		BaseContext:            originalConformanceFixtureContext(t, runtimeeffects.WithExecutionMode(testAuthorActivityContextForBundle(context.Background(), sourceArtifactFact), posture.RootMode()), backend),
+		CarryMutationContext:   runtimestartupownership.CarryMutationAuthority,
+		SourceArtifactFact:     sourceArtifactFact,
+		WorkflowInstances:      coordinator,
+		WorkOwner:              workOwner,
+		DeliveryStore:          deliveryLifecycle,
+		LifecycleStore:         lifecycleStore,
+		SemanticSource:         source,
+		Sessions:               sessionStore,
+		LLMBackend:             llmBackend,
+		ModelAliases:           modelAliases,
+		RequireModelResolution: opts.ordinaryConfig != nil,
+		PersistenceRoles:       roles, ReceiverExecution: eventreceiver.NormalExecution(),
 	}, backend))
 	eventBus.SetCommittedAgentReadinessFinalizer(runtimebus.CommittedAgentReadinessFinalizerFunc(manager.FinalizeCommittedAgentReadiness))
-	contextRuntime := &runtimepkg.Runtime{Bus: eventBus, Manager: manager, ExecutionPosture: posture}
+	if contextRuntime == nil {
+		contextRuntime = &runtimepkg.Runtime{ExecutionPosture: posture}
+	}
+	contextRuntime.Bus, contextRuntime.Manager = eventBus, manager
+	contextRuntime.Pipeline, contextRuntime.GenericSchedules = coordinator, genericSchedules
+	if opts.ordinaryContext {
+		contextRuntime.RunControl = runcontrol.NewController(backend.(runcontrol.Store), eventBus, runcontrol.Options{TimerCancellations: coordinator.TimerCancellationReconciler()})
+	}
 	contextRuntime.Options.RuntimeInstanceID = authorActivityTestRuntimeInstanceID
 	contextRuntime.Options.SourceArtifactFact = sourceArtifactFact
 	contextRuntime.Options.ProcessWorkOwner = conformanceTestProcessOwner(t)
@@ -2584,6 +2664,7 @@ func newNotifyAllChildrenRuntime(
 		bus:     eventBus, diagnostics: diagnosticBus, manager: manager, pipeline: coordinator,
 		workOwner: workOwner, selected: backend, sourceArtifactFact: sourceArtifactFact, genericSchedules: genericSchedules,
 		fanOutServing: fanOutRegistration, contextRuntime: contextRuntime,
+		lifecycle: generationLifecycle,
 	}
 }
 

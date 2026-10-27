@@ -44,15 +44,7 @@ func runStandingOrphanRestorationPublic(t *testing.T, binary, lifecycle, root st
 	card := waitForFullLifecycleCard(t, p.rpc, standing.RunID, "lifecycle_ready")
 	ctx, cancel := context.WithTimeout(context.Background(), fullLifecycleRunLimit)
 	defer cancel()
-	if product == "terminal-orphan" {
-		var result any
-		if err := p.rpc.call(ctx, "mailbox.decide", map[string]any{"card_id": card.CardID, "verdict": "reject", "fields": map[string]any{}, "observed_content_hash": card.CardContentHash, "idempotency_key": "terminal-orphan-reject"}, &result); err != nil {
-			t.Fatal(err)
-		}
-		waitForFullLifecycleRunStatus(t, p.rpc, standing.RunID, "completed")
-	} else {
-		decideFullLifecycleCard(t, p.rpc, card, "orphan-precondition-approve")
-	}
+	decideFullLifecycleCard(t, p.rpc, card, "orphan-precondition-approve")
 	if err := p.stopAndWait(15 * time.Second); err != nil {
 		t.Fatalf("standing precondition stop: %v\n%s", err, p.output.String())
 	}

@@ -54,8 +54,12 @@ func (p *preparedFlowTopologyRetirement) retireWithDisposition(flow runtimeflowi
 	if err := flow.Validate(); err != nil {
 		return err
 	}
+	route, err := flow.Route.AgentIdentityRoute()
+	if err != nil {
+		return err
+	}
 	am := p.manager
-	plan := terminalFlowInstanceSideEffectPlan{RunID: flow.RunID, FlowPath: flow.Route.InstancePath}
+	plan := terminalFlowInstanceSideEffectPlan{RunID: flow.RunID, FlowPath: route.InstancePath}
 	trigger := "teardown"
 	if terminal {
 		trigger = "flow_instance_terminal"

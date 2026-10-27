@@ -2,9 +2,13 @@ package serveapp
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
 	"fmt"
+	"net/http"
+	"net/http/httptest"
 	"path/filepath"
+	"strings"
 	"testing"
 	"time"
 
@@ -47,6 +51,76 @@ func issue2564ServeHarness(t *testing.T, backend, root string, mock bool) (*clia
 // An explicit native location lets process-death proofs reopen the same store.
 // Ordinary harness calls retain their original allocation and configuration.
 func issue2564ServeHarnessAtLocation(t *testing.T, backend, root string, mock bool, location string) (*cliapp.ServeOptions, func() (*serveRuntimeTestProcess, issue2564ServedFixture)) {
+	return issue2564ServeHarnessWithPosture(t, backend, root, mock, location, executionposture.MockOnly)
+}
+
+func issue2564LiveServeHarness(t *testing.T, backend, root, location string) (*cliapp.ServeOptions, func() (*serveRuntimeTestProcess, issue2564ServedFixture)) {
+	t.Helper()
+	provider := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, request *http.Request) {
+		if request.URL.Path != "/v1/messages" || request.Header.Get("x-api-key") != "live-flow-fixture-key" {
+			http.Error(w, "unexpected controlled provider request", http.StatusBadRequest)
+			return
+		}
+		var turn struct {
+			Tools []struct {
+				Name string `json:"name"`
+			} `json:"tools"`
+			Messages []struct {
+				Content json.RawMessage `json:"content"`
+			} `json:"messages"`
+		}
+		if err := json.NewDecoder(request.Body).Decode(&turn); err != nil {
+			t.Errorf("decode live-flow fixture turn: %v", err)
+			http.Error(w, "invalid provider turn", http.StatusBadRequest)
+			return
+		}
+		w.Header().Set("Content-Type", "application/json")
+		var payload map[string]any
+		for _, message := range turn.Messages {
+			var text string
+			if json.Unmarshal(message.Content, &text) != nil {
+				continue
+			}
+			if strings.HasPrefix(text, "Tool result:\n") {
+				_, _ = w.Write([]byte(`{"model":"claude-test","usage":{"input_tokens":1,"output_tokens":1},"content":[{"type":"text","text":"Work finished."}]}`))
+				return
+			}
+			var frame struct {
+				Event struct {
+					Payload map[string]any `json:"payload"`
+				} `json:"event"`
+			}
+			if json.Unmarshal([]byte(text), &frame) == nil && frame.Event.Payload != nil {
+				payload = frame.Event.Payload
+			}
+		}
+		for _, tool := range turn.Tools {
+			name := "emit_work_finished"
+			arguments := map[string]any{"work_id": payload["work_id"], "result": "finished"}
+			if payload["sequence"] == float64(1) {
+				name, arguments = "emit_work_progress", map[string]any{"work_id": payload["work_id"]}
+			}
+			if tool.Name == "emit_work_finish" {
+				name, arguments = tool.Name, map[string]any{}
+			}
+			if tool.Name != name {
+				continue
+			}
+			_ = json.NewEncoder(w).Encode(map[string]any{
+				"model": "claude-test", "usage": map[string]int{"input_tokens": 1, "output_tokens": 1},
+				"content": []map[string]any{{"type": "tool_use", "id": "live-flow-finish", "name": name, "input": arguments}},
+			})
+			return
+		}
+		_, _ = w.Write([]byte(`{"model":"claude-test","usage":{"input_tokens":1,"output_tokens":1},"content":[{"type":"text","text":"Observed delivery."}]}`))
+	}))
+	t.Cleanup(provider.Close)
+	redirectExternalHosts(t, map[string]string{"api.anthropic.com": provider.URL})
+	setDoctorProviderSecret(t, "ANTHROPIC_API_KEY", "live-flow-fixture-key")
+	return issue2564ServeHarnessWithPosture(t, backend, root, true, location, executionposture.Live)
+}
+
+func issue2564ServeHarnessWithPosture(t *testing.T, backend, root string, mock bool, location string, posture executionposture.Posture) (*cliapp.ServeOptions, func() (*serveRuntimeTestProcess, issue2564ServedFixture)) {
 	t.Helper()
 	unsetStoreSelectorEnv(t)
 	stubServeRuntimeWorkspaceLifecycle(t)
@@ -60,7 +134,11 @@ func issue2564ServeHarnessAtLocation(t *testing.T, backend, root string, mock bo
 			if location == "" {
 				location = filepath.Join(t.TempDir(), "completion.sqlite")
 			}
-			opts.ConfigPath = writeMockAgentRuntimeConfig(t, backend, location)
+			if posture == executionposture.Live {
+				opts.ConfigPath = writeStoreBackendRuntimeConfig(t, backend, location)
+			} else {
+				opts.ConfigPath = writeMockAgentRuntimeConfig(t, backend, location)
+			}
 		} else {
 			if location == "" {
 				location = filepath.Join(t.TempDir(), "lifecycle.sqlite")
@@ -84,7 +162,7 @@ func issue2564ServeHarnessAtLocation(t *testing.T, backend, root string, mock bo
 			return owner, nil
 		}
 		t.Cleanup(func() { buildStoresForServe = original })
-		if mock {
+		if mock && posture != executionposture.Live {
 			opts.ConfigPath = writeMockAgentRuntimeConfig(t, backend, "")
 		} else {
 			opts.ConfigPath = writeServeRuntimeTestConfig(t)
@@ -97,9 +175,9 @@ func issue2564ServeHarnessAtLocation(t *testing.T, backend, root string, mock bo
 	return opts, func() (*serveRuntimeTestProcess, issue2564ServedFixture) {
 		var process *serveRuntimeTestProcess
 		if mock {
-			t.Log("proof_surface=H in-process retained mock lifecycle with real authenticated HTTP/WS; not public serve/test")
+			t.Logf("proof_surface=H in-process retained owned lifecycle posture=%s with real authenticated HTTP/WS; not public serve/test", posture)
 			process = startRuntimeTestProcessWithRunner(t, repoRootForTest(), *opts, func(ctx context.Context, repo string, opts cliapp.ServeOptions) int {
-				code, err := runOwnedLifecycle(ctx, repo, retained, opts, apiv1.AuthTokenResolution{Tokens: []string{apiv1.DefaultLoopbackAPIToken}, Explicit: true, Source: "internal-lifecycle-parent"}, executionposture.MockOnly, "")
+				code, err := runOwnedLifecycle(ctx, repo, retained, opts, apiv1.AuthTokenResolution{Tokens: []string{apiv1.DefaultLoopbackAPIToken}, Explicit: true, Source: "internal-lifecycle-parent"}, posture, "")
 				if err != nil {
 					fmt.Fprintf(opts.ErrorOutput, "internal mailbox lifecycle setup: %v\n", err)
 				}
@@ -118,6 +196,14 @@ func issue2564ServeHarnessAtLocation(t *testing.T, backend, root string, mock bo
 			fixture.Runtime = servedTestProcessRuntime(t, process)
 		}
 		return process, fixture
+	}
+}
+
+func requireIssue2564LiveRootMode(t *testing.T, rt issue2564ServedFixture, runID, eventID string) {
+	t.Helper()
+	event := storetest.LoadCanonicalEventRecord(t, t.Context(), rt.selected, eventID)
+	if rt.Runtime == nil || rt.Runtime.ExecutionPosture != executionposture.Live || event.RunID() != runID || event.ExecutionMode() != executionposture.Live.RootMode() {
+		t.Fatalf("live lifecycle fixture changed its exact root: run=%s mode=%s", event.RunID(), event.ExecutionMode())
 	}
 }
 

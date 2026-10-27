@@ -2065,7 +2065,7 @@ func materializeFanOutForkAtCurrentRevision(t *testing.T, ctx context.Context, d
 	return materialized
 }
 
-func seedFanOutOwnerFixture(t *testing.T, ctx context.Context, db *sql.DB, selected any, postgres bool, cardinality int, createdAt time.Time) fanOutOwnerFixture {
+func seedFanOutOwnerFixture(t *testing.T, ctx context.Context, db *sql.DB, selected any, postgres bool, cardinality int, createdAt time.Time, liveScope ...runtimerunlifecycle.LiveRunScope) fanOutOwnerFixture {
 	t.Helper()
 	artifactRoot := t.TempDir()
 	if err := os.WriteFile(filepath.Join(artifactRoot, "schema.yaml"), []byte("name: fan-out-store-fixture\n"), 0o644); err != nil {
@@ -2075,10 +2075,10 @@ func seedFanOutOwnerFixture(t *testing.T, ctx context.Context, db *sql.DB, selec
 	if err != nil {
 		t.Fatal(err)
 	}
-	return seedFanOutOwnerFixtureWithArtifact(t, ctx, db, selected, postgres, cardinality, createdAt, artifact)
+	return seedFanOutOwnerFixtureWithArtifact(t, ctx, db, selected, postgres, cardinality, createdAt, artifact, liveScope...)
 }
 
-func seedFanOutOwnerFixtureWithArtifact(t *testing.T, ctx context.Context, db *sql.DB, selected any, postgres bool, cardinality int, createdAt time.Time, artifact *sourceartifact.AdmittedSourceArtifact) fanOutOwnerFixture {
+func seedFanOutOwnerFixtureWithArtifact(t *testing.T, ctx context.Context, db *sql.DB, selected any, postgres bool, cardinality int, createdAt time.Time, artifact *sourceartifact.AdmittedSourceArtifact, liveScope ...runtimerunlifecycle.LiveRunScope) fanOutOwnerFixture {
 	t.Helper()
 	if runtimeID, _ := runtimecorrelation.RuntimeInstanceIDFromContext(ctx); runtimeID == "" {
 		ctx = runtimecorrelation.WithRuntimeInstanceID(ctx, authorActivityTestRuntimeInstanceID)
@@ -2095,7 +2095,11 @@ func seedFanOutOwnerFixtureWithArtifact(t *testing.T, ctx context.Context, db *s
 	}
 	fixture := fanOutOwnerFixture{runID: uuid.NewString(), eventID: uuid.NewString(), deliveryID: uuid.NewString(), flowPath: ".", semanticPath: `nodes["fan-out-source"].handlers["items.ready"].fan_out`, createdAt: createdAt, artifact: artifact}
 	fixture.plan = fanOutOwnerTypedPlanFixture(t)
-	requireRunFixtureForTest(t, ctx, selected, semanticRunFixture{Origin: semanticScenarioSetupRunOriginForTest(), RunID: fixture.runID, BundleHash: artifact.BundleHash(), StartedAt: createdAt})
+	setup := semanticRunFixture{Origin: semanticScenarioSetupRunOriginForTest(), RunID: fixture.runID, BundleHash: artifact.BundleHash(), StartedAt: createdAt}
+	if len(liveScope) != 0 {
+		setup.Origin, setup.LiveScope = runtimerunlifecycle.DeploymentRunOrigin(), liveScope[0]
+	}
+	requireRunFixtureForTest(t, ctx, selected, setup)
 	if err := db.QueryRowContext(ctx, `SELECT bundle_hash FROM runs WHERE run_id=$1`, fixture.runID).Scan(&fixture.bundleHash); err != nil {
 		t.Fatalf("load fan-out fixture bundle hash: %v", err)
 	}

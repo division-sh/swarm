@@ -58,6 +58,7 @@ func TestSupportedHumanNoticeAcknowledgmentAfterRetirementBothStores(t *testing.
 			// Retire execution through the public owner before comparing all domain
 			// rows. Notice acknowledgment remains available without a live context.
 			var stopped map[string]any
+			requireServedOKJSONRPC(t, rt.Endpoint, "run.pause", map[string]any{"run_id": runID, "idempotency_key": "notice-proof-pause"})
 			requireServedJSONRPCResult(t, rt.Endpoint, "run.stop", map[string]any{"run_id": runID}, &stopped)
 			if err := waitExactOriginPublications(t.Context(), publication, f.eventID, noticePublication.EventID); err != nil {
 				t.Fatal(err)

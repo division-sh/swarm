@@ -62,7 +62,9 @@ func TestSelectedContractExecutionMaterializationAllowsSelectedPendingNodeFronti
 	if materialized.ForkRunID == "" || materialized.SelectedContractBinding == nil || !materialized.DeliveryResumeBlocked {
 		t.Fatalf("materialization = %#v", materialized)
 	}
-	replayed, err := pg.RequireMaterializedRunForkForSelectedContractExecution(ctx, materialized.ForkRunID, request)
+	readback := request
+	readback.ForkOperation = nil
+	replayed, err := pg.RequireMaterializedRunForkForSelectedContractExecution(ctx, materialized.ForkRunID, readback)
 	if err != nil {
 		t.Fatalf("MaterializeRunForkForSelectedContractExecution exact replay: %v", err)
 	}
@@ -437,13 +439,10 @@ func TestSelectedContractExecutionMaterializationKeepsActiveDeliverySessionCoupl
 		t.Fatalf("active coupling plan blockers = %#v err = %v", plan.UnsupportedBlockers, err)
 	}
 
-	materialized, err := pg.MaterializeRunForkForSelectedContractExecution(ctx, canonicalSelectedContractExecutionStoreRequest(t, ctx, pg, sourceRunID, selectedEventID, runfork.RunForkContractSelection{Mode: "selected_contracts"}, mustStoreTestSourceArtifactFact(mustCanonicalSelectedContractStoreHash(t))))
+	_, err = prepareSelectedStoreForkForTest(t, ctx, pg, sourceRunID, selectedEventID, runfork.RunForkContractSelection{Mode: "selected_contracts"})
 	if err == nil || !strings.Contains(err.Error(), runfork.RunForkBlockerSessionHistoryUnproven) ||
 		!strings.Contains(err.Error(), runfork.RunForkBlockerActiveTurnHistoryUnproven) {
 		t.Fatalf("materialization error = %v, want active session/turn blocker", err)
-	}
-	if materialized.ForkRunID != "" {
-		t.Fatalf("materialized fork despite active coupling: %#v", materialized)
 	}
 	assertNoSelectedContractForkRows(t, db, sourceRunID)
 }
@@ -536,16 +535,14 @@ func TestSelectedContractExecutionMaterializationKeepsUnrelatedInProgressDeliver
 		"review.ready", events.EventProducerAgent, "validation-coordinator", entityID, "", []byte(`{}`), forkAt)
 	captureRunForkTestRevision(t, db, sourceRunID)
 
-	materialized, err := pg.MaterializeRunForkForSelectedContractExecution(ctx, canonicalSelectedContractExecutionStoreRequest(t, ctx, pg, sourceRunID, forkPointEventID, runfork.RunForkContractSelection{Mode: "selected_contracts"}, mustStoreTestSourceArtifactFact(mustCanonicalSelectedContractStoreHash(t))))
+	_, err := prepareSelectedStoreForkForTest(t, ctx, pg, sourceRunID, forkPointEventID, runfork.RunForkContractSelection{Mode: "selected_contracts"})
 	if err == nil || !strings.Contains(err.Error(), runfork.RunForkBlockerSessionHistoryUnproven) {
 		t.Fatalf("materialization error = %v, want conversation history blocked by unrelated active delivery", err)
 	}
-	if materialized.ForkRunID != "" {
-		t.Fatalf("materialized fork despite unrelated active coupling: %#v", materialized)
-	}
-	if !runForkTestHasMaterializationBlocker(materialized, runfork.RunForkBlockerSessionHistoryUnproven) ||
-		!runForkTestHasMaterializationBlocker(materialized, runfork.RunForkBlockerActiveTurnHistoryUnproven) {
-		t.Fatalf("materialization blockers = %#v, want conversation blockers", materialized.UnsupportedBlockers)
+	plan, planErr := pg.PlanRunFork(ctx, runfork.RunForkPlanRequest{SourceRunID: sourceRunID, At: forkPointEventID})
+	if planErr != nil || !runForkTestHasPlanBlocker(plan, runfork.RunForkBlockerSessionHistoryUnproven) ||
+		!runForkTestHasPlanBlocker(plan, runfork.RunForkBlockerActiveTurnHistoryUnproven) {
+		t.Fatalf("native plan blockers = %#v, want conversation blockers: %v", plan.UnsupportedBlockers, planErr)
 	}
 	assertNoSelectedContractForkRows(t, db, sourceRunID)
 }
@@ -573,15 +570,13 @@ func TestSelectedContractExecutionMaterializationKeepsUnrelatedInProgressDeliver
 		"review.ready", events.EventProducerAgent, "validation-coordinator", entityID, "", []byte(`{}`), forkAt)
 	captureRunForkTestRevision(t, db, sourceRunID)
 
-	materialized, err := pg.MaterializeRunForkForSelectedContractExecution(ctx, canonicalSelectedContractExecutionStoreRequest(t, ctx, pg, sourceRunID, forkPointEventID, runfork.RunForkContractSelection{Mode: "selected_contracts"}, mustStoreTestSourceArtifactFact(mustCanonicalSelectedContractStoreHash(t))))
+	_, err := prepareSelectedStoreForkForTest(t, ctx, pg, sourceRunID, forkPointEventID, runfork.RunForkContractSelection{Mode: "selected_contracts"})
 	if err == nil || !strings.Contains(err.Error(), runfork.RunForkBlockerDeliveryHistoryUnproven) {
 		t.Fatalf("materialization error = %v, want unrelated active delivery blocker", err)
 	}
-	if materialized.ForkRunID != "" {
-		t.Fatalf("materialized fork despite unrelated active delivery: %#v", materialized)
-	}
-	if !runForkTestHasMaterializationBlocker(materialized, runfork.RunForkBlockerDeliveryHistoryUnproven) {
-		t.Fatalf("materialization blockers = %#v, want delivery history blocker", materialized.UnsupportedBlockers)
+	plan, planErr := pg.PlanRunFork(ctx, runfork.RunForkPlanRequest{SourceRunID: sourceRunID, At: forkPointEventID})
+	if planErr != nil || !runForkTestHasPlanBlocker(plan, runfork.RunForkBlockerDeliveryHistoryUnproven) {
+		t.Fatalf("native plan blockers = %#v, want delivery history blocker: %v", plan.UnsupportedBlockers, planErr)
 	}
 	assertNoSelectedContractForkRows(t, db, sourceRunID)
 }
@@ -636,6 +631,7 @@ func TestSelectedContractExecutionActivationKeepsPostFrontierActiveDeliveryFailC
 	_, db, _ := testutil.StartPostgres(t)
 	pg := admitTestPostgresStore(t, db)
 	ctx := originalStoreFixtureContext(t, testAuthorActivityContextForBundle(mustCanonicalSelectedContractStoreHash(t)), pg)
+	activate := selectedStoreActivationGateForTest(t, ctx, pg)
 	sourceRunID := uuid.NewString()
 	entityID := runtimeflowidentity.EntityID("flow-a/1")
 	sourceEventID := uuid.NewString()
@@ -654,14 +650,15 @@ func TestSelectedContractExecutionActivationKeepsPostFrontierActiveDeliveryFailC
 	}
 	activationRequest := captureSelectedStoreActivationRequest(t, ctx, pg, request, materialized)
 
-	seedPostgresSemanticEventRecordFixture(t, ctx, db, unrelatedEventID, sourceRunID, "unrelated.started",
-		events.EventProducerPlatform, "source-runtime", entityID, "flow-a/1", at.Add(10*time.Second))
-	unrelatedRoute := events.DeliveryRoute{Recipient: events.MustAgentDeliveryRecipient("unrelated-agent")}
-	unrelatedEvent := commitPostgresDeliveryFixture(t, ctx, db, unrelatedEventID, unrelatedRoute)
-	claimPostgresDeliveryFixture(t, ctx, db, unrelatedEvent, unrelatedRoute)
-	captureRunForkTestRevision(t, db, sourceRunID)
-
-	activation, err := pg.ActivateRunForkForSelectedContractExecution(ctx, activationRequest)
+	activation, err := activate(activationRequest, materialized.ForkPoint, func(nativeCtx context.Context, prepared runfork.RunForkSelectedContractExecutionActivateRequest) (runfork.RunForkActivation, error) {
+		seedPostgresSemanticEventRecordFixture(t, ctx, db, unrelatedEventID, sourceRunID, "unrelated.started",
+			events.EventProducerPlatform, "source-runtime", entityID, "flow-a/1", at.Add(10*time.Second))
+		unrelatedRoute := events.DeliveryRoute{Recipient: events.MustAgentDeliveryRecipient("unrelated-agent")}
+		unrelatedEvent := commitPostgresDeliveryFixture(t, ctx, db, unrelatedEventID, unrelatedRoute)
+		claimPostgresDeliveryFixture(t, ctx, db, unrelatedEvent, unrelatedRoute)
+		captureRunForkTestRevision(t, db, sourceRunID)
+		return pg.ActivateRunForkForSelectedContractExecution(nativeCtx, prepared)
+	})
 	if err == nil || !strings.Contains(err.Error(), "source_active_conversation_session_coupling_after_fork_point") {
 		t.Fatalf("activation error = %v, want post-frontier active delivery blocker", err)
 	}
@@ -811,17 +808,12 @@ func TestPostTSourceTimerActivatesAsSelectedBranchDivergence(t *testing.T) {
 
 		return pg.ActivateRunForkForSelectedContractExecution(preparedCtx, prepared)
 	})
-	if err != nil {
-		t.Fatalf("ActivateRunForkForSelectedContractExecution: %v", err)
-	}
-	if !activation.Activated || !activation.SourceAdvancedAfterFork || activation.BranchDivergence == nil {
-		t.Fatalf("activation = %#v, want selected branch divergence", activation)
+	requireSelectedNativeValidationBeforeHandoff(t, activation, err)
+	if !activation.SourceAdvancedAfterFork || activation.BranchDivergence != nil {
+		t.Fatalf("native validation = %#v, want post-cut advancement without an ACK or branch write", activation)
 	}
 	if runForkTestHasActivationBlocker(activation, "source_timers_advanced_after_fork_point") {
 		t.Fatalf("activation blockers = %#v, selected source advancement should branch", activation.UnsupportedBlockers)
-	}
-	if !containsString(activation.BranchDivergence.SourceAdvancedFacts, "source_timers_advanced_after_fork_point") {
-		t.Fatalf("branch divergence facts = %#v, want source_timers_advanced_after_fork_point", activation.BranchDivergence.SourceAdvancedFacts)
 	}
 
 	var sourceStatus, forkStatus string
@@ -831,8 +823,8 @@ func TestPostTSourceTimerActivatesAsSelectedBranchDivergence(t *testing.T) {
 	if err := db.QueryRowContext(ctx, `SELECT status FROM runs WHERE run_id = $1::uuid`, materialized.ForkRunID).Scan(&forkStatus); err != nil {
 		t.Fatalf("load fork status: %v", err)
 	}
-	if sourceStatus != "running" || forkStatus != runfork.RunForkActivatedStatus {
-		t.Fatalf("run statuses source=%q fork=%q, want live source branch and activated fork", sourceStatus, forkStatus)
+	if sourceStatus != "running" || forkStatus != runfork.RunForkMaterializedStatus {
+		t.Fatalf("native validation changed pre-handoff run statuses source=%q fork=%q", sourceStatus, forkStatus)
 	}
 
 	var branchRows, forkTimerRows int
@@ -846,8 +838,8 @@ func TestPostTSourceTimerActivatesAsSelectedBranchDivergence(t *testing.T) {
 	if err := db.QueryRowContext(ctx, `SELECT COUNT(*) FROM timers WHERE run_id = $1::uuid`, materialized.ForkRunID).Scan(&forkTimerRows); err != nil {
 		t.Fatalf("count fork timers: %v", err)
 	}
-	if branchRows != 1 || forkTimerRows != 0 {
-		t.Fatalf("branch rows=%d fork timer rows=%d, want one divergence and no post-frontier timer copies", branchRows, forkTimerRows)
+	if branchRows != 0 || forkTimerRows != 0 {
+		t.Fatalf("branch rows=%d fork timer rows=%d, want no pre-ACK branch write or post-cut timer copies", branchRows, forkTimerRows)
 	}
 	assertNoForkTimerCopiesForSource(t, db, sourceRunID)
 }
@@ -924,9 +916,10 @@ func TestPostTSourceConversationHistoryDoesNotChangeFixedEventMaterialization(t 
 	sessionID := uuid.NewString()
 	at := time.Unix(1700003608, 0).UTC()
 	seedCanonicalSelectedContractExecutionStoreSource(t, ctx, db, sourceRunID, entityID, eventID, at)
+	request := canonicalSelectedContractExecutionStoreRequest(t, ctx, pg, sourceRunID, eventID, runfork.RunForkContractSelection{Mode: "selected_contracts"}, mustStoreTestSourceArtifactFact(mustCanonicalSelectedContractStoreHash(t)))
 	seedPostTActiveConversationCoupling(t, ctx, db, sourceRunID, entityID, eventID, sessionID, at)
 
-	materialized, err := pg.MaterializeRunForkForSelectedContractExecution(ctx, canonicalSelectedContractExecutionStoreRequest(t, ctx, pg, sourceRunID, eventID, runfork.RunForkContractSelection{Mode: "selected_contracts"}, mustStoreTestSourceArtifactFact(mustCanonicalSelectedContractStoreHash(t))))
+	materialized, err := pg.MaterializeRunForkForSelectedContractExecution(ctx, request)
 	if err != nil {
 		t.Fatalf("MaterializeRunForkForSelectedContractExecution: %v", err)
 	}
@@ -976,16 +969,13 @@ func TestPostTGlobalRoutingRuleDoesNotChangeSelectedContractActivation(t *testin
 	}, at.Add(time.Minute))
 
 	activationRequest := captureSelectedStoreActivationRequest(t, ctx, pg, request, materialized)
-	activationRequest.AllowSourceFreeze = true
 	activationRequest.AllowedSourceEventIDs = []string{eventID}
 	activation, err := activate(activationRequest, materialized.ForkPoint, func(preparedCtx context.Context, prepared runfork.RunForkSelectedContractExecutionActivateRequest) (runfork.RunForkActivation, error) {
 		seedSelectedContractExecutionForkLineage(t, ctx, pg, db, sourceRunID, materialized.ForkRunID, eventID, entityID, at)
 		return pg.ActivateRunForkForSelectedContractExecution(preparedCtx, prepared)
 	})
-	if err != nil {
-		t.Fatalf("ActivateRunForkForSelectedContractExecution: %v", err)
-	}
-	if !activation.Activated || activation.SourceAdvancedAfterFork || activation.BranchDivergence != nil {
+	requireSelectedNativeValidationBeforeHandoff(t, activation, err)
+	if activation.Activated || activation.SourceAdvancedAfterFork || activation.BranchDivergence != nil {
 		t.Fatalf("activation = %#v, want current global route to leave fixed source frontier unchanged", activation)
 	}
 	if runForkTestHasActivationBlocker(activation, "source_routes_advanced_after_fork_point") {
@@ -1002,8 +992,8 @@ func TestPostTGlobalRoutingRuleDoesNotChangeSelectedContractActivation(t *testin
 	if err := db.QueryRowContext(ctx, `SELECT status FROM runs WHERE run_id = $1::uuid`, materialized.ForkRunID).Scan(&forkStatus); err != nil {
 		t.Fatalf("load fork status: %v", err)
 	}
-	if sourceStatus != "forked" || forkStatus != "running" {
-		t.Fatalf("run statuses source=%q fork=%q, want source forked and fork running after activation", sourceStatus, forkStatus)
+	if sourceStatus != "running" || forkStatus != runfork.RunForkMaterializedStatus {
+		t.Fatalf("native validation changed pre-handoff run statuses source=%q fork=%q", sourceStatus, forkStatus)
 	}
 
 	var branchRows, forkDeliveryRows, unrelatedInstances, routeRecoveryRows int
@@ -1078,7 +1068,6 @@ func TestSelectedContractActivation_IgnoresExcludedSourceSessionColumnChanges(t 
 		t.Fatalf("MaterializeRunForkForSelectedContractExecution: %v", err)
 	}
 	activationRequest := captureSelectedStoreActivationRequest(t, ctx, pg, request, materialized)
-	activationRequest.AllowSourceFreeze = true
 	activationRequest.AllowedSourceEventIDs = []string{eventID, selectedEventID}
 	activation, err := activate(activationRequest, materialized.ForkPoint, func(preparedCtx context.Context, prepared runfork.RunForkSelectedContractExecutionActivateRequest) (runfork.RunForkActivation, error) {
 		seedSelectedContractExecutionForkLineage(t, ctx, pg, db, sourceRunID, materialized.ForkRunID, eventID, entityID, at)
@@ -1094,10 +1083,8 @@ func TestSelectedContractActivation_IgnoresExcludedSourceSessionColumnChanges(t 
 
 		return pg.ActivateRunForkForSelectedContractExecution(preparedCtx, prepared)
 	})
-	if err != nil {
-		t.Fatalf("ActivateRunForkForSelectedContractExecution after excluded session update: %v", err)
-	}
-	if !activation.Activated || activation.SourceAdvancedAfterFork || activation.BranchDivergence != nil {
+	requireSelectedNativeValidationBeforeHandoff(t, activation, err)
+	if activation.Activated || activation.SourceAdvancedAfterFork || activation.BranchDivergence != nil {
 		t.Fatalf("activation = %#v, branch divergence = %+v, want selected activation without branch divergence", activation, activation.BranchDivergence)
 	}
 }
@@ -1206,20 +1193,15 @@ func TestPostTSourceConversationHistoryActivatesAsBranchDivergence(t *testing.T)
 
 				return pg.ActivateRunForkForSelectedContractExecution(preparedCtx, prepared)
 			})
-			if err != nil {
-				t.Fatalf("ActivateRunForkForSelectedContractExecution: %v", err)
-			}
-			if !activation.Activated || !activation.SourceAdvancedAfterFork || activation.BranchDivergence == nil {
-				t.Fatalf("activation = %#v, want source-advanced branch divergence", activation)
+			requireSelectedNativeValidationBeforeHandoff(t, activation, err)
+			if !activation.SourceAdvancedAfterFork || activation.BranchDivergence != nil {
+				t.Fatalf("native validation = %#v, want post-cut lineage without an ACK or branch write", activation)
 			}
 			if runForkTestHasActivationBlocker(activation, tc.code) {
 				t.Fatalf("activation blockers = %#v, did not expect %s", activation.UnsupportedBlockers, tc.code)
 			}
 			if !runForkTestHasLineageDispositionOwnerClassification(activation.ReplayResumeAdmission, runfork.RunForkReplayResumeFactSourceAdvanced, runfork.RunForkSelectedContractSourceAdvancedConversationHistoryPolicyOwner, tc.code) {
 				t.Fatalf("activation replay admission = %#v, want source advanced lineage owner %s", activation.ReplayResumeAdmission, tc.code)
-			}
-			if !containsString(activation.BranchDivergence.SourceAdvancedFacts, tc.code) {
-				t.Fatalf("branch divergence facts = %#v, want %s", activation.BranchDivergence.SourceAdvancedFacts, tc.code)
 			}
 			assertNoForkConversationRows(t, db, materialized.ForkRunID)
 		})
@@ -1248,6 +1230,21 @@ func TestSelectedContractExecutionActivationRecordsSameSourceDeliveryCouplingAsB
 	seedPostgresChildEventRecordFixture(t, ctx, db, forkPointEventID, sourceRunID, sourceEventID,
 		"review.ready", events.EventProducerAgent, "validation-coordinator", entityID, "", []byte(`{}`), forkAt)
 	captureRunForkTestRevision(t, db, sourceRunID)
+	observed, err := pg.PlanRunFork(ctx, runfork.RunForkPlanRequest{SourceRunID: sourceRunID, At: forkPointEventID})
+	if err != nil {
+		t.Fatal(err)
+	}
+	before, err := runfork.SelectedPreparationPlanFingerprint(observed, runfork.RunForkContractFrontierAdmission{}, runfork.RunForkSelectedContractRecipientPlanning{}, "")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if blockers, err := pg.InspectSelectedMaterializationReplay(ctx, observed); err != nil || len(blockers) != 0 {
+		t.Fatalf("exact source coupling inspection: blockers=%+v err=%v", blockers, err)
+	}
+	after, err := runfork.SelectedPreparationPlanFingerprint(observed, runfork.RunForkContractFrontierAdmission{}, runfork.RunForkSelectedContractRecipientPlanning{}, "")
+	if err != nil || before != after {
+		t.Fatalf("read-only replay inspection changed the fixed preparation plan: before=%s after=%s err=%v", before, after, err)
+	}
 	request := canonicalSelectedContractExecutionStoreRequest(t, ctx, pg, sourceRunID, forkPointEventID, runfork.RunForkContractSelection{Mode: "selected_contracts"}, mustStoreTestSourceArtifactFact(mustCanonicalSelectedContractStoreHash(t)))
 	materialized, err := pg.MaterializeRunForkForSelectedContractExecution(ctx, request)
 	if err != nil {
@@ -1260,11 +1257,9 @@ func TestSelectedContractExecutionActivationRecordsSameSourceDeliveryCouplingAsB
 
 		return pg.ActivateRunForkForSelectedContractExecution(preparedCtx, prepared)
 	})
-	if err != nil {
-		t.Fatalf("ActivateRunForkForSelectedContractExecution: %v", err)
-	}
-	if !activation.Activated || !activation.SourceAdvancedAfterFork || activation.BranchDivergence == nil {
-		t.Fatalf("activation = %#v, want active-coupling branch divergence", activation)
+	requireSelectedNativeValidationBeforeHandoff(t, activation, err)
+	if !activation.SourceAdvancedAfterFork || activation.BranchDivergence != nil {
+		t.Fatalf("native validation = %#v, want source-local coupling lineage without an ACK", activation)
 	}
 	if !runForkTestHasLineageDispositionOwnerClassification(
 		activation.ReplayResumeAdmission,
@@ -1273,9 +1268,6 @@ func TestSelectedContractExecutionActivationRecordsSameSourceDeliveryCouplingAsB
 		runfork.RunForkSelectedContractActiveSourceDeliveryConversationCouplingClassification,
 	) {
 		t.Fatalf("activation replay admission missing #678 owner: %#v", activation.ReplayResumeAdmission)
-	}
-	if !containsString(activation.BranchDivergence.SourceAdvancedFacts, runfork.RunForkSelectedContractActiveSourceDeliveryConversationCouplingClassification) {
-		t.Fatalf("branch divergence facts = %#v, want #678 classification", activation.BranchDivergence.SourceAdvancedFacts)
 	}
 	assertNoCopiedConversationRows(t, db, materialized.ForkRunID, sessionID, auditID, turnID)
 }
@@ -1331,7 +1323,6 @@ func TestSelectedContractActivationAllowsFreshForkConversationRows(t *testing.T)
 		t.Fatalf("MaterializeRunForkForSelectedContractExecution: %v", err)
 	}
 	activationRequest := captureSelectedStoreActivationRequest(t, ctx, pg, request, materialized)
-	activationRequest.AllowSourceFreeze = true
 	activationRequest.AllowedSourceEventIDs = []string{eventID}
 	activation, err := activate(activationRequest, materialized.ForkPoint, func(preparedCtx context.Context, prepared runfork.RunForkSelectedContractExecutionActivateRequest) (runfork.RunForkActivation, error) {
 		forkEventID := seedSelectedContractExecutionForkLineage(t, ctx, pg, db, sourceRunID, materialized.ForkRunID, eventID, entityID, at)
@@ -1422,12 +1413,7 @@ func TestSelectedContractActivationAllowsFreshForkConversationRows(t *testing.T)
 
 		return pg.ActivateRunForkForSelectedContractExecution(preparedCtx, prepared)
 	})
-	if err != nil {
-		t.Fatalf("ActivateRunForkForSelectedContractExecution: %v", err)
-	}
-	if !activation.Activated {
-		t.Fatalf("activation = %#v, want activated", activation)
-	}
+	requireSelectedNativeValidationBeforeHandoff(t, activation, err)
 }
 
 func TestSelectedContractActivationAllowsCausalForkLocalRuntimePlatformControlEvent(t *testing.T) {
@@ -1447,7 +1433,6 @@ func TestSelectedContractActivationAllowsCausalForkLocalRuntimePlatformControlEv
 		t.Fatalf("MaterializeRunForkForSelectedContractExecution: %v", err)
 	}
 	activationRequest := captureSelectedStoreActivationRequest(t, ctx, pg, request, materialized)
-	activationRequest.AllowSourceFreeze = true
 	activationRequest.AllowedSourceEventIDs = []string{eventID}
 	activation, err := activate(activationRequest, materialized.ForkPoint, func(preparedCtx context.Context, prepared runfork.RunForkSelectedContractExecutionActivateRequest) (runfork.RunForkActivation, error) {
 		forkEventID := seedSelectedContractExecutionForkLineage(t, ctx, pg, db, sourceRunID, materialized.ForkRunID, eventID, entityID, at)
@@ -1464,12 +1449,7 @@ func TestSelectedContractActivationAllowsCausalForkLocalRuntimePlatformControlEv
 
 		return pg.ActivateRunForkForSelectedContractExecution(preparedCtx, prepared)
 	})
-	if err != nil {
-		t.Fatalf("ActivateRunForkForSelectedContractExecution: %v", err)
-	}
-	if !activation.Activated {
-		t.Fatalf("activation = %#v, want activated", activation)
-	}
+	requireSelectedNativeValidationBeforeHandoff(t, activation, err)
 }
 
 func TestSelectedContractActivationRejectsUncausedForkLocalRuntimePlatformControlEvent(t *testing.T) {
@@ -1489,7 +1469,6 @@ func TestSelectedContractActivationRejectsUncausedForkLocalRuntimePlatformContro
 		t.Fatalf("MaterializeRunForkForSelectedContractExecution: %v", err)
 	}
 	activationRequest := captureSelectedStoreActivationRequest(t, ctx, pg, request, materialized)
-	activationRequest.AllowSourceFreeze = true
 	activationRequest.AllowedSourceEventIDs = []string{eventID}
 	activation, err := activate(activationRequest, materialized.ForkPoint, func(preparedCtx context.Context, prepared runfork.RunForkSelectedContractExecutionActivateRequest) (runfork.RunForkActivation, error) {
 		seedSelectedContractExecutionForkLineage(t, ctx, pg, db, sourceRunID, materialized.ForkRunID, eventID, entityID, at)
@@ -1498,11 +1477,8 @@ func TestSelectedContractActivationRejectsUncausedForkLocalRuntimePlatformContro
 
 		return requireSelectedStoreFinalSettlement(t, preparedCtx, pg, prepared)
 	})
-	if err != nil {
-		t.Fatalf("committed activation acknowledgement failed: %v", err)
-	}
-	if !activation.Activated {
-		t.Fatalf("final settlement refusal lost committed activation ACK: %#v", activation)
+	if err == nil || !strings.Contains(err.Error(), "fork_events_not_selected_contract_lineage") || activation.Activated {
+		t.Fatalf("unowned event escaped native pre-handoff settlement validation: %+v err=%v", activation, err)
 	}
 }
 
@@ -1523,7 +1499,6 @@ func TestSelectedContractActivationRejectsUncausedForkLocalRuntimeLogDiagnostic(
 		t.Fatalf("MaterializeRunForkForSelectedContractExecution: %v", err)
 	}
 	activationRequest := captureSelectedStoreActivationRequest(t, ctx, pg, request, materialized)
-	activationRequest.AllowSourceFreeze = true
 	activationRequest.AllowedSourceEventIDs = []string{eventID}
 	activation, err := activate(activationRequest, materialized.ForkPoint, func(preparedCtx context.Context, prepared runfork.RunForkSelectedContractExecutionActivateRequest) (runfork.RunForkActivation, error) {
 		seedSelectedContractExecutionForkLineage(t, ctx, pg, db, sourceRunID, materialized.ForkRunID, eventID, entityID, at)
@@ -1532,11 +1507,8 @@ func TestSelectedContractActivationRejectsUncausedForkLocalRuntimeLogDiagnostic(
 
 		return requireSelectedStoreFinalSettlement(t, preparedCtx, pg, prepared)
 	})
-	if err != nil {
-		t.Fatalf("committed activation acknowledgement failed: %v", err)
-	}
-	if !activation.Activated {
-		t.Fatalf("final settlement refusal lost committed activation ACK: %#v", activation)
+	if err == nil || !strings.Contains(err.Error(), "fork_events_not_selected_contract_lineage") || activation.Activated {
+		t.Fatalf("unowned event escaped native pre-handoff settlement validation: %+v err=%v", activation, err)
 	}
 }
 
@@ -1557,7 +1529,6 @@ func TestSelectedContractActivationRejectsUncausedForkLocalToolExecutorRuntimeLo
 		t.Fatalf("MaterializeRunForkForSelectedContractExecution: %v", err)
 	}
 	activationRequest := captureSelectedStoreActivationRequest(t, ctx, pg, request, materialized)
-	activationRequest.AllowSourceFreeze = true
 	activationRequest.AllowedSourceEventIDs = []string{eventID}
 	activation, err := activate(activationRequest, materialized.ForkPoint, func(preparedCtx context.Context, prepared runfork.RunForkSelectedContractExecutionActivateRequest) (runfork.RunForkActivation, error) {
 		seedSelectedContractExecutionForkLineage(t, ctx, pg, db, sourceRunID, materialized.ForkRunID, eventID, entityID, at)
@@ -1566,11 +1537,8 @@ func TestSelectedContractActivationRejectsUncausedForkLocalToolExecutorRuntimeLo
 
 		return requireSelectedStoreFinalSettlement(t, preparedCtx, pg, prepared)
 	})
-	if err != nil {
-		t.Fatalf("committed activation acknowledgement failed: %v", err)
-	}
-	if !activation.Activated {
-		t.Fatalf("final settlement refusal lost committed activation ACK: %#v", activation)
+	if err == nil || !strings.Contains(err.Error(), "fork_events_not_selected_contract_lineage") || activation.Activated {
+		t.Fatalf("unowned event escaped native pre-handoff settlement validation: %+v err=%v", activation, err)
 	}
 }
 
@@ -1591,7 +1559,6 @@ func TestSelectedContractActivationRejectsUnownedPlatformEventWithSelectedParent
 		t.Fatalf("MaterializeRunForkForSelectedContractExecution: %v", err)
 	}
 	activationRequest := captureSelectedStoreActivationRequest(t, ctx, pg, request, materialized)
-	activationRequest.AllowSourceFreeze = true
 	activationRequest.AllowedSourceEventIDs = []string{eventID}
 	activation, err := activate(activationRequest, materialized.ForkPoint, func(preparedCtx context.Context, prepared runfork.RunForkSelectedContractExecutionActivateRequest) (runfork.RunForkActivation, error) {
 		forkEventID := seedSelectedContractExecutionForkLineage(t, ctx, pg, db, sourceRunID, materialized.ForkRunID, eventID, entityID, at)
@@ -1600,11 +1567,8 @@ func TestSelectedContractActivationRejectsUnownedPlatformEventWithSelectedParent
 
 		return requireSelectedStoreFinalSettlement(t, preparedCtx, pg, prepared)
 	})
-	if err != nil {
-		t.Fatalf("committed activation acknowledgement failed: %v", err)
-	}
-	if !activation.Activated {
-		t.Fatalf("final settlement refusal lost committed activation ACK: %#v", activation)
+	if err == nil || !strings.Contains(err.Error(), "fork_events_not_selected_contract_lineage") || activation.Activated {
+		t.Fatalf("unowned event escaped native pre-handoff settlement validation: %+v err=%v", activation, err)
 	}
 }
 
@@ -1689,6 +1653,12 @@ func canonicalSelectedContractExecutionStoreRequest(t *testing.T, ctx context.Co
 	request := prepareSelectedStoreMaterializationForTest(t, ctx, pg, sourceRunID, at, selection)
 	if !request.SourceArtifactFact.Matches(fact) {
 		t.Fatalf("prepared source differs from requested fixture artifact: got %s want %s", request.SourceArtifactFact.BundleHash(), fact.BundleHash())
+	}
+	point := request.Preparation.ForkPoint
+	request.ForkOperation = &runfork.ForkOperationRequest{
+		OperationID: uuid.NewString(), Actor: "selected-native-activation", IdempotencyKey: uuid.NewString(), TransportHash: "selected-native-activation",
+		SourceRunID: sourceRunID, ForkEventID: request.At, ResolvedPoint: &point,
+		TargetBundleHash: fact.BundleHash(), ContractSelection: request.ContractSelection,
 	}
 	return request
 }

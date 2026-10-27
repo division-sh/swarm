@@ -15,6 +15,7 @@ import (
 	"github.com/division-sh/swarm/internal/runtime/testfixtures/canonicalrouting"
 	"github.com/division-sh/swarm/internal/servedparity"
 	"github.com/division-sh/swarm/internal/store/selected"
+	"github.com/division-sh/swarm/internal/store/storetest"
 	"github.com/google/uuid"
 )
 
@@ -32,11 +33,17 @@ func TestRunForkHistoricalIdentityPublicExecutionBothStores(t *testing.T) {
 			t.Cleanup(func() { projectRuntimePersistenceForServe = previous })
 			publication := newExactOriginPublicationProbe(t)
 			root := canonicalrouting.CopyForkReceiverBusinessMutationOwnership(t, false)
-			rt := startServedTestSetupEntitiesProofRuntimeFromSource(t, backend, root)
+			rt := startServedLiveFlowProofRuntimeFromSource(t, backend, root)
+			applicationSnapshot := func() map[string][]string { return snapshotForkReceiverApplication(t, rt) }
 			seed := requireServedEventPublishRPCResult(t, rt.Endpoint, map[string]any{
 				"event_name": "start.seeded", "bundle_hash": rt.BundleHash,
 				"payload": map[string]any{"token": "receiver-proof"}, "idempotency_key": "historical-context-seed",
 			})
+			var rootEventOwner any = rt.SQLite
+			if rt.Postgres != nil {
+				rootEventOwner = rt.Postgres
+			}
+			requireServedLiveRootMode(t, rt.Runtime.ExecutionPosture, storetest.LoadCanonicalEventRecord(t, t.Context(), rootEventOwner, seed.EventID), seed.RunID)
 			waitForkReceiverSourceCompletion(t, rt, seed.RunID)
 			started := requireServedEventPublishRPCResult(t, rt.Endpoint, map[string]any{
 				"event_name": "start.requested", "run_id": seed.RunID, "source_event_id": seed.EventID,
@@ -49,6 +56,8 @@ func TestRunForkHistoricalIdentityPublicExecutionBothStores(t *testing.T) {
 			}
 			sourceRows := readForkReceiverRows(t, rt, seed.RunID)
 			sourceRoute := requireForkReceiverBusinessMutation(t, rt, seed.RunID, frontier, sourceRows["consumer"].ID)
+			var paused map[string]any
+			requireServedJSONRPCResult(t, rt.Endpoint, "run.pause", map[string]any{"run_id": seed.RunID}, &paused)
 			sibling := requireServedEventPublishRPCResult(t, rt.Endpoint, map[string]any{
 				"event_name": "start.seeded", "bundle_hash": rt.BundleHash,
 				"payload": map[string]any{"token": "receiver-proof"}, "idempotency_key": "historical-context-sibling",
@@ -67,8 +76,8 @@ func TestRunForkHistoricalIdentityPublicExecutionBothStores(t *testing.T) {
 				t.Fatal(err)
 			}
 			defaultPlan, err := family.Plan(ctx, runfork.RunForkPlanRequest{SourceRunID: seed.RunID})
-			if err != nil || defaultPlan.ForkPoint.EventID != frontier || defaultPlan.ForkPoint.Revision != plan.ForkPoint.Revision {
-				t.Fatalf("default selector must select this actual final publication: %#v, %v", defaultPlan.ForkPoint, err)
+			if err != nil || defaultPlan.ForkPoint.Kind != runfork.RunForkPointStateRevision || defaultPlan.ForkPoint.EventID != "" || defaultPlan.ForkPoint.Revision < plan.ForkPoint.Revision {
+				t.Fatalf("default selector must select the committed state head: %#v, %v", defaultPlan.ForkPoint, err)
 			}
 			// Exercise the real direct store using an already-admitted request,
 			// rather than allowing request construction to be the only guard.
@@ -112,13 +121,29 @@ func TestRunForkHistoricalIdentityPublicExecutionBothStores(t *testing.T) {
 				}
 			}
 			writeFact(corrupt)
-			before := snapshotForkReceiverApplication(t, rt)
+			before := applicationSnapshot()
 			requireUnchanged := func() {
 				t.Helper()
-				if after := snapshotForkReceiverApplication(t, rt); !reflect.DeepEqual(before, after) {
+				if after := applicationSnapshot(); !reflect.DeepEqual(before, after) {
 					for table := range before {
 						if !reflect.DeepEqual(before[table], after[table]) {
 							t.Errorf("refusal changed complete table %s", table)
+							oldRows := make(map[string]int)
+							for _, row := range before[table] {
+								oldRows[row]++
+							}
+							for _, row := range after[table] {
+								if oldRows[row] == 0 {
+									t.Logf("added %s row: %s", table, row)
+								} else {
+									oldRows[row]--
+								}
+							}
+							for row, remaining := range oldRows {
+								if remaining != 0 {
+									t.Logf("removed %s row x%d: %s", table, remaining, row)
+								}
+							}
 						}
 					}
 					t.Fatal("historical refusal changed application rows (including API journal)")
@@ -131,7 +156,7 @@ func TestRunForkHistoricalIdentityPublicExecutionBothStores(t *testing.T) {
 				}
 				requireUnchanged()
 			}
-			for _, at := range []string{frontier, ""} {
+			for _, at := range []string{frontier} {
 				_, err := family.Plan(ctx, runfork.RunForkPlanRequest{SourceRunID: seed.RunID, At: at})
 				requireHistoricalRefusal(err)
 				_, err = family.Materialize(ctx, runfork.RunForkMaterializeRequest{SourceRunID: seed.RunID, At: at})
@@ -162,6 +187,10 @@ func TestRunForkHistoricalIdentityPublicExecutionBothStores(t *testing.T) {
 					requireUnchanged()
 				}
 			}
+			// The public refusals above retain a live predecessor. Subsequent
+			// retained-row controls must not compare across its lawful retirement.
+			requireServedJSONRPCResult(t, rt.Endpoint, "run.pause", map[string]any{"run_id": sibling.RunID}, &paused)
+			before = applicationSnapshot()
 			_, err = direct.MaterializeRunForkForSelectedContractExecution(ctx, request)
 			requireHistoricalRefusal(err)
 			writeFact(original)
@@ -176,7 +205,7 @@ func TestRunForkHistoricalIdentityPublicExecutionBothStores(t *testing.T) {
 			writeFact(corrupt)
 			// The staged child, binding, readiness and revision rows are lawful.
 			// Each refusal must preserve them exactly, not pretend no child exists.
-			before = snapshotForkReceiverApplication(t, rt)
+			before = applicationSnapshot()
 			_, err = direct.MaterializeRunForkForSelectedContractExecution(ctx, request)
 			requireHistoricalRefusal(err)
 			_, eventIDs, _, err := runfork.RunForkContractFrontierEvidenceBinding(request.FrontierAdmission)
@@ -184,7 +213,7 @@ func TestRunForkHistoricalIdentityPublicExecutionBothStores(t *testing.T) {
 				t.Fatal(err)
 			}
 			activation, err := direct.ActivateRunForkForSelectedContractExecution(ctx, runfork.RunForkSelectedContractExecutionActivateRequest{
-				ExecutionSource: loaded.Source, ForkRunID: staged.ForkRunID, AllowSourceFreeze: true,
+				ExecutionSource: loaded.Source, ForkRunID: staged.ForkRunID,
 				AllowedSourceEventIDs: eventIDs, FrontierAdmission: request.FrontierAdmission,
 				RouteTopology: request.RouteTopology, RecipientPlanning: request.RecipientPlanning,
 			})
@@ -214,7 +243,7 @@ func TestRunForkHistoricalIdentityPublicExecutionBothStores(t *testing.T) {
 			var result apiv1.RunForkExecutionResult
 			params := map[string]any{"source_run_id": seed.RunID, "fork_event_id": frontier, "allow_source_freeze": true, "idempotency_key": "historical-restored-control"}
 			requireServedJSONRPCResult(t, rt.Endpoint, "run.fork", params, &result)
-			if result.ForkRunID == "" || result.ExecutedEventCount != 0 {
+			if result.ForkRunID == "" || result.ExecutedEventCount != 1 {
 				t.Fatalf("restored historical reader lost its immutable activation ACK: %#v", result)
 			}
 			childEvent := waitServedSelectedForkFrontier(t, rt.ReceiverStateReader, rt.ReadRunDeliveries, result.ForkRunID, frontier)
@@ -227,11 +256,11 @@ func TestRunForkHistoricalIdentityPublicExecutionBothStores(t *testing.T) {
 				!reflect.DeepEqual(sourceNotices, readForkReceiverNoticeDomain(t, rt, seed.RunID)) || !reflect.DeepEqual(siblingNotices, readForkReceiverNoticeDomain(t, rt, sibling.RunID)) {
 				t.Fatal("healthy fork changed complete source/sibling business rows, companions, or notices")
 			}
-			completed := snapshotForkReceiverApplication(t, rt)
+			completed := applicationSnapshot()
 			for attempt := 0; attempt < 2; attempt++ {
 				var replay apiv1.RunForkExecutionResult
 				requireServedJSONRPCResult(t, rt.Endpoint, "run.fork", params, &replay)
-				if !reflect.DeepEqual(result, replay) || !reflect.DeepEqual(completed, snapshotForkReceiverApplication(t, rt)) {
+				if !reflect.DeepEqual(result, replay) || !reflect.DeepEqual(completed, applicationSnapshot()) {
 					t.Fatalf("successful API replay %d changed response or application rows", attempt)
 				}
 			}

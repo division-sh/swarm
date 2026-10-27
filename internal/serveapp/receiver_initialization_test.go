@@ -126,6 +126,9 @@ func requireTypedReceiverInitializationCases(t *testing.T, rt servedControlProof
 					t.Fatal("reuse changed receiver or run identity")
 				}
 			}
+			requireServedOKJSONRPC(t, rt.Endpoint, "run.pause", map[string]any{
+				"run_id": seed.RunID, "idempotency_key": "typed-init-pause-" + tc.name,
+			})
 		})
 	}
 	t.Run("wrong_integer_at_ingress", func(t *testing.T) {

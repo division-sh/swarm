@@ -10,6 +10,7 @@ import (
 	"time"
 
 	"github.com/division-sh/swarm/internal/runtime/correlation"
+	"github.com/division-sh/swarm/internal/runtime/executionposture"
 	"github.com/division-sh/swarm/internal/runtime/fanoutobligation"
 	"github.com/division-sh/swarm/internal/runtime/pipeline"
 	"github.com/division-sh/swarm/internal/runtime/pipelineobligation"
@@ -274,7 +275,7 @@ func newSupplementalServingFixture(t *testing.T, backend string, p *supplemental
 	storetest.RequireBundleDataCatalog(t, testAuthorActivityContextForBundle(context.Background(), fact), f.selected, bundle)
 	f.topology = newNotifyAllChildrenProcessTopology(t, testAuthorActivityContextForBundle(context.Background(), fact), f.selected, source)
 	rt := newNotifyAllChildrenRuntime(t, f.selected, f.db, source, time.Now, notifyAllChildrenRuntimeOptions{
-		processTopology: f.topology,
+		processTopology: f.topology, executionPosture: executionposture.MockOnly,
 		fanOutExecutor: func(pc *pipeline.PipelineCoordinator) startupownership.FanOutExecutor {
 			p.PipelineCoordinator = pc
 			if len(wrap) != 0 {

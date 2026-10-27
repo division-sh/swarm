@@ -280,6 +280,22 @@ func (a *candidateAdmission) Cancel() error {
 	return a.err
 }
 
+func (a *candidateAdmission) SubmitGenericScheduleActivations(activations []CommittedGenericScheduleActivation) error {
+	if a == nil || a.executor == nil || a.lease == nil {
+		return errors.New("generic schedule handoff requires its reserved lifecycle admission")
+	}
+	a.once.Do(func() {
+		if a.executor.genericSchedules == nil {
+			a.err = errors.New("committed generic schedule handoff requires its lifecycle owner")
+		} else if !a.executor.reconcileCommittedGenericSchedules(a.lease.Context(), activations) {
+			a.err = context.Cause(a.lease.Context())
+		}
+		a.err = errors.Join(a.err, a.lease.Done())
+		a.executor.settleAdmission()
+	})
+	return a.err
+}
+
 func (e *Executor) settleAdmission() {
 	e.mu.Lock()
 	defer e.mu.Unlock()

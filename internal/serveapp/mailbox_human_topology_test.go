@@ -165,6 +165,9 @@ func TestHumanTaskRealRequesterTopologyBothStores(t *testing.T) {
 						if count != 1 {
 							t.Fatalf("requester outcome deliveries=%d, want exactly one\n%s", count, servedEventPublishDebugSummary(t, rt.DB, rt.Backend, f.base.RunID))
 						}
+						requireServedOKJSONRPC(t, rt.Endpoint, "run.pause", map[string]any{
+							"run_id": f.base.RunID, "idempotency_key": "human-topology-pause-" + f.base.RunID,
+						})
 					})
 				}
 			})

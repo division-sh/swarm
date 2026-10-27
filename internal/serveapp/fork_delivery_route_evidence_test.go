@@ -125,7 +125,7 @@ func TestServedForkConnectedDeliveryRouteEvidenceOnBothStores(t *testing.T) {
 				return previous(owner)
 			}
 			t.Cleanup(func() { projectRuntimePersistenceForServe = previous })
-			rt := startServedTestSetupEntitiesProofRuntimeFromSource(t, backend, canonicalrouting.CopyForkDeliveryRouteEvidence(t))
+			rt := startServedLiveFlowProofRuntimeFromSource(t, backend, canonicalrouting.CopyForkDeliveryRouteEvidence(t))
 			seed := requireServedEventPublishRPCResult(t, rt.Endpoint, map[string]any{
 				"event_name": "parent.seeded", "bundle_hash": rt.BundleHash,
 				"payload": map[string]any{"work_id": "fork-connected-history"}, "idempotency_key": "fork-history-seed",
@@ -140,7 +140,20 @@ func TestServedForkConnectedDeliveryRouteEvidenceOnBothStores(t *testing.T) {
 				t.Fatal("served runtime has no selected fork owner")
 			}
 			ctx := servedControlProofAuthorActivityContext(t, rt)
-			plan, err := planner.Plan(ctx, runfork.RunForkPlanRequest{SourceRunID: seed.RunID})
+			var frontier string
+			for _, delivery := range live {
+				node, isNode := delivery.route.Recipient.Node()
+				if isNode && node.FlowPath() == "consumer" && !delivery.route.ConnectClaim.Empty() {
+					if frontier != "" && frontier != delivery.eventID {
+						t.Fatal("connected source has more than one consumer frontier")
+					}
+					frontier = delivery.eventID
+				}
+			}
+			if frontier == "" {
+				t.Fatal("connected source lost its exact consumer frontier")
+			}
+			plan, err := planner.Plan(ctx, runfork.RunForkPlanRequest{SourceRunID: seed.RunID, At: frontier})
 			if err != nil {
 				t.Fatalf("plan real connected source: %v", err)
 			}

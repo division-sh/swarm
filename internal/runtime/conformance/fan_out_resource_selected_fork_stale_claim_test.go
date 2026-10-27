@@ -11,6 +11,7 @@ import (
 	"github.com/division-sh/swarm/internal/apiv1"
 	"github.com/division-sh/swarm/internal/events"
 	runtimedelivery "github.com/division-sh/swarm/internal/runtime/deliverylifecycle"
+	"github.com/division-sh/swarm/internal/runtime/runfork"
 	"github.com/google/uuid"
 )
 
@@ -41,8 +42,13 @@ func (g *selectedDeploymentClaimHold) ClaimDelivery(ctx context.Context, authori
 func TestDeploymentSourceSelectedPredecessorClaimCannotSettleAfterRecoveryBothStores(t *testing.T) {
 	for _, backend := range []string{"sqlite", "postgres"} {
 		t.Run(backend, func(t *testing.T) {
-			f := selectedDeploymentResourceFixture(t, backend, "root")
-			f.runtime.fanOutServing.Close()
+			ordinary := &selectedDeploymentClaimGate{entered: make(chan string, 16)}
+			ordinary.held.Store(true)
+			t.Cleanup(func() { ordinary.held.Store(false) })
+			f := selectedDeploymentResourceFixtureWithDelivery(t, backend, "root", nil, func(store runtimedelivery.Store) runtimedelivery.Store {
+				ordinary.Store = store
+				return ordinary
+			}, nil)
 			server := f.operatorServer(t)
 			start := func(name string, rows []byte) string {
 				t.Helper()
@@ -52,9 +58,14 @@ func TestDeploymentSourceSelectedPredecessorClaimCannotSettleAfterRecoveryBothSt
 				}
 				return startDeploymentResourceRun(t, f, server, "--data", selectedDeploymentEvent+"="+path)
 			}
-			sourceRunID := start("source", []byte("{\"account_id\":\"source\",\"document\":{\"version\":1}}\n"))
+			sourceRows := []byte("{\"account_id\":\"source\",\"document\":{\"version\":1}}\n")
+			sourceRunID := start("source", sourceRows)
+			pointEventID := waitDeploymentForkRowEvent(t, f.ctx, f.selected, sourceRunID, f.runtime.fanOutServing.Wake)
 			changedRows := []byte("{\"account_id\":\"changed\",\"document\":{\"version\":2}}\n")
 			changed := selectedDeploymentVersion(t, f, changedRows)
+			pauseDeploymentFixtureRun(t, f, sourceRunID)
+			ordinary.held.Store(false)
+			f.runtime.fanOutServing.Wake()
 			_ = start("changed", changedRows)
 			gate := &selectedDeploymentClaimHold{Store: f.selected, entered: make(chan runtimedelivery.Claim, 1), release: make(chan struct{})}
 			var release sync.Once
@@ -67,6 +78,7 @@ func TestDeploymentSourceSelectedPredecessorClaimCannotSettleAfterRecoveryBothSt
 			key := uuid.NewString()
 			params := map[string]any{
 				"source_run_id": sourceRunID, "bundle_hash": f.runtime.sourceArtifactFact.BundleHash(),
+				"fork_event_id":       pointEventID,
 				"allow_source_freeze": true, "idempotency_key": key,
 				"data_pin_overrides": []any{map[string]any{
 					"declaration": map[string]any{"flow_path": ".", "event": selectedDeploymentEvent},
@@ -103,9 +115,16 @@ func TestDeploymentSourceSelectedPredecessorClaimCannotSettleAfterRecoveryBothSt
 			}
 			var childID, status, predecessorExecutionID string
 			var claimVersion int64
-			if err := f.db.QueryRowContext(ctx, `SELECT CAST(fork_run_id AS TEXT) FROM run_fork_operations WHERE idempotency_key=$1`, key).Scan(&childID); err != nil {
-				t.Fatal(err)
+			request := f.forkRequest.Load()
+			if request == nil {
+				t.Fatal("R4 selected claim lacks its original API operation request")
 			}
+			operations := f.selected.(apiv1.RunForkOperationReader)
+			operation, found, err := operations.LoadForkOperation(ctx, request.Actor, request.IdempotencyKey, request.TransportHash)
+			if err != nil || !found || operation.ForkRunID == "" || operation.Status != runfork.ForkOperationMaterialized || operation.Result != nil {
+				t.Fatalf("R4 controlled claim fabricated or lost its pre-ACK operation: %+v err=%v", operation, err)
+			}
+			childID = operation.ForkRunID
 			if err := f.db.QueryRowContext(ctx, `SELECT status,current_attempt_version,selected_execution_id FROM event_deliveries WHERE delivery_id=$1 AND run_id=$2`, predecessor.DeliveryID(), childID).Scan(&status, &claimVersion, &predecessorExecutionID); err != nil {
 				t.Fatal(err)
 			}
@@ -123,8 +142,8 @@ func TestDeploymentSourceSelectedPredecessorClaimCannotSettleAfterRecoveryBothSt
 					t.Fatalf("R4 lost its committed activation acknowledgment: %v", ctx.Err())
 				}
 			}
-			if acknowledged.err != nil || len(acknowledged.rpcErr) != 0 || acknowledged.result.ForkRunID != childID {
-				t.Fatalf("R4 fencing rewrote the committed child acknowledgment: %+v", acknowledged)
+			if acknowledged.result.ForkRunID != "" || (acknowledged.err == nil && len(acknowledged.rpcErr) == 0) {
+				t.Fatalf("R4 fenced pre-ACK claim fabricated a child acknowledgment: %+v", acknowledged)
 			}
 			if err := owner.RetireSelectedContexts(context.Background()); err != nil {
 				t.Fatal(err)
@@ -138,8 +157,9 @@ func TestDeploymentSourceSelectedPredecessorClaimCannotSettleAfterRecoveryBothSt
 			f.ctx = testAuthorActivityContextForBundle(context.Background(), f.runtime.sourceArtifactFact)
 			f.topology = newNotifyAllChildrenProcessTopology(t, f.ctx, f.selected, f.source)
 			f.ctx = originalConformanceFixtureContext(t, f.ctx, f.selected)
+			f.boot(t)
 			successor, recovery := deploymentForkOwner(t, f)
-			var found bool
+			found = false
 			for _, entry := range recovery {
 				found = found || entry.RunID == childID
 			}
@@ -172,9 +192,7 @@ func TestDeploymentSourceSelectedPredecessorClaimCannotSettleAfterRecoveryBothSt
 			if successorExecutionID == predecessorExecutionID || successorGeneration <= 1 || deliveryExecutionID != successorExecutionID || deliveryGeneration != successorGeneration {
 				t.Fatalf("R4 no exact successor claim transfer: predecessor=%s successor=%s/%d delivery=%s/%d", predecessorExecutionID, successorExecutionID, successorGeneration, deliveryExecutionID, deliveryGeneration)
 			}
-			// The fenced predecessor retains its unfinished generation; only the
-			// exact successor closes after settling the transferred claim.
-			assertSelectedDeploymentRowsWithClosedExecutions(t, f, server, childID, "root", string(changed.VersionID), changedRows, 1)
+			assertSelectedDeploymentRowSet(t, f, server, childID, "root", string(changed.VersionID), [][]byte{sourceRows, changedRows}, 2)
 			var successorDelivered int
 			if err := f.db.QueryRowContext(f.ctx, `SELECT COUNT(*) FROM event_delivery_attempts WHERE delivery_id=$1 AND claim_version>$2 AND outcome='delivered'`, predecessor.DeliveryID(), predecessor.Version()).Scan(&successorDelivered); err != nil {
 				t.Fatal(err)

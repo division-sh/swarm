@@ -46,8 +46,12 @@ type candidateRegistrationBarrier struct {
 }
 
 type candidateHandoff struct {
-	admission runtimerunlifecycle.CandidateAdmission
-	candidate runtimerunlifecycle.Candidate
+	admission   runtimerunlifecycle.CandidateAdmission
+	candidate   runtimerunlifecycle.Candidate
+	activations []runtimerunlifecycle.CommittedGenericScheduleActivation
+	schedules   interface {
+		SubmitGenericScheduleActivations([]runtimerunlifecycle.CommittedGenericScheduleActivation) error
+	}
 }
 
 func detachedRunLifecycleCandidateContext(ctx context.Context) context.Context {
@@ -82,7 +86,7 @@ func (r *CandidateHandoff) Prepare(
 	sinks *CandidateCoordinator,
 	result runtimerunlifecycle.CandidateRequestResult,
 ) error {
-	if !result.RequiresRepresentation() {
+	if !result.RequiresRepresentation() && len(result.GenericScheduleActivations) == 0 {
 		return nil
 	}
 	if r == nil {
@@ -94,17 +98,19 @@ func (r *CandidateHandoff) Prepare(
 	if sinks == nil {
 		return errors.New("completion candidate coordinator is required")
 	}
-	if err := result.Candidate.Validate(); err != nil {
+	if err := result.Validate(); err != nil {
 		return err
 	}
-	identity := result.Candidate.Identity()
-	if r.identities == nil {
-		r.identities = make(map[runtimerunlifecycle.CandidateIdentity]struct{})
+	if result.RequiresRepresentation() {
+		identity := result.Candidate.Identity()
+		if r.identities == nil {
+			r.identities = make(map[runtimerunlifecycle.CandidateIdentity]struct{})
+		}
+		if _, exists := r.identities[identity]; exists {
+			return nil
+		}
+		r.identities[identity] = struct{}{}
 	}
-	if _, exists := r.identities[identity]; exists {
-		return nil
-	}
-	r.identities[identity] = struct{}{}
 	sink, barrier := sinks.reserve(result.Candidate.Scope())
 	if sink == nil {
 		r.barriers = append(r.barriers, barrier)
@@ -118,9 +124,20 @@ func (r *CandidateHandoff) Prepare(
 	if err != nil {
 		return fmt.Errorf("reserve completion candidate executor admission: %w", err)
 	}
-	r.handoffs = append(r.handoffs, candidateHandoff{
+	handoff := candidateHandoff{
 		admission: admission, candidate: result.Candidate,
-	})
+		activations: append([]runtimerunlifecycle.CommittedGenericScheduleActivation(nil), result.GenericScheduleActivations...),
+	}
+	if len(handoff.activations) != 0 {
+		var ok bool
+		handoff.schedules, ok = admission.(interface {
+			SubmitGenericScheduleActivations([]runtimerunlifecycle.CommittedGenericScheduleActivation) error
+		})
+		if !ok {
+			return errors.Join(errors.New("live progress requires its generic schedule handoff"), admission.Cancel())
+		}
+	}
+	r.handoffs = append(r.handoffs, handoff)
 	return nil
 }
 
@@ -134,10 +151,11 @@ func (r *CandidateHandoff) Commit() error {
 	r.settled = true
 	var submitErr error
 	for _, handoff := range r.handoffs {
-		submitErr = errors.Join(
-			submitErr,
-			handoff.admission.Submit(handoff.candidate),
-		)
+		if len(handoff.activations) != 0 {
+			submitErr = errors.Join(submitErr, handoff.schedules.SubmitGenericScheduleActivations(handoff.activations))
+		} else {
+			submitErr = errors.Join(submitErr, handoff.admission.Submit(handoff.candidate))
+		}
 	}
 	for _, barrier := range r.barriers {
 		barrier.Settle()

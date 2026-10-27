@@ -33,7 +33,7 @@ func TestIssue642TwoOpenRepliesUnclaimedFanOutInputBothStores(t *testing.T) {
 	for _, backend := range []catalogRuntimeBackend{catalogBackendSQLite, catalogBackendPostgres} {
 		t.Run(string(backend), func(t *testing.T) {
 			root := canonicalrouting.CopyNestedFanOutReply(t)
-			h := newRuntimeHarnessForBackend(t, root, backend, true)
+			h := newLiveForkCatalogHarness(t, root, backend)
 			var selected unclaimedFanOutReplyStore = h.pg
 			if h.sqlite != nil {
 				selected = h.sqlite
@@ -46,7 +46,7 @@ func TestIssue642TwoOpenRepliesUnclaimedFanOutInputBothStores(t *testing.T) {
 			staged := stageCatalogSelectedContractFork(t, h.ctx, selected, owner, loader, selection, options, catalogRuntimeRunID, cut, operation)
 			childRows, inner := requireUnclaimedFanOutReplyStaging(t, h.ctx, selected, staged.ForkRunID, cut)
 			t.Cleanup(func() { logUnclaimedFanOutReplyFailure(t, h.ctx, selected, owner, staged.ForkRunID) })
-			executed, err := runforkexecution.ExecuteSelectedContractRunFork(h.ctx, runforkexecution.SelectedContractExecutionRequest{
+			executed, err := executeCatalogLiveFork(t, h, h.ctx, runforkexecution.SelectedContractExecutionRequest{
 				SourceRunID: catalogRuntimeRunID, At: cut, ForkOperation: &operation, AllowSourceFreeze: true, Owner: owner, SourceLoader: loader, ContractSelection: selection, AgentRuntime: options,
 			})
 			if err != nil || !executed.Activation.Activated || executed.Materialization.ForkRunID != staged.ForkRunID {
@@ -66,7 +66,7 @@ func TestIssue642InheritedRequestPublicationReusesBothOpenRowsBothStores(t *test
 	for _, backend := range []catalogRuntimeBackend{catalogBackendSQLite, catalogBackendPostgres} {
 		t.Run(string(backend), func(t *testing.T) {
 			root := canonicalrouting.CopyNestedFanOutReply(t)
-			h := newRuntimeHarnessForBackend(t, root, backend, true)
+			h := newLiveForkCatalogHarness(t, root, backend)
 			var selected unclaimedFanOutReplyStore = h.pg
 			if h.sqlite != nil {
 				selected = h.sqlite
@@ -79,7 +79,7 @@ func TestIssue642InheritedRequestPublicationReusesBothOpenRowsBothStores(t *test
 			staged := stageCatalogSelectedContractFork(t, h.ctx, selected, owner, loader, selection, options, catalogRuntimeRunID, cut, operation)
 			childRows, inner := requireUnclaimedFanOutReplyStaging(t, h.ctx, selected, staged.ForkRunID, cut)
 			t.Cleanup(func() { logUnclaimedFanOutReplyFailure(t, h.ctx, selected, owner, staged.ForkRunID) })
-			executed, err := runforkexecution.ExecuteSelectedContractRunFork(h.ctx, runforkexecution.SelectedContractExecutionRequest{
+			executed, err := executeCatalogLiveFork(t, h, h.ctx, runforkexecution.SelectedContractExecutionRequest{
 				SourceRunID: catalogRuntimeRunID, At: cut, ForkOperation: &operation, AllowSourceFreeze: true, Owner: owner, SourceLoader: loader, ContractSelection: selection, AgentRuntime: options,
 			})
 			if err != nil || !executed.Activation.Activated || executed.Materialization.ForkRunID != staged.ForkRunID {

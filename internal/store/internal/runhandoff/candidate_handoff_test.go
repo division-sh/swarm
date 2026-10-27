@@ -90,10 +90,11 @@ func TestCandidateHandoffAfterFenceRequiresAcceptedSameRuntimeWork(t *testing.T)
 }
 
 type recordingCandidateSink struct {
-	mu        sync.Mutex
-	reserved  int
-	submitted []runtimerunlifecycle.Candidate
-	cancelled int
+	mu          sync.Mutex
+	reserved    int
+	submitted   []runtimerunlifecycle.Candidate
+	activations []runtimerunlifecycle.CommittedGenericScheduleActivation
+	cancelled   int
 }
 
 func (s *recordingCandidateSink) ReserveCompletionCandidate(context.Context) (runtimerunlifecycle.CandidateAdmission, error) {
@@ -118,6 +119,13 @@ func (a *recordingCandidateAdmission) Cancel() error {
 	a.sink.mu.Lock()
 	defer a.sink.mu.Unlock()
 	a.sink.cancelled++
+	return nil
+}
+
+func (a *recordingCandidateAdmission) SubmitGenericScheduleActivations(activations []runtimerunlifecycle.CommittedGenericScheduleActivation) error {
+	a.sink.mu.Lock()
+	defer a.sink.mu.Unlock()
+	a.sink.activations = append(a.sink.activations, activations...)
 	return nil
 }
 

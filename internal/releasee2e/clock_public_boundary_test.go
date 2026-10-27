@@ -145,6 +145,7 @@ func TestDeclaredClockFiniteAndPublicReadbackBothStores(t *testing.T) {
 			}
 			clockEvent := waitPublicClockEvent(t, process, standing.RunID)
 			assertFullEventPayloadReadback(t, process, clockEvent, binary, root, config, "api-token", env)
+			pauseFullLifecycleRun(t, process.rpc, standing.RunID)
 			connectedID := uuid.NewString()
 			connected := runReleaseCommand(t, goldenStartupTimeout, root, env, "", binary,
 				"run", "start", "--connect", process.apiBase, "--event", "start.requested", "--payload", "payload.json",
@@ -152,8 +153,8 @@ func TestDeclaredClockFiniteAndPublicReadbackBothStores(t *testing.T) {
 			if connected.err != nil {
 				t.Fatalf("connected finite clock run: %v\n%s", connected.err, connected.output)
 			}
-			waitForFullLifecycleRunStatus(t, process.rpc, connectedID, "completed")
-			assertFiniteClockRun(t, process, connectedID)
+			waitForGoldenTerminalRun(t, process, goldenStoreSelection{name: backend}, connectedID, goldenStartupTimeout)
+			assertClocklessRun(t, process, connectedID)
 			var suspended standingRuntimePublicResult
 			if err := process.rpc.call(ctx, "standing.suspend", map[string]any{
 				"service_id": standing.Origin.ServiceID, "idempotency_key": "clock-public-suspend",
@@ -204,11 +205,11 @@ func readPublicClockRun(t *testing.T, process *releaseServeProcess, runID string
 	return result.Run
 }
 
-func assertFiniteClockRun(t *testing.T, process *releaseServeProcess, runID string) {
+func assertClocklessRun(t *testing.T, process *releaseServeProcess, runID string) {
 	t.Helper()
 	header := readPublicClockRun(t, process, runID)
-	if header.Status != "completed" || len(header.ClockSchedules) != 0 {
-		t.Fatalf("finite execution acquired a deployment clock: %+v", header)
+	if header.Status != "live" || len(header.ClockSchedules) != 0 {
+		t.Fatalf("connected execution acquired a deployment clock: %+v", header)
 	}
 	ctx, cancel := context.WithTimeout(t.Context(), goldenStartupTimeout)
 	defer cancel()

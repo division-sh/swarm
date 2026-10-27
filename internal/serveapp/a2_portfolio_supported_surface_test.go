@@ -211,13 +211,15 @@ func TestA2PortfolioSupportedFiniteJoinSurfaceBothStores(t *testing.T) {
 			if len(created) != 4 {
 				t.Fatalf("ordinary operating creation count=%d, want 4 independent instances", len(created))
 			}
-			requireServedRunStatus(t, rt.Endpoint, setup.RunID, "completed")
+			requireServedFinalInstancesSettled(t, rt.Endpoint, setup.RunID, map[string]string{
+				q1.Entity.FlowInstance: "complete", q2.Entity.FlowInstance: "complete",
+			})
 			var header struct {
 				Run operatorread.RunHeader `json:"run"`
 			}
 			requireServedJSONRPCResult(t, rt.Endpoint, "run.get", map[string]any{"run_id": setup.RunID}, &header)
-			if header.Run.RunID != setup.RunID || header.Run.Status != "completed" || header.Run.EndedAt == nil || header.Run.Failure != nil {
-				t.Fatalf("finite join did not complete its exact run: %+v", header.Run)
+			if header.Run.RunID != setup.RunID || header.Run.Status != "live" || header.Run.EndedAt != nil || header.Run.Failure != nil {
+				t.Fatalf("settled period joins did not retain their exact live run: %+v", header.Run)
 			}
 			for _, operating := range created {
 				key, ok := operating.Fields["operating_instance_id"].(string)
@@ -240,8 +242,8 @@ func TestA2PortfolioSupportedFiniteJoinSurfaceBothStores(t *testing.T) {
 				} else {
 					observed, found, err = rt.SQLite.LookupFlowInstance(ctx, request)
 				}
-				if err != nil || !found || observed.Identity().EntityID != operating.Entity.EntityID || observed.InstanceKey() != key || observed.RunState() != runlifecycle.StateCompleted {
-					t.Fatalf("completed run lost occupied operating identity: observation=%+v found=%t err=%v", observed, found, err)
+				if err != nil || !found || observed.Identity().EntityID != operating.Entity.EntityID || observed.InstanceKey() != key || observed.RunState() != runlifecycle.StateLive {
+					t.Fatalf("live run lost occupied operating identity: observation=%+v found=%t err=%v", observed, found, err)
 				}
 			}
 			t.Log("root-triggered operating creations=4; complete typed ordered results: 2026-Q1=[int64(11), int64(22)], 2026-Q2=[int64(111), int64(222)]")

@@ -36,6 +36,7 @@ type runLifecycleFixtureMutation interface {
 type semanticRunFixture struct {
 	RunID      string
 	State      runtimerunlifecycle.State
+	LiveScope  runtimerunlifecycle.LiveRunScope
 	Origin     runtimerunlifecycle.RunOrigin
 	BundleHash string
 	Artifact   *sourceartifact.AdmittedSourceArtifact
@@ -229,6 +230,7 @@ func materializeRunFixtureInCurrentMutationForTest(
 		Origin:    fixture.Origin,
 		Source:    source,
 		StartedAt: fixture.StartedAt.UTC(),
+		LiveScope: fixture.LiveScope,
 	}); err != nil {
 		return err
 	}

@@ -114,7 +114,7 @@ func issue2564H2FinalEntryCompletion(t *testing.T, backend string, acceptedTimer
 		t.Fatalf("normal boot did not establish exact ready attachment: found=%v readiness=%+v err=%v", found, readiness, err)
 	}
 	initial, err := rt.selected.LoadRunHeader(t.Context(), seed.RunID)
-	if err != nil || initial.Status != "running" || initial.EndedAt != nil || initial.Failure != nil {
+	if err != nil || initial.Status != "live" || initial.EndedAt != nil || initial.Failure != nil {
 		t.Fatalf("final-entry run was not active before its final ACK: header=%+v err=%v", initial, err)
 	}
 	name := "overlap.finish"
@@ -178,7 +178,7 @@ func issue2564H2FinalEntryCompletion(t *testing.T, backend string, acceptedTimer
 		}
 		receipt := storetest.ObservePipelineReceipt(t, t.Context(), rt.selected, last.TriggerEventID)
 		blocked, err := rt.selected.LoadRunHeader(t.Context(), seed.RunID)
-		if err != nil || blocked.Status != "running" || blocked.EndedAt != nil || blocked.Failure != nil || receipt.Count != 0 {
+		if err != nil || blocked.Status != "live" || blocked.EndedAt != nil || blocked.Failure != nil || receipt.Count != 0 {
 			t.Fatalf("completion crossed unsettled accepted timer: run=%+v receipt=%+v err=%v\n%s", blocked, receipt, err, issue2564H2CompletionReceipt(t, rt, seed.RunID))
 		}
 		t.Logf("H2_FINAL_ENTRY decision=blocked_at_timer_ACK event=%s revision=%d pipeline=%+v receipt=%+v\n%s", last.TriggerEventID, ack.Revision, pending, receipt, issue2564H2CompletionReceipt(t, rt, seed.RunID))
@@ -193,17 +193,17 @@ func issue2564H2FinalEntryCompletion(t *testing.T, backend string, acceptedTimer
 		}
 		issue2564H2CompletionDelivery(t, rt, seed.RunID, input.EventID, false)
 	}
-	completed := issue2564H2CompletionWaitRun(t, rt, seed.RunID)
-	if completed.BundleHash != rt.BundleHash || completed.EndedAt == nil || !completed.EndedAt.After(last.FiredAt) || completed.Failure != nil {
-		t.Fatalf("completion lost exact final-entry ordering: history=%+v run=%+v", last, completed)
+	live, err := rt.selected.LoadRunHeader(t.Context(), seed.RunID)
+	if err != nil || live.BundleHash != rt.BundleHash || live.Status != "live" || live.EndedAt != nil || live.Failure != nil {
+		t.Fatalf("final-instance acknowledgment changed its live run: history=%+v run=%+v err=%v", last, live, err)
 	}
 	if !acceptedTimer {
 		select {
 		case err := <-returned:
-			t.Fatalf("handler caller returned before completion was observed under its ACK barrier: %v", err)
+			t.Fatalf("handler caller returned before final-instance ACK was observed under its barrier: %v", err)
 		default:
 		}
-		t.Logf("H2_FINAL_ENTRY decision=completed_while_handler_ACK_held event=%s revision=%d ended_at=%s\n%s", input.EventID, ack.Revision, completed.EndedAt.Format(time.RFC3339Nano), issue2564H2CompletionReceipt(t, rt, seed.RunID))
+		t.Logf("H2_FINAL_ENTRY decision=instance_final_while_handler_ACK_held event=%s revision=%d entered_at=%s\n%s", input.EventID, ack.Revision, ack.EnteredStageAt.Format(time.RFC3339Nano), issue2564H2CompletionReceipt(t, rt, seed.RunID))
 		unblock()
 		issue2564H2CompletionJoinHook(t, returned)
 		ctx, cancel := context.WithTimeout(t.Context(), servedProofPollDeadline)
@@ -228,7 +228,15 @@ func issue2564H2FinalEntryCompletion(t *testing.T, backend string, acceptedTimer
 		if err != nil || len(occurrences) != 1 || occurrences[0].ID != last.TriggerEventID || occurrences[0].Outcome != "success" {
 			t.Fatalf("accepted timer repeated/lost its once-only settlement: occurrences=%+v err=%v", occurrences, err)
 		}
-		t.Logf("H2_FINAL_ENTRY decision=completed_after_timer_receipt_settled event=%s revision=%d ended_at=%s\n%s", last.TriggerEventID, after.Revision, completed.EndedAt.Format(time.RFC3339Nano), issue2564H2CompletionReceipt(t, rt, seed.RunID))
+		t.Logf("H2_FINAL_ENTRY decision=instance_final_after_timer_receipt_settled event=%s revision=%d entered_at=%s\n%s", last.TriggerEventID, after.Revision, after.EnteredStageAt.Format(time.RFC3339Nano), issue2564H2CompletionReceipt(t, rt, seed.RunID))
+	}
+	var diagnosis struct {
+		Run            operatorread.RunHeader         `json:"run"`
+		TestQuiescence operatorread.RunTestQuiescence `json:"test_quiescence"`
+	}
+	requireServedJSONRPCResult(t, rt.Endpoint, "run.diagnose", map[string]any{"run_id": seed.RunID}, &diagnosis)
+	if diagnosis.Run.RunID != seed.RunID || diagnosis.Run.Status != "live" || diagnosis.Run.EndedAt != nil || !diagnosis.TestQuiescence.Ready {
+		t.Fatalf("final instance did not settle under its live run: %+v", diagnosis)
 	}
 	logs, err := rt.selected.ListOperatorRuntimeLogs(t.Context(), operatorread.OperatorRuntimeLogListOptions{RunID: seed.RunID, Level: "error", Limit: 100})
 	if err != nil || len(logs.Logs) != 0 || logs.NextCursor != "" {
@@ -261,25 +269,35 @@ func issue2564H2CompletionJoinHook(t *testing.T, returned <-chan error) {
 	}
 }
 
-func issue2564H2CompletionWaitRun(t *testing.T, rt issue2564ServedFixture, runID string) operatorread.RunHeader {
+func waitIssue2564LiveRunSettlement(t *testing.T, rt issue2564ServedFixture, runID string) operatorread.RunHeader {
 	t.Helper()
-	var last operatorread.RunHeader
+	var last struct {
+		Run            operatorread.RunHeader         `json:"run"`
+		TestQuiescence operatorread.RunTestQuiescence `json:"test_quiescence"`
+	}
 	for deadline := time.Now().Add(servedProofPollDeadline); time.Now().Before(deadline); {
-		var err error
-		last, err = rt.selected.LoadRunHeader(t.Context(), runID)
-		if err != nil {
-			t.Fatalf("read exact run completion: %v\n%s", err, issue2564H2CompletionReceipt(t, rt, runID))
+		requireServedJSONRPCResult(t, rt.Endpoint, "run.diagnose", map[string]any{"run_id": runID}, &last)
+		if last.Run.RunID != runID || last.Run.Status != "live" || last.Run.EndedAt != nil || last.Run.Failure != nil {
+			t.Fatalf("settlement changed its live run: %+v", last)
 		}
-		if last.Status == "completed" && last.EndedAt != nil && last.Failure == nil {
-			return last
-		}
-		if last.Status != "running" || last.Failure != nil {
-			t.Fatalf("completion reached an unexpected state: %+v\n%s", last, issue2564H2CompletionReceipt(t, rt, runID))
+		if last.TestQuiescence.Ready {
+			return last.Run
 		}
 		time.Sleep(10 * time.Millisecond)
 	}
-	t.Fatalf("actual run never completed; blocked/quiescent is not PASS: %+v\n%s", last, issue2564H2CompletionReceipt(t, rt, runID))
-	return last
+	t.Fatalf("live run retained unsettled work within the original bound: %+v", last)
+	return last.Run
+}
+
+func pauseIssue2564SettledSource(t *testing.T, rt issue2564ServedFixture, runID string) operatorread.RunHeader {
+	t.Helper()
+	waitIssue2564LiveRunSettlement(t, rt, runID)
+	requireServedOKJSONRPC(t, rt.Endpoint, "run.pause", map[string]any{"run_id": runID, "idempotency_key": "timer-source-pause-" + runID})
+	paused, err := rt.selected.LoadRunHeader(t.Context(), runID)
+	if err != nil || paused.RunID != runID || paused.Status != "paused" || paused.EndedAt != nil || paused.Failure != nil {
+		t.Fatalf("pause exact settled timer source: %+v err=%v", paused, err)
+	}
+	return paused
 }
 
 func issue2564H2CompletionWaitReceipt(t *testing.T, rt issue2564ServedFixture, runID, eventID string) {

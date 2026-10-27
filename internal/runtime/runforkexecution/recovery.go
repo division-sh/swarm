@@ -5,21 +5,26 @@ import (
 	"errors"
 	"fmt"
 
+	runtimepkg "github.com/division-sh/swarm/internal/runtime"
 	"github.com/division-sh/swarm/internal/runtime/authoractivity"
 	"github.com/division-sh/swarm/internal/runtime/correlation"
 	"github.com/division-sh/swarm/internal/runtime/effects"
 	"github.com/division-sh/swarm/internal/runtime/runbundle"
 	"github.com/division-sh/swarm/internal/runtime/runcontrol"
 	"github.com/division-sh/swarm/internal/runtime/runfork"
+	"github.com/division-sh/swarm/internal/runtime/runlifecycle"
 	"github.com/google/uuid"
 )
 
 // SelectedForkRecoveryEnvironment is supplied by serve composition, never
 // reconstructed from a selected run's loaded runtime.
 type SelectedForkRecoveryEnvironment struct {
-	SourceLoader    SelectedContractSourceLoader
-	SourceInspector SelectedContractSourceInspector
-	AgentRuntime    SelectedContractAgentRuntimeOptions
+	SourceLoader       SelectedContractSourceLoader
+	SourceInspector    SelectedContractSourceInspector
+	AgentRuntime       SelectedContractAgentRuntimeOptions
+	AcquireLiveRuntime func(context.Context, string) (*runtimepkg.RuntimeContextUse, error)
+	LiveContexts       *runtimepkg.RuntimeContextManager
+	LiveRuns           runlifecycle.LiveRunReader
 }
 
 type SelectedContractSourceInspector interface {
@@ -141,7 +146,10 @@ func (o SelectedContractExecutionOwner) RecoverSelectedForkContexts(ctx context.
 	}
 	contexts.recovered = true
 	contexts.mu.Unlock()
-	request := SelectedContractExecutionRequest{SourceLoader: environment.SourceLoader, AgentRuntime: environment.AgentRuntime}
+	request := SelectedContractExecutionRequest{
+		SourceLoader: environment.SourceLoader, AgentRuntime: environment.AgentRuntime,
+		AcquireLiveRuntime: environment.AcquireLiveRuntime, LiveContexts: environment.LiveContexts, LiveRuns: environment.LiveRuns,
+	}
 	for _, result := range continuations {
 		if err := ctx.Err(); err != nil {
 			return results, errors.Join(diagnostics, err)

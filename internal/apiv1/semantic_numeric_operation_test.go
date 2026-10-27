@@ -53,6 +53,12 @@ func TestPublicOperationSemanticCarrierParity(t *testing.T) {
 			}
 			for _, method := range []string{"event.publish", "run.start"} {
 				t.Run(method, func(t *testing.T) {
+					var liveRunID string
+					defer func() {
+						if liveRunID != "" {
+							pauseAPITestLiveRun(t, bus, selected, liveRunID)
+						}
+					}()
 					key, run := uuid.NewString(), uuid.NewString()
 					request := func(value any) Request {
 						params := map[string]any{"event_name": "scan.requested", "bundle_hash": runStartTestBundleHash, "idempotency_key": key,
@@ -79,6 +85,11 @@ func TestPublicOperationSemanticCarrierParity(t *testing.T) {
 							t.Fatal(err)
 						}
 						if i == 0 {
+							var decoded map[string]any
+							if err := json.Unmarshal(raw, &decoded); err != nil {
+								t.Fatal(err)
+							}
+							liveRunID = stringValue(t, decoded["run_id"], "run_id")
 							wantResult, after = string(raw), counts()
 						} else if string(raw) != wantResult || !reflect.DeepEqual(counts(), after) {
 							t.Fatalf("carrier replay changed result/domain: %s -> %s; %v -> %v", wantResult, raw, after, counts())

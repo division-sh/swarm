@@ -3,6 +3,7 @@ package runforkexecution
 import (
 	"context"
 	"crypto/sha256"
+	"database/sql"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -172,11 +173,17 @@ func runSelectedContractActivityForkCases(t *testing.T, fixture activityForkFixt
 				t.Fatalf("selected activity source has no descriptor for %s: %#v", tt.resultEventType, descriptors)
 			}
 			loader := &fakeSelectedContractSourceLoader{loaded: loaded}
-			result, err := executeLiveSelectedContractRunFork(ctx, SelectedContractExecutionRequest{
+			request := SelectedContractExecutionRequest{
 				SourceRunID: sourceRunID, At: sourceRequestEventID, AllowSourceFreeze: true, Owner: fixture.owner,
 				SourceLoader: loader, ContractSelection: selection,
 				AgentRuntime: SelectedContractAgentRuntimeOptions{ProcessCapability: fixture.owner.ports.contexts.capability},
-			})
+			}
+			var result SelectedContractExecutionResult
+			if tt.wantError != "" {
+				result, err = executeLiveSelectedContractRunFork(ctx, request)
+			} else {
+				result, err = q1ExecuteSelectedPhaseComponent(t, ctx, request)
+			}
 			if tt.wantError != "" {
 				if err == nil || !strings.Contains(err.Error(), tt.wantError) || connectorCalls.Load() != beforeCalls || result.Activation.Activated {
 					t.Fatalf("unsupported root executed: calls=%d result=%+v err=%v", connectorCalls.Load()-beforeCalls, result, err)
@@ -283,9 +290,8 @@ func runSelectedContractActivityForkCases(t *testing.T, fixture activityForkFixt
 				t.Fatalf("exact child lost bound source preparation: count=%d err=%v", len(reloaded), err)
 			}
 			rejected, refusal := fixture.owner.ports.replay.LoadRunForkSelectedContractSourceEvents(ctx, sourceRunID, sourceRunID, []string{sourceRequestEventID}, original)
-			var inactive *runlifecycle.RunNotActiveError
-			if !errors.As(refusal, &inactive) || inactive.RunID != sourceRunID || inactive.State != runlifecycle.StateForked || len(rejected) != 0 {
-				t.Fatalf("frozen source gained execution preparation: count=%d refusal=%v", len(rejected), refusal)
+			if !errors.Is(refusal, sql.ErrNoRows) || len(rejected) != 0 {
+				t.Fatalf("original source gained the selected child's binding: count=%d refusal=%v", len(rejected), refusal)
 			}
 			repeated := loadSelectedContractActivityRequest(t, selected, result.Materialization.ForkRunID, forkEventID)
 			if !reflect.DeepEqual(forkRequest, repeated) {
@@ -306,6 +312,7 @@ func runSelectedContractActivityForkCases(t *testing.T, fixture activityForkFixt
 // materialization, runtime execution, connector calls and final publication are real.
 type activityForkFixture struct {
 	owner SelectedContractExecutionOwner
+	live  bool
 }
 
 type activityForkSourceEvidence = storetest.ActivityForkSourceStorage
@@ -341,9 +348,13 @@ func (f activityForkFixture) seedSource(t *testing.T, ctx context.Context, loade
 	ctx = runtimeauthoractivity.WithScope(ctx, runtimeauthoractivity.BundleScope(runForkTestRuntimeInstanceID, loaded.SourceArtifactFact.BundleHash()))
 	artifact := selectedExecutionSourceArtifact(t, loaded.SourceArtifactFact.BundleHash())
 	ctx = originalSelectedFixtureContext(t, ctx, any(f.owner.ports.fork).(startupownership.Store))
-	storetest.RequireRun(t, ctx, f.owner.ports.fork.(storetest.RunFixtureStore), storetest.RunFixture{
+	run := storetest.RunFixture{
 		Origin: storetest.ScenarioSetupOrigin(), RunID: runID, StartedAt: at.Add(-time.Minute), BundleHash: loaded.SourceArtifactFact.BundleHash(), Artifact: artifact,
-	})
+	}
+	if f.live {
+		run.Origin, run.LiveScope = runlifecycle.DeploymentRunOrigin(), runlifecycle.LiveRunScope{FlowPath: "."}
+	}
+	storetest.RequireRun(t, ctx, f.owner.ports.fork.(storetest.RunFixtureStore), run)
 	payload, err := json.Marshal(request)
 	if err != nil {
 		t.Fatal(err)
@@ -406,8 +417,8 @@ func (f activityForkFixture) capture(t *testing.T, ctx context.Context, runID st
 
 func waitSelectedContractActivityInputAccounting(t *testing.T, ctx context.Context, fixture activityForkFixture, result SelectedContractExecutionResult, sourceRequestID string) string {
 	t.Helper()
-	if !result.Activation.Activated || result.Materialization.ForkRunID == "" {
-		t.Fatalf("fork did not acknowledge exact child activation: %+v", result)
+	if result.Materialization.ForkRunID == "" || result.SelectedContractExecutionAdmission == nil || result.ForkLocalRuntimeContainer == nil {
+		t.Fatalf("selected input lacks its exact native child and execution admission: %+v", result)
 	}
 	id := activityidentity.ForkLineageEventID(result.Materialization.ForkRunID, sourceRequestID)
 	wait, cancel := context.WithTimeout(ctx, 30*time.Second)
@@ -501,9 +512,21 @@ func selectedContractActivityDeclaredSourceWithResultConsumer(t *testing.T, serv
 	t.Helper()
 	root := t.TempDir()
 	files := map[string]string{
-		"schema.yaml":   "name: activity-fork-proof\nstages:\n  pending: {}\n",
+		"schema.yaml": `name: activity-fork-proof
+stages: {pending: {}}
+pins:
+  inputs: [review.start, review.requested, review.retry, review.close]
+connect:
+  - {event: review.start, from: ., to: flow_a}
+  - {event: review.requested, from: ., to: flow_a}
+  - {event: review.retry, from: ., to: flow_a}
+  - {event: review.close, from: ., to: flow_a}
+`,
 		"entities.yaml": "root: {}\n",
+		"events.yaml":   "review.requested:\n  revision_id: text\nreview.start:\nreview.retry:\n  revision_id: text\nreview.close:\n  revision_id: text\n",
 		"flow_a/schema.yaml": `name: flow_a
+pins:
+  inputs: [review.start, review.requested, review.retry, review.close]
 stages:
   pending: {}
   review: {}
@@ -515,8 +538,7 @@ loops:
     max_attempts: 3
     escape: {advances_to: exhausted}
 `,
-		"flow_a/entities.yaml": "test_entity:\n  name: text\n",
-		"flow_a/events.yaml":   "review.requested:\n  revision_id: text\nreview.start:\nreview.retry:\n  revision_id: text\nreview.close:\n  revision_id: text\n",
+		"flow_a/entities.yaml": "test_entity:\n  name: {type: text, _unused_reason: retained source identity witness}\n",
 		"flow_a/nodes.yaml": `test-node:
   execution_type: system_node
   subscribes_to: [review.start, review.requested, review.retry, review.close]
@@ -541,7 +563,6 @@ loops:
 `, method, serverURL),
 	}
 	if consumeResult {
-		files["flow_a/schema.yaml"] = strings.Replace(files["flow_a/schema.yaml"], "  pending: {}\n  review: {}", "  review: {}\n  pending: {}", 1)
 		files["flow_a/nodes.yaml"] = strings.Replace(files["flow_a/nodes.yaml"], "review.retry, review.close]", "review.retry, review.close, connector.succeeded]", 1) + `
     connector.succeeded:
       loop: {repeat: revision, from: review}
@@ -637,11 +658,11 @@ func seedSelectedContractActivityLoop(t *testing.T, ctx context.Context, fixture
 	state := pipeline.WorkflowEngineStateRecord{
 		Identity: owner, EntityID: entityID, ParentInstance: instance.ParentFlowInstance, InstanceKey: instance.InstanceKey,
 		WorkflowName: instance.WorkflowName, WorkflowVersion: instance.WorkflowVersion, Mode: instance.Mode, Status: instance.Status,
-		CurrentState: instance.CurrentState, StageDefined: instance.StageDefined, EntityType: instance.EntityType, Slug: instance.Slug, Name: instance.Name,
+		CurrentState: activation.CurrentStage, StageDefined: true, EntityType: instance.EntityType, Slug: instance.Slug, Name: instance.Name,
 		Fields: before.State.Fields, Bookkeeping: before.Lifecycle.State.Bookkeeping, Gates: before.Lifecycle.State.Gates,
 		Accumulator: json.RawMessage(selectedContractActivityJSON(t, buckets)), Config: before.Lifecycle.Config,
 		InitialFields:  json.RawMessage(selectedContractActivityJSON(t, instance.InitialFieldValues)),
-		EnteredStageAt: instance.EnteredStageAt, CreatedAt: instance.CreatedAt, UpdatedAt: at,
+		EnteredStageAt: at, CreatedAt: instance.CreatedAt, UpdatedAt: at,
 		ExpectedState: instance.CurrentState, ExpectedRevision: instance.Revision, Transition: pipeline.WorkflowEngineStateTransitionUpdateStateAndCompanion,
 	}
 	committed, err := selected.CommitWorkflowEngineMutation(ctx, pipeline.WorkflowEngineMutationCommand{State: state})
@@ -649,7 +670,7 @@ func seedSelectedContractActivityLoop(t *testing.T, ctx context.Context, fixture
 		t.Fatalf("commit atomic source loop projection/history: committed=%v err=%v", committed.Committed, err)
 	}
 	after, found, err := selected.LoadWorkflowInstance(ctx, owner)
-	if err != nil || !found || after.Revision != instance.Revision+1 || selectedContractActivityJSON(t, after.StateBuckets) != selectedContractActivityJSON(t, buckets) {
+	if err != nil || !found || after.Revision != instance.Revision+1 || !after.StageDefined || after.CurrentState != activation.CurrentStage || selectedContractActivityJSON(t, after.StateBuckets) != selectedContractActivityJSON(t, buckets) {
 		t.Fatalf("source loop exact header/readback: found=%v instance=%+v err=%v", found, after, err)
 	}
 }

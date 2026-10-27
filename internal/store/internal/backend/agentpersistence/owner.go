@@ -26,7 +26,7 @@ type LifecycleDiagnosticEventOwner interface {
 }
 
 type LifecycleDiagnosticOriginValidator interface {
-	ValidateLifecycleDiagnosticOriginTx(context.Context, *sql.Tx, runtimemanager.AgentLifecycleTransitionResult, bool) (string, error)
+	ValidateLifecycleDiagnosticOriginTx(context.Context, *sql.Tx, runtimemanager.AgentLifecycleTransitionResult, bool, string) (string, error)
 }
 
 type DirectivePipelineOwner interface {

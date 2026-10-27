@@ -105,7 +105,7 @@ func (m *RuntimeContextManager) installResetRuntimeContexts(publish, recovered b
 		}
 	}
 	for _, candidate := range contexts {
-		if err := prepared.register(candidate, false); err != nil {
+		if err := prepared.register(candidate, false, false); err != nil {
 			// Registration owns only newly prepared standing occurrences here;
 			// runtime disposal belongs to the reset supervisor on any failure.
 			discardPrepared()

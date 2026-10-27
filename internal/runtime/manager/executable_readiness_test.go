@@ -741,7 +741,7 @@ func TestDynamicReadinessRejectsRegisteredStoppedAsProcessReady(t *testing.T) {
 	if err := restarted.lifecycle.registerExecutionWithTopology(ctx, rec, false, agent, admission, rec.Topology, nil); err != nil {
 		t.Fatalf("seed registered/stopped projection: %v", err)
 	}
-	if err := restarted.verifyDynamicFlowAgents(ctx, testActivationFlowIdentity(req), persisted, rec.Topology); err == nil || !strings.Contains(err.Error(), "agent_execution_not_ready") {
+	if err := restarted.verifyDynamicFlowAgents(ctx, testActivationFlowIdentity(req), persisted, rec.Topology, false); err == nil || !strings.Contains(err.Error(), "agent_execution_not_ready") {
 		t.Fatalf("partial readiness error = %v", err)
 	}
 	if flowActivationAttemptReadyForTest(restarted, ctx, req) {

@@ -53,11 +53,11 @@ func issue642StagedTimerCorruption(t *testing.T, backend string, fault storetest
 	})
 	marker := issue642TimerContinuationMarker(t, rt, seed.RunID)
 	rt.waitEntityStage(t, seed.RunID, seed.RunID, "checked")
-	issue2564H2CompletionWaitRun(t, rt, seed.RunID)
+	pauseIssue2564SettledSource(t, rt, seed.RunID)
 	rt.waitDeliveries(t, seed.RunID)
 	issue2564H2CompletionWaitReceipt(t, rt, seed.RunID, seed.EventID)
 	plan, source := issue642TimerContinuationPlan(t, reader, seed.RunID, seed.EventID, marker.EventID)
-	staged := issue642MaterializePausedTimer(t, ctx, owners, rt, reader, plan, source)
+	staged, _ := issue642MaterializePausedTimer(t, ctx, owners, rt, reader, plan, source)
 	_, timer := issue642RequirePausedStagedTimer(t, rt, reader, staged, source)
 	if err := storetest.CorruptStagedWorkflowTimer(ctx, rt.selected, staged.ForkRunID, timer.Ref.ActivationID, fault); err != nil {
 		t.Fatalf("install exact hostile staged timer: %v", err)

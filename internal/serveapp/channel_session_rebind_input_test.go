@@ -26,6 +26,7 @@ func TestServedWhatsAppIdentityRebindRejectsPendingInputBothStores(t *testing.T)
 			endpoint := process.endpoint(t) + "/v1/rpc"
 			peer.onACKTimeout = func(id string) { logServedNativeWait(t, endpoint, peer, "rebind_input_ack:"+id) }
 			original := requireServedNativeProcessPairing(t, endpoint, peer)
+			pairingRunID := requireServedNativePairingRun(t, endpoint, original.Operation.Coordinate.BundleHash)
 			originalConnection := readServedNativeConnectionID(t, backend, location, original.Operation.OperationID)
 			reader, err := storetest.OpenChannelObservation(backend, location)
 			if err != nil {
@@ -37,7 +38,7 @@ func TestServedWhatsAppIdentityRebindRejectsPendingInputBothStores(t *testing.T)
 				}
 			})
 			seed := requireServedEventPublishRPCResult(t, endpoint, map[string]any{
-				"event_name": "work.requested", "bundle_hash": original.Operation.Coordinate.BundleHash,
+				"event_name": "work.requested", "bundle_hash": original.Operation.Coordinate.BundleHash, "run_id": pairingRunID,
 				"payload": map[string]any{"detail": "Rebind pending native input"}, "idempotency_key": "native-rebind-input"})
 			cardID := waitServedNativePendingCard(t, endpoint)
 			card := awaitServedNativeInputMessage(t, peer, "\nReference: "+cardID+"\n")

@@ -190,6 +190,9 @@ func TestChannelLearnedObjectPublicJourney(t *testing.T) {
 				if err := db.QueryRow(`SELECT COUNT(*) FROM events WHERE run_id=$1 AND event_name='mailbox.card_decided'`, seed.RunID).Scan(&decisions); err != nil || decisions != 1 {
 					t.Fatalf("object duplicate/stale controls changed decisions: %d %v", decisions, err)
 				}
+				requireServedOKJSONRPC(t, h.rpcEndpoint(), "run.pause", map[string]any{
+					"run_id": seed.RunID, "idempotency_key": "object-card-pause",
+				})
 				proveObjectChannelRecovery(t, h, db, provider, scope, command, identity.SourceArtifacts[0].BundleHash, postAction)
 				proveObjectChannelRebindRetirement(t, h, db, provider, scope, command, begun.Operation.OperationID)
 				provider.mu.Lock()

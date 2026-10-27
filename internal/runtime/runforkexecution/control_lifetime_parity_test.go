@@ -7,6 +7,7 @@ import (
 	"os"
 	"path/filepath"
 	"strings"
+	"sync"
 	"testing"
 	"time"
 
@@ -16,6 +17,7 @@ import (
 	"github.com/division-sh/swarm/internal/runtime/runcontrol"
 	"github.com/division-sh/swarm/internal/runtime/runfork"
 	"github.com/division-sh/swarm/internal/runtime/runforkadmission"
+	"github.com/division-sh/swarm/internal/runtime/runlifecycle"
 	"github.com/division-sh/swarm/internal/runtime/startupownership"
 	"github.com/division-sh/swarm/internal/store/storetest"
 	"github.com/division-sh/swarm/internal/testutil"
@@ -150,7 +152,7 @@ func testSelectedForkControlLifetime(t *testing.T, outcomeOperation string) {
 					t.Fatal(err)
 				}
 				sourceRun, eventID := uuid.NewString(), uuid.NewString()
-				seedSelectedOperationSource(t, ctx, backend, db, selected, loaded, sourceRun, eventID)
+				seedSelectedOperationSource(t, ctx, selected, loaded, sourceRun, eventID, false)
 				request := SelectedContractExecutionRequest{SourceRunID: sourceRun, At: eventID, AllowSourceFreeze: true, Owner: owner, SourceLoader: loader,
 					ContractSelection: runforkadmission.SelectedContractSelection(loaded.Source),
 					AgentRuntime:      SelectedContractAgentRuntimeOptions{ExecutionPosture: executionposture.MockOnly, ProcessCapability: capability}}
@@ -159,13 +161,38 @@ func testSelectedForkControlLifetime(t *testing.T, outcomeOperation string) {
 					owner.ports.runtimeExecution = selectedActivitySuccessorClaim{owner.ports.runtimeExecution, claimed}
 					request.Owner = owner
 				}
-				var forkRun string
-				if phase != "executing" && phase != "executing_retirement" {
-					result, err := ExecuteSelectedContractRunFork(ctx, request)
-					if err != nil {
+				entered, cancelled, release := make(chan context.Context, 1), make(chan struct{}), make(chan struct{})
+				releasePublication := sync.OnceFunc(func() { close(release) })
+				defer releasePublication()
+				if phase == "executing" || phase == "executing_retirement" {
+					owner.ports.replay = selectedOperationPublicationProbe{SelectedContractReplayPersistence: owner.ports.replay, after: func(ctx context.Context) {
+						entered <- ctx
+						<-ctx.Done()
+						close(cancelled)
+						<-release
+					}}
+					request.Owner = owner
+				}
+				// These are selected-phase stop/recovery cuts, before any public
+				// live ACK. The existing component owner retains the real work.
+				attachment := q1StageBranchPointComponent(t, ctx, request)
+				if phase == "executing" || phase == "executing_retirement" {
+					if _, err := owner.ports.busDurable.RunLifecycle.TransitionActiveRun(attachment.container.attachment.ctx, runlifecycle.ActiveTransitionRequest{
+						RunID: attachment.materialized.ForkRunID, State: runlifecycle.StateRunning,
+					}); err != nil {
 						t.Fatal(err)
 					}
-					forkRun = result.Materialization.ForkRunID
+					if err := owner.retainPrepared(attachment.prepared); err != nil {
+						t.Fatal(err)
+					}
+					if err := attachment.container.Serve(); err != nil {
+						t.Fatal(err)
+					}
+				} else {
+					attachment.serveSelectedControls(t)
+				}
+				forkRun := attachment.materialized.ForkRunID
+				if phase != "executing" && phase != "executing_retirement" {
 					wait, cancel := context.WithTimeout(ctx, selectedForkCapabilityProofQuiescenceTimeout)
 					observationTick := time.NewTicker(10 * time.Millisecond)
 					for {
@@ -208,7 +235,7 @@ func testSelectedForkControlLifetime(t *testing.T, outcomeOperation string) {
 						default:
 							t.Fatal("control-only predecessor lacks its actual execution claim")
 						}
-						closed, err := owner.ports.runtimeExecution.CloseRunForkSelectedContractRuntimeExecution(ctx, result.ForkLocalRuntimeContainer.RuntimeExecutionID)
+						closed, err := owner.ports.runtimeExecution.CloseRunForkSelectedContractRuntimeExecution(ctx, attachment.container.Proof().RuntimeExecutionID)
 						if err != nil || !closed {
 							t.Fatalf("close the joined control-only predecessor: acknowledged=%v err=%v", closed, err)
 						}
@@ -301,30 +328,13 @@ func testSelectedForkControlLifetime(t *testing.T, outcomeOperation string) {
 						t.Fatalf("stop lost independent cleanup failure: %+v", resultStop.Recovery)
 					}
 				} else {
-					entered, cancelled, release := make(chan context.Context, 1), make(chan struct{}), make(chan struct{})
-					owner.ports.replay = selectedOperationPublicationProbe{SelectedContractReplayPersistence: owner.ports.replay, after: func(ctx context.Context) {
-						entered <- ctx
-						<-ctx.Done()
-						close(cancelled)
-						<-release
-					}}
-					driver, err := process.Begin(ctx)
-					if err != nil {
-						t.Fatal(err)
-					}
-					finished := make(chan error, 1)
-					go func() {
-						_, err := ExecuteSelectedContractRunFork(ctx, request)
-						finished <- errors.Join(err, driver.Done())
-					}()
-					if err := <-finished; err != nil {
-						t.Fatalf("activation ACK failed before retained publication: %v", err)
-					}
 					var publication context.Context
 					select {
 					case publication = <-entered:
 						occurrence, _ := worklifetime.OccurrenceFromContext(publication)
-						forkRun = occurrence.(*worklifetime.SelectedForkOccurrence).Identity().RunID
+						if occurrence.(*worklifetime.SelectedForkOccurrence).Identity().RunID != forkRun {
+							t.Fatal("selected publication borrowed another child occurrence")
+						}
 					case <-ctx.Done():
 						t.Fatal(context.Cause(ctx))
 					}
@@ -343,31 +353,31 @@ func testSelectedForkControlLifetime(t *testing.T, outcomeOperation string) {
 					select {
 					case <-cancelled:
 					case err := <-stopped:
-						close(release)
+						releasePublication()
 						t.Fatalf("stop did not fence selected execution: %v", err)
 					}
 					select {
 					case err := <-stopped:
-						close(release)
+						releasePublication()
 						t.Fatalf("stop skipped accepted execution join: %v", err)
 					default:
 					}
 					var retired chan error
 					if phase == "executing_retirement" {
 						if err := owner.FenceSelectedContexts(); err != nil {
-							close(release)
+							releasePublication()
 							t.Fatal(err)
 						}
 						retired = make(chan error, 1)
 						go func() { retired <- owner.RetireSelectedContexts(context.Background()) }()
 						select {
 						case err := <-retired:
-							close(release)
+							releasePublication()
 							t.Fatalf("retirement skipped accepted execution/control disposition: %v", err)
 						default:
 						}
 					}
-					close(release)
+					releasePublication()
 					if publication.Err() == nil {
 						t.Fatal("stopped retained execution was not cancelled")
 					}

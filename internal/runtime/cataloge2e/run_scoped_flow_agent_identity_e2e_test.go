@@ -180,7 +180,7 @@ func TestRunScopedSelectedForkReconstructsFlowAndAgentOnBothStores(t *testing.T)
 	repoRoot := repoRootFromCatalogE2E(t)
 	for _, backend := range []catalogRuntimeBackend{catalogBackendSQLite, catalogBackendPostgres} {
 		t.Run(string(backend), func(t *testing.T) {
-			h := newRuntimeHarnessForBackend(t, fixtureRoot, backend, true)
+			h := newLiveForkCatalogHarness(t, fixtureRoot, backend)
 			selected := runScopedCatalogStore(t, h)
 			flowPath := "worker-flow/worker-001"
 			sourceRunID := catalogRuntimeRunID
@@ -268,18 +268,23 @@ func TestRunScopedSelectedForkReconstructsFlowAndAgentOnBothStores(t *testing.T)
 			cfg.LLM.Backend = "anthropic"
 			agentRuntime := selectedContractAgentRuntimeOptionsForCatalogHarness(h, cfg)
 			executionCtx := worklifetime.WithOccurrence(catalogRunContext(h, sourceRunID), h.rt.WorkOccurrence())
+			var operationStore runtimerunforkexecution.SelectedContractForkLifecycle = h.pg
+			if h.sqlite != nil {
+				operationStore = h.sqlite
+			}
+			operation := catalogStagedForkOperation(t, executionCtx, operationStore, selection, sourceRunID, sourceEvent.ID())
 			materialization := materializeCatalogSelectedForkForBootResume(
-				t, executionCtx, selected, selectedContractExecutionOwnerForCatalogHarness(t, h), loader, selection, sourcePlan, agentRuntime, sourceEvent.ID(), flowPath, flowEntityID,
+				t, executionCtx, selected, selectedContractExecutionOwnerForCatalogHarness(t, h), loader, selection, sourcePlan, agentRuntime, sourceEvent.ID(), flowPath, flowEntityID, operation,
 			)
-			result, err := runtimerunforkexecution.ActivateSelectedContractRunFork(executionCtx, runtimerunforkexecution.SelectedContractActivationGateRequest{
-				ForkRunID: materialization.ForkRunID, AllowSourceFreeze: true, Store: selected,
-				ExecutionOwner: selectedContractExecutionOwnerForCatalogHarness(t, h), SourceLoader: loader,
+			result, err := executeCatalogLiveFork(t, h, executionCtx, runtimerunforkexecution.SelectedContractExecutionRequest{
+				SourceRunID: sourceRunID, At: sourceEvent.ID(), AllowSourceFreeze: true, ForkOperation: &operation,
+				Owner: selectedContractExecutionOwnerForCatalogHarness(t, h), SourceLoader: loader, ContractSelection: selection,
 				AgentRuntime: agentRuntime,
 			})
 			if err != nil {
 				t.Fatalf("resume materialized selected-contract flow fork: %v; pending=%#v", err, sourcePlan.PendingWork)
 			}
-			if result.Owner != runfork.RunForkSelectedContractExecutionActivationGateOwner || !result.Activated || result.ExecutedEventCount != 0 {
+			if !result.Activation.Activated || result.Activation.ForkRunID != materialization.ForkRunID || result.ExecutedEventCount != 1 {
 				t.Fatalf("selected-contract flow fork result = %#v", result)
 			}
 			forkRunID := materialization.ForkRunID
@@ -316,10 +321,11 @@ func materializeCatalogSelectedForkForBootResume(
 	plan runfork.RunForkPlan,
 	agentRuntime runtimerunforkexecution.SelectedContractAgentRuntimeOptions,
 	sourceEventID, flowPath, entityID string,
+	operation runfork.ForkOperationRequest,
 ) runfork.RunForkMaterialization {
 	t.Helper()
 	prepared, err := owner.Prepare(ctx, runtimerunforkexecution.SelectedContractExecutionRequest{
-		SourceRunID: plan.SourceRunID, At: sourceEventID, ContractSelection: selection,
+		SourceRunID: plan.SourceRunID, At: sourceEventID, ContractSelection: selection, ForkOperation: &operation,
 		SourceLoader: loader, AgentRuntime: agentRuntime,
 	})
 	if err != nil {

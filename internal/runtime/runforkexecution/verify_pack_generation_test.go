@@ -89,13 +89,14 @@ func TestPublicVerifyRetainedForkUsesConfiguredPackGeneration(t *testing.T) {
 	if bindErr != nil {
 		t.Fatal(bindErr)
 	}
-	seedSelectedOperationSource(t, ctx, "sqlite", db, s, loaded, sourceID, eventID)
+	seedSelectedOperationSource(t, ctx, s, loaded, sourceID, eventID, false)
 	owner := selectedContractSQLiteExecutionOwnerForTest(t, s)
-	fork, err := ExecuteSelectedContractRunFork(ctx, SelectedContractExecutionRequest{
+	fork, err := q1ExecuteSelectedPhaseComponent(t, ctx, SelectedContractExecutionRequest{
 		SourceRunID: sourceID, At: eventID, AllowSourceFreeze: true, Owner: owner, SourceLoader: loader,
 		ContractSelection: runforkadmission.SelectedContractSelection(loaded.Source),
 		AgentRuntime:      SelectedContractAgentRuntimeOptions{ExecutionPosture: executionposture.MockOnly, ProcessCapability: capability},
 	})
+
 	if err != nil {
 		t.Fatal(err)
 	}

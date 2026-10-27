@@ -261,13 +261,13 @@ func classifyForkInsertWitnessOracleLiterals(path string, file *ast.File) map[to
 		hashes[name] = fmt.Sprintf("%x", sha256.Sum256(out.Bytes()))
 	}
 	const prefix = "insert into runs ("
-	const columns = "insert into runs ( run_id, status, origin_kind, forked_from_run_id, forked_from_point_kind, forked_from_revision, forked_from_event_id, event_count, started_at, bundle_hash ) values ("
+	const columns = "insert into runs ( run_id, status, origin_kind, forked_from_run_id, forked_from_point_kind, forked_from_revision, forked_from_event_id, event_count, started_at, bundle_hash, flow_path ) select "
 	for _, site := range []struct {
 		name, digest string
 		count        int
 	}{
-		{"*stopCommitForkWitness.decode", "1b09c8ea59a5c256f8a550d253cf64afd1d5adc2b70e83a1ab4fa766ab3337af", 2},
-		{"TestStopCommitForkWitnessObservesOnlySuccessfulExactTransaction", "a92a0fd285117a8a6caa167a4e911d8fd4a2464e079db427c83b095b3168a13c", 1},
+		{"*stopCommitForkWitness.decode", "faca6d87889b0bcdfabb837a090e5ab135cd8d407df96e752cef82aa1b0b2b3f", 2},
+		{"TestStopCommitForkWitnessObservesOnlySuccessfulExactTransaction", "714071c69602b6044fbcbf53fc55e49fd8b270fd413ae31c51813617a8f8a6cf", 1},
 	} {
 		if hashes[site.name] != site.digest || site.count == 1 && hashes["*stopCommitWitnessNativeConn.ExecContext"] != "62a483f2a9969561bccc8979c899824125b0846d218bd8b822f13731bc23f998" {
 			continue
@@ -279,7 +279,7 @@ func classifyForkInsertWitnessOracleLiterals(path string, file *ast.File) map[to
 				return true
 			}
 			value, err := strconv.Unquote(literal.Value)
-			if err == nil && (site.count == 2 && (value == prefix || value == columns) || site.count == 1 && compactSQLForLifecycleGuard(value) == "INSERT INTO runs ( run_id, status, origin_kind, forked_from_run_id, forked_from_point_kind, forked_from_revision, forked_from_event_id, event_count, started_at, bundle_hash ) VALUES (?, ?, ?, ?, ?, ?, NULLIF(?, ''), 0, ?, ?)") {
+			if err == nil && (site.count == 2 && (value == prefix || value == columns) || site.count == 1 && compactSQLForLifecycleGuard(value) == "INSERT INTO runs ( run_id, status, origin_kind, forked_from_run_id, forked_from_point_kind, forked_from_revision, forked_from_event_id, event_count, started_at, bundle_hash, flow_path ) SELECT ?, ?, ?, ?, ?, ?, NULLIF(?, ''), 0, ?, ?, flow_path FROM runs WHERE run_id=?") {
 				positions = append(positions, literal.Pos())
 			}
 			return true
@@ -374,8 +374,8 @@ func classifyCounterOracleRunLiterals(path string, file *ast.File) map[token.Pos
 			mockOracles[`UPDATE runs SET event_count = event_count \+`] = true
 		}
 		if path == "internal/store/internal/backend/runlifecycle/run_admission_test.go" && fn.Name.Name == "TestRunAdmissionCanonicalSourceRevisionReloads" {
-			mockOracles["UPDATE runs SET bundle_hash = $2 WHERE run_id = $1::uuid AND status IN ('running', 'paused')"] = true
-			mockOracles["UPDATE runs SET bundle_hash = ? WHERE run_id = ? AND status IN ('running', 'paused')"] = true
+			mockOracles["UPDATE runs SET bundle_hash = $2 WHERE run_id = $1::uuid AND status IN ('running', 'paused', 'live')"] = true
+			mockOracles["UPDATE runs SET bundle_hash = ? WHERE run_id = ? AND status IN ('running', 'paused', 'live')"] = true
 		}
 		if len(mockOracles) != 0 {
 			ast.Inspect(fn, func(node ast.Node) bool {
@@ -521,7 +521,7 @@ func classifyBackendMinimalRunLiterals(path string, file *ast.File) (map[token.P
 		"internal/store/internal/backend/pipelinepersistence/fan_out_selected_successor_test.go": {
 			"CREATE TABLE runs (run_id TEXT PRIMARY KEY, bundle_hash TEXT NOT NULL, status TEXT NOT NULL)", []string{"INSERT INTO runs VALUES ($1,$2,'running')"}},
 		"internal/store/internal/backend/runforkpersistence/deployment_revision_point_test.go": {
-			"CREATE TABLE runs (run_id TEXT PRIMARY KEY, origin_kind TEXT NOT NULL)", []string{"INSERT INTO runs VALUES($1,'deployment')"}},
+			"CREATE TABLE runs (run_id TEXT PRIMARY KEY, origin_kind TEXT NOT NULL)", []string{"INSERT INTO runs VALUES($1,'deployment')", "INSERT INTO runs VALUES($1,$2)"}},
 		"internal/store/internal/backend/runforkpersistence/historical_snapshot_race_test.go": {
 			"CREATE TABLE runs (run_id TEXT PRIMARY KEY, origin_kind TEXT NOT NULL)", []string{"INSERT INTO runs VALUES($1,'event')"}},
 		"internal/store/internal/backend/runforkpersistence/lifecycle_diagnostic_point_test.go": {
@@ -887,7 +887,10 @@ func allowedSemanticRunFixtureLiteral(relative string, value string) bool {
 	case "internal/store/internal/schemastore/fork_point_schema_test.go":
 		// This test exercises physical CHECK and FK constraints on the real schema.
 		return compact == "INSERT INTO runs (run_id,bundle_hash,origin_kind) VALUES ($1,$2,'scenario_setup')" ||
-			compact == "INSERT INTO runs (run_id,bundle_hash,origin_kind,forked_from_run_id,forked_from_point_kind,forked_from_revision,forked_from_event_id) VALUES ($1,$2,'fork_materialization',$3,$4,$5,$6)"
+			compact == "INSERT INTO runs (run_id,bundle_hash,origin_kind,forked_from_run_id,forked_from_point_kind,forked_from_revision,forked_from_event_id) VALUES ($1,$2,'fork_materialization',$3,$4,$5,$6)" ||
+			compact == "INSERT INTO runs (run_id,bundle_hash,origin_kind,flow_path,status) VALUES ($1,$2,'deployment',$3,$4)" ||
+			compact == "UPDATE runs SET status='live' WHERE run_id=$1" ||
+			compact == "UPDATE runs SET status='paused' WHERE run_id=$1"
 	}
 	return false
 }

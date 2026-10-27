@@ -174,7 +174,7 @@ func validateWorkspaceBaseSetup(t *testing.T, raw []byte) {
 		"credential artifact":     {"path: ${{ runner.temp }}/workspace-base-setup.json", "path: ${{ runner.temp }}"},
 		"proof artifact":          {"name: workspace-base-setup-${{ github.sha }}", "name: ci-tier-proof"},
 		"write on normal build":   {"packages: read", "packages: write"},
-		"inherited normal token":  {"    timeout-minutes: 19\n    permissions:\n      contents: read\n", "    timeout-minutes: 19\n"},
+		"inherited normal token":  {"    timeout-minutes: 28\n    permissions:\n      contents: read\n", "    timeout-minutes: 28\n"},
 		"summary still qualifies": {"if: always() && (github.event_name != 'workflow_dispatch' || inputs.workspace_base_setup != true)", "if: always()"},
 	} {
 		t.Run("setup/"+name, func(t *testing.T) {

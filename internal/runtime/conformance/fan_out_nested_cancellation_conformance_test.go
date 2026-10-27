@@ -202,6 +202,13 @@ func TestIssue2394NestedHeldChildCancellationBothStores(t *testing.T) {
 				time.Sleep(10 * time.Millisecond)
 			}
 			assertNestedPipelineReceipt(t, ctx, db, notifyID, true)
+			controlCtx, err := rt.lifecycle.mutationContext(ctx)
+			if err != nil {
+				t.Fatal(err)
+			}
+			if _, err := controller.Pause(controlCtx, runcontrol.TransitionRequest{RunID: runID, Reason: "nested-held-child-proof", ControlledBy: "conformance"}); err != nil {
+				t.Fatal(err)
+			}
 			// The second child has not claimed an ordinal. Fence the occurrence,
 			// join that paused turn, then stop without preempting the committed group.
 			rt.workOwner.Retire()
@@ -213,7 +220,7 @@ func TestIssue2394NestedHeldChildCancellationBothStores(t *testing.T) {
 				t.Fatal(err)
 			}
 			handlers.assertOnlyHeld(t, held.EventID, secondHeld.EventID)
-			stopCtx, cancelStop := context.WithTimeout(ctx, 5*time.Second)
+			stopCtx, cancelStop := context.WithTimeout(controlCtx, 5*time.Second)
 			defer cancelStop()
 			stopCtx, err = rt.bus.AdmitSourceArtifactFact(stopCtx)
 			if err != nil {

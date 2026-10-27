@@ -487,11 +487,16 @@ func runForkReceiverOwnershipJourney(t *testing.T, backend servedparity.Backend,
 		}
 	}
 	publication := newExactOriginPublicationProbe(t)
-	rt := startServedTestSetupEntitiesProofRuntimeFromSource(t, backend, root)
+	rt := startServedLiveFlowProofRuntimeFromSource(t, backend, root)
 	seed := requireServedEventPublishRPCResult(t, rt.Endpoint, map[string]any{
 		"event_name": seedName, "bundle_hash": rt.BundleHash,
 		"payload": map[string]any{"token": "receiver-proof"}, "idempotency_key": "ownership-seed",
 	})
+	var rootEventOwner any = rt.SQLite
+	if rt.Postgres != nil {
+		rootEventOwner = rt.Postgres
+	}
+	requireServedLiveRootMode(t, rt.Runtime.ExecutionPosture, storetest.LoadCanonicalEventRecord(t, t.Context(), rootEventOwner, seed.EventID), seed.RunID)
 	waitServedRunDeliveryQuiescence(t, rt.ReadRunDeliveries, seed.RunID)
 	waitForkReceiverSourceCompletion(t, rt, seed.RunID)
 	seedRows := readForkReceiverRows(t, rt, seed.RunID)
@@ -626,6 +631,7 @@ func runForkReceiverOwnershipJourney(t *testing.T, backend servedparity.Backend,
 		}
 	}
 	t.Logf("source success reached: run=%s frontier=%s receivers=%d", seed.RunID, frontier, len(receivers))
+	requireServedOKJSONRPC(t, rt.Endpoint, "run.pause", map[string]any{"run_id": seed.RunID, "idempotency_key": "ownership-source-pause"})
 	if option.nested {
 		siblingSeed := requireServedEventPublishRPCResult(t, rt.Endpoint, map[string]any{"event_name": seedName, "bundle_hash": rt.BundleHash,
 			"payload": map[string]any{"token": "receiver-proof"}, "idempotency_key": "ownership-sibling-seed"})
@@ -653,6 +659,7 @@ func runForkReceiverOwnershipJourney(t *testing.T, backend servedparity.Backend,
 		if err := waitExactOriginPublications(t.Context(), publication, siblingSeed.EventID, siblingRequest.EventID); err != nil {
 			t.Fatal(err)
 		}
+		requireServedOKJSONRPC(t, rt.Endpoint, "run.pause", map[string]any{"run_id": siblingSeed.RunID, "idempotency_key": "ownership-sibling-pause"})
 		siblingDomain, siblingCompanions := readServedForkRecipientSourceDomain(t, rt, siblingSeed.RunID), readForkReceiverCompanions(t, rt, siblingSeed.RunID)
 		siblingNotices := readForkReceiverNoticeDomain(t, rt, siblingSeed.RunID)
 		defer func() {
@@ -722,7 +729,7 @@ func runForkReceiverOwnershipJourney(t *testing.T, backend servedparity.Backend,
 	}
 	var fork, replay apiv1.RunForkExecutionResult
 	requireServedJSONRPCResult(t, rt.Endpoint, "run.fork", params, &fork)
-	if fork.SourceRunID != seed.RunID || fork.ForkEventID != frontier || fork.ForkRunID == "" || fork.ForkRunID == seed.RunID || fork.ExecutedEventCount != 0 {
+	if fork.SourceRunID != seed.RunID || fork.ForkEventID != frontier || fork.ForkRunID == "" || fork.ForkRunID == seed.RunID || fork.ExecutedEventCount != 1 {
 		t.Fatalf("fork identity: %+v", fork)
 	}
 	childEvent := waitServedSelectedForkFrontier(t, rt.ReceiverStateReader, rt.ReadRunDeliveries, fork.ForkRunID, frontier)
@@ -801,7 +808,7 @@ func TestSelectedForkReceiverAcquisitionCapabilityRefusalBothStores(t *testing.T
 			publication := newExactOriginPublicationProbe(t)
 			completion := installReceiverCompletionBoundary(t)
 			root := canonicalrouting.CopyTemplateCreateResolution(t, canonicalrouting.TemplateCreateResolutionOptions{Mint: canonicalrouting.CreateMintUUID})
-			rt := startServedTestSetupEntitiesProofRuntimeFromSource(t, backend, root)
+			rt := startServedLiveFlowProofRuntimeFromSource(t, backend, root)
 			seed := requireServedEventPublishRPCResult(t, rt.Endpoint, map[string]any{"event_name": "validation.triggered", "bundle_hash": rt.BundleHash,
 				"payload": map[string]any{"candidate": "fork-capability"}, "idempotency_key": "capability-source"})
 			waitServedRunDeliveryQuiescence(t, rt.ReadRunDeliveries, seed.RunID)
@@ -924,7 +931,7 @@ func TestServedForkSourceCompletionWithoutForkBothStores(t *testing.T) {
 	for _, backend := range []servedparity.Backend{servedparity.BackendDefaultSQLite, servedparity.BackendExplicitPostgres} {
 		t.Run(string(backend), func(t *testing.T) {
 			publication := newExactOriginPublicationProbe(t)
-			rt := startServedTestSetupEntitiesProofRuntimeFromSource(t, backend, canonicalrouting.CopyForkDeliveryRouteEvidence(t))
+			rt := startServedLiveFlowProofRuntimeFromSource(t, backend, canonicalrouting.CopyForkDeliveryRouteEvidence(t))
 			seed := requireServedEventPublishRPCResult(t, rt.Endpoint, map[string]any{"event_name": "parent.seeded", "bundle_hash": rt.BundleHash,
 				"payload": map[string]any{"work_id": "no-fork-completion"}, "idempotency_key": "no-fork-seed"})
 			waitServedRunDeliveryQuiescence(t, rt.ReadRunDeliveries, seed.RunID)
@@ -1125,7 +1132,7 @@ func TestSelectedForkIndependentReceiverBusinessMutationBothStores(t *testing.T)
 		for _, entityless := range []bool{false, true} {
 			t.Run(fmt.Sprintf("%s/entityless_producer=%t", backend, entityless), func(t *testing.T) {
 				publication := newExactOriginPublicationProbe(t)
-				rt := startServedTestSetupEntitiesProofRuntimeFromSource(t, backend, canonicalrouting.CopyForkReceiverBusinessMutationOwnership(t, entityless))
+				rt := startServedLiveFlowProofRuntimeFromSource(t, backend, canonicalrouting.CopyForkReceiverBusinessMutationOwnership(t, entityless))
 				seed := requireServedEventPublishRPCResult(t, rt.Endpoint, map[string]any{"event_name": "start.seeded", "bundle_hash": rt.BundleHash, "payload": map[string]any{"token": "receiver-proof"}, "idempotency_key": "business-seed"})
 				waitServedRunDeliveryQuiescence(t, rt.ReadRunDeliveries, seed.RunID)
 				waitForkReceiverSourceCompletion(t, rt, seed.RunID)
@@ -1164,6 +1171,7 @@ func TestSelectedForkIndependentReceiverBusinessMutationBothStores(t *testing.T)
 				if err := waitExactOriginPublications(t.Context(), publication, seed.EventID, started.EventID); err != nil {
 					t.Fatal(err)
 				}
+				requireServedOKJSONRPC(t, rt.Endpoint, "run.pause", map[string]any{"run_id": seed.RunID, "idempotency_key": "business-source-pause"})
 				before, companions := readServedForkRecipientSourceDomain(t, rt, seed.RunID), readForkReceiverCompanions(t, rt, seed.RunID)
 				defer func() {
 					if !reflect.DeepEqual(before, readServedForkRecipientSourceDomain(t, rt, seed.RunID)) || !reflect.DeepEqual(companions, readForkReceiverCompanions(t, rt, seed.RunID)) {
@@ -1173,7 +1181,7 @@ func TestSelectedForkIndependentReceiverBusinessMutationBothStores(t *testing.T)
 				params := map[string]any{"source_run_id": seed.RunID, "fork_event_id": frontier, "allow_source_freeze": true, "idempotency_key": "business-fork"}
 				var fork, replay apiv1.RunForkExecutionResult
 				requireServedJSONRPCResult(t, rt.Endpoint, "run.fork", params, &fork)
-				if fork.SourceRunID != seed.RunID || fork.ForkEventID != frontier || fork.ForkRunID == "" || fork.ForkRunID == seed.RunID || fork.ExecutedEventCount != 0 {
+				if fork.SourceRunID != seed.RunID || fork.ForkEventID != frontier || fork.ForkRunID == "" || fork.ForkRunID == seed.RunID || fork.ExecutedEventCount != 1 {
 					t.Fatalf("business fork identity: %+v", fork)
 				}
 				childEvent := waitServedSelectedForkFrontier(t, rt.ReceiverStateReader, rt.ReadRunDeliveries, fork.ForkRunID, frontier)

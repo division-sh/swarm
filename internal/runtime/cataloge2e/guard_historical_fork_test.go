@@ -19,7 +19,7 @@ func TestGuardTerminationHistoricalForkPreservesCauseBothStores(t *testing.T) {
 	for _, backend := range []catalogRuntimeBackend{catalogBackendSQLite, catalogBackendPostgres} {
 		t.Run(string(backend), func(t *testing.T) {
 			root := canonicalrouting.CopyGuardForkContinuation(t)
-			h := newRuntimeHarnessForBackend(t, root, backend, true)
+			h := newLiveForkCatalogHarness(t, root, backend)
 			h.seedInitialState(pipeline.FlowInstanceEntityID(catalogRuntimeRunID))
 			step := catalogTriggerStep{Event: "check.requested", Payload: map[string]any{"score": 50}}
 			if err := h.publishRuntimeEventResultForStep(step, 10*time.Second, true); err != nil {
@@ -66,7 +66,7 @@ func TestGuardTerminationHistoricalForkPreservesCauseBothStores(t *testing.T) {
 			loader, selection, _ := selectedContractForkFixtureSelection(t, h.ctx, repoRootFromCatalogE2E(t), root, artifacts)
 			cfg := testRuntimeConfig()
 			cfg.LLM.Backend = "anthropic"
-			fork, err := runforkexecution.ExecuteSelectedContractRunFork(ctx, runforkexecution.SelectedContractExecutionRequest{
+			fork, err := executeCatalogLiveFork(t, h, ctx, runforkexecution.SelectedContractExecutionRequest{
 				SourceRunID: catalogRuntimeRunID, At: point, AllowSourceFreeze: true,
 				Owner: selectedContractExecutionOwnerForCatalogHarness(t, h), SourceLoader: loader, ContractSelection: selection,
 				AgentRuntime: selectedContractAgentRuntimeOptionsForCatalogHarness(h, cfg),
@@ -74,11 +74,11 @@ func TestGuardTerminationHistoricalForkPreservesCauseBothStores(t *testing.T) {
 			if err != nil {
 				t.Fatal(err)
 			}
-			if !fork.Activation.Activated || fork.ExecutedEventCount != 0 || len(fork.ForkEvents) != 0 || fork.Materialization.SourceRunID != catalogRuntimeRunID || fork.Materialization.ForkPoint.EventID != point {
+			if !fork.Activation.Activated || fork.ExecutedEventCount != 1 || len(fork.ForkEvents) != 1 || fork.Materialization.SourceRunID != catalogRuntimeRunID || fork.Materialization.ForkPoint.EventID != point {
 				t.Fatalf("selected historical fork did not resume its exact agent input: %+v", fork)
 			}
 			observed, err := observeCatalogSelectedExecution(t, h, fork.Materialization.ForkRunID)
-			if err != nil || observed.ExecutedEventCount != 1 {
+			if err != nil || observed.ExecutedEventCount != 1 || len(observed.ForkEvents) != 1 || observed.ForkEvents[0] != fork.ForkEvents[0] {
 				t.Fatalf("retained historical execution=%+v error=%v", observed, err)
 			}
 			// The fork reconstructs entity state; completed execution evidence

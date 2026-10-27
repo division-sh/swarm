@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"fmt"
 	"os"
 	"path/filepath"
 	"reflect"
@@ -11,6 +12,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/division-sh/swarm/internal/apiv1"
 	"github.com/division-sh/swarm/internal/events"
 	"github.com/division-sh/swarm/internal/operatorread"
 	runtimebus "github.com/division-sh/swarm/internal/runtime/bus"
@@ -27,6 +29,7 @@ import (
 	"github.com/division-sh/swarm/internal/runtime/workspace"
 	"github.com/division-sh/swarm/internal/servedparity"
 	"github.com/division-sh/swarm/internal/store/storetest"
+	"github.com/google/uuid"
 )
 
 type forkReceiverExecutionObservation struct {
@@ -79,6 +82,20 @@ func TestSelectedForkReceiverEffectOnlyFailureSettlementBothStores(t *testing.T)
 			t.Run(string(backend)+"/"+name, func(t *testing.T) {
 				publication := newExactOriginPublicationProbe(t)
 				var selected *selectedStoreOwner
+				var publicExecutor apiv1.SelectedContractRunForkExecutor
+				previousCapabilities := buildSelectedAPICapabilities
+				buildSelectedAPICapabilities = func(owner *selectedStoreOwner, request selectedAPICapabilityRequest) (selectedAPICapabilities, error) {
+					caps, err := previousCapabilities(owner, request)
+					if err == nil {
+						var exact bool
+						publicExecutor, exact = caps.RunFork.(apiv1.SelectedContractRunForkExecutor)
+						if !exact {
+							return caps, fmt.Errorf("receiver fixture lost its actual public fork executor: %T", caps.RunFork)
+						}
+					}
+					return caps, err
+				}
+				t.Cleanup(func() { buildSelectedAPICapabilities = previousCapabilities })
 				previous := projectRuntimePersistenceForServe
 				projectRuntimePersistenceForServe = func(owner *selectedStoreOwner) serveRuntimePersistence {
 					selected = owner
@@ -103,7 +120,7 @@ func TestSelectedForkReceiverEffectOnlyFailureSettlementBothStores(t *testing.T)
 						requireWorkspaceProofBusinessMutation(t, endpoint, selected.RuntimeDeps().EventStore, selected.RuntimeDeps().DeliveryStore, runID, eventID, entityID)
 					}
 				}
-				rt := startWorkspaceGatewayProofRuntime(t, backend, root, "", nil, "127.0.0.1:0")
+				rt := startWorkspaceLiveGatewayProofRuntime(t, backend, root, "", nil, "127.0.0.1:0")
 				fieldReader := rt.WorkflowTargets
 				if fieldReader == nil {
 					t.Fatal("source proof requires its original receiver target reader")
@@ -118,6 +135,10 @@ func TestSelectedForkReceiverEffectOnlyFailureSettlementBothStores(t *testing.T)
 					"event_name": "start.seeded", "bundle_hash": rt.BundleHash,
 					"payload": map[string]any{"token": "receiver-proof"}, "idempotency_key": "fork-settlement-seed",
 				})
+				rootEvent := storetest.LoadCanonicalEventRecord(t, t.Context(), rt.Events, seed.EventID)
+				if rootEvent.RunID() != seed.RunID || rootEvent.ExecutionMode() != rt.Runtime.ExecutionPosture.RootMode() {
+					t.Fatalf("live receiver source changed its root mode: run=%s mode=%s", rootEvent.RunID(), rootEvent.ExecutionMode())
+				}
 				waitWorkspaceProofPipelineHandoff(t, servedWorkspaceProofRuntime{Events: selected.RuntimeDeps().EventStore}, seed.RunID)
 				requested := requireServedEventPublishRPCResult(t, rt.Endpoint, map[string]any{
 					"event_name": "start.requested", "run_id": seed.RunID, "source_event_id": seed.EventID,
@@ -132,6 +153,7 @@ func TestSelectedForkReceiverEffectOnlyFailureSettlementBothStores(t *testing.T)
 				if err := waitExactOriginPublications(t.Context(), publication, seed.EventID, requested.EventID); err != nil {
 					t.Fatal(err)
 				}
+				requireServedOKJSONRPC(t, rt.Endpoint, "run.pause", map[string]any{"run_id": seed.RunID, "idempotency_key": "source-fixture-pause"})
 				requireServedOKJSONRPC(t, rt.Endpoint, "run.stop", map[string]any{"run_id": seed.RunID, "idempotency_key": "source-fixture-stop"})
 				sourceBefore := readWorkspaceProofSourceDomain(t, selected.RuntimeDeps().EventStore, seed.RunID)
 				family, ok := selected.RunFork()
@@ -160,8 +182,12 @@ func TestSelectedForkReceiverEffectOnlyFailureSettlementBothStores(t *testing.T)
 					SourceLoader: runforkexecution.SourceArtifactSelectedContractSourceLoader{
 						RepoRoot: repoRootForTest(), Store: selected.SourceArtifactStore(),
 					},
-					ContractSelection: runforkadmission.SelectedContractSelection(semanticview.Wrap(loadWorkflowValidationBundleAt(t, root))),
-					AgentRuntime:      forkOptions,
+					ContractSelection:  runforkadmission.SelectedContractSelection(semanticview.Wrap(loadWorkflowValidationBundleAt(t, root))),
+					AgentRuntime:       forkOptions,
+					LiveRuntime:        rt.Runtime,
+					LiveContexts:       publicExecutor.RuntimeContexts,
+					LiveRuns:           publicExecutor.LiveRuns,
+					AcquireLiveRuntime: publicExecutor.AcquireLiveRuntime,
 				}
 				if declaredAgent {
 					target := loadWorkflowValidationBundleAt(t, targetRoot)
@@ -171,16 +197,33 @@ func TestSelectedForkReceiverEffectOnlyFailureSettlementBothStores(t *testing.T)
 					}
 					request.ContractSelection = runfork.RunForkContractSelection{Mode: runfork.RunForkContractSelectionModeBundleHash, BundleHash: fact.BundleHash()}
 					request.ExpectedBundleHash = fact.BundleHash()
+					request.LiveRuntime = nil
 				}
-				execution, err := family.Execute(ctx, request)
-				if err != nil || execution.Materialization.ForkRunID == "" || execution.ExecutedEventCount != 0 || len(execution.ForkEvents) != 0 {
-					t.Fatalf("fork activation acknowledgment: %+v error=%v", execution, err)
+				request.ForkOperation = &runfork.ForkOperationRequest{
+					OperationID: uuid.NewString(), Actor: "receiver-settlement", IdempotencyKey: name, TransportHash: name,
+					SourceRunID: request.SourceRunID, ForkEventID: request.At, TargetBundleHash: request.ExpectedBundleHash,
+					ContractSelection: request.ContractSelection, AllowSourceFreeze: request.AllowSourceFreeze,
 				}
+				var execution runforkexecution.SelectedContractExecutionResult
+				var executionErr error
+				executed := make(chan struct{})
+				go func() {
+					defer close(executed)
+					execution, executionErr = family.Execute(ctx, request)
+				}()
+				defer func() {
+					resumeClaim()
+					resumeSettlement()
+					cancel()
+					<-executed
+				}()
 				await := func(ch <-chan forkReceiverExecutionObservation) forkReceiverExecutionObservation {
 					t.Helper()
 					select {
 					case observation := <-ch:
 						return observation
+					case <-executed:
+						t.Fatalf("fork ended before its real receiver boundary: %+v error=%v", execution, executionErr)
 					case <-ctx.Done():
 						t.Fatalf("fork receiver barrier: %v", ctx.Err())
 					}
@@ -265,6 +308,18 @@ func TestSelectedForkReceiverEffectOnlyFailureSettlementBothStores(t *testing.T)
 					}
 				}
 				resumeSettlement()
+				select {
+				case <-executed:
+				case <-ctx.Done():
+					t.Fatalf("fork did not join after its receiver barriers: %v", ctx.Err())
+				}
+				if unavailable {
+					if executionErr == nil || execution.Activation.Activated {
+						t.Fatalf("failed receiver acknowledged a live handoff: %+v error=%v", execution, executionErr)
+					}
+				} else if executionErr != nil || !execution.Activation.Activated || execution.ExecutedEventCount != 1 || len(execution.ForkEvents) != 1 {
+					t.Fatalf("settled receiver lacks its real live acknowledgment: %+v error=%v", execution, executionErr)
+				}
 				if execution.Materialization.ForkRunID != claim.RunID() {
 					t.Fatal("returned fork differs from actual receiver claim")
 				}
@@ -289,7 +344,9 @@ func TestSelectedForkReceiverEffectOnlyFailureSettlementBothStores(t *testing.T)
 				if !unavailable {
 					checkBusiness(t, rt.Endpoint, claim.RunID(), claimed.signal.EventID, receiver.ID)
 				}
-				if !reflect.DeepEqual(sourceBefore, readWorkspaceProofSourceDomain(t, selected.RuntimeDeps().EventStore, seed.RunID)) {
+				if name == "same_name_agent_control" {
+					requireForkSourceSelfReleaseConservation(t, selected.RuntimeDeps().EventStore, seed.RunID, sourceBefore)
+				} else if !reflect.DeepEqual(sourceBefore, readWorkspaceProofSourceDomain(t, selected.RuntimeDeps().EventStore, seed.RunID)) {
 					t.Fatal("fork receiver execution or settlement mutated source domain")
 				}
 				if !unavailable {
@@ -364,73 +421,24 @@ func requireSelectedForkPublicControlBoundary(t *testing.T, endpoint string, own
 			time.Sleep(10 * time.Millisecond)
 		}
 	}
-	// Delivery completion precedes the completion worker's await-mutation
-	// projection. Observe that durable handoff before measuring API mutations;
-	// the full snapshots below must still include the candidate columns.
-	// A different selected bundle has no completion worker in this loaded runtime.
-	deadline := time.Now().Add(servedProofPollDeadline)
-	var storage storetest.SelectedForkControlStorage
-	for {
-		var err error
-		storage, err = storetest.ReadSelectedForkControlStorage(context.Background(), owner, runID, loadedBundleHash, "same-name")
-		if err != nil {
-			t.Fatal(err)
-		}
-		if storage.AwaitingMutation {
-			break
-		}
-		if time.Now().After(deadline) {
-			summary, err := storetest.ReadServedRunDebugSummary(context.Background(), owner, runID)
-			t.Fatalf("selected fork did not finish its completion candidate: %s error=%v", summary, err)
-		}
-		time.Sleep(10 * time.Millisecond)
-	}
-	bindingID := storage.BindingID
-	type controlCase struct {
-		method string
-		params map[string]any
-	}
-	cases := []controlCase{
-		{"run.pause", map[string]any{"run_id": runID}},
-		{"run.continue", map[string]any{"run_id": runID}},
-		{"agent.restart", map[string]any{"run_id": runID, "agent_id": "same-name"}},
-		{"agent.send_directive", map[string]any{"run_id": runID, "agent_id": "same-name", "directive": "must not execute"}},
-		{"event.publish", map[string]any{"run_id": runID, "event_name": "start.requested", "source_event_id": eventID, "payload": map[string]any{"token": "must-not-execute"}}},
-		{"event.replay", map[string]any{"event_id": eventID}},
-	}
 	if declaredAgent {
-		if storage.AgentCount != 1 {
-			t.Logf("agent rows: %v", readWorkspaceProofApplication(t, owner)["agents"])
-			t.Fatalf("selected declaration did not materialize the control target: count=%d", storage.AgentCount)
-		}
-		cases = append(cases, controlCase{"agent.replay", map[string]any{"run_id": runID, "agent_id": "same-name", "event_id": eventID}})
 		requireSelectedForkDeclaredAgentReads(t, endpoint, owner, loadedBundleHash, runID, completionCount)
 	}
-	for _, test := range cases {
-		t.Run(test.method, func(t *testing.T) {
-			before := readWorkspaceProofApplication(t, owner)
-			err := requireServedJSONRPCError(t, endpoint, test.method, test.params)
-			if err.Data["code"] != "SELECTED_FORK_CONTROL_UNSUPPORTED" {
-				t.Fatalf("selected control escaped through loaded same-hash runtime: %+v", err)
-			}
-			details, ok := err.Data["details"].(map[string]any)
-			if !ok || details["operation"] != test.method || details["run_id"] != runID || details["binding_id"] != bindingID {
-				t.Fatalf("selected refusal lost exact binding: %+v", err)
-			}
-			after := readWorkspaceProofApplication(t, owner)
-			if !reflect.DeepEqual(before, after) {
-				for table, rows := range before {
-					if !reflect.DeepEqual(rows, after[table]) {
-						t.Errorf("refused %s changed %s: before=%v after=%v", test.method, table, rows, after[table])
-					}
-				}
-				t.Fatal("refused selected control changed the database")
-			}
-		})
+	// The immutable ACK has transferred this child to ordinary live authority.
+	for _, control := range []struct{ method, status string }{{"run.pause", "paused"}, {"run.continue", "live"}} {
+		requireServedOKJSONRPC(t, endpoint, control.method, map[string]any{"run_id": runID, "idempotency_key": uuid.NewString()})
+		var readback struct {
+			Run struct{ Status string } `json:"run"`
+		}
+		requireServedJSONRPCResult(t, endpoint, "run.get", map[string]any{"run_id": runID}, &readback)
+		if readback.Run.Status != control.status {
+			t.Fatalf("acknowledged child %s: %+v", control.method, readback)
+		}
 	}
 	var result struct {
 		OK bool `json:"ok"`
 	}
+	requireServedOKJSONRPC(t, endpoint, "run.pause", map[string]any{"run_id": runID, "idempotency_key": uuid.NewString()})
 	requireServedJSONRPCResult(t, endpoint, "run.stop", map[string]any{"run_id": runID, "idempotency_key": "selected-exact-stop"}, &result)
 	if !result.OK {
 		t.Fatal("selected public stop did not return its terminal result")
@@ -452,7 +460,7 @@ func requireSelectedForkDeclaredAgentReads(t *testing.T, endpoint string, owner 
 	params := map[string]any{"run_id": runID, "agent_id": "same-name", "flow_instance": "consumer"}
 	var detail operatorread.OperatorAgentDetail
 	requireServedJSONRPCResult(t, endpoint, "agent.get", params, &detail)
-	if detail.Agent.AgentID != "same-name" || detail.Agent.FlowInstance != "consumer" || detail.Agent.Role != "observer" || detail.Agent.ExecutionMode != "mock" {
+	if detail.Agent.AgentID != "same-name" || detail.Agent.FlowInstance != "consumer" || detail.Agent.Role != "observer" || detail.Agent.ExecutionMode != "live" {
 		t.Fatalf("selected agent read lost persisted target: %+v", detail)
 	}
 	var diagnosis operatorread.OperatorAgentDiagnosis
@@ -475,8 +483,8 @@ func requireSelectedForkDeclaredAgentReads(t *testing.T, endpoint string, owner 
 	}
 	var usage operatorread.OperatorAgentUsage
 	requireServedJSONRPCResult(t, endpoint, "agent.usage", params, &usage)
-	if usage.AgentID != "same-name" || usage.Usage.Estimated.LedgerEntries != completionCount || usage.Usage.Exact.LedgerEntries != 0 {
-		t.Fatalf("selected agent usage lost its exact mock turn: %+v", usage)
+	if usage.AgentID != "same-name" || usage.Usage.Exact.LedgerEntries != completionCount || usage.Usage.Estimated.LedgerEntries != 0 {
+		t.Fatalf("selected agent usage lost its exact live turn: %+v", usage)
 	}
 	requireSelectedForkDurablePublicReads(t, endpoint, owner, loadedBundleHash, runID, completionCount)
 	after := readWorkspaceProofApplication(t, owner)

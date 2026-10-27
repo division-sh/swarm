@@ -53,12 +53,18 @@ func TestIssue642EventlessEmptyStartCompletesWithoutInventedIngressBothStores(t 
 				if err != nil {
 					t.Fatal(err)
 				}
-				if header.Status == "completed" {
+				instances, err := f.selected.ListWorkflowInstances(wait, result.ForkRunID)
+				if err != nil {
+					t.Fatal(err)
+				}
+				if header.Status == "live" && header.EndedAt == nil && len(instances) == 1 && instances[0].StageDefined && instances[0].CurrentState == "done" {
+					deadline, _ := wait.Deadline()
+					waitNotifyAllChildrenRuntimeWithin(t, f.runtime, result.ForkRunID, time.Until(deadline))
 					break
 				}
 				select {
 				case <-wait.Done():
-					t.Fatalf("genuinely final empty child did not complete: %+v error=%v", header, wait.Err())
+					t.Fatalf("empty live child did not reach its exact final instance: header=%+v instances=%+v error=%v", header, instances, wait.Err())
 				case <-time.After(10 * time.Millisecond):
 				}
 			}
@@ -102,7 +108,7 @@ func TestIssue642EventlessEmptyStartCompletesWithoutInventedIngressBothStores(t 
 			for _, entry := range inventory {
 				if entry.RunID == result.ForkRunID {
 					matches++
-					if entry.Disposition != runfork.SelectedForkRecoveryTerminal || entry.Continuation != nil || entry.Operation == nil {
+					if entry.Disposition != runfork.SelectedForkRecoveryControlOnly || entry.Continuation != nil || entry.Operation == nil {
 						t.Fatalf("completed empty child recovered execution: %+v", entry)
 					}
 				}

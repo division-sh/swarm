@@ -25,6 +25,7 @@ import (
 	"github.com/division-sh/swarm/internal/runtime/llm"
 	runtimemanager "github.com/division-sh/swarm/internal/runtime/manager"
 	runtimepipeline "github.com/division-sh/swarm/internal/runtime/pipeline"
+	"github.com/division-sh/swarm/internal/runtime/runlifecycle"
 	"github.com/division-sh/swarm/internal/store/storetest"
 	"github.com/google/uuid"
 )
@@ -197,7 +198,7 @@ func proveTerminalProviderOriginSettlement(t *testing.T, consumer string) {
 						t.Fatal(err)
 					}
 				}
-				h := newRuntimeHarnessWithTerminalProvider(t, root, backend, true, nil, probe, nil)
+				h := newRuntimeHarnessWithTerminalProvider(t, root, backend, true, nil, probe, nil, runlifecycle.LiveRunScope{})
 				defer probe.once.Do(func() { close(probe.release) })
 				path := "worker-flow/worker-001"
 				entity := materializeCatalogSelectedForkSourceFlow(t, h, catalogRuntimeRunID, path, "worker.ready.requested")

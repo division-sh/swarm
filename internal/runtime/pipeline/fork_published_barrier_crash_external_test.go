@@ -11,6 +11,7 @@ import (
 	"time"
 
 	"github.com/division-sh/swarm/internal/cliapp"
+	swarmruntime "github.com/division-sh/swarm/internal/runtime"
 	"github.com/division-sh/swarm/internal/runtime/authoractivity"
 	"github.com/division-sh/swarm/internal/runtime/core/identity"
 	"github.com/division-sh/swarm/internal/runtime/core/managedexecution"
@@ -23,6 +24,7 @@ import (
 	"github.com/division-sh/swarm/internal/runtime/lifecycleprobe"
 	"github.com/division-sh/swarm/internal/runtime/runfork"
 	"github.com/division-sh/swarm/internal/runtime/runforkexecution"
+	"github.com/division-sh/swarm/internal/runtime/runlifecycle"
 	"github.com/division-sh/swarm/internal/runtime/startupownership"
 	"github.com/division-sh/swarm/internal/runtime/testfixtures/canonicalrouting"
 	"github.com/division-sh/swarm/internal/store"
@@ -67,7 +69,7 @@ func TestIssue642UnpublishedBarrierCrashProcessHelper(t *testing.T) {
 	TestIssue642UnpublishedTransferredBarrierReforkBothStores(t)
 }
 
-func publishBarrierCrashCheckpoint(t *testing.T, ctx context.Context, selected *storeselected.Owner, result runforkexecution.SelectedContractExecutionResult, original string, observed forkEngineObservation, sourceRevision int) {
+func publishBarrierCrashCheckpoint(t *testing.T, ctx context.Context, selected *storeselected.Owner, proof storetest.SelectedForkReceiverExecutionProofRequest, observed forkEngineObservation, sourceRevision int) {
 	t.Helper()
 	claim, valid := deliverylifecycle.ClaimFromContext(observed.ctx)
 	authority, granted := effects.AuthorityFromContext(observed.ctx)
@@ -87,14 +89,14 @@ func publishBarrierCrashCheckpoint(t *testing.T, ctx context.Context, selected *
 	}
 	fixture := &mixedFanOutCrashFixture{}
 	fixture.publishCheckpoint(t, mixedFanOutCrashCheckpoint{
-		Proof:      forkEngineExecutionProofRequest(t, result, original, observed.id, claim),
-		BundleHash: fact.BundleHash(), SourceEntityID: result.Materialization.SourceRunID,
+		Proof:      proof,
+		BundleHash: fact.BundleHash(), SourceEntityID: proof.SourceRunID,
 		ChildEntityID: claim.RunID(), SourceRevision: sourceRevision, ChildRevision: forkFixtureEntityRevision(t, child.Entity.Revision), Authority: &preserved,
 	})
 }
 
-// SIGKILL occurs after acknowledged activation/publication and the exact child
-// claim, before any handler or graceful retirement can settle that occurrence.
+// SIGKILL occurs at the exact selected child claim before handoff ACK, handler
+// settlement or graceful retirement.
 func TestIssue642PublishedBarrierCrashRestartBothStores(t *testing.T) {
 	verifyBarrierCrashRestartBothStores(t, false)
 }
@@ -129,7 +131,8 @@ func verifyBarrierCrashRestartBothStores(t *testing.T, pendingSource bool) {
 			if err != nil {
 				t.Fatal(err)
 			}
-			_, bundle, err := cliapp.NewSwarmWorkflowModule(repo, canonicalrouting.CopyForkFanOutBarrierReceiver(t))
+			root := canonicalrouting.CopyForkFanOutBarrierReceiver(t)
+			_, bundle, err := cliapp.NewSwarmWorkflowModule(repo, root)
 			if err != nil || bundle.SourceArtifact.BundleHash() != checkpoint.BundleHash {
 				t.Fatalf("barrier successor requires the exact original source artifact: %v", err)
 			}
@@ -179,12 +182,13 @@ func verifyBarrierCrashRestartBothStores(t *testing.T, pendingSource bool) {
 			if err := family.BindSelectedProcess(ctx, process, capability); err != nil {
 				t.Fatal(err)
 			}
+			rt := startForkEngineOrdinarySuccessor(t, ctx, selected, process, capability, repo, root)
 			baseline := process.ActiveCount()
 			wait, cancel := context.WithTimeout(ctx, 30*time.Second)
 			defer cancel()
 			original, found, err := family.Operations().LoadForkOperation(wait, actor, key, transport)
-			if err != nil || !found || original.Status != runfork.ForkOperationActivated || original.ForkRunID != checkpoint.Proof.ChildRunID || original.Result == nil || original.Request.ResolvedPoint == nil {
-				t.Fatalf("barrier crash lost its permanent cut/activation acknowledgment: %+v found=%t err=%v", original, found, err)
+			if err != nil || !found || original.Status != runfork.ForkOperationMaterialized || original.ForkRunID != checkpoint.Proof.ChildRunID || original.Result != nil || original.Request.ResolvedPoint == nil {
+				t.Fatalf("barrier pre-ACK crash lost its permanent cut/materialized operation: %+v found=%t err=%v", original, found, err)
 			}
 			before, err := storetest.ReadSelectedForkSourceDomain(wait, selected.RuntimeDeps().DeliveryStore, checkpoint.Proof.SourceRunID)
 			if err != nil {
@@ -199,7 +203,7 @@ func verifyBarrierCrashRestartBothStores(t *testing.T, pendingSource bool) {
 				}
 				pending = cut.FanOutObligations[0].Barrier.TransferredOccurrence
 				if pending.Publication.EventID != checkpoint.Proof.SourceEventID || cut.FanOutObligations[0].Barrier.Status != fanoutbarrier.StatusClosedPending ||
-					original.Request.ResolvedPoint.Kind != runfork.RunForkPointRunStart || !original.Result.SourceFrozen {
+					original.Request.ResolvedPoint.Kind != runfork.RunForkPointRunStart || !original.Request.AtStart {
 					t.Fatal("pending crash source changed its obligation or start cut")
 				}
 				if _, physical := cut.HistoricalJoinPublication(pending.Publication.EventID); physical {
@@ -223,33 +227,35 @@ func verifyBarrierCrashRestartBothStores(t *testing.T, pendingSource bool) {
 			t.Cleanup(func() { release.Do(func() { close(probe.resume) }) })
 			options := runforkexecution.SelectedContractAgentRuntimeOptions{ExecutionPosture: executionposture.Live, ProcessCapability: capability}
 			options.AgentManagerOptions.TestLifecycleProbe = probe
-			recovered, err := family.RecoverSelectedForkContexts(wait, effects.NewRecoveryRequest(time.Now().UTC(), executionposture.Live), runforkexecution.SelectedForkRecoveryEnvironment{
-				SourceLoader: runforkexecution.SourceArtifactSelectedContractSourceLoader{RepoRoot: repo, Store: selected.SourceArtifactStore()}, AgentRuntime: options,
+			live := forkEngineLiveRequest(t, rt, selected, runforkexecution.SelectedContractExecutionRequest{})
+			live.AcquireLiveRuntime = func(ctx context.Context, hash string) (*swarmruntime.RuntimeContextUse, error) {
+				use, _, err := live.LiveContexts.AcquireBundleHash(ctx, hash)
+				return use, err
+			}
+			var recovered []runfork.SelectedForkRecoveryResult
+			var recoveryErr error
+			recoveryDone := make(chan struct{})
+			go func() {
+				defer close(recoveryDone)
+				recovered, recoveryErr = family.RecoverSelectedForkContexts(wait, effects.NewRecoveryRequest(time.Now().UTC(), executionposture.Live), runforkexecution.SelectedForkRecoveryEnvironment{
+					SourceLoader: runforkexecution.SourceArtifactSelectedContractSourceLoader{RepoRoot: repo, Store: selected.SourceArtifactStore()}, AgentRuntime: options,
+					AcquireLiveRuntime: live.AcquireLiveRuntime, LiveContexts: live.LiveContexts, LiveRuns: live.LiveRuns,
+				})
+			}()
+			t.Cleanup(func() {
+				cancel()
+				release.Do(func() { close(probe.resume) })
+				select {
+				case <-recoveryDone:
+				case <-time.After(10 * time.Second):
+					t.Error("published barrier recovery did not join")
+				}
 			})
-			if err != nil {
-				t.Fatalf("published barrier native successor: %+v err=%v", recovered, err)
-			}
-			want := 1
-			if pendingSource {
-				want = 2
-			}
-			if len(recovered) != want {
-				t.Fatalf("barrier successor lost a source boundary: %+v want=%d", recovered, want)
-			}
-			for _, entry := range recovered {
-				if pendingSource && entry.RunID == checkpoint.Proof.SourceRunID {
-					if entry.Disposition != runfork.SelectedForkRecoveryTerminal || entry.ExecutionID != "" || entry.Continuation != nil {
-						t.Fatalf("materialized-only source acquired execution authority: %+v", entry)
-					}
-					continue
-				}
-				if entry.RunID != checkpoint.Proof.ChildRunID || entry.ExecutionID != checkpoint.Proof.ExecutionID || entry.Disposition != runfork.SelectedForkRecoveryResume {
-					t.Fatalf("barrier native successor changed its acknowledged occurrence: %+v", entry)
-				}
-			}
 			var observed forkEngineObservation
 			select {
 			case observed = <-probe.claim:
+			case <-recoveryDone:
+				t.Fatalf("published barrier recovery returned before its controlled claim: %+v err=%v", recovered, recoveryErr)
 			case <-wait.Done():
 				t.Fatal("successor did not acquire the exact published barrier delivery")
 			}
@@ -266,6 +272,44 @@ func verifyBarrierCrashRestartBothStores(t *testing.T, pendingSource bool) {
 				t.Fatal("successor failed to fence the actual predecessor execution authority")
 			}
 			release.Do(func() { close(probe.resume) })
+			select {
+			case <-recoveryDone:
+				if recoveryErr != nil {
+					t.Fatalf("published barrier native successor: %+v err=%v", recovered, recoveryErr)
+				}
+			case <-wait.Done():
+				t.Fatal(wait.Err())
+			}
+			want := 1
+			if pendingSource {
+				want = 2
+			}
+			if len(recovered) != want {
+				t.Fatalf("barrier successor lost a source boundary: %+v want=%d", recovered, want)
+			}
+			for _, entry := range recovered {
+				if pendingSource && entry.RunID == checkpoint.Proof.SourceRunID {
+					header, err := selected.Runs().LoadRunHeader(wait, entry.RunID)
+					if err != nil {
+						t.Fatal(err)
+					}
+					state, err := runlifecycle.ParseState(header.Status)
+					if err != nil {
+						t.Fatal(err)
+					}
+					want := runfork.SelectedForkRecoveryStaged
+					if state.Terminal() {
+						want = runfork.SelectedForkRecoveryTerminal
+					}
+					if entry.Disposition != want || entry.ExecutionID != "" || entry.Continuation != nil || entry.Operation != nil {
+						t.Fatalf("materialized-only source acquired execution authority: %+v", entry)
+					}
+					continue
+				}
+				if entry.RunID != checkpoint.Proof.ChildRunID || entry.ExecutionID != checkpoint.Proof.ExecutionID || entry.Disposition != runfork.SelectedForkRecoveryResume {
+					t.Fatalf("barrier native successor changed its acknowledged occurrence: %+v", entry)
+				}
+			}
 			if _, err := probe.Wait(wait, lifecycleprobe.Signal{Kind: lifecycleprobe.DeliveryStatusChanged, EventID: observed.id, SubscriberID: producer.Key(), SubscriberType: "node", Status: "delivered"}); err != nil {
 				t.Fatal(err)
 			}
@@ -318,8 +362,9 @@ func verifyBarrierCrashRestartBothStores(t *testing.T, pendingSource bool) {
 				t.Fatalf("native successor did not settle the exact fresh claim: %+v err=%v", settlement, err)
 			}
 			again, found, err := family.Operations().LoadForkOperation(wait, original.Request.Actor, original.Request.IdempotencyKey, original.Request.TransportHash)
-			if err != nil || !found || !reflect.DeepEqual(original, again) {
-				t.Fatalf("native recovery changed the immutable operation acknowledgment: %+v err=%v", again, err)
+			if err != nil || !found || !reflect.DeepEqual(original.Request, again.Request) || again.ForkRunID != original.ForkRunID ||
+				again.Status != runfork.ForkOperationActivated || again.Result == nil || again.Result.Validate(original.Request, original.ForkRunID) != nil {
+				t.Fatalf("native recovery lost its exact operation or settled acknowledgment: %+v err=%v", again, err)
 			}
 			after, err := storetest.ReadSelectedForkSourceDomain(wait, selected.RuntimeDeps().DeliveryStore, checkpoint.Proof.SourceRunID)
 			if err != nil || !reflect.DeepEqual(before, after) {

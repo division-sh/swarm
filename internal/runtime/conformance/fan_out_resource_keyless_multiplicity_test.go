@@ -139,7 +139,7 @@ func TestDeploymentSourceKeylessEqualRowsPreserveMultiplicityBothStores(t *testi
 				t.Fatal("selected store lacks the canonical run-read owner")
 			}
 			header, err := runs.LoadRunHeader(f.ctx, runID)
-			if err != nil || header.Status != "running" {
+			if err != nil || header.Status != "live" {
 				t.Fatalf("collector ended before close: status=%s error=%v", header.Status, err)
 			}
 			closed := textFileRPCParams2456(t, server, "event.publish", map[string]any{

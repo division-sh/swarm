@@ -62,6 +62,7 @@ func TestPublicCompletionCapacityServedBothStores(t *testing.T) {
 					}
 					data = map[string]any{"imports": []any{}, "pins": []any{map[string]any{"declaration": declaration, "version_id": version}}}
 				}
+				requireServedOKJSONRPC(t, h.rpcEndpoint(), "run.pause", map[string]any{"run_id": params["run_id"], "idempotency_key": "capacity-pause-" + params["run_id"].(string)})
 			}
 			probe.mu.Lock()
 			native, workflow, process, calls := probe.native, probe.workflow, probe.process, probe.deployments

@@ -21,7 +21,7 @@ func TestIssue642TwoOpenUnclaimedRepliesStagedRestartBothStores(t *testing.T) {
 	for _, backend := range []catalogRuntimeBackend{catalogBackendSQLite, catalogBackendPostgres} {
 		t.Run(string(backend), func(t *testing.T) {
 			root := canonicalrouting.CopyNestedFanOutReply(t)
-			h := newRuntimeHarnessForBackend(t, root, backend, true)
+			h := newLiveForkCatalogHarness(t, root, backend)
 			var selected unclaimedFanOutReplyStore = h.pg
 			if h.sqlite != nil {
 				selected = h.sqlite
@@ -166,8 +166,13 @@ func restartNestedReplyChild(t *testing.T, h *runtimeHarness, staged runfork.Run
 	}
 	reopened.selectedOwners = append(reopened.selectedOwners, owner)
 	options := selectedContractAgentRuntimeOptionsForCatalogHarness(reopened, testRuntimeConfig())
+	live := catalogLiveForkRequest(t, reopened, ctx, runforkexecution.SelectedContractExecutionRequest{
+		SourceRunID: operation.SourceRunID, At: operation.ForkEventID, ForkOperation: &operation,
+		ContractSelection: operation.ContractSelection,
+	})
 	recovered, err := owner.RecoverSelectedForkContexts(ctx, effects.NewRecoveryRequest(time.Now().UTC(), options.ExecutionPosture), runforkexecution.SelectedForkRecoveryEnvironment{
 		SourceLoader: loader, AgentRuntime: options,
+		LiveContexts: live.LiveContexts, LiveRuns: live.LiveRuns, AcquireLiveRuntime: live.AcquireLiveRuntime,
 	})
 	if err != nil || len(recovered) != 1 || recovered[0].RunID != staged.ForkRunID || recovered[0].ExecutionID != "" ||
 		recovered[0].Disposition != runfork.SelectedForkRecoveryResume || recovered[0].Operation == nil || recovered[0].Operation.Request.OperationID != operation.OperationID {

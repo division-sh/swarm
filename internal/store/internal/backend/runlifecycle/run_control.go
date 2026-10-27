@@ -109,6 +109,9 @@ func (s *RunLifecyclePostgresOwner) runControlTransition(ctx context.Context, re
 				state, err = s.pauseRunControlTx(txctx, tx, attempt, state, req)
 			case "continue":
 				state, err = s.continueRunControlTx(txctx, tx, attempt, state, req)
+				if err == nil && state.Status == string(runtimerunlifecycle.StateLive) {
+					_, err = attempt.RequestCompletion(txctx, s, runID, nil)
+				}
 			default:
 				err = fmt.Errorf("unsupported run control action %q", action)
 			}
@@ -120,15 +123,7 @@ func (s *RunLifecyclePostgresOwner) runControlTransition(ctx context.Context, re
 				if action == "continue" {
 					transition = "resumed"
 				}
-				transitionID := uuid.NewString()
-				if err := attempt.Record(txctx, runtimeauthoractivity.Draft{
-					Kind: runtimeauthoractivity.KindRunLifecycle, Transition: transition,
-					SourceOwner: "runs", SourceIdentity: transitionID, DedupKey: "run-transition:" + transitionID,
-					OccurredAt: req.Now.UTC(), RunID: runID, Scope: occurrenceScope,
-					Projection: runtimeauthoractivity.Projection{
-						SubjectType: "run", SubjectID: runID, ControlReason: req.Reason, Source: req.ControlledBy,
-					},
-				}); err != nil {
+				if err := recordRunControlTransition(txctx, attempt, runID, occurrenceScope, req, transition); err != nil {
 					return err
 				}
 			}
@@ -139,10 +134,25 @@ func (s *RunLifecyclePostgresOwner) runControlTransition(ctx context.Context, re
 	state, committed := result.Value()
 	outcome := runtimeruncontrol.StoreTransition{State: state, Acknowledged: committed}
 	mutationErr := errors.Join(result.Err(), s.publishChannelChanges(committed, changes))
+	if action == "continue" && !committed && result.Phase() < mutationprotocol.CommitAdmission {
+		mutationErr = classifyLiveClaimFailure(ctx, s.backend, req.RunID, mutationErr)
+	}
 	if action == "stop" {
 		return outcome, classifyStopTransactionOutcome(result.Phase(), committed, mutationErr)
 	}
 	return outcome, mutationErr
+}
+
+func recordRunControlTransition(ctx context.Context, attempt *mutationprotocol.Attempt, runID string, scope runtimeauthoractivity.Scope, req runtimeruncontrol.TransitionRequest, transition string) error {
+	transitionID := uuid.NewString()
+	return attempt.Record(ctx, runtimeauthoractivity.Draft{
+		Kind: runtimeauthoractivity.KindRunLifecycle, Transition: transition,
+		SourceOwner: "runs", SourceIdentity: transitionID, DedupKey: "run-transition:" + transitionID,
+		OccurredAt: req.Now.UTC(), RunID: runID, Scope: scope,
+		Projection: runtimeauthoractivity.Projection{
+			SubjectType: "run", SubjectID: runID, ControlReason: req.Reason, Source: req.ControlledBy,
+		},
+	})
 }
 
 func lockRunControlState(ctx context.Context, tx *sql.Tx, runID string) (runtimeruncontrol.State, error) {
@@ -187,7 +197,7 @@ func (s *RunLifecyclePostgresOwner) pauseRunControlTx(ctx context.Context, tx *s
 		return runtimeruncontrol.State{}, err
 	}
 	switch lifecycleState {
-	case runtimerunlifecycle.StateRunning:
+	case runtimerunlifecycle.StateRunning, runtimerunlifecycle.StateLive:
 	case runtimerunlifecycle.StatePaused:
 		return runtimeruncontrol.State{}, &runtimeruncontrol.StateError{Err: runtimeruncontrol.ErrAlreadyPaused, RunID: state.RunID, CurrentStatus: state.Status}
 	default:
@@ -228,12 +238,13 @@ func (s *RunLifecyclePostgresOwner) continueRunControlTx(ctx context.Context, tx
 	if lifecycleState != runtimerunlifecycle.StatePaused || state.ControlStatus != "paused" {
 		return runtimeruncontrol.State{}, &runtimeruncontrol.StateError{Err: runtimeruncontrol.ErrNotPaused, RunID: state.RunID, CurrentStatus: state.Status}
 	}
-	if err := requireGenericContinueAuthority(ctx, tx, true, state); err != nil {
+	target, err := continueTargetState(ctx, tx, true, state)
+	if err != nil {
 		return runtimeruncontrol.State{}, err
 	}
 	if _, err := (postgresRunLifecycleMutation{store: s, tx: tx, attempt: attempt}).TransitionActive(ctx, runtimerunlifecycle.ActiveTransitionRequest{
 		RunID: state.RunID,
-		State: runtimerunlifecycle.StateRunning,
+		State: target,
 	}); err != nil {
 		return runtimeruncontrol.State{}, fmt.Errorf("continue run lifecycle: %w", err)
 	}
@@ -250,7 +261,7 @@ func (s *RunLifecyclePostgresOwner) continueRunControlTx(ctx context.Context, tx
 	`, state.RunID, req.Reason, req.ControlledBy, req.Now.UTC()); err != nil {
 		return runtimeruncontrol.State{}, fmt.Errorf("persist run continue control state: %w", err)
 	}
-	state.Status = string(runtimerunlifecycle.StateRunning)
+	state.Status = string(target)
 	state.ControlStatus = "running"
 	state.Reason = req.Reason
 	state.ControlledBy = req.ControlledBy
@@ -320,7 +331,8 @@ func rejectPostgresStandingRunStopTx(ctx context.Context, tx *sql.Tx, runID stri
 		return fmt.Errorf("inspect standing run control ownership: %w", err)
 	}
 	if disposition.UsesGenericRecovery() {
-		return nil
+		_, err := rejectLiveRunStop(ctx, tx, runID)
+		return err
 	}
 	return fmt.Errorf("run %s is owned by standing service %s; %s", runID, disposition.ServiceID, disposition.RunControlGuidance())
 }

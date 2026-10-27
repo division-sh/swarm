@@ -18,6 +18,7 @@ import (
 	runtimeengine "github.com/division-sh/swarm/internal/runtime/engine"
 	"github.com/division-sh/swarm/internal/runtime/loopruntime"
 	"github.com/division-sh/swarm/internal/runtime/pipeline"
+	"github.com/division-sh/swarm/internal/runtime/runfork"
 
 	forkexecution "github.com/division-sh/swarm/internal/runtime/runforkexecution"
 	"github.com/division-sh/swarm/internal/runtime/semanticview"
@@ -33,7 +34,6 @@ type activityLineageProofStore struct {
 	hostile     bool
 	hostileLoop bool
 	rejectFinal bool
-	settled     chan error
 	published   catalogSelectedExecutionObservation
 }
 
@@ -45,8 +45,18 @@ type activityLineageSettlement struct {
 	Refusal               string
 }
 
+func (p *activityLineageProofStore) ActivateRunForkForSelectedContractExecution(ctx context.Context, request runfork.RunForkSelectedContractExecutionActivateRequest) (runfork.RunForkActivation, error) {
+	authority, found := effects.AuthorityFromContext(ctx)
+	if !found {
+		return runfork.RunForkActivation{}, fmt.Errorf("activity settlement requires its actual selected activation authority")
+	}
+	if err := p.RequireRunForkSelectedContractExecutionSettlement(ctx, authority, request.AllowedSourceEventIDs, request.ExecutionSource); err != nil {
+		return runfork.RunForkActivation{}, err
+	}
+	return p.SelectedContractForkLifecycle.ActivateRunForkForSelectedContractExecution(ctx, request)
+}
+
 func (p *activityLineageProofStore) RequireRunForkSelectedContractExecutionSettlement(ctx context.Context, authority effects.Authority, allowed []string, source semanticview.Source) (err error) {
-	defer func() { p.settled <- err }()
 	req := activityLineageSettlement{authority: authority, ForkRunID: authority.SelectedFork.ForkRunID, AllowedSourceEventIDs: allowed, ExecutionSource: source}
 	t := p.t
 	observed := activityLineageEvents(t, ctx, p.h, req.ForkRunID)
@@ -322,7 +332,7 @@ func (p *activityLineageProofStore) RequireRunForkSelectedContractExecutionSettl
 			p.update(ctx, `UPDATE runs SET bundle_hash=$1 WHERE run_id=$2`, "bundle-v2:sha256:"+strings.Repeat("a", 64), req.ForkRunID)
 			defer p.update(ctx, `UPDATE runs SET bundle_hash=$1 WHERE run_id=$2`, state.BundleHash, req.ForkRunID)
 			copy := req
-			copy.Refusal = "selected recovery preparation conflicts with binding"
+			copy.Refusal = "permanent selected fork operation conflicts with exact binding"
 			p.requireRejected(t, ctx, copy)
 		})
 	}

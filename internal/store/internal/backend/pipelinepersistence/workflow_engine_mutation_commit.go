@@ -535,11 +535,6 @@ func commitWorkflowEngineMutation(
 			if err != nil {
 				return err
 			}
-			if command.Lifecycle.RequestCompletionCandidate {
-				if _, err := attempt.RequestCompletion(txctx, candidateWriter, command.State.Identity.RunID, nil); err != nil {
-					return err
-				}
-			}
 			if err := commitWorkflowEngineMutationLog(txctx, attempt, store, postgres, command.State, before, nil, command.Writer); err != nil {
 				return err
 			}
@@ -606,16 +601,16 @@ func commitWorkflowEngineMutation(
 				if command.FanOutIntent != nil && command.FanOutIntent.Capsule.Context.ReplyContextID() != settled.Route.Context.ReplyContextID() {
 					return fmt.Errorf("fan-out continuation differs from its exact native delivery settlement")
 				}
-				if !command.Lifecycle.RequestCompletionCandidate {
-					if _, err := attempt.RequestCompletion(txctx, candidateWriter, success.Claim.RunID(), nil); err != nil {
-						return err
-					}
-				}
 				claim := success.Claim
 				if err := persistWorkflowHandlerStageReceiptTx(txctx, tx, claim, settled, stage); err != nil {
 					return err
 				}
 				result.DeliverySuccess = &claim
+			}
+			if command.Lifecycle.RequestCompletionCandidate || command.DeliverySuccess != nil {
+				if _, err := attempt.RequestCompletion(txctx, candidateWriter, command.State.Identity.RunID, nil); err != nil {
+					return err
+				}
 			}
 			return nil
 		})

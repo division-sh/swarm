@@ -271,5 +271,6 @@ func selectedDeliverySourceRoot(t *testing.T, ctx context.Context, source semant
 	if err != nil {
 		t.Fatal(err)
 	}
+	command.Plan.CreatingInput = pipeline.FlowConstructionInput{EventID: event.ID(), Input: string(event.Type())}
 	return command
 }

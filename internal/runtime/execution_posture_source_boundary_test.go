@@ -109,6 +109,8 @@ func TestProcessExecutionPostureOwnsProductionLiveAuthorityLiterals(t *testing.T
 				predicate, operator, expected = "reconcileDisplacedHTTPActivity", token.NEQ, 1
 			case "internal/store/internal/runtimepersistence/test_activity_fork_history_fixture.go":
 				predicate, operator, expected = "SeedHistoricalActivityForkAttemptForTest", token.NEQ, 1
+			case "internal/store/internal/backend/eventpersistence/event_commit.go":
+				predicate, operator, expected = "publicationLiveScope", token.EQL, 1
 			}
 			if predicate != "" {
 				// #2756/6268224234: exact predicate operands, never minting uses.

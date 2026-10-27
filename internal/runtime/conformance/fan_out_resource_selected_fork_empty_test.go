@@ -108,14 +108,14 @@ func TestDeploymentSourceEmptyVersionForkIsQuiescentAndReplayable(t *testing.T) 
 				f.boot(t)
 				f.runtime.fanOutServing.Wake()
 				recoveredOwner, recovery := deploymentForkOwner(t, f)
-				var resumed bool
+				var retained bool
 				for _, entry := range recovery {
 					if entry.RunID == result.ForkRunID {
-						resumed = entry.Disposition == runfork.SelectedForkRecoveryResume && entry.Continuation != nil
+						retained = entry.Disposition == runfork.SelectedForkRecoveryControlOnly && entry.Continuation == nil && entry.Operation != nil
 					}
 				}
-				if !resumed {
-					t.Fatalf("empty nonterminal root lost its exact unfinished successor: %+v", recovery)
+				if !retained {
+					t.Fatalf("empty live root lost its immutable selected handoff: %+v", recovery)
 				}
 				restartedServer := deploymentForkServerAt(t, f, recoveredOwner, func() time.Time { return time.Now().Add(48 * time.Hour) })
 				restartedReplay, rpcErr := deploymentForkRPC(t, f.ctx, restartedServer, params)
@@ -129,8 +129,8 @@ func TestDeploymentSourceEmptyVersionForkIsQuiescentAndReplayable(t *testing.T) 
 				if err := f.db.QueryRowContext(f.ctx, `SELECT COUNT(*) FROM events WHERE run_id=$1`, result.ForkRunID).Scan(&eventsAfter); err != nil {
 					t.Fatal(err)
 				}
-				if generationsAfter != generationsBefore+1 || eventsAfter != 0 {
-					t.Fatalf("empty successor invented business work or lost its one fresh generation: generations=%d want=%d events=%d", generationsAfter, generationsBefore+1, eventsAfter)
+				if generationsAfter != generationsBefore || eventsAfter != 0 {
+					t.Fatalf("ordinary successor reactivated selected execution or invented business work: generations=%d want=%d events=%d", generationsAfter, generationsBefore, eventsAfter)
 				}
 			})
 		}
@@ -168,13 +168,20 @@ func TestDeploymentSourceSelectedControlOnlyRepeatedStopBothStores(t *testing.T)
 			if len(rpcErr) != 0 || result.ForkRunID == "" {
 				t.Fatalf("R8 empty selected fork: result=%+v error=%s", result, rpcErr)
 			}
-			stop, selected, err := owner.StopSelectedFork(f.ctx, runcontrol.TransitionRequest{RunID: result.ForkRunID})
-			if err != nil || !selected || stop.RunID != result.ForkRunID || stop.Status != "cancelled" {
-				t.Fatalf("R8 first stop: state=%+v selected=%t error=%v", stop, selected, err)
+			_, selected, err := owner.StopSelectedFork(f.ctx, runcontrol.TransitionRequest{RunID: result.ForkRunID})
+			if err != nil || selected {
+				t.Fatalf("R8 handed-off child still borrowed selected stop authority: selected=%t error=%v", selected, err)
 			}
-			_, selected, err = owner.StopSelectedFork(f.ctx, runcontrol.TransitionRequest{RunID: result.ForkRunID})
-			if !selected || !errors.Is(err, runcontrol.ErrAlreadyTerminal) {
-				t.Fatalf("R8 repeated stop: selected=%t error=%v", selected, err)
+			if paused, err := f.runtime.contextRuntime.RunControl.Pause(f.ctx, runcontrol.TransitionRequest{RunID: result.ForkRunID}); err != nil || paused.RunID != result.ForkRunID || paused.Status != "paused" {
+				t.Fatalf("R8 pause handed-off live child: state=%+v error=%v", paused, err)
+			}
+			stop, err := f.runtime.contextRuntime.RunControl.Stop(f.ctx, runcontrol.TransitionRequest{RunID: result.ForkRunID})
+			if err != nil || stop.RunID != result.ForkRunID || stop.Status != "cancelled" {
+				t.Fatalf("R8 first ordinary stop: state=%+v error=%v", stop, err)
+			}
+			_, err = f.runtime.contextRuntime.RunControl.Stop(f.ctx, runcontrol.TransitionRequest{RunID: result.ForkRunID})
+			if !errors.Is(err, runcontrol.ErrAlreadyTerminal) {
+				t.Fatalf("R8 repeated ordinary stop: error=%v", err)
 			}
 			var executionCount, eventCount int
 			if err := f.db.QueryRowContext(f.ctx, `SELECT COUNT(*) FROM run_fork_selected_contract_runtime_executions WHERE fork_run_id=$1`, result.ForkRunID).Scan(&executionCount); err != nil {

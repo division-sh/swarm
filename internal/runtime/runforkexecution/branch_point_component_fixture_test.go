@@ -3,6 +3,7 @@ package runforkexecution
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	startupownership "github.com/division-sh/swarm/internal/runtime/startupownership"
 	"testing"
 	"time"
@@ -19,6 +20,7 @@ import (
 	"github.com/division-sh/swarm/internal/runtime/core/worklifetime"
 	"github.com/division-sh/swarm/internal/runtime/correlation"
 	"github.com/division-sh/swarm/internal/runtime/decisioncard"
+	"github.com/division-sh/swarm/internal/runtime/deliverycontinuation"
 	"github.com/division-sh/swarm/internal/runtime/deliverylifecycle"
 	"github.com/division-sh/swarm/internal/runtime/effects"
 	"github.com/division-sh/swarm/internal/runtime/engine"
@@ -29,6 +31,7 @@ import (
 	"github.com/division-sh/swarm/internal/runtime/pipeline"
 	"github.com/division-sh/swarm/internal/runtime/pipelineobligation"
 	"github.com/division-sh/swarm/internal/runtime/runfork"
+	"github.com/division-sh/swarm/internal/runtime/runlifecycle"
 	"github.com/division-sh/swarm/internal/runtime/semanticvalue"
 	"github.com/division-sh/swarm/internal/runtime/testfixtures/canonicalrouting"
 	"github.com/division-sh/swarm/internal/sourceartifact"
@@ -61,6 +64,93 @@ func q1StageBranchPointComponent(t *testing.T, ctx context.Context, request Sele
 		t.Fatalf("original native child: %+v err=%v", materialized, err)
 	}
 	return q1AttachBranchPointComponent(t, prepared, materialized)
+}
+
+// This exercises selected-phase work only. It neither activates the child nor
+// creates the public handoff ACK; those assertions use the live fixture.
+func q1ExecuteSelectedPhaseComponent(t *testing.T, ctx context.Context, request SelectedContractExecutionRequest) (out SelectedContractExecutionResult, finalErr error) {
+	t.Helper()
+	if !request.AgentRuntime.ExecutionPosture.Valid() {
+		request.AgentRuntime.ExecutionPosture = executionposture.Live
+	}
+	ctx, err := selectedFixtureEntryContext(ctx, request.Owner)
+	if err != nil {
+		return SelectedContractExecutionResult{}, err
+	}
+	prepared, err := request.Owner.Prepare(ctx, request)
+	if err != nil {
+		return SelectedContractExecutionResult{}, err
+	}
+	if prepared.forkOperation == nil {
+		prepared.forkOperation, err = bindPreparedSelectedForkOperation(&runfork.ForkOperationRequest{
+			OperationID: uuid.NewString(), Actor: "selected-phase-component", IdempotencyKey: uuid.NewString(),
+			TransportHash: "selected-phase-component", SourceRunID: request.SourceRunID, ForkEventID: request.At, AtStart: request.AtStart,
+			TargetBundleHash: prepared.loadedSource.SourceArtifactFact.BundleHash(), ContractSelection: request.ContractSelection,
+			AllowSourceFreeze: request.AllowSourceFreeze, DataPinOverrides: request.DataPinOverrides,
+		}, prepared.plan)
+		if err != nil {
+			return SelectedContractExecutionResult{}, errors.Join(err, prepared.Close())
+		}
+	}
+	if err := admitSelectedDeploymentRevisionFrontier(prepared.plan, prepared.frontier); err != nil {
+		return SelectedContractExecutionResult{}, errors.Join(err, prepared.Close())
+	}
+	materialized, acknowledged, err := request.Owner.materializePrepared(prepared.operation.PreparationContext(), prepared)
+	if err != nil || !acknowledged {
+		return SelectedContractExecutionResult{Materialization: materialized}, errors.Join(err, prepared.Close())
+	}
+	attachment := q1AttachBranchPointComponent(t, prepared, materialized)
+	defer func() { finalErr = errors.Join(finalErr, attachment.closeResult()) }()
+	proof := attachment.container.Proof()
+	out = SelectedContractExecutionResult{
+		Owner: runfork.RunForkSelectedContractExecutionOwner, Materialization: materialized,
+		SelectedContractExecutionAdmission: &attachment.container.req.Admission,
+		AgentRuntimeMaterialization:        &attachment.container.req.AgentRuntime.Proof,
+		ForkLocalRuntimeContainer:          &proof,
+	}
+	c := attachment.container
+	ctx = c.attachment.ctx
+	if err := c.attachment.runtime.startExecution(ctx, c.attachment.pipeline, c.diagnostics, false); err != nil {
+		return out, err
+	}
+	continuations, err := deliverycontinuation.NewSelected(c.ports.busDurable.DeliveryLifecycle, c.attachment.deliveryAuthority, prepared.operation.selected, c.attachment.runtime.bus, func(_ context.Context, cause error) { c.attachment.cancel(cause) })
+	if err != nil {
+		return out, err
+	}
+	if err := c.attachment.runtime.bus.SetDeliveryContinuationOwner(continuations); err != nil {
+		return out, err
+	}
+	if err := continuations.Start(ctx); err != nil {
+		return out, err
+	}
+	defer func() { finalErr = errors.Join(finalErr, continuations.Retire(context.WithoutCancel(ctx))) }()
+	if err := c.attachment.scheduler.ReleaseStartup(ctx); err != nil {
+		return out, err
+	}
+	inputs, err := c.commitSelectedInputs()
+	if err != nil {
+		return out, err
+	}
+	defer func() {
+		for _, input := range inputs {
+			finalErr = errors.Join(finalErr, c.attachment.runtime.bus.AbandonPreparedPublish(context.WithoutCancel(input.ctx), input.prepared))
+		}
+	}()
+	for _, input := range inputs {
+		if err := c.dispatchCommittedInput(input); err != nil {
+			return out, err
+		}
+		out.ExecutedEventCount++
+		out.ForkEvents = append(out.ForkEvents, SelectedContractExecutionForkEvent{
+			SourceEventID: input.sourceEventID, ForkEventID: input.prepared.Event.ID(), EventName: string(input.prepared.Event.Type()),
+		})
+	}
+	if err := continuations.Synchronize(ctx); err != nil {
+		return out, err
+	}
+	wait, cancel := context.WithTimeout(ctx, selectedContractAgentRuntimeDefaultQuiescenceTimeout)
+	defer cancel()
+	return out, c.attachment.runtime.WaitForQuiescence(wait, c.attachment.runtime.bus)
 }
 
 func q1AttachBranchPointComponent(t *testing.T, prepared *PreparedSelectedFork, materialized runfork.RunForkMaterialization) *q1BranchPointAttachment {
@@ -113,31 +203,64 @@ func (f *q1BranchPointAttachment) activate() (runfork.RunForkActivation, error) 
 	p := f.prepared
 	return p.owner.ports.fork.ActivateRunForkForSelectedContractExecution(effects.WithAuthority(p.operation.Context(), f.container.authority), runfork.RunForkSelectedContractExecutionActivateRequest{
 		InheritedSchedules: p.readiness, ForkOperation: p.forkOperation, DataPins: f.materialized.DataPins,
-		ExecutionSource: p.loadedSource.Source, ForkRunID: f.materialized.ForkRunID, AllowSourceFreeze: true,
+		ExecutionSource: p.loadedSource.Source, ForkRunID: f.materialized.ForkRunID,
 		AllowedSourceEventIDs: selectedContractExecutionFrontierEventIDs(p.frontier.FrontierEvents),
 		FrontierAdmission:     p.frontier, RouteTopology: p.routeTopology, RecipientPlanning: *p.model.RecipientPlanning,
 	})
 }
 
+func (f *q1BranchPointAttachment) serveSelectedControls(t *testing.T) {
+	t.Helper()
+	if _, err := f.prepared.owner.ports.busDurable.RunLifecycle.TransitionActiveRun(f.container.attachment.ctx, runlifecycle.ActiveTransitionRequest{
+		RunID: f.materialized.ForkRunID, State: runlifecycle.StateRunning,
+	}); err != nil {
+		t.Fatal(err)
+	}
+	if err := f.prepared.owner.retainPrepared(f.prepared); err != nil {
+		t.Fatal(err)
+	}
+	if err := f.container.Serve(); err != nil {
+		t.Fatal(err)
+	}
+	waitSelectedRuntimeStartup(t, f.prepared.operation.Context(), f.prepared.owner, f.materialized.ForkRunID)
+}
+
 func (f *q1BranchPointAttachment) close(t *testing.T) {
 	t.Helper()
+	if err := f.closeResult(); err != nil {
+		t.Error(err)
+	}
+}
+
+func (f *q1BranchPointAttachment) closeResult() error {
 	if f.closed {
-		return
+		return nil
+	}
+	f.prepared.bindMu.Lock()
+	closing := f.prepared.closed
+	f.prepared.bindMu.Unlock()
+	if closing {
+		err := f.prepared.Close()
+		f.closed = err == nil
+		return err
 	}
 	ctx := f.prepared.operation.Context()
+	if runtime := f.container.attachment.runtime; runtime != nil {
+		if err := runtime.stopExecutionWork(); err != nil {
+			return err
+		}
+	}
 	if err := f.container.Quiesce(ctx); err != nil {
-		t.Error(err)
-		return
+		return err
 	}
 	if err := f.container.Close(ctx); err != nil {
-		t.Error(err)
-		return
+		return err
 	}
 	if err := f.prepared.Close(); err != nil {
-		t.Error(err)
-		return
+		return err
 	}
 	f.closed = true
+	return nil
 }
 
 func q1BranchPointSourceConstructor(t *testing.T, ctx context.Context, owner SelectedContractExecutionOwner, loaded LoadedSelectedContractSource) (*manager.AgentManager, *pipeline.PipelineCoordinator) {
@@ -185,15 +308,15 @@ func q1BranchPointSourceConstructor(t *testing.T, ctx context.Context, owner Sel
 }
 
 func q1StateOnlyGateComponentSource(t *testing.T, owner SelectedContractExecutionOwner) (context.Context, SelectedContractExecutionRequest, func()) {
-	return q1GateComponentSource(t, owner, true, false)
+	return q1GateComponentSource(t, owner, true, false, false)
 }
 
-func q1GateComponentSource(t *testing.T, owner SelectedContractExecutionOwner, decided, pending bool) (context.Context, SelectedContractExecutionRequest, func()) {
+func q1GateComponentSource(t *testing.T, owner SelectedContractExecutionOwner, decided, pending, live bool) (context.Context, SelectedContractExecutionRequest, func()) {
 	t.Helper()
 	selected := owner.ports.fork
 	ctx := runForkTestContext(t)
 	repo := runForkExecutionRepoRoot(t)
-	bundle, err := contracts.LoadWorkflowContractBundleWithOverrides(repo, canonicalrouting.CopyConstructedGateForkControl(t, true), contracts.DefaultPlatformSpecFile(repo))
+	bundle, err := contracts.LoadWorkflowContractBundleWithOverrides(repo, canonicalrouting.CopyConstructedGateMutationControl(t, true), contracts.DefaultPlatformSpecFile(repo))
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -210,10 +333,25 @@ func q1GateComponentSource(t *testing.T, owner SelectedContractExecutionOwner, d
 	}
 	at := time.Now().UTC().Add(-time.Minute).Truncate(time.Microsecond)
 	ctx = originalSelectedFixtureContext(t, ctx, any(selected).(startupownership.Store))
-	storetest.RequireRun(t, ctx, selected.(storetest.RunFixtureStore), storetest.RunFixture{
-		RunID: runID, Origin: storetest.ScenarioSetupOrigin(), Artifact: bundle.SourceArtifact,
-		BundleHash: fact.BundleHash(), StartedAt: at,
-	})
+	if live {
+		artifacts := selected.(interface {
+			EnsureSourceArtifact(context.Context, *sourceartifact.AdmittedSourceArtifact) (sourceartifact.EnsureResult, error)
+		})
+		if _, err := artifacts.EnsureSourceArtifact(ctx, bundle.SourceArtifact); err != nil {
+			t.Fatal(err)
+		}
+		if _, err := selected.(runlifecycle.OperationOwner).CreateRun(ctx, runlifecycle.CreateRequest{
+			RunID: runID, Origin: runlifecycle.DeploymentRunOrigin(), Source: fact, StartedAt: at,
+			LiveScope: runlifecycle.LiveRunScope{FlowPath: "."},
+		}); err != nil {
+			t.Fatal(err)
+		}
+	} else {
+		storetest.RequireRun(t, ctx, selected.(storetest.RunFixtureStore), storetest.RunFixture{
+			RunID: runID, Origin: storetest.ScenarioSetupOrigin(), Artifact: bundle.SourceArtifact,
+			BundleHash: fact.BundleHash(), StartedAt: at,
+		})
+	}
 	loader := SourceArtifactSelectedContractSourceLoader{RepoRoot: repo, Store: selected.(SourceArtifactSelectedContractSourceStore)}
 	loaded, err := loader.LoadRunForkSelectedContractSourceForRequest(ctx, SelectedContractSourceLoadRequest{SourceRunID: runID, SourceArtifactFact: fact, Selection: testContractSelection()})
 	if err != nil {
@@ -315,7 +453,7 @@ func q1DeploymentComponentSource(t *testing.T, owner SelectedContractExecutionOw
 	t.Helper()
 	selected := owner.ports.fork
 	repo, root := runForkExecutionRepoRoot(t), t.TempDir()
-	writeSelectedContractFixtureFile(t, root+"/schema.yaml", "name: branch-revision\nstages:\n  pending: {}\n  later: {final: true}\npins:\n  outputs:\n    - records.ready\n")
+	writeSelectedContractFixtureFile(t, root+"/schema.yaml", "name: branch-revision\nstages:\n  pending: {}\npins:\n  outputs:\n    - records.ready\n")
 	writeSelectedContractFixtureFile(t, root+"/events.yaml", "records.ready:\n  body: text\n")
 	bundle, err := contracts.LoadWorkflowContractBundleWithOverrides(repo, root, contracts.DefaultPlatformSpecFile(repo))
 	if err != nil {
@@ -386,6 +524,14 @@ func q1DeploymentComponentSource(t *testing.T, owner SelectedContractExecutionOw
 	state.Accumulator = json.RawMessage(`{"source_advanced":{"count":1}}`)
 	operation := runfork.ForkOperationRequest{OperationID: uuid.NewString(), Actor: "bearer:branch-point-proof", IdempotencyKey: uuid.NewString(), TransportHash: "sha256:branch-point-proof",
 		SourceRunID: runID, TargetBundleHash: catalog.BundleHash, ContractSelection: testContractSelection(), AllowSourceFreeze: true}
+	latest, err := selected.PlanRunFork(ctx, runfork.RunForkPlanRequest{SourceRunID: runID})
+	if err != nil {
+		t.Fatal(err)
+	}
+	operation, err = operation.BindResolvedPoint(runfork.RunForkPoint{Kind: runfork.RunForkPointDeploymentRevision, Revision: latest.ForkPoint.Revision})
+	if err != nil {
+		t.Fatal(err)
+	}
 	request := SelectedContractExecutionRequest{Owner: owner, SourceRunID: runID, ForkOperation: &operation, AllowSourceFreeze: true,
 		SourceLoader: loader, ContractSelection: testContractSelection(), AgentRuntime: SelectedContractAgentRuntimeOptions{ProcessCapability: owner.ports.contexts.capability, ExecutionPosture: executionposture.Live}}
 	return ctx, request, func() {

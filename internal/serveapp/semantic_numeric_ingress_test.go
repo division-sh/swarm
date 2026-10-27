@@ -77,6 +77,7 @@ func TestServedSemanticNumericIdempotencyReplay(t *testing.T) {
 					}
 					semanticNumericOutput(t, endpoint, db, c.run)
 					cases = append(cases, c)
+					requireServedOKJSONRPC(t, endpoint, "run.pause", map[string]any{"run_id": c.run, "idempotency_key": uuid.NewString()})
 				}
 			}
 			if code := process.stop(); code != 0 {

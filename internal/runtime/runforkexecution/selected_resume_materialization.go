@@ -45,7 +45,9 @@ func (o SelectedContractExecutionOwner) resumePrepared(ctx context.Context, prep
 	if err != nil {
 		return runfork.RunForkMaterialization{}, err
 	}
-	if (action != selectedRecoveryResume && action != selectedRecoveryActivate) || !sameSelectedForkPointIdentity(prepared.plan.ForkPoint, binding.ForkPoint) ||
+	point := recovered.Operation.Request.ResolvedPoint
+	if point == nil || point.Validate() != nil || *point != prepared.plan.ForkPoint ||
+		(action != selectedRecoveryResume && action != selectedRecoveryActivate) || !sameSelectedForkPointIdentity(prepared.plan.ForkPoint, binding.ForkPoint) ||
 		prepared.plan.SourceRunID != binding.SourceRunID || prepared.loadedSource.SourceArtifactFact.BundleHash() != availability.BundleHash {
 		return runfork.RunForkMaterialization{}, errors.New("selected resume plan differs from committed child")
 	}
@@ -54,7 +56,7 @@ func (o SelectedContractExecutionOwner) resumePrepared(ctx context.Context, prep
 	}
 	return runfork.RunForkMaterialization{
 		SourceRunID: binding.SourceRunID, ForkRunID: recovered.RunID,
-		ForkRunStatus: resume.ForkRunStatus, ForkPoint: binding.ForkPoint,
+		ForkRunStatus: resume.ForkRunStatus, ForkPoint: *point,
 		SelectedContractBinding: &binding, DeliveryResumeBlocked: true, SourceRunStatusUnchanged: true,
 		DataPins:        append(resume.Pins[:0:0], resume.Pins...),
 		AgentTopologies: append(resume.AgentTopologies[:0:0], resume.AgentTopologies...),

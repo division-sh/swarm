@@ -57,7 +57,8 @@ func TestServedRootInputFeedsExecuteAndSettleBothStores(t *testing.T) {
 						t.Fatalf("root input run.start: transport=%v rpc=%s", first.err, first.rpcError)
 					}
 					runID := params["run_id"].(string)
-					requireServedRunStatus(t, rt.Endpoint, runID, "completed")
+					requireServedRunStatus(t, rt.Endpoint, runID, "live")
+					waitIssue2564LiveRunSettlement(t, issue2564ServedFixture{Endpoint: rt.Endpoint}, runID)
 					waitServedBoundaryPublicationCompletion(t, rt, runID)
 					var rows operatorread.OperatorEventListResult
 					requireServedJSONRPCResult(t, rt.Endpoint, "event.list", map[string]any{

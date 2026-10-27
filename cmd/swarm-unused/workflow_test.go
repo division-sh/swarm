@@ -39,7 +39,7 @@ func TestWorkflowNativeUnionIsRequired(t *testing.T) {
 		job, platform, runner string
 		timeoutMinutes        int
 	}{
-		{"unused-linux", "linux", "ubuntu-latest", 19}, {"unused-darwin", "darwin", "macos-latest", 30},
+		{"unused-linux", "linux", "ubuntu-latest", 28}, {"unused-darwin", "darwin", "macos-latest", 30},
 	} {
 		job, ok := workflow.Jobs[owner.job]
 		if !ok || job.If != nativeCadence || !slices.Equal(job.Needs, []string{"ci-plan"}) || job.ContinueOnError != nil || job.RunsOn != owner.runner || job.TimeoutMinutes != owner.timeoutMinutes {

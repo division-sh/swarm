@@ -7,11 +7,18 @@ import (
 	"os"
 	"path/filepath"
 	"strings"
+	"sync/atomic"
 	"testing"
 	"time"
 
+	"github.com/division-sh/swarm/internal/config"
+
+	runtimepkg "github.com/division-sh/swarm/internal/runtime"
 	"github.com/division-sh/swarm/internal/runtime/contracts"
+	runtimecredentials "github.com/division-sh/swarm/internal/runtime/credentials"
 	"github.com/division-sh/swarm/internal/runtime/pipeline"
+	"github.com/division-sh/swarm/internal/runtime/runfork"
+	"github.com/division-sh/swarm/internal/runtime/runforkexecution"
 	"github.com/division-sh/swarm/internal/runtime/semanticview"
 	"github.com/division-sh/swarm/internal/runtime/startupownership"
 	"github.com/division-sh/swarm/internal/runtime/testfixtures/notifyallchildren"
@@ -24,6 +31,20 @@ func deploymentResourceSourceWithAgent(t *testing.T, includeAgent bool) semantic
 	root := notifyallchildren.WriteVariant(t, notifyallchildren.Options{FiniteLifecycle: true})
 	if !includeAgent {
 		if err := os.Remove(filepath.Join(root, notifyallchildren.ChildFlowID, "agents.yaml")); err != nil {
+			t.Fatal(err)
+		}
+		if err := os.Remove(filepath.Join(root, notifyallchildren.ChildFlowID, "events.yaml")); err != nil {
+			t.Fatal(err)
+		}
+		path := filepath.Join(root, notifyallchildren.ChildFlowID, "nodes.yaml")
+		raw, err := os.ReadFile(path)
+		if err != nil {
+			t.Fatal(err)
+		}
+		text := strings.Replace(string(raw), "    - account.notification.completed\n", "", 1)
+		text = strings.Replace(text, "    account.notification.completed:\n      advances_to: completed\n", "", 1)
+		text = strings.Replace(text, "    account.registered:\n", "    account.registered:\n      advances_to: completed\n", 1)
+		if err := os.WriteFile(path, []byte(text), 0o600); err != nil {
 			t.Fatal(err)
 		}
 	}
@@ -49,13 +70,18 @@ func deploymentResourceSourceWithAgent(t *testing.T, includeAgent bool) semantic
 }
 
 type deploymentResourceFixture struct {
-	selected    notifyAllChildrenStore
-	db          *sql.DB
-	postgresDSN string
-	source      semanticview.Source
-	runtime     notifyAllChildrenRuntime
-	topology    *notifyAllChildrenProcessTopology
-	ctx         context.Context
+	selected                    notifyAllChildrenStore
+	db                          *sql.DB
+	postgresDSN                 string
+	source                      semanticview.Source
+	runtime                     notifyAllChildrenRuntime
+	topology                    *notifyAllChildrenProcessTopology
+	ctx                         context.Context
+	liveContexts                *runtimepkg.RuntimeContextManager
+	config                      *config.Config
+	ordinaryProviderCredentials runtimecredentials.Store
+	forkAgents                  runforkexecution.SelectedContractAgentRuntimeOptions
+	forkRequest                 atomic.Pointer[runfork.ForkOperationRequest]
 }
 
 type deploymentFanOutDiagnostic struct {
@@ -77,9 +103,16 @@ func newDeploymentResourceFixtureWithAgent(t *testing.T, backend string, include
 	return newDeploymentResourceFixtureWithSource(t, backend, deploymentResourceSourceWithAgent(t, includeAgent))
 }
 
-func newDeploymentResourceFixtureWithSource(t *testing.T, backend string, source semanticview.Source) *deploymentResourceFixture {
+func newDeploymentResourceFixtureWithSource(t *testing.T, backend string, source semanticview.Source, options ...notifyAllChildrenRuntimeOptions) *deploymentResourceFixture {
 	t.Helper()
-	f := &deploymentResourceFixture{source: source}
+	if len(options) > 1 {
+		t.Fatal("deployment fixture accepts one ordinary runtime configuration")
+	}
+	var opts notifyAllChildrenRuntimeOptions
+	if len(options) == 1 {
+		opts = options[0]
+	}
+	f := &deploymentResourceFixture{source: source, config: opts.ordinaryConfig, ordinaryProviderCredentials: opts.ordinaryProviderCredentials}
 	switch backend {
 	case "sqlite":
 		selected := storetest.StartSQLiteRuntimeStore(t)
@@ -102,8 +135,12 @@ func newDeploymentResourceFixtureWithSource(t *testing.T, backend string, source
 
 func (f *deploymentResourceFixture) boot(t *testing.T) {
 	t.Helper()
+	f.liveContexts = nil
 	f.runtime = newNotifyAllChildrenRuntime(t, f.selected, f.db, f.source, time.Now, notifyAllChildrenRuntimeOptions{
-		processTopology: f.topology,
+		ordinaryContext:             true,
+		ordinaryConfig:              f.config,
+		ordinaryProviderCredentials: f.ordinaryProviderCredentials,
+		processTopology:             f.topology,
 		fanOutExecutor: func(coordinator *pipeline.PipelineCoordinator) startupownership.FanOutExecutor {
 			return deploymentFanOutDiagnostic{FanOutExecutor: coordinator, t: t}
 		},

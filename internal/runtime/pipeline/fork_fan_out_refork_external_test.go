@@ -8,7 +8,6 @@ import (
 	"time"
 
 	"github.com/division-sh/swarm/internal/operatorread"
-	"github.com/division-sh/swarm/internal/runtime/core/managedexecution"
 	"github.com/division-sh/swarm/internal/runtime/deliverylifecycle"
 	"github.com/division-sh/swarm/internal/runtime/fanoutobligation"
 	"github.com/division-sh/swarm/internal/runtime/lifecycleprobe"
@@ -32,31 +31,48 @@ func proveMixedFanOutChildRefork(t *testing.T, ctx context.Context, selected *st
 		releaseSettlement.Do(func() { close(probe.resumeSettled) })
 	})
 	request.AgentRuntime.AgentManagerOptions.TestLifecycleProbe = probe
+	request.ForkOperation = nil
+	request = forkEngineLiveRequest(t, request.LiveRuntime, selected, request)
 	forkCtx, cancel := context.WithTimeout(ctx, 30*time.Second)
 	defer cancel()
-	result, err := family.Execute(forkCtx, request)
-	if err != nil || !result.Activation.Activated || result.ForkLocalRuntimeContainer == nil {
-		t.Fatalf("continuing child cannot itself execute a fixed-cut fork: %+v err=%v", result, err)
-	}
+	acknowledged := make(chan forkEngineAcknowledgment, 1)
+	done := make(chan struct{})
+	go func() {
+		defer close(done)
+		result, err := family.Execute(forkCtx, request)
+		acknowledged <- forkEngineAcknowledgment{result: result, err: err}
+	}()
+	t.Cleanup(func() {
+		cancel()
+		release.Do(func() { close(probe.resume) })
+		releaseSettlement.Do(func() { close(probe.resumeSettled) })
+		select {
+		case <-done:
+		case <-time.After(10 * time.Second):
+			t.Error("second-generation execution did not join")
+		}
+	})
 	var observed forkEngineObservation
 	select {
 	case observed = <-probe.claimed:
+	case ack := <-acknowledged:
+		t.Fatalf("second-generation fork returned before its controlled claim: %+v err=%v", ack.result, ack.err)
 	case <-forkCtx.Done():
 		t.Fatalf("second-generation receiver claim did not start: %v", forkCtx.Err())
 	}
 	claim, claimed := deliverylifecycle.ClaimFromContext(observed.ctx)
-	admission, admitted := managedexecution.FromContext(observed.ctx)
-	proof := result.ForkLocalRuntimeContainer
-	if !claimed || !admitted || !admission.AuthorizesSelected(proof.RuntimeExecutionID, proof.ForkRunID, proof.RuntimeGeneration) ||
-		claim.RunID() != proof.ForkRunID || claim.RunID() == request.SourceRunID || observed.id == request.At {
+	if !claimed || claim.RunID() == request.SourceRunID || observed.id == request.At {
 		t.Fatal("second-generation fork reused predecessor authority or event identity")
 	}
 	snapshot, err := selected.RuntimeDeps().DeliveryStore.Snapshot(forkCtx, claim.DeliveryID())
 	if err != nil || snapshot.Status != deliverylifecycle.StatusInProgress || snapshot.Route.Target.Route().EntityID != parent.Entity.EntityID {
 		t.Fatalf("second-generation receiver lost exact ownership: %+v err=%v", snapshot, err)
 	}
-	observationRequest := forkEngineExecutionProofRequest(t, result, request.At, observed.id, claim)
-	assertForkEngineCommittedEvidence(t, readForkEngineExecutionProof(t, forkCtx, selected, observationRequest), result, request.At)
+	observationRequest := forkEngineClaimProofRequest(t, forkCtx, selected, request.SourceRunID, request.At, observed)
+	physical := readForkEngineExecutionProof(t, forkCtx, selected, observationRequest)
+	if physical.SourceEventID != request.At || physical.BindingID != observationRequest.BindingID || physical.ExecutionCount != 1 || physical.PublicationCount != 1 {
+		t.Fatalf("second-generation pending claim lost native lineage: %+v", physical)
+	}
 	cut, err := family.Plan(forkCtx, runfork.RunForkPlanRequest{SourceRunID: claim.RunID(), At: observed.id})
 	if err != nil {
 		t.Fatal(err)
@@ -81,6 +97,15 @@ func proveMixedFanOutChildRefork(t *testing.T, ctx context.Context, selected *st
 	}
 	releaseSettlement.Do(func() { close(probe.resumeSettled) })
 	waitForkEnginePipelineSettlement(t, forkCtx, selected, observationRequest, settlement)
+	select {
+	case ack := <-acknowledged:
+		if ack.err != nil || !ack.result.Activation.Activated || observationRequest != forkEngineExecutionProofRequest(t, ack.result, request.At, observed.id, claim) {
+			t.Fatalf("second-generation fork lost its actual post-settlement handoff: %+v err=%v", ack.result, ack.err)
+		}
+		assertForkEngineCommittedEvidence(t, physical, ack.result, request.At)
+	case <-forkCtx.Done():
+		t.Fatal(forkCtx.Err())
+	}
 	after, err := selected.Entities().LoadOperatorEntity(forkCtx, parent.Entity.EntityID, claim.RunID())
 	if err != nil || after.Fields["processed_token"] != parent.Fields["processed_token"] || forkFixtureEntityRevision(t, after.Entity.Revision) != forkFixtureEntityRevision(t, before.Entity.Revision)+1 {
 		t.Fatalf("second-generation child did not execute exactly once: before=%+v after=%+v err=%v", before, after, err)

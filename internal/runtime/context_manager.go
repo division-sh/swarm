@@ -299,6 +299,7 @@ type RuntimeContextUse struct {
 	runtime          *Runtime
 	lease            *worklifetime.Lease
 	leases           []*worklifetime.Lease
+	grant            *runtimestartupownership.GrantEvidence
 	releaseAdmission func()
 	once             sync.Once
 }
@@ -314,13 +315,16 @@ func (u *RuntimeContextUse) WorkContext() context.Context {
 	if u == nil {
 		return context.Background()
 	}
+	ctx := context.Background()
 	if len(u.leases) > 0 {
-		return u.leases[len(u.leases)-1].Context()
+		ctx = u.leases[len(u.leases)-1].Context()
+	} else if u.lease != nil {
+		ctx = u.lease.Context()
 	}
-	if u.lease == nil {
-		return context.Background()
+	if u.grant != nil {
+		ctx = runtimestartupownership.WithGenerationGrantEvidence(ctx, *u.grant)
 	}
-	return u.lease.Context()
+	return ctx
 }
 
 func (u *RuntimeContextUse) Done() error {
@@ -392,6 +396,7 @@ type RuntimeContextDeactivationResult struct {
 type RuntimeContextManager struct {
 	mu                         sync.RWMutex
 	sourceSetMu                sync.Mutex
+	liveSelectionMu            sync.Mutex
 	availability               RunBundleAvailabilityReader
 	contexts                   map[string]*runtimeContextEntry
 	order                      []string
@@ -487,7 +492,7 @@ func (m *RuntimeContextManager) quiesceConstructionFailure() error {
 func ValidateRuntimeContextSet(contexts ...BundleContext) error {
 	manager := newRuntimeContextManagerState(nil)
 	for _, contextDef := range contexts {
-		if err := manager.register(contextDef, false); err != nil {
+		if err := manager.register(contextDef, false, false); err != nil {
 			return err
 		}
 	}
@@ -500,10 +505,21 @@ func (m *RuntimeContextManager) Register(contextDef BundleContext) error {
 	}
 	m.sourceSetMu.Lock()
 	defer m.sourceSetMu.Unlock()
-	return m.register(contextDef, true)
+	return m.register(contextDef, true, false)
 }
 
-func (m *RuntimeContextManager) register(contextDef BundleContext, activateOccurrences bool) error {
+// RegisterLiveReplacement publishes the sole bundle after withdrawal. Returning
+// to a prior bundle also requires its exact previous occurrence to have joined.
+func (m *RuntimeContextManager) RegisterLiveReplacement(contextDef BundleContext) error {
+	if m == nil {
+		return errors.New("runtime context manager is required")
+	}
+	m.sourceSetMu.Lock()
+	defer m.sourceSetMu.Unlock()
+	return m.register(contextDef, true, true)
+}
+
+func (m *RuntimeContextManager) register(contextDef BundleContext, activateOccurrences, replaceJoined bool) error {
 	if m == nil {
 		return fmt.Errorf("runtime context manager is required")
 	}
@@ -517,8 +533,9 @@ func (m *RuntimeContextManager) register(contextDef BundleContext, activateOccur
 	if m.contexts == nil {
 		m.contexts = map[string]*runtimeContextEntry{}
 	}
-	if _, exists := m.contexts[contextDef.BundleHash()]; exists {
-		return fmt.Errorf("duplicate runtime context bundle_hash %s", contextDef.BundleHash())
+	previous, err := m.registrationPredecessorLocked(contextDef, replaceJoined)
+	if err != nil {
+		return err
 	}
 	collision, duplicateAgent, err := m.duplicateLoadedAgentSlugLocked(contextDef)
 	if err != nil {
@@ -557,35 +574,73 @@ func (m *RuntimeContextManager) register(contextDef BundleContext, activateOccur
 		state:     RuntimeContextStateUnloaded,
 		cause:     RuntimeContextCauseNotLoaded,
 	}
-	m.order = append(m.order, contextDef.BundleHash())
-	sort.Strings(m.order)
+	if previous == nil {
+		m.order = append(m.order, contextDef.BundleHash())
+		sort.Strings(m.order)
+	}
 	if err := m.publishRuntimeContextVisibilityLocked(runtimeContextVisibilityUpdate{
 		entry: m.contexts[contextDef.BundleHash()], state: RuntimeContextStateLoaded,
 	}); err != nil {
-		delete(m.contexts, contextDef.BundleHash())
-		for i, bundleHash := range m.order {
-			if bundleHash == contextDef.BundleHash() {
-				m.order = append(m.order[:i], m.order[i+1:]...)
-				break
-			}
-		}
-		var retireErr error
-		for serviceID, occurrence := range standing {
-			if occurrence != nil {
-				if occurrenceErr := occurrence.RetireAndWait(context.Background()); occurrenceErr != nil {
-					retireErr = errors.Join(retireErr, fmt.Errorf("retire standing occurrence %s after registration failure: %w", serviceID, occurrenceErr))
-				}
-			}
-		}
-		return errors.Join(err, retireErr)
+		return errors.Join(err, m.rollbackRegistrationLocked(contextDef.BundleHash(), previous, standing))
 	}
 	if activateOccurrences && runtimeOwner != nil && runtimeOwner.Bus != nil {
 		runtimeOwner.Bus.SetStandingRunWorkOwner(m)
 	}
-	if m.primaryBundleHash == "" {
+	if m.primaryBundleHash == "" || replaceJoined {
 		m.primaryBundleHash = contextDef.BundleHash()
 	}
 	return nil
+}
+
+// W1 deletes the standing branch with item 4.
+func (m *RuntimeContextManager) rollbackRegistrationLocked(hash string, previous *runtimeContextEntry, standing map[string]*worklifetime.StandingOccurrence) error {
+	if previous != nil {
+		m.contexts[hash] = previous
+	} else {
+		delete(m.contexts, hash)
+		for i, bundleHash := range m.order {
+			if bundleHash == hash {
+				m.order = append(m.order[:i], m.order[i+1:]...)
+				break
+			}
+		}
+	}
+	var retireErr error
+	for serviceID, occurrence := range standing {
+		if occurrence != nil {
+			if err := occurrence.RetireAndWait(context.Background()); err != nil {
+				retireErr = errors.Join(retireErr, fmt.Errorf("retire standing occurrence %s after registration failure: %w", serviceID, err))
+			}
+		}
+	}
+	return retireErr
+}
+
+func (m *RuntimeContextManager) registrationPredecessorLocked(contextDef BundleContext, replaceJoined bool) (*runtimeContextEntry, error) {
+	if replaceJoined {
+		for _, entry := range m.contexts {
+			if runtimeContextEntryLoaded(entry) || !entry.shutdownMu.TryLock() {
+				return nil, errors.New("bundle replacement requires every predecessor to be withdrawn and joined")
+			}
+			joined := entry.shutdownComplete
+			entry.shutdownMu.Unlock()
+			if !joined {
+				return nil, errors.New("bundle replacement requires every predecessor to be joined")
+			}
+		}
+	}
+	previous := m.contexts[contextDef.BundleHash()]
+	if previous != nil {
+		if !replaceJoined || previous.state != RuntimeContextStateUnloaded || previous.runtime == contextDef.Runtime || !previous.shutdownMu.TryLock() {
+			return nil, fmt.Errorf("duplicate runtime context bundle_hash %s", contextDef.BundleHash())
+		}
+		joined := previous.shutdownComplete
+		previous.shutdownMu.Unlock()
+		if !joined {
+			return nil, fmt.Errorf("runtime context %s has not joined", contextDef.BundleHash())
+		}
+	}
+	return previous, nil
 }
 
 func (m *RuntimeContextManager) BeginStandingRunRecovery(
@@ -1514,7 +1569,18 @@ func (m *RuntimeContextManager) acquireEntryLocked(ctx context.Context, entry *r
 		releaseAdmission()
 		return nil, fmt.Errorf("admit runtime context use: %w", err)
 	}
-	return &RuntimeContextUse{Context: *entry.context, runtime: entry.runtime, lease: lease, releaseAdmission: releaseAdmission}, nil
+	use := &RuntimeContextUse{Context: *entry.context, runtime: entry.runtime, lease: lease, releaseAdmission: releaseAdmission}
+	entry.runtime.lifecycleMu.Lock()
+	grant := entry.runtime.startupGrant
+	entry.runtime.lifecycleMu.Unlock()
+	if grant != nil {
+		evidence, err := grant.Evidence()
+		if err != nil {
+			return nil, errors.Join(err, use.Done())
+		}
+		use.grant = &evidence
+	}
+	return use, nil
 }
 
 func (m *RuntimeContextManager) AcquireBundleHash(ctx context.Context, bundleHash string) (*RuntimeContextUse, RuntimeContextLookup, error) {
@@ -2721,6 +2787,13 @@ func (p *PreparedRuntimeSourceSetTransition) publishCommittedVisibility() error 
 		updates = append(updates, runtimeContextVisibilityUpdate{entry: item.entry, state: RuntimeContextStateLoaded})
 	}
 	return p.manager.publishRuntimeContextVisibilityLocked(updates...)
+}
+
+// Serialize the native selection and its post-ACK reconciliation, not preparation
+// or source-set replacement. Durable writers still enforce their own fences.
+func (m *RuntimeContextManager) BeginLiveRunSelection() func() {
+	m.liveSelectionMu.Lock()
+	return m.liveSelectionMu.Unlock
 }
 
 func (m *RuntimeContextManager) AcquireRun(ctx context.Context, runID string) (*RuntimeContextUse, RuntimeContextLookup, runbundle.Availability, error) {

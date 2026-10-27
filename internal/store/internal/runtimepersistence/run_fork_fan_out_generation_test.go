@@ -43,10 +43,6 @@ func TestSelectedForkFanOutBarrierMaterializationBothStores(t *testing.T) {
 	testForkFanOutGenerationWriterEvaluatorBothStores(t, true, false)
 }
 
-func TestForkFanOutGenerationWriterEvaluatorBothStores(t *testing.T) {
-	testForkFanOutGenerationWriterEvaluatorBothStores(t, true, false)
-}
-
 // Ordinary and selected activation retain their different authority contracts.
 func TestOrdinaryForkFanOutOriginWriterEvaluatorBothStores(t *testing.T) {
 	testForkFanOutGenerationWriterEvaluatorBothStores(t, false, false)
@@ -220,6 +216,12 @@ func testForkFanOutGenerationWriterEvaluatorBothStores(t *testing.T, selectedExe
 						if err != nil {
 							t.Fatal(err)
 						}
+						fixed := request.Preparation.ForkPoint
+						request.ForkOperation = &runfork.ForkOperationRequest{
+							OperationID: uuid.NewString(), Actor: "selected-fanout-native-fixture", IdempotencyKey: uuid.NewString(),
+							TransportHash: "selected-fanout-native-fixture", SourceRunID: runID, ForkEventID: request.At,
+							ResolvedPoint: &fixed, TargetBundleHash: request.SourceArtifactFact.BundleHash(), ContractSelection: request.ContractSelection,
+						}
 						selectedRequest = request
 						materialize = func() (runfork.RunForkMaterialization, error) {
 							return forkOwner.MaterializeRunForkForSelectedContractExecution(ctx, request)
@@ -288,6 +290,7 @@ func testForkFanOutGenerationWriterEvaluatorBothStores(t *testing.T, selectedExe
 					before := snapshotForkHistoricalExecutionTables(t, fixture.db, backend.name == "postgres")
 					var repeated runfork.RunForkMaterialization
 					if selectedExecution {
+						selectedRequest.ForkOperation = nil
 						repeated, err = forkOwner.RequireMaterializedRunForkForSelectedContractExecution(ctx, child.ForkRunID, selectedRequest)
 					} else {
 						repeated, err = fixture.store.(runForkSelectedLifecycleStore).RequireMaterializedRunFork(ctx, child.ForkRunID, materializeRequest)
@@ -321,7 +324,7 @@ func testForkFanOutGenerationWriterEvaluatorBothStores(t *testing.T, selectedExe
 					var grantedOwner pipeline.FanOutObligationOwner
 					var selectedConsumer selectedForkFanOutConsumer
 					if selectedExecution {
-						ctx, grantedOwner, selectedConsumer = activateSelectedForkFanOutForTest(t, ctx, fixture, source, child, selectedRequest)
+						ctx, grantedOwner, selectedConsumer = admitSelectedForkFanOutForTest(t, ctx, fixture, source, child, selectedRequest)
 					} else {
 						// Ordinary materialization is paused; only its canonical activation
 						// may admit the child turn and freeze the immediate source run.

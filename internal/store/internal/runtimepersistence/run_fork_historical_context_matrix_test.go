@@ -108,7 +108,7 @@ func TestRunForkHistoricalContextCanonicalWriterControlsBothStores(t *testing.T)
 				}
 			}
 			latest, err := f.planner.PlanRunFork(testAuthorActivityContext(), runfork.RunForkPlanRequest{SourceRunID: f.source.runID})
-			if err != nil || latest.ForkPoint.EventID != f.latestID || latest.ForkPoint.Revision != 3 || latest.EventCountAtFork != f.initial.EventCountAtFork+1 {
+			if err != nil || latest.ForkPoint.Kind != runfork.RunForkPointStateRevision || latest.ForkPoint.EventID != "" || latest.ForkPoint.Input != "" || latest.ForkPoint.Revision != 3 || latest.EventCountAtFork != f.initial.EventCountAtFork+1 {
 				t.Fatalf("default latest cursor = %#v, err=%v", latest.ForkPoint, err)
 			}
 			historicalContextRequireUnchanged(t, before, historicalContextDatabaseRows(t, f.db, f.postgres))

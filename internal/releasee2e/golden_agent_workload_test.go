@@ -1091,6 +1091,10 @@ type goldenDiagnosis struct {
 	FailedDeliveries []json.RawMessage `json:"failed_deliveries"`
 	FanOut           json.RawMessage   `json:"fan_out"`
 	TestQuiescence   goldenQuiescence  `json:"test_quiescence"`
+	Instances        []struct {
+		Stage       string `json:"stage"`
+		Disposition string `json:"disposition"`
+	} `json:"instances"`
 }
 
 func waitForGoldenCrashCheckpoint(t *testing.T, process *releaseServeProcess, store goldenStoreSelection, runID string, candidateIDs []string, deadline time.Duration) goldenRuntimeLog {
@@ -1279,6 +1283,23 @@ func waitForGoldenTerminalRun(t *testing.T, process *releaseServeProcess, store 
 			return false, err
 		}
 		last = result.Run
+		if last.Status == "live" && !process.internalLifecycle {
+			var diagnosis goldenDiagnosis
+			if err := rpc.call(ctx, "run.diagnose", map[string]any{"run_id": runID}, &diagnosis); err != nil {
+				return false, err
+			}
+			finals := 0
+			for _, instance := range diagnosis.Instances {
+				if instance.Stage == "" {
+					continue
+				}
+				if instance.Disposition != "final" {
+					return false, nil
+				}
+				finals++
+			}
+			return finals > 0 && diagnosis.TestQuiescence.Ready && goldenActiveWork(diagnosis.TestQuiescence) == 0 && len(diagnosis.FailedDeliveries) == 0, nil
+		}
 		switch last.Status {
 		case "completed":
 			return true, nil

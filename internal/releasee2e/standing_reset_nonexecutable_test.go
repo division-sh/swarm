@@ -22,7 +22,7 @@ func TestStandingResetNonExecutablePublicBothStores(t *testing.T) {
 	lifecycle := buildOwnedMockLifecycleBinary(t, base)
 	for _, backend := range []string{"sqlite", "postgres"} {
 		t.Run(backend, func(t *testing.T) {
-			for _, product := range []string{"terminal", "terminal-revised", "terminal-suspended", "validated-invalid", "validated-invalid-revised", "orphan", "terminal-orphan", "invalid-orphan", "broken-relation"} {
+			for _, product := range []string{"validated-invalid", "validated-invalid-revised", "orphan", "invalid-orphan", "broken-relation"} {
 				t.Run(product, func(t *testing.T) {
 					root := filepath.Join(base, backend, product)
 					store := goldenSQLiteStore(root)
@@ -61,23 +61,12 @@ func TestStandingResetNonExecutablePublicBothStores(t *testing.T) {
 					card := waitForFullLifecycleCard(t, p.rpc, standing.RunID, "lifecycle_ready")
 					ctx, cancel := context.WithTimeout(context.Background(), fullLifecycleRunLimit)
 					defer cancel()
-					if strings.HasPrefix(product, "validated-invalid") {
-						decideFullLifecycleCard(t, p.rpc, card, "invalid-precondition-approve")
-					} else {
-						var result any
-						if err := p.rpc.call(ctx, "mailbox.decide", map[string]any{
-							"card_id": card.CardID, "verdict": "reject", "fields": map[string]any{},
-							"observed_content_hash": card.CardContentHash, "idempotency_key": "terminal-reject",
-						}, &result); err != nil {
-							t.Fatal(err)
-						}
-						waitForFullLifecycleRunStatus(t, p.rpc, standing.RunID, "completed")
-					}
+					decideFullLifecycleCard(t, p.rpc, card, "invalid-precondition-approve")
 					before := captureFullLifecycleEvidence(t, p.rpc, standing.RunID)
 					if err := p.stopAndWait(15 * time.Second); err != nil {
 						t.Fatalf("precondition shutdown: %v\n%s", err, p.output.String())
 					}
-					if product == "terminal-suspended" || strings.HasPrefix(product, "validated-invalid") {
+					if strings.HasPrefix(product, "validated-invalid") {
 						// Explicit offline test precondition, not production repair:
 						// preserve all identity relations and source facts while selecting
 						// the canonical retained-override/invalid-current products.
@@ -131,11 +120,7 @@ func TestStandingResetNonExecutablePublicBothStores(t *testing.T) {
 					if !reflect.DeepEqual(before, captureFullLifecycleEvidence(t, p.rpc, standing.RunID)) {
 						t.Fatal("refused non-executable commands changed predecessor facts")
 					}
-					predecessorStatus := "completed"
-					if strings.HasPrefix(product, "validated-invalid") {
-						predecessorStatus = "running"
-					}
-					beforeRun := waitForFullLifecycleRunStatus(t, p.rpc, standing.RunID, predecessorStatus)
+					beforeRun := waitForFullLifecycleRunStatus(t, p.rpc, standing.RunID, "live")
 					withStandingOperatorWriteFault(t, root, store, func() {
 						var refused standingRuntimePublicResult
 						if err := p.rpc.call(ctx, "standing.reset", map[string]any{"service_id": standing.Origin.ServiceID, "idempotency_key": "failed-no-child-reset"}, &refused); err == nil {
@@ -150,7 +135,7 @@ func TestStandingResetNonExecutablePublicBothStores(t *testing.T) {
 						t.Fatalf("%s public reset: %v\n%s", product, err, p.output.String())
 					}
 					wantState := "active"
-					if product == "terminal-suspended" || strings.HasPrefix(product, "validated-invalid") {
+					if strings.HasPrefix(product, "validated-invalid") {
 						wantState = "suspended"
 					}
 					if reset.ServiceID != standing.Origin.ServiceID || reset.Generation != standing.Origin.Generation+1 || reset.RunID == standing.RunID || reset.EffectiveState != wantState {

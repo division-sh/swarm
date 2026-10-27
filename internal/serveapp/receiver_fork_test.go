@@ -15,13 +15,17 @@ import (
 	"github.com/division-sh/swarm/internal/cliapp"
 	"github.com/division-sh/swarm/internal/events"
 	"github.com/division-sh/swarm/internal/runtime/core/flowidentity"
+	"github.com/division-sh/swarm/internal/runtime/executionposture"
 	"github.com/division-sh/swarm/internal/runtime/lifecycleprobe"
 	"github.com/division-sh/swarm/internal/runtime/lifecycleprobe/lifecycletest"
+	"github.com/division-sh/swarm/internal/runtime/runfork"
 	"github.com/division-sh/swarm/internal/runtime/runforkadmission"
 	runtimerunforkexecution "github.com/division-sh/swarm/internal/runtime/runforkexecution"
 	"github.com/division-sh/swarm/internal/runtime/semanticview"
 	"github.com/division-sh/swarm/internal/runtime/testfixtures/canonicalrouting"
 	"github.com/division-sh/swarm/internal/servedparity"
+	"github.com/division-sh/swarm/internal/store/storetest"
+	"github.com/google/uuid"
 )
 
 type receiverForkPublicationBarrier struct {
@@ -71,7 +75,7 @@ func TestReceiverCompositionForkBothStores(t *testing.T) {
 					observer = publication
 				}
 				configureOwnedMockLifecycleProbe(t, observer)
-				rt := startServedTestSetupEntitiesProofRuntimeFromSource(t, backend, root, func(ctx context.Context, _ string, evt events.Event) error {
+				hook := func(ctx context.Context, _ string, evt events.Event) error {
 					if surface != "pending_refusal" || evt.Type() != "work.requested" {
 						return nil
 					}
@@ -82,13 +86,25 @@ func TestReceiverCompositionForkBothStores(t *testing.T) {
 					case <-ctx.Done():
 						return ctx.Err()
 					}
-				})
+				}
+				posture := executionposture.MockOnly
+				if admitted {
+					posture = executionposture.Live
+				}
+				rt := startServedTestSetupEntitiesProofRuntimeConfigured(t, backend, root, false, posture, hook)
 				t.Cleanup(func() { close(release) })
 				t.Cleanup(publication.unblock)
 				var seedEventID string
 				params := map[string]any{"event_name": "work.requested", "bundle_hash": rt.BundleHash, "payload": map[string]any{"seed": true}, "idempotency_key": "fork-request"}
 				if !fieldless {
 					seed := requireServedEventPublishRPCResult(t, rt.Endpoint, map[string]any{"event_name": "work.seeded", "bundle_hash": rt.BundleHash, "payload": map[string]any{"seed": true}, "idempotency_key": "fork-seed"})
+					if admitted {
+						var rootEventOwner any = rt.SQLite
+						if rt.Postgres != nil {
+							rootEventOwner = rt.Postgres
+						}
+						requireServedLiveRootMode(t, rt.Runtime.ExecutionPosture, storetest.LoadCanonicalEventRecord(t, t.Context(), rootEventOwner, seed.EventID), seed.RunID)
+					}
 					seedEventID = seed.EventID
 					requireServedEventPublishEntityState(t, rt.DB, rt.Backend, seed.RunID, "", "active")
 					if admitted {
@@ -98,6 +114,11 @@ func TestReceiverCompositionForkBothStores(t *testing.T) {
 					params = map[string]any{"event_name": "work.requested", "run_id": seed.RunID, "source_event_id": seed.EventID, "payload": map[string]any{"seed": true}, "idempotency_key": "fork-request"}
 				} else {
 					seed := requireServedEventPublishRPCResult(t, rt.Endpoint, map[string]any{"event_name": "fork.seeded", "bundle_hash": rt.BundleHash, "payload": map[string]any{}, "idempotency_key": "empty-fork-seed"})
+					var rootEventOwner any = rt.SQLite
+					if rt.Postgres != nil {
+						rootEventOwner = rt.Postgres
+					}
+					requireServedLiveRootMode(t, rt.Runtime.ExecutionPosture, storetest.LoadCanonicalEventRecord(t, t.Context(), rootEventOwner, seed.EventID), seed.RunID)
 					seedEventID = seed.EventID
 					waitServedRunDeliveryQuiescence(t, rt.ReadRunDeliveries, seed.RunID)
 					params = map[string]any{"event_name": "work.requested", "run_id": seed.RunID, "source_event_id": seed.EventID, "payload": map[string]any{"seed": true}, "idempotency_key": "fork-request"}
@@ -207,12 +228,13 @@ func TestReceiverCompositionForkBothStores(t *testing.T) {
 					}
 				}
 				checkSource("before fork")
+				wantExecuted := 1
 				if surface == "admitted_http" {
 					params := map[string]any{"source_run_id": request.RunID, "fork_event_id": request.EventID, "allow_source_freeze": true, "idempotency_key": "receiver-fork"}
 					var fork, duplicate apiv1.RunForkExecutionResult
 					requireServedJSONRPCResult(t, rt.Endpoint, "run.fork", params, &fork)
 					requireServedJSONRPCResult(t, rt.Endpoint, "run.fork", params, &duplicate)
-					if fork.ForkRunID != duplicate.ForkRunID || fork.ExecutedEventCount != 0 || fork.SourceRunStatus != "paused" || duplicate.SourceRunStatus != "paused" || fork.SourceFrozen || duplicate.SourceFrozen {
+					if fork.ForkRunID != duplicate.ForkRunID || fork.ExecutedEventCount != wantExecuted || duplicate.ExecutedEventCount != wantExecuted || fork.SourceRunStatus != "paused" || duplicate.SourceRunStatus != "paused" || fork.SourceFrozen || duplicate.SourceFrozen {
 						t.Fatalf("fork replay disagreement: %#v / %#v", fork, duplicate)
 					}
 					forkRunID = fork.ForkRunID
@@ -221,18 +243,43 @@ func TestReceiverCompositionForkBothStores(t *testing.T) {
 					if !ok {
 						t.Fatal("missing fork owner")
 					}
-					result, err := family.Execute(forkCtx, runtimerunforkexecution.SelectedContractExecutionRequest{
+					use, lookup, _, err := rt.Contexts.AcquireRun(forkCtx, request.RunID)
+					if err != nil || use == nil || !lookup.Loaded() {
+						t.Fatalf("acquire actual receiver runtime: loaded=%t err=%v", lookup.Loaded(), err)
+					}
+					defer func() {
+						if err := use.Done(); err != nil {
+							t.Error(err)
+						}
+					}()
+					selection := runforkadmission.SelectedContractSelection(semanticview.Wrap(loadWorkflowValidationBundleAt(t, root)))
+					operation := runfork.ForkOperationRequest{
+						OperationID: uuid.NewString(), Actor: "receiver-composition", IdempotencyKey: surface, TransportHash: surface,
+						SourceRunID: request.RunID, ForkEventID: forkPoint, TargetBundleHash: rt.BundleHash,
+						AllowSourceFreeze: true, ContractSelection: selection,
+					}
+					execution := runtimerunforkexecution.SelectedContractExecutionRequest{
 						SourceRunID: request.RunID, At: forkPoint, AllowSourceFreeze: true, ExpectedBundleHash: rt.BundleHash,
 						SourceLoader:      runtimerunforkexecution.SourceArtifactSelectedContractSourceLoader{RepoRoot: repoRootForTest(), Store: selected.SourceArtifactStore()},
-						ContractSelection: runforkadmission.SelectedContractSelection(semanticview.Wrap(loadWorkflowValidationBundleAt(t, root))),
+						ContractSelection: selection,
+						ForkOperation:     &operation,
 						AgentRuntime:      rt.ForkRuntime,
-					})
+						LiveRuntime:       rt.Runtime,
+						LiveContexts:      rt.Contexts,
+						LiveRuns:          selected.LiveRuns(),
+					}
+					if !admitted {
+						// This pre-handoff refusal retains the component's discard reach,
+						// not a durable operation's separately retained failure history.
+						execution.ForkOperation = nil
+					}
+					result, err := family.Execute(use.WorkContext(), execution)
 					if admitted {
 						if err != nil {
 							t.Fatalf("canonical admitted fork failed: %v", err)
 						}
-						if result.ExecutedEventCount != 0 {
-							t.Fatalf("fork execution count: %d", result.ExecutedEventCount)
+						if result.ExecutedEventCount != wantExecuted || len(result.ForkEvents) != wantExecuted || result.ForkEvents[0].SourceEventID != forkPoint {
+							t.Fatalf("fork did not execute its exact captured input: count=%d events=%+v", result.ExecutedEventCount, result.ForkEvents)
 						}
 						forkRunID = result.Materialization.ForkRunID
 					} else {
@@ -242,6 +289,19 @@ func TestReceiverCompositionForkBothStores(t *testing.T) {
 						}
 						if err == nil || !strings.Contains(err.Error(), want) || result.Activation.Activated || result.Activation.SourceFrozen {
 							t.Fatalf("unsupported replay did not fail closed: %v activated=%t sourceFrozen=%t", err, result.Activation.Activated, result.Activation.SourceFrozen)
+						}
+						t.Logf("refused receiver fork cleanup: run=%s err=%v", result.Materialization.ForkRunID, err)
+						if result.Materialization.ForkRunID == "" {
+							var sourceOwner any = rt.SQLite
+							if rt.Postgres != nil {
+								sourceOwner = rt.Postgres
+							}
+							refusal, err := storetest.ReadSelectedSourceRefusalStorage(t.Context(), sourceOwner, request.RunID, forkPoint)
+							if err != nil || refusal["fork_runs"] != 0 {
+								t.Fatalf("pre-materialization refusal retained child runs: count=%d err=%v", refusal["fork_runs"], err)
+							}
+							checkSource("after pre-materialization refusal")
+							return
 						}
 						// The canonical discard retains completion evidence in a cancelled
 						// run tombstone, but removes executable fork state and deliveries.
@@ -276,7 +336,7 @@ func TestReceiverCompositionForkBothStores(t *testing.T) {
 					rootType, childType, rootState = "", "", "pending"
 					rootFields, childFields = nil, nil
 				}
-				rootPhase := "planned"
+				rootPhase := "ready"
 				rootRevision := 2
 				if fieldless {
 					// The retained root is planned without inventing a field companion.

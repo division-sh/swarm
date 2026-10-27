@@ -48,7 +48,6 @@ func branchFaultBoundaryErrors(root string, overrides map[string][]byte) []strin
 		}
 	}
 	want := map[string]int{
-		branchFaultCaller + "::q1DivergenceInsertFault::public":                 2,
 		branchFaultPublic + "::SetSelectedBranchDivergenceInsertFault::private": 1,
 	}
 	if !reflect.DeepEqual(actual, want) {

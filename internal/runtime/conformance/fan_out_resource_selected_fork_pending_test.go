@@ -233,11 +233,12 @@ func TestDeploymentSourceFixedTPendingReceiverAndChangedPinBothStores(t *testing
 					t.Fatalf("R3b requires settled pipeline, stamped handoff and unclaimed receiver at T: delivery=%q status=%q receipt=%d handoff=%t attempts=%d deferred=%d", deliveryID, deliveryStatus, pipelineReceipts, handoffStamped, attempts, gate.deferred.Load())
 				}
 				point := assertDeploymentForkPendingCandidate(t, f, runfork.RunForkPlanRequest{SourceRunID: sourceRunID}, pointEventID, deliveryID, runfork.RunForkDeploymentPendingReceiver)
-				if point.Kind != runfork.RunForkPointDeploymentRevision {
+				if point.Kind != runfork.RunForkPointStateRevision {
 					t.Fatalf("R3b did not select the post-handoff deployment revision: %+v", point)
 				}
 				t.Logf("R3b exact T: delivery=%s status=%s receipt=%d handoff=%t attempts=%d deferred_claims=%d", deliveryID, deliveryStatus, pipelineReceipts, handoffStamped, attempts, gate.deferred.Load())
 				if changedPin {
+					pauseDeploymentFixtureRun(t, f, sourceRunID)
 					_ = start("new", newRows)
 				}
 				var rollback *selectedDeploymentRollbackPublication
@@ -271,7 +272,7 @@ func TestDeploymentSourceFixedTPendingReceiverAndChangedPinBothStores(t *testing
 				if result.ForkRunID == "" || result.ForkRunID == sourceRunID || len(result.DataPins) != 1 || result.DataPins[0].VersionID != wantVersion.VersionID {
 					t.Fatalf("fixed-T fork did not bind the exact pin: %+v", result)
 				}
-				if result.ForkPointKind != string(runfork.RunForkPointDeploymentRevision) || result.ForkRevision != point.Revision || result.ForkEventID != "" {
+				if result.ForkPointKind != string(runfork.RunForkPointStateRevision) || result.ForkRevision != point.Revision || result.ForkEventID != "" {
 					t.Fatalf("R3b fork changed its fixed post-handoff cut: %+v", result)
 				}
 				defer func() {
@@ -289,19 +290,19 @@ func TestDeploymentSourceFixedTPendingReceiverAndChangedPinBothStores(t *testing
 				f.runtime.bus.SignalDeliveryContinuations()
 				waitNotifyAllChildrenRuntimeWithin(t, f.runtime, result.ForkRunID, time.Until(drainDeadline))
 				if !changedPin {
-					// Ordinal settlement does not join the authored follow-up that
-					// closes this finite collector or its retained executor.
+					// Ordinal settlement does not join the authored follow-up or the
+					// selected executor retired by the live handoff.
 					for {
 						state, err := storetest.ReadSelectedExecutionStorage(drainCtx, f.selected, result.ForkRunID)
 						if err != nil {
 							t.Fatal(err)
 						}
-						if state.State == "closed" && state.RunStatus == "completed" && state.Occurrences == 1 {
+						if state.State == "closed" && state.RunStatus == "live" && state.Occurrences == 1 {
 							break
 						}
 						select {
 						case <-drainCtx.Done():
-							t.Fatalf("finite continued receiver did not complete and join: state=%+v error=%v", state, drainCtx.Err())
+							t.Fatalf("continued receiver did not settle and join its selected owner: state=%+v error=%v", state, drainCtx.Err())
 						case <-time.After(10 * time.Millisecond):
 						}
 					}
@@ -365,7 +366,7 @@ func TestDeploymentSourceFixedTPendingReceiverAndChangedPinBothStores(t *testing
 					terminalPreserved := false
 					for _, entry := range recovery {
 						if entry.RunID == result.ForkRunID {
-							terminalPreserved = entry.Disposition == runfork.SelectedForkRecoveryTerminal && entry.Continuation == nil &&
+							terminalPreserved = entry.Disposition == runfork.SelectedForkRecoveryControlOnly && entry.Continuation == nil &&
 								entry.Operation != nil && entry.Operation.ForkRunID == result.ForkRunID && entry.Operation.Status == runfork.ForkOperationActivated &&
 								entry.Effects.PrelaunchTerminal == 0 && entry.Effects.OutcomeUncertain == 0 && len(entry.PendingCancellations) == 0 && len(entry.CanceledTurns) == 0
 						}

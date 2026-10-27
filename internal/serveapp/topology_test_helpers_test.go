@@ -78,6 +78,10 @@ func (s *supervisorTestRetainedSession) LoadSourceSet(context.Context) (runtimea
 	return s.plan, s.plan.Revision != "", nil
 }
 
+func (*supervisorTestRetainedSession) CheckSourceSetReplacement(context.Context, runtimeagenttopology.SourceSetCommitRequest) error {
+	return nil
+}
+
 func (s *supervisorTestRetainedSession) CommitSourceSet(_ context.Context, req runtimeagenttopology.SourceSetCommitRequest) (runtimeagenttopology.SourceSetCommitResult, error) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
