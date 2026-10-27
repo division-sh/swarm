@@ -10,10 +10,12 @@ import (
 	"time"
 
 	"github.com/division-sh/swarm/internal/runtime/correlation"
+	"github.com/division-sh/swarm/internal/runtime/genericschedule"
 	runtimepipeline "github.com/division-sh/swarm/internal/runtime/pipeline"
 	"github.com/division-sh/swarm/internal/runtime/runbundle"
 	"github.com/division-sh/swarm/internal/runtime/runlifecycle"
 	"github.com/division-sh/swarm/internal/runtime/semanticview"
+	storegenericschedule "github.com/division-sh/swarm/internal/store/internal/backend/genericschedule"
 	"github.com/division-sh/swarm/internal/store/internal/backend/mutationprotocol"
 	storerunbundle "github.com/division-sh/swarm/internal/store/internal/runbundle"
 )
@@ -35,6 +37,7 @@ func (s upgradeSnapshot) ReadBundleUpgradeState(ctx context.Context, runID strin
 type bundleUpgradeMutationOwner interface {
 	bundleUpgradeReadOwner
 	ReviseSourceTx(context.Context, *mutationprotocol.Attempt, runlifecycle.SourceRevisionRequest) (runlifecycle.MutationDisposition, error)
+	genericScheduleTxOwner() GenericScheduleTxOwner
 }
 
 func (s *PipelinePostgresOwner) CommitBundleUpgradeTx(ctx context.Context, attempt *mutationprotocol.Attempt, plan *runbundle.UpgradePlan) error {
@@ -72,12 +75,41 @@ func commitBundleUpgrade(ctx context.Context, attempt *mutationprotocol.Attempt,
 			if err := cancelRemovedUpgradeTimers(ctx, tx, attempt, sqlite, runID, candidate); err != nil {
 				return err
 			}
+			if err := cancelRemovedUpgradeClocks(ctx, tx, attempt, owner.genericScheduleTxOwner(), sqlite, runID, candidate); err != nil {
+				return err
+			}
 			if _, err := owner.ReviseSourceTx(ctx, attempt, runlifecycle.SourceRevisionRequest{RunID: runID, Source: source}); err != nil {
 				return err
 			}
 		}
 		return nil
 	})
+}
+
+func cancelRemovedUpgradeClocks(ctx context.Context, tx *sql.Tx, attempt *mutationprotocol.Attempt, owner GenericScheduleTxOwner, sqlite bool, runID string, candidate semanticview.Source) error {
+	clocks, err := storegenericschedule.ReadRunClocks(ctx, tx, !sqlite, runID, true)
+	if err != nil {
+		return err
+	}
+	declarations := semanticview.ClockSchedules(candidate)
+	for _, clock := range clocks {
+		if clock.Status != genericschedule.StatusActive || slices.ContainsFunc(declarations, func(rule semanticview.ClockSchedule) bool {
+			return rule.FlowID == clock.FlowID && rule.Name == clock.Name
+		}) {
+			continue
+		}
+		if owner == nil {
+			return errors.New("bundle upgrade requires the generic schedule transaction owner")
+		}
+		activation, found, err := owner.LoadActivationTx(ctx, attempt, clock.ActivationID)
+		if err != nil || !found {
+			return errors.Join(err, fmt.Errorf("bundle upgrade clock %s disappeared", clock.ActivationID))
+		}
+		if _, err := owner.CancelAdmissionTx(ctx, attempt, activation.Command, "rule_removed", time.Now().UTC()); err != nil {
+			return err
+		}
+	}
+	return nil
 }
 
 func cancelRemovedUpgradeTimers(ctx context.Context, tx *sql.Tx, attempt *mutationprotocol.Attempt, sqlite bool, runID string, candidate semanticview.Source) error {
