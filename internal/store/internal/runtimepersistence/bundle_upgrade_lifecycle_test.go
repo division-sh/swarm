@@ -9,14 +9,18 @@ import (
 	"testing"
 	"time"
 
+	"github.com/division-sh/swarm/internal/events"
 	"github.com/division-sh/swarm/internal/runtime/agenttopology"
 	"github.com/division-sh/swarm/internal/runtime/authoractivity"
 	"github.com/division-sh/swarm/internal/runtime/correlation"
+	"github.com/division-sh/swarm/internal/runtime/executionmode"
 	"github.com/division-sh/swarm/internal/runtime/failures"
+	"github.com/division-sh/swarm/internal/runtime/genericschedule"
 	"github.com/division-sh/swarm/internal/runtime/pipeline"
 	"github.com/division-sh/swarm/internal/runtime/runbundle"
 	"github.com/division-sh/swarm/internal/runtime/runcontrol"
 	"github.com/division-sh/swarm/internal/runtime/runlifecycle"
+	"github.com/division-sh/swarm/internal/runtime/semanticvalue"
 	"github.com/division-sh/swarm/internal/runtime/semanticview"
 	"github.com/division-sh/swarm/internal/runtime/startupownership"
 	"github.com/division-sh/swarm/internal/store/testutil/agentfixture"
@@ -26,12 +30,14 @@ import (
 
 func TestBundleUpgradeAdmissionPreservesLiveWorkBothStores(t *testing.T) {
 	files := map[string]string{
-		"schema.yaml":          "name: bundle-upgrade\nstages:\n  pending: {}\n",
+		"schema.yaml":          "name: bundle-upgrade\nstages:\n  pending: {}\nschedules:\n  removed: {every: 1h, emit: clock.removed}\n  retained: {every: 1h, emit: clock.retained}\n",
+		"events.yaml":          "clock.removed:\nclock.retained:\n",
 		"review/schema.yaml":   "name: review\ninstance: request_id\nstages:\n  pending:\n    timers:\n      - {id: pending.timeout, after: 1h, emit: timer.elapsed}\npins:\n  inputs: [task.create]\n",
 		"review/entities.yaml": "review_item:\n  request_id: text\n  label: text\n  nested: json\n  enabled: {type: boolean, initial: true}\n",
 		"review/events.yaml":   "task.create:\n  request_id: text\n  label: text\n  nested: json\ntask.started:\ntimer.elapsed:\n",
 	}
 	candidateFiles := maps.Clone(files)
+	candidateFiles["schema.yaml"] = strings.Replace(files["schema.yaml"], "  removed: {every: 1h, emit: clock.removed}\n", "", 1)
 	candidateFiles["review/schema.yaml"] = strings.Replace(files["review/schema.yaml"], "  pending:\n    timers:\n      - {id: pending.timeout, after: 1h, emit: timer.elapsed}", "  pending: {}", 1)
 	for _, backend := range []string{"sqlite", "postgres"} {
 		for _, paused := range []bool{false, true} {
@@ -44,7 +50,7 @@ func TestBundleUpgradeAdmissionPreservesLiveWorkBothStores(t *testing.T) {
 				f.constructKeylessRoot(t)
 				reader := f.store.(runbundle.UpgradeReader)
 				load := func(context.Context, string) (semanticview.Source, error) { return semanticview.Wrap(f.bundle), nil }
-				removed := loadLifecyclePersistenceFixtureForTest(t, map[string]string{"schema.yaml": files["schema.yaml"]})
+				removed := loadLifecyclePersistenceFixtureForTest(t, map[string]string{"schema.yaml": files["schema.yaml"], "events.yaml": files["events.yaml"]})
 				removedPlan, err := runbundle.AdmitPinnedSources(f.ctx, reader, semanticview.Wrap(removed), load)
 				if err != nil {
 					t.Fatal(err)
@@ -56,6 +62,35 @@ func TestBundleUpgradeAdmissionPreservesLiveWorkBothStores(t *testing.T) {
 				committer := agentFixtureFlowActivationCommitter{store: f.store}
 				if result, err := committer.CommitFlowInstanceActivation(f.ctx, activation); err != nil || !result.Acknowledged {
 					t.Fatalf("commit genuine timed instance: %+v, %v", result, err)
+				}
+				runID := correlation.RunIDFromContext(f.ctx)
+				clockStore := f.store.(genericschedule.Store)
+				clockSource, err := events.NewStaticFlowRoutingSource(events.RouteIdentity{FlowID: ".", FlowInstance: runID})
+				if err != nil {
+					t.Fatal(err)
+				}
+				clockIDs := map[string]string{}
+				for _, name := range []string{"removed", "retained"} {
+					commit, err := clockStore.AdmitGenericScheduleOutcome(f.ctx, genericschedule.AdmissionCommand{
+						ScheduleKey: name, RunID: runID, FlowInstance: runID, OwnerKind: genericschedule.OwnerInstance,
+						OwnerID: ".", EventType: "clock." + name, Payload: semanticvalue.EmptyObject(),
+						RoutingSource: clockSource, ExecutionMode: executionmode.Live, Due: genericschedule.EveryDue(time.Hour),
+					})
+					if err != nil || !commit.Acknowledged {
+						t.Fatalf("admit genuine %s generic schedule: %+v, %v", name, commit, err)
+					}
+					clockIDs[name] = commit.Result.Activation.ID
+				}
+				readClocks := func() map[string]genericschedule.Activation {
+					clocks := map[string]genericschedule.Activation{}
+					for name, id := range clockIDs {
+						clock, found, err := clockStore.LoadGenericScheduleActivation(f.ctx, id)
+						if err != nil || !found {
+							t.Fatalf("read %s generic schedule: found=%t err=%v", name, found, err)
+						}
+						clocks[name] = clock
+					}
+					return clocks
 				}
 				if paused {
 					controller := runcontrol.NewController(f.store.(runcontrol.Store), nil, runcontrol.Options{})
@@ -89,7 +124,6 @@ func TestBundleUpgradeAdmissionPreservesLiveWorkBothStores(t *testing.T) {
 				if err != nil || !exists {
 					t.Fatalf("admitted predecessor: exists=%t err=%v", exists, err)
 				}
-				runID := correlation.RunIDFromContext(f.ctx)
 				timerReader := f.store.(pipeline.WorkflowTimerActivationPersistence)
 				readTimer := func() pipeline.WorkflowTimerActivation {
 					timer, found, err := timerReader.LoadWorkflowTimerActivation(original, activation.Lifecycle.Timers[0].Activation.Ref.ActivationID)
@@ -99,6 +133,7 @@ func TestBundleUpgradeAdmissionPreservesLiveWorkBothStores(t *testing.T) {
 					return timer
 				}
 				beforeTimer := readTimer()
+				beforeClocks := readClocks()
 				before := captureSelectedReadSideEffects(t, f.db, backend == "postgres", runID)
 				restore := func(plan *runbundle.UpgradePlan) error {
 					_, err := capability.RestoreSourceSet(original, agenttopology.SourceSetCommitRequest{
@@ -125,7 +160,7 @@ func TestBundleUpgradeAdmissionPreservesLiveWorkBothStores(t *testing.T) {
 					for _, blocker := range blocked.Blockers {
 						found = found || (blocker.RunID == runID && blocker.FlowInstance == activation.Instance.StorageRef && blocker.Kind == "stage_removed" && strings.Contains(blocker.Location, ":"))
 					}
-					if !found || before != captureSelectedReadSideEffects(t, f.db, backend == "postgres", runID) || !reflect.DeepEqual(beforeTimer, readTimer()) {
+					if !found || before != captureSelectedReadSideEffects(t, f.db, backend == "postgres", runID) || !reflect.DeepEqual(beforeTimer, readTimer()) || !reflect.DeepEqual(beforeClocks, readClocks()) {
 						t.Fatal("late instance was omitted or native refusal changed retained work")
 					}
 					// The canonical run owner refuses the absent candidate artifact after
@@ -135,7 +170,7 @@ func TestBundleUpgradeAdmissionPreservesLiveWorkBothStores(t *testing.T) {
 						t.Fatalf("upgrade did not reach canonical candidate-artifact refusal: %v", err)
 					}
 					currentHead, _, err := capability.CurrentSourceSet(original)
-					if err != nil || currentHead.Revision != head.Revision || !reflect.DeepEqual(beforeTimer, readTimer()) || before != captureSelectedReadSideEffects(t, f.db, backend == "postgres", runID) {
+					if err != nil || currentHead.Revision != head.Revision || !reflect.DeepEqual(beforeTimer, readTimer()) || !reflect.DeepEqual(beforeClocks, readClocks()) || before != captureSelectedReadSideEffects(t, f.db, backend == "postgres", runID) {
 						t.Fatalf("refused native upgrade left partial timer/source/facts: head=%s err=%v", currentHead.Revision, err)
 					}
 					availability, err := f.store.(runbundle.AvailabilityStore).LoadRunBundleAvailability(original, runID)
@@ -170,6 +205,17 @@ func TestBundleUpgradeAdmissionPreservesLiveWorkBothStores(t *testing.T) {
 					t.Fatalf("source head did not switch: %+v, %v", currentHead, err)
 				}
 				timer := readTimer()
+				clocks := readClocks()
+				if !reflect.DeepEqual(clocks["retained"], beforeClocks["retained"]) {
+					t.Fatal("upgrade changed a retained generic schedule")
+				}
+				if paused {
+					if !reflect.DeepEqual(clocks, beforeClocks) {
+						t.Fatal("upgrade changed a parked run's generic schedules")
+					}
+				} else if clock := clocks["removed"]; clock.Status != genericschedule.StatusCancelled || clock.CancelCause != "rule_removed" || clock.CancelledAt.IsZero() || !reflect.DeepEqual(clock.Command, beforeClocks["removed"].Command) || !clock.CurrentDueAt.Equal(beforeClocks["removed"].CurrentDueAt) {
+					t.Fatalf("removed generic schedule did not cancel with its original arm: %+v", clock)
+				}
 				availability, err := f.store.(runbundle.AvailabilityStore).LoadRunBundleAvailability(original, runID)
 				if err != nil {
 					t.Fatal(err)
