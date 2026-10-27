@@ -131,6 +131,20 @@ func (rt *Runtime) IneligibleStandingIngress() ([]StandingIngressIneligibility, 
 	return out, nil
 }
 
+// Read the plan's existing admission; absence is not a disabled binding.
+func (rt *Runtime) StandingIngressEnabled(selector string) (bool, error) {
+	rt.standingCredentialMu.Lock()
+	defer rt.standingCredentialMu.Unlock()
+	if rt.standingCredentialAdmission == nil {
+		return false, fmt.Errorf("standing ingress admission has not been computed")
+	}
+	binding, found := rt.standingCredentialAdmission.bindings[selector]
+	if !found {
+		return false, fmt.Errorf("standing ingress admission has no selector %q", selector)
+	}
+	return binding.enabled, nil
+}
+
 func standingIngressSelector(flowPath, provider string) string {
 	return "ingress:" + flowPath + ":" + provider
 }

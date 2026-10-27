@@ -29,8 +29,9 @@ func TestServedExpiredQRExplicitRetryReplacesOriginalOccurrenceBothStores(t *tes
 			owners := make(chan *serveSessionBootstrap, 1)
 			newServeSessionBootstrap = func(selectRuntime serveSessionBootstrapRuntime, store channelonboarding.Store,
 				credentials operatorchannel.CredentialCurrentness, directory string, invocation *sessionprovider.InvocationState,
+				enabled channelonboarding.TargetEnablementReader,
 			) (serveSessionBootstrapOwner, error) {
-				owner, err := prior(selectRuntime, store, credentials, directory, invocation)
+				owner, err := prior(selectRuntime, store, credentials, directory, invocation, enabled)
 				if err == nil {
 					owners <- owner.(*serveSessionBootstrap)
 				}

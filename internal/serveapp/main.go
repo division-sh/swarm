@@ -1594,7 +1594,8 @@ func buildRuntimeComposition(ctx context.Context, req runtimeCompositionRequest)
 			return serveChannelOnboardingCatalog(runtimeContextManager)
 		},
 		Activations: channelActivationRefresher, Confirmation: confirmationDispatcher, Readiness: connectedChannelReadiness, LandingRuns: landingRuns,
-		Now: opts.TestChannelOnboardingNow, TestBarrier: opts.TestChannelOnboardingBarrier,
+		TargetEnabled: serveChannelTargetEnablementReader(runtimeContextManager),
+		Now:           opts.TestChannelOnboardingNow, TestBarrier: opts.TestChannelOnboardingBarrier,
 	})
 	if err != nil {
 		presenter.fail(20, "channel_onboarding", err)

@@ -16,7 +16,7 @@ import (
 func newServeChannelProviderOwners(manager *runtime.RuntimeContextManager, store channelonboarding.Store,
 	current *credentials.SnapshotOwner, directory string, invocationState *sessionprovider.InvocationState,
 ) (serveSessionBootstrapOwner, operatorchannel.CredentialCurrentness, error) {
-	sessions, err := newServeSessionBootstrap(serveSessionBootstrapRuntimeSelector(manager), store, current, directory, invocationState)
+	sessions, err := newServeSessionBootstrap(serveSessionBootstrapRuntimeSelector(manager), store, current, directory, invocationState, serveChannelTargetEnablementReader(manager))
 	if err != nil {
 		var unsupported *operatorchannel.SessionProviderUnavailableError
 		if errors.As(err, &unsupported) {

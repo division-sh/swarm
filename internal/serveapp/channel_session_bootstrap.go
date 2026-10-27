@@ -69,6 +69,7 @@ var newServeSessionBootstrap = unavailableServeSessionBootstrap
 
 func unavailableServeSessionBootstrap(serveSessionBootstrapRuntime, channelonboarding.Store,
 	operatorchannel.CredentialCurrentness, string, *sessionprovider.InvocationState,
+	channelonboarding.TargetEnablementReader,
 ) (serveSessionBootstrapOwner, error) {
 	return nil, &operatorchannel.SessionProviderUnavailableError{Provider: "whatsapp"}
 }

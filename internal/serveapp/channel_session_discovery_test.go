@@ -51,7 +51,7 @@ func TestServeSessionDiscoveryRetainsDeclarationWithoutAuthority(t *testing.T) {
 
 func TestServeSessionBootstrapConstructionDoesNotOpenState(t *testing.T) {
 	directory := t.TempDir()
-	owner, err := newServeSessionBootstrap(nil, nil, nil, directory, nil)
+	owner, err := newServeSessionBootstrap(nil, nil, nil, directory, nil, nil)
 	if err == nil && owner == nil {
 		t.Fatal("missing bootstrap owner did not return its typed unavailability")
 	}
