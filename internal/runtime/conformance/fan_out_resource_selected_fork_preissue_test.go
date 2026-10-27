@@ -6,6 +6,8 @@ import (
 	"reflect"
 	"testing"
 
+	"github.com/division-sh/swarm/internal/runtime/effects"
+	"github.com/division-sh/swarm/internal/runtime/startupownership"
 	"github.com/google/uuid"
 )
 
@@ -65,6 +67,16 @@ func TestDeploymentSourceSelectedForkBeforeFirstRow(t *testing.T) {
 			if result.ForkRunID == "" || result.ForkRunID == sourceRunID || len(result.DataPins) != 1 || result.DataPins[0].VersionID != changed.VersionID {
 				t.Fatalf("pre-issue fork lost child or exact changed pin: %+v", result)
 			}
+			grant, err := f.runtime.lifecycle.current()
+			if err != nil {
+				t.Fatal(err)
+			}
+			serving, err := startupownership.StartFanOutServing(effects.WithExecutionMode(f.ctx, f.runtime.posture.RootMode()), grant, f.runtime.workOwner, nil, f.runtime.pipeline)
+			if err != nil {
+				t.Fatal(err)
+			}
+			t.Cleanup(serving.Close)
+			f.runtime.pipeline.InstallFanOutWorkNotifier(serving)
 			assertSelectedDeploymentRows(t, f, server, result.ForkRunID, "singleton", string(changed.VersionID), changedRows)
 			replay, rpcErr := deploymentForkRPC(t, f.ctx, forkServer, params)
 			if len(rpcErr) != 0 || !reflect.DeepEqual(replay, result) {
