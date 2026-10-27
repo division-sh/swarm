@@ -1255,15 +1255,22 @@ func debtW4LiveFixtureComparisons(actual, head, base, source map[string]authorit
 	mockReturn := composition[1]
 	mockReturn.Declaration = "startServedTestSetupEntitiesProofRuntimeFromSource"
 	compositionAllowed := actual[mockReturn.identity()] == mockReturn && source[mockReturn.identity()] == mockReturn
+	sourceCompositionAbsent, sourceCompositionCurrent := true, true
 	for _, site := range composition {
 		compositionAllowed = compositionAllowed && actual[site.identity()] == site &&
-			source[site.identity()].Multiplicity == 0 && base[site.identity()].Multiplicity == 0
+			base[site.identity()].Multiplicity == 0 &&
+			(head[site.identity()].Multiplicity == 0 || head[site.identity()] == site)
+		sourceCompositionAbsent = sourceCompositionAbsent && source[site.identity()].Multiplicity == 0
+		sourceCompositionCurrent = sourceCompositionCurrent && source[site.identity()] == site
 	}
+	compositionAllowed = compositionAllowed && (sourceCompositionAbsent || sourceCompositionCurrent)
 	for _, pair := range pairs {
 		old, current := pair[0], pair[1]
+		sourceOld := source[old.identity()] == old && source[current.identity()].Multiplicity == 0
+		sourceCurrent := source[current.identity()] == current && source[old.identity()].Multiplicity == 0
 		if actual[current.identity()] == current && actual[old.identity()].Multiplicity == 0 &&
-			base[old.identity()] == old && source[old.identity()] == old &&
-			base[current.identity()].Multiplicity == 0 && source[current.identity()].Multiplicity == 0 {
+			base[old.identity()] == old && base[current.identity()].Multiplicity == 0 &&
+			(sourceOld || sourceCurrent) {
 			head = debtForwardQuiescenceUncertainty(head, old, current)
 			base = debtForwardQuiescenceUncertainty(base, old, current)
 			source = debtForwardQuiescenceUncertainty(source, old, current)

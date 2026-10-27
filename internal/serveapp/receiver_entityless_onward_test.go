@@ -63,7 +63,7 @@ func TestReceiverCompositionEntitylessOnwardBothStores(t *testing.T) {
 				if !child || !grandchild {
 					t.Fatalf("missing nested execution child=%t grandchild=%t", child, grandchild)
 				}
-				requireReceiverConstructedInstance(t, rt, started.RunID, "sink", "sink", flowidentity.EntityID("sink"), "", "pending", started.RunID, "ready", 2, nil)
+				requireReceiverConstructedInstance(t, rt, started.RunID, "sink", "sink", flowidentity.EntityID("sink"), "", "pending", started.RunID, "ready", 2, map[string]any(nil))
 				requireReceiverConstructedInstance(t, rt, started.RunID, "sink/tail", "sink/tail", flowidentity.EntityID("sink/tail"), "state", "done", "sink", "ready", 2, map[string]any{"result": "emitted"})
 				record, tail := requireReceiverTargetState(t, rt.ReceiverStateReader, started.RunID, "sink/tail", "sink/tail", flowidentity.EntityID("sink/tail"))
 				if tail.CurrentState != "done" {

@@ -235,7 +235,7 @@ func TestServedCompiledTransitionRestartOnBothStores(t *testing.T) {
 				var capParams map[string]any
 				var capRevision string
 				for attempt := 1; attempt <= 2; attempt++ {
-					loop := readLifecycleLoop(t, rt, seed.RunID, entityID)
+					loop := readLifecycleLoop(t, rt.ReceiverStateReader, seed.RunID, entityID)
 					capRevision = loop.RevisionID
 					payload := map[string]any{"revision_id": loop.RevisionID}
 					admit := requireServedEventPublishRPCResult(t, rt.Endpoint, params("loop.admit", fmt.Sprintf("restart-admit-%d", attempt), payload))
@@ -271,7 +271,7 @@ func TestServedCompiledTransitionRestartOnBothStores(t *testing.T) {
 				requireServedEventPublishEntityState(t, rt.DB, rt.Backend, seed.RunID, entityID, "escaped")
 				receipt := requireServedEventPublishEntityState(t, rt.DB, rt.Backend, seed.RunID, "", "done")
 				waitServedRunDeliveryQuiescence(t, rt.ReadRunDeliveries, seed.RunID)
-				closed := readLifecycleLoop(t, rt, seed.RunID, entityID)
+				closed := readLifecycleLoop(t, rt.ReceiverStateReader, seed.RunID, entityID)
 				if closed.RevisionID != capRevision || closed.Attempt != 2 || closed.Status != loopruntime.StatusClosed || closed.CloseReason != "escaped" {
 					t.Fatalf("restart loop=%#v", closed)
 				}

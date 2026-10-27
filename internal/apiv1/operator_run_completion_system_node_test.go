@@ -71,7 +71,8 @@ func TestOperatorRunCompletionSystemNodeFlowConvergesSupportedSurfaces(t *testin
 		t.Fatalf("run.start result = %#v, want live run %s", result, runID)
 	}
 	requireAPIV1Convergence(t, "live instance final stage and settled work", func() (bool, error) {
-		full, err := pg.LoadOperatorEntity(context.Background(), runtimepipeline.FlowInstanceEntityID("discovery"), runID)
+		owner := flowidentity.RunScopedFlowInstance{RunID: runID, Route: flowidentity.StoredRoute("discovery", "discovery", "discovery")}
+		instance, found, err := pg.LoadWorkflowInstance(context.Background(), owner)
 		if err != nil {
 			return false, err
 		}
@@ -79,7 +80,7 @@ func TestOperatorRunCompletionSystemNodeFlowConvergesSupportedSurfaces(t *testin
 		if err != nil {
 			return false, err
 		}
-		return full.Entity.CurrentState != nil && *full.Entity.CurrentState == "done" && settled.Ready && lifecycleExecutor.ActiveCandidates() == 0, nil
+		return found && instance.StageDefined && instance.CurrentState == "done" && settled.Ready && lifecycleExecutor.ActiveCandidates() == 0, nil
 	})
 
 	eventID := triggerEventIDForRun(t, db, runID)

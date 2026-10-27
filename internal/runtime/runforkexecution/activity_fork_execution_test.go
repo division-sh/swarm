@@ -537,7 +537,7 @@ loops:
     max_attempts: 3
     escape: {advances_to: exhausted}
 `,
-		"flow_a/state.yaml": "name: text\n",
+		"flow_a/state.yaml": "name: \"activity-fork-proof\"\n",
 		"flow_a/nodes.yaml": `test-node:
   execution_type: system_node
   subscribes_to: [review.start, review.requested, review.retry, review.close]
