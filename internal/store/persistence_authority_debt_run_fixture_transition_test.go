@@ -16,7 +16,7 @@ const debtSelectedFixtureComposedOldSHA256 = "2abd9424b866dbda517bcd44726bf04179
 const debtSelectedFixtureComposedCurrentSHA256 = "cdb196a9aeb5f87d51e656249b6bb533003d0af1ed7322cc858a2d9bd9d81fae"
 const debtSelectedFixtureComposedCollectorTo = "db0de72a381af1ab7ee26a4e0748565cde6c124a25a02ac3f79e2bbbc3464801"
 const debtCompletedSelectedFixturePinCollectorTo = "f28178924493fb28094b3bd1fb4814564680387608f43984fcd532afb01636a6"
-const debtW4ComparisonCollectorTo = "b8ba4d46c7965cb22a5e74ee59e3abb701a3c4e6554afd530995f845fe02f398"
+const debtW4ComparisonCollectorTo = "936ed72ce72e025617f0e4650e94c3cfc1632bde97c2cfcfbb0b4683bbca9a31"
 
 // #2727/6388897450: source-pin validation for an already-landed composed endpoint.
 const debtSelectedFixtureLandedCollectorTo = "1b48c6bd1c1b6d6100ee6df74bb9fe3d239372befa4c8f96f02243602fa9f646"
@@ -76,6 +76,36 @@ func TestPersistenceAuthorityDebtRunFixtureSignatureTransitionIsExact(t *testing
 				}
 				t.Run(name, func(t *testing.T) { debtRunFixtureSignatureHostileControls(t, pair, before, after, landed) })
 			}
+		}
+	})
+	t.Run("catalog-original-native-reader-threading", func(t *testing.T) {
+		prior, next := debtCatalogRuntimeRowsSignatureTransition()
+		before, after := debtControlSet(prior), debtControlSet(next)
+		originalBefore, originalAfter := maps.Clone(before), maps.Clone(after)
+		for _, test := range []struct {
+			name                       string
+			actual, head, base, source map[string]authorityDebtSite
+			accept                     bool
+		}{
+			{"forward-unrefreshed", after, before, before, before, true},
+			{"forward-refreshed", after, after, before, before, true},
+			{"landed-inert", after, after, after, after, true},
+			{"landed-source-cannot-extend-pair", after, before, before, after, false},
+			{"landed-source-refreshed-head-cannot-extend-pair", after, after, before, after, false},
+			{"reverse", before, before, after, after, false},
+			{"old-source-resurrection", before, before, before, after, false},
+			{"foreign-source", after, after, before, debtControlSet(), false},
+			{"unrelated-addition", debtControlSet(next, debtControlSite("call:Exec", 1)), after, before, before, false},
+		} {
+			t.Run(test.name, func(t *testing.T) {
+				if failures := authorityDebtRatchet(test.actual, test.head, test.base, test.source); (len(failures) == 0) != test.accept {
+					t.Fatalf("accepted=%v failures=%v", test.accept, failures)
+				}
+			})
+		}
+		debtRunFixtureSignatureHostileControls(t, [2]authorityDebtSite{prior, next}, before, after, false)
+		if !maps.Equal(before, originalBefore) || !maps.Equal(after, originalAfter) {
+			t.Fatal("catalog comparison normalization mutated baseline or source evidence")
 		}
 	})
 	if authorityDebtCount(old) != 9 || authorityDebtCount(current) != 9 {
