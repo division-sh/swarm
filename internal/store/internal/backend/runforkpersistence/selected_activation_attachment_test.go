@@ -252,6 +252,13 @@ func TestSelectedActivationAttachmentRejectsCrossedEvidence(t *testing.T) {
 	}
 }
 
+func expectSelectedAttachmentBinding(mock sqlmock.Sqlmock, binding runfork.RunForkSelectedContractBinding) {
+	mock.ExpectQuery(`FROM run_fork_selected_contract_bindings`).WithArgs(binding.ForkRunID).
+		WillReturnRows(sqlmock.NewRows([]string{"binding", "child", "source", "kind", "revision", "event", "mode", "bundle", "created"}).
+			AddRow(binding.BindingID, binding.ForkRunID, binding.SourceRunID, binding.ForkPoint.Kind, binding.ForkPoint.Revision,
+				binding.ForkEventID, binding.ContractSelection.Mode, binding.ContractSelection.BundleHash, binding.CreatedAt))
+}
+
 func TestSelectedActivationSettlementEmptyInputRequiresNoInventedFeed(t *testing.T) {
 	for _, postgres := range []bool{false, true} {
 		t.Run(map[bool]string{false: "sqlite", true: "postgres"}[postgres], func(t *testing.T) {
