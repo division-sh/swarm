@@ -17,6 +17,7 @@ import (
 	"github.com/division-sh/swarm/internal/runtime/manager"
 	"github.com/division-sh/swarm/internal/runtime/runbundle"
 	"github.com/division-sh/swarm/internal/runtime/runlifecycle"
+	"github.com/division-sh/swarm/internal/runtime/semanticview"
 	"github.com/division-sh/swarm/internal/runtime/startuprecovery"
 	"github.com/division-sh/swarm/internal/runtime/timerobligation"
 	"github.com/division-sh/swarm/internal/store"
@@ -24,6 +25,7 @@ import (
 	storeconstruction "github.com/division-sh/swarm/internal/store/construction"
 	"github.com/division-sh/swarm/internal/store/internal/backend/generationauthority"
 	"github.com/division-sh/swarm/internal/testutil"
+	"github.com/division-sh/swarm/internal/testutil/sourceartifactfixture"
 )
 
 func TestAdmissionInspectionMissingSQLiteDoesNotCreateState(t *testing.T) {
@@ -42,6 +44,10 @@ func TestAdmissionInspectionMissingSQLiteDoesNotCreateState(t *testing.T) {
 
 func TestAdmissionInspectionRealReadScopeBothStores(t *testing.T) {
 	ctx := context.Background()
+	bundle, err := runtimecontracts.LoadWorkflowContractBundleFromArtifact(selectedStoreRepoRoot(t), sourceartifactfixture.Artifact(), runtimecontracts.DefaultPlatformSpecFile(selectedStoreRepoRoot(t)), runtimecontracts.WorkflowContractLoadOptions{})
+	if err != nil {
+		t.Fatal(err)
+	}
 	spec, err := runtimecontracts.LoadPlatformSpecDocument(filepath.Join(selectedStoreRepoRoot(t), "platform-spec.yaml"))
 	if err != nil {
 		t.Fatal(err)
@@ -116,7 +122,7 @@ func TestAdmissionInspectionRealReadScopeBothStores(t *testing.T) {
 				if _, err := snapshot.ActiveNonStandingRunBundleAvailabilities(ctx); err != nil {
 					return err
 				}
-				if err := runbundle.AdmitPinnedSources(ctx, snapshot, "bundle-v2:sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa", []string{"bundle-v2:sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"}); err != nil {
+				if _, err := runbundle.AdmitPinnedSources(ctx, snapshot, semanticview.Wrap(bundle), func(context.Context, string) (semanticview.Source, error) { return semanticview.Wrap(bundle), nil }); err != nil {
 					return err
 				}
 				if _, err := startuprecovery.Inspect(ctx, startuprecovery.Request{AvailabilityReader: snapshot, ArtifactReader: snapshot}); err != nil {

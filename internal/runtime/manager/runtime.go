@@ -1105,7 +1105,7 @@ func (am *AgentManager) HydrateForStartup(ctx context.Context) (StartupReplaySum
 	if am.store == nil {
 		return summary, nil
 	}
-	if err := am.reconcileExternalEffectsForStartup(ctx); err != nil {
+	if err := am.ReconcileExternalEffectsForStartup(ctx); err != nil {
 		return summary, err
 	}
 	if am.budget != nil {
@@ -1129,7 +1129,9 @@ func (am *AgentManager) HydrateForStartup(ctx context.Context) (StartupReplaySum
 	return summary, nil
 }
 
-func (am *AgentManager) reconcileExternalEffectsForStartup(ctx context.Context) error {
+// ReconcileExternalEffectsForStartup settles predecessor work before replacement
+// or dispatch, retaining the existing once-only startup owner.
+func (am *AgentManager) ReconcileExternalEffectsForStartup(ctx context.Context) error {
 	if am == nil {
 		return nil
 	}
@@ -1140,8 +1142,14 @@ func (am *AgentManager) reconcileExternalEffectsForStartup(ctx context.Context) 
 	}
 	if recoveryStore := am.roles.EffectsRecovery; recoveryStore != nil {
 		request := runtimeeffects.NewRecoveryRequest(time.Now().UTC(), am.executionPosture)
-		if _, err := recoveryStore.ReconcileExternalEffectAttempts(ctx, request); err != nil {
+		summary, err := recoveryStore.ReconcileExternalEffectAttempts(ctx, request)
+		if err != nil {
 			return fmt.Errorf("reconcile external effect attempts: %w", err)
+		}
+		if summary.PrelaunchTerminal != 0 || summary.OutcomeUncertain != 0 {
+			diaglog.ProcessLog(diaglog.LevelWarn, "startup-recovery",
+				fmt.Sprintf("%d attempts abandoned before launch; %d attempts whose outcome is unconfirmed. List dead-lettered deliveries with swarm event list --delivery-status dead_letter", summary.PrelaunchTerminal, summary.OutcomeUncertain),
+				"prelaunch_terminal", summary.PrelaunchTerminal, "outcome_uncertain", summary.OutcomeUncertain)
 		}
 		if err := am.reconcileCanceledTurnsForStartup(ctx, request); err != nil {
 			return fmt.Errorf("reconcile canceled agent turns: %w", err)

@@ -117,36 +117,36 @@ func loadSQLiteSourceArtifactPresence(ctx context.Context, queryer rowQueryer, r
 }
 
 func (o *Postgres) ListActiveNonStanding(ctx context.Context) ([]runtimerunbundle.Availability, error) {
-	rows, err := o.backend.QueryContext(ctx, `
-		SELECT run_id::text, status, bundle_hash,
-		       EXISTS (SELECT 1 FROM source_artifacts a WHERE a.bundle_hash = runs.bundle_hash)
-		FROM runs
-		WHERE status IN ($1, $2)
-		  AND NOT EXISTS (
-		      SELECT 1 FROM standing_services ss WHERE ss.current_run_id = runs.run_id
-		  )
-		ORDER BY run_id
-	`, string(runtimerunlifecycle.StateRunning), string(runtimerunlifecycle.StatePaused))
-	if err != nil {
-		return nil, fmt.Errorf("list active non-standing postgres run bundle availability: %w", err)
-	}
-	defer rows.Close()
-	return scanAvailabilities(rows)
+	return listActiveNonStanding(ctx, o.backend, false)
 }
 
 func (o *SQLite) ListActiveNonStanding(ctx context.Context) ([]runtimerunbundle.Availability, error) {
-	rows, err := o.backend.QueryContext(ctx, `
-		SELECT run_id, status, bundle_hash,
+	return listActiveNonStanding(ctx, o.backend, true)
+}
+
+func ListActiveNonStandingTx(ctx context.Context, tx *sql.Tx, sqlite bool) ([]runtimerunbundle.Availability, error) {
+	return listActiveNonStanding(ctx, tx, sqlite)
+}
+
+func listActiveNonStanding(ctx context.Context, q interface {
+	QueryContext(context.Context, string, ...any) (*sql.Rows, error)
+}, sqlite bool) ([]runtimerunbundle.Availability, error) {
+	query := `
+		SELECT run_id::text, status, bundle_hash,
 		       EXISTS (SELECT 1 FROM source_artifacts a WHERE a.bundle_hash = runs.bundle_hash)
 		FROM runs
-		WHERE status IN (?, ?)
+		WHERE status IN ($1, $2, $3)
 		  AND NOT EXISTS (
 		      SELECT 1 FROM standing_services ss WHERE ss.current_run_id = runs.run_id
 		  )
 		ORDER BY run_id
-	`, string(runtimerunlifecycle.StateRunning), string(runtimerunlifecycle.StatePaused))
+	`
+	if sqlite {
+		query = strings.ReplaceAll(strings.ReplaceAll(query, "run_id::text", "run_id"), "$1, $2, $3", "?, ?, ?")
+	}
+	rows, err := q.QueryContext(ctx, query, string(runtimerunlifecycle.StateRunning), string(runtimerunlifecycle.StatePaused), string(runtimerunlifecycle.StateLive))
 	if err != nil {
-		return nil, fmt.Errorf("list active non-standing sqlite run bundle availability: %w", err)
+		return nil, fmt.Errorf("list active non-standing run bundle availability: %w", err)
 	}
 	defer rows.Close()
 	return scanAvailabilities(rows)

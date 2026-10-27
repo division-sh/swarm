@@ -258,8 +258,8 @@ func (a WorkflowTimerActivation) validate() error {
 		if !a.CancelCause.Valid() || a.CancelledAt.IsZero() || a.Status != workflowTimerStatusCancelled {
 			return fmt.Errorf("workflow timer requires a known cause and exact time only on cancelled status")
 		}
-		if !hasLineage || a.CancelledAt.Before(a.CreatedAt) || (!a.FiredAt.IsZero() && a.CancelledAt.Before(a.FiredAt)) {
-			return fmt.Errorf("rule_removed cancellation requires inherited lineage and cannot precede child birth or accepted fire")
+		if a.CancelledAt.Before(a.CreatedAt) || (!a.FiredAt.IsZero() && a.CancelledAt.Before(a.FiredAt)) {
+			return fmt.Errorf("rule_removed cancellation cannot precede timer birth or accepted fire")
 		}
 	}
 	if a.Recurring {
@@ -290,7 +290,7 @@ func (a WorkflowTimerActivation) validate() error {
 }
 
 // Empty cause/time retains ordinary lifecycle cancellation; rule removal carries
-// the exact child-history disposition, not a new arming or firing coordinate.
+// the exact source-switch disposition, not a new arming or firing coordinate.
 func (a WorkflowTimerActivation) ValidateCancellation(cause WorkflowTimerCancelCause, at time.Time) error {
 	if err := a.Validate(); err != nil {
 		return err

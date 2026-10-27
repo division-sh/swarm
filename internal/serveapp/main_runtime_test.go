@@ -68,7 +68,6 @@ import (
 	runtimemcp "github.com/division-sh/swarm/internal/runtime/mcp"
 	runtimepipeline "github.com/division-sh/swarm/internal/runtime/pipeline"
 	runtimepipelineobligation "github.com/division-sh/swarm/internal/runtime/pipelineobligation"
-	"github.com/division-sh/swarm/internal/runtime/runbundle"
 	"github.com/division-sh/swarm/internal/runtime/runfork"
 	storerunlifecycle "github.com/division-sh/swarm/internal/runtime/runlifecycle"
 
@@ -636,78 +635,6 @@ func TestCLI_ServeLifecycleRoutesDiagnosticsToStderr(t *testing.T) {
 				t.Fatalf("startup failure contaminated stdout: %q", stdout.String())
 			}
 		})
-	}
-}
-
-func TestServePinnedHashAdmissionExcludesCurrentStandingAndRejectsOrdinaryMismatch(t *testing.T) {
-	_, db, _ := testutil.StartPostgres(t)
-	pg := storetest.AdmitPostgresRuntimeStore(t, db)
-	ctx := runtimecorrelation.WithRuntimeInstanceID(context.Background(), runStatusTestRuntimeInstanceID)
-	ctx = serveFixtureProcessContext(t, ctx, pg)
-	pinnedArtifact := sourceartifactfixture.New("agents.yaml", []byte("agents: {}\n# pinned-source\n"))
-	otherArtifact := sourceartifactfixture.New("agents.yaml", []byte("agents: {}\n# other-source\n"))
-	pinnedHash := pinnedArtifact.BundleHash()
-	otherHash := otherArtifact.BundleHash()
-	otherRunID := uuid.NewString()
-
-	storetest.RequireRun(t, ctx, pg, storetest.RunFixture{Origin: storetest.ScenarioSetupOrigin(),
-		RunID: uuid.NewString(), Artifact: pinnedArtifact,
-	})
-	storetest.RequireRun(t, ctx, pg, storetest.RunFixture{Origin: storetest.ScenarioSetupOrigin(),
-		RunID: otherRunID, State: storerunlifecycle.StateRunning,
-		Artifact: otherArtifact,
-	})
-	standingSource := mustServeTestPersistedSourceArtifactFact(otherHash)
-	standingCtx := runStatusAuthorActivityContext(standingSource)
-	standingCtx = serveFixtureProcessContext(t, standingCtx, pg)
-	standing, err := pg.ReconcileStandingService(standingCtx, runtimepipeline.StandingServiceCandidate{
-		BindingEnabled: true,
-		ServiceID:      runtimeflowidentity.StandingServiceID("bundle-admission-proof"),
-		FlowPath:       "bundle-admission-proof",
-		Source:         standingSource,
-	})
-	if err != nil {
-		t.Fatalf("reconcile current standing bundle admission run: %v", err)
-	}
-	standingOtherRunID := standing.RunID
-	if _, err := pg.TransitionActiveRun(standingCtx, storerunlifecycle.ActiveTransitionRequest{
-		RunID: standingOtherRunID,
-		State: storerunlifecycle.StatePaused,
-	}); err != nil {
-		t.Fatalf("pause current standing bundle admission run: %v", err)
-	}
-	storetest.RequireRun(t, ctx, pg, storetest.RunFixture{Origin: storetest.ScenarioSetupOrigin(),
-		RunID: uuid.NewString(), State: storerunlifecycle.StateCancelled,
-		Artifact: otherArtifact,
-	})
-
-	err = runbundle.AdmitPinnedSources(ctx, pg, pinnedHash, []string{pinnedHash})
-	if err == nil {
-		t.Fatal("enforceServePinnedBundleAdmissionForHashes error = nil, want pinned bundle_hash conflict")
-	}
-	got := err.Error()
-	for _, want := range []string{
-		"active non-standing run pinned bundle_hash conflict",
-		pinnedHash,
-		otherRunID,
-		otherHash,
-	} {
-		if !strings.Contains(got, want) {
-			t.Fatalf("admission error = %q, want detail %q", got, want)
-		}
-	}
-	if strings.Contains(got, standingOtherRunID) {
-		t.Fatalf("pinned-hash admission claimed current standing run %s: %q", standingOtherRunID, got)
-	}
-	if _, err := pg.TransitionActiveRun(standingCtx, storerunlifecycle.ActiveTransitionRequest{RunID: otherRunID, State: storerunlifecycle.StatePaused}); err != nil {
-		t.Fatal(err)
-	}
-	if err := runbundle.AdmitPinnedSources(ctx, pg, pinnedHash, []string{pinnedHash}); err != nil {
-		t.Fatalf("non-executing paused source blocked boot: %v", err)
-	}
-
-	if err := runbundle.AdmitPinnedSources(ctx, pg, pinnedHash, nil); err != nil {
-		t.Fatalf("unpinned admission = %v, want no pinned-context constraint", err)
 	}
 }
 

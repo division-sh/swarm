@@ -207,19 +207,6 @@ func serveRuntimeBundleIdentitiesDetail(bundles []serveRuntimeBundle) string {
 	return strings.Join(parts, ",")
 }
 
-func servePinnedBundleHashes(bundles []serveRuntimeBundle) []string {
-	out := []string{}
-	for _, bundle := range bundles {
-		if bundle.dbLoaded {
-			if hash := bundle.sourceArtifactFact.BundleHash(); hash != "" {
-				out = append(out, hash)
-			}
-		}
-	}
-	sort.Strings(out)
-	return out
-}
-
 func compileServeSourceSetPlan(contexts []serveRuntimeBundleContext) (runtimeagenttopology.SourceSetPlan, error) {
 	sources := make([]runtimeagenttopology.SourceCoordinate, 0, len(contexts))
 	agents := []runtimeagenttopology.DesiredAgent{}
@@ -239,15 +226,25 @@ func compileServeSourceSetPlan(contexts []serveRuntimeBundleContext) (runtimeage
 	return runtimeagenttopology.NewSourceSetPlan(sources, agents)
 }
 
-func installServeSourceSet(ctx context.Context, capability runtimestartupownership.ProcessCapability, plan runtimeagenttopology.SourceSetPlan) error {
+func installServeSourceSet(ctx context.Context, capability runtimestartupownership.ProcessCapability, plan runtimeagenttopology.SourceSetPlan, upgrades ...*runbundle.UpgradePlan) error {
+	var upgrade *runbundle.UpgradePlan
+	if len(upgrades) > 1 {
+		return errors.New("source installation accepts one bundle upgrade")
+	}
+	if len(upgrades) == 1 {
+		upgrade = upgrades[0]
+	}
 	current, exists, err := capability.CurrentSourceSet(ctx)
 	if err != nil {
 		return err
 	}
-	if exists && current.Revision == plan.Revision {
+	if exists && current.Revision == plan.Revision && (upgrade == nil || len(upgrade.Runs) == 0) {
 		return nil
 	}
 	if !exists {
+		if upgrade != nil && len(upgrade.Runs) != 0 {
+			return errors.New("live bundle upgrade requires its admitted source-set predecessor")
+		}
 		_, err = capability.InstallCompleteSourceSet(ctx, runtimeagenttopology.SourceSetCommitRequest{
 			OperationID: uuid.NewString(),
 			Plan:        plan,
@@ -258,6 +255,7 @@ func installServeSourceSet(ctx context.Context, capability runtimestartupownersh
 		OperationID:      uuid.NewString(),
 		ExpectedRevision: current.Revision,
 		Plan:             plan,
+		BundleUpgrade:    upgrade,
 	})
 	return err
 }
@@ -1193,6 +1191,19 @@ func buildRuntimeComposition(ctx context.Context, req runtimeCompositionRequest)
 		loadedBundle = loadedBundles[0]
 	}
 	source := loadedBundle.source
+	var bundleUpgrade *runbundle.UpgradePlan
+	if resetRecovery == nil {
+		reader, ok := stores.RunBundleAvailability().(runbundle.UpgradeReader)
+		if !ok {
+			presenter.fail(5, "pinned_bundle_admission", errors.New("bundle upgrade read owner is unavailable"))
+			return 3
+		}
+		bundleUpgrade, err = cliapp.PrepareBundleUpgrade(ctx, reader, stores.SourceArtifactStore(), repo, source, platformPackBases)
+		if err != nil {
+			presenter.fail(5, "pinned_bundle_admission", err)
+			return 3
+		}
+	}
 	var listenerWorkspaceBackend cliapp.WorkspaceBackendSelection
 	if len(loadedBundles) == 0 {
 		presenter.boot(4, "bundle_load", "ok", "reset retained an empty source set; execution remains unloaded")
@@ -1263,7 +1274,6 @@ func buildRuntimeComposition(ctx context.Context, req runtimeCompositionRequest)
 	if len(loadedBundles) > 0 {
 		loadedBundle = loadedBundles[0]
 	}
-	pinnedBundleHashes := servePinnedBundleHashes(loadedBundles)
 	credentialStore := req.Credentials
 	mcpListener, err = cliapp.ListenServeHTTPListener("mcp", opts.MCPListenAddr)
 	if err != nil {
@@ -1352,8 +1362,21 @@ func buildRuntimeComposition(ctx context.Context, req runtimeCompositionRequest)
 			return 3
 		}
 	}
-	if err := installServeSourceSet(ctx, processCapability, processSourceSet); err != nil {
-		presenter.fail(5, "startup_topology", err)
+	if bundleUpgrade != nil && len(bundleUpgrade.Runs) != 0 {
+		for _, runtimeContext := range runtimeContexts {
+			if err := runtimeContext.runtime.Manager.ReconcileExternalEffectsForStartup(ctx); err != nil {
+				presenter.fail(5, "startup_recovery", err)
+				return 3
+			}
+		}
+	}
+	if err := installServeSourceSet(ctx, processCapability, processSourceSet, bundleUpgrade); err != nil {
+		var blocked *runbundle.UpgradeConflictError
+		if errors.As(err, &blocked) {
+			presenter.fail(5, "pinned_bundle_admission", blocked)
+		} else {
+			presenter.fail(5, "startup_topology", err)
+		}
 		return 3
 	}
 	for i := range runtimeContexts {
@@ -1439,10 +1462,6 @@ func buildRuntimeComposition(ctx context.Context, req runtimeCompositionRequest)
 		if exitCode := runServeSourceArtifactStartupRecovery(ctx, recovery, stores.SourceArtifactStore(), presenter); exitCode != 0 {
 			return exitCode
 		}
-	}
-	if err := runbundle.AdmitPinnedSources(ctx, stores.RunBundleAvailability(), serveRuntimeBundleIdentitiesDetail(loadedBundles), pinnedBundleHashes); err != nil {
-		presenter.fail(5, "pinned_bundle_admission", err)
-		return 3
 	}
 	if rt != nil {
 		standingReconciliations, err := reconcileServeStandingServices(ctx, rt.Pipeline, runtimeContexts, !opts.LocalRun)
