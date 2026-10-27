@@ -159,6 +159,8 @@ func (e *CredentialRequiredError) ResumeCommand() string {
 
 type CatalogProvider func() (*CandidateCatalog, error)
 
+type TargetEnablementReader func(context.Context, Candidate) (bool, error)
+
 type TestLifecycleBoundary string
 
 const (
@@ -190,6 +192,7 @@ type ServiceOptions struct {
 	Confirmation    ConfirmationDispatcher
 	Readiness       ReadinessProjector
 	LandingRuns     runlifecycle.LandingRunReader
+	TargetEnabled   TargetEnablementReader
 	Sessions        SessionBootstrapOwner
 	Now             func() time.Time
 	Secret          func() (string, error)
@@ -209,6 +212,7 @@ type Service struct {
 	effects         EffectRebindReconciler
 	readiness       ReadinessProjector
 	landingRuns     runlifecycle.LandingRunReader
+	targetEnabled   TargetEnablementReader
 	sessions        SessionBootstrapOwner
 	now             func() time.Time
 	secret          func() (string, error)
@@ -290,7 +294,7 @@ func NewService(opts ServiceOptions) (*Service, error) {
 		deployment: opts.Deployment, operatorAccount: operatorAccount,
 		sourceArtifacts: opts.SourceArtifacts,
 		store:           opts.Store, identities: opts.Identities, credentials: opts.Credentials, catalog: opts.Catalog,
-		activations: opts.Activations, confirmation: opts.Confirmation, effects: effects, readiness: opts.Readiness, landingRuns: opts.LandingRuns, now: opts.Now, secret: opts.Secret,
+		activations: opts.Activations, confirmation: opts.Confirmation, effects: effects, readiness: opts.Readiness, landingRuns: opts.LandingRuns, targetEnabled: opts.TargetEnabled, now: opts.Now, secret: opts.Secret,
 		sessions:    opts.Sessions,
 		testBarrier: opts.TestBarrier,
 	}, nil
@@ -888,7 +892,7 @@ func (s *Service) ReconcileLocal(ctx context.Context) error {
 		for step := 0; step < 5; step++ {
 			switch op.Phase {
 			case PhasePreparing:
-				admitted, err := s.targetHasLandingRun(ctx, candidate)
+				admitted, err := s.targetAdmissionEnabled(ctx, candidate)
 				if err != nil {
 					return err
 				}
@@ -952,7 +956,7 @@ func (s *Service) ReconcileLocal(ctx context.Context) error {
 				}
 			case PhaseAwaitingOperatorConfirmation, PhasePublishingActivation:
 				if op.Phase == PhaseAwaitingOperatorConfirmation && op.AccountConnection() && op.IdentityOperationID == "" {
-					admitted, err := s.targetHasLandingRun(ctx, candidate)
+					admitted, err := s.targetAdmissionEnabled(ctx, candidate)
 					if err != nil {
 						return err
 					}
@@ -1094,7 +1098,7 @@ func (s *Service) recoverOperation(ctx context.Context, id string, restoreOnly b
 	}
 	accountTargetPending := op.AccountConnection() && op.IdentityOperationID == "" && op.Phase == PhaseAwaitingOperatorConfirmation
 	if !accountTargetPending && (op.Phase == PhasePreparing || op.Phase.RequiresExecutableTarget(op.Posture)) {
-		admitted, err := s.targetHasLandingRun(ctx, candidate)
+		admitted, err := s.targetAdmissionEnabled(ctx, candidate)
 		if err != nil {
 			return err
 		}
@@ -1112,7 +1116,7 @@ func (s *Service) recoverOperation(ctx context.Context, id string, restoreOnly b
 	return nil
 }
 
-func (s *Service) targetHasLandingRun(ctx context.Context, candidate Candidate) (bool, error) {
+func (s *Service) targetAdmissionEnabled(ctx context.Context, candidate Candidate) (bool, error) {
 	if s.landingRuns == nil {
 		return false, fmt.Errorf("channel recovery requires the native landing-run reader")
 	}
@@ -1120,8 +1124,14 @@ func (s *Service) targetHasLandingRun(ctx context.Context, candidate Candidate) 
 	if err != nil || !found {
 		return false, err
 	}
-	return landing.Source.BundleHash() == candidate.Coordinate.BundleHash &&
-		(landing.State == runlifecycle.StateLive || landing.State == runlifecycle.StatePaused), nil
+	if landing.Source.BundleHash() != candidate.Coordinate.BundleHash ||
+		(landing.State != runlifecycle.StateLive && landing.State != runlifecycle.StatePaused) {
+		return false, nil
+	}
+	if s.targetEnabled == nil {
+		return false, fmt.Errorf("channel recovery requires the ingress binding enablement reader")
+	}
+	return s.targetEnabled(ctx, candidate)
 }
 
 func (s *Service) recoverTerminalCredentials(ctx context.Context, op Operation) error {

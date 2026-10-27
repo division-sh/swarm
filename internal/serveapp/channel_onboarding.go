@@ -200,7 +200,7 @@ func compileServeChannelActivationSnapshot(ctx context.Context, manager *runtime
 		if err != nil {
 			return serveChannelActivationSnapshot{}, err
 		}
-		learned, err = compileServeLearnedChannelActivations(ctx, store, catalog, activations, projection)
+		learned, err = compileServeLearnedChannelActivations(ctx, store, catalog, activations, projection, serveChannelTargetEnablementReader(manager))
 		if err != nil {
 			return serveChannelActivationSnapshot{}, err
 		}
@@ -220,13 +220,20 @@ func compileServeChannelActivationSnapshot(ctx context.Context, manager *runtime
 	return serveChannelActivationSnapshot{Activations: merged, Prebinding: prebinding}, nil
 }
 
-func compileServeLearnedChannelActivations(ctx context.Context, store channelonboarding.Store, catalog *channelonboarding.CandidateCatalog, activations []channelonboarding.ConnectedChannelActivation, projection *runtimecredentials.SecretBindingProjection) ([]channelonboarding.CompiledActivation, error) {
+func compileServeLearnedChannelActivations(ctx context.Context, store channelonboarding.Store, catalog *channelonboarding.CandidateCatalog, activations []channelonboarding.ConnectedChannelActivation, projection *runtimecredentials.SecretBindingProjection, targetEnabled channelonboarding.TargetEnablementReader) ([]channelonboarding.CompiledActivation, error) {
 	learned := []channelonboarding.CompiledActivation{}
 	for _, activation := range activations {
 		candidate, current := catalog.FindExact(activation.Provider, activation.Interface, activation.Coordinate, activation.TargetSelector)
 		if !current {
 			// Historical selected-store rows remain readable but cannot grant
 			// execution or registration authority to a successor publication.
+			continue
+		}
+		enabled, err := targetEnabled(ctx, candidate)
+		if err != nil {
+			return nil, err
+		}
+		if !enabled {
 			continue
 		}
 		compiled, err := channelonboarding.CompileLearnedActivation(candidate, activation)
@@ -340,6 +347,20 @@ func priorServeDeclaredActivations(manager *runtime.RuntimeContextManager, conte
 		lease.Release()
 	}
 	return prior, nil
+}
+
+func serveChannelTargetEnablementReader(manager *runtime.RuntimeContextManager) channelonboarding.TargetEnablementReader {
+	return func(ctx context.Context, candidate channelonboarding.Candidate) (enabled bool, err error) {
+		use, lookup, err := manager.AcquireBundleHash(ctx, candidate.Coordinate.BundleHash)
+		if err != nil || !lookup.Loaded() || use == nil {
+			return false, errors.Join(channelonboarding.ErrRevisionConflict, err)
+		}
+		defer func() { err = errors.Join(err, use.Done()) }()
+		if !candidate.Coordinate.MatchesContextOccurrence(use.Context.RuntimeInstanceID, use.Context.PublicationGeneration) {
+			return false, channelonboarding.ErrRevisionConflict
+		}
+		return use.Runtime().StandingIngressEnabled(candidate.Target.Selector)
+	}
 }
 
 func serveDeclaredRegistrationEnabled(ctx context.Context, manager *runtime.RuntimeContextManager, contextDef runtime.BundleContext, binding packs.OutboundBindingPlan) (bool, error) {

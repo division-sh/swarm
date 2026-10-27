@@ -94,7 +94,7 @@ func installedSessionBootstrapFixture(t *testing.T, backend string) (*channelonb
 	if err := os.Chmod(directory, 0o700); err != nil {
 		t.Fatal(err)
 	}
-	sessions, err := newServeSessionBootstrap(serveSessionBootstrapRuntimeSelector(manager), selected, current, directory, nil)
+	sessions, err := newServeSessionBootstrap(serveSessionBootstrapRuntimeSelector(manager), selected, current, directory, nil, serveChannelTargetEnablementReader(manager))
 	if err != nil {
 		t.Fatal(err)
 	}
