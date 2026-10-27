@@ -16,7 +16,6 @@ import (
 	"github.com/division-sh/swarm/internal/runtime/core/worklifetime"
 	runtimedelivery "github.com/division-sh/swarm/internal/runtime/deliverylifecycle"
 	"github.com/division-sh/swarm/internal/runtime/pipeline"
-	"github.com/division-sh/swarm/internal/runtime/runquiescence"
 	"github.com/division-sh/swarm/internal/runtime/testfixtures/canonicalrouting"
 	"github.com/division-sh/swarm/internal/servedparity"
 	"github.com/division-sh/swarm/internal/store/storetest"
@@ -160,16 +159,22 @@ func provePublicCompletionManagedCommitCut(t *testing.T, backend servedparity.Ba
 	if err := <-shutdown; err != nil {
 		t.Errorf("managed shutdown failed: %v", err)
 	}
-	handoffObserved, handoffAccepted := false, false
+	handoffObserved := false
 	select {
 	case err := <-observer.result:
-		handoffObserved, handoffAccepted = true, err == nil
-		t.Logf("native committed handoff observed=%t accepted=%t error=%v", handoffObserved, handoffAccepted, err)
+		handoffObserved = true
+		t.Logf("native committed handoff observed=%t accepted=%t error=%v", handoffObserved, err == nil, err)
 	default:
-		t.Log("native committed handoff UNOBSERVED; require durable terminal disposition instead")
+		t.Log("native committed handoff UNOBSERVED; require durable recovery instead")
 	}
 	if _, err := rt.WorkOccurrence().RetireAndWait(t.Context()); err != nil || process.PublicCompletionCount() != 0 {
 		t.Fatalf("managed shutdown retained exact ownership: count=%d err=%v", process.PublicCompletionCount(), err)
+	}
+	probe.mu.Lock()
+	firstDisposals, firstReleases, firstDisposeErr := probe.claimDisposeCount, probe.claimReleaseCount, probe.claimDisposeError
+	probe.mu.Unlock()
+	if eventBacked && (firstDisposals != 1 || firstDisposeErr != nil) {
+		t.Fatalf("managed commit lost exact original claim disposition: count=%d err=%v", firstDisposals, firstDisposeErr)
 	}
 	h.stop(t)
 	probe.afterCommit = nil
@@ -188,7 +193,7 @@ func provePublicCompletionManagedCommitCut(t *testing.T, backend servedparity.Ba
 	}
 	probe.mu.Lock()
 	native, calls, obligations, workflow, eventID := probe.native, probe.commits+probe.deployments, probe.obligations, probe.workflow, probe.eventID
-	disposals, disposeErr := probe.claimDisposeCount, probe.claimDisposeError
+	disposals, releases, disposeErr := probe.claimDisposeCount, probe.claimReleaseCount, probe.claimDisposeError
 	probe.mu.Unlock()
 	if calls != 1 {
 		t.Fatalf("managed restart repeated native COMMIT: %d", calls)
@@ -213,46 +218,31 @@ func provePublicCompletionManagedCommitCut(t *testing.T, backend servedparity.Ba
 		Run operatorread.RunHeader `json:"run"`
 	}
 	requireServedJSONRPCResult(t, h.rpcEndpoint(), "run.get", map[string]any{"run_id": runID}, &result)
-	abandoned := result.Run.Status == "cancelled" && result.Run.ControlReason == runquiescence.ServeAbandonReasonCode
-	completed := result.Run.Status == "completed" && eventBacked && handoffAccepted
-	if result.Run.RunID != runID || (!abandoned && !completed) || result.Run.EndedAt == nil {
-		t.Fatalf("publisher lacks durable managed disposition: %+v", result.Run)
+	if result.Run.RunID != runID || result.Run.Status != "live" || result.Run.EndedAt != nil || result.Run.ControlReason != "" {
+		t.Fatalf("managed shutdown ended the retained live flow: %+v", result.Run)
 	}
 	readiness, found, err := workflow.LoadDynamicFlowRuntimeReadiness(t.Context(), runID, plan.Identity.Route())
-	if err != nil || !found || !readiness.Terminal() || readiness.Eligible() || readiness.Pending() {
-		t.Fatalf("terminal managed run retains actionable readiness: found=%t readiness=%+v err=%v", found, readiness, err)
+	if err != nil || !found || readiness.Phase != pipeline.FlowAttachmentReady {
+		t.Fatalf("managed restart did not recover exact attachment: found=%t readiness=%+v err=%v", found, readiness, err)
 	}
 	open, err := obligations.SummarizeRun(t.Context(), runID)
 	if err != nil || open.HasOpenWork() {
-		t.Fatalf("managed abandonment retains pipeline work: %+v err=%v", open, err)
+		t.Fatalf("managed recovery left publication unsettled: %+v err=%v", open, err)
 	}
 	deliveries, err := storetest.ReadServedRunDeliverySummary(t.Context(), native, runID)
 	if err != nil || deliveries.Pending != 0 || deliveries.InProgress != 0 || deliveries.RetryScheduled != 0 || len(deliveries.ActiveDeliveryIDs) != 0 {
-		t.Fatalf("managed abandonment retains live deliveries: %+v err=%v", deliveries, err)
+		t.Fatalf("managed recovery retains live deliveries: %+v err=%v", deliveries, err)
 	}
 	if !eventBacked && handoffObserved {
 		t.Fatal("feed-only start fabricated a delivery handoff")
 	}
 	if eventBacked {
-		if disposals != 1 || disposeErr != nil {
-			t.Fatalf("managed commit lost exact native claim disposition: count=%d err=%v", disposals, disposeErr)
+		if releases != firstReleases || disposals != firstReleases+1 || disposeErr != nil {
+			t.Fatalf("managed recovery lost exact native claim settlement: count=%d releases=%d original_releases=%d err=%v", disposals, releases, firstReleases, disposeErr)
 		}
 		evidence := storetest.ReadSemanticEventFixtureEvidence(t, t.Context(), native, runID, eventID)
-		outcome := "dead_letter"
-		if completed {
-			outcome = "success"
-		}
-		if !evidence.RecordFound || evidence.PipelineReceiptCount != 1 || evidence.PipelineReceiptOutcome != outcome || evidence.PipelineReceiptFailure != nil || (abandoned && evidence.PipelineReceiptReason != runquiescence.ServeAbandonReasonCode) {
+		if !evidence.RecordFound || evidence.PipelineReceiptCount != 1 || evidence.PipelineReceiptOutcome != "success" || evidence.PipelineReceiptFailure != nil {
 			t.Fatalf("managed restart lost or duplicated native event settlement: %+v", evidence)
-		}
-		rows, err := storetest.ReadEventDeliveryDiagnosticRows(t.Context(), native, eventID)
-		if err != nil {
-			t.Fatal(err)
-		}
-		for _, row := range rows {
-			if abandoned && (row.Status != "dead_letter" || row.Reason != runquiescence.ServeAbandonReasonCode) {
-				t.Fatalf("managed abandoned delivery remains unsettled: %+v", row)
-			}
 		}
 	}
 	h.stop(t)

@@ -13,7 +13,6 @@ import (
 	"github.com/division-sh/swarm/internal/runtime/core/flowidentity"
 	"github.com/division-sh/swarm/internal/runtime/core/worklifetime"
 	"github.com/division-sh/swarm/internal/runtime/pipeline"
-	"github.com/division-sh/swarm/internal/runtime/runquiescence"
 	"github.com/division-sh/swarm/internal/runtime/testfixtures/canonicalrouting"
 	"github.com/division-sh/swarm/internal/servedparity"
 	"github.com/division-sh/swarm/internal/store/storetest"
@@ -181,30 +180,23 @@ func provePublicCompletionAcknowledgedShutdownCut(t *testing.T, backend servedpa
 		t.Fatalf("restart/replay changed immutable construction: before=%+v after=%+v err=%v", before, after, err)
 	}
 	readiness, found, err := workflow.LoadDynamicFlowRuntimeReadiness(t.Context(), plan.Readiness.RunID, plan.Identity.Route())
-	if abandon {
-		if err != nil || !found || !readiness.Terminal() || readiness.Eligible() || readiness.Pending() {
-			t.Fatalf("abandoned attachment remains actionable: found=%t readiness=%+v err=%v", found, readiness, err)
-		}
-		var result struct {
-			Run operatorread.RunHeader `json:"run"`
-		}
-		requireServedJSONRPCResult(t, h.rpcEndpoint(), "run.get", map[string]any{"run_id": plan.Readiness.RunID}, &result)
-		if result.Run.RunID != plan.Readiness.RunID || result.Run.Status != "cancelled" || result.Run.ControlReason != runquiescence.ServeAbandonReasonCode || result.Run.EndedAt == nil {
-			t.Fatalf("publisher lacks exact durable abandonment: %+v", result.Run)
-		}
-		pending, err := obligations.SummarizeRun(t.Context(), plan.Readiness.RunID)
-		if err != nil || pending.HasOpenWork() {
-			t.Fatalf("abandoned run retains pipeline work: summary=%+v err=%v", pending, err)
-		}
-		deliveries, err := storetest.ReadServedRunDeliverySummary(t.Context(), native, plan.Readiness.RunID)
-		if err != nil || deliveries.Pending != 0 || deliveries.InProgress != 0 || deliveries.RetryScheduled != 0 || len(deliveries.ActiveDeliveryIDs) != 0 {
-			t.Fatalf("abandoned run retains live deliveries: summary=%+v err=%v", deliveries, err)
-		}
-		if process.PublicCompletionCount() != 0 {
-			t.Fatal("default restart/replay retained a public reservation")
-		}
-	} else if err != nil || !found || readiness.Phase != pipeline.FlowAttachmentReady {
+	if err != nil || !found || readiness.Phase != pipeline.FlowAttachmentReady {
 		t.Fatalf("authorized startup did not recover exact attachment: found=%t readiness=%+v err=%v", found, readiness, err)
+	}
+	var result struct {
+		Run operatorread.RunHeader `json:"run"`
+	}
+	requireServedJSONRPCResult(t, h.rpcEndpoint(), "run.get", map[string]any{"run_id": plan.Readiness.RunID}, &result)
+	if result.Run.RunID != plan.Readiness.RunID || result.Run.Status != "live" || result.Run.ControlReason != "" || result.Run.EndedAt != nil {
+		t.Fatalf("restart ended the retained live flow: %+v", result.Run)
+	}
+	pending, err := obligations.SummarizeRun(t.Context(), plan.Readiness.RunID)
+	if err != nil || pending.HasOpenWork() {
+		t.Fatalf("recovery left publication unsettled: summary=%+v err=%v", pending, err)
+	}
+	deliveries, err := storetest.ReadServedRunDeliverySummary(t.Context(), native, plan.Readiness.RunID)
+	if err != nil || deliveries.Pending != 0 || deliveries.InProgress != 0 || deliveries.RetryScheduled != 0 || len(deliveries.ActiveDeliveryIDs) != 0 {
+		t.Fatalf("recovery retains live deliveries: summary=%+v err=%v", deliveries, err)
 	}
 	if method == "event.publish" || eventBacked {
 		probe.mu.Lock()
@@ -217,26 +209,8 @@ func provePublicCompletionAcknowledgedShutdownCut(t *testing.T, backend servedpa
 			}
 		}
 		evidence := storetest.ReadSemanticEventFixtureEvidence(t, t.Context(), native, plan.Readiness.RunID, eventID)
-		outcome := "success"
-		if abandon {
-			outcome = "dead_letter"
-		}
-		if !evidence.RecordFound || evidence.PipelineReceiptCount != 1 || evidence.PipelineReceiptOutcome != outcome || evidence.PipelineReceiptFailure != nil {
+		if !evidence.RecordFound || evidence.PipelineReceiptCount != 1 || evidence.PipelineReceiptOutcome != "success" || evidence.PipelineReceiptFailure != nil {
 			t.Fatalf("recovery lost or duplicated exact event settlement: %+v", evidence)
-		}
-		if abandon {
-			if evidence.PipelineReceiptReason != runquiescence.ServeAbandonReasonCode {
-				t.Fatalf("abandonment lost its exact pipeline reason: %+v", evidence)
-			}
-			rows, err := storetest.ReadEventDeliveryDiagnosticRows(t.Context(), native, eventID)
-			if err != nil {
-				t.Fatal(err)
-			}
-			for _, row := range rows {
-				if row.Status != "dead_letter" || row.Reason != runquiescence.ServeAbandonReasonCode {
-					t.Fatalf("abandoned exact delivery remains unsettled: %+v", row)
-				}
-			}
 		}
 	}
 	h.stop(t)
