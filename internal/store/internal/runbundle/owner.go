@@ -125,6 +125,9 @@ func (o *SQLite) ListActiveNonStanding(ctx context.Context) ([]runtimerunbundle.
 }
 
 func ListActiveNonStandingTx(ctx context.Context, tx *sql.Tx, sqlite bool) ([]runtimerunbundle.Availability, error) {
+	if tx == nil {
+		return nil, errors.New("run-bundle snapshot requires its native transaction")
+	}
 	return listActiveNonStanding(ctx, tx, sqlite)
 }
 

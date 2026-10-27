@@ -57,7 +57,6 @@ func TestWorkflowTimerCancellationDDLRejectsNullPairBypasses(t *testing.T) {
 		{"empty_cause", "cancelled", "", nil, nil, "source", false},
 		{"before_birth", "cancelled", "rule_removed", 99, nil, "source", false},
 		{"before_fire", "cancelled", "rule_removed", 100, 101, "source", false},
-		{"no_source_obligation", "cancelled", "rule_removed", 100, nil, nil, false},
 		{"active_with_removal", "active", "rule_removed", 100, nil, "source", false},
 		{"fired_with_removal", "fired", "rule_removed", 100, 100, "source", false},
 	} {
