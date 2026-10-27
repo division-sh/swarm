@@ -44,7 +44,24 @@ func AuthorizeGenerationMutationTx(ctx context.Context, tx *sql.Tx, req manager.
 	if req.ProcessBinding != expected || evidence.State == startupownership.GrantRetired {
 		return errors.New("lifecycle generation grant is retired or differs from the retained process binding")
 	}
-	ownership, err := inspectRunExecutionOwnershipTx(ctx, tx, evidence, req.Identity.RunID, sqlite)
+	var ownership manager.RunExecutionOwnership
+	var err error
+	if (evidence.State == startupownership.GrantPrepared || evidence.State == startupownership.GrantProbeSettled) && evidence.SelectedFork == nil && req.OperationKind == "process_takeover" &&
+		req.Agent == nil && req.Subordinate.Action == sessions.LifecycleMutationNone && req.TargetPhase == req.ExpectedPhase &&
+		req.TargetEpoch == req.ExpectedEpoch+1 && req.TargetGeneration == req.ExpectedGeneration+1 {
+		ownership, err = inspectPreparedRunTakeoverTx(ctx, tx, evidence, req.Identity.RunID, sqlite)
+		if err == nil && ownership == manager.RunExecutionOwned {
+			previous, _, exists, readErr := loadAgentLifecycleState(ctx, tx, req.Identity, sqlite, true)
+			if readErr != nil {
+				return readErr
+			}
+			if !exists || previous.RunMode != req.RunMode || previous.ConfigRevision != req.ConfigRevision || !previous.Topology.Equal(req.Topology) {
+				return lifecycleConflict(req, previous, exists)
+			}
+		}
+	} else {
+		ownership, err = inspectRunExecutionOwnershipTx(ctx, tx, evidence, req.Identity.RunID, sqlite)
+	}
 	if err != nil {
 		return err
 	}
@@ -152,7 +169,13 @@ func authorizeDynamicFlowGrantTx(ctx context.Context, tx *sql.Tx, binding runtim
 			return errors.New("flow activation generation grant source-set revision is not current")
 		}
 	}
-	ownership, err := inspectRunExecutionOwnershipTx(ctx, tx, evidence, runID, sqlite)
+	var ownership manager.RunExecutionOwnership
+	var err error
+	if use == flowGrantTakeoverPreparation && (evidence.State == startupownership.GrantPrepared || evidence.State == startupownership.GrantProbeSettled) {
+		ownership, err = inspectPreparedRunTakeoverTx(ctx, tx, evidence, runID, sqlite)
+	} else {
+		ownership, err = inspectRunExecutionOwnershipTx(ctx, tx, evidence, runID, sqlite)
+	}
 	if err != nil {
 		return err
 	}
@@ -160,6 +183,38 @@ func authorizeDynamicFlowGrantTx(ctx context.Context, tx *sql.Tx, binding runtim
 		return fmt.Errorf("%w: %s", manager.ErrRunExecutionNotOwned, runID)
 	}
 	return nil
+}
+
+// Startup takeover rebinds an existing cell without admitting its execution.
+func inspectPreparedRunTakeoverTx(ctx context.Context, tx *sql.Tx, evidence startupownership.GrantEvidence, runID string, sqlite bool) (manager.RunExecutionOwnership, error) {
+	if (evidence.State != startupownership.GrantPrepared && evidence.State != startupownership.GrantProbeSettled) || evidence.SelectedFork != nil {
+		return 0, errors.New("startup lifecycle takeover requires its ordinary preparation grant")
+	}
+	if err := generationauthority.RequireCurrentGrantTx(ctx, tx, evidence, sqlite); err != nil {
+		return 0, err
+	}
+	if err := proveGrantProcessTx(ctx, tx, evidence, sqlite, true); err != nil {
+		return 0, err
+	}
+	plan, present, err := generationauthority.ReadSourceSetTx(ctx, tx, sqlite, true)
+	if err != nil {
+		return 0, err
+	}
+	if !present || plan.Revision != evidence.SourceSetRevision || !generationauthority.SourceSetContains(plan, agenttopology.SourceCoordinate{BundleHash: evidence.BundleHash}) {
+		return 0, errors.New("startup lifecycle takeover source set is not current")
+	}
+	hash, binding, err := loadRunExecutionBindingModeTx(ctx, tx, runID, sqlite, true)
+	if err != nil {
+		return 0, err
+	}
+	if binding.Valid && hash == evidence.BundleHash {
+		retained, err := sourceadmission.ObserveRetainedLiveHandoff(ctx, tx, runID, hash)
+		if err != nil || !retained {
+			return manager.RunExecutionForeign, err
+		}
+		return manager.RunExecutionOwned, nil
+	}
+	return classifyOrdinaryRunSource(hash, binding, evidence.BundleHash), nil
 }
 
 // FlowActivationPredecessorIsFromAnotherProcessTx permits reconstruction after

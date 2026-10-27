@@ -160,13 +160,58 @@ func verifyUnpublishedTransferredBarrierRefork(t *testing.T, latePublication boo
 			childProbe := &publishedBarrierClaimProbe{Probe: lifecycleprobe.New(), owner: producer.Key(), claim: make(chan forkEngineObservation, 1), completed: make(chan string, 1)}
 			if os.Getenv("TEST_UNPUBLISHED_BARRIER_CRASH_BACKEND") != "" {
 				childProbe.resume = make(chan struct{})
-				t.Cleanup(func() { close(childProbe.resume) })
+				t.Cleanup(func() {
+					select {
+					case <-childProbe.resume:
+					default:
+						close(childProbe.resume)
+					}
+				})
 			}
 			request.SourceRunID, request.At, request.AtStart = parent.ForkRunID, "", true
 			request.ForkOperation = &runfork.ForkOperationRequest{OperationID: uuid.NewString(), Actor: "pending-barrier-refork", IdempotencyKey: "parent-start",
 				TransportHash: "pending-barrier-refork-transport", SourceRunID: parent.ForkRunID, AtStart: true,
 				TargetBundleHash: rt.Options.SourceArtifactFact.BundleHash(), AllowSourceFreeze: true, ContractSelection: request.ContractSelection}
 			request.AgentRuntime.AgentManagerOptions = manager.AgentManagerOptions{TestLifecycleProbe: childProbe}
+			if childProbe.resume != nil {
+				acknowledged := make(chan forkEngineAcknowledgment, 1)
+				done := make(chan struct{})
+				go func() {
+					defer close(done)
+					result, err := family.Execute(phase, request)
+					acknowledged <- forkEngineAcknowledgment{result: result, err: err}
+				}()
+				t.Cleanup(func() {
+					select {
+					case <-childProbe.resume:
+					default:
+						close(childProbe.resume)
+					}
+					select {
+					case <-done:
+					case <-time.After(10 * time.Second):
+						t.Error("pending barrier pre-ACK execution did not join")
+					}
+				})
+				var observed forkEngineObservation
+				select {
+				case observed = <-childProbe.claim:
+				case ack := <-acknowledged:
+					t.Fatalf("pending barrier returned before its crash cut: child=%s err=%v", ack.result.Materialization.ForkRunID, ack.err)
+				case <-phase.Done():
+					t.Fatal(phase.Err())
+				}
+				proof := forkEngineClaimProofRequest(t, phase, selected, parent.ForkRunID, occurrence.Publication.EventID, observed)
+				if observed.id != activityidentity.ForkLineageEventID(proof.ChildRunID, occurrence.Publication.EventID) {
+					t.Fatal("pending barrier crash acquired another occurrence")
+				}
+				source, err := selected.Entities().LoadOperatorEntity(phase, parent.ForkRunID, parent.ForkRunID)
+				if err != nil {
+					t.Fatal(err)
+				}
+				publishBarrierCrashCheckpoint(t, phase, selected, proof, observed, forkFixtureEntityRevision(t, source.Entity.Revision))
+				return
+			}
 			var child runforkexecution.SelectedContractExecutionResult
 			if latePublication {
 				childPrepared, err := family.Prepare(phase, request)
@@ -230,22 +275,6 @@ func verifyUnpublishedTransferredBarrierRefork(t *testing.T, latePublication boo
 				}
 			}
 			id := activityidentity.ForkLineageEventID(child.Materialization.ForkRunID, occurrence.Publication.EventID)
-			if childProbe.resume != nil {
-				var observed forkEngineObservation
-				select {
-				case observed = <-childProbe.claim:
-				case <-phase.Done():
-					t.Fatal(phase.Err())
-				}
-				if observed.id != id {
-					t.Fatal("pending barrier crash acquired another occurrence")
-				}
-				source, err := selected.Entities().LoadOperatorEntity(phase, parent.ForkRunID, parent.ForkRunID)
-				if err != nil {
-					t.Fatal(err)
-				}
-				publishBarrierCrashCheckpoint(t, phase, selected, child, occurrence.Publication.EventID, observed, forkFixtureEntityRevision(t, source.Entity.Revision))
-			}
 			if _, err := childProbe.Wait(phase, lifecycleprobe.Signal{Kind: lifecycleprobe.DeliveryStatusChanged, EventID: id, SubscriberID: producer.Key(), SubscriberType: "node", Status: "delivered"}); err != nil {
 				t.Fatal(err)
 			}

@@ -59,11 +59,20 @@ func (am *AgentManager) RebindLifecycleExecutionForStartup(ctx context.Context) 
 		if strings.TrimSpace(current.BundleHash) != strings.TrimSpace(target.BundleHash) {
 			continue
 		}
-		ownership, err := am.inspectRunExecutionOwnership(ctx, identity.RunID)
+		var applicable bool
+		if reader, ok := store.(interface {
+			ObserveStartupRunSource(context.Context, string) (bool, error)
+		}); ok {
+			applicable, err = reader.ObserveStartupRunSource(ctx, identity.RunID)
+		} else {
+			var ownership RunExecutionOwnership
+			ownership, err = am.inspectRunExecutionOwnership(ctx, identity.RunID)
+			applicable = ownership == RunExecutionOwned
+		}
 		if err != nil {
 			return err
 		}
-		if ownership != RunExecutionOwned {
+		if !applicable {
 			continue
 		}
 		if current.Equal(target) {

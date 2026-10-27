@@ -15,12 +15,11 @@ import (
 	"github.com/division-sh/swarm/internal/runtime/fanoutbarrier"
 	"github.com/division-sh/swarm/internal/runtime/lifecycleprobe"
 	"github.com/division-sh/swarm/internal/runtime/runfork"
-	"github.com/division-sh/swarm/internal/runtime/runforkexecution"
 	storeselected "github.com/division-sh/swarm/internal/store/selected"
 	"github.com/division-sh/swarm/internal/store/storetest"
 )
 
-func verifyPublishedBarrierCompletionFailure(t *testing.T, ctx context.Context, selected *storeselected.Owner, family storeselected.RunFork, result runforkexecution.SelectedContractExecutionResult, plan runfork.RunForkPlan, original, observed forkEngineObservation, probe *publishedBarrierClaimProbe, sourceRun string, sourceBefore operatorread.OperatorEntityFull, proof publishedBarrierCompletionProof) {
+func verifyPublishedBarrierCompletionFailure(t *testing.T, ctx context.Context, selected *storeselected.Owner, family storeselected.RunFork, proofRequest storetest.SelectedForkReceiverExecutionProofRequest, acknowledged <-chan forkEngineAcknowledgment, plan runfork.RunForkPlan, original, observed forkEngineObservation, probe *publishedBarrierClaimProbe, sourceRun string, sourceBefore operatorread.OperatorEntityFull, proof publishedBarrierCompletionProof) {
 	t.Helper()
 	claim, valid := deliverylifecycle.ClaimFromContext(observed.ctx)
 	if !valid {
@@ -98,6 +97,14 @@ func verifyPublishedBarrierCompletionFailure(t *testing.T, ctx context.Context, 
 			t.Fatal(ctx.Err())
 		}
 	}
+	select {
+	case ack := <-acknowledged:
+		if ack.err != nil || !ack.result.Activation.Activated || proofRequest != forkEngineExecutionProofRequest(t, ack.result, original.id, observed.id, claim) {
+			t.Fatalf("failed completion lost its actual settled handoff: %+v err=%v", ack.result, ack.err)
+		}
+	case <-ctx.Done():
+		t.Fatal(ctx.Err())
+	}
 	var barrier fanoutbarrier.Barrier
 	for {
 		barrier, err = storetest.ReadExactFanOutBarrier(ctx, selected.RuntimeDeps().DeliveryStore, key)
@@ -132,7 +139,7 @@ func verifyPublishedBarrierCompletionFailure(t *testing.T, ctx context.Context, 
 	if count, err := storetest.ReadLifecycleEventCardinality(ctx, selected.RuntimeDeps().DeliveryStore, claim.RunID(), "producer/batch.completed"); err != nil || count != 0 {
 		t.Fatalf("failed completion published a success output: count=%d err=%v", count, err)
 	}
-	physical := readForkEngineExecutionProof(t, ctx, selected, forkEngineExecutionProofRequest(t, result, original.id, observed.id, claim))
+	physical := readForkEngineExecutionProof(t, ctx, selected, proofRequest)
 	assertForkEnginePipelineSettlement(t, physical, settled)
 	if physical.DeadLetterCount != 1 || physical.DeliveryHandoff || physical.PipelineOutcome != "dead_letter" || physical.PipelineReason != settled.ReasonCode {
 		t.Fatalf("completion failure lost its one DL or fabricated a success handoff: %+v", physical)
@@ -150,10 +157,10 @@ func verifyPublishedBarrierCompletionFailure(t *testing.T, ctx context.Context, 
 	if err != nil || !reflect.DeepEqual(barrier, retired) {
 		t.Fatalf("explicit retirement rewrote dead-letter business history: %+v err=%v", retired, err)
 	}
-	joined := readForkEngineExecutionProof(t, cleanup, selected, forkEngineExecutionProofRequest(t, result, original.id, observed.id, claim))
+	joined := readForkEngineExecutionProof(t, cleanup, selected, proofRequest)
 	assertForkEnginePipelineSettlement(t, joined, settled)
 	if joined.DeadLetterCount != physical.DeadLetterCount || joined.DeliveryHandoff || joined.PipelineOutcome != physical.PipelineOutcome || joined.PipelineReason != physical.PipelineReason ||
-		!reflect.DeepEqual(joined.PipelineFailure, physical.PipelineFailure) || joined.ExecutionState != "running" || joined.RunStatus != "running" || len(joined.Failure) != 0 {
+		!reflect.DeepEqual(joined.PipelineFailure, physical.PipelineFailure) || joined.ExecutionState != physical.ExecutionState || joined.RunStatus != physical.RunStatus || len(joined.Failure) != 0 {
 		t.Fatalf("retirement changed the exact DL or converted delivery terminality to run failure: %+v", joined)
 	}
 }
