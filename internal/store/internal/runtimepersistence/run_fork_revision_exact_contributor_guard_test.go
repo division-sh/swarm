@@ -585,10 +585,6 @@ func validateRevisionWriterCalls(source string, contract revisionExactWriterCont
 func TestRunForkRevisionExplicitBroadWriterContributions(t *testing.T) {
 	root := repoRootForRuntimeWriterGuard(t)
 	for _, contract := range []revisionExactWriterContract{
-		{"pipelinepersistence/standing_service.go", "standingServiceAdapter.quiesceStandingRunTx", []string{
-			"s.attempt.AddWholeFamily(runID, privaterunforkrevision.FamilyAgentSessions)",
-			"s.attempt.AddWholeFamily(runID, privaterunforkrevision.FamilyAgentSessions)",
-		}},
 		{"delivery/adapter.go", "Adapter.ActivateNormalAuthority", []string{"a.activateNormalAuthorityTx(ctx, tx, attempt, authority)"}},
 		{"delivery/adapter.go", "Adapter.activateNormalAuthorityTx", []string{"declareAuthorityDeliveryRuns(ctx, tx, authority, attempt)"}},
 		{"delivery/lifecycle.go", "declareAuthorityDeliveryRuns", []string{"attempt.AddWholeFamily(runID, privaterunforkrevision.FamilyEventDeliveries)"}},

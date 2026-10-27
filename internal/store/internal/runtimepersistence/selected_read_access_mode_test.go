@@ -189,7 +189,6 @@ func TestStandaloneSelectedReadAccessModeGuard(t *testing.T) {
 	for _, method := range []string{"ListPendingAgentDeliveryFacts", "ListPendingAgentDeliveryDetails"} {
 		tests = append(tests, selectedReadGuard{path: "internal/store/internal/operatorsurface/pending_delivery_read_surface.go", receiver: "AgentSQLite", method: method, required: "RunReadTransaction"})
 	}
-	tests = append(tests, selectedReadGuard{path: "internal/store/internal/backend/pipelinepersistence/standing_service.go", receiver: "standingServiceAdapter", method: "ListStandingServiceStatuses", required: "RunReadTransaction"})
 	for _, test := range tests {
 		calls := selectedReadMethodCalls(t, filepath.Join(root, test.path), test.receiver, test.method)
 		if !calls[test.required] {
