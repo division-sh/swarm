@@ -29,7 +29,7 @@ func TestChannelDeliveryAuthorityRequiresExactFrozenIntent(t *testing.T) {
 			ActivationID: uuid.NewString(), ActivationRevision: 1,
 			BundleHash: "bundle-v2:sha256:source", BundleIdentity: "bundle", PackInventoryGeneration: "inventory",
 			RuntimeInstanceID: uuid.NewString(), ContextPublicationGeneration: 2,
-			PlanGeneration: plan, TargetGeneration: 1,
+			PlanGeneration: plan,
 		},
 	}
 	if !authority.Valid() {

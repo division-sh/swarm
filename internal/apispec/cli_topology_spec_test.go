@@ -363,7 +363,6 @@ func TestCLIIdentifierResolutionPromotedToOutputContract(t *testing.T) {
 		"flow_instance":    {candidateSource: "unpromoted", scopeMode: "unpromoted_full_only", normalizationMode: "existing_flow_path"},
 		"context":          {candidateSource: "local_context_registry", scopeMode: "local_bounded", normalizationMode: "trim_case_sensitive"},
 		"subscriber":       {candidateSource: "polymorphic_subscriber_identity", scopeMode: "polymorphic_full_only", normalizationMode: "trim_case_sensitive"},
-		"standing_service": {candidateSource: "unpromoted", scopeMode: "unpromoted_full_only", normalizationMode: "trim_case_sensitive"},
 		"pack":             {candidateSource: "local_effective_pack_inventory", scopeMode: "local_bounded", normalizationMode: "trim_case_sensitive"},
 		"operator_channel": {candidateSource: "/v1/rpc channel.list", scopeMode: "bounded_catalog", normalizationMode: "trim_case_sensitive"},
 	}

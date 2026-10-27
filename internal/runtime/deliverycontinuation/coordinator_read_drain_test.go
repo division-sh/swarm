@@ -4,7 +4,6 @@ import (
 	"context"
 	"errors"
 	"fmt"
-	runtimestanding "github.com/division-sh/swarm/internal/runtime/runlifecycle"
 	"sync/atomic"
 	"testing"
 
@@ -70,13 +69,9 @@ func (s *drainReadStore) ObserveDeliveryContinuations(ctx context.Context, _ run
 	return observations, nil
 }
 
-func (s *drainReadStore) StandingRunRestartDisposition(ctx context.Context, _ string) (runtimestanding.StandingRestartDisposition, error) {
-	return runtimestanding.StandingRestartDisposition{}, s.read(ctx, "standing")
-}
-
 func TestCoordinatorDrainsAdmittedReadsBeforeRetirement(t *testing.T) {
 	for _, phase := range []string{"startup", "wake", "synchronize"} {
-		for _, stage := range []string{"page", "standing", "held"} {
+		for _, stage := range []string{"page", "held"} {
 			for _, stop := range []string{"retire", "parent_cancel"} {
 				for _, fail := range []bool{false, true} {
 					t.Run(fmt.Sprintf("%s/%s/%s/failure=%t", phase, stage, stop, fail), func(t *testing.T) {
@@ -91,7 +86,7 @@ func TestCoordinatorDrainsAdmittedReadsBeforeRetirement(t *testing.T) {
 						}
 						dispatch := &coordinatorTestDispatcher{}
 						reported := make(chan error, 2)
-						c, err := New(s, s, authority, owner, dispatch, func(_ context.Context, err error) { reported <- err })
+						c, err := New(s, authority, owner, dispatch, func(_ context.Context, err error) { reported <- err })
 						if err != nil {
 							t.Fatal(err)
 						}
@@ -154,7 +149,7 @@ func TestCoordinatorSynchronizeWaiterCancellationKeepsReadLease(t *testing.T) {
 	ctx := context.WithValue(context.Background(), drainReadContextKey{}, "owner-value")
 	s := &drainReadStore{t: t, stage: "page", target: 3, entered: make(chan struct{}), release: make(chan struct{}), initialWake: make(chan struct{})}
 	dispatch := &coordinatorTestDispatcher{}
-	c, err := New(s, s, authority, owner, dispatch, nil)
+	c, err := New(s, authority, owner, dispatch, nil)
 	if err != nil {
 		t.Fatal(err)
 	}

@@ -48,7 +48,7 @@ func channelConfirmationTestContext(harness *channelConfirmationHarness, operati
 			ActivationID: uuid.NewString(), ActivationRevision: 2, BindingRevision: 3, PrincipalID: uuid.NewString(),
 			BundleHash:     "bundle-v2:sha256:" + strings.Repeat("a", 64),
 			BundleIdentity: "bundle:test@sha256:confirmation", PackInventoryGeneration: "sha256:confirmation-inventory",
-			RuntimeInstanceID: uuid.NewString(), ContextPublicationGeneration: 7, PlanGeneration: planGeneration, TargetGeneration: 1,
+			RuntimeInstanceID: uuid.NewString(), ContextPublicationGeneration: 7, PlanGeneration: planGeneration,
 		},
 	}
 	ctx := runtimeeffects.WithExecutionMode(context.Background(), runtimeeffects.ExecutionModeLive)
@@ -180,7 +180,7 @@ func channelDeliveryTestContext(h *channelDeliveryHarness) context.Context {
 			ExternalAccountRef: "account", ConversationRef: "chat", ActivationID: uuid.NewString(), ActivationRevision: 3,
 			BundleHash: "bundle-v2:sha256:" + strings.Repeat("a", 64), BundleIdentity: "bundle:test@sha256:delivery",
 			PackInventoryGeneration: "sha256:delivery-inventory", RuntimeInstanceID: uuid.NewString(),
-			ContextPublicationGeneration: 7, PlanGeneration: plan, TargetGeneration: 1,
+			ContextPublicationGeneration: 7, PlanGeneration: plan,
 		},
 	}
 	ctx := runtimeeffects.WithExecutionMode(context.Background(), runtimeeffects.ExecutionModeLive)
@@ -301,7 +301,7 @@ func channelActionAckTestContext(h *channelActionAckHarness) context.Context {
 			ActivationID: uuid.NewString(), ActivationRevision: 3,
 			BundleHash: "bundle-v2:sha256:" + strings.Repeat("a", 64), BundleIdentity: "bundle:test@sha256:ack",
 			PackInventoryGeneration: "sha256:ack-inventory", RuntimeInstanceID: uuid.NewString(),
-			ContextPublicationGeneration: 7, PlanGeneration: plan, TargetGeneration: 1,
+			ContextPublicationGeneration: 7, PlanGeneration: plan,
 		},
 	}
 	ctx := runtimeeffects.WithExecutionMode(context.Background(), runtimeeffects.ExecutionModeLive)

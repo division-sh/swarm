@@ -145,7 +145,6 @@ type storeTestDurableEventBusStore interface {
 	runtimebus.PreparedPublishEventReader
 	runtimebus.TargetFailureDeadLetterRecorder
 	runtimebus.RunOriginReader
-	runtimerunlifecycle.StandingRestartDispositionReader
 	PipelineObligations() runtimepipelineobligation.Store
 }
 
@@ -217,7 +216,7 @@ func newStoreTestEventBus(t *testing.T, store storeTestDurableEventBusStore, opt
 		ReplyContext:             store, RunLifecycle: store, DeliveryLifecycle: store,
 
 		ActiveAgents: store, PreparedEvents: store,
-		TargetFailureRecorder: store, RunOrigins: store, StandingRestarts: store,
+		TargetFailureRecorder: store,
 	}
 	if feedback, ok := store.(runtimepipeline.WorkflowEmitFeedbackOwner); ok {
 		opts.Durable.EmitFeedback = feedback

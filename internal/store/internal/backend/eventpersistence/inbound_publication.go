@@ -261,7 +261,7 @@ func (s *EventPostgresOwner) ValidateInboundPublicationIntegrity(ctx context.Con
 	if s == nil || s.backend == nil {
 		return fmt.Errorf("postgres store is required")
 	}
-	rows, err := s.backend.QueryContext(ctx, `SELECT stable_service_id::text, resolved_run_id::text, expected_generation, provider, provider_event_id FROM inbound_publications ORDER BY publication_id`)
+	rows, err := s.backend.QueryContext(ctx, `SELECT resolved_run_id::text, provider, provider_event_id FROM inbound_publications ORDER BY publication_id`)
 	if err != nil {
 		return fmt.Errorf("list inbound publications for integrity validation: %w", err)
 	}
@@ -269,7 +269,7 @@ func (s *EventPostgresOwner) ValidateInboundPublicationIntegrity(ctx context.Con
 	identities := make([]runtimeinbound.Identity, 0)
 	for rows.Next() {
 		var item runtimeinbound.Identity
-		if err := rows.Scan(&item.ServiceID, &item.RunID, &item.Generation, &item.Provider, &item.ProviderEventID); err != nil {
+		if err := rows.Scan(&item.RunID, &item.Provider, &item.ProviderEventID); err != nil {
 			return fmt.Errorf("scan inbound publication identity: %w", err)
 		}
 		identities = append(identities, item)
@@ -333,8 +333,7 @@ func loadPostgresInboundPublicationTx(ctx context.Context, db inboundPublication
 const postgresInboundPublicationSelect = `
 	SELECT p.publication_id::text, p.provider, p.provider_event_id,
 	       p.request_fingerprint, p.request_projection_version,
-	       p.stable_service_id::text, p.flow_path,
-	       p.target_alias, p.expected_generation, p.expected_publication_sequence,
+	       p.flow_path, p.target_alias,
 	       p.resolved_run_id::text, COALESCE(p.marker_event_id::text, ''), p.acknowledgement_mode,
 	       p.output_count, p.original_received_at, p.original_user_agent, p.original_transport_metadata,
 	       p.state, p.created_at, p.committed_at
@@ -348,8 +347,7 @@ func scanPostgresInboundPublication(row inboundPublicationRowScanner) (runtimein
 	err := row.Scan(
 		&record.PublicationID, &record.Provider, &record.ProviderEventID,
 		&record.RequestFingerprint, &record.RequestProjectionVersion,
-		&record.StableServiceID, &record.FlowPath,
-		&record.TargetAlias, &record.ExpectedGeneration, &record.ExpectedPublicationSequence,
+		&record.FlowPath, &record.TargetAlias,
 		&record.ResolvedRunID, &record.MarkerEventID, &ackMode, &record.OutputCount,
 		&record.OriginalReceivedAt, &record.OriginalUserAgent, &record.OriginalTransportMetadata,
 		&record.State, &record.CreatedAt, &committedAt,
@@ -427,13 +425,11 @@ func insertPostgresInboundPublicationPreparedTx(ctx context.Context, tx *sql.Tx,
 	_, err := tx.ExecContext(ctx, `
 		INSERT INTO inbound_publications (
 			publication_id, provider, provider_event_id, request_fingerprint, request_projection_version,
-			stable_service_id, flow_path, target_alias,
-			expected_generation, expected_publication_sequence, resolved_run_id, acknowledgement_mode,
+			flow_path, target_alias, resolved_run_id, acknowledgement_mode,
 			original_received_at, original_user_agent, original_transport_metadata, state, created_at
-		) VALUES ($1::uuid, $2, $3, $4, $5, $6::uuid, $7, $8, $9, $10, $11::uuid, $12, $13, $14, $15::jsonb, 'prepared', now())
+		) VALUES ($1::uuid, $2, $3, $4, $5, $6, $7, $8::uuid, $9, $10, $11, $12::jsonb, 'prepared', now())
 	`, request.PublicationID, request.Provider, request.ProviderEventID, request.RequestFingerprint, request.RequestProjectionVersion,
-		request.StableServiceID, request.FlowPath, request.TargetAlias,
-		request.ExpectedGeneration, request.ExpectedPublicationSequence, request.ResolvedRunID, string(request.AcknowledgementMode), request.OriginalReceivedAt, request.OriginalUserAgent, string(request.OriginalTransportMetadata))
+		request.FlowPath, request.TargetAlias, request.ResolvedRunID, string(request.AcknowledgementMode), request.OriginalReceivedAt, request.OriginalUserAgent, string(request.OriginalTransportMetadata))
 	if err != nil {
 		return fmt.Errorf("insert prepared inbound publication: %w", err)
 	}

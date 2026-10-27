@@ -16,7 +16,6 @@ import (
 	"github.com/division-sh/swarm/internal/runtime/correlation"
 	"github.com/division-sh/swarm/internal/runtime/manager"
 	"github.com/division-sh/swarm/internal/runtime/pipeline"
-	"github.com/division-sh/swarm/internal/runtime/runlifecycle"
 )
 
 type attachmentTimerAcquisitionWorkflow struct {
@@ -146,13 +145,6 @@ func runFlowAttachmentTimerAcquisition(t *testing.T, backend, cut, disposition s
 	}, func(options *manager.AgentManagerOptions) {
 		workflow.PipelineCoordinator = options.WorkflowInstances.(*pipeline.PipelineCoordinator)
 		options.WorkflowInstances = workflow
-		if disposition == "automatic_retry" {
-			reader, ok := options.DeliveryStore.(runlifecycle.StandingRestartDispositionReader)
-			if !ok {
-				t.Fatal("automatic retry fixture requires the real standing restart reader")
-			}
-			options.PersistenceRoles.StandingRestarts = reader
-		}
 	})
 	releaseRetry := sync.OnceFunc(func() { close(workflow.retryRelease) })
 	t.Cleanup(releaseRetry)

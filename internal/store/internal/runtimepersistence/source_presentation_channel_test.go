@@ -68,7 +68,7 @@ func Test2376ChannelExactSelectionAndStoredPresentationBothStores(t *testing.T) 
 					operations = append(operations, op)
 					candidates = append(candidates, channelonboarding.Candidate{
 						Provider: request.Provider, Interface: request.Interface, Coordinate: request.Coordinate, SourceLabel: artifact.HumanLabel(),
-						Target:  channelonboarding.CandidateTarget{Selector: request.TargetSelector, ServiceID: "service", FlowPath: "support/flow", Alias: "telegram", Provider: "telegram", Generation: request.Coordinate.TargetGeneration, PublicationSequence: 1, AdmissionGeneration: triggergeneration.FromCanonicalBytes([]byte("2376")), SigningCredentialKey: "telegram_signing"},
+						Target:  channelonboarding.CandidateTarget{Selector: request.TargetSelector, FlowPath: "support/flow", Alias: "telegram", Provider: "telegram", AdmissionGeneration: triggergeneration.FromCanonicalBytes([]byte("2376")), SigningCredentialKey: "telegram_signing"},
 						Posture: request.Posture, Ceremony: request.Ceremony, ProviderCredentialRole: "bot_token", SigningCredentialRole: "webhook_signing", ConfirmationOperation: "deliver",
 					})
 					if err := os.RemoveAll(root); err != nil {

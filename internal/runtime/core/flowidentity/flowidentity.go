@@ -11,7 +11,6 @@ import (
 )
 
 var flowInstanceEntityNamespace = uuid.NewSHA1(uuid.NameSpaceOID, []byte("flow-instance-entity"))
-var standingServiceNamespace = uuid.NewSHA1(uuid.NameSpaceOID, []byte("standing-flow-service"))
 var standingRunNamespace = uuid.NewSHA1(uuid.NameSpaceOID, []byte("standing-flow-generation"))
 
 type Instance struct {
@@ -210,16 +209,8 @@ func Derive(source semanticview.Source, flowID, instanceID string) Instance {
 	}
 }
 
-func StandingServiceID(flowPath string) string {
-	return uuid.NewSHA1(standingServiceNamespace, []byte(strings.TrimSpace(flowPath))).String()
-}
-
-func StandingForService(source semanticview.Source, flowID, serviceID string) Instance {
-	return Derive(source, strings.TrimSpace(flowID), strings.TrimSpace(serviceID))
-}
-
-// Service identity is descriptive; only the selected generation supplies the
-// root's concrete construction coordinate. Keyless descendants keep their paths.
+// The selected run supplies the root's concrete construction coordinate.
+// Keyless descendants keep their paths.
 func StandingForGeneration(source semanticview.Source, flowID, runID string) (Instance, error) {
 	if source == nil || strings.TrimSpace(flowID) != flowID {
 		return Instance{}, fmt.Errorf("standing generation requires its exact admitted flow")

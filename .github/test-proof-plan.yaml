@@ -790,8 +790,6 @@ units:
       - github.com/division-sh/swarm/internal/releasee2e
     run: '^TestS.*$'
     required_children:
-      TestStandingPauseAuthorityPublicBothStores: [sqlite, postgres]
-      TestStandingResetNonExecutablePublicBothStores: [sqlite, postgres]
       TestStandingRootTreePublicRestartAndResetBothStores: [sqlite, postgres]
     count_mode: count-1
     environment_ids: *postgres_gateway_empty
@@ -1239,7 +1237,6 @@ units:
     # Positive RE2 complement of TestFanOut, TestFlow and TestForkG within D-F.
     run: '^Test([D-E].*|F($|[^alo].*|a($|[^n].*|n($|[^O].*|O($|[^u].*|u($|[^t].*))))|l($|[^o].*|o($|[^w].*))|o($|[^r].*|r($|[^k].*|k($|[^G].*)))))$'
     required_children:
-      TestDormantStandingPreparationDoesNotConstructBothStores: [sqlite, postgres]
       TestForkActivationInventoriesConstructedHeadersBothStores: [sqlite/fieldless, sqlite/fields, postgres/fieldless, postgres/fields]
       TestDynamicFlowRuntimeCreationOccurrenceLinearizesWithTerminalizationOnBothStores: [postgres/creation_wins, postgres/terminal_wins, sqlite/creation_wins, sqlite/terminal_wins]
       TestDynamicFlowRuntimeCreationOccurrenceRollsBackAppendedEventOnBothStores: [sqlite, postgres]
@@ -1465,7 +1462,6 @@ units:
       TestScenarioConstructionNativeCommitBothStores: [sqlite/rollback_before_ack, sqlite/commit_before_lost_ack, postgres/rollback_before_ack, postgres/commit_before_lost_ack]
       TestScenarioConstructionFieldlessStateBothStores: [sqlite, postgres]
       TestStandingPreparationVerifiesCompleteRootTreeBothStores: [sqlite/intact, sqlite/missing_sibling, sqlite/missing_fields, sqlite/foreign_parent, postgres/intact, postgres/missing_sibling, postgres/missing_fields, postgres/foreign_parent]
-      TestStandingTreeConstructionFailureDoesNotPublishPartialSetBothStores: [sqlite, postgres]
       TestWorkflowEngineConstructedTransitionAtomicOnBothStores: [postgres/contenders, postgres/exact, postgres/foreign_header_owner, postgres/invalid_transition, postgres/paired_reload, postgres/stale_revision, sqlite/contenders, sqlite/exact, sqlite/foreign_header_owner, sqlite/invalid_transition, sqlite/paired_reload, sqlite/stale_revision]
       TestWorkflowTargetPersistenceReadNeverFabricatesMixedSnapshotOnBothStores: [sqlite, postgres]
       TestWorkflowNodeNoopSettlementAtomicBothStores: [sqlite/healthy, sqlite/renewal, sqlite/selection, sqlite/completion, sqlite/expired, sqlite/foreign_token, sqlite/stale_version, sqlite/agent, sqlite/cancelled, sqlite/terminal_run, sqlite/replaced_authority, postgres/healthy, postgres/renewal, postgres/selection, postgres/completion, postgres/expired, postgres/foreign_token, postgres/stale_version, postgres/agent, postgres/cancelled, postgres/terminal_run, postgres/replaced_authority]

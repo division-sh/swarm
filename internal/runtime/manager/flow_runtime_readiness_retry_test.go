@@ -10,7 +10,6 @@ import (
 	runtimeflowidentity "github.com/division-sh/swarm/internal/runtime/core/flowidentity"
 	runtimecorrelation "github.com/division-sh/swarm/internal/runtime/correlation"
 	runtimepipeline "github.com/division-sh/swarm/internal/runtime/pipeline"
-	runtimestanding "github.com/division-sh/swarm/internal/runtime/runlifecycle"
 	"github.com/division-sh/swarm/internal/runtime/semanticview"
 	"github.com/google/uuid"
 )
@@ -51,14 +50,11 @@ func readinessRetryProbe(t *testing.T, projection runtimepipeline.DynamicFlowRun
 		AgentLifecyclePersistence: am.lifecycle.persistence(),
 		states:                    make(map[string]RunExecutionOwnership), calls: make(map[string]int),
 	}
-	restarts := flowActivationStandingRestarts{}
 	for _, cohort := range [][]runtimepipeline.DynamicFlowRuntimeReadiness{projection.CurrentCompleted, projection.CurrentPending, projection.SourceTransitionRequired} {
 		for _, row := range cohort {
 			owner.states[row.Plan.RunID] = RunExecutionOwned
-			restarts[row.Plan.RunID] = runtimestanding.StandingRestartOrdinary
 		}
 	}
-	am.roles.StandingRestarts = restarts
 	am.lifecycle.replacePersistence(owner)
 	return am, store, owner
 }
@@ -208,20 +204,4 @@ func TestDynamicReadinessRetryRechecksPendingOwnership(t *testing.T) {
 	if owner.calls[runID] != 5 {
 		t.Fatalf("retry reused prior inspection authority: %v", owner.calls)
 	}
-	owner.err = nil
-	am.roles.StandingRestarts = flowActivationStandingRestarts{runID: runtimestanding.StandingRestartSuspended}
-	if err := am.reconcilePendingDynamicFlowRuntimeReadiness(ctx); err != nil || len(store.loads) != 0 {
-		t.Fatalf("suspended standing work: err=%v loads=%v", err, store.loads)
-	}
-	standingErr := errors.New("standing disposition unavailable")
-	am.roles.StandingRestarts = readinessRetryStandingFailure{standingErr}
-	if err := am.reconcilePendingDynamicFlowRuntimeReadiness(ctx); !errors.Is(err, standingErr) || len(store.loads) != 0 {
-		t.Fatalf("standing refusal=%v loads=%v", err, store.loads)
-	}
-}
-
-type readinessRetryStandingFailure struct{ err error }
-
-func (s readinessRetryStandingFailure) StandingRunRestartDisposition(context.Context, string) (runtimestanding.StandingRestartDisposition, error) {
-	return runtimestanding.StandingRestartDisposition{}, s.err
 }

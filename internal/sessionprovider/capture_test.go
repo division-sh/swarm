@@ -19,7 +19,6 @@ import (
 
 	"github.com/division-sh/swarm/internal/channelonboarding"
 	"github.com/division-sh/swarm/internal/operatorchannel"
-	runtimeflowidentity "github.com/division-sh/swarm/internal/runtime/core/flowidentity"
 	runtimeinbound "github.com/division-sh/swarm/internal/runtime/inboundpublication"
 	"github.com/division-sh/swarm/internal/runtime/plangeneration"
 	"github.com/division-sh/swarm/internal/runtime/triggergeneration"
@@ -35,8 +34,8 @@ func captureFixture(t *testing.T) capturedEvent {
 	return capturedEvent{
 		Scope: captureScope{
 			Kind: channelonboarding.SessionInputBusiness,
-			PublicationBinding: runtimeinbound.BindingGeneration{ServiceID: runtimeflowidentity.StandingServiceID("."),
-				RunID: uuid.NewString(), Generation: 1},
+			PublicationBinding: runtimeinbound.BindingGeneration{
+				RunID: uuid.NewString()},
 			Session: operatorchannel.SessionAccountAdmission{
 				Provider: "whatsapp", ConnectionID: uuid.NewString(), AccountRef: "synthetic_account",
 				AdmissionID: uuid.NewString(), Revision: 1,
@@ -53,7 +52,7 @@ func captureFixture(t *testing.T) capturedEvent {
 		ReceivedAt: time.Date(2026, 10, 7, 12, 0, 0, 123456000, time.UTC),
 		Source: captureSource{Coordinate: channelonboarding.ChannelRuntimeContextCoordinate{
 			BundleHash: "bundle-v2:sha256:" + strings.Repeat("a", 64), BundleIdentity: "source:test", PackInventoryGeneration: "inventory:test",
-			PlanGeneration: generation, RuntimeInstanceID: uuid.NewString(), ContextPublicationGeneration: 1, TargetGeneration: 1},
+			PlanGeneration: generation, RuntimeInstanceID: uuid.NewString(), ContextPublicationGeneration: 1},
 			CatalogGeneration: triggergeneration.FromCanonicalBytes([]byte(`{"fixture":"capture"}`))},
 	}
 }
@@ -85,8 +84,6 @@ func TestWhatsAppCaptureScopeAndReceiptAreClosedProducts(t *testing.T) {
 		{"bootstrap_activation", bootstrap, func(e *capturedEvent) { e.Scope.ActivationRevision = 1 }},
 		{"business_activation", business, func(e *capturedEvent) { e.Scope.ActivationRevision = 0 }},
 		{"business_activation_identity", business, func(e *capturedEvent) { e.Scope.ActivationID = "" }},
-		{"business_target_generation", business, func(e *capturedEvent) { e.Source.Coordinate.TargetGeneration++ }},
-		{"business_zero_target_generation", business, func(e *capturedEvent) { e.Source.Coordinate.TargetGeneration = 0 }},
 		{"bootstrap_activation_identity", bootstrap, func(e *capturedEvent) { e.Scope.ActivationID = business.Scope.ActivationID }},
 		{"missing_receipt", business, func(e *capturedEvent) { e.ReceivedAt = time.Time{} }},
 		{"unrepresentable_receipt", business, func(e *capturedEvent) { e.ReceivedAt = e.ReceivedAt.Add(time.Nanosecond) }},

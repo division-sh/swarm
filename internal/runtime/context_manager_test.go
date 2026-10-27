@@ -3,7 +3,6 @@ package runtime
 import (
 	"context"
 	"errors"
-	"fmt"
 	"reflect"
 	"strings"
 	"testing"
@@ -19,6 +18,7 @@ import (
 	"github.com/division-sh/swarm/internal/runtime/deliverycontinuation"
 	runtimedelivery "github.com/division-sh/swarm/internal/runtime/deliverylifecycle"
 	"github.com/division-sh/swarm/internal/runtime/runbundle"
+	"github.com/division-sh/swarm/internal/runtime/runlifecycle"
 	"github.com/division-sh/swarm/internal/runtime/semanticviewtest"
 )
 
@@ -429,7 +429,7 @@ func TestRuntimeContextManagerDeactivateAllFencesCompleteSetBeforeFirstDrain(t *
 		DeliveryID: id, Event: event, Disposition: runtimedelivery.ClaimAcquired,
 		Snapshot: runtimedelivery.Snapshot{DeliveryID: id, Route: route, Status: runtimedelivery.StatusPending, Authority: authority},
 	}}
-	coordinator, err := deliverycontinuation.New(page, startupRecoveryDispositionMap{}, authority, second.WorkOwner, dispatcher, nil)
+	coordinator, err := deliverycontinuation.New(page, authority, second.WorkOwner, dispatcher, nil)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -504,52 +504,6 @@ func TestRuntimeContextManagerRetriesShutdownAfterPriorFailure(t *testing.T) {
 	}
 	if !entry.shutdownComplete {
 		t.Fatal("successful shutdown retry was not marked complete")
-	}
-}
-
-func TestRuntimeContextManagerRejectedDrainJoinsRetiredStandingChildren(t *testing.T) {
-	for _, aggregate := range []bool{false, true} {
-		t.Run(fmt.Sprintf("aggregate_%t", aggregate), func(t *testing.T) {
-			contextDef := testBundleContext(t, runtimeContextTestHashA, "alpha.requested")
-			manager, err := newTestRuntimeContextManager(t, nil, contextDef)
-			if err != nil {
-				t.Fatal(err)
-			}
-			standing, err := contextDef.WorkOwner.NewStanding(t.Context(), worklifetime.StandingIdentity{ServiceID: "service", RunID: "standing-run", Generation: 1})
-			if err != nil {
-				t.Fatal(err)
-			}
-			entry := manager.contexts[runtimeContextTestHashA]
-			entry.standing = map[string]*worklifetime.StandingOccurrence{"service": standing}
-			lease, err := standing.Begin(t.Context())
-			if err != nil {
-				t.Fatal(err)
-			}
-			t.Cleanup(func() { _ = lease.Done() })
-			done := make(chan RuntimeContextDeactivationResult, 1)
-			go func() {
-				if aggregate {
-					done <- manager.DeactivateAllWithOptions(RuntimeContextCauseUnloaded, ShutdownOptions{Grace: -1})[0]
-				} else {
-					done <- manager.DeactivateBundleHashWithOptions(runtimeContextTestHashA, RuntimeContextCauseUnloaded, ShutdownOptions{Grace: -1})
-				}
-			}()
-			select {
-			case <-lease.Context().Done():
-			case <-time.After(time.Second):
-				t.Fatal("withdrawal did not retire its standing child")
-			}
-			if err := lease.Done(); err != nil {
-				t.Fatal(err)
-			}
-			result := <-done
-			if result.ShutdownErr == nil || !strings.Contains(result.ShutdownErr.Error(), "shutdown grace") || entry.shutdownComplete {
-				t.Fatalf("rejected drain lost its error or marked runtime cleanup complete: %+v", result)
-			}
-			if len(entry.standing) != 0 || contextDef.WorkOwner.ActiveCount() != 0 {
-				t.Fatal("rejected drain returned without acknowledging its retired standing child")
-			}
-		})
 	}
 }
 
@@ -646,8 +600,26 @@ func testBundleContext(t *testing.T, bundleHash, eventName string) BundleContext
 func newTestRuntimeContextManager(t testing.TB, availability RunBundleAvailabilityReader, contexts ...BundleContext) (*RuntimeContextManager, error) {
 	t.Helper()
 	manager, err := NewRuntimeContextManager(availability, contexts...)
+	if manager != nil && manager.landingRuns == nil {
+		rows := runtimeTestLandingRuns{}
+		for _, definition := range contexts {
+			for _, target := range definition.StandingTargets {
+				rows[target.FlowPath] = runlifecycle.LandingRun{LiveRun: runlifecycle.LiveRun{
+					RunID: target.RunID, Scope: runlifecycle.LiveRunScope{FlowPath: target.FlowPath}, Source: definition.SourceArtifactFact,
+				}, State: runlifecycle.StateLive}
+			}
+		}
+		manager.landingRuns = rows
+	}
 	registerRuntimeContextManagerCleanup(t, manager)
 	return manager, err
+}
+
+type runtimeTestLandingRuns map[string]runlifecycle.LandingRun
+
+func (r runtimeTestLandingRuns) LoadLandingRun(_ context.Context, scope runlifecycle.LiveRunScope) (runlifecycle.LandingRun, bool, error) {
+	row, found := r[scope.FlowPath]
+	return row, found, nil
 }
 
 func registerRuntimeContextManagerCleanup(t testing.TB, manager *RuntimeContextManager) {

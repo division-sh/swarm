@@ -41,7 +41,7 @@ func TestSessionDeclarationReservesWithoutCredentialsOrBusinessTargetBothStores(
 			request := sessionReservation(t, f.principal, time.Now().UTC())
 			op, err := f.selected.ReserveChannelOnboarding(context.Background(), request)
 			if err != nil || op.Phase != domain.PhasePreparing || len(op.CredentialReservations) != 0 ||
-				op.Coordinate.TargetGeneration != 0 || op.IdentityOperationID != "" || op.ActivationRevision != 0 {
+				op.IdentityOperationID != "" || op.ActivationRevision != 0 {
 				t.Fatalf("declaration-only reservation = %+v, %v", op, err)
 			}
 			again, err := f.selected.ReserveChannelOnboarding(context.Background(), request)
@@ -96,7 +96,7 @@ func TestSessionAccountEvidencePersistenceAndRevisionFencesBothStores(t *testing
 			}
 			for _, phase := range []domain.Phase{domain.PhaseCredentialsAdmitted, domain.PhaseActivatingProvider} {
 				op, err = f.selected.AdvanceChannelOnboarding(ctx, domain.AdvanceRequest{OperationID: op.OperationID, ExpectedRevision: op.Revision, Phase: phase, Now: now})
-				if err != nil || op.Coordinate.TargetGeneration != 0 {
+				if err != nil {
 					t.Fatalf("runless pairing phase %s: %+v %v", phase, op, err)
 				}
 			}
@@ -124,7 +124,7 @@ func TestSessionAccountEvidencePersistenceAndRevisionFencesBothStores(t *testing
 			}
 			admit.SessionAccount = &account
 			op, err = f.selected.AdvanceChannelOnboarding(ctx, admit)
-			if err != nil || op.SessionAccount != account || op.Coordinate.TargetGeneration != 0 {
+			if err != nil || op.SessionAccount != account {
 				t.Fatalf("retained pairing evidence: %+v %v", op, err)
 			}
 			if _, err := f.selected.AdvanceChannelOnboarding(ctx, admit); !errors.Is(err, domain.ErrRevisionConflict) {
@@ -147,13 +147,16 @@ func TestSessionAccountEvidencePersistenceAndRevisionFencesBothStores(t *testing
 					r.Coordinate.BundleHash = "bundle-v2:sha256:" + strings.Repeat("b", 64)
 				},
 				func(r *domain.AdmissionResponsibility) { r.Coordinate.PackInventoryGeneration = "other" },
-				func(r *domain.AdmissionResponsibility) { r.Coordinate.TargetGeneration++ },
 				func(r *domain.AdmissionResponsibility) { r.OperationRevision++ },
 				func(r *domain.AdmissionResponsibility) { r.ActivationRevision = 1 },
 			} {
 				foreign := responsibility
 				mutate(&foreign)
-				if current, err := domain.AdmissionResponsibilityCurrent(ctx, f.selected, foreign, true); err != nil || current {
+				var wantErr error
+				if foreign.ActivationRevision != 0 {
+					wantErr = domain.ErrNotFound
+				}
+				if current, err := domain.AdmissionResponsibilityCurrent(ctx, f.selected, foreign, true); !errors.Is(err, wantErr) || current {
 					t.Fatalf("foreign declaration occurrence passed fence: %t %v", current, err)
 				}
 			}
@@ -181,7 +184,7 @@ func TestSessionAccountEvidencePersistenceAndRevisionFencesBothStores(t *testing
 				})
 			}
 			op, err = f.selected.AdvanceChannelOnboarding(ctx, domain.AdvanceRequest{OperationID: op.OperationID, ExpectedRevision: op.Revision, Phase: domain.PhaseAwaitingOperatorConfirmation, Now: now})
-			if err != nil || op.SessionAccount != account || op.Coordinate.TargetGeneration != 0 {
+			if err != nil || op.SessionAccount != account {
 				t.Fatalf("runless claim: %+v %v", op, err)
 			}
 			if _, err := f.selected.AdvanceChannelOnboarding(ctx, domain.AdvanceRequest{OperationID: op.OperationID, ExpectedRevision: op.Revision, Phase: domain.PhasePublishingActivation, Now: now}); !errors.Is(err, domain.ErrInvalidRequest) {

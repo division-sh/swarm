@@ -62,7 +62,7 @@ func validateSelectedForkBranchDivergenceTx(ctx context.Context, tx *sql.Tx, val
 	if err != nil {
 		return value, fmt.Errorf("load selected branch divergence child origin: %w", err)
 	}
-	origin, err := runtimerunlifecycle.DecodeRunOrigin(originKind, "", "", "", 0, sourceID, pointKind, revision, eventID.String)
+	origin, err := runtimerunlifecycle.DecodeRunOrigin(originKind, "", "", sourceID, pointKind, revision, eventID.String)
 	if err != nil || origin.Kind() != runtimerunlifecycle.OriginForkMaterialization ||
 		origin.SourceRunID() != value.SourceRunID || origin.ForkPointKind() != value.ForkPoint.Kind ||
 		origin.ForkRevision() != value.ForkPoint.Revision || origin.SourceEventID() != value.ForkPoint.EventID ||

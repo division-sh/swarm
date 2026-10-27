@@ -5,25 +5,17 @@ import (
 	"fmt"
 	"testing"
 
+	"github.com/division-sh/swarm/internal/runtime/runlifecycle"
 	"github.com/division-sh/swarm/internal/store/storetest"
 )
 
 func requireProviderAliasStandingRun(t *testing.T, rt servedWorkspaceProofRuntime, flow string) string {
 	t.Helper()
-	rows, err := rt.Standing.ListStandingServiceStatuses(context.Background())
-	if err != nil {
-		t.Fatal(err)
+	row, found, err := rt.FlowRuns.LoadLandingRun(context.Background(), runlifecycle.LiveRunScope{FlowPath: flow})
+	if err != nil || !found || row.RunID == "" || row.Source.BundleHash() != rt.BundleHash {
+		t.Fatalf("exact flow source %s/%s has run=%+v found=%t err=%v", rt.BundleHash, flow, row, found, err)
 	}
-	var runs []string
-	for _, row := range rows {
-		if row.BundleHash == rt.BundleHash && row.FlowPath == flow {
-			runs = append(runs, row.RunID)
-		}
-	}
-	if len(runs) != 1 || runs[0] == "" {
-		t.Fatalf("exact standing source %s/%s has runs=%v, want one", rt.BundleHash, flow, runs)
-	}
-	return runs[0]
+	return row.RunID
 }
 
 type providerAliasActionStorage struct {

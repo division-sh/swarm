@@ -2175,14 +2175,14 @@ func startNotifyAllChildrenDeliveryContinuations(
 	}
 	coordinator, err := runtimedeliverycontinuation.New(
 		backend,
-		backend,
+
 		snapshot.Authority,
 		runtime.workOwner,
 		runtime.bus,
 		func(_ context.Context, reportErr error) {
 			t.Errorf("delivery continuation failed: %v", reportErr)
-		},
-	)
+		})
+
 	if err != nil {
 		t.Fatalf("construct delivery continuation coordinator: %v", err)
 	}
@@ -2573,9 +2573,10 @@ func newNotifyAllChildrenRuntime(
 	if err := backend.ActivateDeliveryAuthority(continuationCtx, authority); err != nil {
 		t.Fatalf("activate notify-all-children delivery authority: %v", err)
 	}
-	continuations, err := runtimedeliverycontinuation.New(backend, backend, authority, workOwner, eventBus, func(_ context.Context, reportErr error) {
+	continuations, err := runtimedeliverycontinuation.New(backend, authority, workOwner, eventBus, func(_ context.Context, reportErr error) {
 		t.Errorf("notify-all-children delivery continuation failed: %v", reportErr)
 	})
+
 	if err != nil {
 		t.Fatalf("construct notify-all-children delivery continuations: %v", err)
 	}

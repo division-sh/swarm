@@ -37,12 +37,9 @@ func ParseTargetSelector(raw string) (TargetSelector, error) {
 type RegistrationTarget struct {
 	Selector                string
 	BundleHash              string
-	ServiceID               string
 	FlowPath                string
 	Alias                   string
 	Provider                string
-	Generation              int64
-	PublicationSequence     int64
 	AdmissionPlanGeneration triggergeneration.Generation
 	SigningCredentialKey    string
 }
@@ -982,9 +979,8 @@ func registrationBaseFingerprint(exposure Generation, pair RegistrationPair, pro
 		"public_origin":       exposure.PublicOrigin,
 		"binding_id":          pair.BindingID,
 		"target": map[string]any{
-			"selector": pair.Target.Selector, "bundle_hash": pair.Target.BundleHash, "service_id": pair.Target.ServiceID,
+			"selector": pair.Target.Selector, "bundle_hash": pair.Target.BundleHash,
 			"callback_alias": pair.Target.Alias, "callback_provider": pair.Target.Provider,
-			"generation": pair.Target.Generation, "publication_sequence": pair.Target.PublicationSequence,
 			"admission_plan_generation": pair.Target.AdmissionPlanGeneration.Diagnostic(),
 		},
 		"plan_generation":         pair.PlanGeneration.Diagnostic(),
@@ -1029,7 +1025,6 @@ func serveRegistrationAuthority(startup runtimestartupownership.GrantEvidence, i
 			BundleHash: coordinate.BundleHash, BundleIdentity: coordinate.BundleIdentity,
 			PackInventoryGeneration: coordinate.PackInventoryGeneration, RuntimeInstanceID: coordinate.RuntimeInstanceID,
 			ContextPublicationGeneration: coordinate.ContextPublicationGeneration, PlanGeneration: coordinate.PlanGeneration,
-			TargetGeneration: coordinate.TargetGeneration,
 		},
 	}
 }

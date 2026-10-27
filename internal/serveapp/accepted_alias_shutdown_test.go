@@ -46,10 +46,7 @@ func TestAcceptedAliasPublicationJoinedShutdownBothStores(t *testing.T) {
 			}
 			_, start := clockDeploymentHarness(t, backend, root)
 			process, served := start()
-			statuses, err := servedTestProcessRuntime(t, process).Pipeline.ListStandingServiceStatuses(t.Context())
-			if err != nil || len(statuses) != 1 || statuses[0].FlowPath != "." {
-				t.Fatalf("enabled root/dormant sibling: statuses=%+v err=%v", statuses, err)
-			}
+			requireServedLandingRun(t, servedTestProcessRuntime(t, process), ".")
 			status, receipt := postProviderAliasUpdate(t, strings.TrimSuffix(served.Endpoint, "/v1/rpc"), "shared", "alias-secret-webhook_signing.alpha", `{"update_id":9801,"message":{"message_id":7,"from":{"id":41},"chat":{"id":42,"type":"private"},"text":"incumbent"}}`)
 			if status != http.StatusAccepted {
 				t.Fatalf("authenticated publication: status=%d receipt=%s", status, receipt)

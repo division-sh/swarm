@@ -820,25 +820,9 @@ func (eb *EventBus) DispatchDeliveryContinuation(ctx context.Context, evt events
 		}
 		return runtimedeliverycontinuation.Fatal(ErrRunDispatchBlocked)
 	}
-	// Run admission below owns standing authorization, not receiver lifetime.
-	// Keep the already-accounted runtime carrier through that separate binding;
-	// coordinator retirement must cancel/join it without a fresh runtime Begin.
+	// Keep the accepted runtime carrier through receiver dispatch so retirement
+	// can cancel and join it without acquiring fresh runtime work.
 	receiverParent := ctx
-	var standingLease *worklifetime.Lease
-	ctx, standingLease, err = eb.bindClaimedRunWork(ctx, evt)
-	if err != nil {
-		if standingRecoveryDeferred(err) {
-			return runtimedeliverycontinuation.Deferred(runtimedeliverycontinuation.DispatchWakeRunContinue)
-		}
-		return runtimedeliverycontinuation.Fatal(fmt.Errorf("bind continuation run work: %w", err))
-	}
-	if standingLease != nil {
-		defer func() {
-			if closeErr := standingLease.Done(); closeErr != nil {
-				result = runtimedeliverycontinuation.Fatal(errors.Join(result.Failure(), closeErr))
-			}
-		}()
-	}
 	ctx = WithCurrentRuntimeEpoch(ctx)
 	if err := ensurePublishEpoch(ctx); err != nil {
 		return runtimedeliverycontinuation.Fatal(err)

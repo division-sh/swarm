@@ -12,7 +12,6 @@ import (
 	"github.com/division-sh/swarm/internal/packadmission"
 	"github.com/division-sh/swarm/internal/packs"
 	runtimecontracts "github.com/division-sh/swarm/internal/runtime/contracts"
-	runtimeflowidentity "github.com/division-sh/swarm/internal/runtime/core/flowidentity"
 	runtimecredentials "github.com/division-sh/swarm/internal/runtime/credentials"
 	runtimerunlifecycle "github.com/division-sh/swarm/internal/runtime/runlifecycle"
 	"github.com/division-sh/swarm/internal/runtime/semanticview"
@@ -240,8 +239,8 @@ func TestStandingLearnedAuthorityCredentialMatrix(t *testing.T) {
 					t.Fatalf("stale learned recovery authority = %#v, %#v, %v", targets, ineligible, err)
 				}
 				if state == "healthy_same_service_sibling" {
-					candidates, err := rt.PlanStandingServiceCandidates()
-					if err != nil || len(candidates) != 1 || !candidates[0].BindingEnabled || candidates[0].BindingBlockReason != "" || targets[0].Provider != "partner" {
+					candidates, err := rt.PlanLiveFlowScopes()
+					if err != nil || len(candidates) != 1 || targets[0].Provider != "partner" {
 						t.Fatalf("independent sibling retention = %#v, %#v, %v", targets, candidates, err)
 					}
 					contextDef := testBundleContext(t, runtimeContextTestHashA, "inbound.telegram")
@@ -456,7 +455,7 @@ func TestExplicitStandingAdmissionCannotRefreshSiblingAuthority(t *testing.T) {
 				t.Fatal(err)
 			}
 			candidate := channelonboarding.Candidate{Provider: "telegram", Interface: identity, Plan: plan, Coordinate: operation.Coordinate,
-				Target: channelonboarding.CandidateTarget{Selector: operation.TargetSelector, ServiceID: runtimeflowidentity.StandingServiceID(declarations[0].FlowPath),
+				Target: channelonboarding.CandidateTarget{Selector: operation.TargetSelector,
 					FlowPath: declarations[0].FlowPath, Alias: declarations[0].Alias, Provider: "telegram", AdmissionGeneration: declarations[0].Ingress[0].AdmissionPlan.Generation()},
 				Posture: channelonboarding.ActivationPosture(profile.ActivationPosture()), Ceremony: channelonboarding.IdentityCeremony(profile.IdentityCeremony()),
 				ProviderCredentialRole: profile.ProviderCredential(), SigningCredentialRole: profile.SigningCredential(), ConfirmationOperation: profile.ConfirmationOperation()}

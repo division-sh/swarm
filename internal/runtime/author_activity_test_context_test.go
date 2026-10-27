@@ -628,7 +628,6 @@ type runtimeTestDurableEventStore interface {
 	runtimebus.PreparedPublishEventReader
 	runtimebus.TargetFailureDeadLetterRecorder
 	runtimebus.RunOriginReader
-	runtimerunlifecycle.StandingRestartDispositionReader
 }
 
 func runtimeTestDurableDependencies(durable runtimeTestDurableEventStore) runtimebus.DurableDependencies {
@@ -639,7 +638,7 @@ func runtimeTestDurableDependencies(durable runtimeTestDurableEventStore) runtim
 		DeliveryLifecycle:     durable,
 		ActiveAgents:          durable,
 		PreparedEvents:        durable,
-		TargetFailureRecorder: durable, RunOrigins: durable, StandingRestarts: durable,
+		TargetFailureRecorder: durable,
 	}
 }
 
@@ -988,9 +987,6 @@ func completeRuntimeRecoveryTestDeps(t testing.TB, deps RuntimeDeps) RuntimeDeps
 		} else if _, ok := deps.EventStore.(*bootSelfCheckDescriptorStore); ok {
 			deps.PipelineObligations = newStartupRecoveryPipelineOwner(nil, nil)
 		}
-	}
-	if deps.ManagerPersistenceRoles.StandingRestarts == nil {
-		deps.ManagerPersistenceRoles.StandingRestarts = startupRecoveryWorkflowOwner{}
 	}
 	if deps.WorkflowPersistence.Valid() {
 		if deps.EventBusDurable.RunLifecycle == nil {

@@ -16,7 +16,6 @@ import (
 	"github.com/division-sh/swarm/internal/providertriggers"
 	runtimebus "github.com/division-sh/swarm/internal/runtime/bus"
 	runtimecontracts "github.com/division-sh/swarm/internal/runtime/contracts"
-	"github.com/division-sh/swarm/internal/runtime/core/flowidentity"
 	"github.com/division-sh/swarm/internal/runtime/executionposture"
 	"github.com/division-sh/swarm/internal/runtime/semanticview"
 	"github.com/division-sh/swarm/internal/runtime/testfixtures/canonicalrouting"
@@ -223,7 +222,7 @@ func TestA9NoProducerCannotRetain(t *testing.T) {
 	if err != nil || len(declarations) != 0 {
 		t.Fatalf("source without a producer declared a standing service: %+v err=%v", declarations, err)
 	}
-	candidates, err := rt.PlanStandingServiceCandidates()
+	candidates, err := rt.PlanLiveFlowScopes()
 	if err != nil || len(candidates) != 0 {
 		t.Fatalf("source without a producer manufactured retention: %+v err=%v", candidates, err)
 	}
@@ -335,8 +334,8 @@ func TestRuntimeContextManagerLookupIngressDistinguishesAliasAndProvider(t *test
 		Runtime:            &Runtime{Bus: bus, workOccurrence: workOwner},
 		WorkOwner:          workOwner,
 		StandingTargets: []StandingTarget{{
-			BundleHash: hash, ServiceID: flowidentity.StandingServiceID("coordinator"), FlowPath: "coordinator", Alias: "chat", Provider: "telegram",
-			RunID: "run", Generation: 1, SigningSecret: "webhook_signing.telegram",
+			BundleHash: hash, FlowPath: "coordinator", Alias: "chat", Provider: "telegram",
+			RunID: "run", SigningSecret: "webhook_signing.telegram",
 			AdmissionPlan: plan,
 		}},
 	}
@@ -350,45 +349,6 @@ func TestRuntimeContextManagerLookupIngressDistinguishesAliasAndProvider(t *test
 	}
 	if lookup := manager.LookupIngress("chat", "github"); lookup.Found || !lookup.AliasFound {
 		t.Fatalf("wrong-provider lookup = %#v, want alias found without provider target", lookup)
-	}
-}
-
-func TestRuntimeContextManagerDoesNotCreateProcessOccurrenceForSuspendedStartupTarget(t *testing.T) {
-	source, catalog := standingTelegramDeclarationSource(t, "inbound.telegram")
-	hash := "bundle-v2:sha256:" + strings.Repeat("c", 64)
-	workOwner := runtimeTestOccurrence(t, hash)
-	bus, err := newRuntimeTestEventBusWithOptions(t, nil, runtimebus.EventBusOptions{WorkOwner: workOwner})
-	if err != nil {
-		t.Fatalf("NewEventBus: %v", err)
-	}
-	plan, err := catalog.CompileAdmission(providertriggers.CompileAdmissionRequest{Alias: "chat", Provider: "telegram", SigningSecret: "webhook_signing.telegram"})
-	if err != nil {
-		t.Fatal(err)
-	}
-	target := StandingTarget{
-		BundleHash: hash, ServiceID: flowidentity.StandingServiceID("coordinator"), FlowPath: "coordinator", Alias: "chat", Provider: "telegram",
-		RunID: "run-1", Generation: 1, PublicationSequence: 1,
-		SigningSecret: "webhook_signing.telegram", AdmissionPlan: plan,
-	}
-	manager, err := newTestRuntimeContextManager(t, nil)
-	if err != nil {
-		t.Fatalf("NewRuntimeContextManager: %v", err)
-	}
-	if err := manager.SuppressStandingServiceTargets(target.ServiceID); err != nil {
-		t.Fatalf("SuppressStandingServiceTargets: %v", err)
-	}
-	contextDef := BundleContext{
-		SourceArtifactFact: testSourceArtifactFact(t, hash), Source: source, Runtime: &Runtime{Bus: bus, workOccurrence: workOwner}, WorkOwner: workOwner, StandingTargets: []StandingTarget{target},
-	}
-	applyRuntimeAdmissionCatalog(t, &contextDef, catalog)
-	if err := manager.Register(contextDef); err != nil {
-		t.Fatalf("Register: %v", err)
-	}
-	if err := manager.PublishStandingServiceTargets(target.ServiceID, []StandingTarget{target}, nil); err != nil {
-		t.Fatalf("PublishStandingServiceTargets after suspended startup: %v", err)
-	}
-	if lookup := manager.LookupIngress("chat", "telegram"); !lookup.Loaded() || lookup.Target.ServiceID != target.ServiceID {
-		t.Fatalf("resumed lookup = %#v, want fresh loaded process occurrence", lookup)
 	}
 }
 
@@ -410,7 +370,7 @@ func TestInboundGatewayConsumesCompiledTelegramRouteWithoutReinterpretingStandin
 	}
 	gateway.HandleResolvedWebhook(rec, req, InboundTarget{
 		BundleHash: inboundTestBusBundleHash(t, bus), FlowPath: "coordinator",
-		ServiceID: flowidentity.StandingServiceID("coordinator"), Generation: 1, PublicationSequence: 1,
+
 		RunID: "41000000-0000-0000-0000-000000000001",
 		Alias: "chat", Provider: "telegram",
 		SigningSecret: "telegram-secret",
@@ -448,7 +408,7 @@ func TestInboundGatewayConsumesCompiledGitHubRouteWithoutReinterpretingDynamicPi
 	}
 	gateway.HandleResolvedWebhook(rec, req, InboundTarget{
 		BundleHash: inboundTestBusBundleHash(t, bus), FlowPath: "coordinator",
-		ServiceID: flowidentity.StandingServiceID("coordinator"), Generation: 1, PublicationSequence: 1,
+
 		RunID: "42000000-0000-0000-0000-000000000001",
 		Alias: "issues", Provider: "github",
 		SigningSecret: "github-secret",
@@ -472,10 +432,10 @@ func bindStandingContextFixtureTargets(t testing.TB, source semanticview.Source,
 	t.Helper()
 	bound := append([]StandingTarget(nil), declarations...)
 	for i, target := range bound {
-		if target.RunID != "" || target.Generation != 0 || target.PublicationSequence != 0 || target.ServiceID != bound[0].ServiceID {
-			t.Fatal("context fixture requires unbound declarations of one service")
+		if target.RunID != "" || target.FlowPath != bound[0].FlowPath {
+			t.Fatal("context fixture requires unbound declarations of one flow")
 		}
-		bound[i].RunID, bound[i].Generation, bound[i].PublicationSequence = runID, 1, 1
+		bound[i].RunID = runID
 	}
 	return bound
 }

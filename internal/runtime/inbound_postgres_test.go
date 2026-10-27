@@ -29,7 +29,6 @@ import (
 	runtimeagentidentity "github.com/division-sh/swarm/internal/runtime/core/agentidentity"
 	runtimeagentidentitytest "github.com/division-sh/swarm/internal/runtime/core/agentidentitytest"
 	runtimeflowidentity "github.com/division-sh/swarm/internal/runtime/core/flowidentity"
-	worklifetime "github.com/division-sh/swarm/internal/runtime/core/worklifetime"
 	runtimecorrelation "github.com/division-sh/swarm/internal/runtime/correlation"
 	runtimeeffects "github.com/division-sh/swarm/internal/runtime/effects"
 	"github.com/division-sh/swarm/internal/runtime/entityruntime"
@@ -39,7 +38,6 @@ import (
 	runtimeingress "github.com/division-sh/swarm/internal/runtime/ingress"
 	runtimemanager "github.com/division-sh/swarm/internal/runtime/manager"
 	runtimepipeline "github.com/division-sh/swarm/internal/runtime/pipeline"
-	runtimerunlifecycle "github.com/division-sh/swarm/internal/runtime/runlifecycle"
 	"github.com/division-sh/swarm/internal/runtime/semanticview"
 	"github.com/division-sh/swarm/internal/store"
 	"github.com/division-sh/swarm/internal/store/storetest"
@@ -153,7 +151,6 @@ func TestInboundGateway_GitHubPausedRuntimePersistsAndReleasesSubscribedDispatch
 	if err != nil {
 		t.Fatalf("NewEventBus: %v", err)
 	}
-	installInboundStandingRecoveryOwner(t, bus, runID, provider)
 	controller := runtimeingress.NewController(pg, bus, runtimeingress.Options{ExecutionPosture: executionposture.Live})
 	t.Cleanup(runtimebus.ResumeRuntimeIngress)
 	bus.SetRuntimeIngressDispatchGate(controller)
@@ -256,7 +253,6 @@ func TestInboundGateway_SlackPausedRuntimePersistsAndReleasesSubscribedDispatch(
 	if err != nil {
 		t.Fatalf("NewEventBus: %v", err)
 	}
-	installInboundStandingRecoveryOwner(t, bus, runID, provider)
 	controller := runtimeingress.NewController(pg, bus, runtimeingress.Options{ExecutionPosture: executionposture.Live})
 	t.Cleanup(runtimebus.ResumeRuntimeIngress)
 	bus.SetRuntimeIngressDispatchGate(controller)
@@ -359,7 +355,6 @@ func TestInboundGateway_StripePausedRuntimePersistsAndReleasesSubscribedDispatch
 	if err != nil {
 		t.Fatalf("NewEventBus: %v", err)
 	}
-	installInboundStandingRecoveryOwner(t, bus, runID, provider)
 	controller := runtimeingress.NewController(pg, bus, runtimeingress.Options{ExecutionPosture: executionposture.Live})
 	t.Cleanup(runtimebus.ResumeRuntimeIngress)
 	bus.SetRuntimeIngressDispatchGate(controller)
@@ -1376,83 +1371,8 @@ func seedSQLiteInboundGatewayRuntime(
 	return target
 }
 
-func boundedInboundStandingOrigin(t *testing.T, _ string) runtimerunlifecycle.RunOrigin {
-	t.Helper()
-	serviceID := runtimeflowidentity.StandingServiceID(boundedProviderFlowID)
-	origin, err := runtimerunlifecycle.StandingGenerationRunOrigin(serviceID, 1)
-	if err != nil {
-		t.Fatalf("construct bounded inbound standing origin: %v", err)
-	}
-	return origin
-}
-
 func inboundTestReceiptIdentity(target runtimepkg.InboundTarget, provider, deliveryID string) runtimeinbound.Identity {
-	return runtimeinbound.Identity{ServiceID: target.ServiceID, RunID: target.RunID, Generation: target.Generation, Provider: provider, ProviderEventID: deliveryID}
-}
-
-type inboundStandingRecoveryOwner struct {
-	occurrence *worklifetime.StandingOccurrence
-}
-
-func (o inboundStandingRecoveryOwner) BeginStandingRunRecovery(
-	ctx context.Context,
-	runID string,
-	origin runtimerunlifecycle.RunOrigin,
-) (*worklifetime.Lease, error) {
-	identity := o.occurrence.Identity()
-	if identity.RunID != runID ||
-		identity.ServiceID != origin.ServiceID() ||
-		identity.Generation != uint64(origin.Generation()) {
-		return nil, errors.New("inbound standing recovery requested the wrong occurrence")
-	}
-	return o.occurrence.Begin(ctx)
-}
-
-func installInboundStandingRecoveryOwner(
-	t *testing.T,
-	bus *runtimebus.EventBus,
-	runID string,
-	provider string,
-) {
-	t.Helper()
-	origin := boundedInboundStandingOrigin(t, provider)
-	ctx, err := bus.AdmitSourceArtifactFact(context.Background())
-	if err != nil {
-		t.Fatalf("admit standing recovery source: %v", err)
-	}
-	fact, present := runtimecorrelation.SourceArtifactFactFromContext(ctx)
-	if !present {
-		t.Fatal("standing recovery requires the selected bus source")
-	}
-	process := worklifetime.NewProcess()
-	runtimeOwner, err := process.NewRuntime(ctx, worklifetime.RuntimeIdentity{
-		RuntimeInstanceID: runID,
-		BundleHash:        fact.BundleHash(),
-	})
-	if err != nil {
-		t.Fatal(err)
-	}
-	standing, err := runtimeOwner.NewStanding(context.Background(), worklifetime.StandingIdentity{
-		ServiceID:  origin.ServiceID(),
-		RunID:      runID,
-		Generation: uint64(origin.Generation()),
-	})
-	if err != nil {
-		t.Fatal(err)
-	}
-	bus.SetStandingRunWorkOwner(inboundStandingRecoveryOwner{occurrence: standing})
-	t.Cleanup(func() {
-		if err := standing.RetireAndWait(context.Background()); err != nil {
-			t.Errorf("retire inbound standing occurrence: %v", err)
-		}
-		if _, err := runtimeOwner.RetireAndWait(context.Background()); err != nil {
-			t.Errorf("retire inbound runtime occurrence: %v", err)
-		}
-		process.Retire()
-		if _, err := process.Join(context.Background()); err != nil {
-			t.Errorf("join inbound process occurrence: %v", err)
-		}
-	})
+	return runtimeinbound.Identity{RunID: target.RunID, Provider: provider, ProviderEventID: deliveryID}
 }
 
 func countPostgresAgentSettledAttemptsForEvent(t *testing.T, ctx context.Context, selected any, eventID string, agentID string) int {

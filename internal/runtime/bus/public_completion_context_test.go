@@ -16,7 +16,7 @@ import (
 )
 
 func TestPublicCompletionPreparationCancellation(t *testing.T) {
-	for _, variant := range []string{"runtime", "standing", "selected"} {
+	for _, variant := range []string{"runtime", "selected"} {
 		for _, cut := range []string{"retirement", "caller", "fence"} {
 			t.Run(variant+"/"+cut, func(t *testing.T) {
 				process := worklifetime.NewProcess()
@@ -28,13 +28,6 @@ func TestPublicCompletionPreparationCancellation(t *testing.T) {
 				retire, fence := runtime.Retire, runtime.Fence
 				join := func() error { _, err := runtime.RetireAndWait(t.Context()); return err }
 				switch variant {
-				case "standing":
-					standing, err := runtime.NewStanding(t.Context(), worklifetime.StandingIdentity{ServiceID: "service", RunID: "standing-run", Generation: 1})
-					if err != nil {
-						t.Fatal(err)
-					}
-					owner, join = standing, func() error { return standing.RetireAndWait(t.Context()) }
-					retire, fence = standing.Retire, standing.Fence
 				case "selected":
 					selected, err := process.NewSelectedFork(t.Context(), worklifetime.SelectedForkIdentity{ExecutionID: "execution", RunID: "selected-run", Generation: 1})
 					if err != nil {

@@ -19,9 +19,9 @@ func CreateSQLiteDeadLetterSchema(ctx context.Context, db *sql.DB) error {
 }
 
 // CreateSQLiteRunAdmissionSchema supplies the canonical lifecycle/control and
-// standing relations now read by delivery claim admission in partial fixtures.
+// relations read by delivery claim admission in partial fixtures.
 func CreateSQLiteRunAdmissionSchema(ctx context.Context, db *sql.DB) error {
-	return createSQLiteFixtureTables(ctx, db, []string{"run_control_state", "standing_services", "standing_service_generations"})
+	return createSQLiteFixtureTables(ctx, db, []string{"run_control_state"})
 }
 
 func createSQLiteFixtureTables(ctx context.Context, db *sql.DB, names []string) error {
@@ -56,7 +56,7 @@ var sqliteFixtureStatements = sync.OnceValues(func() (map[string][]string, error
 	tables := map[string][]string{}
 	for _, plan := range plans {
 		switch plan.TableName {
-		case "dead_letters", "run_control_state", "standing_services", "standing_service_generations":
+		case "dead_letters", "run_control_state":
 			statements, err := schemastore.SQLiteStatementsForPlan(plan)
 			if err != nil {
 				return nil, err

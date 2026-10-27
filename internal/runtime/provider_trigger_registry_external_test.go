@@ -18,8 +18,9 @@ import (
 	runtimecorrelation "github.com/division-sh/swarm/internal/runtime/correlation"
 	runtimecredentials "github.com/division-sh/swarm/internal/runtime/credentials"
 	"github.com/division-sh/swarm/internal/runtime/executionposture"
-	runtimepipeline "github.com/division-sh/swarm/internal/runtime/pipeline"
+	"github.com/division-sh/swarm/internal/runtime/runlifecycle"
 	"github.com/division-sh/swarm/internal/runtime/semanticview"
+	"github.com/division-sh/swarm/internal/store/storetest"
 	"github.com/division-sh/swarm/internal/testutil/sourceartifactfixture"
 )
 
@@ -146,7 +147,6 @@ func seedBoundedStandingTarget(t *testing.T, ctx context.Context, persistence ru
 	t.Helper()
 	ctx = originalRuntimeFixtureContext(t, ctx, persistence)
 	flowPath := boundedProviderFlowID
-	serviceID := runtimeflowidentity.StandingServiceID(flowPath)
 	source, ok := runtimecorrelation.SourceArtifactFactFromContext(ctx)
 	if !ok || source.Validate() != nil {
 		t.Fatal("bounded provider target requires an admitted source artifact fact")
@@ -159,30 +159,25 @@ func seedBoundedStandingTarget(t *testing.T, ctx context.Context, persistence ru
 	}
 	sourceartifactfixture.RequireArtifact(t, ctx, writer, bundle.SourceArtifact)
 
-	owner, ok := persistence.(runtimepipeline.StandingServicePersistence)
+	owner, ok := persistence.(storetest.RunFixtureStore)
 	if !ok {
-		t.Fatalf("bounded provider persistence %T lacks the standing owner", persistence)
+		t.Fatalf("bounded provider persistence %T lacks the native run owner", persistence)
 	}
-	standing, err := owner.ReconcileStandingService(ctx, runtimepipeline.StandingServiceCandidate{
-		ServiceID: serviceID, FlowPath: flowPath, Source: source, BindingEnabled: true,
+	runID, _ := boundedInboundTestCoordinates()
+	storetest.RequireRun(t, ctx, owner, storetest.RunFixture{
+		RunID: runID, LiveScope: runlifecycle.LiveRunScope{FlowPath: flowPath},
+		Origin: runlifecycle.DeploymentRunOrigin(), Artifact: bundle.SourceArtifact,
 	})
-	if err != nil {
-		t.Fatalf("reconcile bounded standing binding: %v", err)
-	}
-	sequence, err := owner.PublishStandingService(ctx, standing.ServiceID, standing.RunID, standing.Generation)
-	if err != nil {
-		t.Fatalf("publish bounded standing binding: %v", err)
-	}
 
 	return runtimepkg.InboundTarget{
-		BundleHash: bundleHash, ServiceID: serviceID, FlowPath: flowPath,
-		RunID: standing.RunID, Generation: standing.Generation, PublicationSequence: sequence,
+		BundleHash: bundleHash, FlowPath: flowPath,
+		RunID: runID,
 		Alias: alias,
 	}
 }
 
 func boundedInboundTestCoordinates() (string, string) {
-	return runtimeflowidentity.StandingGenerationRunID(runtimeflowidentity.StandingServiceID(boundedProviderFlowID), 1),
+	return "b90bd49c-8eef-4d5b-8044-7f69de41b067",
 		runtimeflowidentity.EntityID(boundedProviderFlowID)
 }
 

@@ -28,7 +28,6 @@ type Capture struct {
 	BindingRevision            int64
 	AccountOnly                bool
 	PublicationRunID           string
-	PublicationSequence        int64
 	OriginalPublicationRequest []byte
 	Body                       []byte
 	OriginalCapture            []byte
@@ -88,7 +87,7 @@ func (a Admission) RequireBusiness(ctx context.Context, provider string, generat
 	}
 	capture := a.value.capture
 	if capture.Scope != channelonboarding.SessionInputBusiness || capture.Responsibility.ActivationRevision < 1 ||
-		capture.BindingRevision < 1 && !capture.AccountOnly || capture.AccountOnly && capture.BindingRevision != 0 || capture.PublicationRunID == "" || capture.PublicationSequence < 1 {
+		capture.BindingRevision < 1 && !capture.AccountOnly || capture.AccountOnly && capture.BindingRevision != 0 || capture.PublicationRunID == "" {
 		return fmt.Errorf("business publication requires explicit activated native business scope")
 	}
 	op, err := capture.Store.GetChannelOnboarding(ctx, capture.Responsibility.OperationID)
@@ -181,12 +180,6 @@ func (a Admission) RequireCapturedPublicationRequest(raw []byte) error {
 	return a.value.capture.PublicationVerifier.ValidatePublicationRequest(raw)
 }
 
-func (a Admission) PublicationSequence() int64 {
-	if a.value == nil {
-		return 0
-	}
-	return a.value.capture.PublicationSequence
-}
 func (a Admission) ReceivedAt() time.Time {
 	if a.value == nil {
 		return time.Time{}

@@ -120,7 +120,6 @@ type apiTestDurableEventStore interface {
 	runtimebus.PreparedPublishEventReader
 	runtimebus.TargetFailureDeadLetterRecorder
 	runtimebus.RunOriginReader
-	runtimerunlifecycle.StandingRestartDispositionReader
 }
 
 func testAuthorActivityRuntimeContext(ctx context.Context) context.Context {
@@ -277,8 +276,6 @@ func newScopedAPITestEventBusWithDataCatalog(t *testing.T, eventStore runtimebus
 
 			PreparedEvents:        durable,
 			TargetFailureRecorder: durable,
-			RunOrigins:            durable,
-			StandingRestarts:      durable,
 		}
 	}
 	deliveryStore, hasDeliveryStore := eventStore.(runtimedelivery.Store)
@@ -361,14 +358,14 @@ func newScopedAPITestEventBusWithDataCatalog(t *testing.T, eventStore runtimebus
 	if hasDeliveryStore && opts.PipelineObligations != nil {
 		coordinator, err := runtimedeliverycontinuation.New(
 			deliveryStore,
-			opts.Durable.StandingRestarts,
+
 			opts.DeliveryAuthority,
 			opts.WorkOwner,
 			bus,
 			func(_ context.Context, reportErr error) {
 				t.Errorf("API test delivery continuation failed: %v", reportErr)
-			},
-		)
+			})
+
 		if err != nil {
 			return nil, err
 		}

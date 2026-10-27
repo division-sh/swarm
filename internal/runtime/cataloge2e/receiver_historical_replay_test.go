@@ -29,10 +29,10 @@ func requireHistoricalPublicationFreshBusReplay(t *testing.T, ctx context.Contex
 		ListCompletionCandidates(context.Context, runlifecycle.CandidateScope, runlifecycle.CandidateCursor, int) (runlifecycle.CandidatePage, error)
 		deliverylifecycle.Store
 	} = h.pg
-	durable := bus.DurableDependencies{PreparedEvents: h.pg, ActiveAgents: h.pg, Instances: h.pg, ConstructionPublications: h.pg, RunLifecycle: h.pg, RunOrigins: h.pg, DeliveryLifecycle: h.pg}
+	durable := bus.DurableDependencies{PreparedEvents: h.pg, ActiveAgents: h.pg, Instances: h.pg, ConstructionPublications: h.pg, RunLifecycle: h.pg, DeliveryLifecycle: h.pg}
 	if h.sqlite != nil {
 		selected = h.sqlite
-		durable = bus.DurableDependencies{PreparedEvents: h.sqlite, ActiveAgents: h.sqlite, Instances: h.sqlite, ConstructionPublications: h.sqlite, RunLifecycle: h.sqlite, RunOrigins: h.sqlite, DeliveryLifecycle: h.sqlite}
+		durable = bus.DurableDependencies{PreparedEvents: h.sqlite, ActiveAgents: h.sqlite, Instances: h.sqlite, ConstructionPublications: h.sqlite, RunLifecycle: h.sqlite, DeliveryLifecycle: h.sqlite}
 	}
 	// These are fresh consumers of the actual stored publication and immutable
 	// instance reader, not a copied manifest or the executing Bus's local cache.

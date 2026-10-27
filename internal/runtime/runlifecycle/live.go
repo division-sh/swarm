@@ -28,9 +28,13 @@ type LiveRun struct {
 	Source runtimecorrelation.SourceArtifactFact
 }
 
-type LiveRunReader interface {
-	LoadLiveRun(context.Context, LiveRunScope) (LiveRun, bool, error)
+type FlowScopeReader interface {
 	LoadRunLiveScope(context.Context, string) (LiveRunScope, error)
+}
+
+type LiveRunReader interface {
+	FlowScopeReader
+	LoadLiveRun(context.Context, LiveRunScope) (LiveRun, bool, error)
 }
 
 // LandingRun remains selected during pause; execution still uses LiveRunReader.
@@ -41,6 +45,16 @@ type LandingRun struct {
 
 type LandingRunReader interface {
 	LoadLandingRun(context.Context, LiveRunScope) (LandingRun, bool, error)
+}
+
+type FlowRunReconciliation struct {
+	LandingRun
+	Created           bool
+	CommittedMutation MutationDisposition
+}
+
+type FlowRunOwner interface {
+	ReconcileFlowRun(context.Context, LiveRunScope, runtimecorrelation.SourceArtifactFact) (FlowRunReconciliation, error)
 }
 
 type LiveRunConflictError struct {

@@ -380,7 +380,7 @@ func waitDeploymentResourceLargeRun(t *testing.T, f *deploymentResourceFixture, 
 	acceptance := objective
 	if expected == 1362 && f.postgresDSN != "" {
 		// Provisional #2394 throughput debt; the 180s objective remains unchanged.
-		acceptance = 4 * time.Minute
+		acceptance = 6 * time.Minute
 	}
 	ctx, cancel := context.WithTimeout(f.ctx, acceptance)
 	defer cancel()

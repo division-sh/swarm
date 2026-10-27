@@ -247,9 +247,10 @@ func newA2MapFanOutExecutionFromFiles(t *testing.T, selected gateRecoveryStoreCa
 	if err := selected.events.ActivateDeliveryAuthority(ctx, authority); err != nil {
 		t.Fatal(err)
 	}
-	continuations, err := deliverycontinuation.New(selected.events, selected.events, authority, work, bus, func(_ context.Context, err error) {
+	continuations, err := deliverycontinuation.New(selected.events, authority, work, bus, func(_ context.Context, err error) {
 		t.Errorf("actual map delivery continuation: %v", err)
 	})
+
 	if err != nil {
 		t.Fatal(err)
 	}

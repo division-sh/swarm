@@ -22,7 +22,7 @@ func TestDeclaredClockBindingRequiresDeploymentSelection(t *testing.T) {
 				WorkflowModule:     semanticOnlyWorkflowRuntime{source: source},
 				SourceArtifactFact: testSourceArtifactFact(t, runtimeContextTestHashA), EnableDeclaredClockBinding: enabled,
 			}}
-			candidates, err := rt.PlanStandingServiceCandidates()
+			candidates, err := rt.PlanLiveFlowScopes()
 			want := 0
 			if enabled {
 				want = 1
@@ -31,22 +31,12 @@ func TestDeclaredClockBindingRequiresDeploymentSelection(t *testing.T) {
 				t.Fatalf("nested=%t enabled=%t standing candidates=%+v err=%v", nested, enabled, candidates, err)
 			}
 			if !enabled {
-				if err := rt.ArmDeclaredFlowClocks(t.Context(), []StandingActivation{{FlowPath: "."}}, nil); err != nil {
+				if err := rt.ArmDeclaredFlowClocks(t.Context(), []StandingActivation{{FlowPath: "."}}); err != nil {
 					t.Fatalf("finite host acquired clock execution: %v", err)
 				}
 			}
 			if len(semanticview.ClockSchedules(source)) != 1 {
 				t.Fatal("deployment selection removed the compiled declaration")
-			}
-			flow := "."
-			if nested {
-				flow = "clock"
-			}
-			if err := rt.ValidateStandingClockMutation(flowidentity.StandingServiceID(flow)); (err == nil) != enabled {
-				t.Fatalf("clock mutation binding authority: nested=%t enabled=%t err=%v", nested, enabled, err)
-			}
-			if err := rt.ValidateStandingClockMutation(flowidentity.StandingServiceID("independent")); err != nil {
-				t.Fatalf("clock guard claimed an unrelated legacy standing declaration: %v", err)
 			}
 		}
 	}
@@ -92,18 +82,9 @@ func TestClockDeploymentDeclarationsAndExactPublication(t *testing.T) {
 			if err != nil {
 				t.Fatal(err)
 			}
-			serviceID := flowidentity.StandingServiceID(schedule.FlowID)
-			disposition, err := runlifecycle.ClassifyStandingRestart(runlifecycle.StandingRestartFact{
-				ExactCurrent: true, ServiceID: serviceID, RunID: runID, Generation: 1,
-				DeclarationPresent: true, BindingEnabled: true, EffectiveState: "active", OperatorOverride: "none", RunState: "running",
-			})
-			if err != nil {
-				t.Fatal(err)
-			}
 			activation := StandingActivation{
-				ServiceID: serviceID, RunID: runID, Generation: 1, FlowPath: schedule.FlowID,
-				Construction:       instance,
-				RestartDisposition: disposition,
+				RunID: runID, FlowPath: schedule.FlowID,
+				Construction: instance, RunState: runlifecycle.StateLive,
 			}
 			command, err := flowClockCommand(source, activation, schedule, executionmode.Live)
 			if err != nil || command.OwnerKind != genericschedule.OwnerInstance || command.OwnerID != schedule.FlowID ||
@@ -117,28 +98,20 @@ func TestClockDeploymentDeclarationsAndExactPublication(t *testing.T) {
 			if command.EventType != wantEvent {
 				t.Fatalf("clock event=%s want=%s", command.EventType, wantEvent)
 			}
-			identities, err := StandingExecutionIdentities(nil, []StandingActivation{activation})
-			if err != nil || len(identities) != 1 || identities[0].RunID != runID || identities[0].ServiceID != serviceID || identities[0].Generation != 1 {
-				t.Fatalf("transport-independent work identities=%+v err=%v", identities, err)
-			}
 			before := activation
 			for _, mutation := range []func(*StandingActivation){
 				func(a *StandingActivation) { a.RunID = uuid.NewString() },
-				func(a *StandingActivation) { a.Generation++ },
+				func(a *StandingActivation) { a.RunState = runlifecycle.StateCompleted },
 				func(a *StandingActivation) { a.Construction.InstanceID = "foreign" },
 				func(a *StandingActivation) { a.Construction.InstancePath = "foreign" },
 				func(a *StandingActivation) { a.Construction.EntityID = uuid.NewString() },
-				func(a *StandingActivation) { a.ServiceID = uuid.NewString() },
+				func(a *StandingActivation) { a.FlowPath = "foreign" },
 			} {
 				invalid := activation
 				mutation(&invalid)
 				if _, err := flowClockCommand(source, invalid, schedule, executionmode.Live); err == nil {
 					t.Fatalf("foreign activation admitted: %+v", invalid)
 				}
-			}
-			conflict := StandingTarget{ServiceID: serviceID, RunID: uuid.NewString(), Generation: 1}
-			if _, err := StandingExecutionIdentities([]StandingTarget{conflict}, []StandingActivation{activation}); err == nil {
-				t.Fatal("conflicting transport coordinate overruled acknowledged clock identity")
 			}
 			if !reflect.DeepEqual(activation, before) || len(semanticview.ClockSchedules(source)) != 1 {
 				t.Fatal("clock projection mutated its input or source")

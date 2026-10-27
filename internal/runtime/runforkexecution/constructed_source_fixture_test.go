@@ -90,7 +90,7 @@ func seedSelectedConstructedRootHistory(t *testing.T, ctx context.Context, selec
 			ReplyContext: selected, RunLifecycle: selected, DeliveryLifecycle: selected,
 
 			ActiveAgents: selected, PreparedEvents: selected,
-			TargetFailureRecorder: selected, RunOrigins: selected, StandingRestarts: selected,
+			TargetFailureRecorder: selected,
 		},
 	})
 	if err != nil {

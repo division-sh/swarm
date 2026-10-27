@@ -885,7 +885,7 @@ func (s *Service) ReconcileLocal(ctx context.Context) error {
 		for step := 0; step < 5; step++ {
 			switch op.Phase {
 			case PhasePreparing:
-				admissions, err := s.admitCredentials(ctx, op, candidate, "", candidate.Target.Generation > 0)
+				admissions, err := s.admitCredentials(ctx, op, candidate, "", false)
 				var required *CredentialRequiredError
 				if errors.As(err, &required) {
 					step = 5
@@ -944,7 +944,7 @@ func (s *Service) ReconcileLocal(ctx context.Context) error {
 					step = 5
 				}
 			case PhaseAwaitingOperatorConfirmation, PhasePublishingActivation:
-				if op.Phase == PhaseAwaitingOperatorConfirmation && op.AccountConnection() && op.IdentityOperationID == "" && candidate.Target.Generation == 0 {
+				if op.Phase == PhaseAwaitingOperatorConfirmation && op.AccountConnection() && op.IdentityOperationID == "" {
 					// Startup restores transport before admitting the execution grant.
 					// Recover performs the new source's target admission afterward.
 					step = 5
@@ -1075,8 +1075,7 @@ func (s *Service) recoverOperation(ctx context.Context, id string, restoreOnly b
 	if err := s.restoreSessionProgress(ctx, op, candidate); err != nil {
 		return err
 	}
-	accountTargetPending := op.AccountConnection() && op.IdentityOperationID == "" && op.Phase == PhaseAwaitingOperatorConfirmation
-	if restoreOnly || recoveryNeedsFreshTargetAdmission(op, candidate) && !accountTargetPending {
+	if restoreOnly {
 		// Restoring paired control work does not admit a replacement target or
 		// execute the retained declaration's historical business generation.
 		return nil
@@ -1098,10 +1097,6 @@ func (s *Service) recoverTerminalCredentials(ctx context.Context, op Operation) 
 		}
 	}
 	return nil
-}
-
-func recoveryNeedsFreshTargetAdmission(op Operation, candidate Candidate) bool {
-	return candidate.Target.Generation == 0 && (op.Phase == PhasePreparing || op.Phase.RequiresExecutableTarget(op.Posture))
 }
 
 func (s *Service) resumeSession(ctx context.Context, op Operation, candidate Candidate) error {
@@ -2398,11 +2393,6 @@ func (s *Service) bindCurrentCandidate(ctx context.Context, op Operation) (Opera
 	rebound := op
 	if !op.Coordinate.MatchesDeclaration(candidate.Coordinate) {
 		coordinate := candidate.Coordinate
-		if op.Phase.RequiresExecutableTarget(op.Posture) && coordinate.TargetGeneration == 0 {
-			// Retain the historical target coordinate for local reconciliation.
-			// Declaration discovery grants no replacement executable authority.
-			coordinate.TargetGeneration = op.Coordinate.TargetGeneration
-		}
 		rebound, err = s.store.AdvanceChannelOnboarding(context.WithoutCancel(ctx), AdvanceRequest{
 			OperationID: op.OperationID, ExpectedRevision: op.Revision, Phase: op.Phase,
 			RebindCoordinate: &coordinate, ClearConfirmationOperationID: disposition.RemintConfirmationOperation,
@@ -2434,7 +2424,7 @@ func phaseMayOwnExternalEffect(phase Phase) bool {
 func historicalCandidate(op Operation) Candidate {
 	return Candidate{
 		Provider: op.Provider, Interface: op.Interface, Coordinate: op.Coordinate,
-		Target:  CandidateTarget{Selector: op.TargetSelector, Provider: op.Provider, Generation: op.Coordinate.TargetGeneration},
+		Target:  CandidateTarget{Selector: op.TargetSelector, Provider: op.Provider},
 		Posture: op.Posture, Ceremony: op.Ceremony,
 	}
 }

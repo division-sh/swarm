@@ -68,7 +68,6 @@ type channelSettlementEvidence struct {
 	RuntimeInstanceID            string                       `json:"runtime_instance_id"`
 	ContextPublicationGeneration uint64                       `json:"context_publication_generation"`
 	PlanGeneration               plangeneration.Generation    `json:"plan_generation"`
-	TargetGeneration             uint64                       `json:"target_generation"`
 	SettingID                    string                       `json:"setting_id"`
 	SettingGeneration            int64                        `json:"setting_generation"`
 	Provider                     string                       `json:"provider"`
@@ -101,7 +100,7 @@ func (e channelSettlementEvidence) authority(lease time.Time) (runtimeeffects.Au
 			ConversationRef: e.ConversationRef, ActivationID: e.ActivationID, ActivationRevision: e.ActivationRevision,
 			BundleHash: e.BundleHash, BundleIdentity: e.BundleIdentity, PackInventoryGeneration: e.PackInventoryGeneration,
 			RuntimeInstanceID: e.RuntimeInstanceID, ContextPublicationGeneration: e.ContextPublicationGeneration,
-			PlanGeneration: e.PlanGeneration, TargetGeneration: e.TargetGeneration,
+			PlanGeneration: e.PlanGeneration,
 		}
 	case runtimeeffects.AuthorityChannelNativeSetting:
 		a.ChannelNativeSetting = runtimeeffects.ChannelNativeSettingAuthority{
@@ -112,7 +111,7 @@ func (e channelSettlementEvidence) authority(lease time.Time) (runtimeeffects.Au
 			ActivationID: e.ActivationID, ActivationRevision: e.ActivationRevision, BindingRevision: e.BindingRevision,
 			BundleHash: e.BundleHash, BundleIdentity: e.BundleIdentity, PackInventoryGeneration: e.PackInventoryGeneration,
 			RuntimeInstanceID: e.RuntimeInstanceID, ContextPublicationGeneration: e.ContextPublicationGeneration,
-			PlanGeneration: e.PlanGeneration, TargetGeneration: e.TargetGeneration,
+			PlanGeneration: e.PlanGeneration,
 		}
 	default:
 		return runtimeeffects.Authority{}, fmt.Errorf("unsupported channel settlement authority %q", e.Kind)

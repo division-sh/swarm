@@ -14,7 +14,7 @@ func TestCoordinatorSchedulingStopPreservesItsExactOwner(t *testing.T) {
 		t.Run(stop, func(t *testing.T) {
 			authority, owner, cleanup := coordinatorTestAuthorityAndOwner(t)
 			defer cleanup()
-			c, err := New(&coordinatorTestStore{}, coordinatorTestRestarts{}, authority, owner, &coordinatorTestDispatcher{}, nil)
+			c, err := New(&coordinatorTestStore{}, authority, owner, &coordinatorTestDispatcher{}, nil)
 			if err != nil {
 				t.Fatal(err)
 			}

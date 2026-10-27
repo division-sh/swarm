@@ -205,7 +205,7 @@ func TestChannelDeliverySettlementDiagnosticBothStores(t *testing.T) {
 		t.Run(string(backend), func(t *testing.T) {
 			_, db, _ := startChannelAnchorJourney(t, backend, "settlement-diagnostic-token", false)
 			var runID string
-			if err := db.QueryRow(`SELECT current_run_id FROM standing_services WHERE current_run_id IS NOT NULL`).Scan(&runID); err != nil {
+			if err := db.QueryRow(`SELECT run_id FROM runs WHERE flow_path='telegram-ingress' AND landing_run=TRUE`).Scan(&runID); err != nil {
 				t.Fatal(err)
 			}
 			card := waitChannelAnchorCard(t, db, runID, "stage_gate", "telegram-ingress")

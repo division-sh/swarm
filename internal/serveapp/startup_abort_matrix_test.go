@@ -170,16 +170,8 @@ func testServeStartupAbortFailure(t *testing.T, backend string, reset bool, phas
 			t.Fatal(err)
 		}
 	}
-	reconciled, err := reconcileServeStandingServices(ctx, candidates[0].runtime.Pipeline, candidates, true)
-	if err != nil {
+	if err := reconcileServeFlowRuns(ctx, candidates[0].runtime.Pipeline, candidates); err != nil {
 		t.Fatal(err)
-	}
-	for i := range candidates {
-		targets, activations, err := reconcileServeRuntimeStandingTargets(candidates[i].runtime, reconciled)
-		if err != nil {
-			t.Fatal(err)
-		}
-		candidates[i].startupStandingTargets, candidates[i].startupStandingActivations = targets, activations
 	}
 	definitions, err := plannedServeRuntimeContexts(candidates)
 	if err != nil {

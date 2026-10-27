@@ -147,7 +147,7 @@ func runProviderAliasAuthorityScenario(t *testing.T, scenario providerAliasScena
 							}
 						}
 						if shape == "callback" {
-							requireProviderAliasActionIntent(t, rt, receipt.PublicationID, runtimeinbound.Identity{ServiceID: receipt.ServiceID, RunID: receipt.RunID, Generation: receipt.Generation, Provider: "telegram", ProviderEventID: fmt.Sprint(id)}, scenario.source(alias))
+							requireProviderAliasActionIntent(t, rt, receipt.PublicationID, runtimeinbound.Identity{RunID: receipt.RunID, Provider: "telegram", ProviderEventID: fmt.Sprint(id)}, scenario.source(alias))
 						} else {
 							seen := map[string]bool{}
 							for _, eventID := range receipt.EventIDs {

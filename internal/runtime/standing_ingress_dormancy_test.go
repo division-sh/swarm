@@ -37,8 +37,8 @@ func TestStandingIngressCredentialAbsenceAcrossVerifiedProviders(t *testing.T) {
 			if targets, err := rt.PlanStandingTargets(); err != nil || len(targets) != 0 {
 				t.Fatalf("absent credential granted execution = %#v, %v", targets, err)
 			}
-			candidates, err := rt.PlanStandingServiceCandidates()
-			if err != nil || len(candidates) != 1 || candidates[0].BindingEnabled {
+			candidates, err := rt.PlanLiveFlowScopes()
+			if err != nil || len(candidates) != 1 {
 				t.Fatalf("complete dormant declaration census = %#v, %v", candidates, err)
 			}
 			if err := file.Set(context.Background(), "webhook_signing."+tc.provider, "supplied-signing-value"); err != nil {
@@ -162,8 +162,8 @@ func TestStandingIngressAdmissionDistinguishesAbsentFromInvalid(t *testing.T) {
 			if err != nil {
 				t.Fatal(err)
 			}
-			candidates, err := rt.PlanStandingServiceCandidates()
-			if err != nil || len(candidates) != 1 || candidates[0].BindingEnabled != (state == "valid") {
+			candidates, err := rt.PlanLiveFlowScopes()
+			if err != nil || len(candidates) != 1 {
 				t.Fatalf("complete declaration census = %#v, %v", candidates, err)
 			}
 			if state == "valid" {
@@ -250,8 +250,8 @@ func TestStandingRegistrationRequiresEveryCompiledCredentialRole(t *testing.T) {
 			if err != nil {
 				t.Fatal(err)
 			}
-			candidates, err := rt.PlanStandingServiceCandidates()
-			if err != nil || len(candidates) != 1 || candidates[0].BindingEnabled != (state == "all_present") {
+			candidates, err := rt.PlanLiveFlowScopes()
+			if err != nil || len(candidates) != 1 {
 				t.Fatalf("registration enabledness = %#v, %v", candidates, err)
 			}
 			if state == "all_present" {

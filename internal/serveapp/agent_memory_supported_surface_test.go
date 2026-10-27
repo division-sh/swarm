@@ -500,10 +500,8 @@ type standingTelegramEvidenceCounts struct {
 }
 
 type standingTelegramBinding struct {
-	ServiceID  string `json:"service_id"`
-	RunID      string `json:"run_id"`
-	Generation int64  `json:"generation"`
-	FlowPath   string `json:"flow_path"`
+	RunID    string `json:"run_id"`
+	FlowPath string `json:"flow_path"`
 }
 
 type standingTelegramPublication struct {
@@ -582,14 +580,14 @@ func sendStandingTelegramPublication(t testing.TB, baseURL string, body []byte, 
 	if resp.StatusCode != wantCode || publication.Status != wantStatus {
 		t.Fatalf("Telegram publication status=%d payload=%#v, want %d/%s%s", resp.StatusCode, publication, wantCode, wantStatus, standingWebhookDiagnostics(diagnostics))
 	}
-	if publication.ServiceID == "" || publication.RunID == "" || publication.Generation <= 0 || publication.FlowPath == "" || publication.Provider != "telegram" || publication.ProviderEventID == "" || publication.PublicationID == "" || len(publication.EventIDs) == 0 || len(publication.EventIDs) != len(publication.EventNames) {
+	if publication.RunID == "" || publication.FlowPath == "" || publication.Provider != "telegram" || publication.ProviderEventID == "" || publication.PublicationID == "" || len(publication.EventIDs) == 0 || len(publication.EventIDs) != len(publication.EventNames) {
 		t.Fatalf("Telegram publication identity = %#v", publication)
 	}
 	var fields map[string]json.RawMessage
 	if err := json.Unmarshal(responseBody, &fields); err != nil {
 		t.Fatal(err)
 	}
-	for _, retired := range []string{"entity_id", "instance_id", "target_flow_instance"} {
+	for _, retired := range []string{"service_id", "generation", "entity_id", "instance_id", "target_flow_instance"} {
 		if _, exists := fields[retired]; exists {
 			t.Fatalf("declaration receipt contains retired %s: %s", retired, responseBody)
 		}

@@ -77,13 +77,13 @@ func channelActionAckActivationCurrent(ctx context.Context, q schemaQueryer, ack
 		WHERE activation_id=? AND status='current' AND principal_id=? AND binding_revision=?
 		AND activation_revision=? AND bundle_hash=? AND bundle_identity=?
 		AND pack_inventory_generation=? AND runtime_instance_id=?
-		AND context_publication_generation=? AND plan_generation=? AND target_generation=?`
+		AND context_publication_generation=? AND plan_generation=?`
 	if postgres {
 		query = `SELECT activation_id::text FROM connected_channel_activations
 			WHERE activation_id=$1::uuid AND status='current' AND principal_id=$2::uuid AND binding_revision=$3
 			AND activation_revision=$4 AND bundle_hash=$5 AND bundle_identity=$6
 			AND pack_inventory_generation=$7 AND runtime_instance_id=$8::uuid
-			AND context_publication_generation=$9 AND plan_generation=$10 AND target_generation=$11`
+			AND context_publication_generation=$9 AND plan_generation=$10`
 		if lock {
 			query += ` FOR UPDATE`
 		}
@@ -91,7 +91,7 @@ func channelActionAckActivationCurrent(ctx context.Context, q schemaQueryer, ack
 	var activationID string
 	err := q.QueryRowContext(ctx, query, ack.ActivationID, ack.PrincipalID, ack.BindingRevision, ack.ActivationRevision,
 		ack.BundleHash, ack.BundleIdentity, ack.PackInventoryGeneration, ack.RuntimeInstanceID,
-		ack.ContextPublicationGeneration, ack.PlanGeneration.Diagnostic(), ack.TargetGeneration).Scan(&activationID)
+		ack.ContextPublicationGeneration, ack.PlanGeneration.Diagnostic()).Scan(&activationID)
 	if errors.Is(err, sql.ErrNoRows) {
 		return false, nil
 	}

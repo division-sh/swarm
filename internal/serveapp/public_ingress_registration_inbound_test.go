@@ -32,7 +32,6 @@ import (
 	runtimechannelactivation "github.com/division-sh/swarm/internal/runtime/channelactivation"
 	runtimecontracts "github.com/division-sh/swarm/internal/runtime/contracts"
 	"github.com/division-sh/swarm/internal/runtime/core/eventreceiver"
-	runtimeflowidentity "github.com/division-sh/swarm/internal/runtime/core/flowidentity"
 	runtimecredentials "github.com/division-sh/swarm/internal/runtime/credentials"
 
 	"github.com/division-sh/swarm/internal/runtime/executionposture"
@@ -145,9 +144,9 @@ func TestProviderRegistrationRotationCannotRefreshRuntimeIngressAdmission(t *tes
 		t.Fatalf("CompileAdmission: %v", err)
 	}
 	target := runtimepkg.StandingTarget{
-		BundleHash: bundleHash, ServiceID: runtimeflowidentity.StandingServiceID("."), FlowPath: ".",
+		BundleHash: bundleHash, FlowPath: ".",
 		Alias: "chat", Provider: "telegram", RunID: runID,
-		Generation: 1, PublicationSequence: 1,
+
 		SigningSecret: "webhook_signing.telegram", AdmissionPlan: admission,
 	}
 	installed, err := catalog.InstalledCapabilitySubjects()
@@ -168,7 +167,7 @@ func TestProviderRegistrationRotationCannotRefreshRuntimeIngressAdmission(t *tes
 		t.Fatal(err)
 	}
 	gateway.SetCredentialAdmission(rt.AdmitInboundCredentials)
-	manager, err := runtimepkg.NewRuntimeContextManager(nil, completeServeTestPackContext(t, runtimepkg.BundleContext{
+	manager, err := runtimepkg.NewRuntimeContextManager(eventsStore, completeServeTestPackContext(t, runtimepkg.BundleContext{
 		SourceArtifactFact: mustServeTestEphemeralSourceArtifactFact(bundleHash), Source: source,
 		Runtime: rt, WorkOwner: workOwner,
 		StandingTargets: []runtimepkg.StandingTarget{target}, ProviderTriggerGeneration: catalog.Generation(), InstalledTriggerSubjects: installed,
@@ -237,16 +236,15 @@ func TestProviderRegistrationRotationCannotRefreshRuntimeIngressAdmission(t *tes
 		BundleHash:     bundleHash,
 		BundleIdentity: "bundle:test@sha256:inbound-registration", PackInventoryGeneration: "sha256:inbound-registration-inventory",
 		RuntimeInstanceID: uuid.NewString(), ContextPublicationGeneration: 1,
-		PlanGeneration: planGeneration, TargetGeneration: uint64(target.Generation),
+		PlanGeneration: planGeneration,
 	}
 	pair := runtimepublicingress.RegistrationPair{
 		BindingID: "telegram", PlanGeneration: planGeneration, OnboardingOperationID: onboardingID, OnboardingRevision: 1,
 		OnboardingCoordinate: coordinate, PrebindingOperationID: onboardingID, Registration: registration,
 		CredentialKeys: map[string]string{"telegram_bot_token": "bot"},
 		Target: runtimepublicingress.RegistrationTarget{
-			Selector: "ingress:.:telegram", BundleHash: bundleHash, ServiceID: target.ServiceID,
+			Selector: "ingress:.:telegram", BundleHash: bundleHash,
 			FlowPath: target.FlowPath, Alias: target.Alias, Provider: target.Provider,
-			Generation: target.Generation, PublicationSequence: target.PublicationSequence,
 			AdmissionPlanGeneration: target.AdmissionPlan.Generation(), SigningCredentialKey: target.SigningSecret,
 		},
 	}
@@ -335,8 +333,8 @@ func TestProviderRegistrationRotationCannotRefreshRuntimeIngressAdmission(t *tes
 		t.Fatalf("registration control did not acquire its context: %+v err=%v", lookup, err)
 	}
 	_, _, admissionErr := use.AdmitPublicIngressTarget(runtimepkg.InboundTarget{
-		BundleHash: lookup.Target.BundleHash, ServiceID: lookup.Target.ServiceID, FlowPath: lookup.Target.FlowPath,
-		RunID: lookup.Target.RunID, Generation: lookup.Target.Generation, PublicationSequence: lookup.Target.PublicationSequence,
+		BundleHash: lookup.Target.BundleHash, FlowPath: lookup.Target.FlowPath,
+		RunID: lookup.Target.RunID,
 		Alias: lookup.Target.Alias, Provider: lookup.Target.Provider, SigningSecret: lookup.Target.SigningSecret, AdmissionPlan: lookup.Target.AdmissionPlan,
 	})
 	if err := use.Done(); err != nil {
@@ -433,17 +431,6 @@ func TestProviderRegistrationRotationCannotRefreshRuntimeIngressAdmission(t *tes
 		}
 	}
 	t.Run("loaded_callback_fence", assertManagedFence)
-	t.Run("suppressed_callback_fence", func(t *testing.T) {
-		if err := manager.SuppressStandingServiceTargets(target.ServiceID); err != nil {
-			t.Fatal(err)
-		}
-		defer func() {
-			if err := manager.RestoreStandingServiceTargets(target.ServiceID); err != nil {
-				t.Error(err)
-			}
-		}()
-		assertManagedFence(t)
-	})
 	t.Run("acquisition_failed_callback_fence", func(t *testing.T) {
 		if err := workOwner.Fence(); err != nil {
 			t.Fatal(err)
@@ -536,11 +523,11 @@ func TestResolveServeRegistrationPairsRejectsUnsignedIngressTarget(t *testing.T)
 	}
 	t.Cleanup(func() { _ = bus.ResetInMemoryState() })
 	target := runtimepkg.StandingTarget{
-		BundleHash: bundleHash, ServiceID: runtimeflowidentity.StandingServiceID("."),
-		FlowPath: ".", Alias: "chat", Provider: "telegram_raw",
+		BundleHash: bundleHash,
+		FlowPath:   ".", Alias: "chat", Provider: "telegram_raw",
 		RunID: "41000000-0000-0000-0000-000000000001",
 
-		Generation: 1, PublicationSequence: 1, AdmissionPlan: admission,
+		AdmissionPlan: admission,
 	}
 	emptyPublication, err := channelonboarding.NewChannelActivationPublication(nil)
 	if err != nil {
@@ -712,8 +699,8 @@ func TestDeclaredRegistrationWithoutEnabledTargetStaysDiscoverable(t *testing.T)
 			t.Fatalf("declaration discovery = %#v, %v", candidates, err)
 		}
 		candidate := candidates.Candidates()[0]
-		if candidate.Target.Generation != 0 || candidate.Target.PublicationSequence != 0 || candidate.Coordinate.TargetGeneration != 0 || candidate.Validate() == nil {
-			t.Fatalf("discovery invented executable authority: %#v", candidate)
+		if candidate.Coordinate.ValidateContext() != nil {
+			t.Fatalf("discovery lost its exact runtime context: %#v", candidate)
 		}
 	}
 }

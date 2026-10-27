@@ -36,7 +36,7 @@ func (f *activeInputFixture) confirmationContext(t testing.TB) context.Context {
 			ActivationID: a.ActivationID, ActivationRevision: a.Revision, BindingRevision: f.binding.Revision,
 			PrincipalID: op.PrincipalID, BundleHash: c.BundleHash, BundleIdentity: c.BundleIdentity,
 			PackInventoryGeneration: c.PackInventoryGeneration, RuntimeInstanceID: c.RuntimeInstanceID,
-			ContextPublicationGeneration: c.ContextPublicationGeneration, PlanGeneration: c.PlanGeneration, TargetGeneration: c.TargetGeneration}}
+			ContextPublicationGeneration: c.ContextPublicationGeneration, PlanGeneration: c.PlanGeneration}}
 	if !authority.Valid() {
 		t.Fatal("invalid selected confirmation fixture")
 	}
@@ -180,7 +180,7 @@ func TestWhatsAppChannelDeliveryJournalBothStores(t *testing.T) {
 						BindingRevision: candidate.BindingRevision, ExternalAccountRef: audience.ExternalAccountRef, ConversationRef: audience.ConversationRef,
 						ActivationID: f.activation.ActivationID, ActivationRevision: f.activation.Revision,
 						BundleHash: c.BundleHash, BundleIdentity: c.BundleIdentity, PackInventoryGeneration: c.PackInventoryGeneration,
-						RuntimeInstanceID: c.RuntimeInstanceID, ContextPublicationGeneration: c.ContextPublicationGeneration, PlanGeneration: c.PlanGeneration, TargetGeneration: c.TargetGeneration}}
+						RuntimeInstanceID: c.RuntimeInstanceID, ContextPublicationGeneration: c.ContextPublicationGeneration, PlanGeneration: c.PlanGeneration}}
 				ctx := runtimeeffects.WithExecutionMode(f.ctx, runtimeeffects.ExecutionModeLive)
 				ctx = runtimeeffects.WithController(ctx, runtimeeffects.NewController(f.selected.(runtimeeffects.Store)).WithExecutionPosture(executionposture.Live))
 				ctx = runtimeeffects.WithAuthority(ctx, a)

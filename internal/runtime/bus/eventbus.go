@@ -78,7 +78,6 @@ type EventBus struct {
 	recipientPlanGuard          PublishRecipientPlanGuard
 	runtimeIngressDispatchGate  RuntimeIngressDispatchGate
 	runDispatchGate             RunDispatchGate
-	standingRunWorkOwner        StandingRunWorkOwner
 	sourceArtifactFact          runtimecorrelation.SourceArtifactFact
 	runtimeInstanceID           string
 	mutationContext             func(context.Context) (context.Context, error)
@@ -112,8 +111,6 @@ type DurableDependencies struct {
 
 	PreparedEvents        PreparedPublishEventReader
 	TargetFailureRecorder TargetFailureDeadLetterRecorder
-	RunOrigins            RunOriginReader
-	StandingRestarts      runtimerunlifecycle.StandingRestartDispositionReader
 }
 
 func (d DurableDependencies) validate() error {
@@ -128,8 +125,6 @@ func (d DurableDependencies) validate() error {
 		{"active agent descriptor reader", d.ActiveAgents},
 		{"prepared event settlement reader", d.PreparedEvents},
 		{"target failure recorder", d.TargetFailureRecorder},
-		{"run origin reader", d.RunOrigins},
-		{"standing restart disposition reader", d.StandingRestarts},
 	}
 	for _, role := range required {
 		if role.value == nil {
@@ -278,12 +273,6 @@ type RunDispatchGate interface {
 // select a process-local owner for persisted pipeline recovery.
 type RunOriginReader interface {
 	LoadRunOrigin(context.Context, string) (runtimerunlifecycle.RunOrigin, error)
-}
-
-// StandingRunWorkOwner admits recovery work to the exact standing generation
-// named by a persisted run origin. It must reject stale or fenced generations.
-type StandingRunWorkOwner interface {
-	BeginStandingRunRecovery(context.Context, string, runtimerunlifecycle.RunOrigin) (*worklifetime.Lease, error)
 }
 
 type EventBusOptions struct {
@@ -614,15 +603,6 @@ func (eb *EventBus) SetRunDispatchGate(gate RunDispatchGate) {
 	}
 	eb.mu.Lock()
 	eb.runDispatchGate = gate
-	eb.mu.Unlock()
-}
-
-func (eb *EventBus) SetStandingRunWorkOwner(owner StandingRunWorkOwner) {
-	if eb == nil {
-		return
-	}
-	eb.mu.Lock()
-	eb.standingRunWorkOwner = owner
 	eb.mu.Unlock()
 }
 

@@ -610,7 +610,7 @@ func destructiveResetCleanupStatementsForTable(table string, runIDs []string, in
 		return destructiveResetCleanupStatements{count: "SELECT COUNT(*) FROM source_artifacts", delete: "DELETE FROM source_artifacts"}, nil
 	}
 	switch table {
-	case "connected_channel_activations", "channel_onboarding_operations", "standing_service_journal", "standing_service_generations", "standing_services":
+	case "connected_channel_activations", "channel_onboarding_operations":
 		return destructiveResetCleanupStatements{count: fmt.Sprintf("SELECT COUNT(*) FROM %s", quoteIdent(table)), delete: fmt.Sprintf("DELETE FROM %s", quoteIdent(table))}, nil
 	}
 	if len(runIDs) == 0 {

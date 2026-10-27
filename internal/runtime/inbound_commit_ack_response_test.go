@@ -18,13 +18,11 @@ import (
 	"github.com/division-sh/swarm/internal/packs"
 	runtimepkg "github.com/division-sh/swarm/internal/runtime"
 	runtimebus "github.com/division-sh/swarm/internal/runtime/bus"
-	"github.com/division-sh/swarm/internal/runtime/core/worklifetime"
 	runtimecorrelation "github.com/division-sh/swarm/internal/runtime/correlation"
 	runtimecredentials "github.com/division-sh/swarm/internal/runtime/credentials"
 	runtimeinbound "github.com/division-sh/swarm/internal/runtime/inboundpublication"
 	"github.com/division-sh/swarm/internal/runtime/lifecycleprobe"
 	runtimepipeline "github.com/division-sh/swarm/internal/runtime/pipeline"
-	runtimerunlifecycle "github.com/division-sh/swarm/internal/runtime/runlifecycle"
 	"github.com/division-sh/swarm/internal/store/storetest"
 	"github.com/division-sh/swarm/internal/testutil"
 )
@@ -38,18 +36,6 @@ func (p *inboundCommittedFinalizerProbe) NotifyLifecycle(_ context.Context, sign
 			panic("first committed inbound notification failed")
 		}
 	}
-}
-
-type inboundExactStandingRecoveryOwner struct {
-	occurrence *worklifetime.StandingOccurrence
-}
-
-func (o inboundExactStandingRecoveryOwner) BeginStandingRunRecovery(ctx context.Context, runID string, origin runtimerunlifecycle.RunOrigin) (*worklifetime.Lease, error) {
-	identity := o.occurrence.Identity()
-	if identity.RunID != runID || identity.ServiceID != origin.ServiceID() || identity.Generation != uint64(origin.Generation()) {
-		return nil, errors.New("standing recovery requested a different generation")
-	}
-	return o.occurrence.Begin(ctx)
 }
 
 // The selected store performs the real commit; this boundary injects only the
@@ -84,8 +70,8 @@ func (s *inboundPostCommitFaultStore) CommitInboundPublication(ctx context.Conte
 			} else {
 				result.Record.AcknowledgementMode = runtimeinbound.AcknowledgementAfterPublish
 			}
-		case "publication_sequence":
-			result.Record.ExpectedPublicationSequence++
+		case "resolved_run":
+			result.Record.ResolvedRunID = "3d8fa1d4-d95f-490f-96c5-1c9cf11e1b03"
 		}
 	}
 	return result, s.fault
@@ -151,38 +137,6 @@ func TestInboundCommittedSiblingFinalizationRecoversDurablePipelineBothStores(t 
 			if err != nil || !found || len(record.Events) != 2 {
 				t.Fatalf("committed batch=%+v found=%t err=%v", record, found, err)
 			}
-			originReader, ok := selected.(interface {
-				LoadRunOrigin(context.Context, string) (runtimerunlifecycle.RunOrigin, error)
-			})
-			if !ok {
-				t.Fatalf("selected store %T lacks run origin", selected)
-			}
-			origin, err := originReader.LoadRunOrigin(ctx, runID)
-			if err != nil {
-				t.Fatal(err)
-			}
-			process := worklifetime.NewProcess()
-			runtimeOwner, err := process.NewRuntime(ctx, worklifetime.RuntimeIdentity{RuntimeInstanceID: authorActivityTestRuntimeInstanceID, BundleHash: target.BundleHash})
-			if err != nil {
-				t.Fatal(err)
-			}
-			standing, err := runtimeOwner.NewStanding(ctx, worklifetime.StandingIdentity{ServiceID: origin.ServiceID(), RunID: runID, Generation: uint64(origin.Generation())})
-			if err != nil {
-				t.Fatal(err)
-			}
-			t.Cleanup(func() {
-				if err := standing.RetireAndWait(context.Background()); err != nil {
-					t.Errorf("retire standing recovery owner: %v", err)
-				}
-				if _, err := runtimeOwner.RetireAndWait(context.Background()); err != nil {
-					t.Errorf("retire runtime recovery owner: %v", err)
-				}
-				process.Retire()
-				if _, err := process.Join(context.Background()); err != nil {
-					t.Errorf("join recovery process: %v", err)
-				}
-			})
-			bus.SetStandingRunWorkOwner(inboundExactStandingRecoveryOwner{occurrence: standing})
 			if err := runtimepipeline.NewRecoveryManagerWith(bus).Recover(ctx); err != nil {
 				t.Fatalf("recover committed batch: %v", err)
 			}
@@ -285,7 +239,7 @@ func TestInboundAcknowledgedPublicationCleanupRespondsAndDoesNotRedeliverBothSto
 
 func TestInboundAcknowledgedCreatedResultRejectsChangedExecutionFactsBothStores(t *testing.T) {
 	for _, backend := range []string{"sqlite", "postgres"} {
-		for _, fact := range []string{"acknowledgement_mode", "publication_sequence"} {
+		for _, fact := range []string{"acknowledgement_mode", "resolved_run"} {
 			t.Run(backend+"/"+fact, func(t *testing.T) {
 				runID, entityID := boundedInboundTestCoordinates()
 				const agentID = "hostile-result-telegram-observer"
@@ -303,7 +257,7 @@ func TestInboundAcknowledgedCreatedResultRejectsChangedExecutionFactsBothStores(
 					t.Fatalf("mismatched %s status/body/commits=%d/%s/%d", fact, response.Code, response.Body.String(), wrapped.commits)
 				}
 				record, found, err := selected.LoadInboundPublicationByIdentity(ctx, inboundTestReceiptIdentity(target, "telegram", "8401"))
-				if err != nil || !found || len(record.Events) == 0 || record.ExpectedPublicationSequence != target.PublicationSequence {
+				if err != nil || !found || len(record.Events) == 0 || record.ResolvedRunID != target.RunID {
 					t.Fatalf("durable unmodified record=%+v found=%v err=%v", record, found, err)
 				}
 				waitForInboundBusQuiescence(t, bus)

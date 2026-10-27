@@ -88,7 +88,7 @@ func runOwnedSessionInputBootstrapBothStores(t *testing.T, targetGeneration uint
 			}
 			coordinate := channelonboarding.ChannelRuntimeContextCoordinate{BundleHash: source.BundleHash(),
 				BundleIdentity: "owned-session-input", PackInventoryGeneration: "sha256:session-input", RuntimeInstanceID: uuid.NewString(),
-				ContextPublicationGeneration: 1, PlanGeneration: generation, TargetGeneration: targetGeneration}
+				ContextPublicationGeneration: 1, PlanGeneration: generation}
 			id := uuid.NewString()
 			op, err := selected.ReserveChannelOnboarding(ctx, channelonboarding.StartRequest{OperationID: id,
 				RequestKeyHash: id, RequestHash: id, PrincipalID: principal.ID, Verb: channelonboarding.VerbConnect,
@@ -256,7 +256,6 @@ func runOwnedSessionInputBootstrapBothStores(t *testing.T, targetGeneration uint
 				{"business", func(e *capturedEvent) {
 					e.Scope.Kind = channelonboarding.SessionInputBusiness
 					e.Scope.PublicationBinding = captureFixture(t).Scope.PublicationBinding
-					e.Source.Coordinate.TargetGeneration = uint64(e.Scope.PublicationBinding.Generation)
 					e.Scope.ActivationRevision, e.Scope.BindingRevision = 1, 1
 					e.Scope.ActivationID = uuid.NewString()
 				}},

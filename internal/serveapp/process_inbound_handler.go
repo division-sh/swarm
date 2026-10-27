@@ -89,8 +89,8 @@ func (h runtimeProcessInboundHandler) serveAcquiredIngress(w http.ResponseWriter
 	}
 	target := lookup.Target
 	inbound := runtime.InboundTarget{
-		BundleHash: target.BundleHash, ServiceID: target.ServiceID, FlowPath: target.FlowPath,
-		RunID: target.RunID, Generation: target.Generation, PublicationSequence: target.PublicationSequence,
+		BundleHash: target.BundleHash, FlowPath: target.FlowPath,
+		RunID: target.RunID,
 		Alias: target.Alias, Provider: target.Provider, SigningSecret: target.SigningSecret, AdmissionPlan: target.AdmissionPlan,
 	}
 	var required bool
@@ -128,12 +128,9 @@ func serveAcquiredProcessWebhook(w http.ResponseWriter, r *http.Request, use *ru
 
 func sameRuntimeRegistrationTarget(registration runtimepublicingress.RegistrationTarget, target runtime.StandingTarget) bool {
 	return strings.TrimSpace(registration.BundleHash) == strings.TrimSpace(target.BundleHash) &&
-		strings.TrimSpace(registration.ServiceID) == strings.TrimSpace(target.ServiceID) &&
 		strings.TrimSpace(registration.FlowPath) == strings.TrimSpace(target.FlowPath) &&
 		registration.Alias == target.Alias &&
 		registration.Provider == target.Provider &&
-		registration.Generation == target.Generation &&
-		registration.PublicationSequence == target.PublicationSequence &&
 		registration.AdmissionPlanGeneration.Equal(target.AdmissionPlan.Generation()) &&
 		strings.TrimSpace(registration.SigningCredentialKey) != ""
 }

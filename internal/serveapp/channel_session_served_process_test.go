@@ -186,7 +186,7 @@ func TestServedWhatsAppUnpairedSDKProcessRestartBothStores(t *testing.T) {
 			for iteration := range 2 {
 				deadline := time.Now().Add(5 * time.Second)
 				result = requireServedNativePairingProgress(t, endpoint, result, deadline)
-				if result.Operation.OperationID != operationID || result.Operation.Coordinate.TargetGeneration != 0 || result.Operation.SessionAccount.AccountRef != "" {
+				if result.Operation.OperationID != operationID || result.Operation.Coordinate.ValidateContext() != nil || result.Operation.SessionAccount.AccountRef != "" {
 					t.Fatal("pairing minted business/account authority or replaced the original operation", result.Operation)
 				}
 				if err := process.stop(); err != nil {

@@ -38,7 +38,6 @@ func TestCLIRuntimeStateAPIConsumersAreExplicitlyAccounted(t *testing.T) {
 		"incidents.go":          {},
 		"logs.go":               {},
 		"run_command.go":        {},
-		"standing.go":           {},
 	}
 
 	gotAPIConsumers := map[string]struct{}{}

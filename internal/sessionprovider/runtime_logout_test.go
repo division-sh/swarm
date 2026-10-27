@@ -44,7 +44,6 @@ func TestWhatsAppRuntimeLogoutPreparationUsesOriginalSDKBothStores(t *testing.T)
 				{"account", func(o *channelonboarding.Operation) { o.SessionAccount.AdmissionID = uuid.NewString() }},
 				{"source", func(o *channelonboarding.Operation) { o.Coordinate.BundleIdentity += "-other" }},
 				{"runtime", func(o *channelonboarding.Operation) { o.Coordinate.RuntimeInstanceID = uuid.NewString() }},
-				{"target", func(o *channelonboarding.Operation) { o.Coordinate.TargetGeneration++ }},
 				{"selector", func(o *channelonboarding.Operation) { o.TargetSelector += "-other" }},
 			} {
 				t.Run(mutation.name, func(t *testing.T) {

@@ -3,61 +3,11 @@ package runtime
 import (
 	"context"
 	"errors"
-	"fmt"
-	"reflect"
 	"testing"
 
 	"github.com/division-sh/swarm/internal/runtime/core/worklifetime"
 	"github.com/division-sh/swarm/internal/runtime/runbundle"
-	"github.com/division-sh/swarm/internal/runtime/runlifecycle"
 )
-
-func TestStandingRecoveryCancellationWinsWithdrawnOwnerLookup(t *testing.T) {
-	origin, err := runlifecycle.StandingGenerationRunOrigin("retiring-clock", 1)
-	if err != nil {
-		t.Fatal(err)
-	}
-	for _, fenced := range []bool{false, true} {
-		t.Run(fmt.Sprint(fenced), func(t *testing.T) {
-			manager := &RuntimeContextManager{resetExecutionFenced: fenced}
-			ctx, cancel := context.WithCancel(context.Background())
-			defer cancel()
-			manager.mu.Lock()
-			entered := make(chan struct{})
-			returned := make(chan error, 1)
-			go func() {
-				close(entered)
-				lease, err := manager.BeginStandingRunRecovery(ctx, "retiring-run", origin)
-				if lease != nil {
-					err = errors.Join(err, lease.Done(), errors.New("retired recovery acquired new authority"))
-				}
-				returned <- err
-			}()
-			<-entered
-			cancel()
-			manager.mu.Unlock()
-			if err := <-returned; !errors.Is(err, context.Canceled) || errors.Is(err, worklifetime.ErrAdmissionFenced) {
-				t.Fatalf("cancelled admitted carrier was reclassified by owner withdrawal: %v", err)
-			}
-		})
-	}
-}
-
-func TestResetStandingPreparationFailureDoesNotRetainPrecedingOccurrence(t *testing.T) {
-	owner := runtimeTestOccurrence(t, runtimeContextTestHashA)
-	manager := newRuntimeContextManagerState(nil)
-	before := owner.ActiveCount()
-	_, err := manager.newStandingOccurrencesLocked(owner, []StandingTarget{
-		{ServiceID: "first", RunID: "run-first", Generation: 1},
-		{ServiceID: "invalid", RunID: "run-invalid", Generation: 0},
-	}, nil)
-	if err == nil {
-		t.Fatal("accepted invalid standing generation")
-	}
-	if after := owner.ActiveCount(); after != before {
-		t.Fatalf("failed preparation retained a standing occurrence: before=%d after=%d", before, after)
-	}
-}
 
 func TestRecoveredRuntimeContextsStayFencedUntilExactPublicationRelease(t *testing.T) {
 	manager, err := newTestRuntimeContextManager(t, fakeRunBundleAvailability{})
@@ -107,7 +57,6 @@ func TestRecoveredRuntimeContextsStayFencedUntilExactPublicationRelease(t *testi
 func TestResetRuntimeContextsRequireRetirementAndPublishWholeIdenticalSet(t *testing.T) {
 	catalog := runtimeAdmissionTestCatalog(t, "a")
 	a := runtimeAdmissionTestContext(t, runtimeContextTestHashA, "first", catalog)
-	serviceID := a.StandingTargets[0].ServiceID
 	b := testBundleContext(t, runtimeContextTestHashB, "beta.requested")
 	availability := fakeRunBundleAvailability{rows: map[string]runbundle.Availability{
 		"run-first": {RunID: "run-first", BundleHash: runtimeContextTestHashA, SourceArtifactPresent: true},
@@ -194,17 +143,6 @@ func TestResetRuntimeContextsRequireRetirementAndPublishWholeIdenticalSet(t *tes
 			t.Fatalf("%s escaped reset convergence: %v", name, err)
 		}
 	}
-	origin, err := runlifecycle.StandingGenerationRunOrigin(serviceID, 1)
-	if err != nil {
-		t.Fatal(err)
-	}
-	lease, err := manager.BeginStandingRunRecovery(context.Background(), "run-first", origin)
-	if lease != nil {
-		_ = lease.Done()
-	}
-	if lease != nil || !errors.Is(err, worklifetime.ErrAdmissionFenced) {
-		t.Fatalf("standing recovery escaped reset convergence: %v", err)
-	}
 	if err := manager.ReleaseResetExecution(nextA, nextB); err != nil {
 		t.Fatal(err)
 	}
@@ -235,67 +173,5 @@ func TestResetRuntimeContextsRequireRetirementAndPublishWholeIdenticalSet(t *tes
 		if acquired != expected.Runtime {
 			t.Fatal("published predecessor runtime")
 		}
-		// Structural ownership guard: the bus must never retain the temporary
-		// preparation manager, which cannot observe later process transitions.
-		boundOwner := reflect.ValueOf(expected.Runtime.Bus).Elem().FieldByName("standingRunWorkOwner")
-		if boundOwner.IsNil() || boundOwner.Elem().Pointer() != reflect.ValueOf(manager).Pointer() {
-			t.Fatal("reset bound standing recovery to a detached preparation manager")
-		}
-	}
-}
-
-func TestResetStandingSuppressionComesFromReconstructedEpoch(t *testing.T) {
-	for _, suspended := range []bool{false, true} {
-		t.Run(fmt.Sprintf("successor_suspended_%t", suspended), func(t *testing.T) {
-			catalog := runtimeAdmissionTestCatalog(t, "a")
-			old := runtimeAdmissionTestContext(t, runtimeContextTestHashA, "first", catalog)
-			serviceID := old.StandingTargets[0].ServiceID
-			manager, err := newTestRuntimeContextManager(t, nil, old)
-			if err != nil {
-				t.Fatal(err)
-			}
-			if err := manager.SuppressStandingServiceTargets(serviceID); err != nil {
-				t.Fatal(err)
-			}
-			for _, result := range manager.DeactivateAll(RuntimeContextCauseUnloaded) {
-				if result.ShutdownErr != nil {
-					t.Fatal(result.ShutdownErr)
-				}
-			}
-			next := runtimeAdmissionTestContext(t, runtimeContextTestHashA, "first", catalog)
-			if err := manager.StageResetRuntimeContexts(next); err != nil {
-				t.Fatal(err)
-			}
-			if manager.standingServiceSuppressedLocked(serviceID) {
-				t.Fatal("fresh execution retained predecessor standing suppression")
-			}
-			if suspended {
-				if err := manager.SuppressStandingServiceTargets(serviceID); err != nil {
-					t.Fatal(err)
-				}
-			}
-			if err := manager.PublishResetRuntimeContexts(next); err != nil {
-				t.Fatal(err)
-			}
-			if err := manager.ReleaseResetExecution(next); err != nil {
-				t.Fatal(err)
-			}
-			use, lookup, err := manager.AcquireIngress(context.Background(), "first", "acme")
-			if use != nil {
-				if err := use.Done(); err != nil {
-					t.Fatal(err)
-				}
-			}
-			if err != nil {
-				t.Fatal(err)
-			}
-			if suspended {
-				if use != nil || lookup.Cause != RuntimeContextCauseStandingSuppressed || manager.contexts[next.BundleHash()].standing[serviceID] != nil {
-					t.Fatalf("non-executable successor acquired standing authority: %+v", lookup)
-				}
-			} else if use == nil || !lookup.Loaded() || manager.contexts[next.BundleHash()].standing[serviceID] == nil {
-				t.Fatalf("active successor retained predecessor suppression: %+v", lookup)
-			}
-		})
 	}
 }

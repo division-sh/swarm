@@ -69,7 +69,7 @@ func (f *activeInputFixture) publicationBus(t *testing.T) *bus.EventBus {
 		PipelineObligations: selected.PipelineObligations(), PayloadAdmitter: payload, ProviderOutputVerifier: f.catalog,
 		Durable: bus.DurableDependencies{ReplyContext: selected, RunLifecycle: selected, DeliveryLifecycle: selected,
 			ConstructionPublications: selected, Instances: selected, ActiveAgents: selected,
-			PreparedEvents: selected, TargetFailureRecorder: selected, RunOrigins: selected, StandingRestarts: selected},
+			PreparedEvents: selected, TargetFailureRecorder: selected},
 	})
 	if err != nil {
 		t.Fatal(err)

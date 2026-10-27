@@ -70,12 +70,7 @@ func TestWhatsAppHistoricalCaptureRedeliveryRejectsChangedStableEvidence(t *test
 		{"account", func(e *capturedEvent) { e.Scope.Session.AccountRef = "other" }},
 		{"admission", func(e *capturedEvent) { e.Scope.Session.AdmissionID = uuid.NewString() }},
 		{"admission_revision", func(e *capturedEvent) { e.Scope.Session.Revision++ }},
-		{"service", func(e *capturedEvent) { e.Scope.PublicationBinding.ServiceID = uuid.NewString() }},
 		{"run", func(e *capturedEvent) { e.Scope.PublicationBinding.RunID = uuid.NewString() }},
-		{"generation", func(e *capturedEvent) {
-			e.Scope.PublicationBinding.Generation++
-			e.Source.Coordinate.TargetGeneration++
-		}},
 		{"source", func(e *capturedEvent) {
 			e.Scope.Source.BundleIdentity = "other"
 			e.Source.Coordinate.BundleIdentity = "other"
@@ -109,7 +104,7 @@ func TestWhatsAppHistoricalCaptureRedeliveryRejectsChangedStableEvidence(t *test
 }
 
 func TestWhatsAppHistoricalCaptureRejectsMalformedRedelivery(t *testing.T) {
-	for _, change := range []string{"operation_revision", "activation_revision", "activation_id", "occurrence", "target_generation"} {
+	for _, change := range []string{"operation_revision", "activation_revision", "activation_id", "occurrence"} {
 		t.Run(change, func(t *testing.T) {
 			original := captureFixture(t)
 			request := capturePublicationFixture(t, original)
@@ -123,8 +118,6 @@ func TestWhatsAppHistoricalCaptureRejectsMalformedRedelivery(t *testing.T) {
 				duplicate.Scope.ActivationID = ""
 			case "occurrence":
 				duplicate.OccurrenceID = ""
-			case "target_generation":
-				duplicate.Source.Coordinate.TargetGeneration = 0
 			}
 			if _, err := verifyHistoricalCapture(duplicate, publishedCaptureFixture(request).record); err == nil {
 				t.Fatal("stable historical comparison admitted malformed capture")

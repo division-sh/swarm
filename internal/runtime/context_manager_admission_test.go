@@ -10,7 +10,6 @@ import (
 	"github.com/division-sh/swarm/internal/config"
 	"github.com/division-sh/swarm/internal/packs"
 	"github.com/division-sh/swarm/internal/providertriggers"
-	runtimeflowidentity "github.com/division-sh/swarm/internal/runtime/core/flowidentity"
 	runtimecredentials "github.com/division-sh/swarm/internal/runtime/credentials"
 	"github.com/division-sh/swarm/internal/runtime/executionposture"
 	runtimemanager "github.com/division-sh/swarm/internal/runtime/manager"
@@ -92,41 +91,6 @@ func TestRuntimeContextManagerReadbackSeparatesPresenceFromFrozenAdmission(t *te
 		t.Fatal(err)
 	}
 	assertEffectiveTargetStatus(packs.StatusNotReady, packs.RequirementStatusUnbound)
-}
-
-func TestRuntimeContextManagerRejectsCredentialProjectionStaleAfterSuppression(t *testing.T) {
-	ctx := context.Background()
-	catalog := runtimeAdmissionTestCatalog(t, "a")
-	contextDef := runtimeAdmissionTestContext(t, runtimeContextTestHashA, "primary", catalog)
-	manager, err := newTestRuntimeContextManager(t, nil, contextDef)
-	if err != nil {
-		t.Fatal(err)
-	}
-	store, err := runtimecredentials.NewFileStore(filepath.Join(t.TempDir(), "credentials.json"))
-	if err != nil {
-		t.Fatal(err)
-	}
-	if err := store.Set(ctx, "webhook_signing.acme", "secret"); err != nil {
-		t.Fatal(err)
-	}
-	blocking := &blockingCredentialSnapshotStore{Store: store, entered: make(chan struct{}), release: make(chan struct{})}
-	owner, err := runtimecredentials.NewSnapshotOwner(blocking)
-	if err != nil {
-		t.Fatal(err)
-	}
-	errCh := make(chan error, 1)
-	go func() {
-		_, projectionErr := manager.EvaluatedCapabilitySubjects(ctx, owner)
-		errCh <- projectionErr
-	}()
-	<-blocking.entered
-	if err := manager.SuppressStandingServiceTargets("service-primary"); err != nil {
-		t.Fatal(err)
-	}
-	close(blocking.release)
-	if err := <-errCh; err == nil || !strings.Contains(err.Error(), "became stale") {
-		t.Fatalf("stale projection error = %v", err)
-	}
 }
 
 func TestRuntimeContextManagerInvalidatesCredentialProjectionAcrossOrdinaryUnload(t *testing.T) {
@@ -238,8 +202,8 @@ func TestRuntimeContextManagerInvalidatesCredentialProjectionAcrossSourceSetFenc
 	contextDef.Runtime = rt
 	contextDef.WorkOwner = rt.WorkOccurrence()
 	contextDef.StandingTargets = []StandingTarget{{
-		BundleHash: bundleHash, ServiceID: runtimeflowidentity.StandingServiceID("telegram-flow"), FlowPath: "telegram-flow", Alias: "primary", Provider: "telegram",
-		RunID: "run-primary", Generation: 1,
+		BundleHash: bundleHash, FlowPath: "telegram-flow", Alias: "primary", Provider: "telegram",
+		RunID:         "run-primary",
 		SigningSecret: "webhook_signing.telegram", AdmissionPlan: planAdmission,
 	}}
 	applyRuntimeAdmissionCatalog(t, &contextDef, catalog)
@@ -369,8 +333,7 @@ func runtimeAdmissionTestContext(t *testing.T, hash, alias string, catalog *prov
 		t.Fatal(err)
 	}
 	contextDef.StandingTargets = []StandingTarget{{
-		BundleHash: hash, ServiceID: runtimeflowidentity.StandingServiceID("acme-flow"), FlowPath: "acme-flow", Alias: alias, Provider: "acme", RunID: "run-" + alias,
-		Generation:    1,
+		BundleHash: hash, FlowPath: "acme-flow", Alias: alias, Provider: "acme", RunID: "run-" + alias,
 		SigningSecret: "webhook_signing.acme", AdmissionPlan: plan,
 	}}
 	applyRuntimeAdmissionCatalog(t, &contextDef, catalog)

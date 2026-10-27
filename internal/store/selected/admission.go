@@ -47,7 +47,7 @@ type admissionInspectionPort interface {
 	InspectSelectedForkRecovery(context.Context, runfork.SelectedForkRecoveryEntry) (runfork.SelectedForkRecoveryInspection, error)
 	ListSelectedContractRouteRecoveryRecords(context.Context) ([]manager.SelectedContractRouteRecoveryRecord, error)
 	ListActiveAgentDescriptors(context.Context, string) ([]runtimebus.ActiveAgentDescriptor, error)
-	StandingRunRestartDisposition(context.Context, string) (runlifecycle.StandingRestartDisposition, error)
+	LoadRunLiveScope(context.Context, string) (runlifecycle.LiveRunScope, error)
 	InspectDynamicFlowRuntimeReadinessForSource(context.Context, correlation.SourceArtifactFact) (pipeline.DynamicFlowRuntimeReadinessProjection, error)
 	LoadAgents(context.Context) ([]manager.PersistedAgent, error)
 	PipelineObligations() pipelineobligation.Store
@@ -340,13 +340,13 @@ func (s *AdmissionSnapshot) ListActiveAgentDescriptors(ctx context.Context, runI
 	return s.store.ListActiveAgentDescriptors(ctx, runID)
 }
 
-func (s *AdmissionSnapshot) StandingRunRestartDisposition(ctx context.Context, runID string) (runlifecycle.StandingRestartDisposition, error) {
+func (s *AdmissionSnapshot) LoadRunLiveScope(ctx context.Context, runID string) (runlifecycle.LiveRunScope, error) {
 	ctx, done, err := s.readContext(ctx)
 	if err != nil {
-		return runlifecycle.StandingRestartDisposition{}, err
+		return runlifecycle.LiveRunScope{}, err
 	}
 	defer done()
-	return s.store.StandingRunRestartDisposition(ctx, runID)
+	return s.store.LoadRunLiveScope(ctx, runID)
 }
 
 func (s *AdmissionSnapshot) InspectDynamicFlowRuntimeReadinessForSource(ctx context.Context, source correlation.SourceArtifactFact) (pipeline.DynamicFlowRuntimeReadinessProjection, error) {
@@ -359,7 +359,7 @@ func (s *AdmissionSnapshot) InspectDynamicFlowRuntimeReadinessForSource(ctx cont
 	if err != nil {
 		return pipeline.DynamicFlowRuntimeReadinessProjection{}, err
 	}
-	return manager.FilterDynamicFlowRuntimeReadiness(ctx, projection, s, func(ctx context.Context, runID string) (bool, error) {
+	return manager.FilterDynamicFlowRuntimeReadiness(ctx, projection, func(ctx context.Context, runID string) (bool, error) {
 		return s.store.ObserveOrdinaryRunSource(ctx, source, runID)
 	})
 }

@@ -560,7 +560,7 @@ func TestAPIEventPostCommitErrorRetainsCompletionAndDispatchesAcknowledgedResult
 }
 
 func TestPublicCompletionExactOccurrenceSurvivesRuntimeFence(t *testing.T) {
-	for _, variant := range []string{"runtime", "standing", "selected", "manager-standing"} {
+	for _, variant := range []string{"runtime", "selected", "manager-selected"} {
 		t.Run(variant, func(t *testing.T) {
 			process := worklifetime.NewProcess()
 			source, endpoint := acknowledgedRootInputEndpoint(t)
@@ -577,14 +577,14 @@ func TestPublicCompletionExactOccurrenceSurvivesRuntimeFence(t *testing.T) {
 			var owner worklifetime.Occurrence = runtime
 			var retireChild func()
 			switch variant {
-			case "standing", "manager-standing":
-				standing, err := runtime.NewStanding(t.Context(), worklifetime.StandingIdentity{ServiceID: "service", RunID: "standing-run", Generation: 1})
+			case "manager-selected":
+				standing, err := process.NewSelectedFork(t.Context(), worklifetime.SelectedForkIdentity{ExecutionID: "execution", RunID: "selected-run", Generation: 1})
 				if err != nil {
 					t.Fatal(err)
 				}
 				owner = standing
 				retireChild = func() { _ = standing.RetireAndWait(context.Background()) }
-				if variant == "manager-standing" {
+				if variant == "manager-selected" {
 					manager, err := worklifetime.NewManagerRunOccurrence(t.Context(), runtime, worklifetime.ManagerRunIdentity{Generation: 1})
 					if err != nil {
 						t.Fatal(err)

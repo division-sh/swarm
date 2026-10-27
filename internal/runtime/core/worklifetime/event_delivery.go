@@ -19,7 +19,6 @@ type Occurrence interface {
 	NewRoute(context.Context, RouteIdentity) (*RouteOccurrence, error)
 	NewEventDelivery(context.Context, events.Event) (*EventDelivery, error)
 	NewRoutedEventDelivery(context.Context, events.Event, events.DeliveryRoute) (*EventDelivery, error)
-	standingProjection() *StandingOccurrence
 	workOccurrence()
 }
 
@@ -91,32 +90,8 @@ func newEventDelivery(ctx context.Context, event events.Event, route events.Deli
 }
 
 func (*RuntimeOccurrence) workOccurrence()      {}
-func (*StandingOccurrence) workOccurrence()     {}
 func (*SelectedForkOccurrence) workOccurrence() {}
 func (*ManagerWorkOccurrence) workOccurrence()  {}
-
-func (*RuntimeOccurrence) standingProjection() *StandingOccurrence { return nil }
-func (s *StandingOccurrence) standingProjection() *StandingOccurrence {
-	return s
-}
-func (*SelectedForkOccurrence) standingProjection() *StandingOccurrence { return nil }
-func (m *ManagerWorkOccurrence) standingProjection() *StandingOccurrence {
-	if m == nil || m.companion == nil {
-		return nil
-	}
-	return m.companion.standingProjection()
-}
-
-// StandingProjection returns the exact standing generation represented by a
-// fixed occurrence, including a Manager work projection. It does not expose
-// arbitrary parentage or the Manager's raw companion.
-func StandingProjection(owner Occurrence) (*StandingOccurrence, bool) {
-	if owner == nil {
-		return nil, false
-	}
-	standing := owner.standingProjection()
-	return standing, standing != nil
-}
 
 func (d *EventDelivery) Context() context.Context {
 	if d == nil || d.ctx == nil {
@@ -334,20 +309,6 @@ func beginRouteParent(owner Occurrence, ctx context.Context) (*Lease, error) {
 		return accepted.BeginAcceptedDescendant(ctx)
 	}
 	return owner.Begin(ctx)
-}
-
-func (s *StandingOccurrence) NewEventDelivery(ctx context.Context, event events.Event) (*EventDelivery, error) {
-	if s == nil {
-		return nil, errors.New("standing occurrence is required")
-	}
-	return newEventDelivery(ctx, event, events.DeliveryRoute{}, s, s.Begin)
-}
-
-func (s *StandingOccurrence) NewRoutedEventDelivery(ctx context.Context, event events.Event, route events.DeliveryRoute) (*EventDelivery, error) {
-	if s == nil {
-		return nil, errors.New("standing occurrence is required")
-	}
-	return newEventDelivery(ctx, event, route, s, s.Begin)
 }
 
 func (s *SelectedForkOccurrence) NewEventDelivery(ctx context.Context, event events.Event) (*EventDelivery, error) {

@@ -41,8 +41,7 @@ func admitNativeInboundPublicationTx(ctx context.Context, tx *sql.Tx, postgres b
 	target, err := packs.ParseChannelRegistrationTarget(input.TargetSelector())
 	source, found := correlation.SourceArtifactFactFromContext(ctx)
 	if err != nil || !found || source.BundleHash() != input.Coordinate().BundleHash || target.FlowPath != request.FlowPath ||
-		target.Provider != request.Provider || input.PublicationRunID() != request.ResolvedRunID ||
-		input.Coordinate().TargetGeneration != uint64(request.ExpectedGeneration) {
+		target.Provider != request.Provider || input.PublicationRunID() != request.ResolvedRunID {
 		return fmt.Errorf("native publication changed its original source, target or run")
 	}
 	if err := channelonboarding.RequireSessionBusinessInputTx(ctx, tx, postgres, input); err != nil {

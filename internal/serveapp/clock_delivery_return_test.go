@@ -41,7 +41,7 @@ func TestServedClockPendingConsumerReturnsAndRestartsBothStores(t *testing.T) {
 				t.Fatalf("held accepted clock delivery=%+v", before)
 			}
 			clock := readServedClockHeader(t, served.Endpoint, before.RunID).ClockSchedules[0]
-			statuses, err := servedTestProcessRuntime(t, first).Pipeline.ListStandingServiceStatuses(t.Context())
+			statuses, err := readServedLandingRuns(t.Context(), servedTestProcessRuntime(t, first))
 			if err != nil || len(statuses) != 1 || statuses[0].RunID != before.RunID {
 				t.Fatalf("held clock has no exact deployment generation: statuses=%+v err=%v", statuses, err)
 			}
@@ -79,8 +79,8 @@ func TestServedClockPendingConsumerReturnsAndRestartsBothStores(t *testing.T) {
 			if current := readServedClockHeader(t, restarted.Endpoint, before.RunID).ClockSchedules[0]; current.ActivationID != clock.ActivationID || current.RunID != clock.RunID || current.FlowInstance != clock.FlowInstance || !current.InitialDueAt.Equal(clock.InitialDueAt) {
 				t.Fatalf("pending delivery recovery replaced its clock: before=%+v current=%+v", clock, current)
 			}
-			statuses, err = servedTestProcessRuntime(t, second).Pipeline.ListStandingServiceStatuses(t.Context())
-			if err != nil || len(statuses) != 1 || statuses[0].ServiceID != generation.ServiceID || statuses[0].RunID != generation.RunID || statuses[0].Generation != generation.Generation {
+			statuses, err = readServedLandingRuns(t.Context(), servedTestProcessRuntime(t, second))
+			if err != nil || len(statuses) != 1 || statuses[0].LiveRun != generation.LiveRun || statuses[0].State != generation.State {
 				t.Fatalf("recovery borrowed another deployment generation: before=%+v after=%+v err=%v", generation, statuses, err)
 			}
 			if recoveredExecutions.Load() != 1 {

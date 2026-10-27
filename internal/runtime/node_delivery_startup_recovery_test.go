@@ -627,12 +627,12 @@ func TestCommittedPipelineHandoffCleanupFailureWakesExactDeliveryOnceParity(t *t
 			}
 			coordinator, err := runtimedeliverycontinuation.New(
 				selected,
-				selected,
+
 				snapshot.Authority,
 				runtimeTestEventBusWorkOwner(t, bus),
 				dispatcher,
-				func(_ context.Context, reportErr error) { t.Errorf("pipeline handoff continuation: %v", reportErr) },
-			)
+				func(_ context.Context, reportErr error) { t.Errorf("pipeline handoff continuation: %v", reportErr) })
+
 			if err != nil {
 				t.Fatalf("construct pipeline handoff coordinator: %v", err)
 			}
@@ -793,7 +793,6 @@ func startNodeDeliveryContinuation(
 	ctx context.Context,
 	eventBus *runtimebus.EventBus,
 	selected runtimedelivery.Store,
-	restarts runtimerunlifecycle.StandingRestartDispositionReader,
 	workOwner worklifetime.Occurrence,
 	eventID string,
 	route events.DeliveryRoute,
@@ -815,14 +814,14 @@ func startNodeDeliveryContinuation(
 	}
 	coordinator, err := runtimedeliverycontinuation.New(
 		selected,
-		restarts,
+
 		snapshot.Authority,
 		workOwner,
 		eventBus,
 		func(_ context.Context, reportErr error) {
 			t.Errorf("node delivery continuation failed: %v", reportErr)
-		},
-	)
+		})
+
 	if err != nil {
 		t.Fatalf("construct node delivery continuation coordinator: %v", err)
 	}
@@ -927,7 +926,7 @@ func TestDeliveryContinuationCoordinatorRecoversNodeDeliveriesThroughCanonicalSe
 				runtimepipelineobligation.ScopeSubscribed, storetest.AcknowledgedPipelineDisposition(),
 			)
 
-			continuations := startNodeDeliveryContinuation(t, ctx, bus, deliveryOwner, selected, workOwner, eventID, route)
+			continuations := startNodeDeliveryContinuation(t, ctx, bus, deliveryOwner, workOwner, eventID, route)
 			waitForRecoveredNodeDelivery(t, ctx, selected, eventID, route, 1)
 			if got := deliveryOwner.renewals.Load(); got != 0 {
 				t.Fatalf("standalone claim renewals = %d, want claim/settlement-owned renewal", got)
@@ -1074,7 +1073,7 @@ func TestPipelineCoordinatorRecoveryContinuesAfterCommittedDeadLetterParity(t *t
 				runtimepipelineobligation.ScopeSubscribed, storetest.AcknowledgedPipelineDisposition(),
 			)
 
-			startNodeDeliveryContinuation(t, ctx, bus, selected, selected, workOwner, poison.ID(), poisonRoute)
+			startNodeDeliveryContinuation(t, ctx, bus, selected, workOwner, poison.ID(), poisonRoute)
 			poisonDeliveryID, err := runtimedelivery.DeliveryID(poison.ID(), poisonRoute)
 			if err != nil {
 				t.Fatalf("derive poison delivery identity: %v", err)
@@ -1215,7 +1214,7 @@ func TestPipelineCoordinatorStandingRecoveryClaimsNewlyEligibleNodeDeliveries(t 
 			if err != nil {
 				t.Fatalf("claim node delivery before lease expiry: %v", err)
 			}
-			continuations := startNodeDeliveryContinuation(t, ctx, bus, deliveryOwner, selected, workOwner, eventID, route)
+			continuations := startNodeDeliveryContinuation(t, ctx, bus, deliveryOwner, workOwner, eventID, route)
 			if err := storetest.WaitManagerRetryDecision(ctx, selected, event, route); err != nil {
 				t.Fatalf("make exact node retry eligible: %v", err)
 			}

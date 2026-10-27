@@ -342,16 +342,8 @@ func (s *processLifecycleSupervisor) reconstructResetContexts(ctx context.Contex
 	if err != nil {
 		return err
 	}
-	reconciliations, err := reconcileServeStandingServices(standingCtx, candidates[0].runtime.Pipeline, candidates, !s.resetRequests[0].Options.LocalRun)
-	if err != nil {
+	if err := reconcileServeFlowRuns(standingCtx, candidates[0].runtime.Pipeline, candidates); err != nil {
 		return err
-	}
-	for i := range candidates {
-		targets, activations, err := reconcileServeRuntimeStandingTargets(candidates[i].runtime, reconciliations)
-		if err != nil {
-			return err
-		}
-		candidates[i].startupStandingTargets, candidates[i].startupStandingActivations = targets, activations
 	}
 	definitions, err := plannedServeRuntimeContexts(candidates)
 	if err != nil {

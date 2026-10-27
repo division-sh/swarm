@@ -925,102 +925,6 @@ func (r *RuntimeOccurrence) ActiveCount() uint64 {
 	return r.occurrence.gate.activeCount()
 }
 
-type StandingIdentity struct {
-	ServiceID  string
-	RunID      string
-	Generation uint64
-}
-
-func (i StandingIdentity) validate() error {
-	if strings.TrimSpace(i.ServiceID) == "" || strings.TrimSpace(i.RunID) == "" || i.Generation == 0 {
-		return errors.New("standing occurrence requires service_id, run_id, and durable generation")
-	}
-	return nil
-}
-
-type StandingOccurrence struct {
-	occurrence *ownedOccurrence
-	identity   StandingIdentity
-}
-
-func (r *RuntimeOccurrence) NewStanding(ctx context.Context, identity StandingIdentity) (*StandingOccurrence, error) {
-	if r == nil {
-		return nil, errors.New("runtime occurrence is required")
-	}
-	if err := identity.validate(); err != nil {
-		return nil, err
-	}
-	parentLease, err := r.BeginStanding(ctx)
-	if err != nil {
-		return nil, fmt.Errorf("admit standing occurrence: %w", err)
-	}
-	identity.ServiceID = strings.TrimSpace(identity.ServiceID)
-	identity.RunID = strings.TrimSpace(identity.RunID)
-	return &StandingOccurrence{occurrence: r.occurrence.newChild(parentLease), identity: identity}, nil
-}
-
-func (s *StandingOccurrence) Begin(ctx context.Context) (*Lease, error) {
-	if s == nil {
-		return nil, errors.New("standing occurrence is required")
-	}
-	return s.occurrence.begin(WithOccurrence(ctx, s))
-}
-
-func (s *StandingOccurrence) BeginStanding(ctx context.Context) (*Lease, error) {
-	if s == nil {
-		return nil, errors.New("standing occurrence is required")
-	}
-	return s.occurrence.gate.beginStanding(WithOccurrence(ctx, s))
-}
-
-func (s *StandingOccurrence) Fence() error {
-	if s == nil {
-		return errors.New("standing occurrence is required")
-	}
-	return s.occurrence.fence()
-}
-
-func (s *StandingOccurrence) Reopen() error {
-	if s == nil {
-		return errors.New("standing occurrence is required")
-	}
-	return s.occurrence.reopen()
-}
-
-func (s *StandingOccurrence) Wait(ctx context.Context) error {
-	if s == nil {
-		return nil
-	}
-	return s.occurrence.wait(ctx)
-}
-
-func (s *StandingOccurrence) WaitForQuiescence(ctx context.Context) error {
-	if s == nil {
-		return nil
-	}
-	return s.occurrence.gate.waitTransient(ctx)
-}
-
-func (s *StandingOccurrence) Retire() {
-	if s != nil {
-		s.occurrence.retire()
-	}
-}
-
-func (s *StandingOccurrence) RetireAndWait(ctx context.Context) error {
-	if s == nil {
-		return nil
-	}
-	return s.occurrence.finish(ctx)
-}
-
-func (s *StandingOccurrence) Identity() StandingIdentity {
-	if s == nil {
-		return StandingIdentity{}
-	}
-	return s.identity
-}
-
 type RouteIdentity struct {
 	RuntimeEpoch uint64
 	Agent        agentidentity.Identity
@@ -1055,20 +959,6 @@ func (r *RuntimeOccurrence) NewRoute(ctx context.Context, identity RouteIdentity
 	}
 	identity.Agent = identity.Agent.Normalize()
 	return &RouteOccurrence{occurrence: r.occurrence.newChild(nil), identity: identity, owner: r}, nil
-}
-
-func (s *StandingOccurrence) NewRoute(ctx context.Context, identity RouteIdentity) (*RouteOccurrence, error) {
-	if s == nil {
-		return nil, errors.New("standing occurrence is required")
-	}
-	if err := identity.validate(); err != nil {
-		return nil, err
-	}
-	if err := s.occurrence.gate.admits(); err != nil {
-		return nil, fmt.Errorf("admit standing route occurrence: %w", err)
-	}
-	identity.Agent = identity.Agent.Normalize()
-	return &RouteOccurrence{occurrence: s.occurrence.newChild(nil), identity: identity, owner: s}, nil
 }
 
 func (r *RouteOccurrence) Begin(ctx context.Context) (*Lease, error) {

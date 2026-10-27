@@ -18,7 +18,6 @@ import (
 	runtimeactors "github.com/division-sh/swarm/internal/runtime/core/actors"
 	"github.com/division-sh/swarm/internal/runtime/core/agentidentitytest"
 	"github.com/division-sh/swarm/internal/runtime/core/eventreceiver"
-	"github.com/division-sh/swarm/internal/runtime/core/flowidentity"
 	worklifetime "github.com/division-sh/swarm/internal/runtime/core/worklifetime"
 	runtimedeliverycontinuation "github.com/division-sh/swarm/internal/runtime/deliverycontinuation"
 	runtimedelivery "github.com/division-sh/swarm/internal/runtime/deliverylifecycle"
@@ -381,7 +380,7 @@ func VerifyRuntimeShutdown_ClosesAdmissionBeforeManagerDrainAndInboundIngressFor
 		DeliveryID: deliveryID, Event: continuationEvent, Disposition: runtimedelivery.ClaimAcquired,
 		Snapshot: runtimedelivery.Snapshot{DeliveryID: deliveryID, Route: route, Status: runtimedelivery.StatusPending, Authority: deliveryStore.authority},
 	}}
-	coordinator, err := runtimedeliverycontinuation.New(page, startupRecoveryDispositionMap{}, deliveryStore.authority, workOwner, dispatcher, nil)
+	coordinator, err := runtimedeliverycontinuation.New(page, deliveryStore.authority, workOwner, dispatcher, nil)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -951,7 +950,7 @@ func TestRuntimeContextDeactivationCancelsStuckWebhookWithoutPublishing(t *testi
 		rec := httptest.NewRecorder()
 		gateway.HandleResolvedWebhook(rec, req, InboundTarget{
 			BundleHash: hash, FlowPath: "chat", RunID: "41000000-0000-0000-0000-000000000001",
-			ServiceID: flowidentity.StandingServiceID("chat"), Generation: 1, PublicationSequence: 1,
+
 			Alias: "chat", Provider: "telegram", SigningSecret: "webhook_signing.telegram",
 		}, nil)
 		response <- rec

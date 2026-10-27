@@ -242,7 +242,6 @@ func proveResponseAuthorityNegatives(t *testing.T, original context.Context, sel
 		{"plan_generation", func(d *runtimeeffects.ChannelDeliveryAuthority) {
 			d.PlanGeneration, _ = plangeneration.FromCanonicalValue("foreign-response")
 		}},
-		{"target_generation", func(d *runtimeeffects.ChannelDeliveryAuthority) { d.TargetGeneration++ }},
 	} {
 		if test.name == "missing_predecessor" && edit.ChannelDelivery.PreviousReceiptOperationID == "" {
 			continue

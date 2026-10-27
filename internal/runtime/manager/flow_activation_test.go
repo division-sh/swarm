@@ -17,8 +17,6 @@ import (
 	"testing"
 	"time"
 
-	runtimestanding "github.com/division-sh/swarm/internal/runtime/runlifecycle"
-
 	"github.com/division-sh/swarm/internal/events"
 	"github.com/division-sh/swarm/internal/events/eventtest"
 	"github.com/division-sh/swarm/internal/runtime/agentmemory"
@@ -215,12 +213,6 @@ type flowActivationTestInstanceStore struct {
 	beforeCreation             func()
 	respectReadinessContext    bool
 	lifecycleModes             []executionmode.Mode
-}
-
-type flowActivationStandingRestarts map[string]runtimestanding.StandingRestartDispositionKind
-
-func (s flowActivationStandingRestarts) StandingRunRestartDisposition(_ context.Context, runID string) (runtimestanding.StandingRestartDisposition, error) {
-	return runtimestanding.StandingRestartDisposition{Kind: s[strings.TrimSpace(runID)]}, nil
 }
 
 type flowActivationTestStore struct {
@@ -3761,52 +3753,6 @@ func TestRecoverableStateSnapshotIncludesReadinessOnlyPendingWork(t *testing.T) 
 	}
 	if got := snapshot.Detail()["pending_dynamic_flow_runtime_readiness_count"]; got != 1 {
 		t.Fatalf("readiness-only detail = %#v", snapshot.Detail())
-	}
-}
-
-func TestDynamicFlowRuntimeReadinessExcludesNonExecutableStandingRuns(t *testing.T) {
-	bundleHash := authorActivityTestSourceArtifactFact.BundleHash()
-	runKinds := flowActivationStandingRestarts{
-		uuid.NewString(): runtimestanding.StandingRestartOrdinary,
-		uuid.NewString(): runtimestanding.StandingRestartActiveIntrinsic,
-		uuid.NewString(): runtimestanding.StandingRestartSuspended,
-		uuid.NewString(): runtimestanding.StandingRestartOrphaned,
-		uuid.NewString(): runtimestanding.StandingRestartCredentialDormant,
-		uuid.NewString(): runtimestanding.StandingRestartSessionDormant,
-		uuid.NewString(): runtimestanding.StandingRestartRecoveryRequired,
-	}
-	instances := &flowActivationTestInstanceStore{readiness: map[string]runtimepipeline.DynamicFlowRuntimeReadiness{}}
-	index := 0
-	for runID := range runKinds {
-		index++
-		path := fmt.Sprintf("review/standing-%d", index)
-		instances.readiness[flowActivationReadinessKey(runID, path)] = runtimepipeline.DynamicFlowRuntimeReadiness{
-			InstancePath: path, OwningRunSource: authorActivityTestSourceArtifactFact,
-			RunStatus: "running", InstanceStatus: "active",
-			Plan: runtimepipeline.DynamicFlowRuntimeReadinessPlan{
-				RunID: runID, BundleHash: bundleHash,
-				WorkflowVersion: "1.0.0", ExecutionMode: executionmode.Live,
-				Identity: runtimeflowidentity.Instance{
-					TemplateID: "review", ScopeKey: "review", InstanceID: fmt.Sprintf("standing-%d", index),
-					InstancePath: path, EntityID: uuid.NewString(), HasStoredPath: true,
-				},
-			},
-		}
-	}
-	am := newFlowActivationManager(t, &flowActivationTestBus{}, instances)
-	am.roles.StandingRestarts = runKinds
-	projection, err := am.InspectDynamicFlowRuntimeReadinessForSource(context.Background(), authorActivityTestSourceArtifactFact)
-	if err != nil {
-		t.Fatalf("inspect standing readiness: %v", err)
-	}
-	if len(projection.CurrentPending) != 2 {
-		t.Fatalf("executable readiness count = %d, want ordinary plus active intrinsic", len(projection.CurrentPending))
-	}
-	for _, item := range projection.CurrentPending {
-		kind := runKinds[item.Plan.RunID]
-		if kind != runtimestanding.StandingRestartOrdinary && kind != runtimestanding.StandingRestartActiveIntrinsic {
-			t.Fatalf("non-executable readiness escaped filter: run=%s kind=%s", item.Plan.RunID, kind)
-		}
 	}
 }
 

@@ -561,7 +561,6 @@ func (d *serveChannelDeliveryDispatcher) installNativeInboxCommands(ctx context.
 		BundleHash: coordinate.BundleHash, BundleIdentity: coordinate.BundleIdentity,
 		PackInventoryGeneration: coordinate.PackInventoryGeneration, RuntimeInstanceID: coordinate.RuntimeInstanceID,
 		ContextPublicationGeneration: coordinate.ContextPublicationGeneration, PlanGeneration: coordinate.PlanGeneration,
-		TargetGeneration: coordinate.TargetGeneration,
 	}
 	now := d.now().UTC()
 	authority := runtimeeffects.Authority{

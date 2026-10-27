@@ -7,7 +7,6 @@ import (
 	"time"
 
 	"github.com/division-sh/swarm/internal/events"
-	runtimebus "github.com/division-sh/swarm/internal/runtime/bus"
 	"github.com/division-sh/swarm/internal/runtime/core/eventidentity"
 	"github.com/division-sh/swarm/internal/runtime/core/flowidentity"
 	"github.com/division-sh/swarm/internal/runtime/correlation"
@@ -20,7 +19,7 @@ import (
 
 // Serve calls this only after construction, attachment and context publication
 // have completed. Finite/offline entry points never acquire this binding.
-func (rt *Runtime) ArmDeclaredFlowClocks(ctx context.Context, activations []StandingActivation, owner runtimebus.StandingRunWorkOwner) error {
+func (rt *Runtime) ArmDeclaredFlowClocks(ctx context.Context, activations []StandingActivation) error {
 	if rt == nil || rt.Options.WorkflowModule == nil {
 		return fmt.Errorf("clock deployment requires its runtime source")
 	}
@@ -29,14 +28,14 @@ func (rt *Runtime) ArmDeclaredFlowClocks(ctx context.Context, activations []Stan
 	}
 	source := rt.Options.WorkflowModule.SemanticSource()
 	for _, activation := range activations {
-		if !activation.RestartDisposition.Executable() {
+		if activation.RunState != runlifecycle.StateLive && activation.RunState != runlifecycle.StatePaused {
 			continue
 		}
 		for _, declaration := range semanticview.ClockSchedules(source) {
 			if declaration.FlowID != activation.FlowPath {
 				continue
 			}
-			if err := rt.armFlowClock(ctx, source, activation, declaration, owner); err != nil {
+			if err := rt.armFlowClock(ctx, source, activation, declaration); err != nil {
 				return err
 			}
 		}
@@ -61,25 +60,8 @@ func selectStandingClockBindings(declarations []StandingTargetDeclaration, enabl
 	return selected
 }
 
-// A finite host can retain independent standing declarations, but cannot
-// mutate a clock binding through that service's operator surface.
-func (rt *Runtime) ValidateStandingClockMutation(serviceID string) error {
-	if rt == nil || rt.Options.WorkflowModule == nil {
-		return fmt.Errorf("standing clock mutation requires its runtime source")
-	}
-	if rt.Options.EnableDeclaredClockBinding {
-		return nil
-	}
-	for _, clock := range semanticview.ClockSchedules(rt.Options.WorkflowModule.SemanticSource()) {
-		if flowidentity.StandingServiceID(clock.FlowID) == serviceID {
-			return fmt.Errorf("standing service %s requires its deployment clock binding", serviceID)
-		}
-	}
-	return nil
-}
-
-func (rt *Runtime) armFlowClock(ctx context.Context, source semanticview.Source, activation StandingActivation, declaration semanticview.ClockSchedule, owner runtimebus.StandingRunWorkOwner) error {
-	if rt.GenericSchedules == nil || owner == nil {
+func (rt *Runtime) armFlowClock(ctx context.Context, source semanticview.Source, activation StandingActivation, declaration semanticview.ClockSchedule) error {
+	if rt.GenericSchedules == nil || rt.workOccurrence == nil {
 		return fmt.Errorf("clock deployment requires its durable schedule and execution owners")
 	}
 	command, err := flowClockCommand(source, activation, declaration, rt.ExecutionPosture.RootMode())
@@ -89,11 +71,7 @@ func (rt *Runtime) armFlowClock(ctx context.Context, source semanticview.Source,
 	if activation.BundleHash != rt.Options.SourceArtifactFact.BundleHash() {
 		return fmt.Errorf("clock deployment activation belongs to another source")
 	}
-	origin, err := runlifecycle.StandingGenerationRunOrigin(activation.ServiceID, activation.Generation)
-	if err != nil {
-		return err
-	}
-	lease, err := owner.BeginStandingRunRecovery(ctx, activation.RunID, origin)
+	lease, err := rt.workOccurrence.Begin(rt.authorActivityContext(ctx))
 	if err != nil {
 		return fmt.Errorf("acquire clock deployment: %w", err)
 	}
@@ -104,10 +82,7 @@ func (rt *Runtime) armFlowClock(ctx context.Context, source semanticview.Source,
 }
 
 func flowClockCommand(source semanticview.Source, activation StandingActivation, schedule semanticview.ClockSchedule, mode executionmode.Mode) (genericschedule.AdmissionCommand, error) {
-	if !activation.RestartDisposition.Executable() || schedule.FlowID != activation.FlowPath ||
-		activation.ServiceID != flowidentity.StandingServiceID(schedule.FlowID) || activation.Generation <= 0 ||
-		activation.RestartDisposition.ServiceID != activation.ServiceID || activation.RestartDisposition.RunID != activation.RunID ||
-		activation.RestartDisposition.Generation != activation.Generation {
+	if (activation.RunState != runlifecycle.StateLive && activation.RunState != runlifecycle.StatePaused) || activation.RunID == "" || schedule.FlowID != activation.FlowPath {
 		return genericschedule.AdmissionCommand{}, fmt.Errorf("clock requires its exact active deployment declaration")
 	}
 	instance, err := flowidentity.StandingForGeneration(source, schedule.FlowID, activation.RunID)

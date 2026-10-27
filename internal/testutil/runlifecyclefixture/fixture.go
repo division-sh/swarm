@@ -54,8 +54,6 @@ type CorruptSnapshot struct {
 	OriginKind          string
 	TriggerEventID      string
 	TriggerEventType    string
-	OriginServiceID     string
-	OriginGeneration    int64
 	ForkedFromRunID     string
 	ForkedFromPointKind string
 	ForkedFromRevision  int64
@@ -135,8 +133,6 @@ func corruptOrigin(
 		SET origin_kind = ?,
 		    trigger_event_id = NULLIF(?, ''),
 		    trigger_event_type = NULLIF(?, ''),
-		    origin_service_id = NULLIF(?, ''),
-		    origin_generation = NULLIF(?, 0),
 		    forked_from_run_id = NULLIF(?, ''),
 		    forked_from_point_kind = NULLIF(?, ''),
 		    forked_from_revision = NULLIF(?, 0),
@@ -144,7 +140,7 @@ func corruptOrigin(
 		WHERE run_id = ?
 	`
 	args := []any{
-		origin.Kind(), origin.EventID(), origin.EventType(), origin.ServiceID(), origin.Generation(),
+		origin.Kind(), origin.EventID(), origin.EventType(),
 		origin.SourceRunID(), origin.ForkPointKind(), origin.ForkRevision(), origin.SourceEventID(), strings.TrimSpace(runID),
 	}
 	if dialect == DialectPostgres {
@@ -153,17 +149,15 @@ func corruptOrigin(
 			SET origin_kind = $2,
 			    trigger_event_id = NULLIF($3, '')::uuid,
 			    trigger_event_type = NULLIF($4, ''),
-			    origin_service_id = NULLIF($5, '')::uuid,
-			    origin_generation = NULLIF($6, 0),
-			    forked_from_run_id = NULLIF($7, '')::uuid,
-			    forked_from_point_kind = NULLIF($8, ''),
-			    forked_from_revision = NULLIF($9, 0),
-			    forked_from_event_id = NULLIF($10, '')::uuid
+			    forked_from_run_id = NULLIF($5, '')::uuid,
+			    forked_from_point_kind = NULLIF($6, ''),
+			    forked_from_revision = NULLIF($7, 0),
+			    forked_from_event_id = NULLIF($8, '')::uuid
 			WHERE run_id = $1::uuid
 		`
 		args = []any{
-			strings.TrimSpace(runID), origin.Kind(), origin.EventID(), origin.EventType(), origin.ServiceID(),
-			origin.Generation(), origin.SourceRunID(), origin.ForkPointKind(), origin.ForkRevision(), origin.SourceEventID(),
+			strings.TrimSpace(runID), origin.Kind(), origin.EventID(), origin.EventType(),
+			origin.SourceRunID(), origin.ForkPointKind(), origin.ForkRevision(), origin.SourceEventID(),
 		}
 	}
 	_, err := db.ExecContext(ctx, query, args...)

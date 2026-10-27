@@ -87,7 +87,7 @@ func TestStandingChannelAdmissionRefusesBeforeDurableMutation(t *testing.T) {
 					BundleHash: loaded.BundleHash(), BundleIdentity: "telegram@1.0.0", PackInventoryGeneration: loaded.PackInventoryDigest,
 					RuntimeInstanceID: loaded.RuntimeInstanceID, ContextPublicationGeneration: loaded.PublicationGeneration, PlanGeneration: generation,
 				},
-				Target: channelonboarding.CandidateTarget{Selector: "ingress:coordinator:telegram", ServiceID: target.ServiceID,
+				Target: channelonboarding.CandidateTarget{Selector: "ingress:coordinator:telegram",
 					FlowPath: target.FlowPath, Alias: target.Alias, Provider: target.Provider, AdmissionGeneration: target.AdmissionPlan.Generation()},
 				Posture: channelonboarding.ActivationPosture(profile.ActivationPosture()), Ceremony: channelonboarding.IdentityCeremony(profile.IdentityCeremony()),
 				ProviderCredentialRole: profile.ProviderCredential(), SigningCredentialRole: profile.SigningCredential(), ConfirmationOperation: profile.ConfirmationOperation(),

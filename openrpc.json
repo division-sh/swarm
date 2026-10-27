@@ -15565,11 +15565,6 @@
           },
           "runtime_instance_id": {
             "$ref": "#/components/schemas/OpaqueId"
-          },
-          "target_generation": {
-            "description": "Zero is declaration-only discovery/reservation and session pairing/operator claim before publishing_activation; executable phases and connected activations require a positive exact generation.",
-            "minimum": 0,
-            "type": "integer"
           }
         },
         "required": [
@@ -15578,8 +15573,7 @@
           "pack_inventory_generation",
           "runtime_instance_id",
           "context_publication_generation",
-          "plan_generation",
-          "target_generation"
+          "plan_generation"
         ],
         "type": "object"
       },
@@ -22567,28 +22561,6 @@
             },
             "required": [
               "kind"
-            ],
-            "type": "object"
-          },
-          {
-            "additionalProperties": false,
-            "properties": {
-              "generation": {
-                "minimum": 1,
-                "type": "integer"
-              },
-              "kind": {
-                "const": "standing_generation",
-                "type": "string"
-              },
-              "service_id": {
-                "$ref": "#/components/schemas/OpaqueId"
-              }
-            },
-            "required": [
-              "kind",
-              "service_id",
-              "generation"
             ],
             "type": "object"
           },

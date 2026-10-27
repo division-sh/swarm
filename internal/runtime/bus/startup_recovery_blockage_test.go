@@ -192,9 +192,10 @@ func TestStartupRecoveryIdentifiesAsyncPublicationClaimOnBothStores(t *testing.T
 			if err := fixture.bus.SetDeliveryAuthority(authority); err != nil {
 				t.Fatal(err)
 			}
-			coordinator, err := runtimedeliverycontinuation.New(fixture.store, fixture.store, authority, generation.owner, fixture.bus, func(_ context.Context, err error) {
+			coordinator, err := runtimedeliverycontinuation.New(fixture.store, authority, generation.owner, fixture.bus, func(_ context.Context, err error) {
 				t.Errorf("asynchronous publication continuation failed: %v", err)
 			})
+
 			if err != nil {
 				t.Fatal(err)
 			}

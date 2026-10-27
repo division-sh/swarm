@@ -89,7 +89,8 @@ func TestOnboardingSelectedRequirementRefusesChangesBeforeReservation(t *testing
 			case "context":
 				candidate.Coordinate.ContextPublicationGeneration++
 			case "target":
-				candidate.Target.ServiceID = "changed-service"
+				candidate.Target.FlowPath = "changed-flow"
+				candidate.Target.Selector = "ingress:changed-flow:telegram"
 			case "role":
 				candidate.ProviderCredentialRole = "changed-role"
 			case "verb":

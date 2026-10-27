@@ -56,8 +56,8 @@ func a9NestedKeyedIngressConstruction(t *testing.T, declarationLocal bool) {
 				}
 			})
 			rt := servedTestProcessRuntime(t, process)
-			statuses, err := rt.Pipeline.ListStandingServiceStatuses(t.Context())
-			if err != nil || len(statuses) != 1 || statuses[0].FlowPath != flow {
+			statuses, err := readServedLandingRuns(t.Context(), rt)
+			if err != nil || len(statuses) != 1 || statuses[0].Scope.FlowPath != flow {
 				t.Fatalf("binding status=%+v err=%v", statuses, err)
 			}
 			runID := statuses[0].RunID

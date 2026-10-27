@@ -134,7 +134,7 @@ func proveFactoringCompiledStandingSubjects(t *testing.T, binary, backend string
 		}
 		count := 0
 		for _, run := range inventory.Runs {
-			if run.Origin.Kind == "standing_generation" {
+			if run.Origin.Kind == "deployment" {
 				count++
 			}
 		}

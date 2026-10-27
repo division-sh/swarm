@@ -90,7 +90,6 @@ type claudeAttemptProofStore interface {
 	runtimerunlifecycle.OperationOwner
 	runtimebus.ActiveAgentDescriptorLister
 	runtimepipeline.WorkflowInstancePersistenceReader
-	runtimerunlifecycle.StandingRestartDispositionReader
 	runtimebus.PreparedPublishEventReader
 	runtimebus.TargetFailureDeadLetterRecorder
 	runtimebus.RunOriginReader
@@ -793,8 +792,8 @@ func newClaudeAttemptProofEventBus(
 			DeliveryLifecycle:     backend.store,
 			ActiveAgents:          backend.store,
 			PreparedEvents:        backend.store,
-			TargetFailureRecorder: backend.store, RunOrigins: backend.store, StandingRestarts: backend.store,
-			Instances: backend.workflow, ConstructionPublications: backend.workflow,
+			TargetFailureRecorder: backend.store,
+			Instances:             backend.workflow, ConstructionPublications: backend.workflow,
 		},
 	})
 	if err != nil {
@@ -803,14 +802,14 @@ func newClaudeAttemptProofEventBus(
 	installServeTestExactAgentReadiness(t, eventBus, claudeAttemptProofAgentIdentity())
 	coordinator, err := runtimedeliverycontinuation.New(
 		backend.store,
-		backend.store,
+
 		authority,
 		workOwner,
 		eventBus,
 		func(_ context.Context, reportErr error) {
 			t.Errorf("Claude proof delivery continuation failed: %v", reportErr)
-		},
-	)
+		})
+
 	if err != nil {
 		t.Fatalf("construct Claude proof delivery coordinator: %v", err)
 	}

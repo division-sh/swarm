@@ -638,7 +638,7 @@ type workflowInstanceStore struct {
 	timerOccurrences       WorkflowTimerOccurrenceOwner
 	timerActivations       WorkflowTimerActivationPersistence
 	readiness              DynamicFlowRuntimeReadinessPersistence
-	standingServices       StandingServicePersistence
+	runPosture             RunExecutionPostureAdmission
 	decisionRoutes         WorkflowDecisionRouteOwner
 	instanceReader         WorkflowInstancePersistenceReader
 	instanceIndex          FlowInstanceIndexReader
@@ -699,7 +699,7 @@ type WorkflowPersistenceOwner interface {
 	WorkflowTimerOccurrenceOwner
 	WorkflowTimerActivationPersistence
 	DynamicFlowRuntimeReadinessPersistence
-	StandingServicePersistence
+	RunExecutionPostureAdmission
 	WorkflowDecisionRouteOwner
 	WorkflowInstancePersistenceReader
 	WorkflowEntityCollectionPersistenceReader
@@ -715,7 +715,7 @@ func NewWorkflowPersistence(owner WorkflowPersistenceOwner) WorkflowPersistence 
 		activityJournal: owner, gateRoutes: owner, timerObligations: owner,
 		engineMutations: owner, cardMutations: owner, timerOccurrences: owner,
 		fanOutObligations: owner,
-		timerActivations:  owner, readiness: owner, standingServices: owner,
+		timerActivations:  owner, readiness: owner, runPosture: owner,
 		decisionRoutes: owner, instanceReader: owner, instanceIndex: owner,
 		entityCollectionReader: owner, targetReader: owner,
 	}}
@@ -740,7 +740,7 @@ func (p WorkflowPersistence) Valid() bool {
 		p.store.timerObligations != nil && p.store.engineMutations != nil && p.store.cardMutations != nil &&
 		p.store.fanOutObligations != nil &&
 		p.store.timerOccurrences != nil && p.store.timerActivations != nil && p.store.readiness != nil &&
-		p.store.standingServices != nil && p.store.decisionRoutes != nil && p.store.instanceReader != nil &&
+		p.store.runPosture != nil && p.store.decisionRoutes != nil && p.store.instanceReader != nil &&
 		p.store.entityCollectionReader != nil && p.store.targetReader != nil && p.store.instanceIndex != nil
 }
 

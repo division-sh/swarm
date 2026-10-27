@@ -318,12 +318,11 @@ func (am *AgentManager) prepareFlowInstanceActivation(
 			EnteredStageAt:     occurredAt,
 			CreatedAt:          occurredAt,
 		},
-		Identity:                      instance,
-		Readiness:                     readinessPlan,
-		CreatingInput:                 runtimepipeline.FlowConstructionInput{EventID: triggerEventID, Input: constructor.Input()},
-		ActivationVariables:           flowActivationVars(req),
-		OccurredAt:                    occurredAt,
-		StandingGenerationReplacement: req.StandingGenerationReplacement,
+		Identity:            instance,
+		Readiness:           readinessPlan,
+		CreatingInput:       runtimepipeline.FlowConstructionInput{EventID: triggerEventID, Input: constructor.Input()},
+		ActivationVariables: flowActivationVars(req),
+		OccurredAt:          occurredAt,
 	}
 	if seed := req.ScenarioSeed; seed != nil {
 		primary, err := bundle.ResolveTestSetupPrimaryEntity(templateID, seed.EntityType)
@@ -379,7 +378,6 @@ func (am *AgentManager) prepareFlowInstanceActivation(
 		_, childPlan, err := am.prepareFlowInstanceActivation(ctx, runtimepipeline.FlowInstanceActivationRequest{
 			Context: req.Context, ContractBundle: req.ContractBundle, Instance: child,
 			TriggerEvent: req.TriggerEvent, OccurredAt: occurredAt,
-			StandingGenerationReplacement: req.StandingGenerationReplacement,
 		})
 		if err != nil {
 			return runtimepipeline.FlowInstanceActivationRequest{}, runtimepipeline.FlowInstanceActivationPlan{}, fmt.Errorf("prepare eager child %s: %w", child.TemplateID, err)

@@ -6,6 +6,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/division-sh/swarm/internal/runtime/correlation"
 	"github.com/division-sh/swarm/internal/runtime/engine"
 	"github.com/division-sh/swarm/internal/runtime/executionposture"
 )
@@ -88,7 +89,7 @@ func TestInstanceClockUnacknowledgedAdmissionCannotProjectWakeup(t *testing.T) {
 	for _, commitErr := range []error{nil, fault} {
 		activation := instanceRecoveryActivation(t)
 		standing, _ := instanceRecoveryWorkOwner(t, activation.Command.RunID)
-		lease, err := standing.Begin(t.Context())
+		lease, err := standing.Begin(correlation.WithRunID(t.Context(), activation.Command.RunID))
 		if err != nil {
 			t.Fatal(err)
 		}

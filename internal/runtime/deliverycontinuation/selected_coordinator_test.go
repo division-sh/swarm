@@ -29,7 +29,7 @@ func TestSelectedContinuationUsesExactSelectedScanAndElection(t *testing.T) {
 		}}, Exhausted: true,
 	}}}
 	dispatcher := &coordinatorTestDispatcher{dispatched: make(chan struct{}, 1)}
-	if _, err := New(store, coordinatorTestRestarts{}, selected, owner, dispatcher, nil); err == nil {
+	if _, err := New(store, selected, owner, dispatcher, nil); err == nil {
 		t.Fatal("normal constructor accepted selected authority")
 	}
 	if _, err := NewSelected(store, normal, owner, dispatcher, nil); err == nil {

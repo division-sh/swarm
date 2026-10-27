@@ -88,57 +88,33 @@ func TestChannelOnboardingCandidateCatalogRetainsExactBundleRuntimeContexts(t *t
 	}
 }
 
-func TestCandidateCatalogDiscoversDeclarationWithoutExecutableGeneration(t *testing.T) {
+func TestCandidateCatalogExactDeclarationLookupKeepsExecutionFence(t *testing.T) {
 	candidate := testCandidate(strings.Repeat("a", 64), "support")
-	candidate.Coordinate.TargetGeneration = 0
-	candidate.Target.Generation = 0
-	candidate.Target.PublicationSequence = 0
 	catalog, err := NewCandidateCatalog([]Candidate{candidate})
 	if err != nil {
-		t.Fatalf("credential-absent declaration is undiscoverable: %v", err)
+		t.Fatal(err)
 	}
-	selected, err := catalog.Resolve(CandidateSelection{Provider: candidate.Provider})
-	if err != nil || selected.Target.Generation != 0 || selected.Target.PublicationSequence != 0 || selected.Coordinate.TargetGeneration != 0 {
-		t.Fatalf("declaration selection fabricated execution: %#v, %v", selected, err)
+	if _, found := catalog.FindExactDeclaration(candidate.Provider, candidate.Interface, candidate.Coordinate, candidate.Target.Selector); !found {
+		t.Fatal("exact declaration lookup refused its own candidate")
 	}
-	if err := selected.Validate(); err == nil {
-		t.Fatal("declaration candidate granted live execution authority")
+	if _, found := catalog.FindExact(candidate.Provider, candidate.Interface, candidate.Coordinate, candidate.Target.Selector); !found {
+		t.Fatal("executable lookup lost its exact declared candidate", found)
 	}
-}
-
-func TestCandidateCatalogExactDeclarationLookupKeepsExecutionFence(t *testing.T) {
-	for _, executable := range []bool{false, true} {
-		candidate := testCandidate(strings.Repeat("a", 64), "support")
-		if !executable {
-			candidate.Coordinate.TargetGeneration, candidate.Target.Generation, candidate.Target.PublicationSequence = 0, 0, 0
+	for _, mutate := range []func(*ChannelRuntimeContextCoordinate){
+		func(c *ChannelRuntimeContextCoordinate) { c.BundleHash = "bundle-v2:sha256:" + strings.Repeat("b", 64) },
+		func(c *ChannelRuntimeContextCoordinate) { c.BundleIdentity = "foreign" },
+		func(c *ChannelRuntimeContextCoordinate) { c.PackInventoryGeneration = "foreign" },
+		func(c *ChannelRuntimeContextCoordinate) { c.RuntimeInstanceID = "foreign" },
+		func(c *ChannelRuntimeContextCoordinate) { c.ContextPublicationGeneration++ },
+	} {
+		changed := candidate.Coordinate
+		mutate(&changed)
+		if _, found := catalog.FindExactDeclaration(candidate.Provider, candidate.Interface, changed, candidate.Target.Selector); found {
+			t.Fatal("declaration lookup adopted a foreign occurrence", changed)
 		}
-		catalog, err := NewCandidateCatalog([]Candidate{candidate})
-		if err != nil {
-			t.Fatal(err)
-		}
-		if _, found := catalog.FindExactDeclaration(candidate.Provider, candidate.Interface, candidate.Coordinate, candidate.Target.Selector); !found {
-			t.Fatal("exact declaration lookup refused its own candidate")
-		}
-		if _, found := catalog.FindExact(candidate.Provider, candidate.Interface, candidate.Coordinate, candidate.Target.Selector); found != executable {
-			t.Fatal("executable lookup changed its generation requirement", executable, found)
-		}
-		for _, mutate := range []func(*ChannelRuntimeContextCoordinate){
-			func(c *ChannelRuntimeContextCoordinate) { c.BundleHash = "bundle-v2:sha256:" + strings.Repeat("b", 64) },
-			func(c *ChannelRuntimeContextCoordinate) { c.BundleIdentity = "foreign" },
-			func(c *ChannelRuntimeContextCoordinate) { c.PackInventoryGeneration = "foreign" },
-			func(c *ChannelRuntimeContextCoordinate) { c.RuntimeInstanceID = "foreign" },
-			func(c *ChannelRuntimeContextCoordinate) { c.ContextPublicationGeneration++ },
-			func(c *ChannelRuntimeContextCoordinate) { c.TargetGeneration++ },
-		} {
-			changed := candidate.Coordinate
-			mutate(&changed)
-			if _, found := catalog.FindExactDeclaration(candidate.Provider, candidate.Interface, changed, candidate.Target.Selector); found {
-				t.Fatal("declaration lookup adopted a foreign occurrence", changed)
-			}
-		}
-		if _, found := catalog.FindExactDeclaration(candidate.Provider, candidate.Interface, candidate.Coordinate, "ingress:other:telegram"); found {
-			t.Fatal("declaration lookup guessed an alternate target")
-		}
+	}
+	if _, found := catalog.FindExactDeclaration(candidate.Provider, candidate.Interface, candidate.Coordinate, "ingress:other:telegram"); found {
+		t.Fatal("declaration lookup guessed an alternate target")
 	}
 }
 
@@ -149,14 +125,10 @@ func TestSessionCandidateRequiresDeclarationNotExecutableTarget(t *testing.T) {
 	candidate.Posture = ActivationSessionConnection
 	candidate.ProviderCredentialRole, candidate.SigningCredentialRole, candidate.Target.SigningCredentialKey = "", "", ""
 	candidate.ConnectionHealth = "provider_connection"
-	candidate.Target.Generation, candidate.Target.PublicationSequence, candidate.Coordinate.TargetGeneration = 0, 0, 0
 	if _, err := NewCandidateCatalog([]Candidate{candidate}); err != nil {
 		t.Fatal("unpaired declaration is undiscoverable", err)
 	}
-	if candidate.Validate() == nil {
-		t.Fatal("unpaired declaration granted executable target authority")
-	}
-	for _, cell := range []string{"missing", "alias", "signing", "generation"} {
+	for _, cell := range []string{"missing", "alias", "signing"} {
 		t.Run(cell, func(t *testing.T) {
 			changed := candidate
 			switch cell {
@@ -166,8 +138,6 @@ func TestSessionCandidateRequiresDeclarationNotExecutableTarget(t *testing.T) {
 				changed.Target.Alias = ""
 			case "signing":
 				changed.Target.SigningCredentialKey = "not-a-session-credential"
-			case "generation":
-				changed.Target.Generation = 1
 			}
 			if _, err := NewCandidateCatalog([]Candidate{changed}); err == nil {
 				t.Fatal("session discovery accepted contradictory target evidence")
@@ -210,8 +180,6 @@ func TestCandidateCatalogResolvesOnlyExactDurableSuccessor(t *testing.T) {
 	successor := predecessor
 	successor.Coordinate.RuntimeInstanceID = "22222222-2222-4222-8222-222222222222"
 	successor.Coordinate.ContextPublicationGeneration++
-	successor.Coordinate.TargetGeneration++
-	successor.Target.Generation = successor.Coordinate.TargetGeneration
 	catalog, err := NewCandidateCatalog([]Candidate{successor})
 	if err != nil {
 		t.Fatal(err)
@@ -258,8 +226,6 @@ func TestCandidateCatalogRejectsAmbiguousDurableSuccessorOccurrences(t *testing.
 	successor := predecessor
 	successor.Coordinate.RuntimeInstanceID = "22222222-2222-4222-8222-222222222222"
 	successor.Coordinate.ContextPublicationGeneration++
-	successor.Coordinate.TargetGeneration++
-	successor.Target.Generation = successor.Coordinate.TargetGeneration
 	if _, err := NewCandidateCatalog([]Candidate{predecessor, successor}); err == nil || !strings.Contains(err.Error(), "duplicate") {
 		t.Fatalf("ambiguous durable successor error = %v", err)
 	}
@@ -274,8 +240,8 @@ func testCandidate(hashSuffix, flow string) Candidate {
 	coordinate.BundleHash = "bundle-v2:sha256:" + hashSuffix
 	return Candidate{
 		Provider: "telegram", Interface: identity, Coordinate: coordinate,
-		Target: CandidateTarget{Selector: "ingress:" + flow + ":telegram", ServiceID: "service-" + flow, FlowPath: flow, Alias: flow, Provider: "telegram", Generation: coordinate.TargetGeneration,
-			PublicationSequence: 1, AdmissionGeneration: triggergeneration.FromCanonicalBytes([]byte("catalog")), SigningCredentialKey: "telegram_signing"},
+		Target: CandidateTarget{Selector: "ingress:" + flow + ":telegram", FlowPath: flow, Alias: flow, Provider: "telegram",
+			AdmissionGeneration: triggergeneration.FromCanonicalBytes([]byte("catalog")), SigningCredentialKey: "telegram_signing"},
 		Posture: ActivationWebhookRegistration, Ceremony: CeremonyAuthenticatedTextChallenge,
 		ProviderCredentialRole: "bot_token", SigningCredentialRole: "webhook_signing", ConfirmationOperation: "deliver",
 	}

@@ -308,7 +308,6 @@ func TestWhatsAppDirectQRTerminalAndReadbackScopeFences(t *testing.T) {
 				func(s *pairingQRScope) { s.Coordinate.BundleIdentity = "source:other" },
 				func(s *pairingQRScope) { s.Coordinate.PackInventoryGeneration = "inventory:other" },
 				func(s *pairingQRScope) { s.Coordinate.PlanGeneration = foreignPlan },
-				func(s *pairingQRScope) { s.Coordinate.TargetGeneration++ },
 			} {
 				foreign := scope
 				mutate(&foreign)

@@ -3,7 +3,6 @@ package pipeline
 import (
 	"context"
 	"fmt"
-	runtimestanding "github.com/division-sh/swarm/internal/runtime/runlifecycle"
 	"strings"
 	"time"
 
@@ -12,7 +11,6 @@ import (
 	runtimecorrelation "github.com/division-sh/swarm/internal/runtime/correlation"
 	decisioncard "github.com/division-sh/swarm/internal/runtime/decisioncard"
 	runtimedelivery "github.com/division-sh/swarm/internal/runtime/deliverylifecycle"
-	runtimeeffects "github.com/division-sh/swarm/internal/runtime/effects"
 	"github.com/division-sh/swarm/internal/runtime/failures"
 	"github.com/division-sh/swarm/internal/runtime/semanticview"
 	runtimetimerobligation "github.com/division-sh/swarm/internal/runtime/timerobligation"
@@ -40,131 +38,6 @@ type StandingFlowInstancePreparationOwner interface {
 	PrepareStandingFlowInstance(context.Context, FlowInstanceActivationRequest) (bool, func() error, error)
 }
 
-type StandingTargetMutation struct {
-	Candidate  StandingServiceCandidate
-	Activation FlowInstanceActivationRequest
-}
-
-type StandingTargetMutationRequest struct {
-	Targets    []StandingTargetMutation
-	ObservedAt time.Time
-}
-
-type StandingTargetMutationResult struct {
-	Reconciliation StandingServiceReconciliation
-	Instance       runtimeflowidentity.Instance
-	Created        bool
-}
-
-func (pc *PipelineCoordinator) CommitStandingTargets(ctx context.Context, req StandingTargetMutationRequest, owner StandingFlowInstanceOwner) ([]StandingTargetMutationResult, error) {
-	results, _, err := pc.commitStandingTargets(ctx, req, owner, nil)
-	return results, err
-}
-
-func (pc *PipelineCoordinator) PrepareStandingTargets(ctx context.Context, req StandingTargetMutationRequest, owner StandingFlowInstancePreparationOwner) ([]StandingTargetMutationResult, func() error, error) {
-	return pc.commitStandingTargets(ctx, req, owner, owner)
-}
-
-func (pc *PipelineCoordinator) commitStandingTargets(ctx context.Context, req StandingTargetMutationRequest, owner StandingFlowInstanceOwner, preparation StandingFlowInstancePreparationOwner) ([]StandingTargetMutationResult, func() error, error) {
-	if pc == nil || pc.workflowStore == nil {
-		return nil, nil, fmt.Errorf("standing target mutation requires workflow persistence")
-	}
-	if owner == nil {
-		return nil, nil, fmt.Errorf("standing target mutation requires flow instance owner")
-	}
-	observedAt := req.ObservedAt.UTC()
-	if observedAt.IsZero() {
-		return nil, nil, fmt.Errorf("standing target mutation requires observed_at")
-	}
-	for _, target := range req.Targets {
-		if err := requireEagerStandingRoot(target.Activation.ContractBundle); err != nil {
-			return nil, nil, err
-		}
-	}
-	var completions []func() error
-	results := make([]StandingTargetMutationResult, 0, len(req.Targets))
-	for _, target := range req.Targets {
-		reconciliation, found, err := pc.workflowStore.LoadReconciledStandingService(ctx, target.Candidate)
-		if err != nil {
-			return nil, nil, err
-		}
-		if !found {
-			reconciliation, err = pc.workflowStore.ReconcileStandingService(ctx, target.Candidate)
-			if err != nil {
-				return nil, nil, err
-			}
-		}
-		// A fresh credential-dormant declaration has no admitted run or instance.
-		if reconciliation.RunID == "" && !reconciliation.RestartDisposition.Executable() {
-			results = append(results, StandingTargetMutationResult{Reconciliation: reconciliation})
-			continue
-		}
-		instance, err := standingGenerationConstruction(target.Activation.ContractBundle, reconciliation.FlowPath, reconciliation.RunID)
-		if err != nil {
-			return nil, nil, err
-		}
-		result := StandingTargetMutationResult{Reconciliation: reconciliation, Instance: instance}
-		if reconciliation.RestartDisposition.Executable() {
-			if err := pc.workflowStore.AdmitStandingServiceRun(ctx, reconciliation.RunID, pc.executionPosture); err != nil {
-				return nil, nil, err
-			}
-			operationCtx := runtimecorrelation.WithRunID(ctx, reconciliation.RunID)
-			operationCtx = runtimecorrelation.WithSourceArtifactFact(operationCtx, target.Candidate.Source)
-			operationCtx = runtimeeffects.WithExecutionMode(operationCtx, runtimeeffects.ExecutionMode(pc.executionPosture.RootMode()))
-			if preparation == nil {
-				if err := owner.ReconcileDynamicFlowRuntimeReadinessPlansForRun(operationCtx, observedAt); err != nil {
-					return nil, nil, err
-				}
-			}
-			activation, eager, err := standingRootActivation(target.Activation, reconciliation, instance)
-			if err != nil {
-				return nil, nil, err
-			}
-			if !eager {
-				results = append(results, result)
-				continue
-			}
-			var created bool
-			if preparation != nil {
-				var complete func() error
-				created, complete, err = preparation.PrepareStandingFlowInstance(operationCtx, activation)
-				if err == nil {
-					completions = append(completions, complete)
-				}
-			} else {
-				created, err = owner.EnsureFlowInstance(operationCtx, activation)
-			}
-			if err != nil {
-				return nil, nil, err
-			}
-			result.Created = created
-		}
-		results = append(results, result)
-	}
-	// Publish the complete binding set only after every eager tree is prepared.
-	for i := range results {
-		reconciliation := results[i].Reconciliation
-		if !reconciliation.RestartDisposition.Executable() {
-			continue
-		}
-		publicationCtx := runtimecorrelation.WithRunID(ctx, reconciliation.RunID)
-		publicationCtx = runtimecorrelation.WithSourceArtifactFact(publicationCtx, req.Targets[i].Candidate.Source)
-		sequence, err := pc.workflowStore.PublishStandingService(publicationCtx, reconciliation.ServiceID, reconciliation.RunID, reconciliation.Generation)
-		if err != nil {
-			return nil, nil, err
-		}
-		results[i].Reconciliation.PublicationSequence = sequence
-	}
-	return results, func() error {
-		for _, complete := range completions {
-			if err := complete(); err != nil {
-				return err
-			}
-		}
-		return nil
-	}, nil
-}
-
 func requireEagerStandingRoot(source semanticview.Source) error {
 	rootID := semanticview.RootExecutionFlowID(source)
 	keyless, err := StandingConstructionIsKeyless(source, rootID)
@@ -180,19 +53,6 @@ func standingGenerationConstruction(source semanticview.Source, flowID, runID st
 		return runtimeflowidentity.Instance{}, err
 	}
 	return runtimeflowidentity.StandingForGeneration(source, flowID, runID)
-}
-
-func standingRootActivation(activation FlowInstanceActivationRequest, reconciliation StandingServiceReconciliation, declaring runtimeflowidentity.Instance) (FlowInstanceActivationRequest, bool, error) {
-	instance, err := standingGenerationConstruction(activation.ContractBundle, semanticview.RootExecutionFlowID(activation.ContractBundle), reconciliation.RunID)
-	if err != nil || instance == (runtimeflowidentity.Instance{}) {
-		return activation, false, err
-	}
-	activation.Instance = instance
-	if declaring.TemplateID != instance.TemplateID {
-		activation.InitialState, activation.Bookkeeping = "", nil
-	}
-	activation.StandingGenerationReplacement = reconciliation.Generation > 1
-	return activation, true, nil
 }
 
 func (pc *PipelineCoordinator) CommitFlowInstanceTermination(ctx context.Context, req FlowInstanceTerminationRequest) (FlowInstanceTermination, error) {
@@ -380,64 +240,6 @@ func (pc *PipelineCoordinator) CommitDecision(ctx context.Context, card decision
 			return err
 		}
 	}
-}
-
-func (pc *PipelineCoordinator) ReconcileStandingService(ctx context.Context, candidate StandingServiceCandidate) (StandingServiceReconciliation, error) {
-	result, err := pc.workflowStore.ReconcileStandingService(ctx, candidate)
-	if err == nil {
-		err = pc.reconcileTimerCancellations(ctx, result.TimerCancellations)
-	}
-	return result, err
-}
-
-func (pc *PipelineCoordinator) LoadReconciledStandingService(ctx context.Context, candidate StandingServiceCandidate) (StandingServiceReconciliation, bool, error) {
-	return pc.workflowStore.LoadReconciledStandingService(ctx, candidate)
-}
-
-func (pc *PipelineCoordinator) ReconcileStandingServiceSet(ctx context.Context, candidates []StandingServiceCandidate) ([]StandingServiceReconciliation, error) {
-	results, err := pc.workflowStore.ReconcileStandingServiceSet(ctx, candidates)
-	if err == nil {
-		for _, result := range results {
-			if err = pc.reconcileTimerCancellations(ctx, result.TimerCancellations); err != nil {
-				break
-			}
-		}
-	}
-	return results, err
-}
-
-func (pc *PipelineCoordinator) SuspendStandingService(ctx context.Context, op StandingServiceOperation) (StandingServiceReconciliation, error) {
-	result, err := pc.workflowStore.SuspendStandingService(ctx, op)
-	if err == nil {
-		err = pc.reconcileTimerCancellations(ctx, result.TimerCancellations)
-	}
-	return result, err
-}
-
-func (pc *PipelineCoordinator) ResumeStandingService(ctx context.Context, op StandingServiceOperation) (StandingServiceReconciliation, error) {
-	op.ExecutionPosture = pc.executionPosture
-	return pc.workflowStore.ResumeStandingService(ctx, op)
-}
-
-func (pc *PipelineCoordinator) ResetStandingService(ctx context.Context, op StandingServiceOperation) (StandingServiceReconciliation, error) {
-	op.ExecutionPosture = pc.executionPosture
-	result, err := pc.workflowStore.ResetStandingService(ctx, op)
-	if err == nil {
-		err = pc.reconcileTimerCancellations(ctx, result.TimerCancellations)
-	}
-	return result, err
-}
-
-func (pc *PipelineCoordinator) PublishStandingService(ctx context.Context, serviceID, runID string, generation int64) (int64, error) {
-	return pc.workflowStore.PublishStandingService(ctx, serviceID, runID, generation)
-}
-
-func (pc *PipelineCoordinator) StandingRunRestartDisposition(ctx context.Context, runID string) (runtimestanding.StandingRestartDisposition, error) {
-	return pc.workflowStore.StandingRunRestartDisposition(ctx, runID)
-}
-
-func (pc *PipelineCoordinator) ListStandingServiceStatuses(ctx context.Context) ([]StandingServiceStatus, error) {
-	return pc.workflowStore.ListStandingServiceStatuses(ctx)
 }
 
 func (pc *PipelineCoordinator) RegisterDeliveryContinuationSignal(authority runtimedelivery.ExecutionAuthority, signal func()) (*DeliveryContinuationSignalRegistration, error) {

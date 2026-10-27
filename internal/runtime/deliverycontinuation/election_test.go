@@ -52,7 +52,7 @@ func TestCoordinatorCarrierWinsBeforeScanDispatch(t *testing.T) {
 		defer func() { dispatched <- struct{}{} }()
 		return AlreadyOwned()
 	})
-	c, err = New(store, coordinatorTestRestarts{}, authority, owner, dispatcher, nil)
+	c, err = New(store, authority, owner, dispatcher, nil)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -86,7 +86,7 @@ func TestCoordinatorCarrierWinsBeforeScanDispatch(t *testing.T) {
 func TestCoordinatorElectionPreservesHandoffAttemptAndTerminalEvidence(t *testing.T) {
 	authority, owner, cleanup := coordinatorTestAuthorityAndOwner(t)
 	defer cleanup()
-	c, err := New(&coordinatorTestStore{}, coordinatorTestRestarts{}, authority, owner, &coordinatorTestDispatcher{}, nil)
+	c, err := New(&coordinatorTestStore{}, authority, owner, &coordinatorTestDispatcher{}, nil)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -167,7 +167,7 @@ func TestCoordinatorRetirementSettlesPredecessorWithoutAdmittingSuccessorWork(t 
 			authority, owner, cleanup := coordinatorTestAuthorityAndOwner(t)
 			defer cleanup()
 			newOwner := func(authority runtimedelivery.ExecutionAuthority) *Coordinator {
-				c, err := New(&coordinatorTestStore{}, coordinatorTestRestarts{}, authority, owner, &coordinatorTestDispatcher{}, nil)
+				c, err := New(&coordinatorTestStore{}, authority, owner, &coordinatorTestDispatcher{}, nil)
 				if err != nil {
 					t.Fatal(err)
 				}
@@ -248,7 +248,7 @@ func TestCoordinatorSynchronousDeferralDoesNotScheduleItsOwnRetry(t *testing.T) 
 		}
 		return Deferred(DispatchWakeAgentRouteLifecycle)
 	})
-	c, err = New(store, coordinatorTestRestarts{}, authority, owner, dispatcher, nil)
+	c, err = New(store, authority, owner, dispatcher, nil)
 	if err != nil {
 		t.Fatal(err)
 	}

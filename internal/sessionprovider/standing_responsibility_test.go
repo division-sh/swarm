@@ -37,7 +37,7 @@ func TestWhatsAppStandingResponsibilityRequiresRealConfirmationBothStores(t *tes
 			if err != nil {
 				t.Fatal(err)
 			}
-			if current, err := f.selected.SessionStandingBindingCurrent(f.ctx, f.operation); err != nil || !current || f.operation.Coordinate.TargetGeneration != 0 {
+			if current, err := f.selected.SessionStandingBindingCurrent(f.ctx, f.operation); err != nil || !current {
 				t.Fatal("confirmed runless responsibility was not admitted", current, err)
 			}
 			structural := operatorchannel.ProviderAuthority{Kind: operatorchannel.ProviderAuthoritySession, Session: f.operation.SessionAccount}

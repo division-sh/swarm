@@ -171,8 +171,8 @@ func TestWhatsAppCapturedReceiptAdmissionMatrixBothStores(t *testing.T) {
 						eventBus = f.publicationBus(t)
 						prepared, err = prepareSessionBusinessPublication(f.ctx, admitted, f.trigger, "whatsapp", eventBus,
 							f.selected.(sessionBusinessStore), executionposture.Live, f.channel)
-						if err != nil || prepared.command.Request.ExpectedPublicationSequence == admitted.PublicationSequence() {
-							t.Fatal("recovery lost the distinction between frozen evidence and current fencing", err)
+						if err != nil {
+							t.Fatal("recover immutable publication request", err)
 						}
 					}
 					if path == "business" {

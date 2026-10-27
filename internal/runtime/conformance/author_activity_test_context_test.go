@@ -134,7 +134,6 @@ func conformanceManagerPersistenceRoles(selected any, eventBus *runtimebus.Event
 	roles.EventExistence, _ = selected.(runtimemanager.EventExistenceReader)
 	roles.DirectiveOperations, _ = selected.(runtimeagentcontrol.DirectiveOperationStore)
 	roles.DirectiveTargets, _ = selected.(runtimemanager.AgentDirectiveRunTargetResolver)
-	roles.StandingRestarts, _ = selected.(runtimerunlifecycle.StandingRestartDispositionReader)
 	return roles
 }
 
@@ -322,7 +321,6 @@ type conformanceDurableEventBusStore interface {
 	runtimebus.PreparedPublishEventReader
 	runtimebus.TargetFailureDeadLetterRecorder
 	runtimebus.RunOriginReader
-	runtimerunlifecycle.StandingRestartDispositionReader
 	PipelineObligations() runtimepipelineobligation.Store
 }
 
@@ -338,7 +336,7 @@ func conformanceDurableEventBusDependencies(store conformanceDurableEventBusStor
 		ConstructionPublications: store,
 		ReplyContext:             store, RunLifecycle: store, DeliveryLifecycle: store,
 		ActiveAgents: store, PreparedEvents: store,
-		TargetFailureRecorder: store, RunOrigins: store, StandingRestarts: store, EmitFeedback: store,
+		TargetFailureRecorder: store, EmitFeedback: store,
 	}
 }
 

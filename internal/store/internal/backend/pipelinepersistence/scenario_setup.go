@@ -267,7 +267,7 @@ func validateScenarioConstruction(ctx context.Context, req runtimepipeline.Scena
 	if plan.Readiness.RunID != req.RunID || plan.Readiness.BundleHash != fact.BundleHash() ||
 		plan.Identity.InstanceID != req.RunID || plan.Identity.InstancePath != req.RunID || plan.Identity.EntityID != req.RunID ||
 		plan.Identity.ParentEntityID != "" || plan.Identity.ParentRoute.FlowID != "" ||
-		plan.CreatingInput != (runtimepipeline.FlowConstructionInput{}) || plan.StandingGenerationReplacement ||
+		plan.CreatingInput != (runtimepipeline.FlowConstructionInput{}) ||
 		!plan.OccurredAt.Equal(req.CreatedAt) {
 		return nil, fmt.Errorf("scenario construction lost its exact no-argument run owner")
 	}

@@ -134,7 +134,7 @@ func TestRegistrationSnapshotInvalidatesChangedSameKeyBeforeReconcile(t *testing
 	owner := newRegistrationSnapshotOwner()
 	pair := RegistrationPair{
 		BindingID: "binding",
-		Target:    RegistrationTarget{Selector: "ingress:support:telegram", Alias: "support", Provider: "telegram", Generation: 1},
+		Target:    RegistrationTarget{Selector: "ingress:support:telegram", Alias: "support", Provider: "telegram"},
 	}
 	const slotID = "provider:slot:binding"
 	owner.replaceSelected([]admittedPair{{pair: pair, slotID: slotID}})
@@ -149,7 +149,7 @@ func TestRegistrationSnapshotInvalidatesChangedSameKeyBeforeReconcile(t *testing
 	owner.publishState(key, state)
 
 	changed := pair
-	changed.Target.Generation = 2
+	changed.Target.BundleHash = "replacement-source"
 	owner.replaceSelected([]admittedPair{{pair: changed, slotID: slotID}})
 	invalidated, ok := owner.state(registrationSelectionKey(changed, slotID))
 	if !ok || invalidated.SelectedBase != "" || invalidated.Failure == "" || invalidated.LastVerified == nil {

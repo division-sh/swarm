@@ -98,7 +98,6 @@ func TestServedWhatsAppLaunchedProcessDeathBothStores(t *testing.T) {
 				var restored channelonboarding.Result
 				requireServedJSONRPCResult(t, endpoint, "channel.onboarding_get", map[string]any{"operation_id": ready.Operation.OperationID}, &restored)
 				if restored.Readiness == nil || !restored.Readiness.Ready || restored.Operation.BindingRevision != ready.Operation.BindingRevision ||
-					restored.Operation.Coordinate.TargetGeneration != ready.Operation.Coordinate.TargetGeneration ||
 					restored.Operation.Coordinate.RuntimeInstanceID == ready.Operation.Coordinate.RuntimeInstanceID {
 					t.Fatal("process death replaced original enabled authority or lost readiness", restored)
 				}

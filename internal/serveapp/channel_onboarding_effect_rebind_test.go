@@ -19,7 +19,7 @@ func TestChannelEffectRebindDispositionMatrix(t *testing.T) {
 		BundleHash:     "bundle-v2:sha256:" + strings.Repeat("a", 64),
 		BundleIdentity: "bundle:test@sha256:effect-rebind", PackInventoryGeneration: "sha256:effect-rebind-inventory",
 		RuntimeInstanceID: uuid.NewString(), ContextPublicationGeneration: 7,
-		PlanGeneration: generation, TargetGeneration: 11,
+		PlanGeneration: generation,
 	}
 	op := channelonboarding.Operation{
 		OperationID: uuid.NewString(), Revision: 9, Coordinate: coordinate,
@@ -34,7 +34,7 @@ func TestChannelEffectRebindDispositionMatrix(t *testing.T) {
 		BundleHash: coordinate.BundleHash, BundleIdentity: coordinate.BundleIdentity,
 		PackInventoryGeneration: coordinate.PackInventoryGeneration, RuntimeInstanceID: coordinate.RuntimeInstanceID,
 		ContextPublicationGeneration: coordinate.ContextPublicationGeneration,
-		PlanGeneration:               coordinate.PlanGeneration, TargetGeneration: coordinate.TargetGeneration,
+		PlanGeneration:               coordinate.PlanGeneration,
 	}
 
 	tests := []struct {
@@ -54,7 +54,7 @@ func TestChannelEffectRebindDispositionMatrix(t *testing.T) {
 		{name: "confirmation terminal success", outcome: channelConfirmationOutcome(base, op.ConfirmationOperationID, runtimeeffects.StateSettled, true), wantRetry: true},
 		{name: "contradictory missing provenance", outcome: func() runtimeeffects.ChannelOnboardingEffectOutcome {
 			changed := channelEffectOutcomeWithState(base, runtimeeffects.StateSettled, true)
-			changed.TargetGeneration = 0
+			changed.ContextPublicationGeneration = 0
 			return changed
 		}(), wantErr: true},
 	}

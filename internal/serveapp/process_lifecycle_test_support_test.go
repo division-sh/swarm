@@ -28,6 +28,7 @@ import (
 	runtimeinbound "github.com/division-sh/swarm/internal/runtime/inboundpublication"
 
 	runtimepipeline "github.com/division-sh/swarm/internal/runtime/pipeline"
+	"github.com/division-sh/swarm/internal/runtime/runbundle"
 	"github.com/division-sh/swarm/internal/runtime/runlifecycle"
 	"github.com/division-sh/swarm/internal/runtime/semanticview"
 	workspace "github.com/division-sh/swarm/internal/runtime/workspace"
@@ -249,21 +250,37 @@ func newProcessIngressEventStore(t testing.TB, source semanticview.Source, runID
 	if entity, declared := entityruntime.ResolveForFlow(source, flowID); declared {
 		header.EntityType = entity.EntityType
 	}
-	origin, err := runlifecycle.StandingGenerationRunOrigin(runtimeflowidentity.StandingServiceID(flowID), 1)
-	if err != nil {
-		t.Fatal(err)
-	}
-	run := runlifecycle.Snapshot{RunID: runID, State: runlifecycle.StateRunning, Origin: origin, BundleHash: fact.BundleHash(), StartedAt: at}
+	run := runlifecycle.Snapshot{RunID: runID, State: runlifecycle.StateLive, Origin: runlifecycle.DeploymentRunOrigin(), BundleHash: fact.BundleHash(), StartedAt: at}
 	receipt := runtimepipeline.FlowConstructionPublicationEvidence{Identity: identity, WorkflowVersion: header.WorkflowVersion, BundleHash: fact.BundleHash()}
 	readiness := runtimepipeline.DynamicFlowRuntimeReadiness{
 		Plan:            runtimepipeline.DynamicFlowRuntimeReadinessPlan{Identity: identity, RunID: runID, BundleHash: fact.BundleHash(), WorkflowVersion: source.WorkflowVersion(), ExecutionMode: executionmode.Live},
-		OwningRunSource: fact, RunStatus: "running", InstanceStatus: "active",
+		OwningRunSource: fact, RunStatus: string(run.State), InstanceStatus: "active",
 	}
 	observed, err := runtimepipeline.AdmitNativeFlowInstanceObservation(request, header, run, 1, receipt, readiness)
 	if err != nil {
 		t.Fatal(err)
 	}
 	return &processIngressEventStore{observation: observed}
+}
+
+func (s *processIngressEventStore) LoadRunBundleAvailability(ctx context.Context, runID string) (runbundle.Availability, error) {
+	if err := ctx.Err(); err != nil {
+		return runbundle.Availability{}, err
+	}
+	if !s.observation.Valid() || s.observation.Owner().RunID != runID {
+		return runbundle.Availability{}, runbundle.ErrRunNotFound
+	}
+	return runbundle.Availability{RunID: runID, Status: string(s.observation.RunState()), BundleHash: s.observation.SourceFact().BundleHash(), SourceArtifactPresent: true}, nil
+}
+
+func (s *processIngressEventStore) LoadLandingRun(ctx context.Context, scope runlifecycle.LiveRunScope) (runlifecycle.LandingRun, bool, error) {
+	if err := ctx.Err(); err != nil {
+		return runlifecycle.LandingRun{}, false, err
+	}
+	if !s.observation.Valid() || s.observation.Identity().TemplateID != scope.FlowPath {
+		return runlifecycle.LandingRun{}, false, nil
+	}
+	return runlifecycle.LandingRun{LiveRun: runlifecycle.LiveRun{RunID: s.observation.Owner().RunID, Scope: scope, Source: s.observation.SourceFact()}, State: s.observation.RunState()}, true, nil
 }
 
 func (s *processIngressEventStore) LookupFlowInstance(ctx context.Context, request runtimepipeline.FlowInstanceLookupRequest) (runtimepipeline.FlowInstanceObservation, bool, error) {

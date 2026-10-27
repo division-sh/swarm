@@ -214,7 +214,7 @@ func inspectVerifyRecoverySnapshot(ctx context.Context, snapshot *storeselected.
 		}
 		_, err = runtime.InspectStartupRecoveryAdmission(ctx, runtime.StartupRecoveryReadRequest{
 			SourceArtifact: fact, RecoveryOnStartup: cfg.Config.Runtime.RecoveryOnStartup,
-			ObservedAt: time.Now().UTC(), Delivery: snapshot, Timers: snapshot, StandingRestarts: snapshot,
+			ObservedAt: time.Now().UTC(), Delivery: snapshot, Timers: snapshot, FlowRuns: snapshot,
 			ReadManagerState: func(ctx context.Context) (manager.RecoverableStateSnapshot, error) {
 				return manager.InspectRecoverableStateSnapshot(ctx, fact, snapshot)
 			},

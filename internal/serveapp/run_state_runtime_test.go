@@ -30,7 +30,6 @@ import (
 	llmselection "github.com/division-sh/swarm/internal/runtime/llm/selection"
 	runtimemanager "github.com/division-sh/swarm/internal/runtime/manager"
 	runtimepipeline "github.com/division-sh/swarm/internal/runtime/pipeline"
-	runtimerunlifecycle "github.com/division-sh/swarm/internal/runtime/runlifecycle"
 	"github.com/division-sh/swarm/internal/runtime/semanticview"
 	"github.com/division-sh/swarm/internal/runtime/startupownership"
 	"github.com/division-sh/swarm/internal/store"
@@ -168,8 +167,8 @@ func newRunStatusEventBus(t *testing.T, pg *store.PostgresStore, runID string, w
 			ReplyContext: pg, RunLifecycle: pg, DeliveryLifecycle: pg,
 
 			ActiveAgents: pg, PreparedEvents: pg,
-			TargetFailureRecorder: pg, RunOrigins: pg, StandingRestarts: pg,
-			Instances: workflow, ConstructionPublications: workflow,
+			TargetFailureRecorder: pg,
+			Instances:             workflow, ConstructionPublications: workflow,
 		}, ReceiverExecution: eventreceiver.NormalExecution(),
 	})
 	if err != nil {
@@ -239,7 +238,6 @@ func publishRunStatusExistingRootEvent(t *testing.T, bus *runtimebus.EventBus, s
 func startRunStatusReceiverDeliveries(t *testing.T, pg interface {
 	agentfixture.Store
 	runtimedelivery.Store
-	runtimerunlifecycle.StandingRestartDispositionReader
 }, bus *runtimebus.EventBus, workOwner *worklifetime.RuntimeOccurrence, source runtimecorrelation.SourceArtifactFact, identity agentidentity.Identity) {
 	t.Helper()
 	ctx := runStatusAuthorActivityContext(source)
@@ -281,9 +279,10 @@ func startRunStatusReceiverDeliveries(t *testing.T, pg interface {
 	if err := bus.SetDeliveryAuthority(authority); err != nil {
 		t.Fatalf("bind run-status publication to receiver generation: %v", err)
 	}
-	coordinator, err := deliverycontinuation.New(pg, pg, authority, workOwner, bus, func(_ context.Context, err error) {
+	coordinator, err := deliverycontinuation.New(pg, authority, workOwner, bus, func(_ context.Context, err error) {
 		t.Errorf("run-status delivery continuation: %v", err)
 	})
+
 	if err != nil {
 		t.Fatalf("construct run-status delivery coordinator: %v", err)
 	}
