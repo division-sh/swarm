@@ -14,6 +14,7 @@ import (
 
 	"github.com/division-sh/swarm/internal/operatorchannel"
 	runtimecredentials "github.com/division-sh/swarm/internal/runtime/credentials"
+	"github.com/division-sh/swarm/internal/runtime/runlifecycle"
 	"github.com/division-sh/swarm/internal/sessionprovider/authority"
 	"github.com/division-sh/swarm/internal/sourceartifact"
 	"github.com/google/uuid"
@@ -188,6 +189,7 @@ type ServiceOptions struct {
 	Activations     ActivationRefresher
 	Confirmation    ConfirmationDispatcher
 	Readiness       ReadinessProjector
+	LandingRuns     runlifecycle.LandingRunReader
 	Sessions        SessionBootstrapOwner
 	Now             func() time.Time
 	Secret          func() (string, error)
@@ -206,6 +208,7 @@ type Service struct {
 	confirmation    ConfirmationDispatcher
 	effects         EffectRebindReconciler
 	readiness       ReadinessProjector
+	landingRuns     runlifecycle.LandingRunReader
 	sessions        SessionBootstrapOwner
 	now             func() time.Time
 	secret          func() (string, error)
@@ -287,7 +290,7 @@ func NewService(opts ServiceOptions) (*Service, error) {
 		deployment: opts.Deployment, operatorAccount: operatorAccount,
 		sourceArtifacts: opts.SourceArtifacts,
 		store:           opts.Store, identities: opts.Identities, credentials: opts.Credentials, catalog: opts.Catalog,
-		activations: opts.Activations, confirmation: opts.Confirmation, effects: effects, readiness: opts.Readiness, now: opts.Now, secret: opts.Secret,
+		activations: opts.Activations, confirmation: opts.Confirmation, effects: effects, readiness: opts.Readiness, landingRuns: opts.LandingRuns, now: opts.Now, secret: opts.Secret,
 		sessions:    opts.Sessions,
 		testBarrier: opts.TestBarrier,
 	}, nil
@@ -885,7 +888,11 @@ func (s *Service) ReconcileLocal(ctx context.Context) error {
 		for step := 0; step < 5; step++ {
 			switch op.Phase {
 			case PhasePreparing:
-				admissions, err := s.admitCredentials(ctx, op, candidate, "", false)
+				admitted, err := s.targetHasLandingRun(ctx, candidate)
+				if err != nil {
+					return err
+				}
+				admissions, err := s.admitCredentials(ctx, op, candidate, "", admitted)
 				var required *CredentialRequiredError
 				if errors.As(err, &required) {
 					step = 5
@@ -945,10 +952,15 @@ func (s *Service) ReconcileLocal(ctx context.Context) error {
 				}
 			case PhaseAwaitingOperatorConfirmation, PhasePublishingActivation:
 				if op.Phase == PhaseAwaitingOperatorConfirmation && op.AccountConnection() && op.IdentityOperationID == "" {
-					// Startup restores transport before admitting the execution grant.
-					// Recover performs the new source's target admission afterward.
-					step = 5
-					continue
+					admitted, err := s.targetHasLandingRun(ctx, candidate)
+					if err != nil {
+						return err
+					}
+					if !admitted {
+						// Restore transport before admitting the execution grant.
+						step = 5
+						continue
+					}
 				}
 				if op.IdentityOperationID != "" {
 					identityOp, err := s.currentIdentityOperation(ctx, op.IdentityOperationID)
@@ -1080,6 +1092,16 @@ func (s *Service) recoverOperation(ctx context.Context, id string, restoreOnly b
 		// execute the retained declaration's historical business generation.
 		return nil
 	}
+	accountTargetPending := op.AccountConnection() && op.IdentityOperationID == "" && op.Phase == PhaseAwaitingOperatorConfirmation
+	if !accountTargetPending && (op.Phase == PhasePreparing || op.Phase.RequiresExecutableTarget(op.Posture)) {
+		admitted, err := s.targetHasLandingRun(ctx, candidate)
+		if err != nil {
+			return err
+		}
+		if !admitted {
+			return nil
+		}
+	}
 	if _, err := s.driveLocked(ctx, op, candidate, "", false); err != nil {
 		var credentialRequired *CredentialRequiredError
 		if errors.As(err, &credentialRequired) {
@@ -1088,6 +1110,18 @@ func (s *Service) recoverOperation(ctx context.Context, id string, restoreOnly b
 		return fmt.Errorf("recover channel onboarding %s: %w", op.OperationID, err)
 	}
 	return nil
+}
+
+func (s *Service) targetHasLandingRun(ctx context.Context, candidate Candidate) (bool, error) {
+	if s.landingRuns == nil {
+		return false, fmt.Errorf("channel recovery requires the native landing-run reader")
+	}
+	landing, found, err := s.landingRuns.LoadLandingRun(ctx, runlifecycle.LiveRunScope{FlowPath: candidate.Target.FlowPath})
+	if err != nil || !found {
+		return false, err
+	}
+	return landing.Source.BundleHash() == candidate.Coordinate.BundleHash &&
+		(landing.State == runlifecycle.StateLive || landing.State == runlifecycle.StatePaused), nil
 }
 
 func (s *Service) recoverTerminalCredentials(ctx context.Context, op Operation) error {

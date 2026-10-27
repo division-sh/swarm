@@ -1575,6 +1575,11 @@ func buildRuntimeComposition(ctx context.Context, req runtimeCompositionRequest)
 			return rejectWebhookPrebindingWithoutPublicIngress(snapshot)
 		}
 	}
+	landingRuns, ok := channelOnboardingStore.(runtimerunlifecycle.LandingRunReader)
+	if !ok {
+		presenter.fail(20, "channel_onboarding", fmt.Errorf("selected store does not provide the native landing-run reader"))
+		return 1
+	}
 	connectedChannelReadiness := &serveConnectedChannelReadiness{
 		manager: runtimeContextManager, store: channelOnboardingStore, identities: operatorChannels,
 		native:      stores.ChannelNative(),
@@ -1588,7 +1593,7 @@ func buildRuntimeComposition(ctx context.Context, req runtimeCompositionRequest)
 		Catalog: func() (*channelonboarding.CandidateCatalog, error) {
 			return serveChannelOnboardingCatalog(runtimeContextManager)
 		},
-		Activations: channelActivationRefresher, Confirmation: confirmationDispatcher, Readiness: connectedChannelReadiness,
+		Activations: channelActivationRefresher, Confirmation: confirmationDispatcher, Readiness: connectedChannelReadiness, LandingRuns: landingRuns,
 		Now: opts.TestChannelOnboardingNow, TestBarrier: opts.TestChannelOnboardingBarrier,
 	})
 	if err != nil {
@@ -1819,7 +1824,7 @@ func buildRuntimeComposition(ctx context.Context, req runtimeCompositionRequest)
 			presenter.fail(22, "public_ingress", snapshotErr)
 			return 1
 		}
-		selection, selectionErr := resolveServeRegistrationPairs(snapshot, manager)
+		selection, selectionErr := resolveServeRegistrationPairs(ctx, snapshot, manager)
 		if selectionErr == nil {
 			initialRegistrationPairs = append(initialRegistrationPairs, selection.Pairs...)
 			selection.Release()
