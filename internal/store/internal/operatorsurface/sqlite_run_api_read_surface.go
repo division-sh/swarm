@@ -290,25 +290,16 @@ func sqliteRunHeaderSelectSQL() string {
 	return `
 SELECT
 	r.run_id,
+	COALESCE(r.flow_path, ''),
 	lower(COALESCE(r.status, '')),
 	COALESCE(r.bundle_hash, ''),
 	COALESCE(r.origin_kind, ''),
 	COALESCE(r.trigger_event_id, ''),
 	COALESCE(r.trigger_event_type, ''),
-	COALESCE(r.origin_service_id, ''),
-	COALESCE(r.origin_generation, 0),
 	COALESCE(r.forked_from_run_id, ''),
 	COALESCE(r.forked_from_point_kind, ''),
 	COALESCE(r.forked_from_revision, 0),
 	COALESCE(r.forked_from_event_id, ''),
-	(SELECT COUNT(*) FROM standing_service_generations ssg WHERE ssg.run_id = r.run_id),
-	(
-		SELECT COUNT(*)
-		FROM standing_service_generations ssg
-		WHERE ssg.run_id = r.run_id
-		  AND ssg.service_id = r.origin_service_id
-		  AND ssg.generation = r.origin_generation
-	),
 	COALESCE((SELECT COUNT(DISTINCT es.entity_id) FROM entity_state es WHERE es.run_id = r.run_id), 0),
 	r.event_count,
 	r.started_at,
@@ -326,24 +317,20 @@ func scanSQLiteRunHeader(row runHeaderScanner) (operatorread.RunHeader, error) {
 	var startedRaw, endedRaw any
 	var failureRaw any
 	var bundleHash string
-	var originKind, eventID, eventType, serviceID, sourceRunID, forkPointKind, sourceEventID string
-	var generation, forkRevision int64
-	var standingRelationCount, matchingStandingRelationCount int
+	var originKind, eventID, eventType, sourceRunID, forkPointKind, sourceEventID string
+	var forkRevision int64
 	if err := row.Scan(
 		&header.RunID,
+		&header.FlowPath,
 		&header.Status,
 		&bundleHash,
 		&originKind,
 		&eventID,
 		&eventType,
-		&serviceID,
-		&generation,
 		&sourceRunID,
 		&forkPointKind,
 		&forkRevision,
 		&sourceEventID,
-		&standingRelationCount,
-		&matchingStandingRelationCount,
 		&header.EntityCount,
 		&header.EventCount,
 		&startedRaw,
@@ -368,15 +355,10 @@ func scanSQLiteRunHeader(row runHeaderScanner) (operatorread.RunHeader, error) {
 	}
 	header.Status = strings.ToLower(strings.TrimSpace(header.Status))
 	header.Origin, err = runtimerunlifecycle.DecodeRunOrigin(
-		originKind, eventID, eventType, serviceID, generation, sourceRunID, forkPointKind, forkRevision, sourceEventID,
+		originKind, eventID, eventType, sourceRunID, forkPointKind, forkRevision, sourceEventID,
 	)
 	if err != nil {
 		return operatorread.RunHeader{}, fmt.Errorf("run %s origin: %w", header.RunID, err)
-	}
-	if err := validateRunHeaderStandingRelation(
-		header.RunID, header.Origin, standingRelationCount, matchingStandingRelationCount,
-	); err != nil {
-		return operatorread.RunHeader{}, err
 	}
 	header.ContinuedAsRunID = strings.TrimSpace(header.ContinuedAsRunID)
 	header.ControlReason = strings.TrimSpace(header.ControlReason)

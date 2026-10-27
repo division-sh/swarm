@@ -34,9 +34,6 @@ func (a CompiledActivation) Validate() error {
 	if err := a.Coordinate.ValidateContext(); err != nil {
 		return err
 	}
-	if a.Plan.RegistrationTarget() != "" && a.Coordinate.TargetGeneration == 0 {
-		return fmt.Errorf("registered channel activation requires an exact target generation")
-	}
 	generation, err := a.Plan.PlanGeneration()
 	if err != nil {
 		return err

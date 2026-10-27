@@ -51,7 +51,7 @@ func TestServedClockActiveDowntimeAndRetainedSourceBothStores(t *testing.T) {
 				setServeRuntimeRecovery(t, opts.ConfigPath, false, true)
 				first, served := start()
 				rt := servedTestProcessRuntime(t, first)
-				statuses, err := rt.Pipeline.ListStandingServiceStatuses(t.Context())
+				statuses, err := readServedLandingRuns(t.Context(), rt)
 				if err != nil || len(statuses) != 1 {
 					t.Fatalf("initial clock generation=%+v err=%v", statuses, err)
 				}

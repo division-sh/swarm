@@ -19,7 +19,6 @@ import (
 	"github.com/division-sh/swarm/internal/operatorchannel"
 	"github.com/division-sh/swarm/internal/packs"
 	"github.com/division-sh/swarm/internal/providertriggers"
-	"github.com/division-sh/swarm/internal/runtime/core/flowidentity"
 	"github.com/division-sh/swarm/internal/runtime/core/worklifetime"
 	"github.com/division-sh/swarm/internal/runtime/correlation"
 	credentials "github.com/division-sh/swarm/internal/runtime/credentials"
@@ -87,7 +86,7 @@ func newRuntimeBootstrapFixture(t *testing.T, backend string) *runtimeBootstrapF
 		Coordinate: channelonboarding.ChannelRuntimeContextCoordinate{BundleHash: source.BundleHash(), BundleIdentity: "bootstrap-fixture",
 			PackInventoryGeneration: "sha256:bootstrap-fixture", RuntimeInstanceID: runtimeID, ContextPublicationGeneration: 1, PlanGeneration: generation},
 		Target: channelonboarding.CandidateTarget{Selector: "ingress:.:whatsapp", FlowPath: ".", Alias: "whatsapp", Provider: "whatsapp",
-			ServiceID: flowidentity.StandingServiceID("."), AdmissionGeneration: catalog.Generation()},
+			AdmissionGeneration: catalog.Generation()},
 		Posture: channelonboarding.ActivationSessionConnection, Ceremony: channelonboarding.CeremonyAuthenticatedTextChallenge,
 		ConfirmationOperation: "deliver", ConnectionHealth: "provider_connection"}
 	// Database/spec construction is not part of the peer's bounded socket
@@ -377,7 +376,7 @@ func TestWhatsAppPublicBootstrapReservesBeforeQRBothStores(t *testing.T) {
 				t.Fatal("public bootstrap failed", response.Body.String())
 			}
 			rows, err := f.store.ListChannelOnboardingOperations(f.ctx)
-			if err != nil || len(rows) != 1 || rows[0].Phase != channelonboarding.PhaseActivatingProvider || rows[0].Coordinate.TargetGeneration != 0 ||
+			if err != nil || len(rows) != 1 || rows[0].Phase != channelonboarding.PhaseActivatingProvider ||
 				len(rows[0].CredentialReservations) != 0 || rows[0].IdentityOperationID != "" || rows[0].ActivationRevision != 0 {
 				t.Fatal("public bootstrap invented credential, identity or business authority", rows, err)
 			}

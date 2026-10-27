@@ -406,7 +406,6 @@ type c4CreationCrashRecord struct {
 	BundleHash  string
 	EventID     string
 	SourceRunID string
-	FlowPath    string
 	At          time.Time
 	ForkPoint   runfork.RunForkPoint
 	Deployment  *bus.DeploymentRunCreationCommand
@@ -586,7 +585,7 @@ func TestC4F35CreationCommitSIGKILLReopenBothStores(t *testing.T) {
 		return
 	}
 	for _, backend := range []string{"sqlite", "postgres"} {
-		for _, origin := range []string{"event", "deployment", "fork", "standing"} {
+		for _, origin := range []string{"event", "deployment", "fork"} {
 			t.Run(backend+"/"+origin, func(t *testing.T) {
 				location := filepath.Join(t.TempDir(), "c4-creation.db")
 				if backend == "postgres" {
@@ -793,19 +792,6 @@ func c4RunCreationCrashChild(t *testing.T) {
 				t.Fatal(err)
 			}
 		}
-	case "standing":
-		record.FlowPath, record.EventID = "c4-crash-standing", ""
-		candidate := pipeline.StandingServiceCandidate{BindingEnabled: true, ServiceID: flowidentity.StandingServiceID(record.FlowPath), FlowPath: record.FlowPath, Source: sourceartifactfixture.Fact()}
-		record.RunID = flowidentity.StandingGenerationRunID(candidate.ServiceID, 1)
-		ctx = testAuthorActivityRuntimeContext()
-		ctx = originalStoreFixtureContext(t, ctx, fixture.store)
-		workflow := newWorkflowTestCoordinator(t, fixture.db, pipeline.NewWorkflowPersistence(fixture.store.(workflowTestSelectedStore)), fixture.store.(workflowTestSelectedStore))
-		create = func() {
-			arm()
-			if _, err := workflow.ReconcileStandingService(ctx, candidate); err != nil {
-				t.Fatal(err)
-			}
-		}
 	default:
 		t.Fatalf("unknown creation origin %q", origin)
 	}
@@ -849,18 +835,6 @@ func c4ReplayCreationAfterCrash(t *testing.T, ctx context.Context, fixture autho
 		origin, err = point.MaterializationRunOrigin(record.SourceRunID)
 		c4RequireExclusiveStart(t, ctx, fixture.store, record.SourceRunID, record.BundleHash, record.EventID)
 		c4RequireRevisionCount(t, ctx, fixture.store, record.SourceRunID, 1)
-	case "standing":
-		fact, present := correlation.SourceArtifactFactFromContext(ctx)
-		if !present || fact.BundleHash() != record.BundleHash {
-			t.Fatal("standing retry lost its native committed source")
-		}
-		candidate := pipeline.StandingServiceCandidate{BindingEnabled: true, ServiceID: flowidentity.StandingServiceID(record.FlowPath), FlowPath: record.FlowPath, Source: fact}
-		workflow := newWorkflowTestCoordinator(t, fixture.db, pipeline.NewWorkflowPersistence(fixture.store.(workflowTestSelectedStore)), fixture.store.(workflowTestSelectedStore))
-		replayed, replayErr := workflow.ReconcileStandingService(ctx, candidate)
-		if replayErr != nil || replayed.RunID != record.RunID || replayed.Generation != 1 {
-			t.Fatalf("fresh standing owner duplicated committed generation: %+v err=%v", replayed, replayErr)
-		}
-		origin, err = runlifecycle.StandingGenerationRunOrigin(candidate.ServiceID, 1)
 	default:
 		t.Fatalf("unknown creation origin %q", record.Origin)
 	}
@@ -1140,9 +1114,7 @@ func TestC4F35StandingStartNativeCommitAccountingBothStores(t *testing.T) {
 				ctx = originalStoreFixtureContext(t, ctx, selected)
 				workflow := newWorkflowTestCoordinator(t, db, pipeline.NewWorkflowPersistence(selected.(workflowTestSelectedStore)), selected.(workflowTestSelectedStore))
 				flowPath := "c4-standing/" + backend
-				candidate := pipeline.StandingServiceCandidate{BindingEnabled: true,
-					ServiceID: flowidentity.StandingServiceID(flowPath), FlowPath: flowPath, Source: fact,
-				}
+				candidate := runlifecycle.LiveRunScope{FlowPath: flowPath}
 				fault := errors.New("C4 standing physical commit boundary")
 				var commits atomic.Int32
 				connector.arm(func(tx driver.Tx) error {
@@ -1152,11 +1124,11 @@ func TestC4F35StandingStartNativeCommitAccountingBothStores(t *testing.T) {
 					}
 					return errors.Join(fault, tx.Rollback())
 				})
-				uncertain, err := workflow.ReconcileStandingService(ctx, candidate)
+				uncertain, err := workflow.ReconcileFlowRun(ctx, candidate, fact)
 				if !errors.Is(err, fault) || uncertain.RunID != "" || commits.Load() != 1 {
 					t.Fatalf("uncertain standing creation exposed a run: %+v commits=%d err=%v", uncertain, commits.Load(), err)
 				}
-				observed, found, err := workflow.LoadReconciledStandingService(ctx, candidate)
+				observed, found, err := selected.(runlifecycle.LandingRunReader).LoadLandingRun(ctx, candidate)
 				if err != nil || found != committed {
 					t.Fatalf("standing commit readback: found=%t want=%t err=%v", found, committed, err)
 				}
@@ -1177,22 +1149,19 @@ func TestC4F35StandingStartNativeCommitAccountingBothStores(t *testing.T) {
 				ctx = originalStoreFixtureContext(t, testAuthorActivityRuntimeContext(), selected)
 				workflow = newWorkflowTestCoordinator(t, db, pipeline.NewWorkflowPersistence(selected.(workflowTestSelectedStore)), selected.(workflowTestSelectedStore))
 				reader = selected.(runOriginReadStore)
-				reopened, reopenedFound, err := workflow.LoadReconciledStandingService(ctx, candidate)
+				reopened, reopenedFound, err := selected.(runlifecycle.LandingRunReader).LoadLandingRun(ctx, candidate)
 				if err != nil || reopenedFound != committed || (committed && reopened.RunID != observed.RunID) {
 					t.Fatalf("fresh standing owner lost physical commit outcome: %+v found=%t err=%v", reopened, reopenedFound, err)
 				}
-				retried, err := workflow.ReconcileStandingService(ctx, candidate)
-				if err != nil || retried.RunID == "" || retried.Generation != 1 || (committed && retried.RunID != observed.RunID) {
+				retried, err := workflow.ReconcileFlowRun(ctx, candidate, fact)
+				if err != nil || retried.RunID == "" || retried.Scope != candidate || retried.State != runlifecycle.StateLive || (committed && retried.RunID != observed.RunID) {
 					t.Fatalf("standing creation retry: %+v err=%v", retried, err)
 				}
-				origin, err := runlifecycle.StandingGenerationRunOrigin(candidate.ServiceID, 1)
-				if err != nil {
-					t.Fatal(err)
-				}
+				origin := runlifecycle.DeploymentRunOrigin()
 				requireRunOriginHeader(t, ctx, reader, retried.RunID, origin, 0)
 				before := c4RequireExclusiveStart(t, ctx, selected, retried.RunID, bundleHash, "")
-				replayed, err := workflow.ReconcileStandingService(ctx, candidate)
-				if err != nil || replayed.RunID != retried.RunID || replayed.Generation != 1 {
+				replayed, err := workflow.ReconcileFlowRun(ctx, candidate, fact)
+				if err != nil || replayed.RunID != retried.RunID || replayed.Scope != candidate || replayed.State != runlifecycle.StateLive {
 					t.Fatalf("standing retry duplicated generation: %+v err=%v", replayed, err)
 				}
 				c4RequireRevisionCount(t, ctx, selected, retried.RunID, 1)

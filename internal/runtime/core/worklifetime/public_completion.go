@@ -63,11 +63,6 @@ func publicCompletionProcess(owner Occurrence) *Process {
 		if typed != nil {
 			return typed.process
 		}
-	case *StandingOccurrence:
-		if typed != nil && typed.occurrence != nil && typed.occurrence.parentLease != nil {
-			process, _ := ProcessFromContext(typed.occurrence.parentLease.Context())
-			return process
-		}
 	case *ManagerWorkOccurrence:
 		if typed != nil && typed.manager != nil {
 			return typed.manager.process

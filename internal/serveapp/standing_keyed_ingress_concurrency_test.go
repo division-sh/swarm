@@ -81,7 +81,7 @@ func TestA9ConcurrentKeyedIngressElectionBothStores(t *testing.T) {
 						}
 					})
 					rt := servedTestProcessRuntime(t, process)
-					statuses, err := rt.Pipeline.ListStandingServiceStatuses(t.Context())
+					statuses, err := readServedLandingRuns(t.Context(), rt)
 					if err != nil || len(statuses) != 1 {
 						t.Fatalf("binding=%+v err=%v", statuses, err)
 					}
@@ -380,7 +380,7 @@ func TestA9ConcurrentKeyedRootPreservesCreationBothStores(t *testing.T) {
 					}
 				})
 				rt := servedTestProcessRuntime(t, process)
-				statuses, err := rt.Pipeline.ListStandingServiceStatuses(t.Context())
+				statuses, err := readServedLandingRuns(t.Context(), rt)
 				if err != nil || len(statuses) != 1 {
 					t.Fatalf("root binding=%+v err=%v", statuses, err)
 				}

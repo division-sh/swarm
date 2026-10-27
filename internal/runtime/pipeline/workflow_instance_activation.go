@@ -35,18 +35,17 @@ func (i FlowConstructionInput) Validate() error {
 }
 
 type FlowInstanceActivationRequest struct {
-	Context                       events.DeliveryContext
-	ContractBundle                semanticview.Source
-	Instance                      runtimeflowidentity.Instance
-	InitialState                  string
-	ConstructorInput              string
-	ResolvedKey                   any
-	PayloadProjection             events.DeliveryPayloadProjection
-	Bookkeeping                   map[string]any
-	TriggerEvent                  events.Event
-	OccurredAt                    time.Time
-	StandingGenerationReplacement bool
-	ScenarioSeed                  *ScenarioSetupEntityRequest
+	Context           events.DeliveryContext
+	ContractBundle    semanticview.Source
+	Instance          runtimeflowidentity.Instance
+	InitialState      string
+	ConstructorInput  string
+	ResolvedKey       any
+	PayloadProjection events.DeliveryPayloadProjection
+	Bookkeeping       map[string]any
+	TriggerEvent      events.Event
+	OccurredAt        time.Time
+	ScenarioSeed      *ScenarioSetupEntityRequest
 }
 
 func (r FlowInstanceActivationRequest) ConstructorPayload() (map[string]any, error) {
@@ -89,15 +88,14 @@ func (r FlowInstanceActivationRequest) ConstructorPayload() (map[string]any, err
 // admitted activation request. It contains semantic facts only: selected-store
 // adapters own persistence and return post-commit evidence separately.
 type FlowInstanceActivationPlan struct {
-	Instance                      WorkflowInstance
-	Identity                      runtimeflowidentity.Instance
-	Readiness                     DynamicFlowRuntimeReadinessPlan
-	Lifecycle                     WorkflowLifecycleMutationPlan
-	CreatingInput                 FlowConstructionInput
-	Children                      []FlowInstanceActivationPlan
-	ActivationVariables           map[string]string
-	OccurredAt                    time.Time
-	StandingGenerationReplacement bool
+	Instance            WorkflowInstance
+	Identity            runtimeflowidentity.Instance
+	Readiness           DynamicFlowRuntimeReadinessPlan
+	Lifecycle           WorkflowLifecycleMutationPlan
+	CreatingInput       FlowConstructionInput
+	Children            []FlowInstanceActivationPlan
+	ActivationVariables map[string]string
+	OccurredAt          time.Time
 }
 
 // CommittedFlowInstanceActivation is exact selected-store evidence that the

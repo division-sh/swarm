@@ -41,12 +41,10 @@ const (
 
 var publicationNamespace = uuid.NewSHA1(uuid.NameSpaceOID, []byte("swarm-inbound-publication"))
 
-// Identity elects one immutable provider receipt for an exact binding generation.
+// Identity elects one immutable provider receipt within its run.
 // Concrete receivers and endpoint presentation are consequences, never identity.
 type Identity struct {
-	ServiceID       string `json:"service_id"`
 	RunID           string `json:"run_id"`
-	Generation      int64  `json:"generation"`
 	Provider        string `json:"provider"`
 	ProviderEventID string `json:"provider_event_id"`
 }
@@ -54,30 +52,25 @@ type Identity struct {
 // BindingGeneration is the admitted receipt namespace before a provider
 // delivery arrives. It carries no concrete receiver or delivery authority.
 type BindingGeneration struct {
-	ServiceID  string `json:"service_id"`
-	RunID      string `json:"run_id"`
-	Generation int64  `json:"generation"`
+	RunID string `json:"run_id"`
 }
 
 func (b BindingGeneration) Validate() error {
-	for field, value := range map[string]string{"service_id": b.ServiceID, "run_id": b.RunID} {
+	for field, value := range map[string]string{"run_id": b.RunID} {
 		parsed, err := uuid.Parse(value)
 		if err != nil || parsed == uuid.Nil || parsed.String() != value {
 			return fmt.Errorf("inbound identity %s requires an exact UUID", field)
 		}
 	}
-	if b.Generation <= 0 {
-		return fmt.Errorf("inbound identity requires its exact generation, provider and provider delivery")
-	}
 	return nil
 }
 
 func (i Identity) BindingGeneration() BindingGeneration {
-	return BindingGeneration{ServiceID: i.ServiceID, RunID: i.RunID, Generation: i.Generation}
+	return BindingGeneration{RunID: i.RunID}
 }
 
 func (b BindingGeneration) Identity(provider, providerEventID string) Identity {
-	return Identity{ServiceID: b.ServiceID, RunID: b.RunID, Generation: b.Generation,
+	return Identity{RunID: b.RunID,
 		Provider: provider, ProviderEventID: providerEventID}
 }
 
@@ -93,22 +86,19 @@ func (i Identity) Validate() error {
 }
 
 type Request struct {
-	PublicationID               string
-	Provider                    string
-	ProviderEventID             string
-	RequestFingerprint          string
-	RequestProjectionVersion    string
-	StableServiceID             string
-	FlowPath                    string
-	TargetAlias                 string
-	ExpectedPublicationSequence int64
-	ExpectedGeneration          int64
-	ResolvedRunID               string
-	MarkerEventID               string
-	AcknowledgementMode         AcknowledgementMode
-	OriginalReceivedAt          time.Time
-	OriginalUserAgent           string
-	OriginalTransportMetadata   json.RawMessage
+	PublicationID             string
+	Provider                  string
+	ProviderEventID           string
+	RequestFingerprint        string
+	RequestProjectionVersion  string
+	FlowPath                  string
+	TargetAlias               string
+	ResolvedRunID             string
+	MarkerEventID             string
+	AcknowledgementMode       AcknowledgementMode
+	OriginalReceivedAt        time.Time
+	OriginalUserAgent         string
+	OriginalTransportMetadata json.RawMessage
 }
 
 func (r Request) Normalized() Request {
@@ -120,7 +110,6 @@ func (r Request) Normalized() Request {
 	if r.RequestProjectionVersion == "" {
 		r.RequestProjectionVersion = RequestSemanticProjectionVersion
 	}
-	r.StableServiceID = strings.TrimSpace(r.StableServiceID)
 	r.FlowPath = strings.TrimSpace(r.FlowPath)
 	r.ResolvedRunID = strings.TrimSpace(r.ResolvedRunID)
 	r.MarkerEventID = strings.TrimSpace(r.MarkerEventID)
@@ -137,9 +126,8 @@ func (r Request) Validate() error {
 	if err := r.Identity().Validate(); err != nil {
 		return err
 	}
-	flow, err := identity.AdmitFlowIdentity(r.FlowPath)
-	if err != nil || r.StableServiceID != flowidentity.StandingServiceID(flow.String()) {
-		return fmt.Errorf("inbound request requires its exact declaration-owned service")
+	if _, err := identity.AdmitFlowIdentity(r.FlowPath); err != nil {
+		return fmt.Errorf("inbound request requires its exact declaring flow: %w", err)
 	}
 	r = r.Normalized()
 	if err := runtimecontracts.ValidateIngressAlias(r.TargetAlias); err != nil {
@@ -150,7 +138,6 @@ func (r Request) Validate() error {
 		"provider":                   r.Provider,
 		"provider_event_id":          r.ProviderEventID,
 		"request_fingerprint":        r.RequestFingerprint,
-		"stable_service_id":          r.StableServiceID,
 		"flow_path":                  r.FlowPath,
 		"target_alias":               r.TargetAlias,
 		"resolved_run_id":            r.ResolvedRunID,
@@ -163,10 +150,9 @@ func (r Request) Validate() error {
 		}
 	}
 	for field, value := range map[string]string{
-		"publication_id":    r.PublicationID,
-		"stable_service_id": r.StableServiceID,
-		"resolved_run_id":   r.ResolvedRunID,
-		"marker_event_id":   r.MarkerEventID,
+		"publication_id":  r.PublicationID,
+		"resolved_run_id": r.ResolvedRunID,
+		"marker_event_id": r.MarkerEventID,
 	} {
 		if _, err := uuid.Parse(value); err != nil {
 			return fmt.Errorf("%s must be a UUID: %w", field, err)
@@ -177,12 +163,6 @@ func (r Request) Validate() error {
 	}
 	if err := validateSHA256("request_fingerprint", r.RequestFingerprint); err != nil {
 		return err
-	}
-	if r.ExpectedPublicationSequence < 0 {
-		return fmt.Errorf("expected_publication_sequence must be nonnegative")
-	}
-	if r.ExpectedGeneration < 1 {
-		return fmt.Errorf("expected_generation must be positive")
 	}
 	publicationID, markerEventID, err := DeterministicIDs(r.Identity())
 	if err != nil || r.PublicationID != publicationID || r.MarkerEventID != markerEventID {
@@ -207,7 +187,7 @@ func (r Request) Validate() error {
 }
 
 func (r Request) Identity() Identity {
-	return Identity{ServiceID: r.StableServiceID, RunID: r.ResolvedRunID, Generation: r.ExpectedGeneration,
+	return Identity{RunID: r.ResolvedRunID,
 		Provider: r.Provider, ProviderEventID: r.ProviderEventID}
 }
 
@@ -257,15 +237,6 @@ type CommitCommand struct {
 	operator              *operatorCommitProof
 }
 
-// PublicationSequence projects the sealed current native occurrence separately
-// from its retained original request. Webhook admission keeps its request fence.
-func (c CommitCommand) PublicationSequence() int64 {
-	if input, native := c.Admission.NativeInput(); native {
-		return input.PublicationSequence()
-	}
-	return c.Request.ExpectedPublicationSequence
-}
-
 // RequireNativePublicationRequest is pure and may be repeated by the selected
 // mutation owner after acquiring its locks, before persisting receipt evidence.
 func (c CommitCommand) RequireNativePublicationRequest() error {
@@ -273,8 +244,8 @@ func (c CommitCommand) RequireNativePublicationRequest() error {
 	if !native {
 		return nil
 	}
-	if input.PublicationSequence() < 1 {
-		return fmt.Errorf("native publication requires its sealed occurrence")
+	if input.PublicationRunID() != c.Request.ResolvedRunID {
+		return fmt.Errorf("native publication requires its sealed run")
 	}
 	actual, err := c.Request.CanonicalBytes()
 	if err != nil {
@@ -284,8 +255,6 @@ func (c CommitCommand) RequireNativePublicationRequest() error {
 		if !bytes.Equal(original, actual) {
 			return ErrRequestIdentityConflict
 		}
-	} else if c.Request.ExpectedPublicationSequence != input.PublicationSequence() {
-		return fmt.Errorf("native publication changed its admitted occurrence")
 	}
 	return input.RequireCapturedPublicationRequest(actual)
 }
@@ -515,9 +484,7 @@ type EvidencePayload struct {
 	PublicationID   string   `json:"publication_id"`
 	Provider        string   `json:"provider"`
 	ProviderEventID string   `json:"provider_event_id"`
-	ServiceID       string   `json:"service_id"`
 	RunID           string   `json:"run_id"`
-	Generation      int64    `json:"generation"`
 	FlowPath        string   `json:"flow_path"`
 	EventIDs        []string `json:"event_ids"`
 	EventNames      []string `json:"event_names"`
@@ -563,8 +530,8 @@ func BuildEvidencePayload(request Request, eventIDs, eventNames []string) (json.
 	}
 	payload, err := json.Marshal(EvidencePayload{
 		PublicationID: request.PublicationID, Provider: request.Provider,
-		ProviderEventID: request.ProviderEventID, ServiceID: request.StableServiceID,
-		RunID: request.ResolvedRunID, Generation: request.ExpectedGeneration, FlowPath: request.FlowPath,
+		ProviderEventID: request.ProviderEventID,
+		RunID:           request.ResolvedRunID, FlowPath: request.FlowPath,
 		EventIDs: ids, EventNames: names, OutputCount: len(ids),
 	})
 	if err != nil {
@@ -605,8 +572,8 @@ func ValidateEvidenceEvent(request Request, evidence events.Event, eventIDs, eve
 		return err
 	}
 	if actual.PublicationID != expected.PublicationID || actual.Provider != expected.Provider ||
-		actual.ProviderEventID != expected.ProviderEventID || actual.ServiceID != expected.ServiceID ||
-		actual.RunID != expected.RunID || actual.Generation != expected.Generation || actual.FlowPath != expected.FlowPath ||
+		actual.ProviderEventID != expected.ProviderEventID ||
+		actual.RunID != expected.RunID || actual.FlowPath != expected.FlowPath ||
 		actual.OutputCount != expected.OutputCount || !slices.Equal(actual.EventIDs, expected.EventIDs) ||
 		!slices.Equal(actual.EventNames, expected.EventNames) {
 		return fmt.Errorf("inbound evidence payload does not match the committed ordered event batch")

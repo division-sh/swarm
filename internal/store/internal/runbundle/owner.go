@@ -122,9 +122,7 @@ func (o *Postgres) ListActiveNonStanding(ctx context.Context) ([]runtimerunbundl
 		       EXISTS (SELECT 1 FROM source_artifacts a WHERE a.bundle_hash = runs.bundle_hash)
 		FROM runs
 		WHERE status IN ($1, $2)
-		  AND NOT EXISTS (
-		      SELECT 1 FROM standing_services ss WHERE ss.current_run_id = runs.run_id
-		  )
+		  AND runs.flow_path IS NULL
 		ORDER BY run_id
 	`, string(runtimerunlifecycle.StateRunning), string(runtimerunlifecycle.StatePaused))
 	if err != nil {
@@ -140,9 +138,7 @@ func (o *SQLite) ListActiveNonStanding(ctx context.Context) ([]runtimerunbundle.
 		       EXISTS (SELECT 1 FROM source_artifacts a WHERE a.bundle_hash = runs.bundle_hash)
 		FROM runs
 		WHERE status IN (?, ?)
-		  AND NOT EXISTS (
-		      SELECT 1 FROM standing_services ss WHERE ss.current_run_id = runs.run_id
-		  )
+		  AND runs.flow_path IS NULL
 		ORDER BY run_id
 	`, string(runtimerunlifecycle.StateRunning), string(runtimerunlifecycle.StatePaused))
 	if err != nil {

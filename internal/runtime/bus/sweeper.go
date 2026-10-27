@@ -9,14 +9,12 @@ import (
 	"time"
 
 	"github.com/division-sh/swarm/internal/events"
-	worklifetime "github.com/division-sh/swarm/internal/runtime/core/worklifetime"
 	runtimecorrelation "github.com/division-sh/swarm/internal/runtime/correlation"
 	runtimedelivery "github.com/division-sh/swarm/internal/runtime/deliverylifecycle"
 	"github.com/division-sh/swarm/internal/runtime/diaglog"
 	runtimefailures "github.com/division-sh/swarm/internal/runtime/failures"
 	runtimepipeline "github.com/division-sh/swarm/internal/runtime/pipeline"
 	runtimepipelineobligation "github.com/division-sh/swarm/internal/runtime/pipelineobligation"
-	runtimerunlifecycle "github.com/division-sh/swarm/internal/runtime/runlifecycle"
 )
 
 const (
@@ -31,28 +29,6 @@ const (
 	startupRecoveryPipelineReplayReasonQuarantined           = "replay_quarantined"
 )
 
-var ErrStandingRestartParked = errors.New("standing restart disposition is non-executable")
-
-// A tracked transition retains its exact owner and restore signal. It is a
-// fence, not a non-executable durable disposition or an untracked lifetime fence.
-var ErrStandingRecoveryTransitionFenced = standingRecoveryTransitionFencedError{}
-
-type standingRecoveryTransitionFencedError struct{}
-
-func (standingRecoveryTransitionFencedError) Error() string {
-	return "standing recovery transition: " + worklifetime.ErrAdmissionFenced.Error()
-}
-
-func (standingRecoveryTransitionFencedError) Is(target error) bool {
-	return target == worklifetime.ErrAdmissionFenced
-}
-
-func standingRecoveryDeferred(err error) bool {
-	return runtimefailures.OnlyBranches(err, func(cause error) bool {
-		return errors.Is(cause, ErrStandingRestartParked) || errors.Is(cause, ErrStandingRecoveryTransitionFenced)
-	})
-}
-
 type OutboxSweeperConfig struct {
 	Interval time.Duration
 	Limit    int
@@ -64,8 +40,7 @@ type pipelineSweepScan struct {
 }
 
 type boundedPipelineRetry struct {
-	claim         runtimepipelineobligation.Claim
-	standingLease *worklifetime.Lease
+	claim runtimepipelineobligation.Claim
 }
 
 func DefaultOutboxSweeperConfig() OutboxSweeperConfig {
@@ -262,9 +237,6 @@ func (eb *EventBus) sweepPipelineObligations(ctx context.Context, request runtim
 			if !errors.Is(releaseErr, runtimepipelineobligation.ErrStaleClaim) {
 				err = errors.Join(err, releaseErr)
 			}
-			if retry.standingLease != nil {
-				err = errors.Join(err, retry.standingLease.Done())
-			}
 		}
 	}()
 	for result.Examined < limit {
@@ -284,12 +256,11 @@ func (eb *EventBus) sweepPipelineObligations(ctx context.Context, request runtim
 		result.Examined += batch.Examined
 		state.locallyBlocked = state.locallyBlocked || batch.LocallyBlocked
 		for _, work := range batch.Work {
-			settled, retry, standingLease, processErr := eb.processClaimedPipelineWork(ctx, work)
+			settled, retry, processErr := eb.processClaimedPipelineWork(ctx, work)
 			if retry {
 				state.locallyBlocked = true
 				boundedRetries = append(boundedRetries, boundedPipelineRetry{
-					claim:         work.Claim,
-					standingLease: standingLease,
+					claim: work.Claim,
 				})
 			}
 			if settled {
@@ -300,7 +271,7 @@ func (eb *EventBus) sweepPipelineObligations(ctx context.Context, request runtim
 					closeErr := eb.closePipelineScanLocked(context.WithoutCancel(ctx), request)
 					return result, errors.Join(processErr, closeErr)
 				}
-				if standingRecoveryDeferred(processErr) || errors.Is(processErr, errRunDispatchParked) {
+				if errors.Is(processErr, errRunDispatchParked) {
 					continue
 				}
 				if errors.Is(processErr, ErrRunDispatchBlocked) {
@@ -381,27 +352,23 @@ func (eb *EventBus) closeAllPipelineScans(ctx context.Context) error {
 func (eb *EventBus) processClaimedPipelineWork(
 	ctx context.Context,
 	work runtimepipelineobligation.ClaimedWork,
-) (settled bool, retry bool, retryLease *worklifetime.Lease, err error) {
+) (settled bool, retry bool, err error) {
 	claimOpen := true
-	var standingLease *worklifetime.Lease
 	defer func() {
 		if claimOpen && !retry {
 			err = errors.Join(err, eb.pipelineObligations.Release(context.WithoutCancel(ctx), work.Claim))
-		}
-		if standingLease != nil && !retry {
-			err = errors.Join(err, standingLease.Done())
 		}
 	}()
 	if work.Claim.Purpose() == runtimepipelineobligation.PurposeDecisionRoute && work.Acknowledged {
 		outcome, settleErr := eb.settleClaimedDecisionRoute(ctx, work)
 		claimOpen = !outcome.Committed()
-		return outcome.Committed(), false, nil, settleErr
+		return outcome.Committed(), false, settleErr
 	}
 	if disposition, preclassified := work.PreDispatchDisposition(); preclassified {
 		settlement, settleErr := eb.settlePipelineObligationOutcome(ctx, work.Claim, disposition)
 		claimOpen = !settlement.Committed()
 		if !settlement.Committed() {
-			return false, false, nil, settleErr
+			return false, false, settleErr
 		}
 		eb.logStartupRecoveryPipelineAftermath(
 			ctx,
@@ -411,11 +378,7 @@ func (eb *EventBus) processClaimedPipelineWork(
 			disposition.Failure(),
 			nil,
 		)
-		return true, false, nil, settleErr
-	}
-	ctx, standingLease, err = eb.bindClaimedRunWork(ctx, work.Event)
-	if err != nil {
-		return false, false, nil, err
+		return true, false, settleErr
 	}
 	recipients, dispatchErr := eb.authoritativeRecipientsForEvent(ctx, work.Event.ID())
 	var outcome runtimepipelineobligation.ExecutionOutcome
@@ -425,17 +388,17 @@ func (eb *EventBus) processClaimedPipelineWork(
 	decision := classifyPipelineDispatch(outcome, dispatchErr, false, work.Claim.Purpose(), pipelineDispatchRecoveryFinal)
 	switch decision.action {
 	case pipelineDispatchPending:
-		return false, false, nil, dispatchErr
+		return false, false, dispatchErr
 	case pipelineDispatchRetryRelease:
 		if runtimepipelineobligation.StartupRecoveryDiagnosticsEnabled(ctx) {
 			slog.WarnContext(ctx, "startup pipeline recovery blocked", "reason", "bounded_retry", "event_id", work.Event.ID(), "event_type", work.Event.Type(), "run_id", work.Event.RunID(), "purpose", work.Claim.Purpose(), "retry_reason", decision.retry.ReasonCode(), "failure", decision.retry.Failure())
 		}
-		return false, true, standingLease, dispatchErr
+		return false, true, dispatchErr
 	case pipelineDispatchSettle:
 		settlement, settleErr := eb.settlePipelineObligationOutcome(ctx, work.Claim, decision.disposition)
 		claimOpen = !settlement.Committed()
 		if !settlement.Committed() {
-			return false, false, nil, errors.Join(dispatchErr, settleErr)
+			return false, false, errors.Join(dispatchErr, settleErr)
 		}
 		// Acknowledged is terminal for claim ownership, but not a dropped replay.
 		if decision.disposition.Successful() && work.Scope == runtimepipelineobligation.ScopeDirect && len(recipients) == 0 {
@@ -446,104 +409,22 @@ func (eb *EventBus) processClaimedPipelineWork(
 			eb.logStartupRecoveryPipelineAftermath(ctx, work.Event, startupRecoveryPipelineReplayOutcomeDropped, startupRecoveryPipelineReplayReasonQuarantined, decision.disposition.Failure(), recipients)
 		}
 		if decision.failedBeforeSettle {
-			return true, false, nil, settleErr
+			return true, false, settleErr
 		}
-		return true, false, nil, errors.Join(dispatchErr, settleErr)
+		return true, false, errors.Join(dispatchErr, settleErr)
 	case pipelineDispatchMarkDecisionProcessed:
 		mark, markErr := eb.pipelineObligations.MarkDecisionProcessed(ctx, work.Claim)
 		if mark.DeliveryHandoffCommitted() {
 			eb.SignalDeliveryContinuations()
 		}
 		if !mark.Committed() {
-			return false, false, nil, errors.Join(dispatchErr, markErr)
+			return false, false, errors.Join(dispatchErr, markErr)
 		}
 		settlement, settleErr := eb.settleClaimedDecisionRoute(ctx, work)
 		claimOpen = !settlement.Committed()
-		return settlement.Committed(), false, nil, errors.Join(dispatchErr, markErr, settleErr)
+		return settlement.Committed(), false, errors.Join(dispatchErr, markErr, settleErr)
 	}
-	return false, false, nil, fmt.Errorf("unknown pipeline dispatch decision")
-}
-
-type standingRecoveryAdmissionError struct{ cause error }
-
-func (e standingRecoveryAdmissionError) Error() string {
-	return fmt.Sprintf("%v: admit standing-generation pipeline recovery: %v", ErrRunDispatchBlocked, e.cause)
-}
-
-func (e standingRecoveryAdmissionError) Unwrap() error { return e.cause }
-
-func (e standingRecoveryAdmissionError) Is(target error) bool { return target == ErrRunDispatchBlocked }
-
-func (eb *EventBus) bindClaimedRunWork(
-	ctx context.Context,
-	event events.Event,
-) (bound context.Context, standing *worklifetime.Lease, err error) {
-	runID := strings.TrimSpace(event.RunID())
-	if runID == "" {
-		return ctx, nil, nil
-	}
-	reader := eb.durable.RunOrigins
-	if reader == nil {
-		return ctx, nil, errors.New("persisted pipeline recovery requires typed run origin readback")
-	}
-	if err := ctx.Err(); err != nil {
-		return ctx, nil, err
-	}
-	readOwner := eb.workOwnerForContext(ctx)
-	if readOwner == nil {
-		return ctx, nil, errors.New("pipeline recovery reads require a process work occurrence")
-	}
-	readLease, err := beginAcceptedRuntimeWork(readOwner, ctx)
-	if err != nil {
-		return ctx, nil, err
-	}
-	defer func() { err = errors.Join(err, readLease.Done()) }()
-	// Only these admitted metadata reads drain without cancellation. The lease
-	// joins their completion, and its original context fences every late result.
-	readCtx := context.WithoutCancel(readLease.Context())
-	origin, err := reader.LoadRunOrigin(readCtx, runID)
-	if err != nil {
-		return ctx, nil, fmt.Errorf("load pipeline recovery run origin: %w", err)
-	}
-	if err := readLease.Context().Err(); err != nil {
-		return ctx, nil, err
-	}
-	if origin.Kind() != runtimerunlifecycle.OriginStandingGeneration {
-		return ctx, nil, nil
-	}
-	standingReader := eb.durable.StandingRestarts
-	if standingReader == nil {
-		return ctx, nil, errors.New("persisted standing recovery requires typed restart disposition readback")
-	}
-	disposition, err := standingReader.StandingRunRestartDisposition(readCtx, runID)
-	if err != nil {
-		return ctx, nil, fmt.Errorf("classify pipeline recovery standing disposition: %w", err)
-	}
-	if err := readLease.Context().Err(); err != nil {
-		return ctx, nil, err
-	}
-	if disposition.UsesGenericRecovery() {
-		return ctx, nil, nil
-	}
-	if !disposition.Executable() {
-		return ctx, nil, fmt.Errorf("%w: run %s is %s", ErrStandingRestartParked, runID, disposition.Kind)
-	}
-	eb.mu.RLock()
-	owner := eb.standingRunWorkOwner
-	eb.mu.RUnlock()
-	if owner == nil {
-		return ctx, nil, fmt.Errorf("%w: standing-generation pipeline recovery owner is not installed", ErrRunDispatchBlocked)
-	}
-	lease, err := owner.BeginStandingRunRecovery(ctx, runID, origin)
-	if err != nil {
-		return ctx, nil, standingRecoveryAdmissionError{cause: err}
-	}
-	contextOwner, ok := worklifetime.OccurrenceFromContext(lease.Context())
-	if !ok {
-		_ = lease.Done()
-		return ctx, nil, errors.New("standing-generation pipeline recovery admission omitted its exact occurrence")
-	}
-	return bindWorkContext(ctx, lease, contextOwner, eb.carryMutationContext), lease, nil
+	return false, false, fmt.Errorf("unknown pipeline dispatch decision")
 }
 
 func (eb *EventBus) logStartupRecoveryPipelineAftermath(

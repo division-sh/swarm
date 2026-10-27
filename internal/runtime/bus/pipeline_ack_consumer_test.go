@@ -127,7 +127,7 @@ func TestAcknowledgedSweeperSettlementDoesNotReleaseOnCleanupError(t *testing.T)
 	}
 	bus := &EventBus{ephemeral: true, pipelineObligations: owner}
 	claim := acknowledgedPipelineClaim(t, runtimepipelineobligation.PurposeDecisionRoute)
-	settled, retry, _, err := bus.processClaimedPipelineWork(context.Background(), runtimepipelineobligation.ClaimedWork{Claim: claim, Acknowledged: true})
+	settled, retry, err := bus.processClaimedPipelineWork(context.Background(), runtimepipelineobligation.ClaimedWork{Claim: claim, Acknowledged: true})
 	if !settled || retry || !errors.Is(err, cleanupErr) {
 		t.Fatalf("settled=%t retry=%t error=%v", settled, retry, err)
 	}

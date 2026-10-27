@@ -71,8 +71,8 @@ func a9KeyedRootIngressConstruction(t *testing.T, autoEmit bool) {
 			if construction == nil || inbound == nil {
 				t.Fatal("served proof requires the original native construction and inbound receipt readers")
 			}
-			statuses, err := rt.Pipeline.ListStandingServiceStatuses(t.Context())
-			if err != nil || len(statuses) != 1 || !statuses[0].RestartDisposition.Executable() {
+			statuses, err := readServedLandingRuns(t.Context(), rt)
+			if err != nil || len(statuses) != 1 || statuses[0].State != "live" {
 				t.Fatalf("zero-instance enabled binding=%+v err=%v", statuses, err)
 			}
 			status := statuses[0]
@@ -101,12 +101,10 @@ func a9KeyedRootIngressConstruction(t *testing.T, autoEmit bool) {
 			}
 			var receipt struct {
 				PublicationID string   `json:"publication_id"`
-				ServiceID     string   `json:"service_id"`
 				RunID         string   `json:"run_id"`
-				Generation    int64    `json:"generation"`
 				EventIDs      []string `json:"event_ids"`
 			}
-			if err := json.Unmarshal(accepted, &receipt); err != nil || len(receipt.EventIDs) != 1 || receipt.ServiceID != status.ServiceID || receipt.RunID != status.RunID || receipt.Generation != status.Generation {
+			if err := json.Unmarshal(accepted, &receipt); err != nil || len(receipt.EventIDs) != 1 || receipt.RunID != status.RunID {
 				t.Fatalf("receipt lost binding-generation authority: %+v err=%v", receipt, err)
 			}
 			a9RequireRootIngressSettlement(t, served.Endpoint, status.RunID, receipt.EventIDs[0])
@@ -170,7 +168,7 @@ func a9KeyedRootIngressConstruction(t *testing.T, autoEmit bool) {
 				t.Fatalf("retry or contradiction replaced immutable construction: %+v -> %+v err=%v", initial, again, err)
 			}
 			if _, found, err := inbound.LoadInboundPublicationByIdentity(t.Context(), inboundpublication.Identity{
-				ServiceID: status.ServiceID, RunID: status.RunID, Generation: status.Generation, Provider: "partner", ProviderEventID: "second",
+				RunID: status.RunID, Provider: "partner", ProviderEventID: "second",
 			}); err != nil || found {
 				t.Fatalf("root-key contradiction left a receipt: found=%t err=%v", found, err)
 			}

@@ -326,7 +326,7 @@ func runPublicationGroupAgentCrashChild(t *testing.T, mode string) {
 		t.Fatalf("actual crash receiver authority: found=%v phase=%s mode=%s grant=%s delivery=%s generation=%d/%d err=%v", found, state.Phase, state.RunMode, state.ProcessBinding.GenerationGrantID, deliveryAuthority.ExecutionID(), state.ProcessBinding.RuntimeGeneration, deliveryAuthority.Generation(), err)
 	}
 	eventBus.SetInterceptors(coordinator)
-	continuations, err := deliverycontinuation.New(selected, selected, deliveryAuthority, work, eventBus, func(_ context.Context, err error) { t.Errorf("agent continuation recovery: %v", err) })
+	continuations, err := deliverycontinuation.New(selected, deliveryAuthority, work, eventBus, func(_ context.Context, err error) { t.Errorf("agent continuation recovery: %v", err) })
 	if err != nil {
 		t.Fatal(err)
 	}

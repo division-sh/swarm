@@ -27,7 +27,6 @@ import (
 	runtimeagenttopology "github.com/division-sh/swarm/internal/runtime/agenttopology"
 	runtimeauthoractivity "github.com/division-sh/swarm/internal/runtime/authoractivity"
 	runtimecontracts "github.com/division-sh/swarm/internal/runtime/contracts"
-	runtimeflowidentity "github.com/division-sh/swarm/internal/runtime/core/flowidentity"
 	worklifetime "github.com/division-sh/swarm/internal/runtime/core/worklifetime"
 	runtimecorrelation "github.com/division-sh/swarm/internal/runtime/correlation"
 	runtimecredentials "github.com/division-sh/swarm/internal/runtime/credentials"
@@ -141,19 +140,17 @@ type serveRuntimeBundle struct {
 }
 
 type serveRuntimeBundleContext struct {
-	loaded                     serveRuntimeBundle
-	stateStoreSummary          string
-	sourceArtifactFact         runtimecorrelation.SourceArtifactFact
-	bootIdentity               runtimecontracts.BundleIdentity
-	workspaceBackend           cliapp.WorkspaceBackendSelection
-	workspaces                 cliapp.ServeWorkspaceLifecycle
-	validation                 runtime.WorkflowContractValidationResult
-	runtime                    *runtime.Runtime
-	providerTriggerGeneration  triggergeneration.Generation
-	installedTriggerSubjects   []packs.Subject
-	packInventoryDigest        string
-	startupStandingTargets     []runtime.StandingTarget
-	startupStandingActivations []runtime.StandingActivation
+	loaded                    serveRuntimeBundle
+	stateStoreSummary         string
+	sourceArtifactFact        runtimecorrelation.SourceArtifactFact
+	bootIdentity              runtimecontracts.BundleIdentity
+	workspaceBackend          cliapp.WorkspaceBackendSelection
+	workspaces                cliapp.ServeWorkspaceLifecycle
+	validation                runtime.WorkflowContractValidationResult
+	runtime                   *runtime.Runtime
+	providerTriggerGeneration triggergeneration.Generation
+	installedTriggerSubjects  []packs.Subject
+	packInventoryDigest       string
 }
 
 type serveRuntimeBundleContextRequest struct {
@@ -1444,19 +1441,9 @@ func buildRuntimeComposition(ctx context.Context, req runtimeCompositionRequest)
 		return 3
 	}
 	if rt != nil {
-		standingReconciliations, err := reconcileServeStandingServices(ctx, rt.Pipeline, runtimeContexts, !opts.LocalRun)
-		if err != nil {
+		if err := reconcileServeFlowRuns(ctx, rt.Pipeline, runtimeContexts); err != nil {
 			presenter.fail(5, "runtime_context", err)
 			return 1
-		}
-		for i := range runtimeContexts {
-			targets, activations, err := reconcileServeRuntimeStandingTargets(runtimeContexts[i].runtime, standingReconciliations)
-			if err != nil {
-				presenter.fail(5, "runtime_context", err)
-				return 1
-			}
-			runtimeContexts[i].startupStandingTargets = targets
-			runtimeContexts[i].startupStandingActivations = activations
 		}
 	}
 	supervisor.currentRT = rt
@@ -1791,12 +1778,6 @@ func buildRuntimeComposition(ctx context.Context, req runtimeCompositionRequest)
 		presenter.fail(22, "selected_fork_recovery", err)
 		return 1
 	}
-	if rt != nil {
-		if err := reportServeStandingReadiness(ctx, rt.Pipeline, opts.Output); err != nil {
-			presenter.fail(22, "channel_onboarding", err)
-			return 1
-		}
-	}
 	for _, contextDef := range runtimeContexts {
 		dormant, err := contextDef.runtime.IneligibleStandingIngress()
 		if err != nil {
@@ -2063,109 +2044,23 @@ func serveCancellationExitCode(ownershipLoss <-chan runtimestartupownership.Term
 	return 0
 }
 
-type standingServiceSetReconciler interface {
-	ReconcileStandingServiceSet(context.Context, []runtimepipeline.StandingServiceCandidate) ([]runtimepipeline.StandingServiceReconciliation, error)
-	ReconcileStandingService(context.Context, runtimepipeline.StandingServiceCandidate) (runtimepipeline.StandingServiceReconciliation, error)
-}
-
-func reconcileServeStandingServices(ctx context.Context, owner standingServiceSetReconciler, contexts []serveRuntimeBundleContext, deployment bool) (map[string]runtimepipeline.StandingServiceReconciliation, error) {
-	var candidates []runtimepipeline.StandingServiceCandidate
+func reconcileServeFlowRuns(ctx context.Context, owner runtimerunlifecycle.FlowRunOwner, contexts []serveRuntimeBundleContext) error {
 	for _, contextDef := range contexts {
-		if contextDef.runtime == nil || owner == nil {
+		if contextDef.runtime == nil {
 			continue
 		}
-		planned, err := contextDef.runtime.PlanStandingServiceCandidates()
+		scopes, err := contextDef.runtime.PlanLiveFlowScopes()
 		if err != nil {
-			return nil, err
+			return err
 		}
-		candidates = append(candidates, planned...)
-	}
-	if owner == nil {
-		return nil, nil
-	}
-	results, err := reconcileStandingServiceCandidates(ctx, owner, candidates, deployment)
-	if err != nil {
-		return nil, err
-	}
-	byServiceID := make(map[string]runtimepipeline.StandingServiceReconciliation, len(results))
-	for _, result := range results {
-		if _, exists := byServiceID[result.ServiceID]; exists {
-			return nil, fmt.Errorf("standing service %s reconciled more than once", result.ServiceID)
-		}
-		byServiceID[result.ServiceID] = result
-	}
-	return byServiceID, nil
-}
-
-func reconcileStandingServiceCandidates(ctx context.Context, owner standingServiceSetReconciler, candidates []runtimepipeline.StandingServiceCandidate, deployment bool) ([]runtimepipeline.StandingServiceReconciliation, error) {
-	if deployment {
-		return owner.ReconcileStandingServiceSet(ctx, candidates)
-	}
-	// A finite host does not own deployment selection or declaration removal.
-	results := make([]runtimepipeline.StandingServiceReconciliation, 0, len(candidates))
-	for _, candidate := range candidates {
-		result, err := owner.ReconcileStandingService(ctx, candidate)
-		if err != nil {
-			return nil, err
-		}
-		if result.RunID != "" {
-			results = append(results, result)
-		}
-	}
-	return results, nil
-}
-
-func reconcileServeRuntimeStandingTargets(
-	rt *runtime.Runtime,
-	reconciliations map[string]runtimepipeline.StandingServiceReconciliation,
-) ([]runtime.StandingTarget, []runtime.StandingActivation, error) {
-	if rt == nil {
-		return nil, nil, nil
-	}
-	targets, err := rt.PlanStandingTargets()
-	if err != nil {
-		return nil, nil, err
-	}
-	activations := make([]runtime.StandingActivation, 0)
-	seenServices := make(map[string]struct{}, len(targets))
-	for i := range targets {
-		reconciliation, ok := reconciliations[targets[i].ServiceID]
-		if !ok {
-			return nil, nil, fmt.Errorf("standing service %s has no startup reconciliation", targets[i].ServiceID)
-		}
-		source := rt.Options.WorkflowModule.SemanticSource()
-		keyless, err := runtimepipeline.StandingConstructionIsKeyless(source, reconciliation.FlowPath)
-		if err != nil {
-			return nil, nil, err
-		}
-		var instance runtimeflowidentity.Instance
-		if keyless {
-			instance, err = runtimeflowidentity.StandingForGeneration(source, reconciliation.FlowPath, reconciliation.RunID)
-			if err != nil {
-				return nil, nil, err
+		sourceCtx := runtimecorrelation.WithSourceArtifactFact(ctx, contextDef.sourceArtifactFact)
+		for _, scope := range scopes {
+			if _, err := owner.ReconcileFlowRun(sourceCtx, scope, contextDef.sourceArtifactFact); err != nil {
+				return err
 			}
 		}
-		targets[i].RunID = reconciliation.RunID
-		targets[i].Generation = reconciliation.Generation
-		targets[i].PublicationSequence = reconciliation.PublicationSequence
-		if _, seen := seenServices[reconciliation.ServiceID]; seen {
-			continue
-		}
-		seenServices[reconciliation.ServiceID] = struct{}{}
-		activations = append(activations, runtime.StandingActivation{
-			BundleHash:          targets[i].BundleHash,
-			ServiceID:           reconciliation.ServiceID,
-			FlowPath:            reconciliation.FlowPath,
-			RunID:               reconciliation.RunID,
-			Generation:          reconciliation.Generation,
-			PublicationSequence: reconciliation.PublicationSequence,
-			Construction:        instance,
-			EffectiveState:      reconciliation.EffectiveState,
-			RestartDisposition:  reconciliation.RestartDisposition,
-			Created:             reconciliation.Transition == "created",
-		})
 	}
-	return targets, activations, nil
+	return nil
 }
 
 func serveRuntimeContextStandingTargets(
@@ -2173,63 +2068,19 @@ func serveRuntimeContextStandingTargets(
 	declared []runtime.StandingTarget,
 	activations []runtime.StandingActivation,
 ) []runtime.StandingTarget {
-	nonExecutable := make(map[string]struct{}, len(activations))
-	for _, activation := range activations {
-		if !activation.RestartDisposition.Executable() {
-			nonExecutable[activation.ServiceID] = struct{}{}
-		}
-	}
 	targets := append([]runtime.StandingTarget(nil), executable...)
+	seen := make(map[string]bool, len(executable))
+	for _, target := range executable {
+		seen[target.Alias+"\x00"+target.Provider] = true
+	}
 	for _, target := range declared {
-		if _, ok := nonExecutable[target.ServiceID]; ok {
+		key := target.Alias + "\x00" + target.Provider
+		if !seen[key] {
 			targets = append(targets, target)
+			seen[key] = true
 		}
 	}
 	return targets
-}
-
-type standingServiceStatusReader interface {
-	ListStandingServiceStatuses(context.Context) ([]runtimepipeline.StandingServiceStatus, error)
-}
-
-func reportServeStandingReadiness(ctx context.Context, owner standingServiceStatusReader, out io.Writer) error {
-	if owner == nil {
-		return nil
-	}
-	statuses, err := owner.ListStandingServiceStatuses(ctx)
-	if err != nil {
-		return err
-	}
-	for _, status := range statuses {
-		switch status.RestartDisposition.Kind {
-		case runtimerunlifecycle.StandingRestartActiveIntrinsic:
-			if status.PublicationState != "published" {
-				return fmt.Errorf("standing service %s is active but publication is %s", status.ServiceID, status.PublicationState)
-			}
-			if out != nil {
-				fmt.Fprintf(out, "standing service %s %s run=%s generation=%d source=%s\n", status.ServiceID, status.Transition, status.RunID, status.Generation, status.BundleHash)
-			}
-		case runtimerunlifecycle.StandingRestartSuspended:
-			if out != nil {
-				fmt.Fprintf(out, "standing service %s suspended by=%s at=%s reason=%s resume=`swarm standing resume %s`\n", status.ServiceID, status.OverrideActor, status.OverrideAt.Format(time.RFC3339), status.OverrideReason, status.ServiceID)
-			}
-		case runtimerunlifecycle.StandingRestartCredentialDormant, runtimerunlifecycle.StandingRestartSessionDormant, runtimerunlifecycle.StandingRestartRecoveryRequired:
-			if out != nil {
-				fmt.Fprintf(out, "standing service %s %s declaration_present=true binding_enabled=false run=%s generation=%d override=%s remediation=%s\n", status.ServiceID, status.RestartDisposition.Kind, status.RunID, status.Generation, status.RestartDisposition.OperatorOverride, status.RestartDisposition.RunControlGuidance())
-			}
-		case runtimerunlifecycle.StandingRestartOrphaned:
-			if out != nil {
-				fmt.Fprintf(out, "standing service %s orphaned declaration_removed=true run=%s generation=%d remediation=%s\n", status.ServiceID, status.RunID, status.Generation, status.RestartDisposition.RunControlGuidance())
-			}
-		case runtimerunlifecycle.StandingRestartTerminalDeclared, runtimerunlifecycle.StandingRestartTerminalOrphaned, runtimerunlifecycle.StandingRestartInvalidCurrent:
-			if out != nil {
-				fmt.Fprintf(out, "standing service %s %s run=%s generation=%d remediation=%s\n", status.ServiceID, status.RestartDisposition.Kind, status.RunID, status.Generation, status.RestartDisposition.RunControlGuidance())
-			}
-		default:
-			return fmt.Errorf("standing service %s has unsupported restart disposition %q", status.ServiceID, status.RestartDisposition.Kind)
-		}
-	}
-	return nil
 }
 
 func plannedServeRuntimeContexts(contexts []serveRuntimeBundleContext) ([]runtime.BundleContext, error) {
@@ -2429,19 +2280,9 @@ func prepareServeRuntimeContextSet(ctx context.Context, contexts []serveRuntimeB
 		if contextDef.runtime == nil {
 			continue
 		}
-		startupStandingOwner, err := newServeStartupStandingRecoveryOwner(
-			contextDef.runtime.WorkOccurrence(),
-			contextDef.startupStandingTargets,
-			contextDef.startupStandingActivations,
-		)
+		declaredTargets, err := contextDef.runtime.PlanStandingTargets()
 		if err != nil {
 			return nil, err
-		}
-		if startupStandingOwner != nil {
-			if contextDef.runtime.Bus == nil {
-				return nil, errors.New("standing startup recovery requires event bus")
-			}
-			contextDef.runtime.Bus.SetStandingRunWorkOwner(startupStandingOwner)
 		}
 		release, err := contextDef.runtime.PrepareStart(ctx)
 		if err != nil {
@@ -2455,18 +2296,10 @@ func prepareServeRuntimeContextSet(ctx context.Context, contexts []serveRuntimeB
 			if err := release.Start(completeStanding); err != nil {
 				return err
 			}
-			return contextDef.runtime.ArmDeclaredFlowClocks(ctx, activations, manager)
+			return contextDef.runtime.ArmDeclaredFlowClocks(ctx, activations)
 		})
 		if manager != nil {
-			contextTargets := serveRuntimeContextStandingTargets(targets, contextDef.startupStandingTargets, activations)
-			for _, activation := range activations {
-				if activation.RestartDisposition.Executable() {
-					continue
-				}
-				if err := manager.SuppressStandingServiceTargets(activation.ServiceID); err != nil {
-					return nil, err
-				}
-			}
+			contextTargets := serveRuntimeContextStandingTargets(targets, declaredTargets, activations)
 			definition := runtime.BundleContext{
 				SourceArtifactFact:         contextDef.sourceArtifactFact,
 				BundleIdentity:             contextDef.bootIdentity,
@@ -2513,68 +2346,6 @@ func prepareServeRuntimeContextSet(ctx context.Context, contexts []serveRuntimeB
 		released = true
 		return nil
 	}, nil
-}
-
-type serveStartupStandingRecoveryOwner struct {
-	workOwner *worklifetime.RuntimeOccurrence
-	byRunID   map[string]worklifetime.StandingIdentity
-}
-
-func newServeStartupStandingRecoveryOwner(
-	workOwner *worklifetime.RuntimeOccurrence,
-	targets []runtime.StandingTarget,
-	activations []runtime.StandingActivation,
-) (*serveStartupStandingRecoveryOwner, error) {
-	active := make(map[string]struct{}, len(activations))
-	for _, activation := range activations {
-		if activation.RestartDisposition.Executable() {
-			active[activation.ServiceID] = struct{}{}
-		}
-	}
-	var admittedTargets []runtime.StandingTarget
-	for _, target := range targets {
-		if _, enabled := active[target.ServiceID]; enabled {
-			admittedTargets = append(admittedTargets, target)
-		}
-	}
-	identities, err := runtime.StandingExecutionIdentities(admittedTargets, activations)
-	if err != nil {
-		return nil, err
-	}
-	byRunID := make(map[string]worklifetime.StandingIdentity, len(identities))
-	for _, identity := range identities {
-		if prior, exists := byRunID[identity.RunID]; exists && prior != identity {
-			return nil, fmt.Errorf("standing startup run %s has conflicting exact owners", identity.RunID)
-		}
-		byRunID[identity.RunID] = identity
-	}
-	if len(byRunID) == 0 {
-		return nil, nil
-	}
-	if workOwner == nil {
-		return nil, errors.New("standing startup recovery requires runtime work owner")
-	}
-	return &serveStartupStandingRecoveryOwner{workOwner: workOwner, byRunID: byRunID}, nil
-}
-
-func (o *serveStartupStandingRecoveryOwner) BeginStandingRunRecovery(
-	ctx context.Context,
-	runID string,
-	origin runtimerunlifecycle.RunOrigin,
-) (*worklifetime.Lease, error) {
-	if o == nil || o.workOwner == nil {
-		return nil, errors.New("standing startup recovery owner is required")
-	}
-	target, ok := o.byRunID[strings.TrimSpace(runID)]
-	if !ok {
-		return nil, fmt.Errorf("standing startup recovery run %s has no prepared owner", runID)
-	}
-	if origin.Kind() != runtimerunlifecycle.OriginStandingGeneration ||
-		origin.ServiceID() != target.ServiceID ||
-		uint64(origin.Generation()) != target.Generation {
-		return nil, fmt.Errorf("standing startup recovery run %s conflicts with prepared owner", runID)
-	}
-	return o.workOwner.BeginStanding(ctx)
 }
 
 func closeAdditionalServeRuntimeContexts(ctx context.Context, contexts []serveRuntimeBundleContext, manager *runtime.RuntimeContextManager, opts cliapp.ServeOptions, deadlines ...time.Time) error {

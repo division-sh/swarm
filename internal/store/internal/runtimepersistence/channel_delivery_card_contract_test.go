@@ -559,7 +559,7 @@ func TestChannelDeliveryCardActionAdmissionSelectedStoreParity(t *testing.T) {
 					PackInventoryGeneration:      activation.Coordinate.PackInventoryGeneration,
 					RuntimeInstanceID:            activation.Coordinate.RuntimeInstanceID,
 					ContextPublicationGeneration: activation.Coordinate.ContextPublicationGeneration,
-					PlanGeneration:               activation.Coordinate.PlanGeneration, TargetGeneration: activation.Coordinate.TargetGeneration,
+					PlanGeneration:               activation.Coordinate.PlanGeneration,
 				},
 			}
 			if !authority.Valid() {

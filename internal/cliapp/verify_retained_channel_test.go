@@ -44,7 +44,7 @@ func assertVerifyRetainedChannelPublicAdmission(t *testing.T, ctx context.Contex
 		Coordinate: channelonboarding.ChannelRuntimeContextCoordinate{
 			BundleHash: "bundle-v2:sha256:" + strings.Repeat("a", 64), BundleIdentity: "retained-channel-test",
 			PackInventoryGeneration: "sha256:inventory", RuntimeInstanceID: uuid.NewString(), ContextPublicationGeneration: 2,
-			PlanGeneration: generation, TargetGeneration: 3,
+			PlanGeneration: generation,
 		},
 		TargetSelector: "ingress:support/flow:telegram", Posture: channelonboarding.ActivationWebhookRegistration,
 		Ceremony: channelonboarding.CeremonyAuthenticatedTextChallenge, SaveProof: true,

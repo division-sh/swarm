@@ -34,8 +34,7 @@ func TestServeSessionDiscoveryRetainsDeclarationWithoutAuthority(t *testing.T) {
 			candidate := candidates[0]
 			if candidate.ValidateDeclaration() != nil || candidate.Target.Selector != "ingress:"+flow+":whatsapp" ||
 				candidate.Target.FlowPath != flow || candidate.Target.Alias != "reception" ||
-				!candidate.Target.AdmissionGeneration.Equal(trigger.Generation()) || candidate.Target.Generation != 0 ||
-				candidate.Target.PublicationSequence != 0 || candidate.Coordinate.TargetGeneration != 0 ||
+				!candidate.Target.AdmissionGeneration.Equal(trigger.Generation()) ||
 				candidate.ProviderCredentialRole != "" || candidate.SigningCredentialRole != "" || candidate.Validate() == nil {
 				t.Fatal("session discovery dropped declaration scope or invented execution", candidate)
 			}

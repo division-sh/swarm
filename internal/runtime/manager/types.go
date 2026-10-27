@@ -4,7 +4,6 @@ import (
 	"context"
 	"encoding/json"
 	"github.com/division-sh/swarm/internal/runtime/diaglog"
-	runtimestanding "github.com/division-sh/swarm/internal/runtime/runlifecycle"
 	"time"
 
 	"github.com/division-sh/swarm/internal/events"
@@ -237,7 +236,6 @@ type PersistenceRoles struct {
 	LifecycleEffects     runtimeeffects.Store
 	LifecycleDiagnostics AgentLifecycleDiagnosticPersistence
 	EffectsRecovery      runtimeeffects.RecoveryStore
-	StandingRestarts     runtimestanding.StandingRestartDispositionReader
 	DeliveryQuiescence   ActiveRunDeliveryQuiescenceReader
 	DeliveryRuntime      DeliveryRuntimeOwner
 	EventExistence       EventExistenceReader

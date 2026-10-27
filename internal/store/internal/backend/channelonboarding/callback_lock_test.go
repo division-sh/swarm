@@ -532,7 +532,7 @@ func proveNativeInboxParentOrder(t *testing.T, f callbackLockFixture, admission 
 							BundleHash: activation.Coordinate.BundleHash, BundleIdentity: activation.Coordinate.BundleIdentity,
 							PackInventoryGeneration: activation.Coordinate.PackInventoryGeneration, RuntimeInstanceID: activation.Coordinate.RuntimeInstanceID,
 							ContextPublicationGeneration: activation.Coordinate.ContextPublicationGeneration,
-							PlanGeneration:               activation.Coordinate.PlanGeneration, TargetGeneration: activation.Coordinate.TargetGeneration,
+							PlanGeneration:               activation.Coordinate.PlanGeneration,
 						},
 					}
 					if f.postgres {
@@ -802,7 +802,7 @@ func (f callbackLockFixture) prepare(t *testing.T, verb domain.Verb, now time.Ti
 	op, err := f.selected.ReserveChannelOnboarding(context.Background(), domain.StartRequest{
 		OperationID: id, PrincipalID: f.principal, RequestKeyHash: id, RequestHash: id, Verb: verb, Provider: "telegram",
 		Interface:      operatorchannel.InterfaceIdentity{InterfaceRef: operatorchannel.InterfaceHITLChannelV2, ChannelPackID: "provider.telegram.hitl_channel", ChannelPackVersion: "0.1.0", ChannelManifestHash: "sha256:manifest", SemanticGeneration: "sha256:plan"},
-		Coordinate:     domain.ChannelRuntimeContextCoordinate{BundleHash: "bundle-v2:sha256:" + strings.Repeat("a", 64), BundleIdentity: "callback-test", PackInventoryGeneration: "sha256:inventory", RuntimeInstanceID: "d0df13de-f14d-44cb-b180-17d7b812da2a", ContextPublicationGeneration: 1, PlanGeneration: generation, TargetGeneration: 1},
+		Coordinate:     domain.ChannelRuntimeContextCoordinate{BundleHash: "bundle-v2:sha256:" + strings.Repeat("a", 64), BundleIdentity: "callback-test", PackInventoryGeneration: "sha256:inventory", RuntimeInstanceID: "d0df13de-f14d-44cb-b180-17d7b812da2a", ContextPublicationGeneration: 1, PlanGeneration: generation},
 		TargetSelector: "ingress:channel/flow:telegram", Posture: domain.ActivationWebhookRegistration, Ceremony: domain.CeremonyAuthenticatedTextChallenge, RequestedAt: now,
 		CredentialReservations: []domain.CredentialReservation{{Role: "bot_token", StoreKey: "channel.token"}},
 	})

@@ -48,7 +48,7 @@ func nativeSettingTestContext(h *nativeSettingHarness) context.Context {
 			ActivationRevision: 1, BindingRevision: 1, BundleHash: "bundle-v2:sha256:" + strings.Repeat("a", 64),
 			BundleIdentity: "bundle:test@sha256:native", PackInventoryGeneration: "sha256:inventory",
 			RuntimeInstanceID: uuid.NewString(), ContextPublicationGeneration: 1,
-			PlanGeneration: plan, TargetGeneration: 1,
+			PlanGeneration: plan,
 		},
 	}
 	ctx := runtimeeffects.WithExecutionMode(context.Background(), runtimeeffects.ExecutionModeLive)

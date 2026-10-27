@@ -112,8 +112,8 @@ func (s *PostgresStore) AdmitOperatorConversationForkChat(ctx context.Context, f
 	return s.runForkPostgresOwner.AdmitOperatorConversationForkChat(ctx, forkID, posture)
 }
 
-func (s *PostgresStore) AdmitStandingServiceRun(ctx context.Context, runID string, posture executionposture.Posture) error {
-	return s.pipelinePostgresOwner.AdmitStandingServiceRun(ctx, runID, posture)
+func (s *PostgresStore) AdmitRunExecutionPosture(ctx context.Context, runID string, posture executionposture.Posture) error {
+	return s.pipelinePostgresOwner.AdmitRunExecutionPosture(ctx, runID, posture)
 }
 
 func (s *PostgresStore) AdvanceChannelOnboarding(ctx context.Context, req channelonboarding.AdvanceRequest) (channelonboarding.Operation, error) {
@@ -640,10 +640,6 @@ func (s *PostgresStore) ListSelectedForkRecoveryEntries(ctx context.Context) ([]
 	return s.runForkPostgresOwner.ListSelectedForkRecoveryEntries(ctx)
 }
 
-func (s *PostgresStore) ListStandingServiceStatuses(ctx context.Context) ([]pipeline.StandingServiceStatus, error) {
-	return s.pipelinePostgresOwner.ListStandingServiceStatuses(ctx)
-}
-
 func (s *PostgresStore) ListV1MailboxItems(ctx context.Context, opts mailbox.V1ListOptions) ([]mailbox.V1Item, string, error) {
 	return s.mailboxPostgresOwner.ListV1MailboxItems(ctx, opts)
 }
@@ -770,10 +766,6 @@ func (s *PostgresStore) LoadPreparedPublishEvent(ctx context.Context, eventID st
 
 func (s *PostgresStore) LoadProposedEffectContinuation(ctx context.Context, cardID string) (decisioncard.ProposedEffectContinuation, error) {
 	return s.decisionPostgresOwner.LoadProposedEffectContinuation(ctx, cardID)
-}
-
-func (s *PostgresStore) LoadReconciledStandingService(ctx context.Context, candidate pipeline.StandingServiceCandidate) (pipeline.StandingServiceReconciliation, bool, error) {
-	return s.pipelinePostgresOwner.LoadReconciledStandingService(ctx, candidate)
 }
 
 func (s *PostgresStore) LoadRecordedActivityResult(ctx context.Context, request activityresult.Query) (activityresult.Record, bool, error) {
@@ -932,10 +924,6 @@ func (s *PostgresStore) PublishConnectedChannelActivation(ctx context.Context, r
 	return s.channelOnboardingPostgresOwner.PublishConnectedChannelActivation(ctx, req)
 }
 
-func (s *PostgresStore) PublishStandingService(ctx context.Context, serviceID string, runID string, generation int64) (int64, error) {
-	return s.pipelinePostgresOwner.PublishStandingService(ctx, serviceID, runID, generation)
-}
-
 func (s *PostgresStore) QueryEntityStates(ctx context.Context, query tools.EntityStateQuery) ([]map[string]any, error) {
 	return s.entityPostgresOwner.QueryEntityStates(ctx, query)
 }
@@ -1000,12 +988,8 @@ func (s *PostgresStore) ReconcileExternalEffectAttempts(ctx context.Context, req
 	return s.effectPostgresOwner.ReconcileExternalEffectAttempts(ctx, request)
 }
 
-func (s *PostgresStore) ReconcileStandingService(ctx context.Context, candidate pipeline.StandingServiceCandidate) (pipeline.StandingServiceReconciliation, error) {
-	return s.pipelinePostgresOwner.ReconcileStandingService(ctx, candidate)
-}
-
-func (s *PostgresStore) ReconcileStandingServiceSet(ctx context.Context, candidates []pipeline.StandingServiceCandidate) ([]pipeline.StandingServiceReconciliation, error) {
-	return s.pipelinePostgresOwner.ReconcileStandingServiceSet(ctx, candidates)
+func (s *PostgresStore) ReconcileFlowRun(ctx context.Context, scope runlifecycle.LiveRunScope, source correlation.SourceArtifactFact) (runlifecycle.FlowRunReconciliation, error) {
+	return s.runLifecyclePostgresOwner.ReconcileFlowRun(ctx, scope, source)
 }
 
 func (s *PostgresStore) RecordDeadLetter(ctx context.Context, rec deadletters.Record) error {
@@ -1136,10 +1120,6 @@ func (s *PostgresStore) ResetChannelOnboardingPendingIdentity(ctx context.Contex
 	return s.channelOnboardingPostgresOwner.ResetChannelOnboardingPendingIdentity(ctx, req)
 }
 
-func (s *PostgresStore) ResetStandingService(ctx context.Context, operation pipeline.StandingServiceOperation) (pipeline.StandingServiceReconciliation, error) {
-	return s.pipelinePostgresOwner.ResetStandingService(ctx, operation)
-}
-
 func (s *PostgresStore) ResolveAgentDirectiveRunTarget(ctx context.Context, identity agentidentity.Identity) (agentcontrol.RunTargetResolution, error) {
 	return s.agentPostgresOwner.ResolveAgentDirectiveRunTarget(ctx, identity)
 }
@@ -1166,10 +1146,6 @@ func (s *PostgresStore) ResolveLatestRunDebugRunID(ctx context.Context) (string,
 
 func (s *PostgresStore) ResolveOperatorAgentIdentity(ctx context.Context, runID string, agentID string, flowInstance string) (agentidentity.Identity, error) {
 	return s.agentPostgresOwner.ResolveOperatorAgentIdentity(ctx, runID, agentID, flowInstance)
-}
-
-func (s *PostgresStore) ResumeStandingService(ctx context.Context, operation pipeline.StandingServiceOperation) (pipeline.StandingServiceReconciliation, error) {
-	return s.pipelinePostgresOwner.ResumeStandingService(ctx, operation)
 }
 
 func (s *PostgresStore) RetireChannelTeardownAuthority(ctx context.Context, req channelonboarding.RetireTeardownAuthorityRequest) (channelonboarding.TeardownOperation, error) {
@@ -1264,10 +1240,6 @@ func (s *PostgresStore) Snapshot(ctx context.Context, deliveryID string) (delive
 	return s.deliveryPostgresOwner.Snapshot(ctx, deliveryID)
 }
 
-func (s *PostgresStore) StandingRunRestartDisposition(ctx context.Context, runID string) (runlifecycle.StandingRestartDisposition, error) {
-	return s.pipelinePostgresOwner.StandingRunRestartDisposition(ctx, runID)
-}
-
 func (s *PostgresStore) StartActivityAttempt(ctx context.Context, record pipeline.ActivityAttemptRecord) (pipeline.ActivityAttemptRecord, bool, error) {
 	return s.activityPostgresOwner.StartActivityAttempt(ctx, record)
 }
@@ -1290,10 +1262,6 @@ func (s *PostgresStore) SupersedeDecisionCardsForStage(ctx context.Context, runI
 
 func (s *PostgresStore) SupersedeProposedEffectsForLoopGenerations(ctx context.Context, runID string, entityID string, current []attemptgeneration.Generation, reason string, at time.Time) error {
 	return s.decisionPostgresOwner.SupersedeProposedEffectsForLoopGenerations(ctx, runID, entityID, current, reason, at)
-}
-
-func (s *PostgresStore) SuspendStandingService(ctx context.Context, operation pipeline.StandingServiceOperation) (pipeline.StandingServiceReconciliation, error) {
-	return s.pipelinePostgresOwner.SuspendStandingService(ctx, operation)
 }
 
 func (s *PostgresStore) TerminalizeRun(ctx context.Context, runID string, reason string) ([]deliverylifecycle.Terminalization, error) {
@@ -1392,8 +1360,8 @@ func (s *SQLiteRuntimeStore) AdmitOperatorConversationForkChat(ctx context.Conte
 	return s.runForkSQLiteOwner.AdmitOperatorConversationForkChat(ctx, forkID, posture)
 }
 
-func (s *SQLiteRuntimeStore) AdmitStandingServiceRun(ctx context.Context, runID string, posture executionposture.Posture) error {
-	return s.pipelineSQLiteOwner.AdmitStandingServiceRun(ctx, runID, posture)
+func (s *SQLiteRuntimeStore) AdmitRunExecutionPosture(ctx context.Context, runID string, posture executionposture.Posture) error {
+	return s.pipelineSQLiteOwner.AdmitRunExecutionPosture(ctx, runID, posture)
 }
 
 func (s *SQLiteRuntimeStore) AdvanceChannelOnboarding(ctx context.Context, req channelonboarding.AdvanceRequest) (channelonboarding.Operation, error) {
@@ -1900,10 +1868,6 @@ func (s *SQLiteRuntimeStore) ListSelectedForkRecoveryEntries(ctx context.Context
 	return s.runForkSQLiteOwner.ListSelectedForkRecoveryEntries(ctx)
 }
 
-func (s *SQLiteRuntimeStore) ListStandingServiceStatuses(ctx context.Context) ([]pipeline.StandingServiceStatus, error) {
-	return s.pipelineSQLiteOwner.ListStandingServiceStatuses(ctx)
-}
-
 func (s *SQLiteRuntimeStore) ListV1MailboxItems(ctx context.Context, opts mailbox.V1ListOptions) ([]mailbox.V1Item, string, error) {
 	return s.mailboxSQLiteOwner.ListV1MailboxItems(ctx, opts)
 }
@@ -2026,10 +1990,6 @@ func (s *SQLiteRuntimeStore) LoadPreparedPublishEvent(ctx context.Context, event
 
 func (s *SQLiteRuntimeStore) LoadProposedEffectContinuation(ctx context.Context, cardID string) (decisioncard.ProposedEffectContinuation, error) {
 	return s.decisionSQLiteOwner.LoadProposedEffectContinuation(ctx, cardID)
-}
-
-func (s *SQLiteRuntimeStore) LoadReconciledStandingService(ctx context.Context, candidate pipeline.StandingServiceCandidate) (pipeline.StandingServiceReconciliation, bool, error) {
-	return s.pipelineSQLiteOwner.LoadReconciledStandingService(ctx, candidate)
 }
 
 func (s *SQLiteRuntimeStore) LoadRecordedActivityResult(ctx context.Context, request activityresult.Query) (activityresult.Record, bool, error) {
@@ -2184,10 +2144,6 @@ func (s *SQLiteRuntimeStore) PublishConnectedChannelActivation(ctx context.Conte
 	return s.channelOnboardingSQLiteOwner.PublishConnectedChannelActivation(ctx, req)
 }
 
-func (s *SQLiteRuntimeStore) PublishStandingService(ctx context.Context, serviceID string, runID string, generation int64) (int64, error) {
-	return s.pipelineSQLiteOwner.PublishStandingService(ctx, serviceID, runID, generation)
-}
-
 func (s *SQLiteRuntimeStore) QueryEntityStates(ctx context.Context, query tools.EntityStateQuery) ([]map[string]any, error) {
 	return s.entitySQLiteOwner.QueryEntityStates(ctx, query)
 }
@@ -2252,12 +2208,8 @@ func (s *SQLiteRuntimeStore) ReconcileExternalEffectAttempts(ctx context.Context
 	return s.effectSQLiteOwner.ReconcileExternalEffectAttempts(ctx, request)
 }
 
-func (s *SQLiteRuntimeStore) ReconcileStandingService(ctx context.Context, candidate pipeline.StandingServiceCandidate) (pipeline.StandingServiceReconciliation, error) {
-	return s.pipelineSQLiteOwner.ReconcileStandingService(ctx, candidate)
-}
-
-func (s *SQLiteRuntimeStore) ReconcileStandingServiceSet(ctx context.Context, candidates []pipeline.StandingServiceCandidate) ([]pipeline.StandingServiceReconciliation, error) {
-	return s.pipelineSQLiteOwner.ReconcileStandingServiceSet(ctx, candidates)
+func (s *SQLiteRuntimeStore) ReconcileFlowRun(ctx context.Context, scope runlifecycle.LiveRunScope, source correlation.SourceArtifactFact) (runlifecycle.FlowRunReconciliation, error) {
+	return s.runLifecycleSQLiteOwner.ReconcileFlowRun(ctx, scope, source)
 }
 
 func (s *SQLiteRuntimeStore) RecordDeadLetter(ctx context.Context, rec deadletters.Record) error {
@@ -2388,10 +2340,6 @@ func (s *SQLiteRuntimeStore) ResetChannelOnboardingPendingIdentity(ctx context.C
 	return s.channelOnboardingSQLiteOwner.ResetChannelOnboardingPendingIdentity(ctx, req)
 }
 
-func (s *SQLiteRuntimeStore) ResetStandingService(ctx context.Context, operation pipeline.StandingServiceOperation) (pipeline.StandingServiceReconciliation, error) {
-	return s.pipelineSQLiteOwner.ResetStandingService(ctx, operation)
-}
-
 func (s *SQLiteRuntimeStore) ResolveAgentDirectiveRunTarget(ctx context.Context, identity agentidentity.Identity) (agentcontrol.RunTargetResolution, error) {
 	return s.agentSQLiteOwner.ResolveAgentDirectiveRunTarget(ctx, identity)
 }
@@ -2414,10 +2362,6 @@ func (s *SQLiteRuntimeStore) ResolveFlowInstance(ctx context.Context, runID stri
 
 func (s *SQLiteRuntimeStore) ResolveOperatorAgentIdentity(ctx context.Context, runID string, agentID string, flowInstance string) (agentidentity.Identity, error) {
 	return s.agentSQLiteOwner.ResolveOperatorAgentIdentity(ctx, runID, agentID, flowInstance)
-}
-
-func (s *SQLiteRuntimeStore) ResumeStandingService(ctx context.Context, operation pipeline.StandingServiceOperation) (pipeline.StandingServiceReconciliation, error) {
-	return s.pipelineSQLiteOwner.ResumeStandingService(ctx, operation)
 }
 
 func (s *SQLiteRuntimeStore) RetireChannelTeardownAuthority(ctx context.Context, req channelonboarding.RetireTeardownAuthorityRequest) (channelonboarding.TeardownOperation, error) {
@@ -2516,10 +2460,6 @@ func (s *SQLiteRuntimeStore) Snapshot(ctx context.Context, deliveryID string) (d
 	return s.deliverySQLiteOwner.Snapshot(ctx, deliveryID)
 }
 
-func (s *SQLiteRuntimeStore) StandingRunRestartDisposition(ctx context.Context, runID string) (runlifecycle.StandingRestartDisposition, error) {
-	return s.pipelineSQLiteOwner.StandingRunRestartDisposition(ctx, runID)
-}
-
 func (s *SQLiteRuntimeStore) StartActivityAttempt(ctx context.Context, record pipeline.ActivityAttemptRecord) (pipeline.ActivityAttemptRecord, bool, error) {
 	return s.activitySQLiteOwner.StartActivityAttempt(ctx, record)
 }
@@ -2542,10 +2482,6 @@ func (s *SQLiteRuntimeStore) SupersedeDecisionCardsForStage(ctx context.Context,
 
 func (s *SQLiteRuntimeStore) SupersedeProposedEffectsForLoopGenerations(ctx context.Context, runID string, entityID string, current []attemptgeneration.Generation, reason string, at time.Time) error {
 	return s.decisionSQLiteOwner.SupersedeProposedEffectsForLoopGenerations(ctx, runID, entityID, current, reason, at)
-}
-
-func (s *SQLiteRuntimeStore) SuspendStandingService(ctx context.Context, operation pipeline.StandingServiceOperation) (pipeline.StandingServiceReconciliation, error) {
-	return s.pipelineSQLiteOwner.SuspendStandingService(ctx, operation)
 }
 
 func (s *SQLiteRuntimeStore) TerminalizeRun(ctx context.Context, runID string, reason string) ([]deliverylifecycle.Terminalization, error) {

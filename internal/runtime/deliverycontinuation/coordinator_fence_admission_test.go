@@ -58,7 +58,7 @@ func TestCoordinatorDispatchUsesExactPreFenceLease(t *testing.T) {
 					}
 				}
 			}()
-			c, err := New(&coordinatorTestStore{}, coordinatorTestRestarts{}, authority, owner, &coordinatorTestDispatcher{}, nil)
+			c, err := New(&coordinatorTestStore{}, authority, owner, &coordinatorTestDispatcher{}, nil)
 			if err != nil {
 				t.Fatal(err)
 			}

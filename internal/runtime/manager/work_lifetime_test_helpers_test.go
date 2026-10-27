@@ -2,7 +2,6 @@ package manager
 
 import (
 	"context"
-	runtimestanding "github.com/division-sh/swarm/internal/runtime/runlifecycle"
 	"sync"
 	"testing"
 	"time"
@@ -105,9 +104,6 @@ func projectManagerTestPersistenceRoles(roles *PersistenceRoles, candidate any) 
 	}
 	if roles.EffectsRecovery == nil {
 		roles.EffectsRecovery, _ = candidate.(runtimeeffects.RecoveryStore)
-	}
-	if roles.StandingRestarts == nil {
-		roles.StandingRestarts, _ = candidate.(runtimestanding.StandingRestartDispositionReader)
 	}
 	if roles.DeliveryQuiescence == nil {
 		roles.DeliveryQuiescence, _ = candidate.(ActiveRunDeliveryQuiescenceReader)
@@ -285,9 +281,6 @@ func newTestAgentManagerWithOptions(t *testing.T, bus Bus, factory AgentFactory,
 	for _, store := range stores {
 		projectManagerTestPersistenceRoles(&opts.PersistenceRoles, store)
 	}
-	if opts.PersistenceRoles.StandingRestarts == nil {
-		opts.PersistenceRoles.StandingRestarts = managerTestStandingRestarts{}
-	}
 	if authorityStore, ok := opts.DeliveryStore.(interface {
 		managerTestDeliveryAuthority() runtimedelivery.ExecutionAuthority
 	}); ok {
@@ -339,10 +332,4 @@ func newTestAgentManagerWithOptions(t *testing.T, bus Bus, factory AgentFactory,
 		}
 	})
 	return manager
-}
-
-type managerTestStandingRestarts struct{}
-
-func (managerTestStandingRestarts) StandingRunRestartDisposition(context.Context, string) (runtimestanding.StandingRestartDisposition, error) {
-	return runtimestanding.StandingRestartDisposition{Kind: runtimestanding.StandingRestartOrdinary}, nil
 }

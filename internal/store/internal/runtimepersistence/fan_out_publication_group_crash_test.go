@@ -431,7 +431,7 @@ func runPublicationGroupCrashChild(t *testing.T, mode string) {
 		t.Fatal("real group crash pipeline dependencies incomplete")
 	}
 	eventBus.SetInterceptors(coordinator)
-	continuations, err := deliverycontinuation.New(selected, selected, deliveryAuthority, work, eventBus, func(_ context.Context, err error) { t.Errorf("actual continuation recovery: %v", err) })
+	continuations, err := deliverycontinuation.New(selected, deliveryAuthority, work, eventBus, func(_ context.Context, err error) { t.Errorf("actual continuation recovery: %v", err) })
 	if err != nil {
 		t.Fatal(err)
 	}

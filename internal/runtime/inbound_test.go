@@ -28,7 +28,6 @@ import (
 	"github.com/division-sh/swarm/internal/providertriggers"
 	runtimebus "github.com/division-sh/swarm/internal/runtime/bus"
 	runtimebustest "github.com/division-sh/swarm/internal/runtime/bus/bustest"
-	runtimeflowidentity "github.com/division-sh/swarm/internal/runtime/core/flowidentity"
 	runtimecredentials "github.com/division-sh/swarm/internal/runtime/credentials"
 	"github.com/division-sh/swarm/internal/runtime/executionposture"
 	runtimeinbound "github.com/division-sh/swarm/internal/runtime/inboundpublication"
@@ -37,43 +36,6 @@ import (
 	"github.com/division-sh/swarm/internal/runtime/semanticview"
 	"github.com/division-sh/swarm/internal/testutil/packfixture"
 )
-
-func TestInboundGatewayStandingServiceAdmissionClosesDrainsAndReopens(t *testing.T) {
-	gateway := NewInboundGateway(nil, nil, nil, executionposture.Live)
-	activeCtx, release, admitted := gateway.beginStandingServiceAdmission(context.Background(), "service-1")
-	if !admitted || activeCtx == nil || release == nil {
-		t.Fatal("initial standing service admission was rejected")
-	}
-	if err := gateway.ReopenStandingServiceAdmission("service-1"); err != nil {
-		t.Fatalf("ReopenStandingServiceAdmission while already open: %v", err)
-	}
-	if err := gateway.CloseStandingServiceAdmission("service-1"); err != nil {
-		t.Fatalf("CloseStandingServiceAdmission: %v", err)
-	}
-	if _, _, admitted := gateway.beginStandingServiceAdmission(context.Background(), "service-1"); admitted {
-		t.Fatal("closed standing service admitted a new request")
-	}
-	waitCtx, cancel := context.WithTimeout(context.Background(), 10*time.Millisecond)
-	defer cancel()
-	if err := gateway.WaitForStandingServiceAdmission(waitCtx, "service-1"); !errors.Is(err, context.DeadlineExceeded) {
-		t.Fatalf("WaitForStandingServiceAdmission while active = %v, want deadline", err)
-	}
-	if err := gateway.ReopenStandingServiceAdmission("service-1"); err == nil {
-		t.Fatal("ReopenStandingServiceAdmission succeeded before drain")
-	}
-	release()
-	if err := gateway.WaitForStandingServiceAdmission(context.Background(), "service-1"); err != nil {
-		t.Fatalf("WaitForStandingServiceAdmission after release: %v", err)
-	}
-	if err := gateway.ReopenStandingServiceAdmission("service-1"); err != nil {
-		t.Fatalf("ReopenStandingServiceAdmission: %v", err)
-	}
-	_, reopenedRelease, admitted := gateway.beginStandingServiceAdmission(context.Background(), "service-1")
-	if !admitted {
-		t.Fatal("reopened standing service rejected admission")
-	}
-	reopenedRelease()
-}
 
 type testInboundTargetResolver interface {
 	ResolveInboundTarget(context.Context, string, string) (InboundTarget, error)
@@ -181,11 +143,9 @@ func testInboundCredentialAdmission(t *testing.T, store runtimecredentials.Store
 
 func testInboundTarget(alias, signingSecret string) InboundTarget {
 	return InboundTarget{
-		ServiceID:           runtimeflowidentity.StandingServiceID("test-inbound-flow"),
-		FlowPath:            "test-inbound-flow",
-		RunID:               "10000000-0000-4000-8000-000000000002",
-		Generation:          1,
-		PublicationSequence: 1,
+
+		FlowPath: "test-inbound-flow",
+		RunID:    "10000000-0000-4000-8000-000000000002",
 
 		Alias:         alias,
 		SigningSecret: signingSecret,
@@ -223,7 +183,6 @@ type capturingInboundEventStore struct {
 	duplicate       bool
 	recorded        bool
 	providerEventID string
-	serviceID       string
 	provider        string
 	active          []string
 }
@@ -269,7 +228,7 @@ func TestInboundGatewayResolvedTargetPreservesStandingAuthority(t *testing.T) {
 	rec := httptest.NewRecorder()
 	gateway.HandleResolvedWebhook(rec, req, InboundTarget{
 		BundleHash: inboundTestBusBundleHash(t, bus), FlowPath: "chat-flow",
-		ServiceID: runtimeflowidentity.StandingServiceID("chat-flow"), Generation: 1, PublicationSequence: 1,
+
 		RunID: "41000000-0000-0000-0000-000000000001",
 		Alias: "chat", Provider: "telegram",
 		SigningSecret: "telegram-secret",
@@ -322,7 +281,6 @@ type recordingInboundStore struct {
 	inserted        bool
 	recorded        bool
 	providerEventID string
-	serviceID       string
 	provider        string
 	store           runtimebus.EventStore
 	record          runtimeinbound.Record
@@ -442,17 +400,8 @@ func (s *recordingInboundStore) ResolveInboundTarget(context.Context, string, st
 	if target.FlowPath == "" {
 		target.FlowPath = defaults.FlowPath
 	}
-	if target.ServiceID == "" {
-		target.ServiceID = runtimeflowidentity.StandingServiceID(target.FlowPath)
-	}
 	if target.RunID == "" {
 		target.RunID = defaults.RunID
-	}
-	if target.Generation == 0 {
-		target.Generation = defaults.Generation
-	}
-	if target.PublicationSequence == 0 {
-		target.PublicationSequence = defaults.PublicationSequence
 	}
 	return target, s.resolveErr
 }
@@ -501,7 +450,6 @@ func runTestInboundPublication(command runtimeinbound.CommitCommand, inserted bo
 func (s *recordingInboundStore) CommitInboundPublication(_ context.Context, command runtimeinbound.CommitCommand) (runtimeinbound.CommitResult, error) {
 	request := command.Request
 	s.providerEventID = request.ProviderEventID
-	s.serviceID = request.StableServiceID
 	s.provider = request.Provider
 	result, err := runTestInboundPublication(command, s.inserted)
 	if err == nil {
@@ -516,7 +464,6 @@ func (s *recordingInboundStore) CommitInboundPublication(_ context.Context, comm
 				}
 			}
 			sink.providerEventID = request.ProviderEventID
-			sink.serviceID = request.StableServiceID
 			sink.provider = request.Provider
 		}
 	}
@@ -853,8 +800,8 @@ func TestInboundGatewayExactRetryBypassesCurrentProjectionAndConflictsOnChangedR
 	bus.SetProviderOutputAuthorizationVerifier(firstCatalog)
 	target := InboundTarget{
 		BundleHash: inboundTestBusBundleHash(t, bus),
-		ServiceID:  runtimeflowidentity.StandingServiceID("ingress"), FlowPath: "ingress",
-		RunID: "85fe8f5a-40dd-4ff2-8785-9f5450e42687", Generation: 1, PublicationSequence: 1,
+		FlowPath:   "ingress",
+		RunID:      "85fe8f5a-40dd-4ff2-8785-9f5450e42687",
 
 		Alias: "chat", Provider: "telegram", AdmissionPlan: firstPlan,
 	}
@@ -907,8 +854,8 @@ func TestInboundGatewayConcurrentLoserReturnsCommittedBatchDespiteCurrentProject
 	bus.SetProviderOutputAuthorizationVerifier(firstCatalog)
 	target := InboundTarget{
 		BundleHash: inboundTestBusBundleHash(t, bus),
-		ServiceID:  runtimeflowidentity.StandingServiceID("ingress"), FlowPath: "ingress",
-		RunID: "85fe8f5a-40dd-4ff2-8785-9f5450e42687", Generation: 1, PublicationSequence: 1,
+		FlowPath:   "ingress",
+		RunID:      "85fe8f5a-40dd-4ff2-8785-9f5450e42687",
 
 		Alias: "chat", Provider: "telegram", AdmissionPlan: firstPlan,
 	}
@@ -927,7 +874,6 @@ func TestInboundGatewayConcurrentLoserReturnsCommittedBatchDespiteCurrentProject
 
 	contenderTarget := target
 	contenderTarget.AdmissionPlan = projectionFailingPlan
-	contenderTarget.PublicationSequence = target.PublicationSequence + 1
 	contender := httptest.NewRecorder()
 	contenderDone := make(chan struct{})
 	contenderStarted := make(chan struct{})
@@ -2812,7 +2758,7 @@ func TestInboundGateway_ExecutesOnlyCompiledRawAdmissionPolicy(t *testing.T) {
 			runID := eventtest.UUID("compiled-raw-admission-run-" + tc.name)
 			gateway.HandleResolvedWebhook(rec, req, InboundTarget{
 				BundleHash: inboundTestBusBundleHash(t, bus), FlowPath: "partner-flow", RunID: runID,
-				ServiceID: runtimeflowidentity.StandingServiceID("partner-flow"), Generation: 1, PublicationSequence: 1,
+
 				Alias: "partner", Provider: "partner-events",
 				SigningSecret: "partner-secret", AdmissionPlan: plan,
 			}, nil)
@@ -2865,7 +2811,7 @@ func TestInboundGateway_PreservesExactEmptyBodyForCompiledAdmission(t *testing.T
 	runID := eventtest.UUID("compiled-empty-body-run")
 	gateway.HandleResolvedWebhook(rec, req, InboundTarget{
 		BundleHash: inboundTestBusBundleHash(t, bus), FlowPath: "partner-flow", RunID: runID,
-		ServiceID: runtimeflowidentity.StandingServiceID("partner-flow"), Generation: 1, PublicationSequence: 1,
+
 		Alias: "partner", Provider: "partner-events",
 		SigningSecret: "partner-secret", AdmissionPlan: plan,
 	}, nil)

@@ -11,7 +11,6 @@ import (
 	runtimeflowidentity "github.com/division-sh/swarm/internal/runtime/core/flowidentity"
 	runtimecorrelation "github.com/division-sh/swarm/internal/runtime/correlation"
 	runtimepipeline "github.com/division-sh/swarm/internal/runtime/pipeline"
-	runtimestanding "github.com/division-sh/swarm/internal/runtime/runlifecycle"
 	"github.com/division-sh/swarm/internal/runtime/semanticview"
 	"sort"
 	"strings"
@@ -68,7 +67,7 @@ func (am *AgentManager) InspectDynamicFlowRuntimeReadinessForSource(ctx context.
 }
 
 func (am *AgentManager) filterDynamicFlowRuntimeReadiness(ctx context.Context, projection runtimepipeline.DynamicFlowRuntimeReadinessProjection) (runtimepipeline.DynamicFlowRuntimeReadinessProjection, error) {
-	return FilterDynamicFlowRuntimeReadiness(ctx, projection, am.roles.StandingRestarts, func(ctx context.Context, runID string) (bool, error) {
+	return FilterDynamicFlowRuntimeReadiness(ctx, projection, func(ctx context.Context, runID string) (bool, error) {
 		if am.lifecycle != nil {
 			if reader, ok := am.lifecycle.persistence().(interface {
 				ObserveStartupRunSource(context.Context, string) (bool, error)
@@ -83,14 +82,13 @@ func (am *AgentManager) filterDynamicFlowRuntimeReadiness(ctx context.Context, p
 
 // FilterDynamicFlowRuntimeReadiness consumes source applicability at inspection,
 // and actual grant ownership at boot. Its result never supplies either grant.
-func FilterDynamicFlowRuntimeReadiness(ctx context.Context, projection runtimepipeline.DynamicFlowRuntimeReadinessProjection, restarts runtimestanding.StandingRestartDispositionReader, applicable func(context.Context, string) (bool, error)) (runtimepipeline.DynamicFlowRuntimeReadinessProjection, error) {
+func FilterDynamicFlowRuntimeReadiness(ctx context.Context, projection runtimepipeline.DynamicFlowRuntimeReadinessProjection, applicable func(context.Context, string) (bool, error)) (runtimepipeline.DynamicFlowRuntimeReadinessProjection, error) {
 	if err := ctx.Err(); err != nil {
 		return runtimepipeline.DynamicFlowRuntimeReadinessProjection{}, err
 	}
-	if restarts == nil || applicable == nil {
-		return runtimepipeline.DynamicFlowRuntimeReadinessProjection{}, errors.New("dynamic flow runtime readiness requires standing restart and source applicability readers")
+	if applicable == nil {
+		return runtimepipeline.DynamicFlowRuntimeReadinessProjection{}, errors.New("dynamic flow runtime readiness requires source applicability readback")
 	}
-	cache := make(map[string]runtimestanding.StandingRestartDisposition)
 	// This read-only inspection shares observations, never mutation authority.
 	ownershipCache := make(map[string]bool)
 	filter := func(items []runtimepipeline.DynamicFlowRuntimeReadiness) ([]runtimepipeline.DynamicFlowRuntimeReadiness, error) {
@@ -112,18 +110,7 @@ func FilterDynamicFlowRuntimeReadiness(ctx context.Context, projection runtimepi
 			if !ownership {
 				continue
 			}
-			disposition, ok := cache[runID]
-			if !ok {
-				var err error
-				disposition, err = restarts.StandingRunRestartDisposition(ctx, runID)
-				if err != nil {
-					return nil, fmt.Errorf("classify dynamic flow runtime readiness run %s: %w", runID, err)
-				}
-				cache[runID] = disposition
-			}
-			if disposition.UsesGenericRecovery() || disposition.Executable() {
-				filtered = append(filtered, item)
-			}
+			filtered = append(filtered, item)
 		}
 		return filtered, nil
 	}

@@ -226,27 +226,14 @@ ingress:
 					t.Fatal(err)
 				}
 				installSelectedStoreTestGeneration(t, capability, candidate.runtime, plan, 1)
-				reconciled, err := reconcileServeStandingServices(ctx, candidate.runtime.Pipeline, candidates, true)
-				if err != nil {
+				if err := reconcileServeFlowRuns(ctx, candidate.runtime.Pipeline, candidates); err != nil {
 					t.Fatal(err)
 				}
-				targets, activations, err := reconcileServeRuntimeStandingTargets(candidate.runtime, reconciled)
-				if err != nil {
-					t.Fatal(err)
+				scopes, err := candidate.runtime.PlanLiveFlowScopes()
+				if err != nil || len(scopes) != 1 {
+					t.Fatal("clock frontier requires one declared live scope", scopes, err)
 				}
-				candidates[0].startupStandingTargets, candidates[0].startupStandingActivations = targets, activations
-				frontierRun := ""
-				for _, result := range reconciled {
-					if result.RunID != "" {
-						if frontierRun != "" && frontierRun != result.RunID {
-							t.Fatal("clock frontier fixture requires one acknowledged standing generation")
-						}
-						frontierRun = result.RunID
-					}
-				}
-				if frontierRun == "" {
-					t.Fatal("startup frontier lacks its actual selected generation receipt")
-				}
+				frontierRun := requireServedLandingRun(t, candidate.runtime, scopes[0].FlowPath).RunID
 				proof.WatchType("platform.stage_timer")
 				if !workflowCase {
 					proof.WatchType(barrier.eventType)
@@ -291,7 +278,7 @@ ingress:
 						t.Fatalf("adopt constructed standing generation: %+v err=%v", adopted, err)
 					}
 					for _, activation := range adopted {
-						if activation.Created || !activation.RestartDisposition.Executable() || activation.RunID != frontierRun {
+						if activation.Created || activation.RunState != "live" || activation.RunID != frontierRun {
 							t.Fatalf("adoption did not retain exact executable generation: %+v", activation)
 						}
 					}

@@ -79,7 +79,7 @@ func TestCompiledProcessLifecycleStartupEvidence(t *testing.T) {
 	}
 	assertFullLifecycleReadySurface(t, process)
 	bundle := requireFullLifecycleHealth(t, process.rpc)
-	standing := waitForFullLifecycleStandingRun(t, process.rpc, bundle, "", 0, "")
+	standing := waitForFullLifecycleStandingRun(t, process.rpc, bundle, "")
 	card := waitForFullLifecycleCard(t, process.rpc, standing.RunID, "lifecycle_ready")
 	parts := map[string]any{}
 	partErrors := map[string]error{}
@@ -302,7 +302,7 @@ func runFullLifecycleJourney(t *testing.T, binary, lifecycleBinary, root string,
 
 	process := startReady()
 	bundleHash := requireFullLifecycleHealth(t, process.rpc)
-	standing := waitForFullLifecycleStandingRun(t, process.rpc, bundleHash, "", 0, "")
+	standing := waitForFullLifecycleStandingRun(t, process.rpc, bundleHash, "")
 	lifecycleCard := waitForFullLifecycleCard(t, process.rpc, standing.RunID, "lifecycle_ready")
 	if lifecycleCard.ListedTitle != "Confirm lifecycle readiness" || lifecycleCard.Snapshot.Title != lifecycleCard.ListedTitle {
 		t.Fatalf("lifecycle decision card title = %#v, want exact authored title", lifecycleCard)
@@ -344,7 +344,7 @@ func runFullLifecycleGracefulJourney(
 	if restartedHash := requireFullLifecycleHealth(t, process.rpc); restartedHash != bundleHash {
 		t.Fatalf("graceful restart bundle = %s, want %s", restartedHash, bundleHash)
 	}
-	restored := waitForFullLifecycleStandingRun(t, process.rpc, bundleHash, standing.Origin.ServiceID, standing.Origin.Generation, standing.RunID)
+	restored := waitForFullLifecycleStandingRun(t, process.rpc, bundleHash, standing.RunID)
 	if restored.RunID != standing.RunID {
 		t.Fatalf("graceful restart standing run = %s, want %s", restored.RunID, standing.RunID)
 	}
@@ -380,11 +380,12 @@ func runFullLifecycleCrashIntrinsicJourney(
 	if recoveredHash := requireFullLifecycleHealth(t, process.rpc); recoveredHash != bundleHash {
 		t.Fatalf("intrinsic recovery bundle = %s, want %s", recoveredHash, bundleHash)
 	}
-	recovered := waitForFullLifecycleStandingRun(t, process.rpc, bundleHash, standing.Origin.ServiceID, standing.Origin.Generation, standing.RunID)
-	if recovered.RunID != standing.RunID || recovered.Status != "live" || recovered.ControlReason != "standing_reconcile" ||
+	recovered := waitForFullLifecycleStandingRun(t, process.rpc, bundleHash, standing.RunID)
+	if recovered.RunID != standing.RunID || recovered.Status != "paused" ||
 		!recovered.StartedAt.Equal(standing.StartedAt) {
-		t.Fatalf("recovered standing run = %#v, want same started identity normalized to running by standing_reconcile from %#v", recovered, standing)
+		t.Fatalf("recovery changed the paused run or its original identity: before=%#v after=%#v", standing, recovered)
 	}
+	continueFullLifecycleRun(t, process.rpc, standing.RunID)
 	approveFullLifecycleEffect(t, process.rpc, standing.RunID, "recovered-old")
 	waitForFullLifecycleConvergence(t, process, standing.RunID, 2)
 	assertFullLifecycleDeliveryCompleted(t, process.rpc, standing.RunID, checkpoint)
@@ -429,7 +430,7 @@ func runFullLifecycleDevFreshJourney(
 	if restartedHash := requireFullLifecycleHealth(t, process.rpc); restartedHash != bundleHash {
 		t.Fatalf("fresh dev epoch bundle = %s, want unchanged source %s", restartedHash, bundleHash)
 	}
-	fresh := waitForFullLifecycleStandingRun(t, process.rpc, bundleHash, standing.Origin.ServiceID, standing.Origin.Generation, standing.RunID)
+	fresh := waitForFullLifecycleStandingRun(t, process.rpc, bundleHash, standing.RunID)
 	if !fresh.StartedAt.After(standing.StartedAt) {
 		t.Fatalf("fresh dev standing started_at = %s, want later than predecessor %s (checkpoint=%#v)", fresh.StartedAt, standing.StartedAt, checkpoint)
 	}
@@ -505,13 +506,12 @@ func requireLifecycleHealthPosture(t *testing.T, rpc *releaseRPCClient, posture 
 }
 
 type fullLifecycleOrigin struct {
-	Kind       string `json:"kind"`
-	ServiceID  string `json:"service_id"`
-	Generation int64  `json:"generation"`
+	Kind string `json:"kind"`
 }
 
 type fullLifecycleRun struct {
 	RunID         string              `json:"run_id"`
+	FlowPath      string              `json:"flow_path"`
 	Status        string              `json:"status"`
 	Origin        fullLifecycleOrigin `json:"origin"`
 	StartedAt     time.Time           `json:"started_at"`
@@ -528,7 +528,7 @@ func listFullLifecycleRuns(ctx context.Context, rpc *releaseRPCClient, bundleHas
 	return result.Runs, nil
 }
 
-func waitForFullLifecycleStandingRun(t *testing.T, rpc *releaseRPCClient, bundleHash, serviceID string, generation int64, runID string) fullLifecycleRun {
+func waitForFullLifecycleStandingRun(t *testing.T, rpc *releaseRPCClient, bundleHash, runID string) fullLifecycleRun {
 	t.Helper()
 	ctx, cancel := context.WithTimeout(context.Background(), fullLifecycleRunLimit)
 	defer cancel()
@@ -540,8 +540,7 @@ func waitForFullLifecycleStandingRun(t *testing.T, rpc *releaseRPCClient, bundle
 		}
 		matches := make([]fullLifecycleRun, 0, 1)
 		for _, run := range runs {
-			if run.Origin.Kind != "standing_generation" || (serviceID != "" && run.Origin.ServiceID != serviceID) ||
-				(generation != 0 && run.Origin.Generation != generation) || (runID != "" && run.RunID != runID) {
+			if run.Origin.Kind != "deployment" || run.FlowPath == "" || (runID != "" && run.RunID != runID) {
 				continue
 			}
 			matches = append(matches, run)
@@ -553,10 +552,10 @@ func waitForFullLifecycleStandingRun(t *testing.T, rpc *releaseRPCClient, bundle
 			return false, fmt.Errorf("run.list returned %d matching standing generations: %#v", len(matches), matches)
 		}
 		match = matches[0]
-		return match.RunID != "" && match.Origin.ServiceID != "" && match.Origin.Generation > 0, nil
+		return match.RunID != "", nil
 	})
 	if err != nil {
-		t.Fatalf("wait for standing generation service=%q generation=%d run=%q: %v; last=%#v", serviceID, generation, runID, err, match)
+		t.Fatalf("wait for deployment flow run=%q: %v; last=%#v", runID, err, match)
 	}
 	return match
 }
@@ -690,9 +689,7 @@ func approveLifecycleEffectMode(t *testing.T, rpc *releaseRPCClient, runID, key,
 
 type fullLifecycleIngressReceipt struct {
 	Status          string   `json:"status"`
-	ServiceID       string   `json:"service_id"`
 	RunID           string   `json:"run_id"`
-	Generation      int64    `json:"generation"`
 	FlowPath        string   `json:"flow_path"`
 	Provider        string   `json:"provider"`
 	ProviderEventID string   `json:"provider_event_id"`
@@ -704,7 +701,7 @@ type fullLifecycleIngressReceipt struct {
 func assertFullLifecycleStandingReceiptContinuity(t *testing.T, first fullLifecycleIngressReceipt, subsequent ...fullLifecycleIngressReceipt) {
 	t.Helper()
 	for index, receipt := range subsequent {
-		if receipt.ServiceID != first.ServiceID || receipt.RunID != first.RunID || receipt.Generation != first.Generation ||
+		if receipt.RunID != first.RunID ||
 			receipt.FlowPath != first.FlowPath || receipt.Provider != first.Provider {
 			t.Fatalf("standing ingress receipt binding changed at occurrence %d: first=%#v current=%#v", index+2, first, receipt)
 		}
@@ -757,14 +754,14 @@ func sendLifecycleTelegramUpdateWithSecret(t *testing.T, process *releaseServePr
 }
 
 func validateFullLifecycleIngressReceipt(receipt fullLifecycleIngressReceipt) error {
-	if receipt.Status != "accepted" || receipt.Generation <= 0 || receipt.FlowPath != "telegram-ingress" ||
+	if receipt.Status != "accepted" || receipt.FlowPath != "telegram-ingress" ||
 		receipt.Provider != "telegram" || receipt.ProviderEventID == "" {
 		return fmt.Errorf("lifecycle receipt lacks its exact declaration binding: %#v", receipt)
 	}
 	if len(receipt.EventIDs) != 2 || len(receipt.EventNames) != 2 || receipt.EventNames[0] != "inbound.telegram" || receipt.EventNames[1] != "inbound.telegram.text_message" {
 		return fmt.Errorf("lifecycle receipt lacks its ordered raw/normalized children: %#v", receipt)
 	}
-	identities := []string{receipt.ServiceID, receipt.RunID, receipt.PublicationID, receipt.EventIDs[0], receipt.EventIDs[1]}
+	identities := []string{receipt.RunID, receipt.PublicationID, receipt.EventIDs[0], receipt.EventIDs[1]}
 	seen := make(map[string]bool, len(identities))
 	for _, identity := range identities {
 		if identity == "" || identity != strings.TrimSpace(identity) || seen[identity] {
@@ -784,6 +781,17 @@ func pauseFullLifecycleRun(t *testing.T, rpc *releaseRPCClient, runID string) {
 		t.Fatal(err)
 	}
 	waitForFullLifecycleRunStatus(t, rpc, runID, "paused")
+}
+
+func continueFullLifecycleRun(t *testing.T, rpc *releaseRPCClient, runID string) {
+	t.Helper()
+	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+	defer cancel()
+	var result map[string]any
+	if err := rpc.call(ctx, "run.continue", map[string]any{"run_id": runID, "idempotency_key": "lifecycle-continue-" + runID}, &result); err != nil {
+		t.Fatal(err)
+	}
+	waitForFullLifecycleRunStatus(t, rpc, runID, "live")
 }
 
 type fullLifecycleEvent struct {

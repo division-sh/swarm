@@ -45,9 +45,9 @@ func TestRunServeWhatsAppUnpairedDeclarationBothStores(t *testing.T) {
 				if err != nil || len(targets) != 0 {
 					t.Fatal("unpaired declaration granted a business target", targets, err)
 				}
-				candidates, err := owner.PlanStandingServiceCandidates()
-				if err != nil || len(candidates) != 1 || candidates[0].BindingEnabled {
-					t.Fatal("unpaired declaration lost discovery or enabled standing retention", candidates, err)
+				candidates, err := owner.PlanLiveFlowScopes()
+				if err != nil || len(candidates) != 1 {
+					t.Fatal("unpaired declaration lost its run scope", candidates, err)
 				}
 				endpoint := "http://" + serveRuntimeAPIListenerFromOutput(t, process.outputString()) + "/v1/rpc"
 				var listed struct {

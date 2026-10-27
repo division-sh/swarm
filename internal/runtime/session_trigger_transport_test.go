@@ -14,7 +14,6 @@ import (
 	runtimecredentials "github.com/division-sh/swarm/internal/runtime/credentials"
 	runtimerunlifecycle "github.com/division-sh/swarm/internal/runtime/runlifecycle"
 	"github.com/division-sh/swarm/internal/runtime/semanticview"
-	"github.com/google/uuid"
 )
 
 func compileSessionTriggerTransportFixture(t *testing.T) providertriggers.InboundAdmissionPlan {
@@ -55,7 +54,7 @@ func TestSessionTriggerHTTPGatewayRefusesBeforeCredentialsOrBody(t *testing.T) {
 	request.Body = io.NopCloser(body)
 	response := httptest.NewRecorder()
 	gateway.HandleResolvedWebhook(response, request,
-		InboundTarget{Alias: "chat", Provider: "acme", AdmissionPlan: plan, ServiceID: uuid.NewString()}, semanticview.Wrap(nil))
+		InboundTarget{Alias: "chat", Provider: "acme", AdmissionPlan: plan}, semanticview.Wrap(nil))
 	if response.Code != http.StatusServiceUnavailable || !strings.Contains(response.Body.String(), "session ingress") ||
 		credentialCalls != 0 || body.reads != 0 {
 		t.Fatalf("HTTP reached session interpretation: status=%d credentials=%d reads=%d response=%s", response.Code, credentialCalls, body.reads, response.Body.String())

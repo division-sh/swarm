@@ -15,7 +15,6 @@ import (
 	runtimetimercancellation "github.com/division-sh/swarm/internal/runtime/timercancellation"
 	"github.com/division-sh/swarm/internal/store/internal/backend/mutationprotocol"
 	"github.com/division-sh/swarm/internal/store/internal/backend/runstate"
-	storestandingdisposition "github.com/division-sh/swarm/internal/store/internal/backend/standingdisposition"
 	"github.com/google/uuid"
 )
 
@@ -101,8 +100,8 @@ func (s *RunLifecyclePostgresOwner) runControlTransition(ctx context.Context, re
 			}
 			switch action {
 			case "stop":
-				if err := rejectPostgresStandingRunStopTx(txctx, tx, runID); err != nil {
-					return runtimeruncontrol.StopFailure("standing_admission", err)
+				if _, err := rejectLiveRunStop(txctx, tx, runID); err != nil {
+					return runtimeruncontrol.StopFailure("live_admission", err)
 				}
 				state, err = s.stopRunControlTx(txctx, tx, attempt, state, req, &changes)
 			case "pause":
@@ -269,22 +268,6 @@ func (s *RunLifecyclePostgresOwner) continueRunControlTx(ctx context.Context, tx
 	return state, nil
 }
 
-func requireGenericContinueAuthority(ctx context.Context, tx *sql.Tx, postgres bool, state runtimeruncontrol.State) error {
-	// Standing writers lock their parent before this run. Do not acquire that
-	// parent here: its canonical read is protected by our existing run fence.
-	disposition, err := storestandingdisposition.ReadByRun(ctx, tx, postgres, state.RunID)
-	if err != nil {
-		return err
-	}
-	if disposition.UsesGenericRecovery() || disposition.Executable() {
-		return nil
-	}
-	return &runtimeruncontrol.StateError{
-		Err: runtimeruncontrol.ErrNotPaused, RunID: state.RunID, CurrentStatus: state.Status,
-		Detail: fmt.Sprintf("owned by standing service %s; %s", disposition.ServiceID, disposition.RunControlGuidance()),
-	}
-}
-
 func (s *RunLifecyclePostgresOwner) stopRunControlTx(ctx context.Context, tx *sql.Tx, attempt *mutationprotocol.Attempt, state runtimeruncontrol.State, req runtimeruncontrol.TransitionRequest, changes *ChannelCardChanges) (runtimeruncontrol.State, error) {
 	lifecycleState, err := runtimerunlifecycle.ParseState(state.Status)
 	if err != nil {
@@ -323,18 +306,6 @@ func (s *RunLifecyclePostgresOwner) stopRunControlTx(ctx context.Context, tx *sq
 	state.AbandonedDeliveries = abandoned
 	state.TimerCancellations = cancellations
 	return state, nil
-}
-
-func rejectPostgresStandingRunStopTx(ctx context.Context, tx *sql.Tx, runID string) error {
-	disposition, err := storestandingdisposition.ReadByRun(ctx, tx, true, runID)
-	if err != nil {
-		return fmt.Errorf("inspect standing run control ownership: %w", err)
-	}
-	if disposition.UsesGenericRecovery() {
-		_, err := rejectLiveRunStop(ctx, tx, runID)
-		return err
-	}
-	return fmt.Errorf("run %s is owned by standing service %s; %s", runID, disposition.ServiceID, disposition.RunControlGuidance())
 }
 
 func (s *RunLifecyclePostgresOwner) quiesceStoppedRunWorkTx(ctx context.Context, tx *sql.Tx, attempt *mutationprotocol.Attempt, runID, reason string, now time.Time) (int, []runtimetimercancellation.Ref, error) {

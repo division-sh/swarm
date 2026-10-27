@@ -40,7 +40,6 @@ func TestOnboardingSelectedProviderRequirementSurvivesReadback(t *testing.T) {
 		c := testCandidate(strings.Repeat("a", 64), "support")
 		c.Posture, c.ProviderCredentialRole, c.SigningCredentialRole, c.Target.SigningCredentialKey = ActivationSessionConnection, role, "", ""
 		c.ConnectionHealth = "provider_connection"
-		c.Coordinate.TargetGeneration, c.Target.Generation, c.Target.PublicationSequence = 0, 0, 0
 		r := Result{Candidate: &c, Operation: Operation{OperationID: "selected-operation", Revision: 1,
 			Provider: c.Provider, Interface: c.Interface, Coordinate: c.Coordinate, TargetSelector: c.Target.Selector,
 			Posture: c.Posture, Ceremony: c.Ceremony, Phase: PhaseActivatingProvider}, Pairing: &PairingReadback{Status: PairingStatusPreparing}}
@@ -113,7 +112,6 @@ func TestInitialSessionPreparationProjectionIsExact(t *testing.T) {
 			c := testCandidate(strings.Repeat("a", 64), "support")
 			c.Posture, c.ProviderCredentialRole, c.SigningCredentialRole, c.Target.SigningCredentialKey = ActivationSessionConnection, "", "", ""
 			c.ConnectionHealth = "provider_connection"
-			c.Coordinate.TargetGeneration, c.Target.Generation, c.Target.PublicationSequence = 0, 0, 0
 			r := Result{Candidate: &c, Operation: Operation{OperationID: "selected-operation", Revision: 3,
 				Provider: c.Provider, Interface: c.Interface, Coordinate: c.Coordinate, TargetSelector: c.Target.Selector,
 				Posture: c.Posture, Ceremony: c.Ceremony, Phase: PhaseActivatingProvider}, Pairing: &PairingReadback{Status: "awaiting_qr"}}

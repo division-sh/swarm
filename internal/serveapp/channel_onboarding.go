@@ -16,7 +16,6 @@ import (
 	runtimeauthoractivity "github.com/division-sh/swarm/internal/runtime/authoractivity"
 	"github.com/division-sh/swarm/internal/runtime/channelnative"
 	runtimecontracts "github.com/division-sh/swarm/internal/runtime/contracts"
-	runtimeflowidentity "github.com/division-sh/swarm/internal/runtime/core/flowidentity"
 	runtimecredentials "github.com/division-sh/swarm/internal/runtime/credentials"
 	runtimeeffects "github.com/division-sh/swarm/internal/runtime/effects"
 	"github.com/division-sh/swarm/internal/runtime/executionposture"
@@ -24,6 +23,7 @@ import (
 	"github.com/division-sh/swarm/internal/runtime/plangeneration"
 	runtimepublicingress "github.com/division-sh/swarm/internal/runtime/publicingress"
 	runtimeregistration "github.com/division-sh/swarm/internal/runtime/registration"
+	"github.com/division-sh/swarm/internal/runtime/runlifecycle"
 )
 
 type servePrebindingActivation struct {
@@ -101,14 +101,14 @@ func serveChannelCandidatesForPlan(contextDef runtime.BundleContext, bundleIdent
 				BundleHash: contextDef.BundleHash(), BundleIdentity: bundleIdentity,
 				PackInventoryGeneration: contextDef.PackInventoryDigest, RuntimeInstanceID: contextDef.RuntimeInstanceID,
 				ContextPublicationGeneration: contextDef.PublicationGeneration,
-				PlanGeneration:               generation, TargetGeneration: uint64(target.Generation),
+				PlanGeneration:               generation,
 			}
 			candidates = append(candidates, channelonboarding.Candidate{
 				SourceLabel: contextDef.BundleIdentity.SourceLabel,
 				Provider:    profile.Provider(), Interface: identity, Coordinate: coordinate,
 				Target: channelonboarding.CandidateTarget{
-					Selector: fmt.Sprintf("ingress:%s:%s", target.FlowPath, target.Provider), ServiceID: target.ServiceID, FlowPath: target.FlowPath,
-					Alias: target.Alias, Provider: target.Provider, Generation: uint64(target.Generation), PublicationSequence: target.PublicationSequence,
+					Selector: fmt.Sprintf("ingress:%s:%s", target.FlowPath, target.Provider), FlowPath: target.FlowPath,
+					Alias: target.Alias, Provider: target.Provider,
 					AdmissionGeneration: target.AdmissionPlan.Generation(), SigningCredentialKey: target.SigningSecret,
 				},
 				Posture: posture, Ceremony: ceremony, OperatorRequired: operatorRequired,
@@ -148,8 +148,8 @@ func serveChannelDeclarationTarget(contextDef runtime.BundleContext, declaration
 		}
 	}
 	return runtime.StandingTarget{
-		ServiceID: runtimeflowidentity.StandingServiceID(declaration.FlowPath), FlowPath: declaration.FlowPath,
-		Alias: declaration.Alias, Provider: binding.Provider, SigningSecret: binding.SigningSecret, AdmissionPlan: binding.AdmissionPlan,
+		FlowPath: declaration.FlowPath,
+		Alias:    declaration.Alias, Provider: binding.Provider, SigningSecret: binding.SigningSecret, AdmissionPlan: binding.AdmissionPlan,
 	}
 }
 
@@ -460,11 +460,10 @@ func declaredActivationCoordinate(contextDef runtime.BundleContext, binding pack
 		PlanGeneration:               generation,
 	}
 	if selector := binding.RegistrationTarget(); selector != "" {
-		target, err := exactContextTarget(contextDef, selector)
+		_, err := exactContextTarget(contextDef, selector)
 		if err != nil {
 			return channelonboarding.ChannelRuntimeContextCoordinate{}, fmt.Errorf("channels.bindings.%s.register: %w", binding.BindingID(), err)
 		}
-		coordinate.TargetGeneration = uint64(target.Generation)
 	}
 	if err := coordinate.ValidateContext(); err != nil {
 		return channelonboarding.ChannelRuntimeContextCoordinate{}, err
@@ -672,13 +671,27 @@ func (o *serveConnectedChannelReadiness) ProjectConnectedChannelReadiness(ctx co
 		return channelonboarding.ConnectedChannelReadiness{}, false, nil
 	}
 	now := o.observedAt()
+	reader, ok := o.store.(runlifecycle.LandingRunReader)
+	if !ok {
+		return channelonboarding.ConnectedChannelReadiness{}, false, fmt.Errorf("channel readiness requires the native landing-run reader")
+	}
+	landing, found, err := reader.LoadLandingRun(ctx, runlifecycle.LiveRunScope{FlowPath: candidate.Target.FlowPath})
+	if err != nil {
+		return channelonboarding.ConnectedChannelReadiness{}, false, err
+	}
+	if !found || landing.Source.BundleHash() != activation.Coordinate.BundleHash ||
+		(landing.State != runlifecycle.StateLive && landing.State != runlifecycle.StatePaused) {
+		return channelonboarding.ConnectedChannelReadiness{
+			Reason: channelonboarding.ReadinessTargetUnavailable, Coordinate: activation.Coordinate,
+			ActivationRevision: activation.Revision, BindingRevision: activation.BindingRevision, ObservedAt: now,
+		}, true, nil
+	}
 	facts := channelonboarding.ReadinessFacts{
 		Coordinate: activation.Coordinate, Interface: activation.Interface, ActivationRevision: activation.Revision,
 		PlanGeneration: activation.Coordinate.PlanGeneration, ActivationCurrent: activation.Status == channelonboarding.ActivationCurrent && activation.OperationID == op.OperationID && activation.Revision == op.ActivationRevision,
 		BindingRevision: activation.BindingRevision, ExpectedBindingRevision: activation.BindingRevision,
 		ProofID: activation.ProofID, ProofRevision: activation.ProofRevision, ExpectedProofRevision: activation.ProofRevision,
-		Posture: activation.Posture, TargetGeneration: activation.Coordinate.TargetGeneration,
-		ExpectedTargetGeneration: candidate.Target.Generation, ObservedAt: now,
+		Posture: activation.Posture, ObservedAt: now,
 	}
 
 	planID := channelonboarding.LearnedBindingID(activation.SlotKey)
@@ -868,8 +881,7 @@ func classifyChannelEffectsBeforeRebind(op channelonboarding.Operation, outcomes
 			outcome.PackInventoryGeneration == coordinate.PackInventoryGeneration &&
 			outcome.RuntimeInstanceID == coordinate.RuntimeInstanceID &&
 			outcome.ContextPublicationGeneration == coordinate.ContextPublicationGeneration &&
-			outcome.PlanGeneration.Equal(coordinate.PlanGeneration) &&
-			outcome.TargetGeneration == coordinate.TargetGeneration
+			outcome.PlanGeneration.Equal(coordinate.PlanGeneration)
 		if !currentOccurrence && !channelEffectTerminal(outcome) {
 			return disposition, fmt.Errorf("channel effect %s retains nonterminal authority for a historical runtime occurrence", outcome.OperationID)
 		}
@@ -909,7 +921,7 @@ func validateChannelEffectProvenance(op channelonboarding.Operation, outcome run
 	}
 	if outcome.BundleHash == "" || outcome.BundleIdentity == "" ||
 		outcome.PackInventoryGeneration == "" || outcome.RuntimeInstanceID == "" ||
-		outcome.ContextPublicationGeneration == 0 || !outcome.PlanGeneration.Valid() || outcome.TargetGeneration == 0 {
+		outcome.ContextPublicationGeneration == 0 || !outcome.PlanGeneration.Valid() {
 		return fmt.Errorf("channel effect %s lacks exact runtime occurrence provenance", outcome.OperationID)
 	}
 	switch outcome.AuthorityKind {
@@ -1010,7 +1022,7 @@ func (d *serveChannelConfirmationDispatcher) DispatchChannelConfirmation(ctx con
 			PrincipalID: binding.PrincipalID, BundleHash: op.Coordinate.BundleHash,
 			BundleIdentity: op.Coordinate.BundleIdentity, PackInventoryGeneration: op.Coordinate.PackInventoryGeneration,
 			RuntimeInstanceID: op.Coordinate.RuntimeInstanceID, ContextPublicationGeneration: op.Coordinate.ContextPublicationGeneration,
-			PlanGeneration: op.Coordinate.PlanGeneration, TargetGeneration: op.Coordinate.TargetGeneration,
+			PlanGeneration: op.Coordinate.PlanGeneration,
 		},
 	}
 	if !authority.Valid() {

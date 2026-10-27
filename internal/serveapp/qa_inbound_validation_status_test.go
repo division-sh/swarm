@@ -53,8 +53,8 @@ func TestQAInboundTypedValidationReturnsPermanentHTTPErrorBothStores(t *testing.
 				}
 			})
 			rt := servedTestProcessRuntime(t, process)
-			statuses, err := rt.Pipeline.ListStandingServiceStatuses(t.Context())
-			if err != nil || len(statuses) != 1 || !statuses[0].RestartDisposition.Executable() || inbound == nil {
+			statuses, err := readServedLandingRuns(t.Context(), rt)
+			if err != nil || len(statuses) != 1 || statuses[0].State != "live" || inbound == nil {
 				t.Fatalf("exact standing ingress fixture: statuses=%+v inbound=%t err=%v", statuses, inbound != nil, err)
 			}
 			standing := statuses[0]
@@ -121,7 +121,7 @@ func TestQAInboundTypedValidationReturnsPermanentHTTPErrorBothStores(t *testing.
 					}
 				}
 				if _, found, err := inbound.LoadInboundPublicationByIdentity(t.Context(), inboundpublication.Identity{
-					ServiceID: standing.ServiceID, RunID: standing.RunID, Generation: standing.Generation,
+					RunID:    standing.RunID,
 					Provider: "partner", ProviderEventID: invalid.id,
 				}); err != nil || found {
 					t.Fatalf("invalid input published: found=%t err=%v", found, err)

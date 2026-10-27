@@ -178,7 +178,7 @@ func testRunServeWhatsAppSignedPairing(t *testing.T, proof servedNativeJourneyPr
 			result = channelonboarding.Result{}
 			requireServedJSONRPCResult(t, endpoint, "channel.onboarding_retry", map[string]any{"operation_id": id}, &result)
 			if result.Operation.Phase != channelonboarding.PhaseAwaitingExternalIdentity || result.IdentityOperation == nil ||
-				result.Pairing != nil || result.Operation.Coordinate.TargetGeneration != 0 {
+				result.Pairing != nil || result.Operation.Coordinate.ValidateContext() != nil {
 				t.Fatal("signed pairing did not reach the original runless operator claim", result)
 			}
 			identityID := result.IdentityOperation.OperationID
@@ -199,7 +199,7 @@ func testRunServeWhatsAppSignedPairing(t *testing.T, proof servedNativeJourneyPr
 			if result.Operation.Phase != channelonboarding.PhaseAwaitingOperatorConfirmation || result.IdentityOperation == nil ||
 				result.IdentityOperation.OperationID != identityID ||
 				result.IdentityOperation.State != operatorchannel.StateAwaitingConfirmation ||
-				result.IdentityOperation.ExternalAccountRef != operatorchannel.MaskPresentation(from.String()) || result.Operation.Coordinate.TargetGeneration != 0 ||
+				result.IdentityOperation.ExternalAccountRef != operatorchannel.MaskPresentation(from.String()) || result.Operation.Coordinate.ValidateContext() != nil ||
 				result.Operation.Coordinate.RuntimeInstanceID == previous.RuntimeInstanceID || result.Operation.Coordinate.BundleHash != previous.BundleHash {
 				t.Fatal("encrypted claim did not reach authenticated confirmation without a business target", result.Operation, result.IdentityOperation, "want sender", from.String())
 			}
@@ -227,7 +227,7 @@ func testRunServeWhatsAppSignedPairing(t *testing.T, proof servedNativeJourneyPr
 			}
 			result = channelonboarding.Result{}
 			requireServedJSONRPCResult(t, endpoint, "channel.onboarding_get", map[string]any{"operation_id": id}, &result)
-			if result.Operation.Phase != channelonboarding.PhasePublishingProcessActivation || result.Operation.Coordinate.TargetGeneration < 1 ||
+			if result.Operation.Phase != channelonboarding.PhasePublishingProcessActivation || result.Operation.Coordinate.ContextPublicationGeneration < 1 ||
 				result.Operation.BindingRevision != confirmed.Binding.Revision || result.Operation.ActivationRevision < 1 {
 				t.Fatal("served native target and activation were not committed through their canonical owners", result.Operation)
 			}
@@ -275,7 +275,6 @@ func testRunServeWhatsAppSignedPairing(t *testing.T, proof servedNativeJourneyPr
 			requireServedJSONRPCResult(t, endpoint, "channel.onboarding_get", map[string]any{"operation_id": id}, &result)
 			if result.Operation.Phase != channelonboarding.PhaseSucceeded || result.Readiness == nil || !result.Readiness.Ready ||
 				result.Operation.IdentityOperationID != identityID || result.Operation.BindingRevision != completed.BindingRevision ||
-				result.Operation.Coordinate.TargetGeneration != completed.Coordinate.TargetGeneration ||
 				result.Operation.Coordinate.RuntimeInstanceID == completed.Coordinate.RuntimeInstanceID {
 				t.Fatal("completed native restart lost its original responsibility", result.Operation, result.Readiness)
 			}

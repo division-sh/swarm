@@ -22,7 +22,7 @@ func (s *RunLifecyclePostgresOwner) StopSelectedRunTx(ctx context.Context, attem
 		if _, err := authoractivity.BundleScopeForSource(ctx, state.BundleHash); err != nil {
 			return fmt.Errorf("selected stop source scope: %w", err)
 		}
-		if err := rejectPostgresStandingRunStopTx(ctx, tx, req.RunID); err != nil {
+		if _, err := rejectLiveRunStop(ctx, tx, req.RunID); err != nil {
 			return err
 		}
 		result, err = s.stopRunControlTx(ctx, tx, attempt, state, req, changes)
@@ -41,7 +41,7 @@ func (s *RunLifecycleSQLiteOwner) StopSelectedRunTx(ctx context.Context, attempt
 		if _, err := authoractivity.BundleScopeForSource(ctx, state.BundleHash); err != nil {
 			return fmt.Errorf("selected stop source scope: %w", err)
 		}
-		if err := rejectSQLiteStandingRunStopTx(ctx, tx, req.RunID); err != nil {
+		if _, err := rejectLiveRunStop(ctx, tx, req.RunID); err != nil {
 			return err
 		}
 		result, err = s.stopRunControlTx(ctx, tx, attempt, state, req, changes)

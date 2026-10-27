@@ -1297,15 +1297,14 @@ func (l *WorkflowTimerLifecycle) Restore(ctx context.Context) error {
 		return err
 	}
 	if runID == "" {
-		// Standing adoption restores these rows with an exact run only after its
-		// durable generation and process-visible routes are installed.
+		// Flow-backed clocks are restored with their exact run after attachment.
 		runtimeOwned := activations[:0]
 		for _, activation := range activations {
-			disposition, err := store.StandingRunRestartDisposition(ctx, activation.RunID)
+			scope, err := store.LoadRunLiveScope(ctx, activation.RunID)
 			if err != nil {
 				return fmt.Errorf("classify workflow timer %s startup owner: %w", activation.Ref.ActivationID, err)
 			}
-			if disposition.UsesGenericRecovery() {
+			if scope.Empty() {
 				runtimeOwned = append(runtimeOwned, activation)
 			}
 		}

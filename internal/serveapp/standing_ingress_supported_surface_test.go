@@ -16,7 +16,6 @@ import (
 	"testing"
 	"time"
 
-	"github.com/division-sh/swarm/internal/apiv1"
 	"github.com/division-sh/swarm/internal/cliapp"
 	"github.com/division-sh/swarm/internal/config"
 	runtimepkg "github.com/division-sh/swarm/internal/runtime"
@@ -26,9 +25,7 @@ import (
 	worklifetime "github.com/division-sh/swarm/internal/runtime/core/worklifetime"
 	runtimecorrelation "github.com/division-sh/swarm/internal/runtime/correlation"
 	runtimecredentials "github.com/division-sh/swarm/internal/runtime/credentials"
-	runtimegenericschedule "github.com/division-sh/swarm/internal/runtime/genericschedule"
 	runtimellm "github.com/division-sh/swarm/internal/runtime/llm"
-	runtimepipeline "github.com/division-sh/swarm/internal/runtime/pipeline"
 	runtimerunlifecycle "github.com/division-sh/swarm/internal/runtime/runlifecycle"
 	"github.com/division-sh/swarm/internal/runtime/semanticview"
 	"github.com/division-sh/swarm/internal/runtime/sessions"
@@ -135,125 +132,6 @@ func (telegramPhraseBotLLMRuntime) PersistConversationSnapshot(context.Context, 
 	return nil
 }
 
-type servedStandingScheduleProbe struct {
-	scheduler  *runtimepipeline.Scheduler
-	occurrence *worklifetime.StandingOccurrence
-}
-
-type servedManagerScheduleProjectionProbe struct {
-	mu      sync.Mutex
-	pending *servedManagerScheduleProjectionRequest
-}
-
-type servedManagerScheduleProjectionRequest struct {
-	scheduler  *runtimepipeline.Scheduler
-	runID      string
-	standing   *worklifetime.StandingOccurrence
-	completion chan servedManagerScheduleProjectionResult
-}
-
-type servedManagerScheduleProjectionResult struct {
-	probe servedStandingScheduleProbe
-	err   error
-}
-
-func (p *servedManagerScheduleProjectionProbe) arm(t testing.TB, manager *runtimepkg.RuntimeContextManager, runID string) <-chan servedManagerScheduleProjectionResult {
-	t.Helper()
-	use, lookup, err := manager.AcquireIngress(context.Background(), "chat", "telegram")
-	if err != nil {
-		t.Fatalf("acquire standing ingress for Manager schedule proof: %v", err)
-	}
-	if use == nil || !lookup.Found || use.Runtime() == nil || use.Runtime().Scheduler == nil {
-		t.Fatalf("standing ingress Manager schedule owner is unavailable: %#v", lookup)
-	}
-	owner, ok := worklifetime.OccurrenceFromContext(use.WorkContext())
-	if !ok {
-		_ = use.Done()
-		t.Fatal("standing ingress Manager schedule setup has no exact occurrence")
-	}
-	standing, ok := worklifetime.StandingProjection(owner)
-	if !ok {
-		_ = use.Done()
-		t.Fatalf("standing ingress Manager schedule setup owner %T has no standing projection", owner)
-	}
-	request := &servedManagerScheduleProjectionRequest{
-		scheduler:  use.Runtime().Scheduler,
-		runID:      strings.TrimSpace(runID),
-		standing:   standing,
-		completion: make(chan servedManagerScheduleProjectionResult, 1),
-	}
-	if err := use.Done(); err != nil {
-		t.Fatalf("settle standing ingress Manager schedule setup: %v", err)
-	}
-	p.mu.Lock()
-	defer p.mu.Unlock()
-	if p.pending != nil {
-		t.Fatal("Manager schedule projection proof is already armed")
-	}
-	p.pending = request
-	return request.completion
-}
-
-func (p *servedManagerScheduleProjectionProbe) observe(ctx context.Context, _ *runtimellm.Session, message runtimellm.Message) error {
-	if message.Role == "tool" {
-		return nil
-	}
-	p.mu.Lock()
-	request := p.pending
-	p.pending = nil
-	p.mu.Unlock()
-	if request == nil {
-		return nil
-	}
-	fail := func(err error) error {
-		request.completion <- servedManagerScheduleProjectionResult{err: err}
-		return err
-	}
-	owner, ok := worklifetime.OccurrenceFromContext(ctx)
-	if !ok {
-		return fail(errors.New("Manager event execution has no exact occurrence"))
-	}
-	if _, ok := owner.(*worklifetime.ManagerWorkOccurrence); !ok {
-		return fail(fmt.Errorf("Manager event execution owner = %T, want *worklifetime.ManagerWorkOccurrence", owner))
-	}
-	standing, ok := worklifetime.StandingProjection(owner)
-	if !ok || standing != request.standing {
-		return fail(fmt.Errorf("Manager event execution standing projection = %p/%t, want %p", standing, ok, request.standing))
-	}
-	for _, activationID := range []string{uuid.NewString(), uuid.NewString()} {
-		wakeup, err := runtimegenericschedule.NewWakeup(activationID, time.Now().Add(time.Hour))
-		if err != nil {
-			return fail(fmt.Errorf("construct Manager-composed served standing wakeup: %w", err))
-		}
-		if err := request.scheduler.RegisterGenericScheduleWakeup(ctx, wakeup); err != nil {
-			return fail(fmt.Errorf("register Manager-composed served standing wakeup: %w", err))
-		}
-	}
-	result := servedManagerScheduleProjectionResult{probe: servedStandingScheduleProbe{scheduler: request.scheduler, occurrence: standing}}
-	request.completion <- result
-	return nil
-}
-
-func waitForServedManagerScheduleProjection(
-	t testing.TB,
-	result <-chan servedManagerScheduleProjectionResult,
-	backend servedparity.Backend,
-	operation string,
-	debug func() string,
-) servedStandingScheduleProbe {
-	t.Helper()
-	select {
-	case completed := <-result:
-		if completed.err != nil {
-			t.Fatalf("%s Manager-composed schedule registration before %s: %v\n%s", backend, operation, completed.err, debug())
-		}
-		return completed.probe
-	case <-time.After(5 * time.Second):
-		t.Fatalf("%s timed out waiting for Manager-composed schedule registration before %s\n%s", backend, operation, debug())
-		return servedStandingScheduleProbe{}
-	}
-}
-
 type servedTelegramDeliveryGate struct {
 	mu      sync.Mutex
 	pending chan struct{}
@@ -312,117 +190,6 @@ func waitForServedStandingContextManager(t testing.TB, ready <-chan *runtimepkg.
 	}
 }
 
-func assertServedStandingSchedulesRetired(t testing.TB, probe servedStandingScheduleProbe, backend servedparity.Backend, operation string) {
-	t.Helper()
-	remaining, err := probe.scheduler.ParkOccurrence(context.Background(), probe.occurrence)
-	if err != nil {
-		t.Fatalf("%s inspect %s standing schedules: %v", backend, operation, err)
-	}
-	if remaining.Count() != 0 {
-		t.Fatalf("%s %s left predecessor schedules reachable: %#v", backend, operation, remaining)
-	}
-}
-
-type servedStandingOperationResult struct {
-	ServiceID      string `json:"service_id"`
-	RunID          string `json:"run_id"`
-	Generation     int64  `json:"generation"`
-	EffectiveState string `json:"effective_state"`
-	Transition     string `json:"transition"`
-}
-
-func invokeServedStandingOperation(t *testing.T, endpoint, method, serviceID, idempotencyKey string) servedStandingOperationResult {
-	t.Helper()
-	var result servedStandingOperationResult
-	response := requestServedJSONRPCWithTimeout(t, endpoint, method, map[string]any{
-		"service_id": serviceID, "reason": "served parity proof", "idempotency_key": idempotencyKey,
-	}, 15*time.Second)
-	if response.Error != nil {
-		t.Fatalf("%s error = %#v", method, response.Error)
-	}
-	if err := json.Unmarshal(response.Result, &result); err != nil {
-		t.Fatalf("decode %s result: %v\n%s", method, err, string(response.Result))
-	}
-	return result
-}
-
-type servedStandingOperationOutcome struct {
-	result servedStandingOperationResult
-	err    error
-}
-
-func startServedStandingOperation(endpoint, method, serviceID, idempotencyKey string) <-chan servedStandingOperationOutcome {
-	completed := make(chan servedStandingOperationOutcome, 1)
-	go func() {
-		result, err := requestServedStandingOperation(endpoint, method, serviceID, idempotencyKey)
-		completed <- servedStandingOperationOutcome{result: result, err: err}
-	}()
-	return completed
-}
-
-func requestServedStandingOperation(endpoint, method, serviceID, idempotencyKey string) (servedStandingOperationResult, error) {
-	body, err := json.Marshal(map[string]any{
-		"jsonrpc": "2.0", "id": method + "-ownership-proof", "method": method,
-		"params": map[string]any{
-			"service_id": serviceID, "reason": "served parity proof", "idempotency_key": idempotencyKey,
-		},
-	})
-	if err != nil {
-		return servedStandingOperationResult{}, fmt.Errorf("marshal %s request: %w", method, err)
-	}
-	req, err := http.NewRequestWithContext(context.Background(), http.MethodPost, endpoint, bytes.NewReader(body))
-	if err != nil {
-		return servedStandingOperationResult{}, fmt.Errorf("build %s request: %w", method, err)
-	}
-	req.Header.Set("Content-Type", "application/json")
-	req.Header.Set("Authorization", "Bearer "+apiv1.DefaultLoopbackAPIToken)
-	response, err := (&http.Client{Timeout: 15 * time.Second}).Do(req)
-	if err != nil {
-		return servedStandingOperationResult{}, fmt.Errorf("post %s request: %w", method, err)
-	}
-	defer response.Body.Close()
-	if response.StatusCode != http.StatusOK {
-		return servedStandingOperationResult{}, fmt.Errorf("%s HTTP status = %d, want 200", method, response.StatusCode)
-	}
-	var envelope servedJSONRPCEnvelope
-	if err := json.NewDecoder(response.Body).Decode(&envelope); err != nil {
-		return servedStandingOperationResult{}, fmt.Errorf("decode %s envelope: %w", method, err)
-	}
-	if envelope.Error != nil {
-		return servedStandingOperationResult{}, fmt.Errorf("%s error = %#v", method, envelope.Error)
-	}
-	var result servedStandingOperationResult
-	if err := json.Unmarshal(envelope.Result, &result); err != nil {
-		return servedStandingOperationResult{}, fmt.Errorf("decode %s result: %w", method, err)
-	}
-	return result, nil
-}
-
-func assertServedStandingOperationWaitsForRoute(t testing.TB, outcome <-chan servedStandingOperationOutcome, release chan struct{}, backend servedparity.Backend, operation string) {
-	t.Helper()
-	select {
-	case completed := <-outcome:
-		close(release)
-		t.Fatalf("%s %s completed before its routed Manager descendant settled: result=%#v err=%v", backend, operation, completed.result, completed.err)
-	case <-time.After(100 * time.Millisecond):
-		close(release)
-	}
-}
-
-func waitForServedStandingOperation(t testing.TB, outcome <-chan servedStandingOperationOutcome, backend servedparity.Backend, method string) servedStandingOperationResult {
-	t.Helper()
-	select {
-	case completed := <-outcome:
-		if completed.err != nil {
-			t.Fatalf("%s %s: %v", backend, method, completed.err)
-		}
-		return completed.result
-	case <-time.After(15 * time.Second):
-		t.Fatalf("%s timed out waiting for %s after routed descendant settlement", backend, method)
-		return servedStandingOperationResult{}
-	}
-}
-
 func configureStandingLifecycleCredentials(t *testing.T) {
 	t.Helper()
 	credentialPath := filepath.Join(t.TempDir(), "credentials.json")
@@ -438,38 +205,18 @@ func configureStandingLifecycleCredentials(t *testing.T) {
 	}
 }
 
-func loadServedStandingOwner(t *testing.T, db *sql.DB, backend string) (serviceID, runID string, generation int64) {
+func assertServedFlowRunState(t *testing.T, db *sql.DB, backend, runID, runStatus string) {
 	t.Helper()
-	query := `SELECT service_id, current_run_id, current_generation FROM standing_services ORDER BY service_id LIMIT 1`
+	query := `SELECT status FROM runs WHERE run_id = ? AND landing_run=TRUE`
 	if backend == "postgres" || backend == string(servedparity.BackendExplicitPostgres) {
-		query = `SELECT service_id::text, current_run_id::text, current_generation FROM standing_services ORDER BY service_id LIMIT 1`
+		query = `SELECT status FROM runs WHERE run_id = $1::uuid AND landing_run=TRUE`
 	}
-	if err := db.QueryRowContext(context.Background(), query).Scan(&serviceID, &runID, &generation); err != nil {
-		t.Fatalf("%s load standing owner: %v", backend, err)
+	var gotRunStatus string
+	if err := db.QueryRowContext(context.Background(), query, runID).Scan(&gotRunStatus); err != nil {
+		t.Fatalf("%s load landing run: %v", backend, err)
 	}
-	return serviceID, runID, generation
-}
-
-func assertServedStandingState(t *testing.T, db *sql.DB, backend, serviceID, runID string, generation int64, effectiveState, runStatus string) {
-	t.Helper()
-	query := `
-		SELECT ss.current_run_id, ss.current_generation, ss.effective_state, r.status
-		FROM standing_services ss JOIN runs r ON r.run_id = ss.current_run_id
-		WHERE ss.service_id = ?`
-	args := []any{serviceID}
-	if backend == "postgres" || backend == string(servedparity.BackendExplicitPostgres) {
-		query = `
-			SELECT ss.current_run_id::text, ss.current_generation, ss.effective_state, r.status
-			FROM standing_services ss JOIN runs r ON r.run_id = ss.current_run_id
-			WHERE ss.service_id = $1::uuid`
-	}
-	var gotRunID, gotState, gotRunStatus string
-	var gotGeneration int64
-	if err := db.QueryRowContext(context.Background(), query, args...).Scan(&gotRunID, &gotGeneration, &gotState, &gotRunStatus); err != nil {
-		t.Fatalf("%s load standing state: %v", backend, err)
-	}
-	if gotRunID != runID || gotGeneration != generation || gotState != effectiveState || gotRunStatus != runStatus {
-		t.Fatalf("%s standing state = run:%s generation:%d state:%s run_status:%s", backend, gotRunID, gotGeneration, gotState, gotRunStatus)
+	if gotRunStatus != runStatus {
+		t.Fatalf("%s landing run %s status=%s, want %s", backend, runID, gotRunStatus, runStatus)
 	}
 }
 
@@ -575,11 +322,10 @@ func TestStandingIngressSupportedSurfaceSQLiteRestartPreservesAuthorityAndReplie
 	var runs, instances, entities int
 	var standingRunID string
 	if err := storetest.DatabaseForTest(sqliteStore).QueryRow(`
-		SELECT current_run_id
-		FROM standing_services
+		SELECT run_id
+		FROM runs
 		WHERE flow_path = 'telegram-ingress'
-		  AND declaration_present = TRUE
-		  AND effective_state = 'active'
+		  AND landing_run = TRUE
 	`).Scan(&standingRunID); err != nil || standingRunID != firstBinding.RunID {
 		t.Fatalf("resolve standing run authority: %v", err)
 	}
@@ -587,7 +333,7 @@ func TestStandingIngressSupportedSurfaceSQLiteRestartPreservesAuthorityAndReplie
 	standingEntityID := receiver.EntityID
 	if err := storetest.DatabaseForTest(sqliteStore).QueryRow(`
 		SELECT COUNT(*)
-		FROM standing_services
+		FROM runs
 		WHERE flow_path = 'telegram-ingress'
 	`).Scan(&runs); err != nil {
 		t.Fatalf("count standing run authorities: %v", err)
@@ -799,11 +545,10 @@ func TestStandingIngressSupportedSurfacePostgresRestartPreservesAuthorityAndRepl
 	var runs, instances, entities int
 	var standingRunID string
 	if err := db.QueryRow(`
-		SELECT current_run_id::text
-		FROM standing_services
+		SELECT run_id::text
+		FROM runs
 		WHERE flow_path = 'telegram-ingress'
-		  AND declaration_present = TRUE
-		  AND effective_state = 'active'
+		  AND landing_run = TRUE
 	`).Scan(&standingRunID); err != nil || standingRunID != binding.RunID {
 		t.Fatalf("resolve standing run authority: %v", err)
 	}
@@ -818,7 +563,7 @@ func TestStandingIngressSupportedSurfacePostgresRestartPreservesAuthorityAndRepl
 	entity := receiver.EntityID
 	if err := db.QueryRow(`
 		SELECT COUNT(*)
-		FROM standing_services
+		FROM runs
 		WHERE flow_path = 'telegram-ingress'
 	`).Scan(&runs); err != nil {
 		t.Fatalf("count standing run authorities: %v", err)
@@ -933,16 +678,16 @@ func TestStandingRestartMixedHealthyAndTerminalProcessParity(t *testing.T) {
 			if db == nil {
 				t.Fatalf("%s mixed standing database was not captured", backend)
 			}
-			healthyService, healthyRun, healthyGeneration := loadServedStandingOwnerByFlow(t, db, backend, "telegram-ingress")
-			terminalService, terminalRun, terminalGeneration := loadServedStandingOwnerByFlow(t, db, backend, "telegram-stopped")
+			healthyRun := loadServedLandingRunByFlow(t, db, backend, "telegram-ingress")
+			terminalRun := loadServedLandingRunByFlow(t, db, backend, "telegram-stopped")
 			firstURL := "http://" + serveRuntimeAPIListenerFromOutput(t, first.outputString())
-			if binding := sendStandingTelegramUpdate(t, firstURL, 301, 42); binding.ServiceID != healthyService || binding.RunID != healthyRun || binding.Generation != healthyGeneration {
+			if binding := sendStandingTelegramUpdate(t, firstURL, 301, 42); binding.RunID != healthyRun {
 				t.Fatalf("%s healthy standing service returned wrong binding before restart: %+v", backend, binding)
 			}
 			requireStandingTelegramCalls(t, calls, selectedStore, 42)
 			waitForStandingDeliveryQuiescence(t, selectedStore)
 			terminalizeStandingRunFromRuntime(t, firstRuntime, postgresStore, sqliteStore, terminalRun)
-			assertServedStandingState(t, db, backend, terminalService, terminalRun, terminalGeneration, "active", "cancelled")
+			assertServedFlowRunState(t, db, backend, terminalRun, "cancelled")
 			if code := first.stop(); code != 0 {
 				t.Fatalf("%s first mixed standing serve exit = %d", backend, code)
 			}
@@ -952,20 +697,15 @@ func TestStandingRestartMixedHealthyAndTerminalProcessParity(t *testing.T) {
 			second.waitForReadyLine()
 			_ = waitForStandingRuntime(t, runtimes, backend, "restart")
 			secondOutput := second.outputString()
-			for _, want := range []string{terminalService, "terminal_declared", "swarm standing reset " + terminalService} {
-				if !strings.Contains(secondOutput, want) {
-					t.Fatalf("%s mixed standing restart output missing %q:\n%s", backend, want, secondOutput)
-				}
-			}
 			secondURL := "http://" + serveRuntimeAPIListenerFromOutput(t, secondOutput)
-			if binding := sendStandingTelegramUpdate(t, secondURL, 302, 84); binding.ServiceID != healthyService || binding.RunID != healthyRun || binding.Generation != healthyGeneration {
+			if binding := sendStandingTelegramUpdate(t, secondURL, 302, 84); binding.RunID != healthyRun {
 				t.Fatalf("%s healthy standing service returned wrong binding after restart: %+v", backend, binding)
 			}
 			requireStandingTelegramCalls(t, calls, selectedStore, 84)
 			waitForStandingDeliveryQuiescence(t, selectedStore)
 			assertNoStandingTelegramCall(t, calls, backend)
-			assertServedStandingState(t, db, backend, healthyService, healthyRun, healthyGeneration, "active", "live")
-			assertServedStandingState(t, db, backend, terminalService, terminalRun, terminalGeneration, "active", "cancelled")
+			assertServedFlowRunState(t, db, backend, healthyRun, "live")
+			assertServedFlowRunState(t, db, backend, terminalRun, "cancelled")
 			if code := second.stop(); code != 0 {
 				t.Fatalf("%s second mixed standing serve exit = %d", backend, code)
 			}
@@ -1017,17 +757,18 @@ func terminalizeStandingRunFromRuntime(t testing.TB, rt *runtimepkg.Runtime, pos
 	}
 }
 
-func loadServedStandingOwnerByFlow(t testing.TB, db *sql.DB, backend, flowID string) (serviceID, runID string, generation int64) {
+func loadServedLandingRunByFlow(t testing.TB, db *sql.DB, backend, flowID string) string {
 	t.Helper()
-	query := `SELECT service_id, current_run_id, current_generation FROM standing_services WHERE flow_path = ?`
+	query := `SELECT run_id FROM runs WHERE flow_path = ? AND landing_run=TRUE`
 	args := []any{flowID}
 	if backend == "postgres" {
-		query = `SELECT service_id::text, current_run_id::text, current_generation FROM standing_services WHERE flow_path = $1`
+		query = `SELECT run_id::text FROM runs WHERE flow_path = $1 AND landing_run=TRUE`
 	}
-	if err := db.QueryRowContext(context.Background(), query, args...).Scan(&serviceID, &runID, &generation); err != nil {
+	var runID string
+	if err := db.QueryRowContext(context.Background(), query, args...).Scan(&runID); err != nil {
 		t.Fatalf("%s load standing owner for flow %s: %v", backend, flowID, err)
 	}
-	return serviceID, runID, generation
+	return runID
 }
 
 func assertNoStandingTelegramCall(t testing.TB, calls <-chan map[string]any, backend string) {
@@ -1112,23 +853,22 @@ func requireChangedStandingColdStartMatrix(t *testing.T, opts cliapp.ServeOption
 		t.Fatalf("read standing flow schema: %v", err)
 	}
 	type candidateMutation struct {
-		name       string
-		apply      func(*testing.T)
-		wantOutput []string
+		name  string
+		apply func(*testing.T)
 	}
 	mutations := []candidateMutation{
 		{name: "source revision one", apply: func(t *testing.T) {
 			writeStandingCandidateFile(t, manifestPath, strings.Replace(string(baseManifest), `version: "1.0.0"`, `version: "1.0.1"`, 1))
-		}, wantOutput: []string{" revised run=" + originalRunID}},
+		}},
 		{name: "source revision two", apply: func(t *testing.T) {
 			writeStandingCandidateFile(t, manifestPath, strings.Replace(string(baseManifest), `version: "1.0.0"`, `version: "1.0.2"`, 1))
-		}, wantOutput: []string{" revised run=" + originalRunID}},
+		}},
 		{name: "source revision three", apply: func(t *testing.T) {
 			writeStandingCandidateFile(t, manifestPath, strings.Replace(string(baseManifest), `version: "1.0.0"`, `version: "1.0.3"`, 1))
-		}, wantOutput: []string{" revised run=" + originalRunID}},
+		}},
 		{name: "manifest name revised", apply: func(t *testing.T) {
 			writeStandingCandidateFile(t, manifestPath, strings.Replace(string(baseManifest), "name: telegram-agent", "name: renamed-telegram-agent", 1))
-		}, wantOutput: []string{" revised run=" + originalRunID}},
+		}},
 		{name: "standing declaration removed", apply: func(t *testing.T) {
 			removeConnectedReceiver(t)
 			removedDir := filepath.Join(t.TempDir(), filepath.Base(flowDir))
@@ -1138,7 +878,7 @@ func requireChangedStandingColdStartMatrix(t *testing.T, opts cliapp.ServeOption
 			t.Cleanup(func() {
 				_ = os.Rename(removedDir, flowDir)
 			})
-		}, wantOutput: []string{" orphaned declaration_removed=true"}},
+		}},
 		{name: "standing changed to non-standing", apply: func(t *testing.T) {
 			removeConnectedReceiver(t)
 			var schema map[string]any
@@ -1153,7 +893,7 @@ func requireChangedStandingColdStartMatrix(t *testing.T, opts cliapp.ServeOption
 				t.Fatal(err)
 			}
 			writeStandingCandidateFile(t, flowSchemaPath, string(raw))
-		}, wantOutput: []string{" orphaned declaration_removed=true"}},
+		}},
 		{name: "flow identity renamed", apply: func(t *testing.T) {
 			writeStandingCandidateFile(t, rootSchemaPath, strings.Replace(string(baseRootSchema), "from: telegram-ingress", "from: telegram-ingress-v2", 1))
 			renamedDir := filepath.Join(sourceRoot, "telegram-ingress-v2")
@@ -1165,7 +905,7 @@ func requireChangedStandingColdStartMatrix(t *testing.T, opts cliapp.ServeOption
 				_ = os.WriteFile(flowSchemaPath, baseFlowSchema, 0o600)
 			})
 			writeStandingCandidateFile(t, filepath.Join(renamedDir, "schema.yaml"), strings.Replace(string(baseFlowSchema), "name: telegram-ingress", "name: telegram-ingress-v2", 1))
-		}, wantOutput: []string{" created run=", " orphaned declaration_removed=true"}},
+		}},
 	}
 	for _, mutation := range mutations {
 		mutation := mutation
@@ -1180,7 +920,7 @@ func requireChangedStandingColdStartMatrix(t *testing.T, opts cliapp.ServeOption
 			if prepare != nil {
 				prepare(t)
 			}
-			requireChangedStandingColdStartReconciled(t, opts, mutation.wantOutput...)
+			requireChangedStandingColdStartReconciled(t, opts, originalRunID)
 		})
 	}
 	writeStandingCandidateFile(t, rootSchemaPath, string(baseRootSchema))
@@ -1195,21 +935,33 @@ func writeStandingCandidateFile(t testing.TB, path, body string) {
 	}
 }
 
-func requireChangedStandingColdStartReconciled(t *testing.T, opts cliapp.ServeOptions, wantOutput ...string) {
+func requireChangedStandingColdStartReconciled(t *testing.T, opts cliapp.ServeOptions, originalRunID string) {
 	t.Helper()
+	ready := make(chan *runtimepkg.Runtime, 1)
+	previousHook := opts.TestRuntimeReadyHook
+	opts.TestRuntimeReadyHook = func(rt *runtimepkg.Runtime) {
+		if previousHook != nil {
+			previousHook(rt)
+		}
+		ready <- rt
+	}
 	process := startServeRuntimeTestProcess(t, opts)
 	process.waitForReadyLine()
+	rt := <-ready
+	reader, ok := rt.Bus.Store().(runtimerunlifecycle.LandingRunReader)
+	if !ok {
+		t.Fatal("served store lacks its native landing run reader")
+	}
+	landing, found, err := reader.LoadLandingRun(t.Context(), runtimerunlifecycle.LiveRunScope{FlowPath: "telegram-ingress"})
+	if err != nil || !found || landing.RunID != originalRunID || landing.State != runtimerunlifecycle.StateLive {
+		t.Fatalf("source change discarded or replaced the retained flow run: %+v found=%t err=%v", landing, found, err)
+	}
 	if code := process.stop(); code != 0 {
 		t.Fatalf("changed standing bundle exit = %d\n%s", code, process.outputString())
 	}
 	output := process.outputString()
 	if !strings.Contains(output, "shutdown · complete") {
 		t.Fatalf("changed standing bundle did not release its selected-store authority:\n%s", output)
-	}
-	for _, want := range wantOutput {
-		if !strings.Contains(output, want) {
-			t.Fatalf("changed standing bundle output omitted %q:\n%s", want, output)
-		}
 	}
 }
 

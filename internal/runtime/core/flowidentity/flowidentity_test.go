@@ -37,17 +37,6 @@ func TestPersistedRowIDKeepsEntityFactSeparateFromRouteAddress(t *testing.T) {
 	}
 }
 
-func TestStandingForService_UsesCanonicalStableFlowInstanceRoute(t *testing.T) {
-	serviceID := StandingServiceID("service")
-	instance := StandingForService(nil, "service", serviceID)
-	if instance.ScopeKey != "service" || instance.InstanceID != serviceID || instance.InstancePath != "service/"+serviceID {
-		t.Fatalf("standing identity = %#v, want canonical service route", instance)
-	}
-	if instance.EntityID != EntityID(instance.InstancePath) || !OwnedByFlow(nil, "service", instance.InstancePath) {
-		t.Fatalf("standing route ownership = entity:%q owned:%v", instance.EntityID, OwnedByFlow(nil, "service", instance.InstancePath))
-	}
-}
-
 func TestSemanticScope_DistinguishesStaticAndInstancedPaths(t *testing.T) {
 	cases := []struct {
 		path string

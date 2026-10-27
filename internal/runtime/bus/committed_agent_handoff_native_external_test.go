@@ -72,7 +72,7 @@ func TestCommittedAgentTransitionNativePublicationBothStores(t *testing.T) {
 						t.Fatal(err)
 					}
 				}
-				coordinator, err := deliverycontinuation.New(f.store, f.store, coordinatorAuthority, owner, observedAgentTransitionDispatch{bus: f.bus, results: results}, nil)
+				coordinator, err := deliverycontinuation.New(f.store, coordinatorAuthority, owner, observedAgentTransitionDispatch{bus: f.bus, results: results}, nil)
 				if err != nil {
 					t.Fatal(err)
 				}

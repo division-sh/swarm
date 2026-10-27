@@ -9,7 +9,6 @@ import (
 
 	"github.com/division-sh/swarm/internal/events"
 	"github.com/division-sh/swarm/internal/events/eventtest"
-	"github.com/division-sh/swarm/internal/runtime/core/flowidentity"
 	"github.com/division-sh/swarm/internal/runtime/core/identitytest"
 	runtimeprovideroutput "github.com/division-sh/swarm/internal/runtime/core/provideroutput"
 	"github.com/division-sh/swarm/internal/runtime/executionmode"
@@ -18,14 +17,14 @@ import (
 
 func TestRequestCanonicalBytesRetainOriginalPublicationEvidence(t *testing.T) {
 	request := evidenceProofRequest(t)
-	request.ExpectedPublicationSequence = 7
+	request.OriginalReceivedAt = time.Unix(7, 0).UTC()
 	request.OriginalTransportMetadata = json.RawMessage(`{"second":2,"first":1}`)
 	original, err := request.CanonicalBytes()
 	if err != nil {
 		t.Fatal(err)
 	}
 	var decoded Request
-	if err := json.Unmarshal(original, &decoded); err != nil || decoded.ExpectedPublicationSequence != 7 {
+	if err := json.Unmarshal(original, &decoded); err != nil || !decoded.OriginalReceivedAt.Equal(request.OriginalReceivedAt) {
 		t.Fatal("request encoding changed its original occurrence", err)
 	}
 	decoded.OriginalTransportMetadata = json.RawMessage(`{ "first": 1, "second": 2 }`)
@@ -33,13 +32,10 @@ func TestRequestCanonicalBytesRetainOriginalPublicationEvidence(t *testing.T) {
 	if err != nil || !bytes.Equal(canonical, original) {
 		t.Fatal("equivalent metadata changed canonical request evidence", err)
 	}
-	decoded.ExpectedPublicationSequence++
+	decoded.OriginalReceivedAt = decoded.OriginalReceivedAt.Add(time.Second)
 	changed, err := decoded.CanonicalBytes()
 	if err != nil || bytes.Equal(changed, original) {
-		t.Fatal("request encoding dropped its original sequence", err)
-	}
-	if got := (CommitCommand{Request: request}).PublicationSequence(); got != 7 {
-		t.Fatalf("webhook request lost its existing exact fence: %d", got)
+		t.Fatal("request encoding dropped its original reception time", err)
 	}
 }
 
@@ -175,7 +171,6 @@ func TestRequestRejectsNullTransportMetadata(t *testing.T) {
 
 func TestA9ReceiptRequestUsesExactAlias(t *testing.T) {
 	request := evidenceProofRequest(t)
-	request.ExpectedGeneration = 1
 	if err := request.Validate(); err != nil {
 		t.Fatal(err)
 	}
@@ -193,7 +188,7 @@ func TestA9ReceiptRequestUsesExactAlias(t *testing.T) {
 
 func evidenceProofRequest(t *testing.T) Request {
 	t.Helper()
-	identity := Identity{ServiceID: flowidentity.StandingServiceID("ingress"), RunID: uuid.NewString(), Generation: 1, Provider: "github", ProviderEventID: "delivery-1"}
+	identity := Identity{RunID: uuid.NewString(), Provider: "github", ProviderEventID: "delivery-1"}
 	publicationID, markerEventID, err := DeterministicIDs(identity)
 	if err != nil {
 		t.Fatal(err)
@@ -201,7 +196,7 @@ func evidenceProofRequest(t *testing.T) Request {
 	return Request{
 		PublicationID: publicationID, Provider: "github", ProviderEventID: "delivery-1",
 		RequestFingerprint: strings.Repeat("a", 64), RequestProjectionVersion: RequestSemanticProjectionVersion,
-		StableServiceID: identity.ServiceID, FlowPath: "ingress", ExpectedGeneration: identity.Generation,
+		FlowPath:    "ingress",
 		TargetAlias: "github", ResolvedRunID: identity.RunID,
 		MarkerEventID: markerEventID, AcknowledgementMode: AcknowledgementAfterPublish,
 		OriginalReceivedAt: time.Unix(1, 0).UTC(), OriginalTransportMetadata: []byte(`{}`),
@@ -234,9 +229,7 @@ func TestA9InboundReceiptIdentity(t *testing.T) {
 	}
 	seen := map[string]bool{publication: true}
 	for _, mutate := range []func(*Identity){
-		func(i *Identity) { i.ServiceID = flowidentity.StandingServiceID("other") },
 		func(i *Identity) { i.RunID = uuid.NewString() },
-		func(i *Identity) { i.Generation++ },
 		func(i *Identity) { i.Provider = "telegram" },
 		func(i *Identity) { i.ProviderEventID = "delivery-2" },
 	} {
@@ -257,10 +250,7 @@ func TestA9InboundReceiptIdentity(t *testing.T) {
 		}
 	}
 	for _, mutate := range []func(*Identity){
-		func(i *Identity) { i.ServiceID = "" },
-		func(i *Identity) { i.ServiceID = " " + i.ServiceID },
 		func(i *Identity) { i.RunID = "" },
-		func(i *Identity) { i.Generation = 0 },
 		func(i *Identity) { i.Provider = "Telegram" },
 		func(i *Identity) { i.ProviderEventID += " " },
 	} {

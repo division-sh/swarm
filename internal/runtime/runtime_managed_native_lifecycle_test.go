@@ -246,8 +246,8 @@ func (managedNativeDurableRoles) RecordDeadLetterOutcome(context.Context, runtim
 func (managedNativeDurableRoles) LoadRunOrigin(context.Context, string) (runtimerunlifecycle.RunOrigin, error) {
 	return runtimerunlifecycle.ScenarioSetupRunOrigin(), nil
 }
-func (managedNativeDurableRoles) StandingRunRestartDisposition(context.Context, string) (runtimerunlifecycle.StandingRestartDisposition, error) {
-	return runtimerunlifecycle.ClassifyStandingRestart(runtimerunlifecycle.StandingRestartFact{})
+func (managedNativeDurableRoles) LoadRunLiveScope(context.Context, string) (runtimerunlifecycle.LiveRunScope, error) {
+	return runtimerunlifecycle.LiveRunScope{}, nil
 }
 
 func runtimeTestSyntheticDurableDependencies(delivery runtimedelivery.Store) runtimebus.DurableDependencies {
@@ -257,7 +257,7 @@ func runtimeTestSyntheticDurableDependencies(delivery runtimedelivery.Store) run
 
 		ActiveAgents:          roles,
 		PreparedEvents:        roles,
-		TargetFailureRecorder: roles, RunOrigins: roles, StandingRestarts: roles, ConstructionPublications: roles, Instances: roles,
+		TargetFailureRecorder: roles, ConstructionPublications: roles, Instances: roles,
 	}
 }
 

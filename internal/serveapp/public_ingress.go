@@ -121,9 +121,8 @@ func resolveServeRegistrationPairs(snapshot serveChannelActivationSnapshot, mana
 			CredentialKeys:              credentialKeys,
 			CredentialAdmissions:        append([]channelonboarding.CredentialAdmission(nil), activation.CredentialAdmissions...),
 			Target: runtimepublicingress.RegistrationTarget{
-				Selector: rawSelector, BundleHash: target.BundleHash, ServiceID: target.ServiceID,
+				Selector: rawSelector, BundleHash: target.BundleHash,
 				FlowPath: target.FlowPath, Alias: target.Alias, Provider: target.Provider,
-				Generation: target.Generation, PublicationSequence: target.PublicationSequence,
 				AdmissionPlanGeneration: target.AdmissionPlan.Generation(), SigningCredentialKey: signingCredentialKey,
 			},
 		})
@@ -169,9 +168,8 @@ func resolveServePrebindingRegistrationPair(intent servePrebindingActivation) (r
 		Registration: registration, CredentialKeys: credentials,
 		CredentialAdmissions: append([]channelonboarding.CredentialAdmission(nil), intent.Operation.CredentialAdmissions...),
 		Target: runtimepublicingress.RegistrationTarget{
-			Selector: target.Selector, BundleHash: intent.Candidate.Coordinate.BundleHash, ServiceID: target.ServiceID,
+			Selector: target.Selector, BundleHash: intent.Candidate.Coordinate.BundleHash,
 			FlowPath: target.FlowPath, Alias: target.Alias, Provider: target.Provider,
-			Generation: int64(target.Generation), PublicationSequence: target.PublicationSequence,
 			AdmissionPlanGeneration: target.AdmissionGeneration, SigningCredentialKey: credentials[intent.Candidate.SigningCredentialRole],
 		},
 	}, nil

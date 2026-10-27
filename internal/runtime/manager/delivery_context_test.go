@@ -98,7 +98,7 @@ func TestAgentDeliveryExecutionContextRejectsPublisherValuesAndBuildsNormalRecei
 	}
 }
 
-func TestAgentManagerWorkUsesContextualStandingOccurrence(t *testing.T) {
+func TestAgentManagerWorkUsesContextualSelectedOccurrence(t *testing.T) {
 	process := worklifetime.NewProcess()
 	runtimeOwner, err := process.NewRuntime(context.Background(), worklifetime.RuntimeIdentity{
 		RuntimeInstanceID: "manager-standing-runtime",
@@ -107,10 +107,10 @@ func TestAgentManagerWorkUsesContextualStandingOccurrence(t *testing.T) {
 	if err != nil {
 		t.Fatalf("new runtime occurrence: %v", err)
 	}
-	standing, err := runtimeOwner.NewStanding(context.Background(), worklifetime.StandingIdentity{
-		ServiceID:  "manager-standing-service",
-		RunID:      uuid.NewString(),
-		Generation: 1,
+	standing, err := process.NewSelectedFork(context.Background(), worklifetime.SelectedForkIdentity{
+		ExecutionID: "manager-selected-execution",
+		RunID:       uuid.NewString(),
+		Generation:  1,
 	})
 	if err != nil {
 		t.Fatalf("new standing occurrence: %v", err)

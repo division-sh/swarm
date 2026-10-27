@@ -270,40 +270,6 @@ func TestPlatformSpecOwnsSourceArtifactSchemaFoundation(t *testing.T) {
 	}
 }
 
-func TestPlatformSchemaConstrainsStandingExecutableProvenance(t *testing.T) {
-	repoRoot := repoRootForRuntimeWriterGuard(t)
-	spec := loadPlatformSpecDocumentForStoreTest(t, runtimecontracts.DefaultPlatformSpecFile(repoRoot))
-	plans, err := GeneratePlatformTableDDLs(spec)
-	if err != nil {
-		t.Fatalf("GeneratePlatformTableDDLs: %v", err)
-	}
-	byName := map[string]string{}
-	for _, plan := range plans {
-		byName[plan.TableName] = strings.Join(plan.Statements, "\n")
-	}
-	standing := byName["standing_services"]
-	if standing == "" {
-		t.Fatal("standing_services ddl plan missing")
-	}
-	for _, want := range []string{"current_bundle_hash    TEXT NOT NULL CHECK"} {
-		if !strings.Contains(standing, want) {
-			t.Fatalf("standing_services ddl missing %q:\n%s", want, standing)
-		}
-	}
-	if strings.Contains(standing, "bundle_source") {
-		t.Fatalf("standing_services retained the retired source-kind axis:\n%s", standing)
-	}
-	for _, table := range []string{"standing_service_generations", "standing_service_journal"} {
-		ddl := byName[table]
-		if ddl == "" {
-			t.Fatalf("%s ddl plan missing", table)
-		}
-		if strings.Contains(ddl, "bundle_hash") || strings.Contains(ddl, "bundle_source") {
-			t.Fatalf("%s duplicates bundle identity:\n%s", table, ddl)
-		}
-	}
-}
-
 func TestPlatformSpecEventReceiptsUsesTypedSubscriberIdentity(t *testing.T) {
 	repoRoot := repoRootForRuntimeWriterGuard(t)
 	spec := loadPlatformSpecDocumentForStoreTest(t, runtimecontracts.DefaultPlatformSpecFile(repoRoot))

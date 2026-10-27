@@ -287,7 +287,7 @@ type StartupRecoveryReadRequest struct {
 		InspectDeliveryRecovery(context.Context, correlation.SourceArtifactFact) (runtimedelivery.RecoveryInventory, error)
 	}
 	Timers           runtimetimerobligation.Reader
-	StandingRestarts runtimestanding.StandingRestartDispositionReader
+	FlowRuns         runtimestanding.FlowScopeReader
 	ReadManagerState func(context.Context) (runtimemanager.RecoverableStateSnapshot, error)
 }
 
@@ -311,10 +311,7 @@ func (rt *Runtime) inspectStartupRecoverySnapshot(ctx context.Context, observedA
 	request := StartupRecoveryReadRequest{
 		SourceArtifact: rt.Options.SourceArtifactFact, RecoveryOnStartup: rt.Config.Runtime.RecoveryOnStartup,
 		ObservedAt: observedAt, Delivery: rt.deliveryStore, Timers: reader,
-		StandingRestarts: rt.standingRestartReader,
-	}
-	if rt.Pipeline != nil {
-		request.StandingRestarts = rt.Pipeline
+		FlowRuns: rt.Pipeline,
 	}
 	if rt.Manager != nil {
 		request.ReadManagerState = rt.Manager.RecoverableStateSnapshot
@@ -332,8 +329,8 @@ func inspectStartupRecoverySnapshot(ctx context.Context, request StartupRecovery
 	if err := request.SourceArtifact.Validate(); err != nil {
 		return snapshot, fmt.Errorf("startup recovery source: %w", err)
 	}
-	if request.ObservedAt.IsZero() || request.Delivery == nil || request.Timers == nil || request.StandingRestarts == nil || request.ReadManagerState == nil {
-		return snapshot, errors.New("startup recovery inspection requires an observation time and all delivery, timer, standing restart and manager readers")
+	if request.ObservedAt.IsZero() || request.Delivery == nil || request.Timers == nil || request.FlowRuns == nil || request.ReadManagerState == nil {
+		return snapshot, errors.New("startup recovery inspection requires an observation time and all delivery, timer, flow scope and manager readers")
 	}
 	delivery, standingDelivery, err := inspectDeliveryRecoveryInventory(ctx, request)
 	if err != nil {
@@ -359,15 +356,12 @@ func inspectStartupRecoverySnapshot(ctx context.Context, request StartupRecovery
 				break
 			}
 		}
-		disposition, err := request.StandingRestarts.StandingRunRestartDisposition(ctx, run.RunID)
+		scope, err := request.FlowRuns.LoadRunLiveScope(ctx, run.RunID)
 		if err != nil {
-			return snapshot, fmt.Errorf("classify standing timer obligations: %w", err)
+			return snapshot, fmt.Errorf("classify flow timer obligations: %w", err)
 		}
-		if disposition.Executable() {
+		if !scope.Empty() {
 			snapshot.StandingTimerObligations += recoverable
-			continue
-		}
-		if disposition.ExactCurrent() {
 			continue
 		}
 		snapshot.StartupBlockingTimers += recoverable
@@ -389,10 +383,7 @@ func (rt *Runtime) inspectDeliveryRecoveryInventory(ctx context.Context) (runtim
 	if rt == nil {
 		return runtimedelivery.RecoveryInventory{}, 0, errors.New("delivery recovery inspection requires runtime read dependencies")
 	}
-	request := StartupRecoveryReadRequest{SourceArtifact: rt.Options.SourceArtifactFact, Delivery: rt.deliveryStore, StandingRestarts: rt.standingRestartReader}
-	if rt.Pipeline != nil {
-		request.StandingRestarts = rt.Pipeline
-	}
+	request := StartupRecoveryReadRequest{SourceArtifact: rt.Options.SourceArtifactFact, Delivery: rt.deliveryStore, FlowRuns: rt.Pipeline}
 	return inspectDeliveryRecoveryInventory(ctx, request)
 }
 
@@ -403,38 +394,37 @@ func inspectDeliveryRecoveryInventory(ctx context.Context, request StartupRecove
 	if err := request.SourceArtifact.Validate(); err != nil {
 		return runtimedelivery.RecoveryInventory{}, 0, err
 	}
-	if request.Delivery == nil || request.StandingRestarts == nil {
-		return runtimedelivery.RecoveryInventory{}, 0, errors.New("delivery recovery inspection requires delivery and standing restart readers")
+	if request.Delivery == nil || request.FlowRuns == nil {
+		return runtimedelivery.RecoveryInventory{}, 0, errors.New("delivery recovery inspection requires delivery and flow scope readers")
 	}
 	inventory, err := request.Delivery.InspectDeliveryRecovery(ctx, request.SourceArtifact)
 	if err != nil {
 		return runtimedelivery.RecoveryInventory{}, 0, fmt.Errorf("inspect executable delivery recovery: %w", err)
 	}
-	return partitionDeliveryRecoveryInventory(ctx, inventory, request.StandingRestarts)
+	return partitionDeliveryRecoveryInventory(ctx, inventory, request.FlowRuns)
 }
 
 func partitionDeliveryRecoveryInventory(
 	ctx context.Context,
 	inventory runtimedelivery.RecoveryInventory,
-	restarts runtimestanding.StandingRestartDispositionReader,
+	flows runtimestanding.FlowScopeReader,
 ) (runtimedelivery.RecoveryInventory, int, error) {
 	if !inventory.HasWork() {
 		return runtimedelivery.RecoveryInventory{}, 0, nil
 	}
-	if restarts == nil {
-		return runtimedelivery.RecoveryInventory{}, 0, errors.New("classify delivery obligations: standing restart disposition reader is required")
+	if flows == nil {
+		return runtimedelivery.RecoveryInventory{}, 0, errors.New("classify delivery obligations: flow scope reader is required")
 	}
 	blocking := runtimedelivery.RecoveryInventory{}
 	standing := 0
 	for _, run := range inventory.Runs {
-		disposition, err := restarts.StandingRunRestartDisposition(ctx, run.RunID)
+		scope, err := flows.LoadRunLiveScope(ctx, run.RunID)
 		if err != nil {
-			return runtimedelivery.RecoveryInventory{}, 0, fmt.Errorf("classify standing delivery obligations for run %s: %w", run.RunID, err)
+			return runtimedelivery.RecoveryInventory{}, 0, fmt.Errorf("classify flow delivery obligations for run %s: %w", run.RunID, err)
 		}
-		switch {
-		case disposition.UsesGenericRecovery():
+		if scope.Empty() {
 			blocking.Runs = append(blocking.Runs, run)
-		case disposition.Executable():
+		} else {
 			standing += run.Total()
 		}
 	}

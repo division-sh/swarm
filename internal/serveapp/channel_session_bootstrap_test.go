@@ -24,7 +24,6 @@ import (
 	runtimebus "github.com/division-sh/swarm/internal/runtime/bus"
 	"github.com/division-sh/swarm/internal/runtime/contracts"
 	"github.com/division-sh/swarm/internal/runtime/core/eventreceiver"
-	"github.com/division-sh/swarm/internal/runtime/core/flowidentity"
 	"github.com/division-sh/swarm/internal/runtime/core/processbinding"
 	"github.com/division-sh/swarm/internal/runtime/core/worklifetime"
 	"github.com/division-sh/swarm/internal/runtime/correlation"
@@ -134,7 +133,7 @@ func newServeBootstrapTestFixture(t *testing.T, backend string) *serveBootstrapT
 		Coordinate: channelonboarding.ChannelRuntimeContextCoordinate{BundleHash: source.BundleHash(), BundleIdentity: "serve-bootstrap-test",
 			PackInventoryGeneration: "sha256:bootstrap-test", RuntimeInstanceID: runtimeID, ContextPublicationGeneration: 1, PlanGeneration: generation},
 		Target: channelonboarding.CandidateTarget{Selector: "ingress:.:whatsapp", FlowPath: ".", Alias: "whatsapp", Provider: "whatsapp",
-			ServiceID: flowidentity.StandingServiceID("."), AdmissionGeneration: catalog.Generation()},
+			AdmissionGeneration: catalog.Generation()},
 		Posture: channelonboarding.ActivationSessionConnection, Ceremony: channelonboarding.CeremonyAuthenticatedTextChallenge,
 		ConfirmationOperation: "deliver", ConnectionHealth: "provider_connection"}
 	principal, err := selected.EnsureOperatorPrincipal(ctx, now)
@@ -462,7 +461,7 @@ func TestServeSessionBootstrapInstallsIncomingOwnersBothStores(t *testing.T) {
 					}
 					current, err := f.adapter.store.GetChannelOnboarding(f.ctx, f.op.OperationID)
 					if err != nil || current.Revision != f.op.Revision || current.SessionAccount != (operatorchannel.SessionAccountAdmission{}) ||
-						current.IdentityOperationID != "" || current.ActivationRevision != 0 || current.Coordinate.TargetGeneration != 0 {
+						current.IdentityOperationID != "" || current.ActivationRevision != 0 || current.Coordinate != (channelonboarding.ChannelRuntimeContextCoordinate{}) {
 						t.Fatal("incoming installation manufactured account, claim or business authority", current, err)
 					}
 					if err := connection.Close(f.ctx); err != nil {

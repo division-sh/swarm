@@ -533,7 +533,6 @@ type ChannelOnboardingEffectOutcome struct {
 	RuntimeInstanceID            string
 	ContextPublicationGeneration uint64
 	PlanGeneration               plangeneration.Generation
-	TargetGeneration             uint64
 	Launched                     bool
 	LaunchRejected               bool
 }

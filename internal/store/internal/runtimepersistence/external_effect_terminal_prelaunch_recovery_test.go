@@ -5,14 +5,11 @@ import (
 	"testing"
 	"time"
 
-	runtimeflowidentity "github.com/division-sh/swarm/internal/runtime/core/flowidentity"
 	runtimeeffects "github.com/division-sh/swarm/internal/runtime/effects"
 	"github.com/division-sh/swarm/internal/runtime/executionmode"
 	runtimefailures "github.com/division-sh/swarm/internal/runtime/failures"
-	runtimepipeline "github.com/division-sh/swarm/internal/runtime/pipeline"
 	runtimerunquiescence "github.com/division-sh/swarm/internal/runtime/runquiescence"
 	"github.com/division-sh/swarm/internal/testutil"
-	"github.com/google/uuid"
 )
 
 func forEachTerminalEffectBackend(t *testing.T, run func(*testing.T, neutralEffectParityFixture)) {
@@ -105,42 +102,6 @@ func TestExternalEffectTerminalRunDirectSettlementDoesNotRequestCompletion(t *te
 		}
 		if after.CompletionDueAt != before.CompletionDueAt || after.CompletionRevision != before.CompletionRevision {
 			t.Fatalf("terminal direct settlement requested completion: before=%#v after=%#v", before, after)
-		}
-	})
-}
-
-func TestExternalEffectTerminalPrelaunchSelectorParksStillCurrentStandingOwner(t *testing.T) {
-	forEachTerminalEffectBackend(t, func(t *testing.T, fixture neutralEffectParityFixture) {
-		selected, ok := fixture.store.(workflowTestSelectedStore)
-		if !ok {
-			t.Fatalf("selected store %T lacks standing persistence", fixture.store)
-		}
-		requireStoreTestPersistedBundle(t, fixture.db, runLifecycleCandidateParityBundleHash)
-		workflow := newPostgresWorkflowTestCoordinator(t, fixture.db, selected)
-		if fixture.sqlite {
-			workflow = newSQLiteWorkflowTestCoordinator(t, fixture.db, selected)
-		}
-		flowPath := "effect-recovery/still-current/" + uuid.NewString()
-		candidate := runtimepipeline.StandingServiceCandidate{BindingEnabled: true,
-			ServiceID: runtimeflowidentity.StandingServiceID(flowPath), FlowPath: flowPath,
-
-			Source: mustStoreTestSourceArtifactFact(runLifecycleCandidateParityBundleHash),
-		}
-		standing, err := workflow.ReconcileStandingService(originalStoreFixtureContext(t, testAuthorActivityRuntimeContext(), fixture.store), candidate)
-		if err != nil {
-			t.Fatalf("create standing recovery owner: %v", err)
-		}
-		fixture = bindNeutralEffectFixtureToRun(t, fixture, standing.RunID)
-		handle := beginNeutralRecoveryAttempt(t, fixture, "authored_http_tool", "still-current", false, false)
-		setStandingRecoveryOwnerDesiredState(t, fixture.db, fixture.sqlite, standing.ServiceID, "suspended", "suspended")
-		attempt := recoveryPostureAttempt{AttemptID: handle.Attempt().AttemptID, RunID: standing.RunID, Initial: runtimeeffects.StateAuthorized}
-		before := readExternalEffectRecoverySnapshot(t, fixture.db, fixture.sqlite, attempt)
-		summary, err := fixture.store.ReconcileExternalEffectAttempts(fixture.ctx, liveExternalEffectRecoveryRequest(time.Now().UTC().Add(time.Minute)))
-		if err != nil || summary != (runtimeeffects.RecoverySummary{}) {
-			t.Fatalf("still-current owner recovery = %#v err=%v, want no-op", summary, err)
-		}
-		if after := readExternalEffectRecoverySnapshot(t, fixture.db, fixture.sqlite, attempt); after != before {
-			t.Fatalf("still-current standing owner was mutated: before=%#v after=%#v", before, after)
 		}
 	})
 }

@@ -346,14 +346,12 @@ func selectedExternalOwnerWithCut(t *testing.T, f *deploymentResourceFixture, cu
 
 			ActiveAgents:   selected,
 			PreparedEvents: selected, TargetFailureRecorder: selected,
-			RunOrigins: selected, StandingRestarts: selected,
 			Instances: workflow, ConstructionPublications: workflow,
 		}
 		roles := manager.PersistenceRoles{
 			LifecycleState: selected, LifecycleEffects: selected, LifecycleDiagnostics: selected,
 			EffectsRecovery: selected, DeliveryQuiescence: selected, EventExistence: selected,
 			DirectiveOperations: selected, DirectiveTargets: selected,
-			StandingRestarts: selected,
 		}
 		owner, err = runforkexecution.NewSelectedContractExecutionOwner(
 			workflow, fork, cut, selected, selected,
@@ -376,14 +374,12 @@ func selectedExternalOwnerWithCut(t *testing.T, f *deploymentResourceFixture, cu
 
 			ActiveAgents:   selected,
 			PreparedEvents: selected, TargetFailureRecorder: selected,
-			RunOrigins: selected, StandingRestarts: selected,
 			Instances: workflow, ConstructionPublications: workflow,
 		}
 		roles := manager.PersistenceRoles{
 			LifecycleState: selected, LifecycleEffects: selected, LifecycleDiagnostics: selected,
 			EffectsRecovery: selected, DeliveryQuiescence: selected, EventExistence: selected,
 			DirectiveOperations: selected, DirectiveTargets: selected,
-			StandingRestarts: selected,
 		}
 		owner, err = runforkexecution.NewSelectedContractExecutionOwner(
 			workflow, fork, cut, selected, selected,

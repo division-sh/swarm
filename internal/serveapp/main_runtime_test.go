@@ -371,15 +371,12 @@ func TestPlatformSpecWorkspaceDataProjectionAuthorityPromoted(t *testing.T) {
 }
 
 func TestServeRuntimeContextStandingTargetsPreservesNonExecutableDeclarations(t *testing.T) {
-	active := runtimepkg.StandingTarget{ServiceID: "active-service", RunID: "active-run", Provider: "telegram"}
-	stopped := runtimepkg.StandingTarget{ServiceID: "stopped-service", RunID: "stopped-run", Provider: "telegram"}
+	active := runtimepkg.StandingTarget{RunID: "active-run", FlowPath: "active", Alias: "active", Provider: "telegram"}
+	stopped := runtimepkg.StandingTarget{RunID: "stopped-run", FlowPath: "stopped", Alias: "stopped", Provider: "telegram"}
 	got := serveRuntimeContextStandingTargets(
 		[]runtimepkg.StandingTarget{active},
-		[]runtimepkg.StandingTarget{{ServiceID: active.ServiceID, Provider: active.Provider}, stopped},
-		[]runtimepkg.StandingActivation{
-			{ServiceID: active.ServiceID, RestartDisposition: storerunlifecycle.StandingRestartDisposition{Kind: storerunlifecycle.StandingRestartActiveIntrinsic}},
-			{ServiceID: stopped.ServiceID, RestartDisposition: storerunlifecycle.StandingRestartDisposition{Kind: storerunlifecycle.StandingRestartTerminalDeclared}},
-		},
+		[]runtimepkg.StandingTarget{{FlowPath: active.FlowPath, Alias: active.Alias, Provider: active.Provider}, stopped},
+		nil,
 	)
 	if len(got) != 2 {
 		t.Fatalf("runtime context standing targets = %#v, want active plus stopped declaration", got)
@@ -660,12 +657,7 @@ func TestServePinnedHashAdmissionExcludesCurrentStandingAndRejectsOrdinaryMismat
 	standingSource := mustServeTestPersistedSourceArtifactFact(otherHash)
 	standingCtx := runStatusAuthorActivityContext(standingSource)
 	standingCtx = serveFixtureProcessContext(t, standingCtx, pg)
-	standing, err := pg.ReconcileStandingService(standingCtx, runtimepipeline.StandingServiceCandidate{
-		BindingEnabled: true,
-		ServiceID:      runtimeflowidentity.StandingServiceID("bundle-admission-proof"),
-		FlowPath:       "bundle-admission-proof",
-		Source:         standingSource,
-	})
+	standing, err := pg.ReconcileFlowRun(standingCtx, storerunlifecycle.LiveRunScope{FlowPath: "bundle-admission-proof"}, standingSource)
 	if err != nil {
 		t.Fatalf("reconcile current standing bundle admission run: %v", err)
 	}

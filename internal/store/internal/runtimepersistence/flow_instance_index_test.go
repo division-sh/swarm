@@ -15,6 +15,7 @@ import (
 	"github.com/division-sh/swarm/internal/runtime/correlation"
 	"github.com/division-sh/swarm/internal/runtime/pipeline"
 	"github.com/division-sh/swarm/internal/runtime/runfork"
+	"github.com/division-sh/swarm/internal/runtime/runlifecycle"
 	"github.com/division-sh/swarm/internal/runtime/semanticview"
 	"github.com/division-sh/swarm/internal/store/internal/backend/pipelinepersistence"
 	"github.com/google/uuid"
@@ -338,9 +339,7 @@ func TestR7DirectoryScopedInventoryIgnoresAmbientRunBothStores(t *testing.T) {
 			f, first := newR7KeylessIndexProof(t, backend)
 			source := semanticview.Wrap(f.bundle)
 			fact, _ := correlation.SourceArtifactFactFromContext(f.ctx)
-			standing, err := f.workflows.ReconcileStandingService(f.ctx, pipeline.StandingServiceCandidate{
-				BindingEnabled: true, ServiceID: flowidentity.StandingServiceID("."), FlowPath: ".", Source: fact,
-			})
+			standing, err := f.workflows.ReconcileFlowRun(f.ctx, runlifecycle.LiveRunScope{FlowPath: "."}, fact)
 			if err != nil {
 				t.Fatal(err)
 			}
@@ -409,9 +408,7 @@ func TestR7DirectoryUnconstructedStandingRunHasNoObservationBothStores(t *testin
 			}, nil)
 			source := semanticview.Wrap(f.bundle)
 			fact, _ := correlation.SourceArtifactFactFromContext(f.ctx)
-			standing, err := f.workflows.ReconcileStandingService(f.ctx, pipeline.StandingServiceCandidate{
-				BindingEnabled: true, ServiceID: flowidentity.StandingServiceID("."), FlowPath: ".", Source: fact,
-			})
+			standing, err := f.workflows.ReconcileFlowRun(f.ctx, runlifecycle.LiveRunScope{FlowPath: "."}, fact)
 			if err != nil {
 				t.Fatal(err)
 			}

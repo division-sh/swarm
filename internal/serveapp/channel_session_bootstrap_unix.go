@@ -273,7 +273,6 @@ func (s *serveSessionBootstrap) RollSessionSource(ctx context.Context, op channe
 		}
 	}
 	coordinate := candidate.Coordinate
-	coordinate.TargetGeneration = 0
 	rolled, err := s.store.AdvanceChannelOnboarding(owned, channelonboarding.AdvanceRequest{OperationID: op.OperationID,
 		ExpectedRevision: op.Revision, Phase: channelonboarding.PhaseAwaitingOperatorConfirmation, SourceRollover: &coordinate, Now: time.Now().UTC()})
 	if err != nil {
@@ -305,7 +304,7 @@ func (s *serveSessionBootstrap) validateRetainedSessionOperation(ctx context.Con
 		current.SlotKey != op.SlotKey || current.BindingRevision != op.BindingRevision || current.ActivationRevision != op.ActivationRevision ||
 		current.PrincipalID != op.PrincipalID || current.SessionAccount != op.SessionAccount || current.SessionConnectionID != op.SessionConnectionID ||
 		current.TargetSelector != op.TargetSelector || current.Interface.Normalized() != op.Interface.Normalized() ||
-		current.Coordinate.TargetGeneration != op.Coordinate.TargetGeneration || !current.Coordinate.MatchesDeclaration(op.Coordinate) {
+		!current.Coordinate.MatchesDeclaration(op.Coordinate) {
 		return channelonboarding.ErrRevisionConflict
 	}
 	if ctx.Err() != nil {

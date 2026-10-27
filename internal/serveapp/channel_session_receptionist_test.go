@@ -144,7 +144,7 @@ func TestRunServeWhatsAppReceptionistWithoutOperatorBothStores(t *testing.T) {
 				peer.awaitPostLogin()
 				requireServedJSONRPCResult(t, endpoint, "channel.onboarding_get", map[string]any{"operation_id": id}, &result)
 				if response.Error != nil {
-					t.Fatal("receptionist continuation refused", response.Error, "phase", result.Operation.Phase, "target", result.Operation.Coordinate.TargetGeneration)
+					t.Fatal("receptionist continuation refused", response.Error, "phase", result.Operation.Phase, "target", result.Operation.Coordinate.ContextPublicationGeneration)
 				}
 				if result.Operation.Phase != channelonboarding.PhaseSucceeded || result.Operation.Ceremony != channelonboarding.CeremonyAccountLink ||
 					result.IdentityOperation != nil || result.Operation.BindingRevision != 0 || result.Readiness == nil || !result.Readiness.Ready {

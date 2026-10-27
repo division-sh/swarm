@@ -36,8 +36,8 @@ func TestOwnedMockClockLocalAgentConsumerBothStores(t *testing.T) {
 			process.waitForReadyLine()
 			endpoint := "http://" + serveRuntimeAPIListenerFromOutput(t, process.outputString()) + "/v1/rpc"
 			runtime := servedTestProcessRuntime(t, process)
-			statuses, err := runtime.Pipeline.ListStandingServiceStatuses(t.Context())
-			if err != nil || len(statuses) != 1 || !statuses[0].RestartDisposition.Executable() {
+			statuses, err := readServedLandingRuns(t.Context(), runtime)
+			if err != nil || len(statuses) != 1 || statuses[0].State != "live" {
 				t.Fatalf("agent clock lacks a real selected generation: statuses=%+v err=%v", statuses, err)
 			}
 			runID := statuses[0].RunID

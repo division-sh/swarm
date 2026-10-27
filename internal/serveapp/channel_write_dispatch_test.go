@@ -31,7 +31,7 @@ func TestNativeChannelWriteDispatchNeverFallsBackToHTTP(t *testing.T) {
 			ActivationID: uuid.NewString(), ActivationRevision: 2, BindingRevision: 3, PrincipalID: uuid.NewString(),
 			BundleHash: "bundle-v2:sha256:" + strings.Repeat("a", 64), BundleIdentity: "bundle:test@sha256:dispatch",
 			PackInventoryGeneration: "sha256:dispatch", RuntimeInstanceID: uuid.NewString(),
-			ContextPublicationGeneration: 7, PlanGeneration: generation, TargetGeneration: 1}}
+			ContextPublicationGeneration: 7, PlanGeneration: generation}}
 	if !authority.Valid() {
 		t.Fatal("invalid dispatch test authority")
 	}

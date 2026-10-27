@@ -57,7 +57,7 @@ func TestPublicIngressRawRegistrationNamespaceCollisionIsRefused(t *testing.T) {
 }
 
 func TestPublicIngressClassificationRejectsMissingAndForeignEvidence(t *testing.T) {
-	for _, mismatch := range []string{"missing_publication", "executable_publication", "foreign_publication", "foreign_bundle", "foreign_alias", "foreign_provider", "foreign_service", "foreign_run", "foreign_generation", "foreign_publication_sequence", "missing_credentials"} {
+	for _, mismatch := range []string{"missing_publication", "executable_publication", "foreign_publication", "foreign_bundle", "foreign_alias", "foreign_provider", "foreign_run", "missing_credentials"} {
 		t.Run(mismatch, func(t *testing.T) {
 			use, target, _, _ := publicIngressRegistrationFixture(t, "pack_unmanaged")
 			switch mismatch {
@@ -78,14 +78,8 @@ func TestPublicIngressClassificationRejectsMissingAndForeignEvidence(t *testing.
 				target.Alias = "foreign"
 			case "foreign_provider":
 				target.Provider = "foreign"
-			case "foreign_service":
-				target.ServiceID = uuid.NewString()
 			case "foreign_run":
 				target.RunID = uuid.NewString()
-			case "foreign_generation":
-				target.Generation++
-			case "foreign_publication_sequence":
-				target.PublicationSequence++
 			case "missing_credentials":
 				use.runtime.standingCredentialAdmission = nil
 			}
@@ -136,8 +130,8 @@ func TestPublicIngressMixedBindingsKeepAuthorAndManagedTargetsDistinct(t *testin
 			continue
 		}
 		_, managed, err := use.AdmitPublicIngressTarget(InboundTarget{
-			BundleHash: author.BundleHash, ServiceID: author.ServiceID, FlowPath: author.FlowPath,
-			RunID: author.RunID, Generation: author.Generation, PublicationSequence: author.PublicationSequence,
+			BundleHash: author.BundleHash, FlowPath: author.FlowPath,
+			RunID: author.RunID,
 			Alias: author.Alias, Provider: author.Provider, SigningSecret: author.SigningSecret, AdmissionPlan: author.AdmissionPlan,
 		})
 		if err != nil || managed {
@@ -171,8 +165,8 @@ func publicIngressRegistrationFixture(t *testing.T, mode string) (*RuntimeContex
 		SourceArtifactFact: rt.Options.SourceArtifactFact, Source: rt.Options.WorkflowModule.SemanticSource(), DeclaredChannelPublication: rt.Options.DeclaredChannelPublication, StandingTargets: targets,
 	}}
 	return use, InboundTarget{
-		BundleHash: target.BundleHash, ServiceID: target.ServiceID, FlowPath: target.FlowPath, Alias: target.Alias,
-		RunID: target.RunID, Generation: target.Generation, PublicationSequence: target.PublicationSequence,
+		BundleHash: target.BundleHash, FlowPath: target.FlowPath, Alias: target.Alias,
+		RunID:    target.RunID,
 		Provider: target.Provider, SigningSecret: target.SigningSecret, AdmissionPlan: target.AdmissionPlan,
 	}, file, store
 }

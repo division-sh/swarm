@@ -8,6 +8,7 @@ import (
 	"time"
 
 	"github.com/division-sh/swarm/internal/runtime/core/worklifetime"
+	"github.com/division-sh/swarm/internal/runtime/correlation"
 	"github.com/division-sh/swarm/internal/runtime/executionposture"
 	"github.com/google/uuid"
 )
@@ -105,21 +106,21 @@ func instanceRecoveryActivation(t *testing.T) Activation {
 		AdmittedAt: admitted, InitialDueAt: due, CurrentDueAt: due, Status: StatusActive}
 }
 
-func instanceRecoveryWorkOwner(t *testing.T, runID string) (*worklifetime.StandingOccurrence, *worklifetime.RuntimeOccurrence) {
+func instanceRecoveryWorkOwner(t *testing.T, runID string) (*worklifetime.RuntimeOccurrence, *worklifetime.RuntimeOccurrence) {
 	t.Helper()
 	process := worklifetime.NewProcess()
 	runtime, err := process.NewRuntime(t.Context(), worklifetime.RuntimeIdentity{RuntimeInstanceID: uuid.NewString(), BundleHash: "clock-bundle"})
 	if err != nil {
 		t.Fatal(err)
 	}
-	standing, err := runtime.NewStanding(t.Context(), worklifetime.StandingIdentity{ServiceID: "clock-service", RunID: runID, Generation: 1})
+	standing, err := process.NewRuntime(t.Context(), worklifetime.RuntimeIdentity{RuntimeInstanceID: runID, BundleHash: "clock-bundle"})
 	if err != nil {
 		t.Fatal(err)
 	}
 	t.Cleanup(func() {
 		ctx, cancel := context.WithTimeout(context.Background(), time.Second)
 		defer cancel()
-		if err := standing.RetireAndWait(ctx); err != nil {
+		if _, err := standing.RetireAndWait(ctx); err != nil {
 			t.Error(err)
 		}
 		if _, err := runtime.RetireAndWait(ctx); err != nil {
@@ -159,7 +160,7 @@ func TestInstanceClockRecoveryRetainsExactStandingOwner(t *testing.T) {
 				t.Fatal(err)
 			}
 			t.Cleanup(func() { stopLifecycleProof(t, lifecycle) })
-			lease, err := standing.Begin(t.Context())
+			lease, err := standing.Begin(correlation.WithRunID(t.Context(), activation.Command.RunID))
 			if err != nil {
 				t.Fatal(err)
 			}
@@ -226,20 +227,18 @@ func TestInstanceClockRecoveryRetainsExactStandingOwner(t *testing.T) {
 }
 
 func TestInstanceClockRecoveryRejectsMissingWrongAndClosedOwners(t *testing.T) {
-	for _, kind := range []string{"missing", "runtime", "wrong_run", "fenced", "retired"} {
+	for _, kind := range []string{"missing", "wrong_run", "fenced", "retired"} {
 		t.Run(kind, func(t *testing.T) {
 			activation := instanceRecoveryActivation(t)
 			runID := activation.Command.RunID
 			if kind == "wrong_run" {
 				runID = uuid.NewString()
 			}
-			standing, runtime := instanceRecoveryWorkOwner(t, runID)
-			ctx := worklifetime.WithOccurrence(t.Context(), standing)
+			standing, _ := instanceRecoveryWorkOwner(t, runID)
+			ctx := worklifetime.WithOccurrence(correlation.WithRunID(t.Context(), runID), standing)
 			switch kind {
 			case "missing":
 				ctx = t.Context()
-			case "runtime":
-				ctx = worklifetime.WithOccurrence(t.Context(), runtime)
 			case "fenced":
 				if err := standing.Fence(); err != nil {
 					t.Fatal(err)
@@ -289,7 +288,7 @@ func TestInstanceClockPendingRecoveryJoinsStandingAndShutdown(t *testing.T) {
 				t.Fatal(err)
 			}
 			t.Cleanup(func() { stopLifecycleProof(t, lifecycle) })
-			queued, err := lifecycle.ReconcileWakeupWithRecovery(worklifetime.WithOccurrence(t.Context(), standing), activation.ID)
+			queued, err := lifecycle.ReconcileWakeupWithRecovery(worklifetime.WithOccurrence(correlation.WithRunID(t.Context(), activation.Command.RunID), standing), activation.ID)
 			if !queued || err == nil {
 				t.Fatalf("initial registration: queued=%t err=%v", queued, err)
 			}
@@ -313,7 +312,7 @@ func TestInstanceClockPendingRecoveryJoinsStandingAndShutdown(t *testing.T) {
 			defer cancel()
 			switch stop {
 			case "standing_retire":
-				if err := standing.RetireAndWait(ctx); err != nil {
+				if _, err := standing.RetireAndWait(ctx); err != nil {
 					t.Fatal(err)
 				}
 			case "standing_fence":
@@ -356,7 +355,7 @@ func TestInstanceClockRecoveryDoesNotBorrowSuccessor(t *testing.T) {
 		t.Fatal(err)
 	}
 	t.Cleanup(func() { stopLifecycleProof(t, lifecycle) })
-	ctx := worklifetime.WithOccurrence(t.Context(), standing)
+	ctx := worklifetime.WithOccurrence(correlation.WithRunID(t.Context(), activation.Command.RunID), standing)
 	queued, err := lifecycle.ReconcileWakeupWithRecovery(ctx, activation.ID)
 	if !queued || err == nil {
 		t.Fatalf("initial recovery: queued=%t err=%v", queued, err)

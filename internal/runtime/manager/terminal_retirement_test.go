@@ -24,7 +24,7 @@ import (
 )
 
 func TestPreparedTerminalCompletionSurvivesRetirementBeforeCommit(t *testing.T) {
-	for _, scope := range []string{"runtime", "standing", "selected_fork"} {
+	for _, scope := range []string{"runtime", "selected_fork"} {
 		for _, abort := range []bool{false, true} {
 			t.Run(fmt.Sprintf("%s/abort_%t", scope, abort), func(t *testing.T) {
 				bus := &flowActivationTestBus{}
@@ -46,14 +46,7 @@ func TestPreparedTerminalCompletionSurvivesRetirementBeforeCommit(t *testing.T) 
 					RetireAndWait(context.Context) error
 				}
 				prepareCtx := flowActivationRunContext()
-				root := am.workOwner.(*worklifetime.RuntimeOccurrence)
 				switch scope {
-				case "standing":
-					owner, err := root.NewStanding(ctx, worklifetime.StandingIdentity{ServiceID: "terminal-test", RunID: flowActivationTestRunID, Generation: 1})
-					if err != nil {
-						t.Fatal(err)
-					}
-					companion = owner
 				case "selected_fork":
 					fixture, exists := managerTestWorkFixtures.Load(t)
 					if !exists {

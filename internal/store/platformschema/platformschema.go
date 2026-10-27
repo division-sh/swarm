@@ -190,12 +190,6 @@ func platformTableOrder(name string) int {
 		return 6
 	case "run_scenario_execution_profiles":
 		return 6
-	case "standing_services":
-		return 8
-	case "standing_service_generations":
-		return 9
-	case "standing_service_journal":
-		return 9
 	case "author_activity_order":
 		return 6
 	case "author_activity_occurrences":

@@ -82,7 +82,7 @@ func assertRetirementResult(t *testing.T, c *Coordinator, owner *worklifetime.Ru
 func TestCoordinatorRetireBeforeStartAndDrainAcceptedCarrier(t *testing.T) {
 	authority, owner, cleanup := coordinatorTestAuthorityAndOwner(t)
 	defer cleanup()
-	c, err := New(&coordinatorTestStore{}, coordinatorTestRestarts{}, authority, owner, &coordinatorTestDispatcher{}, nil)
+	c, err := New(&coordinatorTestStore{}, authority, owner, &coordinatorTestDispatcher{}, nil)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -137,7 +137,7 @@ func TestCoordinatorRetirementDuringLeaseAcquisition(t *testing.T) {
 			}}
 			store := &coordinatorTestStore{}
 			reported := make(chan error, 2)
-			c, err := New(store, coordinatorTestRestarts{}, authority, occurrence, &coordinatorTestDispatcher{}, func(_ context.Context, err error) { reported <- err })
+			c, err := New(store, authority, occurrence, &coordinatorTestDispatcher{}, func(_ context.Context, err error) { reported <- err })
 			if err != nil {
 				t.Fatal(err)
 			}
@@ -192,7 +192,7 @@ func TestCoordinatorRetirementScanOutcomeMatrix(t *testing.T) {
 					}
 				}}
 				reported := make(chan error, 2)
-				c, err := New(store, coordinatorTestRestarts{}, authority, owner, &coordinatorTestDispatcher{}, func(_ context.Context, err error) { reported <- err })
+				c, err := New(store, authority, owner, &coordinatorTestDispatcher{}, func(_ context.Context, err error) { reported <- err })
 				if err != nil {
 					t.Fatal(err)
 				}
@@ -244,7 +244,7 @@ func TestCoordinatorRetirementBeforeCancellationIsNotFatal(t *testing.T) {
 		return runtimedelivery.ContinuationPage{Exhausted: true, Items: []runtimedelivery.ContinuationItem{{DeliveryID: "retiring", Disposition: runtimedelivery.ClaimDeferred}}}, nil
 	}}
 	reported := make(chan error, 2)
-	c, err := New(store, coordinatorTestRestarts{}, authority, owner, &coordinatorTestDispatcher{}, func(_ context.Context, err error) { reported <- err })
+	c, err := New(store, authority, owner, &coordinatorTestDispatcher{}, func(_ context.Context, err error) { reported <- err })
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -288,7 +288,7 @@ func TestCoordinatorRetirementPreservesFatalDispatch(t *testing.T) {
 	entered := make(chan struct{})
 	store := &coordinatorTestStore{pages: []runtimedelivery.ContinuationPage{{Exhausted: true}, {Exhausted: true, Items: []runtimedelivery.ContinuationItem{{DeliveryID: "dispatch", Disposition: runtimedelivery.ClaimAcquired}}}}}
 	reported := make(chan error, 2)
-	c, err := New(store, coordinatorTestRestarts{}, authority, owner, retirementFailureDispatcher{entered, want}, func(_ context.Context, err error) { reported <- err })
+	c, err := New(store, authority, owner, retirementFailureDispatcher{entered, want}, func(_ context.Context, err error) { reported <- err })
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -316,7 +316,7 @@ func TestCoordinatorStartupPreservesLeaseCleanupFailure(t *testing.T) {
 		}
 		return runtimedelivery.ContinuationPage{}, want
 	}}
-	c, err := New(store, coordinatorTestRestarts{}, authority, occurrence, &coordinatorTestDispatcher{}, nil)
+	c, err := New(store, authority, occurrence, &coordinatorTestDispatcher{}, nil)
 	if err != nil {
 		t.Fatal(err)
 	}

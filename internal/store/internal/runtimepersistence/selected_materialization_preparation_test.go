@@ -102,13 +102,12 @@ func selectedStorePreparationOwnerWithForkForTest(t testing.TB, selected any, fo
 			ReplyContext: selected, RunLifecycle: selected, DeliveryLifecycle: selected,
 
 			ActiveAgents: selected, PreparedEvents: selected,
-			TargetFailureRecorder: selected, RunOrigins: selected, StandingRestarts: selected,
-			Instances: workflow, ConstructionPublications: workflow,
+			TargetFailureRecorder: selected,
+			Instances:             workflow, ConstructionPublications: workflow,
 		}
 		roles := runtimemanager.PersistenceRoles{
 			LifecycleState: selected, LifecycleEffects: selected, LifecycleDiagnostics: selected, EffectsRecovery: selected,
 			DeliveryQuiescence: selected, EventExistence: selected, DirectiveOperations: selected, DirectiveTargets: selected,
-			StandingRestarts: selected,
 		}
 		owner, err := runforkexecution.NewSelectedContractExecutionOwner(
 			workflow, fork, execution, selected,
@@ -127,13 +126,12 @@ func selectedStorePreparationOwnerWithForkForTest(t testing.TB, selected any, fo
 			ReplyContext: selected, RunLifecycle: selected, DeliveryLifecycle: selected,
 
 			ActiveAgents: selected, PreparedEvents: selected,
-			TargetFailureRecorder: selected, RunOrigins: selected, StandingRestarts: selected,
-			Instances: workflow, ConstructionPublications: workflow,
+			TargetFailureRecorder: selected,
+			Instances:             workflow, ConstructionPublications: workflow,
 		}
 		roles := runtimemanager.PersistenceRoles{
 			LifecycleState: selected, LifecycleEffects: selected, LifecycleDiagnostics: selected, EffectsRecovery: selected,
 			DeliveryQuiescence: selected, EventExistence: selected, DirectiveOperations: selected, DirectiveTargets: selected,
-			StandingRestarts: selected,
 		}
 		owner, err := runforkexecution.NewSelectedContractExecutionOwner(
 			workflow, fork, execution, selected,

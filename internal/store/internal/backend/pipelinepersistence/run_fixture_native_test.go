@@ -39,7 +39,7 @@ func statementRunSchemaRequest(t testing.TB, snapshot bool) schemastore.SchemaBo
 		case "runtime_store_metadata", "runtime_process_generation", "runs", "source_artifacts", "author_activity_order", "author_activity_occurrences",
 			"run_fork_revision_heads", "run_fork_revisions", "run_fork_fact_revisions":
 			selected = append(selected, plan)
-		case "events", "entity_state", "standing_services", "standing_service_generations":
+		case "events", "entity_state":
 			if snapshot {
 				selected = append(selected, plan)
 			}

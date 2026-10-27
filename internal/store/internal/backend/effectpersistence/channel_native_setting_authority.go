@@ -54,7 +54,7 @@ func channelNativeSettingAuthorityCurrent(ctx context.Context, q schemaQueryer, 
 		activation.provider, activation.principal_id, activation.conversation_reference,
 		activation.channel_pack_id, activation.channel_pack_version, activation.channel_manifest_hash,
 		activation.bundle_hash, activation.bundle_identity, activation.pack_inventory_generation,
-		activation.runtime_instance_id, activation.plan_generation, activation.target_generation
+		activation.runtime_instance_id, activation.plan_generation
 		FROM channel_native_settings setting
 		JOIN channel_native_setting_consumers consumer ON consumer.setting_id=setting.setting_id
 		JOIN connected_channel_activations activation ON activation.activation_id=consumer.activation_id
@@ -97,7 +97,7 @@ func channelNativeSettingAuthorityCurrent(ctx context.Context, q schemaQueryer, 
 			activation.provider, activation.principal_id::text, activation.conversation_reference,
 			activation.channel_pack_id, activation.channel_pack_version, activation.channel_manifest_hash,
 			activation.bundle_hash, activation.bundle_identity, activation.pack_inventory_generation,
-			activation.runtime_instance_id::text, activation.plan_generation, activation.target_generation
+			activation.runtime_instance_id::text, activation.plan_generation
 			FROM channel_native_settings setting
 			JOIN channel_native_setting_consumers consumer ON consumer.setting_id=setting.setting_id
 			JOIN connected_channel_activations activation ON activation.activation_id=consumer.activation_id
@@ -136,7 +136,7 @@ func channelNativeSettingAuthorityCurrent(ctx context.Context, q schemaQueryer, 
 		&snapshot.activationRevision, &snapshot.activationBindingRevision, &snapshot.activationContextGeneration,
 		&snapshot.activationProvider, &snapshot.activationPrincipal, &snapshot.activationConversation,
 		&snapshot.activationPackID, &snapshot.activationPackVersion, &snapshot.activationPackHash,
-		&snapshot.bundleHash, &snapshot.bundleIdentity, &snapshot.inventoryGeneration, &snapshot.runtimeInstanceID, &snapshot.planGeneration, &snapshot.targetGeneration)
+		&snapshot.bundleHash, &snapshot.bundleIdentity, &snapshot.inventoryGeneration, &snapshot.runtimeInstanceID, &snapshot.planGeneration)
 	if errors.Is(err, sql.ErrNoRows) {
 		return false, nil
 	}
@@ -189,7 +189,6 @@ type nativeSettingAuthoritySnapshot struct {
 	inventoryGeneration         string
 	runtimeInstanceID           string
 	planGeneration              string
-	targetGeneration            int64
 }
 
 func (snapshot nativeSettingAuthoritySnapshot) matchesSetting(s runtimeeffects.ChannelNativeSettingAuthority, canonical, expected []byte) bool {
@@ -214,5 +213,5 @@ func (snapshot nativeSettingAuthoritySnapshot) matchesActivation(s runtimeeffect
 		snapshot.activationPackVersion == s.PackVersion && snapshot.activationPackHash == s.PackManifestHash &&
 		snapshot.bundleHash == s.BundleHash && snapshot.bundleIdentity == s.BundleIdentity &&
 		snapshot.inventoryGeneration == s.PackInventoryGeneration && snapshot.runtimeInstanceID == s.RuntimeInstanceID &&
-		snapshot.planGeneration == s.PlanGeneration.Diagnostic() && snapshot.targetGeneration == int64(s.TargetGeneration)
+		snapshot.planGeneration == s.PlanGeneration.Diagnostic()
 }

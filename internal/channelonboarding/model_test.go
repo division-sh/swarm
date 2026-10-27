@@ -2,7 +2,6 @@ package channelonboarding
 
 import (
 	"encoding/json"
-	"fmt"
 	"strings"
 	"testing"
 	"time"
@@ -27,7 +26,6 @@ func TestChannelRuntimeContextCoordinateRequiresEveryExactGeneration(t *testing.
 		{name: "runtime instance", mutate: func(c *ChannelRuntimeContextCoordinate) { c.RuntimeInstanceID = "" }},
 		{name: "publication", mutate: func(c *ChannelRuntimeContextCoordinate) { c.ContextPublicationGeneration = 0 }},
 		{name: "plan", mutate: func(c *ChannelRuntimeContextCoordinate) { c.PlanGeneration = plangeneration.Generation{} }},
-		{name: "target", mutate: func(c *ChannelRuntimeContextCoordinate) { c.TargetGeneration = 0 }},
 	}
 	for _, tc := range tests {
 		t.Run(tc.name, func(t *testing.T) {
@@ -37,46 +35,6 @@ func TestChannelRuntimeContextCoordinateRequiresEveryExactGeneration(t *testing.
 				t.Fatal("incomplete coordinate was accepted")
 			}
 		})
-	}
-}
-
-func TestChannelRuntimeCoordinatesFollowClosedPhaseProduct(t *testing.T) {
-	rows := []struct {
-		phase            Phase
-		webhook, session bool
-	}{
-		{PhasePreparing, false, false}, {PhaseCredentialsAdmitted, false, false},
-		{PhaseActivatingProvider, true, false}, {PhaseAwaitingExternalIdentity, true, false},
-		{PhaseAwaitingOperatorConfirmation, true, false}, {PhasePublishingActivation, true, true},
-		{PhasePublishingProcessActivation, true, true}, {PhasePromotingRegistration, true, true},
-		{PhaseRetiringPredecessor, true, true}, {PhaseDeliveringConfirmation, true, true},
-		{PhaseSucceeded, true, true}, {PhaseFailed, false, false}, {PhaseRetired, false, false},
-	}
-	if len(rows) != len(ValidPhases()) {
-		t.Fatal("phase product census is incomplete")
-	}
-	for _, row := range rows {
-		for _, posture := range []ActivationPosture{ActivationWebhookRegistration, ActivationSessionConnection, "unknown"} {
-			for _, executable := range []bool{false, true} {
-				t.Run(string(row.phase)+"/"+string(posture)+"/"+fmt.Sprint(executable), func(t *testing.T) {
-					coordinate := testCoordinate()
-					if !executable {
-						coordinate.TargetGeneration = 0
-					}
-					requires := row.webhook
-					if posture == ActivationSessionConnection {
-						requires = row.session
-					}
-					want := posture.Valid() && (executable || !requires)
-					if err := coordinate.ValidateForPhase(row.phase, posture); (err == nil) != want {
-						t.Fatalf("coordinate phase product = %v, want valid=%t", err, want)
-					}
-				})
-			}
-		}
-	}
-	if err := testCoordinate().ValidateForPhase("unknown", ActivationSessionConnection); err == nil {
-		t.Fatal("unknown phase admitted")
 	}
 }
 
@@ -168,7 +126,6 @@ func TestChannelRuntimeContextCoordinateSeparatesDurableIdentityFromLiveOccurren
 	successor := original
 	successor.RuntimeInstanceID = abaSuccessor.RuntimeInstanceID
 	successor.ContextPublicationGeneration++
-	successor.TargetGeneration++
 	if !original.MatchesDurableIdentity(successor) {
 		t.Fatal("process-local successor changed durable channel context identity")
 	}
@@ -198,7 +155,6 @@ func TestChannelRuntimeContextCoordinateSeparatesDurableIdentityFromLiveOccurren
 
 func TestChannelRuntimeContextCoordinateMatchesContextOccurrenceWithoutStandingTarget(t *testing.T) {
 	coordinate := testCoordinate()
-	coordinate.TargetGeneration = 0
 	if !coordinate.MatchesContextOccurrence("  "+coordinate.RuntimeInstanceID+"  ", coordinate.ContextPublicationGeneration) {
 		t.Fatal("declared activation context occurrence required a standing target")
 	}
@@ -266,7 +222,6 @@ func TestConnectedReadinessRejectsEveryMixedOrMissingFact(t *testing.T) {
 		{name: "proof", mutate: func(f *ReadinessFacts) { f.ProofCurrent = false }, want: ReadinessProofUnavailable},
 		{name: "credentials", mutate: func(f *ReadinessFacts) { f.CredentialsCurrent = false }, want: ReadinessCredentialsUnavailable},
 		{name: "confirmation", mutate: func(f *ReadinessFacts) { f.ConfirmationActivationRevision-- }, want: ReadinessConfirmationUnavailable},
-		{name: "target", mutate: func(f *ReadinessFacts) { f.TargetGeneration++ }, want: ReadinessTargetUnavailable},
 		{name: "exposure", mutate: func(f *ReadinessFacts) { f.ExposureGeneration = "exposure-2" }, want: ReadinessExposureUnavailable},
 		{name: "registration", mutate: func(f *ReadinessFacts) { f.RegistrationCurrent = false }, want: ReadinessRegistrationUnavailable},
 		{name: "registration activation publication", mutate: func(f *ReadinessFacts) {
@@ -314,7 +269,6 @@ func testCoordinate() ChannelRuntimeContextCoordinate {
 		RuntimeInstanceID:            "11111111-1111-4111-8111-111111111111",
 		ContextPublicationGeneration: 7,
 		PlanGeneration:               testPlanGeneration("current"),
-		TargetGeneration:             11,
 	}
 }
 
@@ -343,8 +297,6 @@ func testReadinessFacts() ReadinessFacts {
 		ConfirmationBindingRevision:      4,
 		ConfirmationTerminalSuccess:      true,
 		Posture:                          ActivationWebhookRegistration,
-		TargetGeneration:                 11,
-		ExpectedTargetGeneration:         11,
 		ExposureGeneration:               "exposure-1",
 		ExpectedExposureGeneration:       "exposure-1",
 		RegistrationCurrent:              true,

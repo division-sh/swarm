@@ -60,7 +60,7 @@ func nativeActivityHandoffFixture(t *testing.T) (channelonboarding.CompiledActiv
 		OnboardingOperationID: uuid.NewString(), OnboardingRevision: 1, ActivationRevision: 1, Plan: binding,
 		Coordinate: channelonboarding.ChannelRuntimeContextCoordinate{BundleHash: "bundle-v2:sha256:" + strings.Repeat("a", 64),
 			BundleIdentity: "native-activity", PackInventoryGeneration: "sha256:inventory", RuntimeInstanceID: uuid.NewString(),
-			ContextPublicationGeneration: 1, PlanGeneration: generation, TargetGeneration: 1},
+			ContextPublicationGeneration: 1, PlanGeneration: generation},
 		SessionAccount: operatorchannel.SessionAccountAdmission{Provider: "whatsapp", ConnectionID: uuid.NewString(),
 			AccountRef: "15551234567@s.whatsapp.net", AdmissionID: uuid.NewString(), Revision: 1}}
 	tool, err := binding.OperationTool("deliver")

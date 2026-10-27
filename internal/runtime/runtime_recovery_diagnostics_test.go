@@ -74,8 +74,8 @@ func (startupRecoveryWorkflowOwner) ListActiveWorkflowTimerActivationsForRoute(c
 	return nil, nil
 }
 
-func (startupRecoveryWorkflowOwner) StandingRunRestartDisposition(context.Context, string) (runtimestanding.StandingRestartDisposition, error) {
-	return runtimestanding.ClassifyStandingRestart(runtimestanding.StandingRestartFact{})
+func (startupRecoveryWorkflowOwner) LoadRunLiveScope(context.Context, string) (runtimestanding.LiveRunScope, error) {
+	return runtimestanding.LiveRunScope{}, nil
 }
 
 func (startupRecoveryWorkflowOwner) ClaimFanOutIntent(context.Context, runtimepipeline.FanOutClaimRequest) (runtimefanout.Intent, runtimefanout.Claim, bool, error) {
@@ -802,45 +802,36 @@ func TestStartupRecoveryDecisionAdmissionMatrix(t *testing.T) {
 	}
 }
 
-type startupRecoveryDispositionMap map[string]runtimestanding.StandingRestartDispositionKind
+type startupRecoveryScopeMap map[string]runtimestanding.LiveRunScope
 
-func (m startupRecoveryDispositionMap) StandingRunRestartDisposition(_ context.Context, runID string) (runtimestanding.StandingRestartDisposition, error) {
-	kind, ok := m[runID]
+func (m startupRecoveryScopeMap) LoadRunLiveScope(_ context.Context, runID string) (runtimestanding.LiveRunScope, error) {
+	scope, ok := m[runID]
 	if !ok {
-		return runtimestanding.StandingRestartDisposition{}, errors.New("missing test standing restart disposition")
+		return runtimestanding.LiveRunScope{}, errors.New("missing test run scope")
 	}
-	return runtimestanding.StandingRestartDisposition{Kind: kind}, nil
+	return scope, nil
 }
 
-func TestDeliveryRecoveryInventoryPartitionsEveryRunByStandingDisposition(t *testing.T) {
+func TestDeliveryRecoveryInventoryPartitionsEveryRunByLiveScope(t *testing.T) {
 	inventory := runtimedelivery.RecoveryInventory{Runs: []runtimedelivery.RecoveryRunInventory{
 		{RunID: "ordinary", Pending: 1},
 		{RunID: "active", Failed: 2},
-		{RunID: "suspended", InProgress: 3},
-		{RunID: "orphaned", Pending: 4},
-		{RunID: "terminal-declared", Failed: 5},
-		{RunID: "terminal-orphaned", InProgress: 6},
-		{RunID: "invalid", Pending: 7},
+		{RunID: "paused", InProgress: 3},
 	}}
-	restarts := startupRecoveryDispositionMap{
-		"ordinary":          runtimestanding.StandingRestartOrdinary,
-		"active":            runtimestanding.StandingRestartActiveIntrinsic,
-		"suspended":         runtimestanding.StandingRestartSuspended,
-		"orphaned":          runtimestanding.StandingRestartOrphaned,
-		"terminal-declared": runtimestanding.StandingRestartTerminalDeclared,
-		"terminal-orphaned": runtimestanding.StandingRestartTerminalOrphaned,
-		"invalid":           runtimestanding.StandingRestartInvalidCurrent,
+	scopes := startupRecoveryScopeMap{
+		"ordinary": {},
+		"active":   {FlowPath: "active"},
+		"paused":   {FlowPath: "paused"},
 	}
-
-	blocking, standing, err := partitionDeliveryRecoveryInventory(context.Background(), inventory, restarts)
+	blocking, intrinsic, err := partitionDeliveryRecoveryInventory(context.Background(), inventory, scopes)
 	if err != nil {
 		t.Fatal(err)
 	}
 	if len(blocking.Runs) != 1 || blocking.Runs[0].RunID != "ordinary" || blocking.Total() != 1 {
 		t.Fatalf("generic delivery recovery inventory = %#v, want only ordinary run", blocking)
 	}
-	if standing != 2 {
-		t.Fatalf("intrinsic standing delivery obligations = %d, want active run's 2", standing)
+	if intrinsic != 5 {
+		t.Fatalf("flow delivery obligations = %d, want active plus paused work", intrinsic)
 	}
 }
 
@@ -862,7 +853,7 @@ func VerifyRuntimeStart_RecoveryDisabledEmitsDeniedDecisionForActiveSchedulesFor
 		DeliveryStore:       deliveryStore,
 		ManagerStore:        managerStore,
 		ManagerPersistenceRoles: runtimemanager.PersistenceRoles{
-			LifecycleCensus: managerStore, StandingRestarts: startupRecoveryWorkflowOwner{},
+			LifecycleCensus: managerStore,
 		},
 		GenericScheduleStore:  scheduleStore,
 		TimerObligationReader: scheduleStore,
@@ -939,7 +930,7 @@ func VerifyRuntimeStart_RecoveryDisabledAllowsAndLogsManagerSnapshotWorkForTest(
 		DeliveryStore:       deliveryStore,
 		ManagerStore:        managerStore,
 		ManagerPersistenceRoles: runtimemanager.PersistenceRoles{
-			LifecycleCensus: managerStore, StandingRestarts: startupRecoveryWorkflowOwner{},
+			LifecycleCensus: managerStore,
 		},
 		Options: RuntimeOptions{
 			SourceArtifactFact: nativeRuntimeLogSourceFactForTest(t, fixture),
@@ -1021,7 +1012,7 @@ func VerifyRuntimeStart_RecoveryEnabledEmitsAllowedDecisionSummaryForTest(t *tes
 		PipelineObligations: eventStore.PipelineObligations(),
 		ManagerStore:        managerStore,
 		ManagerPersistenceRoles: runtimemanager.PersistenceRoles{
-			LifecycleCensus: managerStore, StandingRestarts: startupRecoveryWorkflowOwner{},
+			LifecycleCensus: managerStore,
 		},
 		GenericScheduleStore:  scheduleStore,
 		TimerObligationReader: scheduleStore,
@@ -1102,7 +1093,7 @@ func VerifyRuntimeStart_WorkflowOnlyRecoveryUsesFamilyAwareBootAndRestorationDet
 		PipelineObligations: eventStore.PipelineObligations(),
 		ManagerStore:        managerStore,
 		ManagerPersistenceRoles: runtimemanager.PersistenceRoles{
-			LifecycleCensus: managerStore, StandingRestarts: startupRecoveryWorkflowOwner{},
+			LifecycleCensus: managerStore,
 		},
 		GenericScheduleStore:  scheduleStore,
 		TimerObligationReader: scheduleStore,
@@ -1198,7 +1189,7 @@ func VerifyRuntimeStart_RecoveryFailureEmitsDegradedDecisionSummaryForTest(t *te
 		PipelineObligations: eventStore.PipelineObligations(),
 		ManagerStore:        managerStore,
 		ManagerPersistenceRoles: runtimemanager.PersistenceRoles{
-			LifecycleCensus: managerStore, StandingRestarts: startupRecoveryWorkflowOwner{},
+			LifecycleCensus: managerStore,
 		},
 		Options: RuntimeOptions{
 			SourceArtifactFact: nativeRuntimeLogSourceFactForTest(t, fixture),
@@ -1260,7 +1251,7 @@ func VerifyRuntimeStart_DynamicFlowReadinessFinalizationFailureIsBootFatalForTes
 		PipelineObligations: eventStore.PipelineObligations(),
 		ManagerStore:        managerStore,
 		ManagerPersistenceRoles: runtimemanager.PersistenceRoles{
-			LifecycleCensus: managerStore, StandingRestarts: startupRecoveryWorkflowOwner{},
+			LifecycleCensus: managerStore,
 		},
 		Options: RuntimeOptions{
 			SourceArtifactFact: nativeRuntimeLogSourceFactForTest(t, fixture),
@@ -1303,7 +1294,6 @@ func VerifyRuntimeStart_DynamicFlowReadinessFinalizationFailureIsBootFatalForTes
 	}}}
 	managerRoles := runtimeTestManagerBusRoles(rt.Bus)
 	managerRoles.LifecycleCensus = managerStore
-	managerRoles.StandingRestarts = startupRecoveryWorkflowOwner{}
 	rt.Manager = runtimemanager.NewAgentManagerWithOptions(rt.Bus, func(cfg runtimeactors.AgentConfig) (runtimemanager.Agent, error) {
 		return startupManagerReplayRuntimeAgent{id: cfg.ID}, nil
 	}, runtimemanager.AgentManagerOptions{
@@ -1349,7 +1339,7 @@ func VerifyRuntimeStart_RecoveryInspectionAndManagerHydrationFailureIsBootFatalF
 		PipelineObligations: eventStore.PipelineObligations(),
 		ManagerStore:        managerStore,
 		ManagerPersistenceRoles: runtimemanager.PersistenceRoles{
-			LifecycleCensus: managerStore, StandingRestarts: startupRecoveryWorkflowOwner{},
+			LifecycleCensus: managerStore,
 		},
 		Options: RuntimeOptions{
 			SourceArtifactFact: nativeRuntimeLogSourceFactForTest(t, fixture),

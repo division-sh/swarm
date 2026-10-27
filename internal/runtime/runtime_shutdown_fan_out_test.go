@@ -184,7 +184,7 @@ func VerifyRuntimeShutdownFanOutCommittedTurnKeepsDependenciesLiveForTest(t *tes
 	// publication owner marks handoff. AcceptCommitted must still retain it.
 	dispatcher := &shutdownBlockedDispatcher{entered: make(chan struct{}), canceled: make(chan struct{}), release: make(chan struct{})}
 	close(dispatcher.release)
-	coordinator, err := deliverycontinuation.New(store, startupRecoveryDispositionMap{}, store.authority, rt.workOccurrence, dispatcher, nil)
+	coordinator, err := deliverycontinuation.New(store, store.authority, rt.workOccurrence, dispatcher, nil)
 	if err != nil {
 		t.Fatal(err)
 	}

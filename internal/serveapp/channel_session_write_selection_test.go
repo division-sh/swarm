@@ -39,7 +39,6 @@ func TestServeSessionWriteSelectionUsesOriginalOwnerBothStores(t *testing.T) {
 				func(op *channelonboarding.Operation) { op.PrincipalID = uuid.NewString() },
 				func(op *channelonboarding.Operation) { op.SessionAccount.AdmissionID = uuid.NewString() },
 				func(op *channelonboarding.Operation) { op.Coordinate.ContextPublicationGeneration++ },
-				func(op *channelonboarding.Operation) { op.Coordinate.TargetGeneration++ },
 				func(op *channelonboarding.Operation) { op.Interface.ChannelManifestHash = "foreign" },
 				func(op *channelonboarding.Operation) { op.Posture = channelonboarding.ActivationWebhookRegistration },
 			} {

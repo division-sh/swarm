@@ -181,7 +181,7 @@ func (e sessionChannelExecutor) requireChannelDestination(ctx context.Context, s
 		principal, bindingRevision, activationID, activationRevision = a.PrincipalID, a.BindingRevision, a.ActivationID, a.ActivationRevision
 		coordinate = channelonboarding.ChannelRuntimeContextCoordinate{BundleHash: a.BundleHash, BundleIdentity: a.BundleIdentity,
 			PackInventoryGeneration: a.PackInventoryGeneration, RuntimeInstanceID: a.RuntimeInstanceID,
-			ContextPublicationGeneration: a.ContextPublicationGeneration, PlanGeneration: a.PlanGeneration, TargetGeneration: a.TargetGeneration}
+			ContextPublicationGeneration: a.ContextPublicationGeneration, PlanGeneration: a.PlanGeneration}
 	case runtimeeffects.AuthorityChannelDelivery:
 		a := selected.ChannelDelivery
 		if a.InterfaceKey != op.Interface.Key() || a.ConversationRef != destination {
@@ -190,7 +190,7 @@ func (e sessionChannelExecutor) requireChannelDestination(ctx context.Context, s
 		principal, bindingRevision, activationID, activationRevision = a.PrincipalID, a.BindingRevision, a.ActivationID, a.ActivationRevision
 		coordinate = channelonboarding.ChannelRuntimeContextCoordinate{BundleHash: a.BundleHash, BundleIdentity: a.BundleIdentity,
 			PackInventoryGeneration: a.PackInventoryGeneration, RuntimeInstanceID: a.RuntimeInstanceID,
-			ContextPublicationGeneration: a.ContextPublicationGeneration, PlanGeneration: a.PlanGeneration, TargetGeneration: a.TargetGeneration}
+			ContextPublicationGeneration: a.ContextPublicationGeneration, PlanGeneration: a.PlanGeneration}
 	default:
 		return errCaptureScopeChanged
 	}

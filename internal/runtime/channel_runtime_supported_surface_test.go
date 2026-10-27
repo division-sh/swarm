@@ -702,9 +702,6 @@ func testAdmittedChannelActivationPublication(t *testing.T, credentials runtimec
 			ContextPublicationGeneration: 1,
 			PlanGeneration:               generation,
 		}
-		if binding.RegistrationTarget() != "" {
-			coordinate.TargetGeneration = 1
-		}
 		admissions := make([]channelonboarding.CredentialAdmission, 0, len(binding.CredentialStoreKeys()))
 		for role, key := range binding.CredentialStoreKeys() {
 			evidence, err := credentialOwner.SealCurrentValue(context.Background(), key)

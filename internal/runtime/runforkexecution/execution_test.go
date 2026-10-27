@@ -1015,7 +1015,7 @@ func TestSelectedContractForkRejectsSyntheticCarryDynamicCreationBeforeMutation(
 			ReplyContext: pg, RunLifecycle: pg, DeliveryLifecycle: pg,
 
 			ActiveAgents: pg, PreparedEvents: pg,
-			TargetFailureRecorder: pg, RunOrigins: pg, StandingRestarts: pg,
+			TargetFailureRecorder: pg,
 		},
 		InterceptorProvider: func() []bus.EventInterceptor {
 			return nil

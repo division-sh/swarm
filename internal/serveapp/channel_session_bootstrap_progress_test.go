@@ -16,7 +16,7 @@ import (
 	"github.com/division-sh/swarm/internal/operatorchannel"
 	"github.com/division-sh/swarm/internal/runtime/core/processbinding"
 	"github.com/division-sh/swarm/internal/runtime/inboundpublication"
-	"github.com/division-sh/swarm/internal/runtime/pipeline"
+	"github.com/division-sh/swarm/internal/runtime/runlifecycle"
 	"github.com/division-sh/swarm/internal/sessionprovider"
 	"github.com/division-sh/swarm/internal/sessionprovider/authority"
 )
@@ -27,7 +27,7 @@ type sessionConstructionStore interface {
 	channelonboarding.Store
 	channelonboarding.TeardownStore
 	inboundpublication.Runner
-	pipeline.StandingServicePersistence
+	runlifecycle.LandingRunReader
 	ListOperatorChannelBindings(context.Context, string) ([]operatorchannel.Binding, error)
 	ListOperatorChannelOperations(context.Context, string) ([]operatorchannel.Operation, error)
 	LoadOperatorChannelClaimReceipt(context.Context, string) (operatorchannel.ClaimReceipt, bool, error)

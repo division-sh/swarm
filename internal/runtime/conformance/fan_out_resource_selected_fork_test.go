@@ -326,7 +326,6 @@ func deploymentForkOwnerWithExecutor(t *testing.T, f *deploymentResourceFixture,
 		ReplyContext: f.selected, RunLifecycle: f.selected, DeliveryLifecycle: delivery,
 		ActiveAgents:   f.selected,
 		PreparedEvents: f.selected, TargetFailureRecorder: f.selected,
-		RunOrigins: f.selected, StandingRestarts: f.selected,
 	}
 	var owner runforkexecution.SelectedContractExecutionOwner
 	var err error
@@ -343,7 +342,6 @@ func deploymentForkOwnerWithExecutor(t *testing.T, f *deploymentResourceFixture,
 			LifecycleState: selected, LifecycleEffects: selected, LifecycleDiagnostics: selected,
 			EffectsRecovery: selected, DeliveryQuiescence: selected, EventExistence: selected,
 			DirectiveOperations: selected, DirectiveTargets: selected,
-			StandingRestarts: selected,
 		}
 		owner, err = runforkexecution.NewSelectedContractExecutionOwner(
 			workflow, forkOwner, selected, replay, selected,
@@ -364,7 +362,6 @@ func deploymentForkOwnerWithExecutor(t *testing.T, f *deploymentResourceFixture,
 			LifecycleState: selected, LifecycleEffects: selected, LifecycleDiagnostics: selected,
 			EffectsRecovery: selected, DeliveryQuiescence: selected, EventExistence: selected,
 			DirectiveOperations: selected, DirectiveTargets: selected,
-			StandingRestarts: selected,
 		}
 		owner, err = runforkexecution.NewSelectedContractExecutionOwner(
 			workflow, forkOwner, selected, replay, selected,

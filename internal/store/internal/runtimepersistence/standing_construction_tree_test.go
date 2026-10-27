@@ -1,9 +1,7 @@
 package runtimepersistence
 
 import (
-	"context"
 	"encoding/json"
-	"errors"
 	"path/filepath"
 	"reflect"
 	"strings"
@@ -12,7 +10,6 @@ import (
 
 	"github.com/division-sh/swarm/internal/runtime/core/flowidentity"
 	"github.com/division-sh/swarm/internal/runtime/correlation"
-	"github.com/division-sh/swarm/internal/runtime/manager"
 	"github.com/division-sh/swarm/internal/runtime/pipeline"
 	"github.com/division-sh/swarm/internal/runtime/runlifecycle"
 	"github.com/division-sh/swarm/internal/runtime/semanticview"
@@ -35,17 +32,16 @@ func TestA9KeyedStandingGenerationDoesNotConstructBothStores(t *testing.T) {
 				if !found {
 					t.Fatal("source authority is missing")
 				}
-				serviceID := flowidentity.StandingServiceID("parent/service")
-				req := pipeline.StandingTargetMutationRequest{ObservedAt: time.Date(2026, time.January, 1, 0, 0, 0, 0, time.UTC), Targets: []pipeline.StandingTargetMutation{{
-					Candidate:  pipeline.StandingServiceCandidate{BindingEnabled: true, ServiceID: serviceID, FlowPath: "parent/service", Source: fact},
+				req := pipeline.LiveTargetMutationRequest{ObservedAt: time.Date(2026, time.January, 1, 0, 0, 0, 0, time.UTC), Targets: []pipeline.LiveTargetMutation{{
+					FlowPath:   "parent/service",
 					Activation: pipeline.FlowInstanceActivationRequest{ContractBundle: source, OccurredAt: time.Date(2026, time.January, 1, 0, 0, 0, 0, time.UTC)},
 				}}}
-				results, finish, err := f.workflows.PrepareStandingTargets(f.ctx, req, f.manager)
+				results, finish, err := f.workflows.PrepareLiveTargets(f.ctx, req, f.manager)
 				if err != nil || len(results) != 1 || finish == nil {
 					t.Fatalf("keyed declaration failed to retain a generation: results=%+v completion=%t err=%v", results, finish != nil, err)
 				}
 				result := results[0]
-				if !result.Reconciliation.RestartDisposition.Executable() || result.Reconciliation.Generation != 1 || result.Reconciliation.PublicationSequence <= 0 || result.Instance != (flowidentity.Instance{}) {
+				if result.Reconciliation.State != runlifecycle.StateLive || !result.Reconciliation.Source.Matches(fact) || result.Instance != (flowidentity.Instance{}) {
 					t.Fatalf("binding and receiver identity were conflated: %+v", result)
 				}
 				instances, err := f.workflows.ListWorkflowInstances(f.ctx, result.Reconciliation.RunID)
@@ -67,106 +63,12 @@ func TestA9KeyedStandingGenerationDoesNotConstructBothStores(t *testing.T) {
 				if err := finish(); err != nil {
 					t.Fatal(err)
 				}
-				statuses, err := f.workflows.ListStandingServiceStatuses(f.ctx)
-				if err != nil || len(statuses) != 1 || !statuses[0].SameAuthority(result.Reconciliation) {
-					t.Fatalf("zero-instance binding readback changed authority: %+v err=%v", statuses, err)
+				landing, found, err := f.store.(runlifecycle.LandingRunReader).LoadLandingRun(f.ctx, runlifecycle.LiveRunScope{FlowPath: "parent/service"})
+				if err != nil || !found || landing.RunID != result.Reconciliation.RunID || landing.Scope != result.Reconciliation.Scope || landing.State != runlifecycle.StateLive || !landing.Source.Matches(fact) {
+					t.Fatalf("zero-instance binding readback changed authority: %+v err=%v", landing, err)
 				}
 			})
 		}
-	}
-}
-
-type failSecondStandingTreeOwner struct {
-	*manager.AgentManager
-	preparations int
-}
-
-func (o *failSecondStandingTreeOwner) PrepareStandingFlowInstance(ctx context.Context, req pipeline.FlowInstanceActivationRequest) (bool, func() error, error) {
-	o.preparations++
-	if o.preparations == 2 {
-		return false, nil, errors.New("second tree construction failed")
-	}
-	return o.AgentManager.PrepareStandingFlowInstance(ctx, req)
-}
-
-func TestStandingTreeConstructionFailureDoesNotPublishPartialSetBothStores(t *testing.T) {
-	for _, backend := range []string{"sqlite", "postgres"} {
-		t.Run(backend, func(t *testing.T) {
-			f := newReceiverConfigActivationFixtureWithDocuments(t, backend, false, map[string]string{
-				"schema.yaml":       "name: standing-atomic-set\n",
-				"alpha/schema.yaml": "name: alpha\n",
-				"beta/schema.yaml":  "name: beta\n",
-			}, nil)
-			source := semanticview.Wrap(f.bundle)
-			fact, found := correlation.SourceArtifactFactFromContext(f.ctx)
-			if !found {
-				t.Fatal("source authority is missing")
-			}
-			req := pipeline.StandingTargetMutationRequest{ObservedAt: time.Date(2026, time.January, 1, 0, 0, 0, 0, time.UTC)}
-			for _, flowID := range []string{"alpha", "beta"} {
-				serviceID := flowidentity.StandingServiceID(flowID)
-				instance := flowidentity.StandingForService(source, flowID, serviceID)
-				req.Targets = append(req.Targets, pipeline.StandingTargetMutation{
-					Candidate:  pipeline.StandingServiceCandidate{BindingEnabled: true, ServiceID: serviceID, FlowPath: flowID, Source: fact},
-					Activation: pipeline.FlowInstanceActivationRequest{ContractBundle: source, Instance: instance, OccurredAt: req.ObservedAt},
-				})
-			}
-			owner := &failSecondStandingTreeOwner{AgentManager: f.manager}
-			results, finish, err := f.workflows.PrepareStandingTargets(f.ctx, req, owner)
-			if err == nil || !strings.Contains(err.Error(), "second tree construction failed") || owner.preparations != 2 || results != nil || finish != nil {
-				t.Fatalf("partial standing construction: preparations=%d results=%+v completion=%t err=%v", owner.preparations, results, finish != nil, err)
-			}
-			var published int
-			if err := f.db.QueryRowContext(f.ctx, `SELECT COUNT(*) FROM standing_services WHERE publication_sequence > 0`).Scan(&published); err != nil || published != 0 {
-				t.Fatalf("partial set was published: count=%d err=%v", published, err)
-			}
-		})
-	}
-}
-
-func TestDormantStandingPreparationDoesNotConstructBothStores(t *testing.T) {
-	for _, backend := range []string{"sqlite", "postgres"} {
-		t.Run(backend, func(t *testing.T) {
-			f := newReceiverConfigActivationFixtureWithDocuments(t, backend, false, map[string]string{
-				"schema.yaml":         "name: dormant-root\n",
-				"service/schema.yaml": "name: service\n",
-			}, nil)
-			source := semanticview.Wrap(f.bundle)
-			fact, found := correlation.SourceArtifactFactFromContext(f.ctx)
-			if !found {
-				t.Fatal("source authority is missing")
-			}
-			serviceID := flowidentity.StandingServiceID("service")
-			instance := flowidentity.StandingForService(source, "service", serviceID)
-			request := pipeline.StandingTargetMutationRequest{ObservedAt: time.Date(2026, time.January, 1, 0, 0, 0, 0, time.UTC), Targets: []pipeline.StandingTargetMutation{{
-				Candidate: pipeline.StandingServiceCandidate{BindingEnabled: false, BindingBlockReason: runlifecycle.StandingBindingCredentialsAbsent,
-					ServiceID: serviceID, FlowPath: "service", Source: fact},
-				Activation: pipeline.FlowInstanceActivationRequest{ContractBundle: source, Instance: instance},
-			}}}
-			owner := &failSecondStandingTreeOwner{AgentManager: f.manager}
-			before := snapshotForkHistoricalExecutionTables(t, f.db, backend == "postgres")
-			for attempt := 0; attempt < 2; attempt++ {
-				results, finish, err := f.workflows.PrepareStandingTargets(f.ctx, request, owner)
-				if err != nil || len(results) != 1 || finish == nil {
-					t.Fatalf("dormant preparation: results=%+v finish=%t err=%v", results, finish != nil, err)
-				}
-				if result := results[0]; result.Created || result.Reconciliation.RunID != "" || result.Reconciliation.Generation != 0 || result.Reconciliation.RestartDisposition.Executable() || result.Reconciliation.PublicationSequence != 0 || result.Instance.InstancePath != "" {
-					t.Fatalf("dormant declaration acquired execution evidence: %+v", result)
-				}
-				if err := finish(); err != nil || owner.preparations != 0 {
-					t.Fatalf("dormant preparation invoked constructor: count=%d err=%v", owner.preparations, err)
-				}
-			}
-			if !reflect.DeepEqual(before, snapshotForkHistoricalExecutionTables(t, f.db, backend == "postgres")) {
-				t.Fatal("dormant declaration mutated construction/execution evidence")
-			}
-			for _, table := range []string{"standing_services", "standing_service_generations", "standing_service_journal"} {
-				var count int
-				if err := f.db.QueryRowContext(f.ctx, "SELECT COUNT(*) FROM "+table).Scan(&count); err != nil || count != 0 {
-					t.Fatalf("fresh dormant %s count=%d err=%v", table, count, err)
-				}
-			}
-		})
 	}
 }
 

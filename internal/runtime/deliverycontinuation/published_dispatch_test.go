@@ -29,7 +29,7 @@ func newPublishedDispatchTestFixture(t *testing.T, dispatcher Dispatcher, report
 	authority, owner, cleanup := coordinatorTestAuthorityAndOwner(t)
 	t.Cleanup(cleanup)
 	store := &coordinatorTestStore{observations: make(map[string]runtimedelivery.ContinuationObservation)}
-	c, err := New(store, coordinatorTestRestarts{}, authority, owner, dispatcher, report)
+	c, err := New(store, authority, owner, dispatcher, report)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -644,7 +644,7 @@ func TestCoordinatorDispatchPublishedRollsBackPartialAdmission(t *testing.T) {
 	occurrence := &publishedDispatchFailingOccurrence{Occurrence: owner, failure: fault}
 	dispatcher := &coordinatorTestDispatcher{}
 	store := &coordinatorTestStore{observations: make(map[string]runtimedelivery.ContinuationObservation)}
-	c, err := New(store, coordinatorTestRestarts{}, authority, occurrence, dispatcher, nil)
+	c, err := New(store, authority, occurrence, dispatcher, nil)
 	if err != nil {
 		t.Fatal(err)
 	}

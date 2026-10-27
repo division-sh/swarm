@@ -192,7 +192,7 @@ func newBoundHandoffRig(t *testing.T, fixture channelOnboardingConfirmationFixtu
 	}
 	candidate := channelonboarding.Candidate{
 		Provider: request.Provider, Interface: request.Interface, Coordinate: request.Coordinate,
-		Target:  channelonboarding.CandidateTarget{Selector: request.TargetSelector, ServiceID: "service-support", FlowPath: target.FlowPath, Alias: "support", Provider: target.Provider, Generation: request.Coordinate.TargetGeneration, PublicationSequence: 1, AdmissionGeneration: triggergeneration.FromCanonicalBytes([]byte("handoff")), SigningCredentialKey: "signing"},
+		Target:  channelonboarding.CandidateTarget{Selector: request.TargetSelector, FlowPath: target.FlowPath, Alias: "support", Provider: target.Provider, AdmissionGeneration: triggergeneration.FromCanonicalBytes([]byte("handoff")), SigningCredentialKey: "signing"},
 		Posture: request.Posture, Ceremony: request.Ceremony, ProviderCredentialRole: "bot_token", SigningCredentialRole: "webhook_signing_secret", ConfirmationOperation: "deliver",
 	}
 	catalog, err := channelonboarding.NewCandidateCatalog([]channelonboarding.Candidate{candidate})

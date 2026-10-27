@@ -106,7 +106,6 @@ func TestIssue2564ContinuationRetirementCancelsActiveNode(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	eb.durable.RunOrigins = &recoveryOriginStore{}
 	event := eventtest.RunCreatingRootIngress(uuid.NewString(), "custom.retirement", "", "", []byte(`{}`), 0, uuid.NewString(), "", events.EventEnvelope{}, time.Now().UTC())
 	route := nodeOnlyDeliveryPlan(t, event, "retirement-node").DeliveryRoutes()[0]
 	id, err := runtimedelivery.DeliveryID(event.ID(), route)
@@ -119,7 +118,7 @@ func TestIssue2564ContinuationRetirementCancelsActiveNode(t *testing.T) {
 	}
 	scan := recoveryReadScan{item: runtimedelivery.ContinuationItem{DeliveryID: id, Event: event, Disposition: runtimedelivery.ClaimAcquired, Snapshot: runtimedelivery.Snapshot{DeliveryID: id, Route: route, Authority: authority, Status: runtimedelivery.StatusPending}}}
 	reported := make(chan error, 1)
-	c, err := deliverycontinuation.New(scan, &recoveryOriginStore{}, authority, owner, eb, func(_ context.Context, err error) { reported <- err })
+	c, err := deliverycontinuation.New(scan, authority, owner, eb, func(_ context.Context, err error) { reported <- err })
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -226,7 +225,6 @@ func TestCoordinatorRetirementRealEventBusDispatch(t *testing.T) {
 						t.Error(err)
 					}
 				})
-				eb.durable.RunOrigins = &recoveryOriginStore{}
 				event := eventtest.RunCreatingRootIngress(uuid.NewString(), "custom.retirement", "", "", []byte(`{}`), 0, runID, "", events.EventEnvelope{}, time.Now().UTC())
 				route := nodeOnlyDeliveryPlan(t, event, "retirement-node").DeliveryRoutes()[0]
 				id, err := runtimedelivery.DeliveryID(event.ID(), route)
@@ -245,7 +243,7 @@ func TestCoordinatorRetirementRealEventBusDispatch(t *testing.T) {
 				if selected {
 					c, err = deliverycontinuation.NewSelected(scan, authority, owner, dispatcher, func(_ context.Context, err error) { reported <- err })
 				} else {
-					c, err = deliverycontinuation.New(scan, &recoveryOriginStore{}, authority, owner, dispatcher, func(_ context.Context, err error) { reported <- err })
+					c, err = deliverycontinuation.New(scan, authority, owner, dispatcher, func(_ context.Context, err error) { reported <- err })
 				}
 				if err != nil {
 					t.Fatal(err)

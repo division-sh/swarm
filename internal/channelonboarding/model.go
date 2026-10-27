@@ -151,13 +151,12 @@ func (i ChannelDurableContextIdentity) Matches(other ChannelDurableContextIdenti
 type ChannelLiveRuntimeOccurrence struct {
 	RuntimeInstanceID            string
 	ContextPublicationGeneration uint64
-	TargetGeneration             uint64
 }
 
 func (o ChannelLiveRuntimeOccurrence) Validate() error {
 	o.RuntimeInstanceID = strings.TrimSpace(o.RuntimeInstanceID)
-	if o.RuntimeInstanceID == "" || o.ContextPublicationGeneration == 0 || o.TargetGeneration == 0 {
-		return fmt.Errorf("channel live runtime occurrence requires runtime instance, publication, and target generations")
+	if o.RuntimeInstanceID == "" || o.ContextPublicationGeneration == 0 {
+		return fmt.Errorf("channel live runtime occurrence requires runtime instance and publication generation")
 	}
 	return nil
 }
@@ -175,7 +174,6 @@ type ChannelRuntimeContextCoordinate struct {
 	RuntimeInstanceID            string                    `json:"runtime_instance_id"`
 	ContextPublicationGeneration uint64                    `json:"context_publication_generation"`
 	PlanGeneration               plangeneration.Generation `json:"plan_generation"`
-	TargetGeneration             uint64                    `json:"target_generation"`
 }
 
 func (c ChannelRuntimeContextCoordinate) DurableIdentity() ChannelDurableContextIdentity {
@@ -190,7 +188,6 @@ func (c ChannelRuntimeContextCoordinate) LiveOccurrence() ChannelLiveRuntimeOccu
 	return ChannelLiveRuntimeOccurrence{
 		RuntimeInstanceID:            c.RuntimeInstanceID,
 		ContextPublicationGeneration: c.ContextPublicationGeneration,
-		TargetGeneration:             c.TargetGeneration,
 	}
 }
 
@@ -203,13 +200,7 @@ func (c ChannelRuntimeContextCoordinate) Normalized() ChannelRuntimeContextCoord
 }
 
 func (c ChannelRuntimeContextCoordinate) Validate() error {
-	if err := c.ValidateContext(); err != nil {
-		return err
-	}
-	if c.TargetGeneration == 0 {
-		return fmt.Errorf("channel runtime context requires an exact target generation")
-	}
-	return nil
+	return c.ValidateContext()
 }
 
 func (c ChannelRuntimeContextCoordinate) ValidateContext() error {
@@ -363,8 +354,6 @@ type ReadinessFacts struct {
 	ConfirmationBindingRevision      int64                                         `json:"confirmation_binding_revision"`
 	ConfirmationTerminalSuccess      bool                                          `json:"confirmation_terminal_success"`
 	Posture                          ActivationPosture                             `json:"activation_posture"`
-	TargetGeneration                 uint64                                        `json:"target_generation,omitempty"`
-	ExpectedTargetGeneration         uint64                                        `json:"expected_target_generation,omitempty"`
 	ExposureGeneration               string                                        `json:"exposure_generation,omitempty"`
 	ExpectedExposureGeneration       string                                        `json:"expected_exposure_generation,omitempty"`
 	RegistrationCurrent              bool                                          `json:"registration_current,omitempty"`
@@ -452,9 +441,6 @@ func ProjectReadiness(f ReadinessFacts) ConnectedChannelReadiness {
 	}
 	if !f.AccountOnly && (!f.ConfirmationTerminalSuccess || f.ConfirmationActivationRevision != f.ActivationRevision || f.ConfirmationBindingRevision != f.BindingRevision) {
 		return fail(ReadinessConfirmationUnavailable)
-	}
-	if f.TargetGeneration == 0 || f.TargetGeneration != f.ExpectedTargetGeneration || f.TargetGeneration != f.Coordinate.TargetGeneration {
-		return fail(ReadinessTargetUnavailable)
 	}
 	switch f.Posture {
 	case ActivationWebhookRegistration:

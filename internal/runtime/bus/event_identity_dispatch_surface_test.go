@@ -220,12 +220,12 @@ func TestNormalDeliveryContinuationAcceptCommittedIsAtomicOnSQLiteAndPostgres(t 
 			})
 			coordinator, err := runtimedeliverycontinuation.New(
 				fixture.store,
-				fixture.store,
+
 				snapshot.Authority,
 				owner,
 				fixture.bus,
-				nil,
-			)
+				nil)
+
 			if err != nil {
 				t.Fatalf("construct normal delivery coordinator: %v", err)
 			}
@@ -273,7 +273,6 @@ func newCompleteEventDispatchFixtureWithOrigin(
 	decisionObligation bool,
 	origin runtimerunlifecycle.RunOrigin,
 	source semanticview.Source,
-	originReaders ...func(completeEventDispatchStore) runtimebus.RunOriginReader,
 ) completeEventDispatchFixture {
 	t.Helper()
 	constructSource := source == nil
@@ -296,53 +295,13 @@ func newCompleteEventDispatchFixtureWithOrigin(
 	}
 	ctx := originalEventBusFixtureContext(t, testAuthorActivityContextForSource(context.Background(), source), selected)
 	opts := runtimebus.EventBusOptions{ContractBundle: source}
-	for _, reader := range originReaders {
-		opts.Durable.RunOrigins = reader(selected)
-	}
 	bus, err := newScopedTestEventBus(selected, opts)
 	if err != nil {
 		t.Fatalf("NewEventBus: %v", err)
 	}
 	createdAt := time.Now().UTC().Add(-time.Minute).Truncate(time.Microsecond)
 	runID, eventID := uuid.NewString(), uuid.NewString()
-	if origin.Kind() == runtimerunlifecycle.OriginStandingGeneration {
-		runID = runtimeflowidentity.StandingGenerationRunID(origin.ServiceID(), origin.Generation())
-		workflowPersistence := runtimepipeline.NewWorkflowPersistence(selected)
-		if backend == "sqlite" {
-			workflowPersistence = runtimepipeline.NewWorkflowPersistence(selected.(*store.SQLiteRuntimeStore))
-		}
-		workflow := runtimepipeline.NewPipelineCoordinatorWithOptions(bus, runtimepipeline.PipelineCoordinatorOptions{
-			ExecutionPosture:        executionposture.Live,
-			Module:                  standingDispatchWorkflowModule{},
-			Persistence:             workflowPersistence,
-			RunLifecycle:            selected,
-			DeliveryStore:           selected,
-			DeadLetters:             selected,
-			PipelineObligations:     selected.PipelineObligations(),
-			DecisionCards:           selected,
-			ProposedEffects:         selected,
-			HumanTasks:              selected,
-			DecisionCardDraftExpiry: selected,
-			HumanTaskExpiry:         selected,
-			DeliveryRuntime:         bus,
-			ReceiverExecution:       eventreceiver.NormalExecution(),
-		})
-
-		reconciled, err := workflow.ReconcileStandingService(ctx, runtimepipeline.StandingServiceCandidate{BindingEnabled: true,
-			ServiceID: origin.ServiceID(),
-			FlowPath:  backend,
-
-			Source: testSourceArtifactFact(source),
-		})
-		if err != nil {
-			t.Fatalf("reconcile standing recovery fixture: %v", err)
-		}
-		if reconciled.RunID != runID || reconciled.Generation != origin.Generation() {
-			t.Fatalf("standing recovery fixture = %#v, want run %s generation %d", reconciled, runID, origin.Generation())
-		}
-	} else {
-		seedCompleteEventDispatchRunWithOrigin(t, ctx, selected, runID, createdAt, origin)
-	}
+	seedCompleteEventDispatchRunWithOrigin(t, ctx, selected, runID, createdAt, origin)
 	sourceRoute := events.RouteIdentity{
 		FlowID: "source-flow", FlowInstance: "source-flow/one", EntityID: uuid.NewString(),
 	}
@@ -721,14 +680,14 @@ func (f completeEventDispatchFixture) startDeliveryContinuations(
 	}
 	coordinator, err := runtimedeliverycontinuation.New(
 		f.store,
-		f.store,
+
 		snapshot.Authority,
 		generation.owner,
 		f.bus,
 		func(_ context.Context, reportErr error) {
 			t.Errorf("complete-event delivery continuation failed: %v", reportErr)
-		},
-	)
+		})
+
 	if err != nil {
 		t.Fatalf("construct complete-event delivery coordinator: %v", err)
 	}

@@ -5,7 +5,7 @@ import "testing"
 func TestCoordinatorCreatingPredecessorSettlementSignalsOnce(t *testing.T) {
 	authority, owner, cleanup := coordinatorTestAuthorityAndOwner(t)
 	defer cleanup()
-	coordinator, err := New(&coordinatorTestStore{}, coordinatorTestRestarts{}, authority, owner, &coordinatorTestDispatcher{}, nil)
+	coordinator, err := New(&coordinatorTestStore{}, authority, owner, &coordinatorTestDispatcher{}, nil)
 	if err != nil {
 		t.Fatal(err)
 	}

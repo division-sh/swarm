@@ -91,13 +91,13 @@ func TestChannelOnboardingAPIContractEvidence(t *testing.T) {
 	coordinate := channelonboarding.ChannelRuntimeContextCoordinate{
 		BundleHash: "bundle-v2:sha256:" + strings.Repeat("b", 64), BundleIdentity: "support@1.0.0#bundle",
 		PackInventoryGeneration: "inventory", RuntimeInstanceID: "11111111-1111-4111-8111-111111111111",
-		ContextPublicationGeneration: 1, PlanGeneration: planGeneration, TargetGeneration: 1,
+		ContextPublicationGeneration: 1, PlanGeneration: planGeneration,
 	}
 	lifecycle := &recordingChannelOnboardingLifecycle{result: channelonboarding.Result{
 		Operation: channelonboarding.Operation{OperationID: operationID, Verb: channelonboarding.VerbConnect, Provider: "telegram", Interface: identity, Coordinate: coordinate},
 		Candidate: &channelonboarding.Candidate{
 			Provider: "telegram", Interface: identity, Coordinate: coordinate,
-			Target: channelonboarding.CandidateTarget{Selector: "ingress:support/telegram:telegram", ServiceID: uuid.NewString(), FlowPath: "support/telegram", Alias: "telegram", Provider: "telegram", Generation: 1, PublicationSequence: 1, AdmissionGeneration: triggergeneration.FromCanonicalBytes([]byte("catalog"))},
+			Target: channelonboarding.CandidateTarget{Selector: "ingress:support/telegram:telegram", FlowPath: "support/telegram", Alias: "telegram", Provider: "telegram", AdmissionGeneration: triggergeneration.FromCanonicalBytes([]byte("catalog"))},
 		},
 	}}
 	handlers := ChannelOnboardingHandlers(ChannelOnboardingHandlerOptions{Onboarding: lifecycle, Channels: channels})

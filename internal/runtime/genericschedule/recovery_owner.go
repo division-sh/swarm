@@ -6,17 +6,17 @@ import (
 	"time"
 
 	"github.com/division-sh/swarm/internal/runtime/core/worklifetime"
+	"github.com/division-sh/swarm/internal/runtime/correlation"
 )
 
-var errInstanceExecutionOwner = errors.New("instance schedule requires its exact standing work occurrence")
+var errInstanceExecutionOwner = errors.New("instance schedule requires its runtime work occurrence and exact run")
 
 func validateInstanceExecutionOwner(ctx context.Context, command AdmissionCommand) error {
 	if command.OwnerKind != OwnerInstance {
 		return nil
 	}
 	owner, _ := worklifetime.OccurrenceFromContext(ctx)
-	standing, ok := worklifetime.StandingProjection(owner)
-	if !ok || standing.Identity().RunID != command.RunID {
+	if owner == nil || correlation.RunIDFromContext(ctx) != command.RunID {
 		return errInstanceExecutionOwner
 	}
 	return nil

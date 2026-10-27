@@ -503,7 +503,7 @@ func catalogPostgresRuntimeDeps(cfg *config.Config, pg *store.PostgresStore, wor
 		EventBusDurable: runtimebus.DurableDependencies{
 			ReplyContext: pg, RunLifecycle: pg, DeliveryLifecycle: pg,
 			ActiveAgents: pg, PreparedEvents: pg,
-			TargetFailureRecorder: pg, RunOrigins: pg, StandingRestarts: pg, ConstructionPublications: pg, Instances: pg, EmitFeedback: pg,
+			TargetFailureRecorder: pg, ConstructionPublications: pg, Instances: pg, EmitFeedback: pg,
 		},
 		EventPayloadAdmissionBinder:   pg,
 		InboundPayloadAdmissionBinder: pg,
@@ -521,7 +521,6 @@ func catalogPostgresRuntimeDeps(cfg *config.Config, pg *store.PostgresStore, wor
 			LifecycleCensus: pg, LifecycleState: pg, LifecycleEffects: pg,
 			LifecycleDiagnostics: pg, EffectsRecovery: pg, DeliveryQuiescence: pg,
 			EventExistence: pg, DirectiveOperations: pg, DirectiveTargets: pg,
-			StandingRestarts: pg,
 		},
 		EffectsStore:             pg,
 		CompletionStore:          pg,
@@ -561,7 +560,7 @@ func catalogSQLiteRuntimeDeps(cfg *config.Config, sqlite *store.SQLiteRuntimeSto
 		EventBusDurable: runtimebus.DurableDependencies{
 			ReplyContext: sqlite, RunLifecycle: sqlite, DeliveryLifecycle: sqlite,
 			ActiveAgents: sqlite, PreparedEvents: sqlite,
-			TargetFailureRecorder: sqlite, RunOrigins: sqlite, StandingRestarts: sqlite, ConstructionPublications: sqlite, Instances: sqlite, EmitFeedback: sqlite,
+			TargetFailureRecorder: sqlite, ConstructionPublications: sqlite, Instances: sqlite, EmitFeedback: sqlite,
 		},
 		EventPayloadAdmissionBinder:   sqlite,
 		InboundPayloadAdmissionBinder: sqlite,
@@ -579,7 +578,6 @@ func catalogSQLiteRuntimeDeps(cfg *config.Config, sqlite *store.SQLiteRuntimeSto
 			LifecycleCensus: sqlite, LifecycleState: sqlite, LifecycleEffects: sqlite,
 			LifecycleDiagnostics: sqlite, EffectsRecovery: sqlite, DeliveryQuiescence: sqlite,
 			EventExistence: sqlite, DirectiveOperations: sqlite, DirectiveTargets: sqlite,
-			StandingRestarts: sqlite,
 		},
 		EffectsStore:             sqlite,
 		CompletionStore:          sqlite,

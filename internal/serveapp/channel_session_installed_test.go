@@ -78,8 +78,8 @@ func installedSessionBootstrapFixture(t *testing.T, backend string) (*channelonb
 		t.Fatal(err)
 	}
 	candidate, err := catalog.Resolve(channelonboarding.CandidateSelection{Provider: "whatsapp"})
-	if err != nil || candidate.ValidateDeclaration() != nil || candidate.Validate() == nil || candidate.Target.Alias != "reception" ||
-		candidate.Coordinate.BundleHash != fact.BundleHash() || candidate.Target.Generation != 0 || candidate.Plan.HasNativeInbox() {
+	if err != nil || candidate.ValidateDeclaration() != nil || candidate.Target.Alias != "reception" ||
+		candidate.Coordinate.BundleHash != fact.BundleHash() || candidate.Plan.HasNativeInbox() {
 		t.Fatal("artifact-derived catalog invented authority or lost source ownership", candidate, err)
 	}
 	files, err := credentials.NewFileStore(filepath.Join(t.TempDir(), "credentials.json"))
@@ -141,7 +141,7 @@ func TestServeInstalledWhatsAppArtifactSelectsBootstrapWithoutExecutionBothStore
 				Selection: channelonboarding.CandidateSelection{Provider: "whatsapp"}, IdempotencyKey: "installed-artifact-bootstrap"})
 			if err != nil || started.Operation.Phase != channelonboarding.PhaseActivatingProvider || started.Operation.SessionConnectionID == "" ||
 				started.Operation.SessionAccount != (operatorchannel.SessionAccountAdmission{}) || started.IdentityOperation != nil || started.Binding != nil ||
-				started.Operation.ActivationRevision != 0 || started.Operation.Coordinate.TargetGeneration != 0 {
+				started.Operation.ActivationRevision != 0 || started.Operation.Coordinate.ValidateContext() != nil {
 				t.Fatal("installed artifact did not reach pairing-only bootstrap", started, err)
 			}
 			if err := sessions.(*serveSessionBootstrap).connection(started.Operation.OperationID).ReconcileIncoming(ctx); err != nil {

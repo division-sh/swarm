@@ -134,7 +134,6 @@ func loadPostgresRunLifecycleSnapshot(
 	query := `
 		SELECT run_id::text, status, bundle_hash, origin_kind,
 		       COALESCE(trigger_event_id::text, ''), COALESCE(trigger_event_type, ''),
-		       COALESCE(origin_service_id::text, ''), COALESCE(origin_generation, 0),
 		       COALESCE(forked_from_run_id::text, ''), COALESCE(forked_from_point_kind, ''),
 		       COALESCE(forked_from_revision, 0), COALESCE(forked_from_event_id::text, ''),
 		       COALESCE(event_count, 0),
@@ -152,8 +151,6 @@ func loadPostgresRunLifecycleSnapshot(
 		originKind    string
 		eventID       string
 		eventType     string
-		serviceID     string
-		generation    int64
 		sourceRunID   string
 		forkPointKind string
 		forkRevision  int64
@@ -164,7 +161,7 @@ func loadPostgresRunLifecycleSnapshot(
 	)
 	err := q.QueryRowContext(ctx, query, runID).Scan(
 		&snapshot.RunID, &state, &snapshot.BundleHash,
-		&originKind, &eventID, &eventType, &serviceID, &generation, &sourceRunID, &forkPointKind, &forkRevision, &sourceEventID,
+		&originKind, &eventID, &eventType, &sourceRunID, &forkPointKind, &forkRevision, &sourceEventID,
 		&snapshot.EventCount, &snapshot.EntityCount, &failureRaw, &snapshot.ContinuedAsRunID, &startedAt, &endedAt,
 	)
 	if errors.Is(err, sql.ErrNoRows) {
@@ -174,13 +171,10 @@ func loadPostgresRunLifecycleSnapshot(
 		return runtimerunlifecycle.Snapshot{}, fmt.Errorf("load PostgreSQL run lifecycle snapshot: %w", err)
 	}
 	snapshot.Origin, err = runtimerunlifecycle.DecodeRunOrigin(
-		originKind, eventID, eventType, serviceID, generation, sourceRunID, forkPointKind, forkRevision, sourceEventID,
+		originKind, eventID, eventType, sourceRunID, forkPointKind, forkRevision, sourceEventID,
 	)
 	if err != nil {
 		return runtimerunlifecycle.Snapshot{}, fmt.Errorf("decode PostgreSQL run lifecycle origin: %w", err)
-	}
-	if err := requireStandingGenerationOriginRelation(ctx, q, snapshot.RunID, snapshot.Origin, true); err != nil {
-		return runtimerunlifecycle.Snapshot{}, err
 	}
 	snapshot.State, err = runtimerunlifecycle.ParseState(state)
 	if err != nil {
@@ -226,8 +220,6 @@ func loadSQLiteRunLifecycleSnapshot(
 		originKind    string
 		eventID       string
 		eventType     string
-		serviceID     string
-		generation    int64
 		sourceRunID   string
 		forkPointKind string
 		forkRevision  int64
@@ -239,7 +231,6 @@ func loadSQLiteRunLifecycleSnapshot(
 	err := q.QueryRowContext(ctx, `
 		SELECT run_id, status, bundle_hash, origin_kind,
 		       COALESCE(trigger_event_id, ''), COALESCE(trigger_event_type, ''),
-		       COALESCE(origin_service_id, ''), COALESCE(origin_generation, 0),
 		       COALESCE(forked_from_run_id, ''), COALESCE(forked_from_point_kind, ''),
 		       COALESCE(forked_from_revision, 0), COALESCE(forked_from_event_id, ''),
 		       COALESCE(event_count, 0),
@@ -249,7 +240,7 @@ func loadSQLiteRunLifecycleSnapshot(
 		WHERE run_id = ?
 	`, runID).Scan(
 		&snapshot.RunID, &state, &snapshot.BundleHash,
-		&originKind, &eventID, &eventType, &serviceID, &generation, &sourceRunID, &forkPointKind, &forkRevision, &sourceEventID,
+		&originKind, &eventID, &eventType, &sourceRunID, &forkPointKind, &forkRevision, &sourceEventID,
 		&snapshot.EventCount, &snapshot.EntityCount, &failureRaw, &snapshot.ContinuedAsRunID, &startedAt, &endedAt,
 	)
 	if errors.Is(err, sql.ErrNoRows) {
@@ -259,13 +250,10 @@ func loadSQLiteRunLifecycleSnapshot(
 		return runtimerunlifecycle.Snapshot{}, fmt.Errorf("load SQLite run lifecycle snapshot: %w", err)
 	}
 	snapshot.Origin, err = runtimerunlifecycle.DecodeRunOrigin(
-		originKind, eventID, eventType, serviceID, generation, sourceRunID, forkPointKind, forkRevision, sourceEventID,
+		originKind, eventID, eventType, sourceRunID, forkPointKind, forkRevision, sourceEventID,
 	)
 	if err != nil {
 		return runtimerunlifecycle.Snapshot{}, fmt.Errorf("decode SQLite run lifecycle origin: %w", err)
-	}
-	if err := requireStandingGenerationOriginRelation(ctx, q, snapshot.RunID, snapshot.Origin, false); err != nil {
-		return runtimerunlifecycle.Snapshot{}, err
 	}
 	snapshot.State, err = runtimerunlifecycle.ParseState(state)
 	if err != nil {
@@ -293,53 +281,6 @@ func loadSQLiteRunLifecycleSnapshot(
 		return runtimerunlifecycle.Snapshot{}, fmt.Errorf("validate SQLite run lifecycle snapshot: %w", err)
 	}
 	return snapshot, nil
-}
-
-func requireStandingGenerationOriginRelation(
-	ctx context.Context,
-	q rowQueryer,
-	runID string,
-	origin runtimerunlifecycle.RunOrigin,
-	postgres bool,
-) error {
-	query := `
-		SELECT
-			COUNT(*),
-			COALESCE(SUM(CASE WHEN service_id = ? AND generation = ? THEN 1 ELSE 0 END), 0)
-		FROM standing_service_generations
-		WHERE run_id = ?
-	`
-	args := []any{origin.ServiceID(), origin.Generation(), runID}
-	if postgres {
-		query = `
-			SELECT
-				COUNT(*),
-				COUNT(*) FILTER (WHERE service_id = NULLIF($2, '')::uuid AND generation = $3)
-			FROM standing_service_generations
-			WHERE run_id = $1::uuid
-		`
-		args = []any{runID, origin.ServiceID(), origin.Generation()}
-	}
-	var relations, matches int
-	if err := q.QueryRowContext(ctx, query, args...).Scan(&relations, &matches); err != nil {
-		return fmt.Errorf("validate standing generation run origin relation: %w", err)
-	}
-	if origin.Kind() == runtimerunlifecycle.OriginStandingGeneration {
-		if relations == 1 && matches == 1 {
-			return nil
-		}
-		return fmt.Errorf(
-			"standing generation run origin relation mismatch: run_id=%s service_id=%s generation=%d relations=%d matches=%d",
-			runID, origin.ServiceID(), origin.Generation(), relations, matches,
-		)
-	}
-	if relations != 0 || matches != 0 {
-		return fmt.Errorf(
-			"non-standing run origin has standing generation relation: run_id=%s kind=%s relations=%d matches=%d",
-			runID, origin.Kind(), relations, matches,
-		)
-	}
-	return nil
 }
 
 func (s *RunLifecyclePostgresOwner) markRunTerminalTx(

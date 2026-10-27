@@ -143,7 +143,7 @@ func TestServeSessionExplicitResumeRetainsPairedIdentityBothStores(t *testing.T)
 			retained, err := f.adapter.store.GetChannelOnboarding(f.ctx, paired.OperationID)
 			retainedHeader, headerErr := os.ReadFile(headerPath)
 			if err != nil || headerErr != nil || retained.Revision != paired.Revision || retained.SessionAccount != paired.SessionAccount ||
-				retained.ActivationRevision != 0 || retained.IdentityOperationID != "" || retained.Coordinate.TargetGeneration != 0 || !bytes.Equal(header, retainedHeader) {
+				retained.ActivationRevision != 0 || retained.IdentityOperationID != "" || retained.Coordinate.ValidateContext() != nil || !bytes.Equal(header, retainedHeader) {
 				t.Fatal("restoration adopted identity or manufactured executable admission", retained, err, headerErr)
 			}
 			for index := 0; index < 2; index++ {

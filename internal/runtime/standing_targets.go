@@ -37,43 +37,32 @@ type StandingTargetDeclaration struct {
 }
 
 type StandingTarget struct {
-	BundleHash          string
-	ServiceID           string
-	SourcePath          string
-	FlowPath            string
-	Alias               string
-	Provider            string
-	RunID               string
-	Generation          int64
-	PublicationSequence int64
-	SigningSecret       string
-	AdmissionPlan       providertriggers.InboundAdmissionPlan
+	BundleHash    string
+	SourcePath    string
+	FlowPath      string
+	Alias         string
+	Provider      string
+	RunID         string
+	SigningSecret string
+	AdmissionPlan providertriggers.InboundAdmissionPlan
 }
 
 type StandingActivation struct {
-	BundleHash          string
-	ServiceID           string
-	FlowPath            string
-	RunID               string
-	Generation          int64
-	PublicationSequence int64
-	Construction        runtimeflowidentity.Instance
-	EffectiveState      string
-	RestartDisposition  runtimestanding.StandingRestartDisposition
-	Created             bool
+	BundleHash   string
+	FlowPath     string
+	RunID        string
+	Construction runtimeflowidentity.Instance
+	Created      bool
+	RunState     runtimestanding.State
 }
 
 type standingTargetPlan struct {
-	bindingEnabled bool
-	blockReason    runtimestanding.StandingBindingBlockReason
-	declaration    StandingTargetDeclaration
-	serviceID      string
-	targets        []StandingTarget
+	declaration StandingTargetDeclaration
+	targets     []StandingTarget
 }
 
 func (t StandingTarget) normalized() StandingTarget {
 	t.BundleHash = strings.TrimSpace(t.BundleHash)
-	t.ServiceID = strings.TrimSpace(t.ServiceID)
 	t.SourcePath = strings.TrimSpace(t.SourcePath)
 	t.FlowPath = strings.Trim(strings.TrimSpace(t.FlowPath), "/")
 	t.Provider = providertriggers.NormalizeProviderName(t.Provider)
@@ -414,24 +403,24 @@ func (rt *Runtime) EnsureStandingTargets(ctx context.Context) ([]StandingTarget,
 	return targets, activations, err
 }
 
-func (rt *Runtime) EnsureStandingServiceTargets(ctx context.Context, serviceID string) ([]StandingTarget, []StandingActivation, error) {
-	serviceID = strings.TrimSpace(serviceID)
-	if serviceID == "" {
-		return nil, nil, fmt.Errorf("standing service_id is required")
+func (rt *Runtime) EnsureFlowTargets(ctx context.Context, flowPath string) ([]StandingTarget, []StandingActivation, error) {
+	flowPath = strings.TrimSpace(flowPath)
+	if flowPath == "" {
+		return nil, nil, fmt.Errorf("flow path is required")
 	}
-	targets, activations, err := rt.ensureStandingTargets(ctx, serviceID)
+	targets, activations, err := rt.ensureStandingTargets(ctx, flowPath)
 	if err == nil {
 		err = rt.restoreAdoptedStandingWorkflowTimers(ctx, activations)
 	}
 	return targets, activations, err
 }
 
-func (rt *Runtime) ensureStandingTargets(ctx context.Context, serviceID string) ([]StandingTarget, []StandingActivation, error) {
-	return rt.ensureStandingTargetsMutation(ctx, serviceID)
+func (rt *Runtime) ensureStandingTargets(ctx context.Context, flowPath string) ([]StandingTarget, []StandingActivation, error) {
+	return rt.ensureStandingTargetsMutation(ctx, flowPath)
 }
 
-func (rt *Runtime) ensureStandingTargetsMutation(ctx context.Context, serviceID string) ([]StandingTarget, []StandingActivation, error) {
-	targets, activations, _, err := rt.standingTargetsMutation(ctx, serviceID, false)
+func (rt *Runtime) ensureStandingTargetsMutation(ctx context.Context, flowPath string) ([]StandingTarget, []StandingActivation, error) {
+	targets, activations, _, err := rt.standingTargetsMutation(ctx, flowPath, false)
 	return targets, activations, err
 }
 
@@ -439,7 +428,7 @@ func (rt *Runtime) PrepareStandingTargets(ctx context.Context) ([]StandingTarget
 	return rt.standingTargetsMutation(ctx, "", true)
 }
 
-func (rt *Runtime) standingTargetsMutation(ctx context.Context, serviceID string, prepare bool) ([]StandingTarget, []StandingActivation, func() error, error) {
+func (rt *Runtime) standingTargetsMutation(ctx context.Context, flowPath string, prepare bool) ([]StandingTarget, []StandingActivation, func() error, error) {
 	if rt == nil {
 		return nil, nil, nil, fmt.Errorf("standing activation requires a runtime")
 	}
@@ -465,32 +454,30 @@ func (rt *Runtime) standingTargetsMutation(ctx context.Context, serviceID string
 	}
 	fact := rt.Options.SourceArtifactFact
 	source := rt.Options.WorkflowModule.SemanticSource()
+	ctx = runtimecorrelation.WithSourceArtifactFact(ctx, fact)
 	selectedPlans := make([]standingTargetPlan, 0, len(plans))
-	mutations := make([]runtimepipeline.StandingTargetMutation, 0, len(plans))
+	mutations := make([]runtimepipeline.LiveTargetMutation, 0, len(plans))
 	observedAt := time.Now().UTC()
 	for _, plan := range plans {
-		if serviceID != "" && plan.serviceID != serviceID {
+		if flowPath != "" && plan.declaration.FlowPath != flowPath {
 			continue
 		}
 		declaration := plan.declaration
 		graph, found := semanticview.WorkflowStageTopology(source, declaration.FlowPath)
 		if !found || graph.FlowID != declaration.FlowPath || !graph.ValidStageCatalog() {
-			return nil, nil, nil, fmt.Errorf("standing target %q has no selected compiled stage topology for flow %q", plan.serviceID, declaration.FlowPath)
+			return nil, nil, nil, fmt.Errorf("flow %q has no selected compiled stage topology", declaration.FlowPath)
 		}
 		initial, err := graph.InitialStoredStage()
 		if err != nil {
-			return nil, nil, nil, fmt.Errorf("standing target %q initial stage: %w", plan.serviceID, err)
+			return nil, nil, nil, fmt.Errorf("flow %q initial stage: %w", declaration.FlowPath, err)
 		}
 		initialState := ""
 		if !initial.IsStatelessPosture() {
 			initialState = initial.ID()
 		}
 		selectedPlans = append(selectedPlans, plan)
-		mutations = append(mutations, runtimepipeline.StandingTargetMutation{
-			Candidate: runtimepipeline.StandingServiceCandidate{BindingEnabled: plan.bindingEnabled, BindingBlockReason: plan.blockReason,
-				ServiceID: plan.serviceID, FlowPath: declaration.FlowPath,
-				Source: fact,
-			},
+		mutations = append(mutations, runtimepipeline.LiveTargetMutation{
+			FlowPath: declaration.FlowPath,
 			Activation: runtimepipeline.FlowInstanceActivationRequest{
 				ContractBundle: source,
 				InitialState:   initialState,
@@ -502,13 +489,13 @@ func (rt *Runtime) standingTargetsMutation(ctx context.Context, serviceID string
 			},
 		})
 	}
-	request := runtimepipeline.StandingTargetMutationRequest{Targets: mutations, ObservedAt: observedAt}
-	var results []runtimepipeline.StandingTargetMutationResult
+	request := runtimepipeline.LiveTargetMutationRequest{Targets: mutations, ObservedAt: observedAt}
+	var results []runtimepipeline.LiveTargetMutationResult
 	var complete func() error
 	if prepare {
-		results, complete, err = rt.Pipeline.PrepareStandingTargets(ctx, request, rt.Manager)
+		results, complete, err = rt.Pipeline.PrepareLiveTargets(ctx, request, rt.Manager)
 	} else {
-		results, err = rt.Pipeline.CommitStandingTargets(ctx, request, rt.Manager)
+		results, err = rt.Pipeline.CommitLiveTargets(ctx, request, rt.Manager)
 	}
 	if err != nil {
 		return nil, nil, nil, fmt.Errorf("activate standing targets: %w", err)
@@ -523,28 +510,16 @@ func (rt *Runtime) standingTargetsMutation(ctx context.Context, serviceID string
 		result := results[i]
 		instance := result.Instance
 		reconciliation := result.Reconciliation
-		if !reconciliation.RestartDisposition.Executable() {
-			if reconciliation.RunID == "" {
-				continue
-			}
-			activations = append(activations, StandingActivation{
-				BundleHash: fact.BundleHash(), ServiceID: reconciliation.ServiceID, FlowPath: declaration.FlowPath,
-				RunID: reconciliation.RunID, Generation: reconciliation.Generation,
-				PublicationSequence: reconciliation.PublicationSequence, Construction: instance,
-				EffectiveState: reconciliation.EffectiveState, RestartDisposition: reconciliation.RestartDisposition, Created: false,
-			})
+		if !reconciliation.Source.Matches(fact) || (reconciliation.State != runtimestanding.StateLive && reconciliation.State != runtimestanding.StatePaused) {
 			continue
 		}
 		activations = append(activations, StandingActivation{
-			BundleHash: fact.BundleHash(), ServiceID: plan.serviceID, FlowPath: declaration.FlowPath,
-			RunID: reconciliation.RunID, Generation: reconciliation.Generation, PublicationSequence: reconciliation.PublicationSequence, Construction: instance,
-			EffectiveState: reconciliation.EffectiveState, RestartDisposition: reconciliation.RestartDisposition, Created: result.Created,
+			BundleHash: fact.BundleHash(), FlowPath: declaration.FlowPath,
+			RunID: reconciliation.RunID, RunState: reconciliation.State, Construction: instance, Created: result.Created,
 		})
 		for _, target := range plan.targets {
 			target.BundleHash = fact.BundleHash()
 			target.RunID = reconciliation.RunID
-			target.Generation = reconciliation.Generation
-			target.PublicationSequence = reconciliation.PublicationSequence
 			targets = append(targets, target.normalized())
 		}
 	}
@@ -568,7 +543,7 @@ func (rt *Runtime) restoreAdoptedStandingWorkflowTimers(ctx context.Context, act
 	restored := make(map[string]struct{}, len(activations))
 	for _, activation := range activations {
 		runID := strings.TrimSpace(activation.RunID)
-		if activation.Created || !activation.RestartDisposition.Executable() || runID == "" {
+		if activation.Created || (activation.RunState != runtimestanding.StateLive && activation.RunState != runtimestanding.StatePaused) || runID == "" {
 			continue
 		}
 		if _, ok := restored[runID]; ok {
@@ -585,7 +560,7 @@ func (rt *Runtime) restoreAdoptedStandingWorkflowTimers(ctx context.Context, act
 }
 
 // PlanStandingTargets describes declaration coordinates for collision preflight.
-// Only selected-store reconciliation can supply a concrete generation and run.
+// Only selected-store reconciliation can supply a concrete run.
 func (rt *Runtime) PlanStandingTargets() ([]StandingTarget, error) {
 	plans, err := rt.standingTargetPlans()
 	if err != nil {
@@ -598,18 +573,14 @@ func (rt *Runtime) PlanStandingTargets() ([]StandingTarget, error) {
 	return targets, nil
 }
 
-func (rt *Runtime) PlanStandingServiceCandidates() ([]runtimepipeline.StandingServiceCandidate, error) {
+func (rt *Runtime) PlanLiveFlowScopes() ([]runtimestanding.LiveRunScope, error) {
 	plans, err := rt.standingTargetPlans()
 	if err != nil {
 		return nil, err
 	}
-	fact := rt.Options.SourceArtifactFact
-	out := make([]runtimepipeline.StandingServiceCandidate, 0, len(plans))
+	out := make([]runtimestanding.LiveRunScope, 0, len(plans))
 	for _, plan := range plans {
-		out = append(out, runtimepipeline.StandingServiceCandidate{BindingEnabled: plan.bindingEnabled, BindingBlockReason: plan.blockReason,
-			ServiceID: plan.serviceID, FlowPath: plan.declaration.FlowPath,
-			Source: fact,
-		})
+		out = append(out, runtimestanding.LiveRunScope{FlowPath: plan.declaration.FlowPath})
 	}
 	return out, nil
 }
@@ -635,25 +606,17 @@ func (rt *Runtime) standingTargetPlans() ([]standingTargetPlan, error) {
 	}
 	plans := make([]standingTargetPlan, 0, len(declarations))
 	for _, declaration := range declarations {
-		serviceID := runtimeflowidentity.StandingServiceID(declaration.FlowPath)
-		plan := standingTargetPlan{declaration: declaration, serviceID: serviceID, bindingEnabled: len(declaration.Clocks) > 0}
+		plan := standingTargetPlan{declaration: declaration}
 		for _, binding := range declaration.Ingress {
 			credentials := admission.bindings[standingIngressSelector(declaration.FlowPath, binding.Provider)]
 			if !credentials.enabled {
-				if plan.blockReason == "" || credentials.blockReason == runtimestanding.StandingBindingRecoveryRequired {
-					plan.blockReason = credentials.blockReason
-				}
 				continue
 			}
-			plan.bindingEnabled = true
 			plan.targets = append(plan.targets, StandingTarget{
-				BundleHash: fact.BundleHash(), ServiceID: serviceID, SourcePath: declaration.SourcePath,
+				BundleHash: fact.BundleHash(), SourcePath: declaration.SourcePath,
 				FlowPath: declaration.FlowPath, Alias: declaration.Alias,
 				Provider: binding.Provider, SigningSecret: credentials.signingKey, AdmissionPlan: binding.AdmissionPlan,
 			}.normalized())
-		}
-		if plan.bindingEnabled {
-			plan.blockReason = ""
 		}
 		plans = append(plans, plan)
 	}

@@ -1253,16 +1253,16 @@ func testRegistrationPair(t *testing.T, registration packs.CompiledChannelRegist
 		BundleHash:     "bundle-v2:sha256:" + strings.Repeat("b", 64),
 		BundleIdentity: "bundle:test@sha256:registration", PackInventoryGeneration: "sha256:registration-inventory",
 		RuntimeInstanceID: uuid.NewString(), ContextPublicationGeneration: 1,
-		PlanGeneration: planGeneration, TargetGeneration: 1,
+		PlanGeneration: planGeneration,
 	}
 	pair := RegistrationPair{
 		BindingID: bindingID, PlanGeneration: planGeneration, OnboardingOperationID: onboardingID, OnboardingRevision: 1,
 		OnboardingCoordinate: coordinate, PrebindingOperationID: onboardingID, Registration: registration,
 		CredentialKeys: map[string]string{"telegram_bot_token": "bot"},
 		Target: RegistrationTarget{
-			Selector: selector, BundleHash: "bundle-v2:sha256:" + strings.Repeat("b", 64), ServiceID: "service-" + bindingID,
+			Selector: selector, BundleHash: "bundle-v2:sha256:" + strings.Repeat("b", 64),
 			FlowPath: parsed.FlowPath, Alias: parsed.FlowPath, Provider: parsed.Provider,
-			Generation: 1, PublicationSequence: 1, AdmissionPlanGeneration: triggergeneration.FromCanonicalBytes([]byte("admission-" + bindingID)), SigningCredentialKey: "signing",
+			AdmissionPlanGeneration: triggergeneration.FromCanonicalBytes([]byte("admission-" + bindingID)), SigningCredentialKey: "signing",
 		},
 	}
 	if owner != nil {

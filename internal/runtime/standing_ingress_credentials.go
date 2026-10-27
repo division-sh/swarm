@@ -12,9 +12,7 @@ import (
 	"github.com/division-sh/swarm/internal/operatorchannel"
 	"github.com/division-sh/swarm/internal/packs"
 	"github.com/division-sh/swarm/internal/providertriggers"
-	runtimeflowidentity "github.com/division-sh/swarm/internal/runtime/core/flowidentity"
 	runtimecredentials "github.com/division-sh/swarm/internal/runtime/credentials"
-	runtimepipeline "github.com/division-sh/swarm/internal/runtime/pipeline"
 	runtimerunlifecycle "github.com/division-sh/swarm/internal/runtime/runlifecycle"
 	"github.com/division-sh/swarm/internal/runtime/semanticview"
 )
@@ -598,34 +596,12 @@ func (rt *Runtime) AdmitChannelStandingTarget(ctx context.Context, operation cha
 	if err := rt.refreshStandingCredentialAdmission(ctx, candidate.Target.Selector); err != nil {
 		return nil, nil, err
 	}
-	plans, err := rt.standingTargetPlans()
-	if err != nil {
-		return nil, nil, err
-	}
-	for _, plan := range plans {
-		if plan.serviceID != candidate.Target.ServiceID {
-			continue
-		}
-		current, found, err := rt.Pipeline.LoadReconciledStandingService(ctx, runtimepipeline.StandingServiceCandidate{
-			BindingEnabled: plan.bindingEnabled, BindingBlockReason: plan.blockReason, ServiceID: plan.serviceID, FlowPath: plan.declaration.FlowPath,
-			Source: rt.Options.SourceArtifactFact,
-		})
-		if err != nil {
-			return nil, nil, err
-		}
-		if found && current.RestartDisposition.Executable() && current.PublicationSequence > 0 {
-			if candidate.Target.Generation > 0 && (candidate.Target.Generation != uint64(current.Generation) || candidate.Target.PublicationSequence != current.PublicationSequence) {
-				return nil, nil, fmt.Errorf("%w: channel standing target changed before promotion", channelonboarding.ErrRevisionConflict)
-			}
-			return rt.projectCommittedStandingTargets(plan.targets, current)
-		}
-	}
-	targets, activations, err := rt.EnsureStandingServiceTargets(ctx, candidate.Target.ServiceID)
+	targets, activations, err := rt.EnsureFlowTargets(ctx, candidate.Target.FlowPath)
 	if err != nil {
 		return nil, nil, err
 	}
 	if len(targets) == 0 {
-		return nil, nil, fmt.Errorf("channel target %s has no executable standing owner; inspect standing service %s", candidate.Target.Selector, candidate.Target.ServiceID)
+		return nil, nil, fmt.Errorf("channel target %s has no live or paused landing run; inspect flow %s", candidate.Target.Selector, candidate.Target.FlowPath)
 	}
 	return targets, activations, nil
 }
@@ -642,32 +618,6 @@ func (rt *Runtime) requireStandingChannelTargetAdmission(current channelonboardi
 		return channelonboarding.RequireSessionStandingAdmission(current, session)
 	}
 	return nil
-}
-
-func (rt *Runtime) projectCommittedStandingTargets(planned []StandingTarget, current runtimepipeline.StandingServiceReconciliation) ([]StandingTarget, []StandingActivation, error) {
-	source := rt.Options.WorkflowModule.SemanticSource()
-	keyless, err := runtimepipeline.StandingConstructionIsKeyless(source, current.FlowPath)
-	if err != nil {
-		return nil, nil, err
-	}
-	var instance runtimeflowidentity.Instance
-	if keyless {
-		instance, err = runtimeflowidentity.StandingForGeneration(source, current.FlowPath, current.RunID)
-		if err != nil {
-			return nil, nil, err
-		}
-	}
-	activation := StandingActivation{
-		BundleHash: current.BundleHash, ServiceID: current.ServiceID, FlowPath: current.FlowPath,
-		RunID: current.RunID, Generation: current.Generation, PublicationSequence: current.PublicationSequence,
-		Construction:   instance,
-		EffectiveState: current.EffectiveState, RestartDisposition: current.RestartDisposition,
-	}
-	targets := append([]StandingTarget(nil), planned...)
-	for i := range targets {
-		targets[i].RunID, targets[i].Generation, targets[i].PublicationSequence = current.RunID, current.Generation, current.PublicationSequence
-	}
-	return targets, []StandingActivation{activation}, nil
 }
 
 func (rt *Runtime) refreshStandingCredentialAdmission(ctx context.Context, selected string) error {

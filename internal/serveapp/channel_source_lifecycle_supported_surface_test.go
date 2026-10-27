@@ -31,7 +31,7 @@ func TestChannelSourceLifecyclePublicJourney(t *testing.T) {
 				})
 				h, db, hash := startChannelAnchorJourney(t, backend, "source-lifecycle-token", false)
 				var standingRun string
-				if err := db.QueryRow(`SELECT current_run_id FROM standing_services WHERE current_run_id IS NOT NULL`).Scan(&standingRun); err != nil {
+				if err := db.QueryRow(`SELECT run_id FROM runs WHERE flow_path='telegram-ingress' AND landing_run=TRUE`).Scan(&standingRun); err != nil {
 					t.Fatal(err)
 				}
 				standingCard := waitChannelAnchorCard(t, db, standingRun, decisioncard.AnchorKindStageGate, "telegram-ingress")
@@ -161,10 +161,6 @@ func TestChannelSourceLifecyclePublicJourney(t *testing.T) {
 					}
 					successorPlan := ""
 					if !clear {
-						var freshGenerations int
-						if err := db.QueryRow(`SELECT COUNT(*) FROM standing_service_generations`).Scan(&freshGenerations); err != nil || freshGenerations != 0 {
-							t.Fatalf("reset created a standing generation without admitted ingress credentials: count=%d err=%v", freshGenerations, err)
-						}
 						stdout, stderr := &lockedBuffer{}, &lockedBuffer{}
 						restore := installChannelOnboardingCLIInput(t, "source-reset-signing-secret\n")
 						t.Cleanup(restore)
@@ -178,7 +174,7 @@ func TestChannelSourceLifecyclePublicJourney(t *testing.T) {
 						h.stop(t)
 						h.start(t)
 						var successorRun string
-						if err := db.QueryRow(`SELECT current_run_id FROM standing_services WHERE current_run_id IS NOT NULL`).Scan(&successorRun); err != nil {
+						if err := db.QueryRow(`SELECT run_id FROM runs WHERE flow_path='telegram-ingress' AND landing_run=TRUE`).Scan(&successorRun); err != nil {
 							t.Fatal(err)
 						}
 						freshCard := waitChannelAnchorCard(t, db, successorRun, decisioncard.AnchorKindStageGate, "telegram-ingress")

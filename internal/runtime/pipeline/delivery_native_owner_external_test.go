@@ -226,7 +226,7 @@ func pipelineDeliveryNativeFixtureFromSelected(t *testing.T, source semanticview
 		work := pipelineExternalTestWorkOwnerForSource(t, fact)
 		predecessor = work
 		fixture.Context = worklifetime.WithOccurrence(base.Context, work)
-		continuations, err := deliverycontinuation.New(selected, selected, authority, work, bus, nil)
+		continuations, err := deliverycontinuation.New(selected, authority, work, bus, nil)
 		if err != nil {
 			t.Fatal(err)
 		}

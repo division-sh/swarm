@@ -15,24 +15,15 @@ import (
 
 type CandidateTarget struct {
 	Selector             string                       `json:"selector"`
-	ServiceID            string                       `json:"service_id"`
 	FlowPath             string                       `json:"flow_path"`
 	Alias                string                       `json:"alias"`
 	Provider             string                       `json:"provider"`
-	Generation           uint64                       `json:"generation"`
-	PublicationSequence  int64                        `json:"publication_sequence"`
 	AdmissionGeneration  triggergeneration.Generation `json:"admission_generation"`
 	SigningCredentialKey string                       `json:"signing_credential_key,omitempty"`
 }
 
 func (t CandidateTarget) Validate() error {
-	if err := t.ValidateDeclaration(); err != nil {
-		return err
-	}
-	if t.Generation == 0 || t.PublicationSequence < 1 {
-		return fmt.Errorf("channel onboarding target has no admitted executable generation")
-	}
-	return nil
+	return t.ValidateDeclaration()
 }
 
 func (t CandidateTarget) ValidateDeclaration() error {
@@ -43,7 +34,7 @@ func (t CandidateTarget) ValidateDeclaration() error {
 	if err != nil {
 		return fmt.Errorf("channel onboarding target selector %q: %w", strings.TrimSpace(t.Selector), err)
 	}
-	if strings.TrimSpace(t.ServiceID) == "" || strings.TrimSpace(t.FlowPath) != parsed.FlowPath || strings.TrimSpace(t.Provider) != parsed.Provider || !t.AdmissionGeneration.Valid() || t.PublicationSequence < 0 || (t.Generation == 0) != (t.PublicationSequence == 0) {
+	if strings.TrimSpace(t.FlowPath) != parsed.FlowPath || strings.TrimSpace(t.Provider) != parsed.Provider || !t.AdmissionGeneration.Valid() {
 		return fmt.Errorf("channel onboarding target contradicts its exact selector")
 	}
 	return nil
@@ -140,15 +131,12 @@ func (c Candidate) ValidateDeclaration() error {
 		if strings.TrimSpace(c.SigningCredentialRole) == "" || strings.TrimSpace(c.ConnectionHealth) != "" {
 			return fmt.Errorf("webhook channel onboarding candidate requires signing credential and forbids connection health")
 		}
-		if c.Target.Generation != c.Coordinate.TargetGeneration {
-			return fmt.Errorf("channel onboarding declaration contradicts its admitted target generation")
-		}
 	case ActivationSessionConnection:
 		if strings.TrimSpace(c.SigningCredentialRole) != "" || strings.TrimSpace(c.ConnectionHealth) == "" {
 			return fmt.Errorf("session channel onboarding candidate requires connection health and forbids signing credential")
 		}
-		if c.Target.Generation != c.Coordinate.TargetGeneration || c.Target.SigningCredentialKey != "" {
-			return fmt.Errorf("session declaration contradicts its target generation or carries webhook signing")
+		if c.Target.SigningCredentialKey != "" {
+			return fmt.Errorf("session declaration carries webhook signing")
 		}
 	}
 	return c.Target.ValidateDeclaration()

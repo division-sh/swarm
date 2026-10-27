@@ -15,7 +15,7 @@ func TestSessionBusinessResumeOnlyChangesLiveOccurrence(t *testing.T) {
 	activation := ConnectedChannelActivation{ActivationID: "original-activation", OperationID: op.OperationID, OperationRevision: 7, Revision: 2,
 		Coordinate: op.Coordinate, TargetSelector: op.TargetSelector, Provider: op.Provider, SessionAccount: op.SessionAccount, Status: ActivationCurrent}
 	op.ActivationRevision = activation.Revision
-	for _, change := range []string{"unchanged", "live_occurrence", "source", "target_generation", "account", "binding", "parent", "replacement_activation", "activation_revision_backwards", "activation_parent_revision", "retired", "contradictory_coordinate"} {
+	for _, change := range []string{"unchanged", "live_occurrence", "source", "account", "binding", "parent", "replacement_activation", "activation_revision_backwards", "activation_parent_revision", "retired", "contradictory_coordinate"} {
 		t.Run(change, func(t *testing.T) {
 			current, active := op, activation
 			switch change {
@@ -28,9 +28,6 @@ func TestSessionBusinessResumeOnlyChangesLiveOccurrence(t *testing.T) {
 				current.ActivationRevision = active.Revision
 			case "source":
 				current.Coordinate.BundleIdentity += "-replacement"
-				active.Coordinate = current.Coordinate
-			case "target_generation":
-				current.Coordinate.TargetGeneration++
 				active.Coordinate = current.Coordinate
 			case "account":
 				current.SessionAccount.Revision++

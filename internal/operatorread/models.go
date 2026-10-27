@@ -782,6 +782,7 @@ type PendingAgentDeliveryDetail struct {
 
 type RunHeader struct {
 	RunID            string                          `json:"run_id"`
+	FlowPath         string                          `json:"flow_path,omitempty"`
 	BundleHash       string                          `json:"bundle_hash"`
 	Status           string                          `json:"status"`
 	Origin           runtimerunlifecycle.RunOrigin   `json:"origin"`

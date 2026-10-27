@@ -18,11 +18,12 @@ import (
 	runtimeauthoractivity "github.com/division-sh/swarm/internal/runtime/authoractivity"
 	runtimebus "github.com/division-sh/swarm/internal/runtime/bus"
 	runtimecontracts "github.com/division-sh/swarm/internal/runtime/contracts"
-	runtimeflowidentity "github.com/division-sh/swarm/internal/runtime/core/flowidentity"
 	runtimeprovideroutput "github.com/division-sh/swarm/internal/runtime/core/provideroutput"
 	runtimecorrelation "github.com/division-sh/swarm/internal/runtime/correlation"
 	runtimeinbound "github.com/division-sh/swarm/internal/runtime/inboundpublication"
 	runtimepipeline "github.com/division-sh/swarm/internal/runtime/pipeline"
+	"github.com/division-sh/swarm/internal/runtime/runcontrol"
+	"github.com/division-sh/swarm/internal/runtime/runlifecycle"
 	"github.com/division-sh/swarm/internal/runtime/semanticview"
 	"github.com/division-sh/swarm/internal/runtime/semanticviewtest"
 	"github.com/division-sh/swarm/internal/sourceartifact"
@@ -34,15 +35,14 @@ import (
 func TestWhatsAppInboundPublicationRollbackAndLostAcknowledgmentBothStores(t *testing.T) {
 	for _, backend := range []string{"sqlite", "postgres"} {
 		t.Run(backend, func(t *testing.T) {
-			f := openStandingDispositionParityFixture(t, backend)
-			store := f.selected.(inboundPublicationProofStore)
-			candidate := f.candidate("whatsapp-publication")
+			f := openStandingCensusFixture(t, backend)
+			store := f.store.(inboundPublicationProofStore)
+			workflow := newWorkflowTestCoordinator(t, f.db, runtimepipeline.NewWorkflowPersistence(f.store.(workflowTestSelectedStore)), f.store.(workflowTestSelectedStore))
+			candidate := runlifecycle.LiveRunScope{FlowPath: "."}
 			artifact := sourceartifactfixture.New("schema.yaml", []byte("name: whatsapp-publication-component\n"))
-			candidate.Source = sourceartifactfixture.RequireArtifact(t, context.Background(), store, artifact)
-			candidate.FlowPath = "."
-			candidate.ServiceID = runtimeflowidentity.StandingServiceID(candidate.FlowPath)
-			ctx := runtimecorrelation.WithSourceArtifactFact(testAuthorActivityContextForBundle(candidate.Source.BundleHash()), candidate.Source)
-			ctx = originalStoreFixtureContext(t, ctx, f.selected)
+			fact := sourceartifactfixture.RequireArtifact(t, context.Background(), store, artifact)
+			ctx := runtimecorrelation.WithSourceArtifactFact(testAuthorActivityContextForBundle(fact.BundleHash()), fact)
+			ctx = originalStoreFixtureContext(t, ctx, f.store)
 			scope, ok := runtimeauthoractivity.ScopeFromContext(ctx)
 			if !ok {
 				t.Fatal("publication component fixture requires its exact source scope")
@@ -53,15 +53,11 @@ func TestWhatsAppInboundPublicationRollbackAndLostAcknowledgmentBothStores(t *te
 				t.Fatal(err)
 			}
 			t.Cleanup(lease.Release)
-			standing, err := f.workflow.ReconcileStandingService(ctx, candidate)
+			standing, err := workflow.ReconcileFlowRun(ctx, candidate, fact)
 			if err != nil {
 				t.Fatal(err)
 			}
-			sequence, err := f.workflow.PublishStandingService(ctx, standing.ServiceID, standing.RunID, standing.Generation)
-			if err != nil {
-				t.Fatal(err)
-			}
-			request := inboundPublicationProofRequest(t, candidate, standing.RunID, standing.Generation, sequence, "WHATSAPP_CAPTURED_EVENT")
+			request := inboundPublicationProofRequest(t, candidate, standing.RunID, "WHATSAPP_CAPTURED_EVENT")
 			request.Provider, request.TargetAlias = "whatsapp", "whatsapp"
 			request.PublicationID, request.MarkerEventID, err = runtimeinbound.DeterministicIDs(request.Identity())
 			if err != nil {
@@ -108,7 +104,7 @@ ack: {mode: durable_before_dispatch}
 			if err != nil {
 				t.Fatal(err)
 			}
-			delivery, admission, err := trigger.ProjectPublication(authenticated, candidate.Source.BundleHash(), request.FlowPath)
+			delivery, admission, err := trigger.ProjectPublication(authenticated, fact.BundleHash(), request.FlowPath)
 			if err != nil {
 				t.Fatal(err)
 			}
@@ -144,7 +140,7 @@ ack: {mode: durable_before_dispatch}
 						request.ResolvedRunID, events.EventEnvelope{}, source, request.OriginalReceivedAt)}},
 			}
 			eventBus, err := newStoreTestEventBus(t, store, runtimebus.EventBusOptions{
-				SourceArtifactFact: candidate.Source,
+				SourceArtifactFact: fact,
 				ContractBundle:     whatsappPublicationComponentSource(t, artifact),
 			})
 			if err != nil {
@@ -207,7 +203,8 @@ ack: {mode: durable_before_dispatch}
 					t.Fatal(err)
 				}
 			}
-			if _, err := f.workflow.SuspendStandingService(ctx, runtimepipeline.StandingServiceOperation{ServiceID: candidate.ServiceID, Actor: "publication-component-proof"}); err != nil {
+			controller := runcontrol.NewController(store.(runcontrol.Store), nil, runcontrol.Options{})
+			if _, err := controller.Pause(ctx, runcontrol.TransitionRequest{RunID: standing.RunID, Reason: "publication-component-proof"}); err != nil {
 				t.Fatal(err)
 			}
 			duplicate, err := publish()
