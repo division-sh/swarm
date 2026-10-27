@@ -278,7 +278,7 @@ func runServedStandingServiceLifecycleBackendProof(t *testing.T, backend servedp
 		return second.outputString() + "\n" + servedEventPublishDebugSummary(t, db, debugBackend, firstRunID)
 	})
 	telegramGate.waitForStart(t, resetRouteStarted, backend, "reset")
-	assertServedStandingState(t, db, string(backend), serviceID, firstRunID, firstGeneration, "active", "running")
+	assertServedStandingState(t, db, string(backend), serviceID, firstRunID, firstGeneration, "active", "live")
 
 	resetKey := "standing-reset-" + string(backend)
 	resetOutcome := startServedStandingOperation(secondEndpoint, "standing.reset", serviceID, resetKey)
@@ -312,7 +312,7 @@ func runServedStandingServiceLifecycleBackendProof(t *testing.T, backend servedp
 	if err := freshUse.Done(); err != nil {
 		t.Fatalf("%s settle reset successor ingress: %v", backend, err)
 	}
-	assertServedStandingState(t, db, string(backend), serviceID, reset.RunID, reset.Generation, "active", "running")
+	assertServedStandingState(t, db, string(backend), serviceID, reset.RunID, reset.Generation, "active", "live")
 	debugRun := func(runID string) func() string {
 		return func() string { return servedEventPublishDebugSummary(t, db, debugBackend, runID) }
 	}
@@ -347,7 +347,7 @@ func assertServedStandingResetAndShutdownJoin(t *testing.T, backend servedparity
 		t.Fatalf("process reset passed unsettled standing mutation: %+v", outcome)
 	default:
 	}
-	assertServedStandingState(t, db, string(backend), current.ServiceID, current.RunID, current.Generation, "active", "running")
+	assertServedStandingState(t, db, string(backend), current.ServiceID, current.RunID, current.Generation, "active", "live")
 	if err := held.Done(); err != nil {
 		t.Fatal(err)
 	}
@@ -367,7 +367,7 @@ func assertServedStandingResetAndShutdownJoin(t *testing.T, backend servedparity
 	if serviceID != current.ServiceID || generation != 1 {
 		t.Fatalf("fresh epoch did not reconstruct the declared generation: %s/%s/%d", serviceID, runID, generation)
 	}
-	assertServedStandingState(t, db, string(backend), serviceID, runID, generation, "active", "running")
+	assertServedStandingState(t, db, string(backend), serviceID, runID, generation, "active", "live")
 	use, lookup, err := manager.AcquireIngress(context.Background(), "chat", "telegram")
 	if err != nil || use == nil || !lookup.Found {
 		t.Fatalf("reconstructed standing ingress unavailable: lookup=%+v err=%v", lookup, err)
