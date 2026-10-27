@@ -187,8 +187,8 @@ func TestSessionAccountEvidencePersistenceAndRevisionFencesBothStores(t *testing
 			if err != nil || op.SessionAccount != account {
 				t.Fatalf("runless claim: %+v %v", op, err)
 			}
-			if _, err := f.selected.AdvanceChannelOnboarding(ctx, domain.AdvanceRequest{OperationID: op.OperationID, ExpectedRevision: op.Revision, Phase: domain.PhasePublishingActivation, Now: now}); !errors.Is(err, domain.ErrInvalidRequest) {
-				t.Fatalf("pairing evidence granted an executable target: %v", err)
+			if _, err := f.selected.GetConnectedChannelActivation(ctx, op.SlotKey); !errors.Is(err, domain.ErrNotFound) {
+				t.Fatalf("pairing evidence created an executable activation: %v", err)
 			}
 			authority := operatorchannel.ProviderAuthority{Kind: operatorchannel.ProviderAuthoritySession, Session: account}
 			if err := authority.RequireExecutable(); err == nil {
