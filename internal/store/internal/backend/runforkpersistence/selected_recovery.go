@@ -23,6 +23,7 @@ import (
 	storeeffects "github.com/division-sh/swarm/internal/store/internal/backend/effectpersistence"
 	generationauthority "github.com/division-sh/swarm/internal/store/internal/backend/generationauthority"
 	"github.com/division-sh/swarm/internal/store/internal/backend/mutationprotocol"
+	"github.com/division-sh/swarm/internal/store/internal/backend/runforkrevision"
 	privaterunlifecycle "github.com/division-sh/swarm/internal/store/internal/backend/runlifecycle"
 	"github.com/division-sh/swarm/internal/store/internal/backend/runlifecycle/sourceadmission"
 	"github.com/google/uuid"
@@ -825,22 +826,35 @@ func selectedForkOperationForRecoveryTx(ctx context.Context, tx *sql.Tx, binding
 
 func loadSelectedForkRecoveryOperationTx(ctx context.Context, tx *sql.Tx, binding runfork.RunForkSelectedContractBinding, bundleHash string, postgres bool) (*runfork.ForkOperationRecord, error) {
 	var operationID string
-	err := tx.QueryRowContext(ctx, `SELECT CAST(operation_id AS TEXT) FROM run_fork_operations WHERE fork_run_id=$1`, binding.ForkRunID).Scan(&operationID)
+	var currentHash sql.NullString
+	err := tx.QueryRowContext(ctx, `SELECT CAST(operation.operation_id AS TEXT), run.bundle_hash
+		FROM run_fork_operations operation LEFT JOIN runs run ON run.run_id=operation.fork_run_id
+		WHERE operation.fork_run_id=$1`, binding.ForkRunID).Scan(&operationID, &currentHash)
 	if err == sql.ErrNoRows {
 		return nil, nil
 	}
 	if err != nil {
 		return nil, fmt.Errorf("load permanent selected fork operation: %w", err)
 	}
+	if !currentHash.Valid || currentHash.String != bundleHash {
+		return nil, fmt.Errorf("selected fork recovery source differs from its current run")
+	}
 	record, found, err := loadForkOperationByIDTx(ctx, tx, operationID, postgres)
 	if err != nil {
 		return nil, err
 	}
 	if !found || record.ForkRunID != binding.ForkRunID || record.BindingID != binding.BindingID ||
-		record.Request.SourceRunID != binding.SourceRunID || record.Request.TargetBundleHash != bundleHash ||
+		record.Request.SourceRunID != binding.SourceRunID ||
 		record.Request.ResolvedPoint == nil || !sameSelectedForkPointIdentity(*record.Request.ResolvedPoint, binding.ForkPoint) ||
 		record.Request.ResolvedPoint.EventID != binding.ForkEventID || record.Request.ContractSelection != binding.ContractSelection {
 		return nil, fmt.Errorf("permanent selected fork operation conflicts with exact binding")
+	}
+	_, start, err := runforkrevision.LoadStartProjection(ctx, tx, binding.ForkRunID)
+	if err != nil {
+		return nil, err
+	}
+	if record.Request.TargetBundleHash != start.SourceBundleHash {
+		return nil, fmt.Errorf("permanent selected fork operation conflicts with its immutable start source")
 	}
 	return &record, nil
 }

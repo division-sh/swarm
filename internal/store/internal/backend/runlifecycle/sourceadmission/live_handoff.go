@@ -8,6 +8,7 @@ import (
 
 	"github.com/division-sh/swarm/internal/runtime/canonicaljson"
 	"github.com/division-sh/swarm/internal/runtime/runfork"
+	"github.com/division-sh/swarm/internal/store/internal/backend/runforkrevision"
 )
 
 // ObserveLiveHandoff proves source applicability, not executable authority.
@@ -78,7 +79,11 @@ func observeLiveHandoff(ctx context.Context, q RowQueryer, runID, bundleHash str
 	if err := result.Validate(request, runID); err != nil {
 		return false, err
 	}
-	if request.SourceRunID != sourceRunID || result.BundleHash != bundleHash ||
+	_, start, err := runforkrevision.LoadStartProjection(ctx, q, runID)
+	if err != nil {
+		return false, err
+	}
+	if request.SourceRunID != sourceRunID || result.BundleHash != start.SourceBundleHash ||
 		string(result.ForkPoint.Kind) != kind || result.ForkPoint.Revision != revision || result.ForkPoint.EventID != eventID.String {
 		return false, errors.New("committed live handoff contradicts its exact selected lineage")
 	}
