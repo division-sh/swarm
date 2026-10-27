@@ -1,10 +1,8 @@
 package runtime
 
 import (
-	"context"
 	"errors"
 	"fmt"
-	"maps"
 )
 
 const RuntimeContextCauseReset = "runtime_context_reset"
@@ -91,34 +89,9 @@ func (m *RuntimeContextManager) installResetRuntimeContexts(publish, recovered b
 	prepared := newRuntimeContextManagerState(m.availability)
 	prepared.nextPublicationGeneration = m.nextPublicationGeneration
 	prepared.channelSessions = m.channelSessions
-	// Staging starts a fresh execution epoch. Publication retains only the
-	// suppression reconstructed from that epoch's durable standing dispositions.
-	if publish {
-		prepared.suppressedStandingServices = maps.Clone(m.suppressedStandingServices)
-	}
-	discardPrepared := func() {
-		for _, entry := range prepared.contexts {
-			for _, occurrence := range entry.standing {
-				// Discard owns the parent lease as well as the child's work.
-				_ = occurrence.RetireAndWait(context.Background())
-			}
-		}
-	}
 	for _, candidate := range contexts {
 		if err := prepared.register(candidate, false, false); err != nil {
-			// Registration owns only newly prepared standing occurrences here;
-			// runtime disposal belongs to the reset supervisor on any failure.
-			discardPrepared()
 			return err
-		}
-		if publish {
-			entry := prepared.contexts[candidate.BundleHash()]
-			standing, err := prepared.newStandingOccurrencesLocked(candidate.WorkOwner, entry.context.StandingTargets, entry.context.StandingActivations)
-			if err != nil {
-				discardPrepared()
-				return err
-			}
-			entry.standing = standing
 		}
 	}
 	if !publish {
@@ -132,14 +105,6 @@ func (m *RuntimeContextManager) installResetRuntimeContexts(publish, recovered b
 	m.contexts, m.order = prepared.contexts, prepared.order
 	m.resetExecutionFenced = true
 	m.nextPublicationGeneration = prepared.nextPublicationGeneration
-	m.suppressedStandingServices = prepared.suppressedStandingServices
 	m.setBaseCapabilitySubjectsLocked(prepared.capabilitySubjects)
-	if publish {
-		for _, candidate := range contexts {
-			if candidate.Runtime.Bus != nil {
-				candidate.Runtime.Bus.SetStandingRunWorkOwner(m)
-			}
-		}
-	}
 	return nil
 }

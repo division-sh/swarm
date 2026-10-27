@@ -37,14 +37,12 @@ func TestSessionTargetPromotionRequiresCheckpointedConfirmation(t *testing.T) {
 	candidate.Target.Selector = "ingress:support:whatsapp"
 	candidate.ProviderCredentialRole, candidate.SigningCredentialRole, candidate.Target.SigningCredentialKey = "", "", ""
 	candidate.ConnectionHealth = "provider_connection"
-	candidate.Target.Generation, candidate.Target.PublicationSequence, candidate.Coordinate.TargetGeneration = 0, 0, 0
 	account := operatorchannel.SessionAccountAdmission{Provider: "whatsapp", ConnectionID: uuid.NewString(),
 		AccountRef: "15551234567@s.whatsapp.net", AdmissionID: uuid.NewString(), Revision: 1}
 	op := Operation{OperationID: uuid.NewString(), Revision: 3, BindingRevision: 1, Coordinate: candidate.Coordinate,
 		Provider: candidate.Provider, Interface: candidate.Interface, TargetSelector: candidate.Target.Selector,
 		Posture: candidate.Posture, Phase: PhaseAwaitingOperatorConfirmation, SessionConnectionID: account.ConnectionID, SessionAccount: account}
 	promoted := candidate
-	promoted.Target.Generation, promoted.Target.PublicationSequence, promoted.Coordinate.TargetGeneration = 1, 1, 1
 	for _, row := range []string{"current", "unconfirmed", "pairing", "missing_account", "foreign_runtime", "foreign_source", "canceled"} {
 		t.Run(row, func(t *testing.T) {
 			store := &cancellationTestStore{op: op}
@@ -78,7 +76,7 @@ func TestSessionTargetPromotionRequiresCheckpointedConfirmation(t *testing.T) {
 				}
 				return
 			}
-			if err != nil || admitted.Coordinate != promoted.Coordinate || result.Coordinate != promoted.Coordinate || admitted.Revision != before.Revision+1 {
+			if err != nil || admitted.Coordinate != promoted.Coordinate || result.Coordinate != promoted.Coordinate || admitted.Revision != before.Revision {
 				t.Fatal("runless parent failed its exact target checkpoint", admitted, result, err)
 			}
 			repeated, _, err := service.admitConfirmedTarget(ctx, admitted, result)

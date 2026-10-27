@@ -59,7 +59,7 @@ func TestServedWhatsAppStartupPhaseDiagnosticBothStores(t *testing.T) {
 					"provider": "whatsapp", "verb": "connect", "save_proof": false, "idempotency_key": "native-startup-diagnostic"}, &result)
 			}()
 			if result.Operation.Phase != channelonboarding.PhaseActivatingProvider ||
-				result.Operation.Coordinate.TargetGeneration != 0 || result.Operation.SessionAccount.AccountRef != "" ||
+				result.Operation.Coordinate.ValidateContext() != nil || result.Operation.SessionAccount.AccountRef != "" ||
 				(result.Readiness != nil && result.Readiness.Ready) {
 				t.Fatal("unpaired preparation manufactured executable authority", result.Operation.Phase)
 			}

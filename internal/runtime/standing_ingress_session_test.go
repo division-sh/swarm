@@ -12,7 +12,6 @@ import (
 	"github.com/division-sh/swarm/internal/packadmission"
 	"github.com/division-sh/swarm/internal/packs"
 	runtimecontracts "github.com/division-sh/swarm/internal/runtime/contracts"
-	runtimeflowidentity "github.com/division-sh/swarm/internal/runtime/core/flowidentity"
 	"github.com/division-sh/swarm/internal/runtime/plangeneration"
 	runtimerunlifecycle "github.com/division-sh/swarm/internal/runtime/runlifecycle"
 	"github.com/division-sh/swarm/internal/runtime/semanticview"
@@ -109,14 +108,14 @@ func TestStandingSessionPlanRequiresConfirmedSelectedBinding(t *testing.T) {
 				t.Fatal(err)
 			}
 			if row == "current" {
-				if len(targets) != 1 || targets[0].ServiceID != runtimeflowidentity.StandingServiceID(".") || targets[0].RunID != "" {
+				if len(targets) != 1 || targets[0].FlowPath != "." || targets[0].RunID != "" {
 					t.Fatal("confirmed responsibility did not plan its unmaterialized target", targets)
 				}
 				return
 			}
-			candidates, err := rt.PlanStandingServiceCandidates()
-			if err != nil || len(targets) != 0 || len(candidates) != 1 || candidates[0].BindingEnabled ||
-				candidates[0].BindingBlockReason != runtimerunlifecycle.StandingBindingSessionRequired {
+			candidates, err := rt.IneligibleStandingIngress()
+			if err != nil || len(targets) != 0 || len(candidates) != 1 ||
+				candidates[0].BlockReason != runtimerunlifecycle.StandingBindingSessionRequired {
 				t.Fatal("non-current declaration created executable/retaining authority", targets, candidates, err)
 			}
 		})
@@ -165,7 +164,7 @@ func TestStandingNativeTargetRejectsReconstructedAuthorityBeforePlanning(t *test
 	candidate := channelonboarding.Candidate{Provider: op.Provider, Interface: op.Interface, Coordinate: op.Coordinate,
 		Plan: plan, Posture: op.Posture, Ceremony: op.Ceremony, ConfirmationOperation: profile.ConfirmationOperation(),
 		ConnectionHealth: profile.ConnectionHealth(), Target: channelonboarding.CandidateTarget{Selector: op.TargetSelector,
-			ServiceID: runtimeflowidentity.StandingServiceID("."), FlowPath: ".", Alias: "reception", Provider: op.Provider,
+			FlowPath: ".", Alias: "reception", Provider: op.Provider,
 			AdmissionGeneration: rt.Options.ProviderTriggerCatalog.Generation()}}
 	for _, authority := range []operatorchannel.ProviderAuthority{{}, {Kind: operatorchannel.ProviderAuthoritySession, Session: op.SessionAccount}} {
 		if _, _, err := rt.AdmitChannelStandingTarget(context.Background(), op, candidate, authority); err == nil ||

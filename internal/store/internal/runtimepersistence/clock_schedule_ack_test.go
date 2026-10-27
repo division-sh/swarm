@@ -135,11 +135,7 @@ func clockAcknowledgmentContext(t *testing.T, ctx context.Context) context.Conte
 	if err != nil {
 		t.Fatal(err)
 	}
-	standing, err := runtime.NewStanding(ctx, worklifetime.StandingIdentity{ServiceID: uuid.NewString(), RunID: correlation.RunIDFromContext(ctx), Generation: 1})
-	if err != nil {
-		t.Fatal(err)
-	}
-	lease, err := standing.Begin(ctx)
+	lease, err := runtime.Begin(ctx)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -149,9 +145,6 @@ func clockAcknowledgmentContext(t *testing.T, ctx context.Context) context.Conte
 		}
 		join, cancel := context.WithTimeout(context.Background(), time.Second)
 		defer cancel()
-		if err := standing.RetireAndWait(join); err != nil {
-			t.Error(err)
-		}
 		if _, err := runtime.RetireAndWait(join); err != nil {
 			t.Error(err)
 		}

@@ -74,10 +74,6 @@ func TestPublicCompletionAdmissionClosedOccurrenceProjections(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	standing, err := runtime.NewStanding(t.Context(), StandingIdentity{ServiceID: "service", RunID: "run", Generation: 1})
-	if err != nil {
-		t.Fatal(err)
-	}
 	selected, err := process.NewSelectedFork(t.Context(), SelectedForkIdentity{ExecutionID: "fork", RunID: "fork-run", Generation: 1})
 	if err != nil {
 		t.Fatal(err)
@@ -88,15 +84,13 @@ func TestPublicCompletionAdmissionClosedOccurrenceProjections(t *testing.T) {
 	}
 	t.Cleanup(func() {
 		_ = manager.RetireAndWait(context.Background())
-		_ = standing.RetireAndWait(context.Background())
 		_ = selected.RetireAndWait(context.Background())
 		_, _ = runtime.RetireAndWait(context.Background())
 		_, _ = process.Join(context.Background())
 		_, _ = foreign.Join(context.Background())
 	})
 	for name, owner := range map[string]Occurrence{
-		"runtime": runtime, "standing": standing, "selected": selected,
-		"manager-standing": &ManagerWorkOccurrence{manager: manager, companion: standing},
+		"runtime": runtime, "selected": selected,
 		"manager-selected": &ManagerWorkOccurrence{manager: manager, companion: selected},
 	} {
 		t.Run(name, func(t *testing.T) {

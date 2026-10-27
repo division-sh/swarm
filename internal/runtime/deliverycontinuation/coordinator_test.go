@@ -4,7 +4,6 @@ import (
 	"context"
 	"errors"
 	"fmt"
-	runtimestanding "github.com/division-sh/swarm/internal/runtime/runlifecycle"
 	"reflect"
 	"strings"
 	"sync"
@@ -61,7 +60,7 @@ func TestCoordinatorUsesSelectedStoreWorkerLimit(t *testing.T) {
 		{limit: dispatchWorkers + 1},
 	} {
 		store := &limitedCoordinatorTestStore{coordinatorTestStore: &coordinatorTestStore{}, limit: tc.limit}
-		coordinator, err := New(store, coordinatorTestRestarts{}, authority, owner, dispatcher, nil)
+		coordinator, err := New(store, authority, owner, dispatcher, nil)
 		if tc.valid {
 			if err != nil || coordinator.workerLimit != tc.limit {
 				t.Fatalf("worker limit %d: coordinator=%+v err=%v", tc.limit, coordinator, err)
@@ -70,15 +69,6 @@ func TestCoordinatorUsesSelectedStoreWorkerLimit(t *testing.T) {
 			t.Fatalf("invalid worker limit %d was admitted", tc.limit)
 		}
 	}
-}
-
-type coordinatorTestRestarts map[string]runtimestanding.StandingRestartDispositionKind
-
-func (s coordinatorTestRestarts) StandingRunRestartDisposition(_ context.Context, runID string) (runtimestanding.StandingRestartDisposition, error) {
-	if kind := s[strings.TrimSpace(runID)]; kind != "" {
-		return runtimestanding.StandingRestartDisposition{Kind: kind}, nil
-	}
-	return runtimestanding.ClassifyStandingRestart(runtimestanding.StandingRestartFact{})
 }
 
 func (s *coordinatorTestStore) ScanDeliveryContinuations(
@@ -157,7 +147,7 @@ func TestCoordinatorReconcilesMissingEntriesInBoundedExactBatches(t *testing.T) 
 	authority, owner, cleanup := coordinatorTestAuthorityAndOwner(t)
 	defer cleanup()
 	store := &coordinatorTestStore{observations: make(map[string]runtimedelivery.ContinuationObservation)}
-	c, err := New(store, coordinatorTestRestarts{}, authority, owner, &coordinatorTestDispatcher{}, nil)
+	c, err := New(store, authority, owner, &coordinatorTestDispatcher{}, nil)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -185,7 +175,7 @@ func TestCoordinatorRejectsMismatchedBatchedObservationIdentity(t *testing.T) {
 	store := &coordinatorTestStore{observations: map[string]runtimedelivery.ContinuationObservation{
 		"expected": {DeliveryID: "other", Disposition: runtimedelivery.ClaimTerminal},
 	}}
-	c, err := New(store, coordinatorTestRestarts{}, authority, owner, &coordinatorTestDispatcher{}, nil)
+	c, err := New(store, authority, owner, &coordinatorTestDispatcher{}, nil)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -320,7 +310,7 @@ func TestCoordinatorStartRequiresExplicitExhaustionBeforeReadiness(t *testing.T)
 		},
 	}}
 	dispatcher := &coordinatorTestDispatcher{dispatched: make(chan struct{}, 1)}
-	coordinator, err := New(store, coordinatorTestRestarts{}, authority, owner, dispatcher, nil)
+	coordinator, err := New(store, authority, owner, dispatcher, nil)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -379,7 +369,7 @@ func TestCoordinatorHeldDispatchDoesNotBlockIndependentDelivery(t *testing.T) {
 		independent <- struct{}{}
 		return Transferred()
 	})
-	coordinator, err := New(store, coordinatorTestRestarts{}, authority, owner, dispatcher, nil)
+	coordinator, err := New(store, authority, owner, dispatcher, nil)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -437,7 +427,7 @@ func TestCoordinatorQueuedDispatchOwnsQuiescenceUntilJoined(t *testing.T) {
 		<-release
 		return TerminallySettled()
 	})
-	c, err := New(store, coordinatorTestRestarts{}, authority, owner, dispatcher, nil)
+	c, err := New(store, authority, owner, dispatcher, nil)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -491,7 +481,7 @@ func TestCoordinatorCapacityBoundedScanResumesNextPage(t *testing.T) {
 		{Items: items[:dispatchCapacity+1], Next: cursor, Exhausted: false},
 		{Items: items[dispatchCapacity+1:], Exhausted: true},
 	}}
-	c, err := New(store, coordinatorTestRestarts{}, authority, owner, &coordinatorTestDispatcher{}, nil)
+	c, err := New(store, authority, owner, &coordinatorTestDispatcher{}, nil)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -637,7 +627,7 @@ func TestCoordinatorCanDispatchIndependentDeliveriesToOneTargetTogether(t *testi
 	authority, owner, cleanup := coordinatorTestAuthorityAndOwner(t)
 	defer cleanup()
 	route := coordinatorTestAgentRoute(t, "same-target")
-	c, err := New(&coordinatorTestStore{}, coordinatorTestRestarts{}, authority, owner, &coordinatorTestDispatcher{}, nil)
+	c, err := New(&coordinatorTestStore{}, authority, owner, &coordinatorTestDispatcher{}, nil)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -668,66 +658,17 @@ func TestCoordinatorCanDispatchIndependentDeliveriesToOneTargetTogether(t *testi
 	}
 }
 
-func TestCoordinatorParksNonExecutableStandingDelivery(t *testing.T) {
-	for _, kind := range []runtimestanding.StandingRestartDispositionKind{
-		runtimestanding.StandingRestartSuspended,
-		runtimestanding.StandingRestartOrphaned,
-		runtimestanding.StandingRestartCredentialDormant,
-		runtimestanding.StandingRestartSessionDormant,
-		runtimestanding.StandingRestartRecoveryRequired,
-	} {
-		t.Run(string(kind), func(t *testing.T) {
-			authority, owner, cleanup := coordinatorTestAuthorityAndOwner(t)
-			defer cleanup()
-			event := coordinatorTestEvent("parked-standing")
-			route := coordinatorTestAgentRoute(t, "agent-parked")
-			deliveryID, err := runtimedelivery.DeliveryID(event.ID(), route)
-			if err != nil {
-				t.Fatal(err)
-			}
-			store := &coordinatorTestStore{pages: []runtimedelivery.ContinuationPage{{
-				Items: []runtimedelivery.ContinuationItem{{
-					DeliveryID: deliveryID,
-					Event:      event,
-					Snapshot: runtimedelivery.Snapshot{
-						DeliveryID: deliveryID, RunID: event.RunID(), Route: route,
-						Status: runtimedelivery.StatusPending, Authority: authority,
-					},
-					Disposition: runtimedelivery.ClaimAcquired,
-				}},
-				Exhausted: true,
-			}}}
-			dispatcher := &coordinatorTestDispatcher{dispatched: make(chan struct{}, 1)}
-			coordinator, err := New(store, coordinatorTestRestarts{
-				event.RunID(): kind,
-			}, authority, owner, dispatcher, nil)
-			if err != nil {
-				t.Fatal(err)
-			}
-			if err := coordinator.Start(context.Background()); err != nil {
-				t.Fatalf("start coordinator: %v", err)
-			}
-			if err := coordinator.Retire(context.Background()); err != nil {
-				t.Fatalf("retire coordinator: %v", err)
-			}
-			if calls := dispatcher.callCount(); calls != 0 {
-				t.Fatalf("non-executable standing delivery dispatch calls = %d, want 0", calls)
-			}
-		})
-	}
-}
-
 func TestCoordinatorCapabilityTransfersExactlyOnce(t *testing.T) {
 	authority, owner, cleanup := coordinatorTestAuthorityAndOwner(t)
 	defer cleanup()
 	coordinator, err := New(
 		&coordinatorTestStore{},
-		coordinatorTestRestarts{},
+
 		authority,
 		owner,
 		&coordinatorTestDispatcher{dispatched: make(chan struct{}, 1)},
-		nil,
-	)
+		nil)
+
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -809,12 +750,12 @@ func TestCoordinatorCarrierReturnSignalsRedispatch(t *testing.T) {
 	defer cleanup()
 	coordinator, err := New(
 		&coordinatorTestStore{},
-		coordinatorTestRestarts{},
+
 		authority,
 		owner,
 		&coordinatorTestDispatcher{dispatched: make(chan struct{}, 1)},
-		nil,
-	)
+		nil)
+
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -878,12 +819,12 @@ func TestCoordinatorSynchronizationReturnsExactFatalScanResult(t *testing.T) {
 	reported := make(chan error, 1)
 	coordinator, err := New(
 		store,
-		coordinatorTestRestarts{},
+
 		authority,
 		owner,
 		&coordinatorTestDispatcher{dispatched: make(chan struct{}, 1)},
-		func(_ context.Context, err error) { reported <- err },
-	)
+		func(_ context.Context, err error) { reported <- err })
+
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -929,9 +870,10 @@ func TestCoordinatorStopsAfterUnownedStoreFailure(t *testing.T) {
 	store := &coordinatorTestStore{scanned: make(chan struct{}, 8)}
 	dispatcher := &coordinatorTestDispatcher{dispatched: make(chan struct{}, 1)}
 	reported := make(chan error, 1)
-	coordinator, err := New(store, coordinatorTestRestarts{}, authority, owner, dispatcher, func(_ context.Context, err error) {
+	coordinator, err := New(store, authority, owner, dispatcher, func(_ context.Context, err error) {
 		reported <- err
 	})
+
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -1016,9 +958,10 @@ func TestCoordinatorStopsAfterFatalDispatchWithoutPolling(t *testing.T) {
 		dispatched: make(chan struct{}, 2),
 	}
 	reported := make(chan error, 1)
-	coordinator, err := New(store, coordinatorTestRestarts{}, authority, owner, dispatcher, func(_ context.Context, err error) {
+	coordinator, err := New(store, authority, owner, dispatcher, func(_ context.Context, err error) {
 		reported <- err
 	})
+
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -1081,12 +1024,12 @@ func TestCoordinatorAttemptOwnershipReconcilesFromExactStoreState(t *testing.T) 
 	}
 	coordinator, err := New(
 		store,
-		coordinatorTestRestarts{},
+
 		authority,
 		owner,
 		&coordinatorTestDispatcher{dispatched: make(chan struct{}, 1)},
-		nil,
-	)
+		nil)
+
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -1144,12 +1087,12 @@ func TestCoordinatorTerminalReleaseFencesUnclaimedAndCarrierOwnedWork(t *testing
 	store := &coordinatorTestStore{observations: make(map[string]runtimedelivery.ContinuationObservation)}
 	coordinator, err := New(
 		store,
-		coordinatorTestRestarts{},
+
 		authority,
 		owner,
 		&coordinatorTestDispatcher{dispatched: make(chan struct{}, 1)},
-		nil,
-	)
+		nil)
+
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -1240,9 +1183,10 @@ func TestCoordinatorRetirementCancellationIsNotReportedAsExecutionFailure(t *tes
 	store := &coordinatorTestStore{}
 	dispatcher := &coordinatorCancellationDispatcher{started: make(chan struct{})}
 	reported := make(chan error, 1)
-	coordinator, err := New(store, coordinatorTestRestarts{}, authority, owner, dispatcher, func(_ context.Context, err error) {
+	coordinator, err := New(store, authority, owner, dispatcher, func(_ context.Context, err error) {
 		reported <- err
 	})
+
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -1321,9 +1265,10 @@ func TestCoordinatorNamedRouteDeferralRetainsWorkUntilSignal(t *testing.T) {
 		dispatched: make(chan struct{}, 2),
 	}
 	reported := make(chan error, 1)
-	coordinator, err := New(store, coordinatorTestRestarts{}, authority, owner, dispatcher, func(_ context.Context, err error) {
+	coordinator, err := New(store, authority, owner, dispatcher, func(_ context.Context, err error) {
 		reported <- err
 	})
+
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -1397,12 +1342,12 @@ func TestCoordinatorStartFailsClosedOnInvalidContinuation(t *testing.T) {
 			}}}
 			coordinator, err := New(
 				store,
-				coordinatorTestRestarts{},
+
 				authority,
 				owner,
 				&coordinatorTestDispatcher{dispatched: make(chan struct{}, 1)},
-				nil,
-			)
+				nil)
+
 			if err != nil {
 				t.Fatal(err)
 			}

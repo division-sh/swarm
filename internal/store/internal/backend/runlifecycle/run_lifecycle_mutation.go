@@ -446,21 +446,19 @@ func (m postgresRunLifecycleMutation) Create(
 		INSERT INTO runs (
 			run_id, status, bundle_hash, origin_kind,
 			trigger_event_id, trigger_event_type,
-			origin_service_id, origin_generation,
 			forked_from_run_id, forked_from_point_kind, forked_from_revision, forked_from_event_id,
 			started_at, flow_path
 		)
 		VALUES (
-			$1::uuid, $13, $2, $3,
+			$1::uuid, $11, $2, $3,
 			NULLIF($4, '')::uuid, NULLIF($5, ''),
-			NULLIF($6, '')::uuid, NULLIF($7, 0),
-			NULLIF($8, '')::uuid, NULLIF($9, ''), NULLIF($10, 0), NULLIF($11, '')::uuid,
-			$12, NULLIF($14, '')
+			NULLIF($6, '')::uuid, NULLIF($7, ''), NULLIF($8, 0), NULLIF($9, '')::uuid,
+			$10, NULLIF($12, '')
 		)
 		ON CONFLICT (run_id) DO NOTHING
 		RETURNING TRUE
 	`, request.RunID, bundleHash, origin.Kind(),
-		origin.EventID(), origin.EventType(), origin.ServiceID(), origin.Generation(),
+		origin.EventID(), origin.EventType(),
 		origin.SourceRunID(), origin.ForkPointKind(), origin.ForkRevision(), origin.SourceEventID(), request.StartedAt.UTC(),
 		string(status), request.LiveScope.FlowPath).Scan(&inserted)
 	if errors.Is(err, sql.ErrNoRows) {
@@ -507,20 +505,18 @@ func (m sqliteRunLifecycleMutation) Create(
 		INSERT INTO runs (
 			run_id, status, bundle_hash, origin_kind,
 			trigger_event_id, trigger_event_type,
-			origin_service_id, origin_generation,
 			forked_from_run_id, forked_from_point_kind, forked_from_revision, forked_from_event_id,
 			started_at, flow_path
 		)
 		VALUES (
 			?, ?, ?, ?,
 			NULLIF(?, ''), NULLIF(?, ''),
-			NULLIF(?, ''), NULLIF(?, 0),
 			NULLIF(?, ''), NULLIF(?, ''), NULLIF(?, 0), NULLIF(?, ''),
 			?, NULLIF(?, '')
 		)
 		ON CONFLICT (run_id) DO NOTHING
 	`, request.RunID, string(status), bundleHash, origin.Kind(),
-		origin.EventID(), origin.EventType(), origin.ServiceID(), origin.Generation(),
+		origin.EventID(), origin.EventType(),
 		origin.SourceRunID(), origin.ForkPointKind(), origin.ForkRevision(), origin.SourceEventID(), request.StartedAt.UTC(),
 		request.LiveScope.FlowPath)
 	if err != nil {

@@ -96,7 +96,7 @@ func TestManagedRouteOwnershipIncludesFailedAndUnresolvedWithdrawal(t *testing.T
 			controller := &ProviderRegistrationController{snapshot: readiness.registration, opts: RegistrationControllerOptions{
 				Readiness: readiness, Now: func() time.Time { return now },
 			}}
-			pair := RegistrationPair{BindingID: "managed", Target: RegistrationTarget{Alias: "managed", Provider: "partner", Selector: "ingress:.:partner", Generation: 1}}
+			pair := RegistrationPair{BindingID: "managed", Target: RegistrationTarget{Alias: "managed", Provider: "partner", Selector: "ingress:.:partner"}}
 			const slot = "provider:slot:managed"
 			readiness.registration.replaceSelected([]admittedPair{{pair: pair, slotID: slot}})
 			key := registrationSelectionKey(pair, slot)
@@ -118,7 +118,7 @@ func TestManagedRouteOwnershipIncludesFailedAndUnresolvedWithdrawal(t *testing.T
 					t.Fatal("withdrawn owner retained an executable route")
 				}
 			case "rebound":
-				pair.Target.Generation++
+				pair.Target.BundleHash = "replacement-source"
 				readiness.registration.replaceSelected([]admittedPair{{pair: pair, slotID: slot}})
 			}
 			if !controller.OwnsRoute("managed", "partner") || controller.OwnsRoute("author", "partner") {

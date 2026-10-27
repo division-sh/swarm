@@ -26,6 +26,7 @@ import (
 	"github.com/division-sh/swarm/internal/runtime/inboundpublication"
 	"github.com/division-sh/swarm/internal/runtime/manager"
 	"github.com/division-sh/swarm/internal/runtime/pipeline"
+	"github.com/division-sh/swarm/internal/runtime/runlifecycle"
 	"github.com/division-sh/swarm/internal/runtime/semanticview"
 	"github.com/division-sh/swarm/internal/runtime/workspace"
 	"github.com/division-sh/swarm/internal/servedparity"
@@ -49,11 +50,42 @@ type servedWorkspaceProofRuntime struct {
 	Inbound                       interface {
 		LoadInboundPublicationByIdentity(context.Context, inboundpublication.Identity) (inboundpublication.Record, bool, error)
 	}
-	Standing interface {
-		ListStandingServiceStatuses(context.Context) ([]pipeline.StandingServiceStatus, error)
-	}
+	FlowRuns    runlifecycle.LandingRunReader
 	ForkRuntime selectedForkRuntimeProofOptions
 	Restart     func() servedWorkspaceProofRuntime
+}
+
+func requireServedLandingRun(t testing.TB, rt *runtimepkg.Runtime, flow string) runlifecycle.LandingRun {
+	t.Helper()
+	reader, ok := rt.Bus.Store().(runlifecycle.LandingRunReader)
+	if !ok {
+		t.Fatalf("served store %T lacks native landing readback", rt.Bus.Store())
+	}
+	row, found, err := reader.LoadLandingRun(t.Context(), runlifecycle.LiveRunScope{FlowPath: flow})
+	if err != nil || !found || row.RunID == "" || row.Source != rt.Options.SourceArtifactFact {
+		t.Fatalf("flow %s landing=%+v found=%t err=%v", flow, row, found, err)
+	}
+	return row
+}
+
+func readServedLandingRuns(ctx context.Context, rt *runtimepkg.Runtime) ([]runlifecycle.LandingRun, error) {
+	reader, ok := rt.Bus.Store().(runlifecycle.LandingRunReader)
+	if !ok {
+		return nil, fmt.Errorf("served store %T lacks native landing readback", rt.Bus.Store())
+	}
+	scopes, err := rt.PlanLiveFlowScopes()
+	if err != nil {
+		return nil, err
+	}
+	var rows []runlifecycle.LandingRun
+	for _, scope := range scopes {
+		row, found, err := reader.LoadLandingRun(ctx, scope)
+		if err != nil || !found {
+			return nil, fmt.Errorf("flow %s landing found=%t: %w", scope.FlowPath, found, err)
+		}
+		rows = append(rows, row)
+	}
+	return rows, nil
 }
 
 func configureHostWorkspaceProofLifecycle(t *testing.T) {
@@ -96,9 +128,7 @@ func startWorkspaceGatewayProofRuntimeWithPosture(t *testing.T, backend servedpa
 		proof.Observability = owner.Observability()
 		proof.WorkflowTargets, _ = projection.deps.EventStore.(pipeline.WorkflowTargetPersistenceReader)
 		proof.Inbound = projection.deps.InboundStore
-		proof.Standing, _ = projection.deps.EventStore.(interface {
-			ListStandingServiceStatuses(context.Context) ([]pipeline.StandingServiceStatus, error)
-		})
+		proof.FlowRuns, _ = projection.deps.EventStore.(runlifecycle.LandingRunReader)
 		return projection
 	}
 	t.Cleanup(func() { projectRuntimePersistenceForServe = previousProjection })
@@ -231,7 +261,7 @@ func startWorkspaceGatewayProofRuntimeWithPosture(t *testing.T, backend servedpa
 		return proof
 	}
 	start()
-	if proof.Events == nil || proof.Lifecycle == nil || proof.Observability == nil || proof.WorkflowTargets == nil || proof.Inbound == nil || proof.Standing == nil {
+	if proof.Events == nil || proof.Lifecycle == nil || proof.Observability == nil || proof.WorkflowTargets == nil || proof.Inbound == nil || proof.FlowRuns == nil {
 		t.Fatal("workspace proof requires the original selected read roles")
 	}
 	return proof

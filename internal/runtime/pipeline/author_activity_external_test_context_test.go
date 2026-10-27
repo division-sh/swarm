@@ -193,7 +193,6 @@ type scopedTestDurableStore interface {
 	runtimebus.PreparedPublishEventReader
 	runtimebus.TargetFailureDeadLetterRecorder
 	runtimebus.RunOriginReader
-	runtimerunlifecycle.StandingRestartDispositionReader
 	PipelineObligations() runtimepipelineobligation.Store
 }
 
@@ -253,8 +252,6 @@ func newScopedTestEventBus(t *testing.T, eventStore scopedTestDurableStore, opts
 
 		PreparedEvents:        eventStore,
 		TargetFailureRecorder: eventStore,
-		RunOrigins:            eventStore,
-		StandingRestarts:      eventStore,
 	}
 	if opts.PayloadAdmitter == nil {
 		opts.PayloadAdmitter = func(_ context.Context, event events.Event, flowID string) (events.PayloadAdmission, error) {

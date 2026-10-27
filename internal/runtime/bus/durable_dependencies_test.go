@@ -174,12 +174,6 @@ func (unexpectedDurableTestRoles) RecordDeadLetter(context.Context, runtimedeadl
 func (unexpectedDurableTestRoles) RecordDeadLetterOutcome(context.Context, runtimedeadletters.Record) (runtimedeadletters.RecordOutcome, error) {
 	return runtimedeadletters.RecordOutcome{}, errUnexpectedDurableTestRole
 }
-func (unexpectedDurableTestRoles) LoadRunOrigin(context.Context, string) (runtimerunlifecycle.RunOrigin, error) {
-	return runtimerunlifecycle.ScenarioSetupRunOrigin(), nil
-}
-func (unexpectedDurableTestRoles) StandingRunRestartDisposition(context.Context, string) (runtimerunlifecycle.StandingRestartDisposition, error) {
-	return runtimerunlifecycle.ClassifyStandingRestart(runtimerunlifecycle.StandingRestartFact{})
-}
 
 // ExactDurableTestDependencies projects synthetic test stores into the same
 // explicit role graph used by production constructors. Missing roles fail if
@@ -210,12 +204,6 @@ func ExactDurableTestDependencies(selected any) DurableDependencies {
 	}
 	if deps.TargetFailureRecorder == nil {
 		deps.TargetFailureRecorder = defaults
-	}
-	if deps.RunOrigins == nil {
-		deps.RunOrigins = defaults
-	}
-	if deps.StandingRestarts == nil {
-		deps.StandingRestarts = defaults
 	}
 	return deps
 }
@@ -251,12 +239,6 @@ func DurableTestDependencyProjection(selected any) DurableDependencies {
 	if role, ok := selected.(TargetFailureDeadLetterRecorder); ok {
 		deps.TargetFailureRecorder = role
 	}
-	if role, ok := selected.(RunOriginReader); ok {
-		deps.RunOrigins = role
-	}
-	if role, ok := selected.(runtimerunlifecycle.StandingRestartDispositionReader); ok {
-		deps.StandingRestarts = role
-	}
 	return deps
 }
 
@@ -268,7 +250,7 @@ func TestDurableDependenciesDoNotRequireReceiverElectionReader(t *testing.T) {
 		RunLifecycle: roles, DeliveryLifecycle: roles,
 
 		ActiveAgents:   roles,
-		PreparedEvents: roles, TargetFailureRecorder: roles, RunOrigins: roles, StandingRestarts: roles, ConstructionPublications: roles,
+		PreparedEvents: roles, TargetFailureRecorder: roles, ConstructionPublications: roles,
 	}
 	opts := EventBusOptions{
 		SourceArtifactFact:  authorActivityTestSourceArtifactFact,

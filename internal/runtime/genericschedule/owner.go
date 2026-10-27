@@ -11,6 +11,7 @@ import (
 
 	"github.com/division-sh/swarm/internal/events"
 	"github.com/division-sh/swarm/internal/runtime/core/worklifetime"
+	"github.com/division-sh/swarm/internal/runtime/correlation"
 	runtimeengine "github.com/division-sh/swarm/internal/runtime/engine"
 	"github.com/division-sh/swarm/internal/runtime/executionposture"
 )
@@ -618,7 +619,7 @@ func (l *Lifecycle) startRecovery(ctx context.Context, activationID string) (boo
 	var lease *worklifetime.Lease
 	if owner != nil {
 		var err error
-		lease, err = owner.Begin(l.ctx)
+		lease, err = owner.Begin(correlation.WithRunID(l.ctx, correlation.RunIDFromContext(ctx)))
 		if err != nil {
 			l.mu.Unlock()
 			return false, err

@@ -29,7 +29,7 @@ func sessionCompiledActivationFixture(t *testing.T) (channelonboarding.CompiledA
 		Coordinate: channelonboarding.ChannelRuntimeContextCoordinate{
 			BundleHash: "bundle-v2:sha256:" + strings.Repeat("a", 64), BundleIdentity: "native@1.0.0#bundle",
 			PackInventoryGeneration: "sha256:inventory", RuntimeInstanceID: "11111111-1111-4111-8111-111111111111",
-			ContextPublicationGeneration: 1, PlanGeneration: generation, TargetGeneration: 1},
+			ContextPublicationGeneration: 1, PlanGeneration: generation},
 		Plan: binding, CredentialAdmissions: []channelonboarding.CredentialAdmission{
 			{Role: "discord_bot_token", StoreKey: "discord.provider", Kind: channelonboarding.CredentialAdmissionObserved, ValueSeal: packTestCredentialSeal("a")},
 		},
@@ -44,8 +44,8 @@ func sessionCompiledActivationFixture(t *testing.T) (channelonboarding.CompiledA
 	candidate := channelonboarding.Candidate{Provider: "discord", Interface: identity, Coordinate: activation.Coordinate, Plan: plan,
 		Posture: channelonboarding.ActivationSessionConnection, Ceremony: channelonboarding.CeremonyAuthenticatedTextChallenge,
 		ProviderCredentialRole: profile.ProviderCredential(), ConfirmationOperation: profile.ConfirmationOperation(), ConnectionHealth: profile.ConnectionHealth(),
-		Target: channelonboarding.CandidateTarget{Selector: "ingress:.:discord", ServiceID: "fixture-standing-service", FlowPath: ".", Alias: "discord", Provider: "discord",
-			Generation: 1, PublicationSequence: 1, AdmissionGeneration: trigger.Generation}}
+		Target: channelonboarding.CandidateTarget{Selector: "ingress:.:discord", FlowPath: ".", Alias: "discord", Provider: "discord",
+			AdmissionGeneration: trigger.Generation}}
 	if err := candidate.Validate(); err != nil {
 		t.Fatal(err)
 	}

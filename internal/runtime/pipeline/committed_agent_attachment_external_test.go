@@ -338,7 +338,7 @@ func provePartialAttachmentContinuation(t *testing.T, ctx context.Context, selec
 		t.Fatalf("native scan acquired or mutated missing actor's delivery: %+v err=%v", partial, err)
 	}
 	dispatch := &partialAttachmentDispatch{bus: bus, results: make(chan deliverycontinuation.DispatchResult, 8)}
-	coordinator, err := deliverycontinuation.New(selected.events, selected.events, authority, pipelineExternalTestWorkOwnerForSource(t, fact), dispatch, nil)
+	coordinator, err := deliverycontinuation.New(selected.events, authority, pipelineExternalTestWorkOwnerForSource(t, fact), dispatch, nil)
 	if err != nil {
 		t.Fatal(err)
 	}

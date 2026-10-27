@@ -104,9 +104,8 @@ func (e Event) Validate() error {
 		!e.Source.DeploymentRegistration && (e.Source.Coordinate.ValidateContext() != nil || !e.Scope.Source.Matches(e.Source.Coordinate.DurableIdentity())) {
 		return fmt.Errorf("WhatsApp capture requires its frozen exact source and catalog")
 	}
-	if e.Scope.Kind == channelonboarding.SessionInputBusiness &&
-		(e.Source.Coordinate.Validate() != nil || e.Source.Coordinate.TargetGeneration != uint64(e.Scope.PublicationBinding.Generation)) {
-		return fmt.Errorf("WhatsApp business capture contradicts its original target generation")
+	if e.Scope.Kind == channelonboarding.SessionInputBusiness && e.Source.Coordinate.ValidateContext() != nil {
+		return fmt.Errorf("WhatsApp business capture requires its exact source context")
 	}
 	if uuid.Validate(e.OccurrenceID) != nil || e.Conversation == "" || e.EventID == "" ||
 		(e.Kind != "message" && e.Kind != "edit" && e.Kind != "revoke") {

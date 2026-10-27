@@ -149,7 +149,6 @@ func (expected AdmissionResponsibility) ResumeSessionBusiness(op Operation, acti
 	if op.Posture != ActivationSessionConnection || expected.ActivationRevision < 1 ||
 		bindingRevision < 1 && !op.AccountConnection() || op.BindingRevision != bindingRevision ||
 		!expected.Coordinate.MatchesDurableIdentity(op.Coordinate) ||
-		expected.Coordinate.TargetGeneration != op.Coordinate.TargetGeneration ||
 		activationID == "" || activation.ActivationID != activationID ||
 		activation.OperationRevision < expected.OperationRevision || activation.Revision < expected.ActivationRevision {
 		return AdmissionResponsibility{}, false

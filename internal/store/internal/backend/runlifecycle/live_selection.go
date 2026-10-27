@@ -161,9 +161,6 @@ func requireCreateScope(ctx context.Context, tx *sql.Tx, request runtimerunlifec
 }
 
 func continueTargetState(ctx context.Context, tx *sql.Tx, postgres bool, state runtimeruncontrol.State) (runtimerunlifecycle.State, error) {
-	if err := requireGenericContinueAuthority(ctx, tx, postgres, state); err != nil {
-		return "", err
-	}
 	scope, err := liveScopeForRun(ctx, tx, state.RunID)
 	if err != nil {
 		return "", err

@@ -1709,7 +1709,6 @@ func (am *AgentManager) replaceExecutionTargetConfigWithTopology(
 	successor.subscriptions = append([]events.EventType(nil), candidate.Subscriptions...)
 	successor.admission = candidateAdmission
 	successor.startedAt = candidate.StartedAt
-	successor.standingOwner = candidate.StandingOwner
 	am.lifecycle.mu.Unlock()
 
 	if loopCtx != nil {
@@ -1777,9 +1776,6 @@ func (am *AgentManager) launchExecutionLoop(parent context.Context, execution *a
 	ch := execution.route
 	token := execution.token
 	eventWorkOwner := executionOwner
-	if execution.standingOwner != nil {
-		eventWorkOwner = execution.standingOwner
-	}
 	_ = am.projectLifecycleDiagnostics(context.WithoutCancel(parent))
 	go func() {
 		executionCtx, cancelExecution := context.WithCancel(workLease.Context())

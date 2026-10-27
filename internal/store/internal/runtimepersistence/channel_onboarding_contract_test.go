@@ -548,7 +548,6 @@ func runChannelOnboardingStoreContract(t *testing.T, store channelonboarding.Sto
 	successorCoordinate := op.Coordinate
 	successorCoordinate.RuntimeInstanceID = uuid.NewString()
 	successorCoordinate.ContextPublicationGeneration += 17
-	successorCoordinate.TargetGeneration += 19
 	predecessorOperationRevision := op.Revision
 	predecessorActivationRevision := activation.Revision
 	op, err = store.AdvanceChannelOnboarding(ctx, channelonboarding.AdvanceRequest{
@@ -630,7 +629,7 @@ func channelOnboardingStartRequest(principalID string, now time.Time) channelonb
 		Coordinate: channelonboarding.ChannelRuntimeContextCoordinate{
 			BundleHash:     "bundle-v2:sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
 			BundleIdentity: "support-bundle", PackInventoryGeneration: "sha256:inventory", RuntimeInstanceID: uuid.NewString(), ContextPublicationGeneration: 2,
-			PlanGeneration: planGeneration, TargetGeneration: 3,
+			PlanGeneration: planGeneration,
 		},
 		TargetSelector: "ingress:support/flow:telegram", Posture: channelonboarding.ActivationWebhookRegistration,
 		Ceremony: channelonboarding.CeremonyAuthenticatedTextChallenge, SaveProof: true,

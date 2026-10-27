@@ -82,7 +82,7 @@ func TestStandingRootTreePublicRestartAndResetBothStores(t *testing.T) {
 			restarted := requireStandingRootTreePublicServices(t, p, hash)
 			for alias, before := range services {
 				after := restarted[alias]
-				if after.ControlReason != "standing_reconcile" || after.RunID != before.RunID || after.Origin != before.Origin || after.Status != before.Status || !after.StartedAt.Equal(before.StartedAt) {
+				if after.RunID != before.RunID || after.Origin != before.Origin || after.Status != before.Status || !after.StartedAt.Equal(before.StartedAt) {
 					t.Fatalf("restart changed standing generation %s: before=%+v after=%+v", alias, before, after)
 				}
 			}
@@ -91,18 +91,6 @@ func TestStandingRootTreePublicRestartAndResetBothStores(t *testing.T) {
 				t.Fatal("restart repeated construction or creating work")
 			}
 			postStandingRootTreePublicUpdates(t, p, store, services, 200)
-			ctx, cancel := context.WithTimeout(context.Background(), goldenStartupTimeout)
-			defer cancel()
-			var reset standingRuntimePublicResult
-			if err := p.rpc.call(ctx, "standing.reset", map[string]any{"service_id": services["beta"].Origin.ServiceID, "idempotency_key": "root-tree-reset"}, &reset); err != nil {
-				t.Fatalf("public reset: %v\n%s", err, p.output.String())
-			}
-			if reset.RunID == services["beta"].RunID || reset.Generation != services["beta"].Origin.Generation+1 {
-				t.Fatalf("reset did not select one new tree: %+v", reset)
-			}
-			services["beta"] = waitForFullLifecycleStandingRun(t, p.rpc, hash, reset.ServiceID, reset.Generation, reset.RunID)
-			requireStandingRootTreePublicEvidence(t, store, services)
-			postStandingRootTreePublicUpdates(t, p, store, services, 300)
 			if err := p.stopAndWait(15 * time.Second); err != nil {
 				t.Fatal(err)
 			}
@@ -123,9 +111,8 @@ func requireStandingRootTreePublicServices(t *testing.T, p *releaseServeProcess,
 		}
 		services = map[string]fullLifecycleRun{}
 		for _, run := range runs {
-			// Fixed public service coordinates, independent of the runtime codec.
-			for alias, serviceID := range map[string]string{"alpha": "9f3aa24a-6122-56d2-8bcf-0c8d14d3d7bc", "beta": "7eccc4e9-f0f3-5fcd-b5ed-1e1820d4bf7f"} {
-				if run.Origin.Kind == "standing_generation" && run.Origin.ServiceID == serviceID && run.Status == "live" {
+			for alias, flow := range map[string]string{"alpha": ".", "beta": "beta"} {
+				if run.Origin.Kind == "deployment" && run.FlowPath == flow && run.Status == "live" {
 					services[alias] = run
 				}
 			}
@@ -199,9 +186,7 @@ func requireStandingRootTreePublicEvidence(t *testing.T, store goldenStoreSelect
 func postStandingRootTreePublicUpdates(t *testing.T, p *releaseServeProcess, store goldenStoreSelection, services map[string]fullLifecycleRun, base int) {
 	t.Helper()
 	type publicationReceipt struct {
-		ServiceID         string   `json:"service_id"`
 		RunID             string   `json:"run_id"`
-		Generation        int64    `json:"generation"`
 		FlowPath          string   `json:"flow_path"`
 		Provider          string   `json:"provider"`
 		ProviderEventID   string   `json:"provider_event_id"`
@@ -236,14 +221,14 @@ func postStandingRootTreePublicUpdates(t *testing.T, p *releaseServeProcess, sto
 			if alias == "alpha" {
 				flow = "."
 			}
-			if receipt.ServiceID != services[alias].Origin.ServiceID || receipt.RunID != services[alias].RunID || receipt.Generation != services[alias].Origin.Generation || receipt.FlowPath != flow || receipt.Provider != "telegram" || receipt.ProviderEventID != fmt.Sprint(id) {
+			if receipt.RunID != services[alias].RunID || receipt.FlowPath != flow || receipt.Provider != "telegram" || receipt.ProviderEventID != fmt.Sprint(id) {
 				t.Fatalf("%s %s ingress lost exact declaration binding: %+v", alias, shape, receipt)
 			}
 			var fields map[string]json.RawMessage
 			if err := json.Unmarshal(raw, &fields); err != nil {
 				t.Fatal(err)
 			}
-			for _, retired := range []string{"entity_id", "instance_id", "target_flow_instance"} {
+			for _, retired := range []string{"service_id", "generation", "entity_id", "instance_id", "target_flow_instance"} {
 				if _, exists := fields[retired]; exists {
 					t.Fatalf("declaration receipt includes retired %s: %s", retired, raw)
 				}
@@ -390,7 +375,7 @@ func requireStandingRootTreePublicationMarker(t *testing.T, rpc *releaseRPCClien
 		matched++
 		payload := marker.Payload
 		if marker.RunID != run.RunID || marker.EntityID != "" || payload["provider"] != "telegram" || payload["provider_event_id"] != fmt.Sprint(updateID) ||
-			payload["service_id"] != run.Origin.ServiceID || payload["run_id"] != run.RunID || payload["generation"] != float64(run.Origin.Generation) || payload["flow_path"] != flow || payload["output_count"] != float64(0) {
+			payload["run_id"] != run.RunID || payload["flow_path"] != flow || payload["output_count"] != float64(0) {
 			t.Fatalf("committed declaration evidence lost exact binding or borrowed a receiver: %+v", marker)
 		}
 		for _, field := range []string{"event_ids", "event_names"} {

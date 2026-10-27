@@ -24,7 +24,6 @@ import (
 	"github.com/division-sh/swarm/internal/runtime/executionposture"
 	"github.com/division-sh/swarm/internal/runtime/manager"
 	"github.com/division-sh/swarm/internal/runtime/pipelineobligation"
-	"github.com/division-sh/swarm/internal/runtime/runlifecycle"
 	"github.com/division-sh/swarm/internal/runtime/semanticview"
 	"github.com/division-sh/swarm/internal/runtime/testfixtures/canonicalrouting"
 	"github.com/google/uuid"
@@ -165,9 +164,10 @@ func TestReceiverEntitylessPendingAttachmentExecutesBothStores(t *testing.T) {
 			if err != nil || eligible.Disposition != deliverylifecycle.ClaimAcquired || gate.entries.Load() != 0 {
 				t.Fatalf("attached actor not eligible before recovery: %+v executions=%d err=%v", eligible, gate.entries.Load(), err)
 			}
-			continuations, err := deliverycontinuation.New(store, f.store.(runlifecycle.StandingRestartDispositionReader), before.Authority, work, publisher, func(_ context.Context, err error) {
+			continuations, err := deliverycontinuation.New(store, before.Authority, work, publisher, func(_ context.Context, err error) {
 				t.Errorf("recover pending static carrier: %v", err)
 			})
+
 			if err != nil {
 				t.Fatal(err)
 			}

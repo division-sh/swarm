@@ -390,7 +390,7 @@ func TestCompileChannelActivationsRejectsDeclaredLearnedCollisionAndContradictio
 		BundleHash:     "bundle-v2:sha256:" + strings.Repeat("a", 64),
 		BundleIdentity: "telegram@1.0.0#bundle", PackInventoryGeneration: "sha256:inventory",
 		RuntimeInstanceID:            "11111111-1111-4111-8111-111111111111",
-		ContextPublicationGeneration: 1, PlanGeneration: generation, TargetGeneration: 1,
+		ContextPublicationGeneration: 1, PlanGeneration: generation,
 	}
 	admissions := []channelonboarding.CredentialAdmission{
 		{Role: "telegram_bot_token", StoreKey: "telegram.provider", Kind: channelonboarding.CredentialAdmissionObserved, ValueSeal: packTestCredentialSeal("a")},
@@ -428,7 +428,7 @@ func TestChannelActivationPublicationGenerationRetainsCompleteNonSecretProvenanc
 			BundleHash:     "bundle-v2:sha256:" + strings.Repeat("a", 64),
 			BundleIdentity: "telegram@1.0.0#bundle", PackInventoryGeneration: "sha256:inventory",
 			RuntimeInstanceID:            "11111111-1111-4111-8111-111111111111",
-			ContextPublicationGeneration: 7, PlanGeneration: planGeneration, TargetGeneration: 3,
+			ContextPublicationGeneration: 7, PlanGeneration: planGeneration,
 		},
 		Plan: newBinding("-100123"),
 		CredentialAdmissions: []channelonboarding.CredentialAdmission{
@@ -1090,14 +1090,14 @@ func TestLearnedActivationCompilationUsesDurableConversationDestination(t *testi
 		BundleHash:     "bundle-v2:sha256:" + strings.Repeat("a", 64),
 		BundleIdentity: "telegram@1.0.0#bundle", PackInventoryGeneration: "sha256:inventory",
 		RuntimeInstanceID:            "11111111-1111-4111-8111-111111111111",
-		ContextPublicationGeneration: 1, PlanGeneration: generation, TargetGeneration: 1,
+		ContextPublicationGeneration: 1, PlanGeneration: generation,
 	}
 	target := "ingress:telegram-ingress:telegram"
 	candidate := channelonboarding.Candidate{
 		Provider: profile.Provider(), Interface: identity, Coordinate: coordinate,
 		Target: channelonboarding.CandidateTarget{
-			Selector: target, ServiceID: "telegram-ingress", FlowPath: "telegram-ingress",
-			Alias: "telegram", Provider: profile.Provider(), Generation: 1, PublicationSequence: 1,
+			Selector: target, FlowPath: "telegram-ingress",
+			Alias: "telegram", Provider: profile.Provider(),
 			AdmissionGeneration: triggergeneration.FromCanonicalBytes([]byte("telegram-admission")), SigningCredentialKey: "telegram.signing",
 		},
 		Posture: channelonboarding.ActivationWebhookRegistration, Ceremony: channelonboarding.CeremonyAuthenticatedTextChallenge,
@@ -1299,7 +1299,7 @@ func TestDifferentialMockRegistrationExecutesThroughProviderNeutralLifecycle(t *
 		BundleHash:     "bundle-v2:sha256:" + strings.Repeat("e", 64),
 		BundleIdentity: "bundle:test@sha256:mock-registration", PackInventoryGeneration: "sha256:mock-registration-inventory",
 		RuntimeInstanceID: uuid.NewString(), ContextPublicationGeneration: 1,
-		PlanGeneration: planGeneration, TargetGeneration: 1,
+		PlanGeneration: planGeneration,
 	}
 	pair := runtimepublicingress.RegistrationPair{
 		BindingID: "mock-hitl", PlanGeneration: planGeneration, OnboardingOperationID: onboardingID, OnboardingRevision: 1,
@@ -1307,9 +1307,9 @@ func TestDifferentialMockRegistrationExecutesThroughProviderNeutralLifecycle(t *
 		CredentialKeys: map[string]string{"mock_api_key": "api"},
 		Target: runtimepublicingress.RegistrationTarget{
 			Selector: "ingress:support/mock:mock", BundleHash: "bundle-v2:sha256:" + strings.Repeat("e", 64),
-			ServiceID: uuid.NewString(), FlowPath: "support/mock", Alias: "support", Provider: "mock",
-			Generation: 1, PublicationSequence: 1, AdmissionPlanGeneration: triggergeneration.FromCanonicalBytes([]byte("mock-admission")),
-			SigningCredentialKey: "signing",
+			FlowPath: "support/mock", Alias: "support", Provider: "mock",
+			AdmissionPlanGeneration: triggergeneration.FromCanonicalBytes([]byte("mock-admission")),
+			SigningCredentialKey:    "signing",
 		},
 	}
 	other := pair

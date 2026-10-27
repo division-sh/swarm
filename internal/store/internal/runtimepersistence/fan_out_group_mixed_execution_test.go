@@ -652,7 +652,7 @@ func newMixedExecutionFixtureWithManager(t *testing.T, backend string, handlers 
 		t.Fatalf("attach constructed mixed tree: %v", err)
 	}
 	f.bus.SetInterceptors(coordinator)
-	continuations, err := deliverycontinuation.New(selected, selected, authority, f.occurrence, f.bus, func(_ context.Context, err error) { t.Errorf("real mixed continuation: %v", err) })
+	continuations, err := deliverycontinuation.New(selected, authority, f.occurrence, f.bus, func(_ context.Context, err error) { t.Errorf("real mixed continuation: %v", err) })
 	if err != nil {
 		t.Fatal(err)
 	}

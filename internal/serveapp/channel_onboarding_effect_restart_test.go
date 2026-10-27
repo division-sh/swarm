@@ -203,7 +203,7 @@ func requireChannelOnboardingOperationPhase(t *testing.T, configPath, endpoint, 
 	for _, row := range rows {
 		if row.Operation != nil && row.Operation.Phase == phase {
 			if row.Operation.OperationID == "" || row.Operation.Coordinate.BundleHash == "" || row.Operation.Coordinate.RuntimeInstanceID == "" ||
-				row.Operation.Coordinate.ContextPublicationGeneration == 0 || row.Operation.Coordinate.TargetGeneration == 0 {
+				row.Operation.Coordinate.ContextPublicationGeneration == 0 {
 				t.Fatalf("%s operation lacks exact predecessor coordinate: %#v", phase, row.Operation)
 			}
 			return row

@@ -234,7 +234,7 @@ func validateDeploymentRoot(input runtimebus.FlowInstanceActivationCommand, comm
 	if root.Readiness.RunID != command.RunID || root.Readiness.BundleHash != command.BundleHash ||
 		root.Identity.InstanceID != command.RunID || root.Identity.InstancePath != command.RunID || root.Identity.EntityID != command.RunID ||
 		root.Identity.ParentEntityID != "" || root.Identity.ParentRoute.FlowID != "" ||
-		root.CreatingInput != (runtimepipeline.FlowConstructionInput{}) || root.StandingGenerationReplacement {
+		root.CreatingInput != (runtimepipeline.FlowConstructionInput{}) {
 		return fmt.Errorf("deployment root construction requires its exact no-argument run owner")
 	}
 	return nil

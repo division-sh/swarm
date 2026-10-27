@@ -149,7 +149,15 @@ func runPublicRawWebhookProof(t *testing.T, withdrawAfterAcquisition bool) {
 					binding, validate, err := rt.AdmitInboundCredentials(ctx, target)
 					if err == nil {
 						once.Do(func() {
-							withdrawn <- manager.SuppressStandingServiceTargets(target.ServiceID)
+							go func() {
+								result := manager.DeactivateBundleHash(target.BundleHash, runtimepkg.RuntimeContextCauseUnloaded)
+								withdrawn <- result.ShutdownErr
+							}()
+							select {
+							case <-ctx.Done():
+							case <-time.After(2 * time.Second):
+								err = context.DeadlineExceeded
+							}
 						})
 					}
 					return binding, validate, err
@@ -170,19 +178,18 @@ func runPublicRawWebhookProof(t *testing.T, withdrawAfterAcquisition bool) {
 					t.Fatal("request did not reach its acquired-runtime credential boundary")
 				}
 				lookup := manager.LookupIngress("keyed-shop", "partner")
-				t.Cleanup(func() { _ = manager.RestoreStandingServiceTargets(lookup.Target.ServiceID) })
-				if !lookup.Found || lookup.Loaded() || lookup.Cause != runtimepkg.RuntimeContextCauseStandingSuppressed {
+				if !lookup.Found || lookup.Loaded() || lookup.Cause != runtimepkg.RuntimeContextCauseUnloaded {
 					t.Fatalf("interleaving did not withdraw the actual ingress publication: %+v", lookup)
 				}
 				code, _ := a9PostSignedRawIngress(t, "http://"+publicAddress+route, secret, body)
-				if code != http.StatusServiceUnavailable {
-					t.Fatalf("fresh request bypassed withdrawal: %d", code)
+				if code != http.StatusNotFound {
+					t.Fatalf("unloaded publication still exposed its route: %d", code)
 				}
 				if inbound == nil {
 					t.Fatal("fixture did not retain its real inbound reader")
 				}
 				if _, found, err := inbound.LoadInboundPublicationByIdentity(t.Context(), inboundpublication.Identity{
-					ServiceID: before.Target.ServiceID, RunID: before.Target.RunID, Generation: before.Target.Generation,
+					RunID:    before.Target.RunID,
 					Provider: "partner", ProviderEventID: "public-route-proof",
 				}); err != nil || found {
 					t.Fatalf("withdrawal left a publication receipt: found=%t err=%v", found, err)
@@ -191,11 +198,7 @@ func runPublicRawWebhookProof(t *testing.T, withdrawAfterAcquisition bool) {
 				if err != nil || !reflect.DeepEqual(beforeInstances, afterInstances) {
 					t.Fatalf("withdrawal changed native construction: before=%+v after=%+v err=%v", beforeInstances, afterInstances, err)
 				}
-				if err := manager.RestoreStandingServiceTargets(lookup.Target.ServiceID); err != nil {
-					t.Fatal(err)
-				}
-				tlsCode, tlsReceipt = a9PostSignedRawIngress(t, origin.URL+route, secret, body)
-				t.Logf("fresh admission after explicit restoration: status=%d body=%s", tlsCode, tlsReceipt)
+				return
 			}
 			if tlsCode != http.StatusAccepted {
 				t.Errorf("READY public route refused a valid signed request: status=%d, want 202", tlsCode)

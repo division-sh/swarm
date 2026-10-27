@@ -11,8 +11,6 @@ import (
 	"github.com/division-sh/swarm/internal/events/eventtest"
 	runtimebus "github.com/division-sh/swarm/internal/runtime/bus"
 	runtimebustest "github.com/division-sh/swarm/internal/runtime/bus/bustest"
-	runtimeflowidentity "github.com/division-sh/swarm/internal/runtime/core/flowidentity"
-	worklifetime "github.com/division-sh/swarm/internal/runtime/core/worklifetime"
 	runtimeengine "github.com/division-sh/swarm/internal/runtime/engine"
 	"github.com/division-sh/swarm/internal/runtime/executionmode"
 	"github.com/division-sh/swarm/internal/runtime/executionposture"
@@ -20,7 +18,6 @@ import (
 	runtimepipeline "github.com/division-sh/swarm/internal/runtime/pipeline"
 	runtimepipelineobligation "github.com/division-sh/swarm/internal/runtime/pipelineobligation"
 	runtimeruncontrol "github.com/division-sh/swarm/internal/runtime/runcontrol"
-	runtimerunlifecycle "github.com/division-sh/swarm/internal/runtime/runlifecycle"
 	"github.com/division-sh/swarm/internal/store/storetest"
 	"github.com/google/uuid"
 )
@@ -96,24 +93,6 @@ func (g blockedRunDispatchGate) QueueableRunDispatchBlocked(_ context.Context, r
 	return g[runID], nil
 }
 
-type exactStandingRecoveryOwner struct {
-	occurrence *worklifetime.StandingOccurrence
-}
-
-func (o exactStandingRecoveryOwner) BeginStandingRunRecovery(
-	ctx context.Context,
-	runID string,
-	origin runtimerunlifecycle.RunOrigin,
-) (*worklifetime.Lease, error) {
-	identity := o.occurrence.Identity()
-	if identity.RunID != runID ||
-		identity.ServiceID != origin.ServiceID() ||
-		identity.Generation != uint64(origin.Generation()) {
-		return nil, errors.New("standing recovery requested the wrong occurrence")
-	}
-	return o.occurrence.Begin(ctx)
-}
-
 func (o *recordingPipelineRecoveryOwner) SweepPipelineObligations(ctx context.Context, limit int) (runtimepipelineobligation.SweepResult, error) {
 	result, err := o.bus.SweepPipelineObligations(ctx, limit)
 	o.results = append(o.results, result)
@@ -185,75 +164,6 @@ func (q *recordingRunRecoveryQueue) ReleaseRunQueue(ctx context.Context, runID s
 
 func (q *recordingRunRecoveryQueue) PreflightRunQueue(ctx context.Context, runID string) error {
 	return q.bus.PreflightRunQueue(ctx, runID)
-}
-
-func TestStandingPipelineRecoveryWaitsForOwnerInstallationOnSQLiteAndPostgres(t *testing.T) {
-	for _, backend := range []string{"sqlite", "postgres"} {
-		t.Run(backend, func(t *testing.T) {
-			serviceID := runtimeflowidentity.StandingServiceID(backend)
-			origin, err := runtimerunlifecycle.StandingGenerationRunOrigin(serviceID, 1)
-			if err != nil {
-				t.Fatal(err)
-			}
-			fixture := newCompleteEventDispatchFixtureWithOrigin(t, backend, false, origin, nil)
-			deliveries := fixture.subscribe(t, fixture.event.Type())
-			defer runtimebustest.UnsubscribeIdentity(fixture.bus, fixture.identity)
-
-			blocked, err := fixture.bus.SweepPipelineObligations(fixture.ctx, 10)
-			if err != nil {
-				t.Fatalf("sweep before standing owner installation: %v", err)
-			}
-			if blocked.Settled != 0 || !blocked.Blocked || !blocked.Exhausted {
-				t.Fatalf("pre-registration sweep = %#v, want exhausted blocked scan with no settlement", blocked)
-			}
-			select {
-			case delivery := <-deliveries:
-				_ = delivery.Complete()
-				t.Fatalf("standing recovery dispatched before owner installation: %s", delivery.Event().ID())
-			case <-time.After(50 * time.Millisecond):
-			}
-			fixture.assertNoAgentDispatchMutation(t)
-
-			process := worklifetime.NewProcess()
-			runtimeOwner, err := process.NewRuntime(context.Background(), worklifetime.RuntimeIdentity{
-				RuntimeInstanceID: uuid.NewString(),
-				BundleHash:        authorActivityTestSourceArtifactFact.BundleHash(),
-			})
-			if err != nil {
-				t.Fatal(err)
-			}
-			standing, err := runtimeOwner.NewStanding(context.Background(), worklifetime.StandingIdentity{
-				ServiceID:  serviceID,
-				RunID:      fixture.event.RunID(),
-				Generation: 1,
-			})
-			if err != nil {
-				t.Fatal(err)
-			}
-			t.Cleanup(func() {
-				if err := standing.RetireAndWait(context.Background()); err != nil {
-					t.Errorf("retire standing recovery occurrence: %v", err)
-				}
-				if _, err := runtimeOwner.RetireAndWait(context.Background()); err != nil {
-					t.Errorf("retire standing recovery runtime: %v", err)
-				}
-				process.Retire()
-				if _, err := process.Join(context.Background()); err != nil {
-					t.Errorf("join standing recovery process: %v", err)
-				}
-			})
-			fixture.bus.SetStandingRunWorkOwner(exactStandingRecoveryOwner{occurrence: standing})
-
-			recovered, err := fixture.bus.SweepPipelineObligations(fixture.ctx, 10)
-			if err != nil {
-				t.Fatalf("sweep after standing owner installation: %v", err)
-			}
-			if recovered.Settled != 1 {
-				t.Fatalf("post-registration sweep = %#v, want one settled recovery", recovered)
-			}
-			assertCompleteLocalDelivery(t, deliveries, fixture.event)
-		})
-	}
 }
 
 func TestPipelineRetryReleasePreservesReplayAcrossDispatchSurfacesOnSQLiteAndPostgres(t *testing.T) {

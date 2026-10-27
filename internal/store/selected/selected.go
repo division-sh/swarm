@@ -370,7 +370,7 @@ func composePostgres(selected *private.PostgresStore) (*Owner, error) {
 
 				ActiveAgents:          selected,
 				PreparedEvents:        selected,
-				TargetFailureRecorder: selected, RunOrigins: selected, StandingRestarts: selected,
+				TargetFailureRecorder: selected,
 			},
 			EventPayloadAdmissionBinder: selected, InboundPayloadAdmissionBinder: selected,
 			AuthorActivityRegistrars: []runtime.AuthorActivityCatalogRegistrar{selected},
@@ -427,7 +427,7 @@ func composeSQLite(selected *private.SQLiteRuntimeStore) (*Owner, error) {
 
 				ActiveAgents:          selected,
 				PreparedEvents:        selected,
-				TargetFailureRecorder: selected, RunOrigins: selected, StandingRestarts: selected,
+				TargetFailureRecorder: selected,
 			},
 			EventPayloadAdmissionBinder: selected, InboundPayloadAdmissionBinder: selected,
 			AuthorActivityRegistrars: []runtime.AuthorActivityCatalogRegistrar{selected},
@@ -468,7 +468,7 @@ func composeSQLite(selected *private.SQLiteRuntimeStore) (*Owner, error) {
 func managerRoles(selected *private.PostgresStore) runtimemanager.PersistenceRoles {
 	return runtimemanager.PersistenceRoles{
 		LifecycleCensus: selected, LifecycleState: selected, LifecycleOutcome: selected, LifecycleEffects: selected,
-		LifecycleDiagnostics: selected, EffectsRecovery: selected, StandingRestarts: selected, DeliveryQuiescence: selected,
+		LifecycleDiagnostics: selected, EffectsRecovery: selected, DeliveryQuiescence: selected,
 		EventExistence: selected, DirectiveOperations: selected, DirectiveTargets: selected,
 	}
 }
@@ -476,7 +476,7 @@ func managerRoles(selected *private.PostgresStore) runtimemanager.PersistenceRol
 func sqliteManagerRoles(selected *private.SQLiteRuntimeStore) runtimemanager.PersistenceRoles {
 	return runtimemanager.PersistenceRoles{
 		LifecycleCensus: selected, LifecycleState: selected, LifecycleOutcome: selected, LifecycleEffects: selected,
-		LifecycleDiagnostics: selected, EffectsRecovery: selected, StandingRestarts: selected, DeliveryQuiescence: selected,
+		LifecycleDiagnostics: selected, EffectsRecovery: selected, DeliveryQuiescence: selected,
 		EventExistence: selected, DirectiveOperations: selected, DirectiveTargets: selected,
 	}
 }
@@ -490,7 +490,7 @@ func newPostgresRunFork(selected *private.PostgresStore, workflow runtimepipelin
 
 		ActiveAgents: selected,
 
-		PreparedEvents: selected, TargetFailureRecorder: selected, RunOrigins: selected, StandingRestarts: selected,
+		PreparedEvents: selected, TargetFailureRecorder: selected,
 	}
 	execution, err := runtimerunforkexecution.NewSelectedContractExecutionOwner(
 		workflow, selected, selected, selected, selected, durable, selected.PipelineObligations(),
@@ -513,7 +513,7 @@ func newSQLiteRunFork(selected *private.SQLiteRuntimeStore, workflow runtimepipe
 
 		ActiveAgents: selected,
 
-		PreparedEvents: selected, TargetFailureRecorder: selected, RunOrigins: selected, StandingRestarts: selected,
+		PreparedEvents: selected, TargetFailureRecorder: selected,
 	}
 	execution, err := runtimerunforkexecution.NewSelectedContractExecutionOwner(
 		workflow, selected, selected, selected, selected, durable, selected.PipelineObligations(),

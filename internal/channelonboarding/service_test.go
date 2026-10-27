@@ -1635,8 +1635,6 @@ func TestChannelOnboardingRecoveryEveryNonterminalPhase(t *testing.T) {
 			predecessorCoordinate := candidate.Coordinate
 			candidate.Coordinate.RuntimeInstanceID = "22222222-2222-4222-8222-222222222222"
 			candidate.Coordinate.ContextPublicationGeneration += 9
-			candidate.Coordinate.TargetGeneration += 13
-			candidate.Target.Generation = candidate.Coordinate.TargetGeneration
 			catalog, err := NewCandidateCatalog([]Candidate{candidate})
 			if err != nil {
 				t.Fatal(err)
@@ -1753,8 +1751,6 @@ func TestChannelOnboardingEffectDispositionPrecedesRebindAndBlocksUncertainRepla
 	successor := predecessor
 	successor.Coordinate.RuntimeInstanceID = uuid.NewString()
 	successor.Coordinate.ContextPublicationGeneration++
-	successor.Coordinate.TargetGeneration++
-	successor.Target.Generation = successor.Coordinate.TargetGeneration
 	catalog, err := NewCandidateCatalog([]Candidate{successor})
 	if err != nil {
 		t.Fatal(err)
@@ -1834,8 +1830,6 @@ func TestStartupLocalReconciliationRebindsSucceededActivationToSuccessorOccurren
 			successor := predecessor
 			successor.Coordinate.RuntimeInstanceID = "22222222-2222-4222-8222-222222222222"
 			successor.Coordinate.ContextPublicationGeneration += 17
-			successor.Coordinate.TargetGeneration += 19
-			successor.Target.Generation = successor.Coordinate.TargetGeneration
 			unrelated := testCandidate("bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb", "support")
 			unrelated.Coordinate.RuntimeInstanceID = "33333333-3333-4333-8333-333333333333"
 			candidates := []Candidate{successor, unrelated}
@@ -1884,8 +1878,6 @@ func TestChannelOnboardingRestartResolvesExactDurableSourceAcrossContextOrder(t 
 			successor := predecessor
 			successor.Coordinate.RuntimeInstanceID = "22222222-2222-4222-8222-222222222222"
 			successor.Coordinate.ContextPublicationGeneration = 2
-			successor.Coordinate.TargetGeneration = 9
-			successor.Target.Generation = 9
 			unrelated := testCandidate("bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb", "support")
 			unrelated.Coordinate.RuntimeInstanceID = "33333333-3333-4333-8333-333333333333"
 			unrelated.Coordinate.ContextPublicationGeneration = 1

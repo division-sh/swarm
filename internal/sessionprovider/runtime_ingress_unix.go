@@ -13,10 +13,9 @@ import (
 	"github.com/division-sh/swarm/internal/operatorchannel"
 	"github.com/division-sh/swarm/internal/packs"
 	contracts "github.com/division-sh/swarm/internal/runtime/contracts"
-	"github.com/division-sh/swarm/internal/runtime/core/flowidentity"
 	"github.com/division-sh/swarm/internal/runtime/correlation"
 	inbound "github.com/division-sh/swarm/internal/runtime/inboundpublication"
-	"github.com/division-sh/swarm/internal/runtime/pipeline"
+	"github.com/division-sh/swarm/internal/runtime/runlifecycle"
 	"github.com/division-sh/swarm/internal/sessionprovider/authority"
 	"go.mau.fi/whatsmeow/types/events"
 )
@@ -245,19 +244,17 @@ func (i *runtimeIncoming) businessScope(ctx context.Context) (captureScope, capt
 		return scope, source, errCaptureScopeChanged
 	}
 	ownedSource, _ := correlation.SourceArtifactFactFromContext(ctx)
-	standing, found, err := i.store.LoadReconciledStandingService(ctx, pipeline.StandingServiceCandidate{
-		ServiceID: flowidentity.StandingServiceID(target.FlowPath), FlowPath: target.FlowPath, BindingEnabled: true, Source: ownedSource})
+	landing, found, err := i.store.LoadLandingRun(ctx, runlifecycle.LiveRunScope{FlowPath: target.FlowPath})
 	if err != nil {
 		return scope, source, err
 	}
-	if !found || ctx.Err() != nil || !standing.BindingEnabled || standing.EffectiveState != "active" ||
-		!standing.RestartDisposition.Executable() || standing.Generation < 1 || standing.PublicationSequence < 1 ||
-		uint64(standing.Generation) != op.Coordinate.TargetGeneration {
+	if !found || ctx.Err() != nil || !landing.Source.Matches(ownedSource) ||
+		(landing.State != runlifecycle.StateLive && landing.State != runlifecycle.StatePaused) {
 		return scope, source, errCaptureScopeChanged
 	}
 	scope = captureScope{Kind: channelonboarding.SessionInputBusiness, Session: op.SessionAccount,
 		AccountOnly:        op.AccountConnection(),
-		PublicationBinding: inbound.BindingGeneration{ServiceID: standing.ServiceID, RunID: standing.RunID, Generation: standing.Generation},
+		PublicationBinding: inbound.BindingGeneration{RunID: landing.RunID},
 		Source:             op.Coordinate.DurableIdentity(), OnboardingOperation: op.OperationID,
 		OperationRevision: responsibility.OperationRevision, ActivationID: activation.ActivationID,
 		ActivationRevision: responsibility.ActivationRevision, TargetSelector: op.TargetSelector,

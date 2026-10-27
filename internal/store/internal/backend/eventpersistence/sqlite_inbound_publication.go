@@ -94,14 +94,14 @@ func (s *EventSQLiteOwner) ValidateInboundPublicationIntegrity(ctx context.Conte
 	if s == nil || s.backend == nil {
 		return fmt.Errorf("sqlite runtime store is required")
 	}
-	rows, err := s.backend.QueryContext(ctx, `SELECT stable_service_id, resolved_run_id, expected_generation, provider, provider_event_id FROM inbound_publications ORDER BY publication_id`)
+	rows, err := s.backend.QueryContext(ctx, `SELECT resolved_run_id, provider, provider_event_id FROM inbound_publications ORDER BY publication_id`)
 	if err != nil {
 		return fmt.Errorf("list sqlite inbound publications for integrity validation: %w", err)
 	}
 	identities := make([]runtimeinbound.Identity, 0)
 	for rows.Next() {
 		var item runtimeinbound.Identity
-		if err := rows.Scan(&item.ServiceID, &item.RunID, &item.Generation, &item.Provider, &item.ProviderEventID); err != nil {
+		if err := rows.Scan(&item.RunID, &item.Provider, &item.ProviderEventID); err != nil {
 			rows.Close()
 			return fmt.Errorf("scan sqlite inbound publication identity: %w", err)
 		}
@@ -151,8 +151,7 @@ func loadSQLiteInboundPublicationTx(ctx context.Context, db inboundPublicationQu
 const sqliteInboundPublicationSelect = `
 	SELECT p.publication_id, p.provider, p.provider_event_id,
 	       p.request_fingerprint, p.request_projection_version,
-	       p.stable_service_id, p.flow_path,
-	       p.target_alias, p.expected_generation, p.expected_publication_sequence,
+	       p.flow_path, p.target_alias,
 	       p.resolved_run_id, COALESCE(p.marker_event_id, ''), p.acknowledgement_mode,
 	       p.output_count, p.original_received_at, p.original_user_agent, p.original_transport_metadata,
 	       p.state, p.created_at, p.committed_at
@@ -167,8 +166,7 @@ func scanSQLiteInboundPublication(row inboundPublicationRowScanner) (runtimeinbo
 	err := row.Scan(
 		&record.PublicationID, &record.Provider, &record.ProviderEventID,
 		&record.RequestFingerprint, &record.RequestProjectionVersion,
-		&record.StableServiceID, &record.FlowPath,
-		&record.TargetAlias, &record.ExpectedGeneration, &record.ExpectedPublicationSequence,
+		&record.FlowPath, &record.TargetAlias,
 		&record.ResolvedRunID, &record.MarkerEventID, &ackMode, &record.OutputCount,
 		&originalReceivedAt, &record.OriginalUserAgent, &transportMetadata,
 		&record.State, &createdAt, &committedAt,
@@ -260,13 +258,11 @@ func insertSQLiteInboundPublicationPreparedTx(ctx context.Context, tx *sql.Tx, r
 	_, err := tx.ExecContext(ctx, `
 		INSERT INTO inbound_publications (
 			publication_id, provider, provider_event_id, request_fingerprint, request_projection_version,
-			stable_service_id, flow_path, target_alias,
-			expected_generation, expected_publication_sequence, resolved_run_id, acknowledgement_mode,
+			flow_path, target_alias, resolved_run_id, acknowledgement_mode,
 			original_received_at, original_user_agent, original_transport_metadata, state, created_at
-		) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'prepared', ?)
+		) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'prepared', ?)
 	`, request.PublicationID, request.Provider, request.ProviderEventID, request.RequestFingerprint, request.RequestProjectionVersion,
-		request.StableServiceID, request.FlowPath, request.TargetAlias,
-		request.ExpectedGeneration, request.ExpectedPublicationSequence, request.ResolvedRunID, string(request.AcknowledgementMode), request.OriginalReceivedAt, request.OriginalUserAgent, string(request.OriginalTransportMetadata), now)
+		request.FlowPath, request.TargetAlias, request.ResolvedRunID, string(request.AcknowledgementMode), request.OriginalReceivedAt, request.OriginalUserAgent, string(request.OriginalTransportMetadata), now)
 	if err != nil {
 		return fmt.Errorf("insert prepared sqlite inbound publication: %w", err)
 	}

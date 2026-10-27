@@ -18,7 +18,6 @@ import (
 	"github.com/division-sh/swarm/internal/runtime/executionposture"
 	runtimefailures "github.com/division-sh/swarm/internal/runtime/failures"
 	"github.com/division-sh/swarm/internal/runtime/inboundpublication"
-	"github.com/division-sh/swarm/internal/runtime/pipeline"
 	"github.com/division-sh/swarm/internal/store/storetest"
 	"github.com/google/uuid"
 	"go.mau.fi/whatsmeow/proto/waE2E"
@@ -152,7 +151,7 @@ func TestWhatsAppRuntimeIncomingOperatorIntentAckAndRestartBothStores(t *testing
 			if err := c.Close(f.ctx); err != nil {
 				t.Fatal(err)
 			}
-			f.republishBusinessStanding(t)
+
 			f.peer = newSDKPeer(t)
 			reopened := openRuntimeIncomingFixture(t, f)
 			connectRuntimeConnectionFixture(t, f, reopened)
@@ -160,7 +159,7 @@ func TestWhatsAppRuntimeIncomingOperatorIntentAckAndRestartBothStores(t *testing
 			waitRuntimeIncomingReceipt(t, f, reopened, id)
 			repeated, found, err := f.selected.(sessionBusinessStore).LoadInboundPublicationByIdentity(f.ctx, identity)
 			if err != nil || !found || repeated.Request.RequestFingerprint != record.Request.RequestFingerprint ||
-				repeated.Request.ExpectedPublicationSequence != record.Request.ExpectedPublicationSequence || repeated.OutputCount != 0 {
+				repeated.OutputCount != 0 {
 				t.Fatal("redelivery adopted the successor sequence or changed operator evidence", repeated, err)
 			}
 			texts, err := f.selected.(channeldelivery.Store).ListPendingChannelTexts(f.ctx, "", 10)
@@ -283,7 +282,7 @@ func waitRuntimeIncomingFailure(t *testing.T, f *activeInputFixture, c *RuntimeC
 
 func TestWhatsAppRuntimeIncomingAuthorityFencesBothStores(t *testing.T) {
 	for _, backend := range []string{"sqlite", "postgres"} {
-		for _, cell := range []string{"onboarding", "unbind", "retired_activation", "suspended_run", "runtime_fence"} {
+		for _, cell := range []string{"onboarding", "unbind", "retired_activation", "runtime_fence"} {
 			t.Run(backend+"/"+cell, func(t *testing.T) {
 				f := newActiveInputFixture(t, backend)
 				if cell != "onboarding" {
@@ -311,9 +310,6 @@ func TestWhatsAppRuntimeIncomingAuthorityFencesBothStores(t *testing.T) {
 				case "retired_activation":
 					_, err = f.selected.RetireConnectedChannelActivation(f.ctx, channelonboarding.RetireActivationRequest{
 						SlotKey: f.operation.SlotKey, ExpectedActivationRevision: f.activation.Revision, Reason: "incoming fence proof", Now: now})
-				case "suspended_run":
-					_, err = f.selected.SuspendStandingService(f.ctx, pipeline.StandingServiceOperation{ServiceID: f.standing.ServiceID,
-						Actor: "test", Reason: "incoming fence proof", ExecutionPosture: executionposture.Live, Expected: &f.standing})
 				case "runtime_fence":
 					err = f.workOwner.Fence()
 				}

@@ -57,14 +57,9 @@ func recoveryAdmissionRequest(t *testing.T, reads *recoveryAdmissionReads) Start
 	return StartupRecoveryReadRequest{
 		SourceArtifact: source, ObservedAt: time.Date(2026, 10, 3, 0, 0, 0, 0, time.UTC),
 		Delivery: reads, Timers: reads, ReadManagerState: reads.readManager,
-		StandingRestarts: startupRecoveryDispositionMap{
-			"ordinary":          runlifecycle.StandingRestartOrdinary,
-			"active":            runlifecycle.StandingRestartActiveIntrinsic,
-			"suspended":         runlifecycle.StandingRestartSuspended,
-			"orphaned":          runlifecycle.StandingRestartOrphaned,
-			"terminal-declared": runlifecycle.StandingRestartTerminalDeclared,
-			"terminal-orphaned": runlifecycle.StandingRestartTerminalOrphaned,
-			"invalid":           runlifecycle.StandingRestartInvalidCurrent,
+		FlowRuns: startupRecoveryScopeMap{
+			"ordinary": {},
+			"active":   runlifecycle.LiveRunScope{FlowPath: "active"},
 		},
 	}
 }
@@ -121,18 +116,6 @@ func TestSharedStartupRecoveryAdmissionPartitionsAndDecides(t *testing.T) {
 			})
 		}
 	}
-	for _, kind := range []string{"suspended", "orphaned", "terminal-declared", "terminal-orphaned", "invalid"} {
-		t.Run(kind, func(t *testing.T) {
-			reads := &recoveryAdmissionReads{
-				delivery: deliverylifecycle.RecoveryInventory{Runs: []deliverylifecycle.RecoveryRunInventory{{RunID: kind, Pending: 3}}},
-				timers:   timerobligation.Snapshot{Runs: []timerobligation.RunObligations{{RunID: kind, Families: []timerobligation.FamilyObligation{{Family: timerobligation.FamilyWorkflowTimer, RecoverableCount: 2}}}}},
-			}
-			snapshot, err := inspectStartupRecoverySnapshot(context.Background(), recoveryAdmissionRequest(t, reads))
-			if err != nil || !snapshot.InspectionComplete || snapshot.HasRecoverableWork() {
-				t.Fatalf("suppressed standing work became generic recovery: %+v, %v", snapshot, err)
-			}
-		})
-	}
 }
 
 func TestSharedStartupRecoveryAdmissionMissingReadsNeverMeanEmpty(t *testing.T) {
@@ -142,7 +125,7 @@ func TestSharedStartupRecoveryAdmissionMissingReadsNeverMeanEmpty(t *testing.T) 
 	}{
 		{"delivery", func(r *StartupRecoveryReadRequest) { r.Delivery = nil }},
 		{"timers", func(r *StartupRecoveryReadRequest) { r.Timers = nil }},
-		{"standing", func(r *StartupRecoveryReadRequest) { r.StandingRestarts = nil }},
+		{"flow_scope", func(r *StartupRecoveryReadRequest) { r.FlowRuns = nil }},
 		{"manager", func(r *StartupRecoveryReadRequest) { r.ReadManagerState = nil }},
 		{"time", func(r *StartupRecoveryReadRequest) { r.ObservedAt = time.Time{} }},
 		{"source", func(r *StartupRecoveryReadRequest) { r.SourceArtifact = correlation.SourceArtifactFact{} }},
@@ -177,7 +160,7 @@ func TestSharedStartupRecoveryAdmissionErrorsAndCancellation(t *testing.T) {
 			case "timers":
 				reads.timerErr = witness
 			case "standing":
-				request.StandingRestarts = startupRecoveryDispositionMap{}
+				request.FlowRuns = startupRecoveryScopeMap{}
 				reads.delivery.Runs = []deliverylifecycle.RecoveryRunInventory{{RunID: "missing", Pending: 1}}
 				want = nil
 			case "manager":

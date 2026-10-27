@@ -15,10 +15,9 @@ import (
 
 	"github.com/division-sh/swarm/internal/packs"
 	"github.com/division-sh/swarm/internal/providertriggers"
-	"github.com/division-sh/swarm/internal/runtime/core/flowidentity"
 	"github.com/division-sh/swarm/internal/runtime/correlation"
 	inbound "github.com/division-sh/swarm/internal/runtime/inboundpublication"
-	"github.com/division-sh/swarm/internal/runtime/pipeline"
+	"github.com/division-sh/swarm/internal/runtime/runlifecycle"
 	"github.com/division-sh/swarm/internal/store/storetest"
 	"github.com/division-sh/swarm/internal/testutil/sourceartifactfixture"
 )
@@ -71,8 +70,7 @@ func reopenNativeBusinessProcessFixture(t *testing.T, config nativeBusinessProce
 	f.ctx = correlation.WithSourceArtifactFact(context.Background(), source)
 	acquireLogoutProcessFixture(t, f, f.operation.Coordinate.RuntimeInstanceID)
 	var found bool
-	f.standing, found, err = f.selected.LoadReconciledStandingService(f.ctx, pipeline.StandingServiceCandidate{
-		ServiceID: flowidentity.StandingServiceID("."), FlowPath: ".", BindingEnabled: true, Source: source})
+	f.standing.LandingRun, found, err = f.selected.LoadLandingRun(f.ctx, runlifecycle.LiveRunScope{FlowPath: "."})
 	if err != nil || !found {
 		t.Fatalf("original native standing responsibility: found=%t %v", found, err)
 	}
@@ -217,7 +215,7 @@ func TestWhatsAppNativeBusinessHandoffProcessDeathBothStores(t *testing.T) {
 						t.Fatal("unfinished native restart", err)
 					}
 				} else if phase == "after_commit" {
-					f.republishBusinessStanding(t)
+
 					// Committed evidence needs neither a live SDK nor reminted input.
 					if f.state.currentOccurrence() != nil {
 						t.Fatal("history proof unexpectedly installed a live SDK")
@@ -226,7 +224,7 @@ func TestWhatsAppNativeBusinessHandoffProcessDeathBothStores(t *testing.T) {
 						t.Fatalf("committed native restart: %t %v", settled, err)
 					}
 				} else {
-					f.republishBusinessStanding(t)
+
 				}
 				requireNativeBusinessReceipt(t, f, event)
 				if len(frozen) > 0 {

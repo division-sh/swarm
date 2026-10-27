@@ -88,7 +88,6 @@ func channelDeliveryAuthorityCurrent(ctx context.Context, q schemaQueryer, autho
 		  AND activation.bundle_hash=? AND activation.bundle_identity=?
 		  AND activation.pack_inventory_generation=? AND activation.runtime_instance_id=?
 		  AND activation.context_publication_generation=? AND activation.plan_generation=?
-		  AND activation.target_generation=?
 		  AND NOT EXISTS (SELECT 1 FROM runtime_external_effect_operations other
 		       WHERE other.authority_kind='channel_delivery'
 		         AND json_extract(other.authority_evidence, '$.delivery_id')=p.delivery_id
@@ -99,7 +98,7 @@ func channelDeliveryAuthorityCurrent(ctx context.Context, q schemaQueryer, autho
 		d.InterfaceKey, d.DeliveryEpoch, d.ExternalAccountRef, d.ConversationRef,
 		d.BindingRevision, d.ActivationRevision, d.BundleHash, d.BundleIdentity,
 		d.PackInventoryGeneration, d.RuntimeInstanceID, d.ContextPublicationGeneration,
-		d.PlanGeneration.Diagnostic(), d.TargetGeneration, d.EffectOperationID}
+		d.PlanGeneration.Diagnostic(), d.EffectOperationID}
 	if postgres {
 		query = `SELECT p.delivery_id::text
 			FROM channel_delivery_plans p
@@ -131,11 +130,10 @@ func channelDeliveryAuthorityCurrent(ctx context.Context, q schemaQueryer, autho
 			  AND activation.bundle_hash=$12 AND activation.bundle_identity=$13
 			  AND activation.pack_inventory_generation=$14 AND activation.runtime_instance_id=$15::uuid
 			  AND activation.context_publication_generation=$16 AND activation.plan_generation=$17
-			  AND activation.target_generation=$18
 			  AND NOT EXISTS (SELECT 1 FROM runtime_external_effect_operations other
 			       WHERE other.authority_kind='channel_delivery'
 			         AND other.authority_evidence->>'delivery_id'=p.delivery_id::text
-			         AND other.operation_id<>$19::uuid
+			         AND other.operation_id<>$18::uuid
 			         AND other.state IN ('authorized','launched','response_observed'))
 			  AND p.source_kind IN ('summary','notice','card')`
 	}
@@ -188,7 +186,6 @@ func channelResponseAuthorityCurrent(ctx context.Context, q schemaQueryer, autho
 		AND activation.bundle_hash=? AND activation.bundle_identity=?
 		AND activation.pack_inventory_generation=? AND activation.runtime_instance_id=?
 		AND activation.context_publication_generation=? AND activation.plan_generation=?
-		AND activation.target_generation=?
 		AND NOT EXISTS (SELECT 1 FROM runtime_external_effect_operations other
 			WHERE other.authority_kind='channel_delivery'
 			AND json_extract(other.authority_evidence, '$.delivery_id')=p.delivery_id
@@ -197,7 +194,7 @@ func channelResponseAuthorityCurrent(ctx context.Context, q schemaQueryer, autho
 		d.PrincipalID, d.InterfaceKey, d.DeliveryEpoch, d.ExternalAccountRef, d.ConversationRef,
 		d.BindingRevision, d.ActivationRevision, d.BundleHash, d.BundleIdentity,
 		d.PackInventoryGeneration, d.RuntimeInstanceID, d.ContextPublicationGeneration,
-		d.PlanGeneration.Diagnostic(), d.TargetGeneration, d.EffectOperationID}
+		d.PlanGeneration.Diagnostic(), d.EffectOperationID}
 	if postgres {
 		query = `SELECT p.delivery_id::text, r.render_input, r.render_hash FROM channel_delivery_plans p
 			JOIN channel_delivery_renders r ON r.delivery_id=p.delivery_id
@@ -226,11 +223,10 @@ func channelResponseAuthorityCurrent(ctx context.Context, q schemaQueryer, autho
 			AND activation.bundle_hash=$12 AND activation.bundle_identity=$13
 			AND activation.pack_inventory_generation=$14 AND activation.runtime_instance_id=$15::uuid
 			AND activation.context_publication_generation=$16 AND activation.plan_generation=$17
-			AND activation.target_generation=$18
 			AND NOT EXISTS (SELECT 1 FROM runtime_external_effect_operations other
 				WHERE other.authority_kind='channel_delivery'
 				AND other.authority_evidence->>'delivery_id'=p.delivery_id::text
-				AND other.operation_id<>$19::uuid AND other.state IN ('authorized','launched','response_observed'))`
+				AND other.operation_id<>$18::uuid AND other.state IN ('authorized','launched','response_observed'))`
 	}
 	receiptClause, receiptArgs := channelDeliveryReceiptClause(d, postgres)
 	query += receiptClause
@@ -261,16 +257,16 @@ func channelResponseAuthorityCurrent(ctx context.Context, q schemaQueryer, autho
 	return channeldelivery.ResponseSourceCurrent(ctx, q, frozen, postgres, lock)
 }
 
-// Both source queries bind the same nineteen authority coordinates. Receipt
+// Both source queries bind the same eighteen authority coordinates. Receipt
 // currentness is source-neutral; first-send source eligibility remains local.
 func channelDeliveryReceiptClause(d runtimeeffects.ChannelDeliveryAuthority, postgres bool) (string, []any) {
 	if d.PreviousReceiptOperationID == "" {
 		return ` AND p.current_receipt_operation_id IS NULL`, nil
 	}
 	if postgres {
-		return ` AND p.current_receipt_operation_id=$20::uuid
+		return ` AND p.current_receipt_operation_id=$19::uuid
 			AND EXISTS (SELECT 1 FROM channel_delivery_receipts previous
-			WHERE previous.effect_operation_id=$20::uuid AND previous.delivery_id=p.delivery_id AND previous.state='sent')`,
+			WHERE previous.effect_operation_id=$19::uuid AND previous.delivery_id=p.delivery_id AND previous.state='sent')`,
 			[]any{d.PreviousReceiptOperationID}
 	}
 	return ` AND p.current_receipt_operation_id=?

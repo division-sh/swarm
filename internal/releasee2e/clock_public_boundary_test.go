@@ -40,7 +40,7 @@ func TestDeclaredClockNestedBinaryDeliveryBothStores(t *testing.T) {
 				t.Fatalf("nested binary clock startup: %v\n%s", err, process.output.String())
 			}
 			hash := goldenServedBundleHash(t, process.rpc, "live")
-			standing := waitForFullLifecycleStandingRun(t, process.rpc, hash, "", 1, "")
+			standing := waitForFullLifecycleStandingRun(t, process.rpc, hash, "")
 			clocks := readPublicClockRun(t, process, standing.RunID).ClockSchedules
 			if len(clocks) != 1 || clocks[0]["flow_id"] != "clock" || clocks[0]["flow_instance"] != "clock" || clocks[0]["emit"] != "clock/poll.tick" {
 				t.Fatalf("nested binary clock publication coordinate=%+v", clocks)
@@ -135,7 +135,7 @@ func TestDeclaredClockFiniteAndPublicReadbackBothStores(t *testing.T) {
 			if hash := goldenServedBundleHash(t, process.rpc, "live"); hash != described.SourceHash {
 				t.Fatalf("offline/served clock source differs: offline=%s served=%s", described.SourceHash, hash)
 			}
-			standing := waitForFullLifecycleStandingRun(t, process.rpc, described.SourceHash, "", 1, "")
+			standing := waitForFullLifecycleStandingRun(t, process.rpc, described.SourceHash, "")
 			if standing.StartedAt.Before(deploymentStarted) {
 				t.Fatalf("finite host created a clock-only standing generation before deployment: %+v deployment=%s", standing, deploymentStarted)
 			}
@@ -155,16 +155,8 @@ func TestDeclaredClockFiniteAndPublicReadbackBothStores(t *testing.T) {
 			}
 			waitForGoldenTerminalRun(t, process, goldenStoreSelection{name: backend}, connectedID, goldenStartupTimeout)
 			assertClocklessRun(t, process, connectedID)
-			var suspended standingRuntimePublicResult
-			if err := process.rpc.call(ctx, "standing.suspend", map[string]any{
-				"service_id": standing.Origin.ServiceID, "idempotency_key": "clock-public-suspend",
-			}, &suspended); err != nil || suspended.RunID != standing.RunID || suspended.Generation != 1 || suspended.EffectiveState != "suspended" {
-				t.Fatalf("public clock suspension: %+v err=%v", suspended, err)
-			}
 			parked := readPublicClockRun(t, process, standing.RunID)
-			if len(parked.ClockSchedules) != 1 || parked.ClockSchedules[0]["activation_id"] != clock[0]["activation_id"] ||
-				parked.ClockSchedules[0]["status"] != "parked" || parked.ClockSchedules[0]["retains_run"] != false ||
-				parked.ClockSchedules[0]["next_due_at"] != nil || parked.ClockSchedules[0]["suspension"] == nil {
+			if parked.Status != "paused" || len(parked.ClockSchedules) != 1 || parked.ClockSchedules[0]["activation_id"] != clock[0]["activation_id"] {
 				t.Fatalf("public parked clock lost durable identity: %+v", parked)
 			}
 			assertClockTransportReadback(t, process, binary, root, config, env, parked)

@@ -15,14 +15,14 @@ import (
 	"github.com/division-sh/swarm/internal/runtime/correlation"
 	"github.com/division-sh/swarm/internal/runtime/executionposture"
 	inbound "github.com/division-sh/swarm/internal/runtime/inboundpublication"
-	"github.com/division-sh/swarm/internal/runtime/pipeline"
+	"github.com/division-sh/swarm/internal/runtime/runlifecycle"
 	"github.com/division-sh/swarm/internal/sessioncapture"
 	"github.com/division-sh/swarm/internal/sessionprovider/input"
 )
 
 type sessionBusinessStore interface {
 	inbound.Runner
-	pipeline.StandingServicePersistence
+	runlifecycle.LandingRunReader
 	HasCurrentChannelInputDraft(context.Context, operatorchannel.InboundText, time.Time) (bool, error)
 }
 
@@ -146,13 +146,12 @@ func sessionBusinessRequest(ctx context.Context, event capturedEvent, alias stri
 	if err != nil || !found || source.BundleHash() != event.Source.Coordinate.BundleHash {
 		return request, errCaptureScopeChanged
 	}
-	standing, found, err := store.LoadReconciledStandingService(ctx, pipeline.StandingServiceCandidate{
-		ServiceID: event.Scope.PublicationBinding.ServiceID, FlowPath: target.FlowPath, BindingEnabled: true, Source: source})
+	landing, found, err := store.LoadLandingRun(ctx, runlifecycle.LiveRunScope{FlowPath: target.FlowPath})
 	if err != nil {
 		return request, err
 	}
-	if !found || standing.RunID != event.Scope.PublicationBinding.RunID || standing.Generation != event.Scope.PublicationBinding.Generation ||
-		standing.PublicationSequence != admitted.PublicationSequence() {
+	if !found || landing.RunID != event.Scope.PublicationBinding.RunID || !landing.Source.Matches(source) ||
+		(landing.State != runlifecycle.StateLive && landing.State != runlifecycle.StatePaused) {
 		return request, errCaptureScopeChanged
 	}
 	if original := admitted.OriginalPublicationRequest(); len(original) > 0 {
@@ -178,8 +177,7 @@ func sessionBusinessRequest(ctx context.Context, event capturedEvent, alias stri
 	}
 	request = inbound.Request{PublicationID: publication, MarkerEventID: marker, Provider: target.Provider, ProviderEventID: identity.ProviderEventID,
 		RequestFingerprint: fingerprint, RequestProjectionVersion: inbound.RequestSemanticProjectionVersion,
-		StableServiceID: identity.ServiceID, ResolvedRunID: identity.RunID, ExpectedGeneration: identity.Generation,
-		ExpectedPublicationSequence: standing.PublicationSequence, FlowPath: target.FlowPath, TargetAlias: alias,
+		ResolvedRunID: identity.RunID, FlowPath: target.FlowPath, TargetAlias: alias,
 		OriginalReceivedAt: event.ReceivedAt, AcknowledgementMode: inbound.AcknowledgementDurableBeforeDispatch}
 	request, err = withCaptureProvenance(event, request)
 	if err != nil {

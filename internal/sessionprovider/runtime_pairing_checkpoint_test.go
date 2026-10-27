@@ -92,7 +92,7 @@ func TestWhatsAppSessionIdentityUsesNativeAdmissionBothStores(t *testing.T) {
 				t.Fatalf("paired native admission did not reach the existing claim ceremony: %+v, %v", resumed, err)
 			}
 			if !resumed.IdentityOperation.ProviderAuthority.SameProvenance(operatorchannel.ProviderAuthority{Kind: operatorchannel.ProviderAuthoritySession, Session: account}) ||
-				resumed.Binding != nil || resumed.Operation.Coordinate.TargetGeneration != 0 || resumed.Operation.ActivationRevision != 0 {
+				resumed.Binding != nil || resumed.Operation.ActivationRevision != 0 {
 				t.Fatal("pairing invented a credential, operator binding or executable activation")
 			}
 			repeated, err := f.service.Retry(f.ctx, channelonboarding.RetryInput{OperationID: op.OperationID})
@@ -401,7 +401,7 @@ func TestWhatsAppReservedPairingCheckpointBothStores(t *testing.T) {
 			resumed, err := f.service.Retry(f.ctx, channelonboarding.RetryInput{OperationID: started.Operation.OperationID})
 			if err != nil || resumed.IdentityOperation == nil || resumed.IdentityOperation.State != operatorchannel.StateAwaitingClaim ||
 				resumed.Operation.SessionAccount.AccountRef != accountRef || resumed.Operation.SessionAccount.ConnectionID != started.Operation.SessionConnectionID ||
-				resumed.Operation.ActivationRevision != 0 || resumed.Operation.Coordinate.TargetGeneration != 0 || resumed.Binding != nil {
+				resumed.Operation.ActivationRevision != 0 || resumed.Binding != nil {
 				t.Fatal("reserved pairing did not freeze the SDK account before the human claim", resumed, err)
 			}
 			account := resumed.Operation.SessionAccount

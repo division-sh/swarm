@@ -39,7 +39,7 @@ func TestStandingConstructionUsesSelectedGenerationRun(t *testing.T) {
 		Root: &root, ByID: map[string]*contracts.FlowContractView{".": &root, "child": &root.Children[0]},
 		ByPath: map[string]*contracts.FlowContractView{".": &root, "child": &root.Children[0]},
 	}})
-	serviceID := StandingServiceID(".")
+	const serviceID = "11111111-1111-4111-8111-111111111111"
 	for _, generation := range []int64{1, 2, 7} {
 		runID := StandingGenerationRunID(serviceID, generation)
 		parent, err := StandingForGeneration(source, ".", runID)

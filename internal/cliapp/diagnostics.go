@@ -1546,8 +1546,6 @@ func diagnosticRunOriginLabel(origin runtimerunlifecycle.RunOrigin) string {
 		return "scenario setup"
 	case runtimerunlifecycle.OriginDeployment:
 		return "deployment feed"
-	case runtimerunlifecycle.OriginStandingGeneration:
-		return fmt.Sprintf("standing service %s generation %d", origin.ServiceID(), origin.Generation())
 	case runtimerunlifecycle.OriginForkMaterialization:
 		return fmt.Sprintf("fork from run %s at event %s", origin.SourceRunID(), origin.SourceEventID())
 	default:

@@ -261,7 +261,7 @@ func requireSingleServedStandingRun(t *testing.T, endpoint, bundleHash string) o
 	requireServedJSONRPCResult(t, endpoint, "run.list", map[string]any{"bundle_hash": bundleHash, "limit": 500}, &result)
 	var standing []operatorread.RunHeader
 	for _, run := range result.Runs {
-		if run.Origin.Kind() == runtimerunlifecycle.OriginStandingGeneration {
+		if run.Origin.Kind() == runtimerunlifecycle.OriginDeployment {
 			standing = append(standing, run)
 		}
 	}

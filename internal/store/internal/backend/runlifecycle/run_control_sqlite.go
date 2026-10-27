@@ -15,7 +15,6 @@ import (
 	runtimetimercancellation "github.com/division-sh/swarm/internal/runtime/timercancellation"
 	"github.com/division-sh/swarm/internal/store/internal/backend/mutationprotocol"
 	"github.com/division-sh/swarm/internal/store/internal/backend/runstate"
-	storestandingdisposition "github.com/division-sh/swarm/internal/store/internal/backend/standingdisposition"
 )
 
 func (s *RunLifecycleSQLiteOwner) StopRunControlOutcome(ctx context.Context, req runtimeruncontrol.TransitionRequest) (runtimeruncontrol.StoreTransition, error) {
@@ -96,8 +95,8 @@ func (s *RunLifecycleSQLiteOwner) runControlTransition(ctx context.Context, req 
 					_, err = attempt.RequestCompletion(txctx, s, runID, nil)
 				}
 			case "stop":
-				if err := rejectSQLiteStandingRunStopTx(txctx, tx, runID); err != nil {
-					return runtimeruncontrol.StopFailure("standing_admission", err)
+				if _, err := rejectLiveRunStop(txctx, tx, runID); err != nil {
+					return runtimeruncontrol.StopFailure("live_admission", err)
 				}
 				state, err = s.stopRunControlTx(txctx, tx, attempt, state, req, &changes)
 			default:
@@ -276,18 +275,6 @@ func (s *RunLifecycleSQLiteOwner) quiesceStoppedRunWorkTx(ctx context.Context, t
 		return 0, nil, runtimeruncontrol.StopFailure("timers", err)
 	}
 	return len(deliveries), cancellations, nil
-}
-
-func rejectSQLiteStandingRunStopTx(ctx context.Context, tx *sql.Tx, runID string) error {
-	disposition, err := storestandingdisposition.ReadByRun(ctx, tx, false, runID)
-	if err != nil {
-		return fmt.Errorf("inspect sqlite standing run control ownership: %w", err)
-	}
-	if disposition.UsesGenericRecovery() {
-		_, err := rejectLiveRunStop(ctx, tx, runID)
-		return err
-	}
-	return fmt.Errorf("run %s is owned by standing service %s; %s", runID, disposition.ServiceID, disposition.RunControlGuidance())
 }
 
 func sqliteNullableString(raw string) any {

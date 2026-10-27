@@ -75,7 +75,6 @@ type agentExecutionProjection struct {
 	admission         semanticview.FlowOwnedAgentSubscriptionAdmission
 	startedAt         time.Time
 	token             runtimeeffects.LifecycleToken
-	standingOwner     *worklifetime.StandingOccurrence
 	generationCtx     context.Context
 	cancelGeneration  context.CancelFunc
 	loopCancel        context.CancelFunc
@@ -111,7 +110,6 @@ type agentExecutionSnapshot struct {
 	Admission     semanticview.FlowOwnedAgentSubscriptionAdmission
 	StartedAt     time.Time
 	Token         runtimeeffects.LifecycleToken
-	StandingOwner *worklifetime.StandingOccurrence
 }
 
 type executableAgentReadinessKind string
@@ -1069,7 +1067,7 @@ func (c *agentLifecycleCoordinator) registerExecutionCandidate(
 			return err
 		}
 		pending := &agentRegistration{request: transition, agent: agent, binding: binding, phase: preparedPhase, run: preparedRun,
-			admission: admission, standingOwner: registrationStandingOwner(ctx)}
+			admission: admission}
 		if c.registrations == nil {
 			c.registrations = map[runtimeagentidentity.Identity]*agentRegistration{}
 		}
@@ -1085,7 +1083,7 @@ func (c *agentLifecycleCoordinator) registerExecutionCandidate(
 	} else if !found || !lifecycleProjectionEqual(view.ConfigRevision, view.Topology, revision, topology) {
 		return runtimefailures.New(runtimefailures.ClassLifecycleConflict, "agent_hydration_view_mismatch", "agent-lifecycle", "register_execution", map[string]any{"agent_identity": identity})
 	}
-	c.publishRegisteredExecutionLocked(rec, agent, admission, registrationStandingOwner(ctx), view, readinessOwner)
+	c.publishRegisteredExecutionLocked(rec, agent, admission, view, readinessOwner)
 	return nil
 }
 
@@ -1665,7 +1663,7 @@ func snapshotExecution(execution *agentExecutionProjection) agentExecutionSnapsh
 		Agent: execution.agent, Config: execution.config,
 		Subscriptions: append([]events.EventType(nil), execution.subscriptions...),
 		Admission:     execution.admission,
-		StartedAt:     execution.startedAt, Token: execution.token, StandingOwner: execution.standingOwner,
+		StartedAt:     execution.startedAt, Token: execution.token,
 	}
 }
 
@@ -1954,7 +1952,6 @@ func (c *agentLifecycleCoordinator) replaceLoopLocked(
 		nextExecution.config = previousExecution.config
 		nextExecution.subscriptions = append([]events.EventType(nil), previousExecution.subscriptions...)
 		nextExecution.startedAt = previousExecution.startedAt
-		nextExecution.standingOwner = previousExecution.standingOwner
 	}
 	if rec != nil {
 		nextExecution.config = rec.Config

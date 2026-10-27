@@ -1330,7 +1330,7 @@ func proveChannelBareInputChooser(t *testing.T, provider *telegramapi.Double, ca
 func waitChannelCardMessageID(t *testing.T, db *sql.DB, backend, flowName string) int {
 	t.Helper()
 	deadline := time.Now().Add(25 * time.Second)
-	_, runID, _ := loadServedStandingOwnerByFlow(t, db, backend, flowName)
+	runID := loadServedLandingRunByFlow(t, db, backend, flowName)
 	cardID := waitChannelAnchorCard(t, db, runID, decisioncard.AnchorKindStageGate, flowName)
 	messageID := waitChannelAnchorReceipt(t, db, cardID)
 	if time.Now().After(deadline) {

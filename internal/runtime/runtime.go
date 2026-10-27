@@ -263,7 +263,6 @@ type Runtime struct {
 	runLifecycleCandidates      runtimerunlifecycle.CandidateOwner
 	deliveryStore               runtimedelivery.Store
 	timerObligationReader       runtimetimerobligation.Reader
-	standingRestartReader       runtimerunlifecycle.StandingRestartDispositionReader
 	mailboxStore                runtimetools.MailboxPersistence
 	effectsStore                runtimeeffects.Store
 	managedCapabilitiesStore    managedcapabilities.Persistence
@@ -1203,7 +1202,6 @@ func newRuntime(ctx context.Context, deps RuntimeDeps) (*Runtime, error) {
 		runLifecycleCandidates:    runtimeDeps.RunLifecycleCandidates,
 		deliveryStore:             runtimeDeps.DeliveryStore,
 		timerObligationReader:     runtimeDeps.TimerObligationReader,
-		standingRestartReader:     runtimeDeps.ManagerPersistenceRoles.StandingRestarts,
 		mailboxStore:              runtimeDeps.MailboxStore,
 		effectsStore:              runtimeDeps.EffectsStore,
 		managedCapabilitiesStore:  runtimeDeps.ManagedCapabilitiesStore,

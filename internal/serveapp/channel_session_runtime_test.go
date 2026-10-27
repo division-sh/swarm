@@ -145,8 +145,7 @@ func TestServeSessionIncomingSelectionConsumesExactCompiledOwners(t *testing.T) 
 			incoming, err := serveSessionIncomingSelection(definition, definition.Runtime, ordered, candidate)
 			if err != nil || incoming == nil || incoming.Bus != definition.Runtime.Bus || incoming.Posture != executionposture.Live ||
 				incoming.Alias != candidate.Target.Alias || incoming.Trigger.Provider() != "whatsapp" ||
-				incoming.Trigger.Transport() != packs.ChannelTransportSession || !incoming.Trigger.Generation().Equal(candidate.Target.AdmissionGeneration) ||
-				candidate.Target.Generation != 0 || candidate.Target.PublicationSequence != 0 {
+				incoming.Trigger.Transport() != packs.ChannelTransportSession || !incoming.Trigger.Generation().Equal(candidate.Target.AdmissionGeneration) {
 				t.Fatal("selection dropped scope or manufactured executable readiness", incoming, err)
 			}
 		}
@@ -156,11 +155,9 @@ func TestServeSessionIncomingSelectionConsumesExactCompiledOwners(t *testing.T) 
 		mutate func(*channelonboarding.Candidate)
 	}{
 		{"alias", func(c *channelonboarding.Candidate) { c.Target.Alias = "foreign" }},
-		{"service", func(c *channelonboarding.Candidate) { c.Target.ServiceID = "foreign" }},
 		{"flow", func(c *channelonboarding.Candidate) { c.Target.FlowPath = "support" }},
 		{"selector", func(c *channelonboarding.Candidate) { c.Target.Selector = "ingress:support:whatsapp" }},
 		{"provider", func(c *channelonboarding.Candidate) { c.Provider = "discord" }},
-		{"target generation", func(c *channelonboarding.Candidate) { c.Target.Generation = 1; c.Target.PublicationSequence = 1 }},
 		{"signing", func(c *channelonboarding.Candidate) { c.Target.SigningCredentialKey = "secret" }},
 		{"trigger generation", func(c *channelonboarding.Candidate) { c.Target.AdmissionGeneration = triggergeneration.Generation{} }},
 		{"source", func(c *channelonboarding.Candidate) {

@@ -175,7 +175,7 @@ func TestHandedOnlyContinueSignalsBothStores(t *testing.T) {
 			if err != nil {
 				t.Fatal(err)
 			}
-			coordinator, err := deliverycontinuation.New(f.store, f.store, before.Authority, owner, f.bus, nil)
+			coordinator, err := deliverycontinuation.New(f.store, before.Authority, owner, f.bus, nil)
 			if err != nil {
 				t.Fatal(err)
 			}

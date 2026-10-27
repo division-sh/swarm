@@ -191,9 +191,10 @@ func (f *issue2564PublicationFixture) start(t *testing.T, generation uint64, gat
 		gate.bus = f.bus
 		dispatcher = gate
 	}
-	f.continuation, err = deliverycontinuation.New(f.store, f.store, authority, work, dispatcher, func(_ context.Context, err error) {
+	f.continuation, err = deliverycontinuation.New(f.store, authority, work, dispatcher, func(_ context.Context, err error) {
 		f.failures <- err
 	})
+
 	if err != nil {
 		t.Fatal(err)
 	}

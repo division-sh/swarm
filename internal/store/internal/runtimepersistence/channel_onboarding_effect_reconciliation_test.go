@@ -85,7 +85,7 @@ func TestChannelOnboardingEffectReconciliationSelectedStoreParity(t *testing.T) 
 							outcome.BundleIdentity != coordinate.BundleIdentity || outcome.PackInventoryGeneration != coordinate.PackInventoryGeneration ||
 							outcome.RuntimeInstanceID != coordinate.RuntimeInstanceID ||
 							outcome.ContextPublicationGeneration != coordinate.ContextPublicationGeneration ||
-							!outcome.PlanGeneration.Equal(coordinate.PlanGeneration) || outcome.TargetGeneration != coordinate.TargetGeneration {
+							!outcome.PlanGeneration.Equal(coordinate.PlanGeneration) {
 							t.Fatalf("effect lost exact onboarding coordinate: outcome=%#v coordinate=%#v", outcome, coordinate)
 						}
 						replayed, err := selected.ReconcileChannelOnboardingEffectOutcomes(
@@ -131,7 +131,6 @@ func beginSelectedChannelEffect(
 				BundleHash: coordinate.BundleHash, BundleIdentity: coordinate.BundleIdentity,
 				PackInventoryGeneration: coordinate.PackInventoryGeneration, RuntimeInstanceID: coordinate.RuntimeInstanceID,
 				ContextPublicationGeneration: coordinate.ContextPublicationGeneration, PlanGeneration: coordinate.PlanGeneration,
-				TargetGeneration: coordinate.TargetGeneration,
 			},
 		}
 		ctx = runtimeeffects.WithLogicalOperationIdentity(testAuthorActivityContextForBundle(coordinate.BundleHash), "registration:"+string(state)+":"+onboardingID)
@@ -149,7 +148,7 @@ func beginSelectedChannelEffect(
 				PrincipalID: activation.PrincipalID, BundleHash: coordinate.BundleHash,
 				BundleIdentity: coordinate.BundleIdentity, PackInventoryGeneration: coordinate.PackInventoryGeneration,
 				RuntimeInstanceID: coordinate.RuntimeInstanceID, ContextPublicationGeneration: coordinate.ContextPublicationGeneration,
-				PlanGeneration: coordinate.PlanGeneration, TargetGeneration: coordinate.TargetGeneration,
+				PlanGeneration: coordinate.PlanGeneration,
 			},
 		}
 		ctx = runtimeeffects.WithController(runtimeeffects.WithAuthority(testAuthorActivityContextForBundle(coordinate.BundleHash), authority), controller)

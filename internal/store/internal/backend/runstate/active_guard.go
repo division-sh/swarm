@@ -10,7 +10,6 @@ import (
 	runtimecorrelation "github.com/division-sh/swarm/internal/runtime/correlation"
 	runtimerunlifecycle "github.com/division-sh/swarm/internal/runtime/runlifecycle"
 	"github.com/division-sh/swarm/internal/store/internal/backend/runlifecycle/sourceadmission"
-	"github.com/division-sh/swarm/internal/store/internal/backend/standingdisposition"
 )
 
 const ActiveStateSQLValues = "'" +
@@ -38,7 +37,7 @@ func RequireSQLiteActiveNonlockingTx(ctx context.Context, tx *sql.Tx, runID stri
 	return sourceadmission.RequireSQLiteActiveNonlockingTx(ctx, tx, runID)
 }
 
-// DispatchParked consumes lifecycle/control and the exact-current standing owner.
+// DispatchParked consumes the native run lifecycle and control.
 // The caller takes the existing run fence before using this to admit a new claim.
 // Active remains broader: paused topology and already-owned settlement survive.
 func DispatchParked(ctx context.Context, q RowQueryer, postgres bool, runID string) (bool, error) {
@@ -78,20 +77,10 @@ func DispatchParked(ctx context.Context, q RowQueryer, postgres bool, runID stri
 	if !sourcePresent {
 		return false, &runtimerunlifecycle.SourceArtifactUnavailableError{BundleHash: source.BundleHash(), Cause: "missing_source_artifact"}
 	}
-	standing, err := standingdisposition.ReadByRun(ctx, q, postgres, runID)
-	if err != nil {
-		return false, err
-	}
-	if standing.Kind == runtimerunlifecycle.StandingRestartInvalidCurrent {
-		return false, fmt.Errorf("run %s has invalid standing authority: %s", runID, standing.RunControlGuidance())
-	}
 	switch status {
 	case string(runtimerunlifecycle.StateRunning), string(runtimerunlifecycle.StateLive):
 		if control != "" && control != string(runtimerunlifecycle.StateRunning) {
 			return false, fmt.Errorf("run %s has contradictory running/control state %q", runID, control)
-		}
-		if standing.ExactCurrent() && !standing.Executable() {
-			return false, fmt.Errorf("run %s has non-executable standing authority: %s", runID, standing.RunControlGuidance())
 		}
 		return false, nil
 	case string(runtimerunlifecycle.StatePaused):

@@ -189,13 +189,13 @@ func runCommandLiveRestartJourney(t *testing.T, binary, project string, store go
 	openStanding := func(process *releaseServeProcess, previous *fullLifecycleRun) (string, fullLifecycleRun) {
 		bundle := requireLifecycleHealthPosture(t, process.rpc, "live")
 		if previous != nil {
-			run := waitForFullLifecycleStandingRun(t, process.rpc, bundle, previous.Origin.ServiceID, previous.Origin.Generation, previous.RunID)
+			run := waitForFullLifecycleStandingRun(t, process.rpc, bundle, previous.RunID)
 			if !run.StartedAt.Equal(previous.StartedAt) {
 				t.Fatal("retained restart changed standing started_at")
 			}
 			return bundle, run
 		}
-		run := waitForFullLifecycleStandingRun(t, process.rpc, bundle, "", 0, "")
+		run := waitForFullLifecycleStandingRun(t, process.rpc, bundle, "")
 		card := waitForFullLifecycleCard(t, process.rpc, run.RunID, "lifecycle_ready")
 		decideFullLifecycleCard(t, process.rpc, card, "live-ready-"+card.CardID)
 		assertFullLifecycleCardDecided(t, process.rpc, card.CardID)
@@ -303,9 +303,10 @@ func runCommandLiveRestartJourney(t *testing.T, binary, project string, store go
 	}
 	process = start(spec)
 	recoveredBundle, recovered := openStanding(process, &standing)
-	if recoveredBundle != bundle || recovered.Status != "running" || recovered.ControlReason != "standing_reconcile" {
+	if recoveredBundle != bundle || recovered.Status != "paused" {
 		t.Fatalf("live crash recovery did not converge intrinsically: %#v", recovered)
 	}
+	continueFullLifecycleRun(t, process.rpc, standing.RunID)
 	old := converge(process, standing, 3, id, pendingReceipt)
 	assertFullLifecycleDeliveryCompleted(t, process.rpc, standing.RunID, checkpoint)
 	assertFullLifecycleSameRoute(t, second, old)
@@ -368,7 +369,7 @@ func runCommandLiveRestartJourney(t *testing.T, binary, project string, store go
 func TestCommandLiveReceiptUsesExactConfiguredConversation(t *testing.T) {
 	for _, chat := range []string{"42", "424242"} {
 		t.Run(chat, func(t *testing.T) {
-			receipt := fullLifecycleIngressReceipt{Status: "accepted", ServiceID: "standing", RunID: "standing-run", Generation: 1,
+			receipt := fullLifecycleIngressReceipt{Status: "accepted", RunID: "standing-run",
 				FlowPath: "telegram-ingress", Provider: "telegram", ProviderEventID: "1001", PublicationID: "publication",
 				EventIDs: []string{"raw", "normalized"}, EventNames: []string{"inbound.telegram", "inbound.telegram.text_message"}}
 			events := []fullLifecycleEvent{
@@ -378,15 +379,11 @@ func TestCommandLiveReceiptUsesExactConfiguredConversation(t *testing.T) {
 			if _, _, err := fullLifecycleReceiptEvents(events, receipt, 1001, chat); err != nil {
 				t.Fatal(err)
 			}
-			for _, field := range []string{"service", "run", "generation", "declaration", "provider_delivery"} {
+			for _, field := range []string{"run", "declaration", "provider_delivery"} {
 				invalid := receipt
 				switch field {
-				case "service":
-					invalid.ServiceID = ""
 				case "run":
 					invalid.RunID = "foreign-run"
-				case "generation":
-					invalid.Generation = 0
 				case "declaration":
 					invalid.FlowPath = "telegram-chat"
 				case "provider_delivery":

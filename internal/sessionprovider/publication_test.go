@@ -36,9 +36,9 @@ func capturePublicationFixture(t *testing.T, event capturedEvent) runtimeinbound
 	}
 	request := runtimeinbound.Request{PublicationID: publicationID, MarkerEventID: markerID, Provider: "whatsapp",
 		ProviderEventID: identity.ProviderEventID, RequestFingerprint: fingerprint,
-		RequestProjectionVersion: runtimeinbound.RequestSemanticProjectionVersion, StableServiceID: identity.ServiceID,
-		FlowPath: ".", TargetAlias: "whatsapp",
-		ExpectedGeneration: identity.Generation, ExpectedPublicationSequence: 1, ResolvedRunID: identity.RunID,
+		RequestProjectionVersion: runtimeinbound.RequestSemanticProjectionVersion,
+		FlowPath:                 ".", TargetAlias: "whatsapp",
+		ResolvedRunID:             identity.RunID,
 		AcknowledgementMode:       runtimeinbound.AcknowledgementDurableBeforeDispatch,
 		OriginalReceivedAt:        event.ReceivedAt,
 		OriginalTransportMetadata: []byte(`{"transport":"managed_session","fixture":true}`)}
@@ -116,7 +116,6 @@ func TestWhatsAppCapturePublicationStagingSurvivesReopenAndRefusesReplacement(t 
 		fn   func(*runtimeinbound.Request)
 	}{
 		{"target", func(r *runtimeinbound.Request) { r.TargetAlias = "replacement" }},
-		{"generation", func(r *runtimeinbound.Request) { r.ExpectedGeneration++ }},
 		{"run", func(r *runtimeinbound.Request) { r.ResolvedRunID = uuid.NewString() }},
 		{"source metadata", func(r *runtimeinbound.Request) { r.OriginalTransportMetadata = []byte(`{"source":"replacement"}`) }},
 		{"receipt time", func(r *runtimeinbound.Request) { r.OriginalReceivedAt = r.OriginalReceivedAt.Add(time.Microsecond) }},

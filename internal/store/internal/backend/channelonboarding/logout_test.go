@@ -242,7 +242,6 @@ func TestSessionLogoutReservationRejectsContradictionsBothStores(t *testing.T) {
 				}},
 				{"runtime", func(r *domain.ReserveTeardownRequest) { r.Logout.Coordinate.RuntimeInstanceID = uuid.NewString() }},
 				{"publication", func(r *domain.ReserveTeardownRequest) { r.Logout.Coordinate.ContextPublicationGeneration++ }},
-				{"target", func(r *domain.ReserveTeardownRequest) { r.Logout.Coordinate.TargetGeneration++ }},
 				{"selector", func(r *domain.ReserveTeardownRequest) { r.Logout.TargetSelector += "-other" }},
 			} {
 				t.Run(tc.name, func(t *testing.T) {
@@ -363,7 +362,6 @@ func TestSessionLogoutFencesCurrentActivationBothStores(t *testing.T) {
 			ctx, now := context.Background(), time.Now().UTC()
 			op := pairedLogoutOperation(t, f)
 			coordinate := op.Coordinate
-			coordinate.TargetGeneration = 1
 			var err error
 			op, err = f.selected.AdvanceChannelOnboarding(ctx, domain.AdvanceRequest{OperationID: op.OperationID,
 				ExpectedRevision: op.Revision, Phase: domain.PhaseAwaitingOperatorConfirmation, BindingRevision: 1, Now: now})

@@ -44,7 +44,7 @@ func TestDirectNodeDispatchRequiresActualCarrierResolution(t *testing.T) {
 			if err != nil {
 				t.Fatal(err)
 			}
-			c, err := deliverycontinuation.New(struct{ runtimedelivery.Store }{}, unexpectedDurableTestRoles{}, authority, eb.workOwner, eb, nil)
+			c, err := deliverycontinuation.New(struct{ runtimedelivery.Store }{}, authority, eb.workOwner, eb, nil)
 			if err != nil {
 				t.Fatal(err)
 			}
@@ -123,7 +123,7 @@ func TestDeliveryDispatchPartialAcquisitionReturnsAcceptedPrefix(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	c, err := deliverycontinuation.New(struct{ runtimedelivery.Store }{}, unexpectedDurableTestRoles{}, authority, eb.workOwner, eb, nil)
+	c, err := deliverycontinuation.New(struct{ runtimedelivery.Store }{}, authority, eb.workOwner, eb, nil)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -177,7 +177,7 @@ func TestDeliveryElectionLoserSkipsInterceptorsAndQueue(t *testing.T) {
 				}
 				// This test exercises the real process-local election and bus
 				// dispatch. Durable claim execution is covered by runtime parity.
-				coordinator, err := deliverycontinuation.New(struct{ runtimedelivery.Store }{}, unexpectedDurableTestRoles{}, authority, eb.workOwner, eb, nil)
+				coordinator, err := deliverycontinuation.New(struct{ runtimedelivery.Store }{}, authority, eb.workOwner, eb, nil)
 				if err != nil {
 					t.Fatal(err)
 				}

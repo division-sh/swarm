@@ -70,13 +70,12 @@ func newSelectedContractExecutionOwnerForTest(t testing.TB, selected *store.Post
 		ReplyContext: selected, RunLifecycle: selected, DeliveryLifecycle: selected,
 
 		ActiveAgents: selected, PreparedEvents: selected,
-		TargetFailureRecorder: selected, RunOrigins: selected, StandingRestarts: selected,
+		TargetFailureRecorder: selected,
 	}
 	roles := runtimemanager.PersistenceRoles{
 		LifecycleCensus: selected,
 		LifecycleState:  selected, LifecycleEffects: selected, LifecycleDiagnostics: selected, EffectsRecovery: selected,
 		DeliveryQuiescence: selected, EventExistence: selected, DirectiveOperations: selected, DirectiveTargets: selected,
-		StandingRestarts: selected,
 	}
 	owner, err := NewSelectedContractExecutionOwner(
 		workflow, selected, selected, selected,
@@ -111,13 +110,12 @@ func newSelectedContractSQLiteExecutionOwnerForTest(t testing.TB, selected *stor
 		ReplyContext: selected, RunLifecycle: selected, DeliveryLifecycle: selected,
 
 		ActiveAgents: selected, PreparedEvents: selected,
-		TargetFailureRecorder: selected, RunOrigins: selected, StandingRestarts: selected,
+		TargetFailureRecorder: selected,
 	}
 	roles := runtimemanager.PersistenceRoles{
 		LifecycleCensus: selected,
 		LifecycleState:  selected, LifecycleEffects: selected, LifecycleDiagnostics: selected, EffectsRecovery: selected,
 		DeliveryQuiescence: selected, EventExistence: selected, DirectiveOperations: selected, DirectiveTargets: selected,
-		StandingRestarts: selected,
 	}
 	owner, err := NewSelectedContractExecutionOwner(
 		workflow, selected, selected, selected,

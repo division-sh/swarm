@@ -174,37 +174,27 @@ func TestDormantIngressProvisionRestartSignedInputBothStores(t *testing.T) {
 					t.Fatalf("secret command %v exit=%d stdout=%s stderr=%s", args, code, out.String(), errOut.String())
 				}
 			}
-			assertCurrent := func(runID string, generation int64, state string) (string, int64) {
+			assertCurrent := func(runID string) string {
 				t.Helper()
 				var gotRun, gotState string
-				var gotGeneration int64
-				if err := db.QueryRow(`SELECT current_run_id, current_generation, effective_state FROM standing_services`).Scan(&gotRun, &gotGeneration, &gotState); err != nil {
+				if err := db.QueryRow(`SELECT run_id, status FROM runs WHERE flow_path='telegram-ingress' AND landing_run=TRUE`).Scan(&gotRun, &gotState); err != nil {
 					t.Fatal(err)
 				}
-				if gotState != state || gotGeneration != generation || runID != "" && gotRun != runID {
-					t.Fatalf("current identity = %s/%d/%s, want %s/%d/%s", gotRun, gotGeneration, gotState, runID, generation, state)
+				if gotState != "live" || runID != "" && gotRun != runID {
+					t.Fatalf("landing run = %s/%s, want %s/live", gotRun, gotState, runID)
 				}
-				return gotRun, gotGeneration
+				return gotRun
 			}
 			process, endpoint := start()
 			assertDormant(process, endpoint)
-			for _, table := range []string{"standing_services", "standing_service_generations", "standing_service_journal"} {
-				var count int
-				if err := db.QueryRow("SELECT COUNT(*) FROM " + table).Scan(&count); err != nil || count != 0 {
-					t.Fatalf("fresh dormant %s count=%d err=%v", table, count, err)
-				}
-			}
-			var standingRuns int
-			if err := db.QueryRow(`SELECT COUNT(*) FROM runs WHERE origin_kind = 'standing_generation'`).Scan(&standingRuns); err != nil || standingRuns != 0 {
-				t.Fatalf("fresh dormant standing runs=%d err=%v", standingRuns, err)
-			}
+			runID := assertCurrent("")
 			secretsCLI([]string{"secrets", "set", "webhook_signing.telegram", "--stdin"}, "telegram-secret\n")
 			assertDormant(process, endpoint)
 			if code := process.stop(); code != 0 {
 				t.Fatalf("initial stop=%d", code)
 			}
 			process, endpoint = start()
-			runID, generation := assertCurrent("", 1, "active")
+			assertCurrent(runID)
 			requireStandingTelegramSignatureRejection(t, endpoint)
 			sendStandingTelegramUpdate(t, endpoint, 92, 42, process.outputString)
 			duplicateRequest, err := http.NewRequest(http.MethodPost, endpoint+"/webhooks/chat/telegram", strings.NewReader(`{"update_id":92,"message":{"message_id":92,"from":{"id":42},"chat":{"id":42,"type":"private"},"text":"hello 92"}}`))
@@ -229,27 +219,25 @@ func TestDormantIngressProvisionRestartSignedInputBothStores(t *testing.T) {
 			if err := db.QueryRow(`SELECT COUNT(*) FROM events WHERE event_name = 'inbound.telegram'`).Scan(&published); err != nil || published != 1 {
 				t.Fatalf("signed raw event dedupe = %d, %v", published, err)
 			}
-			var serviceID string
-			var journalCount int
-			if err := db.QueryRow(`SELECT service_id FROM standing_services`).Scan(&serviceID); err != nil {
-				t.Fatal(err)
-			}
-			if err := db.QueryRow(`SELECT COUNT(*) FROM standing_service_journal`).Scan(&journalCount); err != nil {
-				t.Fatal(err)
-			}
 			secretsCLI([]string{"secrets", "set", "webhook_signing.telegram", "--stdin"}, "unadmitted-in-process-rotation\n")
-			for _, command := range []string{"resume", "reset"} {
-				response := requestServedJSONRPC(t, endpoint+"/v1/rpc", "standing."+command, map[string]any{
-					"service_id": serviceID, "reason": "credential-currentness proof", "idempotency_key": "stale-standing-" + command,
-				})
-				if response.Error == nil {
-					t.Fatalf("standing %s accepted stale frozen credentials: %#v", command, response)
-				}
-				assertCurrent(runID, generation, "active")
-				var gotJournalCount int
-				if err := db.QueryRow(`SELECT COUNT(*) FROM standing_service_journal`).Scan(&gotJournalCount); err != nil || gotJournalCount != journalCount {
-					t.Fatalf("refused standing %s mutated history: %d->%d, %v", command, journalCount, gotJournalCount, err)
-				}
+			rotated, err := http.NewRequest(http.MethodPost, endpoint+"/webhooks/chat/telegram", strings.NewReader(`{"update_id":999,"message":{"message_id":999,"from":{"id":42},"chat":{"id":42,"type":"private"},"text":"unadmitted"}}`))
+			if err != nil {
+				t.Fatal(err)
+			}
+			rotated.Header.Set("Content-Type", "application/json")
+			rotated.Header.Set("X-Telegram-Bot-Api-Secret-Token", "unadmitted-in-process-rotation")
+			refused, err := http.DefaultClient.Do(rotated)
+			if err != nil {
+				t.Fatal(err)
+			}
+			_, _ = io.Copy(io.Discard, refused.Body)
+			_ = refused.Body.Close()
+			if refused.StatusCode != http.StatusServiceUnavailable {
+				t.Fatalf("unadmitted credential rotation accepted: %d", refused.StatusCode)
+			}
+			assertCurrent(runID)
+			if err := db.QueryRow(`SELECT COUNT(*) FROM events WHERE event_name = 'inbound.telegram'`).Scan(&published); err != nil || published != 1 {
+				t.Fatalf("refused credential rotation mutated history: count=%d err=%v", published, err)
 			}
 			if code := process.stop(); code != 0 {
 				t.Fatalf("enabled stop=%d", code)
@@ -257,18 +245,18 @@ func TestDormantIngressProvisionRestartSignedInputBothStores(t *testing.T) {
 			secretsCLI([]string{"secrets", "remove", "webhook_signing.telegram"}, "")
 			process, endpoint = start()
 			assertDormant(process, endpoint)
-			assertCurrent(runID, generation, "dormant")
+			assertCurrent(runID)
 			if code := process.stop(); code != 0 {
 				t.Fatalf("dormant retained stop=%d", code)
 			}
 			secretsCLI([]string{"secrets", "set", "webhook_signing.telegram", "--stdin"}, "telegram-secret\n")
 			process, endpoint = start()
-			assertCurrent(runID, generation, "active")
+			assertCurrent(runID)
 			sendStandingTelegramUpdate(t, endpoint, 93, 42, process.outputString)
 			if code := process.stop(); code != 0 {
 				t.Fatalf("restored stop=%d", code)
 			}
-			if err := db.QueryRow(`SELECT COUNT(*) FROM standing_service_generations`).Scan(&published); err != nil || published != 1 {
+			if err := db.QueryRow(`SELECT COUNT(*) FROM runs WHERE flow_path='telegram-ingress'`).Scan(&published); err != nil || published != 1 {
 				t.Fatalf("credential restoration minted a successor: %d, %v", published, err)
 			}
 		})

@@ -63,7 +63,7 @@ func TestChannelOnboardingSelectionReadOnlyHTTPBothStores(t *testing.T) {
 					BundleIdentity: "support@1.0.0", PackInventoryGeneration: "inventory", RuntimeInstanceID: uuid.NewString(),
 					ContextPublicationGeneration: 1, PlanGeneration: plan},
 				Target: channelonboarding.CandidateTarget{Selector: "ingress:support:telegram", FlowPath: "support", Alias: "telegram",
-					ServiceID: uuid.NewString(), Provider: "telegram", AdmissionGeneration: triggergeneration.FromCanonicalBytes([]byte("selection"))},
+					Provider: "telegram", AdmissionGeneration: triggergeneration.FromCanonicalBytes([]byte("selection"))},
 				Posture: channelonboarding.ActivationWebhookRegistration, Ceremony: channelonboarding.CeremonyAuthenticatedTextChallenge,
 				ProviderCredentialRole: "bot_token", SigningCredentialRole: "signing", ConfirmationOperation: "deliver"}
 			catalog, err := channelonboarding.NewCandidateCatalog([]channelonboarding.Candidate{candidate})

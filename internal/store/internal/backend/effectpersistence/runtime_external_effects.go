@@ -25,7 +25,6 @@ import (
 	storellm "github.com/division-sh/swarm/internal/store/internal/backend/llmpersistence"
 	storemanagedcapability "github.com/division-sh/swarm/internal/store/internal/backend/managedcapability"
 	"github.com/division-sh/swarm/internal/store/internal/backend/mutationprotocol"
-	storestandingdisposition "github.com/division-sh/swarm/internal/store/internal/backend/standingdisposition"
 )
 
 var _ runtimeeffects.Store = (*EffectPostgresOwner)(nil)
@@ -130,10 +129,6 @@ func (s *EffectPostgresOwner) ReconcileExternalEffectAttempts(ctx context.Contex
 			if err != nil {
 				return err
 			}
-			candidates, err = executableExternalEffectRecoveryCandidates(txctx, tx, true, candidates)
-			if err != nil {
-				return err
-			}
 			if err := admitExternalEffectRecoveryCandidates(request, candidates); err != nil {
 				return err
 			}
@@ -169,10 +164,6 @@ func (s *EffectSQLiteOwner) ReconcileExternalEffectAttempts(ctx context.Context,
 		var summary runtimeeffects.RecoverySummary
 		err := mutation.WithSQL(txctx, func(txctx context.Context, tx *sql.Tx) error {
 			candidates, err := loadExternalEffectRecoveryCandidates(txctx, tx, false, "")
-			if err != nil {
-				return err
-			}
-			candidates, err = executableExternalEffectRecoveryCandidates(txctx, tx, false, candidates)
 			if err != nil {
 				return err
 			}
@@ -348,7 +339,6 @@ func queryChannelOnboardingEffectOutcomes(ctx context.Context, queryer schemaQue
 		       COALESCE(o.authority_evidence->>'runtime_instance_id',''),
 		       COALESCE((o.authority_evidence->>'context_publication_generation')::bigint,0),
 		       COALESCE(o.authority_evidence->>'plan_generation',''),
-		       COALESCE((o.authority_evidence->>'target_generation')::bigint,0),
 		       (a.launched_at IS NOT NULL),COALESCE(a.failure,'{}'::jsonb)::text
 		FROM runtime_external_effect_operations o
 		JOIN runtime_external_effect_attempts a ON a.operation_id=o.operation_id
@@ -368,7 +358,6 @@ func queryChannelOnboardingEffectOutcomes(ctx context.Context, queryer schemaQue
 		       COALESCE(json_extract(o.authority_evidence,'$.runtime_instance_id'),''),
 		       COALESCE(json_extract(o.authority_evidence,'$.context_publication_generation'),0),
 		       COALESCE(json_extract(o.authority_evidence,'$.plan_generation'),''),
-		       COALESCE(json_extract(o.authority_evidence,'$.target_generation'),0),
 		       (a.launched_at IS NOT NULL),COALESCE(a.failure,'{}')
 		FROM runtime_external_effect_operations o
 		JOIN runtime_external_effect_attempts a ON a.operation_id=o.operation_id
@@ -464,7 +453,7 @@ func scanChannelOnboardingEffectOutcomes(rows *sql.Rows) ([]runtimeeffects.Chann
 			&item.OperationID, &kind, &authorityKind, &item.AuthorityID, &state, &attemptState,
 			&item.OnboardingOperationID, &item.OnboardingRevision, &item.BundleHash,
 			&item.BundleIdentity, &item.PackInventoryGeneration, &item.RuntimeInstanceID,
-			&item.ContextPublicationGeneration, &planGeneration, &item.TargetGeneration, &item.Launched, &failureRaw,
+			&item.ContextPublicationGeneration, &planGeneration, &item.Launched, &failureRaw,
 		); err != nil {
 			return nil, err
 		}
@@ -1131,34 +1120,6 @@ func loadExternalEffectRecoveryCandidates(ctx context.Context, tx *sql.Tx, postg
 		candidates = append(candidates, candidate)
 	}
 	return candidates, rows.Err()
-}
-
-func executableExternalEffectRecoveryCandidates(ctx context.Context, tx *sql.Tx, postgres bool, candidates []externalEffectRecoveryCandidate) ([]externalEffectRecoveryCandidate, error) {
-	cache := make(map[string]bool)
-	filtered := make([]externalEffectRecoveryCandidate, 0, len(candidates))
-	for _, candidate := range candidates {
-		runID, err := candidate.runID()
-		if err != nil {
-			return nil, err
-		}
-		if runID == "" {
-			filtered = append(filtered, candidate)
-			continue
-		}
-		allowed, ok := cache[runID]
-		if !ok {
-			disposition, err := storestandingdisposition.ReadByRun(ctx, tx, postgres, runID)
-			if err != nil {
-				return nil, fmt.Errorf("classify external effect recovery run %s: %w", runID, err)
-			}
-			allowed = disposition.UsesGenericRecovery() || disposition.Executable()
-			cache[runID] = allowed
-		}
-		if allowed {
-			filtered = append(filtered, candidate)
-		}
-	}
-	return filtered, nil
 }
 
 func (s *EffectPostgresOwner) requestRecoveredExternalEffectCandidates(ctx context.Context, tx *sql.Tx, mutation *mutationprotocol.Attempt, candidates []externalEffectRecoveryCandidate) error {

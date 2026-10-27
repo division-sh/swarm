@@ -94,7 +94,7 @@ func TestA9KeyedIngressCommitResponseRecoveryBothStores(t *testing.T) {
 				t.Cleanup(func() { projectRuntimePersistenceForServe = previous })
 				first, served := start()
 				rt := servedTestProcessRuntime(t, first)
-				statuses, err := rt.Pipeline.ListStandingServiceStatuses(t.Context())
+				statuses, err := readServedLandingRuns(t.Context(), rt)
 				if err != nil || len(statuses) != 1 {
 					t.Fatalf("binding=%+v err=%v", statuses, err)
 				}
@@ -109,7 +109,7 @@ func TestA9KeyedIngressCommitResponseRecoveryBothStores(t *testing.T) {
 				if code != want {
 					t.Fatalf("commit boundary status=%d want=%d response=%s", code, want, response)
 				}
-				identity := inboundpublication.Identity{ServiceID: status.ServiceID, RunID: status.RunID, Generation: status.Generation, Provider: "partner", ProviderEventID: "commit-boundary"}
+				identity := inboundpublication.Identity{RunID: status.RunID, Provider: "partner", ProviderEventID: "commit-boundary"}
 				record, found, err := fault.Runner.LoadInboundPublicationByIdentity(t.Context(), identity)
 				instances, loadErr := rt.Pipeline.ListWorkflowInstances(t.Context(), status.RunID)
 				if err != nil || loadErr != nil {
@@ -188,7 +188,7 @@ func TestA9KeyedIngressHeldConsumerRestartBothStores(t *testing.T) {
 			}
 			first, served := start()
 			rt := servedTestProcessRuntime(t, first)
-			statuses, err := rt.Pipeline.ListStandingServiceStatuses(t.Context())
+			statuses, err := readServedLandingRuns(t.Context(), rt)
 			if err != nil || len(statuses) != 1 {
 				t.Fatalf("binding=%+v err=%v", statuses, err)
 			}
@@ -246,77 +246,6 @@ func TestA9KeyedIngressHeldConsumerRestartBothStores(t *testing.T) {
 			code, duplicate := postProviderAliasUpdate(t, endpoint, "keyed-chat", secret, body)
 			if code != http.StatusOK || !reflect.DeepEqual(a9AliasReceipt(t, receipt), a9AliasReceipt(t, duplicate)) || executions.Load() != 1 {
 				t.Fatalf("held restart retry redelivered: %d %s -> %s executions=%d", code, receipt, duplicate, executions.Load())
-			}
-		})
-	}
-}
-
-func TestA9KeyedIngressDesiredStateKeepsBindingAndReceiverDistinctBothStores(t *testing.T) {
-	for _, backend := range []string{"sqlite", "postgres"} {
-		t.Run(backend, func(t *testing.T) {
-			secret := a9SetRawIngressCredential(t)
-			_, start := clockDeploymentHarness(t, backend, canonicalrouting.CopyKeyedRootRawIngress(t))
-			process, served := start()
-			t.Cleanup(func() {
-				if code := process.stop(); code != 0 {
-					t.Errorf("desired-state shutdown=%d", code)
-				}
-			})
-			rt := servedTestProcessRuntime(t, process)
-			statuses, err := rt.Pipeline.ListStandingServiceStatuses(t.Context())
-			if err != nil || len(statuses) != 1 {
-				t.Fatalf("binding=%+v err=%v", statuses, err)
-			}
-			status := statuses[0]
-			endpoint := strings.TrimSuffix(served.Endpoint, "/v1/rpc") + "/webhooks/keyed-shop/partner"
-			const body = `{"delivery_id":"same-provider-coordinate"}`
-			code, receipt := a9PostSignedRawIngress(t, endpoint, secret, body)
-			if code != http.StatusAccepted {
-				t.Fatalf("first binding acceptance=%d %s", code, receipt)
-			}
-			original := a9AliasReceipt(t, receipt)
-			ids := original["event_ids"].([]any)
-			a9RequireRootIngressSettlement(t, served.Endpoint, status.RunID, ids[0].(string))
-			initial := a9RootConstructionReceipt(t, rt.Pipeline, status.RunID)
-			suspended := invokeServedStandingOperation(t, served.Endpoint, "standing.suspend", status.ServiceID, "a9-keyed-suspend")
-			if suspended.RunID != status.RunID || suspended.Generation != status.Generation || suspended.EffectiveState != "suspended" {
-				t.Fatalf("suspension replaced receiver identity: %+v", suspended)
-			}
-			code, blocked := a9PostSignedRawIngress(t, endpoint, secret, body)
-			if code != http.StatusServiceUnavailable {
-				t.Fatalf("suspended binding admitted a retry=%d %s", code, blocked)
-			}
-			resumed := invokeServedStandingOperation(t, served.Endpoint, "standing.resume", status.ServiceID, "a9-keyed-resume")
-			if resumed.RunID != status.RunID || resumed.Generation != status.Generation || resumed.EffectiveState != "active" {
-				t.Fatalf("resume replaced binding generation: %+v", resumed)
-			}
-			code, duplicate := a9PostSignedRawIngress(t, endpoint, secret, body)
-			if code != http.StatusOK || !reflect.DeepEqual(original, a9AliasReceipt(t, duplicate)) {
-				t.Fatalf("resume redelivered old acceptance=%d %s", code, duplicate)
-			}
-			if current := a9RootConstructionReceipt(t, rt.Pipeline, status.RunID); !reflect.DeepEqual(current, initial) {
-				t.Fatal("suspend/resume reinitialized the concrete receiver")
-			}
-			reset := invokeServedStandingOperation(t, served.Endpoint, "standing.reset", status.ServiceID, "a9-keyed-reset")
-			if reset.RunID == status.RunID || reset.Generation != status.Generation+1 || reset.EffectiveState != "active" {
-				t.Fatalf("reset did not advance exact binding generation: %+v", reset)
-			}
-			instances, err := rt.Pipeline.ListWorkflowInstances(t.Context(), reset.RunID)
-			if err != nil || len(instances) != 0 {
-				t.Fatalf("reset fabricated a keyed receiver before input: %+v err=%v", instances, err)
-			}
-			code, fresh := a9PostSignedRawIngress(t, endpoint, secret, body)
-			if code != http.StatusAccepted {
-				t.Fatalf("successor could not construct from same provider coordinate=%d %s", code, fresh)
-			}
-			current := a9AliasReceipt(t, fresh)
-			if current["publication_id"] == original["publication_id"] || current["run_id"] != reset.RunID || current["generation"] != float64(reset.Generation) {
-				t.Fatalf("receiver/alias collapsed generation-scoped receipt: old=%+v new=%+v", original, current)
-			}
-			ids = current["event_ids"].([]any)
-			a9RequireRootIngressSettlement(t, served.Endpoint, reset.RunID, ids[0].(string))
-			if successor := a9RootConstructionReceipt(t, rt.Pipeline, reset.RunID); successor.CreatingInput.EventID == initial.CreatingInput.EventID || successor.Fields["processed_count"] != int64(0) {
-				t.Fatalf("successor borrowed predecessor constructor: %+v", successor)
 			}
 		})
 	}

@@ -395,7 +395,7 @@ func (d *serveChannelDeliveryDispatcher) acknowledgeChannelAction(ctx context.Co
 		BundleIdentity: selected.Coordinate.BundleIdentity, PackInventoryGeneration: selected.Coordinate.PackInventoryGeneration,
 		RuntimeInstanceID:            selected.Coordinate.RuntimeInstanceID,
 		ContextPublicationGeneration: selected.Coordinate.ContextPublicationGeneration,
-		PlanGeneration:               selected.Coordinate.PlanGeneration, TargetGeneration: selected.Coordinate.TargetGeneration,
+		PlanGeneration:               selected.Coordinate.PlanGeneration,
 	}
 	authority := runtimeeffects.Authority{
 		Kind: runtimeeffects.AuthorityChannelActionAck, ID: operationID,
@@ -639,7 +639,7 @@ func (d *serveChannelDeliveryDispatcher) dispatchChannel(ctx context.Context, ca
 			PackInventoryGeneration:      selected.Coordinate.PackInventoryGeneration,
 			RuntimeInstanceID:            selected.Coordinate.RuntimeInstanceID,
 			ContextPublicationGeneration: selected.Coordinate.ContextPublicationGeneration,
-			PlanGeneration:               selected.Coordinate.PlanGeneration, TargetGeneration: selected.Coordinate.TargetGeneration,
+			PlanGeneration:               selected.Coordinate.PlanGeneration,
 		},
 	}
 	if !authority.Valid() {

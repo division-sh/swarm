@@ -72,13 +72,13 @@ onboarding:
 	coordinate := channelonboarding.ChannelRuntimeContextCoordinate{
 		BundleHash: "bundle-v2:sha256:" + strings.Repeat("a", 64), BundleIdentity: "mock@1.0.0#bundle",
 		PackInventoryGeneration: "sha256:inventory", RuntimeInstanceID: "11111111-1111-4111-8111-111111111111",
-		ContextPublicationGeneration: 1, PlanGeneration: generation, TargetGeneration: 1,
+		ContextPublicationGeneration: 1, PlanGeneration: generation,
 	}
 	candidate := channelonboarding.Candidate{
 		Provider: "mock", Interface: identity, Coordinate: coordinate,
 		Target: channelonboarding.CandidateTarget{
-			Selector: "ingress:mock-ingress:mock", ServiceID: "mock-ingress", FlowPath: "mock-ingress", Alias: "mock",
-			Provider: "mock", Generation: 1, PublicationSequence: 1,
+			Selector: "ingress:mock-ingress:mock", FlowPath: "mock-ingress", Alias: "mock",
+			Provider:            "mock",
 			AdmissionGeneration: triggergeneration.FromCanonicalBytes([]byte("mock-admission")), SigningCredentialKey: "mock.signing",
 		},
 		Posture: channelonboarding.ActivationWebhookRegistration, Ceremony: channelonboarding.CeremonyAuthenticatedTextChallenge,

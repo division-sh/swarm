@@ -5,20 +5,18 @@ import (
 	"errors"
 	"time"
 
-	worklifetime "github.com/division-sh/swarm/internal/runtime/core/worklifetime"
 	runtimefailures "github.com/division-sh/swarm/internal/runtime/failures"
 	"github.com/division-sh/swarm/internal/runtime/semanticview"
 )
 
 // Retains prepared code and the exact creator request, never current-row truth.
 type agentRegistration struct {
-	request       AgentLifecycleTransition
-	agent         Agent
-	binding       ProcessExecutionBinding
-	phase         runtimeLifecyclePhase
-	run           uint64
-	admission     semanticview.FlowOwnedAgentSubscriptionAdmission
-	standingOwner *worklifetime.StandingOccurrence
+	request   AgentLifecycleTransition
+	agent     Agent
+	binding   ProcessExecutionBinding
+	phase     runtimeLifecyclePhase
+	run       uint64
+	admission semanticview.FlowOwnedAgentSubscriptionAdmission
 }
 
 func registrationProcessBinding(store AgentLifecyclePersistence) (ProcessExecutionBinding, error) {
@@ -69,19 +67,11 @@ func (c *agentLifecycleCoordinator) resumeAgentRegistrationLocked(ctx context.Co
 	if err != nil {
 		return true, err
 	}
-	c.publishRegisteredExecutionLocked(*pending.request.Agent, pending.agent, pending.admission, pending.standingOwner, view, readinessOwner)
+	c.publishRegisteredExecutionLocked(*pending.request.Agent, pending.agent, pending.admission, view, readinessOwner)
 	return true, nil
 }
 
-func registrationStandingOwner(ctx context.Context) *worklifetime.StandingOccurrence {
-	var standingOwner *worklifetime.StandingOccurrence
-	if owner, ok := worklifetime.OccurrenceFromContext(ctx); ok {
-		standingOwner, _ = worklifetime.StandingProjection(owner)
-	}
-	return standingOwner
-}
-
-func (c *agentLifecycleCoordinator) publishRegisteredExecutionLocked(rec PersistedAgent, agent Agent, admission semanticview.FlowOwnedAgentSubscriptionAdmission, standingOwner *worklifetime.StandingOccurrence, view AgentLifecycleState, readinessOwner **agentLifecycleCell) {
+func (c *agentLifecycleCoordinator) publishRegisteredExecutionLocked(rec PersistedAgent, agent Agent, admission semanticview.FlowOwnedAgentSubscriptionAdmission, view AgentLifecycleState, readinessOwner **agentLifecycleCell) {
 	identity := view.Identity
 	generationCtx, cancelGeneration := context.WithCancel(c.context())
 	startedAt := rec.StartedAt
@@ -89,7 +79,7 @@ func (c *agentLifecycleCoordinator) publishRegisteredExecutionLocked(rec Persist
 		startedAt = time.Now()
 	}
 	execution := &agentExecutionProjection{agent: agent, config: rec.Config, admission: admission, startedAt: startedAt,
-		token: lifecycleToken(identity, view.RuntimeEpoch, view.Generation), standingOwner: standingOwner,
+		token:         lifecycleToken(identity, view.RuntimeEpoch, view.Generation),
 		generationCtx: generationCtx, cancelGeneration: cancelGeneration, subscriptions: admittedSubscriptionEventTypes(admission)}
 	cell := &agentLifecycleCell{identity: identity, view: view, execution: execution}
 	c.cells[identity] = cell

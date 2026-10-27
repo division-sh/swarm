@@ -30,7 +30,7 @@ func readInboundPublication(t *testing.T, ctx context.Context, selected inboundG
 	if marker.EventName != "platform.inbound_recorded" || marker.EntityID != "" ||
 		marker.Payload["publication_id"] != record.PublicationID || marker.Payload["provider"] != provider ||
 		marker.Payload["provider_event_id"] != deliveryID || marker.Payload["run_id"] != target.RunID ||
-		marker.Payload["service_id"] != target.ServiceID || record.ExpectedGeneration != target.Generation ||
+		marker.Payload["flow_path"] != target.FlowPath || record.ResolvedRunID != target.RunID ||
 		record.OutputCount != len(record.Events) {
 		t.Fatalf("inbound receipt/marker mismatch: record=%+v marker=%+v", record, marker)
 	}

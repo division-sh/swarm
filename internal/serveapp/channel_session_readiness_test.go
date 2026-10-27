@@ -33,7 +33,6 @@ func pairedServeSessionObserver(t *testing.T, backend string) (*serveBootstrapTe
 		t.Fatal("actual SDK pairing did not checkpoint after its login milestone", err)
 	}
 	coordinate := op.Coordinate
-	coordinate.TargetGeneration = 1
 	op, err = f.adapter.store.AdvanceChannelOnboarding(f.ctx, channelonboarding.AdvanceRequest{
 		OperationID: op.OperationID, ExpectedRevision: op.Revision, Phase: op.Phase, RebindCoordinate: &coordinate, Now: time.Now().UTC()})
 	if err != nil {
@@ -135,13 +134,11 @@ func TestServeSessionReadinessUsesOriginalOwnedObservationBothStores(t *testing.
 				t.Fatal(err)
 			}
 			coordinate := op.Coordinate
-			coordinate.TargetGeneration = 1
 			facts := channelonboarding.ReadinessFacts{Coordinate: coordinate, Interface: op.Interface,
 				PlanGeneration: coordinate.PlanGeneration, ActivationGeneration: publication.Generation(),
 				ActivationRevision: 1, ActivationCurrent: true, BindingRevision: 1, ExpectedBindingRevision: 1,
 				CredentialsCurrent: true, ConfirmationTerminalSuccess: true, ConfirmationActivationRevision: 1, ConfirmationBindingRevision: 1,
 				Posture: channelonboarding.ActivationSessionConnection, SessionAuthority: provider, SessionObservation: &observation,
-				TargetGeneration: coordinate.TargetGeneration, ExpectedTargetGeneration: coordinate.TargetGeneration,
 				ObservedAt: observation.ObservedAt}
 			if projection := channelonboarding.ProjectReadiness(facts); !projection.Ready {
 				t.Fatal("owned observation did not satisfy the canonical health gate", projection)
@@ -209,7 +206,6 @@ func TestServeSessionReadinessRejectsChangedParentsAndObservationErrorsBothStore
 				func(op *channelonboarding.Operation) { op.SessionAccount.AdmissionID = uuid.NewString() },
 				func(op *channelonboarding.Operation) { op.SessionAccount.AccountRef = "foreign@s.whatsapp.net" },
 				func(op *channelonboarding.Operation) { op.Coordinate.ContextPublicationGeneration++ },
-				func(op *channelonboarding.Operation) { op.Coordinate.TargetGeneration++ },
 				func(op *channelonboarding.Operation) { op.ActivationRevision++ },
 				func(op *channelonboarding.Operation) { op.BindingRevision++ },
 				func(op *channelonboarding.Operation) { op.TargetSelector = "ingress:foreign:whatsapp" },

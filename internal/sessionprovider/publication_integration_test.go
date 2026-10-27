@@ -23,7 +23,6 @@ import (
 	runtimebus "github.com/division-sh/swarm/internal/runtime/bus"
 	"github.com/division-sh/swarm/internal/runtime/bus/bustest"
 	"github.com/division-sh/swarm/internal/runtime/core/eventreceiver"
-	runtimeflowidentity "github.com/division-sh/swarm/internal/runtime/core/flowidentity"
 	runtimeprovideroutput "github.com/division-sh/swarm/internal/runtime/core/provideroutput"
 	"github.com/division-sh/swarm/internal/runtime/core/worklifetime"
 	runtimecorrelation "github.com/division-sh/swarm/internal/runtime/correlation"
@@ -33,6 +32,7 @@ import (
 	runtimepipeline "github.com/division-sh/swarm/internal/runtime/pipeline"
 	runtimepipelineobligation "github.com/division-sh/swarm/internal/runtime/pipelineobligation"
 	runtimereplycontext "github.com/division-sh/swarm/internal/runtime/replycontext"
+	"github.com/division-sh/swarm/internal/runtime/runcontrol"
 	runtimerunlifecycle "github.com/division-sh/swarm/internal/runtime/runlifecycle"
 	"github.com/division-sh/swarm/internal/runtime/startupownership"
 	"github.com/division-sh/swarm/internal/runtime/triggergeneration"
@@ -50,36 +50,35 @@ import (
 type sessionPublicationStore interface {
 	sourceartifactfixture.Writer
 	runtimeinbound.Runner
-	runtimepipeline.StandingServicePersistence
+	runtimerunlifecycle.FlowRunOwner
+	runtimerunlifecycle.LandingRunReader
 	runtimebus.EventStore
 	runtimepipeline.FlowConstructionPublicationReader
 	runtimereplycontext.Store
 	runtimerunlifecycle.OperationOwner
+	runcontrol.Store
 	runtimedelivery.Store
 	runtimepipeline.FlowInstanceIndexReader
 	runtimebus.ActiveAgentDescriptorLister
 	runtimebus.PreparedPublishEventReader
 	runtimebus.TargetFailureDeadLetterRecorder
 	runtimebus.RunOriginReader
-	runtimerunlifecycle.StandingRestartDispositionReader
 	PipelineObligations() runtimepipelineobligation.Store
 	SetEventPayloadAdmitter(runtimebus.PayloadAdmitter)
 	RegisterAuthorActivityEventCatalog(runtimeauthoractivity.Scope, []runtimeauthoractivity.EventDescriptor) (*runtimeauthoractivity.EventCatalogLease, error)
 }
 
 type sessionPublicationFixture struct {
-	ctx       context.Context
-	selected  sessionPublicationStore
-	bus       *runtimebus.EventBus
-	manifest  providertriggers.Manifest
-	catalog   *providertriggers.CatalogSnapshot
-	identity  providertriggers.PackIdentity
-	candidate runtimepipeline.StandingServiceCandidate
-	standing  runtimepipeline.StandingServiceReconciliation
-	sequence  int64
-	plans     int
-	prepared  map[string]runtimebus.InboundDeliveryPlan
-	location  string
+	ctx      context.Context
+	selected sessionPublicationStore
+	bus      *runtimebus.EventBus
+	manifest providertriggers.Manifest
+	catalog  *providertriggers.CatalogSnapshot
+	identity providertriggers.PackIdentity
+	standing runtimerunlifecycle.FlowRunReconciliation
+	plans    int
+	prepared map[string]runtimebus.InboundDeliveryPlan
+	location string
 }
 
 // Capture/session coordinates and enabled-binding selection are fixture facts.
@@ -165,7 +164,7 @@ func newSessionPublicationFixture(t *testing.T, backend string) *sessionPublicat
 		PipelineObligations: f.selected.PipelineObligations(), PayloadAdmitter: payload, ProviderOutputVerifier: f.catalog,
 		Durable: runtimebus.DurableDependencies{ReplyContext: f.selected, RunLifecycle: f.selected, DeliveryLifecycle: f.selected,
 			ConstructionPublications: f.selected, Instances: f.selected, ActiveAgents: f.selected,
-			PreparedEvents: f.selected, TargetFailureRecorder: f.selected, RunOrigins: f.selected, StandingRestarts: f.selected},
+			PreparedEvents: f.selected, TargetFailureRecorder: f.selected},
 	})
 	if err != nil {
 		t.Fatal(err)
@@ -173,14 +172,7 @@ func newSessionPublicationFixture(t *testing.T, backend string) *sessionPublicat
 	if err := f.bus.SetDeliveryContinuationOwner(bustest.NewDeliveryContinuationOwner(false)); err != nil {
 		t.Fatal(err)
 	}
-	flow := "."
-	f.candidate = runtimepipeline.StandingServiceCandidate{BindingEnabled: true, FlowPath: flow,
-		ServiceID: runtimeflowidentity.StandingServiceID(flow), Source: source}
-	f.standing, err = f.selected.ReconcileStandingService(f.ctx, f.candidate)
-	if err != nil {
-		t.Fatal(err)
-	}
-	f.sequence, err = f.selected.PublishStandingService(f.ctx, f.standing.ServiceID, f.standing.RunID, f.standing.Generation)
+	f.standing, err = f.selected.ReconcileFlowRun(f.ctx, runtimerunlifecycle.LiveRunScope{FlowPath: "."}, source)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -194,9 +186,9 @@ func (f *sessionPublicationFixture) capture(t *testing.T) capturedEvent {
 func (f *sessionPublicationFixture) captureVariant(t *testing.T, kind string, group, reply bool) capturedEvent {
 	t.Helper()
 	scope := captureFixture(t).Scope
-	scope.PublicationBinding = runtimeinbound.BindingGeneration{ServiceID: f.standing.ServiceID,
-		RunID: f.standing.RunID, Generation: f.standing.Generation}
-	scope.Source.BundleHash = f.candidate.Source.BundleHash()
+	scope.PublicationBinding = runtimeinbound.BindingGeneration{
+		RunID: f.standing.RunID}
+	scope.Source.BundleHash = f.standing.Source.BundleHash()
 	message := incomingMessageFixture()
 	message.Info.ID = "DELIVERY_" + uuid.NewString()
 	if group {
@@ -409,8 +401,7 @@ func TestWhatsAppSessionPublicationRollbackAndHistoricalResetBothStores(t *testi
 			if err := spool.retirePublished(f.ctx, event, f.selected); err != nil {
 				t.Fatal(err)
 			}
-			if _, err := f.selected.ResetStandingService(f.ctx, runtimepipeline.StandingServiceOperation{
-				ServiceID: f.candidate.ServiceID, Actor: "historical-duplicate-proof", ExecutionPosture: executionposture.Live}); err != nil {
+			if _, err := f.selected.StopRunControlOutcome(f.ctx, runcontrol.TransitionRequest{RunID: f.standing.RunID, Reason: "historical duplicate proof", ControlledBy: "test", Now: time.Now().UTC()}); err != nil {
 				t.Fatal(err)
 			}
 			if err := db.Close(); err != nil {
@@ -530,7 +521,7 @@ func TestWhatsAppHistoricalPublicationStableScopeRefusalsBothStores(t *testing.T
 					}
 				})
 			}
-			for _, cell := range []string{"connection", "account", "service", "run", "generation"} {
+			for _, cell := range []string{"connection", "account", "run"} {
 				t.Run(cell+"_namespace", func(t *testing.T) {
 					changed := original
 					switch cell {
@@ -538,13 +529,8 @@ func TestWhatsAppHistoricalPublicationStableScopeRefusalsBothStores(t *testing.T
 						changed.Scope.Session.ConnectionID = uuid.NewString()
 					case "account":
 						changed.Scope.Session.AccountRef = "other"
-					case "service":
-						changed.Scope.PublicationBinding.ServiceID = uuid.NewString()
 					case "run":
 						changed.Scope.PublicationBinding.RunID = uuid.NewString()
-					case "generation":
-						changed.Scope.PublicationBinding.Generation++
-						changed.Source.Coordinate.TargetGeneration++
 					}
 					if err := changed.Validate(); err != nil {
 						t.Fatal("namespace probe must have internally consistent capture evidence", err)
@@ -611,8 +597,7 @@ func TestWhatsAppSessionPublicationOutputAuthorizationBeforeMutationBothStores(t
 func (f *sessionPublicationFixture) command(t *testing.T, event capturedEvent) runtimeinbound.CommitCommand {
 	t.Helper()
 	request := capturePublicationFixture(t, event)
-	request.FlowPath = f.candidate.FlowPath
-	request.ExpectedGeneration, request.ExpectedPublicationSequence = f.standing.Generation, f.sequence
+	request.FlowPath = f.standing.Scope.FlowPath
 	// This historical-storage fixture has a real authenticated webhook policy,
 	// not native SDK authority. The separate active-input journey owns the SDK proof.
 	trigger, err := f.catalog.CompileAdmission(providertriggers.CompileAdmissionRequest{Alias: "whatsapp", Provider: "whatsapp", SigningSecret: "isolated-fixture-secret"})
@@ -627,7 +612,7 @@ func (f *sessionPublicationFixture) command(t *testing.T, event capturedEvent) r
 	if err != nil {
 		t.Fatal(err)
 	}
-	delivery, admission, err := trigger.ProjectPublication(authenticated, f.candidate.Source.BundleHash(), request.FlowPath)
+	delivery, admission, err := trigger.ProjectPublication(authenticated, f.standing.Source.BundleHash(), request.FlowPath)
 	if err != nil {
 		t.Fatal(err)
 	}

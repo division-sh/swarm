@@ -11,7 +11,6 @@ import (
 
 	"github.com/division-sh/swarm/internal/runtime/authoractivity"
 	runtimecontracts "github.com/division-sh/swarm/internal/runtime/contracts"
-	"github.com/division-sh/swarm/internal/runtime/core/worklifetime"
 	runtimepipeline "github.com/division-sh/swarm/internal/runtime/pipeline"
 	"github.com/division-sh/swarm/internal/runtime/semanticview"
 	"github.com/division-sh/swarm/internal/runtime/startupownership"
@@ -88,12 +87,11 @@ func newStartupReadinessTestRuntimeWithSession(t testing.TB, decorate func(*runt
 		t.Fatalf("construct startup readiness generation grant: %v", err)
 	}
 	return &Runtime{
-		Config:                testOperationalRuntimeConfig(),
-		SystemNodes:           nodes,
-		workOccurrence:        runtimeTestOccurrence(t, runtimeTestBundleHash),
-		startupGrant:          grant,
-		deliveryStore:         &managedNativeRecoveryDeliveryStore{},
-		standingRestartReader: startupRecoveryWorkflowOwner{},
+		Config:         testOperationalRuntimeConfig(),
+		SystemNodes:    nodes,
+		workOccurrence: runtimeTestOccurrence(t, runtimeTestBundleHash),
+		startupGrant:   grant,
+		deliveryStore:  &managedNativeRecoveryDeliveryStore{},
 		Options: RuntimeOptions{
 			DisablePersistentStartupRecovery: true,
 			WorkflowModule:                   startupReadinessWorkflowModule{},
@@ -240,75 +238,6 @@ func TestPreparedRuntimeStartupRejectsCancellationBeforeExecutionRelease(t *test
 	}
 	if err := prepared.Start(nil); err == nil {
 		t.Fatal("canceled preparation can be retried")
-	}
-}
-
-func TestPreparedRuntimeAbortReturnsBeforeOuterStandingChildrenRetire(t *testing.T) {
-	for _, scenario := range []struct {
-		count  int
-		active bool
-	}{{0, false}, {1, false}, {1, true}, {3, false}, {3, true}} {
-		t.Run(fmt.Sprintf("children=%d/active=%t", scenario.count, scenario.active), func(t *testing.T) {
-			count := scenario.count
-			rt := newStartupReadinessTestRuntime(t)
-			ctx, cancel := context.WithCancel(testAuthorActivityContext(context.Background()))
-			defer cancel()
-			prepared, err := rt.PrepareStart(ctx)
-			if err != nil {
-				t.Fatal(err)
-			}
-			var targets []StandingTarget
-			for i := 0; i < count; i++ {
-				targets = append(targets, StandingTarget{ServiceID: fmt.Sprintf("service-%d", i), RunID: fmt.Sprintf("run-%d", i), Generation: 1})
-			}
-			manager := &RuntimeContextManager{}
-			children, err := manager.newStandingOccurrencesLocked(rt.WorkOccurrence(), targets, nil)
-			if err != nil {
-				t.Fatal(err)
-			}
-			var accepted []*worklifetime.Lease
-			if scenario.active {
-				for _, child := range children {
-					lease, err := child.Begin(context.Background())
-					if err != nil {
-						t.Fatal(err)
-					}
-					accepted = append(accepted, lease)
-				}
-			}
-			t.Cleanup(func() {
-				for _, lease := range accepted {
-					if err := lease.Done(); err != nil {
-						t.Error(err)
-					}
-				}
-				for _, child := range children {
-					if err := child.RetireAndWait(context.Background()); err != nil {
-						t.Error(err)
-					}
-				}
-				if err := rt.Shutdown(); err != nil {
-					t.Error(err)
-				}
-			})
-			cancel()
-			done := make(chan error, 1)
-			go func() { done <- prepared.Start(nil) }()
-			select {
-			case err := <-done:
-				if !errors.Is(err, context.Canceled) {
-					t.Fatalf("release lost cancellation: %v", err)
-				}
-			case <-time.After(3 * time.Second):
-				t.Fatal("prepared abort joined outer-owned standing children")
-			}
-			if got := rt.WorkOccurrence().ActiveCount(); got != uint64(count) {
-				t.Fatalf("release changed outer child ownership: active=%d want=%d", got, count)
-			}
-			if err := prepared.Start(nil); err == nil {
-				t.Fatal("failed release can execute again")
-			}
-		})
 	}
 }
 

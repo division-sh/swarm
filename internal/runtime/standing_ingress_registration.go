@@ -14,7 +14,7 @@ func (u *RuntimeContextUse) AdmitPublicIngressTarget(target InboundTarget) (Inbo
 	}
 	found := false
 	for _, owned := range u.Context.StandingTargets {
-		if sameDeclaredIngressTarget(target, owned) {
+		if sameDeclaredIngressTarget(target, owned) && target.RunID == owned.RunID {
 			found = true
 			break
 		}
@@ -62,8 +62,8 @@ func declaredAuthorIngress(rt *Runtime, contextDef *BundleContext, target Standi
 		return false
 	}
 	inbound := InboundTarget{
-		BundleHash: target.BundleHash, ServiceID: target.ServiceID, FlowPath: target.FlowPath,
-		RunID: target.RunID, Generation: target.Generation, PublicationSequence: target.PublicationSequence,
+		BundleHash: target.BundleHash, FlowPath: target.FlowPath,
+		RunID: target.RunID,
 		Alias: target.Alias, Provider: target.Provider, SigningSecret: target.SigningSecret, AdmissionPlan: target.AdmissionPlan,
 	}
 	for _, owned := range contextDef.StandingTargets {
@@ -76,8 +76,7 @@ func declaredAuthorIngress(rt *Runtime, contextDef *BundleContext, target Standi
 }
 
 func sameDeclaredIngressTarget(target InboundTarget, owned StandingTarget) bool {
-	return target.BundleHash == owned.BundleHash && target.ServiceID == owned.ServiceID && target.FlowPath == owned.FlowPath &&
-		target.RunID == owned.RunID && target.Generation == owned.Generation && target.PublicationSequence == owned.PublicationSequence &&
+	return target.BundleHash == owned.BundleHash && target.FlowPath == owned.FlowPath &&
 		target.Alias == owned.Alias && target.Provider == owned.Provider && target.SigningSecret == owned.SigningSecret &&
 		target.AdmissionPlan.Generation().Equal(owned.AdmissionPlan.Generation())
 }

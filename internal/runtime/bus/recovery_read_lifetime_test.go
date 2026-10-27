@@ -13,7 +13,6 @@ import (
 	"github.com/division-sh/swarm/internal/runtime/core/worklifetime"
 	"github.com/division-sh/swarm/internal/runtime/deliverycontinuation"
 	runtimedelivery "github.com/division-sh/swarm/internal/runtime/deliverylifecycle"
-	runlifecycle "github.com/division-sh/swarm/internal/runtime/runlifecycle"
 	"github.com/google/uuid"
 )
 
@@ -22,7 +21,6 @@ type recoveryReadProbe struct {
 	entered chan context.Context
 	release chan struct{}
 	failure error
-	origin  runlifecycle.RunOrigin
 	reads   atomic.Int32
 }
 
@@ -34,10 +32,6 @@ func (p *recoveryReadProbe) read(ctx context.Context, phase string) error {
 	p.entered <- ctx
 	<-p.release
 	return p.failure
-}
-
-func (p *recoveryReadProbe) LoadRunOrigin(ctx context.Context, _ string) (runlifecycle.RunOrigin, error) {
-	return p.origin, p.read(ctx, "origin")
 }
 
 func (p *recoveryReadProbe) QueueableIngressPaused(ctx context.Context) (bool, error) {
@@ -52,27 +46,6 @@ func (p *recoveryReadProbe) QueueableRunDispatchParked(ctx context.Context, _ st
 	return false, p.read(ctx, "run_parked")
 }
 
-func (p *recoveryReadProbe) StandingRunRestartDisposition(ctx context.Context, runID string) (runlifecycle.StandingRestartDisposition, error) {
-	if err := p.read(ctx, "standing"); err != nil {
-		return runlifecycle.StandingRestartDisposition{}, err
-	}
-	if p.phase == "authorization" {
-		return runlifecycle.ClassifyStandingRestart(runlifecycle.StandingRestartFact{
-			BindingEnabled: true, ExactCurrent: true, DeclarationPresent: true,
-			ServiceID: p.origin.ServiceID(), RunID: runID, Generation: p.origin.Generation(),
-			EffectiveState: "active", OperatorOverride: "none", RunState: "running",
-		})
-	}
-	return runlifecycle.ClassifyStandingRestart(runlifecycle.StandingRestartFact{})
-}
-
-func (p *recoveryReadProbe) BeginStandingRunRecovery(ctx context.Context, _ string, _ runlifecycle.RunOrigin) (*worklifetime.Lease, error) {
-	if err := p.read(ctx, "authorization"); err != nil {
-		return nil, err
-	}
-	return nil, ctx.Err()
-}
-
 type recoveryReadScan struct {
 	runtimedelivery.Store
 	item runtimedelivery.ContinuationItem
@@ -83,7 +56,7 @@ func (s recoveryReadScan) ScanDeliveryContinuations(context.Context, runtimedeli
 }
 
 func TestContinuationOriginReadDrainsBeforeRetirement(t *testing.T) {
-	for _, phase := range []string{"origin", "standing", "authorization", "ingress", "run_blocked", "run_parked"} {
+	for _, phase := range []string{"ingress", "run_blocked", "run_parked"} {
 		for _, stop := range []string{"retire", "parent_cancel"} {
 			for _, failure := range []string{"none", "independent", "joined"} {
 				t.Run(fmt.Sprintf("%s/%s/%s", phase, stop, failure), func(t *testing.T) {
@@ -93,13 +66,7 @@ func TestContinuationOriginReadDrainsBeforeRetirement(t *testing.T) {
 					if err != nil {
 						t.Fatal(err)
 					}
-					probe := &recoveryReadProbe{phase: phase, entered: make(chan context.Context, 1), release: make(chan struct{}), origin: runlifecycle.ScenarioSetupRunOrigin()}
-					if phase != "origin" {
-						probe.origin, err = runlifecycle.StandingGenerationRunOrigin(uuid.NewString(), 1)
-						if err != nil {
-							t.Fatal(err)
-						}
-					}
+					probe := &recoveryReadProbe{phase: phase, entered: make(chan context.Context, 1), release: make(chan struct{})}
 					independent := errors.New("independent origin read failure")
 					if failure == "independent" {
 						probe.failure = independent
@@ -107,14 +74,8 @@ func TestContinuationOriginReadDrainsBeforeRetirement(t *testing.T) {
 					if failure == "joined" {
 						probe.failure = errors.Join(context.Canceled, independent)
 					}
-					eb.durable.RunOrigins, eb.durable.StandingRestarts = probe, probe
-					if phase == "ingress" || phase == "run_blocked" || phase == "run_parked" {
-						eb.SetRuntimeIngressDispatchGate(probe)
-						eb.SetRunDispatchGate(probe)
-					}
-					if phase == "authorization" {
-						eb.SetStandingRunWorkOwner(probe)
-					}
+					eb.SetRuntimeIngressDispatchGate(probe)
+					eb.SetRunDispatchGate(probe)
 					event := eventtest.ExistingRunRootIngress(uuid.NewString(), "recovery.read", "test", "", []byte(`{}`), 0, uuid.NewString(), events.EventEnvelope{}, time.Now().UTC())
 					route := nodeOnlyDeliveryPlan(t, event, "reader-node").DeliveryRoutes()[0]
 					id, err := runtimedelivery.DeliveryID(event.ID(), route)
@@ -126,9 +87,7 @@ func TestContinuationOriginReadDrainsBeforeRetirement(t *testing.T) {
 						t.Fatal(err)
 					}
 					scan := recoveryReadScan{item: runtimedelivery.ContinuationItem{DeliveryID: id, Event: event, Disposition: runtimedelivery.ClaimReclaimable, Snapshot: runtimedelivery.Snapshot{DeliveryID: id, RunID: event.RunID(), Route: route}}}
-					// The scan's standing classifier is separate from the dispatch's
-					// blocked origin/standing read; both are real coordinator handoffs.
-					c, err := deliverycontinuation.New(scan, &recoveryOriginStore{}, authority, owner, eb, nil)
+					c, err := deliverycontinuation.New(scan, authority, owner, eb, nil)
 					if err != nil {
 						t.Fatal(err)
 					}
@@ -169,9 +128,7 @@ func TestContinuationOriginReadDrainsBeforeRetirement(t *testing.T) {
 					if owner.ActiveCount() == 0 {
 						t.Error("read lost joined worker")
 					}
-					if phase == "authorization" && !errors.Is(readCtx.Err(), context.Canceled) {
-						t.Error("standing authorization lost its original retirement cancellation")
-					} else if phase != "authorization" && readCtx.Done() != nil {
+					if readCtx.Done() != nil {
 						t.Error("admitted metadata read still receives retirement cancellation")
 					}
 					close(probe.release)
@@ -187,13 +144,10 @@ func TestContinuationOriginReadDrainsBeforeRetirement(t *testing.T) {
 					if (failure == "none" && err != nil) || (failure != "none" && !errors.Is(err, independent)) {
 						t.Errorf("retirement lost error accounting: %v", err)
 					}
-					if phase == "authorization" && failure != "none" && !errors.Is(err, ErrRunDispatchBlocked) {
-						t.Errorf("standing admission lost its blocked classification: %v", err)
-					}
 					if dispatched.Load() != 0 || owner.ActiveCount() != 0 {
 						t.Errorf("post-stop dispatch=%d active=%d", dispatched.Load(), owner.ActiveCount())
 					}
-					wantReads := map[string]int32{"origin": 1, "standing": 2, "authorization": 3, "ingress": 1, "run_blocked": 2, "run_parked": 3}[phase]
+					wantReads := map[string]int32{"ingress": 1, "run_blocked": 2, "run_parked": 3}[phase]
 					if reads := probe.reads.Load(); reads != wantReads {
 						t.Errorf("metadata reads=%d, want %d with no successor read after stop", reads, wantReads)
 					}
@@ -210,119 +164,5 @@ func TestContinuationOriginReadDrainsBeforeRetirement(t *testing.T) {
 				})
 			}
 		}
-	}
-}
-
-func TestRecoveryMetadataReadAdmissionAndIsolation(t *testing.T) {
-	for _, cut := range []string{"live", "canceled_before", "retired_before", "fenced_before"} {
-		t.Run(cut, func(t *testing.T) {
-			process := worklifetime.NewProcess()
-			owner := newReceiverProjectionRuntimeOwner(t, process, "read-admission")
-			defer func() {
-				_, _ = owner.RetireAndWait(context.Background())
-				process.Retire()
-				_, _ = process.Join(context.Background())
-			}()
-			probe := &recoveryOriginStore{origin: runlifecycle.ScenarioSetupRunOrigin()}
-			eb := &EventBus{workOwner: owner, durable: DurableDependencies{RunOrigins: probe, StandingRestarts: probe}}
-			ctx, cancel := context.WithCancel(context.Background())
-			defer cancel()
-			switch cut {
-			case "canceled_before":
-				cancel()
-			case "retired_before":
-				owner.Retire()
-			case "fenced_before":
-				if err := owner.Fence(); err != nil {
-					t.Fatal(err)
-				}
-			}
-			event := eventtest.ExistingRunRootIngress(uuid.NewString(), "read.admission", "test", "", []byte(`{}`), 0, uuid.NewString(), events.EventEnvelope{}, time.Now().UTC())
-			bound, lease, err := eb.bindClaimedRunWork(ctx, event)
-			if cut == "live" {
-				if err != nil || lease != nil || bound != ctx || probe.loads != 1 {
-					t.Fatalf("live binding: lease=%v reads=%d err=%v", lease, probe.loads, err)
-				}
-				cancel()
-				if bound.Err() != context.Canceled {
-					t.Error("business context lost cancellation")
-				}
-			} else if err == nil || lease != nil || probe.loads != 0 {
-				t.Fatalf("stopped read admission: lease=%v reads=%d err=%v", lease, probe.loads, err)
-			}
-			if owner.ActiveCount() != 0 {
-				t.Fatal("metadata read leaked lease")
-			}
-		})
-	}
-}
-
-func TestContinuationStandingSuppressionRetainsCarrierAndIndependentErrors(t *testing.T) {
-	independent := errors.New("independent standing admission failure")
-	for _, failure := range []error{ErrStandingRestartParked, ErrStandingRecoveryTransitionFenced, independent,
-		errors.Join(ErrStandingRestartParked, independent), errors.Join(ErrStandingRecoveryTransitionFenced, independent),
-		worklifetime.ErrAdmissionFenced, errors.Join(ErrStandingRecoveryTransitionFenced, worklifetime.ErrAdmissionFenced)} {
-		t.Run(failure.Error(), func(t *testing.T) {
-			owner := newRecoveryControlOwner(t)
-			eb, err := newScopedTestEventBus(InMemoryEventStore{}, EventBusOptions{WorkOwner: owner})
-			if err != nil {
-				t.Fatal(err)
-			}
-			origin, err := runlifecycle.StandingGenerationRunOrigin(uuid.NewString(), 1)
-			if err != nil {
-				t.Fatal(err)
-			}
-			probe := &recoveryReadProbe{phase: "authorization", origin: origin, failure: failure, entered: make(chan context.Context, 1), release: make(chan struct{})}
-			close(probe.release)
-			eb.durable.RunOrigins, eb.durable.StandingRestarts = probe, probe
-			eb.SetStandingRunWorkOwner(probe)
-			authority, err := eb.DeliveryAuthority()
-			if err != nil {
-				t.Fatal(err)
-			}
-			coordinator, err := deliverycontinuation.New(struct{ runtimedelivery.Store }{}, unexpectedDurableTestRoles{}, authority, eb.workOwner, eb, nil)
-			if err != nil {
-				t.Fatal(err)
-			}
-			if err := eb.SetDeliveryContinuationOwner(coordinator); err != nil {
-				t.Fatal(err)
-			}
-			event := eventtest.ExistingRunRootIngress(uuid.NewString(), "custom.election", "test", "", []byte(`{}`), 0, uuid.NewString(), events.EventEnvelope{}, time.Now().UTC())
-			route := nodeOnlyDeliveryPlan(t, event, "parked-node").DeliveryRoutes()[0]
-			id, err := runtimedelivery.DeliveryID(event.ID(), route)
-			if err != nil {
-				t.Fatal(err)
-			}
-			identity, err := route.Identity()
-			if err != nil {
-				t.Fatal(err)
-			}
-			handoff, err := runtimedelivery.AdmitDurableHandoffProof(id, event.ID(), events.EncodeDeliveryRouteIdentity(identity), authority)
-			if err != nil {
-				t.Fatal(err)
-			}
-			if err := coordinator.AcceptCommitted([]runtimedelivery.DurableHandoffProof{handoff}); err != nil {
-				t.Fatal(err)
-			}
-			result := eb.DispatchDeliveryContinuation(context.Background(), event, route)
-			if failure == ErrStandingRestartParked || failure == ErrStandingRecoveryTransitionFenced {
-				if result.Validate() != nil || result.Disposition() != deliverycontinuation.DispatchDeferred || result.WakeAuthority() != deliverycontinuation.DispatchWakeRunContinue {
-					t.Fatalf("known standing transition lost its progress owner: %+v", result)
-				}
-			} else if result.Disposition() != deliverycontinuation.DispatchFatal || !errors.Is(result.Failure(), failure) {
-				t.Fatalf("independent/untracked admission failure was suppressed: result=%+v want=%v", result, failure)
-			}
-			acquisition, err := coordinator.Acquire(id)
-			carrier, acquired := acquisition.Acquired()
-			if err != nil || !acquired {
-				t.Fatalf("exact carrier was not returned: acquired=%t err=%v", acquired, err)
-			}
-			if _, err := carrier.Resolve(context.Background(), worklifetime.DeliveryContinuationReturn); err != nil {
-				t.Fatal(err)
-			}
-			if owner.ActiveCount() != 0 {
-				t.Fatal("standing deferral retained process work")
-			}
-		})
 	}
 }

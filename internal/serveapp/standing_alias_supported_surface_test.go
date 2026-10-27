@@ -38,7 +38,7 @@ func proveA9ServedAliases(t *testing.T, backend string, override bool) {
 	for repetition := 0; repetition < 2; repetition++ {
 		process, served := start()
 		rt := servedTestProcessRuntime(t, process)
-		statuses, err := rt.Pipeline.ListStandingServiceStatuses(t.Context())
+		statuses, err := readServedLandingRuns(t.Context(), rt)
 		if err != nil || len(statuses) != 2 {
 			t.Fatalf("binding readback=%+v err=%v", statuses, err)
 		}
@@ -213,7 +213,7 @@ func proveA9CrossContextAliasPromotion(t *testing.T, backend string) {
 		t.Fatalf("cross-context proof did not admit distinct sources: %+v", contextDef)
 	}
 	rt := servedTestProcessRuntime(t, first)
-	before, err := rt.Pipeline.ListStandingServiceStatuses(t.Context())
+	before, err := readServedLandingRuns(t.Context(), rt)
 	if err != nil || len(before) != 1 {
 		t.Fatalf("incumbent status=%+v err=%v", before, err)
 	}
@@ -227,7 +227,7 @@ func proveA9CrossContextAliasPromotion(t *testing.T, backend string) {
 	if incumbent.Len() != 1 || !reflect.DeepEqual(incumbent.BundleHashes(), []string{served.BundleHash}) {
 		t.Fatalf("failed collision published another context: %+v", incumbent.BundleHashes())
 	}
-	after, err := rt.Pipeline.ListStandingServiceStatuses(t.Context())
+	after, err := readServedLandingRuns(t.Context(), rt)
 	if err != nil || !reflect.DeepEqual(before, after) {
 		t.Fatalf("failed cross-context admission mutated incumbent status: %+v -> %+v err=%v", before, after, err)
 	}
@@ -252,7 +252,7 @@ func proveA9EnabledAliasAdmission(t *testing.T, backend string) {
 	process, served := start()
 	rt := servedTestProcessRuntime(t, process)
 	manager := <-managers
-	before, err := rt.Pipeline.ListStandingServiceStatuses(t.Context())
+	before, err := readServedLandingRuns(t.Context(), rt)
 	if err != nil || len(before) != 1 {
 		t.Fatalf("dormant sibling acquired a generation: %+v err=%v", before, err)
 	}
@@ -287,14 +287,14 @@ func proveA9EnabledAliasAdmission(t *testing.T, backend string) {
 			dormant = candidate
 		}
 	}
-	if dormant.Target.Alias != "shared" || dormant.Target.Generation != 0 {
+	if dormant.Target.Alias != "shared" {
 		t.Fatalf("dormant discovery fabricated a receiver/generation: %+v", dormant)
 	}
 	err = manager.AdmitChannelStandingTarget(t.Context(), channelonboarding.Operation{}, dormant, operatorchannel.ProviderAuthority{}, nil)
 	if err == nil || !strings.Contains(err.Error(), `flow "."`) || !strings.Contains(err.Error(), `flow "beta"`) || !strings.Contains(err.Error(), "duplicate enabled ingress alias") {
 		t.Fatalf("promotion did not refuse both exact owners before mutation: %v", err)
 	}
-	after, err := rt.Pipeline.ListStandingServiceStatuses(t.Context())
+	after, err := readServedLandingRuns(t.Context(), rt)
 	if err != nil || !reflect.DeepEqual(before, after) {
 		t.Fatalf("failed promotion changed standing state: before=%+v after=%+v err=%v", before, after, err)
 	}
@@ -318,7 +318,7 @@ func a9AliasReceipt(t *testing.T, body json.RawMessage) map[string]any {
 		t.Fatal(err)
 	}
 	out := map[string]any{}
-	for _, key := range []string{"publication_id", "service_id", "run_id", "generation", "flow_path", "event_ids"} {
+	for _, key := range []string{"publication_id", "run_id", "flow_path", "event_ids"} {
 		value, present := decoded[key]
 		if !present {
 			t.Fatalf("receipt omitted %q: %s", key, body)

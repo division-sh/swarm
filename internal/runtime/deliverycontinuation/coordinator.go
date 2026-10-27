@@ -4,7 +4,6 @@ import (
 	"context"
 	"errors"
 	"fmt"
-	runtimestanding "github.com/division-sh/swarm/internal/runtime/runlifecycle"
 	"slices"
 	"sync"
 	"sync/atomic"
@@ -63,7 +62,6 @@ type dispatchJob struct {
 // durable queue or a second eligibility clock.
 type Coordinator struct {
 	store      runtimedelivery.Store
-	restarts   runtimestanding.StandingRestartDispositionReader
 	authority  runtimedelivery.ExecutionAuthority
 	workOwner  worklifetime.Occurrence
 	dispatcher Dispatcher
@@ -93,7 +91,6 @@ type Coordinator struct {
 
 func New(
 	store runtimedelivery.Store,
-	restarts runtimestanding.StandingRestartDispositionReader,
 	authority runtimedelivery.ExecutionAuthority,
 	workOwner worklifetime.Occurrence,
 	dispatcher Dispatcher,
@@ -102,11 +99,11 @@ func New(
 	if authority.Kind() != runtimedelivery.ExecutionAuthorityNormalRuntime {
 		return nil, errors.New("normal delivery continuation coordinator requires normal execution authority")
 	}
-	return newCoordinator(store, restarts, authority, workOwner, dispatcher, report)
+	return newCoordinator(store, authority, workOwner, dispatcher, report)
 }
 
 // NewSelected reuses the durable continuation owner for one selected fork
-// generation. Selected work has no normal standing-restart classification.
+// generation.
 func NewSelected(
 	store runtimedelivery.Store,
 	authority runtimedelivery.ExecutionAuthority,
@@ -117,12 +114,11 @@ func NewSelected(
 	if authority.Kind() != runtimedelivery.ExecutionAuthoritySelectedContractFork {
 		return nil, errors.New("selected delivery continuation coordinator requires selected execution authority")
 	}
-	return newCoordinator(store, nil, authority, workOwner, dispatcher, report)
+	return newCoordinator(store, authority, workOwner, dispatcher, report)
 }
 
 func newCoordinator(
 	store runtimedelivery.Store,
-	restarts runtimestanding.StandingRestartDispositionReader,
 	authority runtimedelivery.ExecutionAuthority,
 	workOwner worklifetime.Occurrence,
 	dispatcher Dispatcher,
@@ -130,9 +126,6 @@ func newCoordinator(
 ) (*Coordinator, error) {
 	if store == nil {
 		return nil, errors.New("delivery continuation selected store is required")
-	}
-	if authority.Kind() == runtimedelivery.ExecutionAuthorityNormalRuntime && restarts == nil {
-		return nil, errors.New("delivery continuation standing restart reader is required")
 	}
 	if err := authority.Validate(); err != nil {
 		return nil, err
@@ -151,7 +144,7 @@ func newCoordinator(
 		}
 	}
 	return &Coordinator{
-		store: store, restarts: restarts, authority: authority, workOwner: workOwner, dispatcher: dispatcher, report: report,
+		store: store, authority: authority, workOwner: workOwner, dispatcher: dispatcher, report: report,
 		workerLimit: workerLimit,
 		entries:     make(map[string]entry), reserved: make(map[string]struct{}),
 		wake: make(chan struct{}, 1), sync: make(chan synchronizationRequest), done: make(chan struct{}),
@@ -825,18 +818,6 @@ func (c *Coordinator) scan(ctx context.Context, exhaustive bool) (time.Duration,
 			seen[item.DeliveryID] = struct{}{}
 			if err := c.scanStopError(ctx); err != nil {
 				return 0, false, err
-			}
-			if c.restarts != nil && item.Snapshot.RunID != "" && item.Disposition != runtimedelivery.ClaimAbsent && item.Disposition != runtimedelivery.ClaimInvariantInvalid {
-				disposition, err := c.restarts.StandingRunRestartDisposition(context.WithoutCancel(ctx), item.Snapshot.RunID)
-				if err != nil {
-					return 0, false, fmt.Errorf("classify delivery continuation %s standing disposition: %w", item.DeliveryID, err)
-				}
-				if err := c.scanStopError(ctx); err != nil {
-					return 0, false, err
-				}
-				if disposition.ExactCurrent() && !disposition.Executable() {
-					continue
-				}
 			}
 			if after, ok := item.Wake.After(); ok {
 				next, wake = earlierWake(next, wake, after)

@@ -234,12 +234,9 @@ func sameRegistrationSelection(left, right RegistrationPair) bool {
 		slices.Equal(left.CredentialAdmissions, right.CredentialAdmissions) &&
 		left.Target.Selector == right.Target.Selector &&
 		left.Target.BundleHash == right.Target.BundleHash &&
-		left.Target.ServiceID == right.Target.ServiceID &&
 		left.Target.FlowPath == right.Target.FlowPath &&
 		left.Target.Alias == right.Target.Alias &&
 		left.Target.Provider == right.Target.Provider &&
-		left.Target.Generation == right.Target.Generation &&
-		left.Target.PublicationSequence == right.Target.PublicationSequence &&
 		left.Target.AdmissionPlanGeneration.Diagnostic() == right.Target.AdmissionPlanGeneration.Diagnostic() &&
 		left.Target.SigningCredentialKey == right.Target.SigningCredentialKey
 }

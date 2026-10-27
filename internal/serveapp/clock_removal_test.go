@@ -6,7 +6,6 @@ import (
 	"testing"
 	"time"
 
-	"github.com/division-sh/swarm/internal/runtime/genericschedule"
 	"github.com/division-sh/swarm/internal/runtime/lifecycleprobe"
 	"github.com/division-sh/swarm/internal/runtime/testfixtures/canonicalrouting"
 	"github.com/division-sh/swarm/internal/store/storetest"
@@ -20,7 +19,7 @@ func TestServedClockDeclarationRemovalRetiresLastBindingBothStores(t *testing.T)
 			setServeRuntimeRecovery(t, opts.ConfigPath, false, true)
 			first, served := start()
 			rt := servedTestProcessRuntime(t, first)
-			statuses, err := rt.Pipeline.ListStandingServiceStatuses(t.Context())
+			statuses, err := readServedLandingRuns(t.Context(), rt)
 			if err != nil || len(statuses) != 1 {
 				t.Fatalf("clock removal precondition=%+v err=%v", statuses, err)
 			}
@@ -41,7 +40,7 @@ func TestServedClockDeclarationRemovalRetiresLastBindingBothStores(t *testing.T)
 			})
 			second, current := start()
 			removed := readServedClockHeader(t, current.Endpoint, initial.RunID).ClockSchedules[0]
-			if removed.ActivationID != initial.ActivationID || !removed.InitialDueAt.Equal(initial.InitialDueAt) || removed.Status != genericschedule.StatusCancelled || removed.NextDueAt != nil || removed.RetainsRun || removed.CancelCause != "standing_declaration_removed" {
+			if removed.ActivationID != initial.ActivationID || !removed.InitialDueAt.Equal(initial.InitialDueAt) || removed.Status != initial.Status || removed.RetainsRun != initial.RetainsRun || removed.CancelCause != "" {
 				t.Fatalf("removed binding erased/rearmed historical clock: before=%+v after=%+v", initial, removed)
 			}
 			time.Sleep(550 * time.Millisecond)

@@ -284,12 +284,11 @@ func selectedContractExecutionOwnerForCatalogTestWithReplay(t testing.TB, select
 		ReplyContext: selected, RunLifecycle: selected, DeliveryLifecycle: selected,
 
 		ActiveAgents: selected, PreparedEvents: selected,
-		TargetFailureRecorder: selected, RunOrigins: selected, StandingRestarts: selected, ConstructionPublications: selected, Instances: selected,
+		TargetFailureRecorder: selected, ConstructionPublications: selected, Instances: selected,
 	}
 	managerRoles := runtimemanager.PersistenceRoles{
 		LifecycleState: selected, LifecycleEffects: selected, LifecycleDiagnostics: selected, EffectsRecovery: selected,
 		DeliveryQuiescence: selected, EventExistence: selected, DirectiveOperations: selected, DirectiveTargets: selected,
-		StandingRestarts: selected,
 	}
 	owner, err := runtimerunforkexecution.NewSelectedContractExecutionOwner(
 		runtimepipeline.NewWorkflowPersistence(selected), fork, runtimeExecution, replay,
@@ -350,12 +349,12 @@ func constructCatalogSelectedExecutionOwner(t testing.TB, h *runtimeHarness, rep
 		ReplyContext: selected, RunLifecycle: selected, DeliveryLifecycle: selected,
 
 		ActiveAgents: selected, PreparedEvents: selected,
-		TargetFailureRecorder: selected, RunOrigins: selected, StandingRestarts: selected, ConstructionPublications: selected, Instances: selected,
+		TargetFailureRecorder: selected, ConstructionPublications: selected, Instances: selected,
 	}
 	managerRoles := runtimemanager.PersistenceRoles{
 		LifecycleCensus: selected, LifecycleState: selected, LifecycleEffects: selected, LifecycleDiagnostics: selected,
 		EffectsRecovery: selected, DeliveryQuiescence: selected, EventExistence: selected, DirectiveOperations: selected,
-		DirectiveTargets: selected, StandingRestarts: selected,
+		DirectiveTargets: selected,
 	}
 	owner, err := runtimerunforkexecution.NewSelectedContractExecutionOwner(
 		runtimepipeline.NewWorkflowPersistence(selected), fork, runtimeExecution, replay,

@@ -20,12 +20,11 @@ import (
 	"github.com/division-sh/swarm/internal/packs"
 	"github.com/division-sh/swarm/internal/providertriggers"
 	"github.com/division-sh/swarm/internal/runtime/authoractivity"
-	flowidentity "github.com/division-sh/swarm/internal/runtime/core/flowidentity"
 	"github.com/division-sh/swarm/internal/runtime/core/provideroutput"
 	"github.com/division-sh/swarm/internal/runtime/core/worklifetime"
 	"github.com/division-sh/swarm/internal/runtime/correlation"
 	inbound "github.com/division-sh/swarm/internal/runtime/inboundpublication"
-	"github.com/division-sh/swarm/internal/runtime/pipeline"
+	"github.com/division-sh/swarm/internal/runtime/runlifecycle"
 	"github.com/division-sh/swarm/internal/runtime/startupownership"
 	"github.com/division-sh/swarm/internal/sessionprovider/input"
 	"github.com/division-sh/swarm/internal/store/storetest"
@@ -42,7 +41,8 @@ import (
 
 type activeInputStore interface {
 	sessionInputSelectedStore
-	pipeline.StandingServicePersistence
+	runlifecycle.FlowRunOwner
+	runlifecycle.LandingRunReader
 }
 
 type activeInputFixture struct {
@@ -68,7 +68,7 @@ type activeInputFixture struct {
 	operation     channelonboarding.Operation
 	activation    channelonboarding.ConnectedChannelActivation
 	binding       operatorchannel.Binding
-	standing      pipeline.StandingServiceReconciliation
+	standing      runlifecycle.FlowRunReconciliation
 	source        captureSource
 	mu            sync.Mutex
 	scope         captureScope
@@ -136,7 +136,7 @@ func newActiveInputFixtureWithTarget(t *testing.T, backend string, outbound, sav
 	}
 	f.source = captureSource{Coordinate: channelonboarding.ChannelRuntimeContextCoordinate{
 		BundleHash: source.BundleHash(), BundleIdentity: "active-native-input", PackInventoryGeneration: "sha256:active-native-input",
-		RuntimeInstanceID: uuid.NewString(), ContextPublicationGeneration: 1, PlanGeneration: generation, TargetGeneration: targetGeneration}, CatalogGeneration: catalog.Generation()}
+		RuntimeInstanceID: uuid.NewString(), ContextPublicationGeneration: 1, PlanGeneration: generation}, CatalogGeneration: catalog.Generation()}
 	id := uuid.NewString()
 	f.operation, err = f.selected.ReserveChannelOnboarding(ctx, channelonboarding.StartRequest{OperationID: id,
 		RequestKeyHash: id, RequestHash: id, PrincipalID: principal.ID, Verb: channelonboarding.VerbConnect, Provider: "whatsapp",
@@ -269,7 +269,7 @@ func (f *activeInputFixture) setScope(kind channelonboarding.SessionInputScope) 
 		f.scope.OperationRevision = f.activation.OperationRevision
 		f.scope.ActivationID = f.activation.ActivationID
 		f.scope.ActivationRevision = f.activation.Revision
-		f.scope.PublicationBinding = inbound.BindingGeneration{ServiceID: f.standing.ServiceID, RunID: f.standing.RunID, Generation: f.standing.Generation}
+		f.scope.PublicationBinding = inbound.BindingGeneration{RunID: f.standing.RunID}
 	}
 }
 
@@ -379,12 +379,7 @@ func (f *activeInputFixture) activate(t *testing.T) {
 		t.Fatal(err)
 	}
 	source := sourceartifactfixture.Require(t, ctx, f.selected)
-	f.standing, err = f.selected.ReconcileStandingService(ctx, pipeline.StandingServiceCandidate{BindingEnabled: f.activation.Status == channelonboarding.ActivationCurrent && f.binding.Status == operatorchannel.BindingCurrent,
-		ServiceID: flowidentity.StandingServiceID("."), FlowPath: ".", Source: source})
-	if err != nil {
-		t.Fatal(err)
-	}
-	f.standing.PublicationSequence, err = f.selected.PublishStandingService(ctx, f.standing.ServiceID, f.standing.RunID, f.standing.Generation)
+	f.standing, err = f.selected.ReconcileFlowRun(ctx, runlifecycle.LiveRunScope{FlowPath: "."}, source)
 	if err != nil {
 		t.Fatal(err)
 	}

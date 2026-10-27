@@ -159,7 +159,7 @@ func requireServedUnboundConnectAcrossRestart(t *testing.T, endpoint string, pee
 	}
 	requireServedJSONRPCResult(t, endpoint, "channel.onboarding_retry", map[string]any{"operation_id": id}, &result)
 	if result.Operation.Phase != channelonboarding.PhaseSucceeded || result.Readiness == nil || !result.Readiness.Ready ||
-		result.Operation.BindingRevision != confirmed.Binding.Revision || result.Operation.ActivationRevision < 1 || result.Operation.Coordinate.TargetGeneration < 1 {
+		result.Operation.BindingRevision != confirmed.Binding.Revision || result.Operation.ActivationRevision < 1 || result.Operation.Coordinate.ContextPublicationGeneration < 1 {
 		t.Fatal("fresh confirmation did not establish exact activation", result)
 	}
 	awaitServedNativeProcessSend(t, peer, "Swarm channel connected.")

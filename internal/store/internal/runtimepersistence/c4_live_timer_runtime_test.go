@@ -33,13 +33,13 @@ func c4LiveTimerRuntime(t *testing.T, ctx context.Context, selected any, loaded 
 			EventBusDurable: bus.DurableDependencies{
 				Instances: workflow, ConstructionPublications: workflow, EmitFeedback: store,
 				ReplyContext: store, RunLifecycle: store, DeliveryLifecycle: store, ActiveAgents: store,
-				PreparedEvents: store, TargetFailureRecorder: store, RunOrigins: store, StandingRestarts: store,
+				PreparedEvents: store, TargetFailureRecorder: store,
 			},
 			EventPayloadAdmissionBinder: store, AuthorActivityRegistrars: []runtimepkg.AuthorActivityCatalogRegistrar{store},
 			RunControlStore: store, RunLifecycleCandidates: store, RuntimeLogStore: store, ManagerStore: store,
 			ManagerPersistenceRoles: manager.PersistenceRoles{
 				LifecycleCensus: store, LifecycleState: store, LifecycleOutcome: store, LifecycleEffects: store, LifecycleDiagnostics: store, EffectsRecovery: store,
-				DeliveryQuiescence: store, EventExistence: store, DirectiveOperations: store, DirectiveTargets: store, StandingRestarts: store,
+				DeliveryQuiescence: store, EventExistence: store, DirectiveOperations: store, DirectiveTargets: store,
 			},
 			SessionRegistry: store, LiveSessionAcquirer: store, SessionResetter: store, ConversationStore: store,
 			EffectsStore: store, CompletionStore: store, CompletionHeartbeatStore: store,
@@ -54,13 +54,13 @@ func c4LiveTimerRuntime(t *testing.T, ctx context.Context, selected any, loaded 
 			EventBusDurable: bus.DurableDependencies{
 				Instances: workflow, ConstructionPublications: workflow, EmitFeedback: store,
 				ReplyContext: store, RunLifecycle: store, DeliveryLifecycle: store, ActiveAgents: store,
-				PreparedEvents: store, TargetFailureRecorder: store, RunOrigins: store, StandingRestarts: store,
+				PreparedEvents: store, TargetFailureRecorder: store,
 			},
 			EventPayloadAdmissionBinder: store, AuthorActivityRegistrars: []runtimepkg.AuthorActivityCatalogRegistrar{store},
 			RunControlStore: store, RunLifecycleCandidates: store, RuntimeLogStore: store, ManagerStore: store,
 			ManagerPersistenceRoles: manager.PersistenceRoles{
 				LifecycleCensus: store, LifecycleState: store, LifecycleOutcome: store, LifecycleEffects: store, LifecycleDiagnostics: store, EffectsRecovery: store,
-				DeliveryQuiescence: store, EventExistence: store, DirectiveOperations: store, DirectiveTargets: store, StandingRestarts: store,
+				DeliveryQuiescence: store, EventExistence: store, DirectiveOperations: store, DirectiveTargets: store,
 			},
 			SessionRegistry: store, LiveSessionAcquirer: store, SessionResetter: store, ConversationStore: store,
 			EffectsStore: store, CompletionStore: store, CompletionHeartbeatStore: store,

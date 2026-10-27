@@ -213,16 +213,8 @@ func TestResetCandidateSetFencesConsumersWhileSecondPreparesBothStores(t *testin
 				for _, candidate := range candidates {
 					installSelectedStoreTestGeneration(t, capability, candidate.runtime, plan, 1)
 				}
-				reconciled, err := reconcileServeStandingServices(ctx, candidates[0].runtime.Pipeline, candidates, true)
-				if err != nil {
+				if err := reconcileServeFlowRuns(ctx, candidates[0].runtime.Pipeline, candidates); err != nil {
 					t.Fatal(err)
-				}
-				for i := range candidates {
-					targets, activations, err := reconcileServeRuntimeStandingTargets(candidates[i].runtime, reconciled)
-					if err != nil {
-						t.Fatal(err)
-					}
-					candidates[i].startupStandingTargets, candidates[i].startupStandingActivations = targets, activations
 				}
 				definitions, err := plannedServeRuntimeContexts(candidates)
 				if err != nil {
@@ -347,10 +339,11 @@ func TestResetCandidateSetFencesConsumersWhileSecondPreparesBothStores(t *testin
 						t.Fatalf("API escaped reset fence: %+v", response.Error)
 					}
 				}
-				if len(candidates[0].startupStandingTargets) == 0 {
+				targets, err := candidates[0].runtime.PlanStandingTargets()
+				if err != nil || len(targets) == 0 {
 					t.Fatal("standing probe has no actual service")
 				}
-				target := candidates[0].startupStandingTargets[0]
+				target := targets[0]
 				if target.Alias == "" || target.Provider == "" {
 					t.Fatal("channel probe lacks its real standing ingress identity")
 				}
@@ -428,13 +421,13 @@ func TestResetCandidateSetFencesConsumersWhileSecondPreparesBothStores(t *testin
 
 func assertRegisteredStartupAbort(t *testing.T, cancel context.CancelFunc, release func() error, candidates []serveRuntimeBundleContext, manager *runtime.RuntimeContextManager, active bool) {
 	t.Helper()
-	if candidates[0].runtime.WorkOccurrence().ActiveCount() == 0 {
-		t.Fatal("registered composition has no standing child lease")
-	}
 	var accepted *runtime.RuntimeContextUse
 	if active {
-		target := candidates[0].startupStandingTargets[0]
-		var err error
+		targets, err := candidates[0].runtime.PlanStandingTargets()
+		if err != nil || len(targets) == 0 {
+			t.Fatal("registered composition has no declared ingress target", err)
+		}
+		target := targets[0]
 		accepted, _, err = manager.AcquireIngress(context.Background(), target.Alias, target.Provider)
 		if err != nil || accepted == nil {
 			t.Fatalf("acquire actual standing ingress work: %v", err)

@@ -16,7 +16,6 @@ import (
 	"github.com/division-sh/swarm/internal/runtime/correlation"
 	"github.com/division-sh/swarm/internal/runtime/executionposture"
 	"github.com/division-sh/swarm/internal/runtime/inboundpublication"
-	"github.com/division-sh/swarm/internal/runtime/pipeline"
 	"github.com/division-sh/swarm/internal/runtime/startupownership"
 	"github.com/division-sh/swarm/internal/store/storetest"
 	"github.com/google/uuid"
@@ -56,17 +55,8 @@ func (f *activeInputFixture) restartBusinessConnection(t *testing.T) {
 		t.Fatal(err)
 	}
 	f.source.Coordinate = coordinate
-	f.republishBusinessStanding(t)
-	f.installBusinessOccurrence(t)
-}
 
-func (f *activeInputFixture) republishBusinessStanding(t *testing.T) {
-	t.Helper()
-	sequence, err := f.selected.PublishStandingService(f.ctx, f.standing.ServiceID, f.standing.RunID, f.standing.Generation)
-	if err != nil || sequence < 1 {
-		t.Fatalf("republish the original standing service: sequence=%d %v", sequence, err)
-	}
-	f.standing.PublicationSequence = sequence
+	f.installBusinessOccurrence(t)
 }
 
 func (f *activeInputFixture) installBusinessOccurrence(t *testing.T) {
@@ -173,9 +163,6 @@ func TestWhatsAppNativeBusinessHandoffRestartBothStores(t *testing.T) {
 				admitted.Close()
 				f.restartBusinessConnection(t)
 				f.restartBusinessConnection(t)
-				if f.standing.PublicationSequence != 3 {
-					t.Fatal("restart omitted standing republication")
-				}
 				rows, err := f.spool.pendingPublications(f.ctx)
 				if err != nil || len(rows) != 2 || !rows[1].event.SameCapture(event) || !bytes.Equal(rows[1].requestBytes, frozen) {
 					t.Fatal("restart changed immutable capture/request evidence", err)
@@ -212,81 +199,9 @@ func TestWhatsAppNativeBusinessHandoffRestartBothStores(t *testing.T) {
 	}
 }
 
-// Standing republication is a new commit fence, never a rewrite of staged
-// evidence. These are the normal-restart boundary missing from the old fixture.
-func TestWhatsAppRecoveredBusinessPublicationOccurrenceFenceBothStores(t *testing.T) {
-	for _, backend := range []string{"sqlite", "postgres"} {
-		t.Run(backend, func(t *testing.T) {
-			f := newActiveInputFixture(t, backend)
-			f.activate(t)
-			event, admitted := f.receive(t, "unfinished native message")
-			handoff := f.businessHandoff(t)
-			original, err := prepareSessionBusinessPublication(f.ctx, admitted, f.trigger, "whatsapp", handoff.bus, handoff.store, handoff.posture, f.channel)
-			if err != nil {
-				t.Fatal(err)
-			}
-			if err := f.spool.stagePublication(f.ctx, event, original.command.Request); err != nil {
-				t.Fatal(err)
-			}
-			frozen, err := publicationRequestBytes(original.command.Request)
-			if err != nil {
-				t.Fatal(err)
-			}
-			if err := handoff.bus.AbandonInboundDeliveryPlan(f.ctx, original.plan); err != nil {
-				t.Fatal(err)
-			}
-			admitted.Close()
-			f.restartBusinessConnection(t)
-			handoff = f.businessHandoff(t)
-			reference := SessionInputReference{ConnectionID: event.Scope.Session.ConnectionID, OccurrenceID: event.OccurrenceID,
-				Conversation: event.Conversation, EventID: event.EventID, Kind: event.Kind}
-			recovered, err := f.owner.recoverBusiness(f.ctx, reference)
-			if err != nil {
-				t.Fatal(err)
-			}
-			t.Cleanup(recovered.Close)
-			prepared, err := prepareSessionBusinessPublication(f.ctx, recovered, f.trigger, "whatsapp", handoff.bus, handoff.store, handoff.posture, f.channel)
-			if err != nil {
-				recovered.Close()
-				t.Fatal(err)
-			}
-			t.Cleanup(func() { _ = handoff.bus.AbandonInboundDeliveryPlan(context.Background(), prepared.plan) })
-			if prepared.command.Request.ExpectedPublicationSequence != 1 || prepared.command.PublicationSequence() != 2 {
-				t.Fatal("original evidence and current fence are not distinct")
-			}
-			f.republishBusinessStanding(t)
-			if err := prepared.command.Validate(); err != nil {
-				t.Fatal("the unchanged historical request should remain valid evidence", err)
-			}
-			result, err := prepared.commitAndDispatch()
-			recovered.Close()
-			if err == nil || result.Acknowledged {
-				t.Fatal("republication after preparation adopted a newer commit occurrence", err)
-			}
-			requireNoSessionPublicationEvents(t, f, prepared.command)
-			if _, found, err := handoff.store.LoadInboundPublicationByIdentity(f.ctx, prepared.command.Request.Identity()); err != nil || found {
-				t.Fatal("stale preparation left a receipt", err)
-			}
-			rows, err := f.spool.pendingPublications(f.ctx)
-			if err != nil || len(rows) != 2 || !rows[1].event.SameCapture(event) || !bytes.Equal(rows[1].requestBytes, frozen) {
-				t.Fatal("stale commit changed original evidence", err)
-			}
-			if err := handoff.drain(f.ctx); err != nil {
-				t.Fatal("fresh exact owner could not resume", err)
-			}
-			requireNativeBusinessReceipt(t, f, event)
-			record, _, err := handoff.store.LoadInboundPublicationByIdentity(f.ctx, prepared.command.Request.Identity())
-			actual, encodeErr := publicationRequestBytes(record.Request)
-			if err != nil || encodeErr != nil || !bytes.Equal(actual, frozen) {
-				t.Fatal("fresh commit replaced original evidence", err, encodeErr)
-			}
-		})
-	}
-}
-
 func TestWhatsAppRecoveredBusinessRequestMutationBothStores(t *testing.T) {
 	for _, backend := range []string{"sqlite", "postgres"} {
-		for _, mutation := range []string{"sequence", "alias", "provenance", "fingerprint", "caller_copy"} {
+		for _, mutation := range []string{"alias", "provenance", "fingerprint", "caller_copy"} {
 			t.Run(backend+"/"+mutation, func(t *testing.T) {
 				f := newActiveInputFixture(t, backend)
 				f.activate(t)
@@ -321,8 +236,6 @@ func TestWhatsAppRecoveredBusinessRequestMutationBothStores(t *testing.T) {
 				}
 				defer func() { _ = handoff.bus.AbandonInboundDeliveryPlan(context.Background(), prepared.plan) }()
 				switch mutation {
-				case "sequence":
-					prepared.command.Request.ExpectedPublicationSequence = recovered.PublicationSequence()
 				case "alias":
 					prepared.command.Request.TargetAlias = "invented"
 				case "provenance":
@@ -350,66 +263,6 @@ func TestWhatsAppRecoveredBusinessRequestMutationBothStores(t *testing.T) {
 				rows, err := f.spool.pendingPublications(f.ctx)
 				if err != nil || len(rows) != 2 || !rows[1].event.SameCapture(event) || !bytes.Equal(rows[1].requestBytes, frozen) {
 					t.Fatal("rejected mutation rewrote original evidence", err)
-				}
-			})
-		}
-	}
-}
-
-func TestWhatsAppRecoveredBusinessStandingRefusalsBothStores(t *testing.T) {
-	for _, backend := range []string{"sqlite", "postgres"} {
-		for _, change := range []string{"suspended", "reset", "replacement_run_generation"} {
-			t.Run(backend+"/"+change, func(t *testing.T) {
-				f := newActiveInputFixture(t, backend)
-				f.activate(t)
-				event, admitted := f.receive(t, "unfinished native message")
-				handoff := f.businessHandoff(t)
-				prepared, err := prepareSessionBusinessPublication(f.ctx, admitted, f.trigger, "whatsapp", handoff.bus, handoff.store, handoff.posture, f.channel)
-				if err != nil {
-					t.Fatal(err)
-				}
-				if err := f.spool.stagePublication(f.ctx, event, prepared.command.Request); err != nil {
-					t.Fatal(err)
-				}
-				frozen, err := publicationRequestBytes(prepared.command.Request)
-				if err != nil {
-					t.Fatal(err)
-				}
-				if err := handoff.bus.AbandonInboundDeliveryPlan(f.ctx, prepared.plan); err != nil {
-					t.Fatal(err)
-				}
-				admitted.Close()
-				f.restartBusinessConnection(t)
-				operation := pipeline.StandingServiceOperation{ServiceID: f.standing.ServiceID, Actor: "native-recovery-proof", ExecutionPosture: executionposture.Live}
-				if change == "suspended" {
-					_, err = f.selected.SuspendStandingService(f.ctx, operation)
-				} else {
-					_, err = f.selected.ResetStandingService(f.ctx, operation)
-				}
-				if err != nil {
-					t.Fatal(err)
-				}
-				if change == "replacement_run_generation" {
-					source, _ := correlation.SourceArtifactFactFromContext(f.ctx)
-					replacement, err := f.selected.ReconcileStandingService(f.ctx, pipeline.StandingServiceCandidate{
-						ServiceID: f.standing.ServiceID, FlowPath: f.standing.FlowPath, BindingEnabled: true, Source: source})
-					if err != nil || replacement.RunID == f.standing.RunID || replacement.Generation == f.standing.Generation {
-						t.Fatal("reset did not produce a distinct run and generation", err)
-					}
-					if _, err := f.selected.PublishStandingService(f.ctx, replacement.ServiceID, replacement.RunID, replacement.Generation); err != nil {
-						t.Fatal(err)
-					}
-				}
-				if err := f.businessHandoff(t).drain(f.ctx); err == nil {
-					t.Fatal("recovery adopted changed standing authority")
-				}
-				requireNoSessionPublicationEvents(t, f, prepared.command)
-				if _, found, err := handoff.store.LoadInboundPublicationByIdentity(f.ctx, prepared.command.Request.Identity()); err != nil || found {
-					t.Fatal("changed standing authority left a receipt", err)
-				}
-				rows, err := f.spool.pendingPublications(f.ctx)
-				if err != nil || len(rows) != 2 || !rows[1].event.SameCapture(event) || !bytes.Equal(rows[1].requestBytes, frozen) {
-					t.Fatal("standing refusal changed original evidence", err)
 				}
 			})
 		}
@@ -554,7 +407,7 @@ func TestWhatsAppNativeBusinessRedeliveryAfterRebindBothStores(t *testing.T) {
 			if err := f.state.retireOccurrence(f.ctx); err != nil {
 				t.Fatal(err)
 			}
-			f.republishBusinessStanding(t)
+
 			if err := f.businessHandoff(t).drain(f.ctx); err != nil {
 				t.Fatal("historical native redelivery reminted authority", err)
 			}

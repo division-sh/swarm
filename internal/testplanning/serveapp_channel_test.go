@@ -32,8 +32,8 @@ func TestServeappChannelCompositionPreservesWholeWorkload(t *testing.T) {
 				t.Fatal("complete channel roots, deferrals or execution recipe changed")
 			}
 			complement, err := plan.Unit(channelComplement)
-			if err != nil || len(complement.SelectedRoots) != 12 {
-				t.Fatalf("private twelve-root complement: %d roots, %v", len(complement.SelectedRoots), err)
+			if err != nil || len(complement.SelectedRoots) != 11 {
+				t.Fatalf("private eleven-root complement: %d roots, %v", len(complement.SelectedRoots), err)
 			}
 			if _, measured := f.model.UnitSeconds(ProfileCore, complement); measured || complement.WeightSeconds != f.policy.Planning.UnknownPackageSeconds {
 				t.Fatal("complement borrowed the thirteen-root owner's timing history")
@@ -58,7 +58,7 @@ func TestServeappChannelCompositionPreservesWholeWorkload(t *testing.T) {
 			if completionRoots == 0 {
 				t.Fatal("canonical completion2270 controls absent")
 			}
-			t.Logf("complete channel: %d roots, %d completion2270 roots; complement: twelve; exact child union retained", len(actual.SelectedRoots), completionRoots)
+			t.Logf("complete channel: %d roots, %d completion2270 roots; complement: eleven; exact child union retained", len(actual.SelectedRoots), completionRoots)
 		})
 	}
 }

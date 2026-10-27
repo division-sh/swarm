@@ -1941,13 +1941,9 @@ func VerifyNativeWorkflowTimerGlobalRestoreDefersStandingUntilRunScopedAdoptionO
 			store := pc.workflowStore
 			standingCtx := ctx
 			flowPath := "standing-workflow-timer"
-			// This component test owns timer storage and restoration, not standing
-			// construction. Served tests exercise the native standing mutation owner.
-			store.standingServices = workflowTimerStandingReadControl{fact: runtimerunlifecycle.StandingRestartFact{
-				ServiceID: runtimeflowidentity.StandingServiceID(flowPath), RunID: runtimecorrelation.RunIDFromContext(ctx),
-				Generation: 1, ExactCurrent: true, DeclarationPresent: true, BindingEnabled: true,
-				EffectiveState: "active", OperatorOverride: "none", RunState: "running",
-			}}
+			store.runLifecycle = workflowTimerFlowReadControl{
+				OperationOwner: store.runLifecycle, runID: runtimecorrelation.RunIDFromContext(ctx), flowPath: flowPath,
+			}
 			scheduler := newWorkflowTimerTestScheduler(t, pc.workflowTimers.workOwner)
 			if err := pc.workflowTimers.bindScheduler(scheduler); err != nil {
 				t.Fatalf("bind workflow timer scheduler: %v", err)
@@ -1974,16 +1970,16 @@ func VerifyNativeWorkflowTimerGlobalRestoreDefersStandingUntilRunScopedAdoptionO
 	}
 }
 
-type workflowTimerStandingReadControl struct {
-	StandingServicePersistence
-	fact runtimerunlifecycle.StandingRestartFact
+type workflowTimerFlowReadControl struct {
+	runtimerunlifecycle.OperationOwner
+	runID, flowPath string
 }
 
-func (c workflowTimerStandingReadControl) StandingRunRestartDisposition(_ context.Context, runID string) (runtimerunlifecycle.StandingRestartDisposition, error) {
-	if runID != c.fact.RunID {
-		return runtimerunlifecycle.ClassifyStandingRestart(runtimerunlifecycle.StandingRestartFact{})
+func (c workflowTimerFlowReadControl) LoadRunLiveScope(_ context.Context, runID string) (runtimerunlifecycle.LiveRunScope, error) {
+	if runID != c.runID {
+		return runtimerunlifecycle.LiveRunScope{}, nil
 	}
-	return runtimerunlifecycle.ClassifyStandingRestart(c.fact)
+	return runtimerunlifecycle.LiveRunScope{FlowPath: c.flowPath}, nil
 }
 
 func VerifyNativeWorkflowTimerInitialEntryStaysDormantUntilExplicitArmOnBothStoresForTest(t *testing.T, open pipelineDeliveryNativeOpenerForTest) {
