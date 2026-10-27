@@ -33,7 +33,11 @@ func TestServedCompiledTransitionSelectedCarrierEvidenceOnBothStores(t *testing.
 						t.Run(handler+"/"+choice, func(t *testing.T) {
 							key := handler + "/" + choice
 							seed := requireServedEventPublishRPCResult(t, rt.Endpoint, map[string]any{"event_name": "work.seeded", "bundle_hash": rt.BundleHash, "payload": map[string]any{"seed": true}, "idempotency_key": key + "/seed"})
-							requireServedLiveRootMode(t, rt, seed.RunID, seed.EventID)
+							var rootEventOwner any = rt.SQLite
+							if rt.Postgres != nil {
+								rootEventOwner = rt.Postgres
+							}
+							requireServedLiveRootMode(t, rt.Runtime.ExecutionPosture, storetest.LoadCanonicalEventRecord(t, t.Context(), rootEventOwner, seed.EventID), seed.RunID)
 							if err := waitLifecycleCarrierSeedSettlement(t.Context(), probe, seed); err != nil {
 								t.Fatal(err)
 							}

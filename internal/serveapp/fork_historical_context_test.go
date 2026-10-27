@@ -15,6 +15,7 @@ import (
 	"github.com/division-sh/swarm/internal/runtime/testfixtures/canonicalrouting"
 	"github.com/division-sh/swarm/internal/servedparity"
 	"github.com/division-sh/swarm/internal/store/selected"
+	"github.com/division-sh/swarm/internal/store/storetest"
 	"github.com/google/uuid"
 )
 
@@ -38,7 +39,11 @@ func TestRunForkHistoricalIdentityPublicExecutionBothStores(t *testing.T) {
 				"event_name": "start.seeded", "bundle_hash": rt.BundleHash,
 				"payload": map[string]any{"token": "receiver-proof"}, "idempotency_key": "historical-context-seed",
 			})
-			requireServedLiveRootMode(t, rt, seed.RunID, seed.EventID)
+			var rootEventOwner any = rt.SQLite
+			if rt.Postgres != nil {
+				rootEventOwner = rt.Postgres
+			}
+			requireServedLiveRootMode(t, rt.Runtime.ExecutionPosture, storetest.LoadCanonicalEventRecord(t, t.Context(), rootEventOwner, seed.EventID), seed.RunID)
 			waitForkReceiverSourceCompletion(t, rt, seed.RunID)
 			started := requireServedEventPublishRPCResult(t, rt.Endpoint, map[string]any{
 				"event_name": "start.requested", "run_id": seed.RunID, "source_event_id": seed.EventID,

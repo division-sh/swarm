@@ -115,6 +115,9 @@ func verifyUnpublishedTransferredBarrierRefork(t *testing.T, latePublication boo
 				TargetBundleHash: rt.Options.SourceArtifactFact.BundleHash(), ContractSelection: request.ContractSelection, AllowSourceFreeze: true,
 			}
 			request = forkEngineLiveRequest(t, rt, selected, request)
+			if !latePublication && os.Getenv("TEST_UNPUBLISHED_BARRIER_CRASH_BACKEND") != "" {
+				request.ForkOperation = nil
+			}
 			parentRequest := request
 			prepared, err := family.Prepare(phase, request)
 			if err != nil {

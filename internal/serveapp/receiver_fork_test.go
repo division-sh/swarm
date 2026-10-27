@@ -15,6 +15,7 @@ import (
 	"github.com/division-sh/swarm/internal/cliapp"
 	"github.com/division-sh/swarm/internal/events"
 	"github.com/division-sh/swarm/internal/runtime/core/flowidentity"
+	"github.com/division-sh/swarm/internal/runtime/executionposture"
 	"github.com/division-sh/swarm/internal/runtime/lifecycleprobe"
 	"github.com/division-sh/swarm/internal/runtime/lifecycleprobe/lifecycletest"
 	"github.com/division-sh/swarm/internal/runtime/runfork"
@@ -23,6 +24,7 @@ import (
 	"github.com/division-sh/swarm/internal/runtime/semanticview"
 	"github.com/division-sh/swarm/internal/runtime/testfixtures/canonicalrouting"
 	"github.com/division-sh/swarm/internal/servedparity"
+	"github.com/division-sh/swarm/internal/store/storetest"
 	"github.com/google/uuid"
 )
 
@@ -73,11 +75,7 @@ func TestReceiverCompositionForkBothStores(t *testing.T) {
 					observer = publication
 				}
 				configureOwnedMockLifecycleProbe(t, observer)
-				start := startServedTestSetupEntitiesProofRuntimeFromSource
-				if admitted {
-					start = startServedLiveFlowProofRuntimeFromSource
-				}
-				rt := start(t, backend, root, func(ctx context.Context, _ string, evt events.Event) error {
+				hook := func(ctx context.Context, _ string, evt events.Event) error {
 					if surface != "pending_refusal" || evt.Type() != "work.requested" {
 						return nil
 					}
@@ -88,7 +86,12 @@ func TestReceiverCompositionForkBothStores(t *testing.T) {
 					case <-ctx.Done():
 						return ctx.Err()
 					}
-				})
+				}
+				posture := executionposture.MockOnly
+				if admitted {
+					posture = executionposture.Live
+				}
+				rt := startServedTestSetupEntitiesProofRuntimeConfigured(t, backend, root, false, posture, hook)
 				t.Cleanup(func() { close(release) })
 				t.Cleanup(publication.unblock)
 				var seedEventID string
@@ -96,7 +99,11 @@ func TestReceiverCompositionForkBothStores(t *testing.T) {
 				if !fieldless {
 					seed := requireServedEventPublishRPCResult(t, rt.Endpoint, map[string]any{"event_name": "work.seeded", "bundle_hash": rt.BundleHash, "payload": map[string]any{"seed": true}, "idempotency_key": "fork-seed"})
 					if admitted {
-						requireServedLiveRootMode(t, rt, seed.RunID, seed.EventID)
+						var rootEventOwner any = rt.SQLite
+						if rt.Postgres != nil {
+							rootEventOwner = rt.Postgres
+						}
+						requireServedLiveRootMode(t, rt.Runtime.ExecutionPosture, storetest.LoadCanonicalEventRecord(t, t.Context(), rootEventOwner, seed.EventID), seed.RunID)
 					}
 					seedEventID = seed.EventID
 					requireServedEventPublishEntityState(t, rt.DB, rt.Backend, seed.RunID, "", "active")
@@ -107,7 +114,11 @@ func TestReceiverCompositionForkBothStores(t *testing.T) {
 					params = map[string]any{"event_name": "work.requested", "run_id": seed.RunID, "source_event_id": seed.EventID, "payload": map[string]any{"seed": true}, "idempotency_key": "fork-request"}
 				} else {
 					seed := requireServedEventPublishRPCResult(t, rt.Endpoint, map[string]any{"event_name": "fork.seeded", "bundle_hash": rt.BundleHash, "payload": map[string]any{}, "idempotency_key": "empty-fork-seed"})
-					requireServedLiveRootMode(t, rt, seed.RunID, seed.EventID)
+					var rootEventOwner any = rt.SQLite
+					if rt.Postgres != nil {
+						rootEventOwner = rt.Postgres
+					}
+					requireServedLiveRootMode(t, rt.Runtime.ExecutionPosture, storetest.LoadCanonicalEventRecord(t, t.Context(), rootEventOwner, seed.EventID), seed.RunID)
 					seedEventID = seed.EventID
 					waitServedRunDeliveryQuiescence(t, rt.ReadRunDeliveries, seed.RunID)
 					params = map[string]any{"event_name": "work.requested", "run_id": seed.RunID, "source_event_id": seed.EventID, "payload": map[string]any{"seed": true}, "idempotency_key": "fork-request"}
@@ -281,9 +292,13 @@ func TestReceiverCompositionForkBothStores(t *testing.T) {
 						}
 						t.Logf("refused receiver fork cleanup: run=%s err=%v", result.Materialization.ForkRunID, err)
 						if result.Materialization.ForkRunID == "" {
-							var children int
-							if err := rt.DB.QueryRow(`SELECT COUNT(*) FROM runs WHERE forked_from_run_id=$1`, request.RunID).Scan(&children); err != nil || children != 0 {
-								t.Fatalf("pre-materialization refusal retained child runs: count=%d err=%v", children, err)
+							var sourceOwner any = rt.SQLite
+							if rt.Postgres != nil {
+								sourceOwner = rt.Postgres
+							}
+							refusal, err := storetest.ReadSelectedSourceRefusalStorage(t.Context(), sourceOwner, request.RunID, forkPoint)
+							if err != nil || refusal["fork_runs"] != 0 {
+								t.Fatalf("pre-materialization refusal retained child runs: count=%d err=%v", refusal["fork_runs"], err)
 							}
 							checkSource("after pre-materialization refusal")
 							return

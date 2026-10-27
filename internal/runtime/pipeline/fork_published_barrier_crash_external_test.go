@@ -24,6 +24,7 @@ import (
 	"github.com/division-sh/swarm/internal/runtime/lifecycleprobe"
 	"github.com/division-sh/swarm/internal/runtime/runfork"
 	"github.com/division-sh/swarm/internal/runtime/runforkexecution"
+	"github.com/division-sh/swarm/internal/runtime/runlifecycle"
 	"github.com/division-sh/swarm/internal/runtime/startupownership"
 	"github.com/division-sh/swarm/internal/runtime/testfixtures/canonicalrouting"
 	"github.com/division-sh/swarm/internal/store"
@@ -288,7 +289,19 @@ func verifyBarrierCrashRestartBothStores(t *testing.T, pendingSource bool) {
 			}
 			for _, entry := range recovered {
 				if pendingSource && entry.RunID == checkpoint.Proof.SourceRunID {
-					if entry.Disposition != runfork.SelectedForkRecoveryTerminal || entry.ExecutionID != "" || entry.Continuation != nil {
+					header, err := selected.Runs().LoadRunHeader(wait, entry.RunID)
+					if err != nil {
+						t.Fatal(err)
+					}
+					state, err := runlifecycle.ParseState(header.Status)
+					if err != nil {
+						t.Fatal(err)
+					}
+					want := runfork.SelectedForkRecoveryStaged
+					if state.Terminal() {
+						want = runfork.SelectedForkRecoveryTerminal
+					}
+					if entry.Disposition != want || entry.ExecutionID != "" || entry.Continuation != nil || entry.Operation != nil {
 						t.Fatalf("materialized-only source acquired execution authority: %+v", entry)
 					}
 					continue

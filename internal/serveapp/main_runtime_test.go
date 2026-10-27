@@ -2394,30 +2394,21 @@ func startServedTestSetupEntitiesProofRuntime(t *testing.T, backend servedparity
 
 func startServedTestSetupEntitiesProofRuntimeFromSource(t *testing.T, backend servedparity.Backend, sourceRoot string, hooks ...runtimepipeline.WorkflowNodeHandlerStartHook) servedControlProofRuntime {
 	t.Helper()
-	return startServedTestSetupEntitiesProofRuntimeConfigured(t, backend, sourceRoot, false, hooks...)
-}
-
-func startServedTestSetupEntitiesProofRuntimeConfigured(t *testing.T, backend servedparity.Backend, sourceRoot string, realWorkspace bool, hooks ...runtimepipeline.WorkflowNodeHandlerStartHook) servedControlProofRuntime {
-	return startServedTestSetupEntitiesProofRuntimeWithPosture(t, backend, sourceRoot, realWorkspace, executionposture.MockOnly, hooks...)
+	return startServedTestSetupEntitiesProofRuntimeConfigured(t, backend, sourceRoot, false, executionposture.MockOnly, hooks...)
 }
 
 func startServedLiveFlowProofRuntimeFromSource(t *testing.T, backend servedparity.Backend, sourceRoot string, hooks ...runtimepipeline.WorkflowNodeHandlerStartHook) servedControlProofRuntime {
-	return startServedTestSetupEntitiesProofRuntimeWithPosture(t, backend, sourceRoot, false, executionposture.Live, hooks...)
+	return startServedTestSetupEntitiesProofRuntimeConfigured(t, backend, sourceRoot, false, executionposture.Live, hooks...)
 }
 
-func requireServedLiveRootMode(t *testing.T, rt servedControlProofRuntime, runID, eventID string) {
+func requireServedLiveRootMode(t *testing.T, posture executionposture.Posture, event events.Event, runID string) {
 	t.Helper()
-	var selected any = rt.SQLite
-	if rt.Postgres != nil {
-		selected = rt.Postgres
-	}
-	event := storetest.LoadCanonicalEventRecord(t, t.Context(), selected, eventID)
-	if rt.Runtime.ExecutionPosture != executionposture.Live || event.RunID() != runID || event.ExecutionMode() != executionmode.Live {
-		t.Fatalf("live fixture changed root authority: posture=%s run=%s mode=%s", rt.Runtime.ExecutionPosture, event.RunID(), event.ExecutionMode())
+	if posture != executionposture.Live || event.RunID() != runID || event.ExecutionMode() != executionmode.Live {
+		t.Fatalf("live fixture changed root authority: posture=%s run=%s mode=%s", posture, event.RunID(), event.ExecutionMode())
 	}
 }
 
-func startServedTestSetupEntitiesProofRuntimeWithPosture(t *testing.T, backend servedparity.Backend, sourceRoot string, realWorkspace bool, posture executionposture.Posture, hooks ...runtimepipeline.WorkflowNodeHandlerStartHook) servedControlProofRuntime {
+func startServedTestSetupEntitiesProofRuntimeConfigured(t *testing.T, backend servedparity.Backend, sourceRoot string, realWorkspace bool, posture executionposture.Posture, hooks ...runtimepipeline.WorkflowNodeHandlerStartHook) servedControlProofRuntime {
 	t.Helper()
 	var contexts *runtimepkg.RuntimeContextManager
 	captureContexts := func(manager *runtimepkg.RuntimeContextManager) { contexts = manager }

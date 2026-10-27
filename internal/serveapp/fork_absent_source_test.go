@@ -10,6 +10,7 @@ import (
 	"github.com/division-sh/swarm/internal/events"
 	"github.com/division-sh/swarm/internal/runtime/testfixtures/canonicalrouting"
 	"github.com/division-sh/swarm/internal/servedparity"
+	"github.com/division-sh/swarm/internal/store/storetest"
 )
 
 func TestServedForkRootSourceIngressBothStores(t *testing.T) {
@@ -31,7 +32,11 @@ func TestServedForkRootSourceIngressBothStores(t *testing.T) {
 				t.Fatal("run.start lacks exact acknowledged initial publication evidence")
 			}
 			initialEventID := receipt.RunCreation.EventID
-			requireServedLiveRootMode(t, rt, started.RunID, initialEventID)
+			var rootEventOwner any = rt.SQLite
+			if rt.Postgres != nil {
+				rootEventOwner = rt.Postgres
+			}
+			requireServedLiveRootMode(t, rt.Runtime.ExecutionPosture, storetest.LoadCanonicalEventRecord(t, t.Context(), rootEventOwner, initialEventID), started.RunID)
 			waitServedRunDeliveryQuiescence(t, rt.ReadRunDeliveries, started.RunID)
 			published := requireServedEventPublishRPCResult(t, rt.Endpoint, map[string]any{
 				"bundle_hash": rt.BundleHash, "run_id": started.RunID, "event_name": "item.processed",

@@ -31,6 +31,7 @@ import (
 	"github.com/division-sh/swarm/internal/runtime/runforkexecution"
 	"github.com/division-sh/swarm/internal/runtime/semanticview"
 	"github.com/division-sh/swarm/internal/store"
+	"github.com/division-sh/swarm/internal/store/storetest"
 	"github.com/google/uuid"
 )
 
@@ -74,8 +75,7 @@ func selectedExternalSourcePoint(t *testing.T, f *deploymentResourceFixture, run
 	ctx, cancel := context.WithTimeout(f.ctx, 10*time.Second)
 	defer cancel()
 	for {
-		var eventID string
-		err := f.db.QueryRowContext(ctx, `SELECT event_id FROM events WHERE run_id=$1 AND event_name='task.assigned'`, runID).Scan(&eventID)
+		eventID, err := storetest.ReadRunNamedEventIdentityStorage(ctx, f.selected, runID, "task.assigned")
 		if err == nil {
 			if err := f.runtime.bus.WaitForQuiescence(ctx); err != nil {
 				t.Fatal(err)
@@ -127,6 +127,10 @@ func selectedExternalForkServer(t *testing.T, f *deploymentResourceFixture, owne
 			ExecuteSelectedContractRunFork: func(ctx context.Context, req runforkexecution.SelectedContractExecutionRequest) (runforkexecution.SelectedContractExecutionResult, error) {
 				req.Owner = owner
 				req = deploymentLiveForkRequest(t, f, req)
+				if req.ForkOperation != nil {
+					operation := *req.ForkOperation
+					f.forkRequest.Store(&operation)
+				}
 				result, err := runforkexecution.ExecuteSelectedContractRunFork(ctx, req)
 				if err != nil {
 					t.Logf("selected external executor error: %+v materialization=%+v activation=%+v", err, result.Materialization, result.Activation)
@@ -474,10 +478,16 @@ func TestSelectedDeploymentExternalEffectRecoveryBothStores(t *testing.T) {
 						t.Fatal("R5 settled effect did not reach native final settlement")
 					}
 				}
-				var operationID, childID string
-				if err := f.db.QueryRowContext(f.ctx, `SELECT operation_id,fork_run_id FROM run_fork_operations WHERE idempotency_key=$1`, key).Scan(&operationID, &childID); err != nil {
-					t.Fatal(err)
+				operations := f.selected.(apiv1.RunForkOperationReader)
+				request := f.forkRequest.Load()
+				if request == nil {
+					t.Fatal("effect cut lacks its original API operation request")
 				}
+				recorded, found, err := operations.LoadForkOperation(f.ctx, request.Actor, request.IdempotencyKey, request.TransportHash)
+				if err != nil || !found || recorded.Request.IdempotencyKey != key || recorded.ForkRunID != interrupted.Authority.SelectedFork.ForkRunID {
+					t.Fatalf("effect cut lacks its exact durable operation: %+v found=%t err=%v", recorded, found, err)
+				}
+				operationID, childID := recorded.Request.OperationID, recorded.ForkRunID
 				if stage.name == "settled" {
 					var failed, pending int
 					if err := f.db.QueryRowContext(f.ctx, `SELECT COUNT(*) FROM event_deliveries WHERE run_id=$1 AND status='dead_letter'`, childID).Scan(&failed); err != nil {
@@ -514,7 +524,6 @@ func TestSelectedDeploymentExternalEffectRecoveryBothStores(t *testing.T) {
 				if err := owner.RetireSelectedContexts(context.Background()); err != nil {
 					t.Fatal(err)
 				}
-				operations := f.selected.(apiv1.RunForkOperationReader)
 				beforeRecovery, found, err := operations.LoadForkOperationByID(f.ctx, operationID)
 				if err != nil || !found || beforeRecovery.ForkRunID != childID || beforeRecovery.Status != runfork.ForkOperationMaterialized || beforeRecovery.Result != nil {
 					t.Fatalf("pre-ACK cut fabricated or lost its durable operation: %+v found=%t err=%v", beforeRecovery, found, err)
@@ -543,12 +552,33 @@ func TestSelectedDeploymentExternalEffectRecoveryBothStores(t *testing.T) {
 				restartedServer := selectedExternalForkServer(t, f, restarted, provider.URL)
 				result, retryErr := deploymentForkRPC(t, f.ctx, restartedServer, params)
 				t.Logf("R5 %s retry result=%+v error=%s", stage.name, result, retryErr)
-				if len(retryErr) != 0 || result.ForkRunID != childID {
-					t.Fatalf("R5 recovery lost its original durable child: retry=%+v error=%s", result, retryErr)
-				}
 				replay, replayErr := deploymentForkRPC(t, f.ctx, restartedServer, params)
-				if len(replayErr) != 0 || !reflect.DeepEqual(result, replay) {
-					t.Fatalf("R5 replay changed the real post-settlement ACK: first=%+v replay=%+v error=%s", result, replay, replayErr)
+				if stage.name == "settled" {
+					if len(retryErr) != 0 || len(replayErr) != 0 || result.ForkRunID != childID || !reflect.DeepEqual(result, replay) {
+						t.Fatalf("R5 replay changed the real post-settlement ACK: first=%+v replay=%+v retry_error=%s replay_error=%s", result, replay, retryErr, replayErr)
+					}
+				} else {
+					for _, raw := range []json.RawMessage{retryErr, replayErr} {
+						var failure struct {
+							Code int `json:"code"`
+						}
+						if json.Unmarshal(raw, &failure) != nil || failure.Code != -32603 {
+							t.Fatalf("R5 failed operation did not retain master's replay refusal: %s", raw)
+						}
+					}
+					if !reflect.DeepEqual(result, apiv1.RunForkExecutionResult{}) || !reflect.DeepEqual(replay, apiv1.RunForkExecutionResult{}) {
+						t.Fatal("R5 failed operation fabricated an activation ACK")
+					}
+					recoveredOperation, found, err := operations.LoadForkOperationByID(f.ctx, operationID)
+					if err != nil || !found || recoveredOperation.Validate() != nil ||
+						(recoveredOperation.Status != runfork.ForkOperationFailed && recoveredOperation.Status != runfork.ForkOperationUncertain) ||
+						recoveredOperation.ForkRunID != childID || recoveredOperation.BindingID != beforeRecovery.BindingID ||
+						recoveredOperation.SemanticHash != beforeRecovery.SemanticHash || !reflect.DeepEqual(recoveredOperation.Request, beforeRecovery.Request) {
+						t.Fatalf("R5 failed replay changed its durable child/outcome: %+v err=%v", recoveredOperation, err)
+					}
+					if len(recovered) != 1 || recovered[0].RunID != childID || !reflect.DeepEqual(recovered[0].Operation, &recoveredOperation) {
+						t.Fatalf("R5 retries changed the exact native recovery outcome: recovered=%+v replayed=%+v", recovered, recoveredOperation)
+					}
 				}
 				if got := calls.Load(); got != stage.providerCalls {
 					t.Fatalf("R5 %s redispatched provider: calls=%d want %d", stage.name, got, stage.providerCalls)

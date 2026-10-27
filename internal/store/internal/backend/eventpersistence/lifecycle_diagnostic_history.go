@@ -133,7 +133,7 @@ func validateLifecycleDiagnosticHistory(ctx context.Context, tx *sql.Tx, o lifec
 			return errors.New("lifecycle diagnostic historical parent missing or conflicting")
 		}
 	}
-	_, err = origins.ValidateLifecycleDiagnosticOriginTx(ctx, tx, result, true)
+	_, err = origins.ValidateLifecycleDiagnosticOriginTx(ctx, tx, result, true, "")
 	return err
 }
 

@@ -123,6 +123,7 @@ type issue642FutureRecoveryProof struct {
 	Claim                  issue642FutureClaimFacts
 	RecoveredClaim         *issue642FutureClaimFacts
 	SourceDomain           map[string]storetest.SelectedForkStorageTableSnapshot
+	SourceStartupGrant     *startupownership.GrantEvidence
 	Executions             []issue642FutureExecutionRow
 }
 
@@ -664,8 +665,15 @@ func (o *issue642FutureRecoveryOwner) RecoverSelectedForkContexts(ctx context.Co
 		if results[0].Disposition != runfork.SelectedForkRecoveryResume || results[0].ExecutionID != p.expected.Claim.ExecutionID {
 			return results, fmt.Errorf("selected claim cut was not resumed by its native predecessor: %+v", results)
 		}
-	} else if results[0].Disposition != runfork.SelectedForkRecoveryTerminal {
-		return results, fmt.Errorf("terminal re-recovery was executable: %+v", results)
+	} else {
+		header, err := p.fixture.selected.LoadRunHeader(ctx, results[0].RunID)
+		if err != nil {
+			return results, err
+		}
+		if p.expected.RecoveredClaim == nil || results[0].Disposition != runfork.SelectedForkRecoveryControlOnly || results[0].ExecutionID != p.expected.RecoveredClaim.ExecutionID ||
+			results[0].Continuation != nil || header.Status != "live" || header.EndedAt != nil || header.Failure != nil {
+			return results, fmt.Errorf("settled re-recovery lost its live control-only handoff: result=%+v run=%+v", results, header)
+		}
 	}
 	p.mu.Lock()
 	p.recovered = results
@@ -842,16 +850,22 @@ func issue642RequireFutureSourceStartupDiagnostic(t *testing.T, ctx context.Cont
 				t.Fatal("source startup append lacks its unique immutable lifecycle receipt")
 			}
 			binding := log.Details.Binding
+			matchesGrant := func(expected startupownership.GrantEvidence) bool {
+				return binding.GrantID == expected.GrantID && binding.ProcessAuthority == expected.ProcessAuthorityID &&
+					binding.ProcessOwner == expected.ProcessOwnerID && binding.ProcessBoot == expected.ProcessBootID &&
+					binding.BundleHash == expected.BundleHash && binding.RuntimeInstance == expected.RuntimeInstanceID && binding.RuntimeGeneration == expected.RuntimeGeneration
+			}
+			currentStartup := matchesGrant(grant)
+			priorShutdown := proof.SourceStartupGrant != nil && matchesGrant(*proof.SourceStartupGrant)
 			if log.Details.Action != "platform.agent_lifecycle_transition" || log.Details.RunID != proof.SourceRunID ||
 				log.Details.Provenance.Origin.Owner != "normal" || log.Details.Provenance.Origin.Causality != "observation" ||
-				binding.GrantID != grant.GrantID || binding.ProcessAuthority != grant.ProcessAuthorityID ||
-				binding.ProcessOwner != grant.ProcessOwnerID || binding.ProcessBoot != grant.ProcessBootID ||
-				binding.BundleHash != grant.BundleHash || binding.RuntimeInstance != grant.RuntimeInstanceID || binding.RuntimeGeneration != grant.RuntimeGeneration {
+				(!currentStartup && !priorShutdown) {
 				t.Fatalf("source append did not come from this normal startup grant: log=%+v grant=%+v", log, grant)
 			}
 		}
 		t.Logf("source_startup_diagnostic run=%s grant=%s original_rows_unchanged=%d exact_receipt_appends=%d", proof.SourceRunID, grant.GrantID, len(before.Rows), len(rows))
 		proof.SourceDomain = after
+		proof.SourceStartupGrant = &grant
 		return
 	}
 }

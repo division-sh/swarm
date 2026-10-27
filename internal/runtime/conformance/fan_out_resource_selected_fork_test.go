@@ -748,9 +748,33 @@ func proveSourceChangedPinPublicForkAndLostResponse(t *testing.T, pointKind runf
 					if err != nil || !reflect.DeepEqual(afterRefusals, beforeRefusals) {
 						t.Fatalf("refused fixture inputs changed child state: error=%v", err)
 					}
+					snapshot, err := storetest.ReadSelectedForkApplicationStorageSnapshot(f.ctx, f.selected)
+					if err != nil {
+						t.Fatal(err)
+					}
+					executions, err := storetest.DecodeSelectedForkSnapshotRows(snapshot["run_fork_selected_contract_runtime_executions"])
+					if err != nil {
+						t.Fatal(err)
+					}
 					var executionID string
-					if err := f.db.QueryRowContext(f.ctx, `SELECT CAST(execution_id AS TEXT) FROM run_fork_selected_contract_runtime_executions WHERE fork_run_id=$1 AND state='closed' AND generation=1`, result.ForkRunID).Scan(&executionID); err != nil || executionID == "" {
-						t.Fatalf("fixture lost its closed selected predecessor: execution=%s error=%v", executionID, err)
+					closed := 0
+					for _, execution := range executions {
+						child, childErr := execution["fork_run_id"].Text()
+						state, stateErr := execution["state"].Text()
+						var generation uint64
+						if err := json.Unmarshal(execution["generation"].Value, &generation); err != nil || childErr != nil || stateErr != nil {
+							t.Fatalf("decode exact predecessor: generation=%v child=%v state=%v", err, childErr, stateErr)
+						}
+						if child == result.ForkRunID && state == "closed" && generation == 1 {
+							executionID, err = execution["execution_id"].Text()
+							if err != nil {
+								t.Fatal(err)
+							}
+							closed++
+						}
+					}
+					if closed != 1 || executionID == "" {
+						t.Fatalf("fixture lost its exact closed selected predecessor: matches=%d execution=%s", closed, executionID)
 					}
 					publishNotifyAllChildrenEvent(t, f.ctx, f.runtime, f.source, result.ForkRunID, "fixture.close.requested", map[string]any{"account_id": "changed"})
 					assertForkRows()

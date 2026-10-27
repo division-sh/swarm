@@ -145,7 +145,20 @@ func TestIssue642FanOutBarrierFrontierBothStores(t *testing.T) {
 				case <-phase.Done():
 					t.Fatal(phase.Err())
 				}
-				waitForkEngineCompletion(t, storetest.DatabaseForTest(selected.RuntimeDeps().EventStore), runID)
+				for {
+					count, err := storetest.ReadServedIncompletePipelineHandoffCount(phase, selected.RuntimeDeps().EventStore, runID)
+					if err != nil {
+						t.Fatal(err)
+					}
+					if count == 0 {
+						break
+					}
+					select {
+					case <-time.After(10 * time.Millisecond):
+					case <-phase.Done():
+						t.Fatal(phase.Err())
+					}
+				}
 				sourceRoot := mixedFanOutEntity(t, plan, runID)
 				beforeSource, err := selected.Entities().LoadOperatorEntity(phase, sourceRoot.EntityID, runID)
 				if err != nil {

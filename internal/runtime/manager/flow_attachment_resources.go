@@ -335,6 +335,25 @@ func (am *AgentManager) verifyDynamicFlowAgents(
 	return nil
 }
 
+func (am *AgentManager) flowReadinessComparisonRecords(plan runtimepipeline.DynamicFlowRuntimeReadinessPlan, source semanticview.Source, records []PersistedAgent) ([]PersistedAgent, error) {
+	origin := am.lifecycle.diagnosticOrigin
+	if origin.Owner != LifecycleDiagnosticSelectedFork || origin.SelectedFork.ForkRunID != plan.RunID ||
+		plan.Identity.TemplateID != semanticview.RootExecutionFlowID(source) {
+		return records, nil
+	}
+	owned := make([]PersistedAgent, 0, len(records))
+	for _, record := range records {
+		identity, err := record.Config.ConcreteIdentity()
+		if err != nil {
+			return nil, err
+		}
+		if identity.Route.Presence != runtimeagentidentity.RouteRoot {
+			owned = append(owned, record)
+		}
+	}
+	return owned, nil
+}
+
 func verifyDynamicFlowAgentExpectations(actual []PersistedAgent, expected []runtimepipeline.DynamicFlowRuntimeAgentExpectation) error {
 	if len(actual) != len(expected) {
 		return fmt.Errorf("declared agent count changed: expected=%d actual=%d", len(expected), len(actual))

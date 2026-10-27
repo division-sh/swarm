@@ -150,7 +150,11 @@ func (am *AgentManager) reconcileDynamicFlowRuntimeReadinessOnce(
 	if err != nil {
 		return err
 	}
-	if err := verifyDynamicFlowAgentExpectations(records, plan.Agents); err != nil {
+	comparisonRecords, err := am.flowReadinessComparisonRecords(plan, source, records)
+	if err != nil {
+		return err
+	}
+	if err := verifyDynamicFlowAgentExpectations(comparisonRecords, plan.Agents); err != nil {
 		return fmt.Errorf("dynamic flow runtime readiness %s: %w", readiness.InstancePath, err)
 	}
 	if admission.preAdmission {

@@ -7,6 +7,7 @@ import (
 	"os"
 	"path/filepath"
 	"strings"
+	"sync/atomic"
 	"testing"
 	"time"
 
@@ -15,6 +16,7 @@ import (
 	runtimepkg "github.com/division-sh/swarm/internal/runtime"
 	"github.com/division-sh/swarm/internal/runtime/contracts"
 	"github.com/division-sh/swarm/internal/runtime/pipeline"
+	"github.com/division-sh/swarm/internal/runtime/runfork"
 	"github.com/division-sh/swarm/internal/runtime/runforkexecution"
 	"github.com/division-sh/swarm/internal/runtime/semanticview"
 	"github.com/division-sh/swarm/internal/runtime/startupownership"
@@ -77,6 +79,7 @@ type deploymentResourceFixture struct {
 	liveContexts *runtimepkg.RuntimeContextManager
 	config       *config.Config
 	forkAgents   runforkexecution.SelectedContractAgentRuntimeOptions
+	forkRequest  atomic.Pointer[runfork.ForkOperationRequest]
 }
 
 type deploymentFanOutDiagnostic struct {

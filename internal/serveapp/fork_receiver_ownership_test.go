@@ -492,7 +492,11 @@ func runForkReceiverOwnershipJourney(t *testing.T, backend servedparity.Backend,
 		"event_name": seedName, "bundle_hash": rt.BundleHash,
 		"payload": map[string]any{"token": "receiver-proof"}, "idempotency_key": "ownership-seed",
 	})
-	requireServedLiveRootMode(t, rt, seed.RunID, seed.EventID)
+	var rootEventOwner any = rt.SQLite
+	if rt.Postgres != nil {
+		rootEventOwner = rt.Postgres
+	}
+	requireServedLiveRootMode(t, rt.Runtime.ExecutionPosture, storetest.LoadCanonicalEventRecord(t, t.Context(), rootEventOwner, seed.EventID), seed.RunID)
 	waitServedRunDeliveryQuiescence(t, rt.ReadRunDeliveries, seed.RunID)
 	waitForkReceiverSourceCompletion(t, rt, seed.RunID)
 	seedRows := readForkReceiverRows(t, rt, seed.RunID)

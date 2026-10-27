@@ -7,6 +7,7 @@ import (
 	"fmt"
 	"time"
 
+	"github.com/division-sh/swarm/internal/runtime/agenttopology"
 	"github.com/division-sh/swarm/internal/runtime/canonicaljson"
 	runtimemanager "github.com/division-sh/swarm/internal/runtime/manager"
 	"github.com/division-sh/swarm/internal/runtime/startupownership"
@@ -14,15 +15,15 @@ import (
 	"github.com/division-sh/swarm/internal/store/internal/backend/runlifecycle/sourceadmission"
 )
 
-func (s *RunForkPostgresOwner) ValidateLifecycleDiagnosticOriginTx(ctx context.Context, tx *sql.Tx, result runtimemanager.AgentLifecycleTransitionResult, historical bool) (string, error) {
-	return validateLifecycleDiagnosticOriginTx(ctx, tx, result, historical, false)
+func (s *RunForkPostgresOwner) ValidateLifecycleDiagnosticOriginTx(ctx context.Context, tx *sql.Tx, result runtimemanager.AgentLifecycleTransitionResult, historical bool, operationKind string) (string, error) {
+	return validateLifecycleDiagnosticOriginTx(ctx, tx, result, historical, false, operationKind)
 }
 
-func (s *RunForkSQLiteOwner) ValidateLifecycleDiagnosticOriginTx(ctx context.Context, tx *sql.Tx, result runtimemanager.AgentLifecycleTransitionResult, historical bool) (string, error) {
-	return validateLifecycleDiagnosticOriginTx(ctx, tx, result, historical, true)
+func (s *RunForkSQLiteOwner) ValidateLifecycleDiagnosticOriginTx(ctx context.Context, tx *sql.Tx, result runtimemanager.AgentLifecycleTransitionResult, historical bool, operationKind string) (string, error) {
+	return validateLifecycleDiagnosticOriginTx(ctx, tx, result, historical, true, operationKind)
 }
 
-func validateLifecycleDiagnosticOriginTx(ctx context.Context, tx *sql.Tx, result runtimemanager.AgentLifecycleTransitionResult, historical, sqlite bool) (string, error) {
+func validateLifecycleDiagnosticOriginTx(ctx context.Context, tx *sql.Tx, result runtimemanager.AgentLifecycleTransitionResult, historical, sqlite bool, operationKind string) (string, error) {
 	origin := result.DiagnosticProvenance.Origin
 	if err := origin.Validate(); err != nil {
 		return "", err
@@ -33,7 +34,7 @@ func validateLifecycleDiagnosticOriginTx(ctx context.Context, tx *sql.Tx, result
 	}
 	if origin.Owner == runtimemanager.LifecycleDiagnosticNormal {
 		if hasBinding {
-			return "", validateOrdinaryLifecycleHandoffTx(ctx, tx, result, historical, sqlite)
+			return "", validateOrdinaryLifecycleHandoffTx(ctx, tx, result, historical, sqlite, operationKind)
 		}
 		return "", nil
 	}
@@ -93,7 +94,7 @@ func validateLifecycleDiagnosticOriginTx(ctx context.Context, tx *sql.Tx, result
 	return bindingID, nil
 }
 
-func validateOrdinaryLifecycleHandoffTx(ctx context.Context, tx *sql.Tx, result runtimemanager.AgentLifecycleTransitionResult, historical, sqlite bool) error {
+func validateOrdinaryLifecycleHandoffTx(ctx context.Context, tx *sql.Tx, result runtimemanager.AgentLifecycleTransitionResult, historical, sqlite bool, operationKind string) error {
 	observe := sourceadmission.ObserveRetainedLiveHandoff
 	if historical {
 		observe = sourceadmission.ObserveHistoricalLiveHandoff
@@ -120,6 +121,24 @@ func validateOrdinaryLifecycleHandoffTx(ctx context.Context, tx *sql.Tx, result 
 	}
 	if !expected.Equal(result.ProcessBinding) {
 		return errors.New("live lifecycle diagnostic differs from its ordinary grant")
+	}
+	if operationKind == "process_takeover" && grant.SelectedFork == nil &&
+		(grant.State == startupownership.GrantPrepared || grant.State == startupownership.GrantProbeSettled) {
+		if err := generationauthority.RequireCurrentGrantTx(ctx, tx, grant, sqlite); err != nil {
+			return err
+		}
+		current, err := generationauthority.ProcessCoordinatesCurrentTx(ctx, tx, grant.ProcessCoordinates(), sqlite)
+		if err != nil || !current {
+			return errors.Join(err, errors.New("lifecycle takeover diagnostic process is no longer current"))
+		}
+		plan, present, err := generationauthority.ReadSourceSetTx(ctx, tx, sqlite, true)
+		if err != nil {
+			return err
+		}
+		if !present || plan.Revision != grant.SourceSetRevision || !generationauthority.SourceSetContains(plan, agenttopology.SourceCoordinate{BundleHash: grant.BundleHash}) {
+			return errors.New("lifecycle takeover diagnostic source set is no longer current")
+		}
+		return nil
 	}
 	return generationauthority.RequireAdmittedOrdinaryGrantTx(ctx, tx, grant, result.ProcessBinding.BundleHash, sqlite)
 }

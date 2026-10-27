@@ -12,6 +12,7 @@ import (
 	"github.com/division-sh/swarm/internal/runtime/core/flowidentity"
 	"github.com/division-sh/swarm/internal/runtime/testfixtures/canonicalrouting"
 	"github.com/division-sh/swarm/internal/servedparity"
+	"github.com/division-sh/swarm/internal/store/storetest"
 )
 
 func requireSupplementalForkAcquisitionSettlement(t *testing.T, rt servedControlProofRuntime, runID, eventID string, policy canonicalrouting.ForkReceiverPolicy) events.DeliveryRoute {
@@ -124,7 +125,11 @@ func TestSelectedForkSupplementalReceiverAcquisitionWithoutPostRevisionEmissionB
 				publication := newExactOriginPublicationProbe(t)
 				rt := startServedLiveFlowProofRuntimeFromSource(t, backend, canonicalrouting.CopyForkReceiverAcquisitionWithoutFinishedEmission(t, tc.policy))
 				seed := requireServedEventPublishRPCResult(t, rt.Endpoint, map[string]any{"event_name": "start.seeded", "bundle_hash": rt.BundleHash, "payload": map[string]any{"token": "receiver-proof"}, "idempotency_key": "acquisition-seed"})
-				requireServedLiveRootMode(t, rt, seed.RunID, seed.EventID)
+				var rootEventOwner any = rt.SQLite
+				if rt.Postgres != nil {
+					rootEventOwner = rt.Postgres
+				}
+				requireServedLiveRootMode(t, rt.Runtime.ExecutionPosture, storetest.LoadCanonicalEventRecord(t, t.Context(), rootEventOwner, seed.EventID), seed.RunID)
 				waitServedRunDeliveryQuiescence(t, rt.ReadRunDeliveries, seed.RunID)
 				waitForkReceiverSourceCompletion(t, rt, seed.RunID)
 				seedRows := readForkReceiverRows(t, rt, seed.RunID)

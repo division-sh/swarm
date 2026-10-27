@@ -538,7 +538,11 @@ func (am *AgentManager) verifyDynamicFlowRuntimeProcessTopology(ctx context.Cont
 	if err != nil {
 		return err
 	}
-	if err := verifyDynamicFlowAgentExpectations(records, plan.Agents); err != nil {
+	comparisonRecords, err := am.flowReadinessComparisonRecords(plan, source.source, records)
+	if err != nil {
+		return err
+	}
+	if err := verifyDynamicFlowAgentExpectations(comparisonRecords, plan.Agents); err != nil {
 		return err
 	}
 	topologyAuthority, err := DynamicFlowAgentTopologyAdmission(plan)
