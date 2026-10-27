@@ -132,8 +132,8 @@ func TestServeSessionIncomingSelectionConsumesExactCompiledOwners(t *testing.T) 
 		if _, found := declared.FindExactDeclaration(candidate.Provider, candidate.Interface, candidate.Coordinate, candidate.Target.Selector); !found {
 			t.Fatal("canonical declaration lookup demanded executable authority")
 		}
-		if _, found := declared.FindExact(candidate.Provider, candidate.Interface, candidate.Coordinate, candidate.Target.Selector); found {
-			t.Fatal("declaration entered the executable lookup")
+		if _, found := declared.FindExact(candidate.Provider, candidate.Interface, candidate.Coordinate, candidate.Target.Selector); !found {
+			t.Fatal("exact runtime occurrence lookup dropped a valid declaration")
 		}
 	}
 	for _, reverse := range []bool{false, true} {

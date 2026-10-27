@@ -411,7 +411,7 @@ func lockAllActiveQuiescenceRunsTx(ctx context.Context, tx *sql.Tx) ([]runtimeru
 		SELECT run_id::text, COALESCE(bundle_hash, ''), COALESCE(status, '')
 		FROM runs
 		WHERE status IN (`+runLifecycleActiveStateSQLValues+`)
-		  AND runs.flow_path IS NULL
+		  AND NOT runs.landing_run
 		ORDER BY run_id::text
 		FOR UPDATE
 	`)
@@ -461,7 +461,7 @@ func sqliteLockAllActiveQuiescenceRunsTx(ctx context.Context, tx *sql.Tx) ([]run
 		SELECT run_id, COALESCE(bundle_hash, ''), COALESCE(status, '')
 		FROM runs
 		WHERE lower(COALESCE(status, '')) IN ('running', 'paused', 'live')
-		  AND runs.flow_path IS NULL
+		  AND NOT runs.landing_run
 		ORDER BY run_id
 	`)
 	if err != nil {

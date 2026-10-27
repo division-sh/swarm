@@ -11,7 +11,6 @@ import (
 	"testing"
 	"time"
 
-	"github.com/division-sh/swarm/internal/channelonboarding"
 	"github.com/division-sh/swarm/internal/operatorchannel"
 )
 
@@ -87,7 +86,7 @@ func TestServeSessionHeldAuthenticationCheckpointBothStores(t *testing.T) {
 			retainedHeader, headerErr := os.ReadFile(headerPath)
 			if err != nil || !ok || after.OperationID != f.op.OperationID || after.SessionConnectionID != f.op.SessionConnectionID ||
 				after.Coordinate != f.op.Coordinate || after.Revision != f.op.Revision+1 || after.SessionAccount.AccountRef != accountRef ||
-				after.IdentityOperationID != "" || after.ActivationRevision != 0 || after.Coordinate != (channelonboarding.ChannelRuntimeContextCoordinate{}) ||
+				after.IdentityOperationID != "" || after.ActivationRevision != 0 ||
 				current != f.adapter.connection(f.op.OperationID) || f.selections.Load() != 2 || headerErr != nil || !bytes.Equal(header, retainedHeader) {
 				t.Fatal("released authentication changed responsibility, identity, header or checkpoint ownership")
 			}

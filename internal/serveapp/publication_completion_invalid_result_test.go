@@ -128,22 +128,25 @@ func (s *publicationAuditPipelineRelease) Release(ctx context.Context, claim pip
 		}
 	}
 	err := s.Store.Release(ctx, claim)
-	s.recordClaimDisposition(claim, err)
+	s.recordClaimDisposition(claim, err, true)
 	return err
 }
 
 func (s *publicationAuditPipelineRelease) Settle(ctx context.Context, claim pipelineobligation.Claim, disposition pipelineobligation.Disposition) (pipelineobligation.SettlementOutcome, error) {
 	outcome, err := s.Store.Settle(ctx, claim, disposition)
 	if outcome.Committed() {
-		s.recordClaimDisposition(claim, err)
+		s.recordClaimDisposition(claim, err, false)
 	}
 	return outcome, err
 }
 
-func (s *publicationAuditPipelineRelease) recordClaimDisposition(claim pipelineobligation.Claim, err error) {
+func (s *publicationAuditPipelineRelease) recordClaimDisposition(claim pipelineobligation.Claim, err error, released bool) {
 	s.probe.mu.Lock()
 	if claim.EventID() == s.probe.eventID {
 		s.probe.claimDisposeCount++
+		if released {
+			s.probe.claimReleaseCount++
+		}
 		s.probe.claimDisposeError = err
 		s.probe.claimDisposeOnce.Do(func() { close(s.probe.claimDisposed) })
 	}
