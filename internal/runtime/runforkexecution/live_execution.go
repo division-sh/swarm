@@ -43,7 +43,7 @@ func executePreparedLiveFork(ctx context.Context, req SelectedContractExecutionR
 	if err != nil {
 		return out, err
 	}
-	if found {
+	if found && !req.liveSelectionHeld {
 		releaseSelection := req.LiveContexts.BeginLiveRunSelection()
 		defer releaseSelection()
 		req.liveSelectionHeld = true

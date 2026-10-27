@@ -31,6 +31,52 @@ func (s *RunLifecycleSQLiteOwner) LoadLiveRun(ctx context.Context, scope runtime
 	return loadLiveRun(ctx, s.backend, scope)
 }
 
+func (s *RunLifecyclePostgresOwner) LoadLandingRun(ctx context.Context, scope runtimerunlifecycle.LiveRunScope) (runtimerunlifecycle.LandingRun, bool, error) {
+	if err := s.requireCurrentSchema(); err != nil {
+		return runtimerunlifecycle.LandingRun{}, false, err
+	}
+	return loadLandingRun(ctx, s.backend, scope)
+}
+
+func (s *RunLifecycleSQLiteOwner) LoadLandingRun(ctx context.Context, scope runtimerunlifecycle.LiveRunScope) (runtimerunlifecycle.LandingRun, bool, error) {
+	if err := s.requireCurrentSchema(); err != nil {
+		return runtimerunlifecycle.LandingRun{}, false, err
+	}
+	return loadLandingRun(ctx, s.backend, scope)
+}
+
+func loadLandingRun(ctx context.Context, q rowQueryer, scope runtimerunlifecycle.LiveRunScope) (runtimerunlifecycle.LandingRun, bool, error) {
+	if err := scope.Validate(); err != nil {
+		return runtimerunlifecycle.LandingRun{}, false, err
+	}
+	result := runtimerunlifecycle.LandingRun{LiveRun: runtimerunlifecycle.LiveRun{Scope: scope}}
+	var bundleHash string
+	err := q.QueryRowContext(ctx, `SELECT run_id,bundle_hash,status FROM runs
+		WHERE flow_path=$1 AND landing_run=TRUE`, scope.FlowPath).Scan(&result.RunID, &bundleHash, &result.State)
+	if errors.Is(err, sql.ErrNoRows) {
+		return runtimerunlifecycle.LandingRun{}, false, nil
+	}
+	if err != nil {
+		return runtimerunlifecycle.LandingRun{}, false, fmt.Errorf("read landing run: %w", err)
+	}
+	result.Source, err = runtimecorrelation.DecodeSourceArtifactFact(bundleHash)
+	return result, err == nil, err
+}
+
+// Only creation/transition to live writes this fact, in the same transaction.
+func selectLandingRunTx(ctx context.Context, tx *sql.Tx, runID string) error {
+	if _, err := tx.ExecContext(ctx, `UPDATE runs SET landing_run=FALSE
+		WHERE flow_path=(SELECT flow_path FROM runs WHERE run_id=$1)
+		AND run_id<>$1 AND landing_run=TRUE`, runID); err != nil {
+		return fmt.Errorf("clear predecessor landing run: %w", err)
+	}
+	if _, err := tx.ExecContext(ctx, `UPDATE runs SET landing_run=TRUE
+		WHERE run_id=$1 AND status='live' AND flow_path IS NOT NULL`, runID); err != nil {
+		return fmt.Errorf("select landing run: %w", err)
+	}
+	return nil
+}
+
 func (s *RunLifecyclePostgresOwner) LoadRunLiveScope(ctx context.Context, runID string) (runtimerunlifecycle.LiveRunScope, error) {
 	if err := s.requireCurrentSchema(); err != nil {
 		return runtimerunlifecycle.LiveRunScope{}, err

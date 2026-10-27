@@ -13,7 +13,6 @@ import (
 	runtimeinbound "github.com/division-sh/swarm/internal/runtime/inboundpublication"
 	storedelivery "github.com/division-sh/swarm/internal/store/internal/backend/delivery"
 	"github.com/division-sh/swarm/internal/store/internal/backend/mutationprotocol"
-	storestandingdisposition "github.com/division-sh/swarm/internal/store/internal/backend/standingdisposition"
 )
 
 func (s *EventSQLiteOwner) CommitInboundPublication(ctx context.Context, command runtimeinbound.CommitCommand) (runtimeinbound.CommitResult, error) {
@@ -246,39 +245,12 @@ func admitSQLiteInboundStandingTargetTx(ctx context.Context, s *EventSQLiteOwner
 	if err := admitNativeInboundPublicationTx(ctx, tx, false, command); err != nil {
 		return err
 	}
+	if err := admitInboundLandingRunTx(ctx, tx, false, command); err != nil {
+		return err
+	}
 	request := command.Request.Normalized()
-	var flowPath, runID, publicationState string
-	var generation, publicationSequence int64
-	err := tx.QueryRowContext(ctx, `
-		SELECT flow_path, current_run_id,
-		       current_generation, publication_sequence, publication_state
-		FROM standing_services WHERE service_id = ?
-	`, request.StableServiceID).Scan(&flowPath, &runID, &generation, &publicationSequence, &publicationState)
-	if errors.Is(err, sql.ErrNoRows) {
-		return fmt.Errorf("standing service %s is not admitted", request.StableServiceID)
-	}
-	if err != nil {
-		return fmt.Errorf("lock sqlite inbound standing service: %w", err)
-	}
-	if flowPath != request.FlowPath || runID != request.ResolvedRunID || generation != request.ExpectedGeneration || publicationSequence != command.PublicationSequence() {
-		return fmt.Errorf("stale or conflicting sqlite inbound standing target")
-	}
-	disposition, err := storestandingdisposition.ReadByRun(ctx, tx, false, request.ResolvedRunID)
-	if err != nil {
-		return fmt.Errorf("classify sqlite inbound standing target: %w", err)
-	}
-	if !disposition.Executable() || publicationState != "published" {
-		return fmt.Errorf("standing service %s is %s/%s and cannot accept inbound publication", request.StableServiceID, disposition.Kind, publicationState)
-	}
 	if err := s.RunLifecycleSQLiteOwner.RequireActiveTx(ctx, tx, request.ResolvedRunID); err != nil {
 		return fmt.Errorf("admit sqlite inbound target run lifecycle: %w", err)
-	}
-	var generationRunID string
-	if err := tx.QueryRowContext(ctx, `SELECT run_id FROM standing_service_generations WHERE service_id = ? AND generation = ? AND retired_at IS NULL`, request.StableServiceID, generation).Scan(&generationRunID); err != nil {
-		return fmt.Errorf("lock sqlite inbound standing generation: %w", err)
-	}
-	if generationRunID != request.ResolvedRunID {
-		return fmt.Errorf("sqlite standing generation run changed during inbound admission")
 	}
 	return nil
 }

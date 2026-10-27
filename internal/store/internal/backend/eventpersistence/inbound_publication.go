@@ -18,7 +18,6 @@ import (
 	storeactivityjournal "github.com/division-sh/swarm/internal/store/internal/backend/activityjournal"
 	storechanneldelivery "github.com/division-sh/swarm/internal/store/internal/backend/channeldelivery"
 	"github.com/division-sh/swarm/internal/store/internal/backend/mutationprotocol"
-	storestandingdisposition "github.com/division-sh/swarm/internal/store/internal/backend/standingdisposition"
 )
 
 var errInboundPublicationNotFound = errors.New("inbound publication not found")
@@ -414,39 +413,12 @@ func admitPostgresInboundStandingTargetTx(ctx context.Context, s *EventPostgresO
 	if err := admitNativeInboundPublicationTx(ctx, tx, true, command); err != nil {
 		return err
 	}
+	if err := admitInboundLandingRunTx(ctx, tx, true, command); err != nil {
+		return err
+	}
 	request := command.Request.Normalized()
-	var flowPath, runID, publicationState string
-	var generation, publicationSequence int64
-	err := tx.QueryRowContext(ctx, `
-		SELECT flow_path, current_run_id::text,
-		       current_generation, publication_sequence, publication_state
-		FROM standing_services WHERE service_id = $1::uuid FOR UPDATE
-	`, request.StableServiceID).Scan(&flowPath, &runID, &generation, &publicationSequence, &publicationState)
-	if errors.Is(err, sql.ErrNoRows) {
-		return fmt.Errorf("standing service %s is not admitted", request.StableServiceID)
-	}
-	if err != nil {
-		return fmt.Errorf("lock inbound standing service: %w", err)
-	}
-	if flowPath != request.FlowPath || runID != request.ResolvedRunID || generation != request.ExpectedGeneration || publicationSequence != command.PublicationSequence() {
-		return fmt.Errorf("stale or conflicting inbound standing target")
-	}
-	disposition, err := storestandingdisposition.ReadByRun(ctx, tx, true, request.ResolvedRunID)
-	if err != nil {
-		return fmt.Errorf("classify inbound standing target: %w", err)
-	}
-	if !disposition.Executable() || publicationState != "published" {
-		return fmt.Errorf("standing service %s is %s/%s and cannot accept inbound publication", request.StableServiceID, disposition.Kind, publicationState)
-	}
 	if err := s.RunLifecyclePostgresOwner.RequireActiveTx(ctx, tx, request.ResolvedRunID); err != nil {
 		return fmt.Errorf("admit inbound target run lifecycle: %w", err)
-	}
-	var generationRunID string
-	if err := tx.QueryRowContext(ctx, `SELECT run_id::text FROM standing_service_generations WHERE service_id = $1::uuid AND generation = $2 AND retired_at IS NULL FOR UPDATE`, request.StableServiceID, generation).Scan(&generationRunID); err != nil {
-		return fmt.Errorf("lock inbound standing generation: %w", err)
-	}
-	if generationRunID != request.ResolvedRunID {
-		return fmt.Errorf("standing generation run changed during inbound admission")
 	}
 	return nil
 }
