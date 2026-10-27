@@ -3,6 +3,9 @@ package runtimepersistence
 import (
 	"context"
 	"errors"
+	"io/fs"
+	"os"
+	"path/filepath"
 	"reflect"
 	"strings"
 	"testing"
@@ -66,6 +69,55 @@ func TestFlowConstructorRootEagerTreeBothStores(t *testing.T) {
 				}
 			})
 		}
+		t.Run(backend+"/public-node-identity-silent-headers", func(t *testing.T) {
+			source := os.DirFS(filepath.Join(repoRootForRuntimeWriterGuard(t), "internal/releasee2e/testdata/node_identity"))
+			documents := map[string]string{}
+			if err := fs.WalkDir(source, ".", func(path string, entry fs.DirEntry, err error) error {
+				if err != nil || entry.IsDir() {
+					return err
+				}
+				body, err := fs.ReadFile(source, path)
+				if err != nil {
+					return err
+				}
+				documents[path] = string(body)
+				return nil
+			}); err != nil {
+				t.Fatal(err)
+			}
+			f := newReceiverConfigActivationFixtureWithDocuments(t, backend, false, documents, nil)
+			runID := correlation.RunIDFromContext(f.ctx)
+			req := sqliteFlowActivationRequest(f.bundle, ".", runID, "", runID)
+			req.Instance = flowidentity.Stored(req.ContractBundle, ".", runID, runID, runID, "")
+			plan, err := f.manager.PrepareFlowInstanceActivation(f.ctx, req)
+			if err != nil {
+				t.Fatal(err)
+			}
+			result, err := (agentFixtureFlowActivationCommitter{store: f.store}).CommitFlowInstanceActivation(f.ctx, plan)
+			if err != nil || !result.Acknowledged || !result.Created {
+				t.Fatalf("public fixture constructor commit: %+v %v", result, err)
+			}
+			instances, err := f.store.(pipeline.WorkflowInstancePersistenceReader).ListWorkflowInstances(f.ctx, runID)
+			wanted := map[string]string{
+				runID:         runID,
+				"left":        "84ed5257-7dbc-5111-855e-827abd36948b",
+				"right":       "60897d8d-cc87-5daa-b159-577bf736383b",
+				"left/nested": "a4327142-cbc0-50eb-9fb8-43f6a98ea9d0",
+			}
+			if err != nil || len(instances) != len(wanted) {
+				t.Fatalf("exact fieldless constructor population: %+v err=%v", instances, err)
+			}
+			for _, instance := range instances {
+				wantID, found := wanted[instance.StorageRef]
+				if !found || instance.EntityID != wantID || instance.CurrentState != "pending" {
+					t.Fatalf("silent constructed header lost exact identity/stage: %+v want entity_id=%s stage=pending", instance, wantID)
+				}
+				delete(wanted, instance.StorageRef)
+			}
+			if len(wanted) != 0 {
+				t.Fatalf("silent constructed headers omitted: %+v", wanted)
+			}
+		})
 	}
 }
 
