@@ -256,17 +256,12 @@ func loadSelectedRecoveryExecutionTx(ctx context.Context, tx *sql.Tx, snapshot r
 	if err := canonicaljson.DecodeInto(raw, &preparation); err != nil {
 		return result, err
 	}
-	_, start, err := runforkrevision.LoadStartProjection(ctx, tx, runID)
-	if err != nil {
-		return result, err
-	}
 	actual, err := preparation.Fingerprint()
 	if err != nil {
 		return result, err
 	}
 	if actual != fingerprint || preparation.ForkRunID != runID || preparation.SourceRunID != binding.SourceRunID ||
-		!sameSelectedForkPointIdentity(preparation.ForkPoint, binding.ForkPoint) || preparation.ForkEventID != binding.ForkEventID ||
-		preparation.Coordinates.BundleHash != start.SourceBundleHash {
+		!sameSelectedForkPointIdentity(preparation.ForkPoint, binding.ForkPoint) || preparation.ForkEventID != binding.ForkEventID {
 		return result, fmt.Errorf("selected recovery preparation conflicts with binding")
 	}
 	execution.PreparationFingerprint = fingerprint
@@ -281,7 +276,7 @@ func loadSelectedRecoveryExecutionTx(ctx context.Context, tx *sql.Tx, snapshot r
 		coordinate != execution.ExecutableCoordinateFingerprint || execution.DeclarationPlanFingerprint != preparation.DeclarationPlanFingerprint {
 		return result, fmt.Errorf("selected recovery execution conflicts with preparation")
 	}
-	if err := requireSelectedRecoveryDeclarations(declarationRaw, execution.DeclarationPlanFingerprint, start.SourceBundleHash); err != nil {
+	if err := requireSelectedRecoveryDeclarations(ctx, tx, runID, declarationRaw, execution.DeclarationPlanFingerprint, preparation.Coordinates.BundleHash); err != nil {
 		return result, err
 	}
 	var failure *failures.Envelope
@@ -297,7 +292,14 @@ func loadSelectedRecoveryExecutionTx(ctx context.Context, tx *sql.Tx, snapshot r
 	return result, nil
 }
 
-func requireSelectedRecoveryDeclarations(raw []byte, fingerprint, bundleHash string) error {
+func requireSelectedRecoveryDeclarations(ctx context.Context, tx *sql.Tx, runID string, raw []byte, fingerprint, bundleHash string) error {
+	_, start, err := runforkrevision.LoadStartProjection(ctx, tx, runID)
+	if err != nil {
+		return err
+	}
+	if bundleHash != start.SourceBundleHash {
+		return fmt.Errorf("selected recovery preparation conflicts with binding")
+	}
 	var declarations agenttopology.SelectedDeclarationPlan
 	if err := canonicaljson.DecodeInto(raw, &declarations); err != nil {
 		return err
