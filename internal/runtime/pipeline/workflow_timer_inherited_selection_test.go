@@ -135,6 +135,49 @@ func TestInheritedInitialEntryTimerReusesExactArm(t *testing.T) {
 			if _, found, err := inheritedInitialEntryTimer(source, header, []WorkflowTimerActivation{ordinary}, want.Ref.DeclarationKey, want.Ref.Generation); err != nil || found {
 				t.Fatalf("ordinary arm borrowed inherited selection: found=%t err=%v", found, err)
 			}
+			current, _, _ := inheritedWorkflowTimerSelectionFixture(t, flowID, false)
+			ordinary = inherited.Canonical()
+			ordinary.SourceTimerID, ordinary.ForkedFromRunID, ordinary.ForkedFromEventID, ordinary.ReconstructionOwner = "", "", "", ""
+			ordinary.ForkedFromPointKind, ordinary.ForkedFromPointRevision, ordinary.SourceArmedAt = "", 0, time.Time{}
+			ordinary.FireAt = ordinary.CreatedAt.Add(time.Hour)
+			successor, err := SelectWorkflowTimerSuccessor(semanticview.Wrap(current), source, ordinary, header)
+			if err != nil || successor == nil {
+				t.Fatalf("select ordinary successor: %v", err)
+			}
+			ordinary.Status = workflowTimerStatusCancelled
+			retained := []WorkflowTimerActivation{ordinary, *successor}
+			got, found, err := inheritedInitialEntryTimer(source, header, retained, successor.Ref.DeclarationKey, successor.Ref.Generation)
+			if err != nil || !found || !reflect.DeepEqual(got, *successor) || retained[0].Status != workflowTimerStatusCancelled {
+				t.Fatalf("accepted ordinary successor was lost or revived its predecessor: %+v, %t, %v", got, found, err)
+			}
+			if _, found, err := inheritedInitialEntryTimer(source, header, retained[1:], successor.Ref.DeclarationKey, successor.Ref.Generation); err != nil || found {
+				t.Fatalf("ordinary successor borrowed missing predecessor facts: found=%t err=%v", found, err)
+			}
+			for _, status := range []string{workflowTimerStatusFired, workflowTimerStatusCancelled} {
+				terminal := successor.Canonical()
+				terminal.Status = status
+				if status == workflowTimerStatusFired {
+					terminal.FiredAt = terminal.FireAt
+				}
+				got, found, err := inheritedInitialEntryTimer(source, header, []WorkflowTimerActivation{ordinary, terminal}, terminal.Ref.DeclarationKey, terminal.Ref.Generation)
+				if err != nil || !found || !reflect.DeepEqual(got, terminal) {
+					t.Fatalf("ordinary successor lost its terminal receipt: %+v, %t, %v", got, found, err)
+				}
+			}
+			back, err := SelectWorkflowTimerSuccessor(source, semanticview.Wrap(current), *successor, header)
+			if err != nil || back == nil {
+				t.Fatalf("select returning ordinary arm: %v", err)
+			}
+			cancelled := successor.Canonical()
+			cancelled.Status = workflowTimerStatusCancelled
+			got, found, err = inheritedInitialEntryTimer(semanticview.Wrap(current), header, []WorkflowTimerActivation{ordinary, cancelled, *back}, back.Ref.DeclarationKey, back.Ref.Generation)
+			if err != nil || !found || !reflect.DeepEqual(got, *back) {
+				t.Fatalf("historical cycle hid the accepted successor: %+v, %t, %v", got, found, err)
+			}
+			retained[1].EventType = "timer.selected"
+			if _, _, err := inheritedInitialEntryTimer(source, header, retained, successor.Ref.DeclarationKey, successor.Ref.Generation); err == nil {
+				t.Fatal("ordinary successor with contradictory selected effects was accepted")
+			}
 		})
 	}
 }

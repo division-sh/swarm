@@ -300,12 +300,17 @@ func (l *WorkflowTimerLifecycle) reconcileInitialEntryDeclarations(ctx context.C
 			if err := validateWorkflowTimerTopology(source, declaration); err != nil {
 				return err
 			}
-			inherited, found, err := inheritedInitialEntryTimer(source, instance, active, declaration.SemanticKey(), generation)
+			inherited, found, err := inheritedInitialEntryTimer(source, instance, retained, declaration.SemanticKey(), generation)
 			if err != nil {
 				return err
 			}
 			if found {
-				desired[inherited.Ref.ActivationID] = inherited
+				if inherited.ExecutionMode != initialMode {
+					return fmt.Errorf("retained initial timer disagrees with readiness execution mode")
+				}
+				if inherited.Status == workflowTimerStatusActive {
+					desired[inherited.Ref.ActivationID] = inherited
+				}
 				continue
 			}
 			// A committed inherited occurrence consumed this exact initial edge.
@@ -373,15 +378,17 @@ func (l *WorkflowTimerLifecycle) reconcileInitialEntryDeclarations(ctx context.C
 			continue
 		}
 		expected, keep := desired[activation.Ref.ActivationID]
-		if !keep && activation.SourceTimerID != "" {
-			selected, err := SelectInheritedWorkflowTimer(source, activation, instance)
+		if !keep && (activation.SourceTimerID != "" || !initialEntryOpen) {
+			selected, found, err := inheritedInitialEntryTimer(source, instance, retained, activation.Ref.DeclarationKey, activation.Ref.Generation)
 			if err != nil {
 				return err
 			}
-			if selected == nil {
+			if !found && activation.SourceTimerID != "" {
 				return fmt.Errorf("active inherited workflow timer %s lacks its admitted declaration", activation.Ref.ActivationID)
 			}
-			expected, keep = *selected, true
+			if found {
+				expected, keep = selected, true
+			}
 		}
 		if !keep && !initialEntryOpen {
 			// Source revisions are prospective after the initial-entry edge has passed.
@@ -480,18 +487,32 @@ func (l *WorkflowTimerLifecycle) reconcileInitialEntryDeclarations(ctx context.C
 	return err
 }
 
-func inheritedInitialEntryTimer(source semanticview.Source, instance WorkflowInstance, active []WorkflowTimerActivation, declarationKey string, generation attemptgeneration.Generation) (WorkflowTimerActivation, bool, error) {
+func inheritedInitialEntryTimer(source semanticview.Source, instance WorkflowInstance, retained []WorkflowTimerActivation, declarationKey string, generation attemptgeneration.Generation) (WorkflowTimerActivation, bool, error) {
 	var inherited WorkflowTimerActivation
 	found := false
-	for _, activation := range active {
-		if activation.SourceTimerID == "" || activation.Ref.Cause != timeridentity.WorkflowTimerActivationCauseInitial ||
+	for _, activation := range retained {
+		if activation.Ref.Cause != timeridentity.WorkflowTimerActivationCauseInitial ||
 			activation.Ref.DeclarationKey != declarationKey || activation.Ref.Generation != generation {
+			continue
+		}
+		if activation.SourceTimerID == "" {
+			accepted, err := workflowTimerIsUpgradeSuccessor(source, instance, activation, retained)
+			if err != nil {
+				return WorkflowTimerActivation{}, false, err
+			}
+			if !accepted {
+				continue
+			}
+		} else if activation.Status != workflowTimerStatusActive {
 			continue
 		}
 		if found {
 			return WorkflowTimerActivation{}, false, fmt.Errorf("initial entry has duplicate inherited timer arms for %s", declarationKey)
 		}
-		selected, err := SelectInheritedWorkflowTimer(source, activation, instance)
+		// Terminal successors consume the edge; only their arm facts are compared.
+		selectedInput := activation
+		selectedInput.Status, selectedInput.CancelCause, selectedInput.CancelledAt, selectedInput.FiredAt = workflowTimerStatusActive, "", time.Time{}, time.Time{}
+		selected, err := SelectInheritedWorkflowTimer(source, selectedInput, instance)
 		if err != nil {
 			return WorkflowTimerActivation{}, false, err
 		}
@@ -504,6 +525,37 @@ func inheritedInitialEntryTimer(source semanticview.Source, instance WorkflowIns
 		inherited, found = activation, true
 	}
 	return inherited, found, nil
+}
+
+func workflowTimerIsUpgradeSuccessor(source semanticview.Source, instance WorkflowInstance, activation WorkflowTimerActivation, retained []WorkflowTimerActivation) (bool, error) {
+	if !activation.Ref.Valid() {
+		return false, fmt.Errorf("workflow timer successor requires its exact activation reference")
+	}
+	for _, successor := range retained {
+		if successor.Ref.Valid() && successor.RunID == activation.RunID && successor.EntityID == activation.EntityID && successor.Route == activation.Route &&
+			successor.Ref.Cause == activation.Ref.Cause && successor.Ref.DeclarationKey == activation.Ref.DeclarationKey && successor.Ref.Generation == activation.Ref.Generation &&
+			successor.SourceTimerID == activation.SourceTimerID &&
+			uuid.NewSHA1(uuid.MustParse(activation.Ref.ActivationID), []byte(successor.Ref.DeclarationRevision)).String() == successor.Ref.ActivationID {
+			return false, nil
+		}
+	}
+	for _, predecessor := range retained {
+		if predecessor.Status != workflowTimerStatusCancelled || predecessor.CancelCause != "" || !predecessor.Ref.Valid() ||
+			uuid.NewSHA1(uuid.MustParse(predecessor.Ref.ActivationID), []byte(activation.Ref.DeclarationRevision)).String() != activation.Ref.ActivationID {
+			continue
+		}
+		// Compare immutable arm facts without reviving the cancelled row.
+		predecessor.Status = workflowTimerStatusActive
+		expected, err := selectWorkflowTimerSuccessor(source, predecessor, instance)
+		if err != nil || expected == nil {
+			return false, err
+		}
+		if expected.Ref.DeclarationRevision != activation.Ref.DeclarationRevision {
+			return false, nil
+		}
+		return true, activation.ValidateCauseReplay(*expected)
+	}
+	return false, nil
 }
 
 func initialWorkflowTimerExecutionMode(ctx context.Context, readinessMode executionmode.Mode, active []WorkflowTimerActivation) (executionmode.Mode, error) {
@@ -688,6 +740,10 @@ func SelectWorkflowTimerSuccessor(current, selected semanticview.Source, activat
 	if err := activation.ValidateCauseReplay(*previous); err != nil {
 		return nil, err
 	}
+	return selectWorkflowTimerSuccessor(selected, activation, instance)
+}
+
+func selectWorkflowTimerSuccessor(selected semanticview.Source, activation WorkflowTimerActivation, instance WorkflowInstance) (*WorkflowTimerActivation, error) {
 	projected, err := SelectInheritedWorkflowTimer(selected, activation, instance)
 	if err != nil || projected == nil || projected.Ref.DeclarationRevision == activation.Ref.DeclarationRevision {
 		return projected, err
@@ -698,15 +754,6 @@ func SelectWorkflowTimerSuccessor(current, selected semanticview.Source, activat
 		return nil, fmt.Errorf("workflow timer successor has no executable positive delay")
 	}
 	projected.Ref.ActivationID = uuid.NewSHA1(uuid.MustParse(activation.Ref.ActivationID), []byte(projected.Ref.DeclarationRevision)).String()
-	if activation.Ref.Cause == timeridentity.WorkflowTimerActivationCauseInitial && activation.SourceTimerID == "" {
-		stage := current.FlowInitialStage(instance.WorkflowName)
-		arm, err := workflowTimerActivationForCause(selected, activation.RunID, activation.EntityID, activation.Route, declaration, activation.Ref.Generation,
-			workflowTimerCause{Kind: workflowTimerCauseInitial, EventType: "state:" + stage, ToState: stage, OccurredAt: activation.armedAt(), ExecutionMode: activation.ExecutionMode}, interval)
-		if err != nil {
-			return nil, err
-		}
-		projected.Ref.ActivationID = arm.Ref.ActivationID
-	}
 	projected.FireAt = canonicalWorkflowTimerTime(activation.armedAt().Add(interval))
 	projected.FiredAt = time.Time{}
 	projected.Recurring, projected.RecurrenceInterval = declaration.Recurring, 0
