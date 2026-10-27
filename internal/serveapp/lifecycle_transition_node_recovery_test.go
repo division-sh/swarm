@@ -128,7 +128,7 @@ func TestServedCompiledLoopNodeRecoveryReexecutionOnBothStores(t *testing.T) {
 				}
 				var loop loopruntime.PublicActivation
 				for attempt := 1; attempt <= attempts; attempt++ {
-					loop = readLifecycleLoop(t, rt, seed.RunID, entityID)
+					loop = readLifecycleLoop(t, rt.ReceiverStateReader, seed.RunID, entityID)
 					requireServedEventPublishRPCResult(t, rt.Endpoint, params("loop.admit", fmt.Sprintf("admit-%d", attempt), map[string]any{"revision_id": loop.RevisionID}))
 					requireServedEventPublishEntityState(t, rt.DB, backend, seed.RunID, entityID, "review")
 					if attempt == attempts {
@@ -203,14 +203,14 @@ func TestServedCompiledLoopNodeRecoveryReexecutionOnBothStores(t *testing.T) {
 					if refused.Data["code"] != "EVENT_REPLAY_NO_DELIVERY_HISTORY" || lifecycleStoredSnapshot(t, rt, seed.RunID) != snapshot {
 						t.Fatal("node-only public refusal contract changed")
 					}
-					current := readLifecycleLoop(t, rt, seed.RunID, entityID)
+					current := readLifecycleLoop(t, rt.ReceiverStateReader, seed.RunID, entityID)
 					requireServedEventPublishRPCResult(t, rt.Endpoint, params("loop.admit", "final-admit", map[string]any{"revision_id": current.RevisionID}))
 					requireServedEventPublishEntityState(t, rt.DB, backend, seed.RunID, entityID, "review")
 					requireServedEventPublishRPCResult(t, rt.Endpoint, params("loop.close", "close", map[string]any{"revision_id": current.RevisionID}))
 					requireServedEventPublishEntityState(t, rt.DB, backend, seed.RunID, entityID, "done")
 				}
 				waitServedRunDeliveryQuiescence(t, rt.ReadRunDeliveries, seed.RunID)
-				if closed := readLifecycleLoop(t, rt, seed.RunID, entityID); closed.Status != loopruntime.StatusClosed {
+				if closed := readLifecycleLoop(t, rt.ReceiverStateReader, seed.RunID, entityID); closed.Status != loopruntime.StatusClosed {
 					t.Fatal("loop not closed")
 				}
 				closedState := lifecycleStoredSnapshot(t, rt, seed.RunID)

@@ -83,7 +83,7 @@ func TestReleaseCompiledLifecycleJourneysBothStores(t *testing.T) {
 				requireLifecycleCurrentTransition(t, readLifecycleTransitionHistory(t, rt.ReceiverStateReader, seed.RunID, entityID), started.EventID, "waiting", "drafting")
 				var finalEvent string
 				for attempt := 1; attempt <= 2; attempt++ {
-					current := readLifecycleLoop(t, rt, seed.RunID, entityID)
+					current := readLifecycleLoop(t, rt.ReceiverStateReader, seed.RunID, entityID)
 					if current.Attempt != attempt || current.MaxAttempts != 2 {
 						t.Fatalf("wrong public loop generation: %+v", current)
 					}
@@ -99,7 +99,7 @@ func TestReleaseCompiledLifecycleJourneysBothStores(t *testing.T) {
 					requireServedEventPublishEntityState(t, rt.DB, rt.Backend, seed.RunID, entityID, next)
 					requireLifecycleCurrentTransition(t, readLifecycleTransitionHistory(t, rt.ReceiverStateReader, seed.RunID, entityID), finalEvent, "review", next)
 				}
-				closed := readLifecycleLoop(t, rt, seed.RunID, entityID)
+				closed := readLifecycleLoop(t, rt.ReceiverStateReader, seed.RunID, entityID)
 				if closed.Status != loopruntime.StatusClosed || closed.CloseReason != "escaped" || closed.Attempt != 2 {
 					t.Fatalf("loop cap not closed: %+v", closed)
 				}

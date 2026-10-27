@@ -161,7 +161,7 @@ func TestTier12RuntimeFork_SelectedContractForkExecutionFixture(t *testing.T) {
 		t.Fatalf("fork event lineage = %#v, source event %s", observed.ForkEvents[0], sourceEventID)
 	}
 	assertSelectedContractForkExecutionRows(t, h.db, sourceRunID, forkRunID, sourceEventID, forkEventID)
-	assertSelectedContractForkRuntimeRows(t, h.db, forkRunID, forkEventID)
+	assertSelectedContractForkRuntimeRows(t, h.db, h.pg, forkRunID, forkEventID)
 	assertSelectedContractForkSourceIsolation(t, h.db, sourceRunID, forkRunID, sourceEventID, forkEventID)
 	assertRunCountsUnchanged(t, sourceBefore, selectedContractSourceRunCounts(t, h.db, sourceRunID), "source run after selected execution")
 	assertSourceRowsFrozen(t, sourceRowsBefore, selectedContractSourceRowSnapshot(t, h.db, sourceRunID, sourceEventID), "source rows after selected execution")
@@ -564,7 +564,7 @@ func assertSelectedContractForkExecutionRows(t testing.TB, db *sql.DB, sourceRun
 	}
 }
 
-func assertSelectedContractForkRuntimeRows(t testing.TB, db *sql.DB, forkRunID, forkEventID string) {
+func assertSelectedContractForkRuntimeRows(t testing.TB, db *sql.DB, instances runtimepipeline.WorkflowInstancePersistenceReader, forkRunID, forkEventID string) {
 	t.Helper()
 	ctx := testAuthorActivityContext(context.Background())
 	counts := selectedContractForkRunCounts(t, db, forkRunID)
@@ -581,9 +581,15 @@ func assertSelectedContractForkRuntimeRows(t testing.TB, db *sql.DB, forkRunID, 
 			t.Fatalf("%s rows for fork run %s = 0, counts=%#v", key, forkRunID, counts)
 		}
 	}
-	var fieldCompanions int
-	if err := db.QueryRowContext(ctx, `SELECT COUNT(*) FROM flow_instances WHERE run_id=$1::uuid AND entity_type<>''`, forkRunID).Scan(&fieldCompanions); err != nil {
+	headers, err := instances.ListWorkflowInstances(ctx, forkRunID)
+	if err != nil {
 		t.Fatal(err)
+	}
+	fieldCompanions := 0
+	for _, header := range headers {
+		if header.EntityType != "" {
+			fieldCompanions++
+		}
 	}
 	if counts["entity_state"] != fieldCompanions {
 		t.Fatalf("fork field companions=%d, want %d declared state headers", counts["entity_state"], fieldCompanions)
