@@ -268,14 +268,18 @@ func (l *WorkflowTimerLifecycle) reconcileInitialEntryDeclarations(ctx context.C
 		}
 		var initialMode executionmode.Mode
 		for _, declaration := range workflowTimerDeclarationsForInstance(source, instance) {
-			if !workflowTimerShouldStartOnTransition(declaration, "", currentState, "state:"+currentState) {
+			inherited, found, err := inheritedInitialEntryTimer(source, instance, retained, declaration.SemanticKey(), generation)
+			if err != nil {
+				return err
+			}
+			if !found && !workflowTimerShouldStartOnTransition(declaration, "", currentState, "state:"+currentState) {
 				continue
 			}
 			mayArm, err := workflowTimerMayArmAtStage(source, declaration, currentState)
 			if err != nil {
 				return err
 			}
-			if !mayArm {
+			if !mayArm && !found {
 				continue
 			}
 			if !initialMode.Valid() {
@@ -298,10 +302,6 @@ func (l *WorkflowTimerLifecycle) reconcileInitialEntryDeclarations(ctx context.C
 				return err
 			}
 			if err := validateWorkflowTimerTopology(source, declaration); err != nil {
-				return err
-			}
-			inherited, found, err := inheritedInitialEntryTimer(source, instance, retained, declaration.SemanticKey(), generation)
-			if err != nil {
 				return err
 			}
 			if found {
