@@ -15,6 +15,7 @@ import (
 	"github.com/division-sh/swarm/internal/events/eventtest"
 	"github.com/division-sh/swarm/internal/runtime/core/flowidentity"
 	"github.com/division-sh/swarm/internal/runtime/core/worklifetime"
+	"github.com/division-sh/swarm/internal/runtime/effects"
 	runtimefailures "github.com/division-sh/swarm/internal/runtime/failures"
 	"github.com/division-sh/swarm/internal/runtime/runcontrol"
 	"github.com/division-sh/swarm/internal/runtime/runfork"
@@ -30,7 +31,7 @@ func TestSelectedForkRecoveredReceiverReadinessBothStores(t *testing.T) {
 			t.Run(string(backend)+"/"+change, func(t *testing.T) {
 				cleanupFailure := change == "selected_source_cleanup" || change == "original_source_cleanup"
 				root := localReadinessFixture(t, 1, "agent")
-				h := newRuntimeHarnessForBackend(t, root, backend, true)
+				h := newLiveForkCatalogHarness(t, root, backend)
 				selected := runScopedCatalogStore(t, h)
 				const path = "worker-flow/worker-001"
 				entity := eventtest.UUID("run-scoped-selected-fork-worker")
@@ -49,7 +50,8 @@ func TestSelectedForkRecoveredReceiverReadinessBothStores(t *testing.T) {
 				cfg := testRuntimeConfig()
 				cfg.LLM.Backend = "anthropic"
 				options := selectedContractAgentRuntimeOptionsForCatalogHarness(h, cfg)
-				staged := stageCatalogSelectedContractFork(t, ctx, forkStore, selectedContractExecutionOwnerForCatalogHarness(t, h), loader, selection, options, catalogRuntimeRunID, frontierID)
+				operation := catalogStagedForkOperation(t, ctx, forkStore, selection, catalogRuntimeRunID, frontierID)
+				staged := stageCatalogSelectedContractFork(t, ctx, forkStore, selectedContractExecutionOwnerForCatalogHarness(t, h), loader, selection, options, catalogRuntimeRunID, frontierID, operation)
 				child := staged.ForkRunID
 				readiness, found, err := h.rt.Pipeline.LoadDynamicFlowRuntimeReadiness(ctx, child, flowidentity.RouteForInstancePath(path))
 				if err != nil || !found || readiness.RunStatus != runfork.RunForkMaterializedStatus || !readiness.Eligible() {
@@ -64,9 +66,43 @@ func TestSelectedForkRecoveredReceiverReadinessBothStores(t *testing.T) {
 					}
 					selected = runScopedCatalogStore(t, h)
 				} else if change == "runtime_replacement" {
-					if err := h.rt.Shutdown(); err != nil {
-						t.Fatalf("retire loaded runtime before selected recovery: %v", err)
+					rootEvent := storetest.LoadCanonicalEventRecord(t, ctx, selected, frontierID)
+					for rootEvent.ParentEventID() != "" {
+						rootEvent = storetest.LoadCanonicalEventRecord(t, ctx, selected, rootEvent.ParentEventID())
 					}
+					digest, err := catalogReplayPlatformSpecDigest(repoRootFromCatalogE2E(t))
+					if err != nil {
+						t.Fatal(err)
+					}
+					var payload map[string]any
+					if err := json.Unmarshal(rootEvent.Payload(), &payload); err != nil {
+						t.Fatal(err)
+					}
+					transcript := &catalogExecutionTranscript{version: catalogReplayTranscriptVersion,
+						platformSpecDigest: digest, bundleHash: h.rt.Options.SourceArtifactFact.BundleHash(), runID: catalogRuntimeRunID,
+						groups: []catalogTranscriptGroup{{steps: []catalogTriggerStep{{
+							Event: string(rootEvent.Type()), Payload: payload, inputKind: catalogReplayInputRootIngress,
+							eventID: rootEvent.ID(), createdAt: rootEvent.CreatedAt(), sourceAgent: rootEvent.SourceAgent(),
+						}}}},
+					}
+					loadYAML(t, filepath.Join(root, "tests/fixtures.yaml"), &transcript.agentFixtures)
+					h = h.reopenFromTranscript(transcript)
+					ctx = worklifetime.WithOccurrence(catalogRunContext(h, catalogRuntimeRunID), h.rt.WorkOccurrence())
+					selected = runScopedCatalogStore(t, h)
+					options = selectedContractAgentRuntimeOptionsForCatalogHarness(h, cfg)
+					recoveredOwner := constructCatalogSelectedExecutionOwner(t, h, nil)
+					if err := recoveredOwner.BindSelectedProcess(h.ctx, h.processOwner, h.processTopology); err != nil {
+						t.Fatal(err)
+					}
+					live := catalogLiveForkRequest(t, h, ctx, forkexecution.SelectedContractExecutionRequest{
+						SourceRunID: catalogRuntimeRunID, At: frontierID, ForkOperation: &operation, ContractSelection: selection,
+					})
+					if _, err := recoveredOwner.RecoverSelectedForkContexts(ctx, effects.NewRecoveryRequest(time.Now().UTC(), options.ExecutionPosture), forkexecution.SelectedForkRecoveryEnvironment{
+						SourceLoader: loader, AgentRuntime: options, AcquireLiveRuntime: live.AcquireLiveRuntime, LiveContexts: live.LiveContexts, LiveRuns: live.LiveRuns,
+					}); err != nil {
+						t.Fatal(err)
+					}
+					h.selectedOwners = append(h.selectedOwners, recoveredOwner)
 				} else if change == "terminal_run" {
 					if _, err := selected.StopRunControlOutcome(ctx, runcontrol.TransitionRequest{RunID: child, Reason: "terminal recovery refusal", ControlledBy: "cataloge2e"}); err != nil {
 						t.Fatal(err)
@@ -94,16 +130,37 @@ func TestSelectedForkRecoveredReceiverReadinessBothStores(t *testing.T) {
 						}
 					}()
 				}
-				activated, err := forkexecution.ActivateSelectedContractRunFork(ctx, forkexecution.SelectedContractActivationGateRequest{
-					ForkRunID: child, AllowSourceFreeze: true, Store: selected,
-					ExecutionOwner: executionOwner, SourceLoader: loader, AgentRuntime: options,
-				})
-				if change == "valid" || change == "reconstructed_store" || change == "runtime_replacement" || cleanupFailure {
-					if err != nil {
+				lawful := change == "valid" || change == "reconstructed_store" || change == "runtime_replacement" || cleanupFailure
+				var activated forkexecution.SelectedContractExecutionResult
+				if lawful {
+					activated, err = executeCatalogLiveFork(t, h, ctx, forkexecution.SelectedContractExecutionRequest{
+						SourceRunID: catalogRuntimeRunID, At: frontierID, AllowSourceFreeze: true, ForkOperation: &operation,
+						Owner: executionOwner, SourceLoader: loader, ContractSelection: selection, AgentRuntime: options,
+					})
+				} else {
+					// These are native pre-handoff admission negatives, not live ACKs.
+					refused, refusal := forkexecution.ActivateSelectedContractRunFork(ctx, forkexecution.SelectedContractActivationGateRequest{
+						ForkRunID: child, AllowSourceFreeze: true, Store: selected,
+						ExecutionOwner: executionOwner, SourceLoader: loader, AgentRuntime: options,
+					})
+					err = refusal
+					if refused.Activated || refused.ExecutedEventCount != 0 || refused.ForkLocalRuntimeContainer != nil || len(refused.ForkEvents) != 0 {
+						t.Fatalf("contradictory native child reached publication: %#v, %v", refused, err)
+					}
+				}
+				if lawful {
+					if sourceCleanup != nil && !errors.Is(err, sourceCleanup.failure) || sourceCleanup == nil && err != nil {
 						logSelectedForkRecoveryFailure(t, ctx, h, child, err)
 						t.Fatalf("lawful persisted recovery: %#v, %v", activated, err)
 					}
-					if !activated.Activated || activated.ExecutedEventCount != 0 || len(activated.ForkEvents) != 0 {
+					wantPublications := 1
+					if change == "runtime_replacement" {
+						wantPublications = 0 // Native startup already executed this exact operation.
+						if after := selectedForkRecoveredPhysicalSnapshot(t, ctx, h, child); after != before {
+							t.Fatal("replaying the recovered ACK changed its retained child")
+						}
+					}
+					if !activated.Activation.Activated || activated.Activation.ForkRunID != child || activated.ExecutedEventCount != 1 || len(activated.ForkEvents) != wantPublications {
 						t.Fatalf("lost immutable recovered activation ACK: %#v", activated)
 					}
 					if observed, observeErr := observeCatalogSelectedExecution(t, h, child); observeErr != nil || observed.ExecutedEventCount != 1 {
@@ -138,7 +195,7 @@ func TestSelectedForkRecoveredReceiverReadinessBothStores(t *testing.T) {
 					}
 					return
 				}
-				if err == nil || activated.Activated || activated.ExecutedEventCount != 0 || activated.ForkLocalRuntimeContainer != nil || len(activated.ForkEvents) != 0 {
+				if err == nil || activated.Activation.Activated || activated.ExecutedEventCount != 0 || len(activated.ForkEvents) != 0 {
 					t.Fatalf("contradictory child reached publication: %#v, %v", activated, err)
 				}
 				if change != "terminal_run" {
@@ -176,6 +233,14 @@ type selectedRecoverySourceCleanup struct {
 	failure        error
 	repaired       atomic.Bool
 	roots          [2]string
+}
+
+func (p *selectedRecoverySourceCleanup) InspectRunForkSelectedContractSourceForRequest(ctx context.Context, req forkexecution.SelectedContractSourceLoadRequest) (forkexecution.LoadedSelectedContractSource, error) {
+	inspector, ok := p.SelectedContractSourceLoader.(forkexecution.SelectedContractSourceInspector)
+	if !ok {
+		return forkexecution.LoadedSelectedContractSource{}, errors.New("source cleanup fixture requires its canonical disposable inspector")
+	}
+	return inspector.InspectRunForkSelectedContractSourceForRequest(ctx, req)
 }
 
 func (p *selectedRecoverySourceCleanup) LoadRunForkSelectedContractSourceForRequest(ctx context.Context, req forkexecution.SelectedContractSourceLoadRequest) (forkexecution.LoadedSelectedContractSource, error) {

@@ -83,7 +83,7 @@ func TestCatalogScenarioRunFixturesPrecedeRuntimeConstruction(t *testing.T) {
 			}
 			for _, call := range fixtureCalls {
 				seen[call.Fun.(*ast.SelectorExpr).Sel.Name]++
-				if filepath.Base(path) != "runtime_harness_test.go" || fn.Name.Name != "newRuntimeHarnessWithTerminalProvider" ||
+				if filepath.Base(path) != "runtime_harness_test.go" || fn.Name.Name != "newRuntimeHarnessWithScope" ||
 					!construction.IsValid() || call.Pos() >= construction {
 					t.Errorf("%s:%s admits scenario fixtures outside pre-construction setup", filepath.Base(path), fn.Name.Name)
 				}

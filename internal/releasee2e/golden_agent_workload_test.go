@@ -21,7 +21,6 @@ import (
 	"testing"
 	"time"
 
-	"github.com/division-sh/swarm/internal/operatorread"
 	"github.com/division-sh/swarm/internal/testplanning"
 	"github.com/division-sh/swarm/internal/testpostgres"
 	"github.com/division-sh/swarm/internal/testutil"
@@ -1084,15 +1083,18 @@ type goldenQuiescence struct {
 }
 
 type goldenDiagnosis struct {
-	Run              goldenRunHeader                             `json:"run"`
-	OperationalState string                                      `json:"operational_state"`
-	BlockingLayer    string                                      `json:"blocking_layer"`
-	BlockingReason   string                                      `json:"blocking_reason"`
-	Heuristics       []string                                    `json:"heuristics"`
-	FailedDeliveries []json.RawMessage                           `json:"failed_deliveries"`
-	FanOut           json.RawMessage                             `json:"fan_out"`
-	TestQuiescence   goldenQuiescence                            `json:"test_quiescence"`
-	Instances        []operatorread.RunInstanceOperationalStatus `json:"instances"`
+	Run              goldenRunHeader   `json:"run"`
+	OperationalState string            `json:"operational_state"`
+	BlockingLayer    string            `json:"blocking_layer"`
+	BlockingReason   string            `json:"blocking_reason"`
+	Heuristics       []string          `json:"heuristics"`
+	FailedDeliveries []json.RawMessage `json:"failed_deliveries"`
+	FanOut           json.RawMessage   `json:"fan_out"`
+	TestQuiescence   goldenQuiescence  `json:"test_quiescence"`
+	Instances        []struct {
+		Stage       string `json:"stage"`
+		Disposition string `json:"disposition"`
+	} `json:"instances"`
 }
 
 func waitForGoldenCrashCheckpoint(t *testing.T, process *releaseServeProcess, store goldenStoreSelection, runID string, candidateIDs []string, deadline time.Duration) goldenRuntimeLog {

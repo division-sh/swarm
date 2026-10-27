@@ -621,8 +621,8 @@ func readWorkspaceProofSourceDomain(t *testing.T, owner runtimebus.EventStore, r
 func requireSelectedForkNativeMCPRead(t *testing.T, owner runtimebus.EventStore, runID, eventID string) {
 	t.Helper()
 	event := storetest.LoadCanonicalEventRecord(t, context.Background(), owner, eventID)
-	if event.RunID() != runID || event.ExecutionMode() != executionmode.Mock {
-		t.Fatalf("private MCP turn event run=%s mode=%s, want run=%s mode=mock", event.RunID(), event.ExecutionMode(), runID)
+	if event.RunID() != runID || event.ExecutionMode() != executionmode.Live {
+		t.Fatalf("public MCP turn event run=%s mode=%s, want run=%s mode=live", event.RunID(), event.ExecutionMode(), runID)
 	}
 	rows, err := storetest.ReadManagedAgentTurnStorage(context.Background(), owner, runID, "same-name")
 	if err != nil {
@@ -630,7 +630,7 @@ func requireSelectedForkNativeMCPRead(t *testing.T, owner runtimebus.EventStore,
 	}
 	count, sessionID := 0, ""
 	for _, row := range rows {
-		if row.TriggerEventID != eventID || row.ExecutionMode != string(executionmode.Mock) {
+		if row.TriggerEventID != eventID || row.ExecutionMode != string(executionmode.Live) {
 			continue
 		}
 		callsRaw, responseRaw, emittedRaw, currentSession := row.ToolCalls, row.ResponsePayload, row.EmittedEvents, row.SessionID
@@ -655,9 +655,12 @@ func requireSelectedForkNativeMCPRead(t *testing.T, owner runtimebus.EventStore,
 			}
 		case 1:
 			var response struct {
-				Text string `json:"text"`
+				Content []struct {
+					Type string `json:"type"`
+					Text string `json:"text"`
+				} `json:"content"`
 			}
-			if err := json.Unmarshal([]byte(responseRaw), &response); err != nil || response.Text != "selected-only-mcp-resource verified" || len(calls) != 0 {
+			if err := json.Unmarshal([]byte(responseRaw), &response); err != nil || len(response.Content) != 1 || response.Content[0].Type != "text" || response.Content[0].Text != "selected-only-mcp-resource verified" || len(calls) != 0 {
 				t.Fatalf("selected child did not consume the target resource result: %s, calls=%s err=%v", responseRaw, callsRaw, err)
 			}
 		default:

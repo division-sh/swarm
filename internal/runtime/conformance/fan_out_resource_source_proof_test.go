@@ -29,6 +29,20 @@ func deploymentResourceSourceWithAgent(t *testing.T, includeAgent bool) semantic
 		if err := os.Remove(filepath.Join(root, notifyallchildren.ChildFlowID, "agents.yaml")); err != nil {
 			t.Fatal(err)
 		}
+		if err := os.Remove(filepath.Join(root, notifyallchildren.ChildFlowID, "events.yaml")); err != nil {
+			t.Fatal(err)
+		}
+		path := filepath.Join(root, notifyallchildren.ChildFlowID, "nodes.yaml")
+		raw, err := os.ReadFile(path)
+		if err != nil {
+			t.Fatal(err)
+		}
+		text := strings.Replace(string(raw), "    - account.notification.completed\n", "", 1)
+		text = strings.Replace(text, "    account.notification.completed:\n      advances_to: completed\n", "", 1)
+		text = strings.Replace(text, "    account.registered:\n", "    account.registered:\n      advances_to: completed\n", 1)
+		if err := os.WriteFile(path, []byte(text), 0o600); err != nil {
+			t.Fatal(err)
+		}
 	}
 	path := filepath.Join(root, notifyallchildren.OwnerFlowID, "events.yaml")
 	raw, err := os.ReadFile(path)

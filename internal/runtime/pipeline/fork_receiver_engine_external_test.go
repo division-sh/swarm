@@ -199,12 +199,12 @@ func TestSelectedForkReceiverSupportedDeliveryBothStores(t *testing.T) {
 				done := make(chan struct{})
 				go func() {
 					defer close(done)
-					result, err := family.Execute(forkCtx, runforkexecution.SelectedContractExecutionRequest{
+					result, err := family.Execute(forkCtx, forkEngineLiveRequest(t, rt, selected, runforkexecution.SelectedContractExecutionRequest{
 						SourceRunID: runID, At: frontier, ExpectedBundleHash: rt.Options.SourceArtifactFact.BundleHash(), AllowSourceFreeze: true,
 						SourceLoader:      runforkexecution.SourceArtifactSelectedContractSourceLoader{RepoRoot: repo, Store: selected.SourceArtifactStore()},
 						ContractSelection: runforkadmission.SelectedContractSelection(semanticview.Wrap(bundle)),
 						AgentRuntime:      runforkexecution.SelectedContractAgentRuntimeOptions{ProcessCapability: capability, ExecutionPosture: rt.ExecutionPosture, AgentManagerOptions: runtimemanager.AgentManagerOptions{TestLifecycleProbe: probe}},
-					})
+					}))
 					acknowledged <- forkEngineAcknowledgment{result: result, err: err}
 				}()
 				t.Cleanup(func() {

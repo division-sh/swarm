@@ -223,6 +223,7 @@ func verifyPublishedFanOutBarrierContinuation(t *testing.T, proof publishedBarri
 					t.Fatal(err)
 				}
 			}
+			request = forkEngineLiveRequest(t, rt, selected, request)
 			result, err := family.Execute(phase, request)
 			defer func() {
 				cleanup, stop := context.WithTimeout(context.WithoutCancel(ctx), 10*time.Second)

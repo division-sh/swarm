@@ -192,6 +192,7 @@ func runMixedFanOutPendingMatrixWithCrash(t *testing.T, refork bool, crash *mixe
 						AllowSourceFreeze: true, ContractSelection: executionRequest.ContractSelection,
 					}
 				}
+				executionRequest = forkEngineLiveRequest(t, rt, selected, executionRequest)
 				result, err := family.Execute(forkCtx, executionRequest)
 				if err != nil || !result.Activation.Activated || result.ForkLocalRuntimeContainer == nil {
 					t.Fatalf("mixed fan-out activation acknowledgment: %+v err=%v", result, err)

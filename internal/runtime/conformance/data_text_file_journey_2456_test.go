@@ -24,6 +24,7 @@ import (
 	"github.com/division-sh/swarm/internal/packadmission"
 	swruntime "github.com/division-sh/swarm/internal/runtime"
 	"github.com/division-sh/swarm/internal/runtime/contracts"
+	"github.com/division-sh/swarm/internal/runtime/pipeline"
 	"github.com/division-sh/swarm/internal/runtime/runcontrol"
 	"github.com/division-sh/swarm/internal/runtime/semanticview"
 	"github.com/division-sh/swarm/internal/runtime/testfixtures/canonicalrouting"
@@ -782,10 +783,15 @@ func textFileTwoBundleOperator2456(t *testing.T, f *deploymentResourceFixture, o
 	if !ok {
 		t.Fatalf("selected store %T lacks canonical run readback", f.selected)
 	}
+	profiles, ok := f.selected.(pipeline.ScenarioExecutionProfileReader)
+	if !ok {
+		t.Fatalf("selected store %T lacks scenario execution profiles", f.selected)
+	}
 	publication := apiv1.EventPublicationOptions{
 		Idempotency: idempotency, Events: f.runtime.bus, Acknowledged: f.runtime.bus,
 		SourceArtifact: f.runtime.bus, RunBundleContext: contextOwner,
 		RuntimeContexts: contexts, Source: f.source, Bundle: newIdentity,
+		ScenarioExecutionProfiles: profiles,
 	}
 	methods := apiv1.MergeOperatorHandlers(
 		apiv1.OperatorRunStartHandlers(apiv1.RunStartHandlerOptions{Publication: publication}),

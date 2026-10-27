@@ -388,7 +388,9 @@ func deploymentForkOwnerWithExecutor(t *testing.T, f *deploymentResourceFixture,
 	if !ok {
 		t.Fatalf("selected store %T lacks source artifact loader", f.selected)
 	}
+	live := deploymentLiveForkRequest(t, f, runforkexecution.SelectedContractExecutionRequest{})
 	recovered, err := owner.RecoverSelectedForkContexts(f.ctx, effects.NewRecoveryRequest(time.Now().UTC(), executionposture.Live), runforkexecution.SelectedForkRecoveryEnvironment{
+		AcquireLiveRuntime: live.AcquireLiveRuntime, LiveContexts: live.LiveContexts, LiveRuns: live.LiveRuns,
 		SourceLoader: runforkexecution.SourceArtifactSelectedContractSourceLoader{
 			RepoRoot: conformanceRepoRoot(t), Store: artifacts,
 		},

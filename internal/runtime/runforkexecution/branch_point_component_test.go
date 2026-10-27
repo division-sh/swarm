@@ -118,7 +118,8 @@ func proveSelectedLiveHandoff(t *testing.T, backend string, pending bool) {
 		t.Fatalf("selected grant was not admitted before self-release: %+v %v", selectedEvidence, err)
 	}
 	activationRequest := runfork.RunForkSelectedContractExecutionActivateRequest{
-		InheritedSchedules: p.readiness, ForkOperation: p.forkOperation,
+		OrdinaryGenerationGrant: ordinary,
+		InheritedSchedules:      p.readiness, ForkOperation: p.forkOperation,
 		DataPins: attachment.materialized.DataPins, ExecutionSource: p.loadedSource.Source,
 		ForkRunID:             attachment.materialized.ForkRunID,
 		AllowedSourceEventIDs: selectedContractExecutionFrontierEventIDs(p.frontier.FrontierEvents),
@@ -242,7 +243,8 @@ func proveSelectedLiveHandoff(t *testing.T, backend string, pending bool) {
 	secondActivation, err := q.owner.ports.fork.ActivateRunForkForSelectedContractExecution(
 		startupownership.WithGenerationGrantEvidence(effects.WithAuthority(q.operation.Context(), second.container.authority), evidence),
 		runfork.RunForkSelectedContractExecutionActivateRequest{
-			InheritedSchedules: q.readiness, ForkOperation: q.forkOperation,
+			OrdinaryGenerationGrant: ordinary,
+			InheritedSchedules:      q.readiness, ForkOperation: q.forkOperation,
 			DataPins: second.materialized.DataPins, ExecutionSource: q.loadedSource.Source,
 			ForkRunID:             second.materialized.ForkRunID,
 			AllowedSourceEventIDs: selectedContractExecutionFrontierEventIDs(q.frontier.FrontierEvents),

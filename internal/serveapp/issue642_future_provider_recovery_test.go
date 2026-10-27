@@ -338,7 +338,7 @@ func TestIssue642FutureProviderRecoveryProcessHelper(t *testing.T) {
 	probe.mu.Unlock()
 	want := runfork.SelectedForkRecoveryResume
 	if mode == "terminal" {
-		want = runfork.SelectedForkRecoveryTerminal
+		want = runfork.SelectedForkRecoveryControlOnly
 	}
 	if len(recovered) != 1 || recovered[0].RunID != proof.Claim.RunID || recovered[0].Disposition != want ||
 		!reflect.DeepEqual(recovered[0].Operation, &proof.Operation) {
@@ -757,7 +757,7 @@ func issue642RequireFutureSourceStartupDiagnostic(t *testing.T, ctx context.Cont
 				added = append(added, row)
 			}
 		}
-		if len(originals) != 0 || len(added) > 1 {
+		if len(originals) != 0 {
 			t.Fatalf("normal startup rewrote source events: removed=%d added=%d", len(originals), len(added))
 		}
 		if len(added) == 0 {
@@ -769,54 +769,88 @@ func issue642RequireFutureSourceStartupDiagnostic(t *testing.T, ctx context.Cont
 			}
 		}
 		rows, err := storetest.DecodeSelectedForkSnapshotRows(storetest.SelectedForkStorageTableSnapshot{Columns: current.Columns, Rows: added})
-		if err != nil || len(rows) != 1 {
+		if err != nil {
 			t.Fatalf("decode exact source startup append: %v", err)
 		}
-		row := rows[0]
-		for column, want := range map[string]string{
-			"run_id": proof.SourceRunID, "event_name": "platform.runtime_log", "event_class": "diagnostic_direct",
-			"produced_by": "runtime", "produced_by_type": "platform", "routing_source_kind": "absent",
-			"source_route": "{}", "target_route": "{}", "target_set": "[]",
-		} {
-			value, err := row[column].Text()
-			if err != nil || value != want {
-				t.Fatalf("source startup diagnostic %s=%q, want %q: %v", column, value, want, err)
-			}
-		}
-		payload, err := row["payload_bytes"].Text()
+		diagnostics, err := storetest.ReadSelectedForkLifecycleDiagnosticStorage(ctx, fixture.selected, proof.SourceRunID)
 		if err != nil {
 			t.Fatal(err)
 		}
-		var log struct {
-			Details struct {
-				Action  string `json:"action"`
-				RunID   string `json:"run_id"`
-				Binding struct {
-					GrantID           string `json:"generation_grant_id"`
-					ProcessAuthority  string `json:"process_authority_id"`
-					ProcessOwner      string `json:"process_owner_id"`
-					ProcessBoot       string `json:"process_boot_id"`
-					BundleHash        string `json:"bundle_hash"`
-					RuntimeInstance   string `json:"runtime_instance_id"`
-					RuntimeGeneration uint64 `json:"runtime_generation"`
-				} `json:"process_binding"`
-				Provenance struct {
-					Origin struct{ Owner, Causality string }
-				} `json:"diagnostic_provenance"`
-			} `json:"details"`
+		for _, row := range rows {
+			for column, want := range map[string]string{
+				"run_id": proof.SourceRunID, "event_name": "platform.runtime_log", "event_class": "diagnostic_direct",
+				"produced_by": "runtime", "produced_by_type": "platform", "routing_source_kind": "absent",
+				"source_route": "{}", "target_route": "{}", "target_set": "[]",
+			} {
+				value, err := row[column].Text()
+				if err != nil || value != want {
+					t.Fatalf("source startup diagnostic %s=%q, want %q: %v", column, value, want, err)
+				}
+			}
+			payload, err := row["payload_bytes"].Text()
+			if err != nil {
+				t.Fatal(err)
+			}
+			var log struct {
+				Details struct {
+					Action  string `json:"action"`
+					RunID   string `json:"run_id"`
+					Binding struct {
+						GrantID           string `json:"generation_grant_id"`
+						ProcessAuthority  string `json:"process_authority_id"`
+						ProcessOwner      string `json:"process_owner_id"`
+						ProcessBoot       string `json:"process_boot_id"`
+						BundleHash        string `json:"bundle_hash"`
+						RuntimeInstance   string `json:"runtime_instance_id"`
+						RuntimeGeneration uint64 `json:"runtime_generation"`
+					} `json:"process_binding"`
+					Provenance struct {
+						Origin struct{ Owner, Causality string }
+					} `json:"diagnostic_provenance"`
+				} `json:"details"`
+			}
+			if err := json.Unmarshal([]byte(payload), &log); err != nil {
+				t.Fatal(err)
+			}
+			var expectedPayload map[string]any
+			if err := json.Unmarshal([]byte(payload), &expectedPayload); err != nil {
+				t.Fatal(err)
+			}
+			eventID, err := row["event_id"].Text()
+			if err != nil {
+				t.Fatal(err)
+			}
+			matched := 0
+			for _, native := range diagnostics.Receipts {
+				var receipt struct {
+					EventID string         `json:"event_id"`
+					RunID   string         `json:"run_id"`
+					Payload map[string]any `json:"payload"`
+				}
+				if err := json.Unmarshal(native.Projection, &receipt); err != nil {
+					t.Fatal(err)
+				}
+				if receipt.EventID == eventID {
+					details, _ := expectedPayload["details"].(map[string]any)
+					if receipt.RunID != proof.SourceRunID || details["outbox_id"] != native.OutboxID || !reflect.DeepEqual(receipt.Payload, expectedPayload) {
+						t.Fatal("source startup append differs from its exact native lifecycle receipt")
+					}
+					matched++
+				}
+			}
+			if matched != 1 {
+				t.Fatal("source startup append lacks its unique immutable lifecycle receipt")
+			}
+			binding := log.Details.Binding
+			if log.Details.Action != "platform.agent_lifecycle_transition" || log.Details.RunID != proof.SourceRunID ||
+				log.Details.Provenance.Origin.Owner != "normal" || log.Details.Provenance.Origin.Causality != "observation" ||
+				binding.GrantID != grant.GrantID || binding.ProcessAuthority != grant.ProcessAuthorityID ||
+				binding.ProcessOwner != grant.ProcessOwnerID || binding.ProcessBoot != grant.ProcessBootID ||
+				binding.BundleHash != grant.BundleHash || binding.RuntimeInstance != grant.RuntimeInstanceID || binding.RuntimeGeneration != grant.RuntimeGeneration {
+				t.Fatalf("source append did not come from this normal startup grant: log=%+v grant=%+v", log, grant)
+			}
 		}
-		if err := json.Unmarshal([]byte(payload), &log); err != nil {
-			t.Fatal(err)
-		}
-		binding := log.Details.Binding
-		if log.Details.Action != "platform.agent_lifecycle_transition" || log.Details.RunID != proof.SourceRunID ||
-			log.Details.Provenance.Origin.Owner != "normal" || log.Details.Provenance.Origin.Causality != "observation" ||
-			binding.GrantID != grant.GrantID || binding.ProcessAuthority != grant.ProcessAuthorityID ||
-			binding.ProcessOwner != grant.ProcessOwnerID || binding.ProcessBoot != grant.ProcessBootID ||
-			binding.BundleHash != grant.BundleHash || binding.RuntimeInstance != grant.RuntimeInstanceID || binding.RuntimeGeneration != grant.RuntimeGeneration {
-			t.Fatalf("source append did not come from this normal startup grant: log=%+v grant=%+v", log, grant)
-		}
-		t.Logf("source_startup_diagnostic run=%s grant=%s original_rows_unchanged=%d append=1", proof.SourceRunID, grant.GrantID, len(before.Rows))
+		t.Logf("source_startup_diagnostic run=%s grant=%s original_rows_unchanged=%d exact_receipt_appends=%d", proof.SourceRunID, grant.GrantID, len(before.Rows), len(rows))
 		proof.SourceDomain = after
 		return
 	}
@@ -864,7 +898,7 @@ func issue642RequireFutureRecoveredOutcome(t *testing.T, fixture issue2564Served
 		t.Fatalf("recovery did not retain exactly two native executors: %+v err=%v", rows, err)
 	}
 	for _, row := range rows {
-		wantFence, wantGeneration := next.Fence, next.Generation
+		wantFence, wantGeneration := next.Fence+1, next.Generation
 		if row.ExecutionID == proof.Claim.ExecutionID {
 			wantFence, wantGeneration = proof.Claim.Fence+1, proof.Claim.Generation
 		} else if row.ExecutionID != next.ExecutionID {

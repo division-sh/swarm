@@ -32,6 +32,8 @@ func proveMixedFanOutChildRefork(t *testing.T, ctx context.Context, selected *st
 		releaseSettlement.Do(func() { close(probe.resumeSettled) })
 	})
 	request.AgentRuntime.AgentManagerOptions.TestLifecycleProbe = probe
+	request.ForkOperation = nil
+	request = forkEngineLiveRequest(t, request.LiveRuntime, selected, request)
 	forkCtx, cancel := context.WithTimeout(ctx, 30*time.Second)
 	defer cancel()
 	result, err := family.Execute(forkCtx, request)

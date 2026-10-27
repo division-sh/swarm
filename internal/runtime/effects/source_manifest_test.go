@@ -115,6 +115,7 @@ var sourcePrimitiveOwners = map[string]primitiveOwner{
 	"internal/runtime/runtime_claude_startup.go:startupCallMCP:http_do:1":                                                                 ownerRuntimeDependency,
 	"internal/runtime/runlifecycle/executor.go:Cancel:http_do:1":                                                                          ownerRuntimeDependency,
 	"internal/runtime/runlifecycle/executor.go:Submit:http_do:1":                                                                          ownerRuntimeDependency,
+	"internal/runtime/runlifecycle/executor.go:SubmitGenericScheduleActivations:http_do:1":                                                ownerRuntimeDependency, // sync.Once committed candidate settlement, not HTTP.
 	"internal/runtime/runforkexecution/decision_control.go:Close:http_do:1":                                                               ownerRuntimeDependency, // sync.Once selected control-turn release, not HTTP.
 	"internal/runtime/runforkexecution/agent_runtime_materialization.go:Close:http_do:1":                                                  ownerRuntimeDependency,
 	"internal/runtime/runforkexecution/control_lifetime.go:Done:http_do:1":                                                                ownerRuntimeDependency,
@@ -137,7 +138,7 @@ var sourcePrimitiveOwners = map[string]primitiveOwner{
 	"internal/runtime/testfixtures/canonicalrouting/fixture.go:removeClosedVariantFiles:filesystem_write:1":                               ownerBuildTest,
 	"internal/runtime/testfixtures/canonicalrouting/fixture.go:writeYAMLDocument:filesystem_write:1":                                      ownerBuildTest,
 	"internal/runtime/testfixtures/canonicalrouting/deployment_resource_feeds.go:CopySelectedDeploymentResource:filesystem_write:1":       ownerBuildTest,
-	"internal/runtime/testfixtures/canonicalrouting/deployment_resource_feeds.go:CopyTwoDeploymentFeeds:filesystem_write:1":               ownerBuildTest,
+	"internal/runtime/testfixtures/canonicalrouting/deployment_resource_feeds.go:CopyTwoDeploymentFeeds:filesystem_write:2":               ownerBuildTest,
 	"internal/runtime/testfixtures/canonicalrouting/lifecycle_emitter_static.go:CopyLifecycleEmitterStatic:filesystem_write:1":            ownerBuildTest,
 	"internal/runtime/testfixtures/canonicalrouting/root_connect.go:CopyRootOutputSingletonArc:filesystem_write:1":                        ownerBuildTest,
 	"internal/runtime/testfixtures/canonicalrouting/resolution_variants.go:CopyNestedProducerTemplateSelectResolution:filesystem_write:1": ownerBuildTest,

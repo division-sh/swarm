@@ -59,12 +59,14 @@ func executePreparedLiveFork(ctx context.Context, req SelectedContractExecutionR
 		}
 		parked, parkCtx := use.Runtime(), use.WorkContext()
 		if live.Source.Matches(prepared.loadedSource.SourceArtifactFact) {
+			releaseUse := sync.OnceValue(use.Done)
+			defer func() { finalErr = errors.Join(finalErr, releaseUse()) }()
 			req.LiveRuntime = parked
 			finalErr = parked.WithParkedLiveRun(parkCtx, live, execute)
 			if !out.Activation.Activated {
 				finalErr = errors.Join(finalErr, parked.ReconcileLiveRun(context.WithoutCancel(parkCtx), live.RunID))
 			}
-			finalErr = errors.Join(finalErr, use.Done())
+			finalErr = errors.Join(finalErr, releaseUse())
 		} else {
 			pauseCtx, release, err := parked.ParkLiveRun(parkCtx, live)
 			if err != nil {

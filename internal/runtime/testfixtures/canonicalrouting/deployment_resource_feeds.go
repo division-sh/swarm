@@ -16,6 +16,13 @@ func CopyTwoDeploymentFeeds(t testing.TB) string {
 	if err := os.Remove(filepath.Join(root, NotifyAllChildrenChildFlowID, "agents.yaml")); err != nil {
 		t.Fatal(err)
 	}
+	if err := os.Remove(filepath.Join(root, NotifyAllChildrenChildFlowID, "events.yaml")); err != nil {
+		t.Fatal(err)
+	}
+	nodes := filepath.Join(root, NotifyAllChildrenChildFlowID, "nodes.yaml")
+	replaceDeploymentFixtureExactlyOnce(t, nodes, "    - account.notification.completed\n", "")
+	replaceDeploymentFixtureExactlyOnce(t, nodes, "    account.notification.completed:\n      advances_to: completed\n", "")
+	replaceDeploymentFixtureExactlyOnce(t, nodes, "    account.registered:\n", "    account.registered:\n      advances_to: completed\n")
 	path := filepath.Join(root, "schema.yaml")
 	replaceDeploymentFixtureExactlyOnce(t, path, "    resolution: select\n", "    resolution: select-or-create\n")
 	return root

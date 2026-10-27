@@ -7,6 +7,7 @@ import (
 	"net/http"
 	"net/http/httptest"
 	"path/filepath"
+	"strings"
 	"testing"
 	"time"
 
@@ -121,7 +122,57 @@ func startWorkspaceGatewayProofRuntimeWithPosture(t *testing.T, backend servedpa
 				http.Error(w, "unexpected controlled provider request", http.StatusBadRequest)
 				return
 			}
+			var turn struct {
+				Tools []struct {
+					Name        string `json:"name"`
+					InputSchema struct {
+						Properties map[string]json.RawMessage `json:"properties"`
+					} `json:"input_schema"`
+				} `json:"tools"`
+				Messages []struct {
+					Content json.RawMessage `json:"content"`
+				} `json:"messages"`
+			}
+			if err := json.NewDecoder(request.Body).Decode(&turn); err != nil {
+				t.Errorf("decode controlled provider turn: %v", err)
+				http.Error(w, "invalid provider turn", http.StatusBadRequest)
+				return
+			}
 			w.Header().Set("Content-Type", "application/json")
+			for _, tool := range turn.Tools {
+				var ids struct {
+					Enum []string `json:"enum"`
+				}
+				if tool.Name != "read_flow_data" || json.Unmarshal(tool.InputSchema.Properties["static_id"], &ids) != nil || len(ids.Enum) != 1 {
+					continue
+				}
+				for _, message := range turn.Messages {
+					var text string
+					if json.Unmarshal(message.Content, &text) == nil && strings.HasPrefix(text, "Tool result:\n") && strings.Contains(text, "selected-only-mcp-resource") {
+						_, _ = w.Write([]byte(`{"model":"claude-test","usage":{"input_tokens":1,"output_tokens":1},"content":[{"type":"text","text":"selected-only-mcp-resource verified"}]}`))
+						return
+					}
+					var blocks []struct {
+						Type    string          `json:"type"`
+						Content json.RawMessage `json:"content"`
+					}
+					if json.Unmarshal(message.Content, &blocks) != nil {
+						continue
+					}
+					for _, block := range blocks {
+						if block.Type == "tool_result" && strings.Contains(string(block.Content), "selected-only-mcp-resource") {
+							_, _ = w.Write([]byte(`{"model":"claude-test","usage":{"input_tokens":1,"output_tokens":1},"content":[{"type":"text","text":"selected-only-mcp-resource verified"}]}`))
+							return
+						}
+					}
+				}
+				_ = json.NewEncoder(w).Encode(map[string]any{
+					"model": "claude-test", "usage": map[string]int{"input_tokens": 1, "output_tokens": 1},
+					"content": []map[string]any{{"type": "tool_use", "id": "workspace-native-read", "name": tool.Name,
+						"input": map[string]string{"kind": "static_file", "static_id": ids.Enum[0]}}},
+				})
+				return
+			}
 			_, _ = w.Write([]byte(`{"model":"claude-test","usage":{"input_tokens":1,"output_tokens":1},"content":[{"type":"text","text":"Observed delivery."}]}`))
 		}))
 		t.Cleanup(provider.Close)

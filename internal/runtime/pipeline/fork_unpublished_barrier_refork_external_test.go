@@ -114,6 +114,7 @@ func verifyUnpublishedTransferredBarrierRefork(t *testing.T, latePublication boo
 				TransportHash: "sha256:pending-barrier-parent", SourceRunID: ancestor, ForkEventID: original.id,
 				TargetBundleHash: rt.Options.SourceArtifactFact.BundleHash(), ContractSelection: request.ContractSelection, AllowSourceFreeze: true,
 			}
+			request = forkEngineLiveRequest(t, rt, selected, request)
 			parentRequest := request
 			prepared, err := family.Prepare(phase, request)
 			if err != nil {
@@ -284,7 +285,7 @@ func verifyUnpublishedTransferredBarrierRefork(t *testing.T, latePublication boo
 			// This fixture's on_complete moves to active and its root consumer
 			// only writes data. Settled work does not terminalize those stages.
 			state, err := storetest.ReadSelectedExecutionStorage(phase, selected.RuntimeDeps().DeliveryStore, child.Materialization.ForkRunID)
-			if err != nil || state.State != "running" || state.RunStatus != "running" {
+			if err != nil || state.State != "closed" || state.RunStatus != "live" {
 				t.Fatalf("settled barrier changed the intentionally open run: %+v error=%v", state, err)
 			}
 			after, err := storetest.ReadSelectedForkSourceDomain(phase, selected.RuntimeDeps().DeliveryStore, parent.ForkRunID)

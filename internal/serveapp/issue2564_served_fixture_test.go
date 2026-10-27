@@ -2,9 +2,13 @@ package serveapp
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
 	"fmt"
+	"net/http"
+	"net/http/httptest"
 	"path/filepath"
+	"strings"
 	"testing"
 	"time"
 
@@ -51,6 +55,68 @@ func issue2564ServeHarnessAtLocation(t *testing.T, backend, root string, mock bo
 }
 
 func issue2564LiveServeHarness(t *testing.T, backend, root, location string) (*cliapp.ServeOptions, func() (*serveRuntimeTestProcess, issue2564ServedFixture)) {
+	t.Helper()
+	provider := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, request *http.Request) {
+		if request.URL.Path != "/v1/messages" || request.Header.Get("x-api-key") != "live-flow-fixture-key" {
+			http.Error(w, "unexpected controlled provider request", http.StatusBadRequest)
+			return
+		}
+		var turn struct {
+			Tools []struct {
+				Name string `json:"name"`
+			} `json:"tools"`
+			Messages []struct {
+				Content json.RawMessage `json:"content"`
+			} `json:"messages"`
+		}
+		if err := json.NewDecoder(request.Body).Decode(&turn); err != nil {
+			t.Errorf("decode live-flow fixture turn: %v", err)
+			http.Error(w, "invalid provider turn", http.StatusBadRequest)
+			return
+		}
+		w.Header().Set("Content-Type", "application/json")
+		var payload map[string]any
+		for _, message := range turn.Messages {
+			var text string
+			if json.Unmarshal(message.Content, &text) != nil {
+				continue
+			}
+			if strings.HasPrefix(text, "Tool result:\n") {
+				_, _ = w.Write([]byte(`{"model":"claude-test","usage":{"input_tokens":1,"output_tokens":1},"content":[{"type":"text","text":"Work finished."}]}`))
+				return
+			}
+			var frame struct {
+				Event struct {
+					Payload map[string]any `json:"payload"`
+				} `json:"event"`
+			}
+			if json.Unmarshal([]byte(text), &frame) == nil && frame.Event.Payload != nil {
+				payload = frame.Event.Payload
+			}
+		}
+		for _, tool := range turn.Tools {
+			name := "emit_work_finished"
+			arguments := map[string]any{"work_id": payload["work_id"], "result": "finished"}
+			if payload["sequence"] == float64(1) {
+				name, arguments = "emit_work_progress", map[string]any{"work_id": payload["work_id"]}
+			}
+			if tool.Name == "emit_work_finish" {
+				name, arguments = tool.Name, map[string]any{}
+			}
+			if tool.Name != name {
+				continue
+			}
+			_ = json.NewEncoder(w).Encode(map[string]any{
+				"model": "claude-test", "usage": map[string]int{"input_tokens": 1, "output_tokens": 1},
+				"content": []map[string]any{{"type": "tool_use", "id": "live-flow-finish", "name": name, "input": arguments}},
+			})
+			return
+		}
+		_, _ = w.Write([]byte(`{"model":"claude-test","usage":{"input_tokens":1,"output_tokens":1},"content":[{"type":"text","text":"Observed delivery."}]}`))
+	}))
+	t.Cleanup(provider.Close)
+	redirectExternalHosts(t, map[string]string{"api.anthropic.com": provider.URL})
+	setDoctorProviderSecret(t, "ANTHROPIC_API_KEY", "live-flow-fixture-key")
 	return issue2564ServeHarnessWithPosture(t, backend, root, true, location, executionposture.Live)
 }
 
@@ -68,7 +134,11 @@ func issue2564ServeHarnessWithPosture(t *testing.T, backend, root string, mock b
 			if location == "" {
 				location = filepath.Join(t.TempDir(), "completion.sqlite")
 			}
-			opts.ConfigPath = writeMockAgentRuntimeConfig(t, backend, location)
+			if posture == executionposture.Live {
+				opts.ConfigPath = writeStoreBackendRuntimeConfig(t, backend, location)
+			} else {
+				opts.ConfigPath = writeMockAgentRuntimeConfig(t, backend, location)
+			}
 		} else {
 			if location == "" {
 				location = filepath.Join(t.TempDir(), "lifecycle.sqlite")
@@ -92,7 +162,7 @@ func issue2564ServeHarnessWithPosture(t *testing.T, backend, root string, mock b
 			return owner, nil
 		}
 		t.Cleanup(func() { buildStoresForServe = original })
-		if mock {
+		if mock && posture != executionposture.Live {
 			opts.ConfigPath = writeMockAgentRuntimeConfig(t, backend, "")
 		} else {
 			opts.ConfigPath = writeServeRuntimeTestConfig(t)

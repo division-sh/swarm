@@ -398,7 +398,6 @@ type RuntimeContextManager struct {
 	sourceSetMu                sync.Mutex
 	liveSelectionMu            sync.Mutex
 	availability               RunBundleAvailabilityReader
-	liveRuns                   runtimerunlifecycle.LiveRunReader
 	contexts                   map[string]*runtimeContextEntry
 	order                      []string
 	primaryBundleHash          string
@@ -455,10 +454,8 @@ func NewRuntimeContextManager(availability RunBundleAvailabilityReader, contexts
 }
 
 func newRuntimeContextManagerState(availability RunBundleAvailabilityReader) *RuntimeContextManager {
-	liveRuns, _ := availability.(runtimerunlifecycle.LiveRunReader)
 	return &RuntimeContextManager{
 		availability:               availability,
-		liveRuns:                   liveRuns,
 		contexts:                   map[string]*runtimeContextEntry{},
 		suppressedStandingServices: map[string]struct{}{},
 	}
@@ -2843,18 +2840,6 @@ func (m *RuntimeContextManager) AcquireIngress(ctx context.Context, alias, provi
 			}
 			lookup := RuntimeIngressContextLookup{Target: target, Found: true, AliasFound: true, State: entry.state, Cause: entry.cause}
 			lookup.authorIngress = declaredAuthorIngress(entry.runtime, entry.context, target)
-			if m.liveRuns != nil {
-				live, found, err := m.liveRuns.LoadLiveRun(ctx, runtimerunlifecycle.LiveRunScope{FlowPath: target.FlowPath})
-				if err != nil {
-					return nil, lookup, err
-				}
-				if !found || !live.Source.Matches(entry.context.SourceArtifactFact) {
-					lookup.State, lookup.Cause = RuntimeContextStateUnloaded, RuntimeContextCauseNotLoaded
-					return nil, lookup, nil
-				}
-				target.RunID = live.RunID
-				lookup.Target = target
-			}
 			if lookup.State == "" {
 				lookup.State = RuntimeContextStateLoaded
 			}
