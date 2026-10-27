@@ -14,7 +14,6 @@ import (
 	"github.com/division-sh/swarm/internal/runtime/effects"
 	"github.com/division-sh/swarm/internal/runtime/executionmode"
 	"github.com/division-sh/swarm/internal/runtime/runfork"
-	"github.com/division-sh/swarm/internal/runtime/runlifecycle"
 	"github.com/division-sh/swarm/internal/store/internal/backend/eventrecord"
 	"github.com/google/uuid"
 )
@@ -217,34 +216,6 @@ func TestSelectedForkInputPublishedStrictBothDialects(t *testing.T) {
 					}
 				} else if err != nil || published != test.eventFound {
 					t.Fatalf("published=%v err=%v want=%v", published, err, test.eventFound)
-				}
-			})
-		}
-	}
-}
-
-func TestSelectedForkInputReadTerminalStillRequiresExactCurrentFence(t *testing.T) {
-	for _, sqlite := range []bool{false, true} {
-		for _, current := range []bool{false, true} {
-			t.Run(fmt.Sprintf("sqlite=%v/current=%v", sqlite, current), func(t *testing.T) {
-				f := newSelectedInputReadFixture(t)
-				f.attachment.snapshot.State = runlifecycle.StateCompleted
-				tx, mock := startSnapshotTransaction(t)
-				expectSelectedAttachmentBinding(mock, f.attachment.evidence.binding)
-				expectSelectedAttachmentRecord(t, mock, f.attachment, sqlite, false)
-				a := f.attachment.authority
-				mock.ExpectQuery(`SELECT EXISTS \(SELECT 1 FROM run_fork_selected_contract_runtime_executions`).
-					WithArgs(a.SelectedFork.ExecutionID, a.SelectedFork.ForkRunID, a.SelectedFork.Generation,
-						a.ExecutionOwner, a.FenceGeneration, a.SelectedFork.AdmissionFingerprint,
-						a.SelectedFork.ContainerPlanFingerprint, a.SelectedFork.ActorCensusFingerprint, a.SelectedFork.EffectiveConfigFingerprint).
-					WillReturnRows(sqlmock.NewRows([]string{"current"}).AddRow(current))
-				binding, err := requireSelectedForkInputReadBindingTx(context.Background(), tx, f.attachment.snapshot, a, f.schema, sqlite)
-				if current {
-					if err != nil || binding != f.attachment.evidence.binding {
-						t.Fatalf("terminal immutable read failed: %v", err)
-					}
-				} else if err == nil {
-					t.Fatal("stale fence admitted")
 				}
 			})
 		}

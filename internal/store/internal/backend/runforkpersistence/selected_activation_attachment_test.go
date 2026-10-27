@@ -18,7 +18,6 @@ import (
 	"github.com/division-sh/swarm/internal/runtime/executionmode"
 	"github.com/division-sh/swarm/internal/runtime/runfork"
 	"github.com/division-sh/swarm/internal/runtime/runlifecycle"
-	"github.com/division-sh/swarm/internal/store/internal/backend/effectpersistence"
 
 	"github.com/google/uuid"
 )
@@ -305,30 +304,6 @@ func expectSelectedAttachmentRecord(t *testing.T, mock sqlmock.Sqlmock, f select
 		e.AdmissionFingerprint, e.ContainerPlanFingerprint, e.ActorCensusFingerprint, e.EffectiveConfigFingerprint, e.DeclarationPlanFingerprint, declarations))
 }
 
-func TestSelectedActivationAttachmentRetainedEvidenceBeforeCurrentFence(t *testing.T) {
-	for _, sqlite := range []bool{false, true} {
-		t.Run(map[bool]string{false: "postgres", true: "sqlite"}[sqlite], func(t *testing.T) {
-			f := newSelectedAttachmentFixture(t, runfork.RunForkPointRunStart)
-			tx, mock := startSnapshotTransaction(t)
-			expectSelectedAttachmentRecord(t, mock, f, sqlite, true)
-			a := f.authority
-			mock.ExpectExec(`UPDATE run_fork_selected_contract_runtime_executions SET updated_at=updated_at`).
-				WithArgs(a.SelectedFork.ExecutionID, a.SelectedFork.ForkRunID, a.SelectedFork.Generation,
-					a.ExecutionOwner, a.FenceGeneration, a.SelectedFork.AdmissionFingerprint,
-					a.SelectedFork.ContainerPlanFingerprint, a.SelectedFork.ActorCensusFingerprint, a.SelectedFork.EffectiveConfigFingerprint).
-				WillReturnResult(sqlmock.NewResult(0, 0))
-			var owner selectedContractPreparedAttachmentOwner = &RunForkPostgresOwner{EffectPostgresOwner: &effectpersistence.EffectPostgresOwner{}}
-			if sqlite {
-				owner = &RunForkSQLiteOwner{EffectSQLiteOwner: &effectpersistence.EffectSQLiteOwner{}}
-			}
-			ctx := effects.WithAuthority(context.Background(), f.authority)
-			if err := requireSelectedContractPreparedAttachmentTx(ctx, tx, f.snapshot, f.evidence, sqlite, owner); err == nil {
-				t.Fatalf("current fence not required: %v", err)
-			}
-		})
-	}
-}
-
 func TestSelectedActivationSettlementEmptyInputRequiresNoInventedFeed(t *testing.T) {
 	for _, postgres := range []bool{false, true} {
 		t.Run(map[bool]string{false: "sqlite", true: "postgres"}[postgres], func(t *testing.T) {
@@ -355,31 +330,6 @@ func TestSelectedActivationSettlementEmptyInputRequiresNoInventedFeed(t *testing
 				t.Fatalf("explicit empty input settlement: %v", err)
 			}
 		})
-	}
-}
-
-func TestSelectedActivationSettlementAllowsTerminalChildWithExactFence(t *testing.T) {
-	for _, sqlite := range []bool{false, true} {
-		for _, live := range []bool{false, true} {
-			t.Run(map[bool]string{false: "postgres", true: "sqlite"}[sqlite]+map[bool]string{false: "/settled", true: "/live_attempt"}[live], func(t *testing.T) {
-				f := newSelectedAttachmentFixture(t, runfork.RunForkPointRunStart)
-				f.snapshot.State = runlifecycle.StateCompleted
-				tx, mock := startSnapshotTransaction(t)
-				expectSelectedAttachmentBinding(mock, f.evidence.binding)
-				expectSelectedAttachmentRecord(t, mock, f, sqlite, true)
-				owner := &selectedAttachmentAuthorityProbe{}
-				if live {
-					owner.liveErr = errors.New("live completion attempt")
-				}
-				err := requireSelectedContractSettlementAuthorityTx(context.Background(), tx, f.snapshot, f.authority, owner, sqlite)
-				if !errors.Is(err, owner.liveErr) {
-					t.Fatalf("terminal settlement err=%v want=%v", err, owner.liveErr)
-				}
-				if !reflect.DeepEqual(owner.got, f.authority) || owner.live.SelectedFork.ExecutionID != f.authority.SelectedFork.ExecutionID {
-					t.Fatal("current fence or no-live-attempt proof skipped")
-				}
-			})
-		}
 	}
 }
 

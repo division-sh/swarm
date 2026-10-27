@@ -24,6 +24,7 @@ func TestSelectInheritedWorkflowTimerRetainsArmedFactsAndSelectedEffects(t *test
 			} {
 				t.Run(fmt.Sprintf("%s/recurring=%t/%s", flowID, recurring, cause), func(t *testing.T) {
 					bundle, inherited, header := inheritedWorkflowTimerSelectionFixture(t, flowID, recurring)
+					current, _, _ := inheritedWorkflowTimerSelectionFixture(t, flowID, recurring)
 					inherited.Ref.Cause = cause
 					inherited.Ref.Generation = attemptgeneration.Generation{
 						FlowID: flowID, LoopID: "loop", ActivationID: "loop-activation",
@@ -53,6 +54,19 @@ func TestSelectInheritedWorkflowTimerRetainsArmedFactsAndSelectedEffects(t *test
 					}
 					if !reflect.DeepEqual(inherited, before) || !reflect.DeepEqual(selected.WorkflowTimers(), declarations) {
 						t.Fatal("selection mutated its inherited activation or selected declarations")
+					}
+					successor, err := SelectWorkflowTimerSuccessor(semanticview.Wrap(current), selected, inherited, header)
+					if err != nil || successor == nil || successor.Ref.ActivationID == inherited.Ref.ActivationID {
+						t.Fatalf("R34 successor did not receive its own identity: %+v, %v", successor, err)
+					}
+					expected.Ref.ActivationID = successor.Ref.ActivationID
+					expected.FireAt = inherited.armedAt().Add(time.Hour)
+					if !reflect.DeepEqual(*successor, expected) || !successor.FireAt.Before(successor.CreatedAt) {
+						t.Fatalf("R34 successor changed its original cause, lineage or selected effects: %+v", successor)
+					}
+					replayed, err := SelectWorkflowTimerSuccessor(semanticview.Wrap(current), selected, inherited, header)
+					if err != nil || !reflect.DeepEqual(successor, replayed) {
+						t.Fatalf("R34 successor selection was not deterministic: %+v, %v", replayed, err)
 					}
 					got.Payload[0] = ' '
 					if !reflect.DeepEqual(inherited.Payload, before.Payload) {
