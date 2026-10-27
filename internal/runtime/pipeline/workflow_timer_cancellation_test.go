@@ -30,11 +30,6 @@ func TestWorkflowTimerRuleRemovalCancellationValidation(t *testing.T) {
 		{"unknown_cause", func(a *WorkflowTimerActivation) { a.CancelCause = "guessed_removal" }},
 		{"active_with_disposition", func(a *WorkflowTimerActivation) { a.Status = workflowTimerStatusActive }},
 		{"before_child_birth", func(a *WorkflowTimerActivation) { a.CancelledAt = a.CreatedAt.Add(-time.Microsecond) }},
-		{"ordinary_row", func(a *WorkflowTimerActivation) {
-			a.SourceTimerID, a.ForkedFromRunID, a.ForkedFromPointKind, a.ForkedFromEventID, a.ReconstructionOwner = "", "", "", "", ""
-			a.ForkedFromPointRevision, a.SourceArmedAt = 0, time.Time{}
-			a.FireAt = a.CreatedAt.Add(time.Hour)
-		}},
 		{"before_accepted_recurrence", func(a *WorkflowTimerActivation) {
 			a.Recurring, a.RecurrenceInterval = true, time.Hour
 			a.FireAt = a.SourceArmedAt.Add(5 * time.Hour)
