@@ -949,7 +949,7 @@ func debtValidateCollectorIdentity(base, current string, trusted, head authority
 	if base == debtCompletedSelectedFixturePinCollectorTo && trusted.Collector == base &&
 		current == debtW3LandedFixtureCollectorTo && reviewedTransition == current && head.Collector == current &&
 		debtSitesEqual(head.Sites, trusted.Sites) {
-		return nil // #2728/6449928830: same 22 W4 identities on their already-landed source.
+		return nil // #2812/6453850248: exact W4 composition; unchanged sites and bootstrap.
 	}
 	if base == debtSelectedFixtureComposedCollectorTo && trusted.Collector == base &&
 		current == debtSelectedFixtureLandedCollectorTo && head.Collector == current &&
@@ -1260,10 +1260,15 @@ func debtW4LiveFixtureComparisons(actual, head, base, source map[string]authorit
 	mockReturn := composition[1]
 	mockReturn.Declaration = "startServedTestSetupEntitiesProofRuntimeFromSource"
 	compositionAllowed := actual[mockReturn.identity()] == mockReturn && source[mockReturn.identity()] == mockReturn
+	sourceCompositionAbsent, sourceCompositionCurrent := true, true
 	for _, site := range composition {
 		compositionAllowed = compositionAllowed && actual[site.identity()] == site &&
-			(source[site.identity()].Multiplicity == 0 || source[site.identity()] == site) && base[site.identity()].Multiplicity == 0
+			base[site.identity()].Multiplicity == 0 &&
+			(head[site.identity()].Multiplicity == 0 || head[site.identity()] == site)
+		sourceCompositionAbsent = sourceCompositionAbsent && source[site.identity()].Multiplicity == 0
+		sourceCompositionCurrent = sourceCompositionCurrent && source[site.identity()] == site
 	}
+	compositionAllowed = compositionAllowed && (sourceCompositionAbsent || sourceCompositionCurrent)
 	for _, pair := range pairs {
 		old, current := pair[0], pair[1]
 		beforeTransfer := source[old.identity()] == old && source[current.identity()].Multiplicity == 0
