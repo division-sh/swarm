@@ -109,6 +109,9 @@ func (s *RunLifecyclePostgresOwner) runControlTransition(ctx context.Context, re
 				state, err = s.pauseRunControlTx(txctx, tx, attempt, state, req)
 			case "continue":
 				state, err = s.continueRunControlTx(txctx, tx, attempt, state, req)
+				if err == nil && state.Status == string(runtimerunlifecycle.StateLive) {
+					_, err = attempt.RequestCompletion(txctx, s, runID, nil)
+				}
 			default:
 				err = fmt.Errorf("unsupported run control action %q", action)
 			}

@@ -92,6 +92,9 @@ func (s *RunLifecycleSQLiteOwner) runControlTransition(ctx context.Context, req 
 				state, err = s.pauseRunControlTx(txctx, tx, attempt, state, req)
 			case "continue":
 				state, err = s.continueRunControlTx(txctx, tx, attempt, state, req)
+				if err == nil && state.Status == string(runtimerunlifecycle.StateLive) {
+					_, err = attempt.RequestCompletion(txctx, s, runID, nil)
+				}
 			case "stop":
 				if err := rejectSQLiteStandingRunStopTx(txctx, tx, runID); err != nil {
 					return runtimeruncontrol.StopFailure("standing_admission", err)
