@@ -1200,6 +1200,11 @@ func buildRuntimeComposition(ctx context.Context, req runtimeCompositionRequest)
 		}
 		bundleUpgrade, err = cliapp.PrepareBundleUpgrade(ctx, reader, stores.SourceArtifactStore(), repo, source, platformPackBases)
 		if err != nil {
+			if recovery, available := stores.StartupRecovery(); available {
+				if exitCode := runServeSourceArtifactStartupRecovery(ctx, recovery, stores.SourceArtifactStore(), presenter); exitCode != 0 {
+					return exitCode
+				}
+			}
 			presenter.fail(5, "pinned_bundle_admission", err)
 			return 3
 		}
