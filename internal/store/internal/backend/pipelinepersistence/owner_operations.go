@@ -3098,7 +3098,11 @@ func (s *PipelineSQLiteOwner) releaseSQLitePipelineClaimLocked(claim runtimepipe
 func (s *postgresPipelineObligationStore) GlobalWorkPresence(ctx context.Context) (runtimepipelineobligation.GlobalWorkPresence, error) {
 	out, err := runnablePipelinePresence(ctx, s.postgresPipelineBoundary, s.postgresPipelineCandidates,
 		func(ctx context.Context, runID string) (bool, error) {
-			return runstate.DispatchParked(ctx, s.backend, true, runID)
+			owned, err := s.ObserveRunExecution(ctx, s.backend, runID)
+			if err != nil || !owned {
+				return !owned, err
+			}
+			return pipelineDispatchParked(ctx, s.backend, true, runID, s)
 		})
 	if err != nil {
 		return out, err
@@ -3111,7 +3115,11 @@ func (s *postgresPipelineObligationStore) GlobalWorkPresence(ctx context.Context
 func (s *sqlitePipelineObligationStore) GlobalWorkPresence(ctx context.Context) (runtimepipelineobligation.GlobalWorkPresence, error) {
 	out, err := runnablePipelinePresence(ctx, s.sqlitePipelineBoundary, s.sqlitePipelineCandidates,
 		func(ctx context.Context, runID string) (bool, error) {
-			return runstate.DispatchParked(ctx, s.backend, false, runID)
+			owned, err := s.ObserveRunExecution(ctx, s.backend, runID)
+			if err != nil || !owned {
+				return !owned, err
+			}
+			return pipelineDispatchParked(ctx, s.backend, false, runID, s)
 		})
 	if err != nil {
 		return out, err

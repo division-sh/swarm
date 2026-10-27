@@ -99,30 +99,21 @@ func verifyPublishedBarrierCompletionFailure(t *testing.T, ctx context.Context, 
 	}
 	select {
 	case ack := <-acknowledged:
-		if ack.err != nil || !ack.result.Activation.Activated || proofRequest != forkEngineExecutionProofRequest(t, ack.result, original.id, observed.id, claim) {
-			t.Fatalf("failed completion lost its actual settled handoff: %+v err=%v", ack.result, ack.err)
+		refusal := "live handoff requires its admitted ordinary source grant"
+		if proof == publishedBarrierCompletionSQLFailure {
+			refusal = "live delivery handoff has 1 unparked or foreign continuations"
+		}
+		refusal += "\nlive handoff was not acknowledged; selected work remains recoverable"
+		if ack.err == nil || ack.err.Error() != refusal || ack.result.Activation.Activated {
+			t.Fatalf("failed completion lost its actual pre-ACK handoff refusal: activated=%t err=%v", ack.result.Activation.Activated, ack.err)
 		}
 	case <-ctx.Done():
 		t.Fatal(ctx.Err())
 	}
-	var barrier fanoutbarrier.Barrier
-	for {
-		barrier, err = storetest.ReadExactFanOutBarrier(ctx, selected.RuntimeDeps().DeliveryStore, key)
-		if err != nil || barrier.Status == fanoutbarrier.StatusOutcomeDeadLettered {
-			break
-		}
-		if barrier.Status != fanoutbarrier.StatusClosedPending {
-			t.Fatalf("dead-lettered completion changed to another terminal disposition: %+v", barrier)
-		}
-		select {
-		case <-ticker.C:
-		case <-ctx.Done():
-			t.Fatalf("dead-lettered completion has no terminal barrier owner: %+v cause=%v", barrier, ctx.Err())
-		}
-	}
-	if err != nil || barrier.Status != fanoutbarrier.StatusOutcomeDeadLettered || barrier.Summary == nil || *barrier.Summary != (fanoutbarrier.Summary{Total: 1, Succeeded: 1}) ||
+	barrier, err := storetest.ReadExactFanOutBarrier(ctx, selected.RuntimeDeps().DeliveryStore, key)
+	if err != nil || barrier.Status != fanoutbarrier.StatusClosedPending || barrier.Summary == nil || *barrier.Summary != (fanoutbarrier.Summary{Total: 1, Succeeded: 1}) ||
 		barrier.TransferredOccurrence == nil || barrier.ScheduleActivationID != "" || barrier.TransferredOccurrence.Publication.EventID != observed.id || barrier.TransferredOccurrence.Publication.SourceEventID != original.id {
-		t.Fatalf("completion failure lost terminal summary/lineage or rearmed a timer: %+v err=%v", barrier, err)
+		t.Fatalf("completion failure lost its pre-ACK summary/lineage or rearmed a timer: %+v err=%v", barrier, err)
 	}
 	after, err := selected.Entities().LoadOperatorEntity(ctx, entityID, claim.RunID())
 	if err != nil || !reflect.DeepEqual(before, after) {

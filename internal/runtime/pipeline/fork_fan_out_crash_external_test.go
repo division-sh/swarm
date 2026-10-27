@@ -16,6 +16,7 @@ import (
 
 	"github.com/division-sh/swarm/internal/cliapp"
 	"github.com/division-sh/swarm/internal/operatorread"
+	swarmruntime "github.com/division-sh/swarm/internal/runtime"
 	"github.com/division-sh/swarm/internal/runtime/authoractivity"
 	"github.com/division-sh/swarm/internal/runtime/core/managedexecution"
 	"github.com/division-sh/swarm/internal/runtime/core/worklifetime"
@@ -172,6 +173,10 @@ func TestIssue642MixedFanOutCrashRestartBothStores(t *testing.T) {
 				wait, cancel := context.WithTimeout(ctx, 30*time.Second)
 				defer cancel()
 				live := forkEngineLiveRequest(t, rt, selected, runforkexecution.SelectedContractExecutionRequest{})
+				live.AcquireLiveRuntime = func(ctx context.Context, hash string) (*swarmruntime.RuntimeContextUse, error) {
+					use, _, err := live.LiveContexts.AcquireBundleHash(ctx, hash)
+					return use, err
+				}
 				recoveryDone := make(chan struct{})
 				var recovered []runfork.SelectedForkRecoveryResult
 				var recoveryErr error

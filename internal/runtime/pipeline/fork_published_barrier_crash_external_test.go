@@ -11,6 +11,7 @@ import (
 	"time"
 
 	"github.com/division-sh/swarm/internal/cliapp"
+	swarmruntime "github.com/division-sh/swarm/internal/runtime"
 	"github.com/division-sh/swarm/internal/runtime/authoractivity"
 	"github.com/division-sh/swarm/internal/runtime/core/identity"
 	"github.com/division-sh/swarm/internal/runtime/core/managedexecution"
@@ -226,6 +227,10 @@ func verifyBarrierCrashRestartBothStores(t *testing.T, pendingSource bool) {
 			options := runforkexecution.SelectedContractAgentRuntimeOptions{ExecutionPosture: executionposture.Live, ProcessCapability: capability}
 			options.AgentManagerOptions.TestLifecycleProbe = probe
 			live := forkEngineLiveRequest(t, rt, selected, runforkexecution.SelectedContractExecutionRequest{})
+			live.AcquireLiveRuntime = func(ctx context.Context, hash string) (*swarmruntime.RuntimeContextUse, error) {
+				use, _, err := live.LiveContexts.AcquireBundleHash(ctx, hash)
+				return use, err
+			}
 			var recovered []runfork.SelectedForkRecoveryResult
 			var recoveryErr error
 			recoveryDone := make(chan struct{})
