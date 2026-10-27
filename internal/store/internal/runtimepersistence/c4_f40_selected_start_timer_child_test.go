@@ -10,8 +10,10 @@ import (
 	"time"
 
 	"github.com/division-sh/swarm/internal/config"
+	"github.com/division-sh/swarm/internal/durabledata"
 	"github.com/division-sh/swarm/internal/runtime/authoractivity"
 	"github.com/division-sh/swarm/internal/runtime/bus"
+	"github.com/division-sh/swarm/internal/runtime/contracts"
 	"github.com/division-sh/swarm/internal/runtime/core/worklifetime"
 	"github.com/division-sh/swarm/internal/runtime/correlation"
 	"github.com/division-sh/swarm/internal/runtime/effects"
@@ -23,6 +25,7 @@ import (
 	"github.com/division-sh/swarm/internal/runtime/runforkexecution"
 	"github.com/division-sh/swarm/internal/runtime/runlifecycle"
 	"github.com/division-sh/swarm/internal/runtime/testfixtures/canonicalrouting"
+	"github.com/division-sh/swarm/internal/sourceartifact"
 	"github.com/division-sh/swarm/internal/store/testutil/agentfixture"
 	"github.com/google/uuid"
 )
@@ -343,6 +346,55 @@ func TestC4F40SelectedStartTimerChildBothStores(t *testing.T) {
 			retiredOperation, found, err := operations.LoadForkOperation(ctx, operation.Actor, operation.IdempotencyKey, operation.TransportHash)
 			if err != nil || !found || !reflect.DeepEqual(retiredOperation, activatedOperation) {
 				t.Fatalf("local retirement rewrote permanent start acknowledgment: found=%t err=%v", found, err)
+			}
+			persisted, err := selected.(sourceartifact.Reader).GetSourceArtifact(ctx, bundleHash)
+			if err != nil {
+				t.Fatal(err)
+			}
+			artifact, err := persisted.Decode()
+			if err != nil {
+				t.Fatal(err)
+			}
+			files := map[string]string{}
+			for _, entry := range artifact.Entries() {
+				files[entry.Label()] = string(entry.Bytes())
+			}
+			files["schema.yaml"] += "\n# Compatible live-fork source upgrade.\n"
+			candidate := loadLifecyclePersistenceFixtureForTest(t, files)
+			catalog, err := contracts.BuildDurableDataCatalog(candidate)
+			if err != nil {
+				t.Fatal(err)
+			}
+			if _, err := selected.(interface {
+				EnsureSourceArtifactWithData(context.Context, *sourceartifact.AdmittedSourceArtifact, durabledata.Catalog) (sourceartifact.EnsureResult, error)
+			}).EnsureSourceArtifactWithData(ctx, candidate.SourceArtifact, catalog); err != nil {
+				t.Fatal(err)
+			}
+			if _, err := selected.(runlifecycle.OperationOwner).ReviseRunSource(correlation.WithRunID(ctx, staged.ForkRunID), runlifecycle.SourceRevisionRequest{
+				RunID: staged.ForkRunID, Source: mustStoreTestSourceArtifactFact(candidate.SourceArtifact.BundleHash()),
+			}); err != nil {
+				t.Fatalf("revise the live fork through its existing source owner: %v", err)
+			}
+			recovery := selected.(interface {
+				ListSelectedForkRecoveryEntries(context.Context) ([]runfork.SelectedForkRecoveryEntry, error)
+				InspectSelectedForkRecovery(context.Context, runfork.SelectedForkRecoveryEntry) (runfork.SelectedForkRecoveryInspection, error)
+			})
+			entries, err := recovery.ListSelectedForkRecoveryEntries(ctx)
+			if err != nil || len(entries) != 1 || entries[0].BundleHash != candidate.SourceArtifact.BundleHash() {
+				t.Fatalf("live fork did not expose its current admitted source: %+v, %v", entries, err)
+			}
+			inspection, err := recovery.InspectSelectedForkRecovery(ctx, entries[0])
+			if err != nil || inspection.Plan.Disposition != runfork.SelectedForkRecoveryControlOnly {
+				t.Fatalf("upgraded live fork lost recovery or ordinary handoff applicability: %+v, %v", inspection, err)
+			}
+			stale := entries[0]
+			stale.BundleHash = bundleHash
+			if _, err := recovery.InspectSelectedForkRecovery(ctx, stale); err == nil {
+				t.Fatal("live-fork recovery accepted the stale current source")
+			}
+			afterUpgrade, found, err := operations.LoadForkOperation(ctx, operation.Actor, operation.IdempotencyKey, operation.TransportHash)
+			if err != nil || !found || !reflect.DeepEqual(afterUpgrade, activatedOperation) {
+				t.Fatalf("source upgrade rewrote immutable fork request/result/ACK: %+v, %v", afterUpgrade, err)
 			}
 		})
 	}
