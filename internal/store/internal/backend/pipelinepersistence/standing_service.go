@@ -689,6 +689,7 @@ func (s *standingServiceAdapter) ResetStandingService(ctx context.Context, opera
 		}
 		if _, err := s.createRun(txctx, tx, runtimerunlifecycle.CreateRequest{
 			RunID: nextRunID, Origin: origin, Source: declarationSource, StartedAt: now,
+			// W1 deletes it with the file.
 			LiveScope: runtimerunlifecycle.LiveRunScope{FlowPath: current.FlowPath},
 		}); err != nil {
 			return err
@@ -1142,6 +1143,7 @@ func (s *standingServiceAdapter) createStandingServiceTx(ctx context.Context, tx
 	}
 	if _, err := s.createRun(ctx, tx, runtimerunlifecycle.CreateRequest{
 		RunID: runID, Origin: origin, Source: candidate.Source, StartedAt: now,
+		// W1 deletes it with the file.
 		LiveScope: runtimerunlifecycle.LiveRunScope{FlowPath: candidate.FlowPath},
 	}); err != nil {
 		return runtimepipeline.StandingServiceReconciliation{}, err
@@ -1536,17 +1538,31 @@ func (s *standingServiceAdapter) setStandingRunRunningTx(ctx context.Context, tx
 	if !s.validRunLifecycleMutation(tx) {
 		return errors.New("standing run resume requires run lifecycle owner")
 	}
-	if _, err := s.transitionActiveRun(ctx, tx, runtimerunlifecycle.ActiveTransitionRequest{
+	// W1 deletes it with the file.
+	disposition, err := s.transitionActiveRun(ctx, tx, runtimerunlifecycle.ActiveTransitionRequest{
 		RunID: runID,
 		State: runtimerunlifecycle.StateLive,
-	}); err != nil {
+	})
+	if err != nil {
 		return err
+	}
+	// W1 deletes it with the file.
+	if disposition == runtimerunlifecycle.MutationApplied {
+		var candidates mutationprotocol.CandidateWriter
+		if s.isSQLite() {
+			candidates = s.sqliteStore.candidateRequests
+		} else {
+			candidates = s.postgresStore.candidateRequests
+		}
+		if _, err := s.attempt.RequestCompletion(ctx, candidates, runID, nil); err != nil {
+			return err
+		}
 	}
 	if s.isSQLite() {
 		_, err := tx.ExecContext(ctx, `INSERT INTO run_control_state (run_id, control_status, reason, controlled_by, updated_at, paused_at, stopped_at) VALUES (?, 'running', ?, ?, ?, NULL, NULL) ON CONFLICT(run_id) DO UPDATE SET control_status = 'running', reason = excluded.reason, controlled_by = excluded.controlled_by, updated_at = excluded.updated_at, paused_at = NULL, stopped_at = NULL`, runID, reason, actor, now)
 		return err
 	}
-	_, err := tx.ExecContext(ctx, `INSERT INTO run_control_state (run_id, control_status, reason, controlled_by, updated_at, paused_at, stopped_at) VALUES ($1::uuid, 'running', $2, $3, $4, NULL, NULL) ON CONFLICT(run_id) DO UPDATE SET control_status = 'running', reason = EXCLUDED.reason, controlled_by = EXCLUDED.controlled_by, updated_at = EXCLUDED.updated_at, paused_at = NULL, stopped_at = NULL`, runID, reason, actor, now)
+	_, err = tx.ExecContext(ctx, `INSERT INTO run_control_state (run_id, control_status, reason, controlled_by, updated_at, paused_at, stopped_at) VALUES ($1::uuid, 'running', $2, $3, $4, NULL, NULL) ON CONFLICT(run_id) DO UPDATE SET control_status = 'running', reason = EXCLUDED.reason, controlled_by = EXCLUDED.controlled_by, updated_at = EXCLUDED.updated_at, paused_at = NULL, stopped_at = NULL`, runID, reason, actor, now)
 	return err
 }
 
