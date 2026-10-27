@@ -17,12 +17,12 @@ import (
 func TestProcessExecutionPostureOwnsProductionLiveAuthorityLiterals(t *testing.T) {
 	repoRoot := filepath.Clean(filepath.Join("..", ".."))
 	allowed := map[string]bool{
-		"internal/runtime/agents/agent_llm.go":                                    true,
-		"internal/runtime/effects/authority.go":                                   true,
-		"internal/runtime/executionposture/posture.go":                            true,
-		"internal/runtime/llm/selection/profile.go":                               true,
-		"internal/store/internal/backend/agentpersistence/projection.go":          true,
-		"internal/store/internal/backend/pipelinepersistence/standing_service.go": true,
+		"internal/runtime/agents/agent_llm.go":                                         true,
+		"internal/runtime/effects/authority.go":                                        true,
+		"internal/runtime/executionposture/posture.go":                                 true,
+		"internal/runtime/llm/selection/profile.go":                                    true,
+		"internal/store/internal/backend/agentpersistence/projection.go":               true,
+		"internal/store/internal/backend/pipelinepersistence/run_execution_posture.go": true,
 	}
 	// Exact session owners: three read-only mode comparisons, the process-posture
 	// admission call, and the original logout owner's fenced effect/context pair.

@@ -199,8 +199,8 @@ func TestRunServeRuntimeDevScratchNextInvocationHasNoPredecessor(t *testing.T) {
 		t.Fatalf("second identity = %#v, want new source artifact replacing %s", secondIdentity, firstHash)
 	}
 	secondStanding := requireSingleServedStandingRun(t, secondEndpoint+"/v1/rpc", secondHash)
-	if secondStanding.RunID != firstStanding.RunID || !secondStanding.Origin.Equal(firstStanding.Origin) {
-		t.Fatalf("fresh dev semantic identity = %#v, want deterministic recurrence of %#v", secondStanding, firstStanding)
+	if secondStanding.RunID == firstStanding.RunID || !secondStanding.Origin.Equal(firstStanding.Origin) || secondStanding.FlowPath != firstStanding.FlowPath {
+		t.Fatalf("fresh dev run = %#v, want fresh identity for the same deployment flow as %#v", secondStanding, firstStanding)
 	}
 	if !secondStanding.StartedAt.After(firstStanding.StartedAt) {
 		t.Fatalf("fresh dev started_at = %s, want later than predecessor %s", secondStanding.StartedAt, firstStanding.StartedAt)

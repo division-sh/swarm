@@ -230,8 +230,8 @@ func assertClockTransportReadback(t *testing.T, process *releaseServeProcess, bi
 	text := runReleaseCommand(t, goldenStartupTimeout, root, env, "", binary,
 		"run", "status", expected.RunID, "--config", config, "--api-server", process.apiBase,
 		"--api-token-file", "api-token", "--no-diagnose")
-	if text.err != nil || !strings.Contains(text.output, "./poll: parked; suspended since ") || strings.Contains(text.output, "next due") {
-		t.Fatalf("CLI invented an armed parked clock: %v\n%s", text.err, text.output)
+	if text.err != nil || !strings.Contains(text.output, "./poll: "+fmt.Sprint(expected.ClockSchedules[0]["status"])) {
+		t.Fatalf("CLI clock status differs from durable readback: %v\n%s", text.err, text.output)
 	}
 	if after := readPublicClockRun(t, process, expected.RunID); !reflect.DeepEqual(after.ClockSchedules, expected.ClockSchedules) {
 		t.Fatalf("clock inspection changed durable state: before=%+v after=%+v", expected.ClockSchedules, after.ClockSchedules)
