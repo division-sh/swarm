@@ -27,6 +27,9 @@ func commitWorkflowEngineTimerMutation(
 	if err := mutation.Validate(activation.RunID, activation.Route, activation.EntityID); err != nil {
 		return timeridentity.WorkflowTimerActivationRef{}, false, err
 	}
+	if mutation.CancelCause == runtimepipeline.WorkflowTimerCancelCauseRuleRemoved && activation.SourceTimerID == "" {
+		return timeridentity.WorkflowTimerActivationRef{}, false, fmt.Errorf("ordinary rule removal requires its admitted bundle switch")
+	}
 	var changed bool
 	err := attempt.WithSQL(ctx, func(ctx context.Context, tx *sql.Tx) (err error) {
 		switch mutation.Kind {

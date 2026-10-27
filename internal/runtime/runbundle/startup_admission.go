@@ -6,7 +6,6 @@ import (
 	"errors"
 	"fmt"
 	"slices"
-	"sort"
 	"strconv"
 	"strings"
 
@@ -22,65 +21,92 @@ import (
 	runtimefailures "github.com/division-sh/swarm/internal/runtime/failures"
 	"github.com/division-sh/swarm/internal/runtime/fanoutbarrier"
 	"github.com/division-sh/swarm/internal/runtime/joinruntime"
+	"github.com/division-sh/swarm/internal/runtime/runlifecycle"
 	"github.com/division-sh/swarm/internal/runtime/semanticview"
-	"github.com/division-sh/swarm/internal/sourceartifact"
 )
 
-// AdmitPinnedSources checks source bindings without acquiring execution authority.
-// Standing-run exclusions are owned by the reader, not reconstructed here.
-func AdmitPinnedSources(ctx context.Context, reader ActiveAvailabilityReader, bootIdentity string, pinnedHashes []string) error {
+type UpgradeReader interface {
+	ActiveAvailabilityReader
+	ReadBundleUpgradeState(context.Context, string, semanticview.Source) (UpgradeState, error)
+}
+
+// Sources retain declarations, not an admission result. The transition rereads
+// domain state and derives the affected runs before performing any mutation.
+type UpgradePlan struct {
+	BundleHash string                         `json:"bundle_hash"`
+	Runs       map[string]string              `json:"runs"`
+	Sources    map[string]semanticview.Source `json:"-"`
+}
+
+func AdmitPinnedSources(ctx context.Context, reader UpgradeReader, candidate semanticview.Source, load func(context.Context, string) (semanticview.Source, error)) (*UpgradePlan, error) {
 	if ctx == nil {
-		return errors.New("pinned source admission context is required")
+		return nil, errors.New("bundle upgrade context is required")
 	}
 	if err := ctx.Err(); err != nil {
-		return err
+		return nil, err
 	}
-	allowed := make(map[string]struct{}, len(pinnedHashes))
-	for _, hash := range pinnedHashes {
-		hash = strings.TrimSpace(hash)
-		if err := sourceartifact.ValidateHash(hash); err != nil {
-			return runtimefailures.Wrap(runtimefailures.ClassSchemaInvalid, "pinned_source_hash_invalid", "run-bundle", "admit_sources", nil, err)
-		}
-		allowed[hash] = struct{}{}
+	if reader == nil || candidate == nil || load == nil {
+		return nil, runtimefailures.New(runtimefailures.ClassDependencyUnavailable, "pinned_source_reader_unavailable", "run-bundle", "admit_sources", nil)
 	}
-	if len(allowed) == 0 {
-		return nil
+	hash, err := upgradeSourceHash(candidate)
+	if err != nil {
+		return nil, err
 	}
-	if strings.TrimSpace(bootIdentity) == "" {
-		return runtimefailures.Wrap(runtimefailures.ClassSchemaInvalid, "boot_source_identity_required", "run-bundle", "admit_sources", nil, errors.New("boot bundle identity is required"))
-	}
-	if reader == nil {
-		return runtimefailures.Wrap(runtimefailures.ClassDependencyUnavailable, "pinned_source_reader_unavailable", "run-bundle", "admit_sources", nil, errors.New("active run source reader is required"))
-	}
+	plan := &UpgradePlan{BundleHash: hash, Runs: map[string]string{}, Sources: map[string]semanticview.Source{hash: candidate}}
 	availabilities, err := reader.ActiveNonStandingRunBundleAvailabilities(ctx)
-	if ctxErr := ctx.Err(); ctxErr != nil {
-		return ctxErr
+	if ctx.Err() != nil {
+		return nil, ctx.Err()
 	}
 	if err != nil {
-		return runtimefailures.Wrap(runtimefailures.ClassDependencyUnavailable, "pinned_source_reader_unavailable", "run-bundle", "admit_sources", nil, err)
+		return nil, runtimefailures.Wrap(runtimefailures.ClassDependencyUnavailable, "pinned_source_reader_unavailable", "run-bundle", "admit_sources", nil, err)
 	}
-	var details []string
-	for _, availability := range availabilities {
-		if availability.Status == "paused" {
+	var blockers []UpgradeBlocker
+	for _, available := range availabilities {
+		if !available.Available() {
+			return nil, fmt.Errorf("bundle upgrade source unavailable: %s", available.DetailString())
+		}
+		if available.Status == string(runlifecycle.StatePaused) || available.BundleHash == hash {
 			continue
 		}
-		if !availability.Available() {
-			continue // Artifact integrity is checked by startuprecovery.Inspect.
+		current := plan.Sources[available.BundleHash]
+		if current == nil {
+			current, err = load(ctx, available.BundleHash)
+			if err != nil {
+				return nil, runtimefailures.Wrap(runtimefailures.ClassDependencyUnavailable, "pinned_source_reader_unavailable", "run-bundle", "admit_sources", nil, err)
+			}
+			before, err := upgradeSourceHash(current)
+			if err != nil || before != available.BundleHash {
+				return nil, errors.Join(fmt.Errorf("bundle upgrade source differs from run %s", available.RunID), err)
+			}
+			plan.Sources[available.BundleHash] = current
 		}
-		if _, ok := allowed[strings.TrimSpace(availability.BundleHash)]; !ok {
-			details = append(details, availability.DetailString())
+		state, err := reader.ReadBundleUpgradeState(ctx, available.RunID, current)
+		if err != nil {
+			return nil, runtimefailures.Wrap(runtimefailures.ClassDependencyUnavailable, "pinned_source_reader_unavailable", "run-bundle", "admit_sources", nil, err)
 		}
+		stranded, err := CheckUpgrade(ctx, current, candidate, state)
+		if err != nil {
+			return nil, err
+		}
+		blockers = append(blockers, stranded...)
+		plan.Runs[available.RunID] = available.BundleHash
 	}
-	if len(details) == 0 {
-		return nil
+	if err := ctx.Err(); err != nil {
+		return nil, err
 	}
-	hashes := make([]string, 0, len(allowed))
-	for hash := range allowed {
-		hashes = append(hashes, hash)
+	if len(blockers) != 0 {
+		return nil, &UpgradeConflictError{Blockers: blockers}
 	}
-	sort.Strings(hashes)
-	cause := fmt.Errorf("active non-standing run pinned bundle_hash conflict: DB-loaded serve bundle_hash set %s cannot resume %d active non-standing run(s) with different bundle_hash: %s", strings.Join(hashes, ","), len(details), strings.Join(details, "; "))
-	return fmt.Errorf("%s: %w", cause, runtimefailures.Wrap(runtimefailures.ClassLifecycleConflict, "pinned_source_conflict", "run-bundle", "admit_sources", nil, cause))
+	return plan, nil
+}
+
+func upgradeSourceHash(source semanticview.Source) (string, error) {
+	bundle, ok := semanticview.Bundle(source)
+	if !ok || bundle == nil || bundle.SourceArtifact == nil {
+		return "", errors.New("bundle upgrade requires an admitted artifact")
+	}
+	identity, err := contracts.BootBundleIdentity(bundle)
+	return identity.BundleHash, err
 }
 
 // UpgradeState contains ordinary domain readbacks from one selected-store cut.
@@ -358,7 +384,7 @@ func upgradeLocation(source semanticview.Source, flow, family, member string) st
 	}
 	declaration, found := bundle.FlowSources[flow]
 	if !found {
-		declaration, member = bundle.FlowSources["."], ""
+		flow, declaration, member = ".", bundle.FlowSources["."], ""
 	}
 	file := map[string]string{"schema": declaration.Schema, "entities": declaration.Entities, "events": declaration.Events, "nodes": declaration.Nodes}[family]
 	if file == "" {
@@ -371,6 +397,9 @@ func upgradeLocation(source semanticview.Source, flow, family, member string) st
 		}
 	}
 	if location, found := bundle.IntroductionLocation(file, member, false); found {
+		return fmt.Sprintf("%s:%d:%d", file, location.Line, location.Column)
+	}
+	if location, found := bundle.IntroductionLocation(file, "", false); found {
 		return fmt.Sprintf("%s:%d:%d", file, location.Line, location.Column)
 	}
 	return file

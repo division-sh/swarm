@@ -16,6 +16,7 @@ import (
 	"github.com/division-sh/swarm/internal/runtime/fanoutbarrier"
 	"github.com/division-sh/swarm/internal/runtime/fanoutobligation"
 	"github.com/division-sh/swarm/internal/runtime/semanticview"
+	"github.com/division-sh/swarm/internal/testutil/sourceartifactfixture"
 )
 
 type admissionAvailabilityReader func(context.Context) ([]Availability, error)
@@ -24,34 +25,31 @@ func (r admissionAvailabilityReader) ActiveNonStandingRunBundleAvailabilities(ct
 	return r(ctx)
 }
 
+func (r admissionAvailabilityReader) ReadBundleUpgradeState(_ context.Context, runID string, _ semanticview.Source) (UpgradeState, error) {
+	return UpgradeState{RunID: runID}, nil
+}
+
+func admittedUpgradeSource(t *testing.T, label string) semanticview.Source {
+	t.Helper()
+	artifact := sourceartifactfixture.New("global/schema.yaml", []byte("name: "+label+"\n"))
+	return semanticview.Wrap(&contracts.WorkflowContractBundle{SourceArtifact: artifact})
+}
+
 func TestAdmitPinnedSourcesRequiresCompleteObservation(t *testing.T) {
-	hash := "bundle-v2:sha256:" + strings.Repeat("a", 64)
+	candidate := admittedUpgradeSource(t, "candidate")
 	readErr := errors.New("private selected-store address")
 	for _, test := range []struct {
 		name   string
-		reader ActiveAvailabilityReader
-		pins   []string
-		boot   string
-		class  runtimefailures.Class
+		reader UpgradeReader
 	}{
-		{name: "not applicable"},
-		{name: "missing reader", pins: []string{hash}, boot: hash, class: runtimefailures.ClassDependencyUnavailable},
-		{name: "failed read", reader: admissionAvailabilityReader(func(context.Context) ([]Availability, error) { return nil, readErr }), pins: []string{hash}, boot: hash, class: runtimefailures.ClassDependencyUnavailable},
-		{name: "missing identity", pins: []string{hash}, class: runtimefailures.ClassSchemaInvalid},
-		{name: "invalid hash", pins: []string{"invalid"}, boot: hash, class: runtimefailures.ClassSchemaInvalid},
-		{name: "empty hash is not omission", pins: []string{""}, boot: hash, class: runtimefailures.ClassSchemaInvalid},
+		{name: "missing reader"},
+		{name: "failed read", reader: admissionAvailabilityReader(func(context.Context) ([]Availability, error) { return nil, readErr })},
 	} {
 		t.Run(test.name, func(t *testing.T) {
-			err := AdmitPinnedSources(context.Background(), test.reader, test.boot, test.pins)
-			if test.class == "" {
-				if err != nil {
-					t.Fatal(err)
-				}
-				return
-			}
+			_, err := AdmitPinnedSources(context.Background(), test.reader, candidate, func(context.Context, string) (semanticview.Source, error) { return candidate, nil })
 			failure, ok := runtimefailures.As(err)
-			if !ok || failure.Failure.Class != test.class {
-				t.Fatalf("error = %v, want %s", err, test.class)
+			if !ok || failure.Failure.Class != runtimefailures.ClassDependencyUnavailable {
+				t.Fatalf("error = %v, want dependency refusal", err)
 			}
 			if test.name == "failed read" && (!errors.Is(err, readErr) || strings.Contains(err.Error(), readErr.Error())) {
 				t.Fatalf("read failure must retain its cause without leaking private detail: %v", err)
@@ -61,8 +59,9 @@ func TestAdmitPinnedSourcesRequiresCompleteObservation(t *testing.T) {
 }
 
 func TestAdmitPinnedSourcesUsesExactActiveSourceOwner(t *testing.T) {
-	hash := "bundle-v2:sha256:" + strings.Repeat("a", 64)
-	other := "bundle-v2:sha256:" + strings.Repeat("b", 64)
+	candidate, current := admittedUpgradeSource(t, "candidate"), admittedUpgradeSource(t, "current")
+	hash, _ := upgradeSourceHash(candidate)
+	other, _ := upgradeSourceHash(current)
 	for _, state := range []string{"running", "live", "paused"} {
 		for _, mismatch := range []bool{false, true} {
 			calls := 0
@@ -72,26 +71,14 @@ func TestAdmitPinnedSourcesUsesExactActiveSourceOwner(t *testing.T) {
 				if mismatch {
 					active.BundleHash = other
 				}
-				return []Availability{active, {RunID: "missing-artifact", BundleHash: other}}, nil
+				return []Availability{active}, nil
 			})
-			err := AdmitPinnedSources(context.Background(), reader, hash, []string{hash, hash})
-			wantConflict := mismatch && state != "paused"
-			if calls != 1 || (err != nil) != wantConflict {
+			plan, err := AdmitPinnedSources(context.Background(), reader, candidate, func(context.Context, string) (semanticview.Source, error) { return current, nil })
+			if calls != 1 || err != nil {
 				t.Fatalf("state %s mismatch %t: reads %d, error %v", state, mismatch, calls, err)
 			}
-			if wantConflict {
-				failure, ok := runtimefailures.As(err)
-				if !ok || failure.Failure.Class != runtimefailures.ClassLifecycleConflict {
-					t.Fatalf("conflict classification lost: %v", err)
-				}
-				for _, detail := range []string{"active non-standing run pinned bundle_hash conflict", hash, other, "ordinary-run"} {
-					if !strings.Contains(err.Error(), detail) {
-						t.Fatalf("conflict detail %q lost: %v", detail, err)
-					}
-				}
-				if strings.Contains(err.Error(), "missing-artifact") {
-					t.Fatalf("source integrity was reinterpreted as a pin mismatch: %v", err)
-				}
+			if _, upgraded := plan.Runs["ordinary-run"]; upgraded != (mismatch && state != "paused") {
+				t.Fatalf("state %s mismatch %t: wrong upgrade population %v", state, mismatch, plan.Runs)
 			}
 		}
 	}
@@ -273,19 +260,19 @@ func testUpgradeRetainedInstances(t *testing.T) {
 }
 
 func TestAdmitPinnedSourcesCancellationWins(t *testing.T) {
-	hash := "bundle-v2:sha256:" + strings.Repeat("a", 64)
+	candidate := admittedUpgradeSource(t, "candidate")
 	ctx, cancel := context.WithCancel(context.Background())
 	reader := admissionAvailabilityReader(func(context.Context) ([]Availability, error) {
 		cancel()
 		return nil, errors.New("late dependency failure")
 	})
-	if err := AdmitPinnedSources(ctx, reader, hash, []string{hash}); !errors.Is(err, context.Canceled) {
+	if _, err := AdmitPinnedSources(ctx, reader, candidate, func(context.Context, string) (semanticview.Source, error) { return candidate, nil }); !errors.Is(err, context.Canceled) {
 		t.Fatalf("cancelled observation = %v", err)
 	}
-	if err := AdmitPinnedSources(ctx, nil, "", nil); !errors.Is(err, context.Canceled) {
+	if _, err := AdmitPinnedSources(ctx, nil, nil, nil); !errors.Is(err, context.Canceled) {
 		t.Fatalf("cancellation was treated as non-applicability: %v", err)
 	}
-	if err := AdmitPinnedSources(nil, nil, "", nil); err == nil {
+	if _, err := AdmitPinnedSources(nil, nil, nil, nil); err == nil {
 		t.Fatal("missing context admitted")
 	}
 }

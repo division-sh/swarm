@@ -147,7 +147,7 @@ func (am *AgentManager) PrepareStaticTopologyForStartup(ctx context.Context, sou
 	if am == nil || source == nil || am.store == nil || am.lifecycle == nil || am.lifecycle.persistence() == nil {
 		return nil
 	}
-	if err := am.reconcileExternalEffectsForStartup(ctx); err != nil {
+	if err := am.ReconcileExternalEffectsForStartup(ctx); err != nil {
 		return err
 	}
 	admission, err := am.staticTopologyAdmission()

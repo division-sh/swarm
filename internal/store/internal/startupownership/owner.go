@@ -351,6 +351,9 @@ func (s *postgresSession) LoadSourceSet(ctx context.Context) (runtimeagenttopolo
 }
 
 func (s *postgresSession) CommitSourceSet(ctx context.Context, req runtimeagenttopology.SourceSetCommitRequest) (runtimeagenttopology.SourceSetCommitResult, error) {
+	if req.BundleUpgrade != nil {
+		return s.commitBundleUpgrade(ctx, req)
+	}
 	var result runtimeagenttopology.SourceSetCommitResult
 	err := s.lease.RunTransaction(ctx, func(txctx context.Context, tx *sql.Tx) error {
 		var err error
@@ -575,6 +578,9 @@ func (s *sqliteSession) LoadSourceSet(ctx context.Context) (runtimeagenttopology
 }
 
 func (s *sqliteSession) CommitSourceSet(ctx context.Context, req runtimeagenttopology.SourceSetCommitRequest) (runtimeagenttopology.SourceSetCommitResult, error) {
+	if req.BundleUpgrade != nil {
+		return s.commitBundleUpgrade(ctx, req)
+	}
 	var result runtimeagenttopology.SourceSetCommitResult
 	err := s.owner.backend.RunTransaction(ctx, "commit agent topology source set", func(txctx context.Context, tx *sql.Tx) error {
 		var err error
@@ -912,7 +918,7 @@ func recordGrantTransitionTx(ctx context.Context, tx *sql.Tx, previous *runtimes
 	return err
 }
 
-func commitSourceSetTx(ctx context.Context, tx *sql.Tx, req runtimeagenttopology.SourceSetCommitRequest, sqlite bool) (runtimeagenttopology.SourceSetCommitResult, error) {
+func commitSourceSetTx(ctx context.Context, tx *sql.Tx, req runtimeagenttopology.SourceSetCommitRequest, sqlite bool, upgrade ...sourceSetUpgrade) (runtimeagenttopology.SourceSetCommitResult, error) {
 	if err := req.Validate(); err != nil {
 		return runtimeagenttopology.SourceSetCommitResult{}, err
 	}
@@ -962,6 +968,14 @@ func commitSourceSetTx(ctx context.Context, tx *sql.Tx, req runtimeagenttopology
 	}
 	if err := requireSourceSetPredecessor(ctx, tx, req, previous, hasPrevious, sqlite); err != nil {
 		return runtimeagenttopology.SourceSetCommitResult{}, err
+	}
+	if req.BundleUpgrade != nil {
+		if len(upgrade) != 1 || !sourceSetHasBundle(req.Plan, req.BundleUpgrade.BundleHash) {
+			return runtimeagenttopology.SourceSetCommitResult{}, errors.New("bundle upgrade requires its exact native source transition")
+		}
+		if err := upgrade[0].commit(ctx, req.BundleUpgrade); err != nil {
+			return runtimeagenttopology.SourceSetCommitResult{}, err
+		}
 	}
 	changes, err := runtimeagenttopology.Diff(previous, req.Plan)
 	if err != nil {

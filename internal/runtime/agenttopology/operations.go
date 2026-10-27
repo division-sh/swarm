@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"strings"
 
+	"github.com/division-sh/swarm/internal/runtime/runbundle"
 	"github.com/google/uuid"
 )
 
@@ -17,14 +18,18 @@ const (
 )
 
 type SourceSetCommitRequest struct {
-	Operation            SourceSetOperation `json:"operation"`
-	OperationID          string             `json:"operation_id"`
-	ExpectedRevision     string             `json:"expected_revision,omitempty"`
-	Plan                 SourceSetPlan      `json:"plan"`
-	RequirePausedRemoval bool               `json:"require_paused_removal,omitempty"`
+	Operation            SourceSetOperation     `json:"operation"`
+	OperationID          string                 `json:"operation_id"`
+	ExpectedRevision     string                 `json:"expected_revision,omitempty"`
+	Plan                 SourceSetPlan          `json:"plan"`
+	RequirePausedRemoval bool                   `json:"require_paused_removal,omitempty"`
+	BundleUpgrade        *runbundle.UpgradePlan `json:"bundle_upgrade,omitempty"`
 }
 
 func (r SourceSetCommitRequest) Validate() error {
+	if r.BundleUpgrade != nil && (r.Operation != OperationRestoreSourceSet || r.RequirePausedRemoval) {
+		return errors.New("ordinary bundle upgrade requires its own restore_source_set transition")
+	}
 	if r.RequirePausedRemoval && r.Operation != OperationRestoreSourceSet {
 		return errors.New("paused source removal requires restore_source_set")
 	}

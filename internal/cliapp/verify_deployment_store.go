@@ -20,11 +20,11 @@ import (
 	"github.com/division-sh/swarm/internal/runtime/manager"
 	"github.com/division-sh/swarm/internal/runtime/runbundle"
 	"github.com/division-sh/swarm/internal/runtime/runforkexecution"
-	"github.com/division-sh/swarm/internal/runtime/runlifecycle"
 	"github.com/division-sh/swarm/internal/runtime/semanticview"
 	"github.com/division-sh/swarm/internal/runtime/startupownership"
 	"github.com/division-sh/swarm/internal/runtime/startuprecovery"
 	"github.com/division-sh/swarm/internal/runtime/workspace"
+	"github.com/division-sh/swarm/internal/sourceartifact"
 	"github.com/division-sh/swarm/internal/store"
 	storebackend "github.com/division-sh/swarm/internal/store/backendselection"
 	storeselected "github.com/division-sh/swarm/internal/store/selected"
@@ -199,8 +199,9 @@ func inspectVerifyRecoverySnapshot(ctx context.Context, snapshot *storeselected.
 		}
 		return startupownership.AdmitAuthorityInspection(inspection)
 	})
-	verifyDeploymentObservation(ctx, result, "pinned_source_admission", "internal/runtime/runbundle.CheckUpgrade", subject, failures.ClassLifecycleConflict, func(ctx context.Context) error {
-		return inspectVerifyBundleUpgrades(ctx, snapshot, repo, source, packBases)
+	verifyDeploymentObservation(ctx, result, "pinned_source_admission", "internal/runtime/runbundle.AdmitPinnedSources", subject, failures.ClassLifecycleConflict, func(ctx context.Context) error {
+		_, err := PrepareBundleUpgrade(ctx, snapshot, snapshot, repo, source, packBases)
+		return err
 	})
 	verifyDeploymentObservation(ctx, result, "retained_source_integrity", "internal/runtime/startuprecovery.Inspect", subject, failures.ClassLifecycleConflict, func(ctx context.Context) error {
 		_, err := startuprecovery.Inspect(ctx, startuprecovery.Request{AvailabilityReader: snapshot, ArtifactReader: snapshot})
@@ -282,65 +283,28 @@ func inspectVerifyRecoverySnapshot(ctx context.Context, snapshot *storeselected.
 	return retained
 }
 
-func inspectVerifyBundleUpgrades(ctx context.Context, snapshot *storeselected.AdmissionSnapshot, repo string, candidate semanticview.Source, packBases packartifact.PlatformPackBaseResolver) error {
-	bundle, ok := semanticview.Bundle(candidate)
-	if !ok || bundle.SourceArtifact == nil {
-		return fmt.Errorf("bundle upgrade inspection requires the candidate artifact")
-	}
-	availabilities, err := snapshot.ActiveNonStandingRunBundleAvailabilities(ctx)
-	if err != nil {
-		return err
-	}
-	sources := map[string]semanticview.Source{bundle.SourceArtifact.BundleHash(): candidate}
-	var blockers []runbundle.UpgradeBlocker
-	for _, availability := range availabilities {
-		// Paused sources are retained, not loaded; artifact integrity is checked separately.
-		if availability.Status != string(runlifecycle.StateRunning) || !availability.Available() || availability.BundleHash == bundle.SourceArtifact.BundleHash() {
-			continue
-		}
-		current := sources[availability.BundleHash]
-		if current == nil {
-			record, err := snapshot.GetSourceArtifact(ctx, availability.BundleHash)
-			if err != nil {
-				return err
-			}
-			if record.BundleHash != availability.BundleHash {
-				return fmt.Errorf("bundle upgrade artifact disagrees with run %s source", availability.RunID)
-			}
-			artifact, err := record.Decode()
-			if err != nil {
-				return err
-			}
-			spec, err := EmbeddedPlatformSpecPath()
-			if err != nil {
-				return err
-			}
-			retained, err := contracts.LoadWorkflowContractBundleFromArtifact(repo, artifact, spec, contracts.WorkflowContractLoadOptions{
-				PlatformPackBases: packBases, AdmitPackInventory: packadmission.AdmitInventory,
-			})
-			if err != nil {
-				return err
-			}
-			current = semanticview.Wrap(retained)
-			sources[availability.BundleHash] = current
-		}
-		state, err := snapshot.ReadBundleUpgradeState(ctx, availability.RunID, current)
+func PrepareBundleUpgrade(ctx context.Context, reader runbundle.UpgradeReader, artifacts sourceartifact.Reader, repo string, candidate semanticview.Source, packBases packartifact.PlatformPackBaseResolver) (*runbundle.UpgradePlan, error) {
+	return runbundle.AdmitPinnedSources(ctx, reader, candidate, func(ctx context.Context, hash string) (semanticview.Source, error) {
+		record, err := artifacts.GetSourceArtifact(ctx, hash)
 		if err != nil {
-			return err
+			return nil, err
 		}
-		stranded, err := runbundle.CheckUpgrade(ctx, current, candidate, state)
+		if record.BundleHash != hash {
+			return nil, fmt.Errorf("bundle upgrade artifact disagrees with its admitted hash")
+		}
+		artifact, err := record.Decode()
 		if err != nil {
-			return err
+			return nil, err
 		}
-		blockers = append(blockers, stranded...)
-	}
-	if err := ctx.Err(); err != nil {
-		return err
-	}
-	if len(blockers) != 0 {
-		return &runbundle.UpgradeConflictError{Blockers: blockers}
-	}
-	return nil
+		spec, err := EmbeddedPlatformSpecPath()
+		if err != nil {
+			return nil, err
+		}
+		retained, err := contracts.LoadWorkflowContractBundleFromArtifact(repo, artifact, spec, contracts.WorkflowContractLoadOptions{
+			PlatformPackBases: packBases, AdmitPackInventory: packadmission.AdmitInventory,
+		})
+		return semanticview.Wrap(retained), err
+	})
 }
 
 func verifyRetainedSourceLoader(repo string, packBases packartifact.PlatformPackBaseResolver) (runforkexecution.SourceArtifactSelectedContractSourceLoader, error) {

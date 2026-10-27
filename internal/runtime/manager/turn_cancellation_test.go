@@ -235,12 +235,12 @@ func ProveNativeStartupCanceledTurnCommitsBeforeAdmissionWithoutExecutingReactio
 			if mode == "unowned_continuation" {
 				bus.failure = cleanup
 			}
-			err = am.reconcileExternalEffectsForStartup(ctx)
+			err = am.ReconcileExternalEffectsForStartup(ctx)
 			if mode == "healthy" || mode == "unowned_continuation" {
 				if err != nil || !am.startupEffectsReconciled || calls != 1 || bus.releases != 1 || len(bus.released) != 0 {
 					t.Fatalf("startup did not commit/release exactly once: calls=%d plans=%d deliveries=%v err=%v", calls, bus.releases, bus.released, err)
 				}
-				if err := am.reconcileExternalEffectsForStartup(ctx); err != nil || calls != 1 {
+				if err := am.ReconcileExternalEffectsForStartup(ctx); err != nil || calls != 1 {
 					t.Fatalf("repeat startup replayed business work: calls=%d err=%v", calls, err)
 				}
 			} else {
