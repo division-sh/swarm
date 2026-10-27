@@ -55,7 +55,12 @@ func TestSelectInheritedWorkflowTimerRetainsArmedFactsAndSelectedEffects(t *test
 					if !reflect.DeepEqual(inherited, before) || !reflect.DeepEqual(selected.WorkflowTimers(), declarations) {
 						t.Fatal("selection mutated its inherited activation or selected declarations")
 					}
-					successor, err := SelectWorkflowTimerSuccessor(semanticview.Wrap(current), selected, inherited, header)
+					predecessor := inherited
+					if recurring {
+						predecessor.FiredAt = predecessor.FireAt
+						predecessor.FireAt = predecessor.FireAt.Add(predecessor.RecurrenceInterval)
+					}
+					successor, err := SelectWorkflowTimerSuccessor(semanticview.Wrap(current), selected, predecessor, header)
 					if err != nil || successor == nil || successor.Ref.ActivationID == inherited.Ref.ActivationID {
 						t.Fatalf("R34 successor did not receive its own identity: %+v, %v", successor, err)
 					}
@@ -64,7 +69,7 @@ func TestSelectInheritedWorkflowTimerRetainsArmedFactsAndSelectedEffects(t *test
 					if !reflect.DeepEqual(*successor, expected) || !successor.FireAt.Before(successor.CreatedAt) {
 						t.Fatalf("R34 successor changed its original cause, lineage or selected effects: %+v", successor)
 					}
-					replayed, err := SelectWorkflowTimerSuccessor(semanticview.Wrap(current), selected, inherited, header)
+					replayed, err := SelectWorkflowTimerSuccessor(semanticview.Wrap(current), selected, predecessor, header)
 					if err != nil || !reflect.DeepEqual(successor, replayed) {
 						t.Fatalf("R34 successor selection was not deterministic: %+v, %v", replayed, err)
 					}

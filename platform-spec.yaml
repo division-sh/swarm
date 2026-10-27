@@ -45140,6 +45140,9 @@ filesystem_source_model:
         The retained source-set transition rechecks native state before writing. Run source bindings, removed-rule
         workflow timer cancellation and their facts commit or roll back with the source head. Removed-rule timers
         are canceled with cause rule_removed, not blockers; parked instances retain their existing timer holds.
+        A retained workflow timer whose declaration changes is canceled using the ordinary uncaused form and
+        replaced by an inserted successor with a new identity in that same commit. Its due time uses the original
+        cause time and selected delay, not restart time; an already-due successor is immediately eligible.
         Local timer execution is restored only after acknowledged admission. No alternate writer or reload router exists.
       restart_recovery: |
         Existing recovery settles and dead-letters interrupted attempts before replacement and dispatch, without

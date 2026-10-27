@@ -2,7 +2,6 @@ package runforkpersistence
 
 import (
 	"context"
-	"database/sql"
 	"errors"
 	"reflect"
 	"strings"
@@ -11,7 +10,6 @@ import (
 
 	"github.com/DATA-DOG/go-sqlmock"
 	"github.com/division-sh/swarm/internal/runtime/agenttopology"
-	"github.com/division-sh/swarm/internal/runtime/canonicaljson"
 	"github.com/division-sh/swarm/internal/runtime/core/managedcapabilities"
 
 	"github.com/division-sh/swarm/internal/runtime/effects"
@@ -252,56 +250,6 @@ func TestSelectedActivationAttachmentRejectsCrossedEvidence(t *testing.T) {
 			}
 		})
 	}
-}
-
-func expectSelectedAttachmentBinding(mock sqlmock.Sqlmock, binding runfork.RunForkSelectedContractBinding) {
-	mock.ExpectQuery(`FROM run_fork_selected_contract_bindings`).WithArgs(binding.ForkRunID).
-		WillReturnRows(sqlmock.NewRows([]string{"binding", "child", "source", "kind", "revision", "event", "mode", "bundle", "created"}).
-			AddRow(binding.BindingID, binding.ForkRunID, binding.SourceRunID, binding.ForkPoint.Kind, binding.ForkPoint.Revision,
-				binding.ForkEventID, binding.ContractSelection.Mode, binding.ContractSelection.BundleHash, binding.CreatedAt))
-}
-
-type selectedAttachmentAuthorityProbe struct {
-	got     effects.Authority
-	err     error
-	live    effects.Authority
-	liveErr error
-}
-
-func (p *selectedAttachmentAuthorityProbe) RequireCurrentExternalEffectAuthorityTx(_ context.Context, _ *sql.Tx, authority effects.Authority) error {
-	p.got = authority
-	return p.err
-}
-
-func (p *selectedAttachmentAuthorityProbe) RequireCompletionAuthorityNoLiveAttemptsTx(_ context.Context, _ *sql.Tx, authority effects.Authority) error {
-	p.live = authority
-	return p.liveErr
-}
-
-func expectSelectedAttachmentRecord(t *testing.T, mock sqlmock.Sqlmock, f selectedAttachmentFixture, sqlite, lock bool) {
-	t.Helper()
-	expectSelectedAttachmentBinding(mock, f.evidence.binding)
-	mock.ExpectQuery(`SELECT CAST\(operation_id AS TEXT\) FROM run_fork_operations`).WithArgs(f.execution.ForkRunID).
-		WillReturnRows(sqlmock.NewRows([]string{"operation"}))
-	prep, err := canonicaljson.Bytes(f.record.preparation)
-	if err != nil {
-		t.Fatal(err)
-	}
-	declarations, err := canonicaljson.Bytes(f.declarations)
-	if err != nil {
-		t.Fatal(err)
-	}
-	query := `FROM run_fork_selected_contract_runtime_executions WHERE fork_run_id=\$1 ORDER BY generation DESC LIMIT 1`
-	if !sqlite && lock {
-		query += ` FOR UPDATE`
-	}
-	e := f.execution
-	mock.ExpectQuery(query).WithArgs(e.ForkRunID).WillReturnRows(sqlmock.NewRows([]string{
-		"execution", "state", "preparation", "preparation_fingerprint", "failure", "source", "binding", "kind", "revision", "event",
-		"generation", "fence", "coordinate", "admission", "container", "actors", "config", "declaration_fingerprint", "declarations",
-	}).AddRow(e.ExecutionID, f.record.state, prep, e.PreparationFingerprint, nil, e.SourceRunID, f.evidence.binding.BindingID,
-		e.ForkPoint.Kind, e.ForkPoint.Revision, e.ForkEventID, e.Generation, e.FenceGeneration, e.ExecutableCoordinateFingerprint,
-		e.AdmissionFingerprint, e.ContainerPlanFingerprint, e.ActorCensusFingerprint, e.EffectiveConfigFingerprint, e.DeclarationPlanFingerprint, declarations))
 }
 
 func TestSelectedActivationSettlementEmptyInputRequiresNoInventedFeed(t *testing.T) {

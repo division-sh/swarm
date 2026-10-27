@@ -708,6 +708,7 @@ func SelectWorkflowTimerSuccessor(current, selected semanticview.Source, activat
 		projected.Ref.ActivationID = arm.Ref.ActivationID
 	}
 	projected.FireAt = canonicalWorkflowTimerTime(activation.armedAt().Add(interval))
+	projected.FiredAt = time.Time{}
 	projected.Recurring, projected.RecurrenceInterval = declaration.Recurring, 0
 	if declaration.Recurring {
 		projected.RecurrenceInterval = interval
