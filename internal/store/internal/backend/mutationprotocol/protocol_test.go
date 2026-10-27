@@ -197,8 +197,11 @@ func TestWholeParentDeletionCannotBeSelectedByCaller(t *testing.T) {
 
 type mismatchedCandidateWriter struct{}
 
-func (mismatchedCandidateWriter) WriteCompletionCandidateTx(ctx context.Context, tx *sql.Tx, _ string, _ *time.Time) (runtimelifecycle.CandidateRequestResult, error) {
-	if _, err := tx.ExecContext(ctx, `INSERT INTO mutation_protocol_probe (value) VALUES ('wrong-run')`); err != nil {
+func (mismatchedCandidateWriter) WriteCompletionCandidateTx(ctx context.Context, attempt *Attempt, _ string, _ *time.Time) (runtimelifecycle.CandidateRequestResult, error) {
+	if err := attempt.WithSQL(ctx, func(ctx context.Context, tx *sql.Tx) error {
+		_, err := tx.ExecContext(ctx, `INSERT INTO mutation_protocol_probe (value) VALUES ('wrong-run')`)
+		return err
+	}); err != nil {
 		return runtimelifecycle.CandidateRequestResult{}, err
 	}
 	return runtimelifecycle.CandidateRequestResult{

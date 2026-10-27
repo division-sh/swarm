@@ -307,6 +307,7 @@ func TestDurableDataRunLifecycleAcrossSelectedStores(t *testing.T) {
 		var firstVersion durabledata.VersionID
 		var fusedRunID string
 		t.Run("fused import commits and replays one atomic binding", func(t *testing.T) {
+			pauseAPITestLiveRun(t, bus, fixture.primary, ordinaryRunID)
 			runID := uuid.NewString()
 			fusedRunID = runID
 			sourceID := uuid.NewString()
@@ -366,6 +367,7 @@ func TestDurableDataRunLifecycleAcrossSelectedStores(t *testing.T) {
 			if got := dataRunCount(t, fixture, "fan_out_intents", "run_id", runID); got != 1 {
 				t.Fatalf("changed event payload created %d feeds, want one", got)
 			}
+			pauseAPITestLiveRun(t, bus, fixture.primary, runID)
 		})
 
 		t.Run("failed multi-import retains evidence and no child mutation", func(t *testing.T) {
@@ -829,6 +831,7 @@ func TestRunCreationReceiptRejectsAggregateCorruptionAcrossSelectedStores(t *tes
 				t.Fatalf("wait for pinless run fixture settlement: %v", err)
 			}
 			cancelWait()
+			pauseAPITestLiveRun(t, bus, fixture.primary, runID)
 			corruptRunCreationJSONColumn(t, ctx, fixture, "summary_json", runID, func(value map[string]any) {
 				value["status"] = "bogus"
 			})
@@ -859,6 +862,7 @@ func TestRunCreationReceiptRejectsAggregateCorruptionAcrossSelectedStores(t *tes
 					t.Fatalf("wait for run fixture settlement: %v", err)
 				}
 				cancelWait()
+				pauseAPITestLiveRun(t, bus, fixture.primary, runID)
 				snapshot, err := fixture.primary.ShowDataResource(ctx, runStartTestBundleHash, scanRef)
 				if err != nil {
 					t.Fatal(err)
@@ -913,6 +917,7 @@ func TestRunCreationReceiptRejectsTypedColumnCorruptionAcrossSelectedStores(t *t
 					t.Fatalf("wait for run fixture settlement: %v", err)
 				}
 				cancelWait()
+				pauseAPITestLiveRun(t, bus, fixture.primary, runID)
 				corruptRunCreationScalarColumn(t, ctx, fixture, test.column, runID, test.value())
 				var domainErr *durabledata.DomainError
 				if _, err := fixture.reconstructed.LoadDataRunCreationOperation(ctx, runID); !errors.As(err, &domainErr) || domainErr.Code != durabledata.CodeIntegrity {
@@ -1140,6 +1145,7 @@ func TestDataShowPinCursorSurvivesConcurrentRunCreationAcrossSelectedStores(t *t
 			if response := rpcCall(t, publish, dataRunEventPublishBody(runID, uuid.NewString(), data)); response.Error != nil {
 				t.Fatalf("create pin for run %s: %#v", runID, response.Error)
 			}
+			pauseAPITestLiveRun(t, bus, fixture.primary, runID)
 		}
 		runID := func(suffix int) string { return fmt.Sprintf("00000000-0000-4000-8000-%012d", suffix) }
 		createPin(runID(10))

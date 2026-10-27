@@ -84,8 +84,8 @@ func TestIssue2394ServedReporterTransactionCensusBothStores(t *testing.T) {
 			claims := receipt.ByOperation[storetest.TransactionDeliveryClaim].WriteCommits
 			mutations := receipt.ByOperation[storetest.TransactionWorkflowMutation].WriteCommits
 			settlements := receipt.ByOperation[storetest.TransactionDeliverySettle].WriteCommits
-			// The fan-out handler mutates once; its empty receivers settle without state writes.
-			if claims != uint64(len(rows)+1) || mutations != 1 || settlements != uint64(len(rows)) || candidateWrites == 0 || receipt.Total.Failed != 0 {
+			// The live run has no finite completion candidate; its empty receivers still settle without state writes.
+			if claims != uint64(len(rows)+1) || mutations != 1 || settlements != uint64(len(rows)) || candidateWrites != 0 || receipt.Total.Failed != 0 {
 				t.Fatalf("eight real consumers lost exact claim/mutation/settlement/candidate accounting: claims=%d mutations=%d settlements=%d candidates=%d receipt=%+v", claims, mutations, settlements, candidateWrites, receipt)
 			}
 			t.Logf("eight-row real-consumer commits: total_writes=%d delivery_claims=%d workflow_mutations=%d delivery_settlements=%d completion_candidates=%d continuation_scans=%d continuation_observes=%d", receipt.Total.WriteCommits, claims, mutations, settlements, candidateWrites,

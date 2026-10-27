@@ -28,6 +28,10 @@ func TestRunOriginRoundTripsEveryClosedVariant(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
+	stateFork, err := ForkMaterializationRunOrigin("run-parent", ForkOriginPointStateRevision, 6, "")
+	if err != nil {
+		t.Fatal(err)
+	}
 	for _, origin := range []RunOrigin{
 		event,
 		DeploymentRunOrigin(),
@@ -36,6 +40,7 @@ func TestRunOriginRoundTripsEveryClosedVariant(t *testing.T) {
 		fork,
 		deploymentFork,
 		startFork,
+		stateFork,
 	} {
 		raw, err := json.Marshal(origin)
 		if err != nil {

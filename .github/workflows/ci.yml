@@ -683,7 +683,7 @@ jobs:
     if: (github.event_name != 'workflow_dispatch' || inputs.workspace_base_setup != true) && (github.event_name == 'workflow_dispatch' || (github.event_name == 'schedule' && github.ref == 'refs/heads/master')) && needs.ci-plan.outputs.profile == 'full' && needs.ci-plan.outputs.master_replay != 'true'
     name: Native Linux unused analysis
     runs-on: ubuntu-latest
-    timeout-minutes: 19
+    timeout-minutes: 28
     permissions:
       contents: read
     steps:

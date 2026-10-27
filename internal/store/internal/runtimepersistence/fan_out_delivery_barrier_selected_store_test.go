@@ -258,6 +258,36 @@ func TestFanOutDeliveryBarrierCandidateReturnsExactPostCommitScheduleActivationO
 			if got := result.GenericScheduleActivations[0].ID(); got != persistedActivationID {
 				t.Fatalf("committed activation handoff = %s, want persisted %s", got, persistedActivationID)
 			}
+			t.Run("live_prepared_occurrence", func(t *testing.T) {
+				owner, _, db, postgres := newFanOutOwnerPairForTest(t, backend)
+				ctx := originalStoreFixtureContext(t, testAuthorActivityContext(), owner)
+				fixture := seedFanOutOwnerFixture(t, ctx, db, owner, postgres, 0, base, runtimerunlifecycle.LiveRunScope{FlowPath: "."})
+				seedFanOutDeliveryBarrier(t, ctx, db, fixture, base)
+				lifecycle := owner.(runtimerunlifecycle.OperationOwner)
+				if got, err := lifecycle.RequestCompletionCandidate(ctx, runtimerunlifecycle.ImmediateCandidate(fixture.runID)); err != nil || got != runtimerunlifecycle.CandidateRetainedLive {
+					t.Fatalf("live closed fold=%s/%v", got, err)
+				}
+				schedules := owner.(runtimegenericschedule.Store)
+				active, err := schedules.ListActiveGenericScheduleActivations(ctx)
+				if err != nil || len(active) != 1 {
+					t.Fatalf("live barrier activation count=%d err=%v", len(active), err)
+				}
+				wakeup, err := runtimegenericschedule.NewWakeup(active[0].ID, active[0].CurrentDueAt)
+				if err != nil {
+					t.Fatal(err)
+				}
+				prepared, err := schedules.PrepareGenericScheduleOccurrence(ctx, wakeup)
+				if err != nil || !prepared.Acknowledged || prepared.Result.Outcome != runtimegenericschedule.PrepareReady || prepared.Result.Activation.Status != runtimegenericschedule.StatusActive {
+					t.Fatalf("prepare live barrier occurrence=%+v err=%v", prepared, err)
+				}
+				var events int
+				if err := db.QueryRowContext(ctx, `SELECT COUNT(*) FROM events WHERE event_id=$1`, prepared.Result.Occurrence.EventID).Scan(&events); err != nil || events != 0 {
+					t.Fatalf("prepared occurrence already published: count=%d err=%v", events, err)
+				}
+				if got, err := lifecycle.RequestCompletionCandidate(ctx, runtimerunlifecycle.ImmediateCandidate(fixture.runID)); err != nil || got != runtimerunlifecycle.CandidateRetainedLive {
+					t.Fatalf("prepared, unpublished occurrence is not a terminal outcome: disposition=%s err=%v", got, err)
+				}
+			})
 		})
 	}
 }
@@ -514,6 +544,90 @@ func TestFanOutDeliveryBarrierConcurrentCandidatesCloseExactlyOnceOnBothStores(t
 			want := fanoutbarrier.Summary{Total: 0}
 			assertFanOutBarrierState(t, ctx, db, fixture.runID, fixture.deliveryID, fixture.semanticPath, fanoutbarrier.StatusClosedPending, &want, handle.TaskID())
 			assertFanOutBarrierTimerCount(t, ctx, db, fixture.runID, 1)
+			t.Run("live_parallel_settles", func(t *testing.T) {
+				owner, _, db, postgres := newFanOutOwnerPairForTest(t, backend)
+				ctx := originalStoreFixtureContext(t, testAuthorActivityContext(), owner)
+				selected := owner.(storeTestDurableEventBusStore)
+				fixture := seedFanOutOwnerFixture(t, ctx, db, owner, postgres, 2, base, runtimerunlifecycle.LiveRunScope{FlowPath: "."})
+				handle := seedFanOutDeliveryBarrier(t, ctx, db, fixture, base)
+				claims := make([]runtimedelivery.Claim, 2)
+				eventIDs := make([]string, 2)
+				for i := range claims {
+					event := fanOutBarrierChildEvent(t, fixture, i, base.Add(time.Duration(i+1)*time.Second))
+					route := fanOutBarrierRoute(fmt.Sprintf("parallel-%d", i))
+					if err := commitSemanticEventFixtureWithRoutes(ctx, selected, event, []events.DeliveryRoute{route}); err != nil {
+						t.Fatal(err)
+					}
+					claimed, err := claimDeliveryFixture(ctx, selected, event, route)
+					if err != nil {
+						t.Fatal(err)
+					}
+					claims[i], eventIDs[i] = claimed.Claim, event.ID()
+				}
+				seedFanOutBarrierOutcomes(t, ctx, db, fixture, eventIDs, false, base.Add(3*time.Second))
+				lifecycle := selected.(runtimerunlifecycle.OperationOwner)
+				foldStarted := time.Now()
+				if got, err := lifecycle.RequestCompletionCandidate(ctx, runtimerunlifecycle.ImmediateCandidate(fixture.runID)); err != nil || got != runtimerunlifecycle.CandidateRetainedLive {
+					t.Fatalf("live pending fold=%s/%v", got, err)
+				}
+				t.Logf("LIVE_FOLD pending_members=%d request_elapsed=%s", len(claims), time.Since(foldStarted))
+				var foldElapsed time.Duration
+				if err := runSelectedFixtureMutation(ctx, selected, "measure pending live barrier fold", func(txctx context.Context, attempt *mutationprotocol.Attempt) error {
+					started := time.Now()
+					var activations []runtimerunlifecycle.CommittedGenericScheduleActivation
+					var err error
+					switch store := selected.(type) {
+					case *PostgresStore:
+						activations, err = store.pipelinePostgresOwner.AdvanceFanOutDeliveryBarriersTx(txctx, attempt, fixture.runID, base.Add(4*time.Second))
+					case *SQLiteRuntimeStore:
+						activations, err = store.pipelineSQLiteOwner.AdvanceFanOutDeliveryBarriersTx(txctx, attempt, fixture.runID, base.Add(4*time.Second))
+					}
+					foldElapsed = time.Since(started)
+					if err == nil && len(activations) != 0 {
+						return fmt.Errorf("pending live fold admitted %d activations", len(activations))
+					}
+					return err
+				}); err != nil {
+					t.Fatal(err)
+				}
+				t.Logf("LIVE_FOLD pending_members=%d advance_elapsed=%s", len(claims), foldElapsed)
+				assertFanOutBarrierState(t, ctx, db, fixture.runID, fixture.deliveryID, fixture.semanticPath, fanoutbarrier.StatusArmed, nil, "")
+				start := make(chan struct{})
+				errs := make(chan error, len(claims))
+				var workers sync.WaitGroup
+				for _, claim := range claims {
+					workers.Add(1)
+					go func() {
+						defer workers.Done()
+						<-start
+						started := time.Now()
+						commit, err := selected.(runtimedelivery.Store).SettleWorkflowNodeSuccess(ctx, claim, nil, time.Millisecond, runtimedelivery.NotApplicableHandlerRuleSelection())
+						t.Logf("LIVE_FOLD parallel_settle_elapsed=%s acknowledged=%t", time.Since(started), commit.Acknowledged)
+						if err == nil && !commit.Acknowledged {
+							err = fmt.Errorf("live member settlement was not acknowledged")
+						}
+						errs <- err
+					}()
+				}
+				started := time.Now()
+				close(start)
+				workers.Wait()
+				close(errs)
+				t.Logf("LIVE_FOLD parallel_pair_elapsed=%s", time.Since(started))
+				for err := range errs {
+					if err != nil {
+						t.Fatal(err)
+					}
+				}
+				want := fanoutbarrier.Summary{Total: 2, Succeeded: 2}
+				assertFanOutBarrierState(t, ctx, db, fixture.runID, fixture.deliveryID, fixture.semanticPath, fanoutbarrier.StatusClosedPending, &want, handle.TaskID())
+				assertFanOutBarrierTimerCount(t, ctx, db, fixture.runID, 1)
+				var status string
+				var due any
+				if err := db.QueryRowContext(ctx, `SELECT status,completion_due_at FROM runs WHERE run_id=$1`, fixture.runID).Scan(&status, &due); err != nil || status != "live" || due != nil {
+					t.Fatalf("live fold armed run completion: status=%s due=%v err=%v", status, due, err)
+				}
+			})
 		})
 	}
 }

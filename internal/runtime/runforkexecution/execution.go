@@ -11,14 +11,15 @@ import (
 
 	"github.com/division-sh/swarm/internal/durabledata"
 	"github.com/division-sh/swarm/internal/events"
+	runtimepkg "github.com/division-sh/swarm/internal/runtime"
 	runtimebus "github.com/division-sh/swarm/internal/runtime/bus"
 	runtimecontracts "github.com/division-sh/swarm/internal/runtime/contracts"
 	runtimecorrelation "github.com/division-sh/swarm/internal/runtime/correlation"
-	runtimeeffects "github.com/division-sh/swarm/internal/runtime/effects"
 	runtimefailures "github.com/division-sh/swarm/internal/runtime/failures"
 	"github.com/division-sh/swarm/internal/runtime/genericschedule"
 	runtimepipeline "github.com/division-sh/swarm/internal/runtime/pipeline"
 	"github.com/division-sh/swarm/internal/runtime/runfork"
+	"github.com/division-sh/swarm/internal/runtime/runlifecycle"
 	"github.com/division-sh/swarm/internal/runtime/scenarioexecution"
 	"github.com/division-sh/swarm/internal/runtime/semanticview"
 )
@@ -33,6 +34,11 @@ type SelectedContractExecutionRequest struct {
 	SourceArtifactFact      runtimecorrelation.SourceArtifactFact
 	EffectiveSourceIdentity scenarioexecution.EffectiveSourceIdentity
 	AllowSourceFreeze       bool
+	LiveRuntime             *runtimepkg.Runtime
+	AcquireLiveRuntime      func(context.Context, string) (*runtimepkg.RuntimeContextUse, error)
+	LiveContexts            *runtimepkg.RuntimeContextManager
+	LiveRuns                runlifecycle.LiveRunReader
+	liveSelectionHeld       bool
 	DataPinOverrides        []durabledata.ExplicitPin
 
 	Owner             SelectedContractExecutionOwner
@@ -84,7 +90,6 @@ func ExecuteSelectedContractRunFork(ctx context.Context, req SelectedContractExe
 }
 
 func executeSelectedContractRunFork(ctx context.Context, req SelectedContractExecutionRequest, reserved *selectedContractOperation) (out SelectedContractExecutionResult, finalErr error) {
-	callerContext := ctx
 	if req.Recovery == nil && req.ForkOperation != nil {
 		result, found, err := req.Owner.replaySelectedForkOperation(ctx, req, nil)
 		if found || err != nil {
@@ -95,6 +100,23 @@ func executeSelectedContractRunFork(ctx context.Context, req SelectedContractExe
 	if err != nil {
 		return SelectedContractExecutionResult{Owner: runfork.RunForkSelectedContractExecutionOwner}, err
 	}
+	if err := admitSelectedDeploymentRevisionFrontier(prepared.plan, prepared.frontier); err != nil {
+		return SelectedContractExecutionResult{Owner: runfork.RunForkSelectedContractExecutionOwner}, errors.Join(err, req.Owner.completePreparation(prepared))
+	}
+	if req.LiveRuntime != nil || req.AcquireLiveRuntime != nil {
+		result, err := executePreparedLiveFork(ctx, req, prepared)
+		if replay := isolatedSelectedForkOperationReplay(err); replay != nil {
+			req.ForkOperation = prepared.forkOperation
+			return req.Owner.continueElectedSelectedForkOperation(ctx, req, replay)
+		}
+		return result, err
+	}
+	return executePreparedSelectedContractRunFork(ctx, req, prepared)
+}
+
+func executePreparedSelectedContractRunFork(ctx context.Context, req SelectedContractExecutionRequest, prepared *PreparedSelectedFork) (out SelectedContractExecutionResult, finalErr error) {
+	callerContext := ctx
+	var err error
 	disposed := false
 	defer func() {
 		if !disposed {
@@ -104,9 +126,6 @@ func executeSelectedContractRunFork(ctx context.Context, req SelectedContractExe
 	ports, operation, loadedSource := req.Owner.ports, prepared.operation, prepared.loadedSource
 	forkOperation := prepared.forkOperation
 	plan, frontier, routeAdmission := prepared.plan, prepared.frontier, prepared.routeAdmission
-	if err := admitSelectedDeploymentRevisionFrontier(plan, frontier); err != nil {
-		return SelectedContractExecutionResult{Owner: runfork.RunForkSelectedContractExecutionOwner}, err
-	}
 	routeTopology, model := prepared.routeTopology, prepared.model
 	agentRuntime := prepared.agentRuntime
 	deferredWorkAdmission := prepared.deferredWorkAdmission
@@ -122,19 +141,8 @@ func executeSelectedContractRunFork(ctx context.Context, req SelectedContractExe
 		materialization, acknowledged, materializationDiagnostic = req.Owner.materializePrepared(ctx, prepared)
 	}
 	if !acknowledged {
-		if req.Recovery == nil && forkOperation != nil {
-			if replay := isolatedSelectedForkOperationReplay(materializationDiagnostic); replay != nil {
-				disposed = true
-				if cleanupErr := req.Owner.disposePreparation(prepared); cleanupErr != nil {
-					return SelectedContractExecutionResult{}, errors.Join(materializationDiagnostic, cleanupErr)
-				}
-				request := req
-				request.ForkOperation = forkOperation
-				return req.Owner.continueElectedSelectedForkOperation(callerContext, request, replay)
-			}
-		}
 		disposed = true
-		return SelectedContractExecutionResult{Owner: runfork.RunForkSelectedContractExecutionOwner}, errors.Join(materializationDiagnostic, req.Owner.disposePreparation(prepared))
+		return continueUnacknowledgedSelectedMaterialization(callerContext, req, prepared, materializationDiagnostic)
 	}
 	defer func() {
 		if !out.Activation.Activated {
@@ -234,34 +242,23 @@ func executeSelectedContractRunFork(ctx context.Context, req SelectedContractExe
 			return result, nil
 		}
 	}
-	ctx = runtimeeffects.WithAuthority(ctx, container.authority)
-	activation, err := container.activate(ctx, runfork.RunForkSelectedContractExecutionActivateRequest{
-		InheritedSchedules:    prepared.readiness,
-		ForkOperation:         forkOperation,
-		DataPins:              materialization.DataPins,
-		ExecutionSource:       loadedSource.Source,
-		ForkRunID:             materialization.ForkRunID,
-		AllowSourceFreeze:     req.AllowSourceFreeze,
-		AllowedSourceEventIDs: sourceEventIDs,
-		FrontierAdmission:     frontier,
-		RouteTopology:         routeTopology,
-		RecipientPlanning:     *model.RecipientPlanning,
-	})
-	result.Activation = activation
-	if !activation.Activated {
-		if err == nil {
-			err = errors.New("selected fork activation was not acknowledged")
+	return container.activatePrepared(prepared, req, result, materializationDiagnostic)
+}
+
+func continueUnacknowledgedSelectedMaterialization(ctx context.Context, req SelectedContractExecutionRequest, prepared *PreparedSelectedFork, diagnostic error) (SelectedContractExecutionResult, error) {
+	if req.Recovery == nil && prepared.forkOperation != nil {
+		if replay := isolatedSelectedForkOperationReplay(diagnostic); replay != nil {
+			if cleanupErr := req.Owner.disposePreparation(prepared); cleanupErr != nil {
+				return SelectedContractExecutionResult{}, errors.Join(diagnostic, cleanupErr)
+			}
+			if req.LiveRuntime != nil || req.AcquireLiveRuntime != nil {
+				return SelectedContractExecutionResult{}, diagnostic
+			}
+			req.ForkOperation = prepared.forkOperation
+			return req.Owner.continueElectedSelectedForkOperation(ctx, req, replay)
 		}
-		acknowledged, authorityErr := container.Fail(ctx, err)
-		if !acknowledged {
-			return result, errors.Join(err, authorityErr)
-		}
-		return result, prepared.cleanupExecutionFailure(ctx, ports.fork, materialization.ForkRunID, forkOperation, errors.Join(err, authorityErr))
 	}
-	// The permanent result owns acknowledgment; registration or cleanup loss
-	// cannot reverse it. Recovery resumes the committed child and owed work.
-	container.RetainActivated(prepared, errors.Join(err, materializationDiagnostic))
-	return result, nil
+	return SelectedContractExecutionResult{Owner: runfork.RunForkSelectedContractExecutionOwner}, errors.Join(diagnostic, req.Owner.disposePreparation(prepared))
 }
 
 func validateSelectedContractExecutionFrontierForMutation(frontier runfork.RunForkContractFrontierAdmission) error {
@@ -343,6 +340,9 @@ func admitSelectedEventPointOwedSchedule(plan runfork.RunForkPlan) error {
 		if schedule.Command.RunID != plan.SourceRunID {
 			return fmt.Errorf("selected-contract one-shot belongs to another source run")
 		}
+		return plan.ForkPoint.Validate()
+	}
+	if plan.ForkPoint.Kind == runfork.RunForkPointStateRevision {
 		return plan.ForkPoint.Validate()
 	}
 	return fmt.Errorf("selected-contract event-point execution requires selected frontier events or an exact owed schedule")

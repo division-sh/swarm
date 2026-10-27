@@ -99,7 +99,7 @@ func issue642RemovedArmedTimerFork(t *testing.T, backend string, final bool) {
 		t.Fatal("removed-rule cut lost its actual creating-handler cause")
 	}
 	rt.waitEntityStage(t, seed.RunID, seed.RunID, "checked")
-	sourceCompleted := issue2564H2CompletionWaitRun(t, rt, seed.RunID)
+	sourceCompleted := pauseIssue2564SettledSource(t, rt, seed.RunID)
 	rt.waitDeliveries(t, seed.RunID)
 	issue2564H2CompletionWaitReceipt(t, rt, seed.RunID, seed.EventID)
 	plan, sourceTimer := issue642TimerContinuationPlan(t, reader, seed.RunID, seed.EventID, marker.EventID)
@@ -123,7 +123,7 @@ func issue642RemovedArmedTimerFork(t *testing.T, backend string, final bool) {
 		"allow_source_freeze": true, "idempotency_key": "issue642-removed-armed-timer-fork",
 	}, &fork)
 	if fork.SourceRunID != seed.RunID || fork.ForkRunID == "" || fork.ForkRunID == seed.RunID ||
-		fork.ForkEventID != marker.EventID || fork.ForkRevision != plan.ForkPoint.Revision || fork.SourceFrozen || fork.SourceRunStatus != "completed" {
+		fork.ForkEventID != marker.EventID || fork.ForkRevision != plan.ForkPoint.Revision || fork.SourceFrozen || fork.SourceRunStatus != "paused" {
 		t.Fatalf("removed-rule fork lost its exact cut and independent source completion: %+v", fork)
 	}
 	child := rt
@@ -133,8 +133,8 @@ func issue642RemovedArmedTimerFork(t *testing.T, backend string, final bool) {
 		t.Fatalf("removed rule lost its exact selected child: header=%+v err=%v", header, err)
 	}
 	if final {
-		header = issue2564H2CompletionWaitRun(t, child, fork.ForkRunID)
-	} else if header.Status != "running" || header.EndedAt != nil {
+		header = waitIssue2564LiveRunSettlement(t, child, fork.ForkRunID)
+	} else if header.Status != "live" || header.EndedAt != nil {
 		t.Fatalf("removed rule incorrectly completed its non-final receiver: %+v", header)
 	}
 	if !sourceTimer.FireAt.Before(header.StartedAt) {

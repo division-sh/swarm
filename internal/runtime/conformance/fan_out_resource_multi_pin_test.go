@@ -42,6 +42,7 @@ func TestDeploymentSourceTwoPinnedFeedsSettleIndependentlyBothStores(t *testing.
 					t.Fatal(err)
 				}
 				versions[item.declaration] = version
+				pauseDeploymentFixtureRun(t, f, runID)
 			}
 
 			runID := uuid.NewString()

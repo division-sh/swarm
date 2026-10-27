@@ -428,7 +428,7 @@ func lockActiveRunQuiescenceRunsTx(ctx context.Context, tx *sql.Tx, runIDs []str
 		SELECT run_id::text, COALESCE(bundle_hash, ''), COALESCE(status, '')
 		FROM runs
 		WHERE run_id = ANY($1::uuid[])
-		  AND lower(COALESCE(status, '')) IN ('running', 'paused')
+		  AND lower(COALESCE(status, '')) IN ('running', 'paused', 'live')
 		ORDER BY run_id::text
 		FOR UPDATE
 	`, pq.Array(runIDs))
@@ -462,7 +462,7 @@ func sqliteLockAllActiveQuiescenceRunsTx(ctx context.Context, tx *sql.Tx) ([]run
 	rows, err := tx.QueryContext(ctx, `
 		SELECT run_id, COALESCE(bundle_hash, ''), COALESCE(status, '')
 		FROM runs
-		WHERE lower(COALESCE(status, '')) IN ('running', 'paused')
+		WHERE lower(COALESCE(status, '')) IN ('running', 'paused', 'live')
 		  AND NOT EXISTS (
 			SELECT 1 FROM standing_services ss WHERE ss.current_run_id = runs.run_id
 		  )
@@ -486,7 +486,7 @@ func sqliteLockActiveQuiescenceRunsTx(ctx context.Context, tx *sql.Tx, runIDs []
 		SELECT run_id, COALESCE(bundle_hash, ''), COALESCE(status, '')
 		FROM runs
 		WHERE run_id IN (`+sqlitePlaceholders(len(runIDs))+`)
-		  AND lower(COALESCE(status, '')) IN ('running', 'paused')
+		  AND lower(COALESCE(status, '')) IN ('running', 'paused', 'live')
 		ORDER BY run_id
 	`, args...)
 	if err != nil {

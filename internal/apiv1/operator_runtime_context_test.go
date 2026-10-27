@@ -73,6 +73,7 @@ func TestOperatorRuntimeContextManagerRoutesCreateNewWorkToSelectedBundle(t *tes
 	}
 	fixture.probeA.requireNone(t, "primary context selected bundle route")
 
+	pauseAPITestLiveRun(t, fixture.busB, fixture.pg, publishedRunID)
 	runID := uuid.NewString()
 	started := rpcCallWithPlainRequestContext(t, handler, runStartBodyWithBundleHash(runID, runtimeContextTestBundleHashB, "triage.requested", `{"topic":"context-b-start"}`, "idem-context-start"))
 	if started.Error != nil {

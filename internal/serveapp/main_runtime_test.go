@@ -654,7 +654,7 @@ func TestServePinnedHashAdmissionExcludesCurrentStandingAndRejectsOrdinaryMismat
 		RunID: uuid.NewString(), Artifact: pinnedArtifact,
 	})
 	storetest.RequireRun(t, ctx, pg, storetest.RunFixture{Origin: storetest.ScenarioSetupOrigin(),
-		RunID: otherRunID, State: storerunlifecycle.StatePaused,
+		RunID: otherRunID, State: storerunlifecycle.StateRunning,
 		Artifact: otherArtifact,
 	})
 	standingSource := mustServeTestPersistedSourceArtifactFact(otherHash)
@@ -698,6 +698,12 @@ func TestServePinnedHashAdmissionExcludesCurrentStandingAndRejectsOrdinaryMismat
 	}
 	if strings.Contains(got, standingOtherRunID) {
 		t.Fatalf("pinned-hash admission claimed current standing run %s: %q", standingOtherRunID, got)
+	}
+	if _, err := pg.TransitionActiveRun(standingCtx, storerunlifecycle.ActiveTransitionRequest{RunID: otherRunID, State: storerunlifecycle.StatePaused}); err != nil {
+		t.Fatal(err)
+	}
+	if err := runbundle.AdmitPinnedSources(ctx, pg, pinnedHash, []string{pinnedHash}); err != nil {
+		t.Fatalf("non-executing paused source blocked boot: %v", err)
 	}
 
 	if err := runbundle.AdmitPinnedSources(ctx, pg, pinnedHash, nil); err != nil {
@@ -864,13 +870,13 @@ func TestRunServeRuntimeEventPublishRunIDFollowUpServedPathDefaultSQLite(t *test
 
 func requireServedRunForkStoppedReplay(t *testing.T, db *sql.DB, forkRunID string) {
 	t.Helper()
-	var waitingEntities, deliveredEvents int
+	var endedInstances, deliveredEvents int
 	var executionState string
 	err := db.QueryRowContext(context.Background(), `
 			SELECT
 					(SELECT COUNT(*) FROM entity_state es JOIN flow_instances fi
 					 ON fi.run_id=es.run_id AND fi.entity_id=es.entity_id AND fi.instance_path=es.flow_instance
-					 WHERE es.run_id=$1 AND fi.current_state='waiting'),
+					 WHERE es.run_id=$1 AND fi.current_state='done'),
 				(SELECT COUNT(*)
 				 FROM events e
 				 JOIN event_deliveries d ON d.event_id=e.event_id AND d.run_id=e.run_id
@@ -881,9 +887,9 @@ func requireServedRunForkStoppedReplay(t *testing.T, db *sql.DB, forkRunID strin
 				(SELECT state
 				 FROM run_fork_selected_contract_runtime_executions
 					 WHERE fork_run_id=$1)
-		`, forkRunID, identitytest.RootNode(t, "item-observer").Key()).Scan(&waitingEntities, &deliveredEvents, &executionState)
-	if err != nil || waitingEntities != 1 || deliveredEvents != 1 || executionState != "closed" {
-		t.Fatalf("stopped replay for %s = waiting entities:%d deliveries:%d execution:%q err:%v", forkRunID, waitingEntities, deliveredEvents, executionState, err)
+		`, forkRunID, identitytest.RootNode(t, "item-observer").Key()).Scan(&endedInstances, &deliveredEvents, &executionState)
+	if err != nil || endedInstances != 1 || deliveredEvents != 2 || executionState != "closed" {
+		t.Fatalf("stopped ordinary successor for %s = ended instances:%d deliveries:%d execution:%q err:%v", forkRunID, endedInstances, deliveredEvents, executionState, err)
 	}
 }
 
@@ -1633,7 +1639,7 @@ func runServedRunForkBackendProof(t *testing.T, backend servedparity.Backend) {
 		t.Fatalf("fork-point event.publish result = %#v", published)
 	}
 	waitForServedEventPublishNodeDeliveryLifecycleForNode(t, rt.DB, rt.Backend, started.RunID, published.EventID, identitytest.RootNode(t, "item-observer").Key(), rt.Probe)
-	requireServedRunStatusWithDebug(t, rt.Endpoint, rt.DB, rt.Backend, started.RunID, "running")
+	requireServedRunStatusWithDebug(t, rt.Endpoint, rt.DB, rt.Backend, started.RunID, "live")
 
 	forkParams := map[string]any{
 		"source_run_id":       started.RunID,
@@ -1655,7 +1661,7 @@ func runServedRunForkBackendProof(t *testing.T, backend servedparity.Backend) {
 	if err := json.Unmarshal([]byte(stdout), &fork); err != nil {
 		t.Fatalf("decode swarm run fork result: %v\n%s", err, stdout)
 	}
-	if fork.SourceRunID != started.RunID || fork.ForkEventID != published.EventID || fork.ForkRunID == "" || fork.SourceFrozen || fork.SourceRunStatus != "running" || fork.ExecutedEventCount != 0 {
+	if fork.SourceRunID != started.RunID || fork.ForkEventID != published.EventID || fork.ForkRunID == "" || fork.SourceFrozen || fork.SourceRunStatus != "paused" || fork.ForkRunStatus != "live" || fork.ExecutedEventCount != 1 {
 		t.Fatalf("run.fork result = %#v", fork)
 	}
 	var replay apiv1.RunForkExecutionResult
@@ -1689,30 +1695,19 @@ func runServedRunForkBackendProof(t *testing.T, backend servedparity.Backend) {
 	if err := waitExactOriginPublications(t.Context(), publication, started.EventID, published.EventID); err != nil {
 		t.Fatal(err)
 	}
-	beforeRefusal := snapshotForkReceiverApplication(t, rt)
-	// A selected fork cannot acquire future ordinary ingress from the loaded
-	// same-hash runtime. Retained controls still own its explicit terminal stop.
-	refused := requireServedJSONRPCError(t, rt.Endpoint, "event.publish", map[string]any{
+	// After the canonical ACK, fresh ordinary authority owns subsequent ingress.
+	continued := requireServedEventPublishRPCResult(t, rt.Endpoint, map[string]any{
 		"bundle_hash":     rt.BundleHash,
 		"run_id":          fork.ForkRunID,
 		"event_name":      "item.processed",
 		"payload":         map[string]any{"item_id": "review"},
 		"idempotency_key": "issue-2361-" + rt.Backend + "-fork-completion",
 	})
-	if refused.Data["code"] != "SELECTED_FORK_CONTROL_UNSUPPORTED" {
-		t.Fatalf("selected ingress refusal = %+v", refused)
+	if continued.RunID != fork.ForkRunID || continued.NewRunCreated {
+		t.Fatalf("ordinary successor ingress changed the live child: %+v", continued)
 	}
-	var bindingID string
-	if err := rt.DB.QueryRow(`SELECT binding_id FROM run_fork_selected_contract_bindings WHERE fork_run_id=$1`, fork.ForkRunID).Scan(&bindingID); err != nil {
-		t.Fatal(err)
-	}
-	details, ok := refused.Data["details"].(map[string]any)
-	if !ok || details["run_id"] != fork.ForkRunID || details["binding_id"] != bindingID || details["operation"] != "event.publish" {
-		t.Fatalf("selected ingress refusal lost exact binding: %+v", refused)
-	}
-	if afterRefusal := snapshotForkReceiverApplication(t, rt); !reflect.DeepEqual(beforeRefusal, afterRefusal) {
-		t.Fatalf("refused selected ingress changed persisted state: tables=%v", forkReceiverChangedTables(beforeRefusal, afterRefusal))
-	}
+	waitServedRunDeliveryQuiescence(t, rt.ReadRunDeliveries, fork.ForkRunID)
+	requireServedOKJSONRPC(t, rt.Endpoint, "run.pause", map[string]any{"run_id": fork.ForkRunID, "idempotency_key": "fork-successor-pause"})
 	var stopped struct {
 		OK bool `json:"ok"`
 	}
@@ -2399,11 +2394,24 @@ func startServedTestSetupEntitiesProofRuntime(t *testing.T, backend servedparity
 
 func startServedTestSetupEntitiesProofRuntimeFromSource(t *testing.T, backend servedparity.Backend, sourceRoot string, hooks ...runtimepipeline.WorkflowNodeHandlerStartHook) servedControlProofRuntime {
 	t.Helper()
-	return startServedTestSetupEntitiesProofRuntimeConfigured(t, backend, sourceRoot, false, hooks...)
+	return startServedTestSetupEntitiesProofRuntimeConfigured(t, backend, sourceRoot, false, executionposture.MockOnly, hooks...)
 }
 
-func startServedTestSetupEntitiesProofRuntimeConfigured(t *testing.T, backend servedparity.Backend, sourceRoot string, realWorkspace bool, hooks ...runtimepipeline.WorkflowNodeHandlerStartHook) servedControlProofRuntime {
+func startServedLiveFlowProofRuntimeFromSource(t *testing.T, backend servedparity.Backend, sourceRoot string, hooks ...runtimepipeline.WorkflowNodeHandlerStartHook) servedControlProofRuntime {
+	return startServedTestSetupEntitiesProofRuntimeConfigured(t, backend, sourceRoot, false, executionposture.Live, hooks...)
+}
+
+func requireServedLiveRootMode(t *testing.T, posture executionposture.Posture, event events.Event, runID string) {
 	t.Helper()
+	if posture != executionposture.Live || event.RunID() != runID || event.ExecutionMode() != executionmode.Live {
+		t.Fatalf("live fixture changed root authority: posture=%s run=%s mode=%s", posture, event.RunID(), event.ExecutionMode())
+	}
+}
+
+func startServedTestSetupEntitiesProofRuntimeConfigured(t *testing.T, backend servedparity.Backend, sourceRoot string, realWorkspace bool, posture executionposture.Posture, hooks ...runtimepipeline.WorkflowNodeHandlerStartHook) servedControlProofRuntime {
+	t.Helper()
+	var contexts *runtimepkg.RuntimeContextManager
+	captureContexts := func(manager *runtimepkg.RuntimeContextManager) { contexts = manager }
 	var deliveryReader servedRunDeliveryReader
 	captureSelectedRuntimePersistence(t, func(p serveRuntimePersistence) { deliveryReader = p.deps.DeliveryStore.SummarizeRun })
 	forkOptions := captureServedForkRuntimeOptions(t)
@@ -2450,8 +2458,9 @@ func startServedTestSetupEntitiesProofRuntimeConfigured(t *testing.T, backend se
 		if realWorkspace {
 			configPath = writeMockAgentRuntimeConfig(t, storebackend.BackendSQLite.String(), sqlitePath)
 		}
-		endpoint, rt := startOwnedMockLifecycleFollowUpRuntime(t, cliapp.ServeOptions{
+		endpoint, rt := startOwnedLifecycleFollowUpRuntime(t, cliapp.ServeOptions{
 			ConfigPath:                       configPath,
+			TestRuntimeContextsReadyHook:     captureContexts,
 			SourceRoot:                       sourceRoot,
 			TestWorkflowNodeHandlerStartHook: handlerStart,
 			APIListenAddr:                    "127.0.0.1:0",
@@ -2459,11 +2468,11 @@ func startServedTestSetupEntitiesProofRuntimeConfigured(t *testing.T, backend se
 			SelfCheck:                        true,
 			Verbose:                          true,
 			TestOutboxSweeperConfig:          servedEventPublishProofOutboxSweeperConfig(),
-		})
+		}, posture)
 		if servedDB == nil {
 			t.Fatal("served sqlite SQLDB is required for test.setup_entities served parity proof")
 		}
-		return servedControlProofRuntime{ReadRunDeliveries: deliveryReader, Endpoint: endpoint, DB: servedDB, SQLite: servedSQLite, Backend: "sqlite", BundleHash: bundleHash, Runtime: rt, ForkRuntime: *forkOptions, ReceiverStateReader: receiverReader}
+		return servedControlProofRuntime{ReadRunDeliveries: deliveryReader, Endpoint: endpoint, DB: servedDB, SQLite: servedSQLite, Backend: "sqlite", BundleHash: bundleHash, Runtime: rt, Contexts: contexts, ForkRuntime: *forkOptions, ReceiverStateReader: receiverReader}
 	case servedparity.BackendExplicitPostgres:
 		_, db, pg := installServeRuntimeEmptyPostgresTestStores(t, func() cliapp.ServeWorkspaceLifecycle {
 			return serveRuntimeWorkspaceStub{}
@@ -2474,8 +2483,9 @@ func startServedTestSetupEntitiesProofRuntimeConfigured(t *testing.T, backend se
 		if realWorkspace {
 			configPath = writeMockAgentRuntimeConfig(t, storebackend.BackendPostgres.String(), "")
 		}
-		endpoint, rt := startOwnedMockLifecycleFollowUpRuntime(t, cliapp.ServeOptions{
+		endpoint, rt := startOwnedLifecycleFollowUpRuntime(t, cliapp.ServeOptions{
 			ConfigPath:                       configPath,
+			TestRuntimeContextsReadyHook:     captureContexts,
 			SourceRoot:                       sourceRoot,
 			TestWorkflowNodeHandlerStartHook: handlerStart,
 			StoreMode:                        "postgres",
@@ -2485,8 +2495,8 @@ func startServedTestSetupEntitiesProofRuntimeConfigured(t *testing.T, backend se
 			SelfCheck:                        true,
 			Verbose:                          true,
 			TestOutboxSweeperConfig:          servedEventPublishProofOutboxSweeperConfig(),
-		})
-		return servedControlProofRuntime{ReadRunDeliveries: deliveryReader, Endpoint: endpoint, DB: db, Postgres: pg, Backend: "postgres", BundleHash: bundleHash, Runtime: rt, ForkRuntime: *forkOptions, ReceiverStateReader: receiverReader}
+		}, posture)
+		return servedControlProofRuntime{ReadRunDeliveries: deliveryReader, Endpoint: endpoint, DB: db, Postgres: pg, Backend: "postgres", BundleHash: bundleHash, Runtime: rt, Contexts: contexts, ForkRuntime: *forkOptions, ReceiverStateReader: receiverReader}
 	default:
 		t.Fatalf("unknown served test.setup_entities backend %q", backend)
 		return servedControlProofRuntime{}
@@ -2585,7 +2595,7 @@ func runServedRunControlLifecycleProof(t *testing.T, rt servedControlProofRuntim
 		"run_id":          runID,
 		"idempotency_key": continueKey,
 	})
-	requireServedRunControlState(t, rt.DB, rt.Backend, runID, "running", "running", "completed")
+	requireServedRunStatus(t, rt.Endpoint, runID, "live")
 	requireServedControlAPIIdempotencyRows(t, rt.DB, rt.Backend, "run.continue", continueKey, 1)
 	requireServedOKJSONRPC(t, rt.Endpoint, "run.continue", map[string]any{
 		"run_id":          runID,
@@ -2594,11 +2604,13 @@ func runServedRunControlLifecycleProof(t *testing.T, rt servedControlProofRuntim
 	requireServedControlAPIIdempotencyRows(t, rt.DB, rt.Backend, "run.continue", continueKey, 1)
 	waitServedEventPublishDeliveryStatusCountForRun(t, rt.DB, rt.Backend, runID, queued.EventID, "node", identitytest.RootNode(t, "item-observer").Key(), "delivered", 1)
 	requireServedEventPublishEntityState(t, rt.DB, rt.Backend, runID, entityID, "done")
-	requireServedRunStatus(t, rt.Endpoint, runID, "completed")
+	requireServedRunStatus(t, rt.Endpoint, runID, "live")
 	requireServedParitySettlementPostconditions(t, rt.Endpoint, rt.DB, rt.Backend, runID, servedparity.MustScenario(servedparity.ScenarioRunContinueControlLifecycle))
+	requireServedOKJSONRPC(t, rt.Endpoint, "run.pause", map[string]any{"run_id": runID, "idempotency_key": keyPrefix + "-settled-pause"})
 
 	stopRunID, pendingEventID, stopEntityID, stopCardID := seedServedRunControlPendingRunWithAgentDelivery(t, rt)
 	stopKey := "issue-1864-" + rt.Backend + "-" + stopRunID + "-run-stop"
+	requireServedOKJSONRPC(t, rt.Endpoint, "run.pause", map[string]any{"run_id": stopRunID, "idempotency_key": stopKey + "-pause"})
 	requireServedOKJSONRPC(t, rt.Endpoint, "run.stop", map[string]any{
 		"run_id":          stopRunID,
 		"idempotency_key": stopKey,
@@ -2664,7 +2676,7 @@ func runServedRuntimeIngressControlLifecycleProof(t *testing.T, rt servedControl
 	}
 
 	waitServedEventPublishReceiptOutcomeCount(t, rt.DB, rt.Backend, queued.EventID, "platform", "pipeline", "success", 1)
-	requireServedRunStatus(t, rt.Endpoint, queued.RunID, "running")
+	requireServedRunStatus(t, rt.Endpoint, queued.RunID, "live")
 	requireServedParitySettlementPostconditions(t, rt.Endpoint, rt.DB, rt.Backend, queued.RunID, servedparity.MustScenario(servedparity.ScenarioRuntimeResumeIngressLifecycle))
 }
 
@@ -3547,9 +3559,8 @@ func runServedDynamicAutoEmitProof(t *testing.T, endpoint string, db *sql.DB, ba
 	componentNode := identitytest.FlowNode(t, "operating", "component-scaffold").Key()
 	requireServedEventReadback(t, endpoint, componentEventID, runID, componentEntityID, componentEventName, componentNode)
 	requireServedTraceReadback(t, endpoint, runID, componentEventID, componentEventName, componentNode)
-	requireServedRunStatusWithDebug(t, endpoint, db, backend, runID, "completed")
-	requireServedRunDiagnoseOperationalState(t, endpoint, runID, "completed")
-	requireServedStatusCLIReadback(t, endpoint, runID, "  completed")
+	requireServedFinalInstancesSettled(t, endpoint, runID, map[string]string{servedTypedCreationInstancePath: "ready"})
+	requireServedStatusCLIReadback(t, endpoint, runID, "  live")
 	requireServedReplayNoDeliveryHistoryNoMutation(t, endpoint, db, backend, autoEventID, "issue-1384-"+backend+"-replay-child-node-only")
 	requireServedParitySettlementPostconditions(t, endpoint, db, backend, runID, servedparity.MustScenario(servedparity.ScenarioEventPublishDynamicAutoEmitLifecycle))
 }
@@ -3612,7 +3623,7 @@ func createServedControlWaitingRun(t *testing.T, rt servedControlProofRuntime, s
 	}
 	waitForServedEventPublishNodeDeliveryLifecycleForNode(t, rt.DB, rt.Backend, result.RunID, result.EventID, identitytest.RootNode(t, "item-handler").Key(), rt.Probe)
 	entityID = requireServedEventPublishEntityState(t, rt.DB, rt.Backend, result.RunID, "", "waiting")
-	requireServedRunStatus(t, rt.Endpoint, result.RunID, "running")
+	requireServedRunStatus(t, rt.Endpoint, result.RunID, "live")
 	return result.RunID, result.EventID, entityID
 }
 
@@ -4989,7 +5000,7 @@ func runServedEventPublishFollowUpProof(t *testing.T, endpoint string, db *sql.D
 	waitForServedEventPublishNodeDeliveryLifecycleForNode(t, db, backend, runID, followUpEventID, identitytest.RootNode(t, "item-observer").Key(), probe)
 	requireServedEventPublishEntityState(t, db, backend, runID, entityID, "done")
 	requireServedEntityReadback(t, endpoint, runID, entityID, "done")
-	requireServedRunStatusWithDebug(t, endpoint, db, backend, runID, "completed")
+	requireServedFinalInstancesSettled(t, endpoint, runID, map[string]string{runID: "done"})
 	itemObserver := identitytest.RootNode(t, "item-observer").Key()
 	requireServedEventReadback(t, endpoint, followUpEventID, runID, entityID, "item.processed", itemObserver)
 	requireServedTraceReadback(t, endpoint, runID, followUpEventID, "item.processed", itemObserver)
@@ -5008,7 +5019,7 @@ func runServedEventPublishFollowUpProof(t *testing.T, endpoint string, db *sql.D
 			t.Fatalf("trace readback missing %q:\n%s", want, traceStdout)
 		}
 	}
-	requireServedStatusCLIReadback(t, endpoint, runID, "  completed")
+	requireServedStatusCLIReadback(t, endpoint, runID, "  live")
 	entityListStdout, entityListStderr, entityListCode := runServedCLICommand(t, endpoint, []string{"entity", "list", "--run-id", runID, "--limit", "10"})
 	if entityListCode != 0 {
 		t.Fatalf("entities list readback code=%d stderr=%s stdout=%s", entityListCode, entityListStderr, entityListStdout)
@@ -5029,6 +5040,8 @@ func runServedEventPublishFollowUpProof(t *testing.T, endpoint string, db *sql.D
 	}
 
 	unhandledIdempotencyKey := "issue-1255-" + backend + "-unhandled"
+	requireServedOKJSONRPC(t, endpoint, "run.pause", map[string]any{"run_id": runID})
+	requireServedOKJSONRPC(t, endpoint, "run.stop", map[string]any{"run_id": runID})
 	errResp := requireServedJSONRPCError(t, endpoint, "event.publish", map[string]any{
 		"event_name":      "item.processed",
 		"run_id":          runID,
@@ -5039,7 +5052,7 @@ func runServedEventPublishFollowUpProof(t *testing.T, endpoint string, db *sql.D
 		t.Fatalf("unhandled follow-up error data = %#v, want %s", errResp.Data, apiv1.RunAlreadyTerminalCode)
 	}
 	details, ok := errResp.Data["details"].(map[string]any)
-	if !ok || details["current_status"] != "completed" {
+	if !ok || details["current_status"] != "cancelled" {
 		t.Fatalf("unhandled follow-up details = %#v", errResp.Data["details"])
 	}
 	if got := servedEventPublishEventCountByIdempotencyKey(t, db, backend, unhandledIdempotencyKey); got != 0 {
@@ -5257,7 +5270,7 @@ func runServedEventPublishActiveLoadProof(
 	waitServedEventPublishDeliveryStatusCount(t, db, backend, hold.EventID, "agent", "load-agent", "delivered", 1)
 	waitForServedEventPublishNodeDeliveryLifecycleForNode(t, db, backend, runID, followUp.EventID, identitytest.RootNode(t, "item-observer").Key(), probe)
 	requireServedEventPublishEntityState(t, db, backend, runID, entityID, "done")
-	requireServedRunStatusWithDebug(t, endpoint, db, backend, runID, "completed")
+	requireServedFinalInstancesSettled(t, endpoint, runID, map[string]string{runID: "done"})
 	requireServedTraceReadback(t, endpoint, runID, followUp.EventID, "item.processed", itemObserver)
 }
 
@@ -5380,6 +5393,31 @@ func requestServedRawJSONRPC(t *testing.T, endpoint, raw string) servedJSONRPCEn
 	return envelope
 }
 
+func requireServedFinalInstancesSettled(t *testing.T, endpoint, runID string, stages map[string]string) {
+	t.Helper()
+	var last cliapp.DiagnosticRunDiagnosisResult
+	for deadline := time.Now().Add(servedProofPollDeadline); time.Now().Before(deadline); {
+		requireServedJSONRPCResult(t, endpoint, "run.diagnose", map[string]any{"run_id": runID}, &last)
+		final := len(stages) != 0
+		for path, stage := range stages {
+			found := false
+			for _, instance := range last.Instances {
+				if instance.FlowInstance == path {
+					found = instance.Stage == stage && instance.Disposition == "final"
+					break
+				}
+			}
+			final = final && found
+		}
+		if final && last.Run.RunID == runID && last.Run.Status == "live" && last.Run.EndedAt == "" &&
+			last.Run.Failure == nil && last.TestQuiescence != nil && cliapp.BoolPointerValue(last.TestQuiescence.Ready) {
+			return
+		}
+		time.Sleep(50 * time.Millisecond)
+	}
+	t.Fatalf("live run %s did not retain exact final instances %v with settled work: %+v", runID, stages, last)
+}
+
 func requireServedRunStatus(t *testing.T, endpoint, runID, want string) {
 	t.Helper()
 	var last string
@@ -5420,29 +5458,6 @@ func requireServedRunStatusWithDebug(t *testing.T, endpoint string, db *sql.DB, 
 		time.Sleep(50 * time.Millisecond)
 	}
 	t.Fatalf("run.get status for %s = %q, want %q\n%s", runID, last, want, servedEventPublishDebugSummary(t, db, backend, runID))
-}
-
-func requireServedRunDiagnoseOperationalState(t *testing.T, endpoint, runID, want string) {
-	t.Helper()
-	type servedRunDiagnose struct {
-		OperationalState string `json:"operational_state"`
-		Run              struct {
-			RunID  string `json:"run_id"`
-			Status string `json:"status"`
-		} `json:"run"`
-	}
-	var last servedRunDiagnose
-	deadline := time.Now().Add(servedProofPollDeadline)
-	for time.Now().Before(deadline) {
-		var result servedRunDiagnose
-		requireServedJSONRPCResult(t, endpoint, "run.diagnose", map[string]any{"run_id": runID}, &result)
-		last = result
-		if result.Run.RunID == runID && result.Run.Status == want && result.OperationalState == want {
-			return
-		}
-		time.Sleep(50 * time.Millisecond)
-	}
-	t.Fatalf("run.diagnose for %s = %#v, want run/status and operational_state %q", runID, last, want)
 }
 
 func requireServedStatusCLIReadback(t *testing.T, endpoint, runID, want string) {
@@ -8261,11 +8276,16 @@ func startServeRuntimeTestProcessAtRepo(t *testing.T, repo string, opts cliapp.S
 
 func startOwnedMockLifecycleTestProcess(t *testing.T, repo, retainedRoot string, opts cliapp.ServeOptions) *serveRuntimeTestProcess {
 	t.Helper()
-	t.Log("proof_surface=H in-process retained mock lifecycle; not public serve/test")
+	return startOwnedLifecycleTestProcess(t, repo, retainedRoot, opts, executionposture.MockOnly)
+}
+
+func startOwnedLifecycleTestProcess(t *testing.T, repo, retainedRoot string, opts cliapp.ServeOptions, posture executionposture.Posture) *serveRuntimeTestProcess {
+	t.Helper()
+	t.Logf("proof_surface=H in-process retained lifecycle posture=%s; not public serve/test", posture)
 	return startRuntimeTestProcessWithRunner(t, repo, opts, func(ctx context.Context, root string, opts cliapp.ServeOptions) int {
 		code, err := runOwnedLifecycle(ctx, root, retainedRoot, opts, apiv1.AuthTokenResolution{
 			Tokens: []string{apiv1.DefaultLoopbackAPIToken}, Source: "internal-lifecycle-parent", Explicit: true,
-		}, executionposture.MockOnly, "")
+		}, posture, "")
 		if err != nil {
 			fmt.Fprintf(opts.Output, "internal lifecycle setup: %v\n", err)
 		}

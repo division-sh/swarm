@@ -66,5 +66,9 @@ func (o SelectedContractExecutionOwner) recoverSelectedForkOperation(ctx context
 	if action != selectedRecoveryResume && action != selectedRecoveryActivate {
 		return SelectedContractExecutionResult{}, fmt.Errorf("selected operation recovery is not executable: %s", recovered.Disposition)
 	}
-	return o.resumeRecoveredSelectedFork(ctx, recovered, SelectedContractExecutionRequest{SourceLoader: request.SourceLoader, AgentRuntime: request.AgentRuntime}, operation)
+	return o.resumeRecoveredSelectedFork(ctx, recovered, SelectedContractExecutionRequest{
+		SourceLoader: request.SourceLoader, AgentRuntime: request.AgentRuntime,
+		LiveRuntime: request.LiveRuntime, LiveContexts: request.LiveContexts, LiveRuns: request.LiveRuns,
+		AcquireLiveRuntime: request.AcquireLiveRuntime,
+	}, operation)
 }

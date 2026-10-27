@@ -55,6 +55,7 @@ func (am *AgentManager) reconcileDynamicFlowAgentSet(
 	persisted map[runtimeagentidentity.Identity]PersistedAgent,
 	topologyAuthority runtimeagenttopology.Admission,
 	retireRemoved bool,
+	selectedRootReadiness bool,
 ) error {
 	flowIdentity = flowIdentity.Normalize()
 	if err := flowIdentity.Validate(); err != nil {
@@ -71,6 +72,9 @@ func (am *AgentManager) reconcileDynamicFlowAgentSet(
 		}
 		removedIdentities := make(map[runtimeagentidentity.Identity]struct{})
 		for identity := range persisted {
+			if !flowReadinessOwnsAgentIdentity(identity, selectedRootReadiness) {
+				continue
+			}
 			if _, ok := expectedIdentities[identity]; !ok {
 				removedIdentities[identity] = struct{}{}
 			}
@@ -80,7 +84,7 @@ func (am *AgentManager) reconcileDynamicFlowAgentSet(
 			if err != nil {
 				return err
 			}
-			if !flowIdentity.MatchesAgentRoute(identity) {
+			if !flowReadinessMatchesAgentIdentity(flowIdentity, identity, selectedRootReadiness) {
 				continue
 			}
 			if _, ok := expectedIdentities[identity]; !ok {
@@ -237,6 +241,7 @@ func (am *AgentManager) verifyDynamicFlowAgents(
 	flowIdentity runtimeflowidentity.RunScopedFlowInstance,
 	expected []PersistedAgent,
 	topology runtimeagenttopology.Admission,
+	selectedRootReadiness bool,
 ) error {
 	if err := topology.Validate(); err != nil {
 		return fmt.Errorf("verify dynamic flow topology admission: %w", err)
@@ -268,7 +273,7 @@ func (am *AgentManager) verifyDynamicFlowAgents(
 			if err != nil {
 				return err
 			}
-			if flowIdentity.MatchesAgentRoute(identity) {
+			if flowReadinessMatchesAgentIdentity(flowIdentity, identity, selectedRootReadiness) {
 				persistedByIdentity[identity] = rec
 			}
 		}
@@ -279,7 +284,7 @@ func (am *AgentManager) verifyDynamicFlowAgents(
 		if err != nil {
 			return err
 		}
-		if flowIdentity.MatchesAgentRoute(identity) {
+		if flowReadinessMatchesAgentIdentity(flowIdentity, identity, selectedRootReadiness) {
 			processByIdentity[identity] = cfg
 		}
 	}
@@ -333,6 +338,33 @@ func (am *AgentManager) verifyDynamicFlowAgents(
 		}
 	}
 	return nil
+}
+
+func flowReadinessOwnsAgentIdentity(identity runtimeagentidentity.Identity, selectedRootReadiness bool) bool {
+	return !selectedRootReadiness || identity.Route.Presence != runtimeagentidentity.RouteRoot
+}
+
+func flowReadinessMatchesAgentIdentity(flowIdentity runtimeflowidentity.RunScopedFlowInstance, identity runtimeagentidentity.Identity, selectedRootReadiness bool) bool {
+	return flowIdentity.MatchesAgentRoute(identity) && flowReadinessOwnsAgentIdentity(identity, selectedRootReadiness)
+}
+
+func (am *AgentManager) flowReadinessOwnedAgentRecords(plan runtimepipeline.DynamicFlowRuntimeReadinessPlan, source semanticview.Source, records []PersistedAgent) ([]PersistedAgent, bool, error) {
+	origin := am.lifecycle.diagnosticOrigin
+	if origin.Owner != LifecycleDiagnosticSelectedFork || origin.SelectedFork.ForkRunID != plan.RunID ||
+		plan.Identity.TemplateID != semanticview.RootExecutionFlowID(source) {
+		return records, false, nil
+	}
+	owned := make([]PersistedAgent, 0, len(records))
+	for _, record := range records {
+		identity, err := record.Config.ConcreteIdentity()
+		if err != nil {
+			return nil, false, err
+		}
+		if identity.Route.Presence != runtimeagentidentity.RouteRoot {
+			owned = append(owned, record)
+		}
+	}
+	return owned, true, nil
 }
 
 func verifyDynamicFlowAgentExpectations(actual []PersistedAgent, expected []runtimepipeline.DynamicFlowRuntimeAgentExpectation) error {

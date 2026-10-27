@@ -214,7 +214,7 @@ func executeNodeIdentityWork(t *testing.T, process *releaseServeProcess, hash, s
 		}
 		// Unselected eager children remain pending. The selected handler settles,
 		// but the complete constructed tree must not claim whole-run completion.
-		return countGoldenEvents(observed, prefix+"work.processed") == 1 && diagnosis.Run.Status == "running" && diagnosis.TestQuiescence.Ready, nil
+		return countGoldenEvents(observed, prefix+"work.processed") == 1 && diagnosis.Run.Status == "live" && diagnosis.TestQuiescence.Ready, nil
 	})
 	if err != nil {
 		diagnosisJSON, _ := json.Marshal(diagnosis)
@@ -293,6 +293,11 @@ func executeNodeIdentityWork(t *testing.T, process *releaseServeProcess, hash, s
 			}
 		}
 	}
+	var paused any
+	if err := process.rpc.call(ctx, "run.pause", map[string]any{"run_id": admitted.RunID}, &paused); err != nil {
+		t.Fatalf("pause settled identity fixture before an independent root: %v", err)
+	}
+	waitForFullLifecycleRunStatus(t, process.rpc, admitted.RunID, "paused")
 	observed, err = listGoldenEvents(ctx, process.rpc, admitted.RunID)
 	if err != nil {
 		t.Fatal(err)

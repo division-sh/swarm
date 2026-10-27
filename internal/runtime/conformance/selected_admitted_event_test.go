@@ -40,8 +40,17 @@ func TestIssue2655EventSelectorsKeepPreparedRevisionBothStores(t *testing.T) {
 				if explicit {
 					at = eventID
 				}
+				var operation *runfork.ForkOperationRequest
+				if !explicit {
+					operation = &runfork.ForkOperationRequest{
+						OperationID: uuid.NewString(), Actor: "prepared-state-revision", IdempotencyKey: uuid.NewString(), TransportHash: "prepared-state-revision",
+						SourceRunID: sourceRun, TargetBundleHash: f.runtime.sourceArtifactFact.BundleHash(),
+						ContractSelection: runfork.RunForkContractSelection{Mode: runfork.RunForkContractSelectionModeSelectedContracts},
+					}
+				}
 				prepared, err := owner.Prepare(ctx, runforkexecution.SelectedContractExecutionRequest{
-					SourceRunID: sourceRun, At: at, ExpectedBundleHash: f.runtime.sourceArtifactFact.BundleHash(),
+					ForkOperation: operation,
+					SourceRunID:   sourceRun, At: at, ExpectedBundleHash: f.runtime.sourceArtifactFact.BundleHash(),
 					ContractSelection: runfork.RunForkContractSelection{Mode: runfork.RunForkContractSelectionModeSelectedContracts},
 					SourceLoader:      runforkexecution.SourceArtifactSelectedContractSourceLoader{RepoRoot: repo, Store: f.selected.(runforkexecution.SourceArtifactSelectedContractSourceStore)},
 					AgentRuntime:      runforkexecution.SelectedContractAgentRuntimeOptions{ExecutionPosture: executionposture.Live, ProcessCapability: f.topology.capability},
@@ -56,7 +65,11 @@ func TestIssue2655EventSelectorsKeepPreparedRevisionBothStores(t *testing.T) {
 				})
 				request, err := prepared.MaterializationRequest()
 				point := request.Preparation.ForkPoint
-				if err != nil || request.ForkOperation != nil || request.At != at || point.Validate() != nil || point.Kind != runfork.RunForkPointEvent || point.Input != at || (explicit && point.EventID != eventID) {
+				kind := runfork.RunForkPointStateRevision
+				if explicit {
+					kind = runfork.RunForkPointEvent
+				}
+				if err != nil || (request.ForkOperation == nil) != explicit || request.At != at || point.Validate() != nil || point.Kind != kind || point.Input != at || (explicit && point.EventID != eventID) {
 					t.Fatalf("event selector lost its admitted meaning: at=%q point=%+v err=%v", request.At, point, err)
 				}
 				fork := f.selected.(runforkexecution.SelectedContractForkLifecycle)
@@ -67,7 +80,7 @@ func TestIssue2655EventSelectorsKeepPreparedRevisionBothStores(t *testing.T) {
 				laterEvent := uuid.NewString()
 				storetest.InsertRevisionedExistingRunRootEventRecord(t, ctx, f.selected, laterEvent, sourceRun, selectedDeploymentEvent, eventtest.Producer(events.EventProducerExternal, "later-event-proof"), []byte(`{"account_id":"later-event","document":{}}`), events.EventEnvelope{}, time.Now().UTC())
 				current, err := fork.PlanRunFork(ctx, runfork.RunForkPlanRequest{SourceRunID: sourceRun})
-				if err != nil || current.ForkPoint.EventID != laterEvent || current.ForkPoint.Revision <= request.Preparation.ForkPoint.Revision {
+				if err != nil || current.ForkPoint.Kind != runfork.RunForkPointStateRevision || current.ForkPoint.EventID != "" || current.ForkPoint.Revision <= request.Preparation.ForkPoint.Revision {
 					t.Fatalf("source did not acquire a newer event point: current=%+v err=%v", current.ForkPoint, err)
 				}
 				materialized, err := fork.MaterializeRunForkForSelectedContractExecution(ctx, request)
@@ -189,7 +202,7 @@ func TestIssue2655EventOperationSelectorCorrespondenceBothStores(t *testing.T) {
 				postCutEvent := uuid.NewString()
 				storetest.InsertRevisionedExistingRunRootEventRecord(t, ctx, f.selected, postCutEvent, sourceRun, selectedDeploymentEvent, eventtest.Producer(events.EventProducerExternal, "selector-post-cut"), []byte(`{"account_id":"selector-post-cut","document":{}}`), events.EventEnvelope{}, time.Now().UTC())
 				advanced, err := fork.PlanRunFork(ctx, runfork.RunForkPlanRequest{SourceRunID: sourceRun})
-				if err != nil || advanced.ForkPoint.Revision <= request.Preparation.ForkPoint.Revision || advanced.ForkPoint.EventID != postCutEvent {
+				if err != nil || advanced.ForkPoint.Kind != runfork.RunForkPointStateRevision || advanced.ForkPoint.Revision <= request.Preparation.ForkPoint.Revision || advanced.ForkPoint.EventID != "" {
 					t.Fatalf("selector source did not advance canonically: point=%+v err=%v", advanced.ForkPoint, err)
 				}
 				bad, err := prepared.MaterializationRequest()
@@ -200,7 +213,7 @@ func TestIssue2655EventOperationSelectorCorrespondenceBothStores(t *testing.T) {
 				if explicit {
 					bad.ForkOperation.ForkEventID = ""
 				} else {
-					bad.ForkOperation.ForkEventID = request.Preparation.ForkPoint.EventID
+					bad.ForkOperation.ForkEventID = eventID
 				}
 				before, err := storetest.ReadSelectedForkApplicationStorageSnapshot(ctx, f.selected)
 				if err != nil {

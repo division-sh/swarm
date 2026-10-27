@@ -20,7 +20,7 @@ func TestIssue642PublishedFanOutReturnsOwnChildReplyBothStores(t *testing.T) {
 	for _, backend := range []catalogRuntimeBackend{catalogBackendSQLite, catalogBackendPostgres} {
 		t.Run(string(backend), func(t *testing.T) {
 			root := canonicalrouting.CopyPublishedFanOutReply(t)
-			h := newRuntimeHarnessForBackend(t, root, backend, true)
+			h := newLiveForkCatalogHarness(t, root, backend)
 			h.publishAndWait(catalogTriggerStep{Event: "request.started", Payload: map[string]any{"account_id": "same-account", "request_id": "same-key", "items": []any{"same-key"}},
 				eventID: uuid.NewString(), createdAt: time.Now().UTC(), sourceAgent: "cataloge2e", inputKind: catalogReplayInputRootIngress}, 20*time.Second)
 			h.waitForCatalogStoreQuiescence(20 * time.Second)
@@ -66,7 +66,7 @@ func TestIssue642PublishedFanOutReturnsOwnChildReplyBothStores(t *testing.T) {
 				len(page.Intents) != 1 || page.Intents[0].Status != fanoutobligation.StatusClosed || page.Intents[0].Cursor != 1 || page.Intents[0].Cardinality != 1 || page.Intents[0].Owed != 0 {
 				t.Fatalf("cut did not retain the own open row and exact published carrier: rows=%+v intents=%+v errors=%v/%v", childRows, page, err, pageErr)
 			}
-			executed, err := runforkexecution.ExecuteSelectedContractRunFork(h.ctx, runforkexecution.SelectedContractExecutionRequest{
+			executed, err := executeCatalogLiveFork(t, h, h.ctx, runforkexecution.SelectedContractExecutionRequest{
 				SourceRunID: catalogRuntimeRunID, At: cut, ForkOperation: &operation, AllowSourceFreeze: true, Owner: owner, SourceLoader: loader, ContractSelection: selection, AgentRuntime: options,
 			})
 			if err != nil || !executed.Activation.Activated || executed.Materialization.ForkRunID != staged.ForkRunID {

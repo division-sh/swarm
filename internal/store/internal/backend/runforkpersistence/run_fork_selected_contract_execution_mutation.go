@@ -1058,7 +1058,11 @@ func runForkSelectedContractConversationAdvancedFacts(facts []string) []string {
 }
 
 func ensureRunForkNoPostForkActiveConversationDeliverySessionCoupling(ctx context.Context, q selectedContractExecutionQueryer, deliveries *storedelivery.Adapter, lineage runForkActivationLineage) error {
-	snapshots, err := deliveries.ActiveCouplingSnapshotsForRun(ctx, q, lineage.SourceRunID)
+	return requireSelectedSourcePostCutCouplingAbsent(ctx, q, deliveries, lineage.SourceRunID, lineage.ForkEventRevision)
+}
+
+func requireSelectedSourcePostCutCouplingAbsent(ctx context.Context, q selectedContractExecutionQueryer, deliveries *storedelivery.Adapter, sourceRunID string, revisionAtCut int64) error {
+	snapshots, err := deliveries.ActiveCouplingSnapshotsForRun(ctx, q, sourceRunID)
 	if err != nil {
 		return fmt.Errorf("check selected-contract source delivery snapshots: %w", err)
 	}
@@ -1071,10 +1075,10 @@ func ensureRunForkNoPostForkActiveConversationDeliverySessionCoupling(ctx contex
 			  AND family = 'event_deliveries'
 			  AND fact_key = $2
 			  AND present
-		`, lineage.SourceRunID, snapshot.DeliveryID).Scan(&revision); err != nil {
+		`, sourceRunID, snapshot.DeliveryID).Scan(&revision); err != nil {
 			return fmt.Errorf("check selected-contract source delivery revision: %w", err)
 		}
-		if revision.Valid && revision.Int64 > lineage.ForkEventRevision {
+		if revision.Valid && revision.Int64 > revisionAtCut {
 			code := "source_active_conversation_session_coupling_after_fork_point"
 			return runForkReplayResumeError(code, runfork.RunForkReplayResumeFactSessionHistory, fmt.Sprintf("%s blocked unsafe post-T active source delivery/session coupling: %s", runfork.RunForkSelectedContractSourceAdvancedConversationHistoryPolicyOwner, code))
 		}

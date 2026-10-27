@@ -1,12 +1,14 @@
 package apiv1
 
 import (
+	"context"
 	"encoding/json"
 	"reflect"
 	"testing"
 
 	"github.com/division-sh/swarm/internal/durabledata"
 	runtimecontracts "github.com/division-sh/swarm/internal/runtime/contracts"
+	"github.com/division-sh/swarm/internal/runtime/runlifecycle"
 	"github.com/division-sh/swarm/internal/runtime/semanticview"
 	"github.com/division-sh/swarm/internal/runtime/testfixtures/canonicalrouting"
 	"github.com/google/uuid"
@@ -169,6 +171,11 @@ func TestFiniteRunStartReceiptReplayAndConflictBothStores(t *testing.T) {
 		if first.Error != nil {
 			t.Fatalf("finite initiation: %#v", first)
 		}
+		scope, err := fixture.reconstructed.(runlifecycle.LiveRunReader).LoadRunLiveScope(context.Background(), runID)
+		if err != nil {
+			t.Fatal(err)
+		}
+		t.Logf("W4_FINITE_SCOPE flow_path=%q status=%v", scope.FlowPath, asMap(t, first.Result)["status"])
 		replay := rpcCall(t, handler, body)
 		if replay.Error != nil || !reflect.DeepEqual(first.Result, replay.Result) {
 			t.Fatalf("committed response changed on replay: first=%#v replay=%#v", first, replay)

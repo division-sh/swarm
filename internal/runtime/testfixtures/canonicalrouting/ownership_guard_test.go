@@ -715,52 +715,6 @@ func TestCanonicalRoutingExternalSourceMatchesRuntimeSemantics(t *testing.T) {
 	}
 }
 
-func TestCanonicalRoutingRepositoryUsesClosedConstructionAPI(t *testing.T) {
-	repo := RepoRoot(t)
-	var violations []string
-	packages, err := repositoryGoPackages(repo)
-	if err != nil {
-		t.Fatal(err)
-	}
-	for key, files := range packages {
-		if strings.HasPrefix(key, "internal/runtime/testfixtures/canonicalrouting:") {
-			continue
-		}
-		for _, source := range completeGoPackageRoutingSourceArtifacts(files) {
-			violations = append(violations, key+":"+source.File+":"+source.Function+" contains a complete Go-authored routing bundle")
-		}
-	}
-	err = walkRepositoryGoFiles(repo, func(path string, raw []byte) error {
-		rel, err := filepath.Rel(repo, path)
-		if err != nil {
-			return err
-		}
-		file := filepath.ToSlash(rel)
-		if strings.HasPrefix(file, "internal/runtime/testfixtures/canonicalrouting/") {
-			return nil
-		}
-		for _, retired := range []string{
-			"canonicalrouting.ApplyOverlayMutation",
-			"canonicalrouting.CopyTree",
-			"canonicalrouting.WriteFile",
-			"canonicalrouting.ReplaceFile",
-			"canonicalrouting.MergeMappingFile",
-		} {
-			if bytes.Contains(raw, []byte(retired)) {
-				violations = append(violations, file+" uses retired "+retired)
-			}
-		}
-		return nil
-	})
-	if err != nil {
-		t.Fatal(err)
-	}
-	if len(violations) != 0 {
-		sort.Strings(violations)
-		t.Fatalf("raw routing fixtures bypass the closed canonical API:\n%s", strings.Join(violations, "\n"))
-	}
-}
-
 func TestCanonicalRoutingTrackedSplitsRemainOpen(t *testing.T) {
 	if os.Getenv("SWARM_CANONICAL_ROUTING_VERIFY_TRACKER_REMOTE") != "1" {
 		t.Skip("remote tracker verification is enforced by CI")

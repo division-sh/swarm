@@ -16,6 +16,7 @@ import (
 	"github.com/division-sh/swarm/internal/runtime/core/processbinding"
 	runtimedestructivereset "github.com/division-sh/swarm/internal/runtime/destructivereset"
 	runtimemanager "github.com/division-sh/swarm/internal/runtime/manager"
+	"github.com/division-sh/swarm/internal/runtime/runcontrol"
 	runtimestartupownership "github.com/division-sh/swarm/internal/runtime/startupownership"
 	storeadmin "github.com/division-sh/swarm/internal/store/internal/adminpersistence"
 	"github.com/division-sh/swarm/internal/store/internal/backend/activityjournal"
@@ -24,6 +25,7 @@ import (
 	"github.com/division-sh/swarm/internal/store/internal/backend/mutationprotocol"
 	storepipeline "github.com/division-sh/swarm/internal/store/internal/backend/pipelinepersistence"
 	postgresbackend "github.com/division-sh/swarm/internal/store/internal/backend/postgres"
+	"github.com/division-sh/swarm/internal/store/internal/backend/runlifecycle/sourceadmission"
 	sqlitebackend "github.com/division-sh/swarm/internal/store/internal/backend/sqlite"
 	"github.com/division-sh/swarm/internal/store/internal/backend/transactiontest"
 	storerunhandoff "github.com/division-sh/swarm/internal/store/internal/runhandoff"
@@ -328,6 +330,14 @@ func (s *postgresSession) InspectRunExecutionOwnership(ctx context.Context, evid
 	return result, err
 }
 
+func (s *postgresSession) InspectLiveForkReconciliation(ctx context.Context, evidence runtimestartupownership.GrantEvidence, runID string) (current bool, err error) {
+	err = s.lease.RunTransaction(ctx, func(ctx context.Context, tx *sql.Tx) error {
+		current, err = inspectLiveForkReconciliationTx(ctx, tx, evidence, runID, false)
+		return err
+	})
+	return current, err
+}
+
 func (s *postgresSession) LoadSourceSet(ctx context.Context) (runtimeagenttopology.SourceSetPlan, bool, error) {
 	var plan runtimeagenttopology.SourceSetPlan
 	var exists bool
@@ -348,6 +358,12 @@ func (s *postgresSession) CommitSourceSet(ctx context.Context, req runtimeagentt
 		return err
 	})
 	return result, err
+}
+
+func (s *postgresSession) CheckSourceSetReplacement(ctx context.Context, req runtimeagenttopology.SourceSetCommitRequest) error {
+	return s.lease.RunTransaction(ctx, func(ctx context.Context, tx *sql.Tx) error {
+		return checkSourceSetReplacementTx(ctx, tx, req, false)
+	})
 }
 
 func (s *postgresSession) ApplyDestructiveResetCleanup(ctx context.Context, req runtimedestructivereset.CleanupRequest, topology *runtimeagenttopology.SourceSetCommitRequest) (runtimedestructivereset.CleanupResult, error) {
@@ -538,6 +554,14 @@ func (s *sqliteSession) InspectRunExecutionOwnership(ctx context.Context, eviden
 	return result, err
 }
 
+func (s *sqliteSession) InspectLiveForkReconciliation(ctx context.Context, evidence runtimestartupownership.GrantEvidence, runID string) (current bool, err error) {
+	err = s.owner.backend.RunTransaction(ctx, "inspect live fork reconciliation", func(ctx context.Context, tx *sql.Tx) error {
+		current, err = inspectLiveForkReconciliationTx(ctx, tx, evidence, runID, true)
+		return err
+	})
+	return current, err
+}
+
 func (s *sqliteSession) LoadSourceSet(ctx context.Context) (runtimeagenttopology.SourceSetPlan, bool, error) {
 	var plan runtimeagenttopology.SourceSetPlan
 	var exists bool
@@ -558,6 +582,12 @@ func (s *sqliteSession) CommitSourceSet(ctx context.Context, req runtimeagenttop
 		return err
 	})
 	return result, err
+}
+
+func (s *sqliteSession) CheckSourceSetReplacement(ctx context.Context, req runtimeagenttopology.SourceSetCommitRequest) error {
+	return s.owner.backend.RunTransaction(ctx, "check agent topology source replacement", func(ctx context.Context, tx *sql.Tx) error {
+		return checkSourceSetReplacementTx(ctx, tx, req, true)
+	})
 }
 
 func (s *sqliteSession) ApplyDestructiveResetCleanup(ctx context.Context, req runtimedestructivereset.CleanupRequest, topology *runtimeagenttopology.SourceSetCommitRequest) (result runtimedestructivereset.CleanupResult, err error) {
@@ -930,12 +960,8 @@ func commitSourceSetTx(ctx context.Context, tx *sql.Tx, req runtimeagenttopology
 			return runtimeagenttopology.SourceSetCommitResult{}, err
 		}
 	}
-	if req.Operation == runtimeagenttopology.OperationInstallCompleteSourceSet {
-		if hasPrevious {
-			return runtimeagenttopology.SourceSetCommitResult{}, errors.New("complete source set is already installed")
-		}
-	} else if !hasPrevious || req.ExpectedRevision != previous.Revision {
-		return runtimeagenttopology.SourceSetCommitResult{}, errors.New("agent topology source-set predecessor changed")
+	if err := requireSourceSetPredecessor(ctx, tx, req, previous, hasPrevious, sqlite); err != nil {
+		return runtimeagenttopology.SourceSetCommitResult{}, err
 	}
 	changes, err := runtimeagenttopology.Diff(previous, req.Plan)
 	if err != nil {
@@ -960,6 +986,70 @@ func commitSourceSetTx(ctx context.Context, tx *sql.Tx, req runtimeagenttopology
 		}
 	}
 	return result, err
+}
+
+func checkSourceSetReplacementTx(ctx context.Context, tx *sql.Tx, req runtimeagenttopology.SourceSetCommitRequest, sqlite bool) error {
+	previous, exists, err := loadSourceSetTx(ctx, tx, sqlite)
+	if err != nil {
+		return err
+	}
+	return requireSourceSetPredecessor(ctx, tx, req, previous, exists, sqlite)
+}
+
+func requireSourceSetPredecessor(ctx context.Context, tx *sql.Tx, req runtimeagenttopology.SourceSetCommitRequest, previous runtimeagenttopology.SourceSetPlan, hasPrevious, sqlite bool) error {
+	if req.Operation == runtimeagenttopology.OperationInstallCompleteSourceSet {
+		if hasPrevious {
+			return errors.New("complete source set is already installed")
+		}
+	} else if !hasPrevious || req.ExpectedRevision != previous.Revision {
+		return errors.New("agent topology source-set predecessor changed")
+	}
+	if req.RequirePausedRemoval {
+		return requirePausedSourceRemoval(ctx, tx, previous, req.Plan, sqlite)
+	}
+	return nil
+}
+
+func requirePausedSourceRemoval(ctx context.Context, tx *sql.Tx, previous, next runtimeagenttopology.SourceSetPlan, sqlite bool) error {
+	for _, source := range previous.Sources {
+		if sourceSetContains(next, source) {
+			continue
+		}
+		query := `SELECT run_id,status FROM runs WHERE bundle_hash=$1 AND status IN ('live','running') ORDER BY run_id LIMIT 1`
+		if !sqlite {
+			query += ` FOR UPDATE`
+		}
+		var state runcontrol.State
+		err := tx.QueryRowContext(ctx, query, source.BundleHash).Scan(&state.RunID, &state.Status)
+		if err == nil {
+			return &runcontrol.StateError{Err: runcontrol.ErrNotPaused, RunID: state.RunID, CurrentStatus: state.Status, Detail: "pause every run before replacing its bundle"}
+		}
+		if !errors.Is(err, sql.ErrNoRows) {
+			return err
+		}
+	}
+	return nil
+}
+
+func inspectLiveForkReconciliationTx(ctx context.Context, tx *sql.Tx, evidence runtimestartupownership.GrantEvidence, runID string, sqlite bool) (bool, error) {
+	ownership, err := inspectRunExecutionOwnershipTx(ctx, tx, evidence, runID, sqlite)
+	if err != nil {
+		return false, err
+	}
+	retained, err := sourceadmission.ObserveRetainedLiveHandoff(ctx, tx, runID, evidence.BundleHash)
+	if err != nil {
+		return false, err
+	}
+	if retained && ownership == runtimemanager.RunExecutionOwned {
+		return true, nil
+	}
+	if retained && ownership == runtimemanager.RunExecutionForeign {
+		current, err := sourceadmission.ObserveLiveHandoff(ctx, tx, runID, evidence.BundleHash)
+		if err != nil || !current {
+			return false, err
+		}
+	}
+	return false, fmt.Errorf("%w: %s", runtimemanager.ErrRunExecutionNotOwned, runID)
 }
 
 func inspectRunExecutionOwnershipTx(ctx context.Context, tx *sql.Tx, evidence runtimestartupownership.GrantEvidence, runID string, sqlite bool) (runtimemanager.RunExecutionOwnership, error) {

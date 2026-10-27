@@ -45,7 +45,13 @@ func TestSelectedGenerationGrantExecutionRequiresExactForkPointBothStores(t *tes
 					container_plan_fingerprint TEXT NOT NULL, actor_census_fingerprint TEXT NOT NULL,
 					effective_config_fingerprint TEXT NOT NULL, declaration_plan_fingerprint TEXT NOT NULL,
 					declaration_plan TEXT NOT NULL, preparation_fingerprint TEXT NOT NULL,
-					preparation_binding TEXT NOT NULL, state TEXT NOT NULL, lease_expires_at TIMESTAMPTZ NOT NULL)`,
+					preparation_binding TEXT NOT NULL, state TEXT NOT NULL, lease_expires_at TIMESTAMPTZ NOT NULL, failure TEXT)`,
+				`CREATE TABLE run_fork_operations (
+					operation_id TEXT PRIMARY KEY, selected_binding_id TEXT, fork_run_id TEXT, source_run_id TEXT,
+					fork_point_kind TEXT, fork_revision BIGINT, fork_event_id TEXT, state TEXT, result_json TEXT, failure_json TEXT)`,
+				`CREATE TABLE run_fork_operation_live_parents (
+					operation_id TEXT PRIMARY KEY, selected_binding_id TEXT, fork_run_id TEXT, source_run_id TEXT,
+					fork_point_kind TEXT, fork_revision BIGINT, fork_event_id TEXT)`,
 				`CREATE TABLE run_fork_selected_contract_execution_live_parents (
 					execution_id TEXT PRIMARY KEY, binding_id TEXT NOT NULL, fork_run_id TEXT NOT NULL,
 					source_run_id TEXT NOT NULL, fork_point_kind TEXT NOT NULL, fork_revision BIGINT NOT NULL,
@@ -77,7 +83,7 @@ func TestSelectedGenerationGrantExecutionRequiresExactForkPointBothStores(t *tes
 					t.Fatal(err)
 				}
 				if _, err := db.ExecContext(ctx, `INSERT INTO run_fork_selected_contract_runtime_executions VALUES
-					($1,$2,$3,$4,$5,$6,$7,1,1,'owner',$9,$9,$9,$9,$9,'{}',$9,'{}','running',$8)`,
+					($1,$2,$3,$4,$5,$6,$7,1,1,'owner',$9,$9,$9,$9,$9,'{}',$9,'{}','running',$8,NULL)`,
 					executionID, bindingID, forkID, sourceID, arm.kind, arm.revision, arm.eventID, time.Now().Add(time.Hour), "sha256:"+strings.Repeat("1", 64)); err != nil {
 					t.Fatal(err)
 				}

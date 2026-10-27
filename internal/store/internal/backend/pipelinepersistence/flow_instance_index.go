@@ -34,6 +34,64 @@ type HistoricalFlowInstanceReader interface {
 	ReadProjectedReceiverConstructionReceiptTx(context.Context, *sql.Tx, runlifecycle.Snapshot, pipeline.WorkflowInstance) (pipeline.FlowConstructionReceipt, bool, error)
 }
 
+// Activation consumes these native receipts on its already-owned transaction.
+// Historical projections cannot stand in for newly constructed members.
+func (s *PipelinePostgresOwner) ReadNativeFlowConstructionsTx(ctx context.Context, tx *sql.Tx, source semanticview.Source, run runlifecycle.Snapshot, entityIDs []string) ([]pipeline.FlowInstanceObservation, error) {
+	return readNativeFlowConstructionsTx(ctx, tx, true, source, run, entityIDs, s.historicalInstances)
+}
+
+func (s *PipelineSQLiteOwner) ReadNativeFlowConstructionsTx(ctx context.Context, tx *sql.Tx, source semanticview.Source, run runlifecycle.Snapshot, entityIDs []string) ([]pipeline.FlowInstanceObservation, error) {
+	return readNativeFlowConstructionsTx(ctx, tx, false, source, run, entityIDs, s.historicalInstances)
+}
+
+func readNativeFlowConstructionsTx(ctx context.Context, tx *sql.Tx, postgres bool, source semanticview.Source, run runlifecycle.Snapshot, entityIDs []string, historical HistoricalFlowInstanceReader) (observations []pipeline.FlowInstanceObservation, result error) {
+	if err := validateFlowInstanceIndexSnapshot(source, run.BundleHash, run, historical); err != nil {
+		return nil, err
+	}
+	fact, err := correlation.NewSourceArtifactFact(run.BundleHash)
+	if err != nil {
+		return nil, err
+	}
+	snapshot := flowInstanceIndexSnapshot{tx: tx, postgres: postgres, source: source, run: run, historical: historical, observed: make(map[string]pipeline.FlowInstanceObservation)}
+	result = snapshot.withHistoricalReconstruction(ctx, func(ctx context.Context) error {
+		if err := snapshot.requireRecordedRevision(ctx); err != nil {
+			return err
+		}
+		headers, err := snapshot.headers(ctx, "fi.run_id=$1", run.RunID)
+		if err != nil {
+			return err
+		}
+		wanted := make(map[string]bool, len(entityIDs))
+		for _, id := range entityIDs {
+			if id == "" || wanted[id] {
+				return fmt.Errorf("native construction inventory has a missing or duplicate identity")
+			}
+			wanted[id] = true
+		}
+		for _, header := range headers {
+			if !wanted[header.EntityID] {
+				continue
+			}
+			owner := flowidentity.RunScopedFlowInstance{RunID: run.RunID, Route: flowidentity.StoredRoute(flowidentity.ScopeKey(source, header.WorkflowName), header.InstanceID, header.StorageRef)}
+			request, err := pipeline.NewExactFlowInstanceLookup(source, fact, owner)
+			if err != nil {
+				return err
+			}
+			observation, err := snapshot.observeConstruction(ctx, request, header, HistoricalFlowInstanceConstructionResult{})
+			if err != nil {
+				return err
+			}
+			observations = append(observations, observation)
+			delete(wanted, header.EntityID)
+		}
+		if len(wanted) != 0 {
+			return fmt.Errorf("native construction inventory lost an exact member")
+		}
+		return nil
+	})
+	return observations, result
+}
+
 func (s *PipelinePostgresOwner) BindHistoricalFlowInstanceReader(owner HistoricalFlowInstanceReader) error {
 	if s == nil || owner == nil || s.historicalInstances != nil {
 		return fmt.Errorf("PostgreSQL historical instance reader requires one binding")

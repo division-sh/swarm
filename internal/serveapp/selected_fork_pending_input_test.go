@@ -30,7 +30,7 @@ func TestSelectedForkPendingInputBothStores(t *testing.T) {
 				}
 				root := canonicalrouting.CopySelectedForkPendingInput(t, variant)
 				publication := newExactOriginPublicationProbe(t)
-				rt := startServedTestSetupEntitiesProofRuntimeFromSource(t, backend, root)
+				rt := startServedLiveFlowProofRuntimeFromSource(t, backend, root)
 				seed := requireServedEventPublishRPCResult(t, rt.Endpoint, map[string]any{
 					"event_name": "work.seeded", "bundle_hash": rt.BundleHash, "payload": map[string]any{"seed": true}, "idempotency_key": "input-seed",
 				})
@@ -173,7 +173,7 @@ func TestExplicitTargetRestrictsConnectedSiblingsBothStores(t *testing.T) {
 		t.Run(string(backend), func(t *testing.T) {
 			root := canonicalrouting.CopySelectedForkPendingInput(t, canonicalrouting.PendingInputConnectedSiblings)
 			publication := newExactOriginPublicationProbe(t)
-			rt := startServedTestSetupEntitiesProofRuntimeFromSource(t, backend, root)
+			rt := startServedLiveFlowProofRuntimeFromSource(t, backend, root)
 			seed := requireServedEventPublishRPCResult(t, rt.Endpoint, map[string]any{
 				"event_name": "work.seeded", "bundle_hash": rt.BundleHash, "payload": map[string]any{"seed": true}, "idempotency_key": "target-seed",
 			})

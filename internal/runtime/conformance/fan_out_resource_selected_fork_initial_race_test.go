@@ -74,7 +74,7 @@ func TestDeploymentSourceSelectedForkConcurrentFirstMaterialization(t *testing.T
 				t.Fatalf("same-key retry failed to resolve exact child: result=%+v error=%s contenders=%s / %s",
 					resolved, rpcErr, outcomes[0].rpcErr, outcomes[1].rpcErr)
 			}
-			if resolved.ForkPointKind != "deployment_revision" || resolved.ForkRevision <= 0 || resolved.ForkEventID != "" {
+			if resolved.ForkPointKind != "state_revision" || resolved.ForkRevision <= 0 || resolved.ForkEventID != "" {
 				t.Fatalf("same-key replay lost eventless deployment point: %+v", resolved)
 			}
 			for _, outcome := range outcomes {
@@ -105,7 +105,7 @@ func TestDeploymentSourceSelectedForkConcurrentFirstMaterialization(t *testing.T
 				&operationChildID, &bindingKind, &bindingRevision); err != nil {
 				t.Fatalf("read exact first-materialization authority: %v", err)
 			}
-			if runKind != "deployment_revision" || operationKind != runKind || bindingKind != runKind ||
+			if runKind != "state_revision" || operationKind != runKind || bindingKind != runKind ||
 				runRevision <= 0 || operationRevision != runRevision || bindingRevision != runRevision ||
 				operationChildID != resolved.ForkRunID {
 				t.Fatalf("first-materialization point disagreement: run=%s/%d operation=%s/%d child=%s binding=%s/%d",

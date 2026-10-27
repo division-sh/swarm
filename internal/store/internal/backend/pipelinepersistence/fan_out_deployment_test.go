@@ -211,11 +211,11 @@ func TestOrdinaryCandidateSelectorIncludesDeploymentFeedsOnBothStores(t *testing
 			if err := insertDeploymentFanOutIntentRowTx(ctx, tx, second, at.Add(time.Second)); err != nil {
 				t.Fatal(err)
 			}
-			candidate, found, err := observeFanOutCandidateTx(ctx, tx, backend == "postgres", time.Now, []startupownership.GrantEvidence{grant}, nil)
+			candidate, found, err := observeFanOutCandidateHeaderTx(ctx, tx, backend == "postgres", time.Now, []startupownership.GrantEvidence{grant}, nil)
 			if err != nil || !found || candidate.Key != first.Key || candidate.GrantID != grant.GrantID {
 				t.Fatalf("first deployment candidate: %#v found=%v err=%v", candidate, found, err)
 			}
-			candidate, found, err = observeFanOutCandidateTx(ctx, tx, backend == "postgres", time.Now, []startupownership.GrantEvidence{grant}, []fanoutobligation.IntentKey{first.Key})
+			candidate, found, err = observeFanOutCandidateHeaderTx(ctx, tx, backend == "postgres", time.Now, []startupownership.GrantEvidence{grant}, []fanoutobligation.IntentKey{first.Key})
 			if err != nil || !found || candidate.Key != second.Key {
 				t.Fatalf("excluded feed hid sibling: %#v found=%v err=%v", candidate, found, err)
 			}
@@ -297,7 +297,7 @@ func TestSelectedDeploymentCandidateRequiresExactBindingAndLiveExecution(t *test
 	if _, err := listSelectedDeploymentFeedsTx(ctx, tx, false, selectedFeedAdmissionProbe{runID: uuid.NewString()}, grant); err == nil {
 		t.Fatal("foreign selected run listed deployment feeds")
 	}
-	selected, found, err := observeFanOutCandidateTx(ctx, tx, false, func() time.Time { return now }, []startupownership.GrantEvidence{grant}, nil)
+	selected, found, err := observeFanOutCandidateHeaderTx(ctx, tx, false, func() time.Time { return now }, []startupownership.GrantEvidence{grant}, nil)
 	if err != nil || !found || selected.Key != request.Key || selected.GrantID != grant.GrantID {
 		t.Fatalf("shared selector missed exact selected grant: %#v %v %v", selected, found, err)
 	}
@@ -305,7 +305,7 @@ func TestSelectedDeploymentCandidateRequiresExactBindingAndLiveExecution(t *test
 	if _, err := tx.ExecContext(ctx, `INSERT INTO runtime_generation_grants (grant_id,state_version,state,bundle_hash) VALUES ($1,1,'admitted',$2)`, ordinary.GrantID, ordinary.BundleHash); err != nil {
 		t.Fatal(err)
 	}
-	_, found, err = observeFanOutCandidateTx(ctx, tx, false, func() time.Time { return now }, []startupownership.GrantEvidence{ordinary}, nil)
+	_, found, err = observeFanOutCandidateHeaderTx(ctx, tx, false, func() time.Time { return now }, []startupownership.GrantEvidence{ordinary}, nil)
 	if err != nil || found {
 		t.Fatalf("ordinary grant borrowed selected feed: found=%v err=%v", found, err)
 	}

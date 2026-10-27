@@ -83,7 +83,7 @@ func (s *EventPostgresOwner) ensureEventPayloadAdmission(ctx context.Context, ad
 	return restored, nil
 }
 
-func (s *EventPostgresOwner) appendAdmittedEventTxOutcome(ctx context.Context, attempt *mutationprotocol.Attempt, admitted events.AdmittedEvent, settlement events.RouteSettlement) (runtimebus.EventAppendOutcome, error) {
+func (s *EventPostgresOwner) appendAdmittedEventTxOutcome(ctx context.Context, attempt *mutationprotocol.Attempt, admitted events.AdmittedEvent, settlement events.RouteSettlement, scope runtimerunlifecycle.LiveRunScope) (runtimebus.EventAppendOutcome, error) {
 	if err := s.requireCurrentSchema(); err != nil {
 		return runtimebus.EventAppendOutcomeUnknown, err
 	}
@@ -94,7 +94,7 @@ func (s *EventPostgresOwner) appendAdmittedEventTxOutcome(ctx context.Context, a
 	err := attempt.WithSQL(ctx, func(ctx context.Context, tx *sql.Tx) error {
 		return withEventStoreRetry(ctx, tx, func() error {
 			var writeErr error
-			outcome, writeErr = s.appendEventSpec(ctx, tx, attempt, admitted, settlement)
+			outcome, writeErr = s.appendEventSpec(ctx, tx, attempt, admitted, settlement, scope)
 			return writeErr
 		})
 	})
@@ -108,7 +108,7 @@ func (s *EventPostgresOwner) AppendAdmittedEventTxOutcome(ctx context.Context, a
 	if admitted.Event().AdmissionClass() == events.EventAdmissionInheritedFanOut {
 		return runtimebus.EventAppendOutcomeUnknown, fmt.Errorf("inherited fan-out origin requires named chunk publication")
 	}
-	return s.appendAdmittedEventTxOutcome(ctx, attempt, admitted, settlement)
+	return s.appendAdmittedEventTxOutcome(ctx, attempt, admitted, settlement, runtimerunlifecycle.LiveRunScope{})
 }
 
 func (s *EventPostgresOwner) EventExists(ctx context.Context, eventID string) (bool, error) {
@@ -187,7 +187,7 @@ func (s *EventPostgresOwner) ListEventDeliveryRoutes(ctx context.Context, eventI
 	return events.NormalizeDeliveryRoutes(out), nil
 }
 
-func (s *EventPostgresOwner) appendEventSpec(ctx context.Context, tx *sql.Tx, attempt *mutationprotocol.Attempt, admitted events.AdmittedEvent, settlement events.RouteSettlement) (runtimebus.EventAppendOutcome, error) {
+func (s *EventPostgresOwner) appendEventSpec(ctx context.Context, tx *sql.Tx, attempt *mutationprotocol.Attempt, admitted events.AdmittedEvent, settlement events.RouteSettlement, scope runtimerunlifecycle.LiveRunScope) (runtimebus.EventAppendOutcome, error) {
 	admitted, err := s.ensureEventPayloadAdmission(ctx, admitted)
 	if err != nil {
 		return runtimebus.EventAppendOutcomeUnknown, err
@@ -212,7 +212,7 @@ func (s *EventPostgresOwner) appendEventSpec(ctx context.Context, tx *sql.Tx, at
 	var ensureErr error
 	switch admitted.RunDisposition() {
 	case events.AdmittedRunCreateAuthorized:
-		ensureErr = s.ensureRunRow(ctx, tx, attempt, wantIdentity.RunID, wantIdentity.EventID, wantIdentity.EventName)
+		ensureErr = s.ensureRunRow(ctx, tx, attempt, wantIdentity.RunID, wantIdentity.EventID, wantIdentity.EventName, scope)
 	case events.AdmittedRunRequireActive:
 		ensureErr = requirePostgresRunActive(ctx, tx, wantIdentity.RunID)
 		if ensureErr == nil {
@@ -334,7 +334,7 @@ func chooseRowQueryer(db rowQueryer, tx *sql.Tx) rowQueryer {
 	return db
 }
 
-func (s *EventPostgresOwner) ensureRunRow(ctx context.Context, tx *sql.Tx, attempt *mutationprotocol.Attempt, runID, triggerEventID, triggerEventType string) error {
+func (s *EventPostgresOwner) ensureRunRow(ctx context.Context, tx *sql.Tx, attempt *mutationprotocol.Attempt, runID, triggerEventID, triggerEventType string, scope runtimerunlifecycle.LiveRunScope) error {
 	runID = nullUUIDString(runID)
 	if runID == "" {
 		return nil
@@ -349,9 +349,10 @@ func (s *EventPostgresOwner) ensureRunRow(ctx context.Context, tx *sql.Tx, attem
 	}
 	_, err = s.RunLifecyclePostgresOwner.CreateRunTx(ctx, attempt, runtimerunlifecycle.CreateRequest{
 		RunID: runID, Origin: origin, Source: fact, StartedAt: time.Now().UTC(),
+		LiveScope: scope,
 	})
 	if err != nil {
-		return err
+		return &publicationRunCreationFailure{cause: err}
 	}
 	return storescenarioexecution.EnsurePostgresFromContext(ctx, tx, runID, time.Now().UTC())
 }

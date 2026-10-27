@@ -103,6 +103,9 @@ func (o SelectedContractExecutionOwner) acquireSelectedStop(ctx context.Context,
 	if err != nil || !exists {
 		return nil, exists, err
 	}
+	if ordinary, err := o.ordinaryHandoff(owned, runID, binding); err != nil || ordinary {
+		return nil, false, err
+	}
 	if previous := contexts.stops[runID]; previous != nil {
 		return nil, true, errors.New("selected fork stop is already admitted")
 	}

@@ -5,6 +5,7 @@ import (
 	"database/sql"
 	"errors"
 	"fmt"
+	"slices"
 	"strings"
 	"time"
 
@@ -429,6 +430,63 @@ func materializeRunForkForSelectedContractExecution(ctx context.Context, req run
 // A complete source inventory permits only materialization. Native child
 // readback, not this prospective filter, removes its execution blocker.
 func runForkSelectedMaterializationBlockers(plan runfork.RunForkPlan, childRunID string, admission runfork.RunForkReplayResumeAdmission) ([]runfork.RunForkUnsupportedBlocker, error) {
+	filtered, err := runForkSelectedMaterializationReplayBlockers(plan, admission)
+	if err != nil {
+		return nil, err
+	}
+	return runForkReplyProjectionBlockers(plan, childRunID, filtered)
+}
+
+func (s *RunForkPostgresOwner) InspectSelectedMaterializationReplay(ctx context.Context, plan runfork.RunForkPlan) ([]runfork.RunForkUnsupportedBlocker, error) {
+	if err := ctx.Err(); err != nil {
+		return nil, err
+	}
+	if err := s.requireCurrent(); err != nil {
+		return nil, err
+	}
+	blockers, err := inspectSelectedMaterializationReplay(plan)
+	if err != nil || len(blockers) != 0 {
+		return blockers, err
+	}
+	err = s.backend.RunReadTransaction(ctx, func(ctx context.Context, tx *sql.Tx) error {
+		return requireSelectedSourcePostCutCouplingAbsent(ctx, tx, postgresDeliveryAdapter, plan.SourceRunID, plan.ForkPoint.Revision)
+	})
+	return blockers, err
+}
+
+func (s *RunForkSQLiteOwner) InspectSelectedMaterializationReplay(ctx context.Context, plan runfork.RunForkPlan) ([]runfork.RunForkUnsupportedBlocker, error) {
+	if err := ctx.Err(); err != nil {
+		return nil, err
+	}
+	if err := s.requireCurrent(); err != nil {
+		return nil, err
+	}
+	blockers, err := inspectSelectedMaterializationReplay(plan)
+	if err != nil || len(blockers) != 0 {
+		return blockers, err
+	}
+	err = s.backend.RunReadTransaction(ctx, func(ctx context.Context, tx *sql.Tx) error {
+		return requireSelectedSourcePostCutCouplingAbsent(ctx, tx, sqliteDeliveryAdapter, plan.SourceRunID, plan.ForkPoint.Revision)
+	})
+	return blockers, err
+}
+
+func inspectSelectedMaterializationReplay(plan runfork.RunForkPlan) ([]runfork.RunForkUnsupportedBlocker, error) {
+	plan.ReplayResumeAdmission.Dispositions = slices.Clone(plan.ReplayResumeAdmission.Dispositions)
+	plan.ReplayResumeAdmission.UnsupportedBlockers = slices.Clone(plan.ReplayResumeAdmission.UnsupportedBlockers)
+	admission, err := runfork.RunForkSelectedContractReplayResumeAdmission(plan)
+	if err != nil {
+		return nil, err
+	}
+	// Projection only; the mutation projects and reads back its actual child.
+	destination := uuid.NewString()
+	for destination == plan.SourceRunID {
+		destination = uuid.NewString()
+	}
+	return runForkSelectedMaterializationBlockers(plan, destination, admission)
+}
+
+func runForkSelectedMaterializationReplayBlockers(plan runfork.RunForkPlan, admission runfork.RunForkReplayResumeAdmission) ([]runfork.RunForkUnsupportedBlocker, error) {
 	eligible, err := runForkTimerHistoryMaterializable(plan)
 	if err != nil {
 		return nil, err
@@ -441,7 +499,7 @@ func runForkSelectedMaterializationBlockers(plan runfork.RunForkPlan, childRunID
 		}
 		filtered = append(filtered, blocker)
 	}
-	return runForkReplyProjectionBlockers(plan, childRunID, filtered)
+	return filtered, nil
 }
 
 func selectedContractWorkflowSourceModes(ctx context.Context, tx *sql.Tx, postgres bool, plan runfork.RunForkPlan, frontier runfork.RunForkContractFrontierAdmission) (map[string]executionmode.Mode, error) {

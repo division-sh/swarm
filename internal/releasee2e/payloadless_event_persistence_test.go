@@ -94,6 +94,7 @@ func TestPayloadlessEventPublicPersistenceJourneyBothStores(t *testing.T) {
 				return published.RunID
 			}
 			initialRun := publish("payloadless-initial")
+			pauseFullLifecycleRun(t, process.rpc, initialRun)
 			if err := process.stopAndWait(10 * time.Second); err != nil {
 				t.Fatal(err)
 			}
@@ -105,7 +106,7 @@ func TestPayloadlessEventPublicPersistenceJourneyBothStores(t *testing.T) {
 			if restartedBlob := assertPayloadlessPersistedSource(t, root, store, bundleHash, []byte(eventSource)); !bytes.Equal(restartedBlob, initialBlob) {
 				t.Fatal("same-tree directory restart changed the persisted logical source blob")
 			}
-			waitForGoldenTerminalRun(t, process, store, initialRun, 30*time.Second)
+			waitForFullLifecycleRunStatus(t, process.rpc, initialRun, "paused")
 			if restartedRun := publish("payloadless-restarted"); restartedRun == initialRun {
 				t.Fatal("post-restart ingress reused the initial run")
 			}

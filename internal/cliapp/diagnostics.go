@@ -215,6 +215,7 @@ type diagnosticRunFailureDelivery struct {
 }
 
 var diagnosticValidRunStatuses = map[string]struct{}{
+	"live":      {},
 	"running":   {},
 	"paused":    {},
 	"completed": {},

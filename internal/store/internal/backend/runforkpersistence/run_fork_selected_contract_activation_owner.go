@@ -7,17 +7,17 @@ import (
 	"fmt"
 	"slices"
 	"strings"
-	"time"
 
 	"github.com/division-sh/swarm/internal/durabledata"
 	runtimecorrelation "github.com/division-sh/swarm/internal/runtime/correlation"
 	runtimeeffects "github.com/division-sh/swarm/internal/runtime/effects"
+	"github.com/division-sh/swarm/internal/runtime/pipeline"
 	"github.com/division-sh/swarm/internal/runtime/runfork"
 	runtimerunlifecycle "github.com/division-sh/swarm/internal/runtime/runlifecycle"
+	"github.com/division-sh/swarm/internal/runtime/semanticview"
 	storedelivery "github.com/division-sh/swarm/internal/store/internal/backend/delivery"
 	"github.com/division-sh/swarm/internal/store/internal/backend/mutationprotocol"
 	runforkrevision "github.com/division-sh/swarm/internal/store/internal/backend/runforkrevision"
-	privaterunlifecycle "github.com/division-sh/swarm/internal/store/internal/backend/runlifecycle"
 	"github.com/google/uuid"
 )
 
@@ -38,11 +38,7 @@ type runForkSelectedContractActivationPort struct {
 	replies                runForkReplyContextOwner
 	deliveries             *storedelivery.Adapter
 	attachment             func(context.Context, *sql.Tx, runForkSelectedContractActivationEvidence) error
-	transition             func(context.Context, *mutationprotocol.Attempt, runtimerunlifecycle.ActiveTransitionRequest) error
-	diverge                func(context.Context, *sql.Tx, runfork.RunForkSelectedContractBranchDivergence) error
-	freeze                 func(context.Context, *sql.Tx, *mutationprotocol.Attempt, runForkActivationLineage, time.Time, bool, *privaterunlifecycle.ChannelCardChanges) error
-	publishChannelChanges  func(bool, bool) error
-	now                    func() time.Time
+	liveHandoff            func(context.Context, *sql.Tx, *mutationprotocol.Attempt, runForkSelectedContractActivationEvidence) (string, error)
 }
 
 type runForkSelectedContractActivationEvidence struct {
@@ -61,19 +57,15 @@ func activateRunForkForSelectedContractExecution(ctx context.Context, req runfor
 		return runfork.RunForkActivation{}, fmt.Errorf("fork run_id must be a UUID: %w", err)
 	}
 	if port.requireCurrent == nil || port.runMutation == nil || port.loadLineage == nil || port.lockFrontier == nil ||
-		port.plan == nil || port.deliveries == nil || port.attachment == nil || port.transition == nil || port.diverge == nil ||
-		port.freeze == nil || port.now == nil || port.loadSnapshot == nil || port.readHistoricalSnapshot == nil || port.workflowTimers == nil || port.arrivalSchedules == nil || port.replies == nil {
+		port.plan == nil || port.deliveries == nil || port.attachment == nil || port.liveHandoff == nil ||
+		port.loadSnapshot == nil || port.readHistoricalSnapshot == nil || port.workflowTimers == nil || port.arrivalSchedules == nil || port.replies == nil {
 		return runfork.RunForkActivation{}, fmt.Errorf("selected-contract fork activation operations are incomplete")
 	}
 	if err := port.requireCurrent(); err != nil {
 		return runfork.RunForkActivation{}, err
 	}
-	var changes privaterunlifecycle.ChannelCardChanges
-	var divergence *runfork.RunForkSelectedContractBranchDivergence
 	committed, err := port.runMutation(ctx, func(txctx context.Context, tx *sql.Tx, attempt *mutationprotocol.Attempt) error {
 		result = runfork.RunForkActivation{}
-		changes = privaterunlifecycle.ChannelCardChanges{}
-		divergence = nil
 		lineage, err := port.loadLineage(txctx, tx, forkRunID)
 		if err != nil {
 			return err
@@ -91,7 +83,7 @@ func activateRunForkForSelectedContractExecution(ctx context.Context, req runfor
 			MaterializedEntityCount: len(lineage.EntityIDs),
 		}
 		if lineage.ForkStatus != runfork.RunForkMaterializedStatus {
-			result.RepeatedActivationFailed = lineage.ForkStatus == runfork.RunForkActivatedStatus
+			result.RepeatedActivationFailed = lineage.ForkStatus == runfork.RunForkActivatedStatus || lineage.ForkStatus == runfork.RunForkLiveStatus
 			return fmt.Errorf("selected-contract fork activation requires materialized fork status %q; got %q", runfork.RunForkMaterializedStatus, lineage.ForkStatus)
 		}
 		sourceSnapshot, err := port.loadSnapshot(txctx, tx, lineage.SourceRunID)
@@ -101,7 +93,7 @@ func activateRunForkForSelectedContractExecution(ctx context.Context, req runfor
 		if string(sourceSnapshot.State) != lineage.SourceRunStatus || sourceSnapshot.BundleHash != lineage.SourceBundleHash {
 			return fmt.Errorf("selected-contract activation source lifecycle disagrees with locked lineage")
 		}
-		sourceAdmission, err := admitSelectedForkSource(txctx, tx, lineage.SourceRunID, sourceSnapshot, port.readHistoricalSnapshot, port.postgres)
+		_, err = admitSelectedForkSource(txctx, tx, lineage.SourceRunID, sourceSnapshot, port.readHistoricalSnapshot, port.postgres)
 		if err != nil {
 			return err
 		}
@@ -155,12 +147,15 @@ func activateRunForkForSelectedContractExecution(ctx context.Context, req runfor
 		if err != nil {
 			return err
 		}
-		result.ReplayResumeAdmission, err = requireMaterializedRunForkTimerHistory(runtimecorrelation.WithRunID(txctx, lineage.ForkRunID), attempt,
+		if err := port.attachment(txctx, tx, runForkSelectedContractActivationEvidence{lineage, binding, plan, req}); err != nil {
+			return addRunForkActivationBlocker(&result, err)
+		}
+		result.ReplayResumeAdmission, err = requireContinuingRunForkTimerHistory(runtimecorrelation.WithRunID(txctx, lineage.ForkRunID), attempt,
 			plan, lineage.ForkRunID, req.InheritedSchedules, port.workflowTimers, port.arrivalSchedules, runtimerunlifecycle.CanonicalTimestamp(snapshot.StartedAt), result.ReplayResumeAdmission)
 		if err != nil {
 			return err
 		}
-		result.ReplayResumeAdmission, err = requireMaterializedRunForkReplyContexts(txctx, tx, port.replies, plan, lineage.ForkRunID, port.postgres, result.ReplayResumeAdmission)
+		result.ReplayResumeAdmission, err = requireContinuingRunForkReplyContexts(txctx, tx, port.replies, plan, lineage.ForkRunID, runtimerunlifecycle.CanonicalTimestamp(snapshot.StartedAt), result.ReplayResumeAdmission)
 		if err != nil {
 			return err
 		}
@@ -181,74 +176,22 @@ func activateRunForkForSelectedContractExecution(ctx context.Context, req runfor
 		sourceAdvancedFacts = append(sourceAdvancedFacts, runfork.ActiveSourceDeliveryConversationCouplingFacts(result.ReplayResumeAdmission)...)
 		sourceAdvancedFacts = uniqueNonEmptyStrings(sourceAdvancedFacts)
 		result.SourceAdvancedAfterFork = len(sourceAdvancedFacts) > 0
-		if err := port.attachment(txctx, tx, runForkSelectedContractActivationEvidence{lineage, binding, plan, req}); err != nil {
-			return addRunForkActivationBlocker(&result, err)
+		if req.ForkOperation == nil {
+			return errors.New("live fork activation requires its durable operation")
 		}
-
-		now := port.now().UTC()
-		if sourceAdmission == selectedForkHistoricalSource {
-			if err := port.transition(txctx, attempt, runtimerunlifecycle.ActiveTransitionRequest{RunID: lineage.ForkRunID, State: runtimerunlifecycle.StateRunning}); err != nil {
-				return fmt.Errorf("activate selected-contract historical-source child lifecycle: %w", err)
-			}
-			if err := recordRunForkActivationAuthorActivity(txctx, attempt, lineage, now); err != nil {
-				return err
-			}
-			return completeSelectedForkOperationAtActivation(txctx, tx, req, lineage, runfork.RunForkSourceFrozenStatus, true, port.postgres)
-		}
-		if len(sourceAdvancedFacts) > 0 {
-			if err := port.transition(txctx, attempt, runtimerunlifecycle.ActiveTransitionRequest{RunID: lineage.ForkRunID, State: runtimerunlifecycle.StateRunning}); err != nil {
-				return fmt.Errorf("activate selected-contract branch fork run lifecycle: %w", err)
-			}
-			value := runfork.RunForkSelectedContractBranchDivergence{
-				Owner:                          runfork.RunForkSelectedContractBranchDivergenceOwner,
-				ForkRunID:                      lineage.ForkRunID,
-				SourceRunID:                    lineage.SourceRunID,
-				ForkPoint:                      lineage.ForkPoint,
-				ForkEventID:                    lineage.ForkPoint.EventID,
-				Policy:                         runfork.RunForkSelectedContractSourceAdvancedBranchPolicy,
-				SourceRunStatusAtActivation:    lineage.SourceRunStatus,
-				SourceRunStatusAfterActivation: lineage.SourceRunStatus,
-				SourceFrozen:                   false,
-				SourceAdvancedFacts:            sourceAdvancedFacts,
-				CreatedAt:                      now,
-			}
-			value, err = normalizeSelectedForkBranchDivergence(value)
-			if err != nil {
-				return err
-			}
-			if err := port.diverge(txctx, tx, value); err != nil {
-				return err
-			}
-			if err := recordRunForkActivationAuthorActivity(txctx, attempt, lineage, now); err != nil {
-				return err
-			}
-			divergence = &value
-			if err := completeSelectedForkOperationAtActivation(txctx, tx, req, lineage, value.SourceRunStatusAfterActivation, false, port.postgres); err != nil {
-				return err
-			}
-			return nil
-		}
-		if err := port.freeze(txctx, tx, attempt, lineage, now, req.AllowSourceFreeze, &changes); err != nil {
+		result.SourceRunStatus, err = port.liveHandoff(txctx, tx, attempt, runForkSelectedContractActivationEvidence{lineage, binding, plan, req})
+		if err != nil {
 			return err
 		}
-		return completeSelectedForkOperationAtActivation(txctx, tx, req, lineage, runfork.RunForkSourceFrozenStatus, true, port.postgres)
+		result.ForkRunStatus = runfork.RunForkLiveStatus
+		return nil
 	})
 	if !committed {
 		return result, err
 	}
-	result.ForkRunStatus = runfork.RunForkActivatedStatus
 	result.Activated = true
-	if divergence != nil {
-		result.SourceRunStatus = divergence.SourceRunStatusAfterActivation
-		result.SourceFrozen = false
-		result.BranchDivergence = divergence
-	} else {
-		result.SourceRunStatus = runfork.RunForkSourceFrozenStatus
-		result.SourceFrozen = true
-	}
-	if port.publishChannelChanges != nil {
-		err = errors.Join(err, port.publishChannelChanges(committed, changes.Changed))
-	}
+	result.ForkRunStatus = runfork.RunForkLiveStatus
+	result.SourceFrozen = result.SourceRunStatus == runfork.RunForkSourceFrozenStatus
 	return result, err
 }
 
@@ -256,10 +199,16 @@ type selectedContractCurrentAuthorityOwner interface {
 	RequireCurrentExternalEffectAuthorityTx(context.Context, *sql.Tx, runtimeeffects.Authority) error
 }
 
+type selectedContractPreparedAttachmentOwner interface {
+	selectedContractCurrentAuthorityOwner
+	ReadNativeFlowConstructionsTx(context.Context, *sql.Tx, semanticview.Source, runtimerunlifecycle.Snapshot, []string) ([]pipeline.FlowInstanceObservation, error)
+	requireRunForkSelectedContractExecutionSettlementTx(context.Context, *sql.Tx, string, []string, semanticview.Source) error
+}
+
 // A running execution is an attached, fenced executor, not proof that its owed
 // business work has already completed. The retained reader owns the immutable
 // declaration/preparation decoding; the preparation owner proves currentness.
-func requireSelectedContractPreparedAttachmentTx(ctx context.Context, tx *sql.Tx, snapshot runtimerunlifecycle.Snapshot, evidence runForkSelectedContractActivationEvidence, sqlite bool, owner selectedContractCurrentAuthorityOwner) error {
+func requireSelectedContractPreparedAttachmentTx(ctx context.Context, tx *sql.Tx, snapshot runtimerunlifecycle.Snapshot, evidence runForkSelectedContractActivationEvidence, sqlite bool, owner selectedContractPreparedAttachmentOwner) error {
 	authority, err := selectedContractActivationAuthority(ctx, evidence.lineage.ForkRunID)
 	if err != nil {
 		return err
@@ -273,7 +222,7 @@ func requireSelectedContractPreparedAttachmentTx(ctx context.Context, tx *sql.Tx
 	if err := validateSelectedContractPreparedAttachment(record, authority, evidence); err != nil {
 		return err
 	}
-	if err := validateSelectedContractStagedConstruction(evidence); err != nil {
+	if err := validateSelectedContractStagedConstruction(ctx, tx, snapshot, evidence, owner); err != nil {
 		return err
 	}
 	if err := owner.RequireCurrentExternalEffectAuthorityTx(ctx, tx, authority); err != nil {
@@ -317,27 +266,58 @@ func validateSelectedContractPreparedAttachment(record selectedRecoveryRecord, a
 	return nil
 }
 
-func validateSelectedContractStagedConstruction(evidence runForkSelectedContractActivationEvidence) error {
+func validateSelectedContractStagedConstruction(ctx context.Context, tx *sql.Tx, snapshot runtimerunlifecycle.Snapshot, evidence runForkSelectedContractActivationEvidence, owner selectedContractPreparedAttachmentOwner) error {
 	metadata, err := loadRunForkEntityMetadata(evidence.plan)
 	if err != nil {
 		return err
 	}
-	expected := make([]string, 0, len(metadata))
+	expected := make(map[string]bool, len(metadata))
 	for entityID, meta := range metadata {
 		projection, err := projectRunForkEntityOwnership(evidence.lineage.SourceRunID, evidence.lineage.ForkRunID, entityID, meta.FlowInstance)
 		if err != nil {
 			return err
 		}
-		expected = append(expected, projection.Fork.EntityID)
+		if expected[projection.Fork.EntityID] {
+			return fmt.Errorf("selected-contract projected inventory has a duplicate member")
+		}
+		expected[projection.Fork.EntityID] = true
 	}
-	// Construction is an exact owner inventory, not map or header iteration order.
-	actual := slices.Clone(evidence.lineage.EntityIDs)
-	slices.Sort(expected)
-	slices.Sort(actual)
-	if !slices.Equal(expected, actual) {
-		return fmt.Errorf("selected-contract staged construction differs from exact fixed-cut child inventory")
+	seen := make(map[string]bool, len(evidence.lineage.EntityIDs))
+	var extras []string
+	for _, id := range evidence.lineage.EntityIDs {
+		if id == "" || seen[id] {
+			return fmt.Errorf("selected-contract constructed inventory has a missing or duplicate member")
+		}
+		seen[id] = true
+		if expected[id] {
+			delete(expected, id)
+		} else {
+			extras = append(extras, id)
+		}
 	}
-	return nil
+	if len(expected) != 0 {
+		return fmt.Errorf("selected-contract staged construction lost fixed-cut child inventory")
+	}
+	if len(extras) == 0 {
+		return nil
+	}
+	if tx == nil || owner == nil {
+		return fmt.Errorf("selected-contract additional construction requires its activation transaction and native owner")
+	}
+	observations, err := owner.ReadNativeFlowConstructionsTx(ctx, tx, evidence.request.ExecutionSource, snapshot, extras)
+	if err != nil {
+		return err
+	}
+	for _, observation := range observations {
+		receipt, found, err := observation.NativeConstruction()
+		if err != nil {
+			return fmt.Errorf("selected-contract new child lacks its exact native creating input: %w", err)
+		}
+		if !found || receipt.CreatingInput.EventID == "" {
+			return fmt.Errorf("selected-contract new child lacks its exact native creating input")
+		}
+	}
+	return owner.requireRunForkSelectedContractExecutionSettlementTx(ctx, tx, evidence.lineage.ForkRunID, evidence.request.AllowedSourceEventIDs, evidence.request.ExecutionSource)
 }
 
 func completeSelectedForkOperationAtActivation(ctx context.Context, tx *sql.Tx, req runfork.RunForkSelectedContractExecutionActivateRequest, lineage runForkActivationLineage, sourceStatus string, frozen, postgres bool) error {
@@ -353,13 +333,17 @@ func completeSelectedForkOperationAtActivation(ctx context.Context, tx *sql.Tx, 
 		return err
 	}
 	pins := append([]durabledata.Pin(nil), req.DataPins...)
+	status := runfork.RunForkActivatedStatus
+	if lineage.ForkStatus == runfork.RunForkLiveStatus {
+		status = runfork.RunForkLiveStatus
+	}
 	for i := range pins {
-		pins[i].RunState = runfork.RunForkActivatedStatus
+		pins[i].RunState = status
 	}
 	return completeForkOperationTx(ctx, tx, operation, runfork.ForkOperationResult{
 		SourceRunID: lineage.SourceRunID, SourceRunStatus: sourceStatus, SourceFrozen: frozen,
 		ForkRunID: lineage.ForkRunID, ForkEventID: lineage.ForkEventID, ForkPoint: *operation.ResolvedPoint,
-		ForkRunStatus: runfork.RunForkActivatedStatus, BundleHash: req.ForkOperation.TargetBundleHash,
+		ForkRunStatus: status, BundleHash: req.ForkOperation.TargetBundleHash,
 		ExecutedEventCount: executed, DataPins: pins,
 	}, postgres)
 }
@@ -436,19 +420,14 @@ func postgresRunForkSelectedContractActivationPort(s *RunForkPostgresOwner) runF
 			if err != nil {
 				return err
 			}
-			if err := requireSelectedContractPreparedAttachmentTx(ctx, tx, snapshot, evidence, false, s.EffectPostgresOwner); err != nil {
+			if err := requireSelectedContractPreparedAttachmentTx(ctx, tx, snapshot, evidence, false, s); err != nil {
 				return err
 			}
 			return requireExactMaterializedRunForkDeploymentFeeds(ctx, tx, true, evidence.lineage.ForkRunID, evidence.lineage.ForkBundleHash, s.durableData, evidence.plan, evidence.request.DataPins)
 		},
-		transition: func(ctx context.Context, attempt *mutationprotocol.Attempt, req runtimerunlifecycle.ActiveTransitionRequest) error {
-			_, err := s.RunLifecyclePostgresOwner.TransitionActiveTx(ctx, attempt, req)
-			return err
+		liveHandoff: func(ctx context.Context, tx *sql.Tx, attempt *mutationprotocol.Attempt, evidence runForkSelectedContractActivationEvidence) (string, error) {
+			return commitSelectedLiveHandoffTx(ctx, tx, attempt, evidence, s.RunLifecyclePostgresOwner.SelectLiveRunTx, s.EffectPostgresOwner, postgresDeliveryAdapter, s.RunLifecyclePostgresOwner, false)
 		},
-		diverge:               insertRunForkSelectedContractBranchDivergence,
-		freeze:                s.applyRunForkSourceFreeze,
-		publishChannelChanges: s.publishChannelChanges,
-		now:                   func() time.Time { return time.Now().UTC() },
 	}
 }
 
@@ -485,18 +464,13 @@ func sqliteRunForkSelectedContractActivationPort(s *RunForkSQLiteOwner) runForkS
 			if err != nil {
 				return err
 			}
-			if err := requireSelectedContractPreparedAttachmentTx(ctx, tx, snapshot, evidence, true, s.EffectSQLiteOwner); err != nil {
+			if err := requireSelectedContractPreparedAttachmentTx(ctx, tx, snapshot, evidence, true, s); err != nil {
 				return err
 			}
 			return requireExactMaterializedRunForkDeploymentFeeds(ctx, tx, false, evidence.lineage.ForkRunID, evidence.lineage.ForkBundleHash, s.durableData, evidence.plan, evidence.request.DataPins)
 		},
-		transition: func(ctx context.Context, attempt *mutationprotocol.Attempt, req runtimerunlifecycle.ActiveTransitionRequest) error {
-			_, err := s.RunLifecycleSQLiteOwner.TransitionActiveTx(ctx, attempt, req)
-			return err
+		liveHandoff: func(ctx context.Context, tx *sql.Tx, attempt *mutationprotocol.Attempt, evidence runForkSelectedContractActivationEvidence) (string, error) {
+			return commitSelectedLiveHandoffTx(ctx, tx, attempt, evidence, s.RunLifecycleSQLiteOwner.SelectLiveRunTx, s.EffectSQLiteOwner, sqliteDeliveryAdapter, s.RunLifecycleSQLiteOwner, true)
 		},
-		diverge:               insertSQLiteRunForkSelectedContractBranchDivergence,
-		freeze:                s.applyRunForkSourceFreeze,
-		publishChannelChanges: s.publishChannelChanges,
-		now:                   s.now,
 	}
 }

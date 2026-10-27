@@ -303,6 +303,13 @@ func (o SelectedContractExecutionOwner) prepareWithOperation(ctx context.Context
 	if err := validateSelectedContractExecutionFrontierForMutation(frontier); err != nil {
 		return nil, err
 	}
+	blockers, err := ports.fork.InspectSelectedMaterializationReplay(ctx, plan)
+	if err != nil {
+		return nil, err
+	}
+	if len(blockers) != 0 {
+		return nil, fmt.Errorf("selected-contract fork execution materialization blocked: %s", selectedContractBlockerCodes(blockers))
+	}
 	routeTopology, err := BuildSelectedContractRouteTopology(SelectedContractRouteTopologyRequest{
 		Admission:      frontier,
 		RouteAdmission: routeAdmission,

@@ -23,6 +23,9 @@ func TestForkPointSchemaClosedArmsBothStores(t *testing.T) {
 			if _, err := db.ExecContext(ctx, `INSERT INTO runs (run_id,bundle_hash,origin_kind) VALUES ($1,$2,'scenario_setup')`, sourceRunID, bundleHash); err != nil {
 				t.Fatalf("create source run: %v", err)
 			}
+			t.Run("one_live_run_per_flow", func(t *testing.T) {
+				verifyLiveRunSelectionConstraint(t, db, bundleHash)
+			})
 			t.Run("activity_execution_binding", func(t *testing.T) {
 				verifyActivityExecutionBindingColumn(t, db, sourceRunID)
 			})
@@ -64,6 +67,10 @@ func TestForkPointSchemaClosedArmsBothStores(t *testing.T) {
 			if err != nil {
 				t.Fatalf("deployment revision lineage refused: %v", err)
 			}
+			stateRunID, err := insertForkRun("state_revision", 2, nil)
+			if err != nil {
+				t.Fatalf("state revision lineage refused: %v", err)
+			}
 			t.Run("activity_reply_live_parents", func(t *testing.T) {
 				verifyActivityReplyLiveParents(t, db, sourceRunID, deploymentRunID, eventID)
 			})
@@ -75,6 +82,8 @@ func TestForkPointSchemaClosedArmsBothStores(t *testing.T) {
 				{"event_without_id", "event", 1, nil},
 				{"deployment_with_id", "deployment_revision", 1, uuid.NewString()},
 				{"zero_revision", "deployment_revision", 0, nil},
+				{"state_with_id", "state_revision", 2, eventID},
+				{"state_zero_revision", "state_revision", 0, nil},
 				{"unknown_kind", "unknown", 1, nil},
 			} {
 				t.Run(invalid.name, func(t *testing.T) {
@@ -127,6 +136,28 @@ func TestForkPointSchemaClosedArmsBothStores(t *testing.T) {
 			if err := insertExecution("deployment_revision", nil); err != nil {
 				t.Fatalf("deployment runtime execution refused: %v", err)
 			}
+			t.Run("state_revision_selected_owners", func(t *testing.T) {
+				stateBindingID := uuid.NewString()
+				if _, err := db.ExecContext(ctx, `INSERT INTO run_fork_selected_contract_bindings
+					(binding_id,fork_run_id,source_run_id,fork_point_kind,fork_revision,fork_event_id,mode)
+					VALUES ($1,$2,$3,'state_revision',2,NULL,'selected_contracts')`, stateBindingID, stateRunID, sourceRunID); err != nil {
+					t.Fatalf("state revision binding refused: %v", err)
+				}
+				if _, err := db.ExecContext(ctx, `INSERT INTO run_fork_operations
+					(operation_id,actor,transport_hash,semantic_hash,request_json,source_run_id,fork_point_kind,fork_revision,fork_event_id,fork_run_id,selected_binding_id,state)
+					VALUES ($1,'actor','state-transport','state-semantic','{}',$2,'state_revision',2,NULL,$3,$4,'materialized')`,
+					uuid.NewString(), sourceRunID, stateRunID, stateBindingID); err != nil {
+					t.Fatalf("state revision operation refused: %v", err)
+				}
+				if _, err := db.ExecContext(ctx, `INSERT INTO run_fork_selected_contract_runtime_executions
+					(execution_id,fork_run_id,source_run_id,binding_id,fork_point_kind,fork_revision,fork_event_id,generation,
+					 executable_coordinate_fingerprint,admission_fingerprint,container_plan_fingerprint,actor_census_fingerprint,
+					 effective_config_fingerprint,declaration_plan_fingerprint,declaration_plan,preparation_fingerprint,preparation_binding,state,terminal_at)
+					VALUES ($1,$2,$3,$4,'state_revision',2,NULL,1,'state-executable','state-admission','state-container','state-actors','state-config',$5,'{}',$5,'{}','failed',CURRENT_TIMESTAMP)`,
+					uuid.NewString(), stateRunID, sourceRunID, stateBindingID, fingerprint); err != nil {
+					t.Fatalf("state revision execution refused: %v", err)
+				}
+			})
 			eventBindingID := uuid.NewString()
 			if _, err := db.ExecContext(ctx, `INSERT INTO run_fork_selected_contract_bindings
 				(binding_id,fork_run_id,source_run_id,fork_point_kind,fork_revision,fork_event_id,mode)
@@ -251,6 +282,47 @@ func TestForkPointSchemaClosedArmsBothStores(t *testing.T) {
 				}
 			}
 		})
+	}
+}
+
+func verifyLiveRunSelectionConstraint(t *testing.T, db *sql.DB, bundleHash string) {
+	t.Helper()
+	ctx := context.Background()
+	first, sibling := uuid.NewString(), uuid.NewString()
+	insert := `INSERT INTO runs (run_id,bundle_hash,origin_kind,flow_path,status)
+		VALUES ($1,$2,'deployment',$3,$4)`
+	for _, row := range []struct{ id, flow, status string }{
+		{first, "orders", "live"},
+		{sibling, "orders", "paused"},
+		{uuid.NewString(), "support", "live"},
+	} {
+		if _, err := db.ExecContext(ctx, insert, row.id, bundleHash, row.flow, row.status); err != nil {
+			t.Fatalf("create %s run for %s: %v", row.status, row.flow, err)
+		}
+	}
+	if _, err := db.ExecContext(ctx, insert, uuid.NewString(), bundleHash, "orders", "live"); err == nil {
+		t.Fatal("two live runs claimed the same flow")
+	}
+	if _, err := db.ExecContext(ctx, insert, uuid.NewString(), bundleHash, "", "live"); err == nil {
+		t.Fatal("live run without a flow was admitted")
+	}
+	tx, err := db.BeginTx(ctx, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer tx.Rollback()
+	if _, err := tx.ExecContext(ctx, `UPDATE runs SET status='paused' WHERE run_id=$1`, first); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := tx.ExecContext(ctx, `UPDATE runs SET status='live' WHERE run_id=$1`, sibling); err != nil {
+		t.Fatal(err)
+	}
+	if err := tx.Rollback(); err != nil {
+		t.Fatal(err)
+	}
+	var selected string
+	if err := db.QueryRowContext(ctx, `SELECT run_id FROM runs WHERE flow_path=$1 AND status='live'`, "orders").Scan(&selected); err != nil || selected != first {
+		t.Fatalf("rollback changed live selection: selected=%s error=%v", selected, err)
 	}
 }
 

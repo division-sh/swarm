@@ -10,15 +10,16 @@ import (
 	"os/exec"
 	"path/filepath"
 	"strings"
-	"sync"
 	"syscall"
 	"testing"
 	"time"
 
+	rootruntime "github.com/division-sh/swarm/internal/runtime"
 	"github.com/division-sh/swarm/internal/runtime/core/worklifetime"
-	"github.com/division-sh/swarm/internal/runtime/correlation"
+	"github.com/division-sh/swarm/internal/runtime/deliverylifecycle"
 	"github.com/division-sh/swarm/internal/runtime/effects"
 	"github.com/division-sh/swarm/internal/runtime/executionposture"
+	"github.com/division-sh/swarm/internal/runtime/pipeline"
 	"github.com/division-sh/swarm/internal/runtime/runfork"
 	"github.com/division-sh/swarm/internal/runtime/runforkadmission"
 	"github.com/division-sh/swarm/internal/runtime/runforkreadiness"
@@ -126,20 +127,6 @@ type selectedCrashActivated struct {
 	checkpoint func(string)
 }
 
-type selectedActivatedServingCut struct {
-	runlifecycle.OperationOwner
-	checkpoint func(string)
-	once       sync.Once
-}
-
-func (p *selectedActivatedServingCut) RequireActiveRunSource(ctx context.Context, runID string) (correlation.SourceArtifactFact, error) {
-	fact, err := p.OperationOwner.RequireActiveRunSource(ctx, runID)
-	if err == nil {
-		p.once.Do(func() { p.checkpoint(runID) })
-	}
-	return fact, err
-}
-
 func (p selectedCrashActivated) ActivateRunForkForSelectedContractExecution(ctx context.Context, request runfork.RunForkSelectedContractExecutionActivateRequest) (runfork.RunForkActivation, error) {
 	result, err := p.SelectedContractForkLifecycle.ActivateRunForkForSelectedContractExecution(ctx, request)
 	if result.Activated {
@@ -231,15 +218,6 @@ func TestSelectedForkCrashProcessHelper(t *testing.T) {
 		t.Fatal(err)
 	}
 	sourceRun, eventID := uuid.NewString(), uuid.NewString()
-	if timerCut {
-		eventID = seedIssue642TimerCrashSource(t, ctx, selected, owner, loaded, sourceRun)
-	} else if joinCut {
-		eventID, _ = seedPublishedJoinSource(t, ctx, selected, owner, loaded, sourceRun)
-	} else if armedJoinCut {
-		eventID = seedArmedArrivalCrashSource(t, ctx, selected, owner, loaded, sourceRun)
-	} else {
-		seedSelectedOperationSource(t, ctx, backend, db, selected, loaded, sourceRun, eventID)
-	}
 	checkpointWithSchedule := func(forkRun, scheduleID string) {
 		pipe := os.NewFile(3, "selected-checkpoint")
 		if err := json.NewEncoder(pipe).Encode(selectedForkCrashCheckpoint{SourceRun: sourceRun, ForkRun: forkRun, ScheduleID: scheduleID}); err != nil {
@@ -261,7 +239,7 @@ func TestSelectedForkCrashProcessHelper(t *testing.T) {
 			checkpoint(occurrence.(*worklifetime.SelectedForkOccurrence).Identity().RunID)
 		}}
 	} else if cut == "retained_armed_join_after_activation" {
-		owner.ports.fork = armedArrivalCrashActivationStore{SelectedContractForkLifecycle: owner.ports.fork, schedules: owner.ports.genericSchedules, checkpoint: checkpointWithSchedule}
+		owner.ports.fork = armedArrivalCrashActivationStore{SelectedContractForkLifecycle: owner.ports.fork, checkpoint: checkpointWithSchedule}
 	} else if cut == "retained_after_activation" || cut == "retained_timer_after_activation" || cut == "retained_join_after_activation" {
 		owner.ports.fork = selectedCrashActivated{SelectedContractForkLifecycle: owner.ports.fork, checkpoint: checkpoint}
 	} else if cut == "retained_armed_join_occurrence_committed" {
@@ -275,7 +253,57 @@ func TestSelectedForkCrashProcessHelper(t *testing.T) {
 			checkpoint(occurrence.(*worklifetime.SelectedForkOccurrence).Identity().RunID)
 		}}
 	}
+	if timerCut {
+		eventID = seedIssue642TimerCrashSource(t, ctx, selected, owner, loaded, sourceRun)
+	} else if joinCut {
+		eventID, _ = seedPublishedJoinSource(t, ctx, selected, owner, loaded, sourceRun)
+	} else if armedJoinCut {
+		eventID = seedArmedArrivalCrashSource(t, ctx, selected, owner, loaded, sourceRun)
+	} else {
+		seedSelectedOperationSource(t, ctx, selected, loaded, sourceRun, eventID, true)
+	}
+	var liveRuntime *rootruntime.Runtime
+	var liveContexts *rootruntime.RuntimeContextManager
+	if timerCut {
+		liveRuntime, liveContexts = ordinaryForkRuntimeFixture(t, ctx, selected, owner, loaded, executionposture.MockOnly)
+		plan, err := owner.ports.fork.PlanRunFork(ctx, runfork.RunForkPlanRequest{SourceRunID: sourceRun, At: eventID})
+		if err != nil || len(plan.WorkflowTimers) != 1 {
+			t.Fatalf("original workflow timer fixed cut: %+v err=%v", plan, err)
+		}
+		setup, finish := context.WithTimeout(ctx, 15*time.Second)
+		defer finish()
+		for {
+			clock, found, err := selected.(interface {
+				LoadWorkflowTimerActivation(context.Context, string) (pipeline.WorkflowTimerActivation, bool, error)
+			}).LoadWorkflowTimerActivation(setup, plan.WorkflowTimers[0].ActivationID)
+			if err != nil || !found {
+				t.Fatalf("original workflow timer: %+v found=%t err=%v", clock, found, err)
+			}
+			summary, err := selected.(deliverylifecycle.Store).SummarizeRun(setup, sourceRun)
+			if err != nil {
+				t.Fatal(err)
+			}
+			if clock.Status == "fired" && summary.Total > 0 && summary.Total == summary.Delivered {
+				break
+			}
+			select {
+			case <-setup.Done():
+				t.Fatalf("original workflow timer setup did not settle: clock=%+v delivery=%+v err=%v", clock, summary, setup.Err())
+			case <-time.After(10 * time.Millisecond):
+			}
+		}
+	} else {
+		liveRuntime, liveContexts = liveForkRuntimeFixture(t, ctx, selected, owner, loaded, sourceRun, executionposture.MockOnly)
+	}
+	if armedJoinCut {
+		plan, err := owner.ports.fork.PlanRunFork(ctx, runfork.RunForkPlanRequest{SourceRunID: sourceRun, At: eventID})
+		if err != nil || len(plan.JoinSchedules) != 1 {
+			t.Fatalf("original crash fixture clock: %+v err=%v", plan, err)
+		}
+		joinLiveForkFixtureClock(t, ctx, liveRuntime, selected, sourceRun, plan.JoinSchedules[0].ID)
+	}
 	request := SelectedContractExecutionRequest{SourceRunID: sourceRun, At: eventID, AllowSourceFreeze: true, Owner: owner, SourceLoader: sourceLoader,
+		LiveRuntime: liveRuntime, LiveContexts: liveContexts, LiveRuns: selected.(runlifecycle.LiveRunReader),
 		ContractSelection: runforkadmission.SelectedContractSelection(loaded.Source), AgentRuntime: options}
 	if strings.HasPrefix(cut, "retained_") {
 		request.ForkOperation = &runfork.ForkOperationRequest{

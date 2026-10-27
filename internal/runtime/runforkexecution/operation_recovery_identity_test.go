@@ -8,6 +8,7 @@ import (
 
 	"github.com/division-sh/swarm/internal/events"
 	"github.com/division-sh/swarm/internal/events/eventtest"
+	runtimepkg "github.com/division-sh/swarm/internal/runtime"
 	"github.com/division-sh/swarm/internal/runtime/core/worklifetime"
 	"github.com/division-sh/swarm/internal/runtime/effects"
 	"github.com/division-sh/swarm/internal/runtime/executionmode"
@@ -33,7 +34,7 @@ func TestSelectedOperationReplayRetainsOriginalLatestCutBothStores(t *testing.T)
 				[]events.DeliveryRoute{selectedExecutionEntitylessNodeRoute("source-only-node")}, pipelineobligation.ScopeSubscribed)
 			storetest.CaptureRunForkSnapshot(t, ctx, selected, request.SourceRunID)
 			latest, err := request.Owner.ports.fork.PlanRunFork(ctx, runfork.RunForkPlanRequest{SourceRunID: request.SourceRunID})
-			if err != nil || latest.ForkPoint.EventID != advanced.ID() || latest.ForkPoint.SameIdentity(materialized.ForkPoint) {
+			if err != nil || latest.ForkPoint.Kind != runfork.RunForkPointStateRevision || latest.ForkPoint.EventID != "" || latest.ForkPoint.Revision <= materialized.ForkPoint.Revision {
 				t.Fatalf("source advancement precondition failed: point=%+v err=%v", latest.ForkPoint, err)
 			}
 			replay := *request.ForkOperation
@@ -61,6 +62,9 @@ func TestSelectedOperationSuccessorReturnsRecoveredWinnerBothStores(t *testing.T
 			materialized := abandonSelectedOperationPreparation(t, ctx, request)
 			selected := request.SourceLoader.(SourceArtifactSelectedContractSourceLoader).Store
 			if err := request.Owner.RetireSelectedContexts(ctx); err != nil {
+				t.Fatal(err)
+			}
+			if err := request.LiveRuntime.Shutdown(); err != nil {
 				t.Fatal(err)
 			}
 			if err := request.AgentRuntime.ProcessCapability.Release(ctx); err != nil {
@@ -91,8 +95,18 @@ func TestSelectedOperationSuccessorReturnsRecoveredWinnerBothStores(t *testing.T
 			close(execution.allow)
 			successor.ports.runtimeExecution = execution
 			request.AgentRuntime.ProcessCapability = capability
+			loader := request.SourceLoader.(SourceArtifactSelectedContractSourceLoader)
+			loaded, err := loader.InspectRunForkSelectedContractSourceForRequest(ctx, SelectedContractSourceLoadRequest{SourceRunID: request.SourceRunID, Selection: request.ContractSelection})
+			if err != nil {
+				t.Fatal(err)
+			}
+			request.LiveRuntime, request.LiveContexts = liveForkRuntimeFixture(t, ctx, selected, successor, loaded, request.SourceRunID, executionposture.MockOnly)
+			acquire := func(ctx context.Context, bundleHash string) (*runtimepkg.RuntimeContextUse, error) {
+				use, _, err := request.LiveContexts.AcquireBundleHash(ctx, bundleHash)
+				return use, err
+			}
 			recovered, err := successor.RecoverSelectedForkContexts(ctx, effects.NewRecoveryRequest(time.Now().UTC(), executionposture.MockOnly),
-				SelectedForkRecoveryEnvironment{SourceLoader: request.SourceLoader, AgentRuntime: request.AgentRuntime})
+				SelectedForkRecoveryEnvironment{SourceLoader: request.SourceLoader, AgentRuntime: request.AgentRuntime, AcquireLiveRuntime: acquire, LiveContexts: request.LiveContexts, LiveRuns: request.LiveRuns})
 			if err != nil || len(recovered) != 1 || recovered[0].RunID != materialized.ForkRunID || recovered[0].Disposition != runfork.SelectedForkRecoveryResume {
 				t.Fatalf("successor did not consume exact native recovery: %+v err=%v", recovered, err)
 			}

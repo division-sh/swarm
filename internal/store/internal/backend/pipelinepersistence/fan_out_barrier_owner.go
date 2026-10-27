@@ -771,6 +771,9 @@ func terminalizeDeadLetteredFanOutBarrierOutcomesTx(
 			if err != nil {
 				return err
 			}
+			if scheduleStatus == string(runtimegenericschedule.StatusActive) {
+				continue
+			}
 			if !occurrenceEventID.Valid {
 				if strings.TrimSpace(scheduleStatus) == string(runtimegenericschedule.StatusFailed) {
 					return fmt.Errorf("fan-out barrier schedule %s failed before a canonical completion delivery", item.ScheduleKey)

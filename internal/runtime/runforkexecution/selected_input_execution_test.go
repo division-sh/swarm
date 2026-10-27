@@ -12,8 +12,10 @@ import (
 	"github.com/division-sh/swarm/internal/runtime/core/worklifetime"
 	"github.com/division-sh/swarm/internal/runtime/effects"
 	"github.com/division-sh/swarm/internal/runtime/executionposture"
+	"github.com/division-sh/swarm/internal/runtime/pipelineobligation"
 	"github.com/division-sh/swarm/internal/runtime/runfork"
 	"github.com/division-sh/swarm/internal/runtime/runforkadmission"
+	"github.com/division-sh/swarm/internal/runtime/runlifecycle"
 	"github.com/division-sh/swarm/internal/runtime/semanticview"
 	"github.com/division-sh/swarm/internal/runtime/startupownership"
 	"github.com/division-sh/swarm/internal/store/storetest"
@@ -85,7 +87,19 @@ func TestSelectedInputExecutionEvidenceBothStores(t *testing.T) {
 				if err != nil {
 					t.Fatal(err)
 				}
-				seedSelectedOperationSource(t, ctx, backend, db, selected, loaded, run, eventID, input)
+				ctx = originalSelectedFixtureContext(t, ctx, selected.(startupownership.Store))
+				storetest.RequireRun(t, ctx, selected.(storetest.RunFixtureStore), storetest.RunFixture{
+					RunID: run, Origin: runlifecycle.DeploymentRunOrigin(), BundleHash: loaded.SourceArtifactFact.BundleHash(), Artifact: selectedExecutionSourceArtifact(t, loaded.SourceArtifactFact.BundleHash()),
+					StartedAt: input.CreatedAt().Add(-time.Minute), LiveScope: runlifecycle.LiveRunScope{FlowPath: "."},
+				})
+				storetest.CommitSemanticEventWithRoutes(t, ctx, selected, input, []events.DeliveryRoute{selectedExecutionEntitylessNodeRoute("source-only-node")}, pipelineobligation.ScopeSubscribed)
+				commitSelectedOperationRootFixture(t, ctx, selected, loaded, input)
+				storetest.CaptureRunForkSnapshot(t, ctx, selected, run)
+				liveRuntime, liveContexts := liveForkRuntimeFixture(t, ctx, selected, owner, loaded, run, executionposture.Live)
+				selection := runforkadmission.SelectedContractSelection(loaded.Source)
+				operation := runfork.ForkOperationRequest{OperationID: uuid.NewString(), Actor: "selected-input-evidence", IdempotencyKey: fault,
+					TransportHash: "selected-input-evidence-" + fault, SourceRunID: run, ForkEventID: eventID,
+					TargetBundleHash: loaded.SourceArtifactFact.BundleHash(), AllowSourceFreeze: true, ContractSelection: selection}
 				claimed := false
 				var claimedAuthority effects.Authority
 				if fault == "missing_authority" || fault == "foreign_authority" || fault == "retired_execution" {
@@ -144,14 +158,15 @@ func TestSelectedInputExecutionEvidenceBothStores(t *testing.T) {
 				}}
 				result, err := ExecuteSelectedContractRunFork(ctx, SelectedContractExecutionRequest{
 					SourceRunID: run, At: eventID, AllowSourceFreeze: true, Owner: owner, SourceLoader: loader,
-					ContractSelection: runforkadmission.SelectedContractSelection(loaded.Source),
+					ForkOperation: &operation, LiveRuntime: liveRuntime, LiveContexts: liveContexts, LiveRuns: selected.(runlifecycle.LiveRunReader),
+					ContractSelection: selection,
 					AgentRuntime:      SelectedContractAgentRuntimeOptions{ExecutionPosture: executionposture.Live, ProcessCapability: capability},
 				})
 				if !observed && !claimed {
 					t.Fatalf("did not reach evidence consumer: %v", err)
 				}
 				if fault == "control" {
-					if err != nil || !result.Activation.Activated || result.ExecutedEventCount != 0 {
+					if err != nil || !result.Activation.Activated || result.ExecutedEventCount != 1 {
 						t.Fatalf("input control: %+v %v", result, err)
 					}
 					wait, cancel := context.WithTimeout(t.Context(), 15*time.Second)

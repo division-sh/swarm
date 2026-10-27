@@ -9,8 +9,11 @@ import (
 	"time"
 
 	"github.com/division-sh/swarm/internal/apiidempotency"
+	swruntime "github.com/division-sh/swarm/internal/runtime"
+	"github.com/division-sh/swarm/internal/runtime/authoractivity"
 	runtimeruncontrol "github.com/division-sh/swarm/internal/runtime/runcontrol"
 	"github.com/division-sh/swarm/internal/runtime/runfork"
+	runtimerunlifecycle "github.com/division-sh/swarm/internal/runtime/runlifecycle"
 	"github.com/google/uuid"
 )
 
@@ -93,10 +96,15 @@ func executeRunControl(ctx context.Context, req Request, opts RunControlHandlerO
 			}
 		}
 		controller := opts.Controller
+		if action == "continue" && opts.PrepareRunRuntime != nil {
+			if err := opts.PrepareRunRuntime(ctx, runID); err != nil {
+				return apiidempotency.Completion{}, runControlError(runID, err)
+			}
+		}
 		if !selectedStop && runtimeContextManager(opts.RuntimeContexts) != nil {
 			var err error
 			var selected selectedRuntimeContext
-			ctx, selected, _, err = runtimeBundleContextByRun(ctx, opts.RuntimeContexts, runID)
+			ctx, selected, err = runControlRuntimeContext(ctx, opts.RuntimeContexts, runID, action)
 			if err != nil {
 				return apiidempotency.Completion{}, err
 			}
@@ -147,6 +155,28 @@ func executeRunControl(ctx context.Context, req Request, opts RunControlHandlerO
 	return stored, nil
 }
 
+func runControlRuntimeContext(ctx context.Context, contexts *swruntime.RuntimeContextManager, runID, action string) (context.Context, selectedRuntimeContext, error) {
+	ctx, selected, availability, err := runtimeBundleContextByRun(ctx, contexts, runID)
+	if err == nil || action != "stop" || availability.Status != string(runtimeruncontrol.StatusPaused) || !availability.Available() || contexts.LookupBundleHashStatus(availability.BundleHash).Loaded() {
+		return ctx, selected, err
+	}
+	primary, loaded := contexts.Primary()
+	if !loaded {
+		return ctx, selected, err
+	}
+	ctx, selected, err = runtimeBundleContextByHash(ctx, contexts, primary.SourceArtifactFact.BundleHash(), runID)
+	if err != nil {
+		return ctx, selected, err
+	}
+	scope, err := authoractivity.BundleScopeForTarget(ctx, availability.BundleHash)
+	if err != nil {
+		return ctx, selected, err
+	}
+	// The stop transaction derives the target bundle scope from its locked run;
+	// keep the registered primary's original grant and source identity intact.
+	return authoractivity.WithScope(ctx, authoractivity.RuntimeScope(scope.RuntimeInstanceID)), selected, nil
+}
+
 func runControlRunIDParam(params map[string]any) (string, error) {
 	runID := stringParam(params, "run_id")
 	if runID == "" {
@@ -160,6 +190,12 @@ func runControlRunIDParam(params map[string]any) (string, error) {
 }
 
 func runControlError(runID string, err error) error {
+	var live *runtimerunlifecycle.LiveRunConflictError
+	if errors.As(err, &live) {
+		return NewApplicationError(RunFlowAlreadyLiveCode, false, map[string]any{
+			"run_id": runID, "live_run_id": live.LiveRunID, "flow_path": live.Scope.FlowPath,
+		})
+	}
 	var conflict *apiidempotency.ConflictError
 	if errors.As(err, &conflict) {
 		return NewApplicationError(IdempotencyConflictCode, false, map[string]any{

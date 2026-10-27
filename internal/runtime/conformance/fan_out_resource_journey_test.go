@@ -636,6 +636,7 @@ func TestDeploymentResourceRunStartPinDocumentRowsBothStores(t *testing.T) {
 			server := f.operatorServer(t)
 			importRun := startDeploymentResourceRun(t, f, server, "--data", "portfolio/account.registered="+file)
 			assertDeploymentResourceRows(t, f, server, importRun, compiled)
+			pauseDeploymentFixtureRun(t, f, importRun)
 			pinRun := startDeploymentResourceRun(t, f, server, "--pin", "portfolio/account.registered@head")
 			if pinRun == importRun {
 				t.Fatal("pin selected the import run instead of creating a new processing attempt")

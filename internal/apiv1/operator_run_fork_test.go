@@ -166,34 +166,6 @@ func TestOperatorRunForkEventlessDeploymentPointReadback(t *testing.T) {
 	}
 }
 
-func TestOperatorRunForkHandlersRequireActiveSourceFreezeConfirmation(t *testing.T) {
-	executor := &recordingRunForkExecutor{}
-	handler := runForkTestHandler(t, &recordingRunForkAvailability{rows: map[string]runbundle.Availability{
-		runForkTestSourceRunID: runForkAvailable(runForkTestSourceRunID, runForkTestBundleHash),
-	}}, executor)
-
-	resp := rpcCall(t, handler, fmt.Sprintf(
-		`{"jsonrpc":"2.0","id":"fork","method":"run.fork","params":{"source_run_id":%q,"fork_event_id":%q}}`,
-		runForkTestSourceRunID,
-		runForkTestEventID,
-	))
-	if resp.Error == nil || resp.Error.Code != codeInvalidParams {
-		t.Fatalf("run.fork confirmation error = %#v, want invalid params", resp.Error)
-	}
-	details := asMap(t, asMap(t, resp.Error.Data)["details"])
-	if details["field"] != "allow_source_freeze" {
-		t.Fatalf("run.fork confirmation details = %#v", details)
-	}
-	for _, want := range []string{"permanent source freeze", "beyond the fork point", "frozen source cannot resume", "advanced source stays independently live", "Without this permission, no fork is started"} {
-		if !strings.Contains(fmt.Sprint(details["reason"]), want) {
-			t.Fatalf("consent teaching error omitted %q: %#v", want, details)
-		}
-	}
-	if executor.calls != 0 {
-		t.Fatalf("executor calls = %d, want 0", executor.calls)
-	}
-}
-
 func TestOperatorRunForkRejectsRetiredConsentBeforeAvailability(t *testing.T) {
 	for _, consent := range []string{
 		`"confirm_source_freeze":true`,

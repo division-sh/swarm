@@ -2,7 +2,9 @@ package conformance
 
 import (
 	"context"
+	"database/sql"
 	"encoding/json"
+	"errors"
 	"net/http"
 	"net/http/httptest"
 	"os"
@@ -25,13 +27,15 @@ import (
 	llmselection "github.com/division-sh/swarm/internal/runtime/llm/selection"
 	"github.com/division-sh/swarm/internal/runtime/manager"
 	"github.com/division-sh/swarm/internal/runtime/pipeline"
+	"github.com/division-sh/swarm/internal/runtime/runfork"
 	"github.com/division-sh/swarm/internal/runtime/runforkexecution"
 	"github.com/division-sh/swarm/internal/runtime/semanticview"
 	"github.com/division-sh/swarm/internal/store"
+	"github.com/division-sh/swarm/internal/store/storetest"
 	"github.com/google/uuid"
 )
 
-func selectedExternalResourceFixture(t *testing.T, backend string) *deploymentResourceFixture {
+func selectedExternalResourceFixture(t *testing.T, backend string, providerURLs ...string) *deploymentResourceFixture {
 	t.Helper()
 	repo := conformanceRepoRoot(t)
 	root := filepath.Join(t.TempDir(), "contracts")
@@ -55,9 +59,51 @@ func selectedExternalResourceFixture(t *testing.T, backend string) *deploymentRe
 	if err != nil {
 		t.Fatal(err)
 	}
-	f := newDeploymentResourceFixtureWithSource(t, backend, semanticview.Wrap(bundle))
-	f.runtime.fanOutServing.Close()
-	return f
+	cfg := &config.Config{LLM: config.LLMConfig{
+		Backend: llmselection.BackendOpenAICompatible,
+		Models: llmselection.ModelAliases{llmselection.ModelAliasRegular: {
+			llmselection.BackendOpenAICompatible: "gpt-selected-external-proof",
+		}},
+		Session: config.LLMSessionConfig{LockTTL: time.Second, RotateAfterTurns: 40, RotateOnParseFailures: 3},
+	}}
+	if len(providerURLs) == 0 {
+		return newDeploymentResourceFixtureWithSource(t, backend, semanticview.Wrap(bundle), notifyAllChildrenRuntimeOptions{ordinaryConfig: cfg})
+	}
+	if len(providerURLs) != 1 {
+		t.Fatal("external fixture requires one ordinary provider endpoint")
+	}
+	cfg.LLM.OpenAICompatible.BaseURL = providerURLs[0]
+	credentials, err := runtimecredentials.NewFileStore(filepath.Join(t.TempDir(), "ordinary-provider-credentials.json"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := credentials.Set(t.Context(), llmselection.OpenAICompatibleCredentialEnv, "ordinary-external-test-key"); err != nil {
+		t.Fatal(err)
+	}
+	return newDeploymentResourceFixtureWithSource(t, backend, semanticview.Wrap(bundle), notifyAllChildrenRuntimeOptions{ordinaryConfig: cfg, ordinaryProviderCredentials: credentials})
+}
+
+func selectedExternalSourcePoint(t *testing.T, f *deploymentResourceFixture, runID string) string {
+	t.Helper()
+	ctx, cancel := context.WithTimeout(f.ctx, 10*time.Second)
+	defer cancel()
+	for {
+		eventID, err := storetest.ReadRunNamedEventIdentityStorage(ctx, f.selected, runID, "task.assigned")
+		if err == nil {
+			if err := f.runtime.bus.WaitForQuiescence(ctx); err != nil {
+				t.Fatal(err)
+			}
+			return eventID
+		}
+		if !errors.Is(err, sql.ErrNoRows) {
+			t.Fatal(err)
+		}
+		select {
+		case <-ctx.Done():
+			t.Fatal("source feed did not commit its exact provider input")
+		case <-time.After(10 * time.Millisecond):
+		}
+	}
 }
 
 func selectedExternalForkServer(t *testing.T, f *deploymentResourceFixture, owner runforkexecution.SelectedContractExecutionOwner, providerURL string) *httptest.Server {
@@ -69,14 +115,12 @@ func selectedExternalForkServer(t *testing.T, f *deploymentResourceFixture, owne
 	if err := credentials.Set(f.ctx, llmselection.OpenAICompatibleCredentialEnv, "selected-external-test-key"); err != nil {
 		t.Fatal(err)
 	}
-	cfg := &config.Config{LLM: config.LLMConfig{
-		Backend: llmselection.BackendOpenAICompatible,
-		Models: llmselection.ModelAliases{llmselection.ModelAliasRegular: {
-			llmselection.BackendOpenAICompatible: "gpt-selected-external-proof",
-		}},
-		Session: config.LLMSessionConfig{LockTTL: time.Second, RotateAfterTurns: 40, RotateOnParseFailures: 3},
-	}}
+	cfg := f.config
 	cfg.LLM.OpenAICompatible.BaseURL = providerURL
+	f.forkAgents = runforkexecution.SelectedContractAgentRuntimeOptions{
+		Config: cfg, ProviderCredentials: credentials, ExecutionPosture: executionposture.Live,
+		ProcessCapability: f.topology.capability, QuiescenceTimeout: 15 * time.Second,
+	}
 	artifacts, ok := f.selected.(runforkexecution.SourceArtifactSelectedContractSourceStore)
 	if !ok {
 		t.Fatalf("selected store %T lacks source artifact loader", f.selected)
@@ -95,6 +139,11 @@ func selectedExternalForkServer(t *testing.T, f *deploymentResourceFixture, owne
 		Executor: apiv1.SelectedContractRunForkExecutor{
 			ExecuteSelectedContractRunFork: func(ctx context.Context, req runforkexecution.SelectedContractExecutionRequest) (runforkexecution.SelectedContractExecutionResult, error) {
 				req.Owner = owner
+				req = deploymentLiveForkRequest(t, f, req)
+				if req.ForkOperation != nil {
+					operation := *req.ForkOperation
+					f.forkRequest.Store(&operation)
+				}
 				result, err := runforkexecution.ExecuteSelectedContractRunFork(ctx, req)
 				if err != nil {
 					t.Logf("selected external executor error: %+v materialization=%+v activation=%+v", err, result.Materialization, result.Activation)
@@ -104,10 +153,7 @@ func selectedExternalForkServer(t *testing.T, f *deploymentResourceFixture, owne
 			SourceLoader: runforkexecution.SourceArtifactSelectedContractSourceLoader{
 				RepoRoot: repo, Store: artifacts,
 			},
-			AgentRuntime: runforkexecution.SelectedContractAgentRuntimeOptions{
-				Config: cfg, ProviderCredentials: credentials, ExecutionPosture: executionposture.Live,
-				ProcessCapability: f.topology.capability, QuiescenceTimeout: 15 * time.Second,
-			},
+			AgentRuntime: f.forkAgents,
 		},
 	})
 	handler, err := apiv1.NewHandler(apiv1.Options{
@@ -135,6 +181,7 @@ func TestSelectedExternalEffectFixtureControlBothStores(t *testing.T) {
 				t.Fatal(err)
 			}
 			sourceRunID := startDeploymentResourceRun(t, f, server, "--data", "task.assigned="+path)
+			point := selectedExternalSourcePoint(t, f, sourceRunID)
 			var calls atomic.Int64
 			provider := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 				calls.Add(1)
@@ -153,6 +200,7 @@ func TestSelectedExternalEffectFixtureControlBothStores(t *testing.T) {
 			forkServer := selectedExternalForkServer(t, f, owner, provider.URL)
 			params := map[string]any{
 				"source_run_id": sourceRunID, "bundle_hash": f.runtime.sourceArtifactFact.BundleHash(),
+				"fork_event_id":       point,
 				"allow_source_freeze": true, "idempotency_key": uuid.NewString(),
 			}
 			result, rpcErr := deploymentForkRPC(t, f.ctx, forkServer, params)
@@ -211,12 +259,24 @@ type selectedExternalEffectCut struct {
 	effects.Store
 	effects.CompletionStore
 	effects.CompletionContinuationStore
+	runforkexecution.SelectedContractForkLifecycle
 	runforkexecution.SelectedContractRuntimeExecutionLifecycle
 	stage   string
 	entered chan effects.Attempt
 	settled chan string
 	release chan struct{}
 	cut     atomic.Bool
+}
+
+func (c *selectedExternalEffectCut) ActivateRunForkForSelectedContractExecution(ctx context.Context, request runfork.RunForkSelectedContractExecutionActivateRequest) (runfork.RunForkActivation, error) {
+	authority, found := effects.AuthorityFromContext(ctx)
+	if !found {
+		return runfork.RunForkActivation{}, errors.New("external effect settlement requires its actual selected activation authority")
+	}
+	if err := c.RequireRunForkSelectedContractExecutionSettlement(ctx, authority, request.AllowedSourceEventIDs, request.ExecutionSource); err != nil {
+		return runfork.RunForkActivation{}, err
+	}
+	return c.SelectedContractForkLifecycle.ActivateRunForkForSelectedContractExecution(ctx, request)
 }
 
 func (c *selectedExternalEffectCut) interrupt(stage string, attempt effects.Attempt) {
@@ -275,7 +335,8 @@ func selectedExternalOwnerWithCut(t *testing.T, f *deploymentResourceFixture, cu
 	case *store.SQLiteRuntimeStore:
 		workflow := pipeline.NewWorkflowPersistence(selected)
 		if fork == nil {
-			fork = selected
+			cut.SelectedContractForkLifecycle = selected
+			fork = cut
 		}
 		cut.Store, cut.CompletionStore, cut.CompletionContinuationStore = selected, selected, selected
 		cut.SelectedContractRuntimeExecutionLifecycle = selected
@@ -304,7 +365,8 @@ func selectedExternalOwnerWithCut(t *testing.T, f *deploymentResourceFixture, cu
 	case *store.PostgresStore:
 		workflow := pipeline.NewWorkflowPersistence(selected)
 		if fork == nil {
-			fork = selected
+			cut.SelectedContractForkLifecycle = selected
+			fork = cut
 		}
 		cut.Store, cut.CompletionStore, cut.CompletionContinuationStore = selected, selected, selected
 		cut.SelectedContractRuntimeExecutionLifecycle = selected
@@ -371,6 +433,7 @@ func TestSelectedDeploymentExternalEffectRecoveryBothStores(t *testing.T) {
 					t.Fatal(err)
 				}
 				sourceRunID := startDeploymentResourceRun(t, f, server, "--data", "task.assigned="+path)
+				point := selectedExternalSourcePoint(t, f, sourceRunID)
 				var calls atomic.Int64
 				provider := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 					calls.Add(1)
@@ -390,34 +453,54 @@ func TestSelectedDeploymentExternalEffectRecoveryBothStores(t *testing.T) {
 				key := uuid.NewString()
 				params := map[string]any{
 					"source_run_id": sourceRunID, "bundle_hash": f.runtime.sourceArtifactFact.BundleHash(),
+					"fork_event_id":       point,
 					"allow_source_freeze": true, "idempotency_key": key,
 				}
 				forkCtx, cancel := context.WithTimeout(f.ctx, 15*time.Second)
 				defer cancel()
-				ack, rpcErr, transportErr := deploymentForkRPCRequest(forkCtx, forkServer, params)
-				if transportErr != nil || len(rpcErr) != 0 || ack.ForkRunID == "" {
-					t.Fatalf("R5 lost its immutable activation acknowledgment: result=%+v rpc=%s transport=%v", ack, rpcErr, transportErr)
-				}
+				done := make(chan struct{})
+				var first apiv1.RunForkExecutionResult
+				var firstRPC json.RawMessage
+				var firstTransport error
+				go func() {
+					defer close(done)
+					first, firstRPC, firstTransport = deploymentForkRPCRequest(forkCtx, forkServer, params)
+				}()
+				t.Cleanup(func() {
+					cancel()
+					release.Do(func() { close(cut.release) })
+					select {
+					case <-done:
+					case <-time.After(10 * time.Second):
+						t.Error("interrupted external-effect request did not join")
+					}
+				})
 				var interrupted effects.Attempt
 				select {
 				case interrupted = <-cut.entered:
 				case <-forkCtx.Done():
-					t.Fatalf("R5 did not reach %s effect-owner cut: rpc=%s transport=%v", stage.name, rpcErr, transportErr)
+					t.Fatalf("R5 did not reach %s effect-owner cut", stage.name)
 				}
 				if stage.name == "settled" {
 					select {
 					case runID := <-cut.settled:
-						if runID != ack.ForkRunID {
-							t.Fatal("R5 settlement changed the acknowledged child")
+						if runID != interrupted.Authority.SelectedFork.ForkRunID {
+							t.Fatal("R5 settlement changed the actual selected child")
 						}
 					case <-forkCtx.Done():
 						t.Fatal("R5 settled effect did not reach native final settlement")
 					}
 				}
-				var childID string
-				if err := f.db.QueryRowContext(f.ctx, `SELECT fork_run_id FROM run_fork_operations WHERE idempotency_key=$1`, key).Scan(&childID); err != nil {
-					t.Fatal(err)
+				operations := f.selected.(apiv1.RunForkOperationReader)
+				request := f.forkRequest.Load()
+				if request == nil {
+					t.Fatal("effect cut lacks its original API operation request")
 				}
+				recorded, found, err := operations.LoadForkOperation(f.ctx, request.Actor, request.IdempotencyKey, request.TransportHash)
+				if err != nil || !found || recorded.Request.IdempotencyKey != key || recorded.ForkRunID != interrupted.Authority.SelectedFork.ForkRunID {
+					t.Fatalf("effect cut lacks its exact durable operation: %+v found=%t err=%v", recorded, found, err)
+				}
+				operationID, childID := recorded.Request.OperationID, recorded.ForkRunID
 				if stage.name == "settled" {
 					var failed, pending int
 					if err := f.db.QueryRowContext(f.ctx, `SELECT COUNT(*) FROM event_deliveries WHERE run_id=$1 AND status='dead_letter'`, childID).Scan(&failed); err != nil {
@@ -441,9 +524,22 @@ func TestSelectedDeploymentExternalEffectRecoveryBothStores(t *testing.T) {
 				if err := owner.FenceSelectedContexts(); err != nil {
 					t.Fatal(err)
 				}
+				cancel()
 				release.Do(func() { close(cut.release) })
+				select {
+				case <-done:
+				case <-time.After(10 * time.Second):
+					t.Fatal("fenced external-effect request did not join")
+				}
+				if first.ForkRunID != "" || (firstTransport == nil && len(firstRPC) == 0) || (firstTransport != nil && !errors.Is(firstTransport, context.Canceled)) {
+					t.Fatalf("pre-ACK interruption changed its boundary: result=%+v rpc=%s transport=%v", first, firstRPC, firstTransport)
+				}
 				if err := owner.RetireSelectedContexts(context.Background()); err != nil {
 					t.Fatal(err)
+				}
+				beforeRecovery, found, err := operations.LoadForkOperationByID(f.ctx, operationID)
+				if err != nil || !found || beforeRecovery.ForkRunID != childID || beforeRecovery.Status != runfork.ForkOperationMaterialized || beforeRecovery.Result != nil {
+					t.Fatalf("pre-ACK cut fabricated or lost its durable operation: %+v found=%t err=%v", beforeRecovery, found, err)
 				}
 				oldRuntime := f.runtime
 				join := beginServingLifetimeJoin(oldRuntime, nil)
@@ -469,8 +565,33 @@ func TestSelectedDeploymentExternalEffectRecoveryBothStores(t *testing.T) {
 				restartedServer := selectedExternalForkServer(t, f, restarted, provider.URL)
 				result, retryErr := deploymentForkRPC(t, f.ctx, restartedServer, params)
 				t.Logf("R5 %s retry result=%+v error=%s", stage.name, result, retryErr)
-				if len(retryErr) != 0 || !reflect.DeepEqual(result, ack) {
-					t.Fatalf("R5 recovery changed its immutable child acknowledgment: first=%+v retry=%+v error=%s", ack, result, retryErr)
+				replay, replayErr := deploymentForkRPC(t, f.ctx, restartedServer, params)
+				if stage.name == "settled" {
+					if len(retryErr) != 0 || len(replayErr) != 0 || result.ForkRunID != childID || !reflect.DeepEqual(result, replay) {
+						t.Fatalf("R5 replay changed the real post-settlement ACK: first=%+v replay=%+v retry_error=%s replay_error=%s", result, replay, retryErr, replayErr)
+					}
+				} else {
+					for _, raw := range []json.RawMessage{retryErr, replayErr} {
+						var failure struct {
+							Code int `json:"code"`
+						}
+						if json.Unmarshal(raw, &failure) != nil || failure.Code != -32603 {
+							t.Fatalf("R5 failed operation did not retain master's replay refusal: %s", raw)
+						}
+					}
+					if !reflect.DeepEqual(result, apiv1.RunForkExecutionResult{}) || !reflect.DeepEqual(replay, apiv1.RunForkExecutionResult{}) {
+						t.Fatal("R5 failed operation fabricated an activation ACK")
+					}
+					recoveredOperation, found, err := operations.LoadForkOperationByID(f.ctx, operationID)
+					if err != nil || !found || recoveredOperation.Validate() != nil ||
+						(recoveredOperation.Status != runfork.ForkOperationFailed && recoveredOperation.Status != runfork.ForkOperationUncertain) ||
+						recoveredOperation.ForkRunID != childID || recoveredOperation.BindingID != beforeRecovery.BindingID ||
+						recoveredOperation.SemanticHash != beforeRecovery.SemanticHash || !reflect.DeepEqual(recoveredOperation.Request, beforeRecovery.Request) {
+						t.Fatalf("R5 failed replay changed its durable child/outcome: %+v err=%v", recoveredOperation, err)
+					}
+					if len(recovered) != 1 || recovered[0].RunID != childID || !reflect.DeepEqual(recovered[0].Operation, &recoveredOperation) {
+						t.Fatalf("R5 retries changed the exact native recovery outcome: recovered=%+v replayed=%+v", recovered, recoveredOperation)
+					}
 				}
 				if got := calls.Load(); got != stage.providerCalls {
 					t.Fatalf("R5 %s redispatched provider: calls=%d want %d", stage.name, got, stage.providerCalls)

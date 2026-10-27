@@ -7,6 +7,7 @@ import (
 	"testing"
 
 	"github.com/division-sh/swarm/internal/apiv1"
+	"github.com/division-sh/swarm/internal/operatorread"
 	"github.com/division-sh/swarm/internal/runtime/runfork"
 	"github.com/division-sh/swarm/internal/runtime/testfixtures/canonicalrouting"
 	"github.com/division-sh/swarm/internal/servedparity"
@@ -167,7 +168,7 @@ func TestServedForkConnectedRecipientAuthorityOnBothStores(t *testing.T) {
 			}
 			t.Cleanup(func() { projectRuntimePersistenceForServe = previous })
 			publication := newExactOriginPublicationProbe(t)
-			rt := startServedTestSetupEntitiesProofRuntimeFromSource(t, backend, canonicalrouting.CopyForkDeliveryRouteEvidence(t))
+			rt := startServedLiveFlowProofRuntimeFromSource(t, backend, canonicalrouting.CopyForkDeliveryRouteEvidence(t))
 			seed := requireServedEventPublishRPCResult(t, rt.Endpoint, map[string]any{
 				"event_name": "parent.seeded", "bundle_hash": rt.BundleHash,
 				"payload": map[string]any{"work_id": "fork-recipient-authority"}, "idempotency_key": "recipient-seed",
@@ -181,7 +182,13 @@ func TestServedForkConnectedRecipientAuthorityOnBothStores(t *testing.T) {
 			if !ok {
 				t.Fatal("served runtime has no selected fork owner")
 			}
-			plan, err := planner.Plan(servedControlProofAuthorActivityContext(t, rt), runfork.RunForkPlanRequest{SourceRunID: seed.RunID})
+			var captured operatorread.OperatorEventListResult
+			requireServedJSONRPCResult(t, rt.Endpoint, "event.list", map[string]any{"filter": map[string]any{"run_id": seed.RunID, "event_name": "producer/work.ready"}, "limit": 2}, &captured)
+			if len(captured.Events) != 1 || captured.Events[0].RunID != seed.RunID || captured.Events[0].EventName != "producer/work.ready" || captured.Events[0].EventID == "" {
+				t.Fatalf("source lost its exact connected frontier: %+v", captured)
+			}
+			frontier := captured.Events[0].EventID
+			plan, err := planner.Plan(servedControlProofAuthorActivityContext(t, rt), runfork.RunForkPlanRequest{SourceRunID: seed.RunID, At: frontier})
 			if err != nil {
 				t.Fatal(err)
 			}
@@ -211,7 +218,7 @@ func TestServedForkConnectedRecipientAuthorityOnBothStores(t *testing.T) {
 			params := map[string]any{"source_run_id": seed.RunID, "fork_event_id": plan.ForkPoint.EventID, "allow_source_freeze": true, "idempotency_key": "recipient-fork"}
 			var fork, replay apiv1.RunForkExecutionResult
 			requireServedJSONRPCResult(t, rt.Endpoint, "run.fork", params, &fork)
-			if fork.SourceRunID != seed.RunID || fork.ForkRunID == "" || fork.ForkRunID == seed.RunID || fork.ForkEventID != plan.ForkPoint.EventID || fork.ExecutedEventCount != 0 {
+			if fork.SourceRunID != seed.RunID || fork.ForkRunID == "" || fork.ForkRunID == seed.RunID || fork.ForkEventID != plan.ForkPoint.EventID || fork.ExecutedEventCount != 1 {
 				t.Fatalf("fork lost exact source/child work identity: %+v", fork)
 			}
 			childEvent := waitServedSelectedForkFrontier(t, rt.ReceiverStateReader, rt.ReadRunDeliveries, fork.ForkRunID, plan.ForkPoint.EventID)

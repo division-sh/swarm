@@ -155,7 +155,7 @@ func (r ForkOperationResult) Validate(request ForkOperationRequest, forkRunID st
 	}
 	if r.SourceRunID != request.SourceRunID || (request.ForkEventID != "" && r.ForkEventID != request.ForkEventID) ||
 		r.ForkRunID != forkRunID || r.BundleHash != request.TargetBundleHash ||
-		r.ForkRunStatus != RunForkActivatedStatus || r.ExecutedEventCount < 0 ||
+		(r.ForkRunStatus != RunForkActivatedStatus && r.ForkRunStatus != RunForkLiveStatus) || r.ExecutedEventCount < 0 ||
 		strings.TrimSpace(r.SourceRunStatus) == "" || r.SourceFrozen != (r.SourceRunStatus == RunForkSourceFrozenStatus) {
 		return fmt.Errorf("fork operation result contradicts its exact activation request")
 	}
@@ -164,7 +164,7 @@ func (r ForkOperationResult) Validate(request ForkOperationRequest, forkRunID st
 		if err := pin.Validate(); err != nil {
 			return fmt.Errorf("fork operation result pin: %w", err)
 		}
-		if pin.RunID != forkRunID || pin.RunState != RunForkActivatedStatus {
+		if pin.RunID != forkRunID || pin.RunState != r.ForkRunStatus {
 			return fmt.Errorf("fork operation result pin has foreign run or lifecycle state")
 		}
 		if _, duplicate := seen[pin.Declaration]; duplicate {

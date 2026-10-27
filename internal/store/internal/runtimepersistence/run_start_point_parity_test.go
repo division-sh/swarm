@@ -96,8 +96,10 @@ func TestEventlessRunHasOriginalStartWithoutInventedIntakeBothStores(t *testing.
 				plan.StartFirstTurn != nil || plan.EventCountAtFork != 0 || plan.PendingWorkCount != 0 {
 				t.Fatalf("eventless start invented work or required an event: %+v err=%v", plan, err)
 			}
-			if _, err := planner.PlanRunFork(ctx, runfork.RunForkPlanRequest{SourceRunID: runID}); err == nil {
-				t.Fatal("default event selection silently changed to original start")
+			latest, err := planner.PlanRunFork(ctx, runfork.RunForkPlanRequest{SourceRunID: runID})
+			if err != nil || latest.ForkPoint.Kind != runfork.RunForkPointStateRevision || latest.ForkPoint.Revision != 1 || latest.ForkPoint.EventID != "" ||
+				latest.StartFirstTurn != nil || latest.EventCountAtFork != 0 || latest.PendingWorkCount != 0 {
+				t.Fatalf("eventless committed head invented an intake or original-start turn: %+v err=%v", latest, err)
 			}
 		})
 	}

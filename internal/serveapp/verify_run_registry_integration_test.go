@@ -312,14 +312,9 @@ func registryProofWaitCompleted(t *testing.T, endpoint, runID string) {
 	t.Helper()
 	deadline := time.Now().Add(15 * time.Second)
 	for {
-		var result struct {
-			Run struct {
-				RunID  string `json:"run_id"`
-				Status string `json:"status"`
-			} `json:"run"`
-		}
-		requireServedJSONRPCResult(t, endpoint, "run.get", map[string]any{"run_id": runID}, &result)
-		if result.Run.RunID == runID && result.Run.Status == "completed" {
+		var result cliapp.DiagnosticRunDiagnosisResult
+		requireServedJSONRPCResult(t, endpoint, "run.diagnose", map[string]any{"run_id": runID}, &result)
+		if result.Run.RunID == runID && result.Run.Status == "live" && result.Run.EndedAt == "" && result.Run.Failure == nil && result.TestQuiescence.Ready != nil && *result.TestQuiescence.Ready {
 			return
 		}
 		if !time.Now().Before(deadline) {

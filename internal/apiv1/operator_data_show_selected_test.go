@@ -565,6 +565,7 @@ func TestDataShowOperationReadFamilyAcrossSelectedStores(t *testing.T) {
 					t.Fatal("accepted receipt has no pin")
 				}
 				secondRunID := uuid.NewString()
+				pauseAPITestLiveRun(t, bus, fixture.primary, runID)
 				pinData := map[string]any{"imports": []any{}, "pins": []any{map[string]any{"declaration": dataRunDeclaration(scanRef), "version_id": pin.VersionID}}}
 				if response := rpcCall(t, publisher, dataRunEventPublishBody(secondRunID, uuid.NewString(), pinData)); response.Error != nil {
 					t.Fatalf("second real pin=%#v", response)
@@ -583,7 +584,7 @@ func TestDataShowOperationReadFamilyAcrossSelectedStores(t *testing.T) {
 						t.Fatalf("pin evidence=%#v", wire)
 					}
 					pins, err := fixture.primary.LoadDataPruneOperationPins(ctx, prune.PruneInvocationID)
-					if err != nil || len(pins) != 2 || !dataRunHasPin(pins, runID, "running") || !dataRunHasPin(pins, secondRunID, "running") {
+					if err != nil || len(pins) != 2 || !dataRunHasPin(pins, runID, "paused") || !dataRunHasPin(pins, secondRunID, "live") {
 						t.Fatalf("complete durable pins=%#v/%v", pins, err)
 					}
 					assertDataShowEvidence(t, handler, dataShowOperationParams("prune", prune.PruneInvocationID, "pins"), pins)

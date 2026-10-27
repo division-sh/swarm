@@ -30,19 +30,32 @@ func requireSelectedForkDurablePublicReads(t *testing.T, endpoint string, owner 
 	}
 	hash, err := storetest.ReadSelectedForkRunBundleHash(context.Background(), owner, runID)
 	if err != nil || hash == loadedBundleHash {
-		t.Fatalf("public read fixture must target an unloaded different artifact: hash=%s err=%v", hash, err)
+		t.Fatalf("public read fixture must retain the child's different artifact: hash=%s err=%v", hash, err)
 	}
 	var runs struct {
 		Runs []operatorread.RunHeader `json:"runs"`
 	}
 	requireServedJSONRPCResult(t, endpoint, "run.list", map[string]any{"bundle_hash": hash}, &runs)
-	if len(runs.Runs) != 1 || !reflect.DeepEqual(runs.Runs[0], get.Run) {
-		t.Fatalf("unloaded target absent or replaced in run list: %+v", runs)
+	matches := 0
+	for _, run := range runs.Runs {
+		if run.RunID != runID {
+			if run.Origin.EventType() != "platform.boot" || run.EntityCount != 0 || run.Failure != nil {
+				t.Fatalf("target run list includes an unrelated execution: %+v", run)
+			}
+			continue
+		}
+		matches++
+		if !reflect.DeepEqual(run, get.Run) {
+			t.Fatalf("target run list replaced its exact child: %+v / %+v", run, get.Run)
+		}
+	}
+	if matches != 1 {
+		t.Fatalf("target absent or replaced in run list: %+v", runs)
 	}
 	var agents operatorread.OperatorAgentListResult
 	requireServedJSONRPCResult(t, endpoint, "agent.list", map[string]any{"flow": "consumer", "role": "observer"}, &agents)
 	if len(agents.Agents) != 1 || agents.Agents[0].AgentID != "same-name" || agents.Agents[0].FlowInstance != "consumer" {
-		t.Fatalf("unloaded target missing from agent list: %+v", agents)
+		t.Fatalf("target missing from agent list: %+v", agents)
 	}
 	var entities operatorread.OperatorEntityListResult
 	requireServedJSONRPCResult(t, endpoint, "entity.list", params, &entities)
@@ -90,7 +103,7 @@ func requireSelectedForkDurablePublicReads(t *testing.T, endpoint string, owner 
 			t.Fatalf("selected turn detail lost execution/frame evidence: %+v", turn)
 		}
 		if turn.Turn.Tokens == nil || turn.Turn.Tokens.Input != 1 || turn.Turn.Tokens.Output != 1 {
-			t.Fatalf("selected turn did not retain target mock usage: %+v", turn.Turn.Tokens)
+			t.Fatalf("selected turn did not retain target provider usage: %+v", turn.Turn.Tokens)
 		}
 	}
 	var eventList operatorread.OperatorEventListResult

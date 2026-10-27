@@ -13,12 +13,14 @@ import (
 
 	"github.com/division-sh/swarm/internal/events"
 	"github.com/division-sh/swarm/internal/events/eventtest"
+	rootruntime "github.com/division-sh/swarm/internal/runtime"
 	"github.com/division-sh/swarm/internal/runtime/bus"
 	"github.com/division-sh/swarm/internal/runtime/core/activityidentity"
 	"github.com/division-sh/swarm/internal/runtime/core/attemptgeneration"
 	"github.com/division-sh/swarm/internal/runtime/core/flowidentity"
 	"github.com/division-sh/swarm/internal/runtime/core/worklifetime"
 	"github.com/division-sh/swarm/internal/runtime/correlation"
+	"github.com/division-sh/swarm/internal/runtime/deliverylifecycle"
 	"github.com/division-sh/swarm/internal/runtime/effects"
 	"github.com/division-sh/swarm/internal/runtime/executionmode"
 	"github.com/division-sh/swarm/internal/runtime/executionposture"
@@ -26,6 +28,7 @@ import (
 	"github.com/division-sh/swarm/internal/runtime/pipeline"
 	"github.com/division-sh/swarm/internal/runtime/pipelineobligation"
 	"github.com/division-sh/swarm/internal/runtime/runfork"
+	"github.com/division-sh/swarm/internal/runtime/runlifecycle"
 	"github.com/division-sh/swarm/internal/runtime/startupownership"
 	"github.com/division-sh/swarm/internal/store"
 	"github.com/division-sh/swarm/internal/store/storetest"
@@ -48,13 +51,17 @@ type selectedActivityCrashCheckpoint struct {
 type selectedActivityInputSettlementHold struct {
 	pipelineobligation.Store
 	sourceRequest string
+	release       <-chan struct{}
 }
 
 func (p selectedActivityInputSettlementHold) Settle(ctx context.Context, claim pipelineobligation.Claim, disposition pipelineobligation.Disposition) (pipelineobligation.SettlementOutcome, error) {
 	authority, selected := effects.AuthorityFromContext(ctx)
 	if selected && authority.Kind == effects.AuthoritySelectedContractFork && claim.EventID() == activityidentity.ForkLineageEventID(authority.SelectedFork.ForkRunID, p.sourceRequest) {
-		<-ctx.Done()
-		return pipelineobligation.SettlementOutcome{}, ctx.Err()
+		select {
+		case <-ctx.Done():
+			return pipelineobligation.SettlementOutcome{}, ctx.Err()
+		case <-p.release:
+		}
 	}
 	return p.Store.Settle(ctx, claim, disposition)
 }
@@ -164,7 +171,7 @@ func runSelectedActivityResultCrashHelper(t *testing.T, ctx context.Context, sel
 		SuccessEvent: "flow_a/connector.succeeded", FailureEvent: "flow_a/connector.failed",
 		EntityID: entityID, FlowInstance: "flow_a", NodeID: fact.Owner.Key(), FlowID: "flow_a", HandlerEventKey: "review.requested", SourceEventID: initiatingID,
 		SourceRunID: sourceRun, Generation: activation.Generation(), LoopStage: "review"}
-	fixture := activityForkFixture{owner: owner}
+	fixture := activityForkFixture{owner: owner, live: true}
 	sourceEvent := fixture.seedSource(t, ctx, loaded, sourceRun, entityID, requestID, at, route, source, request)
 	seedSelectedContractActivityLoop(t, ctx, fixture, loaded, sourceEvent, entityID, activation, at)
 	storetest.CaptureSelectedRunForkRevision(t, ctx, selected, sourceRun)
@@ -202,7 +209,7 @@ func runSelectedActivityResultCrashHelper(t *testing.T, ctx context.Context, sel
 		t.Fatalf("acknowledged activity publication resumed without SIGKILL: %v", err)
 	}
 	if advanced {
-		owner.ports.pipelineObligations = selectedActivityInputSettlementHold{owner.ports.pipelineObligations, requestID}
+		owner.ports.pipelineObligations = selectedActivityInputSettlementHold{Store: owner.ports.pipelineObligations, sourceRequest: requestID}
 		owner.ports.workflow = pipeline.NewWorkflowPersistence(selectedActivityResultConsumerCrash{selected.(pipeline.WorkflowPersistenceOwner), t, after})
 	} else {
 		publication := func(ctx context.Context, event events.Event) { after(ctx, event, attemptgeneration.Generation{}) }
@@ -215,11 +222,18 @@ func runSelectedActivityResultCrashHelper(t *testing.T, ctx context.Context, sel
 			t.Fatalf("activity crash requires original native selected store, got %T", selected)
 		}
 	}
-	result, err := executeLiveSelectedContractRunFork(ctx, SelectedContractExecutionRequest{SourceRunID: sourceRun, At: requestID, AllowSourceFreeze: true, Owner: owner,
+	liveRuntime, liveContexts := liveForkRuntimeFixture(t, ctx, selected, owner, loaded, sourceRun, executionposture.Live)
+	execution := SelectedContractExecutionRequest{SourceRunID: sourceRun, At: requestID, AllowSourceFreeze: true, Owner: owner,
+		LiveRuntime: liveRuntime, LiveContexts: liveContexts, LiveRuns: selected.(runlifecycle.LiveRunReader),
 		SourceLoader: &fakeSelectedContractSourceLoader{loaded: loaded}, ContractSelection: selection,
 		AgentRuntime: SelectedContractAgentRuntimeOptions{ExecutionPosture: executionposture.Live, ProcessCapability: capability},
 		ForkOperation: &runfork.ForkOperationRequest{OperationID: uuid.NewString(), Actor: "retained-crash", IdempotencyKey: "fixed-cut", TransportHash: "retained-crash-transport",
-			SourceRunID: sourceRun, ForkEventID: requestID, TargetBundleHash: loaded.SourceArtifactFact.BundleHash(), AllowSourceFreeze: true, ContractSelection: selection}})
+			SourceRunID: sourceRun, ForkEventID: requestID, TargetBundleHash: loaded.SourceArtifactFact.BundleHash(), AllowSourceFreeze: true, ContractSelection: selection}}
+	if advanced {
+		_, err := q1ExecuteSelectedPhaseComponent(t, ctx, execution)
+		t.Fatalf("selected result consumer returned before its physical commit checkpoint: %v", err)
+	}
+	result, err := executeLiveSelectedContractRunFork(ctx, execution)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -300,12 +314,24 @@ func proveSelectedActivityResultCrashRecovery(t *testing.T, cut string) {
 				LoadForkOperation(context.Context, string, string, string) (runfork.ForkOperationRecord, bool, error)
 			})
 			original, found, err := operations.LoadForkOperation(read, "retained-crash", "fixed-cut", "retained-crash-transport")
-			if err != nil || !found || original.Status != runfork.ForkOperationActivated || original.Result == nil || original.ForkRunID != checkpoint.ForkRun {
-				t.Fatalf("crash lost exact activation acknowledgment: %+v %v", original, err)
+			if err != nil || !found || original.Status != runfork.ForkOperationMaterialized || original.Result != nil || original.ForkRunID != checkpoint.ForkRun {
+				t.Fatalf("pre-ACK result cut changed its exact materialized operation: %+v %v", original, err)
 			}
 			before, err := storetest.ReadSelectedForkSourceDomain(read, selected, checkpoint.SourceRun)
 			if err != nil {
 				t.Fatal(err)
+			}
+			sourceRows, err := storetest.DecodeSelectedForkSnapshotRows(before["event_deliveries"])
+			if err != nil || len(sourceRows) != 1 {
+				t.Fatalf("exact paused source delivery: rows=%d err=%v", len(sourceRows), err)
+			}
+			sourceDeliveryID, err := sourceRows[0]["delivery_id"].Text()
+			if err != nil {
+				t.Fatal(err)
+			}
+			sourceDelivery, err := selected.(deliverylifecycle.Store).Snapshot(read, sourceDeliveryID)
+			if err != nil || sourceDelivery.RunID != checkpoint.SourceRun || sourceDelivery.EventID != original.Request.ForkEventID || sourceDelivery.Status != deliverylifecycle.StatusPending {
+				t.Fatalf("source result cut lost its exact pending input: %+v err=%v", sourceDelivery, err)
 			}
 			selected = reopen()
 			operations = selected.(interface {
@@ -327,8 +353,22 @@ func proveSelectedActivityResultCrashRecovery(t *testing.T, cut string) {
 				}
 			})
 			loader := SourceArtifactSelectedContractSourceLoader{RepoRoot: runForkExecutionRepoRoot(t), Store: selected.(SourceArtifactSelectedContractSourceStore)}
+			binding, err := owner.ports.fork.RequireRunForkSelectedContractBinding(ctx, checkpoint.ForkRun)
+			if err != nil {
+				t.Fatal(err)
+			}
+			loaded, err := loader.LoadRunForkSelectedContractSourceForRequest(ctx, SelectedContractSourceLoadRequest{SourceRunID: checkpoint.ForkRun, Selection: binding.ContractSelection})
+			if err != nil {
+				t.Fatal(err)
+			}
+			ordinary, contexts := ordinaryForkRuntimeFixture(t, ctx, selected, owner, loaded, executionposture.Live)
 			recovered, err := owner.RecoverSelectedForkContexts(ctx, effects.NewRecoveryRequest(time.Now().UTC(), executionposture.Live), SelectedForkRecoveryEnvironment{
-				SourceLoader: loader, AgentRuntime: SelectedContractAgentRuntimeOptions{ExecutionPosture: executionposture.Live, ProcessCapability: capability}})
+				SourceLoader: loader, AgentRuntime: SelectedContractAgentRuntimeOptions{ExecutionPosture: executionposture.Live, ProcessCapability: capability},
+				LiveContexts: contexts, LiveRuns: selected.(runlifecycle.LiveRunReader),
+				AcquireLiveRuntime: func(ctx context.Context, hash string) (*rootruntime.RuntimeContextUse, error) {
+					use, _, err := contexts.AcquireBundleHash(ctx, hash)
+					return use, err
+				}})
 			if err != nil || len(recovered) != 1 || recovered[0].RunID != checkpoint.ForkRun || recovered[0].Disposition != runfork.SelectedForkRecoveryResume {
 				t.Fatalf("actual selected successor failed: %+v %v", recovered, err)
 			}
@@ -378,14 +418,29 @@ func proveSelectedActivityResultCrashRecovery(t *testing.T, cut string) {
 			if len(claims) != 0 || !current.Valid() || current.SelectedFork.ExecutionID == checkpoint.Activity.Selection.ExecutionID || current.SelectedFork.Generation <= checkpoint.Activity.Selection.Generation {
 				t.Fatalf("recovery did not issue a fresh selected executor: old=%+v current=%+v", checkpoint.Activity.previousAuthority(), current)
 			}
-			if err := owner.ports.runtimeExecution.HeartbeatRunForkSelectedContractRuntimeExecution(ctx, current, time.Minute); err != nil {
-				t.Fatalf("fresh successor lacks native mutation authority: %v", err)
+			storage, err := storetest.ReadSelectedExecutionStorage(wait, selected, checkpoint.ForkRun)
+			if err != nil || storage.State != "closed" {
+				t.Fatalf("actual result settlement did not close its selected successor: %+v err=%v", storage, err)
+			}
+			if err := owner.ports.runtimeExecution.HeartbeatRunForkSelectedContractRuntimeExecution(ctx, current, time.Minute); err == nil {
+				t.Fatal("acknowledged handoff retained selected successor mutation authority")
 			}
 			if err := owner.ports.runtimeExecution.HeartbeatRunForkSelectedContractRuntimeExecution(ctx, checkpoint.Activity.previousAuthority(), time.Minute); err == nil {
 				t.Fatal("dead selected executor retained mutation authority")
 			}
 			retire, stop := context.WithTimeout(context.WithoutCancel(ctx), 10*time.Second)
 			defer stop()
+			rebootGrant, err := ordinary.CurrentStartupGrantEvidence()
+			if err != nil {
+				t.Fatal(err)
+			}
+			rebootAuthority, err := deliverylifecycle.NewNormalExecutionAuthority(loaded.SourceArtifactFact, rebootGrant.GrantID, rebootGrant.RuntimeGeneration)
+			if err != nil {
+				t.Fatal(err)
+			}
+			if err := ordinary.Shutdown(); err != nil {
+				t.Fatalf("join actual ordinary successor: %v", err)
+			}
 			if err := owner.RetireSelectedContexts(retire); err != nil || process.ActiveCount() != baseline {
 				t.Fatalf("selected successor did not join explicit retirement: work=%d baseline=%d error=%v", process.ActiveCount(), baseline, err)
 			}
@@ -393,13 +448,10 @@ func proveSelectedActivityResultCrashRecovery(t *testing.T, cut string) {
 				t.Fatalf("successor retained incomplete pipeline work: pending=%d error=%v", pending, err)
 			}
 			ack, found, err := operations.LoadForkOperation(wait, original.Request.Actor, original.Request.IdempotencyKey, original.Request.TransportHash)
-			if err != nil || !found || !reflect.DeepEqual(original, ack) {
-				t.Fatalf("successor changed original activation acknowledgment: %+v %v", ack, err)
+			if err != nil || !found || ack.Status != runfork.ForkOperationActivated || ack.Result == nil || ack.ForkRunID != original.ForkRunID || ack.BindingID != original.BindingID || ack.SemanticHash != original.SemanticHash || !reflect.DeepEqual(original.Request, ack.Request) {
+				t.Fatalf("successor did not commit its one exact original operation: %+v %v", ack, err)
 			}
-			after, err := storetest.ReadSelectedForkSourceDomain(wait, selected, checkpoint.SourceRun)
-			if err != nil || !reflect.DeepEqual(before, after) {
-				t.Fatalf("child successor changed source business state: %v", err)
-			}
+			requirePendingSourceRebootConservation(t, wait, selected, before, sourceDelivery, rebootAuthority)
 			selected = reopen()
 			durable, err := storetest.ReadLatestPlatformPipelineReceiptStorage(wait, selected, inputID)
 			if err != nil || !reflect.DeepEqual(receipt, durable) {

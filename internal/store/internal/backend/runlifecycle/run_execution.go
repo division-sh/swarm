@@ -5,10 +5,13 @@ import (
 	"database/sql"
 	"errors"
 	"fmt"
+	"reflect"
 
 	runtimecorrelation "github.com/division-sh/swarm/internal/runtime/correlation"
 	runtimeeffects "github.com/division-sh/swarm/internal/runtime/effects"
 	runtimerunlifecycle "github.com/division-sh/swarm/internal/runtime/runlifecycle"
+	"github.com/division-sh/swarm/internal/runtime/startupownership"
+	"github.com/division-sh/swarm/internal/store/internal/backend/generationauthority"
 	"github.com/division-sh/swarm/internal/store/internal/backend/runlifecycle/sourceadmission"
 )
 
@@ -38,25 +41,44 @@ func (s *RunLifecyclePostgresOwner) ObserveRunExecution(ctx context.Context, q s
 	if s == nil {
 		return false, errors.New("run execution observation requires lifecycle owner")
 	}
-	return observeRunExecution(ctx, q, true, runID, s.runAuthority)
+	return observeRunExecution(ctx, q, true, runID, s.runAuthority, false)
 }
 
 func (s *RunLifecycleSQLiteOwner) ObserveRunExecution(ctx context.Context, q sourceadmission.ExecutionQuery, runID string) (bool, error) {
 	if s == nil {
 		return false, errors.New("run execution observation requires lifecycle owner")
 	}
-	return observeRunExecution(ctx, q, false, runID, s.runAuthority)
+	return observeRunExecution(ctx, q, false, runID, s.runAuthority, false)
 }
 
-func observeRunExecution(ctx context.Context, q sourceadmission.ExecutionQuery, postgres bool, runID string, owner runAuthorityOwner) (bool, error) {
+// This is the same execution observation restricted to its private pre-ACK
+// phase, not permission for an ordinarily paused run to dispatch work.
+func (s *RunLifecyclePostgresOwner) ObserveMaterializedSelectedExecution(ctx context.Context, q sourceadmission.ExecutionQuery, runID string) (bool, error) {
+	if s == nil {
+		return false, errors.New("materialized execution observation requires lifecycle owner")
+	}
+	return observeRunExecution(ctx, q, true, runID, s.runAuthority, true)
+}
+
+func (s *RunLifecycleSQLiteOwner) ObserveMaterializedSelectedExecution(ctx context.Context, q sourceadmission.ExecutionQuery, runID string) (bool, error) {
+	if s == nil {
+		return false, errors.New("materialized execution observation requires lifecycle owner")
+	}
+	return observeRunExecution(ctx, q, false, runID, s.runAuthority, true)
+}
+
+func observeRunExecution(ctx context.Context, q sourceadmission.ExecutionQuery, postgres bool, runID string, owner runAuthorityOwner, materializedOnly bool) (bool, error) {
 	if ctx == nil || q == nil {
 		return false, errors.New("run execution observation requires context and query authority")
 	}
 	if err := ctx.Err(); err != nil {
 		return false, err
 	}
+	if materializedOnly && !selectedExecutionContext(ctx) {
+		return false, nil
+	}
 	if runID == "" {
-		return !selectedExecutionContext(ctx), nil
+		return !materializedOnly && !selectedExecutionContext(ctx), nil
 	}
 	var err error
 	var fact runtimecorrelation.SourceArtifactFact
@@ -76,15 +98,34 @@ func observeRunExecution(ctx context.Context, q sourceadmission.ExecutionQuery, 
 		return false, err
 	}
 	if selectedRunID == "" {
-		return !selectedExecutionContext(ctx), nil
+		return !materializedOnly && !selectedExecutionContext(ctx), nil
 	}
-	return observeSelectedRunExecution(ctx, q, postgres, runID, fact, owner)
+	if !selectedExecutionContext(ctx) {
+		state, err := executionRunState(ctx, q, postgres, runID)
+		if err != nil || state != runtimerunlifecycle.StateLive {
+			return false, err
+		}
+		return sourceadmission.ObserveLiveHandoff(ctx, q, runID, fact.BundleHash())
+	}
+	return observeSelectedRunExecution(ctx, q, postgres, runID, fact, owner, materializedOnly)
 }
 
-func observeSelectedRunExecution(ctx context.Context, q sourceadmission.ExecutionQuery, postgres bool, runID string, fact runtimecorrelation.SourceArtifactFact, owner runAuthorityOwner) (bool, error) {
+func observeSelectedRunExecution(ctx context.Context, q sourceadmission.ExecutionQuery, postgres bool, runID string, fact runtimecorrelation.SourceArtifactFact, owner runAuthorityOwner, materializedOnly bool) (bool, error) {
 	state, err := executionRunState(ctx, q, postgres, runID)
-	if err != nil || state != runtimerunlifecycle.StateRunning {
+	if err != nil {
 		return false, err
+	}
+	if materializedOnly && state != runtimerunlifecycle.StatePaused {
+		return false, nil
+	}
+	if state != runtimerunlifecycle.StateRunning {
+		if state != runtimerunlifecycle.StatePaused {
+			return false, nil
+		}
+		materialized, err := ObserveMaterializedSelectedExecution(ctx, q, runID, fact.BundleHash())
+		if err != nil || !materialized {
+			return false, err
+		}
 	}
 	authority, err := selectedRunAuthority(ctx, runID, fact.BundleHash())
 	if err != nil || owner == nil {
@@ -137,10 +178,39 @@ func requireRunExecutionTx(ctx context.Context, tx *sql.Tx, postgres bool, runID
 	if err != nil {
 		return err
 	}
+	if state == runtimerunlifecycle.StateLive && !selectedExecutionContext(ctx) {
+		handedOff, err := sourceadmission.ObserveLiveHandoff(ctx, tx, runID, fact.BundleHash())
+		if err != nil {
+			return err
+		}
+		if handedOff {
+			return requireLiveHandoffGrantTx(ctx, tx, postgres, fact)
+		}
+	}
 	if state != runtimerunlifecycle.StateRunning {
-		return fmt.Errorf("%w: selected run %s is %s", runtimerunlifecycle.ErrRunExecutionAuthority, runID, state)
+		materialized := false
+		if state == runtimerunlifecycle.StatePaused {
+			materialized, err = ObserveMaterializedSelectedExecution(ctx, tx, runID, fact.BundleHash())
+			if err != nil {
+				return err
+			}
+		}
+		if !materialized {
+			return fmt.Errorf("%w: selected run %s is %s", runtimerunlifecycle.ErrRunExecutionAuthority, runID, state)
+		}
 	}
 	return requireSelectedRunAuthorityTx(ctx, tx, runID, fact.BundleHash(), owner)
+}
+
+func requireLiveHandoffGrantTx(ctx context.Context, tx *sql.Tx, postgres bool, fact runtimecorrelation.SourceArtifactFact) error {
+	original, err := startupownership.CaptureMutationAuthority(ctx)
+	if err != nil || !original.HasRuntimeGrant() {
+		return errors.Join(err, fmt.Errorf("%w: live handoff requires its ordinary generation grant", runtimerunlifecycle.ErrRunExecutionAuthority))
+	}
+	if evidence, present := startupownership.GenerationGrantEvidenceFromContext(ctx); present && !reflect.DeepEqual(evidence, original.GrantEvidence()) {
+		return fmt.Errorf("%w: live handoff grant evidence differs from its original owner", runtimerunlifecycle.ErrRunExecutionAuthority)
+	}
+	return generationauthority.RequireAdmittedOrdinaryGrantTx(ctx, tx, original.GrantEvidence(), fact.BundleHash(), !postgres)
 }
 
 func executionRunState(ctx context.Context, q sourceadmission.RowQueryer, postgres bool, runID string) (runtimerunlifecycle.State, error) {

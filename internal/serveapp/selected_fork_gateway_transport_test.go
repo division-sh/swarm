@@ -49,7 +49,7 @@ type selectedForkGatewayFault struct {
 func startSelectedForkTransportProofRuntime(t *testing.T, backend servedparity.Backend, root string, options selectedForkProofOptions) (servedWorkspaceProofRuntime, *selectedForkGatewayFault) {
 	t.Helper()
 	if !options.docker {
-		return startWorkspaceGatewayProofRuntime(t, backend, root, "", nil, "127.0.0.1:0"), nil
+		return startWorkspaceLiveGatewayProofRuntime(t, backend, root, "", nil, "127.0.0.1:0"), nil
 	}
 	fault := &selectedForkGatewayFault{armed: options.gatewayLoss}
 	factory := func(projection *sourceartifact.RuntimeProjection, source semanticview.Source) (cliapp.ServeWorkspaceLifecycle, error) {

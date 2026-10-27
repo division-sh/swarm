@@ -121,7 +121,7 @@ func issue642NewlyArmedSelectedTimer(t *testing.T, backend, delay string) {
 	})
 	marker := issue642TimerContinuationMarker(t, rt, seed.RunID)
 	rt.waitEntityStage(t, seed.RunID, seed.RunID, "checked")
-	sourceCompleted := issue2564H2CompletionWaitRun(t, rt, seed.RunID)
+	sourceCompleted := pauseIssue2564SettledSource(t, rt, seed.RunID)
 	rt.waitDeliveries(t, seed.RunID)
 	issue2564H2CompletionWaitReceipt(t, rt, seed.RunID, seed.EventID)
 	armedPlan, sourceArm := issue642TimerContinuationPlan(t, reader, seed.RunID, seed.EventID, marker.EventID)
@@ -154,7 +154,7 @@ func issue642NewlyArmedSelectedTimer(t *testing.T, backend, delay string) {
 		"allow_source_freeze": true, "idempotency_key": "issue642-new-selected-arm-fork",
 	}, &fork)
 	if fork.SourceRunID != seed.RunID || fork.ForkRunID == "" || fork.ForkRunID == seed.RunID ||
-		fork.ForkEventID != seed.EventID || fork.ForkRevision != plan.ForkPoint.Revision || fork.SourceFrozen || fork.SourceRunStatus != "completed" {
+		fork.ForkEventID != seed.EventID || fork.ForkRevision != plan.ForkPoint.Revision || fork.SourceFrozen || fork.SourceRunStatus != "paused" {
 		t.Fatalf("new-arm fork lost its timer-free cut or independent completed source: %+v", fork)
 	}
 	child := rt
@@ -167,7 +167,7 @@ func issue642NewlyArmedSelectedTimer(t *testing.T, backend, delay string) {
 		t.Fatalf("new arm did not come from the real selected owed-input turn: event=%+v marker=%+v", replayed, childMarker)
 	}
 	child.waitEntityStage(t, fork.ForkRunID, fork.ForkRunID, "checked")
-	completed := issue2564H2CompletionWaitRun(t, child, fork.ForkRunID)
+	completed := waitIssue2564LiveRunSettlement(t, child, fork.ForkRunID)
 	child.waitDeliveries(t, fork.ForkRunID)
 	issue2564H2CompletionWaitReceipt(t, child, fork.ForkRunID, replayed.ID())
 	actual := issue642RequireNewSelectedArm(t, child, reader, sourceArm, replayed, completed, selectedDelay)
@@ -183,9 +183,9 @@ func issue642NewlyArmedSelectedTimer(t *testing.T, backend, delay string) {
 	if err != nil || !reflect.DeepEqual(sourceCompleted, sourceAfterCompletion) {
 		t.Fatalf("new selected arm changed original source completion: %v", err)
 	}
-	t.Logf("ISSUE642_NEW_SELECTED_TIMER_ARM backend=%s selected_delay=%s source=%s child=%s cut=%d timer=%s arm=%s due=%s effect=%s completed=%s",
+	t.Logf("ISSUE642_NEW_SELECTED_TIMER_ARM backend=%s selected_delay=%s source=%s child=%s cut=%d timer=%s arm=%s due=%s effect=%s settled_run=%s",
 		backend, delay, seed.RunID, fork.ForkRunID, plan.ForkPoint.Revision, actual.Ref.ActivationID,
-		actual.CreatedAt.Format(time.RFC3339Nano), actual.FireAt.Format(time.RFC3339Nano), actual.EventType, completed.EndedAt.Format(time.RFC3339Nano))
+		actual.CreatedAt.Format(time.RFC3339Nano), actual.FireAt.Format(time.RFC3339Nano), actual.EventType, completed.RunID)
 }
 
 func issue642NewArmEvent(t *testing.T, rt issue2564ServedFixture, runID, name string) events.Event {
@@ -254,7 +254,7 @@ func issue642RequireNewSelectedArm(t *testing.T, rt issue2564ServedFixture, read
 	if observed := storetest.ObserveWorkflowTimerReplayStorage(t, t.Context(), rt.selected, completed.RunID, completed.RunID); observed.Timers != 1 || observed.ActiveTimers != 0 {
 		t.Fatalf("new selected arm left extra or unconsumed timer work: %+v", observed)
 	}
-	if completed.BundleHash != rt.BundleHash || completed.Status != "completed" || completed.EndedAt == nil || completed.Failure != nil {
+	if completed.BundleHash != rt.BundleHash || completed.Status != "live" || completed.EndedAt != nil || completed.Failure != nil {
 		t.Fatalf("new-arm checked receiver is not actual selected run completion: %+v", completed)
 	}
 	return actual

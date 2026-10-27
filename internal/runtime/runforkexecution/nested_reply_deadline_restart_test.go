@@ -16,6 +16,7 @@ import (
 	"github.com/division-sh/swarm/internal/runtime/joinruntime"
 	"github.com/division-sh/swarm/internal/runtime/replycontext"
 	"github.com/division-sh/swarm/internal/runtime/runfork"
+	"github.com/division-sh/swarm/internal/runtime/runlifecycle"
 	"github.com/division-sh/swarm/internal/runtime/startupownership"
 	"github.com/division-sh/swarm/internal/store"
 	"github.com/division-sh/swarm/internal/store/storetest"
@@ -75,6 +76,7 @@ func restartSelectedDeadlineChild(t *testing.T, ctx context.Context, source *roo
 	selected startupownership.Store, predecessor SelectedContractExecutionOwner, reopen func() startupownership.Store,
 	loaded LoadedSelectedContractSource, staged runfork.RunForkMaterialization, rows []replycontext.Record,
 	operation *runfork.ForkOperationRequest, hold *nestedDeadlineWorkerHold, contexts chan context.Context, sourceRun string,
+	resume func(),
 ) (startupownership.Store, SelectedContractExecutionOwner, context.Context) {
 	t.Helper()
 	ops := selected.(interface {
@@ -164,32 +166,66 @@ func restartSelectedDeadlineChild(t *testing.T, ctx context.Context, source *roo
 	loader := SourceArtifactSelectedContractSourceLoader{RepoRoot: runForkExecutionRepoRoot(t), Store: selected.(SourceArtifactSelectedContractSourceStore)}
 	options := SelectedContractAgentRuntimeOptions{ExecutionPosture: executionposture.MockOnly, ProcessCapability: newCapability}
 	options.AgentManagerOptions.TestLifecycleProbe = hold
-	recovery, err := owner.RecoverSelectedForkContexts(ctx, effects.NewRecoveryRequest(time.Now().UTC(), executionposture.MockOnly), SelectedForkRecoveryEnvironment{
-		SourceLoader: loader, AgentRuntime: options})
-	if err != nil {
-		t.Fatalf("recover original deadline child: %+v error=%v", recovery, err)
+	ctx = originalSelectedFixtureContext(t, ctx, selected)
+	ordinary, liveContexts := liveForkRuntimeFixture(t, ctx, selected, owner, loaded, sourceRun, executionposture.MockOnly)
+	type outcome struct {
+		entries []runfork.SelectedForkRecoveryResult
+		err     error
 	}
-	matched := 0
-	for _, entry := range recovery {
-		if entry.RunID == staged.ForkRunID {
-			matched++
-			if entry.Disposition != runfork.SelectedForkRecoveryResume || entry.Operation == nil || entry.Operation.Request.OperationID != operation.OperationID {
-				t.Fatalf("successor did not resume the exact staged deadline operation: %+v", entry)
-			}
-		} else if entry.Disposition != runfork.SelectedForkRecoveryStaged {
-			t.Fatalf("successor executed an unrelated context-only predecessor: %+v", entry)
+	done := make(chan outcome, 1)
+	recoveryCtx, cancelRecovery := context.WithCancel(ctx)
+	go func() {
+		entries, err := owner.RecoverSelectedForkContexts(recoveryCtx, effects.NewRecoveryRequest(time.Now().UTC(), executionposture.MockOnly), SelectedForkRecoveryEnvironment{
+			SourceLoader: loader, AgentRuntime: options, LiveContexts: liveContexts, LiveRuns: selected.(runlifecycle.LiveRunReader),
+			AcquireLiveRuntime: func(ctx context.Context, hash string) (*rootruntime.RuntimeContextUse, error) {
+				use, _, err := liveContexts.AcquireBundleHash(ctx, hash)
+				return use, err
+			},
+		})
+		done <- outcome{entries, err}
+	}()
+	// The original deadline assertions run while the real inherited worker is
+	// held. Its public handoff is joined only after that worker is released.
+	t.Cleanup(func() {
+		resume()
+		wait, stop := context.WithTimeout(context.WithoutCancel(ctx), 20*time.Second)
+		defer stop()
+		var result outcome
+		select {
+		case result = <-done:
+		case <-wait.Done():
+			cancelRecovery()
+			result = <-done
+			t.Errorf("deadline successor did not join: %v", wait.Err())
 		}
-	}
-	if matched != 1 {
-		t.Fatalf("successor deadline child count=%d recovery=%+v", matched, recovery)
-	}
-	ops = selected.(interface {
-		LoadForkOperation(context.Context, string, string, string) (runfork.ForkOperationRecord, bool, error)
+		cancelRecovery()
+		if result.err != nil {
+			t.Errorf("recover original deadline child: %+v error=%v", result.entries, result.err)
+		}
+		matched := 0
+		for _, entry := range result.entries {
+			if entry.RunID == staged.ForkRunID {
+				matched++
+				if entry.Disposition != runfork.SelectedForkRecoveryResume || entry.Operation == nil || entry.Operation.Request.OperationID != operation.OperationID {
+					t.Errorf("successor did not resume the exact staged deadline operation: %+v", entry)
+				}
+			} else if entry.Disposition != runfork.SelectedForkRecoveryStaged {
+				t.Errorf("successor executed an unrelated context-only predecessor: %+v", entry)
+			}
+		}
+		if matched != 1 {
+			t.Errorf("successor deadline child count=%d", matched)
+		}
+		ops := selected.(interface {
+			LoadForkOperation(context.Context, string, string, string) (runfork.ForkOperationRecord, bool, error)
+		})
+		ack, found, err := ops.LoadForkOperation(wait, operation.Actor, operation.IdempotencyKey, operation.TransportHash)
+		if err != nil || !found || ack.Status != runfork.ForkOperationActivated || ack.Result == nil || ack.ForkRunID != staged.ForkRunID || ack.BindingID != before.BindingID || !reflect.DeepEqual(ack.Request, before.Request) || !ack.Result.ForkPoint.SameIdentity(staged.ForkPoint) {
+			t.Errorf("deadline successor changed the operation/cut acknowledgment: %+v error=%v", ack, err)
+		}
+		if err := ordinary.Shutdown(); err != nil {
+			t.Error(err)
+		}
 	})
-	ack, found, err := ops.LoadForkOperation(ctx, operation.Actor, operation.IdempotencyKey, operation.TransportHash)
-	if err != nil || !found || ack.Status != runfork.ForkOperationActivated || ack.Result == nil || ack.ForkRunID != staged.ForkRunID ||
-		ack.BindingID != before.BindingID || !reflect.DeepEqual(ack.Request, before.Request) || !ack.Result.ForkPoint.SameIdentity(staged.ForkPoint) {
-		t.Fatalf("deadline successor changed the operation/cut acknowledgment: %+v error=%v", ack, err)
-	}
 	return selected, owner, ctx
 }

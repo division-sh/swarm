@@ -153,6 +153,7 @@ type AgentControlHandlerOptions struct {
 }
 
 type RunControlHandlerOptions struct {
+	PrepareRunRuntime    func(context.Context, string) error
 	SelectedForkControls SelectedForkControlAdmission
 	SelectedForkStop     SelectedForkStopOwner
 	Now                  func() time.Time

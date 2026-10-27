@@ -2,6 +2,7 @@ package runforkexecution
 
 import (
 	"context"
+	"errors"
 	"sync/atomic"
 	"testing"
 	"time"
@@ -9,6 +10,7 @@ import (
 	"github.com/division-sh/swarm/internal/events"
 	"github.com/division-sh/swarm/internal/events/eventtest"
 	"github.com/division-sh/swarm/internal/runtime/executionmode"
+	"github.com/division-sh/swarm/internal/runtime/manager"
 	"github.com/division-sh/swarm/internal/runtime/pipelineobligation"
 	"github.com/division-sh/swarm/internal/runtime/runfork"
 	"github.com/division-sh/swarm/internal/runtime/runforkreadiness"
@@ -65,6 +67,13 @@ func TestSelectedForkIndependentOperationsExecuteDistinctChildrenBothStores(t *t
 					if err != nil || stored.Occurrences != 1 || stored.RunStatus == "cancelled" || stored.RunStatus == "failed" {
 						t.Fatalf("independent child execution count: child=%s stored=%+v err=%v", child, stored, err)
 					}
+				}
+				release := request.LiveContexts.BeginLiveRunSelection()
+				supersededErr := request.LiveRuntime.ReconcileAcknowledgedLiveFork(ctx, first.Materialization.ForkRunID)
+				foreignErr := request.LiveRuntime.ReconcileAcknowledgedLiveFork(ctx, request.SourceRunID)
+				release()
+				if supersededErr != nil || !errors.Is(foreignErr, manager.ErrRunExecutionNotOwned) {
+					t.Fatalf("post-ACK reconciliation lost paused/foreign distinction: superseded=%v foreign=%v", supersededErr, foreignErr)
 				}
 				if err := request.Owner.RetireSelectedContexts(ctx); err != nil {
 					t.Fatalf("join independently admitted child owners: %v", err)
@@ -140,8 +149,8 @@ func TestSelectedForkCompetingPreparationsJoinNativeElectionBothStores(t *testin
 			request.Owner.ports.contexts.mu.Lock()
 			remaining := len(request.Owner.ports.contexts.entries)
 			request.Owner.ports.contexts.mu.Unlock()
-			if remaining != 1 {
-				t.Fatalf("losing preparation leaked: got %d entries, want retained winner only", remaining)
+			if remaining != 0 {
+				t.Fatalf("acknowledged handoff retained selected preparation: got %d entries", remaining)
 			}
 		})
 	}

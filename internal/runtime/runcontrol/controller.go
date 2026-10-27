@@ -250,7 +250,7 @@ func (c *Controller) Continue(ctx context.Context, req TransitionRequest) (Trans
 	state := committed.State
 	result := TransitionResult{
 		RunID:  state.RunID,
-		Status: StatusRunning,
+		Status: state.Status,
 		Recovery: PostCommitRecovery{
 			Disposition: RecoveryNotConfigured,
 		},

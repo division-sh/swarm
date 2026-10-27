@@ -125,7 +125,7 @@ func requireStandingRootTreePublicServices(t *testing.T, p *releaseServeProcess,
 		for _, run := range runs {
 			// Fixed public service coordinates, independent of the runtime codec.
 			for alias, serviceID := range map[string]string{"alpha": "9f3aa24a-6122-56d2-8bcf-0c8d14d3d7bc", "beta": "7eccc4e9-f0f3-5fcd-b5ed-1e1820d4bf7f"} {
-				if run.Origin.Kind == "standing_generation" && run.Origin.ServiceID == serviceID && run.Status == "running" {
+				if run.Origin.Kind == "standing_generation" && run.Origin.ServiceID == serviceID && run.Status == "live" {
 					services[alias] = run
 				}
 			}

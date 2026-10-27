@@ -164,8 +164,24 @@ func TestIssue642PreparedArrivalTimeoutContinuesExactDeliveryBothStores(t *testi
 			operation := runfork.ForkOperationRequest{OperationID: uuid.NewString(), Actor: "prepared-arrival", IdempotencyKey: "fixed-cut",
 				TransportHash: "prepared-arrival-transport", SourceRunID: sourceRun, ForkEventID: marker,
 				TargetBundleHash: loaded.SourceArtifactFact.BundleHash(), AllowSourceFreeze: true, ContractSelection: selection}
+			liveRuntime, liveContexts := liveForkRuntimeFixture(t, sourceCtx, selected, owner, loaded, sourceRun, executionposture.MockOnly)
+			preservedSource := joinLiveForkFixtureClock(t, sourceCtx, liveRuntime, selected, sourceRun, source.ID)
+			sourceCount, err := storetest.ReadLifecycleEventCardinality(sourceCtx, selected, sourceRun, "platform.join_timeout")
+			if err != nil {
+				t.Fatal(err)
+			}
+			sourceBefore, err = storetest.ReadSelectedForkSourceDomain(sourceCtx, selected, sourceRun)
+			if err != nil {
+				t.Fatal(err)
+			}
+			sourceDeliveries, err := owner.ports.busDurable.DeliveryLifecycle.SummarizeRun(sourceCtx, sourceRun)
+			if err != nil {
+				t.Fatal(err)
+			}
+			baseline = process.ActiveCount()
 			result, err := ExecuteSelectedContractRunFork(sourceCtx, SelectedContractExecutionRequest{
 				SourceRunID: sourceRun, At: marker, AllowSourceFreeze: true, Owner: owner, ForkOperation: &operation,
+				LiveRuntime: liveRuntime, LiveContexts: liveContexts, LiveRuns: selected.(runlifecycle.LiveRunReader),
 				SourceLoader: loader, ContractSelection: selection,
 				AgentRuntime: SelectedContractAgentRuntimeOptions{ExecutionPosture: executionposture.MockOnly, ProcessCapability: owner.ports.contexts.capability},
 			})
@@ -184,7 +200,9 @@ func TestIssue642PreparedArrivalTimeoutContinuesExactDeliveryBothStores(t *testi
 			defer cancel()
 			reader := selected.(interface {
 				LoadRunHeader(context.Context, string) (operatorread.RunHeader, error)
+				LoadRunTestQuiescence(context.Context, string, time.Time) (operatorread.RunTestQuiescence, error)
 			})
+			workflow := flowidentity.RunScopedFlowInstance{RunID: child, Route: flowidentity.StoredRoute(".", child, child)}
 			for {
 				header, err := reader.LoadRunHeader(wait, child)
 				if err != nil {
@@ -196,16 +214,23 @@ func TestIssue642PreparedArrivalTimeoutContinuesExactDeliveryBothStores(t *testi
 				owner.ports.contexts.mu.Lock()
 				retained := len(owner.ports.contexts.entries)
 				owner.ports.contexts.mu.Unlock()
-				if header.Status == "completed" && header.EndedAt != nil && process.ActiveCount() == baseline && retained == 0 {
+				instance, found, err := owner.ports.workflow.LoadWorkflowInstance(wait, workflow)
+				if err != nil {
+					t.Fatal(err)
+				}
+				settlement, err := reader.LoadRunTestQuiescence(wait, child, time.Now().UTC())
+				if err != nil {
+					t.Fatal(err)
+				}
+				if found && instance.CurrentState == "attention" && settlement.Ready && header.Status == "live" && header.EndedAt == nil && process.ActiveCount() == baseline && retained == 0 {
 					break
 				}
 				select {
 				case <-wait.Done():
-					t.Fatalf("prepared arrival did not complete and release resources: header=%+v contexts=%d leases=%d baseline=%d", header, retained, process.ActiveCount(), baseline)
+					t.Fatalf("prepared arrival did not settle its final instance: header=%+v contexts=%d leases=%d baseline=%d instance=%+v found=%t settlement=%+v", header, retained, process.ActiveCount(), baseline, instance, found, settlement)
 				case <-time.After(10 * time.Millisecond):
 				}
 			}
-			workflow := flowidentity.RunScopedFlowInstance{RunID: child, Route: flowidentity.StoredRoute(".", child, child)}
 			header, found, err := owner.ports.workflow.LoadWorkflowInstance(wait, workflow)
 			if err != nil || !found || header.CurrentState != "attention" || header.EntityID != child || header.WorkflowName != "." {
 				t.Fatalf("exact prepared timeout receiver did not reach attention: %+v found=%v err=%v", header, found, err)
@@ -289,12 +314,10 @@ func TestIssue642PreparedArrivalTimeoutContinuesExactDeliveryBothStores(t *testi
 			if err != nil || !found {
 				t.Fatalf("prepared source deadline disappeared: found=%v err=%v", found, err)
 			}
-			afterDigest, err := original.EvidenceDigest()
-			if err != nil || afterDigest != sourceDigest || original.Status != genericschedule.StatusActive || original.CurrentEventID != candidate.EventID ||
-				!original.CurrentEventAdmittedAt.Equal(candidate.AdmittedAt) {
+			if !reflect.DeepEqual(original, preservedSource) {
 				t.Fatalf("child changed or committed its prepared source candidate: %+v err=%v", original, err)
 			}
-			if count, err := storetest.ReadLifecycleEventCardinality(wait, selected, sourceRun, "platform.join_timeout"); err != nil || count != 0 {
+			if count, err := storetest.ReadLifecycleEventCardinality(wait, selected, sourceRun, "platform.join_timeout"); err != nil || count != sourceCount {
 				t.Fatalf("prepared source timeout was published: count=%d err=%v", count, err)
 			}
 			sourceAfter, err := storetest.ReadSelectedForkSourceDomain(wait, selected, sourceRun)
@@ -302,7 +325,7 @@ func TestIssue642PreparedArrivalTimeoutContinuesExactDeliveryBothStores(t *testi
 				t.Fatalf("child timeout changed prepared source business facts: %v", err)
 			}
 			sourceSettlement, err := owner.ports.busDurable.DeliveryLifecycle.SummarizeRun(wait, sourceRun)
-			if err != nil || sourceSettlement.Total != 0 {
+			if err != nil || !reflect.DeepEqual(sourceSettlement, sourceDeliveries) {
 				t.Fatalf("child created a prepared-source delivery obligation: %+v err=%v", sourceSettlement, err)
 			}
 			retry, found, err := operations.LoadForkOperation(wait, operation.Actor, operation.IdempotencyKey, operation.TransportHash)

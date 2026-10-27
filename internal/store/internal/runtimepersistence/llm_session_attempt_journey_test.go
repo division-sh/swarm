@@ -13,6 +13,7 @@ import (
 	runlifecycle "github.com/division-sh/swarm/internal/runtime/runlifecycle"
 	"github.com/division-sh/swarm/internal/runtime/sessions"
 	"github.com/division-sh/swarm/internal/store/internal/backend/llmpersistence"
+	"github.com/division-sh/swarm/internal/store/internal/backend/mutationprotocol"
 	"github.com/google/uuid"
 )
 
@@ -39,7 +40,7 @@ func TestLLMSessionAcquireRotateReleaseAttemptJourneyBothStores(t *testing.T) {
 		phase := "acquire"
 		failAttempt := map[string]bool{"acquire": true, "rotate": true}
 		observed := map[string][]string{}
-		probe := llmCandidateRetryProbe{request: func(txctx context.Context, tx *sql.Tx, runID string, due *time.Time) (runlifecycle.CandidateRequestResult, error) {
+		probe := llmCandidateRetryProbe{request: func(txctx context.Context, attempt *mutationprotocol.Attempt, tx *sql.Tx, runID string, due *time.Time) (runlifecycle.CandidateRequestResult, error) {
 			if phase == "acquire" || phase == "rotate" {
 				var sessionID string
 				if err := tx.QueryRowContext(txctx, `SELECT session_id FROM agent_sessions WHERE run_id=$1 AND status='active'`, runID).Scan(&sessionID); err != nil {
@@ -50,9 +51,9 @@ func TestLLMSessionAcquireRotateReleaseAttemptJourneyBothStores(t *testing.T) {
 			var result runlifecycle.CandidateRequestResult
 			var err error
 			if selected.postgres {
-				result, err = selected.selected.(*PostgresStore).runLifecyclePostgresOwner.WriteCompletionCandidateTx(txctx, tx, runID, due)
+				result, err = selected.selected.(*PostgresStore).runLifecyclePostgresOwner.WriteCompletionCandidateTx(txctx, attempt, runID, due)
 			} else {
-				result, err = selected.selected.(*SQLiteRuntimeStore).runLifecycleSQLiteOwner.WriteCompletionCandidateTx(txctx, tx, runID, due)
+				result, err = selected.selected.(*SQLiteRuntimeStore).runLifecycleSQLiteOwner.WriteCompletionCandidateTx(txctx, attempt, runID, due)
 			}
 			if err != nil {
 				return result, err

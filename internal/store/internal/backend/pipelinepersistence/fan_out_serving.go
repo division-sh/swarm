@@ -5,12 +5,16 @@ import (
 	"database/sql"
 	"errors"
 	"fmt"
+	"slices"
 	"strings"
 	"time"
 
 	"github.com/division-sh/swarm/internal/runtime/fanoutobligation"
+	"github.com/division-sh/swarm/internal/runtime/manager"
 	"github.com/division-sh/swarm/internal/runtime/pipeline"
 	"github.com/division-sh/swarm/internal/runtime/startupownership"
+	"github.com/division-sh/swarm/internal/store/internal/backend/agentpersistence"
+	"github.com/division-sh/swarm/internal/store/internal/backend/runlifecycle"
 	"github.com/division-sh/swarm/internal/store/internal/backend/transactiontest"
 )
 
@@ -205,16 +209,7 @@ func (s *fanOutServingStore) NextFanOutCandidate(ctx context.Context, registrati
 			now = s.sqlite.now
 		}
 		candidate, found, err = observeFanOutCandidateTx(ctx, tx, s.postgres != nil, now, fanOutRegistrationGrants(registrations, true), exclude)
-		if err != nil || !found {
-			return err
-		}
-		for _, grant := range grants {
-			if grant.GrantID == candidate.GrantID {
-				found, err = s.admission.ObserveFanOutRunTx(ctx, tx, grant, candidate.Key.RunID)
-				return err
-			}
-		}
-		return errors.New("fan-out candidate has no exact grant")
+		return err
 	}
 	if s.postgres != nil {
 		err = s.postgres.backend.RunReadTransaction(ctx, operation)
@@ -228,6 +223,34 @@ func (s *fanOutServingStore) NextFanOutCandidate(ctx context.Context, registrati
 }
 
 func observeFanOutCandidateTx(ctx context.Context, tx *sql.Tx, postgres bool, now func() time.Time, grants []startupownership.GrantEvidence, exclude []fanoutobligation.IntentKey) (candidate startupownership.FanOutCandidate, found bool, err error) {
+	exclude = slices.Clone(exclude)
+	for {
+		candidate, found, err = observeFanOutCandidateHeaderTx(ctx, tx, postgres, now, grants, exclude)
+		if err != nil || !found {
+			return candidate, found, err
+		}
+		var ownership manager.RunExecutionOwnership
+		for _, grant := range grants {
+			if grant.GrantID == candidate.GrantID {
+				ownership, err = agentpersistence.ObserveRunExecutionOwnershipTx(ctx, tx, grant, candidate.Key.RunID, !postgres)
+				break
+			}
+		}
+		if err != nil {
+			return startupownership.FanOutCandidate{}, false, err
+		}
+		if ownership == 0 {
+			return startupownership.FanOutCandidate{}, false, errors.New("fan-out candidate has no exact grant ownership observation")
+		}
+		if ownership == manager.RunExecutionOwned {
+			return candidate, true, nil
+		}
+		// A foreign or unacknowledged first header cannot hide later owned work.
+		exclude = append(exclude, candidate.Key)
+	}
+}
+
+func observeFanOutCandidateHeaderTx(ctx context.Context, tx *sql.Tx, postgres bool, now func() time.Time, grants []startupownership.GrantEvidence, exclude []fanoutobligation.IntentKey) (candidate startupownership.FanOutCandidate, found bool, err error) {
 	operation := func() error {
 		if len(grants) == 0 {
 			return nil
@@ -292,7 +315,7 @@ const fanOutExecutionReasonSQL = `CASE
 	WHEN b.binding_id IS NOT NULL AND g.grant_id IS NULL THEN 'selected_fork_reserved'
 	WHEN g.grant_id IS NULL THEN 'runtime_unregistered'
 	WHEN r.bundle_hash<>i.bundle_hash THEN 'run_not_owned'
-	WHEN r.status<>'running' THEN 'run_' || r.status
+	WHEN r.status NOT IN ('running','live') AND NOT (r.status='paused' AND g.selected_binding_id IS NOT NULL) THEN 'run_' || r.status
 	WHEN c.control_status IN ('paused','stopped') THEN 'run_' || c.control_status
 	ELSE 'eligible' END`
 
@@ -360,10 +383,11 @@ func fanOutObservationFrom(grants []startupownership.GrantEvidence, args *[]any)
 		LEFT JOIN run_control_state c ON c.run_id=r.run_id
 		LEFT JOIN run_fork_selected_contract_bindings b ON b.fork_run_id=r.run_id
 		LEFT JOIN run_fork_selected_contract_runtime_executions e ON e.binding_id=b.binding_id AND e.fork_run_id=r.run_id
+			AND e.generation=(SELECT MAX(head.generation) FROM run_fork_selected_contract_runtime_executions head WHERE head.fork_run_id=r.run_id)
 		LEFT JOIN runtime_generation_grants g ON g.bundle_hash=r.bundle_hash AND ` + grantFilter + `
 		AND g.state_version=(SELECT MAX(head.state_version) FROM runtime_generation_grants head WHERE head.grant_id=g.grant_id)
 		AND g.state='admitted' AND (
-			(g.selected_binding_id IS NULL AND b.binding_id IS NULL)
+			(g.selected_binding_id IS NULL AND (b.binding_id IS NULL OR (r.status='live' AND e.state='closed')))
 			OR (g.selected_binding_id=b.binding_id
 				AND g.selected_fork_run_id=r.run_id AND g.selected_execution_id=e.execution_id
 				AND g.runtime_generation=e.generation AND e.state='running'
@@ -427,7 +451,10 @@ func fanOutRunAcceptsTurnTx(ctx context.Context, tx *sql.Tx, grant startupowners
 	if err := tx.QueryRowContext(ctx, `SELECT r.status,COALESCE(c.control_status,'') FROM runs r LEFT JOIN run_control_state c ON c.run_id=r.run_id WHERE r.run_id=$1`, runID).Scan(&status, &control); err != nil {
 		return false, err
 	}
-	return (status == "running" || (!newTurn && status == "paused")) && control != "stopped" && (!newTurn || control != "paused"), nil
+	if newTurn && status == "paused" && control == "" && grant.SelectedFork != nil && grant.SelectedFork.ForkRunID == runID {
+		return runlifecycle.ObserveMaterializedSelectedExecution(ctx, tx, runID, grant.BundleHash)
+	}
+	return (status == "running" || status == "live" || (!newTurn && status == "paused")) && control != "stopped" && (!newTurn || control != "paused"), nil
 }
 
 func observeFanOutClaim(ctx context.Context, tx *sql.Tx, admission FanOutAdmission, grant startupownership.GrantEvidence, postgres bool, claim fanoutobligation.Claim, now func() time.Time) (fanoutobligation.Intent, error) {

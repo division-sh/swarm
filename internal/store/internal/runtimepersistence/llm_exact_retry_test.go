@@ -15,6 +15,7 @@ import (
 	runlifecycle "github.com/division-sh/swarm/internal/runtime/runlifecycle"
 	"github.com/division-sh/swarm/internal/runtime/sessions"
 	"github.com/division-sh/swarm/internal/store/internal/backend/llmpersistence"
+	"github.com/division-sh/swarm/internal/store/internal/backend/mutationprotocol"
 	"github.com/division-sh/swarm/internal/store/internal/backend/runforkrevision"
 	"github.com/division-sh/swarm/internal/store/internal/backend/transactiontest"
 )
@@ -22,11 +23,15 @@ import (
 // The existing constructor dependency still delegates to the real lifecycle
 // owner. Only the final SQL statement introduces native SQLite lock contention.
 type llmCandidateRetryProbe struct {
-	request func(context.Context, *sql.Tx, string, *time.Time) (runlifecycle.CandidateRequestResult, error)
+	request func(context.Context, *mutationprotocol.Attempt, *sql.Tx, string, *time.Time) (runlifecycle.CandidateRequestResult, error)
 }
 
-func (p llmCandidateRetryProbe) WriteCompletionCandidateTx(ctx context.Context, tx *sql.Tx, run string, due *time.Time) (runlifecycle.CandidateRequestResult, error) {
-	return p.request(ctx, tx, run, due)
+func (p llmCandidateRetryProbe) WriteCompletionCandidateTx(ctx context.Context, attempt *mutationprotocol.Attempt, run string, due *time.Time) (result runlifecycle.CandidateRequestResult, err error) {
+	err = attempt.WithSQL(ctx, func(ctx context.Context, tx *sql.Tx) (err error) {
+		result, err = p.request(ctx, attempt, tx, run, due)
+		return err
+	})
+	return result, err
 }
 
 func llmSQLiteBusyBlocker(t *testing.T, db *sql.DB, path, phase string, retainedConnections int) *sql.Tx {
@@ -87,14 +92,14 @@ func llmSQLiteBusyBlocker(t *testing.T, db *sql.DB, path, phase string, retained
 func newLLMRetryOwner(t *testing.T, store *SQLiteRuntimeStore, blocker *sql.Tx, phase string, perAttempt int, observe func(context.Context, *sql.Tx) error) (*llmpersistence.LLMSQLiteOwner, *int) {
 	t.Helper()
 	calls := 0
-	probe := llmCandidateRetryProbe{request: func(ctx context.Context, tx *sql.Tx, run string, due *time.Time) (runlifecycle.CandidateRequestResult, error) {
+	probe := llmCandidateRetryProbe{request: func(ctx context.Context, attempt *mutationprotocol.Attempt, tx *sql.Tx, run string, due *time.Time) (runlifecycle.CandidateRequestResult, error) {
 		calls++
 		if calls == perAttempt+1 {
 			if err := blocker.Rollback(); err != nil {
 				return runlifecycle.CandidateRequestResult{}, err
 			}
 		}
-		result, err := store.runLifecycleSQLiteOwner.WriteCompletionCandidateTx(ctx, tx, run, due)
+		result, err := store.runLifecycleSQLiteOwner.WriteCompletionCandidateTx(ctx, attempt, run, due)
 		if err != nil {
 			return result, err
 		}

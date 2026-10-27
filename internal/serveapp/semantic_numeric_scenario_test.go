@@ -131,6 +131,7 @@ func TestServedSemanticNumericScenarioModes(t *testing.T) {
 					t.Fatalf("fraction input=%#v output=%#v", in, out)
 				}
 				requireServedRunStatus(t, rt.Endpoint, run, "completed")
+				waitServedRunDeliveryQuiescence(t, rt.ReadRunDeliveries, run)
 			})
 		}
 	}

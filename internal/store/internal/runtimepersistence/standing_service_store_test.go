@@ -988,8 +988,8 @@ func TestSQLiteRunStopRefusesCurrentStandingGenerationWithTeachingCommand(t *tes
 	if err := store.backend.QueryRowContext(ctx, `SELECT status FROM runs WHERE run_id = ?`, created.RunID).Scan(&status); err != nil {
 		t.Fatal(err)
 	}
-	if status != "running" {
-		t.Fatalf("standing run status = %s, want running", status)
+	if status != "live" {
+		t.Fatalf("standing run status = %s, want live", status)
 	}
 }
 

@@ -86,7 +86,7 @@ func TestR3RulesSelectedActorMachineBothStores(t *testing.T) {
 	fixture := r3RuntimeFixture(t)
 	for _, backend := range []catalogRuntimeBackend{catalogBackendSQLite, catalogBackendPostgres} {
 		t.Run(string(backend), func(t *testing.T) {
-			h := newRuntimeHarnessForBackend(t, fixture.Root, backend, true)
+			h := newLiveForkCatalogHarness(t, fixture.Root, backend)
 			h.seedInitialState(pipeline.FlowInstanceEntityID(catalogRuntimeRunID))
 			ctx := worklifetime.WithOccurrence(catalogRunContext(h, catalogRuntimeRunID), h.rt.WorkOccurrence())
 			if _, err := runScopedCatalogStore(t, h).PauseRunControlOutcome(ctx, runcontrol.TransitionRequest{RunID: catalogRuntimeRunID, Reason: "retained rules proof", ControlledBy: "cataloge2e"}); err != nil {
@@ -109,7 +109,7 @@ func TestR3RulesSelectedActorMachineBothStores(t *testing.T) {
 			loader, selection, _ := selectedContractForkFixtureSelection(t, ctx, repoRootFromCatalogE2E(t), fixture.Root, artifact)
 			cfg := testRuntimeConfig()
 			cfg.LLM.Backend = "anthropic"
-			result, err := runforkexecution.ExecuteSelectedContractRunFork(ctx, runforkexecution.SelectedContractExecutionRequest{
+			result, err := executeCatalogLiveFork(t, h, ctx, runforkexecution.SelectedContractExecutionRequest{
 				SourceRunID: catalogRuntimeRunID, At: point, AllowSourceFreeze: true,
 				Owner: selectedContractExecutionOwnerForCatalogHarness(t, h), SourceLoader: loader, ContractSelection: selection,
 				AgentRuntime: selectedContractAgentRuntimeOptionsForCatalogHarness(h, cfg),
@@ -117,10 +117,10 @@ func TestR3RulesSelectedActorMachineBothStores(t *testing.T) {
 			if err != nil {
 				t.Fatal(err)
 			}
-			if !result.Activation.Activated || result.ExecutedEventCount != 0 || len(result.ForkEvents) != 0 {
+			if !result.Activation.Activated || result.ExecutedEventCount != 1 || len(result.ForkEvents) != 1 {
 				t.Fatalf("selected chronology=%+v", result)
 			}
-			if observed, err := observeCatalogSelectedExecution(t, h, result.Materialization.ForkRunID); err != nil || observed.ExecutedEventCount != 1 {
+			if observed, err := observeCatalogSelectedExecution(t, h, result.Materialization.ForkRunID); err != nil || observed.ExecutedEventCount != 1 || len(observed.ForkEvents) != 1 || observed.ForkEvents[0] != result.ForkEvents[0] {
 				t.Fatalf("retained chronology=%+v error=%v", observed, err)
 			}
 			assertR3RuntimeOutput(t, h, result.Materialization.ForkRunID, "work.accepted", 1)

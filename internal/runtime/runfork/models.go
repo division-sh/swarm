@@ -57,6 +57,7 @@ func sortedTrimmedStrings(values []string) []string {
 
 const (
 	RunForkActivatedStatus    = "running"
+	RunForkLiveStatus         = "live"
 	RunForkSourceFrozenStatus = "forked"
 )
 
@@ -716,6 +717,7 @@ const (
 	RunForkPointEvent              RunForkPointKind = forkpoint.Event
 	RunForkPointDeploymentRevision RunForkPointKind = forkpoint.DeploymentRevision
 	RunForkPointRunStart           RunForkPointKind = forkpoint.RunStart
+	RunForkPointStateRevision      RunForkPointKind = forkpoint.StateRevision
 )
 
 type RunForkPoint struct {
@@ -737,12 +739,14 @@ func (p RunForkPoint) Validate() error {
 	}
 	switch p.Kind {
 	case RunForkPointEvent:
-	case RunForkPointDeploymentRevision, RunForkPointRunStart:
+	case RunForkPointDeploymentRevision, RunForkPointRunStart, RunForkPointStateRevision:
 		if p.Input != "" || p.EventName != "" || p.SourceEventID != "" ||
 			p.ProducedBy != "" || p.ProducedByType != "" || p.RoutingSource != (events.RoutingSource{}) || !p.Timestamp.IsZero() {
 			label := "deployment revision"
 			if p.Kind == RunForkPointRunStart {
 				label = "run start"
+			} else if p.Kind == RunForkPointStateRevision {
+				label = "state revision"
 			}
 			return fmt.Errorf("%s fork point cannot carry event evidence", label)
 		}
@@ -1399,17 +1403,17 @@ type RunForkSelectedContractAgentTopology struct {
 }
 
 type RunForkSelectedContractExecutionActivateRequest struct {
-	InheritedSchedules    InheritedScheduleSelection `json:"-"`
-	ForkOperation         *ForkOperationRequest
-	ExecutedEventCount    int
-	DataPins              []durabledata.Pin
-	ExecutionSource       semanticview.Source
-	ForkRunID             string
-	AllowSourceFreeze     bool
-	AllowedSourceEventIDs []string
-	FrontierAdmission     RunForkContractFrontierAdmission
-	RouteTopology         RunForkSelectedContractRouteTopology
-	RecipientPlanning     RunForkSelectedContractRecipientPlanning
+	InheritedSchedules      InheritedScheduleSelection `json:"-"`
+	OrdinaryGenerationGrant any                        `json:"-"`
+	ForkOperation           *ForkOperationRequest
+	ExecutedEventCount      int
+	DataPins                []durabledata.Pin
+	ExecutionSource         semanticview.Source
+	ForkRunID               string
+	AllowedSourceEventIDs   []string
+	FrontierAdmission       RunForkContractFrontierAdmission
+	RouteTopology           RunForkSelectedContractRouteTopology
+	RecipientPlanning       RunForkSelectedContractRecipientPlanning
 }
 
 type RunForkSelectedContractSourceEvent struct {

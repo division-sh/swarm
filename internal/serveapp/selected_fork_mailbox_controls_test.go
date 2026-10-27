@@ -7,6 +7,7 @@ import (
 
 	"github.com/division-sh/swarm/internal/runtime/testfixtures/canonicalrouting"
 	"github.com/division-sh/swarm/internal/servedparity"
+	"github.com/division-sh/swarm/internal/store/storetest"
 	"github.com/google/uuid"
 )
 
@@ -15,11 +16,16 @@ func TestSelectedForkMailboxControlRefusalsBothStores(t *testing.T) {
 		t.Run(string(backend), func(t *testing.T) {
 			root := canonicalrouting.CopyForkReceiverMailboxGate(t)
 			publication := newExactOriginPublicationProbe(t)
-			rt := startServedTestSetupEntitiesProofRuntimeFromSource(t, backend, root)
+			rt := startServedLiveFlowProofRuntimeFromSource(t, backend, root)
 			seed := requireServedEventPublishRPCResult(t, rt.Endpoint, map[string]any{
 				"event_name": "start.seeded", "bundle_hash": rt.BundleHash,
 				"payload": map[string]any{"token": "receiver-proof"}, "idempotency_key": "selected-card-seed",
 			})
+			var rootEventOwner any = rt.SQLite
+			if rt.Postgres != nil {
+				rootEventOwner = rt.Postgres
+			}
+			requireServedLiveRootMode(t, rt.Runtime.ExecutionPosture, storetest.LoadCanonicalEventRecord(t, t.Context(), rootEventOwner, seed.EventID), seed.RunID)
 			waitForkReceiverSourceCompletion(t, rt, seed.RunID)
 			requested := requireServedEventPublishRPCResult(t, rt.Endpoint, map[string]any{
 				"event_name": "start.requested", "run_id": seed.RunID, "source_event_id": seed.EventID,
@@ -53,6 +59,7 @@ func TestSelectedForkMailboxControlRefusalsBothStores(t *testing.T) {
 					// Public retirement joins execution and candidate maintenance. Only
 					// then is a whole-database comparison attributable to this request.
 					var stopped map[string]any
+					requireServedOKJSONRPC(t, rt.Endpoint, "run.pause", map[string]any{"run_id": fork.ForkRunID, "idempotency_key": "selected-card-pause"})
 					requireServedJSONRPCResult(t, rt.Endpoint, "run.stop", map[string]any{"run_id": fork.ForkRunID}, &stopped)
 				}
 				for _, operation := range []struct {

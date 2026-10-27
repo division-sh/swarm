@@ -42,7 +42,7 @@ func snapshotLifecycleDiagnostic(ctx context.Context, tx *sql.Tx, req runtimeman
 		p.EventMode = parent.Event().ExecutionMode()
 	}
 	result.DiagnosticProvenance = p
-	binding, err := originOwner.ValidateLifecycleDiagnosticOriginTx(ctx, tx, *result, false)
+	binding, err := originOwner.ValidateLifecycleDiagnosticOriginTx(ctx, tx, *result, false, req.OperationKind)
 	if err != nil {
 		return err
 	}

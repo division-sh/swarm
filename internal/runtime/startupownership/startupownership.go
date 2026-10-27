@@ -200,6 +200,7 @@ type RetainedSession interface {
 	InstallTerminalOwner(SessionTerminalOwner, time.Duration) error
 	GrantTransitionRecorder
 	LoadSourceSet(context.Context) (runtimeagenttopology.SourceSetPlan, bool, error)
+	CheckSourceSetReplacement(context.Context, runtimeagenttopology.SourceSetCommitRequest) error
 	CommitSourceSet(context.Context, runtimeagenttopology.SourceSetCommitRequest) (runtimeagenttopology.SourceSetCommitResult, error)
 	ApplyDestructiveResetCleanup(context.Context, runtimedestructivereset.CleanupRequest, *runtimeagenttopology.SourceSetCommitRequest) (runtimedestructivereset.CleanupResult, error)
 	CommitAgentLifecycleTransition(context.Context, runtimemanager.AgentLifecycleTransition) (runtimemanager.AgentLifecycleTransitionResult, error)

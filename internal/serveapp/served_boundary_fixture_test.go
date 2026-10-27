@@ -143,7 +143,7 @@ func createServedBoundaryWaitingRun(t *testing.T, rt servedBoundaryFixture, suff
 		}
 		time.Sleep(50 * time.Millisecond)
 	}
-	requireServedRunStatus(t, rt.Endpoint, result.RunID, "running")
+	requireServedRunStatus(t, rt.Endpoint, result.RunID, "live")
 	return result.RunID, result.EventID
 }
 

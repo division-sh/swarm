@@ -2,6 +2,7 @@ package runforkexecution
 
 import (
 	"context"
+	"net/http/httptest"
 
 	"reflect"
 	"sync"
@@ -12,6 +13,7 @@ import (
 	"github.com/division-sh/swarm/internal/events"
 	"github.com/division-sh/swarm/internal/events/eventtest"
 	"github.com/division-sh/swarm/internal/operatorread"
+	"github.com/division-sh/swarm/internal/packadmission"
 	rootruntime "github.com/division-sh/swarm/internal/runtime"
 	"github.com/division-sh/swarm/internal/runtime/agenttopology"
 	"github.com/division-sh/swarm/internal/runtime/authoractivity"
@@ -28,6 +30,7 @@ import (
 	"github.com/division-sh/swarm/internal/runtime/genericschedule"
 	"github.com/division-sh/swarm/internal/runtime/joinruntime"
 	"github.com/division-sh/swarm/internal/runtime/lifecycleprobe"
+	runtimellm "github.com/division-sh/swarm/internal/runtime/llm"
 	"github.com/division-sh/swarm/internal/runtime/pipeline"
 	"github.com/division-sh/swarm/internal/runtime/replycontext"
 	"github.com/division-sh/swarm/internal/runtime/runcontrol"
@@ -35,8 +38,13 @@ import (
 	"github.com/division-sh/swarm/internal/runtime/runforkadmission"
 	"github.com/division-sh/swarm/internal/runtime/runlifecycle"
 	"github.com/division-sh/swarm/internal/runtime/semanticview"
+	"github.com/division-sh/swarm/internal/runtime/sessions"
 	"github.com/division-sh/swarm/internal/runtime/startupownership"
 	"github.com/division-sh/swarm/internal/runtime/testfixtures/canonicalrouting"
+	"github.com/division-sh/swarm/internal/runtime/timerobligation"
+	"github.com/division-sh/swarm/internal/runtime/toolgateway"
+	"github.com/division-sh/swarm/internal/runtime/workspace"
+	"github.com/division-sh/swarm/internal/sourceartifact"
 	"github.com/division-sh/swarm/internal/store/storetest"
 	"github.com/google/uuid"
 )
@@ -86,41 +94,134 @@ func nestedDeadlineSourceRuntime(t *testing.T, ctx context.Context, selected any
 
 func nodeReplySourceRuntime(t *testing.T, ctx context.Context, selected any, owner SelectedContractExecutionOwner, loaded LoadedSelectedContractSource, posture executionposture.Posture) (*rootruntime.Runtime, func()) {
 	t.Helper()
+	rt, close, err := nodeReplyRuntime(t, ctx, selected, owner, loaded, posture, false)
+	if err != nil {
+		t.Fatal(err)
+	}
+	return rt, close
+}
+
+func nodeReplyRuntime(t *testing.T, ctx context.Context, selected any, owner SelectedContractExecutionOwner, loaded LoadedSelectedContractSource, posture executionposture.Posture, live bool, observeGrant ...func(startupownership.GrantEvidence)) (*rootruntime.Runtime, func(), error) {
+	t.Helper()
+	return nodeReplyRuntimeWithAgentOptions(t, ctx, selected, owner, loaded, posture, live, SelectedContractAgentRuntimeOptions{}, observeGrant...)
+}
+
+func nodeReplyRuntimeWithAgentOptions(t *testing.T, ctx context.Context, selected any, owner SelectedContractExecutionOwner, loaded LoadedSelectedContractSource, posture executionposture.Posture, live bool, agents SelectedContractAgentRuntimeOptions, observeGrant ...func(startupownership.GrantEvidence)) (*rootruntime.Runtime, func(), error) {
+	t.Helper()
 	nodes, err := pipeline.LoadWorkflowNodes(loaded.Source)
 	if err != nil {
 		t.Fatal(err)
 	}
 	process, _ := worklifetime.ProcessFromContext(ctx)
 	p := owner.ports
+	options := rootruntime.RuntimeOptions{ExecutionPosture: posture, RuntimeInstanceID: runForkTestRuntimeInstanceID,
+		SourceArtifactFact: loaded.SourceArtifactFact, ProcessWorkOwner: process,
+		ProviderCredentials: agents.ProviderCredentials,
+		WorkflowModule:      selectedContractWorkflowModule{source: loaded.Source, nodes: nodes, guardRegistry: pipeline.NewContractGuardRegistry(loaded.Source)}}
+	var gateway *httptest.Server
+	if semanticview.SourceDeclaresAgents(loaded.Source) {
+		if loaded.RuntimeProjection == nil {
+			bundle, found := semanticview.Bundle(loaded.Source)
+			if !found || bundle.SourceArtifact == nil {
+				t.Fatal("ordinary agent fixture requires its retained admitted artifact")
+			}
+			projection, err := sourceartifact.MaterializeRuntimeProjection(bundle.SourceArtifact)
+			if err != nil {
+				t.Fatal(err)
+			}
+			loaded.RuntimeProjection = projection
+			t.Cleanup(func() {
+				if err := projection.Release(); err != nil {
+					t.Error(err)
+				}
+			})
+		}
+		gateway = httptest.NewUnstartedServer(nil)
+		t.Cleanup(gateway.Close)
+		endpoint := "http://" + gateway.Listener.Addr().String()
+		token, err := toolgateway.GenerateAuthToken()
+		if err != nil {
+			t.Fatal(err)
+		}
+		options.ToolGatewayBinding, err = toolgateway.NewRuntimeOwnedBinding(toolgateway.TransportHTTP, endpoint, endpoint, token,
+			toolgateway.LifecycleOwnerServeBoot, toolgateway.SourceBoundMCPListener)
+		if err != nil {
+			t.Fatal(err)
+		}
+		options.EnableToolGateway = true
+		host := workspace.NewHostManager()
+		config := workspace.DefaultHostConfig()
+		config.WorkspaceRoot = t.TempDir()
+		host.SetConfig(config)
+		host.SetSemanticSource(loaded.Source)
+		if err := host.BindSourceProjection(loaded.RuntimeProjection); err != nil {
+			t.Fatal(err)
+		}
+		if err := host.EnsurePrereqs(ctx); err != nil {
+			t.Fatal(err)
+		}
+		t.Cleanup(func() {
+			if err := host.ReleaseSourceProjection(context.Background()); err != nil {
+				t.Error(err)
+			}
+		})
+		options.WorkspaceLifecycle = host
+	}
+	cfg := config.Config{Runtime: config.RuntimeConfig{MaxConcurrentAgents: 4}, LLM: config.LLMConfig{Backend: "anthropic"}}
+	if agents.Config != nil {
+		cfg = *agents.Config
+		if cfg.Runtime.MaxConcurrentAgents == 0 {
+			cfg.Runtime.MaxConcurrentAgents = 4
+		}
+	}
+	cfg.Runtime.RecoveryOnStartup = live
 	rt, err := rootruntime.NewRuntime(ctx, rootruntime.RuntimeDeps{
-		Config: &config.Config{Runtime: config.RuntimeConfig{MaxConcurrentAgents: 4}, LLM: config.LLMConfig{Backend: "anthropic"}},
-		Options: rootruntime.RuntimeOptions{ExecutionPosture: posture, RuntimeInstanceID: runForkTestRuntimeInstanceID,
-			SourceArtifactFact: loaded.SourceArtifactFact, ProcessWorkOwner: process,
-			WorkflowModule: selectedContractWorkflowModule{source: loaded.Source, nodes: nodes, guardRegistry: pipeline.NewContractGuardRegistry(loaded.Source)}},
+		Config:              &cfg,
+		Options:             options,
 		WorkflowPersistence: p.workflow, EventStore: p.events, EventBusDurable: p.busDurable,
 		EventPayloadAdmissionBinder: selected.(rootruntime.EventPayloadAdmissionBinder), AuthorActivityRegistrars: []rootruntime.AuthorActivityCatalogRegistrar{p.fork},
 		RunBundleAvailability: p.fork, RunControlStore: selected.(runcontrol.Store), RunLifecycleCandidates: p.candidates,
 		RuntimeLogStore: p.logs, ManagerStore: p.manager, ManagerPersistenceRoles: p.managerRoles,
+		SessionRegistry: selected.(sessions.Registry), LiveSessionAcquirer: selected.(runtimellm.LiveSessionAcquirer),
+		SessionResetter: selected.(sessions.Resetter), ConversationStore: selected.(runtimellm.ConversationPersistence),
 		EffectsStore: p.effects, CompletionStore: p.completion, CompletionHeartbeatStore: p.completionHeartbeat,
 		ManagedCapabilitiesStore: p.managedCapabilities, DeliveryStore: p.busDurable.DeliveryLifecycle, PipelineObligations: p.pipelineObligations,
-		GenericScheduleStore: p.genericSchedules, DecisionCards: p.decisionCards, ProposedEffects: p.proposedEffects,
+		GenericScheduleStore: p.genericSchedules, TimerObligationReader: selected.(timerobligation.Reader),
+		DecisionCards: p.decisionCards, ProposedEffects: p.proposedEffects,
 		DecisionCardHumanTasks: p.humanTasks, DecisionCardDraftExpiry: p.decisionCardDraftExpiry, HumanTaskExpiry: p.humanTaskExpiry,
 		BudgetSpendStore: p.budget,
 	})
 	if err != nil {
 		t.Fatal(err)
 	}
+	if gateway != nil {
+		gateway.Config.Handler = rt.ToolGateway.Handler()
+		gateway.Start()
+	}
 	t.Cleanup(func() {
 		if err := rt.Shutdown(); err != nil {
 			t.Error(err)
 		}
 	})
-	plan, err := agenttopology.NewSourceSetPlan([]agenttopology.SourceCoordinate{{BundleHash: loaded.SourceArtifactFact.BundleHash()}}, nil)
+	coordinate := agenttopology.SourceCoordinate{BundleHash: loaded.SourceArtifactFact.BundleHash()}
+	desired, err := rt.Manager.CompileStaticTopologyDesiredAgents(loaded.Source, coordinate)
+	if err != nil {
+		t.Fatal(err)
+	}
+	plan, err := agenttopology.NewSourceSetPlan([]agenttopology.SourceCoordinate{coordinate}, desired)
 	if err != nil {
 		t.Fatal(err)
 	}
 	capability := owner.ports.contexts.capability
-	if _, err := capability.InstallCompleteSourceSet(ctx, agenttopology.SourceSetCommitRequest{OperationID: uuid.NewString(), Plan: plan}); err != nil {
+	current, present, err := capability.CurrentSourceSet(ctx)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if present {
+		if current.Revision != plan.Revision {
+			t.Fatal("native live fixture requires its exact retained complete source set")
+		}
+	} else if _, err := capability.InstallCompleteSourceSet(ctx, agenttopology.SourceSetCommitRequest{OperationID: uuid.NewString(), Plan: plan}); err != nil {
 		t.Fatal(err)
 	}
 	grant, err := capability.IssueGenerationGrant(ctx, startupownership.GrantRequest{BundleHash: loaded.SourceArtifactFact.BundleHash(),
@@ -130,6 +231,22 @@ func nodeReplySourceRuntime(t *testing.T, ctx context.Context, selected any, own
 	}
 	if err := rt.InstallStartupGrant(grant); err != nil {
 		t.Fatal(err)
+	}
+	for _, observe := range observeGrant {
+		evidence, err := grant.Evidence()
+		if err != nil {
+			t.Fatal(err)
+		}
+		observe(evidence)
+	}
+	if live {
+		ctx = authoractivity.WithScope(ctx, authoractivity.BundleScope(runForkTestRuntimeInstanceID, loaded.SourceArtifactFact.BundleHash()))
+		err := rt.Start(ctx)
+		return rt, func() {
+			if err := rt.Shutdown(); err != nil {
+				t.Error(err)
+			}
+		}, err
 	}
 	if _, err := grant.MarkProbesSettled(ctx, nil); err != nil {
 		t.Fatal(err)
@@ -162,7 +279,107 @@ func nodeReplySourceRuntime(t *testing.T, ctx context.Context, selected any, own
 	}
 	rt.Pipeline.InstallFanOutWorkNotifier(serving)
 	t.Cleanup(serving.Close)
-	return rt, serving.Close
+	return rt, serving.Close, nil
+}
+
+func liveForkRuntimeFixture(t *testing.T, ctx context.Context, selected any, owner SelectedContractExecutionOwner, loaded LoadedSelectedContractSource, sourceRunID string, posture executionposture.Posture, agents ...SelectedContractAgentRuntimeOptions) (*rootruntime.Runtime, *rootruntime.RuntimeContextManager) {
+	t.Helper()
+	ctx = originalSelectedFixtureContext(t, ctx, selected.(startupownership.Store))
+	availability, err := owner.ports.fork.LoadRunBundleAvailability(ctx, sourceRunID)
+	if err != nil || !availability.Available() {
+		t.Fatalf("read retained native source: availability=%+v err=%v", availability, err)
+	}
+	sourceHash := availability.BundleHash
+	controlCtx := authoractivity.WithScope(ctx, authoractivity.BundleScope(runForkTestRuntimeInstanceID, sourceHash))
+	if availability.Status != "paused" {
+		outcome, err := selected.(runcontrol.Store).PauseRunControlOutcome(controlCtx, runcontrol.TransitionRequest{
+			RunID: sourceRunID, Reason: "retained fork source", ControlledBy: "native fixture", Now: time.Now().UTC(),
+		})
+		if err != nil || !outcome.Acknowledged || outcome.State.Status != "paused" {
+			t.Fatalf("park source before ordinary runtime recovery: outcome=%+v err=%v", outcome, err)
+		}
+	}
+	rt, contexts := ordinaryForkRuntimeFixture(t, ctx, selected, owner, loaded, posture, agents...)
+	availability, err = owner.ports.fork.LoadRunBundleAvailability(ctx, sourceRunID)
+	if err != nil || !availability.Available() || availability.BundleHash != sourceHash || availability.Status != "paused" {
+		t.Fatalf("read retained native source: availability=%+v err=%v", availability, err)
+	}
+	return rt, contexts
+}
+
+func ordinaryForkRuntimeFixture(t *testing.T, ctx context.Context, selected any, owner SelectedContractExecutionOwner, loaded LoadedSelectedContractSource, posture executionposture.Posture, agents ...SelectedContractAgentRuntimeOptions) (*rootruntime.Runtime, *rootruntime.RuntimeContextManager) {
+	t.Helper()
+	ctx = originalSelectedFixtureContext(t, ctx, selected.(startupownership.Store))
+	bundle, found := semanticview.Bundle(loaded.Source)
+	if !found || bundle.SourceArtifact == nil {
+		t.Fatal("ordinary fork fixture requires its retained source artifact")
+	}
+	storetest.RequireBundleDataCatalog(t, correlation.WithSourceArtifactFact(ctx, loaded.SourceArtifactFact), selected.(storetest.DurableDataCatalogStore), bundle)
+	var options SelectedContractAgentRuntimeOptions
+	if len(agents) > 1 {
+		t.Fatal("ordinary runtime fixture accepts one exact agent configuration")
+	}
+	if len(agents) == 1 {
+		options = agents[0]
+	}
+	rt, _, err := nodeReplyRuntimeWithAgentOptions(t, ctx, selected, owner, loaded, posture, true, options)
+	if err != nil {
+		t.Fatal(err)
+	}
+	definition := rootruntime.BundleContext{
+		SourceArtifactFact: loaded.SourceArtifactFact, Source: loaded.Source,
+		Runtime: rt, WorkOwner: rt.WorkOccurrence(),
+	}
+	if bundle, ok := semanticview.Bundle(loaded.Source); ok && bundle.PackInventory != nil {
+		definition.PackInventoryDigest = bundle.PackInventory.Digest()
+		projection, err := packadmission.FromBundle(bundle)
+		if err != nil {
+			t.Fatal(err)
+		}
+		definition.ProviderTriggerGeneration = projection.ProviderTriggers.Generation()
+		definition.InstalledTriggerSubjects, err = projection.ProviderTriggers.InstalledCapabilitySubjects()
+		if err != nil {
+			t.Fatal(err)
+		}
+	}
+	contexts, err := rootruntime.NewRuntimeContextManager(owner.ports.fork, definition)
+	if err != nil {
+		t.Fatal(err)
+	}
+	use, lookup, err := contexts.AcquireBundleHash(ctx, loaded.SourceArtifactFact.BundleHash())
+	if err != nil || !lookup.Loaded() || use == nil {
+		t.Fatalf("acquire original live fixture: loaded=%t err=%v", lookup.Loaded(), err)
+	}
+	if err := use.Done(); err != nil {
+		t.Fatal(err)
+	}
+	return rt, contexts
+}
+
+func joinLiveForkFixtureClock(t *testing.T, ctx context.Context, rt *rootruntime.Runtime, selected any, sourceRunID, activationID string) genericschedule.Activation {
+	t.Helper()
+	wait, cancel := context.WithTimeout(ctx, 15*time.Second)
+	defer cancel()
+	availability, err := selected.(SelectedContractForkLifecycle).LoadRunBundleAvailability(wait, sourceRunID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	for {
+		clock, found, err := selected.(genericschedule.Store).LoadGenericScheduleActivation(wait, activationID)
+		if err != nil || !found || clock.Command.RunID != sourceRunID {
+			t.Fatalf("read original fixture clock: found=%t clock=%+v err=%v", found, clock, err)
+		}
+		if availability.BundleHash != rt.Options.SourceArtifactFact.BundleHash() || clock.Status == genericschedule.StatusFired {
+			// This is the setup publication boundary, not a drain: its paused
+			// source keeps the real deferred delivery for a later continue.
+			return clock
+		}
+		select {
+		case <-wait.Done():
+			t.Fatalf("ordinary fixture source publication did not settle: %+v err=%v", clock, wait.Err())
+		case <-time.After(10 * time.Millisecond):
+		}
+	}
 }
 
 func nestedDeadlineArm(t *testing.T, ctx context.Context, owner SelectedContractExecutionOwner, row replycontext.Record) joinruntime.Activation {
@@ -239,7 +456,7 @@ func proveSelectedNestedDeadlines(t *testing.T, refusals bool, restartVariant st
 			at := runlifecycle.CanonicalTimestamp(time.Now().UTC().Add(-2 * time.Hour))
 			bundle, _ := semanticview.Bundle(loaded.Source)
 			ctx = originalSelectedFixtureContext(t, ctx, any(selected).(startupownership.Store))
-			storetest.RequireRun(t, ctx, selected.(storetest.RunFixtureStore), storetest.RunFixture{Origin: storetest.ScenarioSetupOrigin(), RunID: runID,
+			storetest.RequireRun(t, ctx, selected.(storetest.RunFixtureStore), storetest.RunFixture{Origin: runlifecycle.DeploymentRunOrigin(), LiveScope: runlifecycle.LiveRunScope{FlowPath: "."}, RunID: runID,
 				BundleHash: loaded.SourceArtifactFact.BundleHash(), Artifact: bundle.SourceArtifact, StartedAt: at.Add(-time.Minute)})
 			rt, stopSourceServing := nestedDeadlineSourceRuntime(t, ctx, selected, owner, loaded)
 			ctx = worklifetime.WithOccurrence(ctx, rt.WorkOccurrence())
@@ -344,8 +561,14 @@ func proveSelectedNestedDeadlines(t *testing.T, refusals bool, restartVariant st
 			resumeChild := func() { releaseChild.Do(func() { close(childHold.release) }) }
 			t.Cleanup(resumeChild)
 			options.AgentManagerOptions.TestLifecycleProbe = childHold
+			operation := &runfork.ForkOperationRequest{OperationID: uuid.NewString(), Actor: "nested-deadline-proof", IdempotencyKey: uuid.NewString(),
+				TransportHash: "nested-deadline-proof", SourceRunID: runID, ForkEventID: cut, TargetBundleHash: loaded.SourceArtifactFact.BundleHash(), ContractSelection: selection, AllowSourceFreeze: true}
+			var initialOperation *runfork.ForkOperationRequest
+			if restartVariant != "context_only" {
+				initialOperation = operation
+			}
 			prepared, err := owner.Prepare(ctx, SelectedContractExecutionRequest{SourceRunID: runID, At: cut, AllowSourceFreeze: true,
-				SourceLoader: loader, ContractSelection: selection, AgentRuntime: options})
+				SourceLoader: loader, ContractSelection: selection, AgentRuntime: options, ForkOperation: initialOperation})
 			if err != nil {
 				t.Fatal(err)
 			}
@@ -354,20 +577,11 @@ func proveSelectedNestedDeadlines(t *testing.T, refusals bool, restartVariant st
 					t.Error(err)
 				}
 			}()
-			request, err := prepared.MaterializationRequest()
-			if err != nil {
-				t.Fatal(err)
-			}
-			operation := &runfork.ForkOperationRequest{OperationID: uuid.NewString(), Actor: "nested-deadline-proof", IdempotencyKey: uuid.NewString(),
-				TransportHash: "nested-deadline-proof", SourceRunID: runID, ForkEventID: cut, TargetBundleHash: loaded.SourceArtifactFact.BundleHash(), ContractSelection: selection, AllowSourceFreeze: true}
-			if restartVariant != "context_only" {
-				request.ForkOperation = operation
-			}
 			var immediateRows []replycontext.Record
 			immediateArms := map[string]joinruntime.Activation{}
-			staged, err := owner.ports.fork.MaterializeRunForkForSelectedContractExecution(ctx, request)
-			if err != nil {
-				t.Fatal(err)
+			staged, acknowledged, err := owner.materializePrepared(prepared.operation.PreparationContext(), prepared)
+			if err != nil || !acknowledged {
+				t.Fatalf("native prepared deadline child: %+v acknowledged=%t err=%v", staged, acknowledged, err)
 			}
 			if restartVariant == "context_only" {
 				immediateRows, err = storetest.ReadReplyContextRecords(ctx, selected, staged.ForkRunID)
@@ -390,25 +604,24 @@ func proveSelectedNestedDeadlines(t *testing.T, refusals bool, restartVariant st
 				}
 			}
 			if restartVariant == "" {
-				activated, err := ExecuteSelectedContractRunFork(ctx, SelectedContractExecutionRequest{SourceRunID: runID, At: cut,
-					AllowSourceFreeze: true, Owner: owner, SourceLoader: loader, ContractSelection: selection, AgentRuntime: options, ForkOperation: operation})
-				if err != nil || !activated.Activation.Activated || activated.Materialization.ForkRunID != staged.ForkRunID {
-					t.Fatalf("activate exact selected child: %+v error=%v", activated, err)
-				}
+				attachment := q1AttachBranchPointComponent(t, prepared, staged)
+				attachment.serveSelectedControls(t)
 			} else {
 				if err := prepared.Close(); err != nil {
 					t.Fatal(err)
 				}
 				stopSourceServing()
-				selected, owner, ctx = restartSelectedDeadlineChild(t, ctx, rt, selected, owner, reopen, loaded, staged, childRows, operation, childHold, servingContexts, runID)
+				selected, owner, ctx = restartSelectedDeadlineChild(t, ctx, rt, selected, owner, reopen, loaded, staged, childRows, operation, childHold, servingContexts, runID, resumeChild)
 			}
 			wait, cancelWait := context.WithTimeout(ctx, 20*time.Second)
 			defer cancelWait()
-			var servingCtx context.Context
-			select {
-			case servingCtx = <-servingContexts:
-			case <-wait.Done():
-				t.Fatal("selected serving admission was not observed")
+			servingCtx := ctx
+			if restartVariant == "" {
+				select {
+				case servingCtx = <-servingContexts:
+				case <-wait.Done():
+					t.Fatal("selected serving admission was not observed")
+				}
 			}
 			// A context-only start cut owes the retained deadline arms, not a
 			// fabricated inner delivery. The other cut must claim its real input.
@@ -435,6 +648,9 @@ func proveSelectedNestedDeadlines(t *testing.T, refusals bool, restartVariant st
 					case <-time.After(10 * time.Millisecond):
 					}
 				}
+			}
+			if restartVariant != "" {
+				resumeChild()
 			}
 			for {
 				closed := 0

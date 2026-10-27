@@ -93,7 +93,7 @@ func TestIssue642FreshSelectedNoticeReadbackAcknowledgmentBothStores(t *testing.
 				t.Fatal("fresh notice requires its exact process owner")
 			}
 			baseline := process.ActiveCount()
-			result, err := ExecuteSelectedContractRunFork(ctx, SelectedContractExecutionRequest{
+			result, err := q1ExecuteSelectedPhaseComponent(t, ctx, SelectedContractExecutionRequest{
 				SourceRunID: source, At: initial, AllowSourceFreeze: true, Owner: owner, SourceLoader: loader,
 				ContractSelection: runforkadmission.SelectedContractSelection(loaded.Source),
 				AgentRuntime: SelectedContractAgentRuntimeOptions{
@@ -102,8 +102,8 @@ func TestIssue642FreshSelectedNoticeReadbackAcknowledgmentBothStores(t *testing.
 						Session: config.LLMSessionConfig{LockTTL: time.Second, RotateAfterTurns: 40, RotateOnParseFailures: 3}}},
 				},
 			})
-			if err != nil || !result.Activation.Activated {
-				t.Fatalf("fresh notice activation: %+v error=%v", result, err)
+			if err != nil || result.SelectedContractExecutionAdmission == nil || result.Materialization.ForkRunID == "" {
+				t.Fatalf("fresh notice selected attachment: %+v error=%v", result, err)
 			}
 			wait, cancel := context.WithTimeout(ctx, 20*time.Second)
 			defer cancel()

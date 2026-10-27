@@ -12,6 +12,7 @@ import (
 	runtimecorrelation "github.com/division-sh/swarm/internal/runtime/correlation"
 	"github.com/division-sh/swarm/internal/runtime/runfork"
 	runtimerunlifecycle "github.com/division-sh/swarm/internal/runtime/runlifecycle"
+	"github.com/division-sh/swarm/internal/runtime/scenarioexecution"
 	privateactivity "github.com/division-sh/swarm/internal/store/internal/backend/authoractivity"
 	"github.com/division-sh/swarm/internal/store/internal/backend/mutationprotocol"
 	"github.com/division-sh/swarm/internal/store/internal/backend/runlifecycle/sourceadmission"
@@ -288,15 +289,17 @@ func (s *RunLifecycleSQLiteOwner) RequireActiveRunSource(ctx context.Context, ru
 }
 
 func (s *RunLifecyclePostgresOwner) CreateRun(ctx context.Context, request runtimerunlifecycle.CreateRequest) (runtimerunlifecycle.MutationDisposition, error) {
-	return runPostgresLifecycleOperation(ctx, s, func(ctx context.Context, mutation postgresRunLifecycleMutation) (runtimerunlifecycle.MutationDisposition, error) {
+	value, err := runPostgresLifecycleOperation(ctx, s, func(ctx context.Context, mutation postgresRunLifecycleMutation) (runtimerunlifecycle.MutationDisposition, error) {
 		return mutation.Create(ctx, request)
 	})
+	return value, classifyLiveScopeClaimFailure(ctx, s.backend, request.LiveScope, request.RunID, err)
 }
 
 func (s *RunLifecycleSQLiteOwner) CreateRun(ctx context.Context, request runtimerunlifecycle.CreateRequest) (runtimerunlifecycle.MutationDisposition, error) {
-	return runSQLiteLifecycleOperation(ctx, s, func(ctx context.Context, mutation sqliteRunLifecycleMutation) (runtimerunlifecycle.MutationDisposition, error) {
+	value, err := runSQLiteLifecycleOperation(ctx, s, func(ctx context.Context, mutation sqliteRunLifecycleMutation) (runtimerunlifecycle.MutationDisposition, error) {
 		return mutation.Create(ctx, request)
 	})
+	return value, classifyLiveScopeClaimFailure(ctx, s.backend, request.LiveScope, request.RunID, err)
 }
 
 func (s *RunLifecyclePostgresOwner) ForkRunSource(ctx context.Context, request runtimerunlifecycle.ForkSourceRequest) (runtimerunlifecycle.Snapshot, runtimerunlifecycle.MutationDisposition, error) {
@@ -437,6 +440,7 @@ func (m postgresRunLifecycleMutation) Create(
 	}
 	bundleHash := request.Source.BundleHash()
 	origin := request.Origin
+	status := creationState(ctx, request)
 	var inserted bool
 	err := m.tx.QueryRowContext(ctx, `
 		INSERT INTO runs (
@@ -444,20 +448,21 @@ func (m postgresRunLifecycleMutation) Create(
 			trigger_event_id, trigger_event_type,
 			origin_service_id, origin_generation,
 			forked_from_run_id, forked_from_point_kind, forked_from_revision, forked_from_event_id,
-			started_at
+			started_at, flow_path
 		)
 		VALUES (
-			$1::uuid, 'running', $2, $3,
+			$1::uuid, $13, $2, $3,
 			NULLIF($4, '')::uuid, NULLIF($5, ''),
 			NULLIF($6, '')::uuid, NULLIF($7, 0),
 			NULLIF($8, '')::uuid, NULLIF($9, ''), NULLIF($10, 0), NULLIF($11, '')::uuid,
-			$12
+			$12, NULLIF($14, '')
 		)
 		ON CONFLICT (run_id) DO NOTHING
 		RETURNING TRUE
 	`, request.RunID, bundleHash, origin.Kind(),
 		origin.EventID(), origin.EventType(), origin.ServiceID(), origin.Generation(),
-		origin.SourceRunID(), origin.ForkPointKind(), origin.ForkRevision(), origin.SourceEventID(), request.StartedAt.UTC()).Scan(&inserted)
+		origin.SourceRunID(), origin.ForkPointKind(), origin.ForkRevision(), origin.SourceEventID(), request.StartedAt.UTC(),
+		string(status), request.LiveScope.FlowPath).Scan(&inserted)
 	if errors.Is(err, sql.ErrNoRows) {
 		return m.classifyCreateExisting(ctx, request)
 	}
@@ -492,25 +497,27 @@ func (m sqliteRunLifecycleMutation) Create(
 	}
 	bundleHash := request.Source.BundleHash()
 	origin := request.Origin
+	status := creationState(ctx, request)
 	result, err := m.tx.ExecContext(ctx, `
 		INSERT INTO runs (
 			run_id, status, bundle_hash, origin_kind,
 			trigger_event_id, trigger_event_type,
 			origin_service_id, origin_generation,
 			forked_from_run_id, forked_from_point_kind, forked_from_revision, forked_from_event_id,
-			started_at
+			started_at, flow_path
 		)
 		VALUES (
-			?, 'running', ?, ?,
+			?, ?, ?, ?,
 			NULLIF(?, ''), NULLIF(?, ''),
 			NULLIF(?, ''), NULLIF(?, 0),
 			NULLIF(?, ''), NULLIF(?, ''), NULLIF(?, 0), NULLIF(?, ''),
-			?
+			?, NULLIF(?, '')
 		)
 		ON CONFLICT (run_id) DO NOTHING
-	`, request.RunID, bundleHash, origin.Kind(),
+	`, request.RunID, string(status), bundleHash, origin.Kind(),
 		origin.EventID(), origin.EventType(), origin.ServiceID(), origin.Generation(),
-		origin.SourceRunID(), origin.ForkPointKind(), origin.ForkRevision(), origin.SourceEventID(), request.StartedAt.UTC())
+		origin.SourceRunID(), origin.ForkPointKind(), origin.ForkRevision(), origin.SourceEventID(), request.StartedAt.UTC(),
+		request.LiveScope.FlowPath)
 	if err != nil {
 		return "", fmt.Errorf("create SQLite run lifecycle: %w", err)
 	}
@@ -528,6 +535,16 @@ func (m sqliteRunLifecycleMutation) Create(
 		return "", err
 	}
 	return runtimerunlifecycle.MutationApplied, nil
+}
+
+func creationState(ctx context.Context, request runtimerunlifecycle.CreateRequest) runtimerunlifecycle.State {
+	if profile, admitted := scenarioexecution.AdmittedProfileFromContext(ctx); admitted && profile.EffectiveSourceIdentity().SourceArtifactFact().Matches(request.Source) {
+		return runtimerunlifecycle.StateRunning
+	}
+	if !request.LiveScope.Empty() {
+		return runtimerunlifecycle.StateLive
+	}
+	return runtimerunlifecycle.StateRunning
 }
 
 func (s *RunLifecyclePostgresOwner) InsertRunForkRunTx(
@@ -552,15 +569,20 @@ func (s *RunLifecyclePostgresOwner) InsertRunForkRunTx(
 			return err
 		}
 		startedAt = runtimerunlifecycle.CanonicalTimestamp(startedAt)
-		if _, err := tx.ExecContext(ctx, `
+		result, err := tx.ExecContext(ctx, `
 		INSERT INTO runs (
 			run_id, status, origin_kind, forked_from_run_id, forked_from_point_kind, forked_from_revision, forked_from_event_id,
-			event_count, started_at, bundle_hash
+			event_count, started_at, bundle_hash, flow_path
 		)
-		VALUES ($1::uuid, $2, $3, $4::uuid, $5, $6, NULLIF($7, '')::uuid, 0, $8, $9)
+		SELECT $1::uuid, $2, $3, $4::uuid, $5, $6, NULLIF($7, '')::uuid, 0, $8, $9, flow_path
+		FROM runs WHERE run_id=$4::uuid
 	`, forkRunID, string(runtimerunlifecycle.StatePaused), origin.Kind(), origin.SourceRunID(), origin.ForkPointKind(), origin.ForkRevision(), origin.SourceEventID(),
-			startedAt.UTC(), bundleHash); err != nil {
+			startedAt.UTC(), bundleHash)
+		if err != nil {
 			return fmt.Errorf("insert fork run lifecycle: %w", err)
+		}
+		if rows, err := result.RowsAffected(); err != nil || rows != 1 {
+			return errors.Join(fmt.Errorf("fork run creation requires exactly one source row; inserted %d", rows), err)
 		}
 		if err := mutationprotocol.InvalidateActiveRunSource(ctx, tx, forkRunID); err != nil {
 			return err
@@ -605,15 +627,20 @@ func (s *RunLifecycleSQLiteOwner) InsertRunForkRunTx(
 			return err
 		}
 		startedAt = runtimerunlifecycle.CanonicalTimestamp(startedAt)
-		if _, err := tx.ExecContext(ctx, `
+		result, err := tx.ExecContext(ctx, `
 		INSERT INTO runs (
 			run_id, status, origin_kind, forked_from_run_id, forked_from_point_kind, forked_from_revision, forked_from_event_id,
-			event_count, started_at, bundle_hash
+			event_count, started_at, bundle_hash, flow_path
 		)
-		VALUES (?, ?, ?, ?, ?, ?, NULLIF(?, ''), 0, ?, ?)
+		SELECT ?, ?, ?, ?, ?, ?, NULLIF(?, ''), 0, ?, ?, flow_path
+		FROM runs WHERE run_id=?
 	`, forkRunID, string(runtimerunlifecycle.StatePaused), origin.Kind(), origin.SourceRunID(), origin.ForkPointKind(), origin.ForkRevision(), origin.SourceEventID(),
-			startedAt.UTC(), bundleHash); err != nil {
+			startedAt.UTC(), bundleHash, sourceRunID)
+		if err != nil {
 			return fmt.Errorf("insert fork run lifecycle: %w", err)
+		}
+		if rows, err := result.RowsAffected(); err != nil || rows != 1 {
+			return errors.Join(fmt.Errorf("fork run creation requires exactly one source row; inserted %d", rows), err)
 		}
 		if err := mutationprotocol.InvalidateActiveRunSource(ctx, tx, forkRunID); err != nil {
 			return err
@@ -656,10 +683,10 @@ func (m postgresRunLifecycleMutation) TransitionActive(
 	if !current.State.Active() {
 		return "", &runtimerunlifecycle.RunNotActiveError{RunID: request.RunID, State: current.State}
 	}
-	if current.State == runtimerunlifecycle.StateRunning && request.State != runtimerunlifecycle.StatePaused {
+	if (current.State == runtimerunlifecycle.StateRunning || current.State == runtimerunlifecycle.StateLive) && request.State != runtimerunlifecycle.StatePaused {
 		return "", fmt.Errorf("invalid PostgreSQL run lifecycle transition %s -> %s", current.State, request.State)
 	}
-	if current.State == runtimerunlifecycle.StatePaused && request.State != runtimerunlifecycle.StateRunning {
+	if current.State == runtimerunlifecycle.StatePaused && request.State != runtimerunlifecycle.StateRunning && request.State != runtimerunlifecycle.StateLive {
 		return "", fmt.Errorf("invalid PostgreSQL run lifecycle transition %s -> %s", current.State, request.State)
 	}
 	result, err := transitionPostgresActiveRunStateTx(
@@ -709,10 +736,10 @@ func (m sqliteRunLifecycleMutation) TransitionActive(
 	if !current.State.Active() {
 		return "", &runtimerunlifecycle.RunNotActiveError{RunID: request.RunID, State: current.State}
 	}
-	if current.State == runtimerunlifecycle.StateRunning && request.State != runtimerunlifecycle.StatePaused {
+	if (current.State == runtimerunlifecycle.StateRunning || current.State == runtimerunlifecycle.StateLive) && request.State != runtimerunlifecycle.StatePaused {
 		return "", fmt.Errorf("invalid SQLite run lifecycle transition %s -> %s", current.State, request.State)
 	}
-	if current.State == runtimerunlifecycle.StatePaused && request.State != runtimerunlifecycle.StateRunning {
+	if current.State == runtimerunlifecycle.StatePaused && request.State != runtimerunlifecycle.StateRunning && request.State != runtimerunlifecycle.StateLive {
 		return "", fmt.Errorf("invalid SQLite run lifecycle transition %s -> %s", current.State, request.State)
 	}
 	result, err := transitionSQLiteActiveRunStateTx(
@@ -790,6 +817,9 @@ func (m postgresRunLifecycleMutation) classifyCreateExisting(
 	if err != nil {
 		return "", err
 	}
+	if err := requireCreateScope(ctx, m.tx, request); err != nil {
+		return "", err
+	}
 	return classifyCreateExisting(request, current)
 }
 
@@ -799,6 +829,9 @@ func (m sqliteRunLifecycleMutation) classifyCreateExisting(
 ) (runtimerunlifecycle.MutationDisposition, error) {
 	current, err := loadSQLiteRunLifecycleSnapshot(ctx, m.tx, request.RunID)
 	if err != nil {
+		return "", err
+	}
+	if err := requireCreateScope(ctx, m.tx, request); err != nil {
 		return "", err
 	}
 	return classifyCreateExisting(request, current)

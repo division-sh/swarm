@@ -6,6 +6,7 @@ import (
 	"testing"
 
 	"github.com/division-sh/swarm/internal/runtime/pipeline"
+	"github.com/division-sh/swarm/internal/runtime/runlifecycle"
 )
 
 func TestPublicationTerminalReceiverErrorPreservesTypedCause(t *testing.T) {
@@ -15,6 +16,14 @@ func TestPublicationTerminalReceiverErrorPreservesTypedCause(t *testing.T) {
 		mapError func(eventPublicationParams, error) error
 	}{{"event.publish", eventPublishPublishError}, {"run.start", runStartEventPublishError}} {
 		t.Run(mapError.name, func(t *testing.T) {
+			live := &runlifecycle.LiveRunConflictError{Scope: runlifecycle.LiveRunScope{FlowPath: "."}, LiveRunID: "current"}
+			var liveError *ApplicationError
+			if err := mapError.mapError(params, errors.Join(live, errors.New("publication cleanup"))); !errors.As(err, &liveError) || liveError.Code != RunFlowAlreadyLiveCode || liveError.Retryable {
+				t.Fatalf("typed live conflict was not permanent: %#v %v", liveError, err)
+			}
+			if details := liveError.Details.(map[string]any); details["live_run_id"] != live.LiveRunID || details["flow_path"] != "." {
+				t.Fatalf("live conflict lost its exact selector: %#v", details)
+			}
 			for _, tc := range []struct {
 				name     string
 				err      error
@@ -24,6 +33,7 @@ func TestPublicationTerminalReceiverErrorPreservesTypedCause(t *testing.T) {
 				{"wrapped", fmt.Errorf("planning: %w", &pipeline.TerminalReceiverError{FlowID: "child", Stage: "done"}), true},
 				{"identical text is not authority", errors.New((&pipeline.TerminalReceiverError{FlowID: "child", Stage: "done"}).Error()), false},
 				{"storage", errors.New("database unavailable"), false},
+				{"live conflict text is not authority", errors.New(live.Error()), false},
 				{"inactive", errors.New("receiver target owner is unavailable: lifecycle is not active"), false},
 			} {
 				t.Run(tc.name, func(t *testing.T) {

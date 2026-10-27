@@ -73,7 +73,8 @@ func newSelectedContractExecutionOwnerForTest(t testing.TB, selected *store.Post
 		TargetFailureRecorder: selected, RunOrigins: selected, StandingRestarts: selected,
 	}
 	roles := runtimemanager.PersistenceRoles{
-		LifecycleState: selected, LifecycleEffects: selected, LifecycleDiagnostics: selected, EffectsRecovery: selected,
+		LifecycleCensus: selected,
+		LifecycleState:  selected, LifecycleEffects: selected, LifecycleDiagnostics: selected, EffectsRecovery: selected,
 		DeliveryQuiescence: selected, EventExistence: selected, DirectiveOperations: selected, DirectiveTargets: selected,
 		StandingRestarts: selected,
 	}
@@ -113,7 +114,8 @@ func newSelectedContractSQLiteExecutionOwnerForTest(t testing.TB, selected *stor
 		TargetFailureRecorder: selected, RunOrigins: selected, StandingRestarts: selected,
 	}
 	roles := runtimemanager.PersistenceRoles{
-		LifecycleState: selected, LifecycleEffects: selected, LifecycleDiagnostics: selected, EffectsRecovery: selected,
+		LifecycleCensus: selected,
+		LifecycleState:  selected, LifecycleEffects: selected, LifecycleDiagnostics: selected, EffectsRecovery: selected,
 		DeliveryQuiescence: selected, EventExistence: selected, DirectiveOperations: selected, DirectiveTargets: selected,
 		StandingRestarts: selected,
 	}

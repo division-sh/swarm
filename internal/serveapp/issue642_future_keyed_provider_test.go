@@ -42,7 +42,7 @@ func TestIssue642FutureMintedProviderStartsAfterEmptyCatalogBothStores(t *testin
 func issue642FutureProviderContinuesFromEmptyCatalog(t *testing.T, backend, root string, minted bool) {
 	t.Helper()
 	observed := issue642ObserveKeyedProviderPreparation(t)
-	_, start := issue2564ServeHarness(t, backend, root, true)
+	_, start := issue2564LiveServeHarness(t, backend, root, "")
 	process, rt := start()
 	t.Cleanup(func() {
 		if code := process.stop(); code != 0 {
@@ -60,6 +60,7 @@ func issue642FutureProviderContinuesFromEmptyCatalog(t *testing.T, backend, root
 	if err := json.Unmarshal(response.Result, &seed); err != nil {
 		t.Fatal(err)
 	}
+	requireIssue2564LiveRootMode(t, rt, seed.RunID, seed.EventID)
 	issue642WaitKeyedProviderCompletion(t, rt, seed.RunID)
 	rt.waitDeliveries(t, seed.RunID)
 	issue2564H2CompletionWaitReceipt(t, rt, seed.RunID, seed.EventID)
@@ -68,6 +69,7 @@ func issue642FutureProviderContinuesFromEmptyCatalog(t *testing.T, backend, root
 	if minted {
 		sourceKey = issue642RequireMintedProviderIdentity(t, rt, seed.RunID)
 	}
+	pauseIssue2564SettledSource(t, rt, seed.RunID)
 	sourceBefore, err := storetest.ReadSelectedForkSourceDomain(t.Context(), rt.selected, seed.RunID)
 	if err != nil {
 		t.Fatal(err)
@@ -116,7 +118,7 @@ func issue642WaitFutureProviderRetirement(t *testing.T, rt issue2564ServedFixtur
 			t.Fatal(err)
 		}
 		work := rt.Runtime.Options.ProcessWorkOwner.ActiveCount()
-		if last.State == "closed" && last.RunStatus == "completed" && last.Occurrences == 1 && work == baseline {
+		if last.State == "closed" && last.RunStatus == "live" && last.Occurrences == 1 && work == baseline {
 			t.Logf("future_provider_terminal_join run=%s execution=%s process_work=%d baseline=%d", runID, last.State, work, baseline)
 			return
 		}
@@ -162,6 +164,9 @@ func issue642ObserveKeyedProviderPreparation(t *testing.T) <-chan runforkexecuti
 		execute := executor.ExecuteSelectedContractRunFork
 		executor.ExecuteSelectedContractRunFork = func(ctx context.Context, request runforkexecution.SelectedContractExecutionRequest) (runforkexecution.SelectedContractExecutionResult, error) {
 			result, err := execute(ctx, request)
+			if err != nil {
+				t.Logf("keyed-provider selected owner refused: %v", err)
+			}
 			if err == nil && result.AgentRuntimeMaterialization != nil {
 				observed <- *result.AgentRuntimeMaterialization
 			}
@@ -181,15 +186,16 @@ func issue642WaitKeyedProviderCompletion(t *testing.T, rt issue2564ServedFixture
 		if err != nil {
 			t.Fatal(err)
 		}
-		if header.Status == "completed" && header.EndedAt != nil && header.Failure == nil {
-			return
-		}
 		summary, err := rt.selected.SummarizeRun(t.Context(), runID)
 		if err != nil {
 			t.Fatal(err)
 		}
-		if header.Status != "running" || header.Failure != nil || summary.DeadLetter != 0 || summary.Canceled != 0 {
+		if header.Status != "live" || header.EndedAt != nil || header.Failure != nil || summary.DeadLetter != 0 || summary.Canceled != 0 {
 			t.Fatalf("keyed-provider run cannot complete: header=%+v deliveries=%+v\n%s", header, summary, issue2564H2CompletionReceipt(t, rt, runID))
+		}
+		if summary.Pending == 0 && summary.InProgress == 0 && summary.RetryScheduled == 0 {
+			waitIssue2564LiveRunSettlement(t, rt, runID)
+			return
 		}
 		time.Sleep(25 * time.Millisecond)
 	}

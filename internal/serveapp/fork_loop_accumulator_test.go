@@ -30,7 +30,7 @@ func TestServedForkAccumulatorRetainedGenerationBothStores(t *testing.T) {
 				t.Cleanup(func() { projectRuntimePersistenceForServe = previous })
 				root := canonicalrouting.CopyForkLoopAccumulator(t, clearOnAdmit)
 				publication := newExactOriginPublicationProbe(t)
-				rt := startServedTestSetupEntitiesProofRuntimeFromSource(t, backend, root)
+				rt := startServedLiveFlowProofRuntimeFromSource(t, backend, root)
 				started := requireServedEventPublishRPCResult(t, rt.Endpoint, map[string]any{
 					"event_name": "work.requested", "bundle_hash": rt.BundleHash,
 					"payload": map[string]any{"token": "loop-notice-proof"}, "idempotency_key": "accumulator-start",

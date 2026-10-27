@@ -373,9 +373,6 @@ func (s *processLifecycleSupervisor) reconstructResetContexts(ctx context.Contex
 		if err := candidate.BindSelectedProcess(ctx, s.selectedProcess, s.processCapability); err != nil {
 			return err
 		}
-		if _, err := candidate.RecoverSelectedForkContexts(ctx, effects.NewRecoveryRequest(time.Now().UTC(), candidates[0].runtime.ExecutionPosture), s.selectedRecoveryEnvironment); err != nil {
-			return err
-		}
 	}
 	execution, err := s.resetBuildExecution(candidates[0])
 	if err != nil {
@@ -407,6 +404,21 @@ func (s *processLifecycleSupervisor) reconstructResetContexts(ctx context.Contex
 	}
 	if err := release(); err != nil {
 		return err
+	}
+	if s.selectedResetPredecessor != nil {
+		environment := s.selectedRecoveryEnvironment
+		// Reset already holds operationMu and rebuilt the identical source set.
+		// Only its now-admitted ordinary occurrences can serve a handoff.
+		environment.AcquireLiveRuntime = func(ctx context.Context, bundleHash string) (*runtime.RuntimeContextUse, error) {
+			use, lookup, err := s.runtimeContexts.AcquireBundleHash(ctx, bundleHash)
+			if err == nil && !lookup.Loaded() {
+				err = fmt.Errorf("reset handoff target is not loaded: %s", lookup.Cause)
+			}
+			return use, err
+		}
+		if _, err := s.selected.RecoverSelectedForkContexts(ctx, effects.NewRecoveryRequest(time.Now().UTC(), candidates[0].runtime.ExecutionPosture), environment); err != nil {
+			return err
+		}
 	}
 	s.mu.Lock()
 	s.resetting = false

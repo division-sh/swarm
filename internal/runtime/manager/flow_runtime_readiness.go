@@ -150,6 +150,10 @@ func (am *AgentManager) reconcileDynamicFlowRuntimeReadinessOnce(
 	if err != nil {
 		return err
 	}
+	records, selectedRootReadiness, err := am.flowReadinessOwnedAgentRecords(plan, source, records)
+	if err != nil {
+		return err
+	}
 	if err := verifyDynamicFlowAgentExpectations(records, plan.Agents); err != nil {
 		return fmt.Errorf("dynamic flow runtime readiness %s: %w", readiness.InstancePath, err)
 	}
@@ -169,7 +173,7 @@ func (am *AgentManager) reconcileDynamicFlowRuntimeReadinessOnce(
 		if err != nil {
 			return fmt.Errorf("load standing flow agents for %s: %w", readiness.InstancePath, err)
 		}
-		if err := am.reconcileDynamicFlowAgentSet(ctx, source, flowIdentity, records, persistedAgents, topologyAuthority, false); err != nil {
+		if err := am.reconcileDynamicFlowAgentSet(ctx, source, flowIdentity, records, persistedAgents, topologyAuthority, false, selectedRootReadiness); err != nil {
 			return fmt.Errorf("prepare standing flow agents for %s: %w", readiness.InstancePath, err)
 		}
 		if am.lifecycle.phaseSnapshot() != runtimeLifecycleStopped {
@@ -262,11 +266,20 @@ func (am *AgentManager) reconcileDynamicFlowRuntimeReadinessOnce(
 		if err != nil {
 			return fmt.Errorf("load dynamic flow agents for %s: %w", readiness.InstancePath, err)
 		}
-		if err := am.reconcileDynamicFlowAgentSet(ctx, source, flowIdentity, records, persistedAgents, topologyAuthority, true); err != nil {
+		if err := am.reconcileDynamicFlowAgentSet(ctx, source, flowIdentity, records, persistedAgents, topologyAuthority, true, selectedRootReadiness); err != nil {
 			return fmt.Errorf("reconcile dynamic flow agent set for %s: %w", readiness.InstancePath, err)
 		}
 	}
-	if err := am.verifyDynamicFlowAgents(ctx, flowIdentity, records, topologyAuthority); err != nil {
+	if err := am.verifyDynamicFlowAgents(ctx, flowIdentity, records, topologyAuthority, selectedRootReadiness); err != nil {
+		if am.cleanReadinessShutdownReadCancellation(ctx, err) {
+			cleanupCtx, cancel := context.WithTimeout(context.WithoutCancel(ctx), dynamicFlowRuntimeReadinessCleanupTimeout)
+			defer cancel()
+			if cleanupErr := am.settleDynamicFlowActiveAttempt(cleanupCtx, key, active, retirement, flowActivationFailedRetirement); cleanupErr != nil {
+				return errors.Join(err, cleanupErr)
+			}
+			activationAccepted = true
+			return &readinessShutdownCancellation{cause: err, key: key, ordinal: admission.attemptOrdinal, planHash: admission.planHash}
+		}
 		return fmt.Errorf("verify dynamic flow agents for %s: %w", readiness.InstancePath, err)
 	}
 	if eligible, err := advancePending(runtimepipeline.FlowAttachmentPlanned); err != nil {

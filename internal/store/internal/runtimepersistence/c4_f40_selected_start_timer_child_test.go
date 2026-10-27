@@ -10,12 +10,15 @@ import (
 	"time"
 
 	"github.com/division-sh/swarm/internal/config"
+	"github.com/division-sh/swarm/internal/runtime/authoractivity"
 	"github.com/division-sh/swarm/internal/runtime/bus"
 	"github.com/division-sh/swarm/internal/runtime/core/worklifetime"
+	"github.com/division-sh/swarm/internal/runtime/correlation"
 	"github.com/division-sh/swarm/internal/runtime/effects"
 	"github.com/division-sh/swarm/internal/runtime/executionposture"
 	llmselection "github.com/division-sh/swarm/internal/runtime/llm/selection"
 	"github.com/division-sh/swarm/internal/runtime/pipeline"
+	"github.com/division-sh/swarm/internal/runtime/runcontrol"
 	"github.com/division-sh/swarm/internal/runtime/runfork"
 	"github.com/division-sh/swarm/internal/runtime/runforkexecution"
 	"github.com/division-sh/swarm/internal/runtime/runlifecycle"
@@ -37,6 +40,12 @@ func TestC4F40SelectedStartTimerChildBothStores(t *testing.T) {
 				t.Fatalf("real timer-bearing deployment creation: %+v err=%v", created, err)
 			}
 			sourceRun, bundleHash := creation.RunCreation.RunID, creation.RunCreation.BundleHash
+			paused, err := selected.(runcontrol.Store).PauseRunControlOutcome(ctx, runcontrol.TransitionRequest{
+				RunID: sourceRun, Reason: "C4 retained source", ControlledBy: "native timer fixture", Now: time.Now().UTC(),
+			})
+			if err != nil || !paused.Acknowledged || paused.State.Status != "paused" {
+				t.Fatalf("park exact C4 source before capturing its admitted plan: %+v err=%v", paused, err)
+			}
 			sourcePlan := c4RequireExclusiveStart(t, ctx, selected, sourceRun, bundleHash, "")
 			c4RequireRevisionCount(t, ctx, selected, sourceRun, 1)
 			if len(sourcePlan.WorkflowTimers) != 1 {
@@ -117,6 +126,23 @@ func TestC4F40SelectedStartTimerChildBothStores(t *testing.T) {
 					Config: &config.Config{LLM: config.LLMConfig{Backend: llmselection.BackendAnthropic}},
 				},
 			}
+			loaded, err := executionRequest.SourceLoader.LoadRunForkSelectedContractSourceForRequest(ctx, runforkexecution.SelectedContractSourceLoadRequest{
+				SourceRunID: sourceRun, Selection: selection, BundleHash: bundleHash,
+			})
+			if err != nil {
+				t.Fatal(err)
+			}
+			if loaded.Cleanup != nil {
+				t.Cleanup(func() {
+					if err := loaded.Cleanup(); err != nil {
+						t.Error(err)
+					}
+				})
+			}
+			ordinary, contexts := c4LiveTimerRuntime(t, ctx, selected, loaded, capability)
+			executionRequest.LiveRuntime, executionRequest.LiveContexts = ordinary, contexts
+			executionRequest.LiveRuns = selected.(runlifecycle.LiveRunReader)
+			preparationBaseline := work.process.ActiveCount()
 			prepared, err := owner.Prepare(ctx, executionRequest)
 			if err != nil {
 				t.Fatalf("compose exact selected start preparation: %v", err)
@@ -253,8 +279,8 @@ func TestC4F40SelectedStartTimerChildBothStores(t *testing.T) {
 				requireChildTimer()
 				requireSourceUnchanged()
 			}
-			if err := prepared.Close(); err != nil || work.process.ActiveCount() != baseline {
-				t.Fatalf("staged preparation did not release only its own work: leases=%d baseline=%d err=%v", work.process.ActiveCount(), baseline, err)
+			if err := prepared.Close(); err != nil || work.process.ActiveCount() != preparationBaseline {
+				t.Fatalf("staged preparation did not release only its own work: leases=%d baseline=%d err=%v", work.process.ActiveCount(), preparationBaseline, err)
 			}
 			operations := selected.(interface {
 				LoadForkOperation(context.Context, string, string, string) (runfork.ForkOperationRecord, bool, error)
@@ -267,7 +293,15 @@ func TestC4F40SelectedStartTimerChildBothStores(t *testing.T) {
 				t.Fatalf("native retry lost the durable exact-start request: %+v found=%t err=%v", materializedOperation, found, err)
 			}
 
-			activated, err := runforkexecution.ExecuteSelectedContractRunFork(ctx, executionRequest)
+			use, lookup, err := contexts.AcquireBundleHash(ctx, bundleHash)
+			if err != nil || !lookup.Loaded() || use == nil {
+				t.Fatalf("acquire the exact ordinary caller for timer handoff: loaded=%t err=%v", lookup.Loaded(), err)
+			}
+			t.Cleanup(func() { _ = use.Done() })
+			caller := correlation.WithSourceArtifactFact(use.WorkContext(), use.Context.SourceArtifactFact)
+			caller = authoractivity.WithScope(caller, authoractivity.BundleScope(ordinary.Options.RuntimeInstanceID, bundleHash))
+			activated, err := runforkexecution.ExecuteSelectedContractRunFork(caller, executionRequest)
+			err = errors.Join(err, use.Done())
 			if err != nil || !activated.Activation.Activated || activated.Materialization.ForkRunID != staged.ForkRunID ||
 				activated.Activation.ForkPoint != sourcePlan.ForkPoint || activated.ExecutedEventCount != 0 ||
 				activated.ForkLocalRuntimeContainer == nil || activated.ForkLocalRuntimeContainer.RuntimeExecutionID == "" ||
@@ -282,16 +316,19 @@ func TestC4F40SelectedStartTimerChildBothStores(t *testing.T) {
 				t.Fatalf("native activation lost exact typed-start completion: %+v found=%t err=%v", activatedOperation, found, err)
 			}
 			pending, err := ReadSelectedExecutionStorageForTest(ctx, selected, staged.ForkRunID)
-			if err != nil || pending.State != "running" || pending.RunStatus != runfork.RunForkActivatedStatus || pending.Occurrences != 1 || work.process.ActiveCount() <= baseline {
-				t.Fatalf("timer child lacks current retained owner: %+v leases=%d baseline=%d err=%v", pending, work.process.ActiveCount(), baseline, err)
+			if err != nil || pending.State != "closed" || pending.RunStatus != string(runlifecycle.StateLive) || pending.Occurrences != 1 || work.process.ActiveCount() <= baseline {
+				t.Fatalf("timer child lacks its actual live handoff and retired selected owner: %+v leases=%d baseline=%d err=%v", pending, work.process.ActiveCount(), baseline, err)
 			}
 			if err := capability.ProveCurrent(ctx); err != nil {
 				t.Fatal(err)
 			}
 			requireChildTimer()
 			requireSourceUnchanged()
-			if err := owner.RetireSelectedContexts(context.Background()); err != nil || work.process.ActiveCount() != baseline {
-				t.Fatalf("pending timer owner did not retire/join locally: leases=%d baseline=%d err=%v", work.process.ActiveCount(), baseline, err)
+			if err := owner.RetireSelectedContexts(context.Background()); err != nil {
+				t.Fatalf("selected timer owner did not retire/join locally: %v", err)
+			}
+			if err := ordinary.Shutdown(); err != nil || work.process.ActiveCount() != baseline {
+				t.Fatalf("ordinary timer owner did not retire/join locally: leases=%d baseline=%d err=%v", work.process.ActiveCount(), baseline, err)
 			}
 			if next, err := owner.Prepare(ctx, executionRequest); next != nil || !errors.Is(err, worklifetime.ErrRetired) {
 				if next != nil {

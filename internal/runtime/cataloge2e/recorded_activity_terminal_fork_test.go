@@ -60,7 +60,7 @@ func proveCopiedActivityTerminalHistory(t *testing.T, h *runtimeHarness, selecte
 	}
 	operation := catalogStagedForkOperation(t, ctx, selected, selection, sourceRun, cut)
 	staged := stageCatalogSelectedContractFork(t, ctx, selected, owner, loader, selection, options, sourceRun, cut, operation)
-	executed, err := runforkexecution.ExecuteSelectedContractRunFork(ctx, runforkexecution.SelectedContractExecutionRequest{
+	executed, err := executeCatalogLiveFork(t, h, ctx, runforkexecution.SelectedContractExecutionRequest{
 		SourceRunID: sourceRun, At: cut, ForkOperation: &operation, AllowSourceFreeze: true, Owner: owner, SourceLoader: loader, ContractSelection: selection, AgentRuntime: options,
 	})
 	if err != nil || !executed.Activation.Activated || executed.Materialization.ForkRunID != staged.ForkRunID {
@@ -88,7 +88,7 @@ func proveCopiedActivityTerminalHistory(t *testing.T, h *runtimeHarness, selecte
 		}
 		if found && pending == 0 {
 			lineage, isSelected := cutPublished.Event.Event().SelectedForkLineage()
-			if !isSelected || lineage.SourceRunID() != sourceRun || lineage.SourceEventID() != cut || string(run.State) != "running" {
+			if !isSelected || lineage.SourceRunID() != sourceRun || lineage.SourceEventID() != cut || string(run.State) != "live" {
 				t.Fatalf("terminal-cut accounting changed source lineage or invented root completion: event=%+v run=%+v", cutPublished, run)
 			}
 			// Zero current handoffs can precede creation of the pending inputs'

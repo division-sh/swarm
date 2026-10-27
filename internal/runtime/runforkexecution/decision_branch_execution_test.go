@@ -94,7 +94,7 @@ func TestIssue642SourceAndForkDecideOwnPendingEffectsBothStores(t *testing.T) {
 			}
 			// A is an actually activated pending-effect start fork. Its own start
 			// cut is the supported source for B, not an empty event frontier.
-			sourceActivation := activatePendingDecisionFork(t, ctx, owner, sourceRun, page.Events[0].EventID, loader, loaded)
+			sourceActivation := preparePendingDecisionControlComponent(t, ctx, owner, sourceRun, page.Events[0].EventID, loader, loaded)
 			sourceRun = sourceActivation.Materialization.ForkRunID
 			sourceCard = requirePendingReplyCard(t, ctx, store, sourceRun)
 			request, mutation := branchCardDecision(sourceCard, principal.ID, "reject")
@@ -111,14 +111,12 @@ func TestIssue642SourceAndForkDecideOwnPendingEffectsBothStores(t *testing.T) {
 					sourceRejected, sourceEffect, calls.Load(), err, effectErr, rowsErr, domainErr)
 			}
 			selection := runforkadmission.SelectedContractSelection(loaded.Source)
-			result, err := ExecuteSelectedContractRunFork(ctx, SelectedContractExecutionRequest{SourceRunID: sourceRun, AtStart: true,
+			component := q1StageBranchPointComponent(t, ctx, SelectedContractExecutionRequest{SourceRunID: sourceRun, AtStart: true,
 				AllowSourceFreeze: true, Owner: owner, SourceLoader: loader, ContractSelection: selection,
 				AgentRuntime:  SelectedContractAgentRuntimeOptions{ExecutionPosture: executionposture.Live, ProcessCapability: owner.ports.contexts.capability},
 				ForkOperation: pendingDecisionStartInvocation(sourceRun, loaded, selection)})
-			if err != nil || !result.Activation.Activated || result.Activation.SourceFrozen {
-				t.Fatalf("fork at the earlier open card inherited or froze the later rejection: %+v error=%v", result, err)
-			}
-			child := result.Materialization.ForkRunID
+			component.serveSelectedControls(t)
+			child := component.materialized.ForkRunID
 			card := requirePendingReplyCard(t, ctx, store, child)
 			waitSelectedRuntimeStartup(t, ctx, owner, child)
 			rows, err := storetest.ReadReplyContextRecords(ctx, selected, child)

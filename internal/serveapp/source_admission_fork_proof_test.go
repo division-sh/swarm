@@ -230,6 +230,14 @@ func Test2376ForkSourceAndPinsFollowSourceRunBothStores(t *testing.T) {
 			opts, start := lifecycleRestartHarness(t, backend, rootC)
 			c, selectedC := start()
 			hashC := selectedC.BundleHash
+			retainedC := requireServedEventPublishRPCResult(t, selectedC.Endpoint, map[string]any{
+				"event_name": "work.requested", "bundle_hash": hashC,
+				"payload": map[string]any{"seed": true}, "idempotency_key": "2376-retained-target-c",
+			})
+			waitServedRunDeliveryQuiescence(t, selectedC.ReadRunDeliveries, retainedC.RunID)
+			requireServedOKJSONRPC(t, selectedC.Endpoint, "run.pause", map[string]any{
+				"run_id": retainedC.RunID, "idempotency_key": "2376-pause-target-c",
+			})
 			if code := c.stop(); code != 0 {
 				t.Fatalf("C stop=%d", code)
 			}
@@ -366,11 +374,11 @@ func Test2376ForkSourceAndPinsFollowSourceRunBothStores(t *testing.T) {
 					if err := servedB.DB.QueryRow("SELECT bundle_hash FROM runs WHERE run_id=$1", fork.ForkRunID).Scan(&durableHash); err != nil {
 						t.Fatal(err)
 					}
-					if fork.BundleHash != want || durableHash != want || fork.ExecutedEventCount != 0 {
+					if fork.BundleHash != want || durableHash != want || fork.ExecutedEventCount != 1 {
 						t.Fatalf("source selection was not exact: %+v / %s want %s", fork, durableHash, want)
 					}
-					if name == "explicit" && (!fork.SourceFrozen || fork.SourceRunStatus != "forked") {
-						t.Fatalf("explicit target source avoided the source-card freeze: %+v", fork)
+					if fork.SourceFrozen || fork.SourceRunStatus != "paused" || fork.ForkRunStatus != "live" {
+						t.Fatalf("target source lost the paused-source/live-child handoff: %+v", fork)
 					}
 					waitServedSelectedForkFrontier(t, servedB.ReceiverStateReader, servedB.ReadRunDeliveries, fork.ForkRunID, p.frontierID)
 					var cardHash, cardVersion string

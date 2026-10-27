@@ -216,7 +216,7 @@ func observeSelectedDeploymentCandidateTx(ctx context.Context, tx *sql.Tx, at ti
 			AND i.deployment_schema_digest=$14
 			AND i.status='open' AND (i.claim_owner IS NULL OR i.lease_expires_at<=$4)
 			AND (i.retry_ready_at IS NULL OR i.retry_ready_at<=$4)
-			AND r.status='running' AND r.bundle_hash=i.bundle_hash
+			AND r.status IN ('running','live') AND r.bundle_hash=i.bundle_hash
 			AND COALESCE(c.control_status,'') NOT IN ('paused','stopped')
 			AND b.binding_id=$5 AND e.execution_id=$6 AND e.generation=$7
 			AND e.fence_generation=$8 AND e.execution_owner=$9 AND e.state='running'

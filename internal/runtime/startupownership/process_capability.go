@@ -137,6 +137,7 @@ type ProcessCapability interface {
 	IssueGenerationGrant(context.Context, GrantRequest) (LiveGenerationGrant, error)
 	IssueSelectedForkGenerationGrant(context.Context, SelectedForkGrantRequest) (GenerationGrant, error)
 	InstallCompleteSourceSet(context.Context, runtimeagenttopology.SourceSetCommitRequest) (runtimeagenttopology.SourceSetCommitResult, error)
+	CheckSourceSetReplacement(context.Context, runtimeagenttopology.SourceSetCommitRequest) error
 	RestoreSourceSet(context.Context, runtimeagenttopology.SourceSetCommitRequest) (runtimeagenttopology.SourceSetCommitResult, error)
 	ApplyDestructiveResetCleanup(context.Context, runtimedestructivereset.CleanupRequest, *runtimeagenttopology.SourceSetCommitRequest) (runtimedestructivereset.CleanupResult, error)
 	ApplyDestructiveResetTopology(context.Context, runtimeagenttopology.SourceSetCommitRequest) (runtimeagenttopology.SourceSetCommitResult, error)
@@ -303,6 +304,20 @@ func (p *processCapability) InstallCompleteSourceSet(ctx context.Context, req ru
 
 func (p *processCapability) RestoreSourceSet(ctx context.Context, req runtimeagenttopology.SourceSetCommitRequest) (runtimeagenttopology.SourceSetCommitResult, error) {
 	return p.commitSourceSet(ctx, runtimeagenttopology.OperationRestoreSourceSet, req)
+}
+
+func (p *processCapability) CheckSourceSetReplacement(ctx context.Context, req runtimeagenttopology.SourceSetCommitRequest) error {
+	req.Operation = runtimeagenttopology.OperationRestoreSourceSet
+	if err := req.Validate(); err != nil {
+		return err
+	}
+	p.opMu.Lock()
+	defer p.opMu.Unlock()
+	if err := p.proveCurrent(ctx); err != nil {
+		return err
+	}
+	err := p.session.CheckSourceSetReplacement(p.processMutationContext(ctx), req)
+	return errors.Join(p.retireOnPossessionFailure(err), p.requireLive())
 }
 
 func (p *processCapability) ApplyDestructiveResetCleanup(ctx context.Context, req runtimedestructivereset.CleanupRequest, topology *runtimeagenttopology.SourceSetCommitRequest) (runtimedestructivereset.CleanupResult, error) {

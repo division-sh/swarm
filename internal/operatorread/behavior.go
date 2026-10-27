@@ -92,7 +92,7 @@ func ProjectRunOperationalStatus(report RunDebugReport) RunOperationalStatus {
 	if status == "" {
 		return out
 	}
-	if status != "running" {
+	if status != "running" && status != "live" {
 		out.State = status
 		out.Instances, _, _ = projectRunInstances(report.OperationalFacts)
 		if report.OperationalFacts != nil {

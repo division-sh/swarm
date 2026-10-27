@@ -16,17 +16,20 @@ import (
 	"github.com/division-sh/swarm/internal/runtime/canonicaljson"
 	runtimedeadletters "github.com/division-sh/swarm/internal/runtime/deadletters"
 	runtimedelivery "github.com/division-sh/swarm/internal/runtime/deliverylifecycle"
+	"github.com/division-sh/swarm/internal/runtime/executionmode"
 	runtimepipeline "github.com/division-sh/swarm/internal/runtime/pipeline"
 	runtimepipelineobligation "github.com/division-sh/swarm/internal/runtime/pipelineobligation"
 	runtimereplycontext "github.com/division-sh/swarm/internal/runtime/replycontext"
+	"github.com/division-sh/swarm/internal/runtime/runlifecycle"
 	storeapiidempotency "github.com/division-sh/swarm/internal/store/internal/apiidempotency"
 	"github.com/division-sh/swarm/internal/store/internal/backend/mutationprotocol"
 	storedurabledata "github.com/division-sh/swarm/internal/store/internal/durabledata"
 )
 
 type eventCommitTxStore interface {
+	ClassifyLiveRunCreationFailure(context.Context, runlifecycle.LiveRunScope, string, error) error
 	standaloneCompletionOwner() standaloneCompletionCapability
-	appendAdmittedEventTxOutcome(context.Context, *mutationprotocol.Attempt, events.AdmittedEvent, events.RouteSettlement) (runtimebus.EventAppendOutcome, error)
+	appendAdmittedEventTxOutcome(context.Context, *mutationprotocol.Attempt, events.AdmittedEvent, events.RouteSettlement, runlifecycle.LiveRunScope) (runtimebus.EventAppendOutcome, error)
 	RequirePipelinePublicationClaimTx(context.Context, *sql.Tx, string, runtimepipelineobligation.Claim) error
 	RequireWorkflowJoinAdmissionTx(context.Context, *sql.Tx, []runtimepipeline.WorkflowJoinAdmissionFence) error
 	CommitInitialDeliveryObligationsTx(context.Context, *mutationprotocol.Attempt, string, string, []events.DeliveryRoute, runtimedelivery.ExecutionAuthority) ([]runtimedelivery.DurableHandoffProof, error)
@@ -112,7 +115,7 @@ func (c sqlPublishCommitter) commitNamedEvent(ctx context.Context, operation str
 	if err := req.ValidatePreparedEvent(); err != nil {
 		return runtimebus.EventAppendOutcomeUnknown, fmt.Errorf("%s: %w", operation, err)
 	}
-	outcome, err := c.store.appendAdmittedEventTxOutcome(ctx, c.attempt, req.Event, req.RouteSettlement)
+	outcome, err := c.store.appendAdmittedEventTxOutcome(ctx, c.attempt, req.Event, req.RouteSettlement, runlifecycle.LiveRunScope{})
 	if err != nil || outcome == runtimebus.EventAppendExactDuplicate {
 		return outcome, err
 	}
@@ -236,7 +239,7 @@ func commitSelectedForkEvent(
 	result := runtimebus.CommittedSelectedForkEvent{}
 	committer := sqlPublishCommitter{attempt: attempt, store: store}
 	var err error
-	result.AppendOutcome, err = store.appendAdmittedEventTxOutcome(ctx, attempt, req.Commit.Event, req.Commit.RouteSettlement)
+	result.AppendOutcome, err = store.appendAdmittedEventTxOutcome(ctx, attempt, req.Commit.Event, req.Commit.RouteSettlement, runlifecycle.LiveRunScope{})
 	if err != nil {
 		return runtimebus.CommittedSelectedForkEvent{}, err
 	}
@@ -292,7 +295,7 @@ func commitPublication(
 	})
 	result, acknowledged := outcome.Value()
 	if !acknowledged {
-		return runtimebus.CommittedPublication{}, outcome.Err()
+		return runtimebus.CommittedPublication{}, classifyPublicationFailure(ctx, store, command, outcome.Err())
 	}
 	result = result.WithCommitAcknowledgment()
 	if err := result.Validate(); err != nil {
@@ -455,7 +458,7 @@ func (s *EventPostgresOwner) CommitAPIEventPublication(ctx context.Context, comm
 	var acknowledged bool
 	result, acknowledged = outcome.Value()
 	if !acknowledged {
-		return result, outcome.Err()
+		return result, classifyPublicationFailure(ctx, s, command.Publication, outcome.Err())
 	}
 	result.Acknowledged = true
 	result.Publication = result.Publication.WithCommitAcknowledgment()
@@ -556,7 +559,7 @@ func (s *EventSQLiteOwner) CommitAPIEventPublication(ctx context.Context, comman
 	var acknowledged bool
 	result, acknowledged = outcome.Value()
 	if !acknowledged {
-		return result, outcome.Err()
+		return result, classifyPublicationFailure(ctx, s, command.Publication, outcome.Err())
 	}
 	result.Acknowledged = true
 	result.Publication = result.Publication.WithCommitAcknowledgment()
@@ -639,7 +642,13 @@ func commitValidatedPublicationSQL(
 			return runtimebus.CommittedPublication{}, err
 		}
 	}
-	outcome, err := store.appendAdmittedEventTxOutcome(ctx, attempt, request.Event, request.RouteSettlement)
+	scope := publicationLiveScope(command)
+	if !scope.Empty() {
+		if err := scope.Validate(); err != nil {
+			return runtimebus.CommittedPublication{}, err
+		}
+	}
+	outcome, err := store.appendAdmittedEventTxOutcome(ctx, attempt, request.Event, request.RouteSettlement, scope)
 	if err != nil {
 		return runtimebus.CommittedPublication{}, err
 	}
@@ -688,6 +697,34 @@ func commitValidatedPublicationSQL(
 	return result, nil
 }
 
+func publicationLiveScope(command runtimebus.PublicationCommand) runlifecycle.LiveRunScope {
+	if command.Commit.Event.RunDisposition() == events.AdmittedRunCreateAuthorized && command.Commit.Event.Event().ExecutionMode() == executionmode.Live {
+		for _, activation := range command.Activations {
+			if activation.Identity.EntityID == command.Commit.Event.Event().RunID() {
+				return runlifecycle.LiveRunScope{FlowPath: activation.Identity.TemplateID}
+			}
+		}
+	}
+	return runlifecycle.LiveRunScope{}
+}
+
+type publicationRunCreationFailure struct{ cause error }
+
+func (e *publicationRunCreationFailure) Error() string { return e.cause.Error() }
+func (e *publicationRunCreationFailure) Unwrap() error { return e.cause }
+
+func classifyPublicationFailure(ctx context.Context, store eventCommitTxStore, command runtimebus.PublicationCommand, err error) error {
+	return classifyRunCreationFailure(ctx, store, publicationLiveScope(command), command.Commit.Event.Event().RunID(), err)
+}
+
+func classifyRunCreationFailure(ctx context.Context, store eventCommitTxStore, scope runlifecycle.LiveRunScope, runID string, err error) error {
+	var creation *publicationRunCreationFailure
+	if !errors.As(err, &creation) {
+		return err
+	}
+	return store.ClassifyLiveRunCreationFailure(ctx, scope, runID, err)
+}
+
 func (s *EventPostgresOwner) CommitPublicationTx(ctx context.Context, attempt *mutationprotocol.Attempt, command runtimebus.PublicationCommand) (runtimebus.CommittedPublication, error) {
 	return commitPublicationTx(ctx, attempt, s, command)
 }
@@ -721,7 +758,7 @@ func commitRuntimeLogEventTx(ctx context.Context, store eventCommitTxStore, atte
 	if err != nil {
 		return runtimebus.EventAppendOutcomeUnknown, err
 	}
-	return store.appendAdmittedEventTxOutcome(ctx, attempt, admitted, settlement)
+	return store.appendAdmittedEventTxOutcome(ctx, attempt, admitted, settlement, runlifecycle.LiveRunScope{})
 }
 
 func (s *EventPostgresOwner) CommitRuntimeLogEvent(ctx context.Context, admitted events.AdmittedEvent) (runtimebus.EventAppendOutcome, error) {

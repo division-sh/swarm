@@ -680,17 +680,8 @@ func (c selectedContractForkLocalRuntimeContainer) serveCommittedAttachment() (f
 			finalErr = errors.Join(finalErr, bus.AbandonPreparedPublish(context.WithoutCancel(input.ctx), input.prepared))
 		}
 	}()
-	fanOutExecutor, err := c.ports.fanOutExecutor(pipeline)
-	if err != nil {
+	if err := c.startSelectedServing(runCtx); err != nil {
 		return err
-	}
-	agentRuntime.fanOutServing, err = startupownership.StartFanOutServing(runCtx, agentRuntime.generationGrant, req.Operation.selected, nil, fanOutExecutor)
-	if err != nil {
-		return fmt.Errorf("register selected fan-out serving: %w", err)
-	}
-	pipeline.InstallFanOutWorkNotifier(agentRuntime.fanOutServing)
-	if err := attachment.scheduler.ReleaseStartup(runCtx); err != nil {
-		return fmt.Errorf("release selected child wakeups: %w", err)
 	}
 	if err := agentRuntime.completionExecutor.Start(runCtx); err != nil {
 		return fmt.Errorf("start activated selected completion owner: %w", err)
@@ -709,6 +700,23 @@ func (c selectedContractForkLocalRuntimeContainer) serveCommittedAttachment() (f
 		}
 	}
 	return c.awaitTerminalSettlement(runCtx, continuationFailures)
+}
+
+func (c selectedContractForkLocalRuntimeContainer) startSelectedServing(ctx context.Context) error {
+	runtime := c.attachment.runtime
+	executor, err := c.ports.fanOutExecutor(c.attachment.pipeline)
+	if err != nil {
+		return err
+	}
+	runtime.fanOutServing, err = startupownership.StartFanOutServing(ctx, runtime.generationGrant, c.req.Operation.selected, nil, executor)
+	if err != nil {
+		return fmt.Errorf("register selected fan-out serving: %w", err)
+	}
+	c.attachment.pipeline.InstallFanOutWorkNotifier(runtime.fanOutServing)
+	if err := c.attachment.scheduler.ReleaseStartup(ctx); err != nil {
+		return fmt.Errorf("release selected child wakeups: %w", err)
+	}
+	return nil
 }
 
 func (c selectedContractForkLocalRuntimeContainer) reconcileRecoveredDeliveries(ctx context.Context, continuations *runtimedeliverycontinuation.Coordinator) error {

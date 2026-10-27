@@ -2,17 +2,21 @@ package runforkexecution
 
 import (
 	"context"
+	"database/sql"
+	"errors"
 
 	"reflect"
 	"sync"
 	"testing"
 	"time"
 
+	"github.com/division-sh/swarm/internal/operatorread"
 	"github.com/division-sh/swarm/internal/runtime/core/activityidentity"
 	"github.com/division-sh/swarm/internal/runtime/core/worklifetime"
 	"github.com/division-sh/swarm/internal/runtime/executionposture"
 	"github.com/division-sh/swarm/internal/runtime/runfork"
 	"github.com/division-sh/swarm/internal/runtime/runforkadmission"
+	"github.com/division-sh/swarm/internal/runtime/runlifecycle"
 	"github.com/division-sh/swarm/internal/runtime/startupownership"
 	"github.com/division-sh/swarm/internal/store/storetest"
 	"github.com/google/uuid"
@@ -63,60 +67,29 @@ func verifyUnpublishedTransferredArrivalRefork(t *testing.T, latePublication boo
 			cut, cause := seedPublishedJoinSource(t, ctx, selected, owner, loaded, ancestor)
 			selection := runforkadmission.SelectedContractSelection(loaded.Source)
 			lifecycle := selected.(SelectedContractForkLifecycle)
-			activated, release := make(chan string, 1), make(chan struct{})
-			var releaseOnce sync.Once
-			releaseParent := func() { releaseOnce.Do(func() { close(release) }) }
-			defer releaseParent()
-			parentOwner := owner
-			parentPorts := *owner.ports
-			parentOwner.ports = &parentPorts
-			parentOwner.ports.busDurable.RunLifecycle = &selectedActivatedServingCut{OperationOwner: owner.ports.busDurable.RunLifecycle, checkpoint: func(runID string) {
-				activated <- runID
-				select {
-				case <-release:
-				case <-ctx.Done():
-				}
-			}}
-			type completed struct {
-				result SelectedContractExecutionResult
-				err    error
+			parentRequest := SelectedContractExecutionRequest{SourceRunID: ancestor, At: cut, AllowSourceFreeze: true,
+				Owner: owner, SourceLoader: loader, ContractSelection: selection,
+				AgentRuntime: SelectedContractAgentRuntimeOptions{ExecutionPosture: executionposture.MockOnly, ProcessCapability: capability}}
+			if latePublication {
+				parentRequest.ForkOperation = &runfork.ForkOperationRequest{OperationID: uuid.NewString(), Actor: "unpublished-parent", IdempotencyKey: "late-publication",
+					TransportHash: "late-parent-transport", SourceRunID: ancestor, ForkEventID: cut,
+					TargetBundleHash: loaded.SourceArtifactFact.BundleHash(), AllowSourceFreeze: true, ContractSelection: selection}
 			}
-			parentDone := make(chan completed, 1)
-			parentJoined := false
-			defer func() {
-				releaseParent()
-				if !parentJoined {
-					select {
-					case result := <-parentDone:
-						if result.err != nil {
-							t.Errorf("join unpublished parent preparation: %v", result.err)
-						}
-					case <-time.After(15 * time.Second):
-						t.Error("unpublished parent preparation did not join")
-					}
-				}
-			}()
-			go func() {
-				result, err := ExecuteSelectedContractRunFork(ctx, SelectedContractExecutionRequest{SourceRunID: ancestor, At: cut,
-					AllowSourceFreeze: true, Owner: parentOwner, SourceLoader: loader, ContractSelection: selection,
-					AgentRuntime: SelectedContractAgentRuntimeOptions{ExecutionPosture: executionposture.MockOnly, ProcessCapability: capability}})
-				if err == nil && result.Activation.Activated {
-					select {
-					case <-release:
-					case <-ctx.Done():
-					}
-				}
-				parentDone <- completed{result: result, err: err}
-			}()
-			var parentRun string
-			select {
-			case parentRun = <-activated:
-			case result := <-parentDone:
-				parentJoined = true
-				t.Fatalf("parent did not reach its acknowledged unpublished cut: %+v error=%v", result.result, result.err)
-			case <-time.After(15 * time.Second):
-				t.Fatal("parent activation did not reach the existing bound")
+			preparedParent, err := owner.Prepare(ctx, parentRequest)
+			if err != nil {
+				t.Fatal(err)
 			}
+			defer preparedParent.Close()
+			materialized, acknowledged, err := owner.materializePrepared(preparedParent.operation.PreparationContext(), preparedParent)
+			if err != nil || !acknowledged {
+				t.Fatalf("original unpublished parent materialization: %+v acknowledged=%t err=%v", materialized, acknowledged, err)
+			}
+			parentRun := materialized.ForkRunID
+			if err := preparedParent.Close(); err != nil {
+				t.Fatal(err)
+			}
+			ordinary, contexts := liveForkRuntimeFixture(t, ctx, selected, owner, loaded, ancestor, executionposture.MockOnly)
+			parentRequest.LiveRuntime, parentRequest.LiveContexts, parentRequest.LiveRuns = ordinary, contexts, selected.(runlifecycle.LiveRunReader)
 			parent, err := lifecycle.PlanRunFork(ctx, runfork.RunForkPlanRequest{SourceRunID: parentRun, AtStart: true})
 			if err != nil || len(parent.TransferredJoins) != 1 || len(parent.JoinSchedules) != 0 {
 				t.Fatalf("unpublished immediate-parent obligation: %+v error=%v", parent, err)
@@ -146,15 +119,9 @@ func verifyUnpublishedTransferredArrivalRefork(t *testing.T, latePublication boo
 				childOwner.ports.fork = &unpublishedJoinLateSourceActivation{SelectedContractForkLifecycle: owner.ports.fork, before: func() {
 					// The child already owns its immutable cut/materialization. Let B
 					// physically publish EB before C acquires execution authority.
-					releaseParent()
-					select {
-					case parentResult := <-parentDone:
-						parentJoined = true
-						if parentResult.err != nil || !parentResult.result.Activation.Activated {
-							t.Fatalf("late parent publication activation: %+v error=%v", parentResult.result, parentResult.err)
-						}
-					case <-time.After(15 * time.Second):
-						t.Fatal("late parent publication activation did not join")
+					parentResult, err := ExecuteSelectedContractRunFork(ctx, parentRequest)
+					if err != nil || !parentResult.Activation.Activated || parentResult.Materialization.ForkRunID != parentRun {
+						t.Fatalf("late parent publication lost its original materialized child: %+v err=%v", parentResult, err)
 					}
 					waitUnpublishedReforkRunCompletion(t, ctx, selected, parentRun)
 					original := storetest.LoadCanonicalEventRecord(t, ctx, selected, pending.Publication.EventID)
@@ -169,6 +136,7 @@ func verifyUnpublishedTransferredArrivalRefork(t *testing.T, latePublication boo
 			}
 			result, err := ExecuteSelectedContractRunFork(ctx, SelectedContractExecutionRequest{SourceRunID: parentRun, AtStart: true,
 				AllowSourceFreeze: true, Owner: childOwner, ForkOperation: &operation, SourceLoader: loader, ContractSelection: selection,
+				LiveRuntime: ordinary, LiveContexts: contexts, LiveRuns: selected.(runlifecycle.LiveRunReader),
 				AgentRuntime: SelectedContractAgentRuntimeOptions{ExecutionPosture: executionposture.MockOnly, ProcessCapability: capability}})
 			if err != nil || !result.Activation.Activated {
 				t.Fatalf("continue the immediate parent's admitted unpublished obligation: %+v error=%v", result, err)
@@ -204,36 +172,17 @@ func verifyUnpublishedTransferredArrivalRefork(t *testing.T, latePublication boo
 			if err != nil {
 				t.Fatal(err)
 			}
-			releaseParent()
-			if !parentJoined {
-				select {
-				case parentResult := <-parentDone:
-					parentJoined = true
-					if parentResult.err != nil || !parentResult.result.Activation.Activated {
-						t.Fatalf("late parent activation: %+v error=%v", parentResult.result, parentResult.err)
-					}
-				case <-time.After(15 * time.Second):
-					t.Fatal("late parent activation did not finish")
-				}
-			}
-			parentDeadline := time.Now().Add(15 * time.Second)
-			var parentState storetest.SelectedExecutionStorage
-			for time.Now().Before(parentDeadline) {
-				parentState, err = storetest.ReadSelectedExecutionStorage(ctx, selected, parentRun)
-				if err != nil {
-					t.Fatal(err)
-				}
-				if parentState.State == "closed" {
-					break
-				}
-				time.Sleep(10 * time.Millisecond)
-			}
-			wantParentStatus := "forked"
+			parentState, err := storetest.ReadSelectedExecutionStorage(ctx, selected, parentRun)
 			if latePublication {
-				wantParentStatus = "completed"
+				if err != nil || parentState.State != "closed" || parentState.RunStatus != "paused" || parentState.Occurrences != 1 {
+					t.Fatalf("late source publication lost its actual selected lifetime: %+v err=%v", parentState, err)
+				}
+			} else if !errors.Is(err, sql.ErrNoRows) || parentState.Occurrences != 0 {
+				t.Fatalf("unpublished source acquired execution authority: %+v err=%v", parentState, err)
 			}
-			if result.Activation.SourceFrozen == latePublication || parentState.State != "closed" || parentState.RunStatus != wantParentStatus {
-				t.Fatalf("late execution must retain the exact frozen/diverged source outcome: activation=%+v parent=%+v", result.Activation, parentState)
+			availability, err := lifecycle.LoadRunBundleAvailability(ctx, parentRun)
+			if err != nil || !availability.Available() || availability.Status != "paused" || result.Activation.SourceFrozen {
+				t.Fatalf("source did not retain its paused nonterminal disposition: %+v activation=%+v err=%v", availability, result.Activation, err)
 			}
 			if _, exists, err := owner.ports.busDurable.PreparedEvents.LoadPreparedPublishEvent(ctx, pending.Publication.EventID); err != nil || exists != latePublication {
 				t.Fatalf("retired parent changed its actual publication evidence: exists=%t error=%v", exists, err)
@@ -243,6 +192,9 @@ func verifyUnpublishedTransferredArrivalRefork(t *testing.T, latePublication boo
 				t.Fatalf("late parent publication changed its settled child: %v", err)
 			}
 			if err := owner.RetireSelectedContexts(ctx); err != nil {
+				t.Fatal(err)
+			}
+			if err := ordinary.Shutdown(); err != nil {
 				t.Fatal(err)
 			}
 			if process.ActiveCount() != baseline {
@@ -261,7 +213,13 @@ func waitUnpublishedReforkRunCompletion(t *testing.T, ctx context.Context, selec
 		if err != nil {
 			t.Fatal(err)
 		}
-		if state.RunStatus == "completed" && state.State == "closed" {
+		quiescence, err := selected.(interface {
+			LoadRunTestQuiescence(context.Context, string, time.Time) (operatorread.RunTestQuiescence, error)
+		}).LoadRunTestQuiescence(ctx, runID, time.Now().UTC())
+		if err != nil {
+			t.Fatal(err)
+		}
+		if state.RunStatus == "live" && state.State == "closed" && quiescence.Ready {
 			return
 		}
 		last = state

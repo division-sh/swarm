@@ -198,7 +198,7 @@ func TestSelectedSourceCleanupBothStores(t *testing.T) {
 					t.Fatal(err)
 				}
 				runID, eventID := uuid.NewString(), uuid.NewString()
-				seedSelectedOperationSource(t, ctx, backend, db, selected, loaded, runID, eventID)
+				seedSelectedOperationSource(t, ctx, selected, loaded, runID, eventID, false)
 				base := SourceArtifactSelectedContractSourceLoader{RepoRoot: repo, Store: selected.(SourceArtifactSelectedContractSourceStore)}
 				sibling, err := base.LoadRunForkSelectedContractSourceForRequest(ctx, SelectedContractSourceLoadRequest{SourceRunID: runID, Selection: runforkadmission.SelectedContractSelection(loaded.Source)})
 				if err != nil {
@@ -224,8 +224,8 @@ func TestSelectedSourceCleanupBothStores(t *testing.T) {
 				var p *PreparedSelectedFork
 				var workspaceProbe *sourceCleanupWorkspace
 				if tc.phase == "retained_stop" {
-					result, executeErr := ExecuteSelectedContractRunFork(ctx, request)
-					if executeErr != nil || !result.Activation.Activated {
+					result, executeErr := q1ExecuteSelectedPhaseComponent(t, ctx, request)
+					if !errors.Is(executeErr, errSourceRelease) || result.Materialization.ForkRunID == "" || result.ExecutedEventCount != 1 {
 						t.Fatalf("execution: %v", executeErr)
 					}
 					observed, cleanupErr := observeSelectedRetainedExecution(t, ctx, owner, selected, result.Materialization.ForkRunID)

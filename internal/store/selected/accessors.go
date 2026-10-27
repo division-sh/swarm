@@ -16,6 +16,7 @@ import (
 	runtimepipeline "github.com/division-sh/swarm/internal/runtime/pipeline"
 	"github.com/division-sh/swarm/internal/runtime/runbundle"
 	runtimerunforkexecution "github.com/division-sh/swarm/internal/runtime/runforkexecution"
+	runtimerunlifecycle "github.com/division-sh/swarm/internal/runtime/runlifecycle"
 	runtimerunquiescence "github.com/division-sh/swarm/internal/runtime/runquiescence"
 	runtimerunstalled "github.com/division-sh/swarm/internal/runtime/runstalled"
 	runtimestartupownership "github.com/division-sh/swarm/internal/runtime/startupownership"
@@ -69,6 +70,7 @@ func (o *Owner) DataAccess() durabledata.ResourceAccessStore   { return o.requir
 func (o *Owner) RunBundleAvailability() runbundle.AvailabilityStore {
 	return o.required.runBundleAvailability
 }
+func (o *Owner) LiveRuns() runtimerunlifecycle.LiveRunReader    { return o.required.liveRuns }
 func (o *Owner) RunStalled() runtimerunstalled.ProjectionReader { return o.required.runStalled }
 func (o *Owner) SourceArtifactWriter() SourceArtifactDataWriter {
 	return o.required.sourceArtifacts

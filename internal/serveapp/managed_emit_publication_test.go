@@ -123,10 +123,12 @@ func TestManagedEmitPublicationExactScopeBothStores(t *testing.T) {
 					}
 				}
 				assertResult(accepted.RunID, scope, instance, "source-writer", "exact")
+				requireServedOKJSONRPC(t, rt.Endpoint, "run.pause", map[string]any{"run_id": accepted.RunID, "idempotency_key": "managed-primary-pause"})
 				siblingParams := map[string]any{"event_name": "sibling.requested", "bundle_hash": rt.BundleHash, "payload": map[string]any{"case_id": "sibling"}, "idempotency_key": "managed-sibling"}
 				sibling := requireServedEventPublishRPCResult(t, rt.Endpoint, siblingParams)
 				waitServedRunDeliveryQuiescence(t, rt.ReadRunDeliveries, sibling.RunID)
 				assertResult(sibling.RunID, "sibling", "sibling", "sibling-writer", true)
+				requireServedOKJSONRPC(t, rt.Endpoint, "run.pause", map[string]any{"run_id": sibling.RunID, "idempotency_key": "managed-sibling-pause"})
 				rt, _ = restart()
 				duplicate := requireServedEventPublishRPCResult(t, rt.Endpoint, params)
 				if duplicate.EventID != accepted.EventID || duplicate.RunID != accepted.RunID {

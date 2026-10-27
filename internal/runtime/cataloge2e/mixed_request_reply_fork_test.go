@@ -62,7 +62,7 @@ func runMixedRequestWholePublicationWithResponseObserver(t *testing.T, settledPr
 			if responseObserver {
 				root = canonicalrouting.CopyMixedReplyResponse(t, settledProvider)
 			}
-			h := newRuntimeHarnessForBackend(t, root, backend, true)
+			h := newLiveForkCatalogHarness(t, root, backend)
 			var selected unclaimedFanOutReplyStore = h.pg
 			if h.sqlite != nil {
 				selected = h.sqlite
@@ -169,7 +169,7 @@ func runMixedRequestWholePublicationWithResponseObserver(t *testing.T, settledPr
 					logUnclaimedFanOutReplyFailure(t, h.ctx, selected, owner, staged.ForkRunID)
 				}
 			})
-			executed, err := runforkexecution.ExecuteSelectedContractRunFork(h.ctx, runforkexecution.SelectedContractExecutionRequest{
+			executed, err := executeCatalogLiveFork(t, h, h.ctx, runforkexecution.SelectedContractExecutionRequest{
 				SourceRunID: catalogRuntimeRunID, At: cut, ForkOperation: &operation, AllowSourceFreeze: true, Owner: owner, SourceLoader: loader, ContractSelection: selection, AgentRuntime: options,
 			})
 			if err != nil || !executed.Activation.Activated || executed.Materialization.ForkRunID != staged.ForkRunID {

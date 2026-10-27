@@ -15,7 +15,6 @@ import (
 	"github.com/division-sh/swarm/internal/events"
 	"github.com/division-sh/swarm/internal/events/eventtest"
 	"github.com/division-sh/swarm/internal/operatorread"
-	runtimepkg "github.com/division-sh/swarm/internal/runtime"
 	"github.com/division-sh/swarm/internal/runtime/authoractivity"
 	"github.com/division-sh/swarm/internal/runtime/contracts"
 	"github.com/division-sh/swarm/internal/runtime/core/identity"
@@ -153,13 +152,6 @@ func verifyPublishedFanOutBarrierContinuation(t *testing.T, proof publishedBarri
 				t.Fatal(err)
 			}
 			waitPublishedBarrierPipelineReceipts(t, phase, selected.RuntimeDeps().DeliveryStore, original.id, sourceCompletedID)
-			if failingCompletion {
-				// Source business completion does not join its process-wide
-				// fan-out observer. Retire it before measuring the child's work.
-				if err := rt.ShutdownWithOptions(runtimepkg.ShutdownOptions{Grace: 10 * time.Second}); err != nil {
-					t.Fatalf("join completed barrier source runtime: %v", err)
-				}
-			}
 			before, err := selected.Entities().LoadOperatorEntity(phase, runID, runID)
 			if err != nil {
 				t.Fatal(err)
@@ -213,9 +205,6 @@ func verifyPublishedFanOutBarrierContinuation(t *testing.T, proof publishedBarri
 				}
 			}
 			baselineWork := rt.Options.ProcessWorkOwner.ActiveCount()
-			if failingCompletion && baselineWork != 0 {
-				t.Fatalf("completed barrier source retained process work: %d", baselineWork)
-			}
 			var sourceDomain map[string]storetest.SelectedForkStorageTableSnapshot
 			if failingCompletion {
 				sourceDomain, err = storetest.ReadSelectedForkSourceDomain(phase, selected.RuntimeDeps().DeliveryStore, runID)
@@ -223,7 +212,28 @@ func verifyPublishedFanOutBarrierContinuation(t *testing.T, proof publishedBarri
 					t.Fatal(err)
 				}
 			}
-			result, err := family.Execute(phase, request)
+			request = forkEngineLiveRequest(t, rt, selected, request)
+			acknowledged := make(chan forkEngineAcknowledgment, 1)
+			executionDone := make(chan struct{})
+			go func() {
+				defer close(executionDone)
+				result, err := family.Execute(phase, request)
+				acknowledged <- forkEngineAcknowledgment{result: result, err: err}
+			}()
+			t.Cleanup(func() {
+				if childProbe.resume != nil {
+					select {
+					case <-childProbe.resume:
+					default:
+						close(childProbe.resume)
+					}
+				}
+				select {
+				case <-executionDone:
+				case <-time.After(10 * time.Second):
+					t.Error("published barrier execution did not join")
+				}
+			})
 			defer func() {
 				cleanup, stop := context.WithTimeout(context.WithoutCancel(ctx), 10*time.Second)
 				defer stop()
@@ -231,24 +241,24 @@ func verifyPublishedFanOutBarrierContinuation(t *testing.T, proof publishedBarri
 					t.Error(err)
 				}
 			}()
-			if err != nil || !result.Activation.Activated || result.ForkLocalRuntimeContainer == nil {
-				t.Fatalf("published barrier selected activation: %+v err=%v", result, err)
-			}
 			var childClaim forkEngineObservation
 			select {
 			case childClaim = <-childProbe.claim:
+			case ack := <-acknowledged:
+				t.Fatalf("published barrier execution returned before the controlled claim: %+v err=%v", ack.result, ack.err)
 			case <-phase.Done():
 				t.Fatal(phase.Err())
 			}
 			claim, valid := deliverylifecycle.ClaimFromContext(childClaim.ctx)
-			if !valid || claim.RunID() != result.Materialization.ForkRunID || childClaim.id == original.id {
+			if !valid || claim.RunID() == runID || childClaim.id == original.id {
 				t.Fatal("child reused original outcome claim")
 			}
+			proofRequest := forkEngineClaimProofRequest(t, phase, selected, runID, original.id, childClaim)
 			if crashing {
-				publishBarrierCrashCheckpoint(t, phase, selected, result, original.id, childClaim, forkFixtureEntityRevision(t, before.Entity.Revision))
+				publishBarrierCrashCheckpoint(t, phase, selected, proofRequest, childClaim, forkFixtureEntityRevision(t, before.Entity.Revision))
 			}
 			if failingCompletion {
-				verifyPublishedBarrierCompletionFailure(t, phase, selected, family, result, plan, original, childClaim, childProbe, runID, before, proof)
+				verifyPublishedBarrierCompletionFailure(t, phase, selected, family, proofRequest, acknowledged, plan, original, childClaim, childProbe, runID, before, proof)
 				if active := rt.Options.ProcessWorkOwner.ActiveCount(); active != baselineWork {
 					t.Fatalf("failed barrier completion retained owned process work: active=%d baseline=%d", active, baselineWork)
 				}
@@ -257,6 +267,19 @@ func verifyPublishedFanOutBarrierContinuation(t *testing.T, proof publishedBarri
 					t.Fatalf("failed barrier transfer changed source business evidence: %v", err)
 				}
 				return
+			}
+			var result runforkexecution.SelectedContractExecutionResult
+			select {
+			case ack := <-acknowledged:
+				if ack.err != nil || !ack.result.Activation.Activated || ack.result.ForkLocalRuntimeContainer == nil {
+					t.Fatalf("published barrier selected activation: %+v err=%v", ack.result, ack.err)
+				}
+				result = ack.result
+			case <-phase.Done():
+				t.Fatal(phase.Err())
+			}
+			if proofRequest != forkEngineExecutionProofRequest(t, result, original.id, childClaim.id, claim) {
+				t.Fatal("published barrier ACK changed its exact pre-ACK execution claim")
 			}
 			if _, err := childProbe.Wait(phase, lifecycleprobe.Signal{Kind: lifecycleprobe.DeliveryStatusChanged, EventID: childClaim.id, SubscriberID: producer.Key(), SubscriberType: "node", Status: "delivered"}); err != nil {
 				diagnostic, stop := context.WithTimeout(context.WithoutCancel(ctx), 3*time.Second)

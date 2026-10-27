@@ -6,7 +6,6 @@ import (
 	"reflect"
 	"strings"
 	"testing"
-	"time"
 
 	"github.com/division-sh/swarm/internal/operatorread"
 	"github.com/division-sh/swarm/internal/runtime/effects"
@@ -51,33 +50,23 @@ func proveSelectedQ1QuiescedHistoricalAttachmentBothStores(t *testing.T) {
 		t.Run(backend, func(t *testing.T) {
 			ctx, request := ownerlessSelectedOperationFixture(t, backend)
 			first, err := ExecuteSelectedContractRunFork(ctx, request)
-			if err != nil || !first.Activation.Activated || !first.Activation.SourceFrozen {
-				t.Fatalf("first child did not establish canonical freeze: %+v err=%v", first, err)
+			if err != nil || !first.Activation.Activated || first.Activation.SourceFrozen {
+				t.Fatalf("first child did not establish its live handoff: %+v err=%v", first, err)
 			}
 			selected := request.SourceLoader.(SourceArtifactSelectedContractSourceLoader).Store
-			for {
-				state, err := storetest.ReadSelectedExecutionStorage(ctx, selected, first.Materialization.ForkRunID)
-				if err != nil {
-					t.Fatal(err)
-				}
-				request.Owner.ports.contexts.mu.Lock()
-				joined := len(request.Owner.ports.contexts.entries) == 0
-				request.Owner.ports.contexts.mu.Unlock()
-				if state.State == "closed" && state.RunStatus == "completed" && joined {
-					break
-				}
-				select {
-				case <-ctx.Done():
-					t.Fatalf("first child did not finish before isolated attachment proof: %+v joined=%t err=%v", state, joined, ctx.Err())
-				case <-time.After(10 * time.Millisecond):
-				}
+			state, err := storetest.ReadSelectedExecutionStorage(ctx, selected, first.Materialization.ForkRunID)
+			request.Owner.ports.contexts.mu.Lock()
+			joined := len(request.Owner.ports.contexts.entries) == 0
+			request.Owner.ports.contexts.mu.Unlock()
+			if err != nil || state.State != "closed" || state.RunStatus != "live" || !joined {
+				t.Fatalf("acknowledged handoff retained selected execution: %+v joined=%t err=%v", state, joined, err)
 			}
 			headers := selected.(interface {
 				LoadRunHeader(context.Context, string) (operatorread.RunHeader, error)
 			})
 			frozen, err := headers.LoadRunHeader(ctx, request.SourceRunID)
-			if err != nil || frozen.Status != "forked" || frozen.ContinuedAsRunID != first.Materialization.ForkRunID {
-				t.Fatalf("source freeze precondition: %+v err=%v", frozen, err)
+			if err != nil || frozen.Status != "paused" || frozen.ContinuedAsRunID != "" {
+				t.Fatalf("paused source precondition: %+v err=%v", frozen, err)
 			}
 			probe := &q1QuiescedActivationProbe{SelectedContractForkLifecycle: request.Owner.ports.fork,
 				quiesce: request.Owner.ports.runtimeExecution.QuiesceRunForkSelectedContractRuntimeExecution,

@@ -3,6 +3,7 @@ package apiv1
 import (
 	"context"
 	"database/sql"
+	"encoding/json"
 	"fmt"
 	"testing"
 
@@ -82,14 +83,13 @@ func TestExactStageCompletionRealWriterAndRehydratedSourceBothStores(t *testing.
 			catalog := stageCompletionCatalog(t, recoveredSource)
 			ctx := testAuthorActivityContextForSource(context.Background(), fact)
 			ctx = originalAPIFixtureContext(t, ctx, selected)
-			if _, err := recovered.RequestCompletionCandidate(ctx, runtimerunlifecycle.ImmediateCandidate(runID)); err != nil {
+			if disposition, err := recovered.RequestCompletionCandidate(ctx, runtimerunlifecycle.ImmediateCandidate(runID)); err != nil || disposition != runtimerunlifecycle.CandidateRetainedLive {
 				t.Fatalf("request nonterminal completion: %v", err)
 			}
-			outcome, err := storetest.ExecuteRunCompletionCandidate(ctx, recovered, fact.BundleHash(), runID, catalog)
-			if err != nil || outcome.Outcome != runtimerunlifecycle.OutcomeAwaitMutation {
-				t.Fatalf("nonterminal ready candidate = %s, %v", outcome.Outcome, err)
+			if final, known := catalog.Final("discovery", "discovery", "ready"); !known || final {
+				t.Fatalf("rehydrated lower-case ready classification: final=%t known=%t", final, known)
 			}
-			stageCompletionAssertPublicStatus(t, handler, runID, "running")
+			stageCompletionAssertPublicStatus(t, handler, runID, "live")
 
 			finished := rpcCall(t, handler, eventPublishBody(runID, fact.BundleHash(), "flow.finish", `{"topic":"case-distinct"}`, "", "idem-case-finish"))
 			if finished.Error != nil {
@@ -100,14 +100,34 @@ func TestExactStageCompletionRealWriterAndRehydratedSourceBothStores(t *testing.
 			recovered, recoveredSource = stageCompletionRehydrate(t, selected, db, backend, fact.BundleHash())
 			stageCompletionAssertStoredState(t, recovered, runID, "Ready")
 			catalog = stageCompletionCatalog(t, recoveredSource)
-			if _, err := recovered.RequestCompletionCandidate(ctx, runtimerunlifecycle.ImmediateCandidate(runID)); err != nil {
+			if disposition, err := recovered.RequestCompletionCandidate(ctx, runtimerunlifecycle.ImmediateCandidate(runID)); err != nil || disposition != runtimerunlifecycle.CandidateRetainedLive {
 				t.Fatalf("request terminal completion: %v", err)
 			}
-			outcome, err = storetest.ExecuteRunCompletionCandidate(ctx, recovered, fact.BundleHash(), runID, catalog)
-			if err != nil || outcome.Outcome != runtimerunlifecycle.OutcomeTerminallyEligible {
-				t.Fatalf("terminal Ready candidate = %s, %v", outcome.Outcome, err)
+			if final, known := catalog.Final("discovery", "discovery", "Ready"); !known || !final {
+				t.Fatalf("rehydrated final Ready classification: final=%t known=%t", final, known)
 			}
-			stageCompletionAssertPublicStatus(t, handler, runID, "completed")
+			requireAPIV1Convergence(t, "final instance settled without run completion", func() (bool, error) {
+				response := rpcCall(t, handler, fmt.Sprintf(`{"jsonrpc":"2.0","id":"final","method":"run.diagnose","params":{"run_id":%q}}`, runID))
+				if response.Error != nil {
+					return false, fmt.Errorf("diagnose final instance: %+v", response.Error)
+				}
+				raw, err := json.Marshal(response.Result)
+				if err != nil {
+					return false, err
+				}
+				var diagnosis runDiagnosis
+				if err := json.Unmarshal(raw, &diagnosis); err != nil {
+					return false, err
+				}
+				for _, instance := range diagnosis.Instances {
+					if instance.FlowInstance == "discovery" {
+						return instance.Stage == "Ready" && instance.Disposition == "final" && diagnosis.TestQuiescence.Ready && diagnosis.Run.Status == "live" && diagnosis.Run.EndedAt == nil,
+							fmt.Errorf("final instance=%+v settlement=%+v run=%+v", instance, diagnosis.TestQuiescence, diagnosis.Run)
+					}
+				}
+				return false, fmt.Errorf("diagnosis omitted the exact discovery instance")
+			})
+			stageCompletionAssertPublicStatus(t, handler, runID, "live")
 		})
 	}
 }

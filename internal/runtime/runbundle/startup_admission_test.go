@@ -54,32 +54,35 @@ func TestAdmitPinnedSourcesRequiresCompleteObservation(t *testing.T) {
 func TestAdmitPinnedSourcesUsesExactActiveSourceOwner(t *testing.T) {
 	hash := "bundle-v2:sha256:" + strings.Repeat("a", 64)
 	other := "bundle-v2:sha256:" + strings.Repeat("b", 64)
-	for _, mismatch := range []bool{false, true} {
-		calls := 0
-		reader := admissionAvailabilityReader(func(context.Context) ([]Availability, error) {
-			calls++
-			active := Availability{RunID: "ordinary-run", Status: "paused", BundleHash: hash, SourceArtifactPresent: true}
-			if mismatch {
-				active.BundleHash = other
-			}
-			return []Availability{active, {RunID: "missing-artifact", BundleHash: other}}, nil
-		})
-		err := AdmitPinnedSources(context.Background(), reader, hash, []string{hash, hash})
-		if calls != 1 || (err != nil) != mismatch {
-			t.Fatalf("mismatch %t: reads %d, error %v", mismatch, calls, err)
-		}
-		if mismatch {
-			failure, ok := runtimefailures.As(err)
-			if !ok || failure.Failure.Class != runtimefailures.ClassLifecycleConflict {
-				t.Fatalf("conflict classification lost: %v", err)
-			}
-			for _, detail := range []string{"active non-standing run pinned bundle_hash conflict", hash, other, "ordinary-run"} {
-				if !strings.Contains(err.Error(), detail) {
-					t.Fatalf("conflict detail %q lost: %v", detail, err)
+	for _, state := range []string{"running", "live", "paused"} {
+		for _, mismatch := range []bool{false, true} {
+			calls := 0
+			reader := admissionAvailabilityReader(func(context.Context) ([]Availability, error) {
+				calls++
+				active := Availability{RunID: "ordinary-run", Status: state, BundleHash: hash, SourceArtifactPresent: true}
+				if mismatch {
+					active.BundleHash = other
 				}
+				return []Availability{active, {RunID: "missing-artifact", BundleHash: other}}, nil
+			})
+			err := AdmitPinnedSources(context.Background(), reader, hash, []string{hash, hash})
+			wantConflict := mismatch && state != "paused"
+			if calls != 1 || (err != nil) != wantConflict {
+				t.Fatalf("state %s mismatch %t: reads %d, error %v", state, mismatch, calls, err)
 			}
-			if strings.Contains(err.Error(), "missing-artifact") {
-				t.Fatalf("source integrity was reinterpreted as a pin mismatch: %v", err)
+			if wantConflict {
+				failure, ok := runtimefailures.As(err)
+				if !ok || failure.Failure.Class != runtimefailures.ClassLifecycleConflict {
+					t.Fatalf("conflict classification lost: %v", err)
+				}
+				for _, detail := range []string{"active non-standing run pinned bundle_hash conflict", hash, other, "ordinary-run"} {
+					if !strings.Contains(err.Error(), detail) {
+						t.Fatalf("conflict detail %q lost: %v", detail, err)
+					}
+				}
+				if strings.Contains(err.Error(), "missing-artifact") {
+					t.Fatalf("source integrity was reinterpreted as a pin mismatch: %v", err)
+				}
 			}
 		}
 	}

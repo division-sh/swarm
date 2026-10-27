@@ -310,7 +310,7 @@ func runFullLifecycleJourney(t *testing.T, binary, lifecycleBinary, root string,
 	assertFullLifecycleTimerCardinality(t, process.rpc, standing.RunID, 1)
 	decideFullLifecycleCard(t, process.rpc, lifecycleCard, "lifecycle-gate-"+standing.RunID)
 	assertFullLifecycleCardDecided(t, process.rpc, lifecycleCard.CardID)
-	waitForFullLifecycleRunStatus(t, process.rpc, standing.RunID, "running")
+	waitForFullLifecycleRunStatus(t, process.rpc, standing.RunID, "live")
 
 	switch journey.kind {
 	case fullLifecycleGraceful:
@@ -381,7 +381,7 @@ func runFullLifecycleCrashIntrinsicJourney(
 		t.Fatalf("intrinsic recovery bundle = %s, want %s", recoveredHash, bundleHash)
 	}
 	recovered := waitForFullLifecycleStandingRun(t, process.rpc, bundleHash, standing.Origin.ServiceID, standing.Origin.Generation, standing.RunID)
-	if recovered.RunID != standing.RunID || recovered.Status != "running" || recovered.ControlReason != "standing_reconcile" ||
+	if recovered.RunID != standing.RunID || recovered.Status != "live" || recovered.ControlReason != "standing_reconcile" ||
 		!recovered.StartedAt.Equal(standing.StartedAt) {
 		t.Fatalf("recovered standing run = %#v, want same started identity normalized to running by standing_reconcile from %#v", recovered, standing)
 	}
@@ -438,7 +438,7 @@ func runFullLifecycleDevFreshJourney(
 	assertFullLifecycleHistoryAbsent(t, process.rpc, fresh.RunID, predecessorHistory)
 	decideFullLifecycleCard(t, process.rpc, card, "lifecycle-gate-"+fresh.RunID)
 	assertFullLifecycleCardDecided(t, process.rpc, card.CardID)
-	waitForFullLifecycleRunStatus(t, process.rpc, fresh.RunID, "running")
+	waitForFullLifecycleRunStatus(t, process.rpc, fresh.RunID, "live")
 	freshReceipt := sendFullLifecycleTelegramUpdate(t, process, 3002, 42)
 	approveFullLifecycleEffect(t, process.rpc, fresh.RunID, "dev-fresh")
 	waitForFullLifecycleConvergence(t, process, fresh.RunID, 1)
@@ -1066,7 +1066,7 @@ func waitForLifecycleConvergenceMode(t *testing.T, process *releaseServeProcess,
 	if err != nil {
 		t.Fatalf("wait for lifecycle convergence run=%s ingress=%d: %v; diagnosis=%#v events=%#v\n%s", runID, ingressCount, err, diagnosis, last, process.output.String())
 	}
-	if diagnosis.Run.Status != "running" || len(diagnosis.FailedDeliveries) != 0 {
+	if diagnosis.Run.Status != "live" || len(diagnosis.FailedDeliveries) != 0 {
 		t.Fatalf("lifecycle diagnosis = %#v, want running, quiescent, failure-free standing run", diagnosis)
 	}
 	seenDeliveries := map[string]bool{}

@@ -261,11 +261,9 @@ func testRunServeWhatsAppSignedPairing(t *testing.T, proof servedNativeJourneyPr
 				t.Fatal("ready native channel had no genuine decrypted confirmation send")
 			}
 			var cards []servedNativeMessage
-			if quotedRetirement {
-				// This is an ordinary restart, not a lost-send cut. The gate
-				// already exists before SERVED_RETIRE_TRIGGER is published.
-				cards = append(cards, waitServedNativeCardBeforeRestart(t, endpoint, peer, reader))
-			}
+			// Every source fixture declares the initial retirement gate. Join
+			// its exact send before the ordinary-restart no-redispatch cut.
+			cards = append(cards, waitServedNativeCardBeforeRestart(t, endpoint, peer, reader))
 			if code := process.stop(); code != 0 {
 				t.Fatal("enabled RunServe shutdown failed", code, process.outputString())
 			}
@@ -283,7 +281,8 @@ func testRunServeWhatsAppSignedPairing(t *testing.T, proof servedNativeJourneyPr
 			}
 			select {
 			case sent := <-peer.sent:
-				t.Fatal("completed confirmation was resent during ordinary restart", sent.ID)
+				t.Fatalf("unexpected queued send during ordinary restart: original_confirmation_operation_id=%s expected_confirmation_message_id=%s expected_confirmation_body=%q actual_message_id=%s actual_body=%s",
+					completed.ConfirmationOperationID, strings.ReplaceAll(completed.ConfirmationOperationID, "-", ""), "Swarm channel connected.", sent.ID, sent.Body.String())
 			default:
 			}
 			if proof.noticeAcknowledgment {
@@ -769,6 +768,10 @@ func waitServedNativeCardBeforeRestart(t *testing.T, endpoint string, peer *serv
 	case sent = <-peer.sent:
 	case <-time.After(5 * time.Second):
 		t.Fatal("native card was not delivered before ordinary restart", cardID)
+	}
+	if !strings.HasPrefix(sent.Body.GetConversation(), "Retire service\n") ||
+		!strings.Contains(sent.Body.GetConversation(), "\nReference: "+cardID) {
+		t.Fatal("native initial card differs from the exact declared retirement gate", cardID, sent.Body.GetConversation())
 	}
 	deadline := time.Now().Add(5 * time.Second)
 	for time.Now().Before(deadline) {

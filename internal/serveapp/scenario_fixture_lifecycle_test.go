@@ -2,7 +2,9 @@ package serveapp
 
 import (
 	"testing"
+	"time"
 
+	"github.com/division-sh/swarm/internal/operatorread"
 	"github.com/division-sh/swarm/internal/runtime/testfixtures/canonicalrouting"
 )
 
@@ -14,5 +16,19 @@ func closeServedScenarioFixtureRun(t *testing.T, endpoint, bundleHash, runID str
 		"event_name": canonicalrouting.ScenarioFixtureCloseEvent,
 		"payload":    map[string]any{}, "idempotency_key": "close-scenario-" + runID,
 	}, &result)
-	requireServedRunStatus(t, endpoint, runID, "completed")
+	var last struct {
+		Run            operatorread.RunHeader         `json:"run"`
+		TestQuiescence operatorread.RunTestQuiescence `json:"test_quiescence"`
+	}
+	for deadline := time.Now().Add(servedProofPollDeadline); time.Now().Before(deadline); {
+		requireServedJSONRPCResult(t, endpoint, "run.diagnose", map[string]any{"run_id": runID}, &last)
+		if last.Run.RunID != runID || last.Run.Failure != nil || (last.Run.Status != "running" && last.Run.Status != "completed") {
+			t.Fatalf("finite scenario changed its run: %+v", last)
+		}
+		if last.Run.Status == "completed" && last.Run.EndedAt != nil && last.TestQuiescence.Ready {
+			return
+		}
+		time.Sleep(10 * time.Millisecond)
+	}
+	t.Fatalf("finite scenario did not complete and settle within the original bound: %+v", last)
 }

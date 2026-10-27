@@ -641,7 +641,7 @@
       },
       "errors": [
         {
-          "code": -32063,
+          "code": -32064,
           "message": "Application error: SELECTED_FORK_CONTROL_UNSUPPORTED",
           "data": {
             "additionalProperties": false,
@@ -1114,7 +1114,7 @@
       },
       "errors": [
         {
-          "code": -32063,
+          "code": -32064,
           "message": "Application error: SELECTED_FORK_CONTROL_UNSUPPORTED",
           "data": {
             "additionalProperties": false,
@@ -1369,7 +1369,7 @@
       },
       "errors": [
         {
-          "code": -32063,
+          "code": -32064,
           "message": "Application error: SELECTED_FORK_CONTROL_UNSUPPORTED",
           "data": {
             "additionalProperties": false,
@@ -1516,7 +1516,7 @@
           }
         },
         {
-          "code": -32061,
+          "code": -32062,
           "message": "Application error: RUN_NOT_FOUND",
           "data": {
             "additionalProperties": false,
@@ -4253,7 +4253,7 @@
       },
       "errors": [
         {
-          "code": -32064,
+          "code": -32065,
           "message": "Application error: SESSION_NOT_FOUND",
           "data": {
             "additionalProperties": false,
@@ -4291,7 +4291,7 @@
           }
         },
         {
-          "code": -32066,
+          "code": -32067,
           "message": "Application error: TURN_NOT_FOUND",
           "data": {
             "additionalProperties": false,
@@ -4831,7 +4831,7 @@
       },
       "errors": [
         {
-          "code": -32064,
+          "code": -32065,
           "message": "Application error: SESSION_NOT_FOUND",
           "data": {
             "additionalProperties": false,
@@ -4869,7 +4869,7 @@
           }
         },
         {
-          "code": -32066,
+          "code": -32067,
           "message": "Application error: TURN_NOT_FOUND",
           "data": {
             "additionalProperties": false,
@@ -5017,7 +5017,7 @@
       },
       "errors": [
         {
-          "code": -32064,
+          "code": -32065,
           "message": "Application error: SESSION_NOT_FOUND",
           "data": {
             "additionalProperties": false,
@@ -6428,7 +6428,7 @@
       },
       "errors": [
         {
-          "code": -32063,
+          "code": -32064,
           "message": "Application error: SELECTED_FORK_CONTROL_UNSUPPORTED",
           "data": {
             "additionalProperties": false,
@@ -6672,7 +6672,7 @@
           }
         },
         {
-          "code": -32067,
+          "code": -32068,
           "message": "Application error: UNSUPPORTED_BUNDLE_HASH",
           "data": {
             "additionalProperties": false,
@@ -6888,7 +6888,7 @@
           }
         },
         {
-          "code": -32061,
+          "code": -32062,
           "message": "Application error: RUN_NOT_FOUND",
           "data": {
             "additionalProperties": false,
@@ -7498,7 +7498,7 @@
       },
       "errors": [
         {
-          "code": -32063,
+          "code": -32064,
           "message": "Application error: SELECTED_FORK_CONTROL_UNSUPPORTED",
           "data": {
             "additionalProperties": false,
@@ -8239,7 +8239,7 @@
       },
       "errors": [
         {
-          "code": -32063,
+          "code": -32064,
           "message": "Application error: SELECTED_FORK_CONTROL_UNSUPPORTED",
           "data": {
             "additionalProperties": false,
@@ -8600,7 +8600,7 @@
       },
       "errors": [
         {
-          "code": -32063,
+          "code": -32064,
           "message": "Application error: SELECTED_FORK_CONTROL_UNSUPPORTED",
           "data": {
             "additionalProperties": false,
@@ -8877,7 +8877,7 @@
       },
       "errors": [
         {
-          "code": -32063,
+          "code": -32064,
           "message": "Application error: SELECTED_FORK_CONTROL_UNSUPPORTED",
           "data": {
             "additionalProperties": false,
@@ -9276,7 +9276,7 @@
       },
       "errors": [
         {
-          "code": -32063,
+          "code": -32064,
           "message": "Application error: SELECTED_FORK_CONTROL_UNSUPPORTED",
           "data": {
             "additionalProperties": false,
@@ -9762,7 +9762,7 @@
     },
     {
       "name": "run.continue",
-      "description": "Resume an operator-paused run with paired paused lifecycle/control and canonical standing permission. Suspended or orphaned current standing generations refuse RUN_NOT_PAUSED without mutation; use standing controls. The committed transition wakes handed work even when no pipeline work remains.",
+      "description": "Resume an operator-paused run with paired paused lifecycle/control. A deployment/flow run claims live through the unique runs index, refusing RUN_FLOW_ALREADY_LIVE and naming the current sibling if it is already claimed. Continuing an older source never merges work handled by a fork. The committed transition wakes handed work even when no pipeline work remains.",
       "params": [
         {
           "name": "run_id",
@@ -9788,7 +9788,7 @@
       },
       "errors": [
         {
-          "code": -32063,
+          "code": -32064,
           "message": "Application error: SELECTED_FORK_CONTROL_UNSUPPORTED",
           "data": {
             "additionalProperties": false,
@@ -9855,7 +9855,7 @@
           }
         },
         {
-          "code": -32061,
+          "code": -32062,
           "message": "Application error: RUN_NOT_FOUND",
           "data": {
             "additionalProperties": false,
@@ -9893,7 +9893,7 @@
           }
         },
         {
-          "code": -32062,
+          "code": -32063,
           "message": "Application error: RUN_NOT_PAUSED",
           "data": {
             "additionalProperties": false,
@@ -9922,6 +9922,53 @@
                 "required": [
                   "run_id",
                   "current_status"
+                ],
+                "type": "object"
+              },
+              "retryable": {
+                "type": "boolean"
+              }
+            },
+            "required": [
+              "code",
+              "details",
+              "retryable",
+              "correlation_id"
+            ],
+            "type": "object"
+          }
+        },
+        {
+          "code": -32060,
+          "message": "Application error: RUN_FLOW_ALREADY_LIVE",
+          "data": {
+            "additionalProperties": false,
+            "properties": {
+              "code": {
+                "const": "RUN_FLOW_ALREADY_LIVE",
+                "type": "string"
+              },
+              "correlation_id": {
+                "type": "string"
+              },
+              "details": {
+                "additionalProperties": false,
+                "description": "Pause the named live sibling before continuing this run. The partial unique index owns refusal; no second claim check is performed.",
+                "properties": {
+                  "flow_path": {
+                    "type": "string"
+                  },
+                  "live_run_id": {
+                    "$ref": "#/components/schemas/OpaqueId"
+                  },
+                  "run_id": {
+                    "$ref": "#/components/schemas/OpaqueId"
+                  }
+                },
+                "required": [
+                  "run_id",
+                  "live_run_id",
+                  "flow_path"
                 ],
                 "type": "object"
               },
@@ -10020,7 +10067,7 @@
       },
       "errors": [
         {
-          "code": -32061,
+          "code": -32062,
           "message": "Application error: RUN_NOT_FOUND",
           "data": {
             "additionalProperties": false,
@@ -10115,7 +10162,7 @@
       },
       "errors": [
         {
-          "code": -32061,
+          "code": -32062,
           "message": "Application error: RUN_NOT_FOUND",
           "data": {
             "additionalProperties": false,
@@ -10169,7 +10216,7 @@
         {
           "name": "fork_event_id",
           "required": false,
-          "description": "Optional inclusive fork-point event in source_run_id, mutually exclusive with at_start=true. Without either selector the canonical store resolves the latest event or deployment revision once; retries reuse the permanent resolved point.",
+          "description": "Optional inclusive fork-point event in source_run_id, mutually exclusive with at_start=true. Without either selector the canonical store resolves state_revision at the committed run_fork_revision_heads head for every source origin; retries reuse the permanent resolved point. No event is synthesized for this cut.",
           "schema": {
             "$ref": "#/components/schemas/OpaqueId"
           }
@@ -10320,7 +10367,7 @@
           }
         },
         {
-          "code": -32061,
+          "code": -32062,
           "message": "Application error: RUN_NOT_FOUND",
           "data": {
             "additionalProperties": false,
@@ -10679,7 +10726,7 @@
       },
       "errors": [
         {
-          "code": -32061,
+          "code": -32062,
           "message": "Application error: RUN_NOT_FOUND",
           "data": {
             "additionalProperties": false,
@@ -10820,7 +10867,7 @@
       },
       "errors": [
         {
-          "code": -32063,
+          "code": -32064,
           "message": "Application error: SELECTED_FORK_CONTROL_UNSUPPORTED",
           "data": {
             "additionalProperties": false,
@@ -10887,7 +10934,7 @@
           }
         },
         {
-          "code": -32061,
+          "code": -32062,
           "message": "Application error: RUN_NOT_FOUND",
           "data": {
             "additionalProperties": false,
@@ -11332,7 +11379,7 @@
           }
         },
         {
-          "code": -32067,
+          "code": -32068,
           "message": "Application error: UNSUPPORTED_BUNDLE_HASH",
           "data": {
             "additionalProperties": false,
@@ -11961,7 +12008,7 @@
           }
         },
         {
-          "code": -32060,
+          "code": -32061,
           "message": "Application error: RUN_NEVER_COMPLETES",
           "data": {
             "additionalProperties": false,
@@ -12007,7 +12054,7 @@
     },
     {
       "name": "run.stop",
-      "description": "Stop an in-progress run. Pending events are abandoned; in-flight handlers complete or roll back per their own semantics. The selected run-control store terminalizes pending same-run `event_deliveries` rows for canonical runtime subscriber types (`agent` and `node`) as `dead_letter` with `reason_code=run_stopped`, and writes the matching agent or node receipt. For events that already have a platform/pipeline receipt, run.stop preserves that receipt as the authoritative routing outcome while terminalizing the pending delivery. When a stopped event lacks a platform/pipeline receipt and no active delivery remains, the store writes a stopped-run pipeline dead-letter so missing-pipeline-receipt replay cannot resurrect abandoned work. The committed response reports timer projection recovery as complete, pending in the family lifecycle recovery loops, or failed with a diagnostic. Idempotent replay returns that exact response and never repeats the committed stop.\n",
+      "description": "Stop an in-progress run. Pending events are abandoned; in-flight handlers complete or roll back per their own semantics. The selected run-control store terminalizes pending same-run `event_deliveries` rows for canonical runtime subscriber types (`agent` and `node`) as `dead_letter` with `reason_code=run_stopped`, and writes the matching agent or node receipt. For events that already have a platform/pipeline receipt, run.stop preserves that receipt as the authoritative routing outcome while terminalizing the pending delivery. When a stopped event lacks a platform/pipeline receipt and no active delivery remains, the store writes a stopped-run pipeline dead-letter so missing-pipeline-receipt replay cannot resurrect abandoned work. The committed response reports timer projection recovery as complete, pending in the family lifecycle recovery loops, or failed with a diagnostic. Idempotent replay returns that exact response and never repeats the committed stop. A live deployment/flow run must be paused first; run.stop refuses RUN_NOT_PAUSED while it is live.\n",
       "params": [
         {
           "name": "run_id",
@@ -12033,7 +12080,7 @@
       },
       "errors": [
         {
-          "code": -32061,
+          "code": -32062,
           "message": "Application error: RUN_NOT_FOUND",
           "data": {
             "additionalProperties": false,
@@ -12088,6 +12135,52 @@
                 "properties": {
                   "current_status": {
                     "$ref": "#/components/schemas/RunStatus"
+                  },
+                  "run_id": {
+                    "$ref": "#/components/schemas/OpaqueId"
+                  }
+                },
+                "required": [
+                  "run_id",
+                  "current_status"
+                ],
+                "type": "object"
+              },
+              "retryable": {
+                "type": "boolean"
+              }
+            },
+            "required": [
+              "code",
+              "details",
+              "retryable",
+              "correlation_id"
+            ],
+            "type": "object"
+          }
+        },
+        {
+          "code": -32063,
+          "message": "Application error: RUN_NOT_PAUSED",
+          "data": {
+            "additionalProperties": false,
+            "properties": {
+              "code": {
+                "const": "RUN_NOT_PAUSED",
+                "type": "string"
+              },
+              "correlation_id": {
+                "type": "string"
+              },
+              "details": {
+                "additionalProperties": false,
+                "properties": {
+                  "current_status": {
+                    "$ref": "#/components/schemas/RunStatus"
+                  },
+                  "detail": {
+                    "description": "Canonical standing-control guidance when suspension or orphaning owns the paused generation; generic run.continue cannot clear that authority.",
+                    "type": "string"
                   },
                   "run_id": {
                     "$ref": "#/components/schemas/OpaqueId"
@@ -12222,7 +12315,7 @@
       },
       "errors": [
         {
-          "code": -32061,
+          "code": -32062,
           "message": "Application error: RUN_NOT_FOUND",
           "data": {
             "additionalProperties": false,
@@ -12332,7 +12425,7 @@
       },
       "errors": [
         {
-          "code": -32061,
+          "code": -32062,
           "message": "Application error: RUN_NOT_FOUND",
           "data": {
             "additionalProperties": false,
@@ -13070,7 +13163,7 @@
       },
       "errors": [
         {
-          "code": -32065,
+          "code": -32066,
           "message": "Application error: STANDING_SERVICE_NOT_FOUND",
           "data": {
             "additionalProperties": false,
@@ -13203,7 +13296,7 @@
       },
       "errors": [
         {
-          "code": -32065,
+          "code": -32066,
           "message": "Application error: STANDING_SERVICE_NOT_FOUND",
           "data": {
             "additionalProperties": false,
@@ -13336,7 +13429,7 @@
       },
       "errors": [
         {
-          "code": -32065,
+          "code": -32066,
           "message": "Application error: STANDING_SERVICE_NOT_FOUND",
           "data": {
             "additionalProperties": false,
@@ -13661,7 +13754,7 @@
           }
         },
         {
-          "code": -32067,
+          "code": -32068,
           "message": "Application error: UNSUPPORTED_BUNDLE_HASH",
           "data": {
             "additionalProperties": false,
@@ -22675,7 +22768,8 @@
               "fork_point_kind": {
                 "enum": [
                   "deployment_revision",
-                  "run_start"
+                  "run_start",
+                  "state_revision"
                 ],
                 "type": "string"
               },
@@ -22975,7 +23069,11 @@
             "additionalProperties": false,
             "properties": {
               "fork_point_kind": {
-                "const": "deployment_revision",
+                "enum": [
+                  "deployment_revision",
+                  "run_start",
+                  "state_revision"
+                ],
                 "type": "string"
               },
               "fork_revision": {
@@ -23080,6 +23178,7 @@
       },
       "RunStatus": {
         "enum": [
+          "live",
           "running",
           "paused",
           "completed",
@@ -26814,8 +26913,55 @@
           "type": "object"
         }
       },
-      "RUN_NEVER_COMPLETES": {
+      "RUN_FLOW_ALREADY_LIVE": {
         "code": -32060,
+        "message": "Application error: RUN_FLOW_ALREADY_LIVE",
+        "data": {
+          "additionalProperties": false,
+          "properties": {
+            "code": {
+              "const": "RUN_FLOW_ALREADY_LIVE",
+              "type": "string"
+            },
+            "correlation_id": {
+              "type": "string"
+            },
+            "details": {
+              "additionalProperties": false,
+              "description": "Pause the named live sibling before continuing this run. The partial unique index owns refusal; no second claim check is performed.",
+              "properties": {
+                "flow_path": {
+                  "type": "string"
+                },
+                "live_run_id": {
+                  "$ref": "#/components/schemas/OpaqueId"
+                },
+                "run_id": {
+                  "$ref": "#/components/schemas/OpaqueId"
+                }
+              },
+              "required": [
+                "run_id",
+                "live_run_id",
+                "flow_path"
+              ],
+              "type": "object"
+            },
+            "retryable": {
+              "type": "boolean"
+            }
+          },
+          "required": [
+            "code",
+            "details",
+            "retryable",
+            "correlation_id"
+          ],
+          "type": "object"
+        }
+      },
+      "RUN_NEVER_COMPLETES": {
+        "code": -32061,
         "message": "Application error: RUN_NEVER_COMPLETES",
         "data": {
           "additionalProperties": false,
@@ -26858,7 +27004,7 @@
         }
       },
       "RUN_NOT_FOUND": {
-        "code": -32061,
+        "code": -32062,
         "message": "Application error: RUN_NOT_FOUND",
         "data": {
           "additionalProperties": false,
@@ -26896,7 +27042,7 @@
         }
       },
       "RUN_NOT_PAUSED": {
-        "code": -32062,
+        "code": -32063,
         "message": "Application error: RUN_NOT_PAUSED",
         "data": {
           "additionalProperties": false,
@@ -26942,7 +27088,7 @@
         }
       },
       "SELECTED_FORK_CONTROL_UNSUPPORTED": {
-        "code": -32063,
+        "code": -32064,
         "message": "Application error: SELECTED_FORK_CONTROL_UNSUPPORTED",
         "data": {
           "additionalProperties": false,
@@ -27009,7 +27155,7 @@
         }
       },
       "SESSION_NOT_FOUND": {
-        "code": -32064,
+        "code": -32065,
         "message": "Application error: SESSION_NOT_FOUND",
         "data": {
           "additionalProperties": false,
@@ -27047,7 +27193,7 @@
         }
       },
       "STANDING_SERVICE_NOT_FOUND": {
-        "code": -32065,
+        "code": -32066,
         "message": "Application error: STANDING_SERVICE_NOT_FOUND",
         "data": {
           "additionalProperties": false,
@@ -27085,7 +27231,7 @@
         }
       },
       "TURN_NOT_FOUND": {
-        "code": -32066,
+        "code": -32067,
         "message": "Application error: TURN_NOT_FOUND",
         "data": {
           "additionalProperties": false,
@@ -27127,7 +27273,7 @@
         }
       },
       "UNSUPPORTED_BUNDLE_HASH": {
-        "code": -32067,
+        "code": -32068,
         "message": "Application error: UNSUPPORTED_BUNDLE_HASH",
         "data": {
           "additionalProperties": false,
@@ -27162,7 +27308,7 @@
         }
       },
       "UNSUPPORTED_BUNDLE_HASH_FORK": {
-        "code": -32068,
+        "code": -32069,
         "message": "Application error: UNSUPPORTED_BUNDLE_HASH_FORK",
         "data": {
           "additionalProperties": false,

@@ -2,68 +2,35 @@ package runtimepersistence
 
 import (
 	"context"
-	"errors"
 	"fmt"
-	"strings"
 	"testing"
 	"time"
 
 	"github.com/division-sh/swarm/internal/config"
+	"github.com/division-sh/swarm/internal/durabledata"
+	"github.com/division-sh/swarm/internal/runtime/authoractivity"
 	"github.com/division-sh/swarm/internal/runtime/core/worklifetime"
+	"github.com/division-sh/swarm/internal/runtime/correlation"
 	"github.com/division-sh/swarm/internal/runtime/effects"
 	"github.com/division-sh/swarm/internal/runtime/executionposture"
-	llmselection "github.com/division-sh/swarm/internal/runtime/llm/selection"
 	"github.com/division-sh/swarm/internal/runtime/runfork"
 	"github.com/division-sh/swarm/internal/runtime/runforkexecution"
-	"github.com/division-sh/swarm/internal/runtime/runforkreadiness"
 	"github.com/division-sh/swarm/internal/runtime/testfixtures/canonicalrouting"
 )
 
-type selectedStoreActivationBoundary struct {
+type selectedStoreFixedPointComponent struct {
 	runforkexecution.SelectedContractForkLifecycle
-	original runfork.RunForkSelectedContractExecutionActivateRequest
-	binding  runfork.RunForkSelectedContractBinding
-	point    runfork.RunForkPoint
-	call     func(context.Context, runfork.RunForkSelectedContractExecutionActivateRequest) (runfork.RunForkActivation, error)
+	point runfork.RunForkPoint
 }
 
-func requireSelectedStoreFinalSettlement(t *testing.T, ctx context.Context, selected *PostgresStore, req runfork.RunForkSelectedContractExecutionActivateRequest) (runfork.RunForkActivation, error) {
-	t.Helper()
-	activation, err := selected.ActivateRunForkForSelectedContractExecution(ctx, req)
-	if err != nil || !activation.Activated {
-		return activation, err
-	}
-	authority, ok := effects.AuthorityFromContext(ctx)
-	if !ok || authority.SelectedFork.ForkRunID != req.ForkRunID {
-		t.Fatal("settlement fixture lost its exact attached authority")
-	}
-	settlementErr := selected.RequireRunForkSelectedContractExecutionSettlement(ctx, authority, req.AllowedSourceEventIDs, req.ExecutionSource)
-	// These hostile fixtures assert business refusal here, not on the immutable activation ACK.
-	if settlementErr == nil || !strings.Contains(settlementErr.Error(), "fork_events_not_selected_contract_lineage") {
-		t.Fatalf("native final settlement error = %v, want fork event lineage blocker", settlementErr)
-	}
-	return activation, settlementErr
+func (f *selectedStoreFixedPointComponent) PlanRunFork(ctx context.Context, request runfork.RunForkPlanRequest) (runfork.RunForkPlan, error) {
+	point := f.point
+	request.At, request.AtStart, request.ResolvedPoint = point.Input, point.Kind == runfork.RunForkPointRunStart, &point
+	return f.SelectedContractForkLifecycle.PlanRunFork(ctx, request)
 }
 
-func (p *selectedStoreActivationBoundary) PlanRunFork(ctx context.Context, req runfork.RunForkPlanRequest) (runfork.RunForkPlan, error) {
-	if req.SourceRunID != p.binding.SourceRunID || req.At != p.point.Input || req.AtStart != (p.point.Kind == runfork.RunForkPointRunStart) {
-		return runfork.RunForkPlan{}, fmt.Errorf("fixture preparation changed the original selected source or selector")
-	}
-	point := p.point
-	req.ResolvedPoint = &point
-	return p.SelectedContractForkLifecycle.PlanRunFork(ctx, req)
-}
-
-func (p *selectedStoreActivationBoundary) MaterializeRunForkForSelectedContractExecution(ctx context.Context, req runforkreadiness.MaterializeRequest) (runfork.RunForkMaterialization, error) {
-	return p.SelectedContractForkLifecycle.RequireMaterializedRunForkForSelectedContractExecution(ctx, p.original.ForkRunID, req)
-}
-
-func (p *selectedStoreActivationBoundary) ActivateRunForkForSelectedContractExecution(ctx context.Context, req runfork.RunForkSelectedContractExecutionActivateRequest) (runfork.RunForkActivation, error) {
-	return p.call(ctx, req)
-}
-
-// The decorator observes only the real native call after staged preparation and
-// attachment. It cannot supply an execution authority or a replacement child.
+// These native controls stop at validation, before the ordinary handoff. Their
+// selected preparation, execution claim and generation grant are real owners.
 func selectedStoreActivationGateForTest(t *testing.T, ctx context.Context, selected any, observed ...runforkexecution.SelectedContractRuntimeExecutionLifecycle) func(runfork.RunForkSelectedContractExecutionActivateRequest, runfork.RunForkPoint, func(context.Context, runfork.RunForkSelectedContractExecutionActivateRequest) (runfork.RunForkActivation, error)) (runfork.RunForkActivation, error) {
 	t.Helper()
 	storeTestWorkOwner(t)
@@ -71,8 +38,8 @@ func selectedStoreActivationGateForTest(t *testing.T, ctx context.Context, selec
 	work := value.(*storeTestWorkFixture)
 	ctx = worklifetime.WithProcess(ctx, work.process)
 	capability := selectedMaterializationProcessForTest(t, work, selected)
-	probe := &selectedStoreActivationBoundary{SelectedContractForkLifecycle: selected.(runforkexecution.SelectedContractForkLifecycle)}
-	owner := selectedStorePreparationOwnerWithForkForTest(t, selected, probe, observed...)
+	fixed := &selectedStoreFixedPointComponent{SelectedContractForkLifecycle: selected.(runforkexecution.SelectedContractForkLifecycle)}
+	owner := selectedStorePreparationOwnerWithForkForTest(t, selected, fixed, observed...)
 	if err := owner.BindSelectedProcess(ctx, work.process, capability); err != nil {
 		t.Fatal(err)
 	}
@@ -84,45 +51,72 @@ func selectedStoreActivationGateForTest(t *testing.T, ctx context.Context, selec
 	if _, err := owner.RecoverSelectedForkContexts(ctx, effects.NewRecoveryRequest(time.Now().UTC(), executionposture.Live), runforkexecution.SelectedForkRecoveryEnvironment{}); err != nil {
 		t.Fatal(err)
 	}
-	repo := canonicalrouting.RepoRoot(t)
-	loader := runforkexecution.SourceArtifactSelectedContractSourceLoader{
-		RepoRoot: repo,
-		Store:    selected.(runforkexecution.SourceArtifactSelectedContractSourceStore),
-	}
+	loader := runforkexecution.SourceArtifactSelectedContractSourceLoader{RepoRoot: canonicalrouting.RepoRoot(t), Store: selected.(runforkexecution.SourceArtifactSelectedContractSourceStore)}
 	return func(original runfork.RunForkSelectedContractExecutionActivateRequest, point runfork.RunForkPoint, call func(context.Context, runfork.RunForkSelectedContractExecutionActivateRequest) (runfork.RunForkActivation, error)) (runfork.RunForkActivation, error) {
-		binding, err := probe.RequireRunForkSelectedContractBinding(ctx, original.ForkRunID)
+		binding, err := selected.(runforkexecution.SelectedContractForkLifecycle).RequireRunForkSelectedContractBinding(ctx, original.ForkRunID)
 		if err != nil {
 			return runfork.RunForkActivation{}, err
 		}
-		if err := point.Validate(); err != nil || point.Kind != binding.ForkPoint.Kind || point.Revision != binding.ForkPoint.Revision || point.EventID != binding.ForkPoint.EventID {
-			return runfork.RunForkActivation{}, fmt.Errorf("fixture lost the original full fixed point: %v", err)
+		if !point.SameIdentity(binding.ForkPoint) {
+			return runfork.RunForkActivation{}, fmt.Errorf("native component lost its original cut")
 		}
-		probe.binding, probe.original, probe.point = binding, original, point
-		reached := false
-		probe.call = func(actualCtx context.Context, actual runfork.RunForkSelectedContractExecutionActivateRequest) (runfork.RunForkActivation, error) {
-			if reached || actual.ForkRunID != original.ForkRunID {
-				return runfork.RunForkActivation{}, fmt.Errorf("staged activation changed the original child or called twice")
-			}
-			reached = true
-			actual.ForkOperation, actual.DataPins = original.ForkOperation, original.DataPins
-			return call(actualCtx, actual)
-		}
-		request := runforkexecution.SelectedContractExecutionRequest{
-			SourceRunID: binding.SourceRunID, At: point.Input, AtStart: point.Kind == runfork.RunForkPointRunStart,
-			AllowSourceFreeze: original.AllowSourceFreeze, Owner: owner, SourceLoader: loader, ContractSelection: binding.ContractSelection,
-			AgentRuntime: runforkexecution.SelectedContractAgentRuntimeOptions{
-				ProcessCapability: capability, ExecutionPosture: executionposture.Live,
-				Config: &config.Config{LLM: config.LLMConfig{Backend: llmselection.BackendAnthropic}},
-			},
-		}
+		fixed.point = point
+		var overrides []durabledata.ExplicitPin
 		if original.ForkOperation != nil {
-			request.DataPinOverrides = original.ForkOperation.DataPinOverrides
+			overrides = original.ForkOperation.DataPinOverrides
 		}
-		result, err := runforkexecution.ExecuteSelectedContractRunFork(ctx, request)
-		err = errors.Join(err, owner.RetireSelectedContexts(context.Background()))
-		if !reached {
-			return result.Activation, fmt.Errorf("original-child execution did not reach the prepared native activation: %w", err)
+		prepared, err := owner.Prepare(ctx, runforkexecution.SelectedContractExecutionRequest{
+			SourceRunID: binding.SourceRunID, At: point.Input, AtStart: point.Kind == runfork.RunForkPointRunStart,
+			ContractSelection: binding.ContractSelection, SourceLoader: loader,
+			DataPinOverrides: overrides,
+			AgentRuntime:     runforkexecution.SelectedContractAgentRuntimeOptions{ProcessCapability: capability, ExecutionPosture: executionposture.Live, Config: &config.Config{LLM: config.LLMConfig{Backend: "anthropic"}}},
+		})
+		if err != nil {
+			return runfork.RunForkActivation{}, err
 		}
-		return result.Activation, err
+		t.Cleanup(func() {
+			if err := prepared.Close(); err != nil {
+				t.Error(err)
+			}
+		})
+		request, err := prepared.MaterializationRequest()
+		if err != nil {
+			return runfork.RunForkActivation{}, err
+		}
+		scope, err := authoractivity.BundleScopeForTarget(ctx, request.SourceArtifactFact.BundleHash())
+		if err != nil {
+			return runfork.RunForkActivation{}, err
+		}
+		nativeCtx := authoractivity.WithScope(correlation.WithSourceArtifactFact(ctx, request.SourceArtifactFact), scope)
+		child, err := fixed.RequireMaterializedRunForkForSelectedContractExecution(nativeCtx, original.ForkRunID, request)
+		if err != nil {
+			return runfork.RunForkActivation{}, err
+		}
+		original.InheritedSchedules = request.Readiness
+		_, original.AllowedSourceEventIDs, _, err = runfork.RunForkContractFrontierEvidenceBinding(request.FrontierAdmission)
+		if err != nil {
+			return runfork.RunForkActivation{}, err
+		}
+		phaseCtx, _, _ := admitSelectedForkNativePhaseForTest(t, nativeCtx, authorActivityReceiptFixture{store: selected.(authorActivityReceiptStore)}, original.ExecutionSource, child, request)
+		// This fixture intentionally has no ordinary target: passing all native
+		// validation must still refuse an ACK at the durable-operation boundary.
+		original.ForkOperation = nil
+		return call(phaseCtx, original)
+	}
+}
+
+func requireSelectedStoreFinalSettlement(t *testing.T, ctx context.Context, selected *PostgresStore, req runfork.RunForkSelectedContractExecutionActivateRequest) (runfork.RunForkActivation, error) {
+	t.Helper()
+	authority, ok := effects.AuthorityFromContext(ctx)
+	if !ok || authority.SelectedFork.ForkRunID != req.ForkRunID {
+		t.Fatal("settlement fixture lost its exact selected authority")
+	}
+	return runfork.RunForkActivation{}, selected.RequireRunForkSelectedContractExecutionSettlement(ctx, authority, req.AllowedSourceEventIDs, req.ExecutionSource)
+}
+
+func requireSelectedNativeValidationBeforeHandoff(t *testing.T, result runfork.RunForkActivation, err error) {
+	t.Helper()
+	if err == nil || err.Error() != "live fork activation requires its durable operation" || result.Activated || result.SourceFrozen || result.ForkRunStatus != runfork.RunForkMaterializedStatus {
+		t.Fatalf("native validation did not stop before ordinary live handoff: %+v err=%v", result, err)
 	}
 }

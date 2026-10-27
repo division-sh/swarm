@@ -127,20 +127,40 @@ func (s *RunLifecycleSQLiteOwner) RegisterCompletionCandidateSink(
 // protocol owns the matching attempt-local handoff reservation.
 func (s *RunLifecyclePostgresOwner) WriteCompletionCandidateTx(
 	ctx context.Context,
-	tx *sql.Tx,
+	attempt *mutationprotocol.Attempt,
 	runID string,
 	dueAt *time.Time,
 ) (runtimerunlifecycle.CandidateRequestResult, error) {
-	return requestPostgresCompletionCandidateTx(ctx, tx, runID, dueAt, false)
+	var selectedNow time.Time
+	var result runtimerunlifecycle.CandidateRequestResult
+	err := attempt.WithSQL(ctx, func(ctx context.Context, tx *sql.Tx) (err error) {
+		result, err = requestPostgresCompletionCandidateTx(ctx, tx, runID, dueAt, false, &selectedNow)
+		return err
+	})
+	if err != nil || result.Disposition != runtimerunlifecycle.CandidateRetainedLive {
+		return result, err
+	}
+	result.GenericScheduleActivations, err = s.pipeline.AdvanceFanOutDeliveryBarriersTx(ctx, attempt, runID, selectedNow)
+	return result, err
 }
 
 func (s *RunLifecycleSQLiteOwner) WriteCompletionCandidateTx(
 	ctx context.Context,
-	tx *sql.Tx,
+	attempt *mutationprotocol.Attempt,
 	runID string,
 	dueAt *time.Time,
 ) (runtimerunlifecycle.CandidateRequestResult, error) {
-	return requestSQLiteCompletionCandidateTx(ctx, tx, runID, dueAt, s.now(), false)
+	selectedNow := s.now()
+	var result runtimerunlifecycle.CandidateRequestResult
+	err := attempt.WithSQL(ctx, func(ctx context.Context, tx *sql.Tx) (err error) {
+		result, err = requestSQLiteCompletionCandidateTx(ctx, tx, runID, dueAt, selectedNow, false)
+		return err
+	})
+	if err != nil || result.Disposition != runtimerunlifecycle.CandidateRetainedLive {
+		return result, err
+	}
+	result.GenericScheduleActivations, err = s.pipeline.AdvanceFanOutDeliveryBarriersTx(ctx, attempt, runID, selectedNow)
+	return result, err
 }
 
 func (s *RunLifecyclePostgresOwner) RequestCompletionCandidate(
@@ -197,6 +217,7 @@ func requestPostgresCompletionCandidateTx(
 	runID string,
 	dueAt *time.Time,
 	forceRevision bool,
+	observedAt *time.Time,
 ) (runtimerunlifecycle.CandidateRequestResult, error) {
 	runID = nullUUIDString(runID)
 	if tx == nil || runID == "" {
@@ -229,6 +250,13 @@ func requestPostgresCompletionCandidateTx(
 	}
 	if lifecycleState == runtimerunlifecycle.StatePaused {
 		return runtimerunlifecycle.CandidateRequestResult{Disposition: runtimerunlifecycle.CandidateDeferredPaused}, nil
+	}
+	if lifecycleState == runtimerunlifecycle.StateLive {
+		if observedAt != nil {
+			*observedAt = runtimerunlifecycle.CanonicalTimestamp(selectedNow)
+		}
+		return runtimerunlifecycle.CandidateRequestResult{Disposition: runtimerunlifecycle.CandidateRetainedLive,
+			Candidate: runtimerunlifecycle.Candidate{RunID: runID, BundleHash: bundleHash}}, nil
 	}
 	selectedRunID, err := selectedRunBinding(ctx, tx, true, runID)
 	if err != nil {
@@ -275,7 +303,7 @@ func requestPostgresCompletionCandidateTx(
 }
 
 func RequestPostgresCompletionCandidateTx(ctx context.Context, tx *sql.Tx, runID string, dueAt *time.Time) (runtimerunlifecycle.CandidateRequestResult, error) {
-	return requestPostgresCompletionCandidateTx(ctx, tx, runID, dueAt, false)
+	return requestPostgresCompletionCandidateTx(ctx, tx, runID, dueAt, false, nil)
 }
 
 func requestSQLiteCompletionCandidateTx(
@@ -315,6 +343,10 @@ func requestSQLiteCompletionCandidateTx(
 	}
 	if lifecycleState == runtimerunlifecycle.StatePaused {
 		return runtimerunlifecycle.CandidateRequestResult{Disposition: runtimerunlifecycle.CandidateDeferredPaused}, nil
+	}
+	if lifecycleState == runtimerunlifecycle.StateLive {
+		return runtimerunlifecycle.CandidateRequestResult{Disposition: runtimerunlifecycle.CandidateRetainedLive,
+			Candidate: runtimerunlifecycle.Candidate{RunID: runID, BundleHash: bundleHash}}, nil
 	}
 	selectedRunID, err := selectedRunBinding(ctx, tx, false, runID)
 	if err != nil {
@@ -666,7 +698,7 @@ func (s *RunLifecyclePostgresOwner) finishBlockedPostgresCandidate(
 	nextWake *time.Time,
 ) (runtimerunlifecycle.CompletionResult, error) {
 	if nextWake != nil {
-		request, err := requestPostgresCompletionCandidateTx(ctx, tx, candidate.RunID, nextWake, true)
+		request, err := requestPostgresCompletionCandidateTx(ctx, tx, candidate.RunID, nextWake, true, nil)
 		if err != nil {
 			return runtimerunlifecycle.CompletionResult{}, err
 		}

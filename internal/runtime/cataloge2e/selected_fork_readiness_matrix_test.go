@@ -469,7 +469,7 @@ func runSelectedForkFlowOwnedReadinessBothStores(t *testing.T, selectedStage str
 								t.Fatal(err)
 							}
 						}
-						h := newRuntimeHarnessForBackend(t, root, backend, true)
+						h := newLiveForkCatalogHarness(t, root, backend)
 						selected := runScopedCatalogStore(t, h)
 						path := "worker-flow/worker-001"
 						ctx := worklifetime.WithOccurrence(catalogRunContext(h, catalogRuntimeRunID), h.rt.WorkOccurrence())
@@ -521,28 +521,21 @@ func runSelectedForkFlowOwnedReadinessBothStores(t *testing.T, selectedStage str
 								SelectedContractForkLifecycle: forkStore, t: t, h: h, calls: &activityCalls,
 								SelectedContractRuntimeExecutionLifecycle: forkStore.(forkexecution.SelectedContractRuntimeExecutionLifecycle),
 								hostile: declarations == 0 && frontier == "activity", hostileLoop: frontier == "activity_loop" || frontier == "activity_loop_rule", rejectFinal: frontier == "activity_rejected",
-								settled: make(chan error, 1),
 							}
 							executionOwner = selectedContractExecutionOwnerForCatalogHarness(t, h, lineageProof)
 						}
 						var result forkexecution.SelectedContractExecutionResult
+						operation := catalogStagedForkOperation(t, ctx, forkStore, selection, catalogRuntimeRunID, frontierID)
 						if stage == "staged" {
-							result.Materialization = stageCatalogSelectedContractFork(t, ctx, forkStore, executionOwner, loader, selection, options, catalogRuntimeRunID, frontierID)
+							result.Materialization = stageCatalogSelectedContractFork(t, ctx, forkStore, executionOwner, loader, selection, options, catalogRuntimeRunID, frontierID, operation)
 						} else {
-							result, err = forkexecution.ExecuteSelectedContractRunFork(ctx, forkexecution.SelectedContractExecutionRequest{
-								SourceRunID: catalogRuntimeRunID, At: frontierID, AllowSourceFreeze: true,
+							result, err = executeCatalogLiveFork(t, h, ctx, forkexecution.SelectedContractExecutionRequest{
+								SourceRunID: catalogRuntimeRunID, At: frontierID, AllowSourceFreeze: true, ForkOperation: &operation,
 								Owner: executionOwner, SourceLoader: loader, ContractSelection: selection, AgentRuntime: options,
 							})
 						}
 						forkRun := result.Materialization.ForkRunID
 						var executionEvidence catalogSelectedExecutionObservation
-						if lineageProof != nil && err == nil {
-							select {
-							case err = <-lineageProof.settled:
-							case <-time.After(10 * time.Second):
-								t.Fatal("activity did not reach native final settlement")
-							}
-						}
 						if stage == "initial" && frontier != "activity_rejected" && err == nil {
 							executionEvidence, err = observeCatalogSelectedExecution(t, h, forkRun)
 						}
@@ -554,20 +547,24 @@ func runSelectedForkFlowOwnedReadinessBothStores(t *testing.T, selectedStage str
 								attempts = 2
 							}
 							for attempt := 0; attempt < attempts; attempt++ {
-								activated, activateErr := forkexecution.ActivateSelectedContractRunFork(ctx, forkexecution.SelectedContractActivationGateRequest{
-									ForkRunID: forkRun, AllowSourceFreeze: true, Store: selected,
-									ExecutionOwner: selectedContractExecutionOwnerForCatalogHarness(t, h), SourceLoader: loader, AgentRuntime: options,
-								})
 								if !refused {
-									if activateErr != nil || !activated.Activated || activated.ExecutedEventCount != 0 {
+									activated, activateErr := executeCatalogLiveFork(t, h, ctx, forkexecution.SelectedContractExecutionRequest{
+										SourceRunID: catalogRuntimeRunID, At: frontierID, AllowSourceFreeze: true, ForkOperation: &operation,
+										Owner: executionOwner, SourceLoader: loader, ContractSelection: selection, AgentRuntime: options,
+									})
+									if activateErr != nil || !activated.Activation.Activated || activated.ExecutedEventCount != 1 || activated.Materialization.ForkRunID != forkRun {
 										logSelectedForkRecoveryFailure(t, ctx, h, forkRun, activateErr)
-										t.Fatalf("admitted recovery: activated=%t count=%d fork=%s err=%v", activated.Activated, activated.ExecutedEventCount, forkRun, activateErr)
+										t.Fatalf("admitted recovery: activated=%t count=%d fork=%s err=%v", activated.Activation.Activated, activated.ExecutedEventCount, forkRun, activateErr)
 									}
 									if observed, err := observeCatalogSelectedExecution(t, h, forkRun); err != nil || observed.ExecutedEventCount != 1 {
 										t.Fatalf("retained admitted recovery: evidence=%+v error=%v", observed, err)
 									}
 									continue
 								}
+								activated, activateErr := forkexecution.ActivateSelectedContractRunFork(ctx, forkexecution.SelectedContractActivationGateRequest{
+									ForkRunID: forkRun, AllowSourceFreeze: true, Store: selected,
+									ExecutionOwner: selectedContractExecutionOwnerForCatalogHarness(t, h), SourceLoader: loader, AgentRuntime: options,
+								})
 								if activateErr == nil || !strings.Contains(activateErr.Error(), runfork.RunForkBlockerNonAgentDeliveryReplayUnsupported) || activated.Activated || activated.ExecutedEventCount != 0 || activated.ForkLocalRuntimeContainer != nil || len(activated.ForkEvents) != 0 {
 									t.Fatalf("unsupported history must refuse before execution: %#v %v", activated, activateErr)
 								}
@@ -578,7 +575,7 @@ func runSelectedForkFlowOwnedReadinessBothStores(t *testing.T, selectedStage str
 						} else if frontier == "activity_rejected" {
 							executionEvidence = lineageProof.published
 							t.Logf("rejected activity execution evidence: %v", err)
-							if err == nil || !strings.Contains(err.Error(), "fork activity lineage") || executionEvidence.ExecutedEventCount != 1 || activityCalls.Load() != 1 || !result.Activation.Activated {
+							if err == nil || !strings.Contains(err.Error(), "fork activity lineage") || executionEvidence.ExecutedEventCount != 1 || activityCalls.Load() != 1 || result.Activation.Activated {
 								t.Fatalf("failed final validation lost committed execution evidence: count=%d calls=%d err=%v", executionEvidence.ExecutedEventCount, activityCalls.Load(), err)
 							}
 						} else if frontier == "mixed" {
@@ -592,10 +589,10 @@ func runSelectedForkFlowOwnedReadinessBothStores(t *testing.T, selectedStage str
 									t.Fatal("accepted mixed actor did not acknowledge its final-entry settlement")
 								}
 							}
-							if err != nil || result.ExecutedEventCount != 0 || len(result.ForkEvents) != 0 || executionEvidence.ExecutedEventCount != 1 || !result.Activation.Activated || mixed.calls.Load() != int32(declarations) {
+							if err != nil || result.ExecutedEventCount != 1 || len(result.ForkEvents) != 1 || executionEvidence.ExecutedEventCount != 1 || !result.Activation.Activated || mixed.calls.Load() != int32(declarations) {
 								t.Fatalf("ordinary final entry must retain accepted agent execution: count=%d calls=%d err=%v", result.ExecutedEventCount, mixed.calls.Load(), err)
 							}
-						} else if err != nil || result.ExecutedEventCount != 0 || executionEvidence.ExecutedEventCount != 1 {
+						} else if err != nil || result.ExecutedEventCount != 1 || len(result.ForkEvents) != 1 || executionEvidence.ExecutedEventCount != 1 {
 							t.Logf("frontier=%s activity calls=%d", frontier, activityCalls.Load())
 							var logs operatorread.OperatorRuntimeLogListResult
 							var logsErr error
@@ -673,14 +670,13 @@ func runSelectedForkFlowOwnedReadinessBothStores(t *testing.T, selectedStage str
 								}
 							}
 							if !refused && !rejected {
-								// Activation hands completion to the enclosing runtime; join its
-								// durable outcome before comparing refused reactivation attempts.
-								h.waitForRunTerminalID(forkRun, catalogRuntimePublishTimeout)
+								// Activation read the exact native settlement before ACK;
+								// the completed instance does not retire its live run's bus.
 								if err := executionOwner.RetireSelectedContexts(ctx); err != nil {
 									t.Fatal(err)
 								}
 								terminal, err := selected.LoadRunLifecycleSnapshot(ctx, forkRun)
-								wantStatus := "completed"
+								wantStatus := "live"
 								if err != nil || terminal.Status != wantStatus {
 									t.Fatalf("terminal fork: %+v err=%v; want %s", terminal, err, wantStatus)
 								}

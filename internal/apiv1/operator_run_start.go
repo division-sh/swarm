@@ -86,7 +86,7 @@ func executeRunStart(ctx context.Context, req Request, opts EventPublicationOpti
 		atomicAPICompletion:            true,
 		publishError:                   runStartEventPublishError,
 		buildCompletion: func(_ context.Context, _ EventPublicationOptions, params eventPublicationParams) (any, string, error) {
-			return runStartResult{RunID: params.RunID, EventID: params.EventID, Status: "running", DataBinding: durabledata.DataBinding{State: "none"}}, params.RunID, nil
+			return runStartResult{RunID: params.RunID, EventID: params.EventID, Status: "live", DataBinding: durabledata.DataBinding{State: "none"}}, params.RunID, nil
 		},
 	}
 	completion, _, err := executeOperatorEventPublication(ctx, req, opts, now, cfg)
@@ -155,6 +155,10 @@ func executeDeploymentRunStart(ctx context.Context, req Request, opts EventPubli
 	}
 	committed, err := owner.StartDeploymentRunAcknowledged(ctx, command, idempotency)
 	if err != nil {
+		var live *runtimerunlifecycle.LiveRunConflictError
+		if errors.As(err, &live) {
+			return nil, runControlError(command.RunID, err)
+		}
 		if errors.Is(err, worklifetime.ErrPublicCompletionCapacity) {
 			return nil, NewApplicationError(EventPublishFailedCode, true, map[string]any{"reason": err.Error()})
 		}

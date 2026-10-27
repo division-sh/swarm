@@ -68,7 +68,9 @@ func TestRequestBindingCompiledRetryBothStores(t *testing.T) {
 			}
 			importID, pinID := uuid.NewString(), uuid.NewString()
 			requireCreated(t, start(p.apiBase, importID, "--data", "item.registered=input.jsonl"), importID)
+			pauseFullLifecycleRun(t, p.rpc, importID)
 			requireCreated(t, start(p.apiBase, pinID, "--pin", "item.registered@head"), pinID)
+			pauseFullLifecycleRun(t, p.rpc, pinID)
 			refs := []map[string]any{receiptRestartRef("run_creation", importID), receiptRestartRef("run_creation", pinID)}
 			before := captureReceiptRestartOperations(t, ctx, p.rpc, refs)
 			var head receiptRestartVersionSummary

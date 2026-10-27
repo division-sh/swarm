@@ -60,6 +60,7 @@ func TestDeploymentSourceFixedTPublishedBeforePipelineChangedPinBothStores(t *te
 			newVersion := selectedDeploymentVersion(t, f, newRows)
 			changedRunID := start("new", newRows)
 			assertSelectedDeploymentRows(t, f, server, changedRunID, "singleton", string(newVersion.VersionID), newRows)
+			pauseDeploymentFixtureRun(t, f, changedRunID)
 			gate.armed.Store(true)
 			sourceRunID := start("old", oldRows)
 			var pointEventID string

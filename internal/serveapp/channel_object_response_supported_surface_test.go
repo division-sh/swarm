@@ -48,6 +48,9 @@ func createObjectUncertainCards(t *testing.T, h *channelOnboardingE2EHarness, db
 		})
 		cards[index] = waitChannelAnchorCard(t, db, seed.RunID, decisioncard.AnchorKindStageGate, "reviews")
 		waitUncertainCopyPlan(t, db, cards[index])
+		requireServedOKJSONRPC(t, h.rpcEndpoint(), "run.pause", map[string]any{
+			"run_id": seed.RunID, "idempotency_key": fmt.Sprintf("multi-recovery-pause-%d", index),
+		})
 	}
 	return cards
 }

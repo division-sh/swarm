@@ -9,7 +9,6 @@ import (
 	"testing"
 	"time"
 
-	"github.com/division-sh/swarm/internal/config"
 	"github.com/division-sh/swarm/internal/events"
 	"github.com/division-sh/swarm/internal/events/eventtest"
 	"github.com/division-sh/swarm/internal/operatorread"
@@ -24,16 +23,16 @@ import (
 	"github.com/division-sh/swarm/internal/runtime/executionmode"
 	"github.com/division-sh/swarm/internal/runtime/executionposture"
 	"github.com/division-sh/swarm/internal/runtime/genericschedule"
-	"github.com/division-sh/swarm/internal/runtime/llm/selection"
 	"github.com/division-sh/swarm/internal/runtime/pipeline"
 	"github.com/division-sh/swarm/internal/runtime/replycontext"
+	"github.com/division-sh/swarm/internal/runtime/runcontrol"
 	"github.com/division-sh/swarm/internal/runtime/runfork"
 	"github.com/division-sh/swarm/internal/runtime/runforkadmission"
+	"github.com/division-sh/swarm/internal/runtime/runlifecycle"
 	"github.com/division-sh/swarm/internal/runtime/semanticview"
 	"github.com/division-sh/swarm/internal/runtime/startupownership"
 	"github.com/division-sh/swarm/internal/runtime/testfixtures/canonicalrouting"
 	"github.com/division-sh/swarm/internal/runtime/tools"
-	"github.com/division-sh/swarm/internal/runtime/workspace"
 	"github.com/division-sh/swarm/internal/store/storetest"
 	"github.com/google/uuid"
 )
@@ -77,9 +76,14 @@ func TestIssue642SupportedOneShotReturnsOwnChildReplyBothStores(t *testing.T) {
 			ctx = authoractivity.WithScope(ctx, authoractivity.BundleScope(runForkTestRuntimeInstanceID, loaded.SourceArtifactFact.BundleHash()))
 			bundle, _ := semanticview.Bundle(loaded.Source)
 			ctx = originalSelectedFixtureContext(t, ctx, any(selected).(startupownership.Store))
-			storetest.RequireRun(t, ctx, selected.(storetest.RunFixtureStore), storetest.RunFixture{RunID: runID, Origin: storetest.ScenarioSetupOrigin(),
+			storetest.RequireRun(t, ctx, selected.(storetest.RunFixtureStore), storetest.RunFixture{RunID: runID, Origin: runlifecycle.DeploymentRunOrigin(), LiveScope: runlifecycle.LiveRunScope{FlowPath: "."},
 				Artifact: bundle.SourceArtifact, BundleHash: loaded.SourceArtifactFact.BundleHash(), StartedAt: at})
-			rt, closeServing := nodeReplySourceRuntime(t, ctx, selected, owner, loaded, executionposture.MockOnly)
+			process, found := worklifetime.ProcessFromContext(ctx)
+			if !found {
+				t.Fatal("one-shot requires its exact process owner")
+			}
+			baseline := process.ActiveCount()
+			rt, liveContexts := ordinaryForkRuntimeFixture(t, ctx, selected, owner, loaded, executionposture.MockOnly)
 			ctx = worklifetime.WithOccurrence(ctx, rt.WorkOccurrence())
 			created, err := rt.Manager.EnsureFlowInstance(ctx, pipeline.FlowInstanceActivationRequest{ContractBundle: loaded.Source,
 				Instance: flowidentity.Stored(loaded.Source, ".", runID, runID, "", ""), OccurredAt: at})
@@ -144,27 +148,61 @@ func TestIssue642SupportedOneShotReturnsOwnChildReplyBothStores(t *testing.T) {
 			if err != nil || len(page.Events) != 1 {
 				t.Fatalf("one-shot source has no exact cut: %+v error=%v", page, err)
 			}
+			if err := rt.ReconcileLiveRun(ctx, runID); err != nil {
+				t.Fatal(err)
+			}
+			setup, finishSetup := context.WithTimeout(ctx, 20*time.Second)
+			defer finishSetup()
+			for {
+				clock, found, err := selected.(genericschedule.Store).LoadGenericScheduleActivation(setup, id)
+				if err != nil || !found {
+					t.Fatalf("read actual source clock: %+v err=%v", clock, err)
+				}
+				summary, err := owner.ports.busDurable.DeliveryLifecycle.SummarizeRun(setup, runID)
+				if err != nil {
+					t.Fatal(err)
+				}
+				pending, err := storetest.ReadServedIncompletePipelineHandoffCount(setup, selected, runID)
+				if err != nil {
+					t.Fatal(err)
+				}
+				if clock.Status == genericschedule.StatusFired && summary.Total == summary.Delivered && pending == 0 {
+					sourceTimer = clock
+					break
+				}
+				select {
+				case <-setup.Done():
+					t.Fatalf("original source setup did not settle: timer=%+v delivery=%+v pending=%d err=%v", clock, summary, pending, setup.Err())
+				case <-time.After(10 * time.Millisecond):
+				}
+			}
+			live, found, err := selected.(runlifecycle.LiveRunReader).LoadLiveRun(ctx, runlifecycle.LiveRunScope{FlowPath: "."})
+			if err != nil || !found || live.RunID != runID {
+				t.Fatalf("source setup lost its exact live selection: %+v found=%t err=%v", live, found, err)
+			}
+			parkCtx, releaseSource, err := rt.ParkLiveRun(ctx, live)
+			if err != nil {
+				t.Fatal(err)
+			}
+			paused, err := rt.RunControl.Pause(parkCtx, runcontrol.TransitionRequest{RunID: runID, Reason: "one-shot historical source", ControlledBy: "native fixture"})
+			releaseSource()
+			if err != nil || paused.Status != runcontrol.StatusPaused {
+				t.Fatalf("park original source before conservation baseline: %+v err=%v", paused, err)
+			}
 			before, err := storetest.ReadSelectedForkSourceDomain(ctx, selected, runID)
 			if err != nil {
 				t.Fatal(err)
 			}
-			manager := workspace.NewHostManager()
-			options := workspace.DefaultHostConfig()
-			options.WorkspaceRoot = t.TempDir()
-			manager.SetConfig(options)
-			process, found := worklifetime.ProcessFromContext(ctx)
-			if !found {
-				t.Fatal("one-shot requires its exact process owner")
-			}
-			baseline := process.ActiveCount()
+			manager := rt.Options.WorkspaceLifecycle
 			contractSelection := runforkadmission.SelectedContractSelection(loaded.Source)
 			operation := &runfork.ForkOperationRequest{OperationID: uuid.NewString(), Actor: "one-shot-proof", IdempotencyKey: "own-return",
 				TransportHash: "one-shot-proof-transport", SourceRunID: runID, ForkEventID: page.Events[0].EventID,
 				TargetBundleHash: loaded.SourceArtifactFact.BundleHash(), AllowSourceFreeze: true, ContractSelection: contractSelection}
 			result, err := ExecuteSelectedContractRunFork(ctx, SelectedContractExecutionRequest{SourceRunID: runID, At: page.Events[0].EventID, AllowSourceFreeze: true,
+				LiveRuntime: rt, LiveContexts: liveContexts, LiveRuns: selected.(runlifecycle.LiveRunReader),
 				Owner: owner, SourceLoader: loader, ForkOperation: operation, ContractSelection: contractSelection, AgentRuntime: SelectedContractAgentRuntimeOptions{
 					ExecutionPosture: executionposture.MockOnly, ProcessCapability: owner.ports.contexts.capability, Workspace: manager,
-					Config: &config.Config{LLM: config.LLMConfig{Backend: selection.BackendClaudeCLI}},
+					Config: rt.Config,
 				}})
 			if err != nil || !result.Activation.Activated {
 				t.Fatalf("one-shot child projection/activation: %+v error=%v", result, err)
@@ -212,8 +250,8 @@ func TestIssue642SupportedOneShotReturnsOwnChildReplyBothStores(t *testing.T) {
 			}
 			cleanup, finish := context.WithTimeout(context.WithoutCancel(ctx), 10*time.Second)
 			defer finish()
-			if err := owner.RetireSelectedContexts(cleanup); err != nil || process.ActiveCount() != baseline {
-				t.Fatalf("one-shot selected retirement: work=%d baseline=%d error=%v", process.ActiveCount(), baseline, err)
+			if err := owner.RetireSelectedContexts(cleanup); err != nil {
+				t.Fatalf("one-shot selected retirement: %v", err)
 			}
 			after, err := storetest.ReadSelectedForkSourceDomain(wait, selected, runID)
 			unchanged, present, timerErr := selected.(genericschedule.Store).LoadGenericScheduleActivation(wait, id)
@@ -227,9 +265,8 @@ func TestIssue642SupportedOneShotReturnsOwnChildReplyBothStores(t *testing.T) {
 			if err := clock.Stop(cleanup); err != nil {
 				t.Fatal(err)
 			}
-			closeServing()
-			if err := rt.Shutdown(); err != nil {
-				t.Fatal(err)
+			if err := rt.Shutdown(); err != nil || process.ActiveCount() != baseline {
+				t.Fatalf("one-shot ordinary retirement: work=%d baseline=%d error=%v", process.ActiveCount(), baseline, err)
 			}
 			if err := owner.ports.contexts.capability.Release(cleanup); err != nil {
 				t.Fatal(err)
@@ -249,7 +286,7 @@ func TestIssue642SupportedOneShotReturnsOwnChildReplyBothStores(t *testing.T) {
 			defer recoverDone()
 			entries, err := successor.RecoverSelectedForkContexts(recovery, effects.NewRecoveryRequest(time.Now().UTC(), executionposture.MockOnly), SelectedForkRecoveryEnvironment{
 				SourceLoader: loader, AgentRuntime: SelectedContractAgentRuntimeOptions{ExecutionPosture: executionposture.MockOnly, ProcessCapability: capability,
-					Workspace: manager, Config: &config.Config{LLM: config.LLMConfig{Backend: selection.BackendClaudeCLI}}},
+					Workspace: manager, Config: rt.Config},
 			})
 			if err != nil || len(entries) != 1 || entries[0].RunID != child || entries[0].Operation == nil || !reflect.DeepEqual(*entries[0].Operation, acknowledged) {
 				t.Fatalf("one-shot successor lost its exact acknowledged child: %+v error=%v", entries, err)

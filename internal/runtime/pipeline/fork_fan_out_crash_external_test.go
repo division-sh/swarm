@@ -16,6 +16,7 @@ import (
 
 	"github.com/division-sh/swarm/internal/cliapp"
 	"github.com/division-sh/swarm/internal/operatorread"
+	swarmruntime "github.com/division-sh/swarm/internal/runtime"
 	"github.com/division-sh/swarm/internal/runtime/authoractivity"
 	"github.com/division-sh/swarm/internal/runtime/core/managedexecution"
 	"github.com/division-sh/swarm/internal/runtime/core/worklifetime"
@@ -99,7 +100,8 @@ func TestIssue642MixedFanOutCrashRestartBothStores(t *testing.T) {
 				if err != nil {
 					t.Fatal(err)
 				}
-				_, bundle, err := cliapp.NewSwarmWorkflowModule(repo, canonicalrouting.CopyForkFanOutReceiverOwnership(t))
+				root := canonicalrouting.CopyForkFanOutReceiverOwnership(t)
+				_, bundle, err := cliapp.NewSwarmWorkflowModule(repo, root)
 				if err != nil || bundle.SourceArtifact.BundleHash() != checkpoint.BundleHash {
 					t.Fatalf("restart schema must use the exact original artifact: %v", err)
 				}
@@ -149,14 +151,15 @@ func TestIssue642MixedFanOutCrashRestartBothStores(t *testing.T) {
 				if err := family.BindSelectedProcess(ctx, process, capability); err != nil {
 					t.Fatal(err)
 				}
+				rt := startForkEngineOrdinarySuccessor(t, ctx, selected, process, capability, repo, root)
 				baseline := process.ActiveCount()
 				beforeSource, err := selected.Entities().LoadOperatorEntity(ctx, checkpoint.SourceEntityID, checkpoint.Proof.SourceRunID)
-				if err != nil || forkFixtureEntityRevision(t, beforeSource.Entity.Revision) != checkpoint.SourceRevision || beforeSource.Fields["processed_token"] != "seeded" {
+				if err != nil || forkFixtureEntityRevision(t, beforeSource.Entity.Revision) != checkpoint.SourceRevision || beforeSource.Fields["processed_token"] != checkpoint.Token {
 					t.Fatalf("crash changed the frozen source receiver: %+v err=%v", beforeSource, err)
 				}
 				original, found, err := family.Operations().LoadForkOperation(ctx, "mixed-fanout-crash", "pending-cut", "mixed-fanout-crash-transport")
-				if err != nil || !found || original.Status != runfork.ForkOperationActivated || original.ForkRunID != checkpoint.Proof.ChildRunID || original.Result == nil {
-					t.Fatalf("crash lost exact activation acknowledgment: %+v found=%t err=%v", original, found, err)
+				if err != nil || !found || original.Status != runfork.ForkOperationMaterialized || original.ForkRunID != checkpoint.Proof.ChildRunID || original.Result != nil {
+					t.Fatalf("pre-ACK crash lost its exact materialized operation: %+v found=%t err=%v", original, found, err)
 				}
 				probe := &forkEngineProbe{claimed: make(chan forkEngineObservation, 1), settled: make(chan lifecycleprobe.Signal, 1),
 					resume: make(chan struct{}), resumeSettled: make(chan struct{})}
@@ -169,15 +172,36 @@ func TestIssue642MixedFanOutCrashRestartBothStores(t *testing.T) {
 				options.AgentManagerOptions.TestLifecycleProbe = probe
 				wait, cancel := context.WithTimeout(ctx, 30*time.Second)
 				defer cancel()
-				recovered, err := family.RecoverSelectedForkContexts(wait, effects.NewRecoveryRequest(time.Now().UTC(), executionposture.Live), runforkexecution.SelectedForkRecoveryEnvironment{
-					SourceLoader: runforkexecution.SourceArtifactSelectedContractSourceLoader{RepoRoot: repo, Store: selected.SourceArtifactStore()}, AgentRuntime: options,
-				})
-				if err != nil || len(recovered) != 1 || recovered[0].RunID != checkpoint.Proof.ChildRunID || recovered[0].ExecutionID != checkpoint.Proof.ExecutionID || recovered[0].Disposition != runfork.SelectedForkRecoveryResume {
-					t.Fatalf("mixed handler recovery: %+v err=%v", recovered, err)
+				live := forkEngineLiveRequest(t, rt, selected, runforkexecution.SelectedContractExecutionRequest{})
+				live.AcquireLiveRuntime = func(ctx context.Context, hash string) (*swarmruntime.RuntimeContextUse, error) {
+					use, _, err := live.LiveContexts.AcquireBundleHash(ctx, hash)
+					return use, err
 				}
+				recoveryDone := make(chan struct{})
+				var recovered []runfork.SelectedForkRecoveryResult
+				var recoveryErr error
+				go func() {
+					defer close(recoveryDone)
+					recovered, recoveryErr = family.RecoverSelectedForkContexts(wait, effects.NewRecoveryRequest(time.Now().UTC(), executionposture.Live), runforkexecution.SelectedForkRecoveryEnvironment{
+						SourceLoader: runforkexecution.SourceArtifactSelectedContractSourceLoader{RepoRoot: repo, Store: selected.SourceArtifactStore()}, AgentRuntime: options,
+						AcquireLiveRuntime: live.AcquireLiveRuntime, LiveContexts: live.LiveContexts, LiveRuns: live.LiveRuns,
+					})
+				}()
+				t.Cleanup(func() {
+					cancel()
+					release.Do(func() { close(probe.resume) })
+					releaseSettlement.Do(func() { close(probe.resumeSettled) })
+					select {
+					case <-recoveryDone:
+					case <-time.After(10 * time.Second):
+						t.Error("mixed recovery execution did not join")
+					}
+				})
 				var observed forkEngineObservation
 				select {
 				case observed = <-probe.claimed:
+				case <-recoveryDone:
+					t.Fatalf("mixed recovery returned before its controlled claim: %+v err=%v", recovered, recoveryErr)
 				case <-wait.Done():
 					t.Fatal("recovery did not claim the exact pending receiver")
 				}
@@ -211,6 +235,14 @@ func TestIssue642MixedFanOutCrashRestartBothStores(t *testing.T) {
 				}
 				releaseSettlement.Do(func() { close(probe.resumeSettled) })
 				waitForkEnginePipelineSettlement(t, wait, selected, request, settlement)
+				select {
+				case <-recoveryDone:
+					if recoveryErr != nil || len(recovered) != 1 || recovered[0].RunID != checkpoint.Proof.ChildRunID || recovered[0].ExecutionID != checkpoint.Proof.ExecutionID || recovered[0].Disposition != runfork.SelectedForkRecoveryResume {
+						t.Fatalf("mixed handler recovery: %+v err=%v", recovered, recoveryErr)
+					}
+				case <-wait.Done():
+					t.Fatal(wait.Err())
+				}
 				child, err := selected.Entities().LoadOperatorEntity(wait, checkpoint.ChildEntityID, checkpoint.Proof.ChildRunID)
 				if err != nil || child.Fields["processed_token"] != checkpoint.Token || forkFixtureEntityRevision(t, child.Entity.Revision) != checkpoint.ChildRevision+1 {
 					t.Fatalf("crash/restart lost once-only child business mutation: %+v err=%v", child, err)
@@ -235,8 +267,9 @@ func TestIssue642MixedFanOutCrashRestartBothStores(t *testing.T) {
 					t.Fatalf("restart changed source business state: %+v err=%v", afterSource, err)
 				}
 				again, found, err := family.Operations().LoadForkOperation(wait, original.Request.Actor, original.Request.IdempotencyKey, original.Request.TransportHash)
-				if err != nil || !found || !reflect.DeepEqual(original, again) {
-					t.Fatalf("restart changed the permanent acknowledgment: %+v err=%v", again, err)
+				if err != nil || !found || !reflect.DeepEqual(original.Request, again.Request) || again.ForkRunID != original.ForkRunID ||
+					again.Status != runfork.ForkOperationActivated || again.Result == nil || again.Result.Validate(original.Request, original.ForkRunID) != nil {
+					t.Fatalf("restart changed the exact operation or lost its real settled acknowledgment: %+v err=%v", again, err)
 				}
 				cleanup, cleanupCancel := context.WithTimeout(context.WithoutCancel(wait), 10*time.Second)
 				defer cleanupCancel()

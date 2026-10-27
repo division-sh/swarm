@@ -19,6 +19,7 @@ import (
 	"github.com/division-sh/swarm/internal/runtime/runfork"
 	"github.com/division-sh/swarm/internal/runtime/runforkadmission"
 	"github.com/division-sh/swarm/internal/runtime/runforkreadiness"
+	"github.com/division-sh/swarm/internal/runtime/runlifecycle"
 	"github.com/division-sh/swarm/internal/runtime/startupownership"
 	"github.com/division-sh/swarm/internal/store/storetest"
 	"github.com/google/uuid"
@@ -118,9 +119,11 @@ func TestSelectedForkSameKeyJoinsBoundOwnerBeforeExecutionBothStores(t *testing.
 			at := time.Unix(1700002200, 0).UTC()
 			ctx = originalSelectedFixtureContext(t, ctx, any(selected).(startupownership.Store))
 			storetest.RequireRun(t, ctx, selected.(storetest.RunFixtureStore), storetest.RunFixture{
-				RunID: sourceID, Origin: storetest.ScenarioSetupOrigin(), BundleHash: loaded.SourceArtifactFact.BundleHash(),
-				Artifact: selectedExecutionSourceArtifact(t, loaded.SourceArtifactFact.BundleHash()), StartedAt: at.Add(-time.Minute),
+				RunID: sourceID, Origin: runlifecycle.DeploymentRunOrigin(), BundleHash: loaded.SourceArtifactFact.BundleHash(),
+				LiveScope: runlifecycle.LiveRunScope{FlowPath: "."},
+				Artifact:  selectedExecutionSourceArtifact(t, loaded.SourceArtifactFact.BundleHash()), StartedAt: at.Add(-time.Minute),
 			})
+			liveRuntime, liveContexts := liveForkRuntimeFixture(t, ctx, selected, owner, loaded, sourceID, executionposture.MockOnly)
 			event := eventtest.ExistingRunRootIngressWithRoutingSourceAndMode(eventID, "item.received", "source-runtime", "", []byte(`{}`), 0,
 				sourceID, events.EventEnvelope{}, events.NoRoutingSource(), at, executionmode.Mock)
 			storetest.CommitSemanticEventWithRoutes(t, ctx, selected, event,
@@ -139,6 +142,7 @@ func TestSelectedForkSameKeyJoinsBoundOwnerBeforeExecutionBothStores(t *testing.
 			}
 			request := SelectedContractExecutionRequest{
 				Owner: owner, ForkOperation: &operation, SourceRunID: sourceID, At: selector, AllowSourceFreeze: true,
+				LiveRuntime: liveRuntime, LiveContexts: liveContexts, LiveRuns: selected.(runlifecycle.LiveRunReader),
 				ExpectedBundleHash: loaded.SourceArtifactFact.BundleHash(), ContractSelection: selection,
 				SourceLoader: SourceArtifactSelectedContractSourceLoader{RepoRoot: repo,
 					Store: selected.(SourceArtifactSelectedContractSourceStore)},
@@ -236,8 +240,8 @@ func TestSelectedForkSameKeyJoinsBoundOwnerBeforeExecutionBothStores(t *testing.
 			owner.ports.contexts.mu.Lock()
 			remaining := len(owner.ports.contexts.entries)
 			owner.ports.contexts.mu.Unlock()
-			if remaining != 1 {
-				t.Fatalf("observer preparation leaked: got %d entries, want retained winner only", remaining)
+			if remaining != 0 {
+				t.Fatalf("handoff retained %d selected contexts after the ordinary winner took over", remaining)
 			}
 			if observed, err := observeSelectedRetainedExecution(t, ctx, owner, selected, winner.result.Materialization.ForkRunID); err != nil || observed.ExecutedEventCount != 1 {
 				t.Fatalf("join retained winner before replay conservation: %+v err=%v", observed, err)
@@ -349,9 +353,11 @@ func ownerlessSelectedOperationFixtureFromSource(t *testing.T, backend, sourceRo
 	at := time.Unix(1700002200, 0).UTC()
 	ctx = originalSelectedFixtureContext(t, ctx, any(selected).(startupownership.Store))
 	storetest.RequireRun(t, ctx, selected.(storetest.RunFixtureStore), storetest.RunFixture{
-		RunID: sourceID, Origin: storetest.ScenarioSetupOrigin(), BundleHash: loaded.SourceArtifactFact.BundleHash(),
-		Artifact: selectedExecutionSourceArtifact(t, loaded.SourceArtifactFact.BundleHash()), StartedAt: at.Add(-time.Minute),
+		RunID: sourceID, Origin: runlifecycle.DeploymentRunOrigin(), BundleHash: loaded.SourceArtifactFact.BundleHash(),
+		LiveScope: runlifecycle.LiveRunScope{FlowPath: "."},
+		Artifact:  selectedExecutionSourceArtifact(t, loaded.SourceArtifactFact.BundleHash()), StartedAt: at.Add(-time.Minute),
 	})
+	liveRuntime, liveContexts := liveForkRuntimeFixture(t, ctx, selected, owner, loaded, sourceID, executionposture.MockOnly)
 	event := eventtest.ExistingRunRootIngressWithRoutingSourceAndMode(eventID, events.EventType(eventName), "source-runtime", "", []byte(`{}`), 0,
 		sourceID, events.EventEnvelope{}, events.NoRoutingSource(), at, executionmode.Mock)
 	storetest.CommitSemanticEventWithRoutes(t, ctx, selected, event,
@@ -366,6 +372,7 @@ func ownerlessSelectedOperationFixtureFromSource(t *testing.T, backend, sourceRo
 	}
 	return ctx, SelectedContractExecutionRequest{
 		Owner: owner, ForkOperation: &operation, SourceRunID: sourceID, At: eventID, AllowSourceFreeze: true,
+		LiveRuntime: liveRuntime, LiveContexts: liveContexts, LiveRuns: selected.(runlifecycle.LiveRunReader),
 		ExpectedBundleHash: loaded.SourceArtifactFact.BundleHash(), ContractSelection: selection,
 		SourceLoader: SourceArtifactSelectedContractSourceLoader{RepoRoot: repo,
 			Store: selected.(SourceArtifactSelectedContractSourceStore)},
