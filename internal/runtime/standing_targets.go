@@ -416,6 +416,10 @@ func (rt *Runtime) standingTargetsMutation(ctx context.Context, flowPath string,
 	if rt.workOccurrence == nil {
 		return nil, nil, nil, fmt.Errorf("standing activation requires a runtime work occurrence")
 	}
+	ctx, err = rt.compiledSourceContext(ctx)
+	if err != nil {
+		return nil, nil, nil, err
+	}
 	ctx = rt.authorActivityContext(ctx)
 	if _, hasPreparedOwner := worklifetime.OccurrenceFromContext(ctx); !hasPreparedOwner {
 		ctx = worklifetime.WithRuntimeOccurrence(ctx, rt.workOccurrence)
