@@ -351,7 +351,7 @@ imports:
       tool: telegram.send_message
 stages: []
 `)
-	for _, file := range []string{"agents.yaml", "events.yaml"} {
+	for _, file := range []string{"agents.yaml", "events.yaml", "state.yaml"} {
 		if err := os.Remove(filepath.Join(root, "telegram-chat", file)); err != nil {
 			t.Fatal(err)
 		}

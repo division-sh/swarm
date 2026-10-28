@@ -16,10 +16,7 @@ func CopyNestedNodeReplyDeadlines(t testing.TB) string {
 		if flow != "" {
 			applyClosedReplacement(t, filepath.Join(root, flow, "schema.yaml"), "pins:\n", "stages:\n  waiting: {}\n  ready: {}\n  attention: {}\npins:\n")
 		}
-		writeClosedVariantFile(t, root, filepath.Join(flow, "entities.yaml"), `request_state:
-  expected:
-    type: "[text]"
-    initial: [same-business-key]
+		writeClosedVariantFile(t, root, filepath.Join(flow, "state.yaml"), `expected: ["same-business-key"]
 `)
 	}
 	applyClosedReplacement(t, filepath.Join(root, "nodes.yaml"), `    provider.replied:
@@ -53,10 +50,7 @@ func CopyNestedNodeReplyDeadlines(t testing.TB) string {
 func CopyNestedFanOutReplyDeadlines(t testing.TB) string {
 	t.Helper()
 	root := CopyNestedNodeReplyDeadlines(t)
-	writeClosedVariantFile(t, root, "u/entities.yaml", `work:
-  items:
-    type: "[text]"
-    initial: [same-business-key]
+	writeClosedVariantFile(t, root, "u/state.yaml", `items: ["same-business-key"]
 `)
 	writeClosedVariantFile(t, root, "u/events.yaml", `u.ready:
   account_id: text
@@ -72,7 +66,7 @@ u.replied:
   event_handlers:
     u.requested:
       fan_out:
-        items_from: entity.items
+        items_from: state.items
         as: entry
         identity: entry
         emit:
@@ -98,16 +92,10 @@ func CopyTwoOpenFanOutReplyDeadlines(t testing.TB) string {
 	root := CopyNestedFanOutReply(t)
 	applyClosedReplacement(t, filepath.Join(root, "schema.yaml"), "  waiting: {}\n", "  waiting: {}\n  ready: {}\n  attention: {}\n")
 	applyClosedReplacement(t, filepath.Join(root, "schema.yaml"), "inputs: [request.started, request.stop]", "inputs: [request.started, request.stop, provider.replied]")
-	writeClosedVariantFile(t, root, "entities.yaml", `request_state:
-  expected:
-    type: "[text]"
-    initial: [same-business-key]
+	writeClosedVariantFile(t, root, "state.yaml", `expected: ["same-business-key"]
 `)
 	applyClosedReplacement(t, filepath.Join(root, "provider/schema.yaml"), "pins:\n", "stages:\n  waiting: {}\n  ready: {}\n  attention: {}\npins:\n")
-	writeClosedVariantFile(t, root, "provider/entities.yaml", `request_state:
-  expected:
-    type: "[text]"
-    initial: [same-business-key]
+	writeClosedVariantFile(t, root, "provider/state.yaml", `expected: ["same-business-key"]
 `)
 	applyClosedReplacement(t, filepath.Join(root, "nodes.yaml"), `    provider.replied:
       emit:

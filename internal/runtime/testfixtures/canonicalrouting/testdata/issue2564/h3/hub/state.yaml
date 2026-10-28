@@ -1,0 +1,6 @@
+hub_id: text
+items: [text]
+labels: map[text]text
+positions: [text]
+marker: text
+results: integer

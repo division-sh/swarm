@@ -13,7 +13,7 @@ expect:
   events:
     include: [items.counted]
   entities:
-    - type: core
+    - flow: .
       current_state: done
       fields:
         active_count: 2

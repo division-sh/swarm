@@ -19,7 +19,7 @@ func TestJSONContainedMutationRequiresActualObjectAndRetainsStateOnError(t *test
 		if err != nil {
 			t.Fatal(err)
 		}
-		target, err := entityruntime.ResolveContainedOperationTarget(contract, "entity.values", "merge", true, false)
+		target, err := entityruntime.ResolveContainedOperationTarget(contract, "state.values", "merge", true, false)
 		if err != nil {
 			t.Fatal(err)
 		}
@@ -27,7 +27,7 @@ func TestJSONContainedMutationRequiresActualObjectAndRetainsStateOnError(t *test
 		if err != nil {
 			t.Fatal(err)
 		}
-		result, err := entityruntime.ApplyMutations(contract, metadata, []entityruntime.Mutation{{Operation: "merge", Target: "entity.values", Key: "key", HasKey: true, Value: patch}})
+		result, err := entityruntime.ApplyMutations(contract, metadata, []entityruntime.Mutation{{Operation: "merge", Target: "state.values", Key: "key", HasKey: true, Value: patch}})
 		_, object := existing.(map[string]any)
 		if !object {
 			if err == nil || !reflect.DeepEqual(metadata, before) {
@@ -38,9 +38,9 @@ func TestJSONContainedMutationRequiresActualObjectAndRetainsStateOnError(t *test
 		}
 	}
 	for _, op := range []string{"set", "append", "update"} {
-		path, hasKey, hasIndex := "entity.values", true, false
+		path, hasKey, hasIndex := "state.values", true, false
 		if op != "set" {
-			path, hasKey, hasIndex = "entity.items", false, op == "update"
+			path, hasKey, hasIndex = "state.items", false, op == "update"
 		}
 		target, err := entityruntime.ResolveContainedOperationTarget(contract, path, op, hasKey, hasIndex)
 		if err != nil {

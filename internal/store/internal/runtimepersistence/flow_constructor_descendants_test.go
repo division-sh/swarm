@@ -3,6 +3,9 @@ package runtimepersistence
 import (
 	"context"
 	"errors"
+	"io/fs"
+	"os"
+	"path/filepath"
 	"reflect"
 	"strings"
 	"testing"
@@ -24,15 +27,15 @@ func TestFlowConstructorRootEagerTreeBothStores(t *testing.T) {
 			}
 			t.Run(backend+"/"+shape, func(t *testing.T) {
 				documents := map[string]string{
-					"schema.yaml":                "name: root-construction\nstages:\n  pending: {}\n",
-					"scout/schema.yaml":          "name: scout\nstages:\n  pending: {}\n",
-					"scout/detail/schema.yaml":   "name: detail\n",
-					"scout/detail/entities.yaml": "detail:\n  marker: {type: text, initial: original}\n",
+					"schema.yaml":              "name: root-construction\nstages:\n  pending: {}\n",
+					"scout/schema.yaml":        "name: scout\nstages:\n  pending: {}\n",
+					"scout/detail/schema.yaml": "name: detail\n",
+					"scout/detail/state.yaml":  "marker: \"original\"\n",
 				}
 				if keyed {
 					documents["schema.yaml"] = "name: root-construction\ninstance: request_id\nstages:\n  pending: {}\npins:\n  inputs:\n    - task.started\n"
 					documents["events.yaml"] = "task.started:\n  request_id: text\n"
-					documents["entities.yaml"] = "request:\n  request_id: text\n"
+					documents["state.yaml"] = "request_id: text\n"
 				}
 				f := newReceiverConfigActivationFixtureWithDocuments(t, backend, false, documents, nil)
 				runID := correlation.RunIDFromContext(f.ctx)
@@ -66,22 +69,71 @@ func TestFlowConstructorRootEagerTreeBothStores(t *testing.T) {
 				}
 			})
 		}
+		t.Run(backend+"/public-node-identity-silent-headers", func(t *testing.T) {
+			source := os.DirFS(filepath.Join(repoRootForRuntimeWriterGuard(t), "internal/releasee2e/testdata/node_identity"))
+			documents := map[string]string{}
+			if err := fs.WalkDir(source, ".", func(path string, entry fs.DirEntry, err error) error {
+				if err != nil || entry.IsDir() {
+					return err
+				}
+				body, err := fs.ReadFile(source, path)
+				if err != nil {
+					return err
+				}
+				documents[path] = string(body)
+				return nil
+			}); err != nil {
+				t.Fatal(err)
+			}
+			f := newReceiverConfigActivationFixtureWithDocuments(t, backend, false, documents, nil)
+			runID := correlation.RunIDFromContext(f.ctx)
+			req := sqliteFlowActivationRequest(f.bundle, ".", runID, "", runID)
+			req.Instance = flowidentity.Stored(req.ContractBundle, ".", runID, runID, runID, "")
+			plan, err := f.manager.PrepareFlowInstanceActivation(f.ctx, req)
+			if err != nil {
+				t.Fatal(err)
+			}
+			result, err := (agentFixtureFlowActivationCommitter{store: f.store}).CommitFlowInstanceActivation(f.ctx, plan)
+			if err != nil || !result.Acknowledged || !result.Created {
+				t.Fatalf("public fixture constructor commit: %+v %v", result, err)
+			}
+			instances, err := f.store.(pipeline.WorkflowInstancePersistenceReader).ListWorkflowInstances(f.ctx, runID)
+			wanted := map[string]string{
+				runID:         runID,
+				"left":        "84ed5257-7dbc-5111-855e-827abd36948b",
+				"right":       "60897d8d-cc87-5daa-b159-577bf736383b",
+				"left/nested": "a4327142-cbc0-50eb-9fb8-43f6a98ea9d0",
+			}
+			if err != nil || len(instances) != len(wanted) {
+				t.Fatalf("exact fieldless constructor population: %+v err=%v", instances, err)
+			}
+			for _, instance := range instances {
+				wantID, found := wanted[instance.StorageRef]
+				if !found || instance.EntityID != wantID || instance.CurrentState != "pending" {
+					t.Fatalf("silent constructed header lost exact identity/stage: %+v want entity_id=%s stage=pending", instance, wantID)
+				}
+				delete(wanted, instance.StorageRef)
+			}
+			if len(wanted) != 0 {
+				t.Fatalf("silent constructed headers omitted: %+v", wanted)
+			}
+		})
 	}
 }
 
 func newEagerFlowConstructorFixture(t *testing.T, backend string) receiverConfigActivationFixture {
 	t.Helper()
 	f := newReceiverConfigActivationFixtureWithDocuments(t, backend, false, map[string]string{
-		"schema.yaml":                       "name: eager-construction\n",
-		"review/schema.yaml":                "name: review\ninstance: request_id\nstages:\n  pending: {}\npins:\n  inputs:\n    - task.started\n",
-		"review/entities.yaml":              "review_item:\n  request_id: text\n",
-		"review/events.yaml":                "task.started:\n",
-		"review/scout/schema.yaml":          "name: scout\nstages:\n  pending: {}\n",
-		"review/scout/detail/schema.yaml":   "name: detail\n",
-		"review/scout/detail/entities.yaml": "detail:\n  marker: {type: text, initial: original}\n",
-		"review/deferred/schema.yaml":       "name: deferred\ninstance: job_id\npins:\n  inputs:\n    - job.started\n",
-		"review/deferred/events.yaml":       "job.started:\n",
-		"review/deferred/entities.yaml":     "job:\n  job_id: text\n",
+		"schema.yaml":                     "name: eager-construction\n",
+		"review/schema.yaml":              "name: review\ninstance: request_id\nstages:\n  pending: {}\npins:\n  inputs:\n    - task.started\n",
+		"review/state.yaml":               "request_id: text\n",
+		"review/events.yaml":              "task.started:\n",
+		"review/scout/schema.yaml":        "name: scout\nstages:\n  pending: {}\n",
+		"review/scout/detail/schema.yaml": "name: detail\n",
+		"review/scout/detail/state.yaml":  "marker: \"original\"\n",
+		"review/deferred/schema.yaml":     "name: deferred\ninstance: job_id\npins:\n  inputs:\n    - job.started\n",
+		"review/deferred/events.yaml":     "job.started:\n",
+		"review/deferred/state.yaml":      "job_id: text\n",
 	}, nil)
 	runID := correlation.RunIDFromContext(f.ctx)
 	request := sqliteFlowActivationRequest(f.bundle, ".", runID, "", runID)

@@ -19,7 +19,6 @@ func EventContextFieldSupported(field string) bool {
 		"target_set",
 		"source_event_id",
 		"emitted_at",
-		"current_state",
 		"run_id",
 		"scope":
 		return true
@@ -45,10 +44,12 @@ func ValidateEventContextReference(ref string) error {
 	field, tail, _ := strings.Cut(ref, ".")
 	field = strings.TrimSpace(field)
 	switch field {
+	case "current_state":
+		return fmt.Errorf("event.current_state is retired; use instance.stage")
 	case "entity_id":
-		return fmt.Errorf("event.entity_id is unsupported on handler expression surfaces; use _entity.id for current receiver context or event.source.entity_id/event.target.entity_id for route identity")
+		return fmt.Errorf("event.entity_id is unsupported on handler expression surfaces; use instance.id for current receiver context or event.source.entity_id/event.target.entity_id for route identity")
 	case "flow_instance":
-		return fmt.Errorf("event.flow_instance is unsupported on handler expression surfaces; use _entity.flow_instance for current receiver context or event.source.flow_instance/event.target.flow_instance for route identity")
+		return fmt.Errorf("event.flow_instance is unsupported on handler expression surfaces; use instance.path for current receiver context or event.source.flow_instance/event.target.flow_instance for route identity")
 	case "source", "target":
 		return validateRouteIdentityReference(field, tail)
 	case "target_set":

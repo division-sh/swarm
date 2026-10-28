@@ -87,7 +87,7 @@ func hydrateWorkflowDataWrite(w *WorkflowDataWrite) error {
 		if (w.TargetField == "" && w.TargetPathRef == "") || !w.Value.IsZero() {
 			return fmt.Errorf("workflow data write with source_field %q must also declare target_field or target_path and no value/expression", w.SourceField)
 		}
-		if paths.Parse(w.SourceField).HasExplicitRoot() {
+		if strings.Contains(w.SourceField, ".") && paths.Parse(w.SourceField).HasExplicitRoot() {
 			return fmt.Errorf("workflow data source_field %q must be payload-local, not scoped", w.SourceField)
 		}
 	case !w.Value.IsZero():
@@ -118,7 +118,7 @@ func hydrateWorkflowDataOperation(w *WorkflowDataWrite) error {
 		return fmt.Errorf("workflow data write op %q must use target, not field/source_field/target_field/target_path", w.Operation)
 	}
 	if strings.TrimSpace(w.TargetRef) != "" && paths.Parse(w.TargetRef).Root != paths.RootEntity {
-		return fmt.Errorf("workflow data write op %q target %q must use entity scope", w.Operation, w.TargetRef)
+		return fmt.Errorf("workflow data write op %q target %q must use state scope", w.Operation, w.TargetRef)
 	}
 	switch w.Operation {
 	case WorkflowDataOperationClear:

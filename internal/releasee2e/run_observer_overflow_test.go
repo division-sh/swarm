@@ -312,7 +312,7 @@ func writeReleaseObserverOverflowFixture(t *testing.T, repo, root string, eventC
 	}
 	writeReleaseFile(t, filepath.Join(root, "payload.json"), string(payload))
 	flowRoot := filepath.Join(root, "contracts", "worker")
-	writeReleaseFile(t, filepath.Join(flowRoot, "entities.yaml"), "worker_state:\n  requests: {type: \"[text]\", initial: []}\n")
+	writeReleaseFile(t, filepath.Join(flowRoot, "state.yaml"), "requests: [text]\n")
 	writeReleaseFile(t, filepath.Join(flowRoot, "events.yaml"), "agent.requested:\n  request: {type: \"[text]?\"}\nagent.completed:\n  flow_result: text?\ncompletion.item:\n  request: text?\n")
 	writeReleaseFile(t, filepath.Join(flowRoot, "schema.yaml"), "name: claude-cli-release-worker\nstages:\n  pending: {}\n  active:\n    timers:\n      - id: complete_after_overflow\n        after: 10s\n        advances_to: done\n  done:\n    final: true\npins:\n  inputs:\n    - task.assigned\n")
 	writeReleaseFile(t, filepath.Join(flowRoot, "nodes.yaml"), fmt.Sprintf(`intake:
@@ -336,9 +336,9 @@ worker-completion:
   event_handlers:
     agent.completed:
       guard:
-        check: _entity.current_state == 'active'
+        check: instance.stage == 'active'
       fan_out:
-        items_from: entity.requests
+        items_from: state.requests
         as: completed_request
         identity: completed_request
         max_items: %d
@@ -353,7 +353,7 @@ completion-sink:
   event_handlers:
     completion.item:
       guard:
-        check: _entity.current_state == 'active'
+        check: instance.stage == 'active'
       advances_to: active
 `, eventCount))
 }

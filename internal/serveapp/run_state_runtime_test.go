@@ -61,9 +61,8 @@ func runStatusSubscriptionSource(t *testing.T, withAgent bool) semanticview.Sour
 	t.Helper()
 	root := t.TempDir()
 	files := map[string]string{
-		"schema.yaml":   "name: run-status\nrequired_agents: []\nstages:\n  ready: {}\npins:\n  inputs: [scan.requested]\n  outputs: [scan.completed]\n",
-		"events.yaml":   "scan.requested:\n  topic: text\nscan.completed:\n",
-		"entities.yaml": "default: {}\n",
+		"schema.yaml": "name: run-status\nrequired_agents: []\nstages:\n  ready: {}\npins:\n  inputs: [scan.requested]\n  outputs: [scan.completed]\n",
+		"events.yaml": "scan.requested:\n  topic: text\nscan.completed:\n",
 	}
 	if withAgent {
 		files["agents.yaml"] = "agent-1:\n  role: worker\n  intent: {inline: Complete the scan.}\n  model: regular\n  subscriptions: [scan.requested]\n"
@@ -461,15 +460,15 @@ func TestRunState_KeepsSupportedRunRunningUntilManagerWorkSettles(t *testing.T) 
 	var (
 		status           string
 		eventCount       int
-		entityCount      int
+		instanceCount    int
 		activeDeliveries int
 	)
 	if err := db.QueryRowContext(ctx, `
 		SELECT COALESCE(status, ''), event_count,
-		       (SELECT COUNT(DISTINCT entity_id) FROM entity_state WHERE run_id = runs.run_id)
+		       (SELECT COUNT(*) FROM flow_instances WHERE run_id = runs.run_id)
 		FROM runs
 		WHERE run_id = $1::uuid
-	`, runID).Scan(&status, &eventCount, &entityCount); err != nil {
+	`, runID).Scan(&status, &eventCount, &instanceCount); err != nil {
 		t.Fatalf("load in-flight run row: %v", err)
 	}
 	if status != "running" {
@@ -482,8 +481,8 @@ func TestRunState_KeepsSupportedRunRunningUntilManagerWorkSettles(t *testing.T) 
 	if semanticCount != 1 || eventCount < semanticCount {
 		t.Fatalf("in-flight total/semantic events = %d/%d, want one semantic root plus durable diagnostics", eventCount, semanticCount)
 	}
-	if entityCount != 1 {
-		t.Fatalf("in-flight entity_count = %d, want 1", entityCount)
+	if instanceCount != 1 {
+		t.Fatalf("in-flight flow instance count = %d, want 1", instanceCount)
 	}
 	if err := db.QueryRowContext(ctx, `
 		SELECT COUNT(*)
@@ -505,23 +504,23 @@ func TestRunState_KeepsSupportedRunRunningUntilManagerWorkSettles(t *testing.T) 
 	for {
 		err := db.QueryRowContext(ctx, `
 			SELECT COALESCE(status, ''), event_count,
-			       (SELECT COUNT(DISTINCT entity_id) FROM entity_state WHERE run_id = runs.run_id)
+			       (SELECT COUNT(*) FROM flow_instances WHERE run_id = runs.run_id)
 			FROM runs
 			WHERE run_id = $1::uuid
-		`, runID).Scan(&status, &eventCount, &entityCount)
+		`, runID).Scan(&status, &eventCount, &instanceCount)
 		if err == nil && status == "completed" {
 			break
 		}
 		if time.Now().After(deadline) {
-			t.Fatalf("run %s did not reach coherent completed state: last err=%v status=%q event_count=%d entity_count=%d", runID, err, status, eventCount, entityCount)
+			t.Fatalf("run %s did not reach coherent completed state: last err=%v status=%q event_count=%d instances=%d", runID, err, status, eventCount, instanceCount)
 		}
 		time.Sleep(10 * time.Millisecond)
 	}
 	if eventCount < 2 {
 		t.Fatalf("completed event_count = %d, want downstream event activity", eventCount)
 	}
-	if entityCount != 1 {
-		t.Fatalf("completed entity_count = %d, want 1", entityCount)
+	if instanceCount != 1 {
+		t.Fatalf("completed flow instance count = %d, want 1", instanceCount)
 	}
 	var extraRunningRows int
 	if err := db.QueryRowContext(ctx, `

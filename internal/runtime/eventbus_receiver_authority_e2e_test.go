@@ -533,7 +533,7 @@ pins:
   inputs:
     - task.assigned
 `,
-		"entities.yaml": "test_entity: {}\n",
+
 		"events.yaml": `task.assigned:
 task.completed:
 task.finalized:

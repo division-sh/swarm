@@ -80,13 +80,13 @@ func TestTargetedDeclaredKeyAgreementAndConflictExecuteThroughDurableEventBusOnB
 							InstanceID: exactRoute.InstanceID, StorageRef: exactPath, EntityID: exactEntityID,
 							WorkflowName: "review", WorkflowVersion: source.WorkflowVersion(), Mode: "template", CurrentState: "active",
 							EnteredStageAt: createdAt, CreatedAt: createdAt, Fields: map[string]any{"receiver_id": exactRoute.InstanceID, "account_id": exactKey, "owner": "exact"},
-							EntityType: "review_entity",
+							EntityType: "state",
 						},
 						{
 							InstanceID: competingRoute.InstanceID, StorageRef: competingPath, EntityID: competingEntityID,
 							WorkflowName: "review", WorkflowVersion: source.WorkflowVersion(), Mode: "template", CurrentState: "active",
 							EnteredStageAt: createdAt, CreatedAt: createdAt, Fields: map[string]any{"receiver_id": competingRoute.InstanceID, "account_id": payloadKey, "owner": "competing"},
-							EntityType: "review_entity",
+							EntityType: "state",
 						},
 					}
 					materialize := func(instance runtimepipeline.WorkflowInstance) {

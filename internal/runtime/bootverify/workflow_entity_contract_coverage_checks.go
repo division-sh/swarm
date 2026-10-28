@@ -99,9 +99,6 @@ func (c *checkerContext) entityWriterCoverage() []Finding {
 			if constructorFields[fieldName] {
 				continue
 			}
-			if strings.TrimSpace(fieldDecl.MaterializeFrom) != "" {
-				continue
-			}
 			if strings.TrimSpace(fieldDecl.UnusedReason) != "" {
 				continue
 			}
@@ -116,7 +113,6 @@ func (c *checkerContext) entityWriterCoverage() []Finding {
 			})
 		}
 	}
-	c.entityWriterCoverageFindings = append(c.entityWriterCoverageFindings, wave1PromptEntityWriteAuthorizationFindings(c.source)...)
 	return c.entityWriterCoverageFindings
 }
 
@@ -274,26 +270,24 @@ func wave1AgentExplicitEntityWriteCoverageByFlow(source semanticview.Source) map
 		return out
 	}
 	for _, record := range wave1ScopedAgentRecords(source) {
-		if len(record.Entry.EntityWrites) == 0 {
+		if !record.Entry.Writes.Declared() {
 			continue
 		}
-		for entityType, decl := range record.Entry.EntityWrites {
-			contract, ok := wave1ResolveEntityWriteContract(source, record.Source, entityType)
-			if !ok {
-				continue
+		contract := wave1EntityContractForFlow(source, record.Source.FlowPath)
+		if !contract.Defined {
+			continue
+		}
+		if out[contract.FlowID] == nil {
+			out[contract.FlowID] = map[string]struct{}{}
+		}
+		if record.Entry.Writes.All {
+			for field := range contract.Contract.Fields {
+				out[contract.FlowID][field] = struct{}{}
 			}
-			if out[contract.FlowID] == nil {
-				out[contract.FlowID] = map[string]struct{}{}
-			}
-			for _, field := range decl.Create.Fields {
-				if _, declared := contract.Contract.Fields[field]; declared {
-					out[contract.FlowID][field] = struct{}{}
-				}
-			}
-			for _, field := range decl.Save.Fields {
-				if _, declared := contract.Contract.Fields[field]; declared {
-					out[contract.FlowID][field] = struct{}{}
-				}
+		}
+		for _, field := range record.Entry.Writes.Fields {
+			if _, declared := contract.Contract.Fields[field]; declared {
+				out[contract.FlowID][field] = struct{}{}
 			}
 		}
 	}
@@ -313,168 +307,6 @@ func wave1AgentExplicitEntityWriteCoverageByFlow(source semanticview.Source) map
 		out[ownerFlowID][target.RootField] = struct{}{}
 	}
 	return out
-}
-
-func wave1PromptEntityWriteAuthorizationFindings(source semanticview.Source) []Finding {
-	bundle, ok := semanticview.Bundle(source)
-	if !ok || bundle == nil {
-		return nil
-	}
-	evidence, err := runtimecontracts.DerivePromptEntityWriteEvidence(bundle)
-	if err != nil {
-		return []Finding{{
-			CheckID:  "entity_writer_coverage",
-			Severity: SeverityHardInvalidity,
-			Message:  fmt.Sprintf("prompt entity write evidence derivation failed: %v", err),
-			Location: defaultFlowLabel(""),
-		}}
-	}
-	findings := make([]Finding, 0)
-	for _, item := range evidence {
-		contract, ok := wave1AgentPromptEntityContract(source, item.Source)
-		if !ok {
-			continue
-		}
-		writeDecl, ok := wave1PromptEntityWriteDecl(item.Entry, contract)
-		if item.CreateEntity && (!ok || !writeDecl.Create.Declared()) {
-			findings = append(findings, Finding{
-				CheckID:  "entity_writer_coverage",
-				Severity: SeverityHardInvalidity,
-				Message:  fmt.Sprintf("agent %s intent declares create_entity for flow %s entity_type %s without matching agents.yaml entity_writes.%s.create authorization", item.AgentID, defaultFlowLabel(contract.FlowID), contract.EntityType, contract.EntityType),
-				Location: item.IntentSource,
-			})
-		}
-		if item.SaveEntity && (!ok || !writeDecl.Save.Declared()) {
-			findings = append(findings, Finding{
-				CheckID:  "entity_writer_coverage",
-				Severity: SeverityHardInvalidity,
-				Message:  fmt.Sprintf("agent %s intent declares save_entity_field for flow %s entity_type %s without matching agents.yaml entity_writes.%s.save authorization", item.AgentID, defaultFlowLabel(contract.FlowID), contract.EntityType, contract.EntityType),
-				Location: item.IntentSource,
-			})
-			continue
-		}
-		if !item.SaveEntity {
-			continue
-		}
-		for _, field := range item.SaveFields {
-			if err := wave1PromptSaveEntityFieldPathValid(contract, field); err != nil {
-				findings = append(findings, Finding{
-					CheckID:  "entity_writer_coverage",
-					Severity: SeverityHardInvalidity,
-					Message:  fmt.Sprintf("agent %s intent declares save_entity_field for undeclared field path %s on flow %s entity_type %s: %v", item.AgentID, field, defaultFlowLabel(contract.FlowID), contract.EntityType, err),
-					Location: item.IntentSource,
-				})
-				continue
-			}
-			if writeDecl.Save.All {
-				continue
-			}
-			if !wave1PromptSaveEntityFieldAuthorized(writeDecl.Save, field) {
-				findings = append(findings, Finding{
-					CheckID:  "entity_writer_coverage",
-					Severity: SeverityHardInvalidity,
-					Message:  fmt.Sprintf("agent %s intent declares save_entity_field for field %s on flow %s entity_type %s without matching agents.yaml entity_writes.%s.save authorization", item.AgentID, field, defaultFlowLabel(contract.FlowID), contract.EntityType, contract.EntityType),
-					Location: item.IntentSource,
-				})
-			}
-		}
-	}
-	return findings
-}
-
-func wave1PromptSaveEntityFieldPathValid(contract wave1EntityContractView, field string) error {
-	field = strings.TrimSpace(field)
-	if field == "" {
-		return fmt.Errorf("field is required")
-	}
-	resolved, err := entityruntime.ResolveFieldPath(entityruntime.Contract{
-		FlowID:     contract.FlowID,
-		EntityType: contract.EntityType,
-		Entity:     contract.Contract,
-		Types:      contract.Types,
-	}, field)
-	if err != nil {
-		return err
-	}
-	if strings.TrimSpace(resolved.FieldDecl.MaterializeFrom) != "" {
-		return fmt.Errorf("field %s is materialized by runtime accumulator projection and is not agent-writable", field)
-	}
-	return nil
-}
-
-func wave1PromptSaveEntityFieldAuthorized(rule runtimecontracts.AgentEntityWriteRule, field string) bool {
-	field = strings.TrimSpace(field)
-	if field == "" {
-		return false
-	}
-	if rule.All {
-		return true
-	}
-	root, _, _ := strings.Cut(field, ".")
-	root = strings.TrimSpace(root)
-	for _, candidate := range rule.Fields {
-		candidate = strings.TrimSpace(candidate)
-		if candidate == "" {
-			continue
-		}
-		if candidate == field || candidate == root {
-			return true
-		}
-	}
-	return false
-}
-
-func wave1PromptEntityWriteDecl(entry runtimecontracts.AgentRegistryEntry, contract wave1EntityContractView) (runtimecontracts.AgentEntityWriteDecl, bool) {
-	if len(entry.EntityWrites) == 0 {
-		return runtimecontracts.AgentEntityWriteDecl{}, false
-	}
-	if contract.FlowID != "" {
-		if value, ok := entry.EntityWrites[contract.FlowID+"."+contract.EntityType]; ok {
-			return value, true
-		}
-	}
-	if value, ok := entry.EntityWrites[contract.EntityType]; ok {
-		return value, true
-	}
-	return runtimecontracts.AgentEntityWriteDecl{}, false
-}
-
-func wave1ResolveEntityWriteContract(source semanticview.Source, agentSource runtimecontracts.ContractItemSource, entityType string) (wave1EntityContractView, bool) {
-	entityType = strings.TrimSpace(entityType)
-	if entityType == "" {
-		return wave1EntityContractView{}, false
-	}
-	if flowID := strings.TrimSpace(agentSource.FlowPath); flowID != "" {
-		view := wave1EntityContractForFlow(source, flowID)
-		if view.Defined {
-			if entityType == view.EntityType || entityType == flowID+"."+view.EntityType {
-				return view, true
-			}
-		}
-	}
-	for _, contract := range wave1DeclaredEntityContracts(source) {
-		if entityType == contract.EntityType {
-			return contract, true
-		}
-		if contract.FlowID != "" && entityType == contract.FlowID+"."+contract.EntityType {
-			return contract, true
-		}
-	}
-	return wave1EntityContractView{}, false
-}
-
-func wave1AgentPromptEntityContract(source semanticview.Source, agentSource runtimecontracts.ContractItemSource) (wave1EntityContractView, bool) {
-	if flowID := strings.TrimSpace(agentSource.FlowPath); flowID != "" {
-		view := wave1EntityContractForFlow(source, flowID)
-		if view.Defined {
-			return view, true
-		}
-	}
-	root := wave1EntityContractForFlow(source, ".")
-	if root.Defined {
-		return root, true
-	}
-	return wave1EntityContractView{}, false
 }
 
 func wave1ScopedAgentRecords(source semanticview.Source) []wave1ScopedAgentRecord {
@@ -699,7 +531,7 @@ func wave1ResolveWriteTargetPath(source semanticview.Source, target wave1WriteTa
 		}
 		return wave1ResolvedType{}, strings.TrimSpace(target.flowID()), strings.TrimSpace(rootField), nil
 	}
-	leaf, ownerFlowID, err := wave1ResolveEntityPathWithOwner(source, target.flowID(), "entity."+path)
+	leaf, ownerFlowID, err := wave1ResolveEntityPathWithOwner(source, target.flowID(), "state."+path)
 	if err != nil {
 		return wave1ResolvedType{}, "", "", err
 	}

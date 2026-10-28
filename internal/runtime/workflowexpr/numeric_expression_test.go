@@ -15,7 +15,7 @@ func TestNumericFamilyCheckedExecution(t *testing.T) {
 	record := contracts.ResolvedCatalogType{Kind: contracts.CatalogTypeObject, Fields: []contracts.ResolvedCatalogField{{Name: "n", Type: number}}}
 	for _, value := range []any{int64(8), float64(8), float64(8.25)} {
 		t.Run(fmt.Sprintf("%T_%v", value, value), func(t *testing.T) {
-			for _, root := range []string{"payload", "entity", "item"} {
+			for _, root := range []string{"payload", "state", "item"} {
 				t.Run(root, func(t *testing.T) {
 					context := ValueContext{Payload: map[string]any{"n": value}, Entity: map[string]any{"n": value}, FanOut: map[string]any{"item": map[string]any{"n": value}}}
 					opts := ValueExpressionOptions{PayloadType: &record, EntityType: &record, ItemType: &record, AllowBareItem: true}
@@ -141,7 +141,7 @@ func TestNumericNestedOptionalAndCollectionEvidence(t *testing.T) {
 	}}
 	values := []any{int64(8), float64(8), float64(8.25)}
 	data := map[string]any{"numbers": values, "by_key": map[string]any{"one": int64(8)}}
-	for _, root := range []string{"payload", "entity", "row"} {
+	for _, root := range []string{"payload", "state", "row"} {
 		opts := ValueExpressionOptions{PayloadType: &record, EntityType: &record, ItemType: &record, ItemAlias: "row"}
 		ctx := ValueContext{Payload: data, Entity: data, FanOut: map[string]any{"item": data}}
 		for _, tc := range []struct {

@@ -150,7 +150,7 @@ func (s FanOutPlanSemantics) Validate(ref FanOutPlanRef) error {
 	if err := ValidateFanOutAlias(s.ItemAlias); err != nil {
 		return err
 	}
-	if s.SourceAfterWrites && !strings.HasPrefix(s.ItemsFrom, "entity.") {
+	if s.SourceAfterWrites && !strings.HasPrefix(s.ItemsFrom, "state.") {
 		return fmt.Errorf("fan-out payload projection cannot select post-write state")
 	}
 	digest, err := canonicaljson.Hash(s)
@@ -478,19 +478,7 @@ func (b *WorkflowContractBundle) fanOutSourceAfterWrites(node runtimeidentity.Ex
 			return true
 		}
 	}
-	if handler.Accumulate == nil || strings.TrimSpace(handler.Accumulate.Into) == "" {
-		return false
-	}
-	primary, err := b.ResolveFlowPrimaryEntity(node.FlowPath())
-	if err != nil {
-		return false
-	}
-	decl, ok := primary.Contract.Fields[sourceField]
-	if !ok {
-		return false
-	}
-	want := strings.TrimSpace(node.NodeID()) + "." + strings.TrimSpace(handler.Accumulate.Into)
-	return strings.TrimSpace(decl.MaterializeFrom) == want
+	return false
 }
 
 func fanOutSiteWrites(handler SystemNodeEventHandler, spec FanOutSpec) []WorkflowDataWrite {
@@ -588,7 +576,7 @@ func (b *WorkflowContractBundle) resolveWorkflowCollectionType(node runtimeident
 		}
 		return CatalogTypeReference{Type: strings.TrimSpace(decl.Type), Catalog: cloneTypeCatalogDocument(primary.Types)}, nil
 	default:
-		return CatalogTypeReference{}, fmt.Errorf("collection source must use payload or entity scope")
+		return CatalogTypeReference{}, fmt.Errorf("collection source must use payload or state scope")
 	}
 }
 
@@ -894,7 +882,7 @@ func (b *WorkflowContractBundle) resolveQueryCollectionSource(node runtimeidenti
 	if entities == "" {
 		return WorkflowCollectionItemResolution{}, fmt.Errorf("query must declare exactly one collection source: source or entities is required")
 	}
-	if paths.Parse(entities).HasExplicitRoot() {
+	if entities != stateEntityType && paths.Parse(entities).HasExplicitRoot() {
 		return WorkflowCollectionItemResolution{}, fmt.Errorf("query entities %q must name an entity table; use source for collection paths", entities)
 	}
 	return b.resolveQueryEntityTable(node, entities)

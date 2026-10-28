@@ -78,12 +78,12 @@ func TestNodeIdentityCanonicalMapKeySQLitePostgres(t *testing.T) {
 			assertSelectedRootRejectsPrivatePublication(t, process, hash, binary, base, config, token, env,
 				map[string]any{"marker": "must-not-create"}, "left/entry.left", "right/entry.right", "left/nested/entry.nested", "work.routed")
 			persisted := map[string][]goldenEvent{}
-			persistedEntities := map[string][]goldenEntitySummary{}
+			persistedEntities := map[string][]nodeIdentityInstance{}
 			for _, scope := range []string{".", "left", "right", "left/nested"} {
 				run, events := executeNodeIdentityWork(t, process, hash, scope, "before-"+scope)
 				persisted[run] = events
 				ctx, cancel := context.WithTimeout(context.Background(), goldenRunDeadline)
-				entities, err := readGoldenEntities(ctx, process.rpc, run)
+				entities, err := readNodeIdentityInstances(ctx, process.rpc, run)
 				cancel()
 				if err != nil {
 					t.Fatal(err)
@@ -116,7 +116,7 @@ func TestNodeIdentityCanonicalMapKeySQLitePostgres(t *testing.T) {
 				if err != nil || !reflect.DeepEqual(got, want) {
 					t.Fatalf("restart readback: %v\nwant %#v\ngot %#v", err, want, got)
 				}
-				entities, err := readGoldenEntities(ctx, process.rpc, run)
+				entities, err := readNodeIdentityInstances(ctx, process.rpc, run)
 				if err != nil || !reflect.DeepEqual(entities, persistedEntities[run]) {
 					t.Fatalf("restart changed the complete constructed tree: %v\nwant %#v\ngot %#v", err, persistedEntities[run], entities)
 				}
@@ -226,8 +226,19 @@ func executeNodeIdentityWork(t *testing.T, process *releaseServeProcess, hash, s
 		t.Logf("runtime logs: %s (%v)", logs, logErr)
 		t.Fatalf("execution %s: %v; diagnosis=%s events=%s\n%s", scope, err, diagnosisJSON, eventsJSON, process.output.String())
 	}
+	emittedEntityIDs := map[string]string{
+		"work.processed":             admitted.RunID,
+		"work.routed":                "84ed5257-7dbc-5111-855e-827abd36948b", // Cross-flow publication carries its target identity.
+		"left/work.processed":        "84ed5257-7dbc-5111-855e-827abd36948b",
+		"left/work.observed":         "84ed5257-7dbc-5111-855e-827abd36948b",
+		"right/work.processed":       "60897d8d-cc87-5daa-b159-577bf736383b",
+		"left/nested/work.processed": "a4327142-cbc0-50eb-9fb8-43f6a98ea9d0",
+	}
 	count := 0
 	for _, event := range observed {
+		if want, emitted := emittedEntityIDs[event.EventName]; emitted && event.EntityID != want {
+			t.Fatalf("public event lost exact constructed entity identity: event=%+v want entity_id=%s", event, want)
+		}
 		if event.EventName != expected.Request && event.EventName != prefix+"work.processed" && !(scope == "." && event.EventName == "work.routed") {
 			continue
 		}
@@ -266,11 +277,11 @@ func executeNodeIdentityWork(t *testing.T, process *releaseServeProcess, hash, s
 	if count != wantCount {
 		t.Fatalf("handler execution count = %d", count)
 	}
-	entities, err := readGoldenEntities(ctx, process.rpc, admitted.RunID)
+	instances, err := readNodeIdentityInstances(ctx, process.rpc, admitted.RunID)
 	if err != nil {
 		t.Fatal(err)
 	}
-	assertNodeIdentityConstructedTree(t, entities, admitted.RunID, scope)
+	assertNodeIdentityConstructedTree(t, instances, admitted.RunID, scope)
 	for other := range nodeIdentityScopes {
 		if other == scope {
 			continue
@@ -305,18 +316,31 @@ func executeNodeIdentityWork(t *testing.T, process *releaseServeProcess, hash, s
 	return admitted.RunID, observed
 }
 
-func assertNodeIdentityConstructedTree(t *testing.T, entities []goldenEntitySummary, runID, selectedScope string) {
+type nodeIdentityInstance struct {
+	FlowInstance string `json:"flow_instance"`
+	CurrentState string `json:"stage"`
+}
+
+func readNodeIdentityInstances(ctx context.Context, rpc *releaseRPCClient, runID string) ([]nodeIdentityInstance, error) {
+	var diagnosis struct {
+		Run       goldenRunHeader        `json:"run"`
+		Instances []nodeIdentityInstance `json:"instances"`
+	}
+	if err := rpc.call(ctx, "run.diagnose", map[string]any{"run_id": runID}, &diagnosis); err != nil {
+		return nil, err
+	}
+	if diagnosis.Run.RunID != runID {
+		return nil, fmt.Errorf("public diagnosis run_id = %q, want %q", diagnosis.Run.RunID, runID)
+	}
+	return diagnosis.Instances, nil
+}
+
+func assertNodeIdentityConstructedTree(t *testing.T, entities []nodeIdentityInstance, runID, selectedScope string) {
 	t.Helper()
 	if len(entities) != len(nodeIdentityScopes) {
 		t.Fatalf("eager constructed tree has %d instances, want %d: %+v", len(entities), len(nodeIdentityScopes), entities)
 	}
 	wanted := make(map[string]string, len(nodeIdentityScopes))
-	entityIDs := map[string]string{
-		runID:         runID,
-		"left":        "84ed5257-7dbc-5111-855e-827abd36948b",
-		"right":       "60897d8d-cc87-5daa-b159-577bf736383b",
-		"left/nested": "a4327142-cbc0-50eb-9fb8-43f6a98ea9d0",
-	}
 	for scope := range nodeIdentityScopes {
 		path, stage := scope, "pending"
 		if scope == "." {
@@ -329,7 +353,7 @@ func assertNodeIdentityConstructedTree(t *testing.T, entities []goldenEntitySumm
 	}
 	for _, entity := range entities {
 		stage, found := wanted[entity.FlowInstance]
-		if !found || entity.RunID != runID || entity.EntityID != entityIDs[entity.FlowInstance] || entity.CurrentState != stage {
+		if !found || entity.CurrentState != stage {
 			t.Fatalf("constructed tree lost exact instance/stage isolation: %+v, want %+v", entities, wanted)
 		}
 		delete(wanted, entity.FlowInstance)

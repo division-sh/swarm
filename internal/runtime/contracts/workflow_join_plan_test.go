@@ -217,7 +217,7 @@ func a2JoinCompilerFixture(t *testing.T, membersType string) (*WorkflowContractB
 	handler := SystemNodeEventHandler{Join: spec}
 	bundle := &WorkflowContractBundle{
 		RootSchema:   &FlowSchemaDocument{},
-		RootEntities: EntityContractsDocument{"Collector": {Fields: map[string]EntityFieldDecl{"members": {Type: membersType}}}},
+		RootEntities: EntityContractsDocument{"state": {Fields: map[string]EntityFieldDecl{"members": {Type: membersType}}}},
 		RootTypes: TypeCatalogDocument{
 			Scalars: map[string]ScalarTypeDecl{"MemberID": {Base: "text"}, "Score": {Base: "integer"}},
 			Enums:   map[string]EnumTypeDecl{"Decision": {Values: []string{"yes", "no"}}},
@@ -234,5 +234,5 @@ func a2JoinCompilerFixture(t *testing.T, membersType string) (*WorkflowContractB
 }
 
 func a2SetJoinMembersType(bundle *WorkflowContractBundle, memberType string) {
-	bundle.RootEntities["Collector"].Fields["members"] = EntityFieldDecl{Type: memberType}
+	bundle.RootEntities["state"].Fields["members"] = EntityFieldDecl{Type: memberType}
 }

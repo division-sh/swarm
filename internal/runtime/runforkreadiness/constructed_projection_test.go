@@ -38,7 +38,7 @@ func TestSelectedRecordedRootAttachmentWithoutDispatch(t *testing.T) {
 	entity := runfork.RunForkEntityState{EntityID: runID, CurrentState: mutationlog.PresentLifecycleState("waiting"), EnteredStateAt: &entered,
 		MaterializationMetadata: &runfork.RunForkMaterializedEntitySnapshotMetadata{
 			Owner: runfork.RunForkMaterializedEntitySnapshotMetadataOwner, Source: runfork.RunForkMaterializedEntitySnapshotMetadataSourceFlowInstance,
-			Mode: "static", EntityType: "test_entity", FlowTemplate: root.TemplateID, FlowInstance: runID,
+			Mode: "static", FlowTemplate: root.TemplateID, FlowInstance: runID,
 			FlowConfig: selectedAgentHeaderConfig(t, root),
 		}}
 	entity.MaterializationMetadata.InitialMaterialization = selectedConstructionReceipt(t, source, runID, root, nil, entered)
@@ -91,7 +91,7 @@ func TestSelectedConstructedActorProjectionCompleteCensus(t *testing.T) {
 					}
 				}
 				if fields {
-					if err := os.WriteFile(filepath.Join(root, flow, "entities.yaml"), []byte("child_state:\n  value: text\n"), 0600); err != nil {
+					if err := os.WriteFile(filepath.Join(root, flow, "state.yaml"), []byte("value: text\n"), 0600); err != nil {
 						t.Fatal(err)
 					}
 				}
@@ -140,7 +140,6 @@ func TestSelectedConstructedActorProjectionCompleteCensus(t *testing.T) {
 						row := runfork.RunForkEntityState{EntityID: child.EntityID, CurrentState: mutationlog.PresentLifecycleState("active"), EnteredStateAt: &entered,
 							MaterializationMetadata: selectedAgentConstructionMetadata(t, source, runID, child, "", entered)}
 						if fields {
-							row.MaterializationMetadata.EntityType = "child_state"
 							row.Fields = map[string]any{"value": key}
 						}
 						row.MaterializationMetadata.InitialMaterialization = selectedConstructionReceipt(t, source, runID, child, row.Fields, entered)

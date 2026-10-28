@@ -31,7 +31,7 @@ connect:
     branch.done:
       guard:
         id: root_owner
-        check: _entity.id != ""
+        check: instance.id != ""
 `,
 		"branch/schema.yaml": `name: branch
 instance: branch_id
@@ -49,15 +49,15 @@ connect:
     from: .
     to: worker/result
 `,
-		"branch/entities.yaml": "branch_state:\n  branch_id:\n    type: string\n    _unused_reason: concrete diamond branch identity\n",
-		"branch/events.yaml":   "work.ready:\n  branch_id: string\nbranch.done:\n  branch_id: string\n",
+		"branch/state.yaml":  "branch_id: string\n",
+		"branch/events.yaml": "work.ready:\n  branch_id: string\nbranch.done:\n  branch_id: string\n",
 		"branch/nodes.yaml": `branch-worker:
   execution_type: system_node
   event_handlers:
     branch.start:
       guard:
         id: branch_owner
-        check: _entity.id != ""
+        check: instance.id != ""
 `,
 
 		"branch/worker/result-static/schema.yaml": `name: static-result
@@ -71,7 +71,7 @@ pins:
     work.ready:
       guard:
         id: inherited_owner
-        check: _entity.id != ""
+        check: instance.id != ""
 `,
 		"branch/worker/result/schema.yaml": `name: singleton-result
 pins:
@@ -101,7 +101,7 @@ pins:
     work.ready:
       guard:
         id: hostile_owner
-        check: _entity.id != ""
+        check: instance.id != ""
 `,
 	}
 	for name, body := range files {

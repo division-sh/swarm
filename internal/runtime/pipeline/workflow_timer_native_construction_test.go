@@ -10,6 +10,7 @@ import (
 	"github.com/division-sh/swarm/internal/runtime/contracts"
 	"github.com/division-sh/swarm/internal/runtime/correlation"
 	"github.com/division-sh/swarm/internal/runtime/effects"
+	"github.com/division-sh/swarm/internal/runtime/entityruntime"
 	"github.com/division-sh/swarm/internal/runtime/executionmode"
 	"github.com/google/uuid"
 )
@@ -32,10 +33,11 @@ func nativeWorkflowTimerSourceActivationForTest(t *testing.T, backend string, bu
 	pc.workflowTimers.logger = bus
 	entityID := correlation.RunIDFromContext(ctx)
 	createdAt := canonicalWorkflowTimerTime(created)
+	state, _ := entityruntime.ResolveForFlow(pc.SemanticSource(), ".")
 	instance := materializedWorkflowInstanceForSource(t, pc.SemanticSource(), ctx, WorkflowInstance{
 		InstanceID: entityID, StorageRef: entityID, EntityID: entityID, WorkflowName: ".",
 		WorkflowVersion: bundle.WorkflowVersion(), CurrentState: "waiting", EnteredStageAt: createdAt,
-		CreatedAt: createdAt, EntityType: "test_entity",
+		CreatedAt: createdAt, EntityType: state.EntityType,
 	})
 	if err := fixture.Construct(ctx, instance); err != nil {
 		t.Fatal(err)

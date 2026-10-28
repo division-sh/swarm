@@ -68,24 +68,18 @@ func TestListSpellingRetirementPublicBothStores(t *testing.T) {
 
 func listRetirementPublicSource() map[string]string {
 	return map[string]string{
-		"schema.yaml":   "name: list-retirement\nstages:\n  ready: {}\n  done: {final: true}\npins:\n  inputs: [proof.append, proof.finish]\n",
-		"types.yaml":    "types:\n  ProbeItem:\n    name: text\n    tags: [text]\n",
-		"entities.yaml": "probe:\n  entries: {type: '[ProbeItem]', initial: []}\n  snapshots:\n    type: '[ProbeItem]'\n    materialize_from: collector.observed\n",
-		"events.yaml":   "proof.append:\n  name: text\n  tags: [text]\nproof.finish:\n",
+		"schema.yaml": "name: list-retirement\nstages:\n  ready: {}\n  done: {final: true}\npins:\n  inputs: [proof.append, proof.finish]\n",
+		"types.yaml":  "types:\n  ProbeItem:\n    name: text\n    tags: [text]\n",
+		"state.yaml":  "entries: [ProbeItem]\n",
+		"events.yaml": "proof.append:\n  name: text\n  tags: [text]\nproof.finish:\n",
 		"nodes.yaml": `collector:
   execution_type: system_node
-  state_schema:
-    fields:
-      observed: [ProbeItem]
   event_handlers:
     proof.append:
-      accumulate:
-        into: observed
-        key: payload.name
       data_accumulation:
         writes:
           - op: append
-            target: entity.entries
+            target: state.entries
             value: payload
     proof.finish:
       advances_to: done
@@ -96,9 +90,8 @@ func listRetirementPublicSource() map[string]string {
 func TestListSpellingRetirementPublicAdmission(t *testing.T) {
 	for _, field := range []struct{ file, original, prefix, element string }{
 		{"types.yaml", "    tags: [text]", "    tags: ", "text"},
-		{"entities.yaml", "  entries: {type: '[ProbeItem]', initial: []}", "  entries: ", "ProbeItem"},
+		{"state.yaml", "entries: [ProbeItem]", "entries: ", "ProbeItem"},
 		{"events.yaml", "  tags: [text]", "  tags: ", "text"},
-		{"nodes.yaml", "      observed: [ProbeItem]", "      observed: ", "ProbeItem"},
 	} {
 		for _, form := range []struct {
 			name, declaration string
@@ -111,11 +104,19 @@ func TestListSpellingRetirementPublicAdmission(t *testing.T) {
 			{"angle", "list<T>", false},
 			{"long", "{type: list, of: T}", false},
 		} {
+			if field.file == "state.yaml" && (form.name == "quoted_bracket" || form.name == "quoted_singleton") {
+				// Quoted state values are literals, covered by state declaration admission.
+				continue
+			}
 			t.Run(field.file+"/"+form.name, func(t *testing.T) {
 				root := t.TempDir()
+				declaration := form.declaration
+				if field.file == "state.yaml" && form.name == "explicit_type" {
+					declaration = "{type: [T], indexed: true}"
+				}
 				for file, body := range listRetirementPublicSource() {
 					if file == field.file {
-						body = strings.Replace(body, field.original, field.prefix+strings.ReplaceAll(form.declaration, "T", field.element), 1)
+						body = strings.Replace(body, field.original, field.prefix+strings.ReplaceAll(declaration, "T", field.element), 1)
 					}
 					write2376SourceFile(t, root, file, body)
 				}
@@ -145,12 +146,12 @@ func waitListRetirementFields(t *testing.T, endpoint, runID string, want []any) 
 		if len(result.Entities) == 1 {
 			entityID := result.Entities[0].EntityID
 			requireServedJSONRPCResult(t, endpoint, "entity.get", map[string]any{"run_id": runID, "entity_id": entityID}, &observed)
-			if reflect.DeepEqual(observed.Fields["entries"], want) && reflect.DeepEqual(observed.Fields["snapshots"], want) {
+			if reflect.DeepEqual(observed.Fields["entries"], want) {
 				return entityID
 			}
 		}
 		time.Sleep(20 * time.Millisecond)
 	}
-	t.Fatalf("native append/projection/readback did not match exact declared values: got=%#v want=%#v", observed, want)
+	t.Fatalf("native append/readback did not match exact declared values: got=%#v want=%#v", observed, want)
 	return ""
 }

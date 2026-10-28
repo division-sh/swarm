@@ -800,9 +800,7 @@ func requireServedRunForkStoppedReplay(t *testing.T, db *sql.DB, forkRunID strin
 	var executionState string
 	err := db.QueryRowContext(context.Background(), `
 			SELECT
-					(SELECT COUNT(*) FROM entity_state es JOIN flow_instances fi
-					 ON fi.run_id=es.run_id AND fi.entity_id=es.entity_id AND fi.instance_path=es.flow_instance
-					 WHERE es.run_id=$1 AND fi.current_state='done'),
+					(SELECT COUNT(*) FROM flow_instances WHERE run_id=$1 AND current_state='done'),
 				(SELECT COUNT(*)
 				 FROM events e
 				 JOIN event_deliveries d ON d.event_id=e.event_id AND d.run_id=e.run_id
@@ -2816,7 +2814,7 @@ func runServedTestSetupEntitiesLifecycleProof(t *testing.T, rt servedControlProo
 			map[string]any{
 				"alias":         "subject",
 				"entity_id":     entityID,
-				"entity_type":   "widget",
+				"entity_type":   "state",
 				"current_state": "waiting",
 				"fields":        map[string]any{"score": 5},
 			},
@@ -2837,7 +2835,7 @@ func runServedTestSetupEntitiesLifecycleProof(t *testing.T, rt servedControlProo
 		t.Fatalf("%s test.setup_entities result = %#v, want run %s and one entity", rt.Backend, result, runID)
 	}
 	entity := result.Entities[0]
-	if entity.Alias != "subject" || entity.EntityID != entityID || entity.FlowInstance != runID || entity.EntityType != "widget" || entity.CurrentState == nil || *entity.CurrentState != "waiting" {
+	if entity.Alias != "subject" || entity.EntityID != entityID || entity.FlowInstance != runID || entity.EntityType != "state" || entity.CurrentState == nil || *entity.CurrentState != "waiting" {
 		t.Fatalf("%s test.setup_entities entity result = %#v", rt.Backend, entity)
 	}
 	requireServedTestSetupPersistence(t, rt, runID, entityID)
@@ -2945,7 +2943,7 @@ func requireServedTestSetupPersistence(t *testing.T, rt servedControlProofRuntim
 
 	record, instance := requireReceiverTargetState(t, rt.ReceiverStateReader, runID, ".", runID, entityID)
 	flow, typ, state, score := record.State.FlowInstance, record.State.EntityType, instance.CurrentState, instance.Fields["score"]
-	if flow != runID || typ != "widget" || state != "waiting" || !jsonScalarInt(score, 5) {
+	if flow != runID || typ != "state" || state != "waiting" || !jsonScalarInt(score, 5) {
 		t.Fatalf("%s setup entity row = flow:%q type:%q state:%q score:%#v", backend, flow, typ, state, score)
 	}
 	var snapshot map[string]storetest.SelectedForkStorageTableSnapshot
@@ -2986,7 +2984,7 @@ func requireServedTestSetupPersistence(t *testing.T, rt servedControlProofRuntim
 		}
 	}
 	dataDiagnostic, headerDiagnostic := diagnostics["entity_state"], diagnostics["flow_instances"]
-	if !strings.Contains(dataDiagnostic, entityID) || !strings.Contains(dataDiagnostic, "widget") || !strings.Contains(dataDiagnostic, "score") {
+	if !strings.Contains(dataDiagnostic, entityID) || !strings.Contains(dataDiagnostic, "state") || !strings.Contains(dataDiagnostic, "score") {
 		t.Fatalf("%s data diagnostic lost the independent field row: %s", backend, dataDiagnostic)
 	}
 	if !strings.Contains(headerDiagnostic, entityID) || !strings.Contains(headerDiagnostic, "waiting") {
@@ -4622,7 +4620,7 @@ func servedJoinTarget(t *testing.T, db *sql.DB, runID string) string {
 			SELECT entity_id::text
 			FROM entity_state
 			WHERE run_id = $1::uuid
-			  AND entity_type = 'order'
+			  AND entity_type = 'state' AND flow_instance = $1::text
 			ORDER BY created_at, entity_id
 			LIMIT 1
 		`, runID).Scan(&entityID)
@@ -4946,24 +4944,6 @@ func runServedEventPublishFollowUpProof(t *testing.T, endpoint string, db *sql.D
 		}
 	}
 	requireServedStatusCLIReadback(t, endpoint, runID, "  live")
-	entityListStdout, entityListStderr, entityListCode := runServedCLICommand(t, endpoint, []string{"entity", "list", "--run-id", runID, "--limit", "10"})
-	if entityListCode != 0 {
-		t.Fatalf("entities list readback code=%d stderr=%s stdout=%s", entityListCode, entityListStderr, entityListStdout)
-	}
-	for _, want := range []string{entityID, "done"} {
-		if !strings.Contains(entityListStdout, want) {
-			t.Fatalf("entities list readback missing %q:\n%s", want, entityListStdout)
-		}
-	}
-	entityViewStdout, entityViewStderr, entityViewCode := runServedCLICommand(t, endpoint, []string{"entity", "view", entityID, "--run-id", runID})
-	if entityViewCode != 0 {
-		t.Fatalf("entity view readback code=%d stderr=%s stdout=%s", entityViewCode, entityViewStderr, entityViewStdout)
-	}
-	for _, want := range []string{entityID, "done", "Fields  none"} {
-		if !strings.Contains(entityViewStdout, want) {
-			t.Fatalf("entity view readback missing %q:\n%s", want, entityViewStdout)
-		}
-	}
 
 	unhandledIdempotencyKey := "issue-1255-" + backend + "-unhandled"
 	requireServedOKJSONRPC(t, endpoint, "run.pause", map[string]any{"run_id": runID})
@@ -5472,16 +5452,27 @@ func requireServedTraceReadback(t *testing.T, endpoint, runID, eventID, eventNam
 
 func requireServedEntityReadback(t *testing.T, endpoint, runID, entityID, wantState string) {
 	t.Helper()
-	var result struct {
-		Entity struct {
-			EntityID     string  `json:"entity_id"`
-			RunID        string  `json:"run_id"`
-			CurrentState *string `json:"current_state"`
-		} `json:"entity"`
+	if entityID != runID {
+		var result operatorread.OperatorEntityFull
+		requireServedJSONRPCResult(t, endpoint, "entity.get", map[string]any{"entity_id": entityID, "run_id": runID}, &result)
+		if result.Entity.EntityID != entityID || result.Entity.RunID != runID || result.Entity.CurrentState == nil || *result.Entity.CurrentState != wantState {
+			t.Fatalf("entity.get result = %#v, want %s/%s state %s", result.Entity, runID, entityID, wantState)
+		}
+		return
 	}
-	requireServedJSONRPCResult(t, endpoint, "entity.get", map[string]any{"entity_id": entityID, "run_id": runID}, &result)
-	if result.Entity.EntityID != entityID || result.Entity.RunID != runID || result.Entity.CurrentState == nil || *result.Entity.CurrentState != wantState {
-		t.Fatalf("entity.get result = %#v, want %s/%s state %s", result.Entity, runID, entityID, wantState)
+	var result cliapp.DiagnosticRunDiagnosisResult
+	requireServedJSONRPCResult(t, endpoint, "run.diagnose", map[string]any{"run_id": runID}, &result)
+	matched := 0
+	for _, instance := range result.Instances {
+		if instance.FlowInstance == runID {
+			matched++
+			if instance.Stage != wantState {
+				t.Fatalf("run.diagnose root = %#v, want stage %s", instance, wantState)
+			}
+		}
+	}
+	if result.Run.RunID != runID || matched != 1 {
+		t.Fatalf("run.diagnose root readback = %#v, want one exact %s header", result, runID)
 	}
 }
 

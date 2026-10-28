@@ -13,13 +13,13 @@ import (
 func TestEntityPresenceAtGateConsumer(t *testing.T) {
 	source := semanticview.Wrap(&rc.WorkflowContractBundle{
 		RootTypes:    rc.TypeCatalogDocument{Types: map[string]rc.NamedTypeDecl{"Profile": {Fields: map[string]rc.TypeFieldSpec{"note": {Type: "text", IsOptional: true}}}}},
-		RootEntities: rc.EntityContractsDocument{"work": {Fields: map[string]rc.EntityFieldDecl{"profile": {Type: "Profile"}}}},
+		RootEntities: rc.EntityContractsDocument{"state": {Fields: map[string]rc.EntityFieldDecl{"profile": {Type: "Profile"}}}},
 	})
 	for _, consumer := range []string{"gate"} {
 		for _, safe := range []bool{false, true} {
-			name, expr := consumer+"/unsafe", `entity.profile.note`
+			name, expr := consumer+"/unsafe", `state.profile.note`
 			if safe {
-				name, expr = consumer+"/decision", `entity.profile.?note.orValue("fallback")`
+				name, expr = consumer+"/decision", `state.profile.?note.orValue("fallback")`
 			}
 			t.Run(name, func(t *testing.T) {
 				fields := map[string]any{"profile": map[string]any{}}
@@ -33,7 +33,7 @@ func TestEntityPresenceAtGateConsumer(t *testing.T) {
 				var err error
 				switch consumer {
 				case "gate":
-					instance := materializedWorkflowInstanceForTest(WorkflowInstance{StorageRef: testPipelineRunID, EntityID: entityID.String(), WorkflowName: ".", EntityType: "work", CurrentState: "review", Fields: fields})
+					instance := materializedWorkflowInstanceForTest(WorkflowInstance{StorageRef: testPipelineRunID, EntityID: entityID.String(), WorkflowName: ".", EntityType: "state", CurrentState: "review", Fields: fields})
 					got, err = evalWorkflowGateContext(expression, testWorkflowInstanceRoute(testPipelineRunID), entityID, instance, source, ".")
 				}
 				if safe && (err != nil || got != "fallback") {

@@ -41,6 +41,13 @@ func listDeclarationSequence(value yamlsource.Value, context string) (string, er
 	if len(items) != 1 {
 		return "", nodeValueError(value, fmt.Errorf("%w: %s list declaration requires exactly one plain unquoted element type; use [T]; for numeric(p,s), use a one-item block sequence", ErrInvalidField, context))
 	}
+	if items[0].Presence() == yamlsource.PresenceSequence || items[0].Presence() == yamlsource.PresenceEmptySequence {
+		element, err := listDeclarationSequence(items[0], context)
+		if err != nil {
+			return "", err
+		}
+		return "[" + element + "]", nil
+	}
 	element, err := items[0].Scalar()
 	if err != nil || element.Tag != "!!str" || element.Style != 0 || strings.TrimSpace(element.Value) == "" {
 		return "", nodeValueError(items[0], fmt.Errorf("%w: %s list declaration requires a plain unquoted type token; quoted literals are data, not declarations; use [T]", ErrInvalidField, context))

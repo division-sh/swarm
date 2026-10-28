@@ -43,7 +43,7 @@ func CopyPublicationActivity(t testing.TB, mode, providerURL string, approval bo
 		writeClosedVariantFile(t, root, "nodes.yaml", "driver:\n  execution_type: system_node\n  subscribes_to: [activity.requested]\n  event_handlers:\n    activity.requested:\n      emit: {event: activity.dispatch, fields: {case_id: payload.case_id, message: payload.message}}\n")
 		connects += fmt.Sprintf("  - {event: activity.dispatch, from: ., to: %s, rename: activity.requested, resolution: select-or-create}\n", flow)
 		writeClosedVariantFile(t, root, "schema.yaml", "name: activity-driver\npins:\n  inputs:\n    - activity.requested\n  outputs:\n    - activity.dispatch\nconnect:\n"+connects)
-		writeClosedVariantFile(t, root, prefix+"entities.yaml", "work:\n  case_id: {type: text, _unused_reason: receiver identity}\n")
+		writeClosedVariantFile(t, root, prefix+"state.yaml", "case_id: text\n")
 		if mode == "nested_template" {
 			writeClosedVariantFile(t, root, "outer/schema.yaml", "name: outer\n")
 		}
@@ -69,7 +69,7 @@ func CopyPublicationActivity(t testing.TB, mode, providerURL string, approval bo
 			declarations = request + declarations
 		}
 		writeClosedVariantFile(t, root, prefix+"events.yaml", declarations)
-		writeClosedVariantFile(t, root, prefix+"entities.yaml", "work:\n  case_id: {type: text, _unused_reason: approval receiver identity}\n")
+		writeClosedVariantFile(t, root, prefix+"state.yaml", "case_id: text\n")
 	}
 	local := "local:\n  execution_type: system_node\n  subscribes_to: [" + strings.Join(results, ", ") + "]\n  event_handlers:\n"
 	for _, event := range results {

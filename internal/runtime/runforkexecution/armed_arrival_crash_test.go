@@ -453,18 +453,29 @@ func testArmedArrivalTimeoutCrashRestartBothStores(t *testing.T, phase string) {
 func pendingSourceDeliveryForReboot(t *testing.T, ctx context.Context, selected any, before map[string]storetest.SelectedForkStorageTableSnapshot, runID string) deliverylifecycle.Snapshot {
 	t.Helper()
 	rows, err := storetest.DecodeSelectedForkSnapshotRows(before["event_deliveries"])
-	if err != nil || len(rows) != 1 {
+	if err != nil {
 		t.Fatalf("original pending source delivery: rows=%d err=%v", len(rows), err)
 	}
-	id, err := rows[0]["delivery_id"].Text()
-	if err != nil {
-		t.Fatal(err)
+	var pending deliverylifecycle.Snapshot
+	matches := 0
+	for _, row := range rows {
+		id, err := row["delivery_id"].Text()
+		if err != nil {
+			t.Fatal(err)
+		}
+		snapshot, err := selected.(deliverylifecycle.Store).Snapshot(ctx, id)
+		if err != nil || snapshot.RunID != runID {
+			t.Fatalf("source delivery escaped its exact run: %+v err=%v", snapshot, err)
+		}
+		if snapshot.Status == deliverylifecycle.StatusPending {
+			pending = snapshot
+			matches++
+		}
 	}
-	snapshot, err := selected.(deliverylifecycle.Store).Snapshot(ctx, id)
-	if err != nil || snapshot.Status != deliverylifecycle.StatusPending || snapshot.RunID != runID {
-		t.Fatalf("source lost its exact deferred delivery: %+v err=%v", snapshot, err)
+	if matches != 1 {
+		t.Fatalf("source lost its exact deferred delivery: pending=%d total=%d", matches, len(rows))
 	}
-	return snapshot
+	return pending
 }
 
 func requirePendingSourceRebootConservation(t *testing.T, ctx context.Context, selected any, before map[string]storetest.SelectedForkStorageTableSnapshot, sourceDelivery deliverylifecycle.Snapshot, rebootAuthority deliverylifecycle.ExecutionAuthority) {
@@ -473,14 +484,24 @@ func requirePendingSourceRebootConservation(t *testing.T, ctx context.Context, s
 		t.Fatal("reboot conservation requires its exact previously pending source delivery")
 	}
 	sourceRows, err := storetest.DecodeSelectedForkSnapshotRows(before["event_deliveries"])
-	if err != nil || len(sourceRows) != 1 {
+	if err != nil {
 		t.Fatalf("original pending source row: rows=%d err=%v", len(sourceRows), err)
 	}
-	id, err := sourceRows[0]["delivery_id"].Text()
-	if err != nil || id != sourceDelivery.DeliveryID {
-		t.Fatalf("original source snapshot differs from its canonical delivery: %s err=%v", id, err)
+	sourceIndex, sourceMatches := -1, 0
+	for i, row := range sourceRows {
+		id, err := row["delivery_id"].Text()
+		if err != nil {
+			t.Fatal(err)
+		}
+		if id == sourceDelivery.DeliveryID {
+			sourceIndex = i
+			sourceMatches++
+		}
 	}
-	recoveredDelivery, err := selected.(deliverylifecycle.Store).Snapshot(ctx, id)
+	if sourceMatches != 1 {
+		t.Fatalf("original source snapshot has %d rows for its canonical pending delivery", sourceMatches)
+	}
+	recoveredDelivery, err := selected.(deliverylifecycle.Store).Snapshot(ctx, sourceDelivery.DeliveryID)
 	if err != nil || !recoveredDelivery.Authority.Equal(rebootAuthority) || recoveredDelivery.UpdatedAt.Before(sourceDelivery.UpdatedAt) {
 		t.Fatalf("pending source delivery lacks exact reboot custody: %+v err=%v", recoveredDelivery, err)
 	}
@@ -495,23 +516,42 @@ func requirePendingSourceRebootConservation(t *testing.T, ctx context.Context, s
 	}
 	comparison := maps.Clone(after)
 	table := after["event_deliveries"]
-	if len(table.Rows) != 1 || !reflect.DeepEqual(table.Columns, before["event_deliveries"].Columns) {
+	if len(table.Rows) != len(sourceRows) || !reflect.DeepEqual(table.Columns, before["event_deliveries"].Columns) {
 		t.Fatalf("reboot changed exact source delivery shape: rows=%d", len(table.Rows))
 	}
-	var cells []storetest.SelectedForkSnapshotCell
-	if err := json.Unmarshal([]byte(table.Rows[0]), &cells); err != nil {
-		t.Fatal(err)
-	}
-	for i, column := range table.Columns {
-		if column == "execution_authority_id" || column == "updated_at" {
-			cells[i] = sourceRows[0][column]
-		}
-	}
-	row, err := json.Marshal(cells)
+	afterRows, err := storetest.DecodeSelectedForkSnapshotRows(table)
 	if err != nil {
 		t.Fatal(err)
 	}
-	table.Rows = []string{string(row)}
+	table.Rows = append([]string(nil), table.Rows...)
+	afterMatches := 0
+	for rowIndex, row := range afterRows {
+		id, err := row["delivery_id"].Text()
+		if err != nil {
+			t.Fatal(err)
+		}
+		if id != sourceDelivery.DeliveryID {
+			continue
+		}
+		afterMatches++
+		var cells []storetest.SelectedForkSnapshotCell
+		if err := json.Unmarshal([]byte(table.Rows[rowIndex]), &cells); err != nil {
+			t.Fatal(err)
+		}
+		for i, column := range table.Columns {
+			if column == "execution_authority_id" || column == "updated_at" {
+				cells[i] = sourceRows[sourceIndex][column]
+			}
+		}
+		normalized, err := json.Marshal(cells)
+		if err != nil {
+			t.Fatal(err)
+		}
+		table.Rows[rowIndex] = string(normalized)
+	}
+	if afterMatches != 1 {
+		t.Fatalf("reboot retained %d rows for the exact pending source delivery", afterMatches)
+	}
 	comparison["event_deliveries"] = table
 	if !reflect.DeepEqual(before, comparison) {
 		t.Fatal("reboot changed source business facts outside its exact pending-delivery custody")

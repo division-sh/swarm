@@ -1,0 +1,3 @@
+portfolio_id: text
+period_id: text
+expected_operating_ids: [text]

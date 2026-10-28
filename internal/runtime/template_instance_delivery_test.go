@@ -192,7 +192,7 @@ func seedTemplateInstanceDeliveryRouteOwner(t testing.TB, ctx context.Context, s
 	return seedRuntimeTestPreparedInstance(t, ctx, selected, pc, runtimepipeline.WorkflowInstance{
 		InstanceID: "inst-1", StorageRef: "operating/inst-1", EntityID: runtimeflowidentity.EntityID("operating/inst-1"),
 		WorkflowName: "operating", WorkflowVersion: source.WorkflowVersion(), Mode: "template", InstanceKey: "inst-1",
-		CurrentState: "initializing", StageDefined: true, EntityType: "operating_state", Fields: map[string]any{"instance_id": "inst-1"},
+		CurrentState: "initializing", StageDefined: true, EntityType: "state", Fields: map[string]any{"instance_id": "inst-1"},
 	})
 }
 
@@ -866,7 +866,7 @@ stages:
 auto_emit_on_create:
   event: opco.product_initialization_requested
 `,
-		"operating/entities.yaml": "operating_state:\n  instance_id: string\n",
+		"operating/state.yaml": "instance_id: string\n",
 		"operating/events.yaml": `opco.product_initialization_requested:
   entity_id: string?
 opco.ceo_ready:

@@ -56,7 +56,7 @@ func prospectiveSelectionObservation(t *testing.T) (FlowInstanceLookupRequest, F
 	at := time.Now().UTC()
 	instance := WorkflowInstance{
 		WorkflowName: "worker", WorkflowVersion: source.WorkflowVersion(), Mode: flow.EffectiveMode(), Status: "active",
-		InstanceID: child.InstanceID, StorageRef: child.InstancePath, EntityID: child.EntityID, EntityType: "item",
+		InstanceID: child.InstanceID, StorageRef: child.InstancePath, EntityID: child.EntityID, EntityType: "state",
 		ParentFlowID: parent.TemplateID, ParentFlowInstance: parent.InstancePath, ParentEntityID: parent.EntityID,
 		InstanceKey: "business-key", CurrentState: "open", Revision: 1, CreatedAt: at, UpdatedAt: at,
 	}

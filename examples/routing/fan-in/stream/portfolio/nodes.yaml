@@ -12,7 +12,7 @@ portfolio-collector:
           - source_field: period_id
             target_field: period_id
           - op: set
-            target: entity.reports
+            target: state.reports
             key: payload.operating_id
             value: payload
           - source_field: revenue

@@ -1768,7 +1768,7 @@ func constructTrackedWorkflowMutationFixture(t *testing.T, selected fanInBarrier
 	fixtureRoot := t.TempDir()
 	writeConformanceSnapshotFixture(t, fixtureRoot, "schema.yaml", "name: mutation-proof\nstages: []\n")
 	writeConformanceSnapshotFixture(t, fixtureRoot, "mutation-flow/schema.yaml", "stages:\n  done: {final: true}\n")
-	writeConformanceSnapshotFixture(t, fixtureRoot, "mutation-flow/entities.yaml", "test_entity:\n  status: text\n")
+	writeConformanceSnapshotFixture(t, fixtureRoot, "mutation-flow/state.yaml", "status: text\n")
 	module := loadConformanceWorkflowFixtureModule(t, fixtureRoot)
 	bundle, ok := runtimesemanticview.Bundle(module.source)
 	if !ok || bundle == nil {
@@ -1871,7 +1871,7 @@ func testTrackedEntityToolWrites(t *testing.T, backend string) {
 	if err != nil {
 		t.Fatalf("read root before generated-tool refusal: %v", err)
 	}
-	_, err = exec.Execute(ctx, "save_accounts_status", map[string]any{
+	_, err = exec.Execute(ctx, "save_state_status", map[string]any{
 		"value": "rechecked",
 	})
 	var refusal *runtimefailures.Error
@@ -1898,10 +1898,10 @@ func testTrackedEntityToolWrites(t *testing.T, backend string) {
 	if err != nil {
 		t.Fatalf("read non-root subject before generated write: %v", err)
 	}
-	if _, err := exec.Execute(ctx, "save_accounts_status", map[string]any{
+	if _, err := exec.Execute(ctx, "save_state_status", map[string]any{
 		"value": "rechecked",
 	}); err != nil {
-		t.Fatalf("save_accounts_status: %v", err)
+		t.Fatalf("save_state_status: %v", err)
 	}
 
 	if err := trackedMutationStateMatchesEntityState(selected, runID, entityID); err != nil {
@@ -2190,14 +2190,14 @@ func newEntityToolConformanceHarness(t *testing.T, backend, flowID string) (cont
 	repoRoot := canonicalrouting.RepoRoot(t)
 	fixtureRoot := t.TempDir()
 	writeConformanceSnapshotFixture(t, fixtureRoot, "schema.yaml", "name: review\nstages:\n  queued: {}\n  done: {final: true}\n")
-	writeConformanceSnapshotFixture(t, fixtureRoot, "entities.yaml", "accounts:\n  score: numeric(10,2)\n  status: text\n")
+	writeConformanceSnapshotFixture(t, fixtureRoot, "state.yaml", "score: numeric(10,2)\nstatus: text\n")
 	writeConformanceSnapshotFixture(t, fixtureRoot, "events.yaml", "accounts.updated:\n")
-	writeConformanceSnapshotFixture(t, fixtureRoot, "agents.yaml", "tester:\n  role: operator\n  intent: {inline: 'Persist the supplied account status.'}\n  model: regular\n  subscriptions: [accounts.updated]\n  entity_writes: {accounts: {save: [status]}}\n")
+	writeConformanceSnapshotFixture(t, fixtureRoot, "agents.yaml", "tester:\n  role: operator\n  intent: {inline: 'Persist the supplied account status.'}\n  model: regular\n  subscriptions: [accounts.updated]\n  writes: [status]\n")
 	if flowID == "accounts" {
 		writeConformanceSnapshotFixture(t, fixtureRoot, "accounts/schema.yaml", "name: accounts\nstages:\n  queued: {}\n  done: {final: true}\n")
-		writeConformanceSnapshotFixture(t, fixtureRoot, "accounts/entities.yaml", "accounts:\n  score: numeric(10,2)\n  status: text\n")
+		writeConformanceSnapshotFixture(t, fixtureRoot, "accounts/state.yaml", "score: numeric(10,2)\nstatus: text\n")
 		writeConformanceSnapshotFixture(t, fixtureRoot, "accounts/events.yaml", "accounts.updated:\n")
-		writeConformanceSnapshotFixture(t, fixtureRoot, "accounts/agents.yaml", "tester:\n  role: operator\n  intent: {inline: 'Persist the supplied account status.'}\n  model: regular\n  subscriptions: [accounts.updated]\n  entity_writes: {accounts: {save: [status]}}\n")
+		writeConformanceSnapshotFixture(t, fixtureRoot, "accounts/agents.yaml", "tester:\n  role: operator\n  intent: {inline: 'Persist the supplied account status.'}\n  model: regular\n  subscriptions: [accounts.updated]\n  writes: [status]\n")
 	}
 	bundle, err := runtimecontracts.LoadWorkflowContractBundleWithOverrides(repoRoot, fixtureRoot, runtimecontracts.DefaultPlatformSpecFile(repoRoot))
 	if err != nil {

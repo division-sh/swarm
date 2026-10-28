@@ -81,12 +81,12 @@ func TestW4NestedExpressionFieldPresence(t *testing.T) {
 					var err error
 					if strings.HasPrefix(slot, "write.") {
 						field := strings.TrimPrefix(slot, "write.")
-						body = "op: append\ntarget: entity.rows\n"
+						body = "op: append\ntarget: state.rows\n"
 						if field == "key" {
-							body = "op: delete\ntarget: entity.rows\n"
+							body = "op: delete\ntarget: state.rows\n"
 						}
 						if field == "index" {
-							body = "op: update\ntarget: entity.rows\nvalue: replacement\n"
+							body = "op: update\ntarget: state.rows\nvalue: replacement\n"
 						}
 						if shape.name != "missing" {
 							body += field + ": " + shape.value + "\n"

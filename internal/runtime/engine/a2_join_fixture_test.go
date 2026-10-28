@@ -76,7 +76,7 @@ func a2TypedJoinFixtureSource(t *testing.T, node identity.ExecutableNode, eventT
 	}
 	bundle := &rc.WorkflowContractBundle{
 		RootSchema: &rc.FlowSchemaDocument{}, RootTypes: resultType.Catalog,
-		RootEntities: rc.EntityContractsDocument{"work": {Fields: fields}},
+		RootEntities: rc.EntityContractsDocument{"state": {Fields: fields}},
 		Nodes:        map[string]rc.SystemNodeContract{node.NodeID(): {EventHandlers: map[string]rc.SystemNodeEventHandler{eventType: handler}}},
 		Events: map[string]rc.EventCatalogEntry{eventType: {Payload: rc.EventPayloadSpec{Properties: map[string]rc.EventFieldSpec{
 			strings.TrimPrefix(spec.Members.By, "payload."): {Type: "text"}, strings.TrimPrefix(spec.Output, "payload."): {Type: resultType.Type},

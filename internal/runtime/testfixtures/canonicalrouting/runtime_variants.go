@@ -5,7 +5,7 @@ import "testing"
 func CopyGeneratedActivity(t testing.TB, nested, subscribeResults bool) string {
 	t.Helper()
 	root := CopyExample(t, RootIngress)
-	removeClosedVariantFiles(t, root, "entities.yaml")
+	removeClosedVariantFiles(t, root, "state.yaml")
 	flowRoot := ""
 	if nested {
 		removeClosedVariantFiles(t, root, "events.yaml", "nodes.yaml")
@@ -57,7 +57,7 @@ func CopyPayloadNamedField(t testing.TB) string {
 	root := CopyExample(t, RootIngress)
 
 	writeClosedVariantFile(t, root, "schema.yaml", "name: payload-normalizer\nstages:\n  active: {}\n  done: {final: true}\npins:\n  inputs:\n    - inbound.telegram\n")
-	writeClosedVariantFile(t, root, "entities.yaml", "chat:\n  chat_id: text\n")
+	writeClosedVariantFile(t, root, "state.yaml", "chat_id: text\n")
 	writeClosedVariantFile(t, root, "events.yaml", "inbound.telegram:\n  entity_id: text\n  payload: json\n")
 	writeClosedVariantFile(t, root, "nodes.yaml", "normalizer:\n  execution_type: system_node\n  subscribes_to: [inbound.telegram]\n  event_handlers:\n    inbound.telegram:\n      data_accumulation:\n        writes:\n          - target_field: chat_id\n            value: payload.payload.message.chat.id\n      advances_to: done\n")
 	return root
@@ -68,7 +68,7 @@ func CopyConstructedStaticHandler(t testing.TB, withTimer bool) string {
 	root := CopyExample(t, TemplateCreateMintedKey)
 	removeClosedVariantFiles(t, root,
 		"producer/events.yaml", "producer/nodes.yaml", "producer/schema.yaml", "producer",
-		"validator/events.yaml", "validator/entities.yaml", "validator/nodes.yaml", "validator/schema.yaml", "validator")
+		"validator/events.yaml", "validator/state.yaml", "validator/nodes.yaml", "validator/schema.yaml", "validator")
 
 	writeClosedVariantFile(t, root, "schema.yaml", "name: exact-once-test\npins:\n  inputs:\n    - thing.created\n  outputs:\n    - thing.created\nconnect:\n  - {event: thing.created, from: ., to: validation}\n")
 	writeClosedVariantFile(t, root, "events.yaml", "thing.created:\n  amount: integer\n  who: text\n")
@@ -83,6 +83,6 @@ func CopyConstructedStaticHandler(t testing.TB, withTimer bool) string {
 		timerEvent = "timer.check:\n"
 		timer = "  timers:\n    - id: check_timer\n      event: timer.check\n      delay: 1h\n      start_on: event:thing.created\n"
 	}
-	writeLegacyInstanceFlow(t, root, "validation", "name: validation\nstages:\n  new: {}\n  done: {final: true}\npins:\n  inputs: ["+inputs+"]\n  outputs:\n    - thing.emitted\n", "thing.emitted:\n  amount: integer\n  who: text\n"+timerEvent, "widget:\n  amount:\n    type: integer\n    initial: 0\n  who:\n    type: text\n    initial: \"\"\n  counter:\n    type: integer\n    initial: 0\n", "w-node:\n  execution_type: system_node\n  subscribes_to: ["+inputs+"]\n  produces: ["+produces+"]\n"+timer+"  event_handlers:\n    thing.created:\n      data_accumulation:\n        source_event: thing.created\n        writes:\n          - source_field: amount\n            target_field: amount\n          - source_field: who\n            target_field: who\n          - target_field: counter\n            value: entity.counter + 1\n      sets_gate: ready\n      advances_to: done\n      emit:\n        event: thing.emitted\n        fields:\n          amount: entity.amount\n          who: entity.who\n")
+	writeLegacyInstanceFlow(t, root, "validation", "name: validation\nstages:\n  new: {}\n  done: {final: true}\npins:\n  inputs: ["+inputs+"]\n  outputs:\n    - thing.emitted\n", "thing.emitted:\n  amount: integer\n  who: text\n"+timerEvent, "amount: 0\nwho: \"\"\ncounter: 0\n", "w-node:\n  execution_type: system_node\n  subscribes_to: ["+inputs+"]\n  produces: ["+produces+"]\n"+timer+"  event_handlers:\n    thing.created:\n      data_accumulation:\n        source_event: thing.created\n        writes:\n          - source_field: amount\n            target_field: amount\n          - source_field: who\n            target_field: who\n          - target_field: counter\n            value: state.counter + 1\n      sets_gate: ready\n      advances_to: done\n      emit:\n        event: thing.emitted\n        fields:\n          amount: state.amount\n          who: state.who\n")
 	return root
 }

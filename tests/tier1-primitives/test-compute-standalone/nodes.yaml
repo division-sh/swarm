@@ -14,7 +14,7 @@ test-node:
             weight: 0.6
           - dimensions: [c]
             weight: 0.4
-        store_as: entity.composite
+        store_as: state.composite
       advances_to: done
       emit:
         event: scores.computed

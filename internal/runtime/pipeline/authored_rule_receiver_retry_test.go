@@ -35,10 +35,10 @@ func VerifyNativeAuthoredRuleReceiverPreparationRetryBothStoresForTest(t *testin
 		for _, variant := range []string{"no_fault_control", "fresh_retry", "recovered_retry"} {
 			t.Run(backend+"/"+variant, func(t *testing.T) {
 				bundle := loadWorkflowTempBundle(t, map[string]string{
-					"schema.yaml":   "name: delivery-authority\nstages:\n  queued: {}\n  done: {final: true}\n",
-					"entities.yaml": "test_entity: {}\n",
-					"events.yaml":   "source.evt:\n",
-					"nodes.yaml":    "node-a:\n  execution_type: system_node\n  subscribes_to: [source.evt]\n  event_handlers:\n    source.evt:\n      rules:\n        - when: |-\n                  true\n          advances_to: done\n",
+					"schema.yaml": "name: delivery-authority\nstages:\n  queued: {}\n  done: {final: true}\n",
+
+					"events.yaml": "source.evt:\n",
+					"nodes.yaml":  "node-a:\n  execution_type: system_node\n  subscribes_to: [source.evt]\n  event_handlers:\n    source.evt:\n      rules:\n        - when: |-\n                  true\n          advances_to: done\n",
 				})
 				module := handlerTestWorkflowModuleWithBundle(bundle, ".", "node-a").(*previewWorkflowModule)
 				node := pipelineNode(t, ".", "node-a")
@@ -78,7 +78,7 @@ func VerifyNativeAuthoredRuleReceiverPreparationRetryBothStoresForTest(t *testin
 				evt := eventtest.ExistingRunRootIngressWithRoutingSource(uuid.NewString(), "source.evt", "src", "", []byte(`{}`), 0, runID, events.EnvelopeForTargetRoute(handlerTestWorkflowEnvelope(".", runID, entityID), events.RouteIdentity{FlowID: ".", FlowInstance: runID, EntityID: entityID}), eventtest.StaticFlowRoutingSource(".", runID, entityID), time.Now().UTC())
 				if err := fixture.Construct(ctx, materializedWorkflowInstanceForSource(t, pc.SemanticSource(), ctx, WorkflowInstance{
 					InstanceID: runID, StorageRef: runID, EntityID: entityID, WorkflowName: ".", WorkflowVersion: pc.SemanticSource().WorkflowVersion(),
-					CurrentState: "queued", EntityType: "test_entity", Fields: map[string]any{},
+					CurrentState: "queued", Fields: map[string]any{},
 				})); err != nil {
 					t.Fatal(err)
 				}

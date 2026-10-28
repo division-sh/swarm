@@ -35,7 +35,7 @@ func VerifyReceiverConfigAndRuntimeControlsRoundTripBothStoresForTest(t *testing
 			now := time.Now().UTC().Round(time.Microsecond)
 			instance := materializedWorkflowInstanceForTest(WorkflowInstance{
 				InstanceID: "ti-not-the-business-key", StorageRef: "review/ti-not-the-business-key", EntityID: uuid.NewString(),
-				EntityType: "review_subject", WorkflowName: "review", WorkflowVersion: "runtime-version",
+				EntityType: "state", WorkflowName: "review", WorkflowVersion: "runtime-version",
 				CurrentState: "active", Status: "active", InstanceKind: "template", Fields: config,
 				ParentFlowID: "parent", ParentFlowInstance: "parent/one", ParentEntityID: uuid.NewString(),
 				TransitionHistory: []WorkflowTransitionRecord{lifecycleTransitionRecordFixtureForTest(t, "review", "queued", "active", "evt-1", now)},
@@ -88,7 +88,7 @@ func TestHistoricalWorkflowConfigProjectsOnlyOwnership(t *testing.T) {
 	source := materializedWorkflowInstanceForTest(WorkflowInstance{
 		StorageRef: "parent/one/review", EntityID: uuid.NewString(), WorkflowName: "review",
 		WorkflowVersion: "source-version", InstanceKind: "static", TemplateVersion: "source-template",
-		EntityType: "workflow_subject",
+		EntityType: "state",
 		Status:     "active", ParentFlowID: parent.FlowID, ParentFlowInstance: parent.FlowInstance, ParentEntityID: parent.EntityID,
 		Fields: map[string]any{"workflow_version": "business-version", "parent_entity_id": "business-parent", "nested": []any{int64(3), float64(3)}},
 	})

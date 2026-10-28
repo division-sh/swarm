@@ -163,7 +163,7 @@ func TestServedCompiledTransitionNestedCarrierCollisionOnBothStores(t *testing.T
 				requireLifecycleFlowEntity(t, rt, runID, prefix, "drafting")
 				requireLifecycleCurrentTransition(t, readLifecycleTransitionHistory(t, rt.ReceiverStateReader, runID, entityID), started.EventID, "waiting", "drafting")
 				for attempt := 1; attempt <= 2; attempt++ {
-					loop := readLifecycleLoop(t, rt, runID, entityID)
+					loop := readLifecycleLoop(t, rt.ReceiverStateReader, runID, entityID)
 					payload := map[string]any{"revision_id": loop.RevisionID}
 					admit := publish("loop.admit", fmt.Sprintf("admit-%d", attempt), payload)
 					requireLifecycleFlowEntity(t, rt, runID, prefix, "review")
@@ -176,7 +176,7 @@ func TestServedCompiledTransitionNestedCarrierCollisionOnBothStores(t *testing.T
 					requireLifecycleFlowEntity(t, rt, runID, prefix, state)
 					requireLifecycleCurrentTransition(t, readLifecycleTransitionHistory(t, rt.ReceiverStateReader, runID, entityID), repeated.EventID, "review", state)
 				}
-				closed := readLifecycleLoop(t, rt, runID, entityID)
+				closed := readLifecycleLoop(t, rt.ReceiverStateReader, runID, entityID)
 				gateEntity := requireLifecycleFlowEntity(t, rt, runID, prefix+"sink/", "review")
 				gateEntities = append(gateEntities, gateEntity)
 				var entity operatorread.OperatorEntityFull
@@ -248,7 +248,7 @@ func TestServedCompiledTransitionNestedCarrierCollisionOnBothStores(t *testing.T
 			}
 			waitServedRunDeliveryQuiescence(t, rt.ReadRunDeliveries, runID)
 			var entities int
-			if err := rt.DB.QueryRow(`SELECT COUNT(*) FROM entity_state WHERE run_id=$1`, runID).Scan(&entities); err != nil {
+			if err := rt.DB.QueryRow(`SELECT COUNT(*) FROM flow_instances WHERE run_id=$1 AND stage_defined=true`, runID).Scan(&entities); err != nil {
 				t.Fatal(err)
 			}
 			if entities != 6 {

@@ -52,9 +52,6 @@ func requireForkReceiverExecution(t *testing.T, rt servedControlProofRuntime, ru
 		}
 	}
 	if entityID != "" {
-		row := readForkReceiverRows(t, rt, runID)[path]
-		var entity operatorread.OperatorEntityFull
-		requireServedJSONRPCResult(t, rt.Endpoint, "entity.get", map[string]any{"run_id": runID, "entity_id": entityID}, &entity)
 		graph, found := semanticview.WorkflowStageTopology(rt.Runtime.Options.WorkflowModule.SemanticSource(), path)
 		if !found {
 			t.Fatalf("authored receiver %s has no compiled topology", path)
@@ -72,16 +69,29 @@ func requireForkReceiverExecution(t *testing.T, rt servedControlProofRuntime, ru
 			}
 			wantState = handler.AdvancesTo
 		}
-		if _, err := graph.ResolveStoredStage(wantState); err != nil || row.State != wantState {
-			t.Fatalf("receiver internal stage differs from authored posture: row=%+v want=%s err=%v", row, wantState, err)
+		if _, err := graph.ResolveStoredStage(wantState); err != nil {
+			t.Fatalf("receiver authored stage is invalid: %s: %v", wantState, err)
 		}
-		if entity.Entity.StageDefined == nil || *entity.Entity.StageDefined != staged ||
-			(staged && (entity.Entity.CurrentState == nil || *entity.Entity.CurrentState != wantState || entity.Entity.EnteredStateAt == nil)) ||
-			(!staged && (entity.Entity.CurrentState != nil || entity.Entity.EnteredStateAt != nil)) {
-			t.Fatalf("public receiver stage posture differs from authored source: %+v", entity.Entity)
-		}
-		if entity.Entity.RunID != runID || entity.Entity.EntityID != entityID || entity.Entity.FlowInstance != path || entity.Entity.EntityType != "receipt" || !reflect.DeepEqual(entity.Fields, row.Fields) {
-			t.Fatalf("public receiver state: %+v rows=%+v", entity, row)
+		if policy == canonicalrouting.ForkReceiverOptionalAbsent {
+			header := requireReceiverConstructionStorage(t, rt.ReceiverStateReader, runID, path, entityID, "")
+			if header.EntityID != entityID || header.Template != path || header.State != wantState || header.EntityTypePresent || header.FieldRows != 0 {
+				t.Fatalf("fieldless receiver differs from its exact authored owner/stage: %+v want=%s", header, wantState)
+			}
+		} else {
+			row := readForkReceiverRows(t, rt, runID)[path]
+			var entity operatorread.OperatorEntityFull
+			requireServedJSONRPCResult(t, rt.Endpoint, "entity.get", map[string]any{"run_id": runID, "entity_id": entityID}, &entity)
+			if row.State != wantState {
+				t.Fatalf("receiver internal stage differs from authored posture: row=%+v want=%s", row, wantState)
+			}
+			if entity.Entity.StageDefined == nil || *entity.Entity.StageDefined != staged ||
+				(staged && (entity.Entity.CurrentState == nil || *entity.Entity.CurrentState != wantState || entity.Entity.EnteredStateAt == nil)) ||
+				(!staged && (entity.Entity.CurrentState != nil || entity.Entity.EnteredStateAt != nil)) {
+				t.Fatalf("public receiver stage posture differs from authored source: %+v", entity.Entity)
+			}
+			if entity.Entity.RunID != runID || entity.Entity.EntityID != entityID || entity.Entity.FlowInstance != path || entity.Entity.EntityType != "state" || !reflect.DeepEqual(entity.Fields, row.Fields) {
+				t.Fatalf("public receiver state: %+v rows=%+v", entity, row)
+			}
 		}
 	}
 	requireForkReceiverNoPublicationOrNotice(t, rt, runID, sourceEvent)

@@ -312,6 +312,12 @@ func EntityWritePath(target string) (string, bool, error) {
 	if target == "" {
 		return "", false, fmt.Errorf("field is required")
 	}
+	if root, _, dotted := strings.Cut(target, "."); dotted {
+		switch root {
+		case "entity", "_entity", "gates":
+			return "", false, fmt.Errorf("write target %q uses a retired root; use state.<declared field>", target)
+		}
+	}
 	parsed := paths.Parse(target)
 	if parsed.IsZero() {
 		return "", false, fmt.Errorf("field is required")

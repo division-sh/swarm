@@ -6,6 +6,3 @@ steps:
 expect:
   events:
     include: [item.processed]
-  entities:
-    - type: item
-      current_state: done

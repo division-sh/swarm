@@ -17,6 +17,7 @@ const debtSelectedFixtureComposedCurrentSHA256 = "cdb196a9aeb5f87d51e656249b6bb5
 const debtSelectedFixtureComposedCollectorTo = "db0de72a381af1ab7ee26a4e0748565cde6c124a25a02ac3f79e2bbbc3464801"
 const debtCompletedSelectedFixturePinCollectorTo = "f28178924493fb28094b3bd1fb4814564680387608f43984fcd532afb01636a6"
 const debtW3LandedFixtureCollectorTo = "895137c088b18e51143008b7c47e32b76a573054322d87c0072781adcf1c9626"
+const debtW4ComparisonCollectorTo = "4dbc717d402a1e09a38fd15a34629b023854b0639400d0a3053a7d164804a356"
 
 // #2727/6388897450: source-pin validation for an already-landed composed endpoint.
 const debtSelectedFixtureLandedCollectorTo = "1b48c6bd1c1b6d6100ee6df74bb9fe3d239372befa4c8f96f02243602fa9f646"
@@ -76,6 +77,36 @@ func TestPersistenceAuthorityDebtRunFixtureSignatureTransitionIsExact(t *testing
 				}
 				t.Run(name, func(t *testing.T) { debtRunFixtureSignatureHostileControls(t, pair, before, after, landed) })
 			}
+		}
+	})
+	t.Run("catalog-original-native-reader-threading", func(t *testing.T) {
+		prior, next := debtCatalogRuntimeRowsSignatureTransition()
+		before, after := debtControlSet(prior), debtControlSet(next)
+		originalBefore, originalAfter := maps.Clone(before), maps.Clone(after)
+		for _, test := range []struct {
+			name                       string
+			actual, head, base, source map[string]authorityDebtSite
+			accept                     bool
+		}{
+			{"forward-unrefreshed", after, before, before, before, true},
+			{"forward-refreshed", after, after, before, before, true},
+			{"landed-inert", after, after, after, after, true},
+			{"landed-source-cannot-extend-pair", after, before, before, after, false},
+			{"landed-source-refreshed-head-cannot-extend-pair", after, after, before, after, false},
+			{"reverse", before, before, after, after, false},
+			{"old-source-resurrection", before, before, before, after, false},
+			{"foreign-source", after, after, before, debtControlSet(), false},
+			{"unrelated-addition", debtControlSet(next, debtControlSite("call:Exec", 1)), after, before, before, false},
+		} {
+			t.Run(test.name, func(t *testing.T) {
+				if failures := authorityDebtRatchet(test.actual, test.head, test.base, test.source); (len(failures) == 0) != test.accept {
+					t.Fatalf("accepted=%v failures=%v", test.accept, failures)
+				}
+			})
+		}
+		debtRunFixtureSignatureHostileControls(t, [2]authorityDebtSite{prior, next}, before, after, false)
+		if !maps.Equal(before, originalBefore) || !maps.Equal(after, originalAfter) {
+			t.Fatal("catalog comparison normalization mutated baseline or source evidence")
 		}
 	})
 	if authorityDebtCount(old) != 9 || authorityDebtCount(current) != 9 {
@@ -272,6 +303,49 @@ func TestPersistenceAuthorityDebtRunFixtureCollectorTransitionIsPinned(t *testin
 			}
 		})
 	}
+	t.Run("w4-comparison-metadata-only", func(t *testing.T) {
+		for _, mutation := range []string{"exact", "foreign-base", "trusted-collector", "foreign-current", "head-collector", "unreviewed", "foreign-review", "reverse", "bootstrap", "remove-site", "add-site", "multiplicity", "replace-site"} {
+			t.Run(mutation, func(t *testing.T) {
+				before := authorityDebtBaseline{BootstrapSource: trusted.BootstrapSource, Collector: debtW3LandedFixtureCollectorTo, Sites: debtControlSet(legacy)}
+				after := before
+				after.Collector, after.Sites = debtW4ComparisonCollectorTo, maps.Clone(before.Sites)
+				base, collector, reviewed := before.Collector, after.Collector, after.Collector
+				switch mutation {
+				case "foreign-base":
+					base = strings.Repeat("b", 64)
+				case "trusted-collector":
+					before.Collector = strings.Repeat("b", 64)
+				case "foreign-current":
+					collector, after.Collector, reviewed = strings.Repeat("b", 64), strings.Repeat("b", 64), strings.Repeat("b", 64)
+				case "head-collector":
+					after.Collector = before.Collector
+				case "unreviewed":
+					reviewed = ""
+				case "foreign-review":
+					reviewed = strings.Repeat("b", 64)
+				case "reverse":
+					before, after = after, before
+					base, collector, reviewed = before.Collector, after.Collector, after.Collector
+				case "bootstrap":
+					after.BootstrapSource = strings.Repeat("b", 40)
+				case "remove-site":
+					delete(after.Sites, legacy.identity())
+				case "add-site":
+					after.Sites[escape.identity()] = escape
+				case "multiplicity":
+					changed := legacy
+					changed.Multiplicity--
+					after.Sites[changed.identity()] = changed
+				case "replace-site":
+					delete(after.Sites, legacy.identity())
+					after.Sites[replacement.identity()] = replacement
+				}
+				if err := debtValidateCollectorIdentity(base, collector, before, after, reviewed); (err == nil) != (mutation == "exact") {
+					t.Fatalf("metadata-only edge: %v", err)
+				}
+			})
+		}
+	})
 	quiescenceOld, quiescenceNew := debtQuiescenceUncertaintyTransition()
 	chained := trusted
 	chained.Collector, chained.Sites = debtQuiescenceCollectorFrom, maps.Clone(old)

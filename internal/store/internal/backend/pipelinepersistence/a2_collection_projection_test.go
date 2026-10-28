@@ -86,7 +86,7 @@ func a2CollectionRequest(t *testing.T, kind fanoutobligation.SourceKind, ref rc.
 	path := "payload.items"
 	source := fanoutobligation.SourceRef{Kind: kind, Field: "items", EventID: event}
 	if kind == fanoutobligation.SourceEntityField {
-		path = "entity.items"
+		path = "state.items"
 		source.EventID = ""
 		source.RunID = run
 		source.EntityID = run

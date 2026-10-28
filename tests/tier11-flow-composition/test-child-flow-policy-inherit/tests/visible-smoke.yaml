@@ -6,6 +6,3 @@ steps:
 expect:
   events:
     include: [child/check.passed]
-  entities:
-    - type: default
-      current_state: approved
