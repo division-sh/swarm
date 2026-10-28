@@ -109,9 +109,9 @@
           "event": "inbound.telegram.text_message",
           "resolved_event": "inbound.telegram.text_message",
           "flow_path": "telegram-chat",
-          "producer_schema_digest": "sha256:29f728accddc2ffcc24b05fb5501d5c8fdd8c4852278c5b13c08b4cfc3528e66",
-          "receiver_schema_digest": "sha256:29f728accddc2ffcc24b05fb5501d5c8fdd8c4852278c5b13c08b4cfc3528e66",
-          "pin_digest": "sha256:0e319a29a60fb701a997cb534a27c941a356416ae0b69e03cf1ea1671ce836c7",
+          "producer_schema_digest": "sha256:d56e1a4417b8aed6c8891f576f1cce98f40ed9cd339c8a5e1f737bb489ea0e3f",
+          "receiver_schema_digest": "sha256:d56e1a4417b8aed6c8891f576f1cce98f40ed9cd339c8a5e1f737bb489ea0e3f",
+          "pin_digest": "sha256:ebb3c2a9f772bc2d9d44c6ee7a5ca175a7904184800519e50a7c9bf5ba2f545d",
           "source_file": "telegram-chat/schema.yaml",
           "source_line": 1,
           "source_column": 1
@@ -167,8 +167,8 @@
           "event": "inbound.telegram.text_message",
           "resolved_event": "telegram-ingress/inbound.telegram.text_message",
           "flow_path": "telegram-ingress",
-          "schema_digest": "sha256:29f728accddc2ffcc24b05fb5501d5c8fdd8c4852278c5b13c08b4cfc3528e66",
-          "pin_digest": "sha256:669a5e228a37f825b0390c57605db4cd1e6907af323f423249f2faab5ebdd701",
+          "schema_digest": "sha256:d56e1a4417b8aed6c8891f576f1cce98f40ed9cd339c8a5e1f737bb489ea0e3f",
+          "pin_digest": "sha256:d4f747e6f015aadce2427f3c9dca3e5dbcad66e6e22de2350853ad6a01a9ebd9",
           "source_file": "telegram-ingress/schema.yaml",
           "source_line": 1,
           "source_column": 1

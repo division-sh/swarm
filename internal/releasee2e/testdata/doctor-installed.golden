@@ -1204,8 +1204,8 @@
   ],
   "pack_inventory": {
     "base_mode": "embedded",
-    "base_digest": "sha256:691355d39d186c2b308d0d989d53ca84f305bc8bf19cdc6e712174dd8e4551c7",
-    "effective_digest": "sha256:eaeb33cd601d9eb5685e3a780160d12263a6304dda3760f9d4cafb249276d5e9",
+    "base_digest": "sha256:a180cdc3b3609156455eeddc6afcb7a19232c468711594e8396110fd599c436b",
+    "effective_digest": "sha256:fef9360fa351aea4db916dae2b289a10d816346c133829b52d027fec7bfd0c16",
     "packs": [
       {
         "id": "provider.github",
@@ -1364,7 +1364,7 @@
         "id": "provider.telegram",
         "type": "trigger",
         "version": "0.1.0",
-        "manifest_hash": "sha256:9922560bbde72f886573a76d0e41f6dfbbaf5ab99864661195e36b6ddcd9a115",
+        "manifest_hash": "sha256:0f977d5e51e469bdf8f47e56924af6884d05187b6c740f49369568056bc23938",
         "source": "embedded",
         "directory": "provider-triggers/telegram",
         "origin": {
@@ -1398,7 +1398,7 @@
         "id": "provider.telegram.hitl_channel",
         "type": "channel",
         "version": "0.1.0",
-        "manifest_hash": "sha256:4f727e40af6100491344d6cead12e1dc1d9a1ca7c7799d9ffafa7b7effc071b6",
+        "manifest_hash": "sha256:67a1dc37dae729bebbc85109268259db38894118754c817a1073dc1e73b77bf2",
         "source": "embedded",
         "directory": "channels/telegram",
         "origin": {
@@ -1449,7 +1449,7 @@
         "id": "provider.whatsapp",
         "type": "trigger",
         "version": "0.1.0",
-        "manifest_hash": "sha256:d48061410533e79556688fa1d7aad975175e95529c8c09874a2cc0ee352b4205",
+        "manifest_hash": "sha256:52cb772d5fed0e924d36e4b99881bc3fbb145373f92a521ad9bb382d61381b66",
         "source": "embedded",
         "directory": "provider-triggers/whatsapp",
         "origin": {
@@ -1483,7 +1483,7 @@
         "id": "provider.whatsapp.hitl_channel",
         "type": "channel",
         "version": "0.1.0",
-        "manifest_hash": "sha256:b3488106385f2f9590786beadeb041d1e3d99a05fdc04c32e4fd9285e5a6095e",
+        "manifest_hash": "sha256:956d316a42a24e4a420d06e43b13aae5f4e415034da2644d03c1a9bedf0b27e9",
         "source": "embedded",
         "directory": "channels/whatsapp",
         "origin": {
