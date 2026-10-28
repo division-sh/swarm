@@ -31,10 +31,6 @@ type genericScheduleLifecycleConsumerStore interface {
 	StopRunControlOutcome(context.Context, runtimeruncontrol.TransitionRequest) (runtimeruncontrol.StoreTransition, error)
 }
 
-type recordingGenericScheduleReconciler struct {
-	activationIDs []string
-}
-
 type transientGenericScheduleReleaseStore struct {
 	runtimegenericschedule.Store
 	mu          sync.Mutex
@@ -55,33 +51,6 @@ func (s *transientGenericScheduleReleaseStore) ReleaseGenericScheduleWakeup(ctx 
 	err := s.Store.ReleaseGenericScheduleWakeup(ctx, wakeup)
 	s.releaseSeen <- err
 	return err
-}
-
-func (r *recordingGenericScheduleReconciler) ReconcileWakeupWithRecovery(_ context.Context, activationID string) (bool, error) {
-	r.activationIDs = append(r.activationIDs, activationID)
-	return false, nil
-}
-
-func newGenericScheduleAwareWorkflowTestCoordinator(
-	t *testing.T,
-	selected workflowTestSelectedStore,
-) (*runtimepipeline.PipelineCoordinator, *recordingGenericScheduleReconciler) {
-	t.Helper()
-	reconciler := &recordingGenericScheduleReconciler{}
-	options := completeWorkflowTestCoordinatorOptions(runtimepipeline.NewWorkflowPersistence(selected), selected)
-	options.GenericSchedules = reconciler
-	coordinator := runtimepipeline.NewPipelineCoordinatorWithOptions(workflowTestBus{}, options)
-	if coordinator == nil {
-		t.Fatal("construct generic-schedule-aware workflow test coordinator")
-	}
-	return coordinator, reconciler
-}
-
-func assertGenericScheduleReconciled(t *testing.T, recorder *recordingGenericScheduleReconciler, activationID string) {
-	t.Helper()
-	if len(recorder.activationIDs) != 1 || recorder.activationIDs[0] != activationID {
-		t.Fatalf("generic schedule reconciliations = %#v, want [%s]", recorder.activationIDs, activationID)
-	}
 }
 
 func seedGenericScheduleTimerFamilies(

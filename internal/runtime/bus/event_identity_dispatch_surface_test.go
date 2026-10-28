@@ -63,13 +63,6 @@ type completeEventDispatchStore interface {
 	PipelineObligations() runtimepipelineobligation.Store
 }
 
-type standingDispatchWorkflowModule struct{}
-
-func (standingDispatchWorkflowModule) SemanticSource() semanticview.Source { return nil }
-
-func (standingDispatchWorkflowModule) WorkflowNodes() []runtimepipeline.WorkflowNode { return nil }
-func (standingDispatchWorkflowModule) GuardRegistry() runtimepipeline.GuardRegistry  { return nil }
-
 type completeEventDispatchFixture struct {
 	store            completeEventDispatchStore
 	ctx              context.Context
@@ -479,17 +472,6 @@ func (f completeEventDispatchFixture) invoke(surface string) (int, error) {
 
 func (f completeEventDispatchFixture) updateChainDepth(depth int) error {
 	return storetest.SetEventChainDepth(f.ctx, f.store, f.event.ID(), depth)
-}
-
-func (f completeEventDispatchFixture) assertNoAgentDispatchMutation(t *testing.T) {
-	t.Helper()
-	outcomes, err := storetest.ReadAgentSettledAttemptCount(f.ctx, f.store, f.event.ID(), f.agentID)
-	if err != nil {
-		t.Fatalf("count agent delivery outcomes: %v", err)
-	}
-	if outcomes != 0 {
-		t.Fatalf("agent delivery outcomes after corrupt readback = %d, want 0", outcomes)
-	}
 }
 
 func (f completeEventDispatchFixture) decisionObligationStatus(t *testing.T, eventID string) string {

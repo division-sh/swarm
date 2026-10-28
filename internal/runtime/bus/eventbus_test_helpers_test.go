@@ -230,18 +230,6 @@ func testAuthorActivityContextForSource(ctx context.Context, source semanticview
 	))
 }
 
-func acknowledgePipelineTestEvent(t testing.TB, ctx context.Context, provider pipelineObligationTestProvider, eventID string) {
-	t.Helper()
-	owner := provider.PipelineObligations()
-	work, err := owner.ClaimEvent(ctx, eventID, runtimepipelineobligation.PurposeRecovery)
-	if err != nil {
-		t.Fatalf("claim pipeline obligation for %s: %v", eventID, err)
-	}
-	if _, err := owner.Settle(ctx, work.Claim, runtimepipelineobligation.Acknowledged("pipeline_persisted")); err != nil {
-		t.Fatalf("acknowledge pipeline obligation for %s: %v", eventID, err)
-	}
-}
-
 func authorActivityTestEventDescriptors(source semanticview.Source) []runtimeauthoractivity.EventDescriptor {
 	byName := make(map[string]runtimeauthoractivity.EventDescriptor, len(authorActivityTestDifferentEventTypes))
 	for _, name := range authorActivityTestDifferentEventTypes {
