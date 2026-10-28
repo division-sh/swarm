@@ -10,8 +10,10 @@ import (
 
 	"github.com/division-sh/swarm/internal/channelonboarding"
 	"github.com/division-sh/swarm/internal/operatorchannel"
+	"github.com/division-sh/swarm/internal/runtime/correlation"
 	runtimecredentials "github.com/division-sh/swarm/internal/runtime/credentials"
 	"github.com/division-sh/swarm/internal/runtime/plangeneration"
+	"github.com/division-sh/swarm/internal/runtime/runlifecycle"
 	"github.com/division-sh/swarm/internal/testutil"
 	"github.com/google/uuid"
 )
@@ -346,7 +348,33 @@ func (retiredOnboardingConfirmation) DispatchChannelConfirmation(context.Context
 	return channelonboarding.ConfirmationResult{}, nil
 }
 
-type retiredOnboardingReadiness struct{}
+// Runtime projection is fixture input; credential/reset transactions remain native.
+type retiredOnboardingReadiness struct {
+	candidate *channelonboarding.Candidate
+}
+
+func (r retiredOnboardingReadiness) LoadLandingRun(ctx context.Context, scope runlifecycle.LiveRunScope) (runlifecycle.LandingRun, bool, error) {
+	if err := ctx.Err(); err != nil {
+		return runlifecycle.LandingRun{}, false, err
+	}
+	if r.candidate == nil || scope.FlowPath != r.candidate.Target.FlowPath {
+		return runlifecycle.LandingRun{}, false, errors.New("onboarding fixture has no projection for the selected flow")
+	}
+	source, err := correlation.DecodeSourceArtifactFact(r.candidate.Coordinate.BundleHash)
+	return runlifecycle.LandingRun{LiveRun: runlifecycle.LiveRun{
+		RunID: "81000000-0000-0000-0000-000000000001", Scope: scope, Source: source,
+	}, State: runlifecycle.StateLive}, err == nil, err
+}
+
+func (r retiredOnboardingReadiness) TargetEnabled(ctx context.Context, candidate channelonboarding.Candidate) (bool, error) {
+	if err := ctx.Err(); err != nil {
+		return false, err
+	}
+	if r.candidate == nil || candidate.Target.Selector != r.candidate.Target.Selector || !candidate.Coordinate.Matches(r.candidate.Coordinate) {
+		return false, errors.New("onboarding fixture has no projection for the selected target")
+	}
+	return true, nil
+}
 
 func (retiredOnboardingReadiness) ProjectConnectedChannelReadiness(context.Context, channelonboarding.Operation, channelonboarding.Candidate) (channelonboarding.ConnectedChannelReadiness, bool, error) {
 	return channelonboarding.ConnectedChannelReadiness{}, false, nil
