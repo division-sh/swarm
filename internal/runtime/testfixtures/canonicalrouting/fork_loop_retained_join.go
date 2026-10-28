@@ -37,7 +37,8 @@ func CopyForkLoopRetainedJoin(t testing.TB) string {
 	t.Helper()
 	root := t.TempDir()
 	for name, body := range map[string]string{
-		"schema.yaml": `name: fork-loop-retained-join
+		"manifest.yaml": "version: 1.0.0\nplatform_version: '*'\n",
+		"schema.yaml": `# fixture: fork-loop-retained-join
 stages:
   queued: {}
   working: {}

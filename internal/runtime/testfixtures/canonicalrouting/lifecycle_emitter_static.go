@@ -69,7 +69,7 @@ func CopyLifecycleEmitterStatic(t testing.TB, variant LifecycleEmitterStaticVari
 	switch variant {
 	case LifecycleStaticLoopLocal, LifecycleStaticLoopDangling, LifecycleStaticLoopNoEmit, LifecycleStaticLoopLocalNodeInvalid:
 		schema = strings.Split(schema, "  outputs:\n")[0]
-		removeClosedVariantFiles(t, root, "sink/schema.yaml", "sink/nodes.yaml", "sink/entities.yaml")
+		removeClosedVariantFiles(t, root, "sink/manifest.yaml", "sink/schema.yaml", "sink/nodes.yaml", "sink/entities.yaml")
 		if err := os.Remove(filepath.Join(root, "sink")); err != nil {
 			t.Fatal(err)
 		}
@@ -96,6 +96,7 @@ func CopyLifecycleEmitterStatic(t testing.TB, variant LifecycleEmitterStaticVari
 			nodes = strings.ReplaceAll(nodes, "    work.completed:\n", "    work.*:\n")
 		}
 		for _, scope := range []string{"left", "right", "left/deep"} {
+			writeClosedVariantFile(t, root, scope+"/manifest.yaml", "version: 1.0.0\nplatform_version: '*'\n")
 			writeClosedVariantFile(t, root, scope+"/schema.yaml", schema)
 			writeClosedVariantFile(t, root, scope+"/events.yaml", events)
 			writeClosedVariantFile(t, root, scope+"/nodes.yaml", nodes)
@@ -113,7 +114,8 @@ func CopyLifecycleEmitterStatic(t testing.TB, variant LifecycleEmitterStaticVari
 		schema += "  outputs: [work.completed]\n"
 		if variant == LifecycleStaticMixedOutput {
 			schema += "connect:\n  - {event: work.completed, from: ., to: sink}\n"
-			writeClosedVariantFile(t, root, "sink/schema.yaml", "name: sink\npins:\n  inputs:\n    - work.completed\n")
+			writeClosedVariantFile(t, root, "sink/manifest.yaml", "version: 1.0.0\nplatform_version: '*'\n")
+			writeClosedVariantFile(t, root, "sink/schema.yaml", "# fixture: sink\npins:\n  inputs:\n    - work.completed\n")
 			writeClosedVariantFile(t, root, "sink/nodes.yaml", "collector:\n  execution_type: system_node\n  subscribes_to: [work.completed]\n  event_handlers:\n    work.completed: {}\n")
 		}
 	case LifecycleStaticActorCollision:
@@ -139,7 +141,7 @@ func CopyLifecycleEmitterStatic(t testing.TB, variant LifecycleEmitterStaticVari
 		schema = strings.Replace(schema, "  review:\n", "  review:\n    timers:\n      - {id: reminder, after: 1h, emit: work.completed}\n", 1)
 	case LifecycleStaticLoopScopeMatrix:
 		for _, scope := range []string{"left", "right", "left/deep"} {
-			for _, file := range []string{"schema.yaml", "events.yaml", "nodes.yaml", "entities.yaml", "sink/schema.yaml", "sink/nodes.yaml", "sink/entities.yaml"} {
+			for _, file := range []string{"manifest.yaml", "schema.yaml", "events.yaml", "nodes.yaml", "entities.yaml", "sink/manifest.yaml", "sink/schema.yaml", "sink/nodes.yaml", "sink/entities.yaml"} {
 				writeClosedVariantFile(t, root, scope+"/"+file, lifecycleStaticRead(t, root, file))
 			}
 		}
@@ -147,7 +149,8 @@ func CopyLifecycleEmitterStatic(t testing.TB, variant LifecycleEmitterStaticVari
 		schema = strings.Replace(schema, "  waiting: {}", "  waiting:\n    gate:\n      decision: review_decision\n      outcomes:\n        approve:\n          advances_to: escaped\n          emit:\n            event: loop.escaped\n            fields: {revision_id: \"gate\"}", 1)
 	case LifecycleStaticGateWrongFlow:
 		events = "work.requested:\n  seed: boolean\n"
-		writeClosedVariantFile(t, root, "child/schema.yaml", "name: child\n")
+		writeClosedVariantFile(t, root, "child/manifest.yaml", "version: 1.0.0\nplatform_version: '*'\n")
+		writeClosedVariantFile(t, root, "child/schema.yaml", "stages: []\n# fixture: child\n")
 		writeClosedVariantFile(t, root, "child/events.yaml", "work.completed:\n  result: text\n")
 	case LifecycleStaticGateDanglingStrict:
 		// Unlike the journey shell with its removed collector, this minimal
@@ -185,7 +188,8 @@ func CopyLifecycleEmitterStatic(t testing.TB, variant LifecycleEmitterStaticVari
 		nodes = strings.Replace(nodes, "      advances_to: done\n", "      advances_to: done\n      emit: {event: work.completed, fields: {result: \"repeated\"}}\n", 1)
 	case LifecycleStaticLoopWrongFlow:
 		events = strings.Replace(events, "loop.escaped:\n  revision_id: text\n", "", 1)
-		writeClosedVariantFile(t, root, "foreign/schema.yaml", "name: foreign\n")
+		writeClosedVariantFile(t, root, "foreign/manifest.yaml", "version: 1.0.0\nplatform_version: '*'\n")
+		writeClosedVariantFile(t, root, "foreign/schema.yaml", "stages: []\n# fixture: foreign\n")
 		writeClosedVariantFile(t, root, "foreign/events.yaml", "loop.escaped:\n  revision_id: text\n")
 	case LifecycleStaticGateMissingField:
 		schema = strings.Replace(schema, "fields: {result: \"approved\"}", "fields: {}", 1)
@@ -217,7 +221,7 @@ func lifecycleStaticRead(t testing.TB, root, file string) string {
 // The previously loaded bundle must remain the only census authority.
 func RewriteLifecycleEmitterAmbientSource(t testing.TB, root string) {
 	t.Helper()
-	writeClosedVariantFile(t, root, "schema.yaml", "name: replaced-after-admission\n")
+	writeClosedVariantFile(t, root, "schema.yaml", "stages: []\n# fixture: replaced-after-admission\n")
 }
 
 // CopyLifecycleEmitterHandlerFamilies adds genuine handler outcomes in a
@@ -225,7 +229,8 @@ func RewriteLifecycleEmitterAmbientSource(t testing.TB, root string) {
 func CopyLifecycleEmitterHandlerFamilies(t testing.TB) string {
 	t.Helper()
 	root := CopyLifecycleEmitter(t, LifecycleGateLocal)
-	writeClosedVariantFile(t, root, "families/schema.yaml", "name: handler-families\n")
+	writeClosedVariantFile(t, root, "families/manifest.yaml", "version: 1.0.0\nplatform_version: '*'\n")
+	writeClosedVariantFile(t, root, "families/schema.yaml", "stages: []\n# fixture: handler-families\n")
 	events := "direct:\nrouted:\naudit:\nescalated:\nspecialized:\n  bucket: text\nitem:\n  id: text\n"
 	nodes := `worker:
   execution_type: system_node
@@ -327,7 +332,8 @@ func CopyLifecycleEmitterExistingLifecycleFamilies(t testing.TB) string {
 	schema = strings.Replace(schema, "  dispatching: {}", "  dispatching:\n    timers:\n      - {id: reminder, after: 1h, emit: reminder}\n      - {id: expired, after: 2h, emit: expired, advances_to: attention}\n      - {id: internal, after: 3h, advances_to: attention}", 1)
 	schema += "auto_emit_on_create: {event: created}\n"
 	writeClosedVariantFile(t, root, "schema.yaml", schema)
-	writeClosedVariantFile(t, root, "child/schema.yaml", "name: child\nauto_emit_on_create: {event: created}\n")
+	writeClosedVariantFile(t, root, "child/manifest.yaml", "version: 1.0.0\nplatform_version: '*'\n")
+	writeClosedVariantFile(t, root, "child/schema.yaml", "# fixture: child\nauto_emit_on_create: {event: created}\n")
 	writeClosedVariantFile(t, root, "child/events.yaml", "created:\n")
 	return root
 }
@@ -373,7 +379,8 @@ func CopyLifecycleEmitterHumanTaskObserver(t testing.TB, nested bool) string {
 	prefix := ""
 	if nested {
 		prefix = "child/"
-		writeClosedVariantFile(t, root, prefix+"schema.yaml", "name: human-observer\n")
+		writeClosedVariantFile(t, root, prefix+"manifest.yaml", "version: 1.0.0\nplatform_version: '*'\n")
+		writeClosedVariantFile(t, root, prefix+"schema.yaml", "stages: []\n# fixture: human-observer\n")
 	}
 	writeClosedVariantFile(t, root, prefix+"agents.yaml", `operator:
   role: operator
@@ -418,6 +425,8 @@ func CopyLifecycleEmitterRuleActivityOutcomes(t testing.TB, nested bool) string 
 func CopyLifecycleEmitterImportedApprovalReferences(t testing.TB) string {
 	t.Helper()
 	root := t.TempDir()
+	writeClosedVariantFile(t, root, "manifest.yaml", "version: 1.0.0\nplatform_version: '*'\n")
+	writeClosedVariantFile(t, root, "telegram-chat/manifest.yaml", "version: 1.0.0\nplatform_version: '*'\n")
 	copyTree(t, filepath.Join(RepoRoot(t), "internal/releasee2e/testdata/full_lifecycle/standing_telegram"), root)
 	nodes := lifecycleStaticRead(t, root, "telegram-chat/nodes.yaml")
 	nodes += "telegram-rejected:\n  execution_type: system_node\n  subscribes_to: [telegram_send_message.rejected]\n  event_handlers:\n    telegram_send_message.rejected: {}\n"

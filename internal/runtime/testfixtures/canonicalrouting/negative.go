@@ -104,7 +104,7 @@ func ApplyTemplateReplyNegativeMutation(t testing.TB, root string, mutation Temp
 			"  - event: provider.replied\n    from: provider\n",
 			"  - event: provider.replied\n    from: other-provider\n")
 		duplicateFlowForNegativeMutation(t, root, "provider", "other-provider")
-		applyClosedReplacement(t, filepath.Join(root, "other-provider", "schema.yaml"), "name: provider\n", "name: other-provider\n")
+		applyClosedReplacement(t, filepath.Join(root, "other-provider", "schema.yaml"), "# fixture: provider\n", "# fixture: other-provider\n")
 	default:
 		t.Fatalf("unsupported template reply negative mutation %d", mutation)
 	}

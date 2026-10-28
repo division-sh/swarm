@@ -85,8 +85,8 @@ func TestIssue642SupportedOneShotReturnsOwnChildReplyBothStores(t *testing.T) {
 			baseline := process.ActiveCount()
 			rt, liveContexts := ordinaryForkRuntimeFixture(t, ctx, selected, owner, loaded, executionposture.MockOnly)
 			ctx = worklifetime.WithOccurrence(ctx, rt.WorkOccurrence())
-			created, err := rt.Manager.EnsureFlowInstance(ctx, pipeline.FlowInstanceActivationRequest{ContractBundle: loaded.Source,
-				Instance: flowidentity.Stored(loaded.Source, ".", runID, runID, "", ""), OccurredAt: at})
+			created, err := rt.Manager.EnsureFlowInstance(ctx, pipeline.FlowInstanceActivationRequest{ContractBundle: rt.Options.WorkflowModule.SemanticSource(),
+				Instance: flowidentity.Stored(rt.Options.WorkflowModule.SemanticSource(), ".", runID, runID, "", ""), OccurredAt: at})
 			if err != nil || !created {
 				t.Fatalf("construct one-shot source: created=%t error=%v", created, err)
 			}
@@ -197,7 +197,8 @@ func TestIssue642SupportedOneShotReturnsOwnChildReplyBothStores(t *testing.T) {
 			contractSelection := runforkadmission.SelectedContractSelection(loaded.Source)
 			operation := &runfork.ForkOperationRequest{OperationID: uuid.NewString(), Actor: "one-shot-proof", IdempotencyKey: "own-return",
 				TransportHash: "one-shot-proof-transport", SourceRunID: runID, ForkEventID: page.Events[0].EventID,
-				TargetBundleHash: loaded.SourceArtifactFact.BundleHash(), AllowSourceFreeze: true, ContractSelection: contractSelection}
+				TargetBundleHash: loaded.SourceArtifactFact.BundleHash(), AllowSourceFreeze: true, ContractSelection: contractSelection, TargetRootReference: loaded.RootedSource.Admission().Reference(),
+			}
 			result, err := ExecuteSelectedContractRunFork(ctx, SelectedContractExecutionRequest{SourceRunID: runID, At: page.Events[0].EventID, AllowSourceFreeze: true,
 				LiveRuntime: rt, LiveContexts: liveContexts, LiveRuns: selected.(runlifecycle.LiveRunReader),
 				Owner: owner, SourceLoader: loader, ForkOperation: operation, ContractSelection: contractSelection, AgentRuntime: SelectedContractAgentRuntimeOptions{

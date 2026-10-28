@@ -16,6 +16,7 @@ import (
 	runtimeflowidentity "github.com/division-sh/swarm/internal/runtime/core/flowidentity"
 	"github.com/division-sh/swarm/internal/runtime/core/forkpoint"
 	"github.com/division-sh/swarm/internal/runtime/core/forkrecipient"
+	"github.com/division-sh/swarm/internal/runtime/core/processbinding"
 	"github.com/division-sh/swarm/internal/runtime/deliverylifecycle"
 	"github.com/division-sh/swarm/internal/runtime/executionmode"
 	"github.com/division-sh/swarm/internal/runtime/fanoutbarrier"
@@ -33,6 +34,7 @@ import (
 	runtimecorrelation "github.com/division-sh/swarm/internal/runtime/correlation"
 	"github.com/division-sh/swarm/internal/runtime/scenarioexecution"
 	"github.com/division-sh/swarm/internal/runtime/semanticview"
+	"github.com/division-sh/swarm/internal/sourceartifact"
 	"github.com/google/uuid"
 )
 
@@ -62,6 +64,8 @@ const (
 )
 
 type RunForkActivateRequest struct {
+	OriginalRootAdmission             sourceartifact.RootAdmission      `json:"-"`
+	Process                           processbinding.LeaseStamp         `json:"-"`
 	OriginalLoopCarriage              semanticview.OriginalLoopCarriage `json:"-"`
 	ForkRunID                         string
 	AllowSourceFreeze                 bool
@@ -238,6 +242,7 @@ type RunForkMaterializeRequest struct {
 	AtStart                 bool `json:"at_start,omitempty"`
 	ContractSelection       *RunForkContractSelection
 	SourceArtifactFact      runtimecorrelation.SourceArtifactFact
+	RootAdmission           sourceartifact.RootAdmission
 	EffectiveSourceIdentity scenarioexecution.EffectiveSourceIdentity
 	DataPinOverrides        []durabledata.ExplicitPin
 	SelectedFanOutPlans     semanticview.FanOutPlanCarriage
@@ -318,6 +323,7 @@ type RunForkPlan struct {
 // fixed fork revision. Claim, lease, pacing, and service timestamps are not
 // historical authority and are reset when this fact is materialized.
 type RunForkFanOutObligation struct {
+	ExecutionSource   sourceartifact.RootedSource     `json:"-"`
 	Intent            fanoutobligation.Intent         `json:"intent"`
 	Outcomes          []fanoutobligation.Outcome      `json:"outcomes,omitempty"`
 	PendingReplays    []RunForkFanOutPendingReplay    `json:"pending_replays,omitempty"`
@@ -894,21 +900,23 @@ const (
 )
 
 type RunForkSelectedContractBindingRequest struct {
-	ForkRunID         string
-	SourceRunID       string
-	ForkPoint         RunForkPoint
-	ContractSelection RunForkContractSelection
+	ForkRunID           string
+	SourceRunID         string
+	ForkPoint           RunForkPoint
+	ContractSelection   RunForkContractSelection
+	TargetRootAdmission sourceartifact.RootAdmission
 }
 
 type RunForkSelectedContractBinding struct {
-	Owner             string                   `json:"owner"`
-	BindingID         string                   `json:"binding_id"`
-	ForkRunID         string                   `json:"fork_run_id"`
-	SourceRunID       string                   `json:"source_run_id"`
-	ForkPoint         RunForkPoint             `json:"fork_point"`
-	ForkEventID       string                   `json:"fork_event_id,omitempty"`
-	ContractSelection RunForkContractSelection `json:"contract_selection"`
-	CreatedAt         time.Time                `json:"created_at"`
+	Owner               string                                `json:"owner"`
+	BindingID           string                                `json:"binding_id"`
+	ForkRunID           string                                `json:"fork_run_id"`
+	SourceRunID         string                                `json:"source_run_id"`
+	ForkPoint           RunForkPoint                          `json:"fork_point"`
+	ForkEventID         string                                `json:"fork_event_id,omitempty"`
+	ContractSelection   RunForkContractSelection              `json:"contract_selection"`
+	TargetRootReference sourceartifact.RootAdmissionReference `json:"target_root_reference"`
+	CreatedAt           time.Time                             `json:"created_at"`
 }
 
 const (
@@ -1405,6 +1413,8 @@ type RunForkSelectedContractAgentTopology struct {
 type RunForkSelectedContractExecutionActivateRequest struct {
 	InheritedSchedules      InheritedScheduleSelection `json:"-"`
 	OrdinaryGenerationGrant any                        `json:"-"`
+	OriginalRootAdmission   sourceartifact.RootAdmission
+	Process                 processbinding.LeaseStamp
 	ForkOperation           *ForkOperationRequest
 	ExecutedEventCount      int
 	DataPins                []durabledata.Pin

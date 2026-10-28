@@ -14,6 +14,7 @@ import (
 	runtimecorrelation "github.com/division-sh/swarm/internal/runtime/correlation"
 	runtimepipeline "github.com/division-sh/swarm/internal/runtime/pipeline"
 	runtimestartupownership "github.com/division-sh/swarm/internal/runtime/startupownership"
+	"github.com/division-sh/swarm/internal/sourceartifact"
 	"github.com/division-sh/swarm/internal/store/storetest"
 	"github.com/division-sh/swarm/internal/testutil"
 	"github.com/google/uuid"
@@ -23,6 +24,7 @@ type flowActivationAttemptTestStore interface {
 	nativeReadinessFixtureStore
 	storetest.RunFixtureStore
 	runtimestartupownership.Store
+	LoadRunRootedSource(context.Context, string) (sourceartifact.RootedSource, error)
 	LoadDynamicFlowRuntimeReadiness(context.Context, string, runtimeflowidentity.Route) (runtimepipeline.DynamicFlowRuntimeReadiness, bool, error)
 	BeginDynamicFlowRuntimeActivation(context.Context, runtimepipeline.DynamicFlowRuntimeActivationRequest) (runtimepipeline.DynamicFlowRuntimeActivationAdmissionResult, error)
 	VerifyDynamicFlowRuntimeActivationAttempt(context.Context, runtimepipeline.DynamicFlowRuntimeActivationAttempt) error
@@ -68,7 +70,15 @@ func TestFlowActivationAttemptBatchRetirementBothStores(t *testing.T) {
 			for _, path := range paths {
 				seedExactFlowInstanceDescriptorOwner(t, ctx, selected, runID, uuid.NewString(), path, hash)
 			}
-			sourceSet, err := runtimeagenttopology.NewSourceSetPlan([]runtimeagenttopology.SourceCoordinate{{BundleHash: hash}}, nil)
+			rooted, err := selected.LoadRunRootedSource(ctx, runID)
+			if err != nil {
+				t.Fatal(err)
+			}
+			coordinate, err := runtimeagenttopology.NewSourceCoordinate(rooted.Admission())
+			if err != nil || coordinate.BundleHash != hash {
+				t.Fatalf("captured source coordinate: %+v %v", coordinate, err)
+			}
+			sourceSet, err := runtimeagenttopology.NewSourceSetPlan([]runtimeagenttopology.SourceCoordinate{coordinate}, nil)
 			if err != nil {
 				t.Fatal(err)
 			}
@@ -200,7 +210,15 @@ func TestFlowActivationAttemptAdmissionBothStores(t *testing.T) {
 				t.Fatalf("load readiness: found=%v err=%v", found, err)
 			}
 
-			sourceSet, err := runtimeagenttopology.NewSourceSetPlan([]runtimeagenttopology.SourceCoordinate{{BundleHash: hash}}, nil)
+			rooted, err := selected.LoadRunRootedSource(ctx, runID)
+			if err != nil {
+				t.Fatal(err)
+			}
+			coordinate, err := runtimeagenttopology.NewSourceCoordinate(rooted.Admission())
+			if err != nil || coordinate.BundleHash != hash {
+				t.Fatalf("captured source coordinate: %+v %v", coordinate, err)
+			}
+			sourceSet, err := runtimeagenttopology.NewSourceSetPlan([]runtimeagenttopology.SourceCoordinate{coordinate}, nil)
 			if err != nil {
 				t.Fatal(err)
 			}

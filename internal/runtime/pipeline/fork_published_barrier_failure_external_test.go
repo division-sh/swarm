@@ -99,11 +99,11 @@ func verifyPublishedBarrierCompletionFailure(t *testing.T, ctx context.Context, 
 	}
 	select {
 	case ack := <-acknowledged:
-		refusal := "live handoff requires its admitted ordinary source grant"
+		refusal := "startup source observation context differs from runtime source"
 		if proof == publishedBarrierCompletionSQLFailure {
 			refusal = "live delivery handoff has 1 unparked or foreign continuations"
+			refusal += "\nlive handoff was not acknowledged; selected work remains recoverable"
 		}
-		refusal += "\nlive handoff was not acknowledged; selected work remains recoverable"
 		if ack.err == nil || ack.err.Error() != refusal || ack.result.Activation.Activated {
 			t.Fatalf("failed completion lost its actual pre-ACK handoff refusal: activated=%t err=%v", ack.result.Activation.Activated, ack.err)
 		}

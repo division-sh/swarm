@@ -27,7 +27,7 @@ func TestChannelDraftTerminalRestartPublicJourney(t *testing.T) {
 					"event_name": "work.requested", "bundle_hash": hash,
 					"payload": map[string]any{"seed": true}, "idempotency_key": "draft-temporal-seed",
 				})
-				cardID := waitChannelAnchorCard(t, db, seed.RunID, decisioncard.AnchorKindStageGate, "reviews")
+				cardID := waitChannelAnchorCard(t, db, seed.RunID, decisioncard.AnchorKindStageGate, "chat/reviews")
 				message := waitChannelAnchorReceipt(t, db, cardID)
 				initial := readChannelHistoricalRender(t, db, cardID)
 				reject, found := telegramCallbackToken(h.provider.Delivery(message-1), "reject")

@@ -1,4 +1,4 @@
-name: clock-public-boundary
+# fixture: clock-public-boundary
 stages:
   pending: {}
   done: {final: true}

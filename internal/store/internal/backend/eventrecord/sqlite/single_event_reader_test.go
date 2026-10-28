@@ -14,6 +14,7 @@ import (
 	"github.com/division-sh/swarm/internal/events/eventtest"
 	"github.com/division-sh/swarm/internal/runtime/authoractivity"
 	"github.com/division-sh/swarm/internal/runtime/contracts"
+	runtimecorrelation "github.com/division-sh/swarm/internal/runtime/correlation"
 	"github.com/division-sh/swarm/internal/runtime/runlifecycle"
 	"github.com/division-sh/swarm/internal/runtime/startupownership"
 	"github.com/division-sh/swarm/internal/store/construction"
@@ -55,13 +56,13 @@ func singleEventReaderFixture(t *testing.T) (*sqlitebackend.Backend, eventrecord
 	var runPlans []schemastore.SchemaTableDDL
 	for _, plan := range plans {
 		switch plan.TableName {
-		case "runtime_store_metadata", "runs", "source_artifacts", "author_activity_order", "author_activity_occurrences",
+		case "runtime_store_metadata", "runs", "source_artifacts", "source_root_admissions", "author_activity_order", "author_activity_occurrences",
 			"run_fork_revision_heads", "run_fork_revisions", "run_fork_fact_revisions", "runtime_process_generation", "runtime_generation_grants":
 			runPlans = append(runPlans, plan)
 		}
 	}
-	if len(runPlans) != 10 {
-		t.Fatalf("native reader run plans=%d, want 10", len(runPlans))
+	if len(runPlans) != 11 {
+		t.Fatalf("native reader run plans=%d, want 11", len(runPlans))
 	}
 	runtimeID := uuid.NewString()
 	ctx := authoractivity.WithScope(context.Background(), authoractivity.BundleScope(runtimeID, sourceartifactfixture.BundleHash))
@@ -85,11 +86,15 @@ func singleEventReaderFixture(t *testing.T) (*sqlitebackend.Backend, eventrecord
 	if err != nil {
 		t.Fatal(err)
 	}
-	if _, err := selected.EnsureSourceArtifact(ctx, sourceartifactfixture.Artifact()); err != nil {
+	rooted, _ := sourceartifactfixture.Rooted(t, "reader", sourceartifactfixture.Artifact())
+	fact := sourceartifactfixture.FactFor(rooted.Artifact())
+	ctx = runtimecorrelation.WithSourceArtifactFact(ctx, fact)
+	ctx = runtimecorrelation.WithRootAdmission(ctx, rooted.Admission())
+	if _, err := selected.EnsureRootedSource(ctx, rooted); err != nil {
 		t.Fatal(err)
 	}
 	if _, err := selected.CreateRun(ctx, runlifecycle.CreateRequest{
-		RunID: event.RunID(), Source: sourceartifactfixture.Fact(), Origin: runlifecycle.ScenarioSetupRunOrigin(), StartedAt: time.Now().UTC(),
+		RunID: event.RunID(), Source: fact, RootAdmission: rooted.Admission(), Origin: runlifecycle.ScenarioSetupRunOrigin(), StartedAt: time.Now().UTC(),
 	}); err != nil {
 		t.Fatal(err)
 	}

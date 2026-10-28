@@ -17,9 +17,12 @@ import (
 
 func TestOrdinaryProviderSourceUsesExactSelectedOwner(t *testing.T) {
 	source := semanticview.Wrap(loadTargetRouteTempBundle(t, map[string]string{
-		"schema.yaml":       "name: root\n",
-		"alpha/schema.yaml": "name: alpha\n",
-		"beta/schema.yaml":  "name: beta\n",
+		"manifest.yaml":       "version: 1.0.0\nplatform_version: '*'\n",
+		"schema.yaml":         "stages: []\n",
+		"alpha/manifest.yaml": "version: 1.0.0\nplatform_version: '*'\n",
+		"alpha/schema.yaml":   "stages: []\n",
+		"beta/manifest.yaml":  "version: 1.0.0\nplatform_version: '*'\n",
+		"beta/schema.yaml":    "stages: []\n",
 	}))
 	runID := eventtest.UUID("provider-run")
 	for _, flow := range []string{semanticview.RootExecutionFlowID(source), "alpha"} {

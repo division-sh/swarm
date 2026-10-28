@@ -154,8 +154,9 @@ func testSelectedForkControlLifetime(t *testing.T, outcomeOperation string) {
 				sourceRun, eventID := uuid.NewString(), uuid.NewString()
 				seedSelectedOperationSource(t, ctx, selected, loaded, sourceRun, eventID, false)
 				request := SelectedContractExecutionRequest{SourceRunID: sourceRun, At: eventID, AllowSourceFreeze: true, Owner: owner, SourceLoader: loader,
-					ContractSelection: runforkadmission.SelectedContractSelection(loaded.Source),
-					AgentRuntime:      SelectedContractAgentRuntimeOptions{ExecutionPosture: executionposture.MockOnly, ProcessCapability: capability}}
+					ContractSelection:  runforkadmission.SelectedContractSelection(loaded.Source),
+					SourceArtifactFact: loaded.SourceArtifactFact,
+					AgentRuntime:       SelectedContractAgentRuntimeOptions{ExecutionPosture: executionposture.MockOnly, ProcessCapability: capability}}
 				claimed := make(chan effects.Authority, 1)
 				if phase == "reconstructed" {
 					owner.ports.runtimeExecution = selectedActivitySuccessorClaim{owner.ports.runtimeExecution, claimed}

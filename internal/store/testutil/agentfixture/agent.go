@@ -18,6 +18,7 @@ import (
 	runtimemanager "github.com/division-sh/swarm/internal/runtime/manager"
 	runtimerunlifecycle "github.com/division-sh/swarm/internal/runtime/runlifecycle"
 	runtimestartupownership "github.com/division-sh/swarm/internal/runtime/startupownership"
+	"github.com/division-sh/swarm/internal/sourceartifact"
 	"github.com/division-sh/swarm/internal/testutil/sourceartifactfixture"
 	"github.com/google/uuid"
 )
@@ -32,6 +33,31 @@ type Store interface {
 	RequirePresentRun(context.Context, string) error
 	CreateRun(context.Context, runtimerunlifecycle.CreateRequest) (runtimerunlifecycle.MutationDisposition, error)
 	LoadAgents(context.Context) ([]runtimemanager.PersistedAgent, error)
+}
+
+type runRootReader interface {
+	LoadRunRootedSource(context.Context, string) (sourceartifact.RootedSource, error)
+}
+
+func fixtureRunCoordinate(ctx context.Context, selected Store, runID, expectedHash string) (runtimeagenttopology.SourceCoordinate, error) {
+	reader, ok := selected.(runRootReader)
+	if !ok {
+		return runtimeagenttopology.SourceCoordinate{}, fmt.Errorf("agent fixture requires its retained run-root owner")
+	}
+	rooted, err := reader.LoadRunRootedSource(ctx, runID)
+	if err != nil {
+		return runtimeagenttopology.SourceCoordinate{}, err
+	}
+	if err := rooted.Validate(); err != nil {
+		return runtimeagenttopology.SourceCoordinate{}, err
+	}
+	if expectedHash != "" && rooted.Admission().BundleHash() != expectedHash {
+		return runtimeagenttopology.SourceCoordinate{}, fmt.Errorf("agent fixture source differs from its retained run root")
+	}
+	if err := runtimecorrelation.CheckRootAdmissionContext(ctx, rooted.Admission().Reference()); err != nil {
+		return runtimeagenttopology.SourceCoordinate{}, err
+	}
+	return runtimeagenttopology.NewSourceCoordinate(rooted.Admission())
 }
 
 type lifecycleStore struct {
@@ -431,7 +457,6 @@ func UpsertStaticForSource(t testing.TB, ctx context.Context, selected Store, re
 		return fmt.Errorf("agent fixture bundle source is invalid: %w", err)
 	}
 	bundleHash := source.BundleHash()
-	coordinate := runtimeagenttopology.SourceCoordinate{BundleHash: bundleHash}
 	identity, err := rec.Config.ConcreteIdentity()
 	if err != nil {
 		return err
@@ -441,6 +466,10 @@ func UpsertStaticForSource(t testing.TB, ctx context.Context, selected Store, re
 		return err
 	}
 	if err := ensureFixtureRun(ctx, selected, identity.RunID, rec.StartedAt, source); err != nil {
+		return err
+	}
+	coordinate, err := fixtureRunCoordinate(ctx, selected, identity.RunID, bundleHash)
+	if err != nil {
 		return err
 	}
 	planIdentity, err := identity.Normalize().Plan()
@@ -601,8 +630,15 @@ func ensureFixtureRun(ctx context.Context, selected Store, runID string, started
 	if startedAt.IsZero() {
 		startedAt = time.Now().UTC()
 	}
+	root, present, err := runtimecorrelation.RootAdmissionFromContext(ctx)
+	if err != nil {
+		return err
+	}
+	if !present {
+		return fmt.Errorf("create agent fixture run %s requires its admitted root", runID)
+	}
 	_, err = selected.CreateRun(ctx, runtimerunlifecycle.CreateRequest{
-		RunID: runID, Origin: runtimerunlifecycle.ScenarioSetupRunOrigin(), Source: source, StartedAt: startedAt.UTC(),
+		RunID: runID, Origin: runtimerunlifecycle.ScenarioSetupRunOrigin(), Source: source, RootAdmission: root, StartedAt: startedAt.UTC(),
 	})
 	if err != nil {
 		return fmt.Errorf("create agent fixture run %s: %w", runID, err)
@@ -635,7 +671,10 @@ func CommitStatic(t testing.TB, ctx context.Context, selected Store, req runtime
 	if err := ensureFixtureRun(ctx, selected, identity.RunID, req.Now); err != nil {
 		return runtimemanager.AgentLifecycleTransitionResult{}, err
 	}
-	coordinate := runtimeagenttopology.SourceCoordinate{BundleHash: agentFixtureBundleHash}
+	coordinate, err := fixtureRunCoordinate(ctx, selected, identity.RunID, agentFixtureBundleHash)
+	if err != nil {
+		return runtimemanager.AgentLifecycleTransitionResult{}, err
+	}
 	if _, err := validateFixtureStaticSourceSetRebind(ctx, selected, coordinate); err != nil {
 		return runtimemanager.AgentLifecycleTransitionResult{}, err
 	}
@@ -777,12 +816,13 @@ func CommitExact(t testing.TB, ctx context.Context, selected Store, req runtimem
 	if err != nil {
 		return runtimemanager.AgentLifecycleTransitionResult{}, err
 	}
-	coordinate := runtimeagenttopology.SourceCoordinate{BundleHash: agentFixtureBundleHash}
+	expectedHash := ""
 	if kind == runtimeagenttopology.AuthorityStaticDeclarationPlan {
-		static := req.Topology.Authority.Static
-		coordinate = runtimeagenttopology.SourceCoordinate{
-			BundleHash: static.BundleHash,
-		}
+		expectedHash = req.Topology.Authority.Static.BundleHash
+	}
+	coordinate, err := fixtureRunCoordinate(ctx, selected, identity.RunID, expectedHash)
+	if err != nil {
+		return runtimemanager.AgentLifecycleTransitionResult{}, err
 	}
 	plan := current
 	switch kind {

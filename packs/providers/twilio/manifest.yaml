@@ -1,0 +1,8 @@
+version: 0.1.0
+platform_version: '>=0.7.0 <0.8.0'
+capabilities:
+  can:
+    verify_secret: webhook_signing_secret
+    emit_events: [raw]
+    persist_dedupe_markers: true
+  cannot: [emit_undeclared_events, run_code_before_admission, touch_unbound_resources]

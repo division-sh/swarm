@@ -117,7 +117,7 @@ func testServeStartupAbortFailure(t *testing.T, backend string, reset bool, phas
 			}
 		}
 	})
-	credentials := processIngressCredentialStore{"telegram_bot_token": "abort-test-token", "webhook_signing.telegram": "abort-test-secret"}
+	credentials := processIngressCredentialStore{"telegram.telegram_bot_token": "abort-test-token", "telegram.webhook_signing_secret": "abort-test-secret"}
 	roots := []string{
 		writeStandingTelegramServeFixture(t, "http://127.0.0.1:1"),
 		writeServedEventPublishFollowUpFixture(t),
@@ -133,8 +133,8 @@ func testServeStartupAbortFailure(t *testing.T, backend string, reset bool, phas
 		candidate, err := buildServeRuntimeBundleContext(serveRuntimeBundleContextRequest{
 			ExecutionPosture: executionposture.Live,
 			Ctx:              ctx, Stores: projectServeRuntimePersistence(stores), Config: cfg, Loaded: loaded,
-			WorkspaceBackend:       cliapp.WorkspaceBackendSelection{Backend: "host"},
-			ProviderTriggerCatalog: testProviderTriggerCatalog(t), ProcessWorkOwner: process, RuntimeInstanceID: instance,
+			WorkspaceBackend: cliapp.WorkspaceBackendSelection{Backend: "host"},
+			ProcessWorkOwner: process, RuntimeInstanceID: instance,
 			Credentials: credentials, ProviderCredentials: credentials,
 			Options: cliapp.ServeOptions{TestLLMRuntime: servedNoopLLMRuntime{}, ShutdownGrace: 5 * time.Second},
 		})

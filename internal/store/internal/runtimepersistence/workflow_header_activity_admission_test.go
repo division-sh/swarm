@@ -28,7 +28,7 @@ func TestActivityAdmissionConsumesConstructedHeaderBothStores(t *testing.T) {
 		for _, shape := range []string{"fieldless", "fields"} {
 			for _, cell := range []string{"current", "stale", "wrong_entity", "wrong_path", "wrong_header_flow", "missing_header", "malformed_bucket"} {
 				t.Run(backend+"/"+shape+"/"+cell, func(t *testing.T) {
-					files := map[string]string{"schema.yaml": "name: activity-header\nstages:\n  review: {}\n"}
+					files := map[string]string{"manifest.yaml": "version: 1.0.0\nplatform_version: '*'\n", "schema.yaml": "stages:\n  review: {}\n"}
 					if shape == "fields" {
 						files["entities.yaml"] = "default:\n  title: text\n  accumulator:\n    type: text?\n    initial: 'business-only'\n"
 					}

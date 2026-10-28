@@ -64,9 +64,19 @@ func runServeIngressFrozenCredentialJourney(t *testing.T, backend, policy, point
 	if err != nil {
 		t.Fatal(err)
 	}
+	if err := file.Set(ctx, "telegram.telegram_bot_token", "fixture-bot-token"); err != nil {
+		t.Fatal(err)
+	}
+	signingKey := "telegram.webhook_signing_secret"
+	if policy != "pack" {
+		signingKey = "telegram_raw.webhook_signing_secret"
+		if err := file.Set(ctx, "telegram.webhook_signing_secret", "unused-telegram-signing-secret"); err != nil {
+			t.Fatal(err)
+		}
+	}
 	set := func(value string) {
 		t.Helper()
-		if err := file.Set(ctx, "webhook_signing.telegram", value); err != nil {
+		if err := file.Set(ctx, signingKey, value); err != nil {
 			t.Fatal(err)
 		}
 	}
@@ -80,9 +90,9 @@ func runServeIngressFrozenCredentialJourney(t *testing.T, backend, policy, point
 	}
 	hasSibling := point == "independent_sibling" || point == "shared_key_sibling"
 	if hasSibling {
-		key := "webhook_signing.telegram"
+		key := "telegram.webhook_signing_secret"
 		if point == "independent_sibling" {
-			key = "webhook_signing.partner"
+			key = "partner.webhook_signing_secret"
 			if err := file.Set(ctx, key, "original-secret"); err != nil {
 				t.Fatal(err)
 			}
@@ -130,6 +140,22 @@ func runServeIngressFrozenCredentialJourney(t *testing.T, backend, policy, point
 		opts.ConfigPath = writeChannelOnboardingPostgresRuntimeConfig(t, dsn)
 	}
 	enableChannelOnboardingRecoveryOnStartup(t, opts.ConfigPath)
+	if policy == "unsigned" {
+		body, err := os.ReadFile(opts.ConfigPath)
+		if err != nil {
+			t.Fatal(err)
+		}
+		var deployment map[string]any
+		if err := yaml.Unmarshal(body, &deployment); err != nil {
+			t.Fatal(err)
+		}
+		deployment["triggers"] = map[string]any{"telegram_raw/trigger.yaml": map[string]any{"acknowledge": "unsigned_webhook"}}
+		body, err = yaml.Marshal(deployment)
+		if err != nil {
+			t.Fatal(err)
+		}
+		writeStandingCandidateFile(t, opts.ConfigPath, string(body))
+	}
 	var process *serveRuntimeTestProcess
 	var endpoint string
 	start := func() {
@@ -142,8 +168,15 @@ func runServeIngressFrozenCredentialJourney(t *testing.T, backend, policy, point
 	t.Cleanup(func() { process.stop() })
 	postTo := func(id int, secret, provider string) int {
 		t.Helper()
+		alias := "chat"
+		if hasSibling && provider == "partner" {
+			alias = "chat.partner"
+			if point == "shared_key_sibling" {
+				provider = "telegram"
+			}
+		}
 		body := fmt.Sprintf(`{"update_id":%d,"message":{"message_id":%d,"from":{"id":42},"chat":{"id":42,"type":"private"},"text":"probe"}}`, id, id)
-		req, err := http.NewRequest(http.MethodPost, endpoint+"/webhooks/chat/"+provider, strings.NewReader(body))
+		req, err := http.NewRequest(http.MethodPost, endpoint+"/webhooks/"+alias+"/"+provider, strings.NewReader(body))
 		if err != nil {
 			t.Fatal(err)
 		}
@@ -172,9 +205,9 @@ func runServeIngressFrozenCredentialJourney(t *testing.T, backend, policy, point
 		siblings := 0
 		for _, subject := range subjects {
 			if subject.Kind == packs.SubjectProviderTrigger && subject.Applicability == "effective" {
-				if subject.Provider == providerName {
+				if subject.Provider == providerName && subject.TriggerAdmission != nil && subject.TriggerAdmission.FlowPath == "." {
 					effective = append(effective, subject)
-				} else if hasSibling && subject.Provider == "partner" {
+				} else if hasSibling && subject.TriggerAdmission != nil && subject.TriggerAdmission.FlowPath == "partner" {
 					siblings++
 					wantReady := ready || point == "independent_sibling"
 					if (subject.Status == packs.StatusReady) != wantReady || subject.TriggerAdmission.BindingEnabled == nil || *subject.TriggerAdmission.BindingEnabled != wantReady {
@@ -314,7 +347,7 @@ func runServeIngressFrozenCredentialJourney(t *testing.T, backend, policy, point
 			rt := use.Runtime()
 			_ = use.Done()
 			rt.Bus.SetProviderOutputAuthorizationVerifier(&frozenIngressMutationVerifier{verify: rt.Options.ProviderTriggerCatalog.VerifyProviderOutputAuthorization, mutate: func() error {
-				return file.Set(ctx, "webhook_signing.telegram", "unadmitted-replacement")
+				return file.Set(ctx, signingKey, "unadmitted-replacement")
 			}})
 			if code := post(80800, "original-secret"); code != http.StatusServiceUnavailable {
 				t.Fatalf("mutation during publication preparation HTTP %d", code)
@@ -340,7 +373,7 @@ func runServeIngressFrozenCredentialJourney(t *testing.T, backend, policy, point
 			t.Log("temporal mutation:", mutation.name)
 			before := counts()
 			if mutation.remove {
-				if err := file.Delete(ctx, "webhook_signing.telegram"); err != nil {
+				if err := file.Delete(ctx, signingKey); err != nil {
 					t.Fatal(err)
 				}
 			} else {
@@ -383,7 +416,7 @@ func runServeIngressFrozenCredentialJourney(t *testing.T, backend, policy, point
 
 func setFrozenIngressRawPolicy(t *testing.T, root string, unsigned bool) {
 	t.Helper()
-	path := filepath.Join(root, "telegram-ingress", "schema.yaml")
+	path := filepath.Join(root, "schema.yaml")
 	body, err := os.ReadFile(path)
 	if err != nil {
 		t.Fatal(err)
@@ -392,18 +425,7 @@ func setFrozenIngressRawPolicy(t *testing.T, root string, unsigned bool) {
 	if err := yaml.Unmarshal(body, &schema); err != nil {
 		t.Fatal(err)
 	}
-	provider := schema["ingress"].(map[string]any)["providers"].([]any)[0].(map[string]any)
-	provider["provider"] = "telegram_raw"
-	schema["pins"] = map[string]any{"inputs": []string{"inbound.telegram_raw"}}
-	auth := map[string]any{"kind": "token", "header": "X-Telegram-Bot-Api-Secret-Token"}
-	admission := map[string]any{"kind": "raw", "authentication": auth, "event": "inbound.telegram_raw", "payload": "json", "delivery_id": map[string]any{"source": "json_path", "json_path": "$.update_id"}}
-	if unsigned {
-		delete(provider, "signing_secret")
-		auth["kind"] = "none"
-		delete(auth, "header")
-		admission["acknowledge"] = "unsigned_webhook"
-	}
-	provider["admission"] = admission
+	schema["pins"] = map[string]any{"inputs": []string{"inbound.telegram_raw.raw"}}
 	body, err = yaml.Marshal(schema)
 	if err != nil {
 		t.Fatal(err)
@@ -411,35 +433,51 @@ func setFrozenIngressRawPolicy(t *testing.T, root string, unsigned bool) {
 	if err := os.WriteFile(path, body, 0600); err != nil {
 		t.Fatal(err)
 	}
-	writeStandingCandidateFile(t, filepath.Join(root, "telegram-ingress", "events.yaml"), "inbound.telegram_raw:\n  provider: text\n  provider_event_id: text\n  provider_event_type: text\n  data: json\n")
+	writeFrozenIngressTrigger(t, root, "telegram_raw", unsigned)
 }
 
 func addFrozenIngressSibling(t *testing.T, root, signingKey string) {
 	t.Helper()
-	path := filepath.Join(root, "telegram-ingress", "schema.yaml")
-	body, err := os.ReadFile(path)
-	if err != nil {
+	sibling := filepath.Join(root, "partner")
+	provider := "partner"
+	if signingKey == "telegram.webhook_signing_secret" {
+		provider = "telegram"
+		copyReleaseFixtureTree(t, filepath.Join(root, "telegram"), filepath.Join(sibling, provider))
+	} else {
+		writeFrozenIngressTrigger(t, sibling, provider, false)
+	}
+	event := "inbound." + provider + ".raw"
+	if provider == "telegram" {
+		event = "inbound.telegram.text_message"
+	}
+	writeStandingCandidateFile(t, filepath.Join(sibling, "manifest.yaml"), "version: 1.0.0\nplatform_version: '*'\n")
+	writeStandingCandidateFile(t, filepath.Join(sibling, "schema.yaml"), "stages: []\npins:\n  inputs: ["+event+"]\n")
+}
+
+func writeFrozenIngressTrigger(t *testing.T, root, provider string, unsigned bool) {
+	t.Helper()
+	manifest := "version: 1.0.0\nplatform_version: '*'\ncapabilities:\n  can:\n    emit_events: [raw]\n"
+	if !unsigned {
+		manifest += "    verify_secret: webhook_signing_secret\n"
+	}
+	manifest += "  cannot: [execute code]\n"
+	body := `transport: webhook
+payload_object_required: true
+secret: {required: true}
+signature: {type: token_equality, header: X-Telegram-Bot-Api-Secret-Token}
+delivery_id: {json_path: $.update_id, required: true}
+event_type: {literal: update, required: true}
+event_name: {literal: raw}
+`
+	if unsigned {
+		body = strings.Replace(body, "secret: {required: true}", "secret: {required: false}", 1)
+		body = strings.Replace(body, "signature: {type: token_equality, header: X-Telegram-Bot-Api-Secret-Token}\n", "", 1)
+	}
+	if err := os.MkdirAll(filepath.Join(root, provider), 0700); err != nil {
 		t.Fatal(err)
 	}
-	var schema map[string]any
-	if err := yaml.Unmarshal(body, &schema); err != nil {
-		t.Fatal(err)
-	}
-	ingress := schema["ingress"].(map[string]any)
-	ingress["providers"] = append(ingress["providers"].([]any), map[string]any{
-		"provider": "partner", "signing_secret": signingKey,
-		"admission": map[string]any{"kind": "raw", "event": "inbound.partner", "payload": "json",
-			"authentication": map[string]any{"kind": "token", "header": "X-Telegram-Bot-Api-Secret-Token"},
-			"delivery_id":    map[string]any{"source": "json_path", "json_path": "$.update_id"}},
-	})
-	pins := schema["pins"].(map[string]any)
-	pins["inputs"] = append(pins["inputs"].([]any), "inbound.partner")
-	body, err = yaml.Marshal(schema)
-	if err != nil {
-		t.Fatal(err)
-	}
-	writeStandingCandidateFile(t, path, string(body))
-	writeStandingCandidateFile(t, filepath.Join(root, "telegram-ingress", "events.yaml"), "inbound.partner:\n  provider: text\n  provider_event_id: text\n  provider_event_type: text\n  data: json\n")
+	writeStandingCandidateFile(t, filepath.Join(root, provider, "manifest.yaml"), manifest)
+	writeStandingCandidateFile(t, filepath.Join(root, provider, "trigger.yaml"), body)
 }
 
 type frozenIngressMutationVerifier struct {

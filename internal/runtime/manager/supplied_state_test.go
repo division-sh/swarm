@@ -1,7 +1,6 @@
 package manager
 
 import (
-	"context"
 	"encoding/json"
 	"fmt"
 	"path/filepath"
@@ -36,7 +35,7 @@ func setSuppliedFields(t testing.TB, req *runtimepipeline.FlowInstanceActivation
 // Fixture declarations are admitted through the same state loader as production.
 func declareSuppliedFields(t *testing.T, bundle *runtimecontracts.WorkflowContractBundle, fields map[string]runtimecontracts.EventFieldSpec) {
 	t.Helper()
-	root := t.TempDir()
+	root := filepath.Join(t.TempDir(), "supplied-state-fixture")
 	var state strings.Builder
 	state.WriteString("review_item:\n  instance_key: text\n")
 	keys := make([]string, 0, len(fields))
@@ -47,8 +46,11 @@ func declareSuppliedFields(t *testing.T, bundle *runtimecontracts.WorkflowContra
 	for _, key := range keys {
 		fmt.Fprintf(&state, "  %s: %s\n", key, fields[key].Type)
 	}
-	writeFlowActivationFixtureFile(t, filepath.Join(root, "schema.yaml"), "name: supplied-state-fixture\n")
-	writeFlowActivationFixtureFile(t, filepath.Join(root, "review/schema.yaml"), "name: review\ninstance: instance_key\npins: {inputs: [construction.requested]}\n")
+	for _, flow := range []string{".", "review"} {
+		writeFlowActivationFixtureFile(t, filepath.Join(root, flow, "manifest.yaml"), "version: 1.0.0\nplatform_version: '*'\n")
+	}
+	writeFlowActivationFixtureFile(t, filepath.Join(root, "schema.yaml"), "stages: []\n")
+	writeFlowActivationFixtureFile(t, filepath.Join(root, "review/schema.yaml"), "instance: instance_key\npins: {inputs: [construction.requested]}\n")
 	writeFlowActivationFixtureFile(t, filepath.Join(root, "review/entities.yaml"), state.String())
 	repo := runtimepipeline.WorkflowRepoRoot()
 	admitted, err := runtimecontracts.LoadWorkflowContractBundleWithOverrides(repo, root, runtimecontracts.DefaultPlatformSpecFile(repo))
@@ -81,9 +83,8 @@ func TestSuppliedStateHasNoParallelConfigurationAdmission(t *testing.T) {
 	req.ConstructorInput = "construction.requested"
 	setSuppliedPayload(&req, `{"brief":"exact supplied value"}`)
 	instances := &flowActivationTestInstanceStore{}
-	am := newFlowActivationManager(t, &flowActivationTestBus{}, instances)
-	setFlowActivationManagerSemanticSource(am, semanticview.Wrap(bundle))
-	plan, err := am.PrepareFlowInstanceActivation(testAuthorActivityContext(context.Background()), req)
+	am, ctx := newFlowActivationManagerForSource(t, &flowActivationTestBus{}, instances, semanticview.Wrap(bundle))
+	plan, err := am.PrepareFlowInstanceActivation(ctx, req)
 	if err != nil || plan.Instance.Fields["brief"] != "exact supplied value" {
 		t.Fatalf("canonical constructor was blocked by a second authority: %+v %v", plan, err)
 	}

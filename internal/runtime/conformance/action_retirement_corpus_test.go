@@ -18,7 +18,7 @@ import (
 
 	"github.com/division-sh/swarm/internal/checkoutsource"
 	"github.com/division-sh/swarm/internal/runtime/contracts"
-	"gopkg.in/yaml.v3"
+	yaml "gopkg.in/yaml.v3"
 )
 
 const actionRetirementCorpusPath = "internal/runtime/conformance/testdata/action_retirement_corpus_ledger.json"

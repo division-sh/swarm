@@ -302,6 +302,13 @@ func testSetupHandler(t *testing.T, pg *store.PostgresStore, source semanticview
 	}
 	fact := sourceartifactfixture.RequireArtifact(t, context.Background(), pg, bundle.SourceArtifact)
 	ctx := originalAPIFixtureContext(t, testAuthorActivityContextForSource(context.Background(), fact), pg)
+	rooted, err := bundle.RootedSource()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := pg.EnsureRootedSource(context.Background(), rooted); err != nil {
+		t.Fatal(err)
+	}
 	handlers := testOperatorHandlers(testOperatorCapabilities{
 		Now:         func() time.Time { return time.Date(2026, 5, 10, 12, 0, 0, 0, time.UTC) },
 		Ready:       func() bool { return true },
@@ -313,6 +320,7 @@ func testSetupHandler(t *testing.T, pg *store.PostgresStore, source semanticview
 			bundleScopedFailingEventPublisher: bundleScopedFailingEventPublisher{
 				failingRunStartPublisher: failingRunStartPublisher{err: errors.New("unexpected test setup event publish")},
 				fact:                     fact,
+				root:                     rooted.Admission(),
 			},
 			TestSetupStore: pg,
 		},

@@ -22,11 +22,18 @@ import (
 
 type readinessPostcommitFaultWorkflow struct {
 	*pipeline.PipelineCoordinator
-	fault error
-	marks atomic.Int32
+	fault       error
+	marks       atomic.Int32
+	beforeReady func(context.Context, pipeline.DynamicFlowRuntimeActivationAttempt) error
+	afterReady  func(context.Context, pipeline.DynamicFlowRuntimeActivationAttempt) error
 }
 
 func (w *readinessPostcommitFaultWorkflow) AdvanceFlowAttachment(ctx context.Context, attempt pipeline.DynamicFlowRuntimeActivationAttempt, previous pipeline.FlowAttachmentPhase, at time.Time) (pipeline.FlowAttachmentAdvanceResult, error) {
+	if previous == pipeline.FlowAttachmentTimersArmed && w.beforeReady != nil {
+		if err := w.beforeReady(ctx, attempt); err != nil {
+			return pipeline.FlowAttachmentAdvanceResult{}, err
+		}
+	}
 	result, err := w.PipelineCoordinator.AdvanceFlowAttachment(ctx, attempt, previous, at)
 	if err != nil || !result.Acknowledged {
 		return result, err
@@ -35,6 +42,9 @@ func (w *readinessPostcommitFaultWorkflow) AdvanceFlowAttachment(ctx context.Con
 		return result, nil
 	}
 	w.marks.Add(1)
+	if w.afterReady != nil {
+		return result, errors.Join(w.fault, w.afterReady(ctx, attempt))
+	}
 	return result, w.fault
 }
 

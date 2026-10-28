@@ -176,7 +176,11 @@ func openRuntimeLogoutConnectionFixture(t *testing.T, f *activeInputFixture, pro
 
 func admitLogoutGenerationFixture(t *testing.T, f *activeInputFixture, owner startupownership.ProcessCapability) processbinding.Binding {
 	t.Helper()
-	plan, err := agenttopology.NewSourceSetPlan([]agenttopology.SourceCoordinate{{BundleHash: f.operation.Coordinate.BundleHash}}, nil)
+	coordinate, err := agenttopology.NewSourceCoordinate(f.rooted.Admission())
+	if err != nil {
+		t.Fatal(err)
+	}
+	plan, err := agenttopology.NewSourceSetPlan([]agenttopology.SourceCoordinate{coordinate}, nil)
 	if err != nil {
 		t.Fatal(err)
 	}

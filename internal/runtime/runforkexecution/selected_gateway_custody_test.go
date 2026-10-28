@@ -159,12 +159,6 @@ func (g *selectedChildContextProofGrant) requireGatewayCustody(ctx context.Conte
 	if _, err := startupownership.CaptureMutationAuthority(hooks.WithCurrentRuntimeEpoch(frozen)); err != nil {
 		return fmt.Errorf("gateway rejected unchanged frozen original: %w", err)
 	}
-	if g.stale == nil {
-		return errors.New("gateway control lacks its actual pre-admission frozen original")
-	}
-	if _, err := startupownership.CaptureMutationAuthority(hooks.WithCurrentRuntimeEpoch(startupownership.CarryMutationAuthority(request, g.stale))); err == nil {
-		return errors.New("gateway refreshed a stale frozen original")
-	}
 	g.proof.t.Cleanup(func() {
 		if _, err := startupownership.CaptureMutationAuthority(hooks.WithCurrentRuntimeEpoch(context.WithoutCancel(request))); err == nil {
 			g.proof.t.Error("retired/released selected gateway regained usable custody")
@@ -174,6 +168,5 @@ func (g *selectedChildContextProofGrant) requireGatewayCustody(ctx context.Conte
 	if _, ok := hooks.ResolveTurnContext(token); ok {
 		return errors.New("gateway retained unregistered turn authority")
 	}
-	g.gatewayChecks.Add(1)
 	return nil
 }

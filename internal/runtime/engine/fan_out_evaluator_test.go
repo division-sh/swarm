@@ -82,7 +82,10 @@ func preparedFanOutFixtureWithContext(t testing.TB, incoming events.DeliveryCont
 	}
 	// The two compiled fixture variants must not claim the same artifact.
 	fixtureRoot := t.TempDir()
-	if err := os.WriteFile(filepath.Join(fixtureRoot, "schema.yaml"), []byte("name: engine-fan-out-test\n"), 0o644); err != nil {
+	if err := os.WriteFile(filepath.Join(fixtureRoot, "manifest.yaml"), []byte("version: 1.0.0\nplatform_version: '*'\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(fixtureRoot, "schema.yaml"), []byte("stages: []\n"), 0o644); err != nil {
 		t.Fatal(err)
 	}
 	nodeSource, err := json.Marshal(bundle.Nodes)

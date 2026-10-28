@@ -150,6 +150,7 @@ func TestChannelOnboardingSucceededWakeWithoutBackstopBothStores(t *testing.T) {
 	for _, backend := range servedparity.RequiredBackends {
 		t.Run(string(backend), func(t *testing.T) {
 			h := newChannelOnboardingE2EHarness(t, backend, true)
+			writeChannelOnboardingLiveToolCredentials(t, h.credentialPath)
 			observation := &channelReconcileObservation{}
 			observation.configure(&h.opts)
 			// No repair tick can release the held final completion in this proof.

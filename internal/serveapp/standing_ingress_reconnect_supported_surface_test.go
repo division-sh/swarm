@@ -17,6 +17,7 @@ func TestStaleLearnedRegistrationFreshReconnectBothStores(t *testing.T) {
 		for _, change := range []string{"deleted", "rotated", "same_value_new_receipt"} {
 			t.Run(string(backend)+"/"+change, func(t *testing.T) {
 				h := newChannelOnboardingE2EHarness(t, backend, true)
+				writeChannelOnboardingLiveToolCredentials(t, h.credentialPath)
 				var rt *runtime.Runtime
 				h.opts.TestRuntimeReadyHook = func(ready *runtime.Runtime) { rt = ready }
 				h.start(t)

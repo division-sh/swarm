@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"path/filepath"
 	"reflect"
 	"strings"
 	"sync"
@@ -13,6 +14,7 @@ import (
 	"github.com/division-sh/swarm/internal/runtime/bus"
 	"github.com/division-sh/swarm/internal/runtime/core/worklifetime"
 	"github.com/division-sh/swarm/internal/runtime/correlation"
+	runtimecredentials "github.com/division-sh/swarm/internal/runtime/credentials"
 	"github.com/division-sh/swarm/internal/runtime/deliverylifecycle"
 	"github.com/division-sh/swarm/internal/runtime/effects"
 	"github.com/division-sh/swarm/internal/runtime/executionposture"
@@ -153,12 +155,22 @@ func TestSelectedForkAcknowledgmentPrecedesBusinessDrainBothStores(t *testing.T)
 			owner, selected := fixture.owner, fixture.owner.ports.fork
 			ctx, request, _ := q1GateComponentSource(t, owner, false, true, true)
 			loaded, err := request.SourceLoader.LoadRunForkSelectedContractSourceForRequest(ctx, SelectedContractSourceLoadRequest{
-				SourceRunID: request.SourceRunID, Selection: request.ContractSelection,
+				Responsibility: OriginalRunSource(request.SourceRunID), Selection: request.ContractSelection,
 			})
 			if err != nil {
 				t.Fatal(err)
 			}
-			ordinary, contexts := liveForkRuntimeFixture(t, ctx, selected, owner, loaded, request.SourceRunID, executionposture.Live)
+			credentials, err := runtimecredentials.NewFileStore(filepath.Join(t.TempDir(), "credentials.json"))
+			if err != nil {
+				t.Fatal(err)
+			}
+			for key, value := range map[string]string{"telegram.telegram_bot_token": "retained-order-bot", "telegram.webhook_signing_secret": "retained-order-signing"} {
+				if err := credentials.Set(ctx, key, value); err != nil {
+					t.Fatal(err)
+				}
+			}
+			ordinary, contexts := liveForkRuntimeFixture(t, ctx, selected, owner, loaded, request.SourceRunID, executionposture.Live,
+				SelectedContractAgentRuntimeOptions{Credentials: credentials})
 			probe := &retainedExecutionOrderProbe{SelectedContractForkLifecycle: owner.ports.fork, SelectedContractReplayPersistence: owner.ports.replay,
 				started: make(chan struct{}), release: make(chan struct{})}
 			owner.ports.fork, owner.ports.replay = probe, probe

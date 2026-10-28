@@ -16,6 +16,7 @@ import (
 	"github.com/division-sh/swarm/internal/runtime/core/processbinding"
 	runtimedestructivereset "github.com/division-sh/swarm/internal/runtime/destructivereset"
 	runtimemanager "github.com/division-sh/swarm/internal/runtime/manager"
+	"github.com/division-sh/swarm/internal/sourceartifact"
 	"github.com/google/uuid"
 )
 
@@ -151,6 +152,7 @@ type processCapability struct {
 	mu              sync.Mutex
 	monitorMu       sync.Mutex
 	session         RetainedSession
+	retainedSources map[sourceartifact.RootAdmissionReference]sourceartifact.RootAdmission
 	grants          map[string]*generationGrant
 	fanOutCapacity  *fanOutCapacityState
 	fanOutClosing   bool
@@ -164,6 +166,8 @@ type processCapability struct {
 }
 
 type generationGrant struct {
+	issuingParent context.Context
+
 	mu        sync.Mutex
 	owner     *processCapability
 	evidence  GrantEvidence

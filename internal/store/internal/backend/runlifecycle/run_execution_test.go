@@ -31,9 +31,9 @@ func admissionTestSQLMock(t *testing.T) (*sql.DB, sqlmock.Sqlmock) {
 
 func admissionTestRunSQL(postgres, readOnly bool) string {
 	if !postgres {
-		return "SELECT status, bundle_hash FROM runs WHERE run_id = ?"
+		return "SELECT status, bundle_hash, source_root_directory FROM runs WHERE run_id = ?"
 	}
-	query := "SELECT status, bundle_hash FROM runs WHERE run_id = $1::uuid"
+	query := "SELECT status, bundle_hash, source_root_directory FROM runs WHERE run_id = $1::uuid"
 	if !readOnly {
 		query += " FOR UPDATE"
 	}
@@ -45,6 +45,14 @@ func admissionTestArtifactSQL(postgres bool) string {
 		return "SELECT EXISTS (SELECT 1 FROM source_artifacts WHERE bundle_hash = $1)"
 	}
 	return "SELECT EXISTS (SELECT 1 FROM source_artifacts WHERE bundle_hash = ?)"
+}
+
+func admissionTestExpectRoot(mock sqlmock.Sqlmock, postgres bool, hash string, exists bool) {
+	query := "SELECT EXISTS (SELECT 1 FROM source_root_admissions WHERE bundle_hash = ? AND root_directory = ?)"
+	if postgres {
+		query = "SELECT EXISTS (SELECT 1 FROM source_root_admissions WHERE bundle_hash = $1 AND root_directory = $2)"
+	}
+	mock.ExpectQuery(query).WithArgs(hash, "fixture").WillReturnRows(sqlmock.NewRows([]string{"exists"}).AddRow(exists))
 }
 
 func admissionTestSource(t *testing.T, bundle string) runtimecorrelation.SourceArtifactFact {
@@ -96,14 +104,15 @@ func runExecutionTransaction(t *testing.T) (*sql.Tx, sqlmock.Sqlmock) {
 }
 
 func expectRunExecutionSource(mock sqlmock.Sqlmock, postgres, observe bool, state string) {
-	rows := sqlmock.NewRows([]string{"status", "bundle_hash"})
+	rows := sqlmock.NewRows([]string{"status", "bundle_hash", "source_root_directory"})
 	if state != "missing" {
-		rows.AddRow(state, selectedCompletionBundle)
+		rows.AddRow(state, selectedCompletionBundle, "fixture")
 	}
 	mock.ExpectQuery(admissionTestRunSQL(postgres, observe)).WithArgs(selectedCompletionRunID).WillReturnRows(rows)
 	if state == "running" || state == "paused" {
 		mock.ExpectQuery(admissionTestArtifactSQL(postgres)).WithArgs(selectedCompletionBundle).
 			WillReturnRows(sqlmock.NewRows([]string{"exists"}).AddRow(true))
+		admissionTestExpectRoot(mock, postgres, selectedCompletionBundle, true)
 	}
 }
 
@@ -319,7 +328,7 @@ func TestRunExecutionSQLAndArtifactRefusalsBothDialects(t *testing.T) {
 						mock.ExpectQuery(admissionTestRunSQL(postgres, observe)).WithArgs(selectedCompletionRunID).WillReturnError(failure)
 					} else if stage == "artifact" || stage == "missing_artifact" {
 						mock.ExpectQuery(admissionTestRunSQL(postgres, observe)).WithArgs(selectedCompletionRunID).
-							WillReturnRows(sqlmock.NewRows([]string{"status", "bundle_hash"}).AddRow("running", selectedCompletionBundle))
+							WillReturnRows(sqlmock.NewRows([]string{"status", "bundle_hash", "source_root_directory"}).AddRow("running", selectedCompletionBundle, "fixture"))
 						artifact := mock.ExpectQuery(admissionTestArtifactSQL(postgres)).WithArgs(selectedCompletionBundle)
 						if stage == "artifact" {
 							artifact.WillReturnError(failure)

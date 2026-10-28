@@ -3,6 +3,7 @@ package runforkexecution
 import (
 	"context"
 	"errors"
+	"path/filepath"
 	"reflect"
 	"strings"
 	"testing"
@@ -10,6 +11,7 @@ import (
 
 	"github.com/division-sh/swarm/internal/packartifact"
 	"github.com/division-sh/swarm/internal/runtime/agenttopology"
+	runtimecredentials "github.com/division-sh/swarm/internal/runtime/credentials"
 	"github.com/division-sh/swarm/internal/runtime/destructivereset"
 	"github.com/division-sh/swarm/internal/runtime/executionposture"
 	"github.com/division-sh/swarm/internal/runtime/runfork"
@@ -43,11 +45,21 @@ func proveQ1BranchPointCleanup(t *testing.T, backend string, kind runfork.RunFor
 	fixture := newActivityForkFixture(t, backend)
 	owner, selected := fixture.owner, fixture.owner.ports.fork
 	ctx, eventRequest, advanceEvent := q1CleanupSource(t, owner, kind, operation == "reset")
-	loaded, err := eventRequest.SourceLoader.LoadRunForkSelectedContractSourceForRequest(ctx, SelectedContractSourceLoadRequest{SourceRunID: eventRequest.SourceRunID, Selection: eventRequest.ContractSelection})
+	loaded, err := eventRequest.SourceLoader.LoadRunForkSelectedContractSourceForRequest(ctx, SelectedContractSourceLoadRequest{Responsibility: OriginalRunSource(eventRequest.SourceRunID), Selection: eventRequest.ContractSelection})
 	if err != nil {
 		t.Fatal(err)
 	}
-	ordinary, contexts := liveForkRuntimeFixture(t, ctx, selected, owner, loaded, eventRequest.SourceRunID, executionposture.Live)
+	credentials, err := runtimecredentials.NewFileStore(filepath.Join(t.TempDir(), "credentials.json"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	for key, value := range map[string]string{"telegram.telegram_bot_token": "cleanup-bot", "telegram.webhook_signing_secret": "cleanup-signing"} {
+		if err := credentials.Set(ctx, key, value); err != nil {
+			t.Fatal(err)
+		}
+	}
+	ordinary, contexts := liveForkRuntimeFixture(t, ctx, selected, owner, loaded, eventRequest.SourceRunID, executionposture.Live,
+		SelectedContractAgentRuntimeOptions{Credentials: credentials})
 	deploymentRequest := eventRequest
 	siblingOperation := *eventRequest.ForkOperation
 	siblingOperation.OperationID, siblingOperation.IdempotencyKey = uuid.NewString(), uuid.NewString()
@@ -127,11 +139,21 @@ func proveQ1DetachedAcknowledgmentWithoutSource(t *testing.T, backend string, ki
 	fixture := newActivityForkFixture(t, backend)
 	owner, selected := fixture.owner, fixture.owner.ports.fork
 	ctx, request, advance := q1CleanupSource(t, owner, kind, false)
-	loaded, err := request.SourceLoader.LoadRunForkSelectedContractSourceForRequest(ctx, SelectedContractSourceLoadRequest{SourceRunID: request.SourceRunID, Selection: request.ContractSelection})
+	loaded, err := request.SourceLoader.LoadRunForkSelectedContractSourceForRequest(ctx, SelectedContractSourceLoadRequest{Responsibility: OriginalRunSource(request.SourceRunID), Selection: request.ContractSelection})
 	if err != nil {
 		t.Fatal(err)
 	}
-	ordinary, contexts := liveForkRuntimeFixture(t, ctx, selected, owner, loaded, request.SourceRunID, executionposture.Live)
+	credentials, err := runtimecredentials.NewFileStore(filepath.Join(t.TempDir(), "credentials.json"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	for key, value := range map[string]string{"telegram.telegram_bot_token": "cleanup-bot", "telegram.webhook_signing_secret": "cleanup-signing"} {
+		if err := credentials.Set(ctx, key, value); err != nil {
+			t.Fatal(err)
+		}
+	}
+	ordinary, contexts := liveForkRuntimeFixture(t, ctx, selected, owner, loaded, request.SourceRunID, executionposture.Live,
+		SelectedContractAgentRuntimeOptions{Credentials: credentials})
 	attachment := q1StageBranchPointComponent(t, ctx, request)
 	advance()
 	result, err := attachment.container.activateLive(attachment.prepared, SelectedContractExecutionRequest{

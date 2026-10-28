@@ -627,7 +627,7 @@ func TestPostgresLifecycleSessionMutationPublishesRunForkRevision(t *testing.T) 
 	_, db, _ := testutil.StartPostgres(t)
 	store := admitTestPostgresStore(t, db)
 	ctx := originalStoreFixtureContext(t, testAuthorActivityContext(), store)
-	requireDefaultSourceArtifactForTest(t, ctx, store)
+	ctx = requireDefaultSourceArtifactForTest(t, ctx, store)
 	now := time.Date(2026, 7, 14, 12, 0, 0, 0, time.UTC)
 	runID := uuid.NewString()
 	agentID := "revision-lifecycle-agent"
@@ -663,7 +663,7 @@ func TestPostgresLifecycleSessionMutationPublishesRunForkRevision(t *testing.T) 
 
 	eventID := uuid.NewString()
 	sessionID := uuid.NewString()
-	requireRunFixtureForTest(t, ctx, store, semanticRunFixture{Origin: semanticScenarioSetupRunOriginForTest(), RunID: runID})
+	ctx = requireRunFixtureForTest(t, ctx, store, semanticRunFixture{Origin: semanticScenarioSetupRunOriginForTest(), RunID: runID})
 	initialRevision := captureRunForkTestRevision(t, db, runID)
 	tx, err := db.BeginTx(ctx, nil)
 	if err != nil {

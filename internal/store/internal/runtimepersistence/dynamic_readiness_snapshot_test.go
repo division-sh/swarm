@@ -28,7 +28,7 @@ func newReadinessSnapshotFixture(t *testing.T, backend string) readinessSnapshot
 	writerDB := sql.OpenDB(connector)
 	t.Cleanup(func() { _ = writerDB.Close() })
 	writer := newStopCommitStoreOwner(t, backend, writerDB).(agentFixtureFlowStore)
-	f := newReceiverConfigActivationFixtureForStore(t, writer, false, map[string]string{"schema.yaml": "name: readiness-snapshot\n"}, nil, ownStoreTestAgentManager, nil)
+	f := newReceiverConfigActivationFixtureForStore(t, writer, false, map[string]string{"schema.yaml": "stages: []\n", "manifest.yaml": "version: 1.0.0\nplatform_version: '*'\n"}, nil, ownStoreTestAgentManager, nil)
 	runID := correlation.RunIDFromContext(f.ctx)
 	request := sqliteFlowActivationRequest(f.bundle, ".", runID, "", runID)
 	request.Instance = flowidentity.Stored(request.ContractBundle, ".", runID, runID, runID, "")

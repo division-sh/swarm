@@ -430,10 +430,10 @@ func newIssue2564OperationFixture(t *testing.T, backend string) issue2564Operati
 	t.Helper()
 	const flow = "operations"
 	f := newReceiverConfigActivationFixtureWithDocuments(t, backend, false, map[string]string{
-		"schema.yaml":            "name: issue2564-operation-proof\n",
+		"schema.yaml":            "stages: []\n",
 		"events.yaml":            "operations.requested:\noperations.snapshot:\n",
 		"types.yaml":             "types:\n  OperationProfile:\n    leaf: text\n    sibling: text\n",
-		"operations/schema.yaml": "name: operations\ninstance: receiver_key\nstages:\n  active: {}\n  done: {final: true}\npins:\n  inputs: [construct.requested]\n",
+		"operations/schema.yaml": "instance: receiver_key\nstages:\n  active: {}\n  done: {final: true}\npins:\n  inputs: [construct.requested]\n",
 		"operations/entities.yaml": `operation_state:
   receiver_key: text
   items: {type: "[text]", initial: [equal]}
@@ -441,7 +441,7 @@ func newIssue2564OperationFixture(t *testing.T, backend string) issue2564Operati
   positions: {type: "[text]", initial: [old-0, old-1]}
   profile: {type: OperationProfile, initial: {leaf: old-leaf, sibling: initial}}
 `,
-		"operations/events.yaml": "construct.requested:\n",
+		"operations/events.yaml": "construct.requested:\n", "manifest.yaml": "version: 1.0.0\nplatform_version: '*'\n", "operations/manifest.yaml": "version: 1.0.0\nplatform_version: '*'\n",
 	}, nil)
 	f.constructKeylessRoot(t)
 	runID := correlation.RunIDFromContext(f.ctx)

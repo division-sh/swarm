@@ -61,6 +61,10 @@ func TestLoadDeclarationsConsumesOnlySupportedScenarioRoots(t *testing.T) {
 			t.Fatal(err)
 		}
 	}
+	write("manifest.yaml", "version: 1.0.0\nplatform_version: '*'\n")
+	write("schema.yaml", "stages: []\n")
+	write("work/manifest.yaml", "version: 1.0.0\nplatform_version: '*'\n")
+	write("work/schema.yaml", "stages: []\n")
 	write("work/data/not-a-scenario.yaml", "not: a scenario\n")
 	write("data/tests/root-fixture.yaml", "name: wrong-root\nderive:\n  flow: root\n  input: request\n  payload:\n    generate: true\n")
 	write("mocks/tests/root-case.yaml", "name: wrong-mock\nderive:\n  flow: root\n  input: request\n  payload:\n    generate: true\n")

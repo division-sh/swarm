@@ -302,12 +302,8 @@ type compiledFlowEventSchemas struct {
 // for one exact flow-local event. It never rebuilds evidence from reader-side
 // authored maps.
 func (b *WorkflowContractBundle) ResolveCompiledFlowEventSchema(flowID, eventType string) (CompiledEventSchema, bool, error) {
-	if b == nil {
+	if _, ok := b.exactFlowEventDeclarationView(flowID); !ok {
 		return CompiledEventSchema{}, false, nil
-	}
-	flowID = strings.TrimSpace(flowID)
-	if flowID == "" {
-		flowID = "."
 	}
 	bindings, exists := b.compiledEventSchemas[flowID]
 	if !exists {
@@ -509,10 +505,10 @@ func (b *WorkflowContractBundle) compileCurrentEventDeclaration(
 		return CompiledEventSchema{}, false, nil
 	}
 	if !eventidentity.IsCanonicalName(localName) {
-		return CompiledEventSchema{}, false, fmt.Errorf("compiled event declaration %q is not an exact canonical event identity", localName)
+		return CompiledEventSchema{}, false, eventNameAdmissionError(fmt.Errorf("compiled event declaration %q is not an exact canonical event identity", localName), localName)
 	}
 	if !eventidentity.IsCanonicalName(qualifiedName) {
-		return CompiledEventSchema{}, false, fmt.Errorf("compiled event declaration %q resolves to noncanonical identity %q", localName, qualifiedName)
+		return CompiledEventSchema{}, false, eventNameAdmissionError(fmt.Errorf("compiled event declaration %q resolves to noncanonical identity %q", localName, qualifiedName), qualifiedName)
 	}
 	admittedFlow, err := runtimeidentity.AdmitFlowIdentity(flowPath)
 	if err != nil {
@@ -537,7 +533,7 @@ func (b *WorkflowContractBundle) compileCurrentEventDeclaration(
 // without exposing a reader-side EventCatalogEntry fallback.
 func CompileImportedEventSchema(flowPath, eventName string, entry EventCatalogEntry, source CompiledEventSchemaSource) (CompiledEventSchema, error) {
 	if !eventidentity.IsCanonicalName(eventName) {
-		return CompiledEventSchema{}, fmt.Errorf("imported event declaration %q is not an exact canonical event identity", eventName)
+		return CompiledEventSchema{}, eventNameAdmissionError(fmt.Errorf("imported event declaration %q is not an exact canonical event identity", eventName), eventName)
 	}
 	admittedFlow, err := runtimeidentity.AdmitFlowIdentity(flowPath)
 	if err != nil {

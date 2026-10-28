@@ -19,11 +19,12 @@ func CopyPublishedFanOutReply(t testing.TB) string {
 	applyClosedReplacement(t, filepath.Join(root, "nodes.yaml"),
 		"          account_id: payload.account_id\n          request_id: payload.request_id\n",
 		"          account_id: payload.account_id\n          request_id: payload.request_id\n          items: payload.items\n")
-	writeClosedVariantFile(t, root, "provider/schema.yaml", `name: provider
-pins:
+	writeClosedVariantFile(t, root, "provider/manifest.yaml", "version: 1.0.0\nplatform_version: '*'\n")
+	writeClosedVariantFile(t, root, "provider/schema.yaml", `pins:
   inputs: [provider.requested]
   outputs: [provider.replied]
-`)
+`,
+	)
 	writeClosedVariantFile(t, root, "provider/events.yaml", `provider.replied:
   account_id: text
   request_id: text
@@ -85,7 +86,6 @@ func CopyNestedFanOutReply(t testing.TB) string {
 	t.Helper()
 	root := CopyPublishedFanOutReply(t)
 	copyTree(t, filepath.Join(root, "provider"), filepath.Join(root, "t"))
-	applyClosedReplacement(t, filepath.Join(root, "t/schema.yaml"), "name: provider\n", "name: t\n")
 	applyClosedReplacement(t, filepath.Join(root, "t/schema.yaml"), "provider.requested", "t.requested")
 	applyClosedReplacement(t, filepath.Join(root, "t/schema.yaml"), "provider.replied", "t.replied")
 	applyClosedReplacement(t, filepath.Join(root, "t/events.yaml"), "provider.replied", "t.replied")
@@ -100,11 +100,12 @@ func CopyNestedFanOutReply(t testing.TB) string {
     replies_to: t.requested
     correlation_key: request_id
 `)
-	writeClosedVariantFile(t, root, "provider/schema.yaml", `name: provider
-pins:
+	writeClosedVariantFile(t, root, "provider/manifest.yaml", "version: 1.0.0\nplatform_version: '*'\n")
+	writeClosedVariantFile(t, root, "provider/schema.yaml", `pins:
   inputs: [provider.requested, t.replied]
   outputs: [t.requested, provider.replied]
-`)
+`,
+	)
 	writeClosedVariantFile(t, root, "provider/events.yaml", `t.requested:
   account_id: text
   request_id: text

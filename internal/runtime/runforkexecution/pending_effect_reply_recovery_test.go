@@ -34,7 +34,6 @@ import (
 	"github.com/division-sh/swarm/internal/runtime/runforkadmission"
 	"github.com/division-sh/swarm/internal/runtime/runlifecycle"
 	"github.com/division-sh/swarm/internal/runtime/semanticvalue"
-	"github.com/division-sh/swarm/internal/runtime/semanticview"
 	"github.com/division-sh/swarm/internal/runtime/startupownership"
 	"github.com/division-sh/swarm/internal/runtime/testfixtures/canonicalrouting"
 	"github.com/division-sh/swarm/internal/sourceartifact"
@@ -364,7 +363,7 @@ func TestIssue642FreshPendingEffectBeforeJournalSIGKILLRecoveryBothStores(t *tes
 			if err != nil {
 				t.Fatal(err)
 			}
-			loaded, err := loader.LoadRunForkSelectedContractSourceForRequest(ctx, SelectedContractSourceLoadRequest{SourceRunID: checkpoint.ForkRun, Selection: binding.ContractSelection})
+			loaded, err := loader.LoadRunForkSelectedContractSourceForRequest(ctx, SelectedContractSourceLoadRequest{Responsibility: RetainedForkSource(checkpoint.ForkRun), Selection: binding.ContractSelection})
 			if err != nil {
 				t.Fatal(err)
 			}
@@ -391,7 +390,8 @@ func TestIssue642FreshPendingEffectBeforeJournalSIGKILLRecoveryBothStores(t *tes
 				entries, err := owner.RecoverSelectedForkContexts(wait, effects.NewRecoveryRequest(time.Now().UTC(), executionposture.Live), SelectedForkRecoveryEnvironment{
 					SourceLoader: loader, AgentRuntime: SelectedContractAgentRuntimeOptions{ExecutionPosture: executionposture.Live, ProcessCapability: capability},
 					LiveContexts: liveContexts, LiveRuns: selected.(runlifecycle.LiveRunReader),
-					AcquireLiveRuntime: func(ctx context.Context, hash string) (*rootruntime.RuntimeContextUse, error) {
+					AcquireLiveRuntime: func(ctx context.Context, reference sourceartifact.RootAdmissionReference) (*rootruntime.RuntimeContextUse, error) {
+						hash := reference.BundleHash
 						use, _, err := liveContexts.AcquireBundleHash(ctx, hash)
 						return use, err
 					},
@@ -575,27 +575,26 @@ func runPendingEffectReplyCrashHelper(t *testing.T, ctx context.Context, selecte
 		t.Fatal(err)
 	}
 	sourceRun := uuid.NewString()
-	ctx = correlation.WithRunID(correlation.WithSourceArtifactFact(ctx, loaded.SourceArtifactFact), sourceRun)
+	ctx = correlation.WithRootAdmission(correlation.WithRunID(correlation.WithSourceArtifactFact(ctx, loaded.SourceArtifactFact), sourceRun), loaded.RootedSource.Admission())
 	ctx = effects.WithExecutionMode(ctx, executionmode.Live)
 	ctx = authoractivity.WithScope(ctx, authoractivity.BundleScope(runForkTestRuntimeInstanceID, loaded.SourceArtifactFact.BundleHash()))
 	at := time.Now().UTC()
-	bundle, _ := semanticview.Bundle(loaded.Source)
 	ctx = originalSelectedFixtureContext(t, ctx, any(selected).(startupownership.Store))
 	if _, err := selected.(interface {
-		EnsureSourceArtifact(context.Context, *sourceartifact.AdmittedSourceArtifact) (sourceartifact.EnsureResult, error)
-	}).EnsureSourceArtifact(ctx, bundle.SourceArtifact); err != nil {
+		EnsureRootedSource(context.Context, sourceartifact.RootedSource) (sourceartifact.RootedEnsureResult, error)
+	}).EnsureRootedSource(ctx, loaded.RootedSource); err != nil {
 		t.Fatal(err)
 	}
 	if _, err := selected.(runlifecycle.OperationOwner).CreateRun(ctx, runlifecycle.CreateRequest{
 		RunID: sourceRun, Origin: runlifecycle.DeploymentRunOrigin(), Source: loaded.SourceArtifactFact,
-		StartedAt: at, LiveScope: runlifecycle.LiveRunScope{FlowPath: "."},
+		RootAdmission: loaded.RootedSource.Admission(), StartedAt: at, LiveScope: runlifecycle.LiveRunScope{FlowPath: "."},
 	}); err != nil {
 		t.Fatal(err)
 	}
-	rt, _ := nodeReplySourceRuntime(t, ctx, selected, owner, loaded, executionposture.Live)
+	rt, _ := nodeReplySourceRuntime(t, ctx, selected, owner, loaded, executionposture.Live, nil)
 	ctx = worklifetime.WithOccurrence(ctx, rt.WorkOccurrence())
-	created, err := rt.Manager.EnsureFlowInstance(ctx, pipeline.FlowInstanceActivationRequest{ContractBundle: loaded.Source,
-		Instance: flowidentity.Stored(loaded.Source, ".", sourceRun, sourceRun, "", ""), OccurredAt: at})
+	created, err := rt.Manager.EnsureFlowInstance(ctx, pipeline.FlowInstanceActivationRequest{ContractBundle: rt.Options.WorkflowModule.SemanticSource(),
+		Instance: flowidentity.Stored(rt.Options.WorkflowModule.SemanticSource(), ".", sourceRun, sourceRun, "", ""), OccurredAt: at})
 	if err != nil || !created {
 		t.Fatalf("construct pending recovery source: created=%t error=%v", created, err)
 	}
@@ -623,7 +622,7 @@ func runPendingEffectReplyCrashHelper(t *testing.T, ctx context.Context, selecte
 	selection := runforkadmission.SelectedContractSelection(loaded.Source)
 	options := SelectedContractAgentRuntimeOptions{ExecutionPosture: executionposture.Live, ProcessCapability: capability}
 	prepared, err := owner.Prepare(ctx, SelectedContractExecutionRequest{SourceRunID: sourceRun, At: page.Events[0].EventID, AllowSourceFreeze: true,
-		Owner: owner, SourceLoader: loader, ContractSelection: selection, AgentRuntime: options})
+		Owner: owner, SourceLoader: loader, SourceArtifactFact: loaded.SourceArtifactFact, ContractSelection: selection, AgentRuntime: options})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -648,7 +647,8 @@ func runPendingEffectReplyCrashHelper(t *testing.T, ctx context.Context, selecte
 		Owner: owner, SourceLoader: loader, ContractSelection: selection, AgentRuntime: options,
 		ForkOperation: &runfork.ForkOperationRequest{OperationID: uuid.NewString(), Actor: "pending-reply-crash", IdempotencyKey: "before-journal",
 			TransportHash: "pending-reply-crash-transport", SourceRunID: staged.ForkRunID, AtStart: true, TargetBundleHash: loaded.SourceArtifactFact.BundleHash(),
-			AllowSourceFreeze: true, ContractSelection: selection}})
+			TargetRootReference: loaded.RootedSource.Admission().Reference(),
+			AllowSourceFreeze:   true, ContractSelection: selection}})
 	if err := owner.retainPrepared(child.prepared); err != nil {
 		t.Fatal(err)
 	}

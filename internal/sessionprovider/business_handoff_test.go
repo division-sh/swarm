@@ -34,6 +34,12 @@ func (f *activeInputFixture) restartBusinessConnection(t *testing.T) {
 	if err := f.state.close(context.Background()); err != nil {
 		t.Fatal(err)
 	}
+	for _, planner := range f.businessPlanners {
+		if err := planner.Shutdown(); err != nil {
+			t.Fatal("join original business topology before restart", err)
+		}
+	}
+	f.businessPlanners = nil
 	f.state = sessionStateFixture(t, f.basePath, f.operation.SessionAccount.ConnectionID, f.operation.SessionAccount.AccountRef)
 	f.peer = newSDKPeer(t)
 	coordinate := f.operation.Coordinate
@@ -62,7 +68,7 @@ func (f *activeInputFixture) restartBusinessConnection(t *testing.T) {
 func (f *activeInputFixture) installBusinessOccurrence(t *testing.T) {
 	t.Helper()
 	source, _ := correlation.SourceArtifactFactFromContext(f.ctx)
-	f.ctx = authoractivity.WithScope(correlation.WithSourceArtifactFact(f.peer.ctx, source),
+	f.ctx = authoractivity.WithScope(correlation.WithRootAdmission(correlation.WithSourceArtifactFact(f.peer.ctx, source), f.rooted.Admission()),
 		authoractivity.BundleScope(f.operation.Coordinate.RuntimeInstanceID, source.BundleHash()))
 	var err error
 	f.ctx, err = startupownership.WithProcessMutationAuthority(f.ctx, f.nativeProcess)

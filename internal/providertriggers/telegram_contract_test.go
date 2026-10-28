@@ -57,7 +57,7 @@ func TestTelegramSelectedTextMessageContractUsesShippedPack(t *testing.T) {
 	if len(delivery.Events) != 2 {
 		t.Fatalf("events = %#v, want exactly raw plus text_message", delivery.Events)
 	}
-	if raw := delivery.Events[0]; raw.Kind != OutputKindRaw || raw.Name != "inbound.telegram" || !raw.Authorization.Empty() {
+	if raw := delivery.Events[0]; raw.Kind != OutputKindRaw || raw.Name != "inbound.telegram.raw" || !raw.Authorization.Empty() {
 		t.Fatalf("raw event = %#v", raw)
 	}
 	normalized := delivery.Events[1]
@@ -254,7 +254,7 @@ func assertTelegramNormalizedScope(t *testing.T, delivery Delivery, event, scope
 
 func assertTelegramRawOnly(t *testing.T, delivery Delivery) {
 	t.Helper()
-	if len(delivery.Events) != 1 || delivery.Events[0].Kind != OutputKindRaw || delivery.Events[0].Name != "inbound.telegram" {
+	if len(delivery.Events) != 1 || delivery.Events[0].Kind != OutputKindRaw || delivery.Events[0].Name != "inbound.telegram.raw" {
 		t.Fatalf("events = %#v, want raw only", delivery.Events)
 	}
 }
@@ -409,7 +409,7 @@ func TestTelegramBotAPI101ResidualUpdateUnionRemainsRawOnly(t *testing.T) {
 			if err != nil {
 				t.Fatalf("Accept %s fixture (%s): %v", fixture.root, telegramBotAPIUpdateContract, err)
 			}
-			if len(delivery.Events) != 1 || delivery.Events[0].Kind != OutputKindRaw || delivery.Events[0].Name != "inbound.telegram" || !delivery.Events[0].Authorization.Empty() {
+			if len(delivery.Events) != 1 || delivery.Events[0].Kind != OutputKindRaw || delivery.Events[0].Name != "inbound.telegram.raw" || !delivery.Events[0].Authorization.Empty() {
 				t.Fatalf("events = %#v, want exactly raw for %s under %s", delivery.Events, fixture.root, telegramBotAPIUpdateContract)
 			}
 		})
@@ -427,49 +427,6 @@ func TestTelegramBotAPI101ResidualUpdateUnionRemainsRawOnly(t *testing.T) {
 	}
 }
 
-func TestTelegramInstalledAndEffectiveSubjectsCarryExactSelectedDescriptors(t *testing.T) {
-	pack, catalog, plan := telegramPlatformContract(t)
-	installed, err := catalog.InstalledCapabilitySubjects()
-	if err != nil {
-		t.Fatalf("InstalledCapabilitySubjects: %v", err)
-	}
-	var telegramInstalled packs.Subject
-	for _, subject := range installed {
-		if subject.ID == "provider.telegram" {
-			telegramInstalled = subject
-			break
-		}
-	}
-	if telegramInstalled.ID == "" {
-		t.Fatalf("installed subjects = %#v, want Telegram", installed)
-	}
-	effective, err := plan.EffectiveCapabilitySubject(EffectiveSubjectRequest{
-		BundleHash: strings.Repeat("a", 64), FlowPath: ".", Alias: "chat",
-		SigningSecret: "webhook_signing.telegram", SourcePath: "schema.yaml",
-	})
-	if err != nil {
-		t.Fatalf("EffectiveCapabilitySubject: %v", err)
-	}
-	wantDescriptors := telegramSelectedTriggerDescriptors()
-	for name, subject := range map[string]packs.Subject{"installed": telegramInstalled, "effective": effective} {
-		if !reflect.DeepEqual(subject.TriggerEvents, wantDescriptors) {
-			t.Errorf("%s trigger descriptors = %#v, want %#v", name, subject.TriggerEvents, wantDescriptors)
-		}
-		if subject.Provider != "telegram" || subject.Provenance != packs.ProvenancePlatform {
-			t.Errorf("%s subject provider/provenance = %q/%q", name, subject.Provider, subject.Provenance)
-		}
-	}
-	if telegramInstalled.Source != "trigger_pack" || telegramInstalled.Applicability != "installed" || telegramInstalled.SourcePath != pack.SourcePath {
-		t.Fatalf("installed subject identity = %#v", telegramInstalled)
-	}
-	identity := effective.TriggerAdmission
-	if effective.Source != "trigger_pack_binding" || effective.Applicability != "effective" || identity == nil || identity.Pack == nil ||
-		identity.Pack.ID != pack.Envelope.ID || identity.Pack.Version != pack.Envelope.Version ||
-		identity.Pack.ManifestHash != pack.Envelope.ManifestHash || identity.Pack.Provenance != packs.ProvenancePlatform {
-		t.Fatalf("effective subject pack provenance = %#v", effective)
-	}
-}
-
 func telegramPlatformContract(t *testing.T) (LoadedPack, *CatalogSnapshot, InboundAdmissionPlan) {
 	t.Helper()
 	catalog, loaded, err := NewCatalogSnapshotFromInventory(testEmbeddedPackInventory(t), "0.7.0")
@@ -483,7 +440,7 @@ func telegramPlatformContract(t *testing.T) (LoadedPack, *CatalogSnapshot, Inbou
 			break
 		}
 	}
-	if telegram.Envelope.ID == "" {
+	if telegram.Identity.ID() == "" {
 		t.Fatal("embedded Telegram trigger pack is missing")
 	}
 	plan, err := catalog.CompileAdmission(CompileAdmissionRequest{
@@ -528,7 +485,7 @@ func telegramCallbackMessage() map[string]any {
 func telegramSelectedTriggerDescriptors() []packs.TriggerEventDescriptor {
 	return []packs.TriggerEventDescriptor{
 		{
-			Event: "inbound.telegram", Kind: "raw",
+			Event: "inbound.telegram.raw", Kind: "raw",
 			Fields: []packs.TriggerEventFieldDescriptor{
 				{Name: "event_type", Type: "text", Required: true},
 				{Name: "headers", Type: "json", Required: true},

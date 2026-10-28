@@ -62,6 +62,11 @@ func OpenSelectedDeliveryExecution(t *testing.T, ctx context.Context, owner Sele
 	if err != nil {
 		t.Fatal(err)
 	}
+	rooted, err := bundle.RootedSource()
+	if err != nil {
+		t.Fatal(err)
+	}
+	ctx = correlation.WithRootAdmission(ctx, rooted.Admission())
 	runtimeID := uuid.NewString()
 	process := worklifetime.NewProcess()
 	ctx = worklifetime.WithProcess(ctx, process)
@@ -94,7 +99,7 @@ func OpenSelectedDeliveryExecution(t *testing.T, ctx context.Context, owner Sele
 		}
 	})
 	input := selectedDeliverySourceEvent(t)
-	payload, err := runtimepkg.NewRuntimePayloadAdmitter(nil, semanticview.Wrap(bundle), source)(ctx, input, ".")
+	payload, err := runtimepkg.NewRuntimePayloadAdmitter(nil, semanticview.Wrap(bundle), source)(ctx, input, events.AuthoredPayloadProducer("."))
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -165,7 +170,7 @@ func OpenSelectedDeliveryExecution(t *testing.T, ctx context.Context, owner Sele
 	}
 	fixture.Context = managedexecution.WithAdmission(ctx, admission)
 	fixture.SelectedEvent = selectedDeliveryIssuedEvent(t, claimed.Issued.ForkRunID)
-	payload, err = runtimepkg.NewRuntimePayloadAdmitter(nil, semanticview.Wrap(bundle), source)(fixture.Context, fixture.SelectedEvent, ".")
+	payload, err = runtimepkg.NewRuntimePayloadAdmitter(nil, semanticview.Wrap(bundle), source)(fixture.Context, fixture.SelectedEvent, events.AuthoredPayloadProducer("."))
 	if err != nil {
 		t.Fatal(err)
 	}

@@ -18,6 +18,7 @@ import (
 	"github.com/division-sh/swarm/internal/runtime/runlifecycle"
 	"github.com/division-sh/swarm/internal/runtime/semanticview"
 	"github.com/division-sh/swarm/internal/runtime/startupownership"
+	"github.com/division-sh/swarm/internal/sourceartifact"
 	"github.com/division-sh/swarm/internal/store/storetest"
 	"github.com/division-sh/swarm/internal/testutil"
 	"github.com/google/uuid"
@@ -41,8 +42,8 @@ func (p selectedInputClaimProbe) ClaimRunForkSelectedContractRuntimeExecution(ct
 	return authority, err
 }
 
-func (p selectedInputExecutionProbe) LoadRunForkSelectedContractSourceEvents(ctx context.Context, sourceRun, forkRun string, ids []string, carriage semanticview.OriginalLoopCarriage) ([]runfork.RunForkSelectedContractSourceEvent, error) {
-	events, err := p.SelectedContractReplayPersistence.LoadRunForkSelectedContractSourceEvents(ctx, sourceRun, forkRun, ids, carriage)
+func (p selectedInputExecutionProbe) LoadRunForkSelectedContractSourceEvents(ctx context.Context, sourceRun, forkRun string, ids []string, carriage semanticview.OriginalLoopCarriage, originalRoot sourceartifact.RootAdmission) ([]runfork.RunForkSelectedContractSourceEvent, error) {
+	events, err := p.SelectedContractReplayPersistence.LoadRunForkSelectedContractSourceEvents(ctx, sourceRun, forkRun, ids, carriage, originalRoot)
 	if err == nil {
 		p.mutate(ctx, events)
 	}
@@ -89,7 +90,7 @@ func TestSelectedInputExecutionEvidenceBothStores(t *testing.T) {
 				}
 				ctx = originalSelectedFixtureContext(t, ctx, selected.(startupownership.Store))
 				storetest.RequireRun(t, ctx, selected.(storetest.RunFixtureStore), storetest.RunFixture{
-					RunID: run, Origin: runlifecycle.DeploymentRunOrigin(), BundleHash: loaded.SourceArtifactFact.BundleHash(), Artifact: selectedExecutionSourceArtifact(t, loaded.SourceArtifactFact.BundleHash()),
+					RunID: run, Origin: runlifecycle.DeploymentRunOrigin(), BundleHash: loaded.SourceArtifactFact.BundleHash(), Artifact: loaded.RootedSource.Artifact(), RootAdmission: loaded.RootedSource.Admission(),
 					StartedAt: input.CreatedAt().Add(-time.Minute), LiveScope: runlifecycle.LiveRunScope{FlowPath: "."},
 				})
 				storetest.CommitSemanticEventWithRoutes(t, ctx, selected, input, []events.DeliveryRoute{selectedExecutionEntitylessNodeRoute("source-only-node")}, pipelineobligation.ScopeSubscribed)
@@ -99,7 +100,7 @@ func TestSelectedInputExecutionEvidenceBothStores(t *testing.T) {
 				selection := runforkadmission.SelectedContractSelection(loaded.Source)
 				operation := runfork.ForkOperationRequest{OperationID: uuid.NewString(), Actor: "selected-input-evidence", IdempotencyKey: fault,
 					TransportHash: "selected-input-evidence-" + fault, SourceRunID: run, ForkEventID: eventID,
-					TargetBundleHash: loaded.SourceArtifactFact.BundleHash(), AllowSourceFreeze: true, ContractSelection: selection}
+					TargetBundleHash: loaded.SourceArtifactFact.BundleHash(), TargetRootReference: loaded.RootedSource.Admission().Reference(), AllowSourceFreeze: true, ContractSelection: selection}
 				claimed := false
 				var claimedAuthority effects.Authority
 				if fault == "missing_authority" || fault == "foreign_authority" || fault == "retired_execution" {
@@ -159,8 +160,9 @@ func TestSelectedInputExecutionEvidenceBothStores(t *testing.T) {
 				result, err := ExecuteSelectedContractRunFork(ctx, SelectedContractExecutionRequest{
 					SourceRunID: run, At: eventID, AllowSourceFreeze: true, Owner: owner, SourceLoader: loader,
 					ForkOperation: &operation, LiveRuntime: liveRuntime, LiveContexts: liveContexts, LiveRuns: selected.(runlifecycle.LiveRunReader),
-					ContractSelection: selection,
-					AgentRuntime:      SelectedContractAgentRuntimeOptions{ExecutionPosture: executionposture.Live, ProcessCapability: capability},
+					SourceArtifactFact: loaded.SourceArtifactFact,
+					ContractSelection:  selection,
+					AgentRuntime:       SelectedContractAgentRuntimeOptions{ExecutionPosture: executionposture.Live, ProcessCapability: capability},
 				})
 				if !observed && !claimed {
 					t.Fatalf("did not reach evidence consumer: %v", err)

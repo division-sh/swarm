@@ -20,7 +20,7 @@ func TestForkGenerationPreparationReconstructedOwnersBothStores(t *testing.T) {
 				ctx := originalStoreFixtureContext(t, testAuthorActivityContext(), fixture.store)
 				child, event, source := seedActivityEvidenceReuse(t, fixture, backend.name == "postgres", false, status, 2)
 				owner := fixture.store.(selectedActivityProjectionStore)
-				first, err := owner.LoadRunForkSelectedContractSourceEvents(ctx, event.RunID(), child.ForkRunID, []string{event.ID()}, originalActivityCarriageAtPoint(t, owner, event.RunID(), child.ForkPoint))
+				first, err := owner.LoadRunForkSelectedContractSourceEvents(ctx, event.RunID(), child.ForkRunID, []string{event.ID()}, originalActivityCarriageAtPoint(t, owner, event.RunID(), child.ForkPoint), originalRootAdmissionForRun(t, owner, event.RunID()))
 				if err != nil || len(first) != 1 {
 					t.Fatalf("initial loop-bearing preparation: count=%d err=%v", len(first), err)
 				}
@@ -66,7 +66,7 @@ func TestForkGenerationPreparationReconstructedOwnersBothStores(t *testing.T) {
 					t.Fatal(err)
 				}
 				for range 2 {
-					again, err := reconstructed.LoadRunForkSelectedContractSourceEvents(ctx, event.RunID(), child.ForkRunID, []string{event.ID()}, originalActivityCarriageAtPoint(t, reconstructed, event.RunID(), child.ForkPoint))
+					again, err := reconstructed.LoadRunForkSelectedContractSourceEvents(ctx, event.RunID(), child.ForkRunID, []string{event.ID()}, originalActivityCarriageAtPoint(t, reconstructed, event.RunID(), child.ForkPoint), originalRootAdmissionForRun(t, reconstructed, event.RunID()))
 					if err != nil || !reflect.DeepEqual(first, again) {
 						t.Fatalf("reconstructed preparation re-elected generation: err=%v", err)
 					}

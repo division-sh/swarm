@@ -9,13 +9,17 @@ import (
 	"strings"
 
 	"github.com/division-sh/swarm/internal/durabledata"
+	"github.com/division-sh/swarm/internal/runtime/core/processbinding"
 	runtimecorrelation "github.com/division-sh/swarm/internal/runtime/correlation"
 	runtimeeffects "github.com/division-sh/swarm/internal/runtime/effects"
 	"github.com/division-sh/swarm/internal/runtime/pipeline"
 	"github.com/division-sh/swarm/internal/runtime/runfork"
 	runtimerunlifecycle "github.com/division-sh/swarm/internal/runtime/runlifecycle"
 	"github.com/division-sh/swarm/internal/runtime/semanticview"
+	runtimeownership "github.com/division-sh/swarm/internal/runtime/startupownership"
+	"github.com/division-sh/swarm/internal/sourceartifact"
 	storedelivery "github.com/division-sh/swarm/internal/store/internal/backend/delivery"
+	"github.com/division-sh/swarm/internal/store/internal/backend/generationauthority"
 	"github.com/division-sh/swarm/internal/store/internal/backend/mutationprotocol"
 	runforkrevision "github.com/division-sh/swarm/internal/store/internal/backend/runforkrevision"
 	"github.com/google/uuid"
@@ -66,6 +70,9 @@ func activateRunForkForSelectedContractExecution(ctx context.Context, req runfor
 	}
 	committed, err := port.runMutation(ctx, func(txctx context.Context, tx *sql.Tx, attempt *mutationprotocol.Attempt) error {
 		result = runfork.RunForkActivation{}
+		if err := requireForkActivationProcessTx(txctx, tx, req.Process, !port.postgres); err != nil {
+			return err
+		}
 		lineage, err := port.loadLineage(txctx, tx, forkRunID)
 		if err != nil {
 			return err
@@ -108,7 +115,7 @@ func activateRunForkForSelectedContractExecution(ctx context.Context, req runfor
 			return fmt.Errorf("load selected contract binding: %w", err)
 		}
 		result.SelectedContractBinding = &binding
-		if binding.SourceRunID != lineage.SourceRunID || binding.ForkPoint != lineage.ForkPoint {
+		if binding.SourceRunID != lineage.SourceRunID || binding.ForkPoint != lineage.ForkPoint || binding.TargetRootReference != lineage.ForkRootReference {
 			return fmt.Errorf("selected-contract fork activation binding differs from child origin")
 		}
 
@@ -178,6 +185,9 @@ func activateRunForkForSelectedContractExecution(ctx context.Context, req runfor
 		result.SourceAdvancedAfterFork = len(sourceAdvancedFacts) > 0
 		if req.ForkOperation == nil {
 			return errors.New("live fork activation requires its durable operation")
+		}
+		if _, err := admitSelectedForkActivationRootsTx(txctx, tx, lineage, req.OriginalRootAdmission, port.postgres); err != nil {
+			return err
 		}
 		result.SourceRunStatus, err = port.liveHandoff(txctx, tx, attempt, runForkSelectedContractActivationEvidence{lineage, binding, plan, req})
 		if err != nil {
@@ -264,6 +274,45 @@ func validateSelectedContractPreparedAttachment(record selectedRecoveryRecord, a
 		return fmt.Errorf("selected-contract activation inputs differ from prepared frontier")
 	}
 	return nil
+}
+
+func requireForkActivationProcessTx(ctx context.Context, tx *sql.Tx, process processbinding.LeaseStamp, sqlite bool) error {
+	current, err := generationauthority.ProcessAuthorityCurrent(ctx, tx, process, sqlite, true)
+	if err != nil {
+		return err
+	}
+	if !current {
+		return runtimeownership.ErrProcessNotCurrent
+	}
+	return nil
+}
+
+// Only the admitted activation coordinator calls this before delegating A's
+// complete freeze subtree; possessing an original root alone is not admission.
+func admitSelectedForkActivationRootsTx(ctx context.Context, tx *sql.Tx, lineage runForkActivationLineage, original sourceartifact.RootAdmission, postgres bool) (context.Context, error) {
+	if err := original.Validate(); err != nil {
+		return nil, err
+	}
+	target, supplied, err := runtimecorrelation.RootAdmissionFromContext(ctx)
+	if err != nil {
+		return nil, err
+	}
+	if !supplied || target.Reference() != lineage.ForkRootReference || original.Reference() != lineage.SourceRootReference {
+		return nil, fmt.Errorf("activation requires the exact original and fork roots")
+	}
+	if postgres {
+		err = requirePostgresRunActive(ctx, tx, lineage.ForkRunID)
+	} else {
+		err = requireSQLiteRunActive(ctx, tx, lineage.ForkRunID)
+	}
+	if err != nil {
+		return nil, err
+	}
+	fact, err := runtimecorrelation.NewSourceArtifactFact(original.BundleHash())
+	if err != nil {
+		return nil, err
+	}
+	return runtimecorrelation.WithRootAdmission(runtimecorrelation.WithSourceArtifactFact(ctx, fact), original), nil
 }
 
 func validateSelectedContractStagedConstruction(ctx context.Context, tx *sql.Tx, snapshot runtimerunlifecycle.Snapshot, evidence runForkSelectedContractActivationEvidence, owner selectedContractPreparedAttachmentOwner) error {
@@ -405,7 +454,7 @@ func postgresRunForkSelectedContractActivationPort(s *RunForkPostgresOwner) runF
 		},
 		lockFrontier: lockRunForkSourceRevisionFrontier,
 		plan: func(ctx context.Context, tx *sql.Tx, req runfork.RunForkPlanRequest) (runfork.RunForkPlan, error) {
-			return planRunForkSnapshot(ctx, tx, req, runforkrevision.ValidateCompletePostgres, resolveRunForkRevisionPoint)
+			return planRunForkSnapshot(ctx, tx, req, runforkrevision.ValidateCompletePostgres, resolveRunForkRevisionPoint, true)
 		},
 		deliveries: postgresDeliveryAdapter,
 		loadSnapshot: func(ctx context.Context, tx *sql.Tx, runID string) (runtimerunlifecycle.Snapshot, error) {
@@ -451,7 +500,7 @@ func sqliteRunForkSelectedContractActivationPort(s *RunForkSQLiteOwner) runForkS
 		},
 		lockFrontier: lockSQLiteRunForkSourceRevisionFrontier,
 		plan: func(ctx context.Context, tx *sql.Tx, req runfork.RunForkPlanRequest) (runfork.RunForkPlan, error) {
-			return planRunForkSnapshot(ctx, tx, req, runforkrevision.ValidateCompleteSQLite, resolveSQLiteRunForkRevisionPoint)
+			return planRunForkSnapshot(ctx, tx, req, runforkrevision.ValidateCompleteSQLite, resolveSQLiteRunForkRevisionPoint, false)
 		},
 		deliveries: sqliteDeliveryAdapter,
 		loadSnapshot: func(ctx context.Context, tx *sql.Tx, runID string) (runtimerunlifecycle.Snapshot, error) {

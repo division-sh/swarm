@@ -24,6 +24,7 @@ func TestStandingIngressPendingResetProcessDeathBothStores(t *testing.T) {
 				t.Run(fmt.Sprintf("%s/inherited=%t/%s", backend, inherited, boundary), func(t *testing.T) {
 					t.Setenv("TEST_CHANNEL_ONBOARDING_RETAIN_RUNS", "1")
 					h := newChannelOnboardingE2EHarness(t, backend, true)
+					writeChannelOnboardingLiveToolCredentials(t, h.credentialPath)
 					h.opts.AbandonActiveRuns = false
 					h.start(t)
 					begun := startChannelOnboardingRPC(t, h, channelonboarding.VerbConnect, "crash-reset-original", nil)
@@ -96,6 +97,7 @@ func TestStandingIngressAdmissionProcessDeathBothStores(t *testing.T) {
 			t.Run(fmt.Sprintf("%s/%s", backend, boundary), func(t *testing.T) {
 				t.Setenv("TEST_CHANNEL_ONBOARDING_RETAIN_RUNS", "1")
 				h := newChannelOnboardingE2EHarness(t, backend, true)
+				writeChannelOnboardingLiveToolCredentials(t, h.credentialPath)
 				process := startChannelOnboardingCrashServeProcessAtBoundary(t, h.opts, h.telegram.URL, boundary)
 				h.endpoint = process.endpoint(t)
 				command := startChannelOnboardingCLICommand(t, h.opts.ConfigPath, h.endpoint,

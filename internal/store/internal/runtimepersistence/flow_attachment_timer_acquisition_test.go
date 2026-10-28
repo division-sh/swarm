@@ -136,10 +136,10 @@ func runFlowAttachmentTimerAcquisition(t *testing.T, backend, cut, disposition s
 	workflow := &attachmentTimerAcquisitionWorkflow{retryRelease: make(chan struct{}), cut: cut, disposition: disposition, fault: errors.New("injected partial timer acquisition failure"), ready: make(chan pipeline.DynamicFlowRuntimeActivationAttempt, 2)}
 	workflow.enabled.Store(true)
 	f := newReceiverConfigActivationFixtureWithOwnership(t, backend, false, map[string]string{
-		"schema.yaml":          "name: timer-acquisition\n",
-		"review/schema.yaml":   "name: review\ninstance: request_id\nstages:\n  pending:\n    timers:\n      - {id: pending.timeout, after: 2h, emit: timer.timeout}\n      - {id: pending.second, after: 3h, emit: timer.timeout}\npins:\n  inputs:\n    - task.started\n",
+		"schema.yaml":          "stages: []\n",
+		"review/schema.yaml":   "instance: request_id\nstages:\n  pending:\n    timers:\n      - {id: pending.timeout, after: 2h, emit: timer.timeout}\n      - {id: pending.second, after: 3h, emit: timer.timeout}\npins:\n  inputs:\n    - task.started\n",
 		"review/entities.yaml": "review_item:\n  request_id: text\n",
-		"review/events.yaml":   "task.started:\ntimer.timeout:\n",
+		"review/events.yaml":   "task.started:\ntimer.timeout:\n", "manifest.yaml": "version: 1.0.0\nplatform_version: '*'\n", "review/manifest.yaml": "version: 1.0.0\nplatform_version: '*'\n",
 	}, nil, ownStoreTestAgentManager, func(options *pipeline.PipelineCoordinatorOptions) {
 		options.TimerScheduler = scheduler
 	}, func(options *manager.AgentManagerOptions) {

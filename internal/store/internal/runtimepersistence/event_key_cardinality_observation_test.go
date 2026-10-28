@@ -9,7 +9,9 @@ import (
 
 	"github.com/division-sh/swarm/internal/events"
 	"github.com/division-sh/swarm/internal/events/eventtest"
+	runtimecorrelation "github.com/division-sh/swarm/internal/runtime/correlation"
 	"github.com/division-sh/swarm/internal/store/internal/backend/transactiontest"
+	"github.com/division-sh/swarm/internal/testutil/sourceartifactfixture"
 	"github.com/google/uuid"
 )
 
@@ -19,6 +21,9 @@ func TestEventKeyCardinalityObservationPreservesExactPhysicalPredicateBothStores
 			fixture := backend.open(t)
 			ctx, at := testAuthorActivityContext(), time.Now().UTC()
 			ctx = originalStoreFixtureContext(t, ctx, fixture.store)
+			rooted, _ := sourceartifactfixture.Rooted(t, "fixture", sourceartifactfixture.Artifact())
+			sourceartifactfixture.RequireArtifact(t, ctx, fixture.store.(sourceartifactfixture.Writer), rooted.Artifact())
+			ctx = runtimecorrelation.WithRootAdmission(ctx, rooted.Admission())
 			ids := [3]string{uuid.NewString(), uuid.NewString(), uuid.NewString()}
 			for index, id := range ids {
 				event := eventtest.RunCreatingRootIngress(id, events.EventType("key.first"), "fixture", "", []byte(`{}`), 0, uuid.NewString(), "", events.EventEnvelope{}, at)

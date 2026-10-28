@@ -15,6 +15,7 @@ import (
 	"github.com/division-sh/swarm/internal/runtime/diaglog"
 	"github.com/division-sh/swarm/internal/runtime/executionposture"
 	"github.com/division-sh/swarm/internal/store/testutil/agentfixture"
+	"github.com/division-sh/swarm/internal/testutil/sourceartifactfixture"
 	"github.com/google/uuid"
 )
 
@@ -23,7 +24,12 @@ func lifecycleCausalFixture(t *testing.T, sqlite bool, kind string) (lifecycleDi
 	store, db := newLifecycleDiagnosticTestStore(t, sqlite)
 	ctx := testAuthorActivityContext()
 	ctx = originalStoreFixtureContext(t, ctx, store)
-	seed := createNamedLifecycleDiagnostic(t, ctx, store, "lineage-seed")
+	rooted, _ := sourceartifactfixture.Rooted(t, "fixture", sourceartifactfixture.Artifact())
+	sourceartifactfixture.RequireArtifact(t, ctx, store.(sourceartifactfixture.Writer), rooted.Artifact())
+	ctx = runtimecorrelation.WithRootAdmission(ctx, rooted.Admission())
+	identity := testAgentIdentity(t, "lineage-seed", "")
+	requireRunningRunForTest(t, ctx, store, identity.RunID, time.Now().UTC().Truncate(time.Microsecond))
+	seed := createLifecycleDiagnosticWithIdentity(t, ctx, store, identity)
 	ctx = runtimecorrelation.WithRunID(ctx, seed.Identity.RunID)
 	logger := runtimepkg.NewRuntimeLogger(store, executionposture.Live, storeTestPayloadAdmitter)
 	if err := logger.Log(ctx, runtimepkg.RuntimeLogEntry{Level: diaglog.LevelInfo, Component: "lineage", Action: "parent"}); err != nil {

@@ -82,7 +82,7 @@ func inboundProviderError(err error) (providertriggers.Error, bool) {
 		causes := err.Unwrap()
 		for i, cause := range causes {
 			current, valid := inboundProviderError(cause)
-			if !valid || i > 0 && current != first {
+			if !valid || i > 0 && (current.Status != first.Status || current.Message != first.Message) {
 				return providertriggers.Error{}, false
 			}
 			first = current

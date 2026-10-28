@@ -3,6 +3,7 @@ package runforkexecution
 import (
 	"bytes"
 	"context"
+	"github.com/division-sh/swarm/internal/sourceartifact"
 	"os"
 	"path/filepath"
 	"reflect"
@@ -212,7 +213,7 @@ func TestIssue642TimerForkCrashRestartBothStores(t *testing.T) {
 					}
 				})
 				loader := SourceArtifactSelectedContractSourceLoader{RepoRoot: runForkExecutionRepoRoot(t), Store: selected.(SourceArtifactSelectedContractSourceStore)}
-				loaded, err := loader.LoadRunForkSelectedContractSourceForRequest(ctx, SelectedContractSourceLoadRequest{SourceRunID: checkpoint.ForkRun, Selection: original.Request.ContractSelection})
+				loaded, err := loader.LoadRunForkSelectedContractSourceForRequest(ctx, SelectedContractSourceLoadRequest{Responsibility: RetainedForkSource(checkpoint.ForkRun), Selection: original.Request.ContractSelection})
 				if err != nil {
 					t.Fatal(err)
 				}
@@ -220,7 +221,8 @@ func TestIssue642TimerForkCrashRestartBothStores(t *testing.T) {
 				recovered, err := owner.RecoverSelectedForkContexts(ctx, effects.NewRecoveryRequest(time.Now().UTC(), executionposture.MockOnly), SelectedForkRecoveryEnvironment{
 					SourceLoader: loader, AgentRuntime: SelectedContractAgentRuntimeOptions{ExecutionPosture: executionposture.MockOnly, ProcessCapability: capability},
 					LiveContexts: liveContexts, LiveRuns: selected.(runlifecycle.LiveRunReader),
-					AcquireLiveRuntime: func(ctx context.Context, hash string) (*rootruntime.RuntimeContextUse, error) {
+					AcquireLiveRuntime: func(ctx context.Context, reference sourceartifact.RootAdmissionReference) (*rootruntime.RuntimeContextUse, error) {
+						hash := reference.BundleHash
 						use, _, err := liveContexts.AcquireBundleHash(ctx, hash)
 						return use, err
 					},

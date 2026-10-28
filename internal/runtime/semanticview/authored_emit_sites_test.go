@@ -192,8 +192,9 @@ func loadAuthoredEmitSiteFixture(t *testing.T, opts authoredEmitSiteFixture) Sou
 	}
 	repoRoot = filepath.Clean(filepath.Join(repoRoot, "..", "..", ".."))
 	root := t.TempDir()
+	writeSemanticviewFixtureFile(t, filepath.Join(root, "manifest.yaml"), "version: 1.0.0\nplatform_version: '*'\n")
 	writeSemanticviewFixtureFile(t, filepath.Join(root, "schema.yaml"), `
-name: authored-emit-site-fixture
+stages: []
 pins:
   outputs: [root.ready]
 `)
@@ -217,8 +218,8 @@ root.audit:
 	if strings.TrimSpace(rootNodeYAML) != "" {
 		writeSemanticviewFixtureFile(t, filepath.Join(root, "nodes.yaml"), rootNodeYAML)
 	}
-	writeSemanticviewFixtureFile(t, filepath.Join(root, "support", "schema.yaml"), `name: support
-stages:
+	writeSemanticviewFixtureFile(t, filepath.Join(root, "support", "manifest.yaml"), "version: 1.0.0\nplatform_version: '*'\n")
+	writeSemanticviewFixtureFile(t, filepath.Join(root, "support", "schema.yaml"), `stages:
   pending: {}
   done: {final: true}
 pins:
@@ -232,13 +233,15 @@ support.ready:
 	if flowNodes := authoredEmitSiteNodeYAML(opts.flowNodeID, "support.start", opts.flowEmit, ""); strings.TrimSpace(flowNodes) != "" {
 		writeSemanticviewFixtureFile(t, filepath.Join(root, "support", "nodes.yaml"), flowNodes)
 	}
-	writeSemanticviewFixtureFile(t, filepath.Join(root, "extras", "schema.yaml"), "name: extras\n")
+	writeSemanticviewFixtureFile(t, filepath.Join(root, "extras", "manifest.yaml"), "version: 1.0.0\nplatform_version: '*'\n")
+	writeSemanticviewFixtureFile(t, filepath.Join(root, "extras", "schema.yaml"), "stages: []\n")
 	writeSemanticviewFixtureFile(t, filepath.Join(root, "extras", "events.yaml"), "extras.start:\n")
 	if extraNodes := authoredEmitSiteNodeYAML(opts.extrasNodeID, "extras.start", opts.extrasEmit, ""); strings.TrimSpace(extraNodes) != "" {
 		writeSemanticviewFixtureFile(t, filepath.Join(root, "extras", "nodes.yaml"), extraNodes)
 	}
 	if strings.TrimSpace(opts.nestedPackageNodeID) != "" {
-		writeSemanticviewFixtureFile(t, filepath.Join(root, "support", "addon", "schema.yaml"), "name: support-addon\n")
+		writeSemanticviewFixtureFile(t, filepath.Join(root, "support", "addon", "manifest.yaml"), "version: 1.0.0\nplatform_version: '*'\n")
+		writeSemanticviewFixtureFile(t, filepath.Join(root, "support", "addon", "schema.yaml"), "stages: []\n")
 		writeSemanticviewFixtureFile(t, filepath.Join(root, "support", "addon", "events.yaml"), "addon.start:\n")
 		writeSemanticviewFixtureFile(t, filepath.Join(root, "support", "addon", "nodes.yaml"), authoredEmitSiteNodeYAML(opts.nestedPackageNodeID, "addon.start", opts.nestedPackageEmit, ""))
 	}
@@ -258,6 +261,7 @@ func loadAuthoredEmitSiteLoweringFixture(t *testing.T) Source {
 	}
 	repoRoot = filepath.Clean(filepath.Join(repoRoot, "..", "..", ".."))
 	root := t.TempDir()
+	writeSemanticviewFixtureFile(t, filepath.Join(root, "manifest.yaml"), "version: 1.0.0\nplatform_version: '*'\n")
 	writeSemanticviewFixtureFile(t, filepath.Join(root, "schema.yaml"), `stages:
   pending: {}
   done: {final: true}

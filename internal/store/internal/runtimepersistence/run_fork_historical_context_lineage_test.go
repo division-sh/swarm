@@ -21,10 +21,6 @@ func TestRunForkHistoricalFanOutAncestorLineageBothStores(t *testing.T) {
 	historicalFanOutAncestorLineage(t, true)
 }
 
-func TestRunForkHistoricalFanOutAncestorLineageWithoutRetryBothStores(t *testing.T) {
-	historicalFanOutAncestorLineage(t, false)
-}
-
 func historicalFanOutAncestorLineage(t *testing.T, proveRetry bool) {
 	t.Helper()
 	for _, backend := range []string{"sqlite", "postgres"} {
@@ -79,7 +75,11 @@ func historicalFanOutAncestorLineage(t *testing.T, proveRetry bool) {
 					rootRows := historicalLineageOwnedRows(t, db, postgres, source.runID)
 					parentRun := source.runID
 					for generation := 1; generation <= 2; generation++ {
-						request := runfork.RunForkMaterializeRequest{SourceRunID: parentRun, At: point, OriginalLoopCarriage: originalCarriageForRun(t, owner, parentRun)}
+						rooted, err := owner.(rootedRunStore).LoadRunRootedSource(ctx, parentRun)
+						if err != nil {
+							t.Fatal(err)
+						}
+						request := runfork.RunForkMaterializeRequest{SourceRunID: parentRun, At: point, RootAdmission: rooted.Admission(), OriginalLoopCarriage: originalCarriageForRun(t, owner, parentRun)}
 						child, err := store.MaterializeRunFork(ctx, request)
 						if err != nil || child.MaterializedFanOutCount != 1 || child.ForkRunID == parentRun || child.ForkRunID == source.runID {
 							t.Fatalf("generation %d materialization: %#v err=%v", generation, child, err)

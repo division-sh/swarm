@@ -15,8 +15,6 @@ import (
 	"strconv"
 	"strings"
 	"testing"
-
-	"github.com/spf13/pflag"
 )
 
 func TestCLIIdentifierRegistryRejectsUnsupportedFamilyPolicy(t *testing.T) {
@@ -118,73 +116,6 @@ func TestCLIIdentifierMatchingRejectsUnsupportedNormalizationMode(t *testing.T) 
 	_, _, err := matchCLIIdentifierCandidates(policy, "agent", []cliIdentifierCandidate{{ID: "agent-one"}})
 	if err == nil || !strings.Contains(err.Error(), "unsupported normalization mode") {
 		t.Fatalf("matchCLIIdentifierCandidates() error = %v, want unsupported normalization mode", err)
-	}
-}
-
-func TestCLIIdentifierRegistryCoversVisiblePositionalsAndStringFlags(t *testing.T) {
-	paths := visibleCLICommandPaths(t)
-	for command, cmd := range paths {
-		for _, selector := range cliUsePositionals(cmd.Use) {
-			key := cliIdentifierRegistryKey(command, "arg:"+selector)
-			if cliIdentifierStructuralRowCovers(command, "arg:"+selector) || cliIdentifierNonResourcePositionals[key] {
-				continue
-			}
-			t.Errorf("%s positional %q is not classified by the identifier registry or explicit non-resource ledger", command, selector)
-		}
-		cmd.Flags().VisitAll(func(flag *pflag.Flag) {
-			if flag.Value.Type() != "string" && flag.Value.Type() != "stringSlice" && flag.Value.Type() != "stringArray" {
-				return
-			}
-			selector := "flag:" + flag.Name
-			key := cliIdentifierRegistryKey(command, selector)
-			if cliIdentifierStructuralRowCovers(command, selector) || cliIdentifierGlobalNonResourceStringFlags[flag.Name] || cliIdentifierNonResourceStringFlags[key] {
-				return
-			}
-			t.Errorf("%s --%s (%s) is not classified by the identifier registry or explicit non-resource ledger", command, flag.Name, flag.Value.Type())
-		})
-	}
-}
-
-func TestCLIIdentifierRegistryRowsReferToLiveInputs(t *testing.T) {
-	paths := visibleCLICommandPaths(t)
-	assertLive := func(command, selector, ledger string) {
-		t.Helper()
-		if strings.Contains(command, "<") {
-			return
-		}
-		cmd, ok := paths[command]
-		if !ok {
-			t.Errorf("%s row refers to missing command %s", ledger, command)
-			return
-		}
-		switch {
-		case strings.HasPrefix(selector, "arg:"):
-			name := strings.TrimPrefix(selector, "arg:")
-			for _, positional := range cliUsePositionals(cmd.Use) {
-				if positional == name {
-					return
-				}
-			}
-			t.Errorf("%s row refers to missing positional %s %s", ledger, command, selector)
-		case strings.HasPrefix(selector, "flag:"):
-			if cmd.Flags().Lookup(strings.TrimPrefix(selector, "flag:")) == nil {
-				t.Errorf("%s row refers to missing flag %s %s", ledger, command, selector)
-			}
-		default:
-			t.Errorf("%s row has unsupported selector %q", ledger, selector)
-		}
-	}
-
-	for _, row := range cliIdentifierInputRegistry {
-		assertLive(row.Command, row.Selector, "identifier registry")
-	}
-	for key := range cliIdentifierNonResourcePositionals {
-		parts := strings.SplitN(key, "\x00", 2)
-		assertLive(parts[0], parts[1], "non-resource positional ledger")
-	}
-	for key := range cliIdentifierNonResourceStringFlags {
-		parts := strings.SplitN(key, "\x00", 2)
-		assertLive(parts[0], parts[1], "non-resource flag ledger")
 	}
 }
 

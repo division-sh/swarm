@@ -123,11 +123,11 @@ func TestInboundCommittedSiblingFinalizationRecoversDurablePipelineBothStores(t 
 			const agentID = "committed-inbound-observer"
 			ctx, selected, db, target := inboundAcknowledgedSelectedFixture(t, backend, runID, entityID, "committed-inbound", agentID)
 			probe := &inboundCommittedFinalizerProbe{}
-			bus, err := newBoundedInboundTestEventBus(t, selected, runtimebus.EventBusOptions{TestLifecycleProbe: probe}, "inbound.telegram", "inbound.telegram.text_message")
+			bus, err := newBoundedInboundTestEventBus(t, selected, runtimebus.EventBusOptions{TestLifecycleProbe: probe}, "inbound.telegram.raw", "inbound.telegram.text_message")
 			if err != nil {
 				t.Fatal(err)
 			}
-			_ = subscribeInboundGatewayAgent(t, bus, runID, agentID, boundedProviderFlowID, events.EventType("inbound.telegram"))
+			_ = subscribeInboundGatewayAgent(t, bus, runID, agentID, boundedProviderFlowID, events.EventType("inbound.telegram.raw"))
 			gateway := newTestInboundGateway(t, bus, nil, nil, selected)
 			first := serveAcknowledgedTelegram(t, gateway, bus, target, ctx, 8291, "hello")
 			if first.Code != http.StatusServiceUnavailable || probe.persisted != 2 {
@@ -166,11 +166,11 @@ func TestInboundAcknowledgedPublicationCleanupRespondsAndDoesNotRedeliverBothSto
 			const agentID = "acknowledged-telegram-observer"
 			const providerEventID = "8201"
 			ctx, selected, _, target := inboundAcknowledgedSelectedFixture(t, backend, runID, entityID, "ack-telegram", agentID)
-			bus, err := newBoundedInboundTestEventBus(t, selected, runtimebus.EventBusOptions{}, "inbound.telegram", "inbound.telegram.text_message")
+			bus, err := newBoundedInboundTestEventBus(t, selected, runtimebus.EventBusOptions{}, "inbound.telegram.raw", "inbound.telegram.text_message")
 			if err != nil {
 				t.Fatal(err)
 			}
-			ch := subscribeInboundGatewayAgent(t, bus, runID, agentID, boundedProviderFlowID, events.EventType("inbound.telegram"))
+			ch := subscribeInboundGatewayAgent(t, bus, runID, agentID, boundedProviderFlowID, events.EventType("inbound.telegram.raw"))
 			fault := errors.New("private post-commit cleanup fault")
 			wrapped := &inboundPostCommitFaultStore{InboundPersistence: selected, fault: fault}
 			gateway := newTestInboundGateway(t, bus, nil, nil, wrapped)
@@ -184,7 +184,7 @@ func TestInboundAcknowledgedPublicationCleanupRespondsAndDoesNotRedeliverBothSto
 			}
 			var rawEventID string
 			for _, item := range record.Events {
-				if item.EventName == "inbound.telegram" {
+				if item.EventName == "inbound.telegram.raw" {
 					rawEventID = item.EventID
 				}
 			}
@@ -244,11 +244,11 @@ func TestInboundAcknowledgedCreatedResultRejectsChangedExecutionFactsBothStores(
 				runID, entityID := boundedInboundTestCoordinates()
 				const agentID = "hostile-result-telegram-observer"
 				ctx, selected, _, target := inboundAcknowledgedSelectedFixture(t, backend, runID, entityID, "hostile-result", agentID)
-				bus, err := newBoundedInboundTestEventBus(t, selected, runtimebus.EventBusOptions{}, "inbound.telegram", "inbound.telegram.text_message")
+				bus, err := newBoundedInboundTestEventBus(t, selected, runtimebus.EventBusOptions{}, "inbound.telegram.raw", "inbound.telegram.text_message")
 				if err != nil {
 					t.Fatal(err)
 				}
-				ch := subscribeInboundGatewayAgent(t, bus, runID, agentID, boundedProviderFlowID, events.EventType("inbound.telegram"))
+				ch := subscribeInboundGatewayAgent(t, bus, runID, agentID, boundedProviderFlowID, events.EventType("inbound.telegram.raw"))
 				fault := errors.New("private post-commit cleanup fault")
 				wrapped := &inboundPostCommitFaultStore{InboundPersistence: selected, fault: fault, corruptCreatedFact: fact}
 				gateway := newTestInboundGateway(t, bus, nil, nil, wrapped)
@@ -272,8 +272,16 @@ func TestInboundAcknowledgedOperatorClaimCleanupRespondsBothStores(t *testing.T)
 	for _, backend := range []string{"sqlite", "postgres"} {
 		t.Run(backend, func(t *testing.T) {
 			runID, entityID := boundedInboundTestCoordinates()
-			ctx, selected, db, target := inboundAcknowledgedSelectedFixture(t, backend, runID, entityID, "ack-operator", "")
-			plan := compileEmbeddedTelegramOperatorChannelPlan(t)
+			source := capturedTelegramOperatorSource(t)
+			ctx := runtimecorrelation.WithRunID(testAuthorActivityContext(context.Background()), runID)
+			var selected operatorChannelInboundSelectedStore
+			if backend == "postgres" {
+				selected = storetest.StartPostgresRuntimeStore(t)
+			} else {
+				selected = storetest.StartSQLiteRuntimeStoreWithContext(t, ctx)
+			}
+			ctx, target := seedCapturedProviderTarget(t, ctx, selected, source, runID, entityID, boundedProviderFlowID, "ack-operator", "telegram", "telegram-secret", "")
+			plan := compileCapturedTelegramOperatorChannelPlan(t, source)
 			identity, err := plan.InterfaceIdentity()
 			if err != nil {
 				t.Fatal(err)
@@ -319,7 +327,7 @@ func TestInboundAcknowledgedOperatorClaimCleanupRespondsBothStores(t *testing.T)
 			if err != nil {
 				t.Fatal(err)
 			}
-			bus, err := newBoundedInboundTestEventBus(t, selected, runtimebus.EventBusOptions{}, "inbound.telegram", "inbound.telegram.text_message")
+			bus, err := newScopedTestEventBus(t, selected, runtimebus.EventBusOptions{ContractBundle: source, SourceArtifactFact: runtimeTestSourceArtifactFact(t, source)}, "inbound.telegram.raw", "inbound.telegram.text_message")
 			if err != nil {
 				t.Fatal(err)
 			}
@@ -327,6 +335,7 @@ func TestInboundAcknowledgedOperatorClaimCleanupRespondsBothStores(t *testing.T)
 			wrapped := &inboundPostCommitFaultStore{InboundPersistence: selected, fault: fault}
 			gateway := newTestInboundGateway(t, bus, nil, nil, wrapped)
 			gateway.SetChannelPlans([]packs.SatisfactionPlan{plan})
+			bus.SetProviderOutputAuthorizationVerifier(capturedProviderCatalog(t, source))
 			first := serveAcknowledgedTelegram(t, gateway, bus, target, ctx, 8301, operation.Challenge)
 			var response operatorChannelInboundResponse
 			if err := json.Unmarshal(first.Body.Bytes(), &response); err != nil {
@@ -360,8 +369,8 @@ func TestInboundAcknowledgedOperatorClaimCleanupRespondsBothStores(t *testing.T)
 				t.Fatalf("missing-ack claim persisted: found=%v err=%v", found, err)
 			}
 			requireOperatorChannelOperationState(t, selected, principal.ID, operation.OperationID, operatorchannel.StateAwaitingConfirmation, 2)
-			var deliveries int
-			if err := db.QueryRow(`SELECT COUNT(*) FROM event_deliveries`).Scan(&deliveries); err != nil || deliveries != 0 {
+			deliveries, err := storetest.CountPhysicalEventDeliveries(ctx, selected)
+			if err != nil || deliveries != 0 {
 				t.Fatalf("operator claim deliveries=%d err=%v, want 0", deliveries, err)
 			}
 		})

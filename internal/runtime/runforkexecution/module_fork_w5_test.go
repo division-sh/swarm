@@ -61,7 +61,7 @@ func TestW5ToolsPinnedModuleRunsThroughSelectedForkBothStores(t *testing.T) {
 			files := map[string]string{
 				"events.yaml": "item.received:\n  component: text\n  owner: text\n  language: text\n  files: [text]\nitem.processed:\n  content: text\n",
 				"nodes.yaml":  "test-node:\n  event_handlers:\n    item.received:\n      rules:\n        - compute_module:\n            module: renderer\n            input: {component: payload.component, owner: payload.owner, language: payload.language, files: payload.files}\n            into: computed.rendered_bundle\n        - advances_to: done\n          emit:\n            event: item.processed\n            fields: {content: computed.rendered_bundle.content}\n",
-				"tools.yaml":  fmt.Sprintf("renderer:\n  handler_type: wasm\n  path: modules/renderer.wasm\n  abi: core-json-v1\n  entry: compute\n  digest: sha256:%x\n  input_schema:\n    type: object\n    required: [component, owner, language, files]\n    properties:\n      component: {type: string}\n      owner: {type: string}\n      language: {type: string}\n      files: {type: array, items: {type: string}}\n  output_schema:\n    type: object\n    required: [content, format, line_count]\n    properties:\n      content: {type: string}\n      format: {type: string}\n      line_count: {type: integer}\n  limits: {gas: 5000000, memory_pages: 17, output_bytes: 1024}\n", sha256.Sum256(bytes)),
+				"tools.yaml":  fmt.Sprintf("renderer:\n  handler_type: wasm\n  path: modules/renderer.wasm\n  abi: core-json-v1\n  entry: compute\n  digest: sha256:%x\n  input_schema:\n    type: object\n    required: [component, owner, language, files]\n    properties:\n      component: {type: string}\n      owner: {type: string}\n      language: {type: string}\n      files: {type: array, items: {type: string}}\n  output_schema:\n    type: object\n    required: [content, format, line_count]\n    properties:\n      content: {type: string}\n      format: {type: string}\n      line_count: {type: integer}\n  limits: {gas: 5000000, memory_pages: 17, output_bytes: 1024}\n", sha256.Sum256(bytes)), "manifest.yaml": "version: 1.0.0\nplatform_version: '*'\n",
 			}
 			for name, body := range files {
 				if err := os.WriteFile(filepath.Join(root, name), []byte(body), 0o644); err != nil {
@@ -82,8 +82,9 @@ func TestW5ToolsPinnedModuleRunsThroughSelectedForkBothStores(t *testing.T) {
 			seedSelectedOperationSource(t, ctx, selected, loaded, runID, eventID, false, input)
 			result, err := q1ExecuteSelectedPhaseComponent(t, ctx, SelectedContractExecutionRequest{
 				SourceRunID: runID, At: eventID, AllowSourceFreeze: true, Owner: owner, SourceLoader: loader,
-				ContractSelection: runforkadmission.SelectedContractSelection(loaded.Source),
-				AgentRuntime:      SelectedContractAgentRuntimeOptions{ExecutionPosture: executionposture.Live, ProcessCapability: capability},
+				SourceArtifactFact: loaded.SourceArtifactFact,
+				ContractSelection:  runforkadmission.SelectedContractSelection(loaded.Source),
+				AgentRuntime:       SelectedContractAgentRuntimeOptions{ExecutionPosture: executionposture.Live, ProcessCapability: capability},
 			})
 
 			if err != nil {

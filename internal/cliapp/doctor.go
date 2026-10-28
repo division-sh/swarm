@@ -218,7 +218,7 @@ func appendDoctorInstalledReadback(report *LocalPreflightReport, base *packartif
 		}
 		report.SchemaInventory = &inventory
 	}
-	inventory, err := packartifact.NewEffectivePackInventory(base, nil)
+	inventory, err := packartifact.NewEffectivePackInventory(base)
 	if err != nil {
 		report.add(localPreflightProviderPackPrerequisite, "platform_pack_load_failed", LocalPreflightSeverityBlocker, LocalPreflightStatusFailed, err.Error(), "repair the platform pack inventory")
 		return false

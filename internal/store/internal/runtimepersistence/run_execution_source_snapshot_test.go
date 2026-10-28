@@ -11,6 +11,7 @@ import (
 	"github.com/division-sh/swarm/internal/runtime/canonicaljson"
 	"github.com/division-sh/swarm/internal/runtime/manager"
 	"github.com/division-sh/swarm/internal/runtime/startupownership"
+	"github.com/division-sh/swarm/internal/sourceartifact"
 	"github.com/division-sh/swarm/internal/store/internal/backend/transactiontest"
 	"github.com/division-sh/swarm/internal/testutil/sourceartifactfixture"
 	"github.com/google/uuid"
@@ -35,7 +36,15 @@ func TestRunExecutionSourceSnapshotBothStores(t *testing.T) {
 			if err := db.QueryRowContext(ctx, `SELECT bundle_hash FROM runs WHERE run_id=$1`, fixture.sourceRun).Scan(&hash); err != nil {
 				t.Fatal(err)
 			}
-			plan, err := agenttopology.NewSourceSetPlan([]agenttopology.SourceCoordinate{{BundleHash: hash}}, nil)
+			rooted, err := selected.(rootedRunStore).LoadRunRootedSource(ctx, fixture.sourceRun)
+			if err != nil {
+				t.Fatal(err)
+			}
+			coordinate, err := agenttopology.NewSourceCoordinate(rooted.Admission())
+			if err != nil {
+				t.Fatal(err)
+			}
+			plan, err := agenttopology.NewSourceSetPlan([]agenttopology.SourceCoordinate{coordinate}, nil)
 			if err != nil {
 				t.Fatal(err)
 			}
@@ -120,9 +129,22 @@ func TestRunExecutionSourceSnapshotBothStores(t *testing.T) {
 			t.Run("missing_run", func(t *testing.T) {
 				inspect(t, ctx, uuid.NewString(), 0, "load run execution binding", 1, 2)
 			})
-			otherArtifact := sourceartifactfixture.New("agents.yaml", []byte("# other execution source\nagents: {}\n"))
+			otherArtifact, err := sourceartifact.AdmitMembers(map[string][]byte{
+				"manifest.yaml": []byte("version: 1.0.0\nplatform_version: '*'\n"),
+				"schema.yaml":   []byte("stages: []\n"),
+				"agents.yaml":   []byte("# other execution source\nagents: {}\n"),
+			})
+			if err != nil {
+				t.Fatal(err)
+			}
+			otherRooted, _ := sourceartifactfixture.Rooted(t, "other", otherArtifact)
+			otherArtifact = otherRooted.Artifact()
 			otherHash := otherArtifact.BundleHash()
-			otherPlan, err := agenttopology.NewSourceSetPlan([]agenttopology.SourceCoordinate{{BundleHash: otherHash}}, nil)
+			otherCoordinate, err := agenttopology.NewSourceCoordinate(otherRooted.Admission())
+			if err != nil {
+				t.Fatal(err)
+			}
+			otherPlan, err := agenttopology.NewSourceSetPlan([]agenttopology.SourceCoordinate{otherCoordinate}, nil)
 			if err != nil {
 				t.Fatal(err)
 			}

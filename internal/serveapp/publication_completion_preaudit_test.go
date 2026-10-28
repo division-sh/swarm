@@ -8,6 +8,8 @@ import (
 	"fmt"
 	"io"
 	"net/http"
+	"os"
+	"path/filepath"
 	"sync"
 	"testing"
 	"time"
@@ -32,7 +34,7 @@ func TestPublicPublicationCompletionBoundaryBothStores(t *testing.T) {
 		t.Run(string(backend), func(t *testing.T) {
 			probe := installPublicationCompletionAudit(t, true)
 			defer probe.releaseOnce.Do(func() { close(probe.release) })
-			h, hash := startChannelAnchorJourneyRuntime(t, backend, "completion-boundary-test", false)
+			h, hash := startPublicationCompletionRuntime(t, backend)
 			endpoint := h.rpcEndpoint()
 			ctx, cancel := context.WithCancel(context.Background())
 			defer cancel()
@@ -41,6 +43,12 @@ func TestPublicPublicationCompletionBoundaryBothStores(t *testing.T) {
 			select {
 			case <-probe.entered:
 			case <-time.After(10 * time.Second):
+				select {
+				case response := <-done:
+					t.Logf("publication response before readiness cut: error=%v rpc=%s result=%s", response.err, response.rpcError, response.result)
+				default:
+					t.Log("publication response still pending at readiness timeout")
+				}
 				t.Fatal("owned readiness cut not reached")
 			}
 			probe.mu.Lock()
@@ -174,7 +182,7 @@ func TestPublicPublicationCompletionExactBytesBothStores(t *testing.T) {
 		t.Run(string(backend), func(t *testing.T) {
 			probe := installPublicationCompletionAudit(t, false)
 			defer probe.releaseOnce.Do(func() { close(probe.release) })
-			h, hash := startChannelAnchorJourneyRuntime(t, backend, "completion-bytes-test", false)
+			h, hash := startPublicationCompletionRuntime(t, backend)
 			endpoint := h.rpcEndpoint()
 			params := publicationAuditParams(hash, "audit1930-bytes")
 			first := publicationAuditHTTP(t.Context(), endpoint, params)
@@ -215,7 +223,7 @@ func TestPublicPublicationRetirementRecoveryBothStores(t *testing.T) {
 		t.Run(string(backend), func(t *testing.T) {
 			probe := installPublicationCompletionAudit(t, true)
 			defer probe.releaseOnce.Do(func() { close(probe.release) })
-			h, hash := startChannelAnchorJourneyRuntime(t, backend, "completion-retirement-test", false)
+			h, hash := startPublicationCompletionRuntime(t, backend)
 			params := publicationAuditParams(hash, "completion-retirement")
 			first := publicationAuditHTTP(t.Context(), h.rpcEndpoint(), params)
 			if first.err != nil || first.rpcError != nil {
@@ -299,6 +307,49 @@ func publicationCompletionHTTPMethod(ctx context.Context, endpoint, method strin
 func publicationAuditParams(hash, key string) map[string]any {
 	return map[string]any{"bundle_hash": hash, "event_name": "work.requested", "idempotency_key": key,
 		"payload": map[string]any{"seed": true}}
+}
+
+func startPublicationCompletionRuntime(t *testing.T, backend servedparity.Backend) (*channelOnboardingE2EHarness, string) {
+	t.Helper()
+	h := newChannelOnboardingE2EHarness(t, backend, false)
+	root := filepath.Join(t.TempDir(), "publication")
+	for name, body := range map[string]string{
+		"manifest.yaml": "version: 1.0.0\nplatform_version: '*'\n",
+		"schema.yaml": `stages: []
+pins:
+  inputs: [work.requested]
+  outputs: [work.requested]
+connect:
+  - {event: work.requested, from: ., to: reviews}
+`,
+		"events.yaml":           "work.requested:\n  seed: boolean\n",
+		"reviews/manifest.yaml": "version: 1.0.0\nplatform_version: '*'\n",
+		"reviews/schema.yaml":   "stages: []\npins:\n  inputs: [work.requested]\n",
+		"reviews/nodes.yaml": `start:
+  execution_type: system_node
+  subscribes_to: [work.requested]
+  event_handlers:
+    work.requested: {}
+`,
+	} {
+		path := filepath.Join(root, name)
+		if err := os.MkdirAll(filepath.Dir(path), 0o755); err != nil {
+			t.Fatal(err)
+		}
+		if err := os.WriteFile(path, []byte(body), 0o600); err != nil {
+			t.Fatal(err)
+		}
+	}
+	h.opts.SourceRoot = root
+	h.opts.AbandonActiveRuns = false
+	h.start(t)
+	t.Cleanup(func() { h.stop(t) })
+	var identity apiv1.RuntimeIdentityResult
+	requireServedJSONRPCResult(t, h.rpcEndpoint(), "runtime.identity", map[string]any{}, &identity)
+	if len(identity.SourceArtifacts) != 1 {
+		t.Fatalf("publication completion requires one admitted source: %+v", identity)
+	}
+	return h, identity.SourceArtifacts[0].BundleHash
 }
 
 type publicationCompletionAudit struct {

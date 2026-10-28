@@ -116,7 +116,14 @@ func TestFinalFlowInstanceAuthoringRuntime_PublishActivatesAndExecutesSelectedTe
 		DeliveryStore:      pg, ReceiverExecution: eventreceiver.NormalExecution(),
 	}))
 
-	coordinate := agenttopology.SourceCoordinate{BundleHash: fact.BundleHash()}
+	rooted, err := bundle.RootedSource()
+	if err != nil {
+		t.Fatal(err)
+	}
+	coordinate, err := agenttopology.NewSourceCoordinate(rooted.Admission())
+	if err != nil {
+		t.Fatal(err)
+	}
 	desired, err := manager.CompileStaticTopologyDesiredAgents(source, coordinate)
 	if err != nil {
 		t.Fatal(err)

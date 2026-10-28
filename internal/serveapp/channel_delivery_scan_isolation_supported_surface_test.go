@@ -28,7 +28,7 @@ func TestChannelDeliveryCompiledRenderFailureDoesNotStarveReceiptUpdates(t *test
 					"event_name": "work.requested", "bundle_hash": bundleHash,
 					"payload": map[string]any{"seed": true}, "idempotency_key": fmt.Sprintf("scan-isolation-%d", index),
 				})
-				cards[index] = waitChannelAnchorCard(t, db, seed.RunID, decisioncard.AnchorKindStageGate, "reviews")
+				cards[index] = waitChannelAnchorCard(t, db, seed.RunID, decisioncard.AnchorKindStageGate, "chat/reviews")
 				messages[index] = waitChannelAnchorReceipt(t, db, cards[index])
 				requireServedOKJSONRPC(t, h.rpcEndpoint(), "run.pause", map[string]any{
 					"run_id": seed.RunID, "idempotency_key": fmt.Sprintf("scan-isolation-pause-%d", index),

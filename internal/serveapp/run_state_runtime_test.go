@@ -32,6 +32,7 @@ import (
 	runtimepipeline "github.com/division-sh/swarm/internal/runtime/pipeline"
 	"github.com/division-sh/swarm/internal/runtime/semanticview"
 	"github.com/division-sh/swarm/internal/runtime/startupownership"
+	"github.com/division-sh/swarm/internal/sourceartifact"
 	"github.com/division-sh/swarm/internal/store"
 	"github.com/division-sh/swarm/internal/store/storetest"
 	"github.com/division-sh/swarm/internal/store/testutil/agentfixture"
@@ -60,9 +61,9 @@ func runStatusSubscriptionSource(t *testing.T, withAgent bool) semanticview.Sour
 	t.Helper()
 	root := t.TempDir()
 	files := map[string]string{
-		"schema.yaml":   "name: run-status\nrequired_agents: []\nstages:\n  ready: {}\npins:\n  inputs: [scan.requested]\n  outputs: [scan.completed]\n",
+		"schema.yaml":   "required_agents: []\nstages:\n  ready: {}\npins:\n  inputs: [scan.requested]\n  outputs: [scan.completed]\n",
 		"events.yaml":   "scan.requested:\n  topic: text\nscan.completed:\n",
-		"entities.yaml": "default: {}\n",
+		"entities.yaml": "default: {}\n", "manifest.yaml": "version: 1.0.0\nplatform_version: '*'\n",
 	}
 	if withAgent {
 		files["agents.yaml"] = "agent-1:\n  role: worker\n  intent: {inline: Complete the scan.}\n  model: regular\n  subscriptions: [scan.requested]\n"
@@ -238,9 +239,22 @@ func publishRunStatusExistingRootEvent(t *testing.T, bus *runtimebus.EventBus, s
 func startRunStatusReceiverDeliveries(t *testing.T, pg interface {
 	agentfixture.Store
 	runtimedelivery.Store
+	LoadRunRootedSource(context.Context, string) (sourceartifact.RootedSource, error)
 }, bus *runtimebus.EventBus, workOwner *worklifetime.RuntimeOccurrence, source runtimecorrelation.SourceArtifactFact, identity agentidentity.Identity) {
 	t.Helper()
 	ctx := runStatusAuthorActivityContext(source)
+	rooted, err := pg.LoadRunRootedSource(ctx, identity.RunID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if rooted.Admission().BundleHash() != source.BundleHash() {
+		t.Fatal("run-status receiver source differs from its retained run root")
+	}
+	coordinate, err := agenttopology.NewSourceCoordinate(rooted.Admission())
+	if err != nil {
+		t.Fatal(err)
+	}
+	ctx = runtimecorrelation.WithRootAdmission(ctx, rooted.Admission())
 	ctx = serveFixtureProcessContext(t, ctx, pg)
 	state, found, err := pg.LoadAgentLifecycleState(ctx, identity)
 	if err != nil || !found || state.Identity != identity || state.Phase != runtimemanager.AgentLifecycleRunning ||
@@ -255,7 +269,7 @@ func startRunStatusReceiverDeliveries(t *testing.T, pg interface {
 	if err != nil || !found {
 		t.Fatalf("run-status receiver lost its complete source plan: found=%t err=%v", found, err)
 	}
-	grant, err := agentfixture.AdmitGeneration(t, ctx, pg, plan, agenttopology.SourceCoordinate{BundleHash: source.BundleHash()})
+	grant, err := agentfixture.AdmitGeneration(t, ctx, pg, plan, coordinate)
 	if err != nil {
 		t.Fatal(err)
 	}

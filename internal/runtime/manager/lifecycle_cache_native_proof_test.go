@@ -11,8 +11,13 @@ import (
 	"github.com/division-sh/swarm/internal/runtime/agentcontrol"
 	"github.com/division-sh/swarm/internal/runtime/agenttopology"
 	"github.com/division-sh/swarm/internal/runtime/canonicaljson"
+	runtimecontracts "github.com/division-sh/swarm/internal/runtime/contracts"
 	runtimeactors "github.com/division-sh/swarm/internal/runtime/core/actors"
 	runtimefailures "github.com/division-sh/swarm/internal/runtime/failures"
+	"github.com/division-sh/swarm/internal/runtime/semanticview"
+	"github.com/division-sh/swarm/internal/runtime/testfixtures/canonicalrouting"
+	"github.com/division-sh/swarm/internal/sourceartifact"
+	"github.com/division-sh/swarm/internal/testutil/sourceartifactfixture"
 	"github.com/google/uuid"
 )
 
@@ -54,8 +59,12 @@ func (s *agentRowResponseLoss) CommitAgentLifecycleTransition(ctx context.Contex
 	return result, nil
 }
 
-func ProveAgentRowNativeLostAckCacheAdoption(t *testing.T, ctx context.Context, store AgentLifecyclePersistence, reader AgentLifecycleStateReader, outcomes AgentLifecycleOutcomeReader, record PersistedAgent, snapshot func() any, admit ReconfigureMemoryNativeAdmission, publicRestart func(agentcontrol.Controller)) {
+func ProveAgentRowNativeLostAckCacheAdoption(t *testing.T, ctx context.Context, rooted sourceartifact.RootedSource, store AgentLifecyclePersistence, reader AgentLifecycleStateReader, outcomes AgentLifecycleOutcomeReader, record PersistedAgent, snapshot func() any, admit ReconfigureMemoryNativeAdmission, publicRestart func(agentcontrol.Controller)) {
 	t.Helper()
+	bundle, err := runtimecontracts.LoadWorkflowContractBundleFromRootedSource(canonicalrouting.RepoRoot(t), rooted, "", runtimecontracts.WorkflowContractLoadOptions{})
+	if err != nil {
+		t.Fatal(err)
+	}
 	binding, ok := store.(processExecutionBindingProvider)
 	if !ok {
 		t.Fatal("native lifecycle fixture lacks exact process binding")
@@ -66,18 +75,20 @@ func ProveAgentRowNativeLostAckCacheAdoption(t *testing.T, ctx context.Context, 
 	}
 	fault := &agentRowResponseLoss{AgentLifecyclePersistence: store, binding: binding, runOwner: runOwner}
 	bus := newProjectionTestBus()
-	am := newTestAgentManagerWithOptions(t, bus, nil, AgentManagerOptions{LLMBackend: record.Config.LLMBackend, LifecycleStore: fault, PersistenceRoles: PersistenceRoles{LifecycleState: reader, LifecycleOutcome: outcomes}})
+	am := newTestAgentManagerWithOptions(t, bus, nil, AgentManagerOptions{
+		BaseContext: ctx, SemanticSource: semanticview.Wrap(bundle), SourceArtifactFact: sourceartifactfixture.FactFor(rooted.Artifact()),
+		LLMBackend: record.Config.LLMBackend, LifecycleStore: fault, PersistenceRoles: PersistenceRoles{LifecycleState: reader, LifecycleOutcome: outcomes},
+	})
 	if am.lifecycle.persistence() != fault || am.lifecycle.stateReader != reader || am.lifecycle.outcomeReader != outcomes {
 		t.Fatal("fixture constructor replaced an explicitly supplied native row/outcome owner")
 	}
 	if _, unit := am.lifecycle.persistence().(*ephemeralLifecyclePersistenceProbe); unit {
 		t.Fatal("supplied native authority selected the unit-only row model")
 	}
-	ctx = testAuthorActivityContext(ctx)
 	if err := am.lifecycle.registerExecution(ctx, record, false, reconfigureTestAgent{id: record.Config.ID}, testManagerSubscriptionAdmission(t, record.Config)); err != nil {
 		t.Fatal(err)
 	}
-	if err := am.Run(managedExecutionTestContext(t, ctx)); err != nil {
+	if err := am.Run(managedExecutionTestContextForCapturedSource(t, ctx)); err != nil {
 		t.Fatal(err)
 	}
 	t.Cleanup(func() {
@@ -446,7 +457,7 @@ func proveAgentRowNativePublicationPanic(t *testing.T, ctx context.Context, am *
 	if err := am.Shutdown(); err != nil {
 		t.Fatalf("publication compensation left a Manager lease or join: %v", err)
 	}
-	if err := am.Run(managedExecutionTestContext(t, ctx)); err != nil {
+	if err := am.Run(managedExecutionTestContextForCapturedSource(t, ctx)); err != nil {
 		t.Fatalf("restart after exact publication cleanup: %v", err)
 	}
 	current, found, err := reader.LoadAgentLifecycleState(ctx, record.Config.Identity)
@@ -455,16 +466,22 @@ func proveAgentRowNativePublicationPanic(t *testing.T, ctx context.Context, am *
 	}
 }
 
-func ProveAgentRowIndividualSourceSetReplacement(t *testing.T, previous AgentLifecyclePersistence, reader AgentLifecycleStateReader, record PersistedAgent, advance func() (AgentLifecyclePersistence, agenttopology.Admission)) {
+func ProveAgentRowIndividualSourceSetReplacement(t *testing.T, ctx context.Context, rooted sourceartifact.RootedSource, previous AgentLifecyclePersistence, reader AgentLifecycleStateReader, record PersistedAgent, advance func() (AgentLifecyclePersistence, agenttopology.Admission)) {
 	t.Helper()
+	bundle, err := runtimecontracts.LoadWorkflowContractBundleFromRootedSource(canonicalrouting.RepoRoot(t), rooted, "", runtimecontracts.WorkflowContractLoadOptions{})
+	if err != nil {
+		t.Fatal(err)
+	}
 	bus := newProjectionTestBus()
-	am := newTestAgentManagerWithOptions(t, bus, nil, AgentManagerOptions{LifecycleStore: previous, PersistenceRoles: PersistenceRoles{LifecycleState: reader}})
-	ctx := testAuthorActivityContext(context.Background())
+	am := newTestAgentManagerWithOptions(t, bus, nil, AgentManagerOptions{
+		BaseContext: ctx, SemanticSource: semanticview.Wrap(bundle), SourceArtifactFact: sourceartifactfixture.FactFor(rooted.Artifact()),
+		LLMBackend: record.Config.LLMBackend, LifecycleStore: previous, PersistenceRoles: PersistenceRoles{LifecycleState: reader},
+	})
 	agent := &reconfigureTestAgent{id: record.Config.ID}
 	if err := am.lifecycle.registerExecution(ctx, record, false, agent, testManagerSubscriptionAdmission(t, record.Config)); err != nil {
 		t.Fatal(err)
 	}
-	if err := am.Run(managedExecutionTestContext(t, ctx)); err != nil {
+	if err := am.Run(managedExecutionTestContextForCapturedSource(t, ctx)); err != nil {
 		t.Fatalf("install original running Manager projection: %v", err)
 	}
 	t.Cleanup(func() {

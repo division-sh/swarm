@@ -45,7 +45,7 @@ func a9NestedKeyedIngressConstruction(t *testing.T, declarationLocal bool) {
 				t.Fatal(err)
 			}
 			const secret = "a9-nested-construction"
-			if err := file.Set(t.Context(), "webhook_signing.partner", secret); err != nil {
+			if err := file.Set(t.Context(), "partner.webhook_signing_secret", secret); err != nil {
 				t.Fatal(err)
 			}
 			_, start := clockDeploymentHarness(t, backend, root)
@@ -145,7 +145,7 @@ func a9NestedKeyedIngressConstruction(t *testing.T, declarationLocal bool) {
 						t.Fatalf("eager keyless intermediate gained an argument input: %+v", initial)
 					}
 				} else {
-					input := "account.opened"
+					input := "inbound.partner.raw"
 					if initial.CreatingInput.Input != input || initial.Fields["id"] != instance.Fields["id"] || initial.Fields["seen"] != int64(0) {
 						t.Fatalf("nested immutable constructor fields were replaced by current state: %+v current=%+v", initial, instance.Fields)
 					}

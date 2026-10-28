@@ -21,6 +21,7 @@ func TestPayloadlessEventCanonicalGrammarDiskAndReconstructedSource(t *testing.T
 		}
 		t.Run(name, func(t *testing.T) {
 			root := t.TempDir()
+			writeFixtureFile(t, filepath.Join(root, "manifest.yaml"), "version: 1.0.0\nplatform_version: '*'\n")
 			body := event + ":"
 			if variant != "" {
 				body += " " + variant
@@ -114,6 +115,7 @@ func TestPayloadlessEventRejectsNullAliasAtUse(t *testing.T) {
 
 func TestPayloadlessEventMissingDeclarationStaysMissing(t *testing.T) {
 	root := t.TempDir()
+	writeFixtureFile(t, filepath.Join(root, "manifest.yaml"), "version: 1.0.0\nplatform_version: '*'\n")
 	path := filepath.Join(root, "events.yaml")
 	if err := os.WriteFile(path, []byte("other.event:\n  id: text\n"), 0o600); err != nil {
 		t.Fatal(err)

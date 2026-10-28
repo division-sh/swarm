@@ -10,13 +10,16 @@ import (
 	"github.com/division-sh/swarm/internal/runtime/fanoutobligation"
 	"github.com/division-sh/swarm/internal/runtime/runfork"
 	"github.com/division-sh/swarm/internal/runtime/semanticview"
+	"github.com/division-sh/swarm/internal/sourceartifact"
+	"github.com/division-sh/swarm/internal/testutil/sourceartifactfixture"
 	"github.com/google/uuid"
 )
 
 type fanOutHistoryFixtureLoader struct {
-	loaded LoadedSelectedContractSource
-	err    error
-	calls  int
+	loaded   LoadedSelectedContractSource
+	expected sourceartifact.RootedSource
+	err      error
+	calls    int
 }
 
 func (l *fanOutHistoryFixtureLoader) LoadRunForkSelectedContractSourceForRequest(ctx context.Context, req SelectedContractSourceLoadRequest) (LoadedSelectedContractSource, error) {
@@ -24,7 +27,7 @@ func (l *fanOutHistoryFixtureLoader) LoadRunForkSelectedContractSourceForRequest
 	if err := ctx.Err(); err != nil {
 		return LoadedSelectedContractSource{}, err
 	}
-	if req.SourceRunID != "" || req.BundleHash != req.Selection.BundleHash || req.Selection.Mode != runfork.RunForkContractSelectionModeBundleHash {
+	if req.Responsibility != retainedFanOutExecutionSource(l.expected) || req.BundleHash != req.Selection.BundleHash || req.Selection.Mode != runfork.RunForkContractSelectionModeBundleHash {
 		return LoadedSelectedContractSource{}, errors.New("history loader requires an exact immutable artifact, not a current run")
 	}
 	return l.loaded, l.err
@@ -39,12 +42,25 @@ func TestForkFanOutHistoryLoadsOnceAndReleasesEveryAcquisition(t *testing.T) {
 	}
 	currentBundle, _ := semanticview.Bundle(current)
 	archivedBundle, _ := semanticview.Bundle(archive)
+	archiveRoot, err := archivedBundle.RootedSource()
+	if err != nil {
+		t.Fatal(err)
+	}
+	currentRoot, err := currentBundle.RootedSource()
+	if err != nil {
+		t.Fatal(err)
+	}
+	otherRoot, _ := sourceartifactfixture.Rooted(t, "other-history", archiveRoot.Artifact())
+	if otherRoot.Admission().BundleHash() != archiveRoot.Admission().BundleHash() || otherRoot.Admission().Equal(archiveRoot.Admission()) {
+		t.Fatal("foreign history control requires equal content and distinct captured roots")
+	}
 	compiled := archive.FanOutPlans()[0]
 	source := fanoutobligation.SourceRef{Kind: fanoutobligation.SourceEventPayloadField, Field: strings.TrimPrefix(compiled.ItemsFrom, "payload.")}
 	if strings.HasPrefix(compiled.ItemsFrom, "entity.") {
 		source.Kind, source.Field = fanoutobligation.SourceEntityField, strings.TrimPrefix(compiled.ItemsFrom, "entity.")
 	}
 	first := selectedFanOutHistoryFixture(t, compiled, compiled.Ref, source, compiled.SemanticEvidence())
+	first.ExecutionSource = archiveRoot
 	first.Intent.Status, first.Intent.Cursor = fanoutobligation.StatusClosed, 1
 	first.Outcomes = []fanoutobligation.Outcome{{Ordinal: 0, Kind: fanoutobligation.OutcomeCommitted, SourceEventID: uuid.NewString(),
 		InheritedDisposition: fanoutobligation.InheritedSucceeded, CreatedAt: first.Intent.CreatedAt}}
@@ -55,11 +71,11 @@ func TestForkFanOutHistoryLoadsOnceAndReleasesEveryAcquisition(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	for _, variant := range []string{"success", "load_failure", "foreign_fact", "cleanup_failure", "canceled"} {
+	for _, variant := range []string{"success", "load_failure", "foreign_fact", "foreign_root", "missing_evidence", "contradictory_evidence", "cleanup_failure", "canceled"} {
 		t.Run(variant, func(t *testing.T) {
 			released := 0
 			fault := errors.New("retained source acquisition failed")
-			loader := &fanOutHistoryFixtureLoader{loaded: LoadedSelectedContractSource{Source: archive, SourceArtifactFact: fact,
+			loader := &fanOutHistoryFixtureLoader{expected: archiveRoot, loaded: LoadedSelectedContractSource{Source: archive, SourceArtifactFact: fact, RootedSource: archiveRoot,
 				Cleanup: func() error {
 					released++
 					if variant == "cleanup_failure" {
@@ -68,7 +84,15 @@ func TestForkFanOutHistoryLoadsOnceAndReleasesEveryAcquisition(t *testing.T) {
 					return nil
 				}}}
 			ctx := context.Background()
+			candidate := plan
+			candidate.FanOutObligations = append([]runfork.RunForkFanOutObligation(nil), plan.FanOutObligations...)
 			switch variant {
+			case "foreign_root":
+				loader.loaded.RootedSource = otherRoot
+			case "missing_evidence":
+				candidate.FanOutObligations[0].ExecutionSource = sourceartifact.RootedSource{}
+			case "contradictory_evidence":
+				candidate.FanOutObligations[0].ExecutionSource = currentRoot
 			case "load_failure":
 				loader.err = fault
 			case "foreign_fact":
@@ -81,7 +105,10 @@ func TestForkFanOutHistoryLoadsOnceAndReleasesEveryAcquisition(t *testing.T) {
 				ctx, cancel = context.WithCancel(ctx)
 				cancel()
 			}
-			combined, err := retainOriginalFanOutHistory(ctx, loader, primary, currentBundle.SourceArtifact.BundleHash(), plan)
+			combined, err := retainOriginalFanOutHistory(ctx, loader, primary, currentRoot.Admission(), candidate)
+			if (variant == "load_failure" || variant == "cleanup_failure") && !errors.Is(err, fault) {
+				t.Fatalf("lost the acquired source/cleanup failure: %v", err)
+			}
 			if variant == "success" {
 				if err != nil || loader.calls != 1 || released != 1 {
 					t.Fatalf("duplicate history load or leaked projection: calls=%d released=%d err=%v", loader.calls, released, err)
@@ -94,6 +121,10 @@ func TestForkFanOutHistoryLoadsOnceAndReleasesEveryAcquisition(t *testing.T) {
 			} else if variant == "canceled" {
 				if !errors.Is(err, context.Canceled) || loader.calls != 0 || released != 0 {
 					t.Fatalf("canceled history admission loaded artifacts: calls=%d released=%d err=%v", loader.calls, released, err)
+				}
+			} else if variant == "missing_evidence" || variant == "contradictory_evidence" {
+				if loader.calls != 0 || released != 0 {
+					t.Fatal("invalid history evidence reached a fallback loader")
 				}
 			} else if loader.calls != 1 || released != 1 {
 				t.Fatalf("failed acquisition leaked cleanup: calls=%d released=%d err=%v", loader.calls, released, err)

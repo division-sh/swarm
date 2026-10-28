@@ -19,8 +19,7 @@ func CopySelectedFutureMintedProviderInput(t testing.TB) string {
 func copySelectedFutureProviderInput(t testing.TB, minted bool) string {
 	t.Helper()
 	root := t.TempDir()
-	schema := `name: selected-future-keyed-provider
-stages:
+	schema := `stages:
   pending: {}
   done: {final: true}
 pins:
@@ -30,8 +29,8 @@ connect:
   - {event: work.assigned, from: ., to: work, resolution: select-or-create}
   - {event: work.finished, from: work, to: .}
 `
-	workSchema := `name: work
-instance: work_id
+
+	workSchema := `instance: work_id
 stages:
   pending: {}
   done: {final: true}
@@ -41,13 +40,13 @@ pins:
 required_agents:
   - {role: worker, subscribes_to: [work.assigned]}
 `
+
 	workEntity := `job:
   work_id: text
   result: text
 `
 	if minted {
-		schema = `name: selected-future-minted-provider
-stages:
+		schema = `stages:
   pending: {}
   done: {final: true}
 pins:
@@ -57,8 +56,8 @@ connect:
   - {event: work.assigned, from: ., to: work, resolution: create, key_from: generated.uuid}
   - {event: work.finished, from: work, to: .}
 `
-		workSchema = `name: work
-instance: case_id
+
+		workSchema = `instance: case_id
 stages:
   pending: {}
   done: {final: true}
@@ -68,6 +67,7 @@ pins:
 required_agents:
   - {role: worker, subscribes_to: [work.assigned]}
 `
+
 		workEntity = `job:
   case_id: text
   work_id: text
@@ -147,7 +147,7 @@ def handle(input):
             "usage": usage,
         }
     return {"text": "Finished the assigned work.", "usage": usage}
-`,
+`, "manifest.yaml": "version: 1.0.0\nplatform_version: '*'\n", "work/manifest.yaml": "version: 1.0.0\nplatform_version: '*'\n",
 	} {
 		writeClosedVariantFile(t, root, path, body)
 	}

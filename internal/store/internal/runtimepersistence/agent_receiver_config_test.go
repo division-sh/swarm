@@ -28,11 +28,15 @@ func TestAgentReceiverConfigNativeNamespacesBothStores(t *testing.T) {
 				selected = newTestPostgresStore(t, db)
 			}
 			ctx := testAuthorActivityContext()
+			ctx = originalStoreFixtureContext(t, ctx, selected)
 			cfg := withRuntimePersistenceTestIntent(t, runtimeactors.AgentConfig{
 				ID: "receiver-storage-proof", Identity: testAgentIdentity(t, "receiver-storage-proof", "review/item"),
 				ExecutionMode: "live", Role: "worker", Type: "worker", Model: "regular", LLMBackend: "claude_cli",
 				Memory: agentmemory.Plan{Enabled: true}, FlowPath: "review/item",
 				Config: json.RawMessage(`{"opaque":[7,7.0,null]}`),
+			})
+			ctx = requireRunFixtureForTest(t, ctx, selected, semanticRunFixture{
+				Origin: semanticScenarioSetupRunOriginForTest(), RunID: cfg.Identity.RunID,
 			})
 			if err := agentfixture.UpsertStatic(t, ctx, selected, runtimemanager.PersistedAgent{Config: cfg, Status: "active"}); err != nil {
 				t.Fatal(err)

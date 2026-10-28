@@ -21,7 +21,7 @@ func TestOriginalActivityArtifactRequiresCapturedPlatformBinding(t *testing.T) {
 		t.Run(scenario, func(t *testing.T) {
 			request := eventtest.RuntimeControl(uuid.NewString(), runForkActivityRequestEvent, "activity-runtime", "", []byte(`{"input":{}}`), 0,
 				uuid.NewString(), "", events.EventEnvelope{}, time.Now().UTC().Truncate(time.Microsecond))
-			binding := events.PayloadSchemaBindingInput{BundleHash: originalHash, FlowID: ".", EventKey: runForkActivityRequestEvent,
+			binding := events.PayloadSchemaBindingInput{BundleHash: originalHash, EventKey: runForkActivityRequestEvent,
 				SchemaClass: events.PayloadSchemaPlatform, SchemaDigest: "sha256:" + strings.Repeat("c", 64)}
 			fact := original
 			switch scenario {
@@ -40,7 +40,13 @@ func TestOriginalActivityArtifactRequiresCapturedPlatformBinding(t *testing.T) {
 				fact = correlation.SourceArtifactFact{}
 			}
 			if scenario != "absent_admission" {
-				schema, err := events.NewPayloadSchemaBinding(binding)
+				schema, err := events.NewPlatformPayloadSchemaBinding(binding, events.PlatformPayloadProducer(request), "")
+				if scenario == "foreign_schema_class" || scenario == "foreign_event_key" {
+					if err == nil || !strings.Contains(err.Error(), "platform payload binding disagrees with producer, class or event") {
+						t.Fatalf("%s canonical binding refusal = %v", scenario, err)
+					}
+					return
+				}
 				if err != nil {
 					t.Fatal(err)
 				}

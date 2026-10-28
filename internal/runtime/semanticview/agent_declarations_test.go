@@ -15,7 +15,8 @@ func TestAgentDeclarationsResolvesUniqueRootOnlyProjectOwner(t *testing.T) {
 	}
 	repoRoot = filepath.Clean(filepath.Join(repoRoot, "..", "..", ".."))
 	root := t.TempDir()
-	writeSemanticviewFixtureFile(t, filepath.Join(root, "schema.yaml"), "name: root-only-agent\n")
+	writeSemanticviewFixtureFile(t, filepath.Join(root, "manifest.yaml"), "version: 1.0.0\nplatform_version: '*'\n")
+	writeSemanticviewFixtureFile(t, filepath.Join(root, "schema.yaml"), "stages: []\n")
 	writeSemanticviewFixtureFile(t, filepath.Join(root, "agents.yaml"), "root-agent:\n  model: regular\n  intent:\n    inline: Exercise root declaration ownership.\n")
 
 	bundle, err := runtimecontracts.LoadWorkflowContractBundleWithOverrides(repoRoot, root, runtimecontracts.DefaultPlatformSpecFile(repoRoot))

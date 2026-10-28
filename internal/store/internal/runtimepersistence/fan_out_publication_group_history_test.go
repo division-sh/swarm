@@ -29,6 +29,7 @@ import (
 	"github.com/division-sh/swarm/internal/runtime/runfork"
 	"github.com/division-sh/swarm/internal/runtime/semanticview"
 	"github.com/division-sh/swarm/internal/store/internal/backend/transactiontest"
+	"github.com/division-sh/swarm/internal/testutil/sourceartifactfixture"
 	"github.com/google/uuid"
 )
 
@@ -251,7 +252,11 @@ func TestFanOutPublicationGroupHistoryMaterializedForkBothStores(t *testing.T) {
 				t.Fatal("declared group did not settle in one revision")
 			}
 			store := f.raw.(runForkSelectedLifecycleStore)
-			request := runfork.RunForkMaterializeRequest{SourceRunID: f.runID, At: f.events[0].ID(), OriginalLoopCarriage: originalCarriageForRun(t, f.raw, f.runID)}
+			rooted, err := f.raw.(rootedRunStore).LoadRunRootedSource(f.ctx, f.runID)
+			if err != nil {
+				t.Fatal(err)
+			}
+			request := runfork.RunForkMaterializeRequest{SourceRunID: f.runID, At: f.events[0].ID(), RootAdmission: rooted.Admission(), OriginalLoopCarriage: originalCarriageForRun(t, f.raw, f.runID)}
 			child, err := store.MaterializeRunFork(f.ctx, request)
 			if err != nil {
 				t.Fatal(err)
@@ -470,7 +475,7 @@ func newDeclaredFanOutGroupHistoryFixture(t *testing.T, backend string, count in
 	ctx, seed := seedDeclaredForkFanOutFixture(t, backend, authorActivityReceiptFixture{db: db, store: raw.(authorActivityReceiptStore)}, count, time.Now().UTC().Truncate(time.Microsecond))
 	ctx, cancel := context.WithTimeout(ctx, 25*time.Second)
 	t.Cleanup(cancel)
-	bundle, err := contracts.LoadWorkflowContractBundleFromArtifact(pipeline.WorkflowRepoRoot(), seed.artifact, contracts.DefaultPlatformSpecFile(pipeline.WorkflowRepoRoot()), contracts.WorkflowContractLoadOptions{})
+	bundle, err := contracts.LoadWorkflowContractBundleFromRootedSource(pipeline.WorkflowRepoRoot(), sourceartifactfixture.CapturedRoot(t, seed.artifact), contracts.DefaultPlatformSpecFile(pipeline.WorkflowRepoRoot()), contracts.WorkflowContractLoadOptions{})
 	if err != nil {
 		t.Fatal(err)
 	}

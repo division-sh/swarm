@@ -8,6 +8,7 @@ import (
 	"testing/fstest"
 
 	"github.com/division-sh/swarm/internal/packartifact"
+	"github.com/division-sh/swarm/internal/packmodel"
 	runtimecontracts "github.com/division-sh/swarm/internal/runtime/contracts"
 	platformpacks "github.com/division-sh/swarm/packs"
 	"gopkg.in/yaml.v3"
@@ -18,7 +19,7 @@ var embeddedTestInventory = sync.OnceValues(func() (*packartifact.EffectivePackI
 	if err != nil {
 		return nil, err
 	}
-	return packartifact.NewEffectivePackInventory(base, nil)
+	return packartifact.NewEffectivePackInventory(base)
 })
 
 var embeddedTestRegistry = sync.OnceValues(func() (*PackRegistry, error) {
@@ -64,7 +65,7 @@ func TestEffectiveConnectorAdmissionValidatesGeneratedIndexEvidence(t *testing.T
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			files := mutablePlatformPackFS(t)
-			rewriteConnectorManifest(t, files, "provider-connectors/github", tc.mutate)
+			rewriteConnectorManifest(t, files, "providers/github", tc.mutate)
 			inventory := effectivePlatformPackInventoryFS(t, files)
 			if _, err := NewPackRegistryFromInventory(inventory, "0.7.0"); err == nil || !strings.Contains(err.Error(), tc.want) {
 				t.Fatalf("forged generated evidence error = %v, want %q", err, tc.want)
@@ -74,44 +75,22 @@ func TestEffectiveConnectorAdmissionValidatesGeneratedIndexEvidence(t *testing.T
 
 	t.Run("unindexed evidence", func(t *testing.T) {
 		files := mutablePlatformPackFS(t)
-		var generated ConnectorManifest
-		if err := unmarshalToolTestYAML(files["provider-connectors/github/"+packartifact.ConnectorManifestFileName].Data, &generated); err != nil {
+		files["providers/notion/connector.yaml"].Data = append([]byte(nil), files["providers/github/connector.yaml"].Data...)
+		var metadata map[string]any
+		if err := yaml.Unmarshal(files["providers/notion/manifest.yaml"].Data, &metadata); err != nil {
 			t.Fatal(err)
 		}
-		rewriteConnectorManifest(t, files, "provider-connectors/notion", func(manifest *ConnectorManifest) {
-			*manifest = generated
-		})
-		copyConnectorEnvelopeContract(t, files, "provider-connectors/github", "provider-connectors/notion")
+		metadata["capabilities"].(map[string]any)["can"].(map[string]any)["call_provider_actions"] = []string{"add_labels_to_issue", "create_issue", "create_issue_comment"}
+		body, err := yaml.Marshal(metadata)
+		if err != nil {
+			t.Fatal(err)
+		}
+		files["providers/notion/manifest.yaml"].Data = body
 		inventory := effectivePlatformPackInventoryFS(t, files)
 		if _, err := NewPackRegistryFromInventory(inventory, "0.7.0"); err == nil || !strings.Contains(err.Error(), "carries generation evidence but is not in the generated pack index") {
 			t.Fatalf("unindexed generated evidence error = %v", err)
 		}
 	})
-}
-
-func copyConnectorEnvelopeContract(t testing.TB, files fstest.MapFS, sourceDirectory, targetDirectory string) {
-	t.Helper()
-	var source, target packartifact.Envelope
-	if err := unmarshalToolTestYAML(files[sourceDirectory+"/"+packartifact.EnvelopeFileName].Data, &source); err != nil {
-		t.Fatal(err)
-	}
-	targetPath := targetDirectory + "/" + packartifact.EnvelopeFileName
-	if err := unmarshalToolTestYAML(files[targetPath].Data, &target); err != nil {
-		t.Fatal(err)
-	}
-	target.Implements = source.Implements
-	target.Capabilities = source.Capabilities
-	target.Requires = source.Requires
-	manifestBody := files[targetDirectory+"/"+packartifact.ConnectorManifestFileName].Data
-	var err error
-	target, _, err = packartifact.StampEnvelope(target, manifestBody)
-	if err != nil {
-		t.Fatal(err)
-	}
-	files[targetPath].Data, err = yaml.Marshal(target)
-	if err != nil {
-		t.Fatal(err)
-	}
 }
 
 func mutablePlatformPackFS(t testing.TB) fstest.MapFS {
@@ -136,31 +115,30 @@ func mutablePlatformPackFS(t testing.TB) fstest.MapFS {
 
 func rewriteConnectorManifest(t testing.TB, files fstest.MapFS, directory string, mutate func(*ConnectorManifest)) {
 	t.Helper()
-	manifestPath := directory + "/" + packartifact.ConnectorManifestFileName
+	manifestPath := directory + "/" + packmodel.ConnectorManifestFileName
+	var members map[string]yaml.Node
+	if err := yaml.Unmarshal(files[manifestPath].Data, &members); err != nil {
+		t.Fatal(err)
+	}
 	var manifest ConnectorManifest
-	if err := unmarshalToolTestYAML(files[manifestPath].Data, &manifest); err != nil {
+	generation := members["generation"]
+	if err := generation.Decode(&manifest.Generation); err != nil {
 		t.Fatal(err)
 	}
 	mutate(&manifest)
-	manifestBody, err := yaml.Marshal(manifest)
+	if manifest.Generation == nil {
+		delete(members, "generation")
+	} else {
+		if err := generation.Encode(manifest.Generation); err != nil {
+			t.Fatal(err)
+		}
+		members["generation"] = generation
+	}
+	manifestBody, err := yaml.Marshal(members)
 	if err != nil {
 		t.Fatal(err)
 	}
 	files[manifestPath].Data = manifestBody
-
-	envelopePath := directory + "/" + packartifact.EnvelopeFileName
-	var envelope packartifact.Envelope
-	if err := unmarshalToolTestYAML(files[envelopePath].Data, &envelope); err != nil {
-		t.Fatal(err)
-	}
-	envelope, _, err = packartifact.StampEnvelope(envelope, manifestBody)
-	if err != nil {
-		t.Fatal(err)
-	}
-	files[envelopePath].Data, err = yaml.Marshal(envelope)
-	if err != nil {
-		t.Fatal(err)
-	}
 }
 
 func effectivePlatformPackInventoryFS(t testing.TB, files fstest.MapFS) *packartifact.EffectivePackInventory {
@@ -169,7 +147,7 @@ func effectivePlatformPackInventoryFS(t testing.TB, files fstest.MapFS) *packart
 	if err != nil {
 		t.Fatal(err)
 	}
-	inventory, err := packartifact.NewEffectivePackInventory(base, nil)
+	inventory, err := packartifact.NewEffectivePackInventory(base)
 	if err != nil {
 		t.Fatal(err)
 	}

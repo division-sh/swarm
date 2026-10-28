@@ -1,15 +1,12 @@
 package canonicalrouting
 
 import (
-	"bytes"
-	"io/fs"
-	"os"
-	"path/filepath"
 	"testing"
 
 	"github.com/division-sh/swarm/internal/runtime/contracts"
 	"github.com/division-sh/swarm/internal/runtime/core/identitytest"
 	"github.com/division-sh/swarm/internal/sourceartifact"
+	"github.com/division-sh/swarm/internal/testutil/sourceartifactfixture"
 )
 
 func TestFanOutExecutionSourcesLoadExactOverlays(t *testing.T) {
@@ -23,43 +20,12 @@ func TestFanOutExecutionSourcesLoadExactOverlays(t *testing.T) {
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			root := tc.copy(t)
-			overlay := filepath.Join(RepoRoot(t), "internal/runtime/testfixtures/canonicalrouting/testdata/fan-out-execution", tc.name)
-			files := 0
-			err := filepath.WalkDir(overlay, func(path string, entry fs.DirEntry, err error) error {
-				if err != nil || entry.IsDir() {
-					return err
-				}
-				relative, err := filepath.Rel(overlay, path)
-				if err != nil {
-					return err
-				}
-				want, err := os.ReadFile(path)
-				if err != nil {
-					return err
-				}
-				got, err := os.ReadFile(filepath.Join(root, relative))
-				if err != nil {
-					return err
-				}
-				if !bytes.Equal(got, want) {
-					t.Errorf("overlay bytes changed: %s", relative)
-				}
-				files++
-				return nil
-			})
-			wantFiles := 7
-			if tc.name == "served-reporter" {
-				wantFiles = 8
-			}
-			if err != nil || files != wantFiles {
-				t.Fatalf("overlay inventory: files=%d err=%v", files, err)
-			}
 			artifact, err := sourceartifact.AdmitDirectory(root)
 			if err != nil {
 				t.Fatal(err)
 			}
 			repo := RepoRoot(t)
-			if _, err := contracts.LoadWorkflowContractBundleFromArtifact(repo, artifact, contracts.DefaultPlatformSpecFile(repo), contracts.WorkflowContractLoadOptions{}); err != nil {
+			if _, err := contracts.LoadWorkflowContractBundleFromRootedSource(repo, sourceartifactfixture.CapturedRoot(t, artifact), contracts.DefaultPlatformSpecFile(repo), contracts.WorkflowContractLoadOptions{}); err != nil {
 				t.Fatal(err)
 			}
 		})

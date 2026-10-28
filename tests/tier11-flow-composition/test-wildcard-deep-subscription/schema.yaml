@@ -9,5 +9,5 @@ pins:
     - pipeline.complete
 connect:
   - event: task.done
-    from: child
+    from: child/grandchild
     to: .

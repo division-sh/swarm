@@ -27,8 +27,10 @@ func TestImportedPlatformReadUsesAuthoredOnceOnlyPolicy(t *testing.T) {
 				if err != nil {
 					t.Fatal(err)
 				}
-				if err := credentials.Set(t.Context(), "telegram_bot_token", "proof-bot-token"); err != nil {
-					t.Fatal(err)
+				for _, key := range tool.Credentials() {
+					if err := credentials.Set(t.Context(), key, "proof-bot-token"); err != nil {
+						t.Fatal(err)
+					}
 				}
 				executor := NewExecutorWithOptions(nil, ExecutorOptions{
 					Credentials: credentials,

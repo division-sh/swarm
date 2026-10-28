@@ -15,6 +15,7 @@ import (
 	runtimerunlifecycle "github.com/division-sh/swarm/internal/runtime/runlifecycle"
 	"github.com/division-sh/swarm/internal/runtime/semanticview"
 	"github.com/division-sh/swarm/internal/runtime/testfixtures/canonicalrouting"
+	"github.com/division-sh/swarm/internal/sourceartifact"
 	"github.com/division-sh/swarm/internal/store/storetest"
 	"github.com/division-sh/swarm/internal/testutil"
 	"github.com/division-sh/swarm/internal/testutil/sourceartifactfixture"
@@ -31,6 +32,7 @@ type stageCompletionJourneyStore interface {
 	apiTestDurableWorkflowRoles
 	sourceartifactfixture.Writer
 	sourceartifactfixture.Reader
+	LoadRunRootedSource(context.Context, string) (sourceartifact.RootedSource, error)
 	RequestCompletionCandidate(context.Context, runtimerunlifecycle.CandidateRequest) (runtimerunlifecycle.CandidateRequestDisposition, error)
 }
 
@@ -78,12 +80,12 @@ func TestExactStageCompletionRealWriterAndRehydratedSourceBothStores(t *testing.
 			stageCompletionWaitForDelivery(t, db, backend, runID, "flow.started")
 			stageCompletionAssertStoredState(t, selected, runID, "ready")
 
-			recovered, recoveredSource := stageCompletionRehydrate(t, selected, db, backend, fact.BundleHash())
-			stageCompletionAssertStoredState(t, recovered, runID, "ready")
+			recoveredSource := stageCompletionRehydrate(t, selected, runID, fact.BundleHash())
+			stageCompletionAssertStoredState(t, selected, runID, "ready")
 			catalog := stageCompletionCatalog(t, recoveredSource)
 			ctx := testAuthorActivityContextForSource(context.Background(), fact)
 			ctx = originalAPIFixtureContext(t, ctx, selected)
-			if disposition, err := recovered.RequestCompletionCandidate(ctx, runtimerunlifecycle.ImmediateCandidate(runID)); err != nil || disposition != runtimerunlifecycle.CandidateRetainedLive {
+			if disposition, err := selected.RequestCompletionCandidate(ctx, runtimerunlifecycle.ImmediateCandidate(runID)); err != nil || disposition != runtimerunlifecycle.CandidateRetainedLive {
 				t.Fatalf("request nonterminal completion: %v", err)
 			}
 			if final, known := catalog.Final("discovery", "discovery", "ready"); !known || final {
@@ -97,10 +99,10 @@ func TestExactStageCompletionRealWriterAndRehydratedSourceBothStores(t *testing.
 			}
 			stageCompletionWaitForDelivery(t, db, backend, runID, "flow.finish")
 			stageCompletionAssertStoredState(t, selected, runID, "Ready")
-			recovered, recoveredSource = stageCompletionRehydrate(t, selected, db, backend, fact.BundleHash())
-			stageCompletionAssertStoredState(t, recovered, runID, "Ready")
+			recoveredSource = stageCompletionRehydrate(t, selected, runID, fact.BundleHash())
+			stageCompletionAssertStoredState(t, selected, runID, "Ready")
 			catalog = stageCompletionCatalog(t, recoveredSource)
-			if disposition, err := recovered.RequestCompletionCandidate(ctx, runtimerunlifecycle.ImmediateCandidate(runID)); err != nil || disposition != runtimerunlifecycle.CandidateRetainedLive {
+			if disposition, err := selected.RequestCompletionCandidate(ctx, runtimerunlifecycle.ImmediateCandidate(runID)); err != nil || disposition != runtimerunlifecycle.CandidateRetainedLive {
 				t.Fatalf("request terminal completion: %v", err)
 			}
 			if final, known := catalog.Final("discovery", "discovery", "Ready"); !known || !final {
@@ -143,7 +145,7 @@ func exactStageCompletionJourneyBundle(t *testing.T) *runtimecontracts.WorkflowC
 	return bundle
 }
 
-func stageCompletionRehydrate(t *testing.T, selected stageCompletionJourneyStore, db *sql.DB, backend, hash string) (stageCompletionJourneyStore, semanticview.Source) {
+func stageCompletionRehydrate(t *testing.T, selected stageCompletionJourneyStore, runID, hash string) semanticview.Source {
 	t.Helper()
 	record, err := selected.GetSourceArtifact(context.Background(), hash)
 	if err != nil {
@@ -154,14 +156,18 @@ func stageCompletionRehydrate(t *testing.T, selected stageCompletionJourneyStore
 		t.Fatalf("decode retained selected source: %v", err)
 	}
 	repo := runCompletionRepoRoot(t)
-	bundle, err := runtimecontracts.LoadWorkflowContractBundleFromArtifact(repo, artifact, runtimecontracts.DefaultPlatformSpecFile(repo), runtimecontracts.WorkflowContractLoadOptions{})
+	rooted, err := selected.LoadRunRootedSource(context.Background(), runID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if rooted.Artifact().BundleHash() != artifact.BundleHash() {
+		t.Fatal("retained run root differs from exact selected source bytes")
+	}
+	bundle, err := runtimecontracts.LoadWorkflowContractBundleFromRootedSource(repo, rooted, runtimecontracts.DefaultPlatformSpecFile(repo), runtimecontracts.WorkflowContractLoadOptions{})
 	if err != nil {
 		t.Fatalf("recompile retained selected source: %v", err)
 	}
-	if backend == "sqlite" {
-		return storetest.AdmitSQLiteRuntimeStore(t, db), semanticview.Wrap(bundle)
-	}
-	return storetest.AdmitPostgresRuntimeStore(t, db), semanticview.Wrap(bundle)
+	return semanticview.Wrap(bundle)
 }
 
 func stageCompletionCatalog(t *testing.T, source semanticview.Source) runtimerunlifecycle.FinalCatalog {

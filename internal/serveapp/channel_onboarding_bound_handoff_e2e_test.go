@@ -21,6 +21,7 @@ func TestChannelOnboardingConfirmedChildRotationResumeE2E(t *testing.T) {
 					for _, publishing := range []bool{false, true} {
 						t.Run(fmt.Sprintf("%s/proof=%t/restart=%t/restore=%t/publishing=%t", backend, proof, restart, restore, publishing), func(t *testing.T) {
 							harness := newChannelOnboardingE2EHarness(t, backend, true)
+							writeChannelOnboardingLiveToolCredentials(t, harness.credentialPath)
 							barrier := newChannelOnboardingTestBarrier(channelonboarding.TestAfterBindingCheckpointBeforeActivation)
 							barrier.Disarm()
 							t.Cleanup(barrier.Release)
@@ -143,6 +144,7 @@ func TestChannelOnboardingEarlyReconnectConfirmationRestartE2E(t *testing.T) {
 		for _, proof := range []bool{false, true} {
 			t.Run(fmt.Sprintf("%s/proof=%t", backend, proof), func(t *testing.T) {
 				harness := newChannelOnboardingE2EHarness(t, backend, true)
+				writeChannelOnboardingLiveToolCredentials(t, harness.credentialPath)
 				harness.start(t)
 				var begun channelonboarding.Result
 				for index, verb := range []string{"connect", "reconnect"} {

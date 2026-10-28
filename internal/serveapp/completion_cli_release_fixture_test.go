@@ -15,7 +15,6 @@ import (
 	"github.com/division-sh/swarm/internal/runtime/contracts"
 	"github.com/division-sh/swarm/internal/runtime/core/eventreceiver"
 	"github.com/division-sh/swarm/internal/runtime/semanticview"
-	"github.com/division-sh/swarm/internal/runtime/semanticviewtest"
 	"github.com/division-sh/swarm/internal/runtime/workspace"
 	"github.com/division-sh/swarm/internal/sourceartifact"
 )
@@ -38,7 +37,10 @@ func newCompletion2270ReleaseFixture(t *testing.T, proof *completion2270Invocati
 	f := &completion2270ReleaseFixture{proof: proof}
 	f.root, f.args, f.attempt = completion2270ProtocolFixture(t, "")
 	sourceRoot := t.TempDir()
-	if err := os.WriteFile(filepath.Join(sourceRoot, "schema.yaml"), []byte("name: selected-witness\n"), 0600); err != nil {
+	if err := os.WriteFile(filepath.Join(sourceRoot, "manifest.yaml"), []byte("version: 1.0.0\nplatform_version: '*'\n"), 0600); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(sourceRoot, "schema.yaml"), []byte("stages: []\n# fixture: selected completion source\n"), 0600); err != nil {
 		t.Fatal(err)
 	}
 	artifact, err := sourceartifact.AdmitDirectory(sourceRoot)
@@ -102,15 +104,23 @@ func newCompletion2270PublishedProof(t *testing.T) *completion2270InvocationProo
 		t.Fatal(err)
 	}
 	root := t.TempDir()
-	if err := os.WriteFile(filepath.Join(root, "schema.yaml"), []byte("name: published-witness\n"), 0600); err != nil {
+	if err := os.WriteFile(filepath.Join(root, "manifest.yaml"), []byte("version: 1.0.0\nplatform_version: '*'\n"), 0600); err != nil {
 		t.Fatal(err)
 	}
-	artifact, err := sourceartifact.AdmitDirectory(root)
+	if err := os.WriteFile(filepath.Join(root, "schema.yaml"), []byte("stages: []\n"), 0600); err != nil {
+		t.Fatal(err)
+	}
+	module, bundle, err := cliapp.NewSwarmWorkflowModule(repoRootForTest(), root)
 	if err != nil {
 		t.Fatal(err)
 	}
+	rooted, err := bundle.RootedSource()
+	if err != nil {
+		t.Fatal(err)
+	}
+	artifact := rooted.Artifact()
 	owner := newSupervisorTestRuntimeOccurrence(t, artifact.BundleHash())
-	source := semanticviewtest.WrapRootAgents(&contracts.WorkflowContractBundle{})
+	source := module.SemanticSource()
 	fact := mustServeTestEphemeralSourceArtifactFact(artifact.BundleHash())
 	publisher, err := bus.NewEphemeralEventBusWithOptions(nil, bus.EventBusOptions{
 		SourceArtifactFact: fact, WorkOwner: owner, ContractBundle: source, ReceiverExecution: eventreceiver.NormalExecution(),
@@ -125,9 +135,9 @@ func newCompletion2270PublishedProof(t *testing.T) *completion2270InvocationProo
 		}
 		return "", nil
 	})
-	if err := contexts.Register(runtimepkg.BundleContext{SourceArtifactFact: fact, Source: source, WorkOwner: owner,
+	if err := contexts.Register(completeServeTestPackContext(t, runtimepkg.BundleContext{SourceArtifactFact: fact, RootAdmission: rooted.Admission(), Source: source, WorkOwner: owner,
 		Runtime: &runtimepkg.Runtime{Bus: publisher, Workspace: &completion2270ObservedWorkspace{DockerManager: manager}},
-	}); err != nil {
+	})); err != nil {
 		t.Fatal(err)
 	}
 	proof := &completion2270InvocationProof{}

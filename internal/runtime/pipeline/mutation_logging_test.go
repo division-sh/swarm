@@ -104,7 +104,8 @@ func VerifyNativeWorkflowInstanceStoreReplaysContainedStateMapListProjectionForT
 func nativeMutationLoggingFixtureForTest(t *testing.T, backend string, open pipelineDeliveryNativeOpenerForTest) (*PipelineDeliveryNativeFixtureForTest, *PipelineCoordinator, context.Context) {
 	t.Helper()
 	bundle := loadWorkflowTempBundle(t, map[string]string{
-		"schema.yaml":   "name: native-mutation-log\nstages:\n  queued: {}\n  done: {}\n",
+		"manifest.yaml": "version: 1.0.0\nplatform_version: \">=0.7.0 <0.8.0\"\n",
+		"schema.yaml":   "stages:\n  queued: {}\n  done: {}\n",
 		"entities.yaml": "test_entity:\n  status: text\n  business_status: text\n  verticals: map[text]Vertical\n  tags: [text]\n",
 		"types.yaml":    "types:\n  Job:\n    id: text\n    title: text\n  Vertical:\n    status: text\n    active_jobs: [Job]\n",
 		"events.yaml":   "flow.transitioned:\n",

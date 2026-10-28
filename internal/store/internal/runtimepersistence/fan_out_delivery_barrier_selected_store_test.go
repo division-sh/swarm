@@ -32,8 +32,10 @@ import (
 	runtimepipeline "github.com/division-sh/swarm/internal/runtime/pipeline"
 	"github.com/division-sh/swarm/internal/runtime/runfork"
 	runtimerunlifecycle "github.com/division-sh/swarm/internal/runtime/runlifecycle"
+	"github.com/division-sh/swarm/internal/runtime/semanticview"
 	"github.com/division-sh/swarm/internal/store/internal/backend/mutationprotocol"
 	runforkrevision "github.com/division-sh/swarm/internal/store/internal/backend/runforkrevision"
+	"github.com/division-sh/swarm/internal/testutil/sourceartifactfixture"
 	"github.com/division-sh/swarm/internal/testutil/stagecatalogfixture"
 	"github.com/google/uuid"
 )
@@ -709,14 +711,11 @@ func TestFanOutDeliveryBarrierOutcomeFailureTerminalizesOnBothStores(t *testing.
 				name = "no_route"
 			}
 			t.Run(backend+"/"+name, func(t *testing.T) {
-				ctx := testAuthorActivityContext()
-				owner, _, db, postgres := newFanOutOwnerPairForTest(t, backend)
-				ctx = originalStoreFixtureContext(t, ctx, owner)
+				owner, _, db, _ := newFanOutOwnerPairForTest(t, backend)
 				selected := owner.(storeTestDurableEventBusStore)
 				base := time.Now().UTC().Add(-time.Minute).Truncate(time.Microsecond)
-				fixture := seedFanOutOwnerFixture(t, ctx, db, owner, postgres, 0, base)
-				entityID := uuid.NewString()
-				handle := seedFanOutDeliveryBarrierRecord(t, ctx, db, fixture, entityID, attemptgeneration.Generation{}, base)
+				ctx, fixture, handle := seedDeclaredForkFanOutFixtureWithBarrier(t, backend, authorActivityReceiptFixture{db: db, store: owner.(authorActivityReceiptStore)}, 0, base, true)
+				entityID := fixture.runID
 				advanceFanOutBarriersForTest(t, ctx, selected, fixture.runID, base.Add(time.Second))
 				activationID := mustFanOutBarrierScheduleActivationID(t, ctx, db, fixture)
 				activation, found, err := owner.(runtimegenericschedule.Store).LoadGenericScheduleActivation(ctx, activationID)
@@ -729,10 +728,23 @@ func TestFanOutDeliveryBarrierOutcomeFailureTerminalizesOnBothStores(t *testing.
 				}
 				event := eventtest.RuntimeControlWithRoutingSource(runtimegenericschedule.OccurrenceEventID(activationID, activation.CurrentDueAt), events.EventType(activation.Command.EventType), runtimegenericschedule.OccurrenceProducerID(), handle.TaskID(), payload, 0, fixture.runID, "",
 					events.EventEnvelope{EntityID: entityID}, activation.Command.RoutingSource, activation.CurrentDueAt)
+				repo := runtimepipeline.WorkflowRepoRoot()
+				bundle, err := runtimecontracts.LoadWorkflowContractBundleFromRootedSource(repo, sourceartifactfixture.CapturedRoot(t, fixture.artifact), runtimecontracts.DefaultPlatformSpecFile(repo), runtimecontracts.WorkflowContractLoadOptions{})
+				if err != nil {
+					t.Fatal(err)
+				}
+				admission, found, err := runtimepipeline.ResolveWorkflowJoinOccurrencePayloadAdmission(semanticview.Wrap(bundle), event, fixture.bundleHash)
+				if err != nil || !found {
+					t.Fatalf("admit exact barrier outcome payload: found=%t err=%v", found, err)
+				}
+				event, err = events.ApplyPayloadAdmission(event, admission)
+				if err != nil {
+					t.Fatal(err)
+				}
 				var routes []events.DeliveryRoute
 				if !noRoute {
 					ref, _ := handle.JoinRef()
-					routes = []events.DeliveryRoute{{Recipient: events.MustNodeDeliveryRecipient(ref.Node()), Target: events.MustExistingEntityTarget(events.RouteIdentity{FlowID: ref.FlowPath(), FlowInstance: "root", EntityID: entityID})}}
+					routes = []events.DeliveryRoute{{Recipient: events.MustNodeDeliveryRecipient(ref.Node()), Target: events.MustExistingEntityTarget(events.RouteIdentity{FlowID: ref.FlowPath(), FlowInstance: fixture.runID, EntityID: entityID})}}
 				}
 				if err := commitSemanticEventFixtureWithRoutes(ctx, selected, event, routes); err != nil {
 					t.Fatal(err)
@@ -813,6 +825,19 @@ func runForkBarrierFixedRevisionMatrix(t *testing.T, generationMode string) {
 							occurrenceID := runtimegenericschedule.OccurrenceEventID(activationID, activation.CurrentDueAt)
 							occurrence := eventtest.RuntimeControlWithRoutingSource(occurrenceID, events.EventType(activation.Command.EventType), runtimegenericschedule.OccurrenceProducerID(), activation.Command.TaskID, payload, 0, fixture.runID, "",
 								events.EventEnvelope{EntityID: fixture.runID}, activation.Command.RoutingSource, activation.CurrentDueAt)
+							repo := runtimepipeline.WorkflowRepoRoot()
+							bundle, err := runtimecontracts.LoadWorkflowContractBundleFromRootedSource(repo, sourceartifactfixture.CapturedRoot(t, fixture.artifact), runtimecontracts.DefaultPlatformSpecFile(repo), runtimecontracts.WorkflowContractLoadOptions{})
+							if err != nil {
+								t.Fatal(err)
+							}
+							admission, found, err := runtimepipeline.ResolveWorkflowJoinOccurrencePayloadAdmission(semanticview.Wrap(bundle), occurrence, fixture.bundleHash)
+							if err != nil || !found {
+								t.Fatalf("admit retained join occurrence: found=%v err=%v", found, err)
+							}
+							occurrence, err = events.ApplyPayloadAdmission(occurrence, admission)
+							if err != nil {
+								t.Fatal(err)
+							}
 							ref, _ := handle.JoinRef()
 							route := events.DeliveryRoute{Recipient: events.MustNodeDeliveryRecipient(ref.Node()), Target: events.MustExistingEntityTarget(events.RouteIdentity{FlowID: ".", FlowInstance: fixture.runID, EntityID: fixture.runID})}
 							if err := commitSemanticEventFixtureWithRoutes(ctx, selected, occurrence, []events.DeliveryRoute{route}); err != nil {
@@ -860,7 +885,11 @@ func runForkBarrierFixedRevisionMatrix(t *testing.T, generationMode string) {
 						t.Fatal(err)
 					}
 					captureFanOutBarrierForkRevision(t, ctx, db, fixture.runID, postgres)
-					request := runfork.RunForkMaterializeRequest{SourceRunID: fixture.runID, At: forkPointID, OriginalLoopCarriage: originalCarriageForRun(t, owner, fixture.runID)}
+					rooted, err := owner.(rootedRunStore).LoadRunRootedSource(ctx, fixture.runID)
+					if err != nil {
+						t.Fatal(err)
+					}
+					request := runfork.RunForkMaterializeRequest{SourceRunID: fixture.runID, At: forkPointID, RootAdmission: rooted.Admission(), OriginalLoopCarriage: originalCarriageForRun(t, owner, fixture.runID)}
 					if tc.status == fanoutbarrier.StatusClosedPending || tc.status == fanoutbarrier.StatusFired || tc.status == fanoutbarrier.StatusOutcomeDeadLettered {
 						var ownedScheduleCount int
 						if err := db.QueryRowContext(ctx, `SELECT COUNT(*) FROM timers WHERE run_id=$1 AND entity_id=$1 AND schedule_key=$2`, fixture.runID, handle.TaskID()).Scan(&ownedScheduleCount); err != nil || ownedScheduleCount != 1 {

@@ -181,9 +181,9 @@ func TestRunServeRuntimeDevScratchNextInvocationHasNoPredecessor(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	changed := strings.Replace(string(body), `name: derived-novel-flow`, `name: derived-novel-flow-v2`, 1)
+	changed := strings.Replace(string(body), `# fixture: derived-novel-flow`, `# fixture: derived-novel-flow-v2`, 1)
 	if changed == string(body) {
-		t.Fatalf("fixture source name was not replaceable:\n%s", body)
+		t.Fatalf("fixture source revision was not replaceable:\n%s", body)
 	}
 	if err := os.WriteFile(schemaPath, []byte(changed), 0o644); err != nil {
 		t.Fatal(err)
@@ -230,22 +230,21 @@ func promoteDevScratchFixtureToStanding(t *testing.T, sourceRoot string) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	updatedSchema := strings.Replace(string(schema), "name: fulfillment", `name: fulfillment
-ingress:
-  alias: fulfillment
-  providers:
-    - provider: partner
-      admission:
-        kind: raw
-        acknowledge: unsigned_webhook
-        payload: json
-        event: fulfillment.requested
-        authentication: {kind: none}
-        delivery_id: {source: body_sha256}`, 1)
-	if updatedSchema == string(schema) {
-		t.Fatalf("dev scratch fixture flow declaration was not replaceable:\n%s", schema)
-	}
+	updatedSchema := string(schema) + "\nschedules:\n  retained: {every: 24h, emit: fixture.tick}\n"
 	if err := os.WriteFile(schemaPath, []byte(updatedSchema), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	eventsPath := filepath.Join(sourceRoot, "fulfillment", "events.yaml")
+	if err := os.WriteFile(eventsPath, []byte("fixture.tick:\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	nodesPath := filepath.Join(sourceRoot, "fulfillment", "nodes.yaml")
+	nodes, err := os.ReadFile(nodesPath)
+	if err != nil {
+		t.Fatal(err)
+	}
+	updatedNodes := strings.Replace(string(nodes), "subscribes_to: [fulfillment.requested]", "subscribes_to: [fulfillment.requested, fixture.tick]", 1) + "    fixture.tick: {}\n"
+	if err := os.WriteFile(nodesPath, []byte(updatedNodes), 0o644); err != nil {
 		t.Fatal(err)
 	}
 	if err := os.WriteFile(filepath.Join(sourceRoot, "fulfillment", "entities.yaml"), []byte("fulfillment: {}\n"), 0o644); err != nil {

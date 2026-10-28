@@ -3,6 +3,7 @@ package storetest
 import (
 	"context"
 	"errors"
+	"github.com/division-sh/swarm/internal/runtime/correlation"
 
 	"testing"
 
@@ -37,7 +38,9 @@ func TestRunFixtureRefusalsDoNotWrite(t *testing.T) {
 		t.Run(backend.name, func(t *testing.T) {
 			selected := backend.open(t)
 			ctx := context.Background()
-			sourceartifactfixture.Require(t, ctx, selected)
+			rooted, _ := sourceartifactfixture.Rooted(t, "fixture", sourceartifactfixture.Artifact())
+			sourceartifactfixture.RequireArtifact(t, ctx, selected, rooted.Artifact())
+			ctx = correlation.WithRootAdmission(correlation.WithSourceArtifactFact(ctx, sourceartifactfixture.FactFor(rooted.Artifact())), rooted.Admission())
 			collector := CollectTransactions(t, selected, TransactionProbeOptions{})
 			for _, refusal := range []struct {
 				name    string

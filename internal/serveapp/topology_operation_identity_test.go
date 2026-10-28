@@ -8,17 +8,13 @@ import (
 	runtimeagenttopology "github.com/division-sh/swarm/internal/runtime/agenttopology"
 	runtimedestructivereset "github.com/division-sh/swarm/internal/runtime/destructivereset"
 	runtimestartupownership "github.com/division-sh/swarm/internal/runtime/startupownership"
+	"github.com/division-sh/swarm/internal/testutil/sourceartifactfixture"
 	"github.com/google/uuid"
-)
-
-const (
-	topologyOperationBundleA = "bundle-v2:sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
-	topologyOperationBundleB = "bundle-v2:sha256:bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb"
 )
 
 func TestAdministrativeTopologyMutationIDsSurviveRepeatedSourceCycles(t *testing.T) {
 	capability, session := newTopologyOperationTestCapability(t)
-	initial := topologyOperationPlan(t, topologyOperationBundleA)
+	initial := topologyOperationPlan(t)
 	if err := installServeSourceSet(context.Background(), capability, initial); err != nil {
 		t.Fatalf("install initial source set: %v", err)
 	}
@@ -54,9 +50,14 @@ func newTopologyOperationTestCapability(t *testing.T) (runtimestartupownership.P
 	return capability, session
 }
 
-func topologyOperationPlan(t *testing.T, bundleHash string) runtimeagenttopology.SourceSetPlan {
+func topologyOperationPlan(t *testing.T) runtimeagenttopology.SourceSetPlan {
 	t.Helper()
-	plan, err := runtimeagenttopology.NewSourceSetPlan([]runtimeagenttopology.SourceCoordinate{{BundleHash: bundleHash}}, nil)
+	rooted, _ := sourceartifactfixture.Rooted(t, "topology", sourceartifactfixture.Artifact())
+	coordinate, err := runtimeagenttopology.NewSourceCoordinate(rooted.Admission())
+	if err != nil {
+		t.Fatal(err)
+	}
+	plan, err := runtimeagenttopology.NewSourceSetPlan([]runtimeagenttopology.SourceCoordinate{coordinate}, nil)
 	if err != nil {
 		t.Fatalf("construct source set plan: %v", err)
 	}

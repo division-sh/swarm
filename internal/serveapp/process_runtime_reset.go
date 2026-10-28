@@ -27,7 +27,7 @@ func loadServeRecoveredResetSources(ctx context.Context, repo string, artifacts 
 	}
 	var loaded []serveRuntimeBundle
 	for _, source := range plan.Sources {
-		bundle, err := loadServeRuntimeBundleFromArtifact(ctx, repo, artifacts, source.BundleHash, packBases, materialize)
+		bundle, err := loadServeRuntimeBundleFromArtifact(ctx, repo, artifacts, source.RootReference(), packBases, materialize)
 		if err != nil {
 			for _, prior := range loaded {
 				err = errors.Join(err, prior.cleanup())
@@ -401,10 +401,16 @@ func (s *processLifecycleSupervisor) reconstructResetContexts(ctx context.Contex
 		environment := s.selectedRecoveryEnvironment
 		// Reset already holds operationMu and rebuilt the identical source set.
 		// Only its now-admitted ordinary occurrences can serve a handoff.
-		environment.AcquireLiveRuntime = func(ctx context.Context, bundleHash string) (*runtime.RuntimeContextUse, error) {
-			use, lookup, err := s.runtimeContexts.AcquireBundleHash(ctx, bundleHash)
+		environment.AcquireLiveRuntime = func(ctx context.Context, reference sourceartifact.RootAdmissionReference) (*runtime.RuntimeContextUse, error) {
+			if err := reference.Validate(); err != nil {
+				return nil, err
+			}
+			use, lookup, err := s.runtimeContexts.AcquireBundleHash(ctx, reference.BundleHash)
 			if err == nil && !lookup.Loaded() {
 				err = fmt.Errorf("reset handoff target is not loaded: %s", lookup.Cause)
+			}
+			if err == nil && (use == nil || use.Context.RootAdmission.Reference() != reference) {
+				err = errors.New("reset handoff target has a different admitted root")
 			}
 			return use, err
 		}

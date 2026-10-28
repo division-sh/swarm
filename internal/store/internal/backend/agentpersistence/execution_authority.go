@@ -212,7 +212,15 @@ func inspectPreparedRunTakeoverTx(ctx context.Context, tx *sql.Tx, evidence star
 	if err != nil {
 		return 0, err
 	}
-	if !present || plan.Revision != evidence.SourceSetRevision || !generationauthority.SourceSetContains(plan, agenttopology.SourceCoordinate{BundleHash: evidence.BundleHash}) {
+	root, rootPresent, err := correlation.RootAdmissionFromContext(ctx)
+	if err != nil || !rootPresent || root.BundleHash() != evidence.BundleHash {
+		return 0, errors.Join(err, errors.New("startup lifecycle takeover requires its exact admitted root"))
+	}
+	coordinate, err := agenttopology.NewSourceCoordinate(root)
+	if err != nil {
+		return 0, err
+	}
+	if !present || plan.Revision != evidence.SourceSetRevision || !generationauthority.SourceSetContains(plan, coordinate) {
 		return 0, errors.New("startup lifecycle takeover source set is not current")
 	}
 	hash, binding, err := loadRunExecutionBindingModeTx(ctx, tx, runID, sqlite, true)

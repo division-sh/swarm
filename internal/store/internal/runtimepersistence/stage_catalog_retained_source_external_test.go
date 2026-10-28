@@ -9,6 +9,7 @@ import (
 	"time"
 
 	"github.com/division-sh/swarm/internal/runtime/contracts"
+	"github.com/division-sh/swarm/internal/runtime/correlation"
 	"github.com/division-sh/swarm/internal/runtime/runfork"
 	"github.com/division-sh/swarm/internal/runtime/runforkexecution"
 	"github.com/division-sh/swarm/internal/runtime/semanticview"
@@ -17,6 +18,7 @@ import (
 	"github.com/division-sh/swarm/internal/sourceartifact"
 	"github.com/division-sh/swarm/internal/store/storetest"
 	"github.com/division-sh/swarm/internal/store/testutil/agentfixture"
+	"github.com/division-sh/swarm/internal/testutil/sourceartifactfixture"
 	"github.com/google/uuid"
 )
 
@@ -39,8 +41,11 @@ func TestStageCatalogRetainedStoreReloadAndSelectedForkSourceBothStores(t *testi
 				selected, reopen = owner, func() retainedStageSourceStore { return open() }
 			}
 			root := t.TempDir()
+			if err := os.WriteFile(filepath.Join(root, "manifest.yaml"), []byte("version: 1.0.0\nplatform_version: '*'\n"), 0600); err != nil {
+				t.Fatal(err)
+			}
 			path := filepath.Join(root, "schema.yaml")
-			body := []byte("name: ordered-retained\nstages:\n  registered: {}\n  cooling: {}\n  Done: {final: true}\n")
+			body := []byte("# fixture: ordered-retained\nstages:\n  registered: {}\n  cooling: {}\n  Done: {final: true}\n")
 			if err := os.WriteFile(path, body, 0600); err != nil {
 				t.Fatal(err)
 			}
@@ -49,7 +54,11 @@ func TestStageCatalogRetainedStoreReloadAndSelectedForkSourceBothStores(t *testi
 			if err != nil {
 				t.Fatal(err)
 			}
-			ctx := testAuthorActivityContext()
+			captured, err := bundle.RootedSource()
+			if err != nil {
+				t.Fatal(err)
+			}
+			ctx := correlation.WithRootAdmission(correlation.WithSourceArtifactFact(testAuthorActivityContext(), sourceartifactfixture.FactFor(bundle.SourceArtifact)), captured.Admission())
 			process, err := agentfixture.ProcessCapability(t, ctx, selected.(agentfixture.Store))
 			if err != nil {
 				t.Fatal(err)
@@ -59,10 +68,10 @@ func TestStageCatalogRetainedStoreReloadAndSelectedForkSourceBothStores(t *testi
 				t.Fatal(err)
 			}
 			runID := uuid.NewString()
-			storetest.RequireRun(t, ctx, selected, storetest.RunFixture{Origin: storetest.ScenarioSetupOrigin(), RunID: runID, Artifact: bundle.SourceArtifact, StartedAt: time.Now().UTC()})
+			storetest.RequireRun(t, ctx, selected, storetest.RunFixture{Origin: storetest.ScenarioSetupOrigin(), RunID: runID, Artifact: bundle.SourceArtifact, RootAdmission: captured.Admission(), StartedAt: time.Now().UTC()})
 			// A sorted live directory remains graph-valid but changes entry. Neither
 			// selected-store reopen nor fork selection may reconstruct from it.
-			if err := os.WriteFile(path, []byte("name: ordered-retained\nstages: {cooling: {}, Done: {final: true}, registered: {}}\n"), 0600); err != nil {
+			if err := os.WriteFile(path, []byte("# fixture: ordered-retained\nstages: {cooling: {}, Done: {final: true}, registered: {}}\n"), 0600); err != nil {
 				t.Fatal(err)
 			}
 			if err := process.Release(ctx); err != nil {
@@ -85,7 +94,14 @@ func TestStageCatalogRetainedStoreReloadAndSelectedForkSourceBothStores(t *testi
 			if err != nil {
 				t.Fatal(err)
 			}
-			loaded, err := contracts.LoadWorkflowContractBundleFromArtifact(repo, logical, contracts.DefaultPlatformSpecFile(repo), contracts.WorkflowContractLoadOptions{})
+			rooted, err := reloaded.LoadRunRootedSource(ctx, runID)
+			if err != nil {
+				t.Fatal(err)
+			}
+			if rooted.Artifact().BundleHash() != logical.BundleHash() {
+				t.Fatal("retained run root changed exact member identity")
+			}
+			loaded, err := contracts.LoadWorkflowContractBundleFromRootedSource(repo, rooted, contracts.DefaultPlatformSpecFile(repo), contracts.WorkflowContractLoadOptions{})
 			if err != nil {
 				t.Fatal(err)
 			}
@@ -102,7 +118,7 @@ func TestStageCatalogRetainedStoreReloadAndSelectedForkSourceBothStores(t *testi
 			}
 			assertEntry(semanticview.Wrap(loaded))
 			loader := runforkexecution.SourceArtifactSelectedContractSourceLoader{RepoRoot: repo, Store: reloaded}
-			forkSource, err := loader.LoadRunForkSelectedContractSourceForRequest(ctx, runforkexecution.SelectedContractSourceLoadRequest{SourceRunID: runID, Selection: runfork.RunForkContractSelection{Mode: runfork.RunForkContractSelectionModeSelectedContracts}})
+			forkSource, err := loader.LoadRunForkSelectedContractSourceForRequest(ctx, runforkexecution.SelectedContractSourceLoadRequest{Responsibility: runforkexecution.OriginalRunSource(runID), Selection: runfork.RunForkContractSelection{Mode: runfork.RunForkContractSelectionModeSelectedContracts}})
 			if err != nil {
 				t.Fatal(err)
 			}

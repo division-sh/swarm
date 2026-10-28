@@ -95,11 +95,22 @@ func deadEventDeclarations(source semanticview.Source) []deadEventDeclaration {
 		return nil
 	}
 	out := make([]deadEventDeclaration, 0)
+	bundle, ok := semanticview.Bundle(source)
+	if !ok || bundle == nil {
+		return nil
+	}
 	for _, scope := range semanticview.FlowScopes(source) {
 		flowID := strings.TrimSpace(scope.ID)
+		view, found := bundle.FlowViewByID(flowID)
+		if !found || view == nil {
+			continue
+		}
 		for eventName, entry := range scope.Events {
 			canonical := eventidentity.Normalize(source.ResolveFlowEventReference(flowID, eventName))
 			if canonical == "" {
+				continue
+			}
+			if _, declared := view.Events[eventName]; !declared {
 				continue
 			}
 			out = append(out, deadEventDeclaration{Canonical: canonical, FlowID: flowID, File: deadEventSchemaFileLabel("", flowID), Entry: entry})

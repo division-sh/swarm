@@ -264,7 +264,7 @@ func TestOperatorAgentReadSurfaceLoadAgentUsageSplitsExactAndEstimated(t *testin
 	t.Cleanup(cleanup)
 	pg := newTestPostgresStore(t, db)
 
-	ctx := testAuthorActivityContext()
+	ctx := requireDefaultSourceArtifactForTest(t, testAuthorActivityContext(), pg)
 	if err := agentfixture.UpsertStatic(t, ctx, pg, runtimemanager.PersistedAgent{
 		Config:    testOperatorAgentConfig("agent-1", "researcher"),
 		Status:    "active",
@@ -478,7 +478,7 @@ func TestOperatorAgentReadSurfaceLoadAgentDeliveryDiagnosticsDoesNotRequireConve
 	t.Cleanup(cleanup)
 	pg := newTestPostgresStore(t, db)
 
-	ctx := testAuthorActivityContext()
+	ctx := requireDefaultSourceArtifactForTest(t, testAuthorActivityContext(), pg)
 	if err := agentfixture.UpsertStatic(t, ctx, pg, runtimemanager.PersistedAgent{
 		Config:    testOperatorAgentConfig("agent-1", "researcher"),
 		Status:    "active",

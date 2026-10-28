@@ -34,6 +34,8 @@ func runPublicRawWebhookProof(t *testing.T, withdrawAfterAcquisition bool) {
 	for _, backend := range []string{"sqlite", "postgres"} {
 		t.Run(backend, func(t *testing.T) {
 			root := canonicalrouting.CopyKeyedRootRawIngress(t)
+			writeWorkflowValidationFixtureFile(t, filepath.Join(root, "partner/manifest.yaml"), "version: 1.0.0\nplatform_version: '*'\ncapabilities:\n  can:\n    emit_events: [raw]\n    verify_secret: webhook_signing_secret\n  cannot: [execute code]\n")
+			writeWorkflowValidationFixtureFile(t, filepath.Join(root, "partner/trigger.yaml"), "transport: webhook\npayload_object_required: true\nsecret: {required: true}\nsignature: {type: hmac_sha256, header: X-Signature, prefix: 'sha256=', signed_payload: raw_body}\ndelivery_id: {json_path: $.delivery_id, required: true}\nevent_type: {literal: update, required: true}\nevent_name: {literal: raw}\n")
 			credentialPath := filepath.Join(t.TempDir(), "credentials.json")
 			t.Setenv("SWARM_CREDENTIALS_FILE", credentialPath)
 			file, err := credentials.NewFileStore(credentialPath)
@@ -41,7 +43,7 @@ func runPublicRawWebhookProof(t *testing.T, withdrawAfterAcquisition bool) {
 				t.Fatal(err)
 			}
 			const secret = "public-raw-loopback-no-spend"
-			if err := file.Set(t.Context(), "webhook_signing.partner", secret); err != nil {
+			if err := file.Set(t.Context(), "partner.webhook_signing_secret", secret); err != nil {
 				t.Fatal(err)
 			}
 			publicListener := reserveChannelOnboardingListener(t)

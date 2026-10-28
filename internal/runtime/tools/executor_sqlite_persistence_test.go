@@ -10,6 +10,7 @@ import (
 	"github.com/division-sh/swarm/internal/config"
 	"github.com/division-sh/swarm/internal/events"
 	"github.com/division-sh/swarm/internal/events/eventtest"
+	runtimeauthoractivity "github.com/division-sh/swarm/internal/runtime/authoractivity"
 	runtimebus "github.com/division-sh/swarm/internal/runtime/bus"
 	runtimecontracts "github.com/division-sh/swarm/internal/runtime/contracts"
 	models "github.com/division-sh/swarm/internal/runtime/core/actors"
@@ -21,14 +22,17 @@ import (
 	runtimereplycontext "github.com/division-sh/swarm/internal/runtime/replycontext"
 	"github.com/division-sh/swarm/internal/runtime/semanticview"
 	runtimetools "github.com/division-sh/swarm/internal/runtime/tools"
+	"github.com/division-sh/swarm/internal/sourceartifact"
 	"github.com/division-sh/swarm/internal/store"
 	"github.com/division-sh/swarm/internal/store/storetest"
+	"github.com/division-sh/swarm/internal/testutil/sourceartifactfixture"
 	"github.com/division-sh/swarm/internal/yamlsource"
 	"github.com/google/uuid"
 )
 
 type humanTaskToolStore interface {
 	storetest.RunFixtureStore
+	LoadRunRootedSource(context.Context, string) (sourceartifact.RootedSource, error)
 	decisioncard.Store
 	decisioncard.HumanTaskStore
 	decisioncard.HumanTaskAcknowledgedCreationStore
@@ -332,7 +336,7 @@ func TestAskHumanCreatesTypedCardAndContinuationForImportedAgentOnBothStores(t *
 				t.Fatalf("requester declaration name: %v", err)
 			}
 			requester.Identity = agentidentitytest.Declared(t, plan.AgentID, plan.OwnerURI, flowPath, "provider", flowPath)
-			ctx, replyContextID, sourceEventID := seedReplyToolContext(t, tc.store)
+			ctx, replyContextID, sourceEventID := seedReplyToolContext(t, tc.store, source)
 			ctx = runtimeeffects.WithLogicalOperationIdentity(ctx, "provider-turn")
 			ctx = runtimeeffects.WithLogicalOperationIdentitySegment(ctx, "tool_call:1:0:mock-1:ask_human")
 			logicalCall, ok := runtimeeffects.LogicalOperationIdentityFromContext(ctx)
@@ -409,7 +413,7 @@ func TestAskHumanCreatesTypedCardAndContinuationForImportedAgentOnBothStores(t *
 				t.Fatal("changed content under the same operation identity was accepted")
 			}
 
-			forkCtx, _, _ := seedReplyToolContext(t, tc.store)
+			forkCtx, _, _ := seedReplyToolContext(t, tc.store, source)
 			forkCtx = runtimeeffects.WithLogicalOperationIdentity(forkCtx, logicalCall)
 			forkCtx, forkRequester, _ := humanTaskConstructedRequester(t, forkCtx, tc.store, source, requester)
 			forkCtx = runtimetools.WithActor(forkCtx, forkRequester)
@@ -424,16 +428,27 @@ func TestAskHumanCreatesTypedCardAndContinuationForImportedAgentOnBothStores(t *
 	}
 }
 
-func seedReplyToolContext(t *testing.T, persistence humanTaskToolStore) (context.Context, string, string) {
+func seedReplyToolContext(t *testing.T, persistence humanTaskToolStore, source semanticview.Source) (context.Context, string, string) {
 	t.Helper()
-	fixtureCtx := toolFixtureProcessContext(t, unmanagedToolTestContext(), persistence)
+	bundle, present := semanticview.Bundle(source)
+	if !present || bundle == nil {
+		t.Fatal("reply fixture requires its compiled source")
+	}
+	rooted, err := bundle.RootedSource()
+	if err != nil {
+		t.Fatal(err)
+	}
+	fact := sourceartifactfixture.FactFor(rooted.Artifact())
+	setup := runtimecorrelation.WithRootAdmission(runtimecorrelation.WithSourceArtifactFact(unmanagedToolTestContext(), fact), rooted.Admission())
+	setup = runtimeauthoractivity.WithScope(setup, runtimeauthoractivity.BundleScope(authorActivityTestRuntimeInstanceID, fact.BundleHash()))
+	setup = toolFixtureProcessContext(t, setup, persistence)
 	runID := uuid.NewString()
 	requestEventID := uuid.NewString()
 	// Force precision that Postgres cannot retain so idempotent replay proves
 	// admission canonicalizes before snapshot and selected-store persistence.
 	now := time.Now().UTC().Truncate(time.Microsecond).Add(789 * time.Nanosecond)
-	storetest.RequireRun(t, fixtureCtx, persistence, storetest.RunFixture{Origin: storetest.ScenarioSetupOrigin(), RunID: runID, StartedAt: now, BundleHash: authorActivityTestBundleHash})
-	storetest.CommitSemanticEvent(t, fixtureCtx, persistence, eventtest.PersistedChildForProducer(
+	storetest.RequireRun(t, setup, persistence, storetest.RunFixture{Origin: storetest.ScenarioSetupOrigin(), RunID: runID, StartedAt: now, Artifact: rooted.Artifact(), RootAdmission: rooted.Admission()})
+	storetest.CommitSemanticEvent(t, setup, persistence, eventtest.PersistedChildForProducer(
 		requestEventID, events.EventType("provider.requested"),
 		eventtest.Producer(events.EventProducerNode, "requester"), "", []byte(`{}`), 0,
 		runID, eventtest.UUID("provider-request-parent:"+requestEventID), events.EventEnvelope{Scope: events.EventScopeGlobal}, now,
@@ -456,10 +471,10 @@ func seedReplyToolContext(t *testing.T, persistence humanTaskToolStore) (context
 		UpdatedAt:            now,
 	}
 	record.ID = runtimereplycontext.DeterministicID(record.RequestEventID, record.RequesterFlowID, record.RequestOutputPin, record.ReplyInputPin, record.ProviderFlowID, record.Origin)
-	if err := persistence.CreateReplyContext(fixtureCtx, record); err != nil {
+	if err := persistence.CreateReplyContext(setup, record); err != nil {
 		t.Fatalf("seed reply tool context: %v", err)
 	}
-	source, err := events.NewStaticFlowRoutingSource(events.RouteIdentity{FlowID: "provider", FlowInstance: "provider", EntityID: record.Origin.EntityID})
+	routingSource, err := events.NewStaticFlowRoutingSource(events.RouteIdentity{FlowID: "provider", FlowInstance: "provider", EntityID: record.Origin.EntityID})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -473,9 +488,9 @@ func seedReplyToolContext(t *testing.T, persistence humanTaskToolStore) (context
 		runID,
 		"",
 		events.EnvelopeForSourceRoute(events.EventEnvelope{}, events.RouteIdentity{FlowID: "provider", FlowInstance: "provider", EntityID: record.Origin.EntityID}),
-		source, now,
+		routingSource, now,
 	)
-	ctx := runtimebus.WithInboundEvent(runtimecorrelation.WithRunID(fixtureCtx, runID), inbound)
+	ctx := runtimebus.WithInboundEvent(runtimecorrelation.WithRunID(setup, runID), inbound)
 	ctx = events.WithDeliveryContext(ctx, events.DeliveryContext{Reply: &events.ReplyContextRef{ID: record.ID}})
 	return ctx, record.ID, requestEventID
 }

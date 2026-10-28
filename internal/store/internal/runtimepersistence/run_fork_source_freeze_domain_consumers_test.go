@@ -23,6 +23,7 @@ import (
 	"github.com/division-sh/swarm/internal/runtime/pipeline"
 	runtimerunlifecycle "github.com/division-sh/swarm/internal/runtime/runlifecycle"
 	"github.com/division-sh/swarm/internal/runtime/semanticview"
+	"github.com/division-sh/swarm/internal/sourceartifact"
 	"github.com/division-sh/swarm/internal/testutil/sourceartifactfixture"
 	"github.com/google/uuid"
 )
@@ -45,27 +46,38 @@ func TestForkedSourceEntityMutationLogBudgetRouteAndDeadLetterConsumersRefuse(t 
 				t.Fatal("freeze domain source artifact is required")
 			}
 			fact := sourceartifactfixture.FactFor(bundle.SourceArtifact)
-			ctx := runtimecorrelation.WithRunID(testAuthorActivityContextForBundle(fact.BundleHash()), fixture.sourceRun)
+			rooted, err := bundle.RootedSource()
+			if err != nil {
+				t.Fatal(err)
+			}
+			priorCtx := runtimecorrelation.WithRunID(storeTestWorkContext(t, testAuthorActivityContextForBundle(fixture.sourceBundleHash)), fixture.sourceRun)
 			var surface forkedDomainConsumerSurface
 			if fixture.postgres != nil {
 				surface = fixture.postgres
 			} else {
 				surface = fixture.sqlite
 			}
-			ctx = originalStoreFixtureContext(t, ctx, surface)
+			priorCtx = originalStoreFixtureContext(t, priorCtx, surface)
 			owner, ok := surface.(interface {
 				runtimerunlifecycle.OperationOwner
 				sourceartifactfixture.Writer
+				LoadRunRootedSource(context.Context, string) (sourceartifact.RootedSource, error)
 			})
 			if !ok {
 				t.Fatal("freeze domain source owner is required")
 			}
-			sourceartifactfixture.RequireArtifact(t, ctx, owner, bundle.SourceArtifact)
-			if _, err := owner.ReviseRunSource(ctx, runtimerunlifecycle.SourceRevisionRequest{RunID: fixture.sourceRun, Source: fact}); err != nil {
+			priorRoot, err := owner.LoadRunRootedSource(priorCtx, fixture.sourceRun)
+			if err != nil {
+				t.Fatal(err)
+			}
+			priorCtx = runtimecorrelation.WithRootAdmission(priorCtx, priorRoot.Admission())
+			sourceartifactfixture.RequireArtifact(t, priorCtx, owner, bundle.SourceArtifact)
+			if _, err := owner.ReviseRunSource(priorCtx, runtimerunlifecycle.SourceRevisionRequest{RunID: fixture.sourceRun, Source: fact, RootAdmission: rooted.Admission()}); err != nil {
 				t.Fatalf("bind freeze domain source: %v", err)
 			}
 			fixture.sourceBundleHash = fact.BundleHash()
-			ctx = runtimecorrelation.WithSourceArtifactFact(ctx, fact)
+			ctx := runtimecorrelation.WithRootAdmission(runtimecorrelation.WithRunID(storeTestWorkContext(t, testAuthorActivityContextForBundle(fact.BundleHash())), fixture.sourceRun), rooted.Admission())
+			ctx = originalStoreFixtureContext(t, ctx, surface)
 
 			entityID := uuid.NewString()
 			entity := pipeline.ScenarioSetupEntityRequest{

@@ -152,7 +152,7 @@ func TestStageGateVerificationRejectsProgrammaticNonCanonicalMapIdentities(t *te
 }
 
 func TestStageGateVerificationRejectsOptionalDecisionFieldUsedByEmit(t *testing.T) {
-	plan := runtimecontracts.WorkflowGatePlan{Stage: "awaiting_review", Decision: "launch_review", Outcomes: map[string]runtimecontracts.WorkflowGateOutcomePlan{
+	plan := runtimecontracts.WorkflowGatePlan{FlowID: ".", Stage: "awaiting_review", Decision: "launch_review", Outcomes: map[string]runtimecontracts.WorkflowGateOutcomePlan{
 		"approve": {
 			AdvancesTo: "complete",
 			Input:      map[string]runtimecontracts.WorkflowGateInputField{"note": {Type: "text", Required: false}},
@@ -171,7 +171,7 @@ func TestStageGateVerificationRejectsOptionalDecisionFieldUsedByEmit(t *testing.
 }
 
 func TestStageGateVerificationValidatesAssembledLiteralPayloadRelations(t *testing.T) {
-	plan := runtimecontracts.WorkflowGatePlan{Stage: "awaiting_review", Decision: "launch_review", Outcomes: map[string]runtimecontracts.WorkflowGateOutcomePlan{
+	plan := runtimecontracts.WorkflowGatePlan{FlowID: ".", Stage: "awaiting_review", Decision: "launch_review", Outcomes: map[string]runtimecontracts.WorkflowGateOutcomePlan{
 		"approve": {
 			AdvancesTo: "complete",
 			Emit: runtimecontracts.EmitSpec{Event: "review.completed", Fields: map[string]runtimecontracts.ExpressionValue{
@@ -257,7 +257,7 @@ func stageGateLiteralEmitReport(field runtimecontracts.EventFieldSpec, rootTypes
 		Semantics: runtimecontracts.WorkflowSemanticView{
 			Name: "launch", Stages: []runtimecontracts.WorkflowStageContract{{ID: "awaiting_review"}, {ID: "complete"}},
 			Gates: []runtimecontracts.WorkflowGatePlan{{
-				Stage: "awaiting_review", Decision: "launch_review",
+				FlowID: ".", Stage: "awaiting_review", Decision: "launch_review",
 				Outcomes: map[string]runtimecontracts.WorkflowGateOutcomePlan{
 					"approve": {
 						AdvancesTo: "complete",

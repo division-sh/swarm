@@ -2045,11 +2045,9 @@ func pipelineDispatchEligible(ctx context.Context, q pipelineQueryer, eventID st
 		}
 		return false, err
 	}
-	if pipelineSelectedExecution(ctx) {
-		owned, err := owner.ObserveRunExecution(ctx, q, runID)
-		if err != nil || !owned {
-			return false, err
-		}
+	owned, err := owner.ObserveRunExecution(ctx, q, runID)
+	if err != nil || !owned {
+		return false, err
 	}
 	parked, err := pipelineDispatchParked(ctx, q, postgres, runID, owner)
 	var inactive *runtimerunlifecycle.RunNotActiveError

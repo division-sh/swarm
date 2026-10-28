@@ -16,6 +16,7 @@ func TestChannelNativeLocaleQualificationPublicJourney(t *testing.T) {
 		for _, language := range []string{"en", "fr"} {
 			t.Run(string(backend)+"/"+language, func(t *testing.T) {
 				h := newChannelOnboardingE2EHarness(t, backend, true)
+				writeChannelOnboardingLiveToolCredentials(t, h.credentialPath)
 				h.start(t)
 				defer h.stop(t)
 				begun := startChannelOnboardingRPC(t, h, channelonboarding.VerbConnect, "locale-token", nil)
@@ -119,6 +120,7 @@ func TestChannelNativePreinstallConflictsPublicJourney(t *testing.T) {
 		for _, conflict := range []string{"selected language", "fallback", "chat launcher", "default launcher", "shared member language"} {
 			t.Run(string(backend)+"/"+conflict, func(t *testing.T) {
 				h := newChannelOnboardingE2EHarness(t, backend, true)
+				writeChannelOnboardingLiveToolCredentials(t, h.credentialPath)
 				chat, kind := int64(9593), "private"
 				scope := map[string]any{"type": "chat", "chat_id": "9593"}
 				if conflict == "shared member language" {

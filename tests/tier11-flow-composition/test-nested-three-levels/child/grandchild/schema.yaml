@@ -1,4 +1,4 @@
-name: grandchild
+# fixture: grandchild
 stages:
   ready: {}
   finished: {final: true}

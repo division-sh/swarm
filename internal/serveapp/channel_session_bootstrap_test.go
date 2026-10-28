@@ -35,7 +35,6 @@ import (
 	"github.com/division-sh/swarm/internal/sessionprovider"
 	"github.com/division-sh/swarm/internal/sourceartifact"
 	"github.com/division-sh/swarm/internal/store/storetest"
-	"github.com/division-sh/swarm/internal/testutil/packfixture"
 	"github.com/division-sh/swarm/internal/testutil/sourceartifactfixture"
 	"github.com/division-sh/swarm/internal/testutil/whatsappfixture"
 	"github.com/google/uuid"
@@ -61,6 +60,7 @@ type serveBootstrapTestFixture struct {
 	principal  operatorchannel.Principal
 	selections atomic.Int64
 	binding    processbinding.Binding
+	rooted     sourceartifact.RootedSource
 }
 
 // Fixtures needing a completed SDK occurrence use the startup wait, while
@@ -100,9 +100,9 @@ func newServeBootstrapTestFixture(t *testing.T, backend string) *serveBootstrapT
 		selected = storetest.StartPostgresRuntimeStore(t)
 	}
 	ctx, now := context.Background(), time.Now().UTC()
-	source := sourceartifactfixture.Require(t, ctx, selected)
-	catalog := sessionDiscoveryCatalog(t)
-	plan := packfixture.WhatsAppSessionChannel(t, filepath.Join(repoRootForTest(), defaultPlatformSpecPath), catalog)
+	rooted, _ := sourceartifactfixture.Rooted(t, "fixture", sourceartifactfixture.Artifact())
+	source := sourceartifactfixture.RequireArtifact(t, ctx, selected, rooted.Artifact())
+	catalog, plan := sessionDiscoveryProvider(t)
 	identity, err := plan.InterfaceIdentity()
 	if err != nil {
 		t.Fatal(err)
@@ -167,8 +167,8 @@ func newServeBootstrapTestFixture(t *testing.T, backend string) *serveBootstrapT
 	if err := os.Chmod(directory, 0o700); err != nil {
 		t.Fatal(err)
 	}
-	f := &serveBootstrapTestFixture{ctx: ctx, owned: owned, owner: owner, op: op, candidate: candidate, principal: principal}
-	grant := admitServeSessionProcessFixture(t, selected.(startupownership.Store), op.Coordinate.RuntimeInstanceID, op.Coordinate.BundleHash)
+	f := &serveBootstrapTestFixture{ctx: ctx, owned: owned, owner: owner, op: op, candidate: candidate, principal: principal, rooted: rooted}
+	grant := admitServeSessionProcessFixture(t, selected.(startupownership.Store), op.Coordinate.RuntimeInstanceID, rooted.Admission())
 	f.ctx, err = startupownership.WithRuntimeMutationAuthority(f.ctx, grant)
 	if err != nil {
 		t.Fatal(err)
@@ -191,7 +191,7 @@ func newServeBootstrapTestFixture(t *testing.T, backend string) *serveBootstrapT
 	return f
 }
 
-func admitServeSessionProcessFixture(t *testing.T, selected startupownership.Store, runtimeID, bundleHash string) startupownership.LiveGenerationGrant {
+func admitServeSessionProcessFixture(t *testing.T, selected startupownership.Store, runtimeID string, root sourceartifact.RootAdmission) startupownership.LiveGenerationGrant {
 	t.Helper()
 	ctx := context.Background()
 	process, err := selected.AcquireProcessCapability(ctx, startupownership.AcquireRequest{
@@ -204,7 +204,11 @@ func admitServeSessionProcessFixture(t *testing.T, selected startupownership.Sto
 			t.Error(err)
 		}
 	})
-	plan, err := agenttopology.NewSourceSetPlan([]agenttopology.SourceCoordinate{{BundleHash: bundleHash}}, nil)
+	coordinate, err := agenttopology.NewSourceCoordinate(root)
+	if err != nil {
+		t.Fatal(err)
+	}
+	plan, err := agenttopology.NewSourceSetPlan([]agenttopology.SourceCoordinate{coordinate}, nil)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -212,7 +216,7 @@ func admitServeSessionProcessFixture(t *testing.T, selected startupownership.Sto
 		t.Fatal(err)
 	}
 	grant, err := process.IssueGenerationGrant(ctx, startupownership.GrantRequest{
-		BundleHash: bundleHash, RuntimeInstanceID: runtimeID, RuntimeGeneration: 1, SourceSetRevision: plan.Revision})
+		BundleHash: root.BundleHash(), RuntimeInstanceID: runtimeID, RuntimeGeneration: 1, SourceSetRevision: plan.Revision})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -446,14 +450,21 @@ func TestServeSessionBootstrapInstallsIncomingOwnersBothStores(t *testing.T) {
 		for _, mode := range []string{"installed", "missing_bus", "foreign_bus"} {
 			t.Run(backend+"/"+mode, func(t *testing.T) {
 				f := newServeBootstrapTestFixture(t, backend)
-				bundle, err := contracts.LoadWorkflowContractBundleWithOverrides(repoRootForTest(), canonicalrouting.ExampleRoot(t, canonicalrouting.RootIngress), runtimePlatformSpecPath(t))
+				bundle, err := contracts.LoadWorkflowContractBundleFromRootedSource(repoRootForTest(), f.rooted, runtimePlatformSpecPath(t), contracts.WorkflowContractLoadOptions{})
 				if err != nil {
 					t.Fatal(err)
 				}
 				fact, _ := correlation.SourceArtifactFactFromContext(f.owned)
 				owner := f.owner
 				if mode == "foreign_bus" {
-					fact = mustServeTestEphemeralSourceArtifactFact("bundle-v2:sha256:eeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeee")
+					bundle, err = contracts.LoadWorkflowContractBundleWithOverrides(repoRootForTest(), canonicalrouting.ExampleRoot(t, canonicalrouting.RootIngress), runtimePlatformSpecPath(t))
+					if err != nil {
+						t.Fatal(err)
+					}
+					fact = sourceartifactfixture.FactFor(bundle.SourceArtifact)
+					if fact.BundleHash() == f.rooted.Artifact().BundleHash() {
+						t.Fatal("foreign incoming bus fixture requires distinct source content")
+					}
 					owner = newSupervisorTestRuntimeOccurrence(t, fact.BundleHash())
 				}
 				bus, err := runtimebus.NewEphemeralEventBusWithOptions(&processIngressEventStore{}, runtimebus.EventBusOptions{
@@ -467,7 +478,8 @@ func TestServeSessionBootstrapInstallsIncomingOwnersBothStores(t *testing.T) {
 						t.Error(err)
 					}
 				})
-				trigger, err := sessionDiscoveryCatalog(t).CompileAdmission(providertriggers.CompileAdmissionRequest{Alias: f.candidate.Target.Alias, Provider: f.candidate.Provider})
+				catalog, _ := sessionDiscoveryProvider(t)
+				trigger, err := catalog.CompileAdmission(providertriggers.CompileAdmissionRequest{Alias: f.candidate.Target.Alias, Provider: f.candidate.Provider})
 				if err != nil {
 					t.Fatal(err)
 				}

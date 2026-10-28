@@ -7,6 +7,7 @@ import (
 
 	"github.com/division-sh/swarm/internal/runtime/agenttopology"
 	"github.com/division-sh/swarm/internal/runtime/canonicaljson"
+	"github.com/division-sh/swarm/internal/runtime/correlation"
 	"github.com/division-sh/swarm/internal/runtime/startupownership"
 )
 
@@ -52,7 +53,15 @@ func RequireAdmittedOrdinaryGrantTx(ctx context.Context, tx *sql.Tx, evidence st
 	if err != nil {
 		return err
 	}
-	if !present || plan.Revision != evidence.SourceSetRevision || !SourceSetContains(plan, agenttopology.SourceCoordinate{BundleHash: bundleHash}) {
+	root, rootPresent, err := correlation.RootAdmissionFromContext(ctx)
+	if err != nil || !rootPresent || root.BundleHash() != bundleHash {
+		return errors.Join(err, errors.New("live handoff ordinary grant requires its exact admitted root"))
+	}
+	coordinate, err := agenttopology.NewSourceCoordinate(root)
+	if err != nil {
+		return err
+	}
+	if !present || plan.Revision != evidence.SourceSetRevision || !SourceSetContains(plan, coordinate) {
 		return errors.New("live handoff ordinary source set is no longer current")
 	}
 	return nil

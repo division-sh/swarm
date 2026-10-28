@@ -194,6 +194,7 @@ func consumeSelectedForkFanOutEmissions(t *testing.T, fixture authorActivityRece
 	eventBus, err := newStoreTestEventBus(t, selected, bus.EventBusOptions{
 		ContractBundle: source, SourceArtifactFact: fact, WorkOwner: consumer.work,
 		ReceiverExecution: consumer.receiver, DeliveryAuthority: consumer.delivery,
+		PayloadAdmitter: runtimepkg.NewRuntimePayloadAdmitter(nil, source, fact),
 	})
 	if err != nil {
 		t.Fatal(err)

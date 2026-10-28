@@ -23,6 +23,7 @@ import (
 	"github.com/division-sh/swarm/internal/runtime/correlation"
 	runtimefailures "github.com/division-sh/swarm/internal/runtime/failures"
 	"github.com/division-sh/swarm/internal/runtime/runlifecycle"
+	"github.com/division-sh/swarm/internal/sourceartifact"
 	"github.com/division-sh/swarm/internal/store/storetest"
 	"github.com/division-sh/swarm/internal/testutil"
 	"github.com/division-sh/swarm/internal/testutil/sourceartifactfixture"
@@ -40,6 +41,7 @@ func TestRuntimeLogFilterSupportedConsumersBothStores(t *testing.T) {
 				apiv1.ObservabilityReadStore
 				runlifecycle.OperationOwner
 				runlifecycle.CandidateStore
+				LoadRunRootedSource(context.Context, string) (sourceartifact.RootedSource, error)
 				CommitRuntimeLogEvent(context.Context, events.AdmittedEvent) (runtimebus.EventAppendOutcome, error)
 			}
 			if backend == "sqlite" {
@@ -56,9 +58,18 @@ func TestRuntimeLogFilterSupportedConsumersBothStores(t *testing.T) {
 			ctx = cliFixtureProcessContext(t, ctx, selected)
 			base := time.Now().UTC().Add(-time.Minute).Truncate(time.Second)
 			runA, runB := uuid.NewString(), uuid.NewString()
-			artifactB := sourceartifactfixture.New("agents.yaml", []byte("agents: {}\n# runtime-log-consumer-foreign\n"))
+			artifactB, err := sourceartifact.AdmitMembers(map[string][]byte{
+				"manifest.yaml": []byte("version: 1.0.0\nplatform_version: '*'\n"),
+				"agents.yaml":   []byte("# runtime-log-consumer-foreign\n{}\n"),
+			})
+			if err != nil {
+				t.Fatal(err)
+			}
+			rootB, _ := sourceartifactfixture.Rooted(t, "foreign", artifactB)
 			storetest.RequireRun(t, ctx, selected, storetest.RunFixture{RunID: runA, Origin: storetest.ScenarioSetupOrigin(), StartedAt: base.Add(-time.Minute)})
-			storetest.RequireRun(t, ctx, selected, storetest.RunFixture{RunID: runB, Origin: storetest.ScenarioSetupOrigin(), Artifact: artifactB, StartedAt: base.Add(-time.Minute)})
+			ctxB := correlation.WithRootAdmission(correlation.WithSourceArtifactFact(ctx, sourceartifactfixture.FactFor(artifactB)), rootB.Admission())
+			ctxB = authoractivity.WithScope(ctxB, authoractivity.BundleScope(instance, artifactB.BundleHash()))
+			storetest.RequireRun(t, ctxB, selected, storetest.RunFixture{RunID: runB, Origin: storetest.ScenarioSetupOrigin(), Artifact: rootB.Artifact(), RootAdmission: rootB.Admission(), StartedAt: base.Add(-time.Minute)})
 			insert := func(run, code, message string, at time.Time) string {
 				t.Helper()
 				failure := runtimefailures.Normalize(runtimefailures.New(runtimefailures.ClassInternalFailure, code, "filter-probe", "probe", nil), "filter-probe", "probe")
@@ -77,7 +88,13 @@ func TestRuntimeLogFilterSupportedConsumersBothStores(t *testing.T) {
 				if err != nil {
 					t.Fatal(err)
 				}
-				if _, err := selected.CommitRuntimeLogEvent(ctx, admitted); err != nil {
+				rooted, err := selected.LoadRunRootedSource(ctx, run)
+				if err != nil {
+					t.Fatal(err)
+				}
+				writeCtx := correlation.WithRootAdmission(correlation.WithSourceArtifactFact(ctx, sourceartifactfixture.FactFor(rooted.Artifact())), rooted.Admission())
+				writeCtx = authoractivity.WithScope(writeCtx, authoractivity.BundleScope(instance, rooted.Admission().BundleHash()))
+				if _, err := selected.CommitRuntimeLogEvent(writeCtx, admitted); err != nil {
 					t.Fatal(err)
 				}
 				return id

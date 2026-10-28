@@ -375,7 +375,7 @@ func assertCoreStructuralGuardCatalogInventory(t *testing.T, policy testplanning
 	}
 	for _, root := range []string{
 		"TestRunForkRevisionStateAccessorInventoryIsClosed",
-		"TestRetiredBuilderSemanticReferencesStayExplicit", "TestReleaseE2EPackageStaysAtPublicProcessBoundary",
+		"TestReleaseE2EPackageStaysAtPublicProcessBoundary",
 	} {
 		if !regexp.MustCompile(unit.Run).MatchString(root) {
 			t.Fatalf("core structural guard selection omits %s", root)
@@ -431,7 +431,7 @@ func TestCatalogRequiredCIProofSelection(t *testing.T) {
 		t.Fatal(err)
 	}
 	serveUnits := []string{
-		"serveapp-channel", "serveapp-channel-learned", "serveapp-channel-neutral", "serveapp-channel-delivery", "serveapp-channel-process-temporal", "serveapp-channel-lifecycle", "serveapp-channel-native", "serveapp-runtime", "serveapp-surfaces", "serveapp-publication-text",
+		"serveapp-channel", "serveapp-channel-neutral", "serveapp-channel-delivery", "serveapp-channel-process-temporal", "serveapp-channel-lifecycle", "serveapp-channel-native", "serveapp-runtime", "serveapp-surfaces", "serveapp-publication-text",
 		"serveapp-journeys-first", "serveapp-journeys-a-c", "serveapp-journeys-d-l", "serveapp-journeys-m-z",
 		"serveapp-mailbox", "serveapp-mailbox-p-q",
 		"serveapp-selected", "serveapp-selected-rest", "serveapp-other", "serveapp-i-reporter", "serveapp-i-reporter-all-commit", "serveapp-other-late", "serveapp-delayed-commit-preservation", "serveapp-standing",
@@ -447,7 +447,7 @@ func TestCatalogRequiredCIProofSelection(t *testing.T) {
 		"store-runtime-full-03", "store-runtime-full-03-i-l", "store-runtime-full-04",
 		"store-runtime-full-05", "store-runtime-full-07-fork", "store-runtime-selected", "store-runtime-s-z-rest",
 	}
-	codemodUnits := []string{"codemod-owner-guards", "codemod-pipeline-mutation", "codemod-bus-mutation"}
+	codemodUnits := []string{"codemod-owner-guards", "codemod-bus-mutation"}
 	var codemodPartitions []testplanning.ProofUnit
 	for _, id := range codemodUnits {
 		unit, ok := policy.Units[id]

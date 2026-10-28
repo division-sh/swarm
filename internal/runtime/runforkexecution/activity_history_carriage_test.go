@@ -32,6 +32,10 @@ func TestActivityHistoryLoadsExactOriginAndReleasesEveryAcquisition(t *testing.T
 		t.Fatal(err)
 	}
 	bundle, _ := semanticview.Bundle(source)
+	rooted, err := bundle.RootedSource()
+	if err != nil {
+		t.Fatal(err)
+	}
 	fact, err := correlation.NewSourceArtifactFact(bundle.SourceArtifact.BundleHash())
 	if err != nil {
 		t.Fatal(err)
@@ -56,7 +60,7 @@ func TestActivityHistoryLoadsExactOriginAndReleasesEveryAcquisition(t *testing.T
 			defer cancel()
 			fault := errors.New("original artifact acquisition fault")
 			released := 0
-			loader := &activityHistoryFixtureLoader{loaded: LoadedSelectedContractSource{Source: source, SourceArtifactFact: fact, Cleanup: func() error {
+			loader := &activityHistoryFixtureLoader{loaded: LoadedSelectedContractSource{Source: source, RootedSource: rooted, SourceArtifactFact: fact, Cleanup: func() error {
 				released++
 				if scenario == "canceled_during" {
 					cancel()
@@ -94,7 +98,7 @@ func TestActivityHistoryLoadsExactOriginAndReleasesEveryAcquisition(t *testing.T
 				t.Fatalf("acquisition was repeated or leaked: requests=%d released=%d err=%v", len(loader.requests), released, err)
 			}
 			request := loader.requests[0]
-			if request.SourceRunID != runID || !request.SourceArtifactFact.Matches(fact) || request.BundleHash != fact.BundleHash() ||
+			if request.Responsibility != OriginalRunSource(runID) || !request.SourceArtifactFact.Matches(fact) || request.BundleHash != fact.BundleHash() ||
 				request.Selection.Mode != runfork.RunForkContractSelectionModeBundleHash || request.Selection.BundleHash != fact.BundleHash() {
 				t.Fatalf("loader lost original run-bound artifact coordinates: %+v", request)
 			}

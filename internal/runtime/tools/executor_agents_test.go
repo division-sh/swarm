@@ -2,6 +2,7 @@ package tools
 
 import (
 	"context"
+	"path/filepath"
 	"strings"
 	"testing"
 	"time"
@@ -125,7 +126,9 @@ func TestExecSchedulePreservesImportedTemplateAgentRoutingSource(t *testing.T) {
 	bundle := &runtimecontracts.WorkflowContractBundle{FlowTree: runtimecontracts.FlowTree{
 		Root: &root, ByID: map[string]*runtimecontracts.FlowContractView{flowID: &root.Children[0].Children[0]},
 	}}
-	bundle = semanticviewtest.WithInstanceDeclarations(t, bundle, canonicalrouting.CopyInstanceDeclarations(t, flowID))
+	declarationRoot := canonicalrouting.CopyInstanceDeclarations(t, flowID)
+	writeToolFlowDataFixtureFile(t, filepath.Join(declarationRoot, "telegram-ingress/manifest.yaml"), "version: 1.0.0\nplatform_version: '*'\n")
+	bundle = semanticviewtest.WithInstanceDeclarations(t, bundle, declarationRoot)
 	source := toolTestSourceWithDeclaredAgent(t, bundle, agentID, flowID)
 	declarations := semanticview.AgentDeclarations(source)
 	if len(declarations) != 1 {

@@ -39,6 +39,7 @@ import (
 	"github.com/division-sh/swarm/internal/sourceartifact"
 	"github.com/division-sh/swarm/internal/store/testutil/agentfixture"
 	"github.com/division-sh/swarm/internal/testutil"
+	"github.com/division-sh/swarm/internal/testutil/sourceartifactfixture"
 	"github.com/google/uuid"
 )
 
@@ -489,7 +490,7 @@ func newMixedExecutionFixtureWithManager(t *testing.T, backend string, handlers 
 		t.Fatal(err)
 	}
 	repo := pipeline.WorkflowRepoRoot()
-	bundle, err := contracts.LoadWorkflowContractBundleFromArtifact(repo, artifact, contracts.DefaultPlatformSpecFile(repo), contracts.WorkflowContractLoadOptions{})
+	bundle, err := contracts.LoadWorkflowContractBundleFromRootedSource(repo, sourceartifactfixture.CapturedRoot(t, artifact), contracts.DefaultPlatformSpecFile(repo), contracts.WorkflowContractLoadOptions{})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -590,7 +591,14 @@ func newMixedExecutionFixtureWithManager(t *testing.T, backend string, handlers 
 		WorkOwner:         f.occurrence, ReceiverExecution: eventreceiver.NormalExecution(),
 	}, f.raw.(manager.ManagerPersistence))
 	f.bus.SetCommittedAgentReadinessFinalizer(bus.CommittedAgentReadinessFinalizerFunc(am.FinalizeCommittedAgentReadiness))
-	coordinate := agenttopology.SourceCoordinate{BundleHash: f.seed.bundleHash}
+	rooted, err := bundle.RootedSource()
+	if err != nil {
+		t.Fatal(err)
+	}
+	coordinate, err := agenttopology.NewSourceCoordinate(rooted.Admission())
+	if err != nil {
+		t.Fatal(err)
+	}
 	desired, err := am.CompileStaticTopologyDesiredAgents(source, coordinate)
 	if err != nil {
 		t.Fatal(err)

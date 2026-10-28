@@ -25,6 +25,7 @@ func proveServedCompiledGateOutcomeRestart(t *testing.T) {
 	t.Helper()
 	for _, backend := range []string{"sqlite", "postgres"} {
 		t.Run(backend, func(t *testing.T) {
+			configureStandingLifecycleCredentials(t)
 			root := canonicalrouting.CopyLifecycleEmitter(t, canonicalrouting.LifecycleGateSharedEvent)
 			opts, start := lifecycleRestartHarness(t, backend, root)
 			reached := make(chan struct{}, 1)

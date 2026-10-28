@@ -18,9 +18,10 @@ func TestServeRequiredCredentialSourceReadbackBothStores(t *testing.T) {
 			for _, verbose := range []bool{false, true} {
 				t.Run(map[bool]string{false: "concise", true: "verbose"}[verbose], func(t *testing.T) {
 					isolateCLIAPIConfigEnv(t)
-					const key = "telegram_bot_token"
+					const key = "telegram.telegram_bot_token"
 					const fileValue = "private-file-value-2729"
 					const envValue = "private-environment-value-2729"
+					const signingValue = "private-signing-value-2729"
 					const receipt = "private-admission-receipt-2729"
 					path := filepath.Join(t.TempDir(), "per-instance-credentials.json")
 					t.Setenv("SWARM_CREDENTIALS_FILE", path)
@@ -30,6 +31,9 @@ func TestServeRequiredCredentialSourceReadbackBothStores(t *testing.T) {
 						t.Fatal(err)
 					}
 					if _, err := file.AdmitWithReceipt(context.Background(), key, fileValue, receipt); err != nil {
+						t.Fatal(err)
+					}
+					if err := file.Set(context.Background(), "telegram.webhook_signing_secret", signingValue); err != nil {
 						t.Fatal(err)
 					}
 					if err := file.Set(context.Background(), "unrelated_do_not_list", "unrelated-private-value"); err != nil {
@@ -45,6 +49,9 @@ func TestServeRequiredCredentialSourceReadbackBothStores(t *testing.T) {
 					}
 					root := t.TempDir()
 					if err := os.CopyFS(root, os.DirFS(filepath.Join(repoRootForTest(), "tests/tier8-boot-verification/test-boot-success"))); err != nil {
+						t.Fatal(err)
+					}
+					if err := os.CopyFS(filepath.Join(root, "telegram"), os.DirFS(filepath.Join(repoRootForTest(), "packs/providers/telegram"))); err != nil {
 						t.Fatal(err)
 					}
 					writeWorkflowValidationFixtureFile(t, filepath.Join(root, "tools.yaml"), `credential_probe:
@@ -66,7 +73,7 @@ func TestServeRequiredCredentialSourceReadbackBothStores(t *testing.T) {
 channels:
   bindings:
     source-proof:
-      pack: provider.telegram.hitl_channel
+      pack: telegram
       destination: "-100123"
 `)...)
 					if err := os.WriteFile(opts.ConfigPath, config, 0o600); err != nil {
@@ -83,11 +90,11 @@ channels:
 							lines = append(lines, line)
 						}
 					}
-					want := "credential telegram_bot_token · source env:TELEGRAM_BOT_TOKEN\ncredential telegram_bot_token · source file:" + path
+					want := "credential telegram.telegram_bot_token · source file:" + path + "\ncredential telegram.webhook_signing_secret · source file:" + path + "\ncredential telegram_bot_token · source env:TELEGRAM_BOT_TOKEN"
 					if strings.Join(lines, "\n") != want {
 						t.Fatalf("credential source golden mismatch\ngot: %s\nwant: %s\nboot:\n%s", strings.Join(lines, "\n"), want, text)
 					}
-					for _, forbidden := range []string{fileValue, envValue, receipt, seal.Seal.String(), "unrelated_do_not_list", "unrelated-private-value"} {
+					for _, forbidden := range []string{fileValue, envValue, signingValue, receipt, seal.Seal.String(), "unrelated_do_not_list", "unrelated-private-value"} {
 						if strings.Contains(text, forbidden) {
 							t.Fatal("serve disclosed credential bytes or an unrelated store key")
 						}

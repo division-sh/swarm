@@ -22,6 +22,7 @@ type selectedContractOperation struct {
 	preparation   *worklifetime.Lease
 	preparing     context.Context
 	owned         context.Context
+	grantIssuance context.Context
 	cancel        context.CancelCauseFunc
 	cancelOwned   context.CancelCauseFunc
 	stop          func()
@@ -60,6 +61,7 @@ func beginSelectedContractOperation(ctx context.Context) (*selectedContractOpera
 	op := &selectedContractOperation{process: process, preparation: lease, cancel: cancel, cancelOwned: cancelOwned, stop: stopAndJoin}
 	op.preparing = context.WithValue(preparing, selectedOperationContextKey{}, op)
 	op.owned = context.WithValue(owned, selectedOperationContextKey{}, op)
+	op.grantIssuance = op.owned
 	return op, nil
 }
 

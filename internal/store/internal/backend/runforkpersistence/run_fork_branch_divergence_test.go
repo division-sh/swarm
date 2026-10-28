@@ -147,7 +147,7 @@ func selectedBranchDivergenceTestDatabase(t *testing.T, backend string, kind run
 			forked_from_run_id ID_TYPE, forked_from_point_kind TEXT, forked_from_revision BIGINT, forked_from_event_id ID_TYPE)`,
 		`CREATE TABLE run_fork_selected_contract_bindings (binding_id ID_TYPE PRIMARY KEY, fork_run_id ID_TYPE,
 			source_run_id ID_TYPE, fork_point_kind TEXT, fork_revision BIGINT, fork_event_id ID_TYPE,
-			mode TEXT, bundle_hash TEXT, created_at TEXT)`,
+			mode TEXT, bundle_hash TEXT, target_bundle_hash TEXT NOT NULL, source_root_directory TEXT NOT NULL, created_at TEXT)`,
 		`CREATE TABLE run_fork_revisions (run_id ID_TYPE, revision BIGINT, PRIMARY KEY(run_id,revision))`,
 		`CREATE TABLE run_fork_fact_revisions (run_id ID_TYPE, family TEXT, fact_key TEXT, revision BIGINT, fact TEXT, present BOOLEAN)`,
 		`CREATE TABLE run_fork_selected_contract_branch_divergences (fork_run_id ID_TYPE PRIMARY KEY, source_run_id ID_TYPE,
@@ -170,13 +170,14 @@ func selectedBranchDivergenceTestDatabase(t *testing.T, backend string, kind run
 		SourceRunStatusAtActivation: status, SourceRunStatusAfterActivation: status,
 		SourceAdvancedFacts: []string{"source_entity_mutations_advanced_after_fork_point"}, CreatedAt: time.Date(2026, 10, 2, 19, 0, 0, 0, time.UTC),
 	}
+	root := forkOperationTargetRoot(t)
 	for _, command := range []struct {
 		query string
 		args  []any
 	}{
-		{`INSERT INTO runs (run_id,bundle_hash,origin_kind,status) VALUES ($1,$2,'deployment',$3)`, []any{value.SourceRunID, strings.Repeat("a", 64), status}},
-		{`INSERT INTO runs (run_id,bundle_hash,origin_kind,status,forked_from_run_id,forked_from_point_kind,forked_from_revision,forked_from_event_id) VALUES ($1,$2,'fork_materialization','running',$3,$4,$5,$6)`, []any{value.ForkRunID, strings.Repeat("a", 64), value.SourceRunID, kind, point.Revision, nullableForkEventID(point)}},
-		{`INSERT INTO run_fork_selected_contract_bindings VALUES ($1,$2,$3,$4,$5,$6,'selected_contracts',NULL,$7)`, []any{uuid.NewString(), value.ForkRunID, value.SourceRunID, kind, point.Revision, nullableForkEventID(point), value.CreatedAt.Format(time.RFC3339Nano)}},
+		{`INSERT INTO runs (run_id,bundle_hash,origin_kind,status) VALUES ($1,$2,'deployment',$3)`, []any{value.SourceRunID, root.BundleHash, status}},
+		{`INSERT INTO runs (run_id,bundle_hash,origin_kind,status,forked_from_run_id,forked_from_point_kind,forked_from_revision,forked_from_event_id) VALUES ($1,$2,'fork_materialization','running',$3,$4,$5,$6)`, []any{value.ForkRunID, root.BundleHash, value.SourceRunID, kind, point.Revision, nullableForkEventID(point)}},
+		{`INSERT INTO run_fork_selected_contract_bindings VALUES ($1,$2,$3,$4,$5,$6,'selected_contracts',NULL,$7,$8,$9)`, []any{uuid.NewString(), value.ForkRunID, value.SourceRunID, kind, point.Revision, nullableForkEventID(point), root.BundleHash, root.RootDirectory, value.CreatedAt.Format(time.RFC3339Nano)}},
 		{`INSERT INTO run_fork_revisions VALUES ($1,$2)`, []any{value.SourceRunID, point.Revision}},
 	} {
 		if _, err := db.Exec(command.query, command.args...); err != nil {

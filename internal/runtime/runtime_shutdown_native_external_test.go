@@ -6,16 +6,6 @@ import (
 	"testing"
 )
 
-func TestRuntimeShutdownDeliveryFixtureClaimsThroughCanonicalAdapter(t *testing.T) {
-	for _, backend := range []string{"sqlite", "postgres"} {
-		t.Run(backend, func(t *testing.T) {
-			runtimepkg.VerifyRuntimeShutdownDeliveryFixtureClaimsThroughCanonicalAdapterForTest(t, func(t *testing.T, artifact *sourceartifact.AdmittedSourceArtifact) runtimepkg.RuntimeLogNativeFixtureForTest {
-				return nativeRuntimeLogFixture(t, backend, artifact, authorActivityTestRuntimeInstanceID)
-			})
-		})
-	}
-}
-
 func TestRuntimeShutdown_ClosesAdmissionBeforeManagerDrainAndInboundIngress(t *testing.T) {
 	for _, backend := range []string{"sqlite", "postgres"} {
 		t.Run(backend, func(t *testing.T) {

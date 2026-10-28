@@ -68,8 +68,11 @@ func TestScenarioInvalidVariantsRequireValidBaseAndTypedRejection(t *testing.T) 
 }
 
 func TestScenarioFixturePreparationUsesArtifactAndSingleEvaluation(t *testing.T) {
-	root := t.TempDir()
+	root := filepath.Join(t.TempDir(), "scenario-fixture")
 	if err := os.MkdirAll(filepath.Join(root, "tests"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(root, "manifest.yaml"), []byte("version: 1.0.0\nplatform_version: '*'\n"), 0o644); err != nil {
 		t.Fatal(err)
 	}
 	for label, raw := range map[string]string{

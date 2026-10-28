@@ -19,16 +19,20 @@ import (
 
 // Source-set replacement and process shutdown share one lifecycle owner. The
 // target is admitted only after selected preparation has validated the request.
-func (s *processLifecycleSupervisor) acquireLiveTargetRuntime(ctx context.Context, bundleHash string) (_ *runtime.RuntimeContextUse, retErr error) {
+func (s *processLifecycleSupervisor) acquireLiveTargetRuntime(ctx context.Context, reference sourceartifact.RootAdmissionReference) (_ *runtime.RuntimeContextUse, retErr error) {
 	if s == nil {
 		return nil, errors.New("live target requires process lifecycle ownership")
 	}
 	s.operationMu.Lock()
 	defer s.operationMu.Unlock()
-	return s.acquireLiveTargetRuntimeLocked(ctx, bundleHash)
+	return s.acquireLiveTargetRuntimeLocked(ctx, reference)
 }
 
-func (s *processLifecycleSupervisor) acquireLiveTargetRuntimeLocked(ctx context.Context, bundleHash string) (_ *runtime.RuntimeContextUse, retErr error) {
+func (s *processLifecycleSupervisor) acquireLiveTargetRuntimeLocked(ctx context.Context, reference sourceartifact.RootAdmissionReference) (_ *runtime.RuntimeContextUse, retErr error) {
+	if err := reference.Validate(); err != nil {
+		return nil, err
+	}
+	bundleHash := reference.BundleHash
 	s.mu.RLock()
 	manager, resetting := s.runtimeContexts, s.resetting
 	requests := append([]serveRuntimeBundleContextRequest(nil), s.resetRequests...)
@@ -40,11 +44,11 @@ func (s *processLifecycleSupervisor) acquireLiveTargetRuntimeLocked(ctx context.
 	if err != nil || !exists {
 		return nil, errors.Join(err, errors.New("live target requires its committed source set"))
 	}
-	if use, loaded, err := s.acquireCurrentLiveSource(ctx, manager, current, bundleHash); loaded || err != nil {
+	if use, loaded, err := s.acquireCurrentLiveSource(ctx, manager, current, reference); loaded || err != nil {
 		return use, err
 	}
 	request := requests[0]
-	loaded, err := loadServeRuntimeBundleFromArtifact(ctx, request.RepoRoot, request.Stores.sourceReader, bundleHash, request.PlatformPackBases, func(artifact *sourceartifact.AdmittedSourceArtifact, _ semanticview.Source) (*sourceartifact.RuntimeProjection, error) {
+	loaded, err := loadServeRuntimeBundleFromArtifact(ctx, request.RepoRoot, request.Stores.sourceReader, reference, request.PlatformPackBases, func(artifact *sourceartifact.AdmittedSourceArtifact, _ semanticview.Source) (*sourceartifact.RuntimeProjection, error) {
 		return sourceartifact.MaterializeRuntimeProjection(artifact)
 	})
 	if err != nil {
@@ -56,6 +60,10 @@ func (s *processLifecycleSupervisor) acquireLiveTargetRuntimeLocked(ctx context.
 			retErr = errors.Join(retErr, loaded.cleanup())
 		}
 	}()
+	rooted, err := loaded.bundle.RootedSource()
+	if err != nil {
+		return nil, err
+	}
 	request, err = prepareLiveTargetRequest(ctx, request, loaded)
 	if err != nil {
 		return nil, err
@@ -72,6 +80,10 @@ func (s *processLifecycleSupervisor) acquireLiveTargetRuntimeLocked(ctx context.
 		}
 	}()
 	plan, err := compileServeSourceSetPlan([]serveRuntimeBundleContext{candidate})
+	if err != nil {
+		return nil, err
+	}
+	plan, err = startupownership.AdmitRetainedRunSources(ctx, s.processCapability, plan)
 	if err != nil {
 		return nil, err
 	}
@@ -96,8 +108,10 @@ func (s *processLifecycleSupervisor) acquireLiveTargetRuntimeLocked(ctx context.
 		return nil, err
 	}
 	definition := runtime.BundleContext{
+		RootAdmission:      rooted.Admission(),
 		SourceArtifactFact: candidate.sourceArtifactFact, BundleIdentity: candidate.bootIdentity,
 		Source: candidate.loaded.source, Runtime: candidate.runtime, WorkOwner: candidate.runtime.WorkOccurrence(),
+		ProviderTriggerCatalog:    candidate.runtime.Options.ProviderTriggerCatalog,
 		ProviderTriggerGeneration: candidate.providerTriggerGeneration,
 		InstalledTriggerSubjects:  candidate.installedTriggerSubjects, PackInventoryDigest: candidate.packInventoryDigest,
 		ChannelPlans: candidate.runtime.Options.ChannelPlans, DeclaredChannelPublication: candidate.runtime.Options.DeclaredChannelPublication,
@@ -137,7 +151,6 @@ func prepareLiveTargetRequest(ctx context.Context, request serveRuntimeBundleCon
 		return request, err
 	}
 	request.Loaded, request.StateStoreSummary = loaded, ""
-	request.ProviderTriggerCatalog = packs.ProviderTriggers.Catalog
 	request.ChannelPlans, request.ChannelBindings = packs.Channels.Plans, packs.Channels.Bindings
 	request.BootStartedAt, request.BootProgress = time.Now().UTC(), nil
 	return request, nil
@@ -155,10 +168,13 @@ func (s *processLifecycleSupervisor) discardLiveTarget(ctx context.Context, mana
 	return err
 }
 
-func (s *processLifecycleSupervisor) acquireCurrentLiveSource(ctx context.Context, manager *runtime.RuntimeContextManager, current agenttopology.SourceSetPlan, bundleHash string) (*runtime.RuntimeContextUse, bool, error) {
+func (s *processLifecycleSupervisor) acquireCurrentLiveSource(ctx context.Context, manager *runtime.RuntimeContextManager, current agenttopology.SourceSetPlan, reference sourceartifact.RootAdmissionReference) (*runtime.RuntimeContextUse, bool, error) {
 	member := false
 	for _, source := range current.Sources {
-		member = member || source.BundleHash == bundleHash
+		if source.BundleHash == reference.BundleHash && source.RootReference() != reference {
+			return nil, false, errors.New("live source membership has a different admitted root")
+		}
+		member = member || source.RootReference() == reference
 	}
 	if !member {
 		return nil, false, nil
@@ -170,7 +186,10 @@ func (s *processLifecycleSupervisor) acquireCurrentLiveSource(ctx context.Contex
 	if err := pending.Commit(ctx, s.processCapability); err != nil {
 		return nil, false, err
 	}
-	use, lookup, err := manager.AcquireBundleHash(ctx, bundleHash)
+	use, lookup, err := manager.AcquireBundleHash(ctx, reference.BundleHash)
+	if err == nil && use != nil && use.Context.RootAdmission.Reference() != reference {
+		return nil, false, errors.Join(errors.New("loaded live target has a different admitted root"), use.Done())
+	}
 	return use, lookup.Loaded(), err
 }
 
@@ -210,7 +229,7 @@ func (s *processLifecycleSupervisor) replaceLiveSourceSet(ctx context.Context, m
 			if readErr != nil || !exists || observed.Revision != current.Revision || len(current.Sources) != 1 {
 				return nil, errors.Join(err, readErr, errors.New("refused source replacement lost its exact predecessor"))
 			}
-			use, restoreErr := s.acquireLiveTargetRuntimeLocked(recoveryCtx, current.Sources[0].BundleHash)
+			use, restoreErr := s.acquireLiveTargetRuntimeLocked(recoveryCtx, current.Sources[0].RootReference())
 			if use != nil {
 				restoreErr = errors.Join(restoreErr, use.Done())
 			}
@@ -261,7 +280,7 @@ func (s *processLifecycleSupervisor) prepareLiveRunRuntime(ctx context.Context, 
 	if !availability.Available() {
 		return fmt.Errorf("continue requires its retained source artifact: %s", availability.DetailString())
 	}
-	use, err := s.acquireLiveTargetRuntime(ctx, availability.BundleHash)
+	use, err := s.acquireLiveTargetRuntime(ctx, availability.RootReference)
 	if use != nil {
 		defer func() { retErr = errors.Join(retErr, use.Done()) }()
 	}

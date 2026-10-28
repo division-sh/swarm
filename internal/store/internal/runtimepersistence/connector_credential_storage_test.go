@@ -23,7 +23,7 @@ func seedConnectorCredentialStorageWitness(t *testing.T, fixture authorActivityR
 			t.Fatal(err)
 		}
 	}
-	journal := activityNativeJournalForFixture(t, fixture)
+	journal := activityNativeJournalForFixture(t, fixture, runID)
 	for _, columns := range [][2]string{
 		{"fixture-secret", "safe"},
 		{"safe", "fixture-secret"},

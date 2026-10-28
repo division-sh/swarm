@@ -132,6 +132,16 @@ func nativeWorkflowJoinSourceCoordinatorForTest(t *testing.T, fixture *PipelineD
 
 func nativeWorkflowJoinPublicationContextForTest(t *testing.T, fixture *PipelineDeliveryNativeFixtureForTest, pc *PipelineCoordinator, ctx context.Context, event events.Event, route events.DeliveryRoute, ordinary bool) (context.Context, error) {
 	t.Helper()
+	admission, occurrence, err := ResolveWorkflowJoinOccurrencePayloadAdmission(pc.SemanticSource(), event, pc.sourceArtifactFact.BundleHash())
+	if err != nil {
+		return ctx, err
+	}
+	if occurrence {
+		event, err = events.ApplyPayloadAdmission(event, admission)
+		if err != nil {
+			return ctx, err
+		}
+	}
 	// Replays retain the exact committed route, including its original join binding.
 	count, err := fixture.DeliveryCount(ctx, event.ID(), route.Recipient.ID())
 	if err != nil {

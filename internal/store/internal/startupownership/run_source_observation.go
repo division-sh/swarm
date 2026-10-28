@@ -46,11 +46,19 @@ func observeStartupRunSourceTx(ctx context.Context, tx *sql.Tx, evidence runtime
 	if err != nil || !current {
 		return false, errors.Join(err, errors.New("startup source observation process is not current"))
 	}
+	root, rootPresent, err := correlation.RootAdmissionFromContext(ctx)
+	if err != nil || !rootPresent || root.BundleHash() != evidence.BundleHash {
+		return false, errors.Join(err, errors.New("startup source observation requires its exact admitted root"))
+	}
+	coordinate, err := agenttopology.NewSourceCoordinate(root)
+	if err != nil {
+		return false, err
+	}
 	plan, present, err := loadSourceSetModeTx(ctx, tx, sqlite, false)
 	if err != nil {
 		return false, err
 	}
-	if !present || plan.Revision != evidence.SourceSetRevision || !sourceSetContains(plan, agenttopology.SourceCoordinate{BundleHash: evidence.BundleHash}) {
+	if !present || plan.Revision != evidence.SourceSetRevision || !sourceSetContains(plan, coordinate) {
 		return false, errors.New("startup source observation source set is not current")
 	}
 	source, err := correlation.DecodeSourceArtifactFact(evidence.BundleHash)

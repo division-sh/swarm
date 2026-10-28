@@ -67,7 +67,15 @@ func TestDisplacedHTTPActivityOriginalSessionRecoveryBothStores(t *testing.T) {
 				t.Fatal(err)
 			}
 			t.Cleanup(func() { _ = original.Release(context.Background()) })
-			plan, err := agenttopology.NewSourceSetPlan([]agenttopology.SourceCoordinate{{BundleHash: intent.BundleHash}}, nil)
+			root, present, err := correlation.RootAdmissionFromContext(ctx)
+			if err != nil || !present {
+				t.Fatalf("original activity source root is unavailable: present=%t error=%v", present, err)
+			}
+			coordinate, err := agenttopology.NewSourceCoordinate(root)
+			if err != nil {
+				t.Fatal(err)
+			}
+			plan, err := agenttopology.NewSourceSetPlan([]agenttopology.SourceCoordinate{coordinate}, nil)
 			if err != nil {
 				t.Fatal(err)
 			}

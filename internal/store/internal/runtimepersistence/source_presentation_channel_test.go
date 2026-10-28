@@ -21,9 +21,8 @@ import (
 
 func Test2376ChannelExactSelectionAndStoredPresentationBothStores(t *testing.T) {
 	for _, backend := range []string{"sqlite", "postgres"} {
-		for _, name := range []string{"", "Reception", "Reception\u202e"} {
-			named := name != ""
-			t.Run(fmt.Sprintf("%s/name=%q", backend, name), func(t *testing.T) {
+		for _, version := range []string{"1.0.0", "1.0.0+display"} {
+			t.Run(fmt.Sprintf("%s/version=%q", backend, version), func(t *testing.T) {
 				fixture := openChannelOnboardingConfirmationFixture(t, backend)
 				selected := fixture.store.(interface {
 					sourceartifact.Reader
@@ -45,10 +44,8 @@ func Test2376ChannelExactSelectionAndStoredPresentationBothStores(t *testing.T) 
 					if err := os.WriteFile(filepath.Join(root, "schema.yaml"), []byte(fmt.Sprintf("description: candidate-%d\n", seed)), 0600); err != nil {
 						t.Fatal(err)
 					}
-					if named {
-						if err := os.WriteFile(filepath.Join(root, "manifest.yaml"), []byte(fmt.Sprintf("name: %q\nversion: 1.0.0\nplatform_version: '*'\n", name)), 0600); err != nil {
-							t.Fatal(err)
-						}
+					if err := os.WriteFile(filepath.Join(root, "manifest.yaml"), []byte(fmt.Sprintf("version: %q\nplatform_version: '*'\n", version)), 0600); err != nil {
+						t.Fatal(err)
 					}
 					artifact, err := sourceartifact.AdmitDirectory(root)
 					if err != nil {
@@ -82,15 +79,10 @@ func Test2376ChannelExactSelectionAndStoredPresentationBothStores(t *testing.T) 
 					if err != nil || stored.BundleHash() != artifact.BundleHash() {
 						t.Fatalf("exact stored source changed: %v", err)
 					}
-					if named {
-						metadata, present := stored.RootManifest()
-						if !present || metadata.Name != name {
-							t.Fatalf("display sanitization rewrote stored metadata: %#v", metadata)
-						}
+					metadata, present := stored.RootManifest()
+					if !present || metadata.Version != version {
+						t.Fatalf("display sanitization rewrote stored metadata: %#v", metadata)
 					}
-				}
-				if !named && (sourceartifact.ShortHashLabel(candidates[0].Coordinate.BundleHash) != "fa84932" || sourceartifact.ShortHashLabel(candidates[1].Coordinate.BundleHash) != "fa84932") {
-					t.Fatal("literal collision vector changed")
 				}
 				for _, order := range [][]channelonboarding.Candidate{candidates, {candidates[1], candidates[0]}} {
 					catalog, err := channelonboarding.NewCandidateCatalog(order)
@@ -162,10 +154,7 @@ func Test2376ChannelExactSelectionAndStoredPresentationBothStores(t *testing.T) 
 							t.Fatalf("missing exact operation: %+v", row)
 						}
 						op := row.Operation
-						want := strings.ReplaceAll(name, "\u202e", " ") + "@1.0.0"
-						if !named {
-							want = "fa84932"
-						}
+						want := sourceartifact.ShortHashLabel(op.Coordinate.BundleHash)
 						if row.SourceLabel != want || strings.Contains(row.SourceLabel, "store-") {
 							t.Fatalf("stored source borrowed a directory: %+v", row)
 						}

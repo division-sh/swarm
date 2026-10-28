@@ -35,9 +35,9 @@ func TestResourceCodecMapValueOptionalFieldsUseCompiledCatalog(t *testing.T) {
 		t.Run(cell.name, func(t *testing.T) {
 			root := t.TempDir()
 			for name, text := range map[string]string{
-				"schema.yaml": "name: codec-normalization\n",
+				"schema.yaml": "stages: []\n",
 				"types.yaml":  "types:\n  CodecProfile:\n    note: integer?\n  CodecRequiredProfile:\n    note: integer\n",
-				"events.yaml": "records.loaded:\n  " + cell.field + "\n",
+				"events.yaml": "records.loaded:\n  " + cell.field + "\n", "manifest.yaml": "version: 1.0.0\nplatform_version: '*'\n",
 			} {
 				if err := os.WriteFile(filepath.Join(root, name), []byte(text), 0o600); err != nil {
 					t.Fatal(err)

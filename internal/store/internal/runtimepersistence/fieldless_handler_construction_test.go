@@ -32,8 +32,8 @@ func TestSelectedRunTargetOwnersUseConstructedHeadersBothStores(t *testing.T) {
 			}
 			t.Run(backend+"/"+shape, func(t *testing.T) {
 				files := map[string]string{
-					"schema.yaml":        "name: target-header-proof\n",
-					"review/schema.yaml": "name: review\nstages:\n  pending: {}\n",
+					"schema.yaml":        "stages: []\n",
+					"review/schema.yaml": "stages:\n  pending: {}\n", "manifest.yaml": "version: 1.0.0\nplatform_version: '*'\n", "review/manifest.yaml": "version: 1.0.0\nplatform_version: '*'\n",
 				}
 				if fielded {
 					files["review/entities.yaml"] = "review_item:\n  marker: {type: text, initial: original}\n"
@@ -228,10 +228,10 @@ func TestOrdinaryHandlerRequiresCanonicalConstructionBothStores(t *testing.T) {
 				}
 				t.Run(backend+"/"+shape.name+"/"+name, func(t *testing.T) {
 					files := map[string]string{
-						"schema.yaml":        "name: fieldless-handler\n",
-						"review/schema.yaml": "name: review\nstages:\n  pending: {}\n  reviewing: {}\n",
+						"schema.yaml":        "stages: []\n",
+						"review/schema.yaml": "stages:\n  pending: {}\n  reviewing: {}\n",
 						"review/events.yaml": "work.ready:\nwork.recorded:\n",
-						"review/nodes.yaml":  "inspect:\n  execution_type: system_node\n  event_handlers:\n    work.ready:\n      advances_to: reviewing\n" + shape.effects,
+						"review/nodes.yaml":  "inspect:\n  execution_type: system_node\n  event_handlers:\n    work.ready:\n      advances_to: reviewing\n" + shape.effects, "manifest.yaml": "version: 1.0.0\nplatform_version: '*'\n", "review/manifest.yaml": "version: 1.0.0\nplatform_version: '*'\n",
 					}
 					if shape.entity != "" {
 						files["review/entities.yaml"] = "review_item:\n  marker: {type: text, initial: original}\n"

@@ -7,10 +7,13 @@ import (
 	"testing"
 	"time"
 
+	"github.com/division-sh/swarm/internal/runtime/authoractivity"
+	runtimebus "github.com/division-sh/swarm/internal/runtime/bus"
 	runtimecorrelation "github.com/division-sh/swarm/internal/runtime/correlation"
 	runtimeengine "github.com/division-sh/swarm/internal/runtime/engine"
 	"github.com/division-sh/swarm/internal/runtime/executionposture"
 	runtimegenericschedule "github.com/division-sh/swarm/internal/runtime/genericschedule"
+	"github.com/division-sh/swarm/internal/runtime/startupownership"
 	"github.com/google/uuid"
 )
 
@@ -74,8 +77,23 @@ func TestGenericScheduleSchedulerConsumesCommittedErrorOnBothStores(t *testing.T
 		for _, phase := range []string{"healthy", "preparation_postcommit_error", "settlement_postcommit_error"} {
 			t.Run(backend.name+"/"+phase, func(t *testing.T) {
 				selected, db, ctx := backend.open(t)
-				registerTestAuthorActivityCatalogForContext(t, selected.(testAuthorActivityCatalogRegistrar), testAuthorActivityContext())
-				bus, err := newStoreTestEventBus(t, selected.(storeTestDurableEventBusStore))
+				mutation, err := startupownership.CaptureMutationAuthority(ctx)
+				if err != nil {
+					t.Fatal(err)
+				}
+				runtimeID := mutation.ProcessAuthority().RuntimeInstanceID
+				ctx = runtimecorrelation.WithRuntimeInstanceID(ctx, runtimeID)
+				fact, present := runtimecorrelation.SourceArtifactFactFromContext(ctx)
+				if !present || fact.Validate() != nil {
+					t.Fatal("native schedule source fact is required")
+				}
+				ctx = authoractivity.WithScope(ctx, authoractivity.BundleScope(runtimeID, fact.BundleHash()))
+				registerTestAuthorActivityCatalogForContext(t, selected.(testAuthorActivityCatalogRegistrar), ctx)
+				bus, err := newStoreTestEventBus(t, selected.(storeTestDurableEventBusStore), runtimebus.EventBusOptions{RuntimeInstanceID: runtimeID})
+				if err != nil {
+					t.Fatal(err)
+				}
+				ctx, err = bus.AdmitSourceArtifactFact(ctx)
 				if err != nil {
 					t.Fatal(err)
 				}
@@ -90,7 +108,7 @@ func TestGenericScheduleSchedulerConsumesCommittedErrorOnBothStores(t *testing.T
 				planner := &scheduleConsumerOutcomePlanner{PublicationPlanner: bus}
 				scheduler := &selectedStoreLifecycleScheduler{}
 				dispatcher := &terminalScheduleDispatcherProbe{}
-				lifecycle, err := runtimegenericschedule.NewLifecycle(store, scheduler, planner, dispatcher, nil, executionposture.Live)
+				lifecycle, err := runtimegenericschedule.NewLifecycle(store, scheduler, planner, dispatcher, forkCompletionScheduleLogger{t: t}, executionposture.Live)
 				if err != nil {
 					t.Fatal(err)
 				}

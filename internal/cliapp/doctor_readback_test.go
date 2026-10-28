@@ -38,7 +38,7 @@ func TestDoctorInstalledReadbackScopesAdmissionBlockers(t *testing.T) {
 			}
 			if len(report.Findings) != 1 || report.Findings[0].Category != localPreflightProviderPackPrerequisite ||
 				report.Findings[0].Code != "platform_pack_load_failed" || report.Findings[0].Status != LocalPreflightStatusFailed ||
-				report.Findings[0].Severity != LocalPreflightSeverityBlocker || report.Findings[0].Message != "selected platform pack base inventory is required" {
+				report.Findings[0].Severity != LocalPreflightSeverityBlocker || report.Findings[0].Message != "selected platform provider inventory is required" {
 				t.Fatalf("invalid inventory lost its provider-pack blocker: %#v", report)
 			}
 			if (report.SchemaInventory != nil) != schemaInventory || report.PackInventory != nil {

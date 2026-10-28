@@ -150,7 +150,9 @@ func startLifecycleReleaseProcess(t *testing.T, binary string, backend servedpar
 		db, backendName = postgres, "postgres"
 		config = writeChannelOnboardingPostgresRuntimeConfig(t, dsn)
 	}
-	env := append(releaseProviderTriggerProcessEnv(), "PGPASSWORD="+os.Getenv("PGPASSWORD"), "ANTHROPIC_API_KEY=", "OPENAI_API_KEY=")
+	credentialPath := filepath.Join(t.TempDir(), "provider-credentials.json")
+	writeChannelOnboardingLiveToolCredentials(t, credentialPath)
+	env := append(releaseProviderTriggerProcessEnv(), "PGPASSWORD="+os.Getenv("PGPASSWORD"), "ANTHROPIC_API_KEY=", "OPENAI_API_KEY=", "SWARM_CREDENTIALS_FILE="+credentialPath)
 	endpoint := startReleaseServeEndpoint(t, binary, backend, root, config, env)
 	observer, err := storetest.OpenReleaseProcessReadOnlyInspection(backendName, location)
 	if err != nil {

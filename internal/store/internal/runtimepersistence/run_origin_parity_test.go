@@ -13,8 +13,10 @@ import (
 	"github.com/division-sh/swarm/internal/runtime/pipelineobligation"
 	runtimerunlifecycle "github.com/division-sh/swarm/internal/runtime/runlifecycle"
 	"github.com/division-sh/swarm/internal/runtime/startupownership"
+	"github.com/division-sh/swarm/internal/sourceartifact"
 	storerunlifecycle "github.com/division-sh/swarm/internal/store/internal/backend/runlifecycle"
 	"github.com/division-sh/swarm/internal/testutil/runlifecyclefixture"
+	"github.com/division-sh/swarm/internal/testutil/sourceartifactfixture"
 	"github.com/google/uuid"
 )
 
@@ -29,7 +31,11 @@ func TestEventAndScenarioRunOriginLifecycleParity(t *testing.T) {
 		t.Run(backend, func(t *testing.T) {
 			fixture := openRunLifecycleCandidateParityFixture(t, backend)
 			reader := fixture.store.(runOriginReadStore)
-			ctx := originalStoreFixtureContext(t, testAuthorActivityContextForBundle(runLifecycleCandidateParityBundleHash), fixture.store)
+			ctx := testAuthorActivityContextForBundle(runLifecycleCandidateParityBundleHash)
+			ctx = originalStoreFixtureContext(t, ctx, fixture.store)
+			rooted, _ := sourceartifactfixture.Rooted(t, "fixture", sourceartifactfixture.Artifact())
+			sourceartifactfixture.RequireArtifact(t, ctx, fixture.store, rooted.Artifact())
+			ctx = runtimecorrelation.WithRootAdmission(ctx, rooted.Admission())
 			at := time.Date(2026, 7, 29, 16, 0, 0, 0, time.UTC)
 
 			t.Run("event_origin_survives_later_event", func(t *testing.T) {
@@ -72,7 +78,7 @@ func TestEventAndScenarioRunOriginLifecycleParity(t *testing.T) {
 				source := mustStoreTestSourceArtifactFact(runLifecycleCandidateParityBundleHash)
 				request := runtimerunlifecycle.CreateRequest{
 					RunID: runID, Origin: runtimerunlifecycle.ScenarioSetupRunOrigin(),
-					Source: source, StartedAt: at.Add(time.Minute),
+					Source: source, RootAdmission: rooted.Admission(), StartedAt: at.Add(time.Minute),
 				}
 				if disposition, err := createRunLifecycleParity(fixture, ctx, request); err != nil ||
 					disposition != runtimerunlifecycle.MutationApplied {
@@ -99,11 +105,12 @@ func TestEventAndScenarioRunOriginLifecycleParity(t *testing.T) {
 				c4RequireExclusiveStart(t, ctx, fixture.store, runID, runLifecycleCandidateParityBundleHash, "")
 
 				replacement := mustStoreTestSourceArtifactFact(runLifecycleCandidateParityReplacementHash)
-				if disposition, err := reviseRunLifecycleSourceParity(fixture, ctx, runID, replacement); err != nil ||
+				replacementRoot, _ := sourceartifactfixture.Rooted(t, "candidate-replacement", runLifecycleCandidateParityReplacementArtifact)
+				if disposition, err := reviseRunLifecycleSourceParity(fixture, ctx, runID, replacement, replacementRoot); err != nil ||
 					disposition != runtimerunlifecycle.MutationApplied {
 					t.Fatalf("revise scenario source = %s/%v", disposition, err)
 				}
-				ctx = startupownership.CarryMutationAuthority(testAuthorActivityContextForBundle(runLifecycleCandidateParityReplacementHash), ctx)
+				ctx = startupownership.CarryMutationAuthority(runtimecorrelation.WithRootAdmission(testAuthorActivityContextForBundle(runLifecycleCandidateParityReplacementHash), replacementRoot.Admission()), ctx)
 				requireRunOriginHeader(t, ctx, reader, runID, want, 1)
 				c4RequireExclusiveStart(t, ctx, fixture.store, runID, runLifecycleCandidateParityBundleHash, "")
 				for _, state := range []runtimerunlifecycle.State{
@@ -155,6 +162,7 @@ func TestRunOriginStorageConstraintParity(t *testing.T) {
 		t.Run(backend, func(t *testing.T) {
 			fixture := openRunLifecycleCandidateParityFixture(t, backend)
 			ctx := context.Background()
+			rooted, _ := sourceartifactfixture.Rooted(t, "fixture", sourceartifactfixture.Artifact())
 			eventID := uuid.NewString()
 			sourceRunID := uuid.NewString()
 			sourceEventID := uuid.NewString()
@@ -178,7 +186,7 @@ func TestRunOriginStorageConstraintParity(t *testing.T) {
 				test := test
 				t.Run(test.name, func(t *testing.T) {
 					err := insertRawRunOrigin(
-						ctx, fixture.db, backend, uuid.NewString(),
+						ctx, fixture.db, backend, uuid.NewString(), rooted.Admission(),
 						test.kind, test.eventID, test.eventType,
 						test.sourceRunID, test.sourceEventID,
 					)
@@ -238,6 +246,7 @@ func insertRawRunOrigin(
 	db *sql.DB,
 	backend string,
 	runID string,
+	root sourceartifact.RootAdmission,
 	kind string,
 	eventID string,
 	eventType string,
@@ -246,7 +255,7 @@ func insertRawRunOrigin(
 ) error {
 	snapshot := runlifecyclefixture.CorruptSnapshot{
 		RunID: runID, State: string(runtimerunlifecycle.StateRunning),
-		BundleHash: runLifecycleCandidateParityBundleHash,
+		BundleHash: root.BundleHash(), RootDirectory: root.RootDirectory(),
 		OriginKind: kind, TriggerEventID: eventID, TriggerEventType: eventType,
 		ForkedFromRunID: sourceRunID, ForkedFromEventID: sourceEventID,
 		StartedAt: time.Date(2026, 7, 29, 17, 0, 0, 0, time.UTC),

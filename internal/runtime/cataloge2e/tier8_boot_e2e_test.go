@@ -13,6 +13,7 @@ import (
 	runtimebootverify "github.com/division-sh/swarm/internal/runtime/bootverify"
 	runtimecontracts "github.com/division-sh/swarm/internal/runtime/contracts"
 	worklifetime "github.com/division-sh/swarm/internal/runtime/core/worklifetime"
+	runtimecorrelation "github.com/division-sh/swarm/internal/runtime/correlation"
 	runtimecredentials "github.com/division-sh/swarm/internal/runtime/credentials"
 	"github.com/division-sh/swarm/internal/runtime/executionposture"
 	runtimellm "github.com/division-sh/swarm/internal/runtime/llm"
@@ -132,7 +133,11 @@ func newTier8Runtime(t testing.TB, bundle *runtimecontracts.WorkflowContractBund
 	selected := storetest.StartSQLiteRuntimeStore(t)
 	cfg := testRuntimeConfig()
 	sourceArtifactFact := catalogSourceArtifactFact(t, bundle)
-	ctx := testAuthorActivityContextForBundle(context.Background(), sourceArtifactFact)
+	rooted, err := bundle.RootedSource()
+	if err != nil {
+		return nil, err
+	}
+	ctx := runtimecorrelation.WithRootAdmission(testAuthorActivityContextForBundle(context.Background(), sourceArtifactFact), rooted.Admission())
 	ctx, capability := acquireCatalogRuntimeProcess(t, ctx, selected)
 	storetest.RequireBundleDataCatalog(t, ctx, selected, bundle)
 	deps := catalogSQLiteRuntimeDeps(
@@ -150,7 +155,7 @@ func newTier8Runtime(t testing.TB, bundle *runtimecontracts.WorkflowContractBund
 	if err != nil {
 		return nil, err
 	}
-	installCatalogRuntimeStartupGrant(t, ctx, capability, rt, false)
+	installCatalogRuntimeStartupGrant(t, ctx, capability, rt, rooted.Admission(), false)
 	return rt, nil
 
 }

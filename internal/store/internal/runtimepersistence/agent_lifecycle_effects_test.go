@@ -11,17 +11,20 @@ import (
 	runtimepkg "github.com/division-sh/swarm/internal/runtime"
 	runtimeactors "github.com/division-sh/swarm/internal/runtime/core/actors"
 	runtimeagentidentity "github.com/division-sh/swarm/internal/runtime/core/agentidentity"
+	"github.com/division-sh/swarm/internal/runtime/correlation"
 	runtimeeffects "github.com/division-sh/swarm/internal/runtime/effects"
 	"github.com/division-sh/swarm/internal/runtime/executionposture"
 	runtimefailures "github.com/division-sh/swarm/internal/runtime/failures"
 	runtimemanager "github.com/division-sh/swarm/internal/runtime/manager"
 	agentfixture "github.com/division-sh/swarm/internal/store/testutil/agentfixture"
 	"github.com/division-sh/swarm/internal/testutil"
+	"github.com/division-sh/swarm/internal/testutil/sourceartifactfixture"
 )
 
 type lifecycleEffectStore interface {
 	agentfixture.Store
 	runtimeeffects.Store
+	sourceartifactfixture.RootedWriter
 }
 
 func TestLifecycleAndExternalEffectAuthoritySQLite(t *testing.T) {
@@ -46,7 +49,11 @@ func TestSameSlugSiblingExternalEffectAuthorityPostgres(t *testing.T) {
 
 func proveSameSlugSiblingExternalEffectAuthority(t *testing.T, store lifecycleEffectStore, db *sql.DB, sqlite bool) {
 	t.Helper()
-	ctx := originalStoreFixtureContext(t, testAuthorActivityContext(), store)
+	rooted, _ := sourceartifactfixture.Rooted(t, "fixture", sourceartifactfixture.Artifact())
+	ctx := originalStoreFixtureContext(t, correlation.WithRootAdmission(testAuthorActivityContext(), rooted.Admission()), store)
+	if _, err := store.EnsureRootedSource(ctx, rooted); err != nil {
+		t.Fatal(err)
+	}
 	now := time.Date(2026, 7, 10, 19, 0, 0, 0, time.UTC)
 	identities := []struct {
 		identity runtimeagentidentity.Identity
@@ -155,7 +162,11 @@ func proveSameSlugSiblingExternalEffectAuthority(t *testing.T, store lifecycleEf
 
 func proveLifecycleAndExternalEffectAuthority(t *testing.T, store lifecycleEffectStore, db *sql.DB, sqlite bool) {
 	t.Helper()
-	ctx := originalStoreFixtureContext(t, testAuthorActivityContext(), store)
+	rooted, _ := sourceartifactfixture.Rooted(t, "fixture", sourceartifactfixture.Artifact())
+	ctx := originalStoreFixtureContext(t, correlation.WithRootAdmission(testAuthorActivityContext(), rooted.Admission()), store)
+	if _, err := store.EnsureRootedSource(ctx, rooted); err != nil {
+		t.Fatal(err)
+	}
 	now := time.Date(2026, 7, 10, 18, 0, 0, 0, time.UTC)
 	identity := testAgentIdentity(t, "lifecycle-agent", "global")
 	rec := runtimemanager.PersistedAgent{

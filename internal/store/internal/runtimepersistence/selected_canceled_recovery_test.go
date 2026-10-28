@@ -7,12 +7,15 @@ import (
 	"testing"
 	"time"
 
+	"github.com/division-sh/swarm/internal/events"
+	"github.com/division-sh/swarm/internal/events/eventtest"
 	rootruntime "github.com/division-sh/swarm/internal/runtime"
 	"github.com/division-sh/swarm/internal/runtime/authoractivity"
 	"github.com/division-sh/swarm/internal/runtime/bus"
 	"github.com/division-sh/swarm/internal/runtime/core/eventreceiver"
 	"github.com/division-sh/swarm/internal/runtime/core/timeridentity"
 	"github.com/division-sh/swarm/internal/runtime/core/worklifetime"
+	"github.com/division-sh/swarm/internal/runtime/correlation"
 	"github.com/division-sh/swarm/internal/runtime/deliverylifecycle"
 	"github.com/division-sh/swarm/internal/runtime/effects"
 	"github.com/division-sh/swarm/internal/runtime/executionposture"
@@ -20,6 +23,7 @@ import (
 	"github.com/division-sh/swarm/internal/runtime/runcontrol"
 	"github.com/division-sh/swarm/internal/runtime/runfork"
 	"github.com/division-sh/swarm/internal/runtime/runforkexecution"
+	"github.com/division-sh/swarm/internal/runtime/semanticview"
 	"github.com/division-sh/swarm/internal/runtime/startupownership"
 	"github.com/division-sh/swarm/internal/runtime/testfixtures/canonicalrouting"
 	"github.com/google/uuid"
@@ -204,8 +208,62 @@ func TestSelectedCanceledOriginStartupReactionBothStores(t *testing.T) {
 	for _, backend := range []string{"sqlite", "postgres"} {
 		t.Run(backend, func(t *testing.T) {
 			selected, db, sqlite := selectedForkDiscardTestStore(t, backend)
-			f := newSelectedProviderCompletionFixture(t, selected, db, sqlite)
-			ctx := testAuthorActivityContextForBundle(f.request.DeclarationPlan.BundleHash)
+			base := selectedProviderCompletionSourceForTest(t)
+			baseBundle, _ := semanticview.Bundle(base)
+			files := make(map[string]string)
+			for _, entry := range baseBundle.SourceArtifact.Entries() {
+				files[entry.Label()] = string(entry.Bytes())
+			}
+			files["global/events.yaml"] = "test.grant_receiver:\n"
+			bundle := loadLifecyclePersistenceFixtureForTest(t, files)
+			source := semanticview.Wrap(bundle)
+			rooted, err := bundle.RootedSource()
+			if err != nil {
+				t.Fatal(err)
+			}
+			sourceRun := uuid.NewString()
+			ctx := testAuthorActivityContextForBundle(rooted.Admission().BundleHash())
+			ctx = correlation.WithRootAdmission(ctx, rooted.Admission())
+			ctx = originalStoreFixtureContext(t, ctx, selected)
+			registerTestAuthorActivityCatalog(t, selected.(testAuthorActivityCatalogRegistrar))
+			requireRunFixtureForTest(t, ctx, selected, semanticRunFixture{RunID: sourceRun, Origin: semanticScenarioSetupRunOriginForTest(), Artifact: rooted.Artifact(), StartedAt: time.Now().UTC()})
+			point := eventtest.ExistingRunRootIngress(uuid.NewString(), "test.grant_receiver", "operator", "", []byte(`{}`), 0, sourceRun, events.EventEnvelope{}, time.Now().UTC())
+			if err := commitSemanticEventFixture(ctx, selected.(semanticEventFixtureStore), point); err != nil {
+				t.Fatal(err)
+			}
+			selection := runfork.RunForkContractSelection{Mode: runfork.RunForkContractSelectionModeSelectedContracts}
+			materialization := prepareSelectedStoreMaterializationForTest(t, ctx, selected, sourceRun, point.ID(), selection, rooted.Admission().BundleHash())
+			materialization.ForkOperation = &runfork.ForkOperationRequest{
+				OperationID: uuid.NewString(), Actor: "selected-startup-proof", IdempotencyKey: uuid.NewString(),
+				TransportHash: "sha256:selected-startup-proof", SourceRunID: sourceRun, ForkEventID: point.ID(),
+				TargetBundleHash: rooted.Admission().BundleHash(), TargetRootReference: rooted.Admission().Reference(),
+				ContractSelection: selection,
+			}
+			child, err := selected.(runforkexecution.SelectedContractForkLifecycle).MaterializeRunForkForSelectedContractExecution(ctx, materialization)
+			if err != nil {
+				t.Fatal(err)
+			}
+			if child.SelectedContractBinding == nil {
+				t.Fatal("selected materialization omitted its durable binding")
+			}
+			value, _ := storeTestWorkFixtures.Load(t)
+			preparationCapability := selectedMaterializationProcessForTest(t, value.(*storeTestWorkFixture), selected)
+			admission := runfork.RunForkSelectedContractExecutionAdmission{
+				Owner: runfork.RunForkSelectedContractExecutionAdmissionOwner, FutureExecutionOwner: runfork.RunForkSelectedContractExecutionOwner,
+				NonMutating: true, ForkRunID: child.ForkRunID, SourceRunID: sourceRun, ForkPoint: child.ForkPoint, ForkEventID: point.ID(),
+				ContractSelection: selection, ContractBindingOwner: runfork.RunForkSelectedContractBindingOwner,
+				AdmissionOwner: "runtime.run_fork.frontier", AdmissionUse: runfork.RunForkSelectedContractExecutionAdmissionUseDurableBinding,
+				ExecutionModelOwner: runfork.RunForkSelectedContractExecutionModelOwner,
+				SourceWorkflowName:  source.WorkflowName(), SourceWorkflowVersion: source.WorkflowVersion(),
+				DeferredWorkAdmissionOwner: runfork.RunForkSelectedContractDeferredWorkAdmissionOwner,
+			}
+			f := selectedCompletionFixture{store: selected, db: db, sqlite: sqlite, process: preparationCapability, providerSource: source,
+				sourceRun: sourceRun, forkRun: child.ForkRunID, eventID: point.ID(), admission: admission}
+			f.request.Admission, f.request.ExecutionMode, f.request.Now = admission, effects.ExecutionModeLive, time.Now().UTC()
+			f.request.Preparation = selectedPreparationForTest(t, preparationCapability, sourceRun, child.ForkRunID, child.ForkPoint, emptySelectedDeclarationForTest(t, db, child.ForkRunID))
+			f.request.Preparation.ForkPoint = child.ForkPoint
+			f = selectedProviderCompletionFixtureForSource(t, f, source)
+			ctx = testAuthorActivityContextForBundle(f.request.DeclarationPlan.BundleHash)
 			issued, err := selected.IssueRunForkSelectedContractRuntimeExecution(ctx, f.request)
 			if err != nil {
 				t.Fatal(err)

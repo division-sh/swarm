@@ -90,6 +90,7 @@ func testServedLifecycleEmitterDanglingAdmission(t *testing.T, backend servedpar
 func TestServedLifecycleEmitterPublicInputAdmissionNoMutation(t *testing.T) {
 	for _, backend := range []servedparity.Backend{servedparity.BackendDefaultSQLite, servedparity.BackendExplicitPostgres} {
 		t.Run(string(backend), func(t *testing.T) {
+			configureStandingLifecycleCredentials(t)
 			for _, tc := range []struct {
 				name, event, site, state string
 				variant                  canonicalrouting.LifecycleEmitterVariant

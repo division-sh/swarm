@@ -11,7 +11,8 @@ func CopySemanticNumericIngress(t testing.TB) string {
 	t.Helper()
 	root := CopyScenarioRootSetup(t)
 	for name, raw := range map[string]string{
-		"schema.yaml": `name: semantic-numeric-ingress
+		"manifest.yaml": "version: 1.0.0\nplatform_version: '*'\n",
+		"schema.yaml": `# fixture: semantic-numeric-ingress
 stages:
   waiting: {}
   done: {final: true}

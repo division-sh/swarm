@@ -139,7 +139,7 @@ func configureStandingLifecycleCredentials(t *testing.T) {
 	if err != nil {
 		t.Fatalf("NewFileStore: %v", err)
 	}
-	for key, value := range map[string]string{"webhook_signing.telegram": "telegram-secret", "telegram_bot_token": "bot-token"} {
+	for key, value := range map[string]string{"telegram.webhook_signing_secret": "telegram-secret", "telegram.telegram_bot_token": "bot-token"} {
 		if err := credentials.Set(context.Background(), key, value); err != nil {
 			t.Fatalf("set credential %s: %v", key, err)
 		}
@@ -184,7 +184,7 @@ func TestStandingIngressSupportedSurfaceSQLiteRestartPreservesAuthorityAndReplie
 	if err != nil {
 		t.Fatalf("NewFileStore: %v", err)
 	}
-	for key, value := range map[string]string{"webhook_signing.telegram": "telegram-secret", "telegram_bot_token": "bot-token"} {
+	for key, value := range map[string]string{"telegram.webhook_signing_secret": "telegram-secret", "telegram.telegram_bot_token": "bot-token"} {
 		if err := credentialStore.Set(context.Background(), key, value); err != nil {
 			t.Fatalf("set credential %s: %v", key, err)
 		}
@@ -217,7 +217,7 @@ func TestStandingIngressSupportedSurfaceSQLiteRestartPreservesAuthorityAndReplie
 		"listeners                  api 127.0.0.1:",
 		"ready in ",
 		"telegram webhook",
-		"webhook_signing.telegram bound",
+		"telegram.webhook_signing_secret bound",
 		"shutdown · complete",
 	} {
 		if !strings.Contains(firstOutput, want) {
@@ -265,21 +265,21 @@ func TestStandingIngressSupportedSurfaceSQLiteRestartPreservesAuthorityAndReplie
 	if err := storetest.DatabaseForTest(sqliteStore).QueryRow(`
 		SELECT run_id
 		FROM runs
-		WHERE flow_path = 'telegram-ingress'
+		WHERE flow_path = '.'
 		  AND landing_run = TRUE
 	`).Scan(&standingRunID); err != nil || standingRunID != firstBinding.RunID {
 		t.Fatalf("resolve standing run authority: %v", err)
 	}
-	_, receiver := requireSingleReceiverTargetState(t, requireReceiverProofStateReader(t, sqliteStore), standingRunID, "telegram-ingress")
+	_, receiver := requireSingleReceiverTargetState(t, requireReceiverProofStateReader(t, sqliteStore), standingRunID, ".")
 	standingEntityID := receiver.EntityID
 	if err := storetest.DatabaseForTest(sqliteStore).QueryRow(`
 		SELECT COUNT(*)
 		FROM runs
-		WHERE flow_path = 'telegram-ingress'
+		WHERE flow_path = '.'
 	`).Scan(&runs); err != nil {
 		t.Fatalf("count standing run authorities: %v", err)
 	}
-	if err := storetest.DatabaseForTest(sqliteStore).QueryRow(`SELECT COUNT(*) FROM flow_instances WHERE flow_template = 'telegram-ingress'`).Scan(&instances); err != nil {
+	if err := storetest.DatabaseForTest(sqliteStore).QueryRow("SELECT COUNT(*) FROM flow_instances WHERE flow_template = '.'").Scan(&instances); err != nil {
 		t.Fatalf("count standing instances: %v", err)
 	}
 	if err := storetest.DatabaseForTest(sqliteStore).QueryRow(`SELECT COUNT(*) FROM entity_state WHERE entity_id = ?`, standingEntityID).Scan(&entities); err != nil {
@@ -334,7 +334,7 @@ func TestServeAuthorActivityAttachmentFailureKeepsRuntimeHealthy(t *testing.T) {
 	if err != nil {
 		t.Fatalf("NewFileStore: %v", err)
 	}
-	for key, value := range map[string]string{"webhook_signing.telegram": "telegram-secret", "telegram_bot_token": "bot-token"} {
+	for key, value := range map[string]string{"telegram.webhook_signing_secret": "telegram-secret", "telegram.telegram_bot_token": "bot-token"} {
 		if err := credentialStore.Set(context.Background(), key, value); err != nil {
 			t.Fatalf("set credential %s: %v", key, err)
 		}
@@ -366,44 +366,6 @@ func TestServeAuthorActivityAttachmentFailureKeepsRuntimeHealthy(t *testing.T) {
 	}
 	if code := process.stop(); code != 0 {
 		t.Fatalf("serve exit after feed attachment failure = %d\n%s", code, process.outputString())
-	}
-}
-
-func TestStandingIngressUnsupportedAliasFailsBeforeServeReadiness(t *testing.T) {
-	isolateCLIAPIConfigEnv(t)
-	sourceRoot := writeStandingTelegramServeFixture(t, "http://127.0.0.1:1")
-	credentialPath := filepath.Join(t.TempDir(), "credentials.json")
-	t.Setenv("SWARM_CREDENTIALS_FILE", credentialPath)
-	credentialStore, err := runtimecredentials.NewFileStore(credentialPath)
-	if err != nil {
-		t.Fatalf("NewFileStore: %v", err)
-	}
-	for key, value := range map[string]string{"webhook_signing.telegram": "telegram-secret", "telegram_bot_token": "bot-token"} {
-		if err := credentialStore.Set(context.Background(), key, value); err != nil {
-			t.Fatalf("set credential %s: %v", key, err)
-		}
-	}
-	schemaPath := filepath.Join(sourceRoot, "telegram-ingress", "schema.yaml")
-	raw, err := os.ReadFile(schemaPath)
-	if err != nil {
-		t.Fatalf("read ingress schema: %v", err)
-	}
-	writeStandingCandidateFile(t, schemaPath, strings.Replace(string(raw), "alias: chat", "alias: chat/support", 1))
-	sqlitePath := filepath.Join(t.TempDir(), "invalid-alias.sqlite")
-	process := startServeRuntimeTestProcess(t, cliapp.ServeOptions{
-		ConfigPath: writeStoreBackendRuntimeConfigWithWorkspaceFields(t, "sqlite", sqlitePath, nil),
-		SourceRoot: sourceRoot, StoreMode: "sqlite", APIListenAddr: "127.0.0.1:0", MCPListenAddr: "127.0.0.1:0",
-		SelfCheck: true, Dev: true, LocalRun: true, Verbose: true,
-	})
-	code, exited := process.waitForExit(15 * time.Second)
-	if !exited {
-		process.cleanup()
-		t.Fatal("serve reached a live process with an unreachable standing ingress alias")
-	}
-	process.recordStopped(code)
-	output := process.outputString()
-	if code == 0 || !strings.Contains(output, "one URL-safe path segment") || strings.Contains(output, "swarm runtime ready") {
-		t.Fatalf("invalid alias exit/output = %d\n%s", code, output)
 	}
 }
 
@@ -449,7 +411,7 @@ func TestStandingIngressSupportedSurfacePostgresRestartPreservesAuthorityAndRepl
 	if err != nil {
 		t.Fatalf("NewFileStore: %v", err)
 	}
-	for key, value := range map[string]string{"webhook_signing.telegram": "telegram-secret", "telegram_bot_token": "bot-token"} {
+	for key, value := range map[string]string{"telegram.webhook_signing_secret": "telegram-secret", "telegram.telegram_bot_token": "bot-token"} {
 		if err := credentialStore.Set(context.Background(), key, value); err != nil {
 			t.Fatalf("set credential %s: %v", key, err)
 		}
@@ -498,7 +460,7 @@ func TestStandingIngressSupportedSurfacePostgresRestartPreservesAuthorityAndRepl
 	if err := db.QueryRow(`
 		SELECT run_id::text
 		FROM runs
-		WHERE flow_path = 'telegram-ingress'
+		WHERE flow_path = '.'
 		  AND landing_run = TRUE
 	`).Scan(&standingRunID); err != nil || standingRunID != binding.RunID {
 		t.Fatalf("resolve standing run authority: %v", err)
@@ -507,7 +469,7 @@ func TestStandingIngressSupportedSurfacePostgresRestartPreservesAuthorityAndRepl
 	if err != nil {
 		t.Fatal(err)
 	}
-	_, receiver := requireSingleReceiverTargetState(t, requireReceiverProofStateReader(t, observer), standingRunID, "telegram-ingress")
+	_, receiver := requireSingleReceiverTargetState(t, requireReceiverProofStateReader(t, observer), standingRunID, ".")
 	if err := observer.Close(); err != nil {
 		t.Fatal(err)
 	}
@@ -515,11 +477,11 @@ func TestStandingIngressSupportedSurfacePostgresRestartPreservesAuthorityAndRepl
 	if err := db.QueryRow(`
 		SELECT COUNT(*)
 		FROM runs
-		WHERE flow_path = 'telegram-ingress'
+		WHERE flow_path = '.'
 	`).Scan(&runs); err != nil {
 		t.Fatalf("count standing run authorities: %v", err)
 	}
-	if err := db.QueryRow(`SELECT COUNT(*) FROM flow_instances WHERE flow_template = 'telegram-ingress'`).Scan(&instances); err != nil {
+	if err := db.QueryRow("SELECT COUNT(*) FROM flow_instances WHERE flow_template = '.'").Scan(&instances); err != nil {
 		t.Fatalf("count standing instances: %v", err)
 	}
 	if err := db.QueryRow(`SELECT COUNT(*) FROM entity_state WHERE entity_id = $1::uuid`, entity).Scan(&entities); err != nil {
@@ -634,7 +596,7 @@ func TestStandingRestartMixedHealthyAndTerminalProcessParity(t *testing.T) {
 			if db == nil {
 				t.Fatalf("%s mixed standing database was not captured", backend)
 			}
-			healthyRun := loadServedLandingRunByFlow(t, db, backend, "telegram-ingress")
+			healthyRun := loadServedLandingRunByFlow(t, db, backend, ".")
 			terminalRun := loadServedLandingRunByFlow(t, db, backend, "telegram-stopped")
 			firstURL := "http://" + serveRuntimeAPIListenerFromOutput(t, first.outputString())
 			if binding := sendStandingTelegramUpdate(t, firstURL, 301, 42); binding.RunID != healthyRun {
@@ -825,7 +787,7 @@ func requireChangedStandingColdStartMatrix(t *testing.T, opts cliapp.ServeOption
 		}
 		writeStandingCandidateFile(t, rootSchemaPath, string(raw))
 	}
-	flowDir := filepath.Join(sourceRoot, "telegram-ingress")
+	flowDir := filepath.Join(sourceRoot, ".")
 	flowSchemaPath := filepath.Join(flowDir, "schema.yaml")
 	baseFlowSchema, err := os.ReadFile(flowSchemaPath)
 	if err != nil {
@@ -868,6 +830,7 @@ func requireChangedStandingColdStartMatrix(t *testing.T, opts cliapp.ServeOption
 			delete(schema, "pins")
 			delete(schema, "activation")
 			delete(schema, "ingress")
+			delete(schema, "connect")
 			raw, err := yaml.Marshal(schema)
 			if err != nil {
 				t.Fatal(err)
@@ -1140,8 +1103,12 @@ func standingSQLiteDiagnostics(path string) string {
 func writeStandingTelegramServeFixture(t testing.TB, telegramBaseURL string) string {
 	t.Helper()
 	root := canonicalrouting.CopyExample(t, canonicalrouting.TelegramAgent)
+	selected := filepath.Join(filepath.Dir(root), "chat")
+	if err := os.Rename(root, selected); err != nil {
+		t.Fatal(err)
+	}
 	redirectExternalHosts(t, map[string]string{"api.telegram.org": telegramBaseURL})
-	return root
+	return selected
 }
 
 func writeMixedStandingTelegramServeFixture(t testing.TB, telegramBaseURL string) string {
@@ -1151,20 +1118,27 @@ func writeMixedStandingTelegramServeFixture(t testing.TB, telegramBaseURL string
 	if err := os.MkdirAll(flowDir, 0o755); err != nil {
 		t.Fatalf("create terminal standing flow directory: %v", err)
 	}
-	baseSchema, err := os.ReadFile(filepath.Join(root, "telegram-ingress", "schema.yaml"))
+	baseSchema, err := os.ReadFile(filepath.Join(root, "schema.yaml"))
 	if err != nil {
 		t.Fatalf("read healthy standing flow schema: %v", err)
 	}
-	stoppedSchema := strings.Replace(string(baseSchema), "name: telegram-ingress", "name: telegram-stopped", 1)
-	stoppedSchema = canonicalrouting.WithoutStandingIngressPins(t, stoppedSchema)
-	if ingress := strings.Index(stoppedSchema, "\ningress:\n"); ingress >= 0 {
-		stoppedSchema = stoppedSchema[:ingress+1]
+	stoppedSchema := canonicalrouting.WithoutStandingIngressPins(t, string(baseSchema))
+	var declaration map[string]any
+	if err := yaml.Unmarshal([]byte(stoppedSchema), &declaration); err != nil {
+		t.Fatal(err)
 	}
+	delete(declaration, "connect")
+	encoded, err := yaml.Marshal(declaration)
+	if err != nil {
+		t.Fatal(err)
+	}
+	stoppedSchema = string(encoded)
 	stoppedSchema += "schedules:\n  retained: {every: 24h, emit: service.tick}\n"
+	writeStandingCandidateFile(t, filepath.Join(flowDir, "manifest.yaml"), "version: 1.0.0\nplatform_version: '*'\n")
 	writeStandingCandidateFile(t, filepath.Join(flowDir, "schema.yaml"), stoppedSchema)
 	writeStandingCandidateFile(t, filepath.Join(flowDir, "events.yaml"), "service.tick:\n")
 	writeStandingCandidateFile(t, filepath.Join(flowDir, "nodes.yaml"), "hold:\n  execution_type: system_node\n  subscribes_to: [service.tick]\n  event_handlers:\n    service.tick:\n      guard: {id: hold, check: true}\n")
-	baseEntities, err := os.ReadFile(filepath.Join(root, "telegram-ingress", "entities.yaml"))
+	baseEntities, err := os.ReadFile(filepath.Join(root, "entities.yaml"))
 	if err != nil {
 		t.Fatalf("read healthy standing flow entities: %v", err)
 	}

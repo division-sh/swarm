@@ -45,6 +45,13 @@ func TestPreparedProcessOperationJoinsBeforeReleaseAndClosesItsExactScope(t *tes
 		if !PreparedOperationEntered(ctx, PreparedEffectAuthorize, store) || PreparedOperationEntered(ctx, PreparedEffectLaunch, store) || PreparedOperationEntered(ctx, PreparedEffectAuthorize, &preparedEffectProbe{}) {
 			return errors.New("process invocation lost exact operation/owner identity")
 		}
+		for _, target := range []any{[]int{1}, struct{ Value any }{[]int{1}}} {
+			scope := preparedOperationScope{PreparedEffectAuthorize, target, ctx}
+			invalid := context.WithValue(ctx, preparedOperationContextKey{}, scope)
+			if PreparedOperationEntered(invalid, PreparedEffectAuthorize, target) || PreparedOperationEntered(invalid, PreparedEffectAuthorize, struct{ Value any }{1}) {
+				return errors.New("non-comparable target admitted an exact prepared operation")
+			}
+		}
 		retained = context.WithoutCancel(ctx)
 		close(entered)
 		<-resume

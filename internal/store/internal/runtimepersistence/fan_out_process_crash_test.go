@@ -342,9 +342,13 @@ func runFanOutCrashChild(t *testing.T, mode string) {
 	if err != nil {
 		t.Fatal(err)
 	}
+	rooted, err := bundle.RootedSource()
+	if err != nil {
+		t.Fatal(err)
+	}
 	source := semanticview.Wrap(bundle)
 	fact := mustStoreTestSourceArtifactFact(bundle.SourceArtifact.BundleHash())
-	ctx, cancel := context.WithTimeout(correlation.WithRunID(correlation.WithSourceArtifactFact(testAuthorActivityContextForBundle(fact.BundleHash()), fact), runID), 40*time.Second)
+	ctx, cancel := context.WithTimeout(correlation.WithRootAdmission(correlation.WithRunID(correlation.WithSourceArtifactFact(testAuthorActivityContextForBundle(fact.BundleHash()), fact), runID), rooted.Admission()), 40*time.Second)
 	defer cancel()
 	selected := fixture.store.(selectedFanOutOwner)
 	request := testStartupAcquireRequest("fan-out-crash-" + mode)
@@ -370,7 +374,11 @@ func runFanOutCrashChild(t *testing.T, mode string) {
 			t.Fatalf("not actual crash takeover: old=%+v next=%+v", old, authority)
 		}
 	}
-	plan, err := agenttopology.NewSourceSetPlan([]agenttopology.SourceCoordinate{{BundleHash: fact.BundleHash()}}, nil)
+	coordinate, err := agenttopology.NewSourceCoordinate(rooted.Admission())
+	if err != nil {
+		t.Fatal(err)
+	}
+	plan, err := agenttopology.NewSourceSetPlan([]agenttopology.SourceCoordinate{coordinate}, nil)
 	if err != nil {
 		t.Fatal(err)
 	}

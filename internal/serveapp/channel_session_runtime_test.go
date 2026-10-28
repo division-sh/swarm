@@ -4,10 +4,13 @@ import (
 	"context"
 	"errors"
 	"path/filepath"
+	"strings"
 	"testing"
 	"time"
 
 	"github.com/division-sh/swarm/internal/channelonboarding"
+	"github.com/division-sh/swarm/internal/cliapp"
+	"github.com/division-sh/swarm/internal/config"
 	"github.com/division-sh/swarm/internal/packadmission"
 	"github.com/division-sh/swarm/internal/packs"
 	"github.com/division-sh/swarm/internal/providertriggers"
@@ -19,7 +22,7 @@ import (
 	"github.com/division-sh/swarm/internal/runtime/semanticview"
 	"github.com/division-sh/swarm/internal/runtime/testfixtures/canonicalrouting"
 	"github.com/division-sh/swarm/internal/runtime/triggergeneration"
-	"github.com/division-sh/swarm/internal/testutil/packfixture"
+	"github.com/division-sh/swarm/internal/sourceartifact"
 	"github.com/division-sh/swarm/internal/testutil/sourceartifactfixture"
 	"github.com/google/uuid"
 )
@@ -32,7 +35,15 @@ func TestServeSessionRuntimeSelectionRejectsUndeclaredCandidate(t *testing.T) {
 		t.Fatal(err)
 	}
 	source := semanticview.Wrap(bundle)
-	fact := sourceartifactfixture.Fact()
+	fact := sourceartifactfixture.FactFor(bundle.SourceArtifact)
+	rooted, err := bundle.RootedSource()
+	if err != nil {
+		t.Fatal(err)
+	}
+	identity, err := contracts.BootBundleIdentity(bundle)
+	if err != nil {
+		t.Fatal(err)
+	}
 	owner := newSupervisorTestRuntimeOccurrence(t, fact.BundleHash())
 	bus, err := runtimebus.NewEphemeralEventBusWithOptions(&processIngressEventStore{}, runtimebus.EventBusOptions{
 		WorkOwner: owner, ContractBundle: source, SourceArtifactFact: fact, ReceiverExecution: eventreceiver.NormalExecution(),
@@ -41,8 +52,8 @@ func TestServeSessionRuntimeSelectionRejectsUndeclaredCandidate(t *testing.T) {
 		t.Fatal(err)
 	}
 	manager, err := runtimepkg.NewRuntimeContextManager(nil, completeServeTestPackContext(t, runtimepkg.BundleContext{
-		Source: source, SourceArtifactFact: fact, WorkOwner: owner,
-		BundleIdentity: contracts.BundleIdentity{WorkflowName: "root", WorkflowVersion: "1", BundleHash: fact.BundleHash()},
+		Source: source, SourceArtifactFact: fact, RootAdmission: rooted.Admission(), WorkOwner: owner,
+		BundleIdentity: identity,
 		Runtime:        &runtimepkg.Runtime{Bus: bus, ExecutionPosture: executionposture.Live, Options: runtimepkg.RuntimeOptions{RuntimeInstanceID: owner.Identity().RuntimeInstanceID}},
 	}))
 	if err != nil {
@@ -54,8 +65,7 @@ func TestServeSessionRuntimeSelectionRejectsUndeclaredCandidate(t *testing.T) {
 		}
 	})
 	loaded := manager.LoadedContexts()[0]
-	catalog := sessionDiscoveryCatalog(t)
-	plan := packfixture.WhatsAppSessionChannel(t, runtimePlatformSpecPath(t), catalog)
+	catalog, plan, _ := sessionDiscoveryCapturedProvider(t, ".")
 	trigger, err := catalog.CompileAdmission(providertriggers.CompileAdmissionRequest{Alias: "reception", Provider: "whatsapp"})
 	if err != nil {
 		t.Fatal(err)
@@ -99,10 +109,46 @@ func runtimePlatformSpecPath(t testing.TB) string {
 }
 
 func TestServeSessionIncomingSelectionConsumesExactCompiledOwners(t *testing.T) {
-	catalog := sessionDiscoveryCatalog(t)
-	plan := packfixture.WhatsAppSessionChannel(t, runtimePlatformSpecPath(t), catalog)
+	_, _, fixture := sessionDiscoveryCapturedProvider(t, ".")
+	members := map[string][]byte{}
+	for _, member := range fixture.Artifact().Entries() {
+		label := member.Label()
+		members[label] = member.Bytes()
+		if label == "manifest.yaml" || label == "schema.yaml" || strings.HasPrefix(label, "whatsapp/") {
+			members["support/"+label] = member.Bytes()
+		}
+	}
+	artifact, err := sourceartifact.AdmitMembers(members)
+	if err != nil {
+		t.Fatal(err)
+	}
+	rooted, _ := sourceartifactfixture.Rooted(t, "reception", artifact)
+	bundle, err := contracts.LoadWorkflowContractBundleFromRootedSource(repoRootForTest(), rooted, runtimePlatformSpecPath(t), contracts.WorkflowContractLoadOptions{AdmitPackInventory: packadmission.AdmitInventory})
+	if err != nil {
+		t.Fatal(err)
+	}
+	packLoad, err := cliapp.LoadBundlePackRuntime(context.Background(), cliapp.RuntimeConfigLoadResult{Config: &config.Config{}}, bundle, nil, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	providers, err := packadmission.AdmitProviderSource(rooted, bundle.Platform)
+	if err != nil {
+		t.Fatal(err)
+	}
+	identity, err := contracts.BootBundleIdentity(bundle)
+	if err != nil {
+		t.Fatal(err)
+	}
 	var declarations []runtimepkg.StandingTargetDeclaration
 	for _, flow := range []string{".", "support"} {
+		scope, err := providers.Scope(flow)
+		if err != nil {
+			t.Fatal(err)
+		}
+		catalog, err := scope.TriggerCatalog()
+		if err != nil {
+			t.Fatal(err)
+		}
 		alias := "reception"
 		if flow != "." {
 			alias = "support"
@@ -114,9 +160,9 @@ func TestServeSessionIncomingSelectionConsumesExactCompiledOwners(t *testing.T) 
 		declarations = append(declarations, runtimepkg.StandingTargetDeclaration{FlowPath: flow, Alias: alias,
 			Ingress: []runtimepkg.StandingIngressBinding{{Provider: "whatsapp", AdmissionPlan: trigger}}})
 	}
-	definition := runtimepkg.BundleContext{SourceArtifactFact: sourceartifactfixture.Fact(), RuntimeInstanceID: uuid.NewString(),
-		PublicationGeneration: 1, PackInventoryDigest: "sha256:incoming-selection", ChannelPlans: []packs.SatisfactionPlan{plan},
-		BundleIdentity: contracts.BundleIdentity{WorkflowName: "incoming", WorkflowVersion: "1", BundleHash: sourceartifactfixture.BundleHash}}
+	definition := runtimepkg.BundleContext{Source: semanticview.Wrap(bundle), SourceArtifactFact: sourceartifactfixture.FactFor(rooted.Artifact()), RootAdmission: rooted.Admission(), RuntimeInstanceID: uuid.NewString(),
+		PublicationGeneration: 1, PackInventoryDigest: bundle.PackInventory.Digest(), ChannelPlans: packLoad.Channels.Plans,
+		BundleIdentity: identity}
 	// This is a compiled-selection component proof. The manager/source test above
 	// separately proves that an undeclared plan cannot reach this projection.
 	definition.Runtime = &runtimepkg.Runtime{Bus: &runtimebus.EventBus{}, ExecutionPosture: executionposture.Live}

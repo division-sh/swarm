@@ -254,6 +254,7 @@ func TestCompiledTransitionStageTimerReferenceGuards(t *testing.T) {
 func testCompiledOrdinaryConsumerAgreement(t *testing.T) {
 	root := t.TempDir()
 	for _, flow := range []string{".", "child", "sibling"} {
+		writeBootverifyFixtureFile(t, filepath.Join(root, flow, "manifest.yaml"), "version: 1.0.0\nplatform_version: '*'\n")
 		writeBootverifyFixtureFile(t, filepath.Join(root, flow, "schema.yaml"), `
 stages:
   ready:

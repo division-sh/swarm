@@ -1,4 +1,4 @@
-name: test-compose-multi-emit-cross-flow
+# fixture: test-compose-multi-emit-cross-flow
 stages:
   pending: {}
   done: {final: true}

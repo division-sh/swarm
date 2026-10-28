@@ -51,8 +51,12 @@ func workflowHandlerNativeFixtureFromSelected(t *testing.T, source semanticview.
 		t.Fatal("handler fixture requires its exact admitted source artifact")
 	}
 	fact := sourceartifactfixture.FactFor(bundle.SourceArtifact)
+	rooted, err := bundle.RootedSource()
+	if err != nil {
+		t.Fatal(err)
+	}
 	persistence := pipeline.NewWorkflowPersistence(selected)
-	ctx := withLiveGateExecution(testAuthorActivityContextForSource(t, context.Background(), fact))
+	ctx := correlation.WithRootAdmission(withLiveGateExecution(testAuthorActivityContextForSource(t, context.Background(), fact)), rooted.Admission())
 	ctx = originalPipelineFixtureContext(t, ctx, selected)
 	probe := storetest.CollectTransactions(t, selected, storetest.TransactionProbeOptions{})
 	t.Cleanup(func() {
@@ -72,7 +76,7 @@ func workflowHandlerNativeFixtureFromSelected(t *testing.T, source semanticview.
 			LoadRunOrigin(context.Context, string) (runtimerunlifecycle.RunOrigin, error)
 		}),
 		RequireRun: func(ctx context.Context, run string) error {
-			return storetest.MaterializeRun(ctx, selected, storetest.RunFixture{RunID: run, Origin: storetest.ScenarioSetupOrigin(), Artifact: bundle.SourceArtifact, BundleHash: fact.BundleHash(), StartedAt: time.Now().UTC()})
+			return storetest.MaterializeRun(ctx, selected, storetest.RunFixture{RunID: run, Origin: storetest.ScenarioSetupOrigin(), Artifact: bundle.SourceArtifact, RootAdmission: rooted.Admission(), BundleHash: fact.BundleHash(), StartedAt: time.Now().UTC()})
 		},
 		Construct: func(ctx context.Context, instance pipeline.WorkflowInstance) error {
 			command, err := flowactivationfixture.Command(ctx, instance, pipeline.WorkflowLifecycleMutationPlan{}, instance.CreatedAt)

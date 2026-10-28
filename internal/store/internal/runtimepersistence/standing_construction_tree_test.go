@@ -20,9 +20,12 @@ func TestA9KeyedStandingGenerationDoesNotConstructBothStores(t *testing.T) {
 		for _, keyed := range []string{".", "parent"} {
 			t.Run(backend+"/"+keyed, func(t *testing.T) {
 				documents := map[string]string{
-					"schema.yaml":                "name: root\n",
-					"parent/schema.yaml":         "name: parent\n",
-					"parent/service/schema.yaml": "name: service\n",
+					"manifest.yaml":                "version: 1.0.0\nplatform_version: '*'\n",
+					"parent/manifest.yaml":         "version: 1.0.0\nplatform_version: '*'\n",
+					"parent/service/manifest.yaml": "version: 1.0.0\nplatform_version: '*'\n",
+					"schema.yaml":                  "stages: []\n",
+					"parent/schema.yaml":           "stages: []\n",
+					"parent/service/schema.yaml":   "stages: []\n",
 				}
 				documents[filepath.Join(keyed, "schema.yaml")] += "instance: tenant\n"
 				documents[filepath.Join(keyed, "entities.yaml")] = "owner:\n  tenant: text\n"
@@ -77,14 +80,19 @@ func TestStandingPreparationVerifiesCompleteRootTreeBothStores(t *testing.T) {
 		for _, damage := range []string{"intact", "missing_sibling", "missing_fields", "foreign_parent"} {
 			t.Run(backend+"/"+damage, func(t *testing.T) {
 				f := newReceiverConfigActivationFixtureWithDocuments(t, backend, false, map[string]string{
-					"schema.yaml":                "name: standing-root-tree\n",
-					"service/schema.yaml":        "name: service\n",
-					"service/detail/schema.yaml": "name: detail\n",
-					"receiver/schema.yaml":       "name: receiver\n",
-					"receiver/entities.yaml":     "receipt:\n  marker: {type: text, initial: unchanged}\n",
-					"deferred/schema.yaml":       "name: deferred\ninstance: job_id\npins:\n  inputs:\n    - job.started\n",
-					"deferred/entities.yaml":     "job:\n  job_id: text\n",
-					"deferred/events.yaml":       "job.started:\n  job_id: text\n",
+					"manifest.yaml":                "version: 1.0.0\nplatform_version: '*'\n",
+					"service/manifest.yaml":        "version: 1.0.0\nplatform_version: '*'\n",
+					"service/detail/manifest.yaml": "version: 1.0.0\nplatform_version: '*'\n",
+					"receiver/manifest.yaml":       "version: 1.0.0\nplatform_version: '*'\n",
+					"deferred/manifest.yaml":       "version: 1.0.0\nplatform_version: '*'\n",
+					"schema.yaml":                  "stages: []\n# fixture: standing-root-tree\n",
+					"service/schema.yaml":          "stages: []\n",
+					"service/detail/schema.yaml":   "stages: []\n",
+					"receiver/schema.yaml":         "stages: []\n",
+					"receiver/entities.yaml":       "receipt:\n  marker: {type: text, initial: unchanged}\n",
+					"deferred/schema.yaml":         "instance: job_id\npins:\n  inputs:\n    - job.started\n",
+					"deferred/entities.yaml":       "job:\n  job_id: text\n",
+					"deferred/events.yaml":         "job.started:\n  job_id: text\n",
 				}, nil)
 				runID := correlation.RunIDFromContext(f.ctx)
 				req := sqliteFlowActivationRequest(f.bundle, ".", runID, "", runID)

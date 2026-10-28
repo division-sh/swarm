@@ -11,17 +11,19 @@ import (
 func CopyPublicationStateResult(t testing.TB, mode string) string {
 	t.Helper()
 	root, prefix, flow := t.TempDir(), "", "."
+	writeClosedVariantFile(t, root, "manifest.yaml", "version: 1.0.0\nplatform_version: '*'\n")
 	if mode == "static" {
 		prefix, flow = "source/", "source"
+		writeClosedVariantFile(t, root, "source/manifest.yaml", "version: 1.0.0\nplatform_version: '*'\n")
 	} else if mode != "root" {
 		t.Fatalf("unsupported state-result publication topology %q", mode)
 	}
 	connect := fmt.Sprintf("connect:\n  - {event: result.accepted, from: %s, to: sink}\n  - {event: result.rejected, from: %s, to: sink}\n", flow, flow)
-	schema := "name: state-result-publication\npins:\n  inputs:\n    - document.requested\n  outputs:\n    - result.accepted\n    - result.rejected\n"
+	schema := "# fixture: state-result-publication\npins:\n  inputs:\n    - document.requested\n  outputs:\n    - result.accepted\n    - result.rejected\n"
 	if flow == "." {
 		schema += connect
 	} else {
-		writeClosedVariantFile(t, root, "schema.yaml", "name: result-root\npins:\n  inputs: [document.requested]\n  outputs: [document.requested]\n"+connect+"  - {event: document.requested, from: ., to: source}\n")
+		writeClosedVariantFile(t, root, "schema.yaml", "# fixture: result-root\npins:\n  inputs: [document.requested]\n  outputs: [document.requested]\n"+connect+"  - {event: document.requested, from: ., to: source}\n")
 		writeClosedVariantFile(t, root, "events.yaml", "document.requested:\n  request_id: text\n  content: text\n  result_kind: text\n")
 	}
 	writeClosedVariantFile(t, root, prefix+"schema.yaml", schema)
@@ -85,7 +87,8 @@ result.rejected:
             event: result.rejected
             fields: {request_id: entity.request_id, content: entity.content, result_kind: entity.result_kind}
 `+local)
-	writeClosedVariantFile(t, root, "sink/schema.yaml", "name: sink\npins:\n  inputs:\n    - result.accepted\n    - result.rejected\n")
+	writeClosedVariantFile(t, root, "sink/manifest.yaml", "version: 1.0.0\nplatform_version: '*'\n")
+	writeClosedVariantFile(t, root, "sink/schema.yaml", "# fixture: sink\npins:\n  inputs:\n    - result.accepted\n    - result.rejected\n")
 	writeClosedVariantFile(t, root, "sink/nodes.yaml", local)
 	return root
 }

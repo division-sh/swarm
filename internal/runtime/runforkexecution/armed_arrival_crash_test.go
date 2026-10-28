@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"github.com/division-sh/swarm/internal/sourceartifact"
 	"maps"
 	"os"
 	"reflect"
@@ -289,7 +290,7 @@ func testArmedArrivalTimeoutCrashRestartBothStores(t *testing.T, phase string) {
 				})
 				loader := SourceArtifactSelectedContractSourceLoader{RepoRoot: runForkExecutionRepoRoot(t), Store: selected.(SourceArtifactSelectedContractSourceStore)}
 				loaded, err := loader.LoadRunForkSelectedContractSourceForRequest(ctx, SelectedContractSourceLoadRequest{
-					SourceRunID: child, Selection: acknowledged.Request.ContractSelection,
+					Responsibility: RetainedForkSource(child), Selection: acknowledged.Request.ContractSelection,
 				})
 				if err != nil {
 					t.Fatal(err)
@@ -298,7 +299,8 @@ func testArmedArrivalTimeoutCrashRestartBothStores(t *testing.T, phase string) {
 				recovered, err := owner.RecoverSelectedForkContexts(ctx, effects.NewRecoveryRequest(time.Now().UTC(), executionposture.MockOnly), SelectedForkRecoveryEnvironment{
 					SourceLoader: loader, AgentRuntime: SelectedContractAgentRuntimeOptions{ExecutionPosture: executionposture.MockOnly, ProcessCapability: capability},
 					LiveContexts: liveContexts, LiveRuns: selected.(runlifecycle.LiveRunReader),
-					AcquireLiveRuntime: func(ctx context.Context, hash string) (*rootruntime.RuntimeContextUse, error) {
+					AcquireLiveRuntime: func(ctx context.Context, reference sourceartifact.RootAdmissionReference) (*rootruntime.RuntimeContextUse, error) {
+						hash := reference.BundleHash
 						use, _, err := liveContexts.AcquireBundleHash(ctx, hash)
 						return use, err
 					},

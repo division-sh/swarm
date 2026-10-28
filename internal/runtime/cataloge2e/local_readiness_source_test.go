@@ -81,7 +81,7 @@ func TestLocalReadinessForkRecipientBothStores(t *testing.T) {
 			if err != nil {
 				t.Fatal(err)
 			}
-			source := semanticview.Wrap(h.bundle)
+			source := h.rt.Options.WorkflowModule.SemanticSource()
 			routes, err := runtimebus.DeriveRouteTable(source)
 			if err != nil {
 				t.Fatal(err)
@@ -144,7 +144,7 @@ func activateLocalReadinessFrontier(t *testing.T, ctx context.Context, h *runtim
 	trigger := eventtest.ChildForProducerWithRoutingSource(uuid.NewString(), "source.prepare", eventtest.Producer(events.EventProducerNode, identitytest.FlowNode(t, ".", "prepare").Key()), "", []byte(`{"worker_id":"worker-001"}`), 0,
 		events.EventLineage{RunID: catalogRuntimeRunID, ParentEventID: recorded.ID(), ExecutionMode: executionmode.Live}, events.EventEnvelope{}, rootSource, time.Now().UTC())
 	admit := runtimepkg.NewRuntimePayloadAdmitter(nil, semanticview.Wrap(h.bundle), catalogSourceArtifactFact(t, h.bundle))
-	admission, err := admit(ctx, trigger, "")
+	admission, err := admit(ctx, trigger, events.EventPayloadProducer(trigger, rootSource.Route().FlowID))
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -170,7 +170,7 @@ func activateLocalReadinessFrontier(t *testing.T, ctx context.Context, h *runtim
 	}
 	defer h.rt.Pipeline.SetTestLifecycleProbe(nil)
 	entityID := eventtest.UUID("run-scoped-selected-fork-worker")
-	source := semanticview.Wrap(h.bundle)
+	source := h.rt.Options.WorkflowModule.SemanticSource()
 	parent := runtimeflowidentity.Stored(source, semanticview.RootExecutionFlowID(source), catalogRuntimeRunID, catalogRuntimeRunID, catalogRuntimeRunID, "")
 	instance, err := runtimeflowidentity.KeyedChild(source, parent, "worker-flow", "worker-001")
 	if err != nil {
@@ -178,7 +178,7 @@ func activateLocalReadinessFrontier(t *testing.T, ctx context.Context, h *runtim
 	}
 	instance.EntityID = entityID
 	if err := h.rt.Manager.ActivateFlowInstance(runtimeeffects.WithExecutionMode(ctx, executionmode.Live), runtimepipeline.FlowInstanceActivationRequest{
-		ContractBundle:   semanticview.Wrap(h.bundle),
+		ContractBundle:   source,
 		Instance:         instance,
 		ConstructorInput: "source.prepare", ResolvedKey: "worker-001",
 		TriggerEvent: trigger, OccurredAt: trigger.CreatedAt(),

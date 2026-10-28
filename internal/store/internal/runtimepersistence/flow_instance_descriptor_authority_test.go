@@ -29,6 +29,7 @@ type dynamicFlowSourceProjectionStore interface {
 	storetest.RunFixtureStore
 	sourceartifactfixture.Writer
 	runtimerunlifecycle.OperationOwner
+	LoadRunRootedSource(context.Context, string) (sourceartifact.RootedSource, error)
 	InspectDynamicFlowRuntimeReadinessForSource(context.Context, runtimecorrelation.SourceArtifactFact) (runtimepipeline.DynamicFlowRuntimeReadinessProjection, error)
 	InspectDynamicFlowRuntimeReadinessForRun(context.Context, string, runtimecorrelation.SourceArtifactFact) ([]runtimepipeline.DynamicFlowRuntimeReadiness, error)
 	LoadDynamicFlowRuntimeReadiness(context.Context, string, runtimeflowidentity.Route) (runtimepipeline.DynamicFlowRuntimeReadiness, bool, error)
@@ -54,13 +55,23 @@ func TestDynamicFlowRuntimeReadinessForSourceScopesInSQLBothStores(t *testing.T)
 			store, db, sqlite := tc.open(t)
 			sourceA := mustExternalStoreTestSourceArtifactFact()
 			hashA := sourceA.BundleHash()
-			sourceBArtifact := sourceartifactfixture.New("agents.yaml", []byte("agents:\n  source_b: {}\n"))
+			sourceBArtifact, err := sourceartifact.AdmitMembers(map[string][]byte{
+				"manifest.yaml": []byte("version: 1.0.0\nplatform_version: '*'\n"),
+				"agents.yaml":   []byte("agents:\n  source_b: {}\n"),
+			})
+			if err != nil {
+				t.Fatal(err)
+			}
 			sourceB := sourceartifactfixture.FactFor(sourceBArtifact)
 			hashB := sourceB.BundleHash()
+			rootB, _ := sourceartifactfixture.Rooted(t, "readiness-b", sourceBArtifact)
 			runA, runB := uuid.NewString(), uuid.NewString()
 			ctx := originalStoreFixtureContext(t, testAuthorActivityContext(), store)
-			storetest.RequireRun(t, ctx, store, storetest.RunFixture{Origin: storetest.ScenarioSetupOrigin(), RunID: runA, BundleHash: hashA})
-			storetest.RequireRun(t, ctx, store, storetest.RunFixture{Origin: storetest.ScenarioSetupOrigin(), RunID: runB, Artifact: sourceBArtifact})
+			requireReadinessRun(t, ctx, store, runA, hashA)
+			requireReadinessRun(t, ctx, store, runB, hashB, rootB.Artifact())
+			if stored, err := store.LoadRunRootedSource(ctx, runB); err != nil || !stored.Admission().Equal(rootB.Admission()) {
+				t.Fatalf("run fixture retargeted its captured source: root=%+v err=%v", stored.Admission(), err)
+			}
 			seedExactFlowInstanceDescriptorOwner(t, ctx, store, runA, uuid.NewString(), "account/a", hashA)
 			seedExactFlowInstanceDescriptorOwner(t, ctx, store, runB, uuid.NewString(), "account/b", hashB)
 			setReadinessCoordinate(t, db, sqlite, runA, "account/a", "phase", time.Now().UTC())
@@ -106,10 +117,22 @@ func TestDynamicFlowRuntimeReadinessProjectionClassifiesSourceTransitionsBothSto
 			selected, db, sqlite := tc.open(t)
 			current := mustExternalStoreTestSourceArtifactFact()
 			currentHash := current.BundleHash()
-			predecessorArtifact := sourceartifactfixture.New("agents.yaml", []byte("agents:\n  predecessor: {}\n"))
+			predecessorArtifact, err := sourceartifact.AdmitMembers(map[string][]byte{
+				"manifest.yaml": []byte("version: 1.0.0\nplatform_version: '*'\n"),
+				"agents.yaml":   []byte("agents:\n  predecessor: {}\n"),
+			})
+			if err != nil {
+				t.Fatal(err)
+			}
 			predecessor := sourceartifactfixture.FactFor(predecessorArtifact)
 			predecessorHash := predecessor.BundleHash()
-			foreignArtifact := sourceartifactfixture.New("agents.yaml", []byte("agents:\n  foreign: {}\n"))
+			foreignArtifact, err := sourceartifact.AdmitMembers(map[string][]byte{
+				"manifest.yaml": []byte("version: 1.0.0\nplatform_version: '*'\n"),
+				"agents.yaml":   []byte("agents:\n  foreign: {}\n"),
+			})
+			if err != nil {
+				t.Fatal(err)
+			}
 			foreign := sourceartifactfixture.FactFor(foreignArtifact)
 			foreignHash := foreign.BundleHash()
 			ctx := originalStoreFixtureContext(t, testAuthorActivityContext(), selected)
@@ -203,8 +226,15 @@ func TestDynamicFlowRuntimeReadinessObservedStateGuardBothStores(t *testing.T) {
 			selected, db, sqlite := tc.open(t)
 			source := mustExternalStoreTestSourceArtifactFact()
 			bundleHash := source.BundleHash()
-			otherArtifact := sourceartifactfixture.New("agents.yaml", []byte("agents:\n  other: {}\n"))
+			otherArtifact, err := sourceartifact.AdmitMembers(map[string][]byte{
+				"manifest.yaml": []byte("version: 1.0.0\nplatform_version: '*'\n"),
+				"agents.yaml":   []byte("agents:\n  other: {}\n"),
+			})
+			if err != nil {
+				t.Fatal(err)
+			}
 			otherSource := sourceartifactfixture.FactFor(otherArtifact)
+			otherRoot, _ := sourceartifactfixture.Rooted(t, "readiness-target", otherArtifact)
 			for _, race := range []string{"plan", "source", "topology", "creation", "run_status", "instance_status", "terminated_at"} {
 				t.Run(race, func(t *testing.T) {
 					runID := uuid.NewString()
@@ -237,9 +267,11 @@ func TestDynamicFlowRuntimeReadinessObservedStateGuardBothStores(t *testing.T) {
 							t.Fatal(err)
 						}
 					case "source":
-						setReadinessRunSource(t, selected, callCtx, runID, otherSource, otherArtifact)
+						callCtx = setReadinessRunSource(t, selected, callCtx, runID, otherSource, otherRoot.Artifact())
 						desired.BundleHash = otherSource.BundleHash()
-						callCtx = runtimecorrelation.WithSourceArtifactFact(callCtx, otherSource)
+						if stored, err := selected.LoadRunRootedSource(callCtx, runID); err != nil || !stored.Admission().Equal(otherRoot.Admission()) {
+							t.Fatalf("revision fixture retargeted its captured source: root=%+v err=%v", stored.Admission(), err)
+						}
 					case "topology":
 						setReadinessCoordinate(t, db, sqlite, runID, path, "phase", time.Now().UTC())
 					case "creation":
@@ -501,7 +533,13 @@ func requireReadinessRun(t *testing.T, ctx context.Context, selected storetest.R
 		BundleHash: bundleHash,
 	}
 	if len(artifacts) > 0 {
-		fixture.Artifact = artifacts[0]
+		artifact := artifacts[0]
+		root, captured := artifact.RootAdmission()
+		if !captured {
+			rooted, _ := sourceartifactfixture.Rooted(t, "fixture", artifact)
+			artifact, root = rooted.Artifact(), rooted.Admission()
+		}
+		fixture.Artifact, fixture.RootAdmission = artifact, root
 	}
 	storetest.RequireRun(t, ctx, selected, fixture)
 }
@@ -520,12 +558,36 @@ func setReadinessPlanRaw(t *testing.T, db *sql.DB, sqlite bool, runID, instanceP
 func setReadinessRunSource(t *testing.T, owner interface {
 	runtimerunlifecycle.OperationOwner
 	sourceartifactfixture.Writer
-}, ctx context.Context, runID string, source runtimecorrelation.SourceArtifactFact, artifact *sourceartifact.AdmittedSourceArtifact) {
+	LoadRunRootedSource(context.Context, string) (sourceartifact.RootedSource, error)
+}, ctx context.Context, runID string, source runtimecorrelation.SourceArtifactFact, artifact *sourceartifact.AdmittedSourceArtifact) context.Context {
 	t.Helper()
-	sourceartifactfixture.RequireArtifact(t, ctx, owner, artifact)
-	if _, err := owner.ReviseRunSource(ctx, runtimerunlifecycle.SourceRevisionRequest{RunID: runID, Source: source}); err != nil {
+	root, captured := artifact.RootAdmission()
+	if !captured {
+		rooted, _ := sourceartifactfixture.Rooted(t, "fixture", artifact)
+		artifact, root = rooted.Artifact(), rooted.Admission()
+	}
+	prior, err := owner.LoadRunRootedSource(ctx, runID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := runtimecorrelation.CheckRootAdmissionContext(ctx, prior.Admission().Reference()); err != nil {
+		t.Fatal(err)
+	}
+	priorScope, err := authoractivity.BundleScopeForTarget(ctx, prior.Admission().BundleHash())
+	if err != nil {
+		t.Fatal(err)
+	}
+	priorCtx := runtimecorrelation.WithRootAdmission(runtimecorrelation.WithSourceArtifactFact(runtimecorrelation.WithRunID(ctx, runID), sourceartifactfixture.FactFor(prior.Artifact())), prior.Admission())
+	priorCtx = authoractivity.WithScope(priorCtx, priorScope)
+	sourceartifactfixture.RequireArtifact(t, priorCtx, owner, artifact)
+	if _, err := owner.ReviseRunSource(priorCtx, runtimerunlifecycle.SourceRevisionRequest{RunID: runID, Source: source, RootAdmission: root}); err != nil {
 		t.Fatalf("set readiness run source for %s: %v", runID, err)
 	}
+	targetScope, err := authoractivity.BundleScopeForTarget(priorCtx, source.BundleHash())
+	if err != nil {
+		t.Fatal(err)
+	}
+	return authoractivity.WithScope(runtimecorrelation.WithRootAdmission(runtimecorrelation.WithSourceArtifactFact(runtimecorrelation.WithRunID(ctx, runID), source), root), targetScope)
 }
 
 func setReadinessRunStatus(t *testing.T, owner runtimerunlifecycle.OperationOwner, ctx context.Context, runID string, state runtimerunlifecycle.State) {

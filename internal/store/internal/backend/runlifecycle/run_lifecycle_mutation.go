@@ -13,9 +13,11 @@ import (
 	"github.com/division-sh/swarm/internal/runtime/runfork"
 	runtimerunlifecycle "github.com/division-sh/swarm/internal/runtime/runlifecycle"
 	"github.com/division-sh/swarm/internal/runtime/scenarioexecution"
+	"github.com/division-sh/swarm/internal/sourceartifact"
 	privateactivity "github.com/division-sh/swarm/internal/store/internal/backend/authoractivity"
 	"github.com/division-sh/swarm/internal/store/internal/backend/mutationprotocol"
 	"github.com/division-sh/swarm/internal/store/internal/backend/runlifecycle/sourceadmission"
+	sourceartifactstore "github.com/division-sh/swarm/internal/store/internal/sourceartifact"
 )
 
 type postgresRunLifecycleMutation struct {
@@ -435,7 +437,13 @@ func (m postgresRunLifecycleMutation) Create(
 	if err := request.Validate(); err != nil {
 		return "", err
 	}
+	if err := runtimecorrelation.CheckRootAdmissionContext(ctx, request.RootAdmission.Reference()); err != nil {
+		return "", err
+	}
 	if err := m.requireSourceArtifactForWrite(ctx, request.Source); err != nil {
+		return "", err
+	}
+	if err := sourceartifactstore.RequireRootAdmissionTx(ctx, m.tx, request.RootAdmission, true); err != nil {
 		return "", err
 	}
 	bundleHash := request.Source.BundleHash()
@@ -444,13 +452,13 @@ func (m postgresRunLifecycleMutation) Create(
 	var inserted bool
 	err := m.tx.QueryRowContext(ctx, `
 		INSERT INTO runs (
-			run_id, status, bundle_hash, origin_kind,
+			run_id, status, bundle_hash, source_root_directory, origin_kind,
 			trigger_event_id, trigger_event_type,
 			forked_from_run_id, forked_from_point_kind, forked_from_revision, forked_from_event_id,
 			started_at, flow_path
 		)
 		VALUES (
-			$1::uuid, $11, $2, $3,
+			$1::uuid, $11, $2, $13, $3,
 			NULLIF($4, '')::uuid, NULLIF($5, ''),
 			NULLIF($6, '')::uuid, NULLIF($7, ''), NULLIF($8, 0), NULLIF($9, '')::uuid,
 			$10, NULLIF($12, '')
@@ -460,7 +468,7 @@ func (m postgresRunLifecycleMutation) Create(
 	`, request.RunID, bundleHash, origin.Kind(),
 		origin.EventID(), origin.EventType(),
 		origin.SourceRunID(), origin.ForkPointKind(), origin.ForkRevision(), origin.SourceEventID(), request.StartedAt.UTC(),
-		string(status), request.LiveScope.FlowPath).Scan(&inserted)
+		string(status), request.LiveScope.FlowPath, request.RootAdmission.RootDirectory()).Scan(&inserted)
 	if errors.Is(err, sql.ErrNoRows) {
 		return m.classifyCreateExisting(ctx, request)
 	}
@@ -495,7 +503,13 @@ func (m sqliteRunLifecycleMutation) Create(
 	if err := request.Validate(); err != nil {
 		return "", err
 	}
+	if err := runtimecorrelation.CheckRootAdmissionContext(ctx, request.RootAdmission.Reference()); err != nil {
+		return "", err
+	}
 	if err := m.requireSourceArtifact(ctx, request.Source); err != nil {
+		return "", err
+	}
+	if err := sourceartifactstore.RequireRootAdmissionTx(ctx, m.tx, request.RootAdmission, false); err != nil {
 		return "", err
 	}
 	bundleHash := request.Source.BundleHash()
@@ -503,19 +517,19 @@ func (m sqliteRunLifecycleMutation) Create(
 	status := creationState(ctx, request)
 	result, err := m.tx.ExecContext(ctx, `
 		INSERT INTO runs (
-			run_id, status, bundle_hash, origin_kind,
+			run_id, status, bundle_hash, source_root_directory, origin_kind,
 			trigger_event_id, trigger_event_type,
 			forked_from_run_id, forked_from_point_kind, forked_from_revision, forked_from_event_id,
 			started_at, flow_path
 		)
 		VALUES (
-			?, ?, ?, ?,
+			?, ?, ?, ?, ?,
 			NULLIF(?, ''), NULLIF(?, ''),
 			NULLIF(?, ''), NULLIF(?, ''), NULLIF(?, 0), NULLIF(?, ''),
 			?, NULLIF(?, '')
 		)
 		ON CONFLICT (run_id) DO NOTHING
-	`, request.RunID, string(status), bundleHash, origin.Kind(),
+	`, request.RunID, string(status), bundleHash, request.RootAdmission.RootDirectory(), origin.Kind(),
 		origin.EventID(), origin.EventType(),
 		origin.SourceRunID(), origin.ForkPointKind(), origin.ForkRevision(), origin.SourceEventID(), request.StartedAt.UTC(),
 		request.LiveScope.FlowPath)
@@ -560,6 +574,7 @@ func (s *RunLifecyclePostgresOwner) InsertRunForkRunTx(
 	point runfork.RunForkPoint,
 	startedAt time.Time,
 	identity runtimecorrelation.SourceArtifactFact,
+	root sourceartifact.RootAdmission,
 ) error {
 	return attempt.WithSQL(ctx, func(ctx context.Context, tx *sql.Tx) error {
 		if err := identity.Validate(); err != nil {
@@ -567,6 +582,9 @@ func (s *RunLifecyclePostgresOwner) InsertRunForkRunTx(
 		}
 		mutation := postgresRunLifecycleMutation{store: s, tx: tx}
 		if err := mutation.requireSourceArtifactForWrite(ctx, identity); err != nil {
+			return err
+		}
+		if err := requireForkRootAdmissionTx(ctx, tx, identity, root, true); err != nil {
 			return err
 		}
 		bundleHash := identity.BundleHash()
@@ -578,12 +596,12 @@ func (s *RunLifecyclePostgresOwner) InsertRunForkRunTx(
 		result, err := tx.ExecContext(ctx, `
 		INSERT INTO runs (
 			run_id, status, origin_kind, forked_from_run_id, forked_from_point_kind, forked_from_revision, forked_from_event_id,
-			event_count, started_at, bundle_hash, flow_path
+			event_count, started_at, bundle_hash, source_root_directory, flow_path
 		)
-		SELECT $1::uuid, $2, $3, $4::uuid, $5, $6, NULLIF($7, '')::uuid, 0, $8, $9, flow_path
+		SELECT $1::uuid, $2, $3, $4::uuid, $5, $6, NULLIF($7, '')::uuid, 0, $8, $9, $10, flow_path
 		FROM runs WHERE run_id=$4::uuid
 	`, forkRunID, string(runtimerunlifecycle.StatePaused), origin.Kind(), origin.SourceRunID(), origin.ForkPointKind(), origin.ForkRevision(), origin.SourceEventID(),
-			startedAt.UTC(), bundleHash)
+			startedAt.UTC(), bundleHash, root.RootDirectory())
 		if err != nil {
 			return fmt.Errorf("insert fork run lifecycle: %w", err)
 		}
@@ -618,6 +636,7 @@ func (s *RunLifecycleSQLiteOwner) InsertRunForkRunTx(
 	point runfork.RunForkPoint,
 	startedAt time.Time,
 	identity runtimecorrelation.SourceArtifactFact,
+	root sourceartifact.RootAdmission,
 ) error {
 	return attempt.WithSQL(ctx, func(ctx context.Context, tx *sql.Tx) error {
 		if err := identity.Validate(); err != nil {
@@ -625,6 +644,9 @@ func (s *RunLifecycleSQLiteOwner) InsertRunForkRunTx(
 		}
 		mutation := sqliteRunLifecycleMutation{store: s, tx: tx}
 		if err := mutation.requireSourceArtifact(ctx, identity); err != nil {
+			return err
+		}
+		if err := requireForkRootAdmissionTx(ctx, tx, identity, root, false); err != nil {
 			return err
 		}
 		bundleHash := identity.BundleHash()
@@ -636,12 +658,12 @@ func (s *RunLifecycleSQLiteOwner) InsertRunForkRunTx(
 		result, err := tx.ExecContext(ctx, `
 		INSERT INTO runs (
 			run_id, status, origin_kind, forked_from_run_id, forked_from_point_kind, forked_from_revision, forked_from_event_id,
-			event_count, started_at, bundle_hash, flow_path
+			event_count, started_at, bundle_hash, source_root_directory, flow_path
 		)
-		SELECT ?, ?, ?, ?, ?, ?, NULLIF(?, ''), 0, ?, ?, flow_path
+		SELECT ?, ?, ?, ?, ?, ?, NULLIF(?, ''), 0, ?, ?, ?, flow_path
 		FROM runs WHERE run_id=?
 	`, forkRunID, string(runtimerunlifecycle.StatePaused), origin.Kind(), origin.SourceRunID(), origin.ForkPointKind(), origin.ForkRevision(), origin.SourceEventID(),
-			startedAt.UTC(), bundleHash, sourceRunID)
+			startedAt.UTC(), bundleHash, root.RootDirectory(), sourceRunID)
 		if err != nil {
 			return fmt.Errorf("insert fork run lifecycle: %w", err)
 		}
@@ -667,6 +689,19 @@ func (s *RunLifecycleSQLiteOwner) InsertRunForkRunTx(
 			},
 		})
 	})
+}
+
+func requireForkRootAdmissionTx(ctx context.Context, tx *sql.Tx, identity runtimecorrelation.SourceArtifactFact, root sourceartifact.RootAdmission, postgres bool) error {
+	if err := root.Validate(); err != nil {
+		return err
+	}
+	if root.BundleHash() != identity.BundleHash() {
+		return fmt.Errorf("fork run root admission differs from admitted source content")
+	}
+	if err := runtimecorrelation.CheckRootAdmissionContext(ctx, root.Reference()); err != nil {
+		return err
+	}
+	return sourceartifactstore.RequireRootAdmissionTx(ctx, tx, root, postgres)
 }
 
 func (m postgresRunLifecycleMutation) TransitionActive(
@@ -864,6 +899,10 @@ func classifyCreateExisting(
 			request.RunID, current.BundleHash, wantHash,
 		)
 	}
+	if current.RootReference != request.RootAdmission.Reference() {
+		return "", fmt.Errorf("run lifecycle root conflict for run_id=%s: stored=%s requested=%s",
+			request.RunID, current.RootReference.RootDirectory, request.RootAdmission.RootDirectory())
+	}
 	if !current.State.Active() {
 		return "", &runtimerunlifecycle.RunNotActiveError{RunID: request.RunID, State: current.State}
 	}
@@ -921,23 +960,33 @@ func (m postgresRunLifecycleMutation) ReviseSource(
 	ctx context.Context,
 	request runtimerunlifecycle.SourceRevisionRequest,
 ) (runtimerunlifecycle.MutationDisposition, error) {
+	if err := request.Validate(); err != nil {
+		return "", err
+	}
 	current, err := m.RequireActiveSource(ctx, request.RunID)
 	if err != nil {
 		return "", err
 	}
-	if current.Matches(request.Source) {
-		return runtimerunlifecycle.MutationExactNoop, nil
+	currentRoot, err := loadRunRootReference(ctx, m.tx, request.RunID, true)
+	if err != nil {
+		return "", err
 	}
 	if err := m.requireSourceArtifactForWrite(ctx, request.Source); err != nil {
 		return "", err
 	}
+	if err := sourceartifactstore.RequireRootAdmissionTx(ctx, m.tx, request.RootAdmission, true); err != nil {
+		return "", err
+	}
+	if current.Matches(request.Source) && currentRoot == request.RootAdmission.Reference() {
+		return runtimerunlifecycle.MutationExactNoop, nil
+	}
 	bundleHash := request.Source.BundleHash()
 	result, err := m.tx.ExecContext(ctx, `
 		UPDATE runs
-		SET bundle_hash = $2
+		SET bundle_hash = $2, source_root_directory = $3
 		WHERE run_id = $1::uuid
 		  AND status IN (`+runLifecycleActiveStateSQLValues+`)
-	`, request.RunID, bundleHash)
+	`, request.RunID, bundleHash, request.RootAdmission.RootDirectory())
 	if err != nil {
 		return "", fmt.Errorf("revise PostgreSQL run lifecycle source: %w", err)
 	}
@@ -957,23 +1006,33 @@ func (m sqliteRunLifecycleMutation) ReviseSource(
 	ctx context.Context,
 	request runtimerunlifecycle.SourceRevisionRequest,
 ) (runtimerunlifecycle.MutationDisposition, error) {
+	if err := request.Validate(); err != nil {
+		return "", err
+	}
 	current, err := m.RequireActiveSource(ctx, request.RunID)
 	if err != nil {
 		return "", err
 	}
-	if current.Matches(request.Source) {
-		return runtimerunlifecycle.MutationExactNoop, nil
+	currentRoot, err := loadRunRootReference(ctx, m.tx, request.RunID, false)
+	if err != nil {
+		return "", err
 	}
 	if err := m.requireSourceArtifact(ctx, request.Source); err != nil {
 		return "", err
 	}
+	if err := sourceartifactstore.RequireRootAdmissionTx(ctx, m.tx, request.RootAdmission, false); err != nil {
+		return "", err
+	}
+	if current.Matches(request.Source) && currentRoot == request.RootAdmission.Reference() {
+		return runtimerunlifecycle.MutationExactNoop, nil
+	}
 	bundleHash := request.Source.BundleHash()
 	result, err := m.tx.ExecContext(ctx, `
 		UPDATE runs
-		SET bundle_hash = ?
+		SET bundle_hash = ?, source_root_directory = ?
 		WHERE run_id = ?
 		  AND status IN (`+runLifecycleActiveStateSQLValues+`)
-	`, bundleHash, request.RunID)
+	`, bundleHash, request.RootAdmission.RootDirectory(), request.RunID)
 	if err != nil {
 		return "", fmt.Errorf("revise SQLite run lifecycle source: %w", err)
 	}

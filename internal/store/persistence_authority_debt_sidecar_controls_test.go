@@ -103,7 +103,7 @@ func TestPersistenceAuthorityDebtCollectorMetadataIdentity(t *testing.T) {
 		}
 	}
 	if _, err := debtBaselineWithCollector(root, baseline, collector, false); err != nil {
-		t.Fatal(err)
+		t.Fatalf("%v; current collector=%s baseline=%s", err, collector, debtBaselineChecksum(baseline))
 	}
 	t.Logf("sidecar collector=%s baseline=%s", collector, debtBaselineChecksum(baseline))
 }

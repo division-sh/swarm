@@ -10,6 +10,7 @@ import (
 
 	postgresbackend "github.com/division-sh/swarm/internal/store/internal/backend/postgres"
 	"github.com/division-sh/swarm/internal/testutil"
+	"github.com/division-sh/swarm/internal/testutil/sourceartifactfixture"
 	"github.com/google/uuid"
 )
 
@@ -19,12 +20,13 @@ func TestForkPointSchemaClosedArmsBothStores(t *testing.T) {
 			db := bootstrappedForkPointSchemaDB(t, backend)
 			ctx := context.Background()
 			sourceRunID := uuid.NewString()
-			bundleHash := "bundle-v2:sha256:" + strings.Repeat("a", 64)
-			if _, err := db.ExecContext(ctx, `INSERT INTO runs (run_id,bundle_hash,origin_kind) VALUES ($1,$2,'scenario_setup')`, sourceRunID, bundleHash); err != nil {
+			source, _ := sourceartifactfixture.Rooted(t, "fork-schema", sourceartifactfixture.Artifact())
+			bundleHash := source.Admission().BundleHash()
+			if _, err := db.ExecContext(ctx, `INSERT INTO runs (run_id,bundle_hash,origin_kind,source_root_directory) VALUES ($1,$2,'scenario_setup',$3)`, sourceRunID, bundleHash, source.Admission().RootDirectory()); err != nil {
 				t.Fatalf("create source run: %v", err)
 			}
 			t.Run("one_live_run_per_flow", func(t *testing.T) {
-				verifyLiveRunSelectionConstraint(t, db, bundleHash)
+				verifyLiveRunSelectionConstraint(t, db, bundleHash, source.Admission().RootDirectory())
 			})
 			t.Run("activity_execution_binding", func(t *testing.T) {
 				verifyActivityExecutionBindingColumn(t, db, sourceRunID)
@@ -51,12 +53,16 @@ func TestForkPointSchemaClosedArmsBothStores(t *testing.T) {
 			}
 			insertSourceEvent(eventID)
 			insertSourceEvent(otherEventID)
+			var directory string
+			if err := db.QueryRowContext(ctx, `SELECT source_root_directory FROM runs WHERE run_id=$1`, sourceRunID).Scan(&directory); err != nil {
+				t.Fatal(err)
+			}
 			insertForkRun := func(kind string, revision int64, eventID any) (string, error) {
 				t.Helper()
 				runID := uuid.NewString()
 				_, err := db.ExecContext(ctx, `INSERT INTO runs
-					(run_id,bundle_hash,origin_kind,forked_from_run_id,forked_from_point_kind,forked_from_revision,forked_from_event_id)
-					VALUES ($1,$2,'fork_materialization',$3,$4,$5,$6)`, runID, bundleHash, sourceRunID, kind, revision, eventID)
+					(run_id,bundle_hash,origin_kind,forked_from_run_id,forked_from_point_kind,forked_from_revision,forked_from_event_id,source_root_directory)
+					VALUES ($1,$2,'fork_materialization',$3,$4,$5,$6,$7)`, runID, bundleHash, sourceRunID, kind, revision, eventID, directory)
 				return runID, err
 			}
 			eventRunID, err := insertForkRun("event", 1, eventID)
@@ -96,8 +102,8 @@ func TestForkPointSchemaClosedArmsBothStores(t *testing.T) {
 			insertBinding := func(id, kind string, eventID any) error {
 				t.Helper()
 				_, err := db.ExecContext(ctx, `INSERT INTO run_fork_selected_contract_bindings
-					(binding_id,fork_run_id,source_run_id,fork_point_kind,fork_revision,fork_event_id,mode)
-					VALUES ($1,$2,$3,$4,2,$5,'selected_contracts')`, id, deploymentRunID, sourceRunID, kind, eventID)
+					(binding_id,fork_run_id,source_run_id,fork_point_kind,fork_revision,fork_event_id,mode,target_bundle_hash,source_root_directory)
+					VALUES ($1,$2,$3,$4,2,$5,'selected_contracts',$6,$7)`, id, deploymentRunID, sourceRunID, kind, eventID, bundleHash, directory)
 				return err
 			}
 			if err := insertBinding(uuid.NewString(), "event", nil); err == nil {
@@ -139,8 +145,8 @@ func TestForkPointSchemaClosedArmsBothStores(t *testing.T) {
 			t.Run("state_revision_selected_owners", func(t *testing.T) {
 				stateBindingID := uuid.NewString()
 				if _, err := db.ExecContext(ctx, `INSERT INTO run_fork_selected_contract_bindings
-					(binding_id,fork_run_id,source_run_id,fork_point_kind,fork_revision,fork_event_id,mode)
-					VALUES ($1,$2,$3,'state_revision',2,NULL,'selected_contracts')`, stateBindingID, stateRunID, sourceRunID); err != nil {
+					(binding_id,fork_run_id,source_run_id,fork_point_kind,fork_revision,fork_event_id,mode,target_bundle_hash,source_root_directory)
+					VALUES ($1,$2,$3,'state_revision',2,NULL,'selected_contracts',$4,$5)`, stateBindingID, stateRunID, sourceRunID, bundleHash, directory); err != nil {
 					t.Fatalf("state revision binding refused: %v", err)
 				}
 				if _, err := db.ExecContext(ctx, `INSERT INTO run_fork_operations
@@ -160,8 +166,8 @@ func TestForkPointSchemaClosedArmsBothStores(t *testing.T) {
 			})
 			eventBindingID := uuid.NewString()
 			if _, err := db.ExecContext(ctx, `INSERT INTO run_fork_selected_contract_bindings
-				(binding_id,fork_run_id,source_run_id,fork_point_kind,fork_revision,fork_event_id,mode)
-				VALUES ($1,$2,$3,'event',1,$4,'selected_contracts')`, eventBindingID, eventRunID, sourceRunID, eventID); err != nil {
+				(binding_id,fork_run_id,source_run_id,fork_point_kind,fork_revision,fork_event_id,mode,target_bundle_hash,source_root_directory)
+				VALUES ($1,$2,$3,'event',1,$4,'selected_contracts',$5,$6)`, eventBindingID, eventRunID, sourceRunID, eventID, bundleHash, directory); err != nil {
 				t.Fatalf("event binding refused: %v", err)
 			}
 			if _, err := db.ExecContext(ctx, `INSERT INTO run_fork_operations
@@ -285,25 +291,25 @@ func TestForkPointSchemaClosedArmsBothStores(t *testing.T) {
 	}
 }
 
-func verifyLiveRunSelectionConstraint(t *testing.T, db *sql.DB, bundleHash string) {
+func verifyLiveRunSelectionConstraint(t *testing.T, db *sql.DB, bundleHash, rootDirectory string) {
 	t.Helper()
 	ctx := context.Background()
 	first, sibling := uuid.NewString(), uuid.NewString()
-	insert := `INSERT INTO runs (run_id,bundle_hash,origin_kind,flow_path,status)
-		VALUES ($1,$2,'deployment',$3,$4)`
+	insert := `INSERT INTO runs (run_id,bundle_hash,origin_kind,flow_path,status,source_root_directory)
+		VALUES ($1,$2,'deployment',$3,$4,$5)`
 	for _, row := range []struct{ id, flow, status string }{
 		{first, "orders", "live"},
 		{sibling, "orders", "paused"},
 		{uuid.NewString(), "support", "live"},
 	} {
-		if _, err := db.ExecContext(ctx, insert, row.id, bundleHash, row.flow, row.status); err != nil {
+		if _, err := db.ExecContext(ctx, insert, row.id, bundleHash, row.flow, row.status, rootDirectory); err != nil {
 			t.Fatalf("create %s run for %s: %v", row.status, row.flow, err)
 		}
 	}
-	if _, err := db.ExecContext(ctx, insert, uuid.NewString(), bundleHash, "orders", "live"); err == nil {
+	if _, err := db.ExecContext(ctx, insert, uuid.NewString(), bundleHash, "orders", "live", rootDirectory); err == nil {
 		t.Fatal("two live runs claimed the same flow")
 	}
-	if _, err := db.ExecContext(ctx, insert, uuid.NewString(), bundleHash, "", "live"); err == nil {
+	if _, err := db.ExecContext(ctx, insert, uuid.NewString(), bundleHash, "", "live", rootDirectory); err == nil {
 		t.Fatal("live run without a flow was admitted")
 	}
 	tx, err := db.BeginTx(ctx, nil)
@@ -332,8 +338,9 @@ func seedForkPointSchemaRunAndEvent(t *testing.T, db *sql.DB) (sourceRunID, even
 	t.Helper()
 	ctx := context.Background()
 	sourceRunID = uuid.NewString()
-	bundleHash = "bundle-v2:sha256:" + strings.Repeat("a", 64)
-	if _, err := db.ExecContext(ctx, `INSERT INTO runs (run_id,bundle_hash,origin_kind) VALUES ($1,$2,'scenario_setup')`, sourceRunID, bundleHash); err != nil {
+	source, _ := sourceartifactfixture.Rooted(t, "fork-schema", sourceartifactfixture.Artifact())
+	bundleHash = source.Admission().BundleHash()
+	if _, err := db.ExecContext(ctx, `INSERT INTO runs (run_id,bundle_hash,origin_kind,source_root_directory) VALUES ($1,$2,'scenario_setup',$3)`, sourceRunID, bundleHash, source.Admission().RootDirectory()); err != nil {
 		t.Fatalf("create source run: %v", err)
 	}
 	eventID = uuid.NewString()

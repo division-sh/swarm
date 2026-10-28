@@ -15,7 +15,6 @@ import (
 
 	"github.com/division-sh/swarm/internal/cliapp"
 	"github.com/division-sh/swarm/internal/testutil"
-	"gopkg.in/yaml.v3"
 )
 
 func TestDormantIngressTelegramScaffoldJourney(t *testing.T) {
@@ -53,8 +52,22 @@ func TestDormantIngressDevPublishesNoAuthority(t *testing.T) {
 	isolateCLIAPIConfigEnv(t)
 	unsetStoreSelectorEnv(t)
 	t.Setenv("SWARM_CREDENTIALS_FILE", filepath.Join(t.TempDir(), "credentials.json"))
-	root := writeStandingTelegramServeFixture(t, "http://127.0.0.1:1")
-	disableChannelOnboardingBusinessConsumers(t, root)
+	root := filepath.Join(t.TempDir(), "chat")
+	if err := os.MkdirAll(filepath.Join(root, "telegram"), 0o700); err != nil {
+		t.Fatal(err)
+	}
+	trigger, err := os.ReadFile(filepath.Join(repoRootForTest(), "packs/providers/telegram/trigger.yaml"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	for name, body := range map[string]string{
+		"manifest.yaml":          "version: 1.0.0\nplatform_version: '*'\n",
+		"schema.yaml":            "stages: []\npins: {inputs: [inbound.telegram.raw, inbound.telegram.text_message]}\n",
+		"telegram/manifest.yaml": "version: 1.0.0\nplatform_version: '*'\ncapabilities: {can: {emit_events: [raw, callback_action, text_message], verify_secret: webhook_signing_secret, persist_dedupe_markers: true}, cannot: [execute code]}\n",
+		"telegram/trigger.yaml":  string(trigger),
+	} {
+		writeStandingCandidateFile(t, filepath.Join(root, name), body)
+	}
 	opts := cliapp.ServeOptions{
 		SourceRoot: root, ConfigPath: writeStoreBackendRuntimeConfigWithWorkspaceFields(t, "", "", channelOnboardingHostWorkspaceFields()),
 		Dev: true, SelfCheck: true, Verbose: true, APIListenAddr: "127.0.0.1:0", MCPListenAddr: "127.0.0.1:0",
@@ -103,8 +116,22 @@ func TestDormantIngressProvisionRestartSignedInputBothStores(t *testing.T) {
 		t.Run(backend, func(t *testing.T) {
 			isolateCLIAPIConfigEnv(t)
 			t.Setenv("SWARM_CREDENTIALS_FILE", filepath.Join(t.TempDir(), "credentials.json"))
-			root := writeStandingTelegramServeFixture(t, "http://127.0.0.1:1")
-			disableChannelOnboardingBusinessConsumers(t, root)
+			root := filepath.Join(t.TempDir(), "chat")
+			if err := os.MkdirAll(filepath.Join(root, "telegram"), 0o700); err != nil {
+				t.Fatal(err)
+			}
+			trigger, err := os.ReadFile(filepath.Join(repoRootForTest(), "packs/providers/telegram/trigger.yaml"))
+			if err != nil {
+				t.Fatal(err)
+			}
+			for name, body := range map[string]string{
+				"manifest.yaml":          "version: 1.0.0\nplatform_version: '*'\n",
+				"schema.yaml":            "stages: []\npins: {inputs: [inbound.telegram.raw, inbound.telegram.text_message]}\n",
+				"telegram/manifest.yaml": "version: 1.0.0\nplatform_version: '*'\ncapabilities: {can: {emit_events: [raw, callback_action, text_message], verify_secret: webhook_signing_secret, persist_dedupe_markers: true}, cannot: [execute code]}\n",
+				"telegram/trigger.yaml":  string(trigger),
+			} {
+				writeStandingCandidateFile(t, filepath.Join(root, name), body)
+			}
 			opts := cliapp.ServeOptions{SourceRoot: root, APIListenAddr: "127.0.0.1:0", MCPListenAddr: "127.0.0.1:0", SelfCheck: true, Verbose: true,
 				WorkspaceBackend: "host", WorkspaceBackendSet: true, StoreMode: backend, StoreModeSet: true}
 			var db *sql.DB
@@ -132,9 +159,9 @@ func TestDormantIngressProvisionRestartSignedInputBothStores(t *testing.T) {
 			}
 			assertDormant := func(process *serveRuntimeTestProcess, endpoint string) {
 				t.Helper()
-				waitForInboundAdmissionServeOutput(t, process, "DORMANT ingress telegram-ingress/telegram")
+				waitForInboundAdmissionServeOutput(t, process, "DORMANT ingress ./telegram")
 				output := process.outputString()
-				for _, want := range []string{"DORMANT ingress telegram-ingress/telegram", "webhook_signing.telegram", "then restart", "NOT READY", "file tier"} {
+				for _, want := range []string{"DORMANT ingress ./telegram", "telegram.webhook_signing_secret", "then restart", "NOT READY", "file tier"} {
 					if !strings.Contains(output, want) {
 						t.Fatalf("dormant teaching missing %q:\n%s", want, output)
 					}
@@ -188,7 +215,7 @@ func TestDormantIngressProvisionRestartSignedInputBothStores(t *testing.T) {
 			process, endpoint := start()
 			assertDormant(process, endpoint)
 			runID := assertCurrent("")
-			secretsCLI([]string{"secrets", "set", "webhook_signing.telegram", "--stdin"}, "telegram-secret\n")
+			secretsCLI([]string{"secrets", "set", "telegram.webhook_signing_secret", "--stdin"}, "telegram-secret\n")
 			assertDormant(process, endpoint)
 			if code := process.stop(); code != 0 {
 				t.Fatalf("initial stop=%d", code)
@@ -216,10 +243,10 @@ func TestDormantIngressProvisionRestartSignedInputBothStores(t *testing.T) {
 				t.Fatalf("exact duplicate response = %d/%#v/%v", duplicate.StatusCode, receipt, decodeErr)
 			}
 			var published int
-			if err := db.QueryRow(`SELECT COUNT(*) FROM events WHERE event_name = 'inbound.telegram'`).Scan(&published); err != nil || published != 1 {
+			if err := db.QueryRow(`SELECT COUNT(*) FROM events WHERE event_name = 'inbound.telegram.raw'`).Scan(&published); err != nil || published != 1 {
 				t.Fatalf("signed raw event dedupe = %d, %v", published, err)
 			}
-			secretsCLI([]string{"secrets", "set", "webhook_signing.telegram", "--stdin"}, "unadmitted-in-process-rotation\n")
+			secretsCLI([]string{"secrets", "set", "telegram.webhook_signing_secret", "--stdin"}, "unadmitted-in-process-rotation\n")
 			rotated, err := http.NewRequest(http.MethodPost, endpoint+"/webhooks/chat/telegram", strings.NewReader(`{"update_id":999,"message":{"message_id":999,"from":{"id":42},"chat":{"id":42,"type":"private"},"text":"unadmitted"}}`))
 			if err != nil {
 				t.Fatal(err)
@@ -236,20 +263,20 @@ func TestDormantIngressProvisionRestartSignedInputBothStores(t *testing.T) {
 				t.Fatalf("unadmitted credential rotation accepted: %d", refused.StatusCode)
 			}
 			assertCurrent(runID)
-			if err := db.QueryRow(`SELECT COUNT(*) FROM events WHERE event_name = 'inbound.telegram'`).Scan(&published); err != nil || published != 1 {
+			if err := db.QueryRow(`SELECT COUNT(*) FROM events WHERE event_name = 'inbound.telegram.raw'`).Scan(&published); err != nil || published != 1 {
 				t.Fatalf("refused credential rotation mutated history: count=%d err=%v", published, err)
 			}
 			if code := process.stop(); code != 0 {
 				t.Fatalf("enabled stop=%d", code)
 			}
-			secretsCLI([]string{"secrets", "remove", "webhook_signing.telegram"}, "")
+			secretsCLI([]string{"secrets", "remove", "telegram.webhook_signing_secret"}, "")
 			process, endpoint = start()
 			assertDormant(process, endpoint)
 			assertCurrent(runID)
 			if code := process.stop(); code != 0 {
 				t.Fatalf("dormant retained stop=%d", code)
 			}
-			secretsCLI([]string{"secrets", "set", "webhook_signing.telegram", "--stdin"}, "telegram-secret\n")
+			secretsCLI([]string{"secrets", "set", "telegram.webhook_signing_secret", "--stdin"}, "telegram-secret\n")
 			process, endpoint = start()
 			assertCurrent(runID)
 			sendStandingTelegramUpdate(t, endpoint, 93, 42, process.outputString)
@@ -274,7 +301,23 @@ func TestDormantIngressDoesNotWaiveLiveModelReadiness(t *testing.T) {
 			t.Setenv("SWARM_CREDENTIALS_FILE", filepath.Join(t.TempDir(), "credentials.json"))
 			t.Setenv("ANTHROPIC_API_KEY", "")
 			t.Setenv("TELEGRAM_BOT_TOKEN", "")
-			root := writeStandingTelegramServeFixture(t, "http://127.0.0.1:1")
+			root := filepath.Join(t.TempDir(), "chat")
+			if err := os.MkdirAll(filepath.Join(root, "telegram"), 0o700); err != nil {
+				t.Fatal(err)
+			}
+			trigger, err := os.ReadFile(filepath.Join(repoRootForTest(), "packs/providers/telegram/trigger.yaml"))
+			if err != nil {
+				t.Fatal(err)
+			}
+			for name, body := range map[string]string{
+				"manifest.yaml":          "version: 1.0.0\nplatform_version: '*'\n",
+				"schema.yaml":            "stages: []\npins: {inputs: [inbound.telegram.raw, inbound.telegram.text_message]}\n",
+				"telegram/manifest.yaml": "version: 1.0.0\nplatform_version: '*'\ncapabilities: {can: {emit_events: [raw, callback_action, text_message], verify_secret: webhook_signing_secret, persist_dedupe_markers: true}, cannot: [execute code]}\n",
+				"telegram/trigger.yaml":  string(trigger),
+				"agents.yaml":            "phrase-bot:\n  role: phrase_bot\n  intent: {inline: Require the independently selected Live model before handling inbound text.}\n  model: regular\n  subscriptions: [inbound.telegram.text_message]\n  emit_events: []\n",
+			} {
+				writeStandingCandidateFile(t, filepath.Join(root, name), body)
+			}
 			backend, storePath := "sqlite", filepath.Join(t.TempDir(), "model-readiness.sqlite")
 			if dev {
 				backend, storePath = "", ""
@@ -292,53 +335,16 @@ func TestDormantIngressDoesNotWaiveLiveModelReadiness(t *testing.T) {
 }
 
 func TestDormantIngressDoesNotWaiveIndependentOutboundCredential(t *testing.T) {
-	for _, signingKey := range []string{"webhook_signing.telegram", "telegram_bot_token"} {
-		t.Run(signingKey, func(t *testing.T) {
-			testDormantIngressDoesNotWaiveIndependentOutboundCredential(t, signingKey)
-		})
-	}
+	testDormantIngressDoesNotWaiveIndependentOutboundCredential(t)
 }
 
-func testDormantIngressDoesNotWaiveIndependentOutboundCredential(t *testing.T, signingKey string) {
+func testDormantIngressDoesNotWaiveIndependentOutboundCredential(t *testing.T) {
 	t.Helper()
 	isolateCLIAPIConfigEnv(t)
 	t.Setenv("SWARM_CREDENTIALS_FILE", filepath.Join(t.TempDir(), "credentials.json"))
 	unsetEnvForTest(t, "TELEGRAM_BOT_TOKEN")
-	unsetEnvForTest(t, "telegram_bot_token")
+	unsetEnvForTest(t, "telegram.telegram_bot_token")
 	root := writeStandingTelegramServeFixture(t, "http://127.0.0.1:1")
-	path := filepath.Join(root, "telegram-ingress", "schema.yaml")
-	data, err := os.ReadFile(path)
-	if err != nil {
-		t.Fatal(err)
-	}
-	var schema map[string]any
-	if err := yaml.Unmarshal(data, &schema); err != nil {
-		t.Fatal(err)
-	}
-	ingress := schema["ingress"].(map[string]any)
-	providers := ingress["providers"].([]any)
-	providers[0].(map[string]any)["signing_secret"] = signingKey
-	data, err = yaml.Marshal(schema)
-	if err != nil {
-		t.Fatal(err)
-	}
-	writeStandingCandidateFile(t, path, string(data))
-	writeStandingCandidateFile(t, filepath.Join(root, "schema.yaml"), `name: telegram-agent
-imports:
-  provider_trigger_events:
-    - provider: telegram
-      event: inbound.telegram.text_message
-pins:
-  inputs: [inbound.telegram.text_message]
-  outputs: [inbound.telegram.text_message]
-`)
-	writeStandingCandidateFile(t, filepath.Join(root, "telegram-chat", "schema.yaml"), `name: telegram-chat
-imports:
-  connector_packs:
-    - provider: telegram
-      tool: telegram.send_message
-stages: []
-`)
 	for _, file := range []string{"agents.yaml", "events.yaml"} {
 		if err := os.Remove(filepath.Join(root, "telegram-chat", file)); err != nil {
 			t.Fatal(err)
@@ -362,7 +368,7 @@ stages: []
 	code := runFrom(ctx, root, cliapp.ServeOptions{SourceRoot: root, ConfigPath: writeStoreBackendRuntimeConfigWithWorkspaceFields(t, "sqlite", filepath.Join(t.TempDir(), "outbound-readiness.sqlite"), channelOnboardingHostWorkspaceFields()),
 		APIListenAddr: "127.0.0.1:0", MCPListenAddr: "127.0.0.1:0", WorkspaceBackend: "host", WorkspaceBackendSet: true,
 		TestLLMRuntime: servedNoopLLMRuntime{}, Output: &output})
-	if code == 0 || ctx.Err() != nil || !strings.Contains(output.String(), "credential_key_exists @ telegram_bot_token") || !strings.Contains(output.String(), "required by tool telegram.send_message") || !strings.Contains(output.String(), "independent-notifier") || strings.Contains(output.String(), "[22/22]") {
+	if code == 0 || ctx.Err() != nil || !strings.Contains(output.String(), "credential_key_exists @ telegram.telegram_bot_token") || !strings.Contains(output.String(), "tool telegram.send_message") || !strings.Contains(output.String(), "independent-notifier") || strings.Contains(output.String(), "[22/22]") {
 		t.Fatalf("dormant ingress waived independent outbound demand: exit=%d context=%v\n%s", code, ctx.Err(), output.String())
 	}
 }

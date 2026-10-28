@@ -109,10 +109,15 @@ func TestC4F40SelectedStartTimerChildBothStores(t *testing.T) {
 			}
 			baseline := work.process.ActiveCount()
 			selection := runfork.RunForkContractSelection{Mode: runfork.RunForkContractSelectionModeBundleHash, BundleHash: bundleHash}
+			root, present, err := correlation.RootAdmissionFromContext(ctx)
+			if err != nil || !present {
+				t.Fatalf("selected timer target root: present=%t err=%v", present, err)
+			}
 			operation := &runfork.ForkOperationRequest{
 				OperationID: uuid.NewString(), Actor: "c4-f40-start-timer", IdempotencyKey: uuid.NewString(), TransportHash: "c4-f40-start-timer",
 				SourceRunID: sourceRun, AtStart: true, ResolvedPoint: &sourcePlan.ForkPoint, TargetBundleHash: bundleHash,
-				AllowSourceFreeze: true, ContractSelection: selection,
+				TargetRootReference: root.Reference(),
+				AllowSourceFreeze:   true, ContractSelection: selection,
 			}
 			if _, _, err := operation.Canonical(); err != nil {
 				t.Fatal(err)
@@ -130,7 +135,7 @@ func TestC4F40SelectedStartTimerChildBothStores(t *testing.T) {
 				},
 			}
 			loaded, err := executionRequest.SourceLoader.LoadRunForkSelectedContractSourceForRequest(ctx, runforkexecution.SelectedContractSourceLoadRequest{
-				SourceRunID: sourceRun, Selection: selection, BundleHash: bundleHash,
+				Responsibility: runforkexecution.OriginalRunSource(sourceRun), Selection: selection, BundleHash: bundleHash,
 			})
 			if err != nil {
 				t.Fatal(err)

@@ -3,6 +3,7 @@ package runforkexecution
 import (
 	"context"
 	"encoding/json"
+	"github.com/division-sh/swarm/internal/sourceartifact"
 	"os"
 	"path/filepath"
 	"reflect"
@@ -144,6 +145,7 @@ func seedPublishedJoinSource(t *testing.T, ctx context.Context, selected any, ow
 		ExecutionPosture: executionposture.MockOnly, WorkOwner: work, PipelineObligations: owner.ports.pipelineObligations,
 		ContractBundle: loaded.Source, SourceArtifactFact: loaded.SourceArtifactFact, RuntimeInstanceID: runForkTestRuntimeInstanceID,
 		DeliveryAuthority: authority, ReceiverExecution: eventreceiver.NormalExecution(), Durable: owner.ports.busDurable,
+		PayloadAdmitter: rootruntime.NewRuntimePayloadAdmitter(nil, loaded.Source, loaded.SourceArtifactFact),
 	})
 	if err != nil {
 		t.Fatal(err)
@@ -180,7 +182,8 @@ func seedPublishedJoinSource(t *testing.T, ctx context.Context, selected any, ow
 	}
 	driver, dispatch := &publishedJoinSourceDriver{}, &publishedJoinSourceDispatch{}
 	schedules := selected.(genericschedule.Store)
-	logger := rootruntime.NewGenericScheduleRuntimeLogger(rootruntime.NewRuntimeLogger(owner.ports.logs, executionposture.MockOnly, nil))
+	logger := rootruntime.NewGenericScheduleRuntimeLogger(rootruntime.NewRuntimeLogger(owner.ports.logs, executionposture.MockOnly,
+		rootruntime.NewRuntimePayloadAdmitter(nil, loaded.Source, loaded.SourceArtifactFact)))
 	clock, err := genericschedule.NewLifecycle(schedules, driver, eventBus, dispatch, logger, executionposture.MockOnly)
 	if err != nil {
 		t.Fatal(err)
@@ -204,7 +207,7 @@ func seedPublishedJoinSource(t *testing.T, ctx context.Context, selected any, ow
 	marker := eventtest.ExistingRunRootIngressWithRoutingSourceAndMode(uuid.NewString(), event.Type(), "source-runtime", "",
 		event.Payload(), 0, runID, events.EventEnvelope{}, events.NoRoutingSource(), at.Add(time.Second), executionmode.Mock)
 	if os.Getenv(publishedJoinFlowEnv) == "orders" {
-		admission, err := rootruntime.NewRuntimePayloadAdmitter(nil, loaded.Source, loaded.SourceArtifactFact)(ctx, marker, "orders")
+		admission, err := rootruntime.NewRuntimePayloadAdmitter(nil, loaded.Source, loaded.SourceArtifactFact)(ctx, marker, events.EventPayloadProducer(marker, "orders"))
 		if err != nil {
 			t.Fatal(err)
 		}
@@ -279,7 +282,7 @@ func seedPublishedOrdersJoinConstruction(t *testing.T, ctx context.Context, sele
 	}
 	event = eventtest.ExistingRunRootIngressWithRoutingSourceAndMode(event.ID(), events.EventType(declaration.EventKey()), "source-runtime", "",
 		payload, 0, root.InstancePath, events.EventEnvelope{}, events.NoRoutingSource(), at, executionmode.Mock)
-	admission, err := rootruntime.NewRuntimePayloadAdmitter(nil, loaded.Source, loaded.SourceArtifactFact)(ctx, event, "orders")
+	admission, err := rootruntime.NewRuntimePayloadAdmitter(nil, loaded.Source, loaded.SourceArtifactFact)(ctx, event, events.EventPayloadProducer(event, "orders"))
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -373,7 +376,7 @@ func TestIssue642PublishedJoinCrashRestartBothStores(t *testing.T) {
 				if err != nil {
 					t.Fatal(err)
 				}
-				loaded, err := loader.LoadRunForkSelectedContractSourceForRequest(ctx, SelectedContractSourceLoadRequest{SourceRunID: checkpoint.ForkRun, Selection: binding.ContractSelection})
+				loaded, err := loader.LoadRunForkSelectedContractSourceForRequest(ctx, SelectedContractSourceLoadRequest{Responsibility: RetainedForkSource(checkpoint.ForkRun), Selection: binding.ContractSelection})
 				if err != nil {
 					t.Fatal(err)
 				}
@@ -389,7 +392,8 @@ func TestIssue642PublishedJoinCrashRestartBothStores(t *testing.T) {
 				recovered, err := owner.RecoverSelectedForkContexts(ctx, effects.NewRecoveryRequest(time.Now().UTC(), executionposture.MockOnly), SelectedForkRecoveryEnvironment{
 					SourceLoader: loader, AgentRuntime: SelectedContractAgentRuntimeOptions{ExecutionPosture: executionposture.MockOnly, ProcessCapability: capability},
 					LiveContexts: contexts, LiveRuns: selected.(runlifecycle.LiveRunReader),
-					AcquireLiveRuntime: func(ctx context.Context, hash string) (*rootruntime.RuntimeContextUse, error) {
+					AcquireLiveRuntime: func(ctx context.Context, reference sourceartifact.RootAdmissionReference) (*rootruntime.RuntimeContextUse, error) {
+						hash := reference.BundleHash
 						use, _, err := contexts.AcquireBundleHash(ctx, hash)
 						return use, err
 					}})
@@ -520,7 +524,7 @@ func TestIssue642PublishedJoinContinuesExactDeliveryBothStores(t *testing.T) {
 			selection := runforkadmission.SelectedContractSelection(loaded.Source)
 			operation := runfork.ForkOperationRequest{OperationID: uuid.NewString(), Actor: "published-join", IdempotencyKey: "fixed-cut",
 				TransportHash: "published-join-transport", SourceRunID: sourceRun, ForkEventID: marker,
-				TargetBundleHash: loaded.SourceArtifactFact.BundleHash(), AllowSourceFreeze: true, ContractSelection: selection}
+				TargetBundleHash: loaded.SourceArtifactFact.BundleHash(), TargetRootReference: loaded.RootedSource.Admission().Reference(), AllowSourceFreeze: true, ContractSelection: selection}
 			liveRuntime, liveContexts := liveForkRuntimeFixture(t, ctx, selected, owner, loaded, sourceRun, executionposture.MockOnly)
 			sourceBefore, err = storetest.ReadSelectedForkSourceDomain(ctx, selected, sourceRun)
 			if err != nil {

@@ -5,7 +5,8 @@ import "testing"
 func CopyBusPublicationClaims(t testing.TB) string {
 	t.Helper()
 	root := t.TempDir()
-	writeClosedVariantFile(t, root, "schema.yaml", `name: bus-publication-claims
+	writeClosedVariantFile(t, root, "manifest.yaml", "version: 1.0.0\nplatform_version: '*'\n")
+	writeClosedVariantFile(t, root, "schema.yaml", `# fixture: bus-publication-claims
 pins:
   inputs: [task.completed, task.failed, custom.shared_claim, custom.pool_saturation]
   outputs: [task.completed, task.failed, custom.shared_claim, custom.pool_saturation]

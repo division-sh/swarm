@@ -10,18 +10,22 @@ import (
 	"github.com/division-sh/swarm/internal/runtime/deliverylifecycle"
 	"github.com/division-sh/swarm/internal/runtime/effects"
 	"github.com/division-sh/swarm/internal/runtime/runfork"
+	"github.com/division-sh/swarm/internal/testutil/sourceartifactfixture"
 	"github.com/google/uuid"
 )
 
-func selectedRecoveryEvidence() (runfork.SelectedForkRecoveryResult, runfork.SelectedForkRecoveryEntry) {
+func selectedRecoveryEvidence(t *testing.T) (runfork.SelectedForkRecoveryResult, runfork.SelectedForkRecoveryEntry) {
+	t.Helper()
+	rooted, _ := sourceartifactfixture.Rooted(t, "finite-feed", sourceartifactfixture.Artifact())
 	point := runfork.RunForkPoint{Kind: runfork.RunForkPointDeploymentRevision, Revision: 3}
 	selection := runfork.RunForkContractSelection{Mode: runfork.RunForkContractSelectionModeSelectedContracts}
-	bundle := "bundle-v2:sha256:" + strings.Repeat("a", 64)
+	bundle := rooted.Artifact().BundleHash()
 	entry := runfork.SelectedForkRecoveryEntry{
 		BundleHash: bundle,
 		Binding: runfork.RunForkSelectedContractBinding{
 			BindingID: uuid.NewString(), ForkRunID: uuid.NewString(), SourceRunID: uuid.NewString(),
 			ForkPoint: point, ContractSelection: selection,
+			TargetRootReference: rooted.Admission().Reference(),
 		},
 	}
 	pin := durabledata.Pin{
@@ -32,7 +36,7 @@ func selectedRecoveryEvidence() (runfork.SelectedForkRecoveryResult, runfork.Sel
 	operation := runfork.ForkOperationRequest{
 		OperationID: uuid.NewString(), Actor: "operator", TransportHash: "transport-hash",
 		SourceRunID: entry.Binding.SourceRunID, ResolvedPoint: &point,
-		TargetBundleHash: bundle, ContractSelection: selection,
+		TargetBundleHash: bundle, TargetRootReference: rooted.Admission().Reference(), ContractSelection: selection,
 		DataPinOverrides: []durabledata.ExplicitPin{{Declaration: pin.Declaration, VersionID: pin.VersionID}},
 	}
 	operation, hash, err := operation.Canonical()
@@ -49,7 +53,7 @@ func selectedRecoveryEvidence() (runfork.SelectedForkRecoveryResult, runfork.Sel
 }
 
 func TestSelectedRecoveryBootActionsAreClosed(t *testing.T) {
-	_, entry := selectedRecoveryEvidence()
+	_, entry := selectedRecoveryEvidence(t)
 	for _, tc := range []struct {
 		name        string
 		disposition runfork.SelectedForkRecoveryDisposition
@@ -76,7 +80,7 @@ func TestSelectedRecoveryBootActionsAreClosed(t *testing.T) {
 }
 
 func TestSelectedCancellationRecoveryPreservesPermanentOperationBinding(t *testing.T) {
-	result, entry := selectedRecoveryEvidence()
+	result, entry := selectedRecoveryEvidence(t)
 	origin, err := effects.DirectiveCompletionOrigin(agentcontrol.DirectiveExecutionOrigin{
 		OperationID: uuid.NewString(), ExecutionOwnerID: uuid.NewString(),
 	})
@@ -98,7 +102,7 @@ func TestSelectedCancellationRecoveryPreservesPermanentOperationBinding(t *testi
 }
 
 func TestSelectedRecoveryUsesPersistedCutIdentityNotDiagnosticMetadata(t *testing.T) {
-	result, entry := selectedRecoveryEvidence()
+	result, entry := selectedRecoveryEvidence(t)
 	point := runfork.RunForkPoint{Kind: runfork.RunForkPointEvent, Revision: 3, EventID: uuid.NewString()}
 	entry.Binding.ForkPoint, entry.Binding.ForkEventID = point, point.EventID
 	point.Input, point.EventName, point.ProducedBy, point.Timestamp = point.EventID, "item.received", "historical producer", time.Unix(1700002200, 0).UTC()
@@ -126,7 +130,7 @@ func TestSelectedRecoveryUsesPersistedCutIdentityNotDiagnosticMetadata(t *testin
 }
 
 func TestSelectedFiniteFeedRecoveryRequiresExactTypedOperation(t *testing.T) {
-	valid, entry := selectedRecoveryEvidence()
+	valid, entry := selectedRecoveryEvidence(t)
 	for _, tc := range []struct {
 		disposition runfork.SelectedForkRecoveryDisposition
 		want        selectedRecoveryAction
@@ -194,7 +198,7 @@ func TestSelectedFiniteFeedRecoveryRequiresExactTypedOperation(t *testing.T) {
 func TestSelectedRecoveryAllTypedCutsAndActivatedAcknowledgment(t *testing.T) {
 	for _, kind := range []runfork.RunForkPointKind{runfork.RunForkPointRunStart, runfork.RunForkPointEvent, runfork.RunForkPointDeploymentRevision} {
 		t.Run(string(kind), func(t *testing.T) {
-			recovered, entry := selectedRecoveryEvidence()
+			recovered, entry := selectedRecoveryEvidence(t)
 			point := runfork.RunForkPoint{Kind: kind, Revision: 4}
 			if kind == runfork.RunForkPointEvent {
 				point.EventID = uuid.NewString()

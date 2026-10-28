@@ -6,14 +6,6 @@ source:
   sha256: a00d391d74dbc940025e6bad601f08014cbdca4ab890606178e42102e436ded9
   openapi_version: 3.0.3
   server: https://api.github.com
-pack:
-  id: provider.github.connector
-  version: 0.1.0
-  platform_version: ">=0.7.0 <0.8.0"
-  provenance: platform
-  tests:
-    - providerconnectors/github_pack
-    - runtime/github_app_issue_workflow_supported_surface
 auth:
   mode: managed_credential
   managed_credential:

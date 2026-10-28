@@ -13,10 +13,6 @@ import (
 	"golang.org/x/sys/unix"
 )
 
-type admittedArtifactRoot struct {
-	directory *os.File
-}
-
 func openAdmittedArtifactRoot(target string) (*admittedArtifactRoot, error) {
 	target = filepath.Clean(target)
 	if !filepath.IsAbs(target) {

@@ -41,7 +41,8 @@ func VerifyNativePipelineCompiledTimerTransitionEvidenceOnBothStoresForTest(t *t
 					timer += "        emit: review.expired\n"
 				}
 				files := map[string]string{
-					"schema.yaml":   "name: timer-evidence\nstages:\n  waiting:\n    timers:\n      - after: 1h\n" + timer + "  done: {final: true}\n",
+					"manifest.yaml": "version: 1.0.0\nplatform_version: \">=0.7.0 <0.8.0\"\n",
+					"schema.yaml":   "stages:\n  waiting:\n    timers:\n      - after: 1h\n" + timer + "  done: {final: true}\n",
 					"entities.yaml": "test_entity: {}\n",
 					"events.yaml":   "review.expired:\n",
 				}
@@ -261,8 +262,10 @@ func VerifyAcceptedLifecycleConsumerRejectsUnownedTransitionOnBothStoresForTest(
 		t.Fatal(err)
 	}
 	gateBundle := loadWorkflowTempBundle(t, map[string]string{
-		"schema.yaml":          "name: frozen-gate\n",
-		"orders/schema.yaml":   "name: orders\nstages:\n  queued:\n    gate:\n      decision: review\n      outcomes:\n        approve: {advances_to: active}\n  active: {}\n",
+		"manifest.yaml":        "version: 1.0.0\nplatform_version: \">=0.7.0 <0.8.0\"\n",
+		"schema.yaml":          "stages: []\n",
+		"orders/manifest.yaml": "version: 1.0.0\nplatform_version: \">=0.7.0 <0.8.0\"\n",
+		"orders/schema.yaml":   "stages:\n  queued:\n    gate:\n      decision: review\n      outcomes:\n        approve: {advances_to: active}\n  active: {}\n",
 		"orders/entities.yaml": "test_entity: {}\n",
 	})
 	gateGraph, found := gateBundle.WorkflowStageTopology("orders")

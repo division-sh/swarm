@@ -186,7 +186,7 @@ func TestComposedStartupCreationPublicationHandoffOnBothStores(t *testing.T) {
 					UseStartupRecovery: true,
 					ExecutionPosture:   executionposture.MockOnly, Ctx: ctx, Stores: persistence, Config: cfg, Loaded: loaded,
 					WorkspaceBackend: cliapp.WorkspaceBackendSelection{Backend: "host"}, EnableToolGateway: true, ToolGatewayBinding: binding,
-					ProviderTriggerCatalog: testProviderTriggerCatalog(t), ProcessWorkOwner: process, RuntimeInstanceID: instance,
+					ProcessWorkOwner: process, RuntimeInstanceID: instance,
 					Credentials: credentials, ProviderCredentials: credentials,
 					Options: cliapp.ServeOptions{TestLLMRuntime: servedNoopLLMRuntime{}, TestLifecycleProbe: barrier, ShutdownGrace: 5 * time.Second},
 				}
@@ -195,6 +195,7 @@ func TestComposedStartupCreationPublicationHandoffOnBothStores(t *testing.T) {
 					_ = loaded.cleanup()
 					t.Fatal(err)
 				}
+				loaded = candidate.loaded
 				candidates = append(candidates, candidate)
 				plan, err := compileServeSourceSetPlan(candidates)
 				if err != nil {
@@ -211,7 +212,12 @@ func TestComposedStartupCreationPublicationHandoffOnBothStores(t *testing.T) {
 				db, _, _ := selectedRuntimeStoreForTest(t, persistence)
 				runID := uuid.NewString()
 				fact := candidate.runtime.Options.SourceArtifactFact
-				storetest.RequireRun(t, ctx, persistence.deps.EventBusDurable.RunLifecycle.(storetest.RunFixtureStore), storetest.RunFixture{RunID: runID, Origin: storetest.ScenarioSetupOrigin(), BundleHash: fact.BundleHash(), Artifact: loaded.bundle.SourceArtifact})
+				rooted, err := loaded.bundle.RootedSource()
+				if err != nil {
+					t.Fatal(err)
+				}
+				ctx = correlation.WithRootAdmission(correlation.WithSourceArtifactFact(ctx, fact), rooted.Admission())
+				storetest.RequireRun(t, ctx, persistence.deps.EventBusDurable.RunLifecycle.(storetest.RunFixtureStore), storetest.RunFixture{RunID: runID, Origin: storetest.ScenarioSetupOrigin(), BundleHash: fact.BundleHash(), Artifact: loaded.bundle.SourceArtifact, RootAdmission: rooted.Admission()})
 				// Commit fixture setup before releasing autonomous runtime writers.
 				if err := startPredecessor(); err != nil {
 					t.Fatalf("start predecessor: %v", err)

@@ -6,14 +6,18 @@ import (
 	"github.com/division-sh/swarm/internal/events/eventtest"
 	"github.com/division-sh/swarm/internal/runtime/authoractivity"
 	runtimebus "github.com/division-sh/swarm/internal/runtime/bus"
+	"github.com/division-sh/swarm/internal/runtime/contracts"
 	"github.com/division-sh/swarm/internal/runtime/core/actors"
 	"github.com/division-sh/swarm/internal/runtime/core/agentidentity"
 	"github.com/division-sh/swarm/internal/runtime/correlation"
 	"github.com/division-sh/swarm/internal/runtime/deliverylifecycle"
 	"github.com/division-sh/swarm/internal/runtime/effects"
 	"github.com/division-sh/swarm/internal/runtime/manager"
+	"github.com/division-sh/swarm/internal/runtime/semanticview"
 	"github.com/division-sh/swarm/internal/runtime/sessions"
 	"github.com/division-sh/swarm/internal/runtime/startupownership"
+	"github.com/division-sh/swarm/internal/runtime/testfixtures/canonicalrouting"
+	"github.com/division-sh/swarm/internal/sourceartifact"
 	"github.com/division-sh/swarm/internal/store/selected/selectedtest"
 	"github.com/division-sh/swarm/internal/store/storetest"
 	"github.com/division-sh/swarm/internal/testutil/sourceartifactfixture"
@@ -27,6 +31,7 @@ type exactHandoffNativeOwner interface {
 	selectedtest.SelectedDeliveryFixtureStore
 	sessions.Registry
 	storetest.AgentFixtureStore
+	sourceartifactfixture.RootedWriter
 }
 
 func openExactHandoffNative(t *testing.T, backend string, selectedExecution bool) runtimebus.ExactHandoffNativeFixtureForTest {
@@ -38,28 +43,49 @@ func openExactHandoffNative(t *testing.T, backend string, selectedExecution bool
 		owner = storetest.StartSQLiteRuntimeStore(t)
 	}
 	ctx := effects.WithDifferentOwner(context.Background(), effects.OwnerBuildTestInfrastructure)
-	ctx = correlation.WithSourceArtifactFact(ctx, sourceartifactfixture.Fact())
-	ctx = authoractivity.WithScope(ctx, authoractivity.BundleScope(uuid.NewString(), sourceartifactfixture.BundleHash))
+	var authority deliverylifecycle.ExecutionAuthority
+	fixture := runtimebus.ExactHandoffNativeFixtureForTest{Store: owner}
 	if !selectedExecution {
 		ctx = originalEventBusFixtureContext(t, ctx, owner)
 	}
-	if err := sourceartifactfixture.Ensure(ctx, owner); err != nil {
-		t.Fatal(err)
-	}
-	authority, err := deliverylifecycle.NewNormalExecutionAuthority(sourceartifactfixture.Fact(), "exact-handoff-test", 1)
-	if err != nil {
-		t.Fatal(err)
-	}
-	fixture := runtimebus.ExactHandoffNativeFixtureForTest{Store: owner, Context: ctx, Authority: authority}
 	if selectedExecution {
 		execution := selectedtest.OpenSelectedDeliveryExecution(t, ctx, owner)
 		ctx, authority = execution.Context, execution.Authority
-		fixture.Context, fixture.Authority = ctx, authority
+		fixture.Source = execution.SemanticSource
 		fixture.SelectedEvent, fixture.SelectedRoute = execution.SelectedEvent, execution.SelectedRoute
-	} else if err := owner.ActivateDeliveryAuthority(ctx, authority); err != nil {
-		t.Fatal(err)
+	} else {
+		artifact, err := sourceartifact.AdmitMembers(map[string][]byte{
+			"manifest.yaml": []byte("version: 1.0.0\nplatform_version: '*'\n"),
+			"schema.yaml":   []byte("stages: []\n"),
+			"events.yaml":   []byte("test.work:\n"),
+		})
+		if err != nil {
+			t.Fatal(err)
+		}
+		rooted, _ := sourceartifactfixture.Rooted(t, "exact-handoff", artifact)
+		repo := canonicalrouting.RepoRoot(t)
+		bundle, err := contracts.LoadWorkflowContractBundleFromRootedSource(repo, rooted, contracts.DefaultPlatformSpecFile(repo), contracts.WorkflowContractLoadOptions{})
+		if err != nil {
+			t.Fatal(err)
+		}
+		fixture.Source = semanticview.Wrap(bundle)
+		fact := sourceartifactfixture.FactFor(bundle.SourceArtifact)
+		ctx = correlation.WithSourceArtifactFact(ctx, fact)
+		ctx = correlation.WithRootAdmission(ctx, rooted.Admission())
+		ctx = authoractivity.WithScope(ctx, authoractivity.BundleScope(uuid.NewString(), fact.BundleHash()))
+		if _, err := owner.EnsureRootedSource(ctx, rooted); err != nil {
+			t.Fatal(err)
+		}
+		authority, err = deliverylifecycle.NewNormalExecutionAuthority(fact, "exact-handoff-test", 1)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if err := owner.ActivateDeliveryAuthority(ctx, authority); err != nil {
+			t.Fatal(err)
+		}
 	}
 	fixture.OriginalCommandContext = startupownership.CarryMutationAuthority(context.Background(), ctx)
+	fixture.Context, fixture.Authority = ctx, authority
 	fixture.Seed = func(t *testing.T, eventID, runID string, route events.DeliveryRoute) events.Event {
 		t.Helper()
 		var event events.Event

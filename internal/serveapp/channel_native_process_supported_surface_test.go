@@ -13,6 +13,7 @@ func TestChannelNativeInstallAbruptProcessDeathPublicJourney(t *testing.T) {
 		for _, cut := range []string{"launched", "settled"} {
 			t.Run(string(backend)+"/"+cut, func(t *testing.T) {
 				h := newChannelOnboardingE2EHarness(t, backend, true)
+				writeChannelOnboardingLiveToolCredentials(t, h.credentialPath)
 				t.Setenv("TEST_CHANNEL_ONBOARDING_RETAIN_RUNS", "1")
 				first := startChannelOnboardingCrashServeProcess(t, h.opts, h.telegram.URL)
 				h.endpoint = first.endpoint(t)

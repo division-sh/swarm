@@ -25,7 +25,7 @@ func TestInputProducerSharesOnlyOperationLocalCensus(t *testing.T) {
 		t.Run(tc.name, func(t *testing.T) {
 			source := &producerCensusCounter{Source: flowInputProducerFixture(t, runtimecontracts.FlowInputEventPin{Event: "work.requested"}, nil)}
 			if tc.provider {
-				source.Source = markedToolOverlaySource{Source: source.Source, capabilities: source.SemanticCapabilities().WithProviderTriggerEvents(source.Source, triggergeneration.FromCanonicalBytes([]byte("producer-work")), nil).WithProviderIngressEvents(map[string][]string{"worker": {"work.requested"}})}
+				source.Source = markedToolOverlaySource{Source: source.Source, capabilities: source.SemanticCapabilities().WithProviderTriggerEvents(source.Source, triggergeneration.FromCanonicalBytes([]byte("producer-work")), nil, nil).WithProviderIngressEvents(map[string][]string{"worker": {"work.requested"}})}
 			}
 			for calls := 1; calls <= 2; calls++ {
 				got := ResolveNonConnectFlowInputProducer(source, "worker", "work.requested")

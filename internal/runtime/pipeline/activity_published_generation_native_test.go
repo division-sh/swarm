@@ -36,7 +36,7 @@ func VerifyReadOnlyPublishedAccountingAfterNativeLoopAdvanceAndReopenForTest(t *
 			}))
 			defer server.Close()
 			bundle := loadWorkflowTempBundle(t, map[string]string{
-				"schema.yaml":   "name: published-read-accounting\nstages:\n  review: {}\n  drafting: {}\n  exhausted: {final: true}\nloops:\n  revision:\n    revision_field: revision_id\n    max_attempts: 3\n    escape: {advances_to: exhausted}\n",
+				"schema.yaml":   "stages:\n  review: {}\n  drafting: {}\n  exhausted: {final: true}\nloops:\n  revision:\n    revision_field: revision_id\n    max_attempts: 3\n    escape: {advances_to: exhausted}\n",
 				"entities.yaml": "work: {}\n",
 				"events.yaml":   "read.requested:\n  revision_id: text\n",
 				"nodes.yaml": `reader:
@@ -52,7 +52,7 @@ func VerifyReadOnlyPublishedAccountingAfterNativeLoopAdvanceAndReopenForTest(t *
     read.failed:
       guard: {id: exact_activity, check: payload.activity_id == 'read'}
 `,
-				"tools.yaml": fmt.Sprintf("read:\n  handler_type: http\n  http: {method: GET, url: %q}\n", server.URL),
+				"tools.yaml": fmt.Sprintf("read:\n  handler_type: http\n  http: {method: GET, url: %q}\n", server.URL), "manifest.yaml": "version: 1.0.0\nplatform_version: '*'\n",
 			})
 			fixture, pc, ctx := nativePilotPipelineForTest(t, backend, bundle, open)
 			run := correlation.RunIDFromContext(ctx)

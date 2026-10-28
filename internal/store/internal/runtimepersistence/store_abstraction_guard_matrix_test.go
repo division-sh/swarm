@@ -264,11 +264,6 @@ func validateSelectedStoreAbstractionRequiredRowShapes(rowsByID map[string]selec
 
 func expectedSelectedStoreAbstractionRowShapes() map[string]selectedStoreAbstractionExpectedRowShape {
 	return map[string]selectedStoreAbstractionExpectedRowShape{
-		"public_surface_backend_matrix_accounting": {
-			Classification:         "matrix_owner",
-			Tier:                   "required_smoke",
-			RequiresGuardProofRefs: true,
-		},
 		"producer_backend_branching_guard": {
 			Classification:         "guard",
 			Tier:                   "required_smoke",
@@ -514,7 +509,6 @@ func selectedStoreAbstractionProblemsContain(problems []string, want string) boo
 
 func requiredSelectedStoreAbstractionRows() map[string]struct{} {
 	return selectedStoreAbstractionStringSet([]string{
-		"public_surface_backend_matrix_accounting",
 		"producer_backend_branching_guard",
 		"raw_selected_runtime_writer_boundary_guard",
 		"sqlite_runtime_sqldb_omission_guard",

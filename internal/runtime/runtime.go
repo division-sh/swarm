@@ -5,6 +5,7 @@ import (
 	"errors"
 	"fmt"
 	"log/slog"
+	"maps"
 	"os"
 	"regexp"
 	"sort"
@@ -17,6 +18,7 @@ import (
 	"github.com/division-sh/swarm/internal/config"
 	"github.com/division-sh/swarm/internal/durabledata"
 	"github.com/division-sh/swarm/internal/events"
+	"github.com/division-sh/swarm/internal/packadmission"
 	"github.com/division-sh/swarm/internal/packs"
 	"github.com/division-sh/swarm/internal/providerconnectors"
 	"github.com/division-sh/swarm/internal/providertriggers"
@@ -68,6 +70,7 @@ import (
 	"github.com/division-sh/swarm/internal/runtime/toolgateway"
 	runtimetools "github.com/division-sh/swarm/internal/runtime/tools"
 	workspace "github.com/division-sh/swarm/internal/runtime/workspace"
+	"github.com/division-sh/swarm/internal/sourceartifact"
 	"github.com/google/uuid"
 )
 
@@ -80,7 +83,9 @@ type AuthorActivityCatalogRegistrar interface {
 }
 
 type RuntimeOptions struct {
+	TriggerEntries                   map[string]config.TriggerConfig
 	ExecutionPosture                 executionposture.Posture
+	PublicIngressAbsent              bool
 	EnableDeclaredClockBinding       bool
 	SelfCheck                        bool
 	WorkspaceLifecycle               workspace.Lifecycle
@@ -153,7 +158,7 @@ type RuntimeDeps struct {
 	DataAccessStore               durabledata.ResourceAccessStore
 	HumanTaskStore                runtimetools.HumanTaskCardStore
 	BudgetSpendStore              budgetspend.Store
-	BudgetStageSourceLoader       func(context.Context, string) (semanticview.Source, error)
+	BudgetStageSourceLoader       func(context.Context, sourceartifact.RootAdmissionReference) (semanticview.Source, error)
 	InboundStore                  InboundPersistence
 	RuntimeIngressStore           runtimeingress.Store
 	ScenarioExecutionProfiles     runtimepipeline.ScenarioExecutionProfileReader
@@ -444,7 +449,11 @@ func (rt *Runtime) prepareStartupLifecycleLocked(ctx context.Context) error {
 	if grant == nil {
 		return errors.New("runtime generation grant is required before startup preparation")
 	}
-	ctx, err := runtimestartupownership.WithRuntimeMutationAuthority(ctx, grant)
+	ctx, err := rt.compiledSourceContext(ctx)
+	if err != nil {
+		return err
+	}
+	ctx, err = runtimestartupownership.WithRuntimeMutationAuthority(ctx, grant)
 	if err != nil {
 		return err
 	}
@@ -481,6 +490,10 @@ func (rt *Runtime) PreflightDynamicTopologyStartup(ctx context.Context) error {
 	if rt == nil || rt.Manager == nil {
 		return nil
 	}
+	ctx, err := rt.compiledSourceContext(ctx)
+	if err != nil {
+		return err
+	}
 	projection, err := rt.Manager.InspectDynamicFlowRuntimeReadinessForSource(ctx, rt.Options.SourceArtifactFact)
 	if err != nil {
 		return fmt.Errorf("inspect source-scoped dynamic topology startup: %w", err)
@@ -499,6 +512,31 @@ func (rt *Runtime) PreflightDynamicTopologyStartup(ctx context.Context) error {
 		)
 	}
 	return nil
+}
+
+func (rt *Runtime) compiledSourceContext(ctx context.Context) (context.Context, error) {
+	if rt.Options.WorkflowModule == nil {
+		return nil, errors.New("startup source observation requires its compiled workflow module")
+	}
+	bundle, present := semanticview.Bundle(rt.Options.WorkflowModule.SemanticSource())
+	if !present || bundle == nil {
+		return nil, errors.New("startup source observation requires its compiled bundle")
+	}
+	rooted, err := bundle.RootedSource()
+	if err != nil {
+		return nil, err
+	}
+	if rooted.Admission().BundleHash() != rt.Options.SourceArtifactFact.BundleHash() {
+		return nil, errors.New("startup source observation compiled root differs from runtime source")
+	}
+	if fact, supplied := runtimecorrelation.SourceArtifactFactFromContext(ctx); supplied && fact.BundleHash() != rt.Options.SourceArtifactFact.BundleHash() {
+		return nil, errors.New("startup source observation context differs from runtime source")
+	}
+	if err := runtimecorrelation.CheckRootAdmissionContext(ctx, rooted.Admission().Reference()); err != nil {
+		return nil, err
+	}
+	ctx = runtimecorrelation.WithRootAdmission(runtimecorrelation.WithSourceArtifactFact(ctx, rt.Options.SourceArtifactFact), rooted.Admission())
+	return ctx, nil
 }
 
 // PreparedSourceSetGenerationRefresh reserves one runtime generation and all
@@ -777,10 +815,10 @@ func runtimeThrottleSuppressPrefixes(source semanticview.Source) []string {
 }
 
 func ensureWorkflowBootWiring(opts RuntimeOptions, profile llmselection.Profile, posture executionposture.Posture) (*providerconnectors.MockResponsePlan, runtimebootverify.SourceBootEffectReachability, error) {
-	return ensureWorkflowBootWiringWithModelAliases(opts, profile, posture, nil)
+	return ensureWorkflowBootWiringWithModelAliases(opts, profile, posture, nil, opts.TriggerEntries)
 }
 
-func ensureWorkflowBootWiringWithModelAliases(opts RuntimeOptions, profile llmselection.Profile, posture executionposture.Posture, modelAliases llmselection.ModelAliases) (*providerconnectors.MockResponsePlan, runtimebootverify.SourceBootEffectReachability, error) {
+func ensureWorkflowBootWiringWithModelAliases(opts RuntimeOptions, profile llmselection.Profile, posture executionposture.Posture, modelAliases llmselection.ModelAliases, triggers map[string]config.TriggerConfig) (*providerconnectors.MockResponsePlan, runtimebootverify.SourceBootEffectReachability, error) {
 	if opts.WorkflowModule == nil {
 		return nil, runtimebootverify.SourceBootEffectReachability{}, fmt.Errorf("workflow module is required: configure RuntimeOptions.WorkflowModule")
 	}
@@ -791,6 +829,8 @@ func ensureWorkflowBootWiringWithModelAliases(opts RuntimeOptions, profile llmse
 		}
 	}
 	validationOpts := DefaultWorkflowContractValidationOptions(opts.Credentials, posture)
+	validationOpts.PublicIngressAbsent = opts.PublicIngressAbsent
+	validationOpts.TriggerEntries = triggers
 	validationOpts.ManagedCredentials = opts.ManagedCredentials
 	validationOpts.ProviderCredentials = opts.ProviderCredentials
 	validationOpts.ProviderTriggerCatalog = opts.ProviderTriggerCatalog
@@ -903,7 +943,7 @@ func (deps RuntimeDeps) validated() (validatedRuntimeDeps, error) {
 	}
 	projection, err := AdmitEffectiveSourceProjection(EffectiveSourceProjectionRequest{
 		WorkflowModule: opts.WorkflowModule, SourceArtifactFact: opts.SourceArtifactFact,
-		ProviderTriggerCatalog: opts.ProviderTriggerCatalog, ChannelPlans: opts.ChannelPlans,
+		ChannelPlans: opts.ChannelPlans,
 	})
 	if err != nil {
 		return validatedRuntimeDeps{}, fmt.Errorf("admit effective source projection: %w", err)
@@ -914,7 +954,8 @@ func (deps RuntimeDeps) validated() (validatedRuntimeDeps, error) {
 	if err != nil {
 		return validatedRuntimeDeps{}, fmt.Errorf("compile scenario execution profile catalog: %w", err)
 	}
-	mockConnectorResponses, bootEffectReachability, err := ensureWorkflowBootWiringWithModelAliases(opts, profile, posture, cfg.LLM.Models)
+	opts.TriggerEntries = maps.Clone(cfg.Triggers)
+	mockConnectorResponses, bootEffectReachability, err := ensureWorkflowBootWiringWithModelAliases(opts, profile, posture, cfg.LLM.Models, cfg.Triggers)
 	if err != nil {
 		return validatedRuntimeDeps{}, fmt.Errorf("workflow contract validation failed: %w", err)
 	}
@@ -1018,6 +1059,28 @@ func AuthorActivityEventDescriptors(source semanticview.Source) ([]runtimeauthor
 		}
 		if err := add(proof.EventKey(), disposition); err != nil {
 			return nil, err
+		}
+		schema, found, err := source.ResolveEffectiveCompiledFlowEventSchema(endpoint.FlowID, proof.Local)
+		if err != nil {
+			return nil, err
+		}
+		if found && schema.Classification() == runtimecontracts.CompiledEventSchemaImported {
+			if err := add(schema.EventName(), runtimeauthoractivity.StoryDifferent); err != nil {
+				return nil, err
+			}
+		}
+	}
+	for _, provenance := range source.SemanticCapabilities().ProviderTriggerEventProvenance() {
+		for _, flow := range provenance.FlowScopes {
+			schema, found, err := source.ResolveEffectiveCompiledFlowEventSchema(flow, provenance.Event)
+			if err != nil {
+				return nil, err
+			}
+			if found && schema.Classification() == runtimecontracts.CompiledEventSchemaImported {
+				if err := add(schema.EventName(), runtimeauthoractivity.StoryDifferent); err != nil {
+					return nil, err
+				}
+			}
 		}
 	}
 	for _, join := range source.WorkflowJoins() {
@@ -1127,6 +1190,10 @@ func (rt *Runtime) authorActivityContext(ctx context.Context) context.Context {
 }
 
 func (rt *Runtime) mutationContext(ctx context.Context) (context.Context, error) {
+	ctx, err := rt.compiledSourceContext(ctx)
+	if err != nil {
+		return nil, err
+	}
 	if runtimestartupownership.HasMutationAuthority(ctx) {
 		original, err := runtimestartupownership.CaptureMutationAuthority(ctx)
 		if err != nil || original.HasRuntimeGrant() {
@@ -1215,12 +1282,24 @@ func newRuntime(ctx context.Context, deps RuntimeDeps) (*Runtime, error) {
 	payloadAdmitter := boot.payloadAdmitter(rt.Logger)
 	rt.payloadAdmitter = payloadAdmitter
 	constructionOwner := runtimeFlowConstructionOwner{current: func() *runtimemanager.AgentManager { return managerRef }}
+	bundle, ok := semanticview.Bundle(source)
+	if !ok {
+		return nil, fmt.Errorf("provider output admission requires its compiled source")
+	}
+	rooted, err := bundle.RootedSource()
+	if err != nil {
+		return nil, err
+	}
+	providers, err := packadmission.AdmitProviderSource(rooted, bundle.Platform)
+	if err != nil {
+		return nil, err
+	}
 	bus, err := newRuntimeEventBus(runtimeDeps.EventStore, runtimeDeps.EventBusDurable, runtimeDeps.PipelineObligations, rt.Logger, source, boot.ExecutionPosture, boot.SourceArtifactFact, opts.RuntimeInstanceID, workOccurrence, func() []runtimebus.EventInterceptor {
 		if rt.Pipeline == nil {
 			return nil
 		}
 		return []runtimebus.EventInterceptor{rt.Pipeline}
-	}, payloadAdmitter, constructionOwner, constructionOwner, opts.ProviderTriggerCatalog, opts.TestLifecycleProbe, rt.mutationContext)
+	}, payloadAdmitter, constructionOwner, constructionOwner, providers, opts.TestLifecycleProbe, rt.mutationContext)
 	if err != nil {
 		return nil, fmt.Errorf("build event bus: %w", err)
 	}
@@ -1338,7 +1417,7 @@ func newRuntime(ctx context.Context, deps RuntimeDeps) (*Runtime, error) {
 
 	if runtimeDeps.BudgetSpendStore != nil {
 		rt.Budget = NewBudgetTracker(runtimeDeps.BudgetSpendStore, rt.Bus, cfg, runtimeDeps.MailboxStore, rt.Logger, source, rt.ExecutionPosture, BudgetRecoveryStageSources{
-			CurrentBundleHash: boot.SourceArtifactFact.BundleHash(), Load: runtimeDeps.BudgetStageSourceLoader,
+			Load: runtimeDeps.BudgetStageSourceLoader,
 		})
 	}
 
@@ -1482,7 +1561,7 @@ func newRuntime(ctx context.Context, deps RuntimeDeps) (*Runtime, error) {
 	factory := runtimeagents.NewLLMAgentFactory(rt.LLMRuntimes, rt.ToolExecutor, runtimeagents.LLMAgentOptions{})
 	managerOptions := runtimemanager.AgentManagerOptions{
 		ExecutionPosture:     boot.ExecutionPosture,
-		BaseContext:          rt.authorActivityContext(context.Background()),
+		BaseContext:          runtimecorrelation.WithRootAdmission(rt.authorActivityContext(context.Background()), rooted.Admission()),
 		MutationContext:      rt.mutationContext,
 		CarryMutationContext: runtimestartupownership.CarryMutationAuthority,
 		SourceArtifactFact:   rt.Options.SourceArtifactFact,
@@ -1645,7 +1724,10 @@ func (rt *Runtime) PrepareStart(ctx context.Context) (*PreparedStartup, error) {
 }
 
 func (rt *Runtime) prepareStartLocked(ctx context.Context) (*PreparedStartup, error) {
-	ctx = runtimecorrelation.WithSourceArtifactFact(ctx, rt.Options.SourceArtifactFact)
+	ctx, err := rt.compiledSourceContext(ctx)
+	if err != nil {
+		return nil, err
+	}
 	if err := rt.PreflightDynamicTopologyStartup(ctx); err != nil {
 		return nil, err
 	}
@@ -1656,7 +1738,6 @@ func (rt *Runtime) prepareStartLocked(ctx context.Context) (*PreparedStartup, er
 		return nil, err
 	}
 	ctx = rt.authorActivityContext(ctx)
-	var err error
 	ctx, err = rt.mutationContext(ctx)
 	if err != nil {
 		return nil, err

@@ -249,8 +249,13 @@ func newDynamicFlowCreationAtomicityFixture(t *testing.T, backend string) dynami
 	if err != nil {
 		t.Fatal(err)
 	}
+	rooted, err := bundle.RootedSource()
+	if err != nil {
+		t.Fatal(err)
+	}
 	runID := uuid.NewString()
 	ctx := runtimeauthoractivity.WithScope(runtimecorrelation.WithSourceArtifactFact(context.Background(), sourceFact), runtimeauthoractivity.BundleScope(authorActivityTestRuntimeInstanceID, sourceFact.BundleHash()))
+	ctx = runtimecorrelation.WithRootAdmission(ctx, rooted.Admission())
 	ctx = runtimeeffects.WithExecutionMode(runtimecorrelation.WithRunID(ctx, runID), executionmode.Live)
 	acquire := runtimestartupownership.AcquireRequest{OwnerID: "dynamic-creation-atomicity", BootID: uuid.NewString(), RuntimeInstanceID: authorActivityTestRuntimeInstanceID}
 	process, err := selected.AcquireProcessCapability(ctx, acquire)
@@ -263,7 +268,7 @@ func newDynamicFlowCreationAtomicityFixture(t *testing.T, backend string) dynami
 		t.Fatal(err)
 	}
 	bundleHash := sourceFact.BundleHash()
-	fixture := storetest.RunFixture{Origin: storetest.ScenarioSetupOrigin(), RunID: runID, BundleHash: bundleHash, Artifact: bundle.SourceArtifact}
+	fixture := storetest.RunFixture{Origin: storetest.ScenarioSetupOrigin(), RunID: runID, BundleHash: bundleHash, Artifact: bundle.SourceArtifact, RootAdmission: rooted.Admission()}
 	if sqlite {
 		fixture.StartedAt = time.Now().UTC()
 	}
@@ -367,7 +372,11 @@ func newDynamicFlowCreationAtomicityFixture(t *testing.T, backend string) dynami
 	if err != nil || !found {
 		t.Fatalf("load initial flow readiness: found=%v err=%v", found, err)
 	}
-	sourceSet, err := runtimeagenttopology.NewSourceSetPlan([]runtimeagenttopology.SourceCoordinate{{BundleHash: bundleHash}}, nil)
+	coordinate, err := runtimeagenttopology.NewSourceCoordinate(rooted.Admission())
+	if err != nil {
+		t.Fatal(err)
+	}
+	sourceSet, err := runtimeagenttopology.NewSourceSetPlan([]runtimeagenttopology.SourceCoordinate{coordinate}, nil)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -418,10 +427,10 @@ func dynamicFlowCreationAtomicityBundle(t *testing.T) *runtimecontracts.Workflow
 	t.Helper()
 	root := t.TempDir()
 	for name, content := range map[string]string{
-		"schema.yaml":          "name: dynamic-creation-proof\n",
-		"review/schema.yaml":   "name: review\ninstance: name\nstages:\n  pending: {}\npins:\n  inputs:\n    - task.started\nauto_emit_on_create:\n  event: task.started\n",
+		"schema.yaml":          "stages: []\n",
+		"review/schema.yaml":   "instance: name\nstages:\n  pending: {}\npins:\n  inputs:\n    - task.started\nauto_emit_on_create:\n  event: task.started\n",
 		"review/entities.yaml": "test_entity:\n  name: text\n",
-		"review/events.yaml":   "task.started:\n  name: text\n",
+		"review/events.yaml":   "task.started:\n  name: text\n", "manifest.yaml": "version: 1.0.0\nplatform_version: '*'\n", "review/manifest.yaml": "version: 1.0.0\nplatform_version: '*'\n",
 	} {
 		path := filepath.Join(root, name)
 		if err := os.MkdirAll(filepath.Dir(path), 0o755); err != nil {

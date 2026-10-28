@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"github.com/division-sh/swarm/internal/sourceartifact"
 	"os"
 	"path/filepath"
 	"reflect"
@@ -65,7 +66,7 @@ func runSelectedHandlerFanOutCrashHelper(t *testing.T, ctx context.Context, sele
 	t.Helper()
 	repo := runForkExecutionRepoRoot(t)
 	root := canonicalrouting.CopyForkFanOutConsumer(t, false, false)
-	writeSelectedContractFixtureFile(t, filepath.Join(root, "schema.yaml"), "name: fork-fan-out-carrier\nstages:\n  pending: {}\npins:\n  inputs: [items.ready]\n")
+	writeSelectedContractFixtureFile(t, filepath.Join(root, "schema.yaml"), "stages:\n  pending: {}\npins:\n  inputs: [items.ready]\n")
 	writeSelectedContractFixtureFile(t, filepath.Join(root, "events.yaml"), "items.ready:\n  items: [text]\nitems.child:\n  value: text\n")
 	loader := admittedFixtureSelectedContractSourceLoader{RepoRoot: repo, SourceRoot: root}
 	loaded, err := loader.LoadRunForkSelectedContractSourceForRequest(ctx, SelectedContractSourceLoadRequest{Selection: runfork.RunForkContractSelection{Mode: "selected_contracts"}})
@@ -74,7 +75,7 @@ func runSelectedHandlerFanOutCrashHelper(t *testing.T, ctx context.Context, sele
 	}
 	sourceRun, eventID := uuid.NewString(), uuid.NewString()
 	event := eventtest.ExistingRunRootIngressWithRoutingSourceAndMode(eventID, "items.ready", "source-runtime", "",
-		[]byte(`{"items":["one","two"]}`), 0, sourceRun, events.EventEnvelope{}, events.NoRoutingSource(), time.Now().UTC().Add(-time.Minute), executionmode.Mock)
+		[]byte(`{"items":["one","two"]}`), 0, sourceRun, events.EventEnvelope{}, eventtest.RootRoutingSource(sourceRun), time.Now().UTC().Add(-time.Minute), executionmode.Mock)
 	bundle, found := semanticview.Bundle(loaded.Source)
 	if !found || bundle.SourceArtifact == nil {
 		t.Fatal("handler fan-out source lacks its admitted artifact")
@@ -132,7 +133,8 @@ func runSelectedHandlerFanOutCrashHelper(t *testing.T, ctx context.Context, sele
 		AgentRuntime: SelectedContractAgentRuntimeOptions{ExecutionPosture: executionposture.MockOnly, ProcessCapability: capability},
 		ForkOperation: &runfork.ForkOperationRequest{OperationID: uuid.NewString(), Actor: "retained-handler-fan-out", IdempotencyKey: "intent-cut",
 			TransportHash: "retained-handler-fan-out-transport", SourceRunID: sourceRun, ForkEventID: eventID,
-			TargetBundleHash: loaded.SourceArtifactFact.BundleHash(), AllowSourceFreeze: true, ContractSelection: selection},
+			TargetBundleHash: loaded.SourceArtifactFact.BundleHash(), AllowSourceFreeze: true, ContractSelection: selection, TargetRootReference: loaded.RootedSource.Admission().Reference(),
+		},
 	})
 	if err != nil || result.Materialization.ForkRunID == "" || result.Activation.Activated {
 		t.Fatalf("materialized selected handler fan-out: %+v error=%v", result, err)
@@ -242,7 +244,7 @@ func runSelectedHandlerFanOutRecovery(t *testing.T, claimed, live bool) {
 				}
 			})
 			loader := SourceArtifactSelectedContractSourceLoader{RepoRoot: runForkExecutionRepoRoot(t), Store: selected.(SourceArtifactSelectedContractSourceStore)}
-			loaded, err := loader.LoadRunForkSelectedContractSourceForRequest(ctx, SelectedContractSourceLoadRequest{SourceRunID: checkpoint.SourceRun, Selection: original.Request.ContractSelection})
+			loaded, err := loader.LoadRunForkSelectedContractSourceForRequest(ctx, SelectedContractSourceLoadRequest{Responsibility: OriginalRunSource(checkpoint.SourceRun), Selection: original.Request.ContractSelection})
 			if err != nil {
 				t.Fatal(err)
 			}
@@ -272,7 +274,8 @@ func runSelectedHandlerFanOutRecovery(t *testing.T, claimed, live bool) {
 				recovered, err := owner.RecoverSelectedForkContexts(recoveryCtx, effects.NewRecoveryRequest(time.Now().UTC(), executionposture.MockOnly), SelectedForkRecoveryEnvironment{
 					SourceLoader: loader, AgentRuntime: SelectedContractAgentRuntimeOptions{ExecutionPosture: executionposture.MockOnly, ProcessCapability: capability},
 					LiveContexts: contexts, LiveRuns: selected.(runlifecycle.LiveRunReader),
-					AcquireLiveRuntime: func(ctx context.Context, hash string) (*rootruntime.RuntimeContextUse, error) {
+					AcquireLiveRuntime: func(ctx context.Context, reference sourceartifact.RootAdmissionReference) (*rootruntime.RuntimeContextUse, error) {
+						hash := reference.BundleHash
 						use, _, err := contexts.AcquireBundleHash(ctx, hash)
 						return use, err
 					},

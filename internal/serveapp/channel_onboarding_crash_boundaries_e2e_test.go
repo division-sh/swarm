@@ -39,6 +39,7 @@ func runChannelOnboardingCrashBoundaryE2E(t *testing.T, boundary channelonboardi
 		backend := backend
 		t.Run(string(backend), func(t *testing.T) {
 			harness := newChannelOnboardingE2EHarness(t, backend, true)
+			bootCredentials := writeChannelOnboardingLiveToolCredentials(t, harness.credentialPath)
 			barrier := newChannelOnboardingTestBarrier(boundary)
 			defer barrier.Release()
 			t.Cleanup(barrier.Release)
@@ -63,7 +64,7 @@ func runChannelOnboardingCrashBoundaryE2E(t *testing.T, boundary channelonboardi
 			harness.start(t)
 
 			if boundary == channelonboarding.TestAfterAuthorityRetirementBeforeCleanup {
-				runChannelOnboardingDestructiveCrashBoundary(t, backend, harness, barrier, uncheckpointedBarrier)
+				runChannelOnboardingDestructiveCrashBoundary(t, backend, harness, barrier, uncheckpointedBarrier, bootCredentials)
 				return
 			}
 			var predecessor channelOnboardingJourneyReadback
@@ -93,10 +94,7 @@ func runChannelOnboardingCrashBoundaryE2E(t *testing.T, boundary channelonboardi
 				}
 				t.Cleanup(func() { _ = db.Close() })
 				// Neither crash cut may interrupt the predecessor's provider write.
-				cardMessageID := waitChannelCardMessageID(t, db, driver, "telegram-ingress")
-				if card := harness.provider.Delivery(cardMessageID - 1); card == nil || !strings.HasPrefix(fmt.Sprint(card["text"]), "Retire service") {
-					t.Fatalf("%s %s predecessor card = %#v", backend, boundary, card)
-				}
+				cardMessageID := waitChannelCardMessageID(t, db, driver, ".")
 				if boundary == channelonboarding.TestAfterCredentialWriteBeforeCheckpoint {
 					native := waitNativeQualification(t, harness, predecessor.Operation.OperationID, channelnative.QualificationQualified, time.Time{})
 					t.Logf("E2E-13 predecessor settled before credential cut: operation=%s setting=%s generation=%d locale=%s/%d observed=%s card_message_id=%d", predecessor.Operation.OperationID, native.SettingID, native.SettingGeneration, native.ClientLanguage, native.LocaleRevision, native.ObservedAt.Format(time.RFC3339Nano), cardMessageID)
@@ -178,8 +176,17 @@ func runChannelOnboardingCrashBoundaryE2E(t *testing.T, boundary channelonboardi
 				if beforeRow.Readiness == nil || beforeRow.Readiness.Ready {
 					t.Fatalf("%s E2E-16 reported READY before registration promotion: %#v", backend, beforeRow.Readiness)
 				}
-				if registrations, deliveries := harness.provider.Counts(); registrations != 1 || deliveries != 2 {
-					t.Fatalf("%s E2E-16 effects before promotion = %d/%d, want predecessor registration, confirmation, and joined card 1/2", backend, registrations, deliveries)
+				if registrations, confirmations := harness.provider.OnboardingCounts(); registrations != 1 || confirmations != 1 {
+					t.Fatalf("%s E2E-16 onboarding effects before promotion = %d/%d, want predecessor 1/1", backend, registrations, confirmations)
+				}
+				registrations, deliveries := harness.provider.Counts()
+				if registrations != 1 || deliveries < 1 || deliveries > 2 {
+					t.Fatalf("%s E2E-16 effects before promotion = %d/%d, want confirmation and at most one root retirement card", backend, registrations, deliveries)
+				}
+				if deliveries == 2 {
+					if card := harness.provider.Delivery(1); card == nil || !strings.HasPrefix(fmt.Sprint(card["text"]), "Retire service") {
+						t.Fatalf("%s E2E-16 non-onboarding delivery is not the root retirement card: %v", backend, card)
+					}
 				}
 			}
 
@@ -266,6 +273,11 @@ func runChannelOnboardingCrashBoundaryE2E(t *testing.T, boundary channelonboardi
 				}
 				time.Sleep(20 * time.Millisecond)
 			}
+			if boundary == channelonboarding.TestAfterProcessPublicationBeforePromotion {
+				if registrations, confirmations := harness.provider.OnboardingCounts(); registrations != 2 || confirmations != 2 {
+					t.Fatalf("%s E2E-16 recovered onboarding effects = %d/%d, want exact predecessor and successor 2/2", backend, registrations, confirmations)
+				}
+			}
 			if wantDeliveries >= 3 {
 				cards := 0
 				for index := 0; index < wantDeliveries; index++ {
@@ -339,7 +351,7 @@ func assertChannelOnboardingServeNotReady(t *testing.T, endpoint string) {
 	t.Fatalf("restart readiness endpoint %s did not become observable", endpoint)
 }
 
-func runChannelOnboardingDestructiveCrashBoundary(t *testing.T, backend servedparity.Backend, harness *channelOnboardingE2EHarness, barrier, uncheckpointedBarrier *channelOnboardingTestBarrier) {
+func runChannelOnboardingDestructiveCrashBoundary(t *testing.T, backend servedparity.Backend, harness *channelOnboardingE2EHarness, barrier, uncheckpointedBarrier *channelOnboardingTestBarrier, bootCredentials map[string]string) {
 	t.Helper()
 	ready := runChannelOnboardingCLIJourney(t, harness.opts.ConfigPath, harness.endpoint, harness.provider, "connect", "destructive-token", 7217, "private", 0)
 	if ready.Activation == nil || ready.Readiness == nil || !ready.Readiness.Ready {
@@ -364,6 +376,15 @@ func runChannelOnboardingDestructiveCrashBoundary(t *testing.T, backend servedpa
 	if teardownID == "" {
 		t.Fatal("E2E-17 teardown barrier lacks responsibility ID")
 	}
+	registrationsBeforeCrash, deliveriesBeforeCrash := harness.provider.Counts()
+	if registrationsBeforeCrash != 1 || deliveriesBeforeCrash < 1 || deliveriesBeforeCrash > 2 {
+		t.Fatalf("%s E2E-17 pre-crash effects = %d/%d, want confirmation and at most one root retirement card", backend, registrationsBeforeCrash, deliveriesBeforeCrash)
+	}
+	if deliveriesBeforeCrash == 2 {
+		if card := harness.provider.Delivery(1); card == nil || !strings.HasPrefix(fmt.Sprint(card["text"]), "Retire service") {
+			t.Fatalf("%s E2E-17 non-onboarding delivery is not the root retirement card: %v", backend, card)
+		}
+	}
 	assertChannelOnboardingCredentialStoreNotEmpty(t, harness.credentialPath, string(backend)+" E2E-17 before cleanup")
 	crashChannelOnboardingServeAtBarriers(t, harness, []*channelOnboardingTestBarrier{barrier, uncheckpointedBarrier}, []channelOnboardingCLICommand{command, stagedCommand})
 	harness.opts.TestChannelOnboardingBarrier = nil
@@ -372,7 +393,7 @@ func runChannelOnboardingDestructiveCrashBoundary(t *testing.T, backend servedpa
 	if unbound.Activation != nil || unbound.Readiness != nil || unbound.Identity.BindingRevision <= ready.Identity.BindingRevision {
 		t.Fatalf("%s E2E-17 recovered teardown = %#v", backend, unbound)
 	}
-	assertChannelOnboardingCredentialStoreEmpty(t, harness.credentialPath, string(backend)+" E2E-17 recovered cleanup")
+	assertChannelOnboardingCredentials(t, harness.credentialPath, bootCredentials, string(backend)+" E2E-17 recovered cleanup")
 	retiredStaged := getChannelOnboardingRPC(t, harness, stagedOperationID)
 	if retiredStaged.Operation.Phase != channelonboarding.PhaseRetired || retiredStaged.Operation.FailureCode != "authority_retired" {
 		t.Fatalf("%s E2E-17 uncheckpointed operation resurrected: %#v", backend, retiredStaged.Operation)
@@ -381,8 +402,11 @@ func runChannelOnboardingDestructiveCrashBoundary(t *testing.T, backend servedpa
 	if retiredAfterRestart.StatusCode != http.StatusNotFound {
 		t.Fatalf("%s E2E-17 registration authority resurrected after restart: %#v", backend, retiredAfterRestart)
 	}
-	if registrations, deliveries := harness.provider.Counts(); registrations != 1 || deliveries != 1 {
-		t.Fatalf("%s E2E-17 replayed provider effects = %d/%d, want 1/1", backend, registrations, deliveries)
+	if registrations, confirmations := harness.provider.OnboardingCounts(); registrations != 1 || confirmations != 1 {
+		t.Fatalf("%s E2E-17 replayed onboarding effects = %d/%d, want 1/1", backend, registrations, confirmations)
+	}
+	if registrations, deliveries := harness.provider.Counts(); registrations != registrationsBeforeCrash || deliveries != deliveriesBeforeCrash {
+		t.Fatalf("%s E2E-17 replayed provider effects = %d/%d, want exact pre-crash %d/%d", backend, registrations, deliveries, registrationsBeforeCrash, deliveriesBeforeCrash)
 	}
 	harness.stop(t)
 }

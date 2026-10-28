@@ -18,7 +18,10 @@ func Test2376LocalIdentitySelectorsUseAdmittedSource(t *testing.T) {
 	if err := os.Mkdir(path, 0700); err != nil {
 		t.Fatal(err)
 	}
-	if err := os.WriteFile(filepath.Join(path, "schema.yaml"), []byte("description: selected\n"), 0600); err != nil {
+	if err := os.WriteFile(filepath.Join(path, "manifest.yaml"), []byte("version: 1.0.0\nplatform_version: '*'\n"), 0600); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(path, "schema.yaml"), []byte("stages: []\n"), 0600); err != nil {
 		t.Fatal(err)
 	}
 	want, err := sourceartifact.AdmitDirectory(path)
@@ -31,7 +34,7 @@ func Test2376LocalIdentitySelectorsUseAdmittedSource(t *testing.T) {
 			t.Fatalf("%q: %v %#v", operand, err, got)
 		}
 	}
-	if err := os.WriteFile(filepath.Join(path, "manifest.yaml"), []byte("name: Reception\nversion: 1.0.0\nplatform_version: '>=99.0.0'\n"), 0600); err != nil {
+	if err := os.WriteFile(filepath.Join(path, "manifest.yaml"), []byte("version: 1.0.0\nplatform_version: '>=99.0.0'\n"), 0600); err != nil {
 		t.Fatal(err)
 	}
 	if _, err := admitCLIIdentitySource(root, "selected"); err == nil || !strings.Contains(err.Error(), "platform_version") {
@@ -44,8 +47,14 @@ func Test2376LocalIdentitySelectorsUseAdmittedSource(t *testing.T) {
 
 func identitySource2376(t *testing.T) (string, *sourceartifact.AdmittedSourceArtifact) {
 	t.Helper()
-	dir := t.TempDir()
-	if err := os.WriteFile(filepath.Join(dir, "schema.yaml"), []byte("description: identity selector fixture\n"), 0600); err != nil {
+	dir := filepath.Join(t.TempDir(), "identity-selector")
+	if err := os.Mkdir(dir, 0700); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(dir, "manifest.yaml"), []byte("version: 1.0.0\nplatform_version: '*'\n"), 0600); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(dir, "schema.yaml"), []byte("stages: []\n"), 0600); err != nil {
 		t.Fatal(err)
 	}
 	artifact, err := sourceartifact.AdmitDirectory(dir)

@@ -10,6 +10,8 @@ import (
 	"github.com/division-sh/swarm/internal/runtime/runfork"
 	"github.com/division-sh/swarm/internal/runtime/runforkexecution"
 	"github.com/division-sh/swarm/internal/runtime/runlifecycle"
+	"github.com/division-sh/swarm/internal/runtime/semanticview"
+	"github.com/division-sh/swarm/internal/sourceartifact"
 	"github.com/google/uuid"
 )
 
@@ -27,23 +29,40 @@ func catalogLiveForkRequest(t testing.TB, h *runtimeHarness, ctx context.Context
 		selected = h.sqlite
 	}
 	if h.liveContexts == nil {
+		source := h.rt.Options.WorkflowModule.SemanticSource()
+		bundle, ok := semanticview.Bundle(source)
+		if !ok {
+			t.Fatal("catalog live fork requires its admitted source bundle")
+		}
+		rooted, err := bundle.RootedSource()
+		if err != nil {
+			t.Fatal(err)
+		}
 		definition := runtimepkg.BundleContext{
 			SourceArtifactFact: h.rt.Options.SourceArtifactFact,
-			Source:             h.rt.Options.WorkflowModule.SemanticSource(), Runtime: h.rt, WorkOwner: h.rt.WorkOccurrence(),
+			RootAdmission:      rooted.Admission(), Source: source, Runtime: h.rt, WorkOwner: h.rt.WorkOccurrence(),
 		}
-		if h.bundle.PackInventory != nil {
-			definition.PackInventoryDigest = h.bundle.PackInventory.Digest()
-			projection, err := packadmission.FromBundle(h.bundle)
+		if bundle.PackInventory != nil {
+			definition.PackInventoryDigest = bundle.PackInventory.Digest()
+			providers, err := packadmission.AdmitProviderSource(rooted, bundle.Platform)
 			if err != nil {
 				t.Fatal(err)
 			}
-			definition.ProviderTriggerGeneration = projection.ProviderTriggers.Generation()
-			definition.InstalledTriggerSubjects, err = projection.ProviderTriggers.InstalledCapabilitySubjects()
+			scope, err := providers.Scope(semanticview.RootExecutionFlowID(source))
+			if err != nil {
+				t.Fatal(err)
+			}
+			catalog, err := scope.TriggerCatalog()
+			if err != nil {
+				t.Fatal(err)
+			}
+			definition.ProviderTriggerCatalog = catalog
+			definition.ProviderTriggerGeneration = catalog.Generation()
+			definition.InstalledTriggerSubjects, err = catalog.InstalledCapabilitySubjects()
 			if err != nil {
 				t.Fatal(err)
 			}
 		}
-		var err error
 		h.liveContexts, err = runtimepkg.NewRuntimeContextManager(selected, definition)
 		if err != nil {
 			t.Fatal(err)
@@ -56,7 +75,8 @@ func catalogLiveForkRequest(t testing.TB, h *runtimeHarness, ctx context.Context
 	}
 	request.LiveRuntime = h.rt
 	request.LiveRuns, request.LiveContexts = selected, h.liveContexts
-	request.AcquireLiveRuntime = func(ctx context.Context, hash string) (*runtimepkg.RuntimeContextUse, error) {
+	request.AcquireLiveRuntime = func(ctx context.Context, reference sourceartifact.RootAdmissionReference) (*runtimepkg.RuntimeContextUse, error) {
+		hash := reference.BundleHash
 		use, lookup, err := h.liveContexts.AcquireBundleHash(ctx, hash)
 		if err == nil && !lookup.Loaded() {
 			return nil, fmt.Errorf("catalog live fork target %s is not its registered ordinary runtime", hash)
@@ -70,18 +90,20 @@ func catalogLiveForkRequest(t testing.TB, h *runtimeHarness, ctx context.Context
 // and explicit-child readback keep their operation-free setup.
 func catalogStagedForkOperation(t testing.TB, ctx context.Context, selected runforkexecution.SelectedContractForkLifecycle, selection runfork.RunForkContractSelection, sourceRunID, eventID string) runfork.ForkOperationRequest {
 	t.Helper()
-	bundleHash := selection.BundleHash
-	if bundleHash == "" {
-		availability, err := selected.LoadRunBundleAvailability(ctx, sourceRunID)
-		if err != nil || !availability.Available() {
-			t.Fatalf("load exact staged operation source: %+v err=%v", availability, err)
-		}
-		bundleHash = availability.BundleHash
+	store, ok := selected.(runforkexecution.SourceArtifactSelectedContractSourceStore)
+	if !ok {
+		t.Fatal("catalog operation requires its exact selected source owner")
+	}
+	loaded, err := (runforkexecution.SourceArtifactSelectedContractSourceLoader{RepoRoot: repoRootFromCatalogE2E(t), Store: store}).InspectRunForkSelectedContractSourceForRequest(ctx, runforkexecution.SelectedContractSourceLoadRequest{
+		Responsibility: runforkexecution.FreshSelectedSource(selection.BundleHash), BundleHash: selection.BundleHash, Selection: selection,
+	})
+	if err != nil {
+		t.Fatal(err)
 	}
 	id := uuid.NewString()
 	return runfork.ForkOperationRequest{
 		OperationID: id, Actor: "cataloge2e:" + t.Name(), IdempotencyKey: uuid.NewString(), TransportHash: "catalog-staged:" + id,
-		SourceRunID: sourceRunID, ForkEventID: eventID, TargetBundleHash: bundleHash,
+		SourceRunID: sourceRunID, ForkEventID: eventID, TargetBundleHash: loaded.SourceArtifactFact.BundleHash(), TargetRootReference: loaded.RootedSource.Admission().Reference(),
 		AllowSourceFreeze: true, ContractSelection: selection,
 	}
 }

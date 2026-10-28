@@ -182,8 +182,8 @@ func prepareFullLifecycleProject(t *testing.T, binary, root string, store golden
 		"verify", "contracts", "--config", "swarm.yaml", "--portable", "--json")
 	assertFullLifecycleVerifySuccess(t, verify)
 	for key, value := range map[string]string{
-		"webhook_signing.telegram": fullLifecycleSigningSecret,
-		"telegram_bot_token":       fullLifecycleBotToken,
+		"telegram.webhook_signing_secret": fullLifecycleSigningSecret,
+		"telegram.telegram_bot_token":     fullLifecycleBotToken,
 	} {
 		result := runReleaseCommand(t, 30*time.Second, projectRoot, credentialFreeEnv, value+"\n", binary,
 			"secrets", "set", key, "--stdin")
@@ -455,7 +455,7 @@ func assertFullLifecycleReadySurface(t *testing.T, process *releaseServeProcess)
 	defer cancel()
 	err := pollReleaseCondition(ctx, 10*time.Millisecond, func() (bool, error) {
 		output := process.output.String()
-		for _, text := range []string{"ready in", "telegram webhook", "webhook_signing.telegram", "bound"} {
+		for _, text := range []string{"ready in", "telegram webhook", "telegram.webhook_signing_secret", "bound"} {
 			if !strings.Contains(output, text) {
 				return false, nil
 			}
@@ -719,7 +719,7 @@ func sendFullLifecycleTelegramUpdate(t *testing.T, process *releaseServeProcess,
 func sendLifecycleTelegramUpdateWithSecret(t *testing.T, process *releaseServeProcess, updateID, chatID int, signingSecret string) fullLifecycleIngressReceipt {
 	t.Helper()
 	body := []byte(fmt.Sprintf(`{"update_id":%d,"message":{"message_id":%d,"from":{"id":%d},"chat":{"id":%d,"type":"private"},"text":"lifecycle %d"}}`, updateID, updateID, chatID, chatID, updateID))
-	request, err := http.NewRequest(http.MethodPost, process.apiBase+"/webhooks/chat/telegram", bytes.NewReader(body))
+	request, err := http.NewRequest(http.MethodPost, process.apiBase+"/webhooks/contracts/telegram", bytes.NewReader(body))
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -757,11 +757,11 @@ func sendLifecycleTelegramUpdateWithSecret(t *testing.T, process *releaseServePr
 }
 
 func validateFullLifecycleIngressReceipt(receipt fullLifecycleIngressReceipt) error {
-	if receipt.Status != "accepted" || receipt.FlowPath != "telegram-ingress" ||
+	if receipt.Status != "accepted" || receipt.FlowPath != "." ||
 		receipt.Provider != "telegram" || receipt.ProviderEventID == "" {
 		return fmt.Errorf("lifecycle receipt lacks its exact declaration binding: %#v", receipt)
 	}
-	if len(receipt.EventIDs) != 2 || len(receipt.EventNames) != 2 || receipt.EventNames[0] != "inbound.telegram" || receipt.EventNames[1] != "inbound.telegram.text_message" {
+	if len(receipt.EventIDs) != 2 || len(receipt.EventNames) != 2 || receipt.EventNames[0] != "inbound.telegram.raw" || receipt.EventNames[1] != "inbound.telegram.text_message" {
 		return fmt.Errorf("lifecycle receipt lacks its ordered raw/normalized children: %#v", receipt)
 	}
 	identities := []string{receipt.RunID, receipt.PublicationID, receipt.EventIDs[0], receipt.EventIDs[1]}
@@ -1068,7 +1068,7 @@ func waitForLifecycleConvergenceMode(t *testing.T, process *releaseServeProcess,
 		}
 		last = events
 		return diagnosis.TestQuiescence.Ready && goldenActiveWork(diagnosis.TestQuiescence) == 0 &&
-			countFullLifecycleEvents(events, "inbound.telegram") == ingressCount &&
+			countFullLifecycleEvents(events, "inbound.telegram.raw") == ingressCount &&
 			countFullLifecycleEvents(events, "inbound.telegram.text_message") == ingressCount &&
 			countFullLifecycleEvents(events, "platform.activity_requested") == ingressCount &&
 			countFullLifecycleEventSuffix(events, "/telegram.reply_requested") == ingressCount &&
@@ -1085,7 +1085,7 @@ func waitForLifecycleConvergenceMode(t *testing.T, process *releaseServeProcess,
 		if len(event.DeadLetters) != 0 {
 			t.Fatalf("lifecycle event %s (%s) dead letters = %s", event.EventName, event.EventID, event.DeadLetters)
 		}
-		if event.EventName == "inbound.telegram" &&
+		if event.EventName == "inbound.telegram.raw" &&
 			(len(event.Deliveries) != 0 || event.NoDelivery == nil || event.NoDelivery.Reason != "no_subscriber_by_design") {
 			t.Fatalf("raw Telegram settlement = %#v, want no_subscriber_by_design without delivery", event)
 		}
@@ -1180,7 +1180,7 @@ func fullLifecycleReceiptEvents(events []fullLifecycleEvent, receipt fullLifecyc
 		}
 	}
 	if len(receipt.EventIDs) != 2 || len(receipt.EventNames) != 2 ||
-		receipt.EventNames[0] != "inbound.telegram" || receipt.EventNames[1] != "inbound.telegram.text_message" {
+		receipt.EventNames[0] != "inbound.telegram.raw" || receipt.EventNames[1] != "inbound.telegram.text_message" {
 		return fullLifecycleEvent{}, fullLifecycleEvent{}, fmt.Errorf("receipt is not the exact ordered raw/normalized pair: %#v", receipt)
 	}
 	raw, rawOK := byID[receipt.EventIDs[0]]

@@ -159,6 +159,15 @@ func proveReceiverGrantRetirementFencesClaimBothStores(t *testing.T, selectedFor
 					ctx = correlation.WithSourceArtifactFact(ctx, fact)
 					ctx = authoractivity.WithScope(ctx, authoractivity.BundleScope(authorActivityTestRuntimeInstanceID, fact.BundleHash()))
 				} else {
+					rooted, err := bundle.RootedSource()
+					if err != nil {
+						t.Fatal(err)
+					}
+					ctx = correlation.WithRootAdmission(ctx, rooted.Admission())
+					ctx = originalStoreFixtureContext(t, ctx, selected)
+					requireRunFixtureForTest(t, ctx, selected, semanticRunFixture{
+						RunID: runID, Origin: semanticScenarioSetupRunOriginForTest(), Artifact: bundle.SourceArtifact, StartedAt: time.Now().UTC(),
+					})
 					if err := agentfixture.UpsertStaticForSource(t, ctx, selected, agentFixtureStaticRecord(t, identity), mustStoreTestSourceArtifactFact(bundle.SourceArtifact.BundleHash())); err != nil {
 						t.Fatal(err)
 					}
@@ -166,7 +175,6 @@ func proveReceiverGrantRetirementFencesClaimBothStores(t *testing.T, selectedFor
 					if len(plan.Sources) != 1 {
 						t.Fatalf("fixture source census: %+v", plan.Sources)
 					}
-					var err error
 					grant, err = agentfixture.AdmitGeneration(t, ctx, selected, plan, plan.Sources[0])
 					if err != nil {
 						t.Fatal(err)
@@ -403,8 +411,10 @@ func proveReceiverGrantRetirementFencesClaimBothStores(t *testing.T, selectedFor
 func grantReceiverEntitySource(t *testing.T) semanticview.Source {
 	t.Helper()
 	root := t.TempDir()
-	writeStateOnlyAcquisitionFixtureFile(t, filepath.Join(root, "schema.yaml"), "name: grant-receiver-root\nstages:\n  active: {}\n  done: {final: true}\n")
-	writeStateOnlyAcquisitionFixtureFile(t, filepath.Join(root, "global/schema.yaml"), "name: global\nstages:\n  active: {}\n  done: {final: true}\n")
+	writeStateOnlyAcquisitionFixtureFile(t, filepath.Join(root, "manifest.yaml"), "version: 1.0.0\nplatform_version: '*'\n")
+	writeStateOnlyAcquisitionFixtureFile(t, filepath.Join(root, "schema.yaml"), "stages:\n  active: {}\n  done: {final: true}\n")
+	writeStateOnlyAcquisitionFixtureFile(t, filepath.Join(root, "global/manifest.yaml"), "version: 1.0.0\nplatform_version: '*'\n")
+	writeStateOnlyAcquisitionFixtureFile(t, filepath.Join(root, "global/schema.yaml"), "stages:\n  active: {}\n  done: {final: true}\n")
 	writeStateOnlyAcquisitionFixtureFile(t, filepath.Join(root, "global/entities.yaml"), "receiver: {}\n")
 	bundle, err := contracts.LoadWorkflowContractBundleWithOverrides(pipeline.WorkflowRepoRoot(), root, contracts.DefaultPlatformSpecFile(pipeline.WorkflowRepoRoot()))
 	if err != nil {
@@ -488,8 +498,16 @@ func selectedReceiverClaimGrant(t *testing.T, ctx context.Context, selected agen
 		t.Fatal(err)
 	}
 	hash := fixture.request.DeclarationPlan.BundleHash
+	rooted, err := selected.(rootedRunStore).LoadRunRootedSource(ctx, fixture.forkRun)
+	if err != nil {
+		t.Fatal(err)
+	}
+	coordinate, err := agenttopology.NewSourceCoordinate(rooted.Admission())
+	if err != nil {
+		t.Fatal(err)
+	}
 	fixture.request.DeclarationPlan, err = agenttopology.NewSelectedDeclarationPlan(hash, []agenttopology.DesiredAgent{{
-		Identity: plan, ConfigRevision: revision, Source: agenttopology.SourceCoordinate{BundleHash: hash},
+		Identity: plan, ConfigRevision: revision, Source: coordinate,
 	}})
 	if err != nil {
 		t.Fatal(err)

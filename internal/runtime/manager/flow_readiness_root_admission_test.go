@@ -17,7 +17,7 @@ import (
 func TestConstructedRootAgentPreparationUsesExactReadinessOwner(t *testing.T) {
 	for _, variant := range []string{"exact", "foreign_run", "foreign_route", "wrong_agent_route", "undeclared", "changed_attempt", "running_cell", "running_mode", "foreign_source"} {
 		t.Run(variant, func(t *testing.T) {
-			am, instances, _, req := prepareConstructedRootAgentForTest(t)
+			am, instances, _, req, ctx := prepareConstructedRootAgentForTest(t)
 			identity := am.lifecycle.executionIdentities()[0]
 			key := flowActivationReadinessKey(req.TriggerEvent.RunID(), req.Instance.InstancePath)
 			wantError := ""
@@ -69,7 +69,7 @@ func TestConstructedRootAgentPreparationUsesExactReadinessOwner(t *testing.T) {
 				t.Fatal(err)
 			}
 			instances.readinessMu.Unlock()
-			err = am.PrepareAdmittedDynamicFlowAgentsForStart(testAuthorActivityContext(context.Background()))
+			err = am.PrepareAdmittedDynamicFlowAgentsForStart(ctx)
 			if wantError == "" && err != nil {
 				t.Fatalf("admit exact root preparation: %v", err)
 			}
@@ -84,7 +84,7 @@ func TestConstructedRootAgentPreparationUsesExactReadinessOwner(t *testing.T) {
 					t.Fatalf("refused preparation mutated durable readiness: %s -> %s, err=%v", before, after, encodeErr)
 				}
 			}
-			if flowActivationAttemptReadyForTest(am, testAuthorActivityContext(context.Background()), req) || len(instances.armedEntries) != 0 {
+			if flowActivationAttemptReadyForTest(am, ctx, req) || len(instances.armedEntries) != 0 {
 				t.Fatal("stopped root preparation acquired executable activation or timer work")
 			}
 		})
@@ -92,8 +92,7 @@ func TestConstructedRootAgentPreparationUsesExactReadinessOwner(t *testing.T) {
 }
 
 func TestStandingPreparationDefersRunningPredecessor(t *testing.T) {
-	first, instances, _, req := prepareConstructedRootAgentForTest(t)
-	ctx := testAuthorActivityContext(context.Background())
+	first, instances, _, req, ctx := prepareConstructedRootAgentForTest(t)
 	if err := first.PrepareAdmittedDynamicFlowAgentsForStart(ctx); err != nil {
 		t.Fatal(err)
 	}
@@ -113,8 +112,7 @@ func TestStandingPreparationDefersRunningPredecessor(t *testing.T) {
 	}
 	agents := &flowActivationTestStore{upserts: []PersistedAgent{predecessor}}
 	bus := &flowActivationTestBus{}
-	next := newFlowActivationManager(t, bus, instances, agents)
-	setFlowActivationManagerSemanticSource(next, req.ContractBundle)
+	next, ctx := newFlowActivationManagerForSource(t, bus, instances, req.ContractBundle, agents)
 	before, err := json.Marshal(agents.upserts)
 	if err != nil {
 		t.Fatal(err)
@@ -135,13 +133,13 @@ func TestStandingPreparationDefersRunningPredecessor(t *testing.T) {
 	}
 }
 
-func prepareConstructedRootAgentForTest(t *testing.T) (*AgentManager, *flowActivationTestInstanceStore, *flowActivationTestBus, runtimepipeline.FlowInstanceActivationRequest) {
+func prepareConstructedRootAgentForTest(t *testing.T) (*AgentManager, *flowActivationTestInstanceStore, *flowActivationTestBus, runtimepipeline.FlowInstanceActivationRequest, context.Context) {
 	t.Helper()
 	instances := &flowActivationTestInstanceStore{}
 	bus := &flowActivationTestBus{}
-	am := newFlowActivationManager(t, bus, instances)
-	root := t.TempDir()
-	writeFlowActivationFixtureFile(t, filepath.Join(root, "schema.yaml"), "name: root-agent-preparation\n")
+	root := filepath.Join(t.TempDir(), "root-agent-preparation")
+	writeFlowActivationFixtureFile(t, filepath.Join(root, "manifest.yaml"), "version: 1.0.0\nplatform_version: '*'\n")
+	writeFlowActivationFixtureFile(t, filepath.Join(root, "schema.yaml"), "stages: []\n")
 	writeFlowActivationFixtureFile(t, filepath.Join(root, "events.yaml"), "task.assigned:\n")
 	writeFlowActivationFixtureFile(t, filepath.Join(root, "agents.yaml"), "test-agent:\n  intent: {inline: Handle root work.}\n  model: regular\n  subscriptions: [task.assigned]\n")
 	repo := runtimepipeline.WorkflowRepoRoot()
@@ -150,14 +148,13 @@ func prepareConstructedRootAgentForTest(t *testing.T) (*AgentManager, *flowActiv
 		t.Fatal(err)
 	}
 	source := semanticview.Wrap(bundle)
-	setFlowActivationManagerSemanticSource(am, source)
+	am, ctx := newFlowActivationManagerForSource(t, bus, instances, source)
 	owner := runtimeflowidentity.Stored(source, ".", flowActivationTestRunID, flowActivationTestRunID, flowActivationTestRunID, "")
 	req := runtimepipeline.FlowInstanceActivationRequest{
 		ContractBundle: source,
 		Instance:       owner,
 		TriggerEvent:   testFlowActivationTriggerEvent("77777777-7777-4777-8777-777777777777"),
 	}
-	ctx := testAuthorActivityContext(context.Background())
 	created, finish, err := am.PrepareStandingFlowInstance(ctx, req)
 	if err != nil || !created || finish == nil {
 		t.Fatalf("prepare constructed root: created=%t finish=%t err=%v", created, finish != nil, err)
@@ -170,5 +167,5 @@ func prepareConstructedRootAgentForTest(t *testing.T) (*AgentManager, *flowActiv
 	if !found || state.Topology.Authority.Readiness == nil || state.Topology.Authority.Readiness.InstancePath != owner.InstancePath {
 		t.Fatalf("root preparation does not own its constructed readiness: %+v found=%t", state, found)
 	}
-	return am, instances, bus, req
+	return am, instances, bus, req, ctx
 }

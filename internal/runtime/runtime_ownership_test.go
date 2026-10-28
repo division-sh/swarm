@@ -18,13 +18,14 @@ import (
 
 func TestRuntimeRequiresProcessGenerationGrant(t *testing.T) {
 	module := loadRuntimeOwnershipWorkflowModule(t)
+	ctx, fact := runtimeOwnershipFixtureContext(t, module)
 	cfg := &config.Config{}
-	rt, err := NewRuntime(testAuthorActivityContext(context.Background()), RuntimeDeps{
+	rt, err := NewRuntime(ctx, RuntimeDeps{
 		Config: cfg, Options: RuntimeOptions{
 			ExecutionPosture: executionposture.Live,
 			SelfCheck:        false, WorkflowModule: module, LLMRuntime: noopLLMRuntime{},
 			RuntimeInstanceID:  authorActivityTestRuntimeInstanceID,
-			SourceArtifactFact: testSourceArtifactFact(t, runtimeTestBundleHash),
+			SourceArtifactFact: fact,
 			ProcessWorkOwner:   runtimeTestProcessWorkOwner(t),
 		},
 	})
@@ -36,7 +37,7 @@ func TestRuntimeRequiresProcessGenerationGrant(t *testing.T) {
 			t.Errorf("Shutdown: %v", shutdownErr)
 		}
 	})
-	if err := rt.Start(testAuthorActivityContext(context.Background())); err == nil {
+	if err := rt.Start(ctx); err == nil {
 		t.Fatal("Start unexpectedly admitted a runtime without a process generation grant")
 	}
 }

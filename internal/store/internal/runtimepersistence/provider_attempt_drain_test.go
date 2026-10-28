@@ -14,6 +14,7 @@ import (
 	"github.com/division-sh/swarm/internal/runtime/agentmemory"
 	runtimeagenttopology "github.com/division-sh/swarm/internal/runtime/agenttopology"
 	runtimeactors "github.com/division-sh/swarm/internal/runtime/core/actors"
+	runtimecorrelation "github.com/division-sh/swarm/internal/runtime/correlation"
 	runtimedelivery "github.com/division-sh/swarm/internal/runtime/deliverylifecycle"
 	runtimeeffects "github.com/division-sh/swarm/internal/runtime/effects"
 	"github.com/division-sh/swarm/internal/runtime/executionposture"
@@ -187,13 +188,23 @@ func TestProviderAttemptDrainLifecycleTransitionRollbackParity(t *testing.T) {
 				}
 				var takeover runtimemanager.AgentLifecyclePersistence
 				var request runtimemanager.AgentLifecycleTransition
+				takeoverCtx := testAuthorActivityContext()
 				if candidate.takeover {
+					root, present, err := runtimecorrelation.RootAdmissionFromContext(fixture.original)
+					if err != nil || !present {
+						t.Fatalf("takeover fixture requires its captured source admission: %v", err)
+					}
+					fact, present := runtimecorrelation.SourceArtifactFactFromContext(fixture.original)
+					if !present {
+						t.Fatal("takeover fixture requires its captured source fact")
+					}
+					takeoverCtx = runtimecorrelation.WithRootAdmission(runtimecorrelation.WithSourceArtifactFact(takeoverCtx, fact), root)
 					takeover, request = providerDrainStartupTakeover(t, fixture)
 				}
 				installProviderDrainFailureBoundary(t, fixture, candidate.boundary)
 				var commitErr error
 				if candidate.takeover {
-					_, commitErr = takeover.CommitAgentLifecycleTransition(testAuthorActivityContext(), request)
+					_, commitErr = takeover.CommitAgentLifecycleTransition(takeoverCtx, request)
 				} else {
 					_, commitErr = commitProviderDrainTransition(t, fixture, "teardown", runtimemanager.AgentLifecycleTerminated)
 				}
@@ -219,14 +230,14 @@ func TestProviderAttemptDrainLifecycleTransitionRollbackParity(t *testing.T) {
 					} {
 						refused := request
 						refused.StartupRecovery = recovery
-						if _, err := takeover.CommitAgentLifecycleTransition(testAuthorActivityContext(), refused); err == nil {
+						if _, err := takeover.CommitAgentLifecycleTransition(takeoverCtx, refused); err == nil {
 							t.Fatal("takeover accepted missing, foreign-time or mock-only recovery for a live attempt")
 						}
 						requireProviderDrainCount(t, fixture, handle.Attempt().AttemptID, 0)
 						requireExternalAttemptState(t, fixture.db, fixture.sqlite, handle.Attempt().AttemptID, candidate.wantState)
 						requireAgentLifecycleState(t, fixture, runtimemanager.AgentLifecycleRunning, fixture.authority.Normal.Generation)
 					}
-					result, err := takeover.CommitAgentLifecycleTransition(testAuthorActivityContext(), request)
+					result, err := takeover.CommitAgentLifecycleTransition(takeoverCtx, request)
 					if err != nil || result.Generation != request.TargetGeneration || result.ProviderDrainCount != 1 {
 						t.Fatalf("takeover after rollback: result=%+v err=%v", result, err)
 					}
@@ -234,7 +245,7 @@ func TestProviderAttemptDrainLifecycleTransitionRollbackParity(t *testing.T) {
 					requireProviderDrainState(t, fixture, handle.Attempt().AttemptID, "settled")
 					requireCompletionRecoveryRows(t, fixture, handle.Attempt().AttemptID, 1, 1, 0)
 					requireOriginDeliveryOutcome(t, fixture, "dead_letter", "effect_recovery_outcome_unconfirmed")
-					again, err := takeover.CommitAgentLifecycleTransition(testAuthorActivityContext(), request)
+					again, err := takeover.CommitAgentLifecycleTransition(takeoverCtx, request)
 					if err != nil || !again.Replayed || again.TransitionID != result.TransitionID {
 						t.Fatalf("takeover replay changed the committed result: result=%+v err=%v", again, err)
 					}

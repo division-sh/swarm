@@ -112,7 +112,7 @@ func TestIssue642TwoOpenReplyLevelSiblingForksReturnIndependentlyBothStores(t *t
 type copiedActivityReplyStore interface {
 	runforkexecution.SelectedContractForkLifecycle
 	runforkexecution.SourceArtifactSelectedContractSourceStore
-	storetest.DurableDataCatalogStore
+	storetest.RootedDataCatalogStore
 	pipeline.ActivityAttemptJournal
 	bus.PreparedPublishEventReader
 	replycontext.Store
@@ -293,9 +293,9 @@ func runCopiedActivityReplyReturnOutcome(t *testing.T, backend catalogRuntimeBac
 	options := selectedContractAgentRuntimeOptionsForCatalogHarness(h, testRuntimeConfig())
 	var operations []runfork.ForkOperationRequest
 	if followup == copiedReplyStagedRestart {
-		operations = append(operations, runfork.ForkOperationRequest{OperationID: uuid.NewString(), Actor: "nested-reply-restart",
-			IdempotencyKey: uuid.NewString(), TransportHash: "nested-reply-restart", SourceRunID: catalogRuntimeRunID, ForkEventID: cut,
-			TargetBundleHash: selection.BundleHash, AllowSourceFreeze: true, ContractSelection: selection})
+		operation := catalogStagedForkOperation(t, h.ctx, selected, selection, catalogRuntimeRunID, cut)
+		operation.Actor, operation.TransportHash = "nested-reply-restart", "nested-reply-restart"
+		operations = append(operations, operation)
 	} else if followup != copiedReplyContextOnlyOpen {
 		operations = append(operations, catalogStagedForkOperation(t, h.ctx, selected, selection, catalogRuntimeRunID, cut))
 	}
@@ -343,7 +343,7 @@ func runCopiedActivityReplyReturnOutcome(t *testing.T, backend catalogRuntimeBac
 		options = selectedContractAgentRuntimeOptionsForCatalogHarness(h, testRuntimeConfig())
 	} else {
 		executed, err := executeCatalogLiveFork(t, h, h.ctx, runforkexecution.SelectedContractExecutionRequest{
-			SourceRunID: catalogRuntimeRunID, At: cut, ForkOperation: &operations[0], AllowSourceFreeze: true, Owner: owner, SourceLoader: loader, ContractSelection: selection, AgentRuntime: options,
+			SourceRunID: catalogRuntimeRunID, At: cut, ForkOperation: &operations[0], AllowSourceFreeze: true, Owner: owner, SourceLoader: loader, ContractSelection: selection, AgentRuntime: options, ExpectedBundleHash: selection.BundleHash,
 		})
 		if err != nil || !executed.Activation.Activated || executed.Materialization.ForkRunID != staged.ForkRunID {
 			t.Fatalf("activate real recorded-result child: %+v error=%v", executed, err)
@@ -437,11 +437,10 @@ func proveCopiedTwoLevelReplySibling(t *testing.T, h *runtimeHarness, selected c
 	if err != nil || len(firstRows) != 2 {
 		t.Fatalf("sibling lacks its already-settled first child: %+v error=%v", firstRows, err)
 	}
-	operation := runfork.ForkOperationRequest{OperationID: uuid.NewString(), Actor: "catalog-reply-sibling", IdempotencyKey: uuid.NewString(),
-		TransportHash: "copied-reply-sibling", SourceRunID: catalogRuntimeRunID, ForkEventID: sourceAttempt.RequestEventID,
-		TargetBundleHash: selection.BundleHash, AllowSourceFreeze: true, ContractSelection: selection}
+	operation := catalogStagedForkOperation(t, ctx, selected, selection, catalogRuntimeRunID, sourceAttempt.RequestEventID)
+	operation.Actor, operation.TransportHash = "catalog-reply-sibling", "copied-reply-sibling"
 	prepared, err := owner.Prepare(ctx, runforkexecution.SelectedContractExecutionRequest{SourceRunID: catalogRuntimeRunID,
-		At: sourceAttempt.RequestEventID, ForkOperation: &operation, AllowSourceFreeze: true, SourceLoader: loader, ContractSelection: selection, AgentRuntime: options})
+		At: sourceAttempt.RequestEventID, ForkOperation: &operation, AllowSourceFreeze: true, SourceLoader: loader, ContractSelection: selection, AgentRuntime: options, ExpectedBundleHash: selection.BundleHash})
 	if err != nil {
 		t.Fatalf("prepare the sibling's exact durable operation: %v", err)
 	}
@@ -473,7 +472,7 @@ func proveCopiedTwoLevelReplySibling(t *testing.T, h *runtimeHarness, selected c
 	}
 	executed, err := executeCatalogLiveFork(t, h, ctx, runforkexecution.SelectedContractExecutionRequest{
 		SourceRunID: catalogRuntimeRunID, At: sourceAttempt.RequestEventID, ForkOperation: &operation, AllowSourceFreeze: true,
-		Owner: owner, SourceLoader: loader, ContractSelection: selection, AgentRuntime: options,
+		Owner: owner, SourceLoader: loader, ContractSelection: selection, AgentRuntime: options, ExpectedBundleHash: selection.BundleHash,
 	})
 	if err != nil || !executed.Activation.Activated || executed.Materialization.ForkRunID != staged.ForkRunID {
 		t.Fatalf("activate the exact sibling operation: %+v error=%v", executed, err)
@@ -551,7 +550,7 @@ func proveCopiedTwoLevelReplyRefork(t *testing.T, h *runtimeHarness, selected co
 	}
 	inner := requireReforkedOpenReplyRows(t, beforeRows, grandchildRows, staged.ForkRunID)
 	executed, err := executeCatalogLiveFork(t, h, ctx, runforkexecution.SelectedContractExecutionRequest{
-		SourceRunID: sourceRun, At: cut, ForkOperation: &operation, AllowSourceFreeze: true, Owner: owner, SourceLoader: loader, ContractSelection: selection, AgentRuntime: options,
+		SourceRunID: sourceRun, At: cut, ForkOperation: &operation, AllowSourceFreeze: true, Owner: owner, SourceLoader: loader, ContractSelection: selection, AgentRuntime: options, ExpectedBundleHash: selection.BundleHash,
 	})
 	if err != nil || !executed.Activation.Activated || executed.Materialization.ForkRunID != staged.ForkRunID {
 		t.Fatalf("activate exact grandchild activity continuation: %+v error=%v", executed, err)

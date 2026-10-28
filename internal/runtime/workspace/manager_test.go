@@ -117,10 +117,12 @@ func TestValidateAgentWorkspaceClassesCensusesAmbiguousScopedDeclarations(t *tes
 	}
 	repoRoot = filepath.Clean(filepath.Join(repoRoot, "..", "..", ".."))
 	root := t.TempDir()
-	writeWorkspaceValidationFile(t, filepath.Join(root, "schema.yaml"), "name: scoped-workspace-validation\n")
+	writeWorkspaceValidationFile(t, filepath.Join(root, "manifest.yaml"), "version: 1.0.0\nplatform_version: '*'\n")
+	writeWorkspaceValidationFile(t, filepath.Join(root, "schema.yaml"), "stages: []\n")
 	for _, project := range []string{"project-a", "project-b"} {
 		dir := filepath.Join(root, project)
-		writeWorkspaceValidationFile(t, filepath.Join(dir, "schema.yaml"), "name: "+project+"\n")
+		writeWorkspaceValidationFile(t, filepath.Join(dir, "manifest.yaml"), "version: 1.0.0\nplatform_version: '*'\n")
+		writeWorkspaceValidationFile(t, filepath.Join(dir, "schema.yaml"), "# fixture: "+project+"\n\nstages: []\n")
 		writeWorkspaceValidationFile(t, filepath.Join(dir, "agents.yaml"), "shared-worker:\n  model: regular\n  intent:\n    inline: Exercise scoped workspace-class validation.\n  workspace_class: missing\n")
 	}
 	bundle, err := runtimecontracts.LoadWorkflowContractBundleWithOverrides(repoRoot, root, runtimecontracts.DefaultPlatformSpecFile(repoRoot))

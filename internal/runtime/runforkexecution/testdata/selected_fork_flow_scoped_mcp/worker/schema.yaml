@@ -1,4 +1,4 @@
-name: selected-fork-flow-scoped-worker
+# fixture: selected-fork-flow-scoped-worker
 pins:
   inputs:
     - task.assigned

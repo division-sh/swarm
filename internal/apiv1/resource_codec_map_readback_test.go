@@ -27,11 +27,13 @@ func TestResourceCodecCompiledMapImportReceiptAndPinnedPublicAgentReadbackBothSt
 	forEachDataRunLifecycleStore(t, func(t *testing.T, fixture dataRunLifecycleFixture) {
 		root := t.TempDir()
 		for name, text := range map[string]string{
-			"schema.yaml":         "name: codec-map-readback\n",
-			"support/schema.yaml": "name: support\n",
-			"support/types.yaml":  "types:\n  CodecProfile:\n    note: integer?\n",
-			"support/events.yaml": "records.loaded:\n  records: map[text]CodecProfile\n",
-			"support/agents.yaml": "reader:\n  id: codec-map-reader\n  role: reader\n  intent: {inline: Read exact run data.}\n  data_access:\n    - data: support/records.loaded\n",
+			"manifest.yaml":         "version: 1.0.0\nplatform_version: '*'\n",
+			"support/manifest.yaml": "version: 1.0.0\nplatform_version: '*'\n",
+			"schema.yaml":           "stages: []\n",
+			"support/schema.yaml":   "stages: []\n",
+			"support/types.yaml":    "types:\n  CodecProfile:\n    note: integer?\n",
+			"support/events.yaml":   "records.loaded:\n  records: map[text]CodecProfile\n",
+			"support/agents.yaml":   "reader:\n  id: codec-map-reader\n  role: reader\n  intent: {inline: Read exact run data.}\n  data_access:\n    - data: support/records.loaded\n",
 		} {
 			path := filepath.Join(root, name)
 			if err := os.MkdirAll(filepath.Dir(path), 0o700); err != nil {

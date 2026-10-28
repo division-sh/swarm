@@ -59,9 +59,27 @@ type forkEngineAcknowledgment struct {
 	err    error
 }
 
-func startForkEngineOrdinarySuccessor(t *testing.T, ctx context.Context, selected *storeselected.Owner, process *worklifetime.Process, capability startupownership.ProcessCapability, repo, root string) *swarmruntime.Runtime {
+func startForkEngineOrdinarySuccessor(t *testing.T, ctx context.Context, selected *storeselected.Owner, process *worklifetime.Process, capability startupownership.ProcessCapability, repo, sourceRunID string) *swarmruntime.Runtime {
 	t.Helper()
-	module, bundle, err := cliapp.NewSwarmWorkflowModule(repo, root)
+	fact, pinned := runtimecorrelation.SourceArtifactFactFromContext(ctx)
+	runtimeID, identified := runtimecorrelation.RuntimeInstanceIDFromContext(ctx)
+	if !pinned || !identified {
+		t.Fatal("ordinary successor requires its original admitted source and process coordinate")
+	}
+	loader := runforkexecution.SourceArtifactSelectedContractSourceLoader{RepoRoot: repo, Store: selected.SourceArtifactStore()}
+	loaded, err := loader.InspectRunForkSelectedContractSourceForRequest(ctx, runforkexecution.SelectedContractSourceLoadRequest{
+		Responsibility: runforkexecution.OriginalRunSource(sourceRunID),
+		BundleHash:     fact.BundleHash(), SourceArtifactFact: fact,
+		Selection: runfork.RunForkContractSelection{Mode: runfork.RunForkContractSelectionModeBundleHash, BundleHash: fact.BundleHash()},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	bundle, found := semanticview.Bundle(loaded.Source)
+	if !found {
+		t.Fatal("ordinary successor requires its retained compiled source")
+	}
+	module, _, err := cliapp.NewSwarmWorkflowModuleForBundle(bundle)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -72,11 +90,6 @@ func startForkEngineOrdinarySuccessor(t *testing.T, ctx context.Context, selecte
 	cfg, err := cliapp.LoadRuntimeConfigWithOptions(cliapp.RuntimeConfigLoadOptions{RepoRoot: repo, ExplicitPath: configPath})
 	if err != nil {
 		t.Fatal(err)
-	}
-	fact, pinned := runtimecorrelation.SourceArtifactFactFromContext(ctx)
-	runtimeID, identified := runtimecorrelation.RuntimeInstanceIDFromContext(ctx)
-	if !pinned || !identified || fact.BundleHash() != bundle.SourceArtifact.BundleHash() {
-		t.Fatal("ordinary successor requires its original admitted source and process coordinate")
 	}
 	catalog, _, err := providertriggers.NewCatalogSnapshotFromInventory(bundle.PackInventory, bundle.Platform.Platform.Version)
 	if err != nil {
@@ -121,26 +134,41 @@ func forkEngineLiveRequest(t *testing.T, rt *swarmruntime.Runtime, selected *sto
 	if !ok {
 		t.Fatal("fork engine fixture requires its admitted source bundle")
 	}
-	projection, err := packadmission.FromBundle(bundle)
+	rooted, err := bundle.RootedSource()
 	if err != nil {
 		t.Fatal(err)
 	}
-	subjects, err := projection.ProviderTriggers.InstalledCapabilitySubjects()
+	providers, err := packadmission.AdmitProviderSource(rooted, bundle.Platform)
+	if err != nil {
+		t.Fatal(err)
+	}
+	scope, err := providers.Scope(semanticview.RootExecutionFlowID(source))
+	if err != nil {
+		t.Fatal(err)
+	}
+	catalog, err := scope.TriggerCatalog()
+	if err != nil {
+		t.Fatal(err)
+	}
+	subjects, err := catalog.InstalledCapabilitySubjects()
 	if err != nil {
 		t.Fatal(err)
 	}
 	contexts, err := swarmruntime.NewRuntimeContextManager(selected.RunBundleAvailability(), swarmruntime.BundleContext{
-		SourceArtifactFact: rt.Options.SourceArtifactFact, Source: source, Runtime: rt, WorkOwner: rt.WorkOccurrence(),
-		PackInventoryDigest: bundle.PackInventory.Digest(), ProviderTriggerGeneration: projection.ProviderTriggers.Generation(), InstalledTriggerSubjects: subjects,
+		SourceArtifactFact: rt.Options.SourceArtifactFact, RootAdmission: rooted.Admission(), Source: source, Runtime: rt, WorkOwner: rt.WorkOccurrence(),
+		PackInventoryDigest: bundle.PackInventory.Digest(), ProviderTriggerCatalog: catalog, ProviderTriggerGeneration: catalog.Generation(), InstalledTriggerSubjects: subjects,
 	})
 	if err != nil {
 		t.Fatal(err)
 	}
 	if request.ForkOperation == nil {
+		if request.ExpectedBundleHash != rooted.Admission().BundleHash() {
+			t.Fatal("implicit fork operation requires its own captured target root")
+		}
 		request.ForkOperation = &runfork.ForkOperationRequest{
 			OperationID: uuid.NewString(), Actor: "pipeline:" + t.Name(), IdempotencyKey: uuid.NewString(), TransportHash: "pipeline-live-fork",
 			SourceRunID: request.SourceRunID, ForkEventID: request.At, AtStart: request.AtStart,
-			TargetBundleHash: request.ExpectedBundleHash, ContractSelection: request.ContractSelection, AllowSourceFreeze: request.AllowSourceFreeze,
+			TargetBundleHash: request.ExpectedBundleHash, TargetRootReference: rooted.Admission().Reference(), ContractSelection: request.ContractSelection, AllowSourceFreeze: request.AllowSourceFreeze,
 		}
 	}
 	request.LiveRuntime, request.LiveRuns, request.LiveContexts = rt, selected.LiveRuns(), contexts
@@ -839,7 +867,14 @@ func startForkEngineRuntimeOwnerAt(t *testing.T, backend, root string, probe lif
 	if _, err := family.RecoverSelectedForkContexts(ctx, runtimeeffects.NewRecoveryRequest(time.Now().UTC(), rt.ExecutionPosture), runforkexecution.SelectedForkRecoveryEnvironment{}); err != nil {
 		t.Fatal(err)
 	}
-	coordinate := agenttopology.SourceCoordinate{BundleHash: fact.BundleHash()}
+	rooted, err := bundle.RootedSource()
+	if err != nil {
+		t.Fatal(err)
+	}
+	coordinate, err := agenttopology.NewSourceCoordinate(rooted.Admission())
+	if err != nil {
+		t.Fatal(err)
+	}
 	agents, err := rt.Manager.CompileStaticTopologyDesiredAgents(module.SemanticSource(), coordinate)
 	if err != nil {
 		t.Fatal(err)

@@ -40,6 +40,7 @@ import (
 	runtimerunlifecycle "github.com/division-sh/swarm/internal/runtime/runlifecycle"
 	"github.com/division-sh/swarm/internal/runtime/semanticvalue"
 	"github.com/division-sh/swarm/internal/runtime/semanticview"
+	"github.com/division-sh/swarm/internal/sourceartifact"
 	"github.com/division-sh/swarm/internal/store/storetest"
 	"github.com/division-sh/swarm/internal/testutil"
 	"github.com/division-sh/swarm/internal/testutil/flowactivationfixture"
@@ -1026,6 +1027,16 @@ func TestDecisionRouteObligationFairnessAdmitsNewWorkBehindFullDeferredPageOnBot
 			ctx := testAuthorActivityContext(t, context.Background())
 			runID := uuid.NewString()
 			insertGateRecoveryRun(t, selected.events, runID)
+			rooted, err := selected.events.(interface {
+				LoadRunRootedSource(context.Context, string) (sourceartifact.RootedSource, error)
+			}).LoadRunRootedSource(ctx, runID)
+			if err != nil {
+				t.Fatal(err)
+			}
+			bundle, err := runtimecontracts.LoadWorkflowContractBundleFromRootedSource(filepath.Clean("../../.."), rooted, "", runtimecontracts.WorkflowContractLoadOptions{})
+			if err != nil {
+				t.Fatal(err)
+			}
 			deferred := map[string]struct{}{}
 			oldAt := time.Now().UTC().Add(-25 * time.Hour)
 			for i := 0; i < 200; i++ {
@@ -1035,7 +1046,7 @@ func TestDecisionRouteObligationFairnessAdmitsNewWorkBehindFullDeferredPageOnBot
 			}
 			newEventID := seedGateRecoveryRouteObligation(t, selected, runID, time.Now().UTC())
 			setGateRecoveryRouteAttempt(t, selected, newEventID, 2)
-			bus, err := newScopedTestEventBus(t, selected.events, runtimebus.EventBusOptions{Interceptors: []runtimebus.EventInterceptor{gateRecoveryFairnessInterceptor{deferred: deferred}}})
+			bus, err := newScopedTestEventBus(t, selected.events, runtimebus.EventBusOptions{ContractBundle: semanticview.Wrap(bundle), Interceptors: []runtimebus.EventInterceptor{gateRecoveryFairnessInterceptor{deferred: deferred}}})
 			if err != nil {
 				t.Fatal(err)
 			}
@@ -1063,10 +1074,21 @@ func TestDecisionRouteObligationQuarantinesPoisonAndContinuesOnBothStores(t *tes
 			selected := tc.open(t)
 			runID := uuid.NewString()
 			insertGateRecoveryRun(t, selected.events, runID)
+			rooted, err := selected.events.(interface {
+				LoadRunRootedSource(context.Context, string) (sourceartifact.RootedSource, error)
+			}).LoadRunRootedSource(context.Background(), runID)
+			if err != nil {
+				t.Fatal(err)
+			}
+			bundle, err := runtimecontracts.LoadWorkflowContractBundleFromRootedSource(filepath.Clean("../../.."), rooted, "", runtimecontracts.WorkflowContractLoadOptions{})
+			if err != nil {
+				t.Fatal(err)
+			}
 			poisonEventID := seedGateRecoveryRouteObligation(t, selected, runID, time.Now().UTC().Add(-time.Minute))
 			validEventID := seedGateRecoveryRouteObligation(t, selected, runID, time.Now().UTC())
 			bus, err := newScopedTestEventBus(t, selected.events, runtimebus.EventBusOptions{
-				Interceptors: []runtimebus.EventInterceptor{gateRecoveryPoisonInterceptor{poisonEventID: poisonEventID}},
+				ContractBundle: semanticview.Wrap(bundle),
+				Interceptors:   []runtimebus.EventInterceptor{gateRecoveryPoisonInterceptor{poisonEventID: poisonEventID}},
 			})
 			if err != nil {
 				t.Fatal(err)
@@ -1093,10 +1115,21 @@ func TestDecisionRouteStartupRecoveryQuarantinesPoisonAndContinuesOnBothStores(t
 			selected := tc.open(t)
 			runID := uuid.NewString()
 			insertGateRecoveryRun(t, selected.events, runID)
+			rooted, err := selected.events.(interface {
+				LoadRunRootedSource(context.Context, string) (sourceartifact.RootedSource, error)
+			}).LoadRunRootedSource(context.Background(), runID)
+			if err != nil {
+				t.Fatal(err)
+			}
+			bundle, err := runtimecontracts.LoadWorkflowContractBundleFromRootedSource(filepath.Clean("../../.."), rooted, "", runtimecontracts.WorkflowContractLoadOptions{})
+			if err != nil {
+				t.Fatal(err)
+			}
 			poisonEventID := seedGateRecoveryRouteObligation(t, selected, runID, time.Now().UTC().Add(-time.Minute))
 			validEventID := seedGateRecoveryRouteObligation(t, selected, runID, time.Now().UTC())
 			bus, err := newScopedTestEventBus(t, selected.events, runtimebus.EventBusOptions{
-				Interceptors: []runtimebus.EventInterceptor{gateRecoveryPoisonInterceptor{poisonEventID: poisonEventID}},
+				ContractBundle: semanticview.Wrap(bundle),
+				Interceptors:   []runtimebus.EventInterceptor{gateRecoveryPoisonInterceptor{poisonEventID: poisonEventID}},
 			})
 			if err != nil {
 				t.Fatal(err)
@@ -1616,7 +1649,8 @@ func proposedEffectProofBundle(t *testing.T, serverURL string, queueAfterProposa
 func proposedEffectProofBundleForMethod(t *testing.T, serverURL string, queueAfterProposal bool, method string) *runtimecontracts.WorkflowContractBundle {
 	t.Helper()
 	files := map[string]string{
-		"schema.yaml":   "name: support\nstages:\n  drafting: {}\n",
+		"manifest.yaml": "version: 1.0.0\nplatform_version: \">=0.7.0 <0.8.0\"\n",
+		"schema.yaml":   "stages:\n  drafting: {}\n",
 		"entities.yaml": "test_entity: {}\n",
 		"events.yaml":   "support.reply_drafted:\n  chat_id: text\n  text: text\n",
 		"nodes.yaml": `support:
@@ -1775,8 +1809,8 @@ func loadGateRecoveryContractBundle(t *testing.T, terminal bool) *runtimecontrac
 		outcome = "          advances_to: completed\n  completed: {final: true}\n"
 	}
 	files := map[string]string{
-		"schema.yaml": `name: launch
-stages:
+		"manifest.yaml": "version: 1.0.0\nplatform_version: \">=0.7.0 <0.8.0\"\n",
+		"schema.yaml": `stages:
   awaiting_review:
     gate:
       decision: launch_review

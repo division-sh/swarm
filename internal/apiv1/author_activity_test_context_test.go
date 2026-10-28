@@ -159,6 +159,53 @@ func newScopedAPITestEventBus(t *testing.T, eventStore runtimebus.EventStore, op
 	return newScopedAPITestEventBusWithDataCatalog(t, eventStore, nil, options...)
 }
 
+func admittedAPITestBusContext(t testing.TB, ctx context.Context, bus *runtimebus.EventBus) context.Context {
+	t.Helper()
+	admitted, err := bus.AdmitSourceArtifactFact(ctx)
+	if err != nil {
+		t.Fatalf("admit API fixture source context: %v", err)
+	}
+	return admitted
+}
+
+func admittedAPICompiledSourceContext(t *testing.T, ctx context.Context, selected runtimebus.EventStore, source semanticview.Source) context.Context {
+	t.Helper()
+	bundle, ok := semanticview.Bundle(source)
+	if !ok {
+		t.Fatal("API fixture requires its compiled captured source")
+	}
+	if err := retainAPITestCompiledRoot(ctx, selected, bundle); err != nil {
+		t.Fatal(err)
+	}
+	rooted, err := bundle.RootedSource()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := runtimecorrelation.CheckRootAdmissionContext(ctx, rooted.Admission().Reference()); err != nil {
+		t.Fatal(err)
+	}
+	fact := sourceartifactfixture.FactFor(rooted.Artifact())
+	if prior, ok := runtimecorrelation.SourceArtifactFactFromContext(ctx); ok && !prior.Matches(fact) {
+		t.Fatal("API fixture source fact conflicts with its captured root")
+	}
+	return runtimecorrelation.WithRootAdmission(testAuthorActivityContextForSource(ctx, fact), rooted.Admission())
+}
+
+func retainAPITestCompiledRoot(ctx context.Context, selected runtimebus.EventStore, bundle *runtimecontracts.WorkflowContractBundle) error {
+	rooted, err := bundle.RootedSource()
+	if err != nil {
+		return fmt.Errorf("API test source requires captured rooted compilation: %w", err)
+	}
+	owner, ok := selected.(sourceartifactfixture.RootedWriter)
+	if !ok {
+		return fmt.Errorf("API test store %T lacks compiled root retention", selected)
+	}
+	if _, err := owner.EnsureRootedSource(ctx, rooted); err != nil {
+		return fmt.Errorf("retain exact API test compiled root: %w", err)
+	}
+	return nil
+}
+
 func newScopedAPITestEventBusWithDataCatalog(t *testing.T, eventStore runtimebus.EventStore, exactCatalog *durabledata.Catalog, options ...runtimebus.EventBusOptions) (*runtimebus.EventBus, error) {
 	t.Helper()
 	opts := runtimebus.EventBusOptions{}
@@ -200,7 +247,8 @@ func newScopedAPITestEventBusWithDataCatalog(t *testing.T, eventStore runtimebus
 		opts.PayloadAdmitter = runtimepkg.NewRuntimePayloadAdmitter(nil, opts.ContractBundle, opts.SourceArtifactFact)
 	}
 	if opts.PayloadAdmitter == nil {
-		opts.PayloadAdmitter = func(_ context.Context, event events.Event, flowID string) (events.PayloadAdmission, error) {
+		opts.PayloadAdmitter = func(_ context.Context, event events.Event, payloadProducer events.PayloadProducer) (events.PayloadAdmission, error) {
+			flowID := payloadProducer.FlowID()
 			return eventtest.PayloadAdmission(event, flowID, string(event.Type()))
 		}
 	}
@@ -217,6 +265,9 @@ func newScopedAPITestEventBusWithDataCatalog(t *testing.T, eventStore runtimebus
 		}
 		artifact := authorActivityTestSourceArtifact
 		if bundle, ok := semanticview.Bundle(opts.ContractBundle); ok && bundle.SourceArtifact != nil {
+			if err := retainAPITestCompiledRoot(context.Background(), eventStore, bundle); err != nil {
+				return nil, err
+			}
 			if exactCatalog == nil {
 				var err error
 				catalog, err = runtimecontracts.BuildDurableDataCatalog(bundle)
@@ -403,7 +454,14 @@ func newAPITestFlowConstructor(t *testing.T, selected runtimebus.EventStore, bus
 	}), nil
 }
 func mustAPITestSourceArtifactNamed(name string) *sourceartifact.AdmittedSourceArtifact {
-	return sourceartifactfixture.New("schema.yaml", []byte("name: "+name+"\n"))
+	artifact, err := sourceartifact.AdmitMembers(map[string][]byte{
+		"manifest.yaml": []byte("version: 1.0.0\nplatform_version: '*'\n"),
+		"schema.yaml":   []byte("# " + name + "\nstages: []\n"),
+	})
+	if err != nil {
+		panic(err)
+	}
+	return artifact
 }
 
 func newAPITestRuntimeWorkOccurrence(t *testing.T, runtimeInstanceID, bundleHash string) *worklifetime.RuntimeOccurrence {

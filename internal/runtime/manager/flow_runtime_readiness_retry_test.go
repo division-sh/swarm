@@ -36,7 +36,7 @@ func (s *readinessRetryProjectionStore) LoadDynamicFlowRuntimeReadiness(_ contex
 	return runtimepipeline.DynamicFlowRuntimeReadiness{}, false, s.loadErr
 }
 
-func readinessRetryProbe(t *testing.T, projection runtimepipeline.DynamicFlowRuntimeReadinessProjection) (*AgentManager, *readinessRetryProjectionStore, *countedReadinessOwnership) {
+func readinessRetryProbe(t *testing.T, projection runtimepipeline.DynamicFlowRuntimeReadinessProjection) (*AgentManager, *readinessRetryProjectionStore, *countedReadinessOwnership, context.Context) {
 	t.Helper()
 	store := &readinessRetryProjectionStore{
 		readinessOwnershipProjectionStore: &readinessOwnershipProjectionStore{
@@ -44,8 +44,7 @@ func readinessRetryProbe(t *testing.T, projection runtimepipeline.DynamicFlowRun
 		},
 		loadErr: errors.New("pending reconciliation reached the exact readiness loader"),
 	}
-	am := newFlowActivationManager(t, &flowActivationTestBus{}, store)
-	setFlowActivationManagerSemanticSource(am, semanticview.Wrap(testFlowBundle(t, "")))
+	am, ctx := newFlowActivationManagerForSource(t, &flowActivationTestBus{}, store, semanticview.Wrap(testFlowBundle(t, "")))
 	owner := &countedReadinessOwnership{
 		AgentLifecyclePersistence: am.lifecycle.persistence(),
 		states:                    make(map[string]RunExecutionOwnership), calls: make(map[string]int),
@@ -56,7 +55,7 @@ func readinessRetryProbe(t *testing.T, projection runtimepipeline.DynamicFlowRun
 		}
 	}
 	am.lifecycle.replacePersistence(owner)
-	return am, store, owner
+	return am, store, owner, ctx
 }
 
 func TestDynamicReadinessRetryFiltersOnlyPending(t *testing.T) {
@@ -77,8 +76,8 @@ func TestDynamicReadinessRetryFiltersOnlyPending(t *testing.T) {
 		}},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
-			am, store, owner := readinessRetryProbe(t, tc.projection)
-			err := am.reconcilePendingDynamicFlowRuntimeReadiness(testAuthorActivityContext(context.Background()))
+			am, store, owner, ctx := readinessRetryProbe(t, tc.projection)
+			err := am.reconcilePendingDynamicFlowRuntimeReadiness(ctx)
 			if len(tc.projection.CurrentPending) == 0 && err != nil || len(tc.projection.CurrentPending) != 0 && !errors.Is(err, store.loadErr) {
 				t.Fatalf("retry result = %v", err)
 			}
@@ -92,7 +91,7 @@ func TestDynamicReadinessRetryFiltersOnlyPending(t *testing.T) {
 				t.Fatalf("retry: full backend inspections=%d ownership=%v loads=%v; want 1, %v, %v", store.inspections, owner.calls, store.loads, wantCalls, wantLoads)
 			}
 			owner.calls = make(map[string]int)
-			full, err := am.InspectDynamicFlowRuntimeReadinessForSource(context.Background(), authorActivityTestSourceArtifactFact)
+			full, err := am.InspectDynamicFlowRuntimeReadinessForSource(ctx, am.semanticReadinessSource.fact)
 			if err != nil {
 				t.Fatal(err)
 			}
@@ -127,8 +126,8 @@ func TestDynamicReadinessRetryPreservesIntegrityAndCancellation(t *testing.T) {
 	} {
 		for _, failure := range []string{"backend_integrity", "canceled_before", "canceled_after_backend", "missing_source", "stale_source"} {
 			t.Run(failure+"/"+readinessRetryCohortName(projection), func(t *testing.T) {
-				am, store, owner := readinessRetryProbe(t, projection)
-				ctx, cancel := context.WithCancel(testAuthorActivityContext(context.Background()))
+				am, store, owner, ctx := readinessRetryProbe(t, projection)
+				ctx, cancel := context.WithCancel(ctx)
 				defer cancel()
 				var want error
 				switch failure {
@@ -183,8 +182,7 @@ func readinessRetryCohortName(projection runtimepipeline.DynamicFlowRuntimeReadi
 func TestDynamicReadinessRetryRechecksPendingOwnership(t *testing.T) {
 	runID := uuid.NewString()
 	projection := runtimepipeline.DynamicFlowRuntimeReadinessProjection{CurrentPending: []runtimepipeline.DynamicFlowRuntimeReadiness{{InstancePath: "pending", Plan: runtimepipeline.DynamicFlowRuntimeReadinessPlan{RunID: runID}}}}
-	am, store, owner := readinessRetryProbe(t, projection)
-	ctx := testAuthorActivityContext(context.Background())
+	am, store, owner, ctx := readinessRetryProbe(t, projection)
 	if err := am.reconcilePendingDynamicFlowRuntimeReadiness(ctx); !errors.Is(err, store.loadErr) {
 		t.Fatal(err)
 	}

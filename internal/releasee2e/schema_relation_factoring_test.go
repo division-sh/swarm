@@ -14,7 +14,7 @@ func TestSchemaRelationFactoringCompiledReaders(t *testing.T) {
 	config, env := clockReleaseConfig(t, root, "sqlite")
 	source := filepath.Join(root, "contracts")
 	copyReleaseTree(t, filepath.Join(releaseE2ERepoRoot(t), "internal/releasee2e/testdata/workspace_mcp"), source)
-	imported := runReleaseCommand(t, goldenStartupTimeout, root, env, "", binary, "import", "provider.telegram.hitl_channel", source, "--config", config, "--json")
+	imported := runReleaseCommand(t, goldenStartupTimeout, root, env, "", binary, "import", "telegram", source, "--config", config, "--json")
 	if imported.err != nil {
 		t.Fatalf("public pack import: %v\n%s", imported.err, imported.output)
 	}
@@ -25,9 +25,9 @@ func TestSchemaRelationFactoringCompiledReaders(t *testing.T) {
 		}
 	}
 	// A real admitted channel output relation feeds compiled-result admission.
-	// Project-owned imports derive identity from authored bytes, so a changed
+	// Project-owned providers derive identity from authored bytes, so a changed
 	// target minimum reaches directional proof without bypassing the seal owner.
-	path := filepath.Join(source, "packs", "provider.telegram.hitl_channel", "channel.yaml")
+	path := filepath.Join(source, "telegram", "channel.yaml")
 	body, err := os.ReadFile(path)
 	if err != nil {
 		t.Fatal(err)

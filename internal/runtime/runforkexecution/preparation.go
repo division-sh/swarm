@@ -12,6 +12,7 @@ import (
 	"sync"
 
 	"github.com/division-sh/swarm/internal/durabledata"
+	"github.com/division-sh/swarm/internal/events"
 	runtimepkg "github.com/division-sh/swarm/internal/runtime"
 	runtimeauthoractivity "github.com/division-sh/swarm/internal/runtime/authoractivity"
 	runtimebus "github.com/division-sh/swarm/internal/runtime/bus"
@@ -209,7 +210,7 @@ func (o SelectedContractExecutionOwner) prepareWithOperation(ctx context.Context
 		expectedBundleHash = req.SourceArtifactFact.BundleHash()
 	}
 	loadedSource, err := loadRunForkSelectedContractSource(ctx, req.SourceLoader, SelectedContractSourceLoadRequest{
-		SourceRunID:        req.SourceRunID,
+		Responsibility:     FreshSelectedSource(expectedBundleHash),
 		BundleHash:         expectedBundleHash,
 		SourceArtifactFact: req.SourceArtifactFact,
 		Selection:          selection,
@@ -235,6 +236,7 @@ func (o SelectedContractExecutionOwner) prepareWithOperation(ctx context.Context
 		return nil, fmt.Errorf("selected-contract effective source identity does not match loaded effective source")
 	}
 	ctx = runtimecorrelation.WithSourceArtifactFact(ctx, loadedSource.SourceArtifactFact)
+	ctx = runtimecorrelation.WithRootAdmission(ctx, loadedSource.RootedSource.Admission())
 	materializationBundleHash := loadedSource.SourceArtifactFact.BundleHash()
 	selectedScope, err := runtimeauthoractivity.BundleScopeForTarget(ctx, materializationBundleHash)
 	if err != nil {
@@ -243,6 +245,7 @@ func (o SelectedContractExecutionOwner) prepareWithOperation(ctx context.Context
 	ctx = runtimeauthoractivity.WithScope(ctx, selectedScope)
 	operation.preparing = ctx
 	operation.owned = runtimeauthoractivity.WithScope(runtimecorrelation.WithSourceArtifactFact(operation.owned, loadedSource.SourceArtifactFact), selectedScope)
+	operation.owned = runtimecorrelation.WithRootAdmission(operation.owned, loadedSource.RootedSource.Admission())
 	descriptors, err := runtimepkg.AuthorActivityEventDescriptors(loadedSource.Source)
 	if err != nil {
 		return nil, fmt.Errorf("project selected-contract author activity descriptors: %w", err)
@@ -260,7 +263,11 @@ func (o SelectedContractExecutionOwner) prepareWithOperation(ctx context.Context
 	if req.ForkOperation != nil && req.ForkOperation.ResolvedPoint != nil {
 		planRequest.ResolvedPoint = req.ForkOperation.ResolvedPoint
 	}
-	plan, err := ports.fork.PlanRunFork(ctx, planRequest)
+	originalPlanContext := runtimecorrelation.WithRootAdmission(
+		runtimecorrelation.WithSourceArtifactFact(ctx, owned.originalSource.SourceArtifactFact),
+		owned.originalSource.RootedSource.Admission(),
+	)
+	plan, err := ports.fork.PlanRunFork(originalPlanContext, planRequest)
 	if err != nil {
 		return nil, fmt.Errorf("plan selected-contract execution: %w", err)
 	}
@@ -271,7 +278,7 @@ func (o SelectedContractExecutionOwner) prepareWithOperation(ctx context.Context
 	if err := runforkadmission.ValidateFixedConstructionTree(owned.originalSource.Source, plan); err != nil {
 		return nil, fmt.Errorf("admit original atomic construction tree: %w", err)
 	}
-	original, err = retainOriginalFanOutHistory(ctx, req.SourceLoader, original, owned.originalSource.SourceArtifactFact.BundleHash(), plan)
+	original, err = retainOriginalFanOutHistory(ctx, req.SourceLoader, original, owned.originalSource.RootedSource.Admission(), plan)
 	if err != nil {
 		return nil, err
 	}
@@ -400,9 +407,11 @@ func (p *PreparedSelectedFork) MaterializationRequest() (runforkreadiness.Materi
 		return runforkreadiness.MaterializeRequest{}, err
 	}
 	return runforkreadiness.MaterializeRequest{
-		ForkOperation:        forkOperation,
-		OriginalLoopCarriage: p.originalLoopCarriage,
-		Preparation:          p.evidence(), SourceRunID: p.plan.SourceRunID, At: p.plan.ForkPoint.Input,
+		RootAdmission:         p.loadedSource.RootedSource.Admission(),
+		ForkOperation:         forkOperation,
+		OriginalLoopCarriage:  p.originalLoopCarriage,
+		OriginalRootAdmission: p.originalSource.RootedSource.Admission(),
+		Preparation:           p.evidence(), SourceRunID: p.plan.SourceRunID, At: p.plan.ForkPoint.Input,
 		ContractSelection: p.loadedSource.Selection, SourceArtifactFact: p.loadedSource.SourceArtifactFact,
 		EffectiveSourceIdentity: p.loadedSource.EffectiveSourceIdentity, FrontierAdmission: detached.Frontier,
 		RouteTopology: detached.Routes, RecipientPlanning: detached.Recipients, Readiness: p.readiness,
@@ -551,7 +560,7 @@ func prepareSelectedFork(ctx context.Context, operation *selectedContractOperati
 			return nil, err
 		}
 		payload, _ := original.PayloadAdmission()
-		if _, err := admitPayload(ctx, original, payload.Binding().FlowID()); err != nil {
+		if _, err := admitPayload(ctx, original, events.EventPayloadProducer(original, payload.Binding().FlowID())); err != nil {
 			return nil, fmt.Errorf("selected starting input %s: %w", event.SourceEventID, err)
 		}
 		constructions := make(map[agentidentity.Plan]flowidentity.Instance)
@@ -574,7 +583,7 @@ func prepareSelectedFork(ctx context.Context, operation *selectedContractOperati
 				}
 				flow = scope.Declaration().OwnerFlowID
 			}
-			if _, err := admitPayload(ctx, original, flow); err != nil {
+			if _, err := admitPayload(ctx, original, events.EventPayloadProducer(original, flow)); err != nil {
 				return nil, fmt.Errorf("selected input %s recipient schema: %w", event.SourceEventID, err)
 			}
 		}

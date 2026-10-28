@@ -1,4 +1,4 @@
-name: test-compose-clear-gates-reenter
+# fixture: test-compose-clear-gates-reenter
 stages:
   reviewing: {}
   approved: {final: true}

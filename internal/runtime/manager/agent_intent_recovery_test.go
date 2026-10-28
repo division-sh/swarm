@@ -2,6 +2,8 @@ package manager
 
 import (
 	"encoding/json"
+	"fmt"
+	"path/filepath"
 	"strings"
 	"testing"
 
@@ -26,7 +28,7 @@ func TestAgentFactoryRejectsAuthoredPromptAuthority(t *testing.T) {
 
 func TestSelectedStoreRecoveryReconstructsCanonicalPromptBeforeProviderFactory(t *testing.T) {
 	intent := managerRecoveryIntent(t)
-	source := managerRecoverySource(intent, nil)
+	source := managerRecoverySource(t, intent, nil)
 	cfg := managerTestAgentConfig(models.AgentConfig{
 		ID:       "worker",
 		Identity: managerAgentIdentity("worker"),
@@ -62,7 +64,7 @@ func TestSelectedStoreRecoveryReconstructsCanonicalPromptBeforeProviderFactory(t
 
 func TestSelectedStoreRecoveryRejectsCriteriaMismatchBeforeProviderFactory(t *testing.T) {
 	intent := managerRecoveryIntent(t)
-	source := managerRecoverySource(intent, []string{"quality"})
+	source := managerRecoverySource(t, intent, []string{"quality"})
 	cfg := managerTestAgentConfig(models.AgentConfig{
 		ID:       "worker",
 		Identity: managerAgentIdentity("worker"),
@@ -105,23 +107,23 @@ func managerRecoveryIntent(t testing.TB) runtimeagentintent.Resolved {
 	return intent
 }
 
-func managerRecoverySource(intent runtimeagentintent.Resolved, criteria []string) semanticview.Source {
-	flow := runtimecontracts.FlowContractView{
-		Paths: runtimecontracts.FlowContractPaths{FlowPath: "review"},
-		Agents: map[string]runtimecontracts.AgentRegistryEntry{
-			"worker": {
-				ID:             "worker",
-				Role:           "worker",
-				ResolvedIntent: intent,
-				Criteria:       append([]string(nil), criteria...),
-			},
-		},
+func managerRecoverySource(t *testing.T, intent runtimeagentintent.Resolved, criteria []string) semanticview.Source {
+	t.Helper()
+	root := filepath.Join(t.TempDir(), "recovery")
+	for _, flow := range []string{".", "review"} {
+		writeFlowActivationFixtureFile(t, filepath.Join(root, flow, "manifest.yaml"), "version: 1.0.0\nplatform_version: '*'\n")
+		writeFlowActivationFixtureFile(t, filepath.Join(root, flow, "schema.yaml"), "stages: []\n")
 	}
-	bundle := &runtimecontracts.WorkflowContractBundle{
-		FlowTree: runtimecontracts.FlowTree{
-			Root: &runtimecontracts.FlowContractView{Children: []runtimecontracts.FlowContractView{flow}},
-			ByID: map[string]*runtimecontracts.FlowContractView{"review": &flow},
-		},
+	agent := fmt.Sprintf("worker:\n  role: worker\n  model: regular\n  intent: {inline: %q}\n", intent.Content)
+	if len(criteria) != 0 {
+		agent += "  criteria: [quality]\n"
+		writeFlowActivationFixtureFile(t, filepath.Join(root, "review", "rules.yaml"), "quality:\n  classes:\n    hard: {disposition: reject}\n  rules:\n    - {id: QUALITY-01, class: hard, text: Require declared quality.}\n")
+	}
+	writeFlowActivationFixtureFile(t, filepath.Join(root, "review", "agents.yaml"), agent)
+	repo := filepath.Clean("../../..")
+	bundle, err := runtimecontracts.LoadWorkflowContractBundleWithOverrides(repo, root, runtimecontracts.DefaultPlatformSpecFile(repo))
+	if err != nil {
+		t.Fatal(err)
 	}
 	return semanticview.Wrap(bundle)
 }

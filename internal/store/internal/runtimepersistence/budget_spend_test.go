@@ -89,7 +89,7 @@ func TestSQLiteRuntimeStoreBudgetSpendPersistence(t *testing.T) {
 	}
 	stages := map[string]string{activeEntity: "active", terminalEntity: "done"}
 	for _, target := range targets {
-		if target.RunID != runID || target.BundleHash == "" || target.Stage != stages[target.EntityID] || target.FlowInstance == "" {
+		if target.RunID != runID || target.RootReference.Validate() != nil || target.Stage != stages[target.EntityID] || target.FlowInstance == "" {
 			t.Fatalf("budget target lost source/flow/stage evidence: %#v", target)
 		}
 	}
@@ -224,7 +224,7 @@ func TestPostgresStoreBudgetSpendPersistenceQueries(t *testing.T) {
 		if target.EntityID == entityID {
 			wantStage, wantPath = "active", "flow/1"
 		}
-		if target.RunID != runID || target.BundleHash == "" || target.FlowTemplate != "flow" || target.FlowInstance != wantPath || target.Stage != wantStage {
+		if target.RunID != runID || target.RootReference.Validate() != nil || target.FlowTemplate != "flow" || target.FlowInstance != wantPath || target.Stage != wantStage {
 			t.Fatalf("budget target lost source/flow/stage evidence: %#v", target)
 		}
 	}
