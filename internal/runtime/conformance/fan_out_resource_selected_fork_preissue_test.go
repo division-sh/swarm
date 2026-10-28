@@ -6,6 +6,7 @@ import (
 	"reflect"
 	"testing"
 
+	"github.com/division-sh/swarm/internal/runtime/correlation"
 	"github.com/division-sh/swarm/internal/runtime/effects"
 	"github.com/division-sh/swarm/internal/runtime/startupownership"
 	"github.com/google/uuid"
@@ -73,7 +74,12 @@ func TestDeploymentSourceSelectedForkBeforeFirstRow(t *testing.T) {
 			if err != nil {
 				t.Fatal(err)
 			}
-			serving, err := startupownership.StartFanOutServing(effects.WithExecutionMode(f.ctx, f.runtime.posture.RootMode()), grant, f.runtime.workOwner, nil, deploymentFanOutDiagnostic{FanOutExecutor: f.runtime.pipeline, t: t})
+			rooted := notifyAllChildrenRootedSource(t, f.source)
+			if err := correlation.CheckRootAdmissionContext(f.ctx, rooted.Admission().Reference()); err != nil {
+				t.Fatal(err)
+			}
+			servingCtx := correlation.WithRootAdmission(f.ctx, rooted.Admission())
+			serving, err := startupownership.StartFanOutServing(effects.WithExecutionMode(servingCtx, f.runtime.posture.RootMode()), grant, f.runtime.workOwner, nil, deploymentFanOutDiagnostic{FanOutExecutor: f.runtime.pipeline, t: t})
 			if err != nil {
 				t.Fatal(err)
 			}
