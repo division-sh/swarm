@@ -46,6 +46,10 @@ func TestAdmissionInspectionMissingSQLiteDoesNotCreateState(t *testing.T) {
 func TestAdmissionInspectionRealReadScopeBothStores(t *testing.T) {
 	ctx := context.Background()
 	rooted, _ := sourceartifactfixture.Rooted(t, "inspection", sourceartifactfixture.Artifact())
+	bundle, err := runtimecontracts.LoadWorkflowContractBundleFromRootedSource(selectedStoreRepoRoot(t), rooted, runtimecontracts.DefaultPlatformSpecFile(selectedStoreRepoRoot(t)), runtimecontracts.WorkflowContractLoadOptions{})
+	if err != nil {
+		t.Fatal(err)
+	}
 	spec, err := runtimecontracts.LoadPlatformSpecDocument(filepath.Join(selectedStoreRepoRoot(t), "platform-spec.yaml"))
 	if err != nil {
 		t.Fatal(err)

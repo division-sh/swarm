@@ -50,6 +50,7 @@ type inboundPublicationProofStore interface {
 	runtimeinbound.Runner
 	storeTestDurableEventBusStore
 	workflowTestSelectedStore
+	testAuthorActivityCatalogRegistrar
 	sourceartifact.Reader
 	GetRootedSource(context.Context, sourceartifact.RootAdmissionReference) (sourceartifact.RootedSource, error)
 }
@@ -239,7 +240,7 @@ func runInboundPublicationOperationProof(t *testing.T, db *sql.DB, sqlite bool, 
 	if _, err := store.(selectedSourceArtifactStore).EnsureRootedSource(ctx, rooted); err != nil {
 		t.Fatal(err)
 	}
-	registerTestAuthorActivityCatalogForContext(t, registrar, ctx)
+	registerTestAuthorActivityCatalogForContext(t, store, ctx)
 	standing, err := workflowStore.ReconcileFlowRun(ctx, candidate, source)
 	if err != nil {
 		t.Fatalf("ReconcileFlowRun: %v", err)
