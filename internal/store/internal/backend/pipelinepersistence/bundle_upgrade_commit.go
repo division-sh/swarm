@@ -80,6 +80,17 @@ func commitBundleUpgrade(ctx context.Context, attempt *mutationprotocol.Attempt,
 		if err != nil {
 			return err
 		}
+		candidateBundle, ok := semanticview.Bundle(candidate)
+		if !ok || candidateBundle == nil {
+			return errors.New("bundle upgrade candidate lacks its compiled root")
+		}
+		rooted, err := candidateBundle.RootedSource()
+		if err != nil {
+			return err
+		}
+		if rooted.Admission().BundleHash() != source.BundleHash() {
+			return errors.New("bundle upgrade candidate root differs from its revalidated source")
+		}
 		for _, runID := range slices.Sorted(maps.Keys(fresh.Runs)) {
 			if err := cancelRemovedUpgradeTimers(ctx, tx, attempt, sqlite, runID, fresh.Sources[fresh.Runs[runID]], candidate); err != nil {
 				return err
@@ -87,7 +98,7 @@ func commitBundleUpgrade(ctx context.Context, attempt *mutationprotocol.Attempt,
 			if err := cancelRemovedUpgradeClocks(ctx, tx, attempt, owner.genericScheduleTxOwner(), sqlite, runID, candidate); err != nil {
 				return err
 			}
-			if _, err := owner.ReviseSourceTx(ctx, attempt, runlifecycle.SourceRevisionRequest{RunID: runID, Source: source}); err != nil {
+			if _, err := owner.ReviseSourceTx(ctx, attempt, runlifecycle.SourceRevisionRequest{RunID: runID, Source: source, RootAdmission: rooted.Admission()}); err != nil {
 				return err
 			}
 		}

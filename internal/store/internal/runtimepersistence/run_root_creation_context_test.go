@@ -9,6 +9,7 @@ import (
 	runtimecorrelation "github.com/division-sh/swarm/internal/runtime/correlation"
 	"github.com/division-sh/swarm/internal/runtime/runlifecycle"
 	"github.com/division-sh/swarm/internal/sourceartifact"
+	"github.com/division-sh/swarm/internal/testutil/sourceartifactfixture"
 )
 
 func TestS1RunCreationChecksSuppliedRootContextBothStores(t *testing.T) {
@@ -112,6 +113,35 @@ func TestS1RunCreationChecksSuppliedRootContextBothStores(t *testing.T) {
 				t.Fatalf("explicit revision refused its legitimate predecessor context: %s, %v", disposition, err)
 			}
 			requireRunRoot(t, ctx, selected, request.RunID, sourceB)
+			live := selected.(runlifecycle.FlowRunOwner)
+			for _, cell := range []struct {
+				name   string
+				ctx    context.Context
+				source runtimecorrelation.SourceArtifactFact
+			}{
+				{"absent", ctx, request.Source},
+				{"cleared", runtimecorrelation.WithRootAdmission(correct, sourceartifact.RootAdmission{}), request.Source},
+				{"contradictory", correct, sourceartifactfixture.Fact()},
+			} {
+				t.Run("live_reconcile/"+cell.name, func(t *testing.T) {
+					before, err := ReadFiniteRunStartStorageCountsForTest(ctx, selected)
+					if err != nil {
+						t.Fatal(err)
+					}
+					if result, err := live.ReconcileFlowRun(cell.ctx, runlifecycle.LiveRunScope{FlowPath: "."}, cell.source); err == nil || result.RunID != "" {
+						t.Fatalf("missing or contradictory caller root reconciled a live run: %+v, %v", result, err)
+					}
+					after, err := ReadFiniteRunStartStorageCountsForTest(ctx, selected)
+					if err != nil || after != before {
+						t.Fatalf("refused live reconciliation changed rows: before=%+v after=%+v err=%v", before, after, err)
+					}
+				})
+			}
+			reconciled, err := live.ReconcileFlowRun(correct, runlifecycle.LiveRunScope{FlowPath: "."}, request.Source)
+			if err != nil || !reconciled.Created {
+				t.Fatalf("genuine caller root could not reconcile its live run: %+v, %v", reconciled, err)
+			}
+			requireRunRoot(t, correct, selected, reconciled.RunID, sourceB)
 		})
 	}
 }
