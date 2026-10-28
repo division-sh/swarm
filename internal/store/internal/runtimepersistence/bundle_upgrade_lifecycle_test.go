@@ -30,11 +30,11 @@ import (
 
 func TestBundleUpgradeAdmissionPreservesLiveWorkBothStores(t *testing.T) {
 	files := map[string]string{
-		"schema.yaml":          "name: bundle-upgrade\nstages:\n  pending: {}\nschedules:\n  removed: {every: 1h, emit: clock.removed}\n  retained: {every: 1h, emit: clock.retained}\n",
-		"events.yaml":          "clock.removed:\nclock.retained:\n",
-		"review/schema.yaml":   "name: review\ninstance: request_id\nstages:\n  pending:\n    timers:\n      - {id: pending.timeout, after: 1h, emit: timer.elapsed}\npins:\n  inputs: [task.create]\n",
-		"review/entities.yaml": "review_item:\n  request_id: text\n  label: text\n  nested: json\n  enabled: {type: boolean, initial: true}\n",
-		"review/events.yaml":   "task.create:\n  request_id: text\n  label: text\n  nested: json\ntask.started:\ntimer.elapsed:\n",
+		"schema.yaml":        "name: bundle-upgrade\nstages:\n  pending: {}\nschedules:\n  removed: {every: 1h, emit: clock.removed}\n  retained: {every: 1h, emit: clock.retained}\n",
+		"events.yaml":        "clock.removed:\nclock.retained:\n",
+		"review/schema.yaml": "name: review\ninstance: request_id\nstages:\n  pending:\n    timers:\n      - {id: pending.timeout, after: 1h, emit: timer.elapsed}\npins:\n  inputs: [task.create]\n",
+		"review/state.yaml":  "request_id: text\nlabel: text\nnested: json\nenabled: true\n",
+		"review/events.yaml": "task.create:\n  request_id: text\n  label: text\n  nested: json\ntask.started:\ntimer.elapsed:\n",
 	}
 	candidateFiles := maps.Clone(files)
 	candidateFiles["schema.yaml"] = strings.Replace(files["schema.yaml"], "  removed: {every: 1h, emit: clock.removed}\n", "", 1)
