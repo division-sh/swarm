@@ -5333,46 +5333,6 @@ func selectedExecutionFixtureAgentConfig(t testing.TB, identity agentidentity.Id
 	})
 }
 
-func seedSelectedExecutionStateOnlySourceRun(
-	t *testing.T,
-	selected *store.PostgresStore, db *sql.DB,
-	sourceRunID, sourceEventID, eventName string,
-	at time.Time,
-	rooted sourceartifact.RootedSource,
-) {
-	t.Helper()
-	ctx := runForkTestContext(t)
-	sourceFact := sourceartifactfixture.FactFor(rooted.Artifact())
-	ctx = runtimecorrelation.WithSourceArtifactFact(ctx, sourceFact)
-	ctx = runtimecorrelation.WithRootAdmission(ctx, rooted.Admission())
-	ctx = runtimeauthoractivity.WithScope(
-		ctx,
-		runtimeauthoractivity.BundleScope(runForkTestRuntimeInstanceID, sourceFact.BundleHash()),
-	)
-	admitSelectedExecutionSourceArtifact(t, ctx, db, sourceFact.BundleHash())
-	ctx, err := runtimestartupownership.WithProcessMutationAuthority(ctx, selectedContractTestProcessCapability(t, ctx, selected))
-	if err != nil {
-		t.Fatal(err)
-	}
-	ctx = originalSelectedFixtureContext(t, ctx, any(selected).(runtimestartupownership.Store))
-	storetest.RequireRun(t, ctx, selected, storetest.RunFixture{Origin: storetest.ScenarioSetupOrigin(),
-		RunID: sourceRunID, StartedAt: at.Add(-time.Minute), BundleHash: sourceFact.BundleHash(),
-		Artifact: rooted.Artifact(), RootAdmission: rooted.Admission(),
-	})
-	event := eventtest.ExistingRunRootIngress(
-		sourceEventID,
-		events.EventType(eventName),
-		"source-runtime",
-		"",
-		json.RawMessage(`{}`),
-		0,
-		sourceRunID,
-		events.EventEnvelope{Scope: events.EventScopeGlobal},
-		at,
-	)
-	commitRunForkTestEvent(t, ctx, selected, event, nil)
-}
-
 func selectedExecutionEntitylessNodeRoute(nodeID string) events.DeliveryRoute {
 	return events.DeliveryRoute{
 		Recipient: events.MustNodeDeliveryRecipient(mustRunForkRootNode(nodeID)),

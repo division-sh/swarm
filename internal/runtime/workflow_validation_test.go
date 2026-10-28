@@ -477,37 +477,6 @@ func TestValidateWorkflowContractSurface_DurableActivityResultEventsRejectGenera
 // USER6220888538 gives key-free GET the same fixed conservative
 // policy as POST, including the existing static credential owner.
 
-func declareRuntimeValidationSourceRequestedEvent(bundle *runtimecontracts.WorkflowContractBundle) {
-	if bundle.Events == nil {
-		bundle.Events = map[string]runtimecontracts.EventCatalogEntry{}
-	}
-	bundle.Events["source.requested"] = runtimecontracts.EventCatalogEntry{Payload: runtimecontracts.EventPayloadSpec{
-		Properties: map[string]runtimecontracts.EventFieldSpec{"url": {Type: "text"}},
-		Required:   []string{"url"},
-	}}
-}
-
-func declareRuntimeValidationTelegramEvent(bundle *runtimecontracts.WorkflowContractBundle) {
-	if bundle.Events == nil {
-		bundle.Events = map[string]runtimecontracts.EventCatalogEntry{}
-	}
-	if bundle.RootTypes.Types == nil {
-		bundle.RootTypes.Types = map[string]runtimecontracts.NamedTypeDecl{}
-	}
-	bundle.RootTypes.Types["RuntimeValidationTelegramPayload"] = runtimecontracts.NamedTypeDecl{Fields: map[string]runtimecontracts.TypeFieldSpec{
-		"message": {Type: "RuntimeValidationTelegramMessage"},
-	}}
-	bundle.RootTypes.Types["RuntimeValidationTelegramMessage"] = runtimecontracts.NamedTypeDecl{Fields: map[string]runtimecontracts.TypeFieldSpec{
-		"chat": {Type: "RuntimeValidationTelegramChat"},
-	}}
-	bundle.RootTypes.Types["RuntimeValidationTelegramChat"] = runtimecontracts.NamedTypeDecl{Fields: map[string]runtimecontracts.TypeFieldSpec{
-		"id": {Type: "text"},
-	}}
-	bundle.Events["inbound.telegram"] = runtimecontracts.EventCatalogEntry{Payload: runtimecontracts.EventPayloadSpec{
-		Properties: map[string]runtimecontracts.EventFieldSpec{"payload": {Type: "RuntimeValidationTelegramPayload"}},
-		Required:   []string{"payload"},
-	}}
-}
 func workflowValidationTestProfile(t *testing.T) llmselection.Profile {
 	t.Helper()
 	profile, err := llmselection.ResolveActiveBackend(llmselection.BackendAnthropic)

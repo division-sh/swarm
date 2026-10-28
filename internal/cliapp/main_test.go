@@ -3726,13 +3726,6 @@ accumulator:
 	return root
 }
 
-func testWorkflowValidationBundle() *runtimecontracts.WorkflowContractBundle {
-	bundle := &runtimecontracts.WorkflowContractBundle{}
-	bundle.Platform.Platform.Name = "swarm"
-	bundle.Platform.Platform.Version = "test"
-	return bundle
-}
-
 func loadWorkflowValidationFixtureBundle(t *testing.T, relativeRoot string) *runtimecontracts.WorkflowContractBundle {
 	t.Helper()
 	RepoRoot := runtimepipeline.WorkflowRepoRoot()

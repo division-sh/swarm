@@ -6,16 +6,6 @@ import (
 	"testing"
 )
 
-func normalizeInboundReceiptWitnessCalls(source string) string {
-	return strings.NewReplacer(
-		"loadPostgresAgentDeliveryStatus(t, ctx, pg,", "loadPostgresAgentDeliveryStatus(t, ctx, db,",
-		"countPostgresAgentDeliveriesForEvent(t, ctx, pg,", "countPostgresAgentDeliveriesForEvent(t, ctx, db,",
-		"countPostgresPipelineReceiptsForEvent(t, ctx, pg,", "countPostgresPipelineReceiptsForEvent(t, ctx, db,",
-		"countPostgresAgentSettledAttemptsForEvent(t, ctx, pg,", "countPostgresAgentReceiptsForEvent(t, ctx, db,",
-		"agent settled attempts while paused", "agent receipts while paused",
-	).Replace(source)
-}
-
 func TestNativeInboundReceiptWitnessPreservesPipelineRowsAndRejectsRetiredAgentMeaning(t *testing.T) {
 	var rows []recipe
 	if err := json.Unmarshal(recipeBytes, &rows); err != nil {

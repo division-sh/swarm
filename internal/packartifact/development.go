@@ -150,15 +150,6 @@ func readDevelopmentPackArtifacts(root *admittedArtifactRoot, directory string, 
 	return bodies, nil
 }
 
-func readRegularDevelopmentPackFile(dir, name string) ([]byte, error) {
-	root, err := openAdmittedArtifactRoot(dir)
-	if err != nil {
-		return nil, err
-	}
-	defer root.close()
-	return root.readRegularFile(name)
-}
-
 func requireCompleteReplacement(embedded, candidate *PlatformPackInventory) error {
 	if len(embedded.entries) != len(candidate.entries) {
 		return fmt.Errorf("development override must replace all %d embedded provider directories; got %d", len(embedded.entries), len(candidate.entries))

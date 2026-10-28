@@ -8,7 +8,6 @@ import (
 	"fmt"
 	"net/http"
 	"net/http/httptest"
-	"sort"
 	"strings"
 	"testing"
 	"time"
@@ -18,7 +17,6 @@ import (
 	"github.com/division-sh/swarm/internal/mailbox"
 	operatorread "github.com/division-sh/swarm/internal/operatorread"
 
-	"github.com/division-sh/swarm/internal/apispec"
 	"github.com/division-sh/swarm/internal/events"
 	"github.com/division-sh/swarm/internal/events/eventtest"
 	runtimeagentcontrol "github.com/division-sh/swarm/internal/runtime/agentcontrol"
@@ -31,25 +29,20 @@ import (
 	runtimecorrelation "github.com/division-sh/swarm/internal/runtime/correlation"
 	decisioncard "github.com/division-sh/swarm/internal/runtime/decisioncard"
 	runtimedelivery "github.com/division-sh/swarm/internal/runtime/deliverylifecycle"
-	"github.com/division-sh/swarm/internal/runtime/destructivereset"
 	runtimeeffects "github.com/division-sh/swarm/internal/runtime/effects"
 	"github.com/division-sh/swarm/internal/runtime/executionmode"
 	"github.com/division-sh/swarm/internal/runtime/executionposture"
-	runtimefailures "github.com/division-sh/swarm/internal/runtime/failures"
 	runtimeingress "github.com/division-sh/swarm/internal/runtime/ingress"
 	runtimepipeline "github.com/division-sh/swarm/internal/runtime/pipeline"
 	"github.com/division-sh/swarm/internal/runtime/runbundle"
 	runtimeruncontrol "github.com/division-sh/swarm/internal/runtime/runcontrol"
 	"github.com/division-sh/swarm/internal/runtime/runfork"
 	"github.com/division-sh/swarm/internal/runtime/runforkexecution"
-	runtimerunlifecycle "github.com/division-sh/swarm/internal/runtime/runlifecycle"
 	"github.com/division-sh/swarm/internal/runtime/semanticvalue"
 	"github.com/division-sh/swarm/internal/runtime/semanticview"
 	"github.com/division-sh/swarm/internal/runtime/testfixtures/decisioncardtest"
 	"github.com/division-sh/swarm/internal/testutil/sourceartifactfixture"
 )
-
-const mutatingRuntimeProbeTestName = "TestOpenRPCMutatingHTTPRuntimeProbes"
 
 func TestMailboxDecideHTTPUsesTheHumanTaskAnchorRegistry(t *testing.T) {
 	operation := decisioncardtest.HumanOperation(t, t.Name(), "provider-turn/tool-call-1")
@@ -88,52 +81,6 @@ func TestMailboxDecideHTTPUsesTheHumanTaskAnchorRegistry(t *testing.T) {
 	if anchor["requester_agent_id"] != "requester-agent" || anchor["operation_id"] != operation.String() {
 		t.Fatalf("human-task decision event anchor = %#v", anchor)
 	}
-}
-
-func mutatingProbeGenericIdempotencyCalls(methodName string, normal int) int {
-	if methodName == runtimeagentcontrol.DirectiveOperationMethod || methodName == "conversation.fork" || methodName == "run.fork" {
-		return 0
-	}
-	return normal
-}
-
-func mutatingHTTPRuntimeMethods(t *testing.T, api *apispec.APISpecification, openRPC apispec.OpenRPCDocument, matrix openRPCComplianceMatrix) []string {
-	t.Helper()
-	openRPCMethods := map[string]struct{}{}
-	for _, method := range openRPC.Methods {
-		openRPCMethods[method.Name] = struct{}{}
-	}
-	matrixRows := map[string]openRPCMethodMatrix{}
-	for _, row := range matrix.Methods {
-		matrixRows[row.Method] = row
-	}
-
-	var out []string
-	for _, methodName := range api.Conventions.Idempotency.MutatingMethods {
-		method, ok := api.MethodCatalog[methodName]
-		if !ok {
-			t.Fatalf("%s listed in mutating_methods but missing from platform spec method_catalog", methodName)
-		}
-		if _, ok := openRPCMethods[methodName]; !ok {
-			t.Fatalf("%s missing from generated OpenRPC artifact", methodName)
-		}
-		row, ok := matrixRows[methodName]
-		if !ok {
-			t.Fatalf("%s missing from OpenRPC compliance matrix", methodName)
-		}
-		if row.Transport != expectedComplianceTransport(methodName, method) {
-			t.Fatalf("%s matrix transport = %q, want %q", methodName, row.Transport, expectedComplianceTransport(methodName, method))
-		}
-		if expectedComplianceTransport(methodName, method) != "http" {
-			t.Fatalf("%s mutating runtime probe expected HTTP transport, got %q", methodName, expectedComplianceTransport(methodName, method))
-		}
-		if strings.HasPrefix(methodName, "channel.") {
-			continue
-		}
-		out = append(out, methodName)
-	}
-	sort.Strings(out)
-	return out
 }
 
 func approvedMutatingHTTPRuntimeMethods() []string {
@@ -338,357 +285,6 @@ func mutatingHTTPRuntimeFixtures() map[string]mutatingHTTPRuntimeFixture {
 			SuccessEffects: 1,
 		},
 	}
-}
-
-type mutatingHTTPRuntimeErrorProbe struct {
-	Method      string
-	Params      map[string]any
-	Code        string
-	WantEffects int
-	Modifiers   []func(*mutatingRuntimeProbeState)
-}
-
-func mutatingHTTPRuntimeErrorProbes(t testing.TB) []mutatingHTTPRuntimeErrorProbe {
-	t.Helper()
-	runID := "00000000-0000-0000-0000-000000000101"
-	missingRunID := "00000000-0000-0000-0000-000000000999"
-	otherBundleHash := "bundle-v2:sha256:bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb"
-	validEvent := map[string]any{"bundle_hash": runStartTestBundleHash, "event_name": "scan.requested", "payload": map[string]any{"topic": "medicine"}, "idempotency_key": "idem-error"}
-	invalidBundleHashEvent := mergeProbeParams(validEvent, map[string]any{"bundle_hash": "sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"})
-	missingBundleHashEvent := mergeProbeParams(validEvent, nil)
-	delete(missingBundleHashEvent, "bundle_hash")
-	setupRunID := "00000000-0000-0000-0000-000000000601"
-	setupEntityID := "00000000-0000-0000-0000-000000000602"
-	validSetup := map[string]any{
-		"bundle_hash":     runStartTestBundleHash,
-		"run_id":          setupRunID,
-		"idempotency_key": "idem-error",
-		"entities": []any{map[string]any{
-			"alias":         "subject",
-			"entity_id":     setupEntityID,
-			"flow_instance": "operating",
-			"entity_type":   "product",
-			"fields":        map[string]any{"note": "seeded"},
-		}},
-	}
-	invalidBundleHashSetup := mergeProbeParams(validSetup, map[string]any{"bundle_hash": "sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"})
-	sourceSessionID := "00000000-0000-0000-0000-000000000201"
-	sourceTurnID := "00000000-0000-0000-0000-000000000401"
-	forkID := "00000000-0000-0000-0000-000000000301"
-	probes := []mutatingHTTPRuntimeErrorProbe{
-		{Method: "event.publish", Params: mergeProbeParams(validEvent, map[string]any{"bundle_hash": otherBundleHash}), Code: BundleUnavailableCode},
-		{Method: "event.publish", Params: mergeProbeParams(validEvent, map[string]any{"bundle_hash": otherBundleHash, "run_id": runID}), Code: BundleMismatchCode},
-		{Method: "event.publish", Params: missingBundleHashEvent, Code: BundleScopeRequiredCode, Modifiers: []func(*mutatingRuntimeProbeState){func(s *mutatingRuntimeProbeState) {
-			s.events.missingSourceArtifactFact = true
-		}}},
-		{Method: "event.publish", Params: invalidBundleHashEvent, Code: UnsupportedBundleHashCode},
-		{Method: "event.publish", Params: mergeProbeParams(validEvent, map[string]any{"event_name": "scan.missing"}), Code: EventNotDeclaredCode},
-		{Method: "event.publish", Params: validEvent, Code: EventPublishFailedCode, Modifiers: []func(*mutatingRuntimeProbeState){func(s *mutatingRuntimeProbeState) { s.events.publishErr = errors.New("simulated publish failure") }}},
-		{Method: "event.publish", Params: validEvent, Code: PayloadValidationFailedCode, Modifiers: []func(*mutatingRuntimeProbeState){func(s *mutatingRuntimeProbeState) { s.events.publishErr = runtimebus.ErrPayloadValidation }}},
-		{Method: "event.publish", Params: mergeProbeParams(validEvent, map[string]any{"run_id": missingRunID}), Code: RunNotFoundCode},
-		{Method: "event.publish", Params: mergeProbeParams(validEvent, map[string]any{"run_id": runID, "source_event_id": "00000000-0000-0000-0000-000000000998"}), Code: EventNotFoundCode},
-		{Method: "event.publish", Params: mergeProbeParams(validEvent, map[string]any{"run_id": runID}), Code: BundleDataIntegrityErrorCode, Modifiers: []func(*mutatingRuntimeProbeState){func(s *mutatingRuntimeProbeState) {
-			s.runForkAvailability.rows[runID] = runForkDataIntegrity(runID, runStartTestBundleHash)
-		}}},
-		{Method: "event.publish", Params: mergeProbeParams(validEvent, map[string]any{"run_id": runID}), Code: RunAlreadyTerminalCode, Modifiers: []func(*mutatingRuntimeProbeState){func(s *mutatingRuntimeProbeState) {
-			s.runs.headers[runID] = operatorread.RunHeader{RunID: runID, Status: "completed"}
-		}}},
-
-		{Method: "event.replay", Params: map[string]any{"event_id": "missing", "idempotency_key": "idem-error"}, Code: EventNotFoundCode},
-		{Method: "event.replay", Params: map[string]any{"event_id": "evt-empty", "idempotency_key": "idem-error"}, Code: EventReplayNoDeliveryHistoryCode, Modifiers: []func(*mutatingRuntimeProbeState){func(s *mutatingRuntimeProbeState) {
-			s.observability.events["evt-empty"] = mutatingProbeOriginalEvent(t, "evt-empty", nil, runtimedelivery.StatusDelivered)
-		}}},
-		{Method: "event.replay", Params: map[string]any{"event_id": "evt-1", "subscribers": []any{"agent-b"}, "idempotency_key": "idem-error"}, Code: EventReplaySubscriberNotOriginalCode},
-		{Method: "event.replay", Params: map[string]any{"event_id": "evt-1", "idempotency_key": "idem-error"}, Code: EventReplaySubscriberUnavailableCode, Modifiers: []func(*mutatingRuntimeProbeState){func(s *mutatingRuntimeProbeState) { s.events.missingRecipients = []string{"agent-a"} }}},
-		{Method: "event.replay", Params: map[string]any{"event_id": "evt-pending", "idempotency_key": "idem-error"}, Code: EventReplayNotEligibleCode, Modifiers: []func(*mutatingRuntimeProbeState){func(s *mutatingRuntimeProbeState) {
-			s.observability.events["evt-pending"] = mutatingProbeOriginalEvent(t, "evt-pending", []string{"agent-a"}, runtimedelivery.StatusPending)
-		}}},
-		{Method: "event.replay", Params: map[string]any{"event_id": "evt-1", "idempotency_key": "idem-error"}, Code: PayloadValidationFailedCode, Modifiers: []func(*mutatingRuntimeProbeState){func(s *mutatingRuntimeProbeState) { s.events.checkErr = runtimebus.ErrPayloadValidation }}},
-
-		{Method: "agent.replay", Params: map[string]any{"event_id": "missing", "run_id": runID, "agent_id": "agent-a", "idempotency_key": "idem-error"}, Code: EventNotFoundCode},
-		{Method: "agent.replay", Params: map[string]any{"event_id": "evt-empty", "run_id": runID, "agent_id": "agent-a", "idempotency_key": "idem-error"}, Code: EventReplayNoDeliveryHistoryCode, Modifiers: []func(*mutatingRuntimeProbeState){func(s *mutatingRuntimeProbeState) {
-			s.observability.events["evt-empty"] = mutatingProbeOriginalEvent(t, "evt-empty", nil, runtimedelivery.StatusDelivered)
-		}}},
-		{Method: "agent.replay", Params: map[string]any{"event_id": "evt-1", "run_id": runID, "agent_id": "agent-b", "idempotency_key": "idem-error"}, Code: EventReplaySubscriberNotOriginalCode},
-		{Method: "agent.replay", Params: map[string]any{"event_id": "evt-1", "run_id": runID, "agent_id": "agent-a", "idempotency_key": "idem-error"}, Code: EventReplaySubscriberUnavailableCode, Modifiers: []func(*mutatingRuntimeProbeState){func(s *mutatingRuntimeProbeState) { s.events.missingRecipients = []string{"agent-a"} }}},
-		{Method: "agent.replay", Params: map[string]any{"event_id": "evt-pending", "run_id": runID, "agent_id": "agent-a", "idempotency_key": "idem-error"}, Code: EventReplayNotEligibleCode, Modifiers: []func(*mutatingRuntimeProbeState){func(s *mutatingRuntimeProbeState) {
-			s.observability.events["evt-pending"] = mutatingProbeOriginalEvent(t, "evt-pending", []string{"agent-a"}, runtimedelivery.StatusPending)
-		}}},
-		{Method: "agent.replay", Params: map[string]any{"event_id": "evt-1", "run_id": runID, "agent_id": "agent-a", "idempotency_key": "idem-error"}, Code: PayloadValidationFailedCode, Modifiers: []func(*mutatingRuntimeProbeState){func(s *mutatingRuntimeProbeState) { s.events.checkErr = runtimebus.ErrPayloadValidation }}},
-
-		{Method: "conversation.fork", Params: map[string]any{"source_session_id": sourceSessionID, "fork_point": map[string]any{"kind": "turn", "turn_id": sourceTurnID}, "idempotency_key": "idem-error"}, Code: SessionNotFoundCode, Modifiers: []func(*mutatingRuntimeProbeState){func(s *mutatingRuntimeProbeState) {
-			s.forks.createErr = operatorread.ErrSessionNotFound
-		}}},
-		{Method: "conversation.fork", Params: map[string]any{"source_session_id": sourceSessionID, "fork_point": map[string]any{"kind": "turn", "turn_id": sourceTurnID}, "idempotency_key": "idem-error"}, Code: TurnNotFoundCode, Modifiers: []func(*mutatingRuntimeProbeState){func(s *mutatingRuntimeProbeState) {
-			s.forks.createErr = operatorread.ErrTurnNotFound
-		}}},
-		{Method: "conversation.fork", Params: map[string]any{"source_session_id": sourceSessionID, "fork_point": map[string]any{"kind": "event", "event_id": "00000000-0000-0000-0000-000000000901"}, "idempotency_key": "idem-error"}, Code: EventNotFoundCode, Modifiers: []func(*mutatingRuntimeProbeState){func(s *mutatingRuntimeProbeState) {
-			s.forks.createErr = operatorread.ErrEventNotFound
-		}}},
-		{Method: "conversation.fork_chat", Params: map[string]any{"fork_id": forkID, "message": "inspect fork", "idempotency_key": "idem-error"}, Code: ForkNotFoundCode, Modifiers: []func(*mutatingRuntimeProbeState){func(s *mutatingRuntimeProbeState) {
-			s.forks.prepareErr = runfork.ErrConversationForkNotFound
-		}}},
-		{Method: "conversation.fork_delete", Params: map[string]any{"fork_id": forkID, "idempotency_key": "idem-error"}, Code: ForkNotFoundCode, Modifiers: []func(*mutatingRuntimeProbeState){func(s *mutatingRuntimeProbeState) {
-			s.forks.deleteErr = runfork.ErrConversationForkNotFound
-		}}},
-		{Method: "run.fork", Params: map[string]any{"source_run_id": missingRunID, "fork_event_id": runForkTestEventID, "idempotency_key": "idem-error"}, Code: RunNotFoundCode},
-		{Method: "run.fork", Params: map[string]any{"source_run_id": runForkTestSourceRunID, "fork_event_id": runForkTestEventID, "allow_source_freeze": true, "idempotency_key": "idem-error"}, Code: EventNotFoundCode, Modifiers: []func(*mutatingRuntimeProbeState){func(s *mutatingRuntimeProbeState) {
-			s.runFork.err = errors.New("fork point event " + runForkTestEventID + " not found in source run " + runForkTestSourceRunID)
-		}}},
-		{Method: "run.fork", Params: map[string]any{"source_run_id": runForkTestSourceRunID, "fork_event_id": runForkTestEventID, "bundle_hash": "bundle-v2:sha256:cccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc", "allow_source_freeze": true, "idempotency_key": "idem-error"}, Code: BundleUnavailableCode, Modifiers: []func(*mutatingRuntimeProbeState){func(s *mutatingRuntimeProbeState) {
-			// Artifact availability is decided by selected preparation, not loaded membership.
-			s.runFork.err = errors.New(runbundle.CodeBundleUnavailable + ": selected artifact missing")
-		}}},
-		{Method: "run.fork", Params: map[string]any{"source_run_id": runForkTestSourceRunID, "fork_event_id": runForkTestEventID, "idempotency_key": "idem-error"}, Code: BundleUnavailableCode, Modifiers: []func(*mutatingRuntimeProbeState){func(s *mutatingRuntimeProbeState) {
-			s.runForkAvailability.rows[runForkTestSourceRunID] = runForkUnavailable(runForkTestSourceRunID, runForkTestBundleHash)
-		}}},
-		{Method: "run.fork", Params: map[string]any{"source_run_id": runForkTestSourceRunID, "fork_event_id": runForkTestEventID, "idempotency_key": "idem-error"}, Code: BundleDataIntegrityErrorCode, Modifiers: []func(*mutatingRuntimeProbeState){func(s *mutatingRuntimeProbeState) {
-			s.runForkAvailability.rows[runForkTestSourceRunID] = runForkDataIntegrity(runForkTestSourceRunID, runForkTestBundleHash)
-		}}},
-
-		{Method: "run.start", Params: mergeProbeParams(validEvent, map[string]any{"bundle_hash": otherBundleHash}), Code: BundleUnavailableCode},
-		{Method: "run.start", Params: mergeProbeParams(validEvent, map[string]any{"bundle_hash": otherBundleHash, "run_id": runID}), Code: BundleMismatchCode},
-		{Method: "run.start", Params: missingBundleHashEvent, Code: BundleScopeRequiredCode, Modifiers: []func(*mutatingRuntimeProbeState){func(s *mutatingRuntimeProbeState) {
-			s.events.missingSourceArtifactFact = true
-		}}},
-		{Method: "run.start", Params: invalidBundleHashEvent, Code: UnsupportedBundleHashCode},
-		{Method: "run.start", Params: mergeProbeParams(validEvent, map[string]any{"run_id": runID}), Code: BundleDataIntegrityErrorCode, Modifiers: []func(*mutatingRuntimeProbeState){func(s *mutatingRuntimeProbeState) {
-			s.runForkAvailability.rows[runID] = runForkDataIntegrity(runID, runStartTestBundleHash)
-		}}},
-		{Method: "run.start", Params: mergeProbeParams(validEvent, map[string]any{"event_name": "scan.missing"}), Code: EventNotDeclaredCode},
-		{Method: "run.start", Params: validEvent, Code: EventPublishFailedCode, Modifiers: []func(*mutatingRuntimeProbeState){func(s *mutatingRuntimeProbeState) { s.events.publishErr = errors.New("simulated publish failure") }}},
-		{Method: "run.start", Params: validEvent, Code: PayloadValidationFailedCode, Modifiers: []func(*mutatingRuntimeProbeState){func(s *mutatingRuntimeProbeState) { s.events.publishErr = runtimebus.ErrPayloadValidation }}},
-
-		{Method: "run.stop", Params: map[string]any{"run_id": runID, "idempotency_key": "idem-error"}, Code: RunNotFoundCode, Modifiers: []func(*mutatingRuntimeProbeState){func(s *mutatingRuntimeProbeState) {
-			s.runControl.errs["stop"] = &runtimeruncontrol.StateError{Err: runtimeruncontrol.ErrRunNotFound, RunID: runID}
-		}}},
-		{Method: "run.stop", Params: map[string]any{"run_id": runID, "idempotency_key": "idem-error"}, Code: RunAlreadyTerminalCode, Modifiers: []func(*mutatingRuntimeProbeState){func(s *mutatingRuntimeProbeState) {
-			s.runControl.errs["stop"] = &runtimeruncontrol.StateError{Err: runtimeruncontrol.ErrAlreadyTerminal, RunID: runID, CurrentStatus: "completed"}
-		}}},
-		{Method: "run.stop", Params: map[string]any{"run_id": runID, "idempotency_key": "idem-error"}, Code: RunNotPausedCode, Modifiers: []func(*mutatingRuntimeProbeState){func(s *mutatingRuntimeProbeState) {
-			s.runControl.errs["stop"] = &runtimeruncontrol.StateError{Err: runtimeruncontrol.ErrNotPaused, RunID: runID, CurrentStatus: "live"}
-		}}},
-		{Method: "run.pause", Params: map[string]any{"run_id": runID, "idempotency_key": "idem-error"}, Code: RunNotFoundCode, Modifiers: []func(*mutatingRuntimeProbeState){func(s *mutatingRuntimeProbeState) {
-			s.runControl.errs["pause"] = &runtimeruncontrol.StateError{Err: runtimeruncontrol.ErrRunNotFound, RunID: runID}
-		}}},
-		{Method: "run.pause", Params: map[string]any{"run_id": runID, "idempotency_key": "idem-error"}, Code: RunAlreadyTerminalCode, Modifiers: []func(*mutatingRuntimeProbeState){func(s *mutatingRuntimeProbeState) {
-			s.runControl.errs["pause"] = &runtimeruncontrol.StateError{Err: runtimeruncontrol.ErrAlreadyTerminal, RunID: runID, CurrentStatus: "completed"}
-		}}},
-		{Method: "run.pause", Params: map[string]any{"run_id": runID, "idempotency_key": "idem-error"}, Code: RunAlreadyPausedCode, Modifiers: []func(*mutatingRuntimeProbeState){func(s *mutatingRuntimeProbeState) {
-			s.runControl.errs["pause"] = &runtimeruncontrol.StateError{Err: runtimeruncontrol.ErrAlreadyPaused, RunID: runID, CurrentStatus: "paused"}
-		}}},
-		{Method: "run.continue", Params: map[string]any{"run_id": runID, "idempotency_key": "idem-error"}, Code: RunNotFoundCode, Modifiers: []func(*mutatingRuntimeProbeState){func(s *mutatingRuntimeProbeState) {
-			s.runControl.errs["continue"] = &runtimeruncontrol.StateError{Err: runtimeruncontrol.ErrRunNotFound, RunID: runID}
-		}}},
-		{Method: "run.continue", Params: map[string]any{"run_id": runID, "idempotency_key": "idem-error"}, Code: RunNotPausedCode, Modifiers: []func(*mutatingRuntimeProbeState){func(s *mutatingRuntimeProbeState) {
-			s.runControl.errs["continue"] = &runtimeruncontrol.StateError{Err: runtimeruncontrol.ErrNotPaused, RunID: runID, CurrentStatus: "running"}
-		}}},
-		{Method: "run.continue", Params: map[string]any{"run_id": runID, "idempotency_key": "idem-error"}, Code: RunFlowAlreadyLiveCode, Modifiers: []func(*mutatingRuntimeProbeState){func(s *mutatingRuntimeProbeState) {
-			s.runControl.errs["continue"] = &runtimerunlifecycle.LiveRunConflictError{Scope: runtimerunlifecycle.LiveRunScope{FlowPath: "."}, LiveRunID: "11111111-1111-4111-8111-111111111111"}
-		}}},
-
-		{Method: "mailbox.acknowledge", Params: map[string]any{"mailbox_id": "missing", "idempotency_key": "idem-error"}, Code: MailboxNotFoundCode, Modifiers: []func(*mutatingRuntimeProbeState){func(s *mutatingRuntimeProbeState) { s.mailbox.notifyErr = mailbox.ErrV1NotFound }}},
-		{Method: "mailbox.begin_input", Params: map[string]any{"card_id": "card-1", "verdict": "reject", "observed_content_hash": "content-1", "idempotency_key": "idem-error"}, Code: MailboxNotFoundCode, Modifiers: []func(*mutatingRuntimeProbeState){func(s *mutatingRuntimeProbeState) { s.decisionCards.err = decisioncard.ErrNotFound }}},
-		{Method: "mailbox.begin_input", Params: map[string]any{"card_id": "card-1", "verdict": "reject", "observed_content_hash": "stale", "idempotency_key": "idem-error"}, Code: "MAILBOX_STALE_CARD"},
-		{Method: "mailbox.begin_input", Params: map[string]any{"card_id": "card-1", "verdict": "missing", "observed_content_hash": "content-1", "idempotency_key": "idem-error"}, Code: "MAILBOX_INVALID_VERDICT", Modifiers: []func(*mutatingRuntimeProbeState){func(s *mutatingRuntimeProbeState) { s.decisionCards.err = decisioncard.ErrInvalidVerdict }}},
-		{Method: "mailbox.begin_input", Params: map[string]any{"card_id": "card-1", "verdict": "reject", "observed_content_hash": "content-1", "idempotency_key": "idem-error"}, Code: MailboxAlreadyDecidedCode, Modifiers: []func(*mutatingRuntimeProbeState){func(s *mutatingRuntimeProbeState) { s.decisionCards.err = decisioncard.ErrAlreadyTerminal }}},
-		{Method: "mailbox.begin_input", Params: map[string]any{"card_id": "card-1", "verdict": "reject", "observed_content_hash": "content-1", "idempotency_key": "idem-error"}, Code: "MAILBOX_CARD_SUPERSEDED", Modifiers: []func(*mutatingRuntimeProbeState){func(s *mutatingRuntimeProbeState) { s.decisionCards.err = decisioncard.ErrSuperseded }}},
-		{Method: "mailbox.defer", Params: map[string]any{"card_id": "card-1", "until": time.Unix(1700003600, 0).UTC().Format(time.RFC3339Nano), "idempotency_key": "idem-error"}, Code: "MAILBOX_CARD_SUPERSEDED", Modifiers: []func(*mutatingRuntimeProbeState){func(s *mutatingRuntimeProbeState) { s.decisionCards.err = decisioncard.ErrSuperseded }}},
-		{Method: "mailbox.cancel_input", Params: map[string]any{"card_id": "missing", "input_draft_id": "draft-1", "idempotency_key": "idem-error"}, Code: MailboxNotFoundCode, Modifiers: []func(*mutatingRuntimeProbeState){func(s *mutatingRuntimeProbeState) { s.decisionCards.err = decisioncard.ErrNotFound }}},
-		{Method: "mailbox.cancel_input", Params: map[string]any{"card_id": "card-1", "input_draft_id": "draft-1", "idempotency_key": "idem-error"}, Code: "MAILBOX_INPUT_DRAFT_NOT_AUTHORITY", Modifiers: []func(*mutatingRuntimeProbeState){func(s *mutatingRuntimeProbeState) { s.decisionCards.err = decisioncard.ErrDraftNotAuthority }}},
-		{Method: "mailbox.decide", Params: map[string]any{"card_id": "missing", "verdict": "approve", "fields": map[string]any{}, "observed_content_hash": "content-1", "idempotency_key": "idem-error"}, Code: MailboxNotFoundCode, Modifiers: []func(*mutatingRuntimeProbeState){func(s *mutatingRuntimeProbeState) { s.decisionCards.err = decisioncard.ErrNotFound }}},
-		{Method: "mailbox.decide", Params: map[string]any{"card_id": "card-1", "verdict": "approve", "fields": map[string]any{}, "observed_content_hash": "content-1", "idempotency_key": "idem-error"}, Code: MailboxAlreadyDecidedCode, Modifiers: []func(*mutatingRuntimeProbeState){func(s *mutatingRuntimeProbeState) { s.decisionCards.err = decisioncard.ErrAlreadyTerminal }}},
-		{Method: "mailbox.decide", Params: map[string]any{"card_id": "card-1", "verdict": "approve", "fields": map[string]any{}, "observed_content_hash": "content-1", "idempotency_key": "idem-error"}, Code: "MAILBOX_STALE_CARD", Modifiers: []func(*mutatingRuntimeProbeState){func(s *mutatingRuntimeProbeState) { s.decisionCards.err = decisioncard.ErrStaleContent }}},
-		{Method: "mailbox.decide", Params: map[string]any{"card_id": "card-1", "verdict": "missing", "fields": map[string]any{}, "observed_content_hash": "content-1", "idempotency_key": "idem-error"}, Code: "MAILBOX_INVALID_VERDICT", Modifiers: []func(*mutatingRuntimeProbeState){func(s *mutatingRuntimeProbeState) { s.decisionCards.err = decisioncard.ErrInvalidVerdict }}},
-		{Method: "mailbox.decide", Params: map[string]any{"card_id": "card-1", "verdict": "reject", "fields": map[string]any{"feedback": "no"}, "observed_content_hash": "content-1", "input_draft_id": "draft-1", "idempotency_key": "idem-error"}, Code: "MAILBOX_INPUT_DRAFT_NOT_AUTHORITY", Modifiers: []func(*mutatingRuntimeProbeState){func(s *mutatingRuntimeProbeState) { s.decisionCards.err = decisioncard.ErrDraftNotAuthority }}},
-		{Method: "mailbox.decide", Params: map[string]any{"card_id": "card-1", "verdict": "approve", "fields": map[string]any{}, "observed_content_hash": "content-1", "idempotency_key": "idem-error"}, Code: "MAILBOX_CARD_SUPERSEDED", Modifiers: []func(*mutatingRuntimeProbeState){func(s *mutatingRuntimeProbeState) {
-			s.workflowStore.err = decisioncard.ErrSuperseded
-		}}},
-		{Method: "mailbox.defer", Params: map[string]any{"card_id": "missing", "until": time.Unix(1700003600, 0).UTC().Format(time.RFC3339Nano), "idempotency_key": "idem-error"}, Code: MailboxNotFoundCode, Modifiers: []func(*mutatingRuntimeProbeState){func(s *mutatingRuntimeProbeState) { s.decisionCards.err = decisioncard.ErrNotFound }}},
-		{Method: "mailbox.defer", Params: map[string]any{"card_id": "card-1", "until": time.Unix(1700003600, 0).UTC().Format(time.RFC3339Nano), "idempotency_key": "idem-error"}, Code: MailboxAlreadyDecidedCode, Modifiers: []func(*mutatingRuntimeProbeState){func(s *mutatingRuntimeProbeState) { s.decisionCards.err = decisioncard.ErrAlreadyTerminal }}},
-		{Method: "mailbox.defer", Params: map[string]any{"card_id": "card-1", "until": time.Unix(1699999999, 0).UTC().Format(time.RFC3339Nano), "idempotency_key": "idem-error"}, Code: InvalidDeferUntilCode, Modifiers: []func(*mutatingRuntimeProbeState){func(s *mutatingRuntimeProbeState) { s.decisionCards.err = decisioncard.ErrInvalidDeferUntil }}},
-
-		{Method: "agent.send_directive", Params: map[string]any{"agent_id": "missing", "directive": "continue", "run_id": runID, "idempotency_key": "idem-error"}, Code: AgentNotFoundCode, Modifiers: []func(*mutatingRuntimeProbeState){func(s *mutatingRuntimeProbeState) {
-			s.agentControl.errs["agent.send_directive"] = &runtimeagentcontrol.StateError{Err: runtimeagentcontrol.ErrAgentNotFound, AgentID: "missing"}
-		}}},
-		{Method: "agent.send_directive", Params: map[string]any{"agent_id": "agent-a", "directive": "continue", "run_id": runID, "idempotency_key": "idem-error"}, Code: AgentNotRunningCode, Modifiers: []func(*mutatingRuntimeProbeState){func(s *mutatingRuntimeProbeState) {
-			s.agentControl.errs["agent.send_directive"] = &runtimeagentcontrol.StateError{Err: runtimeagentcontrol.ErrAgentNotRunning, AgentID: "agent-a", CurrentStatus: runtimeagentcontrol.StatusTerminated}
-		}}},
-		{Method: "agent.send_directive", Params: map[string]any{"agent_id": "agent-a", "directive": "continue", "run_id": missingRunID, "idempotency_key": "idem-error"}, Code: RunNotFoundCode, Modifiers: []func(*mutatingRuntimeProbeState){func(s *mutatingRuntimeProbeState) {
-			s.agentControl.errs["agent.send_directive"] = &runtimeagentcontrol.StateError{Err: runtimeagentcontrol.ErrRunNotFound, AgentID: "agent-a", RunID: missingRunID}
-		}}},
-		{Method: "agent.send_directive", Params: map[string]any{"agent_id": "agent-a", "directive": "continue", "run_id": runID, "idempotency_key": "idem-error"}, Code: RunAlreadyTerminalCode, Modifiers: []func(*mutatingRuntimeProbeState){func(s *mutatingRuntimeProbeState) {
-			s.agentControl.errs["agent.send_directive"] = &runtimeagentcontrol.StateError{Err: runtimeagentcontrol.ErrRunAlreadyTerminal, AgentID: "agent-a", RunID: runID, CurrentStatus: "completed"}
-		}}},
-		{Method: "agent.send_directive", Params: map[string]any{"agent_id": "agent-a", "directive": "continue", "run_id": runID, "idempotency_key": "idem-error"}, Code: AgentDirectiveInProgressCode, Modifiers: []func(*mutatingRuntimeProbeState){func(s *mutatingRuntimeProbeState) {
-			s.agentControl.errs["agent.send_directive"] = directiveOperationProbeError(t, runtimeagentcontrol.ErrDirectiveInProgress, runtimeagentcontrol.DirectiveOperationExecuting, runID)
-		}}},
-		{Method: "agent.send_directive", Params: map[string]any{"agent_id": "agent-a", "directive": "continue", "run_id": runID, "idempotency_key": "idem-error"}, Code: AgentDirectiveCompletionPendingCode, Modifiers: []func(*mutatingRuntimeProbeState){func(s *mutatingRuntimeProbeState) {
-			s.agentControl.errs["agent.send_directive"] = directiveOperationProbeError(t, runtimeagentcontrol.ErrDirectiveCompletionPending, runtimeagentcontrol.DirectiveOperationExecuted, runID)
-		}}},
-		{Method: "agent.send_directive", Params: map[string]any{"agent_id": "agent-a", "directive": "continue", "run_id": runID, "idempotency_key": "idem-error"}, Code: AgentDirectiveExecutionFailedCode, Modifiers: []func(*mutatingRuntimeProbeState){func(s *mutatingRuntimeProbeState) {
-			s.agentControl.errs["agent.send_directive"] = directiveOperationProbeError(t, runtimeagentcontrol.ErrDirectiveExecutionFailed, runtimeagentcontrol.DirectiveOperationFailed, runID)
-		}}},
-		{Method: "agent.send_directive", Params: map[string]any{"agent_id": "agent-a", "directive": "continue", "run_id": runID, "idempotency_key": "idem-error"}, Code: AgentDirectiveOutcomeIndeterminateCode, Modifiers: []func(*mutatingRuntimeProbeState){func(s *mutatingRuntimeProbeState) {
-			s.agentControl.errs["agent.send_directive"] = directiveOperationProbeError(t, runtimeagentcontrol.ErrDirectiveOutcomeIndeterminate, runtimeagentcontrol.DirectiveOperationIndeterminate, runID)
-		}}},
-		{Method: "agent.restart", Params: map[string]any{"run_id": runID, "agent_id": "missing", "idempotency_key": "idem-error"}, Code: AgentNotFoundCode, Modifiers: []func(*mutatingRuntimeProbeState){func(s *mutatingRuntimeProbeState) {
-			s.agentControl.errs["agent.restart"] = &runtimeagentcontrol.StateError{Err: runtimeagentcontrol.ErrAgentNotFound, AgentID: "missing"}
-		}}},
-		{Method: "runtime.pause", Params: map[string]any{"idempotency_key": "idem-error"}, Code: RuntimeAlreadyPausedCode, Modifiers: []func(*mutatingRuntimeProbeState){func(s *mutatingRuntimeProbeState) {
-			s.runtimeIngress.errs["runtime.pause"] = runtimeingress.ErrAlreadyPaused
-		}}},
-		{Method: "runtime.resume", Params: map[string]any{"idempotency_key": "idem-error"}, Code: RuntimeNotPausedCode, Modifiers: []func(*mutatingRuntimeProbeState){func(s *mutatingRuntimeProbeState) {
-			s.runtimeIngress.errs["runtime.resume"] = runtimeingress.ErrNotPaused
-		}}},
-		{Method: "runtime.nuke", Params: map[string]any{"dry_run": false, "idempotency_key": "idem-error"}, Code: RuntimeNukeInProgressCode, WantEffects: 1, Modifiers: []func(*mutatingRuntimeProbeState){func(s *mutatingRuntimeProbeState) { s.nuke.planErr = destructivereset.ErrOperationInProgress }}},
-		{Method: "test.setup_entities", Params: invalidBundleHashSetup, Code: UnsupportedBundleHashCode},
-		{Method: "test.setup_entities", Params: mergeProbeParams(validSetup, map[string]any{"bundle_hash": otherBundleHash}), Code: BundleUnavailableCode},
-		{Method: "test.setup_entities", Params: mergeProbeParams(validSetup, map[string]any{"bundle_hash": otherBundleHash}), Code: BundleMismatchCode, Modifiers: []func(*mutatingRuntimeProbeState){func(s *mutatingRuntimeProbeState) {
-			s.runForkAvailability.rows[setupRunID] = runForkAvailable(setupRunID, apiArtifactRoot(t, runStartTestArtifact("scan.requested")))
-		}}},
-		{Method: "test.setup_entities", Params: validSetup, Code: BundleDataIntegrityErrorCode, Modifiers: []func(*mutatingRuntimeProbeState){func(s *mutatingRuntimeProbeState) {
-			s.runForkAvailability.rows[setupRunID] = runForkDataIntegrity(setupRunID, runStartTestBundleHash)
-		}}},
-	}
-	dataErrors := []durabledata.ErrorCode{
-		durabledata.CodeInvocationConflict,
-		durabledata.CodeContractNotFound,
-		durabledata.CodeDependencyMissing,
-		durabledata.CodePinConflict,
-		durabledata.CodeSchemaMismatch,
-		durabledata.CodeRunDataRejected,
-		durabledata.CodeRunHeadConflict,
-		durabledata.CodeIntegrity,
-	}
-	for _, method := range []string{"event.publish", "run.start"} {
-		for _, code := range dataErrors {
-			code := code
-			probes = append(probes, mutatingHTTPRuntimeErrorProbe{
-				Method: method,
-				Params: validEvent,
-				Code:   string(code),
-				Modifiers: []func(*mutatingRuntimeProbeState){func(s *mutatingRuntimeProbeState) {
-					s.events.runCreationErr = durabledata.NewDomainError(code, "simulated durable data failure")
-				}},
-			})
-		}
-	}
-	probes = append(probes, mutatingHTTPRuntimeErrorProbe{
-		Method: "event.publish",
-		Params: validEvent,
-		Code:   string(durabledata.CodeRunDataImmutable),
-		Modifiers: []func(*mutatingRuntimeProbeState){func(s *mutatingRuntimeProbeState) {
-			s.events.runCreationErr = durabledata.NewDomainError(durabledata.CodeRunDataImmutable, "simulated durable data failure")
-		}},
-	})
-	for _, code := range []durabledata.ErrorCode{
-		durabledata.CodeDependencyMissing,
-		durabledata.CodePinConflict,
-		durabledata.CodeSchemaMismatch,
-		durabledata.CodePayloadPruned,
-		durabledata.CodeVersionMissing,
-		durabledata.CodeIntegrity,
-	} {
-		code := code
-		probes = append(probes, mutatingHTTPRuntimeErrorProbe{
-			Method: "run.fork",
-			Params: map[string]any{
-				"source_run_id":       runForkTestSourceRunID,
-				"fork_event_id":       runForkTestEventID,
-				"allow_source_freeze": true,
-			},
-			Code: string(code),
-			Modifiers: []func(*mutatingRuntimeProbeState){func(s *mutatingRuntimeProbeState) {
-				s.runFork.err = durabledata.NewDomainError(code, "simulated durable data fork failure")
-			}},
-		})
-	}
-	fixtures := mutatingHTTPRuntimeFixtures()
-	for _, method := range []string{
-		"agent.replay", "agent.restart", "agent.send_directive", "event.publish", "event.replay",
-		"mailbox.begin_input", "mailbox.cancel_input", "mailbox.decide", "mailbox.defer", "run.continue", "run.pause",
-	} {
-		params := mutatingProbeParamsWithIdempotency(fixtures[method].Params, "selected-control-refusal")
-		if method == "event.publish" {
-			params["run_id"] = runID
-		}
-		probes = append(probes, mutatingHTTPRuntimeErrorProbe{
-			Method: method, Params: params, Code: "SELECTED_FORK_CONTROL_UNSUPPORTED",
-			Modifiers: []func(*mutatingRuntimeProbeState){func(s *mutatingRuntimeProbeState) {
-				s.selectedControls = &selectedControlRefusalFixture{bindingID: "00000000-0000-0000-0000-000000000901"}
-			}},
-		})
-	}
-	return probes
-}
-
-func assertMutatingRuntimeDeclaredErrorCoverage(t *testing.T, api *apispec.APISpecification, methods []string) {
-	t.Helper()
-	covered := map[string]map[string]struct{}{}
-	for _, methodName := range methods {
-		covered[methodName] = map[string]struct{}{
-			IdempotencyConflictCode:   {},
-			"MESSAGE_BUDGET_EXCEEDED": {}, // Central transport admission proves this before method dispatch.
-		}
-	}
-	for _, probe := range mutatingHTTPRuntimeErrorProbes(t) {
-		if _, ok := covered[probe.Method]; !ok {
-			t.Fatalf("%s error probe is outside the approved mutating HTTP method set", probe.Method)
-		}
-		covered[probe.Method][probe.Code] = struct{}{}
-	}
-	for _, methodName := range methods {
-		for _, code := range api.MethodCatalog[methodName].Errors {
-			if _, ok := covered[methodName][code]; !ok {
-				t.Fatalf("%s declared error %s lacks generated mutating runtime probe coverage", methodName, code)
-			}
-		}
-	}
-}
-
-func assertMutatingRuntimeMatrixProofRefs(t *testing.T, api *apispec.APISpecification, matrix openRPCComplianceMatrix, methods []string) {
-	t.Helper()
-	mutatingMethods := complianceStringSet(methods)
-	rows := map[string]openRPCMethodMatrix{}
-	for _, row := range matrix.Methods {
-		rows[row.Method] = row
-		if _, ok := mutatingMethods[row.Method]; !ok && rowHasMutatingRuntimeProof(row) {
-			t.Fatalf("%s has %s proof_ref but is outside the approved mutating HTTP runtime probe set", row.Method, mutatingRuntimeProbeTestName)
-		}
-	}
-
-	for _, methodName := range methods {
-		row, ok := rows[methodName]
-		if !ok {
-			t.Fatalf("%s missing from compliance matrix", methodName)
-		}
-		assertEvidenceHasMutatingRuntimeProof(t, methodName, "happy_path", row.HappyPath)
-		assertEvidenceHasMutatingRuntimeProof(t, methodName, "unknown_top_level_param_validation", row.UnknownTopLevelParamValidation)
-		assertEvidenceHasMutatingRuntimeProof(t, methodName, "auth", row.Auth)
-		assertEvidenceHasMutatingRuntimeProof(t, methodName, "declared_error_tests", row.DeclaredErrorTests)
-		assertEvidenceHasMutatingRuntimeProof(t, methodName, "idempotency", row.Idempotency)
-		assertEvidenceHasMutatingRuntimeProof(t, methodName, "result_schema", row.ResultSchema)
-		if len(requiredParamNames(api.MethodCatalog[methodName])) > 0 {
-			assertEvidenceHasMutatingRuntimeProof(t, methodName, "required_param_validation", row.RequiredParamValidation)
-		}
-	}
-}
-
-func assertEvidenceHasMutatingRuntimeProof(t *testing.T, methodName, field string, evidence complianceEvidence) {
-	t.Helper()
-	if !evidenceHasGoTest(evidence, mutatingRuntimeProbeTestName) {
-		t.Fatalf("%s %s missing go_test proof_ref %s", methodName, field, mutatingRuntimeProbeTestName)
-	}
-}
-
-func rowHasMutatingRuntimeProof(row openRPCMethodMatrix) bool {
-	for _, evidence := range complianceEvidenceFields(row) {
-		if evidenceHasGoTest(evidence.evidence, mutatingRuntimeProbeTestName) {
-			return true
-		}
-	}
-	return false
 }
 
 func newMutatingRuntimeProbeHandler(t *testing.T, methodName string, modifiers ...func(*mutatingRuntimeProbeState)) (*Handler, map[string]int, *mutatingRuntimeProbeState) {
@@ -940,10 +536,6 @@ func (s *mutatingRuntimeProbeState) options(t *testing.T) testOperatorCapabiliti
 
 func (s *mutatingRuntimeProbeState) recordEffect() {
 	s.effects++
-}
-
-func (s *mutatingRuntimeProbeState) effectCount() int {
-	return s.effects + len(s.nuke.calls)
 }
 
 type mutatingProbeIdempotencyStore struct {
@@ -1314,28 +906,6 @@ func (c *mutatingProbeAgentControl) SendDirective(_ context.Context, req runtime
 		c.results[key] = mutatingProbeDirectiveResult{requestHash: req.RequestHash, result: result}
 	}
 	return result, nil
-}
-
-func directiveOperationProbeError(t testing.TB, err error, state runtimeagentcontrol.DirectiveOperationState, runID string) error {
-	t.Helper()
-	op := runtimeagentcontrol.DirectiveOperation{
-		OperationID:      "00000000-0000-0000-0000-000000000203",
-		AgentIdentity:    agentidentitytest.DeclaredForRun(t, runID, "agent-a", "test-bundle", "research", "inst-1", "research/inst-1"),
-		DirectiveEventID: "00000000-0000-0000-0000-000000000202",
-		ResolvedRunID:    runID,
-		State:            state,
-	}
-	if state == runtimeagentcontrol.DirectiveOperationExecuting {
-		op.ExecutionLeaseExpiresAt = time.Now().UTC().Add(time.Minute)
-	}
-	if state == runtimeagentcontrol.DirectiveOperationExecuted {
-		op.Response = json.RawMessage(`{"ok":true}`)
-	}
-	if state == runtimeagentcontrol.DirectiveOperationFailed || state == runtimeagentcontrol.DirectiveOperationIndeterminate {
-		failure := runtimefailures.Normalize(runtimefailures.New(runtimefailures.ClassInternalFailure, "probe_failure", "openrpc-probe", "agent_directive", nil), "openrpc-probe", "agent_directive")
-		op.Failure = &failure
-	}
-	return &runtimeagentcontrol.DirectiveOperationError{Err: err, Operation: op}
 }
 
 func (c *mutatingProbeAgentControl) Restart(_ context.Context, req runtimeagentcontrol.RestartRequest) (runtimeagentcontrol.RestartResult, error) {
@@ -1724,95 +1294,6 @@ func callMutatingProbeRPC(t *testing.T, handler *Handler, methodName string, par
 	return rec.Code, resp, rec.Body.String()
 }
 
-func assertMutatingProbeSuccess(t *testing.T, methodName string, resp rpcResponse, resultKeys []string) {
-	t.Helper()
-	if resp.JSONRPC != jsonRPCVersion {
-		t.Fatalf("%s jsonrpc = %q, want %q", methodName, resp.JSONRPC, jsonRPCVersion)
-	}
-	if resp.ID != mutatingProbeID(methodName) {
-		t.Fatalf("%s id = %#v, want %q", methodName, resp.ID, mutatingProbeID(methodName))
-	}
-	if resp.Error != nil {
-		t.Fatalf("%s error = %#v, want success", methodName, resp.Error)
-	}
-	result := asMap(t, resp.Result)
-	for _, key := range resultKeys {
-		if _, ok := result[key]; !ok {
-			t.Fatalf("%s result missing top-level key %q: %#v", methodName, key, result)
-		}
-	}
-}
-
-func assertMutatingProbeInvalidParams(t *testing.T, methodName string, resp rpcResponse, field string) {
-	t.Helper()
-	if resp.JSONRPC != jsonRPCVersion {
-		t.Fatalf("%s jsonrpc = %q, want %q", methodName, resp.JSONRPC, jsonRPCVersion)
-	}
-	if resp.ID != mutatingProbeID(methodName) {
-		t.Fatalf("%s id = %#v, want %q", methodName, resp.ID, mutatingProbeID(methodName))
-	}
-	if resp.Error == nil {
-		t.Fatalf("%s error = nil, want invalid params for %s", methodName, field)
-	}
-	if resp.Error.Code != codeInvalidParams {
-		t.Fatalf("%s error code = %d, want %d body=%#v", methodName, resp.Error.Code, codeInvalidParams, resp.Error)
-	}
-	data := asMap(t, resp.Error.Data)
-	details := asMap(t, data["details"])
-	if details["field"] != field {
-		t.Fatalf("%s invalid params field = %#v, want %s details=%#v", methodName, details["field"], field, details)
-	}
-	if _, ok := data["correlation_id"].(string); !ok {
-		t.Fatalf("%s invalid params missing correlation_id: %#v", methodName, data)
-	}
-}
-
-func assertMutatingProbeApplicationError(t *testing.T, registry *Registry, methodName string, resp rpcResponse, code string) {
-	t.Helper()
-	if resp.JSONRPC != jsonRPCVersion {
-		t.Fatalf("%s jsonrpc = %q, want %q", methodName, resp.JSONRPC, jsonRPCVersion)
-	}
-	if resp.ID != mutatingProbeID(methodName) {
-		t.Fatalf("%s id = %#v, want %q", methodName, resp.ID, mutatingProbeID(methodName))
-	}
-	if resp.Error == nil {
-		t.Fatalf("%s error = nil, want %s", methodName, code)
-	}
-	numeric, ok := registry.ApplicationErrorCode(code)
-	if !ok {
-		t.Fatalf("registry missing application error code %s", code)
-	}
-	if resp.Error.Code != numeric {
-		t.Fatalf("%s error code = %d, want generated numeric %d for %s", methodName, resp.Error.Code, numeric, code)
-	}
-	data := asMap(t, resp.Error.Data)
-	if data["code"] != code {
-		t.Fatalf("%s data.code = %#v, want %s", methodName, data["code"], code)
-	}
-	if _, ok := data["details"].(map[string]any); !ok && data["details"] != nil {
-		t.Fatalf("%s data.details = %#v, want object or null", methodName, data["details"])
-	}
-	if _, ok := data["retryable"].(bool); !ok {
-		t.Fatalf("%s data.retryable = %#v, want bool", methodName, data["retryable"])
-	}
-	if _, ok := data["correlation_id"].(string); !ok {
-		t.Fatalf("%s data.correlation_id = %#v, want string", methodName, data["correlation_id"])
-	}
-}
-
-func assertMutatingProbeNoExecution(t *testing.T, methodName string, calls map[string]int, state *mutatingRuntimeProbeState, reason string) {
-	t.Helper()
-	if calls[methodName] != 0 {
-		t.Fatalf("%s handler calls = %d, want 0 for %s", methodName, calls[methodName], reason)
-	}
-	if state.idempotency.calls != 0 {
-		t.Fatalf("%s idempotency calls = %d, want 0 for %s", methodName, state.idempotency.calls, reason)
-	}
-	if got := state.effectCount(); got != 0 {
-		t.Fatalf("%s side effects = %d, want 0 for %s", methodName, got, reason)
-	}
-}
-
 func mutatingProbeParamsWithIdempotency(params map[string]any, key string) map[string]any {
 	out := cloneProbeParams(params)
 	if _, ok := out["idempotency_key"]; !ok {
@@ -1821,37 +1302,8 @@ func mutatingProbeParamsWithIdempotency(params map[string]any, key string) map[s
 	return out
 }
 
-func mutatingProbeConflictParams(fixture mutatingHTTPRuntimeFixture, key string) map[string]any {
-	out := cloneProbeParams(fixture.ConflictParams)
-	if fixture.TrimEquivalentConflictKeyValue {
-		out["idempotency_key"] = " " + key + " "
-		return out
-	}
-	if _, ok := out["idempotency_key"]; !ok {
-		out["idempotency_key"] = key
-	}
-	return out
-}
-
-func mergeProbeParams(base map[string]any, override map[string]any) map[string]any {
-	out := cloneProbeParams(base)
-	for key, value := range override {
-		out[key] = value
-	}
-	return out
-}
-
 func mutatingProbeID(methodName string) string {
 	return "mutating-probe-" + strings.ReplaceAll(methodName, ".", "-")
-}
-
-func sortedMutatingProbeFixtureMethods(fixtures map[string]mutatingHTTPRuntimeFixture) []string {
-	methods := make([]string, 0, len(fixtures))
-	for methodName := range fixtures {
-		methods = append(methods, methodName)
-	}
-	sort.Strings(methods)
-	return methods
 }
 
 var _ APIIdempotencyStore = (*mutatingProbeIdempotencyStore)(nil)

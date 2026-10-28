@@ -75,7 +75,6 @@ type sessionPublicationFixture struct {
 	bus      *runtimebus.EventBus
 	manifest providertriggers.Manifest
 	catalog  *providertriggers.CatalogSnapshot
-	identity providertriggers.PackIdentity
 	standing runtimerunlifecycle.FlowRunReconciliation
 	plans    int
 	prepared map[string]runtimebus.InboundDeliveryPlan

@@ -161,25 +161,6 @@ func platformPackTeachingFiles(repoRoot string) ([]string, error) {
 	return paths, nil
 }
 
-func pathSet(paths ...string) map[string]struct{} {
-	result := make(map[string]struct{}, len(paths))
-	for _, path := range paths {
-		result[path] = struct{}{}
-	}
-	return result
-}
-
-func missingPaths(want, got map[string]struct{}) []string {
-	var missing []string
-	for path := range want {
-		if _, ok := got[path]; !ok {
-			missing = append(missing, path)
-		}
-	}
-	sort.Strings(missing)
-	return missing
-}
-
 func assertNoRetiredPackConfig(t *testing.T, path, body string) {
 	t.Helper()
 	for _, retired := range []string{"external_dirs:", "provider_triggers:\n", "provider_triggers:\r\n", "channels:\n  packs:", "channels:\r\n  packs:"} {

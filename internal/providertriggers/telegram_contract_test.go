@@ -6,8 +6,6 @@ import (
 	"reflect"
 	"strings"
 	"testing"
-
-	"github.com/division-sh/swarm/internal/packs"
 )
 
 const telegramBotAPIUpdateContract = "Bot API 10.1 (2026-06-11) https://core.telegram.org/bots/api#update"
@@ -480,45 +478,4 @@ func telegramCallbackFixture(variant map[string]any) map[string]any {
 
 func telegramCallbackMessage() map[string]any {
 	return map[string]any{"message_id": 1, "chat": map[string]any{"id": 42}}
-}
-
-func telegramSelectedTriggerDescriptors() []packs.TriggerEventDescriptor {
-	return []packs.TriggerEventDescriptor{
-		{
-			Event: "inbound.telegram.raw", Kind: "raw",
-			Fields: []packs.TriggerEventFieldDescriptor{
-				{Name: "event_type", Type: "text", Required: true},
-				{Name: "headers", Type: "json", Required: true},
-				{Name: "payload", Type: "json", Required: true},
-				{Name: "provider", Type: "text", Required: true},
-				{Name: "provider_delivery_id", Type: "text", Required: true},
-				{Name: "provider_event_id", Type: "text", Required: true},
-				{Name: "provider_event_type", Type: "text", Required: true},
-				{Name: "received_at", Type: "text", Required: true},
-			},
-		},
-		{
-			Event: "inbound.telegram.callback_action", Kind: "normalized",
-			Fields: []packs.TriggerEventFieldDescriptor{
-				{Name: "conversation_reference", Type: "text", Required: true, CarryEligible: true},
-				{Name: "conversation_scope", Type: "text", Required: true, CarryEligible: true},
-				{Name: "external_account", Type: "text", Required: true, CarryEligible: true},
-				{Name: "interaction_reference", Type: "text", Required: true, CarryEligible: true},
-				{Name: "provider_message_reference", Type: "integer", Required: true, CarryEligible: true},
-				{Name: "token", Type: "text", Required: true, CarryEligible: true},
-			},
-		},
-		{
-			Event: "inbound.telegram.text_message", Kind: "normalized",
-			Fields: []packs.TriggerEventFieldDescriptor{
-				{Name: "command_invocation", Type: "object"},
-				{Name: "conversation_reference", Type: "text", Required: true, CarryEligible: true},
-				{Name: "conversation_scope", Type: "text", Required: true, CarryEligible: true},
-				{Name: "external_account", Type: "text", Required: true, CarryEligible: true},
-				{Name: "provider_message_reference", Type: "integer", Required: true, CarryEligible: true},
-				{Name: "reply_to_message_reference", Type: "integer"},
-				{Name: "text", Type: "text", Required: true, CarryEligible: true},
-			},
-		},
-	}
 }

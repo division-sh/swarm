@@ -279,12 +279,6 @@ func cloneRouteAuthorityDriftInventory(in routeAuthorityDriftInventory) routeAut
 	return out
 }
 
-func validateRouteAuthorityDriftInventory(t *testing.T, root string, inventory routeAuthorityDriftInventory) []string {
-	t.Helper()
-	corpus := routeAuthorityDriftNewValidationCorpus(t, root)
-	return validateRouteAuthorityDriftInventoryWithCorpus(root, corpus, inventory)
-}
-
 func validateRouteAuthorityDriftInventoryWithCorpus(root string, corpus *routeAuthorityDriftValidationCorpus, inventory routeAuthorityDriftInventory) []string {
 	var problems []string
 	if inventory.Version != 1 {

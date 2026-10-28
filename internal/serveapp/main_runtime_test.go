@@ -103,8 +103,6 @@ func (servedOpenAICompatibleNoopLLMRuntime) ProviderContract() runtimellm.Provid
 	return runtimellm.OpenAICompatibleProviderContract()
 }
 
-const serveRuntimeTestBundleHash = "bundle-v2:sha256:eeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeee"
-
 func servedRuntimeRootIdentityForRun(t testing.TB, runID, agentID string) runtimeagentidentity.Identity {
 	t.Helper()
 	return agentidentitytest.RootRuntimeForRun(t, runID, agentID, "serveapp-test")

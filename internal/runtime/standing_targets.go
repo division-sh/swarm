@@ -3,7 +3,6 @@ package runtime
 import (
 	"context"
 	"fmt"
-	runtimestanding "github.com/division-sh/swarm/internal/runtime/runlifecycle"
 	"reflect"
 	"sort"
 	"strings"
@@ -19,6 +18,7 @@ import (
 	runtimecorrelation "github.com/division-sh/swarm/internal/runtime/correlation"
 	runtimecredentials "github.com/division-sh/swarm/internal/runtime/credentials"
 	runtimepipeline "github.com/division-sh/swarm/internal/runtime/pipeline"
+	runtimestanding "github.com/division-sh/swarm/internal/runtime/runlifecycle"
 	"github.com/division-sh/swarm/internal/runtime/semanticview"
 )
 
@@ -340,30 +340,6 @@ func ProviderTriggerCapabilitySubjects(ctx context.Context, source semanticview.
 	}
 	subjects = append(subjects, effective...)
 	return packs.NormalizeSubjects(subjects)
-}
-
-func resolveStandingInputEndpoint(source semanticview.Source, flowID, eventName string) (semanticview.AuthoredEventEndpoint, error) {
-	return resolveStandingInputEndpointWithCensus(source, semanticview.BuildAuthoredEventEndpointCensus(source), flowID, eventName)
-}
-
-func resolveStandingInputEndpointWithCensus(source semanticview.Source, census semanticview.AuthoredEventEndpointCensus, flowID, eventName string) (semanticview.AuthoredEventEndpoint, error) {
-	flowID = strings.TrimSpace(flowID)
-	eventName = strings.TrimSpace(eventName)
-	if source == nil || flowID == "" || eventName == "" {
-		return semanticview.AuthoredEventEndpoint{}, fmt.Errorf("standing ingress requires semantic source, flow id, and event name")
-	}
-	association := census.ResolveDeclaredInputEndpoint(flowID, eventName)
-	endpoint, ok := association.Endpoint()
-	if !ok {
-		return semanticview.AuthoredEventEndpoint{}, association.Err()
-	}
-	// The caller already compiled this flow's provider admission plan. Its exact
-	// raw output needs a production pin, not a second inferred producer claim.
-	_, present := source.FlowInputEventPin(flowID, endpoint.PinName)
-	if !present {
-		return semanticview.AuthoredEventEndpoint{}, fmt.Errorf("event endpoint %q in flow %s is not a production input of its admitted provider ingress", eventName, flowID)
-	}
-	return endpoint, nil
 }
 
 func (rt *Runtime) EnsureStandingTargets(ctx context.Context) ([]StandingTarget, []StandingActivation, error) {
