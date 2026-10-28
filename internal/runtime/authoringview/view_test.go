@@ -990,13 +990,13 @@ func TestBuildShowsSingletonContainedOperations(t *testing.T) {
 
 func TestBuildShowsStatelessSingletonWithoutCoordinatorError(t *testing.T) {
 	repoRoot := canonicalrouting.RepoRoot(t)
-	root := canonicalrouting.CopyExample(t, canonicalrouting.TelegramAgent)
+	root := canonicalrouting.CopySingletonCoordinatorPilot(t, canonicalrouting.SingletonCoordinatorPilotStatelessCountJoin)
 	bundle, err := runtimecontracts.LoadWorkflowContractBundleWithOverrides(repoRoot, root, runtimecontracts.DefaultPlatformSpecFile(repoRoot))
 	if err != nil {
 		t.Fatalf("load stateless standing singleton: %v", err)
 	}
 	view := mustBuild(t, semanticview.Wrap(bundle), nil)
-	flow := flowByID(t, view, ".")
+	flow := flowByID(t, view, "coordinator")
 	if flow.Mode != runtimecontracts.FlowModeStatic || flow.PrimaryEntity == nil {
 		t.Fatalf("stateless singleton view = %#v", flow)
 	}
@@ -1010,9 +1010,9 @@ func TestBuildShowsStatelessSingletonWithoutCoordinatorError(t *testing.T) {
 
 func TestBuildDoesNotInferCoordinatorFromUnusedContainedField(t *testing.T) {
 	repoRoot := canonicalrouting.RepoRoot(t)
-	root := canonicalrouting.CopyExample(t, canonicalrouting.TelegramAgent)
-	entitiesPath := filepath.Join(root, "entities.yaml")
-	entities := []byte("telegram_service:\n  unused_index:\n    type: map[text]json\n    initial: {}\n")
+	root := canonicalrouting.CopySingletonCoordinatorPilot(t, canonicalrouting.SingletonCoordinatorPilotStatelessCountJoin)
+	entitiesPath := filepath.Join(root, "coordinator", "entities.yaml")
+	entities := []byte("coordinator_state:\n  unused_index:\n    type: map[text]json\n    initial: {}\n")
 	if err := os.WriteFile(entitiesPath, entities, 0o644); err != nil {
 		t.Fatalf("write standing singleton entities: %v", err)
 	}
@@ -1021,7 +1021,7 @@ func TestBuildDoesNotInferCoordinatorFromUnusedContainedField(t *testing.T) {
 		t.Fatalf("load standing singleton with unused map: %v", err)
 	}
 	view := mustBuild(t, semanticview.Wrap(bundle), nil)
-	flow := flowByID(t, view, ".")
+	flow := flowByID(t, view, "coordinator")
 	if flow.SingletonCoordinator != nil || flow.SingletonError != "" {
 		t.Fatalf("unused contained field inferred coordinator semantics = coordinator:%#v error:%q", flow.SingletonCoordinator, flow.SingletonError)
 	}

@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"errors"
 	"reflect"
+	"runtime"
 	"testing"
 	"time"
 
@@ -41,6 +42,11 @@ func TestServedCompiledTransitionTemplateSiblingForkOnBothStores(t *testing.T) {
 				case readback := <-failureReadback:
 					readback()
 				default:
+				}
+				if t.Failed() {
+					stack := make([]byte, 512*1024)
+					n := runtime.Stack(stack, true)
+					t.Logf("template fork failure stacks at unchanged deadline:\n%s", stack[:n])
 				}
 			}()
 			previous := buildSelectedAPICapabilities
