@@ -19,12 +19,16 @@ import (
 // pending code from an authenticated provider read can enter it.
 func PollDeploymentClaim(ctx context.Context, client *http.Client, operations channelonboarding.OperationStore, identities operatorchannel.Store, currentness *credentials.SnapshotOwner, channel packs.SatisfactionPlan, trigger providertriggers.InboundAdmissionPlan, op channelonboarding.Operation, offset int64) (int64, error) {
 	identity, identityErr := channel.InterfaceIdentity()
-	if !op.DeploymentRegistration || !op.AccountConfirmed || op.Provider != "telegram" || op.IdentityOperationID == "" || len(op.CredentialAdmissions) != 1 ||
+	profile, profilePresent := channel.OnboardingProfile()
+	if !op.DeploymentRegistration || !op.AccountConfirmed || op.Provider != "telegram" || op.IdentityOperationID == "" || !profilePresent ||
 		identityErr != nil || identity.Normalized() != op.Interface.Normalized() || trigger.Provider() != op.Provider ||
 		operations == nil || identities == nil || currentness == nil {
 		return offset, channelonboarding.ErrInvalidRequest
 	}
-	admission := op.CredentialAdmissions[0]
+	admission, err := channelonboarding.ProviderCredentialAdmission(op, profile.ProviderCredential())
+	if err != nil {
+		return offset, err
+	}
 	evidence := credentials.ValueEvidence{Key: admission.StoreKey, Seal: admission.ValueSeal}
 	snapshot, current, err := currentness.ObserveValueMatchingSeal(ctx, evidence)
 	if err != nil || !current {
@@ -94,6 +98,10 @@ func ConsumeDeploymentWebhookClaim(ctx context.Context, opts DeploymentConnectio
 	if err != nil {
 		return false, err
 	}
+	profile, profilePresent := opts.Plan.OnboardingProfile()
+	if !profilePresent {
+		return false, channelonboarding.ErrInvalidRequest
+	}
 	rows, err := identities.ListOperatorChannelOperations(ctx, opts.Principal.ID)
 	if err != nil {
 		return false, err
@@ -107,13 +115,17 @@ func ConsumeDeploymentWebhookClaim(ctx context.Context, opts DeploymentConnectio
 			return false, err
 		}
 		if !op.PendingDeploymentClaim(account) ||
-			op.PrincipalID != opts.Principal.ID || identity.OperationID != op.IdentityOperationID || op.Interface.Normalized() != selected.Normalized() || len(op.CredentialAdmissions) != 1 {
+			op.PrincipalID != opts.Principal.ID || identity.OperationID != op.IdentityOperationID || op.Interface.Normalized() != selected.Normalized() {
 			continue
+		}
+		provider, err := channelonboarding.ProviderCredentialAdmission(op, profile.ProviderCredential())
+		if err != nil {
+			return false, err
 		}
 		if !current() {
 			return false, channelonboarding.ErrConflict
 		}
-		valid := func() bool { return current() && credential(op.CredentialAdmissions[0]) }
+		valid := func() bool { return current() && credential(provider) }
 		delivery, err := admit()
 		if err != nil {
 			return false, err

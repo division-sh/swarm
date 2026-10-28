@@ -3,6 +3,7 @@ package channelonboarding
 import (
 	"context"
 	"errors"
+	"fmt"
 	"path/filepath"
 	"strings"
 	"testing"
@@ -55,7 +56,8 @@ func TestOnboardingSelectionHasNoCredentialOrExecutionEffects(t *testing.T) {
 	// Deployment accounts reuse the operation receipt key, never the shared
 	// credential fallback available to an explicitly selected runtime slot.
 	candidate = Candidate{DeploymentRegistration: true, Provider: candidate.Provider, Interface: candidate.Interface,
-		Posture: ActivationWebhookRegistration, Ceremony: CeremonyAccountLink, ProviderCredentialRole: candidate.ProviderCredentialRole}
+		Posture: ActivationWebhookRegistration, Ceremony: CeremonyAccountLink, ProviderCredentialRole: candidate.ProviderCredentialRole,
+		SigningCredentialRole: candidate.SigningCredentialRole}
 	if err := candidate.ValidateDeclaration(); err != nil {
 		t.Fatal(err)
 	}
@@ -64,6 +66,14 @@ func TestOnboardingSelectionHasNoCredentialOrExecutionEffects(t *testing.T) {
 		t.Fatal(err)
 	}
 	service.deployment = true
+	generated := 0
+	service.secret = func() (string, error) {
+		generated++
+		return fmt.Sprintf("private-signing-secret-%d", generated), nil
+	}
+	if err := values.Set(context.Background(), deployment.CredentialReservations[1].StoreKey, "another-account-signing-secret"); err != nil {
+		t.Fatal(err)
+	}
 	var required *CredentialRequiredError
 	if _, err := service.admitCredentials(context.Background(), deployment, candidate, "", true); !errors.As(err, &required) {
 		t.Fatal("deployment registration adopted the shared credential", err)
@@ -71,6 +81,35 @@ func TestOnboardingSelectionHasNoCredentialOrExecutionEffects(t *testing.T) {
 	admissions, err := service.admitCredentials(context.Background(), deployment, candidate, "deployment-token", true)
 	if err != nil || admissions[0].StoreKey != operationCredentialStoreKey(deployment.CredentialReservations[0].StoreKey, deployment.OperationID, candidate.ProviderCredentialRole) {
 		t.Fatal("deployment registration lost its exact operation receipt", admissions, err)
+	}
+	if generated != 1 || len(admissions) != 2 || admissions[1].Kind != CredentialAdmissionWritten ||
+		admissions[1].StoreKey != operationCredentialStoreKey(deployment.CredentialReservations[1].StoreKey, deployment.OperationID, candidate.SigningCredentialRole) {
+		t.Fatal("fresh signing admission escaped its original registration operation")
+	}
+	deployment.CredentialAdmissions = admissions
+	if _, err := ProviderCredentialAdmission(deployment, candidate.SigningCredentialRole); err == nil {
+		t.Fatal("signing role selected as provider identity evidence")
+	}
+	proof, err := providerIdentityAuthority(deployment, candidate)
+	if err != nil || proof.Credential.Key != admissions[0].StoreKey || proof.Credential.Seal != admissions[0].ValueSeal ||
+		proof.Credential.Key == admissions[1].StoreKey {
+		t.Fatal("signing admission expanded the provider identity proof", err)
+	}
+	replayed, err := service.admitCredentials(context.Background(), deployment, candidate, "different-retry-bytes", true)
+	if err != nil || generated != 1 || len(replayed) != 2 || replayed[1] != admissions[1] {
+		t.Fatal("credential checkpoint recovery generated or rotated a second signing key", err)
+	}
+	second := deployment
+	second.OperationID, second.CredentialAdmissions = uuid.NewString(), nil
+	other, err := service.admitCredentials(context.Background(), second, candidate, "second-account-token", true)
+	if err != nil || generated != 2 || len(other) != 2 || other[1].StoreKey == admissions[1].StoreKey || other[1].ValueSeal == admissions[1].ValueSeal {
+		t.Fatal("another account reused the first signing admission", err)
+	}
+	if err := values.Set(context.Background(), admissions[1].StoreKey, "foreign-replacement"); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := service.admitCredentials(context.Background(), deployment, candidate, "deployment-token", true); err == nil || generated != 2 {
+		t.Fatal("foreign signing replacement was regenerated or adopted", err)
 	}
 }
 

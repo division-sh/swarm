@@ -103,7 +103,8 @@ func openDeploymentChannelClient(ctx context.Context, provider string, opts root
 		}
 		candidate = channelonboarding.Candidate{DeploymentRegistration: true, Provider: provider, Interface: identity,
 			Plan: plan, Posture: channelonboarding.ActivationPosture(profile.ActivationPosture()),
-			Ceremony: channelonboarding.CeremonyAccountLink, ProviderCredentialRole: profile.ProviderCredential()}
+			Ceremony: channelonboarding.CeremonyAccountLink, ProviderCredentialRole: profile.ProviderCredential(),
+			SigningCredentialRole: profile.SigningCredential()}
 	}
 	if candidate.Provider == "" || candidate.Validate() != nil {
 		return nil, fmt.Errorf("no admitted deployment channel for %s", provider)
