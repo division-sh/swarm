@@ -1538,18 +1538,9 @@ func compileChannelSatisfaction(channel channelCompilation, trigger TriggerPackD
 		}
 	}
 	if channel.Manifest.Onboarding != nil {
-		compiled, compileErr := CompileChannelOnboardingProfile(provider.String(), channel.Manifest.Transport, *channel.Manifest.Onboarding, sortedKeys(plan.operations))
-		if compileErr != nil {
-			return SatisfactionPlan{}, fmt.Errorf("channel pack %q onboarding: %w", channel.Identity.ID(), compileErr)
+		if err := compileChannelOnboarding(channel, &plan); err != nil {
+			return SatisfactionPlan{}, err
 		}
-		if compiled.ActivationPosture() == ChannelActivationWebhookRegistration && plan.registration == nil {
-			return SatisfactionPlan{}, fmt.Errorf("channel pack %q webhook onboarding requires registration", channel.Identity.ID())
-		}
-		compiled.learnedDestination, err = compileLearnedDestination(channel.Manifest.Onboarding.LearnedDestination, plan.opaqueTypes)
-		if err != nil {
-			return SatisfactionPlan{}, fmt.Errorf("channel pack %q onboarding learned_destination: %w", channel.Identity.ID(), err)
-		}
-		plan.onboarding = &compiled
 	}
 	if _, err := plan.PresentationBounds(); err != nil {
 		return SatisfactionPlan{}, fmt.Errorf("channel pack %q presentation bounds: %w", channel.Identity.ID(), err)
@@ -1563,6 +1554,22 @@ func compileChannelSatisfaction(channel channelCompilation, trigger TriggerPackD
 		return SatisfactionPlan{}, err
 	}
 	return plan, nil
+}
+
+func compileChannelOnboarding(channel channelCompilation, plan *SatisfactionPlan) error {
+	compiled, err := CompileChannelOnboardingProfile(plan.provider.String(), channel.Manifest.Transport, *channel.Manifest.Onboarding, sortedKeys(plan.operations))
+	if err != nil {
+		return fmt.Errorf("channel pack %q onboarding: %w", channel.Identity.ID(), err)
+	}
+	if compiled.ActivationPosture() == ChannelActivationWebhookRegistration && plan.registration == nil {
+		return fmt.Errorf("channel pack %q webhook onboarding requires registration", channel.Identity.ID())
+	}
+	compiled.learnedDestination, err = compileLearnedDestination(channel.Manifest.Onboarding.LearnedDestination, plan.opaqueTypes)
+	if err != nil {
+		return fmt.Errorf("channel pack %q onboarding learned_destination: %w", channel.Identity.ID(), err)
+	}
+	plan.onboarding = &compiled
+	return nil
 }
 
 func compileChannelOperationDrafts(channel channelCompilation, connector ConnectorPackDescriptor) (map[string]channelOperationDraft, error) {
