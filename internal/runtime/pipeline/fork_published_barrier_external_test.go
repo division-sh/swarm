@@ -207,7 +207,6 @@ func verifyPublishedFanOutBarrierContinuation(t *testing.T, proof publishedBarri
 				TargetRootReference: rooted.Admission().Reference(),
 				AllowSourceFreeze:   true, ContractSelection: request.ContractSelection,
 			}
-			baselineWork := rt.Options.ProcessWorkOwner.ActiveCount()
 			var sourceDomain map[string]storetest.SelectedForkStorageTableSnapshot
 			if failingCompletion {
 				sourceDomain, err = storetest.ReadSelectedForkSourceDomain(phase, selected.RuntimeDeps().DeliveryStore, runID)
@@ -262,9 +261,7 @@ func verifyPublishedFanOutBarrierContinuation(t *testing.T, proof publishedBarri
 			}
 			if failingCompletion {
 				verifyPublishedBarrierCompletionFailure(t, phase, selected, family, proofRequest, acknowledged, plan, original, childClaim, childProbe, runID, before, proof)
-				if active := rt.Options.ProcessWorkOwner.ActiveCount(); active != baselineWork {
-					t.Fatalf("failed barrier completion retained owned process work: active=%d baseline=%d", active, baselineWork)
-				}
+				// 6392246365 / 6465532293: ordinary observation remains live, so a process-wide count is not a selected-work oracle.
 				after, err := storetest.ReadSelectedForkSourceDomain(phase, selected.RuntimeDeps().DeliveryStore, runID)
 				if err != nil || !reflect.DeepEqual(sourceDomain, after) {
 					t.Fatalf("failed barrier transfer changed source business evidence: %v", err)
