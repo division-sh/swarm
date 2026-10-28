@@ -60,7 +60,9 @@ func TestAdmitPinnedSourcesRequiresCompleteObservation(t *testing.T) {
 		{name: "failed read", reader: admissionAvailabilityReader(func(context.Context) ([]Availability, error) { return nil, readErr })},
 	} {
 		t.Run(test.name, func(t *testing.T) {
-			_, err := AdmitPinnedSources(context.Background(), test.reader, candidate, func(context.Context, string) (semanticview.Source, error) { return candidate, nil })
+			_, err := AdmitPinnedSources(context.Background(), test.reader, candidate, func(context.Context, sourceartifact.RootAdmissionReference) (semanticview.Source, error) {
+				return candidate, nil
+			})
 			failure, ok := runtimefailures.As(err)
 			if !ok || failure.Failure.Class != runtimefailures.ClassDependencyUnavailable {
 				t.Fatalf("error = %v, want dependency refusal", err)
@@ -84,8 +86,8 @@ func TestAdmitPinnedSourcesUsesExactActiveSourceOwner(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	hash, _ := upgradeSourceHash(candidate)
-	other, _ := upgradeSourceHash(current)
+	hash := first.Admission().BundleHash()
+	other := second.Admission().BundleHash()
 	for _, state := range []string{"running", "live", "paused"} {
 		for _, mismatch := range []bool{false, true} {
 			calls := 0
@@ -98,14 +100,57 @@ func TestAdmitPinnedSourcesUsesExactActiveSourceOwner(t *testing.T) {
 				}
 				return []Availability{active}, nil
 			})
-			plan, err := AdmitPinnedSources(context.Background(), reader, candidate, func(context.Context, string) (semanticview.Source, error) { return current, nil })
+			loads := 0
+			plan, err := AdmitPinnedSources(context.Background(), reader, candidate, func(_ context.Context, reference sourceartifact.RootAdmissionReference) (semanticview.Source, error) {
+				loads++
+				if reference != second.Admission().Reference() {
+					t.Fatalf("loader lost exact retained root: %+v", reference)
+				}
+				return current, nil
+			})
 			if calls != 1 || err != nil {
 				t.Fatalf("state %s mismatch %t: reads %d, error %v", state, mismatch, calls, err)
 			}
 			if _, upgraded := plan.Runs["ordinary-run"]; upgraded != (mismatch && state != "paused") {
 				t.Fatalf("state %s mismatch %t: wrong upgrade population %v", state, mismatch, plan.Runs)
 			}
+			if (loads != 0) != (mismatch && state != "paused") {
+				t.Fatalf("state %s mismatch %t: unexpected retained loads %d", state, mismatch, loads)
+			}
 		}
+	}
+	foreignCandidate, _ := sourceartifactfixture.Rooted(t, "foreign-candidate", candidateBundle.SourceArtifact)
+	foreignCurrent, _ := sourceartifactfixture.Rooted(t, "foreign-current", currentBundle.SourceArtifact)
+	for _, test := range []struct {
+		name       string
+		references []sourceartifact.RootAdmissionReference
+		loads      int
+	}{
+		{"candidate equal hash foreign root", []sourceartifact.RootAdmissionReference{foreignCandidate.Admission().Reference()}, 0},
+		{"loaded source foreign root", []sourceartifact.RootAdmissionReference{foreignCurrent.Admission().Reference()}, 1},
+		{"cached source foreign root", []sourceartifact.RootAdmissionReference{second.Admission().Reference(), foreignCurrent.Admission().Reference()}, 1},
+		{"missing root", []sourceartifact.RootAdmissionReference{{BundleHash: other}}, 0},
+	} {
+		t.Run(test.name, func(t *testing.T) {
+			reader := admissionAvailabilityReader(func(context.Context) ([]Availability, error) {
+				var active []Availability
+				for _, reference := range test.references {
+					active = append(active, Availability{RunID: "ordinary-run", Status: "running", BundleHash: reference.BundleHash, RootReference: reference, RootAdmissionPresent: true, SourceArtifactPresent: true})
+				}
+				return active, nil
+			})
+			loads := 0
+			plan, err := AdmitPinnedSources(context.Background(), reader, candidate, func(_ context.Context, reference sourceartifact.RootAdmissionReference) (semanticview.Source, error) {
+				if reference != test.references[loads] {
+					t.Fatalf("loader replaced persisted root: %+v", reference)
+				}
+				loads++
+				return current, nil
+			})
+			if err == nil || plan != nil || loads != test.loads {
+				t.Fatalf("contradictory root admitted: plan=%v loads=%d error=%v", plan, loads, err)
+			}
+		})
 	}
 	t.Run("upgrade preserves held instance state", testUpgradeRetainedInstances)
 }
@@ -291,7 +336,9 @@ func TestAdmitPinnedSourcesCancellationWins(t *testing.T) {
 		cancel()
 		return nil, errors.New("late dependency failure")
 	})
-	if _, err := AdmitPinnedSources(ctx, reader, candidate, func(context.Context, string) (semanticview.Source, error) { return candidate, nil }); !errors.Is(err, context.Canceled) {
+	if _, err := AdmitPinnedSources(ctx, reader, candidate, func(context.Context, sourceartifact.RootAdmissionReference) (semanticview.Source, error) {
+		return candidate, nil
+	}); !errors.Is(err, context.Canceled) {
 		t.Fatalf("cancelled observation = %v", err)
 	}
 	if _, err := AdmitPinnedSources(ctx, nil, nil, nil); !errors.Is(err, context.Canceled) {

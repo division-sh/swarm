@@ -23,6 +23,7 @@ import (
 	"github.com/division-sh/swarm/internal/runtime/semanticvalue"
 	"github.com/division-sh/swarm/internal/runtime/semanticview"
 	"github.com/division-sh/swarm/internal/runtime/startupownership"
+	"github.com/division-sh/swarm/internal/sourceartifact"
 	"github.com/division-sh/swarm/internal/store/testutil/agentfixture"
 	"github.com/division-sh/swarm/internal/testutil/sourceartifactfixture"
 	"github.com/google/uuid"
@@ -58,7 +59,9 @@ func TestBundleUpgradeAdmissionPreservesLiveWorkBothStores(t *testing.T) {
 				f := newReceiverConfigActivationFixtureWithDocuments(t, backend, false, files, nil)
 				f.constructKeylessRoot(t)
 				reader := f.store.(runbundle.UpgradeReader)
-				load := func(context.Context, string) (semanticview.Source, error) { return semanticview.Wrap(f.bundle), nil }
+				load := func(context.Context, sourceartifact.RootAdmissionReference) (semanticview.Source, error) {
+					return semanticview.Wrap(f.bundle), nil
+				}
 				removed := loadLifecyclePersistenceFixtureForTest(t, map[string]string{"schema.yaml": files["schema.yaml"], "events.yaml": files["events.yaml"]})
 				removedPlan, err := runbundle.AdmitPinnedSources(f.ctx, reader, semanticview.Wrap(removed), load)
 				if err != nil {
@@ -252,8 +255,8 @@ func TestBundleUpgradeAdmissionPreservesLiveWorkBothStores(t *testing.T) {
 						t.Fatalf("successor rewrote its predecessor or lost uncaused cancellation: %+v", timer)
 					}
 					backSource := semanticview.Wrap(f.bundle)
-					back, err := runbundle.AdmitPinnedSources(original, reader, backSource, func(_ context.Context, hash string) (semanticview.Source, error) {
-						if hash == candidate.SourceArtifact.BundleHash() {
+					back, err := runbundle.AdmitPinnedSources(original, reader, backSource, func(_ context.Context, reference sourceartifact.RootAdmissionReference) (semanticview.Source, error) {
+						if reference.BundleHash == candidate.SourceArtifact.BundleHash() {
 							return view, nil
 						}
 						return backSource, nil

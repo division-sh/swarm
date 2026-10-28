@@ -20,6 +20,7 @@ import (
 	"github.com/division-sh/swarm/internal/runtime/semanticview"
 	"github.com/division-sh/swarm/internal/runtime/startuprecovery"
 	"github.com/division-sh/swarm/internal/runtime/timerobligation"
+	"github.com/division-sh/swarm/internal/sourceartifact"
 	"github.com/division-sh/swarm/internal/store"
 	storebackend "github.com/division-sh/swarm/internal/store/backendselection"
 	storeconstruction "github.com/division-sh/swarm/internal/store/construction"
@@ -141,7 +142,9 @@ func TestAdmissionInspectionRealReadScopeBothStores(t *testing.T) {
 				if _, err := snapshot.ActiveNonStandingRunBundleAvailabilities(ctx); err != nil {
 					return err
 				}
-				if _, err := runbundle.AdmitPinnedSources(ctx, snapshot, semanticview.Wrap(bundle), func(context.Context, string) (semanticview.Source, error) { return semanticview.Wrap(bundle), nil }); err != nil {
+				if _, err := runbundle.AdmitPinnedSources(ctx, snapshot, semanticview.Wrap(bundle), func(context.Context, sourceartifact.RootAdmissionReference) (semanticview.Source, error) {
+					return semanticview.Wrap(bundle), nil
+				}); err != nil {
 					return err
 				}
 				if _, err := startuprecovery.Inspect(ctx, startuprecovery.Request{AvailabilityReader: snapshot, ArtifactReader: snapshot}); err != nil {
