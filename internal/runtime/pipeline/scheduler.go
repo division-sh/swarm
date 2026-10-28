@@ -578,14 +578,3 @@ func (s *Scheduler) finishTask(key string, task *scheduledTask) {
 	close(task.done)
 	s.mu.Unlock()
 }
-
-func validateScheduledProjection(projection scheduledProjection) (scheduledProjection, error) {
-	switch projection.kind {
-	case scheduledProjectionWorkflowTimer:
-		return newWorkflowTimerScheduledProjection(projection.workflow)
-	case scheduledProjectionGenericActivation:
-		return newGenericActivationScheduledProjection(projection.activation)
-	default:
-		return scheduledProjection{}, errors.New("scheduled projection kind is invalid")
-	}
-}

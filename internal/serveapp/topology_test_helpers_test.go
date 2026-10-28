@@ -20,10 +20,8 @@ import (
 	runtimecorrelation "github.com/division-sh/swarm/internal/runtime/correlation"
 	runtimedestructivereset "github.com/division-sh/swarm/internal/runtime/destructivereset"
 	runtimemanager "github.com/division-sh/swarm/internal/runtime/manager"
-	"github.com/division-sh/swarm/internal/runtime/semanticview"
 	runtimestartupownership "github.com/division-sh/swarm/internal/runtime/startupownership"
 	"github.com/division-sh/swarm/internal/store/storetest"
-	"github.com/google/uuid"
 )
 
 type supervisorTestRetainedSession struct {
@@ -130,41 +128,6 @@ func (s *supervisorTestRetainedSession) Release(context.Context) error {
 		callback(runtimestartupownership.TerminalResult{Cause: runtimestartupownership.TerminalOwnershipUnprovable})
 	}
 	return nil
-}
-
-func installSelectedStoreTestProcessTopology(
-	t testing.TB,
-	stores *selectedStoreOwner,
-	rt *runtimepkg.Runtime,
-	source semanticview.Source,
-	fact runtimecorrelation.SourceArtifactFact,
-	runtimeInstanceID string,
-) (runtimestartupownership.ProcessCapability, runtimeagenttopology.SourceSetPlan, runtimestartupownership.LiveGenerationGrant) {
-	t.Helper()
-	if stores == nil || rt == nil || rt.Manager == nil {
-		t.Fatal("selected-store topology test requires an owner and runtime manager")
-	}
-	coordinate := runtimeagenttopology.SourceCoordinate{BundleHash: fact.BundleHash()}
-	desired, err := rt.Manager.CompileStaticTopologyDesiredAgents(source, coordinate)
-	if err != nil {
-		t.Fatalf("compile selected-store test source set: %v", err)
-	}
-	plan, err := runtimeagenttopology.NewSourceSetPlan([]runtimeagenttopology.SourceCoordinate{coordinate}, desired)
-	if err != nil {
-		t.Fatalf("construct selected-store test source set: %v", err)
-	}
-	capability, err := stores.StartupOwnership().AcquireProcessCapability(context.Background(), runtimestartupownership.AcquireRequest{
-		OwnerID: "serve-topology-test:" + runtimeInstanceID, BootID: uuid.NewString(), RuntimeInstanceID: runtimeInstanceID,
-	})
-	if err != nil {
-		t.Fatalf("acquire selected-store test process capability: %v", err)
-	}
-	if err := installServeSourceSet(context.Background(), capability, plan); err != nil {
-		_ = capability.Release(context.Background())
-		t.Fatalf("install selected-store test source set: %v", err)
-	}
-	grant := installSelectedStoreTestGeneration(t, capability, rt, plan, 1)
-	return capability, plan, grant
 }
 
 func installSelectedStoreTestGeneration(

@@ -856,34 +856,6 @@ func (s *workflowInstanceStore) RegisterDeliveryContinuationSignal(authority run
 	return &DeliveryContinuationSignalRegistration{owner: s, authority: authority}, nil
 }
 
-func (s *workflowInstanceStore) deliveryContinuationSignalOwners() []runtimedelivery.ExecutionAuthority {
-	if s == nil {
-		return nil
-	}
-	s.deliverySignalMu.RLock()
-	defer s.deliverySignalMu.RUnlock()
-	owners := make([]runtimedelivery.ExecutionAuthority, 0, len(s.deliverySignals))
-	for authority := range s.deliverySignals {
-		owners = append(owners, authority)
-	}
-	return owners
-}
-
-func (s *workflowInstanceStore) signalDeliveryContinuations() {
-	if s == nil {
-		return
-	}
-	authorities := s.deliveryContinuationSignalOwners()
-	for _, authority := range authorities {
-		s.deliverySignalMu.RLock()
-		signal := s.deliverySignals[authority]
-		s.deliverySignalMu.RUnlock()
-		if signal != nil {
-			signal()
-		}
-	}
-}
-
 func (s *workflowInstanceStore) enabled() bool {
 	return s != nil && s.instanceReader != nil
 }
