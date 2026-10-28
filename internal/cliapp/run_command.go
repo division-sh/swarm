@@ -66,7 +66,6 @@ type runCommandOptions struct {
 	timeout          time.Duration
 	reattachRunID    string
 	configPath       string
-	backend          string
 	sourceRoot       string
 	sourceBundleHash string
 	dataImports      []string
@@ -74,7 +73,6 @@ type runCommandOptions struct {
 	idempotencyKey   string
 	runID            string
 	apiPort          int
-	mcpPort          int
 	changedFlags     map[string]bool
 }
 

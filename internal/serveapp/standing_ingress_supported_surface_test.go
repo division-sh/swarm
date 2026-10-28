@@ -1,7 +1,6 @@
 package serveapp
 
 import (
-	"bytes"
 	"context"
 	"database/sql"
 	"encoding/json"
@@ -12,7 +11,6 @@ import (
 	"os"
 	"path/filepath"
 	"strings"
-	"sync"
 	"testing"
 	"time"
 
@@ -130,64 +128,6 @@ func (telegramPhraseBotLLMRuntime) ContinueForkChatSession(ctx context.Context, 
 
 func (telegramPhraseBotLLMRuntime) PersistConversationSnapshot(context.Context, *sessions.Lease, *runtimellm.Session) error {
 	return nil
-}
-
-type servedTelegramDeliveryGate struct {
-	mu      sync.Mutex
-	pending chan struct{}
-	started chan struct{}
-}
-
-func (g *servedTelegramDeliveryGate) blockNext() (chan struct{}, <-chan struct{}) {
-	release := make(chan struct{})
-	g.mu.Lock()
-	defer g.mu.Unlock()
-	if g.pending != nil {
-		panic("Telegram delivery gate is already armed")
-	}
-	g.pending = release
-	g.started = make(chan struct{})
-	return release, g.started
-}
-
-func (g *servedTelegramDeliveryGate) awaitRelease() {
-	g.mu.Lock()
-	release := g.pending
-	started := g.started
-	g.pending = nil
-	g.started = nil
-	g.mu.Unlock()
-	if release == nil {
-		return
-	}
-	close(started)
-	<-release
-}
-
-func (g *servedTelegramDeliveryGate) waitForStart(t testing.TB, started <-chan struct{}, backend servedparity.Backend, operation string) {
-	t.Helper()
-	if started == nil {
-		t.Fatalf("%s Telegram delivery gate was not armed before %s", backend, operation)
-	}
-	select {
-	case <-started:
-	case <-time.After(5 * time.Second):
-		t.Fatalf("%s timed out waiting for routed Telegram descendant before %s", backend, operation)
-	}
-}
-
-func waitForServedStandingContextManager(t testing.TB, ready <-chan *runtimepkg.RuntimeContextManager, backend servedparity.Backend) *runtimepkg.RuntimeContextManager {
-	t.Helper()
-	select {
-	case manager := <-ready:
-		if manager == nil {
-			t.Fatalf("%s served standing context manager is nil", backend)
-		}
-		return manager
-	case <-time.After(5 * time.Second):
-		t.Fatalf("%s timed out waiting for served standing context manager", backend)
-		return nil
-	}
 }
 
 func configureStandingLifecycleCredentials(t *testing.T) {
@@ -962,36 +902,6 @@ func requireChangedStandingColdStartReconciled(t *testing.T, opts cliapp.ServeOp
 	output := process.outputString()
 	if !strings.Contains(output, "shutdown · complete") {
 		t.Fatalf("changed standing bundle did not release its selected-store authority:\n%s", output)
-	}
-}
-
-func requireStandingTelegramUnavailable(t testing.TB, baseURL string, updateID int) {
-	t.Helper()
-	body := []byte(fmt.Sprintf(`{"update_id":%d,"message":{"message_id":%d,"from":{"id":42},"chat":{"id":42,"type":"private"},"text":"hello %d"}}`, updateID, updateID, updateID))
-	req, err := http.NewRequest(http.MethodPost, strings.TrimRight(baseURL, "/")+"/webhooks/chat/telegram", bytes.NewReader(body))
-	if err != nil {
-		t.Fatalf("new suspended webhook request: %v", err)
-	}
-	req.Header.Set("content-type", "application/json")
-	req.Header.Set("X-Telegram-Bot-Api-Secret-Token", "telegram-secret")
-	resp, err := http.DefaultClient.Do(req)
-	if err != nil {
-		t.Fatalf("send suspended webhook: %v", err)
-	}
-	defer resp.Body.Close()
-	if resp.StatusCode != http.StatusServiceUnavailable {
-		var payload any
-		_ = json.NewDecoder(resp.Body).Decode(&payload)
-		t.Fatalf("suspended webhook status=%d payload=%v, want %d", resp.StatusCode, payload, http.StatusServiceUnavailable)
-	}
-}
-
-func requireStandingLifecycleTelegramCall(t testing.TB, calls <-chan struct{}, backend servedparity.Backend, phase string) {
-	t.Helper()
-	select {
-	case <-calls:
-	case <-time.After(5 * time.Second):
-		t.Fatalf("%s timed out waiting for standing Telegram side effect after %s", backend, phase)
 	}
 }
 

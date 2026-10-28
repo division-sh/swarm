@@ -15,7 +15,6 @@ import (
 	"github.com/division-sh/swarm/internal/runtime/executionposture"
 	runtimemanager "github.com/division-sh/swarm/internal/runtime/manager"
 	runtimerunquiescence "github.com/division-sh/swarm/internal/runtime/runquiescence"
-	"github.com/division-sh/swarm/internal/runtime/startupownership"
 	"github.com/division-sh/swarm/internal/testutil"
 	"github.com/google/uuid"
 )
@@ -124,33 +123,6 @@ func TestExternalEffectRecoveryRejectsPersistedAgentRunConflictWithoutMutationSQ
 			}
 		})
 	}
-}
-
-func bindNeutralEffectFixtureToRun(t *testing.T, fixture neutralEffectParityFixture, runID string) neutralEffectParityFixture {
-	t.Helper()
-	identity := mustTestAgentIdentityForRun(
-		runID,
-		fixture.authority.Normal.Identity.AgentID(),
-		fixture.authority.Normal.Identity.FlowInstance(),
-	)
-	seedTestAgentRow(t, fixture.ctx, fixture.db, !fixture.sqlite, identity, "active")
-	token := runtimeeffects.LifecycleToken{
-		RuntimeEpoch: 1,
-		Identity:     identity,
-		AgentID:      identity.AgentID(),
-		Generation:   1,
-	}
-	fixture.authority = runtimeeffects.NormalAgentAuthority(
-		token,
-		fixture.authority.ExecutionOwner,
-		fixture.authority.LeaseExpiresAt,
-	)
-	fixture.ctx = runtimeeffects.WithController(
-		runtimeeffects.WithLifecycleToken(startupownership.CarryMutationAuthority(testAuthorActivityContext(), fixture.ctx), token),
-		liveTestEffectController(fixture.store),
-	)
-	fixture.ctx = managedNormalEffectStoreTestContext(t, fixture.ctx, fixture.authority)
-	return fixture
 }
 
 func assertProviderRecoveryCompletionRows(t *testing.T, db *sql.DB, sqlite bool, attempts []recoveryPostureAttempt) {
