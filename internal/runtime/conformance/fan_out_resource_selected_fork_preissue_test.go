@@ -45,7 +45,9 @@ func TestDeploymentSourceSelectedForkBeforeFirstRow(t *testing.T) {
 			sourceRunID := start("source", originalRows)
 			pauseDeploymentFixtureRun(t, f, sourceRunID)
 			_ = start("changed", changedRows)
-			owner, recovered := deploymentForkOwner(t, f)
+			owner, recovered := deploymentForkOwnerWithExecutor(t, f, nil, nil, nil, func(executor startupownership.FanOutExecutor) startupownership.FanOutExecutor {
+				return deploymentFanOutDiagnostic{FanOutExecutor: executor, t: t}
+			})
 			if len(recovered) != 0 {
 				t.Fatalf("fresh selected owner inherited work: %+v", recovered)
 			}
