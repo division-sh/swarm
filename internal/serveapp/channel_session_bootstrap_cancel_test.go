@@ -197,7 +197,10 @@ func TestServeBootstrapOriginalCallerCancellationBothStores(t *testing.T) {
 	for _, backend := range []string{"sqlite", "postgres"} {
 		t.Run(backend, func(t *testing.T) {
 			f := newServeBootstrapTestFixture(t, backend)
-			entered := serveBootstrapWireFixture(t, "blocked_handshake", f.owner)
+			cut := &serveBootstrapAuthCut{held: make(chan struct{}), release: make(chan struct{})}
+			entered := serveBootstrapWireFixture(t, "blocked_handshake", f.owner, cut)
+			release := sync.OnceFunc(func() { close(cut.release) })
+			t.Cleanup(release)
 			caller, cancel := context.WithCancel(f.ctx)
 			defer cancel()
 			finished := make(chan error, 1)
@@ -207,6 +210,7 @@ func TestServeBootstrapOriginalCallerCancellationBothStores(t *testing.T) {
 			case err := <-finished:
 				t.Fatal("did not reach handshake", err)
 			}
+			awaitServeBootstrapNativeCloseFixture(t, cut.held)
 			cancel()
 			prompt := true
 			select {
@@ -245,6 +249,7 @@ func TestServeBootstrapOriginalCallerCancellationBothStores(t *testing.T) {
 					t.Fatal("successor acquired provider state while original SDK cleanup remained pending")
 				}
 			}
+			release()
 			join, stop := context.WithTimeout(context.Background(), 30*time.Second)
 			defer stop()
 			if err := connection.Close(join); err != nil {

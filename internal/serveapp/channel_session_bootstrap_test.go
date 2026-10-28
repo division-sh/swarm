@@ -226,12 +226,41 @@ func admitServeSessionProcessFixture(t *testing.T, selected startupownership.Sto
 	return grant
 }
 
+type serveBootstrapHeldCloseConn struct {
+	net.Conn
+	entered <-chan struct{}
+	cut     *serveBootstrapAuthCut
+}
+
+func (c *serveBootstrapHeldCloseConn) Close() error {
+	select {
+	case <-c.entered:
+		// Hold real SDK cleanup after Noise entry, without waiting for its timer.
+		c.cut.heldOnce.Do(func() { close(c.cut.held) })
+		<-c.cut.release
+	default:
+	}
+	return c.Conn.Close()
+}
+
+func awaitServeBootstrapNativeCloseFixture(t *testing.T, held <-chan struct{}) {
+	t.Helper()
+	select {
+	case <-held:
+	case <-time.After(5 * time.Second):
+		t.Fatal("SDK transport did not reach its held native close within the existing fixture safety bound")
+	}
+}
+
 // Only the SDK's external TLS/Noise peer is supplied. The actual production
 // adapter constructs and owns its SDK, selected reservation and runtime work.
 func serveBootstrapWireFixture(t *testing.T, mode string, owner *worklifetime.RuntimeOccurrence, authCuts ...*serveBootstrapAuthCut) <-chan struct{} {
 	t.Helper()
 	if len(authCuts) > 1 || len(authCuts) == 1 && authCuts[0] == nil {
 		t.Fatal("SDK peer requires at most one explicit authentication cut")
+	}
+	if mode == "blocked_handshake" && (len(authCuts) != 1 || authCuts[0].held == nil || authCuts[0].release == nil) {
+		t.Fatal("blocked SDK handshake requires its explicit native close cut")
 	}
 	noise := whatsappfixture.NewNoiseServer(t)
 	ctx, cancel := context.WithCancel(context.Background())
@@ -283,11 +312,7 @@ func serveBootstrapWireFixture(t *testing.T, mode string, owner *worklifetime.Ru
 				return
 			}
 			signalEntered()
-			if mode == "handshake_failure" {
-				_ = whatsappfixture.WriteFrame(ctx, conn, []byte{0xff})
-			} else {
-				<-ctx.Done()
-			}
+			_ = whatsappfixture.WriteFrame(ctx, conn, []byte{0xff})
 			return
 		}
 		wire, err := noise.Handshake(ctx, conn)
@@ -347,7 +372,11 @@ func serveBootstrapWireFixture(t *testing.T, mode string, owner *worklifetime.Ru
 		if address != "web.whatsapp.com:443" {
 			return nil, fmt.Errorf("SDK test refuses external destination %q", address)
 		}
-		return dial.DialContext(ctx, network, server.Listener.Addr().String())
+		conn, err := dial.DialContext(ctx, network, server.Listener.Addr().String())
+		if err == nil && mode == "blocked_handshake" {
+			return &serveBootstrapHeldCloseConn{Conn: conn, entered: entered, cut: authCuts[0]}, nil
+		}
+		return conn, err
 	}
 	// The SDK clones the default *http.Transport at construction. Restore it
 	// after all concrete clients and server workers have joined; tests are serial.
@@ -542,7 +571,10 @@ func TestServeSessionBootstrapPendingAttemptRetainsOwnershipBothStores(t *testin
 	for _, backend := range []string{"sqlite", "postgres"} {
 		t.Run(backend, func(t *testing.T) {
 			f := newServeBootstrapTestFixture(t, backend)
-			entered := serveBootstrapWireFixture(t, "blocked_handshake", f.owner)
+			cut := &serveBootstrapAuthCut{held: make(chan struct{}), release: make(chan struct{})}
+			entered := serveBootstrapWireFixture(t, "blocked_handshake", f.owner, cut)
+			release := sync.OnceFunc(func() { close(cut.release) })
+			t.Cleanup(release)
 			caller, cancel := context.WithCancel(f.ctx)
 			defer cancel()
 			finished := make(chan error, 1)
@@ -552,6 +584,7 @@ func TestServeSessionBootstrapPendingAttemptRetainsOwnershipBothStores(t *testin
 			case err := <-finished:
 				t.Fatal("SDK did not reach its pending handshake", err)
 			}
+			awaitServeBootstrapNativeCloseFixture(t, cut.held)
 			cancel()
 			if err := awaitServeSessionBootstrapFixture(caller, f.adapter, f.op, f.candidate, false); !errors.Is(err, context.Canceled) {
 				t.Fatal("canceled overlapping waiter became successful bootstrap", err)
@@ -569,8 +602,8 @@ func TestServeSessionBootstrapPendingAttemptRetainsOwnershipBothStores(t *testin
 			if err == nil {
 				t.Fatal("successor acquired pairing before the pending handshake joined")
 			}
-			// The pinned SDK's existing Noise wait is 20s; the outer safety bound
-			// includes joining and never changes that SDK deadline or a test ceiling.
+			// Only release the real SDK's native cleanup after possession is refused.
+			release()
 			select {
 			case err := <-finished:
 				if !errors.Is(err, context.Canceled) {
