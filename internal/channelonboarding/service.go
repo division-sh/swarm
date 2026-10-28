@@ -1917,6 +1917,19 @@ func (s *Service) currentCredentialAdmissions(ctx context.Context, slot string) 
 
 func (s *Service) admitSigningCredential(ctx context.Context, op Operation, reservation CredentialReservation, current CredentialAdmission) (CredentialAdmission, bool, error) {
 	key := reservation.StoreKey
+	if op.DeploymentRegistration {
+		key = operationCredentialStoreKey(key, op.OperationID, reservation.Role)
+		_, present, err := s.credentials.ObserveOptional(ctx, key)
+		if err != nil {
+			return CredentialAdmission{}, false, err
+		}
+		// admitCredentials already checked the exact receipt. A value here has
+		// no matching receipt and must not be adopted or overwritten.
+		if present {
+			return CredentialAdmission{}, false, fmt.Errorf("%w: deployment signing credential has no matching operation receipt", ErrConflict)
+		}
+		return CredentialAdmission{}, true, nil
+	}
 	if current.StoreKey != "" {
 		key = current.StoreKey
 	}
@@ -2130,17 +2143,11 @@ func providerIdentityAuthority(op Operation, candidate Candidate) (operatorchann
 }
 
 func providerIdentityEvidence(op Operation, candidate Candidate) (runtimecredentials.ValueEvidence, error) {
-	for _, admission := range op.CredentialAdmissions {
-		if admission.Role != candidate.ProviderCredentialRole {
-			continue
-		}
-		evidence := runtimecredentials.ValueEvidence{Key: admission.StoreKey, Seal: admission.ValueSeal}
-		if err := evidence.Validate(); err != nil {
-			return runtimecredentials.ValueEvidence{}, fmt.Errorf("%w: provider credential admission is invalid", ErrConflict)
-		}
-		return evidence, nil
+	admission, err := ProviderCredentialAdmission(op, candidate.ProviderCredentialRole)
+	if err != nil {
+		return runtimecredentials.ValueEvidence{}, err
 	}
-	return runtimecredentials.ValueEvidence{}, fmt.Errorf("%w: provider credential role %q is not admitted", ErrConflict, candidate.ProviderCredentialRole)
+	return runtimecredentials.ValueEvidence{Key: admission.StoreKey, Seal: admission.ValueSeal}, nil
 }
 
 func (s *Service) currentIdentityOperation(ctx context.Context, operationID string) (operatorchannel.Operation, error) {
@@ -2603,6 +2610,8 @@ func findOperationByRequestKey(ctx context.Context, store Store, key string) (Op
 
 func credentialReservations(candidate Candidate) []CredentialReservation {
 	roles := make([]string, 0, 2)
+	// The native parent owner binds identity proof to this first, provider-only
+	// reservation, not to an arbitrary admitted signing credential.
 	if candidate.ProviderCredentialRole != "" {
 		roles = append(roles, candidate.ProviderCredentialRole)
 	}

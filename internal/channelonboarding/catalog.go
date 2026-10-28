@@ -104,7 +104,7 @@ func (c Candidate) ValidateDeclaration() error {
 			return err
 		}
 		if c.Target != (CandidateTarget{}) || c.Ceremony != CeremonyAccountLink ||
-			c.SigningCredentialRole != "" || c.ConfirmationOperation != "" ||
+			c.SigningCredentialRole != "" && (c.Provider != "telegram" || c.SigningCredentialRole == c.ProviderCredentialRole) || c.ConfirmationOperation != "" ||
 			c.Posture != (map[string]ActivationPosture{"whatsapp": ActivationSessionConnection, "telegram": ActivationWebhookRegistration})[c.Provider] ||
 			(c.ProviderCredentialRole == "") != (c.Provider == "whatsapp") {
 			return fmt.Errorf("%w: deployment registration has runtime activation or invalid provider inputs", ErrInvalidRequest)

@@ -47,6 +47,28 @@ type CredentialWriteRequest struct {
 	Receipt  string
 }
 
+// ProviderCredentialAdmission selects the canonical provider reservation, never
+// a signing admission that happens to have a current value seal.
+func ProviderCredentialAdmission(op Operation, role string) (CredentialAdmission, error) {
+	if len(op.CredentialReservations) == 0 || op.CredentialReservations[0].Validate() != nil || role != op.CredentialReservations[0].Role {
+		return CredentialAdmission{}, ErrConflict
+	}
+	var selected CredentialAdmission
+	for _, admission := range op.CredentialAdmissions {
+		if admission.Role != role {
+			continue
+		}
+		if selected.Role != "" || admission.Validate() != nil {
+			return CredentialAdmission{}, ErrConflict
+		}
+		selected = admission
+	}
+	if selected.Role == "" {
+		return CredentialAdmission{}, ErrConflict
+	}
+	return selected, nil
+}
+
 type CredentialWriteResult struct {
 	StoreKey  string
 	Receipt   string

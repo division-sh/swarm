@@ -6,6 +6,7 @@ import (
 	"bytes"
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"io"
 	"net/http"
@@ -14,6 +15,7 @@ import (
 	"reflect"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/division-sh/swarm/internal/channelonboarding"
 	"github.com/division-sh/swarm/internal/cliapp"
@@ -24,6 +26,7 @@ import (
 	"github.com/division-sh/swarm/internal/testpostgres"
 	"github.com/division-sh/swarm/internal/testutil"
 	"github.com/division-sh/swarm/internal/testutil/packfixture"
+	"github.com/google/uuid"
 )
 
 type registrationProviderRead func(*http.Request) (*http.Response, error)
@@ -73,8 +76,16 @@ func TestDeploymentChannelRegistrationWithoutRuntimeBothStores(t *testing.T) {
 			confirmations := 0
 			webhook := false
 			webhookClaims := 0
+			var providerRole, signingRole string
+			var credentialOwner *credentials.SnapshotOwner
+			var claimedProvider operatorchannel.ProviderAuthority
+			var privateRegistration channelonboarding.Operation
 			factory := func(ctx context.Context, opts cliapp.ChannelRegistrationOptions) (cliapp.ChannelRegistrationSession, error) {
 				var native cliapp.ChannelRegistrationSession
+				profile, present := opts.Plan.OnboardingProfile()
+				if !present {
+					t.Fatal("registration has no admitted credential profile")
+				}
 				const callback = "https://hooks.example.test/webhooks/chat/telegram?swarm_callback_generation=current"
 				opts.CurrentWebhook = func(_ context.Context, received, account string) bool {
 					return webhook && received == callback && account == "420080"
@@ -110,6 +121,22 @@ func TestDeploymentChannelRegistrationWithoutRuntimeBothStores(t *testing.T) {
 								for _, parent := range parents {
 									if parent.OperationID != identity.OnboardingOperationID {
 										continue
+									}
+									for _, admission := range parent.CredentialAdmissions {
+										if admission.Role != profile.SigningCredential() {
+											continue
+										}
+										wrong := identity.ProviderAuthority
+										wrong.Credential = credentials.ValueEvidence{Key: admission.StoreKey, Seal: admission.ValueSeal}
+										now := time.Now().UTC()
+										_, err := opts.Identities.BeginChannelBinding(ctx, operatorchannel.BeginRequest{
+											OperationID: uuid.NewString(), Kind: identity.Kind, PrincipalID: identity.PrincipalID, Interface: identity.Interface,
+											ExpectedRevision: identity.ExpectedBindingRevision, RequestKeyHash: uuid.NewString(), RequestHash: uuid.NewString(),
+											OnboardingOperationID: parent.OperationID, ProviderAuthority: wrong, RequestedAt: now, ExpiresAt: now.Add(time.Minute),
+										})
+										if !errors.Is(err, operatorchannel.ErrRevisionConflict) {
+											t.Fatal("a signing admission authorized operator enrollment", err)
+										}
 									}
 									deliver := func(text string) providertriggers.Delivery {
 										raw := fmt.Sprintf(`{"update_id":987,"message":{"message_id":987,"from":{"id":12346},"chat":{"id":12346,"type":"private"},"text":%q}}`, text)
@@ -204,6 +231,13 @@ func TestDeploymentChannelRegistrationWithoutRuntimeBothStores(t *testing.T) {
 							for _, op := range operations {
 								if op.State == operatorchannel.StateAwaitingClaim {
 									text = op.Challenge
+									claimedProvider = op.ProviderAuthority
+									providerRole, signingRole = profile.ProviderCredential(), profile.SigningCredential()
+									credentialOwner = opts.Credentials
+									privateRegistration, err = opts.Operations.GetChannelOnboarding(ctx, op.OnboardingOperationID)
+									if err != nil {
+										t.Fatal(err)
+									}
 								}
 							}
 						}
@@ -277,6 +311,29 @@ func TestDeploymentChannelRegistrationWithoutRuntimeBothStores(t *testing.T) {
 				t.Fatalf("HITL registration readback exit=%d err=%s", code, errOut.String())
 			}
 			registered := readback.Accounts[0]
+			admissions := map[string]channelonboarding.CredentialAdmission{}
+			for _, admission := range privateRegistration.CredentialAdmissions {
+				admissions[admission.Role] = admission
+			}
+			signing, signed := admissions[signingRole]
+			provider, linked := admissions[providerRole]
+			if len(admissions) != 2 || !signed || !linked || signing.Kind != channelonboarding.CredentialAdmissionWritten ||
+				signing.StoreKey == provider.StoreKey || signing.Receipt == "" || registered.IdentityOperation == nil ||
+				privateRegistration.OperationID != registered.Operation.OperationID ||
+				claimedProvider.Credential.Key != provider.StoreKey || claimedProvider.Credential.Seal != provider.ValueSeal {
+				t.Fatalf("signing/provider proof: admissions=%d signing=%t provider=%t written=%t distinct=%t receipt=%t identity=%t same_operation=%t provider_key=%t provider_seal=%t",
+					len(admissions), signed, linked, signing.Kind == channelonboarding.CredentialAdmissionWritten, signing.StoreKey != provider.StoreKey,
+					signing.Receipt != "", registered.IdentityOperation != nil, privateRegistration.OperationID == registered.Operation.OperationID,
+					claimedProvider.Credential.Key == provider.StoreKey, claimedProvider.Credential.Seal == provider.ValueSeal)
+			}
+			privateSigning, current, err := credentialOwner.ObserveValueMatchingSeal(context.Background(), credentials.ValueEvidence{Key: signing.StoreKey, Seal: signing.ValueSeal})
+			if err != nil || !current {
+				t.Fatal("registration did not retain its exact generated signing occurrence", err)
+			}
+			if strings.Contains(out.String(), signing.ValueSeal.String()) || strings.Contains(out.String(), provider.ValueSeal.String()) ||
+				strings.Contains(out.String()+errOut.String(), privateSigning.CredentialValue()) {
+				t.Fatal("public registration readback exposed private credential material")
+			}
 			out.Reset()
 			errOut.Reset()
 			code = cliapp.Execute(context.Background(), []string{"--config", path, "channel", "status", "telegram", "420079", "--json"}, &out, &errOut, nil, nil, factory)

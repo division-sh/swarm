@@ -147,9 +147,9 @@ func requireSessionParent(ctx context.Context, tx *sql.Tx, d dialect, parentID, 
 	if err != nil {
 		return err
 	}
-	approval := `TRUE,'[]'`
+	approval := `TRUE,'[]','[]'`
 	if admitted.Scope == authority.DeploymentParent {
-		approval = `account_confirmed,credential_admissions`
+		approval = `account_confirmed,credential_admissions,credential_reservations`
 	}
 	query := `SELECT operation_revision,phase,principal_id,` + approval + ` FROM ` + table + ` WHERE operation_id=?`
 	if d == dialectPostgres {
@@ -157,9 +157,9 @@ func requireSessionParent(ctx context.Context, tx *sql.Tx, d dialect, parentID, 
 	}
 	var revision int64
 	var phase string
-	var owner, credentials string
+	var owner, credentials, reservations string
 	var confirmed bool
-	if err := tx.QueryRowContext(ctx, d.bind(query), parentID).Scan(&revision, &phase, &owner, &confirmed, &credentials); err != nil {
+	if err := tx.QueryRowContext(ctx, d.bind(query), parentID).Scan(&revision, &phase, &owner, &confirmed, &credentials, &reservations); err != nil {
 		return err
 	}
 	if owner != principal || !confirmed || admitted.Kind == domain.ProviderAuthoritySession && revision != originalRevision ||
@@ -171,7 +171,15 @@ func requireSessionParent(ctx context.Context, tx *sql.Tx, d dialect, parentID, 
 		if err != nil {
 			return err
 		}
-		if len(admissions) != 1 || admitted.Credential.Key != admissions[0].StoreKey || admitted.Credential.Seal != admissions[0].ValueSeal {
+		var reserved []onboarding.CredentialReservation
+		if err := json.Unmarshal([]byte(reservations), &reserved); err != nil {
+			return err
+		}
+		if len(reserved) == 0 || len(admissions) != len(reserved) || reserved[0].Validate() != nil {
+			return domain.ErrRevisionConflict
+		}
+		provider, err := onboarding.ProviderCredentialAdmission(onboarding.Operation{CredentialReservations: reserved, CredentialAdmissions: admissions}, reserved[0].Role)
+		if err != nil || admitted.Credential.Key != provider.StoreKey || admitted.Credential.Seal != provider.ValueSeal {
 			return domain.ErrRevisionConflict
 		}
 	}
