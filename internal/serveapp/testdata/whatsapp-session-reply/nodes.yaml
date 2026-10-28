@@ -7,5 +7,6 @@ customer-reply:
         id: customer_reply
         tool: whatsapp.send_text
         input:
+          account: policy.operator_account
           destination: payload.conversation_reference
           text: payload.text
