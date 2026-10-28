@@ -396,7 +396,7 @@ func (f *activeInputFixture) activate(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	source := sourceartifactfixture.Require(t, ctx, f.selected)
+	source := sourceartifactfixture.FactFor(f.rooted.Artifact())
 	f.standing, err = f.selected.ReconcileFlowRun(ctx, runlifecycle.LiveRunScope{FlowPath: "."}, source)
 	if err != nil {
 		t.Fatal(err)

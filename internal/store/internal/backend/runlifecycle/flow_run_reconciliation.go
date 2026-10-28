@@ -8,6 +8,7 @@ import (
 
 	runtimecorrelation "github.com/division-sh/swarm/internal/runtime/correlation"
 	runtimerunlifecycle "github.com/division-sh/swarm/internal/runtime/runlifecycle"
+	"github.com/division-sh/swarm/internal/sourceartifact"
 	"github.com/google/uuid"
 )
 
@@ -32,6 +33,16 @@ func reconcileFlowRunTx(ctx context.Context, tx *sql.Tx, mutation flowRunMutatio
 	if err := source.Validate(); err != nil {
 		return runtimerunlifecycle.FlowRunReconciliation{}, err
 	}
+	root, present, err := runtimecorrelation.RootAdmissionFromContext(ctx)
+	if err != nil {
+		return runtimerunlifecycle.FlowRunReconciliation{}, err
+	}
+	if !present {
+		return runtimerunlifecycle.FlowRunReconciliation{}, sourceartifact.ErrRootAdmissionMissing
+	}
+	if root.BundleHash() != source.BundleHash() {
+		return runtimerunlifecycle.FlowRunReconciliation{}, fmt.Errorf("live flow root admission does not match the supplied source")
+	}
 	current, found, err := loadLandingRun(ctx, tx, scope)
 	if err != nil {
 		return runtimerunlifecycle.FlowRunReconciliation{}, err
@@ -39,7 +50,7 @@ func reconcileFlowRunTx(ctx context.Context, tx *sql.Tx, mutation flowRunMutatio
 	out := runtimerunlifecycle.FlowRunReconciliation{LandingRun: current, CommittedMutation: runtimerunlifecycle.MutationExactNoop}
 	if found {
 		if !current.Source.Matches(source) && current.State.Active() {
-			out.CommittedMutation, err = mutation.ReviseSource(ctx, runtimerunlifecycle.SourceRevisionRequest{RunID: current.RunID, Source: source})
+			out.CommittedMutation, err = mutation.ReviseSource(ctx, runtimerunlifecycle.SourceRevisionRequest{RunID: current.RunID, Source: source, RootAdmission: root})
 			if err != nil {
 				return runtimerunlifecycle.FlowRunReconciliation{}, err
 			}
@@ -47,7 +58,7 @@ func reconcileFlowRunTx(ctx context.Context, tx *sql.Tx, mutation flowRunMutatio
 		}
 		return out, nil
 	}
-	request := runtimerunlifecycle.CreateRequest{RunID: uuid.NewString(), Origin: runtimerunlifecycle.DeploymentRunOrigin(), Source: source, StartedAt: time.Now().UTC(), LiveScope: scope}
+	request := runtimerunlifecycle.CreateRequest{RunID: uuid.NewString(), Origin: runtimerunlifecycle.DeploymentRunOrigin(), Source: source, RootAdmission: root, StartedAt: time.Now().UTC(), LiveScope: scope}
 	out.CommittedMutation, err = mutation.Create(ctx, request)
 	if err != nil {
 		return runtimerunlifecycle.FlowRunReconciliation{}, err
