@@ -275,7 +275,12 @@ func TestChannelCredentialRotationBeforeTargetPublicationBothStores(t *testing.T
 				return nil
 			}
 			h.start(t)
-			manager := waitForServedStandingContextManager(t, contextsReady, backend)
+			var manager *runtime.RuntimeContextManager
+			select {
+			case manager = <-contextsReady:
+			case <-time.After(5 * time.Second):
+				t.Fatal("runtime context manager was not published")
+			}
 			type publicationSnapshot struct {
 				targets     []runtime.StandingTarget
 				activations []runtime.StandingActivation
