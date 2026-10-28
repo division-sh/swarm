@@ -31,7 +31,7 @@ const debtG01CollectorFrom = "494fd3b6300c4163241395ef9e3aa59ce58eb32f45e9f5d8bc
 const debtQuiescenceCollectorFrom = "65fe2e66c01eb0e19ce2b44d53f545cc76dd823f5f8b58562e139a362cc9c267"
 const debtRunFixtureCollectorFrom = "4ab44a86253d3b09474c20463ca1a4e5c6296f4a4694e4d80d904832757ae047"
 const debtDeploymentRegistrationCollectorFrom = "4a683b60cf5147aece5eabc4e8f044555f64a15623f9e7106ddb4d9726961f9a"
-const debtS1CollectorFrom = "f28178924493fb28094b3bd1fb4814564680387608f43984fcd532afb01636a6"
+const debtS1CollectorFrom = "58217e03fdd7a5276ef4ac1b0a763fb2b2508423763415bc875ddcb6469c78d0"
 
 // The reviewed, unlanded bootstrap cannot move when its guard PR is rebased.
 const debtBootstrapSource = "52b954ec26c85a47605cefb8d7030f2a842f8c24"

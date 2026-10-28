@@ -98,7 +98,10 @@ func TestPayloadlessEventPublicPersistenceJourneyBothStores(t *testing.T) {
 			if err := process.stopAndWait(10 * time.Second); err != nil {
 				t.Fatal(err)
 			}
-			relocated := filepath.Join(root, "relocated-contracts")
+			relocated := filepath.Join(root, "relocated", filepath.Base(contracts))
+			if err := os.MkdirAll(filepath.Dir(relocated), 0o755); err != nil {
+				t.Fatal(err)
+			}
 			if err := os.Rename(contracts, relocated); err != nil {
 				t.Fatal(err)
 			}

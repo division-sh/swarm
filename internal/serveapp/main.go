@@ -2126,7 +2126,21 @@ func reconcileServeFlowRuns(ctx context.Context, owner runtimerunlifecycle.FlowR
 		if err != nil {
 			return err
 		}
+		rooted, err := contextDef.loaded.bundle.RootedSource()
+		if err != nil {
+			return err
+		}
+		if rooted.Admission().BundleHash() != contextDef.sourceArtifactFact.BundleHash() {
+			return fmt.Errorf("live flow reconciliation compiled root differs from its source")
+		}
+		if fact, supplied := runtimecorrelation.SourceArtifactFactFromContext(ctx); supplied && !fact.Matches(contextDef.sourceArtifactFact) {
+			return fmt.Errorf("live flow reconciliation context differs from its source")
+		}
+		if err := runtimecorrelation.CheckRootAdmissionContext(ctx, rooted.Admission().Reference()); err != nil {
+			return err
+		}
 		sourceCtx := runtimecorrelation.WithSourceArtifactFact(ctx, contextDef.sourceArtifactFact)
+		sourceCtx = runtimecorrelation.WithRootAdmission(sourceCtx, rooted.Admission())
 		for _, scope := range scopes {
 			if _, err := owner.ReconcileFlowRun(sourceCtx, scope, contextDef.sourceArtifactFact); err != nil {
 				return err
