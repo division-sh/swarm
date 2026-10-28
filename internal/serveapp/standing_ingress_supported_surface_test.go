@@ -305,12 +305,17 @@ func TestStandingIngressSupportedSurfaceSQLiteRestartPreservesAuthorityAndReplie
 	if err := storetest.DatabaseForTest(sqliteStore).QueryRow(`SELECT COUNT(*) FROM decision_cards WHERE anchor_kind = 'stage_gate' AND json_extract(anchor, '$.entity_id') = ? AND status = 'pending' AND json_extract(snapshot, '$.decision') = 'retire_service'`, standingEntityID).Scan(&pendingCards); err != nil || pendingCards != 1 {
 		t.Fatalf("standing initial gate cards = %d, %v, want one persisted card across restart", pendingCards, err)
 	}
+	if _, err := initializeServePlatformStateStores(t.Context(), sqliteStore); err != nil {
+		t.Fatal(err)
+	}
+	disableServeRuntimeRecovery(t, opts.ConfigPath)
+	requireChangedStandingColdStartMatrix(t, opts, sourceRoot, standingRunID, func(t *testing.T) standingRetainedState {
+		return readStandingRetainedState(t, sqliteStore, standingRunID)
+	})
 	if err := sqliteStore.Close(); err != nil {
-		t.Fatalf("close SQLite inspection store before restart matrix: %v", err)
+		t.Fatalf("close SQLite inspection store after restart matrix: %v", err)
 	}
 	sqliteStore = nil
-	disableServeRuntimeRecovery(t, opts.ConfigPath)
-	requireChangedStandingColdStartMatrix(t, opts, sourceRoot, standingRunID, "sqlite", sqlitePath, nil)
 }
 
 func TestServeAuthorActivityAttachmentFailureKeepsRuntimeHealthy(t *testing.T) {
@@ -410,6 +415,11 @@ func TestStandingIngressSupportedSurfacePostgresRestartPreservesAuthorityAndRepl
 	if err != nil {
 		t.Fatalf("NewPostgresStore: %v", err)
 	}
+	t.Cleanup(func() {
+		if err := runtimePG.Close(); err != nil {
+			t.Error(err)
+		}
+	})
 	oldBuildStores := buildStoresForServe
 	oldWorkspace := cliapp.ConfiguredWorkspaceLifecycleForServe
 	buildStoresForServe = func(ctx context.Context, _ storebackend.Selection, cfg *config.Config) (*selectedStoreOwner, error) {
@@ -536,12 +546,17 @@ func TestStandingIngressSupportedSurfacePostgresRestartPreservesAuthorityAndRepl
 		t.Fatalf("standing initial gate cards = %d, %v, want one persisted card across restart", pendingCards, err)
 	}
 	disableServeRuntimeRecovery(t, opts.ConfigPath)
-	requireChangedStandingColdStartMatrix(t, opts, sourceRoot, standingRunID, "postgres", dsn, func(t *testing.T) {
+	requireChangedStandingColdStartMatrix(t, opts, sourceRoot, standingRunID, func(t *testing.T) standingRetainedState {
+		if err := runtimePG.Close(); err != nil {
+			t.Fatal(err)
+		}
 		var reopenErr error
 		runtimePG, reopenErr = store.NewPostgresStore(dsn)
 		if reopenErr != nil {
 			t.Fatalf("reopen PostgresStore for changed-bundle probe: %v", reopenErr)
 		}
+		storetest.BootstrapPostgresRuntimeStore(t, runtimePG)
+		return readStandingRetainedState(t, runtimePG, standingRunID)
 	})
 }
 
@@ -748,51 +763,31 @@ func setServeRuntimeRecovery(t *testing.T, configPath string, from, to bool) {
 	}
 }
 
-func requireChangedStandingColdStartMatrix(t *testing.T, opts cliapp.ServeOptions, sourceRoot, originalRunID, backend, connection string, prepare func(*testing.T)) {
+type standingRetainedState struct {
+	run    runtimerunlifecycle.Snapshot
+	source sourceartifact.Persisted
+	work   map[string]storetest.SelectedForkStorageTableSnapshot
+}
+
+func readStandingRetainedState(t *testing.T, selected sourceArtifactReader, runID string) standingRetainedState {
 	t.Helper()
-	type retainedState struct {
-		run    runtimerunlifecycle.Snapshot
-		source sourceartifact.Persisted
-		work   map[string]storetest.SelectedForkStorageTableSnapshot
+	run, err := storetest.ReadRuntimeLogRunSnapshot(t.Context(), selected, runID)
+	if err != nil {
+		t.Fatal(err)
 	}
-	readRetained := func(t *testing.T) retainedState {
-		t.Helper()
-		var selected interface {
-			sourceArtifactReader
-			store.SchemaBootstrapper
-			Close() error
-		}
-		var err error
-		if backend == "postgres" {
-			selected, err = store.NewPostgresStore(connection)
-		} else {
-			selected, err = store.NewSQLiteRuntimeStore(connection)
-		}
-		if err != nil {
-			t.Fatal(err)
-		}
-		defer func() {
-			if err := selected.Close(); err != nil {
-				t.Fatal(err)
-			}
-		}()
-		if _, err := initializeServePlatformStateStores(t.Context(), selected); err != nil {
-			t.Fatal(err)
-		}
-		run, err := storetest.ReadRuntimeLogRunSnapshot(t.Context(), selected, originalRunID)
-		if err != nil {
-			t.Fatal(err)
-		}
-		source, err := selected.GetSourceArtifact(t.Context(), run.BundleHash)
-		if err != nil {
-			t.Fatal(err)
-		}
-		work, err := storetest.ReadSelectedForkSourceDomain(t.Context(), selected, originalRunID)
-		if err != nil {
-			t.Fatal(err)
-		}
-		return retainedState{run: run, source: source, work: work}
+	source, err := selected.GetSourceArtifact(t.Context(), run.BundleHash)
+	if err != nil {
+		t.Fatal(err)
 	}
+	work, err := storetest.ReadSelectedForkSourceDomain(t.Context(), selected, runID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	return standingRetainedState{run: run, source: source, work: work}
+}
+
+func requireChangedStandingColdStartMatrix(t *testing.T, opts cliapp.ServeOptions, sourceRoot, originalRunID string, prepare func(*testing.T) standingRetainedState) {
+	t.Helper()
 	manifestPath := filepath.Join(sourceRoot, "manifest.yaml")
 	baseManifest, err := os.ReadFile(manifestPath)
 	if err != nil {
@@ -902,11 +897,8 @@ func requireChangedStandingColdStartMatrix(t *testing.T, opts cliapp.ServeOption
 				t.Fatalf("standing flow directory unavailable before mutation: %v", err)
 			}
 			mutation.apply(t)
-			if prepare != nil {
-				prepare(t)
-			}
+			before := prepare(t)
 			if len(mutation.wantStrand) != 0 {
-				before := readRetained(t)
 				ready := make(chan struct{}, 1)
 				refused := opts
 				refused.TestRuntimeReadyHook = func(*runtimepkg.Runtime) { ready <- struct{}{} }
@@ -925,7 +917,7 @@ func requireChangedStandingColdStartMatrix(t *testing.T, opts cliapp.ServeOption
 						t.Fatalf("destructive bundle refusal missing %q:\n%s", want, output)
 					}
 				}
-				if after := readRetained(t); !reflect.DeepEqual(before, after) {
+				if after := prepare(t); !reflect.DeepEqual(before, after) {
 					t.Fatalf("refused bundle edit changed retained run, source or work: before=%+v after=%+v", before, after)
 				}
 				return
