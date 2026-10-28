@@ -639,7 +639,7 @@
               "carry_eligible": true
             },
             {
-              "name": "external_account_reference",
+              "name": "external_account",
               "type": "text",
               "required": true,
               "carry_eligible": true
@@ -687,7 +687,7 @@
               "carry_eligible": true
             },
             {
-              "name": "external_account_reference",
+              "name": "external_account",
               "type": "text",
               "required": true,
               "carry_eligible": true
@@ -1048,7 +1048,7 @@
               "carry_eligible": true
             },
             {
-              "name": "external_account_reference",
+              "name": "external_account",
               "type": "text",
               "required": true,
               "carry_eligible": true
@@ -1114,7 +1114,7 @@
               "carry_eligible": true
             },
             {
-              "name": "external_account_reference",
+              "name": "external_account",
               "type": "text",
               "required": true,
               "carry_eligible": true
@@ -1168,7 +1168,7 @@
               "carry_eligible": true
             },
             {
-              "name": "external_account_reference",
+              "name": "external_account",
               "type": "text",
               "required": true,
               "carry_eligible": true
@@ -1544,7 +1544,7 @@
       "code": "provider_trigger_pack_telegram",
       "status": "ok",
       "severity": "info",
-      "message": "provider trigger pack provider.telegram AVAILABLE; provenance=platform; source_path=provider-triggers/telegram; requires webhook_signing.telegram (target-scoped); CAN emit named event inbound.telegram; CAN emit named event inbound.telegram.callback_action; CAN emit named event inbound.telegram.text_message; CAN persist dedupe markers; CAN receive HTTPS route /webhooks/{alias}/telegram; CAN verify named secret webhook_signing.telegram; event_descriptor=inbound.telegram kind=raw fields=event_type:text:required:not-carry-eligible,headers:json:required:not-carry-eligible,payload:json:required:not-carry-eligible,provider:text:required:not-carry-eligible,provider_delivery_id:text:required:not-carry-eligible,provider_event_id:text:required:not-carry-eligible,provider_event_type:text:required:not-carry-eligible,received_at:text:required:not-carry-eligible; event_descriptor=inbound.telegram.callback_action kind=normalized fields=conversation_reference:text:required:carry-eligible,conversation_scope:text:required:carry-eligible,external_account_reference:text:required:carry-eligible,interaction_reference:text:required:carry-eligible,provider_message_reference:integer:required:carry-eligible,token:text:required:carry-eligible; event_descriptor=inbound.telegram.text_message kind=normalized fields=command_invocation:object:optional:not-carry-eligible,conversation_reference:text:required:carry-eligible,conversation_scope:text:required:carry-eligible,external_account_reference:text:required:carry-eligible,provider_message_reference:integer:required:carry-eligible,reply_to_message_reference:integer:optional:not-carry-eligible,text:text:required:carry-eligible; guarantee: cannot emit undeclared events - enforced by internal/providertriggers.InboundAdmissionPlan.Accept; guarantee: cannot run code before admission - enforced by internal/providertriggers.InboundAdmissionPlan.Accept; guarantee: cannot touch unbound resources - enforced by internal/runtime.InboundGateway.HandleResolvedWebhook",
+      "message": "provider trigger pack provider.telegram AVAILABLE; provenance=platform; source_path=provider-triggers/telegram; requires webhook_signing.telegram (target-scoped); CAN emit named event inbound.telegram; CAN emit named event inbound.telegram.callback_action; CAN emit named event inbound.telegram.text_message; CAN persist dedupe markers; CAN receive HTTPS route /webhooks/{alias}/telegram; CAN verify named secret webhook_signing.telegram; event_descriptor=inbound.telegram kind=raw fields=event_type:text:required:not-carry-eligible,headers:json:required:not-carry-eligible,payload:json:required:not-carry-eligible,provider:text:required:not-carry-eligible,provider_delivery_id:text:required:not-carry-eligible,provider_event_id:text:required:not-carry-eligible,provider_event_type:text:required:not-carry-eligible,received_at:text:required:not-carry-eligible; event_descriptor=inbound.telegram.callback_action kind=normalized fields=conversation_reference:text:required:carry-eligible,conversation_scope:text:required:carry-eligible,external_account:text:required:carry-eligible,interaction_reference:text:required:carry-eligible,provider_message_reference:integer:required:carry-eligible,token:text:required:carry-eligible; event_descriptor=inbound.telegram.text_message kind=normalized fields=command_invocation:object:optional:not-carry-eligible,conversation_reference:text:required:carry-eligible,conversation_scope:text:required:carry-eligible,external_account:text:required:carry-eligible,provider_message_reference:integer:required:carry-eligible,reply_to_message_reference:integer:optional:not-carry-eligible,text:text:required:carry-eligible; guarantee: cannot emit undeclared events - enforced by internal/providertriggers.InboundAdmissionPlan.Accept; guarantee: cannot run code before admission - enforced by internal/providertriggers.InboundAdmissionPlan.Accept; guarantee: cannot touch unbound resources - enforced by internal/runtime.InboundGateway.HandleResolvedWebhook",
       "owner": "internal/cliapp local claude_cli preflight/admission owner"
     },
     {
@@ -1568,7 +1568,7 @@
       "code": "provider_trigger_pack_whatsapp",
       "status": "ok",
       "severity": "info",
-      "message": "provider trigger pack provider.whatsapp AVAILABLE; provenance=platform; source_path=provider-triggers/whatsapp; CAN emit named event inbound.whatsapp; CAN emit named event inbound.whatsapp.edit; CAN emit named event inbound.whatsapp.message; CAN emit named event inbound.whatsapp.revoke; CAN persist dedupe markers; CAN receive authenticated session events whatsapp; event_descriptor=inbound.whatsapp kind=raw fields=event_type:text:required:not-carry-eligible,headers:json:required:not-carry-eligible,payload:json:required:not-carry-eligible,provider:text:required:not-carry-eligible,provider_delivery_id:text:required:not-carry-eligible,provider_event_id:text:required:not-carry-eligible,provider_event_type:text:required:not-carry-eligible,received_at:text:required:not-carry-eligible; event_descriptor=inbound.whatsapp.edit kind=normalized fields=conversation_reference:text:required:carry-eligible,conversation_scope:text:required:carry-eligible,ephemeral:boolean:required:carry-eligible,external_account_reference:text:required:carry-eligible,provider_message_reference:text:required:carry-eligible,provider_timestamp_ms:integer:required:carry-eligible,reply_to_message_reference:text:optional:not-carry-eligible,target_message_reference:text:required:carry-eligible,text:text:required:carry-eligible; event_descriptor=inbound.whatsapp.message kind=normalized fields=conversation_reference:text:required:carry-eligible,conversation_scope:text:required:carry-eligible,entry_invocation:object:optional:not-carry-eligible,ephemeral:boolean:required:carry-eligible,external_account_reference:text:required:carry-eligible,provider_message_reference:text:required:carry-eligible,provider_timestamp_ms:integer:required:carry-eligible,reply_to_message_reference:text:optional:not-carry-eligible,text:text:required:carry-eligible; event_descriptor=inbound.whatsapp.revoke kind=normalized fields=conversation_reference:text:required:carry-eligible,conversation_scope:text:required:carry-eligible,ephemeral:boolean:required:carry-eligible,external_account_reference:text:required:carry-eligible,provider_message_reference:text:required:carry-eligible,provider_timestamp_ms:integer:required:carry-eligible,reply_to_message_reference:text:optional:not-carry-eligible,target_message_reference:text:required:carry-eligible; guarantee: cannot emit undeclared events - enforced by internal/providertriggers.InboundAdmissionPlan.Accept; guarantee: cannot run code before admission - enforced by internal/providertriggers.InboundAdmissionPlan.Accept; guarantee: cannot touch unbound resources - enforced by internal/runtime.InboundGateway.HandleResolvedWebhook",
+      "message": "provider trigger pack provider.whatsapp AVAILABLE; provenance=platform; source_path=provider-triggers/whatsapp; CAN emit named event inbound.whatsapp; CAN emit named event inbound.whatsapp.edit; CAN emit named event inbound.whatsapp.message; CAN emit named event inbound.whatsapp.revoke; CAN persist dedupe markers; CAN receive authenticated session events whatsapp; event_descriptor=inbound.whatsapp kind=raw fields=event_type:text:required:not-carry-eligible,headers:json:required:not-carry-eligible,payload:json:required:not-carry-eligible,provider:text:required:not-carry-eligible,provider_delivery_id:text:required:not-carry-eligible,provider_event_id:text:required:not-carry-eligible,provider_event_type:text:required:not-carry-eligible,received_at:text:required:not-carry-eligible; event_descriptor=inbound.whatsapp.edit kind=normalized fields=conversation_reference:text:required:carry-eligible,conversation_scope:text:required:carry-eligible,ephemeral:boolean:required:carry-eligible,external_account:text:required:carry-eligible,provider_message_reference:text:required:carry-eligible,provider_timestamp_ms:integer:required:carry-eligible,reply_to_message_reference:text:optional:not-carry-eligible,target_message_reference:text:required:carry-eligible,text:text:required:carry-eligible; event_descriptor=inbound.whatsapp.message kind=normalized fields=conversation_reference:text:required:carry-eligible,conversation_scope:text:required:carry-eligible,entry_invocation:object:optional:not-carry-eligible,ephemeral:boolean:required:carry-eligible,external_account:text:required:carry-eligible,provider_message_reference:text:required:carry-eligible,provider_timestamp_ms:integer:required:carry-eligible,reply_to_message_reference:text:optional:not-carry-eligible,text:text:required:carry-eligible; event_descriptor=inbound.whatsapp.revoke kind=normalized fields=conversation_reference:text:required:carry-eligible,conversation_scope:text:required:carry-eligible,ephemeral:boolean:required:carry-eligible,external_account:text:required:carry-eligible,provider_message_reference:text:required:carry-eligible,provider_timestamp_ms:integer:required:carry-eligible,reply_to_message_reference:text:optional:not-carry-eligible,target_message_reference:text:required:carry-eligible; guarantee: cannot emit undeclared events - enforced by internal/providertriggers.InboundAdmissionPlan.Accept; guarantee: cannot run code before admission - enforced by internal/providertriggers.InboundAdmissionPlan.Accept; guarantee: cannot touch unbound resources - enforced by internal/runtime.InboundGateway.HandleResolvedWebhook",
       "owner": "internal/cliapp local claude_cli preflight/admission owner"
     }
   ]

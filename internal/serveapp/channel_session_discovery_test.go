@@ -79,7 +79,7 @@ normalized_events:
     author_subject: {type: chat, field: conversation_reference}
     fields:
       text: {from: text, schema: {type: string, minLength: 1}}
-      external_account_reference: {from: external_account_reference, schema: {type: string, minLength: 1}}
+      external_account: {from: external_account, schema: {type: string, minLength: 1}}
       conversation_reference: {from: conversation_reference, schema: {type: string, minLength: 1}}
       conversation_scope: {from: conversation_scope, schema: {type: string, enum: [direct, shared]}}
       provider_message_reference: {from: provider_message_reference, schema: {type: string, minLength: 1}}

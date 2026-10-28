@@ -142,8 +142,8 @@ func TestChannelStoredObjectOperationInputs(t *testing.T) {
 		extra                                    map[string]any
 	}{
 		{"acknowledge_interaction", "interaction_reference", "interaction_reference", fact.InteractionRef, map[string]any{"cursor": "callback-1"}, nil},
-		{"read_shared_inbox_entry", "member_reference", "external_account_reference", fact.ExternalAccountRef, map[string]any{"principal": "operator-a"}, map[string]any{"language_code": "fr"}},
-		{"install_shared_inbox_entry", "member_reference", "external_account_reference", fact.ExternalAccountRef, map[string]any{"principal": "operator-a"}, map[string]any{"commands": []any{map[string]any{"command": "open", "description": "Open inbox"}}}},
+		{"read_shared_inbox_entry", "member_reference", "external_account", fact.ExternalAccountRef, map[string]any{"principal": "operator-a"}, map[string]any{"language_code": "fr"}},
+		{"install_shared_inbox_entry", "member_reference", "external_account", fact.ExternalAccountRef, map[string]any{"principal": "operator-a"}, map[string]any{"commands": []any{map[string]any{"command": "open", "description": "Open inbox"}}}},
 	} {
 		t.Run(tc.operation, func(t *testing.T) {
 			input := map[string]any{tc.inputSlot: tc.typed}
@@ -190,7 +190,7 @@ func TestChannelOpaqueReferenceRestoration(t *testing.T) {
 		{"fractional integer", "delivery_reference", `{"id":1.5}`, telegram, nil, false},
 		{"missing plan", "interaction_reference", "callback", packs.SatisfactionPlan{}, nil, false},
 		{"unknown slot", "member_reference", `{"principal":"operator-a"}`, mock, nil, false},
-		{"wrong known slot", "external_account_reference", `{"cursor":"callback-1"}`, mock, nil, false},
+		{"wrong known slot", "external_account", `{"cursor":"callback-1"}`, mock, nil, false},
 		{"malformed", "interaction_reference", `{"cursor":`, mock, nil, false},
 		{"empty carrier", "interaction_reference", "", mock, nil, false},
 		{"empty string", "interaction_reference", " \t", telegram, nil, false},
@@ -316,15 +316,15 @@ func TestChannelNestedTypedOpaqueReferenceRestoration(t *testing.T) {
 		"principal": mockStringSchema(1, 20, ""),
 		"metadata":  mockObjectSchema(map[string]runtimecontracts.ToolInputSchema{"revision": integer, "trusted": boolean}, "revision", "trusted"),
 	}, "principal", "metadata")
-	channel.Manifest.OpaqueTypes["external_account_reference"] = member
+	channel.Manifest.OpaqueTypes["external_account"] = member
 	for name, event := range trigger.Events {
 		event.Fields["revision"] = packs.TriggerEventField{Schema: integer, Required: true}
 		event.Fields["trusted"] = packs.TriggerEventField{Schema: boolean, Required: true}
 		trigger.Events[name] = event
 	}
 	for name, event := range channel.Manifest.Events {
-		event.Fields["external_account_reference.metadata.revision"] = "event.revision"
-		event.Fields["external_account_reference.metadata.trusted"] = "event.trusted"
+		event.Fields["external_account.metadata.revision"] = "event.revision"
+		event.Fields["external_account.metadata.trusted"] = "event.trusted"
 		channel.Manifest.Events[name] = event
 	}
 	for _, name := range []string{"read_shared_inbox_entry", "install_shared_inbox_entry"} {
@@ -346,7 +346,7 @@ func TestChannelNestedTypedOpaqueReferenceRestoration(t *testing.T) {
 		t.Fatal(err)
 	}
 	stored := `{"metadata":{"revision":3,"trusted":true},"principal":"operator-a"}`
-	value, err := plan.RestoreOpaqueReference("external_account_reference", stored)
+	value, err := plan.RestoreOpaqueReference("external_account", stored)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -356,7 +356,7 @@ func TestChannelNestedTypedOpaqueReferenceRestoration(t *testing.T) {
 		t.Fatalf("typed nested leaves changed: %#v", value)
 	}
 	metadata["revision"] = float64(4)
-	again, err := plan.RestoreOpaqueReference("external_account_reference", stored)
+	again, err := plan.RestoreOpaqueReference("external_account", stored)
 	if err != nil || again.(map[string]any)["metadata"].(map[string]any)["revision"] != float64(3) {
 		t.Fatal("restored values retain caller ownership")
 	}
@@ -366,7 +366,7 @@ func TestChannelNestedTypedOpaqueReferenceRestoration(t *testing.T) {
 		`{"metadata":{"revision":3,"revision":4,"trusted":true},"principal":"operator-a"}`,
 		`{"metadata":{"revision":3},"principal":"operator-a"}`,
 	} {
-		if _, err := plan.RestoreOpaqueReference("external_account_reference", invalid); err == nil {
+		if _, err := plan.RestoreOpaqueReference("external_account", invalid); err == nil {
 			t.Errorf("invalid nested reference accepted: %s", invalid)
 		}
 	}

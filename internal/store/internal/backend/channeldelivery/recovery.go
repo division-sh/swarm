@@ -19,7 +19,7 @@ func ListActionableUncertainTx(ctx context.Context, tx *sql.Tx, selected Default
 	query := `SELECT p.delivery_id, p.source_kind, p.source_id FROM channel_delivery_plans p
 		WHERE p.state='uncertain' AND p.source_kind IN ('notice','card')
 		AND p.principal_id=? AND p.interface_key=? AND p.delivery_epoch=?
-		AND p.external_account_reference=? AND p.conversation_reference=? AND p.conversation_scope=?
+		AND p.external_account=? AND p.conversation_reference=? AND p.conversation_scope=?
 		AND NOT EXISTS (SELECT 1 FROM channel_delivery_plans child WHERE child.resend_of_delivery_id=p.delivery_id)
 		AND ((p.source_kind='notice' AND EXISTS (SELECT 1 FROM mailbox n WHERE n.item_id=p.source_id AND n.status='pending'))
 		 OR (p.source_kind='card' AND EXISTS (SELECT 1 FROM decision_cards c WHERE c.card_id=p.source_id AND c.status='pending')))
@@ -28,7 +28,7 @@ func ListActionableUncertainTx(ctx context.Context, tx *sql.Tx, selected Default
 		query = `SELECT p.delivery_id::text, p.source_kind, p.source_id::text FROM channel_delivery_plans p
 			WHERE p.state='uncertain' AND p.source_kind IN ('notice','card')
 			AND p.principal_id=$1::uuid AND p.interface_key=$2 AND p.delivery_epoch=$3
-			AND p.external_account_reference=$4 AND p.conversation_reference=$5 AND p.conversation_scope=$6
+			AND p.external_account=$4 AND p.conversation_reference=$5 AND p.conversation_scope=$6
 			AND NOT EXISTS (SELECT 1 FROM channel_delivery_plans child WHERE child.resend_of_delivery_id=p.delivery_id)
 			AND ((p.source_kind='notice' AND EXISTS (SELECT 1 FROM mailbox n WHERE n.item_id=p.source_id AND n.status='pending'))
 			 OR (p.source_kind='card' AND EXISTS (SELECT 1 FROM decision_cards c WHERE c.card_id=p.source_id AND c.status='pending')))
@@ -91,7 +91,7 @@ func PlanManualResendTx(ctx context.Context, tx *sql.Tx, action operatorchannel.
 	query := `SELECT source_kind, source_id, resend_generation FROM channel_delivery_plans p
 		WHERE delivery_id=? AND state='uncertain' AND source_kind IN ('notice','card')
 		AND principal_id=? AND interface_key=? AND delivery_epoch=?
-		AND external_account_reference=? AND conversation_reference=? AND conversation_scope=?
+		AND external_account=? AND conversation_reference=? AND conversation_scope=?
 		AND NOT EXISTS (SELECT 1 FROM channel_delivery_plans child WHERE child.resend_of_delivery_id=p.delivery_id)
 		AND ((source_kind='notice' AND EXISTS (SELECT 1 FROM mailbox n WHERE n.item_id=p.source_id AND n.status='pending'))
 		 OR (source_kind='card' AND EXISTS (SELECT 1 FROM decision_cards c WHERE c.card_id=p.source_id AND c.status='pending')))`
@@ -99,7 +99,7 @@ func PlanManualResendTx(ctx context.Context, tx *sql.Tx, action operatorchannel.
 		query = `SELECT source_kind, source_id::text, resend_generation FROM channel_delivery_plans p
 			WHERE delivery_id=$1::uuid AND state='uncertain' AND source_kind IN ('notice','card')
 			AND principal_id=$2::uuid AND interface_key=$3 AND delivery_epoch=$4
-			AND external_account_reference=$5 AND conversation_reference=$6 AND conversation_scope=$7
+			AND external_account=$5 AND conversation_reference=$6 AND conversation_scope=$7
 			AND NOT EXISTS (SELECT 1 FROM channel_delivery_plans child WHERE child.resend_of_delivery_id=p.delivery_id)
 			AND ((source_kind='notice' AND EXISTS (SELECT 1 FROM mailbox n WHERE n.item_id=p.source_id AND n.status='pending'))
 			 OR (source_kind='card' AND EXISTS (SELECT 1 FROM decision_cards c WHERE c.card_id=p.source_id AND c.status='pending')))
@@ -118,12 +118,12 @@ func PlanManualResendTx(ctx context.Context, tx *sql.Tx, action operatorchannel.
 	}
 	newID := uuid.NewString()
 	query = `INSERT INTO channel_delivery_plans (delivery_id, source_kind, source_id, principal_id,
-		interface_key, binding_revision, delivery_epoch, external_account_reference, conversation_reference,
+		interface_key, binding_revision, delivery_epoch, external_account, conversation_reference,
 		conversation_scope, state, resend_generation, resend_of_delivery_id, resend_action_publication_id, created_at)
 		VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'planned', ?, ?, ?, ?)`
 	if postgres {
 		query = `INSERT INTO channel_delivery_plans (delivery_id, source_kind, source_id, principal_id,
-			interface_key, binding_revision, delivery_epoch, external_account_reference, conversation_reference,
+			interface_key, binding_revision, delivery_epoch, external_account, conversation_reference,
 			conversation_scope, state, resend_generation, resend_of_delivery_id, resend_action_publication_id, created_at)
 			VALUES ($1::uuid, $2, $3::uuid, $4::uuid, $5, $6, $7, $8, $9, $10, 'planned', $11, $12::uuid, $13::uuid, $14)`
 	}

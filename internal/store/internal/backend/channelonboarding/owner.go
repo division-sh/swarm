@@ -1144,7 +1144,7 @@ func updateOperation(ctx context.Context, tx *sql.Tx, d dialect, op domain.Opera
 		nullable(c.BundleHash), c.BundleIdentity, c.PackInventoryGeneration, nullable(c.RuntimeInstanceID), c.ContextPublicationGeneration, c.PlanGeneration.Diagnostic(),
 		op.SlotKey, string(op.Phase), op.Revision, string(admissions), session, nullable(op.IdentityOperationID), nullableInt(op.BindingRevision), nullableInt(op.ActivationRevision), nullable(op.ConfirmationOperationID), nullable(op.FailureCode), nullable(op.FailureMessage), op.UpdatedAt, nullableTime(op.CompletedAt), op.OperationID)
 	if err == nil && op.DeploymentRegistration {
-		_, err = tx.ExecContext(ctx, d.bind(`UPDATE deployment_channel_operations SET account_reference=?,account_confirmed=?,logout_completed=? WHERE operation_id=?`), op.AccountReference, op.AccountConfirmed, op.LogoutCompleted, op.OperationID)
+		_, err = tx.ExecContext(ctx, d.bind(`UPDATE deployment_channel_operations SET operator_account=?,account_confirmed=?,logout_completed=? WHERE operation_id=?`), op.AccountReference, op.AccountConfirmed, op.LogoutCompleted, op.OperationID)
 	}
 	return err
 }

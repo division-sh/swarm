@@ -36,7 +36,7 @@ func TestSourceWithProviderTriggerEventsImportsEffectivePackSchemasWithoutAuthor
 		t.Fatal("pack event was misclassified as authored")
 	}
 	resolved, name, ok := wrapped.ResolveFlowEventCatalogEntry("coordinator", "inbound.telegram.text_message")
-	wantFields := []string{"command_invocation", "conversation_reference", "conversation_scope", "external_account_reference", "provider_message_reference", "reply_to_message_reference", "text"}
+	wantFields := []string{"command_invocation", "conversation_reference", "conversation_scope", "external_account", "provider_message_reference", "reply_to_message_reference", "text"}
 	if !ok || name != "inbound.telegram.text_message" || len(resolved.Payload.Properties) != len(wantFields) {
 		t.Fatalf("flow catalog resolution = (%#v, %q, %v)", resolved, name, ok)
 	}
@@ -52,7 +52,7 @@ func TestSourceWithProviderTriggerEventsImportsEffectivePackSchemasWithoutAuthor
 			t.Fatalf("flow catalog field %q = (%#v, %v), want %s", field, spec, exists, wantType)
 		}
 	}
-	wantRequired := []string{"conversation_reference", "conversation_scope", "external_account_reference", "provider_message_reference", "text"}
+	wantRequired := []string{"conversation_reference", "conversation_scope", "external_account", "provider_message_reference", "text"}
 	if strings.Join(resolved.Payload.Required, ",") != strings.Join(wantRequired, ",") {
 		t.Fatalf("flow catalog required fields = %q, want %q", resolved.Payload.Required, wantRequired)
 	}
@@ -527,7 +527,7 @@ func TestW2ProviderTriggerImportBindsCompiledInputPinOnce(t *testing.T) {
 	if err != nil {
 		t.Fatalf("bundle source fact: %v", err)
 	}
-	payload := []byte(`{"conversation_reference":"12345","conversation_scope":"direct","external_account_reference":"67890","provider_message_reference":1.0,"text":"hello"}`)
+	payload := []byte(`{"conversation_reference":"12345","conversation_scope":"direct","external_account":"67890","provider_message_reference":1.0,"text":"hello"}`)
 	event := eventtest.RunCreatingRootIngress(uuid.NewString(), "inbound.telegram.text_message", "telegram", "", payload, 0, uuid.NewString(), "", events.EventEnvelope{}, time.Now().UTC())
 	// This is a target-free root ingress, not a receiver named telegram-ingress.
 	admission, err := NewRuntimePayloadAdmitter(nil, wrapped, fact)(context.Background(), event, "")

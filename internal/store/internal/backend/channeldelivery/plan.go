@@ -70,12 +70,12 @@ func LoadPlan(ctx context.Context, db queryer, deliveryID string, postgres bool)
 		return Plan{}, false, fmt.Errorf("channel delivery plan requires a store and delivery id")
 	}
 	query := `SELECT delivery_id, source_kind, source_id, COALESCE(request_activation_id, ''), COALESCE(summary_count, 0), principal_id, interface_key, binding_revision, delivery_epoch,
-		external_account_reference, conversation_reference, conversation_scope, state,
+		external_account, conversation_reference, conversation_scope, state,
 		COALESCE(current_render_id, ''), COALESCE(current_receipt_operation_id, ''), action_capacity, text_capacity, label_capacity, action_page_index, ` + AcceptedEffectPredicate(false) + `
 		FROM channel_delivery_plans p WHERE delivery_id = ?`
 	if postgres {
 		query = `SELECT delivery_id::text, source_kind, source_id::text, COALESCE(request_activation_id::text, ''), COALESCE(summary_count, 0), principal_id::text, interface_key, binding_revision, delivery_epoch,
-			external_account_reference, conversation_reference, conversation_scope, state,
+			external_account, conversation_reference, conversation_scope, state,
 			COALESCE(current_render_id::text, ''), COALESCE(current_receipt_operation_id::text, ''), action_capacity, text_capacity, label_capacity, action_page_index, ` + AcceptedEffectPredicate(true) + `
 			FROM channel_delivery_plans p WHERE delivery_id = $1::uuid`
 	}
@@ -167,11 +167,11 @@ func PlanFirstSummaryTx(ctx context.Context, tx *sql.Tx, selected Default, postg
 		return nil
 	}
 	query := `INSERT INTO channel_delivery_plans (delivery_id, source_kind, source_id, summary_count, principal_id,
-		interface_key, binding_revision, delivery_epoch, external_account_reference, conversation_reference,
+		interface_key, binding_revision, delivery_epoch, external_account, conversation_reference,
 		conversation_scope, state, created_at) VALUES (?, 'summary', ?, ?, ?, ?, ?, ?, ?, ?, ?, 'planned', ?)`
 	if postgres {
 		query = `INSERT INTO channel_delivery_plans (delivery_id, source_kind, source_id, summary_count, principal_id,
-			interface_key, binding_revision, delivery_epoch, external_account_reference, conversation_reference,
+			interface_key, binding_revision, delivery_epoch, external_account, conversation_reference,
 			conversation_scope, state, created_at) VALUES ($1, 'summary', $2, $3, $4, $5, $6, $7, $8, $9, $10, 'planned', $11)`
 	}
 	_, err := tx.ExecContext(ctx, query, uuid.NewString(), selected.FirstOperationID, count, selected.PrincipalID,
@@ -242,12 +242,12 @@ func PlanOpenCardTx(ctx context.Context, tx *sql.Tx, cardID string, postgres boo
 
 func insertPlanTx(ctx context.Context, tx *sql.Tx, kind, sourceID string, selected Default, postgres bool) (bool, error) {
 	query := `INSERT INTO channel_delivery_plans (delivery_id, source_kind, source_id, principal_id,
-		interface_key, binding_revision, delivery_epoch, external_account_reference, conversation_reference,
+		interface_key, binding_revision, delivery_epoch, external_account, conversation_reference,
 		conversation_scope, state, created_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'planned', ?)
 		ON CONFLICT (source_kind, source_id, interface_key, delivery_epoch, resend_generation) DO NOTHING`
 	if postgres {
 		query = `INSERT INTO channel_delivery_plans (delivery_id, source_kind, source_id, principal_id,
-			interface_key, binding_revision, delivery_epoch, external_account_reference, conversation_reference,
+			interface_key, binding_revision, delivery_epoch, external_account, conversation_reference,
 			conversation_scope, state, created_at) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, 'planned', $11)
 			ON CONFLICT (source_kind, source_id, interface_key, delivery_epoch, resend_generation) DO NOTHING`
 	}
@@ -267,10 +267,10 @@ func insertPlanTx(ctx context.Context, tx *sql.Tx, kind, sourceID string, select
 	if rows != 0 {
 		return false, fmt.Errorf("channel delivery plan insert affected %d rows", rows)
 	}
-	query = `SELECT principal_id, external_account_reference, conversation_reference, conversation_scope
+	query = `SELECT principal_id, external_account, conversation_reference, conversation_scope
 		FROM channel_delivery_plans WHERE source_kind = ? AND source_id = ? AND interface_key = ? AND delivery_epoch = ? AND resend_generation = 0`
 	if postgres {
-		query = `SELECT principal_id::text, external_account_reference, conversation_reference, conversation_scope
+		query = `SELECT principal_id::text, external_account, conversation_reference, conversation_scope
 			FROM channel_delivery_plans WHERE source_kind = $1 AND source_id = $2::uuid AND interface_key = $3 AND delivery_epoch = $4 AND resend_generation = 0`
 	}
 	var principalID, account, conversation, scope string

@@ -193,7 +193,7 @@ func (i InterfaceIdentity) CanonicalSelector() string {
 
 type TextFact struct {
 	Interface           InterfaceIdentity `json:"interface"`
-	ExternalAccountRef  string            `json:"external_account_reference"`
+	ExternalAccountRef  string            `json:"external_account"`
 	ConversationRef     string            `json:"conversation_reference"`
 	ConversationScope   ConversationScope `json:"conversation_scope"`
 	Text                string            `json:"text"`
@@ -208,7 +208,7 @@ type ActionFact struct {
 	Kind               ActionSourceKind  `json:"source_kind"`
 	TextSource         TextFact          `json:"text_source,omitzero"`
 	Interface          InterfaceIdentity `json:"interface"`
-	ExternalAccountRef string            `json:"external_account_reference"`
+	ExternalAccountRef string            `json:"external_account"`
 	ConversationRef    string            `json:"conversation_reference"`
 	ConversationScope  ConversationScope `json:"conversation_scope"`
 	MessageReference   string            `json:"provider_message_reference"`
@@ -398,7 +398,7 @@ type Operation struct {
 	State                   OperationState    `json:"state"`
 	Revision                int64             `json:"revision"`
 	BindingRevision         int64             `json:"binding_revision,omitempty"`
-	ExternalAccountRef      string            `json:"external_account_reference,omitempty"`
+	ExternalAccountRef      string            `json:"external_account,omitempty"`
 	ConversationRef         string            `json:"conversation_reference,omitempty"`
 	ConversationScope       ConversationScope `json:"conversation_scope,omitempty"`
 	AccountPresentation     string            `json:"account_presentation,omitempty"`
@@ -424,7 +424,7 @@ type Operation struct {
 type Binding struct {
 	PrincipalID         string            `json:"principal_id"`
 	Interface           InterfaceIdentity `json:"interface"`
-	ExternalAccountRef  string            `json:"external_account_reference,omitempty"`
+	ExternalAccountRef  string            `json:"external_account,omitempty"`
 	ConversationRef     string            `json:"conversation_reference,omitempty"`
 	ConversationScope   ConversationScope `json:"conversation_scope,omitempty"`
 	AccountPresentation string            `json:"account_presentation,omitempty"`
@@ -444,7 +444,7 @@ type VerifiedProof struct {
 	Revision            int64             `json:"revision"`
 	Status              ProofStatus       `json:"status"`
 	Interface           InterfaceIdentity `json:"interface"`
-	ExternalAccountRef  string            `json:"external_account_reference"`
+	ExternalAccountRef  string            `json:"external_account"`
 	ConversationRef     string            `json:"conversation_reference"`
 	ConversationScope   ConversationScope `json:"conversation_scope"`
 	AccountPresentation string            `json:"account_presentation,omitempty"`
@@ -495,7 +495,7 @@ type Readback struct {
 	Status              BindingStatus     `json:"status"`
 	Reason              string            `json:"reason,omitempty"`
 	BindingRevision     int64             `json:"binding_revision,omitempty"`
-	ExternalAccountRef  string            `json:"external_account_reference,omitempty"`
+	ExternalAccountRef  string            `json:"external_account,omitempty"`
 	ConversationRef     string            `json:"conversation_reference,omitempty"`
 	ConversationScope   ConversationScope `json:"conversation_scope,omitempty"`
 	AccountPresentation string            `json:"account_presentation,omitempty"`

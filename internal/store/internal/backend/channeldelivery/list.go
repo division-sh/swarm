@@ -50,7 +50,7 @@ func LoadDestinationCurrentPlan(ctx context.Context, tx *sql.Tx, deliveryID stri
 		query := `SELECT b.binding_revision FROM operator_channel_bindings b
 			JOIN channel_delivery_defaults d ON d.singleton_id=1 AND d.state='current'
 			WHERE b.interface_key=? AND b.status='current' AND b.principal_id=?
-			AND b.binding_revision>=? AND b.external_account_reference=?
+			AND b.binding_revision>=? AND b.external_account=?
 			AND b.conversation_reference=? AND b.conversation_scope=?
 			AND d.principal_id=b.principal_id AND d.delivery_epoch=?
 			AND EXISTS (SELECT 1 FROM connected_channel_activations a
@@ -63,7 +63,7 @@ func LoadDestinationCurrentPlan(ctx context.Context, tx *sql.Tx, deliveryID stri
 			query = `SELECT b.binding_revision FROM operator_channel_bindings b
 				JOIN channel_delivery_defaults d ON d.singleton_id=1 AND d.state='current'
 				WHERE b.interface_key=$1 AND b.status='current' AND b.principal_id=$2::uuid
-				AND b.binding_revision>=$3 AND b.external_account_reference=$4
+				AND b.binding_revision>=$3 AND b.external_account=$4
 				AND b.conversation_reference=$5 AND b.conversation_scope=$6
 				AND d.principal_id=b.principal_id AND d.delivery_epoch=$7
 				AND EXISTS (SELECT 1 FROM connected_channel_activations a
@@ -86,12 +86,12 @@ func LoadDestinationCurrentPlan(ctx context.Context, tx *sql.Tx, deliveryID stri
 	}
 	query := `SELECT binding_revision FROM channel_delivery_defaults WHERE singleton_id=1
 		AND state='current' AND principal_id=? AND interface_key=? AND delivery_epoch=?
-		AND external_account_reference=? AND conversation_reference=? AND conversation_scope=?
+		AND external_account=? AND conversation_reference=? AND conversation_scope=?
 		AND binding_revision>=?`
 	if postgres {
 		query = `SELECT binding_revision FROM channel_delivery_defaults WHERE singleton_id=1
 			AND state='current' AND principal_id=$1::uuid AND interface_key=$2 AND delivery_epoch=$3
-			AND external_account_reference=$4 AND conversation_reference=$5 AND conversation_scope=$6
+			AND external_account=$4 AND conversation_reference=$5 AND conversation_scope=$6
 			AND binding_revision>=$7`
 	}
 	err = tx.QueryRowContext(ctx, query, plan.PrincipalID, plan.InterfaceKey, plan.DeliveryEpoch,
@@ -115,14 +115,14 @@ func ListCurrentPlans(ctx context.Context, tx *sql.Tx, afterDeliveryID string, l
 	}
 	query := `SELECT p.delivery_id, p.source_kind, p.source_id, COALESCE(p.request_activation_id, ''), COALESCE(p.summary_count, 0), p.principal_id,
 		p.interface_key, p.binding_revision, CASE WHEN ` + AcceptedEffectPredicate(false) + ` THEN p.binding_revision WHEN p.source_kind='response' THEN b.binding_revision ELSE d.binding_revision END,
-		p.delivery_epoch, p.external_account_reference,
+		p.delivery_epoch, p.external_account,
 		p.conversation_reference, p.conversation_scope, p.state,
 		COALESCE(p.current_render_id, ''), COALESCE(p.current_receipt_operation_id, ''), ` + AcceptedEffectPredicate(false) + `
 		FROM channel_delivery_plans p JOIN channel_delivery_defaults d ON d.singleton_id=1
 		LEFT JOIN operator_channel_bindings b ON b.interface_key=p.interface_key
 		WHERE (((d.state='current' AND p.principal_id=d.principal_id AND p.delivery_epoch=d.delivery_epoch
 		AND ((p.source_kind='response' AND b.status='current' AND b.principal_id=p.principal_id
-			AND b.binding_revision>=p.binding_revision AND b.external_account_reference=p.external_account_reference
+			AND b.binding_revision>=p.binding_revision AND b.external_account=p.external_account
 			AND b.conversation_reference=p.conversation_reference AND b.conversation_scope=p.conversation_scope
 			AND EXISTS (SELECT 1 FROM connected_channel_activations a
 				JOIN channel_onboarding_operations o ON o.operation_id=a.operation_id
@@ -132,21 +132,21 @@ func ListCurrentPlans(ctx context.Context, tx *sql.Tx, afterDeliveryID string, l
 				AND o.identity_operation_id=b.operation_id AND o.phase='succeeded'))
 		OR (p.source_kind<>'response' AND p.interface_key=d.interface_key
 			AND d.binding_revision>=p.binding_revision
-			AND p.external_account_reference=d.external_account_reference
+			AND p.external_account=d.external_account
 			AND p.conversation_reference=d.conversation_reference AND p.conversation_scope=d.conversation_scope))
 		) AND p.state <> 'retired' AND ` + SendEligibilityPredicate + `) OR ` + AcceptedEffectPredicate(false) + `)
 		AND p.delivery_id > ? ORDER BY p.delivery_id LIMIT ?`
 	if postgres {
 		query = `SELECT p.delivery_id::text, p.source_kind, p.source_id::text, COALESCE(p.request_activation_id::text, ''), COALESCE(p.summary_count, 0), p.principal_id::text,
 			p.interface_key, p.binding_revision, CASE WHEN ` + AcceptedEffectPredicate(true) + ` THEN p.binding_revision WHEN p.source_kind='response' THEN b.binding_revision ELSE d.binding_revision END,
-			p.delivery_epoch, p.external_account_reference,
+			p.delivery_epoch, p.external_account,
 			p.conversation_reference, p.conversation_scope, p.state,
 			COALESCE(p.current_render_id::text, ''), COALESCE(p.current_receipt_operation_id::text, ''), ` + AcceptedEffectPredicate(true) + `
 			FROM channel_delivery_plans p JOIN channel_delivery_defaults d ON d.singleton_id=1
 			LEFT JOIN operator_channel_bindings b ON b.interface_key=p.interface_key
 			WHERE (((d.state='current' AND p.principal_id=d.principal_id AND p.delivery_epoch=d.delivery_epoch
 			AND ((p.source_kind='response' AND b.status='current' AND b.principal_id=p.principal_id
-				AND b.binding_revision>=p.binding_revision AND b.external_account_reference=p.external_account_reference
+				AND b.binding_revision>=p.binding_revision AND b.external_account=p.external_account
 				AND b.conversation_reference=p.conversation_reference AND b.conversation_scope=p.conversation_scope
 				AND EXISTS (SELECT 1 FROM connected_channel_activations a
 					JOIN channel_onboarding_operations o ON o.operation_id=a.operation_id
@@ -156,7 +156,7 @@ func ListCurrentPlans(ctx context.Context, tx *sql.Tx, afterDeliveryID string, l
 					AND o.identity_operation_id=b.operation_id AND o.phase='succeeded'))
 			OR (p.source_kind<>'response' AND p.interface_key=d.interface_key
 				AND d.binding_revision>=p.binding_revision
-				AND p.external_account_reference=d.external_account_reference
+				AND p.external_account=d.external_account
 				AND p.conversation_reference=d.conversation_reference AND p.conversation_scope=d.conversation_scope))
 			) AND p.state <> 'retired' AND ` + SendEligibilityPredicate + `) OR ` + AcceptedEffectPredicate(true) + `)
 			AND p.delivery_id > $1::uuid ORDER BY p.delivery_id LIMIT $2`

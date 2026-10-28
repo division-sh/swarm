@@ -379,7 +379,7 @@ func TestRootConnectedTemplatePublicationRollbackIsAtomicAcrossSelectedStores(t 
 				"bundle_hash": bundleHash,
 				"event_name":  "inbound.telegram.text_message",
 				"payload": map[string]any{
-					"conversation_reference": "42", "conversation_scope": "direct", "external_account_reference": "42",
+					"conversation_reference": "42", "conversation_scope": "direct", "external_account": "42",
 					"provider_message_reference": 1, "text": "rollback proof",
 				},
 				"idempotency_key": idempotencyKey,
@@ -435,7 +435,7 @@ func TestRootConnectedTemplatePublicationRollsBackAfterDeliveryAndCompletionAcro
 				idempotencyKey := "public-input-" + stage.name + "-" + string(backend)
 				rpcErr := requireServedJSONRPCError(t, endpoint, "event.publish", map[string]any{
 					"bundle_hash": bundleHash, "event_name": "inbound.telegram.text_message",
-					"payload":         map[string]any{"conversation_reference": "42", "conversation_scope": "direct", "external_account_reference": "42", "provider_message_reference": 1, "text": "late rollback proof"},
+					"payload":         map[string]any{"conversation_reference": "42", "conversation_scope": "direct", "external_account": "42", "provider_message_reference": 1, "text": "late rollback proof"},
 					"idempotency_key": idempotencyKey,
 				})
 				if code, _ := rpcErr.Data["code"].(string); code != apiv1.EventPublishFailedCode {
@@ -1241,7 +1241,7 @@ func runServedGeneratedInputFixtureBackendProof(t *testing.T, backend servedpari
 	wantPayload := map[string]any{
 		"conversation_reference":     "0",
 		"conversation_scope":         "direct",
-		"external_account_reference": "0",
+		"external_account": "0",
 		"provider_message_reference": float64(1),
 		"text":                       "0",
 	}

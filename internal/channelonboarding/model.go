@@ -575,7 +575,7 @@ func (r StartRequest) Validate() error {
 
 type Operation struct {
 	DeploymentRegistration  bool                              `json:"deployment_registration,omitempty"`
-	AccountReference        string                            `json:"account_reference,omitempty"`
+	AccountReference        string                            `json:"operator_account,omitempty"`
 	LogoutCompleted         bool                              `json:"logout_completed,omitempty"`
 	AccountConfirmed        bool                              `json:"account_confirmed,omitempty"`
 	ExpectedAccount         string                            `json:"expected_account,omitempty"`

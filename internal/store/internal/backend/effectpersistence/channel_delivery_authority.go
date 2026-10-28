@@ -68,15 +68,15 @@ func channelDeliveryAuthorityCurrent(ctx context.Context, q schemaQueryer, autho
 		WHERE p.delivery_id=? AND r.render_id=? AND p.current_render_id=r.render_id AND r.render_hash=?
 		  AND p.state='rendered'
 		  AND p.principal_id=? AND p.interface_key=? AND p.delivery_epoch=?
-		  AND p.external_account_reference=? AND p.conversation_reference=?
+		  AND p.external_account=? AND p.conversation_reference=?
 		  AND selected.state='current' AND selected.principal_id=p.principal_id
 		  AND selected.interface_key=p.interface_key AND selected.delivery_epoch=p.delivery_epoch
-		  AND selected.binding_revision=? AND selected.external_account_reference=p.external_account_reference
+		  AND selected.binding_revision=? AND selected.external_account=p.external_account
 		  AND selected.conversation_reference=p.conversation_reference
 		  AND selected.conversation_scope=p.conversation_scope
 		  AND binding.status='current' AND binding.principal_id=selected.principal_id
 		  AND binding.binding_revision=selected.binding_revision
-		  AND binding.external_account_reference=selected.external_account_reference
+		  AND binding.external_account=selected.external_account
 		  AND binding.conversation_reference=selected.conversation_reference
 		  AND binding.conversation_scope=selected.conversation_scope
 		  AND onboarding.identity_operation_id=binding.operation_id
@@ -110,15 +110,15 @@ func channelDeliveryAuthorityCurrent(ctx context.Context, q schemaQueryer, autho
 			WHERE p.delivery_id=$2::uuid AND r.render_id=$3::uuid AND p.current_render_id=r.render_id AND r.render_hash=$4
 			  AND p.state='rendered'
 			  AND p.principal_id=$5::uuid AND p.interface_key=$6 AND p.delivery_epoch=$7
-			  AND p.external_account_reference=$8 AND p.conversation_reference=$9
+			  AND p.external_account=$8 AND p.conversation_reference=$9
 			  AND selected.state='current' AND selected.principal_id=p.principal_id
 			  AND selected.interface_key=p.interface_key AND selected.delivery_epoch=p.delivery_epoch
-			  AND selected.binding_revision=$10 AND selected.external_account_reference=p.external_account_reference
+			  AND selected.binding_revision=$10 AND selected.external_account=p.external_account
 			  AND selected.conversation_reference=p.conversation_reference
 			  AND selected.conversation_scope=p.conversation_scope
 			  AND binding.status='current' AND binding.principal_id=selected.principal_id
 			  AND binding.binding_revision=selected.binding_revision
-			  AND binding.external_account_reference=selected.external_account_reference
+			  AND binding.external_account=selected.external_account
 			  AND binding.conversation_reference=selected.conversation_reference
 			  AND binding.conversation_scope=selected.conversation_scope
 			  AND onboarding.identity_operation_id=binding.operation_id
@@ -168,12 +168,12 @@ func channelResponseAuthorityCurrent(ctx context.Context, q schemaQueryer, autho
 		WHERE p.delivery_id=? AND p.source_kind='response' AND p.state='rendered'
 		AND p.current_render_id=r.render_id AND r.render_id=? AND r.render_hash=?
 		AND p.principal_id=? AND p.interface_key=? AND p.delivery_epoch=?
-		AND p.external_account_reference=? AND p.conversation_reference=?
+		AND p.external_account=? AND p.conversation_reference=?
 		AND selected.state='current' AND selected.principal_id=p.principal_id
 		AND selected.delivery_epoch=p.delivery_epoch
 		AND binding.status='current' AND binding.principal_id=p.principal_id
 		AND binding.binding_revision>=p.binding_revision AND binding.binding_revision=?
-		AND binding.external_account_reference=p.external_account_reference
+		AND binding.external_account=p.external_account
 		AND binding.conversation_reference=p.conversation_reference
 		AND binding.conversation_scope=p.conversation_scope
 		AND onboarding.identity_operation_id=binding.operation_id
@@ -205,12 +205,12 @@ func channelResponseAuthorityCurrent(ctx context.Context, q schemaQueryer, autho
 			WHERE p.delivery_id=$2::uuid AND p.source_kind='response' AND p.state='rendered'
 			AND p.current_render_id=r.render_id AND r.render_id=$3::uuid AND r.render_hash=$4
 			AND p.principal_id=$5::uuid AND p.interface_key=$6 AND p.delivery_epoch=$7
-			AND p.external_account_reference=$8 AND p.conversation_reference=$9
+			AND p.external_account=$8 AND p.conversation_reference=$9
 			AND selected.state='current' AND selected.principal_id=p.principal_id
 			AND selected.delivery_epoch=p.delivery_epoch
 			AND binding.status='current' AND binding.principal_id=p.principal_id
 			AND binding.binding_revision>=p.binding_revision AND binding.binding_revision=$10
-			AND binding.external_account_reference=p.external_account_reference
+			AND binding.external_account=p.external_account
 			AND binding.conversation_reference=p.conversation_reference
 			AND binding.conversation_scope=p.conversation_scope
 			AND onboarding.identity_operation_id=binding.operation_id

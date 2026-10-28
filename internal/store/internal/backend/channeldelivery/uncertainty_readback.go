@@ -27,13 +27,13 @@ func appendUncertaintyReadbackTx(ctx context.Context, tx *sql.Tx, audience rende
 	query := `SELECT DISTINCT p.source_kind, p.source_id FROM channel_delivery_plans p
 		WHERE p.state='uncertain' AND p.source_kind IN ('notice','card')
 		AND p.principal_id=? AND p.interface_key=? AND p.delivery_epoch=?
-		AND p.external_account_reference=? AND p.conversation_reference=? AND p.conversation_scope=?
+		AND p.external_account=? AND p.conversation_reference=? AND p.conversation_scope=?
 		ORDER BY p.source_kind, p.source_id`
 	if postgres {
 		query = `SELECT DISTINCT p.source_kind, p.source_id::text FROM channel_delivery_plans p
 			WHERE p.state='uncertain' AND p.source_kind IN ('notice','card')
 			AND p.principal_id=$1::uuid AND p.interface_key=$2 AND p.delivery_epoch=$3
-			AND p.external_account_reference=$4 AND p.conversation_reference=$5 AND p.conversation_scope=$6
+			AND p.external_account=$4 AND p.conversation_reference=$5 AND p.conversation_scope=$6
 			ORDER BY p.source_kind, p.source_id::text`
 	}
 	rows, err := tx.QueryContext(ctx, query, selected.PrincipalID, selected.InterfaceKey, selected.DeliveryEpoch,

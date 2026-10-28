@@ -18,7 +18,7 @@ onboarding:
 opaque_types:
   destination: {type: string, pattern: '^[0-9]+$', minLength: 1, maxLength: 20}
   delivery_reference: {type: string, pattern: '^[0-9]+$', minLength: 1, maxLength: 20}
-  external_account_reference: {type: string, pattern: '^[0-9]+$', minLength: 1, maxLength: 20}
+  external_account: {type: string, pattern: '^[0-9]+$', minLength: 1, maxLength: 20}
   conversation_reference: {type: string, pattern: '^[0-9]+$', minLength: 1, maxLength: 20}
 operations:
   deliver:
@@ -33,7 +33,7 @@ events:
     event: inbound.discord.text_message
     fields:
       text: event.text
-      external_account_reference: event.author_id
+      external_account: event.author_id
       conversation_reference: event.channel_id
       conversation_scope: event.scope
       provider_message_reference: event.message_id
