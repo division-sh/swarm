@@ -3,6 +3,7 @@ package runbundle
 import (
 	"context"
 	"errors"
+	"path/filepath"
 	"strings"
 	"testing"
 
@@ -16,6 +17,7 @@ import (
 	"github.com/division-sh/swarm/internal/runtime/fanoutbarrier"
 	"github.com/division-sh/swarm/internal/runtime/fanoutobligation"
 	"github.com/division-sh/swarm/internal/runtime/semanticview"
+	"github.com/division-sh/swarm/internal/sourceartifact"
 	"github.com/division-sh/swarm/internal/testutil/sourceartifactfixture"
 )
 
@@ -31,8 +33,20 @@ func (r admissionAvailabilityReader) ReadBundleUpgradeState(_ context.Context, r
 
 func admittedUpgradeSource(t *testing.T, label string) semanticview.Source {
 	t.Helper()
-	artifact := sourceartifactfixture.New("global/schema.yaml", []byte("name: "+label+"\n"))
-	return semanticview.Wrap(&contracts.WorkflowContractBundle{SourceArtifact: artifact})
+	artifact, err := sourceartifact.AdmitMembers(map[string][]byte{
+		"manifest.yaml": []byte("version: 1.0.0\nplatform_version: '*'\n"),
+		"schema.yaml":   []byte("stages: []\n# " + label + "\n"),
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	rooted, _ := sourceartifactfixture.Rooted(t, label, artifact)
+	repo := filepath.Join("..", "..", "..")
+	bundle, err := contracts.LoadWorkflowContractBundleFromRootedSource(repo, rooted, contracts.DefaultPlatformSpecFile(repo), contracts.WorkflowContractLoadOptions{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	return semanticview.Wrap(bundle)
 }
 
 func TestAdmitPinnedSourcesRequiresCompleteObservation(t *testing.T) {
@@ -60,6 +74,16 @@ func TestAdmitPinnedSourcesRequiresCompleteObservation(t *testing.T) {
 
 func TestAdmitPinnedSourcesUsesExactActiveSourceOwner(t *testing.T) {
 	candidate, current := admittedUpgradeSource(t, "candidate"), admittedUpgradeSource(t, "current")
+	candidateBundle, _ := semanticview.Bundle(candidate)
+	first, err := candidateBundle.RootedSource()
+	if err != nil {
+		t.Fatal(err)
+	}
+	currentBundle, _ := semanticview.Bundle(current)
+	second, err := currentBundle.RootedSource()
+	if err != nil {
+		t.Fatal(err)
+	}
 	hash, _ := upgradeSourceHash(candidate)
 	other, _ := upgradeSourceHash(current)
 	for _, state := range []string{"running", "live", "paused"} {

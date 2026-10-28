@@ -671,7 +671,7 @@ func logInboundPublicationFailure(logger *RuntimeLogger, requestCtx context.Cont
 		return
 	}
 	if path, rejected := providertriggers.NormalizedInputValidationPath(err); rejected {
-		logInboundPayloadRejection(logger, requestCtx, provider, serviceID, providerEventID, path)
+		logInboundPayloadRejection(logger, requestCtx, provider, flowPath, providerEventID, path)
 		return
 	}
 	// Durable failure envelopes normalize unknown errors; retain joined causes in
