@@ -13,6 +13,7 @@ import (
 )
 
 type Contract struct {
+	source     semanticview.Source
 	FlowID     string
 	EntityType string
 	Entity     runtimecontracts.EntityContract
@@ -166,6 +167,7 @@ func ResolveForFlow(source semanticview.Source, flowID string) (Contract, bool) 
 		entityType, entity, ok := bundle.FlowPrimaryEntityContract(flowID)
 		if ok {
 			return Contract{
+				source:     source,
 				FlowID:     flowID,
 				EntityType: strings.TrimSpace(entityType),
 				Entity:     entity,
@@ -175,6 +177,7 @@ func ResolveForFlow(source semanticview.Source, flowID string) (Contract, bool) 
 		if rootFlowContractApplies(bundle, flowID) {
 			entityType, entity, ok := bundle.RootPrimaryEntityContract()
 			return Contract{
+				source:     source,
 				FlowID:     flowID,
 				EntityType: strings.TrimSpace(entityType),
 				Entity:     entity,
@@ -185,6 +188,7 @@ func ResolveForFlow(source semanticview.Source, flowID string) (Contract, bool) 
 	}
 	entityType, entity, ok := bundle.RootPrimaryEntityContract()
 	return Contract{
+		source:     source,
 		FlowID:     "",
 		EntityType: strings.TrimSpace(entityType),
 		Entity:     entity,

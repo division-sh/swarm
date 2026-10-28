@@ -34,6 +34,7 @@ type runtimeIncoming struct {
 	connection *RuntimeConnection
 	store      runtimeIncomingStore
 	handoff    *sessionBusinessHandoff
+	registered *RegisteredBusinessBinding
 }
 
 func validateRuntimeIncoming(ctx context.Context, opts *RuntimeIncomingOptions, store channelonboarding.Store, op channelonboarding.Operation) error {
@@ -79,24 +80,11 @@ func (c *RuntimeConnection) receive(ctx context.Context, raw any) (err error) {
 		return err
 	}
 	defer func() { err = errors.Join(err, work.Done()) }()
-	if c.operation.DeploymentRegistration {
-		op, err := c.currentOperation(work.Context())
-		if err != nil {
-			return err
-		}
-		if !op.AccountConfirmed || op.IdentityOperationID == "" {
-			return errIncomingAdmissionPending
-		}
-	}
 	account, err := c.AdmitSessionAccount(work.Context(), c.sessionAccount())
 	if err != nil {
 		return err
 	}
 	defer account.Close()
-	scope, source, err := c.incoming.receiveScope(work.Context(), message)
-	if err != nil {
-		return err
-	}
 	if message.Info.IsFromMe {
 		device, err := c.state.device(work.Context())
 		if err != nil {
@@ -108,8 +96,67 @@ func (c *RuntimeConnection) receive(ctx context.Context, raw any) (err error) {
 			sender != device.ID.ToNonAD() && sender != device.LID.ToNonAD() {
 			return errIncomingMalformed
 		}
-		// The SDK owns linked-device echoes and sync, not customer ingress.
-		return nil
+		return nil // The SDK owns linked-device echoes, not customer ingress.
+	}
+	incoming := c.incoming
+	if c.operation.DeploymentRegistration {
+		op, err := c.currentOperation(work.Context())
+		if err != nil {
+			return err
+		}
+		if !op.AccountConfirmed {
+			return errIncomingAdmissionPending
+		}
+		claim, err := incoming.pendingOperatorClaim(work.Context(), op, message)
+		if err != nil {
+			return err
+		}
+		if !claim && c.registeredBusiness != nil {
+			occurrence := c.state.currentOccurrence()
+			if occurrence == nil {
+				return errClientOccurrenceFenced
+			}
+			unclaimed, err := captureSDKMessage(captureScope{DeploymentRegistration: true, Kind: channelonboarding.SessionInputOnboarding,
+				Session: op.SessionAccount, OnboardingOperation: op.OperationID, OperationRevision: op.Revision, PrincipalID: op.PrincipalID},
+				captureSource{DeploymentRegistration: true, CatalogGeneration: incoming.handoff.trigger.Generation()}, occurrence.occurrenceID, message, time.Now().UTC().Truncate(time.Microsecond))
+			if err != nil {
+				return err
+			}
+			if terminal, err := c.captures.isUnclaimed(work.Context(), unclaimed); err != nil || terminal {
+				return err
+			}
+			binding, err := c.registeredBusiness(work.Context(), op)
+			if errors.Is(err, ErrAccountUnclaimed) {
+				return c.captures.retainUnclaimed(work.Context(), unclaimed)
+			}
+			if err != nil {
+				return err
+			}
+			if binding.Release == nil || binding.Current == nil || binding.Context == nil || binding.Coordinate.Validate() != nil ||
+				binding.Publication.Validate() != nil {
+				if binding.Release != nil {
+					_ = binding.Release()
+				}
+				return errCaptureScopeChanged
+			}
+			defer func() { err = errors.Join(err, binding.Release()) }()
+			if err := binding.Current(binding.Context); err != nil {
+				return err
+			}
+			incoming, err = newRuntimeIncoming(c, binding.Incoming)
+			if err != nil {
+				return err
+			}
+			incoming.registered, incoming.handoff.input.registered = &binding, &binding
+			ctx = binding.Context
+		}
+	}
+	if !c.operation.DeploymentRegistration || incoming.registered == nil {
+		ctx = work.Context()
+	}
+	scope, source, err := incoming.receiveScope(ctx, message)
+	if err != nil {
+		return err
 	}
 	occurrence := c.state.currentOccurrence()
 	if occurrence == nil {
@@ -119,12 +166,12 @@ func (c *RuntimeConnection) receive(ctx context.Context, raw any) (err error) {
 	if err != nil {
 		return err
 	}
-	if err := c.captures.capture(work.Context(), event); err != nil {
+	if err := c.captures.capture(ctx, event); err != nil {
 		return err
 	}
 	// Local capture, selected-store publication and the SDK receipt remain
 	// distinct. Failure preserves capture and returns non-success to the SDK.
-	return c.incoming.drain(work.Context())
+	return incoming.drain(ctx)
 }
 
 func (i *runtimeIncoming) receiveScope(ctx context.Context, message *events.Message) (captureScope, captureSource, error) {
@@ -133,6 +180,16 @@ func (i *runtimeIncoming) receiveScope(ctx context.Context, message *events.Mess
 		return captureScope{}, captureSource{}, err
 	}
 	if op.DeploymentRegistration {
+		if i.registered != nil {
+			binding := i.registered
+			scope := captureScope{DeploymentRegistration: true, RegisteredBusiness: true, AccountOnly: true,
+				Kind: channelonboarding.SessionInputBusiness, Session: op.SessionAccount,
+				PublicationBinding: binding.Publication, Source: binding.Coordinate.DurableIdentity(),
+				OnboardingOperation: op.OperationID, OperationRevision: op.Revision,
+				TargetSelector: binding.TargetSelector, PrincipalID: op.PrincipalID}
+			return scope, captureSource{DeploymentRegistration: true, Coordinate: binding.Coordinate,
+				CatalogGeneration: binding.Incoming.Trigger.Generation()}, scope.Validate()
+		}
 		claim, err := i.pendingOperatorClaim(ctx, op, message)
 		if err != nil {
 			return captureScope{}, captureSource{}, err

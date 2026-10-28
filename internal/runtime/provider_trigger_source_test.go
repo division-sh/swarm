@@ -83,7 +83,7 @@ func TestSourceWithProviderTriggerEventsImportsEffectivePackSchemasWithoutAuthor
 	if strings.Join(resolved.Payload.Required, ",") != strings.Join(wantRequired, ",") {
 		t.Fatalf("flow catalog required fields = %q, want %q", resolved.Payload.Required, wantRequired)
 	}
-	if _, err := ResolveStandingTargetDeclarations(wrapped, catalog); err != nil {
+	if _, err := ResolveStandingTargetDeclarations(wrapped, catalog, nil); err != nil {
 		t.Fatalf("standing declarations rejected pack-composed source: %v", err)
 	}
 	descriptors, err := AuthorActivityEventDescriptors(wrapped)

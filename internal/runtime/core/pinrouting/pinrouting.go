@@ -19,6 +19,7 @@ const (
 	FailureTargetUnreachableTerminated
 	FailureReplyAlreadyTerminal
 	FailureStaleArrival
+	FailureAccountUnclaimed
 )
 
 const targetFailureConnectOffset TargetFailure = 32
@@ -44,6 +45,8 @@ func (f TargetFailure) Code() string {
 		return "platform.reply_already_terminal"
 	case FailureStaleArrival:
 		return "platform.stale_arrival"
+	case FailureAccountUnclaimed:
+		return "account_unclaimed"
 	default:
 		if f > targetFailureConnectOffset {
 			return ConnectRoutePlanFailure(f - targetFailureConnectOffset).Code()
@@ -66,6 +69,8 @@ func ParseTargetFailure(code string) (TargetFailure, error) {
 		return FailureReplyAlreadyTerminal, nil
 	case "platform.stale_arrival":
 		return FailureStaleArrival, nil
+	case "account_unclaimed":
+		return FailureAccountUnclaimed, nil
 	default:
 		for failure := ConnectFailureSourceMissing; failure <= ConnectFailureLifecycleUnavailable; failure++ {
 			if failure.Code() == strings.TrimSpace(code) {

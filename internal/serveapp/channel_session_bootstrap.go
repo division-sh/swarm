@@ -19,6 +19,12 @@ import (
 // the runtime manager's unrelated persistence-bearing implementation fields.
 type serveSessionBootstrapRuntime func(context.Context, channelonboarding.Candidate) (context.Context, *sessionprovider.RuntimeIncomingOptions, processbinding.Binding, func() error, error)
 
+type deploymentRuntimeOptions struct {
+	manager  *runtime.RuntimeContextManager
+	sessions serveSessionBootstrapOwner
+	refresh  func(context.Context) error
+}
+
 type serveSessionBootstrapOwner interface {
 	channelonboarding.SessionBootstrapOwner
 	channelonboarding.SessionLogoutLifecycle

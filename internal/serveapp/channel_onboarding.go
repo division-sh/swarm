@@ -207,6 +207,39 @@ func compileServeChannelActivationSnapshot(ctx context.Context, manager *runtime
 		if err != nil {
 			return serveChannelActivationSnapshot{}, err
 		}
+		if scoped, ok := store.(interface {
+			DeploymentChannelOperations() channelonboarding.OperationStore
+		}); ok {
+			registered, err := scoped.DeploymentChannelOperations().ListChannelOnboardingOperations(ctx)
+			if err != nil {
+				return serveChannelActivationSnapshot{}, err
+			}
+			for _, contextDef := range manager.LoadedContexts() {
+				declarations, err := contextDef.StandingTargetDeclarations()
+				if err != nil {
+					return serveChannelActivationSnapshot{}, err
+				}
+				candidates, err := serveChannelContextCandidates(contextDef, declarations)
+				if err != nil {
+					return serveChannelActivationSnapshot{}, err
+				}
+				for _, op := range registered {
+					if !op.AccountConfirmed || op.Provider != "whatsapp" || op.Phase == channelonboarding.PhaseFailed || op.Phase == channelonboarding.PhaseRetired {
+						continue
+					}
+					for _, candidate := range candidates {
+						if candidate.Provider != op.Provider || candidate.Coordinate.Validate() != nil {
+							continue
+						}
+						compiled, err := channelonboarding.CompileRegisteredActivation(candidate, op)
+						if err != nil {
+							return serveChannelActivationSnapshot{}, err
+						}
+						learned = append(learned, compiled)
+					}
+				}
+			}
+		}
 		prebinding, err = compileServePrebindingActivations(ctx, catalog, operations, projection)
 		if err != nil {
 			return serveChannelActivationSnapshot{}, err

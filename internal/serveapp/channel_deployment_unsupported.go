@@ -18,6 +18,6 @@ func OpenChannelRegistration(context.Context, cliapp.ChannelRegistrationOptions)
 	return nil, errors.New("native channel registration requires Linux or macOS")
 }
 
-func deploymentChannelHandlers(string, string, string, *selected.Owner, *worklifetime.Process, startupownership.ProcessCapability, func(context.Context, string, string) bool) (apiv1.MethodHandler, publicingress.PendingDeploymentClaim, func() error) {
-	return nil, nil, func() error { return nil }
+func deploymentChannelHandlers(string, string, string, *selected.Owner, *worklifetime.Process, startupownership.ProcessCapability, func(context.Context, string, string) bool, deploymentRuntimeOptions) (apiv1.MethodHandler, publicingress.PendingDeploymentClaim, func(context.Context) error, func() error) {
+	return nil, nil, func(context.Context) error { return nil }, func() error { return nil }
 }

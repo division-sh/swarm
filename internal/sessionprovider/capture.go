@@ -38,6 +38,12 @@ func newCaptureStore(ctx context.Context, owner *sessionstate.Owner, connectionI
 func (s *captureStore) capture(ctx context.Context, event capturedEvent) error {
 	return s.owner.Capture(ctx, event)
 }
+func (s *captureStore) retainUnclaimed(ctx context.Context, event capturedEvent) error {
+	return s.owner.RetainUnclaimed(ctx, event)
+}
+func (s *captureStore) isUnclaimed(ctx context.Context, event capturedEvent) (bool, error) {
+	return s.owner.IsUnclaimed(ctx, event)
+}
 func (s *captureStore) pending(ctx context.Context) ([]capturedEvent, error) {
 	return s.owner.Pending(ctx)
 }

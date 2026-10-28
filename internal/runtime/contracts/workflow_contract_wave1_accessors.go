@@ -2,6 +2,7 @@ package contracts
 
 import (
 	"fmt"
+	"path"
 	"sort"
 	"strings"
 )
@@ -11,6 +12,70 @@ type PrimaryEntityContract struct {
 	EntityType string
 	Contract   EntityContract
 	Types      TypeCatalogDocument
+}
+
+// FlowOperatorAccount is a declaration, not proof that an account is linked.
+type FlowOperatorAccount struct {
+	FlowID     string
+	Keyed      bool
+	FromPolicy bool
+	Policy     string
+}
+
+func (b *WorkflowContractBundle) ResolveFlowOperatorAccount(flowID string) (FlowOperatorAccount, error) {
+	var absent FlowOperatorAccount
+	schema, found := b.FlowSchemaByID(flowID)
+	if !found {
+		return absent, fmt.Errorf("flow %s operator_account requires its admitted schema", flowID)
+	}
+	selection := FlowOperatorAccount{FlowID: flowID, Keyed: !schema.Instance.Empty()}
+	policy, inPolicy := b.PolicyValueForFlow(flowID, "operator_account")
+	primary, primaryErr := b.ResolveFlowPrimaryEntity(flowID)
+	field, inState := primary.Contract.Fields["operator_account"]
+	if selection.Keyed {
+		if schema.Instance.Path() != "operator_account" {
+			return absent, fmt.Errorf("flow %s schema.yaml instance %q must be operator_account for connection-account inbound", flowID, schema.Instance.Path())
+		}
+		if inPolicy {
+			return absent, fmt.Errorf("flow %s operator_account occurs in both schema.yaml instance and policy.yaml; keep only instance: operator_account", flowID)
+		}
+		if _, err := b.ResolveFlowTemplateInstance(flowID); err != nil {
+			return absent, err
+		}
+		if len(b.FlowFinalStages(flowID)) != 0 {
+			return absent, fmt.Errorf("flow %s uses instance: operator_account and must not declare a final stage; end customer child flows instead", flowID)
+		}
+	} else {
+		if inPolicy && inState {
+			return absent, fmt.Errorf("flow %s operator_account occurs in both policy.yaml and entities.yaml; keep exactly one", flowID)
+		}
+		if !inPolicy && !inState {
+			return absent, fmt.Errorf("flow %s requires operator_account: use instance: operator_account for a keyed flow, policy.yaml for one number, or a declared entities.yaml field for a dynamic keyless flow", flowID)
+		}
+		if inPolicy {
+			value, text := policy.Value.(string)
+			if !text || value == "" {
+				return absent, fmt.Errorf("flow %s policy.yaml operator_account must be a nonempty account string", flowID)
+			}
+			selection.FromPolicy, selection.Policy = true, value
+		}
+		for ancestor := flowID; ancestor != "."; {
+			ancestor = path.Dir(ancestor)
+			if parent, found := b.FlowSchemaByID(ancestor); found && !parent.Instance.Empty() {
+				return absent, fmt.Errorf("flow %s has a keyless operator_account holder under keyed ancestor %s; move it under keyless ancestors", flowID, ancestor)
+			}
+		}
+	}
+	if !selection.FromPolicy {
+		if primaryErr != nil {
+			return absent, primaryErr
+		}
+		resolved, err := (CatalogTypeReference{Type: field.Type, Catalog: primary.Types}).Resolve()
+		if !inState || err != nil || resolved.Kind != CatalogTypeText || field.IsOptional {
+			return absent, fmt.Errorf("flow %s entities.yaml operator_account must be a required text field", flowID)
+		}
+	}
+	return selection, nil
 }
 
 func (b *WorkflowContractBundle) ResolveFlowTemplateInstance(flowID string) (TemplateInstanceContract, error) {

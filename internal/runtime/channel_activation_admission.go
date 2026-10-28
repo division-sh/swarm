@@ -30,7 +30,17 @@ func (rt *Runtime) nativeChannelExecution(ctx context.Context, activation channe
 	if !ok {
 		return absent, &operatorchannel.SessionProviderUnavailableError{Provider: activation.SessionAccount.Provider}
 	}
-	op, err := rt.Options.ChannelOnboardingStore.GetChannelOnboarding(ctx, activation.OnboardingOperationID)
+	var operations channelonboarding.OperationStore = rt.Options.ChannelOnboardingStore
+	if activation.Source == channelonboarding.ActivationSourceRegistered {
+		scoped, ok := rt.Options.ChannelOnboardingStore.(interface {
+			DeploymentChannelOperations() channelonboarding.OperationStore
+		})
+		if !ok {
+			return absent, channelonboarding.ErrInvalidRequest
+		}
+		operations = scoped.DeploymentChannelOperations()
+	}
+	op, err := operations.GetChannelOnboarding(ctx, activation.OnboardingOperationID)
 	if err != nil {
 		return absent, err
 	}
@@ -67,7 +77,7 @@ func (rt *Runtime) validateChannelActivationPublication(ctx context.Context, pub
 				return err
 			}
 		}
-		if activation.Source == channelonboarding.ActivationSourceLearned {
+		if activation.Source == channelonboarding.ActivationSourceLearned || activation.Source == channelonboarding.ActivationSourceRegistered {
 			if err := rt.validateLearnedChannelPublication(ctx, activation); err != nil {
 				return err
 			}

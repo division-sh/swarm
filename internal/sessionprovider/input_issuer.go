@@ -30,6 +30,7 @@ type sessionInputOwner struct {
 	operations channelonboarding.OperationStore
 	native     *sessionInputReader
 	operation  string
+	registered *RegisteredBusinessBinding
 }
 
 func newSessionInputOwner(store channelonboarding.Store, operations channelonboarding.OperationStore, native *sessionInputReader, operation string) (*sessionInputOwner, error) {
@@ -144,6 +145,7 @@ func (v capturedRequestVerifier) ValidatePublicationRequest(raw []byte) error {
 func (o *sessionInputOwner) inputResponsibility(ctx context.Context, native nativeSessionInput, op channelonboarding.Operation, recovery bool) (channelonboarding.AdmissionResponsibility, error) {
 	original := channelonboarding.AdmissionResponsibility{OperationID: native.OperationID, OperationRevision: native.OperationRevision,
 		DeploymentRegistration: native.DeploymentRegistration,
+		RegisteredBusiness:     native.RegisteredBusiness,
 		ActivationRevision:     native.ActivationRevision, Coordinate: native.SourceContext.Coordinate, TargetSelector: native.TargetSelector,
 		Provider: native.Account.Provider, SessionAccount: native.Account}
 	if !recovery {
@@ -151,6 +153,13 @@ func (o *sessionInputOwner) inputResponsibility(ctx context.Context, native nati
 			return original, fmt.Errorf("native capture is outside its original responsibility")
 		}
 		original.Credentials = append([]channelonboarding.CredentialAdmission(nil), op.CredentialAdmissions...)
+		if native.RegisteredBusiness {
+			if o.registered == nil || !o.registered.Coordinate.Matches(native.SourceContext.Coordinate) ||
+				o.registered.TargetSelector != native.TargetSelector || o.registered.Publication != native.PublicationBinding {
+				return original, errCaptureScopeChanged
+			}
+			return original, nil
+		}
 		if native.Scope == channelonboarding.SessionInputBusiness {
 			activation, err := o.store.GetConnectedChannelActivation(ctx, op.SlotKey)
 			if err != nil {
@@ -160,6 +169,16 @@ func (o *sessionInputOwner) inputResponsibility(ctx context.Context, native nati
 				return original, errCaptureScopeChanged
 			}
 		}
+		return original, nil
+	}
+	if native.RegisteredBusiness {
+		if o.registered == nil || !o.registered.Coordinate.MatchesDurableIdentity(native.SourceContext.Coordinate) ||
+			o.registered.TargetSelector != native.TargetSelector || o.registered.Publication != native.PublicationBinding ||
+			!native.matchesOriginalOperation(op, native.SourceContext.Coordinate) {
+			return original, errCaptureScopeChanged
+		}
+		original.Coordinate = o.registered.Coordinate
+		original.Credentials = append([]channelonboarding.CredentialAdmission(nil), op.CredentialAdmissions...)
 		return original, nil
 	}
 	if native.Scope != channelonboarding.SessionInputBusiness || native.PrincipalID != op.PrincipalID ||
@@ -181,11 +200,19 @@ func (o *sessionInputOwner) businessRunOwner(ctx context.Context, native nativeS
 	if native.Scope != channelonboarding.SessionInputBusiness {
 		return nil, nil
 	}
+	if native.RegisteredBusiness {
+		if o.registered == nil || o.registered.Current == nil || o.registered.Publication.Validate() != nil ||
+			!o.registered.Coordinate.MatchesDurableIdentity(native.SourceContext.Coordinate) || o.registered.Publication != native.PublicationBinding {
+			return nil, errCaptureScopeChanged
+		}
+		return o.registered.Current, o.registered.Current(ctx)
+	}
 	validate := func(ctx context.Context) error {
 		reader, ok := o.store.(runlifecycle.LandingRunReader)
 		source := native.OwnedSource
 		target, err := packs.ParseChannelRegistrationTarget(native.TargetSelector)
-		if !ok || source.Validate() != nil || err != nil || source.BundleHash() != native.SourceContext.Coordinate.BundleHash {
+		if !ok || source.Validate() != nil || err != nil || source.BundleHash() != native.SourceContext.Coordinate.BundleHash ||
+			native.OwnedRoot.Validate() != nil || native.OwnedRoot.BundleHash() != source.BundleHash() {
 			return fmt.Errorf("native business input requires its exact owned source and run owner")
 		}
 		landing, found, err := reader.LoadLandingRun(ctx, runlifecycle.LiveRunScope{FlowPath: target.FlowPath})

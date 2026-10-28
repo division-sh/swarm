@@ -9,16 +9,21 @@ import (
 	"errors"
 	"os"
 	"path/filepath"
+	"sync/atomic"
 	"testing"
 	"time"
 
 	"github.com/division-sh/swarm/internal/channelonboarding"
 	"github.com/division-sh/swarm/internal/providertriggers"
 	"github.com/division-sh/swarm/internal/runtime/channeldelivery"
+	"github.com/division-sh/swarm/internal/runtime/core/flowidentity"
+	"github.com/division-sh/swarm/internal/runtime/core/worklifetime"
 	"github.com/division-sh/swarm/internal/runtime/executionposture"
 	runtimefailures "github.com/division-sh/swarm/internal/runtime/failures"
 	"github.com/division-sh/swarm/internal/runtime/inboundpublication"
+	"github.com/division-sh/swarm/internal/runtime/runlifecycle"
 	"github.com/division-sh/swarm/internal/store/storetest"
+	"github.com/division-sh/swarm/internal/testutil/sourceartifactfixture"
 	"github.com/google/uuid"
 	"go.mau.fi/whatsmeow/proto/waE2E"
 	"go.mau.fi/whatsmeow/types"
@@ -71,6 +76,93 @@ func waitRuntimeIncomingReceipt(t *testing.T, f *activeInputFixture, c *RuntimeC
 
 func TestWhatsAppRuntimeIncomingPublishesBeforeAcknowledgementBothStores(t *testing.T) {
 	for _, backend := range []string{"sqlite", "postgres"} {
+		t.Run(backend+"/registered", func(t *testing.T) {
+			f := newActiveInputFixtureWithTarget(t, backend, false, false, 1, true)
+			var err error
+			f.standing, err = f.selected.ReconcileFlowRun(f.ctx, runlifecycle.LiveRunScope{FlowPath: "."}, sourceartifactfixture.FactFor(f.rooted.Artifact()))
+			if err != nil {
+				t.Fatal(err)
+			}
+			publication := inboundpublication.BindingGeneration{RunID: f.standing.RunID}
+			incoming := RuntimeIncomingOptions{Alias: "whatsapp", Trigger: f.trigger, Bus: f.publicationBus(t), Posture: executionposture.Live}
+			var held atomic.Bool
+			selector := func(ctx context.Context, op channelonboarding.Operation) (RegisteredBusinessBinding, error) {
+				if op.OperationID != f.operation.OperationID || op.SessionAccount != f.operation.SessionAccount || !op.AccountConfirmed {
+					return RegisteredBusinessBinding{}, channelonboarding.ErrRevisionConflict
+				}
+				if !held.Load() {
+					return RegisteredBusinessBinding{}, ErrAccountUnclaimed
+				}
+				return RegisteredBusinessBinding{Context: f.ctx, Incoming: incoming, Coordinate: f.source.Coordinate,
+					TargetSelector: "ingress:.:whatsapp", Publication: publication,
+					Current: func(context.Context) error {
+						if !held.Load() {
+							return channelonboarding.ErrRevisionConflict
+						}
+						return f.ctx.Err()
+					}, Release: func() error { return nil }}, nil
+			}
+			if err := f.state.close(f.ctx); err != nil {
+				t.Fatal(err)
+			}
+			principal, err := f.selected.EnsureOperatorPrincipal(f.ctx, time.Now().UTC())
+			if err != nil {
+				t.Fatal(err)
+			}
+			process := worklifetime.NewProcess()
+			operations := f.selected.(interface {
+				DeploymentChannelOperations() channelonboarding.OperationStore
+			}).DeploymentChannelOperations()
+			c, err := OpenDeploymentConnection(f.ctx, DeploymentConnectionOptions{Directory: f.basePath, Store: f.selected,
+				Operations: operations, OperationID: f.operation.OperationID, Principal: principal, Process: process,
+				Plan: f.channel, Trigger: f.trigger, RegisteredBusiness: selector})
+			if err != nil {
+				t.Fatal(err)
+			}
+			t.Cleanup(func() {
+				if err := c.Close(context.Background()); err != nil {
+					t.Error(err)
+				}
+				process.Retire()
+				if _, err := process.Join(context.Background()); err != nil {
+					t.Error(err)
+				}
+			})
+			connectRuntimeConnectionFixture(t, f, c)
+			unclaimed, at := uuid.NewString(), time.Now()
+			sendRuntimeIncomingAtFixture(t, f, c, unclaimed, "no current holder", at)
+			waitRuntimeIncomingReceipt(t, f, c, unclaimed)
+			if count, err := c.UnclaimedCount(f.ctx); err != nil || count != 1 {
+				t.Fatal("unheld account did not retain exactly one terminal capture", count, err)
+			}
+			held.Store(true)
+			id, businessAt := uuid.NewString(), time.Now()
+			sendRuntimeIncomingAtFixture(t, f, c, id, "registered account customer input", businessAt)
+			waitRuntimeIncomingReceipt(t, f, c, id)
+			f.scope = captureScope{Kind: channelonboarding.SessionInputBusiness, Session: f.operation.SessionAccount,
+				Source: f.source.Coordinate.DurableIdentity(), OnboardingOperation: f.operation.OperationID, OperationRevision: f.operation.Revision,
+				PrincipalID: f.operation.PrincipalID, TargetSelector: "ingress:.:whatsapp", AccountOnly: true,
+				DeploymentRegistration: true, RegisteredBusiness: true, PublicationBinding: publication}
+			record, found, err := f.selected.(sessionBusinessStore).LoadInboundPublicationByIdentity(f.ctx, runtimeIncomingIdentityFixture(t, f, id))
+			if err != nil || !found || record.OutputCount != 2 {
+				t.Fatal("registered account acknowledged before its exact current runtime publication", found, err)
+			}
+			original, err := publicationCaptureProvenance(record.Request)
+			if err != nil || original.Scope != f.scope || original.Scope.ActivationID != "" || original.Scope.ActivationRevision != 0 {
+				t.Fatal("registration was adopted as a learned runtime activation", err)
+			}
+			sendRuntimeIncomingAtFixture(t, f, c, unclaimed, "no current holder", at)
+			waitRuntimeIncomingReceipt(t, f, c, unclaimed)
+			if count, err := c.UnclaimedCount(f.ctx); err != nil || count != 1 {
+				t.Fatal("old unclaimed delivery was reinterpreted after holder construction", count, err)
+			}
+			sendRuntimeIncomingAtFixture(t, f, c, id, "registered account customer input", businessAt)
+			waitRuntimeIncomingReceipt(t, f, c, id)
+			repeated, found, err := f.selected.(sessionBusinessStore).LoadInboundPublicationByIdentity(f.ctx, runtimeIncomingIdentityFixture(t, f, id))
+			if err != nil || !found || repeated.Request.RequestFingerprint != record.Request.RequestFingerprint || repeated.OutputCount != record.OutputCount {
+				t.Fatal("registered account replay changed its original runtime publication", found, err)
+			}
+		})
 		t.Run(backend, func(t *testing.T) {
 			f := newActiveInputFixture(t, backend)
 			f.activate(t)
@@ -187,6 +279,7 @@ func runtimeIncomingIdentityFixture(t *testing.T, f *activeInputFixture, id stri
 	event := capturedEvent{Scope: f.scope, Source: f.source, OccurrenceID: uuid.NewString(),
 		Conversation: types.NewJID("100000000003", types.DefaultUserServer).String(), EventID: id,
 		Kind: "message", Body: []byte(`{}`), ReceivedAt: time.Now().UTC().Truncate(time.Microsecond)}
+	event.Source.DeploymentRegistration = event.Scope.DeploymentRegistration
 	identity, err := event.PublicationIdentity()
 	if err != nil {
 		t.Fatal(err)

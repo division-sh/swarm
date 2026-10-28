@@ -274,11 +274,21 @@ func newChannelListCommand(opts rootCommandOptions) *cobra.Command {
 func newChannelStatusCommand(opts rootCommandOptions) *cobra.Command {
 	commandOpts := channelStatusOptions{apiOptions: opts}
 	cmd := &cobra.Command{
-		Use:   "status <interface>",
-		Short: "Inspect one exact connected-channel activation.",
-		Args:  argcount.ExactArgs(1),
+		Use:   "status <provider> [account]",
+		Short: "Inspect one deployment account and its current flow holder.",
+		Args:  argcount.RangeArgs(1, 2),
 		RunE: func(cmd *cobra.Command, args []string) error {
 			commandOpts.sourceSet = cmd.Flags().Changed("source")
+			if commandOpts.apiOptions.channelRegistration != nil && !commandOpts.sourceSet && commandOpts.target == "" {
+				account := ""
+				if len(args) == 2 {
+					account = args[1]
+				}
+				return runDeploymentChannelStatus(cmd.Context(), cmd.OutOrStdout(), cmd.ErrOrStderr(), args[0], account, commandOpts.apiOptions, commandOpts.output)
+			}
+			if len(args) != 1 {
+				return returnCLIValidationError(cmd.ErrOrStderr(), errors.New("legacy interface status accepts one interface"))
+			}
 			return runChannelStatus(cmd.Context(), cmd.OutOrStdout(), cmd.ErrOrStderr(), args[0], commandOpts)
 		},
 	}

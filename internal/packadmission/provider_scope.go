@@ -4,6 +4,7 @@ import (
 	"fmt"
 	"sort"
 
+	"github.com/division-sh/swarm/internal/channelonboarding"
 	"github.com/division-sh/swarm/internal/packartifact"
 	platformcontract "github.com/division-sh/swarm/internal/platform"
 	"github.com/division-sh/swarm/internal/providertriggers"
@@ -158,6 +159,49 @@ func (s ProviderScope) HeldProviders() []ProviderDefinition {
 		}
 	}
 	return out
+}
+
+// ConnectionAccount resolves authored placement without requiring a linked
+// account or a provider-emitted payload during structural verification.
+func (s ProviderScope) ConnectionAccount(bundle *runtimecontracts.WorkflowContractBundle) (ProviderDefinition, runtimecontracts.FlowOperatorAccount, error) {
+	var selected ProviderDefinition
+	var account runtimecontracts.FlowOperatorAccount
+	for _, definition := range s.HeldProviders() {
+		if _, connection := definition.ChannelPlan(); !connection {
+			continue
+		}
+		if selected.Valid() {
+			directory := definition.Provider().Directory()
+			return ProviderDefinition{}, account, fmt.Errorf("flow %s holds a second connection-account provider %s; move %s/ into its own child flow", s.flowPath, directory, directory)
+		}
+		selected = definition
+	}
+	if !selected.Valid() {
+		return selected, account, nil
+	}
+	rooted, err := bundle.RootedSource()
+	if err != nil || !rooted.Admission().Equal(s.source.rooted.Admission()) {
+		return ProviderDefinition{}, account, fmt.Errorf("flow %s connection account requires the same captured source", s.flowPath)
+	}
+	schema, found := bundle.FlowSchemaByID(s.flowPath)
+	if !found {
+		return ProviderDefinition{}, account, fmt.Errorf("flow %s connection account requires its admitted schema", s.flowPath)
+	}
+	for _, consumed := range s.ConsumedTriggerProviders(schema.Pins.Inputs.EventTypes()) {
+		if consumed.Provider().Directory() == selected.Provider().Directory() {
+			account, err := bundle.ResolveFlowOperatorAccount(s.flowPath)
+			if err == nil && account.FromPolicy {
+				plan, _ := selected.ChannelPlan()
+				canonical, canonicalErr := channelonboarding.CanonicalAccount(plan.Provider(), account.Policy)
+				if canonicalErr != nil {
+					return selected, account, fmt.Errorf("flow %s policy.yaml operator_account: %w", s.flowPath, canonicalErr)
+				}
+				account.Policy = canonical.Account
+			}
+			return selected, account, err
+		}
+	}
+	return selected, account, nil
 }
 
 // ConsumedTriggerProviders projects held declarations, not route activation.

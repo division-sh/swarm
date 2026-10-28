@@ -34,6 +34,9 @@ func IsRootConstructorKeyConflict(err error) bool {
 // The creating root input prepares the whole keyless tree before recipient
 // classification. Publication commits that tree and its deliveries atomically.
 func (p deliveryPlanner) prepareRootConstruction(ctx context.Context, event events.Event) ([]pipeline.FlowInstanceActivationPlan, error) {
+	if publication, authenticated := authenticatedProviderPublicationForEvent(ctx, event); authenticated && publication.account != "" {
+		return nil, nil // Account instances are constructed by authored input, not customer traffic.
+	}
 	sourceKind := event.RoutingSource().Kind()
 	if sourceKind != events.RoutingSourceRoot && sourceKind != events.RoutingSourceExternalIngress {
 		return nil, nil

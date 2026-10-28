@@ -12,8 +12,9 @@ import (
 type ActivationSource string
 
 const (
-	ActivationSourceDeclared ActivationSource = "declared"
-	ActivationSourceLearned  ActivationSource = "learned"
+	ActivationSourceDeclared   ActivationSource = "declared"
+	ActivationSourceLearned    ActivationSource = "learned"
+	ActivationSourceRegistered ActivationSource = "registered"
 )
 
 type CompiledActivation struct {
@@ -25,10 +26,11 @@ type CompiledActivation struct {
 	Plan                  packs.OutboundBindingPlan
 	CredentialAdmissions  []CredentialAdmission
 	SessionAccount        operatorchannel.SessionAccountAdmission `json:"-"`
+	OperatorAccount       string
 }
 
 func (a CompiledActivation) Validate() error {
-	if a.Source != ActivationSourceDeclared && a.Source != ActivationSourceLearned {
+	if a.Source != ActivationSourceDeclared && a.Source != ActivationSourceLearned && a.Source != ActivationSourceRegistered {
 		return fmt.Errorf("channel activation source is invalid")
 	}
 	if err := a.Coordinate.ValidateContext(); err != nil {
@@ -49,6 +51,13 @@ func (a CompiledActivation) Validate() error {
 	}
 	if a.Source == ActivationSourceDeclared && strings.TrimSpace(a.OnboardingOperationID) != "" {
 		return fmt.Errorf("declared channel activation cannot claim an onboarding operation")
+	}
+	if a.Source == ActivationSourceRegistered {
+		profile, found := a.Plan.OnboardingProfile()
+		if !found || a.OnboardingRevision < 1 || a.OnboardingOperationID == "" || a.ActivationRevision != 0 ||
+			(AccountReference{Provider: profile.Provider(), Account: a.OperatorAccount}).Validate() != nil {
+			return fmt.Errorf("registered activation requires its confirmed deployment account, not a learned runtime activation")
+		}
 	}
 	if err := a.validateProviderAuthority(); err != nil {
 		return err
@@ -84,7 +93,7 @@ func (a CompiledActivation) validateProviderAuthority() error {
 	provider := ""
 	if posture == packs.ChannelActivationSessionConnection {
 		profile, found := a.Plan.OnboardingProfile()
-		if a.Source != ActivationSourceLearned || !found || profile.ActivationPosture() != posture {
+		if a.Source != ActivationSourceLearned && a.Source != ActivationSourceRegistered || !found || profile.ActivationPosture() != posture {
 			return fmt.Errorf("session activation requires its selected learned responsibility")
 		}
 		provider = profile.Provider()
@@ -98,12 +107,44 @@ func (a CompiledActivation) AdmissionResponsibility() (AdmissionResponsibility, 
 		return AdmissionResponsibility{}, err
 	}
 	profile, found := a.Plan.OnboardingProfile()
+	if a.Source == ActivationSourceRegistered && found {
+		return AdmissionResponsibility{DeploymentRegistration: true, RegisteredBusiness: true,
+			OperationID: a.OnboardingOperationID, OperationRevision: a.OnboardingRevision,
+			Coordinate: a.Coordinate, TargetSelector: a.Plan.RegistrationTarget(), Provider: profile.Provider(),
+			Credentials: append([]CredentialAdmission(nil), a.CredentialAdmissions...), SessionAccount: a.SessionAccount}, nil
+	}
 	if a.Source != ActivationSourceLearned || !found {
 		return AdmissionResponsibility{}, fmt.Errorf("learned activation responsibility requires its onboarding profile")
 	}
 	return AdmissionResponsibility{OperationID: a.OnboardingOperationID, OperationRevision: a.OnboardingRevision,
 		ActivationRevision: a.ActivationRevision, Coordinate: a.Coordinate, TargetSelector: a.Plan.RegistrationTarget(),
 		Provider: profile.Provider(), Credentials: append([]CredentialAdmission(nil), a.CredentialAdmissions...), SessionAccount: a.SessionAccount}, nil
+}
+
+// CompileRegisteredActivation composes current source authority with separate
+// deployment approval. Neither is adopted as the other's durable authority.
+func CompileRegisteredActivation(candidate Candidate, op Operation) (CompiledActivation, error) {
+	if err := candidate.Validate(); err != nil {
+		return CompiledActivation{}, err
+	}
+	if !op.DeploymentRegistration || !op.AccountConfirmed || op.Provider != candidate.Provider ||
+		op.Phase != PhaseSucceeded && op.Phase != PhaseAwaitingExternalIdentity && op.Phase != PhaseAwaitingOperatorConfirmation ||
+		op.ValidateSessionAccount() != nil || op.LogoutCompleted {
+		return CompiledActivation{}, ErrRevisionConflict
+	}
+	keys := map[string]string{}
+	for _, admission := range op.CredentialAdmissions {
+		keys[admission.Role] = admission.StoreKey
+	}
+	plan, err := packs.NewOutboundBindingPlanWithRegistration("registered_"+operatorchannel.Hash("registered-account-activation-v1", op.OperationID, candidate.Target.Selector),
+		candidate.Plan, nil, nil, keys, candidate.Target.Selector)
+	if err != nil {
+		return CompiledActivation{}, err
+	}
+	compiled := CompiledActivation{Source: ActivationSourceRegistered, OperatorAccount: op.AccountReference,
+		OnboardingOperationID: op.OperationID, OnboardingRevision: op.Revision, Coordinate: candidate.Coordinate,
+		Plan: plan, CredentialAdmissions: append([]CredentialAdmission(nil), op.CredentialAdmissions...), SessionAccount: op.SessionAccount}
+	return compiled, compiled.Validate()
 }
 
 func LearnedBindingID(slotKey string) string {
@@ -179,6 +220,9 @@ func MergeCompiledActivations(declared, learned []CompiledActivation) ([]Compile
 		byBinding[bindingID] = activation
 		if target := activation.Plan.RegistrationTarget(); target != "" {
 			slot := activation.Coordinate.BundleHash + "\x00" + target
+			if activation.Source == ActivationSourceRegistered {
+				slot += "\x00" + activation.OperatorAccount
+			}
 			if existing, collision := bySlot[slot]; collision {
 				return nil, fmt.Errorf("channel activation target collision between %s binding %q and %s binding %q", existing.Source, existing.Plan.BindingID(), activation.Source, bindingID)
 			}

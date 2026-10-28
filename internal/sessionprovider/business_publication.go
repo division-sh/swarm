@@ -154,6 +154,12 @@ func sessionBusinessRequest(ctx context.Context, event capturedEvent, alias stri
 		(landing.State != runlifecycle.StateLive && landing.State != runlifecycle.StatePaused) {
 		return request, errCaptureScopeChanged
 	}
+	if event.Scope.RegisteredBusiness {
+		if !admitted.Responsibility().RegisteredBusiness || admitted.PublicationRunID() != event.Scope.PublicationBinding.RunID ||
+			admitted.RequireBusiness(ctx, target.Provider, event.Source.CatalogGeneration) != nil {
+			return request, errCaptureScopeChanged
+		}
+	}
 	if original := admitted.OriginalPublicationRequest(); len(original) > 0 {
 		if err := json.Unmarshal(original, &request); err != nil {
 			return request, err

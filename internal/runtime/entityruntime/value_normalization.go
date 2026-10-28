@@ -5,6 +5,8 @@ import (
 	"reflect"
 	"strings"
 
+	"github.com/division-sh/swarm/internal/channelonboarding"
+	"github.com/division-sh/swarm/internal/packadmission"
 	"github.com/division-sh/swarm/internal/runtime/canonicaljson"
 	"github.com/division-sh/swarm/internal/runtime/semanticview"
 )
@@ -101,6 +103,39 @@ func NormalizeMetadataForFlow(source semanticview.Source, flowID string, metadat
 }
 
 func NormalizeFieldValue(contract Contract, fieldName string, value any) (any, error) {
+	if fieldName == "operator_account" && contract.source != nil {
+		bundle, ok := semanticview.Bundle(contract.source)
+		if !ok || bundle == nil {
+			return nil, fieldTypeError(fieldName, "requires its admitted source")
+		}
+		rooted, err := bundle.RootedSource()
+		if err != nil {
+			return nil, err
+		}
+		providers, err := packadmission.AdmitProviderSource(rooted, bundle.Platform)
+		if err != nil {
+			return nil, err
+		}
+		scope, err := providers.Scope(contract.FlowID)
+		if err != nil {
+			return nil, err
+		}
+		provider, declaration, err := scope.ConnectionAccount(bundle)
+		if err != nil {
+			return nil, err
+		}
+		if plan, held := provider.ChannelPlan(); held && declaration.FlowID != "" {
+			text, ok := value.(string)
+			if !ok {
+				return nil, fieldTypeError(fieldName, "must be an account string")
+			}
+			canonical, err := channelonboarding.CanonicalAccount(plan.Provider(), text)
+			if err != nil {
+				return nil, fieldTypeError(fieldName, err.Error())
+			}
+			value = canonical.Account
+		}
+	}
 	field, err := ResolveFieldPath(contract, fieldName)
 	if err != nil {
 		return nil, err

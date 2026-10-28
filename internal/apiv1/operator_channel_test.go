@@ -134,6 +134,10 @@ func TestOperatorChannelAPIContractEvidence(t *testing.T) {
 	if listed["principal_id"] != principal.ID || len(listed["channels"].([]any)) != 1 {
 		t.Fatalf("channel.list result = %#v", listed)
 	}
+	accountWithoutScope := rpcCall(t, handler, `{"jsonrpc":"2.0","id":"account-without-scope","method":"channel.list","params":{"provider":"telegram","account":"420079"}}`)
+	if accountWithoutScope.Error == nil || accountWithoutScope.Error.Code != -32602 {
+		t.Fatalf("deployment account selector was accepted by runtime channel readback: %#v", accountWithoutScope.Error)
+	}
 
 	missingProof := rpcCall(t, handler, fmt.Sprintf(`{"jsonrpc":"2.0","id":"missing-proof","method":"channel.proof_revoke","params":{"interface":%q,"expected_revision":1,"idempotency_key":"missing-proof"}}`, identity.Selector))
 	requireOperatorChannelAPIErrorCode(t, missingProof, ChannelProofUnavailableCode)
