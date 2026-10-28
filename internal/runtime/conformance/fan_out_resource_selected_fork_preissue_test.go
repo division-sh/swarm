@@ -71,7 +71,7 @@ func TestDeploymentSourceSelectedForkBeforeFirstRow(t *testing.T) {
 			if err != nil {
 				t.Fatal(err)
 			}
-			serving, err := startupownership.StartFanOutServing(effects.WithExecutionMode(f.ctx, f.runtime.posture.RootMode()), grant, f.runtime.workOwner, nil, f.runtime.pipeline)
+			serving, err := startupownership.StartFanOutServing(effects.WithExecutionMode(f.ctx, f.runtime.posture.RootMode()), grant, f.runtime.workOwner, nil, deploymentFanOutDiagnostic{FanOutExecutor: f.runtime.pipeline, t: t})
 			if err != nil {
 				t.Fatal(err)
 			}
