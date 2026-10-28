@@ -1517,76 +1517,19 @@ func compileChannelSatisfaction(channel channelCompilation, trigger TriggerPackD
 		schemas:    cloneSchemaMap(definition.Schemas),
 		operations: map[string]compiledChannelOperation{}, events: map[string]compiledChannelEvent{}, constraints: map[string]runtimecontracts.ToolInputSchema{},
 	}
-	drafts := make(map[string]channelOperationDraft, len(definition.Operations))
-	for _, name := range sortedKeys(definition.Operations) {
-		binding := channel.Manifest.Operations[name]
-		operation := definition.Operations[name]
-		effect := runtimecontracts.NormalizeActivityEffectClass(operation.EffectClass)
-		if effect == "" {
-			return SatisfactionPlan{}, fmt.Errorf("channel operation %q has unsupported effect class %q", name, operation.EffectClass)
-		}
-		tool, ok := connector.Tools[strings.TrimSpace(binding.Tool)]
-		if !ok {
-			return SatisfactionPlan{}, fmt.Errorf("channel operation %q references unknown connector tool %q", name, binding.Tool)
-		}
-		operationID, err := admitChannelPlanIdentity("channel operation identity", name)
-		if err != nil {
-			return SatisfactionPlan{}, err
-		}
-		toolID, err := admitChannelPlanIdentity("channel connector tool identity", binding.Tool)
-		if err != nil {
-			return SatisfactionPlan{}, err
-		}
-		drafts[name] = channelOperationDraft{name: operationID, tool: toolID, toolSchema: tool, effect: effect, input: binding.Input, output: binding.Output, interfaceValue: operation}
+	drafts, err := compileChannelOperationDrafts(channel, connector)
+	if err != nil {
+		return SatisfactionPlan{}, err
 	}
 	plan.constraints, err = compileSelectedChannelConstraints(drafts, plan.schemas, plan.opaqueTypes, plan.capabilities.Vector().ActionsAsButtons)
 	if err != nil {
 		return SatisfactionPlan{}, err
 	}
-	for _, name := range sortedKeys(drafts) {
-		draft := drafts[name]
-		inputTopology, outputTopology, err := validateOperationBinding(name, draft.interfaceValue, channel.Manifest.Operations[name], definition.Schemas, channel.Manifest.OpaqueTypes, plan.constraints, draft.toolSchema)
-		if err != nil {
-			return SatisfactionPlan{}, err
-		}
-		compiled, err := compileAdmittedChannelOperation(draft, inputTopology, outputTopology, plan.schemas, plan.opaqueTypes, plan.constraints)
-		if err != nil {
-			return SatisfactionPlan{}, err
-		}
-		plan.operations[name] = compiled
+	if err := compileChannelOperationBindings(channel, drafts, &plan); err != nil {
+		return SatisfactionPlan{}, err
 	}
-	for _, name := range sortedKeys(definition.Events) {
-		binding := channel.Manifest.Events[name]
-		descriptor, ok := trigger.Events[strings.TrimSpace(binding.Event)]
-		if !ok {
-			return SatisfactionPlan{}, fmt.Errorf("channel event %q references unknown accepted trigger event %q", name, binding.Event)
-		}
-		if err := validateEventBinding(name, definition.Events[name], binding, definition.Schemas, channel.Manifest.OpaqueTypes, descriptor); err != nil {
-			return SatisfactionPlan{}, err
-		}
-		eventName, err := admitChannelPlanIdentity("channel event identity", name)
-		if err != nil {
-			return SatisfactionPlan{}, err
-		}
-		triggerEvent, err := admitChannelPlanIdentity("channel trigger event identity", binding.Event)
-		if err != nil {
-			return SatisfactionPlan{}, err
-		}
-		fields := make(map[string]channelPlanIdentity, len(binding.Fields))
-		fieldSchemas := make(map[string]runtimecontracts.ToolInputSchema, len(descriptor.Fields))
-		required := make(map[string]bool, len(descriptor.Fields))
-		for fieldName, target := range binding.Fields {
-			fieldID, err := admitChannelPlanIdentity("channel event field identity", target)
-			if err != nil {
-				return SatisfactionPlan{}, err
-			}
-			fields[fieldName] = fieldID
-		}
-		for fieldName, field := range descriptor.Fields {
-			fieldSchemas[fieldName] = field.Schema
-			required[fieldName] = field.Required
-		}
-		plan.events[name] = compiledChannelEvent{name: eventName, event: triggerEvent, fields: fields, fieldSchema: fieldSchemas, required: required}
+	if err := compileChannelEventBindings(channel, trigger, &plan); err != nil {
+		return SatisfactionPlan{}, err
 	}
 	if channel.Manifest.Registration != nil {
 		plan.registration, err = compileChannelRegistration(*channel.Manifest.Registration, connector, provider)
@@ -1620,6 +1563,85 @@ func compileChannelSatisfaction(channel channelCompilation, trigger TriggerPackD
 		return SatisfactionPlan{}, err
 	}
 	return plan, nil
+}
+
+func compileChannelOperationDrafts(channel channelCompilation, connector ConnectorPackDescriptor) (map[string]channelOperationDraft, error) {
+	drafts := make(map[string]channelOperationDraft, len(channel.definition.Operations))
+	for _, name := range sortedKeys(channel.definition.Operations) {
+		binding := channel.Manifest.Operations[name]
+		operation := channel.definition.Operations[name]
+		effect := runtimecontracts.NormalizeActivityEffectClass(operation.EffectClass)
+		if effect == "" {
+			return nil, fmt.Errorf("channel operation %q has unsupported effect class %q", name, operation.EffectClass)
+		}
+		tool, ok := connector.Tools[strings.TrimSpace(binding.Tool)]
+		if !ok {
+			return nil, fmt.Errorf("channel operation %q references unknown connector tool %q", name, binding.Tool)
+		}
+		operationID, err := admitChannelPlanIdentity("channel operation identity", name)
+		if err != nil {
+			return nil, err
+		}
+		toolID, err := admitChannelPlanIdentity("channel connector tool identity", binding.Tool)
+		if err != nil {
+			return nil, err
+		}
+		drafts[name] = channelOperationDraft{name: operationID, tool: toolID, toolSchema: tool, effect: effect, input: binding.Input, output: binding.Output, interfaceValue: operation}
+	}
+	return drafts, nil
+}
+
+func compileChannelOperationBindings(channel channelCompilation, drafts map[string]channelOperationDraft, plan *SatisfactionPlan) error {
+	for _, name := range sortedKeys(drafts) {
+		draft := drafts[name]
+		inputTopology, outputTopology, err := validateOperationBinding(name, draft.interfaceValue, channel.Manifest.Operations[name], channel.definition.Schemas, channel.Manifest.OpaqueTypes, plan.constraints, draft.toolSchema)
+		if err != nil {
+			return err
+		}
+		compiled, err := compileAdmittedChannelOperation(draft, inputTopology, outputTopology, plan.schemas, plan.opaqueTypes, plan.constraints)
+		if err != nil {
+			return err
+		}
+		plan.operations[name] = compiled
+	}
+	return nil
+}
+
+func compileChannelEventBindings(channel channelCompilation, trigger TriggerPackDescriptor, plan *SatisfactionPlan) error {
+	for _, name := range sortedKeys(channel.definition.Events) {
+		binding := channel.Manifest.Events[name]
+		descriptor, ok := trigger.Events[strings.TrimSpace(binding.Event)]
+		if !ok {
+			return fmt.Errorf("channel event %q references unknown accepted trigger event %q", name, binding.Event)
+		}
+		if err := validateEventBinding(name, channel.definition.Events[name], binding, channel.definition.Schemas, channel.Manifest.OpaqueTypes, descriptor); err != nil {
+			return err
+		}
+		eventName, err := admitChannelPlanIdentity("channel event identity", name)
+		if err != nil {
+			return err
+		}
+		triggerEvent, err := admitChannelPlanIdentity("channel trigger event identity", binding.Event)
+		if err != nil {
+			return err
+		}
+		fields := make(map[string]channelPlanIdentity, len(binding.Fields))
+		fieldSchemas := make(map[string]runtimecontracts.ToolInputSchema, len(descriptor.Fields))
+		required := make(map[string]bool, len(descriptor.Fields))
+		for fieldName, target := range binding.Fields {
+			fieldID, err := admitChannelPlanIdentity("channel event field identity", target)
+			if err != nil {
+				return err
+			}
+			fields[fieldName] = fieldID
+		}
+		for fieldName, field := range descriptor.Fields {
+			fieldSchemas[fieldName] = field.Schema
+			required[fieldName] = field.Required
+		}
+		plan.events[name] = compiledChannelEvent{name: eventName, event: triggerEvent, fields: fields, fieldSchema: fieldSchemas, required: required}
+	}
+	return nil
 }
 
 func validateAcceptedTriggerDescriptor(trigger TriggerPackDescriptor) error {
