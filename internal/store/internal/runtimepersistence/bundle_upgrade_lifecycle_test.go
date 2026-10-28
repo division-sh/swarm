@@ -31,13 +31,34 @@ import (
 
 func TestBundleUpgradeAdmissionPreservesLiveWorkBothStores(t *testing.T) {
 	files := map[string]string{
-		"schema.yaml":          "name: bundle-upgrade\nstages:\n  pending: {}\nschedules:\n  removed: {every: 1h, emit: clock.removed}\n  retained: {every: 1h, emit: clock.retained}\n",
+		"schema.yaml":          "stages:\n  pending: {}\nschedules:\n  removed: {every: 1h, emit: clock.removed}\n  retained: {every: 1h, emit: clock.retained}\n",
 		"events.yaml":          "clock.removed:\nclock.retained:\n",
-		"review/schema.yaml":   "name: review\ninstance: request_id\nstages:\n  pending:\n    timers:\n      - {id: pending.timeout, after: 1h, emit: timer.elapsed}\npins:\n  inputs: [task.create]\n",
+		"review/manifest.yaml": "version: 1.0.0\nplatform_version: '*'\n",
+		"review/schema.yaml":   "instance: request_id\nstages:\n  pending:\n    timers:\n      - {id: pending.timeout, after: 1h, emit: timer.elapsed}\npins:\n  inputs: [task.create]\n",
 		"review/entities.yaml": "review_item:\n  request_id: text\n  label: text\n  nested: json\n  enabled: {type: boolean, initial: true}\n",
 		"review/events.yaml":   "task.create:\n  request_id: text\n  label: text\n  nested: json\ntask.started:\ntimer.elapsed:\n",
 	}
 	candidateFiles := maps.Clone(files)
+	sourceSet := func(t *testing.T, source semanticview.Source) agenttopology.SourceSetPlan {
+		t.Helper()
+		bundle, ok := semanticview.Bundle(source)
+		if !ok || bundle == nil {
+			t.Fatal("upgrade fixture requires its compiled source")
+		}
+		rooted, err := bundle.RootedSource()
+		if err != nil {
+			t.Fatal(err)
+		}
+		coordinate, err := agenttopology.NewSourceCoordinate(rooted.Admission())
+		if err != nil {
+			t.Fatal(err)
+		}
+		plan, err := agenttopology.NewSourceSetPlan([]agenttopology.SourceCoordinate{coordinate}, nil)
+		if err != nil {
+			t.Fatal(err)
+		}
+		return plan
+	}
 	candidateFiles["schema.yaml"] = strings.Replace(files["schema.yaml"], "  removed: {every: 1h, emit: clock.removed}\n", "", 1)
 	candidateFiles["review/schema.yaml"] = strings.Replace(files["review/schema.yaml"], "  pending:\n    timers:\n      - {id: pending.timeout, after: 1h, emit: timer.elapsed}", "  pending: {}", 1)
 	for _, backend := range []string{"sqlite", "postgres"} {
@@ -128,10 +149,7 @@ func TestBundleUpgradeAdmissionPreservesLiveWorkBothStores(t *testing.T) {
 				if err != nil {
 					t.Fatal(err)
 				}
-				next, err := agenttopology.NewSourceSetPlan([]agenttopology.SourceCoordinate{{BundleHash: prepared.BundleHash}}, nil)
-				if err != nil {
-					t.Fatal(err)
-				}
+				next := sourceSet(t, view)
 				head, exists, err := capability.CurrentSourceSet(original)
 				if err != nil || !exists {
 					t.Fatalf("admitted predecessor: exists=%t err=%v", exists, err)
@@ -156,10 +174,7 @@ func TestBundleUpgradeAdmissionPreservesLiveWorkBothStores(t *testing.T) {
 				if !paused {
 					// The child was created after the first read. The native policy must
 					// now report the same stranded instance as a fresh verify read.
-					removedNext, err := agenttopology.NewSourceSetPlan([]agenttopology.SourceCoordinate{{BundleHash: removedPlan.BundleHash}}, nil)
-					if err != nil {
-						t.Fatal(err)
-					}
+					removedNext := sourceSet(t, semanticview.Wrap(removed))
 					_, nativeErr := capability.RestoreSourceSet(original, agenttopology.SourceSetCommitRequest{
 						OperationID: uuid.NewString(), ExpectedRevision: head.Revision, Plan: removedNext, BundleUpgrade: removedPlan,
 					})
@@ -264,10 +279,7 @@ func TestBundleUpgradeAdmissionPreservesLiveWorkBothStores(t *testing.T) {
 					if err != nil {
 						t.Fatal(err)
 					}
-					backSet, err := agenttopology.NewSourceSetPlan([]agenttopology.SourceCoordinate{{BundleHash: back.BundleHash}}, nil)
-					if err != nil {
-						t.Fatal(err)
-					}
+					backSet := sourceSet(t, backSource)
 					if _, err := capability.RestoreSourceSet(original, agenttopology.SourceSetCommitRequest{
 						OperationID: uuid.NewString(), ExpectedRevision: currentHead.Revision, Plan: backSet, BundleUpgrade: back,
 					}); err != nil {
