@@ -184,6 +184,22 @@ func admitNativeActivityDestination(ctx context.Context, intent runtimeengine.Ac
 // The SDK consumes immutable admitted input, not the caller's mutable map.
 type NativeChannelActivityPermit struct{ launch *nativeChannelActivityLaunch }
 
+func (p NativeChannelActivityPermit) ValidateConnector(ctx context.Context, name, id string, tool runtimecontracts.ToolSchemaEntry) error {
+	if err := p.Validate(ctx); err != nil {
+		return err
+	}
+	ownedID, owned, err := p.launch.activation.Plan.ConnectorOperation(name)
+	if err != nil {
+		return err
+	}
+	want, err := owned.CanonicalHash()
+	actual, actualErr := tool.CanonicalHash()
+	if err != nil || actualErr != nil || ownedID != id || want != actual {
+		return fmt.Errorf("native connector differs from its original selected source")
+	}
+	return nil
+}
+
 func ConsumeNativeChannelActivity(ctx context.Context, operationID string, account operatorchannel.SessionAccountAdmission,
 	tool runtimecontracts.ToolSchemaEntry, input map[string]any,
 ) (NativeChannelActivityPermit, error) {
@@ -254,6 +270,14 @@ func (p NativeChannelActivityPermit) ValidateBusinessTarget(ctx context.Context,
 	expected, err := p.launch.activation.AdmissionResponsibility()
 	if err != nil {
 		return err
+	}
+	if p.launch.activation.Source == channelonboarding.ActivationSourceRegistered {
+		values, object := p.Input().ObjectMap()
+		account, present := values["account"].String()
+		if !object || !present || account != op.AccountReference || p.launch.activation.OperatorAccount != account || !expected.MatchesOperation(op) {
+			return fmt.Errorf("native activity lost its exact registered account")
+		}
+		return nil
 	}
 	if p.launch.activation.Plan.ActivitiesOnly() && expected.MatchesAccountBusiness(op, activation) {
 		return nil

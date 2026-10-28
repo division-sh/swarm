@@ -2,6 +2,8 @@ package pipeline
 
 import (
 	"encoding/json"
+	"os"
+	"path/filepath"
 	"strings"
 	"testing"
 	"time"
@@ -135,6 +137,31 @@ func TestFlowInstanceKeyRequiresScalarAdmissionBeforeFormatting(t *testing.T) {
 			}
 		})
 	}
+	t.Run("canonical_operator_account", func(t *testing.T) {
+		members := map[string]string{
+			"manifest.yaml": "version: 1.0.0\nplatform_version: '*'\n",
+			"schema.yaml":   "instance: operator_account\nstages:\n  active: {}\npins:\n  inputs: [account.created, inbound.whatsapp.message]\n",
+			"entities.yaml": "account_state:\n  operator_account: text\n",
+			"events.yaml":   "account.created:\n  operator_account: text\n",
+		}
+		for _, role := range []string{"manifest", "trigger", "connector", "channel"} {
+			body, err := os.ReadFile(filepath.Join(WorkflowRepoRoot(), "packs", "providers", "whatsapp", role+".yaml"))
+			if err != nil {
+				t.Fatal(err)
+			}
+			members["whatsapp/"+role+".yaml"] = string(body)
+		}
+		source := loadWorkflowTempSource(t, members)
+		key, err := AdmitFlowInstanceKey(source, ".", "+1 (555) 0100")
+		if err != nil || key != "+15550100" {
+			t.Fatalf("unlinked account key was not canonically admitted before identity: %q %v", key, err)
+		}
+		for _, value := range []any{nil, 15550100, "not a phone", "+1;echo unsafe"} {
+			if key, err := AdmitFlowInstanceKey(source, ".", value); err == nil {
+				t.Fatalf("invalid account %T became constructor identity %q", value, key)
+			}
+		}
+	})
 	source := loadWorkflowTempSource(t, map[string]string{"manifest.yaml": "version: 1.0.0\nplatform_version: \">=0.7.0 <0.8.0\"\n",
 		"schema.yaml": "stages: []\n"})
 	if material, err := AdmitFlowInstanceKey(source, ".", nil); err != nil || material != "" {

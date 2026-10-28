@@ -5,8 +5,11 @@ import (
 	"encoding/json"
 	"reflect"
 	"testing"
+	"time"
 
+	"github.com/division-sh/swarm/internal/channelonboarding"
 	"github.com/division-sh/swarm/internal/events"
+	"github.com/division-sh/swarm/internal/operatorchannel"
 	"github.com/division-sh/swarm/internal/runtime/deliverylifecycle"
 	"github.com/division-sh/swarm/internal/runtime/mutationlog"
 	"github.com/division-sh/swarm/internal/runtime/runlifecycle"
@@ -17,6 +20,7 @@ import (
 // Component proofs consume the original native semantic owner, never a pool
 // or a test transaction runner reconstructed around the selected database.
 type WorkflowActivityNativeFixtureForTest struct {
+	AccountRegistrationOwners AccountRegistrationOwnersForTest
 	Source                    semanticview.Source
 	Persistence               WorkflowPersistence
 	CaptureActivityJournal    func() ActivityAttemptJournal
@@ -38,6 +42,11 @@ type WorkflowActivityNativeFixtureForTest struct {
 	TryInvalidMutationPath    func(context.Context, string, string) error
 	PersistEvent              func(context.Context, events.Event)
 	AdmitDelivery             func(context.Context, events.Event, events.DeliveryRoute) (deliverylifecycle.Snapshot, error)
+}
+
+type AccountRegistrationOwnersForTest interface {
+	DeploymentChannelOperations() channelonboarding.OperationStore
+	EnsureOperatorPrincipal(context.Context, time.Time) (operatorchannel.Principal, error)
 }
 
 type WorkflowMutationProjectionForTest struct {

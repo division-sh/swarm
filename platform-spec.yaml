@@ -24828,6 +24828,19 @@ configuration_source_authority:
             id/type set. Relative entries resolve from the selected document's directory. Missing, empty,
             partial, extra, duplicate, malformed, or incompatible replacement inventory fails before stores with no embedded
             fallback. Project-owned pack customization uses explicit `packs/manifest.yaml`, not config paths.
+        triggers:
+          keys:
+            '<captured-trigger-member>.acknowledge': supported_explicit_unsigned_webhook_consent
+          owner: providertriggers.CompileAdmission
+          shape: >
+            A typed map keyed by the exact captured selected-root-relative trigger BODY member, such as
+            `acme/trigger.yaml` or `child/acme/trigger.yaml`. Its only leaf is `acknowledge: unsigned_webhook`.
+            The key selects the consumed provider directory, not a provider basename, sibling, normalized alias,
+            inherited replacement, or reopened deployment filesystem path. Unselected or malformed keys refuse.
+            Trigger BODY and authored flow declarations carry no deployment acknowledgement. BODY schemas and
+            declared output metadata can compile without granting request admission. The one trigger admission
+            owner requires the unchanged exact token for unsigned webhook admission, rejects other tokens and
+            rejects any acknowledgement on authenticated webhook or session transport. No boolean, default or alias.
         provider_triggers:
           keys:
             packs.platform_dirs: split_unsupported_retired
@@ -37839,6 +37852,7 @@ api_specification:
         additionalProperties: false
         required: [state, linked]
         properties:
+          account_unclaimed: {type: integer, minimum: 0}
           state: {type: string, enum: [pairing, connecting, connected, disconnected]}
           reason: {type: string, description: Display-only finite SDK disconnect reason; not execution or retry authority.}
           linked: {type: boolean, description: Retained paired account exists; not operator identity or execution authority.}
@@ -37874,11 +37888,35 @@ api_specification:
           boot_id: {$ref: '#/components/schemas/OpaqueId'}
           runtime_instance_id: {$ref: '#/components/schemas/OpaqueId'}
           backend: {type: string, minLength: 1}
+      ChannelAccountStatus:
+        type: object
+        additionalProperties: false
+        required: [provider, account, state, linked, health, holders]
+        properties:
+          provider: {type: string, minLength: 1}
+          account: {type: string, minLength: 1}
+          state: {type: string, enum: [live, refused, stopped]}
+          reason: {type: string}
+          account_unclaimed: {type: integer, minimum: 0}
+          linked: {type: boolean}
+          health: {type: string, enum: [pairing, connecting, connected, disconnected]}
+          holders:
+            type: array
+            items:
+              type: object
+              additionalProperties: false
+              required: [bundle_hash, flow, run_id, flow_instance]
+              properties:
+                bundle_hash: {type: string, minLength: 1}
+                flow: {type: string, minLength: 1}
+                run_id: {$ref: '#/components/schemas/OpaqueId'}
+                flow_instance: {type: string, minLength: 1}
       ChannelOnboardingResult:
         type: object
         additionalProperties: false
         required: [operation]
         properties:
+          status: {$ref: '#/components/schemas/ChannelAccountStatus'}
           operation: {$ref: '#/components/schemas/ChannelOnboardingOperation'}
           candidate: {$ref: '#/components/schemas/ChannelOnboardingCandidate'}
           identity_operation: {$ref: '#/components/schemas/OperatorChannelOperation'}
@@ -42395,7 +42433,8 @@ api_specification:
       - {name: scope, required: false, schema: {type: string, const: deployment}}
       - {name: holder, required: false, schema: {$ref: '#/components/schemas/DeploymentChannelHolder'}}
       - {name: provider, required: false, schema: {type: string, enum: [whatsapp, telegram]}}
-      result: {name: result, required: true, schema: {oneOf: [{$ref: '#/components/schemas/OperatorChannelListResult'}, {type: object, additionalProperties: false, required: [accounts], properties: {accounts: {type: array, items: {$ref: '#/components/schemas/ChannelOnboardingResult'}}}}]}}
+      - {name: account, required: false, schema: {type: string, minLength: 1, description: Exact deployment account status, including an account not yet linked; requires deployment scope and provider.}}
+      result: {name: result, required: true, schema: {oneOf: [{$ref: '#/components/schemas/OperatorChannelListResult'}, {$ref: '#/components/schemas/ChannelAccountStatus'}, {type: object, additionalProperties: false, required: [accounts], properties: {accounts: {type: array, items: {$ref: '#/components/schemas/ChannelOnboardingResult'}}}}]}}
       errors: [CHANNEL_PROOF_UNAVAILABLE]
     runtime.pause:
       tier: should_have

@@ -36,6 +36,9 @@ func TestRunServeWhatsAppReceptionistWithoutOperatorBothStores(t *testing.T) {
 				peer.mu.Unlock()
 				source := t.TempDir()
 				copyReleaseFixtureTree(t, filepath.Join(repoRootForTest(), "internal/cliapp/archetypes/whatsapp-receptionist"), source)
+				if err := os.WriteFile(filepath.Join(source, "policy.yaml"), []byte("operator_account: '+15551234567'\n"), 0o600); err != nil {
+					t.Fatal(err)
+				}
 				opts := cliapp.ServeOptions{
 					SourceRoot:    source,
 					APIListenAddr: "127.0.0.1:0", MCPListenAddr: "127.0.0.1:0",

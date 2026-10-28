@@ -17,6 +17,27 @@ func (rt *Runtime) observeStandingSessionBinding(ctx context.Context, declaratio
 	if store == nil {
 		return result, nil
 	}
+	if scoped, ok := store.(interface {
+		DeploymentChannelOperations() channelonboarding.OperationStore
+	}); ok {
+		registered, err := scoped.DeploymentChannelOperations().ListChannelOnboardingOperations(ctx)
+		if err != nil {
+			return result, err
+		}
+		for _, op := range registered {
+			if op.Provider != binding.Provider || !op.AccountConfirmed || op.Phase == channelonboarding.PhaseRetired || op.Phase == channelonboarding.PhaseFailed {
+				continue
+			}
+			if op.ValidateSessionAccount() != nil || op.LogoutCompleted {
+				continue
+			}
+			result.registeredOperations = append(result.registeredOperations, op)
+		}
+		if len(result.registeredOperations) > 0 {
+			result.enabled, result.blockReason = true, ""
+			return result, nil
+		}
+	}
 	operations, err := store.ListChannelOnboardingOperations(ctx)
 	if err != nil || len(operations) == 0 {
 		return result, err
@@ -64,6 +85,27 @@ func (rt *Runtime) observeStandingSessionBinding(ctx context.Context, declaratio
 }
 
 func (rt *Runtime) validateStandingSessionBinding(ctx context.Context, binding standingBindingCredentials) error {
+	if len(binding.registeredOperations) > 0 {
+		scoped, ok := rt.Options.ChannelOnboardingStore.(interface {
+			DeploymentChannelOperations() channelonboarding.OperationStore
+		})
+		if !ok {
+			return channelonboarding.ErrInvalidRequest
+		}
+		for _, original := range binding.registeredOperations {
+			current, err := channelonboarding.RegisteredAccount(ctx, scoped.DeploymentChannelOperations(), channelonboarding.AccountReference{Provider: original.Provider, Account: original.AccountReference})
+			if err != nil {
+				if err == channelonboarding.ErrNotFound {
+					continue
+				}
+				return err
+			}
+			if current.OperationID == original.OperationID && current.SessionAccount == original.SessionAccount && current.Revision >= original.Revision {
+				return nil
+			}
+		}
+		return channelonboarding.ErrRevisionConflict
+	}
 	if binding.sessionOperation == nil {
 		return nil
 	}

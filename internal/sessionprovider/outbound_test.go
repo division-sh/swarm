@@ -2,6 +2,7 @@ package sessionprovider
 
 import (
 	"errors"
+	"strings"
 	"testing"
 
 	"go.mau.fi/whatsmeow/proto/waE2E"
@@ -9,14 +10,19 @@ import (
 )
 
 func TestWhatsAppOutboundTextAndExactReplyEncoding(t *testing.T) {
-	for _, destination := range []string{"100000001@s.whatsapp.net", "100000001@lid", "100000000003-1@g.us"} {
+	for destination, canonical := range map[string]string{
+		"+100000001":               "100000001@s.whatsapp.net",
+		"100000001@s.whatsapp.net": "100000001@s.whatsapp.net",
+		"100000001@lid":            "100000001@lid",
+		"100000000003-1@g.us":      "100000000003-1@g.us",
+	} {
 		for _, replying := range []bool{false, true} {
 			var reference *outboundReply
 			if replying {
-				reference = &outboundReply{Conversation: destination, Sender: "100000002@s.whatsapp.net", MessageID: "ORIGINAL", Text: "stored receipt text"}
+				reference = &outboundReply{Conversation: canonical, Sender: "100000002@s.whatsapp.net", MessageID: "ORIGINAL", Text: "stored receipt text"}
 			}
 			to, message, err := encodeOutboundText(destination, "current English control", reference)
-			if err != nil || to.String() != destination {
+			if err != nil || to.String() != canonical {
 				t.Fatal("destination changed during encoding", err)
 			}
 			if reference == nil {
@@ -43,10 +49,12 @@ func TestWhatsAppOutboundTextAndExactReplyEncoding(t *testing.T) {
 }
 
 func TestWhatsAppOutboundRefusesGuessedOrForeignReplyTargets(t *testing.T) {
-	for _, destination := range []string{"", "100000001", "@s.whatsapp.net", "100000001@s.whatsapp.net ",
+	for _, destination := range []string{"", "+", "+0123456", "+100000001x", "+1 00000001", "+1234567890123456", "100000001", "@s.whatsapp.net", "100000001@s.whatsapp.net ",
 		"100000001:3@s.whatsapp.net", "status@broadcast", "100@newsletter"} {
-		if _, _, err := encodeOutboundText(destination, "text", nil); !errors.Is(err, errOutboundTarget) {
-			t.Fatal("invalid destination accepted", err)
+		if _, _, err := encodeOutboundText(destination, "text", nil); !errors.Is(err, errOutboundTarget) ||
+			!strings.Contains(err.Error(), "E.164") || !strings.Contains(err.Error(), "JID") ||
+			!strings.Contains(err.Error(), "shape=") || len(destination) > 3 && strings.Contains(err.Error(), destination) {
+			t.Fatal("invalid destination accepted or privacy-safe teaching omitted", err)
 		}
 	}
 	for _, cell := range []string{"conversation", "sender", "message", "quote", "current_text"} {

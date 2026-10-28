@@ -5,6 +5,7 @@ import (
 	"errors"
 	"fmt"
 	"log/slog"
+	"maps"
 	"os"
 	"regexp"
 	"sort"
@@ -82,6 +83,7 @@ type AuthorActivityCatalogRegistrar interface {
 }
 
 type RuntimeOptions struct {
+	TriggerEntries                   map[string]config.TriggerConfig
 	ExecutionPosture                 executionposture.Posture
 	PublicIngressAbsent              bool
 	EnableDeclaredClockBinding       bool
@@ -813,10 +815,10 @@ func runtimeThrottleSuppressPrefixes(source semanticview.Source) []string {
 }
 
 func ensureWorkflowBootWiring(opts RuntimeOptions, profile llmselection.Profile, posture executionposture.Posture) (*providerconnectors.MockResponsePlan, runtimebootverify.SourceBootEffectReachability, error) {
-	return ensureWorkflowBootWiringWithModelAliases(opts, profile, posture, nil)
+	return ensureWorkflowBootWiringWithModelAliases(opts, profile, posture, nil, opts.TriggerEntries)
 }
 
-func ensureWorkflowBootWiringWithModelAliases(opts RuntimeOptions, profile llmselection.Profile, posture executionposture.Posture, modelAliases llmselection.ModelAliases) (*providerconnectors.MockResponsePlan, runtimebootverify.SourceBootEffectReachability, error) {
+func ensureWorkflowBootWiringWithModelAliases(opts RuntimeOptions, profile llmselection.Profile, posture executionposture.Posture, modelAliases llmselection.ModelAliases, triggers map[string]config.TriggerConfig) (*providerconnectors.MockResponsePlan, runtimebootverify.SourceBootEffectReachability, error) {
 	if opts.WorkflowModule == nil {
 		return nil, runtimebootverify.SourceBootEffectReachability{}, fmt.Errorf("workflow module is required: configure RuntimeOptions.WorkflowModule")
 	}
@@ -951,7 +953,8 @@ func (deps RuntimeDeps) validated() (validatedRuntimeDeps, error) {
 	if err != nil {
 		return validatedRuntimeDeps{}, fmt.Errorf("compile scenario execution profile catalog: %w", err)
 	}
-	mockConnectorResponses, bootEffectReachability, err := ensureWorkflowBootWiringWithModelAliases(opts, profile, posture, cfg.LLM.Models)
+	opts.TriggerEntries = maps.Clone(cfg.Triggers)
+	mockConnectorResponses, bootEffectReachability, err := ensureWorkflowBootWiringWithModelAliases(opts, profile, posture, cfg.LLM.Models, cfg.Triggers)
 	if err != nil {
 		return validatedRuntimeDeps{}, fmt.Errorf("workflow contract validation failed: %w", err)
 	}
@@ -1353,6 +1356,12 @@ func newRuntime(ctx context.Context, deps RuntimeDeps) (*Runtime, error) {
 		return nil, fmt.Errorf("selected runtime store run lifecycle candidate owner is required")
 	}
 	if runtimeDeps.WorkflowPersistence.Valid() {
+		var registeredAccounts channelonboarding.OperationStore
+		if selected, ok := rt.Options.ChannelOnboardingStore.(interface {
+			DeploymentChannelOperations() channelonboarding.OperationStore
+		}); ok {
+			registeredAccounts = selected.DeploymentChannelOperations()
+		}
 		rt.Pipeline = runtimepipeline.NewPipelineCoordinatorWithOptions(rt.Bus, runtimepipeline.PipelineCoordinatorOptions{
 			ExecutionPosture:          boot.ExecutionPosture,
 			ReceiverExecution:         eventreceiver.NormalExecution(),
@@ -1374,6 +1383,7 @@ func newRuntime(ctx context.Context, deps RuntimeDeps) (*Runtime, error) {
 			RunLifecycle:              runtimeDeps.EventBusDurable.RunLifecycle,
 			Credentials:               rt.Credentials,
 			ProviderCredentials:       rt.Options.ProviderCredentials,
+			RegisteredAccounts:        registeredAccounts,
 			ManagedCredentials:        rt.ManagedCredentials,
 			MockConnectorResponses:    boot.MockConnectorResponses,
 			ScenarioExecutionProfiles: runtimeDeps.ScenarioExecutionProfiles,

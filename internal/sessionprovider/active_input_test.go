@@ -104,7 +104,7 @@ func newActiveInputFixtureWithProof(t *testing.T, backend string, outbound, save
 	return newActiveInputFixtureWithTarget(t, backend, outbound, saveProof, 1)
 }
 
-func newActiveInputFixtureWithTarget(t *testing.T, backend string, outbound, saveProof bool, targetGeneration uint64) *activeInputFixture {
+func newActiveInputFixtureWithTarget(t *testing.T, backend string, outbound, saveProof bool, targetGeneration uint64, deployment ...bool) *activeInputFixture {
 	t.Helper()
 	f := &activeInputFixture{handled: make(chan capturedEvent, 1)}
 	if backend == "sqlite" {
@@ -119,6 +119,7 @@ func newActiveInputFixtureWithTarget(t *testing.T, backend string, outbound, sav
 	members := map[string][]byte{
 		"manifest.yaml": []byte("version: 1.0.0\nplatform_version: '*'\n"),
 		"schema.yaml":   []byte("stages: []\npins: {inputs: [inbound.whatsapp.raw, inbound.whatsapp.message, inbound.whatsapp.edit, inbound.whatsapp.revoke]}\n"),
+		"policy.yaml":   []byte("operator_account: '+100000000002'\n"),
 	}
 	for name, body := range packfixture.WhatsAppSessionProviderMembers(t, manifest.SourceBytes(), []string{"raw", "edit", "message", "revoke"}) {
 		members["whatsapp/"+name] = body
@@ -156,16 +157,25 @@ func newActiveInputFixtureWithTarget(t *testing.T, backend string, outbound, sav
 		BundleHash: source.BundleHash(), BundleIdentity: "active-native-input", PackInventoryGeneration: "sha256:active-native-input",
 		RuntimeInstanceID: uuid.NewString(), ContextPublicationGeneration: 1, PlanGeneration: generation}, CatalogGeneration: catalog.Generation()}
 	id := uuid.NewString()
-	f.operation, err = f.selected.ReserveChannelOnboarding(ctx, channelonboarding.StartRequest{OperationID: id,
+	operations := channelonboarding.OperationStore(f.selected)
+	request := channelonboarding.StartRequest{OperationID: id,
 		RequestKeyHash: id, RequestHash: id, PrincipalID: principal.ID, Verb: channelonboarding.VerbConnect, Provider: "whatsapp",
 		Interface: identity, Coordinate: f.source.Coordinate, TargetSelector: "ingress:.:whatsapp",
-		Posture: channelonboarding.ActivationSessionConnection, Ceremony: channelonboarding.CeremonyAuthenticatedTextChallenge, SaveProof: saveProof, RequestedAt: now})
+		Posture: channelonboarding.ActivationSessionConnection, Ceremony: channelonboarding.CeremonyAuthenticatedTextChallenge, SaveProof: saveProof, RequestedAt: now}
+	if len(deployment) == 1 && deployment[0] {
+		operations = f.selected.(interface {
+			DeploymentChannelOperations() channelonboarding.OperationStore
+		}).DeploymentChannelOperations()
+		request.DeploymentRegistration, request.Ceremony = true, channelonboarding.CeremonyAccountLink
+		request.Coordinate, request.TargetSelector = channelonboarding.ChannelRuntimeContextCoordinate{}, ""
+	}
+	f.operation, err = operations.ReserveChannelOnboarding(ctx, request)
 	if err != nil {
 		t.Fatal(err)
 	}
 	connectionID := f.operation.SessionConnectionID
 	f.state = sessionStateFixture(t, base, connectionID, "")
-	device := newSDKDeviceFixture(t, f.state.database)
+	device := newSDKDeviceFixture(t, f.state.database, types.NewJID("100000000002", types.DefaultUserServer))
 	if outbound {
 		device.LID = types.NewJID("200000000000", types.HiddenUserServer)
 		if err := device.Save(ctx); err != nil {
@@ -181,10 +191,27 @@ func newActiveInputFixtureWithTarget(t *testing.T, backend string, outbound, sav
 		req := channelonboarding.AdvanceRequest{OperationID: f.operation.OperationID, ExpectedRevision: f.operation.Revision, Phase: phase, Now: now}
 		if phase == channelonboarding.PhaseAwaitingExternalIdentity {
 			req.SessionAccount = &account
+			if request.DeploymentRegistration {
+				req.AccountReference = "+100000000002"
+			}
 		}
-		f.operation, err = f.selected.AdvanceChannelOnboarding(ctx, req)
+		f.operation, err = operations.AdvanceChannelOnboarding(ctx, req)
 		if err != nil {
 			t.Fatal(err)
+		}
+	}
+	if request.DeploymentRegistration {
+		f.operation, err = operations.AdvanceChannelOnboarding(ctx, channelonboarding.AdvanceRequest{OperationID: f.operation.OperationID,
+			ExpectedRevision: f.operation.Revision, Phase: f.operation.Phase, ConfirmAccount: true, Now: now})
+		if err != nil {
+			t.Fatal(err)
+		}
+		for _, phase := range []channelonboarding.Phase{channelonboarding.PhaseAwaitingOperatorConfirmation, channelonboarding.PhaseSucceeded} {
+			f.operation, err = operations.AdvanceChannelOnboarding(ctx, channelonboarding.AdvanceRequest{OperationID: f.operation.OperationID,
+				ExpectedRevision: f.operation.Revision, Phase: phase, Now: now})
+			if err != nil {
+				t.Fatalf("registered account phase %s: %v", phase, err)
+			}
 		}
 	}
 	f.peer = newSDKPeer(t)
@@ -196,7 +223,7 @@ func newActiveInputFixtureWithTarget(t *testing.T, backend string, outbound, sav
 	}
 	f.ctx = worklifetime.WithOccurrence(f.ctx, f.workOwner)
 	f.nativeContext = f.ctx
-	acquireLogoutProcessFixture(t, f, f.operation.Coordinate.RuntimeInstanceID)
+	acquireLogoutProcessFixture(t, f, f.source.Coordinate.RuntimeInstanceID)
 	initialWorkOwner := f.workOwner
 	t.Cleanup(func() {
 		ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
@@ -227,11 +254,15 @@ func newActiveInputFixtureWithTarget(t *testing.T, backend string, outbound, sav
 	if err != nil {
 		t.Fatal(err)
 	}
-	f.owner, err = newSessionInputOwner(f.selected, f.selected, reader, f.operation.OperationID)
+	f.owner, err = newSessionInputOwner(f.selected, operations, reader, f.operation.OperationID)
 	if err != nil {
 		t.Fatal(err)
 	}
-	f.authority, err = newSessionAuthorityOwner(f.state, f.selected, f.operation, nil, nil)
+	var invocation sessionWorkParent
+	if request.DeploymentRegistration {
+		invocation = f.workOwner
+	}
+	f.authority, err = newSessionAuthorityOwner(f.state, operations, f.operation, nil, invocation)
 	if err != nil {
 		t.Fatal(err)
 	}

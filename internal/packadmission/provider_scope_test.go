@@ -10,6 +10,7 @@ import (
 	"time"
 
 	"github.com/division-sh/swarm/internal/packmodel"
+	runtimecontracts "github.com/division-sh/swarm/internal/runtime/contracts"
 	"github.com/division-sh/swarm/internal/sourceartifact"
 	"github.com/division-sh/swarm/internal/testutil/packfixture"
 	"github.com/division-sh/swarm/internal/testutil/sourceartifactfixture"
@@ -182,6 +183,46 @@ func TestS1ProviderSourceDoesNotPromoteVisibilityToHolderOwnership(t *testing.T)
 	}
 	if scope, err := (ProviderSource{}).Scope("."); err == nil || len(scope.Providers()) != 0 {
 		t.Fatal("zero source exposed a provider scope")
+	}
+	if _, _, err := root.ConnectionAccount(&runtimecontracts.WorkflowContractBundle{}); err == nil ||
+		!strings.Contains(err.Error(), "second connection-account provider") || !strings.Contains(err.Error(), "into its own child flow") {
+		t.Fatalf("multiple connection account holders = %v", err)
+	}
+	if provider, account, err := deep.ConnectionAccount(nil); err != nil || provider.Valid() || account.FlowID != "" {
+		t.Fatalf("inherited visibility fabricated an operator account: %+v %v", account, err)
+	}
+	for _, withPolicy := range []bool{false, true} {
+		members := map[string][]byte{
+			"manifest.yaml": []byte("version: 1.0.0\nplatform_version: '*'\n"),
+			"schema.yaml":   []byte("stages: []\npins:\n  inputs: [inbound.whatsapp.text_message]\n"),
+		}
+		for name, body := range packfixture.NeutralProviderMembers() {
+			members["whatsapp/"+name] = body
+		}
+		if withPolicy {
+			members["policy.yaml"] = []byte("operator_account: '+1 (555) 0100'\n")
+		}
+		captured, _ := capturedProviderSource(t, members)
+		bundle, err := runtimecontracts.LoadWorkflowContractBundleFromRootedSource(repoRoot(t), captured, "", runtimecontracts.WorkflowContractLoadOptions{})
+		if err != nil {
+			t.Fatal(err)
+		}
+		admitted, err := AdmitProviderSource(captured, bundle.Platform)
+		if err != nil {
+			t.Fatal(err)
+		}
+		scope, err := admitted.Scope(".")
+		if err != nil {
+			t.Fatal(err)
+		}
+		definition, account, err := scope.ConnectionAccount(bundle)
+		if withPolicy {
+			if err != nil || !definition.Valid() || !account.FromPolicy || account.Policy != "+15550100" {
+				t.Fatalf("pre-emission account declaration = %+v, %v", account, err)
+			}
+		} else if err == nil || !strings.Contains(err.Error(), "requires operator_account") {
+			t.Fatalf("missing ordinary account variable = %v", err)
+		}
 	}
 }
 

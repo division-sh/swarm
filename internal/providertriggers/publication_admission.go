@@ -16,13 +16,14 @@ import (
 // not receiver permission. HTTP receipts consume its authenticated delivery ID;
 // native receipt coordinates remain owned by the original capture.
 type PublicationAdmission struct {
-	bundleHash  string
-	flowID      string
-	provider    string
-	deliveryID  string
-	outputs     []admittedPublicationOutput
-	nativeInput *nativeinput.Admission
-	generation  triggergeneration.Generation
+	bundleHash      string
+	flowID          string
+	provider        string
+	deliveryID      string
+	outputs         []admittedPublicationOutput
+	nativeInput     *nativeinput.Admission
+	generation      triggergeneration.Generation
+	operatorAccount string
 }
 
 type admittedPublicationOutput struct {
@@ -33,6 +34,7 @@ type admittedPublicationOutput struct {
 }
 
 func (a PublicationAdmission) SourceBundleHash() string { return a.bundleHash }
+func (a PublicationAdmission) OperatorAccount() string  { return a.operatorAccount }
 
 func (p InboundAdmissionPlan) ProjectPublication(admitted AdmittedRequest, bundleHash, flowID string) (Delivery, PublicationAdmission, error) {
 	if admitted.sessionInput != nil {
@@ -56,8 +58,15 @@ func (p InboundAdmissionPlan) ProjectPublication(admitted AdmittedRequest, bundl
 		return Delivery{}, PublicationAdmission{}, fmt.Errorf("publication requires the exact admitted delivery, not a challenge or changed identity")
 	}
 	admission := PublicationAdmission{bundleHash: bundleHash, flowID: flowID, provider: p.provider,
-		deliveryID: delivery.ProviderEventID, nativeInput: admitted.sessionInput, generation: p.generation}
+		deliveryID: delivery.ProviderEventID, nativeInput: admitted.sessionInput, generation: p.generation, operatorAccount: admitted.operatorAccount}
 	for _, output := range delivery.Events {
+		if admitted.sessionInput != nil && output.Kind == OutputKindNormalized {
+			account, _ := output.Payload["operator_account"].(string)
+			if admission.operatorAccount != "" && admission.operatorAccount != account {
+				return Delivery{}, PublicationAdmission{}, fmt.Errorf("native outputs disagree on their receiving account")
+			}
+			admission.operatorAccount = account
+		}
 		payload, err := canonicaljson.Bytes(output.Payload)
 		if err != nil {
 			return Delivery{}, PublicationAdmission{}, err

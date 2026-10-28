@@ -8,6 +8,7 @@ import (
 
 	"github.com/division-sh/swarm/internal/channelonboarding"
 	"github.com/division-sh/swarm/internal/packadmission"
+	"github.com/division-sh/swarm/internal/runtime/canonicaljson"
 	channelactivation "github.com/division-sh/swarm/internal/runtime/channelactivation"
 	contracts "github.com/division-sh/swarm/internal/runtime/contracts"
 	correlation "github.com/division-sh/swarm/internal/runtime/correlation"
@@ -42,13 +43,30 @@ func (pc *PipelineCoordinator) prepareSessionActivityIntents(ctx context.Context
 
 func (pc *PipelineCoordinator) prepareSessionActivityIntent(ctx context.Context, intent engine.ActivityIntent) (engine.ActivityIntent, *channelactivation.Lease, error) {
 	tool, declared := pc.SemanticSource().ToolEntries()[intent.Tool]
-	_, native := tool.InProcess()
+	nativeTarget, native := tool.InProcess()
 	requiresSession := declared && native && intent.ExecutionMode == executionmode.Live
 	if intent.NativeSessionTarget != "" && !requiresSession {
 		return intent, nil, fmt.Errorf("frozen session activity selection has no exact live native declaration")
 	}
 	if !requiresSession {
 		return intent, nil, nil
+	}
+	input, object := intent.Input.Interface().(map[string]any)
+	account, supplied := input["account"].(string)
+	if !object || !supplied {
+		return intent, nil, fmt.Errorf("authored session activity requires account: state.operator_account or policy.operator_account")
+	}
+	ref, err := channelonboarding.CanonicalAccount(nativeTarget.Provider(), account)
+	if err != nil {
+		return intent, nil, fmt.Errorf("session activity account: %w", err)
+	}
+	if intent.NativeSessionTarget != "" && account != ref.Account {
+		return intent, nil, fmt.Errorf("frozen session activity account is not canonical")
+	}
+	input["account"] = ref.Account
+	intent.Input, err = canonicaljson.FromGo(input)
+	if err != nil {
+		return intent, nil, err
 	}
 	if pc.channelActivations == nil {
 		return intent, nil, fmt.Errorf("authored session activity requires its original activation owner")
@@ -105,7 +123,9 @@ func (pc *PipelineCoordinator) compileAuthoredSessionActivity(ctx context.Contex
 	if err != nil {
 		return absent, err
 	}
-	return channelonboarding.CompileSessionActivityTarget(pc.SemanticSource(), intent.BundleHash, site, publication, trigger)
+	input, _ := intent.Input.ObjectMap()
+	account, _ := input["account"].String()
+	return channelonboarding.CompileSessionActivityTarget(pc.SemanticSource(), intent.BundleHash, site, publication, trigger, account)
 }
 
 func (pc *PipelineCoordinator) validateAuthoredSessionActivity(ctx context.Context, intent engine.ActivityIntent,

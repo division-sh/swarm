@@ -246,6 +246,7 @@ type RetryInput struct {
 }
 
 type Result struct {
+	Status            *AccountStatus             `json:"status,omitempty"`
 	Operation         Operation                  `json:"operation"`
 	Candidate         *Candidate                 `json:"candidate,omitempty"`
 	IdentityOperation *operatorchannel.Operation `json:"identity_operation,omitempty"`
@@ -257,6 +258,7 @@ type Result struct {
 }
 
 type SessionConnectionReadback struct {
+	Unclaimed           *int64 `json:"account_unclaimed,omitempty"`
 	State               string `json:"state"`
 	Reason              string `json:"reason,omitempty"`
 	Linked              bool   `json:"linked"`

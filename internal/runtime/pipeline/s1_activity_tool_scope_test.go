@@ -1,17 +1,25 @@
 package pipeline
 
 import (
+	"context"
 	"encoding/json"
 	"fmt"
 	"net/http"
 	"net/http/httptest"
+	"os"
+	"path/filepath"
 	"slices"
+	"strings"
 	"sync/atomic"
 	"testing"
+	"time"
 
+	"github.com/division-sh/swarm/internal/channelonboarding"
 	"github.com/division-sh/swarm/internal/events"
+	"github.com/division-sh/swarm/internal/packadmission"
 	runtimeactivityidentity "github.com/division-sh/swarm/internal/runtime/core/activityidentity"
 	"github.com/division-sh/swarm/internal/runtime/core/identity"
+	runtimecredentials "github.com/division-sh/swarm/internal/runtime/credentials"
 	"github.com/division-sh/swarm/internal/runtime/semanticview"
 	"github.com/google/uuid"
 )
@@ -22,6 +30,132 @@ func VerifyS1ScopedActivityDispatchUsesExactDeclarationForTest(t *testing.T, ope
 		t.Fatal("local activity journey requires the real effective-source compiler")
 	}
 	verifyS1ScopedActivityDispatch(t, open, compose, false)
+	t.Run("registered_account_credentials", func(t *testing.T) {
+		files := map[string]string{
+			"manifest.yaml": "version: 1.0.0\nplatform_version: '*'\n",
+			"schema.yaml":   "stages: []\npins:\n  inputs: [inbound.telegram.text_message]\n",
+			"policy.yaml":   "operator_account: '420079'\n",
+		}
+		for _, role := range []string{"manifest", "trigger", "connector", "channel"} {
+			body, err := os.ReadFile(filepath.Join(WorkflowRepoRoot(), "packs", "providers", "telegram", role+".yaml"))
+			if err != nil {
+				t.Fatal(err)
+			}
+			files["telegram/"+role+".yaml"] = string(body)
+		}
+		bundle := loadWorkflowTempBundle(t, files)
+		source := compose(t, semanticview.Wrap(bundle))
+		rooted, err := bundle.RootedSource()
+		if err != nil {
+			t.Fatal(err)
+		}
+		providers, err := packadmission.AdmitProviderSource(rooted, bundle.Platform)
+		if err != nil {
+			t.Fatal(err)
+		}
+		scope, _ := providers.Scope(".")
+		provider, _ := scope.Provider("telegram")
+		plan, _ := provider.ChannelPlan()
+		profile, found := plan.OnboardingProfile()
+		if !found {
+			t.Fatal("registered credential control requires its exact provider role")
+		}
+		role := profile.ProviderCredential()
+		connector, _ := provider.ConnectorDescriptor()
+		channelIdentity, err := plan.InterfaceIdentity()
+		if err != nil {
+			t.Fatal(err)
+		}
+		fixture := open(t, source)
+		ctx := fixture.Context
+		selected := fixture.AccountRegistrationOwners
+		if selected == nil {
+			t.Fatal("activity fixture lacks its existing deployment registration owners")
+		}
+		principal, err := selected.EnsureOperatorPrincipal(ctx, time.Now().UTC())
+		if err != nil {
+			t.Fatal(err)
+		}
+		accounts := selected.DeploymentChannelOperations()
+		file, err := runtimecredentials.NewFileStore(filepath.Join(t.TempDir(), "account-credentials.json"))
+		if err != nil {
+			t.Fatal(err)
+		}
+		writer, err := channelonboarding.NewCredentialWriter(file)
+		if err != nil {
+			t.Fatal(err)
+		}
+		operations := []channelonboarding.Operation{}
+		for _, account := range []string{"420079", "420080"} {
+			id := uuid.NewString()
+			admitted, err := writer.Admit(ctx, channelonboarding.CredentialWriteRequest{StoreKey: "telegram." + account, Value: account + ":fixture-token", Receipt: id})
+			if err != nil {
+				t.Fatal(err)
+			}
+			op, err := accounts.ReserveChannelOnboarding(ctx, channelonboarding.StartRequest{DeploymentRegistration: true,
+				ExpectedAccount: account, OperationID: id, PrincipalID: principal.ID, RequestKeyHash: id, RequestHash: id,
+				Provider: "telegram", Interface: channelIdentity, Verb: channelonboarding.VerbConnect,
+				CredentialReservations: []channelonboarding.CredentialReservation{{Role: role, StoreKey: admitted.StoreKey}},
+				Posture:                channelonboarding.ActivationWebhookRegistration, Ceremony: channelonboarding.CeremonyAccountLink, RequestedAt: time.Now().UTC()})
+			if err != nil {
+				t.Fatal(err)
+			}
+			for _, phase := range []channelonboarding.Phase{channelonboarding.PhaseCredentialsAdmitted, channelonboarding.PhaseActivatingProvider,
+				channelonboarding.PhaseAwaitingExternalIdentity, channelonboarding.PhaseAwaitingExternalIdentity,
+				channelonboarding.PhaseAwaitingOperatorConfirmation, channelonboarding.PhaseSucceeded} {
+				req := channelonboarding.AdvanceRequest{OperationID: op.OperationID, ExpectedRevision: op.Revision, Phase: phase, Now: time.Now().UTC()}
+				if phase == channelonboarding.PhaseCredentialsAdmitted {
+					req.ReplaceCredentialAdmissions = true
+					req.CredentialAdmissions = []channelonboarding.CredentialAdmission{{Role: role, StoreKey: admitted.StoreKey,
+						Kind: channelonboarding.CredentialAdmissionWritten, Receipt: admitted.Receipt, ValueSeal: admitted.ValueSeal}}
+				}
+				if phase == channelonboarding.PhaseAwaitingExternalIdentity {
+					if op.Phase == phase {
+						req.ConfirmAccount = true
+					} else {
+						req.AccountReference = account
+					}
+				}
+				op, err = accounts.AdvanceChannelOnboarding(ctx, req)
+				if err != nil {
+					t.Fatal("registered credential fixture", phase, err)
+				}
+			}
+			operations = append(operations, op)
+		}
+		pc := fixture.NewCoordinator(&recordingPipelineBus{}, PipelineCoordinatorOptions{Module: staticSemanticWorkflowModule{source: source}, ProviderCredentials: file, RegisteredAccounts: accounts})
+		tool, present := connector.Tools["telegram.send_message"]
+		if !present {
+			t.Fatal("registered credential control lacks its exact admitted tool")
+		}
+		var currents []func(context.Context) error
+		for _, account := range []string{"420079", "420080", "420081", ""} {
+			intent := testNonIdempotentActivityIntent(uuid.NewString(), uuid.NewString(), uuid.NewString())
+			intent.Tool, intent.ExecutionFlowID = "telegram.send_message", identity.NormalizeFlowID(".")
+			intent.Input = mustActivityInput(map[string]any{"account": account, "chat_id": "17", "text": "customer reply"})
+			values, _, current, matched, err := pc.accountActivityCredentials(ctx, intent, tool)
+			if account == "420081" || account == "" {
+				if err == nil || !matched {
+					t.Fatal("missing/unlinked account fell back to another credential")
+				}
+				continue
+			}
+			if err != nil || !matched || len(values) != 1 || values[role] != account+":fixture-token" || current == nil || current(ctx) != nil {
+				t.Fatal("authored activity did not select only its exact account credential", err)
+			}
+			prepared, err := (pipelineActivityDispatcher{coordinator: pc}).prepareActivityHTTPTool(ctx, nil, intent, tool)
+			if err != nil || !strings.Contains(prepared.url, "bot"+account+":fixture-token/sendMessage") || prepared.validateAdmission == nil || prepared.validateAdmission(ctx) != nil {
+				t.Fatal("HTTP preparation bypassed its selected account credential", err)
+			}
+			currents = append(currents, prepared.validateAdmission)
+		}
+		if released, err := writer.Release(ctx, operations[0].CredentialAdmissions[0]); err != nil || !released {
+			t.Fatal("withdraw exact account credential", released, err)
+		}
+		if currents[0](ctx) == nil || currents[1](ctx) != nil {
+			t.Fatal("withdrawing one account credential did not fence only its own prepared activity")
+		}
+	})
 }
 
 func VerifyS1DirectoryConnectorDispatchUsesExactDeclarationForTest(t *testing.T, open func(*testing.T, semanticview.Source) WorkflowActivityNativeFixtureForTest, compose func(*testing.T, semanticview.Source) semanticview.Source) {

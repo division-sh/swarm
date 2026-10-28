@@ -45,6 +45,15 @@ func (o *Owner) Captures(ctx context.Context, connectionID string) (*Capture, er
 func (s *Capture) Capture(ctx context.Context, event sessioncapture.Event) error {
 	return s.owner.Capture(ctx, event)
 }
+func (s *Capture) RetainUnclaimed(ctx context.Context, event sessioncapture.Event) error {
+	return s.owner.RetainUnclaimed(ctx, event)
+}
+func (s *Capture) IsUnclaimed(ctx context.Context, event sessioncapture.Event) (bool, error) {
+	return s.owner.IsUnclaimed(ctx, event)
+}
+func (s *Capture) UnclaimedCount(ctx context.Context) (int64, error) {
+	return s.owner.UnclaimedCount(ctx)
+}
 func (s *Capture) Pending(ctx context.Context) ([]sessioncapture.Event, error) {
 	return s.owner.Pending(ctx)
 }

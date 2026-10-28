@@ -1,8 +1,9 @@
 # WhatsApp receptionist
 
-Run `swarm serve` here. In another terminal in this directory, run
-`swarm channel connect whatsapp`. Scan the terminal QR from WhatsApp's
-Linked Devices screen, then confirm the linked account. A customer can
+Run `swarm channel connect whatsapp` here before starting serve. Scan the
+terminal QR from WhatsApp's Linked Devices screen, then confirm the linked
+account. Replace `<number>` in `policy.yaml` with that account's international
+number, including `+`, then run `swarm serve`. A customer can
 send a message to that number and receive the same text back once.
 
 This flow has no human approval step, so it never challenges a customer

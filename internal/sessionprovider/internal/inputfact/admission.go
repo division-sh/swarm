@@ -86,6 +86,13 @@ func (a Admission) RequireBusiness(ctx context.Context, provider string, generat
 		return err
 	}
 	capture := a.value.capture
+	if capture.Responsibility.RegisteredBusiness {
+		if capture.Scope != channelonboarding.SessionInputBusiness || !capture.AccountOnly || capture.BindingRevision != 0 ||
+			capture.PublicationRunID == "" || capture.RunCurrent == nil {
+			return fmt.Errorf("registered business input requires its separate current source and run")
+		}
+		return capture.RunCurrent(ctx)
+	}
 	if capture.Scope != channelonboarding.SessionInputBusiness || capture.Responsibility.ActivationRevision < 1 ||
 		capture.BindingRevision < 1 && !capture.AccountOnly || capture.AccountOnly && capture.BindingRevision != 0 || capture.PublicationRunID == "" {
 		return fmt.Errorf("business publication requires explicit activated native business scope")

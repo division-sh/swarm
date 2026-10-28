@@ -22,6 +22,7 @@ type AdmissionResponsibility struct {
 	SessionAccount     operatorchannel.SessionAccountAdmission
 
 	DeploymentRegistration bool
+	RegisteredBusiness     bool
 }
 
 // Fresh target promotion borrows the original SDK admission. Confirmed durable
@@ -86,6 +87,9 @@ func AdmissionResponsibilityCurrent(ctx context.Context, store Store, expected A
 	if !expected.MatchesOperation(op) {
 		return false, nil
 	}
+	if expected.RegisteredBusiness {
+		return true, nil // The separate current source/run owner fences execution.
+	}
 	if expected.ActivationRevision == 0 {
 		return (op.Phase.SupportsPrebindingRegistration() || op.Phase == PhaseCredentialsAdmitted) &&
 			(!exactPendingRevision || op.Revision == expected.OperationRevision), nil
@@ -102,6 +106,15 @@ func AdmissionResponsibilityCurrent(ctx context.Context, store Store, expected A
 func (expected AdmissionResponsibility) MatchesOperation(op Operation) bool {
 	if expected.DeploymentRegistration != op.DeploymentRegistration {
 		return false
+	}
+	if expected.RegisteredBusiness {
+		return expected.DeploymentRegistration && op.AccountConfirmed && !op.LogoutCompleted &&
+			op.ValidateSessionAccount() == nil && op.Coordinate == (ChannelRuntimeContextCoordinate{}) && op.TargetSelector == "" &&
+			expected.Coordinate.Validate() == nil && expected.TargetSelector != "" && expected.ActivationRevision == 0 &&
+			op.OperationID == expected.OperationID && expected.OperationRevision > 0 && op.Revision >= expected.OperationRevision &&
+			op.Provider == expected.Provider && op.SessionAccount == expected.SessionAccount &&
+			slices.Equal(op.CredentialAdmissions, expected.Credentials) &&
+			(op.Phase == PhaseSucceeded || op.Phase == PhaseAwaitingExternalIdentity || op.Phase == PhaseAwaitingOperatorConfirmation)
 	}
 	coordinateCurrent := op.Coordinate.Matches(expected.Coordinate)
 	if op.DeploymentRegistration {

@@ -211,6 +211,11 @@ func (s *Service) DeploymentAccounts(ctx context.Context, provider string) ([]Re
 		if err != nil {
 			return nil, err
 		}
+		status, err := s.DeploymentAccountStatus(ctx, AccountReference{Provider: provider, Account: account})
+		if err != nil {
+			return nil, err
+		}
+		view.Status = &status
 		accounts = append(accounts, view)
 	}
 	return accounts, nil

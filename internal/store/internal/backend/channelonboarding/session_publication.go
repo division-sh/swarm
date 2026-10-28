@@ -22,7 +22,7 @@ func RequireSessionBusinessInputTx(ctx context.Context, tx *sql.Tx, postgres boo
 		d = dialectPostgres
 	}
 	expected := input.Responsibility()
-	op, found, err := loadOperation(ctx, tx, d, expected.OperationID, true)
+	op, found, err := loadOperation(ctx, tx, d, expected.OperationID, true, expected.DeploymentRegistration)
 	if err != nil {
 		return err
 	}
@@ -33,6 +33,12 @@ func RequireSessionBusinessInputTx(ctx context.Context, tx *sql.Tx, postgres boo
 	// principal-before-binding/activation fence used by retirement and unbind.
 	if err := channeldelivery.LockPrincipalTx(ctx, tx, op.PrincipalID, postgres); err != nil {
 		return err
+	}
+	if expected.RegisteredBusiness {
+		if input.BindingRevision() != 0 || !input.LifetimeCurrent(ctx) {
+			return domain.ErrRevisionConflict
+		}
+		return nil // The enclosing publication transaction fences the exact run/source.
 	}
 	if op.AccountConnection() {
 		activation, found, err := loadActivationBySlot(ctx, tx, d, op.SlotKey, true)

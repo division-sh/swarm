@@ -305,6 +305,14 @@ func (c *DeploymentChannelControl) call(ctx context.Context, method string, para
 		revision, _ := params["expected_revision"].(int64)
 		result, err = c.service.LogoutDeployment(ctx, channelSelectionParam(params, "operation_id"), revision)
 	case "channel.list":
+		if account, _ := params["account"].(string); account != "" {
+			ref, failure := channelonboarding.CanonicalAccount(c.provider, account)
+			if failure != nil {
+				return failure
+			}
+			result, err = c.service.DeploymentAccountStatus(ctx, ref)
+			break
+		}
 		rows, failure := c.service.DeploymentAccounts(ctx, c.provider)
 		result, err = map[string]any{"accounts": rows}, failure
 	default:
@@ -343,6 +351,30 @@ func (c *DeploymentChannelControl) Close(ctx context.Context) error {
 
 func (c *DeploymentChannelControl) Dispatch(ctx context.Context, method string, params map[string]any, target any) error {
 	return c.call(ctx, method, params, target)
+}
+
+// ResumeRegisteredAccount restores only the retained transport. It neither
+// advances registration nor grants any source/flow execution authority.
+func (c *DeploymentChannelControl) ResumeRegisteredAccount(ctx context.Context, ref channelonboarding.AccountReference) error {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	if c.remote != nil || c.store == nil || ref.Provider != c.provider {
+		return channelonboarding.ErrInvalidRequest
+	}
+	op, err := channelonboarding.RegisteredAccount(ctx, c.store.DeploymentChannels(), ref)
+	if err != nil {
+		return err
+	}
+	return c.session.ResumeSession(ctx, op, channelonboarding.Candidate{})
+}
+
+func (c *DeploymentChannelControl) AccountStatus(ctx context.Context, ref channelonboarding.AccountReference) (channelonboarding.AccountStatus, error) {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	if c.service == nil || ref.Provider != c.provider {
+		return channelonboarding.AccountStatus{}, channelonboarding.ErrInvalidRequest
+	}
+	return c.service.DeploymentAccountStatus(ctx, ref)
 }
 
 func (c *DeploymentChannelControl) ConsumeWebhookClaim(ctx context.Context, account channelonboarding.AccountReference, credential func(channelonboarding.CredentialAdmission) bool, admit func() (providertriggers.Delivery, error), current func() bool) (bool, error) {
@@ -414,6 +446,10 @@ func runDeploymentChannelList(ctx context.Context, out, errOut io.Writer, opts r
 	}
 	return renderCLIOutput(out, errOut, output, map[string]any{"accounts": accounts}, func(w io.Writer) {
 		for _, row := range accounts {
+			if row.Status != nil {
+				writeDeploymentAccountStatus(w, *row.Status)
+				continue
+			}
 			state := "pending"
 			if row.Operation.AccountConfirmed && row.Operation.Phase == channelonboarding.PhaseSucceeded {
 				state = "registered"
@@ -430,6 +466,57 @@ func runDeploymentChannelList(ctx context.Context, out, errOut io.Writer, opts r
 		}
 		return values, nil
 	})
+}
+
+func runDeploymentChannelStatus(ctx context.Context, out, errOut io.Writer, provider, account string, opts rootCommandOptions, output cliOutputOptions) (resultErr error) {
+	if err := output.validate(); err != nil {
+		return returnCLIValidationError(errOut, err)
+	}
+	if account != "" {
+		ref, err := channelonboarding.CanonicalAccount(provider, account)
+		if err != nil {
+			return returnCLIValidationError(errOut, err)
+		}
+		account = ref.Account
+	}
+	client, err := openDeploymentChannelClient(ctx, provider, opts)
+	if err != nil {
+		return returnCLIValidationError(errOut, err)
+	}
+	defer func() { resultErr = errors.Join(resultErr, client.Close(context.WithoutCancel(ctx))) }()
+	if account == "" {
+		rows, err := client.accounts(ctx)
+		if err != nil {
+			return returnCLIAPIError(errOut, err, channelErrorClassifier())
+		}
+		op, err := selectDeploymentAccount(rows, account, opts.input, errOut, false)
+		if err != nil {
+			return returnCLIValidationError(errOut, err)
+		}
+		account = op.DeploymentAccount()
+	}
+	var status channelonboarding.AccountStatus
+	if err := client.call(ctx, "channel.list", map[string]any{"account": account}, &status); err != nil {
+		return returnCLIAPIError(errOut, err, channelErrorClassifier())
+	}
+	return renderCLIOutput(out, errOut, output, status, func(w io.Writer) {
+		writeDeploymentAccountStatus(w, status)
+	}, func() ([]string, error) { return []string{status.Account}, nil })
+}
+
+func writeDeploymentAccountStatus(w io.Writer, status channelonboarding.AccountStatus) {
+	role := "idle"
+	if len(status.Holders) == 1 {
+		role = "held by " + status.Holders[0].Flow
+	}
+	fmt.Fprintf(w, "%s %s · %s · %s · %s", status.Provider, status.Account, status.State, role, status.Health)
+	if status.Reason != "" {
+		fmt.Fprintf(w, ": %s", status.Reason)
+	}
+	if status.Unclaimed != nil {
+		fmt.Fprintf(w, " · account_unclaimed=%d", *status.Unclaimed)
+	}
+	fmt.Fprintln(w)
 }
 
 func runDeploymentChannelLogout(ctx context.Context, out, errOut io.Writer, provider, account string, opts rootCommandOptions, output cliOutputOptions) (resultErr error) {

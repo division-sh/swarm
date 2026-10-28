@@ -307,21 +307,60 @@ func (s *serveSessionBootstrap) validateRetainedSessionOperation(ctx context.Con
 		op.Phase == channelonboarding.PhaseRetired || op.ValidateSessionAccount() != nil {
 		return channelonboarding.ErrRevisionConflict
 	}
-	current, err := s.store.GetChannelOnboarding(ctx, op.OperationID)
+	operations, err := s.operationsFor(op)
 	if err != nil {
 		return err
+	}
+	current, err := operations.GetChannelOnboarding(ctx, op.OperationID)
+	if err != nil {
+		return err
+	}
+	coordinateCurrent := current.Coordinate.MatchesDeclaration(op.Coordinate)
+	if op.DeploymentRegistration {
+		coordinateCurrent = current.DeploymentRegistration && current.AccountConfirmed && current.Coordinate == op.Coordinate && current.AccountReference == op.AccountReference
 	}
 	if current.Revision != op.Revision || current.Phase != op.Phase || current.RequestHash != op.RequestHash ||
 		current.Provider != op.Provider || current.Posture != op.Posture ||
 		current.SlotKey != op.SlotKey || current.BindingRevision != op.BindingRevision || current.ActivationRevision != op.ActivationRevision ||
 		current.PrincipalID != op.PrincipalID || current.SessionAccount != op.SessionAccount || current.SessionConnectionID != op.SessionConnectionID ||
 		current.TargetSelector != op.TargetSelector || current.Interface.Normalized() != op.Interface.Normalized() ||
-		!current.Coordinate.MatchesDeclaration(op.Coordinate) {
+		!coordinateCurrent {
 		return channelonboarding.ErrRevisionConflict
 	}
 	if ctx.Err() != nil {
 		return context.Cause(ctx)
 	}
+	return nil
+}
+
+func (s *serveSessionBootstrap) operationsFor(op channelonboarding.Operation) (channelonboarding.OperationStore, error) {
+	if !op.DeploymentRegistration {
+		return s.store, nil
+	}
+	scoped, ok := s.store.(interface {
+		DeploymentChannelOperations() channelonboarding.OperationStore
+	})
+	if !ok {
+		return nil, channelonboarding.ErrInvalidRequest
+	}
+	return scoped.DeploymentChannelOperations(), nil
+}
+
+func (s *serveSessionBootstrap) registerDeploymentConnection(op channelonboarding.Operation, connection *sessionprovider.RuntimeConnection) error {
+	if !op.DeploymentRegistration || connection == nil || connection.ConnectionID() != op.SessionConnectionID {
+		return channelonboarding.ErrInvalidRequest
+	}
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	if prior := s.connections[op.OperationID]; prior != nil {
+		if prior.connection != connection {
+			return channelonboarding.ErrConflict
+		}
+		return nil
+	}
+	done := make(chan struct{})
+	close(done)
+	s.connections[op.OperationID] = &serveSessionBootstrapAttempt{operation: op, connection: connection, done: done, connected: true}
 	return nil
 }
 
@@ -434,7 +473,11 @@ func (s *serveSessionBootstrap) RetireInactiveSessions(ctx context.Context) erro
 }
 
 func (s *serveSessionBootstrap) observeSessionRetirement(ctx context.Context, id string, original channelonboarding.Operation) (channelonboarding.Operation, bool, error) {
-	op, err := s.store.GetChannelOnboarding(ctx, id)
+	operations, err := s.operationsFor(original)
+	if err != nil {
+		return channelonboarding.Operation{}, false, err
+	}
+	op, err := operations.GetChannelOnboarding(ctx, id)
 	if ctx.Err() != nil {
 		return op, false, context.Cause(ctx)
 	}

@@ -129,12 +129,14 @@ func scaffoldArchetype(root InvocationRoot, out io.Writer, rawName, rawOutput st
 	if source.WorkingDir != "." {
 		fmt.Fprintf(out, "  cd %s\n", source.WorkingDir)
 	}
-	fmt.Fprintln(out, "  swarm verify . --portable")
 	if name == "whatsapp-receptionist" {
 		fmt.Fprintln(out, "  swarm channel connect whatsapp")
+		fmt.Fprintln(out, "  Set operator_account in policy.yaml to the linked number, including +.")
+		fmt.Fprintln(out, "  swarm verify . --portable")
 		fmt.Fprintln(out, "  swarm serve")
 		return nil
 	}
+	fmt.Fprintln(out, "  swarm verify . --portable")
 	fmt.Fprintln(out, "  swarm test . tests/smoke.yaml")
 	fmt.Fprintln(out, "  swarm serve . --dev")
 	return nil

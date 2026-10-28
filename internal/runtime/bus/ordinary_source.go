@@ -72,6 +72,9 @@ func (p selectedRunTargetOwnerProjection) ordinarySource(evt events.Event) (ordi
 }
 
 func (p selectedRunTargetOwnerProjection) selectedProviderExecutionIdentity(event events.Event, flowID string, root bool) (runtimeflowidentity.Instance, error) {
+	if account, selected, err := p.selectedAccountInstance(p.context, event); selected || err != nil {
+		return account, err
+	}
 	expected, err := p.providerExecutionIdentity(event, flowID, root)
 	if err != nil || expected.InstancePath != "" || p.context == nil {
 		return expected, err

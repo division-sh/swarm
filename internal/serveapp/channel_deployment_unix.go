@@ -31,13 +31,23 @@ type deploymentChannelSession struct {
 	opts       cliapp.ChannelRegistrationOptions
 	connection *sessionprovider.RuntimeConnection
 	offset     int64
+	business   sessionprovider.RegisteredBusinessSelector
+	opened     func(channelonboarding.Operation, *sessionprovider.RuntimeConnection) error
 }
 
-func deploymentChannelHandlers(repo, config, directory string, stores *selected.Owner, process *worklifetime.Process, capability startupownership.ProcessCapability, webhook func(context.Context, string, string) bool) (apiv1.MethodHandler, publicingress.PendingDeploymentClaim, func() error) {
+func deploymentChannelHandlers(repo, config, directory string, stores *selected.Owner, process *worklifetime.Process, capability startupownership.ProcessCapability, webhook func(context.Context, string, string) bool, runtimeOptions deploymentRuntimeOptions) (apiv1.MethodHandler, publicingress.PendingDeploymentClaim, func(context.Context) error, func() error) {
 	root, rootErr := cliapp.NewInvocationRoot(repo)
 	factory := func(ctx context.Context, opts cliapp.ChannelRegistrationOptions) (cliapp.ChannelRegistrationSession, error) {
 		opts.CurrentWebhook = webhook
-		return OpenChannelRegistration(ctx, opts)
+		value, err := OpenChannelRegistration(ctx, opts)
+		if err == nil && runtimeOptions.manager != nil {
+			session := value.(*deploymentChannelSession)
+			session.business = serveRegisteredBusinessSelector(runtimeOptions.manager)
+			if owner, ok := runtimeOptions.sessions.(*serveSessionBootstrap); ok {
+				session.opened = owner.registerDeploymentConnection
+			}
+		}
+		return value, err
 	}
 	var mu sync.Mutex
 	clients := map[string]*cliapp.DeploymentChannelControl{}
@@ -63,6 +73,45 @@ func deploymentChannelHandlers(repo, config, directory string, stores *selected.
 		}
 		var result json.RawMessage
 		err = client.Dispatch(ctx, req.Method, req.Params, &result)
+		if err == nil && req.Method == "channel.list" && runtimeOptions.manager != nil {
+			if account, _ := req.Params["account"].(string); account != "" {
+				var status channelonboarding.AccountStatus
+				if err := json.Unmarshal(result, &status); err != nil {
+					return nil, err
+				}
+				if err := observeDeploymentAccountHolder(ctx, runtimeOptions.manager, &status); err != nil {
+					return nil, err
+				}
+				return status, nil
+			}
+			var list struct {
+				Accounts []channelonboarding.Result `json:"accounts"`
+			}
+			if err := json.Unmarshal(result, &list); err != nil {
+				return nil, err
+			}
+			for index := range list.Accounts {
+				row := &list.Accounts[index]
+				if row.Status == nil {
+					continue // A pending pairing may not have an approved account yet.
+				}
+				ref := channelonboarding.AccountReference{Provider: row.Status.Provider, Account: row.Status.Account}
+				mu.Lock()
+				owner := clients[ref.Provider+":"+row.Operation.OperationID]
+				mu.Unlock()
+				if owner != nil {
+					status, err := owner.AccountStatus(ctx, ref)
+					if err != nil {
+						return nil, err
+					}
+					row.Status = &status
+				}
+				if err := observeDeploymentAccountHolder(ctx, runtimeOptions.manager, row.Status); err != nil {
+					return nil, err
+				}
+			}
+			result, err = json.Marshal(list)
+		}
 		var head channelonboarding.Result
 		var decodeErr error
 		if err == nil {
@@ -85,6 +134,9 @@ func deploymentChannelHandlers(repo, config, directory string, stores *selected.
 		mu.Unlock()
 		if !found && head.Operation.OperationID == "" {
 			err = errors.Join(err, client.Close(context.WithoutCancel(ctx)))
+		}
+		if err == nil && req.Method != "channel.list" && req.Method != "channel.onboarding_get" && req.Method != "channel.onboarding_select" && runtimeOptions.refresh != nil {
+			err = runtimeOptions.refresh(ctx)
 		}
 		return result, err
 	}
@@ -118,7 +170,30 @@ func deploymentChannelHandlers(repo, config, directory string, stores *selected.
 		defer func() { _ = client.Close(context.WithoutCancel(ctx)) }()
 		return client.ConsumeWebhookClaim(work.Context(), account, credential, admit, current)
 	}
-	return handler, claim, close
+	restore := func(ctx context.Context) error {
+		operations, err := stores.DeploymentChannels().ListChannelOnboardingOperations(ctx)
+		if err != nil || rootErr != nil {
+			return errors.Join(err, rootErr)
+		}
+		for _, op := range operations {
+			if op.Provider != "whatsapp" || !op.AccountConfirmed || op.Phase == channelonboarding.PhaseRetired || op.Phase == channelonboarding.PhaseFailed {
+				continue
+			}
+			ref := channelonboarding.AccountReference{Provider: op.Provider, Account: op.AccountReference}
+			client, err := cliapp.UseDeploymentChannelControl(ctx, root, config, directory, op.Provider, stores, process, factory)
+			if err != nil {
+				return err
+			}
+			if err := client.ResumeRegisteredAccount(ctx, ref); err != nil {
+				return errors.Join(err, client.Close(context.WithoutCancel(ctx)))
+			}
+			mu.Lock()
+			clients[op.Provider+":"+op.OperationID] = client
+			mu.Unlock()
+		}
+		return nil
+	}
+	return handler, claim, restore, close
 }
 
 func closeDeploymentControls(clients map[string]*cliapp.DeploymentChannelControl) error {
@@ -169,9 +244,14 @@ func (c *deploymentChannelSession) BootstrapSession(ctx context.Context, op chan
 	var err error
 	c.connection, err = sessionprovider.OpenDeploymentConnection(ctx, sessionprovider.DeploymentConnectionOptions{Directory: c.opts.Directory,
 		OperationID: op.OperationID, Principal: c.opts.Principal, Process: c.opts.Process, Operations: c.opts.Operations,
-		Store: c.opts.Store, Credentials: c.opts.Credentials, Plan: c.opts.Plan, Trigger: c.opts.Trigger})
+		Store: c.opts.Store, Credentials: c.opts.Credentials, Plan: c.opts.Plan, Trigger: c.opts.Trigger, RegisteredBusiness: c.business})
 	if err != nil {
 		return err
+	}
+	if c.opened != nil {
+		if err := c.opened(op, c.connection); err != nil {
+			return errors.Join(err, c.connection.Close(context.WithoutCancel(ctx)))
+		}
 	}
 	return c.connection.Connect(ctx)
 }
@@ -274,6 +354,11 @@ func (c *deploymentChannelSession) ReadSessionConnection(ctx context.Context, op
 		return view, nil
 	}
 	view.Reason = c.connection.DisconnectionReason()
+	count, err := c.connection.UnclaimedCount(ctx)
+	if err != nil {
+		return view, err
+	}
+	view.Unclaimed = &count
 	if op.SessionAccount.Validate() == nil {
 		var err error
 		view.AccountPresentation, view.AccountName, err = c.connection.AccountPresentation(ctx)

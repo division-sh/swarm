@@ -18,6 +18,7 @@ import (
 
 type nativeSessionInput struct {
 	DeploymentRegistration     bool
+	RegisteredBusiness         bool
 	Scope                      channelonboarding.SessionInputScope
 	Account                    operatorchannel.SessionAccountAdmission
 	OperationID                string
@@ -48,6 +49,13 @@ func (input nativeSessionInput) matchesOriginalOperation(op channelonboarding.Op
 	}
 	awaitingIdentity := slices.Contains([]channelonboarding.Phase{channelonboarding.PhaseAwaitingExternalIdentity, channelonboarding.PhaseAwaitingOperatorConfirmation}, op.Phase)
 	if op.DeploymentRegistration {
+		if input.RegisteredBusiness {
+			return input.Scope == channelonboarding.SessionInputBusiness && input.AccountOnly &&
+				op.AccountConfirmed && input.OperationID == op.OperationID && op.SessionAccount == input.Account &&
+				op.PrincipalID == input.PrincipalID && op.Revision >= input.OperationRevision &&
+				coordinate.Validate() == nil && coordinate.DurableIdentity().Matches(input.Source) &&
+				input.ActivationRevision == 0 && input.TargetSelector != "" && op.ValidateSessionAccount() == nil
+		}
 		return input.Scope == channelonboarding.SessionInputOnboarding && input.OperationID == op.OperationID &&
 			op.AccountConfirmed && op.SessionAccount == input.Account && op.PrincipalID == input.PrincipalID &&
 			op.Revision == input.OperationRevision && awaitingIdentity &&
@@ -157,6 +165,7 @@ func (r *sessionInputReader) readRetainedInput(ctx context.Context, reference Se
 		}
 		return nativeSessionInput{Scope: event.Scope.Kind, Account: event.Scope.Session, OperationID: event.Scope.OnboardingOperation,
 			DeploymentRegistration: event.Scope.DeploymentRegistration,
+			RegisteredBusiness:     event.Scope.RegisteredBusiness,
 			AccountOnly:            event.Scope.AccountOnly,
 			OperationRevision:      event.Scope.OperationRevision, ActivationID: event.Scope.ActivationID, ActivationRevision: event.Scope.ActivationRevision, TargetSelector: event.Scope.TargetSelector,
 			PrincipalID: event.Scope.PrincipalID, Source: event.Scope.Source, BindingRevision: event.Scope.BindingRevision,

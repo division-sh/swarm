@@ -974,13 +974,23 @@ func (d pipelineActivityDispatcher) prepareActivityHTTPTool(ctx context.Context,
 	}
 	credentials := map[string]any{}
 	secrets := []string{}
+	var accountCurrent func(context.Context) error
 	staticCredentials := tool.Credentials()
 	_, hasManagedCredential := tool.ManagedCredentialExecution()
 	if len(staticCredentials) > 0 && hasManagedCredential {
 		return preparedActivityHTTPTool{}, activityContractFailure(intent.Tool, "credential_owners_conflict")
 	}
 	if len(staticCredentials) > 0 {
-		resolved, secretValues, err := d.resolveActivityToolCredentials(ctx, intent, staticCredentials)
+		var resolved map[string]any
+		var secretValues []string
+		var selected bool
+		var err error
+		if _, private := activityChannelTargetFromContext(ctx); !private {
+			resolved, secretValues, accountCurrent, selected, err = d.coordinator.accountActivityCredentials(ctx, intent, tool)
+		}
+		if !selected && err == nil {
+			resolved, secretValues, err = d.resolveActivityToolCredentials(ctx, intent, staticCredentials)
+		}
 		if err != nil {
 			return preparedActivityHTTPTool{}, activityAuthenticationFailure(err, intent.Tool, "resolve_static_credentials", "activity_credential")
 		}
@@ -1024,6 +1034,8 @@ func (d pipelineActivityDispatcher) prepareActivityHTTPTool(ctx context.Context,
 	var validateAdmission func(context.Context) error
 	if target, private := activityChannelTargetFromContext(ctx); private {
 		validateAdmission = target.validateAdmission
+	} else if accountCurrent != nil {
+		validateAdmission = accountCurrent
 	}
 	return preparedActivityHTTPTool{
 		toolName:           intent.Tool,
