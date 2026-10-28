@@ -9,9 +9,13 @@ import (
 	"github.com/division-sh/swarm/internal/events"
 	"github.com/division-sh/swarm/internal/events/eventtest"
 	"github.com/division-sh/swarm/internal/runtime/canonicaljson"
+	runtimecontracts "github.com/division-sh/swarm/internal/runtime/contracts"
 	"github.com/division-sh/swarm/internal/runtime/fanoutbarrier"
 	"github.com/division-sh/swarm/internal/runtime/genericschedule"
+	runtimepipeline "github.com/division-sh/swarm/internal/runtime/pipeline"
 	"github.com/division-sh/swarm/internal/runtime/runfork"
+	"github.com/division-sh/swarm/internal/runtime/semanticview"
+	"github.com/division-sh/swarm/internal/testutil/sourceartifactfixture"
 	"github.com/google/uuid"
 )
 
@@ -38,6 +42,19 @@ func TestIssue642PublishedBarrierFixedCutAdmissionBothStores(t *testing.T) {
 			eventID := genericschedule.OccurrenceEventID(activationID, activation.CurrentDueAt)
 			occurrence := eventtest.RuntimeControlWithRoutingSource(eventID, events.EventType(activation.Command.EventType), genericschedule.OccurrenceProducerID(), activation.Command.TaskID,
 				payload, 0, fixture.runID, "", events.EventEnvelope{EntityID: fixture.runID}, activation.Command.RoutingSource, activation.CurrentDueAt)
+			repo := runtimepipeline.WorkflowRepoRoot()
+			bundle, err := runtimecontracts.LoadWorkflowContractBundleFromRootedSource(repo, sourceartifactfixture.CapturedRoot(t, fixture.artifact), runtimecontracts.DefaultPlatformSpecFile(repo), runtimecontracts.WorkflowContractLoadOptions{})
+			if err != nil {
+				t.Fatal(err)
+			}
+			admission, found, err := runtimepipeline.ResolveWorkflowJoinOccurrencePayloadAdmission(semanticview.Wrap(bundle), occurrence, fixture.bundleHash)
+			if err != nil || !found {
+				t.Fatalf("admit exact barrier occurrence payload: found=%t err=%v", found, err)
+			}
+			occurrence, err = events.ApplyPayloadAdmission(occurrence, admission)
+			if err != nil {
+				t.Fatal(err)
+			}
 			ref, _ := handle.JoinRef()
 			route := events.DeliveryRoute{Recipient: events.MustNodeDeliveryRecipient(ref.Node()), Target: events.MustExistingEntityTarget(events.RouteIdentity{
 				FlowID: ".", FlowInstance: fixture.runID, EntityID: fixture.runID,

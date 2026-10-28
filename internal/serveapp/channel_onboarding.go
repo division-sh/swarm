@@ -42,7 +42,7 @@ func serveChannelOnboardingCatalog(manager *runtime.RuntimeContextManager) (*cha
 	}
 	candidates := []channelonboarding.Candidate{}
 	for _, contextDef := range manager.LoadedContexts() {
-		declarations, err := runtime.ResolveStandingTargetDeclarations(contextDef.Source, contextDef.ProviderTriggerCatalog)
+		declarations, err := contextDef.StandingTargetDeclarations()
 		if err != nil {
 			return nil, err
 		}
@@ -92,6 +92,9 @@ func serveChannelCandidatesForPlan(contextDef runtime.BundleContext, bundleIdent
 	}
 	var candidates []channelonboarding.Candidate
 	for _, declaration := range declarations {
+		if !plan.MatchesCapturedHolder(declaration.FlowPath) {
+			continue
+		}
 		for _, binding := range declaration.Ingress {
 			if binding.Provider != profile.Provider() {
 				continue
@@ -373,7 +376,7 @@ func serveDeclaredRegistrationEnabled(ctx context.Context, manager *runtime.Runt
 		return false, err
 	}
 	if !enabled {
-		declarations, err := runtime.ResolveStandingTargetDeclarations(contextDef.Source, contextDef.ProviderTriggerCatalog)
+		declarations, err := contextDef.StandingTargetDeclarations()
 		if err != nil {
 			return false, err
 		}

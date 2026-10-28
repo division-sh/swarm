@@ -80,6 +80,18 @@ func (p *processCapability) IssueSelectedForkGenerationGrant(ctx context.Context
 	if err := p.proveCurrent(ctx); err != nil {
 		return nil, err
 	}
+	issuingParent := ctx
+	if !HasMutationAuthority(issuingParent) {
+		issuingParent = p.processMutationContext(issuingParent)
+	}
+	parent, err := CaptureMutationAuthority(issuingParent)
+	if err != nil {
+		return nil, err
+	}
+	if parent.owner != p {
+		return nil, errors.New("selected-fork grant requires its exact issuing parent process")
+	}
+	issuingParent = context.WithValue(issuingParent, mutationAuthorityContextKey{}, parent)
 	process, err := p.session.Authority()
 	if err != nil {
 		return nil, err
@@ -99,7 +111,7 @@ func (p *processCapability) IssueSelectedForkGenerationGrant(ctx context.Context
 		err = p.retireOnPossessionFailure(err)
 		return nil, fmt.Errorf("record selected-fork generation grant: %w", err)
 	}
-	g := &generationGrant{owner: p, evidence: evidence, done: make(chan struct{})}
+	g := &generationGrant{owner: p, evidence: evidence, done: make(chan struct{}), issuingParent: issuingParent}
 	p.mu.Lock()
 	defer p.mu.Unlock()
 	if err := p.requireLive(); err != nil {

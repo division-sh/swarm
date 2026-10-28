@@ -162,7 +162,11 @@ func TestFanOutForkResetsOnlyOperationalBudgetBothStores(t *testing.T) {
 					forkOwner := owner.(interface {
 						MaterializeRunFork(context.Context, runfork.RunForkMaterializeRequest) (runfork.RunForkMaterialization, error)
 					})
-					request := runfork.RunForkMaterializeRequest{SourceRunID: fixture.runID, At: point, OriginalLoopCarriage: originalCarriageForRun(t, owner, fixture.runID)}
+					rooted, err := owner.(rootedRunStore).LoadRunRootedSource(ctx, fixture.runID)
+					if err != nil {
+						t.Fatal(err)
+					}
+					request := runfork.RunForkMaterializeRequest{SourceRunID: fixture.runID, At: point, RootAdmission: rooted.Admission(), OriginalLoopCarriage: originalCarriageForRun(t, owner, fixture.runID)}
 					child, err := forkOwner.MaterializeRunFork(ctx, request)
 					if err != nil {
 						t.Fatal(err)

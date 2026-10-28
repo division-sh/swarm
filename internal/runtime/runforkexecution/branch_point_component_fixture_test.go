@@ -12,6 +12,7 @@ import (
 	"github.com/division-sh/swarm/internal/durabledata"
 	"github.com/division-sh/swarm/internal/events"
 	"github.com/division-sh/swarm/internal/events/eventtest"
+	"github.com/division-sh/swarm/internal/packartifact"
 	"github.com/division-sh/swarm/internal/runtime/authoractivity"
 	"github.com/division-sh/swarm/internal/runtime/bus"
 	"github.com/division-sh/swarm/internal/runtime/contracts"
@@ -36,6 +37,7 @@ import (
 	"github.com/division-sh/swarm/internal/runtime/testfixtures/canonicalrouting"
 	"github.com/division-sh/swarm/internal/sourceartifact"
 	"github.com/division-sh/swarm/internal/store/storetest"
+	"github.com/division-sh/swarm/internal/testutil/packfixture"
 	"github.com/google/uuid"
 )
 
@@ -86,7 +88,8 @@ func q1ExecuteSelectedPhaseComponent(t *testing.T, ctx context.Context, request 
 			OperationID: uuid.NewString(), Actor: "selected-phase-component", IdempotencyKey: uuid.NewString(),
 			TransportHash: "selected-phase-component", SourceRunID: request.SourceRunID, ForkEventID: request.At, AtStart: request.AtStart,
 			TargetBundleHash: prepared.loadedSource.SourceArtifactFact.BundleHash(), ContractSelection: request.ContractSelection,
-			AllowSourceFreeze: request.AllowSourceFreeze, DataPinOverrides: request.DataPinOverrides,
+			TargetRootReference: prepared.loadedSource.RootedSource.Admission().Reference(),
+			AllowSourceFreeze:   request.AllowSourceFreeze, DataPinOverrides: request.DataPinOverrides,
 		}, prepared.plan)
 		if err != nil {
 			return SelectedContractExecutionResult{}, errors.Join(err, prepared.Close())
@@ -157,15 +160,6 @@ func q1AttachBranchPointComponent(t *testing.T, prepared *PreparedSelectedFork, 
 	t.Helper()
 	p := prepared
 	ctx := p.operation.Context()
-	request, err := p.MaterializationRequest()
-	if err != nil {
-		t.Fatal(err)
-	}
-	request.ForkOperation = nil
-	observed, err := p.owner.ports.fork.RequireMaterializedRunForkForSelectedContractExecution(ctx, materialized.ForkRunID, request)
-	if err != nil || observed.ForkRunID != materialized.ForkRunID || !observed.ForkPoint.SameIdentity(materialized.ForkPoint) {
-		t.Fatalf("component lost its original child/cut: %+v err=%v", observed, err)
-	}
 	agents, err := p.agentRuntime.bindRun(materialized.ForkRunID, materialized.AgentTopologies)
 	if err != nil {
 		t.Fatal(err)
@@ -180,7 +174,8 @@ func q1AttachBranchPointComponent(t *testing.T, prepared *PreparedSelectedFork, 
 		t.Fatal("native component admission: ", err)
 	}
 	container, err := buildSelectedContractForkLocalRuntimeContainer(ctx, publishSelectedContractForkEventsRequest{
-		OriginalLoopCarriage: p.originalLoopCarriage, Prepared: p, Operation: p.operation, Owner: p.owner,
+		OriginalRootAdmission: p.originalSource.RootedSource.Admission(),
+		OriginalLoopCarriage:  p.originalLoopCarriage, Prepared: p, Operation: p.operation, Owner: p.owner,
 		Admission: admission, LoadedSource: p.loadedSource, RecipientPlanning: *p.model.RecipientPlanning,
 		AgentRuntime: agents, SourceRunID: p.plan.SourceRunID, ForkRunID: materialized.ForkRunID,
 		DataPins: materialized.DataPins, ForkEventID: p.plan.ForkPoint.EventID,
@@ -201,8 +196,14 @@ func q1AttachBranchPointComponent(t *testing.T, prepared *PreparedSelectedFork, 
 
 func (f *q1BranchPointAttachment) activate() (runfork.RunForkActivation, error) {
 	p := f.prepared
+	process, err := p.agentRuntime.Options.ProcessCapability.Evidence()
+	if err != nil {
+		return runfork.RunForkActivation{}, err
+	}
 	return p.owner.ports.fork.ActivateRunForkForSelectedContractExecution(effects.WithAuthority(p.operation.Context(), f.container.authority), runfork.RunForkSelectedContractExecutionActivateRequest{
-		InheritedSchedules: p.readiness, ForkOperation: p.forkOperation, DataPins: f.materialized.DataPins,
+		OriginalRootAdmission: p.originalSource.RootedSource.Admission(),
+		Process:               process.LeaseStamp(),
+		InheritedSchedules:    p.readiness, ForkOperation: p.forkOperation, DataPins: f.materialized.DataPins,
 		ExecutionSource: p.loadedSource.Source, ForkRunID: f.materialized.ForkRunID,
 		AllowedSourceEventIDs: selectedContractExecutionFrontierEventIDs(p.frontier.FrontierEvents),
 		FrontierAdmission:     p.frontier, RouteTopology: p.routeTopology, RecipientPlanning: *p.model.RecipientPlanning,
@@ -316,7 +317,11 @@ func q1GateComponentSource(t *testing.T, owner SelectedContractExecutionOwner, d
 	selected := owner.ports.fork
 	ctx := runForkTestContext(t)
 	repo := runForkExecutionRepoRoot(t)
-	bundle, err := contracts.LoadWorkflowContractBundleWithOverrides(repo, canonicalrouting.CopyConstructedGateMutationControl(t, true), contracts.DefaultPlatformSpecFile(repo))
+	root := canonicalrouting.CopyConstructedGateMutationControl(t, true)
+	if _, err := packartifact.ImportEmbeddedPack(root, "telegram", packfixture.EmbeddedBase(t)); err != nil {
+		t.Fatal(err)
+	}
+	bundle, err := contracts.LoadWorkflowContractBundleWithOverrides(repo, root, contracts.DefaultPlatformSpecFile(repo))
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -324,8 +329,13 @@ func q1GateComponentSource(t *testing.T, owner SelectedContractExecutionOwner, d
 	if err != nil {
 		t.Fatal(err)
 	}
+	rooted, err := bundle.RootedSource()
+	if err != nil {
+		t.Fatal(err)
+	}
 	runID, eventID := uuid.NewString(), uuid.NewString()
 	ctx = correlation.WithRunID(correlation.WithSourceArtifactFact(ctx, fact), runID)
+	ctx = correlation.WithRootAdmission(ctx, rooted.Admission())
 	ctx = authoractivity.WithScope(ctx, authoractivity.BundleScope(runForkTestRuntimeInstanceID, fact.BundleHash()))
 	ctx, err = eventreceiver.NormalExecution().Bind(ctx, executionmode.Live)
 	if err != nil {
@@ -335,13 +345,13 @@ func q1GateComponentSource(t *testing.T, owner SelectedContractExecutionOwner, d
 	ctx = originalSelectedFixtureContext(t, ctx, any(selected).(startupownership.Store))
 	if live {
 		artifacts := selected.(interface {
-			EnsureSourceArtifact(context.Context, *sourceartifact.AdmittedSourceArtifact) (sourceartifact.EnsureResult, error)
+			EnsureRootedSource(context.Context, sourceartifact.RootedSource) (sourceartifact.RootedEnsureResult, error)
 		})
-		if _, err := artifacts.EnsureSourceArtifact(ctx, bundle.SourceArtifact); err != nil {
+		if _, err := artifacts.EnsureRootedSource(ctx, rooted); err != nil {
 			t.Fatal(err)
 		}
 		if _, err := selected.(runlifecycle.OperationOwner).CreateRun(ctx, runlifecycle.CreateRequest{
-			RunID: runID, Origin: runlifecycle.DeploymentRunOrigin(), Source: fact, StartedAt: at,
+			RunID: runID, Origin: runlifecycle.DeploymentRunOrigin(), Source: fact, RootAdmission: rooted.Admission(), StartedAt: at,
 			LiveScope: runlifecycle.LiveRunScope{FlowPath: "."},
 		}); err != nil {
 			t.Fatal(err)
@@ -353,7 +363,7 @@ func q1GateComponentSource(t *testing.T, owner SelectedContractExecutionOwner, d
 		})
 	}
 	loader := SourceArtifactSelectedContractSourceLoader{RepoRoot: repo, Store: selected.(SourceArtifactSelectedContractSourceStore)}
-	loaded, err := loader.LoadRunForkSelectedContractSourceForRequest(ctx, SelectedContractSourceLoadRequest{SourceRunID: runID, SourceArtifactFact: fact, Selection: testContractSelection()})
+	loaded, err := loader.LoadRunForkSelectedContractSourceForRequest(ctx, SelectedContractSourceLoadRequest{Responsibility: OriginalRunSource(runID), SourceArtifactFact: fact, Selection: testContractSelection()})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -397,7 +407,7 @@ func q1GateComponentSource(t *testing.T, owner SelectedContractExecutionOwner, d
 		storetest.CaptureRunForkSnapshot(t, ctx, selected, runID)
 		state.ExpectedRevision = 2
 		state.Accumulator = json.RawMessage(`{"source_advanced":{"count":1}}`)
-		return ctx, q1GateComponentRequest(owner, loader, runID, eventID, loaded.SourceArtifactFact.BundleHash()), func() {
+		return ctx, q1GateComponentRequest(owner, loader, runID, eventID, loaded.RootedSource.Admission()), func() {
 			if _, err := selected.(pipeline.WorkflowEngineMutationOwner).CommitWorkflowEngineMutation(ctx, pipeline.WorkflowEngineMutationCommand{State: state}); err != nil {
 				t.Fatal(err)
 			}
@@ -433,7 +443,7 @@ func q1GateComponentSource(t *testing.T, owner SelectedContractExecutionOwner, d
 	event := eventtest.RuntimeControlWithRoutingSource(eventID, "mailbox.card_decided", "platform", "", []byte(`{"card_id":"`+card.CardID+`"}`), 0, runID, "", events.EnvelopeForEntityID(events.EventEnvelope{}, runID), control, decidedAt)
 	storetest.CommitSemanticEvent(t, ctx, selected, event)
 	storetest.CaptureRunForkSnapshot(t, ctx, selected, runID)
-	return ctx, q1GateComponentRequest(owner, loader, runID, eventID, loaded.SourceArtifactFact.BundleHash()), func() {
+	return ctx, q1GateComponentRequest(owner, loader, runID, eventID, loaded.RootedSource.Admission()), func() {
 		pass, _, outcome, err := coordinator.Intercept(ctx, event)
 		if err != nil || pass || !outcome.Committed {
 			t.Fatalf("original post-cut gate mutation: pass=%t outcome=%+v err=%v", pass, outcome, err)
@@ -441,19 +451,20 @@ func q1GateComponentSource(t *testing.T, owner SelectedContractExecutionOwner, d
 	}
 }
 
-func q1GateComponentRequest(owner SelectedContractExecutionOwner, loader SourceArtifactSelectedContractSourceLoader, runID, eventID, bundleHash string) SelectedContractExecutionRequest {
+func q1GateComponentRequest(owner SelectedContractExecutionOwner, loader SourceArtifactSelectedContractSourceLoader, runID, eventID string, root sourceartifact.RootAdmission) SelectedContractExecutionRequest {
 	selection := testContractSelection()
 	operation := runfork.ForkOperationRequest{OperationID: uuid.NewString(), Actor: "bearer:branch-point-proof", IdempotencyKey: uuid.NewString(), TransportHash: "sha256:branch-point-proof",
-		SourceRunID: runID, ForkEventID: eventID, TargetBundleHash: bundleHash, ContractSelection: selection, AllowSourceFreeze: true}
+		SourceRunID: runID, ForkEventID: eventID, TargetBundleHash: root.BundleHash(), TargetRootReference: root.Reference(), ContractSelection: selection, AllowSourceFreeze: true}
 	return SelectedContractExecutionRequest{Owner: owner, SourceRunID: runID, At: eventID, ForkOperation: &operation, AllowSourceFreeze: true,
-		SourceLoader: loader, ContractSelection: selection, AgentRuntime: SelectedContractAgentRuntimeOptions{ProcessCapability: owner.ports.contexts.capability, ExecutionPosture: executionposture.Live}}
+		ExpectedBundleHash: root.BundleHash(), SourceLoader: loader, ContractSelection: selection, AgentRuntime: SelectedContractAgentRuntimeOptions{ProcessCapability: owner.ports.contexts.capability, ExecutionPosture: executionposture.Live}}
 }
 
 func q1DeploymentComponentSource(t *testing.T, owner SelectedContractExecutionOwner) (context.Context, SelectedContractExecutionRequest, func()) {
 	t.Helper()
 	selected := owner.ports.fork
 	repo, root := runForkExecutionRepoRoot(t), t.TempDir()
-	writeSelectedContractFixtureFile(t, root+"/schema.yaml", "name: branch-revision\nstages:\n  pending: {}\npins:\n  outputs:\n    - records.ready\n")
+	writeSelectedContractFixtureFile(t, root+"/manifest.yaml", "version: 1.0.0\nplatform_version: '*'\n")
+	writeSelectedContractFixtureFile(t, root+"/schema.yaml", "stages:\n  pending: {}\npins:\n  outputs:\n    - records.ready\n")
 	writeSelectedContractFixtureFile(t, root+"/events.yaml", "records.ready:\n  body: text\n")
 	bundle, err := contracts.LoadWorkflowContractBundleWithOverrides(repo, root, contracts.DefaultPlatformSpecFile(repo))
 	if err != nil {
@@ -463,24 +474,29 @@ func q1DeploymentComponentSource(t *testing.T, owner SelectedContractExecutionOw
 	if err != nil {
 		t.Fatal(err)
 	}
+	rooted, err := bundle.RootedSource()
+	if err != nil {
+		t.Fatal(err)
+	}
 	data := selected.(interface {
-		EnsureSourceArtifactWithData(context.Context, *sourceartifact.AdmittedSourceArtifact, durabledata.Catalog) (sourceartifact.EnsureResult, error)
+		EnsureRootedSourceWithData(context.Context, sourceartifact.RootedSource, durabledata.Catalog) (sourceartifact.RootedEnsureResult, error)
 		ExecuteDataSourceOperation(context.Context, durabledata.SourceCommand) (durabledata.SourceOperationResult, error)
 	})
 	ctx := correlation.WithSourceArtifactFact(runForkTestContext(t), mustComponentSourceFact(t, bundle.SourceArtifact.BundleHash()))
+	ctx = correlation.WithRootAdmission(ctx, rooted.Admission())
 	ctx = authoractivity.WithScope(ctx, authoractivity.BundleScope(runForkTestRuntimeInstanceID, bundle.SourceArtifact.BundleHash()))
 	ctx, err = eventreceiver.NormalExecution().Bind(ctx, executionmode.Live)
 	if err != nil {
 		t.Fatal(err)
 	}
-	if _, err := data.EnsureSourceArtifactWithData(ctx, bundle.SourceArtifact, catalog); err != nil {
+	if _, err := data.EnsureRootedSourceWithData(ctx, rooted, catalog); err != nil {
 		t.Fatal(err)
 	}
 	bootstrap := uuid.NewString()
 	ctx = originalSelectedFixtureContext(t, ctx, any(selected).(startupownership.Store))
 	storetest.RequireRun(t, ctx, selected.(storetest.RunFixtureStore), storetest.RunFixture{RunID: bootstrap, Origin: storetest.ScenarioSetupOrigin(), Artifact: bundle.SourceArtifact, BundleHash: catalog.BundleHash})
 	loader := SourceArtifactSelectedContractSourceLoader{RepoRoot: repo, Store: selected.(SourceArtifactSelectedContractSourceStore)}
-	loaded, err := loader.LoadRunForkSelectedContractSourceForRequest(ctx, SelectedContractSourceLoadRequest{SourceRunID: bootstrap, Selection: testContractSelection()})
+	loaded, err := loader.LoadRunForkSelectedContractSourceForRequest(ctx, SelectedContractSourceLoadRequest{Responsibility: OriginalRunSource(bootstrap), Selection: testContractSelection()})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -491,6 +507,7 @@ func q1DeploymentComponentSource(t *testing.T, owner SelectedContractExecutionOw
 			}
 		})
 	}
+	ctx = correlation.WithRootAdmission(ctx, loaded.RootedSource.Admission())
 	planner, _ := q1BranchPointSourceConstructor(t, ctx, owner, loaded)
 	ref, err := durabledata.ParseDeclarationRef(".", "records.ready")
 	if err != nil {
@@ -523,7 +540,7 @@ func q1DeploymentComponentSource(t *testing.T, owner SelectedContractExecutionOw
 	state.Transition, state.ExpectedState, state.ExpectedRevision = pipeline.WorkflowEngineStateTransitionUpdateStateAndCompanion, "pending", 1
 	state.Accumulator = json.RawMessage(`{"source_advanced":{"count":1}}`)
 	operation := runfork.ForkOperationRequest{OperationID: uuid.NewString(), Actor: "bearer:branch-point-proof", IdempotencyKey: uuid.NewString(), TransportHash: "sha256:branch-point-proof",
-		SourceRunID: runID, TargetBundleHash: catalog.BundleHash, ContractSelection: testContractSelection(), AllowSourceFreeze: true}
+		SourceRunID: runID, TargetBundleHash: catalog.BundleHash, TargetRootReference: loaded.RootedSource.Admission().Reference(), ContractSelection: testContractSelection(), AllowSourceFreeze: true}
 	latest, err := selected.PlanRunFork(ctx, runfork.RunForkPlanRequest{SourceRunID: runID})
 	if err != nil {
 		t.Fatal(err)
@@ -533,7 +550,7 @@ func q1DeploymentComponentSource(t *testing.T, owner SelectedContractExecutionOw
 		t.Fatal(err)
 	}
 	request := SelectedContractExecutionRequest{Owner: owner, SourceRunID: runID, ForkOperation: &operation, AllowSourceFreeze: true,
-		SourceLoader: loader, ContractSelection: testContractSelection(), AgentRuntime: SelectedContractAgentRuntimeOptions{ProcessCapability: owner.ports.contexts.capability, ExecutionPosture: executionposture.Live}}
+		SourceLoader: loader, ExpectedBundleHash: catalog.BundleHash, ContractSelection: testContractSelection(), AgentRuntime: SelectedContractAgentRuntimeOptions{ProcessCapability: owner.ports.contexts.capability, ExecutionPosture: executionposture.Live}}
 	return ctx, request, func() {
 		if _, err := selected.(pipeline.WorkflowEngineMutationOwner).CommitWorkflowEngineMutation(ctx, pipeline.WorkflowEngineMutationCommand{State: state}); err != nil {
 			t.Fatal(err)

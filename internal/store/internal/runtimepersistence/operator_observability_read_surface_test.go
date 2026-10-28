@@ -11,10 +11,12 @@ import (
 	"github.com/division-sh/swarm/internal/events"
 	"github.com/division-sh/swarm/internal/events/eventtest"
 	"github.com/division-sh/swarm/internal/operatorread"
+	runtimecorrelation "github.com/division-sh/swarm/internal/runtime/correlation"
 	runtimedelivery "github.com/division-sh/swarm/internal/runtime/deliverylifecycle"
 	runtimefailures "github.com/division-sh/swarm/internal/runtime/failures"
 	"github.com/division-sh/swarm/internal/store/internal/backend/mutationprotocol"
 	"github.com/division-sh/swarm/internal/testutil"
+	"github.com/division-sh/swarm/internal/testutil/sourceartifactfixture"
 	"github.com/google/uuid"
 )
 
@@ -449,8 +451,9 @@ func TestOperatorRuntimeObservabilityFiltersByBundleHash(t *testing.T) {
 	pg := admitTestPostgresStore(t, db)
 	ctx = originalStoreFixtureContext(t, ctx, pg)
 
-	artifactA := storeTestSourceArtifact("operator-observability-a")
-	artifactB := storeTestSourceArtifact("operator-observability-b")
+	rootA, _ := sourceartifactfixture.Rooted(t, "operator-observability", storeTestSourceArtifact("operator-observability-a"))
+	rootB, _ := sourceartifactfixture.Rooted(t, "operator-observability", storeTestSourceArtifact("operator-observability-b"))
+	artifactA, artifactB := rootA.Artifact(), rootB.Artifact()
 	bundleA := artifactA.BundleHash()
 	runA := uuid.NewString()
 	runB := uuid.NewString()
@@ -463,6 +466,12 @@ func TestOperatorRuntimeObservabilityFiltersByBundleHash(t *testing.T) {
 	})
 	insertLog := func(runID, code string, createdAt time.Time) string {
 		t.Helper()
+		rooted, err := pg.LoadRunRootedSource(ctx, runID)
+		if err != nil {
+			t.Fatal(err)
+		}
+		fact := mustStoreTestSourceArtifactFact(rooted.Admission().BundleHash())
+		logContext := runtimecorrelation.WithRootAdmission(runtimecorrelation.WithSourceArtifactFact(ctx, fact), rooted.Admission())
 		eventID := uuid.NewString()
 		failure := mustMarshalTestFailure(t, testFailureEnvelope(runtimefailures.ClassInternalFailure, code, nil))
 		payload := `{
@@ -475,7 +484,7 @@ func TestOperatorRuntimeObservabilityFiltersByBundleHash(t *testing.T) {
 				"failure":` + failure + `
 			}
 		}`
-		seedOperatorRuntimeLog(t, ctx, pg, eventID, runID, "runtime", json.RawMessage(payload), createdAt)
+		seedOperatorRuntimeLog(t, logContext, pg, eventID, runID, "runtime", json.RawMessage(payload), createdAt)
 		return eventID
 	}
 	logA := insertLog(runA, "bundle_a_code", base.Add(time.Second))

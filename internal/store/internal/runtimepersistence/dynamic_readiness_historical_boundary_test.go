@@ -22,12 +22,12 @@ func TestR7ReadinessDiagnosticsDoNotExemptLaterNativeForkConstructionBothStores(
 	for _, backend := range []string{"sqlite", "postgres"} {
 		t.Run(backend, func(t *testing.T) {
 			f := newReceiverConfigActivationFixtureWithDocuments(t, backend, false, map[string]string{
-				"schema.yaml":               "name: later-native-diagnostic\n",
+				"schema.yaml":               "stages: []\n",
 				"events.yaml":               "checkpoint:\n",
-				"worker/schema.yaml":        "name: worker\ninstance: item_id\npins:\n  inputs: [item.created]\n",
+				"worker/schema.yaml":        "instance: item_id\npins:\n  inputs: [item.created]\n",
 				"worker/entities.yaml":      "item:\n  item_id: text\n",
 				"worker/events.yaml":        "item.created:\n  item_id: text\n",
-				"worker/detail/schema.yaml": "name: fieldless-detail\n",
+				"worker/detail/schema.yaml": "stages: []\n", "manifest.yaml": "version: 1.0.0\nplatform_version: '*'\n", "worker/manifest.yaml": "version: 1.0.0\nplatform_version: '*'\n", "worker/detail/manifest.yaml": "version: 1.0.0\nplatform_version: '*'\n",
 			}, nil)
 			f.constructKeylessRoot(t)
 			runID := correlation.RunIDFromContext(f.ctx)
@@ -35,9 +35,13 @@ func TestR7ReadinessDiagnosticsDoNotExemptLaterNativeForkConstructionBothStores(
 			if err := commitSemanticPipelineProcessedEventFixture(f.ctx, f.store, marker); err != nil {
 				t.Fatal(err)
 			}
+			rooted, err := f.store.(rootedRunStore).LoadRunRootedSource(f.ctx, runID)
+			if err != nil {
+				t.Fatal(err)
+			}
 			fork, err := f.store.(interface {
 				MaterializeRunFork(context.Context, runfork.RunForkMaterializeRequest) (runfork.RunForkMaterialization, error)
-			}).MaterializeRunFork(f.ctx, runfork.RunForkMaterializeRequest{SourceRunID: runID, At: marker.ID()})
+			}).MaterializeRunFork(f.ctx, runfork.RunForkMaterializeRequest{SourceRunID: runID, At: marker.ID(), RootAdmission: rooted.Admission()})
 			if err != nil {
 				t.Fatal(err)
 			}

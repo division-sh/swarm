@@ -6,26 +6,28 @@ import (
 	"testing"
 
 	"github.com/division-sh/swarm/internal/channelonboarding"
+	"github.com/division-sh/swarm/internal/packadmission"
 	"github.com/division-sh/swarm/internal/packs"
 	"github.com/division-sh/swarm/internal/providertriggers"
 	runtimepkg "github.com/division-sh/swarm/internal/runtime"
+	"github.com/division-sh/swarm/internal/runtime/contracts"
+	"github.com/division-sh/swarm/internal/sourceartifact"
 	"github.com/division-sh/swarm/internal/testutil/packfixture"
 	"github.com/division-sh/swarm/internal/testutil/sourceartifactfixture"
 	"github.com/google/uuid"
 )
 
 func TestServeSessionDiscoveryRetainsDeclarationWithoutAuthority(t *testing.T) {
-	catalog := sessionDiscoveryCatalog(t)
-	plan := packfixture.WhatsAppSessionChannel(t, filepath.Join(repoRootForTest(), defaultPlatformSpecPath), catalog)
 	for _, flow := range []string{".", "support"} {
 		t.Run(flow, func(t *testing.T) {
+			catalog, plan, rooted := sessionDiscoveryCapturedProvider(t, flow)
 			trigger, err := catalog.CompileAdmission(providertriggers.CompileAdmissionRequest{Alias: "reception", Provider: "whatsapp"})
 			if err != nil {
 				t.Fatal(err)
 			}
 			declarations := []runtimepkg.StandingTargetDeclaration{{FlowPath: flow, Alias: "reception",
 				Ingress: []runtimepkg.StandingIngressBinding{{Provider: "whatsapp", AdmissionPlan: trigger}}}}
-			definition := runtimepkg.BundleContext{SourceArtifactFact: sourceartifactfixture.Fact(), RuntimeInstanceID: uuid.NewString(),
+			definition := runtimepkg.BundleContext{SourceArtifactFact: sourceartifactfixture.FactFor(rooted.Artifact()), RootAdmission: rooted.Admission(), RuntimeInstanceID: uuid.NewString(),
 				PublicationGeneration: 1, PackInventoryDigest: "sha256:discovery-inventory"}
 			candidates, err := serveChannelCandidatesForPlan(definition, "discovery-fixture", declarations, plan)
 			if err != nil || len(candidates) != 1 {
@@ -49,6 +51,64 @@ func TestServeSessionDiscoveryRetainsDeclarationWithoutAuthority(t *testing.T) {
 	}
 }
 
+func sessionDiscoveryCapturedProvider(t *testing.T, flow string) (*providertriggers.CatalogSnapshot, packs.SatisfactionPlan, sourceartifact.RootedSource) {
+	t.Helper()
+	standalone, _ := sessionDiscoveryProvider(t)
+	entry, present := standalone.EntryByProvider("whatsapp")
+	if !present {
+		t.Fatal("session discovery requires its authored WhatsApp trigger")
+	}
+	members := map[string][]byte{
+		"manifest.yaml": []byte("version: 1.0.0\nplatform_version: '*'\n"),
+		"schema.yaml":   []byte("stages: []\n"),
+	}
+	members[filepath.ToSlash(filepath.Join(flow, "manifest.yaml"))] = members["manifest.yaml"]
+	members[filepath.ToSlash(filepath.Join(flow, "schema.yaml"))] = []byte("stages: []\npins: {inputs: [inbound.whatsapp.raw, inbound.whatsapp.message]}\n")
+	for name, body := range packfixture.WhatsAppSessionProviderMembers(t, entry.Manifest.SourceBytes(), []string{"raw", "message"}) {
+		members[filepath.ToSlash(filepath.Join(flow, "whatsapp", name))] = body
+	}
+	artifact, err := sourceartifact.AdmitMembers(members)
+	if err != nil {
+		t.Fatal(err)
+	}
+	rooted, _ := sourceartifactfixture.Rooted(t, "reception", artifact)
+	repo := repoRootForTest()
+	bundle, err := contracts.LoadWorkflowContractBundleFromRootedSource(repo, rooted, contracts.DefaultPlatformSpecFile(repo), contracts.WorkflowContractLoadOptions{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	providers, err := packadmission.AdmitProviderSource(rooted, bundle.Platform)
+	if err != nil {
+		t.Fatal(err)
+	}
+	scope, err := providers.Scope(flow)
+	if err != nil {
+		t.Fatal(err)
+	}
+	definition, present := scope.Provider("whatsapp")
+	if !present || definition.Provider().DeclaringFlow() != flow {
+		t.Fatal("session discovery has no exact captured holder")
+	}
+	catalog, err := scope.TriggerCatalog()
+	if err != nil {
+		t.Fatal(err)
+	}
+	trigger, hasTrigger := catalog.PackDescriptorForProvider("whatsapp")
+	connector, hasConnector := definition.ConnectorDescriptor()
+	if !hasTrigger || !hasConnector {
+		t.Fatal("session discovery requires its captured trigger and connector")
+	}
+	registry, err := packs.NewInterfaceRegistry(bundle.Platform)
+	if err != nil {
+		t.Fatal(err)
+	}
+	plan, err := packs.CompileProviderChannel(registry, definition.Provider(), trigger, connector)
+	if err != nil {
+		t.Fatal(err)
+	}
+	return catalog, plan, rooted
+}
+
 func TestServeSessionBootstrapConstructionDoesNotOpenState(t *testing.T) {
 	directory := t.TempDir()
 	owner, err := newServeSessionBootstrap(nil, nil, nil, directory, nil, nil)
@@ -64,17 +124,16 @@ func TestServeSessionBootstrapConstructionDoesNotOpenState(t *testing.T) {
 	}
 }
 
-func sessionDiscoveryCatalog(t *testing.T) *providertriggers.CatalogSnapshot {
+func sessionDiscoveryProvider(t *testing.T) (*providertriggers.CatalogSnapshot, packs.SatisfactionPlan) {
 	t.Helper()
-	manifest, err := providertriggers.ParseManifest([]byte(`provider: whatsapp
-transport: session
+	return packfixture.WhatsAppSessionProvider(t, filepath.Join(repoRootForTest(), defaultPlatformSpecPath), []byte(`transport: session
 ack: {mode: durable_before_dispatch}
 payload_object_required: true
 delivery_id: {json_path: $.provider_message_reference, required: true}
 event_type: {json_path: $.kind, required: true}
-event_name: {literal: inbound.whatsapp}
+event_name: {literal: raw}
 normalized_events:
-  - event: inbound.whatsapp.message
+  - event: message
     when: {equals: {kind: message}}
     author_subject: {type: chat, field: conversation_reference}
     fields:
@@ -94,14 +153,5 @@ normalized_events:
           properties:
             reference: {type: string, minLength: 1, maxLength: 32}
             address: {type: string, minLength: 5, maxLength: 32}
-`))
-	if err != nil {
-		t.Fatal(err)
-	}
-	catalog, err := providertriggers.NewCatalogSnapshot(providertriggers.CatalogEntry{Manifest: manifest,
-		Identity: providertriggers.PackIdentity{ID: "provider.whatsapp.input", Version: "1.0.0", ManifestHash: packs.ManifestHash(manifest.SourceBytes()), Provenance: "test"}})
-	if err != nil {
-		t.Fatal(err)
-	}
-	return catalog
+`), []string{"raw", "message"})
 }

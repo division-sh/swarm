@@ -7,6 +7,7 @@ import (
 	"time"
 
 	runtimepipelineobligation "github.com/division-sh/swarm/internal/runtime/pipelineobligation"
+	"github.com/division-sh/swarm/internal/testutil/sourceartifactfixture"
 )
 
 type blockingPipelineSweepStore struct {
@@ -32,6 +33,7 @@ func (s *blockingPipelineSweepStore) CloseScan(context.Context, runtimepipelineo
 }
 
 func TestPipelineParentTransitionAdmissionHonorsContextWhileSweepIsActive(t *testing.T) {
+	rooted, _ := sourceartifactfixture.Rooted(t, "pipeline-parent", sourceartifactfixture.Artifact())
 	owner := &blockingPipelineSweepStore{
 		issuer:  runtimepipelineobligation.NewScanIssuer(),
 		entered: make(chan struct{}),
@@ -39,7 +41,8 @@ func TestPipelineParentTransitionAdmissionHonorsContextWhileSweepIsActive(t *tes
 	}
 	eb := &EventBus{
 		pipelineObligations: owner,
-		sourceArtifactFact:  sourceMutationFact(t, "e"),
+		sourceArtifactFact:  sourceartifactfixture.FactFor(rooted.Artifact()),
+		rootAdmission:       rooted.Admission(),
 	}
 	sweepResult := make(chan error, 1)
 	go func() {

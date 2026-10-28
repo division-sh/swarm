@@ -100,6 +100,7 @@ func readLifecycleLoopFromEndpoint(t *testing.T, endpoint, runID, entityID strin
 func TestServedLifecycleEmitterGateJourney(t *testing.T) {
 	for _, backend := range []servedparity.Backend{servedparity.BackendDefaultSQLite, servedparity.BackendExplicitPostgres} {
 		t.Run(string(backend), func(t *testing.T) {
+			configureStandingLifecycleCredentials(t)
 			for _, tc := range []struct {
 				name, prefix, verdict, result string
 				variant                       canonicalrouting.LifecycleEmitterVariant

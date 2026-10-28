@@ -1,4 +1,4 @@
-name: test-dynamic-flow-instance
+# fixture: test-dynamic-flow-instance
 stages:
   pending: {}
   spawned: {}

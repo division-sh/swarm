@@ -9,7 +9,7 @@ import (
 
 func TestStatelessSingletonFixturesContainNoCoordinatorCeremony(t *testing.T) {
 	standing := CopyExample(t, TelegramAgent)
-	assertCanonicalFileExcludes(t, filepath.Join(standing, "telegram-ingress", "entities.yaml"), "active_chats")
+	assertCanonicalFileExcludes(t, filepath.Join(standing, "entities.yaml"), "active_chats")
 
 	matrix := CopyInboundAdmissionPolicyMatrix(t)
 	assertCanonicalFileExcludes(t, filepath.Join(matrix, "matrix", "entities.yaml"), "records")

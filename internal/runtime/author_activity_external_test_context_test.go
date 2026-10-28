@@ -292,6 +292,15 @@ func newExternalRuntimeTestActivityCoordinator(t *testing.T, bus *runtimebus.Eve
 		ctx = runtimecorrelation.WithRuntimeInstanceID(ctx, owner.runtimeID)
 		ctx = runtimeauthoractivity.WithScope(ctx, runtimeauthoractivity.BundleScope(owner.runtimeID, fact.BundleHash()))
 		bundle, _ := semanticview.Bundle(source)
+		rooted, err := bundle.RootedSource()
+		if err != nil {
+			t.Fatal(err)
+		}
+		coordinate, err := runtimeagenttopology.NewSourceCoordinate(rooted.Admission())
+		if err != nil || coordinate.BundleHash != fact.BundleHash() {
+			t.Fatalf("activity source coordinate differs from its admitted fact: %v", err)
+		}
+		ctx = runtimecorrelation.WithRootAdmission(ctx, rooted.Admission())
 		if err := sourceartifactfixture.EnsureArtifact(ctx, writer, bundle.SourceArtifact); err != nil {
 			t.Fatal(err)
 		}
@@ -309,7 +318,7 @@ func newExternalRuntimeTestActivityCoordinator(t *testing.T, bus *runtimebus.Eve
 			present = present || coordinate.BundleHash == fact.BundleHash()
 		}
 		if !present {
-			sources = append(sources, runtimeagenttopology.SourceCoordinate{BundleHash: fact.BundleHash()})
+			sources = append(sources, coordinate)
 		}
 		plan, err := runtimeagenttopology.NewSourceSetPlan(sources, current.Agents)
 		if err != nil {
@@ -325,7 +334,7 @@ func newExternalRuntimeTestActivityCoordinator(t *testing.T, bus *runtimebus.Eve
 		if err != nil {
 			t.Fatal(err)
 		}
-		grant, err := agentfixture.AdmitGeneration(t, ctx, store, plan, runtimeagenttopology.SourceCoordinate{BundleHash: fact.BundleHash()})
+		grant, err := agentfixture.AdmitGeneration(t, ctx, store, plan, coordinate)
 		if err != nil {
 			t.Fatal(err)
 		}
@@ -426,7 +435,19 @@ func installExternalRuntimeTestGeneration(
 		t.Fatal("external runtime test generation requires a constructed runtime and semantic source")
 	}
 	bundleHash := runtime.Options.SourceArtifactFact.BundleHash()
-	coordinate := runtimeagenttopology.SourceCoordinate{BundleHash: bundleHash}
+	bundle, present := semanticview.Bundle(runtime.Options.WorkflowModule.SemanticSource())
+	if !present {
+		t.Fatal("external runtime test generation requires its captured bundle")
+	}
+	rooted, err := bundle.RootedSource()
+	if err != nil {
+		t.Fatal(err)
+	}
+	coordinate, err := runtimeagenttopology.NewSourceCoordinate(rooted.Admission())
+	if err != nil || coordinate.BundleHash != bundleHash {
+		t.Fatalf("external runtime coordinate differs from its admitted fact: %v", err)
+	}
+	ctx = runtimecorrelation.WithRootAdmission(ctx, rooted.Admission())
 	desired, err := runtime.Manager.CompileStaticTopologyDesiredAgents(runtime.Options.WorkflowModule.SemanticSource(), coordinate)
 	if err != nil {
 		t.Fatalf("compile external runtime test source set: %v", err)
@@ -571,7 +592,19 @@ func admitExternalManagerTestGeneration(t testing.TB, ctx context.Context, selec
 	if !present || fact.Validate() != nil {
 		t.Fatal("external manager fixture requires its admitted source context")
 	}
-	coordinate := runtimeagenttopology.SourceCoordinate{BundleHash: fact.BundleHash()}
+	bundle, present := semanticview.Bundle(source)
+	if !present {
+		t.Fatal("external manager fixture requires its captured bundle")
+	}
+	rooted, err := bundle.RootedSource()
+	if err != nil {
+		t.Fatal(err)
+	}
+	coordinate, err := runtimeagenttopology.NewSourceCoordinate(rooted.Admission())
+	if err != nil || coordinate.BundleHash != fact.BundleHash() {
+		t.Fatalf("external manager coordinate differs from its admitted fact: %v", err)
+	}
+	ctx = runtimecorrelation.WithRootAdmission(ctx, rooted.Admission())
 	desired, err := manager.CompileStaticTopologyDesiredAgents(source, coordinate)
 	if err != nil {
 		t.Fatal(err)
@@ -673,7 +706,8 @@ func newScopedTestEventBus(t *testing.T, store runtimebus.EventStore, opts runti
 		opts.SourceArtifactFact = authorActivityTestSourceArtifactFact
 	}
 	if opts.PayloadAdmitter == nil {
-		opts.PayloadAdmitter = func(_ context.Context, event events.Event, flowID string) (events.PayloadAdmission, error) {
+		opts.PayloadAdmitter = func(_ context.Context, event events.Event, payloadProducer events.PayloadProducer) (events.PayloadAdmission, error) {
+			flowID := payloadProducer.FlowID()
 			return eventtest.PayloadAdmission(event, flowID, string(event.Type()))
 		}
 	}
@@ -731,7 +765,8 @@ func newRuntimeTestEventBusWithOptions(t testing.TB, store runtimebus.EventStore
 		opts.SourceArtifactFact = authorActivityTestSourceArtifactFact
 	}
 	if opts.PayloadAdmitter == nil {
-		opts.PayloadAdmitter = func(_ context.Context, event events.Event, flowID string) (events.PayloadAdmission, error) {
+		opts.PayloadAdmitter = func(_ context.Context, event events.Event, payloadProducer events.PayloadProducer) (events.PayloadAdmission, error) {
+			flowID := payloadProducer.FlowID()
 			return eventtest.PayloadAdmission(event, flowID, string(event.Type()))
 		}
 	}

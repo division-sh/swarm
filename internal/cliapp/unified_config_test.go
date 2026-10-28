@@ -222,13 +222,16 @@ func TestUnifiedConfigSelectedFileAndExplicitReplacement(t *testing.T) {
 		t.Fatalf("serve api listen addr = %q, want local-operator override", got.CLI.Serve.APIListenAddr)
 	}
 	explicitPath := filepath.Join(t.TempDir(), "explicit.yaml")
-	writeRuntimeConfigText(t, explicitPath, "serve:\n  api_listen_addr: 127.0.0.1:4444\n")
+	writeRuntimeConfigText(t, explicitPath, "serve:\n  api_listen_addr: 127.0.0.1:4444\ntriggers:\n  acme/trigger.yaml: {acknowledge: unsigned_webhook}\n  child/acme/trigger.yaml: {acknowledge: unsigned_webhook}\n")
 	got, err = loadUnifiedConfigForTest(t, unifiedConfigLoadOptions{RepoRoot: repo, ExplicitPath: explicitPath})
 	if err != nil {
 		t.Fatalf("load explicit unified config: %v", err)
 	}
 	if got.CLI.Serve.APIListenAddr != "127.0.0.1:4444" || got.Source != unifiedConfigSourceExplicit {
 		t.Fatalf("explicit serve api/source = %q/%q", got.CLI.Serve.APIListenAddr, got.Source)
+	}
+	if len(got.Config.Triggers) != 2 || got.Config.Triggers["acme/trigger.yaml"].Acknowledge != "unsigned_webhook" || got.Config.Triggers["child/acme/trigger.yaml"].Acknowledge != "unsigned_webhook" {
+		t.Fatalf("explicit trigger entries lost exact member identity: %#v", got.Config.Triggers)
 	}
 }
 
@@ -250,6 +253,9 @@ func TestUnifiedConfigRejectsLegacyFlatShapeAndSplitUnsupported(t *testing.T) {
 		{name: "sharding dotted split unsupported", body: "sharding.foo: true\n", want: "config key \"sharding.foo\" is recognized but not yet supported"},
 		{name: "sharding typo unknown", body: "shardingtypo:\n  enabled: true\n", want: "unknown config key \"shardingtypo\""},
 		{name: "unknown budget key", body: "budget:\n  not_a_real_key: 1\n", want: "unknown config key \"budget.not_a_real_key\""},
+		{name: "unknown trigger entry key", body: "triggers: {acme/trigger.yaml: {allow: true}}\n", want: "unknown config key \"triggers.acme/trigger.yaml.allow\""},
+		{name: "nonmember trigger entry", body: "triggers: {acme: {acknowledge: unsigned_webhook}}\n", want: "must be an exact selected-root-relative provider/trigger.yaml member path"},
+		{name: "escaping trigger entry", body: "triggers: {'../acme/trigger.yaml': {acknowledge: unsigned_webhook}}\n", want: "must be an exact selected-root-relative provider/trigger.yaml member path"},
 		{name: "unknown human task budget typo", body: "budget:\n  human_tasks:\n    max_tasks_per_wek: 1\n", want: "unknown config key \"budget.human_tasks.max_tasks_per_wek\""},
 		{name: "unknown provider limit profile policy typo", body: "llm:\n  provider_limits:\n    anthropic:\n      max_concurency: 2\n", want: "unknown config key \"llm.provider_limits.anthropic.max_concurency\""},
 		{name: "unknown provider limit model policy typo", body: "llm:\n  provider_limits:\n    anthropic:\n      models:\n        sonnet:\n          rate_limt: 10/m\n", want: "unknown config key \"llm.provider_limits.anthropic.models.sonnet.rate_limt\""},

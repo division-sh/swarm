@@ -1,4 +1,4 @@
-name: test-boot-permission-tool-mismatch
+# fixture: test-boot-permission-tool-mismatch
 stages:
   pending: {}
   done: {final: true}

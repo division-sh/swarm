@@ -10,12 +10,29 @@
         "no_arguments": true
       }
     ],
+    "ingress": {
+      "alias": "telegram-agent",
+      "providers": [
+        {
+          "provider": "telegram",
+          "signing_secret": "telegram.webhook_signing_secret",
+          "admission_kind": "pack",
+          "pack_id": "telegram",
+          "request_authentication": "TOKEN_EQUALITY"
+        }
+      ]
+    },
     "source_files": {
-      "schema": "schema.yaml"
+      "schema": "schema.yaml",
+      "entities": "entities.yaml"
     },
     "required_agents": {
       "source": "inferred",
       "agents": []
+    },
+    "primary_entity": {
+      "type": "telegram_service",
+      "source_file": "entities.yaml"
     }
   },
   "flows": [
@@ -107,7 +124,7 @@
       "input_pins": [
         {
           "event": "inbound.telegram.text_message",
-          "resolved_event": "inbound.telegram.text_message",
+          "resolved_event": "telegram-chat/inbound.telegram.text_message",
           "flow_path": "telegram-chat",
           "producer_schema_digest": "sha256:d56e1a4417b8aed6c8891f576f1cce98f40ed9cd339c8a5e1f737bb489ea0e3f",
           "receiver_schema_digest": "sha256:d56e1a4417b8aed6c8891f576f1cce98f40ed9cd339c8a5e1f737bb489ea0e3f",
@@ -117,69 +134,12 @@
           "source_column": 1
         }
       ]
-    },
-    {
-      "constructors": [
-        {
-          "no_arguments": true
-        }
-      ],
-      "id": "telegram-ingress",
-      "path": "telegram-ingress",
-      "mode": "static",
-      "ingress": {
-        "alias": "chat",
-        "providers": [
-          {
-            "provider": "telegram",
-            "signing_secret": "webhook_signing.telegram",
-            "admission_kind": "pack-required"
-          }
-        ]
-      },
-      "source_files": {
-        "schema": "telegram-ingress/schema.yaml",
-        "entities": "telegram-ingress/entities.yaml"
-      },
-      "required_agents": {
-        "source": "inferred",
-        "agents": []
-      },
-      "primary_entity": {
-        "type": "telegram_service",
-        "source_file": "telegram-ingress/entities.yaml"
-      },
-      "input_pins": [
-        {
-          "event": "inbound.telegram",
-          "resolved_event": "inbound.telegram",
-          "flow_path": "telegram-ingress",
-          "producer_schema_digest": "sha256:2268977f0788f12cd81b2a7ab459d27139ab8276680592201f4b4f1de3d1eddf",
-          "receiver_schema_digest": "sha256:2268977f0788f12cd81b2a7ab459d27139ab8276680592201f4b4f1de3d1eddf",
-          "pin_digest": "sha256:78c536f1022461c2a1a5cfab589351d31b6ac00789a20a24967f30a739db7f82",
-          "source_file": "telegram-ingress/schema.yaml",
-          "source_line": 1,
-          "source_column": 1
-        }
-      ],
-      "output_pins": [
-        {
-          "event": "inbound.telegram.text_message",
-          "resolved_event": "telegram-ingress/inbound.telegram.text_message",
-          "flow_path": "telegram-ingress",
-          "schema_digest": "sha256:d56e1a4417b8aed6c8891f576f1cce98f40ed9cd339c8a5e1f737bb489ea0e3f",
-          "pin_digest": "sha256:d4f747e6f015aadce2427f3c9dca3e5dbcad66e6e22de2350853ad6a01a9ebd9",
-          "source_file": "telegram-ingress/schema.yaml",
-          "source_line": 1,
-          "source_column": 1
-        }
-      ]
     }
   ],
   "stage_graphs": [
     {
-      "flow_id": "telegram-ingress",
-      "flow_path": "telegram-ingress",
+      "flow_id": "root",
+      "flow_path": ".",
       "nodes": [
         {
           "id": "active",
@@ -228,19 +188,6 @@
     "source_authority": "projection_only_existing_contract_owners",
     "producers": [
       {
-        "id": "endpoint-030626ef65cb06f2",
-        "direction": "producer",
-        "kind": "external",
-        "flow_id": "telegram-ingress",
-        "flow_path": "telegram-ingress",
-        "event": {
-          "authored": "inbound.telegram.callback_action",
-          "local": "inbound.telegram.callback_action",
-          "canonical": "inbound.telegram.callback_action"
-        },
-        "source_location": "ingress.providers"
-      },
-      {
         "id": "endpoint-5da5ad19cbf90fcf",
         "direction": "producer",
         "kind": "node_generated",
@@ -256,15 +203,14 @@
         "source_location": "effective generated producer"
       },
       {
-        "id": "endpoint-747935b3eaed7348",
+        "id": "endpoint-682c39b35d985676",
         "direction": "producer",
         "kind": "external",
-        "flow_id": "telegram-ingress",
-        "flow_path": "telegram-ingress",
+        "flow_id": ".",
         "event": {
-          "authored": "inbound.telegram",
-          "local": "inbound.telegram",
-          "canonical": "inbound.telegram"
+          "authored": "inbound.telegram.text_message",
+          "local": "inbound.telegram.text_message",
+          "canonical": "inbound.telegram.text_message"
         },
         "source_location": "ingress.providers"
       },
@@ -296,19 +242,6 @@
         },
         "role": "phrase-bot",
         "source_location": "required_agents.emits"
-      },
-      {
-        "id": "endpoint-d36246f28f9e8bd9",
-        "direction": "producer",
-        "kind": "external",
-        "flow_id": "telegram-ingress",
-        "flow_path": "telegram-ingress",
-        "event": {
-          "authored": "inbound.telegram.text_message",
-          "local": "inbound.telegram.text_message",
-          "canonical": "telegram-ingress/inbound.telegram.text_message"
-        },
-        "source_location": "ingress.providers"
       },
       {
         "id": "endpoint-f6607084c81f7b55",
@@ -347,7 +280,7 @@
         "source_location": "event_handlers.telegram.reply_requested"
       },
       {
-        "id": "endpoint-20a1aa1faca0b99f",
+        "id": "endpoint-2e22598188781c48",
         "direction": "consumer",
         "kind": "agent",
         "flow_id": "telegram-chat",
@@ -355,7 +288,7 @@
         "event": {
           "authored": "inbound.telegram.text_message",
           "local": "inbound.telegram.text_message",
-          "canonical": "inbound.telegram.text_message"
+          "canonical": "telegram-chat/inbound.telegram.text_message"
         },
         "agent_id": "phrase-bot",
         "role": "phrase_bot",
@@ -364,7 +297,7 @@
         "source_location": "subscriptions"
       },
       {
-        "id": "endpoint-215efa191a9d7683",
+        "id": "endpoint-8253aa58da00591c",
         "direction": "consumer",
         "kind": "required_agent_role",
         "flow_id": "telegram-chat",
@@ -372,13 +305,27 @@
         "event": {
           "authored": "inbound.telegram.text_message",
           "local": "inbound.telegram.text_message",
-          "canonical": "inbound.telegram.text_message"
+          "canonical": "telegram-chat/inbound.telegram.text_message"
         },
         "role": "phrase-bot",
         "source_location": "required_agents.subscribes_to"
       }
     ],
     "input_pins": [
+      {
+        "id": "endpoint-03d2938259cb3ec3",
+        "direction": "input_pin",
+        "kind": "flow_input_pin",
+        "flow_id": "telegram-chat",
+        "flow_path": "telegram-chat",
+        "event": {
+          "authored": "inbound.telegram.text_message",
+          "local": "inbound.telegram.text_message",
+          "canonical": "telegram-chat/inbound.telegram.text_message"
+        },
+        "pin_name": "inbound.telegram.text_message",
+        "source_location": "pins.inputs.inbound.telegram.text_message"
+      },
       {
         "id": "endpoint-2567114cdf8665bf",
         "direction": "input_pin",
@@ -391,51 +338,9 @@
         },
         "pin_name": "inbound.telegram.text_message",
         "source_location": "pins.inputs.inbound.telegram.text_message"
-      },
-      {
-        "id": "endpoint-7ee8c383d9e2a6ee",
-        "direction": "input_pin",
-        "kind": "flow_input_pin",
-        "flow_id": "telegram-ingress",
-        "flow_path": "telegram-ingress",
-        "event": {
-          "authored": "inbound.telegram",
-          "local": "inbound.telegram",
-          "canonical": "inbound.telegram"
-        },
-        "pin_name": "inbound.telegram",
-        "source_location": "pins.inputs.inbound.telegram"
-      },
-      {
-        "id": "endpoint-cc92228f87a1afdc",
-        "direction": "input_pin",
-        "kind": "flow_input_pin",
-        "flow_id": "telegram-chat",
-        "flow_path": "telegram-chat",
-        "event": {
-          "authored": "inbound.telegram.text_message",
-          "local": "inbound.telegram.text_message",
-          "canonical": "inbound.telegram.text_message"
-        },
-        "pin_name": "inbound.telegram.text_message",
-        "source_location": "pins.inputs.inbound.telegram.text_message"
       }
     ],
     "output_pins": [
-      {
-        "id": "endpoint-194314c9606f9de1",
-        "direction": "output_pin",
-        "kind": "flow_output_pin",
-        "flow_id": "telegram-ingress",
-        "flow_path": "telegram-ingress",
-        "event": {
-          "authored": "inbound.telegram.text_message",
-          "local": "inbound.telegram.text_message",
-          "canonical": "telegram-ingress/inbound.telegram.text_message"
-        },
-        "pin_name": "inbound.telegram.text_message",
-        "source_location": "pins.outputs.inbound.telegram.text_message"
-      },
       {
         "id": "endpoint-36b9ad81b07bd213",
         "direction": "output_pin",
@@ -452,50 +357,51 @@
     ],
     "root_input_sources": [
       {
-        "id": "root-input-41dbf053a93bfddc",
+        "id": "root-input-b2e50b1b73575a54",
         "kind": "standing_ingress",
-        "alias": "chat",
+        "alias": "telegram-agent",
         "provider": "telegram",
+        "signing_secret": "telegram.webhook_signing_secret",
         "target": {
-          "flow_path": "telegram-ingress"
+          "flow_path": "."
         },
-        "authored_location": "telegram-ingress/schema.yaml:ingress.providers[0]",
+        "authored_location": "telegram/trigger.yaml",
         "admission": {
-          "kind": "pack-required"
+          "kind": "pack",
+          "pack_id": "telegram",
+          "declared_authentication": "TOKEN_EQUALITY"
         }
       }
     ],
     "boundary_exposures": [
       {
-        "id": "endpoint-d36246f28f9e8bd9-\u003eendpoint-194314c9606f9de1",
+        "id": "endpoint-682c39b35d985676-\u003eendpoint-36b9ad81b07bd213",
         "event": {
           "authored": "inbound.telegram.text_message",
           "local": "inbound.telegram.text_message",
-          "canonical": "telegram-ingress/inbound.telegram.text_message"
+          "canonical": "inbound.telegram.text_message"
         },
         "producer": {
-          "id": "endpoint-d36246f28f9e8bd9",
+          "id": "endpoint-682c39b35d985676",
           "direction": "producer",
           "kind": "external",
-          "flow_id": "telegram-ingress",
-          "flow_path": "telegram-ingress",
+          "flow_id": ".",
           "event": {
             "authored": "inbound.telegram.text_message",
             "local": "inbound.telegram.text_message",
-            "canonical": "telegram-ingress/inbound.telegram.text_message"
+            "canonical": "inbound.telegram.text_message"
           },
           "source_location": "ingress.providers"
         },
         "output": {
-          "id": "endpoint-194314c9606f9de1",
+          "id": "endpoint-36b9ad81b07bd213",
           "direction": "output_pin",
           "kind": "flow_output_pin",
-          "flow_id": "telegram-ingress",
-          "flow_path": "telegram-ingress",
+          "flow_id": ".",
           "event": {
             "authored": "inbound.telegram.text_message",
             "local": "inbound.telegram.text_message",
-            "canonical": "telegram-ingress/inbound.telegram.text_message"
+            "canonical": "inbound.telegram.text_message"
           },
           "pin_name": "inbound.telegram.text_message",
           "source_location": "pins.outputs.inbound.telegram.text_message"
@@ -504,15 +410,27 @@
     ],
     "edges": [
       {
-        "id": "route-1e3434c28c0ac92e",
-        "scope": "typed_pubsub",
+        "id": "route-5318e7d80eb461b0",
+        "scope": "inter_flow_connect",
         "event": {
           "authored": "inbound.telegram.text_message",
           "local": "inbound.telegram.text_message",
           "canonical": "inbound.telegram.text_message"
         },
         "producer": {
-          "id": "endpoint-cc92228f87a1afdc",
+          "id": "endpoint-682c39b35d985676",
+          "direction": "producer",
+          "kind": "external",
+          "flow_id": ".",
+          "event": {
+            "authored": "inbound.telegram.text_message",
+            "local": "inbound.telegram.text_message",
+            "canonical": "inbound.telegram.text_message"
+          },
+          "source_location": "ingress.providers"
+        },
+        "consumer": {
+          "id": "endpoint-03d2938259cb3ec3",
           "direction": "input_pin",
           "kind": "flow_input_pin",
           "flow_id": "telegram-chat",
@@ -520,33 +438,31 @@
           "event": {
             "authored": "inbound.telegram.text_message",
             "local": "inbound.telegram.text_message",
-            "canonical": "inbound.telegram.text_message"
+            "canonical": "telegram-chat/inbound.telegram.text_message"
           },
           "pin_name": "inbound.telegram.text_message",
           "source_location": "pins.inputs.inbound.telegram.text_message"
         },
-        "consumer": {
-          "id": "endpoint-20a1aa1faca0b99f",
-          "direction": "consumer",
-          "kind": "agent",
-          "flow_id": "telegram-chat",
-          "flow_path": "telegram-chat",
-          "event": {
-            "authored": "inbound.telegram.text_message",
-            "local": "inbound.telegram.text_message",
-            "canonical": "inbound.telegram.text_message"
-          },
-          "agent_id": "phrase-bot",
-          "role": "phrase_bot",
-          "source_file": "telegram-chat/agents.yaml",
-          "source_line": 1,
-          "source_location": "subscriptions"
+        "boundary": {
+          "owner_flow_path": ".",
+          "authored_location": "schema.yaml:\u003cline\u003e",
+          "from": ".inbound.telegram.text_message",
+          "to": "telegram-chat.inbound.telegram.text_message",
+          "output_pin": "inbound.telegram.text_message",
+          "input_pin": "inbound.telegram.text_message"
         },
-        "typed_pubsub": {
-          "match": "exact",
-          "boundary": "same_flow"
+        "resolution": {
+          "mode": "select-or-create",
+          "target_kind": "target",
+          "instance_key": {
+            "mode": "select-or-create",
+            "field": "conversation_reference",
+            "source_kind": "payload",
+            "source_path": "payload.conversation_reference",
+            "derived_from": "instance.conversation_reference + carries.conversation_reference.from"
+          }
         },
-        "requires_runtime_resolution": false
+        "requires_runtime_resolution": true
       },
       {
         "id": "route-5696f501d9010ba4",
@@ -592,62 +508,6 @@
           "boundary": "same_flow"
         },
         "requires_runtime_resolution": false
-      },
-      {
-        "id": "route-742376a147e07541",
-        "scope": "inter_flow_connect",
-        "event": {
-          "authored": "inbound.telegram.text_message",
-          "local": "inbound.telegram.text_message",
-          "canonical": "telegram-ingress/inbound.telegram.text_message"
-        },
-        "producer": {
-          "id": "endpoint-d36246f28f9e8bd9",
-          "direction": "producer",
-          "kind": "external",
-          "flow_id": "telegram-ingress",
-          "flow_path": "telegram-ingress",
-          "event": {
-            "authored": "inbound.telegram.text_message",
-            "local": "inbound.telegram.text_message",
-            "canonical": "telegram-ingress/inbound.telegram.text_message"
-          },
-          "source_location": "ingress.providers"
-        },
-        "consumer": {
-          "id": "endpoint-cc92228f87a1afdc",
-          "direction": "input_pin",
-          "kind": "flow_input_pin",
-          "flow_id": "telegram-chat",
-          "flow_path": "telegram-chat",
-          "event": {
-            "authored": "inbound.telegram.text_message",
-            "local": "inbound.telegram.text_message",
-            "canonical": "inbound.telegram.text_message"
-          },
-          "pin_name": "inbound.telegram.text_message",
-          "source_location": "pins.inputs.inbound.telegram.text_message"
-        },
-        "boundary": {
-          "owner_flow_path": ".",
-          "authored_location": "schema.yaml:\u003cline\u003e",
-          "from": "telegram-ingress.inbound.telegram.text_message",
-          "to": "telegram-chat.inbound.telegram.text_message",
-          "output_pin": "inbound.telegram.text_message",
-          "input_pin": "inbound.telegram.text_message"
-        },
-        "resolution": {
-          "mode": "select-or-create",
-          "target_kind": "target",
-          "instance_key": {
-            "mode": "select-or-create",
-            "field": "conversation_reference",
-            "source_kind": "payload",
-            "source_path": "payload.conversation_reference",
-            "derived_from": "instance.conversation_reference + carries.conversation_reference.from"
-          }
-        },
-        "requires_runtime_resolution": true
       },
       {
         "id": "route-74cebad681f052d2",
@@ -698,28 +558,15 @@
         "requires_runtime_resolution": false
       },
       {
-        "id": "route-f98cb74171252311",
-        "scope": "inter_flow_connect",
+        "id": "route-bb82b496bba2ed3d",
+        "scope": "typed_pubsub",
         "event": {
           "authored": "inbound.telegram.text_message",
           "local": "inbound.telegram.text_message",
-          "canonical": "inbound.telegram.text_message"
+          "canonical": "telegram-chat/inbound.telegram.text_message"
         },
         "producer": {
-          "id": "endpoint-36b9ad81b07bd213",
-          "direction": "output_pin",
-          "kind": "flow_output_pin",
-          "flow_id": ".",
-          "event": {
-            "authored": "inbound.telegram.text_message",
-            "local": "inbound.telegram.text_message",
-            "canonical": "inbound.telegram.text_message"
-          },
-          "pin_name": "inbound.telegram.text_message",
-          "source_location": "pins.outputs.inbound.telegram.text_message"
-        },
-        "consumer": {
-          "id": "endpoint-cc92228f87a1afdc",
+          "id": "endpoint-03d2938259cb3ec3",
           "direction": "input_pin",
           "kind": "flow_input_pin",
           "flow_id": "telegram-chat",
@@ -727,36 +574,44 @@
           "event": {
             "authored": "inbound.telegram.text_message",
             "local": "inbound.telegram.text_message",
-            "canonical": "inbound.telegram.text_message"
+            "canonical": "telegram-chat/inbound.telegram.text_message"
           },
           "pin_name": "inbound.telegram.text_message",
           "source_location": "pins.inputs.inbound.telegram.text_message"
         },
-        "boundary": {
-          "owner_flow_path": ".",
-          "authored_location": "schema.yaml:\u003cline\u003e",
-          "from": ".inbound.telegram.text_message",
-          "to": "telegram-chat.inbound.telegram.text_message",
-          "output_pin": "inbound.telegram.text_message",
-          "input_pin": "inbound.telegram.text_message"
+        "consumer": {
+          "id": "endpoint-2e22598188781c48",
+          "direction": "consumer",
+          "kind": "agent",
+          "flow_id": "telegram-chat",
+          "flow_path": "telegram-chat",
+          "event": {
+            "authored": "inbound.telegram.text_message",
+            "local": "inbound.telegram.text_message",
+            "canonical": "telegram-chat/inbound.telegram.text_message"
+          },
+          "agent_id": "phrase-bot",
+          "role": "phrase_bot",
+          "source_file": "telegram-chat/agents.yaml",
+          "source_line": 1,
+          "source_location": "subscriptions"
         },
-        "resolution": {
-          "mode": "select-or-create",
-          "target_kind": "target",
-          "instance_key": {
-            "mode": "select-or-create",
-            "field": "conversation_reference",
-            "source_kind": "payload",
-            "source_path": "payload.conversation_reference",
-            "derived_from": "instance.conversation_reference + carries.conversation_reference.from"
-          }
+        "typed_pubsub": {
+          "match": "exact",
+          "boundary": "same_flow"
         },
-        "requires_runtime_resolution": true
+        "requires_runtime_resolution": false
       }
     ],
     "issues": []
   },
   "diagnostics": [
+    {
+      "check_id": "cross_surface_named_type_use",
+      "severity": "lint_evidence",
+      "location": "global",
+      "message": "authored object shape reuse candidate: identical shape {command_invocation:object?, conversation_reference:text, conversation_scope:text, external_account:text, provider_message_reference:integer, reply_to_message_reference:integer?, text:text} appears in event inbound.telegram.text_message payload; event telegram-chat/inbound.telegram.text_message payload; consider extracting or reusing a named type if these represent the same concept"
+    },
     {
       "check_id": "entity_reader_coverage",
       "severity": "lint_evidence",

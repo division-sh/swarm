@@ -19,6 +19,7 @@ func TestChannelOnboardingPendingResetRestartToReadyE2E(t *testing.T) {
 				for _, boundary := range []channelonboarding.TestLifecycleBoundary{channelonboarding.TestAfterStaleIdentitySettlement, channelonboarding.TestAfterPendingResetCleanup, channelonboarding.TestAfterPendingResetCommit} {
 					t.Run(fmt.Sprintf("%s/proof=%t/inherited=%t/%s", backend, proof, inherited, boundary), func(t *testing.T) {
 						h := newChannelOnboardingE2EHarness(t, backend, true)
+						writeChannelOnboardingLiveToolCredentials(t, h.credentialPath)
 						barrier := newChannelOnboardingTestBarrier(boundary)
 						barrier.Disarm()
 						t.Cleanup(barrier.Release)

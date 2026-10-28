@@ -199,7 +199,7 @@ func verifyWorkflowTimerPublishedOccurrenceRecovery(t *testing.T, scenarios []st
 				newRuntime := func() (*runtimebus.EventBus, *runtimepipeline.PipelineCoordinator, *timerTransitionOutcomeCapture) {
 					t.Helper()
 					bus, err := newScopedTestEventBus(t, selected.events, runtimebus.EventBusOptions{
-						ContractBundle: source, SourceArtifactFact: fact, PayloadAdmitter: strictWorkflowTimerPayloadAdmitter,
+						ContractBundle: source, SourceArtifactFact: fact, PayloadAdmitter: strictWorkflowTimerPayloadAdmitter(source, fact),
 					}, runtimecontracts.WorkflowStageTimerInternalEvent)
 					if err != nil {
 						t.Fatal(err)

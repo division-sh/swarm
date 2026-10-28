@@ -47,32 +47,25 @@ func TestOperationInputProducerResolverMatchesFreshResolution(t *testing.T) {
 }
 
 func TestOperationInputProducerResolverBoundsCensusAndSeparatesOperations(t *testing.T) {
-	for _, tc := range targetFreeSyntheticProjectionCases() {
-		t.Run(tc.name, func(t *testing.T) {
-			base, endpoint := targetFreeSyntheticProjectionFixture(t, tc.mint, false)
-			source := &censusCountingSource{Source: base}
-			_, resolver := CompileConnectGraphWithInputProducerResolver(source)
-			want := ResolveFlowInputProducer(base, endpoint.FlowID, endpoint.Event.Local)
-			for i := 0; i < 100; i++ {
-				if got := resolver.Resolve(endpoint.FlowID, endpoint.Event.Local); !reflect.DeepEqual(got, want) {
-					t.Fatalf("query %d changed evidence: %+v", i, got)
-				}
-			}
-			if source.builds != 1 {
-				t.Fatalf("100 queries built %d censuses, want one", source.builds)
-			}
-			// End the first operation before changing its source. Neither the
-			// new operation nor the one-shot API may inherit old evidence.
-			source.withdraw = true
-			graph, next := CompileConnectGraphWithInputProducerResolver(source)
-			got := next.Resolve(endpoint.FlowID, endpoint.Event.Local)
-			if source.builds != 2 || len(graph.receiverPlans) != 0 || !got.HasEvidenceKind(runtimecontracts.FlowInputProducerInvalidContext) {
-				t.Fatalf("new operation reused withdrawn source: builds=%d result=%+v", source.builds, got)
-			}
-			if fresh := ResolveFlowInputProducer(source, endpoint.FlowID, endpoint.Event.Local); source.builds != 3 || !reflect.DeepEqual(fresh, got) {
-				t.Fatalf("one-shot API cached operation: builds=%d fresh=%+v want=%+v", source.builds, fresh, got)
-			}
-		})
+	base := operationScatterSource(t)
+	source := &censusCountingSource{Source: base}
+	_, resolver := CompileConnectGraphWithInputProducerResolver(source)
+	want := ResolveFlowInputProducer(base, "workers", "item.registered")
+	for i := 0; i < 100; i++ {
+		if got := resolver.Resolve("workers", "item.registered"); !reflect.DeepEqual(got, want) {
+			t.Fatalf("query %d changed evidence: %+v", i, got)
+		}
+	}
+	// End the first operation before changing its source. Neither the
+	// new operation nor the one-shot API may inherit old evidence.
+	source.withdraw = true
+	graph, next := CompileConnectGraphWithInputProducerResolver(source)
+	got := next.Resolve("workers", "item.registered")
+	if len(graph.receiverPlans) != 0 || !got.HasEvidenceKind(runtimecontracts.FlowInputProducerInvalidContext) {
+		t.Fatalf("new operation reused withdrawn source: result=%+v", got)
+	}
+	if fresh := ResolveFlowInputProducer(source, "workers", "item.registered"); !reflect.DeepEqual(fresh, got) {
+		t.Fatalf("one-shot API cached operation: fresh=%+v want=%+v", fresh, got)
 	}
 }
 

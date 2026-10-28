@@ -18,6 +18,7 @@ import (
 	"github.com/division-sh/swarm/internal/runtime/executionposture"
 	runtimefailures "github.com/division-sh/swarm/internal/runtime/failures"
 	runtimemanager "github.com/division-sh/swarm/internal/runtime/manager"
+	"github.com/division-sh/swarm/internal/runtime/semanticview"
 	"github.com/division-sh/swarm/internal/runtime/startupownership"
 	"github.com/division-sh/swarm/internal/store/storetest"
 	"github.com/division-sh/swarm/internal/testutil"
@@ -249,9 +250,18 @@ func TestOperatorAgentSendDirectivePersistsDirectiveEventOnceOnReplay(t *testing
 	_, db, cleanup := testutil.StartPostgres(t)
 	t.Cleanup(cleanup)
 	pg := storetest.AdmitPostgresRuntimeStore(t, db)
-	ctx := originalAPIFixtureContext(t, testAuthorActivityContext(context.Background()), pg)
-	workOwner := newAPITestRuntimeWorkOccurrence(t, authorActivityTestRuntimeInstanceID, authorActivityTestSourceArtifactFact.BundleHash())
-	bus, err := newScopedAPITestEventBus(t, pg, runtimebus.EventBusOptions{WorkOwner: workOwner})
+	bundle := runStartTestBundle(t, "scan.requested")
+	rooted, err := bundle.RootedSource()
+	if err != nil {
+		t.Fatal(err)
+	}
+	source := semanticview.Wrap(bundle)
+	ctx := runtimecorrelation.WithRootAdmission(testAuthorActivityContextForSource(context.Background(), runStartTestSourceArtifactFact()), rooted.Admission())
+	ctx = originalAPIFixtureContext(t, ctx, pg)
+	workOwner := newAPITestRuntimeWorkOccurrence(t, authorActivityTestRuntimeInstanceID, runStartTestBundleHash)
+	bus, err := newScopedAPITestEventBus(t, pg, runtimebus.EventBusOptions{
+		WorkOwner: workOwner, ContractBundle: source, SourceArtifactFact: runStartTestSourceArtifactFact(),
+	})
 	if err != nil {
 		t.Fatalf("NewEventBus: %v", err)
 	}
@@ -259,8 +269,10 @@ func TestOperatorAgentSendDirectivePersistsDirectiveEventOnceOnReplay(t *testing
 	manager := runtimemanager.NewAgentManagerWithOptions(bus, func(cfg runtimeactors.AgentConfig) (runtimemanager.Agent, error) {
 		return agent, nil
 	}, runtimemanager.AgentManagerOptions{
-		ExecutionPosture: executionposture.Live,
-		BaseContext:      ctx,
+		ExecutionPosture:   executionposture.Live,
+		BaseContext:        ctx,
+		SemanticSource:     source,
+		SourceArtifactFact: runStartTestSourceArtifactFact(),
 		MutationContext: func(work context.Context) (context.Context, error) {
 			return startupownership.FreezeMutationAuthority(startupownership.CarryMutationAuthority(work, ctx))
 		},
@@ -281,9 +293,9 @@ func TestOperatorAgentSendDirectivePersistsDirectiveEventOnceOnReplay(t *testing
 	})
 	storetest.RequireRun(t, ctx, pg, storetest.RunFixture{
 		Origin: storetest.ScenarioSetupOrigin(), RunID: agentidentitytest.DefaultRunID,
-		BundleHash: authorActivityTestSourceArtifactFact.BundleHash(),
+		BundleHash: runStartTestBundleHash, Artifact: bundle.SourceArtifact, RootAdmission: rooted.Admission(),
 	})
-	materializeAPITestAgent(t, ctx, pg, manager, withAPITestIntent(t, runtimeactors.AgentConfig{ExecutionMode: "live", ID: agent.id, Model: "regular", ResolvedLLMBackend: "anthropic", Config: json.RawMessage(`{}`)}))
+	materializeAPITestAgent(t, ctx, pg, manager, withAPITestIntent(t, runtimeactors.AgentConfig{ExecutionMode: "live", ID: agent.id, FlowID: ".", Model: "regular", ResolvedLLMBackend: "anthropic", Config: json.RawMessage(`{}`)}))
 	handler := testHandler(t, Options{
 		AuthTokens: []string{testToken},
 		Handlers: testOperatorHandlers(testOperatorCapabilities{
@@ -324,12 +336,20 @@ func TestOperatorAgentSendDirectiveUsesCanonicalRuntimeSourceArtifact(t *testing
 	_, db, cleanup := testutil.StartPostgres(t)
 	t.Cleanup(cleanup)
 	pg := storetest.AdmitPostgresRuntimeStore(t, db)
-	bootFact := authorActivityTestSourceArtifactFact
-	ctx := originalAPIFixtureContext(t, testAuthorActivityContextForSource(context.Background(), bootFact), pg)
+	bundle := runStartTestBundle(t, "scan.requested")
+	rooted, err := bundle.RootedSource()
+	if err != nil {
+		t.Fatal(err)
+	}
+	source := semanticview.Wrap(bundle)
+	bootFact := runStartTestSourceArtifactFact()
+	ctx := runtimecorrelation.WithRootAdmission(testAuthorActivityContextForSource(context.Background(), bootFact), rooted.Admission())
+	ctx = originalAPIFixtureContext(t, ctx, pg)
 	workOwner := newAPITestRuntimeWorkOccurrence(t, authorActivityTestRuntimeInstanceID, bootFact.BundleHash())
 	bus, err := newScopedAPITestEventBus(t, pg, runtimebus.EventBusOptions{
 		SourceArtifactFact: bootFact,
 		WorkOwner:          workOwner,
+		ContractBundle:     source,
 	})
 	if err != nil {
 		t.Fatalf("NewEventBusWithOptions: %v", err)
@@ -338,8 +358,10 @@ func TestOperatorAgentSendDirectiveUsesCanonicalRuntimeSourceArtifact(t *testing
 	manager := runtimemanager.NewAgentManagerWithOptions(bus, func(cfg runtimeactors.AgentConfig) (runtimemanager.Agent, error) {
 		return agent, nil
 	}, runtimemanager.AgentManagerOptions{
-		ExecutionPosture: executionposture.Live,
-		BaseContext:      ctx,
+		ExecutionPosture:   executionposture.Live,
+		BaseContext:        ctx,
+		SemanticSource:     source,
+		SourceArtifactFact: bootFact,
 		MutationContext: func(work context.Context) (context.Context, error) {
 			return startupownership.FreezeMutationAuthority(startupownership.CarryMutationAuthority(work, ctx))
 		},
@@ -360,9 +382,9 @@ func TestOperatorAgentSendDirectiveUsesCanonicalRuntimeSourceArtifact(t *testing
 	})
 	storetest.RequireRun(t, ctx, pg, storetest.RunFixture{
 		Origin: storetest.ScenarioSetupOrigin(), RunID: agentidentitytest.DefaultRunID,
-		BundleHash: bootFact.BundleHash(),
+		BundleHash: bootFact.BundleHash(), Artifact: bundle.SourceArtifact, RootAdmission: rooted.Admission(),
 	})
-	materializeAPITestAgent(t, ctx, pg, manager, withAPITestIntent(t, runtimeactors.AgentConfig{ExecutionMode: "live", ID: agent.id, Model: "regular", ResolvedLLMBackend: "anthropic", Config: json.RawMessage(`{}`)}))
+	materializeAPITestAgent(t, ctx, pg, manager, withAPITestIntent(t, runtimeactors.AgentConfig{ExecutionMode: "live", ID: agent.id, FlowID: ".", Model: "regular", ResolvedLLMBackend: "anthropic", Config: json.RawMessage(`{}`)}))
 	handler := testHandler(t, Options{
 		AuthTokens: []string{testToken},
 		Handlers: testOperatorHandlers(testOperatorCapabilities{

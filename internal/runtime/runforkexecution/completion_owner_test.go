@@ -104,8 +104,17 @@ func proveSelectedCompletionScope(t *testing.T, ordinaryCtx, selectedCtx context
 	}
 	ordinaryRunID := uuid.NewString()
 	ordinaryCtx = originalSelectedFixtureContext(t, ordinaryCtx, any(selected).(startupownership.Store))
+	bundle, present := semanticview.Bundle(source)
+	if !present {
+		t.Fatal("completion fixture requires its captured source")
+	}
+	rooted, err := bundle.RootedSource()
+	if err != nil {
+		t.Fatal(err)
+	}
 	storetest.RequireRun(t, ordinaryCtx, selected.(storetest.RunFixtureStore), storetest.RunFixture{
 		RunID: ordinaryRunID, State: runlifecycle.StateRunning, Origin: runlifecycle.ScenarioSetupRunOrigin(),
+		Artifact: rooted.Artifact(), RootAdmission: rooted.Admission(),
 		BundleHash: sourceFact.BundleHash(), StartedAt: time.Now().UTC().Add(-time.Minute),
 	})
 	if _, err := requester.RequestCompletionCandidate(ordinaryCtx, runlifecycle.CandidateAtTime(ordinaryRunID, due)); err != nil {

@@ -11,6 +11,7 @@ import (
 	runtimecontracts "github.com/division-sh/swarm/internal/runtime/contracts"
 	"github.com/division-sh/swarm/internal/runtime/semanticview"
 	"github.com/division-sh/swarm/internal/runtime/workflowexpr"
+	"github.com/division-sh/swarm/internal/sourceartifact"
 	"github.com/division-sh/swarm/internal/store/storetest"
 	"github.com/google/uuid"
 )
@@ -26,24 +27,26 @@ func TestPublicOperationSemanticCarrierParity(t *testing.T) {
 			} else {
 				selected = storetest.StartPostgresRuntimeStore(t)
 			}
-			bundle := runStartTestBundle("scan.requested")
-			event := bundle.Events["scan.requested"]
-			event.Payload.Properties["value"] = runtimecontracts.EventFieldSpec{Type: "json"}
-			event.Payload.Properties["nested"] = runtimecontracts.EventFieldSpec{Type: "json"}
-			bundle.Events["scan.requested"] = event
-			bundle.FlowTree.Root.Events["scan.requested"] = event
-			if err := runtimecontracts.CompileWorkflowSemantics(bundle); err != nil {
+			members := map[string][]byte{}
+			for _, entry := range runStartTestArtifact("scan.requested").Entries() {
+				members[entry.Label()] = entry.Bytes()
+			}
+			members["events.yaml"] = []byte("scan.requested:\n  topic: text?\n  value: json\n  nested: json\nfixture.close.requested:\n")
+			artifact, err := sourceartifact.AdmitMembers(members)
+			if err != nil {
 				t.Fatal(err)
 			}
+			bundle := loadAPIAuthoredBundle(t, artifact)
 			source := semanticview.Wrap(bundle)
 			bus, err := newScopedAPITestEventBus(t, selected, runStartTestEventBusOptions(source))
 			if err != nil {
 				t.Fatal(err)
 			}
+			ctx = admittedAPITestBusContext(t, context.Background(), bus)
 			handlers := testOperatorHandlers(testOperatorCapabilities{
 				Runs: selected, Observability: selected, Idempotency: selected, Events: bus, Source: source,
 				RunBundleContext: selected.(RunBundleContextStore), Entities: selected.(EntityReadStore),
-				Bundle: runtimecontracts.BundleIdentity{WorkflowName: "review", WorkflowVersion: "1.0.0", BundleHash: runStartTestBundleHash},
+				Bundle: runtimecontracts.BundleIdentity{WorkflowName: "review", WorkflowVersion: "1.0.0", BundleHash: runStartTestBundleHashForSource(source)},
 			})
 			counts := func() map[string]int {
 				t.Helper()
@@ -61,7 +64,7 @@ func TestPublicOperationSemanticCarrierParity(t *testing.T) {
 					}()
 					key, run := uuid.NewString(), uuid.NewString()
 					request := func(value any) Request {
-						params := map[string]any{"event_name": "scan.requested", "bundle_hash": runStartTestBundleHash, "idempotency_key": key,
+						params := map[string]any{"event_name": "scan.requested", "bundle_hash": runStartTestBundleHashForSource(source), "idempotency_key": key,
 							"payload": map[string]any{"value": value, "nested": []any{value, 7.5}}}
 						if method == "run.start" {
 							params["run_id"] = run

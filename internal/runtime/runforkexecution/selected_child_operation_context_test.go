@@ -3,7 +3,6 @@ package runforkexecution
 import (
 	"context"
 	"errors"
-	"sync/atomic"
 	"testing"
 	"time"
 
@@ -20,7 +19,15 @@ import (
 func selectedForkParentRuntimeContext(t *testing.T, ctx context.Context, selected startupownership.Store, source correlation.SourceArtifactFact) (context.Context, string) {
 	t.Helper()
 	process := selectedContractTestProcessCapability(t, ctx, selected)
-	plan, err := agenttopology.NewSourceSetPlan([]agenttopology.SourceCoordinate{{BundleHash: source.BundleHash()}}, nil)
+	root, present, err := correlation.RootAdmissionFromContext(ctx)
+	if err != nil || !present || root.BundleHash() != source.BundleHash() {
+		t.Fatalf("parent runtime requires its captured source root: present=%v err=%v", present, err)
+	}
+	coordinate, err := agenttopology.NewSourceCoordinate(root)
+	if err != nil {
+		t.Fatal(err)
+	}
+	plan, err := agenttopology.NewSourceSetPlan([]agenttopology.SourceCoordinate{coordinate}, nil)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -79,17 +86,28 @@ type selectedChildContextProofCapability struct {
 
 type selectedChildContextProofGrant struct {
 	startupownership.GenerationGrant
-	proof         *selectedChildContextProofCapability
-	ctx           context.Context
-	stale         context.Context
-	gatewayChecks atomic.Int64
+	proof *selectedChildContextProofCapability
+	ctx   context.Context
 }
 
 type selectedChildContextProofKey struct{}
 
 func selectedForkChildContextProof(t *testing.T, parent context.Context, selected startupownership.Store, source correlation.SourceArtifactFact) *selectedChildContextProofCapability {
 	t.Helper()
-	foreign, _ := selectedForkParentRuntimeContext(t, runForkTestContext(t), storetest.StartSQLiteRuntimeStore(t), source)
+	root, present, err := correlation.RootAdmissionFromContext(parent)
+	if err != nil || !present {
+		t.Fatalf("child proof requires its captured source root: present=%v err=%v", present, err)
+	}
+	rooted, err := selected.(SourceArtifactSelectedContractSourceStore).GetRootedSource(parent, root.Reference())
+	if err != nil {
+		t.Fatal(err)
+	}
+	foreignStore := storetest.StartSQLiteRuntimeStore(t)
+	foreignCtx := correlation.WithRootAdmission(correlation.WithSourceArtifactFact(runForkTestContext(t), source), root)
+	if _, err := foreignStore.EnsureRootedSource(foreignCtx, rooted); err != nil {
+		t.Fatal(err)
+	}
+	foreign, _ := selectedForkParentRuntimeContext(t, foreignCtx, foreignStore, source)
 	return &selectedChildContextProofCapability{
 		ProcessCapability: selectedContractTestProcessCapability(t, parent, selected),
 		t:                 t, parent: parent, foreign: foreign,
@@ -103,13 +121,10 @@ func (p *selectedChildContextProofCapability) IssueSelectedForkGenerationGrant(c
 	}
 	proof := &selectedChildContextProofGrant{GenerationGrant: grant, proof: p}
 	p.issued = append(p.issued, proof)
-	if _, err := proof.BindSelectedForkMutationContext(ctx); err != nil {
-		return nil, err
-	}
 	return grant, nil
 }
 
-func (g *selectedChildContextProofGrant) BindSelectedForkMutationContext(ctx context.Context) (context.Context, error) {
+func (g *selectedChildContextProofGrant) observeChildContext(ctx context.Context) (context.Context, error) {
 	t := g.proof.t
 	owner := g.GenerationGrant.(startupownership.SelectedForkMutationContextOwner)
 	if _, err := startupownership.WithRuntimeMutationAuthority(g.proof.parent, g.GenerationGrant); err == nil {
@@ -119,6 +134,10 @@ func (g *selectedChildContextProofGrant) BindSelectedForkMutationContext(ctx con
 	admission, _ := managedexecution.FromContext(ctx)
 	missing := managedexecution.WithAdmission(effects.WithAuthority(context.Background(), authority), admission)
 	foreign := managedexecution.WithAdmission(effects.WithAuthority(g.proof.foreign, authority), admission)
+	processOnly, err := startupownership.WithProcessMutationAuthority(missing, g.proof.ProcessCapability)
+	if err != nil {
+		return nil, err
+	}
 	wrongRun := authority
 	wrongRun.SelectedFork.ForkRunID = uuid.NewString()
 	wrongGeneration := authority
@@ -128,7 +147,7 @@ func (g *selectedChildContextProofGrant) BindSelectedForkMutationContext(ctx con
 		t.Fatal("refused-owner control unexpectedly bound")
 	}
 	for name, candidate := range map[string]context.Context{
-		"missing": missing, "foreign_process": foreign, "refused_original": refused,
+		"missing": missing, "foreign_process": foreign, "same_process_without_parent": processOnly, "refused_original": refused,
 		"cross_fork": effects.WithAuthority(ctx, wrongRun), "wrong_generation": effects.WithAuthority(ctx, wrongGeneration),
 	} {
 		if _, err := owner.BindSelectedForkMutationContext(candidate); err == nil {
@@ -161,9 +180,6 @@ func (g *selectedChildContextProofGrant) BindSelectedForkMutationContext(ctx con
 		t.Fatal("same-child reuse changed the genuine issuing owner")
 	}
 	g.ctx, err = owner.BindSelectedForkMutationContext(context.WithValue(ctx, selectedChildContextProofKey{}, g))
-	if err == nil && g.stale == nil {
-		g.stale, err = startupownership.FreezeMutationAuthority(g.ctx)
-	}
 	return g.ctx, err
 }
 
@@ -176,6 +192,10 @@ func (p *selectedChildContextProofCapability) requireReleasedChildren(t *testing
 		return
 	}
 	for _, grant := range p.issued {
+		if grant.ctx == nil {
+			t.Error("released-owner control never observed an actual child context")
+			continue
+		}
 		owner := grant.GenerationGrant.(startupownership.SelectedForkMutationContextOwner)
 		// Exclude cancellation as the reason this negative control refuses.
 		if _, err := owner.BindSelectedForkMutationContext(context.WithoutCancel(grant.ctx)); err == nil {

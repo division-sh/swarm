@@ -7,16 +7,17 @@ import (
 	"path/filepath"
 	"testing"
 
+	"github.com/division-sh/swarm/internal/packadmission"
 	"github.com/division-sh/swarm/internal/packs"
 	"github.com/division-sh/swarm/internal/providertriggers"
 	"github.com/division-sh/swarm/internal/runtime/contracts"
 	"github.com/division-sh/swarm/internal/runtime/correlation"
 	inbound "github.com/division-sh/swarm/internal/runtime/inboundpublication"
-	"github.com/division-sh/swarm/internal/testutil/packfixture"
+	"github.com/division-sh/swarm/internal/sourceartifact"
 	"github.com/division-sh/swarm/internal/yamlsource"
 )
 
-func inboundOperatorProofPlan(t *testing.T) packs.SatisfactionPlan {
+func inboundOperatorProofPlan(t *testing.T, rooted sourceartifact.RootedSource, flowPath string) (packs.SatisfactionPlan, *providertriggers.CatalogSnapshot) {
 	t.Helper()
 	snapshot, err := yamlsource.LoadFile(filepath.Join("..", "..", "..", "..", "platform-spec.yaml"))
 	if err != nil {
@@ -26,24 +27,44 @@ func inboundOperatorProofPlan(t *testing.T) packs.SatisfactionPlan {
 	if err != nil {
 		t.Fatal(err)
 	}
-	registry, err := packs.NewInterfaceRegistry(spec)
+	providers, err := packadmission.AdmitProviderSource(rooted, spec)
 	if err != nil {
 		t.Fatal(err)
 	}
-	plans, err := packs.CompileChannelInventory(registry, packfixture.ChannelPacks(t),
-		packfixture.TriggerCatalog(t).PackDescriptors(), packfixture.ConnectorRegistry(t).PackDescriptors())
+	scope, err := providers.Scope(flowPath)
 	if err != nil {
 		t.Fatal(err)
 	}
-	return packfixture.ChannelPlanByID(t, plans, "provider.telegram.hitl_channel")
+	definition, found := scope.Provider("telegram")
+	if !found || definition.Provider().DeclaringFlow() != flowPath {
+		t.Fatal("operator fixture requires its exact captured Telegram holder")
+	}
+	catalog, err := scope.TriggerCatalog()
+	if err != nil {
+		t.Fatal(err)
+	}
+	trigger, hasTrigger := catalog.PackDescriptorForProvider("telegram")
+	connector, hasConnector := definition.ConnectorDescriptor()
+	if !hasTrigger || !hasConnector {
+		t.Fatal("operator fixture requires its captured trigger and connector BODYs")
+	}
+	interfaces, err := packs.NewInterfaceRegistry(spec)
+	if err != nil {
+		t.Fatal(err)
+	}
+	channel, err := packs.CompileProviderChannel(interfaces, definition.Provider(), trigger, connector)
+	if err != nil {
+		t.Fatal(err)
+	}
+	return channel, catalog
 }
 
 // Persistence tests supply only external Telegram bytes. Compiled trigger and
 // channel owners issue the projection; this helper cannot seal arbitrary facts.
-func inboundOperatorProofCommand(t *testing.T, ctx context.Context, request inbound.Request, payload map[string]any) inbound.CommitCommand {
+func inboundOperatorProofCommand(t *testing.T, ctx context.Context, rooted sourceartifact.RootedSource, request inbound.Request, payload map[string]any) inbound.CommitCommand {
 	t.Helper()
-	channel := inboundOperatorProofPlan(t)
-	trigger, err := packfixture.TriggerCatalog(t).CompileAdmission(providertriggers.CompileAdmissionRequest{Alias: "telegram", Provider: "telegram", SigningSecret: "operator_fixture_signing"})
+	channel, catalog := inboundOperatorProofPlan(t, rooted, request.FlowPath)
+	trigger, err := catalog.CompileAdmission(providertriggers.CompileAdmissionRequest{Alias: "telegram", Provider: "telegram", SigningSecret: "operator_fixture_signing"})
 	if err != nil {
 		t.Fatal(err)
 	}

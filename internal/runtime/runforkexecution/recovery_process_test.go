@@ -230,7 +230,7 @@ func TestSelectedForkCrashProcessHelper(t *testing.T) {
 	}
 	checkpoint := func(forkRun string) { checkpointWithSchedule(forkRun, "") }
 	if cut == "before_materialization" || cut == "materialized" {
-		owner.ports.fork = selectedCrashMaterialization{SelectedContractForkLifecycle: owner.ports.fork, before: cut == "before_materialization", checkpoint: checkpoint}
+		owner.ports.fork = &selectedCrashMaterialization{SelectedContractForkLifecycle: owner.ports.fork, before: cut == "before_materialization", checkpoint: checkpoint}
 	} else if cut == "execution_issued" || cut == "execution_claimed" {
 		owner.ports.runtimeExecution = selectedCrashExecution{SelectedContractRuntimeExecutionLifecycle: owner.ports.runtimeExecution, issued: cut == "execution_issued", checkpoint: checkpoint}
 	} else if cut == "event_committed" || cut == "retained_event_committed" || cut == "retained_join_event_committed" {
@@ -239,16 +239,16 @@ func TestSelectedForkCrashProcessHelper(t *testing.T) {
 			checkpoint(occurrence.(*worklifetime.SelectedForkOccurrence).Identity().RunID)
 		}}
 	} else if cut == "retained_armed_join_after_activation" {
-		owner.ports.fork = armedArrivalCrashActivationStore{SelectedContractForkLifecycle: owner.ports.fork, checkpoint: checkpointWithSchedule}
+		owner.ports.fork = &armedArrivalCrashActivationStore{SelectedContractForkLifecycle: owner.ports.fork, checkpoint: checkpointWithSchedule}
 	} else if cut == "retained_after_activation" || cut == "retained_timer_after_activation" || cut == "retained_join_after_activation" {
-		owner.ports.fork = selectedCrashActivated{SelectedContractForkLifecycle: owner.ports.fork, checkpoint: checkpoint}
+		owner.ports.fork = &selectedCrashActivated{SelectedContractForkLifecycle: owner.ports.fork, checkpoint: checkpoint}
 	} else if cut == "retained_armed_join_occurrence_committed" {
 		owner.ports.genericSchedules = newArmedArrivalCrashScheduleStore(t, owner.ports.genericSchedules, checkpointWithSchedule)
 	} else if cut == "retained_timer_occurrence_committed" {
 		owner.ports.workflow = newIssue642TimerCrashPersistence(t, selected, checkpoint)
 	} else if cut == "before_activation" {
 		var discards int
-		owner.ports.fork = selectedOperationActivationProbe{SelectedContractForkLifecycle: owner.ports.fork, discards: &discards, before: func(ctx context.Context) {
+		owner.ports.fork = &selectedOperationActivationProbe{SelectedContractForkLifecycle: owner.ports.fork, discards: &discards, before: func(ctx context.Context) {
 			occurrence, _ := worklifetime.OccurrenceFromContext(ctx)
 			checkpoint(occurrence.(*worklifetime.SelectedForkOccurrence).Identity().RunID)
 		}}
@@ -304,12 +304,13 @@ func TestSelectedForkCrashProcessHelper(t *testing.T) {
 	}
 	request := SelectedContractExecutionRequest{SourceRunID: sourceRun, At: eventID, AllowSourceFreeze: true, Owner: owner, SourceLoader: sourceLoader,
 		LiveRuntime: liveRuntime, LiveContexts: liveContexts, LiveRuns: selected.(runlifecycle.LiveRunReader),
-		ContractSelection: runforkadmission.SelectedContractSelection(loaded.Source), AgentRuntime: options}
+		SourceArtifactFact: loaded.SourceArtifactFact,
+		ContractSelection:  runforkadmission.SelectedContractSelection(loaded.Source), AgentRuntime: options}
 	if strings.HasPrefix(cut, "retained_") {
 		request.ForkOperation = &runfork.ForkOperationRequest{
 			OperationID: uuid.NewString(), Actor: "retained-crash", IdempotencyKey: "fixed-cut",
 			TransportHash: "retained-crash-transport", SourceRunID: sourceRun, ForkEventID: eventID,
-			TargetBundleHash: loaded.SourceArtifactFact.BundleHash(), AllowSourceFreeze: true, ContractSelection: request.ContractSelection,
+			TargetBundleHash: loaded.SourceArtifactFact.BundleHash(), TargetRootReference: loaded.RootedSource.Admission().Reference(), AllowSourceFreeze: true, ContractSelection: request.ContractSelection,
 		}
 	}
 	result, err := ExecuteSelectedContractRunFork(ctx, request)

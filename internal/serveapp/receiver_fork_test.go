@@ -256,7 +256,7 @@ func TestReceiverCompositionForkBothStores(t *testing.T) {
 					operation := runfork.ForkOperationRequest{
 						OperationID: uuid.NewString(), Actor: "receiver-composition", IdempotencyKey: surface, TransportHash: surface,
 						SourceRunID: request.RunID, ForkEventID: forkPoint, TargetBundleHash: rt.BundleHash,
-						AllowSourceFreeze: true, ContractSelection: selection,
+						TargetRootReference: use.Context.RootAdmission.Reference(), AllowSourceFreeze: true, ContractSelection: selection,
 					}
 					execution := runtimerunforkexecution.SelectedContractExecutionRequest{
 						SourceRunID: request.RunID, At: forkPoint, AllowSourceFreeze: true, ExpectedBundleHash: rt.BundleHash,

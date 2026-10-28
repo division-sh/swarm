@@ -10,6 +10,7 @@ import (
 	"github.com/division-sh/swarm/internal/runtime/startupownership"
 	"github.com/division-sh/swarm/internal/store/storetest"
 	"github.com/division-sh/swarm/internal/store/testutil/agentfixture"
+	"github.com/division-sh/swarm/internal/testutil/sourceartifactfixture"
 	"github.com/google/uuid"
 )
 
@@ -31,6 +32,7 @@ func TestDurableDataEmptyHeadAdvancePreservesReceiptsAndPinsBothStores(t *testin
 			if err != nil {
 				t.Fatal(err)
 			}
+			rooted, _ := sourceartifactfixture.Rooted(t, "durable-data-test", testDataSourceArtifact)
 			catalog, ref := durableDataTestCatalog(t)
 			if err := registerDurableDataTestCatalog(ctx, selected, catalog); err != nil {
 				t.Fatal(err)
@@ -80,6 +82,7 @@ func TestDurableDataEmptyHeadAdvancePreservesReceiptsAndPinsBothStores(t *testin
 					for _, id := range []string{sourceRun, pinnedRun} {
 						storetest.RequireRun(t, ctx, selected, storetest.RunFixture{
 							RunID: id, BundleHash: testDataBundle, Origin: storetest.ScenarioSetupOrigin(),
+							Artifact: rooted.Artifact(), RootAdmission: rooted.Admission(),
 						})
 					}
 					pins, err := storetest.MaterializeDataForkPins(ctx, selected, sourceRun, pinnedRun, testDataBundle,

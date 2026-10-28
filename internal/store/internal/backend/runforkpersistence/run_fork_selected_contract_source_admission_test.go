@@ -5,7 +5,6 @@ import (
 	"database/sql"
 	"errors"
 	"reflect"
-	"strings"
 	"testing"
 	"time"
 
@@ -18,6 +17,7 @@ import (
 )
 
 func TestSelectedHistoricalSourceAdmissionRequiresCanonicalFreezeLineageBothDialects(t *testing.T) {
+	root := forkOperationTargetRoot(t)
 	for _, postgres := range []bool{false, true} {
 		for _, name := range []string{"completed_successor", "running_successor", "foreign_successor", "crossed_successor_id", "missing_successor", "malformed_successor", "missing_pointer", "wrong_source", "uncommitted_cut", "cancelled_reader"} {
 			t.Run(map[bool]string{false: "sqlite", true: "postgres"}[postgres]+"/"+name, func(t *testing.T) {
@@ -28,8 +28,8 @@ func TestSelectedHistoricalSourceAdmissionRequiresCanonicalFreezeLineageBothDial
 				if err != nil {
 					t.Fatal(err)
 				}
-				source := runlifecycle.Snapshot{RunID: sourceID, State: runlifecycle.StateForked, Origin: runlifecycle.DeploymentRunOrigin(), BundleHash: "bundle-v2:sha256:" + strings.Repeat("a", 64), StartedAt: at, EndedAt: &ended, ContinuedAsRunID: successorID}
-				successor := runlifecycle.Snapshot{RunID: successorID, State: runlifecycle.StateCompleted, Origin: origin, BundleHash: source.BundleHash, StartedAt: at, EndedAt: &ended}
+				source := runlifecycle.Snapshot{RunID: sourceID, State: runlifecycle.StateForked, Origin: runlifecycle.DeploymentRunOrigin(), BundleHash: root.BundleHash, RootReference: root, StartedAt: at, EndedAt: &ended, ContinuedAsRunID: successorID}
+				successor := runlifecycle.Snapshot{RunID: successorID, State: runlifecycle.StateCompleted, Origin: origin, BundleHash: source.BundleHash, RootReference: root, StartedAt: at, EndedAt: &ended}
 				readErr := errors.New("original successor missing")
 				switch name {
 				case "running_successor":
@@ -90,10 +90,11 @@ func TestSelectedHistoricalSourceAdmissionRequiresCanonicalFreezeLineageBothDial
 }
 
 func TestSelectedUnfrozenSourceAdmissionNeverUsesHistoricalFallback(t *testing.T) {
+	root := forkOperationTargetRoot(t)
 	for _, state := range []runlifecycle.State{runlifecycle.StateRunning, runlifecycle.StatePaused, runlifecycle.StateCompleted, runlifecycle.StateCancelled} {
 		t.Run(string(state), func(t *testing.T) {
 			at := time.Unix(100, 0).UTC()
-			source := runlifecycle.Snapshot{RunID: uuid.NewString(), State: state, Origin: runlifecycle.ScenarioSetupRunOrigin(), BundleHash: "bundle-v2:sha256:" + strings.Repeat("a", 64), StartedAt: at}
+			source := runlifecycle.Snapshot{RunID: uuid.NewString(), State: state, Origin: runlifecycle.ScenarioSetupRunOrigin(), BundleHash: root.BundleHash, RootReference: root, StartedAt: at}
 			if state.Terminal() {
 				source.EndedAt = &at
 			}

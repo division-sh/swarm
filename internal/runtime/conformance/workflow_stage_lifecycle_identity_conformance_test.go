@@ -4,6 +4,7 @@ import (
 	"context"
 	"database/sql"
 	"encoding/json"
+	"os"
 	"path/filepath"
 	"strings"
 	"sync"
@@ -13,8 +14,10 @@ import (
 	"github.com/division-sh/swarm/internal/config"
 	"github.com/division-sh/swarm/internal/events"
 	"github.com/division-sh/swarm/internal/events/eventtest"
+	"github.com/division-sh/swarm/internal/packadmission"
 	runtimepkg "github.com/division-sh/swarm/internal/runtime"
 	runtimebus "github.com/division-sh/swarm/internal/runtime/bus"
+	runtimecontracts "github.com/division-sh/swarm/internal/runtime/contracts"
 	runtimeflowidentity "github.com/division-sh/swarm/internal/runtime/core/flowidentity"
 	"github.com/division-sh/swarm/internal/runtime/core/timeridentity"
 	runtimecorrelation "github.com/division-sh/swarm/internal/runtime/correlation"
@@ -29,9 +32,12 @@ import (
 	runtimestartupownership "github.com/division-sh/swarm/internal/runtime/startupownership"
 	"github.com/division-sh/swarm/internal/runtime/testfixtures/canonicalrouting"
 	"github.com/division-sh/swarm/internal/runtime/workflowlifecycle"
+	"github.com/division-sh/swarm/internal/sourceartifact"
 	"github.com/division-sh/swarm/internal/store"
 	"github.com/division-sh/swarm/internal/store/storetest"
 	"github.com/division-sh/swarm/internal/testutil"
+	"github.com/division-sh/swarm/internal/testutil/packfixture"
+	"github.com/division-sh/swarm/internal/testutil/sourceartifactfixture"
 	"github.com/google/uuid"
 )
 
@@ -99,6 +105,37 @@ func (s *stageLifecycleIdentityPublicationStore) publication(eventID string) sta
 func TestKeyedStageLifecyclePreservesRouteAndEntityAcrossRestartOnBothBackends(t *testing.T) {
 	canonicalrouting.Prove(t, canonicalrouting.ArtifactID("internal/runtime/conformance/testdata/stage-lifecycle-identity"))
 	module := loadConformanceWorkflowFixtureModule(t, filepath.Join("testdata", "stage-lifecycle-identity"))
+	bundle, ok := semanticview.Bundle(module.source)
+	if !ok {
+		t.Fatal("stage lifecycle requires its captured contract bundle")
+	}
+	members := make(map[string][]byte)
+	for _, entry := range bundle.SourceArtifact.Entries() {
+		members[entry.Label()] = entry.Bytes()
+	}
+	repo := canonicalrouting.RepoRoot(t)
+	trigger, err := os.ReadFile(filepath.Join(repo, "packs", "providers", "whatsapp", "trigger.yaml"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	for name, body := range packfixture.WhatsAppSessionProviderMembers(t, trigger, []string{"raw", "edit", "message", "revoke"}) {
+		members["whatsapp/"+name] = body
+	}
+	artifact, err := sourceartifact.AdmitMembers(members)
+	if err != nil {
+		t.Fatal(err)
+	}
+	rooted, _ := sourceartifactfixture.Rooted(t, "stage-lifecycle-identity", artifact)
+	bundle, err = runtimecontracts.LoadWorkflowContractBundleFromRootedSource(repo, rooted, "", runtimecontracts.WorkflowContractLoadOptions{AdmitPackInventory: packadmission.AdmitInventory})
+	if err != nil {
+		t.Fatal(err)
+	}
+	module.source = semanticview.Wrap(bundle)
+	module.nodes, err = runtimepipeline.LoadWorkflowNodes(module.source)
+	if err != nil {
+		t.Fatal(err)
+	}
+	module.guards = runtimepipeline.NewContractGuardRegistry(module.source)
 
 	for _, tc := range []struct {
 		name  string
@@ -303,7 +340,7 @@ func newStageLifecycleIdentityRuntime(t *testing.T, selected any, module conform
 		t.Fatal("stage lifecycle runtime requires a bundle-backed source")
 	}
 	sourceArtifactFact := conformanceSourceArtifactFact(t, module.source)
-	catalogStore, ok := selected.(storetest.DurableDataCatalogStore)
+	catalogStore, ok := selected.(storetest.RootedDataCatalogStore)
 	if !ok {
 		t.Fatalf("stage lifecycle store %T does not persist source artifacts", selected)
 	}

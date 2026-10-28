@@ -18,6 +18,7 @@ import (
 	"github.com/division-sh/swarm/internal/runtime/runfork"
 	"github.com/division-sh/swarm/internal/runtime/runlifecycle"
 	"github.com/division-sh/swarm/internal/runtime/startupownership"
+	"github.com/division-sh/swarm/internal/sourceartifact"
 	"github.com/division-sh/swarm/internal/store"
 	"github.com/division-sh/swarm/internal/store/storetest"
 	"github.com/google/uuid"
@@ -25,7 +26,7 @@ import (
 
 func stageContextOnlyDeadlineDescendant(t *testing.T, ctx context.Context, selected any, owner SelectedContractExecutionOwner,
 	loader SelectedContractSourceLoader, selection runfork.RunForkContractSelection, options SelectedContractAgentRuntimeOptions,
-	bundleHash string, parent runfork.RunForkMaterialization) (runfork.RunForkMaterialization, *runfork.ForkOperationRequest) {
+	target sourceartifact.RootedSource, parent runfork.RunForkMaterialization) (runfork.RunForkMaterialization, *runfork.ForkOperationRequest) {
 	t.Helper()
 	rows, err := storetest.ReadReplyContextRecords(ctx, selected, parent.ForkRunID)
 	if err != nil || len(rows) != 2 {
@@ -43,7 +44,7 @@ func stageContextOnlyDeadlineDescendant(t *testing.T, ctx context.Context, selec
 	}
 	operation := &runfork.ForkOperationRequest{OperationID: uuid.NewString(), Actor: "context-only-deadline", IdempotencyKey: uuid.NewString(),
 		TransportHash: "context-only-deadline", SourceRunID: parent.ForkRunID, AtStart: true,
-		TargetBundleHash: bundleHash, AllowSourceFreeze: true, ContractSelection: selection}
+		TargetBundleHash: target.Admission().BundleHash(), TargetRootReference: target.Admission().Reference(), AllowSourceFreeze: true, ContractSelection: selection}
 	prepared, err := owner.Prepare(ctx, SelectedContractExecutionRequest{SourceRunID: parent.ForkRunID, AtStart: true,
 		AllowSourceFreeze: true, ForkOperation: operation, SourceLoader: loader, ContractSelection: selection, AgentRuntime: options})
 	if err != nil {
@@ -177,7 +178,8 @@ func restartSelectedDeadlineChild(t *testing.T, ctx context.Context, source *roo
 	go func() {
 		entries, err := owner.RecoverSelectedForkContexts(recoveryCtx, effects.NewRecoveryRequest(time.Now().UTC(), executionposture.MockOnly), SelectedForkRecoveryEnvironment{
 			SourceLoader: loader, AgentRuntime: options, LiveContexts: liveContexts, LiveRuns: selected.(runlifecycle.LiveRunReader),
-			AcquireLiveRuntime: func(ctx context.Context, hash string) (*rootruntime.RuntimeContextUse, error) {
+			AcquireLiveRuntime: func(ctx context.Context, reference sourceartifact.RootAdmissionReference) (*rootruntime.RuntimeContextUse, error) {
+				hash := reference.BundleHash
 				use, _, err := liveContexts.AcquireBundleHash(ctx, hash)
 				return use, err
 			},

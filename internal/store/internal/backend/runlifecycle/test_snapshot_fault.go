@@ -25,20 +25,20 @@ func AttemptCorruptPostgresSnapshotForTest(
 			run_id, status, bundle_hash, origin_kind,
 			trigger_event_id, trigger_event_type,
 			forked_from_run_id, forked_from_point_kind, forked_from_revision, forked_from_event_id, continued_as_run_id,
-			event_count, failure, started_at, ended_at
+			event_count, failure, started_at, ended_at, source_root_directory
 		)
 		VALUES (
 			$1::uuid, $2, $3, $4,
 			NULLIF($5, '')::uuid, NULLIF($6, ''),
 			NULLIF($7, '')::uuid, NULLIF($8, ''), NULLIF($9, 0), NULLIF($10, '')::uuid, NULLIF($11, '')::uuid,
-			$12, NULLIF($13, '')::jsonb, $14, $15
+			$12, NULLIF($13, '')::jsonb, $14, $15, $16
 		)
 	`, strings.TrimSpace(snapshot.RunID), strings.TrimSpace(snapshot.State),
 		strings.TrimSpace(snapshot.BundleHash), strings.TrimSpace(snapshot.OriginKind),
 		strings.TrimSpace(snapshot.TriggerEventID), strings.TrimSpace(snapshot.TriggerEventType),
 		strings.TrimSpace(snapshot.ForkedFromRunID), strings.TrimSpace(snapshot.ForkedFromPointKind), snapshot.ForkedFromRevision, strings.TrimSpace(snapshot.ForkedFromEventID),
 		strings.TrimSpace(snapshot.ContinuedAsRunID),
-		snapshot.EventCount, failure, snapshot.StartedAt.UTC(), endedAt)
+		snapshot.EventCount, failure, snapshot.StartedAt.UTC(), endedAt, snapshot.RootDirectory)
 	return err
 }
 
@@ -58,19 +58,19 @@ func AttemptCorruptSQLiteSnapshotForTest(
 			run_id, status, bundle_hash, origin_kind,
 			trigger_event_id, trigger_event_type,
 			forked_from_run_id, forked_from_point_kind, forked_from_revision, forked_from_event_id, continued_as_run_id,
-			event_count, failure, started_at, ended_at
+			event_count, failure, started_at, ended_at, source_root_directory
 		)
 		VALUES (
 			?, ?, ?, ?,
 			NULLIF(?, ''), NULLIF(?, ''),
 			NULLIF(?, ''), NULLIF(?, ''), NULLIF(?, 0), NULLIF(?, ''), NULLIF(?, ''),
-			?, NULLIF(?, ''), ?, ?
+			?, NULLIF(?, ''), ?, ?, ?
 		)
 	`, strings.TrimSpace(snapshot.RunID), strings.TrimSpace(snapshot.State),
 		strings.TrimSpace(snapshot.BundleHash), strings.TrimSpace(snapshot.OriginKind),
 		strings.TrimSpace(snapshot.TriggerEventID), strings.TrimSpace(snapshot.TriggerEventType),
 		strings.TrimSpace(snapshot.ForkedFromRunID), strings.TrimSpace(snapshot.ForkedFromPointKind), snapshot.ForkedFromRevision, strings.TrimSpace(snapshot.ForkedFromEventID),
 		strings.TrimSpace(snapshot.ContinuedAsRunID),
-		snapshot.EventCount, failure, snapshot.StartedAt.UTC(), endedAt)
+		snapshot.EventCount, failure, snapshot.StartedAt.UTC(), endedAt, snapshot.RootDirectory)
 	return err
 }

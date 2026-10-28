@@ -152,7 +152,7 @@ func (g *InboundGateway) handleResolvedWebhook(w http.ResponseWriter, r *http.Re
 		http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
 		return
 	}
-	provider := providertriggers.NormalizeProviderName(target.Provider)
+	provider := target.Provider
 	if provider == "" {
 		_, provider, _ = parseWebhookPath(r.URL.Path)
 	}
@@ -670,6 +670,10 @@ func logInboundPublicationFailure(logger *RuntimeLogger, requestCtx context.Cont
 		logInboundPayloadRejection(logger, requestCtx, provider, flowPath, providerEventID, path)
 		return
 	}
+	if path, rejected := providertriggers.NormalizedInputValidationPath(err); rejected {
+		logInboundPayloadRejection(logger, requestCtx, provider, serviceID, providerEventID, path)
+		return
+	}
 	// Durable failure envelopes normalize unknown errors; retain joined causes in
 	// the existing process diagnostic channel without exposing them over HTTP.
 	diaglog.ProcessLog(diaglog.LevelError, "inbound-gateway", "inbound publication failed",
@@ -744,7 +748,7 @@ func parseWebhookPath(path string) (entityID, provider string, ok bool) {
 		return "", "", false
 	}
 	entityID = parts[1]
-	provider = strings.TrimSpace(parts[2])
+	provider = parts[2]
 	if entityID == "" || provider == "" {
 		return "", "", false
 	}

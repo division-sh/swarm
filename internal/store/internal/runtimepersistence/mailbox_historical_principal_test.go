@@ -8,6 +8,7 @@ import (
 
 	"github.com/division-sh/swarm/internal/operatorchannel"
 	runtimecontracts "github.com/division-sh/swarm/internal/runtime/contracts"
+	runtimecorrelation "github.com/division-sh/swarm/internal/runtime/correlation"
 	"github.com/division-sh/swarm/internal/runtime/decisioncard"
 	"github.com/division-sh/swarm/internal/runtime/gateruntime"
 	"github.com/division-sh/swarm/internal/store/internal/backend/mutationprotocol"
@@ -22,6 +23,8 @@ func TestForkMaterializedDecisionPrincipalBothStores(t *testing.T) {
 			db := DatabaseForTest(selected)
 			ctx := testAuthorActivityContext()
 			ctx = originalStoreFixtureContext(t, ctx, selected)
+			rooted := decisionCardTestRootedSource(t, ctx, selected, sourceRunID)
+			ctx = runtimecorrelation.WithRootAdmission(ctx, rooted.Admission())
 			now := time.Now().UTC().Truncate(time.Microsecond)
 			principal, err := selected.(interface {
 				EnsureOperatorPrincipal(context.Context, time.Time) (operatorchannel.Principal, error)

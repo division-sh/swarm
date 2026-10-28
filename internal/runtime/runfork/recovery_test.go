@@ -5,14 +5,16 @@ import (
 	"testing"
 
 	"github.com/division-sh/swarm/internal/durabledata"
+	"github.com/division-sh/swarm/internal/testutil/sourceartifactfixture"
 	"github.com/google/uuid"
 )
 
 func TestSelectedRecoveryActivatedResultIsOriginalAcknowledgment(t *testing.T) {
+	rooted, _ := sourceartifactfixture.Rooted(t, "recovery", sourceartifactfixture.Artifact())
 	point := RunForkPoint{Kind: RunForkPointRunStart, Revision: 3}
 	request := ForkOperationRequest{OperationID: uuid.NewString(), Actor: "operator", TransportHash: "sha256:transport",
 		SourceRunID: uuid.NewString(), AtStart: true, ResolvedPoint: &point,
-		TargetBundleHash:  "bundle-v2:sha256:" + strings.Repeat("a", 64),
+		TargetBundleHash: rooted.Artifact().BundleHash(), TargetRootReference: rooted.Admission().Reference(),
 		ContractSelection: RunForkContractSelection{Mode: RunForkContractSelectionModeSelectedContracts}}
 	request, hash, err := request.Canonical()
 	if err != nil {

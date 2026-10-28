@@ -8,7 +8,7 @@ import (
 	"testing"
 	"time"
 
-	"github.com/DATA-DOG/go-sqlmock"
+	sqlmock "github.com/DATA-DOG/go-sqlmock"
 	"github.com/division-sh/swarm/internal/runtime/agenttopology"
 	"github.com/division-sh/swarm/internal/runtime/core/managedcapabilities"
 
@@ -17,6 +17,7 @@ import (
 	"github.com/division-sh/swarm/internal/runtime/runfork"
 	"github.com/division-sh/swarm/internal/runtime/runlifecycle"
 
+	"github.com/division-sh/swarm/internal/testutil/sourceartifactfixture"
 	"github.com/google/uuid"
 )
 
@@ -33,13 +34,16 @@ func newSelectedAttachmentFixture(t *testing.T, kind runfork.RunForkPointKind) s
 	t.Helper()
 	now := time.Unix(100, 0).UTC()
 	source, child := uuid.NewString(), uuid.NewString()
-	bundle := "bundle-v2:sha256:" + strings.Repeat("a", 64)
+	rooted, _ := sourceartifactfixture.Rooted(t, "selected", sourceartifactfixture.Artifact())
+	root := rooted.Admission()
+	bundle := root.BundleHash()
 	point := runfork.RunForkPoint{Kind: kind, Revision: 1}
 	if kind == runfork.RunForkPointEvent {
 		point.EventID = uuid.NewString()
 	}
 	binding, err := normalizeRunForkSelectedContractBinding(runfork.RunForkSelectedContractBindingRequest{
 		ForkRunID: child, SourceRunID: source, ForkPoint: point,
+		TargetRootAdmission: root,
 	}, now)
 	if err != nil {
 		t.Fatal(err)
@@ -89,6 +93,7 @@ func newSelectedAttachmentFixture(t *testing.T, kind runfork.RunForkPointKind) s
 				ForkRunID: child, SourceRunID: source, ForkPoint: point, ForkEventID: point.EventID,
 				ForkEventRevision: 1, ForkBundleHash: bundle, ForkStatus: runfork.RunForkMaterializedStatus,
 				SourceRunStatus: "running", SourceBundleHash: bundle, EntityIDs: []string{child},
+				SourceRootReference: root.Reference(), ForkRootReference: root.Reference(),
 			},
 			binding: binding,
 			plan: runfork.RunForkPlan{SourceRunID: source, ForkPoint: point,
@@ -111,7 +116,7 @@ func newSelectedAttachmentFixture(t *testing.T, kind runfork.RunForkPointKind) s
 				ActorCensusFingerprint: execution.ActorCensusFingerprint, EffectiveConfigFingerprint: execution.EffectiveConfigFingerprint,
 			},
 		},
-		snapshot:  runlifecycle.Snapshot{RunID: child, State: runlifecycle.StatePaused, BundleHash: bundle, Origin: origin, StartedAt: now},
+		snapshot:  runlifecycle.Snapshot{RunID: child, State: runlifecycle.StatePaused, BundleHash: bundle, RootReference: root.Reference(), Origin: origin, StartedAt: now},
 		execution: execution, declarations: declarations,
 	}
 }
@@ -254,9 +259,10 @@ func TestSelectedActivationAttachmentRejectsCrossedEvidence(t *testing.T) {
 
 func expectSelectedAttachmentBinding(mock sqlmock.Sqlmock, binding runfork.RunForkSelectedContractBinding) {
 	mock.ExpectQuery(`FROM run_fork_selected_contract_bindings`).WithArgs(binding.ForkRunID).
-		WillReturnRows(sqlmock.NewRows([]string{"binding", "child", "source", "kind", "revision", "event", "mode", "bundle", "created"}).
+		WillReturnRows(sqlmock.NewRows([]string{"binding", "child", "source", "kind", "revision", "event", "mode", "bundle", "target_bundle", "target_root", "created"}).
 			AddRow(binding.BindingID, binding.ForkRunID, binding.SourceRunID, binding.ForkPoint.Kind, binding.ForkPoint.Revision,
-				binding.ForkEventID, binding.ContractSelection.Mode, binding.ContractSelection.BundleHash, binding.CreatedAt))
+				binding.ForkEventID, binding.ContractSelection.Mode, binding.ContractSelection.BundleHash,
+				binding.TargetRootReference.BundleHash, binding.TargetRootReference.RootDirectory, binding.CreatedAt))
 }
 
 func TestSelectedActivationSettlementEmptyInputRequiresNoInventedFeed(t *testing.T) {

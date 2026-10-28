@@ -78,8 +78,7 @@ func TestMailboxDecideHTTPReleasesProposedEffectThroughProviderOnBothStores(t *t
 			entityID := runID
 			cards := persistence.(decisioncard.Store)
 			card, continuation := proposedEffectAPICard(t, runID, entityID, fact, source.WorkflowVersion())
-			fixtureCtx := testAuthorActivityContextForSource(context.Background(), fact)
-			fixtureCtx = originalAPIFixtureContext(t, fixtureCtx, persistence)
+			fixtureCtx := admittedAPITestBusContext(t, context.Background(), bus)
 			storetest.RequireRun(t, fixtureCtx, persistence.(storetest.RunFixtureStore), storetest.RunFixture{
 				Origin: storetest.ScenarioSetupOrigin(), RunID: runID, BundleHash: fact.BundleHash(), Artifact: bundle.SourceArtifact,
 			})
@@ -235,8 +234,19 @@ func newProposedEffectMailboxHandler(
 
 func installProposedEffectAPIJournal(t *testing.T, selected agentfixture.Store, bus *runtimebus.EventBus, coordinator *runtimepipeline.PipelineCoordinator, fact runtimecorrelation.SourceArtifactFact) {
 	t.Helper()
-	ctx := testAuthorActivityContextForSource(context.Background(), fact)
-	coordinate := agenttopology.SourceCoordinate{BundleHash: fact.BundleHash()}
+	ctx := admittedAPITestBusContext(t, context.Background(), bus)
+	root, present, err := runtimecorrelation.RootAdmissionFromContext(ctx)
+	if err != nil || !present {
+		t.Fatalf("proposed-effect journal root admission: present=%t err=%v", present, err)
+	}
+	admittedFact, present := runtimecorrelation.SourceArtifactFactFromContext(ctx)
+	if !present || !admittedFact.Matches(fact) {
+		t.Fatal("proposed-effect journal source does not match its bus admission")
+	}
+	coordinate, err := agenttopology.NewSourceCoordinate(root)
+	if err != nil {
+		t.Fatal(err)
+	}
 	plan, err := agenttopology.NewSourceSetPlan([]agenttopology.SourceCoordinate{coordinate}, nil)
 	if err != nil {
 		t.Fatal(err)
@@ -333,7 +343,8 @@ func proposedEffectAPICard(t *testing.T, runID, entityID string, fact runtimecor
 func proposedEffectSupportedSurfaceBundle(t *testing.T, providerURL string) *runtimecontracts.WorkflowContractBundle {
 	t.Helper()
 	root := t.TempDir()
-	writeRunCompletionFixtureFile(t, root+"/schema.yaml", `name: proposed-effect-supported-surface
+	writeRunCompletionFixtureFile(t, root+"/manifest.yaml", "version: 1.0.0\nplatform_version: '*'\n")
+	writeRunCompletionFixtureFile(t, root+"/schema.yaml", `# fixture: proposed-effect-supported-surface
 stages:
   new: {}
   done: {final: true}

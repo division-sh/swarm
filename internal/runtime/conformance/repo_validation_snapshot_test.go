@@ -705,13 +705,8 @@ func TestCanonicalConformanceRepoSnapshotBuildsOnce(t *testing.T) {
 	if first != second {
 		t.Fatal("canonical snapshot consumers received different owners")
 	}
-	for _, name := range []string{
-		"TestCanonicalConformanceRepoSnapshotBuildsOnce",
-		"TestRouteAuthorityDriftInventoryCoversRepoWideSearchDimensions",
-	} {
-		if !names[name] {
-			t.Fatalf("shared Go-test index omitted route-view self-audit test %s", name)
-		}
+	if !names["TestCanonicalConformanceRepoSnapshotBuildsOnce"] {
+		t.Fatal("shared Go-test index omitted the snapshot owner test")
 	}
 	if got := conformanceRepoSnapshotBuilds.Load(); got != afterFirst {
 		t.Fatalf("canonical snapshot repeated consumers added %d builds, want 0", got-afterFirst)

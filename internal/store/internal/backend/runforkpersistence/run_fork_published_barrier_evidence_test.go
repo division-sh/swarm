@@ -3,7 +3,6 @@ package runforkpersistence
 import (
 	"encoding/json"
 	"reflect"
-	"strings"
 	"testing"
 	"time"
 
@@ -104,9 +103,13 @@ func publishedBarrierEvidenceFixture(t *testing.T, root bool, mode executionmode
 		TaskID:   command.TaskID, Payload: timer.FirePayload, ExecutionMode: mode, CreatedAt: timer.FireAt,
 		Envelope: events.EventEnvelope{EntityID: command.EntityID, FlowInstance: command.FlowInstance}, RoutingSource: command.RoutingSource,
 	})
-	schema, err := events.NewPayloadSchemaBinding(events.PayloadSchemaBindingInput{BundleHash: registration.PlanRef.BundleHash,
-		FlowID: registration.IntentKey.ElementRef.FlowPath, EventKey: command.EventType,
-		SchemaDigest: "sha256:" + strings.Repeat("b", 64), SchemaClass: events.PayloadSchemaPlatform})
+	digest, err := events.JoinOccurrencePayloadDigest(event)
+	if err != nil {
+		t.Fatal(err)
+	}
+	schema, err := events.NewPlatformPayloadSchemaBinding(events.PayloadSchemaBindingInput{BundleHash: registration.PlanRef.BundleHash,
+		EventKey:     command.EventType,
+		SchemaDigest: digest, SchemaClass: events.PayloadSchemaPlatform}, events.EventPayloadProducer(event, ""), events.JoinOccurrencePayloadReference)
 	if err != nil {
 		t.Fatal(err)
 	}

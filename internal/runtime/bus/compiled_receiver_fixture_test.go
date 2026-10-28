@@ -55,9 +55,17 @@ func TerminatedFlowInstanceObservationFixture(t testing.TB, source semanticview.
 		t.Fatal("terminal component lacks original attachment evidence")
 	}
 	readiness.InstanceStatus, readiness.InstanceTerminatedAt = header.Status, header.TerminatedAt
+	bundle, found := semanticview.Bundle(source)
+	if !found {
+		t.Fatal("terminal component lacks its compiled source")
+	}
+	rooted, err := bundle.RootedSource()
+	if err != nil {
+		t.Fatal(err)
+	}
 	run := runlifecycle.Snapshot{
 		RunID: runID, State: base.RunState(), Origin: runlifecycle.DeploymentRunOrigin(),
-		BundleHash: base.SourceFact().BundleHash(), StartedAt: header.CreatedAt,
+		BundleHash: base.SourceFact().BundleHash(), RootReference: rooted.Admission().Reference(), StartedAt: header.CreatedAt,
 	}
 	observed, err := pipeline.AdmitNativeFlowInstanceObservation(base.Selection(), header, run, base.RunRevision()+1, receipt, readiness)
 	if err != nil {

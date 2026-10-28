@@ -34,7 +34,7 @@ func TestRootConnectedTemplatePublicationAcknowledgmentLossBothStores(t *testing
 			t.Cleanup(func() { projectRuntimePersistenceForServe = previous })
 			endpoint, db, bundleHash := startPublicInputRollbackRuntime(t, backend)
 			params := map[string]any{
-				"bundle_hash": bundleHash, "event_name": "inbound.telegram.text_message",
+				"bundle_hash": bundleHash, "event_name": publicTelegramMockApprovalInput,
 				"payload":         map[string]any{"conversation_reference": "42", "conversation_scope": "direct", "external_account": "42", "provider_message_reference": 1, "text": "acknowledgment proof"},
 				"idempotency_key": "root-connected-ack-loss",
 			}
@@ -66,7 +66,7 @@ func TestRootConnectedTemplatePublicationAcknowledgmentLossBothStores(t *testing
 			}
 			for label, statement := range map[string]string{
 				"private instance": "SELECT COUNT(*) FROM flow_instances WHERE flow_template = 'telegram-chat'",
-				"root event":       "SELECT COUNT(*) FROM events WHERE event_name = 'inbound.telegram.text_message'",
+				"root event":       "SELECT COUNT(*) FROM events WHERE event_name = '" + publicTelegramMockApprovalInput + "'",
 				"API completion":   "SELECT COUNT(*) FROM api_idempotency WHERE method = 'event.publish' AND idempotency_key = 'root-connected-ack-loss'",
 			} {
 				var count int

@@ -11,6 +11,7 @@ import (
 	"github.com/division-sh/swarm/internal/runtime/authoractivity"
 	"github.com/division-sh/swarm/internal/runtime/contracts"
 	"github.com/division-sh/swarm/internal/runtime/core/agentidentity"
+	"github.com/division-sh/swarm/internal/runtime/correlation"
 	runtimellm "github.com/division-sh/swarm/internal/runtime/llm"
 	"github.com/division-sh/swarm/internal/runtime/runlifecycle"
 	"github.com/division-sh/swarm/internal/runtime/startupownership"
@@ -75,6 +76,12 @@ func TestPostgresLLMExactRevisionFactsUseStoredUUIDCoordinates(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
+	setupCtx = ctx
+	rooted, _ := sourceartifactfixture.Rooted(t, "llm-proof", sourceartifactfixture.Artifact())
+	if _, err := selected.EnsureRootedSource(setupCtx, rooted); err != nil {
+		t.Fatal(err)
+	}
+	setupCtx = correlation.WithRootAdmission(correlation.WithSourceArtifactFact(setupCtx, sourceartifactfixture.Fact()), rooted.Admission())
 	name, err := agentidentity.DeclaredName("uuid-agent", "uuid-owner")
 	if err != nil {
 		t.Fatal(err)
@@ -93,8 +100,8 @@ func TestPostgresLLMExactRevisionFactsUseStoredUUIDCoordinates(t *testing.T) {
 			}
 			sessionID, firstRunID, nextRunID := uuid.NewString(), uuid.NewString(), uuid.NewString()
 			for _, runID := range []string{firstRunID, nextRunID} {
-				if _, err := selected.CreateRun(ctx, runlifecycle.CreateRequest{
-					RunID: runID, Origin: runlifecycle.ScenarioSetupRunOrigin(), Source: sourceartifactfixture.Fact(), StartedAt: time.Now().UTC(),
+				if _, err := selected.CreateRun(setupCtx, runlifecycle.CreateRequest{
+					RunID: runID, Origin: runlifecycle.ScenarioSetupRunOrigin(), Source: sourceartifactfixture.Fact(), RootAdmission: rooted.Admission(), StartedAt: time.Now().UTC(),
 				}); err != nil {
 					t.Fatal(err)
 				}

@@ -53,7 +53,7 @@ func runReceiverMaterializationSelectedForkExecution(t *testing.T, publicationFr
 				t.Fatal(err)
 			}
 			var sourceStore interface {
-				storetest.DurableDataCatalogStore
+				storetest.RootedDataCatalogStore
 				forkexecution.SourceArtifactSelectedContractSourceStore
 			} = h.pg
 			var store interface {
@@ -72,7 +72,7 @@ func runReceiverMaterializationSelectedForkExecution(t *testing.T, publicationFr
 			result, err := executeCatalogLiveFork(t, h, ctx, forkexecution.SelectedContractExecutionRequest{
 				SourceRunID: catalogRuntimeRunID, At: inputID, AllowSourceFreeze: true,
 				Owner: executionOwner, SourceLoader: loader, ContractSelection: selection,
-				AgentRuntime: selectedContractAgentRuntimeOptionsForCatalogHarness(h, cfg),
+				AgentRuntime: selectedContractAgentRuntimeOptionsForCatalogHarness(h, cfg), ExpectedBundleHash: selection.BundleHash,
 			})
 			if err != nil {
 				logSelectedForkRecoveryFailure(t, ctx, h, result.Materialization.ForkRunID, err)

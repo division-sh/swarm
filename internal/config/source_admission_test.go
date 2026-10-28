@@ -194,11 +194,15 @@ func TestConfigCustomReadersAreStrictWithoutOuterDecoder(t *testing.T) {
 func TestConfigSourcePreservesSupportedAliasesPresenceAndOpenMaps(t *testing.T) {
 	var cfg Config
 	source := "runtime: {<<: {fan_out_workers: 2, recovery_on_startup: false}}\nworkspace: {<<: {image: '', allow_exec_on_host: false}, backend: host}\nllm: {models: {business_model: {provider: model}}, provider_limits: {provider: {models: {model: {max_concurrency: 2}}}}}\nconnection: {api_server: localhost}\nbudget: {human_tasks: {categories_enabled: [support]}}\npaths: {swarm_dir: state, monitor_dir: monitor}\n"
+	source += "triggers:\n  acme/trigger.yaml: {acknowledge: unsigned_webhook}\n  child/acme/trigger.yaml: {acknowledge: unsigned_webhook}\n"
 	if err := decodeConfigSourceTest(source, &cfg); err != nil {
 		t.Fatal(err)
 	}
 	if cfg.Runtime.FanOutWorkers == nil || *cfg.Runtime.FanOutWorkers != 2 || cfg.Runtime.RecoveryOnStartup || !cfg.Workspace.ImageConfigured() || !cfg.Workspace.AllowExecOnHostConfigured() || cfg.Workspace.AllowExecOnHost {
 		t.Fatalf("lost values/presence: %#v %#v", cfg.Runtime, cfg.Workspace)
+	}
+	if len(cfg.Triggers) != 2 || cfg.Triggers["acme/trigger.yaml"].Acknowledge != "unsigned_webhook" || cfg.Triggers["child/acme/trigger.yaml"].Acknowledge != "unsigned_webhook" {
+		t.Fatalf("deployment trigger identity or exact token changed: %#v", cfg.Triggers)
 	}
 	var cli CLISourceConfig
 	if err := yaml.Unmarshal([]byte(source), &cli); err != nil || cli.Connection.APIServer != "localhost" || cli.Paths.SwarmDir != "state" || cli.Paths.MonitorDir != "monitor" {
@@ -239,6 +243,20 @@ func TestConfigDecodeSourceRejectsBeforeProjection(t *testing.T) {
 		"database: {<<: {totally_unknown: true}}",
 		"llm: {provider_limits: {provider: {models: {model: {unknown: 1}}}}}",
 		"runtime: {recovery_on_startup: true, recovery_on_startup: false}",
+		"triggers: true",
+		"triggers: null",
+		"triggers: {acme: {acknowledge: unsigned_webhook}}",
+		"triggers: {'../acme/trigger.yaml': {acknowledge: unsigned_webhook}}",
+		"triggers: {'/acme/trigger.yaml': {acknowledge: unsigned_webhook}}",
+		"triggers: {'child/../acme/trigger.yaml': {acknowledge: unsigned_webhook}}",
+		"triggers: {acme/trigger.yaml: {}}",
+		"triggers: {acme/trigger.yaml: {acknowledge: null}}",
+		"triggers: {acme/trigger.yaml: {acknowledge: true}}",
+		"triggers: {acme/trigger.yaml: {acknowledge: 1}}",
+		"triggers: {acme/trigger.yaml: {acknowledge: ''}}",
+		"triggers: {acme/trigger.yaml: {acknowledge: []}}",
+		"triggers: {acme/trigger.yaml: {acknowledge: unsigned_webhook, unknown: true}}",
+		"triggers: {acme/trigger.yaml: {acknowledge: unsigned_webhook}, acme/trigger.yaml: {acknowledge: unsigned_webhook}}",
 	} {
 		t.Run(source, func(t *testing.T) {
 			before := Config{Runtime: RuntimeConfig{RecoveryOnStartup: true}, LLM: LLMConfig{Backend: "anthropic"}}

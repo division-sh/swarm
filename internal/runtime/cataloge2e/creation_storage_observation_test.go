@@ -28,7 +28,7 @@ func TestCatalogCreationStoragePreservesTimePathAndPhysicalScopeBothStores(t *te
 			ctx := worklifetime.WithOccurrence(catalogRunContext(h, foreignRun), h.rt.WorkOccurrence())
 			ctx = runtimeeffects.WithExecutionMode(ctx, executionmode.Live)
 			if err := h.rt.Manager.ActivateFlowInstance(ctx, runtimepipeline.FlowInstanceActivationRequest{
-				ContractBundle: semanticview.Wrap(h.bundle),
+				ContractBundle: h.rt.Options.WorkflowModule.SemanticSource(),
 				Instance:       flowidentity.Stored(semanticview.Wrap(h.bundle), ".", foreignRun, foreignRun, foreignRun, ""),
 				OccurredAt:     boundary.Add(time.Second),
 			}); err != nil {

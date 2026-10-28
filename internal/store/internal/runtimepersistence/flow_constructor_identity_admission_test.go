@@ -14,8 +14,8 @@ func TestFlowConstructorRejectsNoncanonicalRequestIdentityBothStores(t *testing.
 	for _, backend := range []string{"sqlite", "postgres"} {
 		t.Run(backend, func(t *testing.T) {
 			f := newReceiverConfigActivationFixtureWithDocuments(t, backend, false, map[string]string{
-				"schema.yaml":        "name: constructor-identity\n",
-				"review/schema.yaml": "name: review\n",
+				"schema.yaml":        "stages: []\n",
+				"review/schema.yaml": "stages: []\n", "manifest.yaml": "version: 1.0.0\nplatform_version: '*'\n", "review/manifest.yaml": "version: 1.0.0\nplatform_version: '*'\n",
 			}, nil)
 			runID := correlation.RunIDFromContext(f.ctx)
 			root := sqliteFlowActivationRequest(f.bundle, ".", runID, "", runID)

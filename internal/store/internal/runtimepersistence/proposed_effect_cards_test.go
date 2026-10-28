@@ -17,6 +17,7 @@ import (
 	runtimecontracts "github.com/division-sh/swarm/internal/runtime/contracts"
 	"github.com/division-sh/swarm/internal/runtime/core/activityidentity"
 	"github.com/division-sh/swarm/internal/runtime/core/attemptgeneration"
+	"github.com/division-sh/swarm/internal/runtime/correlation"
 	"github.com/division-sh/swarm/internal/runtime/decisioncard"
 	"github.com/division-sh/swarm/internal/runtime/executionmode"
 	runtimefailures "github.com/division-sh/swarm/internal/runtime/failures"
@@ -376,6 +377,8 @@ func TestProposedEffectReadbackKeepsAuthorizationAndDispatchAxesSeparateOnBothSt
 				ctx := testAuthorActivityContext()
 				cards, runID := decisionCardTestStore(t, backend)
 				ctx = originalStoreFixtureContext(t, ctx, cards)
+				rooted := decisionCardTestRootedSource(t, ctx, cards, runID)
+				ctx = correlation.WithRootAdmission(ctx, rooted.Admission())
 				store := cards.(decisioncard.ProposedEffectStore)
 				now := time.Date(2026, 7, 14, 17, 0, 0, 0, time.UTC)
 				card, continuation := newProposedEffectTestCard(t, runID, now, attemptgeneration.Generation{})
@@ -391,7 +394,8 @@ func TestProposedEffectReadbackKeepsAuthorizationAndDispatchAxesSeparateOnBothSt
 				}
 				completeProposedEffectRouteInTestMutation(t, ctx, cards, card.CardID, decisionEventID, now.Add(2*time.Minute))
 
-				journal := proposedEffectTestJournal(t, cards)
+				// Preserve the original native journal role and its captured source.
+				journal := captureActivityFixtureJournal(t, ctx, cards)
 				hints := observeChannelHints(t, cards.(interface {
 					SubscribeChannelReconciliation(context.Context) (*render.ReconcileSubscription, error)
 				}))
@@ -502,13 +506,6 @@ func overwriteProposedEffectAttemptMode(t *testing.T, ctx context.Context, cards
 	if err != nil {
 		t.Fatalf("overwrite proposed-effect attempt mode: %v", err)
 	}
-}
-
-func proposedEffectTestJournal(t *testing.T, cards decisioncard.Store) runtimepipeline.ActivityAttemptJournal {
-	t.Helper()
-	// These are explicit journal calls, not activity dispatch through a mutable
-	// coordinator slot. Keep the exact original native role for every callback.
-	return captureActivityFixtureJournal(t, testAuthorActivityContext(), cards)
 }
 
 func isProposedEffectFailureClass(err error, class runtimefailures.Class) bool {

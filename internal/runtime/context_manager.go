@@ -4,12 +4,14 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"maps"
 	"reflect"
 	"sort"
 	"strings"
 	"sync"
 
 	"github.com/division-sh/swarm/internal/channelonboarding"
+	"github.com/division-sh/swarm/internal/config"
 	"github.com/division-sh/swarm/internal/operatorchannel"
 	"github.com/division-sh/swarm/internal/packadmission"
 	"github.com/division-sh/swarm/internal/packs"
@@ -27,6 +29,7 @@ import (
 	"github.com/division-sh/swarm/internal/runtime/semanticview"
 	runtimestartupownership "github.com/division-sh/swarm/internal/runtime/startupownership"
 	"github.com/division-sh/swarm/internal/runtime/triggergeneration"
+	"github.com/division-sh/swarm/internal/sourceartifact"
 	"github.com/google/uuid"
 )
 
@@ -39,6 +42,7 @@ type RunBundleAvailabilityReader interface {
 type BundleContext struct {
 	ProviderTriggerCatalog      *providertriggers.CatalogSnapshot
 	SourceArtifactFact          runtimecorrelation.SourceArtifactFact
+	RootAdmission               sourceartifact.RootAdmission `json:"-"`
 	BundleIdentity              runtimecontracts.BundleIdentity
 	RuntimeInstanceID           string
 	PublicationGeneration       uint64
@@ -56,6 +60,7 @@ type BundleContext struct {
 	ChannelActivationGeneration channelonboarding.ChannelActivationGeneration
 	EffectiveSourceIdentity     scenarioexecution.EffectiveSourceIdentity
 	ScenarioProfileCatalog      *scenarioexecution.Catalog
+	deploymentTriggers          map[string]config.TriggerConfig
 }
 
 type RuntimeContextState string
@@ -71,6 +76,9 @@ const (
 )
 
 func (c BundleContext) normalized() BundleContext {
+	if c.Runtime != nil {
+		c.deploymentTriggers = maps.Clone(c.Runtime.Options.TriggerEntries)
+	}
 	c.RuntimeInstanceID = strings.TrimSpace(c.RuntimeInstanceID)
 	c.WorkspaceScopeKey = strings.TrimSpace(c.WorkspaceScopeKey)
 	c.PackInventoryDigest = strings.TrimSpace(c.PackInventoryDigest)
@@ -89,6 +97,13 @@ func (c BundleContext) normalized() BundleContext {
 
 func (c BundleContext) BundleHash() string {
 	return c.SourceArtifactFact.BundleHash()
+}
+
+func (c BundleContext) triggerEntries() map[string]config.TriggerConfig {
+	if c.Runtime == nil {
+		return c.deploymentTriggers
+	}
+	return c.Runtime.Options.TriggerEntries
 }
 
 type runtimeContextEntry struct {
@@ -594,6 +609,9 @@ func validateRuntimeContextDefinition(contextDef BundleContext, executable bool)
 	if contextDef.Runtime.Bus == nil {
 		return BundleContext{}, fmt.Errorf("runtime context %s event bus is required", bundleHash)
 	}
+	if err := validateRuntimeContextRoot(contextDef); err != nil {
+		return BundleContext{}, err
+	}
 	if !equalRuntimeContextSlice(contextDef.ChannelPlans, contextDef.Runtime.Options.ChannelPlans) {
 		return BundleContext{}, fmt.Errorf("runtime context %s channel plans do not belong to runtime", bundleHash)
 	}
@@ -637,36 +655,74 @@ func validateRuntimeContextDefinition(contextDef BundleContext, executable bool)
 		return BundleContext{}, fmt.Errorf("runtime context %s installed provider trigger subjects: %w", bundleHash, err)
 	}
 	contextDef.InstalledTriggerSubjects = normalizedSubjects
-	if bundle, ok := semanticview.Bundle(contextDef.Source); ok && bundle != nil && bundle.PackInventory != nil {
-		inventoryDigest := bundle.PackInventory.Digest()
-		if contextDef.PackInventoryDigest == "" || contextDef.PackInventoryDigest != inventoryDigest {
-			return BundleContext{}, fmt.Errorf("runtime context %s pack inventory digest %q does not match bundle inventory %q", bundleHash, contextDef.PackInventoryDigest, inventoryDigest)
-		}
-		projection, err := packadmission.FromBundle(bundle)
-		if err != nil {
-			return BundleContext{}, fmt.Errorf("runtime context %s load admitted pack projection: %w", bundleHash, err)
-		}
-		catalog := projection.ProviderTriggers
-		contextDef.ProviderTriggerCatalog = catalog
-		if !contextDef.ProviderTriggerGeneration.Equal(catalog.Generation()) {
-			return BundleContext{}, fmt.Errorf("runtime context %s provider-trigger generation %q does not match bundle inventory generation %q", bundleHash, contextDef.ProviderTriggerGeneration.Diagnostic(), catalog.Generation().Diagnostic())
-		}
-		expectedSubjects, err := catalog.InstalledCapabilitySubjects()
-		if err != nil {
-			return BundleContext{}, fmt.Errorf("runtime context %s derive installed provider-trigger subjects: %w", bundleHash, err)
-		}
-		expectedSubjects, err = packs.NormalizeSubjects(expectedSubjects)
-		if err != nil {
-			return BundleContext{}, err
-		}
-		if !reflect.DeepEqual(contextDef.InstalledTriggerSubjects, expectedSubjects) {
-			return BundleContext{}, fmt.Errorf("runtime context %s installed provider-trigger subjects do not match its bundle inventory", bundleHash)
-		}
+	if err := validateRuntimeContextProviderCatalog(contextDef); err != nil {
+		return BundleContext{}, err
 	}
 	if err := validateTargetsGeneration(contextDef, contextDef.ProviderTriggerGeneration); err != nil {
 		return BundleContext{}, err
 	}
 	return contextDef, nil
+}
+
+func validateRuntimeContextProviderCatalog(contextDef BundleContext) error {
+	bundle, present := semanticview.Bundle(contextDef.Source)
+	if !present || bundle == nil {
+		return fmt.Errorf("runtime context provider catalog requires its compiled source")
+	}
+	if bundle.PackInventory != nil && contextDef.PackInventoryDigest != bundle.PackInventory.Digest() {
+		return fmt.Errorf("runtime context %s pack inventory digest does not match its captured inventory", contextDef.BundleHash())
+	}
+	catalog := contextDef.ProviderTriggerCatalog
+	if catalog == nil {
+		return fmt.Errorf("runtime context %s requires its captured provider catalog", contextDef.BundleHash())
+	}
+	if !contextDef.ProviderTriggerGeneration.Equal(catalog.Generation()) {
+		return fmt.Errorf("runtime context %s provider-trigger generation does not match its captured catalog", contextDef.BundleHash())
+	}
+	rooted, err := bundle.RootedSource()
+	if err != nil {
+		return err
+	}
+	providers, err := packadmission.AdmitProviderSource(rooted, bundle.Platform)
+	if err != nil {
+		return err
+	}
+	matched := false
+	for _, flow := range providers.FlowPaths() {
+		scope, err := providers.Scope(flow)
+		if err != nil {
+			return err
+		}
+		expected, err := scope.TriggerCatalog()
+		if err != nil {
+			return err
+		}
+		if !catalog.Generation().Equal(expected.Generation()) || len(catalog.Entries()) != len(expected.Entries()) {
+			continue
+		}
+		matched = true
+		for _, entry := range catalog.Entries() {
+			owner, found := expected.EntryByProvider(entry.Manifest.Provider())
+			if !found || owner.Identity != entry.Identity || owner.SourcePath != entry.SourcePath {
+				matched = false
+				break
+			}
+		}
+		if matched {
+			break
+		}
+	}
+	if !matched {
+		return fmt.Errorf("runtime context %s provider catalog is not an exact captured flow scope", contextDef.BundleHash())
+	}
+	expectedSubjects, err := catalog.InstalledCapabilitySubjects()
+	if err != nil {
+		return err
+	}
+	if !reflect.DeepEqual(contextDef.InstalledTriggerSubjects, expectedSubjects) {
+		return fmt.Errorf("runtime context %s installed provider-trigger subjects do not match its captured catalog", contextDef.BundleHash())
+	}
+	return nil
 }
 
 func equalRuntimeContextSlice[T any](left, right []T) bool {
@@ -750,8 +806,8 @@ func (m *RuntimeContextManager) refreshCapabilitySubjectsLocked() error {
 	return nil
 }
 
-func validateStandingTargetDeclarationOwner(contextDef *BundleContext, target StandingTarget) error {
-	declarations, err := ResolveStandingTargetDeclarations(contextDef.Source, contextDef.ProviderTriggerCatalog)
+func validateStandingTargetDeclarationOwner(contextDef *BundleContext, runtimeOwner *Runtime, target StandingTarget) error {
+	declarations, err := ResolveStandingTargetDeclarations(contextDef.Source, contextDef.ProviderTriggerCatalog, contextDef.triggerEntries())
 	if err != nil {
 		return err
 	}
@@ -761,9 +817,35 @@ func validateStandingTargetDeclarationOwner(contextDef *BundleContext, target St
 			continue
 		}
 		for _, binding := range declaration.Ingress {
-			if binding.Provider == target.Provider && binding.AdmissionPlan.Generation().Equal(target.AdmissionPlan.Generation()) {
-				owned = true
+			if binding.Provider != target.Provider || !binding.AdmissionPlan.Generation().Equal(target.AdmissionPlan.Generation()) {
+				continue
 			}
+			signingSecret := binding.SigningSecret
+			if runtimeOwner != nil {
+				_, _, _, err := runtimeOwner.standingIngressCredentialScope(InboundTarget{
+					BundleHash: target.BundleHash, FlowPath: target.FlowPath, Alias: target.Alias,
+					Provider: target.Provider, SigningSecret: target.SigningSecret, AdmissionPlan: target.AdmissionPlan,
+				})
+				if err != nil {
+					return err
+				}
+				signingSecret = target.SigningSecret
+			}
+			if signingSecret != target.SigningSecret {
+				continue
+			}
+			expected, err := binding.AdmissionPlan.EffectiveCapabilitySubject(providertriggers.EffectiveSubjectRequest{
+				BundleHash: contextDef.BundleHash(), FlowPath: declaration.FlowPath, Alias: declaration.Alias,
+				SigningSecret: signingSecret, SourcePath: declaration.SourcePath,
+			})
+			if err != nil {
+				return err
+			}
+			actual, err := target.CapabilitySubject()
+			if err != nil {
+				return err
+			}
+			owned = reflect.DeepEqual(actual, expected)
 		}
 	}
 	if !owned {
@@ -773,7 +855,7 @@ func validateStandingTargetDeclarationOwner(contextDef *BundleContext, target St
 }
 
 func declaredStandingCapabilitySubjects(contextDef *BundleContext, executableSubjects map[string]struct{}) ([]packs.Subject, error) {
-	declarations, err := ResolveStandingTargetDeclarations(contextDef.Source, contextDef.ProviderTriggerCatalog)
+	declarations, err := ResolveStandingTargetDeclarations(contextDef.Source, contextDef.ProviderTriggerCatalog, contextDef.triggerEntries())
 	if err != nil {
 		return nil, err
 	}
@@ -1302,7 +1384,12 @@ func (m *RuntimeContextManager) acquireEntryLocked(ctx context.Context, entry *r
 	if !runtimeContextEntryLoaded(entry) || entry.runtime == nil || entry.workOwner == nil {
 		return nil, fmt.Errorf("runtime context is unavailable")
 	}
-	ctx, err := entry.runtime.mutationContext(ctx)
+	definition := *entry.context
+	definition.Runtime = entry.runtime
+	ctx, err := rootedRuntimeContextUse(ctx, definition)
+	if err == nil {
+		ctx, err = entry.runtime.mutationContext(ctx)
+	}
 	if err != nil {
 		return nil, err
 	}
@@ -1361,7 +1448,7 @@ func runtimeContextLookupForEntry(entry *runtimeContextEntry) RuntimeContextLook
 	}
 	lookup := RuntimeContextLookup{State: state, Cause: cause, Found: true}
 	if state == RuntimeContextStateLoaded {
-		lookup.Context = entry.context
+		lookup.Context = runtimeContextMetadata(entry.context)
 	}
 	return lookup
 }
@@ -1379,7 +1466,7 @@ func (m *RuntimeContextManager) Primary() (*BundleContext, bool) {
 	if !runtimeContextEntryLoaded(entry) {
 		return nil, false
 	}
-	return entry.context, true
+	return runtimeContextMetadata(entry.context), true
 }
 
 func (m *RuntimeContextManager) CurrentPublication() (RuntimeContextPublicationSnapshot, error) {
@@ -1439,7 +1526,6 @@ func (m *RuntimeContextManager) LookupIngress(alias, provider string) RuntimeIng
 	if m == nil {
 		return RuntimeIngressContextLookup{State: RuntimeContextStateUnloaded, Cause: RuntimeContextCauseNotLoaded}
 	}
-	provider = strings.TrimSpace(provider)
 	m.mu.RLock()
 	defer m.mu.RUnlock()
 	aliasFound := false
@@ -1470,7 +1556,7 @@ func (m *RuntimeContextManager) LookupIngress(alias, provider string) RuntimeIng
 			out.Found = true
 			out.Target = target
 			if state == RuntimeContextStateLoaded {
-				out.Context = entry.context
+				out.Context = runtimeContextMetadata(entry.context)
 			}
 			return out
 		}
@@ -1495,7 +1581,7 @@ func (m *RuntimeContextManager) AdmitChannelStandingTarget(ctx context.Context, 
 		m.mu.RUnlock()
 		return fmt.Errorf("%w: channel target runtime context is no longer current", channelonboarding.ErrRevisionConflict)
 	}
-	declarations, err := ResolveStandingTargetDeclarations(entry.context.Source, entry.context.ProviderTriggerCatalog)
+	declarations, err := ResolveStandingTargetDeclarations(entry.context.Source, entry.context.ProviderTriggerCatalog, entry.context.triggerEntries())
 	if err != nil {
 		m.mu.RUnlock()
 		return err
@@ -1617,7 +1703,7 @@ func (m *RuntimeContextManager) publishFlowTargets(flowPath string, targets []St
 			if target.BundleHash != bundleHash {
 				continue
 			}
-			if err := validateStandingTargetDeclarationOwner(&copied, target); err != nil {
+			if err := validateStandingTargetDeclarationOwner(&copied, entry.runtime, target); err != nil {
 				return err
 			}
 			copied.StandingTargets = append(copied.StandingTargets, target)
@@ -1660,7 +1746,7 @@ func (m *RuntimeContextManager) publishFlowTargets(flowPath string, targets []St
 
 func (m *RuntimeContextManager) validateAdmittedStandingPublicationLocked(admitted *RuntimeContextUse) error {
 	current := m.contexts[admitted.Context.BundleHash()]
-	if !runtimeContextEntryLoaded(current) || current.runtime != admitted.Runtime() || current.context.RuntimeInstanceID != admitted.Context.RuntimeInstanceID || current.context.PublicationGeneration != admitted.Context.PublicationGeneration || admitted.WorkContext().Err() != nil || m.resetExecutionFenced {
+	if !runtimeContextEntryLoaded(current) || current.runtime != admitted.Runtime() || current.context.RuntimeInstanceID != admitted.Context.RuntimeInstanceID || current.context.PublicationGeneration != admitted.Context.PublicationGeneration || !current.context.RootAdmission.Equal(admitted.Context.RootAdmission) || admitted.WorkContext().Err() != nil || m.resetExecutionFenced {
 		return fmt.Errorf("%w: channel target runtime ownership changed at publication", channelonboarding.ErrRevisionConflict)
 	}
 	return admitted.Runtime().ValidateStandingIngressCredentials(admitted.WorkContext())
@@ -1671,8 +1757,8 @@ func validateTargetsGeneration(contextDef BundleContext, generation triggergener
 		return fmt.Errorf("runtime context %s provider-trigger catalog generation is required", contextDef.BundleHash())
 	}
 	for _, target := range contextDef.StandingTargets {
-		if !target.AdmissionPlan.Generation().Equal(generation) {
-			return fmt.Errorf("runtime context %s standing target %q/%q admission generation %q does not match its bundle generation %q", contextDef.BundleHash(), target.Alias, target.Provider, target.AdmissionPlan.Generation().Diagnostic(), generation.Diagnostic())
+		if err := validateStandingTargetDeclarationOwner(&contextDef, contextDef.Runtime, target); err != nil {
+			return err
 		}
 	}
 	return nil
@@ -1700,7 +1786,10 @@ func (m *RuntimeContextManager) LookupRunStatus(ctx context.Context, runID strin
 	if strings.TrimSpace(availability.BundleHash) == "" {
 		return RuntimeContextLookup{State: RuntimeContextStateUnloaded, Cause: RuntimeContextCauseNotLoaded}, availability, nil
 	}
-	return m.LookupBundleHashStatus(availability.BundleHash), availability, nil
+	m.mu.RLock()
+	defer m.mu.RUnlock()
+	_, lookup, err := m.runContextEntryLocked(availability)
+	return lookup, availability, err
 }
 
 // PrepareSourceSetTransition fences every surviving loaded runtime before the
@@ -1748,9 +1837,9 @@ func (m *RuntimeContextManager) prepareSourceSetTransition(
 		default:
 		}
 	}
-	wanted := make(map[string]struct{}, len(plan.Sources))
+	wanted := make(map[string]runtimeagenttopology.SourceCoordinate, len(plan.Sources))
 	for _, source := range plan.Sources {
-		wanted[source.Normalize().Key()] = struct{}{}
+		wanted[source.Normalize().Key()] = source.Normalize()
 	}
 	transition := &PreparedRuntimeSourceSetTransition{manager: m, locked: true}
 	m.mu.Lock()
@@ -1768,10 +1857,9 @@ func (m *RuntimeContextManager) prepareSourceSetTransition(
 		if (!loaded && !pending) || (pendingOnly && !pending) {
 			continue
 		}
-		coordinate := runtimeagenttopology.SourceCoordinate{BundleHash: entry.context.SourceArtifactFact.BundleHash()}.Normalize()
-		if _, survives := wanted[coordinate.Key()]; !survives {
+		if err := validateRuntimeContextSourceSetMember(entry.context, wanted); err != nil {
 			m.mu.Unlock()
-			return nil, fmt.Errorf("loaded runtime context %s is absent from successor source set", bundleHash)
+			return nil, err
 		}
 		transition.entries = append(transition.entries, runtimeSourceSetTransitionEntry{
 			bundleHash: bundleHash, entry: entry, fresh: loaded,
@@ -2007,7 +2095,13 @@ func (m *RuntimeContextManager) AcquireRun(ctx context.Context, runID string) (*
 		lookup := RuntimeContextLookup{State: RuntimeContextStateUnloaded, Cause: RuntimeContextCauseNotLoaded}
 		return nil, lookup, availability, nil
 	}
-	use, lookup, err := m.AcquireBundleHash(ctx, availability.BundleHash)
+	m.mu.RLock()
+	defer m.mu.RUnlock()
+	entry, lookup, err := m.runContextEntryLocked(availability)
+	if err != nil || !lookup.Loaded() {
+		return nil, lookup, availability, err
+	}
+	use, err := m.acquireEntryLocked(ctx, entry)
 	return use, lookup, availability, err
 }
 
@@ -2051,7 +2145,7 @@ func (m *RuntimeContextManager) AcquireIngress(ctx context.Context, alias, provi
 				}
 				return nil, lookup, nil
 			}
-			lookup.Context = entry.context
+			lookup.Context = runtimeContextMetadata(entry.context)
 			if m.landingRuns == nil {
 				return nil, lookup, fmt.Errorf("inbound requires the deployment landing-run reader")
 			}

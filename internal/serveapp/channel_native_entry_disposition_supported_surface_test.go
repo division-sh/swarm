@@ -18,6 +18,7 @@ func TestChannelNativeEntryDispositionsPublicJourney(t *testing.T) {
 		for _, kind := range []string{"private", "group"} {
 			t.Run(string(backend)+"/"+kind, func(t *testing.T) {
 				h := newChannelOnboardingE2EHarness(t, backend, true)
+				writeChannelOnboardingLiveToolCredentials(t, h.credentialPath)
 				h.start(t)
 				defer h.stop(t)
 				chat := int64(9593)

@@ -177,12 +177,13 @@ func TestSelectedForkReceiverEffectOnlyFailureSettlementBothStores(t *testing.T)
 					forkOptions.Workspace = manager
 				}
 				forkOptions.AgentManagerOptions = runtimemanager.AgentManagerOptions{TestLifecycleProbe: barrier}
+				targetBundle := loadWorkflowValidationBundleAt(t, root)
 				request := runforkexecution.SelectedContractExecutionRequest{
 					SourceRunID: seed.RunID, At: frontier, AllowSourceFreeze: true, ExpectedBundleHash: rt.BundleHash,
 					SourceLoader: runforkexecution.SourceArtifactSelectedContractSourceLoader{
 						RepoRoot: repoRootForTest(), Store: selected.SourceArtifactStore(),
 					},
-					ContractSelection:  runforkadmission.SelectedContractSelection(semanticview.Wrap(loadWorkflowValidationBundleAt(t, root))),
+					ContractSelection:  runforkadmission.SelectedContractSelection(semanticview.Wrap(targetBundle)),
 					AgentRuntime:       forkOptions,
 					LiveRuntime:        rt.Runtime,
 					LiveContexts:       publicExecutor.RuntimeContexts,
@@ -190,8 +191,8 @@ func TestSelectedForkReceiverEffectOnlyFailureSettlementBothStores(t *testing.T)
 					AcquireLiveRuntime: publicExecutor.AcquireLiveRuntime,
 				}
 				if declaredAgent {
-					target := loadWorkflowValidationBundleAt(t, targetRoot)
-					fact, err := prepareServeSourceArtifact(ctx, selected.SourceArtifactWriter(), target)
+					targetBundle = loadWorkflowValidationBundleAt(t, targetRoot)
+					fact, err := prepareServeSourceArtifact(ctx, selected.SourceArtifactWriter(), targetBundle)
 					if err != nil || fact.BundleHash() == rt.BundleHash {
 						t.Fatalf("register distinct unloaded target: %v", err)
 					}
@@ -199,10 +200,14 @@ func TestSelectedForkReceiverEffectOnlyFailureSettlementBothStores(t *testing.T)
 					request.ExpectedBundleHash = fact.BundleHash()
 					request.LiveRuntime = nil
 				}
+				rootedTarget, err := targetBundle.RootedSource()
+				if err != nil {
+					t.Fatal(err)
+				}
 				request.ForkOperation = &runfork.ForkOperationRequest{
 					OperationID: uuid.NewString(), Actor: "receiver-settlement", IdempotencyKey: name, TransportHash: name,
 					SourceRunID: request.SourceRunID, ForkEventID: request.At, TargetBundleHash: request.ExpectedBundleHash,
-					ContractSelection: request.ContractSelection, AllowSourceFreeze: request.AllowSourceFreeze,
+					TargetRootReference: rootedTarget.Admission().Reference(), ContractSelection: request.ContractSelection, AllowSourceFreeze: request.AllowSourceFreeze,
 				}
 				var execution runforkexecution.SelectedContractExecutionResult
 				var executionErr error

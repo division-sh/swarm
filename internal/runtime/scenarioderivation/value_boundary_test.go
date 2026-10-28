@@ -30,6 +30,12 @@ func TestDerivedDeclarationRejectsOutOfDomainResultsThroughArtifactLoading(t *te
 			if err := os.MkdirAll(filepath.Join(root, "tests"), 0o755); err != nil {
 				t.Fatal(err)
 			}
+			if err := os.WriteFile(filepath.Join(root, "manifest.yaml"), []byte("version: 1.0.0\nplatform_version: '*'\n"), 0o644); err != nil {
+				t.Fatal(err)
+			}
+			if err := os.WriteFile(filepath.Join(root, "schema.yaml"), []byte("stages: []\n"), 0o644); err != nil {
+				t.Fatal(err)
+			}
 			if err := os.WriteFile(filepath.Join(root, "tests", "negative.yaml"), raw, 0o644); err != nil {
 				t.Fatal(err)
 			}

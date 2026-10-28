@@ -7,6 +7,7 @@ import (
 	"time"
 
 	"github.com/division-sh/swarm/internal/events"
+	"github.com/division-sh/swarm/internal/runtime/correlation"
 	"github.com/division-sh/swarm/internal/runtime/executionmode"
 	"github.com/division-sh/swarm/internal/runtime/genericschedule"
 	"github.com/division-sh/swarm/internal/runtime/semanticvalue"
@@ -31,9 +32,11 @@ func TestClockScheduleHTTPReadbackOnBothStores(t *testing.T) {
 			} else {
 				selected, _ = storetest.StartPostgresRuntimeStoreWithReopen(t)
 			}
-			artifact := sourceartifactfixture.New("schema.yaml", []byte("name: clock-readback\n"))
+			rooted, _ := sourceartifactfixture.Rooted(t, "clock-readback", mustAPITestSourceArtifactNamed("clock-readback"))
+			artifact := rooted.Artifact()
 			ctx := testAuthorActivityContextForSource(context.Background(), sourceartifactfixture.FactFor(artifact))
 			ctx = originalAPIFixtureContext(t, ctx, selected)
+			ctx = correlation.WithRootAdmission(ctx, rooted.Admission())
 			runID := uuid.NewString()
 			fixture := storetest.RunFixture{Origin: storetest.ScenarioSetupOrigin(), RunID: runID, Artifact: artifact, StartedAt: time.Now().UTC()}
 			storetest.RequireRun(t, ctx, selected, fixture)

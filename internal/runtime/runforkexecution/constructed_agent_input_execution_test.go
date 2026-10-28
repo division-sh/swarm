@@ -36,6 +36,7 @@ import (
 	"github.com/division-sh/swarm/internal/runtime/semanticview"
 	"github.com/division-sh/swarm/internal/runtime/startupownership"
 	"github.com/division-sh/swarm/internal/runtime/testfixtures/canonicalrouting"
+	"github.com/division-sh/swarm/internal/sourceartifact"
 	"github.com/division-sh/swarm/internal/store/storetest"
 	runforkrevision "github.com/division-sh/swarm/internal/store/testutil/runforkrevisionfixture"
 	"github.com/division-sh/swarm/internal/testutil"
@@ -46,6 +47,22 @@ import (
 type constructedInputAgent struct {
 	selectedContractForkTestAgent
 	observe func(context.Context, events.Event) error
+}
+
+type constructedInputRecoverySourceLoader struct {
+	SourceArtifactSelectedContractSourceLoader
+	target sourceartifact.RootedSource
+}
+
+func (l constructedInputRecoverySourceLoader) LoadRunForkSelectedContractSourceForRequest(ctx context.Context, request SelectedContractSourceLoadRequest) (LoadedSelectedContractSource, error) {
+	if request.Responsibility.kind == freshSelectedSource {
+		fact, err := correlation.NewSourceArtifactFact(l.target.Admission().BundleHash())
+		if err != nil {
+			return LoadedSelectedContractSource{}, err
+		}
+		ctx = correlation.WithRootAdmission(correlation.WithSourceArtifactFact(ctx, fact), l.target.Admission())
+	}
+	return l.SourceArtifactSelectedContractSourceLoader.LoadRunForkSelectedContractSourceForRequest(ctx, request)
 }
 
 func (a *constructedInputAgent) OnEvent(ctx context.Context, event events.Event) ([]events.Event, error) {
@@ -187,6 +204,7 @@ func proveSelectedConstructedAgentInput(t *testing.T, backend string, nested, fi
 	}
 	runID, eventID := uuid.NewString(), uuid.NewString()
 	at := time.Unix(1700002200, 0).UTC()
+	ctx = correlation.WithRootAdmission(correlation.WithSourceArtifactFact(ctx, loaded.SourceArtifactFact), loaded.RootedSource.Admission())
 	ctx, err = startupownership.WithProcessMutationAuthority(ctx, selectedContractTestProcessCapability(t, ctx, selected))
 	if err != nil {
 		t.Fatal(err)
@@ -329,6 +347,7 @@ func proveSelectedConstructedAgentInput(t *testing.T, backend string, nested, fi
 	}
 	before := selectedPreparationDatabaseSnapshot(t, db, backend)
 	capturedVersion := loaded.Source.WorkflowVersion()
+	originalSourceFact := loaded.SourceArtifactFact
 	var sourceLoader SelectedContractSourceLoader = loader
 	if proof.changedVersionRecovery {
 		if err := os.WriteFile(filepath.Join(root, "child/prompts/worker.md"), []byte("Consume the assigned task using the compatible selected version.\n"), 0600); err != nil {
@@ -340,7 +359,10 @@ func proveSelectedConstructedAgentInput(t *testing.T, backend string, nested, fi
 		}
 		selectedBundle, _ := semanticview.Bundle(loaded.Source)
 		sourceartifactfixture.RequireArtifact(t, ctx, selected.(sourceartifactfixture.Writer), selectedBundle.SourceArtifact)
-		sourceLoader = SourceArtifactSelectedContractSourceLoader{RepoRoot: repo, Store: selected.(SourceArtifactSelectedContractSourceStore)}
+		sourceLoader = constructedInputRecoverySourceLoader{
+			SourceArtifactSelectedContractSourceLoader: SourceArtifactSelectedContractSourceLoader{RepoRoot: repo, Store: selected.(SourceArtifactSelectedContractSourceStore)},
+			target: loaded.RootedSource,
+		}
 	}
 	var scanProof chan error
 	if proof.scan {
@@ -351,8 +373,8 @@ func proveSelectedConstructedAgentInput(t *testing.T, backend string, nested, fi
 	var parentGrantID string
 	var childContextProof *selectedChildContextProofCapability
 	if proof.parentRuntime {
-		ctx, parentGrantID = selectedForkParentRuntimeContext(t, ctx, selected, loaded.SourceArtifactFact)
-		childContextProof = selectedForkChildContextProof(t, ctx, selected, loaded.SourceArtifactFact)
+		ctx, parentGrantID = selectedForkParentRuntimeContext(t, ctx, selected, originalSourceFact)
+		childContextProof = selectedForkChildContextProof(t, ctx, selected, originalSourceFact)
 		if proof.afterRelease != nil {
 			*proof.afterRelease = func() { childContextProof.requireReleasedChildren(t) }
 		}
@@ -379,6 +401,9 @@ func proveSelectedConstructedAgentInput(t *testing.T, backend string, nested, fi
 							return fmt.Errorf("selected handler did not consume its own exact child grant")
 						}
 						for _, issued := range childContextProof.issued {
+							if _, err := issued.observeChildContext(ctx); err != nil {
+								return err
+							}
 							if err := issued.requireGatewayCustody(ctx, cfg); err != nil {
 								return err
 							}
@@ -402,7 +427,9 @@ func proveSelectedConstructedAgentInput(t *testing.T, backend string, nested, fi
 	var proveRecovery func(string)
 	if proof.changedVersionRecovery {
 		request.ContractSelection = runfork.RunForkContractSelection{Mode: runfork.RunForkContractSelectionModeBundleHash, BundleHash: loaded.SourceArtifactFact.BundleHash()}
-		proveRecovery = prepareSelectedConstructedRecovery(t, ctx, owner, request, loaded)
+		request.SourceArtifactFact = loaded.SourceArtifactFact
+		selectedContext := correlation.WithRootAdmission(correlation.WithSourceArtifactFact(ctx, loaded.SourceArtifactFact), loaded.RootedSource.Admission())
+		proveRecovery = prepareSelectedConstructedRecovery(t, selectedContext, owner, request, loaded)
 	}
 	var result SelectedContractExecutionResult
 	if proof.scan {

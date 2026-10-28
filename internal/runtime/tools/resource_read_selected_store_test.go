@@ -204,11 +204,11 @@ func resourceReadSourceRoot(t *testing.T) string {
 	t.Helper()
 	root := t.TempDir()
 	for path, contents := range map[string]string{
-		"schema.yaml":           "name: resource-read-store\n",
-		"support/schema.yaml":   "name: support\n",
+		"schema.yaml":           "stages: []\n",
+		"support/schema.yaml":   "stages: []\n",
 		"support/entities.yaml": "support_state:\n  support_id: text\n",
 		"support/agents.yaml":   "factory-cto:\n  id: public-factory-cto\n  role: factory_cto\n  intent: {inline: Read exact run data.}\n  data_access:\n    - data: support/records.loaded\n",
-		"support/events.yaml":   "records.loaded:\n  id: text\n  payload: text\n",
+		"support/events.yaml":   "records.loaded:\n  id: text\n  payload: text\n", "manifest.yaml": "version: 1.0.0\nplatform_version: '*'\n", "support/manifest.yaml": "version: 1.0.0\nplatform_version: '*'\n",
 	} {
 		file := filepath.Join(root, path)
 		if err := os.MkdirAll(filepath.Dir(file), 0o700); err != nil {

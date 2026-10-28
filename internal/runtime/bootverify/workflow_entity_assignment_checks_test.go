@@ -209,14 +209,16 @@ func TestEntityDefiniteAssignmentStages(t *testing.T) {
 	for _, variant := range []string{"all paths write", "guard stage then value", "guard short circuit", "nontransitioning guarded reader", "nontransitioning clear", "bypass", "same destination outcomes", "on_complete outcomes", "same event different node", "zero trip", "backedge cannot prove first entry"} {
 		t.Run(variant, func(t *testing.T) {
 			root := t.TempDir()
-			writeBootverifyFixtureFile(t, filepath.Join(root, "schema.yaml"), "name: assignment-proof\n")
-			writeBootverifyFixtureFile(t, filepath.Join(root, "child", "schema.yaml"), `name: child
-stages:
+			writeBootverifyFixtureFile(t, filepath.Join(root, "manifest.yaml"), "version: 1.0.0\nplatform_version: '*'\n")
+			writeBootverifyFixtureFile(t, filepath.Join(root, "schema.yaml"), "stages: []\n")
+			writeBootverifyFixtureFile(t, filepath.Join(root, "child", "manifest.yaml"), "version: 1.0.0\nplatform_version: '*'\n")
+			writeBootverifyFixtureFile(t, filepath.Join(root, "child", "schema.yaml"), `stages:
   idle: {}
   assess: {}
   consume: {}
   done: {final: true}
-`)
+`,
+			)
 			writeBootverifyFixtureFile(t, filepath.Join(root, "child", "entities.yaml"), "work:\n  score: {type: integer}\n")
 			writeBootverifyFixtureFile(t, filepath.Join(root, "child", "events.yaml"), `work.opened:
 work.scored:
@@ -373,7 +375,8 @@ func TestEntityDefiniteAssignmentStructuralMutations(t *testing.T) {
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			root := t.TempDir()
-			writeBootverifyFixtureFile(t, filepath.Join(root, "schema.yaml"), "name: mutation-assignment\n")
+			writeBootverifyFixtureFile(t, filepath.Join(root, "manifest.yaml"), "version: 1.0.0\nplatform_version: '*'\n")
+			writeBootverifyFixtureFile(t, filepath.Join(root, "schema.yaml"), "stages: []\n")
 			writeBootverifyFixtureFile(t, filepath.Join(root, "types.yaml"), "types:\n  Profile:\n    id: text\n    note: text?\n")
 			writeBootverifyFixtureFile(t, filepath.Join(root, "entities.yaml"), "work:\n  profile: Profile\n  observed: text\n  notes: [text]\n  by_id: map[text]Profile\n")
 			writeBootverifyFixtureFile(t, filepath.Join(root, "events.yaml"), "work.requested:\n")

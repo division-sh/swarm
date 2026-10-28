@@ -18,7 +18,8 @@ import (
 
 func VerifyNativePipelineRejectsFabricatedGuardCauseOnBothStoresForTest(t *testing.T, open pipelineDeliveryNativeOpenerForTest) {
 	source := loadWorkflowTempSource(t, map[string]string{
-		"schema.yaml":   "name: guard-cause-hostility\nstages:\n  ready: {}\n  done: {final: true}\n  killed: {final: true}\n",
+		"manifest.yaml": "version: 1.0.0\nplatform_version: \">=0.7.0 <0.8.0\"\n",
+		"schema.yaml":   "stages:\n  ready: {}\n  done: {final: true}\n  killed: {final: true}\n",
 		"entities.yaml": "test_entity:\n  marker: text\n",
 		"events.yaml":   "observe:\nkill:\nkill_chain:\n",
 		"nodes.yaml": `router:

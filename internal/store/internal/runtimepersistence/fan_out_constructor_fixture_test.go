@@ -18,9 +18,10 @@ import (
 
 func newFanOutConstructorFixture(t *testing.T, backend string) receiverConfigActivationFixture {
 	t.Helper()
-	files := map[string]string{"schema.yaml": "name: fan-out-store-fixture\nstages:\n  work: {}\n"}
+	files := map[string]string{"schema.yaml": "stages:\n  work: {}\n", "manifest.yaml": "version: 1.0.0\nplatform_version: '*'\n"}
 	for _, flow := range []string{"completion_one", "completion_two"} {
-		files[flow+"/schema.yaml"] = "name: " + flow + "\nstages:\n  pending: {}\n"
+		files[flow+"/manifest.yaml"] = "version: 1.0.0\nplatform_version: '*'\n"
+		files[flow+"/schema.yaml"] = "# fixture: " + flow + "\nstages:\n  pending: {}\n"
 		files[flow+"/events.yaml"] = "items.child:\n  ordinal: integer\n"
 		files[flow+"/nodes.yaml"] = "completion:\n  execution_type: system_node\n  event_handlers:\n    items.child: {}\n"
 	}

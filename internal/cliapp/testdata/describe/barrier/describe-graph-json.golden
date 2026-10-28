@@ -1,5 +1,5 @@
 {
-  "source_label": "fan-in-barrier@1.0.0",
+  "source_label": "barrier@1.0.0",
   "workflow_name": ".",
   "workflow_version": "\u003cadmitted-bundle\u003e",
   "source_hash": "\u003cadmitted-bundle\u003e",
@@ -1613,7 +1613,19 @@
       "check_id": "cross_surface_named_type_use",
       "severity": "lint_evidence",
       "location": "global",
-      "message": "authored object shape reuse candidate: identical shape {expected_operating_ids:[text], period_id:text, portfolio_id:text} appears in entity portfolio/period.period_state; event portfolio.setup payload; consider extracting or reusing a named type if these represent the same concept"
+      "message": "authored object shape reuse candidate: identical shape {expected_operating_ids:[text], period_id:text, portfolio_id:text} appears in entity portfolio/period.period_state; event portfolio.setup payload; event portfolio/period.setup payload; consider extracting or reusing a named type if these represent the same concept"
+    },
+    {
+      "check_id": "cross_surface_named_type_use",
+      "severity": "lint_evidence",
+      "location": "global",
+      "message": "authored object shape reuse candidate: identical shape {operating_id:text, period_id:text, portfolio_id:text, revenue:integer} appears in event ingress/operating.report.requested payload; event operating.report.triggered payload; event portfolio/period.reported payload; consider extracting or reusing a named type if these represent the same concept"
+    },
+    {
+      "check_id": "cross_surface_named_type_use",
+      "severity": "lint_evidence",
+      "location": "global",
+      "message": "authored object shape reuse candidate: near-duplicate shapes share 4/5 field/type pairs (operating_id:text, period_id:text, portfolio_id:text, revenue:integer) between event operating/operating.reported payload and event ingress/operating.report.requested payload; event operating.report.triggered payload; event portfolio/period.reported payload; consider extracting or reusing a named type if these represent the same concept"
     },
     {
       "check_id": "entity_reader_coverage",

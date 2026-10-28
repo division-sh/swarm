@@ -27,13 +27,12 @@ func PrepareServeProjectContextRegistration(root InvocationRoot, opts ServeOptio
 	if err != nil {
 		return nil, err
 	}
-	selectedRoot := strings.TrimSpace(resolvedPaths.SourceRoot)
+	selectedRoot := resolvedPaths.SourceRoot
 	if selectedRoot == "" {
 		return nil, fmt.Errorf("serve --dev project context registration requires a selected source root")
 	}
 	projectRoot := selectedRoot
 	canonical, _ := canonicalizeDoctorTargetPath(projectRoot)
-	canonical = strings.TrimSpace(canonical)
 	if canonical == "" {
 		return nil, fmt.Errorf("serve --dev project context registration requires a canonical project root")
 	}

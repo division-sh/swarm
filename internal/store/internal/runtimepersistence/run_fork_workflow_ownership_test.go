@@ -276,16 +276,20 @@ func forkWorkflowOwnershipRequestWithSeedDelivery(t *testing.T, fixture authorAc
 	repo := canonicalrouting.RepoRoot(t)
 	root := t.TempDir()
 	for file, body := range map[string]string{
-		"schema.yaml":   "name: fork-workflow-ownership\nstages:\n  waiting: {}\n  active: {}\n  done: {final: true}\npins:\n  inputs: [start.seeded, start.requested, start.closed]\n",
+		"schema.yaml":   "stages:\n  waiting: {}\n  active: {}\n  done: {final: true}\npins:\n  inputs: [start.seeded, start.requested, start.closed]\n",
 		"events.yaml":   "start.seeded:\n  token: text\nstart.requested:\n  token: text\nstart.closed:\n",
 		"entities.yaml": "root:\n  marker: text\n",
-		"nodes.yaml":    "controller:\n  execution_type: system_node\n  subscribes_to: [start.seeded, start.requested, start.closed]\n  event_handlers:\n    start.seeded: {}\n    start.requested: {}\n    start.closed: {advances_to: done}\n",
+		"nodes.yaml":    "controller:\n  execution_type: system_node\n  subscribes_to: [start.seeded, start.requested, start.closed]\n  event_handlers:\n    start.seeded: {}\n    start.requested: {}\n    start.closed: {advances_to: done}\n", "manifest.yaml": "version: 1.0.0\nplatform_version: '*'\n",
 	} {
 		if err := os.WriteFile(filepath.Join(root, file), []byte(body), 0600); err != nil {
 			t.Fatal(err)
 		}
 	}
 	bundle, err := runtimecontracts.LoadWorkflowContractBundleWithOptions(repo, root, runtimecontracts.DefaultPlatformSpecFile(repo), runtimecontracts.WorkflowContractLoadOptions{AdmitPackInventory: packadmission.AdmitInventory})
+	if err != nil {
+		t.Fatal(err)
+	}
+	rooted, err := bundle.RootedSource()
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -306,6 +310,7 @@ func forkWorkflowOwnershipRequestWithSeedDelivery(t *testing.T, fixture authorAc
 	source = effective.Source()
 	ctx = correlation.WithSourceArtifactFact(ctx, sourceFact)
 	ctx = authoractivity.WithScope(ctx, authoractivity.BundleScope(authorActivityTestRuntimeInstanceID, hash))
+	ctx = correlation.WithRootAdmission(ctx, rooted.Admission())
 	requireRunFixtureForTest(t, ctx, fixture.store, semanticRunFixture{Origin: semanticScenarioSetupRunOriginForTest(), RunID: runID, BundleHash: hash, Artifact: bundle.SourceArtifact, StartedAt: time.Date(2026, 7, 14, 12, 0, 0, 0, time.UTC)})
 	at := time.Date(2026, 7, 14, 12, 1, 0, 0, time.UTC)
 	event := eventtest.ExistingRunRootIngress(eventID, "start.requested", "test", "", []byte(`{"token":"ownership"}`), 0, runID, events.EventEnvelope{}, at)
@@ -345,7 +350,7 @@ func forkWorkflowOwnershipRequestWithSeedDelivery(t *testing.T, fixture authorAc
 		t.Fatalf("fixture failed to publish exact fixed-revision metadata: %+v", plan.Entities)
 	}
 	fixture.advance()
-	return ctx, prepareSelectedStoreMaterializationForTest(t, ctx, fixture.store, runID, eventID, runfork.RunForkContractSelection{Mode: "selected_contracts"})
+	return ctx, prepareSelectedStoreMaterializationForTest(t, ctx, fixture.store, runID, eventID, runfork.RunForkContractSelection{Mode: "selected_contracts"}, hash)
 }
 
 func requireForkWorkflowOwnershipPreserved(t *testing.T, db *sql.DB, sourceRun, forkRun string) {

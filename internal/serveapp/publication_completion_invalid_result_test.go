@@ -160,7 +160,7 @@ func TestPublicPublicationInvalidAcknowledgedResultBothStores(t *testing.T) {
 				probe := installPublicationCompletionAudit(t, fault == "completion")
 				probe.resultFault, probe.holdRelease = fault, fault == "publication"
 				defer probe.releaseOnce.Do(func() { close(probe.release) })
-				h, hash := startChannelAnchorJourneyRuntime(t, backend, "invalid-publication-result-test", false)
+				h, hash := startPublicationCompletionRuntime(t, backend)
 				params := publicationAuditParams(hash, "invalid-acknowledged-result")
 				first := publicationAuditHTTP(t.Context(), h.rpcEndpoint(), params)
 				if first.err != nil || len(first.rpcError) == 0 || len(first.result) != 0 {
@@ -169,7 +169,7 @@ func TestPublicPublicationInvalidAcknowledgedResultBothStores(t *testing.T) {
 				select {
 				case <-probe.entered:
 				case <-time.After(10 * time.Second):
-					t.Fatal("acknowledged invalid projection dropped its joined consequence")
+					t.Fatalf("acknowledged invalid projection dropped its joined consequence: error=%v rpc=%s result=%s", first.err, first.rpcError, first.result)
 				}
 				probe.mu.Lock()
 				process, native, request, committed, run := probe.process, probe.native, probe.request, probe.committed, probe.run

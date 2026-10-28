@@ -355,7 +355,7 @@ func runCommandLiveRestartJourney(t *testing.T, binary, project string, store go
 			t.Fatalf("dev execution changed retained event/delivery facts for %s", id)
 		}
 	}
-	for _, name := range []string{"inbound.telegram", "inbound.telegram.text_message", "platform.activity_requested", "platform.stage_timer"} {
+	for _, name := range []string{"inbound.telegram.raw", "inbound.telegram.text_message", "platform.activity_requested", "platform.stage_timer"} {
 		if actualEvidence.EventCounts[name] != retainedEvidence.EventCounts[name] {
 			t.Fatalf("dev execution changed retained %s cardinality", name)
 		}
@@ -370,10 +370,10 @@ func TestCommandLiveReceiptUsesExactConfiguredConversation(t *testing.T) {
 	for _, chat := range []string{"42", "424242"} {
 		t.Run(chat, func(t *testing.T) {
 			receipt := fullLifecycleIngressReceipt{Status: "accepted", RunID: "standing-run",
-				FlowPath: "telegram-ingress", Provider: "telegram", ProviderEventID: "1001", PublicationID: "publication",
-				EventIDs: []string{"raw", "normalized"}, EventNames: []string{"inbound.telegram", "inbound.telegram.text_message"}}
+				FlowPath: ".", Provider: "telegram", ProviderEventID: "1001", PublicationID: "publication",
+				EventIDs: []string{"raw", "normalized"}, EventNames: []string{"inbound.telegram.raw", "inbound.telegram.text_message"}}
 			events := []fullLifecycleEvent{
-				{EventID: "raw", EventName: "inbound.telegram", RunID: "standing-run", NoDelivery: &fullLifecycleNoDelivery{Reason: "no_subscriber_by_design"}},
+				{EventID: "raw", EventName: "inbound.telegram.raw", RunID: "standing-run", NoDelivery: &fullLifecycleNoDelivery{Reason: "no_subscriber_by_design"}},
 				{EventID: "normalized", EventName: "inbound.telegram.text_message", RunID: "standing-run", EntityID: "downstream", Payload: map[string]any{"provider_message_reference": float64(1001), "conversation_reference": chat}, Deliveries: []fullLifecycleEventDelivery{{SubscriberType: "agent", SubscriberID: "phrase-bot", Target: fullLifecycleDeliveryTarget{Kind: "materializing_entity", EntityID: "downstream", FlowID: "telegram-chat", FlowInstance: "telegram-chat/instance"}}}},
 			}
 			if _, _, err := fullLifecycleReceiptEvents(events, receipt, 1001, chat); err != nil {

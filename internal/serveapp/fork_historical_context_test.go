@@ -276,7 +276,7 @@ type forkHistoricalSelectedStore interface {
 func admitForkHistoricalSelectedRequest(t *testing.T, ctx context.Context, owner selected.RunFork, loader runforkexecution.SourceArtifactSelectedContractSourceLoader, plan runfork.RunForkPlan, hash string, options runforkexecution.SelectedContractAgentRuntimeOptions) (runforkreadiness.MaterializeRequest, runforkexecution.LoadedSelectedContractSource) {
 	t.Helper()
 	selection := runfork.RunForkContractSelection{Mode: runfork.RunForkContractSelectionModeSelectedContracts}
-	loaded, err := loader.LoadRunForkSelectedContractSourceForRequest(ctx, runforkexecution.SelectedContractSourceLoadRequest{SourceRunID: plan.SourceRunID, BundleHash: hash, Selection: selection})
+	loaded, err := loader.LoadRunForkSelectedContractSourceForRequest(ctx, runforkexecution.SelectedContractSourceLoadRequest{Responsibility: runforkexecution.FreshSelectedSource(hash), BundleHash: hash, Selection: selection})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -287,9 +287,18 @@ func admitForkHistoricalSelectedRequest(t *testing.T, ctx context.Context, owner
 			}
 		})
 	}
+	operation, err := (runfork.ForkOperationRequest{
+		OperationID: uuid.NewString(), Actor: "selected-fork-fixture", TransportHash: "selected-fork-fixture",
+		SourceRunID: plan.SourceRunID, ForkEventID: plan.ForkPoint.EventID,
+		TargetBundleHash: loaded.SourceArtifactFact.BundleHash(), TargetRootReference: loaded.RootedSource.Admission().Reference(),
+		AllowSourceFreeze: false, ContractSelection: selection,
+	}).BindResolvedPoint(plan.ForkPoint)
+	if err != nil {
+		t.Fatal(err)
+	}
 	prepared, err := owner.Prepare(ctx, runforkexecution.SelectedContractExecutionRequest{
 		SourceRunID: plan.SourceRunID, At: plan.ForkPoint.EventID, ExpectedBundleHash: hash,
-		ContractSelection: selection, SourceLoader: loader, AgentRuntime: options,
+		ContractSelection: selection, SourceLoader: loader, AgentRuntime: options, ForkOperation: &operation,
 	})
 	if err != nil {
 		t.Fatal(err)

@@ -72,6 +72,7 @@ func TestTerminateDiskAndReconstructedSourceAgree(t *testing.T) {
 	for _, raw := range []string{"true", "false", "null", "''", "'true'", "[]", "{}"} {
 		t.Run(raw, func(t *testing.T) {
 			root := t.TempDir()
+			writeFixtureFile(t, filepath.Join(root, "manifest.yaml"), "version: 1.0.0\nplatform_version: '*'\n")
 			path := filepath.Join(root, "nodes.yaml")
 			body := "worker:\n  event_handlers:\n    work.finished:\n      advances_to: done\n      terminate: " + raw + "\n"
 			writeFixtureFile(t, path, body)

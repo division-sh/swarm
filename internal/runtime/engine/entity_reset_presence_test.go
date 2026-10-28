@@ -45,7 +45,8 @@ func TestEntityResetProjectionUsesWholeNodeOwnership(t *testing.T) {
 	for _, variant := range []string{"normal", "immutable", "nonempty refinement"} {
 		t.Run(variant, func(t *testing.T) {
 			root := t.TempDir()
-			writeEngineProjectionFixtureFile(t, filepath.Join(root, "schema.yaml"), "name: node-reset\n")
+			writeEngineProjectionFixtureFile(t, filepath.Join(root, "manifest.yaml"), "version: 1.0.0\nplatform_version: '*'\n")
+			writeEngineProjectionFixtureFile(t, filepath.Join(root, "schema.yaml"), "stages: []\n")
 			writeEngineProjectionFixtureFile(t, filepath.Join(root, "types.yaml"), "types:\n  Item:\n    id: text\n")
 			entities := `work:
   first:

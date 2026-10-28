@@ -705,10 +705,10 @@ func testContractFrontierTemplateSource(t testing.TB) semanticview.Source {
 	t.Helper()
 	root := canonicalrouting.CopyInstanceDeclarations(t, "review")
 	for path, body := range map[string]string{
-		"schema.yaml":        "name: test-workflow\n",
+		"schema.yaml":        "stages: []\n",
 		"review/schema.yaml": "instance: instance_key\n",
 		"review/events.yaml": "task.started:\n",
-		"review/nodes.yaml":  "reviewer:\n  execution_type: system_node\n  subscribes_to: [task.started]\n  produces: [task.started]\n",
+		"review/nodes.yaml":  "reviewer:\n  execution_type: system_node\n  subscribes_to: [task.started]\n  produces: [task.started]\n", "manifest.yaml": "version: 1.0.0\nplatform_version: '*'\n", "review/manifest.yaml": "version: 1.0.0\nplatform_version: '*'\n",
 	} {
 		if err := os.WriteFile(filepath.Join(root, path), []byte(body), 0600); err != nil {
 			t.Fatal(err)

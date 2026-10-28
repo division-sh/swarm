@@ -67,9 +67,9 @@ func (s *postCommitRegistrationStore) SettleExternalAttempt(ctx context.Context,
 }
 
 func TestProviderRegistrationAcknowledgedMutationCleanupKeepsOneDispatch(t *testing.T) {
-	tool := packfixture.ConnectorTool(t, "telegram", "telegram.apply_webhook").Tool
+
 	input := map[string]any{"callback_url": "https://hooks.example.test/webhooks/support/telegram?swarm_callback_generation=current"}
-	credentials := map[string]any{"telegram_bot_token": "bot-secret", "webhook_signing_secret": "signing-secret"}
+	credentials := map[string]any{"telegram.telegram_bot_token": "bot-secret", "telegram.webhook_signing_secret": "signing-secret"}
 	for _, phase := range []runtimeeffects.MutationPhase{runtimeeffects.MutationLaunch, runtimeeffects.MutationObservation} {
 		t.Run(string(phase), func(t *testing.T) {
 			harness := effecttest.New()
@@ -90,7 +90,7 @@ func TestProviderRegistrationAcknowledgedMutationCleanupKeepsOneDispatch(t *test
 				}
 				return registrationResponse(http.StatusOK, `{"ok":true,"result":true}`), nil
 			})}}
-			result, err := executor.Apply(ctx, registrationOperationForTest(t, packs.RegistrationOperationApply, "telegram.apply_webhook", tool), input, credentials, map[string]string{"binding_id": "hitl", "intent_id": uuid.NewString()})
+			result, err := executor.Apply(ctx, registrationOperationForTest(t, packs.RegistrationOperationApply, "telegram.apply_webhook"), input, credentials, map[string]string{"binding_id": "hitl", "intent_id": uuid.NewString()})
 			if result.Pending == nil || !errors.Is(err, cleanup) || !registrationPhaseDiagnostic(err, phase, result.Pending.Attempt()) || !result.Acknowledged || result.Output == nil {
 				t.Fatalf("acknowledged %s result = %+v, %v", phase, result, err)
 			}
@@ -113,7 +113,7 @@ func TestProviderRegistrationAcknowledgedMutationCleanupKeepsOneDispatch(t *test
 func TestChannelConfirmationAcknowledgedMutationCleanupKeepsOneDispatch(t *testing.T) {
 	tool := packfixture.ConnectorTool(t, "telegram", "telegram.send_interactive").Tool
 	input := map[string]any{"chat_id": "42", "text": "Swarm channel connected.", "reply_markup": map[string]any{"inline_keyboard": []any{}}}
-	credentials := map[string]any{"telegram_bot_token": "bot-secret"}
+	credentials := map[string]any{"telegram.telegram_bot_token": "bot-secret"}
 	for _, phase := range []runtimeeffects.MutationPhase{runtimeeffects.MutationLaunch, runtimeeffects.MutationObservation} {
 		t.Run(string(phase), func(t *testing.T) {
 			harness := &channelConfirmationHarness{Harness: effecttest.New()}
@@ -178,14 +178,14 @@ func TestRegistrationAcknowledgedLaunchGuardPreventsDispatch(t *testing.T) {
 					ctx = serveRegistrationTestContext(harness, "blocked-"+reason)
 					toolID = "telegram.apply_webhook"
 					input = map[string]any{"callback_url": "https://hooks.example.test/webhooks/support/telegram?swarm_callback_generation=current"}
-					credentials = map[string]any{"telegram_bot_token": "bot-secret", "webhook_signing_secret": "signing-secret"}
+					credentials = map[string]any{"telegram.telegram_bot_token": "bot-secret", "telegram.webhook_signing_secret": "signing-secret"}
 				} else {
 					channelHarness := &channelConfirmationHarness{Harness: harness}
 					store.Store = channelHarness
 					ctx = channelConfirmationTestContext(channelHarness, uuid.NewString())
 					toolID = "telegram.send_interactive"
 					input = map[string]any{"chat_id": "42", "text": "Swarm channel connected.", "reply_markup": map[string]any{"inline_keyboard": []any{}}}
-					credentials = map[string]any{"telegram_bot_token": "bot-secret"}
+					credentials = map[string]any{"telegram.telegram_bot_token": "bot-secret"}
 				}
 				if reason == "canceled" {
 					var cancel context.CancelFunc
@@ -201,7 +201,7 @@ func TestRegistrationAcknowledgedLaunchGuardPreventsDispatch(t *testing.T) {
 				tool := packfixture.ConnectorTool(t, "telegram", toolID).Tool
 				var err error
 				if kind == "provider_registration" {
-					result, applyErr := executor.Apply(ctx, registrationOperationForTest(t, packs.RegistrationOperationApply, toolID, tool), input, credentials, map[string]string{"binding_id": "hitl", "intent_id": uuid.NewString()})
+					result, applyErr := executor.Apply(ctx, registrationOperationForTest(t, packs.RegistrationOperationApply, toolID), input, credentials, map[string]string{"binding_id": "hitl", "intent_id": uuid.NewString()})
 					if result.Pending != nil || result.Acknowledged || result.Output != nil {
 						t.Fatalf("no-dispatch result=%+v", result)
 					}

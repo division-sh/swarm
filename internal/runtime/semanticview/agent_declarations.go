@@ -60,7 +60,6 @@ func AgentDeclarations(source Source) []AgentDeclaration {
 // AgentDeclarationsForOwner returns the complete declaration set owned by one
 // semantic flow. The explicit root is ".".
 func AgentDeclarationsForOwner(source Source, ownerFlowID string) []AgentDeclaration {
-	ownerFlowID = strings.TrimSpace(ownerFlowID)
 	declarations := AgentDeclarations(source)
 	out := make([]AgentDeclaration, 0, len(declarations))
 	for _, declaration := range declarations {

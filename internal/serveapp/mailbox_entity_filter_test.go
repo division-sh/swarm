@@ -2,6 +2,7 @@ package serveapp
 
 import (
 	"encoding/json"
+	"path/filepath"
 	"testing"
 
 	"github.com/division-sh/swarm/internal/runtime/core/identitytest"
@@ -29,7 +30,12 @@ type servedEntityFilterList struct {
 
 func startServedMailboxEntityFilterProof(t *testing.T, backend servedparity.Backend) (servedControlProofRuntime, []string, []string, func(map[string]any) servedEntityFilterList, map[string]bool) {
 	t.Helper()
-	rt := startServedControlProofRuntimeWithFixture(t, backend, func(t *testing.T) string { return canonicalrouting.CopyMailboxEntityFilter(t) })
+	rt := startServedControlProofRuntimeWithFixture(t, backend, func(t *testing.T) string {
+		credentialPath := filepath.Join(t.TempDir(), "credentials.json")
+		t.Setenv("SWARM_CREDENTIALS_FILE", credentialPath)
+		writeChannelOnboardingLiveToolCredentials(t, credentialPath)
+		return canonicalrouting.CopyMailboxEntityFilter(t)
+	})
 	var runs, entities, events []string
 	for i := 0; i < 3; i++ {
 		published := requireServedEventPublishRPCResult(t, rt.Endpoint, map[string]any{

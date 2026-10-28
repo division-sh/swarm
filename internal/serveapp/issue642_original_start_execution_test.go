@@ -11,6 +11,7 @@ import (
 	"github.com/division-sh/swarm/internal/apiv1"
 	"github.com/division-sh/swarm/internal/durabledata"
 	"github.com/division-sh/swarm/internal/operatorread"
+	"github.com/division-sh/swarm/internal/runtime/correlation"
 	"github.com/division-sh/swarm/internal/runtime/runfork"
 	"github.com/division-sh/swarm/internal/runtime/runforkexecution"
 	"github.com/division-sh/swarm/internal/runtime/testfixtures/canonicalrouting"
@@ -80,11 +81,15 @@ func TestIssue642OriginalStartFirstTurnExecutesBothStores(t *testing.T) {
 			if err != nil {
 				t.Fatal(err)
 			}
+			root, present, err := correlation.RootAdmissionFromContext(ctx)
+			if err != nil || !present || root.BundleHash() != rt.BundleHash {
+				t.Fatalf("original-start target root: present=%t error=%v", present, err)
+			}
 			selection := runfork.RunForkContractSelection{Mode: runfork.RunForkContractSelectionModeSelectedContracts}
 			operation := runfork.ForkOperationRequest{
 				OperationID: uuid.NewString(), Actor: "original-first-turn-proof", IdempotencyKey: uuid.NewString(),
 				TransportHash: "original-first-turn-proof", SourceRunID: started.RunID, AtStart: true,
-				TargetBundleHash: rt.BundleHash, ContractSelection: selection,
+				TargetBundleHash: rt.BundleHash, TargetRootReference: root.Reference(), ContractSelection: selection,
 			}
 			request := runforkexecution.SelectedContractExecutionRequest{
 				SourceRunID: started.RunID, AtStart: true, ExpectedBundleHash: rt.BundleHash,

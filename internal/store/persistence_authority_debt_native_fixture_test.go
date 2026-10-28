@@ -17,16 +17,16 @@ func debtReviewedNativeSelectedImport(path, alias string, file *ast.File) bool {
 	var pins map[string]string
 	switch path {
 	case "internal/runtime/pipeline/fork_fan_out_crash_external_test.go":
-		pins = map[string]string{"TestIssue642MixedFanOutCrashRestartBothStores": "4274e69f3146a7a1001c8775788d0898466092ba49f2e9d01bfc398fdf9ab330"}
+		pins = map[string]string{"TestIssue642MixedFanOutCrashRestartBothStores": "b451555fab08deea56a83f724f7cf0077d78821eee240d253b6568e93a2e19f0"}
 	case "internal/runtime/pipeline/fork_fan_out_refork_external_test.go":
 		pins = map[string]string{"proveMixedFanOutChildRefork": "ee5d1ddc90f8d518bd58a34dfa1ebd0462ac0f8b969c9e28167877e18d53dbe9"}
 	case "internal/runtime/pipeline/fork_published_barrier_crash_external_test.go":
 		pins = map[string]string{
 			"publishBarrierCrashCheckpoint":       "3e68bccee6ade3f449a47c7b4fe147082dc2e03f1afb3a1366d852381ddd2fc0",
-			"verifyBarrierCrashRestartBothStores": "da29852fb88b258304cf3beba07eb96f41e9b06878a53970940fc18cabeb7ada",
+			"verifyBarrierCrashRestartBothStores": "7bd132be01e1625fb47479849cec3c9a0158e905e492f346f98992f850807526",
 		}
 	case "internal/runtime/pipeline/fork_published_barrier_failure_external_test.go":
-		pins = map[string]string{"verifyPublishedBarrierCompletionFailure": "52209d08d23aedab1abe32b298ce86a597af174dde4490239cf740106de69fee"}
+		pins = map[string]string{"verifyPublishedBarrierCompletionFailure": "9f11b5dea9efb5084ffe34e8054132e92abab1862d80a84a50c2d24ff6d2f516"}
 	default:
 		return false
 	}

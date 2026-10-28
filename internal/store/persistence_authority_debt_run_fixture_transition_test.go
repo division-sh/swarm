@@ -175,6 +175,20 @@ func TestPersistenceAuthorityDebtRunFixtureSignatureTransitionIsExact(t *testing
 			}
 		}
 	})
+	t.Run("selected-binding-root-arguments", func(t *testing.T) {
+		pair := debtSelectedBindingRootArgumentTransition()
+		before, after := debtControlSet(pair[0]), debtControlSet(pair[1])
+		if failures := authorityDebtRatchet(after, before, before, before); len(failures) != 0 {
+			t.Fatal(failures)
+		}
+		if failures := authorityDebtRatchet(before, before, after, after); len(failures) == 0 {
+			t.Fatal("reverse rooted INSERT correspondence admitted")
+		}
+		if failures := authorityDebtRatchet(after, after, before, after); len(failures) == 0 {
+			t.Fatal("rooted INSERT correspondence admitted without the old source occurrence")
+		}
+		debtRunFixtureSignatureHostileControls(t, pair, before, after, false)
+	})
 	if authorityDebtCount(old) != 9 || authorityDebtCount(current) != 9 {
 		t.Fatal("signature accounting must preserve all nine distinct debt occurrences")
 	}
@@ -239,6 +253,29 @@ func debtRunFixtureSignatureHostileControls(t *testing.T, pair [2]authorityDebtS
 			states[slot] = maps.Clone(states[slot])
 			states[slot][pair[0].identity()] = pair[0]
 			states[slot][pair[1].identity()] = pair[1]
+			if landed && slot == 2 {
+				for _, reviewed := range debtW4LiveFixtureTransfers() {
+					if pair != reviewed {
+						continue
+					}
+					// #2791/6453734119: removing already-counted OLD debt is
+					// downward progress, not a coexistence normalization.
+					original := [4]map[string]authorityDebtSite{maps.Clone(states[0]), maps.Clone(states[1]), maps.Clone(states[2]), maps.Clone(states[3])}
+					head, base, source := debtW4LiveFixtureComparisons(states[0], states[1], states[2], states[3])
+					if !maps.Equal(head, original[1]) || !maps.Equal(base, original[2]) || !maps.Equal(source, original[3]) {
+						t.Fatal("W4 coexistence normalized comparison inputs")
+					}
+					for index := range states {
+						if !maps.Equal(states[index], original[index]) {
+							t.Fatal("W4 coexistence mutated trusted input")
+						}
+					}
+					if failures := authorityDebtRatchet(states[0], states[1], states[2], states[3]); len(failures) != 0 {
+						t.Fatal("downward OLD deletion refused: ", failures)
+					}
+					return
+				}
+			}
 			if failures := authorityDebtRatchet(states[0], states[1], states[2], states[3]); len(failures) == 0 {
 				t.Fatal("old/new coexistence admitted")
 			}
@@ -259,7 +296,11 @@ func debtRunFixtureSignatureHostileControls(t *testing.T, pair [2]authorityDebtS
 			case "argument":
 				changed.Resolved = strings.Replace(changed.Resolved, "|arg=string|", "|arg=int|", 1)
 			case "receiver":
-				changed.Resolved = strings.Replace(changed.Resolved, "|recv=<nil>|", "|recv=*database/sql.DB|", 1)
+				if strings.Contains(changed.Resolved, "|recv=*database/sql.DB|") {
+					changed.Resolved = strings.Replace(changed.Resolved, "|recv=*database/sql.DB|", "|recv=*database/sql.Conn|", 1)
+				} else {
+					changed.Resolved = strings.Replace(changed.Resolved, "|recv=<nil>|", "|recv=*database/sql.DB|", 1)
+				}
 			case "result":
 				changed.Resolved += ",error"
 			case "family":

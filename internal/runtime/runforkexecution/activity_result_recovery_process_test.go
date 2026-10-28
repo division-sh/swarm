@@ -3,6 +3,7 @@ package runforkexecution
 import (
 	"context"
 	"encoding/json"
+	"github.com/division-sh/swarm/internal/sourceartifact"
 	"net/http"
 	"net/http/httptest"
 	"os"
@@ -228,7 +229,7 @@ func runSelectedActivityResultCrashHelper(t *testing.T, ctx context.Context, sel
 		SourceLoader: &fakeSelectedContractSourceLoader{loaded: loaded}, ContractSelection: selection,
 		AgentRuntime: SelectedContractAgentRuntimeOptions{ExecutionPosture: executionposture.Live, ProcessCapability: capability},
 		ForkOperation: &runfork.ForkOperationRequest{OperationID: uuid.NewString(), Actor: "retained-crash", IdempotencyKey: "fixed-cut", TransportHash: "retained-crash-transport",
-			SourceRunID: sourceRun, ForkEventID: requestID, TargetBundleHash: loaded.SourceArtifactFact.BundleHash(), AllowSourceFreeze: true, ContractSelection: selection}}
+			SourceRunID: sourceRun, ForkEventID: requestID, TargetBundleHash: loaded.SourceArtifactFact.BundleHash(), TargetRootReference: loaded.RootedSource.Admission().Reference(), AllowSourceFreeze: true, ContractSelection: selection}}
 	if advanced {
 		_, err := q1ExecuteSelectedPhaseComponent(t, ctx, execution)
 		t.Fatalf("selected result consumer returned before its physical commit checkpoint: %v", err)
@@ -357,7 +358,7 @@ func proveSelectedActivityResultCrashRecovery(t *testing.T, cut string) {
 			if err != nil {
 				t.Fatal(err)
 			}
-			loaded, err := loader.LoadRunForkSelectedContractSourceForRequest(ctx, SelectedContractSourceLoadRequest{SourceRunID: checkpoint.ForkRun, Selection: binding.ContractSelection})
+			loaded, err := loader.LoadRunForkSelectedContractSourceForRequest(ctx, SelectedContractSourceLoadRequest{Responsibility: RetainedForkSource(checkpoint.ForkRun), Selection: binding.ContractSelection})
 			if err != nil {
 				t.Fatal(err)
 			}
@@ -365,7 +366,8 @@ func proveSelectedActivityResultCrashRecovery(t *testing.T, cut string) {
 			recovered, err := owner.RecoverSelectedForkContexts(ctx, effects.NewRecoveryRequest(time.Now().UTC(), executionposture.Live), SelectedForkRecoveryEnvironment{
 				SourceLoader: loader, AgentRuntime: SelectedContractAgentRuntimeOptions{ExecutionPosture: executionposture.Live, ProcessCapability: capability},
 				LiveContexts: contexts, LiveRuns: selected.(runlifecycle.LiveRunReader),
-				AcquireLiveRuntime: func(ctx context.Context, hash string) (*rootruntime.RuntimeContextUse, error) {
+				AcquireLiveRuntime: func(ctx context.Context, reference sourceartifact.RootAdmissionReference) (*rootruntime.RuntimeContextUse, error) {
+					hash := reference.BundleHash
 					use, _, err := contexts.AcquireBundleHash(ctx, hash)
 					return use, err
 				}})

@@ -79,7 +79,7 @@ func TestAskHumanAcknowledgedPostCommitErrorKeepsCardWithoutDuplicateBothStores(
 				t.Fatal(err)
 			}
 			actor.Identity = agentidentitytest.Declared(t, plan.AgentID, plan.OwnerURI, flowPath, "provider", flowPath)
-			ctx, _, _ := seedReplyToolContext(t, selected)
+			ctx, _, _ := seedReplyToolContext(t, selected, source)
 			ctx = runtimeeffects.WithLogicalOperationIdentity(ctx, "human-task-ack-turn")
 			ctx = runtimeeffects.WithLogicalOperationIdentitySegment(ctx, "tool_call:1:0:ask_human")
 			ctx, actor, loader := humanTaskConstructedRequester(t, ctx, selected, source, actor)

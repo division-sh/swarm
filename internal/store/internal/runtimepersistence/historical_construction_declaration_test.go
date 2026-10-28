@@ -10,6 +10,7 @@ import (
 
 	"github.com/division-sh/swarm/internal/runtime/canonicaljson"
 	"github.com/division-sh/swarm/internal/runtime/core/flowidentity"
+	"github.com/division-sh/swarm/internal/runtime/correlation"
 	"github.com/division-sh/swarm/internal/runtime/pipeline"
 	"github.com/division-sh/swarm/internal/runtime/runlifecycle"
 	"github.com/division-sh/swarm/internal/runtime/semanticview"
@@ -290,11 +291,18 @@ func TestHistoricalDeclarationBatchNeverPromotesEvidenceToSourceAuthorityBothSto
 			}); err != nil {
 				t.Fatal(err)
 			}
-			sourceartifactfixture.RequireArtifact(t, f.ctx, f.store.(sourceartifactfixture.Writer), foreign.bundle.SourceArtifact)
-			fact := mustStoreTestSourceArtifactFact(foreign.bundle.SourceArtifact.BundleHash())
-			if _, err := f.store.(runlifecycle.OperationOwner).ReviseRunSource(f.ctx, runlifecycle.SourceRevisionRequest{RunID: f.owner.RunID, Source: fact}); err != nil {
+			rooted, err := foreign.bundle.RootedSource()
+			if err != nil {
 				t.Fatal(err)
 			}
+			if _, err := f.store.(sourceartifactfixture.RootedWriter).EnsureRootedSource(f.ctx, rooted); err != nil {
+				t.Fatal(err)
+			}
+			fact := mustStoreTestSourceArtifactFact(foreign.bundle.SourceArtifact.BundleHash())
+			if _, err := f.store.(runlifecycle.OperationOwner).ReviseRunSource(f.ctx, runlifecycle.SourceRevisionRequest{RunID: f.owner.RunID, Source: fact, RootAdmission: rooted.Admission()}); err != nil {
+				t.Fatal(err)
+			}
+			f.ctx = correlation.WithRootAdmission(correlation.WithSourceArtifactFact(f.ctx, fact), rooted.Admission())
 			scope, err := pipeline.NewFlowInstanceLookupScope(incompatible, fact, f.owner.RunID, []string{"review"}, nil)
 			if err != nil {
 				t.Fatal(err)

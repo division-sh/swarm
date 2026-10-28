@@ -12,6 +12,7 @@ import (
 	runtimemanager "github.com/division-sh/swarm/internal/runtime/manager"
 	"github.com/division-sh/swarm/internal/store/testutil/agentfixture"
 	"github.com/division-sh/swarm/internal/testutil"
+	"github.com/division-sh/swarm/internal/testutil/sourceartifactfixture"
 	"github.com/google/uuid"
 )
 
@@ -34,14 +35,16 @@ func TestLifecycleDiagnosticDisjointSourcesIgnoreAmbientAuthority(t *testing.T) 
 			want := map[string]string{}
 			for _, sourceName := range []string{"diagnostic-source-left", "diagnostic-source-right"} {
 				artifact := storeTestSourceArtifact(sourceName)
-				seedStoreTestPersistedArtifact(t, db, artifact)
+				rooted, _ := sourceartifactfixture.Rooted(t, sourceName, artifact)
+				sourceartifactfixture.RequireArtifact(t, context.Background(), selected, rooted.Artifact())
 				source := mustStoreTestSourceArtifactFact(artifact.BundleHash())
 				runID := uuid.NewString()
 				identity := mustTestAgentIdentityForRun(runID, "same-worker", "global")
 				config := testOperatorAgentConfigForIdentity(identity, "worker")
 				config.ExecutionMode = executionmode.Live
 				config = withRuntimePersistenceTestIntent(t, config)
-				if err := agentfixture.UpsertStaticForSource(t, testAuthorActivityContextForBundle(artifact.BundleHash()), selected, runtimemanager.PersistedAgent{
+				owned := runtimecorrelation.WithRootAdmission(testAuthorActivityContextForBundle(artifact.BundleHash()), rooted.Admission())
+				if err := agentfixture.UpsertStaticForSource(t, owned, selected, runtimemanager.PersistedAgent{
 					Config: config, Status: "active", StartedAt: time.Now().UTC(),
 				}, source); err != nil {
 					t.Fatal(err)

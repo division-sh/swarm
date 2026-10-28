@@ -8,13 +8,18 @@ import (
 	"testing"
 	"time"
 
+	"github.com/division-sh/swarm/internal/config"
 	"github.com/division-sh/swarm/internal/events"
 	"github.com/division-sh/swarm/internal/events/eventtest"
 	"github.com/division-sh/swarm/internal/packadmission"
 	"github.com/division-sh/swarm/internal/runtime/authoractivity"
 	"github.com/division-sh/swarm/internal/runtime/contracts"
+	"github.com/division-sh/swarm/internal/runtime/core/worklifetime"
 	"github.com/division-sh/swarm/internal/runtime/correlation"
+	"github.com/division-sh/swarm/internal/runtime/effects"
+	"github.com/division-sh/swarm/internal/runtime/executionposture"
 	"github.com/division-sh/swarm/internal/runtime/fanoutobligation"
+	llmselection "github.com/division-sh/swarm/internal/runtime/llm/selection"
 	"github.com/division-sh/swarm/internal/runtime/pipeline"
 	"github.com/division-sh/swarm/internal/runtime/runfork"
 	"github.com/division-sh/swarm/internal/runtime/runforkexecution"
@@ -34,7 +39,7 @@ func TestIssue642SettledFanOutSelectedRemovalAndReforkBothStores(t *testing.T) {
 					if sqlite, ok := opened.store.(*SQLiteRuntimeStore); ok {
 						sqlite.nowFn = time.Now
 					}
-					forks := opened.store.(runForkSelectedLifecycleStore)
+					forks := opened.store.(selectedActivityProjectionStore)
 					pump := opened.store.(selectedFanOutOwner)
 					at := time.Now().UTC().Truncate(time.Microsecond)
 					ctx, fixture := seedDeclaredForkFanOutFixture(t, backend.name, opened, 2, at)
@@ -74,63 +79,114 @@ func TestIssue642SettledFanOutSelectedRemovalAndReforkBothStores(t *testing.T) {
 					if (len(selected.FanOutPlans()) == 0) != (variant == "removed") {
 						t.Fatal("fixture did not change/remove the selected fan-out declaration")
 					}
-					if _, err := opened.store.(selectedSourceArtifactStore).EnsureSourceArtifact(ctx, bundle.SourceArtifact); err != nil {
+					rooted, err := bundle.RootedSource()
+					if err != nil {
+						t.Fatal(err)
+					}
+					if _, err := opened.store.(selectedSourceArtifactStore).EnsureRootedSource(ctx, rooted); err != nil {
 						t.Fatal(err)
 					}
 					target, err := correlation.NewSourceArtifactFact(bundle.SourceArtifact.BundleHash())
 					if err != nil {
 						t.Fatal(err)
 					}
-					original := originalCarriageForRun(t, opened.store, fixture.runID)
-					request := runfork.RunForkMaterializeRequest{SourceRunID: fixture.runID, At: cut.ID(), SourceArtifactFact: target, OriginalLoopCarriage: original}
-					child, err := forks.MaterializeRunFork(ctx, request)
-					if err != nil {
-						t.Fatalf("settled source required an executable selected declaration: %v", err)
+					if target.BundleHash() == fixture.bundleHash {
+						t.Fatal("selected fan-out variant must change the captured source")
 					}
-					if reused, err := forks.RequireMaterializedRunFork(ctx, child.ForkRunID, request); err != nil || reused.ForkRunID != child.ForkRunID {
-						t.Fatalf("exact settled-history readback: %+v %v", reused, err)
-					}
-					requireSettledFanOutHistoryForTest(t, ctx, opened.store, child.ForkRunID, fixture.bundleHash)
-					activation, err := forks.ActivateRunFork(ctx, runfork.RunForkActivateRequest{ForkRunID: child.ForkRunID, AllowSourceFreeze: true,
-						OriginalLoopCarriage: original, HistoricalReplayExecutionAdmitter: runforkexecution.HistoricalReplayExecutionAdmitter{}})
-					if err != nil || !activation.Activated {
-						t.Fatalf("activate settled history: %+v %v", activation, err)
-					}
-					if _, _, found, err := pump.ClaimFanOutIntent(ctx, pipeline.FanOutClaimRequest{Owner: "must-not-reissue", BundleHash: target.BundleHash(), Now: time.Now().UTC(), Lease: time.Minute}); err != nil || found {
-						t.Fatalf("settled child reissued work: %t %v", found, err)
-					}
-					childCtx := correlation.WithSourceArtifactFact(ctx, target)
-					scope, err := authoractivity.BundleScopeForTarget(childCtx, target.BundleHash())
+					selectedCtx := correlation.WithRootAdmission(correlation.WithSourceArtifactFact(ctx, target), rooted.Admission())
+					scope, err := authoractivity.BundleScopeForTarget(selectedCtx, target.BundleHash())
 					if err != nil {
 						t.Fatal(err)
 					}
-					childCtx = authoractivity.WithScope(childCtx, scope)
+					selectedCtx = authoractivity.WithScope(selectedCtx, scope)
+					selection := runfork.RunForkContractSelection{Mode: runfork.RunForkContractSelectionModeBundleHash, BundleHash: target.BundleHash()}
+					storeTestWorkOwner(t)
+					value, _ := storeTestWorkFixtures.Load(t)
+					work := value.(*storeTestWorkFixture)
+					selectedCtx = worklifetime.WithProcess(selectedCtx, work.process)
+					capability := selectedMaterializationProcessForTest(t, work, opened.store)
+					// Startup is performed once, before the live child and its refork.
+					preparationOwner := selectedStorePreparationOwnerForTest(t, opened.store)
+					if err := preparationOwner.BindSelectedProcess(selectedCtx, work.process, capability); err != nil {
+						t.Fatal(err)
+					}
+					t.Cleanup(func() {
+						if err := preparationOwner.RetireSelectedContexts(context.Background()); err != nil {
+							t.Error(err)
+						}
+					})
+					if _, err := preparationOwner.RecoverSelectedForkContexts(selectedCtx, effects.NewRecoveryRequest(time.Now().UTC(), executionposture.Live), runforkexecution.SelectedForkRecoveryEnvironment{}); err != nil {
+						t.Fatal(err)
+					}
+					preparationRequest := runforkexecution.SelectedContractExecutionRequest{
+						SourceRunID: fixture.runID, At: cut.ID(), ContractSelection: selection, ExpectedBundleHash: target.BundleHash(),
+						SourceLoader: runforkexecution.SourceArtifactSelectedContractSourceLoader{RepoRoot: repo, Store: opened.store.(runforkexecution.SourceArtifactSelectedContractSourceStore)},
+						AgentRuntime: runforkexecution.SelectedContractAgentRuntimeOptions{
+							ProcessCapability: capability, ExecutionPosture: executionposture.Live,
+							Config: &config.Config{LLM: config.LLMConfig{Backend: llmselection.BackendAnthropic}},
+						},
+					}
+					prepared, err := preparationOwner.Prepare(selectedCtx, preparationRequest)
+					if err != nil {
+						t.Fatal(err)
+					}
+					t.Cleanup(func() {
+						if err := prepared.Close(); err != nil {
+							t.Error(err)
+						}
+					})
+					request, err := prepared.MaterializationRequest()
+					if err != nil {
+						t.Fatal(err)
+					}
+					request.ForkOperation = &runfork.ForkOperationRequest{
+						OperationID: uuid.NewString(), Actor: "bearer:settled-fan-out-proof", IdempotencyKey: uuid.NewString(),
+						TransportHash: "sha256:settled-fan-out-proof", SourceRunID: fixture.runID, ForkEventID: cut.ID(),
+						TargetBundleHash: target.BundleHash(), TargetRootReference: rooted.Admission().Reference(),
+						ContractSelection: selection, AllowSourceFreeze: true,
+					}
+					child, err := forks.MaterializeRunForkForSelectedContractExecution(selectedCtx, request)
+					if err != nil {
+						t.Fatalf("settled source required an executable selected declaration: %v", err)
+					}
+					readback := request
+					readback.ForkOperation = nil
+					if reused, err := forks.RequireMaterializedRunForkForSelectedContractExecution(selectedCtx, child.ForkRunID, readback); err != nil || reused.ForkRunID != child.ForkRunID {
+						t.Fatalf("exact settled-history readback: %+v %v", reused, err)
+					}
+					requireSettledFanOutHistoryForTest(t, selectedCtx, opened.store, child.ForkRunID, fixture.bundleHash)
+					childCtx, selectedOwner, _ := admitSelectedForkFanOutForTest(t, selectedCtx, opened, selected, child, request)
+					candidate := claim.Key
+					candidate.RunID = child.ForkRunID
+					if _, _, found, err := selectedOwner.ClaimFanOutIntent(childCtx, pipeline.FanOutClaimRequest{Owner: "must-not-reissue", BundleHash: target.BundleHash(), Candidate: &candidate, Now: time.Now().UTC(), Lease: time.Minute}); err != nil || found {
+						t.Fatalf("settled child reissued work: %t %v", found, err)
+					}
 					checkpoint := eventtest.ExistingRunRootIngressWithRoutingSource(uuid.NewString(), "fork.refork-cut", "operator", "", []byte(`{}`), 0, child.ForkRunID, events.EventEnvelope{}, eventtest.RootRoutingSource(child.ForkRunID), at.Add(4*time.Second))
 					if err := insertCanonicalEventRecordFixture(childCtx, opened.store, checkpoint); err != nil {
 						t.Fatal(err)
 					}
 					captureFanOutBarrierForkRevision(t, childCtx, opened.db, child.ForkRunID, backend.name == "postgres")
-					primary := originalCarriageForRun(t, opened.store, child.ForkRunID)
-					secondRequest := runfork.RunForkMaterializeRequest{SourceRunID: child.ForkRunID, At: checkpoint.ID(), OriginalLoopCarriage: primary}
-					if _, err := forks.MaterializeRunFork(childCtx, secondRequest); err == nil {
-						t.Fatal("refork inferred archived meaning from the current selected artifact")
-					}
-					loader := runforkexecution.SourceArtifactSelectedContractSourceLoader{RepoRoot: repo, Store: opened.store.(runforkexecution.SourceArtifactSelectedContractSourceStore)}
-					archive, err := loader.LoadRunForkSelectedContractSourceForRequest(childCtx, runforkexecution.SelectedContractSourceLoadRequest{
-						BundleHash: fixture.bundleHash, Selection: runfork.RunForkContractSelection{Mode: runfork.RunForkContractSelectionModeBundleHash, BundleHash: fixture.bundleHash}})
+					preparationRequest.SourceRunID, preparationRequest.At = child.ForkRunID, checkpoint.ID()
+					secondPrepared, err := preparationOwner.Prepare(childCtx, preparationRequest)
 					if err != nil {
 						t.Fatal(err)
 					}
 					t.Cleanup(func() {
-						if err := archive.Cleanup(); err != nil {
+						if err := secondPrepared.Close(); err != nil {
 							t.Error(err)
 						}
 					})
-					secondRequest.OriginalLoopCarriage, err = primary.WithFanOutHistory(archive.Source)
+					secondRequest, err := secondPrepared.MaterializationRequest()
 					if err != nil {
 						t.Fatal(err)
 					}
-					second, err := forks.MaterializeRunFork(childCtx, secondRequest)
+					secondRequest.ForkOperation = &runfork.ForkOperationRequest{
+						OperationID: uuid.NewString(), Actor: "bearer:settled-fan-out-proof", IdempotencyKey: uuid.NewString(),
+						TransportHash: "sha256:settled-fan-out-refork-proof", SourceRunID: child.ForkRunID, ForkEventID: checkpoint.ID(),
+						TargetBundleHash: target.BundleHash(), TargetRootReference: rooted.Admission().Reference(),
+						ContractSelection: selection, AllowSourceFreeze: true,
+					}
+					second, err := forks.MaterializeRunForkForSelectedContractExecution(childCtx, secondRequest)
 					if err != nil {
 						t.Fatalf("refork settled history with exact archived evidence: %v", err)
 					}

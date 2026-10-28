@@ -386,7 +386,7 @@ func stageCatalogSelectedContractFork(
 	}
 	prepared, err := owner.Prepare(ctx, forkexecution.SelectedContractExecutionRequest{
 		SourceRunID: sourceRunID, At: eventID, AllowSourceFreeze: true, ForkOperation: operation,
-		SourceLoader: loader, ContractSelection: selection, AgentRuntime: options,
+		SourceLoader: loader, ContractSelection: selection, AgentRuntime: options, ExpectedBundleHash: selection.BundleHash,
 	})
 	if err != nil {
 		t.Fatalf("prepare selected fork for direct staging: %v", err)
@@ -400,7 +400,7 @@ func stageCatalogSelectedContractFork(
 	if err != nil {
 		t.Fatalf("project directly staged selected fork request: %v", err)
 	}
-	commitCtx := runtimecorrelation.WithSourceArtifactFact(ctx, request.SourceArtifactFact)
+	commitCtx := runtimecorrelation.WithRootAdmission(runtimecorrelation.WithSourceArtifactFact(ctx, request.SourceArtifactFact), request.RootAdmission)
 	materialized, err := store.MaterializeRunForkForSelectedContractExecution(commitCtx, request)
 	if err != nil {
 		t.Fatalf("direct selected fork materialization: %v", err)
@@ -488,7 +488,7 @@ func runSelectedForkFlowOwnedReadinessBothStores(t *testing.T, selectedStage str
 						}
 						routesBefore := catalogCommittedDeliveryRoutes(t, ctx, selected, frontierID)
 						var sourceStore interface {
-							storetest.DurableDataCatalogStore
+							storetest.RootedDataCatalogStore
 							forkexecution.SourceArtifactSelectedContractSourceStore
 						} = h.pg
 						var forkStore forkexecution.SelectedContractForkLifecycle = h.pg
@@ -531,7 +531,7 @@ func runSelectedForkFlowOwnedReadinessBothStores(t *testing.T, selectedStage str
 						} else {
 							result, err = executeCatalogLiveFork(t, h, ctx, forkexecution.SelectedContractExecutionRequest{
 								SourceRunID: catalogRuntimeRunID, At: frontierID, AllowSourceFreeze: true, ForkOperation: &operation,
-								Owner: executionOwner, SourceLoader: loader, ContractSelection: selection, AgentRuntime: options,
+								Owner: executionOwner, SourceLoader: loader, ContractSelection: selection, AgentRuntime: options, ExpectedBundleHash: selection.BundleHash,
 							})
 						}
 						forkRun := result.Materialization.ForkRunID

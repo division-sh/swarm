@@ -59,7 +59,7 @@ func TestRunForkActivityTimestampRecordedReuseBothStores(t *testing.T) {
 						}))
 						before := snapshotForkHistoricalExecutionTables(t, fixture.db, backend.name == "postgres")
 						original := originalActivityCarriageAtPoint(t, store, event.RunID(), child.ForkPoint)
-						loaded, err := store.LoadRunForkSelectedContractSourceEvents(ctx, event.RunID(), child.ForkRunID, []string{event.ID()}, original)
+						loaded, err := store.LoadRunForkSelectedContractSourceEvents(ctx, event.RunID(), child.ForkRunID, []string{event.ID()}, original, originalRootAdmissionForRun(t, store, event.RunID()))
 						hints.expect(t, 0)
 						wantErr := ""
 						if status == "started" {
@@ -122,7 +122,7 @@ func TestRunForkActivityTimestampRecordedReuseBothStores(t *testing.T) {
 							t.Fatalf("source journal changed: found=%v err=%v", found, err)
 						}
 						afterFirst := snapshotForkHistoricalExecutionTables(t, fixture.db, backend.name == "postgres")
-						again, err := store.LoadRunForkSelectedContractSourceEvents(ctx, event.RunID(), child.ForkRunID, []string{event.ID()}, original)
+						again, err := store.LoadRunForkSelectedContractSourceEvents(ctx, event.RunID(), child.ForkRunID, []string{event.ID()}, original, originalRootAdmissionForRun(t, store, event.RunID()))
 						if err != nil || !reflect.DeepEqual(loaded, again) {
 							t.Fatalf("repeat changed prepared event: err=%v", err)
 						}
@@ -328,7 +328,7 @@ func TestSelectedForkRecordedActivityCardDependencyBothStores(t *testing.T) {
 						SubscribeChannelReconciliation(context.Context) (*render.ReconcileSubscription, error)
 					}))
 					store := fixture.store.(selectedActivityProjectionStore)
-					loaded, err := store.LoadRunForkSelectedContractSourceEvents(ctx, event.RunID(), child.ForkRunID, []string{event.ID()}, originalActivityCarriageAtPoint(t, store, event.RunID(), child.ForkPoint))
+					loaded, err := store.LoadRunForkSelectedContractSourceEvents(ctx, event.RunID(), child.ForkRunID, []string{event.ID()}, originalActivityCarriageAtPoint(t, store, event.RunID(), child.ForkPoint), originalRootAdmissionForRun(t, store, event.RunID()))
 					if err != nil || len(loaded) != 1 {
 						t.Fatalf("selected recorded preparation: %+v error=%v", loaded, err)
 					}
@@ -385,7 +385,7 @@ func TestRunForkActivityTimestampRejectsIncompleteReuseBothStores(t *testing.T) 
 					}
 					before := snapshotForkHistoricalExecutionTables(t, fixture.db, backend.name == "postgres")
 					store := fixture.store.(selectedActivityProjectionStore)
-					_, err := store.LoadRunForkSelectedContractSourceEvents(ctx, event.RunID(), child.ForkRunID, []string{event.ID()}, originalActivityCarriageAtPoint(t, store, event.RunID(), child.ForkPoint))
+					_, err := store.LoadRunForkSelectedContractSourceEvents(ctx, event.RunID(), child.ForkRunID, []string{event.ID()}, originalActivityCarriageAtPoint(t, store, event.RunID(), child.ForkPoint), originalRootAdmissionForRun(t, store, event.RunID()))
 					if err == nil || !strings.Contains(err.Error(), column+" is required") {
 						t.Fatalf("incomplete recorded timestamp: got %v, want %s is required", err, column)
 					}
@@ -424,7 +424,7 @@ func TestRunForkActivityTimestampCopyPreservesStoredPrecisionBothStores(t *testi
 			}
 			store := fixture.store.(selectedActivityProjectionStore)
 			originalCarriage := originalActivityCarriageAtPoint(t, store, event.RunID(), child.ForkPoint)
-			if _, err := store.LoadRunForkSelectedContractSourceEvents(ctx, event.RunID(), child.ForkRunID, []string{event.ID()}, originalCarriage); err != nil {
+			if _, err := store.LoadRunForkSelectedContractSourceEvents(ctx, event.RunID(), child.ForkRunID, []string{event.ID()}, originalCarriage, originalRootAdmissionForRun(t, store, event.RunID())); err != nil {
 				t.Fatal(err)
 			}
 			var copiedID string
@@ -445,7 +445,7 @@ func TestRunForkActivityTimestampCopyPreservesStoredPrecisionBothStores(t *testi
 				}
 			}
 			before := snapshotForkHistoricalExecutionTables(t, fixture.db, postgres)
-			if _, err := store.LoadRunForkSelectedContractSourceEvents(ctx, event.RunID(), child.ForkRunID, []string{event.ID()}, originalCarriage); err != nil {
+			if _, err := store.LoadRunForkSelectedContractSourceEvents(ctx, event.RunID(), child.ForkRunID, []string{event.ID()}, originalCarriage, originalRootAdmissionForRun(t, store, event.RunID())); err != nil {
 				t.Fatal(err)
 			}
 			if _, inserted, err := journal.StartActivityAttempt(ctx, copied); err == nil || inserted {
@@ -647,7 +647,7 @@ func seedActivityEvidenceForForkWithReply(t *testing.T, fixture authorActivityRe
 			t.Fatal(err)
 		}
 	}
-	journal := captureActivityFixtureJournal(t, ctx, fixture.store)
+	journal := activityNativeJournalForFixture(t, fixture, runID)
 	record, inserted, err := journal.StartActivityAttempt(ctx, runtimepipeline.ActivityAttemptRecord{
 		RequestEventID: requestID, RunID: runID, SourceEventID: parentID, ExecutionMode: executionmode.Live,
 		EntityID: entityID, FlowInstance: instance, NodeID: owner.Key(), HandlerEventKey: handler, ActivityID: activity, Tool: tool,
@@ -692,13 +692,22 @@ func seedActivityEvidenceForForkWithReply(t *testing.T, fixture authorActivityRe
 		owner := fixture.store.(interface {
 			MaterializeRunFork(context.Context, runfork.RunForkMaterializeRequest) (runfork.RunForkMaterialization, error)
 		})
-		child, err = owner.MaterializeRunFork(ctx, runfork.RunForkMaterializeRequest{SourceRunID: runID, At: event.ID()})
+		rooted, err := fixture.store.(rootedRunStore).LoadRunRootedSource(ctx, runID)
+		if err != nil {
+			t.Fatal(err)
+		}
+		child, err = owner.MaterializeRunFork(ctx, runfork.RunForkMaterializeRequest{SourceRunID: runID, At: event.ID(), RootAdmission: rooted.Admission()})
 		if err != nil {
 			t.Fatal(err)
 		}
 	} else {
-		retainActivityFixtureProcessForMaterialization(t, ctx, fixture.store)
-		child = materializeSelectedActivityFixture(t, ctx, fixture.store.(selectedActivityProjectionStore), runID, event.ID())
+		retainActivityFixtureProcessForMaterialization(t, ctx, fixture.store, fixture.activityOwner)
+		selected := fixture.store.(selectedActivityProjectionStore)
+		request := selectedSourceMaterializationRequest(t, ctx, selected, runID, event.ID(), declarations)
+		child, err = selected.MaterializeRunForkForSelectedContractExecution(ctx, request)
+		if err != nil {
+			t.Fatal(err)
+		}
 	}
 	wantEntities := 2
 	if child.MaterializedEntityCount != wantEntities {

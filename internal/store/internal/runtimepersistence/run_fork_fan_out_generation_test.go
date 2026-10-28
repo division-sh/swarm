@@ -76,6 +76,10 @@ func testForkFanOutGenerationWriterEvaluatorBothStores(t *testing.T, selectedExe
 					if err != nil {
 						t.Fatal(err)
 					}
+					rooted, err := bundle.RootedSource()
+					if err != nil {
+						t.Fatal(err)
+					}
 					source := semanticview.Wrap(bundle)
 					original, err := semanticview.CompileOriginalLoopCarriage(source)
 					if err != nil {
@@ -220,14 +224,14 @@ func testForkFanOutGenerationWriterEvaluatorBothStores(t *testing.T, selectedExe
 						request.ForkOperation = &runfork.ForkOperationRequest{
 							OperationID: uuid.NewString(), Actor: "selected-fanout-native-fixture", IdempotencyKey: uuid.NewString(),
 							TransportHash: "selected-fanout-native-fixture", SourceRunID: runID, ForkEventID: request.At,
-							ResolvedPoint: &fixed, TargetBundleHash: request.SourceArtifactFact.BundleHash(), ContractSelection: request.ContractSelection,
+							ResolvedPoint: &fixed, TargetBundleHash: request.SourceArtifactFact.BundleHash(), TargetRootReference: request.RootAdmission.Reference(), ContractSelection: request.ContractSelection,
 						}
 						selectedRequest = request
 						materialize = func() (runfork.RunForkMaterialization, error) {
 							return forkOwner.MaterializeRunForkForSelectedContractExecution(ctx, request)
 						}
 					} else {
-						materializeRequest = runfork.RunForkMaterializeRequest{SourceRunID: runID, At: point.ID(), OriginalLoopCarriage: original}
+						materializeRequest = runfork.RunForkMaterializeRequest{SourceRunID: runID, At: point.ID(), RootAdmission: rooted.Admission(), OriginalLoopCarriage: original}
 						materialize = func() (runfork.RunForkMaterialization, error) {
 							return fixture.store.(runForkSelectedLifecycleStore).MaterializeRunFork(ctx, materializeRequest)
 						}
@@ -256,7 +260,7 @@ func testForkFanOutGenerationWriterEvaluatorBothStores(t *testing.T, selectedExe
 							t.Fatal(err)
 						}
 						captureFanOutBarrierForkRevision(t, ctx, fixture.db, firstChild, backend.name == "postgres")
-						materializeRequest = runfork.RunForkMaterializeRequest{SourceRunID: firstChild, At: checkpoint.ID(), OriginalLoopCarriage: original}
+						materializeRequest = runfork.RunForkMaterializeRequest{SourceRunID: firstChild, At: checkpoint.ID(), RootAdmission: rooted.Admission(), OriginalLoopCarriage: original}
 						child, err = fixture.store.(runForkSelectedLifecycleStore).MaterializeRunFork(ctx, materializeRequest)
 						if err != nil {
 							t.Fatalf("fork inherited intent a second time: %v", err)
@@ -290,8 +294,9 @@ func testForkFanOutGenerationWriterEvaluatorBothStores(t *testing.T, selectedExe
 					before := snapshotForkHistoricalExecutionTables(t, fixture.db, backend.name == "postgres")
 					var repeated runfork.RunForkMaterialization
 					if selectedExecution {
-						selectedRequest.ForkOperation = nil
-						repeated, err = forkOwner.RequireMaterializedRunForkForSelectedContractExecution(ctx, child.ForkRunID, selectedRequest)
+						readbackRequest := selectedRequest
+						readbackRequest.ForkOperation = nil
+						repeated, err = forkOwner.RequireMaterializedRunForkForSelectedContractExecution(ctx, child.ForkRunID, readbackRequest)
 					} else {
 						repeated, err = fixture.store.(runForkSelectedLifecycleStore).RequireMaterializedRunFork(ctx, child.ForkRunID, materializeRequest)
 					}
@@ -335,8 +340,15 @@ func testForkFanOutGenerationWriterEvaluatorBothStores(t *testing.T, selectedExe
 						if err != nil || !forkActivation.Activated || !forkActivation.SourceFrozen || forkActivation.ForkRunStatus != runfork.RunForkActivatedStatus {
 							t.Fatalf("activate ordinary fork before child serving: %+v err=%v", forkActivation, err)
 						}
-						grantSeed := fanOutOwnerFixture{bundleHash: intent.PlanRef.BundleHash, runID: child.ForkRunID, deliveryID: key.TriggeringDeliveryID}
+						grantSeed := fanOutOwnerFixture{artifact: rooted.Artifact(), bundleHash: intent.PlanRef.BundleHash, runID: child.ForkRunID, deliveryID: key.TriggeringDeliveryID}
 						grantedOwner, _, _, _ = grantedFanOutOwnerForTest(t, ctx, owner, grantSeed)
+					}
+					childRooted, err := fixture.store.(rootedRunStore).LoadRunRootedSource(ctx, child.ForkRunID)
+					if err != nil {
+						t.Fatal(err)
+					}
+					if !childRooted.Admission().Equal(rooted.Admission()) {
+						t.Fatal("fan-out child changed its explicitly admitted target root")
 					}
 					copied, claim, found, err := grantedOwner.ClaimFanOutIntent(ctx, request)
 					if err != nil || !found {

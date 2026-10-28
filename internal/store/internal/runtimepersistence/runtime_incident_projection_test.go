@@ -10,8 +10,10 @@ import (
 	"github.com/division-sh/swarm/internal/events"
 	"github.com/division-sh/swarm/internal/events/eventtest"
 	"github.com/division-sh/swarm/internal/operatorread"
+	"github.com/division-sh/swarm/internal/runtime/correlation"
 	runtimefailures "github.com/division-sh/swarm/internal/runtime/failures"
 	"github.com/division-sh/swarm/internal/testutil"
+	"github.com/division-sh/swarm/internal/testutil/sourceartifactfixture"
 	"github.com/google/uuid"
 )
 
@@ -33,16 +35,27 @@ func TestRuntimeIncidentFiltersAndGroupingOnBothStores(t *testing.T) {
 			base := time.Now().UTC().Add(-time.Minute).Truncate(time.Second)
 			artifactA := storeTestSourceArtifact("reviewer-2394-a")
 			artifactB := storeTestSourceArtifact("reviewer-2394-b")
+			rootA, _ := sourceartifactfixture.Rooted(t, "incident-a", artifactA)
+			rootB, _ := sourceartifactfixture.Rooted(t, "incident-b", artifactB)
+			artifactA, artifactB = rootA.Artifact(), rootB.Artifact()
+			ctxA := correlation.WithRootAdmission(correlation.WithSourceArtifactFact(testAuthorActivityContextForBundle(artifactA.BundleHash()), sourceartifactfixture.FactFor(artifactA)), rootA.Admission())
+			ctxB := correlation.WithRootAdmission(correlation.WithSourceArtifactFact(testAuthorActivityContextForBundle(artifactB.BundleHash()), sourceartifactfixture.FactFor(artifactB)), rootB.Admission())
+			ctxA = originalStoreFixtureContext(t, ctxA, selected)
+			ctxB = originalStoreFixtureContext(t, ctxB, selected)
 			runA, runB := uuid.NewString(), uuid.NewString()
-			requireRunFixtureForTest(t, ctx, selected, semanticRunFixture{Origin: semanticScenarioSetupRunOriginForTest(), RunID: runA, Artifact: artifactA, StartedAt: base.Add(-48 * time.Hour)})
-			requireRunFixtureForTest(t, ctx, selected, semanticRunFixture{Origin: semanticScenarioSetupRunOriginForTest(), RunID: runB, Artifact: artifactB, StartedAt: base.Add(-48 * time.Hour)})
+			requireRunFixtureForTest(t, ctxA, selected, semanticRunFixture{Origin: semanticScenarioSetupRunOriginForTest(), RunID: runA, Artifact: artifactA, StartedAt: base.Add(-48 * time.Hour)})
+			requireRunFixtureForTest(t, ctxB, selected, semanticRunFixture{Origin: semanticScenarioSetupRunOriginForTest(), RunID: runB, Artifact: artifactB, StartedAt: base.Add(-48 * time.Hour)})
 			insertRecord := func(run, code, component, level string, at time.Time) string {
 				t.Helper()
 				failure := mustMarshalTestFailure(t, testFailureEnvelope(runtimefailures.ClassInternalFailure, code, nil))
 				payload := json.RawMessage(`{"log_level":"` + level + `","message":"review probe","details":{"component":"` + component + `","action":"request_failed","failure":` + failure + `}}`)
 				id := uuid.NewString()
 				event := eventtest.DiagnosticDirect(id, events.EventTypePlatformRuntimeLog, "runtime", "", payload, 0, run, "", events.EventEnvelope{}, at)
-				if err := commitDiagnosticRuntimeLogFixture(ctx, selected, event); err != nil {
+				recordContext := ctxA
+				if run == runB {
+					recordContext = ctxB
+				}
+				if err := commitDiagnosticRuntimeLogFixture(recordContext, selected, event); err != nil {
 					t.Fatal(err)
 				}
 				return id

@@ -4,7 +4,6 @@ import (
 	"context"
 	"database/sql"
 	"errors"
-	"strings"
 	"testing"
 	"time"
 
@@ -19,6 +18,7 @@ import (
 	"github.com/division-sh/swarm/internal/runtime/runcontrol"
 	"github.com/division-sh/swarm/internal/runtime/startupownership"
 	"github.com/division-sh/swarm/internal/store/testutil/agentfixture"
+	"github.com/division-sh/swarm/internal/testutil/sourceartifactfixture"
 	"github.com/google/uuid"
 )
 
@@ -66,14 +66,30 @@ func newGrantedFanOutProcessForTest(t *testing.T, ctx context.Context, selected 
 	})
 	sources := make([]agenttopology.SourceCoordinate, len(fixtures))
 	for i, fixture := range fixtures {
-		sources[i] = agenttopology.SourceCoordinate{BundleHash: fixture.bundleHash}
+		rooted, err := fixture.artifact.RootedSource()
+		if err != nil {
+			t.Fatal(err)
+		}
+		sources[i], err = agenttopology.NewSourceCoordinate(rooted.Admission())
+		if err != nil {
+			t.Fatal(err)
+		}
 	}
 	plan, err := agenttopology.NewSourceSetPlan(sources, nil)
 	if err != nil {
 		t.Fatal(err)
 	}
-	if _, err := capability.InstallCompleteSourceSet(ctx, agenttopology.SourceSetCommitRequest{OperationID: uuid.NewString(), Plan: plan}); err != nil {
+	current, exists, err := capability.CurrentSourceSet(ctx)
+	if err != nil {
 		t.Fatal(err)
+	}
+	if exists && current.Revision != plan.Revision {
+		t.Fatal("fan-out fixture cannot replace an existing source plan")
+	}
+	if !exists {
+		if _, err := capability.InstallCompleteSourceSet(ctx, agenttopology.SourceSetCommitRequest{OperationID: uuid.NewString(), Plan: plan}); err != nil {
+			t.Fatal(err)
+		}
 	}
 	work := worklifetime.NewProcess()
 	t.Cleanup(func() {
@@ -86,16 +102,30 @@ func newGrantedFanOutProcessForTest(t *testing.T, ctx context.Context, selected 
 	})
 	var grants []startupownership.LiveGenerationGrant
 	var occurrences []*worklifetime.RuntimeOccurrence
-	for _, fixture := range fixtures {
-		grant, err := capability.IssueGenerationGrant(ctx, startupownership.GrantRequest{BundleHash: fixture.bundleHash, RuntimeInstanceID: authority.RuntimeInstanceID, RuntimeGeneration: 1, SourceSetRevision: plan.Revision})
+	for index, fixture := range fixtures {
+		// The original activity journal may already own this exact generation.
+		grant, err := agentfixture.AdmitGeneration(t, ctx, selected.(agentfixture.Store), plan, sources[index])
 		if err != nil {
 			t.Fatal(err)
 		}
-		if _, err := grant.MarkProbesSettled(ctx, nil); err != nil {
+		evidence, err := grant.Evidence()
+		if err != nil {
 			t.Fatal(err)
 		}
-		if _, err := grant.AdmitExecution(ctx); err != nil {
-			t.Fatal(err)
+		if evidence.State == startupownership.GrantPrepared {
+			evidence, err = grant.MarkProbesSettled(ctx, nil)
+			if err != nil {
+				t.Fatal(err)
+			}
+		}
+		if evidence.State == startupownership.GrantProbeSettled {
+			evidence, err = grant.AdmitExecution(ctx)
+			if err != nil {
+				t.Fatal(err)
+			}
+		}
+		if evidence.State != startupownership.GrantAdmitted {
+			t.Fatalf("fan-out fixture requires its exact admitted generation, got %s", evidence.State)
 		}
 		occurrence, err := work.NewRuntime(ctx, worklifetime.RuntimeIdentity{RuntimeInstanceID: authority.RuntimeInstanceID, BundleHash: fixture.bundleHash})
 		if err != nil {
@@ -206,7 +236,16 @@ func TestFanOutGrantedStoreAdmissionBothStores(t *testing.T) {
 						t.Fatal(err)
 					}
 				case "source-head":
-					next, err := agenttopology.NewSourceSetPlan([]agenttopology.SourceCoordinate{{BundleHash: fixture.bundleHash}, {BundleHash: "bundle-v2:sha256:" + strings.Repeat("a", 64)}}, nil)
+					extra, _ := sourceartifactfixture.Rooted(t, "extra", storeTestSourceArtifact("source-head-replacement-extra-source"))
+					sourceartifactfixture.RequireArtifact(t, ctx, raw.(sourceartifactfixture.Writer), extra.Artifact())
+					if extra.Admission().BundleHash() == fixture.bundleHash {
+						t.Fatal("source-head replacement requires a distinct second source")
+					}
+					extraCoordinate, err := agenttopology.NewSourceCoordinate(extra.Admission())
+					if err != nil {
+						t.Fatal(err)
+					}
+					next, err := agenttopology.NewSourceSetPlan([]agenttopology.SourceCoordinate{plan.Sources[0], extraCoordinate}, nil)
 					if err != nil {
 						t.Fatal(err)
 					}

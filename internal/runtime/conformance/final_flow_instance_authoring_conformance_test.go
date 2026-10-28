@@ -167,37 +167,6 @@ func TestFinalFlowInstanceAuthoringFixture_FailClosedMatrix(t *testing.T) {
 	}
 }
 
-func TestFinalFlowInstanceAuthoringFixture_RouteAuthorityBypassInventoryStaysClassified(t *testing.T) {
-	root := conformanceRepoRoot(t)
-	inventory := loadRouteAuthorityDriftInventory(t, root)
-	for _, id := range []string{
-		"direct_delivery_path",
-		"event_delivery_plan_compatibility",
-		"route_table_resolve",
-		"typed_connect_recipient_evaluation",
-	} {
-		dimension := routeAuthorityDriftSearchDimensionByID(t, &inventory, id)
-		if !dimension.ClassifiedPathsRequired {
-			t.Fatalf("search_dimension %s classified_paths_required = false, want true for final bypass guard", id)
-		}
-	}
-	for _, id := range []string{
-		"direct_delivery_path_classification",
-		"event_delivery_plan_compatibility_adapter",
-		"route_table_resolve_role_separation",
-		"compiled_connect_recipient_evaluation",
-		"live_carriers_internal_subscriptions",
-	} {
-		family := routeAuthorityDriftSeamFamilyByID(t, &inventory, id)
-		if len(family.InvalidAuthority) == 0 && strings.Contains(family.Layer, "non_authority") {
-			t.Fatalf("seam_family %s invalid_authority missing", id)
-		}
-	}
-	if problems := validateRouteAuthorityDriftInventory(t, root, inventory); len(problems) != 0 {
-		t.Fatalf("route authority inventory validation failed:\n- %s", strings.Join(problems, "\n- "))
-	}
-}
-
 func finalFixtureFindingContains(findings []runtimebootverify.Finding, checkID, substr string) bool {
 	for _, finding := range findings {
 		if strings.TrimSpace(finding.CheckID) != checkID {

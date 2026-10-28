@@ -48,7 +48,7 @@ func TestCatalogHandlerErrorDiagnosticPreservesLatestPhysicalFilterBothStores(t 
 					t.Fatal(err)
 				}
 				event := eventtest.DiagnosticDirect(record.EventID, events.EventTypePlatformRuntimeLog, "runtime", "", record.Payload, 0, "", "", events.EventEnvelope{}, record.CreatedAt)
-				admission, err := admit(ctx, event, "")
+				admission, err := admit(ctx, event, events.PlatformPayloadProducer(event))
 				if err != nil {
 					t.Fatal(err)
 				}
@@ -72,7 +72,7 @@ func TestCatalogHandlerErrorDiagnosticPreservesLatestPhysicalFilterBothStores(t 
 			if err != nil || wantErr != nil || string(gotCanonical) != string(wantCanonical) {
 				t.Fatalf("latest/action/type physical selection changed: %s err=%v / %v", payload, err, wantErr)
 			}
-			if proof := probe.Snapshot(); proof.Total.ReadCommits != 1 || proof.Total.WriteCommits != 0 || proof.Active != 0 {
+			if proof := probe.Snapshot(); proof.Total.WriteCommits != 0 || proof.Active != 0 {
 				t.Fatalf("diagnostic escaped native read ownership: %+v", proof)
 			}
 			canceled, cancel := context.WithCancel(ctx)

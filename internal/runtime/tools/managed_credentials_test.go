@@ -2,7 +2,9 @@ package tools
 
 import (
 	"bytes"
+	"context"
 	"encoding/json"
+	"errors"
 	"net/http"
 	"net/http/httptest"
 	"strings"
@@ -13,12 +15,26 @@ import (
 	runtimecontracts "github.com/division-sh/swarm/internal/runtime/contracts"
 	models "github.com/division-sh/swarm/internal/runtime/core/actors"
 	"github.com/division-sh/swarm/internal/runtime/core/agentidentitytest"
+	runtimecredentials "github.com/division-sh/swarm/internal/runtime/credentials"
+	runtimeeffects "github.com/division-sh/swarm/internal/runtime/effects"
+	"github.com/division-sh/swarm/internal/runtime/effects/effecttest"
+	"github.com/division-sh/swarm/internal/runtime/executionposture"
 	runtimefailures "github.com/division-sh/swarm/internal/runtime/failures"
 	runtimemanagedcredentials "github.com/division-sh/swarm/internal/runtime/managedcredentials"
 	managedcredentialmodel "github.com/division-sh/swarm/internal/runtime/managedcredentials/model"
 	runtimemcp "github.com/division-sh/swarm/internal/runtime/mcp"
 	"github.com/division-sh/swarm/internal/runtime/semanticview"
 )
+
+type httpCredentialReadProbe struct {
+	runtimecredentials.Store
+	reads int
+}
+
+func (s *httpCredentialReadProbe) Get(context.Context, string) (string, bool, error) {
+	s.reads++
+	return "", false, errors.New("credential read before HTTP posture admission")
+}
 
 func TestExecutorHTTPToolNeverRefreshesAndRedispatchesAfterUnauthorized(t *testing.T) {
 	ctx := unmanagedToolTestContext()
@@ -82,6 +98,27 @@ func TestExecutorHTTPToolNeverRefreshesAndRedispatchesAfterUnauthorized(t *testi
 	if strings.Join(sawAuth, ",") != "Bearer old-token" {
 		t.Fatalf("Authorization sequence = %v, want old token exactly once", sawAuth)
 	}
+	t.Run("mock_only_registration_refuses_before_credentials", func(t *testing.T) {
+		object := runtimecontracts.MustToolInputSchema(runtimecontracts.ToolSchemaObject)
+		entry := runtimecontracts.MustToolSchemaEntry(
+			runtimecontracts.WithToolCategory("provider_registration"), runtimecontracts.WithToolHandler(runtimecontracts.ToolHandlerHTTP),
+			runtimecontracts.WithToolSchemas(object, object), runtimecontracts.WithToolCredentials("registration_secret"),
+			runtimecontracts.WithToolHTTP(runtimecontracts.HTTPToolSpec{Method: "POST", URL: server.URL + "/api"}),
+		)
+		credentials := &httpCredentialReadProbe{}
+		executor := NewExecutorWithOptions(nil, ExecutorOptions{Credentials: credentials,
+			WorkflowSource: semanticview.Wrap(&runtimecontracts.WorkflowContractBundle{Tools: map[string]runtimecontracts.ToolSchemaEntry{"provider.register": entry}})})
+		actor := models.AgentConfig{ID: "mock-agent", Tools: []string{"provider.register"}, ExecutionMode: runtimeeffects.ExecutionModeMock}
+		mockCtx := runtimeeffects.WithExecutionMode(unmanagedToolTestContext(), runtimeeffects.ExecutionModeMock)
+		mockCtx = runtimeeffects.WithController(mockCtx, runtimeeffects.NewController(effecttest.New()).WithExecutionPosture(executionposture.MockOnly))
+		before := apiCalls.Load()
+		out, err := executor.Execute(models.WithActor(mockCtx, actor), "provider.register", map[string]any{})
+		failure, classified := runtimefailures.As(err)
+		if out != nil || !classified || failure.Failure.Class != runtimefailures.ClassAuthorizationDenied ||
+			failure.Failure.Detail.Code != "mock_external_effect_forbidden" || credentials.reads != 0 || apiCalls.Load() != before {
+			t.Fatalf("mock-only registration reached credentials/transport: reads=%d calls=%d out=%v err=%v", credentials.reads, apiCalls.Load()-before, out, err)
+		}
+	})
 }
 
 func TestToolAdmissionRejectsMalformedManagedCredentialReferences(t *testing.T) {

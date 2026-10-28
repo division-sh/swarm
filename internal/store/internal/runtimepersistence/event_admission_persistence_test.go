@@ -13,6 +13,7 @@ import (
 	"github.com/division-sh/swarm/internal/events"
 	"github.com/division-sh/swarm/internal/events/eventtest"
 	runtimepkg "github.com/division-sh/swarm/internal/runtime"
+	"github.com/division-sh/swarm/internal/runtime/correlation"
 	"github.com/division-sh/swarm/internal/runtime/diaglog"
 	runtimeeffects "github.com/division-sh/swarm/internal/runtime/effects"
 	"github.com/division-sh/swarm/internal/runtime/executionmode"
@@ -21,7 +22,12 @@ import (
 	runtimepipelineobligation "github.com/division-sh/swarm/internal/runtime/pipelineobligation"
 	runtimeruncontrol "github.com/division-sh/swarm/internal/runtime/runcontrol"
 	storerunlifecycle "github.com/division-sh/swarm/internal/runtime/runlifecycle"
+	"github.com/division-sh/swarm/internal/sourceartifact"
+	"github.com/division-sh/swarm/internal/store/internal/backend/eventrecord"
+	eventrecordpostgres "github.com/division-sh/swarm/internal/store/internal/backend/eventrecord/postgres"
+	eventrecordsqlite "github.com/division-sh/swarm/internal/store/internal/backend/eventrecord/sqlite"
 	"github.com/division-sh/swarm/internal/testutil"
+	"github.com/division-sh/swarm/internal/testutil/sourceartifactfixture"
 	"github.com/google/uuid"
 )
 
@@ -209,6 +215,8 @@ func convergeTerminalAdmissionRun(
 func TestPostgresTerminalEventAdmissionIsImmutableAndIdempotent(t *testing.T) {
 	_, db, _ := testutil.StartPostgres(t)
 	pg := newTestPostgresStore(t, db)
+	rooted, _ := sourceartifactfixture.Rooted(t, "fixture", sourceartifactfixture.Artifact())
+	sourceartifactfixture.RequireArtifact(t, testAuthorActivityContext(), pg, rooted.Artifact())
 	harness := terminalEventAdmissionHarness{
 		statuses: []string{"completed", "cancelled", "failed", "forked"},
 		append: func(ctx context.Context, evt events.Event) error {
@@ -246,11 +254,13 @@ func TestPostgresTerminalEventAdmissionIsImmutableAndIdempotent(t *testing.T) {
 		},
 		persistVariants: terminalEventAdmissionPersistVariants(pg),
 	}
-	assertTerminalEventAdmission(t, originalStoreFixtureContext(t, testAuthorActivityContext(), pg), harness)
+	assertTerminalEventAdmission(t, originalStoreFixtureContext(t, testAuthorActivityContext(), pg), harness, rooted.Admission())
 }
 
 func TestSQLiteTerminalEventAdmissionIsImmutableAndIdempotent(t *testing.T) {
 	sqliteStore := newBootstrappedSQLiteRuntimeStoreForTest(t)
+	rooted, _ := sourceartifactfixture.Rooted(t, "fixture", sourceartifactfixture.Artifact())
+	sourceartifactfixture.RequireArtifact(t, testAuthorActivityContext(), sqliteStore, rooted.Artifact())
 	harness := terminalEventAdmissionHarness{
 		statuses: []string{"completed", "cancelled", "failed"},
 		append: func(ctx context.Context, evt events.Event) error {
@@ -288,12 +298,14 @@ func TestSQLiteTerminalEventAdmissionIsImmutableAndIdempotent(t *testing.T) {
 		},
 		persistVariants: terminalEventAdmissionPersistVariants(sqliteStore),
 	}
-	assertTerminalEventAdmission(t, originalStoreFixtureContext(t, testAuthorActivityContext(), sqliteStore), harness)
+	assertTerminalEventAdmission(t, originalStoreFixtureContext(t, testAuthorActivityContext(), sqliteStore), harness, rooted.Admission())
 }
 
 func TestPostgresRuntimeLogAdmissionPreservesEveryRunStatus(t *testing.T) {
 	_, db, _ := testutil.StartPostgres(t)
 	store := newTestPostgresStore(t, db)
+	rooted, _ := sourceartifactfixture.Rooted(t, "fixture", sourceartifactfixture.Artifact())
+	sourceartifactfixture.RequireArtifact(t, testAuthorActivityContext(), store, rooted.Artifact())
 	assertRuntimeLogAdmissionPreservesEveryRunStatus(t, originalStoreFixtureContext(t, testAuthorActivityContext(), store), runtimeLogStatusHarness{
 		statuses: []string{"running", "paused", "completed", "cancelled", "failed", "forked"},
 		appendOrdinary: func(ctx context.Context, evt events.Event) error {
@@ -381,11 +393,13 @@ func TestPostgresRuntimeLogAdmissionPreservesEveryRunStatus(t *testing.T) {
 			}
 			return state, nil
 		},
-	})
+	}, rooted.Admission())
 }
 
 func TestSQLiteRuntimeLogAdmissionPreservesEveryRunStatus(t *testing.T) {
 	store := newBootstrappedSQLiteRuntimeStoreForTest(t)
+	rooted, _ := sourceartifactfixture.Rooted(t, "fixture", sourceartifactfixture.Artifact())
+	sourceartifactfixture.RequireArtifact(t, testAuthorActivityContext(), store, rooted.Artifact())
 	assertRuntimeLogAdmissionPreservesEveryRunStatus(t, originalStoreFixtureContext(t, testAuthorActivityContext(), store), runtimeLogStatusHarness{
 		statuses: []string{"running", "paused", "completed", "cancelled", "failed"},
 		appendOrdinary: func(ctx context.Context, evt events.Event) error {
@@ -473,11 +487,12 @@ func TestSQLiteRuntimeLogAdmissionPreservesEveryRunStatus(t *testing.T) {
 			}
 			return state, nil
 		},
-	})
+	}, rooted.Admission())
 }
 
-func assertRuntimeLogAdmissionPreservesEveryRunStatus(t *testing.T, ctx context.Context, harness runtimeLogStatusHarness) {
+func assertRuntimeLogAdmissionPreservesEveryRunStatus(t *testing.T, ctx context.Context, harness runtimeLogStatusHarness, root sourceartifact.RootAdmission) {
 	t.Helper()
+	ctx = correlation.WithRootAdmission(ctx, root)
 	for _, status := range harness.statuses {
 		status := status
 		t.Run(status, func(t *testing.T) {
@@ -508,7 +523,7 @@ func assertRuntimeLogAdmissionPreservesEveryRunStatus(t *testing.T, ctx context.
 				t.Fatalf("marshal runtime log payload: %v", err)
 			}
 			admissionEvent := eventtest.DiagnosticDirect("", events.EventTypePlatformRuntimeLog, "runtime", "", payload, 0, runID, "", events.EventEnvelope{}, time.Time{})
-			payloadAdmission, err := currentPlatformPayloadAdmitterForStoreTest(t)(ctx, admissionEvent, "")
+			payloadAdmission, err := currentPlatformPayloadAdmitterForStoreTest(t)(ctx, admissionEvent, events.PlatformPayloadProducer(admissionEvent))
 			if err != nil {
 				t.Fatalf("admit runtime log payload: %v", err)
 			}
@@ -566,8 +581,9 @@ func TestJSONSemanticallyEqualPreservesExactNumbers(t *testing.T) {
 	}
 }
 
-func assertTerminalEventAdmission(t *testing.T, ctx context.Context, harness terminalEventAdmissionHarness) {
+func assertTerminalEventAdmission(t *testing.T, ctx context.Context, harness terminalEventAdmissionHarness, root sourceartifact.RootAdmission) {
 	t.Helper()
+	ctx = correlation.WithRootAdmission(ctx, root)
 	for _, status := range harness.statuses {
 		status := status
 		t.Run(status, func(t *testing.T) {
@@ -830,15 +846,19 @@ type globalRuntimeLogIdentityState struct {
 }
 
 type globalRuntimeLogIdentityHarness struct {
-	append    func(context.Context, events.Event) error
-	appendTx  func(context.Context, events.Event) error
-	loadState func(context.Context, string) (globalRuntimeLogIdentityState, error)
+	append     func(context.Context, events.Event) error
+	appendTx   func(context.Context, events.Event) error
+	loadState  func(context.Context, string) (globalRuntimeLogIdentityState, error)
+	loadRecord func(context.Context, string) (eventrecord.Record, bool, error)
 }
 
 func TestPostgresGlobalRuntimeLogIdentityIsIdempotentAndNonRouted(t *testing.T) {
 	_, db, _ := testutil.StartPostgres(t)
 	store := admitTestPostgresStore(t, db)
 	assertGlobalRuntimeLogIdentity(t, originalStoreFixtureContext(t, testAuthorActivityContext(), store), globalRuntimeLogIdentityHarness{
+		loadRecord: func(ctx context.Context, id string) (eventrecord.Record, bool, error) {
+			return eventrecordpostgres.Load(ctx, db, id)
+		},
 		append: func(ctx context.Context, evt events.Event) error {
 			return commitDiagnosticRuntimeLogFixture(ctx, store, evt)
 		},
@@ -871,6 +891,9 @@ func TestPostgresGlobalRuntimeLogIdentityIsIdempotentAndNonRouted(t *testing.T) 
 func TestSQLiteGlobalRuntimeLogIdentityIsIdempotentAndNonRouted(t *testing.T) {
 	store := newBootstrappedSQLiteRuntimeStoreForTest(t)
 	assertGlobalRuntimeLogIdentity(t, originalStoreFixtureContext(t, testAuthorActivityContext(), store), globalRuntimeLogIdentityHarness{
+		loadRecord: func(ctx context.Context, id string) (eventrecord.Record, bool, error) {
+			return eventrecordsqlite.Load(ctx, store.backend, id)
+		},
 		append: func(ctx context.Context, evt events.Event) error {
 			return commitDiagnosticRuntimeLogFixture(ctx, store, evt)
 		},
@@ -931,6 +954,37 @@ func assertGlobalRuntimeLogIdentity(t *testing.T, ctx context.Context, harness g
 	}
 	if state.EventCount != 1 || state.RunCount != baseline.RunCount || state.RunID != "" || state.ProducedBy != "runtime" || state.ProducedByType != "platform" || state.DeliveryCount != 0 || state.ReceiptCount != 0 {
 		t.Fatalf("global runtime log state = %+v, baseline runs=%d", state, baseline.RunCount)
+	}
+	// Reach: the native row must reconstruct the explicit producer/reference
+	// variant, and contradictory durable facts must not restore that authority.
+	record, found, err := harness.loadRecord(ctx, eventID)
+	if err != nil || !found {
+		t.Fatalf("load durable diagnostic: found=%t err=%v", found, err)
+	}
+	decoded, err := record.Decode()
+	if err != nil {
+		t.Fatal(err)
+	}
+	admission, ok := decoded.Event().PayloadAdmission()
+	if !ok || !admission.Binding().Producer().IsPlatform() || admission.Binding().Reference() != events.RuntimeLogSchemaReference || admission.Binding().SchemaClass() != events.PayloadSchemaPlatform {
+		t.Fatalf("native round-trip lost platform reference: %+v", admission.Binding())
+	}
+	for name, mutate := range map[string]func(*eventrecord.Record){
+		"producer":      func(r *eventrecord.Record) { r.ProducedBy = "foreign" },
+		"producer_type": func(r *eventrecord.Record) { r.ProducedByType = events.EventProducerExternal },
+		"class":         func(r *eventrecord.Record) { r.Class = events.EventAdmissionRuntimeControl },
+		"event_key":     func(r *eventrecord.Record) { r.PayloadSchemaEventKey = "platform.boot" },
+		"flow":          func(r *eventrecord.Record) { r.PayloadSchemaFlowID = "." },
+		"schema_less":   func(r *eventrecord.Record) { r.PayloadSchemaClass = events.PayloadSchemaSchemaLess },
+	} {
+		bad := record
+		mutate(&bad)
+		if err := bad.Validate(); err == nil {
+			t.Errorf("%s record gained platform reference authority", name)
+		}
+		if _, err := bad.Decode(); err == nil {
+			t.Errorf("%s readback gained platform reference authority", name)
+		}
 	}
 }
 

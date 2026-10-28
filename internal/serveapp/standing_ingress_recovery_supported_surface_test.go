@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"io"
 	"net/http"
+	"reflect"
 	"strings"
 	"testing"
 	"time"
@@ -31,6 +32,7 @@ func testStaleLearnedIngressRecoveryRequiredBothStores(t *testing.T, completed b
 			for _, change := range []string{"changed_value", "same_value_new_receipt", "deleted"} {
 				t.Run(fmt.Sprintf("%s/%s/%s", backend, role, change), func(t *testing.T) {
 					h := newChannelOnboardingE2EHarness(t, backend, true)
+					writeChannelOnboardingLiveToolCredentials(t, h.credentialPath)
 					var rt *runtime.Runtime
 					h.opts.TestRuntimeReadyHook = func(ready *runtime.Runtime) { rt = ready }
 					h.start(t)
@@ -235,8 +237,11 @@ func TestChannelCredentialRotationBeforeTargetPublicationBothStores(t *testing.T
 	for _, backend := range servedparity.RequiredBackends {
 		t.Run(string(backend), func(t *testing.T) {
 			h := newChannelOnboardingE2EHarness(t, backend, true)
+			writeChannelOnboardingLiveToolCredentials(t, h.credentialPath)
 			var rt *runtime.Runtime
 			h.opts.TestRuntimeReadyHook = func(ready *runtime.Runtime) { rt = ready }
+			contextsReady := make(chan *runtime.RuntimeContextManager, 1)
+			h.opts.TestRuntimeContextsReadyHook = func(manager *runtime.RuntimeContextManager) { contextsReady <- manager }
 			rotated := false
 			h.opts.TestChannelOnboardingBarrier = func(boundary channelonboarding.TestLifecycleBoundary, operationID string) error {
 				if boundary != channelonboarding.TestAfterStandingTargetReconciliation {
@@ -256,6 +261,38 @@ func TestChannelCredentialRotationBeforeTargetPublicationBothStores(t *testing.T
 				return nil
 			}
 			h.start(t)
+			manager := waitForServedStandingContextManager(t, contextsReady, backend)
+			type publicationSnapshot struct {
+				targets     []runtime.StandingTarget
+				activations []runtime.StandingActivation
+				generation  uint64
+				publication channelonboarding.ChannelActivationPublication
+			}
+			observePublication := func() map[string]publicationSnapshot {
+				t.Helper()
+				observed := make(map[string]publicationSnapshot)
+				for _, loaded := range manager.LoadedContexts() {
+					publication, current, err := manager.ChannelActivationPublication(loaded.BundleHash(), loaded.PublicationGeneration)
+					if err != nil || !current {
+						t.Fatalf("observe current channel activation publication: current=%t, error=%v", current, err)
+					}
+					observed[loaded.BundleHash()] = publicationSnapshot{
+						targets:     append([]runtime.StandingTarget(nil), loaded.StandingTargets...),
+						activations: append([]runtime.StandingActivation(nil), loaded.StandingActivations...),
+						generation:  loaded.PublicationGeneration, publication: publication,
+					}
+				}
+				return observed
+			}
+			baseline := observePublication()
+			baselineTargets, baselineActivations := 0, 0
+			for _, published := range baseline {
+				baselineTargets += len(published.targets)
+				baselineActivations += len(published.activations)
+			}
+			if baselineTargets == 0 || baselineActivations == 0 {
+				t.Fatal("baseline standing targets and activations are required")
+			}
 			result := requestServedJSONRPC(t, h.rpcEndpoint(), "channel.onboarding_start", map[string]any{
 				"provider": "telegram", "verb": "connect", "provider_credential": "publication-original-token",
 			})
@@ -268,14 +305,20 @@ func TestChannelCredentialRotationBeforeTargetPublicationBothStores(t *testing.T
 			if registrations, deliveries := h.provider.Counts(); registrations != 0 || deliveries != 0 {
 				t.Fatalf("stale target publication granted provider effects: %d/%d", registrations, deliveries)
 			}
+			if after := observePublication(); !reflect.DeepEqual(after, baseline) {
+				t.Fatalf("refused handoff replaced or augmented baseline publication: before=%#v, after=%#v", baseline, after)
+			}
 			resp, err := http.Post(h.endpoint+"/webhooks/chat/telegram", "application/json", strings.NewReader(`{"update_id":77934}`))
 			if err != nil {
 				t.Fatal(err)
 			}
 			_, _ = io.Copy(io.Discard, resp.Body)
 			_ = resp.Body.Close()
-			if resp.StatusCode != http.StatusNotFound {
-				t.Fatalf("stale target route was published: %d", resp.StatusCode)
+			if resp.StatusCode != http.StatusServiceUnavailable {
+				t.Fatalf("stale credential route was not refused: %d", resp.StatusCode)
+			}
+			if after := observePublication(); !reflect.DeepEqual(after, baseline) {
+				t.Fatalf("refused request replaced or augmented baseline publication: before=%#v, after=%#v", baseline, after)
 			}
 			h.stop(t)
 		})

@@ -21,11 +21,11 @@ import (
 	"github.com/division-sh/swarm/internal/runtime/deliverylifecycle"
 	"github.com/division-sh/swarm/internal/runtime/engine"
 	"github.com/division-sh/swarm/internal/runtime/executionposture"
-	"github.com/division-sh/swarm/internal/runtime/manager"
 	"github.com/division-sh/swarm/internal/runtime/pipeline"
 	"github.com/division-sh/swarm/internal/runtime/runfork"
 	"github.com/division-sh/swarm/internal/runtime/semanticview"
 	"github.com/division-sh/swarm/internal/runtime/testfixtures/canonicalrouting"
+	"github.com/division-sh/swarm/internal/sourceartifact"
 	"github.com/division-sh/swarm/internal/store/internal/backend/eventrecord"
 	"github.com/division-sh/swarm/internal/store/internal/backend/mutationprotocol"
 	"github.com/division-sh/swarm/internal/store/testutil/agentfixture"
@@ -169,7 +169,11 @@ func TestOrdinaryReplayInitializedReceiversBothStores(t *testing.T) {
 			if err != nil {
 				t.Fatal(err)
 			}
-			child, err := owner.MaterializeRunFork(ctx, runfork.RunForkMaterializeRequest{SourceRunID: runID, At: point.ID(), OriginalLoopCarriage: original})
+			rooted, err := fixture.store.(rootedRunStore).LoadRunRootedSource(ctx, runID)
+			if err != nil {
+				t.Fatal(err)
+			}
+			child, err := owner.MaterializeRunFork(ctx, runfork.RunForkMaterializeRequest{SourceRunID: runID, At: point.ID(), RootAdmission: rooted.Admission(), OriginalLoopCarriage: original})
 			if err != nil {
 				t.Fatal(err)
 			}
@@ -451,7 +455,7 @@ func TestOrdinaryReplayInitializedReceiversBothStores(t *testing.T) {
 				if err := acknowledgePipelineEventFixture(childCtx, fresh, childEventID); err != nil {
 					t.Fatalf("accept replay through the existing pipeline settlement/handoff owner: %v", err)
 				}
-				children = admitHistoricalReplayReceiverClaimFixtures(ownerT, childCtx, fixture.store.(deliverylifecycle.Store), children, fact)
+				children = admitHistoricalReplayReceiverClaimFixtures(ownerT, childCtx, fixture.store.(deliverylifecycle.Store), children, fact, rooted.Admission())
 				immutableBefore := snapshotForkHistoricalExecutionTables(t, fixture.db, backend.name == "postgres")
 				inventory, err := fresh.InspectDeliveryRecovery(childCtx, fact)
 				if err != nil {
@@ -570,59 +574,26 @@ func TestOrdinaryReplayInitializedReceiversBothStores(t *testing.T) {
 	}
 }
 
-func admitHistoricalReplayReceiverClaimFixtures(t *testing.T, ctx context.Context, selected deliverylifecycle.Store, pending []deliverylifecycle.Snapshot, source correlation.SourceArtifactFact) []deliverylifecycle.Snapshot {
+func admitHistoricalReplayReceiverClaimFixtures(t *testing.T, ctx context.Context, selected deliverylifecycle.Store, pending []deliverylifecycle.Snapshot, source correlation.SourceArtifactFact, rootAdmission sourceartifact.RootAdmission) []deliverylifecycle.Snapshot {
 	t.Helper()
-	coordinate := agenttopology.SourceCoordinate{BundleHash: source.BundleHash()}
-	records := make([]manager.PersistedAgent, len(pending))
-	desired := make([]agenttopology.DesiredAgent, len(pending))
-	for i, delivery := range pending {
-		records[i] = agentFixtureStaticRecord(t, delivery.Route.AgentIdentity)
-		records[i].Config.FlowID = delivery.Route.Initialization.ConstructionTarget().Route().FlowID
-		if records[i].Config.EntityID != "" {
-			t.Fatal("historical actor fixture must remain exactly entityless")
-		}
-		plan, err := delivery.Route.AgentIdentity.Plan()
-		if err != nil {
-			t.Fatal(err)
-		}
-		revision, err := manager.AgentConfigPlanRevision(records[i].Config, plan)
-		if err != nil {
-			t.Fatal(err)
-		}
-		desired[i] = agenttopology.DesiredAgent{Identity: plan, Source: coordinate, ConfigRevision: revision}
-	}
-	plan, err := agenttopology.NewSourceSetPlan([]agenttopology.SourceCoordinate{coordinate}, desired)
+	coordinate, err := agenttopology.NewSourceCoordinate(rootAdmission)
 	if err != nil {
 		t.Fatal(err)
 	}
+	for _, delivery := range pending {
+		record := agentFixtureStaticRecord(t, delivery.Route.AgentIdentity)
+		record.Config.FlowID = delivery.Route.Initialization.ConstructionTarget().Route().FlowID
+		if record.Config.EntityID != "" {
+			t.Fatal("historical actor fixture must remain exactly entityless")
+		}
+		if err := agentfixture.UpsertStaticForSource(t, ctx, selected.(agentfixture.Store), record, source); err != nil {
+			t.Fatal(err)
+		}
+	}
+	plan := currentAgentFixtureSourceSet(t, ctx, selected.(agentfixture.Store))
 	grant, err := agentfixture.AdmitGeneration(t, ctx, selected.(agentfixture.Store), plan, coordinate)
 	if err != nil {
 		t.Fatal(err)
-	}
-	admission, err := agenttopology.StaticAdmission(plan.Revision, coordinate.BundleHash, agenttopology.LifetimeDurableManaged)
-	if err != nil {
-		t.Fatal(err)
-	}
-	for i, record := range records {
-		record.Topology = admission
-		registered, err := grant.CommitAgentLifecycleTransition(ctx, manager.AgentLifecycleTransition{
-			DiagnosticOrigin: manager.LifecycleDiagnosticOrigin{Owner: manager.LifecycleDiagnosticNormal, Causality: manager.LifecycleDiagnosticObservation},
-			OperationID:      uuid.NewString(), OperationKind: "spawn", RequestHash: uuid.NewString(), Identity: record.Config.Identity, AgentID: record.Config.ID,
-			Trigger: "historical-claim-proof", TargetEpoch: 1, TargetGeneration: 1, TargetPhase: manager.AgentLifecycleRegistered,
-			ConfigRevision: desired[i].ConfigRevision, RunMode: manager.AgentRunModeStopped, Agent: &record, Topology: admission, Now: record.StartedAt,
-		})
-		if err != nil {
-			t.Fatal(err)
-		}
-		if _, err := grant.CommitAgentLifecycleTransition(ctx, manager.AgentLifecycleTransition{
-			DiagnosticOrigin: manager.LifecycleDiagnosticOrigin{Owner: manager.LifecycleDiagnosticNormal, Causality: manager.LifecycleDiagnosticObservation},
-			OperationID:      uuid.NewString(), OperationKind: "start", RequestHash: uuid.NewString(), Identity: record.Config.Identity, AgentID: record.Config.ID,
-			Trigger: "historical-claim-proof", ExpectedEpoch: registered.RuntimeEpoch, ExpectedGeneration: registered.Generation, ExpectedPhase: registered.Phase,
-			TargetEpoch: registered.RuntimeEpoch, TargetGeneration: registered.Generation + 1, TargetPhase: manager.AgentLifecycleRunning,
-			ConfigRevision: desired[i].ConfigRevision, RunMode: manager.AgentRunModeStandard, Topology: admission, Now: record.StartedAt.Add(time.Microsecond),
-		}); err != nil {
-			t.Fatal(err)
-		}
 	}
 	if _, err := grant.MarkProbesSettled(ctx, nil); err != nil {
 		t.Fatal(err)

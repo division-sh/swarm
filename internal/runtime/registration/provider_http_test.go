@@ -62,7 +62,7 @@ func TestChannelConfirmationEffectOutcomes(t *testing.T) {
 		"chat_id": "42", "text": "Swarm channel connected.",
 		"reply_markup": map[string]any{"inline_keyboard": []any{}},
 	}
-	credentials := map[string]any{"telegram_bot_token": "bot-secret"}
+	credentials := map[string]any{"telegram.telegram_bot_token": "bot-secret"}
 
 	t.Run("terminal provider success", func(t *testing.T) {
 		harness := &channelConfirmationHarness{Harness: effecttest.New()}
@@ -139,7 +139,7 @@ func TestChannelProviderPreflightGuardsAuthorizationLaunchAndDispatch(t *testing
 			}}
 			tool := packfixture.ConnectorTool(t, "telegram", "telegram.send_interactive").Tool
 			_, err := executor.DeliverChannelConfirmation(channelConfirmationTestContext(h, uuid.NewString()), "telegram.send_interactive", tool,
-				map[string]any{"chat_id": "42", "text": "Confirmation", "reply_markup": map[string]any{"inline_keyboard": []any{}}}, map[string]any{"telegram_bot_token": "token"}, nil)
+				map[string]any{"chat_id": "42", "text": "Confirmation", "reply_markup": map[string]any{"inline_keyboard": []any{}}}, map[string]any{"telegram.telegram_bot_token": "token"}, nil)
 			if !errors.Is(err, refusal) || requests != 0 || checks != boundary.check {
 				t.Fatalf("preflight bypass: checks=%d requests=%d error=%v", checks, requests, err)
 			}
@@ -191,7 +191,7 @@ func channelDeliveryTestContext(h *channelDeliveryHarness) context.Context {
 func TestChannelDeliveryEffectOutcomes(t *testing.T) {
 	tool := packfixture.ConnectorTool(t, "telegram", "telegram.send_interactive").Tool
 	input := map[string]any{"chat_id": "42", "text": "Notice", "reply_markup": map[string]any{"inline_keyboard": []any{}}}
-	credentials := map[string]any{"telegram_bot_token": "bot-secret"}
+	credentials := map[string]any{"telegram.telegram_bot_token": "bot-secret"}
 	projectionSchema := contracts.MustToolInputSchema(contracts.ToolSchemaObject, contracts.ToolSchemaProperties(map[string]contracts.ToolInputSchema{
 		"delivery_reference": contracts.MustToolInputSchema(contracts.ToolSchemaObject, contracts.ToolSchemaProperties(map[string]contracts.ToolInputSchema{
 			"id": contracts.MustToolInputSchema(contracts.ToolSchemaInteger),
@@ -267,7 +267,7 @@ func TestChannelDeliveryRequiresOwnedCompiledReceiptBeforeAuthorization(t *testi
 	})}}
 	if _, err := executor.DeliverChannelMessage(channelDeliveryTestContext(h), "telegram.send_interactive", tool,
 		map[string]any{"chat_id": "42", "text": "Notice", "reply_markup": map[string]any{"inline_keyboard": []any{}}},
-		map[string]any{"telegram_bot_token": "bot-secret"}, nil); err == nil || len(h.Attempts) != 0 {
+		map[string]any{"telegram.telegram_bot_token": "bot-secret"}, nil); err == nil || len(h.Attempts) != 0 {
 		t.Fatalf("uncompiled receipt authorized a delivery: attempts=%d %v", len(h.Attempts), err)
 	}
 }
@@ -312,7 +312,7 @@ func channelActionAckTestContext(h *channelActionAckHarness) context.Context {
 func TestChannelActionAckEffectOutcomes(t *testing.T) {
 	tool := packfixture.ConnectorTool(t, "telegram", "telegram.answer_callback").Tool
 	input := map[string]any{"callback_query_id": "callback:1"}
-	credentials := map[string]any{"telegram_bot_token": "bot-secret"}
+	credentials := map[string]any{"telegram.telegram_bot_token": "bot-secret"}
 	for _, tc := range []struct {
 		name     string
 		response string
@@ -362,9 +362,9 @@ func serveRegistrationTestContext(harness *effecttest.Harness, identity string) 
 }
 
 func TestProviderRegistrationApplyEffectOutcomes(t *testing.T) {
-	tool := packfixture.ConnectorTool(t, "telegram", "telegram.apply_webhook").Tool
+
 	input := map[string]any{"callback_url": "https://hooks.example.test/webhooks/support/telegram?swarm_callback_generation=current"}
-	credentials := map[string]any{"telegram_bot_token": "bot-secret", "webhook_signing_secret": "signing-secret"}
+	credentials := map[string]any{"telegram.telegram_bot_token": "bot-secret", "telegram.webhook_signing_secret": "signing-secret"}
 	lineage := map[string]string{"binding_id": "hitl", "target": "ingress:support:telegram", "intent_id": uuid.NewString(), "slot_id": "telegram:bot_webhook:42"}
 
 	t.Run("known success", func(t *testing.T) {
@@ -382,7 +382,7 @@ func TestProviderRegistrationApplyEffectOutcomes(t *testing.T) {
 			}
 			return registrationResponse(http.StatusOK, `{"ok":true,"result":true}`), nil
 		})}}
-		result, err := executor.Apply(serveRegistrationTestContext(harness, "known-success"), registrationOperationForTest(t, packs.RegistrationOperationApply, "telegram.apply_webhook", tool), input, credentials, lineage)
+		result, err := executor.Apply(serveRegistrationTestContext(harness, "known-success"), registrationOperationForTest(t, packs.RegistrationOperationApply, "telegram.apply_webhook"), input, credentials, lineage)
 		if err != nil || !result.Acknowledged || result.Pending == nil {
 			t.Fatalf("Apply = %#v, %v", result, err)
 		}
@@ -405,7 +405,7 @@ func TestProviderRegistrationApplyEffectOutcomes(t *testing.T) {
 			}
 			return nil, errors.New("transport lost bot-secret signing-secret")
 		})}}
-		result, err := executor.Apply(serveRegistrationTestContext(harness, "ack-loss-exact"), registrationOperationForTest(t, packs.RegistrationOperationApply, "telegram.apply_webhook", tool), input, credentials, lineage)
+		result, err := executor.Apply(serveRegistrationTestContext(harness, "ack-loss-exact"), registrationOperationForTest(t, packs.RegistrationOperationApply, "telegram.apply_webhook"), input, credentials, lineage)
 		if err == nil || result.Pending == nil || strings.Contains(err.Error(), "bot-secret") || strings.Contains(err.Error(), "signing-secret") {
 			t.Fatalf("Apply acknowledgment loss = %#v, %v", result, err)
 		}
@@ -425,7 +425,7 @@ func TestProviderRegistrationApplyEffectOutcomes(t *testing.T) {
 			}
 			return nil, errors.New("transport lost")
 		})}}
-		result, err := executor.Apply(serveRegistrationTestContext(harness, "ack-loss-mismatch"), registrationOperationForTest(t, packs.RegistrationOperationApply, "telegram.apply_webhook", tool), input, credentials, lineage)
+		result, err := executor.Apply(serveRegistrationTestContext(harness, "ack-loss-mismatch"), registrationOperationForTest(t, packs.RegistrationOperationApply, "telegram.apply_webhook"), input, credentials, lineage)
 		if err == nil || result.Pending == nil {
 			t.Fatalf("Apply acknowledgment loss = %#v, %v", result, err)
 		}
@@ -443,7 +443,7 @@ func TestProviderRegistrationApplyEffectOutcomes(t *testing.T) {
 		executor := HTTPExecutor{Client: &http.Client{Transport: registrationRoundTripFunc(func(*http.Request) (*http.Response, error) {
 			return registrationResponse(http.StatusOK, `{"ok":true,"result":true}`), nil
 		})}}
-		result, err := executor.Apply(serveRegistrationTestContext(harness, "settlement-ack-loss"), registrationOperationForTest(t, packs.RegistrationOperationApply, "telegram.apply_webhook", tool), input, credentials, lineage)
+		result, err := executor.Apply(serveRegistrationTestContext(harness, "settlement-ack-loss"), registrationOperationForTest(t, packs.RegistrationOperationApply, "telegram.apply_webhook"), input, credentials, lineage)
 		if err != nil || result.Pending == nil || !result.Acknowledged {
 			t.Fatalf("Apply settlement acknowledgment loss = %#v, %v", result, err)
 		}
@@ -464,7 +464,7 @@ func TestProviderRegistrationApplyEffectOutcomes(t *testing.T) {
 		executor := HTTPExecutor{Client: &http.Client{Transport: registrationRoundTripFunc(func(*http.Request) (*http.Response, error) {
 			return registrationResponse(http.StatusOK, `{"ok":true,"result":"not-a-boolean"}`), nil
 		})}}
-		result, err := executor.Apply(serveRegistrationTestContext(harness, "malformed-success"), registrationOperationForTest(t, packs.RegistrationOperationApply, "telegram.apply_webhook", tool), input, credentials, lineage)
+		result, err := executor.Apply(serveRegistrationTestContext(harness, "malformed-success"), registrationOperationForTest(t, packs.RegistrationOperationApply, "telegram.apply_webhook"), input, credentials, lineage)
 		if err == nil || result.Pending == nil {
 			t.Fatalf("Apply malformed success = %#v, %v", result, err)
 		}
@@ -483,7 +483,7 @@ func TestProviderRegistrationApplyEffectOutcomes(t *testing.T) {
 			t.Fatal("stale authority reached provider transport")
 			return nil, nil
 		})}}
-		if _, err := executor.Apply(serveRegistrationTestContext(harness, "stale"), registrationOperationForTest(t, packs.RegistrationOperationApply, "telegram.apply_webhook", tool), input, credentials, lineage); err == nil {
+		if _, err := executor.Apply(serveRegistrationTestContext(harness, "stale"), registrationOperationForTest(t, packs.RegistrationOperationApply, "telegram.apply_webhook"), input, credentials, lineage); err == nil {
 			t.Fatal("stale authority Apply returned nil")
 		}
 		if _, exists := harness.StateForAdapter("provider_registration"); exists {
@@ -498,7 +498,7 @@ func TestProviderRegistrationApplyEffectOutcomes(t *testing.T) {
 			t.Fatal("launch persistence failure reached provider transport")
 			return nil, nil
 		})}}
-		result, err := executor.Apply(serveRegistrationTestContext(harness, "launch-persistence-failure"), registrationOperationForTest(t, packs.RegistrationOperationApply, "telegram.apply_webhook", tool), input, credentials, lineage)
+		result, err := executor.Apply(serveRegistrationTestContext(harness, "launch-persistence-failure"), registrationOperationForTest(t, packs.RegistrationOperationApply, "telegram.apply_webhook"), input, credentials, lineage)
 		if err == nil || result.Pending != nil || result.Acknowledged {
 			t.Fatalf("Apply launch persistence failure = %#v, %v", result, err)
 		}
@@ -512,11 +512,11 @@ func TestProviderRegistrationApplyEffectOutcomes(t *testing.T) {
 }
 
 func TestProviderRegistrationReadClassifiesCredentialRejection(t *testing.T) {
-	tool := packfixture.ConnectorTool(t, "telegram", "telegram.identify_bot").Tool
+
 	executor := HTTPExecutor{Client: &http.Client{Transport: registrationRoundTripFunc(func(*http.Request) (*http.Response, error) {
 		return registrationResponse(http.StatusUnauthorized, `{"ok":false,"error_code":401,"description":"Unauthorized"}`), nil
 	})}}
-	_, err := executor.Read(context.Background(), registrationOperationForTest(t, packs.RegistrationOperationIdentify, "telegram.identify_bot", tool), map[string]any{}, map[string]any{"telegram_bot_token": "rejected-secret"})
+	_, err := executor.Read(context.Background(), registrationOperationForTest(t, packs.RegistrationOperationIdentify, "telegram.identify_bot"), map[string]any{}, map[string]any{"telegram.telegram_bot_token": "rejected-secret"})
 	var rejected *ProviderCredentialRejectedError
 	if !errors.As(err, &rejected) || rejected.StatusCode != http.StatusUnauthorized || strings.Contains(err.Error(), "rejected-secret") {
 		t.Fatalf("credential rejection = %#v, %v", rejected, err)
@@ -524,28 +524,30 @@ func TestProviderRegistrationReadClassifiesCredentialRejection(t *testing.T) {
 }
 
 func TestProviderRegistrationReadRequiresCompiledReadSlot(t *testing.T) {
-	tool := packfixture.ConnectorTool(t, "telegram", "telegram.apply_webhook").Tool
+
 	var calls int
 	executor := HTTPExecutor{Client: &http.Client{Transport: registrationRoundTripFunc(func(*http.Request) (*http.Response, error) {
 		calls++
 		return registrationResponse(http.StatusOK, `{"ok":true,"result":true}`), nil
 	})}}
-	_, err := executor.Read(context.Background(), registrationOperationForTest(t, packs.RegistrationOperationApply, "telegram.apply_webhook", tool),
+	_, err := executor.Read(context.Background(), registrationOperationForTest(t, packs.RegistrationOperationApply, "telegram.apply_webhook"),
 		map[string]any{"callback_url": "https://hooks.example.test/current"},
-		map[string]any{"telegram_bot_token": "bot-secret", "webhook_signing_secret": "signing-secret"})
+		map[string]any{"telegram.telegram_bot_token": "bot-secret", "telegram.webhook_signing_secret": "signing-secret"})
 	if err == nil || calls != 0 {
 		t.Fatalf("write slot became a platform read by category alone: calls=%d err=%v", calls, err)
 	}
 }
 
 func TestProviderRegistrationTransportFailsClosedBeforeCredentialsLeaveProcess(t *testing.T) {
-	tool := packfixture.ConnectorTool(t, "telegram", "telegram.apply_webhook").Tool
-	httpSpec, ok := tool.HTTP()
+	plan := registrationChannelPlanForTest(t, func(tools map[string]any) {
+		httpSpec := tools["apply_webhook"].(map[string]any)["http"].(map[string]any)
+		httpSpec["url"] = strings.Replace(httpSpec["url"].(string), "https://", "http://", 1)
+	})
+	registration, ok := plan.Registration()
 	if !ok {
-		t.Fatal("Telegram registration HTTP contract is missing")
+		t.Fatal("Telegram registration plan is missing")
 	}
-	httpSpec.URL = strings.Replace(httpSpec.URL, "https://", "http://", 1)
-	insecure, err := tool.WithHTTP(httpSpec)
+	operation, err := registration.Operation(packs.RegistrationOperationApply)
 	if err != nil {
 		t.Fatalf("construct insecure registration tool: %v", err)
 	}
@@ -556,9 +558,9 @@ func TestProviderRegistrationTransportFailsClosedBeforeCredentialsLeaveProcess(t
 	})}}
 	_, err = executor.Apply(
 		serveRegistrationTestContext(harness, "insecure"),
-		registrationOperationForTest(t, packs.RegistrationOperationApply, "telegram.apply_webhook", insecure),
+		operation,
 		map[string]any{"callback_url": "https://hooks.example.test/webhooks/support/telegram?swarm_callback_generation=current"},
-		map[string]any{"telegram_bot_token": "bot-secret", "webhook_signing_secret": "signing-secret"},
+		map[string]any{"telegram.telegram_bot_token": "bot-secret", "telegram.webhook_signing_secret": "signing-secret"},
 		nil,
 	)
 	if err == nil || !strings.Contains(err.Error(), "HTTPS URL") {

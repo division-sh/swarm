@@ -188,10 +188,7 @@ func TestC4F35EventStartNativeCommitAccountingBothStores(t *testing.T) {
 			}
 			t.Run(backend+"/"+cut, func(t *testing.T) {
 				selected, db, connector := newP16RaceStore(t, backend)
-				ctx := testAuthorActivityContext()
-				if err := sourceartifactfixture.Ensure(ctx, selected.(sourceartifactfixture.Writer)); err != nil {
-					t.Fatal(err)
-				}
+				ctx := requireDefaultSourceArtifactForTest(t, testAuthorActivityContext(), selected)
 				runID := uuid.NewString()
 				input := eventtest.RunCreatingRootIngress(uuid.NewString(), "c4.atomic.birth", "ingress", "", []byte(`{"original":true}`), 0,
 					runID, "", events.EventEnvelope{}, time.Date(2026, 10, 9, 0, 0, 0, 0, time.UTC))
@@ -221,7 +218,6 @@ func TestC4F35EventStartNativeCommitAccountingBothStores(t *testing.T) {
 					c4RequireRevisionCount(t, ctx, selected, runID, 1)
 				}
 				selected, _ = c4ReopenCreationStore(t, backend, selected, db, connector)
-				ctx = testAuthorActivityContext()
 				if !committed {
 					c4RequireAbsentCreation(t, ctx, selected, runID)
 				} else {
@@ -278,11 +274,8 @@ func TestC4F35ForkStartNativeCommitAccountingBothStores(t *testing.T) {
 			}
 			t.Run(backend+"/"+cut, func(t *testing.T) {
 				selected, db, connector := newP16RaceStore(t, backend)
-				ctx := testAuthorActivityContext()
+				ctx := requireDefaultSourceArtifactForTest(t, testAuthorActivityContext(), selected)
 				ctx = originalStoreFixtureContext(t, ctx, selected)
-				if err := sourceartifactfixture.Ensure(ctx, selected.(sourceartifactfixture.Writer)); err != nil {
-					t.Fatal(err)
-				}
 				sourceRun := uuid.NewString()
 				input := eventtest.RunCreatingRootIngress(uuid.NewString(), "c4.fork.atomic.source", "ingress", "", []byte(`{}`), 0,
 					sourceRun, "", events.EventEnvelope{}, time.Date(2026, 10, 9, 0, 0, 0, 0, time.UTC))
@@ -292,7 +285,11 @@ func TestC4F35ForkStartNativeCommitAccountingBothStores(t *testing.T) {
 					t.Fatal(err)
 				}
 				sourceStart := c4RequireExclusiveStart(t, ctx, selected, sourceRun, sourceartifactfixture.BundleHash, input.ID())
-				request := runfork.RunForkMaterializeRequest{SourceRunID: sourceRun, At: input.ID()}
+				root, present, err := correlation.RootAdmissionFromContext(ctx)
+				if err != nil || !present {
+					t.Fatalf("source root admission: present=%t err=%v", present, err)
+				}
+				request := runfork.RunForkMaterializeRequest{SourceRunID: sourceRun, At: input.ID(), RootAdmission: root}
 				plan, err := selected.(c4StartPlanner).PlanRunFork(ctx, runfork.RunForkPlanRequest{SourceRunID: sourceRun, At: input.ID()})
 				if err != nil {
 					t.Fatal(err)
@@ -337,7 +334,7 @@ func TestC4F35ForkStartNativeCommitAccountingBothStores(t *testing.T) {
 					c4RequireRevisionCount(t, ctx, selected, forkRun, 1)
 				}
 				selected, _ = c4ReopenCreationStore(t, backend, selected, db, connector, p16CommitConnector{connector})
-				ctx = testAuthorActivityContext()
+				ctx = requireDefaultSourceArtifactForTest(t, testAuthorActivityContext(), selected)
 				ctx = originalStoreFixtureContext(t, ctx, selected)
 				owner = selected.(c4ForkCreationOwner)
 				if !committed {
@@ -568,13 +565,14 @@ func c4CreationReplayContext(t *testing.T, selected any, record c4CreationCrashR
 			t.Fatalf("creation crash record lost a canonical run/input coordinate: %q", id)
 		}
 	}
-	fact, err := selected.(interface {
-		RequirePresentRunSource(context.Context, string) (correlation.SourceArtifactFact, error)
-	}).RequirePresentRunSource(testAuthorActivityRuntimeContext(), record.RunID)
-	if err != nil || fact.BundleHash() != record.BundleHash {
+	rooted, err := selected.(interface {
+		LoadRunRootedSource(context.Context, string) (sourceartifact.RootedSource, error)
+	}).LoadRunRootedSource(testAuthorActivityRuntimeContext(), record.RunID)
+	if err != nil || rooted.Admission().BundleHash() != record.BundleHash {
 		t.Fatalf("creation retry source disagrees with its committed run: err=%v", err)
 	}
-	ctx := correlation.WithSourceArtifactFact(testAuthorActivityRuntimeContext(), fact)
+	fact := sourceartifactfixture.FactFor(rooted.Artifact())
+	ctx := correlation.WithRootAdmission(correlation.WithSourceArtifactFact(testAuthorActivityRuntimeContext(), fact), rooted.Admission())
 	ctx = authoractivity.WithScope(ctx, authoractivity.BundleScope(authorActivityTestRuntimeInstanceID, fact.BundleHash()))
 	return originalStoreFixtureContext(t, correlation.WithRunID(effects.WithExecutionMode(ctx, effects.ExecutionModeLive), record.RunID), selected)
 }
@@ -711,9 +709,7 @@ func c4RunCreationCrashChild(t *testing.T) {
 	fixture, _ := openPipelineCrashStore(t, backend, location, p16CommitConnector{connector})
 	ctx := testAuthorActivityContext()
 	ctx = originalStoreFixtureContext(t, ctx, fixture.store)
-	if err := sourceartifactfixture.Ensure(ctx, fixture.store.(sourceartifactfixture.Writer)); err != nil {
-		t.Fatal(err)
-	}
+	ctx = requireDefaultSourceArtifactForTest(t, ctx, fixture.store)
 	record := c4CreationCrashRecord{Origin: origin, RunID: uuid.NewString(), EventID: uuid.NewString(), BundleHash: sourceartifactfixture.BundleHash,
 		At: time.Now().UTC().Truncate(time.Microsecond)}
 	var create func()
@@ -785,10 +781,14 @@ func c4RunCreationCrashChild(t *testing.T) {
 			t.Fatal(err)
 		}
 		record.ForkPoint = sourcePlan.ForkPoint
+		root, present, err := correlation.RootAdmissionFromContext(ctx)
+		if err != nil || !present {
+			t.Fatalf("creation fork source root: present=%t err=%v", present, err)
+		}
 		create = func() {
 			forkWitness = connector.armForkInsert(record.SourceRunID, record.ForkPoint, record.BundleHash)
 			arm()
-			if _, err := fixture.store.(c4ForkCreationOwner).MaterializeRunFork(ctx, runfork.RunForkMaterializeRequest{SourceRunID: record.SourceRunID, At: record.EventID}); err != nil {
+			if _, err := fixture.store.(c4ForkCreationOwner).MaterializeRunFork(ctx, runfork.RunForkMaterializeRequest{SourceRunID: record.SourceRunID, At: record.EventID, RootAdmission: root}); err != nil {
 				t.Fatal(err)
 			}
 		}
@@ -825,8 +825,12 @@ func c4ReplayCreationAfterCrash(t *testing.T, ctx context.Context, fixture autho
 		}
 		origin = runlifecycle.DeploymentRunOrigin()
 	case "fork":
+		root, present, rootErr := correlation.RootAdmissionFromContext(ctx)
+		if rootErr != nil || !present {
+			t.Fatalf("fork replay source root: present=%t err=%v", present, rootErr)
+		}
 		replayed := c4ReadExactForkWithoutMutation(t, ctx, fixture.store, backend, record.RunID,
-			runfork.RunForkMaterializeRequest{SourceRunID: record.SourceRunID, At: record.EventID}, true, nil)
+			runfork.RunForkMaterializeRequest{SourceRunID: record.SourceRunID, At: record.EventID, RootAdmission: root}, true, nil)
 		point := record.ForkPoint
 		if point.Kind != runfork.RunForkPointEvent || point.EventID != record.EventID || point.Revision != 1 ||
 			replayed.ForkRunID != record.RunID || replayed.ForkPoint != point {
@@ -943,6 +947,10 @@ func TestC4F35DeploymentStartNativeCommitAccountingBothStores(t *testing.T) {
 			t.Run(backend+"/"+name, func(t *testing.T) {
 				selected, db, connector := newP16RaceStore(t, backend)
 				ctx, command := c4DeploymentStartCommand(t, selected, false)
+				root, present, err := correlation.RootAdmissionFromContext(ctx)
+				if err != nil || !present {
+					t.Fatalf("deployment creation requires its captured root: present=%t err=%v", present, err)
+				}
 				owner := selected.(bus.DeploymentRunCreationCommitOwner)
 				runID := command.RunCreation.RunID
 				fault := errors.New("C4 deployment physical commit boundary")
@@ -980,7 +988,7 @@ func TestC4F35DeploymentStartNativeCommitAccountingBothStores(t *testing.T) {
 					c4RequireRevisionCount(t, ctx, selected, runID, 1)
 				}
 				selected, _ = c4ReopenCreationStore(t, backend, selected, db, connector)
-				ctx = testAuthorActivityContextForBundle(command.RunCreation.BundleHash)
+				ctx = correlation.WithRootAdmission(testAuthorActivityContextForBundle(command.RunCreation.BundleHash), root)
 				ctx = originalStoreFixtureContext(t, ctx, selected)
 				owner = selected.(bus.DeploymentRunCreationCommitOwner)
 				if !committed {
@@ -1028,7 +1036,7 @@ func TestC4F35EventForkStartNativeRetryBothStores(t *testing.T) {
 		for _, kind := range []runfork.RunForkPointKind{runfork.RunForkPointEvent, runfork.RunForkPointStateRevision} {
 			t.Run(backend+"/"+string(kind), func(t *testing.T) {
 				fixture := openRunLifecycleCandidateParityFixture(t, backend)
-				ctx := testAuthorActivityContextForBundle(runLifecycleCandidateParityBundleHash)
+				ctx := requireDefaultSourceArtifactForTest(t, testAuthorActivityContextForBundle(runLifecycleCandidateParityBundleHash), fixture.store)
 				ctx = originalStoreFixtureContext(t, ctx, fixture.store)
 				runID := uuid.NewString()
 				initial := eventtest.RunCreatingRootIngress(uuid.NewString(), "c4.fork.source", "ingress", "", []byte(`{}`), 0,
@@ -1040,7 +1048,11 @@ func TestC4F35EventForkStartNativeRetryBothStores(t *testing.T) {
 				}
 				c4RequireExclusiveStart(t, ctx, fixture.store, runID, runLifecycleCandidateParityBundleHash, initial.ID())
 				selected := fixture.store.(c4ForkCreationOwner)
-				request := runfork.RunForkMaterializeRequest{SourceRunID: runID}
+				root, present, err := correlation.RootAdmissionFromContext(ctx)
+				if err != nil || !present {
+					t.Fatalf("source root admission: present=%t error=%v", present, err)
+				}
+				request := runfork.RunForkMaterializeRequest{SourceRunID: runID, RootAdmission: root}
 				if kind == runfork.RunForkPointEvent {
 					request.At = initial.ID()
 				}
@@ -1109,7 +1121,12 @@ func TestC4F35StandingStartNativeCommitAccountingBothStores(t *testing.T) {
 				artifact := storeTestSourceArtifact("c4-standing-" + backend)
 				bundleHash := artifact.BundleHash()
 				setup := testAuthorActivityContextForBundle(bundleHash)
-				fact := sourceartifactfixture.RequireArtifact(t, setup, selected.(sourceartifactfixture.Writer), artifact)
+				rooted, _ := sourceartifactfixture.Rooted(t, "c4-standing", artifact)
+				fact := sourceartifactfixture.FactFor(artifact)
+				setup = correlation.WithRootAdmission(setup, rooted.Admission())
+				if _, err := selected.(sourceartifactfixture.RootedWriter).EnsureRootedSource(setup, rooted); err != nil {
+					t.Fatal(err)
+				}
 				ctx := testAuthorActivityRuntimeContext()
 				ctx = originalStoreFixtureContext(t, ctx, selected)
 				workflow := newWorkflowTestCoordinator(t, db, pipeline.NewWorkflowPersistence(selected.(workflowTestSelectedStore)), selected.(workflowTestSelectedStore))
@@ -1177,14 +1194,15 @@ func TestC4F35StandingStartNativeCommitAccountingBothStores(t *testing.T) {
 func c4DeploymentStartCommand(t *testing.T, selected any, withTimer bool) (context.Context, bus.DeploymentRunCreationCommand) {
 	t.Helper()
 	files := map[string]string{
-		"schema.yaml": "name: c4-start\npins:\n  outputs:\n    - records.ready\n",
-		"events.yaml": "records.ready:\n  body: text\n",
+		"schema.yaml": "pins:\n  outputs:\n    - records.ready\n",
+		"events.yaml": "records.ready:\n  body: text\n", "manifest.yaml": "version: 1.0.0\nplatform_version: '*'\n",
 	}
 	if withTimer {
 		files["schema.yaml"] += "    - timer.elapsed\nstages:\n  waiting:\n    timers:\n      - {id: waiting.timeout, after: 1h, emit: timer.elapsed}\n"
 		files["events.yaml"] += "timer.elapsed:\n"
 	} else {
-		files["nested/schema.yaml"] = "name: nested\n"
+		files["nested/manifest.yaml"] = "version: 1.0.0\nplatform_version: '*'\n"
+		files["nested/schema.yaml"] = "stages: []\n"
 	}
 	f := newReceiverConfigActivationFixtureForStore(t, selected.(agentFixtureFlowStore), false, files, nil, ownStoreTestAgentManager, nil)
 	f.ctx = originalStoreFixtureContext(t, f.ctx, selected)

@@ -22,6 +22,7 @@ import (
 	"github.com/division-sh/swarm/internal/runtime/runlifecycle"
 	"github.com/division-sh/swarm/internal/runtime/scenarioexecution"
 	"github.com/division-sh/swarm/internal/runtime/semanticview"
+	"github.com/division-sh/swarm/internal/sourceartifact"
 )
 
 type SelectedContractExecutionRequest struct {
@@ -35,7 +36,7 @@ type SelectedContractExecutionRequest struct {
 	EffectiveSourceIdentity scenarioexecution.EffectiveSourceIdentity
 	AllowSourceFreeze       bool
 	LiveRuntime             *runtimepkg.Runtime
-	AcquireLiveRuntime      func(context.Context, string) (*runtimepkg.RuntimeContextUse, error)
+	AcquireLiveRuntime      func(context.Context, sourceartifact.RootAdmissionReference) (*runtimepkg.RuntimeContextUse, error)
 	LiveContexts            *runtimepkg.RuntimeContextManager
 	LiveRuns                runlifecycle.LiveRunReader
 	liveSelectionHeld       bool
@@ -62,6 +63,7 @@ type SelectedContractExecutionResult struct {
 	ForkLocalRuntimeContainer          *SelectedContractForkLocalRuntimeContainer         `json:"fork_local_runtime_container,omitempty"`
 	ExecutedEventCount                 int                                                `json:"executed_event_count"`
 	ForkEvents                         []SelectedContractExecutionForkEvent               `json:"fork_events,omitempty"`
+	liveReconciliationAttempted        bool
 }
 
 // ResumeRecoveredSelectedFork re-enters the selected execution sequence
@@ -184,6 +186,7 @@ func executePreparedSelectedContractRunFork(ctx context.Context, req SelectedCon
 	}
 	container, err := buildSelectedContractForkLocalRuntimeContainer(ctx, publishSelectedContractForkEventsRequest{
 		OriginalLoopCarriage:  prepared.originalLoopCarriage,
+		OriginalRootAdmission: prepared.originalSource.RootedSource.Admission(),
 		Prepared:              prepared,
 		Operation:             operation,
 		Owner:                 req.Owner,
@@ -385,6 +388,7 @@ func (p *PreparedSelectedFork) cleanupExecutionFailure(ctx context.Context, stor
 
 type publishSelectedContractForkEventsRequest struct {
 	OriginalLoopCarriage  semanticview.OriginalLoopCarriage
+	OriginalRootAdmission sourceartifact.RootAdmission
 	Prepared              *PreparedSelectedFork
 	Operation             *selectedContractOperation
 	Owner                 SelectedContractExecutionOwner

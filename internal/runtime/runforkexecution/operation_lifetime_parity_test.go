@@ -114,7 +114,7 @@ func TestSelectedContractOperationReplacementBothStores(t *testing.T) {
 				var interruptedSnapshot map[string]storetest.SelectedForkStorageTableSnapshot
 				failure := errors.New("injected activation failure")
 				var discards int
-				activation := selectedOperationActivationProbe{SelectedContractForkLifecycle: owner.ports.fork, discards: &discards, before: func(ctx context.Context) {
+				activation := &selectedOperationActivationProbe{SelectedContractForkLifecycle: owner.ports.fork, discards: &discards, before: func(ctx context.Context) {
 					occurrence, ok := worklifetime.OccurrenceFromContext(ctx)
 					bound, _ = occurrence.(*worklifetime.SelectedForkOccurrence)
 					if !ok || bound == nil || process.ActiveCount() == 0 {
@@ -150,14 +150,15 @@ func TestSelectedContractOperationReplacementBothStores(t *testing.T) {
 				}
 				request := SelectedContractExecutionRequest{
 					SourceRunID: sourceID, At: eventID, AllowSourceFreeze: true, Owner: owner, SourceLoader: loader,
-					ContractSelection: runforkadmission.SelectedContractSelection(loaded.Source),
-					AgentRuntime:      SelectedContractAgentRuntimeOptions{ExecutionPosture: executionposture.MockOnly, ProcessCapability: capability},
-					LiveRuntime:       ordinary, LiveContexts: contexts, LiveRuns: selected.(runlifecycle.LiveRunReader),
+					SourceArtifactFact: loaded.SourceArtifactFact,
+					ContractSelection:  runforkadmission.SelectedContractSelection(loaded.Source),
+					AgentRuntime:       SelectedContractAgentRuntimeOptions{ExecutionPosture: executionposture.MockOnly, ProcessCapability: capability},
+					LiveRuntime:        ordinary, LiveContexts: contexts, LiveRuns: selected.(runlifecycle.LiveRunReader),
 				}
 				request.ForkOperation = &runfork.ForkOperationRequest{
 					OperationID: uuid.NewString(), Actor: "operation-lifetime", IdempotencyKey: point,
 					TransportHash: "operation-lifetime-" + point, SourceRunID: sourceID, ForkEventID: eventID,
-					TargetBundleHash: loaded.SourceArtifactFact.BundleHash(), ContractSelection: request.ContractSelection, AllowSourceFreeze: true,
+					TargetBundleHash: loaded.SourceArtifactFact.BundleHash(), TargetRootReference: loaded.RootedSource.Admission().Reference(), ContractSelection: request.ContractSelection, AllowSourceFreeze: true,
 				}
 				result, err := ExecuteSelectedContractRunFork(ctx, request)
 				if point == "activation_failure" || point == "process_shutdown" {
@@ -229,19 +230,43 @@ func seedSelectedOperationSource(t *testing.T, ctx context.Context, selected any
 	ctx = originalSelectedFixtureContext(t, ctx, selected.(startupownership.Store))
 	at := time.Unix(1700002200, 0).UTC()
 	ctx = originalSelectedFixtureContext(t, ctx, any(selected).(startupownership.Store))
-	fixture := storetest.RunFixture{RunID: runID, Origin: storetest.ScenarioSetupOrigin(), BundleHash: loaded.SourceArtifactFact.BundleHash(), Artifact: selectedExecutionSourceArtifact(t, loaded.SourceArtifactFact.BundleHash()), StartedAt: at.Add(-time.Minute)}
+	fixture := storetest.RunFixture{RunID: runID, Origin: storetest.ScenarioSetupOrigin(), BundleHash: loaded.SourceArtifactFact.BundleHash(), Artifact: loaded.RootedSource.Artifact(), RootAdmission: loaded.RootedSource.Admission(), StartedAt: at.Add(-time.Minute)}
 	if live {
 		fixture.Origin, fixture.LiveScope = runlifecycle.DeploymentRunOrigin(), runlifecycle.LiveRunScope{FlowPath: "."}
 	}
 	storetest.RequireRun(t, ctx, selected.(storetest.RunFixtureStore), fixture)
 	event := eventtest.ExistingRunRootIngressWithRoutingSourceAndMode(eventID, "item.received", "source-runtime", "", []byte(`{}`), 0, runID,
-		events.EventEnvelope{}, events.NoRoutingSource(), at, executionmode.Mock)
+		events.EventEnvelope{}, eventtest.RootRoutingSource(runID), at, executionmode.Mock)
 	if len(input) == 1 {
 		event = input[0]
+	} else {
+		var err error
+		event, err = eventtest.AdmitPayload(event, ".", string(event.Type()))
+		if err != nil {
+			t.Fatal(err)
+		}
 	}
 	storetest.CommitSemanticEventWithRoutes(t, ctx, selected, event, []events.DeliveryRoute{selectedExecutionEntitylessNodeRoute("source-only-node")}, pipelineobligation.ScopeSubscribed)
 	commitSelectedOperationRootFixture(t, ctx, selected, loaded, event)
 	storetest.CaptureRunForkSnapshot(t, ctx, selected, runID)
+}
+
+func selectedForkFixtureOperation(t testing.TB, loaded LoadedSelectedContractSource, runID, eventID string) *runfork.ForkOperationRequest {
+	t.Helper()
+	if err := loaded.RootedSource.Validate(); err != nil {
+		t.Fatal(err)
+	}
+	operation := runfork.ForkOperationRequest{
+		OperationID: uuid.NewString(), Actor: "selected-fork-fixture", TransportHash: "selected-fork-fixture",
+		SourceRunID: runID, ForkEventID: eventID, TargetBundleHash: loaded.SourceArtifactFact.BundleHash(),
+		TargetRootReference: loaded.RootedSource.Admission().Reference(), AllowSourceFreeze: true,
+		ContractSelection: runforkadmission.SelectedContractSelection(loaded.Source),
+	}
+	canonical, _, err := operation.Canonical()
+	if err != nil {
+		t.Fatal(err)
+	}
+	return &canonical
 }
 
 // This is explicit component construction with no route/arm installation, not

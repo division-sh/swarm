@@ -13,7 +13,7 @@ import (
 	"github.com/division-sh/swarm/internal/sourceartifact"
 )
 
-const BundleHash = "bundle-v2:sha256:50f57791dbbc28dad36e9660e36e04f0c1a0431e57ce811ff3a409b9bcccffbb"
+const BundleHash = "bundle-v2:sha256:51ab8ed4049f1b6b711082e422f94893dc7eedacc57f66c4e1fd761142fa5fa3"
 
 type Writer interface {
 	EnsureSourceArtifactWithData(context.Context, *sourceartifact.AdmittedSourceArtifact, durabledata.Catalog) (sourceartifact.EnsureResult, error)
@@ -24,7 +24,14 @@ type Reader interface {
 }
 
 func Artifact() *sourceartifact.AdmittedSourceArtifact {
-	artifact := New("global/schema.yaml", []byte("name: global\n"))
+	artifact, err := sourceartifact.AdmitMembers(map[string][]byte{
+		"manifest.yaml":        []byte("version: 1.0.0\nplatform_version: '*'\n"),
+		"global/manifest.yaml": []byte("version: 1.0.0\nplatform_version: '*'\n"),
+		"global/schema.yaml":   []byte("stages: []\n"),
+	})
+	if err != nil {
+		panic(err)
+	}
 	if artifact.BundleHash() != BundleHash {
 		panic("source artifact fixture hash drift: " + artifact.BundleHash())
 	}
@@ -88,6 +95,15 @@ func EnsureArtifact(ctx context.Context, writer Writer, artifact *sourceartifact
 	}
 	if artifact == nil {
 		return errors.New("admitted source artifact fixture is required")
+	}
+	if rooted, err := artifact.RootedSource(); err == nil {
+		owner, ok := writer.(RootedWriter)
+		if !ok {
+			return errors.New("rooted source fixture requires its selected-store rooted writer")
+		}
+		if _, err := owner.EnsureRootedSource(ctx, rooted); err != nil {
+			return err
+		}
 	}
 	if reader, ok := writer.(Reader); ok {
 		persisted, err := reader.GetSourceArtifact(ctx, artifact.BundleHash())

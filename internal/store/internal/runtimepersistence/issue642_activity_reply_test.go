@@ -7,9 +7,11 @@ import (
 	"testing"
 
 	"github.com/division-sh/swarm/internal/runtime/core/activityidentity"
+	runtimecorrelation "github.com/division-sh/swarm/internal/runtime/correlation"
 	"github.com/division-sh/swarm/internal/runtime/replycontext"
 	"github.com/division-sh/swarm/internal/runtime/runfork"
 	"github.com/division-sh/swarm/internal/runtime/runforkexecution"
+	"github.com/division-sh/swarm/internal/sourceartifact"
 )
 
 func TestIssue642RecordedActivityRetainsChildReplyBothStores(t *testing.T) {
@@ -39,7 +41,7 @@ func TestIssue642RecordedActivityRetainsChildReplyBothStores(t *testing.T) {
 						if inherited[0].ID == sourceReply.ID || inherited[0].RunID != child.ForkRunID || inherited[0].State != replycontext.StateOpen || inherited[0].SourceRunID != sourceReply.SourceRunID || inherited[0].SourceRequestEventID != sourceReply.SourceRequestEventID {
 							t.Fatalf("child context lost original evidence or cut ownership: %+v", inherited[0])
 						}
-						loaded, err := owner.LoadRunForkSelectedContractSourceEvents(ctx, event.RunID(), child.ForkRunID, []string{event.ID()}, originalActivityCarriageAtPoint(t, owner, event.RunID(), child.ForkPoint))
+						loaded, err := owner.LoadRunForkSelectedContractSourceEvents(ctx, event.RunID(), child.ForkRunID, []string{event.ID()}, originalActivityCarriageAtPoint(t, owner, event.RunID(), child.ForkPoint), originalRootAdmissionForRun(t, owner, event.RunID()))
 						if err != nil || len(loaded) != 1 {
 							t.Fatalf("project activity source: count=%d error=%v", len(loaded), err)
 						}
@@ -87,6 +89,14 @@ func TestIssue642OrdinaryActivityReplayRetainsChildReplyBothStores(t *testing.T)
 			fixture := backend.open(t)
 			child, event, original := seedActivityEvidenceForForkWithReply(t, fixture, backend.name == "postgres", false, "succeeded", 0, true, false, true)
 			ctx := originalStoreFixtureContext(fixture.activityOwner, testAuthorActivityContext(), fixture.store)
+			rooted, err := fixture.store.(interface {
+				LoadRunRootedSource(context.Context, string) (sourceartifact.RootedSource, error)
+			}).LoadRunRootedSource(ctx, event.RunID())
+			if err != nil {
+				t.Fatal(err)
+			}
+			fact := mustStoreTestSourceArtifactFact(rooted.Admission().BundleHash())
+			ctx = runtimecorrelation.WithRootAdmission(runtimecorrelation.WithSourceArtifactFact(ctx, fact), rooted.Admission())
 			rows, err := ReadReplyContextRecordsForTest(ctx, fixture.store, child.ForkRunID)
 			if err != nil || len(rows) != 1 || rows[0].ID == original.ReplyContextID || rows[0].SourceRunID != event.RunID() {
 				t.Fatalf("ordinary materialization lost exact own context: %+v error=%v", rows, err)
@@ -95,12 +105,15 @@ func TestIssue642OrdinaryActivityReplayRetainsChildReplyBothStores(t *testing.T)
 				RequireMaterializedRunFork(context.Context, string, runfork.RunForkMaterializeRequest) (runfork.RunForkMaterialization, error)
 				ActivateRunFork(context.Context, runfork.RunForkActivateRequest) (runfork.RunForkActivation, error)
 			})
-			repeat, err := owner.RequireMaterializedRunFork(ctx, child.ForkRunID, runfork.RunForkMaterializeRequest{SourceRunID: event.RunID(), At: event.ID()})
+			repeat, err := owner.RequireMaterializedRunFork(ctx, child.ForkRunID, runfork.RunForkMaterializeRequest{
+				SourceRunID: event.RunID(), At: event.ID(), SourceArtifactFact: fact, RootAdmission: rooted.Admission(),
+			})
 			if err != nil || repeat.ForkRunID != child.ForkRunID {
 				t.Fatalf("ordinary exact repeated materialization: %+v error=%v", repeat, err)
 			}
 			activation, err := owner.ActivateRunFork(ctx, runfork.RunForkActivateRequest{
 				ForkRunID: child.ForkRunID, AllowSourceFreeze: true,
+				OriginalRootAdmission:             rooted.Admission(),
 				OriginalLoopCarriage:              originalActivityCarriageAtPoint(t, fixture.store.(selectedActivityProjectionStore), event.RunID(), child.ForkPoint),
 				HistoricalReplayExecutionAdmitter: runforkexecution.HistoricalReplayExecutionAdmitter{},
 			})

@@ -47,7 +47,7 @@ func a9KeyedRootIngressConstruction(t *testing.T, autoEmit bool) {
 				t.Fatal(err)
 			}
 			const secret = "a9-authenticated-keyed-root"
-			if err := file.Set(t.Context(), "webhook_signing.partner", secret); err != nil {
+			if err := file.Set(t.Context(), "partner.webhook_signing_secret", secret); err != nil {
 				t.Fatal(err)
 			}
 			_, start := clockDeploymentHarness(t, backend, root)
@@ -122,7 +122,7 @@ func a9KeyedRootIngressConstruction(t *testing.T, autoEmit bool) {
 				t.Fatal(err)
 			}
 			initial, err := construction.LoadFlowConstructionPublication(t.Context(), rootOwner, status.RunID)
-			if err != nil || initial.CreatingInput != (pipeline.FlowConstructionInput{EventID: receipt.EventIDs[0], Input: "account.opened"}) || initial.Fields["provider_event_id"] != "first" {
+			if err != nil || initial.CreatingInput != (pipeline.FlowConstructionInput{EventID: receipt.EventIDs[0], Input: "inbound.partner.raw"}) || initial.Fields["provider_event_id"] != "first" {
 				t.Fatalf("creating input or immutable initial fields lost: %+v err=%v", initial, err)
 			}
 			instances, err = rt.Pipeline.ListWorkflowInstances(t.Context(), status.RunID)

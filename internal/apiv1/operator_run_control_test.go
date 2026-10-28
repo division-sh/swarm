@@ -7,14 +7,15 @@ import (
 	"testing"
 	"time"
 
-	runtimebus "github.com/division-sh/swarm/internal/runtime/bus"
+	"github.com/division-sh/swarm/internal/runtime/bus"
 	runtimeruncontrol "github.com/division-sh/swarm/internal/runtime/runcontrol"
 	storerunlifecycle "github.com/division-sh/swarm/internal/runtime/runlifecycle"
+	"github.com/division-sh/swarm/internal/runtime/semanticview"
 	"github.com/division-sh/swarm/internal/store/storetest"
 	"github.com/google/uuid"
 )
 
-func pauseAPITestLiveRun(t *testing.T, bus *runtimebus.EventBus, selected any, runID string) {
+func pauseAPITestLiveRun(t *testing.T, bus *bus.EventBus, selected any, runID string) {
 	t.Helper()
 	owner, ok := selected.(runtimeruncontrol.Store)
 	if !ok {
@@ -88,8 +89,8 @@ func TestOperatorRunStopDoesNotReplayCommittedTransitionAfterReconciliationFailu
 
 func TestOperatorRunControlHandlersUseCanonicalOwnerAndIdempotency(t *testing.T) {
 	pg := storetest.StartPostgresRuntimeStore(t)
-	ctx := originalAPIFixtureContext(t, testAuthorActivityContext(context.Background()), pg)
-	bus, err := newScopedAPITestEventBus(t, pg)
+	source := semanticview.Wrap(loadAPIAuthoredBundle(t, authorActivityTestSourceArtifact))
+	bus, err := newScopedAPITestEventBus(t, pg, bus.EventBusOptions{ContractBundle: source, SourceArtifactFact: authorActivityTestSourceArtifactFact})
 	if err != nil {
 		t.Fatalf("NewEventBus: %v", err)
 	}
@@ -97,6 +98,7 @@ func TestOperatorRunControlHandlersUseCanonicalOwnerAndIdempotency(t *testing.T)
 		Now: func() time.Time { return time.Date(2026, 5, 11, 12, 0, 0, 0, time.UTC) },
 	})
 	bus.SetRunDispatchGate(controller)
+	ctx := admittedAPITestBusContext(t, context.Background(), bus)
 	handler := testHandlerWithOriginalContext(t, Options{
 		AuthTokens: []string{testToken},
 		Handlers: testOperatorHandlers(testOperatorCapabilities{
@@ -186,13 +188,14 @@ func TestOperatorRunControlHandlersUseCanonicalOwnerAndIdempotency(t *testing.T)
 
 func TestOperatorRunControlHandlersTypedResourceErrors(t *testing.T) {
 	pg, _ := storetest.StartPostgresRuntimeStoreWithReopen(t)
-	ctx := originalAPIFixtureContext(t, testAuthorActivityContext(context.Background()), pg)
-	bus, err := newScopedAPITestEventBus(t, pg)
+	source := semanticview.Wrap(loadAPIAuthoredBundle(t, authorActivityTestSourceArtifact))
+	bus, err := newScopedAPITestEventBus(t, pg, bus.EventBusOptions{ContractBundle: source, SourceArtifactFact: authorActivityTestSourceArtifactFact})
 	if err != nil {
 		t.Fatalf("NewEventBus: %v", err)
 	}
 	controller := runtimeruncontrol.NewController(pg, bus, runtimeruncontrol.Options{})
 	bus.SetRunDispatchGate(controller)
+	ctx := admittedAPITestBusContext(t, context.Background(), bus)
 	handler := testHandlerWithOriginalContext(t, Options{AuthTokens: []string{testToken}, Handlers: testOperatorHandlers(testOperatorCapabilities{Idempotency: pg, RunControl: controller})}, ctx)
 	missingRunID := uuid.NewString()
 	for _, method := range []string{"run.stop", "run.pause", "run.continue"} {
@@ -205,7 +208,7 @@ func TestOperatorRunControlHandlersTypedResourceErrors(t *testing.T) {
 		}
 	}
 	materializedLikePausedRunID := uuid.NewString()
-	storetest.RequireRun(t, ctx, pg, storetest.RunFixture{Origin: storetest.ScenarioSetupOrigin(), RunID: materializedLikePausedRunID, State: storerunlifecycle.StatePaused, BundleHash: authorActivityTestSourceArtifactFact.BundleHash()})
+	storetest.RequireRun(t, admittedAPITestBusContext(t, context.Background(), bus), pg, storetest.RunFixture{Origin: storetest.ScenarioSetupOrigin(), RunID: materializedLikePausedRunID, State: storerunlifecycle.StatePaused, BundleHash: authorActivityTestSourceArtifactFact.BundleHash()})
 	resp := rpcCall(t, handler, runControlBody("run.continue", materializedLikePausedRunID, ""))
 	if resp.Error == nil {
 		t.Fatal("run.continue without operator pause owner error = nil")

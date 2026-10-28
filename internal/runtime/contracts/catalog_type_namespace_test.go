@@ -14,8 +14,11 @@ func namespaceTestDeclaration(category, name, body string) string {
 func loadNamespaceTestBundle(t *testing.T, rootTypes, flowTypes string) (*WorkflowContractBundle, error) {
 	t.Helper()
 	root := t.TempDir()
-	writeFixtureFile(t, filepath.Join(root, "schema.yaml"), "name: namespace\nstages: {done: {final: true}}\n")
-	writeFixtureFile(t, filepath.Join(root, "child/schema.yaml"), "name: child\nstages: {done: {final: true}}\n")
+	writeFixtureFile(t, filepath.Join(root, "manifest.yaml"), "version: 1.0.0\nplatform_version: '*'\n")
+	writeFixtureFile(t, filepath.Join(root, "schema.yaml"), "# fixture: namespace\nstages: {done: {final: true}}\n")
+	writeFixtureFile(t, filepath.Join(root, "child/manifest.yaml"), "version: 1.0.0\nplatform_version: '*'\n")
+	writeFixtureFile(t, filepath.Join(root, "manifest.yaml"), "version: 1.0.0\nplatform_version: '*'\n")
+	writeFixtureFile(t, filepath.Join(root, "child/schema.yaml"), "# fixture: child\nstages: {done: {final: true}}\n")
 	if rootTypes != "" {
 		writeFixtureFile(t, filepath.Join(root, "types.yaml"), rootTypes)
 	}

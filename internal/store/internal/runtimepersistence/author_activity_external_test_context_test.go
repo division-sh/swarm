@@ -157,7 +157,8 @@ func newStoreTestEventBus(t *testing.T, selected externalStoreTestDurableEventBu
 	}
 	if opts.ContractBundle == nil && opts.SourceArtifactFact.BundleHash() == sourceartifactfixture.BundleHash {
 		repo := runtimepipeline.WorkflowRepoRoot()
-		bundle, err := runtimecontracts.LoadWorkflowContractBundleFromArtifact(repo, sourceartifactfixture.Artifact(), runtimecontracts.DefaultPlatformSpecFile(repo), runtimecontracts.WorkflowContractLoadOptions{})
+		rooted, _ := sourceartifactfixture.Rooted(t, "fixture", sourceartifactfixture.Artifact())
+		bundle, err := runtimecontracts.LoadWorkflowContractBundleFromRootedSource(repo, rooted, runtimecontracts.DefaultPlatformSpecFile(repo), runtimecontracts.WorkflowContractLoadOptions{})
 		if err != nil {
 			return nil, err
 		}
@@ -187,7 +188,8 @@ func newStoreTestEventBus(t *testing.T, selected externalStoreTestDurableEventBu
 		opts.PipelineObligations = selected.PipelineObligations()
 	}
 	if opts.PayloadAdmitter == nil {
-		opts.PayloadAdmitter = func(_ context.Context, event events.Event, flowID string) (events.PayloadAdmission, error) {
+		opts.PayloadAdmitter = func(_ context.Context, event events.Event, payloadProducer events.PayloadProducer) (events.PayloadAdmission, error) {
+			flowID := payloadProducer.FlowID()
 			return eventtest.PayloadAdmission(event, flowID, string(event.Type()))
 		}
 	}

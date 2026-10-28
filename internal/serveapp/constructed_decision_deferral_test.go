@@ -5,6 +5,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/division-sh/swarm/internal/packartifact"
 	"github.com/division-sh/swarm/internal/runtime/core/flowidentity"
 	"github.com/division-sh/swarm/internal/runtime/correlation"
 	"github.com/division-sh/swarm/internal/runtime/decisioncard"
@@ -14,6 +15,7 @@ import (
 	"github.com/division-sh/swarm/internal/runtime/testfixtures/canonicalrouting"
 	"github.com/division-sh/swarm/internal/servedparity"
 	"github.com/division-sh/swarm/internal/store/storetest"
+	"github.com/division-sh/swarm/internal/testutil/packfixture"
 	"github.com/google/uuid"
 )
 
@@ -21,7 +23,12 @@ func TestServedFieldlessGateDeferralBothStores(t *testing.T) {
 	for _, backend := range servedparity.RequiredBackends {
 		for _, fields := range []bool{false, true} {
 			t.Run(fmt.Sprintf("%s/fields=%t", backend, fields), func(t *testing.T) {
-				rt := startServedTestSetupEntitiesProofRuntimeFromSource(t, backend, canonicalrouting.CopyConstructedGateMutationControl(t, fields))
+				configureStandingLifecycleCredentials(t)
+				root := canonicalrouting.CopyConstructedGateMutationControl(t, fields)
+				if _, err := packartifact.ImportEmbeddedPack(root, "telegram", packfixture.EmbeddedBase(t)); err != nil {
+					t.Fatal(err)
+				}
+				rt := startServedTestSetupEntitiesProofRuntimeFromSource(t, backend, root)
 				seed := requireServedEventPublishRPCResult(t, rt.Endpoint, map[string]any{
 					"event_name": "item.received", "bundle_hash": rt.BundleHash,
 					"payload": map[string]any{}, "idempotency_key": "fieldless-gate-seed",
@@ -67,8 +74,13 @@ func TestServedFieldlessGateDeferralBothStores(t *testing.T) {
 func TestServedConstructedDecisionCardDeferralBothStores(t *testing.T) {
 	for _, backend := range servedparity.RequiredBackends {
 		t.Run(string(backend), func(t *testing.T) {
+			configureStandingLifecycleCredentials(t)
 			rt := startServedControlProofRuntimeWithFixture(t, backend, func(t *testing.T) string {
-				return canonicalrouting.CopyRootIngressServedDecisionControl(t)
+				root := canonicalrouting.CopyRootIngressServedDecisionControl(t)
+				if _, err := packartifact.ImportEmbeddedPack(root, "telegram", packfixture.EmbeddedBase(t)); err != nil {
+					t.Fatal(err)
+				}
+				return root
 			})
 			source := rt.Runtime.Pipeline.SemanticSource()
 			bundle, found := semanticview.Bundle(source)

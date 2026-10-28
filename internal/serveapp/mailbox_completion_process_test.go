@@ -14,10 +14,12 @@ import (
 
 	"github.com/division-sh/swarm/internal/cliapp"
 	"github.com/division-sh/swarm/internal/events"
+	"github.com/division-sh/swarm/internal/packartifact"
 	"github.com/division-sh/swarm/internal/runtime/canonicaljson"
 	"github.com/division-sh/swarm/internal/runtime/testfixtures/canonicalrouting"
 	"github.com/division-sh/swarm/internal/store/storetest"
 	"github.com/division-sh/swarm/internal/testutil"
+	"github.com/division-sh/swarm/internal/testutil/packfixture"
 )
 
 type mailboxCompletionChild struct {
@@ -157,6 +159,12 @@ func mailboxCompletionProcessHarness(t *testing.T, backend, root string) (func(b
 
 func mailboxCompletionProcessHarnessWithSelectionCut(t *testing.T, backend, root, cut string) (func(bool) (*channelOnboardingCrashServeProcess, servedControlProofRuntime), *os.File, *os.File) {
 	t.Helper()
+	if _, err := packartifact.ImportEmbeddedPack(root, "telegram", packfixture.EmbeddedBase(t)); err != nil {
+		t.Fatal(err)
+	}
+	credentialPath := filepath.Join(t.TempDir(), "credentials.json")
+	t.Setenv("SWARM_CREDENTIALS_FILE", credentialPath)
+	writeChannelOnboardingLiveToolCredentials(t, credentialPath)
 	unsetStoreSelectorEnv(t)
 	var db *sql.DB
 	var config string

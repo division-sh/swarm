@@ -23,6 +23,7 @@ import (
 )
 
 type workflowTestSelectedStore interface {
+	rootedSourceStore
 	runtimepipeline.WorkflowPersistenceOwner
 	runtimebus.TargetFailureDeadLetterRecorder
 	runtimerunlifecycle.OperationOwner

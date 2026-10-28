@@ -42,7 +42,7 @@ func selectedScheduleStoreCases() []selectedScheduleStoreCase {
 			runID := uuid.NewString()
 			store := admitTestPostgresStore(t, db)
 			ctx := originalStoreFixtureContext(t, selectedScheduleTestContext(t, runID), store)
-			requireRunningRunForTest(t, ctx, store, runID, time.Now().UTC())
+			ctx = requireRunningRunForTest(t, ctx, store, runID, time.Now().UTC())
 			t.Cleanup(func() { _ = store.ReleaseGenericScheduleClaims(ctx) })
 			return store, db, ctx
 		}},

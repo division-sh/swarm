@@ -3,6 +3,7 @@ package pipeline_test
 import (
 	"context"
 	"encoding/json"
+	"github.com/division-sh/swarm/internal/sourceartifact"
 	"os"
 	"path/filepath"
 	"reflect"
@@ -182,7 +183,7 @@ func verifyBarrierCrashRestartBothStores(t *testing.T, pendingSource bool) {
 			if err := family.BindSelectedProcess(ctx, process, capability); err != nil {
 				t.Fatal(err)
 			}
-			rt := startForkEngineOrdinarySuccessor(t, ctx, selected, process, capability, repo, root)
+			rt := startForkEngineOrdinarySuccessor(t, ctx, selected, process, capability, repo, checkpoint.Proof.SourceRunID)
 			baseline := process.ActiveCount()
 			wait, cancel := context.WithTimeout(ctx, 30*time.Second)
 			defer cancel()
@@ -227,8 +228,9 @@ func verifyBarrierCrashRestartBothStores(t *testing.T, pendingSource bool) {
 			t.Cleanup(func() { release.Do(func() { close(probe.resume) }) })
 			options := runforkexecution.SelectedContractAgentRuntimeOptions{ExecutionPosture: executionposture.Live, ProcessCapability: capability}
 			options.AgentManagerOptions.TestLifecycleProbe = probe
-			live := forkEngineLiveRequest(t, rt, selected, runforkexecution.SelectedContractExecutionRequest{})
-			live.AcquireLiveRuntime = func(ctx context.Context, hash string) (*swarmruntime.RuntimeContextUse, error) {
+			live := forkEngineLiveRequest(t, rt, selected, runforkexecution.SelectedContractExecutionRequest{ForkOperation: &original.Request})
+			live.AcquireLiveRuntime = func(ctx context.Context, reference sourceartifact.RootAdmissionReference) (*swarmruntime.RuntimeContextUse, error) {
+				hash := reference.BundleHash
 				use, _, err := live.LiveContexts.AcquireBundleHash(ctx, hash)
 				return use, err
 			}

@@ -44,7 +44,10 @@ func (w *renewalCleanupWrapper) RenewClaim(ctx context.Context, claim runtimedel
 func TestClaimHeartbeatRealStoreAcknowledgedCleanupParity(t *testing.T) {
 	for _, backend := range []string{"sqlite", "postgres"} {
 		t.Run(backend, func(t *testing.T) {
-			var selected runtimedelivery.Store
+			var selected interface {
+				runtimedelivery.Store
+				sourceartifactfixture.Writer
+			}
 			if backend == "postgres" {
 				_, db, _ := testutil.StartPostgres(t)
 				selected = storetest.AdmitPostgresRuntimeStore(t, db)
@@ -53,6 +56,9 @@ func TestClaimHeartbeatRealStoreAcknowledgedCleanupParity(t *testing.T) {
 			}
 			source := sourceartifactfixture.Fact()
 			ctx := runtimecorrelation.WithSourceArtifactFact(context.Background(), source)
+			rooted, _ := sourceartifactfixture.Rooted(t, "fixture", sourceartifactfixture.Artifact())
+			sourceartifactfixture.RequireArtifact(t, ctx, selected, rooted.Artifact())
+			ctx = runtimecorrelation.WithRootAdmission(ctx, rooted.Admission())
 			ctx = runtimeauthoractivity.WithScope(ctx, runtimeauthoractivity.BundleScope(uuid.NewString(), source.BundleHash()))
 			processCapability, err := agentfixture.ProcessCapability(t, ctx, selected.(agentfixture.Store))
 			if err != nil {

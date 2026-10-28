@@ -1,11 +1,8 @@
 package runtimepersistence
 
 import (
-	"bytes"
-	"crypto/sha256"
 	"fmt"
 	"go/ast"
-	"go/format"
 	"go/parser"
 	"go/token"
 	"io/fs"
@@ -243,64 +240,130 @@ func TestSemanticRunFixturesUseLifecycleOwner(t *testing.T) {
 	}
 }
 
-// #642 6190268703: these are three observer/oracle literals, not a file or
-// function exemption. Exact AST pins also fence their def-use paths and the
-// concrete fake driver; any added use or executable receiver invalidates them.
+// Only the witness decoder's two comparison literals are non-writers. Their
+// query and constant cannot escape into an executable or additional use.
 func classifyForkInsertWitnessOracleLiterals(path string, file *ast.File) map[token.Pos]bool {
 	approved := map[token.Pos]bool{}
 	if path != "internal/store/internal/runtimepersistence/stop_commit_fork_witness_test.go" {
 		return approved
 	}
-	functions := map[string]*ast.FuncDecl{}
-	hashes := map[string]string{}
+	standardStrings := false
+	for _, imported := range file.Imports {
+		if imported.Path.Value == `"strings"` && (imported.Name == nil || imported.Name.Name == "strings") {
+			standardStrings = true
+		}
+	}
+	if !standardStrings {
+		return approved
+	}
+	var decoder *ast.FuncDecl
 	for _, decl := range file.Decls {
 		fn, ok := decl.(*ast.FuncDecl)
+		if !ok || fn.Name.Name != "decode" || fn.Recv == nil || len(fn.Recv.List) != 1 || revisionGuardNode(fn.Recv.List[0].Type) != "*stopCommitForkWitness" {
+			continue
+		}
+		if decoder != nil {
+			return approved
+		}
+		decoder = fn
+	}
+	if decoder == nil || decoder.Body == nil || len(decoder.Type.Params.List) != 2 || len(decoder.Type.Params.List[0].Names) != 1 || revisionGuardNode(decoder.Type.Params.List[0].Type) != "string" {
+		return approved
+	}
+	query := decoder.Type.Params.List[0].Names[0]
+	if query.Obj == nil {
+		return approved
+	}
+	var columns *ast.ValueSpec
+	for _, statement := range decoder.Body.List {
+		declaration, ok := statement.(*ast.DeclStmt)
 		if !ok {
 			continue
 		}
-		name := fn.Name.Name
-		if fn.Recv != nil {
-			name = revisionGuardNode(fn.Recv.List[0].Type) + "." + name
-		}
-		var out bytes.Buffer
-		if err := format.Node(&out, token.NewFileSet(), fn); err != nil {
+		group, ok := declaration.Decl.(*ast.GenDecl)
+		if !ok || group.Tok != token.CONST || len(group.Specs) != 1 {
 			continue
 		}
-		if functions[name] != nil {
-			return approved
+		spec, ok := group.Specs[0].(*ast.ValueSpec)
+		if ok && len(spec.Names) == 1 && spec.Names[0].Name == "columns" && len(spec.Values) == 1 {
+			if columns != nil {
+				return approved
+			}
+			columns = spec
 		}
-		functions[name] = fn
-		hashes[name] = fmt.Sprintf("%x", sha256.Sum256(out.Bytes()))
 	}
-	const prefix = "insert into runs ("
-	const columns = "insert into runs ( run_id, status, origin_kind, forked_from_run_id, forked_from_point_kind, forked_from_revision, forked_from_event_id, event_count, started_at, bundle_hash, flow_path ) select "
-	for _, site := range []struct {
-		name, digest string
-		count        int
-	}{
-		{"*stopCommitForkWitness.decode", "faca6d87889b0bcdfabb837a090e5ab135cd8d407df96e752cef82aa1b0b2b3f", 2},
-		{"TestStopCommitForkWitnessObservesOnlySuccessfulExactTransaction", "714071c69602b6044fbcbf53fc55e49fd8b270fd413ae31c51813617a8f8a6cf", 1},
-	} {
-		if hashes[site.name] != site.digest || site.count == 1 && hashes["*stopCommitWitnessNativeConn.ExecContext"] != "62a483f2a9969561bccc8979c899824125b0846d218bd8b822f13731bc23f998" {
-			continue
+	if columns == nil || columns.Names[0].Obj == nil {
+		return approved
+	}
+	columnLiteral, ok := columns.Values[0].(*ast.BasicLit)
+	if !ok || columnLiteral.Kind != token.STRING {
+		return approved
+	}
+	columnText, err := strconv.Unquote(columnLiteral.Value)
+	if err != nil || !strings.HasPrefix(columnText, "insert into runs (") || !strings.HasSuffix(columnText, ") select ") {
+		return approved
+	}
+	allowed := map[*ast.Ident]bool{query: true, columns.Names[0]: true}
+	var prefix *ast.BasicLit
+	prefixCount, columnUses, normalizations, suffixComparisons := 0, 0, 0, 0
+	ast.Inspect(decoder.Body, func(node ast.Node) bool {
+		if assignment, ok := node.(*ast.AssignStmt); ok && len(assignment.Lhs) == 1 && len(assignment.Rhs) == 1 && assignment.Tok == token.ASSIGN && revisionGuardNode(assignment.Rhs[0]) == `strings.Join(strings.Fields(strings.ToLower(query)), " ")` {
+			if id, ok := assignment.Lhs[0].(*ast.Ident); ok && id.Obj == query.Obj {
+				allowed[id] = true
+				normalizations++
+			}
 		}
-		var positions []token.Pos
-		ast.Inspect(functions[site.name], func(node ast.Node) bool {
-			literal, ok := node.(*ast.BasicLit)
-			if !ok || literal.Kind != token.STRING {
-				return true
-			}
-			value, err := strconv.Unquote(literal.Value)
-			if err == nil && (site.count == 2 && (value == prefix || value == columns) || site.count == 1 && compactSQLForLifecycleGuard(value) == "INSERT INTO runs ( run_id, status, origin_kind, forked_from_run_id, forked_from_point_kind, forked_from_revision, forked_from_event_id, event_count, started_at, bundle_hash, flow_path ) SELECT ?, ?, ?, ?, ?, ?, NULLIF(?, ''), 0, ?, ?, flow_path FROM runs WHERE run_id=?") {
-				positions = append(positions, literal.Pos())
-			}
+		call, ok := node.(*ast.CallExpr)
+		if !ok || len(call.Args) == 0 {
 			return true
-		})
-		if len(positions) == site.count {
-			for _, position := range positions {
-				approved[position] = true
+		}
+		selector, ok := call.Fun.(*ast.SelectorExpr)
+		if !ok {
+			return true
+		}
+		pkg, ok := selector.X.(*ast.Ident)
+		if !ok || pkg.Name != "strings" || pkg.Obj != nil {
+			return true
+		}
+		id, ok := call.Args[0].(*ast.Ident)
+		if !ok || id.Obj != query.Obj {
+			return true
+		}
+		if selector.Sel.Name == "ToLower" && len(call.Args) == 1 || (selector.Sel.Name == "HasPrefix" || selector.Sel.Name == "Contains") && len(call.Args) == 2 {
+			allowed[id] = true
+		}
+		if selector.Sel.Name == "HasSuffix" && len(call.Args) == 2 {
+			if literal, ok := call.Args[1].(*ast.BasicLit); ok && literal.Kind == token.STRING {
+				if value, err := strconv.Unquote(literal.Value); err == nil && value == "from runs where run_id=?" {
+					allowed[id] = true
+					suffixComparisons++
+				}
 			}
 		}
+		if selector.Sel.Name == "HasPrefix" && len(call.Args) == 2 {
+			switch argument := call.Args[1].(type) {
+			case *ast.Ident:
+				if argument.Obj == columns.Names[0].Obj {
+					allowed[argument] = true
+					columnUses++
+				}
+			case *ast.BasicLit:
+				if value, err := strconv.Unquote(argument.Value); err == nil && value == "insert into runs (" {
+					prefix, prefixCount = argument, prefixCount+1
+				}
+			}
+		}
+		return true
+	})
+	closed := true
+	ast.Inspect(decoder, func(node ast.Node) bool {
+		if id, ok := node.(*ast.Ident); ok && (id.Obj == query.Obj || id.Obj == columns.Names[0].Obj) && !allowed[id] {
+			closed = false
+		}
+		return true
+	})
+	if closed && prefixCount == 1 && columnUses == 1 && normalizations == 1 && suffixComparisons == 1 {
+		approved[prefix.Pos()], approved[columnLiteral.Pos()] = true, true
 	}
 	return approved
 }
@@ -316,14 +379,17 @@ func TestForkInsertWitnessOracleClassificationRejectsExecutableAndExtraSites(t *
 		name, path, before, after string
 		approved, refused         int
 	}{
-		{"reviewed", path, "", "", 3, 0},
-		{"foreign_path", "internal/runtime/other_test.go", "", "", 0, 3},
-		{"real_store", path, "conn.ExecContext(context.Background(), statement, args)", "db.ExecContext(context.Background(), statement, args)", 2, 1},
-		{"recognizer_to_writer", path, "strings.HasPrefix(query, columns)", "db.ExecContext(ctx, columns)", 1, 2},
-		{"fake_driver_delegates", path, "return driver.RowsAffected(c.rows), c.err", "return db.ExecContext(context.Background(), c.query)", 2, 1},
-		{"extra_executable_literal", path, "\tconst query =", "\tdb.Exec(`DELETE FROM runs`)\n\tconst query =", 2, 2},
-		{"extra_recognizer_site", path, "\tquery = strings.Join(", "\t_ = strings.HasPrefix(query, \"insert into runs (\")\n\tquery = strings.Join(", 1, 3},
-		{"unreviewed_function", path, "func TestStopCommitForkWitnessObservesOnlySuccessfulExactTransaction(", "func TestUnreviewedForkWitness(", 2, 1},
+		{"reviewed", path, "", "", 2, 0},
+		{"foreign_path", "internal/runtime/other_test.go", "", "", 0, 2},
+		{"foreign_comparator", path, `"strings"`, `strings "example.test/strings"`, 0, 2},
+		{"recognizer_to_writer", path, "strings.HasPrefix(query, columns)", "db.ExecContext(ctx, columns)", 0, 2},
+		{"query_to_writer", path, "\tquery = strings.Join(", "\tdb.ExecContext(ctx, query)\n\tquery = strings.Join(", 0, 2},
+		{"extra_executable_literal", path, "\tquery = strings.Join(", "\tdb.Exec(`DELETE FROM runs`)\n\tquery = strings.Join(", 2, 1},
+		{"extra_recognizer_site", path, "\tquery = strings.Join(", "\t_ = strings.HasPrefix(query, \"insert into runs (\")\n\tquery = strings.Join(", 0, 3},
+		{"foreign_suffix", path, `"from runs where run_id=?"`, `"from other_runs where run_id=?"`, 0, 2},
+		{"extra_suffix_comparison", path, "\tquery = strings.Join(", "\t_ = strings.HasSuffix(query, \"from runs where run_id=?\")\n\tquery = strings.Join(", 0, 2},
+		{"constant_escape", path, "\tif !strings.HasPrefix(query, columns)", "\tother := columns\n\tif !strings.HasPrefix(query, columns)", 0, 2},
+		{"unreviewed_function", path, "func (w *stopCommitForkWitness) decode(", "func (w *stopCommitForkWitness) other(", 0, 2},
 	} {
 		t.Run(test.name, func(t *testing.T) {
 			mutant := source
@@ -386,8 +452,8 @@ func classifyCounterOracleRunLiterals(path string, file *ast.File) map[token.Pos
 			mockOracles[`UPDATE runs SET event_count = event_count \+`] = true
 		}
 		if path == "internal/store/internal/backend/runlifecycle/run_admission_test.go" && fn.Name.Name == "TestRunAdmissionCanonicalSourceRevisionReloads" {
-			mockOracles["UPDATE runs SET bundle_hash = $2 WHERE run_id = $1::uuid AND status IN ('running', 'paused', 'live')"] = true
-			mockOracles["UPDATE runs SET bundle_hash = ? WHERE run_id = ? AND status IN ('running', 'paused', 'live')"] = true
+			mockOracles["UPDATE runs SET bundle_hash = $2, source_root_directory = $3 WHERE run_id = $1::uuid AND status IN ('running', 'paused', 'live')"] = true
+			mockOracles["UPDATE runs SET bundle_hash = ?, source_root_directory = ? WHERE run_id = ? AND status IN ('running', 'paused', 'live')"] = true
 		}
 		if len(mockOracles) != 0 {
 			ast.Inspect(fn, func(node ast.Node) bool {
@@ -513,6 +579,9 @@ func classifyBackendMinimalRunLiterals(path string, file *ast.File) (map[token.P
 	if path == "internal/store/internal/backend/pipelinepersistence/a2_collection_projection_test.go" {
 		return classifyA2CollectionMinimalRunLiterals(file)
 	}
+	if path == "internal/store/internal/backend/runforkpersistence/selected_binding_root_test.go" {
+		return classifySelectedBindingRootMinimalRunLiterals(file)
+	}
 	type fixtureShape struct {
 		schema string
 		writes []string
@@ -578,6 +647,40 @@ func classifyBackendMinimalRunLiterals(path string, file *ast.File) (map[token.P
 	})
 	if !schemaFound {
 		return nil, fmt.Errorf("minimal backend runs schema is missing")
+	}
+	return approved, nil
+}
+
+func classifySelectedBindingRootMinimalRunLiterals(file *ast.File) (map[token.Pos]bool, error) {
+	const schema = "CREATE TABLE runs (run_id TEXT PRIMARY KEY, bundle_hash TEXT, source_root_directory TEXT)"
+	const insert = "INSERT INTO runs (run_id, bundle_hash, source_root_directory) VALUES ($1, $2, $3)"
+	schemas, inserts := 0, 0
+	approved := map[token.Pos]bool{}
+	ast.Inspect(file, func(node ast.Node) bool {
+		literal, ok := node.(*ast.BasicLit)
+		if !ok || literal.Kind != token.STRING {
+			return true
+		}
+		value, err := strconv.Unquote(literal.Value)
+		if err != nil {
+			return true
+		}
+		scope := eventBoundaryEnclosingScope(file, literal.Pos())
+		switch compactSQLForLifecycleGuard(value) {
+		case schema:
+			if scope == "selectedBindingRootDatabase" {
+				schemas++
+			}
+		case insert:
+			if scope == "insertSelectedBindingChildFixture" {
+				inserts++
+				approved[literal.Pos()] = true
+			}
+		}
+		return true
+	})
+	if schemas != 1 || inserts != 1 {
+		return nil, fmt.Errorf("selected binding reduced root fixture requires one exact schema/insert in their named fixture operations, got %d/%d", schemas, inserts)
 	}
 	return approved, nil
 }
@@ -898,9 +1001,9 @@ func allowedSemanticRunFixtureLiteral(relative string, value string) bool {
 			compact == "UPDATE runs SET completion_revision = 1, completion_due_at = $1 WHERE run_id = $2::uuid"
 	case "internal/store/internal/schemastore/fork_point_schema_test.go":
 		// This test exercises physical CHECK and FK constraints on the real schema.
-		return compact == "INSERT INTO runs (run_id,bundle_hash,origin_kind) VALUES ($1,$2,'scenario_setup')" ||
-			compact == "INSERT INTO runs (run_id,bundle_hash,origin_kind,forked_from_run_id,forked_from_point_kind,forked_from_revision,forked_from_event_id) VALUES ($1,$2,'fork_materialization',$3,$4,$5,$6)" ||
-			compact == "INSERT INTO runs (run_id,bundle_hash,origin_kind,flow_path,status) VALUES ($1,$2,'deployment',$3,$4)" ||
+		return compact == "INSERT INTO runs (run_id,bundle_hash,origin_kind,source_root_directory) VALUES ($1,$2,'scenario_setup',$3)" ||
+			compact == "INSERT INTO runs (run_id,bundle_hash,origin_kind,forked_from_run_id,forked_from_point_kind,forked_from_revision,forked_from_event_id,source_root_directory) VALUES ($1,$2,'fork_materialization',$3,$4,$5,$6,$7)" ||
+			compact == "INSERT INTO runs (run_id,bundle_hash,origin_kind,flow_path,status,source_root_directory) VALUES ($1,$2,'deployment',$3,$4,$5)" ||
 			compact == "UPDATE runs SET status='live' WHERE run_id=$1" ||
 			compact == "UPDATE runs SET status='paused' WHERE run_id=$1"
 	}
@@ -966,6 +1069,23 @@ func TestRunLifecycleFixtureGuardRejectsSiblingWrites(t *testing.T) {
 	}
 	if allowedSemanticRunFixtureLiteral("internal/serveapp/mailbox_source_admission_test.go", "UPDATE runs SET bundle_hash=$1 WHERE run_id=$2") {
 		t.Fatal("retired raw fixture writer still authorized")
+	}
+	const schemaPath = "internal/store/internal/schemastore/fork_point_schema_test.go"
+	const rootedSelection = "INSERT INTO runs (run_id,bundle_hash,origin_kind,flow_path,status,source_root_directory) VALUES ($1,$2,'deployment',$3,$4,$5)"
+	for _, tc := range []struct {
+		name, path, literal string
+		allowed             bool
+	}{
+		{"schema_exact", schemaPath, rootedSelection, true},
+		{"schema_foreign_path", "internal/store/internal/schemastore/fork_point_sibling_test.go", rootedSelection, false},
+		{"schema_changed_literal", schemaPath, strings.Replace(rootedSelection, "'deployment'", "'event'", 1), false},
+		{"schema_unrooted", schemaPath, "INSERT INTO runs (run_id,bundle_hash,origin_kind,flow_path,status) VALUES ($1,$2,'deployment',$3,$4)", false},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			if got := allowedSemanticRunFixtureLiteral(tc.path, tc.literal); got != tc.allowed {
+				t.Fatalf("schema literal allowed=%v want=%v", got, tc.allowed)
+			}
+		})
 	}
 }
 

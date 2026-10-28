@@ -22,6 +22,9 @@ func TestServedMailboxCursorRetainedRestartParity(t *testing.T) {
 	for _, backend := range []string{"sqlite", "postgres"} {
 		t.Run(backend, func(t *testing.T) {
 			root := canonicalrouting.CopyMailboxEntityFilter(t)
+			credentialPath := filepath.Join(t.TempDir(), "credentials.json")
+			t.Setenv("SWARM_CREDENTIALS_FILE", credentialPath)
+			writeChannelOnboardingLiveToolCredentials(t, credentialPath)
 			bundle := servedEventPublishFixtureBundleHash(t, root)
 			unsetStoreSelectorEnv(t)
 			stubServeRuntimeWorkspaceLifecycle(t)

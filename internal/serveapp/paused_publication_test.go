@@ -14,6 +14,7 @@ func TestPausedAcceptedTimerAndDecisionPublicBothStores(t *testing.T) {
 	for _, backend := range []servedparity.Backend{servedparity.BackendDefaultSQLite, servedparity.BackendExplicitPostgres} {
 		for _, family := range []string{"timer", "decision", "decision_unloaded", "stop_unloaded"} {
 			t.Run(string(backend)+"/"+family, func(t *testing.T) {
+				configureStandingLifecycleCredentials(t)
 				captured := captureSelectedResetSupervisor(t)
 				root := canonicalrouting.CopyLifecycleEmitter(t, canonicalrouting.LifecycleGateLocal)
 				if family == "timer" {

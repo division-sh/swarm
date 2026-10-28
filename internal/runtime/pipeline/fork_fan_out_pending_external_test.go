@@ -193,12 +193,15 @@ func runMixedFanOutPendingMatrixWithCrash(t *testing.T, refork bool, crash *mixe
 					AgentRuntime: runforkexecution.SelectedContractAgentRuntimeOptions{ProcessCapability: capability, ExecutionPosture: rt.ExecutionPosture,
 						AgentManagerOptions: manager.AgentManagerOptions{TestLifecycleProbe: probe}},
 				}
-				if crash != nil {
-					executionRequest.ForkOperation = &runfork.ForkOperationRequest{
-						OperationID: uuid.NewString(), Actor: "mixed-fanout-crash", IdempotencyKey: "pending-cut", TransportHash: "mixed-fanout-crash-transport",
-						SourceRunID: runID, ForkEventID: cutID, TargetBundleHash: rt.Options.SourceArtifactFact.BundleHash(),
-						AllowSourceFreeze: true, ContractSelection: executionRequest.ContractSelection,
-					}
+				rooted, err := bundle.RootedSource()
+				if err != nil {
+					t.Fatal(err)
+				}
+				executionRequest.ForkOperation = &runfork.ForkOperationRequest{
+					OperationID: uuid.NewString(), Actor: "mixed-fanout-crash", IdempotencyKey: "pending-cut", TransportHash: "mixed-fanout-crash-transport",
+					SourceRunID: runID, ForkEventID: cutID, TargetBundleHash: executionRequest.ExpectedBundleHash,
+					TargetRootReference: rooted.Admission().Reference(),
+					AllowSourceFreeze:   true, ContractSelection: executionRequest.ContractSelection,
 				}
 				executionRequest = forkEngineLiveRequest(t, rt, selected, executionRequest)
 				acknowledged := make(chan forkEngineAcknowledgment, 1)
@@ -310,6 +313,12 @@ func runMixedFanOutPendingMatrixWithCrash(t *testing.T, refork bool, crash *mixe
 				assertMixedFanOutPendingPlan(t, finalCut, observed.id, retained)
 				if refork {
 					executionRequest.SourceRunID, executionRequest.At = claim.RunID(), observed.id
+					executionRequest.ForkOperation = &runfork.ForkOperationRequest{
+						OperationID: uuid.NewString(), Actor: "mixed-fanout-refork", IdempotencyKey: "continued-cut", TransportHash: "mixed-fanout-refork-transport",
+						SourceRunID: executionRequest.SourceRunID, ForkEventID: executionRequest.At, TargetBundleHash: executionRequest.ExpectedBundleHash,
+						TargetRootReference: rooted.Admission().Reference(),
+						AllowSourceFreeze:   executionRequest.AllowSourceFreeze, ContractSelection: executionRequest.ContractSelection,
+					}
 					proveMixedFanOutChildRefork(t, ctx, selected, executionRequest, afterChild, retained)
 				}
 				cleanupCtx, cleanupCancel := context.WithTimeout(context.WithoutCancel(forkCtx), 10*time.Second)

@@ -104,6 +104,10 @@ func verifyUnpublishedTransferredBarrierRefork(t *testing.T, latePublication boo
 			if err != nil {
 				t.Fatal(err)
 			}
+			rooted, err := bundle.RootedSource()
+			if err != nil {
+				t.Fatal(err)
+			}
 			request := runforkexecution.SelectedContractExecutionRequest{SourceRunID: ancestor, At: original.id,
 				AllowSourceFreeze: true, ExpectedBundleHash: rt.Options.SourceArtifactFact.BundleHash(),
 				SourceLoader:      runforkexecution.SourceArtifactSelectedContractSourceLoader{RepoRoot: repo, Store: selected.SourceArtifactStore()},
@@ -113,6 +117,7 @@ func verifyUnpublishedTransferredBarrierRefork(t *testing.T, latePublication boo
 				OperationID: uuid.NewString(), Actor: "pending-barrier-parent", IdempotencyKey: "ancestor-cut",
 				TransportHash: "sha256:pending-barrier-parent", SourceRunID: ancestor, ForkEventID: original.id,
 				TargetBundleHash: rt.Options.SourceArtifactFact.BundleHash(), ContractSelection: request.ContractSelection, AllowSourceFreeze: true,
+				TargetRootReference: rooted.Admission().Reference(),
 			}
 			request = forkEngineLiveRequest(t, rt, selected, request)
 			if !latePublication && os.Getenv("TEST_UNPUBLISHED_BARRIER_CRASH_BACKEND") != "" {
@@ -174,7 +179,7 @@ func verifyUnpublishedTransferredBarrierRefork(t *testing.T, latePublication boo
 			request.SourceRunID, request.At, request.AtStart = parent.ForkRunID, "", true
 			request.ForkOperation = &runfork.ForkOperationRequest{OperationID: uuid.NewString(), Actor: "pending-barrier-refork", IdempotencyKey: "parent-start",
 				TransportHash: "pending-barrier-refork-transport", SourceRunID: parent.ForkRunID, AtStart: true,
-				TargetBundleHash: rt.Options.SourceArtifactFact.BundleHash(), AllowSourceFreeze: true, ContractSelection: request.ContractSelection}
+				TargetBundleHash: rt.Options.SourceArtifactFact.BundleHash(), TargetRootReference: rooted.Admission().Reference(), AllowSourceFreeze: true, ContractSelection: request.ContractSelection}
 			request.AgentRuntime.AgentManagerOptions = manager.AgentManagerOptions{TestLifecycleProbe: childProbe}
 			if childProbe.resume != nil {
 				acknowledged := make(chan forkEngineAcknowledgment, 1)

@@ -8,6 +8,7 @@ import (
 	"github.com/division-sh/swarm/internal/runtime/core/flowidentity"
 	"github.com/division-sh/swarm/internal/runtime/executionmode"
 	"github.com/division-sh/swarm/internal/runtime/runlifecycle"
+	"github.com/division-sh/swarm/internal/runtime/semanticview"
 	"github.com/google/uuid"
 )
 
@@ -16,6 +17,14 @@ func instanceObservationTestFixture(t *testing.T) (FlowInstanceLookupRequest, Wo
 	source, fact := instanceIndexTestSource(t, "text")
 	runID := uuid.NewString()
 	identity, err := flowidentity.StandingForGeneration(source, ".", runID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	bundle, found := semanticview.Bundle(source)
+	if !found {
+		t.Fatal("observation fixture requires its captured bundle")
+	}
+	rooted, err := bundle.RootedSource()
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -29,7 +38,7 @@ func instanceObservationTestFixture(t *testing.T) (FlowInstanceLookupRequest, Wo
 		InstanceID: runID, StorageRef: runID, EntityID: runID, CurrentState: "open", Revision: 1,
 		CreatedAt: at, UpdatedAt: at, Fields: map[string]any{"nested": map[string]any{"value": "original"}},
 	}
-	run := runlifecycle.Snapshot{RunID: runID, State: runlifecycle.StateRunning, Origin: runlifecycle.DeploymentRunOrigin(), BundleHash: fact.BundleHash(), StartedAt: at}
+	run := runlifecycle.Snapshot{RunID: runID, State: runlifecycle.StateRunning, Origin: runlifecycle.DeploymentRunOrigin(), BundleHash: fact.BundleHash(), RootReference: rooted.Admission().Reference(), StartedAt: at}
 	receipt := FlowConstructionPublicationEvidence{Identity: identity, WorkflowVersion: instance.WorkflowVersion, BundleHash: fact.BundleHash(), Fields: instance.Fields}
 	readiness := DynamicFlowRuntimeReadiness{
 		Plan:            DynamicFlowRuntimeReadinessPlan{Identity: identity, RunID: runID, BundleHash: fact.BundleHash(), WorkflowVersion: source.WorkflowVersion(), ExecutionMode: executionmode.Live},

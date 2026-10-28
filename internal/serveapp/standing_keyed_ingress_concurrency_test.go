@@ -235,7 +235,7 @@ func TestA9ConcurrentKeyedIngressElectionBothStores(t *testing.T) {
 							t.Fatal(err)
 						}
 						original, err := rt.Pipeline.LoadFlowConstructionPublication(t.Context(), coordinate, instance.EntityID)
-						if err != nil || !eventIDs[original.CreatingInput.EventID] || original.CreatingInput.Input != "account.opened" || original.Fields["seen"] != int64(0) {
+						if err != nil || !eventIDs[original.CreatingInput.EventID] || original.CreatingInput.Input != "inbound.partner.raw" || original.Fields["seen"] != int64(0) {
 							t.Fatalf("elected constructor lost original fields/input: %+v err=%v", original, err)
 						}
 						initial[instance.EntityID] = original
@@ -277,7 +277,7 @@ func TestA9IndependentReceiverProgressWhileSiblingHandlerHeldBothStores(t *testi
 				if err != nil {
 					return err
 				}
-				if node.FlowPath() != "parent/middle/leaf" || event.Type() != "account.opened" {
+				if node.FlowPath() != "parent/middle/leaf" || event.Type() != "inbound.partner.raw" {
 					return nil
 				}
 				var payload map[string]any

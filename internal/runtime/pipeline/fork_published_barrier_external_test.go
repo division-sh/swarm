@@ -197,12 +197,15 @@ func verifyPublishedFanOutBarrierContinuation(t *testing.T, proof publishedBarri
 					t.Fatal("completion failure must select a genuinely different admitted artifact")
 				}
 			}
-			if crashing {
-				request.ForkOperation = &runfork.ForkOperationRequest{
-					OperationID: uuid.NewString(), Actor: "published-barrier-crash", IdempotencyKey: "pending-cut", TransportHash: "published-barrier-crash-transport",
-					SourceRunID: runID, ForkEventID: original.id, TargetBundleHash: rt.Options.SourceArtifactFact.BundleHash(),
-					AllowSourceFreeze: true, ContractSelection: request.ContractSelection,
-				}
+			rooted, err := bundle.RootedSource()
+			if err != nil {
+				t.Fatal(err)
+			}
+			request.ForkOperation = &runfork.ForkOperationRequest{
+				OperationID: uuid.NewString(), Actor: "published-barrier-crash", IdempotencyKey: "pending-cut", TransportHash: "published-barrier-crash-transport",
+				SourceRunID: runID, ForkEventID: original.id, TargetBundleHash: request.ExpectedBundleHash,
+				TargetRootReference: rooted.Admission().Reference(),
+				AllowSourceFreeze:   true, ContractSelection: request.ContractSelection,
 			}
 			baselineWork := rt.Options.ProcessWorkOwner.ActiveCount()
 			var sourceDomain map[string]storetest.SelectedForkStorageTableSnapshot

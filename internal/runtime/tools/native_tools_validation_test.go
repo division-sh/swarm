@@ -513,7 +513,10 @@ func TestValidateNativeToolBootConfigValidatesScopedFlowRouteWithoutMaterializin
 	source := scopedFlowWorkspaceNativeToolFixture(t)
 	root := filepath.Join(t.TempDir(), "workspaces")
 	contractsDir := t.TempDir()
-	if err := os.WriteFile(filepath.Join(contractsDir, "schema.yaml"), []byte("name: scoped-flow-native-tool-workspace\n"), 0o644); err != nil {
+	if err := os.WriteFile(filepath.Join(contractsDir, "manifest.yaml"), []byte("version: 1.0.0\nplatform_version: '*'\n"), 0o644); err != nil {
+		t.Fatalf("write flow schema: %v", err)
+	}
+	if err := os.WriteFile(filepath.Join(contractsDir, "schema.yaml"), []byte("stages: []\n"), 0o644); err != nil {
 		t.Fatalf("write flow schema: %v", err)
 	}
 	projection := toolTestRuntimeSourceProjection(t, contractsDir)
@@ -580,13 +583,17 @@ func sameFlowScopedNativeToolAgentFixture(t *testing.T) semanticview.Source {
 	t.Helper()
 	root := t.TempDir()
 
-	writeToolFlowDataFixtureFile(t, filepath.Join(root, "schema.yaml"), "name: same-flow-scoped-native-tool-census\n")
+	writeToolFlowDataFixtureFile(t, filepath.Join(root, "manifest.yaml"), "version: 1.0.0\nplatform_version: '*'\n")
+	writeToolFlowDataFixtureFile(t, filepath.Join(root, "schema.yaml"), "stages: []\n")
 	flowDir := filepath.Join(root, "operating")
 
-	writeToolFlowDataFixtureFile(t, filepath.Join(flowDir, "schema.yaml"), "name: operating\nstages:\n  active: {}\n")
+	writeToolFlowDataFixtureFile(t, filepath.Join(flowDir, "manifest.yaml"), "version: 1.0.0\nplatform_version: '*'\n")
+	writeToolFlowDataFixtureFile(t, filepath.Join(flowDir, "schema.yaml"), "stages:\n  active: {}\n")
+	writeToolFlowDataFixtureFile(t, filepath.Join(flowDir, "departments", "manifest.yaml"), "version: 1.0.0\nplatform_version: '*'\n")
 	for _, project := range []string{"project-a", "project-b"} {
 		dir := filepath.Join(flowDir, "departments", project)
 
+		writeToolFlowDataFixtureFile(t, filepath.Join(dir, "manifest.yaml"), "version: 1.0.0\nplatform_version: '*'\n")
 		writeToolFlowDataFixtureFile(t, filepath.Join(dir, "agents.yaml"), scopedNativeToolAgentYAML())
 	}
 	repoRoot := runtimepipeline.WorkflowRepoRoot()
@@ -601,14 +608,16 @@ func scopedFlowWorkspaceNativeToolFixture(t *testing.T) semanticview.Source {
 	t.Helper()
 	root := t.TempDir()
 
-	writeToolFlowDataFixtureFile(t, filepath.Join(root, "schema.yaml"), "name: scoped-flow-native-tool-workspace\n")
+	writeToolFlowDataFixtureFile(t, filepath.Join(root, "manifest.yaml"), "version: 1.0.0\nplatform_version: '*'\n")
+	writeToolFlowDataFixtureFile(t, filepath.Join(root, "schema.yaml"), "stages: []\n")
 	writeToolFlowDataFixtureFile(t, filepath.Join(root, "policy.yaml"), `
 workspace_classes:
   shared_flow:
     workspace_scope: per-flow-instance
 `)
 	flowDir := filepath.Join(root, "review")
-	writeToolFlowDataFixtureFile(t, filepath.Join(flowDir, "schema.yaml"), "name: review\nstages:\n  active: {}\n")
+	writeToolFlowDataFixtureFile(t, filepath.Join(flowDir, "manifest.yaml"), "version: 1.0.0\nplatform_version: '*'\n")
+	writeToolFlowDataFixtureFile(t, filepath.Join(flowDir, "schema.yaml"), "stages:\n  active: {}\n")
 	writeToolFlowDataFixtureFile(t, filepath.Join(flowDir, "agents.yaml"), `
 scoped-worker:
   model: regular
@@ -630,15 +639,19 @@ func scopedNativeToolAgentFixture(t *testing.T) semanticview.Source {
 	t.Helper()
 	root := t.TempDir()
 
-	writeToolFlowDataFixtureFile(t, filepath.Join(root, "schema.yaml"), "name: scoped-native-tool-census\n")
+	writeToolFlowDataFixtureFile(t, filepath.Join(root, "manifest.yaml"), "version: 1.0.0\nplatform_version: '*'\n")
+	writeToolFlowDataFixtureFile(t, filepath.Join(root, "schema.yaml"), "stages: []\n")
+	writeToolFlowDataFixtureFile(t, filepath.Join(root, "departments", "manifest.yaml"), "version: 1.0.0\nplatform_version: '*'\n")
 	for _, project := range []string{"project-a", "project-b"} {
 		dir := filepath.Join(root, "departments", project)
 
+		writeToolFlowDataFixtureFile(t, filepath.Join(dir, "manifest.yaml"), "version: 1.0.0\nplatform_version: '*'\n")
 		writeToolFlowDataFixtureFile(t, filepath.Join(dir, "agents.yaml"), scopedNativeToolAgentYAML())
 	}
 	for _, flowID := range []string{"flow-a", "flow-b"} {
 		dir := filepath.Join(root, flowID)
-		writeToolFlowDataFixtureFile(t, filepath.Join(dir, "schema.yaml"), "name: "+flowID+"\n")
+		writeToolFlowDataFixtureFile(t, filepath.Join(dir, "manifest.yaml"), "version: 1.0.0\nplatform_version: '*'\n")
+		writeToolFlowDataFixtureFile(t, filepath.Join(dir, "schema.yaml"), "# fixture: "+flowID+"\n\nstages: []\n")
 		writeToolFlowDataFixtureFile(t, filepath.Join(dir, "agents.yaml"), scopedNativeToolAgentYAML())
 	}
 	repoRoot := runtimepipeline.WorkflowRepoRoot()

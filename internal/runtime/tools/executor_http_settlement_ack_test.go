@@ -32,6 +32,7 @@ import (
 
 type httpSettlementSelectedStore interface {
 	storetest.AgentFixtureStore
+	storetest.RunFixtureStore
 	runtimeeffects.Store
 	runtimeeffects.OutcomeStore
 	runtimerunlifecycle.CandidateRegistrar
@@ -90,6 +91,15 @@ func selectedHTTPSettlementContext(t *testing.T, selected httpSettlementSelected
 	if err != nil {
 		t.Fatal(err)
 	}
+	rooted, _ := sourceartifactfixture.Rooted(t, "http-settlement", sourceartifactfixture.Artifact())
+	fixtureCtx = runtimecorrelation.WithSourceArtifactFact(fixtureCtx, sourceartifactfixture.FactFor(rooted.Artifact()))
+	fixtureCtx = runtimecorrelation.WithRootAdmission(fixtureCtx, rooted.Admission())
+	if err := storetest.MaterializeRun(fixtureCtx, selected, storetest.RunFixture{
+		RunID: harness.Token.Identity.RunID, Artifact: rooted.Artifact(), RootAdmission: rooted.Admission(),
+		Origin: storetest.ScenarioSetupOrigin(), StartedAt: time.Now().UTC(),
+	}); err != nil {
+		t.Fatalf("seed current rooted run: %v", err)
+	}
 	if err := storetest.UpsertStaticAgentFixture(t, fixtureCtx, selected, runtimemanager.PersistedAgent{
 		Config: actor, Status: "active", HiredBy: "http-settlement-test", StartedAt: time.Now().UTC(),
 	}); err != nil {
@@ -106,6 +116,8 @@ func selectedHTTPSettlementContext(t *testing.T, selected httpSettlementSelected
 	ctx = runtimecorrelation.WithRuntimeInstanceID(ctx, runtimeID)
 	ctx = runtimeauthoractivity.WithScope(ctx, runtimeauthoractivity.BundleScope(runtimeID, sourceartifactfixture.BundleHash))
 	ctx = startupownership.CarryMutationAuthority(ctx, fixtureCtx)
+	ctx = runtimecorrelation.WithSourceArtifactFact(ctx, sourceartifactfixture.FactFor(rooted.Artifact()))
+	ctx = runtimecorrelation.WithRootAdmission(ctx, rooted.Admission())
 	return runtimetools.WithActor(ctx, actor), actor
 }
 

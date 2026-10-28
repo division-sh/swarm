@@ -9,11 +9,13 @@ import (
 	"github.com/division-sh/swarm/internal/events"
 	"github.com/division-sh/swarm/internal/events/eventtest"
 	"github.com/division-sh/swarm/internal/operatorread"
+	runtimecorrelation "github.com/division-sh/swarm/internal/runtime/correlation"
 	runtimedelivery "github.com/division-sh/swarm/internal/runtime/deliverylifecycle"
 	runtimefailures "github.com/division-sh/swarm/internal/runtime/failures"
 	runtimegenericschedule "github.com/division-sh/swarm/internal/runtime/genericschedule"
 	runtimerunlifecycle "github.com/division-sh/swarm/internal/runtime/runlifecycle"
 	"github.com/division-sh/swarm/internal/runtime/startupownership"
+	"github.com/division-sh/swarm/internal/sourceartifact"
 	"github.com/division-sh/swarm/internal/testutil/runlifecyclefixture"
 	"github.com/division-sh/swarm/internal/testutil/sourceartifactfixture"
 	"github.com/google/uuid"
@@ -34,24 +36,33 @@ func TestSQLiteRunAPIReadSurface_LoadListAndDiagnoseEvidence(t *testing.T) {
 	newerEntityB := uuid.NewString()
 	olderEntity := uuid.NewString()
 	olderEventOnly := uuid.NewString()
-	bundleAArtifact := sourceartifactfixture.Artifact()
-	bundleBArtifact := sourceartifactfixture.New("agents.yaml", []byte("agents:\n  readback_b: {}\n"))
+	rootA, _ := sourceartifactfixture.Rooted(t, "fixture", sourceartifactfixture.Artifact())
+	artifactB, err := sourceartifact.AdmitMembers(map[string][]byte{
+		"manifest.yaml": []byte("version: 1.0.0\nplatform_version: '*'\n"),
+		"agents.yaml":   []byte("agents:\n  readback_b: {}\n"),
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	rootB, _ := sourceartifactfixture.Rooted(t, "readback-b", artifactB)
+	bundleAArtifact, bundleBArtifact := rootA.Artifact(), rootB.Artifact()
 	bundleA := bundleAArtifact.BundleHash()
 	bundleB := bundleBArtifact.BundleHash()
 	sourceartifactfixture.RequireArtifact(t, ctx, sqliteStore, bundleAArtifact)
 	sourceartifactfixture.RequireArtifact(t, ctx, sqliteStore, bundleBArtifact)
+	ctx = runtimecorrelation.WithRootAdmission(ctx, rootA.Admission())
 	runtimeLogFailure := mustMarshalTestFailure(t, testFailureEnvelope(runtimefailures.ClassInternalFailure, "proof_failure", nil))
 	runtimeLogPayload := `{"log_level":"error","message":"boom","details":{"component":"runtime","action":"proof","failure":` + runtimeLogFailure + `}}`
 
 	for _, snapshot := range []runlifecyclefixture.CorruptSnapshot{
 		{
-			RunID: newer, State: "running", BundleHash: bundleA,
+			RunID: newer, State: "running", BundleHash: bundleA, RootDirectory: rootA.Admission().RootDirectory(),
 			OriginKind:     string(runtimerunlifecycle.OriginEvent),
 			TriggerEventID: newerEvent, TriggerEventType: "scan.requested",
 			StartedAt: now,
 		},
 		{
-			RunID: older, State: "running", BundleHash: bundleB,
+			RunID: older, State: "running", BundleHash: bundleB, RootDirectory: rootB.Admission().RootDirectory(),
 			OriginKind:      string(runtimerunlifecycle.OriginForkMaterialization),
 			ForkedFromRunID: newer, ForkedFromPointKind: "event", ForkedFromRevision: 1, ForkedFromEventID: newerEvent,
 			StartedAt: now.Add(-time.Hour),
@@ -76,7 +87,7 @@ func TestSQLiteRunAPIReadSurface_LoadListAndDiagnoseEvidence(t *testing.T) {
 	} {
 		eventCtx := ctx
 		if fixture.runID == older {
-			eventCtx = testAuthorActivityContextForBundle(bundleB)
+			eventCtx = runtimecorrelation.WithRootAdmission(testAuthorActivityContextForBundle(bundleB), rootB.Admission())
 		}
 		eventCtx = startupownership.CarryMutationAuthority(eventCtx, ctx)
 		envelope := events.EventEnvelope{}

@@ -2,7 +2,6 @@ package mutationprotocol_test
 
 import (
 	"context"
-	"strings"
 	"testing"
 
 	"github.com/division-sh/swarm/internal/runtime/agenttopology"
@@ -11,6 +10,7 @@ import (
 	"github.com/division-sh/swarm/internal/store/construction"
 	"github.com/division-sh/swarm/internal/store/internal/backend/mutationprotocol"
 	"github.com/division-sh/swarm/internal/store/storetest"
+	"github.com/division-sh/swarm/internal/testutil/sourceartifactfixture"
 	"github.com/google/uuid"
 )
 
@@ -41,7 +41,14 @@ func prepareNativeFenceAuthority(t *testing.T, dsn string) context.Context {
 			t.Error(err)
 		}
 	})
-	coordinate := agenttopology.SourceCoordinate{BundleHash: "bundle-v2:sha256:" + strings.Repeat("a", 64)}
+	rooted, _ := sourceartifactfixture.Rooted(t, "fence", sourceartifactfixture.Artifact())
+	if _, err := selected.EnsureRootedSource(ctx, rooted); err != nil {
+		t.Fatal(err)
+	}
+	coordinate, err := agenttopology.NewSourceCoordinate(rooted.Admission())
+	if err != nil {
+		t.Fatal(err)
+	}
 	plan, err := agenttopology.NewSourceSetPlan([]agenttopology.SourceCoordinate{coordinate}, nil)
 	if err != nil {
 		t.Fatal(err)

@@ -13,11 +13,24 @@ import (
 	"github.com/division-sh/swarm/internal/runtime/core/processbinding"
 	runtimedestructivereset "github.com/division-sh/swarm/internal/runtime/destructivereset"
 	runtimemanager "github.com/division-sh/swarm/internal/runtime/manager"
+	"github.com/division-sh/swarm/internal/sourceartifact"
+	"github.com/division-sh/swarm/internal/testutil/sourceartifactfixture"
 	"github.com/google/uuid"
 )
 
-const startupBundleHashA = "bundle-v2:sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
-const startupBundleHashB = "bundle-v2:sha256:bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb"
+const startupBundleHashA = sourceartifactfixture.BundleHash
+
+var startupBundleArtifactB = func() *sourceartifact.AdmittedSourceArtifact {
+	artifact, err := sourceartifact.AdmitMembers(map[string][]byte{
+		"manifest.yaml": []byte("version: 2.0.0\nplatform_version: '*'\n"),
+		"schema.yaml":   []byte("stages: []\n"),
+	})
+	if err != nil {
+		panic(err)
+	}
+	return artifact
+}()
+var startupBundleHashB = startupBundleArtifactB.BundleHash()
 
 func (*retainedSessionProbe) InspectRunExecutionOwnership(context.Context, GrantEvidence, string) (runtimemanager.RunExecutionOwnership, error) {
 	return 0, errors.New("run execution ownership is not implemented by this session probe")
@@ -187,7 +200,12 @@ func testCapability(t *testing.T) (ProcessCapability, *retainedSessionProbe, run
 
 func testRetainedSession(t *testing.T) (*retainedSessionProbe, runtimeagenttopology.SourceSetPlan) {
 	t.Helper()
-	plan, err := runtimeagenttopology.NewSourceSetPlan([]runtimeagenttopology.SourceCoordinate{{BundleHash: startupBundleHashA}}, nil)
+	rooted, _ := sourceartifactfixture.Rooted(t, "source-a", sourceartifactfixture.Artifact())
+	coordinate, err := runtimeagenttopology.NewSourceCoordinate(rooted.Admission())
+	if err != nil {
+		t.Fatal(err)
+	}
+	plan, err := runtimeagenttopology.NewSourceSetPlan([]runtimeagenttopology.SourceCoordinate{coordinate}, nil)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -278,10 +296,12 @@ func TestGenerationGrantRejectsEveryAuthorityUseAfterSourceSetChanges(t *testing
 	if _, err := grantToAdmit.MarkProbesSettled(context.Background(), []string{"startup"}); err != nil {
 		t.Fatalf("MarkProbesSettled before source-set restoration: %v", err)
 	}
-	restored, err := runtimeagenttopology.NewSourceSetPlan([]runtimeagenttopology.SourceCoordinate{
-		{BundleHash: startupBundleHashA},
-		{BundleHash: startupBundleHashB},
-	}, nil)
+	rootedB, _ := sourceartifactfixture.Rooted(t, "source-b", startupBundleArtifactB)
+	coordinateB, err := runtimeagenttopology.NewSourceCoordinate(rootedB.Admission())
+	if err != nil {
+		t.Fatal(err)
+	}
+	restored, err := runtimeagenttopology.NewSourceSetPlan([]runtimeagenttopology.SourceCoordinate{plan.Sources[0], coordinateB}, nil)
 	if err != nil {
 		t.Fatalf("NewSourceSetPlan: %v", err)
 	}

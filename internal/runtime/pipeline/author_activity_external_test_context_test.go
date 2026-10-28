@@ -254,7 +254,12 @@ func newScopedTestEventBus(t *testing.T, eventStore scopedTestDurableStore, opts
 		TargetFailureRecorder: eventStore,
 	}
 	if opts.PayloadAdmitter == nil {
-		opts.PayloadAdmitter = func(_ context.Context, event events.Event, flowID string) (events.PayloadAdmission, error) {
+		opts.PayloadAdmitter = func(_ context.Context, event events.Event, payloadProducer events.PayloadProducer) (events.PayloadAdmission, error) {
+			admission, found, err := runtimepipeline.ResolveWorkflowStageTimerPayloadAdmission(opts.ContractBundle, event, opts.SourceArtifactFact.BundleHash())
+			if found || err != nil {
+				return admission, err
+			}
+			flowID := payloadProducer.FlowID()
 			return eventtest.PayloadAdmission(event, flowID, string(event.Type()))
 		}
 	}

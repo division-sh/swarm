@@ -17,6 +17,7 @@ import (
 	"testing"
 	"time"
 
+	runtimecredentials "github.com/division-sh/swarm/internal/runtime/credentials"
 	"github.com/division-sh/swarm/internal/runtime/testfixtures/canonicalrouting"
 )
 
@@ -35,7 +36,16 @@ func TestReadProofFactoringCompiledScenario(t *testing.T) {
 				t.Fatal(err)
 			}
 			writeWorkflowValidationFixtureFile(t, filepath.Join(root, "tests", anchor+".yaml"), string(scenario))
-			env := readProofCompiledScopeEnv(t.TempDir())
+			scope := t.TempDir()
+			credentialPath := filepath.Join(scope, "credentials.json")
+			credentials, err := runtimecredentials.NewFileStore(credentialPath)
+			if err != nil {
+				t.Fatal(err)
+			}
+			if err := credentials.Set(context.Background(), "telegram.telegram_bot_token", "scenario-provider-token"); err != nil {
+				t.Fatal(err)
+			}
+			env := append(readProofCompiledScopeEnv(scope), "SWARM_CREDENTIALS_FILE="+credentialPath)
 			ctx, cancel := context.WithTimeout(context.Background(), 45*time.Second)
 			defer cancel()
 			cmd := exec.CommandContext(ctx, binary, "test", root, "tests/"+anchor+".yaml", "--timeout", "20s", "--poll-interval", "25ms")

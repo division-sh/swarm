@@ -248,10 +248,10 @@ func newCatalogAssertionHarness(t *testing.T, initial string) *runtimeHarness {
 	t.Helper()
 	root := t.TempDir()
 	for name, contents := range map[string]string{
-		"schema.yaml":   "name: catalog-assertion\npins:\n  inputs: [score.requested, assertion.finish]\nstages:\n  " + initial + ": {}\n  finished: {final: true}\n",
+		"schema.yaml":   "# fixture: catalog-assertion\npins:\n  inputs: [score.requested, assertion.finish]\nstages:\n  " + initial + ": {}\n  finished: {final: true}\n",
 		"entities.yaml": "assertion:\n  note: {type: 'text?', _unused_reason: assertion fixture}\n",
 		"events.yaml":   "score.requested:\n  entity_id: uuid?\nassertion.finish:\n",
-		"nodes.yaml":    "finisher:\n  execution_type: system_node\n  event_handlers:\n    score.requested: {}\n    assertion.finish:\n      advances_to: finished\n",
+		"nodes.yaml":    "finisher:\n  execution_type: system_node\n  event_handlers:\n    score.requested: {}\n    assertion.finish:\n      advances_to: finished\n", "manifest.yaml": "version: 1.0.0\nplatform_version: '*'\n",
 	} {
 		if err := os.WriteFile(filepath.Join(root, name), []byte(contents), 0o600); err != nil {
 			t.Fatal(err)
@@ -260,7 +260,7 @@ func newCatalogAssertionHarness(t *testing.T, initial string) *runtimeHarness {
 	h := newRuntimeHarnessForBackend(t, root, catalogBackendPostgres, false)
 	ctx := runtimeeffects.WithExecutionMode(h.ctx, executionmode.Live)
 	plan, err := h.rt.Manager.PrepareFlowInstanceActivation(ctx, runtimepipeline.FlowInstanceActivationRequest{
-		ContractBundle: semanticview.Wrap(h.bundle),
+		ContractBundle: h.rt.Options.WorkflowModule.SemanticSource(),
 		Instance:       flowidentity.Stored(semanticview.Wrap(h.bundle), ".", catalogRuntimeRunID, catalogRuntimeRunID, catalogRuntimeRunID, ""),
 		OccurredAt:     h.startedAt,
 	})

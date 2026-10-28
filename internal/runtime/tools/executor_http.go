@@ -19,6 +19,8 @@ import (
 	"github.com/division-sh/swarm/internal/runtime/semanticview"
 )
 
+const authoredHTTPToolEffectAdapter = "authored_http_tool"
+
 type httpToolStatusError struct {
 	ToolName   string
 	StatusCode int
@@ -45,6 +47,9 @@ func (e *Executor) execHTTPTool(ctx context.Context, actor models.AgentConfig, t
 	}
 	if payload == nil {
 		payload = map[string]any{}
+	}
+	if err := runtimeeffects.CheckExternalEffectExecutionMode(ctx, authoredHTTPToolEffectAdapter); err != nil {
+		return nil, err
 	}
 	credentials, err := e.resolveToolCredentialsForActor(ctx, actor, tool.Credentials())
 	if err != nil {
@@ -236,7 +241,7 @@ func (e *Executor) execHTTPRequestOnce(ctx context.Context, method, url string, 
 	requestEvidence := append([]byte(method+"\x00"+url+"\x00"), headerEvidence...)
 	requestEvidence = append(requestEvidence, '\x00')
 	requestEvidence = append(requestEvidence, bodyBytes...)
-	attempt, err := runtimeeffects.Begin(ctx, "authored_http_tool", requestEvidence, map[string]string{"tool": toolName})
+	attempt, err := runtimeeffects.Begin(ctx, authoredHTTPToolEffectAdapter, requestEvidence, map[string]string{"tool": toolName})
 	if err != nil {
 		return nil, err
 	}

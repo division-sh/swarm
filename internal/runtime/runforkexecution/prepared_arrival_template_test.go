@@ -27,6 +27,7 @@ import (
 	"github.com/division-sh/swarm/internal/runtime/runlifecycle"
 	"github.com/division-sh/swarm/internal/runtime/semanticview"
 	"github.com/division-sh/swarm/internal/runtime/startupownership"
+	"github.com/division-sh/swarm/internal/sourceartifact"
 	"github.com/division-sh/swarm/internal/store/storetest"
 	"github.com/google/uuid"
 )
@@ -58,6 +59,7 @@ func testPreparedTemplateArrivalTimeoutBothStores(t *testing.T, selectedDelay st
 				selected, owner = s, selectedContractExecutionOwnerForTest(t, s)
 			}
 			ctx := runForkTestContext(t)
+			startupEntry := ctx
 			process, _ := worklifetime.ProcessFromContext(ctx)
 			baseline := process.ActiveCount()
 			t.Cleanup(func() {
@@ -185,13 +187,14 @@ func testPreparedTemplateArrivalTimeoutBothStores(t *testing.T, selectedDelay st
 					t.Fatal("selected delay requires its actual loader-owned source artifact")
 				}
 				storetest.RequireBundleDataCatalog(t, correlation.WithSourceArtifactFact(ctx, target.SourceArtifactFact),
-					selected.(storetest.DurableDataCatalogStore), bundle)
+					selected.(storetest.RootedDataCatalogStore), bundle)
 			}
 			selection := runforkadmission.SelectedContractSelection(target.Source)
 			operation := runfork.ForkOperationRequest{OperationID: uuid.NewString(), Actor: "prepared-template-arrival", IdempotencyKey: "fixed-cut",
 				TransportHash: "prepared-template-arrival-transport", SourceRunID: sourceRun, ForkEventID: marker,
-				TargetBundleHash: target.SourceArtifactFact.BundleHash(), AllowSourceFreeze: true, ContractSelection: selection}
-			liveRuntime, liveContexts := liveForkRuntimeFixture(t, ctx, selected, owner, target, sourceRun, executionposture.MockOnly)
+				TargetBundleHash: target.SourceArtifactFact.BundleHash(), TargetRootReference: target.RootedSource.Admission().Reference(), AllowSourceFreeze: true, ContractSelection: selection}
+			startupCtx := authoractivity.WithScope(startupEntry, authoractivity.BundleScope(runForkTestRuntimeInstanceID, target.SourceArtifactFact.BundleHash()))
+			liveRuntime, liveContexts := liveForkRuntimeFixtureWithStartupContext(t, ctx, startupCtx, selected, owner, target, sourceRun, executionposture.MockOnly)
 			preservedSource := joinLiveForkFixtureClock(t, ctx, liveRuntime, selected, sourceRun, source.ID)
 			sourceCount, err := storetest.ReadLifecycleEventCardinality(ctx, selected, sourceRun, "platform.join_timeout")
 			if err != nil {
@@ -206,12 +209,21 @@ func testPreparedTemplateArrivalTimeoutBothStores(t *testing.T, selectedDelay st
 				t.Fatal(err)
 			}
 			baseline = process.ActiveCount()
-			result, err := ExecuteSelectedContractRunFork(ctx, SelectedContractExecutionRequest{
+			request := SelectedContractExecutionRequest{
 				SourceRunID: sourceRun, At: marker, AllowSourceFreeze: true, Owner: owner, ForkOperation: &operation,
 				LiveRuntime: liveRuntime, LiveContexts: liveContexts, LiveRuns: selected.(runlifecycle.LiveRunReader),
-				SourceLoader: loader, ContractSelection: selection,
+				SourceLoader:       SourceArtifactSelectedContractSourceLoader{RepoRoot: repo, Store: selected.(SourceArtifactSelectedContractSourceStore)},
+				ExpectedBundleHash: target.SourceArtifactFact.BundleHash(), ContractSelection: selection,
 				AgentRuntime: SelectedContractAgentRuntimeOptions{ExecutionPosture: executionposture.MockOnly, ProcessCapability: owner.ports.contexts.capability},
-			})
+			}
+			if selectedDelay != "" {
+				request.LiveRuntime = nil
+				request.AcquireLiveRuntime = func(ctx context.Context, reference sourceartifact.RootAdmissionReference) (*rootruntime.RuntimeContextUse, error) {
+					use, _, err := liveContexts.AcquireBundleHash(ctx, reference.BundleHash)
+					return use, err
+				}
+			}
+			result, err := ExecuteSelectedContractRunFork(ctx, request)
 			if err != nil || !result.Activation.Activated {
 				t.Fatalf("selected prepared template arrival activation must succeed: %+v err=%v", result, err)
 			}

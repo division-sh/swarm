@@ -107,7 +107,15 @@ func TestRunExecutionOwnershipBothStores(t *testing.T) {
 			if err != nil {
 				t.Fatal(err)
 			}
-			plan, err := agenttopology.NewSourceSetPlan([]agenttopology.SourceCoordinate{{BundleHash: hash}}, nil)
+			rooted, err := store.(rootedRunStore).LoadRunRootedSource(ctx, fixture.sourceRun)
+			if err != nil {
+				t.Fatal(err)
+			}
+			coordinate, err := agenttopology.NewSourceCoordinate(rooted.Admission())
+			if err != nil {
+				t.Fatal(err)
+			}
+			plan, err := agenttopology.NewSourceSetPlan([]agenttopology.SourceCoordinate{coordinate}, nil)
 			if err != nil {
 				t.Fatal(err)
 			}
@@ -184,8 +192,16 @@ func TestRunExecutionOwnershipBothStores(t *testing.T) {
 			if err != nil {
 				t.Fatal(err)
 			}
+			target, err := store.(rootedRunStore).LoadRunRootedSource(ctx, fixture.forkRun)
+			if err != nil {
+				t.Fatal(err)
+			}
+			targetCoordinate, err := agenttopology.NewSourceCoordinate(target.Admission())
+			if err != nil {
+				t.Fatal(err)
+			}
 			fixture.request.DeclarationPlan, err = agenttopology.NewSelectedDeclarationPlan(hash, []agenttopology.DesiredAgent{{
-				Identity: declaredIdentityPlan, ConfigRevision: configRevision, Source: agenttopology.SourceCoordinate{BundleHash: hash},
+				Identity: declaredIdentityPlan, ConfigRevision: configRevision, Source: targetCoordinate,
 			}})
 			if err != nil {
 				t.Fatal(err)

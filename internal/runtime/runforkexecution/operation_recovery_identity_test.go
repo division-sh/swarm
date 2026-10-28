@@ -2,6 +2,7 @@ package runforkexecution
 
 import (
 	"context"
+	"github.com/division-sh/swarm/internal/sourceartifact"
 	"slices"
 	"testing"
 	"time"
@@ -18,6 +19,7 @@ import (
 	"github.com/division-sh/swarm/internal/runtime/startupownership"
 	"github.com/division-sh/swarm/internal/store"
 	"github.com/division-sh/swarm/internal/store/storetest"
+	"github.com/division-sh/swarm/internal/testutil/sourceartifactfixture"
 	"github.com/google/uuid"
 )
 
@@ -29,7 +31,7 @@ func TestSelectedOperationReplayRetainsOriginalLatestCutBothStores(t *testing.T)
 			materialized := abandonSelectedOperationPreparation(t, ctx, request)
 			selected := request.SourceLoader.(SourceArtifactSelectedContractSourceLoader).Store
 			advanced := eventtest.ExistingRunRootIngressWithRoutingSourceAndMode(uuid.NewString(), "item.received", "source-runtime", "", []byte(`{}`), 0,
-				request.SourceRunID, events.EventEnvelope{}, events.NoRoutingSource(), time.Unix(1700002300, 0).UTC(), executionmode.Mock)
+				request.SourceRunID, events.EventEnvelope{}, eventtest.RootRoutingSource(request.SourceRunID), time.Unix(1700002300, 0).UTC(), executionmode.Mock)
 			storetest.CommitSemanticEventWithRoutes(t, ctx, selected, advanced,
 				[]events.DeliveryRoute{selectedExecutionEntitylessNodeRoute("source-only-node")}, pipelineobligation.ScopeSubscribed)
 			storetest.CaptureRunForkSnapshot(t, ctx, selected, request.SourceRunID)
@@ -38,7 +40,12 @@ func TestSelectedOperationReplayRetainsOriginalLatestCutBothStores(t *testing.T)
 				t.Fatalf("source advancement precondition failed: point=%+v err=%v", latest.ForkPoint, err)
 			}
 			replay := *request.ForkOperation
-			replay.OperationID, replay.TargetBundleHash = uuid.NewString(), "sha256:stale-loser-alias"
+			loser, _ := sourceartifactfixture.Rooted(t, "losing-selection", sourceartifactfixture.Artifact())
+			if loser.Admission().BundleHash() == replay.TargetBundleHash {
+				t.Fatal("losing selection must have distinct captured content")
+			}
+			replay.OperationID, replay.TargetBundleHash = uuid.NewString(), loser.Admission().BundleHash()
+			replay.TargetRootReference = loser.Admission().Reference()
 			request.ForkOperation, request.ExpectedBundleHash = &replay, replay.TargetBundleHash
 			result, err := ExecuteSelectedContractRunFork(ctx, request)
 			if err != nil || !result.Activation.Activated || result.Materialization.ForkRunID != materialized.ForkRunID ||
@@ -96,12 +103,13 @@ func TestSelectedOperationSuccessorReturnsRecoveredWinnerBothStores(t *testing.T
 			successor.ports.runtimeExecution = execution
 			request.AgentRuntime.ProcessCapability = capability
 			loader := request.SourceLoader.(SourceArtifactSelectedContractSourceLoader)
-			loaded, err := loader.InspectRunForkSelectedContractSourceForRequest(ctx, SelectedContractSourceLoadRequest{SourceRunID: request.SourceRunID, Selection: request.ContractSelection})
+			loaded, err := loader.InspectRunForkSelectedContractSourceForRequest(ctx, SelectedContractSourceLoadRequest{Responsibility: OriginalRunSource(request.SourceRunID), Selection: request.ContractSelection})
 			if err != nil {
 				t.Fatal(err)
 			}
 			request.LiveRuntime, request.LiveContexts = liveForkRuntimeFixture(t, ctx, selected, successor, loaded, request.SourceRunID, executionposture.MockOnly)
-			acquire := func(ctx context.Context, bundleHash string) (*runtimepkg.RuntimeContextUse, error) {
+			acquire := func(ctx context.Context, reference sourceartifact.RootAdmissionReference) (*runtimepkg.RuntimeContextUse, error) {
+				bundleHash := reference.BundleHash
 				use, _, err := request.LiveContexts.AcquireBundleHash(ctx, bundleHash)
 				return use, err
 			}

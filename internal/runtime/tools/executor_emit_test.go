@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"path/filepath"
 	"reflect"
 	"strings"
 	"testing"
@@ -90,7 +91,9 @@ func TestHandleEmitToolPreservesImportedAgentSemanticSource(t *testing.T) {
 			ByID: map[string]*runtimecontracts.FlowContractView{flowID: &root.Children[0].Children[0]},
 		},
 	}
-	bundle = semanticviewtest.WithInstanceDeclarations(t, bundle, canonicalrouting.CopyInstanceDeclarations(t, flowID))
+	declarationRoot := canonicalrouting.CopyInstanceDeclarations(t, flowID)
+	writeToolFlowDataFixtureFile(t, filepath.Join(declarationRoot, "telegram-ingress/manifest.yaml"), "version: 1.0.0\nplatform_version: '*'\n")
+	bundle = semanticviewtest.WithInstanceDeclarations(t, bundle, declarationRoot)
 	source := toolTestSourceWithDeclaredAgent(t, bundle, agentID, flowID)
 	declaration := semanticview.AgentDeclarations(source)
 	if len(declaration) != 1 {

@@ -77,7 +77,7 @@ func prepareArmedArrivalSourceAtCut(t *testing.T, ctx context.Context, selected 
 	marker := eventtest.ExistingRunRootIngressWithRoutingSourceAndMode(uuid.NewString(), initial.Type(), "source-runtime", "",
 		initial.Payload(), 0, sourceRun, events.EventEnvelope{}, events.NoRoutingSource(),
 		runlifecycle.CanonicalTimestamp(candidate.AdmittedAt), executionmode.Mock)
-	admission, err := rootruntime.NewRuntimePayloadAdmitter(nil, loaded.Source, loaded.SourceArtifactFact)(ctx, marker, flowID)
+	admission, err := rootruntime.NewRuntimePayloadAdmitter(nil, loaded.Source, loaded.SourceArtifactFact)(ctx, marker, events.EventPayloadProducer(marker, flowID))
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -163,9 +163,16 @@ func TestIssue642PreparedArrivalTimeoutContinuesExactDeliveryBothStores(t *testi
 			selection := runforkadmission.SelectedContractSelection(loaded.Source)
 			operation := runfork.ForkOperationRequest{OperationID: uuid.NewString(), Actor: "prepared-arrival", IdempotencyKey: "fixed-cut",
 				TransportHash: "prepared-arrival-transport", SourceRunID: sourceRun, ForkEventID: marker,
-				TargetBundleHash: loaded.SourceArtifactFact.BundleHash(), AllowSourceFreeze: true, ContractSelection: selection}
+				TargetBundleHash: loaded.SourceArtifactFact.BundleHash(), TargetRootReference: loaded.RootedSource.Admission().Reference(), AllowSourceFreeze: true, ContractSelection: selection}
 			liveRuntime, liveContexts := liveForkRuntimeFixture(t, sourceCtx, selected, owner, loaded, sourceRun, executionposture.MockOnly)
-			preservedSource := joinLiveForkFixtureClock(t, sourceCtx, liveRuntime, selected, sourceRun, source.ID)
+			// The clock commit precedes its callback's diagnostic publication.
+			setup, cancelSetup := context.WithTimeout(sourceCtx, 15*time.Second)
+			defer cancelSetup()
+			preservedSource := joinLiveForkFixtureClock(t, setup, liveRuntime, selected, sourceRun, source.ID)
+			if err := liveRuntime.Scheduler.Wait(setup); err != nil {
+				t.Fatalf("join original clock publication: %v", err)
+			}
+			cancelSetup()
 			sourceCount, err := storetest.ReadLifecycleEventCardinality(sourceCtx, selected, sourceRun, "platform.join_timeout")
 			if err != nil {
 				t.Fatal(err)
@@ -322,6 +329,17 @@ func TestIssue642PreparedArrivalTimeoutContinuesExactDeliveryBothStores(t *testi
 			}
 			sourceAfter, err := storetest.ReadSelectedForkSourceDomain(wait, selected, sourceRun)
 			if err != nil || !reflect.DeepEqual(sourceBefore, sourceAfter) {
+				for table, before := range sourceBefore {
+					after, found := sourceAfter[table]
+					if !found || !reflect.DeepEqual(before, after) {
+						t.Logf("source business table %s changed: before=%+v after=%+v present=%t", table, before, after, found)
+					}
+				}
+				for table, after := range sourceAfter {
+					if _, found := sourceBefore[table]; !found {
+						t.Logf("source business table %s added: %+v", table, after)
+					}
+				}
 				t.Fatalf("child timeout changed prepared source business facts: %v", err)
 			}
 			sourceSettlement, err := owner.ports.busDurable.DeliveryLifecycle.SummarizeRun(wait, sourceRun)

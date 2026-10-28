@@ -8,8 +8,7 @@ func CopySelectedFutureReusedProviderInput(t testing.TB) string {
 	t.Helper()
 	root := CopySelectedFutureKeyedProviderInput(t)
 	for path, body := range map[string]string{
-		"schema.yaml": `name: selected-future-reused-provider
-stages:
+		"schema.yaml": `stages:
   pending: {}
   done: {final: true}
 pins:
@@ -20,6 +19,7 @@ connect:
   - {event: work.progress, from: work, to: .}
   - {event: work.finished, from: work, to: .}
 `,
+
 		"events.yaml": `start.requested:
   work_id: text
 work.assigned:
@@ -46,8 +46,7 @@ work.assigned:
         writes:
           - {target_field: counter, value: entity.counter + 1}
 `,
-		"work/schema.yaml": `name: work
-instance: work_id
+		"work/schema.yaml": `instance: work_id
 stages:
   pending: {}
   done: {final: true}
@@ -57,6 +56,7 @@ pins:
 required_agents:
   - {role: worker, subscribes_to: [work.assigned]}
 `,
+
 		"work/events.yaml": `work.progress:
   work_id: text
 work.finished:
@@ -92,7 +92,7 @@ def handle(input):
             arguments["result"] = "finished"
         return {"calls": [{"name": name, "arguments": arguments}], "usage": usage}
     return {"text": "Reported the assigned step.", "usage": usage}
-`,
+`, "manifest.yaml": "version: 1.0.0\nplatform_version: '*'\n", "work/manifest.yaml": "version: 1.0.0\nplatform_version: '*'\n",
 	} {
 		writeClosedVariantFile(t, root, path, body)
 	}

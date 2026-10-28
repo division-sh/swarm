@@ -13,6 +13,7 @@ import (
 	"github.com/division-sh/swarm/internal/runtime/runcontrol"
 	"github.com/division-sh/swarm/internal/runtime/runfork"
 	"github.com/division-sh/swarm/internal/runtime/runlifecycle"
+	"github.com/division-sh/swarm/internal/sourceartifact"
 	"github.com/google/uuid"
 )
 
@@ -22,7 +23,7 @@ type SelectedForkRecoveryEnvironment struct {
 	SourceLoader       SelectedContractSourceLoader
 	SourceInspector    SelectedContractSourceInspector
 	AgentRuntime       SelectedContractAgentRuntimeOptions
-	AcquireLiveRuntime func(context.Context, string) (*runtimepkg.RuntimeContextUse, error)
+	AcquireLiveRuntime func(context.Context, sourceartifact.RootAdmissionReference) (*runtimepkg.RuntimeContextUse, error)
 	LiveContexts       *runtimepkg.RuntimeContextManager
 	LiveRuns           runlifecycle.LiveRunReader
 }

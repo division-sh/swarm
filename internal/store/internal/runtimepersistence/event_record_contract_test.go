@@ -16,6 +16,7 @@ import (
 	runtimebus "github.com/division-sh/swarm/internal/runtime/bus"
 	runtimecontracts "github.com/division-sh/swarm/internal/runtime/contracts"
 	runtimepinrouting "github.com/division-sh/swarm/internal/runtime/core/pinrouting"
+	runtimecorrelation "github.com/division-sh/swarm/internal/runtime/correlation"
 	"github.com/division-sh/swarm/internal/runtime/executionmode"
 	runtimepipelineobligation "github.com/division-sh/swarm/internal/runtime/pipelineobligation"
 
@@ -26,6 +27,7 @@ import (
 	eventrecordsqlite "github.com/division-sh/swarm/internal/store/internal/backend/eventrecord/sqlite"
 	eventtestsql "github.com/division-sh/swarm/internal/store/testsql"
 	authoractivityfixture "github.com/division-sh/swarm/internal/store/testutil/authoractivityfixture"
+	"github.com/division-sh/swarm/internal/testutil/sourceartifactfixture"
 	"github.com/google/uuid"
 )
 
@@ -50,6 +52,9 @@ func TestEventRecordExactPersistenceParity(t *testing.T) {
 			store := fixture.store.(eventRecordContractStore)
 			ctx := testAuthorActivityContext()
 			ctx = originalStoreFixtureContext(t, ctx, fixture.store)
+			rooted, _ := sourceartifactfixture.Rooted(t, "fixture", sourceartifactfixture.Artifact())
+			sourceartifactfixture.RequireArtifact(t, ctx, fixture.store.(sourceartifactfixture.Writer), rooted.Artifact())
+			ctx = runtimecorrelation.WithRootAdmission(ctx, rooted.Admission())
 			now := time.Date(2026, 7, 18, 16, 0, 0, 123456000, time.UTC)
 			runID := uuid.NewString()
 			root := eventtest.RunCreatingRootIngress(uuid.NewString(), "contract.root", "gateway", "root-task", []byte(`{"root":true}`), 1, runID, "", events.EventEnvelope{}, now)
@@ -99,6 +104,9 @@ func TestPreparedPublishOutboxReadbackPreservesExactPayloadBytesParity(t *testin
 			store := fixture.store.(eventRecordContractStore)
 			ctx := testAuthorActivityContext()
 			ctx = originalStoreFixtureContext(t, ctx, fixture.store)
+			rooted, _ := sourceartifactfixture.Rooted(t, "fixture", sourceartifactfixture.Artifact())
+			sourceartifactfixture.RequireArtifact(t, ctx, fixture.store.(sourceartifactfixture.Writer), rooted.Artifact())
+			ctx = runtimecorrelation.WithRootAdmission(ctx, rooted.Admission())
 			payload := []byte("{\n  \"numeric\": 1.0, \"first\": true\n}")
 			event := eventtest.RunCreatingRootIngress(
 				uuid.NewString(), "outbox.payload_bytes", "gateway", "", payload, 0,
@@ -152,6 +160,9 @@ func TestEventRoutingSourceRoundTripParity(t *testing.T) {
 			store := fixture.store.(eventRecordContractStore)
 			ctx := testAuthorActivityContext()
 			ctx = originalStoreFixtureContext(t, ctx, fixture.store)
+			rooted, _ := sourceartifactfixture.Rooted(t, "fixture", sourceartifactfixture.Artifact())
+			sourceartifactfixture.RequireArtifact(t, ctx, fixture.store.(sourceartifactfixture.Writer), rooted.Artifact())
+			ctx = runtimecorrelation.WithRootAdmission(ctx, rooted.Admission())
 			now := time.Date(2026, 7, 18, 16, 30, 0, 0, time.UTC)
 			for _, source := range routingSourceRoundTripFixtures(t) {
 				t.Run(source.Kind().StorageCode(), func(t *testing.T) {
@@ -193,6 +204,9 @@ func TestW2CompiledRouteClaimPersistenceRestartAndGraphMutationParity(t *testing
 			fixture := backend.open(t)
 			ctx := testAuthorActivityContext()
 			ctx = originalStoreFixtureContext(t, ctx, fixture.store)
+			rooted, _ := sourceartifactfixture.Rooted(t, "fixture", sourceartifactfixture.Artifact())
+			sourceartifactfixture.RequireArtifact(t, ctx, fixture.store.(sourceartifactfixture.Writer), rooted.Artifact())
+			ctx = runtimecorrelation.WithRootAdmission(ctx, rooted.Admission())
 			event := eventtest.RunCreatingRootIngress(
 				uuid.NewString(), "routing.claim.roundtrip", "gateway", "", []byte(`{}`), 0,
 				uuid.NewString(), "", events.EventEnvelope{}, time.Date(2026, 7, 18, 16, 45, 0, 0, time.UTC),
@@ -376,6 +390,9 @@ func TestEventRecordEveryFieldDuplicateParity(t *testing.T) {
 			store := fixture.store.(semanticEventFixtureStore)
 			ctx := testAuthorActivityContext()
 			ctx = originalStoreFixtureContext(t, ctx, fixture.store)
+			rooted, _ := sourceartifactfixture.Rooted(t, "fixture", sourceartifactfixture.Artifact())
+			sourceartifactfixture.RequireArtifact(t, ctx, fixture.store.(sourceartifactfixture.Writer), rooted.Artifact())
+			ctx = runtimecorrelation.WithRootAdmission(ctx, rooted.Admission())
 			outcome, err := commitSemanticEventFixtureOutcome(ctx, store, baseEvent, nil, "direct")
 			if err != nil || outcome != runtimebus.EventAppendInserted {
 				t.Fatalf("initial commit: outcome=%v err=%v", outcome, err)
@@ -439,6 +456,9 @@ func TestEventRecordPayloadByteIdentityParity(t *testing.T) {
 					store := fixture.store.(semanticEventFixtureStore)
 					ctx := testAuthorActivityContext()
 					ctx = originalStoreFixtureContext(t, ctx, fixture.store)
+					rooted, _ := sourceartifactfixture.Rooted(t, "fixture", sourceartifactfixture.Artifact())
+					sourceartifactfixture.RequireArtifact(t, ctx, fixture.store.(sourceartifactfixture.Writer), rooted.Artifact())
+					ctx = runtimecorrelation.WithRootAdmission(ctx, rooted.Admission())
 					now := time.Date(2026, 8, 13, 18, 0, 0, 0, time.UTC)
 					event := eventtest.RunCreatingRootIngress(
 						uuid.NewString(), "payload.bytes", "gateway", "", tc.original, 0,
@@ -597,6 +617,9 @@ func TestPostgresEventRecordReadbackNormalizesSessionTimezone(t *testing.T) {
 	store := fixture.store.(semanticEventFixtureStore)
 	ctx := testAuthorActivityContext()
 	ctx = originalStoreFixtureContext(t, ctx, fixture.store)
+	rooted, _ := sourceartifactfixture.Rooted(t, "fixture", sourceartifactfixture.Artifact())
+	sourceartifactfixture.RequireArtifact(t, ctx, fixture.store.(sourceartifactfixture.Writer), rooted.Artifact())
+	ctx = runtimecorrelation.WithRootAdmission(ctx, rooted.Admission())
 	createdAt := time.Date(2026, 7, 18, 18, 45, 12, 123456000, time.UTC)
 	event := eventtest.RunCreatingRootIngress(
 		uuid.NewString(), "timezone.contract", "gateway", "timezone-task", []byte(`{"timezone":true}`),

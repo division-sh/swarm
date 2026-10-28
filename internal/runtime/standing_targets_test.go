@@ -1,25 +1,15 @@
 package runtime
 
 import (
-	"crypto/hmac"
-	"crypto/sha256"
-	"encoding/hex"
-	"fmt"
-	"net/http"
-	"net/http/httptest"
-	"os"
-	"path/filepath"
-	"strings"
 	"testing"
 
 	"github.com/division-sh/swarm/internal/packadmission"
-	"github.com/division-sh/swarm/internal/providertriggers"
-	runtimebus "github.com/division-sh/swarm/internal/runtime/bus"
+	"github.com/division-sh/swarm/internal/packmodel"
 	runtimecontracts "github.com/division-sh/swarm/internal/runtime/contracts"
-	"github.com/division-sh/swarm/internal/runtime/executionposture"
 	"github.com/division-sh/swarm/internal/runtime/semanticview"
 	"github.com/division-sh/swarm/internal/runtime/testfixtures/canonicalrouting"
-	"github.com/division-sh/swarm/internal/runtime/testfixtures/singletoncoordinatorpilot"
+	"github.com/division-sh/swarm/internal/testutil/packfixture"
+	"github.com/division-sh/swarm/internal/testutil/sourceartifactfixture"
 )
 
 func TestDeriveStandingTargets_OrdinaryRootInputCreatesNoStandingTarget(t *testing.T) {
@@ -32,7 +22,7 @@ func TestDeriveStandingTargets_OrdinaryRootInputCreatesNoStandingTarget(t *testi
 	if err != nil {
 		t.Fatalf("load root ingress artifact: %v", err)
 	}
-	declarations, err := ResolveStandingTargetDeclarations(semanticview.Wrap(bundle), nil)
+	declarations, err := ResolveStandingTargetDeclarations(semanticview.Wrap(bundle), nil, nil)
 	if err != nil {
 		t.Fatalf("ResolveStandingTargetDeclarations: %v", err)
 	}
@@ -41,184 +31,29 @@ func TestDeriveStandingTargets_OrdinaryRootInputCreatesNoStandingTarget(t *testi
 	}
 }
 
-func TestResolveStandingTargetDeclarationsConsumesRootConstructor(t *testing.T) {
-	for _, tc := range []struct {
-		name, schema, fields, handler, refusal string
-	}{
-		{name: "keyless root"},
-		{name: "keyed root", schema: "instance: tenant\n", fields: "  tenant: text\n"},
-		{name: "unassigned initial read", fields: "  brief: text\n", handler: "      guard: {check: entity.brief != ''}\n", refusal: "standing constructor is ineligible"},
-	} {
-		t.Run(tc.name, func(t *testing.T) {
-			root := t.TempDir()
-			documents := map[string]string{
-				"schema.yaml": "name: standing-root\nstages: []\n" + constructorIngressSchema + tc.schema,
-				"events.yaml": "inbound.constructor:\n",
-				"nodes.yaml":  constructorIngressNodes,
-			}
-			if tc.fields != "" {
-				documents["entities.yaml"] = "root_state:\n" + tc.fields
-			}
-			if tc.handler != "" {
-				documents["events.yaml"] += "work:\n"
-				documents["nodes.yaml"] += "reader:\n  execution_type: system_node\n  subscribes_to: [work]\n  event_handlers:\n    work:\n" + tc.handler
-			}
-			for name, contents := range documents {
-				if err := os.WriteFile(filepath.Join(root, name), []byte(contents), 0600); err != nil {
-					t.Fatal(err)
-				}
-			}
-			source := loadWorkflowValidationSourceAt(t, root)
-			bundle, _ := semanticview.Bundle(source)
-			repo := canonicalrouting.RepoRoot(t)
-			rebuilt, err := runtimecontracts.LoadWorkflowContractBundleFromArtifact(repo, bundle.SourceArtifact, runtimecontracts.DefaultPlatformSpecFile(repo), runtimecontracts.WorkflowContractLoadOptions{})
-			if err != nil {
-				t.Fatal(err)
-			}
-			catalog, err := providertriggers.NewCatalogSnapshot()
-			if err != nil {
-				t.Fatal(err)
-			}
-			for _, admitted := range []semanticview.Source{source, semanticview.Wrap(rebuilt)} {
-				declarations, err := ResolveStandingTargetDeclarations(admitted, catalog)
-				if tc.refusal != "" {
-					if err == nil || !strings.Contains(err.Error(), tc.refusal) || len(declarations) != 0 {
-						t.Fatalf("standing refusal=%q declarations=%#v err=%v", tc.refusal, declarations, err)
-					}
-				} else if err != nil || len(declarations) != 1 || declarations[0].FlowPath != "." {
-					t.Fatalf("standing root constructor declarations=%#v err=%v", declarations, err)
-				}
-			}
-		})
-	}
-}
-
-func TestA9DeclarationAncestryMayBeKeyed(t *testing.T) {
-	for _, keyed := range []string{".", "parent"} {
-		t.Run(keyed, func(t *testing.T) {
-			root := t.TempDir()
-			documents := map[string]string{
-				"schema.yaml":                "name: root\n",
-				"parent/schema.yaml":         "name: parent\n",
-				"parent/service/schema.yaml": "name: service\nstages: []\n" + constructorIngressSchema,
-				"parent/service/events.yaml": "inbound.constructor:\n",
-				"parent/service/nodes.yaml":  constructorIngressNodes,
-			}
-			documents[filepath.Join(keyed, "schema.yaml")] += "instance: tenant\n"
-			documents[filepath.Join(keyed, "entities.yaml")] = "owner:\n  tenant: text\n"
-			for name, contents := range documents {
-				path := filepath.Join(root, name)
-				if err := os.MkdirAll(filepath.Dir(path), 0700); err != nil {
-					t.Fatal(err)
-				}
-				if err := os.WriteFile(path, []byte(contents), 0600); err != nil {
-					t.Fatal(err)
-				}
-			}
-			source := loadWorkflowValidationSourceAt(t, root)
-			bundle, _ := semanticview.Bundle(source)
-			repo := canonicalrouting.RepoRoot(t)
-			rebuilt, err := runtimecontracts.LoadWorkflowContractBundleFromArtifact(repo, bundle.SourceArtifact, runtimecontracts.DefaultPlatformSpecFile(repo), runtimecontracts.WorkflowContractLoadOptions{})
-			if err != nil {
-				t.Fatal(err)
-			}
-			catalog, err := providertriggers.NewCatalogSnapshot()
-			if err != nil {
-				t.Fatal(err)
-			}
-			for _, admitted := range []semanticview.Source{source, semanticview.Wrap(rebuilt)} {
-				declarations, err := ResolveStandingTargetDeclarations(admitted, catalog)
-				if err != nil || len(declarations) != 1 || declarations[0].FlowPath != "parent/service" || len(declarations[0].Ingress) != 1 || !declarations[0].Ingress[0].AdmissionPlan.Valid() {
-					t.Fatalf("keyed ancestry %s erased the declaring binding: declarations=%+v err=%v", keyed, declarations, err)
-				}
-			}
-		})
-	}
-}
-
-const constructorIngressSchema = `pins:
-  inputs: [inbound.constructor]
-ingress:
-  alias: constructor
-  providers:
-    - provider: partner
-      admission:
-        kind: raw
-        acknowledge: unsigned_webhook
-        payload: json
-        event: inbound.constructor
-        authentication: {kind: none}
-        delivery_id: {source: body_sha256}
-`
-
-const constructorIngressNodes = `receiver:
-  execution_type: system_node
-  subscribes_to: [inbound.constructor]
-  event_handlers:
-    inbound.constructor:
-      guard: {check: true}
-`
-
-func TestResolveStandingTargetDeclarationsRequiresExactProviderPin(t *testing.T) {
-	source, registry := standingTelegramDeclarationSource(t, "inbound.telegram")
-	declarations, err := ResolveStandingTargetDeclarations(source, registry)
-	if err != nil {
-		t.Fatalf("ResolveStandingTargetDeclarations: %v", err)
-	}
-	if len(declarations) != 1 || declarations[0].Alias != "chat" || len(declarations[0].Ingress) != 1 {
-		t.Fatalf("declarations = %#v, want one chat/telegram standing declaration", declarations)
-	}
-
-	missingPin, registry := standingTelegramDeclarationSource(t, "lead.observed")
-	if _, err := ResolveStandingTargetDeclarations(missingPin, registry); err == nil || !strings.Contains(err.Error(), `add an exact production input pin for "inbound.telegram"`) {
-		t.Fatalf("missing pin error = %v, want exact inbound.telegram teaching error", err)
-	}
-}
-
-func TestResolveStandingTargetDeclarationsConsumesCanonicalInputAssociation(t *testing.T) {
-	source, registry := standingTelegramDeclarationSource(t, "inbound.telegram")
-	bundle, _ := semanticview.Bundle(source)
-	schema := bundle.FlowSchemas["coordinator"]
-	schema.Pins.Inputs.EventPins[0].Event = "lead.observed"
-	bundle.FlowSchemas["coordinator"] = schema
-	if err := runtimecontracts.CompileWorkflowSemantics(bundle); err != nil {
-		t.Fatalf("compile changed input semantics: %v", err)
-	}
-	_, err := ResolveStandingTargetDeclarations(source, registry)
-	if err == nil || !strings.Contains(err.Error(), `add an exact production input pin for "inbound.telegram"`) {
-		t.Fatalf("canonical input-association error = %v", err)
-	}
-}
-
-func TestResolveStandingTargetDeclarationsRejectsDuplicateExactInputIdentity(t *testing.T) {
-	source, _ := standingTelegramDeclarationSource(t, "inbound.telegram")
-	bundle, _ := semanticview.Bundle(source)
-	schema := bundle.FlowSchemas["coordinator"]
-	schema.Pins.Inputs.EventPins = append(schema.Pins.Inputs.EventPins, schema.Pins.Inputs.EventPins[0])
-	bundle.FlowSchemas["coordinator"] = schema
-	bundle.FlowTree.ByID["coordinator"].Schema = schema
-	if err := runtimecontracts.CompileWorkflowSemantics(bundle); err == nil || !strings.Contains(err.Error(), "declared more than once") {
-		t.Fatalf("duplicate exact input compile error = %v, want fail-closed", err)
-	}
-}
-
-func TestResolveStandingTargetDeclarationsDerivesIngressPresence(t *testing.T) {
-	source, registry := standingTelegramDeclarationSource(t, "inbound.telegram")
-	declarations, err := ResolveStandingTargetDeclarations(source, registry)
-	if err != nil || len(declarations) != 1 || len(declarations[0].Ingress) != 1 {
-		t.Fatalf("genuine ingress did not supply a declaration: %+v err=%v", declarations, err)
-	}
-}
-
 func TestA9NoProducerCannotRetain(t *testing.T) {
-	source, registry := standingTelegramDeclarationSource(t, "inbound.telegram")
-	bundle, _ := semanticview.Bundle(source)
-	mutateStandingCoordinatorSchema(t, bundle, func(schema *runtimecontracts.FlowSchemaDocument) { schema.Ingress = nil })
+	bundle, rooted, _ := loadS1EffectiveProviderScope(t, map[string][]byte{
+		"manifest.yaml": []byte("version: 1.0.0\nplatform_version: '*'\n"),
+		"schema.yaml":   []byte("stages: []\n"),
+	})
+	source := semanticview.Wrap(bundle)
+	providers, err := packadmission.AdmitProviderSource(rooted, bundle.Platform)
+	if err != nil {
+		t.Fatal(err)
+	}
+	scope, err := providers.Scope(".")
+	if err != nil {
+		t.Fatal(err)
+	}
+	registry, err := scope.TriggerCatalog()
+	if err != nil {
+		t.Fatal(err)
+	}
 	rt := &Runtime{Options: RuntimeOptions{
 		WorkflowModule: semanticOnlyWorkflowRuntime{source: source}, ProviderTriggerCatalog: registry,
-		SourceArtifactFact: testSourceArtifactFact(t, runtimeContextTestHashA), EnableDeclaredClockBinding: true,
+		SourceArtifactFact: sourceartifactfixture.FactFor(rooted.Artifact()), EnableDeclaredClockBinding: true,
 	}}
-	declarations, err := ResolveStandingTargetDeclarations(source, registry)
+	declarations, err := ResolveStandingTargetDeclarations(source, registry, nil)
 	if err != nil || len(declarations) != 0 {
 		t.Fatalf("source without a producer declared a standing service: %+v err=%v", declarations, err)
 	}
@@ -228,202 +63,74 @@ func TestA9NoProducerCannotRetain(t *testing.T) {
 	}
 }
 
-func TestCompileStandingIngressAliasRejectsUnreachableAlias(t *testing.T) {
-	source, _ := standingTelegramDeclarationSource(t, "inbound.telegram")
-	bundle, _ := semanticview.Bundle(source)
-	mutateStandingCoordinatorSchema(t, bundle, func(schema *runtimecontracts.FlowSchemaDocument) {
-		alias := "chat/support"
-		schema.Ingress.Alias = &alias
-	})
-	err := runtimecontracts.CompileWorkflowSemantics(bundle)
-	if err == nil || !strings.Contains(err.Error(), "one URL-safe path segment") || !strings.Contains(err.Error(), "[A-Za-z0-9][A-Za-z0-9._-]*") {
-		t.Fatalf("multi-segment alias error = %v", err)
-	}
-}
-
-func TestStandingIngressAdmissionOmissionIsPackRequired(t *testing.T) {
-	source, _ := standingTelegramDeclarationSource(t, "inbound.partner")
-	bundle, _ := semanticview.Bundle(source)
-	mutateStandingCoordinatorSchema(t, bundle, func(schema *runtimecontracts.FlowSchemaDocument) {
-		binding := &schema.Ingress.Providers[0]
-		binding.Provider = "partner"
-		binding.SigningSecret = ""
-		binding.Admission = runtimecontracts.ProjectFlowIngressAdmission{}
-	})
-	emptyCatalog, err := providertriggers.NewCatalogSnapshot()
-	if err != nil {
-		t.Fatal(err)
-	}
-	_, err = ResolveStandingTargetDeclarations(source, emptyCatalog)
-	if err == nil || !strings.Contains(err.Error(), `provider "partner" is pack-required`) || !strings.Contains(err.Error(), "admission.kind: raw") {
-		t.Fatalf("omitted admission error = %v", err)
-	}
-}
-
-func TestValidateWorkflowContractSurfaceWarnsForUnacknowledgedUnsignedRawAdmission(t *testing.T) {
-	for _, tc := range []struct {
-		name        string
-		acknowledge string
-		wantWarning bool
-	}{
-		{name: "warning teaches acknowledgement", wantWarning: true},
-		{name: "structured acknowledgement suppresses warning", acknowledge: providertriggers.UnsignedWebhookAcknowledgement},
-	} {
-		t.Run(tc.name, func(t *testing.T) {
-			source, _ := standingTelegramDeclarationSource(t, "inbound.partner")
-			bundle, _ := semanticview.Bundle(source)
-			mutateStandingCoordinatorSchema(t, bundle, func(schema *runtimecontracts.FlowSchemaDocument) {
-				binding := &schema.Ingress.Providers[0]
-				binding.Provider = "partner"
-				binding.SigningSecret = ""
-				binding.Admission = runtimecontracts.ProjectFlowIngressAdmission{
-					Kind: "raw", Acknowledge: tc.acknowledge, Event: "inbound.partner", Payload: "json",
-					Authentication: &runtimecontracts.ProjectFlowIngressAuthentication{Kind: "none"},
-					DeliveryID:     &runtimecontracts.ProjectFlowIngressDeliveryID{Source: "json_path", JSONPath: "$.id"},
-				}
-			})
-			emptyCatalog, err := providertriggers.NewCatalogSnapshot()
-			if err != nil {
-				t.Fatal(err)
-			}
-			declarations, err := ResolveStandingTargetDeclarations(source, emptyCatalog)
-			if err != nil {
-				t.Fatalf("ResolveStandingTargetDeclarations: %v", err)
-			}
-			warnings := unsignedRawAdmissionFindings(declarations)
-			found := false
-			for _, warning := range warnings {
-				if warning.CheckID != "inbound_unsigned_webhook" {
-					continue
-				}
-				found = true
-				if !strings.Contains(warning.Message, "anyone who learns") || !strings.Contains(warning.Remediation, "admission.acknowledge: unsigned_webhook") {
-					t.Fatalf("unsigned warning = %#v", warning)
-				}
-			}
-			if found != tc.wantWarning {
-				t.Fatalf("unsigned warning found=%t, want %t: %#v", found, tc.wantWarning, warnings)
-			}
-			bundleHash := "bundle-v2:sha256:" + strings.Repeat("c", 64)
-			subject, err := declarations[0].Ingress[0].AdmissionPlan.EffectiveCapabilitySubject(providertriggers.EffectiveSubjectRequest{BundleHash: bundleHash, FlowPath: declarations[0].FlowPath, Alias: declarations[0].Alias})
-			if err != nil {
-				t.Fatal(err)
-			}
-			if subject.TriggerAdmission == nil || subject.TriggerAdmission.RequestAuthentication != "UNAUTHENTICATED" || len(subject.Requirements) != 0 {
-				t.Fatalf("effective unsigned subject = %#v", subject)
-			}
-		})
-	}
-}
-
 func TestRuntimeContextManagerLookupIngressDistinguishesAliasAndProvider(t *testing.T) {
-	source, catalog := standingTelegramDeclarationSource(t, "inbound.telegram")
-	hash := "bundle-v2:sha256:" + strings.Repeat("a", 64)
-	workOwner := runtimeTestOccurrence(t, hash)
-	bus, err := newRuntimeTestEventBusWithOptions(t, nil, runtimebus.EventBusOptions{WorkOwner: workOwner})
-	if err != nil {
-		t.Fatalf("NewEventBus: %v", err)
+	members := map[string][]byte{
+		"manifest.yaml":             []byte("version: 1.0.0\nplatform_version: '*'\n"),
+		"schema.yaml":               []byte("stages: []\n"),
+		"coordinator/manifest.yaml": []byte("version: 1.0.0\nplatform_version: '*'\n"),
+		"coordinator/schema.yaml":   []byte("stages: []\npins: {inputs: [inbound.telegram.raw]}\n"),
 	}
-	plan, err := catalog.CompileAdmission(providertriggers.CompileAdmissionRequest{Alias: "chat", Provider: "telegram", SigningSecret: "webhook_signing.telegram"})
+	for _, entry := range packfixture.EmbeddedInventory(t).Entries() {
+		if entry.ID() != "telegram" {
+			continue
+		}
+		members["coordinator/telegram/manifest.yaml"] = entry.ManifestBody()
+		for _, role := range []packmodel.BodyRole{packmodel.BodyTrigger, packmodel.BodyConnector, packmodel.BodyChannel} {
+			if body, present := entry.Provider().Body(role); present {
+				members["coordinator/telegram/"+role.FileName()] = body.Bytes()
+			}
+		}
+		break
+	}
+	if members["coordinator/telegram/manifest.yaml"] == nil {
+		t.Fatal("embedded Telegram provider is unavailable")
+	}
+	captured, rooted, _ := loadS1EffectiveProviderScope(t, members)
+	providers, err := packadmission.AdmitProviderSource(rooted, captured.Platform)
 	if err != nil {
 		t.Fatal(err)
 	}
-	contextDef := BundleContext{
-		SourceArtifactFact: testSourceArtifactFact(t, hash),
-		Source:             source,
-		Runtime:            &Runtime{Bus: bus, workOccurrence: workOwner},
-		WorkOwner:          workOwner,
-		StandingTargets: []StandingTarget{{
-			BundleHash: hash, FlowPath: "coordinator", Alias: "chat", Provider: "telegram",
-			RunID: "run", SigningSecret: "webhook_signing.telegram",
-			AdmissionPlan: plan,
-		}},
+	scope, err := providers.Scope("coordinator")
+	if err != nil {
+		t.Fatal(err)
 	}
+	catalog, err := scope.TriggerCatalog()
+	if err != nil {
+		t.Fatal(err)
+	}
+	contextDef := rootedContextForSource(t, semanticview.Wrap(captured), rooted)
+	contextDef.ProviderTriggerCatalog = catalog
 	applyRuntimeAdmissionCatalog(t, &contextDef, catalog)
+	hash := contextDef.BundleHash()
+	alias, present := captured.FlowIngressAlias("coordinator")
+	if !present {
+		t.Fatal("captured coordinator has no compiled directory webhook alias")
+	}
+	declarations, err := ResolveStandingTargetDeclarations(contextDef.Source, catalog, nil)
+	if err != nil || len(declarations) != 1 {
+		t.Fatalf("captured standing declarations: %+v, %v", declarations, err)
+	}
+	declaration := declarations[0]
+	if declaration.FlowPath != "coordinator" || declaration.Alias != alias || len(declaration.Ingress) != 1 || declaration.Ingress[0].Provider != "telegram" {
+		t.Fatalf("captured coordinator/Telegram declaration: %+v", declaration)
+	}
+	binding := declaration.Ingress[0]
+	contextDef.StandingTargets = []StandingTarget{{
+		BundleHash: hash, FlowPath: "coordinator", Alias: declaration.Alias, Provider: "telegram",
+		RunID: "run", SigningSecret: binding.SigningSecret,
+		SourcePath: declaration.SourcePath, AdmissionPlan: binding.AdmissionPlan,
+	}}
+	freezeTestStandingCredentialAdmission(t, contextDef, identityInboundCredentialStore{})
 	manager, err := newTestRuntimeContextManager(t, nil, contextDef)
 	if err != nil {
 		t.Fatalf("NewRuntimeContextManager: %v", err)
 	}
-	if lookup := manager.LookupIngress("chat", "telegram"); !lookup.Loaded() || lookup.Target.RunID != "run" {
+	if lookup := manager.LookupIngress(alias, "telegram"); !lookup.Loaded() || lookup.Target.RunID != "run" {
 		t.Fatalf("telegram lookup = %#v, want loaded standing target", lookup)
 	}
-	if lookup := manager.LookupIngress("chat", "github"); lookup.Found || !lookup.AliasFound {
+	if lookup := manager.LookupIngress(alias, "github"); lookup.Found || !lookup.AliasFound {
 		t.Fatalf("wrong-provider lookup = %#v, want alias found without provider target", lookup)
 	}
-}
-
-func TestInboundGatewayConsumesCompiledTelegramRouteWithoutReinterpretingStandingPins(t *testing.T) {
-	source, catalog := standingTelegramDeclarationSource(t, "lead.observed")
-	eventStore := &capturingInboundEventStore{}
-	bus, err := newInboundTestEventBus(t, eventStore, InboundTarget{FlowPath: "coordinator", RunID: "41000000-0000-0000-0000-000000000001"})
-	if err != nil {
-		t.Fatalf("NewEventBus: %v", err)
-	}
-	store := &recordingInboundStore{inserted: true}
-	gateway := newTestInboundGateway(t, bus, nil, nil, store)
-	req := httptest.NewRequest(http.MethodPost, "/webhooks/chat/telegram", strings.NewReader(`{"update_id":124,"message":{"chat":{"id":42}}}`))
-	req.Header.Set("X-Telegram-Bot-Api-Secret-Token", "telegram-secret")
-	rec := httptest.NewRecorder()
-	plan, err := catalog.CompileAdmission(providertriggers.CompileAdmissionRequest{Alias: "chat", Provider: "telegram", SigningSecret: "telegram-secret"})
-	if err != nil {
-		t.Fatal(err)
-	}
-	gateway.HandleResolvedWebhook(rec, req, InboundTarget{
-		BundleHash: inboundTestBusBundleHash(t, bus), FlowPath: "coordinator",
-
-		RunID: "41000000-0000-0000-0000-000000000001",
-		Alias: "chat", Provider: "telegram",
-		SigningSecret: "telegram-secret",
-		AdmissionPlan: plan,
-	}, source)
-	if rec.Code != http.StatusAccepted {
-		t.Fatalf("response = %d %q, want compiled-plan acceptance", rec.Code, rec.Body.String())
-	}
-	if !eventStore.recorded || len(eventStore.events) != 1 {
-		t.Fatalf("compiled mapped event persisted marker=%v events=%d", eventStore.recorded, len(eventStore.events))
-	}
-}
-
-func TestInboundGatewayConsumesCompiledGitHubRouteWithoutReinterpretingDynamicPins(t *testing.T) {
-	source, catalog := standingProviderDeclarationSource(t, "github", "inbound.github.raw.issues")
-	eventStore := &capturingInboundEventStore{}
-	bus, err := newInboundTestEventBus(t, eventStore, InboundTarget{FlowPath: "coordinator", RunID: "42000000-0000-0000-0000-000000000001"})
-	if err != nil {
-		t.Fatalf("NewEventBus: %v", err)
-	}
-	publicationStore := &recordingInboundStore{inserted: true, store: eventStore}
-	gateway := NewInboundGateway(bus, nil, nil, executionposture.Live, publicationStore)
-	gateway.SetCredentialAdmission(testInboundCredentialAdmission(t, identityInboundCredentialStore{}))
-	body := []byte(`{"action":"created","issue":{"number":7}}`)
-	mac := hmac.New(sha256.New, []byte("github-secret"))
-	_, _ = mac.Write(body)
-	req := httptest.NewRequest(http.MethodPost, "/webhooks/issues/github", strings.NewReader(string(body)))
-	req.Header.Set("X-Hub-Signature-256", "sha256="+hex.EncodeToString(mac.Sum(nil)))
-	req.Header.Set("X-GitHub-Delivery", "delivery-comment-1")
-	req.Header.Set("X-GitHub-Event", "issue_comment")
-	rec := httptest.NewRecorder()
-	plan, err := catalog.CompileAdmission(providertriggers.CompileAdmissionRequest{Alias: "issues", Provider: "github", SigningSecret: "github-secret"})
-	if err != nil {
-		t.Fatal(err)
-	}
-	gateway.HandleResolvedWebhook(rec, req, InboundTarget{
-		BundleHash: inboundTestBusBundleHash(t, bus), FlowPath: "coordinator",
-
-		RunID: "42000000-0000-0000-0000-000000000001",
-		Alias: "issues", Provider: "github",
-		SigningSecret: "github-secret",
-		AdmissionPlan: plan,
-	}, source)
-	if rec.Code != http.StatusAccepted {
-		t.Fatalf("response = %d %q, want compiled-plan acceptance", rec.Code, rec.Body.String())
-	}
-	if !eventStore.recorded || len(eventStore.events) != 1 {
-		t.Fatalf("compiled dynamic event persisted marker=%v events=%d", eventStore.recorded, len(eventStore.events))
-	}
-}
-
-func standingTelegramDeclarationSource(t testing.TB, inputEvent string) (semanticview.Source, *providertriggers.CatalogSnapshot) {
-	return standingProviderDeclarationSource(t, "telegram", inputEvent)
 }
 
 // Pure context-publication fixture; durable standing construction is proved
@@ -438,58 +145,4 @@ func bindStandingContextFixtureTargets(t testing.TB, source semanticview.Source,
 		bound[i].RunID = runID
 	}
 	return bound
-}
-
-func standingProviderDeclarationSource(t testing.TB, provider, inputEvent string) (semanticview.Source, *providertriggers.CatalogSnapshot) {
-	t.Helper()
-	alias := provider
-	if provider == "telegram" {
-		alias = "chat"
-	}
-	root := singletoncoordinatorpilot.Write(t, singletoncoordinatorpilot.Options{})
-	// This fixture's producer is the admitted provider, not the pilot's root connection.
-	if err := os.WriteFile(filepath.Join(root, "schema.yaml"), []byte("name: standing-provider-declaration\n"), 0600); err != nil {
-		t.Fatal(err)
-	}
-	standingYAML := fmt.Sprintf("name: coordinator\ningress:\n  alias: %s\n  providers:\n    - provider: %s\n      signing_secret: webhook_signing.%s", alias, provider, provider)
-	schemaPath := filepath.Join(root, "coordinator", "schema.yaml")
-	schemaBytes, err := os.ReadFile(schemaPath)
-	if err != nil {
-		t.Fatalf("read schema: %v", err)
-	}
-	schemaText := strings.Replace(string(schemaBytes), "name: coordinator", strings.TrimSpace(standingYAML), 1)
-	schemaText = strings.Replace(schemaText, "- lead.observed", "- "+inputEvent, 1)
-	if err := os.WriteFile(schemaPath, []byte(schemaText), 0o600); err != nil {
-		t.Fatalf("write schema: %v", err)
-	}
-	repoRoot := filepath.Join("..", "..")
-	bundle, err := runtimecontracts.LoadWorkflowContractBundleWithOptions(
-		repoRoot,
-		root,
-		runtimecontracts.DefaultPlatformSpecFile(repoRoot),
-		runtimecontracts.WorkflowContractLoadOptions{AdmitPackInventory: packadmission.AdmitInventory},
-	)
-	if err != nil {
-		t.Fatalf("LoadWorkflowContractBundleWithOverrides: %v", err)
-	}
-	projection, err := packadmission.FromBundle(bundle)
-	if err != nil {
-		t.Fatalf("load admitted pack projection: %v", err)
-	}
-	return semanticview.Wrap(bundle), projection.ProviderTriggers
-}
-
-func mutateStandingCoordinatorSchema(t testing.TB, bundle *runtimecontracts.WorkflowContractBundle, mutate func(*runtimecontracts.FlowSchemaDocument)) {
-	t.Helper()
-	schema, ok := bundle.FlowSchemas["coordinator"]
-	if !ok {
-		t.Fatal("fixture coordinator schema missing")
-	}
-	mutate(&schema)
-	bundle.FlowSchemas["coordinator"] = schema
-	view, ok := bundle.FlowViewByID("coordinator")
-	if !ok {
-		t.Fatal("fixture coordinator flow missing")
-	}
-	view.Schema = schema
 }

@@ -3,6 +3,7 @@ package runtime
 import (
 	"context"
 	"errors"
+	"fmt"
 	"path/filepath"
 	"strings"
 	"testing"
@@ -10,12 +11,14 @@ import (
 	"github.com/division-sh/swarm/internal/channelonboarding"
 	"github.com/division-sh/swarm/internal/operatorchannel"
 	"github.com/division-sh/swarm/internal/packadmission"
+	"github.com/division-sh/swarm/internal/packmodel"
 	"github.com/division-sh/swarm/internal/packs"
 	runtimecontracts "github.com/division-sh/swarm/internal/runtime/contracts"
 	runtimecredentials "github.com/division-sh/swarm/internal/runtime/credentials"
 	runtimerunlifecycle "github.com/division-sh/swarm/internal/runtime/runlifecycle"
 	"github.com/division-sh/swarm/internal/runtime/semanticview"
 	"github.com/division-sh/swarm/internal/testutil/packfixture"
+	"github.com/division-sh/swarm/internal/testutil/sourceartifactfixture"
 	"github.com/google/uuid"
 )
 
@@ -61,13 +64,79 @@ func TestStandingLearnedAuthorityCredentialMatrix(t *testing.T) {
 		for _, state := range []string{"current", "changed_value", "same_value_new_receipt", "deleted", "empty", "whitespace", "read_error", "other_role_invalid", "other_role_read_error", "preparing_after_reset", "duplicate_role", "missing_role", "owner_read_error", "healthy_same_service_sibling", "completed_activation_pending_reconnect", "competing_pending_owners", "after_boot_rotation", "after_boot_receipt", "after_boot_deletion", "after_boot_ABA"} {
 			t.Run(role+"/"+state, func(t *testing.T) {
 				ctx := context.Background()
-				source, catalog := standingTelegramDeclarationSource(t, "inbound.telegram")
-				bundle, _ := semanticview.Bundle(source)
-				packProjection, err := packadmission.FromBundle(bundle)
-				if err != nil {
-					t.Fatal("exact channel inventory", err)
+				members := map[string][]byte{
+					"manifest.yaml":             []byte("version: 1.0.0\nplatform_version: '*'\n"),
+					"schema.yaml":               []byte("stages: []\n"),
+					"coordinator/manifest.yaml": []byte("version: 1.0.0\nplatform_version: '*'\n"),
+					"coordinator/schema.yaml":   []byte("stages: []\npins: {inputs: [inbound.telegram.raw]}\n"),
 				}
-				plan := packfixture.ChannelPlanByID(t, packProjection.ChannelPlans, "provider.telegram.hitl_channel")
+				if state == "healthy_same_service_sibling" {
+					members["coordinator/schema.yaml"] = []byte("stages: []\npins: {inputs: [inbound.telegram.raw, inbound.partner.raw.issues]}\n")
+				}
+				for _, entry := range packfixture.EmbeddedInventory(t).Entries() {
+					directory := ""
+					switch entry.ID() {
+					case "telegram":
+						directory = "telegram"
+					case "github":
+						if state == "healthy_same_service_sibling" {
+							directory = "partner"
+						}
+					}
+					if directory == "" {
+						continue
+					}
+					members["coordinator/"+directory+"/manifest.yaml"] = entry.ManifestBody()
+					for _, role := range []packmodel.BodyRole{packmodel.BodyTrigger, packmodel.BodyConnector, packmodel.BodyChannel} {
+						if body, present := entry.Provider().Body(role); present {
+							members["coordinator/"+directory+"/"+role.FileName()] = body.Bytes()
+						}
+					}
+				}
+				bundle, rooted, _ := loadS1EffectiveProviderScope(t, members)
+				source := semanticview.Wrap(bundle)
+				fact := sourceartifactfixture.FactFor(rooted.Artifact())
+				providers, err := packadmission.AdmitProviderSource(rooted, bundle.Platform)
+				if err != nil {
+					t.Fatal(err)
+				}
+				scope, err := providers.Scope("coordinator")
+				if err != nil {
+					t.Fatal(err)
+				}
+				catalog, err := scope.TriggerCatalog()
+				if err != nil {
+					t.Fatal(err)
+				}
+				definition, present := scope.Provider("telegram")
+				if !present {
+					t.Fatal("captured Telegram provider is unavailable")
+				}
+				plan, present := definition.ChannelPlan()
+				if !present {
+					t.Fatal("captured Telegram channel plan is unavailable")
+				}
+				declarations, err := ResolveStandingTargetDeclarations(source, catalog, nil)
+				if err != nil || len(declarations) != 1 || declarations[0].FlowPath != "coordinator" {
+					t.Fatalf("captured coordinator declaration: %+v, %v", declarations, err)
+				}
+				declaration := declarations[0]
+				var telegramBinding, partnerBinding StandingIngressBinding
+				for _, binding := range declaration.Ingress {
+					switch binding.Provider {
+					case "telegram":
+						telegramBinding = binding
+					case "partner":
+						partnerBinding = binding
+					}
+				}
+				if telegramBinding.SigningSecret == "" || (state == "healthy_same_service_sibling" && partnerBinding.SigningSecret == "") {
+					t.Fatalf("captured provider signing roles: %+v", declaration.Ingress)
+				}
+				alias, present := bundle.FlowIngressAlias("coordinator")
+				if !present || alias != declaration.Alias {
+					t.Fatalf("captured coordinator alias: %q, %+v", alias, declaration)
+				}
 				identity, err := plan.InterfaceIdentity()
 				if err != nil {
 					t.Fatal(err)
@@ -90,9 +159,9 @@ func TestStandingLearnedAuthorityCredentialMatrix(t *testing.T) {
 				}
 				operation := channelonboarding.Operation{
 					OperationID: uuid.NewString(), Provider: "telegram", Interface: identity,
-					Phase: channelonboarding.PhaseAwaitingOperatorConfirmation, TargetSelector: "ingress:coordinator:telegram",
+					Phase: channelonboarding.PhaseAwaitingOperatorConfirmation, TargetSelector: "ingress:" + declaration.FlowPath + ":telegram",
 					Coordinate: channelonboarding.ChannelRuntimeContextCoordinate{
-						BundleHash: runtimeContextTestHashA, PackInventoryGeneration: bundle.PackInventory.Digest(), PlanGeneration: generation,
+						BundleHash: fact.BundleHash(), PackInventoryGeneration: bundle.PackInventory.Digest(), PlanGeneration: generation,
 					},
 				}
 				roles := []string{registration.ProviderCredentials()[0], registration.SigningCredential()}
@@ -135,17 +204,7 @@ func TestStandingLearnedAuthorityCredentialMatrix(t *testing.T) {
 						credentials = &standingRoleObservationErrorStore{FileStore: file, key: sibling.StoreKey, err: observationErr}
 					}
 					if state == "healthy_same_service_sibling" {
-						mutateStandingCoordinatorSchema(t, bundle, func(schema *runtimecontracts.FlowSchemaDocument) {
-							schema.Ingress.Providers = append(schema.Ingress.Providers, runtimecontracts.ProjectFlowIngressProvider{
-								Provider: "partner", SigningSecret: "webhook_signing.partner",
-								Admission: runtimecontracts.ProjectFlowIngressAdmission{
-									Kind: "raw", Event: "inbound.telegram", Payload: "json",
-									Authentication: &runtimecontracts.ProjectFlowIngressAuthentication{Kind: "hmac_sha256", Header: "X-Partner-Signature", Encoding: "hex"},
-									DeliveryID:     &runtimecontracts.ProjectFlowIngressDeliveryID{Source: "header", Header: "X-Partner-Delivery"},
-								},
-							})
-						})
-						if err := file.Set(ctx, "webhook_signing.partner", "independent-sibling-secret"); err != nil {
+						if err := file.Set(ctx, partnerBinding.SigningSecret, "independent-sibling-secret"); err != nil {
 							t.Fatal(err)
 						}
 					}
@@ -174,7 +233,7 @@ func TestStandingLearnedAuthorityCredentialMatrix(t *testing.T) {
 				case "preparing_after_reset":
 					wantRecovery = true
 					operation.Phase, operation.CredentialAdmissions = channelonboarding.PhasePreparing, nil
-					if err := file.Set(ctx, "webhook_signing.telegram", "unrelated-declaration-value"); err != nil {
+					if err := file.Set(ctx, telegramBinding.SigningSecret, "unrelated-declaration-value"); err != nil {
 						t.Fatal(err)
 					}
 				case "duplicate_role":
@@ -206,8 +265,8 @@ func TestStandingLearnedAuthorityCredentialMatrix(t *testing.T) {
 				}
 				store.operations = append(store.operations, operation)
 				rt := &Runtime{Options: RuntimeOptions{WorkflowModule: semanticOnlyWorkflowRuntime{source: source},
-					ProviderTriggerCatalog: catalog, ChannelPlans: packProjection.ChannelPlans, ProviderCredentials: credentials,
-					ChannelOnboardingStore: store, SourceArtifactFact: testSourceArtifactFact(t, runtimeContextTestHashA)}}
+					ProviderTriggerCatalog: catalog, ChannelPlans: []packs.SatisfactionPlan{plan}, ProviderCredentials: credentials,
+					ChannelOnboardingStore: store, SourceArtifactFact: fact}}
 				targets, err := rt.PlanStandingTargets()
 				if wantError {
 					if err == nil || len(targets) != 0 {
@@ -243,8 +302,8 @@ func TestStandingLearnedAuthorityCredentialMatrix(t *testing.T) {
 					if err != nil || len(candidates) != 1 || targets[0].Provider != "partner" {
 						t.Fatalf("independent sibling retention = %#v, %#v, %v", targets, candidates, err)
 					}
-					contextDef := testBundleContext(t, runtimeContextTestHashA, "inbound.telegram")
-					contextDef.Source, contextDef.ProviderTriggerCatalog, contextDef.StandingTargets = source, catalog, targets
+					contextDef := rootedContextForSource(t, source, rooted)
+					contextDef.ProviderTriggerCatalog = catalog
 					contextDef.StandingTargets = bindStandingContextFixtureTargets(t, source, targets, uuid.NewString())
 					contextDef.Runtime.Options.SourceArtifactFact = contextDef.SourceArtifactFact
 					contextDef.Runtime.standingCredentialAdmission = rt.standingCredentialAdmission
@@ -253,10 +312,10 @@ func TestStandingLearnedAuthorityCredentialMatrix(t *testing.T) {
 					if err != nil {
 						t.Fatal(err)
 					}
-					if lookup := manager.LookupIngress("chat", "telegram"); lookup.Loaded() {
+					if lookup := manager.LookupIngress(alias, "telegram"); lookup.Loaded() {
 						t.Fatal("stale binding executed through its sibling's active service")
 					}
-					if lookup := manager.LookupIngress("chat", "partner"); !lookup.Loaded() {
+					if lookup := manager.LookupIngress(alias, "partner"); !lookup.Loaded() {
 						t.Fatalf("healthy binding was suppressed: %#v", lookup)
 					}
 				}
@@ -319,19 +378,62 @@ func proveLearnedIngressMutationAfterBoot(t *testing.T, rt *Runtime, target Stan
 }
 
 func TestStandingRecoveryReadbackDoesNotObserveDeclarationFallback(t *testing.T) {
-	source, catalog := standingTelegramDeclarationSource(t, "inbound.telegram")
-	contextDef := testBundleContext(t, runtimeContextTestHashA, "inbound.telegram")
-	contextDef.Source, contextDef.ProviderTriggerCatalog = source, catalog
-	applyRuntimeAdmissionCatalog(t, &contextDef, catalog)
-	rt := contextDef.Runtime
-	declarations, err := ResolveStandingTargetDeclarations(source, catalog)
+	members := map[string][]byte{
+		"manifest.yaml":             []byte("version: 1.0.0\nplatform_version: '*'\n"),
+		"schema.yaml":               []byte("stages: []\n"),
+		"coordinator/manifest.yaml": []byte("version: 1.0.0\nplatform_version: '*'\n"),
+		"coordinator/schema.yaml":   []byte("stages: []\npins: {inputs: [inbound.telegram.raw]}\n"),
+	}
+	for _, entry := range packfixture.EmbeddedInventory(t).Entries() {
+		if entry.ID() != "telegram" {
+			continue
+		}
+		members["coordinator/telegram/manifest.yaml"] = entry.ManifestBody()
+		for _, role := range []packmodel.BodyRole{packmodel.BodyTrigger, packmodel.BodyConnector, packmodel.BodyChannel} {
+			if body, present := entry.Provider().Body(role); present {
+				members["coordinator/telegram/"+role.FileName()] = body.Bytes()
+			}
+		}
+		break
+	}
+	if members["coordinator/telegram/manifest.yaml"] == nil {
+		t.Fatal("embedded Telegram provider is unavailable")
+	}
+	bundle, rooted, _ := loadS1EffectiveProviderScope(t, members)
+	source := semanticview.Wrap(bundle)
+	providers, err := packadmission.AdmitProviderSource(rooted, bundle.Platform)
 	if err != nil {
 		t.Fatal(err)
+	}
+	scope, err := providers.Scope("coordinator")
+	if err != nil {
+		t.Fatal(err)
+	}
+	catalog, err := scope.TriggerCatalog()
+	if err != nil {
+		t.Fatal(err)
+	}
+	contextDef := rootedContextForSource(t, source, rooted)
+	contextDef.ProviderTriggerCatalog = catalog
+	applyRuntimeAdmissionCatalog(t, &contextDef, catalog)
+	rt := contextDef.Runtime
+	declarations, err := ResolveStandingTargetDeclarations(source, catalog, nil)
+	if err != nil || len(declarations) != 1 || declarations[0].FlowPath != "coordinator" {
+		t.Fatalf("captured coordinator declaration: %+v, %v", declarations, err)
+	}
+	var telegramBinding StandingIngressBinding
+	for _, binding := range declarations[0].Ingress {
+		if binding.Provider == "telegram" {
+			telegramBinding = binding
+		}
+	}
+	if telegramBinding.SigningSecret == "" {
+		t.Fatal("captured Telegram declaration has no signing credential role")
 	}
 	rt.Options.SourceArtifactFact = contextDef.SourceArtifactFact
 	rt.standingCredentialAdmission = &standingCredentialAdmission{
 		declarations: declarations,
-		bindings: map[string]standingBindingCredentials{"ingress:coordinator:telegram": {
+		bindings: map[string]standingBindingCredentials{"ingress:" + declarations[0].FlowPath + ":telegram": {
 			blockReason: runtimerunlifecycle.StandingBindingRecoveryRequired, operationID: "retained-operation", recoveryCommand: "swarm channel resume retained-operation --credential-stdin",
 		}},
 	}
@@ -343,7 +445,7 @@ func TestStandingRecoveryReadbackDoesNotObserveDeclarationFallback(t *testing.T)
 	if err != nil {
 		t.Fatal(err)
 	}
-	if err := file.Set(context.Background(), "webhook_signing.telegram", "unrelated-default"); err != nil {
+	if err := file.Set(context.Background(), telegramBinding.SigningSecret, "unrelated-default"); err != nil {
 		t.Fatal(err)
 	}
 	owner, err := runtimecredentials.NewSnapshotOwner(file)
@@ -373,13 +475,53 @@ func TestExplicitStandingAdmissionCannotRefreshSiblingAuthority(t *testing.T) {
 	for _, change := range []string{"rotated", "deleted", "provisioned_after_boot", "invalid", "read_error"} {
 		t.Run(change, func(t *testing.T) {
 			ctx := context.Background()
-			source, catalog := standingTelegramDeclarationSource(t, "inbound.telegram")
-			bundle, _ := semanticview.Bundle(source)
-			projection, err := packadmission.FromBundle(bundle)
+			members := map[string][]byte{
+				"manifest.yaml":             []byte("version: 1.0.0\nplatform_version: '*'\n"),
+				"schema.yaml":               []byte("stages: []\n"),
+				"coordinator/manifest.yaml": []byte("version: 1.0.0\nplatform_version: '*'\n"),
+				"coordinator/schema.yaml":   []byte("stages: []\npins: {inputs: [inbound.telegram.raw, inbound.partner.raw.issues]}\n"),
+			}
+			for _, entry := range packfixture.EmbeddedInventory(t).Entries() {
+				directory := ""
+				switch entry.ID() {
+				case "telegram":
+					directory = "telegram"
+				case "github":
+					directory = "partner"
+				}
+				if directory == "" {
+					continue
+				}
+				members["coordinator/"+directory+"/manifest.yaml"] = entry.ManifestBody()
+				for _, role := range []packmodel.BodyRole{packmodel.BodyTrigger, packmodel.BodyConnector, packmodel.BodyChannel} {
+					if body, present := entry.Provider().Body(role); present {
+						members["coordinator/"+directory+"/"+role.FileName()] = body.Bytes()
+					}
+				}
+			}
+			bundle, rooted, _ := loadS1EffectiveProviderScope(t, members)
+			source := semanticview.Wrap(bundle)
+			fact := sourceartifactfixture.FactFor(rooted.Artifact())
+			providers, err := packadmission.AdmitProviderSource(rooted, bundle.Platform)
 			if err != nil {
 				t.Fatal(err)
 			}
-			plan := projection.ChannelPlans[0]
+			scope, err := providers.Scope("coordinator")
+			if err != nil {
+				t.Fatal(err)
+			}
+			catalog, err := scope.TriggerCatalog()
+			if err != nil {
+				t.Fatal(err)
+			}
+			definition, present := scope.Provider("telegram")
+			if !present {
+				t.Fatal("captured Telegram provider is unavailable")
+			}
+			plan, present := definition.ChannelPlan()
+			if !present {
+				t.Fatal("captured Telegram channel plan is unavailable")
+			}
 			identity, err := plan.InterfaceIdentity()
 			if err != nil {
 				t.Fatal(err)
@@ -388,33 +530,52 @@ func TestExplicitStandingAdmissionCannotRefreshSiblingAuthority(t *testing.T) {
 			if err != nil {
 				t.Fatal(err)
 			}
-			profile, _ := plan.OnboardingProfile()
-			registration, _ := plan.Registration()
-			mutateStandingCoordinatorSchema(t, bundle, func(schema *runtimecontracts.FlowSchemaDocument) {
-				schema.Ingress.Providers = append(schema.Ingress.Providers, runtimecontracts.ProjectFlowIngressProvider{
-					Provider: "partner", SigningSecret: "webhook_signing.partner",
-					Admission: runtimecontracts.ProjectFlowIngressAdmission{Kind: "raw", Event: "inbound.telegram", Payload: "json",
-						Authentication: &runtimecontracts.ProjectFlowIngressAuthentication{Kind: "hmac_sha256", Header: "X-Partner-Signature", Encoding: "hex"},
-						DeliveryID:     &runtimecontracts.ProjectFlowIngressDeliveryID{Source: "header", Header: "X-Partner-Delivery"}},
-				})
-			})
+			profile, present := plan.OnboardingProfile()
+			if !present {
+				t.Fatal("captured Telegram onboarding profile is unavailable")
+			}
+			registration, present := plan.Registration()
+			if !present {
+				t.Fatal("captured Telegram registration is unavailable")
+			}
+			declarations, err := ResolveStandingTargetDeclarations(source, catalog, nil)
+			if err != nil || len(declarations) != 1 || declarations[0].FlowPath != "coordinator" {
+				t.Fatalf("captured coordinator declaration: %+v, %v", declarations, err)
+			}
+			declaration := declarations[0]
+			var telegramBinding, partnerBinding StandingIngressBinding
+			for _, binding := range declaration.Ingress {
+				switch binding.Provider {
+				case "telegram":
+					telegramBinding = binding
+				case "partner":
+					partnerBinding = binding
+				}
+			}
+			if telegramBinding.SigningSecret == "" || partnerBinding.SigningSecret == "" || telegramBinding.SigningSecret == partnerBinding.SigningSecret {
+				t.Fatalf("captured distinct provider signing roles: %+v", declaration.Ingress)
+			}
+			bundleIdentity, err := runtimecontracts.BootBundleIdentity(bundle)
+			if err != nil {
+				t.Fatal(err)
+			}
 			file, err := runtimecredentials.NewFileStore(filepath.Join(t.TempDir(), "credentials.json"))
 			if err != nil {
 				t.Fatal(err)
 			}
 			if change != "provisioned_after_boot" {
-				if err := file.Set(ctx, "webhook_signing.partner", "partner-original"); err != nil {
+				if err := file.Set(ctx, partnerBinding.SigningSecret, "partner-original"); err != nil {
 					t.Fatal(err)
 				}
 			}
 			operation := channelonboarding.Operation{OperationID: uuid.NewString(), Provider: "telegram", Interface: identity,
-				Phase: channelonboarding.PhasePreparing, Revision: 1, TargetSelector: "ingress:coordinator:telegram",
-				Coordinate: channelonboarding.ChannelRuntimeContextCoordinate{BundleHash: runtimeContextTestHashA, BundleIdentity: "test@1.0.0",
+				Phase: channelonboarding.PhasePreparing, Revision: 1, TargetSelector: "ingress:" + declaration.FlowPath + ":telegram",
+				Coordinate: channelonboarding.ChannelRuntimeContextCoordinate{BundleHash: fact.BundleHash(), BundleIdentity: fmt.Sprintf("%s@%s#%s", bundleIdentity.WorkflowName, bundleIdentity.WorkflowVersion, bundleIdentity.BundleHash),
 					PackInventoryGeneration: bundle.PackInventory.Digest(), PlanGeneration: generation, RuntimeInstanceID: uuid.NewString(), ContextPublicationGeneration: 1}}
 			store := &standingLearnedCredentialStore{operations: []channelonboarding.Operation{operation}}
 			rt := &Runtime{Options: RuntimeOptions{WorkflowModule: semanticOnlyWorkflowRuntime{source: source},
-				ProviderTriggerCatalog: catalog, ChannelPlans: projection.ChannelPlans, ProviderCredentials: file,
-				ChannelOnboardingStore: store, SourceArtifactFact: testSourceArtifactFact(t, runtimeContextTestHashA)}}
+				ProviderTriggerCatalog: catalog, ChannelPlans: []packs.SatisfactionPlan{plan}, ProviderCredentials: file,
+				ChannelOnboardingStore: store, SourceArtifactFact: fact}}
 			frozen, err := rt.standingCredentials(ctx)
 			if err != nil {
 				t.Fatal(err)
@@ -439,24 +600,20 @@ func TestExplicitStandingAdmissionCannotRefreshSiblingAuthority(t *testing.T) {
 			store.operations = []channelonboarding.Operation{operation}
 			switch change {
 			case "rotated", "provisioned_after_boot":
-				err = file.Set(ctx, "webhook_signing.partner", "unadmitted-partner")
+				err = file.Set(ctx, partnerBinding.SigningSecret, "unadmitted-partner")
 			case "deleted":
-				err = file.Delete(ctx, "webhook_signing.partner")
+				err = file.Delete(ctx, partnerBinding.SigningSecret)
 			case "invalid":
-				err = file.Set(ctx, "webhook_signing.partner", " \t\n")
+				err = file.Set(ctx, partnerBinding.SigningSecret, " \t\n")
 			case "read_error":
-				rt.Options.ProviderCredentials = &standingRoleObservationErrorStore{FileStore: file, key: "webhook_signing.partner", err: errors.New("sibling observation unavailable")}
+				rt.Options.ProviderCredentials = &standingRoleObservationErrorStore{FileStore: file, key: partnerBinding.SigningSecret, err: errors.New("sibling observation unavailable")}
 			}
-			if err != nil {
-				t.Fatal(err)
-			}
-			declarations, err := ResolveStandingTargetDeclarations(source, catalog)
 			if err != nil {
 				t.Fatal(err)
 			}
 			candidate := channelonboarding.Candidate{Provider: "telegram", Interface: identity, Plan: plan, Coordinate: operation.Coordinate,
 				Target: channelonboarding.CandidateTarget{Selector: operation.TargetSelector,
-					FlowPath: declarations[0].FlowPath, Alias: declarations[0].Alias, Provider: "telegram", AdmissionGeneration: declarations[0].Ingress[0].AdmissionPlan.Generation()},
+					FlowPath: declaration.FlowPath, Alias: declaration.Alias, Provider: "telegram", AdmissionGeneration: telegramBinding.AdmissionPlan.Generation()},
 				Posture: channelonboarding.ActivationPosture(profile.ActivationPosture()), Ceremony: channelonboarding.IdentityCeremony(profile.IdentityCeremony()),
 				ProviderCredentialRole: profile.ProviderCredential(), SigningCredentialRole: profile.SigningCredential(), ConfirmationOperation: profile.ConfirmationOperation()}
 			defer func() {

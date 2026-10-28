@@ -240,6 +240,114 @@ func TestRunScopedRuntimeControlPreservesExactRootRoutingSource(t *testing.T) {
 	if _, err := NewRunScopedRuntimeControlEvent(RunScopedRuntimeEventInput{Facts: facts, RunID: testRunID}); err == nil || !strings.Contains(err.Error(), "does not match typed routing source") {
 		t.Fatalf("mismatched root source error = %v, want exact-source rejection", err)
 	}
+
+	facts.Envelope.Source = RouteIdentity{}
+	facts.Producer.ID = "runtime.workflow_timer"
+	timer, err := NewRunScopedRuntimeControlEvent(RunScopedRuntimeEventInput{Facts: facts, RunID: testRunID})
+	if err != nil {
+		t.Fatal(err)
+	}
+	producer := EventPayloadProducer(timer, ".")
+	if !producer.IsAuthored() || producer.ValidateForEvent(timer) != nil {
+		t.Fatal("authored timer lost its exact root payload coordinate")
+	}
+	input := PayloadSchemaBindingInput{
+		BundleHash: "bundle-v2:sha256:" + strings.Repeat("0", 64), FlowID: ".", EventKey: string(timer.Type()),
+		SchemaDigest: "sha256:" + strings.Repeat("0", 64), SchemaClass: PayloadSchemaAuthored,
+	}
+	binding, err := NewPayloadSchemaBinding(input)
+	if err != nil {
+		t.Fatal(err)
+	}
+	restored, err := RestoreEventPayloadSchemaBinding(input, timer.AdmissionClass(), timer.Type(), timer.Producer())
+	if err != nil || !restored.Equal(binding) {
+		t.Fatalf("authored timer binding restore: %v", err)
+	}
+	admission, err := NewPayloadAdmission([]byte(`{}`), restored)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := ApplyPayloadAdmission(timer, admission); err != nil {
+		t.Fatalf("apply authored timer binding: %v", err)
+	}
+	for _, flow := range []string{"", "foreign", " . "} {
+		if err := EventPayloadProducer(timer, flow).ValidateForEvent(timer); err == nil {
+			t.Fatalf("timer admitted foreign flow %q", flow)
+		}
+	}
+	flowTimer := timer.Clone()
+	flowTimer.routingSource, err = NewFlowOwnedControlRoutingSource(RouteIdentity{FlowID: "producer", FlowInstance: "producer", EntityID: "entity-root"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	flowTimer.envelope.Source = flowTimer.routingSource.Route()
+	if err := EventPayloadProducer(flowTimer, "producer").ValidateForEvent(flowTimer); err != nil {
+		t.Fatalf("flow-owned timer payload coordinate: %v", err)
+	}
+	if _, err := ApplyPayloadAdmission(flowTimer, admission); err == nil {
+		t.Fatal("root timer binding admitted a child flow timer")
+	}
+	foreign := timer.Clone()
+	foreign.producer, _ = NewProducerIdentity(EventProducerPlatform, "runtime.other")
+	if _, err := ApplyPayloadAdmission(foreign, admission); err == nil {
+		t.Fatal("timer binding admitted a different runtime emitter")
+	}
+	stage := timer.Clone()
+	stage.eventType = "platform.stage_timer"
+	if !EventPayloadProducer(stage, ".").IsPlatform() {
+		t.Fatal("platform stage timer lost its catalog producer")
+	}
+	for _, flowID := range []string{".", "producer"} {
+		timeout := timer.Clone()
+		timeout.producer, _ = NewProducerIdentity(EventProducerPlatform, "agent-turn-timeout")
+		timeout.routingSource, err = NewFlowOwnedControlRoutingSource(RouteIdentity{FlowID: flowID, FlowInstance: "actor-instance", EntityID: "entity-root"})
+		if err != nil {
+			t.Fatal(err)
+		}
+		timeout.envelope.Source = timeout.routingSource.Route()
+		input.FlowID = flowID
+		binding, err := NewPayloadSchemaBinding(input)
+		if err != nil {
+			t.Fatal(err)
+		}
+		restored, err := RestoreEventPayloadSchemaBinding(input, timeout.AdmissionClass(), timeout.Type(), timeout.Producer())
+		if err != nil || !restored.Equal(binding) {
+			t.Fatalf("authored timeout binding restore: %v", err)
+		}
+		proof, err := NewPayloadAdmission([]byte(`{}`), restored)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if _, err := ApplyPayloadAdmission(timeout, proof); err != nil {
+			t.Fatalf("apply exact actor timeout binding: %v", err)
+		}
+		wrongProducer := timeout.Clone()
+		wrongProducer.producer, _ = NewProducerIdentity(EventProducerPlatform, "runtime.other")
+		if _, err := ApplyPayloadAdmission(wrongProducer, proof); err == nil {
+			t.Fatal("timeout binding admitted a different runtime emitter")
+		}
+		for _, class := range []EventAdmissionClass{EventAdmissionRuntimeDiagnostic, EventAdmissionChild, EventAdmissionSelectedForkReplay} {
+			wrongClass := timeout.Clone()
+			wrongClass.admissionClass = class
+			if _, err := ApplyPayloadAdmission(wrongClass, proof); err == nil {
+				t.Fatalf("timeout binding admitted a different event class %q", class)
+			}
+			if _, err := RestoreEventPayloadSchemaBinding(input, class, timeout.Type(), timeout.Producer()); err == nil {
+				t.Fatalf("timeout restore admitted a different event class %q", class)
+			}
+		}
+		for _, flow := range []string{"", "foreign", " . "} {
+			if err := EventPayloadProducer(timeout, flow).ValidateForEvent(timeout); err == nil {
+				t.Fatalf("timeout admitted foreign flow %q", flow)
+			}
+		}
+		for _, reserved := range []EventType{"platform.stage_timer", "platform.join_complete", "platform.join_timeout"} {
+			timeout.eventType = reserved
+			if _, err := ApplyPayloadAdmission(timeout, proof); err == nil {
+				t.Fatalf("actor timeout binding admitted reserved event %q", reserved)
+			}
+		}
+	}
 }
 
 func TestAdmitRuntimeControlEventTypeBindsFlowOwnedSourceExactly(t *testing.T) {
@@ -311,6 +419,45 @@ func TestReplayClassesRequireExactTypedLineage(t *testing.T) {
 	}
 	if event.ParentEventID() != "" {
 		t.Fatalf("selected-fork generic parent = %q, want absent", event.ParentEventID())
+	}
+	facts := validFacts()
+	facts.Type = "event.replayed"
+	facts.Producer = ProducerClaim{Type: EventProducerPlatform, ID: "operator-token"}
+	audit, err := NewReplayEvent(ReplayEventInput{Facts: facts, Lineage: validLineage()})
+	if err != nil {
+		t.Fatal(err)
+	}
+	producer := EventPayloadProducer(audit, "")
+	if !producer.IsPlatform() || producer.producer.ID() != facts.Producer.ID {
+		t.Fatal("replay audit lost its exact platform producer")
+	}
+	input := PayloadSchemaBindingInput{
+		BundleHash: "bundle-v2:sha256:" + strings.Repeat("0", 64), EventKey: "event.replayed",
+		SchemaDigest: "sha256:" + strings.Repeat("0", 64), SchemaClass: PayloadSchemaPlatform,
+	}
+	binding, err := NewPlatformPayloadSchemaBinding(input, producer, "")
+	if err != nil {
+		t.Fatal(err)
+	}
+	restored, err := RestoreEventPayloadSchemaBinding(input, audit.AdmissionClass(), audit.Type(), audit.Producer())
+	if err != nil || !restored.Equal(binding) {
+		t.Fatalf("replay audit binding restore: %v", err)
+	}
+	for _, change := range []func(*PayloadProducer){
+		func(p *PayloadProducer) { p.class = EventAdmissionChild },
+		func(p *PayloadProducer) { p.event = "task.completed" },
+		func(p *PayloadProducer) { p.producer, _ = NewProducerIdentity(EventProducerAgent, "operator-token") },
+	} {
+		other := producer
+		change(&other)
+		if _, err := NewPlatformPayloadSchemaBinding(input, other, ""); err == nil {
+			t.Fatal("foreign replay class/event/producer gained platform binding")
+		}
+	}
+	for _, authored := range []PayloadProducer{AuthoredPayloadProducer(""), AuthoredPayloadProducer(".")} {
+		if err := authored.ValidateForEvent(audit); err == nil {
+			t.Fatal("replay audit accepted authored flow authority")
+		}
 	}
 }
 

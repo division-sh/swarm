@@ -51,8 +51,8 @@ func (o *a2AccumulatorPersistenceObserver) CommitWorkflowEngineMutation(ctx cont
 func newA2AccumulatorPersistenceProof(t *testing.T, selected gateRecoveryStoreCase) *a2AccumulatorPersistenceProof {
 	t.Helper()
 	source := semanticview.Wrap(loadPipelineLifecycleFixtureBundle(t, map[string]string{
-		"schema.yaml": `name: accumulator-persistence-proof
-stages:
+		"manifest.yaml": "version: 1.0.0\nplatform_version: \">=0.7.0 <0.8.0\"\n",
+		"schema.yaml": `stages:
   active: {}
 pins:
   inputs:

@@ -32,6 +32,9 @@ func NewMockResponsePlan[T any](responses map[string]T) (*MockResponsePlan, erro
 		if toolID != rawID {
 			return nil, fmt.Errorf("mock connector response tool id %q is not canonical", rawID)
 		}
+		if _, _, valid := splitToolID(toolID); !valid {
+			return nil, fmt.Errorf("mock connector response tool id %q requires an exact portable provider key", toolID)
+		}
 		var value semanticvalue.Value
 		var err error
 		if raw, ok := any(response).(json.RawMessage); ok {
@@ -48,8 +51,7 @@ func NewMockResponsePlan[T any](responses map[string]T) (*MockResponsePlan, erro
 }
 
 func (p *MockResponsePlan) Admit(toolID string, tool runtimecontracts.ToolSchemaEntry) (AdmittedMockResponse, error) {
-	toolID = strings.TrimSpace(toolID)
-	if toolID == "" {
+	if _, _, valid := splitToolID(toolID); !valid {
 		return AdmittedMockResponse{}, fmt.Errorf("mock connector response requires an exact tool id")
 	}
 	if !isProviderConnector(tool) {

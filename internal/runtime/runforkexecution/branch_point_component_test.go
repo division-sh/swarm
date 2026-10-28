@@ -86,7 +86,11 @@ func proveSelectedLiveHandoff(t *testing.T, backend string, pending bool) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	plan, err := agenttopology.NewSourceSetPlan([]agenttopology.SourceCoordinate{{BundleHash: p.loadedSource.SourceArtifactFact.BundleHash()}}, nil)
+	coordinate, err := agenttopology.NewSourceCoordinate(p.loadedSource.RootedSource.Admission())
+	if err != nil {
+		t.Fatal(err)
+	}
+	plan, err := agenttopology.NewSourceSetPlan([]agenttopology.SourceCoordinate{coordinate}, nil)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -118,6 +122,8 @@ func proveSelectedLiveHandoff(t *testing.T, backend string, pending bool) {
 		t.Fatalf("selected grant was not admitted before self-release: %+v %v", selectedEvidence, err)
 	}
 	activationRequest := runfork.RunForkSelectedContractExecutionActivateRequest{
+		OriginalRootAdmission:   p.originalSource.RootedSource.Admission(),
+		Process:                 process.LeaseStamp(),
 		OrdinaryGenerationGrant: ordinary,
 		InheritedSchedules:      p.readiness, ForkOperation: p.forkOperation,
 		DataPins: attachment.materialized.DataPins, ExecutionSource: p.loadedSource.Source,
@@ -243,6 +249,8 @@ func proveSelectedLiveHandoff(t *testing.T, backend string, pending bool) {
 	secondActivation, err := q.owner.ports.fork.ActivateRunForkForSelectedContractExecution(
 		startupownership.WithGenerationGrantEvidence(effects.WithAuthority(q.operation.Context(), second.container.authority), evidence),
 		runfork.RunForkSelectedContractExecutionActivateRequest{
+			OriginalRootAdmission:   q.originalSource.RootedSource.Admission(),
+			Process:                 process.LeaseStamp(),
 			OrdinaryGenerationGrant: ordinary,
 			InheritedSchedules:      q.readiness, ForkOperation: q.forkOperation,
 			DataPins: second.materialized.DataPins, ExecutionSource: q.loadedSource.Source,

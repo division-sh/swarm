@@ -7,6 +7,7 @@ import (
 
 	"github.com/division-sh/swarm/internal/runtime/correlation"
 	"github.com/division-sh/swarm/internal/runtime/pipeline"
+	"github.com/division-sh/swarm/internal/sourceartifact"
 	"github.com/division-sh/swarm/internal/testutil/sourceartifactfixture"
 	"github.com/google/uuid"
 )
@@ -73,7 +74,14 @@ func TestFlowConstructorRouteReadinessCorruptionBothStores(t *testing.T) {
 							t.Errorf("%s admitted %s for %s: %v", inspect, cut, path, err)
 						}
 					}
-					foreign := sourceartifactfixture.FactFor(sourceartifactfixture.New("schema.yaml", []byte("name: unrelated-readiness-source\n")))
+					artifact, err := sourceartifact.AdmitMembers(map[string][]byte{
+						"manifest.yaml": []byte("version: 1.0.0\nplatform_version: '*'\n"),
+						"schema.yaml":   []byte("# fixture: unrelated-readiness-source\nstages: []\n"),
+					})
+					if err != nil {
+						t.Fatal(err)
+					}
+					foreign := sourceartifactfixture.FactFor(artifact)
 					if projection, err := reader.InspectDynamicFlowRuntimeReadinessForSource(f.ctx, foreign); err != nil || len(projection.CurrentPending)+len(projection.CurrentCompleted)+len(projection.SourceTransitionRequired) != 0 {
 						t.Fatalf("foreign source consumed corrupt construction: %+v %v", projection, err)
 					}

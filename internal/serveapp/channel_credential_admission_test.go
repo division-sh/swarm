@@ -24,7 +24,7 @@ func TestChannelProviderConsumersRequireExactAdmission(t *testing.T) {
 				if err != nil {
 					t.Fatal(err)
 				}
-				keys := map[string]string{"telegram_bot_token": "provider", "webhook_signing_secret": "signing"}
+				keys := map[string]string{"telegram.telegram_bot_token": "provider", "telegram.webhook_signing_secret": "signing"}
 				binding, err := packs.NewOutboundBindingPlanWithCredentials("telegram", loadSupportedTelegramChannelPlan(t), "42", nil, keys)
 				if err != nil {
 					t.Fatal(err)
@@ -34,7 +34,7 @@ func TestChannelProviderConsumersRequireExactAdmission(t *testing.T) {
 					t.Fatal(err)
 				}
 				admissions := []channelonboarding.CredentialAdmission{}
-				for _, role := range []string{"telegram_bot_token", "webhook_signing_secret"} {
+				for _, role := range []string{"telegram.telegram_bot_token", "telegram.webhook_signing_secret"} {
 					key := keys[role]
 					if _, err := file.AdmitWithReceipt(ctx, key, key+"-value", key+"-receipt"); err != nil {
 						t.Fatal(err)
@@ -46,7 +46,7 @@ func TestChannelProviderConsumersRequireExactAdmission(t *testing.T) {
 					admissions = append(admissions, channelonboarding.CredentialAdmission{Role: role, StoreKey: key, Kind: channelonboarding.CredentialAdmissionWritten, Receipt: key + "-receipt", ValueSeal: evidence.Seal})
 				}
 				values, err := resolveChannelDeliveryCredentials(ctx, owner, binding, admissions, tool)
-				if err != nil || values["telegram_bot_token"] != "provider-value" {
+				if err != nil || values["telegram.telegram_bot_token"] != "provider-value" {
 					t.Fatalf("healthy execution = %v/%v", values, err)
 				}
 				switch change {

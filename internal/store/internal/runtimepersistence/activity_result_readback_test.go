@@ -24,7 +24,7 @@ func TestActivityResultPublicationEvidenceBothStores(t *testing.T) {
 			primaryRunID := runtimecorrelation.RunIDFromContext(ctx)
 			ctx = startupownership.CarryMutationAuthority(testAuthorActivityContext(), ctx)
 			sibling := uuid.NewString()
-			requireRunningRunForTest(t, ctx, selected, sibling, time.Now().UTC())
+			ctx = requireRunningRunForTest(t, ctx, selected, sibling, time.Now().UTC())
 			journal := captureActivityFixtureJournal(t, ctx, selected)
 			fault := errors.New("post-acknowledgment cleanup")
 			for _, invalid := range []any{nil, db, (*PostgresStore)(nil), (*SQLiteRuntimeStore)(nil)} {

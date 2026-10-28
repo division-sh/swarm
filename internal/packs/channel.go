@@ -2,17 +2,17 @@ package packs
 
 import (
 	"fmt"
-	"io/fs"
-	"path"
 	"regexp"
 	"sort"
 	"strings"
 
 	"github.com/division-sh/swarm/internal/operatorchannel"
+	"github.com/division-sh/swarm/internal/packartifact"
 	"github.com/division-sh/swarm/internal/runtime/canonicaljson"
 	runtimecontracts "github.com/division-sh/swarm/internal/runtime/contracts"
 	"github.com/division-sh/swarm/internal/runtime/core/manifesthash"
 	"github.com/division-sh/swarm/internal/runtime/core/packidentity"
+	runtimepaths "github.com/division-sh/swarm/internal/runtime/core/paths"
 	runtimeprovideroutput "github.com/division-sh/swarm/internal/runtime/core/provideroutput"
 	"github.com/division-sh/swarm/internal/runtime/plangeneration"
 	"github.com/division-sh/swarm/internal/runtime/semanticvalue"
@@ -49,6 +49,9 @@ func MustPackSource(provenance, path string) PackSource {
 func (s PackSource) Provenance() string { return s.provenance }
 func (s PackSource) Path() string       { return s.path }
 func (s PackSource) Diagnostic() string {
+	if s.provenance == "" {
+		return s.path
+	}
 	if s.path == "" {
 		return s.provenance
 	}
@@ -72,6 +75,26 @@ const (
 )
 
 func NewPackIdentity(id, version, manifestHash, packType string, source PackSource) (PackIdentity, error) {
+	identity, err := admitPackIdentity(id, version, manifestHash, packType, source)
+	if err != nil {
+		return PackIdentity{}, err
+	}
+	if source.Provenance() == "" {
+		return PackIdentity{}, fmt.Errorf("pack source is required")
+	}
+	return identity, nil
+}
+
+// NewProviderBodyIdentity derives diagnostic/content coordinates from captured
+// membership. It invents neither authored role IDs nor acquisition provenance.
+func NewProviderBodyIdentity(body packartifact.ProviderBody) (PackIdentity, error) {
+	if !body.Valid() {
+		return PackIdentity{}, fmt.Errorf("provider identity requires an admitted BODY")
+	}
+	return admitPackIdentity(body.ProviderKey(), body.Metadata().Version, body.Hash(), body.Role().String(), PackSource{path: body.Label()})
+}
+
+func admitPackIdentity(id, version, manifestHash, packType string, source PackSource) (PackIdentity, error) {
 	if id == "" || version == "" || strings.TrimSpace(manifestHash) == "" || strings.TrimSpace(packType) == "" {
 		return PackIdentity{}, fmt.Errorf("pack id, version, manifest hash, and type are required")
 	}
@@ -91,7 +114,7 @@ func NewPackIdentity(id, version, manifestHash, packType string, source PackSour
 	if err != nil {
 		return PackIdentity{}, err
 	}
-	if source.Provenance() == "" {
+	if source.Diagnostic() == "" {
 		return PackIdentity{}, fmt.Errorf("pack source is required")
 	}
 	return PackIdentity{id: admittedID, version: admittedVersion, manifestHash: admittedManifestHash, packType: admittedPackType, source: source}, nil
@@ -368,6 +391,9 @@ func CompileChannelOnboardingProfile(provider string, transport ChannelTransport
 	if len(profile.LearnedDestination) == 0 {
 		return CompiledChannelOnboardingProfile{}, fmt.Errorf("channel onboarding requires an explicit learned_destination relation")
 	}
+	if err := runtimepaths.ValidateFlowSegment(provider); err != nil {
+		return CompiledChannelOnboardingProfile{}, fmt.Errorf("channel onboarding provider requires an exact portable directory key: %w", err)
+	}
 	providerID, err := admitChannelPlanIdentity("channel onboarding provider", provider)
 	if err != nil {
 		return CompiledChannelOnboardingProfile{}, err
@@ -467,89 +493,13 @@ type ChannelMapping struct {
 	Item []map[string]ChannelMapping
 }
 
-type LoadedChannelPack struct {
-	Envelope     Envelope
-	Manifest     ChannelManifest
-	ManifestBody []byte
-	Directory    string
-	Source       PackSource
-}
-
-func LoadChannelPackFS(fsys fs.FS, dir, runningPlatformVersion string) (LoadedChannelPack, error) {
-	loaded, err := Load(fsys, dir, runningPlatformVersion)
-	if err != nil {
-		return LoadedChannelPack{}, err
-	}
-	return LoadChannelPack(loaded)
-}
-
-func LoadChannelPack(loaded Loaded) (LoadedChannelPack, error) {
-	if strings.TrimSpace(loaded.Envelope.Type) != TypeChannel {
-		return LoadedChannelPack{}, fmt.Errorf("channel pack %q has unsupported type %q", loaded.Envelope.ID, loaded.Envelope.Type)
-	}
-	if len(loaded.Envelope.Requires.Packs) != 2 || strings.TrimSpace(loaded.Envelope.Requires.Packs[TypeTrigger]) == "" || strings.TrimSpace(loaded.Envelope.Requires.Packs[TypeConnector]) == "" {
-		return LoadedChannelPack{}, fmt.Errorf("channel pack %q requires exactly trigger and connector pack roles", loaded.Envelope.ID)
-	}
-	manifest, err := parseChannelManifestAt(loaded.ManifestBody, path.Join(loaded.Directory, "channel.yaml"))
-	if err != nil {
-		return LoadedChannelPack{}, fmt.Errorf("parse channel manifest for pack %q: %w", loaded.Envelope.ID, err)
-	}
-	if err := validateChannelManifest(loaded.Envelope.ID, manifest); err != nil {
-		return LoadedChannelPack{}, err
-	}
-	return LoadedChannelPack{
-		Envelope: loaded.Envelope, Manifest: manifest, ManifestBody: append([]byte(nil), loaded.ManifestBody...),
-		Directory: loaded.Directory, Source: MustPackSource(loaded.Envelope.Provenance.Source, loaded.Envelope.ID),
-	}, nil
-}
-
 func ParseChannelManifest(body []byte) (ChannelManifest, error) {
 	return parseChannelManifestAt(body, "channel.yaml")
 }
 
-func CompileChannelInventory(registry *InterfaceRegistry, channels []LoadedChannelPack, triggers []TriggerPackDescriptor, connectors []ConnectorPackDescriptor) ([]SatisfactionPlan, error) {
-	seenIDs := map[string]PackIdentity{}
-	register := func(identity PackIdentity) error {
-		id := identity.ID()
-		if id == "" {
-			return fmt.Errorf("pack identity is required")
-		}
-		if prior, exists := seenIDs[id]; exists {
-			return fmt.Errorf("duplicate accepted pack id %q across roles %q and %q", id, prior.Type(), identity.Type())
-		}
-		seenIDs[id] = identity
-		return nil
-	}
-	for _, trigger := range triggers {
-		if err := register(trigger.Identity); err != nil {
-			return nil, err
-		}
-	}
-	for _, connector := range connectors {
-		if err := register(connector.Identity); err != nil {
-			return nil, err
-		}
-	}
-	for _, channel := range channels {
-		if err := register(identityFromEnvelope(channel.Envelope, channel.Source)); err != nil {
-			return nil, err
-		}
-	}
-	plans := make([]SatisfactionPlan, 0, len(channels))
-	for _, channel := range channels {
-		plan, err := CompileChannel(registry, channel, triggers, connectors)
-		if err != nil {
-			return nil, err
-		}
-		plans = append(plans, plan)
-	}
-	sort.Slice(plans, func(i, j int) bool { return plans[i].channel.ID() < plans[j].channel.ID() })
-	return plans, nil
-}
-
 func validateChannelManifest(packID string, manifest ChannelManifest) error {
-	if strings.TrimSpace(manifest.Provider) == "" {
-		return fmt.Errorf("channel pack %q provider is required", packID)
+	if err := runtimepaths.ValidateFlowSegment(manifest.Provider); err != nil {
+		return fmt.Errorf("channel pack %q provider requires an exact portable directory key: %w", packID, err)
 	}
 	if len(manifest.OpaqueTypes) == 0 || len(manifest.Operations) == 0 || len(manifest.Events) == 0 {
 		return fmt.Errorf("channel pack %q requires opaque_types, operations, and events", packID)
@@ -591,7 +541,7 @@ func validateChannelManifest(packID string, manifest ChannelManifest) error {
 		}
 	}
 	if manifest.Registration != nil {
-		if err := validateChannelRegistrationManifest(packID, *manifest.Registration); err != nil {
+		if err := validateChannelRegistrationManifest(packID, manifest.Provider, *manifest.Registration); err != nil {
 			return err
 		}
 	}
@@ -658,6 +608,9 @@ type SatisfactionPlan struct {
 	registration      *CompiledChannelRegistration
 	onboarding        *CompiledChannelOnboardingProfile
 	generation        plangeneration.Generation
+
+	capturedChannelMember string
+	capturedHolder        string
 }
 
 type channelPlanIdentity struct {
@@ -783,6 +736,10 @@ type OutboundBindingPlan struct {
 
 func (p SatisfactionPlan) ChannelIdentity() PackIdentity {
 	return p.channel
+}
+
+func (p SatisfactionPlan) MatchesCapturedHolder(flowPath string) bool {
+	return p.capturedHolder != "" && p.capturedHolder == flowPath
 }
 
 func (p SatisfactionPlan) Provider() string {
@@ -1215,7 +1172,11 @@ func (p SatisfactionPlan) CapabilitySubject() (Subject, error) {
 			"interface": p.interfaceRef.String(), "channel_hash": p.channel.ManifestHash(),
 			"trigger_id": p.trigger.ID(), "trigger_hash": p.trigger.ManifestHash(),
 			"connector_id": p.connector.ID(), "connector_hash": p.connector.ManifestHash(),
+			"trigger_generation": p.triggerGeneration.Diagnostic(), "plan_generation": p.generation.Diagnostic(),
 		}}},
+	}
+	if p.capturedChannelMember != "" {
+		subject.ID = p.capturedChannelMember
 	}
 	normalized, err := NormalizeSubjects([]Subject{subject})
 	if err != nil {
@@ -1480,51 +1441,55 @@ func cloneRequirements(in []Requirement) []Requirement {
 	return out
 }
 
-func CompileChannel(registry *InterfaceRegistry, channel LoadedChannelPack, triggers []TriggerPackDescriptor, connectors []ConnectorPackDescriptor) (SatisfactionPlan, error) {
-	if registry == nil {
-		return SatisfactionPlan{}, fmt.Errorf("channel interface registry is required")
-	}
-	interfaceRef, err := admitChannelPlanIdentity("channel interface reference", channel.Envelope.Implements[0])
+type channelCompilation struct {
+	Identity   PackIdentity
+	Manifest   ChannelManifest
+	reference  channelPlanIdentity
+	definition runtimecontracts.PackInterfaceDefinition
+}
+
+func prepareChannelCompilation(registry *InterfaceRegistry, identity PackIdentity, manifest ChannelManifest, reference string) (channelCompilation, error) {
+	interfaceRef, err := admitChannelPlanIdentity("channel interface reference", reference)
 	if err != nil {
-		return SatisfactionPlan{}, err
+		return channelCompilation{}, err
 	}
 	definition, ok := registry.Lookup(interfaceRef.String())
 	if !ok {
-		return SatisfactionPlan{}, fmt.Errorf("channel pack %q implements unknown interface %q", channel.Envelope.ID, interfaceRef.String())
+		return channelCompilation{}, fmt.Errorf("channel pack %q implements unknown interface %q", identity.ID(), interfaceRef.String())
 	}
-	if _, err := CompileChannelCapabilities(channel.Manifest.Capabilities.Vector()); err != nil {
-		return SatisfactionPlan{}, fmt.Errorf("channel pack %q capabilities: %w", channel.Envelope.ID, err)
+	if _, err := CompileChannelCapabilities(manifest.Capabilities.Vector()); err != nil {
+		return channelCompilation{}, fmt.Errorf("channel pack %q capabilities: %w", identity.ID(), err)
 	}
-	if _, err := channel.Manifest.Transport.ActivationPosture(); err != nil {
-		return SatisfactionPlan{}, fmt.Errorf("channel pack %q transport: %w", channel.Envelope.ID, err)
+	if _, err := manifest.Transport.ActivationPosture(); err != nil {
+		return channelCompilation{}, fmt.Errorf("channel pack %q transport: %w", identity.ID(), err)
 	}
-	definition, err = selectChannelCapabilityDefinition(definition, channel.Manifest.Capabilities, channel.Manifest.NativeInbox != nil)
+	definition, err = selectChannelCapabilityDefinition(definition, manifest.Capabilities, manifest.NativeInbox != nil)
 	if err != nil {
-		return SatisfactionPlan{}, fmt.Errorf("channel pack %q capability contract: %w", channel.Envelope.ID, err)
+		return channelCompilation{}, fmt.Errorf("channel pack %q capability contract: %w", identity.ID(), err)
 	}
-	trigger, err := resolveTriggerDependency(channel, triggers)
-	if err != nil {
-		return SatisfactionPlan{}, err
-	}
-	connector, err := resolveConnectorDependency(channel, connectors)
-	if err != nil {
-		return SatisfactionPlan{}, err
-	}
+	return channelCompilation{Identity: identity, Manifest: manifest, reference: interfaceRef, definition: definition}, nil
+}
+
+func compileChannelSatisfaction(channel channelCompilation, trigger TriggerPackDescriptor, connector ConnectorPackDescriptor) (SatisfactionPlan, error) {
+	definition, interfaceRef := channel.definition, channel.reference
 	if err := validateAcceptedTriggerDescriptor(trigger); err != nil {
 		return SatisfactionPlan{}, err
 	}
 	if channel.Manifest.Transport != trigger.Transport {
-		return SatisfactionPlan{}, fmt.Errorf("channel pack %q transport %q does not match verified trigger %q transport %q", channel.Envelope.ID, channel.Manifest.Transport, trigger.Identity.ID(), trigger.Transport)
+		return SatisfactionPlan{}, fmt.Errorf("channel pack %q transport %q does not match verified trigger %q transport %q", channel.Identity.ID(), channel.Manifest.Transport, trigger.Identity.ID(), trigger.Transport)
 	}
 	if err := validateAcceptedConnectorDescriptor(connector); err != nil {
 		return SatisfactionPlan{}, err
+	}
+	if err := runtimepaths.ValidateFlowSegment(channel.Manifest.Provider); err != nil {
+		return SatisfactionPlan{}, fmt.Errorf("channel provider requires an exact portable directory key: %w", err)
 	}
 	provider, err := admitChannelPlanIdentity("channel provider", channel.Manifest.Provider)
 	if err != nil {
 		return SatisfactionPlan{}, err
 	}
-	if provider.String() != strings.TrimSpace(trigger.Provider) || provider.String() != strings.TrimSpace(connector.Provider) {
-		return SatisfactionPlan{}, fmt.Errorf("channel pack %q provider %q does not match trigger %q and connector %q providers", channel.Envelope.ID, provider.String(), trigger.Provider, connector.Provider)
+	if provider.String() != trigger.Provider || provider.String() != connector.Provider {
+		return SatisfactionPlan{}, fmt.Errorf("channel pack %q provider %q does not match trigger %q and connector %q providers", channel.Identity.ID(), provider.String(), trigger.Provider, connector.Provider)
 	}
 	if err := exactKeySet("channel opaque_types", channel.Manifest.OpaqueTypes, interfaceOpaqueSlots(definition)); err != nil {
 		return SatisfactionPlan{}, err
@@ -1547,7 +1512,7 @@ func CompileChannel(registry *InterfaceRegistry, channel LoadedChannelPack, trig
 		capabilities: channel.Manifest.Capabilities,
 		transport:    channel.Manifest.Transport,
 		interfaceRef: interfaceRef,
-		channel:      identityFromEnvelope(channel.Envelope, channel.Source), trigger: trigger.Identity, connector: connector.Identity,
+		channel:      channel.Identity, trigger: trigger.Identity, connector: connector.Identity,
 		provider: provider, triggerGeneration: trigger.Generation, opaqueTypes: cloneSchemaMap(channel.Manifest.OpaqueTypes),
 		schemas:    cloneSchemaMap(definition.Schemas),
 		operations: map[string]compiledChannelOperation{}, events: map[string]compiledChannelEvent{}, constraints: map[string]runtimecontracts.ToolInputSchema{},
@@ -1626,29 +1591,29 @@ func CompileChannel(registry *InterfaceRegistry, channel LoadedChannelPack, trig
 	if channel.Manifest.Registration != nil {
 		plan.registration, err = compileChannelRegistration(*channel.Manifest.Registration, connector, provider)
 		if err != nil {
-			return SatisfactionPlan{}, fmt.Errorf("channel pack %q registration: %w", channel.Envelope.ID, err)
+			return SatisfactionPlan{}, fmt.Errorf("channel pack %q registration: %w", channel.Identity.ID(), err)
 		}
 	}
 	if channel.Manifest.Onboarding != nil {
 		compiled, compileErr := CompileChannelOnboardingProfile(provider.String(), channel.Manifest.Transport, *channel.Manifest.Onboarding, sortedKeys(plan.operations))
 		if compileErr != nil {
-			return SatisfactionPlan{}, fmt.Errorf("channel pack %q onboarding: %w", channel.Envelope.ID, compileErr)
+			return SatisfactionPlan{}, fmt.Errorf("channel pack %q onboarding: %w", channel.Identity.ID(), compileErr)
 		}
 		if compiled.ActivationPosture() == ChannelActivationWebhookRegistration && plan.registration == nil {
-			return SatisfactionPlan{}, fmt.Errorf("channel pack %q webhook onboarding requires registration", channel.Envelope.ID)
+			return SatisfactionPlan{}, fmt.Errorf("channel pack %q webhook onboarding requires registration", channel.Identity.ID())
 		}
 		compiled.learnedDestination, err = compileLearnedDestination(channel.Manifest.Onboarding.LearnedDestination, plan.opaqueTypes)
 		if err != nil {
-			return SatisfactionPlan{}, fmt.Errorf("channel pack %q onboarding learned_destination: %w", channel.Envelope.ID, err)
+			return SatisfactionPlan{}, fmt.Errorf("channel pack %q onboarding learned_destination: %w", channel.Identity.ID(), err)
 		}
 		plan.onboarding = &compiled
 	}
 	if _, err := plan.PresentationBounds(); err != nil {
-		return SatisfactionPlan{}, fmt.Errorf("channel pack %q presentation bounds: %w", channel.Envelope.ID, err)
+		return SatisfactionPlan{}, fmt.Errorf("channel pack %q presentation bounds: %w", channel.Identity.ID(), err)
 	}
 	plan.nativeInbox, err = compileNativeInboxProfile(channel.Manifest.NativeInbox, plan)
 	if err != nil {
-		return SatisfactionPlan{}, fmt.Errorf("channel pack %q native inbox: %w", channel.Envelope.ID, err)
+		return SatisfactionPlan{}, fmt.Errorf("channel pack %q native inbox: %w", channel.Identity.ID(), err)
 	}
 	plan.generation, err = compileSatisfactionPlanGeneration(plan)
 	if err != nil {
@@ -1848,40 +1813,6 @@ func intersectSelectedConstraint(name string, left, right *runtimecontracts.Tool
 		return nil, fmt.Errorf("selected channel constraint %q: %w", name, err)
 	}
 	return &out, nil
-}
-
-func resolveTriggerDependency(channel LoadedChannelPack, descriptors []TriggerPackDescriptor) (TriggerPackDescriptor, error) {
-	id := strings.TrimSpace(channel.Envelope.Requires.Packs[TypeTrigger])
-	var matches []TriggerPackDescriptor
-	for _, descriptor := range descriptors {
-		if descriptor.Identity.ID() == id {
-			matches = append(matches, descriptor)
-		}
-	}
-	if len(matches) != 1 {
-		return TriggerPackDescriptor{}, fmt.Errorf("channel pack %q trigger dependency %q resolved %d accepted packs; require exactly one", channel.Envelope.ID, id, len(matches))
-	}
-	if matches[0].Identity.Type() != TypeTrigger {
-		return TriggerPackDescriptor{}, fmt.Errorf("channel pack %q dependency %q has wrong role %q", channel.Envelope.ID, id, matches[0].Identity.Type())
-	}
-	return matches[0], nil
-}
-
-func resolveConnectorDependency(channel LoadedChannelPack, descriptors []ConnectorPackDescriptor) (ConnectorPackDescriptor, error) {
-	id := strings.TrimSpace(channel.Envelope.Requires.Packs[TypeConnector])
-	var matches []ConnectorPackDescriptor
-	for _, descriptor := range descriptors {
-		if descriptor.Identity.ID() == id {
-			matches = append(matches, descriptor)
-		}
-	}
-	if len(matches) != 1 {
-		return ConnectorPackDescriptor{}, fmt.Errorf("channel pack %q connector dependency %q resolved %d accepted packs; require exactly one", channel.Envelope.ID, id, len(matches))
-	}
-	if matches[0].Identity.Type() != TypeConnector {
-		return ConnectorPackDescriptor{}, fmt.Errorf("channel pack %q dependency %q has wrong role %q", channel.Envelope.ID, id, matches[0].Identity.Type())
-	}
-	return matches[0], nil
 }
 
 func validateOperationBinding(name string, operation runtimecontracts.PackInterfaceOperation, binding ChannelOperationBinding, schemas, opaque, constraints map[string]runtimecontracts.ToolInputSchema, tool runtimecontracts.ToolSchemaEntry) (compiledChannelMappingTopology, compiledChannelMappingTopology, error) {
@@ -2461,10 +2392,6 @@ func stringSet(values []string) map[string]struct{} {
 		out[strings.TrimSpace(value)] = struct{}{}
 	}
 	return out
-}
-
-func identityFromEnvelope(envelope Envelope, source PackSource) PackIdentity {
-	return MustPackIdentity(envelope.ID, envelope.Version, envelope.ManifestHash, envelope.Type, source)
 }
 
 func cloneInterfaceDefinition(in runtimecontracts.PackInterfaceDefinition) runtimecontracts.PackInterfaceDefinition {

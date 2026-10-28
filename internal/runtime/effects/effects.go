@@ -1202,6 +1202,12 @@ func BeginStartupProbe(ctx context.Context, adapter string, request []byte, line
 	return authorizedHandle(controller, attempt, err)
 }
 
+// CheckExternalEffectExecutionMode reads mode and posture only; it does not
+// authorize an attempt or supply lifecycle or request authority.
+func CheckExternalEffectExecutionMode(ctx context.Context, adapter string) error {
+	return admitExecutionMode(ctx, adapter)
+}
+
 func admitExecutionMode(ctx context.Context, adapter string) error {
 	mode, found := ExecutionModeFromContext(ctx)
 	if controller, ok := ControllerFromContext(ctx); ok {

@@ -8,6 +8,8 @@ import (
 	"testing"
 
 	"github.com/division-sh/swarm/internal/runtime/runfork"
+	"github.com/division-sh/swarm/internal/sourceartifact"
+	"github.com/division-sh/swarm/internal/testutil/sourceartifactfixture"
 	"github.com/google/uuid"
 )
 
@@ -16,9 +18,18 @@ func TestForkOperationElectionKeepsOriginalRequestBothStores(t *testing.T) {
 		t.Run(backend, func(t *testing.T) {
 			db := forkOperationTestDatabase(t, backend)
 			ctx := context.Background()
+			root := forkOperationTargetRoot(t)
+			laterArtifact, err := sourceartifact.AdmitMembers(map[string][]byte{
+				"manifest.yaml": []byte("version: 1.1.0\nplatform_version: '*'\n"),
+				"schema.yaml":   []byte("stages: []\n"),
+			})
+			if err != nil {
+				t.Fatal(err)
+			}
+			later, _ := sourceartifactfixture.Rooted(t, "later", laterArtifact)
 			request := runfork.ForkOperationRequest{
 				OperationID: uuid.NewString(), Actor: "bearer:operator", IdempotencyKey: "elected",
-				TransportHash: "sha256:original", SourceRunID: uuid.NewString(), TargetBundleHash: "sha256:bundle",
+				TransportHash: "sha256:original", SourceRunID: uuid.NewString(), TargetBundleHash: root.BundleHash, TargetRootReference: root,
 				ContractSelection: runfork.RunForkContractSelection{Mode: runfork.RunForkContractSelectionModeSelectedContracts},
 				ResolvedPoint:     &runfork.RunForkPoint{Kind: runfork.RunForkPointDeploymentRevision, Revision: 4},
 			}
@@ -38,7 +49,8 @@ func TestForkOperationElectionKeepsOriginalRequestBothStores(t *testing.T) {
 					case "late_winner":
 						candidate.OperationID = uuid.NewString()
 					case "latest_changed":
-						candidate.OperationID, candidate.TargetBundleHash = uuid.NewString(), "sha256:later-bundle"
+						candidate.OperationID, candidate.TargetBundleHash = uuid.NewString(), later.Artifact().BundleHash()
+						candidate.TargetRootReference = later.Admission().Reference()
 						candidate.ResolvedPoint = &runfork.RunForkPoint{Kind: runfork.RunForkPointDeploymentRevision, Revision: 9}
 					case "different_transport":
 						candidate.OperationID, candidate.TransportHash = uuid.NewString(), "sha256:other-request"

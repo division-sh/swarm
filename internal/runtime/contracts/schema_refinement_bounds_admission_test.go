@@ -11,6 +11,7 @@ import (
 func loadRefinementBound(t *testing.T, family, kind, refinement, source string) (*WorkflowContractBundle, error) {
 	t.Helper()
 	root := t.TempDir()
+	writeFixtureFile(t, filepath.Join(root, "manifest.yaml"), "version: 1.0.0\nplatform_version: '*'\n")
 	field := fmt.Sprintf("value: {type: %q, %s: %s}", kind, refinement, source)
 	file, text := family+".yaml", ""
 	switch family {

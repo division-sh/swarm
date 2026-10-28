@@ -1,12 +1,10 @@
-name: child
+# fixture: child
 stages:
   waiting: {}
   completed: {final: true}
 pins:
   inputs:
     - work.begin
-    - task.done
-  outputs:
     - task.done
 connect:
   - event: task.done

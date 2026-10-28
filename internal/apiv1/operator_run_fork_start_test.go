@@ -10,6 +10,7 @@ import (
 	"github.com/division-sh/swarm/internal/runtime/runbundle"
 	"github.com/division-sh/swarm/internal/runtime/runfork"
 	"github.com/division-sh/swarm/internal/runtime/runforkexecution"
+	"github.com/division-sh/swarm/internal/testutil/sourceartifactfixture"
 )
 
 func TestRunForkStartParamsRequireExplicitExclusiveBoolean(t *testing.T) {
@@ -116,11 +117,12 @@ func TestSelectedForkRunStartSelectorAndPermanentPoint(t *testing.T) {
 
 func TestOperatorRunForkStartReadbackAndMaterializedRetry(t *testing.T) {
 	operations := newRecordingRunForkOperations()
+	selectedTarget, _ := sourceartifactfixture.Rooted(t, "review", runForkTestArtifact)
 	result := runForkActivatedTestResult()
 	result.ForkPointKind, result.ForkRevision, result.ForkEventID = string(runfork.RunForkPointRunStart), 7, ""
-	executor := &recordingRunForkExecutor{operations: operations, result: result}
+	executor := &recordingRunForkExecutor{selectedSource: selectedTarget, operations: operations, result: result}
 	availability := &recordingRunForkAvailability{rows: map[string]runbundle.Availability{
-		runForkTestSourceRunID: runForkAvailable(runForkTestSourceRunID, runForkTestBundleHash),
+		runForkTestSourceRunID: runForkAvailable(runForkTestSourceRunID, apiArtifactRoot(t, runForkTestArtifact)),
 	}}
 	opts := RunForkHandlerOptions{Availability: availability, Operations: operations, Executor: executor}
 	request := runForkOperationTestRequest("start-retry", "start-transport-hash")
@@ -156,7 +158,7 @@ func TestOperatorRunForkStartHTTPReadback(t *testing.T) {
 	executor := &recordingRunForkExecutor{result: runForkActivatedTestResult()}
 	executor.result.ForkPointKind, executor.result.ForkRevision, executor.result.ForkEventID = string(runfork.RunForkPointRunStart), 7, ""
 	handler := runForkTestHandler(t, &recordingRunForkAvailability{rows: map[string]runbundle.Availability{
-		runForkTestSourceRunID: runForkAvailable(runForkTestSourceRunID, runForkTestBundleHash),
+		runForkTestSourceRunID: runForkAvailable(runForkTestSourceRunID, apiArtifactRoot(t, runForkTestArtifact)),
 	}}, executor)
 	request := fmt.Sprintf(`{"jsonrpc":"2.0","id":"start","method":"run.fork","params":{"source_run_id":%q,"at_start":true,"allow_source_freeze":true,"idempotency_key":"start-http"}}`, runForkTestSourceRunID)
 	response := rpcCall(t, handler, request)

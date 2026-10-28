@@ -31,7 +31,6 @@ import (
 	"github.com/division-sh/swarm/internal/runtime/testfixtures/canonicalrouting"
 	"github.com/division-sh/swarm/internal/store/storetest"
 	"github.com/division-sh/swarm/internal/testutil"
-	"github.com/division-sh/swarm/internal/testutil/sourceartifactfixture"
 	"github.com/google/uuid"
 )
 
@@ -77,8 +76,11 @@ func testDynamicTopologyStartupPreflightTwoContexts(t *testing.T, backend string
 			}
 			facts := make([]runtimecorrelation.SourceArtifactFact, len(loaded))
 			for index, source := range loaded {
-				facts[index] = sourceartifactfixture.RequireArtifact(t, context.Background(),
-					selected.RuntimeDeps().EventStore.(sourceartifactfixture.Writer), source.bundle.SourceArtifact)
+				fact, err := prepareServeSourceArtifact(context.Background(), selected.SourceArtifactWriter(), source.bundle)
+				if err != nil {
+					t.Fatal(err)
+				}
+				facts[index] = fact
 			}
 			paths := []string{"worker/context-a", "worker/context-b"}
 			runIDs := []string{uuid.NewString(), uuid.NewString()}
@@ -129,6 +131,7 @@ func testDynamicTopologyStartupPreflightTwoContexts(t *testing.T, backend string
 				if err != nil {
 					t.Fatalf("construct runtime context %s: %v", fact.BundleHash(), err)
 				}
+				loaded[index].source = rt.Options.WorkflowModule.SemanticSource()
 				runtimes = append(runtimes, rt)
 			}
 			for index := range facts {
@@ -140,9 +143,20 @@ func testDynamicTopologyStartupPreflightTwoContexts(t *testing.T, backend string
 					facts[captured], runIDs[index], paths[index])
 				if captured != index {
 					ctx := serveDynamicTopologySetupContext(original, facts[index], runIDs[index], runtimeInstanceID)
-					disposition, err := storetest.ReviseRunSource(ctx,
+					rooted, err := loaded[index].bundle.RootedSource()
+					if err != nil {
+						t.Fatal(err)
+					}
+					ctx = runtimecorrelation.WithRootAdmission(ctx, rooted.Admission())
+					previous, err := loaded[captured].bundle.RootedSource()
+					if err != nil {
+						t.Fatal(err)
+					}
+					revisionCtx := runtimecorrelation.WithRootAdmission(
+						serveDynamicTopologySetupContext(original, facts[captured], runIDs[index], runtimeInstanceID), previous.Admission())
+					disposition, err := storetest.ReviseRunSource(revisionCtx,
 						selected.RuntimeDeps().EventBusDurable.RunLifecycle.(storetest.RunFixtureStore),
-						runlifecycle.SourceRevisionRequest{RunID: runIDs[index], Source: facts[index]})
+						runlifecycle.SourceRevisionRequest{RunID: runIDs[index], Source: facts[index], RootAdmission: rooted.Admission()})
 					if err != nil || disposition != runlifecycle.MutationApplied {
 						t.Fatalf("revise captured source to current context: disposition=%s err=%v", disposition, err)
 					}
@@ -174,8 +188,18 @@ func testDynamicTopologyStartupPreflightTwoContexts(t *testing.T, backend string
 			}
 			var coordinates []runtimeagenttopology.SourceCoordinate
 			var desired []runtimeagenttopology.DesiredAgent
+			inspectionContexts := make([]context.Context, len(runtimes))
 			for index, rt := range runtimes {
-				coordinate := runtimeagenttopology.SourceCoordinate{BundleHash: facts[index].BundleHash()}
+				rooted, err := loaded[index].bundle.RootedSource()
+				if err != nil {
+					t.Fatal(err)
+				}
+				inspectionContexts[index] = runtimecorrelation.WithRootAdmission(
+					runtimecorrelation.WithSourceArtifactFact(context.Background(), facts[index]), rooted.Admission())
+				coordinate, err := runtimeagenttopology.NewSourceCoordinate(rooted.Admission())
+				if err != nil {
+					t.Fatal(err)
+				}
 				agents, err := rt.Manager.CompileStaticTopologyDesiredAgents(loaded[index].source, coordinate)
 				if err != nil {
 					t.Fatal(err)
@@ -212,14 +236,14 @@ func testDynamicTopologyStartupPreflightTwoContexts(t *testing.T, backend string
 					}
 				}
 			}
-			local, err := runtimes[0].Manager.InspectDynamicFlowRuntimeReadinessForSource(context.Background(), facts[0])
+			local, err := runtimes[0].Manager.InspectDynamicFlowRuntimeReadinessForSource(inspectionContexts[0], facts[0])
 			if err != nil || len(local.CurrentCompleted) != 2 ||
 				local.CurrentCompleted[0].InstancePath != runIDs[0] || local.CurrentCompleted[1].InstancePath != paths[0] ||
 				len(local.CurrentPending) != 0 || len(local.SourceTransitionRequired) != 0 {
 				t.Fatalf("first context projection = %#v err=%v", local, err)
 			}
 			if foreign.sourceTransition {
-				transition, inspectErr := runtimes[1].Manager.InspectDynamicFlowRuntimeReadinessForSource(context.Background(), facts[1])
+				transition, inspectErr := runtimes[1].Manager.InspectDynamicFlowRuntimeReadinessForSource(inspectionContexts[1], facts[1])
 				if inspectErr != nil || len(transition.SourceTransitionRequired) != 1 || transition.SourceTransitionRequired[0].InstancePath != paths[1] ||
 					transition.SourceTransitionRequired[0].Plan.BundleHash != facts[0].BundleHash() ||
 					transition.SourceTransitionRequired[0].Plan.WorkflowVersion != loaded[0].source.WorkflowVersion() ||
@@ -230,7 +254,7 @@ func testDynamicTopologyStartupPreflightTwoContexts(t *testing.T, backend string
 					t.Fatalf("foreign transition projection = %#v err=%v", transition, inspectErr)
 				}
 			} else if !foreign.malformed {
-				pending, inspectErr := runtimes[1].Manager.InspectDynamicFlowRuntimeReadinessForSource(context.Background(), facts[1])
+				pending, inspectErr := runtimes[1].Manager.InspectDynamicFlowRuntimeReadinessForSource(inspectionContexts[1], facts[1])
 				if inspectErr != nil || len(pending.CurrentPending) != 1 || pending.CurrentPending[0].InstancePath != paths[1] ||
 					len(pending.CurrentCompleted) != 1 || pending.CurrentCompleted[0].InstancePath != runIDs[1] || len(pending.SourceTransitionRequired) != 0 {
 					t.Fatalf("foreign pending projection = %#v err=%v", pending, inspectErr)
@@ -271,7 +295,7 @@ func testDynamicTopologyStartupPreflightTwoContexts(t *testing.T, backend string
 
 func loadServeDynamicTopologySource(t *testing.T, selected *selectedStoreOwner, label string) serveRuntimeBundle {
 	t.Helper()
-	root := t.TempDir()
+	root := filepath.Join(t.TempDir(), label)
 	for path, contents := range canonicalrouting.DynamicTopologyStartupDocuments(t, label) {
 		writeWorkflowValidationFixtureFile(t, filepath.Join(root, path), contents)
 	}
@@ -308,8 +332,13 @@ func seedServeDynamicTopologyReadiness(t *testing.T, original context.Context, s
 		t.Fatal("startup construction requires its exact compiled and stored artifact")
 	}
 	ctx := worklifetime.WithOccurrence(serveDynamicTopologySetupContext(original, fact, runID, rt.Options.RuntimeInstanceID), rt.WorkOccurrence())
+	rooted, err := bundle.RootedSource()
+	if err != nil {
+		t.Fatal(err)
+	}
+	ctx = runtimecorrelation.WithRootAdmission(ctx, rooted.Admission())
 	storetest.RequireRun(t, ctx, selected.RuntimeDeps().EventBusDurable.RunLifecycle.(storetest.RunFixtureStore),
-		storetest.RunFixture{Origin: storetest.ScenarioSetupOrigin(), RunID: runID, Artifact: bundle.SourceArtifact})
+		storetest.RunFixture{Origin: storetest.ScenarioSetupOrigin(), RunID: runID, Artifact: bundle.SourceArtifact, RootAdmission: rooted.Admission()})
 	parent := runtimeflowidentity.Stored(source, semanticview.RootExecutionFlowID(source), runID, runID, runID, "")
 	rootPlan, err := rt.Manager.PrepareFlowInstanceActivation(ctx, runtimepipeline.FlowInstanceActivationRequest{
 		ContractBundle: source, Instance: parent, OccurredAt: time.Now().UTC(),

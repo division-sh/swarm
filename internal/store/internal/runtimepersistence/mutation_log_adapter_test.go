@@ -11,6 +11,7 @@ import (
 	runtimecorrelation "github.com/division-sh/swarm/internal/runtime/correlation"
 	runtimemutationlog "github.com/division-sh/swarm/internal/runtime/mutationlog"
 	runtimerunlifecycle "github.com/division-sh/swarm/internal/runtime/runlifecycle"
+	"github.com/division-sh/swarm/internal/sourceartifact"
 	privatemutationlog "github.com/division-sh/swarm/internal/store/internal/backend/mutationlog"
 	"github.com/division-sh/swarm/internal/store/internal/backend/mutationprotocol"
 	storerunfork "github.com/division-sh/swarm/internal/store/internal/backend/runforkpersistence"
@@ -20,8 +21,23 @@ import (
 )
 
 func TestMutationLogPrivateAdapterRequiresExactActiveRunSource(t *testing.T) {
-	artifactA := sourceartifactfixture.New("agents.yaml", []byte("agents:\n  mutation-log-a: {}\n"))
-	artifactB := sourceartifactfixture.New("agents.yaml", []byte("agents:\n  mutation-log-b: {}\n"))
+	artifactA, err := sourceartifact.AdmitMembers(map[string][]byte{
+		"manifest.yaml": []byte("version: 1.0.0\nplatform_version: '*'\n"),
+		"agents.yaml":   []byte("agents:\n  mutation-log-a: {}\n"),
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	artifactB, err := sourceartifact.AdmitMembers(map[string][]byte{
+		"manifest.yaml": []byte("version: 1.0.0\nplatform_version: '*'\n"),
+		"agents.yaml":   []byte("agents:\n  mutation-log-b: {}\n"),
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	rootA, _ := sourceartifactfixture.Rooted(t, "mutation-log", artifactA)
+	rootB, _ := sourceartifactfixture.Rooted(t, "mutation-log", artifactB)
+	artifactA, artifactB = rootA.Artifact(), rootB.Artifact()
 	bundleA := artifactA.BundleHash()
 	bundleB := artifactB.BundleHash()
 
@@ -52,7 +68,7 @@ func TestMutationLogPrivateAdapterRequiresExactActiveRunSource(t *testing.T) {
 			if tc.seedRun {
 				requireRunFixtureForTest(t, originalStoreFixtureContext(t, testAuthorActivityContextForBundle(bundleA), selected), selected, semanticRunFixture{
 					Origin: semanticScenarioSetupRunOriginForTest(), RunID: runID,
-					State: runtimerunlifecycle.StateRunning, BundleHash: bundleA,
+					State: runtimerunlifecycle.StateRunning, BundleHash: bundleA, Artifact: artifactA,
 					StartedAt: time.Date(2026, 8, 2, 14, 0, 0, 0, time.UTC),
 				})
 			}

@@ -9,6 +9,7 @@ import (
 
 	"github.com/division-sh/swarm/internal/runtime/agenttopology"
 	"github.com/division-sh/swarm/internal/runtime/canonicaljson"
+	"github.com/division-sh/swarm/internal/runtime/correlation"
 	runtimemanager "github.com/division-sh/swarm/internal/runtime/manager"
 	"github.com/division-sh/swarm/internal/runtime/startupownership"
 	"github.com/division-sh/swarm/internal/store/internal/backend/generationauthority"
@@ -135,7 +136,15 @@ func validateOrdinaryLifecycleHandoffTx(ctx context.Context, tx *sql.Tx, result 
 		if err != nil {
 			return err
 		}
-		if !present || plan.Revision != grant.SourceSetRevision || !generationauthority.SourceSetContains(plan, agenttopology.SourceCoordinate{BundleHash: grant.BundleHash}) {
+		root, rootPresent, err := correlation.RootAdmissionFromContext(ctx)
+		if err != nil || !rootPresent || root.BundleHash() != grant.BundleHash {
+			return errors.Join(err, errors.New("lifecycle takeover diagnostic requires its exact admitted root"))
+		}
+		coordinate, err := agenttopology.NewSourceCoordinate(root)
+		if err != nil {
+			return err
+		}
+		if !present || plan.Revision != grant.SourceSetRevision || !generationauthority.SourceSetContains(plan, coordinate) {
 			return errors.New("lifecycle takeover diagnostic source set is no longer current")
 		}
 		return nil

@@ -128,7 +128,7 @@ func TestServedClockMixedEnabledBindingsBothStores(t *testing.T) {
 			if err != nil {
 				t.Fatal(err)
 			}
-			for _, key := range []string{"telegram_bot_token", "webhook_signing.alpha", "webhook_signing.beta"} {
+			for _, key := range []string{"telegram.telegram_bot_token", "telegram.webhook_signing_secret"} {
 				if err := file.Set(context.Background(), key, "clock-binding-secret"); err != nil {
 					t.Fatal(err)
 				}

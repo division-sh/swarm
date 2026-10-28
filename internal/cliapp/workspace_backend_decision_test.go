@@ -308,9 +308,12 @@ func TestLocalPreflightAgentCensusIncludesOnlyAmbiguousScopedDeclarations(t *tes
 
 func scopedWorkspaceBackendAgentFixtureOptions(t *testing.T, includeRootAgent bool) semanticview.Source {
 	t.Helper()
-	root := t.TempDir()
+	root := filepath.Join(t.TempDir(), "scoped-workspace-backend")
+	for _, flow := range []string{".", "packages", "packages/project-a", "packages/project-b", "flow-a", "flow-b"} {
+		writeWorkflowValidationFixtureFile(t, filepath.Join(root, flow, "manifest.yaml"), "version: 1.0.0\nplatform_version: '*'\n")
+	}
 
-	writeWorkflowValidationFixtureFile(t, filepath.Join(root, "schema.yaml"), "name: scoped-workspace-backend\n")
+	writeWorkflowValidationFixtureFile(t, filepath.Join(root, "schema.yaml"), "stages: []\n")
 	writeWorkflowValidationFixtureFile(t, filepath.Join(root, "entities.yaml"), "item:\n  item_id: string\n")
 	rootAgents := ""
 	if includeRootAgent {
@@ -328,7 +331,7 @@ func scopedWorkspaceBackendAgentFixtureOptions(t *testing.T, includeRootAgent bo
 	}
 	for _, flowID := range []string{"flow-a", "flow-b"} {
 		dir := filepath.Join(root, flowID)
-		writeWorkflowValidationFixtureFile(t, filepath.Join(dir, "schema.yaml"), "name: "+flowID+"\nstages: []\n")
+		writeWorkflowValidationFixtureFile(t, filepath.Join(dir, "schema.yaml"), "stages: []\n")
 		writeWorkflowValidationFixtureFile(t, filepath.Join(dir, "agents.yaml"), "shared-worker:\n  model: regular\n  intent:\n    inline: Exercise flow-scoped workspace backend selection.\n")
 	}
 

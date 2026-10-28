@@ -11,6 +11,8 @@ import (
 	"time"
 
 	"github.com/division-sh/swarm/internal/channelonboarding"
+	"github.com/division-sh/swarm/internal/cliapp"
+	"github.com/division-sh/swarm/internal/config"
 	"github.com/division-sh/swarm/internal/operatorchannel"
 	"github.com/division-sh/swarm/internal/packadmission"
 	runtimepkg "github.com/division-sh/swarm/internal/runtime"
@@ -42,11 +44,19 @@ func installedSessionBootstrapFixture(t *testing.T, backend string) (*channelonb
 	if err != nil {
 		t.Fatal(err)
 	}
-	projection, err := packadmission.FromBundle(bundle)
+	packLoad, err := cliapp.LoadBundlePackRuntime(ctx, cliapp.RuntimeConfigLoadResult{Config: &config.Config{}}, bundle, nil, nil)
 	if err != nil {
 		t.Fatal(err)
 	}
 	fact := sourceartifactfixture.RequireArtifact(t, ctx, selected, bundle.SourceArtifact)
+	rooted, err := bundle.RootedSource()
+	if err != nil {
+		t.Fatal(err)
+	}
+	identity, err := contracts.BootBundleIdentity(bundle)
+	if err != nil {
+		t.Fatal(err)
+	}
 	owner := newSupervisorTestRuntimeOccurrence(t, fact.BundleHash())
 	serveBootstrapWireFixture(t, "connected", owner)
 	bus, err := runtimebus.NewEphemeralEventBusWithOptions(&processIngressEventStore{}, runtimebus.EventBusOptions{WorkOwner: owner,
@@ -54,12 +64,13 @@ func installedSessionBootstrapFixture(t *testing.T, backend string) (*channelonb
 	if err != nil {
 		t.Fatal(err)
 	}
-	definition := completeServeTestPackContext(t, runtimepkg.BundleContext{Source: semanticview.Wrap(bundle), SourceArtifactFact: fact, WorkOwner: owner,
-		BundleIdentity: contracts.BundleIdentity{WorkflowName: "whatsapp-session", WorkflowVersion: "1.0.0", BundleHash: fact.BundleHash()},
-		ChannelPlans:   projection.ChannelPlans,
+	definition := completeServeTestPackContext(t, runtimepkg.BundleContext{Source: semanticview.Wrap(bundle), SourceArtifactFact: fact, RootAdmission: rooted.Admission(), WorkOwner: owner,
+		BundleIdentity: identity,
+		ChannelPlans:   packLoad.Channels.Plans,
 		Runtime: &runtimepkg.Runtime{Bus: bus, ExecutionPosture: executionposture.Live,
-			Options: runtimepkg.RuntimeOptions{RuntimeInstanceID: owner.Identity().RuntimeInstanceID, SourceArtifactFact: fact, ChannelPlans: projection.ChannelPlans}}})
-	grant := admitServeSessionProcessFixture(t, selected.(startupownership.Store), owner.Identity().RuntimeInstanceID, fact.BundleHash())
+			Options: runtimepkg.RuntimeOptions{RuntimeInstanceID: owner.Identity().RuntimeInstanceID, SourceArtifactFact: fact,
+				WorkflowModule: stubWorkflowModule{source: semanticview.Wrap(bundle)}, ChannelPlans: packLoad.Channels.Plans}}})
+	grant := admitServeSessionProcessFixture(t, selected.(startupownership.Store), owner.Identity().RuntimeInstanceID, rooted.Admission())
 	definition.Runtime.Manager = manager.NewAgentManager(bus, nil)
 	if err := definition.Runtime.InstallStartupGrant(grant); err != nil {
 		t.Fatal(err)
@@ -78,7 +89,7 @@ func installedSessionBootstrapFixture(t *testing.T, backend string) (*channelonb
 		t.Fatal(err)
 	}
 	candidate, err := catalog.Resolve(channelonboarding.CandidateSelection{Provider: "whatsapp"})
-	if err != nil || candidate.ValidateDeclaration() != nil || candidate.Target.Alias != "reception" ||
+	if err != nil || candidate.ValidateDeclaration() != nil || candidate.Target.Alias != rooted.Admission().Reference().RootDirectory ||
 		candidate.Coordinate.BundleHash != fact.BundleHash() || candidate.Plan.HasNativeInbox() {
 		t.Fatal("artifact-derived catalog invented authority or lost source ownership", candidate, err)
 	}

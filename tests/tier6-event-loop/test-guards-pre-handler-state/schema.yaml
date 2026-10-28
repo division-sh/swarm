@@ -1,4 +1,4 @@
-name: test-guards-pre-handler-state
+# fixture: test-guards-pre-handler-state
 stages:
   active: {}
   processing: {final: true}

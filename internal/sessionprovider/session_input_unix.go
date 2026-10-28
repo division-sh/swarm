@@ -12,6 +12,7 @@ import (
 	"github.com/division-sh/swarm/internal/operatorchannel"
 	"github.com/division-sh/swarm/internal/runtime/correlation"
 	runtimeinbound "github.com/division-sh/swarm/internal/runtime/inboundpublication"
+	"github.com/division-sh/swarm/internal/sourceartifact"
 	"github.com/google/uuid"
 )
 
@@ -37,6 +38,7 @@ type nativeSessionInput struct {
 	OriginalCapture            capturedEvent
 	OriginalPublicationRequest []byte
 	OwnedSource                correlation.SourceArtifactFact
+	OwnedRoot                  sourceartifact.RootAdmission
 	NativeCurrent              func() bool
 }
 
@@ -132,6 +134,10 @@ func (r *sessionInputReader) readRetainedInput(ctx context.Context, reference Se
 	}
 	account := device.ID.ToNonAD().String()
 	ownedSource, _ := correlation.SourceArtifactFactFromContext(occurrence.ctx)
+	ownedRoot, _, err := correlation.RootAdmissionFromContext(occurrence.ctx)
+	if err != nil {
+		return result, err
+	}
 	rows, err := r.spool.pendingPublications(workContext)
 	if err != nil {
 		return result, err
@@ -159,6 +165,7 @@ func (r *sessionInputReader) readRetainedInput(ctx context.Context, reference Se
 			OriginalCapture:            event,
 			OriginalPublicationRequest: row.requestBytes,
 			OwnedSource:                ownedSource,
+			OwnedRoot:                  ownedRoot,
 			NativeCurrent:              nativeCurrent,
 			Body:                       event.Body, ReceivedAt: event.ReceivedAt, Context: workContext, Release: release}, nil
 	}

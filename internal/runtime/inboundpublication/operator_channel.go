@@ -42,6 +42,9 @@ func ProjectOperatorOutput(output providertriggers.DeliveryEvent, request Reques
 		return previous, nil
 	}
 	for _, plan := range channelPlans {
+		if !plan.MatchesCapturedHolder(request.FlowPath) {
+			continue
+		}
 		action, matched, err := plan.ProjectActionFact(string(output.Name), output.Authorization, output.Payload)
 		if err != nil {
 			return nil, err

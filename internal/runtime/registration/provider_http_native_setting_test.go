@@ -63,7 +63,7 @@ func TestChannelNativeSettingEffectOutcomes(t *testing.T) {
 		t.Fatal(err)
 	}
 	input := map[string]any{"chat_id": "42", "commands": []any{map[string]any{"command": mustNativeSettingTestCommand(), "description": "Open inbox"}}}
-	credentials := map[string]any{"telegram_bot_token": "bot-secret"}
+	credentials := map[string]any{"telegram.telegram_bot_token": "bot-secret"}
 	t.Run("exact readback settles", func(t *testing.T) {
 		h := &nativeSettingHarness{Harness: effecttest.New()}
 		client := &http.Client{Transport: registrationRoundTripFunc(func(*http.Request) (*http.Response, error) {

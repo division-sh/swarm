@@ -38,6 +38,7 @@ import (
 	"github.com/division-sh/swarm/internal/runtime/semanticview"
 	runtimestartupownership "github.com/division-sh/swarm/internal/runtime/startupownership"
 	"github.com/division-sh/swarm/internal/runtime/testfixtures/canonicalrouting"
+	"github.com/division-sh/swarm/internal/sourceartifact"
 	"github.com/division-sh/swarm/internal/store"
 	"github.com/division-sh/swarm/internal/store/storetest"
 	"github.com/division-sh/swarm/internal/store/testutil/agentfixture"
@@ -61,6 +62,7 @@ type completeEventDispatchStore interface {
 	runtimepipeline.DecisionCardDraftExpiry
 	runtimepipeline.HumanTaskExpiry
 	PipelineObligations() runtimepipelineobligation.Store
+	EnsureRootedSource(context.Context, sourceartifact.RootedSource) (sourceartifact.RootedEnsureResult, error)
 }
 
 type completeEventDispatchFixture struct {
@@ -291,6 +293,18 @@ func newCompleteEventDispatchFixtureWithOrigin(
 	bus, err := newScopedTestEventBus(selected, opts)
 	if err != nil {
 		t.Fatalf("NewEventBus: %v", err)
+	}
+	bundle, present := semanticview.Bundle(source)
+	if !present || bundle == nil {
+		t.Fatal("complete dispatch fixture requires its captured source")
+	}
+	rooted, err := bundle.RootedSource()
+	if err != nil {
+		t.Fatal(err)
+	}
+	ctx = runtimecorrelation.WithRootAdmission(ctx, rooted.Admission())
+	if _, err := selected.EnsureRootedSource(ctx, rooted); err != nil {
+		t.Fatal(err)
 	}
 	createdAt := time.Now().UTC().Add(-time.Minute).Truncate(time.Microsecond)
 	runID, eventID := uuid.NewString(), uuid.NewString()
@@ -584,7 +598,14 @@ func (f completeEventDispatchFixture) newRecordingManager(
 		}
 	})
 	bundleHash := fact.BundleHash()
-	coordinate := runtimeagenttopology.SourceCoordinate{BundleHash: bundleHash}
+	rooted, err := bundle.RootedSource()
+	if err != nil {
+		t.Fatal(err)
+	}
+	coordinate, err := runtimeagenttopology.NewSourceCoordinate(rooted.Admission())
+	if err != nil {
+		t.Fatal(err)
+	}
 	desired, err := manager.CompileStaticTopologyDesiredAgents(f.source, coordinate)
 	if err != nil {
 		t.Fatalf("compile complete-event static topology: %v", err)

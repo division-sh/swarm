@@ -9,6 +9,7 @@ import (
 	"time"
 
 	"github.com/division-sh/swarm/internal/runtime/agentmemory"
+	runtimecorrelation "github.com/division-sh/swarm/internal/runtime/correlation"
 	runtimedelivery "github.com/division-sh/swarm/internal/runtime/deliverylifecycle"
 	runtimeeffects "github.com/division-sh/swarm/internal/runtime/effects"
 	"github.com/division-sh/swarm/internal/runtime/executionposture"
@@ -16,6 +17,7 @@ import (
 	runtimellm "github.com/division-sh/swarm/internal/runtime/llm"
 	llmselection "github.com/division-sh/swarm/internal/runtime/llm/selection"
 	"github.com/division-sh/swarm/internal/runtime/runfork"
+	"github.com/division-sh/swarm/internal/runtime/semanticview"
 	"github.com/division-sh/swarm/internal/store/testutil/agentfixture"
 	"github.com/division-sh/swarm/internal/testutil"
 	"github.com/google/uuid"
@@ -242,17 +244,27 @@ func completionBudgetRaceAuthority(t *testing.T, fixture completionBudgetRaceFix
 			t.Fatal(err)
 		}
 		selected := newSelectedProviderCompletionFixtureWithProcess(t, fixture.primary, fixture.db, fixture.sqlite, process)
-		issued, err := fixture.primary.IssueRunForkSelectedContractRuntimeExecution(fixture.normal.original, selected.request)
+		bundle, found := semanticview.Bundle(selected.providerSource)
+		if !found {
+			t.Fatal("selected budget fixture has no compiled source")
+		}
+		rooted, err := bundle.RootedSource()
+		if err != nil {
+			t.Fatal(err)
+		}
+		selectedCtx := runtimecorrelation.WithRootAdmission(runtimecorrelation.WithSourceArtifactFact(fixture.normal.original,
+			mustStoreTestSourceArtifactFact(rooted.Admission().BundleHash())), rooted.Admission())
+		issued, err := fixture.primary.IssueRunForkSelectedContractRuntimeExecution(selectedCtx, selected.request)
 		if err != nil {
 			t.Fatalf("issue budget-race selected authority: %v", err)
 		}
-		authority, err := fixture.primary.ClaimRunForkSelectedContractRuntimeExecution(fixture.normal.original, issued, "budget-selected", time.Minute)
+		authority, err := fixture.primary.ClaimRunForkSelectedContractRuntimeExecution(selectedCtx, issued, "budget-selected", time.Minute)
 		if err != nil {
 			t.Fatalf("claim budget-race selected authority: %v", err)
 		}
-		admitSelectedProviderFixture(t, fixture.normal.original, selected, issued, authority)
+		admitSelectedProviderFixture(t, selectedCtx, selected, issued, authority)
 		authority.Target = selectedProviderTarget(selected)
-		return authority, selectedProviderClaimContext(t, fixture.normal.original, selected, authority)
+		return authority, selectedProviderClaimContext(t, selectedCtx, selected, authority)
 	case runtimeeffects.AuthorityConversationForkChat:
 		now := time.Now().UTC()
 		var source conversationForkSourceFixture

@@ -11,6 +11,7 @@ import (
 
 	"github.com/division-sh/swarm/internal/events"
 	"github.com/division-sh/swarm/internal/events/eventtest"
+	swarmruntime "github.com/division-sh/swarm/internal/runtime"
 	runtimebus "github.com/division-sh/swarm/internal/runtime/bus"
 	"github.com/division-sh/swarm/internal/runtime/contracts"
 	"github.com/division-sh/swarm/internal/runtime/joinruntime"
@@ -88,7 +89,7 @@ func TestA2JoinDeadlineExecutionRetainsEntryAndPartialContextOnBothStores(t *tes
 					Subscriptions: []events.EventType{"item.completed", "halt.requested", "touch"}, ExecutionType: contracts.SystemNodeExecutionType}}}
 				probe := &a2HeldDeadlineDeliveryProbe{Probe: lifecycleprobe.New(), entered: make(chan struct{}), release: make(chan struct{})}
 				logger := &exactJoinRuntimeLogger{}
-				bus, err := newScopedTestEventBus(t, selected.events, runtimebus.EventBusOptions{ContractBundle: source, SourceArtifactFact: fact, TestLifecycleProbe: probe, Logger: logger},
+				bus, err := newScopedTestEventBus(t, selected.events, runtimebus.EventBusOptions{ContractBundle: source, SourceArtifactFact: fact, PayloadAdmitter: swarmruntime.NewRuntimePayloadAdmitter(nil, source, fact), TestLifecycleProbe: probe, Logger: logger},
 					"platform.join_complete", "platform.join_timeout")
 				if err != nil {
 					t.Fatal(err)

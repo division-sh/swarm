@@ -62,8 +62,8 @@ func (o SelectedContractExecutionOwner) prepareResetBindingHistory(ctx context.C
 	}
 	inspection := resetSourceInspection{loader}
 	loaded, err := inspection.LoadRunForkSelectedContractSourceForRequest(ctx, SelectedContractSourceLoadRequest{
-		SourceRunID: binding.SourceRunID,
-		Selection:   runfork.RunForkContractSelection{Mode: runfork.RunForkContractSelectionModeSelectedContracts},
+		Responsibility: OriginalRunSource(binding.SourceRunID),
+		Selection:      runfork.RunForkContractSelection{Mode: runfork.RunForkContractSelectionModeSelectedContracts},
 	})
 	if err != nil {
 		return runfork.SelectedResetPreparation{}, fmt.Errorf("inspect selected reset source: %w", err)

@@ -11,7 +11,6 @@ import (
 	"github.com/division-sh/swarm/internal/packadmission"
 	"github.com/division-sh/swarm/internal/packs"
 	"github.com/division-sh/swarm/internal/providertriggers"
-	runtimecontracts "github.com/division-sh/swarm/internal/runtime/contracts"
 	runtimecredentials "github.com/division-sh/swarm/internal/runtime/credentials"
 	"github.com/division-sh/swarm/internal/runtime/executionposture"
 	"github.com/division-sh/swarm/internal/runtime/semanticview"
@@ -20,11 +19,11 @@ import (
 )
 
 func TestPublicIngressClassificationUsesCompleteDeclaredAndLearnedOwners(t *testing.T) {
-	for _, mode := range []string{"raw_author", "pack_unmanaged", "declared", "learned", "prebinding"} {
+	for _, mode := range []string{"pack_unmanaged", "declared", "learned", "prebinding"} {
 		t.Run(mode, func(t *testing.T) {
 			use, target, _, _ := publicIngressRegistrationFixture(t, mode)
 			admitted, managed, err := use.AdmitPublicIngressTarget(target)
-			wantManaged := mode != "raw_author" && mode != "pack_unmanaged"
+			wantManaged := mode != "pack_unmanaged"
 			if err != nil || managed != wantManaged || admitted.registrationAdmission == nil {
 				t.Fatalf("mode=%s managed=%t guard=%t err=%v", mode, managed, admitted.registrationAdmission != nil, err)
 			}
@@ -37,22 +36,10 @@ func TestPublicIngressClassificationUsesCompleteDeclaredAndLearnedOwners(t *test
 				}
 			}
 			wantSource := providertriggers.PolicySourceVerifiedPack
-			if mode == "raw_author" {
-				wantSource = providertriggers.PolicySourceRawDeclaration
-			}
 			if got := admitted.AdmissionPlan.PolicySource(); got != wantSource {
 				t.Fatalf("policy source=%s want=%s", got, wantSource)
 			}
 		})
-	}
-}
-
-func TestPublicIngressRawRegistrationNamespaceCollisionIsRefused(t *testing.T) {
-	rt, _, _ := publicIngressRegistrationRuntime(t, "raw_declared")
-	targets, err := rt.PlanStandingTargets()
-	const want = `coordinator/schema.yaml: raw ingress alias "chat" provider "telegram" conflicts with installed pack "provider.telegram"; use pack admission or rename the intentional raw namespace to "telegram-raw"`
-	if err == nil || err.Error() != want || len(targets) != 0 {
-		t.Fatalf("raw registration namespace collision targets=%+v err=%v, want %q", targets, err, want)
 	}
 }
 
@@ -173,38 +160,44 @@ func publicIngressRegistrationFixture(t *testing.T, mode string) (*RuntimeContex
 
 func publicIngressRegistrationRuntime(t *testing.T, mode string) (*Runtime, *runtimecredentials.FileStore, *standingLearnedCredentialStore) {
 	t.Helper()
-	source, catalog := standingTelegramDeclarationSource(t, "inbound.telegram")
-	bundle, _ := semanticview.Bundle(source)
-	if mode == "raw_author" || mode == "raw_declared" {
-		mutateStandingCoordinatorSchema(t, bundle, func(schema *runtimecontracts.FlowSchemaDocument) {
-			if mode == "raw_author" {
-				schema.Ingress.Providers[0].Provider = "partner"
-				schema.Ingress.Providers[0].SigningSecret = "webhook_signing.partner"
-			}
-			schema.Ingress.Providers[0].Admission = runtimecontracts.ProjectFlowIngressAdmission{
-				Kind: "raw", Event: "inbound.telegram", Payload: "json",
-				Authentication: &runtimecontracts.ProjectFlowIngressAuthentication{Kind: "hmac_sha256", Header: "X-Signature", Encoding: "hex"},
-				DeliveryID:     &runtimecontracts.ProjectFlowIngressDeliveryID{Source: "header", Header: "X-Delivery"},
-			}
-		})
+	const metadata = "version: 1.0.0\nplatform_version: '*'\n"
+	members := map[string][]byte{
+		"manifest.yaml":             []byte(metadata),
+		"schema.yaml":               []byte("stages: []\n"),
+		"coordinator/manifest.yaml": []byte(metadata),
+		"coordinator/schema.yaml":   []byte("stages: []\npins: {inputs: [inbound.telegram.raw]}\n"),
+	}
+	entry, present := packfixture.EmbeddedInventory(t).Lookup("telegram")
+	if !present {
+		t.Fatal("missing captured Telegram provider")
+	}
+	for name, body := range entry.Provider().Members() {
+		members["coordinator/telegram/"+name] = body
 	}
 	if mode == "mixed" {
-		mutateStandingCoordinatorSchema(t, bundle, func(schema *runtimecontracts.FlowSchemaDocument) {
-			schema.Ingress.Providers = append(schema.Ingress.Providers, runtimecontracts.ProjectFlowIngressProvider{
-				Provider: "partner", SigningSecret: "webhook_signing.partner",
-				Admission: runtimecontracts.ProjectFlowIngressAdmission{
-					Kind: "raw", Event: "inbound.telegram", Payload: "json",
-					Authentication: &runtimecontracts.ProjectFlowIngressAuthentication{Kind: "hmac_sha256", Header: "X-Signature", Encoding: "hex"},
-					DeliveryID:     &runtimecontracts.ProjectFlowIngressDeliveryID{Source: "header", Header: "X-Delivery"},
-				},
-			})
-		})
+		members["coordinator/schema.yaml"] = []byte("stages: []\npins: {inputs: [inbound.telegram.raw, inbound.partner.raw]}\n")
+		members["coordinator/partner/manifest.yaml"] = []byte(metadata + "capabilities: {can: {emit_events: [raw], verify_secret: webhook_signing_secret}, cannot: [execute code]}\n")
+		members["coordinator/partner/trigger.yaml"] = []byte("secret: {required: true}\nsignature: {type: hmac_sha256, header: X-Signature, prefix: 'sha256=', signed_payload: raw_body}\ndelivery_id: {header: X-Delivery, required: true}\nevent_type: {literal: fixture, required: true}\nevent_name: {literal: raw}\n")
+	}
+	bundle, rooted, _ := loadS1EffectiveProviderScope(t, members)
+	source := semanticview.Wrap(bundle)
+	providers, err := packadmission.AdmitProviderSource(rooted, bundle.Platform)
+	if err != nil {
+		t.Fatal(err)
+	}
+	scope, err := providers.Scope("coordinator")
+	if err != nil {
+		t.Fatal(err)
+	}
+	catalog, err := scope.TriggerCatalog()
+	if err != nil {
+		t.Fatal(err)
 	}
 	projection, err := packadmission.FromBundle(bundle)
 	if err != nil {
 		t.Fatalf("exact channel plan=%+v err=%v", projection, err)
 	}
-	plan := packfixture.ChannelPlanByID(t, projection.ChannelPlans, "provider.telegram.hitl_channel")
+	plan := packfixture.ChannelPlanByID(t, projection.ChannelPlans, "telegram")
 	registration, ok := plan.Registration()
 	if !ok {
 		t.Fatal("missing compiled registration")
@@ -213,8 +206,8 @@ func publicIngressRegistrationRuntime(t *testing.T, mode string) (*Runtime, *run
 	if err != nil {
 		t.Fatal(err)
 	}
-	if mode == "mixed" || mode == "raw_author" {
-		if err := file.Set(t.Context(), "webhook_signing.partner", "independent-author-secret"); err != nil {
+	if mode == "mixed" {
+		if err := file.Set(t.Context(), "partner.webhook_signing_secret", "independent-author-secret"); err != nil {
 			t.Fatal(err)
 		}
 	}
@@ -234,14 +227,14 @@ func publicIngressRegistrationRuntime(t *testing.T, mode string) (*Runtime, *run
 		OperationID: uuid.NewString(), Provider: "telegram", Interface: identity,
 		Phase: channelonboarding.PhaseRetired, TargetSelector: "ingress:coordinator:telegram",
 		Coordinate: channelonboarding.ChannelRuntimeContextCoordinate{
-			BundleHash: runtimeContextTestHashA, PackInventoryGeneration: bundle.PackInventory.Digest(), PlanGeneration: generation,
+			BundleHash: rooted.Artifact().BundleHash(), PackInventoryGeneration: bundle.PackInventory.Digest(), PlanGeneration: generation,
 		},
 	}
 	keys := map[string]string{}
 	for _, role := range append(registration.ProviderCredentials(), registration.SigningCredential()) {
 		key := "test." + role
 		if role == registration.SigningCredential() {
-			key = "webhook_signing.telegram"
+			key = role
 		}
 		keys[role] = key
 		if err := file.Set(t.Context(), key, "public-ingress-test-"+role); err != nil {
@@ -256,7 +249,7 @@ func publicIngressRegistrationRuntime(t *testing.T, mode string) (*Runtime, *run
 		})
 	}
 	bindings := []packs.OutboundBindingPlan{}
-	if mode == "declared" || mode == "raw_declared" || mode == "mixed" {
+	if mode == "declared" || mode == "mixed" {
 		binding, err := packs.NewOutboundBindingPlanWithRegistration("telegram", plan, "42", nil, keys, operation.TargetSelector)
 		if err != nil {
 			t.Fatal(err)
@@ -282,7 +275,7 @@ func publicIngressRegistrationRuntime(t *testing.T, mode string) (*Runtime, *run
 	rt := &Runtime{Options: RuntimeOptions{
 		WorkflowModule: semanticOnlyWorkflowRuntime{source: source}, ProviderTriggerCatalog: catalog,
 		ChannelPlans: projection.ChannelPlans, DeclaredChannelPublication: declared,
-		ProviderCredentials: file, ChannelOnboardingStore: store, SourceArtifactFact: testSourceArtifactFact(t, runtimeContextTestHashA),
+		ProviderCredentials: file, ChannelOnboardingStore: store, SourceArtifactFact: testSourceArtifactFact(t, rooted.Artifact().BundleHash()),
 	}}
 	return rt, file, store
 }

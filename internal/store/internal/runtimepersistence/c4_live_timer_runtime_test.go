@@ -112,16 +112,25 @@ func c4LiveTimerRuntime(t *testing.T, ctx context.Context, selected any, loaded 
 		t.Fatal(err)
 	}
 	definition := runtimepkg.BundleContext{
-		SourceArtifactFact: loaded.SourceArtifactFact, Source: loaded.Source, Runtime: rt, WorkOwner: rt.WorkOccurrence(),
+		SourceArtifactFact: loaded.SourceArtifactFact, RootAdmission: loaded.RootedSource.Admission(), Source: loaded.Source, Runtime: rt, WorkOwner: rt.WorkOccurrence(),
 	}
 	if bundle, found := semanticview.Bundle(loaded.Source); found && bundle.PackInventory != nil {
 		definition.PackInventoryDigest = bundle.PackInventory.Digest()
-		projection, err := packadmission.FromBundle(bundle)
+		providers, err := packadmission.AdmitProviderSource(loaded.RootedSource, bundle.Platform)
 		if err != nil {
 			t.Fatal(err)
 		}
-		definition.ProviderTriggerGeneration = projection.ProviderTriggers.Generation()
-		definition.InstalledTriggerSubjects, err = projection.ProviderTriggers.InstalledCapabilitySubjects()
+		scope, err := providers.Scope(semanticview.RootExecutionFlowID(loaded.Source))
+		if err != nil {
+			t.Fatal(err)
+		}
+		catalog, err := scope.TriggerCatalog()
+		if err != nil {
+			t.Fatal(err)
+		}
+		definition.ProviderTriggerCatalog = catalog
+		definition.ProviderTriggerGeneration = catalog.Generation()
+		definition.InstalledTriggerSubjects, err = catalog.InstalledCapabilitySubjects()
 		if err != nil {
 			t.Fatal(err)
 		}

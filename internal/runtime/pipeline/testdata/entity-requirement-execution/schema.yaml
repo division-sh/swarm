@@ -1,4 +1,4 @@
-name: review
+# fixture: review
 stages:
   active: {}
   killed: {final: true}

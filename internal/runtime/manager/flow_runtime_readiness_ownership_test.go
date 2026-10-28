@@ -55,7 +55,8 @@ func TestDynamicReadinessOwnershipIsMemoizedOnlyWithinOneInspection(t *testing.T
 	for n := 0; n < 9; n++ {
 		store.projection.CurrentCompleted = append(store.projection.CurrentCompleted, row(foreignRun, n))
 	}
-	am := newFlowActivationManager(t, &flowActivationTestBus{}, store)
+	am, ctx := newFlowActivationManagerForSource(t, &flowActivationTestBus{}, store, loadRootAndFlowStaticAgentSource(t))
+	fact := am.semanticReadinessSource.fact
 	owner := &countedReadinessOwnership{
 		AgentLifecyclePersistence: am.lifecycle.persistence(),
 		states:                    map[string]RunExecutionOwnership{ownedRun: RunExecutionOwned, foreignRun: RunExecutionForeign},
@@ -64,7 +65,7 @@ func TestDynamicReadinessOwnershipIsMemoizedOnlyWithinOneInspection(t *testing.T
 	am.lifecycle.replacePersistence(owner)
 	check := func(wantCompleted, wantPending, wantTransition int) {
 		t.Helper()
-		got, err := am.InspectDynamicFlowRuntimeReadinessForSource(context.Background(), authorActivityTestSourceArtifactFact)
+		got, err := am.InspectDynamicFlowRuntimeReadinessForSource(ctx, fact)
 		if err != nil {
 			t.Fatal(err)
 		}
@@ -90,22 +91,22 @@ func TestDynamicReadinessOwnershipIsMemoizedOnlyWithinOneInspection(t *testing.T
 	owner.mu.Lock()
 	owner.states[ownedRun] = 0
 	owner.mu.Unlock()
-	if _, err := am.InspectDynamicFlowRuntimeReadinessForSource(context.Background(), authorActivityTestSourceArtifactFact); err == nil {
+	if _, err := am.InspectDynamicFlowRuntimeReadinessForSource(ctx, fact); err == nil {
 		t.Fatal("invalid ownership disposition was cached or accepted")
 	}
 	owner.mu.Lock()
 	owner.err = errors.New("ownership unavailable")
 	owner.mu.Unlock()
-	if _, err := am.InspectDynamicFlowRuntimeReadinessForSource(context.Background(), authorActivityTestSourceArtifactFact); !errors.Is(err, owner.err) {
+	if _, err := am.InspectDynamicFlowRuntimeReadinessForSource(ctx, fact); !errors.Is(err, owner.err) {
 		t.Fatalf("ownership reader failure = %v", err)
 	}
-	ctx, cancel := context.WithCancel(context.Background())
+	ctx, cancel := context.WithCancel(ctx)
 	cancel()
-	if _, err := am.InspectDynamicFlowRuntimeReadinessForSource(ctx, authorActivityTestSourceArtifactFact); !errors.Is(err, context.Canceled) {
+	if _, err := am.InspectDynamicFlowRuntimeReadinessForSource(ctx, fact); !errors.Is(err, context.Canceled) {
 		t.Fatalf("canceled inspection = %v", err)
 	}
 	store.projection = runtimepipeline.DynamicFlowRuntimeReadinessProjection{}
-	if _, err := am.InspectDynamicFlowRuntimeReadinessForSource(ctx, authorActivityTestSourceArtifactFact); !errors.Is(err, context.Canceled) {
+	if _, err := am.InspectDynamicFlowRuntimeReadinessForSource(ctx, fact); !errors.Is(err, context.Canceled) {
 		t.Fatalf("canceled empty inspection = %v", err)
 	}
 }

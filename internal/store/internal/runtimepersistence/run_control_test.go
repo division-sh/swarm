@@ -11,6 +11,7 @@ import (
 	runtimeruncontrol "github.com/division-sh/swarm/internal/runtime/runcontrol"
 	"github.com/division-sh/swarm/internal/runtime/runfork"
 	runtimerunlifecycle "github.com/division-sh/swarm/internal/runtime/runlifecycle"
+	"github.com/division-sh/swarm/internal/sourceartifact"
 	"github.com/division-sh/swarm/internal/store/internal/backend/mutationprotocol"
 	"github.com/division-sh/swarm/internal/testutil"
 	"github.com/google/uuid"
@@ -27,7 +28,7 @@ func requireLiveRunControlSelection(t *testing.T, fixture runLifecycleCandidateP
 		ContinueRunControlOutcome(context.Context, runtimeruncontrol.TransitionRequest) (runtimeruncontrol.StoreTransition, error)
 		StopRunControlOutcome(context.Context, runtimeruncontrol.TransitionRequest) (runtimeruncontrol.StoreTransition, error)
 		SelectLiveRunTx(context.Context, *mutationprotocol.Attempt, string, time.Time) (string, error)
-		InsertRunForkRunTx(context.Context, *mutationprotocol.Attempt, string, string, runfork.RunForkPoint, time.Time, runtimecorrelation.SourceArtifactFact) error
+		InsertRunForkRunTx(context.Context, *mutationprotocol.Attempt, string, string, runfork.RunForkPoint, time.Time, runtimecorrelation.SourceArtifactFact, sourceartifact.RootAdmission) error
 		RunDispatchBlocked(context.Context, string) (bool, error)
 		RunDispatchParked(context.Context, string) (bool, error)
 		RequestCompletionCandidate(context.Context, runtimerunlifecycle.CandidateRequest) (runtimerunlifecycle.CandidateRequestDisposition, error)
@@ -36,6 +37,10 @@ func requireLiveRunControlSelection(t *testing.T, fixture runLifecycleCandidateP
 	landingReader := fixture.store.(runtimerunlifecycle.LandingRunReader)
 	scope := runtimerunlifecycle.LiveRunScope{FlowPath: "."}
 	source, _ := runtimecorrelation.SourceArtifactFactFromContext(ctx)
+	root, present, rootErr := runtimecorrelation.RootAdmissionFromContext(ctx)
+	if rootErr != nil || !present {
+		t.Fatalf("live run control fixture requires its captured source admission: %v", rootErr)
+	}
 	requireLanding := func(runID string, state runtimerunlifecycle.State) {
 		t.Helper()
 		landing, found, err := landingReader.LoadLandingRun(ctx, scope)
@@ -44,7 +49,7 @@ func requireLiveRunControlSelection(t *testing.T, fixture runLifecycleCandidateP
 		}
 	}
 	first, second := uuid.NewString(), uuid.NewString()
-	request := runtimerunlifecycle.CreateRequest{RunID: first, Source: source, Origin: runtimerunlifecycle.DeploymentRunOrigin(), StartedAt: time.Now().UTC(), LiveScope: scope}
+	request := runtimerunlifecycle.CreateRequest{RunID: first, Source: source, RootAdmission: root, Origin: runtimerunlifecycle.DeploymentRunOrigin(), StartedAt: time.Now().UTC(), LiveScope: scope}
 	for _, invalid := range []string{"../source", "one//two", `one\two`, " first"} {
 		invalidRequest := request
 		invalidRequest.LiveScope.FlowPath = invalid
@@ -152,7 +157,7 @@ func requireLiveRunControlSelection(t *testing.T, fixture runLifecycleCandidateP
 	third := uuid.NewString()
 	err = runSelectedFixtureMutation(ctx, fixture.store, "fork older paused sibling", func(ctx context.Context, attempt *mutationprotocol.Attempt) error {
 		if err := owner.InsertRunForkRunTx(ctx, attempt, third, first,
-			runfork.RunForkPoint{Kind: runfork.RunForkPointStateRevision, Revision: 1}, time.Now().UTC(), source); err != nil {
+			runfork.RunForkPoint{Kind: runfork.RunForkPointStateRevision, Revision: 1}, time.Now().UTC(), source, root); err != nil {
 			return err
 		}
 		previous, err := owner.SelectLiveRunTx(ctx, attempt, third, time.Now().UTC())

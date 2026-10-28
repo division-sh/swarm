@@ -32,7 +32,7 @@ type SourceBootEffectContext struct {
 
 // PrepareSourceBootEffectContext compiles the exact mock response plan and
 // derives effect reachability from an already admitted effective source.
-func PrepareSourceBootEffectContext(source semanticview.Source, configuredDefault llmselection.Profile, posture executionposture.Posture) (SourceBootEffectContext, error) {
+func PrepareSourceBootEffectContext(source semanticview.Source, configuredDefault llmselection.Profile, posture executionposture.Posture, publicIngressAbsent bool) (SourceBootEffectContext, error) {
 	if source == nil {
 		return SourceBootEffectContext{}, fmt.Errorf("effective semantic source is required")
 	}
@@ -40,7 +40,7 @@ func PrepareSourceBootEffectContext(source semanticview.Source, configuredDefaul
 	if err != nil {
 		return SourceBootEffectContext{}, fmt.Errorf("provider connector mock response compilation failed: %w", err)
 	}
-	reachability, err := ResolveSourceBootEffectReachability(source, configuredDefault, plan, posture)
+	reachability, err := ResolveSourceBootEffectReachability(source, configuredDefault, plan, posture, publicIngressAbsent)
 	if err != nil {
 		return SourceBootEffectContext{}, fmt.Errorf("resolve source boot effect reachability: %w", err)
 	}
@@ -55,7 +55,7 @@ func PrepareSourceBootEffectContext(source semanticview.Source, configuredDefaul
 // can still execute for one effective source. Any live-selected agent or
 // declarative workflow activity keeps its outbound tools reachable; an
 // mock command admits exact responders without changing authored declarations.
-func ResolveSourceBootEffectReachability(source semanticview.Source, configuredDefault llmselection.Profile, plan *providerconnectors.MockResponsePlan, posture executionposture.Posture) (SourceBootEffectReachability, error) {
+func ResolveSourceBootEffectReachability(source semanticview.Source, configuredDefault llmselection.Profile, plan *providerconnectors.MockResponsePlan, posture executionposture.Posture, publicIngressAbsent bool) (SourceBootEffectReachability, error) {
 	if source == nil {
 		return SourceBootEffectReachability{}, fmt.Errorf("semantic source is required")
 	}
@@ -97,7 +97,11 @@ func ResolveSourceBootEffectReachability(source semanticview.Source, configuredD
 		}
 		fact.unreachableOutboundTools = map[string]struct{}{}
 		for toolID, entries := range sourceToolEntriesByID(source) {
-			if exactMockResponderAdmitsEveryEntry(plan, toolID, entries) {
+			registrationUnreachable := publicIngressAbsent && len(entries) != 0 && len(fact.liveWorkflowActivitySites[toolID]) == 0
+			for _, entry := range entries {
+				registrationUnreachable = registrationUnreachable && entry.Category() == runtimecontracts.ToolCategoryProviderRegistration
+			}
+			if registrationUnreachable || exactMockResponderAdmitsEveryEntry(plan, toolID, entries) {
 				fact.unreachableOutboundTools[toolID] = struct{}{}
 			}
 		}

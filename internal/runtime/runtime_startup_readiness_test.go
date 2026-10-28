@@ -14,6 +14,8 @@ import (
 	runtimepipeline "github.com/division-sh/swarm/internal/runtime/pipeline"
 	"github.com/division-sh/swarm/internal/runtime/semanticview"
 	"github.com/division-sh/swarm/internal/runtime/startupownership"
+	"github.com/division-sh/swarm/internal/runtime/testfixtures/canonicalrouting"
+	"github.com/division-sh/swarm/internal/testutil/sourceartifactfixture"
 )
 
 type delayedSubscriptionBackgroundNode struct {
@@ -57,10 +59,12 @@ func (*delayedSubscriptionBackgroundNode) String() string {
 	return "delayed-system-node"
 }
 
-type startupReadinessWorkflowModule struct{}
+type startupReadinessWorkflowModule struct {
+	source semanticview.Source
+}
 
-func (startupReadinessWorkflowModule) SemanticSource() semanticview.Source {
-	return semanticview.Wrap(&runtimecontracts.WorkflowContractBundle{})
+func (m startupReadinessWorkflowModule) SemanticSource() semanticview.Source {
+	return m.source
 }
 
 func (startupReadinessWorkflowModule) WorkflowNodes() []runtimepipeline.WorkflowNode {
@@ -78,6 +82,11 @@ func newStartupReadinessTestRuntime(t testing.TB, nodes ...runtimepipeline.Backg
 func newStartupReadinessTestRuntimeWithSession(t testing.TB, decorate func(*runtimeTestRetainedSession) startupownership.RetainedSession, nodes ...runtimepipeline.BackgroundNode) *Runtime {
 	t.Helper()
 	fact := testSourceArtifactFact(t, runtimeTestBundleHash)
+	rooted, _ := sourceartifactfixture.Rooted(t, "runtime-only", sourceartifactfixture.Artifact())
+	bundle, err := runtimecontracts.LoadWorkflowContractBundleFromRootedSource(canonicalrouting.RepoRoot(t), rooted, "", runtimecontracts.WorkflowContractLoadOptions{})
+	if err != nil {
+		t.Fatal(err)
+	}
 	var decorators []func(*runtimeTestRetainedSession) startupownership.RetainedSession
 	if decorate != nil {
 		decorators = append(decorators, decorate)
@@ -94,7 +103,7 @@ func newStartupReadinessTestRuntimeWithSession(t testing.TB, decorate func(*runt
 		deliveryStore:  &managedNativeRecoveryDeliveryStore{},
 		Options: RuntimeOptions{
 			DisablePersistentStartupRecovery: true,
-			WorkflowModule:                   startupReadinessWorkflowModule{},
+			WorkflowModule:                   startupReadinessWorkflowModule{source: semanticview.Wrap(bundle)},
 			SourceArtifactFact:               fact,
 		},
 	}

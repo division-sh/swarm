@@ -36,7 +36,7 @@ func TestSelectedForkIndependentOperationsExecuteDistinctChildrenBothStores(t *t
 				}
 				selected := request.SourceLoader.(SourceArtifactSelectedContractSourceLoader).Store
 				advanced := eventtest.ExistingRunRootIngressWithRoutingSourceAndMode(uuid.NewString(), "item.received", "source-runtime", "", []byte(`{}`), 0,
-					request.SourceRunID, events.EventEnvelope{}, events.NoRoutingSource(), time.Unix(1700002300, 0).UTC(), executionmode.Mock)
+					request.SourceRunID, events.EventEnvelope{}, eventtest.RootRoutingSource(request.SourceRunID), time.Unix(1700002300, 0).UTC(), executionmode.Mock)
 				storetest.CommitSemanticEventWithRoutes(t, ctx, selected, advanced,
 					[]events.DeliveryRoute{selectedExecutionEntitylessNodeRoute("source-only-node")}, pipelineobligation.ScopeSubscribed)
 				storetest.CaptureRunForkSnapshot(t, ctx, selected, request.SourceRunID)
