@@ -53,9 +53,6 @@ func TestLoadAvailabilityClassifiesSourceArtifactPresence(t *testing.T) {
 }
 
 func TestListActiveNonStandingUsesArtifactPresenceOwner(t *testing.T) {
-	// W3 excludes legacy standing runs until W1 removes standing_service (both v0.7).
-	// W1 must delete this note with that layer; if W1 leaves v0.7, W3 merge returns
-	// to the orchestrator: https://github.com/division-sh/swarm/issues/2728#issuecomment-6448399236
 	_, db, _ := testutil.StartPostgres(t)
 	ctx := testAuthorActivityContext()
 	owner := newPostgresOwnerForTest(t, db)

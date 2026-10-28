@@ -139,7 +139,6 @@ func listActiveNonStanding(ctx context.Context, q interface {
 		       EXISTS (SELECT 1 FROM source_artifacts a WHERE a.bundle_hash = runs.bundle_hash)
 		FROM runs
 		WHERE status IN ($1, $2, $3)
-		  AND NOT runs.landing_run
 		ORDER BY run_id
 	`
 	if sqlite {
