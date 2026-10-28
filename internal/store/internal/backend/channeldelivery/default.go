@@ -92,7 +92,7 @@ func loadDefault(ctx context.Context, db queryer, postgres, lock bool) (Default,
 	if db == nil {
 		return Default{}, false, fmt.Errorf("channel delivery default store is required")
 	}
-	query := `SELECT principal_id, interface_key, binding_revision, delivery_epoch, external_account_reference,
+	query := `SELECT principal_id, interface_key, binding_revision, delivery_epoch, external_account,
 		conversation_reference, conversation_scope, state, first_operation_id
 		FROM channel_delivery_defaults WHERE singleton_id = 1`
 	if postgres && lock {
@@ -134,11 +134,11 @@ func ApplyBindingTx(ctx context.Context, tx *sql.Tx, binding operatorchannel.Bin
 	}
 	if !found {
 		query := `INSERT INTO channel_delivery_defaults (singleton_id, principal_id, interface_key, binding_revision, delivery_epoch,
-			external_account_reference, conversation_reference, conversation_scope, state, first_operation_id, updated_at)
+			external_account, conversation_reference, conversation_scope, state, first_operation_id, updated_at)
 			VALUES (1, ?, ?, ?, 1, ?, ?, ?, 'current', ?, ?)`
 		if postgres {
 			query = `INSERT INTO channel_delivery_defaults (singleton_id, principal_id, interface_key, binding_revision, delivery_epoch,
-				external_account_reference, conversation_reference, conversation_scope, state, first_operation_id, updated_at)
+				external_account, conversation_reference, conversation_scope, state, first_operation_id, updated_at)
 				VALUES (1, $1, $2, $3, 1, $4, $5, $6, 'current', $7, $8)`
 		}
 		_, err = tx.ExecContext(ctx, query, binding.PrincipalID, binding.Interface.Key(), binding.Revision,
@@ -170,10 +170,10 @@ func ApplyBindingTx(ctx context.Context, tx *sql.Tx, binding operatorchannel.Bin
 	if current.State == StateRetired || kind == operatorchannel.OperationRebind {
 		epoch++
 	}
-	query := `UPDATE channel_delivery_defaults SET binding_revision = ?, delivery_epoch = ?, external_account_reference = ?,
+	query := `UPDATE channel_delivery_defaults SET binding_revision = ?, delivery_epoch = ?, external_account = ?,
 		conversation_reference = ?, conversation_scope = ?, state = 'current', updated_at = ? WHERE singleton_id = 1`
 	if postgres {
-		query = `UPDATE channel_delivery_defaults SET binding_revision = $1, delivery_epoch = $2, external_account_reference = $3,
+		query = `UPDATE channel_delivery_defaults SET binding_revision = $1, delivery_epoch = $2, external_account = $3,
 			conversation_reference = $4, conversation_scope = $5, state = 'current', updated_at = $6 WHERE singleton_id = 1`
 	}
 	_, err = tx.ExecContext(ctx, query, binding.Revision, epoch, binding.ExternalAccountRef, binding.ConversationRef,

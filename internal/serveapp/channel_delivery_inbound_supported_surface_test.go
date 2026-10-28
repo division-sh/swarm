@@ -463,7 +463,7 @@ func runChannelDeliveryInboundDispositionE2E(t *testing.T, backend, scenario str
 				"event_name":      "inbound.telegram.text_message",
 				"idempotency_key": fmt.Sprintf("preconnection-notice-%d", index),
 				"payload": map[string]any{
-					"text": "ordinary business text", "external_account_reference": "7000",
+					"text": "ordinary business text", "external_account": "7000",
 					"conversation_reference": "1001", "conversation_scope": "direct",
 					"provider_message_reference": 9100 + index,
 				},

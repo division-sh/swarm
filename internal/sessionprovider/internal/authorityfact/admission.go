@@ -13,7 +13,7 @@ import (
 type Account struct {
 	Provider     string `json:"provider"`
 	ConnectionID string `json:"connection_id"`
-	AccountRef   string `json:"account_reference"`
+	AccountRef   string `json:"operator_account"`
 	AdmissionID  string `json:"admission_id"`
 	Revision     int64  `json:"admission_revision"`
 }

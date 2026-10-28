@@ -20,7 +20,7 @@ func ResolveCurrentTextTx(ctx context.Context, tx *sql.Tx, text operatorchannel.
 	query := `SELECT b.principal_id, b.interface_key, b.binding_revision
 		FROM operator_channel_bindings b
 		WHERE b.interface_key=? AND b.status='current'
-		AND b.external_account_reference=? AND b.conversation_reference=? AND b.conversation_scope=?
+		AND b.external_account=? AND b.conversation_reference=? AND b.conversation_scope=?
 		AND EXISTS (SELECT 1 FROM connected_channel_activations a
 			JOIN channel_onboarding_operations o ON o.operation_id=a.operation_id
 			WHERE a.interface_key=b.interface_key AND a.status='current' AND o.phase='succeeded'
@@ -32,7 +32,7 @@ func ResolveCurrentTextTx(ctx context.Context, tx *sql.Tx, text operatorchannel.
 		query = `SELECT b.principal_id::text, b.interface_key, b.binding_revision
 			FROM operator_channel_bindings b
 			WHERE b.interface_key=$1 AND b.status='current'
-			AND b.external_account_reference=$2 AND b.conversation_reference=$3 AND b.conversation_scope=$4
+			AND b.external_account=$2 AND b.conversation_reference=$3 AND b.conversation_scope=$4
 			AND EXISTS (SELECT 1 FROM connected_channel_activations a
 				JOIN channel_onboarding_operations o ON o.operation_id=a.operation_id
 				WHERE a.interface_key=b.interface_key AND a.status='current' AND o.phase='succeeded'
@@ -105,8 +105,8 @@ func ResolveCurrentInboxEntryTx(ctx context.Context, tx *sql.Tx, text operatorch
 			AND s.pack_id=a.channel_pack_id AND s.pack_version=a.channel_pack_version
 			AND s.pack_manifest_hash=a.channel_manifest_hash
 			AND s.scope_kind=CASE WHEN b.conversation_scope='direct' THEN 'chat' ELSE 'chat_member' END
-			AND s.member_reference=CASE WHEN b.conversation_scope='direct' THEN '' ELSE b.external_account_reference END
-		WHERE b.interface_key=? AND b.status='current' AND b.external_account_reference=?
+			AND s.member_reference=CASE WHEN b.conversation_scope='direct' THEN '' ELSE b.external_account END
+		WHERE b.interface_key=? AND b.status='current' AND b.external_account=?
 			AND b.conversation_reference=? AND b.conversation_scope=? AND a.provider=?
 			AND s.entry_command=? LIMIT 2`
 	if postgres {
@@ -128,8 +128,8 @@ func ResolveCurrentInboxEntryTx(ctx context.Context, tx *sql.Tx, text operatorch
 				AND s.pack_id=a.channel_pack_id AND s.pack_version=a.channel_pack_version
 				AND s.pack_manifest_hash=a.channel_manifest_hash
 				AND s.scope_kind=CASE WHEN b.conversation_scope='direct' THEN 'chat' ELSE 'chat_member' END
-				AND s.member_reference=CASE WHEN b.conversation_scope='direct' THEN '' ELSE b.external_account_reference END
-			WHERE b.interface_key=$1 AND b.status='current' AND b.external_account_reference=$2
+				AND s.member_reference=CASE WHEN b.conversation_scope='direct' THEN '' ELSE b.external_account END
+			WHERE b.interface_key=$1 AND b.status='current' AND b.external_account=$2
 				AND b.conversation_reference=$3 AND b.conversation_scope=$4 AND a.provider=$5
 				AND s.entry_command=$6 LIMIT 2`
 	}

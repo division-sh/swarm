@@ -22,7 +22,7 @@ type incomingPayload struct {
 	Kind                string  `json:"kind"`
 	Conversation        string  `json:"conversation_reference"`
 	ConversationScope   string  `json:"conversation_scope"`
-	Sender              string  `json:"external_account_reference"`
+	Sender              string  `json:"external_account"`
 	MessageReference    string  `json:"provider_message_reference"`
 	TargetReference     *string `json:"target_message_reference,omitempty"`
 	ReplyReference      *string `json:"reply_to_message_reference,omitempty"`

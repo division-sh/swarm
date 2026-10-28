@@ -668,7 +668,7 @@ type channelOnboardingJourneyReadback struct {
 		} `json:"interface"`
 		Status            string `json:"status"`
 		BindingRevision   int64  `json:"binding_revision"`
-		AccountReference  string `json:"account_reference"`
+		AccountReference  string `json:"operator_account"`
 		ConversationRef   string `json:"conversation_reference"`
 		ConversationScope string `json:"conversation_scope"`
 		ProofID           string `json:"proof_id"`

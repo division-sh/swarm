@@ -35,7 +35,7 @@ type proofRecord struct {
 	Revision            int64                   `json:"revision"`
 	Status              ProofStatus             `json:"status"`
 	Interface           InterfaceIdentity       `json:"interface"`
-	ExternalAccountRef  string                  `json:"external_account_reference"`
+	ExternalAccountRef  string                  `json:"external_account"`
 	ConversationRef     string                  `json:"conversation_reference"`
 	ConversationScope   ConversationScope       `json:"conversation_scope"`
 	AccountPresentation string                  `json:"account_presentation,omitempty"`

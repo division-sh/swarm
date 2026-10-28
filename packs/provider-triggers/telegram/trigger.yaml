@@ -29,7 +29,7 @@ normalized_events:
       interaction_reference:
         from: callback_query.id
         schema: {type: string, minLength: 1}
-      external_account_reference:
+      external_account:
         from: callback_query.from.id
         schema: {type: string, pattern: '^[0-9]+$', minLength: 1, maxLength: 17}
         convert: number_to_text
@@ -57,7 +57,7 @@ normalized_events:
       text:
         from: message.text
         schema: {type: string, minLength: 1, maxLength: 4096}
-      external_account_reference:
+      external_account:
         from: message.from.id
         schema: {type: string, pattern: '^[0-9]+$', minLength: 1, maxLength: 17}
         convert: number_to_text

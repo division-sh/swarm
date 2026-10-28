@@ -75,13 +75,13 @@ func requireReceiverInitializationPublicProviderIngressCases(t *testing.T, rt se
 		t.Fatal("provider-input duplicate conservation requires its exact-origin snapshot-writer fence")
 	}
 	const input = "inbound.telegram.text_message"
-	payload := map[string]any{"conversation_reference": "2307", "conversation_scope": "direct", "external_account_reference": "2307", "provider_message_reference": 7, "text": "direct initialization"}
+	payload := map[string]any{"conversation_reference": "2307", "conversation_scope": "direct", "external_account": "2307", "provider_message_reference": 7, "text": "direct initialization"}
 	for _, tc := range []struct {
 		name, event, code string
 		payload           map[string]any
 	}{
 		{"private_child", "telegram-chat/chat.initialized", apiv1.EventNotDeclaredCode, map[string]any{"conversation_reference": "2307", "text": "not a declared input", "provider_message_reference": 7, "enabled": false}},
-		{"wrong_provider_integer", input, apiv1.PayloadValidationFailedCode, map[string]any{"conversation_reference": "2307", "conversation_scope": "direct", "external_account_reference": "2307", "provider_message_reference": "7", "text": "invalid"}},
+		{"wrong_provider_integer", input, apiv1.PayloadValidationFailedCode, map[string]any{"conversation_reference": "2307", "conversation_scope": "direct", "external_account": "2307", "provider_message_reference": "7", "text": "invalid"}},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			before := receiverIngressApplicationSnapshot(t, rt.ReceiverStateReader)

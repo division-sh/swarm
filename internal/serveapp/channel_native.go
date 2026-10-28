@@ -458,7 +458,7 @@ func nativeInboxInput(plan packs.OutboundBindingPlan, setting channelnative.Sett
 		if setting.MemberReference == "" {
 			return nil, fmt.Errorf("shared native inbox scope lacks member reference")
 		}
-		member, err := plan.RestoreOpaqueReference("external_account_reference", setting.MemberReference)
+		member, err := plan.RestoreOpaqueReference("external_account", setting.MemberReference)
 		if err != nil {
 			return nil, err
 		}

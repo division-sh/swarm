@@ -21,7 +21,7 @@ func CurrentActivationID(ctx context.Context, tx *sql.Tx, postgres bool) (string
 		WHERE selected.singleton_id=1 AND selected.state='current'
 		AND binding.status='current' AND binding.principal_id=selected.principal_id
 		AND binding.binding_revision=selected.binding_revision
-		AND binding.external_account_reference=selected.external_account_reference
+		AND binding.external_account=selected.external_account
 		AND binding.conversation_reference=selected.conversation_reference
 		AND binding.conversation_scope=selected.conversation_scope
 		AND onboarding.phase='succeeded'
@@ -39,7 +39,7 @@ func CurrentActivationID(ctx context.Context, tx *sql.Tx, postgres bool) (string
 			WHERE selected.singleton_id=1 AND selected.state='current'
 			AND binding.status='current' AND binding.principal_id=selected.principal_id
 			AND binding.binding_revision=selected.binding_revision
-			AND binding.external_account_reference=selected.external_account_reference
+			AND binding.external_account=selected.external_account
 			AND binding.conversation_reference=selected.conversation_reference
 			AND binding.conversation_scope=selected.conversation_scope
 			AND onboarding.phase='succeeded'

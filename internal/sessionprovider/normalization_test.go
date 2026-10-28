@@ -44,8 +44,8 @@ normalized_events:
       conversation_scope:
         from: conversation_scope
         schema: {type: string, enum: [direct, shared]}
-      external_account_reference:
-        from: external_account_reference
+      external_account:
+        from: external_account
         schema: {type: string, minLength: 1}
       provider_message_reference:
         from: provider_message_reference
@@ -114,7 +114,7 @@ func TestWhatsAppIncomingAcceptedPackProjectionIsNotAdmission(t *testing.T) {
 				if string(got.Name) != "inbound.whatsapp."+kind || got.Kind != providertriggers.OutputKindNormalized ||
 					!got.Authorization.Empty() || got.AuthorSubjectType != "chat" || got.AuthorSubjectID != captured.Conversation ||
 					got.Payload["provider_message_reference"] != captured.EventID ||
-					got.Payload["external_account_reference"] != event.Info.Sender.String() ||
+					got.Payload["external_account"] != event.Info.Sender.String() ||
 					got.Payload["provider_timestamp_ms"] != json.Number(fmt.Sprint(event.Info.Timestamp.UnixMilli())) {
 					t.Fatalf("projection changed identity or granted authority: %+v", got)
 				}

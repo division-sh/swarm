@@ -50,7 +50,7 @@ func ListCurrentInputDraftsTx(ctx context.Context, tx *sql.Tx, text operatorchan
 			AND selected.binding_revision=plan.binding_revision AND selected.principal_id=plan.principal_id
 		WHERE draft.principal_id=? AND draft.status='active' AND draft.expires_at>?
 			AND plan.interface_key=? AND plan.binding_revision=?
-			AND plan.external_account_reference=? AND plan.conversation_reference=? AND plan.conversation_scope=?
+			AND plan.external_account=? AND plan.conversation_reference=? AND plan.conversation_scope=?
 			AND draft.input_draft_id>?
 		ORDER BY draft.input_draft_id LIMIT ?`
 	if postgres {
@@ -66,7 +66,7 @@ func ListCurrentInputDraftsTx(ctx context.Context, tx *sql.Tx, text operatorchan
 				AND selected.binding_revision=plan.binding_revision AND selected.principal_id=plan.principal_id
 			WHERE draft.principal_id=$1 AND draft.status='active' AND draft.expires_at>$2
 				AND plan.interface_key=$3 AND plan.binding_revision=$4
-				AND plan.external_account_reference=$5 AND plan.conversation_reference=$6 AND plan.conversation_scope=$7
+				AND plan.external_account=$5 AND plan.conversation_reference=$6 AND plan.conversation_scope=$7
 				AND draft.input_draft_id>$8::uuid
 			ORDER BY draft.input_draft_id LIMIT $9`
 	}
@@ -126,7 +126,7 @@ func quotedCardReceiptMatchesTx(ctx context.Context, tx *sql.Tx, text operatorch
 		AND plan.current_receipt_operation_id=receipt.effect_operation_id AND plan.current_render_id=receipt.render_id
 		AND ((plan.source_kind='card' AND plan.source_id=?) OR plan.source_kind='response')
 		AND plan.principal_id=? AND plan.interface_key=? AND plan.binding_revision=?
-		AND plan.external_account_reference=? AND plan.conversation_reference=? AND plan.conversation_scope=?`
+		AND plan.external_account=? AND plan.conversation_reference=? AND plan.conversation_scope=?`
 	if postgres {
 		query = `SELECT receipt.provider_reference, frozen.render_input, frozen.render_hash, plan.source_kind, plan.source_id::text FROM channel_delivery_receipts receipt
 			JOIN channel_delivery_plans plan ON plan.delivery_id=receipt.delivery_id
@@ -138,7 +138,7 @@ func quotedCardReceiptMatchesTx(ctx context.Context, tx *sql.Tx, text operatorch
 			AND plan.current_receipt_operation_id=receipt.effect_operation_id AND plan.current_render_id=receipt.render_id
 			AND ((plan.source_kind='card' AND plan.source_id=$1::uuid) OR plan.source_kind='response')
 			AND plan.principal_id=$2::uuid AND plan.interface_key=$3 AND plan.binding_revision=$4
-			AND plan.external_account_reference=$5 AND plan.conversation_reference=$6 AND plan.conversation_scope=$7`
+			AND plan.external_account=$5 AND plan.conversation_reference=$6 AND plan.conversation_scope=$7`
 	}
 	rows, err := tx.QueryContext(ctx, query, cardID, bound.PrincipalID, bound.InterfaceKey, bound.BindingRevision,
 		text.ExternalAccountRef, text.ConversationRef, string(text.ConversationScope))

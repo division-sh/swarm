@@ -128,14 +128,14 @@ interfaces:
         install_shared_inbox_entry:
           effect_class: non_idempotent_write
           input:
-            member_reference: {opaque: external_account_reference}
+            member_reference: {opaque: external_account}
             commands: {schema: inbox_install_commands}
           context:
             destination: {opaque: destination}
         read_shared_inbox_entry:
           effect_class: read_only
           input:
-            member_reference: {opaque: external_account_reference}
+            member_reference: {opaque: external_account}
             language_code: {schema: inbox_language}
           context:
             destination: {opaque: destination}
@@ -160,14 +160,14 @@ interfaces:
           required_fields:
             token: {schema: nonempty_text}
             interaction_reference: {opaque: interaction_reference}
-            external_account_reference: {opaque: external_account_reference}
+            external_account: {opaque: external_account}
             conversation_reference: {opaque: conversation_reference}
             conversation_scope: {schema: conversation_scope}
             provider_message_reference: {opaque: delivery_reference}
         text:
           required_fields:
             text: {schema: inbound_text}
-            external_account_reference: {opaque: external_account_reference}
+            external_account: {opaque: external_account}
             conversation_reference: {opaque: conversation_reference}
             conversation_scope: {schema: conversation_scope}
             provider_message_reference: {opaque: delivery_reference}
@@ -13105,7 +13105,7 @@ tool_model:
       - delivery_reference
       - delivery_receipt
       - interaction_reference
-      - external_account_reference
+      - external_account
       - conversation_reference
       rule: >
         Each satisfier binds every slot exactly once to either a non-empty string schema or a closed object schema whose
@@ -13120,7 +13120,7 @@ tool_model:
         Malformed, empty, duplicate-key, noncanonical, wrong-slot or schema-contradictory values fail closed, with no
         string/object fallback. Restoration confers no identity, principal, audience, credential or effect authority.
         Callback ACK consumes the interaction_reference slot; both shared native read and install consume
-        external_account_reference for member_reference. PrepareOperation remains strict for typed semantic input.
+        external_account for member_reference. PrepareOperation remains strict for typed semantic input.
         Provider-native conversation-kind vocabulary does not cross the v2 interface. The required provider-neutral
         conversation_scope is exactly direct or shared and is projected once by the accepted provider trigger.
     operation_model:
@@ -17363,7 +17363,7 @@ platform_tables:
             state TEXT NOT NULL CHECK (state IN ('awaiting_claim','awaiting_confirmation','bound','rejected','credential_stale','expired','unbound')),
             operation_revision BIGINT NOT NULL CHECK (operation_revision > 0),
             binding_revision BIGINT CHECK (binding_revision > 0),
-            external_account_reference TEXT,
+            external_account TEXT,
             conversation_reference TEXT,
             conversation_scope TEXT CHECK (conversation_scope IS NULL OR conversation_scope IN ('direct','shared')),
             account_presentation TEXT,
@@ -17386,7 +17386,7 @@ platform_tables:
             updated_at TIMESTAMPTZ NOT NULL,
             CHECK ((operation_kind = 'unbind' AND challenge IS NULL AND state = 'unbound') OR (operation_kind <> 'unbind' AND challenge IS NOT NULL)),
             CHECK ((operation_kind = 'unbind' AND provider_authority IS NULL) OR (operation_kind <> 'unbind' AND provider_authority IS NOT NULL)),
-            CHECK (state NOT IN ('awaiting_confirmation','bound','rejected','credential_stale') OR (external_account_reference IS NOT NULL AND conversation_reference IS NOT NULL AND conversation_scope IS NOT NULL)),
+            CHECK (state NOT IN ('awaiting_confirmation','bound','rejected','credential_stale') OR (external_account IS NOT NULL AND conversation_reference IS NOT NULL AND conversation_scope IS NOT NULL)),
             CHECK ((state IN ('bound','unbound')) = (binding_revision IS NOT NULL)),
             CHECK ((save_proof AND planned_proof_id IS NOT NULL AND planned_proof_revision IS NOT NULL) OR (NOT save_proof AND planned_proof_id IS NULL AND planned_proof_revision IS NULL)),
             CHECK ((proof_status IN ('pending','active','failed','revoked') AND proof_id IS NOT NULL AND proof_revision IS NOT NULL) OR (proof_status = 'skipped' AND proof_id IS NULL AND proof_revision IS NULL)),
@@ -17411,7 +17411,7 @@ platform_tables:
             channel_manifest_hash TEXT NOT NULL,
             semantic_generation TEXT NOT NULL,
             provider_authority JSONB,
-            external_account_reference TEXT,
+            external_account TEXT,
             conversation_reference TEXT,
             conversation_scope TEXT CHECK (conversation_scope IS NULL OR conversation_scope IN ('direct','shared')),
             account_presentation TEXT,
@@ -17422,7 +17422,7 @@ platform_tables:
             proof_revision BIGINT CHECK (proof_revision IS NULL OR proof_revision > 0),
             operation_id UUID NOT NULL REFERENCES operator_channel_operations(operation_id),
             updated_at TIMESTAMPTZ NOT NULL,
-            CHECK ((status = 'current' AND provider_authority IS NOT NULL AND external_account_reference IS NOT NULL AND conversation_reference IS NOT NULL AND conversation_scope IS NOT NULL AND source IS NOT NULL) OR (status = 'unbound' AND provider_authority IS NULL AND external_account_reference IS NULL AND conversation_reference IS NULL AND conversation_scope IS NULL AND source IS NULL)),
+            CHECK ((status = 'current' AND provider_authority IS NOT NULL AND external_account IS NOT NULL AND conversation_reference IS NOT NULL AND conversation_scope IS NOT NULL AND source IS NOT NULL) OR (status = 'unbound' AND provider_authority IS NULL AND external_account IS NULL AND conversation_reference IS NULL AND conversation_scope IS NULL AND source IS NULL)),
             CHECK (source <> 'local_proof' OR (proof_id IS NOT NULL AND proof_revision IS NOT NULL)),
             INDEX idx_operator_channel_bindings_principal (principal_id, interface_key),
             INDEX idx_operator_channel_bindings_proof (proof_id, proof_revision)
@@ -17450,7 +17450,7 @@ platform_tables:
             interface_key TEXT NOT NULL REFERENCES operator_channel_bindings(interface_key),
             binding_revision BIGINT NOT NULL CHECK (binding_revision > 0),
             delivery_epoch BIGINT NOT NULL CHECK (delivery_epoch > 0),
-            external_account_reference TEXT NOT NULL,
+            external_account TEXT NOT NULL,
             conversation_reference TEXT NOT NULL,
             conversation_scope TEXT NOT NULL CHECK (conversation_scope IN ('direct','shared')),
             state TEXT NOT NULL CHECK (state IN ('current','retired')),
@@ -17619,7 +17619,7 @@ platform_tables:
             interface_key TEXT NOT NULL REFERENCES operator_channel_bindings(interface_key),
             binding_revision BIGINT NOT NULL CHECK (binding_revision > 0),
             delivery_epoch BIGINT NOT NULL CHECK (delivery_epoch > 0),
-            external_account_reference TEXT NOT NULL,
+            external_account TEXT NOT NULL,
             conversation_reference TEXT NOT NULL,
             conversation_scope TEXT NOT NULL CHECK (conversation_scope IN ('direct','shared')),
             state TEXT NOT NULL CHECK (state IN ('planned','rendered','sent','uncertain','retired')),
@@ -17847,7 +17847,7 @@ platform_tables:
             connect_fence_revision BIGINT NOT NULL DEFAULT 0,
             activation_revision BIGINT,
             confirmation_operation_id UUID,
-            account_reference TEXT NOT NULL DEFAULT '',
+            operator_account TEXT NOT NULL DEFAULT '',
             account_confirmed BOOLEAN NOT NULL DEFAULT FALSE,
             logout_completed BOOLEAN NOT NULL DEFAULT FALSE,
             expected_account TEXT NOT NULL DEFAULT '',
@@ -17858,13 +17858,13 @@ platform_tables:
             completed_at TIMESTAMPTZ,
             CHECK (bundle_hash IS NULL AND runtime_instance_id IS NULL AND activation_revision IS NULL AND confirmation_operation_id IS NULL),
             CHECK ((phase IN ('succeeded','failed','retired')) = (completed_at IS NOT NULL)),
-            CHECK (NOT account_confirmed OR account_reference <> ''),
+            CHECK (NOT account_confirmed OR operator_account <> ''),
             CHECK (NOT logout_completed OR phase = 'retired'),
             CHECK (phase <> 'succeeded' OR account_confirmed),
             CHECK ((provider = 'whatsapp') = (activation_posture = 'session_connection')),
             CHECK ((activation_posture = 'session_connection') = (session_connection_id IS NOT NULL)),
             UNIQUE INDEX idx_deployment_channel_active_slot (slot_key) WHERE phase NOT IN ('succeeded','failed','retired'),
-            UNIQUE INDEX idx_deployment_channel_account (principal_id,provider,account_reference) WHERE account_confirmed AND phase <> 'retired',
+            UNIQUE INDEX idx_deployment_channel_account (principal_id,provider,operator_account) WHERE account_confirmed AND phase <> 'retired',
             INDEX idx_deployment_channel_principal (principal_id,requested_at)
         );
     channel_onboarding_teardowns:
@@ -37394,7 +37394,7 @@ api_specification:
           state: {type: string, enum: [awaiting_claim, awaiting_confirmation, bound, rejected, credential_stale, expired, unbound]}
           revision: {type: integer, minimum: 1}
           binding_revision: {type: integer, minimum: 1}
-          external_account_reference: {type: string}
+          external_account: {type: string}
           conversation_reference: {type: string}
           conversation_scope: {type: string, enum: [direct, shared]}
           account_presentation: {type: string}
@@ -37414,7 +37414,7 @@ api_specification:
         properties:
           principal_id: {$ref: '#/components/schemas/OpaqueId'}
           interface: {$ref: '#/components/schemas/OperatorChannelInterface'}
-          external_account_reference: {type: string}
+          external_account: {type: string}
           conversation_reference: {type: string}
           conversation_scope: {type: string, enum: [direct, shared]}
           account_presentation: {type: string}
@@ -37428,14 +37428,14 @@ api_specification:
       OperatorChannelProof:
         type: object
         additionalProperties: false
-        required: [format, proof_id, revision, status, interface, external_account_reference, conversation_reference, conversation_scope, method, challenge, original_operation_id, minting_store_id, minting_deployment_id, verified_at, operator_confirmed, consent_scopes]
+        required: [format, proof_id, revision, status, interface, external_account, conversation_reference, conversation_scope, method, challenge, original_operation_id, minting_store_id, minting_deployment_id, verified_at, operator_confirmed, consent_scopes]
         properties:
           format: {type: string, const: swarm-verified-account-proof-v3}
           proof_id: {$ref: '#/components/schemas/OpaqueId'}
           revision: {type: integer, minimum: 1}
           status: {type: string, enum: [active, revoked]}
           interface: {$ref: '#/components/schemas/OperatorChannelInterface'}
-          external_account_reference: {type: string, minLength: 1}
+          external_account: {type: string, minLength: 1}
           conversation_reference: {type: string, minLength: 1}
           conversation_scope: {type: string, enum: [direct, shared]}
           account_presentation: {type: string}
@@ -37461,7 +37461,7 @@ api_specification:
           status: {type: string, enum: [current, stale, unbound, revoked]}
           reason: {type: string}
           binding_revision: {type: integer, minimum: 1}
-          external_account_reference: {type: string}
+          external_account: {type: string}
           conversation_reference: {type: string}
           conversation_scope: {type: string, enum: [direct, shared]}
           account_presentation: {type: string}
@@ -37523,7 +37523,7 @@ api_specification:
           phase: {type: string, enum: [preparing, credentials_admitted, activating_provider, awaiting_external_identity, awaiting_operator_confirmation, succeeded, failed, retired]}
           revision: {type: integer, minimum: 1}
           save_proof: {type: boolean}
-          account_reference: {type: string, minLength: 1}
+          operator_account: {type: string, minLength: 1}
           expected_account: {type: string, minLength: 1}
           account_confirmed: {type: boolean}
           logout_completed: {type: boolean}

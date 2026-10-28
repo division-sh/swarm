@@ -67,20 +67,20 @@ func insertControlCopyPlanTx(ctx context.Context, tx *sql.Tx, action operatorcha
 		return fmt.Errorf("requested control copy generation exhausted")
 	}
 	query = `INSERT INTO channel_delivery_plans (delivery_id, source_kind, source_id, request_activation_id,
-		summary_count, principal_id, interface_key, binding_revision, delivery_epoch, external_account_reference,
+		summary_count, principal_id, interface_key, binding_revision, delivery_epoch, external_account,
 		conversation_reference, conversation_scope, state, current_render_id, action_capacity, text_capacity,
 		label_capacity, action_page_index, resend_generation, resend_of_delivery_id, resend_action_publication_id, created_at)
 		SELECT ?, source_kind, source_id, request_activation_id, summary_count, principal_id, interface_key,
-		binding_revision, delivery_epoch, external_account_reference, conversation_reference, conversation_scope,
+		binding_revision, delivery_epoch, external_account, conversation_reference, conversation_scope,
 		'rendered', ?, action_capacity, text_capacity, label_capacity, action_page_index+1, ?, delivery_id, ?, ?
 		FROM channel_delivery_plans WHERE delivery_id=? AND state='sent' AND current_render_id=? AND current_receipt_operation_id=?`
 	if postgres {
 		query = `INSERT INTO channel_delivery_plans (delivery_id, source_kind, source_id, request_activation_id,
-			summary_count, principal_id, interface_key, binding_revision, delivery_epoch, external_account_reference,
+			summary_count, principal_id, interface_key, binding_revision, delivery_epoch, external_account,
 			conversation_reference, conversation_scope, state, current_render_id, action_capacity, text_capacity,
 			label_capacity, action_page_index, resend_generation, resend_of_delivery_id, resend_action_publication_id, created_at)
 			SELECT $1::uuid, source_kind, source_id, request_activation_id, summary_count, principal_id, interface_key,
-			binding_revision, delivery_epoch, external_account_reference, conversation_reference, conversation_scope,
+			binding_revision, delivery_epoch, external_account, conversation_reference, conversation_scope,
 			'rendered', $2::uuid, action_capacity, text_capacity, label_capacity, action_page_index+1, $3, delivery_id, $4::uuid, $5
 			FROM channel_delivery_plans WHERE delivery_id=$6::uuid AND state='sent' AND current_render_id=$7::uuid AND current_receipt_operation_id=$8::uuid`
 	}

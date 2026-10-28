@@ -115,7 +115,7 @@ func TestChannelCLIProgressFixturesRetainExactDeclarations(t *testing.T) {
 				row["deployment_registration"], row["identity_ceremony"] = true, "account_link"
 				delete(row, "coordinate")
 			}
-			op["account_reference"], op["account_confirmed"], op["target_selector"], op["activation_revision"] = account, true, "", 0
+			op["operator_account"], op["account_confirmed"], op["target_selector"], op["activation_revision"] = account, true, "", 0
 			candidate["confirmation_operation"], candidate["signing_credential_role"] = "", ""
 			delete(candidate, "target")
 			delete(candidate, "connection_health")

@@ -64,10 +64,10 @@ func readChannelDeliverySettlementDiagnostic(ctx context.Context, db *sql.DB, de
 			binding.status AS binding_status,
 			CAST(binding.binding_revision AS TEXT) AS binding_revision,
 			CAST(binding.operation_id AS TEXT) AS binding_operation_id,
-			CAST(p.external_account_reference=selected.external_account_reference AS TEXT) AS default_account_matches,
+			CAST(p.external_account=selected.external_account AS TEXT) AS default_account_matches,
 			CAST(p.conversation_reference=selected.conversation_reference AS TEXT) AS default_conversation_matches,
 			CAST(p.conversation_scope=selected.conversation_scope AS TEXT) AS default_scope_matches,
-			CAST(binding.external_account_reference=selected.external_account_reference AS TEXT) AS binding_account_matches,
+			CAST(binding.external_account=selected.external_account AS TEXT) AS binding_account_matches,
 			CAST(binding.conversation_reference=selected.conversation_reference AS TEXT) AS binding_conversation_matches,
 			CAST(binding.conversation_scope=selected.conversation_scope AS TEXT) AS binding_scope_matches
 			FROM channel_delivery_plans p

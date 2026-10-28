@@ -278,7 +278,7 @@ func requireProviderAliasRootConnection(t *testing.T, rt servedWorkspaceProofRun
 	var runID string
 	for _, name := range []string{"inbound.telegram.text_message", "inbound.telegram.callback_action"} {
 		payload := map[string]any{
-			"conversation_reference": "42", "conversation_scope": "direct", "external_account_reference": "41",
+			"conversation_reference": "42", "conversation_scope": "direct", "external_account": "41",
 			"provider_message_reference": 7,
 		}
 		if name == "inbound.telegram.text_message" {
