@@ -299,7 +299,10 @@ func TestServeSessionResumeCancellationRetainsJoinAndPossessionBothStores(t *tes
 	for _, backend := range []string{"sqlite", "postgres"} {
 		t.Run(backend, func(t *testing.T) {
 			f := newServeBootstrapTestFixture(t, backend)
-			entered := serveBootstrapWireFixture(t, "blocked_handshake", f.owner)
+			cut := &serveBootstrapAuthCut{held: make(chan struct{}), release: make(chan struct{})}
+			entered := serveBootstrapWireFixture(t, "blocked_handshake", f.owner, cut)
+			release := sync.OnceFunc(func() { close(cut.release) })
+			t.Cleanup(release)
 			caller, cancel := context.WithCancel(f.ctx)
 			defer cancel()
 			f.adapter.store = &serveSessionReadFaultStore{Store: f.adapter.store}
@@ -332,6 +335,7 @@ func TestServeSessionResumeCancellationRetainsJoinAndPossessionBothStores(t *tes
 				t.Fatal("resume did not enter the actual SDK handshake", "result", err,
 					"selections", f.selections.Load(), "constructed", f.adapter.connection(f.op.OperationID) != nil)
 			}
+			awaitServeBootstrapNativeCloseFixture(t, cut.held)
 			cancel()
 			select {
 			case err := <-done:
@@ -362,6 +366,7 @@ func TestServeSessionResumeCancellationRetainsJoinAndPossessionBothStores(t *tes
 			if err == nil {
 				t.Fatal("successor possessed state before original SDK join")
 			}
+			release()
 			join, finish := context.WithTimeout(f.ctx, 30*time.Second)
 			defer finish()
 			if err := old.Close(join); err != nil {

@@ -5,6 +5,7 @@ package serveapp
 import (
 	"context"
 	"errors"
+	"sync"
 	"testing"
 	"time"
 
@@ -53,7 +54,10 @@ func TestServePairedSessionObservationCancelsPendingResumeBothStores(t *testing.
 			if err := f.adapter.connection(op.OperationID).Close(f.ctx); err != nil {
 				t.Fatal(err)
 			}
-			entered := serveBootstrapWireFixture(t, "blocked_handshake", f.owner)
+			cut := &serveBootstrapAuthCut{held: make(chan struct{}), release: make(chan struct{})}
+			entered := serveBootstrapWireFixture(t, "blocked_handshake", f.owner, cut)
+			release := sync.OnceFunc(func() { close(cut.release) })
+			t.Cleanup(release)
 			caller, cancel := context.WithCancel(f.ctx)
 			defer cancel()
 			result := make(chan error, 1)
@@ -65,6 +69,7 @@ func TestServePairedSessionObservationCancelsPendingResumeBothStores(t *testing.
 			case <-time.After(5 * time.Second):
 				t.Fatal("paired resume did not reach the SDK handshake")
 			}
+			awaitServeBootstrapNativeCloseFixture(t, cut.held)
 			wait, stop := context.WithTimeout(f.ctx, 50*time.Millisecond)
 			provider, observation, current, err := observer.ObserveSession(wait, op)
 			provider.CloseExecution()
@@ -88,6 +93,7 @@ func TestServePairedSessionObservationCancelsPendingResumeBothStores(t *testing.
 			case <-time.After(time.Second):
 				t.Fatal("paired resume caller waits inline for retained cleanup")
 			}
+			release()
 			join, finish := context.WithTimeout(f.ctx, 30*time.Second)
 			defer finish()
 			if err := f.adapter.connection(op.OperationID).Close(join); err != nil {
