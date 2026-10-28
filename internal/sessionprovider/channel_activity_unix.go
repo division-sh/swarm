@@ -5,7 +5,9 @@ package sessionprovider
 import (
 	"context"
 	"fmt"
+	"strings"
 
+	"github.com/division-sh/swarm/internal/channelonboarding"
 	"github.com/division-sh/swarm/internal/operatorchannel"
 	contracts "github.com/division-sh/swarm/internal/runtime/contracts"
 	"github.com/division-sh/swarm/internal/runtime/failures"
@@ -17,26 +19,28 @@ func (e sessionChannelExecutor) ExecuteChannelActivity(ctx context.Context, oper
 	if e.owner == nil {
 		return nil, errRuntimeConnection
 	}
-	ownedID, owned, err := e.plan.ConnectorOperation(operation)
-	if err != nil {
-		return nil, err
-	}
-	ownedHash, err := owned.CanonicalHash()
-	if err != nil {
-		return nil, err
-	}
-	selectedHash, err := tool.CanonicalHash()
-	if err != nil || ownedID != toolID || ownedHash != selectedHash {
-		return nil, errCaptureScopeChanged
-	}
 	permit, err := pipeline.ConsumeNativeChannelActivity(ctx, e.owner.operation.OperationID, e.owner.operation.SessionAccount, tool, input)
 	if err != nil {
+		return nil, err
+	}
+	if err := permit.ValidateConnector(ctx, operation, toolID, tool); err != nil {
 		return nil, err
 	}
 	values, object := permit.Input().ObjectMap()
 	destination, destinationOK := values["destination"].String()
 	text, textOK := values["text"].String()
-	if !object || !destinationOK || !textOK || len(values) != 2 {
+	expectedFields := 2
+	accountValue, supplied := values["account"]
+	if e.owner.operation.DeploymentRegistration || supplied {
+		account, valid := accountValue.String()
+		ref := channelonboarding.AccountReference{Provider: "whatsapp", Account: account}
+		if !valid || ref.Validate() != nil || strings.TrimPrefix(account, "+")+"@s.whatsapp.net" != e.owner.operation.SessionAccount.AccountRef ||
+			e.owner.operation.DeploymentRegistration && account != e.owner.operation.AccountReference {
+			return nil, errOutboundTarget
+		}
+		expectedFields = 3
+	}
+	if !object || !destinationOK || !textOK || len(values) != expectedFields {
 		return nil, errOutboundTarget
 	}
 	to, message, err := encodeOutboundText(destination, text, nil)
@@ -82,9 +86,12 @@ func (e sessionChannelExecutor) ExecuteChannelActivity(ctx context.Context, oper
 }
 
 func (e sessionChannelExecutor) requireNativeActivityBinding(ctx context.Context, permit pipeline.NativeChannelActivityPermit) error {
-	op, err := e.owner.store.GetChannelOnboarding(ctx, e.owner.operation.OperationID)
+	op, err := e.owner.operations.GetChannelOnboarding(ctx, e.owner.operation.OperationID)
 	if err != nil {
 		return err
+	}
+	if op.DeploymentRegistration {
+		return permit.ValidateBusinessTarget(ctx, op, channelonboarding.ConnectedChannelActivation{}, operatorchannel.Binding{})
 	}
 	activation, err := e.owner.store.GetConnectedChannelActivation(ctx, op.SlotKey)
 	if err != nil {

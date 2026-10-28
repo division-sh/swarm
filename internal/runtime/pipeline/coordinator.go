@@ -81,6 +81,7 @@ type PipelineCoordinator struct {
 	turnCancellations      effects.TurnCancellationDispatcher
 	credentials            runtimecredentials.Store
 	providerCredentials    runtimecredentials.Store
+	registeredAccounts     channelonboarding.OperationStore
 	managedCredentials     runtimemanagedcredentials.Store
 	mockConnectorResponses *providerconnectors.MockResponsePlan
 	scenarioProfiles       ScenarioExecutionProfileReader
@@ -126,6 +127,7 @@ type PipelineCoordinatorOptions struct {
 	RunLifecycle                     runtimerunlifecycle.OperationOwner
 	Credentials                      runtimecredentials.Store
 	ProviderCredentials              runtimecredentials.Store
+	RegisteredAccounts               channelonboarding.OperationStore
 	ManagedCredentials               runtimemanagedcredentials.Store
 	MockConnectorResponses           *providerconnectors.MockResponsePlan
 	ScenarioExecutionProfiles        ScenarioExecutionProfileReader
@@ -373,6 +375,7 @@ func newPipelineCoordinatorWithOptions(bus Bus, opts PipelineCoordinatorOptions,
 		credentials:                      credentials,
 		managedCredentials:               opts.ManagedCredentials,
 		providerCredentials:              opts.ProviderCredentials,
+		registeredAccounts:               opts.RegisteredAccounts,
 		mockConnectorResponses:           opts.MockConnectorResponses,
 		scenarioProfiles:                 opts.ScenarioExecutionProfiles,
 		effectiveSource:                  opts.EffectiveSourceIdentity,

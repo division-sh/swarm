@@ -556,6 +556,7 @@ func buildServeRuntimeBundleContext(req serveRuntimeBundleContextRequest) (resul
 		return serveRuntimeBundleContext{}, fmt.Errorf("compile declared-only channel activation publication: %w", err)
 	}
 	validationOpts.ChannelActivationPublication = declaredChannelPublication
+	validationOpts.TriggerEntries = req.Config.Triggers
 	profile, err := req.Config.LLMBackendProfile()
 	if err != nil {
 		return serveRuntimeBundleContext{}, fmt.Errorf("resolve llm backend profile for workflow validation: %w", err)
@@ -1655,14 +1656,18 @@ func buildRuntimeComposition(ctx context.Context, req runtimeCompositionRequest)
 		return 1
 	}
 	var deploymentRegistration *runtimepublicingress.ProviderRegistrationController
-	deploymentChannels, deploymentClaims, closeDeploymentChannels := deploymentChannelHandlers(repo, cfgResult.Path, swarmDir.Path, stores, processWorkOwner, processCapability, func(ctx context.Context, callback, account string) bool {
+	deploymentChannels, deploymentClaims, restoreDeploymentChannels, closeDeploymentChannels := deploymentChannelHandlers(repo, cfgResult.Path, swarmDir.Path, stores, processWorkOwner, processCapability, func(ctx context.Context, callback, account string) bool {
 		return deploymentRegistration != nil && deploymentRegistration.OwnsAccountCallback(ctx, callback, account)
-	})
+	}, deploymentRuntimeOptions{manager: runtimeContextManager, sessions: sessionBootstrap, refresh: channelActivationRefresher.RefreshChannelActivations})
 	defer func() {
 		if err := closeDeploymentChannels(); err != nil {
 			log.Printf("deployment channel shutdown failed: %T", err)
 		}
 	}()
+	if err := restoreDeploymentChannels(ctx); err != nil {
+		presenter.fail(5, "channel_registration", err)
+		return 1
+	}
 	handlers := apiv1.MergeOperatorHandlers(
 		apiv1.OperatorHealthHandlers(apiv1.HealthHandlerOptions{ExecutionPosture: posture, Ready: readyFn, Database: apiStoreCaps.Database, Publication: runtimeContextManager}),
 		apiv1.OperatorRuntimeIdentityHandlers(apiv1.RuntimeIdentityHandlerOptions{Identity: runtimeIdentity, Publication: runtimeContextManager}),

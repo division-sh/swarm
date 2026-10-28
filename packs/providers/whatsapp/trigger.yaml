@@ -8,6 +8,7 @@ normalized_events:
     when: {equals: {kind: message}, exists: [text], absent: [target_message_reference]}
     author_subject: {type: chat, field: conversation_reference}
     fields:
+      operator_account: {from: operator_account, schema: {type: string, minLength: 1}}
       text: {from: text, schema: {type: string, minLength: 1}}
       external_account: {from: external_account, schema: {type: string, minLength: 1}}
       conversation_reference: {from: conversation_reference, schema: {type: string, minLength: 1}}
@@ -30,6 +31,7 @@ normalized_events:
     when: {equals: {kind: edit}, exists: [text, target_message_reference]}
     author_subject: {type: chat, field: conversation_reference}
     fields:
+      operator_account: {from: operator_account, schema: {type: string, minLength: 1}}
       text: {from: text, schema: {type: string, minLength: 1}}
       target_message_reference: {from: target_message_reference, schema: {type: string, minLength: 1}}
       external_account: {from: external_account, schema: {type: string, minLength: 1}}
@@ -43,6 +45,7 @@ normalized_events:
     when: {equals: {kind: revoke}, exists: [target_message_reference], absent: [text]}
     author_subject: {type: chat, field: conversation_reference}
     fields:
+      operator_account: {from: operator_account, schema: {type: string, minLength: 1}}
       target_message_reference: {from: target_message_reference, schema: {type: string, minLength: 1}}
       external_account: {from: external_account, schema: {type: string, minLength: 1}}
       conversation_reference: {from: conversation_reference, schema: {type: string, minLength: 1}}

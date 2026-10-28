@@ -16,15 +16,16 @@ import (
 )
 
 type DeploymentConnectionOptions struct {
-	Directory   string
-	OperationID string
-	Principal   operatorchannel.Principal
-	Process     *worklifetime.Process
-	Operations  channelonboarding.OperationStore
-	Store       channelonboarding.Store
-	Credentials operatorchannel.CredentialCurrentness
-	Plan        packs.SatisfactionPlan
-	Trigger     providertriggers.InboundAdmissionPlan
+	RegisteredBusiness RegisteredBusinessSelector
+	Directory          string
+	OperationID        string
+	Principal          operatorchannel.Principal
+	Process            *worklifetime.Process
+	Operations         channelonboarding.OperationStore
+	Store              channelonboarding.Store
+	Credentials        operatorchannel.CredentialCurrentness
+	Plan               packs.SatisfactionPlan
+	Trigger            providertriggers.InboundAdmissionPlan
 }
 
 // OpenDeploymentConnection reuses private SDK possession and pairing under the
@@ -60,7 +61,7 @@ func OpenDeploymentConnection(ctx context.Context, opts DeploymentConnectionOpti
 		incoming = &RuntimeIncomingOptions{Trigger: opts.Trigger}
 	}
 	return openOwnedConnection(context.WithoutCancel(ctx), opts.Process, RuntimeConnectionOptions{
-		Directory: opts.Directory, Store: opts.Store, Credentials: opts.Credentials, Plan: opts.Plan, Incoming: incoming}, opts.Operations, op)
+		Directory: opts.Directory, Store: opts.Store, Credentials: opts.Credentials, Plan: opts.Plan, Incoming: incoming, RegisteredBusiness: opts.RegisteredBusiness}, opts.Operations, op)
 }
 
 func (c *RuntimeConnection) VerifyDeploymentRegistration(ctx context.Context, expected channelonboarding.Operation) (bool, error) {

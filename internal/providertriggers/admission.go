@@ -13,6 +13,7 @@ import (
 	"net/http"
 	"strings"
 
+	"github.com/division-sh/swarm/internal/channelonboarding"
 	"github.com/division-sh/swarm/internal/events"
 	"github.com/division-sh/swarm/internal/packs"
 	"github.com/division-sh/swarm/internal/runtime/canonicaljson"
@@ -110,11 +111,16 @@ type AdmittedRequest struct {
 	manifestAdmission       *manifestAdmission
 	rawAdmission            *rawRequestAdmission
 	sessionInput            *nativeinput.Admission
+	operatorAccount         string
+	accountDeliveryID       string
 }
 
 func (a AdmittedRequest) SemanticContentDigest() string { return a.semanticContentDigest }
 
 func (a AdmittedRequest) ProviderEventID() string {
+	if a.accountDeliveryID != "" {
+		return a.accountDeliveryID
+	}
 	if a.manifestAdmission != nil {
 		return a.manifestAdmission.deliveryID
 	}
@@ -122,6 +128,26 @@ func (a AdmittedRequest) ProviderEventID() string {
 		return a.rawAdmission.deliveryID
 	}
 	return ""
+}
+
+// BindReceivingAccount is called by the verified registration owner only after
+// payload authentication. It does not change the authenticated request bytes.
+func (p InboundAdmissionPlan) BindReceivingAccount(admitted AdmittedRequest, account channelonboarding.AccountReference, signingSecret string) (AdmittedRequest, error) {
+	if account.Validate() != nil || account.Provider != p.provider || p.RequestAuthentication() == RequestAuthenticationNone ||
+		p.Transport() == packs.ChannelTransportSession || admitted.operatorAccount != "" || admitted.Response() != nil ||
+		admitted.manifestAdmission == nil || signingSecret == "" ||
+		!hmac.Equal([]byte(signingSecret), []byte(admitted.manifestAdmission.request.Target.WebhookSecret)) {
+		return AdmittedRequest{}, unauthorized("receiving account requires its exact authenticated registration")
+	}
+	if err := p.validateProjectionEvidence(admitted); err != nil {
+		return AdmittedRequest{}, err
+	}
+	id, err := semanticContentDigest([]string{p.provider, account.Account, admitted.ProviderEventID()})
+	if err != nil {
+		return AdmittedRequest{}, err
+	}
+	admitted.operatorAccount, admitted.accountDeliveryID = account.Account, id
+	return admitted, nil
 }
 
 func (a AdmittedRequest) ProviderEventType() string {
@@ -640,9 +666,15 @@ func (p InboundAdmissionPlan) ProjectDelivery(admitted AdmittedRequest) (Deliver
 			return Delivery{}, err
 		}
 		delivery.Response = cloneAdmissionResponse(delivery.Response)
+		if admitted.operatorAccount != "" {
+			delivery.ProviderEventID = admitted.ProviderEventID()
+		}
 		for index := range delivery.Events {
 			if delivery.Events[index].Kind != OutputKindNormalized {
 				continue
+			}
+			if admitted.operatorAccount != "" {
+				delivery.Events[index].Payload["operator_account"] = admitted.operatorAccount
 			}
 			authorization, err := runtimeprovideroutput.NewAuthorization(
 				p.provider,

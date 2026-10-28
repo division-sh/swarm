@@ -41,6 +41,9 @@ normalized_events:
     when: {equals: {kind: %s}, %s}
     author_subject: {type: chat, field: conversation_reference}
     fields:
+      operator_account:
+        from: operator_account
+        schema: {type: string, minLength: 1}
       conversation_reference:
         from: conversation_reference
         schema: {type: string, minLength: 1}
@@ -125,7 +128,7 @@ func TestWhatsAppIncomingAcceptedPackProjectionIsNotAdmission(t *testing.T) {
 				if string(got.Name) != "inbound.whatsapp."+kind || got.Kind != providertriggers.OutputKindNormalized ||
 					!got.Authorization.Empty() || got.AuthorSubjectType != "chat" || got.AuthorSubjectID != captured.Conversation ||
 					got.Payload["provider_message_reference"] != captured.EventID ||
-					got.Payload["external_account"] != event.Info.Sender.String() ||
+					got.Payload["external_account"] != event.Info.Sender.String() || got.Payload["operator_account"] != "+100000002" ||
 					got.Payload["provider_timestamp_ms"] != json.Number(fmt.Sprint(event.Info.Timestamp.UnixMilli())) {
 					t.Fatalf("projection changed identity or granted authority: %+v", got)
 				}

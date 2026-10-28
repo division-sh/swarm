@@ -17,6 +17,7 @@ import (
 	"github.com/division-sh/swarm/internal/channelonboarding"
 	"github.com/division-sh/swarm/internal/packadmission"
 	"github.com/division-sh/swarm/internal/packs"
+	"github.com/division-sh/swarm/internal/providertriggers"
 	"github.com/division-sh/swarm/internal/runtime/contracts"
 	runtimecredentials "github.com/division-sh/swarm/internal/runtime/credentials"
 	runtimeeffects "github.com/division-sh/swarm/internal/runtime/effects"
@@ -1024,6 +1025,11 @@ func TestProviderRegistrationRetainsSettlementIdentityAndSharesCallbackCurrentne
 		ObservedAt: now, ExpiresAt: now.Add(EvidenceTTL),
 	})
 	pair := testRegistrationPair(t, registration, "hitl", "ingress:support:telegram", snapshotOwner)
+	plan, err := packfixture.TriggerCatalog(t).CompileAdmission(providertriggers.CompileAdmissionRequest{Alias: pair.Target.Alias, Provider: "telegram", SigningSecret: "signing"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	pair.Target.AdmissionPlanGeneration = plan.Generation()
 	if err := controller.Reconcile(context.Background(), exposure, []RegistrationPair{pair}); !errors.Is(err, settlementErr) {
 		t.Fatalf("settlement acknowledgment loss = %v, want %v", err, settlementErr)
 	}
@@ -1090,7 +1096,33 @@ func TestProviderRegistrationRetainsSettlementIdentityAndSharesCallbackCurrentne
 	}
 
 	handlerCalls := 0
-	handler := controller.Handler(http.HandlerFunc(func(response http.ResponseWriter, _ *http.Request) {
+	var capturedContext context.Context
+	handler := controller.Handler(http.HandlerFunc(func(response http.ResponseWriter, request *http.Request) {
+		capturedContext = request.Context()
+		payload := map[string]any{"update_id": json.Number("71"), "operator_account": "999",
+			"message": map[string]any{"message_id": json.Number("7"), "from": map[string]any{"id": json.Number("13")},
+				"chat": map[string]any{"id": json.Number("13"), "type": "private"}, "text": "customer"}}
+		for _, secret := range []string{"signing-v1", "foreign-secret"} {
+			admitted, err := plan.AdmitRequest(providertriggers.Request{Provider: "telegram", Payload: payload,
+				Target: providertriggers.Target{WebhookSecret: secret}, Headers: http.Header{"X-Telegram-Bot-Api-Secret-Token": {secret}}})
+			if err != nil {
+				t.Fatal(err)
+			}
+			bound, err := BindReceivingAccount(request.Context(), plan, admitted)
+			if secret != "signing-v1" {
+				if err == nil {
+					t.Fatal("a request authenticated with a foreign credential claimed this receiving bot")
+				}
+				continue
+			}
+			if err != nil {
+				t.Fatal(err)
+			}
+			delivery, err := plan.ProjectDelivery(bound)
+			if err != nil || len(delivery.Events) != 2 || delivery.Events[1].Payload["operator_account"] != "42" {
+				t.Fatalf("verified receiving bot was replaced by a payload field: %+v %v", delivery, err)
+			}
+		}
 		handlerCalls++
 		response.WriteHeader(http.StatusNoContent)
 	}))
@@ -1101,6 +1133,9 @@ func TestProviderRegistrationRetainsSettlementIdentityAndSharesCallbackCurrentne
 		t.Fatalf("current callback status/calls=%d/%d, want 204/1", recorder.Code, handlerCalls)
 	}
 	now = now.Add(EvidenceTTL)
+	if evidence, ok := capturedContext.Value(receivingAccountContextKey{}).(receivingAccount); !ok || evidence.current(capturedContext) {
+		t.Fatal("retained request context outlived its verified callback generation")
+	}
 	expired := httptest.NewRecorder()
 	handler.ServeHTTP(expired, httptest.NewRequest(http.MethodPost, callbackURL, nil))
 	if expired.Code != http.StatusNotFound || handlerCalls != 1 || readiness.Snapshot(now).PublicIngressReady {

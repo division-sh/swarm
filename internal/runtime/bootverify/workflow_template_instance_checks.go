@@ -4,6 +4,7 @@ import (
 	"fmt"
 	"strings"
 
+	"github.com/division-sh/swarm/internal/packadmission"
 	"github.com/division-sh/swarm/internal/runtime/entityruntime"
 	"github.com/division-sh/swarm/internal/runtime/semanticview"
 )
@@ -53,6 +54,26 @@ func checkTemplateInstanceValidation(c *checkerContext) []Finding {
 				Message:  fmt.Sprintf("flow %s template instance invalid: instance field %q must resolve to a scalar or enum primary-entity field: %v", flowID, field, err),
 				Location: flowID,
 			})
+		}
+	}
+	if bundle.SourceArtifact == nil || len(bundle.SourceArtifact.ProviderDirectories()) == 0 {
+		return findings
+	}
+	rooted, err := bundle.RootedSource()
+	if err != nil {
+		return append(findings, Finding{CheckID: "template_instance_validation", Severity: "error", Message: err.Error()})
+	}
+	providers, err := packadmission.AdmitProviderSource(rooted, bundle.Platform)
+	if err != nil {
+		return append(findings, Finding{CheckID: "template_instance_validation", Severity: "error", Message: err.Error()})
+	}
+	for _, flowID := range providers.FlowPaths() {
+		scope, err := providers.Scope(flowID)
+		if err == nil {
+			_, _, err = scope.ConnectionAccount(bundle)
+		}
+		if err != nil {
+			findings = append(findings, Finding{CheckID: "template_instance_validation", Severity: "error", Message: err.Error(), Location: flowID})
 		}
 	}
 	return findings

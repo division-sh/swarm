@@ -122,6 +122,11 @@ func scopedChannelHandlers(handlers map[string]MethodHandler, channels *operator
 		handlers[name] = func(ctx context.Context, req Request) (any, error) {
 			scope, exists := req.Params["scope"]
 			if !exists {
+				if req.Method == "channel.list" {
+					if _, exists := req.Params["account"]; exists {
+						return nil, NewInvalidParamsError(map[string]any{"field": "account", "reason": "requires deployment scope and provider"})
+					}
+				}
 				if _, exists := req.Params["holder"]; exists {
 					return nil, NewInvalidParamsError(map[string]any{"field": "holder", "reason": "requires deployment scope"})
 				}

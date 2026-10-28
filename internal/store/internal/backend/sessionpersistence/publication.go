@@ -11,6 +11,7 @@ import (
 )
 
 type pendingCapture struct {
+	unclaimed    bool
 	sequence     int64
 	event        capturedEvent
 	request      *runtimeinbound.Request

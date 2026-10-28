@@ -1,7 +1,7 @@
 tools:
   send_text:
     category: provider_connector
-    description: send English text through the owned WhatsApp connection
+    description: send text through the owned WhatsApp connection
     handler_type: in_process
     in_process: whatsapp.send_text
     input_schema:
@@ -9,6 +9,7 @@ tools:
       additionalProperties: false
       required: [destination, text]
       properties:
+        account: {type: string, pattern: '^\+[1-9][0-9]{1,14}$'}
         destination: {type: string, minLength: 1}
         text: {type: string, minLength: 1, maxLength: 2000}
     output_schema:

@@ -41,13 +41,19 @@ type Scope struct {
 	AccountOnly         bool `json:",omitempty"`
 
 	DeploymentRegistration bool `json:",omitempty"`
+	RegisteredBusiness     bool `json:",omitempty"`
 }
 
 func (s Scope) Validate() error {
 	if err := s.Session.Validate(); err != nil {
 		return err
 	}
-	if s.DeploymentRegistration {
+	if s.RegisteredBusiness {
+		if !s.DeploymentRegistration || s.Kind != channelonboarding.SessionInputBusiness || !s.AccountOnly ||
+			s.Source.Validate() != nil || s.TargetSelector == "" || s.BindingRevision != 0 || s.ActivationID != "" || s.ActivationRevision != 0 {
+			return ErrCaptureScopeChanged
+		}
+	} else if s.DeploymentRegistration {
 		if s.Source != (channelonboarding.ChannelDurableContextIdentity{}) || s.TargetSelector != "" ||
 			s.Kind != channelonboarding.SessionInputOnboarding || s.BindingRevision != 0 {
 			return ErrCaptureScopeChanged
@@ -64,7 +70,7 @@ func (s Scope) Validate() error {
 		if err := s.PublicationBinding.Validate(); err != nil {
 			return err
 		}
-		if s.BindingRevision < 1 && !s.AccountOnly || s.AccountOnly && s.BindingRevision != 0 || s.ActivationRevision < 1 || uuid.Validate(s.ActivationID) != nil {
+		if !s.RegisteredBusiness && (s.BindingRevision < 1 && !s.AccountOnly || s.AccountOnly && s.BindingRevision != 0 || s.ActivationRevision < 1 || uuid.Validate(s.ActivationID) != nil) {
 			return fmt.Errorf("WhatsApp business capture requires its confirmed binding")
 		}
 	default:
@@ -100,8 +106,8 @@ func (e Event) Validate() error {
 		return err
 	}
 	if !e.Source.CatalogGeneration.Valid() || e.Scope.DeploymentRegistration != e.Source.DeploymentRegistration ||
-		e.Source.DeploymentRegistration && e.Source.Coordinate != (channelonboarding.ChannelRuntimeContextCoordinate{}) ||
-		!e.Source.DeploymentRegistration && (e.Source.Coordinate.ValidateContext() != nil || !e.Scope.Source.Matches(e.Source.Coordinate.DurableIdentity())) {
+		e.Source.DeploymentRegistration && !e.Scope.RegisteredBusiness && e.Source.Coordinate != (channelonboarding.ChannelRuntimeContextCoordinate{}) ||
+		(!e.Source.DeploymentRegistration || e.Scope.RegisteredBusiness) && (e.Source.Coordinate.ValidateContext() != nil || !e.Scope.Source.Matches(e.Source.Coordinate.DurableIdentity())) {
 		return fmt.Errorf("WhatsApp capture requires its frozen exact source and catalog")
 	}
 	if e.Scope.Kind == channelonboarding.SessionInputBusiness && e.Source.Coordinate.ValidateContext() != nil {
@@ -152,7 +158,7 @@ var ErrCapturePublicationPending = errors.New("WhatsApp capture has no verified 
 
 func (e Event) SameCapture(other Event) bool {
 	sourceCurrent := e.Source.Coordinate.MatchesDeclaration(other.Source.Coordinate)
-	if e.Source.DeploymentRegistration && other.Source.DeploymentRegistration {
+	if e.Source.DeploymentRegistration && other.Source.DeploymentRegistration && !e.Scope.RegisteredBusiness && !other.Scope.RegisteredBusiness {
 		sourceCurrent = e.Source.Coordinate == (channelonboarding.ChannelRuntimeContextCoordinate{}) && e.Source.Coordinate == other.Source.Coordinate
 	}
 	return e.Scope == other.Scope && e.OccurrenceID == other.OccurrenceID && e.Conversation == other.Conversation &&
@@ -189,11 +195,13 @@ type publicationAuthority struct {
 	AccountOnly         bool `json:",omitempty"`
 
 	DeploymentRegistration bool `json:",omitempty"`
+	RegisteredBusiness     bool `json:",omitempty"`
 }
 
 func (s Scope) publicationAuthority() publicationAuthority {
 	result := publicationAuthority{Kind: s.Kind, Session: s.Session, PublicationBinding: s.PublicationBinding,
 		DeploymentRegistration: s.DeploymentRegistration,
+		RegisteredBusiness:     s.RegisteredBusiness,
 		Source:                 s.Source, OnboardingOperation: s.OnboardingOperation, ActivationID: s.ActivationID,
 		TargetSelector: s.TargetSelector, PrincipalID: s.PrincipalID, BindingRevision: s.BindingRevision}
 	result.AccountOnly = s.AccountOnly
@@ -212,8 +220,15 @@ func (e Event) SameDelivery(other Event) bool {
 // reconcile its original bytes across process/binding revisions, not reinterpret
 // that setup message as new business input or adopt a different account/source.
 func (e Event) SameNonClaimDelivery(other Event) bool {
+	sameSource := e.Scope.Source.Matches(other.Scope.Source)
+	if e.Scope.DeploymentRegistration && other.Scope.DeploymentRegistration && !e.Scope.RegisteredBusiness && !other.Scope.RegisteredBusiness {
+		sameSource = e.Scope.Source == (channelonboarding.ChannelDurableContextIdentity{}) && other.Scope.Source == e.Scope.Source &&
+			e.Source.Coordinate == (channelonboarding.ChannelRuntimeContextCoordinate{}) && other.Source.Coordinate == e.Source.Coordinate
+	}
 	return e.Scope.Kind == channelonboarding.SessionInputOnboarding &&
-		e.Scope.Session == other.Scope.Session && e.Scope.Source.Matches(other.Scope.Source) &&
+		other.Scope.Kind == channelonboarding.SessionInputOnboarding &&
+		e.Scope.DeploymentRegistration == other.Scope.DeploymentRegistration && !e.Scope.RegisteredBusiness && !other.Scope.RegisteredBusiness &&
+		e.Scope.Session == other.Scope.Session && sameSource &&
 		e.Scope.OnboardingOperation == other.Scope.OnboardingOperation && e.Scope.TargetSelector == other.Scope.TargetSelector &&
 		e.Scope.PrincipalID == other.Scope.PrincipalID && e.Conversation == other.Conversation && e.EventID == other.EventID &&
 		e.Kind == other.Kind && e.Source.CatalogGeneration.Equal(other.Source.CatalogGeneration) && bytes.Equal(e.Body, other.Body)

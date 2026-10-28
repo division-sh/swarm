@@ -347,6 +347,50 @@ func TestWorkflowContractBundleResolveFlowTemplateInstance_UsesScalarIdentity(t 
 	if got, want := keyMaterialString(key), "scope_id=vertical-1"; got != want {
 		t.Fatalf("CanonicalKeyMaterial = %q, want %q", got, want)
 	}
+	for _, cell := range []struct {
+		name, key, stateType string
+		policy               any
+		want                 string
+	}{
+		{name: "keyed account", key: "operator_account", stateType: "text"},
+		{name: "policy before provider emission", policy: "+15550100"},
+		{name: "dynamic state before provider emission", stateType: "text"},
+		{name: "missing account", want: "requires operator_account"},
+		{name: "policy and state", policy: "+15550100", stateType: "text", want: "both policy.yaml and entities.yaml"},
+		{name: "key and policy", key: "operator_account", stateType: "text", policy: "+15550100", want: "both schema.yaml instance and policy.yaml"},
+		{name: "another key", key: "other", stateType: "text", want: "must be operator_account"},
+		{name: "nontext policy", policy: true, want: "nonempty account string"},
+		{name: "nontext state", stateType: "integer", want: "required text field"},
+	} {
+		t.Run(cell.name, func(t *testing.T) {
+			schema := &FlowSchemaDocument{}
+			if cell.key != "" {
+				schema.Instance = mustTemplateInstanceField(t, cell.key)
+			}
+			fields := map[string]EntityFieldDecl{}
+			if cell.stateType != "" {
+				fields["operator_account"] = EntityFieldDecl{Type: cell.stateType}
+			}
+			candidate := &WorkflowContractBundle{
+				RootSchema:   schema,
+				RootEntities: EntityContractsDocument{"account": {Fields: fields}},
+				Policy:       PolicyDocument{Values: map[string]PolicyValue{}},
+			}
+			if cell.policy != nil {
+				candidate.Policy.Values["operator_account"] = PolicyValue{Value: cell.policy}
+			}
+			account, err := candidate.ResolveFlowOperatorAccount(".")
+			if cell.want != "" {
+				if err == nil || !strings.Contains(err.Error(), cell.want) {
+					t.Fatalf("operator account refusal = %v, want %s", err, cell.want)
+				}
+				return
+			}
+			if err != nil || account.FlowID != "." || account.Keyed != (cell.key != "") || account.FromPolicy != (cell.policy != nil) {
+				t.Fatalf("operator account placement = %+v, %v", account, err)
+			}
+		})
+	}
 }
 
 func TestWorkflowContractBundleResolveFlowTemplateInstance_RejectsInvalidDeclarations(t *testing.T) {

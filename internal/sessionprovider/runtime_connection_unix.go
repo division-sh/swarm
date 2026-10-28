@@ -29,37 +29,39 @@ var errRuntimeConnection = errors.New("WhatsApp connection requires its retained
 var errRuntimeIngressUnavailable = errors.New("WhatsApp runtime incoming publication is not installed")
 
 type RuntimeConnectionOptions struct {
-	Directory       string
-	InvocationState *InvocationState
-	OperationID     string
-	Store           channelonboarding.Store
-	Credentials     operatorchannel.CredentialCurrentness
-	Plan            packs.SatisfactionPlan
-	Incoming        *RuntimeIncomingOptions
-	ProcessBinding  processbinding.Binding
+	Directory          string
+	InvocationState    *InvocationState
+	OperationID        string
+	Store              channelonboarding.Store
+	Credentials        operatorchannel.CredentialCurrentness
+	Plan               packs.SatisfactionPlan
+	Incoming           *RuntimeIncomingOptions
+	RegisteredBusiness RegisteredBusinessSelector
+	ProcessBinding     processbinding.Binding
 }
 
 // RuntimeConnection owns the actual SDK state and socket, not a registration
 // promise. Neither its zero value nor its readback can manufacture execution.
 type RuntimeConnection struct {
-	lifecycle      chan struct{}
-	parent         sessionWorkParent
-	work           *worklifetime.Lease
-	ctx            context.Context
-	cancel         context.CancelFunc
-	closed         chan struct{}
-	closeErr       error
-	state          *sessionState
-	captures       *captureStore
-	directory      string
-	store          channelonboarding.Store
-	operations     channelonboarding.OperationStore
-	operation      channelonboarding.Operation
-	account        atomic.Pointer[operatorchannel.SessionAccountAdmission]
-	incoming       *runtimeIncoming
-	plan           packs.SatisfactionPlan
-	credentials    operatorchannel.CredentialCurrentness
-	processBinding processbinding.Binding
+	lifecycle          chan struct{}
+	parent             sessionWorkParent
+	work               *worklifetime.Lease
+	ctx                context.Context
+	cancel             context.CancelFunc
+	closed             chan struct{}
+	closeErr           error
+	state              *sessionState
+	captures           *captureStore
+	directory          string
+	store              channelonboarding.Store
+	operations         channelonboarding.OperationStore
+	operation          channelonboarding.Operation
+	account            atomic.Pointer[operatorchannel.SessionAccountAdmission]
+	incoming           *runtimeIncoming
+	registeredBusiness RegisteredBusinessSelector
+	plan               packs.SatisfactionPlan
+	credentials        operatorchannel.CredentialCurrentness
+	processBinding     processbinding.Binding
 }
 
 // OpenRuntimeConnection resumes paired state only after its original selected
@@ -105,7 +107,7 @@ func openOwnedConnection(ctx context.Context, parent sessionWorkParent, opts Run
 	}
 	owned, cancel := context.WithCancel(work.Context())
 	c := &RuntimeConnection{parent: parent, work: work, ctx: owned, cancel: cancel, closed: make(chan struct{}), lifecycle: make(chan struct{}, 1), operations: operations,
-		store: opts.Store, operation: op, plan: opts.Plan, credentials: opts.Credentials, directory: opts.Directory, processBinding: opts.ProcessBinding}
+		store: opts.Store, operation: op, plan: opts.Plan, credentials: opts.Credentials, directory: opts.Directory, processBinding: opts.ProcessBinding, registeredBusiness: opts.RegisteredBusiness}
 	c.account.Store(&op.SessionAccount)
 	go c.joinRetirement()
 	if err := c.open(opts.Incoming); err != nil {
@@ -454,8 +456,15 @@ func (c *RuntimeConnection) AdmitSessionAccount(ctx context.Context, expected op
 }
 
 func (c *RuntimeConnection) ChannelExecution(ctx context.Context) (execution.Channel, error) {
-	if c == nil || c.operation.DeploymentRegistration {
+	if c == nil {
 		return execution.Channel{}, errRuntimeConnection
+	}
+	if c.operation.DeploymentRegistration {
+		op, err := c.currentOperation(ctx)
+		if err != nil || !op.AccountConfirmed || op.Phase != channelonboarding.PhaseSucceeded &&
+			op.Phase != channelonboarding.PhaseAwaitingExternalIdentity && op.Phase != channelonboarding.PhaseAwaitingOperatorConfirmation {
+			return execution.Channel{}, errors.Join(errRuntimeConnection, err)
+		}
 	}
 	admitted, err := c.AdmitSessionAccount(ctx, c.sessionAccount())
 	if err != nil {
@@ -463,6 +472,18 @@ func (c *RuntimeConnection) ChannelExecution(ctx context.Context) (execution.Cha
 	}
 	defer admitted.Close()
 	return executionfact.SealOwnedChannel(c.operation.OperationID, c), nil
+}
+
+func (c *RuntimeConnection) UnclaimedCount(ctx context.Context) (count int64, err error) {
+	work, err := c.begin(ctx)
+	if err != nil {
+		return 0, err
+	}
+	defer func() { err = errors.Join(err, work.Done()) }()
+	if _, err := c.currentOperation(work.Context()); err != nil {
+		return 0, err
+	}
+	return c.captures.owner.UnclaimedCount(work.Context())
 }
 
 // ObserveSession returns held admission plus this SDK occurrence's observation.
@@ -511,7 +532,7 @@ func (c *RuntimeConnection) ExecuteChannelWrite(ctx context.Context, operation, 
 }
 
 func (c *RuntimeConnection) ExecuteChannelActivity(ctx context.Context, operation, toolID string, tool contracts.ToolSchemaEntry, input map[string]any) (result any, err error) {
-	if c == nil || c.operation.DeploymentRegistration {
+	if c == nil {
 		return nil, errRuntimeConnection
 	}
 	work, err := c.begin(ctx)

@@ -7,6 +7,7 @@ import (
 	"time"
 	"unicode/utf8"
 
+	"github.com/division-sh/swarm/internal/channelonboarding"
 	"go.mau.fi/whatsmeow/proto/waE2E"
 	"go.mau.fi/whatsmeow/types"
 	"go.mau.fi/whatsmeow/types/events"
@@ -20,6 +21,7 @@ var errIncomingUnsupported = errors.New("WhatsApp incoming message variant is un
 // ceremony. The accepted trigger pack and publication owners still own those.
 type incomingPayload struct {
 	Kind                string  `json:"kind"`
+	OperatorAccount     string  `json:"operator_account"`
 	Conversation        string  `json:"conversation_reference"`
 	ConversationScope   string  `json:"conversation_scope"`
 	Sender              string  `json:"external_account"`
@@ -35,6 +37,14 @@ func captureSDKMessage(scope captureScope, source captureSource, occurrenceID st
 	var result capturedEvent
 	if err := scope.Validate(); err != nil {
 		return result, err
+	}
+	accountJID, err := types.ParseJID(scope.Session.AccountRef)
+	if err != nil || accountJID.Server != types.DefaultUserServer || accountJID.Device != 0 || accountJID.String() != scope.Session.AccountRef {
+		return result, errCaptureScopeChanged
+	}
+	account := channelonboarding.AccountReference{Provider: "whatsapp", Account: "+" + accountJID.User}
+	if err := account.Validate(); err != nil {
+		return result, errCaptureScopeChanged
 	}
 	if event == nil || event.Message == nil || !exactMessageID(event.Info.ID) || event.Info.Timestamp.IsZero() || event.Info.Timestamp.UnixMilli() < 1 {
 		return result, errIncomingMalformed
@@ -65,7 +75,7 @@ func captureSDKMessage(scope captureScope, source captureSource, occurrenceID st
 	if err != nil {
 		return result, err
 	}
-	payload := incomingPayload{Kind: kind, Conversation: chat.String(), ConversationScope: conversationScope,
+	payload := incomingPayload{Kind: kind, OperatorAccount: account.Account, Conversation: chat.String(), ConversationScope: conversationScope,
 		Sender: sender.String(), MessageReference: event.Info.ID, TargetReference: target, ReplyReference: reply,
 		Text: text, ProviderTimestampMS: event.Info.Timestamp.UnixMilli(), Ephemeral: event.IsEphemeral}
 	body, err := json.Marshal(payload)

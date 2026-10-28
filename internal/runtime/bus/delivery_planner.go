@@ -248,6 +248,12 @@ func (p deliveryPlanner) planRecipients(ctx context.Context, evt events.Event) (
 	if err != nil {
 		return RoutePlan{}, err
 	}
+	if account, selected, err := projection.selectedAccountInstance(ctx, evt); err != nil {
+		return RoutePlan{}, err
+	} else if selected && account.InstancePath == "" {
+		routePlan.MarkCanonicalRouteFailedClosed(routeIntentProducerInternalTargetCarrier, runtimepinrouting.FailureAccountUnclaimed)
+		return p.resolvePreparedRoutePlan(projection, routePlan)
+	}
 	ctx = withSelectedRunTargetOwnerProjection(ctx, projection)
 	joinRecipient, joinTarget, joinHandler, joinOccurrence, err := runtimepipeline.ResolveWorkflowJoinOccurrenceDeliveryTarget(
 		p.recipientPolicy.semanticSource, evt,

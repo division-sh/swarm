@@ -62,6 +62,14 @@ func newCaptureStore(ctx context.Context, db *sql.DB, connectionID string) (*Cap
 	if err := columns.Close(); err != nil {
 		return nil, err
 	}
+	_, err = tx.ExecContext(ctx, `CREATE TABLE IF NOT EXISTS whatsapp_unclaimed_capture (
+		sequence INTEGER PRIMARY KEY REFERENCES whatsapp_incoming_capture(sequence),
+		reason TEXT NOT NULL CHECK(reason = 'account_unclaimed'),
+		digest BLOB NOT NULL CHECK(length(digest) = 32)
+	)`)
+	if err != nil {
+		return nil, err
+	}
 	region = trace.StartRegion(ctx, "whatsapp.private.failure-schema")
 	_, err = tx.ExecContext(ctx, `CREATE TABLE IF NOT EXISTS whatsapp_callback_failures (
 		connection_id TEXT NOT NULL,
@@ -114,7 +122,7 @@ func (s *CaptureStore) Capture(ctx context.Context, event capturedEvent) error {
 	var pending int
 	for _, row := range stored {
 		prior := row.event
-		if !row.nonClaim {
+		if !row.nonClaim && !row.unclaimed {
 			pending++
 			totalBytes += len(prior.Body)
 		}
@@ -124,7 +132,7 @@ func (s *CaptureStore) Capture(ctx context.Context, event capturedEvent) error {
 		}
 		// A recovered occurrence may see the same provider delivery again. All
 		// stored routing and quota evidence was validated before this success.
-		if !prior.SameDelivery(event) && !(row.nonClaim && prior.SameNonClaimDelivery(event)) {
+		if !prior.SameDelivery(event) && !((row.nonClaim || row.unclaimed) && prior.SameNonClaimDelivery(event)) {
 			return errCaptureConflict
 		}
 		return tx.Commit()
@@ -171,7 +179,7 @@ func (s *CaptureStore) readPendingRows(ctx context.Context, query captureRowQuer
 	}
 	result := make([]pendingCapture, 0, len(rows))
 	for _, row := range rows {
-		if !row.nonClaim {
+		if !row.nonClaim && !row.unclaimed {
 			result = append(result, row)
 		}
 	}
@@ -180,7 +188,8 @@ func (s *CaptureStore) readPendingRows(ctx context.Context, query captureRowQuer
 
 func (s *CaptureStore) readAllRows(ctx context.Context, query captureRowQuery) ([]pendingCapture, error) {
 	rows, err := query.QueryContext(ctx, `SELECT sequence,envelope,digest,connection_id,body_bytes,
-		account_ref,conversation_ref,event_id,event_kind,publication_request,publication_digest,setup_disposition,setup_disposition_digest
+		account_ref,conversation_ref,event_id,event_kind,publication_request,publication_digest,setup_disposition,setup_disposition_digest,
+		(SELECT digest FROM whatsapp_unclaimed_capture u WHERE u.sequence=whatsapp_incoming_capture.sequence)
 		FROM whatsapp_incoming_capture ORDER BY sequence`)
 	if err != nil {
 		return nil, err
@@ -190,11 +199,11 @@ func (s *CaptureStore) readAllRows(ctx context.Context, query captureRowQuery) (
 	var totalBytes int64
 	var pendingCount int
 	for rows.Next() {
-		var raw, digest, request, requestDigest, dispositionDigest []byte
+		var raw, digest, request, requestDigest, dispositionDigest, unclaimedDigest []byte
 		var disposition sql.NullString
 		var connectionID, account, conversation, eventID, kind string
 		var sequence, bodyBytes int64
-		if err := rows.Scan(&sequence, &raw, &digest, &connectionID, &bodyBytes, &account, &conversation, &eventID, &kind, &request, &requestDigest, &disposition, &dispositionDigest); err != nil {
+		if err := rows.Scan(&sequence, &raw, &digest, &connectionID, &bodyBytes, &account, &conversation, &eventID, &kind, &request, &requestDigest, &disposition, &dispositionDigest, &unclaimedDigest); err != nil {
 			return nil, err
 		}
 		event, err := capturedata.DecodeCapture(raw, digest)
@@ -209,14 +218,18 @@ func (s *CaptureStore) readAllRows(ctx context.Context, query captureRowQuery) (
 		if err := validateNonClaimReceipt(event, raw, disposition, dispositionDigest, request); err != nil {
 			return nil, err
 		}
-		if !nonClaim {
+		unclaimed := unclaimedDigest != nil
+		if unclaimed && (nonClaim || request != nil || !event.Scope.DeploymentRegistration || event.Scope.Kind != channelonboarding.SessionInputOnboarding || !bytes.Equal(unclaimedDigest, digest)) {
+			return nil, errCaptureConflict
+		}
+		if !nonClaim && !unclaimed {
 			totalBytes += bodyBytes
 			pendingCount++
 			if pendingCount > maxPendingCaptureCount || totalBytes > maxPendingCaptureBytes {
 				return nil, errCaptureCapacity
 			}
 		}
-		pending := pendingCapture{sequence: sequence, event: event, requestBytes: request, nonClaim: nonClaim}
+		pending := pendingCapture{sequence: sequence, event: event, requestBytes: request, nonClaim: nonClaim, unclaimed: unclaimed}
 		if request != nil || requestDigest != nil {
 			admitted, err := capturedata.DecodePublicationRequest(event, request, requestDigest)
 			if err != nil {

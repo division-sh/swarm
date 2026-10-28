@@ -72,7 +72,7 @@ func TestWhatsAppIncomingPublicSDKMessageEditRevokeProjection(t *testing.T) {
 				}
 				payload := incomingPayloadFixture(t, captured)
 				if captured.Kind != kind || captured.EventID != "DELIVERY_1" || captured.Conversation != event.Info.Chat.String() ||
-					payload.MessageReference != "DELIVERY_1" || payload.Sender != self.String() {
+					payload.MessageReference != "DELIVERY_1" || payload.Sender != self.String() || payload.OperatorAccount != "+100000002" {
 					t.Fatalf("SDK target key replaced delivery/routing identity: %+v", payload)
 				}
 				if kind == "message" && (payload.Text == nil || *payload.Text != "exact current text" || payload.TargetReference != nil) {
@@ -129,6 +129,14 @@ func TestWhatsAppIncomingReplyAndForwardUseOnlyCurrentText(t *testing.T) {
 }
 
 func TestWhatsAppIncomingMalformedUnsupportedAndIdentityConflicts(t *testing.T) {
+	for _, account := range []string{"synthetic_account", "100000002@lid", "100000002:3@s.whatsapp.net", "100000002@g.us"} {
+		scope := captureFixture(t).Scope
+		scope.Session.AccountRef = account
+		captured, err := captureSDKMessage(scope, captureFixture(t).Source, uuid.NewString(), incomingMessageFixture(), captureFixture(t).ReceivedAt)
+		if !errors.Is(err, errCaptureScopeChanged) || len(captured.Body) != 0 {
+			t.Fatalf("invalid receiving account produced customer ingress: %v", err)
+		}
+	}
 	for _, tc := range []struct {
 		name   string
 		mutate func(*events.Message)

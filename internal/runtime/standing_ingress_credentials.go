@@ -18,17 +18,18 @@ import (
 )
 
 type standingBindingCredentials struct {
-	alias            string
-	plan             providertriggers.InboundAdmissionPlan
-	enabled          bool
-	blockReason      runtimerunlifecycle.StandingBindingBlockReason
-	operationID      string
-	recoveryCommand  string
-	signingKey       string
-	credentialKeys   []string
-	admissions       []channelonboarding.CredentialAdmission
-	missing          []string
-	sessionOperation *channelonboarding.Operation
+	alias                string
+	plan                 providertriggers.InboundAdmissionPlan
+	enabled              bool
+	blockReason          runtimerunlifecycle.StandingBindingBlockReason
+	operationID          string
+	recoveryCommand      string
+	signingKey           string
+	credentialKeys       []string
+	admissions           []channelonboarding.CredentialAdmission
+	missing              []string
+	sessionOperation     *channelonboarding.Operation
+	registeredOperations []channelonboarding.Operation
 }
 
 type standingCredentialAdmission struct {
@@ -167,7 +168,7 @@ func (rt *Runtime) standingCredentials(ctx context.Context) (*standingCredential
 
 func (rt *Runtime) observeStandingCredentials(ctx context.Context) (*standingCredentialAdmission, error) {
 	source := rt.Options.WorkflowModule.SemanticSource()
-	declarations, err := ResolveStandingTargetDeclarations(source, rt.Options.ProviderTriggerCatalog)
+	declarations, err := ResolveStandingTargetDeclarations(source, rt.Options.ProviderTriggerCatalog, rt.Options.TriggerEntries)
 	if err != nil {
 		return nil, err
 	}

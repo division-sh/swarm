@@ -12,6 +12,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/division-sh/swarm/internal/channelonboarding"
 	"github.com/division-sh/swarm/internal/events"
 	"github.com/division-sh/swarm/internal/events/eventtest"
 	"github.com/division-sh/swarm/internal/runtime/canonicaljson"
@@ -150,6 +151,31 @@ func TestAuthenticatedPackProjectionRejectsPostAdmissionMutation(t *testing.T) {
 			const bundleHash = "bundle-v2:sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
 			if delivery, _, err := plan.ProjectPublication(admitted, bundleHash, "."); err != nil || len(delivery.Events) != 2 {
 				t.Fatalf("exact authenticated positive control: %+v, %v", delivery, err)
+			}
+			first, err := plan.BindReceivingAccount(admitted, channelonboarding.AccountReference{Provider: "telegram", Account: "123"}, "signed-proof")
+			if err != nil {
+				t.Fatal(err)
+			}
+			second, err := plan.BindReceivingAccount(admitted, channelonboarding.AccountReference{Provider: "telegram", Account: "456"}, "signed-proof")
+			if err != nil || first.ProviderEventID() == second.ProviderEventID() {
+				t.Fatalf("bot-local delivery identity crossed accounts: %v", err)
+			}
+			replay, err := plan.BindReceivingAccount(admitted, channelonboarding.AccountReference{Provider: "telegram", Account: "123"}, "signed-proof")
+			if err != nil || replay.ProviderEventID() != first.ProviderEventID() {
+				t.Fatalf("account delivery replay changed identity: %v", err)
+			}
+			bound, _, err := plan.ProjectPublication(first, bundleHash, ".")
+			if err != nil || bound.Events[1].Payload["operator_account"] != "123" {
+				t.Fatalf("authenticated account carrier: %+v %v", bound, err)
+			}
+			if _, err := plan.BindReceivingAccount(first, channelonboarding.AccountReference{Provider: "telegram", Account: "456"}, "signed-proof"); err == nil {
+				t.Fatal("an already-bound account was replaced")
+			}
+			if _, err := plan.BindReceivingAccount(AdmittedRequest{}, channelonboarding.AccountReference{Provider: "telegram", Account: "123"}, "signed-proof"); err == nil {
+				t.Fatal("unauthenticated request acquired a receiving account")
+			}
+			if _, err := plan.BindReceivingAccount(admitted, channelonboarding.AccountReference{Provider: "telegram", Account: "123"}, "foreign-key"); err == nil {
+				t.Fatal("a foreign registration credential acquired the receiving account")
 			}
 			switch mutation {
 			case "payload":

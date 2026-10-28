@@ -65,7 +65,7 @@ func ResolveSessionActivitySite(source semanticview.Source, node identity.Execut
 }
 
 func CompileSessionActivityTarget(source semanticview.Source, bundleHash string, site contracts.ActivitySite,
-	publication ChannelActivationPublication, trigger packs.TriggerPackDescriptor,
+	publication ChannelActivationPublication, trigger packs.TriggerPackDescriptor, accounts ...string,
 ) (CompiledSessionActivityTarget, error) {
 	var absent CompiledSessionActivityTarget
 	if source == nil || bundleHash == "" || bundleHash != strings.TrimSpace(bundleHash) || !publication.Executable() {
@@ -84,6 +84,9 @@ func CompileSessionActivityTarget(source semanticview.Source, bundleHash string,
 	}
 	var matches []CompiledSessionActivityTarget
 	for _, activation := range publication.Activations() {
+		if activation.Source == ActivationSourceRegistered && (len(accounts) != 1 || accounts[0] != activation.OperatorAccount) {
+			continue
+		}
 		if activation.Coordinate.BundleHash != bundleHash || activation.Plan.RegistrationTarget() != selector || activation.Plan.Transport() != packs.ChannelTransportSession {
 			continue
 		}
@@ -154,6 +157,9 @@ func compileSessionActivityDeclaration(source semanticview.Source, site contract
 	target, native := tool.InProcess()
 	if !native || target != contracts.ToolInProcessWhatsAppSendText {
 		return absent, "", "", fmt.Errorf("session activity has no supported private write contract")
+	}
+	if _, hasAccount := site.Spec.Input["account"]; !hasAccount {
+		return absent, "", "", fmt.Errorf("session activity input requires account: state.operator_account (or policy.operator_account for a fixed number)")
 	}
 	if trigger.Provider != target.Provider() || trigger.Identity.ID() != target.Provider() ||
 		trigger.Transport != packs.ChannelTransportSession || !trigger.Generation.Valid() ||

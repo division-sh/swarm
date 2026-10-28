@@ -37,7 +37,7 @@ func captureFixture(t *testing.T) capturedEvent {
 			PublicationBinding: runtimeinbound.BindingGeneration{
 				RunID: uuid.NewString()},
 			Session: operatorchannel.SessionAccountAdmission{
-				Provider: "whatsapp", ConnectionID: uuid.NewString(), AccountRef: "synthetic_account",
+				Provider: "whatsapp", ConnectionID: uuid.NewString(), AccountRef: "100000002@s.whatsapp.net",
 				AdmissionID: uuid.NewString(), Revision: 1,
 			},
 			Source: channelonboarding.ChannelDurableContextIdentity{
@@ -250,6 +250,33 @@ func TestWhatsAppCaptureAcknowledgmentRequiresCommitAndSurvivesReopen(t *testing
 	got, err = reopened.pending(context.Background())
 	if err != nil || len(got) != 1 || got[0].OccurrenceID != event.OccurrenceID || !bytes.Equal(got[0].Body, event.Body) {
 		t.Fatal("redelivery overwrote original capture or duplicated work")
+	}
+	unclaimed := event
+	unclaimed.EventID = "UNCLAIMED_CAPTURE"
+	unclaimed.Scope = captureScope{DeploymentRegistration: true, Kind: channelonboarding.SessionInputOnboarding,
+		Session: event.Scope.Session, OnboardingOperation: event.Scope.OnboardingOperation,
+		OperationRevision: event.Scope.OperationRevision, PrincipalID: event.Scope.PrincipalID}
+	unclaimed.Source = captureSource{DeploymentRegistration: true, CatalogGeneration: event.Source.CatalogGeneration}
+	if err := reopened.retainUnclaimed(context.Background(), unclaimed); err != nil {
+		t.Fatal(err)
+	}
+	if err := reopened.retainUnclaimed(context.Background(), unclaimed); err != nil {
+		t.Fatal("dead-letter replay changed its retained evidence", err)
+	}
+	count, err := reopened.owner.UnclaimedCount(context.Background())
+	if err != nil || count != 1 {
+		t.Fatalf("account_unclaimed count=%d error=%v", count, err)
+	}
+	if terminal, err := reopened.isUnclaimed(context.Background(), unclaimed); err != nil || !terminal {
+		t.Fatalf("account_unclaimed receipt lost after settlement: %t %v", terminal, err)
+	}
+	changed := unclaimed
+	changed.Body = []byte(`{"text":"changed"}`)
+	if _, err := reopened.isUnclaimed(context.Background(), changed); !errors.Is(err, errCaptureConflict) {
+		t.Fatal("dead-letter identity accepted different native bytes", err)
+	}
+	if pending, err := reopened.pending(context.Background()); err != nil || len(pending) != 1 || pending[0].EventID != event.EventID {
+		t.Fatal("dead-letter settlement discarded pending work or remained executable", pending, err)
 	}
 }
 

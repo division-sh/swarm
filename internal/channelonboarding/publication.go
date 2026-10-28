@@ -233,6 +233,9 @@ func canonicalActivationPublication(activations []CompiledActivation) (canonical
 			"plan":                    planValue,
 			"credential_admissions":   admissionValues,
 		}
+		if activation.Source == ActivationSourceRegistered {
+			value["operator_account"] = activation.OperatorAccount
+		}
 		if activation.SessionAccount != (operatorchannel.SessionAccountAdmission{}) {
 			value["session_account"] = activation.SessionAccount
 		}

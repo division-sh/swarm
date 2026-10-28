@@ -27,6 +27,7 @@ import (
 	runtimefailures "github.com/division-sh/swarm/internal/runtime/failures"
 	runtimeinbound "github.com/division-sh/swarm/internal/runtime/inboundpublication"
 	runtimeingress "github.com/division-sh/swarm/internal/runtime/ingress"
+	"github.com/division-sh/swarm/internal/runtime/publicingress"
 	"github.com/division-sh/swarm/internal/runtime/semanticview"
 )
 
@@ -270,6 +271,11 @@ func (g *InboundGateway) handleResolvedWebhook(w http.ResponseWriter, r *http.Re
 		w.Header().Set("content-type", contentType)
 		w.WriteHeader(status)
 		_, _ = w.Write(response.Body)
+		return
+	}
+	admitted, err = publicingress.BindReceivingAccount(r.Context(), target.AdmissionPlan, admitted)
+	if err != nil {
+		http.Error(w, "receiving account is no longer current", http.StatusServiceUnavailable)
 		return
 	}
 	providerEventID := admitted.ProviderEventID()

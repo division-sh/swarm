@@ -201,6 +201,7 @@ func workflowActivityNativeFixtureFromSelectedSource(t *testing.T, selected time
 		NewCoordinator: func(bus pipeline.Bus, options pipeline.PipelineCoordinatorOptions) *pipeline.PipelineCoordinator {
 			return coordinator(bus, options, persistence, original)
 		},
+		AccountRegistrationOwners: selected.(pipeline.AccountRegistrationOwnersForTest),
 		CleanupFaultCoordinator: func(bus pipeline.Bus, options pipeline.PipelineCoordinatorOptions, fault error) (*pipeline.PipelineCoordinator, func() int32) {
 			journal, count := cleanupFault(fault)
 			return coordinator(bus, options, journalPersistence(journal), journal), count

@@ -79,6 +79,31 @@ type ProviderRegistrationController struct {
 }
 
 type currentRegistrationTargetContextKey struct{}
+type receivingAccountContextKey struct{}
+
+type receivingAccount struct {
+	account    channelonboarding.AccountReference
+	current    func(context.Context) bool
+	generation triggergeneration.Generation
+	signing    func(context.Context) (string, error)
+}
+
+// BindReceivingAccount consumes Handler's exact verified slot after the caller
+// has authenticated the payload with that slot's current signing credential.
+func BindReceivingAccount(ctx context.Context, plan providertriggers.InboundAdmissionPlan, admitted providertriggers.AdmittedRequest) (providertriggers.AdmittedRequest, error) {
+	evidence, ok := ctx.Value(receivingAccountContextKey{}).(receivingAccount)
+	if !ok {
+		return admitted, nil // Raw ingress has no connection-account slot.
+	}
+	if evidence.current == nil || !evidence.current(ctx) || !plan.Generation().Equal(evidence.generation) || evidence.signing == nil {
+		return providertriggers.AdmittedRequest{}, channelonboarding.ErrRevisionConflict
+	}
+	secret, err := evidence.signing(ctx)
+	if err != nil {
+		return providertriggers.AdmittedRequest{}, err
+	}
+	return plan.BindReceivingAccount(admitted, evidence.account, secret)
+}
 
 // CurrentRegistrationTarget returns the exact registration target selected by
 // Handler after callback-token and registration-currentness admission.
@@ -794,6 +819,39 @@ func (c *ProviderRegistrationController) Handler(next http.Handler) http.Handler
 			return
 		}
 		request = request.WithContext(context.WithValue(request.Context(), currentRegistrationTargetContextKey{}, target))
+		snapshot := c.snapshot.capture()
+		for _, state := range snapshot.registrations {
+			if state.Pair.Target != target || state.LastVerified == nil {
+				continue
+			}
+			if target.Provider != "telegram" && target.Provider != "whatsapp" {
+				continue
+			}
+			prefix := target.Provider + ":" + state.Pair.Registration.SlotNamespace() + ":"
+			if !strings.HasPrefix(state.SelectionSlotID, prefix) {
+				http.Error(response, "receiving account unavailable", http.StatusServiceUnavailable)
+				return
+			}
+			account := channelonboarding.AccountReference{Provider: target.Provider, Account: strings.TrimPrefix(state.SelectionSlotID, prefix)}
+			if account.Validate() != nil {
+				http.Error(response, "receiving account unavailable", http.StatusServiceUnavailable)
+				return
+			}
+			token := request.URL.Query().Get("swarm_callback_generation")
+			evidence := receivingAccount{account: account, generation: target.AdmissionPlanGeneration, signing: func(ctx context.Context) (string, error) {
+				_, signing, err := c.admitCredentials(ctx, state.Pair)
+				if err != nil {
+					return "", err
+				}
+				return signing.CredentialValue(), nil
+			}, current: func(ctx context.Context) bool {
+				current, err := c.credentialObservationTokensCurrent(ctx, state.LastVerified.CredentialObservationTokens)
+				selected, callbackCurrent := c.callbackTargetCurrent(ctx, target.Alias, target.Provider, token)
+				return ctx.Err() == nil && callbackCurrent && selected == target && c.snapshot.currentRevision(snapshot.revision) && err == nil && current
+			}}
+			request = request.WithContext(context.WithValue(request.Context(), receivingAccountContextKey{}, evidence))
+			break
+		}
 		next.ServeHTTP(response, request)
 	})
 }
