@@ -50,6 +50,9 @@ func resolveServeRegistrationPairs(ctx context.Context, snapshot serveChannelAct
 	if manager == nil {
 		return nil, fmt.Errorf("runtime context manager is required for provider registration")
 	}
+	if err := ctx.Err(); err != nil {
+		return nil, err
+	}
 	contexts := manager.LoadedContexts()
 	selection := &serveRegistrationSelection{}
 	fail := func(err error) (*serveRegistrationSelection, error) {
@@ -90,23 +93,25 @@ func resolveServeRegistrationPairs(ctx context.Context, snapshot serveChannelAct
 		if err != nil {
 			return fail(fmt.Errorf("channels.bindings.%s.register: %w", binding.BindingID(), err))
 		}
-		enabled, err := serveDeclaredRegistrationEnabled(ctx, manager, contextDef, binding)
-		if err != nil {
-			return fail(err)
+		target, targetErr := exactContextTarget(contextDef, rawSelector)
+		if targetErr == nil && !target.AdmissionPlan.RequiresSecret() {
+			return fail(fmt.Errorf("channels.bindings.%s.register target %q requires a signing credential role but the exact ingress target is %s", binding.BindingID(), rawSelector, target.AdmissionPlan.RequestAuthentication()))
 		}
-		if !enabled {
-			continue
+		if activation.Source == channelonboarding.ActivationSourceDeclared {
+			enabled, err := serveDeclaredRegistrationEnabled(ctx, manager, contextDef, binding)
+			if err != nil {
+				return fail(err)
+			}
+			if !enabled {
+				continue
+			}
 		}
-		target, err := exactContextTarget(contextDef, rawSelector)
-		if err != nil {
-			return fail(fmt.Errorf("channels.bindings.%s.register: %w", binding.BindingID(), err))
+		if targetErr != nil {
+			return fail(fmt.Errorf("channels.bindings.%s.register: %w", binding.BindingID(), targetErr))
 		}
 		planGeneration, err := binding.PlanGeneration()
 		if err != nil {
 			return fail(err)
-		}
-		if !target.AdmissionPlan.RequiresSecret() {
-			return fail(fmt.Errorf("channels.bindings.%s.register target %q requires a signing credential role but the exact ingress target is %s", binding.BindingID(), rawSelector, target.AdmissionPlan.RequestAuthentication()))
 		}
 		if strings.TrimSpace(target.SigningSecret) == "" {
 			return fail(fmt.Errorf("channels.bindings.%s.register target %q has no signing credential binding", binding.BindingID(), rawSelector))

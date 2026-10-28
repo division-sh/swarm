@@ -136,6 +136,9 @@ func retainedRuntimeBootstrapFixture(t *testing.T, a *activeInputFixture) *runti
 		t.Fatal(err)
 	}
 	f.service, err = channelonboarding.NewService(channelonboarding.ServiceOptions{Store: a.selected, SourceArtifacts: a.selected.(sourceartifact.Reader),
+		LandingRuns: a.selected, TargetEnabled: func(ctx context.Context, _ channelonboarding.Candidate) (bool, error) {
+			return a.selected.SessionStandingBindingCurrent(ctx, a.operation)
+		},
 		Identities: f.channels, Credentials: writer, Catalog: func() (*channelonboarding.CandidateCatalog, error) { return catalog, nil },
 		Sessions: f, Activations: f, Confirmation: f, Readiness: f})
 	if err != nil {
@@ -237,6 +240,9 @@ func TestWhatsAppSucceededRecoveryRestoresOnlyCurrentActivationBothStores(t *tes
 				t.Fatal(err)
 			}
 			f.service, err = channelonboarding.NewService(channelonboarding.ServiceOptions{Store: a.selected, SourceArtifacts: a.selected.(sourceartifact.Reader),
+				LandingRuns: a.selected, TargetEnabled: func(ctx context.Context, _ channelonboarding.Candidate) (bool, error) {
+					return a.selected.SessionStandingBindingCurrent(ctx, a.operation)
+				},
 				Identities: f.channels, Credentials: writer, Catalog: func() (*channelonboarding.CandidateCatalog, error) { return catalog, nil },
 				Sessions: f, Activations: f, Confirmation: f, Readiness: f})
 			if err != nil {

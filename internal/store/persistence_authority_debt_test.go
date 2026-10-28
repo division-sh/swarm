@@ -220,9 +220,64 @@ func debtRunFixtureSignatureSite(declaration, resolved string) authorityDebtSite
 	}
 }
 
+func debtW1RunObservationSignatureTransitions() [10][2]authorityDebtSite {
+	const file = "internal/serveapp/standing_ingress_supported_surface_test.go"
+	const observation = "domain observation port on the exact selected owner; missing exact port: escalate #2542"
+	const unowned = "exact domain owner not identified here; escalate #2542, never invent a SQL escape"
+	var pairs [10][2]authorityDebtSite
+	for index, names := range [][3]string{
+		{"assertServedStandingState", "assertServedFlowRunState", "|arg=*string|arg=*int64|arg=*string|arg=*string"},
+		{"loadServedStandingOwnerByFlow", "loadServedLandingRunByFlow", "|arg=*string|arg=*string|arg=*int64"},
+	} {
+		for offset, site := range []authorityDebtSite{
+			{Kind: "raw-operation", File: file, Operation: "call:database/sql.(*database/sql.DB).QueryRowContext", Resolved: "func=func(ctx context.Context, query string, args ...any) *database/sql.Row|recv=*database/sql.DB|arg=context.Context|arg=string|arg=[]any|results=(*database/sql.Row)", Family: "observation", Replacement: observation, Multiplicity: 1},
+			{Kind: "raw-operation", File: file, Operation: "call:database/sql.(*database/sql.Row).Scan", Resolved: "func=func(dest ...any) error|recv=*database/sql.Row" + names[2] + "|results=(error)", Family: "observation", Replacement: observation, Multiplicity: 1},
+			{Kind: "raw-type", File: file, Operation: "param:db", Resolved: "*database/sql.DB", Family: "unowned-authority", Replacement: unowned, Multiplicity: 1},
+		} {
+			site.Declaration = names[0]
+			current := site
+			current.Declaration = names[1]
+			if offset == 1 {
+				current.Resolved = "func=func(dest ...any) error|recv=*database/sql.Row|arg=*string|results=(error)"
+			}
+			if index == 0 && offset == 0 {
+				current.Resolved = "func=func(ctx context.Context, query string, args ...any) *database/sql.Row|recv=*database/sql.DB|arg=context.Context|arg=string|arg=string|results=(*database/sql.Row)"
+			}
+			pairs[index*3+offset] = [2]authorityDebtSite{site, current}
+		}
+	}
+	old := authorityDebtSite{Kind: "raw-operation", File: file, Declaration: "TestStandingRestartMixedHealthyAndTerminalProcessParity", Operation: "call:github.com/division-sh/swarm/internal/serveapp.assertServedStandingState", Resolved: "func=func(t *testing.T, db *database/sql.DB, backend string, serviceID string, runID string, generation int64, effectiveState string, runStatus string)|recv=<nil>|arg=*testing.T|arg=*database/sql.DB|arg=string|arg=string|arg=string|arg=int64|arg=string|arg=string|results=()", Family: "unowned-authority", Replacement: unowned, Multiplicity: 3}
+	current := old
+	current.Operation = "call:github.com/division-sh/swarm/internal/serveapp.assertServedFlowRunState"
+	current.Resolved = "func=func(t *testing.T, db *database/sql.DB, backend string, runID string, runStatus string)|recv=<nil>|arg=*testing.T|arg=*database/sql.DB|arg=string|arg=string|arg=string|results=()"
+	current.Family, current.Replacement = "lifecycle", "selected run lifecycle/candidate/source owner and bounded lifecycle observation"
+	pairs[6] = [2]authorityDebtSite{old, current}
+	old.Operation = "call:github.com/division-sh/swarm/internal/serveapp.loadServedStandingOwnerByFlow"
+	old.Resolved = "func=func(t testing.TB, db *database/sql.DB, backend string, flowID string) (serviceID string, runID string, generation int64)|recv=<nil>|arg=*testing.T|arg=*database/sql.DB|arg=string|arg=string|results=(string,string,int64)"
+	old.Multiplicity = 2
+	current = old
+	current.Operation = "call:github.com/division-sh/swarm/internal/serveapp.loadServedLandingRunByFlow"
+	current.Resolved = "func=func(t testing.TB, db *database/sql.DB, backend string, flowID string) string|recv=<nil>|arg=*testing.T|arg=*database/sql.DB|arg=string|arg=string|results=(string)"
+	current.Family, current.Replacement = "lifecycle", "selected run lifecycle/candidate/source owner and bounded lifecycle observation"
+	pairs[7] = [2]authorityDebtSite{old, current}
+	old.File, current.File = "internal/serveapp/channel_delivery_inbound_supported_surface_test.go", "internal/serveapp/channel_delivery_inbound_supported_surface_test.go"
+	old.Declaration, current.Declaration = "waitChannelCardMessageID", "waitChannelCardMessageID"
+	old.Family = "channel"
+	old.Replacement = "selected channel/delivery owner and named channel fault/readback"
+	old.Multiplicity, current.Multiplicity = 1, 1
+	pairs[8] = [2]authorityDebtSite{old, current}
+	old = authorityDebtSite{Kind: "raw-operation", File: "internal/serveapp/standing_ingress_dormancy_supported_surface_test.go", Declaration: "TestDormantIngressProvisionRestartSignedInputBothStores", Operation: "call:database/sql.(*database/sql.Row).Scan", Resolved: "func=func(dest ...any) error|recv=*database/sql.Row|arg=*string|arg=*int64|arg=*string|results=(error)", Family: "observation", Replacement: observation, Multiplicity: 1}
+	current = old
+	current.Resolved = "func=func(dest ...any) error|recv=*database/sql.Row|arg=*string|arg=*string|results=(error)"
+	pairs[9] = [2]authorityDebtSite{old, current}
+	return pairs
+}
+
 func debtRunFixtureSignatureComparisons(actual, head, base, source map[string]authorityDebtSite) (map[string]authorityDebtSite, map[string]authorityDebtSite, map[string]authorityDebtSite, []string) {
 	runFixtures, selectedFixtures := debtRunFixtureSignatureTransitions(), debtSelectedFixtureSignatureTransitions()
-	for index, pair := range append(runFixtures[:], selectedFixtures[:]...) {
+	w1Fixtures := debtW1RunObservationSignatureTransitions()
+	pairs := append(append(runFixtures[:], selectedFixtures[:]...), w1Fixtures[:]...)
+	for index, pair := range pairs {
 		old, current := pair[0], pair[1]
 		for _, state := range []map[string]authorityDebtSite{actual, head, base, source} {
 			if state[old.identity()].Multiplicity > 0 && state[current.identity()].Multiplicity > 0 {
@@ -946,6 +1001,11 @@ func debtValidateCollectorIdentity(base, current string, trusted, head authority
 	if base == current && trusted.Collector == current && head.Collector == current {
 		return nil
 	}
+	if base == debtCompletedSelectedFixturePinCollectorTo && trusted.Collector == base &&
+		current == debtW1ComparisonCollectorTo && reviewedTransition == current && head.Collector == current &&
+		debtSitesEqual(head.Sites, trusted.Sites) {
+		return nil // #2728/6456523378: finite comparison repair, unchanged baseline.
+	}
 	if base == debtSelectedFixtureComposedCollectorTo && trusted.Collector == base &&
 		current == debtSelectedFixtureLandedCollectorTo && head.Collector == current &&
 		debtSitesEqual(head.Sites, trusted.Sites) {
@@ -1255,15 +1315,22 @@ func debtW4LiveFixtureComparisons(actual, head, base, source map[string]authorit
 	mockReturn := composition[1]
 	mockReturn.Declaration = "startServedTestSetupEntitiesProofRuntimeFromSource"
 	compositionAllowed := actual[mockReturn.identity()] == mockReturn && source[mockReturn.identity()] == mockReturn
+	sourceCompositionAbsent, sourceCompositionCurrent := true, true
 	for _, site := range composition {
 		compositionAllowed = compositionAllowed && actual[site.identity()] == site &&
-			source[site.identity()].Multiplicity == 0 && base[site.identity()].Multiplicity == 0
+			base[site.identity()].Multiplicity == 0 &&
+			(head[site.identity()].Multiplicity == 0 || head[site.identity()] == site)
+		sourceCompositionAbsent = sourceCompositionAbsent && source[site.identity()].Multiplicity == 0
+		sourceCompositionCurrent = sourceCompositionCurrent && source[site.identity()] == site
 	}
+	compositionAllowed = compositionAllowed && (sourceCompositionAbsent || sourceCompositionCurrent)
 	for _, pair := range pairs {
 		old, current := pair[0], pair[1]
+		sourceOld := source[old.identity()] == old && source[current.identity()].Multiplicity == 0
+		sourceCurrent := source[current.identity()] == current && source[old.identity()].Multiplicity == 0
 		if actual[current.identity()] == current && actual[old.identity()].Multiplicity == 0 &&
-			base[old.identity()] == old && source[old.identity()] == old &&
-			base[current.identity()].Multiplicity == 0 && source[current.identity()].Multiplicity == 0 {
+			base[old.identity()] == old && base[current.identity()].Multiplicity == 0 &&
+			(sourceOld || sourceCurrent) {
 			head = debtForwardQuiescenceUncertainty(head, old, current)
 			base = debtForwardQuiescenceUncertainty(base, old, current)
 			source = debtForwardQuiescenceUncertainty(source, old, current)
