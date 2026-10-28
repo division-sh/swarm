@@ -588,6 +588,7 @@ func waitChannelAnchorRejectedIntent(t *testing.T, reader render.Observer, inter
 
 func writeChannelAnchorJourneySource(t *testing.T, root string, withNotice bool) {
 	t.Helper()
+	writeStandingCandidateFile(t, filepath.Join(root, "policy.yaml"), "operator_account: '420079'\n")
 	fixture := canonicalrouting.CopyMailboxCompletionMatrix(t)
 	if withNotice {
 		fixture = canonicalrouting.CopyMailboxNoticeCompletion(t)
