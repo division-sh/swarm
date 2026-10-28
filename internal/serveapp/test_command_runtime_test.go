@@ -1241,7 +1241,7 @@ func runServedGeneratedInputFixtureBackendProof(t *testing.T, backend servedpari
 	wantPayload := map[string]any{
 		"conversation_reference":     "0",
 		"conversation_scope":         "direct",
-		"external_account": "0",
+		"external_account":           "0",
 		"provider_message_reference": float64(1),
 		"text":                       "0",
 	}
