@@ -10,6 +10,7 @@ import (
 	"net/http/httptest"
 	"os"
 	"path/filepath"
+	"reflect"
 	"strings"
 	"testing"
 	"time"
@@ -309,7 +310,7 @@ func TestStandingIngressSupportedSurfaceSQLiteRestartPreservesAuthorityAndReplie
 	}
 	sqliteStore = nil
 	disableServeRuntimeRecovery(t, opts.ConfigPath)
-	requireChangedStandingColdStartMatrix(t, opts, sourceRoot, standingRunID, nil)
+	requireChangedStandingColdStartMatrix(t, opts, sourceRoot, standingRunID, "sqlite", sqlitePath, nil)
 }
 
 func TestServeAuthorActivityAttachmentFailureKeepsRuntimeHealthy(t *testing.T) {
@@ -535,7 +536,7 @@ func TestStandingIngressSupportedSurfacePostgresRestartPreservesAuthorityAndRepl
 		t.Fatalf("standing initial gate cards = %d, %v, want one persisted card across restart", pendingCards, err)
 	}
 	disableServeRuntimeRecovery(t, opts.ConfigPath)
-	requireChangedStandingColdStartMatrix(t, opts, sourceRoot, standingRunID, func(t *testing.T) {
+	requireChangedStandingColdStartMatrix(t, opts, sourceRoot, standingRunID, "postgres", dsn, func(t *testing.T) {
 		var reopenErr error
 		runtimePG, reopenErr = store.NewPostgresStore(dsn)
 		if reopenErr != nil {
@@ -747,8 +748,51 @@ func setServeRuntimeRecovery(t *testing.T, configPath string, from, to bool) {
 	}
 }
 
-func requireChangedStandingColdStartMatrix(t *testing.T, opts cliapp.ServeOptions, sourceRoot, originalRunID string, prepare func(*testing.T)) {
+func requireChangedStandingColdStartMatrix(t *testing.T, opts cliapp.ServeOptions, sourceRoot, originalRunID, backend, connection string, prepare func(*testing.T)) {
 	t.Helper()
+	type retainedState struct {
+		run    runtimerunlifecycle.Snapshot
+		source sourceartifact.Persisted
+		work   map[string]storetest.SelectedForkStorageTableSnapshot
+	}
+	readRetained := func(t *testing.T) retainedState {
+		t.Helper()
+		var selected interface {
+			sourceArtifactReader
+			store.SchemaBootstrapper
+			Close() error
+		}
+		var err error
+		if backend == "postgres" {
+			selected, err = store.NewPostgresStore(connection)
+		} else {
+			selected, err = store.NewSQLiteRuntimeStore(connection)
+		}
+		if err != nil {
+			t.Fatal(err)
+		}
+		defer func() {
+			if err := selected.Close(); err != nil {
+				t.Fatal(err)
+			}
+		}()
+		if _, err := initializeServePlatformStateStores(t.Context(), selected); err != nil {
+			t.Fatal(err)
+		}
+		run, err := storetest.ReadRuntimeLogRunSnapshot(t.Context(), selected, originalRunID)
+		if err != nil {
+			t.Fatal(err)
+		}
+		source, err := selected.GetSourceArtifact(t.Context(), run.BundleHash)
+		if err != nil {
+			t.Fatal(err)
+		}
+		work, err := storetest.ReadSelectedForkSourceDomain(t.Context(), selected, originalRunID)
+		if err != nil {
+			t.Fatal(err)
+		}
+		return retainedState{run: run, source: source, work: work}
+	}
 	manifestPath := filepath.Join(sourceRoot, "manifest.yaml")
 	baseManifest, err := os.ReadFile(manifestPath)
 	if err != nil {
@@ -793,8 +837,9 @@ func requireChangedStandingColdStartMatrix(t *testing.T, opts cliapp.ServeOption
 		t.Fatalf("read standing flow schema: %v", err)
 	}
 	type candidateMutation struct {
-		name  string
-		apply func(*testing.T)
+		name       string
+		apply      func(*testing.T)
+		wantStrand []string
 	}
 	mutations := []candidateMutation{
 		{name: "source revision one", apply: func(t *testing.T) {
@@ -809,7 +854,7 @@ func requireChangedStandingColdStartMatrix(t *testing.T, opts cliapp.ServeOption
 		{name: "manifest name revised", apply: func(t *testing.T) {
 			writeStandingCandidateFile(t, manifestPath, strings.Replace(string(baseManifest), "name: telegram-agent", "name: renamed-telegram-agent", 1))
 		}},
-		{name: "standing declaration removed", apply: func(t *testing.T) {
+		{name: "standing declaration removed", wantStrand: []string{"instance telegram-ingress", "stage_removed (active)", "instance telegram-chat/", "stage_removed (pending)", "field_value_incompatible"}, apply: func(t *testing.T) {
 			removeConnectedReceiver(t)
 			removedDir := filepath.Join(t.TempDir(), filepath.Base(flowDir))
 			if err := os.Rename(flowDir, removedDir); err != nil {
@@ -819,7 +864,7 @@ func requireChangedStandingColdStartMatrix(t *testing.T, opts cliapp.ServeOption
 				_ = os.Rename(removedDir, flowDir)
 			})
 		}},
-		{name: "standing changed to non-standing", apply: func(t *testing.T) {
+		{name: "standing changed to non-standing", wantStrand: []string{"instance telegram-chat/", "stage_removed (pending)", "field_value_incompatible"}, apply: func(t *testing.T) {
 			removeConnectedReceiver(t)
 			var schema map[string]any
 			if err := yaml.Unmarshal(baseFlowSchema, &schema); err != nil {
@@ -834,7 +879,7 @@ func requireChangedStandingColdStartMatrix(t *testing.T, opts cliapp.ServeOption
 			}
 			writeStandingCandidateFile(t, flowSchemaPath, string(raw))
 		}},
-		{name: "flow identity renamed", apply: func(t *testing.T) {
+		{name: "flow identity renamed", wantStrand: []string{"instance telegram-ingress", "stage_removed (active)", "gate_removed (active)"}, apply: func(t *testing.T) {
 			writeStandingCandidateFile(t, rootSchemaPath, strings.Replace(string(baseRootSchema), "from: telegram-ingress", "from: telegram-ingress-v2", 1))
 			renamedDir := filepath.Join(sourceRoot, "telegram-ingress-v2")
 			if err := os.Rename(flowDir, renamedDir); err != nil {
@@ -859,6 +904,31 @@ func requireChangedStandingColdStartMatrix(t *testing.T, opts cliapp.ServeOption
 			mutation.apply(t)
 			if prepare != nil {
 				prepare(t)
+			}
+			if len(mutation.wantStrand) != 0 {
+				before := readRetained(t)
+				ready := make(chan struct{}, 1)
+				refused := opts
+				refused.TestRuntimeReadyHook = func(*runtimepkg.Runtime) { ready <- struct{}{} }
+				process := startServeRuntimeTestProcess(t, refused)
+				code, exited := process.waitForExit(serveRuntimeStopTimeout)
+				if !exited {
+					process.cleanup()
+					t.Fatal("destructive bundle edit did not refuse before readiness")
+				}
+				output := process.outputString()
+				if code != 3 || len(ready) != 0 || strings.Contains(output, "swarm runtime ready") {
+					t.Fatalf("destructive bundle edit reached readiness or lost refusal: exit=%d\n%s", code, output)
+				}
+				for _, want := range append([]string{"pinned bundle admission", "bundle upgrade would strand retained work"}, mutation.wantStrand...) {
+					if !strings.Contains(output, want) {
+						t.Fatalf("destructive bundle refusal missing %q:\n%s", want, output)
+					}
+				}
+				if after := readRetained(t); !reflect.DeepEqual(before, after) {
+					t.Fatalf("refused bundle edit changed retained run, source or work: before=%+v after=%+v", before, after)
+				}
+				return
 			}
 			requireChangedStandingColdStartReconciled(t, opts, originalRunID)
 		})

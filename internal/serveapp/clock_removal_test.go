@@ -3,9 +3,11 @@ package serveapp
 import (
 	"os"
 	"path/filepath"
+	"reflect"
 	"testing"
 	"time"
 
+	"github.com/division-sh/swarm/internal/runtime/genericschedule"
 	"github.com/division-sh/swarm/internal/runtime/lifecycleprobe"
 	"github.com/division-sh/swarm/internal/runtime/testfixtures/canonicalrouting"
 	"github.com/division-sh/swarm/internal/store/storetest"
@@ -40,7 +42,16 @@ func TestServedClockDeclarationRemovalRetiresLastBindingBothStores(t *testing.T)
 			})
 			second, current := start()
 			removed := readServedClockHeader(t, current.Endpoint, initial.RunID).ClockSchedules[0]
-			if removed.ActivationID != initial.ActivationID || !removed.InitialDueAt.Equal(initial.InitialDueAt) || removed.Status != initial.Status || removed.RetainsRun != initial.RetainsRun || removed.CancelCause != "" {
+			if removed.Status != genericschedule.StatusCancelled || removed.CancelCause != "rule_removed" || removed.CancelledAt == nil || removed.CancelledAt.IsZero() || removed.NextDueAt != nil || removed.RetainsRun {
+				t.Fatalf("removed clock binding did not retain its cancellation: %+v", removed)
+			}
+			expected := initial
+			expected.Status = genericschedule.StatusCancelled
+			expected.CancelCause = "rule_removed"
+			expected.CancelledAt = removed.CancelledAt
+			expected.NextDueAt = nil
+			expected.RetainsRun = false
+			if !reflect.DeepEqual(removed, expected) {
 				t.Fatalf("removed binding erased/rearmed historical clock: before=%+v after=%+v", initial, removed)
 			}
 			time.Sleep(550 * time.Millisecond)
