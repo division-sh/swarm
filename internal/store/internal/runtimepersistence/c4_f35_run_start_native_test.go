@@ -1127,7 +1127,7 @@ func TestC4F35StandingStartNativeCommitAccountingBothStores(t *testing.T) {
 				if _, err := selected.(sourceartifactfixture.RootedWriter).EnsureRootedSource(setup, rooted); err != nil {
 					t.Fatal(err)
 				}
-				ctx := testAuthorActivityRuntimeContext()
+				ctx := correlation.WithRootAdmission(correlation.WithSourceArtifactFact(testAuthorActivityRuntimeContext(), fact), rooted.Admission())
 				ctx = originalStoreFixtureContext(t, ctx, selected)
 				workflow := newWorkflowTestCoordinator(t, db, pipeline.NewWorkflowPersistence(selected.(workflowTestSelectedStore)), selected.(workflowTestSelectedStore))
 				flowPath := "c4-standing/" + backend
@@ -1163,7 +1163,7 @@ func TestC4F35StandingStartNativeCommitAccountingBothStores(t *testing.T) {
 					c4RequireRevisionCount(t, ctx, selected, observed.RunID, 1)
 				}
 				selected, db = c4ReopenCreationStore(t, backend, selected, db, connector)
-				ctx = originalStoreFixtureContext(t, testAuthorActivityRuntimeContext(), selected)
+				ctx = originalStoreFixtureContext(t, correlation.WithRootAdmission(correlation.WithSourceArtifactFact(testAuthorActivityRuntimeContext(), fact), rooted.Admission()), selected)
 				workflow = newWorkflowTestCoordinator(t, db, pipeline.NewWorkflowPersistence(selected.(workflowTestSelectedStore)), selected.(workflowTestSelectedStore))
 				reader = selected.(runOriginReadStore)
 				reopened, reopenedFound, err := selected.(runlifecycle.LandingRunReader).LoadLandingRun(ctx, candidate)
