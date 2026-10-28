@@ -88,19 +88,6 @@ func selectedContractAgentTestSourceFact(t *testing.T) runtimecorrelation.Source
 	return fact
 }
 
-func selectedContractTestDeclarationTopology(t testing.TB) runtimeagenttopology.Admission {
-	t.Helper()
-	topology, err := runtimeagenttopology.StaticAdmission(
-		"selected-contract-test-source-set-v1",
-		selectedContractAgentTestBundleHash,
-		runtimeagenttopology.LifetimeEphemeral,
-	)
-	if err != nil {
-		t.Fatalf("construct selected-contract declaration topology: %v", err)
-	}
-	return topology
-}
-
 func selectedContractTestProcessCapability(
 	t testing.TB,
 	ctx context.Context,

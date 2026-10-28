@@ -1009,12 +1009,3 @@ func joinErrors(errs []error) string {
 func requirementSatisfied(requirement packs.Requirement) bool {
 	return requirement.Satisfied != nil && *requirement.Satisfied
 }
-
-func evidenceByKind(evidence []packs.Evidence, kind string) map[string]string {
-	for _, item := range evidence {
-		if item.Kind == kind {
-			return item.Fields
-		}
-	}
-	return nil
-}

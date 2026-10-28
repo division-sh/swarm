@@ -9,20 +9,6 @@ import (
 	"testing"
 )
 
-// Check today's owner first, then give unchanged mechanical oracles their
-// actual historical target. The historical target is never a source rewrite.
-func historicalMechanicalRecipe(t *testing.T, row recipe) recipe {
-	t.Helper()
-	files, changes, err := prepareFiles("../../..", []recipe{row})
-	if err != nil || len(files) != 0 || len(changes) != 0 {
-		t.Fatalf("current semantic successor diverged: %s/%v", row.Function, err)
-	}
-	if row.Mechanical != nil {
-		row.After = row.Mechanical.After
-	}
-	return row
-}
-
 func TestHistoricalMechanicalSnapshotsRejectInvalidAndCrossedCuts(t *testing.T) {
 	row := recipe{File: "fixture.go", Function: "original", Before: "func original() { raw() }", After: "func native() { acknowledged() }", Successor: "func native() { current() }"}
 	row.Mechanical = &mechanicalSnapshot{SourceCommit: strings.Repeat("1", 40), BeforeSHA256: fmt.Sprintf("%x", sha256.Sum256([]byte(row.Before))), After: "func native() { mechanical() }"}

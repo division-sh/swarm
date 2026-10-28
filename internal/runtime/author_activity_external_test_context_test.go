@@ -73,7 +73,6 @@ func originalRuntimeFixtureContext(t testing.TB, ctx context.Context, selected a
 	return ctx
 }
 
-var authorActivityTestSourceArtifact = sourceartifactfixture.Artifact()
 var authorActivityTestSourceArtifactFact = sourceartifactfixture.Fact()
 
 var externalRuntimeTestEventBusOwners sync.Map

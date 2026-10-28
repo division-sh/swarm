@@ -57,27 +57,6 @@ var schemaRangeRefinementFieldOptions = map[string]struct{}{
 	"max": {},
 }
 
-func (i ConnectorPackImport) normalized() ConnectorPackImport {
-	return ConnectorPackImport{
-		Provider: normalizeConnectorPackToken(i.Provider),
-		Tool:     strings.TrimSpace(i.Tool),
-	}
-}
-
-func (i ProviderTriggerEventImport) normalized() ProviderTriggerEventImport {
-	return ProviderTriggerEventImport{
-		Provider: normalizeConnectorPackToken(i.Provider),
-		Event:    strings.TrimSpace(i.Event),
-	}
-}
-
-func normalizeConnectorPackToken(raw string) string {
-	raw = strings.TrimSpace(strings.ToLower(raw))
-	raw = strings.ReplaceAll(raw, "-", "_")
-	raw = strings.ReplaceAll(raw, " ", "_")
-	return strings.Trim(raw, "_")
-}
-
 func (d *TypeCatalogDocument) UnmarshalYAML(node *yaml.Node) error {
 	if d == nil {
 		return nil

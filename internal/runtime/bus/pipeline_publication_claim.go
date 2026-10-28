@@ -75,12 +75,6 @@ func (c *pipelinePublicationClaim) retireToPublicationGroup() {
 	c.retired.Store(true)
 }
 
-func (c *pipelinePublicationClaim) releaseAndLog(ctx context.Context) {
-	if err := c.Release(ctx); err != nil && c != nil && c.bus != nil {
-		c.bus.logRuntime(context.WithoutCancel(ctx), "error", "Releasing foreground pipeline publication claim failed", "eventbus", "pipeline_publication_claim_release_failed", c.eventID, "", "", "", "", nil, nil, eventBusDependencyFailure(err, "pipeline_publication_claim_release_failed", "release_pipeline_publication_claim"), 0)
-	}
-}
-
 func (c *pipelinePublicationClaim) Settle(ctx context.Context, disposition runtimepipelineobligation.Disposition) (runtimepipelineobligation.SettlementOutcome, error) {
 	if c == nil || c.bus == nil {
 		return runtimepipelineobligation.SettlementOutcome{}, fmt.Errorf("pipeline publication claim owner is required")
