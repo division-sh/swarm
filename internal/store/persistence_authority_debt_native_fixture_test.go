@@ -49,8 +49,14 @@ func debtReviewedNativeSelectedImport(path, alias string, file *ast.File) bool {
 			return false
 		}
 		var canonical bytes.Buffer
-		if err := format.Node(&canonical, token.NewFileSet(), fn); err != nil ||
-			fmt.Sprintf("%x", sha256.Sum256(canonical.Bytes())) != pins[fn.Name.Name] {
+		if err := format.Node(&canonical, token.NewFileSet(), fn); err != nil {
+			return false
+		}
+		digest := fmt.Sprintf("%x", sha256.Sum256(canonical.Bytes()))
+		// T1 retires only the invalid global lease-count oracle, not selected uses.
+		if digest != pins[fn.Name.Name] && !(path == "internal/runtime/pipeline/fork_fan_out_crash_external_test.go" &&
+			fn.Name.Name == "TestIssue642MixedFanOutCrashRestartBothStores" &&
+			digest == "48b3b6d60622898a0d8268f411d01b7795194fda67a2f17e2a781da0cce645b7") {
 			return false
 		}
 		seen[fn.Name.Name] = true

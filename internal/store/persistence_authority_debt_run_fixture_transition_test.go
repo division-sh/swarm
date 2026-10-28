@@ -18,7 +18,7 @@ const debtSelectedFixtureComposedCollectorTo = "db0de72a381af1ab7ee26a4e0748565c
 const debtCompletedSelectedFixturePinCollectorTo = "f28178924493fb28094b3bd1fb4814564680387608f43984fcd532afb01636a6"
 const debtW3LandedFixtureCollectorTo = "895137c088b18e51143008b7c47e32b76a573054322d87c0072781adcf1c9626"
 const debtW1ComparisonCollectorTo = "e15497e25a763bd9e57c71221b045640ca92517d809095ed618eb93c741f8127"
-const debtW1RebasedComparisonCollectorTo = "e4376bce9b55353d6f743c05ab119758ced815bf84bb0d4e02156b5c8b9d972c"
+const debtW1RebasedComparisonCollectorTo = "58217e03fdd7a5276ef4ac1b0a763fb2b2508423763415bc875ddcb6469c78d0"
 
 // #2727/6388897450: source-pin validation for an already-landed composed endpoint.
 const debtSelectedFixtureLandedCollectorTo = "1b48c6bd1c1b6d6100ee6df74bb9fe3d239372befa4c8f96f02243602fa9f646"
