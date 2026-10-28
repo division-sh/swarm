@@ -121,19 +121,8 @@ func (g GenerationEvidence) validateOperations(provider string, tools map[string
 		if !ok || toolProvider != provider {
 			return fmt.Errorf("generation tool_id %q does not match provider %q", toolID, provider)
 		}
-		if len(operation.Permissions) == 0 {
-			return fmt.Errorf("generation operation %q permissions are required", operationID)
-		}
-		seenPermissions := map[string]struct{}{}
-		for _, permission := range operation.Permissions {
-			permissionID := strings.TrimSpace(permission.ID)
-			if permissionID == "" || strings.TrimSpace(permission.Note) == "" {
-				return fmt.Errorf("generation operation %q permission id and note are required", operationID)
-			}
-			if _, exists := seenPermissions[permissionID]; exists {
-				return fmt.Errorf("generation operation %q contains duplicate permission id %q", operationID, permissionID)
-			}
-			seenPermissions[permissionID] = struct{}{}
+		if err := validateGenerationPermissions(operationID, operation.Permissions); err != nil {
+			return err
 		}
 		expectedPolicy, err := runtimecontracts.AdmitToolResponseSuccessPolicy(operation.ResponseSuccess)
 		if err != nil {
@@ -159,6 +148,24 @@ func (g GenerationEvidence) validateOperations(provider string, tools map[string
 		}
 		sort.Strings(missing)
 		return fmt.Errorf("generation operation set does not cover connector tools: %s", strings.Join(missing, ", "))
+	}
+	return nil
+}
+
+func validateGenerationPermissions(operationID string, permissions []GenerationPermission) error {
+	if len(permissions) == 0 {
+		return fmt.Errorf("generation operation %q permissions are required", operationID)
+	}
+	seenPermissions := map[string]struct{}{}
+	for _, permission := range permissions {
+		permissionID := strings.TrimSpace(permission.ID)
+		if permissionID == "" || strings.TrimSpace(permission.Note) == "" {
+			return fmt.Errorf("generation operation %q permission id and note are required", operationID)
+		}
+		if _, exists := seenPermissions[permissionID]; exists {
+			return fmt.Errorf("generation operation %q contains duplicate permission id %q", operationID, permissionID)
+		}
+		seenPermissions[permissionID] = struct{}{}
 	}
 	return nil
 }
