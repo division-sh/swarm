@@ -17,6 +17,8 @@ const debtSelectedFixtureComposedCurrentSHA256 = "cdb196a9aeb5f87d51e656249b6bb5
 const debtSelectedFixtureComposedCollectorTo = "db0de72a381af1ab7ee26a4e0748565cde6c124a25a02ac3f79e2bbbc3464801"
 const debtCompletedSelectedFixturePinCollectorTo = "f28178924493fb28094b3bd1fb4814564680387608f43984fcd532afb01636a6"
 const debtW3LandedFixtureCollectorTo = "895137c088b18e51143008b7c47e32b76a573054322d87c0072781adcf1c9626"
+const debtW1ComparisonCollectorTo = "e15497e25a763bd9e57c71221b045640ca92517d809095ed618eb93c741f8127"
+const debtW1RebasedComparisonCollectorTo = ""
 
 // #2727/6388897450: source-pin validation for an already-landed composed endpoint.
 const debtSelectedFixtureLandedCollectorTo = "1b48c6bd1c1b6d6100ee6df74bb9fe3d239372befa4c8f96f02243602fa9f646"
@@ -32,6 +34,101 @@ func debtRunFixtureTransitionStates() (map[string]authorityDebtSite, map[string]
 
 func TestPersistenceAuthorityDebtRunFixtureSignatureTransitionIsExact(t *testing.T) {
 	old, current := debtRunFixtureTransitionStates()
+	t.Run("w1-exact-run-observations", func(t *testing.T) {
+		before, after := debtControlSet(), debtControlSet()
+		pairs := debtW1RunObservationSignatureTransitions()
+		for _, pair := range pairs {
+			before[pair[0].identity()], after[pair[1].identity()] = pair[0], pair[1]
+		}
+		if len(before) != 10 || len(after) != 10 || authorityDebtCount(before) != 13 || authorityDebtCount(after) != 13 {
+			t.Fatal("W1 comparison must preserve ten identities and thirteen occurrences")
+		}
+		originalBefore, originalAfter := maps.Clone(before), maps.Clone(after)
+		for _, source := range []map[string]authorityDebtSite{before, after} {
+			for _, head := range []map[string]authorityDebtSite{before, after} {
+				if failures := authorityDebtRatchet(after, head, before, source); len(failures) != 0 {
+					t.Fatal(failures)
+				}
+			}
+		}
+		if !maps.Equal(before, originalBefore) || !maps.Equal(after, originalAfter) {
+			t.Fatal("W1 comparison mutated source or baseline")
+		}
+		if failures := authorityDebtRatchet(before, before, after, after); len(failures) == 0 {
+			t.Fatal("reverse W1 transition admitted")
+		}
+		for _, pair := range pairs {
+			for _, landed := range []bool{false, true} {
+				t.Run(pair[0].Declaration+"/"+pair[0].Operation+map[bool]string{false: "/forward", true: "/landed"}[landed], func(t *testing.T) {
+					debtRunFixtureSignatureHostileControls(t, pair, before, after, landed)
+				})
+			}
+		}
+	})
+	t.Run("w4-landed-source", func(t *testing.T) {
+		before, after := debtControlSet(), debtControlSet()
+		for _, pair := range debtW4LiveFixtureTransfers() {
+			before[pair[0].identity()], after[pair[1].identity()] = pair[0], pair[1]
+		}
+		composition := debtW4LiveFixtureComposition()
+		mockReturn := composition[1]
+		mockReturn.Declaration = "startServedTestSetupEntitiesProofRuntimeFromSource"
+		before[mockReturn.identity()], after[mockReturn.identity()] = mockReturn, mockReturn
+		for _, site := range composition {
+			after[site.identity()] = site
+		}
+		originalBefore, originalAfter := maps.Clone(before), maps.Clone(after)
+		for _, source := range []map[string]authorityDebtSite{before, after} {
+			for _, head := range []map[string]authorityDebtSite{before, after} {
+				if failures := authorityDebtRatchet(after, head, before, source); len(failures) != 0 {
+					t.Fatal(failures)
+				}
+			}
+		}
+		if !maps.Equal(before, originalBefore) || !maps.Equal(after, originalAfter) {
+			t.Fatal("W4 comparison mutated source or baseline")
+		}
+		for _, mutation := range []string{"partial-source", "conflicting-head", "missing-mock", "foreign-composition", "coexists-actual", "coexists-source", "count-actual", "count-source", "reverse"} {
+			t.Run(mutation, func(t *testing.T) {
+				actual, head, base, source := maps.Clone(after), maps.Clone(after), maps.Clone(before), maps.Clone(after)
+				switch mutation {
+				case "partial-source":
+					delete(source, composition[0].identity())
+				case "conflicting-head":
+					changed := composition[0]
+					changed.Multiplicity++
+					head[changed.identity()] = changed
+				case "missing-mock":
+					delete(source, mockReturn.identity())
+				case "foreign-composition":
+					changed := composition[0]
+					changed.Resolved += "Other"
+					delete(actual, composition[0].identity())
+					actual[changed.identity()] = changed
+				case "coexists-actual", "coexists-source":
+					pair := debtW4LiveFixtureTransfers()[0]
+					if mutation == "coexists-actual" {
+						actual[pair[0].identity()] = pair[0]
+					} else {
+						source[pair[0].identity()] = pair[0]
+					}
+				case "count-actual", "count-source":
+					changed := debtW4LiveFixtureTransfers()[0][1]
+					changed.Multiplicity++
+					if mutation == "count-actual" {
+						actual[changed.identity()] = changed
+					} else {
+						source[changed.identity()] = changed
+					}
+				case "reverse":
+					actual, head, base, source = before, before, after, after
+				}
+				if failures := authorityDebtRatchet(actual, head, base, source); len(failures) == 0 {
+					t.Fatal("non-exact W4 source composition admitted")
+				}
+			})
+		}
+	})
 	t.Run("selected-original-owner-threading", func(t *testing.T) {
 		before, after := debtControlSet(), debtControlSet()
 		for _, pair := range debtSelectedFixtureSignatureTransitions() {
@@ -172,6 +269,9 @@ func debtRunFixtureSignatureHostileControls(t *testing.T, pair [2]authorityDebtS
 			case "multiplicity":
 				changed.Multiplicity++
 			}
+			if changed == pair[1] {
+				changed.Resolved += "Other"
+			}
 			actual := maps.Clone(current)
 			delete(actual, pair[1].identity())
 			actual[changed.identity()] = changed
@@ -272,6 +372,49 @@ func TestPersistenceAuthorityDebtRunFixtureCollectorTransitionIsPinned(t *testin
 			}
 		})
 	}
+	t.Run("w1-comparison-metadata-only", func(t *testing.T) {
+		for _, mutation := range []string{"exact", "foreign-base", "trusted-collector", "foreign-current", "head-collector", "unreviewed", "foreign-review", "reverse", "bootstrap", "remove-site", "add-site", "multiplicity", "replace-site"} {
+			t.Run(mutation, func(t *testing.T) {
+				before := authorityDebtBaseline{BootstrapSource: trusted.BootstrapSource, Collector: debtCompletedSelectedFixturePinCollectorTo, Sites: debtControlSet(legacy)}
+				after := before
+				after.Collector, after.Sites = debtW1ComparisonCollectorTo, maps.Clone(before.Sites)
+				base, collector, reviewed := before.Collector, after.Collector, after.Collector
+				switch mutation {
+				case "foreign-base":
+					base = strings.Repeat("b", 64)
+				case "trusted-collector":
+					before.Collector = strings.Repeat("b", 64)
+				case "foreign-current":
+					collector, after.Collector, reviewed = strings.Repeat("b", 64), strings.Repeat("b", 64), strings.Repeat("b", 64)
+				case "head-collector":
+					after.Collector = before.Collector
+				case "unreviewed":
+					reviewed = ""
+				case "foreign-review":
+					reviewed = strings.Repeat("b", 64)
+				case "reverse":
+					before, after = after, before
+					base, collector, reviewed = before.Collector, after.Collector, after.Collector
+				case "bootstrap":
+					after.BootstrapSource = strings.Repeat("b", 40)
+				case "remove-site":
+					delete(after.Sites, legacy.identity())
+				case "add-site":
+					after.Sites[escape.identity()] = escape
+				case "multiplicity":
+					changed := legacy
+					changed.Multiplicity--
+					after.Sites[changed.identity()] = changed
+				case "replace-site":
+					delete(after.Sites, legacy.identity())
+					after.Sites[replacement.identity()] = replacement
+				}
+				if err := debtValidateCollectorIdentity(base, collector, before, after, reviewed); (err == nil) != (mutation == "exact") {
+					t.Fatalf("metadata-only edge: %v", err)
+				}
+			})
+		}
+	})
 	quiescenceOld, quiescenceNew := debtQuiescenceUncertaintyTransition()
 	chained := trusted
 	chained.Collector, chained.Sites = debtQuiescenceCollectorFrom, maps.Clone(old)
