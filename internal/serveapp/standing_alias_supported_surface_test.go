@@ -187,7 +187,7 @@ func proveA9CrossContextAliasPromotion(t *testing.T, backend string) {
 	}
 	rt := servedTestProcessRuntime(t, first)
 	before, err := readServedLandingRuns(t.Context(), rt)
-	if err != nil || len(before) != 2 {
+	if err != nil || len(before) != 1 || before[0].Scope.FlowPath != "." || before[0].State != "live" {
 		t.Fatalf("incumbent status=%+v err=%v", before, err)
 	}
 	definition := *contextDef

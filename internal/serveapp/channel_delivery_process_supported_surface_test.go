@@ -23,7 +23,7 @@ func TestChannelDeliveryAbruptProcessDeathPublicJourney(t *testing.T) {
 				first := startChannelOnboardingCrashServeProcess(t, h.opts, h.telegram.URL)
 				h.endpoint = first.endpoint(t)
 				var standingRun string
-				if err := db.QueryRow(`SELECT run_id FROM runs WHERE flow_path='telegram-ingress' AND landing_run=TRUE`).Scan(&standingRun); err != nil {
+				if err := db.QueryRow(`SELECT run_id FROM runs WHERE flow_path='chat' AND landing_run=TRUE`).Scan(&standingRun); err != nil {
 					t.Fatal(err)
 				}
 				standingCard := waitChannelAnchorCard(t, db, standingRun, decisioncard.AnchorKindStageGate, "chat")
