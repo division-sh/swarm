@@ -353,7 +353,10 @@ func newEarlyResetService(t *testing.T, rig *boundHandoffRig, store channelonboa
 	if err != nil {
 		t.Fatal(err)
 	}
-	service, err := channelonboarding.NewService(channelonboarding.ServiceOptions{Store: store, Identities: rig.identities, Credentials: writer, Catalog: func() (*channelonboarding.CandidateCatalog, error) { return catalog, nil }, Activations: activations, Confirmation: handoffConfirmation{}, Readiness: retiredOnboardingReadiness{}, Now: func() time.Time { return rig.now }})
+	readiness := retiredOnboardingReadiness{candidate: &candidate}
+	service, err := channelonboarding.NewService(channelonboarding.ServiceOptions{Store: store, Identities: rig.identities, Credentials: writer,
+		LandingRuns: readiness, TargetEnabled: readiness.TargetEnabled,
+		Catalog: func() (*channelonboarding.CandidateCatalog, error) { return catalog, nil }, Activations: activations, Confirmation: handoffConfirmation{}, Readiness: readiness, Now: func() time.Time { return rig.now }})
 	if err != nil {
 		t.Fatal(err)
 	}
