@@ -53,7 +53,6 @@ ack: {mode: durable_before_dispatch}
 			f := openStandingCensusFixture(t, backend)
 			store := f.store.(inboundPublicationProofStore)
 			candidate := runlifecycle.LiveRunScope{FlowPath: "."}
-			workflow := newWorkflowTestCoordinator(t, f.db, runtimepipeline.NewWorkflowPersistence(f.store.(workflowTestSelectedStore)), f.store.(workflowTestSelectedStore))
 			artifact, err := sourceartifact.AdmitMembers(map[string][]byte{
 				"manifest.yaml":          []byte("version: 1.0.0\nplatform_version: '*'\n"),
 				"schema.yaml":            []byte("stages: []\npins: {inputs: [inbound.whatsapp.message]}\n"),
@@ -70,6 +69,18 @@ ack: {mode: durable_before_dispatch}
 			ctx = runtimecorrelation.WithRootAdmission(ctx, rooted.Admission())
 			if _, err := f.store.(rootedSourceStore).EnsureRootedSource(ctx, rooted); err != nil {
 				t.Fatal(err)
+			}
+			componentSource := whatsappPublicationComponentSource(t, rooted)
+			bundle, ok := semanticview.Bundle(componentSource)
+			if !ok {
+				t.Fatal("publication component requires its captured bundle")
+			}
+			options := completeWorkflowTestCoordinatorOptions(runtimepipeline.NewWorkflowPersistence(store), store)
+			options.SourceArtifactFact = fact
+			options.Module = sqliteFlowActivationWorkflowModule{source: componentSource, guards: runtimepipeline.NewContractGuardRegistry(componentSource)}
+			workflow := runtimepipeline.NewPipelineCoordinatorWithOptions(workflowTestBus{}, options)
+			if workflow == nil {
+				t.Fatal("publication component requires its source-bound workflow owner")
 			}
 			scope, ok := runtimeauthoractivity.ScopeFromContext(ctx)
 			if !ok {
@@ -159,11 +170,6 @@ ack: {mode: durable_before_dispatch}
 				Events: []runtimeinbound.EventFinalization{{Ordinal: 0, Kind: runtimeprovideroutput.KindRaw,
 					Event: eventtest.ExistingRunRootIngressWithRoutingSource(childID, "inbound.whatsapp.message", "inbound-gateway", "", eventPayload, 0,
 						request.ResolvedRunID, events.EventEnvelope{}, source, request.OriginalReceivedAt)}},
-			}
-			componentSource := whatsappPublicationComponentSource(t, rooted)
-			bundle, ok := semanticview.Bundle(componentSource)
-			if !ok {
-				t.Fatal("publication component requires its captured bundle")
 			}
 			configureAgentFixtureFlowLifecycle(t, f.store.(agentFixtureFlowStore), &sqliteFlowActivationBus{}, bundle)
 			coordinate, err := agenttopology.NewSourceCoordinate(rooted.Admission())
