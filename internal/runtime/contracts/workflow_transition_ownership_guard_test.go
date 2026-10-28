@@ -722,6 +722,7 @@ func allowedTransitionBoundaryUses() map[string]int {
 		"internal/runtime/pipeline.workflowTimerMayArmAtStage::call internal/runtime/semanticview.WorkflowStageTopology": 1,
 		"internal/runtime/runstart.ValidateFinite::call internal/runtime/semanticview.WorkflowStageTopology":             1,
 		"internal/runtime/runstart.ValidateFinite::graph metadata":                                                       1,
+		"internal/runtime/runbundle.upgradeCheck.instance::call internal/runtime/semanticview.WorkflowStageTopology":     1,
 
 		"internal/runtime.Runtime.standingTargetsMutation::call internal/runtime/semanticview.WorkflowStageTopology": 1,
 		"internal/runtime.Runtime.standingTargetsMutation::graph metadata":                                           1,

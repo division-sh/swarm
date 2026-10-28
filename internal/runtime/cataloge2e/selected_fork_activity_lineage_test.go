@@ -332,7 +332,7 @@ func (p *activityLineageProofStore) RequireRunForkSelectedContractExecutionSettl
 			p.update(ctx, `UPDATE runs SET bundle_hash=$1 WHERE run_id=$2`, "bundle-v2:sha256:"+strings.Repeat("a", 64), req.ForkRunID)
 			defer p.update(ctx, `UPDATE runs SET bundle_hash=$1 WHERE run_id=$2`, state.BundleHash, req.ForkRunID)
 			copy := req
-			copy.Refusal = "permanent selected fork operation conflicts with exact binding"
+			copy.Refusal = fmt.Sprintf("fork activity lineage %s: activity execution source differs from selected run", request.EventID)
 			p.requireRejected(t, ctx, copy)
 		})
 	}
