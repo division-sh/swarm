@@ -1423,10 +1423,6 @@ func (b *flowActivationTestBus) LogRuntime(_ context.Context, entry runtimepipel
 	return nil
 }
 
-func flowActivationRunContext() context.Context {
-	return runtimecorrelation.WithRunID(testAuthorActivityContext(context.Background()), flowActivationTestRunID)
-}
-
 func testFlowActivationAgentConfig(t testing.TB, am *AgentManager, agentID, flowInstance string) (models.AgentConfig, bool) {
 	return testAgentConfigForRun(t, am, flowActivationTestRunID, agentID, flowInstance)
 }

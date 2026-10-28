@@ -921,60 +921,6 @@ func repositoryGoPackages(repo string) (map[string]map[string]string, error) {
 	return packages, err
 }
 
-func yamlNodeContainsCanonicalRoutingAuthority(node *yaml.Node) bool {
-	return yamlNodeContainsCanonicalRoutingAuthorityAt(node, nil)
-}
-
-func yamlNodeContainsCanonicalRoutingAuthorityAt(node *yaml.Node, path []string) bool {
-	if node == nil {
-		return false
-	}
-	if node.Kind == yaml.MappingNode {
-		for index := 0; index+1 < len(node.Content); index += 2 {
-			key := strings.TrimSpace(node.Content[index].Value)
-			value := node.Content[index+1]
-			switch key {
-			case "connect":
-				if value.Kind == yaml.SequenceNode {
-					return true
-				}
-			case "resolution":
-				if value.Kind == yaml.MappingNode {
-					return true
-				}
-			case "source":
-				if value.Kind == yaml.ScalarNode && canonicalRoutingExternalSource(value.Value) && canonicalRoutingSourcePath(path) {
-					return true
-				}
-			}
-			if yamlNodeContainsCanonicalRoutingAuthorityAt(value, append(path, key)) {
-				return true
-			}
-		}
-		return false
-	}
-	for _, child := range node.Content {
-		if yamlNodeContainsCanonicalRoutingAuthorityAt(child, path) {
-			return true
-		}
-	}
-	return false
-}
-
-func canonicalRoutingSourcePath(path []string) bool {
-	for _, part := range path {
-		if part == "swarm" {
-			return true
-		}
-	}
-	for index := 0; index+2 < len(path); index++ {
-		if path[index] == "pins" && path[index+1] == "inputs" && path[index+2] == "events" {
-			return true
-		}
-	}
-	return false
-}
-
 func canonicalRoutingExternalSource(source string) bool {
 	// Keep this mirror exact with semanticview.eventMetadataExternalSource.
 	return strings.HasPrefix(strings.ToLower(strings.TrimSpace(source)), "external")

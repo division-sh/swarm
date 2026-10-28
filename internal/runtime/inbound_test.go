@@ -21,12 +21,10 @@ import (
 	"sync"
 	"sync/atomic"
 	"testing"
-	"testing/fstest"
 	"time"
 
 	"github.com/division-sh/swarm/internal/events"
 	"github.com/division-sh/swarm/internal/packadmission"
-	"github.com/division-sh/swarm/internal/packartifact"
 	"github.com/division-sh/swarm/internal/providertriggers"
 	runtimebus "github.com/division-sh/swarm/internal/runtime/bus"
 	runtimebustest "github.com/division-sh/swarm/internal/runtime/bus/bustest"
@@ -38,14 +36,6 @@ import (
 	"github.com/division-sh/swarm/internal/runtime/semanticview"
 	"github.com/division-sh/swarm/internal/testutil/packfixture"
 )
-
-func s1LoadProviderMembers(directory string, members map[string][]byte) (packartifact.AdmittedProvider, error) {
-	files := fstest.MapFS{}
-	for name, body := range members {
-		files[directory+"/"+name] = &fstest.MapFile{Data: body}
-	}
-	return packartifact.LoadProviderFS(files, directory, "0.7.0")
-}
 
 type testInboundTargetResolver interface {
 	ResolveInboundTarget(context.Context, string, string) (InboundTarget, error)

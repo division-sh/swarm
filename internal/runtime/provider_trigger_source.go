@@ -211,13 +211,6 @@ func providerTriggerGlobalReadback(byFlow map[string]map[string]runtimecontracts
 	return entries, compiled, nil
 }
 
-func flowSchemaLocation(view runtimecontracts.FlowContractView) string {
-	if label := strings.TrimSpace(view.Paths.SchemaFile); label != "" {
-		return label
-	}
-	return "schema.yaml"
-}
-
 func providerTriggerCatalogEvent(entry providertriggers.CatalogEntry, eventName string) (runtimecontracts.EventCatalogEntry, bool, bool) {
 	eventName = strings.TrimSpace(eventName)
 	entries := entry.Manifest.EventCatalogEntries()

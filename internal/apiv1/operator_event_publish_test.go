@@ -2544,10 +2544,6 @@ func eventPublishTargetRouteTestBundle(t testing.TB) *runtimecontracts.WorkflowC
 	return bundle
 }
 
-func eventPublishRootTemplateCollisionTestBundle(t testing.TB) *runtimecontracts.WorkflowContractBundle {
-	return eventPublishTemplateInputTestBundle(t, "review.requested", true)
-}
-
 func eventPublishRootTemplateCollisionSource(t *testing.T) *runtimecontracts.WorkflowContractBundle {
 	t.Helper()
 	root := t.TempDir()
@@ -2645,19 +2641,6 @@ func mustCompileEventPublishTestBundle(bundle *runtimecontracts.WorkflowContract
 		panic(fmt.Sprintf("compile event-publish test bundle: %v", err))
 	}
 	return bundle
-}
-
-func topicEventCatalogEntry() runtimecontracts.EventCatalogEntry {
-	return runtimecontracts.EventCatalogEntry{Payload: runtimecontracts.EventPayloadSpec{
-		Properties: map[string]runtimecontracts.EventFieldSpec{"topic": {Type: "text"}},
-		Required:   []string{"topic"},
-	}}
-}
-
-func topicAndEntityIDEventCatalogEntry() runtimecontracts.EventCatalogEntry {
-	entry := topicEventCatalogEntry()
-	entry.Payload.Properties["entity_id"] = runtimecontracts.EventFieldSpec{Type: "uuid"}
-	return entry
 }
 
 func seedEventPublishConstructedFlow(t *testing.T, selected *store.PostgresStore, bus *runtimebus.EventBus, source semanticview.Source, runID, flowInstance, sourceEventID string) string {

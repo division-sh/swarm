@@ -2379,10 +2379,6 @@ func (eb *EventBus) authorizePublishRecipientPlanning(ctx context.Context, evt e
 	return eb.recipientPlanAdmissionGuard(ctx, evt)
 }
 
-func (eb *EventBus) materializePublishRecipientPlan(ctx context.Context, evt events.Event, routePlan RoutePlan) (RoutePlan, error) {
-	return eb.materializePublishRecipientPlanWithPlanner(ctx, evt, routePlan, eb.deliveryPlanner)
-}
-
 func (eb *EventBus) materializePublishRecipientPlanWithPlanner(ctx context.Context, evt events.Event, routePlan RoutePlan, planner deliveryPlanner) (RoutePlan, error) {
 	routePlan = routePlan.Normalized()
 	if eb == nil || eb.recipientPlanMaterializer == nil {

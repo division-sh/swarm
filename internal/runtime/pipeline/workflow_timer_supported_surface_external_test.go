@@ -809,23 +809,6 @@ func workflowTimerDeliveryTrace(t *testing.T, selected gateRecoveryStoreCase, ru
 	return trace
 }
 
-func waitWorkflowTimerEventCount(t *testing.T, selected gateRecoveryStoreCase, fireErrors <-chan error, runID, eventType string, want int) {
-	t.Helper()
-	deadline := time.Now().Add(5 * time.Second)
-	for time.Now().Before(deadline) {
-		select {
-		case err := <-fireErrors:
-			t.Fatalf("workflow timer callback: %v", err)
-		default:
-		}
-		if workflowTimerEventCount(t, selected, runID, eventType) >= want {
-			return
-		}
-		time.Sleep(10 * time.Millisecond)
-	}
-	t.Fatalf("workflow timer event count did not reach %d", want)
-}
-
 func workflowTimerEventCount(t *testing.T, selected gateRecoveryStoreCase, runID, eventType string) int {
 	t.Helper()
 	query := `SELECT COUNT(*) FROM events WHERE run_id = ? AND event_name = ?`

@@ -431,11 +431,6 @@ func jsonSchema(t *testing.T, value any) []byte {
 	return body
 }
 
-func builtinCatalogFS(t *testing.T) fstest.MapFS {
-	t.Helper()
-	return catalogWorkingTreeFS(t)
-}
-
 func catalogWorkingTreeFS(t *testing.T) fstest.MapFS {
 	t.Helper()
 	out := copyTestFS(t, os.DirFS("."))
