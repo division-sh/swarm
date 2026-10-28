@@ -113,30 +113,8 @@ func (g GenerationEvidence) validateOperations(provider string, tools map[string
 			return fmt.Errorf("generation contains duplicate tool_id %q", toolID)
 		}
 		seenTools[toolID] = struct{}{}
-		tool, exists := tools[toolID]
-		if !exists {
-			return fmt.Errorf("generation operation %q references unknown tool_id %q", operationID, toolID)
-		}
-		toolProvider, _, ok := splitToolID(toolID)
-		if !ok || toolProvider != provider {
-			return fmt.Errorf("generation tool_id %q does not match provider %q", toolID, provider)
-		}
-		if err := validateGenerationPermissions(operationID, operation.Permissions); err != nil {
+		if err := validateGenerationOperation(provider, operationID, operation, tools); err != nil {
 			return err
-		}
-		expectedPolicy, err := runtimecontracts.AdmitToolResponseSuccessPolicy(operation.ResponseSuccess)
-		if err != nil {
-			return fmt.Errorf("generation operation %q: %w", operationID, err)
-		}
-		responseSuccess, ok := tool.ResponseSuccessPolicy()
-		if !ok || !responseSuccess.Equal(expectedPolicy) {
-			return fmt.Errorf("generation operation %q response_success does not match tool %q", operationID, toolID)
-		}
-		if strings.TrimSpace(operation.FixtureID) == "" || strings.TrimSpace(operation.FixtureStatus) != GenerationFixturePassing {
-			return fmt.Errorf("generation operation %q requires fixture_id and fixture_status %q", operationID, GenerationFixturePassing)
-		}
-		if strings.TrimSpace(operation.ReviewStatus) != GenerationReviewApproved {
-			return fmt.Errorf("generation operation %q review_status must be %q", operationID, GenerationReviewApproved)
 		}
 	}
 	if len(seenTools) != len(tools) {
@@ -148,6 +126,36 @@ func (g GenerationEvidence) validateOperations(provider string, tools map[string
 		}
 		sort.Strings(missing)
 		return fmt.Errorf("generation operation set does not cover connector tools: %s", strings.Join(missing, ", "))
+	}
+	return nil
+}
+
+func validateGenerationOperation(provider, operationID string, operation GenerationOperationEvidence, tools map[string]runtimecontracts.ToolSchemaEntry) error {
+	toolID := operation.ToolID
+	tool, exists := tools[toolID]
+	if !exists {
+		return fmt.Errorf("generation operation %q references unknown tool_id %q", operationID, toolID)
+	}
+	toolProvider, _, ok := splitToolID(toolID)
+	if !ok || toolProvider != provider {
+		return fmt.Errorf("generation tool_id %q does not match provider %q", toolID, provider)
+	}
+	if err := validateGenerationPermissions(operationID, operation.Permissions); err != nil {
+		return err
+	}
+	expectedPolicy, err := runtimecontracts.AdmitToolResponseSuccessPolicy(operation.ResponseSuccess)
+	if err != nil {
+		return fmt.Errorf("generation operation %q: %w", operationID, err)
+	}
+	responseSuccess, ok := tool.ResponseSuccessPolicy()
+	if !ok || !responseSuccess.Equal(expectedPolicy) {
+		return fmt.Errorf("generation operation %q response_success does not match tool %q", operationID, toolID)
+	}
+	if strings.TrimSpace(operation.FixtureID) == "" || strings.TrimSpace(operation.FixtureStatus) != GenerationFixturePassing {
+		return fmt.Errorf("generation operation %q requires fixture_id and fixture_status %q", operationID, GenerationFixturePassing)
+	}
+	if strings.TrimSpace(operation.ReviewStatus) != GenerationReviewApproved {
+		return fmt.Errorf("generation operation %q review_status must be %q", operationID, GenerationReviewApproved)
 	}
 	return nil
 }
