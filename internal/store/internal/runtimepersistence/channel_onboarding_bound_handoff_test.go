@@ -212,10 +212,12 @@ func newBoundHandoffRig(t *testing.T, fixture channelOnboardingConfirmationFixtu
 	if _, _, err := rig.identities.Bootstrap(context.Background(), rig.now); err != nil {
 		t.Fatal(err)
 	}
+	readiness := retiredOnboardingReadiness{candidate: &candidate}
 	rig.service, err = channelonboarding.NewService(channelonboarding.ServiceOptions{
 		Store: fixture.store, Identities: rig.identities, Credentials: writer,
+		LandingRuns: readiness, TargetEnabled: readiness.TargetEnabled,
 		Catalog:     func() (*channelonboarding.CandidateCatalog, error) { return catalog, nil },
-		Activations: retiredOnboardingActivations{}, Confirmation: handoffConfirmation{}, Readiness: retiredOnboardingReadiness{},
+		Activations: retiredOnboardingActivations{}, Confirmation: handoffConfirmation{}, Readiness: readiness,
 		Now: func() time.Time { return rig.now },
 		TestBarrier: func(boundary channelonboarding.TestLifecycleBoundary, _ string) error {
 			if rig.testBarrier != nil {
