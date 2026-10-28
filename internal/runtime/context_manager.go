@@ -2116,7 +2116,6 @@ func (m *RuntimeContextManager) AcquireIngress(ctx context.Context, alias, provi
 			m.liveSelectionMu.RUnlock()
 		}
 	}()
-	provider = strings.TrimSpace(provider)
 	m.mu.RLock()
 	defer m.mu.RUnlock()
 	aliasFound := false

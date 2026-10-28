@@ -206,9 +206,13 @@ func TestBundleUpgradeAdmissionPreservesLiveWorkBothStores(t *testing.T) {
 					}
 				}
 				liveRunID := uuid.NewString()
+				rooted, err := f.bundle.RootedSource()
+				if err != nil {
+					t.Fatal(err)
+				}
 				if _, err := f.store.(runlifecycle.OperationOwner).CreateRun(original, runlifecycle.CreateRequest{
 					RunID: liveRunID, LiveScope: runlifecycle.LiveRunScope{FlowPath: "."}, Origin: runlifecycle.DeploymentRunOrigin(),
-					Source: sourceartifactfixture.FactFor(f.bundle.SourceArtifact), StartedAt: time.Now().UTC(),
+					Source: sourceartifactfixture.FactFor(f.bundle.SourceArtifact), RootAdmission: rooted.Admission(), StartedAt: time.Now().UTC(),
 				}); err != nil {
 					t.Fatalf("create live deployment run through its lifecycle owner: %v", err)
 				}
