@@ -11,7 +11,10 @@ import (
 
 func loadLifecyclePersistenceFixtureForTest(t *testing.T, files map[string]string) *runtimecontracts.WorkflowContractBundle {
 	t.Helper()
-	root := t.TempDir()
+	root := filepath.Join(t.TempDir(), "fixture")
+	if err := os.Mkdir(root, 0o700); err != nil {
+		t.Fatal(err)
+	}
 	if err := os.WriteFile(filepath.Join(root, "manifest.yaml"), []byte("version: 1.0.0\nplatform_version: '*'\n"), 0o600); err != nil {
 		t.Fatal(err)
 	}
