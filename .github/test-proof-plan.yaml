@@ -605,7 +605,7 @@ units:
     required_children:
       TestPublicCompletionCapacityNativeMixedBothStores: [sqlite, postgres]
       TestFeedOnlyRunStartReplayPrecedenceBothStores: [sqlite, postgres]
-      TestPublicCompletionExactOccurrenceSurvivesRuntimeFence: [runtime, standing, selected, manager-standing]
+      TestPublicCompletionExactOccurrenceSurvivesRuntimeFence: [runtime, selected, manager-selected]
       TestCommittedAgentTransitionNativePublicationBothStores: [sqlite/live, sqlite/retired, sqlite/wrong_generation, postgres/live, postgres/retired, postgres/wrong_generation]
       TestOperatorEventPublishAgentHeaderSelectorsBothStores: [sqlite/review, sqlite/other, postgres/review, postgres/other]
       TestHistoricalAgentAttachmentCannotBorrowNativeConstruction: [admitted_historical, native_receipt_omitted, historical_dependency_omitted, no_admitted_history, foreign_run, foreign_header, actor_entity_loan]

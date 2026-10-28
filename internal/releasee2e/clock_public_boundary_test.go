@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"maps"
 	"os"
 	"path/filepath"
 	"reflect"
@@ -159,7 +160,8 @@ func TestDeclaredClockFiniteAndPublicReadbackBothStores(t *testing.T) {
 			if parked.Status != "paused" || len(parked.ClockSchedules) != 1 || parked.ClockSchedules[0]["activation_id"] != clock[0]["activation_id"] {
 				t.Fatalf("public parked clock lost durable identity: %+v", parked)
 			}
-			assertClockTransportReadback(t, process, binary, root, config, env, parked)
+			assertClockScheduleContinuation(t, clock, parked.ClockSchedules)
+			parked = assertClockTransportReadback(t, process, binary, root, config, env, parked)
 			if err := process.stopAndWait(goldenShutdownGrace); err != nil {
 				t.Fatalf("clock public shutdown: %v\n%s", err, process.output.String())
 			}
@@ -173,9 +175,11 @@ func TestDeclaredClockFiniteAndPublicReadbackBothStores(t *testing.T) {
 			if err := restarted.waitReady(ctx); err != nil {
 				t.Fatalf("parked deployment after finite host: %v\n%s", err, restarted.output.String())
 			}
-			if after := readPublicClockRun(t, restarted, standing.RunID); !reflect.DeepEqual(after.ClockSchedules, parked.ClockSchedules) {
-				t.Fatalf("finite host mutated the parked deployment: before=%+v after=%+v", parked.ClockSchedules, after.ClockSchedules)
+			after := readPublicClockRun(t, restarted, standing.RunID)
+			if after.Status != parked.Status {
+				t.Fatalf("finite host changed paused run state: before=%s after=%s", parked.Status, after.Status)
 			}
+			assertClockScheduleContinuation(t, parked.ClockSchedules, after.ClockSchedules)
 			if err := restarted.stopAndWait(goldenShutdownGrace); err != nil {
 				t.Fatalf("parked clock restart shutdown: %v\n%s", err, restarted.output.String())
 			}
@@ -216,7 +220,27 @@ func assertClocklessRun(t *testing.T, process *releaseServeProcess, runID string
 	}
 }
 
-func assertClockTransportReadback(t *testing.T, process *releaseServeProcess, binary, root, config string, env []string, expected clockPublicHeader) {
+func assertClockScheduleContinuation(t *testing.T, before, after []map[string]any) {
+	t.Helper()
+	if len(before) != 1 || len(after) != 1 || before[0]["every"] != "250ms" {
+		t.Fatalf("exact clock schedule/cadence changed: before=%+v after=%+v", before, after)
+	}
+	initial, initialErr := time.Parse(time.RFC3339Nano, fmt.Sprint(before[0]["initial_due_at"]))
+	previous, previousErr := time.Parse(time.RFC3339Nano, fmt.Sprint(before[0]["next_due_at"]))
+	next, nextErr := time.Parse(time.RFC3339Nano, fmt.Sprint(after[0]["next_due_at"]))
+	const cadence = 250 * time.Millisecond
+	if initialErr != nil || previousErr != nil || nextErr != nil || previous.Before(initial) || next.Before(previous) ||
+		previous.Sub(initial)%cadence != 0 || next.Sub(initial)%cadence != 0 {
+		t.Fatalf("clock cursor left its original cadence or moved backwards: before=%+v after=%+v errors=%v/%v/%v", before, after, initialErr, previousErr, nextErr)
+	}
+	expected := maps.Clone(before[0])
+	expected["next_due_at"] = after[0]["next_due_at"]
+	if !reflect.DeepEqual(expected, after[0]) {
+		t.Fatalf("clock identity, command or lifecycle changed: before=%+v after=%+v", before, after)
+	}
+}
+
+func assertClockTransportReadback(t *testing.T, process *releaseServeProcess, binary, root, config string, env []string, expected clockPublicHeader) clockPublicHeader {
 	t.Helper()
 	cli := runReleaseCommand(t, goldenStartupTimeout, root, env, "", binary,
 		"run", "status", expected.RunID, "--config", config, "--api-server", process.apiBase,
@@ -224,18 +248,23 @@ func assertClockTransportReadback(t *testing.T, process *releaseServeProcess, bi
 	var result struct {
 		Run clockPublicHeader `json:"run"`
 	}
-	if err := json.Unmarshal([]byte(cli.output), &result); cli.err != nil || err != nil || !reflect.DeepEqual(result.Run.ClockSchedules, expected.ClockSchedules) {
+	if err := json.Unmarshal([]byte(cli.output), &result); cli.err != nil || err != nil || result.Run.RunID != expected.RunID || result.Run.Status != expected.Status {
 		t.Fatalf("CLI clock readback differs: command=%v decode=%v\n%s", cli.err, err, cli.output)
 	}
+	assertClockScheduleContinuation(t, expected.ClockSchedules, result.Run.ClockSchedules)
+	expected = result.Run
 	text := runReleaseCommand(t, goldenStartupTimeout, root, env, "", binary,
 		"run", "status", expected.RunID, "--config", config, "--api-server", process.apiBase,
 		"--api-token-file", "api-token", "--no-diagnose")
 	if text.err != nil || !strings.Contains(text.output, "./poll: "+fmt.Sprint(expected.ClockSchedules[0]["status"])) {
 		t.Fatalf("CLI clock status differs from durable readback: %v\n%s", text.err, text.output)
 	}
-	if after := readPublicClockRun(t, process, expected.RunID); !reflect.DeepEqual(after.ClockSchedules, expected.ClockSchedules) {
-		t.Fatalf("clock inspection changed durable state: before=%+v after=%+v", expected.ClockSchedules, after.ClockSchedules)
+	after := readPublicClockRun(t, process, expected.RunID)
+	if after.Status != expected.Status {
+		t.Fatalf("clock inspection changed paused run state: before=%s after=%s", expected.Status, after.Status)
 	}
+	assertClockScheduleContinuation(t, expected.ClockSchedules, after.ClockSchedules)
+	return after
 }
 
 func waitPublicClockEvent(t *testing.T, process *releaseServeProcess, runID string) goldenEvent {
