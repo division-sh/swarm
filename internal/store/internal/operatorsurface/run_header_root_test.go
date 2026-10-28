@@ -44,7 +44,7 @@ func TestS1RunHeaderScannersPreserveExactRootAndLifecycle(t *testing.T) {
 			for _, root := range []string{"shop-a", "shop-b", "", " shop-a", "shop-a ", "../shop-a", "shop/a"} {
 				t.Run(root, func(t *testing.T) {
 					row := validRunHeaderValues(backend)
-					row[3] = root
+					row[4] = root
 					header, err := scan(row)
 					valid := root == "shop-a" || root == "shop-b"
 					if valid {
@@ -61,14 +61,13 @@ func TestS1RunHeaderScannersPreserveExactRootAndLifecycle(t *testing.T) {
 				index int
 				value any
 			}{
-				{"origin", 4, "unknown"},
-				{"standing_relation", 13, 1},
-				{"negative_event_count", 16, -1},
-				{"negative_entity_count", 15, -1},
-				{"failed_without_failure", 1, "failed"},
-				{"completed_without_end", 1, "completed"},
-				{"forked_without_continuation", 1, "forked"},
-				{"running_with_continuation", 19, "22222222-2222-4222-8222-222222222222"},
+				{"origin", 5, "unknown"},
+				{"negative_event_count", 13, -1},
+				{"negative_entity_count", 12, -1},
+				{"failed_without_failure", 2, "failed"},
+				{"completed_without_end", 2, "completed"},
+				{"forked_without_continuation", 2, "forked"},
+				{"running_with_continuation", 16, "22222222-2222-4222-8222-222222222222"},
 			} {
 				t.Run(change.name, func(t *testing.T) {
 					row := validRunHeaderValues(backend)
@@ -90,9 +89,9 @@ func validRunHeaderValues(backend string) runHeaderValues {
 		endedAt, failure = nil, nil
 	}
 	return runHeaderValues{
-		"11111111-1111-4111-8111-111111111111", "running", sourceartifactfixture.BundleHash, "shop-a",
-		string(runlifecycle.OriginDeployment), "", "", "", int64(0), "", "", int64(0), "",
-		0, 0, 0, 0, at, endedAt, "", failure, "",
+		"11111111-1111-4111-8111-111111111111", "", "running", sourceartifactfixture.BundleHash, "shop-a",
+		string(runlifecycle.OriginDeployment), "", "", "", "", int64(0), "",
+		0, 0, at, endedAt, "", failure, "",
 	}
 }
 
