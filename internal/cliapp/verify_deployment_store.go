@@ -283,24 +283,20 @@ func inspectVerifyRecoverySnapshot(ctx context.Context, snapshot *storeselected.
 	return retained
 }
 
-func PrepareBundleUpgrade(ctx context.Context, reader runbundle.UpgradeReader, artifacts sourceartifact.Reader, repo string, candidate semanticview.Source, packBases packartifact.PlatformPackBaseResolver) (*runbundle.UpgradePlan, error) {
-	return runbundle.AdmitPinnedSources(ctx, reader, candidate, func(ctx context.Context, hash string) (semanticview.Source, error) {
-		record, err := artifacts.GetSourceArtifact(ctx, hash)
+func PrepareBundleUpgrade(ctx context.Context, reader runbundle.UpgradeReader, artifacts runforkexecution.SourceArtifactSelectedContractSourceStore, repo string, candidate semanticview.Source, packBases packartifact.PlatformPackBaseResolver) (*runbundle.UpgradePlan, error) {
+	return runbundle.AdmitPinnedSources(ctx, reader, candidate, func(ctx context.Context, reference sourceartifact.RootAdmissionReference) (semanticview.Source, error) {
+		rooted, err := artifacts.GetRootedSource(ctx, reference)
 		if err != nil {
 			return nil, err
 		}
-		if record.BundleHash != hash {
-			return nil, fmt.Errorf("bundle upgrade artifact disagrees with its admitted hash")
-		}
-		artifact, err := record.Decode()
-		if err != nil {
-			return nil, err
+		if rooted.Admission().Reference() != reference {
+			return nil, fmt.Errorf("bundle upgrade artifact disagrees with its admitted root")
 		}
 		spec, err := EmbeddedPlatformSpecPath()
 		if err != nil {
 			return nil, err
 		}
-		retained, err := contracts.LoadWorkflowContractBundleFromArtifact(repo, artifact, spec, contracts.WorkflowContractLoadOptions{
+		retained, err := contracts.LoadWorkflowContractBundleFromRootedSource(repo, rooted, spec, contracts.WorkflowContractLoadOptions{
 			PlatformPackBases: packBases, AdmitPackInventory: packadmission.AdmitInventory,
 		})
 		return semanticview.Wrap(retained), err

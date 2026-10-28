@@ -15,6 +15,7 @@ import (
 	"github.com/division-sh/swarm/internal/runtime/runbundle"
 	"github.com/division-sh/swarm/internal/runtime/runlifecycle"
 	"github.com/division-sh/swarm/internal/runtime/semanticview"
+	"github.com/division-sh/swarm/internal/sourceartifact"
 	storegenericschedule "github.com/division-sh/swarm/internal/store/internal/backend/genericschedule"
 	"github.com/division-sh/swarm/internal/store/internal/backend/mutationprotocol"
 	storerunbundle "github.com/division-sh/swarm/internal/store/internal/runbundle"
@@ -54,10 +55,18 @@ func commitBundleUpgrade(ctx context.Context, attempt *mutationprotocol.Attempt,
 	}
 	return attempt.WithSQL(ctx, func(ctx context.Context, tx *sql.Tx) error {
 		candidate := plan.Sources[plan.BundleHash]
-		fresh, err := runbundle.AdmitPinnedSources(ctx, upgradeSnapshot{tx: tx, owner: owner, sqlite: sqlite}, candidate, func(_ context.Context, hash string) (semanticview.Source, error) {
-			retained := plan.Sources[hash]
+		fresh, err := runbundle.AdmitPinnedSources(ctx, upgradeSnapshot{tx: tx, owner: owner, sqlite: sqlite}, candidate, func(_ context.Context, reference sourceartifact.RootAdmissionReference) (semanticview.Source, error) {
+			retained := plan.Sources[reference.BundleHash]
 			if retained == nil {
-				return nil, fmt.Errorf("bundle upgrade retained source %s changed before admission", hash)
+				return nil, fmt.Errorf("bundle upgrade retained source %s changed before admission", reference.BundleHash)
+			}
+			bundle, ok := semanticview.Bundle(retained)
+			if !ok || bundle == nil {
+				return nil, errors.New("bundle upgrade retained source lacks its compiled root")
+			}
+			rooted, err := bundle.RootedSource()
+			if err != nil || rooted.Admission().Reference() != reference {
+				return nil, errors.Join(errors.New("bundle upgrade retained source root changed before admission"), err)
 			}
 			return retained, nil
 		})
