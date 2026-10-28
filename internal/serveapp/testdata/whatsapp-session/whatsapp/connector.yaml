@@ -9,6 +9,7 @@ tools:
       additionalProperties: false
       required: [destination, text]
       properties:
+        account: {type: string, pattern: '^\+[1-9][0-9]{1,14}$'}
         destination: {type: string, minLength: 1}
         text: {type: string, minLength: 1, maxLength: 2000}
     output_schema:
