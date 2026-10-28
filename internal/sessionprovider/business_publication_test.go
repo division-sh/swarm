@@ -22,6 +22,7 @@ import (
 	"github.com/division-sh/swarm/internal/runtime/contracts"
 	"github.com/division-sh/swarm/internal/runtime/core/eventreceiver"
 	"github.com/division-sh/swarm/internal/runtime/correlation"
+	"github.com/division-sh/swarm/internal/runtime/decisioncard"
 	"github.com/division-sh/swarm/internal/runtime/deliverylifecycle"
 	"github.com/division-sh/swarm/internal/runtime/executionposture"
 	"github.com/division-sh/swarm/internal/runtime/inboundpublication"
@@ -46,9 +47,20 @@ func (m sessionBusinessWorkflowModule) GuardRegistry() pipeline.GuardRegistry {
 	return pipeline.NewContractGuardRegistry(m.source)
 }
 
+type sessionBusinessPublicationStore interface {
+	sessionPublicationStore
+	pipeline.WorkflowPersistenceOwner
+	pipeline.DecisionCardDraftExpiry
+	pipeline.HumanTaskExpiry
+	manager.ManagerPersistence
+	decisioncard.Store
+	decisioncard.ProposedEffectStore
+	decisioncard.HumanTaskStore
+}
+
 func (f *activeInputFixture) publicationBus(t *testing.T) *bus.EventBus {
 	t.Helper()
-	selected, ok := f.selected.(sessionPublicationStore)
+	selected, ok := f.selected.(sessionBusinessPublicationStore)
 	if !ok {
 		t.Fatal("selected publication owners absent")
 	}

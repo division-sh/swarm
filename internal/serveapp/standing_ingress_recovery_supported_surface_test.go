@@ -233,6 +233,20 @@ func testStaleLearnedIngressRecoveryRequiredBothStores(t *testing.T, completed b
 	}
 }
 
+func waitForServedStandingContextManager(t testing.TB, ready <-chan *runtime.RuntimeContextManager, backend servedparity.Backend) *runtime.RuntimeContextManager {
+	t.Helper()
+	select {
+	case manager := <-ready:
+		if manager == nil {
+			t.Fatalf("%s served standing context manager is nil", backend)
+		}
+		return manager
+	case <-time.After(5 * time.Second):
+		t.Fatalf("%s timed out waiting for served standing context manager", backend)
+		return nil
+	}
+}
+
 func TestChannelCredentialRotationBeforeTargetPublicationBothStores(t *testing.T) {
 	for _, backend := range servedparity.RequiredBackends {
 		t.Run(string(backend), func(t *testing.T) {
