@@ -73,7 +73,7 @@ func TestStandaloneDeliveryAndRunLifecycleReadsHaveNoMutationSideEffectsParity(t
 				t.Fatalf("empty run upgrade read: %+v, %v", upgrade, err)
 			}
 			foreignBundle := *bundle
-			foreignBundle.SourceArtifact = sourceartifactfixture.New("global/schema.yaml", []byte("name: other\n"))
+			foreignBundle.SourceArtifact = loadLifecyclePersistenceFixtureForTest(t, map[string]string{"schema.yaml": "stages: []\n# foreign selected-read source\n"}).SourceArtifact
 			if partial, err := store.ReadBundleUpgradeState(ctx, runID, semanticview.Wrap(&foreignBundle)); err == nil || partial.RunID != "" {
 				t.Fatalf("foreign admitted source returned upgrade state: %+v, %v", partial, err)
 			}
