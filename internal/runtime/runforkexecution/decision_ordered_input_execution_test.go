@@ -5,6 +5,8 @@ import (
 	"encoding/json"
 	"net/http"
 	"net/http/httptest"
+	"os"
+	"path/filepath"
 
 	"reflect"
 	"strings"
@@ -17,6 +19,7 @@ import (
 	"github.com/division-sh/swarm/internal/runtime/core/flowidentity"
 	"github.com/division-sh/swarm/internal/runtime/core/worklifetime"
 	"github.com/division-sh/swarm/internal/runtime/correlation"
+	runtimecredentials "github.com/division-sh/swarm/internal/runtime/credentials"
 	"github.com/division-sh/swarm/internal/runtime/decisioncard"
 	"github.com/division-sh/swarm/internal/runtime/effects"
 	"github.com/division-sh/swarm/internal/runtime/executionmode"
@@ -27,6 +30,7 @@ import (
 	"github.com/division-sh/swarm/internal/runtime/startupownership"
 	"github.com/division-sh/swarm/internal/runtime/testfixtures/canonicalrouting"
 	"github.com/division-sh/swarm/internal/store/storetest"
+	"github.com/division-sh/swarm/internal/testutil/packfixture"
 	"github.com/google/uuid"
 )
 
@@ -51,24 +55,47 @@ func TestIssue642ForkOrderedGateInputUsesOwnCurrentGenerationBothStores(t *testi
 			repo := runForkExecutionRepoRoot(t)
 			loader := admittedFixtureSelectedContractSourceLoader{RepoRoot: repo,
 				SourceRoot: canonicalrouting.CopyNestedPendingActivityReplyWithOrderedInputGate(t, provider.URL)}
+			providerEntry, found := packfixture.EmbeddedInventory(t).Lookup("telegram")
+			if !found {
+				t.Fatal("missing captured channel provider")
+			}
+			for label, body := range providerEntry.Provider().Members() {
+				path := filepath.Join(loader.SourceRoot, "telegram", filepath.FromSlash(label))
+				if err := os.MkdirAll(filepath.Dir(path), 0o700); err != nil {
+					t.Fatal(err)
+				}
+				if err := os.WriteFile(path, body, 0o600); err != nil {
+					t.Fatal(err)
+				}
+			}
+			credentials, err := runtimecredentials.NewFileStore(filepath.Join(t.TempDir(), "credentials.json"))
+			if err != nil {
+				t.Fatal(err)
+			}
+			for key, value := range map[string]string{"telegram.telegram_bot_token": "ordered-input-bot", "telegram.webhook_signing_secret": "ordered-input-signing"} {
+				if err := credentials.Set(t.Context(), key, value); err != nil {
+					t.Fatal(err)
+				}
+			}
 			ctx := runForkTestContext(t)
 			loaded, err := loader.LoadRunForkSelectedContractSource(ctx, runfork.RunForkContractSelection{Mode: "selected_contracts"})
 			if err != nil {
 				t.Fatal(err)
 			}
 			source := uuid.NewString()
-			ctx = correlation.WithRunID(correlation.WithSourceArtifactFact(ctx, loaded.SourceArtifactFact), source)
+			ctx = correlation.WithRootAdmission(correlation.WithRunID(correlation.WithSourceArtifactFact(ctx, loaded.SourceArtifactFact), source), loaded.RootedSource.Admission())
 			ctx = effects.WithExecutionMode(ctx, executionmode.Live)
 			ctx = authoractivity.WithScope(ctx, authoractivity.BundleScope(runForkTestRuntimeInstanceID, loaded.SourceArtifactFact.BundleHash()))
 			at := time.Now().UTC()
 			bundle, _ := semanticview.Bundle(loaded.Source)
 			ctx = originalSelectedFixtureContext(t, ctx, any(selected).(startupownership.Store))
 			storetest.RequireRun(t, ctx, selected.(storetest.RunFixtureStore), storetest.RunFixture{Origin: storetest.ScenarioSetupOrigin(), RunID: source,
-				BundleHash: loaded.SourceArtifactFact.BundleHash(), Artifact: bundle.SourceArtifact, StartedAt: at})
-			rt, _ := nodeReplySourceRuntime(t, ctx, selected, owner, loaded, executionposture.Live)
+				BundleHash: loaded.SourceArtifactFact.BundleHash(), Artifact: bundle.SourceArtifact, RootAdmission: loaded.RootedSource.Admission(), StartedAt: at})
+			rt, _ := nodeReplySourceRuntime(t, ctx, selected, owner, loaded, executionposture.Live, credentials)
 			ctx = worklifetime.WithOccurrence(ctx, rt.WorkOccurrence())
-			created, err := rt.Manager.EnsureFlowInstance(ctx, pipeline.FlowInstanceActivationRequest{ContractBundle: loaded.Source,
-				Instance: flowidentity.Stored(loaded.Source, ".", source, source, "", ""), OccurredAt: at})
+			runtimeSource := rt.Options.WorkflowModule.SemanticSource()
+			created, err := rt.Manager.EnsureFlowInstance(ctx, pipeline.FlowInstanceActivationRequest{ContractBundle: runtimeSource,
+				Instance: flowidentity.Stored(runtimeSource, ".", source, source, "", ""), OccurredAt: at})
 			if err != nil || !created {
 				t.Fatalf("construct ordered-input source: created=%t error=%v", created, err)
 			}

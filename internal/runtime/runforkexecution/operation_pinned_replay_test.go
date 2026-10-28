@@ -46,7 +46,7 @@ func proveSelectedPinnedOperationReplay(t *testing.T, backend string, rows int, 
 	ctx, request := ownerlessSelectedOperationFixtureFromSource(t, backend, canonicalrouting.CopySelectedOperationPinnedResource(t), "fixture.seed.requested")
 	loader := request.SourceLoader.(SourceArtifactSelectedContractSourceLoader)
 	loaded, err := loader.InspectRunForkSelectedContractSourceForRequest(ctx, SelectedContractSourceLoadRequest{
-		SourceRunID: request.SourceRunID, Selection: request.ContractSelection,
+		Responsibility: OriginalRunSource(request.SourceRunID), Selection: request.ContractSelection,
 	})
 	if err != nil {
 		t.Fatal(err)
@@ -55,7 +55,7 @@ func proveSelectedPinnedOperationReplay(t *testing.T, backend string, rows int, 
 	if !found || bundle == nil {
 		t.Fatal("pin proof requires the actual admitted source bundle")
 	}
-	storetest.RequireBundleDataCatalog(t, ctx, loader.Store.(storetest.DurableDataCatalogStore), bundle)
+	storetest.RequireBundleDataCatalog(t, ctx, loader.Store.(storetest.RootedDataCatalogStore), bundle)
 	data := loader.Store.(interface {
 		ExecuteDataSourceOperation(context.Context, durabledata.SourceCommand) (durabledata.SourceOperationResult, error)
 		LoadPinnedSource(context.Context, string, string, durabledata.DeclarationRef) (durabledata.PinnedSource, error)

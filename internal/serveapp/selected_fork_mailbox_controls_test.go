@@ -5,16 +5,22 @@ import (
 	"testing"
 	"time"
 
+	"github.com/division-sh/swarm/internal/packartifact"
 	"github.com/division-sh/swarm/internal/runtime/testfixtures/canonicalrouting"
 	"github.com/division-sh/swarm/internal/servedparity"
 	"github.com/division-sh/swarm/internal/store/storetest"
+	"github.com/division-sh/swarm/internal/testutil/packfixture"
 	"github.com/google/uuid"
 )
 
 func TestSelectedForkMailboxControlRefusalsBothStores(t *testing.T) {
 	for _, backend := range []servedparity.Backend{servedparity.BackendDefaultSQLite, servedparity.BackendExplicitPostgres} {
 		t.Run(string(backend), func(t *testing.T) {
+			configureStandingLifecycleCredentials(t)
 			root := canonicalrouting.CopyForkReceiverMailboxGate(t)
+			if _, err := packartifact.ImportEmbeddedPack(root, "telegram", packfixture.EmbeddedBase(t)); err != nil {
+				t.Fatal(err)
+			}
 			publication := newExactOriginPublicationProbe(t)
 			rt := startServedLiveFlowProofRuntimeFromSource(t, backend, root)
 			seed := requireServedEventPublishRPCResult(t, rt.Endpoint, map[string]any{

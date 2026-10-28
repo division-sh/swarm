@@ -29,6 +29,7 @@ import (
 	runtimepipeline "github.com/division-sh/swarm/internal/runtime/pipeline"
 	"github.com/division-sh/swarm/internal/runtime/semanticview"
 	runtimestartupownership "github.com/division-sh/swarm/internal/runtime/startupownership"
+	"github.com/division-sh/swarm/internal/sourceartifact"
 	"github.com/division-sh/swarm/internal/store/internal/backend/generationauthority"
 	agentfixture "github.com/division-sh/swarm/internal/store/testutil/agentfixture"
 	"github.com/division-sh/swarm/internal/testutil"
@@ -38,6 +39,7 @@ import (
 
 type agentFixtureFlowStore interface {
 	agentfixture.Store
+	LoadRunRootedSource(context.Context, string) (sourceartifact.RootedSource, error)
 	runtimemanager.AgentLifecycleOutcomeReader
 	runtimedelivery.Store
 	LoadDynamicFlowRuntimeReadiness(context.Context, string, runtimeflowidentity.Route) (runtimepipeline.DynamicFlowRuntimeReadiness, bool, error)
@@ -63,7 +65,7 @@ func TestAgentFixtureExactFlowAuthorityParity(t *testing.T) {
 			runID := uuid.NewString()
 			ctx = runtimecorrelation.WithRunID(storeTestWorkContext(t, ctx), runID)
 			ctx = runtimeeffects.WithExecutionMode(ctx, runtimeeffects.ExecutionModeLive)
-			requireRunFixtureForTest(t, ctx, selected, semanticRunFixture{
+			ctx = requireRunFixtureForTest(t, ctx, selected, semanticRunFixture{
 				Origin: semanticScenarioSetupRunOriginForTest(), RunID: runID,
 			})
 			bus := &sqliteFlowActivationBus{}
@@ -73,7 +75,14 @@ func TestAgentFixtureExactFlowAuthorityParity(t *testing.T) {
 			if _, err := lifecycle.(runtimemanager.RunExecutionOwner).InspectRunExecutionOwnership(ctx, runID); err == nil {
 				t.Fatal("fixture inspection granted ownership before generation admission")
 			}
-			coordinate := runtimeagenttopology.SourceCoordinate{BundleHash: authorActivityTestBundleHash}
+			root, present, err := runtimecorrelation.RootAdmissionFromContext(ctx)
+			if err != nil || !present {
+				t.Fatalf("fixture root: present=%t err=%v", present, err)
+			}
+			coordinate, err := runtimeagenttopology.NewSourceCoordinate(root)
+			if err != nil {
+				t.Fatal(err)
+			}
 			plan, err := runtimeagenttopology.NewSourceSetPlan([]runtimeagenttopology.SourceCoordinate{coordinate}, nil)
 			if err != nil {
 				t.Fatal(err)
@@ -306,7 +315,7 @@ func assertExactAgentFixtureFlowAuthority(
 }
 
 type agentFixtureAcquireProbe struct {
-	agentfixture.Store
+	agentFixtureFlowStore
 	mu           sync.Mutex
 	acquireCalls int
 }
@@ -315,7 +324,7 @@ func (s *agentFixtureAcquireProbe) AcquireProcessCapability(ctx context.Context,
 	s.mu.Lock()
 	s.acquireCalls++
 	s.mu.Unlock()
-	return s.Store.AcquireProcessCapability(ctx, req)
+	return s.agentFixtureFlowStore.AcquireProcessCapability(ctx, req)
 }
 
 func (s *agentFixtureAcquireProbe) calls() int {
@@ -354,7 +363,7 @@ func TestAgentFixtureSealedAuthorityRejectionParity(t *testing.T) {
 				t.Fatal(err)
 			}
 			invalid := rejectedAgentFixtureAdmissions(t)
-			probe := &agentFixtureAcquireProbe{Store: selected}
+			probe := &agentFixtureAcquireProbe{agentFixtureFlowStore: selected}
 			for index, topology := range invalid {
 				if _, err := agentfixture.CommitExact(t, ctx, probe, runtimemanager.AgentLifecycleTransition{
 					Identity: identity, AgentID: identity.AgentID(), Topology: topology,
@@ -483,6 +492,9 @@ func proveAgentFixtureMixedAuthorityRejection(t *testing.T, ctx context.Context,
 	t.Helper()
 	ctx = originalStoreFixtureContext(t, ctx, selected)
 	staticIdentity := testAgentIdentity(t, "static-survivor", "global")
+	ctx = requireRunFixtureForTest(t, ctx, selected, semanticRunFixture{
+		Origin: semanticScenarioSetupRunOriginForTest(), RunID: staticIdentity.RunID,
+	})
 	staticRecord := agentFixtureStaticRecord(t, staticIdentity)
 	if err := agentfixture.UpsertStatic(t, ctx, selected, staticRecord); err != nil {
 		t.Fatalf("seed static fixture survivor: %v", err)
@@ -499,7 +511,7 @@ func proveAgentFixtureMixedAuthorityRejection(t *testing.T, ctx context.Context,
 	flowIdentity := testAgentIdentity(t, "flow-survivor", "review/fixture")
 	flowState := seedExactAgentFixtureFlowState(t, ctx, selected, flowIdentity, grant)
 	before := captureAgentFixtureAuthority(t, ctx, selected)
-	probe := &agentFixtureAcquireProbe{Store: selected}
+	probe := &agentFixtureAcquireProbe{agentFixtureFlowStore: selected}
 	for index, topology := range rejectedAgentFixtureAdmissions(t) {
 		if _, err := agentfixture.CommitExact(t, ctx, probe, runtimemanager.AgentLifecycleTransition{
 			Identity: flowIdentity, AgentID: flowIdentity.AgentID(), Topology: topology,
@@ -610,7 +622,7 @@ func seedExactAgentFixtureFlowState(
 	}
 	revision = strings.TrimPrefix(revision, "sha256:")
 	runID := identity.RunID
-	requireRunningRunForTest(t, ctx, selected, runID, time.Now().UTC())
+	ctx = requireRunningRunForTest(t, ctx, selected, runID, time.Now().UTC())
 	readinessPlan, err := (runtimepipeline.DynamicFlowRuntimeReadinessPlan{
 		Identity: runtimeflowidentity.Instance{
 			TemplateID: "review", ScopeKey: "review", InstanceID: "fixture", InstancePath: identity.FlowInstance(),

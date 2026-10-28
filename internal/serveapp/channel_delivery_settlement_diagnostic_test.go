@@ -208,7 +208,7 @@ func TestChannelDeliverySettlementDiagnosticBothStores(t *testing.T) {
 			if err := db.QueryRow(`SELECT run_id FROM runs WHERE flow_path='telegram-ingress' AND landing_run=TRUE`).Scan(&runID); err != nil {
 				t.Fatal(err)
 			}
-			card := waitChannelAnchorCard(t, db, runID, "stage_gate", "telegram-ingress")
+			card := waitChannelAnchorCard(t, db, runID, "stage_gate", "chat")
 			waitChannelAnchorReceipt(t, db, card)
 			waitChannelDeliverySendsSettled(t, db, backend)
 			var deliveryID string

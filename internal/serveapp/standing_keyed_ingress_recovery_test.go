@@ -55,10 +55,10 @@ func a9SetRawIngressCredential(t *testing.T) string {
 		t.Fatal(err)
 	}
 	const secret = "a9-keyed-recovery-proof"
-	if err := file.Set(t.Context(), "webhook_signing.partner", secret); err != nil {
+	if err := file.Set(t.Context(), "partner.webhook_signing_secret", secret); err != nil {
 		t.Fatal(err)
 	}
-	if err := file.Set(t.Context(), "webhook_signing.telegram", secret); err != nil {
+	if err := file.Set(t.Context(), "telegram.webhook_signing_secret", secret); err != nil {
 		t.Fatal(err)
 	}
 	return secret
@@ -116,7 +116,7 @@ func TestA9KeyedIngressCommitResponseRecoveryBothStores(t *testing.T) {
 					t.Fatalf("native observations=%v / %v", err, loadErr)
 				}
 				if mode == "before_commit" {
-					if found || len(instances) != 0 || len(servedClockEvents(t, served.Endpoint, status.RunID, "account.opened")) != 0 || len(servedClockEvents(t, served.Endpoint, status.RunID, "root.created")) != 0 {
+					if found || len(instances) != 0 || len(servedClockEvents(t, served.Endpoint, status.RunID, "inbound.partner.raw")) != 0 || len(servedClockEvents(t, served.Endpoint, status.RunID, "root.created")) != 0 {
 						t.Fatal("refused commit leaked construction, receipt or publication")
 					}
 					code, response = a9PostSignedRawIngress(t, endpoint, secret, body)
@@ -129,7 +129,7 @@ func TestA9KeyedIngressCommitResponseRecoveryBothStores(t *testing.T) {
 					t.Fatalf("exact committed receipt=%+v found=%t err=%v", record, found, err)
 				}
 				initial := a9RootConstructionReceipt(t, rt.Pipeline, status.RunID)
-				if initial.CreatingInput.EventID != record.Events[0].EventID || initial.CreatingInput.Input != "account.opened" {
+				if initial.CreatingInput.EventID != record.Events[0].EventID || initial.CreatingInput.Input != "inbound.partner.raw" {
 					t.Fatalf("committed constructor lost elected publication: %+v", initial)
 				}
 				if code := first.stop(); code != 0 {

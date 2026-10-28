@@ -1,6 +1,7 @@
 package contracts
 
 import (
+	"errors"
 	"fmt"
 	"sort"
 	"strings"
@@ -73,9 +74,9 @@ func eventSchemaOwnershipRowsForReceiver(bundle *WorkflowContractBundle, flowID 
 func compileEventSchemaOwnershipRow(bundle *WorkflowContractBundle, connect FlowConnect) (eventSchemaOwnershipRow, bool) {
 	producerEvent := connect.Event
 	producerFlowID := connectEndpointFlowID(connect.OwnerFlowPath, connect.From)
-	producer, producerName, producerOK := connectEndpointEventDeclaration(bundle, producerFlowID, producerEvent, false)
-	if !producerOK {
-		return eventSchemaOwnershipRow{}, false
+	producer, producerName, _ := connectEndpointEventDeclaration(bundle, producerFlowID, producerEvent, false)
+	if producerName == "" {
+		producerName = packageEndpointLocalEvent(bundle, producerFlowID, producerEvent, false)
 	}
 	receiverEvent := connect.Event
 	if strings.TrimSpace(connect.Rename) != "" {
@@ -100,6 +101,56 @@ func compileEventSchemaOwnershipRow(bundle *WorkflowContractBundle, connect Flow
 		receiver:              receiver,
 		receiverRestatement:   receiverOK,
 	}, true
+}
+
+// BindConnectedProviderInputPins completes only schema evidence for the
+// already-owned edges; the returned pins retain their authored provenance.
+func (b *WorkflowContractBundle) BindConnectedProviderInputPins(outputs map[string][]CompiledFlowOutputPin) (map[string][]CompiledFlowInputPin, error) {
+	if b == nil {
+		return nil, fmt.Errorf("connected provider input binding requires its compiled bundle")
+	}
+	if errs := validateCompiledConnectEventSchemaOwnership(b); len(errs) != 0 {
+		return nil, errors.Join(errs...)
+	}
+	bound := make(map[string][]CompiledFlowInputPin, len(b.Semantics.flowInputEventPins))
+	for flow, pins := range b.Semantics.flowInputEventPins {
+		bound[flow] = cloneCompiledFlowInputPins(pins)
+	}
+	for _, row := range effectiveEventSchemaOwnershipRows(b) {
+		var schema CompiledEventSchema
+		for _, output := range outputs[row.producerFlowID] {
+			if output.EventType() == packageEndpointLocalEvent(b, row.producerFlowID, row.producerEvent, false) {
+				schema, _ = output.EventSchema()
+				if output.FlowID() != row.producerFlowID || (schema.Classification() == CompiledEventSchemaImported && schema.FlowPath() != row.producerFlowID) {
+					return nil, fmt.Errorf("connected producer %s:%s has foreign output schema evidence", row.producerFlowID, row.producerEvent)
+				}
+				break
+			}
+		}
+		if schema.Classification() != CompiledEventSchemaImported {
+			continue
+		}
+		for index, pin := range bound[row.receiverFlowID] {
+			if pin.EventType() != row.receiverEvent {
+				continue
+			}
+			if existing, present := pin.ProducerEventSchema(); present {
+				if existing.FlowPath() != schema.FlowPath() || existing.EventName() != schema.EventName() || existing.AcceptanceSchemaDigest() != schema.AcceptanceSchemaDigest() {
+					return nil, fmt.Errorf("connected input %s:%s conflicts with its admitted producer schema", row.receiverFlowID, row.receiverEvent)
+				}
+				continue
+			}
+			value := *pin.value
+			value.producerEventSchema, value.receiverEventSchema = schema, schema
+			var err error
+			value.digest, err = compiledFlowPinDigest("input", value.context, value.event, schema, schema)
+			if err != nil {
+				return nil, err
+			}
+			bound[row.receiverFlowID][index] = CompiledFlowInputPin{value: &value}
+		}
+	}
+	return bound, nil
 }
 
 func validateCompiledConnectEventSchemaOwnership(bundle *WorkflowContractBundle) []error {
@@ -265,7 +316,9 @@ func effectiveEventDeclarationForFlowEvent(bundle *WorkflowContractBundle, flowI
 }
 
 func resolveEffectiveEventDeclarationForFlowEvent(bundle *WorkflowContractBundle, flowID, eventType string) (EventCatalogEntry, string, TypeCatalogDocument, bool, bool) {
-	flowID = strings.TrimSpace(flowID)
+	if _, ok := bundle.exactFlowEventDeclarationView(flowID); !ok {
+		return EventCatalogEntry{}, "", TypeCatalogDocument{}, false, false
+	}
 	_, connected, ambiguous := connectedEventSchemaOwnershipRow(bundle, flowID, eventType)
 	if ambiguous {
 		return EventCatalogEntry{}, "", TypeCatalogDocument{}, true, false
@@ -285,10 +338,6 @@ func resolveEffectiveEventDeclarationForFlowEvent(bundle *WorkflowContractBundle
 }
 
 func (b *WorkflowContractBundle) flowInputEventPinForResolvedEvent(flowID, eventType string) (CompiledFlowInputPin, bool) {
-	flowID = strings.TrimSpace(flowID)
-	if flowID == "" {
-		flowID = "."
-	}
 	requested := eventidentity.Normalize(eventType)
 	if local, owned := b.connectionInputs.ReceiverEvent(flowID, requested); owned {
 		return b.FlowInputEventPin(flowID, local)
@@ -306,10 +355,6 @@ func (b *WorkflowContractBundle) flowInputEventPinForResolvedEvent(flowID, event
 func connectedEventSchemaOwnershipRow(bundle *WorkflowContractBundle, flowID, eventType string) (eventSchemaOwnershipRow, bool, bool) {
 	if bundle == nil {
 		return eventSchemaOwnershipRow{}, false, false
-	}
-	flowID = strings.TrimSpace(flowID)
-	if flowID == "" {
-		flowID = "."
 	}
 	var selected eventSchemaOwnershipRow
 	found := false

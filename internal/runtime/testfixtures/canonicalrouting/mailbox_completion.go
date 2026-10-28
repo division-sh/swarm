@@ -26,7 +26,7 @@ func CopyMailboxCompletionMatrix(t testing.TB) string {
 	t.Helper()
 	root := CopyGateCompletionDiagnostic(t)
 	applyClosedReplacement(t, filepath.Join(root, "schema.yaml"), "        reject:\n", "        reject:\n          input:\n            reason: {type: text, required: true}\n")
-	applyClosedReplacement(t, filepath.Join(root, "schema.yaml"), "stages:\n", "imports:\n  connector_packs:\n    - provider: telegram\n      tool: telegram.send_message\nstages:\n")
+	copyTree(t, filepath.Join(RepoRoot(t), "packs/providers/telegram"), filepath.Join(root, "telegram"))
 	applyClosedReplacement(t, filepath.Join(root, "schema.yaml"), "    - work.requested\n", "    - work.requested\n    - effect.requested\n    - observer.requested\n  outputs: [observer.requested]\nconnect:\n  - {event: observer.requested, from: ., to: observers}\n")
 	nodes, err := os.ReadFile(filepath.Join(root, "nodes.yaml"))
 	if err != nil {
@@ -50,7 +50,8 @@ effect-revision:
   event_handlers:
     telegram_send_message.revision_requested: {}
 `)
-	writeClosedVariantFile(t, root, "observers/schema.yaml", `name: observers
+	writeClosedVariantFile(t, root, "observers/manifest.yaml", "version: 1.0.0\nplatform_version: '*'\n")
+	writeClosedVariantFile(t, root, "observers/schema.yaml", `# fixture: observers
 stages: []
 pins:
   inputs:
@@ -127,10 +128,10 @@ func CopyHumanTaskOwnership(t testing.TB, mode string) string {
 			writeClosedVariantFile(t, root, name, string(child))
 		}
 		applyClosedReplacement(t, filepath.Join(root, "schema.yaml"), "  outputs: [observer.requested]\nconnect:\n  - {event: observer.requested, from: ., to: observers}\n", "")
-		removeClosedVariantFiles(t, root, "observers/mocks/observer.py", "observers/mocks", "observers/agents.yaml", "observers/entities.yaml", "observers/nodes.yaml", "observers/schema.yaml", "observers")
+		removeClosedVariantFiles(t, root, "observers/mocks/observer.py", "observers/mocks", "observers/agents.yaml", "observers/entities.yaml", "observers/nodes.yaml", "observers/schema.yaml", "observers/manifest.yaml", "observers")
 	case "template":
 		writeClosedVariantFile(t, root, "observers/entities.yaml", "observer:\n  case_id: text\n")
-		applyClosedReplacement(t, filepath.Join(root, "observers/schema.yaml"), "name: observers\n", "name: observers\ninstance: case_id\n")
+		applyClosedReplacement(t, filepath.Join(root, "observers/schema.yaml"), "# fixture: observers\n", "# fixture: observers\ninstance: case_id\n")
 		applyClosedReplacement(t, filepath.Join(root, "schema.yaml"), "  - {event: observer.requested, from: ., to: observers}\n", "  - {event: observer.requested, from: ., to: observers, resolution: create}\n")
 		applyClosedReplacement(t, filepath.Join(root, "schema.yaml"), "    - observer.requested\n", "    - observer.requested\n    - observer.seed\n")
 		applyClosedReplacement(t, filepath.Join(root, "events.yaml"), "observer.requested:\n  seed: boolean\n", "observer.requested:\n  case_id: text\n  seed: boolean\n")

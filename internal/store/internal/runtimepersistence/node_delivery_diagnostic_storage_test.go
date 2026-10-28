@@ -11,10 +11,12 @@ import (
 
 	"github.com/division-sh/swarm/internal/events"
 	"github.com/division-sh/swarm/internal/events/eventtest"
+	runtimecorrelation "github.com/division-sh/swarm/internal/runtime/correlation"
 	runtimedeadletters "github.com/division-sh/swarm/internal/runtime/deadletters"
 	runtimefailures "github.com/division-sh/swarm/internal/runtime/failures"
 	runtimepipelineobligation "github.com/division-sh/swarm/internal/runtime/pipelineobligation"
 	"github.com/division-sh/swarm/internal/store/internal/backend/transactiontest"
+	"github.com/division-sh/swarm/internal/testutil/sourceartifactfixture"
 	"github.com/google/uuid"
 )
 
@@ -23,6 +25,9 @@ func TestNodeDeliveryDiagnosticsPreserveRowsReceiptsAndDeadLettersBothStores(t *
 		t.Run(backend.name, func(t *testing.T) {
 			fixture, ctx := backend.open(t), testAuthorActivityContext()
 			ctx = originalStoreFixtureContext(t, ctx, fixture.store)
+			rooted, _ := sourceartifactfixture.Rooted(t, "fixture", sourceartifactfixture.Artifact())
+			sourceartifactfixture.RequireArtifact(t, ctx, fixture.store.(sourceartifactfixture.Writer), rooted.Artifact())
+			ctx = runtimecorrelation.WithRootAdmission(ctx, rooted.Admission())
 			selected := fixture.store.(interface {
 				semanticEventFixtureStore
 				exactDeadLetterStore

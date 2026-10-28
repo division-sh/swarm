@@ -52,7 +52,7 @@ func TestIssue642TerminalNestedReplyNativeMaterializationBothStores(t *testing.T
 			}
 			var selected interface {
 				runforkexecution.SelectedContractForkLifecycle
-				storetest.DurableDataCatalogStore
+				storetest.RootedDataCatalogStore
 				runforkexecution.SourceArtifactSelectedContractSourceStore
 			} = h.pg
 			if h.sqlite != nil {
@@ -61,7 +61,8 @@ func TestIssue642TerminalNestedReplyNativeMaterializationBothStores(t *testing.T
 			loader, selection, _ := selectedContractForkFixtureSelection(t, h.ctx, repoRootFromCatalogE2E(t), root, selected)
 			owner := selectedContractExecutionOwnerForCatalogHarness(t, h)
 			options := selectedContractAgentRuntimeOptionsForCatalogHarness(h, testRuntimeConfig())
-			staged := stageCatalogSelectedContractFork(t, h.ctx, selected, owner, loader, selection, options, catalogRuntimeRunID, cut)
+			operation := catalogStagedForkOperation(t, h.ctx, selected, selection, catalogRuntimeRunID, cut)
+			staged := stageCatalogSelectedContractFork(t, h.ctx, selected, owner, loader, selection, options, catalogRuntimeRunID, cut, operation)
 			if staged.ExecutionReady || staged.SelectedContractBinding == nil || staged.ForkRunStatus != runfork.RunForkMaterializedStatus {
 				t.Fatalf("row projection created execution authority: %+v", staged)
 			}

@@ -37,7 +37,10 @@ func TestChannelOneBotManyConversationsPublicJourney(t *testing.T) {
 			if err != nil {
 				t.Fatal(err)
 			}
-			if err := credentials.Set(context.Background(), "telegram_bot_token", "bot-token"); err != nil {
+			if err := credentials.Set(context.Background(), "telegram.telegram_bot_token", "bot-token"); err != nil {
+				t.Fatal(err)
+			}
+			if err := credentials.Set(context.Background(), "telegram.webhook_signing_secret", "boot-signing-secret"); err != nil {
 				t.Fatal(err)
 			}
 			if err := credentials.Set(context.Background(), "ANTHROPIC_API_KEY", "anthropic-key"); err != nil {
@@ -56,7 +59,7 @@ func TestChannelOneBotManyConversationsPublicJourney(t *testing.T) {
 				t.Fatal(err)
 			}
 			defer db.Close()
-			cardMessageID := waitChannelCardMessageID(t, db, backendName, "telegram-ingress")
+			cardMessageID := waitChannelCardMessageID(t, db, backendName, ".")
 			card := h.provider.Delivery(cardMessageID - 1)
 			if fmt.Sprint(card["chat_id"]) != "1001" {
 				t.Fatalf("operator card escaped operator conversation: %v", card)

@@ -102,7 +102,7 @@ func (p *diagnosticForkActivationProbe) RequireRunForkSelectedContractExecutionS
 			}
 			admissionEvent := eventtest.DiagnosticDirect(uuid.NewString(), events.EventTypePlatformRuntimeLog, "runtime", "", payload, 0, "", "", events.EventEnvelope{}, time.Now().UTC())
 			admit := runtimepkg.NewRuntimePayloadAdmitter(nil, semanticview.Wrap(p.h.bundle), catalogSourceArtifactFact(p.t, p.h.bundle))
-			admission, err := admit(ctx, admissionEvent, "")
+			admission, err := admit(ctx, admissionEvent, events.PlatformPayloadProducer(admissionEvent))
 			if err != nil {
 				p.t.Fatal(err)
 			}
@@ -124,7 +124,7 @@ func TestLifecycleDiagnosticForkActivationBothStores(t *testing.T) {
 					ctx := worklifetime.WithOccurrence(catalogRunContext(h, catalogRuntimeRunID), h.rt.WorkOccurrence())
 					frontierID := activateLocalReadinessFrontier(t, ctx, h, "worker.ready")
 					var sourceStore interface {
-						storetest.DurableDataCatalogStore
+						storetest.RootedDataCatalogStore
 						forkexecution.SourceArtifactSelectedContractSourceStore
 					} = h.pg
 					var forkStore forkexecution.SelectedContractForkLifecycle = h.pg
@@ -143,7 +143,7 @@ func TestLifecycleDiagnosticForkActivationBothStores(t *testing.T) {
 					result, err := executeCatalogLiveFork(t, h, ctx, forkexecution.SelectedContractExecutionRequest{
 						SourceRunID: catalogRuntimeRunID, At: frontierID, AllowSourceFreeze: true,
 						Owner: selectedContractExecutionOwnerForCatalogHarness(t, h, probe), SourceLoader: loader, ContractSelection: selection,
-						AgentRuntime: selectedContractAgentRuntimeOptionsForCatalogHarness(h, cfg),
+						AgentRuntime: selectedContractAgentRuntimeOptionsForCatalogHarness(h, cfg), ExpectedBundleHash: selection.BundleHash,
 					})
 					if scenario == "clean" && (err != nil || !result.Activation.Activated) {
 						t.Fatalf("activation acknowledgment: %+v err=%v", result.Activation, err)

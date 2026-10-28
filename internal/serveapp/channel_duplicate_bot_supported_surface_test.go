@@ -15,6 +15,7 @@ func TestChannelDuplicatePhysicalBotRejectsDurablyWithoutStealingConnection(t *t
 		for _, credential := range []string{"duplicate-bot-token", "credential-alias"} {
 			t.Run(string(backend)+"/"+credential, func(t *testing.T) {
 				h := newChannelOnboardingE2EHarness(t, backend, true)
+				writeChannelOnboardingLiveToolCredentials(t, h.credentialPath)
 				addSecondChannelOnboardingTarget(t, h.opts.SourceRoot)
 				h.start(t)
 				defer h.stop(t)
@@ -35,7 +36,7 @@ func TestChannelDuplicatePhysicalBotRejectsDurablyWithoutStealingConnection(t *t
 				initial := waitNativeQualification(t, h, firstBefore.Operation.OperationID, channelnative.QualificationQualified, time.Time{})
 				var rejected channelonboarding.Result
 				requireServedJSONRPCResult(t, h.rpcEndpoint(), "channel.onboarding_start", map[string]any{
-					"provider": "telegram", "verb": "reconnect", "provider_credential": credential,
+					"provider": "telegram", "verb": "connect", "provider_credential": credential,
 					"save_proof": true, "bundle": servedEventPublishFixtureBundleHash(t, second.source), "interface": second.interfaceRef, "target": second.target,
 				}, &rejected)
 				if rejected.Operation.Phase != channelonboarding.PhaseFailed || rejected.Operation.FailureCode != "provider_slot_collision" || rejected.IdentityOperation != nil {

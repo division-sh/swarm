@@ -19,6 +19,7 @@ import (
 	"github.com/division-sh/swarm/internal/store/construction"
 	"github.com/division-sh/swarm/internal/store/internal/backend/generationauthority"
 	"github.com/division-sh/swarm/internal/testutil"
+	"github.com/division-sh/swarm/internal/testutil/sourceartifactfixture"
 	"github.com/google/uuid"
 )
 
@@ -135,7 +136,12 @@ func TestGenerationEffectAdmissionRequiresCurrentProcessBothStores(t *testing.T)
 					t.Fatal(err)
 				}
 				t.Cleanup(func() { _ = capability.Release(context.Background()) })
-				plan, err := agenttopology.NewSourceSetPlan([]agenttopology.SourceCoordinate{{BundleHash: "bundle-v2:sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"}}, nil)
+				rooted, _ := sourceartifactfixture.Rooted(t, "generation-publication", sourceartifactfixture.Artifact())
+				coordinate, err := agenttopology.NewSourceCoordinate(rooted.Admission())
+				if err != nil {
+					t.Fatal(err)
+				}
+				plan, err := agenttopology.NewSourceSetPlan([]agenttopology.SourceCoordinate{coordinate}, nil)
 				if err != nil {
 					t.Fatal(err)
 				}

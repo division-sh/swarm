@@ -594,8 +594,16 @@ func (d *serveChannelDeliveryDispatcher) dispatchChannel(ctx context.Context, ca
 	if err != nil {
 		return err
 	}
-	if err := d.reconcileNativeInboxActivation(ctx, selected); err != nil {
-		return fmt.Errorf("channel delivery recovery entry is unavailable: %w", err)
+	if selected.Posture == channelonboarding.ActivationWebhookRegistration {
+		if d.ingress == nil {
+			return fmt.Errorf("channel delivery requires its exact ingress owner")
+		}
+		registration, current := d.ingress.ChannelRegistrationCurrent(ctx, d.now().UTC(),
+			channelonboarding.LearnedBindingID(selected.SlotKey), selected.TargetSelector, selected.Provider)
+		if !current || !registration.Current || registration.Registration.SlotID == "" ||
+			!registration.ActivationGeneration.Equal(lease.Generation()) {
+			return fmt.Errorf("channel delivery physical registration is not exact-current")
+		}
 	}
 	semanticInput, err := channelDeliverySemanticInput(plan, prepared, operation, previousReference)
 	if err != nil {

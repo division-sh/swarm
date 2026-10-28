@@ -4,6 +4,7 @@ import (
 	"context"
 	"database/sql"
 	"encoding/json"
+	"errors"
 	"path/filepath"
 	"reflect"
 	"sort"
@@ -11,12 +12,14 @@ import (
 	"testing"
 
 	"github.com/division-sh/swarm/internal/runtime/core/worklifetime"
+	"github.com/division-sh/swarm/internal/runtime/correlation"
 	"github.com/division-sh/swarm/internal/runtime/executionposture"
 	"github.com/division-sh/swarm/internal/runtime/runfork"
 	"github.com/division-sh/swarm/internal/runtime/runforkadmission"
 	"github.com/division-sh/swarm/internal/runtime/startupownership"
+	"github.com/division-sh/swarm/internal/sourceartifact"
 	"github.com/division-sh/swarm/internal/store/storetest"
-	"github.com/division-sh/swarm/internal/testutil"
+	"github.com/division-sh/swarm/internal/testutil/sourceartifactfixture"
 	"github.com/google/uuid"
 )
 
@@ -24,14 +27,12 @@ func TestSelectedForkPreparationProcessBoundaryBothStores(t *testing.T) {
 	for _, backend := range []string{"sqlite", "postgres"} {
 		t.Run(backend, func(t *testing.T) {
 			var selected startupownership.Store
-			var db *sql.DB
 			var owner SelectedContractExecutionOwner
 			if backend == "sqlite" {
 				s := storetest.StartSQLiteRuntimeStore(t)
-				selected, db, owner = s, storetest.Database(s), selectedContractSQLiteExecutionOwnerForTest(t, s)
+				selected, owner = s, selectedContractSQLiteExecutionOwnerForTest(t, s)
 			} else {
-				_, db, _ = testutil.StartPostgres(t)
-				s := storetest.AdmitPostgresRuntimeStore(t, db)
+				s := storetest.StartPostgresRuntimeStore(t)
 				selected, owner = s, selectedContractExecutionOwnerForTest(t, s)
 			}
 			ctx := runForkTestContext(t)
@@ -51,11 +52,19 @@ func TestSelectedForkPreparationProcessBoundaryBothStores(t *testing.T) {
 			seedSelectedOperationSource(t, ctx, selected, loaded, sourceRun, eventID, false)
 			request := SelectedContractExecutionRequest{
 				Owner: owner, SourceRunID: sourceRun, At: eventID,
-				ContractSelection: runforkadmission.SelectedContractSelection(loaded.Source),
-				SourceLoader:      SourceArtifactSelectedContractSourceLoader{RepoRoot: repo, Store: selected.(SourceArtifactSelectedContractSourceStore)},
-				AgentRuntime:      SelectedContractAgentRuntimeOptions{ExecutionPosture: executionposture.MockOnly, ProcessCapability: capability},
+				SourceArtifactFact: loaded.SourceArtifactFact,
+				ContractSelection:  runforkadmission.SelectedContractSelection(loaded.Source),
+				SourceLoader:       SourceArtifactSelectedContractSourceLoader{RepoRoot: repo, Store: selected.(SourceArtifactSelectedContractSourceStore)},
+				AgentRuntime:       SelectedContractAgentRuntimeOptions{ExecutionPosture: executionposture.MockOnly, ProcessCapability: capability},
 			}
-			before := selectedPreparationDatabaseSnapshot(t, db, backend)
+			snapshot := func() map[string]storetest.SelectedForkStorageTableSnapshot {
+				state, err := storetest.ReadSelectedForkApplicationStorageSnapshot(ctx, selected)
+				if err != nil {
+					t.Fatal(err)
+				}
+				return state
+			}
+			before := snapshot()
 			baseline := process.ActiveCount()
 			for _, test := range []struct {
 				name string
@@ -75,7 +84,7 @@ func TestSelectedForkPreparationProcessBoundaryBothStores(t *testing.T) {
 						}
 						t.Fatalf("wrong preparation disposition: prepared=%v err=%v", prepared, err)
 					}
-					if !reflect.DeepEqual(before, selectedPreparationDatabaseSnapshot(t, db, backend)) || process.ActiveCount() != baseline {
+					if !reflect.DeepEqual(before, snapshot()) || process.ActiveCount() != baseline {
 						t.Fatal("rejected preparation changed persisted facts or leaked process ownership")
 					}
 				})
@@ -87,9 +96,58 @@ func TestSelectedForkPreparationProcessBoundaryBothStores(t *testing.T) {
 			if err := prepared.Close(); err != nil {
 				t.Fatal(err)
 			}
-			if !reflect.DeepEqual(before, selectedPreparationDatabaseSnapshot(t, db, backend)) || process.ActiveCount() != baseline {
+			if !reflect.DeepEqual(before, snapshot()) || process.ActiveCount() != baseline {
 				t.Fatal("non-executable preparation mutated the store or retained process work")
 			}
+			t.Run("root-selection-frozen", func(t *testing.T) {
+				prepared, err := owner.Prepare(ctx, request)
+				if err != nil {
+					t.Fatalf("prepare before second-root admission: %v", err)
+				}
+				defer func() {
+					if err := prepared.Close(); err != nil {
+						t.Error(err)
+					}
+				}()
+				other, _ := sourceartifactfixture.Rooted(t, "other", loaded.RootedSource.Artifact())
+				if other.Admission().BundleHash() != loaded.RootedSource.Admission().BundleHash() || other.Admission().Equal(loaded.RootedSource.Admission()) {
+					t.Fatal("temporal control requires equal content under a distinct admitted root")
+				}
+				sourceartifactfixture.RequireArtifact(t, ctx, selected.(sourceartifactfixture.Writer), other.Artifact())
+				if !prepared.loadedSource.RootedSource.Admission().Equal(loaded.RootedSource.Admission()) {
+					t.Fatal("later admission retargeted the prepared source")
+				}
+				afterAdmission := snapshot()
+				if err := prepared.Close(); err != nil {
+					t.Fatal(err)
+				}
+				if !reflect.DeepEqual(afterAdmission, snapshot()) || process.ActiveCount() != baseline {
+					t.Fatal("prepared-source cleanup changed retained authority or leaked work")
+				}
+				ambiguous, err := owner.Prepare(ctx, request)
+				if ambiguous != nil {
+					if err := ambiguous.Close(); err != nil {
+						t.Error(err)
+					}
+				}
+				if !errors.Is(err, sourceartifact.ErrRootAdmissionAmbiguous) {
+					t.Fatalf("fresh unbound preparation did not refuse exact root ambiguity: %v", err)
+				}
+				bound := correlation.WithRootAdmission(correlation.WithSourceArtifactFact(ctx, loaded.SourceArtifactFact), loaded.RootedSource.Admission())
+				exact, err := owner.Prepare(bound, request)
+				if err != nil {
+					t.Fatalf("exact selected context failed after sibling admission: %v", err)
+				}
+				if !exact.loadedSource.RootedSource.Admission().Equal(loaded.RootedSource.Admission()) {
+					t.Error("exact selected context borrowed the other root")
+				}
+				if err := exact.Close(); err != nil {
+					t.Fatal(err)
+				}
+				if !reflect.DeepEqual(afterAdmission, snapshot()) || process.ActiveCount() != baseline {
+					t.Fatal("ambiguous or bound preparation changed native facts or leaked work")
+				}
+			})
 		})
 	}
 }

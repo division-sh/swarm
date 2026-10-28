@@ -1,21 +1,57 @@
 package packfixture
 
 import (
+	"os"
+	"path/filepath"
 	"testing"
 
-	"github.com/division-sh/swarm/internal/operatorchannel"
+	"github.com/division-sh/swarm/internal/packartifact"
+	"github.com/division-sh/swarm/internal/packmodel"
 	"github.com/division-sh/swarm/internal/packs"
+	"github.com/division-sh/swarm/internal/providerconnectors"
 	"github.com/division-sh/swarm/internal/providertriggers"
 	contracts "github.com/division-sh/swarm/internal/runtime/contracts"
 	"github.com/division-sh/swarm/internal/yamlsource"
+	"gopkg.in/yaml.v3"
 )
 
-// WhatsAppSessionChannel is the compiler-only descriptor shared by SDK and
-// discovery proofs. It grants no account, connection or executable authority.
-func WhatsAppSessionChannel(t testing.TB, platformSpecPath string, catalog *providertriggers.CatalogSnapshot) packs.SatisfactionPlan {
+func WhatsAppSessionProviderMembers(t testing.TB, trigger []byte, emittedEvents []string) map[string][]byte {
 	t.Helper()
-	body := []byte(`provider: whatsapp
-transport: session
+	manifest, err := yaml.Marshal(struct {
+		Version         string                 `yaml:"version"`
+		PlatformVersion string                 `yaml:"platform_version"`
+		Capabilities    packmodel.Capabilities `yaml:"capabilities"`
+	}{Version: "1.0.0", PlatformVersion: "*", Capabilities: packmodel.Capabilities{
+		Can:    packmodel.CanCapabilities{EmitEvents: emittedEvents, CallProviderActions: []string{"fixture_send"}},
+		Cannot: []string{"bypass activity_attempts"},
+	}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	return map[string][]byte{
+		"manifest.yaml": manifest,
+		"trigger.yaml":  trigger,
+		"connector.yaml": []byte(`tools:
+  fixture_send:
+    category: provider_connector
+    handler_type: in_process
+    in_process: whatsapp.send_text
+    input_schema:
+      type: object
+      additionalProperties: false
+      required: [destination, text]
+      properties:
+        destination: {type: string, minLength: 1}
+        text: {type: string, minLength: 1, maxLength: 2000}
+    output_schema:
+      type: object
+      additionalProperties: false
+      required: [id]
+      properties:
+        id: {type: string, minLength: 1}
+`,
+		),
+		"channel.yaml": []byte(`transport: session
 capabilities: {card_render: true, reply_to_reference: true, actions_as_buttons: false, actions_as_text: true, edit: false, acknowledgment: false, inbox_listing: true}
 onboarding:
   ceremony: authenticated_text_challenge
@@ -29,12 +65,12 @@ opaque_types:
   conversation_reference: {type: string, minLength: 1}
 operations:
   deliver:
-    tool: whatsapp.fixture_send
+    tool: fixture_send
     input: {destination: context.destination, text: input.presentation.text}
     output: {delivery_reference: result.id}
 events:
   text:
-    event: inbound.whatsapp.message
+    event: message
     fields:
       text: event.text
       external_account: event.external_account
@@ -43,25 +79,28 @@ events:
       provider_message_reference: event.provider_message_reference
       reply_to_message_reference: event.reply_to_message_reference
       entry_invocation: event.entry_invocation
-`)
-	manifest, err := packs.ParseChannelManifest(body)
+`),
+	}
+}
+
+// WhatsAppSessionProvider captures the authored fixture roles together. It
+// grants no account, connection, runtime root or executable authority.
+func WhatsAppSessionProvider(t testing.TB, platformSpecPath string, trigger []byte, emittedEvents []string) (*providertriggers.CatalogSnapshot, packs.SatisfactionPlan) {
+	t.Helper()
+	root := t.TempDir()
+	directory := filepath.Join(root, "whatsapp")
+	if err := os.Mkdir(directory, 0o700); err != nil {
+		t.Fatal(err)
+	}
+	for name, body := range WhatsAppSessionProviderMembers(t, trigger, emittedEvents) {
+		if err := os.WriteFile(filepath.Join(directory, name), body, 0o600); err != nil {
+			t.Fatal(err)
+		}
+	}
+	provider, err := packartifact.LoadProviderFS(os.DirFS(root), "whatsapp", PlatformVersion)
 	if err != nil {
 		t.Fatal(err)
 	}
-	pack := packs.LoadedChannelPack{Envelope: packs.Envelope{ID: "provider.whatsapp.hitl_channel", Version: "0.1.0", Type: packs.TypeChannel,
-		ManifestHash: packs.ManifestHash(body), Implements: []string{operatorchannel.InterfaceHITLChannelV2}, Provenance: packs.Provenance{Source: "external"},
-		Requires: packs.Requires{Packs: map[string]string{packs.TypeTrigger: "provider.whatsapp.input", packs.TypeConnector: "provider.whatsapp.fixture_connector"}}},
-		Manifest: manifest, Source: packs.MustPackSource("test", "active-native-input")}
-	text := contracts.MustToolInputSchema(contracts.ToolSchemaString, contracts.ToolSchemaMinLength(1))
-	presentationText := contracts.MustToolInputSchema(contracts.ToolSchemaString, contracts.ToolSchemaMinLength(1), contracts.ToolSchemaMaxLength(2000))
-	object := func(properties map[string]contracts.ToolInputSchema, required ...string) contracts.ToolInputSchema {
-		return contracts.MustToolInputSchema(contracts.ToolSchemaObject, contracts.ToolSchemaProperties(properties), contracts.ToolSchemaRequired(required...))
-	}
-	connector := packs.ConnectorPackDescriptor{Identity: packs.MustPackIdentity("provider.whatsapp.fixture_connector", "0.1.0", packs.ManifestHash([]byte("fixture-connector")), packs.TypeConnector, packs.MustPackSource("test", "active-native-input")),
-		Provider: "whatsapp", Tools: map[string]contracts.ToolSchemaEntry{"whatsapp.fixture_send": contracts.MustToolSchemaEntry(
-			contracts.WithToolCategory(contracts.ToolCategoryProviderConnector.String()), contracts.WithToolHandler(contracts.ToolHandlerInProcess),
-			contracts.WithToolSchemas(object(map[string]contracts.ToolInputSchema{"destination": text, "text": presentationText}, "destination", "text"), object(map[string]contracts.ToolInputSchema{"id": text}, "id")),
-			contracts.WithToolInProcessTarget(contracts.ToolInProcessWhatsAppSendText))}}
 	snapshot, err := yamlsource.LoadFile(platformSpecPath)
 	if err != nil {
 		t.Fatal(err)
@@ -70,13 +109,34 @@ events:
 	if err != nil {
 		t.Fatal(err)
 	}
+	triggerBody, _ := provider.Body(packmodel.BodyTrigger)
+	triggerManifest, err := providertriggers.AdmitBody(triggerBody)
+	if err != nil {
+		t.Fatal(err)
+	}
+	catalog, err := providertriggers.NewCatalogSnapshotFromAdmittedBodies(triggerManifest)
+	if err != nil {
+		t.Fatal(err)
+	}
+	connectorBody, _ := provider.Body(packmodel.BodyConnector)
+	connector, err := providerconnectors.AdmitBody(connectorBody)
+	if err != nil {
+		t.Fatal(err)
+	}
+	identity, err := packs.NewProviderBodyIdentity(connectorBody)
+	if err != nil {
+		t.Fatal(err)
+	}
 	registry, err := packs.NewInterfaceRegistry(spec)
 	if err != nil {
 		t.Fatal(err)
 	}
-	plan, err := packs.CompileChannel(registry, pack, catalog.PackDescriptors(), []packs.ConnectorPackDescriptor{connector})
+	triggerDescriptor, _ := catalog.PackDescriptorForProvider("whatsapp")
+	plan, err := packs.CompileProviderChannel(registry, provider, triggerDescriptor, packs.ConnectorPackDescriptor{
+		Identity: identity, Provider: "whatsapp", Tools: connector.Tools,
+	})
 	if err != nil {
 		t.Fatal(err)
 	}
-	return plan
+	return catalog, plan
 }

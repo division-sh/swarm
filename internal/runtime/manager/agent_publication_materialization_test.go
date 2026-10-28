@@ -15,7 +15,8 @@ import (
 
 func TestMaterializedAgentEmitPermissionRetainsDeclarationOnEveryScope(t *testing.T) {
 	root := t.TempDir()
-	writeFlowActivationFixtureFile(t, filepath.Join(root, "schema.yaml"), "name: emit-owner-proof\nstages: []\n")
+	writeFlowActivationFixtureFile(t, filepath.Join(root, "manifest.yaml"), "version: 1.0.0\nplatform_version: '*'\n")
+	writeFlowActivationFixtureFile(t, filepath.Join(root, "schema.yaml"), "stages: []\n")
 	writeFlowActivationFixtureFile(t, filepath.Join(root, "events.yaml"), "result.done:\n  owned: text\n")
 	writeFlowActivationFixtureFile(t, filepath.Join(root, "agents.yaml"), "worker:\n  role: worker\n  intent: {inline: Emit the root result.}\n  emit_events: [result.done]\n")
 	for _, flow := range []struct{ id, mode string }{{"left", "singleton"}, {"right", "template"}, {"nested/deeper", "template"}} {
@@ -23,11 +24,13 @@ func TestMaterializedAgentEmitPermissionRetainsDeclarationOnEveryScope(t *testin
 		if flow.mode == "template" {
 			shape = "instance: instance_key\n"
 		}
+		writeFlowActivationFixtureFile(t, filepath.Join(root, flow.id, "manifest.yaml"), "version: 1.0.0\nplatform_version: '*'\n")
 		writeFlowActivationFixtureFile(t, filepath.Join(root, flow.id, "schema.yaml"), fmt.Sprintf("%sstages:\n  active: {}\n", shape))
 		writeFlowActivationFixtureFile(t, filepath.Join(root, flow.id, "entities.yaml"), "item:\n  instance_key: {type: text, _unused_reason: fixture instance identity}\n")
 		writeFlowActivationFixtureFile(t, filepath.Join(root, flow.id, "events.yaml"), "result.done:\n  owned: text\n")
 		writeFlowActivationFixtureFile(t, filepath.Join(root, flow.id, "agents.yaml"), "worker:\n  role: worker\n  intent: {inline: Emit this flow's result.}\n  emit_events: [result.done]\n")
 	}
+	writeFlowActivationFixtureFile(t, filepath.Join(root, "nested", "manifest.yaml"), "version: 1.0.0\nplatform_version: '*'\n")
 	writeFlowActivationFixtureFile(t, filepath.Join(root, "nested", "schema.yaml"), "stages: []\n")
 	repo := runtimepipeline.WorkflowRepoRoot()
 	bundle, err := runtimecontracts.LoadWorkflowContractBundleWithOverrides(repo, root, runtimecontracts.DefaultPlatformSpecFile(repo))

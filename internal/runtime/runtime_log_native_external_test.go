@@ -49,7 +49,12 @@ func nativeRuntimeLogFixture(t *testing.T, backend string, artifact *sourceartif
 		selected = storetest.StartSQLiteRuntimeStore(t)
 	}
 	fact := sourceartifactfixture.FactFor(artifact)
+	rooted, err := artifact.RootedSource()
+	if err != nil {
+		t.Fatal(err)
+	}
 	ctx := correlation.WithSourceArtifactFact(context.Background(), fact)
+	ctx = correlation.WithRootAdmission(ctx, rooted.Admission())
 	ctx = authoractivity.WithScope(ctx, authoractivity.BundleScope(runtimeID, fact.BundleHash()))
 	ctx = originalRuntimeFixtureContext(t, ctx, selected)
 	original, err := agentfixture.ProcessCapability(t, ctx, selected.(agentfixture.Store))
@@ -70,7 +75,7 @@ func nativeRuntimeLogFixture(t *testing.T, backend string, artifact *sourceartif
 			return startupownership.WithProcessMutationAuthority(operation, original)
 		},
 		RequireRun: func(ctx context.Context, run string) error {
-			return storetest.MaterializeRun(ctx, selected, storetest.RunFixture{RunID: run, Origin: storetest.ScenarioSetupOrigin(), Artifact: artifact, BundleHash: artifact.BundleHash(), StartedAt: time.Now().UTC()})
+			return storetest.MaterializeRun(ctx, selected, storetest.RunFixture{RunID: run, Origin: storetest.ScenarioSetupOrigin(), Artifact: artifact, RootAdmission: rooted.Admission(), BundleHash: artifact.BundleHash(), StartedAt: time.Now().UTC()})
 		},
 		RunSnapshot: func(ctx context.Context, run string) (runlifecycle.Snapshot, error) {
 			return storetest.ReadRuntimeLogRunSnapshot(ctx, selected, run)

@@ -33,6 +33,10 @@ func TestRetainedActorAdmissionRealSnapshotBothStores(t *testing.T) {
 		t.Fatal(err)
 	}
 	source := semanticview.Wrap(bundle)
+	rooted, err := bundle.RootedSource()
+	if err != nil {
+		t.Fatal(err)
+	}
 	plans, err := store.GeneratePlatformTableDDLs(bundle.Platform)
 	if err != nil {
 		t.Fatal(err)
@@ -77,6 +81,7 @@ func TestRetainedActorAdmissionRealSnapshotBothStores(t *testing.T) {
 			fact := sourceartifactfixture.RequireArtifact(t, ctx, owner, bundle.SourceArtifact)
 			runtimeID := uuid.NewString()
 			ctx = correlation.WithSourceArtifactFact(ctx, fact)
+			ctx = correlation.WithRootAdmission(ctx, rooted.Admission())
 			ctx = correlation.WithRuntimeInstanceID(ctx, runtimeID)
 			ctx = effects.WithExecutionMode(ctx, effects.ExecutionModeLive)
 			ctx = authoractivity.WithScope(ctx, authoractivity.BundleScope(runtimeID, fact.BundleHash()))

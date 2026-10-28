@@ -1,4 +1,4 @@
-name: provider
+# fixture: provider
 pins:
   inputs:
     - provider.requested

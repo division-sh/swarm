@@ -12,6 +12,7 @@ import (
 	"github.com/division-sh/swarm/internal/runtime/pipeline"
 	"github.com/division-sh/swarm/internal/runtime/semanticview"
 	"github.com/division-sh/swarm/internal/runtime/startupownership"
+	"github.com/division-sh/swarm/internal/sourceartifact"
 	"github.com/division-sh/swarm/internal/store/testutil/agentfixture"
 	"github.com/google/uuid"
 )
@@ -20,6 +21,13 @@ import (
 // intentionally continues to use the unbound, read-only journal after reopening.
 func installActivityReplayJournal(t *testing.T, ctx context.Context, selected gateRecoveryStoreCase, bus interface{ WaitForQuiescence(context.Context) error }, pc *pipeline.PipelineCoordinator) (pipeline.ActivityAttemptJournal, func()) {
 	t.Helper()
+	rooted, err := selected.events.(interface {
+		LoadRunRootedSource(context.Context, string) (sourceartifact.RootedSource, error)
+	}).LoadRunRootedSource(ctx, correlation.RunIDFromContext(ctx))
+	if err != nil {
+		t.Fatal(err)
+	}
+	ctx = correlation.WithRootAdmission(ctx, rooted.Admission())
 	journal, release := captureActivityReplayJournal(t, ctx, selected.events.(startupownership.Store), bus)
 	if err := pc.InstallActivityJournal(journal); err != nil {
 		t.Fatal(err)
@@ -86,7 +94,15 @@ func captureActivityReplayJournal(t *testing.T, ctx context.Context, selected st
 		})
 	}
 	t.Cleanup(release)
-	set, err := agenttopology.NewSourceSetPlan([]agenttopology.SourceCoordinate{{BundleHash: fact.BundleHash()}}, nil)
+	root, present, err := correlation.RootAdmissionFromContext(ctx)
+	if err != nil || !present || root.BundleHash() != fact.BundleHash() {
+		t.Fatalf("activity proof requires its exact captured source root: present=%t error=%v", present, err)
+	}
+	coordinate, err := agenttopology.NewSourceCoordinate(root)
+	if err != nil {
+		t.Fatal(err)
+	}
+	set, err := agenttopology.NewSourceSetPlan([]agenttopology.SourceCoordinate{coordinate}, nil)
 	if err != nil {
 		t.Fatal(err)
 	}

@@ -13,8 +13,6 @@ import (
 	"testing"
 	"time"
 
-	"github.com/division-sh/swarm/internal/packs"
-	"github.com/division-sh/swarm/internal/providertriggers"
 	"github.com/division-sh/swarm/internal/runtime/correlation"
 	inbound "github.com/division-sh/swarm/internal/runtime/inboundpublication"
 	"github.com/division-sh/swarm/internal/runtime/runlifecycle"
@@ -23,7 +21,7 @@ import (
 )
 
 type nativeBusinessProcessFixture struct {
-	Backend, Location, BasePath, OperationID string
+	Backend, Location, BasePath, OperationID, RunID string
 }
 
 type nativeBusinessDeathStore struct {
@@ -66,24 +64,19 @@ func reopenNativeBusinessProcessFixture(t *testing.T, config nativeBusinessProce
 	if err != nil {
 		t.Fatal(err)
 	}
-	source := sourceartifactfixture.Require(t, context.Background(), f.selected)
-	f.ctx = correlation.WithSourceArtifactFact(context.Background(), source)
+	f.rooted, err = f.selected.LoadRunRootedSource(context.Background(), config.RunID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	source := sourceartifactfixture.FactFor(f.rooted.Artifact())
+	f.ctx = correlation.WithRootAdmission(correlation.WithSourceArtifactFact(context.Background(), source), f.rooted.Admission())
 	acquireLogoutProcessFixture(t, f, f.operation.Coordinate.RuntimeInstanceID)
 	var found bool
 	f.standing.LandingRun, found, err = f.selected.LoadLandingRun(f.ctx, runlifecycle.LiveRunScope{FlowPath: "."})
 	if err != nil || !found {
 		t.Fatalf("original native standing responsibility: found=%t %v", found, err)
 	}
-	manifest := sessionInputManifestFixture(t)
-	f.catalog, err = providertriggers.NewCatalogSnapshot(providertriggers.CatalogEntry{Manifest: manifest,
-		Identity: providertriggers.PackIdentity{ID: "provider.whatsapp.input", Version: "1.0.0", ManifestHash: packs.ManifestHash(manifest.SourceBytes()), Provenance: "test"}})
-	if err != nil {
-		t.Fatal(err)
-	}
-	f.trigger, err = f.catalog.CompileAdmission(providertriggers.CompileAdmissionRequest{Alias: "whatsapp", Provider: "whatsapp"})
-	if err != nil {
-		t.Fatal(err)
-	}
+	f.catalog, f.trigger, f.channel = capturedActiveInputChannelFixture(t, f.rooted)
 	f.source = captureSource{Coordinate: f.operation.Coordinate, CatalogGeneration: f.catalog.Generation()}
 	f.state = sessionStateFixture(t, f.basePath, f.operation.SessionAccount.ConnectionID, f.operation.SessionAccount.AccountRef)
 	f.restartBusinessConnection(t)
@@ -180,7 +173,7 @@ func TestWhatsAppNativeBusinessHandoffProcessDeathBothStores(t *testing.T) {
 				if err := f.nativeProcess.Release(f.ctx); err != nil {
 					t.Fatal(err)
 				}
-				runNativeBusinessDeathChild(t, phase, nativeBusinessProcessFixture{Backend: backend, Location: f.location, BasePath: f.basePath, OperationID: f.operation.OperationID})
+				runNativeBusinessDeathChild(t, phase, nativeBusinessProcessFixture{Backend: backend, Location: f.location, BasePath: f.basePath, OperationID: f.operation.OperationID, RunID: f.standing.RunID})
 				var err error
 				f.operation, err = f.selected.GetChannelOnboarding(context.Background(), f.operation.OperationID)
 				if err != nil {

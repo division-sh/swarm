@@ -1,4 +1,4 @@
-name: template-reply
+# fixture: template-reply
 pins:
   inputs:
     - requester.setup.requested

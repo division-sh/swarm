@@ -1,20 +1,12 @@
-name: whatsapp-session-input
-imports:
-  provider_trigger_events:
-    - provider: whatsapp
-      event: inbound.whatsapp.message
 stages:
   active: {}
 pins:
   inputs:
-    - inbound.whatsapp
+    - inbound.whatsapp.raw
+    - inbound.whatsapp.message
     - work.requested
   outputs:
     - inbound.whatsapp.message
     - work.requested
-ingress:
-  alias: reception
-  providers:
-    - provider: whatsapp
 connect:
   - {event: work.requested, from: ., to: reviews}

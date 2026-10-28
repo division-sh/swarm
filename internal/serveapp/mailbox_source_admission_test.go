@@ -2,7 +2,6 @@ package serveapp
 
 import (
 	"context"
-	"errors"
 	"reflect"
 	"strings"
 	"testing"
@@ -10,7 +9,6 @@ import (
 	"github.com/division-sh/swarm/internal/runtime/correlation"
 	"github.com/division-sh/swarm/internal/runtime/decisioncard"
 	runtimepipeline "github.com/division-sh/swarm/internal/runtime/pipeline"
-	"github.com/division-sh/swarm/internal/runtime/runlifecycle"
 	"github.com/division-sh/swarm/internal/servedparity"
 	"github.com/division-sh/swarm/internal/store/storetest"
 )
@@ -56,8 +54,7 @@ func TestMailboxSourceAdmissionBeforeReplayAndAtCommitBothStores(t *testing.T) {
 								t.Fatal(err)
 							}
 							_, replayed, err := mailboxFaultCoordinator(t, rt, cut).CommitDecisionCardMutation(f.ctx, req, mutation)
-							var missing *runlifecycle.SourceArtifactUnavailableError
-							if !errors.As(err, &missing) || missing.BundleHash != unavailable || replayed {
+							if err == nil || err.Error() != "rooted execution context does not match the exact run source root" || replayed {
 								t.Fatalf("source changed after acquisition was not rejected at commit: replay=%t err=%v", replayed, err)
 							}
 							restore()
@@ -73,9 +70,19 @@ func TestMailboxSourceAdmissionBeforeReplayAndAtCommitBothStores(t *testing.T) {
 						requireServedJSONRPCResult(t, rt.Endpoint, method, params, &result)
 						waitServedRunDeliveryQuiescence(t, rt.ReadRunDeliveries, f.base.RunID)
 						before := mailboxCompletionRunEffects(t, rt, f.base.RunID)
-						for _, ctx := range []context.Context{context.Background(), correlation.WithSourceArtifactFact(f.ctx, mustServeTestPersistedSourceArtifactFact(unavailable))} {
-							_, replayed, err := mailboxTokenlessMutation(ctx, rt, owner, req, params)
-							if err == nil || replayed || !strings.Contains(strings.ToLower(err.Error()), "source") {
+						foreignCause := "rooted context does not match its content fact"
+						if kind == "notice" {
+							foreignCause = "source"
+						}
+						for _, rejected := range []struct {
+							ctx   context.Context
+							cause string
+						}{
+							{context.Background(), "source"},
+							{correlation.WithSourceArtifactFact(f.ctx, mustServeTestPersistedSourceArtifactFact(unavailable)), foreignCause},
+						} {
+							_, replayed, err := mailboxTokenlessMutation(rejected.ctx, rt, owner, req, params)
+							if err == nil || replayed || !strings.Contains(strings.ToLower(err.Error()), rejected.cause) {
 								t.Fatalf("completion bypassed missing/foreign source admission: replay=%t err=%v", replayed, err)
 							}
 						}

@@ -6,7 +6,10 @@ import (
 	"fmt"
 	"reflect"
 	"testing"
+	"testing/fstest"
 
+	"github.com/division-sh/swarm/internal/packartifact"
+	"github.com/division-sh/swarm/internal/packmodel"
 	"github.com/division-sh/swarm/internal/providertriggers"
 	"github.com/google/uuid"
 	"go.mau.fi/whatsmeow/proto/waCommon"
@@ -19,13 +22,13 @@ import (
 // webhook policy deliberately remains authenticated: projection cannot admit it.
 func incomingNormalizationFixture(t *testing.T) providertriggers.Manifest {
 	t.Helper()
-	source := `provider: whatsapp
+	source := `transport: webhook
 payload_object_required: true
 secret: {required: true}
 signature: {type: token_equality, header: X-Fixture-Signature}
 delivery_id: {json_path: $.provider_message_reference, required: true}
 event_type: {json_path: $.kind, required: true}
-event_name: {literal: inbound.whatsapp}
+event_name: {literal: raw}
 normalized_events:
 `
 	for _, kind := range []string{"message", "edit", "revoke"} {
@@ -34,7 +37,7 @@ normalized_events:
 			"edit":    "exists: [text, target_message_reference]",
 			"revoke":  "exists: [target_message_reference], absent: [text]",
 		}[kind]
-		source += fmt.Sprintf(`  - event: inbound.whatsapp.%s
+		source += fmt.Sprintf(`  - event: %s
     when: {equals: {kind: %s}, %s}
     author_subject: {type: chat, field: conversation_reference}
     fields:
@@ -74,7 +77,15 @@ normalized_events:
 `
 		}
 	}
-	manifest, err := providertriggers.ParseManifest([]byte(source))
+	provider, err := packartifact.LoadProviderFS(fstest.MapFS{
+		"whatsapp/manifest.yaml": {Data: []byte("version: 1.0.0\nplatform_version: '*'\ncapabilities: {can: {emit_events: [raw, message, edit, revoke], verify_secret: webhook_signing_secret}, cannot: [execute code]}\n")},
+		"whatsapp/trigger.yaml":  {Data: []byte(source)},
+	}, "whatsapp", "0.7.0")
+	if err != nil {
+		t.Fatal(err)
+	}
+	body, _ := provider.Body(packmodel.BodyTrigger)
+	manifest, err := providertriggers.AdmitBody(body)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -180,7 +191,7 @@ func TestWhatsAppIncomingAcceptedPackRefusesMalformedPayload(t *testing.T) {
 	}
 	_, err = manifest.ProjectNormalizedPayload(body)
 	var normalization providertriggers.NormalizationError
-	if !errors.As(err, &normalization) || normalization.Path != "conversation_scope" {
+	if !errors.As(err, &normalization) || normalization.Path != "$.conversation_scope" {
 		t.Fatalf("lost exact schema error: %v", err)
 	}
 	if _, err := (providertriggers.Manifest{}).ProjectNormalizedPayload([]byte(`{}`)); err == nil {

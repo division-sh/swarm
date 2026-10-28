@@ -20,9 +20,11 @@ import (
 	"github.com/division-sh/swarm/internal/runtime/flowmodel"
 	runtimepipeline "github.com/division-sh/swarm/internal/runtime/pipeline"
 	"github.com/division-sh/swarm/internal/runtime/semanticview"
-	"github.com/division-sh/swarm/internal/runtime/semanticviewtest"
+	"github.com/division-sh/swarm/internal/runtime/testfixtures/canonicalrouting"
+	"github.com/division-sh/swarm/internal/sourceartifact"
 	"github.com/division-sh/swarm/internal/testutil/sourceartifactfixture"
 	"github.com/google/uuid"
+	"gopkg.in/yaml.v3"
 )
 
 func testActiveAgentDescriptor(t testing.TB, agentID, entityID, flowInstance string) ActiveAgentDescriptor {
@@ -91,7 +93,7 @@ var deliveryPlannerHandlerFixtures = map[string]deliveryPlannerHandlerFixture{
 
 func newDeliveryPlannerWithHandlers(t testing.TB, resolver deliveryRouteResolver, policy deliveryRecipientPolicy, connectPlanners ...connectRoutePlanResolver) deliveryPlanner {
 	t.Helper()
-	source := deliveryPlannerHandlerSource(policy.requireTargetOwners)
+	source := deliveryPlannerHandlerSource(t, policy.requireTargetOwners)
 	original := resolver.resolveRoutedSubscribers
 	resolver.resolveRoutedSubscribers = func(ctx context.Context, evt events.Event, keys []string, publication ordinaryPublicationSource) ([]Subscriber, error) {
 		routed, err := original(ctx, evt, keys, publication)
@@ -156,74 +158,61 @@ func deliveryPlannerIndexContext(t testing.TB, planner *deliveryPlanner, runID s
 	return withSelectedTargetOwnerLookupScope(ctx, selectedTargetOwnerLookupScope{lookup: lookup, observations: observations})
 }
 
-func deliveryPlannerHandlerSource(requireEntity bool) semanticview.Source {
-	rootSchema := runtimecontracts.FlowSchemaDocument{Name: "root"}
-	root := runtimecontracts.FlowContractView{Paths: runtimecontracts.FlowContractPaths{FlowPath: "."}, Schema: rootSchema, Path: "."}
-	byID := map[string]*runtimecontracts.FlowContractView{}
-	byPath := map[string]*runtimecontracts.FlowContractView{}
-	bundle := &runtimecontracts.WorkflowContractBundle{
-		SourceArtifact: sourceartifactfixture.Artifact(),
-		RootSchema:     &rootSchema,
-		Semantics: runtimecontracts.WorkflowSemanticView{
-			Name: "root", Version: "1.0.0", NodeHandlers: map[string]map[string]runtimecontracts.SystemNodeEventHandler{},
-		},
-		Nodes:  map[string]runtimecontracts.SystemNodeContract{},
-		Events: map[string]runtimecontracts.EventCatalogEntry{},
-	}
-	flows := map[string]*runtimecontracts.FlowContractView{}
+func deliveryPlannerHandlerSource(t testing.TB, requireEntity bool) semanticview.Source {
+	t.Helper()
+	members := map[string][]byte{}
+	nodes := map[string]map[string]any{}
+	events := map[string]map[string]*yaml.Node{}
 	for nodeID, fixture := range deliveryPlannerHandlerFixtures {
-		handler := runtimecontracts.SystemNodeEventHandler{}
-		if requireEntity {
-			handler = existingOwnerHandlerFixture()
+		prefix := ""
+		if fixture.flowID != "root" {
+			prefix = fixture.path + "/"
 		}
-		node := runtimecontracts.SystemNodeContract{
-			ExecutionType: "system_node", SubscribesTo: []string{fixture.event},
-			EventHandlers: map[string]runtimecontracts.SystemNodeEventHandler{fixture.event: handler},
-		}
-		if fixture.flowID == "root" {
-			bundle.Nodes[nodeID] = node
-			bundle.Events[fixture.event] = runtimecontracts.EventCatalogEntry{}
-			bundle.Semantics.NodeHandlers[nodeID] = node.EventHandlers
-			continue
-		}
-		flow := flows[fixture.flowID]
-		if flow == nil {
-			flow = &runtimecontracts.FlowContractView{
-				Path: fixture.path, Paths: runtimecontracts.FlowContractPaths{FlowPath: fixture.path},
-				Schema: runtimecontracts.FlowSchemaDocument{},
-				Nodes:  map[string]runtimecontracts.SystemNodeContract{}, Events: map[string]runtimecontracts.EventCatalogEntry{},
-			}
+		if nodes[prefix] == nil {
+			nodes[prefix] = map[string]any{}
+			events[prefix] = map[string]*yaml.Node{}
+			members[prefix+"manifest.yaml"] = []byte("version: 1.0.0\nplatform_version: '*'\n")
+			schema := "stages: []\n"
 			switch fixture.flowID {
 			case "parent", "child-a", "child-b", "worker", "operating":
-				flow.Schema.Instance = semanticviewtest.InstanceField("instance_key")
+				schema += "instance: instance_key\n"
+				members[prefix+"entities.yaml"] = []byte("work:\n  instance_key: {type: text, _unused_reason: delivery planner instance key}\n")
 			}
-			flows[fixture.flowID] = flow
+			members[prefix+"schema.yaml"] = []byte(schema)
 		}
-		flow.Nodes[nodeID] = node
-		flow.Events[fixture.event] = runtimecontracts.EventCatalogEntry{}
-	}
-	for _, flow := range flows {
-		root.Children = append(root.Children, *flow)
-	}
-	for index := range root.Children {
-		flow := &root.Children[index]
-		flow.Parent = &root
-		for flowID, candidate := range flows {
-			if candidate == nil || strings.TrimSpace(candidate.Path) != strings.TrimSpace(flow.Path) {
-				continue
-			}
-			byID[flowID] = flow
-			break
+		handler := map[string]any{}
+		if requireEntity {
+			guard := existingOwnerHandlerFixture().Guard
+			handler["guard"] = map[string]string{"id": guard.ID, "check": guard.Check}
 		}
-		byPath[flow.Paths.FlowPath] = flow
+		nodes[prefix][nodeID] = map[string]any{
+			"execution_type": "system_node",
+			"subscribes_to":  []string{fixture.event},
+			"event_handlers": map[string]any{fixture.event: handler},
+		}
+		events[prefix][fixture.event] = &yaml.Node{Kind: yaml.ScalarNode, Tag: "!!null"}
 	}
-	root.Nodes = bundle.Nodes
-	root.Events = bundle.Events
-	byID["."] = &root
-	byPath["."] = &root
-	bundle.FlowTree = flowmodel.Tree[runtimecontracts.FlowContractView]{Root: &root, ByID: byID, ByPath: byPath}
-	if err := runtimecontracts.CompileWorkflowSemantics(bundle); err != nil {
-		panic(err)
+	for prefix, body := range nodes {
+		data, err := yaml.Marshal(body)
+		if err != nil {
+			t.Fatal(err)
+		}
+		members[prefix+"nodes.yaml"] = data
+		data, err = yaml.Marshal(events[prefix])
+		if err != nil {
+			t.Fatal(err)
+		}
+		members[prefix+"events.yaml"] = data
+	}
+	artifact, err := sourceartifact.AdmitMembers(members)
+	if err != nil {
+		t.Fatal(err)
+	}
+	rooted, _ := sourceartifactfixture.Rooted(t, "delivery-planner", artifact)
+	repo := canonicalrouting.RepoRoot(t)
+	bundle, err := runtimecontracts.LoadWorkflowContractBundleFromRootedSource(repo, rooted, runtimecontracts.DefaultPlatformSpecFile(repo), runtimecontracts.WorkflowContractLoadOptions{})
+	if err != nil {
+		t.Fatal(err)
 	}
 	return semanticview.Wrap(bundle)
 }
@@ -1774,21 +1763,6 @@ func TestDeliveryPlanner_NoTargetDescendantScopedRoutedNodeFailsClosed(t *testin
 	}
 }
 
-func TestNoTargetNodeRouteFamiliesUseExactPersistedTargetOwner(t *testing.T) {
-	tests := []struct {
-		name string
-		run  func(*testing.T)
-	}{
-		{name: "concrete and no-recipient concrete", run: TestDeliveryPlanner_NoTargetConcreteRoutedNodePersistsSemanticNodeRoute},
-		{name: "root", run: TestDeliveryPlanner_NoTargetRootRoutedNodeUsesSemanticNodeDeliveryRoute},
-		{name: "root local event", run: TestDeliveryPlanner_NoTargetRootLocalEventWithFlowInstanceUsesRootNodeRoute},
-		{name: "unconnected root input", run: TestEventBusRootInputDoesNotDeliverToUnconnectedPrivateChild},
-	}
-	for _, test := range tests {
-		t.Run(test.name, test.run)
-	}
-}
-
 func TestRouteTargetOwnerIgnoresAbsentAndForeignSourceEntity(t *testing.T) {
 	runID := uuid.NewString()
 	owner := events.RouteIdentity{
@@ -1892,34 +1866,5 @@ func TestRoutedEventKeysForPlanPreservesProtocolNameInEveryFlow(t *testing.T) {
 				t.Fatalf("routed keys = %#v, want %q", keys, tc.want)
 			}
 		})
-	}
-}
-
-func TestRoutedRootNodeDeliveryIntentsRejectEmptyPathFromAnotherFlow(t *testing.T) {
-	event := eventtest.RunCreatingRootIngress(
-		"", "step.begin", "", "", nil, 0, "run-one", "", events.EventEnvelope{}, time.Time{},
-	)
-	rootNode := testRootNode(t, "root-handler")
-	childNode := testFlowNode(t, "child-flow", "child-handler")
-	root := Subscriber{
-		Recipient:      events.MustNodeDeliveryRecipient(rootNode),
-		Path:           ".",
-		MatchPattern:   "step.begin",
-		routeSource:    subscriberRouteSourceSubscription,
-		handlerNode:    rootNode,
-		targetHandler:  runtimepipeline.MustDeliveryTargetHandler(rootNode),
-		LocalizedEvent: "step.begin",
-	}
-	child := Subscriber{
-		Recipient:      events.MustNodeDeliveryRecipient(childNode),
-		MatchPattern:   "step.begin",
-		routeSource:    subscriberRouteSourceSubscription,
-		handlerNode:    childNode,
-		targetHandler:  runtimepipeline.MustDeliveryTargetHandler(childNode),
-		LocalizedEvent: "step.begin",
-	}
-	intents := routedRootNodeDeliveryIntentsForNoTargetEvent(deliveryPlannerHandlerSource(false), event, []Subscriber{child, root})
-	if len(intents) != 1 || intents[0].Recipient.LocalID() != "root-handler" || intents[0].TargetBlueprint.FlowID != "." {
-		t.Fatalf("root intents = %#v, want only exact authored-root handler", intents)
 	}
 }

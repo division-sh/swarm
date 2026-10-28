@@ -14,7 +14,6 @@ import (
 	"github.com/division-sh/swarm/internal/events"
 	"github.com/division-sh/swarm/internal/packadmission"
 	"github.com/division-sh/swarm/internal/packartifact"
-	"github.com/division-sh/swarm/internal/providertriggers"
 	runtimepkg "github.com/division-sh/swarm/internal/runtime"
 	runtimebus "github.com/division-sh/swarm/internal/runtime/bus"
 	runtimeactors "github.com/division-sh/swarm/internal/runtime/core/actors"
@@ -219,6 +218,10 @@ func newProcessIngressEventStore(t testing.TB, source semanticview.Source, runID
 	if !found || bundle.SourceArtifact == nil {
 		t.Fatal("transport construction requires its admitted source")
 	}
+	rooted, err := bundle.RootedSource()
+	if err != nil {
+		t.Fatal(err)
+	}
 	fact := mustServeTestEphemeralSourceArtifactFact(bundle.SourceArtifact.BundleHash())
 	flowID := semanticview.RootExecutionFlowID(source)
 	identity, err := runtimeflowidentity.StandingForGeneration(source, flowID, runID)
@@ -250,7 +253,7 @@ func newProcessIngressEventStore(t testing.TB, source semanticview.Source, runID
 	if entity, declared := entityruntime.ResolveForFlow(source, flowID); declared {
 		header.EntityType = entity.EntityType
 	}
-	run := runlifecycle.Snapshot{RunID: runID, State: runlifecycle.StateLive, Origin: runlifecycle.DeploymentRunOrigin(), BundleHash: fact.BundleHash(), StartedAt: at}
+	run := runlifecycle.Snapshot{RunID: runID, State: runlifecycle.StateLive, Origin: runlifecycle.DeploymentRunOrigin(), BundleHash: fact.BundleHash(), RootReference: rooted.Admission().Reference(), StartedAt: at}
 	receipt := runtimepipeline.FlowConstructionPublicationEvidence{Identity: identity, WorkflowVersion: header.WorkflowVersion, BundleHash: fact.BundleHash()}
 	readiness := runtimepipeline.DynamicFlowRuntimeReadiness{
 		Plan:            runtimepipeline.DynamicFlowRuntimeReadinessPlan{Identity: identity, RunID: runID, BundleHash: fact.BundleHash(), WorkflowVersion: source.WorkflowVersion(), ExecutionMode: executionmode.Live},
@@ -369,10 +372,19 @@ func completeServeTestPackContext(t testing.TB, contextDef runtimepkg.BundleCont
 	if !ok || bundle == nil || bundle.PackInventory == nil {
 		return contextDef
 	}
-	catalog, _, err := providertriggers.NewCatalogSnapshotFromInventory(
-		bundle.PackInventory,
-		strings.TrimSpace(bundle.Platform.Platform.Version),
-	)
+	rooted, err := bundle.RootedSource()
+	if err != nil {
+		t.Fatal(err)
+	}
+	providers, err := packadmission.AdmitProviderSource(rooted, bundle.Platform)
+	if err != nil {
+		t.Fatal(err)
+	}
+	scope, err := providers.Scope(semanticview.RootExecutionFlowID(contextDef.Source))
+	if err != nil {
+		t.Fatal(err)
+	}
+	catalog, err := scope.TriggerCatalog()
 	if err != nil {
 		t.Fatalf("derive test runtime-context provider-trigger catalog: %v", err)
 	}
@@ -382,6 +394,7 @@ func completeServeTestPackContext(t testing.TB, contextDef runtimepkg.BundleCont
 	}
 	contextDef.PackInventoryDigest = bundle.PackInventory.Digest()
 	contextDef.ProviderTriggerGeneration = catalog.Generation()
+	contextDef.ProviderTriggerCatalog = catalog
 	contextDef.InstalledTriggerSubjects = subjects
 	return contextDef
 }

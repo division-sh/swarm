@@ -2,6 +2,8 @@ package providertriggers
 
 import (
 	"encoding/json"
+	"errors"
+	"fmt"
 	"strings"
 	"testing"
 
@@ -33,7 +35,7 @@ func TestNormalizedEventManifestPublishesRawAndTypedFlatEvent(t *testing.T) {
 	if len(delivery.Events) != 2 {
 		t.Fatalf("events = %#v, want raw plus normalized", delivery.Events)
 	}
-	if delivery.Events[0].Kind != OutputKindRaw || delivery.Events[0].Name != "inbound.telegram" {
+	if delivery.Events[0].Kind != OutputKindRaw || delivery.Events[0].Name != "inbound.telegram.raw" {
 		t.Fatalf("raw event = %#v", delivery.Events[0])
 	}
 	normalized := delivery.Events[1]
@@ -53,14 +55,12 @@ func TestNormalizedEventManifestPublishesRawAndTypedFlatEvent(t *testing.T) {
 
 func TestCompiledPackPlanOwnsNormalizedOutputAuthorization(t *testing.T) {
 	manifest := normalizedEventTestManifest()
-	identity := PackIdentity{
-		ID: "provider.telegram", Version: "1.0.0",
-		ManifestHash: "sha256:" + strings.Repeat("c", 64), Provenance: "platform",
-	}
-	catalog, err := NewCatalogSnapshot(CatalogEntry{Manifest: manifest.mustAdmit(), Identity: identity, Source: "test"})
+	catalog, err := NewCatalogSnapshotFromAdmittedBodies(manifest.mustAdmit())
 	if err != nil {
 		t.Fatalf("NewCatalogSnapshot: %v", err)
 	}
+	entry, _ := catalog.EntryByProvider("telegram")
+	identity := entry.Identity
 	plan, err := catalog.CompileAdmission(CompileAdmissionRequest{
 		Alias: "chat", Provider: "telegram",
 		Declaration: AdmissionDeclaration{Acknowledge: UnsignedWebhookAcknowledgement},
@@ -143,7 +143,7 @@ func TestNormalizedEventManifestUnmatchedPayloadPublishesRawOnly(t *testing.T) {
 func TestNormalizedEventManifestRejectsOverlappingBranchesAtLoad(t *testing.T) {
 	manifest := normalizedEventTestManifest()
 	manifest.NormalizedEvents = append(manifest.NormalizedEvents, NormalizedEventManifest{
-		Event: "inbound.telegram.message_copy",
+		Event: "message_copy",
 		Fields: map[string]NormalizedEventFieldProjection{
 			"text": {From: "message.text", Schema: runtimecontracts.MustToolInputSchema(runtimecontracts.ToolSchemaKind("string"))},
 		},
@@ -162,7 +162,7 @@ func TestNormalizedEventPlanRejectsForcedRuntimeMultiMatch(t *testing.T) {
 	manifest := normalizedEventTestManifest()
 	plan := compileTriggerTestPlan(t, manifest.mustAdmit())
 	manifest.NormalizedEvents = append(manifest.NormalizedEvents, NormalizedEventManifest{
-		Event: "inbound.telegram.message_copy",
+		Event: "message_copy",
 		Fields: map[string]NormalizedEventFieldProjection{
 			"text": {From: "message.text", Schema: runtimecontracts.MustToolInputSchema(runtimecontracts.ToolSchemaKind("string"))},
 		},
@@ -186,14 +186,9 @@ func TestNormalizedEventPlanRejectsForcedRuntimeMultiMatch(t *testing.T) {
 func TestAdmittedSemanticDigestRetainsRedactedConsumedValues(t *testing.T) {
 	manifest := normalizedEventTestManifest()
 	manifest.RedactKeys = []string{"text"}
-	catalog, err := NewCatalogSnapshot(CatalogEntry{
-		Manifest: manifest.mustAdmit(),
-		Identity: PackIdentity{
-			ID: "provider.telegram", Version: "1.0.0",
-			ManifestHash: "sha256:" + strings.Repeat("c", 64), Provenance: "platform",
-		},
-		Source: "test",
-	})
+	catalog, err := NewCatalogSnapshotFromAdmittedBodies(
+		manifest.mustAdmit(),
+	)
 	if err != nil {
 		t.Fatalf("NewCatalogSnapshot: %v", err)
 	}
@@ -256,29 +251,11 @@ normalized_events:
 	}
 }
 
-func TestNormalizedEventManifestRejectsMalformedEventNamesAtLoad(t *testing.T) {
-	for _, eventName := range []string{
-		"inbound.telegram.",
-		"inbound.telegram.TextMessage",
-		"inbound.telegram.text-message",
-		"inbound.telegram..text_message",
-		"inbound.telegram.text message",
-	} {
-		t.Run(eventName, func(t *testing.T) {
-			manifest := normalizedEventTestManifest()
-			manifest.NormalizedEvents[0].Event = eventName
-			if err := manifest.Validate(); err == nil || !strings.Contains(err.Error(), "valid canonical event name") {
-				t.Fatalf("Validate(%q) error = %v, want canonical event-name rejection", eventName, err)
-			}
-		})
-	}
-}
-
 func TestNormalizedEventManifestRejectsRawTemplateCollision(t *testing.T) {
 	manifest := normalizedEventTestManifest()
 	manifest.Provider = "github"
-	manifest.EventName = EventNameManifest{Template: "inbound.github.{event_type}"}
-	manifest.NormalizedEvents[0].Event = "inbound.github.push"
+	manifest.EventName = EventNameManifest{Template: "{event_type}"}
+	manifest.NormalizedEvents[0].Event = "push"
 	err := manifest.Validate()
 	if err == nil || !strings.Contains(err.Error(), "collides with the raw event-name policy") {
 		t.Fatalf("Validate error = %v, want raw-template collision rejection", err)
@@ -301,9 +278,10 @@ func TestNormalizedEventPlanRejectsCompositeSchemaMismatchesWithPackProvenance(t
 		schema   runtimecontracts.ToolInputSchema
 		value    any
 		wantPart string
+		wantPath string
 	}{
-		{name: "array", schema: runtimecontracts.MustToolInputSchema(runtimecontracts.ToolSchemaKind("array"), runtimecontracts.ToolSchemaItems(runtimecontracts.MustToolInputSchema(runtimecontracts.ToolSchemaKind("string")))), value: []any{"ok", json.Number("2")}, wantPart: "$[1] must be string"},
-		{name: "object", schema: runtimecontracts.MustToolInputSchema(runtimecontracts.ToolSchemaObject, runtimecontracts.ToolSchemaProperties(map[string]runtimecontracts.ToolInputSchema{"id": runtimecontracts.MustToolInputSchema(runtimecontracts.ToolSchemaInteger)}), runtimecontracts.ToolSchemaRequired("id")), value: map[string]any{"id": "not-an-integer"}, wantPart: "$.id must be integer"},
+		{name: "array", schema: runtimecontracts.MustToolInputSchema(runtimecontracts.ToolSchemaKind("array"), runtimecontracts.ToolSchemaItems(runtimecontracts.MustToolInputSchema(runtimecontracts.ToolSchemaKind("string")))), value: []any{"ok", json.Number("2")}, wantPart: "$[1] must be string", wantPath: "$.raw[1]"},
+		{name: "object", schema: runtimecontracts.MustToolInputSchema(runtimecontracts.ToolSchemaObject, runtimecontracts.ToolSchemaProperties(map[string]runtimecontracts.ToolInputSchema{"id": runtimecontracts.MustToolInputSchema(runtimecontracts.ToolSchemaInteger)}), runtimecontracts.ToolSchemaRequired("id")), value: map[string]any{"id": "not-an-integer"}, wantPart: "$.id must be integer", wantPath: "$.raw.id"},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			manifest := normalizedEventTestManifest()
@@ -320,7 +298,7 @@ func TestNormalizedEventPlanRejectsCompositeSchemaMismatchesWithPackProvenance(t
 				},
 				Source: "test",
 			}
-			catalog, err := NewCatalogSnapshot(entry)
+			catalog, err := NewCatalogSnapshotFromAdmittedBodies(entry.Manifest)
 			if err != nil {
 				t.Fatalf("NewCatalogSnapshot: %v", err)
 			}
@@ -342,9 +320,31 @@ func TestNormalizedEventPlanRejectsCompositeSchemaMismatchesWithPackProvenance(t
 					},
 				},
 			})
-			for _, want := range []string{"provider.telegram", "version=1.0.0", "manifest_hash=sha256:", "inbound.telegram.text_message", "path \"message.raw\"", tc.wantPart} {
+			for _, want := range []string{"pack telegram", "version=1.0.0", "manifest_hash=sha256:", "inbound.telegram.text_message", "path " + fmt.Sprintf("%q", tc.wantPath), tc.wantPart} {
 				if err == nil || !strings.Contains(err.Error(), want) {
 					t.Fatalf("Accept error = %v, want %q", err, want)
+				}
+			}
+			var violation *eventschema.Violation
+			if !errors.As(err, &violation) {
+				t.Fatalf("projection lost its typed schema cause: %v", err)
+			}
+			for _, wrapped := range []error{err, fmt.Errorf("outer: %w", err), errors.Join(err, err)} {
+				if path, valid := NormalizedInputValidationPath(wrapped); !valid || path != tc.wantPath {
+					t.Fatalf("normalized validation path=%q valid=%t error=%v", path, valid, wrapped)
+				}
+			}
+			independent := errors.New("independent cleanup/store failure")
+			var internal Error
+			if !errors.As(err, &internal) {
+				t.Fatal("projection lost its provider error")
+			}
+			internal.Status = 503
+			for _, other := range []error{badRequest("invalid request"), NormalizationError{Path: tc.wantPath, Cause: violation.Error()},
+				Error{Status: 400, cause: &NormalizationError{Path: tc.wantPath, Cause: "conversion failed"}},
+				internal, errors.Join(err, independent), errors.Join(independent, err), fmt.Errorf("outer: %w", errors.Join(err, independent))} {
+				if path, valid := NormalizedInputValidationPath(other); valid {
+					t.Fatalf("non-validation failure acquired schema classification: path=%q error=%v", path, other)
 				}
 			}
 		})
@@ -481,11 +481,9 @@ func TestNormalizedEventFiniteSemanticsAreDeeplyImmutable(t *testing.T) {
 		Convert: normalizedFieldConvertTextEnumMap, Values: map[string]string{"private": "direct"},
 	}
 	manifest.NormalizedEvents[0].When.OneOf = map[string][]string{"message.chat.type": {"private"}}
-	catalog, err := NewCatalogSnapshot(CatalogEntry{
-		Manifest: manifest.mustAdmit(),
-		Identity: PackIdentity{ID: "provider.telegram", Version: "1.0.0", ManifestHash: "sha256:" + strings.Repeat("c", 64), Provenance: "platform"},
-		Source:   "test",
-	})
+	catalog, err := NewCatalogSnapshotFromAdmittedBodies(
+		manifest.mustAdmit(),
+	)
 	if err != nil {
 		t.Fatalf("NewCatalogSnapshot: %v", err)
 	}
@@ -520,7 +518,7 @@ func TestNormalizedEventOneOfDoesNotProveBranchExclusivity(t *testing.T) {
 	manifest := normalizedEventTestManifest()
 	manifest.NormalizedEvents[0].When.OneOf = map[string][]string{"message.chat.type": {"private"}}
 	copy := manifest.NormalizedEvents[0]
-	copy.Event = "inbound.telegram.message_copy"
+	copy.Event = "message_copy"
 	copy.When.OneOf = map[string][]string{"message.chat.type": {"group"}}
 	manifest.NormalizedEvents = append(manifest.NormalizedEvents, copy)
 	if err := manifest.Validate(); err == nil || !strings.Contains(err.Error(), "can match the same payload") {
@@ -538,7 +536,7 @@ func TestNormalizedEventCatalogDerivesSchemaAndCapabilities(t *testing.T) {
 		t.Fatalf("required = %q", got)
 	}
 	capabilities := DerivedCapabilities(manifest.mustAdmit())
-	if got := strings.Join(capabilities.Can.EmitEvents, ","); got != "inbound.telegram,inbound.telegram.text_message" {
+	if got := strings.Join(capabilities.Can.EmitEvents, ","); got != "inbound.telegram.raw,inbound.telegram.text_message" {
 		t.Fatalf("emit events = %q", got)
 	}
 }
@@ -613,7 +611,7 @@ additionalProperties:
 		Identity: PackIdentity{ID: "provider.telegram", Version: "1.0.0", ManifestHash: "sha256:" + strings.Repeat("c", 64), Provenance: "platform"},
 		Source:   "test",
 	}
-	catalog, err := NewCatalogSnapshot(entry)
+	catalog, err := NewCatalogSnapshotFromAdmittedBodies(entry.Manifest)
 	if err != nil {
 		t.Fatalf("NewCatalogSnapshot: %v", err)
 	}
@@ -693,9 +691,9 @@ func normalizedEventTestManifest() triggerFixture {
 		PayloadObjectRequired: true,
 		DeliveryID:            ValueSource{Literal: "delivery-1", Required: true},
 		EventType:             ValueSource{Literal: "update", Required: true},
-		EventName:             EventNameManifest{Literal: "inbound.telegram"},
+		EventName:             EventNameManifest{Literal: "raw"},
 		NormalizedEvents: []NormalizedEventManifest{{
-			Event: "inbound.telegram.text_message",
+			Event: "text_message",
 			Fields: map[string]NormalizedEventFieldProjection{
 				"chat_id":    {From: "message.chat.id", Schema: runtimecontracts.MustToolInputSchema(runtimecontracts.ToolSchemaKind("string")), Convert: runtimecontracts.FieldProjectionConvertNumberToText},
 				"text":       {From: "message.text", Schema: runtimecontracts.MustToolInputSchema(runtimecontracts.ToolSchemaKind("string"))},

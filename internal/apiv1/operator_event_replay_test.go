@@ -27,6 +27,7 @@ import (
 	runtimeactors "github.com/division-sh/swarm/internal/runtime/core/actors"
 	"github.com/division-sh/swarm/internal/runtime/core/agentidentity"
 	"github.com/division-sh/swarm/internal/runtime/core/identitytest"
+	"github.com/division-sh/swarm/internal/runtime/correlation"
 	runtimedelivery "github.com/division-sh/swarm/internal/runtime/deliverylifecycle"
 	"github.com/division-sh/swarm/internal/runtime/executionmode"
 	"github.com/division-sh/swarm/internal/runtime/executionposture"
@@ -34,6 +35,7 @@ import (
 	runtimemanager "github.com/division-sh/swarm/internal/runtime/manager"
 	runtimepipelineobligation "github.com/division-sh/swarm/internal/runtime/pipelineobligation"
 	"github.com/division-sh/swarm/internal/runtime/semanticview"
+	"github.com/division-sh/swarm/internal/sourceartifact"
 	"github.com/division-sh/swarm/internal/store"
 	"github.com/division-sh/swarm/internal/store/storetest"
 	eventtestsql "github.com/division-sh/swarm/internal/store/testsql"
@@ -46,9 +48,10 @@ import (
 const operatorReplayRunID = "00000000-0000-4000-8000-000000002279"
 
 func TestOperatorEventReplayPublishesDistinctReplayEventAuditAndIdempotency(t *testing.T) {
-	ctx := testAuthorActivityContext(context.Background())
+	ctx := testAuthorActivityContextForSource(context.Background(), runStartTestSourceArtifactFact())
 	pg := storetest.StartPostgresRuntimeStore(t)
 	bus := eventReplayTestBus(t, pg)
+	ctx = admittedAPICompiledSourceContext(t, ctx, pg, semanticview.Wrap(runStartTestBundle(t, "scan.requested")))
 	seedActiveOperatorReplayAgent(t, ctx, pg, "agent-a")
 	seedActiveOperatorReplayAgent(t, ctx, pg, "agent-b")
 	chA := subscribeOperatorReplayAgent(t, bus, "agent-a")
@@ -127,9 +130,10 @@ func TestOperatorReplayMockOnlyRejectsLiveOriginalBeforeMutation(t *testing.T) {
 		}},
 	} {
 		t.Run(replay.name, func(t *testing.T) {
-			ctx := testAuthorActivityContext(context.Background())
+			ctx := testAuthorActivityContextForSource(context.Background(), runStartTestSourceArtifactFact())
 			pg := storetest.StartPostgresRuntimeStore(t)
 			bus := eventReplayTestBus(t, pg)
+			ctx = admittedAPICompiledSourceContext(t, ctx, pg, semanticview.Wrap(runStartTestBundle(t, "scan.requested")))
 			seedActiveOperatorReplayAgent(t, ctx, pg, "agent-a")
 			original := seedReplayableOperatorEvent(t, ctx, pg, "scan.requested", []string{"agent-a"}, runtimedelivery.StatusDelivered)
 			if original.ExecutionMode != "live" {
@@ -271,8 +275,10 @@ func TestOperatorEventReplayDispatchesCompleteCanonicalSnapshotParity(t *testing
 	} {
 		for _, routeShape := range routeShapes {
 			t.Run(tc.name+"/"+routeShape.name, func(t *testing.T) {
-				ctx := testAuthorActivityContext(context.Background())
+				ctx := testAuthorActivityContextForSource(context.Background(), runStartTestSourceArtifactFact())
 				f := tc.open(t, ctx)
+				source := completeOperatorReplaySource(t)
+				ctx = admittedAPICompiledSourceContext(t, context.Background(), f.store, source)
 				ctx = originalAPIFixtureContext(t, ctx, f.store)
 				runID := uuid.NewString()
 				const agentID = "complete-replay-agent"
@@ -294,7 +300,7 @@ func TestOperatorEventReplayDispatchesCompleteCanonicalSnapshotParity(t *testing
 						Type: "stub", Model: "regular", ExecutionMode: "live", ResolvedLLMBackend: "anthropic", Config: []byte(`{}`), Subscriptions: []string{"scan.requested"},
 					}),
 					Status: "active", HiredBy: "test", StartedAt: createdAt,
-				}, runStartTestSourceArtifactFact()); err != nil {
+				}, mustAPITestSourceArtifactFact(runStartTestBundleHashForSource(source))); err != nil {
 					t.Fatalf("UpsertAgent(%s): %v", agentID, err)
 				}
 				auditIdentity := runtimebustest.IdentityForRun(t, runID, "complete-replay-auditor", "audit-flow/instance")
@@ -306,13 +312,13 @@ func TestOperatorEventReplayDispatchesCompleteCanonicalSnapshotParity(t *testing
 							Type: "stub", Model: "regular", ExecutionMode: "live", ResolvedLLMBackend: "anthropic", Config: []byte(`{}`), Subscriptions: []string{"scan.requested"},
 						}),
 						Status: "active", HiredBy: "test", StartedAt: createdAt,
-					}, runStartTestSourceArtifactFact()); err != nil {
+					}, mustAPITestSourceArtifactFact(runStartTestBundleHashForSource(source))); err != nil {
 						t.Fatalf("UpsertAgent(%s): %v", auditIdentity.AgentID(), err)
 					}
 				}
 				authority := admitOperatorReplayReceiverGeneration(t, ctx, f.store, runID)
 				bus, err := newScopedAPITestEventBus(t, f.store, runtimebus.EventBusOptions{
-					ContractBundle: completeOperatorReplaySource(t), DeliveryAuthority: authority,
+					ContractBundle: source, DeliveryAuthority: authority, SourceArtifactFact: mustAPITestSourceArtifactFact(runStartTestBundleHashForSource(source)),
 				})
 				if err != nil {
 					t.Fatalf("NewEventBusWithOptions: %v", err)
@@ -496,8 +502,10 @@ func TestOperatorReplayPreservesFailedEligibilityAndEveryExactRouteSiblingParity
 		},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
-			ctx := testAuthorActivityContext(context.Background())
+			ctx := testAuthorActivityContextForSource(context.Background(), runStartTestSourceArtifactFact())
 			f := tc.open(t, ctx)
+			source := completeOperatorReplaySource(t)
+			ctx = admittedAPICompiledSourceContext(t, context.Background(), f.store, source)
 			ctx = originalAPIFixtureContext(t, ctx, f.store)
 			runID := uuid.NewString()
 			const agentID = "route-sibling-replay-agent"
@@ -515,12 +523,12 @@ func TestOperatorReplayPreservesFailedEligibilityAndEveryExactRouteSiblingParity
 					Config: []byte(`{}`), Subscriptions: []string{"scan.requested"},
 				}),
 				Status: "active", HiredBy: "test", StartedAt: createdAt,
-			}, runStartTestSourceArtifactFact()); err != nil {
+			}, mustAPITestSourceArtifactFact(runStartTestBundleHashForSource(source))); err != nil {
 				t.Fatalf("UpsertAgent(%s): %v", identity, err)
 			}
 			authority := admitOperatorReplayReceiverGeneration(t, ctx, f.store, runID)
 			bus, err := newScopedAPITestEventBus(t, f.store, runtimebus.EventBusOptions{
-				ContractBundle: semanticview.Wrap(runStartTestBundle("scan.requested")), DeliveryAuthority: authority,
+				ContractBundle: source, DeliveryAuthority: authority, SourceArtifactFact: mustAPITestSourceArtifactFact(runStartTestBundleHashForSource(source)),
 			})
 			if err != nil {
 				t.Fatalf("NewEventBusWithOptions: %v", err)
@@ -709,9 +717,15 @@ func TestOpaqueMissingEventIDReturnsNotFoundAcrossOperatorConsumersParity(t *tes
 		},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
-			ctx := testAuthorActivityContext(context.Background())
+			ctx := testAuthorActivityContextForSource(context.Background(), runStartTestSourceArtifactFact())
 			f := tc.open(t, ctx)
-			if _, err := f.store.EnsureSourceArtifactWithData(ctx, authorActivityTestSourceArtifact, durabledata.Catalog{BundleHash: runStartTestBundleHash}); err != nil {
+			source := completeOperatorReplaySource(t)
+			ctx = admittedAPICompiledSourceContext(t, context.Background(), f.store, source)
+			bundle, ok := semanticview.Bundle(source)
+			if !ok {
+				t.Fatal("missing captured replay source")
+			}
+			if _, err := f.store.EnsureSourceArtifactWithData(ctx, bundle.SourceArtifact, durabledata.Catalog{BundleHash: bundle.SourceArtifact.BundleHash()}); err != nil {
 				t.Fatalf("admit replay fixture source: %v", err)
 			}
 			seedActiveOperatorReplayAgent(t, ctx, f.store, "agent-a")
@@ -719,7 +733,7 @@ func TestOpaqueMissingEventIDReturnsNotFoundAcrossOperatorConsumersParity(t *tes
 				t.Fatalf("operator reader error = %v, want ErrEventNotFound", err)
 			}
 			bus, err := newScopedAPITestEventBus(t, f.store, runtimebus.EventBusOptions{
-				ContractBundle: semanticview.Wrap(runStartTestBundle("scan.requested")),
+				ContractBundle: source, SourceArtifactFact: sourceArtifactFactForTestBundle(t, bundle),
 			})
 			if err != nil {
 				t.Fatalf("NewEventBusWithOptions: %v", err)
@@ -767,7 +781,15 @@ func admitOperatorReplayReceiverGeneration(t *testing.T, ctx context.Context, se
 	if err != nil || !found {
 		t.Fatalf("replay receiver source plan: found=%t err=%v", found, err)
 	}
-	grant, err := agentfixture.AdmitGeneration(t, ctx, fixture, plan, agenttopology.SourceCoordinate{BundleHash: runStartTestBundleHash})
+	root, present, err := correlation.RootAdmissionFromContext(ctx)
+	if err != nil || !present {
+		t.Fatalf("replay receiver root admission: present=%t err=%v", present, err)
+	}
+	coordinate, err := agenttopology.NewSourceCoordinate(root)
+	if err != nil {
+		t.Fatal(err)
+	}
+	grant, err := agentfixture.AdmitGeneration(t, ctx, fixture, plan, coordinate)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -791,7 +813,7 @@ func admitOperatorReplayReceiverGeneration(t *testing.T, ctx context.Context, se
 	if _, err := grant.AdmitExecution(ctx); err != nil {
 		t.Fatal(err)
 	}
-	authority, err := runtimedelivery.NewNormalExecutionAuthority(runStartTestSourceArtifactFact(), binding.GenerationGrantID, binding.RuntimeGeneration)
+	authority, err := runtimedelivery.NewNormalExecutionAuthority(mustAPITestSourceArtifactFact(root.BundleHash()), binding.GenerationGrantID, binding.RuntimeGeneration)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -817,20 +839,18 @@ func completeOperatorReplayTestHandler(t *testing.T, owner completeOperatorRepla
 
 func completeOperatorReplaySource(t *testing.T) semanticview.Source {
 	t.Helper()
-	bundle := runStartTestBundle("scan.requested")
-	producer := runtimecontracts.FlowContractView{
-		Path: "source-flow", Paths: runtimecontracts.FlowContractPaths{FlowPath: "source-flow"},
-		Events: map[string]runtimecontracts.EventCatalogEntry{"scan.requested": {}},
+	members := map[string][]byte{}
+	for _, entry := range runStartTestArtifact("scan.requested").Entries() {
+		members[entry.Label()] = entry.Bytes()
 	}
-	bundle.FlowTree.Root.Children = append(bundle.FlowTree.Root.Children, producer)
-	for i := range bundle.FlowTree.Root.Children {
-		flow := &bundle.FlowTree.Root.Children[i]
-		bundle.FlowTree.ByID[flow.Path] = flow
-	}
-	if err := runtimecontracts.CompileWorkflowSemantics(bundle); err != nil {
+	members["source-flow/manifest.yaml"] = []byte("version: 1.0.0\nplatform_version: '*'\n")
+	members["source-flow/schema.yaml"] = []byte("stages: []\n")
+	members["source-flow/events.yaml"] = []byte("scan.requested:\n")
+	artifact, err := sourceartifact.AdmitMembers(members)
+	if err != nil {
 		t.Fatal(err)
 	}
-	return semanticview.Wrap(bundle)
+	return semanticview.Wrap(loadAPIAuthoredBundle(t, artifact))
 }
 
 type diagnosingReplayPublisher struct {
@@ -1090,15 +1110,23 @@ func TestEventReplayAuditPayloadOmitsAbsentTargetlessEntity(t *testing.T) {
 
 func seedCompleteReplayRun(t testing.TB, ctx context.Context, selected storetest.RunFixtureStore, runID string, startedAt time.Time) {
 	t.Helper()
+	root, present, err := correlation.RootAdmissionFromContext(ctx)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !present {
+		t.Fatal("complete replay fixture requires its admitted root")
+	}
 	storetest.RequireRun(t, ctx, selected, storetest.RunFixture{Origin: storetest.ScenarioSetupOrigin(),
-		RunID: runID, StartedAt: startedAt, BundleHash: runStartTestBundleHash,
+		RunID: runID, StartedAt: startedAt, BundleHash: root.BundleHash(), RootAdmission: root,
 	})
 }
 
 func TestOperatorEventReplayStoresIdempotencyBeforeAuditPublishReadiness(t *testing.T) {
-	ctx := testAuthorActivityContext(context.Background())
+	ctx := testAuthorActivityContextForSource(context.Background(), runStartTestSourceArtifactFact())
 	pg := storetest.StartPostgresRuntimeStore(t)
 	inner := eventReplayTestBus(t, pg)
+	ctx = admittedAPICompiledSourceContext(t, ctx, pg, semanticview.Wrap(runStartTestBundle(t, "scan.requested")))
 	publisher := &failOnceAuditEventPublisher{inner: inner, err: errors.New("audit publish temporarily unavailable")}
 	seedActiveOperatorReplayAgent(t, ctx, pg, "agent-a")
 	ch := subscribeOperatorReplayAgent(t, inner, "agent-a")
@@ -1137,9 +1165,10 @@ func TestOperatorEventReplayStoresIdempotencyBeforeAuditPublishReadiness(t *test
 }
 
 func TestOperatorEventReplayStoresIdempotencyBeforeDirectPublishFanoutError(t *testing.T) {
-	ctx := testAuthorActivityContext(context.Background())
+	ctx := testAuthorActivityContextForSource(context.Background(), runStartTestSourceArtifactFact())
 	pg := storetest.StartPostgresRuntimeStore(t)
 	bus := eventReplayTestBus(t, pg)
+	ctx = admittedAPICompiledSourceContext(t, ctx, pg, semanticview.Wrap(runStartTestBundle(t, "scan.requested")))
 	seedActiveOperatorReplayAgent(t, ctx, pg, "agent-a")
 	ch := subscribeOperatorReplayAgent(t, bus, "agent-a")
 	defer runtimebustest.Unsubscribe(bus, "agent-a")
@@ -1187,9 +1216,10 @@ func TestOperatorEventReplayStoresIdempotencyBeforeDirectPublishFanoutError(t *t
 
 func TestOperatorEventReplaySubsetAndFailClosedCases(t *testing.T) {
 	t.Run("subset targets only requested original subscriber", func(t *testing.T) {
-		ctx := testAuthorActivityContext(context.Background())
+		ctx := testAuthorActivityContextForSource(context.Background(), runStartTestSourceArtifactFact())
 		pg := storetest.StartPostgresRuntimeStore(t)
 		bus := eventReplayTestBus(t, pg)
+		ctx = admittedAPICompiledSourceContext(t, ctx, pg, semanticview.Wrap(runStartTestBundle(t, "scan.requested")))
 		seedActiveOperatorReplayAgent(t, ctx, pg, "agent-a")
 		seedActiveOperatorReplayAgent(t, ctx, pg, "agent-b")
 		chA := subscribeOperatorReplayAgent(t, bus, "agent-a")
@@ -1225,9 +1255,10 @@ func TestOperatorEventReplaySubsetAndFailClosedCases(t *testing.T) {
 	})
 
 	t.Run("zero original agent delivery history", func(t *testing.T) {
-		ctx := testAuthorActivityContext(context.Background())
+		ctx := testAuthorActivityContextForSource(context.Background(), runStartTestSourceArtifactFact())
 		pg := storetest.StartPostgresRuntimeStore(t)
 		bus := eventReplayTestBus(t, pg)
+		ctx = admittedAPICompiledSourceContext(t, ctx, pg, semanticview.Wrap(runStartTestBundle(t, "scan.requested")))
 		original := seedReplayableOperatorEvent(t, ctx, pg, "scan.requested", nil, runtimedelivery.StatusDelivered)
 		handler := eventReplayTestHandler(t, pg, bus)
 		resp := rpcCall(t, handler, eventReplayBody(original.EventID, nil, "idem-empty"))
@@ -1240,9 +1271,10 @@ func TestOperatorEventReplaySubsetAndFailClosedCases(t *testing.T) {
 	})
 
 	t.Run("pending node-only delivery is not replay eligible and does not mutate", func(t *testing.T) {
-		ctx := testAuthorActivityContext(context.Background())
+		ctx := testAuthorActivityContextForSource(context.Background(), runStartTestSourceArtifactFact())
 		pg := storetest.StartPostgresRuntimeStore(t)
 		bus := eventReplayTestBus(t, pg)
+		ctx = admittedAPICompiledSourceContext(t, ctx, pg, semanticview.Wrap(runStartTestBundle(t, "scan.requested")))
 		eventID := uuid.NewString()
 		runID := uuid.NewString()
 		ctx = originalAPIFixtureContext(t, ctx, pg)
@@ -1292,9 +1324,10 @@ func TestOperatorEventReplaySubsetAndFailClosedCases(t *testing.T) {
 	})
 
 	t.Run("requested subscriber was not original", func(t *testing.T) {
-		ctx := testAuthorActivityContext(context.Background())
+		ctx := testAuthorActivityContextForSource(context.Background(), runStartTestSourceArtifactFact())
 		pg := storetest.StartPostgresRuntimeStore(t)
 		bus := eventReplayTestBus(t, pg)
+		ctx = admittedAPICompiledSourceContext(t, ctx, pg, semanticview.Wrap(runStartTestBundle(t, "scan.requested")))
 		seedActiveOperatorReplayAgent(t, ctx, pg, "agent-a")
 		seedActiveOperatorReplayAgent(t, ctx, pg, "agent-b")
 		subscribeOperatorReplayAgent(t, bus, "agent-a")
@@ -1314,9 +1347,10 @@ func TestOperatorEventReplaySubsetAndFailClosedCases(t *testing.T) {
 	})
 
 	t.Run("original subscriber no longer deliverable", func(t *testing.T) {
-		ctx := testAuthorActivityContext(context.Background())
+		ctx := testAuthorActivityContextForSource(context.Background(), runStartTestSourceArtifactFact())
 		pg := storetest.StartPostgresRuntimeStore(t)
 		bus := eventReplayTestBus(t, pg)
+		ctx = admittedAPICompiledSourceContext(t, ctx, pg, semanticview.Wrap(runStartTestBundle(t, "scan.requested")))
 		seedActiveOperatorReplayAgent(t, ctx, pg, "agent-a")
 		original := seedReplayableOperatorEvent(t, ctx, pg, "scan.requested", []string{"agent-a"}, runtimedelivery.StatusDelivered)
 		handler := eventReplayTestHandler(t, pg, bus)
@@ -1334,9 +1368,10 @@ func TestOperatorEventReplaySubsetAndFailClosedCases(t *testing.T) {
 
 	for _, status := range []runtimedelivery.Status{runtimedelivery.StatusPending, runtimedelivery.StatusInProgress} {
 		t.Run("nonterminal original delivery is not eligible "+string(status), func(t *testing.T) {
-			ctx := testAuthorActivityContext(context.Background())
+			ctx := testAuthorActivityContextForSource(context.Background(), runStartTestSourceArtifactFact())
 			pg := storetest.StartPostgresRuntimeStore(t)
 			bus := eventReplayTestBus(t, pg)
+			ctx = admittedAPICompiledSourceContext(t, ctx, pg, semanticview.Wrap(runStartTestBundle(t, "scan.requested")))
 			seedActiveOperatorReplayAgent(t, ctx, pg, "agent-a")
 			subscribeOperatorReplayAgent(t, bus, "agent-a")
 			defer runtimebustest.Unsubscribe(bus, "agent-a")
@@ -1369,9 +1404,10 @@ func TestOperatorEventReplaySubsetAndFailClosedCases(t *testing.T) {
 }
 
 func TestOperatorAgentReplayProjectsSingletonEventReplayOwner(t *testing.T) {
-	ctx := testAuthorActivityContext(context.Background())
+	ctx := testAuthorActivityContextForSource(context.Background(), runStartTestSourceArtifactFact())
 	pg := storetest.StartPostgresRuntimeStore(t)
 	bus := eventReplayTestBus(t, pg)
+	ctx = admittedAPICompiledSourceContext(t, ctx, pg, semanticview.Wrap(runStartTestBundle(t, "scan.requested")))
 	seedActiveOperatorReplayAgent(t, ctx, pg, "agent-a")
 	seedActiveOperatorReplayAgent(t, ctx, pg, "agent-b")
 	chA := subscribeOperatorReplayAgent(t, bus, "agent-a")
@@ -1441,9 +1477,10 @@ func TestOperatorAgentReplayProjectsSingletonEventReplayOwner(t *testing.T) {
 
 func TestOperatorAgentReplayFailClosedCases(t *testing.T) {
 	t.Run("requested agent was not original subscriber", func(t *testing.T) {
-		ctx := testAuthorActivityContext(context.Background())
+		ctx := testAuthorActivityContextForSource(context.Background(), runStartTestSourceArtifactFact())
 		pg := storetest.StartPostgresRuntimeStore(t)
 		bus := eventReplayTestBus(t, pg)
+		ctx = admittedAPICompiledSourceContext(t, ctx, pg, semanticview.Wrap(runStartTestBundle(t, "scan.requested")))
 		seedActiveOperatorReplayAgent(t, ctx, pg, "agent-a")
 		seedActiveOperatorReplayAgent(t, ctx, pg, "agent-b")
 		subscribeOperatorReplayAgent(t, bus, "agent-a")
@@ -1464,9 +1501,10 @@ func TestOperatorAgentReplayFailClosedCases(t *testing.T) {
 	})
 
 	t.Run("original agent no longer deliverable", func(t *testing.T) {
-		ctx := testAuthorActivityContext(context.Background())
+		ctx := testAuthorActivityContextForSource(context.Background(), runStartTestSourceArtifactFact())
 		pg := storetest.StartPostgresRuntimeStore(t)
 		bus := eventReplayTestBus(t, pg)
+		ctx = admittedAPICompiledSourceContext(t, ctx, pg, semanticview.Wrap(runStartTestBundle(t, "scan.requested")))
 		seedActiveOperatorReplayAgent(t, ctx, pg, "agent-a")
 		original := seedReplayableOperatorEvent(t, ctx, pg, "scan.requested", []string{"agent-a"}, runtimedelivery.StatusDelivered)
 		handler := eventReplayTestHandler(t, pg, bus)
@@ -1484,9 +1522,10 @@ func TestOperatorAgentReplayFailClosedCases(t *testing.T) {
 	})
 
 	t.Run("nonterminal original delivery is not eligible", func(t *testing.T) {
-		ctx := testAuthorActivityContext(context.Background())
+		ctx := testAuthorActivityContextForSource(context.Background(), runStartTestSourceArtifactFact())
 		pg := storetest.StartPostgresRuntimeStore(t)
 		bus := eventReplayTestBus(t, pg)
+		ctx = admittedAPICompiledSourceContext(t, ctx, pg, semanticview.Wrap(runStartTestBundle(t, "scan.requested")))
 		seedActiveOperatorReplayAgent(t, ctx, pg, "agent-a")
 		subscribeOperatorReplayAgent(t, bus, "agent-a")
 		defer runtimebustest.Unsubscribe(bus, "agent-a")
@@ -1512,14 +1551,16 @@ func TestOperatorEventReplayQueuesWhenDispatchGated(t *testing.T) {
 		{name: "run dispatch blocked", opts: runtimebus.EventBusOptions{RunDispatchGate: blockedRunDispatchGate{}}},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
-			ctx := testAuthorActivityContext(context.Background())
+			ctx := testAuthorActivityContextForSource(context.Background(), runStartTestSourceArtifactFact())
 			pg := storetest.StartPostgresRuntimeStore(t)
 			opts := tc.opts
-			opts.ContractBundle = semanticview.Wrap(runStartTestBundle("scan.requested"))
+			opts.ContractBundle = semanticview.Wrap(runStartTestBundle(t, "scan.requested"))
+			opts.SourceArtifactFact = runStartTestSourceArtifactFact()
 			bus, err := newScopedAPITestEventBus(t, pg, opts)
 			if err != nil {
 				t.Fatalf("NewEventBusWithOptions: %v", err)
 			}
+			ctx = admittedAPICompiledSourceContext(t, ctx, pg, semanticview.Wrap(runStartTestBundle(t, "scan.requested")))
 			seedActiveOperatorReplayAgent(t, ctx, pg, "agent-a")
 			ch := subscribeOperatorReplayAgent(t, bus, "agent-a")
 			defer runtimebustest.Unsubscribe(bus, "agent-a")
@@ -1562,7 +1603,8 @@ func (blockedRunDispatchGate) QueueableRunDispatchParked(context.Context, string
 func eventReplayTestBus(t *testing.T, pg *store.PostgresStore) *runtimebus.EventBus {
 	t.Helper()
 	bus, err := newScopedAPITestEventBus(t, pg, runtimebus.EventBusOptions{
-		ContractBundle: semanticview.Wrap(runStartTestBundle("scan.requested")),
+		ContractBundle:     semanticview.Wrap(runStartTestBundle(t, "scan.requested")),
+		SourceArtifactFact: runStartTestSourceArtifactFact(),
 	})
 	if err != nil {
 		t.Fatalf("NewEventBusWithOptions: %v", err)
@@ -1610,7 +1652,7 @@ func eventReplayTestHandlerWithPosture(t *testing.T, pg *store.PostgresStore, bu
 			AgentConversations: pg,
 			Idempotency:        pg,
 			Events:             bus,
-			Source:             semanticview.Wrap(runStartTestBundle("scan.requested")),
+			Source:             semanticview.Wrap(runStartTestBundle(t, "scan.requested")),
 			Bundle: runtimecontracts.BundleIdentity{
 				WorkflowName:    "review",
 				WorkflowVersion: "1.0.0",

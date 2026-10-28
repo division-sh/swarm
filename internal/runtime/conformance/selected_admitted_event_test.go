@@ -45,7 +45,8 @@ func TestIssue2655EventSelectorsKeepPreparedRevisionBothStores(t *testing.T) {
 					operation = &runfork.ForkOperationRequest{
 						OperationID: uuid.NewString(), Actor: "prepared-state-revision", IdempotencyKey: uuid.NewString(), TransportHash: "prepared-state-revision",
 						SourceRunID: sourceRun, TargetBundleHash: f.runtime.sourceArtifactFact.BundleHash(),
-						ContractSelection: runfork.RunForkContractSelection{Mode: runfork.RunForkContractSelectionModeSelectedContracts},
+						TargetRootReference: notifyAllChildrenRootedSource(t, f.source).Admission().Reference(),
+						ContractSelection:   runfork.RunForkContractSelection{Mode: runfork.RunForkContractSelectionModeSelectedContracts},
 					}
 				}
 				prepared, err := owner.Prepare(ctx, runforkexecution.SelectedContractExecutionRequest{
@@ -174,7 +175,8 @@ func TestIssue2655EventOperationSelectorCorrespondenceBothStores(t *testing.T) {
 				selection := runfork.RunForkContractSelection{Mode: runfork.RunForkContractSelectionModeSelectedContracts}
 				operation := runfork.ForkOperationRequest{
 					OperationID: uuid.NewString(), Actor: "original-selector-proof", IdempotencyKey: uuid.NewString(), TransportHash: "event-selector",
-					SourceRunID: sourceRun, ForkEventID: at, TargetBundleHash: f.runtime.sourceArtifactFact.BundleHash(), ContractSelection: selection,
+					SourceRunID: sourceRun, ForkEventID: at, TargetBundleHash: f.runtime.sourceArtifactFact.BundleHash(),
+					TargetRootReference: notifyAllChildrenRootedSource(t, f.source).Admission().Reference(), ContractSelection: selection,
 				}
 				_, hash, err := operation.Canonical()
 				if err != nil {

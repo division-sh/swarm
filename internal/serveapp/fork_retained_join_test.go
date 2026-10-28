@@ -13,6 +13,7 @@ import (
 	runtimebus "github.com/division-sh/swarm/internal/runtime/bus"
 	"github.com/division-sh/swarm/internal/runtime/core/identitytest"
 	"github.com/division-sh/swarm/internal/runtime/core/timeridentity"
+	"github.com/division-sh/swarm/internal/runtime/correlation"
 	"github.com/division-sh/swarm/internal/runtime/engine"
 	"github.com/division-sh/swarm/internal/runtime/failures"
 	"github.com/division-sh/swarm/internal/runtime/joinruntime"
@@ -248,6 +249,10 @@ func requireServedRetainedJoinForkSuccess(t *testing.T, ctx context.Context, rea
 	if !ok {
 		t.Fatal("retained join success requires the original selected store owner")
 	}
+	root, present, err := correlation.RootAdmissionFromContext(ctx)
+	if err != nil || !present || root.BundleHash() != bundleHash {
+		t.Fatalf("retained join target root: present=%t error=%v", present, err)
+	}
 	selection := runfork.RunForkContractSelection{Mode: runfork.RunForkContractSelectionModeSelectedContracts}
 	prepared, err := owner.Prepare(ctx, runforkexecution.SelectedContractExecutionRequest{
 		SourceRunID: request.SourceRunID, At: request.At, ExpectedBundleHash: bundleHash,
@@ -255,7 +260,7 @@ func requireServedRetainedJoinForkSuccess(t *testing.T, ctx context.Context, rea
 		ForkOperation: &runfork.ForkOperationRequest{
 			OperationID: uuid.NewString(), Actor: "retained-join-proof", IdempotencyKey: "retained-join-materialization",
 			TransportHash: "retained-join-proof", SourceRunID: request.SourceRunID, ForkEventID: request.At,
-			TargetBundleHash: bundleHash, ContractSelection: selection,
+			TargetBundleHash: bundleHash, TargetRootReference: root.Reference(), ContractSelection: selection,
 		},
 		SourceLoader: runforkexecution.SourceArtifactSelectedContractSourceLoader{
 			RepoRoot: repoRootForTest(), Store: selected.SourceArtifactStore(),

@@ -12,8 +12,10 @@ import (
 	"github.com/division-sh/swarm/internal/events"
 	"github.com/division-sh/swarm/internal/events/eventtest"
 	runtimeidentity "github.com/division-sh/swarm/internal/runtime/core/identity"
+	runtimecorrelation "github.com/division-sh/swarm/internal/runtime/correlation"
 	runtimefailures "github.com/division-sh/swarm/internal/runtime/failures"
 	"github.com/division-sh/swarm/internal/store/internal/backend/transactiontest"
+	"github.com/division-sh/swarm/internal/testutil/sourceartifactfixture"
 	"github.com/google/uuid"
 )
 
@@ -22,6 +24,9 @@ func TestAPIEventStoragePreservesWholeStoreCountsLineageAndNativeSnapshotBothSto
 		t.Run(backend.name, func(t *testing.T) {
 			fixture, ctx := backend.open(t), testAuthorActivityContext()
 			ctx = originalStoreFixtureContext(t, ctx, fixture.store)
+			rooted, _ := sourceartifactfixture.Rooted(t, "fixture", sourceartifactfixture.Artifact())
+			sourceartifactfixture.RequireArtifact(t, ctx, fixture.store.(sourceartifactfixture.Writer), rooted.Artifact())
+			ctx = runtimecorrelation.WithRootAdmission(ctx, rooted.Admission())
 			at := time.Now().UTC().Truncate(time.Microsecond)
 			original := eventtest.RunCreatingRootIngress(uuid.NewString(), "scan.requested", "gateway", "", []byte(`{"value":1}`), 0, uuid.NewString(), "", events.EventEnvelope{}, at)
 			replay := eventtest.Child(uuid.NewString(), "scan.requested", "gateway", "", []byte(`{"value":1}`), 1, original, events.EventEnvelope{}, at.Add(time.Second))
@@ -143,6 +148,9 @@ func TestAPILatestNamedEventIdentityPreservesPhysicalOrderAndGlobalScopeBothStor
 		t.Run(backend.name, func(t *testing.T) {
 			fixture, ctx := backend.open(t), testAuthorActivityContext()
 			ctx = originalStoreFixtureContext(t, ctx, fixture.store)
+			rooted, _ := sourceartifactfixture.Rooted(t, "fixture", sourceartifactfixture.Artifact())
+			sourceartifactfixture.RequireArtifact(t, ctx, fixture.store.(sourceartifactfixture.Writer), rooted.Artifact())
+			ctx = runtimecorrelation.WithRootAdmission(ctx, rooted.Admission())
 			at := time.Now().UTC().Truncate(time.Microsecond)
 			first := eventtest.RunCreatingRootIngress(uuid.NewString(), "scan.requested", "gateway", "", []byte(`{}`), 0, uuid.NewString(), "", events.EventEnvelope{}, at)
 			second := eventtest.RunCreatingRootIngress(uuid.NewString(), "scan.requested", "gateway", "", []byte(`{}`), 0, uuid.NewString(), "", events.EventEnvelope{}, at.Add(time.Second))
@@ -182,6 +190,9 @@ func TestAPIEventAcknowledgmentCountsPreserveNativeScopesBothStores(t *testing.T
 		t.Run(backend.name, func(t *testing.T) {
 			fixture, ctx := backend.open(t), testAuthorActivityContext()
 			ctx = originalStoreFixtureContext(t, ctx, fixture.store)
+			rooted, _ := sourceartifactfixture.Rooted(t, "fixture", sourceartifactfixture.Artifact())
+			sourceartifactfixture.RequireArtifact(t, ctx, fixture.store.(sourceartifactfixture.Writer), rooted.Artifact())
+			ctx = runtimecorrelation.WithRootAdmission(ctx, rooted.Admission())
 			event := eventtest.RunCreatingRootIngress(uuid.NewString(), "ack.observation", "gateway", "", []byte(`{}`), 0, uuid.NewString(), "", events.EventEnvelope{}, time.Now().UTC())
 			if err := commitSemanticPipelineProcessedEventFixture(ctx, fixture.store, event); err != nil {
 				t.Fatal(err)

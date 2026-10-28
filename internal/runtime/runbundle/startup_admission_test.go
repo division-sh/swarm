@@ -67,9 +67,10 @@ func TestAdmitPinnedSourcesUsesExactActiveSourceOwner(t *testing.T) {
 			calls := 0
 			reader := admissionAvailabilityReader(func(context.Context) ([]Availability, error) {
 				calls++
-				active := Availability{RunID: "ordinary-run", Status: state, BundleHash: hash, SourceArtifactPresent: true}
+				active := Availability{RunID: "ordinary-run", Status: state, BundleHash: hash, RootReference: first.Admission().Reference(), RootAdmissionPresent: true, SourceArtifactPresent: true}
 				if mismatch {
 					active.BundleHash = other
+					active.RootReference = second.Admission().Reference()
 				}
 				return []Availability{active}, nil
 			})

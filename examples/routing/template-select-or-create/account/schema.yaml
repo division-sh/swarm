@@ -1,4 +1,4 @@
-name: account
+# fixture: account
 instance: account_id
 pins:
   inputs:

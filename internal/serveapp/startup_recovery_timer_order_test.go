@@ -144,8 +144,7 @@ func TestComposedStartupWithholdsStandingTimerPublicationUntilRecoveryOnBothStor
 					root = fixture
 					// Native timer coordinates use microsecond precision: 1ns is
 					// due at construction, without sleeping or editing store rows.
-					writeWorkflowValidationFixtureFile(t, filepath.Join(root, "telegram-ingress/schema.yaml"), `name: telegram-ingress
-stages:
+					writeWorkflowValidationFixtureFile(t, filepath.Join(root, "schema.yaml"), `stages:
   warming:
     timers:
       - id: warmup
@@ -167,15 +166,16 @@ stages:
     final: true
 pins:
   inputs:
-    - inbound.telegram
+    - inbound.telegram.text_message
   outputs:
     - inbound.telegram.text_message
-ingress:
-  alias: chat
-  providers:
-    - provider: telegram
-      signing_secret: webhook_signing.telegram
-`)
+connect:
+  - event: inbound.telegram.text_message
+    from: .
+    to: telegram-chat
+    resolution: select-or-create
+`,
+					)
 				} else {
 					root = canonicalrouting.CopyClockDeployment(t, sourceCase == "child_clock")
 					barrier.eventType = "poll.tick"
@@ -183,7 +183,8 @@ ingress:
 						barrier.eventType = "clock/poll.tick"
 					}
 					if sourceCase == "partial_clock_receipt" {
-						writeWorkflowValidationFixtureFile(t, filepath.Join(root, "schema.yaml"), "name: clock-export\nstages: []\nschedules:\n  first: {every: 1h, emit: poll.tick}\n  second: {every: 1h, emit: poll.tick}\npins:\n  outputs: [poll.tick]\n")
+						writeWorkflowValidationFixtureFile(t, filepath.Join(root, "manifest.yaml"), "version: 1.0.0\nplatform_version: '*'\n")
+						writeWorkflowValidationFixtureFile(t, filepath.Join(root, "schema.yaml"), "stages: []\nschedules:\n  first: {every: 1h, emit: poll.tick}\n  second: {every: 1h, emit: poll.tick}\npins:\n  outputs: [poll.tick]\n")
 					}
 				}
 				loaded, err := loadServeRuntimeBundle(ctx, repoRootForTest(), stores.SourceArtifactStore(), cliapp.CLISourcePaths{
@@ -192,7 +193,7 @@ ingress:
 				if err != nil {
 					t.Fatal(err)
 				}
-				credentials := processIngressCredentialStore{"telegram_bot_token": "timer-test-token", "webhook_signing.telegram": "timer-test-secret"}
+				credentials := processIngressCredentialStore{"telegram.telegram_bot_token": "timer-test-token", "telegram.webhook_signing_secret": "timer-test-secret"}
 				binding, err := createServeToolGatewayBinding(&net.TCPAddr{IP: net.ParseIP("127.0.0.1"), Port: 8081})
 				if err != nil {
 					t.Fatal(err)
@@ -209,7 +210,7 @@ ingress:
 					UseStartupRecovery: true,
 					ExecutionPosture:   executionposture.MockOnly, Ctx: ctx, Stores: persistence, Config: cfg, Loaded: loaded,
 					WorkspaceBackend: cliapp.WorkspaceBackendSelection{Backend: "host"}, EnableToolGateway: true, ToolGatewayBinding: binding,
-					ProviderTriggerCatalog: testProviderTriggerCatalog(t), ProcessWorkOwner: process, RuntimeInstanceID: instance,
+					ProcessWorkOwner: process, RuntimeInstanceID: instance,
 					Credentials: credentials, ProviderCredentials: credentials,
 					Options: cliapp.ServeOptions{TestLLMRuntime: servedNoopLLMRuntime{}, TestLifecycleProbe: barrier, ShutdownGrace: 5 * time.Second},
 				})
@@ -289,11 +290,11 @@ ingress:
 					t.Fatal("selected timer activation owner is required")
 				}
 				if workflowCase {
-					child, err := flowidentity.StandingForGeneration(candidate.loaded.source, "telegram-ingress", frontierRun)
+					instance, err := flowidentity.StandingForGeneration(candidate.loaded.source, ".", frontierRun)
 					if err != nil {
 						t.Fatal(err)
 					}
-					dormant, err = timerReader.ListWorkflowTimerActivations(ctx, frontierRun, child.EntityID, true)
+					dormant, err = timerReader.ListWorkflowTimerActivations(ctx, frontierRun, instance.EntityID, true)
 					if err != nil || len(dormant) != 1 {
 						t.Fatalf("initial/adopted registration omitted durable timer: %+v err=%v", dormant, err)
 					}

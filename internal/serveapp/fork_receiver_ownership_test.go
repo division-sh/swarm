@@ -19,6 +19,7 @@ import (
 	runtimecontracts "github.com/division-sh/swarm/internal/runtime/contracts"
 	"github.com/division-sh/swarm/internal/runtime/core/activityidentity"
 	"github.com/division-sh/swarm/internal/runtime/core/identitytest"
+	"github.com/division-sh/swarm/internal/runtime/correlation"
 	"github.com/division-sh/swarm/internal/runtime/runfork"
 	"github.com/division-sh/swarm/internal/runtime/runforkexecution"
 	"github.com/division-sh/swarm/internal/runtime/semanticview"
@@ -701,18 +702,27 @@ func runForkReceiverOwnershipJourney(t *testing.T, backend servedparity.Backend,
 			{Path: missingReceiver, Policy: canonicalrouting.ForkReceiverRequiredMissing},
 		}, false)
 		bundle := loadWorkflowValidationBundleAt(t, selectedRoot)
+		rooted, err := bundle.RootedSource()
+		if err != nil {
+			t.Fatal(err)
+		}
 		if selected == nil {
 			t.Fatal("missing selected store owner")
 		}
 		seedStandingRuntimeContextBundle(t, selected.SourceArtifactWriter(), bundle)
 		selectedHash := servedEventPublishFixtureBundleHash(t, selectedRoot)
+		selectedFact, err := correlation.NewSourceArtifactFact(selectedHash)
+		if err != nil {
+			t.Fatal(err)
+		}
+		selectedCtx := correlation.WithRootAdmission(correlation.WithSourceArtifactFact(servedControlProofAuthorActivityContext(t, rt), selectedFact), rooted.Admission())
 		family, ok := selected.RunFork()
 		if !ok {
 			t.Fatal("missing actual fork executor")
 		}
 		beforeRefusal := snapshotForkReceiverApplication(t, rt)
 		for attempt := 0; attempt < 2; attempt++ {
-			result, err := family.Execute(servedControlProofAuthorActivityContext(t, rt), runforkexecution.SelectedContractExecutionRequest{
+			result, err := family.Execute(selectedCtx, runforkexecution.SelectedContractExecutionRequest{
 				SourceRunID: seed.RunID, At: frontier, AllowSourceFreeze: true, ExpectedBundleHash: selectedHash,
 				SourceLoader:      runforkexecution.SourceArtifactSelectedContractSourceLoader{RepoRoot: repoRootForTest(), Store: selected.SourceArtifactStore()},
 				ContractSelection: runfork.RunForkContractSelection{Mode: runfork.RunForkContractSelectionModeBundleHash, BundleHash: selectedHash},

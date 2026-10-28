@@ -83,8 +83,8 @@ type a2MapFanOutExecution struct {
 
 func a2MapFanOutFiles(gather bool) map[string]string {
 	files := map[string]string{
-		"schema.yaml": `name: a2-map-fan-out
-stages:
+		"manifest.yaml": "version: 1.0.0\nplatform_version: \">=0.7.0 <0.8.0\"\n",
+		"schema.yaml": `stages:
   active: {}
   awaiting: {}
   ready: {final: true}
@@ -159,8 +159,17 @@ func newA2MapFanOutExecutionFromFiles(t *testing.T, selected gateRecoveryStoreCa
 	bundle := loadPipelineLifecycleFixtureBundle(t, files)
 	source := semanticview.Wrap(bundle)
 	fact := mustAuthorActivityTestSourceArtifactFactForHash(bundle.SourceArtifact.BundleHash())
+	rooted, err := bundle.RootedSource()
+	if err != nil {
+		t.Fatal(err)
+	}
+	coordinate, err := agenttopology.NewSourceCoordinate(rooted.Admission())
+	if err != nil {
+		t.Fatal(err)
+	}
 	runID, runtimeID := uuid.NewString(), uuid.NewString()
 	ctx := correlation.WithSourceArtifactFact(correlation.WithRunID(context.Background(), runID), fact)
+	ctx = correlation.WithRootAdmission(ctx, rooted.Admission())
 	ctx = authoractivity.WithScope(ctx, authoractivity.BundleScope(runtimeID, fact.BundleHash()))
 	process := worklifetime.NewProcess()
 	work, err := process.NewRuntime(ctx, worklifetime.RuntimeIdentity{RuntimeInstanceID: runtimeID, BundleHash: fact.BundleHash()})
@@ -227,7 +236,7 @@ func newA2MapFanOutExecutionFromFiles(t *testing.T, selected gateRecoveryStoreCa
 			t.Error(err)
 		}
 	})
-	plan, err := agenttopology.NewSourceSetPlan([]agenttopology.SourceCoordinate{{BundleHash: fact.BundleHash()}}, nil)
+	plan, err := agenttopology.NewSourceSetPlan([]agenttopology.SourceCoordinate{coordinate}, nil)
 	if err != nil {
 		t.Fatal(err)
 	}

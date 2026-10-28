@@ -21,6 +21,7 @@ import (
 	runtimedestructivereset "github.com/division-sh/swarm/internal/runtime/destructivereset"
 	runtimemanager "github.com/division-sh/swarm/internal/runtime/manager"
 	runtimestartupownership "github.com/division-sh/swarm/internal/runtime/startupownership"
+	"github.com/division-sh/swarm/internal/sourceartifact"
 	"github.com/division-sh/swarm/internal/store/storetest"
 )
 
@@ -74,6 +75,10 @@ func (s *supervisorTestRetainedSession) LoadSourceSet(context.Context) (runtimea
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	return s.plan, s.plan.Revision != "", nil
+}
+
+func (*supervisorTestRetainedSession) LoadStartupRunSources(context.Context, []runtimeagenttopology.SourceCoordinate) (map[sourceartifact.RootAdmissionReference]sourceartifact.RootedSource, error) {
+	return map[sourceartifact.RootAdmissionReference]sourceartifact.RootedSource{}, nil
 }
 
 func (*supervisorTestRetainedSession) CheckSourceSetReplacement(context.Context, runtimeagenttopology.SourceSetCommitRequest) error {

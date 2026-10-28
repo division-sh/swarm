@@ -118,13 +118,13 @@ func InputPinSourceParserSnippet(t testing.TB, id InputPinSourceSnippet) ParserS
 	var source string
 	switch id {
 	case InputPinSourceDefault:
-		source = "name: source-enum\npins:\n  inputs:\n    - work.requested\n"
+		source = "# fixture: source-enum\npins:\n  inputs:\n    - work.requested\n"
 	case InputPinSourceExternal:
-		source = "name: source-enum\npins:\n  inputs:\n    - event: work.requested\n      source: external\n"
+		source = "# fixture: source-enum\npins:\n  inputs:\n    - event: work.requested\n      source: external\n"
 	case InputPinSourceHarness:
-		source = "name: source-enum\npins:\n  inputs:\n    - event: work.requested\n      source: harness\n"
+		source = "# fixture: source-enum\npins:\n  inputs:\n    - event: work.requested\n      source: harness\n"
 	case InputPinSourceInvalid:
-		source = "name: source-enum\npins:\n  inputs:\n    - event: work.requested\n      source: fallback\n"
+		source = "# fixture: source-enum\npins:\n  inputs:\n    - event: work.requested\n      source: fallback\n"
 	default:
 		t.Fatalf("unsupported input pin source parser snippet %q", id)
 	}
@@ -186,9 +186,9 @@ func W2MappingKeyParserSnippet(t testing.TB, id W2MappingKeySnippet) ParserSnipp
 	case W2ResolutionBlankKey:
 		source = "connect:\n  - event: work.requested\n    from: .\n    to: worker\n    \" \": ignored\n    resolution: create\n"
 	case W2ConnectSurroundingKey:
-		source = "name: hostile-connect\nconnect:\n  - \" event \": work.requested\n    from: producer\n    to: consumer\n"
+		source = "# fixture: hostile-connect\nconnect:\n  - \" event \": work.requested\n    from: producer\n    to: consumer\n"
 	case W2ConnectBlankKey:
-		source = "name: hostile-connect\nconnect:\n  - \" \": ignored\n    event: work.requested\n    from: producer\n    to: consumer\n"
+		source = "# fixture: hostile-connect\nconnect:\n  - \" \": ignored\n    event: work.requested\n    from: producer\n    to: consumer\n"
 	default:
 		t.Fatalf("unsupported W2 mapping-key parser snippet %q", id)
 	}
@@ -198,7 +198,7 @@ func W2MappingKeyParserSnippet(t testing.TB, id W2MappingKeySnippet) ParserSnipp
 func InputPinResolutionModesSnippet(t testing.TB) ParserSnippet {
 	t.Helper()
 	return NewParserSnippet(t, `
-name: resolution-pins
+# fixture: resolution-pins
 connect:
   - {event: validation.requested, from: ., to: worker, resolution: create, key_from: generated.uuid}
   - {event: account.selected, from: ., to: worker, resolution: select}
@@ -218,7 +218,7 @@ func UnsupportedInputPinResolutionSnippet(t testing.TB, id UnsupportedResolution
 	switch id {
 	case UnsupportedResolutionField:
 		source = `
-name: invalid-resolution
+# fixture: invalid-resolution
 pins:
   inputs:
     - event: work.requested
@@ -228,7 +228,7 @@ pins:
 `
 	case UnsupportedInstanceKeyField:
 		source = `
-name: invalid-resolution-instance-key
+# fixture: invalid-resolution-instance-key
 pins:
   inputs:
     - event: work.requested
@@ -241,7 +241,7 @@ pins:
 `
 	case UnsupportedResolutionCarry:
 		source = `
-name: invalid-resolution-carries
+# fixture: invalid-resolution-carries
 pins:
   inputs:
     - event: work.requested
@@ -252,7 +252,7 @@ pins:
 `
 	case RetiredInstanceKeyCarry:
 		source = `
-name: retired-instance-key-source
+# fixture: retired-instance-key-source
 instance: work_id
 pins:
   inputs:
@@ -273,33 +273,33 @@ func RetiredReceiverRoutingParserSnippet(t testing.TB, id RetiredReceiverRouting
 	var source string
 	switch id {
 	case RetiredInputAddressEmpty:
-		source = "name: retired-address\npins: {inputs: [{event: work.requested, address: {}}]}\n"
+		source = "# fixture: retired-address\npins: {inputs: [{event: work.requested, address: {}}]}\n"
 	case RetiredInputAddressMalformed:
-		source = "name: retired-address\npins: {inputs: [{event: work.requested, address: unsupported}]}\n"
+		source = "# fixture: retired-address\npins: {inputs: [{event: work.requested, address: unsupported}]}\n"
 	case RetiredInputAddressPopulated:
-		source = "name: retired-address\npins: {inputs: [{event: work.requested, address: {by: work_id, source: payload.work_id, target: entity.work_id}}]}\n"
+		source = "# fixture: retired-address\npins: {inputs: [{event: work.requested, address: {by: work_id, source: payload.work_id, target: entity.work_id}}]}\n"
 	case RetiredInputAddressMixed:
-		source = "name: retired-address\npins: {inputs: [{event: work.requested, address: {by: work_id, resolution: {mode: select}}}]}\n"
+		source = "# fixture: retired-address\npins: {inputs: [{event: work.requested, address: {by: work_id, resolution: {mode: select}}}]}\n"
 	case RetiredInputAddressUnsupportedNested:
-		source = "name: retired-address\npins: {inputs: [{event: work.requested, address: {by: work_id, unsupported: nope}}]}\n"
+		source = "# fixture: retired-address\npins: {inputs: [{event: work.requested, address: {by: work_id, unsupported: nope}}]}\n"
 	case RetiredConnectMapEmpty:
-		source = "name: retired-map\nconnect: [{event: work.done, from: producer, to: consumer, map: {}}]\n"
+		source = "# fixture: retired-map\nconnect: [{event: work.done, from: producer, to: consumer, map: {}}]\n"
 	case RetiredConnectMapMalformed:
-		source = "name: retired-map\nconnect: [{event: work.done, from: producer, to: consumer, map: unsupported}]\n"
+		source = "# fixture: retired-map\nconnect: [{event: work.done, from: producer, to: consumer, map: unsupported}]\n"
 	case RetiredConnectMapPopulated:
-		source = "name: retired-map\nconnect: [{event: work.done, from: producer, to: consumer, map: {work_id: {source: payload.work_id, target: entity.work_id}}}]\n"
+		source = "# fixture: retired-map\nconnect: [{event: work.done, from: producer, to: consumer, map: {work_id: {source: payload.work_id, target: entity.work_id}}}]\n"
 	case RetiredConnectMapMixed:
-		source = "name: retired-map\nconnect: [{event: work.done, from: producer, to: consumer, map: {work_id: {source: payload.work_id}, resolution: {mode: select}}}]\n"
+		source = "# fixture: retired-map\nconnect: [{event: work.done, from: producer, to: consumer, map: {work_id: {source: payload.work_id}, resolution: {mode: select}}}]\n"
 	case RetiredConnectUsingEmpty:
-		source = "name: retired-using\nconnect: [{event: work.done, from: producer, to: consumer, using: {}}]\n"
+		source = "# fixture: retired-using\nconnect: [{event: work.done, from: producer, to: consumer, using: {}}]\n"
 	case RetiredConnectUsingMalformed:
-		source = "name: retired-using\nconnect: [{event: work.done, from: producer, to: consumer, using: unsupported}]\n"
+		source = "# fixture: retired-using\nconnect: [{event: work.done, from: producer, to: consumer, using: unsupported}]\n"
 	case RetiredConnectUsingPopulated:
-		source = "name: retired-using\nconnect: [{event: work.done, from: producer, to: consumer, using: {instance: {source: payload.account_id, target: account_id}}}]\n"
+		source = "# fixture: retired-using\nconnect: [{event: work.done, from: producer, to: consumer, using: {instance: {source: payload.account_id, target: account_id}}}]\n"
 	case RetiredConnectUsingComposite:
-		source = "name: retired-using\nconnect: [{event: work.done, from: producer, to: consumer, using: {instance: {source: [payload.scope, payload.account_id], target: [scope, account_id]}}}]\n"
+		source = "# fixture: retired-using\nconnect: [{event: work.done, from: producer, to: consumer, using: {instance: {source: [payload.scope, payload.account_id], target: [scope, account_id]}}}]\n"
 	case RetiredConnectUsingMixed:
-		source = "name: retired-using\nconnect: [{event: work.done, from: producer, to: consumer, using: {instance: {source: payload.account_id}, map: {account_id: payload.account_id}}}]\n"
+		source = "# fixture: retired-using\nconnect: [{event: work.done, from: producer, to: consumer, using: {instance: {source: payload.account_id}, map: {account_id: payload.account_id}}}]\n"
 	default:
 		t.Fatalf("unsupported retired receiver routing parser snippet %q", id)
 	}

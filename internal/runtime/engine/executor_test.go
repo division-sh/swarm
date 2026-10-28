@@ -146,7 +146,10 @@ func fanOutEntitySource(t testing.TB) semanticview.Source {
 func fanOutSourceWithBundleIdentity(t testing.TB, bundle *runtimecontracts.WorkflowContractBundle) semanticview.Source {
 	t.Helper()
 	root := t.TempDir()
-	if err := os.WriteFile(filepath.Join(root, "schema.yaml"), []byte("name: engine-fan-out-test\n"), 0o644); err != nil {
+	if err := os.WriteFile(filepath.Join(root, "manifest.yaml"), []byte("version: 1.0.0\nplatform_version: '*'\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(root, "schema.yaml"), []byte("stages: []\n"), 0o644); err != nil {
 		t.Fatal(err)
 	}
 	artifact, err := sourceartifact.AdmitDirectory(root)
@@ -159,7 +162,10 @@ func fanOutSourceWithBundleIdentity(t testing.TB, bundle *runtimecontracts.Workf
 
 func mustEngineSourceArtifact(t testing.TB, root string) *sourceartifact.AdmittedSourceArtifact {
 	t.Helper()
-	if err := os.WriteFile(filepath.Join(root, "schema.yaml"), []byte("name: engine-test\n"), 0o644); err != nil {
+	if err := os.WriteFile(filepath.Join(root, "manifest.yaml"), []byte("version: 1.0.0\nplatform_version: '*'\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(root, "schema.yaml"), []byte("stages: []\n"), 0o644); err != nil {
 		t.Fatal(err)
 	}
 	artifact, err := sourceartifact.AdmitDirectory(root)
@@ -7937,9 +7943,10 @@ func loadEngineProjectionFlowBundle(t *testing.T) *runtimecontracts.WorkflowCont
 	t.Helper()
 	root := t.TempDir()
 
-	writeEngineProjectionFixtureFile(t, filepath.Join(root, "schema.yaml"), "name: projection-flow\n")
-	writeEngineProjectionFixtureFile(t, filepath.Join(root, "scoring", "schema.yaml"), `name: scoring
-stages:
+	writeEngineProjectionFixtureFile(t, filepath.Join(root, "manifest.yaml"), "version: 1.0.0\nplatform_version: '*'\n")
+	writeEngineProjectionFixtureFile(t, filepath.Join(root, "schema.yaml"), "stages: []\n")
+	writeEngineProjectionFixtureFile(t, filepath.Join(root, "scoring", "manifest.yaml"), "version: 1.0.0\nplatform_version: '*'\n")
+	writeEngineProjectionFixtureFile(t, filepath.Join(root, "scoring", "schema.yaml"), `stages:
   pending: {}
   scored: {final: true}
 pins:
@@ -7947,7 +7954,8 @@ pins:
     - score.dimension_complete
   outputs:
     - vertical.scored
-`)
+`,
+	)
 	writeEngineProjectionFixtureFile(t, filepath.Join(root, "scoring", "types.yaml"), `
 types:
   DimensionScore:
@@ -8004,14 +8012,16 @@ func loadEngineSingletonCoordinatorFlowBundle(t *testing.T) *runtimecontracts.Wo
 	t.Helper()
 	root := t.TempDir()
 
-	writeEngineProjectionFixtureFile(t, filepath.Join(root, "schema.yaml"), "name: singleton-coordinator-runtime\n")
-	writeEngineProjectionFixtureFile(t, filepath.Join(root, "coordinator", "schema.yaml"), `name: coordinator
-stages:
+	writeEngineProjectionFixtureFile(t, filepath.Join(root, "manifest.yaml"), "version: 1.0.0\nplatform_version: '*'\n")
+	writeEngineProjectionFixtureFile(t, filepath.Join(root, "schema.yaml"), "stages: []\n")
+	writeEngineProjectionFixtureFile(t, filepath.Join(root, "coordinator", "manifest.yaml"), "version: 1.0.0\nplatform_version: '*'\n")
+	writeEngineProjectionFixtureFile(t, filepath.Join(root, "coordinator", "schema.yaml"), `stages:
   active: {}
 pins:
   inputs:
     - job.received
-`)
+`,
+	)
 	writeEngineProjectionFixtureFile(t, filepath.Join(root, "coordinator", "types.yaml"), `
 types:
   VerticalState:

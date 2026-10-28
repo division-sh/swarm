@@ -80,6 +80,9 @@ func TestClockScheduleRequiresKeylessAncestry(t *testing.T) {
 				if path == "account/worker/poller" {
 					schema += clock
 				}
+				if err := os.WriteFile(filepath.Join(dir, "manifest.yaml"), []byte("version: 1.0.0\nplatform_version: '*'\n"), 0600); err != nil {
+					t.Fatal(err)
+				}
 				if err := os.WriteFile(filepath.Join(dir, "schema.yaml"), []byte(schema), 0600); err != nil {
 					t.Fatal(err)
 				}

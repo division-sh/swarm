@@ -6,6 +6,7 @@ import (
 
 	"github.com/division-sh/swarm/internal/durabledata"
 	"github.com/division-sh/swarm/internal/runtime/canonicaljson"
+	"github.com/division-sh/swarm/internal/sourceartifact"
 	"github.com/google/uuid"
 )
 
@@ -14,18 +15,19 @@ import (
 // hash binds caller-selected inputs; ResolvedPoint binds the selected revision
 // separately so retry never resolves an alias again.
 type ForkOperationRequest struct {
-	OperationID       string                    `json:"operation_id"`
-	Actor             string                    `json:"actor"`
-	IdempotencyKey    string                    `json:"idempotency_key,omitempty"`
-	TransportHash     string                    `json:"transport_hash"`
-	SourceRunID       string                    `json:"source_run_id"`
-	ForkEventID       string                    `json:"fork_event_id"`
-	AtStart           bool                      `json:"at_start,omitempty"`
-	ResolvedPoint     *RunForkPoint             `json:"resolved_point,omitempty"`
-	TargetBundleHash  string                    `json:"target_bundle_hash"`
-	AllowSourceFreeze bool                      `json:"allow_source_freeze"`
-	ContractSelection RunForkContractSelection  `json:"contract_selection"`
-	DataPinOverrides  []durabledata.ExplicitPin `json:"data_pin_overrides"`
+	OperationID         string                                `json:"operation_id"`
+	Actor               string                                `json:"actor"`
+	IdempotencyKey      string                                `json:"idempotency_key,omitempty"`
+	TransportHash       string                                `json:"transport_hash"`
+	SourceRunID         string                                `json:"source_run_id"`
+	ForkEventID         string                                `json:"fork_event_id"`
+	AtStart             bool                                  `json:"at_start,omitempty"`
+	ResolvedPoint       *RunForkPoint                         `json:"resolved_point,omitempty"`
+	TargetBundleHash    string                                `json:"target_bundle_hash"`
+	TargetRootReference sourceartifact.RootAdmissionReference `json:"target_root_reference"`
+	AllowSourceFreeze   bool                                  `json:"allow_source_freeze"`
+	ContractSelection   RunForkContractSelection              `json:"contract_selection"`
+	DataPinOverrides    []durabledata.ExplicitPin             `json:"data_pin_overrides"`
 }
 
 func (r ForkOperationRequest) Canonical() (ForkOperationRequest, string, error) {
@@ -58,6 +60,12 @@ func (r ForkOperationRequest) Canonical() (ForkOperationRequest, string, error) 
 	if strings.TrimSpace(r.Actor) == "" || strings.TrimSpace(r.TransportHash) == "" || strings.TrimSpace(r.TargetBundleHash) == "" {
 		return ForkOperationRequest{}, "", fmt.Errorf("fork operation requires actor, transport hash and selected bundle")
 	}
+	if err := r.TargetRootReference.Validate(); err != nil {
+		return ForkOperationRequest{}, "", fmt.Errorf("fork operation requires its exact target root reference: %w", err)
+	}
+	if r.TargetRootReference.BundleHash != r.TargetBundleHash {
+		return ForkOperationRequest{}, "", fmt.Errorf("fork operation target root contradicts its selected content hash")
+	}
 	switch r.ContractSelection.Mode {
 	case RunForkContractSelectionModeSelectedContracts:
 		if r.ContractSelection.BundleHash != "" {
@@ -77,14 +85,15 @@ func (r ForkOperationRequest) Canonical() (ForkOperationRequest, string, error) 
 	}
 	r.DataPinOverrides = pins
 	semantic := struct {
-		SourceRunID       string                    `json:"source_run_id"`
-		ForkEventID       string                    `json:"fork_event_id"`
-		AtStart           bool                      `json:"at_start,omitempty"`
-		TargetBundleHash  string                    `json:"target_bundle_hash"`
-		AllowSourceFreeze bool                      `json:"allow_source_freeze"`
-		ContractSelection RunForkContractSelection  `json:"contract_selection"`
-		DataPinOverrides  []durabledata.ExplicitPin `json:"data_pin_overrides"`
-	}{r.SourceRunID, r.ForkEventID, r.AtStart, r.TargetBundleHash, r.AllowSourceFreeze, r.ContractSelection, r.DataPinOverrides}
+		SourceRunID         string                                `json:"source_run_id"`
+		ForkEventID         string                                `json:"fork_event_id"`
+		AtStart             bool                                  `json:"at_start,omitempty"`
+		TargetBundleHash    string                                `json:"target_bundle_hash"`
+		TargetRootReference sourceartifact.RootAdmissionReference `json:"target_root_reference"`
+		AllowSourceFreeze   bool                                  `json:"allow_source_freeze"`
+		ContractSelection   RunForkContractSelection              `json:"contract_selection"`
+		DataPinOverrides    []durabledata.ExplicitPin             `json:"data_pin_overrides"`
+	}{r.SourceRunID, r.ForkEventID, r.AtStart, r.TargetBundleHash, r.TargetRootReference, r.AllowSourceFreeze, r.ContractSelection, r.DataPinOverrides}
 	hash, err := canonicaljson.Hash(semantic)
 	if err != nil {
 		return ForkOperationRequest{}, "", err

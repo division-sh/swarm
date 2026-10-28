@@ -20,7 +20,6 @@ import (
 	runtimeauthoractivity "github.com/division-sh/swarm/internal/runtime/authoractivity"
 	runtimebus "github.com/division-sh/swarm/internal/runtime/bus"
 	runtimecontracts "github.com/division-sh/swarm/internal/runtime/contracts"
-	runtimeactors "github.com/division-sh/swarm/internal/runtime/core/actors"
 	runtimeagentidentity "github.com/division-sh/swarm/internal/runtime/core/agentidentity"
 	runtimeflowidentity "github.com/division-sh/swarm/internal/runtime/core/flowidentity"
 	"github.com/division-sh/swarm/internal/runtime/core/identitytest"
@@ -36,7 +35,6 @@ import (
 	runtimeruncontrol "github.com/division-sh/swarm/internal/runtime/runcontrol"
 	runtimerunlifecycle "github.com/division-sh/swarm/internal/runtime/runlifecycle"
 	"github.com/division-sh/swarm/internal/runtime/semanticview"
-	"github.com/division-sh/swarm/internal/runtime/semanticviewtest"
 	"github.com/division-sh/swarm/internal/runtime/startupownership"
 	"github.com/division-sh/swarm/internal/runtime/testfixtures/canonicalrouting"
 	"github.com/division-sh/swarm/internal/sourceartifact"
@@ -155,12 +153,23 @@ func (startupRecoveryOrderLLM) ProviderContract() llm.ProviderContract {
 }
 
 func TestRuntimeStartHydratesPersistedAgentsBeforeRecoveringNodeDeliveriesParity(t *testing.T) {
-	bundle := loadEntitylessStartupRecoveryBundle(t)
+	const agentID = "startup-order-agent"
+	base := loadEntitylessStartupRecoveryBundle(t)
+	files := make(map[string]string)
+	for _, entry := range base.SourceArtifact.Entries() {
+		files[entry.Label()] = string(entry.Bytes())
+	}
+	files["agents.yaml"] = agentID + ":\n  type: test\n  role: observer\n  model: regular\n  intent: {inline: observe startup order}\n  subscriptions: [task.completed]\n"
+	bundle := loadRuntimeTempBundle(t, files)
 	persistedSource, err := runtimecorrelation.NewSourceArtifactFact(bundle.SourceArtifact.BundleHash())
 	if err != nil {
 		t.Fatalf("construct persisted startup bundle source: %v", err)
 	}
 	persistedBundleHash := persistedSource.BundleHash()
+	rooted, err := bundle.RootedSource()
+	if err != nil {
+		t.Fatal(err)
+	}
 	for _, backend := range []struct {
 		name  string
 		setup func(*testing.T) (context.Context, *sql.DB, *sql.DB, startupRecoveryOrderStore)
@@ -173,6 +182,7 @@ func TestRuntimeStartHydratesPersistedAgentsBeforeRecoveringNodeDeliveriesParity
 				selected := storetest.AdmitPostgresRuntimeStore(t, db)
 				ctx := startupRecoverySourceContext(persistedSource, templateInstanceDeliveryRunID)
 				ctx = runtimecorrelation.WithSourceArtifactFact(ctx, persistedSource)
+				ctx = runtimecorrelation.WithRootAdmission(ctx, rooted.Admission())
 				ensureStartupRecoverySourceArtifact(t, ctx, selected, bundle.SourceArtifact)
 				return ctx, db, db, selected
 			},
@@ -183,6 +193,7 @@ func TestRuntimeStartHydratesPersistedAgentsBeforeRecoveringNodeDeliveriesParity
 				selected := storetest.StartSQLiteRuntimeStore(t)
 				ctx := startupRecoverySourceContext(persistedSource, templateInstanceDeliveryRunID)
 				ctx = runtimecorrelation.WithSourceArtifactFact(ctx, persistedSource)
+				ctx = runtimecorrelation.WithRootAdmission(ctx, rooted.Admission())
 				ensureStartupRecoverySourceArtifact(t, ctx, selected, bundle.SourceArtifact)
 				return ctx, nil, storetest.Database(selected), selected
 			},
@@ -193,20 +204,11 @@ func TestRuntimeStartHydratesPersistedAgentsBeforeRecoveringNodeDeliveriesParity
 			prepared := prepareExternalRuntimeFixtureProcess(t, ctx, selected)
 			storetest.RequireRun(t, externalRuntimeProcessContext(t, ctx, prepared), selected, storetest.RunFixture{
 				Origin: storetest.ScenarioSetupOrigin(), RunID: templateInstanceDeliveryRunID,
-				BundleHash: persistedBundleHash,
+				BundleHash: persistedBundleHash, Artifact: rooted.Artifact(), RootAdmission: rooted.Admission(),
 			})
 			activationCleanupErr := errors.New("injected delivery authority postcommit cleanup failure")
 			activationProbe := &startupRecoveryActivationProbe{Store: selected, cleanupErr: activationCleanupErr}
-			const agentID = "startup-order-agent"
-			agentConfig := runtimeTestAgentConfig(t, runtimeactors.AgentConfig{
-				ID: agentID, Type: "test", Role: "observer", FlowID: "global", Model: "regular",
-				ExecutionMode: "live", Subscriptions: []string{"task.completed"},
-			})
-			bundle.Agents[agentID] = runtimecontracts.AgentRegistryEntry{
-				ID: agentID, Type: "test", Role: "observer", Model: "regular",
-				ResolvedIntent: agentConfig.Intent, Subscriptions: []string{"task.completed"},
-			}
-			source := semanticviewtest.WrapRootAgents(bundle)
+			source := semanticview.Wrap(bundle)
 			module := newRuntimeTestWorkflowModule(t, source)
 			hydrated := atomic.Bool{}
 			newRuntime := func(process *worklifetime.Process, deliveries runtimedelivery.Store) *swarmruntime.Runtime {
@@ -257,11 +259,19 @@ func TestRuntimeStartHydratesPersistedAgentsBeforeRecoveringNodeDeliveriesParity
 			}
 			constructionCtx := externalRuntimeGenerationContext(t, testLiveExecutionContext(worklifetime.WithOccurrence(ctx, predecessor.WorkOccurrence())), predecessorGrant)
 			if err := predecessor.Manager.ActivateFlowInstance(constructionCtx, runtimepipeline.FlowInstanceActivationRequest{
-				ContractBundle: source,
+				ContractBundle: predecessor.Options.WorkflowModule.SemanticSource(),
 				Instance:       runtimeflowidentity.Stored(source, ".", templateInstanceDeliveryRunID, templateInstanceDeliveryRunID, templateInstanceDeliveryRunID, ""),
 				OccurredAt:     time.Now().UTC(),
 			}); err != nil {
 				t.Fatalf("construct startup predecessor tree: %v", err)
+			}
+			predecessorAgent, err := predecessor.Manager.ResolveAgentConfig(templateInstanceDeliveryRunID, agentID, "")
+			if err != nil {
+				t.Fatal(err)
+			}
+			agentIdentity, err := predecessorAgent.ConcreteIdentity()
+			if err != nil {
+				t.Fatal(err)
 			}
 			if err := closeExternalRuntimeTestGeneration(predecessor, predecessorProcess, predecessorCapability); err != nil {
 				t.Fatalf("retire startup predecessor: %v", err)
@@ -281,7 +291,7 @@ func TestRuntimeStartHydratesPersistedAgentsBeforeRecoveringNodeDeliveriesParity
 			storetest.CommitSemanticEventWithRoutes(t, handoffCtx, selected, event, []events.DeliveryRoute{nodeRoute}, runtimepipelineobligation.ScopeSubscribed)
 
 			agentEventID := eventtest.UUID("startup-order-agent-event-" + backend.name)
-			agentRoute := startupRecoveryAgentRoute(t, templateInstanceDeliveryRunID, agentID)
+			agentRoute := events.DeliveryRoute{Recipient: events.MustAgentDeliveryRecipient(agentID), AgentIdentity: agentIdentity}
 			agentEvent := eventtest.ExistingRunRootIngress(
 				agentEventID, "task.completed", "test", "", []byte(`{}`), 0,
 				templateInstanceDeliveryRunID, events.EventEnvelope{}, time.Now().UTC(),
@@ -570,7 +580,17 @@ func TestRuntimeStartRecoveryDisabledRejectsExecutableDeliveryInventoryParity(t 
 }
 
 func TestCommittedPipelineHandoffCleanupFailureWakesExactDeliveryOnceParity(t *testing.T) {
-	source, err := runtimecorrelation.NewSourceArtifactFact(authorActivityTestSourceArtifactFact.BundleHash())
+	artifact := startupRecoverySourceArtifact(t, "pipeline-handoff-cleanup")
+	rooted, err := artifact.RootedSource()
+	if err != nil {
+		t.Fatal(err)
+	}
+	repo := canonicalrouting.RepoRoot(t)
+	bundle, err := runtimecontracts.LoadWorkflowContractBundleFromRootedSource(repo, rooted, runtimecontracts.DefaultPlatformSpecFile(repo), runtimecontracts.WorkflowContractLoadOptions{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	source, err := runtimecorrelation.NewSourceArtifactFact(artifact.BundleHash())
 	if err != nil {
 		t.Fatalf("construct pipeline handoff source: %v", err)
 	}
@@ -588,7 +608,8 @@ func TestCommittedPipelineHandoffCleanupFailureWakesExactDeliveryOnceParity(t *t
 			runID := eventtest.UUID("pipeline-handoff-cleanup-run-" + backend)
 			ctx := startupRecoverySourceContext(source, runID)
 			ctx = originalRuntimeFixtureContext(t, ctx, selected)
-			seedStartupRecoverySourceRun(t, ctx, selected, source, authorActivityTestSourceArtifact, runID)
+			ctx = runtimecorrelation.WithRootAdmission(ctx, rooted.Admission())
+			seedStartupRecoverySourceRun(t, ctx, selected, source, artifact, runID)
 			route := startupRecoveryNodeRoute(t, "complete-task")
 			event := eventtest.ExistingRunRootIngress(
 				eventtest.UUID("pipeline-handoff-cleanup-event-"+backend),
@@ -615,6 +636,7 @@ func TestCommittedPipelineHandoffCleanupFailureWakesExactDeliveryOnceParity(t *t
 				err:   injectedErr,
 			}
 			bus, err := newScopedTestEventBus(t, selected, runtimebus.EventBusOptions{
+				ContractBundle:      semanticview.Wrap(bundle),
 				PipelineObligations: pipelineOwner,
 				SourceArtifactFact:  source,
 				DeliveryAuthority:   snapshot.Authority,
@@ -731,10 +753,16 @@ func seedStartupRecoverySourceRun(
 	if artifact == nil || artifact.BundleHash() != bundleHash {
 		t.Fatalf("startup recovery artifact = %v, want exact source %s", artifact, bundleHash)
 	}
+	rooted, err := artifact.RootedSource()
+	if err != nil {
+		t.Fatal(err)
+	}
+	ctx = runtimecorrelation.WithRootAdmission(ctx, rooted.Admission())
 	ensureStartupRecoverySourceArtifact(t, ctx, selected, artifact)
 	fixture := storetest.RunFixture{
 		Origin: storetest.ScenarioSetupOrigin(), RunID: runID,
 		BundleHash: bundleHash,
+		Artifact:   artifact, RootAdmission: rooted.Admission(),
 	}
 	storetest.RequireRun(t, ctx, selected, fixture)
 }
@@ -744,15 +772,14 @@ func loadEntitylessStartupRecoveryBundle(t *testing.T) *runtimecontracts.Workflo
 	repoRoot := filepath.Clean(filepath.Join("..", ".."))
 	fixtureRoot := filepath.Join(repoRoot, "tests", "tier8-boot-verification", "test-boot-success")
 	files := make(map[string]string)
-	for _, name := range []string{"schema.yaml", "events.yaml", "nodes.yaml"} {
+	for _, name := range []string{"manifest.yaml", "schema.yaml", "events.yaml", "nodes.yaml"} {
 		body, err := os.ReadFile(filepath.Join(fixtureRoot, name))
 		if err != nil {
 			t.Fatalf("read startup recovery fixture %s: %v", name, err)
 		}
 		files[name] = string(body)
 	}
-	files["schema.yaml"] = `name: startup-recovery-stateless
-stages: []
+	files["schema.yaml"] = `stages: []
 pins:
   inputs:
     - task.requested
@@ -773,7 +800,10 @@ func ensureStartupRecoverySourceArtifact(t *testing.T, ctx context.Context, sele
 func startupRecoverySourceArtifact(t *testing.T, name string) *sourceartifact.AdmittedSourceArtifact {
 	t.Helper()
 	root := t.TempDir()
-	if err := os.WriteFile(filepath.Join(root, "schema.yaml"), []byte("name: "+name+"\n"), 0o644); err != nil {
+	if err := os.WriteFile(filepath.Join(root, "manifest.yaml"), []byte("version: 1.0.0\nplatform_version: '*'\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(root, "schema.yaml"), []byte("# fixture: "+name+"\nstages: []\n"), 0o644); err != nil {
 		t.Fatal(err)
 	}
 	artifact, err := sourceartifact.AdmitDirectory(root)

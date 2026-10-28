@@ -35,11 +35,11 @@ func TestR7DirectoryScalarSelectorsBothStores(t *testing.T) {
 		} {
 			t.Run(backend+"/"+scalar.name, func(t *testing.T) {
 				f := newReceiverConfigActivationFixtureWithDocuments(t, backend, false, map[string]string{
-					"schema.yaml":          "name: scalar-index\n",
+					"schema.yaml":          "stages: []\n",
 					"events.yaml":          "checkpoint:\n",
-					"worker/schema.yaml":   "name: worker\ninstance: item_id\npins:\n  inputs:\n    - item.created\n",
+					"worker/schema.yaml":   "instance: item_id\npins:\n  inputs:\n    - item.created\n",
 					"worker/entities.yaml": "item:\n  item_id: " + scalar.kind + "\n",
-					"worker/events.yaml":   "item.created:\n  item_id: " + scalar.kind + "\n",
+					"worker/events.yaml":   "item.created:\n  item_id: " + scalar.kind + "\n", "manifest.yaml": "version: 1.0.0\nplatform_version: '*'\n", "worker/manifest.yaml": "version: 1.0.0\nplatform_version: '*'\n",
 				}, nil)
 				runID := correlation.RunIDFromContext(f.ctx)
 				rootRequest := sqliteFlowActivationRequest(f.bundle, ".", runID, "", runID)
@@ -135,7 +135,11 @@ func proveR7ScalarHistoricalIndex(t *testing.T, f receiverConfigActivationFixtur
 	if err != nil {
 		t.Fatal(err)
 	}
-	fork, err := forks.MaterializeRunFork(f.ctx, runfork.RunForkMaterializeRequest{SourceRunID: runID, At: marker.ID()})
+	rooted, err := f.store.(rootedRunStore).LoadRunRootedSource(f.ctx, runID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	fork, err := forks.MaterializeRunFork(f.ctx, runfork.RunForkMaterializeRequest{SourceRunID: runID, At: marker.ID(), RootAdmission: rooted.Admission()})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -200,10 +204,10 @@ func TestR7ConstructionAddressImmutableBothStores(t *testing.T) {
 	for _, backend := range []string{"sqlite", "postgres"} {
 		t.Run(backend, func(t *testing.T) {
 			f := newReceiverConfigActivationFixtureWithDocuments(t, backend, false, map[string]string{
-				"schema.yaml":        "name: immutable-construction\ninstance: item_id\npins:\n  inputs:\n    - item.created\n",
+				"schema.yaml":        "instance: item_id\npins:\n  inputs:\n    - item.created\n",
 				"events.yaml":        "item.created:\n  item_id: text\n",
 				"entities.yaml":      "item:\n  item_id: text\n",
-				"detail/schema.yaml": "name: detail\n",
+				"detail/schema.yaml": "stages: []\n", "manifest.yaml": "version: 1.0.0\nplatform_version: '*'\n", "detail/manifest.yaml": "version: 1.0.0\nplatform_version: '*'\n",
 			}, nil)
 			runID := correlation.RunIDFromContext(f.ctx)
 			request := sqliteFlowActivationRequest(f.bundle, ".", runID, "", runID)
@@ -316,9 +320,9 @@ func TestR7ConstructionAddressImmutableBothStores(t *testing.T) {
 func newR7KeylessIndexProof(t *testing.T, backend string) (receiverConfigActivationFixture, pipeline.FlowInstanceActivationPlan) {
 	t.Helper()
 	f := newReceiverConfigActivationFixtureWithDocuments(t, backend, false, map[string]string{
-		"schema.yaml":         "name: keyless-index-proof\n",
-		"detail/schema.yaml":  "name: detail\n",
-		"sibling/schema.yaml": "name: sibling\n",
+		"schema.yaml":         "stages: []\n",
+		"detail/schema.yaml":  "stages: []\n",
+		"sibling/schema.yaml": "stages: []\n", "manifest.yaml": "version: 1.0.0\nplatform_version: '*'\n", "detail/manifest.yaml": "version: 1.0.0\nplatform_version: '*'\n", "sibling/manifest.yaml": "version: 1.0.0\nplatform_version: '*'\n",
 	}, nil)
 	runID := correlation.RunIDFromContext(f.ctx)
 	request := sqliteFlowActivationRequest(f.bundle, ".", runID, "", runID)
@@ -403,8 +407,8 @@ func TestR7DirectoryUnconstructedStandingRunHasNoObservationBothStores(t *testin
 	for _, backend := range []string{"sqlite", "postgres"} {
 		t.Run(backend, func(t *testing.T) {
 			f := newReceiverConfigActivationFixtureWithDocuments(t, backend, false, map[string]string{
-				"schema.yaml":        "name: unconstructed-standing-run\n",
-				"detail/schema.yaml": "name: detail\n",
+				"schema.yaml":        "stages: []\n",
+				"detail/schema.yaml": "stages: []\n", "manifest.yaml": "version: 1.0.0\nplatform_version: '*'\n", "detail/manifest.yaml": "version: 1.0.0\nplatform_version: '*'\n",
 			}, nil)
 			source := semanticview.Wrap(f.bundle)
 			fact, _ := correlation.SourceArtifactFactFromContext(f.ctx)
@@ -599,10 +603,10 @@ func TestR7DirectoryDeclarationCannotHideCorruptKeyedConstructionBothStores(t *t
 	for _, backend := range []string{"sqlite", "postgres"} {
 		t.Run(backend, func(t *testing.T) {
 			f := newReceiverConfigActivationFixtureWithDocuments(t, backend, false, map[string]string{
-				"schema.yaml":          "name: keyed-corruption-proof\n",
-				"worker/schema.yaml":   "name: worker\ninstance: item_id\npins:\n  inputs:\n    - item.created\n",
+				"schema.yaml":          "stages: []\n",
+				"worker/schema.yaml":   "instance: item_id\npins:\n  inputs:\n    - item.created\n",
 				"worker/entities.yaml": "item:\n  item_id: text\n",
-				"worker/events.yaml":   "item.created:\n  item_id: text\n",
+				"worker/events.yaml":   "item.created:\n  item_id: text\n", "manifest.yaml": "version: 1.0.0\nplatform_version: '*'\n", "worker/manifest.yaml": "version: 1.0.0\nplatform_version: '*'\n",
 			}, nil)
 			runID := correlation.RunIDFromContext(f.ctx)
 			rootRequest := sqliteFlowActivationRequest(f.bundle, ".", runID, "", runID)

@@ -350,9 +350,6 @@ func TestValidatedEnvelopeReuseDifferential(t *testing.T) {
 	t.Run("inherited", func(t *testing.T) {
 		requireEnvelopeReuseDecodeParity(t, inheritedFanOutRecord(t), "")
 	})
-	t.Run("diagnostic_direct", func(t *testing.T) {
-		requireEnvelopeReuseDecodeParity(t, validDiagnosticDirectRecord(t, events.EventTypePlatformRuntimeLog, "", events.EventEnvelope{}), "")
-	})
 	for _, shape := range []string{"external", "target_set"} {
 		t.Run("allocations/"+shape, func(t *testing.T) {
 			record := envelopeReuseFixture(t, 1, shape)

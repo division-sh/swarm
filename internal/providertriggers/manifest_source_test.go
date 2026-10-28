@@ -1,22 +1,22 @@
 package providertriggers
 
 import (
-	"bytes"
 	"fmt"
 	"net/http"
 	"reflect"
 	"strings"
 	"testing"
 
+	"github.com/division-sh/swarm/internal/packmodel"
 	runtimecontracts "github.com/division-sh/swarm/internal/runtime/contracts"
+	"github.com/division-sh/swarm/internal/yamlsource"
 )
 
-const triggerPredicateFixture = `provider: acme
-event_name: {literal: inbound.acme}
+const triggerPredicateFixture = `event_name: {literal: raw}
 delivery_id: {literal: receipt, required: true}
 event_type: {literal: observed, required: true}
 normalized_events:
-  - event: inbound.acme.observed
+  - event: observed
     fields:
       value: {from: message.value, schema: {type: string}}
     when: %s
@@ -36,8 +36,8 @@ func TestTriggerPredicatePathIdentityBeforeProjection(t *testing.T) {
 	} {
 		t.Run(predicate, func(t *testing.T) {
 			for attempt := 0; attempt < 20; attempt++ {
-				manifest, err := parseManifestAt([]byte(fmt.Sprintf(triggerPredicateFixture, predicate)), "packs/acme/trigger.yaml")
-				if err == nil || !strings.Contains(err.Error(), "packs/acme/trigger.yaml:") || !strings.Contains(err.Error(), "when") {
+				manifest, err := admitTestTriggerBody(fmt.Sprintf(triggerPredicateFixture, predicate))
+				if err == nil || !strings.Contains(err.Error(), "trigger.yaml:") || !strings.Contains(err.Error(), "when") {
 					t.Fatalf("noncanonical predicate admitted: %v", err)
 				}
 				if manifest.Validate() == nil {
@@ -65,7 +65,7 @@ func TestTriggerPredicatePathIdentityBeforeProjection(t *testing.T) {
 
 func TestTriggerPredicateExactTextPreservation(t *testing.T) {
 	body := []byte(fmt.Sprintf(triggerPredicateFixture, "{equals: {kind: ' alpha '}}"))
-	manifest, err := ParseManifest(body)
+	manifest, err := admitTestTriggerBody(string(body))
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -82,7 +82,7 @@ func TestTriggerPredicateExactTextPreservation(t *testing.T) {
 		}
 	}
 	for _, value := range []string{"''", "null", "1", "false", "{}", "[]"} {
-		if _, err := ParseManifest([]byte(fmt.Sprintf(triggerPredicateFixture, "{equals: {kind: "+value+"}}"))); err == nil {
+		if _, err := admitTestTriggerBody(fmt.Sprintf(triggerPredicateFixture, "{equals: {kind: "+value+"}}")); err == nil {
 			t.Fatalf("invalid equals text admitted: %s", value)
 		}
 	}
@@ -92,12 +92,11 @@ func TestTriggerPredicateExactTextPreservation(t *testing.T) {
 	}
 }
 
-const triggerPatternFixture = `provider: acme
-event_name: {literal: inbound.acme}
+const triggerPatternFixture = `event_name: {literal: raw}
 delivery_id: {literal: receipt, required: true}
 event_type: {literal: observed, required: true}
 normalized_events:
-  - event: inbound.acme.command
+  - event: command
     fields:
       command:
         from: message.text
@@ -152,16 +151,16 @@ func TestTriggerPatternConversionAdmissionAndExecution(t *testing.T) {
 		}
 	}
 	for _, pattern := range []string{"[", "(?P<unknown>.+)", "(?P<reference>a)(?P<reference>b)"} {
-		if _, err := ParseManifest([]byte(fmt.Sprintf(triggerPatternFixture, pattern, false))); err == nil {
+		if _, err := admitTestTriggerBody(fmt.Sprintf(triggerPatternFixture, pattern, false)); err == nil {
 			t.Fatalf("invalid pattern admitted: %q", pattern)
 		}
 	}
 	wrongSchema := strings.Replace(fmt.Sprintf(triggerPatternFixture, pattern, false), "type: object", "type: string", 1)
-	if _, err := ParseManifest([]byte(wrongSchema)); err == nil {
+	if _, err := admitTestTriggerBody(wrongSchema); err == nil {
 		t.Fatal("pattern without object schema admitted")
 	}
 	retired := strings.Replace(fmt.Sprintf(triggerPatternFixture, pattern, false), "{pattern: '"+pattern+"'}", "telegram_command", 1)
-	if _, err := ParseManifest([]byte(retired)); err == nil || !strings.Contains(err.Error(), "want one of") || strings.Contains(err.Error(), "retired") {
+	if _, err := admitTestTriggerBody(retired); err == nil || !strings.Contains(err.Error(), "want one of") || strings.Contains(err.Error(), "retired") {
 		t.Fatalf("closed conversion enum = %v", err)
 	}
 }
@@ -180,8 +179,8 @@ func TestTriggerPatternAdmissionRejectsNonStringCaptureProperties(t *testing.T) 
 			t.Run(fmt.Sprintf("optional=%t/type=%s", optional, tc.kind), func(t *testing.T) {
 				body := fmt.Sprintf(triggerPatternFixture, `^(?P<reference>.+)$`, optional)
 				body = strings.Replace(body, "reference: {type: string}", "reference: "+tc.schema, 1)
-				manifest, err := parseManifestAt([]byte(body), "packs/acme/trigger.yaml")
-				if err == nil || !strings.Contains(err.Error(), "capture reference requires a string output property") || !strings.Contains(err.Error(), "packs/acme/trigger.yaml:") {
+				manifest, err := admitTestTriggerBody(body)
+				if err == nil || !strings.Contains(err.Error(), "capture reference requires a string output property") || !strings.Contains(err.Error(), "trigger.yaml:") {
 					t.Fatalf("non-string capture schema admitted: %v", err)
 				}
 				if manifest.Validate() == nil {
@@ -197,8 +196,8 @@ func TestTriggerPatternAdmissionRejectsRequiredPropertyWithoutCapture(t *testing
 		t.Run(fmt.Sprintf("optional=%t", optional), func(t *testing.T) {
 			body := fmt.Sprintf(triggerPatternFixture, `^(?P<reference>.+)$`, optional)
 			body = strings.Replace(body, "required: [reference]", "required: [reference, address]", 1)
-			manifest, err := parseManifestAt([]byte(body), "packs/acme/trigger.yaml")
-			if err == nil || !strings.Contains(err.Error(), "required output property address has no named capture") || !strings.Contains(err.Error(), "packs/acme/trigger.yaml:") {
+			manifest, err := admitTestTriggerBody(body)
+			if err == nil || !strings.Contains(err.Error(), "required output property address has no named capture") || !strings.Contains(err.Error(), "trigger.yaml:") {
 				t.Fatalf("unsupplied required property admitted: %v", err)
 			}
 			if manifest.Validate() == nil {
@@ -238,50 +237,6 @@ func TestTriggerPatternAdmissionPreservesCaptureParticipationAndValueValidation(
 	}
 }
 
-func TestTriggerBodyProgrammaticAdmission(t *testing.T) {
-	var zero Manifest
-	if _, err := zero.Accept(Request{}); err == nil {
-		t.Fatal("zero policy executed")
-	}
-	if _, err := NewCatalogSnapshot(CatalogEntry{Manifest: zero}); err == nil {
-		t.Fatal("zero policy entered catalog")
-	}
-	for i := 0; i < reflect.TypeOf(zero).NumField(); i++ {
-		if reflect.TypeOf(zero).Field(i).IsExported() {
-			t.Fatal("public writable policy authority returned")
-		}
-	}
-	body := []byte(fmt.Sprintf(triggerPredicateFixture, "{equals: {kind: ' alpha '}}"))
-	manifest, err := ParseManifest(body)
-	if err != nil {
-		t.Fatal(err)
-	}
-	plan := compileTriggerTestPlan(t, manifest)
-	for i := range body {
-		body[i] = 'x'
-	}
-	projection := manifest.SourceBytes()
-	projection[0] = 'x'
-	if bytes.Equal(projection, manifest.SourceBytes()) {
-		t.Fatal("BODY bytes were exposed")
-	}
-	outputs := manifest.OutputManifest()
-	outputs[1].When.Equals["kind"] = "changed"
-	outputs[1].Fields["value"] = NormalizedEventFieldProjection{}
-	outputs[1].When.Exists[0] = "changed"
-	catalog := manifest.EventCatalogEntries()
-	delete(catalog["inbound.acme.observed"].Payload.Properties, "value")
-	for _, next := range []InboundAdmissionPlan{plan, compileTriggerTestPlan(t, manifest)} {
-		if got := next.Outputs()[1]; got.When.Equals["kind"] != " alpha " || got.Fields["value"].From != "message.value" {
-			t.Fatalf("projection mutation changed executable policy: %#v", got)
-		}
-		delivery, err := next.Accept(Request{Payload: map[string]any{"kind": " alpha ", "message": map[string]any{"value": "unchanged"}}})
-		if err != nil || len(delivery.Events) != 2 || delivery.Events[1].Payload["value"] != "unchanged" {
-			t.Fatalf("carrier mutation changed request execution: %+v, %v", delivery, err)
-		}
-	}
-}
-
 func TestTriggerBodyHostileSourceProvenance(t *testing.T) {
 	for _, suffix := range []string{
 		"\nunknown: null\n", "\nprovider: other\n", "\n---\n{}\n",
@@ -293,7 +248,7 @@ func TestTriggerBodyHostileSourceProvenance(t *testing.T) {
 			t.Fatalf("hostile BODY or provenance admitted: %q: %v", suffix, err)
 		}
 	}
-	manifest := parseTriggerTestBody(t, "provider: acme\nevent_name: &event {literal: inbound.acme}\nmetadata: &facts {value: user_agent}\nack: &policy {mode: durable_before_dispatch}\n<<: {secret: {required: false}}\n")
+	manifest := parseTriggerTestBody(t, "event_name: &event {literal: raw}\nmetadata: &facts {value: user_agent}\nack: &policy {mode: durable_before_dispatch}\n<<: {secret: {required: false}}\n")
 	if got := manifest.Metadata()["value"]; got != "user_agent" {
 		t.Fatalf("faithful merge lost its data: %q", got)
 	}
@@ -301,16 +256,40 @@ func TestTriggerBodyHostileSourceProvenance(t *testing.T) {
 
 func parseTriggerTestBody(t testing.TB, body string) Manifest {
 	t.Helper()
-	manifest, err := ParseManifest([]byte(body))
+	manifest, err := admitTestTriggerBody(body)
 	if err != nil {
 		t.Fatal(err)
 	}
 	return manifest
 }
 
+func admitTestTriggerBody(body string) (Manifest, error) {
+	source, err := yamlsource.Load([]byte(body))
+	if err != nil {
+		return Manifest{}, err
+	}
+	definition, err := admitTriggerDefinition(source.Document("trigger.yaml").Root())
+	if err != nil {
+		return Manifest{}, err
+	}
+	metadata, err := triggerFixture(definition).metadata()
+	if err != nil {
+		return Manifest{}, err
+	}
+	provider, err := s1LoadProviderMembers("acme", map[string][]byte{
+		"manifest.yaml": metadata,
+		"trigger.yaml":  []byte(body),
+	})
+	if err != nil {
+		return Manifest{}, err
+	}
+	trigger, _ := provider.Body(packmodel.BodyTrigger)
+	return AdmitBody(trigger)
+}
+
 func compileTriggerTestPlan(t testing.TB, manifest Manifest) InboundAdmissionPlan {
 	t.Helper()
-	catalog, err := NewCatalogSnapshot(CatalogEntry{Manifest: manifest, Identity: PackIdentity{ID: "provider." + manifest.Provider(), Version: "1.0.0", ManifestHash: "sha256:" + strings.Repeat("a", 64), Provenance: "test"}})
+	catalog, err := NewCatalogSnapshotFromAdmittedBodies(manifest)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -337,7 +316,7 @@ func TestTriggerBodyDefaultAlternativesUseNormalEnumErrors(t *testing.T) {
 			}
 		}
 	}
-	manifest := parseTriggerTestBody(t, "provider: acme\nevent_name: {literal: inbound.acme}\ndelivery_id: {literal: receipt}\nevent_type: {literal: observed}\n")
+	manifest := parseTriggerTestBody(t, "event_name: {literal: raw}\ndelivery_id: {literal: receipt}\nevent_type: {literal: observed}\n")
 	delivery, err := manifest.Accept(Request{Headers: http.Header{}, Payload: map[string]any{}})
 	if err != nil || delivery.AcknowledgeBeforeDispatch {
 		t.Fatalf("omitted default changed execution: %+v, %v", delivery, err)

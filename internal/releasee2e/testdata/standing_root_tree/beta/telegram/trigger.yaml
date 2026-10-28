@@ -1,0 +1,101 @@
+transport: webhook
+payload_object_required: true
+payload_object_error: telegram update object is required
+secret:
+  required: true
+signature:
+  type: token_equality
+  header: X-Telegram-Bot-Api-Secret-Token
+  missing_error: telegram secret token is required
+  invalid_error: invalid telegram secret token
+delivery_id:
+  json_path: $.update_id
+  required: true
+  missing_error: telegram update_id is required
+event_type:
+  literal: update
+  required: true
+event_name:
+  literal: raw
+normalized_events:
+  - event: callback_action
+    author_subject:
+      type: chat
+      field: conversation_reference
+    fields:
+      token:
+        from: callback_query.data
+        schema: {type: string, minLength: 1, maxLength: 64}
+      interaction_reference:
+        from: callback_query.id
+        schema: {type: string, minLength: 1}
+      external_account:
+        from: callback_query.from.id
+        schema: {type: string, pattern: '^[0-9]+$', minLength: 1, maxLength: 17}
+        convert: number_to_text
+      conversation_reference:
+        from: callback_query.message.chat.id
+        schema: {type: string, pattern: '^-?[0-9]+$', minLength: 1, maxLength: 17}
+        convert: number_to_text
+      conversation_scope:
+        from: callback_query.message.chat.type
+        schema: {type: string, enum: [direct, shared]}
+        convert: text_enum_map
+        values: {private: direct, group: shared, supergroup: shared}
+      provider_message_reference:
+        from: callback_query.message.message_id
+        schema: {type: integer, minimum: 1, maximum: 2147483647}
+    when:
+      absent: [message]
+      one_of:
+        callback_query.message.chat.type: [private, group, supergroup]
+  - event: text_message
+    author_subject:
+      type: chat
+      field: conversation_reference
+    fields:
+      text:
+        from: message.text
+        schema: {type: string, minLength: 1, maxLength: 4096}
+      external_account:
+        from: message.from.id
+        schema: {type: string, pattern: '^[0-9]+$', minLength: 1, maxLength: 17}
+        convert: number_to_text
+      conversation_reference:
+        from: message.chat.id
+        schema: {type: string, pattern: '^-?[0-9]+$', minLength: 1, maxLength: 17}
+        convert: number_to_text
+      conversation_scope:
+        from: message.chat.type
+        schema: {type: string, enum: [direct, shared]}
+        convert: text_enum_map
+        values: {private: direct, group: shared, supergroup: shared}
+      provider_message_reference:
+        from: message.message_id
+        schema: {type: integer, minimum: 1, maximum: 2147483647}
+      reply_to_message_reference:
+        from: message.reply_to_message.message_id
+        schema: {type: integer, minimum: 1, maximum: 2147483647}
+        optional: true
+      command_invocation:
+        from: message.text
+        schema:
+          type: object
+          additionalProperties: false
+          required: [reference]
+          properties:
+            reference: {type: string, pattern: '^[A-Za-z0-9_]{1,32}$', minLength: 1, maxLength: 32}
+            address: {type: string, pattern: '^[A-Za-z0-9_]{5,32}$', minLength: 5, maxLength: 32}
+        convert:
+          pattern: '^/(?P<reference>[A-Za-z0-9_]{1,32})(?:@(?P<address>[A-Za-z0-9_]{5,32}))?$'
+        optional: true
+    when:
+      absent: [callback_query, message.sender_chat]
+      one_of:
+        message.chat.type: [private, group, supergroup]
+ack:
+  mode: durable_before_dispatch
+metadata:
+  user_agent: user_agent
+  telegram_update_id: delivery_id
+  telegram_update_type: event_type

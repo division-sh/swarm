@@ -252,7 +252,11 @@ func TestSelectedForkDestructiveDiscardRefusesDependentForkBothStores(t *testing
 			if err := commitSemanticEventFixture(ctx, eventStore, forkPoint); err != nil {
 				t.Fatalf("commit forkable source event: %v", err)
 			}
-			child, err := materializer.MaterializeRunFork(ctx, runfork.RunForkMaterializeRequest{SourceRunID: runID, At: forkPointID})
+			rooted, err := store.(rootedRunStore).LoadRunRootedSource(ctx, runID)
+			if err != nil {
+				t.Fatal(err)
+			}
+			child, err := materializer.MaterializeRunFork(ctx, runfork.RunForkMaterializeRequest{SourceRunID: runID, At: forkPointID, RootAdmission: rooted.Admission()})
 			if err != nil {
 				t.Fatalf("materialize dependent fork: %v", err)
 			}

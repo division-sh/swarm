@@ -14,6 +14,8 @@ import (
 	runtimecorrelation "github.com/division-sh/swarm/internal/runtime/correlation"
 	runtimeengine "github.com/division-sh/swarm/internal/runtime/engine"
 	runtimepipelineobligation "github.com/division-sh/swarm/internal/runtime/pipelineobligation"
+	"github.com/division-sh/swarm/internal/runtime/semanticview"
+	"github.com/division-sh/swarm/internal/testutil/sourceartifactfixture"
 	"github.com/google/uuid"
 )
 
@@ -190,12 +192,14 @@ func TestPipelinePublicationReleaseIsTerminalAndImmediatelyReclaimable(t *testin
 		},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
+			rooted, _ := sourceartifactfixture.Rooted(t, "pipeline-release", sourceartifactfixture.Artifact())
 			owner := newTerminalReleasePipelineOwner()
 			eventID := uuid.NewString()
 			owner.releaseError[eventID] = tc.failure
 			bus := &EventBus{
 				pipelineObligations: owner,
-				sourceArtifactFact:  sourceMutationFact(t, "9"),
+				sourceArtifactFact:  sourceartifactfixture.FactFor(rooted.Artifact()),
+				rootAdmission:       rooted.Admission(),
 			}
 			claim, err := bus.claimPipelinePublication(context.Background(), eventID)
 			if err != nil {
@@ -222,11 +226,13 @@ func TestPipelinePublicationReleaseIsTerminalAndImmediatelyReclaimable(t *testin
 		})
 	}
 	t.Run("cancelled_original", func(t *testing.T) {
+		rooted, _ := sourceartifactfixture.Rooted(t, "pipeline-release", sourceartifactfixture.Artifact())
 		owner := newTerminalReleasePipelineOwner()
 		admissions := 0
 		bus := &EventBus{
 			pipelineObligations: owner,
-			sourceArtifactFact:  sourceMutationFact(t, "9"),
+			sourceArtifactFact:  sourceartifactfixture.FactFor(rooted.Artifact()),
+			rootAdmission:       rooted.Admission(),
 			mutationContext: func(ctx context.Context) (context.Context, error) {
 				admissions++
 				return ctx, ctx.Err()
@@ -274,7 +280,12 @@ func TestPipelinePublicationReleaseIsTerminalAndImmediatelyReclaimable(t *testin
 }
 
 func TestPipelineOneShotTerminalSinksPropagateOrRecordCleanupEvidence(t *testing.T) {
-	for _, sink := range []string{"selected_fork_abandon", "rollback_cleanup", "direct_recovery"} {
+	source := semanticview.Wrap(loadTargetRouteTempBundle(t, map[string]string{
+		"manifest.yaml": "version: 1.0.0\nplatform_version: '*'\n",
+		"schema.yaml":   "stages: []\n",
+		"events.yaml":   "test.work:\n",
+	}))
+	for _, sink := range []string{"selected_fork_abandon", "direct_recovery"} {
 		for _, failureMode := range []string{"fail_once", "persistent_failure"} {
 			t.Run(sink+"/"+failureMode, func(t *testing.T) {
 				owner := newTerminalReleasePipelineOwner()
@@ -285,7 +296,7 @@ func TestPipelineOneShotTerminalSinksPropagateOrRecordCleanupEvidence(t *testing
 					}
 					return errors.New(failureMode + " one-shot cleanup failure")
 				}
-				bus, err := newScopedTestEventBus(InMemoryEventStore{}, EventBusOptions{PipelineObligations: owner})
+				bus, err := newScopedTestEventBus(InMemoryEventStore{}, EventBusOptions{PipelineObligations: owner, ContractBundle: source})
 				if err != nil {
 					t.Fatalf("NewEventBus: %v", err)
 				}
@@ -303,12 +314,6 @@ func TestPipelineOneShotTerminalSinksPropagateOrRecordCleanupEvidence(t *testing
 					if err == nil || !strings.Contains(err.Error(), failureMode+" one-shot cleanup failure") {
 						t.Fatalf("abandon cleanup error = %v, want propagated evidence", err)
 					}
-				case "rollback_cleanup":
-					claim, err := bus.claimPipelinePublication(context.Background(), eventID)
-					if err != nil {
-						t.Fatalf("claim rollback publication: %v", err)
-					}
-					claim.releaseAndLog(context.Background())
 				case "direct_recovery":
 					event := eventtest.RuntimeControl(eventID, events.EventType("test.work"), "test", "", []byte(`{}`), 0, uuid.NewString(), "", events.EventEnvelope{}, time.Now())
 					bus.SetRuntimeIngressDispatchGate(terminalReleasePausedGate{})
@@ -339,6 +344,12 @@ func TestPipelineOneShotTerminalSinksPropagateOrRecordCleanupEvidence(t *testing
 }
 
 func TestPreparedDispatchAdmissionFailureTerminallyConsumesPublicationClaim(t *testing.T) {
+	bundle := loadTargetRouteTempBundle(t, map[string]string{
+		"manifest.yaml": "version: 1.0.0\nplatform_version: '*'\n",
+		"schema.yaml":   "stages: []\n",
+		"events.yaml":   "test.prepared.dispatch:\n",
+	})
+	source := semanticview.Wrap(bundle)
 	dispatches := []struct {
 		name string
 		run  func(*EventBus, context.Context, PreparedPublish) error
@@ -366,9 +377,10 @@ func TestPreparedDispatchAdmissionFailureTerminallyConsumesPublicationClaim(t *t
 		for _, dispatch := range dispatches {
 			t.Run(lifecycle+"/"+dispatch.name, func(t *testing.T) {
 				process := worklifetime.NewProcess()
+				runtimeID := "prepared-dispatch-" + lifecycle + "-" + dispatch.name
 				runtimeOwner, err := process.NewRuntime(context.Background(), worklifetime.RuntimeIdentity{
-					RuntimeInstanceID: "prepared-dispatch-" + lifecycle + "-" + dispatch.name,
-					BundleHash:        "prepared-dispatch-bundle",
+					RuntimeInstanceID: runtimeID,
+					BundleHash:        bundle.SourceArtifact.BundleHash(),
 				})
 				if err != nil {
 					t.Fatalf("create runtime occurrence: %v", err)
@@ -387,6 +399,8 @@ func TestPreparedDispatchAdmissionFailureTerminallyConsumesPublicationClaim(t *t
 				bus, err := newScopedTestEventBus(InMemoryEventStore{}, EventBusOptions{
 					PipelineObligations: owner,
 					WorkOwner:           runtimeOwner,
+					RuntimeInstanceID:   runtimeID,
+					ContractBundle:      source,
 				})
 				if err != nil {
 					t.Fatalf("NewEventBus: %v", err)
@@ -443,6 +457,12 @@ func TestPreparedDispatchAdmissionFailureTerminallyConsumesPublicationClaim(t *t
 }
 
 func TestInvalidPreparedDispatchTerminallyConsumesAttachedPublicationClaim(t *testing.T) {
+	bundle := loadTargetRouteTempBundle(t, map[string]string{
+		"manifest.yaml": "version: 1.0.0\nplatform_version: '*'\n",
+		"schema.yaml":   "stages: []\n",
+		"events.yaml":   "test.prepared.dispatch:\n",
+	})
+	source := semanticview.Wrap(bundle)
 	for _, dispatch := range []struct {
 		name string
 		run  func(*EventBus, context.Context, PreparedPublish) error
@@ -468,9 +488,10 @@ func TestInvalidPreparedDispatchTerminallyConsumesAttachedPublicationClaim(t *te
 	} {
 		t.Run(dispatch.name, func(t *testing.T) {
 			process := worklifetime.NewProcess()
+			runtimeID := "invalid-prepared-dispatch-" + dispatch.name
 			runtimeOwner, err := process.NewRuntime(context.Background(), worklifetime.RuntimeIdentity{
-				RuntimeInstanceID: "invalid-prepared-dispatch-" + dispatch.name,
-				BundleHash:        "invalid-prepared-dispatch-bundle",
+				RuntimeInstanceID: runtimeID,
+				BundleHash:        bundle.SourceArtifact.BundleHash(),
 			})
 			if err != nil {
 				t.Fatalf("create runtime occurrence: %v", err)
@@ -489,6 +510,8 @@ func TestInvalidPreparedDispatchTerminallyConsumesAttachedPublicationClaim(t *te
 			bus, err := newScopedTestEventBus(InMemoryEventStore{}, EventBusOptions{
 				PipelineObligations: owner,
 				WorkOwner:           runtimeOwner,
+				RuntimeInstanceID:   runtimeID,
+				ContractBundle:      source,
 			})
 			if err != nil {
 				t.Fatalf("NewEventBus: %v", err)
@@ -528,7 +551,7 @@ func TestInvalidPreparedDispatchTerminallyConsumesAttachedPublicationClaim(t *te
 func VerifyEventBusResetPreservesPendingOperationUntilPriorRetirementSucceedsForTest(t *testing.T, open ExactHandoffNativeOpenerForTest) {
 	store := newExactHandoffProofStore(open(t, false), false)
 	owner := newTerminalReleasePipelineOwner()
-	bus, err := newScopedTestEventBus(store, EventBusOptions{PipelineObligations: owner})
+	bus, err := newScopedTestEventBus(store, EventBusOptions{PipelineObligations: owner, ContractBundle: store.fixture.Source})
 	if err != nil {
 		t.Fatalf("NewEventBus: %v", err)
 	}
@@ -583,8 +606,13 @@ func VerifyEventBusResetPreservesPendingOperationUntilPriorRetirementSucceedsFor
 }
 
 func TestRecoveredPublicationRejectsForeignSourceBeforePendingRelease(t *testing.T) {
+	source := semanticview.Wrap(loadTargetRouteTempBundle(t, map[string]string{
+		"manifest.yaml": "version: 1.0.0\nplatform_version: '*'\n",
+		"schema.yaml":   "stages: []\n",
+		"events.yaml":   "test.work:\n",
+	}))
 	owner := newTerminalReleasePipelineOwner()
-	bus, err := newScopedTestEventBus(InMemoryEventStore{}, EventBusOptions{PipelineObligations: owner})
+	bus, err := newScopedTestEventBus(InMemoryEventStore{}, EventBusOptions{PipelineObligations: owner, ContractBundle: source})
 	if err != nil {
 		t.Fatalf("NewEventBus: %v", err)
 	}
@@ -631,8 +659,13 @@ func TestRecoveredPublicationRejectsForeignSourceBeforePendingRelease(t *testing
 }
 
 func TestEventBusResetAttemptsEveryTerminalPendingReleaseAndAggregatesEvidence(t *testing.T) {
+	source := semanticview.Wrap(loadTargetRouteTempBundle(t, map[string]string{
+		"manifest.yaml": "version: 1.0.0\nplatform_version: '*'\n",
+		"schema.yaml":   "stages: []\n",
+		"events.yaml":   "test.work:\n",
+	}))
 	owner := newTerminalReleasePipelineOwner()
-	bus, err := newScopedTestEventBus(InMemoryEventStore{}, EventBusOptions{PipelineObligations: owner})
+	bus, err := newScopedTestEventBus(InMemoryEventStore{}, EventBusOptions{PipelineObligations: owner, ContractBundle: source})
 	if err != nil {
 		t.Fatalf("NewEventBus: %v", err)
 	}

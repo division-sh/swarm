@@ -73,7 +73,7 @@ func verifyUnpublishedTransferredArrivalRefork(t *testing.T, latePublication boo
 			if latePublication {
 				parentRequest.ForkOperation = &runfork.ForkOperationRequest{OperationID: uuid.NewString(), Actor: "unpublished-parent", IdempotencyKey: "late-publication",
 					TransportHash: "late-parent-transport", SourceRunID: ancestor, ForkEventID: cut,
-					TargetBundleHash: loaded.SourceArtifactFact.BundleHash(), AllowSourceFreeze: true, ContractSelection: selection}
+					TargetBundleHash: loaded.SourceArtifactFact.BundleHash(), TargetRootReference: loaded.RootedSource.Admission().Reference(), AllowSourceFreeze: true, ContractSelection: selection}
 			}
 			preparedParent, err := owner.Prepare(ctx, parentRequest)
 			if err != nil {
@@ -111,7 +111,8 @@ func verifyUnpublishedTransferredArrivalRefork(t *testing.T, latePublication boo
 			}
 			operation := runfork.ForkOperationRequest{OperationID: uuid.NewString(), Actor: "unpublished-descendant", IdempotencyKey: "parent-start",
 				TransportHash: "unpublished-descendant-transport", SourceRunID: parentRun, AtStart: true,
-				TargetBundleHash: loaded.SourceArtifactFact.BundleHash(), AllowSourceFreeze: true, ContractSelection: selection}
+				TargetBundleHash: loaded.SourceArtifactFact.BundleHash(), AllowSourceFreeze: true, ContractSelection: selection, TargetRootReference: loaded.RootedSource.Admission().Reference(),
+			}
 			childOwner := owner
 			if latePublication {
 				childPorts := *owner.ports

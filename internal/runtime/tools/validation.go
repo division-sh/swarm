@@ -7,6 +7,7 @@ import (
 	"strings"
 
 	"github.com/division-sh/swarm/internal/channelonboarding"
+	"github.com/division-sh/swarm/internal/packadmission"
 	runtimecontracts "github.com/division-sh/swarm/internal/runtime/contracts"
 	"github.com/division-sh/swarm/internal/runtime/semanticview"
 )
@@ -86,7 +87,6 @@ func qualifyNativeActivityImplementation(source semanticview.Source, name string
 	if err := entry.Validate(); err != nil {
 		return fmt.Errorf("native activity tool %s: %w", name, err)
 	}
-	sites := 0
 	for _, record := range source.ExecutableNodeRecords() {
 		node, err := record.Identity()
 		if err != nil {
@@ -96,14 +96,14 @@ func qualifyNativeActivityImplementation(source semanticview.Source, name string
 			if site.Spec.Tool != name {
 				continue
 			}
-			if err := channelonboarding.QualifySessionActivityDeclaration(source, site); err != nil {
+			trigger, err := packadmission.SessionActivityTrigger(source, site)
+			if err != nil {
 				return fmt.Errorf("native activity tool %s: %w", name, err)
 			}
-			sites++
+			if err := channelonboarding.QualifySessionActivityDeclaration(source, site, trigger); err != nil {
+				return fmt.Errorf("native activity tool %s: %w", name, err)
+			}
 		}
-	}
-	if sites == 0 {
-		return fmt.Errorf("tool %s has no qualified private activity/ingress declaration", name)
 	}
 	return nil
 }

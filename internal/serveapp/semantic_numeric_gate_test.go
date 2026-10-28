@@ -8,7 +8,9 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/division-sh/swarm/internal/packartifact"
 	"github.com/division-sh/swarm/internal/servedparity"
+	"github.com/division-sh/swarm/internal/testutil/packfixture"
 	"github.com/google/uuid"
 )
 
@@ -16,8 +18,13 @@ func TestWorkflowGateSemanticNumericOutcomeExecutionParity(t *testing.T) {
 	for _, backend := range []servedparity.Backend{servedparity.BackendDefaultSQLite, servedparity.BackendExplicitPostgres} {
 		t.Run(string(backend), func(t *testing.T) {
 			root := semanticNumericIngressFixture(t)
-			schema := `name: numeric-gate
-stages:
+			if _, err := packartifact.ImportEmbeddedPack(root, "telegram", packfixture.EmbeddedBase(t)); err != nil {
+				t.Fatal(err)
+			}
+			credentialPath := filepath.Join(t.TempDir(), "credentials.json")
+			t.Setenv("SWARM_CREDENTIALS_FILE", credentialPath)
+			writeChannelOnboardingLiveToolCredentials(t, credentialPath)
+			schema := `stages:
   waiting: {}
   review:
     gate:
@@ -41,6 +48,10 @@ pins:
   inputs:
     - numeric.requested
 `
+
+			if err := os.WriteFile(filepath.Join(root, "manifest.yaml"), []byte("version: 1.0.0\nplatform_version: '*'\n"), 0600); err != nil {
+				t.Fatal(err)
+			}
 			if err := os.WriteFile(filepath.Join(root, "schema.yaml"), []byte(schema), 0600); err != nil {
 				t.Fatal(err)
 			}

@@ -24,7 +24,6 @@ import (
 	"github.com/division-sh/swarm/internal/runtime/pipeline"
 	"github.com/division-sh/swarm/internal/runtime/replycontext"
 	"github.com/division-sh/swarm/internal/runtime/runlifecycle"
-	"github.com/division-sh/swarm/internal/runtime/semanticview"
 	"github.com/division-sh/swarm/internal/runtime/testfixtures/canonicalrouting"
 	"github.com/division-sh/swarm/internal/store/storetest"
 	"github.com/google/uuid"
@@ -56,7 +55,7 @@ func TestIssue642DepthThreeOriginalDeadlineAndLateReplyBothStores(t *testing.T) 
 			ctx = effects.WithExecutionMode(ctx, executionmode.Live)
 			storetest.RequireRun(t, ctx, selected, storetest.RunFixture{Origin: storetest.ScenarioSetupOrigin(), RunID: runID,
 				BundleHash: h.rt.Options.SourceArtifactFact.BundleHash(), Artifact: h.bundle.SourceArtifact, StartedAt: at.Add(-time.Minute)})
-			source := semanticview.Wrap(h.bundle)
+			source := h.rt.Options.WorkflowModule.SemanticSource()
 			created, err := h.rt.Manager.EnsureFlowInstance(ctx, pipeline.FlowInstanceActivationRequest{ContractBundle: source,
 				Instance: flowidentity.Stored(source, ".", runID, runID, "", ""), OccurredAt: at})
 			if err != nil || !created {

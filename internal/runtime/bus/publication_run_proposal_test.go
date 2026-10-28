@@ -74,9 +74,10 @@ func TestPublicationRunFixtureRequiresExactKnownRun(t *testing.T) {
 
 func TestRunCreatingRecipientPreviewSharesProposalWithOrdinaryConsumers(t *testing.T) {
 	source := semanticview.Wrap(loadTargetRouteTempBundle(t, map[string]string{
-		"schema.yaml": "name: root\npins:\n  inputs: [task.requested]\n  outputs: [task.requested]\n",
-		"events.yaml": "task.requested:\n",
-		"nodes.yaml":  "worker:\n  execution_type: system_node\n  subscribes_to: [task.requested]\n  event_handlers:\n    task.requested:\n      guard: {id: admitted, check: true}\n",
+		"manifest.yaml": "version: 1.0.0\nplatform_version: '*'\n",
+		"schema.yaml":   "pins:\n  inputs: [task.requested]\n  outputs: [task.requested]\n",
+		"events.yaml":   "task.requested:\n",
+		"nodes.yaml":    "worker:\n  execution_type: system_node\n  subscribes_to: [task.requested]\n  event_handlers:\n    task.requested:\n      guard: {id: admitted, check: true}\n",
 	}))
 	missing := &runlifecycle.RunNotFoundError{RunID: busInternalTestRunID}
 	independent := errors.New("independent run observation failure")

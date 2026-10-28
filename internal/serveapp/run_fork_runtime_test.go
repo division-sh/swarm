@@ -3,7 +3,6 @@ package serveapp
 import (
 	"bytes"
 	"context"
-	"database/sql"
 
 	"fmt"
 	"os"
@@ -13,9 +12,6 @@ import (
 	"testing"
 
 	"github.com/division-sh/swarm/internal/cliapp"
-
-	runtimecontracts "github.com/division-sh/swarm/internal/runtime/contracts"
-
 	"github.com/division-sh/swarm/internal/store/storetest"
 
 	"github.com/division-sh/swarm/internal/testpostgres"
@@ -39,12 +35,18 @@ func TestRunForkRuntimeOwnerHarness_ActivateWithBundleHashReachesSelectedActivat
 }
 
 func TestRunForkRuntimeOwnerHarness_PersistedBundleDoesNotRequireAmbientSource(t *testing.T) {
-	dsn, db, _ := testutil.StartPostgres(t)
+	dsn := testutil.StartPostgresDSN(t)
+	selected, _ := storetest.StartPostgresRuntimeStoreWithReopen(t, dsn)
 	setPostgresEnvFromDSN(t, dsn)
 	repo := repoRootForTest()
 	borrowedRoot := t.TempDir()
 	copyReleaseFixtureTree(t, filepath.Join(repo, "tests", "tier1-primitives", "test-emits-multiple"), borrowedRoot)
-	bundleHash, _ := registerRunForkCLIContractCatalog(t, context.Background(), db, borrowedRoot)
+	_, bundle, err := cliapp.NewSwarmWorkflowModule(repo, borrowedRoot)
+	if err != nil {
+		t.Fatal(err)
+	}
+	storetest.RequireBundleDataCatalog(t, context.Background(), selected, bundle)
+	bundleHash := bundle.SourceArtifact.BundleHash()
 	if err := os.RemoveAll(borrowedRoot); err != nil {
 		t.Fatalf("remove admitted source root: %v", err)
 	}
@@ -71,7 +73,8 @@ func TestRunForkRuntimeOwnerHarness_PersistedBundleDoesNotRequireAmbientSource(t
 }
 
 func TestRunForkRuntimeOwnerHarness_SelectedContractsExecutesExplicitHostRefusal(t *testing.T) {
-	dsn, db, _ := testutil.StartPostgres(t)
+	dsn := testutil.StartPostgresDSN(t)
+	selected, _ := storetest.StartPostgresRuntimeStoreWithReopen(t, dsn)
 	setPostgresEnvFromDSN(t, dsn)
 	configPath := os.Getenv("SWARM_CONFIG")
 	rawConfig, err := os.ReadFile(configPath)
@@ -79,7 +82,12 @@ func TestRunForkRuntimeOwnerHarness_SelectedContractsExecutesExplicitHostRefusal
 		t.Fatalf("read run-fork config: %v", err)
 	}
 	writeRuntimeConfigText(t, configPath, string(rawConfig)+"workspace:\n  backend: host\n")
-	bundleHash, _ := registerRunForkCLIContractCatalog(t, context.Background(), db, filepath.Join(repoRootForTest(), doctorAgentContractsPath))
+	_, bundle, err := cliapp.NewSwarmWorkflowModule(repoRootForTest(), filepath.Join(repoRootForTest(), doctorAgentContractsPath))
+	if err != nil {
+		t.Fatal(err)
+	}
+	storetest.RequireBundleDataCatalog(t, context.Background(), selected, bundle)
+	bundleHash := bundle.SourceArtifact.BundleHash()
 	var out bytes.Buffer
 	code := runForkRuntimeOwnerHarness(context.Background(), repoRootForTest(), []string{
 		"--store", "postgres",
@@ -106,24 +114,6 @@ func TestRunForkRuntimeOwnerHarness_NonDryRunWithoutMaterializeOnlyStaysFailClos
 	if !strings.Contains(buf.String(), "mutating fork execution requires --bundle-hash") {
 		t.Fatalf("output = %q, want fail-closed fork execution message", buf.String())
 	}
-}
-
-func registerRunForkCLIContractCatalog(t *testing.T, ctx context.Context, db *sql.DB, sourceRoot string) (string, storetest.RunFixtureStore) {
-	t.Helper()
-	repo := repoRootForTest()
-	_, bundle, err := cliapp.NewSwarmWorkflowModule(repo, sourceRoot)
-	if err != nil {
-		t.Fatalf("load run-fork selected contracts %s: %v", sourceRoot, err)
-	}
-	catalog, err := runtimecontracts.BuildDurableDataCatalog(bundle)
-	if err != nil {
-		t.Fatalf("project run-fork selected source data %s: %v", sourceRoot, err)
-	}
-	selected := storetest.AdmitPostgresRuntimeStore(t, db)
-	if _, err := selected.EnsureSourceArtifactWithData(ctx, bundle.SourceArtifact, catalog); err != nil {
-		t.Fatalf("register run-fork selected source %s: %v", sourceRoot, err)
-	}
-	return bundle.SourceArtifact.BundleHash(), selected
 }
 
 func setPostgresEnvFromDSN(t *testing.T, dsn string) {

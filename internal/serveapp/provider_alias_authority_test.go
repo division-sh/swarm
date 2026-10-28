@@ -20,16 +20,14 @@ import (
 	"github.com/division-sh/swarm/internal/events"
 	"github.com/division-sh/swarm/internal/operatorchannel"
 	"github.com/division-sh/swarm/internal/operatorread"
-	"github.com/division-sh/swarm/internal/providertriggers"
 	"github.com/division-sh/swarm/internal/runtime/core/flowidentity"
 	"github.com/division-sh/swarm/internal/runtime/core/identity"
 	"github.com/division-sh/swarm/internal/runtime/core/identitytest"
-	runtimecredentials "github.com/division-sh/swarm/internal/runtime/credentials"
 	runtimeinbound "github.com/division-sh/swarm/internal/runtime/inboundpublication"
 	"github.com/division-sh/swarm/internal/runtime/semanticview"
+	"github.com/division-sh/swarm/internal/runtime/testfixtures/canonicalrouting"
 	"github.com/division-sh/swarm/internal/servedparity"
 	"github.com/division-sh/swarm/internal/store/storetest"
-	"gopkg.in/yaml.v3"
 )
 
 func TestProviderAliasesDeliverOnlyLocalAndConnectedConsumersBothStores(t *testing.T) {
@@ -61,15 +59,6 @@ func runProviderAliasAuthorityScenario(t *testing.T, scenario providerAliasScena
 		t.Run(string(backend), func(t *testing.T) {
 			isolateCLIAPIConfigEnv(t)
 			configureStandingLifecycleCredentials(t)
-			credentials, err := runtimecredentials.NewFileStore(os.Getenv("SWARM_CREDENTIALS_FILE"))
-			if err != nil {
-				t.Fatal(err)
-			}
-			for _, alias := range []string{"alpha", "beta"} {
-				if err := credentials.Set(context.Background(), "webhook_signing."+alias, alias+"-secret"); err != nil {
-					t.Fatal(err)
-				}
-			}
 			var fault *providerPublicationAckLoss
 			if scenario.ackLoss {
 				fault = &providerPublicationAckLoss{}
@@ -87,6 +76,10 @@ func runProviderAliasAuthorityScenario(t *testing.T, scenario providerAliasScena
 			requireIndependentStandingRootTrees(t, rt, scenario)
 			baseURL := strings.TrimSuffix(rt.Endpoint, "/v1/rpc")
 			for aliasIndex, alias := range []string{"alpha", "beta"} {
+				endpointAlias := filepath.Base(root)
+				if flow := scenario.source(alias); flow != "." {
+					endpointAlias += "." + flow
+				}
 				for shapeIndex, shape := range []string{"text", "callback"} {
 					t.Run(alias+"/"+shape, func(t *testing.T) {
 						id := 9100 + aliasIndex*10 + shapeIndex
@@ -100,18 +93,18 @@ func runProviderAliasAuthorityScenario(t *testing.T, scenario providerAliasScena
 						}
 						// Failed authentication must not claim the delivery identity: the exact
 						// same update succeeds only after presenting the bound signing secret.
-						for _, secret := range []string{"", "wrong-secret", map[string]string{"alpha": "beta-secret", "beta": "alpha-secret"}[alias]} {
-							status, _ := postProviderAliasUpdate(t, baseURL, alias, secret, update)
+						for _, secret := range []string{"", "wrong-secret"} {
+							status, _ := postProviderAliasUpdate(t, baseURL, endpointAlias, secret, update)
 							if status != http.StatusUnauthorized {
 								t.Fatalf("unauthenticated %s status=%d, want 401", alias, status)
 							}
 						}
-						status, response := postProviderAliasUpdate(t, baseURL, alias, alias+"-secret", update)
+						status, response := postProviderAliasUpdate(t, baseURL, endpointAlias, "telegram-secret", update)
 						if fault != nil {
 							if status != http.StatusServiceUnavailable {
 								t.Fatalf("lost acknowledgment status=%d body=%s", status, response)
 							}
-							status, response = postProviderAliasUpdate(t, baseURL, alias, alias+"-secret", update)
+							status, response = postProviderAliasUpdate(t, baseURL, endpointAlias, "telegram-secret", update)
 							if status != http.StatusOK {
 								t.Fatalf("committed retry status=%d body=%s", status, response)
 							}
@@ -163,11 +156,11 @@ func runProviderAliasAuthorityScenario(t *testing.T, scenario providerAliasScena
 								}
 								seen[name] = true
 							}
-							if !seen["inbound.telegram"] || !seen[normalized] {
+							if !seen["inbound.telegram.raw"] || !seen[normalized] {
 								t.Fatalf("event kinds=%v", seen)
 							}
 						}
-						duplicateStatus, duplicateBody := postProviderAliasUpdate(t, baseURL, alias, alias+"-secret", update)
+						duplicateStatus, duplicateBody := postProviderAliasUpdate(t, baseURL, endpointAlias, "telegram-secret", update)
 						var duplicate struct {
 							PublicationID string   `json:"publication_id"`
 							EventIDs      []string `json:"event_ids"`
@@ -276,12 +269,12 @@ func (s providerAliasScenario) receiver(alias string) string {
 func requireProviderAliasRootConnection(t *testing.T, rt servedWorkspaceProofRuntime, receiver string) {
 	t.Helper()
 	var runID string
-	for _, name := range []string{"inbound.telegram.text_message", "inbound.telegram.callback_action"} {
+	for _, name := range []string{"public.text_message", "public.callback_action"} {
 		payload := map[string]any{
 			"conversation_reference": "42", "conversation_scope": "direct", "external_account": "41",
 			"provider_message_reference": 7,
 		}
-		if name == "inbound.telegram.text_message" {
+		if name == "public.text_message" {
 			payload["text"] = "root publication"
 		} else {
 			payload["interaction_reference"] = "root-action"
@@ -367,7 +360,7 @@ func requireProviderAliasDeliveries(t *testing.T, rt servedWorkspaceProofRuntime
 			if receiver != "" {
 				want = append(want, identitytest.FlowNode(t, receiver, "observer").Key())
 			}
-		case "inbound.telegram":
+		case "inbound.telegram.raw":
 			if rawConnected && receiver != "" {
 				want = append(want, identitytest.FlowNode(t, receiver, "observer").Key())
 			}
@@ -403,7 +396,7 @@ func requireProviderAliasDeliveries(t *testing.T, rt servedWorkspaceProofRuntime
 			t.Logf("provider agent physical storage: columns=%v rows=%v", physical["agents"].Columns, physical["agents"].Rows)
 			t.Fatalf("%s %s recipients=%v want=%v; root, other alias and unwired consumers must be absent", alias, event.EventName, got, want)
 		}
-		if len(want) == 0 && event.EventName == "inbound.telegram" &&
+		if len(want) == 0 && event.EventName == "inbound.telegram.raw" &&
 			(event.NoDelivery == nil || event.NoDelivery.Reason != "no_subscriber_by_design" || event.EntityID != "") {
 			t.Fatalf("consumerless raw source acquired a recipient or false settlement: %#v", event)
 		}
@@ -477,32 +470,41 @@ func requireProviderAliasConstructedNodeTarget(t *testing.T, rt servedWorkspaceP
 
 func writeProviderAliasAuthorityFixture(t *testing.T, scenario providerAliasScenario) string {
 	t.Helper()
-	root := t.TempDir()
-	names := []string{"inbound.telegram", "inbound.telegram.text_message", "inbound.telegram.callback_action"}
-	imports := "imports:\n  provider_trigger_events:\n"
+	rootName := "provider-authority"
+	if scenario.rootProvider {
+		rootName = "alpha"
+	}
+	root := filepath.Join(t.TempDir(), rootName)
+	names := []string{"inbound.telegram.raw", "inbound.telegram.text_message", "inbound.telegram.callback_action"}
 	nodes := "observer:\n  execution_type: system_node\n  subscribes_to: [" + strings.Join(names, ", ") + "]\n  event_handlers:\n"
 	for _, name := range names {
-		if name != "inbound.telegram" {
-			imports += "    - {provider: telegram, event: " + name + "}\n"
-		}
 		nodes += "    " + name + ":\n      guard: {id: admit, check: true}\n"
 	}
 	pins := "pins:\n  inputs: [" + strings.Join(names, ", ") + "]\n"
-	rootSchema := "name: provider-authority\n" + imports + "pins:\n  inputs: [" + strings.Join(names[1:], ", ") + "]\nconnect:\n"
+	rootSchema := "# fixture: provider-authority\nconnect:\n"
+	if scenario.alphaReceiver == "." {
+		rootSchema = "# fixture: provider-authority\npins:\n  inputs: [" + strings.Join(names[1:], ", ") + "]\nconnect:\n"
+	}
 	if scenario.publicConnected {
-		rootSchema = strings.Replace(rootSchema, "\nconnect:\n", "\n  outputs: ["+strings.Join(names[1:], ", ")+"]\nconnect:\n", 1)
-		for _, name := range names[1:] {
+		rootSchema = "# fixture: provider-authority\npins:\n  inputs: [public.text_message, public.callback_action]\n  outputs: [public.text_message, public.callback_action]\nconnect:\n"
+		for _, name := range []string{"public.text_message", "public.callback_action"} {
 			rootSchema += "  - {event: " + name + ", from: ., to: " + scenario.alphaReceiver + "}\n"
 		}
 	}
 	rootNodes := strings.Replace(nodes, "subscribes_to: ["+strings.Join(names, ", ")+"]", "subscribes_to: ["+strings.Join(names[1:], ", ")+"]", 1)
-	rootNodes = strings.Replace(rootNodes, "    inbound.telegram:\n      guard: {id: admit, check: true}\n", "", 1)
+	rootNodes = strings.Replace(rootNodes, "    inbound.telegram.raw:\n      guard: {id: admit, check: true}\n", "", 1)
+	if scenario.publicConnected {
+		rootNodes = strings.ReplaceAll(strings.ReplaceAll(rootNodes, names[1], "public.text_message"), names[2], "public.callback_action")
+	}
 	connectedNames := names[1:]
 	if scenario.rawConnected {
 		connectedNames = names
 	}
 	files := map[string]string{}
-	if scenario.rootObserver {
+	if scenario.publicConnected {
+		files["events.yaml"] = "public.text_message:\n  conversation_reference: text\n  conversation_scope: text\n  external_account: text\n  provider_message_reference: integer\n  text: text\npublic.callback_action:\n  conversation_reference: text\n  conversation_scope: text\n  external_account: text\n  provider_message_reference: integer\n  interaction_reference: text\n  token: text\n"
+	}
+	if scenario.rootObserver && (scenario.publicConnected || scenario.alphaReceiver == ".") {
 		files["nodes.yaml"] = rootNodes
 	}
 	for _, alias := range []string{"alpha", "beta"} {
@@ -511,26 +513,26 @@ func writeProviderAliasAuthorityFixture(t *testing.T, scenario providerAliasScen
 				rootSchema += "  - {event: " + name + ", from: " + alias + ", to: " + receiver + "}\n"
 			}
 		}
-		files[alias+"/schema.yaml"] = "name: " + alias + "\nstages: []\n" + imports + pins + "  outputs: [" + strings.Join(connectedNames, ", ") + "]\ningress:\n  alias: " + alias + "\n  providers:\n    - {provider: telegram, signing_secret: webhook_signing." + alias + "}\n"
+		files[alias+"/schema.yaml"] = "stages: []\n" + pins + "  outputs: [" + strings.Join(connectedNames, ", ") + "]\n"
 		files[alias+"/entities.yaml"] = "service: {}\n"
 		files[alias+"/nodes.yaml"] = nodes
 		if scenario.noLocalConsumers {
 			delete(files, alias+"/nodes.yaml")
 		}
-		files[alias+"-receiver/schema.yaml"] = "name: " + alias + "-receiver\n"
+		files[alias+"-receiver/schema.yaml"] = "# fixture: " + alias + "-receiver\nstages: []\n"
 		hasReceiver := scenario.receiver("alpha") == alias+"-receiver" || scenario.receiver("beta") == alias+"-receiver" || (scenario.publicConnected && scenario.alphaReceiver == alias+"-receiver")
+		receiverNames := append([]string(nil), connectedNames...)
+		if scenario.omitAlphaProviderEdge && scenario.alphaReceiver == alias+"-receiver" {
+			receiverNames = nil
+		}
+		if scenario.publicConnected && scenario.alphaReceiver == alias+"-receiver" {
+			receiverNames = append(receiverNames, "public.text_message", "public.callback_action")
+		}
 		if hasReceiver {
-			files[alias+"-receiver/schema.yaml"] += imports + "pins:\n  inputs: [" + strings.Join(connectedNames, ", ") + "]\n"
+			files[alias+"-receiver/schema.yaml"] += "pins:\n  inputs: [" + strings.Join(receiverNames, ", ") + "]\n"
 		}
-		if scenario.rawConnected {
-			raw, err := yaml.Marshal(map[string]any{"inbound.telegram": providertriggers.RawEventCatalogEntry().Payload.Properties})
-			if err != nil {
-				t.Fatal(err)
-			}
-			files[alias+"-receiver/events.yaml"] = string(raw)
-		}
-		receiverNodes := "observer:\n  execution_type: system_node\n  subscribes_to: [" + strings.Join(connectedNames, ", ") + "]\n  event_handlers:\n"
-		for _, name := range connectedNames {
+		receiverNodes := "observer:\n  execution_type: system_node\n  subscribes_to: [" + strings.Join(receiverNames, ", ") + "]\n  event_handlers:\n"
+		for _, name := range receiverNames {
 			receiverNodes += "    " + name + ":\n      guard: {id: admit, check: true}\n"
 		}
 		if hasReceiver {
@@ -538,11 +540,14 @@ func writeProviderAliasAuthorityFixture(t *testing.T, scenario providerAliasScen
 		}
 	}
 	if scenario.alphaReceiver == "redirected-receiver" {
-		files["redirected-receiver/schema.yaml"] = strings.Replace(files["beta-receiver/schema.yaml"], "name: beta-receiver", "name: redirected-receiver", 1)
+		files["redirected-receiver/schema.yaml"] = strings.Replace(files["beta-receiver/schema.yaml"], "# fixture: beta-receiver", "# fixture: redirected-receiver", 1)
 		files["redirected-receiver/nodes.yaml"] = files["beta-receiver/nodes.yaml"]
 	}
 	if scenario.agents {
 		for _, flow := range []string{"alpha", "beta", "."} {
+			if flow == "." && !scenario.publicConnected && scenario.alphaReceiver != "." {
+				continue
+			}
 			id := flow + "-agent"
 			flowNames := names
 			if flow == "." {
@@ -566,6 +571,20 @@ func writeProviderAliasAuthorityFixture(t *testing.T, scenario providerAliasScen
 		delete(files, "alpha/schema.yaml")
 		delete(files, "alpha/nodes.yaml")
 		delete(files, "alpha/entities.yaml")
+	}
+	for _, alias := range []string{"alpha", "beta"} {
+		for _, name := range []string{"manifest.yaml", "trigger.yaml", "connector.yaml", "channel.yaml"} {
+			body, err := os.ReadFile(filepath.Join(canonicalrouting.RepoRoot(t), "packs/providers/telegram", name))
+			if err != nil {
+				t.Fatal(err)
+			}
+			files[filepath.Join(scenario.source(alias), "telegram", name)] = string(body)
+		}
+	}
+	for path := range files {
+		if filepath.Base(path) == "schema.yaml" {
+			files[filepath.Join(filepath.Dir(path), "manifest.yaml")] = "version: 1.0.0\nplatform_version: '*'\n"
+		}
 	}
 	for path, body := range files {
 		target := filepath.Join(root, path)

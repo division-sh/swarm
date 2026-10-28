@@ -2,7 +2,6 @@ package runtimepersistence
 
 import (
 	"context"
-	"errors"
 	"reflect"
 	"strings"
 	"testing"
@@ -127,7 +126,11 @@ func TestR7HistoricalDirectoryIgnoresPostCutConstructionAndLifecycleBothStores(t
 			if again, err := forks.PlanRunFork(f.ctx, cutRequest); err != nil || again.ForkPoint != cut.ForkPoint || !reflect.DeepEqual(again.Entities, cut.Entities) {
 				t.Fatalf("live construction/lifecycle changed the fixed cut: %+v err=%v", again, err)
 			}
-			forkRequest := runfork.RunForkMaterializeRequest{SourceRunID: runID, At: marker.ID()}
+			rooted, err := f.bundle.RootedSource()
+			if err != nil {
+				t.Fatal(err)
+			}
+			forkRequest := runfork.RunForkMaterializeRequest{SourceRunID: runID, At: marker.ID(), RootAdmission: rooted.Admission()}
 			fork, err := forks.MaterializeRunFork(f.ctx, forkRequest)
 			if err != nil {
 				t.Fatal(err)
@@ -190,9 +193,17 @@ func TestR7HistoricalDirectoryIgnoresPostCutConstructionAndLifecycleBothStores(t
 			if after, err := ReadSelectedForkApplicationStorageSnapshotForTest(f.ctx, f.store); err != nil || !reflect.DeepEqual(before, after) {
 				t.Fatalf("exact fixed fork replay changed durable evidence: %v", err)
 			}
-			artifact := sourceartifactfixture.New("agents.yaml", []byte("agents:\n  newer_source: {}\n"))
-			sourceartifactfixture.RequireArtifact(t, f.ctx, f.store.(sourceartifactfixture.Writer), artifact)
-			if _, err := f.store.(runlifecycle.OperationOwner).ReviseRunSource(f.ctx, runlifecycle.SourceRevisionRequest{RunID: runID, Source: sourceartifactfixture.FactFor(artifact)}); err != nil {
+			newer := loadLifecyclePersistenceFixtureForTest(t, map[string]string{"schema.yaml": "stages:\n  active: {}\n# newer historical directory source\n", "manifest.yaml": "version: 1.0.0\nplatform_version: '*'\n"})
+			newerRoot, err := newer.RootedSource()
+			if err != nil {
+				t.Fatal(err)
+			}
+			if newer.SourceArtifact.BundleHash() == fact.BundleHash() {
+				t.Fatal("newer source fixture reused the frozen artifact")
+			}
+			newerFact := sourceartifactfixture.FactFor(newer.SourceArtifact)
+			sourceartifactfixture.RequireArtifact(t, f.ctx, f.store.(sourceartifactfixture.Writer), newer.SourceArtifact)
+			if _, err := f.store.(runlifecycle.OperationOwner).ReviseRunSource(f.ctx, runlifecycle.SourceRevisionRequest{RunID: runID, Source: newerFact, RootAdmission: newerRoot.Admission()}); err != nil {
 				t.Fatal(err)
 			}
 			before, err = ReadSelectedForkApplicationStorageSnapshotForTest(f.ctx, f.store)
@@ -202,8 +213,7 @@ func TestR7HistoricalDirectoryIgnoresPostCutConstructionAndLifecycleBothStores(t
 			if current := readFixed(); !reflect.DeepEqual(current, original) {
 				t.Fatal("current source progress changed the captured observation")
 			}
-			var conflict *runfork.RunForkMaterializationConflictError
-			if replayed, err := forks.RequireMaterializedRunFork(f.ctx, fork.ForkRunID, forkRequest); err == nil || replayed.ForkRunID != "" || !errors.As(err, &conflict) || conflict.ForkRunID != fork.ForkRunID {
+			if replayed, err := forks.RequireMaterializedRunFork(f.ctx, fork.ForkRunID, forkRequest); err == nil || replayed.ForkRunID != "" || err.Error() != "load source run bundle identity: rooted execution context does not match the exact run source root" {
 				t.Fatalf("source progress rewrote frozen fork eligibility: %+v err=%v", replayed, err)
 			}
 			if after, err := ReadSelectedForkApplicationStorageSnapshotForTest(f.ctx, f.store); err != nil || !reflect.DeepEqual(before, after) {
@@ -214,14 +224,14 @@ func TestR7HistoricalDirectoryIgnoresPostCutConstructionAndLifecycleBothStores(t
 }
 
 func proveFlowConstructorHistoricalSnapshot(t *testing.T, backend string, staged, fielded, terminal, keyed bool) {
-	stages := ""
+	stages := "stages: []\n"
 	if staged {
 		stages = "stages:\n  pending: {}\n"
 	}
 	files := map[string]string{
-		"schema.yaml":        "name: historical-fieldless\n" + stages,
+		"schema.yaml":        "# fixture: historical-fieldless\n" + stages,
 		"events.yaml":        "checkpoint:\n",
-		"detail/schema.yaml": "name: detail\n",
+		"detail/schema.yaml": "stages: []\n", "manifest.yaml": "version: 1.0.0\nplatform_version: '*'\n", "detail/manifest.yaml": "version: 1.0.0\nplatform_version: '*'\n",
 	}
 	if fielded {
 		files["entities.yaml"] = "record:\n  marker: {type: text, initial: original}\n"
@@ -290,7 +300,11 @@ func proveFlowConstructorHistoricalSnapshot(t *testing.T, backend string, staged
 	if err != nil || len(history.Entities) != 2 {
 		t.Fatalf("constructed fieldless history: %+v %v", history.Entities, err)
 	}
-	request := runfork.RunForkMaterializeRequest{SourceRunID: runID, At: marker.ID()}
+	rooted, err := f.store.(rootedRunStore).LoadRunRootedSource(f.ctx, runID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	request := runfork.RunForkMaterializeRequest{SourceRunID: runID, At: marker.ID(), RootAdmission: rooted.Admission()}
 	fork, err := owner.MaterializeRunFork(f.ctx, request)
 	if err != nil {
 		t.Fatal(err)

@@ -130,14 +130,16 @@ func admitSyntheticEntityContractsForTest(
 	}
 	sort.Strings(flowIDs)
 	files := map[string]string{
-		"schema.yaml": "name: synthetic-contract\n",
+		"manifest.yaml": "version: 1.0.0\nplatform_version: \">=0.7.0 <0.8.0\"\n",
+		"schema.yaml":   "stages: []\n",
 	}
 	for _, flowID := range flowIDs {
 		entityType := strings.TrimSpace(flowEntityTypes[flowID])
 		if flowID == "" || entityType == "" {
 			t.Fatalf("synthetic flow entity contract requires nonblank flow and entity type: flow=%q type=%q", flowID, entityType)
 		}
-		files[""+flowID+"/schema.yaml"] = fmt.Sprintf("name: %s\nstages:\n  active: {}\n", flowID)
+		files[flowID+"/manifest.yaml"] = "version: 1.0.0\nplatform_version: \">=0.7.0 <0.8.0\"\n"
+		files[flowID+"/schema.yaml"] = "stages:\n  active: {}\n"
 		files[""+flowID+"/entities.yaml"] = fmt.Sprintf("%s:\n  instance_key: {type: text, _unused_reason: fixture instance identity}\n", entityType)
 	}
 	if rootEntityType = strings.TrimSpace(rootEntityType); rootEntityType != "" {

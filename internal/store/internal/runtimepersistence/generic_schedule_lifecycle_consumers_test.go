@@ -177,7 +177,7 @@ func TestRunControlControllerStopReconcilesBothTimerFamiliesOnBothStores(t *test
 	for _, backend := range []string{"sqlite", "postgres"} {
 		t.Run(backend, func(t *testing.T) {
 			f := newReceiverConfigActivationFixtureWithDocuments(t, backend, false, map[string]string{
-				"schema.yaml": "name: run-stop-timer-proof\nstages:\n  waiting:\n    timers:\n      - after: 1h\n        advances_to: done\n  done: {final: true}\n",
+				"schema.yaml": "stages:\n  waiting:\n    timers:\n      - after: 1h\n        advances_to: done\n  done: {final: true}\n", "manifest.yaml": "version: 1.0.0\nplatform_version: '*'\n",
 			}, nil)
 			selected := f.store.(genericScheduleLifecycleConsumerStore)
 			db, ctx := f.db, f.ctx

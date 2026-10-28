@@ -2,17 +2,18 @@ package serveapp
 
 import (
 	"bytes"
-	"context"
 	"database/sql"
 	"encoding/json"
 	"errors"
 	"net/http"
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
 	"time"
 
 	"github.com/division-sh/swarm/internal/apiv1"
+	"github.com/division-sh/swarm/internal/operatorread"
 	"github.com/division-sh/swarm/internal/runtime/channelnative"
 	"github.com/division-sh/swarm/internal/runtime/decisioncard"
 	"github.com/division-sh/swarm/internal/servedparity"
@@ -23,6 +24,15 @@ func TestChannelSourceLifecyclePublicJourney(t *testing.T) {
 	for _, backend := range servedparity.RequiredBackends {
 		for _, operation := range []string{"disk", "new_process", "retained_reset", "source_reset", "fork"} {
 			t.Run(string(backend)+"/"+operation, func(t *testing.T) {
+				previous := buildSelectedAPICapabilities
+				buildSelectedAPICapabilities = func(owner *selectedStoreOwner, req selectedAPICapabilityRequest) (selectedAPICapabilities, error) {
+					caps, err := previous(owner, req)
+					if err == nil {
+						caps.RunFork = sourceForkErrorProbe{RunForkExecutor: caps.RunFork, t: t}
+					}
+					return caps, err
+				}
+				t.Cleanup(func() { buildSelectedAPICapabilities = previous })
 				var deliveryReader servedRunDeliveryReader
 				var receiverReader receiverProofStateReader
 				captureSelectedRuntimePersistence(t, func(p serveRuntimePersistence) {
@@ -31,16 +41,27 @@ func TestChannelSourceLifecyclePublicJourney(t *testing.T) {
 				})
 				h, db, hash := startChannelAnchorJourney(t, backend, "source-lifecycle-token", false)
 				var standingRun string
-				if err := db.QueryRow(`SELECT run_id FROM runs WHERE flow_path='telegram-ingress' AND landing_run=TRUE`).Scan(&standingRun); err != nil {
+				if err := db.QueryRow(`SELECT run_id FROM runs WHERE flow_path='chat' AND landing_run=TRUE`).Scan(&standingRun); err != nil {
 					t.Fatal(err)
 				}
-				standingCard := waitChannelAnchorCard(t, db, standingRun, decisioncard.AnchorKindStageGate, "telegram-ingress")
+				originalStanding, err := readServedLandingRuns(t.Context(), servedTestProcessRuntime(t, h.process))
+				if err != nil || len(originalStanding) != 1 || originalStanding[0].RunID != standingRun || originalStanding[0].Source.BundleHash() != hash || originalStanding[0].Scope.FlowPath != "chat" {
+					t.Fatalf("source lifecycle requires its exact standing owner: statuses=%+v err=%v", originalStanding, err)
+				}
+				var originalHeader struct {
+					Run operatorread.RunHeader `json:"run"`
+				}
+				requireServedJSONRPCResult(t, h.rpcEndpoint(), "run.get", map[string]any{"run_id": standingRun}, &originalHeader)
+				if originalHeader.Run.RunID != standingRun || originalHeader.Run.StartedAt.IsZero() {
+					t.Fatalf("source lifecycle lost its original run incarnation: %+v", originalHeader.Run)
+				}
+				standingCard := waitChannelAnchorCard(t, db, standingRun, decisioncard.AnchorKindStageGate, "chat")
 				waitChannelAnchorReceipt(t, db, standingCard)
 				seed := requireServedEventPublishRPCResult(t, h.rpcEndpoint(), map[string]any{
 					"event_name": "work.requested", "bundle_hash": hash, "payload": map[string]any{"seed": true},
 					"idempotency_key": "source-lifecycle-seed",
 				})
-				card := waitChannelAnchorCard(t, db, seed.RunID, decisioncard.AnchorKindStageGate, "reviews")
+				card := waitChannelAnchorCard(t, db, seed.RunID, decisioncard.AnchorKindStageGate, "chat/reviews")
 				messageID := waitChannelAnchorReceipt(t, db, card)
 				token, ok := telegramCallbackToken(h.provider.Delivery(messageID-1), "approve")
 				if !ok {
@@ -55,7 +76,7 @@ func TestChannelSourceLifecyclePublicJourney(t *testing.T) {
 				callback, signing, _ := h.provider.Registration()
 				switch operation {
 				case "disk", "new_process":
-					path := filepath.Join(h.opts.SourceRoot, "reviews", "schema.yaml")
+					path := filepath.Join(h.opts.SourceRoot, "chat", "reviews", "schema.yaml")
 					body, err := os.ReadFile(path)
 					if err != nil {
 						t.Fatal(err)
@@ -165,7 +186,7 @@ func TestChannelSourceLifecyclePublicJourney(t *testing.T) {
 						restore := installChannelOnboardingCLIInput(t, "source-reset-signing-secret\n")
 						t.Cleanup(restore)
 						code := executeCLI(context.Background(), []string{
-							"--config", h.opts.ConfigPath, "secrets", "set", "webhook_signing.telegram", "--stdin",
+							"--config", h.opts.ConfigPath, "secrets", "set", "telegram.webhook_signing_secret", "--stdin",
 						}, stdout, stderr, nil)
 						restore()
 						if code != 0 {
@@ -174,10 +195,10 @@ func TestChannelSourceLifecyclePublicJourney(t *testing.T) {
 						h.stop(t)
 						h.start(t)
 						var successorRun string
-						if err := db.QueryRow(`SELECT run_id FROM runs WHERE flow_path='telegram-ingress' AND landing_run=TRUE`).Scan(&successorRun); err != nil {
+						if err := db.QueryRow(`SELECT run_id FROM runs WHERE flow_path='chat' AND landing_run=TRUE`).Scan(&successorRun); err != nil {
 							t.Fatal(err)
 						}
-						freshCard := waitChannelAnchorCard(t, db, successorRun, decisioncard.AnchorKindStageGate, "telegram-ingress")
+						freshCard := waitChannelAnchorCard(t, db, successorRun, decisioncard.AnchorKindStageGate, "chat")
 						if freshCard == standingCard {
 							t.Fatal("retained reset reused predecessor standing card")
 						}
@@ -274,8 +295,21 @@ func TestChannelSourceLifecyclePublicJourney(t *testing.T) {
 					var fork apiv1.RunForkExecutionResult
 					response := requestServedJSONRPC(t, h.rpcEndpoint(), "run.fork", params)
 					if response.Error != nil {
+						query := `SELECT json_object('state',o.state,'fork_run_id',o.fork_run_id,'failure',o.failure_json,
+							'deliveries',(SELECT json_group_array(json_object('id',d.delivery_id,'event',e.event_name,
+								'subscriber_type',d.subscriber_type,'subscriber_id',d.subscriber_id,
+								'status',d.status,'reason',d.reason_code,'failure',d.failure,
+								'handoff',d.continuation_handoff_at,'authority',d.execution_authority_kind,
+								'execution',d.selected_execution_id,'generation',d.selected_execution_generation,
+								'bundle_hash',d.authority_bundle_hash,'open_attempt',d.current_attempt_open))
+								FROM event_deliveries d LEFT JOIN events e ON e.event_id=d.event_id
+								WHERE d.run_id=o.fork_run_id AND d.execution_authority_kind='selected_contract_fork'))
+							FROM run_fork_operations o WHERE o.idempotency_key=$1`
+						if backend == servedparity.BackendExplicitPostgres {
+							query = strings.ReplaceAll(strings.ReplaceAll(query, "json_object(", "json_build_object("), "json_group_array(", "json_agg(")
+						}
 						var failure sql.NullString
-						readErr := db.QueryRow(`SELECT CAST(failure_json AS TEXT) FROM run_fork_operations WHERE idempotency_key=$1`, params["idempotency_key"]).Scan(&failure)
+						readErr := db.QueryRow(query, params["idempotency_key"]).Scan(&failure)
 						t.Fatalf("public fork failed: %+v failure=%s read=%v\n%s", response.Error, failure.String, readErr, h.process.outputString())
 					}
 					if err := json.Unmarshal(response.Result, &fork); err != nil {
@@ -294,7 +328,7 @@ func TestChannelSourceLifecyclePublicJourney(t *testing.T) {
 					if supersessionCount != 1 || exactLineageCount != supersessionCount {
 						t.Fatalf("fork stage exit lost its selected frontier: supersessions=%d exact=%d", supersessionCount, exactLineageCount)
 					}
-					child := waitChannelAnchorCardInState(t, db, fork.ForkRunID, decisioncard.AnchorKindStageGate, "reviews", decisioncard.StatusPending)
+					child := waitChannelAnchorCardInState(t, db, fork.ForkRunID, decisioncard.AnchorKindStageGate, "chat/reviews", decisioncard.StatusPending)
 					var retiredEvent []byte
 					if err := db.QueryRow(`SELECT payload FROM events WHERE run_id=$1 AND event_name='mailbox.card_superseded'`, fork.ForkRunID).Scan(&retiredEvent); err != nil {
 						t.Fatal(err)
@@ -353,7 +387,7 @@ func TestChannelSourceLifecyclePublicJourney(t *testing.T) {
 					ordinary := requireServedEventPublishRPCResult(t, h.rpcEndpoint(), map[string]any{
 						"event_name": "work.requested", "bundle_hash": hash, "payload": map[string]any{"seed": true}, "idempotency_key": uuid.NewString(),
 					})
-					ordinaryCard := waitChannelAnchorCard(t, db, ordinary.RunID, decisioncard.AnchorKindStageGate, "reviews")
+					ordinaryCard := waitChannelAnchorCard(t, db, ordinary.RunID, decisioncard.AnchorKindStageGate, "chat/reviews")
 					ordinaryMessage := waitChannelAnchorReceipt(t, db, ordinaryCard)
 					ordinaryToken, ok := telegramCallbackToken(h.provider.Delivery(ordinaryMessage-1), "approve")
 					if !ok {

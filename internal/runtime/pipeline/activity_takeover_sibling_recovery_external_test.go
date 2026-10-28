@@ -49,8 +49,13 @@ func newRecoveryActivityCell(t *testing.T, ctx context.Context, selected gateRec
 	fact := sourceartifactfixture.RequireArtifact(t, ctx, selected.events.(sourceartifactfixture.Writer), bundle.SourceArtifact)
 	ctx = correlation.WithRuntimeInstanceID(ctx, runtimeID)
 	ctx = withLiveGateExecution(testAuthorActivityContextForSource(t, correlation.WithRunID(ctx, runID), fact))
+	rooted, err := bundle.RootedSource()
+	if err != nil {
+		t.Fatal(err)
+	}
+	ctx = correlation.WithRootAdmission(ctx, rooted.Admission())
 	storetest.RequireRun(t, ctx, selected.events.(storetest.RunFixtureStore), storetest.RunFixture{
-		Origin: storetest.ScenarioSetupOrigin(), RunID: runID, Artifact: bundle.SourceArtifact, StartedAt: time.Now().UTC(),
+		Origin: storetest.ScenarioSetupOrigin(), RunID: runID, Artifact: bundle.SourceArtifact, RootAdmission: rooted.Admission(), StartedAt: time.Now().UTC(),
 	})
 	bus, err := newScopedTestEventBus(t, selected.events, runtimebus.EventBusOptions{
 		ContractBundle: source, SourceArtifactFact: fact, RuntimeInstanceID: runtimeID,
@@ -104,9 +109,19 @@ func TestDisplacedHTTPActivityRecoveryRoutesSiblingBundlesBothStores(t *testing.
 			if cells[0].fact.BundleHash() == cells[1].fact.BundleHash() {
 				t.Fatal("sibling recovery witness requires two distinct real artifacts")
 			}
-			plan, err := agenttopology.NewSourceSetPlan([]agenttopology.SourceCoordinate{
-				{BundleHash: cells[0].fact.BundleHash()}, {BundleHash: cells[1].fact.BundleHash()},
-			}, nil)
+			var coordinates []agenttopology.SourceCoordinate
+			for _, cell := range cells {
+				root, present, err := correlation.RootAdmissionFromContext(cell.ctx)
+				if err != nil || !present {
+					t.Fatalf("sibling activity source root is unavailable: present=%t error=%v", present, err)
+				}
+				coordinate, err := agenttopology.NewSourceCoordinate(root)
+				if err != nil {
+					t.Fatal(err)
+				}
+				coordinates = append(coordinates, coordinate)
+			}
+			plan, err := agenttopology.NewSourceSetPlan(coordinates, nil)
 			if err != nil {
 				t.Fatal(err)
 			}

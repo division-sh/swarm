@@ -8,6 +8,7 @@ import (
 
 	"github.com/division-sh/swarm/internal/runtime/agenttopology"
 	"github.com/division-sh/swarm/internal/runtime/core/worklifetime"
+	"github.com/division-sh/swarm/internal/testutil/sourceartifactfixture"
 )
 
 type fanOutCapacitySession struct {
@@ -68,8 +69,13 @@ func TestFanOutCapacityIsSharedAcrossExactRuntimeGrants(t *testing.T) {
 	for _, workers := range []int{1, 4} {
 		t.Run(fmt.Sprint(workers), func(t *testing.T) {
 			ctx := context.Background()
-			probe, _ := testRetainedSession(t)
-			plan, err := agenttopology.NewSourceSetPlan([]agenttopology.SourceCoordinate{{BundleHash: startupBundleHashA}, {BundleHash: startupBundleHashB}}, nil)
+			probe, initial := testRetainedSession(t)
+			rootedB, _ := sourceartifactfixture.Rooted(t, "source-b", startupBundleArtifactB)
+			coordinateB, err := agenttopology.NewSourceCoordinate(rootedB.Admission())
+			if err != nil {
+				t.Fatal(err)
+			}
+			plan, err := agenttopology.NewSourceSetPlan([]agenttopology.SourceCoordinate{initial.Sources[0], coordinateB}, nil)
 			if err != nil {
 				t.Fatal(err)
 			}

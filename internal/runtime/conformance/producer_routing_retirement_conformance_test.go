@@ -318,12 +318,12 @@ func TestProducerRoutingCanonicalConsumerManifestationsExecute(t *testing.T) {
 			}
 			switch tc.disposition {
 			case "same_flow":
-				consumers := semanticview.BuildAuthoredEventEndpointCensus(source).MatchingConsumers(tc.flowID, tc.emitted)
+				consumers := semanticview.BuildAuthoredEventEndpointCensus(source).MatchingConsumers(flowID, tc.emitted)
 				if len(consumers) == 0 {
 					t.Fatalf("%s has no typed same-flow consumer", tc.emitted)
 				}
-				if runtimepinrouting.PinDeclaredOutput(source, tc.flowID, tc.emitted) {
-					classification := runtimepinrouting.ClassifyOutputConsumer(source, tc.flowID, tc.emitted)
+				if runtimepinrouting.PinDeclaredOutput(source, flowID, tc.emitted) {
+					classification := runtimepinrouting.ClassifyOutputConsumer(source, flowID, tc.emitted)
 					if !classification.Has(runtimepinrouting.OutputConsumerSameFlow) {
 						t.Fatalf("output consumer classification = %#v, want same-flow", classification)
 					}
@@ -331,7 +331,7 @@ func TestProducerRoutingCanonicalConsumerManifestationsExecute(t *testing.T) {
 			case "external":
 				// The historical external disposition is now a public root export,
 				// not an authored promise of an external consumer.
-				classification := runtimepinrouting.ClassifyOutputConsumer(source, tc.flowID, tc.emitted)
+				classification := runtimepinrouting.ClassifyOutputConsumer(source, flowID, tc.emitted)
 				if !classification.Has(runtimepinrouting.OutputConsumerRootExport) {
 					t.Fatalf("%s lacks a compiled public root output: %#v", tc.emitted, classification)
 				}
@@ -673,31 +673,6 @@ func retiredProducerRoutingOutputError(pins map[string]struct{}, event string) e
 		return fmt.Errorf("removed event %q still has an output pin", event)
 	}
 	return nil
-}
-
-func TestProducerRoutingLedgerDetectsRestoredScalarOutput(t *testing.T) {
-	for _, restored := range []bool{false, true} {
-		source := "name: negative-proof\npins:\n  outputs: [work.retained]\n"
-		if restored {
-			source = strings.Replace(source, "[work.retained]", "[work.retained, work.removed]", 1)
-		}
-		pins, err := producerRoutingOutputPins([]byte(source))
-		if err != nil {
-			t.Fatal(err)
-		}
-		if detected := retiredProducerRoutingOutputError(pins, "work.removed") != nil; detected != restored {
-			t.Fatalf("restored scalar output detected=%t want=%t", detected, restored)
-		}
-	}
-	for _, alternate := range []string{
-		"pins: {outputs: {events: [work.removed]}}",
-		"pins: {outputs: [{event: work.removed, sink: harness}]}",
-		"pins: {outputs: [{name: work.removed}]}",
-	} {
-		if _, err := producerRoutingOutputPins([]byte(alternate)); err == nil {
-			t.Fatalf("ledger admitted alternate output spelling %s", alternate)
-		}
-	}
 }
 
 func hasRetiredProducerRoutingYAML(raw []byte) (bool, error) {

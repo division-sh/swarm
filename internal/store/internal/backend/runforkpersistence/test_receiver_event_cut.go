@@ -17,7 +17,7 @@ func (s *RunForkPostgresOwner) ReadEntityAtEventCutForTest(ctx context.Context, 
 	}
 	var entity runfork.RunForkEntityState
 	err := s.backend.RunReadTransaction(ctx, func(ctx context.Context, tx *sql.Tx) error {
-		plan, err := planRunForkSnapshot(ctx, tx, runfork.RunForkPlanRequest{SourceRunID: runID, At: eventID}, runforkrevision.ValidateCompletePostgres, resolveRunForkRevisionPoint)
+		plan, err := planRunForkSnapshot(ctx, tx, runfork.RunForkPlanRequest{SourceRunID: runID, At: eventID}, runforkrevision.ValidateCompletePostgres, resolveRunForkRevisionPoint, true)
 		if err != nil {
 			return err
 		}
@@ -36,7 +36,7 @@ func (s *RunForkSQLiteOwner) ReadEntityAtEventCutForTest(ctx context.Context, ru
 	}
 	var entity runfork.RunForkEntityState
 	err := s.backend.RunReadTransaction(ctx, func(ctx context.Context, tx *sql.Tx) error {
-		plan, err := planRunForkSnapshot(ctx, tx, runfork.RunForkPlanRequest{SourceRunID: runID, At: eventID}, runforkrevision.ValidateCompleteSQLite, resolveSQLiteRunForkRevisionPoint)
+		plan, err := planRunForkSnapshot(ctx, tx, runfork.RunForkPlanRequest{SourceRunID: runID, At: eventID}, runforkrevision.ValidateCompleteSQLite, resolveSQLiteRunForkRevisionPoint, false)
 		if err != nil {
 			return err
 		}

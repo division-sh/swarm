@@ -1051,8 +1051,9 @@ func writeEnvAuthorityContractsFixture(t *testing.T, name string) string {
 	t.Helper()
 	root := t.TempDir()
 
-	writeWorkflowValidationFixtureFile(t, filepath.Join(root, "schema.yaml"), `
-name: `+name+`
+	writeWorkflowValidationFixtureFile(t, filepath.Join(root, "manifest.yaml"), "version: 1.0.0\nplatform_version: '*'\n")
+	writeWorkflowValidationFixtureFile(t, filepath.Join(root, "schema.yaml"), "\n# fixture: "+
+		name+`
 stages: []
 `)
 	return root

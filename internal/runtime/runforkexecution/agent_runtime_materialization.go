@@ -406,6 +406,13 @@ func prepareSelectedContractAgentRuntimeMaterialization(ctx context.Context, loa
 }
 
 func prepareSelectedContractDeclarations(loaded LoadedSelectedContractSource, blueprints []runtimemanager.AgentMaterializationBlueprint) (runtimeagenttopology.SelectedDeclarationPlan, error) {
+	if err := loaded.RootedSource.Validate(); err != nil {
+		return runtimeagenttopology.SelectedDeclarationPlan{}, err
+	}
+	coordinate, err := runtimeagenttopology.NewSourceCoordinate(loaded.RootedSource.Admission())
+	if err != nil {
+		return runtimeagenttopology.SelectedDeclarationPlan{}, err
+	}
 	static, err := runforkreadiness.StaticAgentBlueprints(loaded.Source)
 	if err != nil {
 		return runtimeagenttopology.SelectedDeclarationPlan{}, err
@@ -434,7 +441,7 @@ func prepareSelectedContractDeclarations(loaded LoadedSelectedContractSource, bl
 			return runtimeagenttopology.SelectedDeclarationPlan{}, err
 		}
 		desired = append(desired, runtimeagenttopology.DesiredAgent{Identity: blueprint.Identity, ConfigRevision: revision,
-			Source: runtimeagenttopology.SourceCoordinate{BundleHash: loaded.SourceArtifactFact.BundleHash()}})
+			Source: coordinate})
 	}
 	return runtimeagenttopology.NewSelectedDeclarationPlan(loaded.SourceArtifactFact.BundleHash(), desired)
 }
@@ -745,6 +752,9 @@ func issueSelectedContractAgentRuntimeGenerationGrant(
 	if req.Prepared == nil || !req.Prepared.bound {
 		return nil, errors.New("selected generation grant requires bound preparation")
 	}
+	if req.Prepared.operation == nil || req.Prepared.operation.grantIssuance == nil {
+		return nil, errors.New("selected generation grant requires its original operation context")
+	}
 	capability := req.AgentRuntime.Options.ProcessCapability
 	if capability == nil {
 		return nil, errors.New("selected-contract agent runtime requires the process topology capability")
@@ -762,7 +772,7 @@ func issueSelectedContractAgentRuntimeGenerationGrant(
 	if err != nil {
 		return nil, err
 	}
-	grant, err := capability.IssueSelectedForkGenerationGrant(ctx, runtimestartupownership.SelectedForkGrantRequest{
+	grant, err := capability.IssueSelectedForkGenerationGrant(req.Prepared.operation.grantIssuance, runtimestartupownership.SelectedForkGrantRequest{
 		BundleHash:        bundleHash,
 		RuntimeInstanceID: processAuthority.RuntimeInstanceID,
 		Binding: runtimestartupownership.SelectedForkGrantBinding{
@@ -824,9 +834,7 @@ func buildSelectedContractAgentRuntimeFactory(req publishSelectedContractForkEve
 	if managerOptions.Workspaces == nil {
 		managerOptions.Workspaces = options.Workspace
 	}
-	budget := swaruntime.NewBudgetTracker(ports.budget, bus, options.Config, options.MailboxStore, nil, source, options.ExecutionPosture, swaruntime.BudgetRecoveryStageSources{
-		CurrentBundleHash: req.LoadedSource.SourceArtifactFact.BundleHash(),
-	})
+	budget := swaruntime.NewBudgetTracker(ports.budget, bus, options.Config, options.MailboxStore, nil, source, options.ExecutionPosture, swaruntime.BudgetRecoveryStageSources{})
 	managerOptions.Budget = budget
 	if options.AgentFactory != nil {
 		return selectedContractAgentRuntimeFactory{factory: options.AgentFactory, options: managerOptions}, nil

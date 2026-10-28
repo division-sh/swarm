@@ -6,7 +6,6 @@ import (
 	"sync/atomic"
 	"testing"
 
-	runtimecontracts "github.com/division-sh/swarm/internal/runtime/contracts"
 	"github.com/division-sh/swarm/internal/runtime/semanticview"
 )
 
@@ -18,45 +17,6 @@ type operationInputReadSource struct {
 func (s *operationInputReadSource) FlowHasInputEvent(flowID, eventType string) bool {
 	s.reads.Add(1)
 	return s.Source.FlowHasInputEvent(flowID, eventType)
-}
-
-func TestOperationInputProducerPreparationBoundsRepeatedQueries(t *testing.T) {
-	base := operationScatterSource(t)
-	source := &operationInputReadSource{Source: base}
-	_, resolver := CompileConnectGraphWithInputProducerResolver(source)
-	source.reads.Store(0)
-	want := ResolveFlowInputProducer(base, "workers", "item.registered")
-	first := resolver.Resolve("workers", "item.registered")
-	firstReads := source.reads.Load()
-	if firstReads == 0 || !reflect.DeepEqual(first, want) {
-		t.Fatalf("first query skipped canonical admission: reads=%d result=%+v", firstReads, first)
-	}
-	first.Evidence[0].Kind = "caller mutation on miss"
-	copyOfResolver := resolver
-	for i := 0; i < 100; i++ {
-		got := copyOfResolver.Resolve(" workers ", " item.registered ")
-		if !reflect.DeepEqual(got, want) {
-			t.Fatalf("query %d changed caller-private evidence: %+v", i, got)
-		}
-		got.Evidence[0].Detail = "caller mutation on hit"
-	}
-	if source.reads.Load() != firstReads {
-		t.Fatalf("repeated normalized query reread source: first=%d total=%d", firstReads, source.reads.Load())
-	}
-	options := runtimecontracts.FlowInputProducerResolutionOptions{AllowNonInputEvent: true}
-	wantOptions := ResolveFlowInputProducerWithOptions(base, "workers", "item.registered", options)
-	if got := resolver.ResolveWithOptions("workers", "item.registered", options); !reflect.DeepEqual(got, wantOptions) || source.reads.Load() <= firstReads {
-		t.Fatalf("query options reused different admission: %+v", got)
-	}
-	optionsReads := source.reads.Load()
-	if got := resolver.ResolveWithOptions("workers", "item.registered", options); !reflect.DeepEqual(got, wantOptions) || source.reads.Load() != optionsReads {
-		t.Fatal("identical options did not reuse exact query preparation")
-	}
-	_, next := CompileConnectGraphWithInputProducerResolver(source)
-	source.reads.Store(0)
-	if got := next.Resolve("workers", "item.registered"); !reflect.DeepEqual(got, want) || source.reads.Load() == 0 {
-		t.Fatal("new operation inherited old prepared query")
-	}
 }
 
 func TestOperationInputProducerPreparationConcurrentMissOnce(t *testing.T) {

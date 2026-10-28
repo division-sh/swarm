@@ -62,7 +62,18 @@ func transferredJoinHistoryFixture(t *testing.T) (*runForkRevisionSnapshot, join
 		t.Fatal(err)
 	}
 	admission, _ := original.PayloadAdmission()
-	bound, err := events.NewPayloadAdmission(event.Payload(), admission.Binding())
+	digest, err := events.JoinOccurrencePayloadDigest(event)
+	if err != nil {
+		t.Fatal(err)
+	}
+	binding, err := events.NewPlatformPayloadSchemaBinding(events.PayloadSchemaBindingInput{
+		BundleHash: admission.Binding().BundleHash(), EventKey: string(event.Type()),
+		SchemaDigest: digest, SchemaClass: events.PayloadSchemaPlatform,
+	}, events.EventPayloadProducer(event, ""), events.JoinOccurrencePayloadReference)
+	if err != nil {
+		t.Fatal(err)
+	}
+	bound, err := events.NewPayloadAdmission(event.Payload(), binding)
 	if err != nil {
 		t.Fatal(err)
 	}

@@ -126,10 +126,8 @@ func collectCrossSurfaceShapeCandidates(source semanticview.Source) []crossSurfa
 		}
 	}
 
-	for _, eventType := range sortedEventTypes(source.ResolvedEventCatalog()) {
-		if structural, ok := source.ResolveFlowEventStructuralType("", eventType); ok {
-			add("event "+eventType+" payload", "event "+eventType, crossSurfaceEventPayloadFields(structural))
-		}
+	for _, candidate := range crossSurfaceEventShapeCandidates(source) {
+		add(candidate.Label, candidate.Location, candidate.Fields)
 	}
 
 	for _, scope := range sortedFlowScopes(source.FlowScopes()) {
@@ -143,6 +141,22 @@ func collectCrossSurfaceShapeCandidates(source semanticview.Source) []crossSurfa
 	sort.Slice(out, func(i, j int) bool {
 		return out[i].Label < out[j].Label
 	})
+	return out
+}
+
+func crossSurfaceEventShapeCandidates(source semanticview.Source) []crossSurfaceShapeCandidate {
+	var out []crossSurfaceShapeCandidate
+	for _, scope := range sortedFlowScopes(source.FlowScopes()) {
+		for _, eventType := range sortedEventTypes(scope.Events) {
+			if structural, ok := source.ResolveFlowEventStructuralType(scope.ID, eventType); ok {
+				canonical := source.ResolveFlowEventReference(scope.ID, eventType)
+				out = append(out, crossSurfaceShapeCandidate{
+					Label: "event " + canonical + " payload", Location: "event " + canonical,
+					Fields: crossSurfaceEventPayloadFields(structural),
+				})
+			}
+		}
+	}
 	return out
 }
 

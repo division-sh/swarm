@@ -25,7 +25,11 @@ func TestRunOperationalSessionWorkIsNotStalledBothStores(t *testing.T) {
 		ctx := correlation.WithRunID(fixture.context, fixture.origin.RunID())
 		ctx = correlation.WithSourceArtifactFact(ctx, sourceartifactfixture.Fact())
 		ctx = effects.WithLifecycleToken(ctx, fixture.authority.Normal)
-		bundle, err := contracts.LoadWorkflowContractBundleFromArtifact("", sourceartifactfixture.Artifact(), platform.PlatformSpecDisplayPath, contracts.WorkflowContractLoadOptions{})
+		rooted, err := fixture.store.(rootedRunStore).LoadRunRootedSource(fixture.context, fixture.origin.RunID())
+		if err != nil {
+			t.Fatal(err)
+		}
+		bundle, err := contracts.LoadWorkflowContractBundleFromRootedSource("", rooted, platform.PlatformSpecDisplayPath, contracts.WorkflowContractLoadOptions{})
 		if err != nil {
 			t.Fatal(err)
 		}
@@ -94,7 +98,11 @@ func TestRunOperationalFutureTimerIsWaitingBothStores(t *testing.T) {
 		fixture := newCompletionSettlementFixtureForFlow(t, selected.selected.(completionSettlementTestStore), selected.db, !selected.postgres, agentmemory.Plan{}, "global")
 		ctx := correlation.WithRunID(fixture.context, fixture.origin.RunID())
 		ctx = correlation.WithSourceArtifactFact(ctx, sourceartifactfixture.Fact())
-		bundle, err := contracts.LoadWorkflowContractBundleFromArtifact("", sourceartifactfixture.Artifact(), platform.PlatformSpecDisplayPath, contracts.WorkflowContractLoadOptions{})
+		rooted, err := fixture.store.(rootedRunStore).LoadRunRootedSource(fixture.context, fixture.origin.RunID())
+		if err != nil {
+			t.Fatal(err)
+		}
+		bundle, err := contracts.LoadWorkflowContractBundleFromRootedSource("", rooted, platform.PlatformSpecDisplayPath, contracts.WorkflowContractLoadOptions{})
 		if err != nil {
 			t.Fatal(err)
 		}
@@ -142,7 +150,11 @@ func TestRunOperationalHumanWaitIsWaitingBothStores(t *testing.T) {
 				fixture := newCompletionSettlementFixtureForFlow(t, selected.selected.(completionSettlementTestStore), selected.db, !selected.postgres, agentmemory.Plan{}, "global")
 				ctx := correlation.WithRunID(fixture.context, fixture.origin.RunID())
 				ctx = correlation.WithSourceArtifactFact(ctx, sourceartifactfixture.Fact())
-				bundle, err := contracts.LoadWorkflowContractBundleFromArtifact("", sourceartifactfixture.Artifact(), platform.PlatformSpecDisplayPath, contracts.WorkflowContractLoadOptions{})
+				rooted, err := fixture.store.(rootedRunStore).LoadRunRootedSource(fixture.context, fixture.origin.RunID())
+				if err != nil {
+					t.Fatal(err)
+				}
+				bundle, err := contracts.LoadWorkflowContractBundleFromRootedSource("", rooted, platform.PlatformSpecDisplayPath, contracts.WorkflowContractLoadOptions{})
 				if err != nil {
 					t.Fatal(err)
 				}

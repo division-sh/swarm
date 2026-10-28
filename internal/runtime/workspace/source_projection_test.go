@@ -76,7 +76,10 @@ func testRuntimeSourceProjection(t *testing.T) (*sourceartifact.RuntimeProjectio
 func testRuntimeSourceProjectionNamed(t *testing.T, name string) (*sourceartifact.RuntimeProjection, string) {
 	t.Helper()
 	root := t.TempDir()
-	if err := os.WriteFile(filepath.Join(root, "schema.yaml"), []byte("name: "+name+"\n"), 0o644); err != nil {
+	if err := os.WriteFile(filepath.Join(root, "manifest.yaml"), []byte("version: 1.0.0\nplatform_version: '*'\n"), 0o644); err != nil {
+		t.Fatalf("write source metadata: %v", err)
+	}
+	if err := os.WriteFile(filepath.Join(root, "schema.yaml"), []byte("# fixture: "+name+"\nstages: []\n"), 0o644); err != nil {
 		t.Fatalf("write source fixture: %v", err)
 	}
 	artifact, err := sourceartifact.AdmitDirectory(root)

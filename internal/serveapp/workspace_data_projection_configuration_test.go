@@ -33,7 +33,10 @@ func ownedDataProjectionTestRoot(t *testing.T) string {
 
 func TestConfigureWorkspaceDataProjectionMaterializesCanonicalEmptyDataForGrantFreeBundle(t *testing.T) {
 	sourceRoot := t.TempDir()
-	if err := os.WriteFile(filepath.Join(sourceRoot, "schema.yaml"), []byte("name: data-free\n"), 0o600); err != nil {
+	if err := os.WriteFile(filepath.Join(sourceRoot, "manifest.yaml"), []byte("version: 1.0.0\nplatform_version: '*'\n"), 0o600); err != nil {
+		t.Fatalf("write flow marker: %v", err)
+	}
+	if err := os.WriteFile(filepath.Join(sourceRoot, "schema.yaml"), []byte("stages: []\n"), 0o600); err != nil {
 		t.Fatalf("write flow marker: %v", err)
 	}
 	artifact, err := sourceartifact.AdmitDirectory(sourceRoot)
@@ -116,7 +119,10 @@ func TestConfigureWorkspaceDataProjectionRejectsMissingStoreForDataBearingBundle
 
 func TestConfigureWorkspaceDataProjectionMountsCanonicalEmptyDataInDocker(t *testing.T) {
 	sourceRoot := t.TempDir()
-	if err := os.WriteFile(filepath.Join(sourceRoot, "schema.yaml"), []byte("name: data-free\n"), 0o600); err != nil {
+	if err := os.WriteFile(filepath.Join(sourceRoot, "manifest.yaml"), []byte("version: 1.0.0\nplatform_version: '*'\n"), 0o600); err != nil {
+		t.Fatalf("write flow marker: %v", err)
+	}
+	if err := os.WriteFile(filepath.Join(sourceRoot, "schema.yaml"), []byte("stages: []\n"), 0o600); err != nil {
 		t.Fatalf("write flow marker: %v", err)
 	}
 	artifact, err := sourceartifact.AdmitDirectory(sourceRoot)

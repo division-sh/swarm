@@ -50,6 +50,7 @@ func runChannelConnectTelegramFirstUserJourney(t *testing.T, backend servedparit
 	isolateCLIAPIConfigEnv(t)
 	credentialPath := filepath.Join(t.TempDir(), "credentials.json")
 	t.Setenv("SWARM_CREDENTIALS_FILE", credentialPath)
+	bootCredentials := writeChannelOnboardingLiveToolCredentials(t, credentialPath)
 	provider := &channelOnboardingTelegramProvider{}
 	telegram := httptest.NewServer(provider)
 	t.Cleanup(telegram.Close)
@@ -203,7 +204,7 @@ func runChannelConnectTelegramFirstUserJourney(t *testing.T, backend servedparit
 	if !strings.Contains(listOut.String(), "channel telegram: identity verified, activation lost with store - run swarm channel reconnect telegram") {
 		t.Fatalf("%s reset channel list lacks reconnect teaching:\n%s", backend, listOut.String())
 	}
-	deleteAllChannelOnboardingCredentials(t, credentialPath, string(backend)+" credential loss after proof restore")
+	deleteChannelOnboardingCredentialsExcept(t, credentialPath, bootCredentials, string(backend)+" credential loss after proof restore")
 	registrationsBeforeBlock, deliveriesBeforeBlock := provider.OnboardingCounts()
 	blockedOut, blockedErr := &lockedBuffer{}, &lockedBuffer{}
 	blockedCode := executeCLI(context.Background(), []string{
@@ -320,7 +321,7 @@ func runChannelConnectTelegramFirstUserJourney(t *testing.T, backend servedparit
 	recovered = corrected
 	t.Run("E2E-11_proof_revoke_preserves_no_activation", func(t *testing.T) {
 		runChannelOnboardingUnbindJourney(t, opts.ConfigPath, endpoint, recovered.Identity.Interface.Selector)
-		assertChannelOnboardingCredentialStoreEmpty(t, credentialPath, string(backend)+" recovered unbind")
+		assertChannelOnboardingCredentials(t, credentialPath, bootCredentials, string(backend)+" recovered unbind")
 		runChannelOnboardingProofRevokeJourney(t, opts.ConfigPath, endpoint, recovered.Identity.Interface.Selector)
 		revoked := readChannelOnboardingRow(t, opts.ConfigPath, endpoint, "unbound")
 		if revoked.Identity.ProofStatus != "revoked" || revoked.Identity.ProofID != recovered.Identity.ProofID || revoked.Identity.ProofRevision <= recovered.Identity.ProofRevision {
@@ -827,7 +828,26 @@ func runChannelOnboardingProofRevokeJourney(t *testing.T, configPath, endpoint, 
 	}
 }
 
-func assertChannelOnboardingCredentialStoreEmpty(t *testing.T, credentialPath, label string) {
+func writeChannelOnboardingLiveToolCredentials(t *testing.T, credentialPath string) map[string]string {
+	t.Helper()
+	// Static tool roles do not satisfy operation-owned onboarding admissions.
+	values := map[string]string{
+		"telegram.telegram_bot_token":     "bot-token",
+		"telegram.webhook_signing_secret": "boot-signing-secret",
+	}
+	credentialStore, err := runtimecredentials.NewFileStore(credentialPath)
+	if err != nil {
+		t.Fatal(err)
+	}
+	for key, value := range values {
+		if err := credentialStore.Set(context.Background(), key, value); err != nil {
+			t.Fatal(err)
+		}
+	}
+	return values
+}
+
+func assertChannelOnboardingCredentials(t *testing.T, credentialPath string, want map[string]string, label string) {
 	t.Helper()
 	credentialStore, err := runtimecredentials.NewFileStore(credentialPath)
 	if err != nil {
@@ -837,12 +857,19 @@ func assertChannelOnboardingCredentialStoreEmpty(t *testing.T, credentialPath, l
 	if err != nil {
 		t.Fatalf("%s list credential store: %v", label, err)
 	}
-	if len(keys) != 0 {
-		t.Fatalf("%s retained channel credentials: %v", label, keys)
+	if len(keys) != len(want) {
+		t.Fatalf("%s credential keys = %v, want exactly %d independent tool roles", label, keys, len(want))
+	}
+	for _, key := range keys {
+		value, found, err := credentialStore.Get(context.Background(), key)
+		expected, retained := want[key]
+		if err != nil || !found || !retained || expected != value {
+			t.Fatalf("%s credential %q changed or is operation-owned: found=%t err=%v", label, key, found, err)
+		}
 	}
 }
 
-func deleteAllChannelOnboardingCredentials(t *testing.T, credentialPath, label string) {
+func deleteChannelOnboardingCredentialsExcept(t *testing.T, credentialPath string, retained map[string]string, label string) {
 	t.Helper()
 	credentialStore, err := runtimecredentials.NewFileStore(credentialPath)
 	if err != nil {
@@ -853,10 +880,14 @@ func deleteAllChannelOnboardingCredentials(t *testing.T, credentialPath, label s
 		t.Fatalf("%s list credential store: %v", label, err)
 	}
 	for _, key := range keys {
+		if _, keep := retained[key]; keep {
+			continue
+		}
 		if err := credentialStore.Delete(context.Background(), key); err != nil {
 			t.Fatalf("%s delete credential %q: %v", label, key, err)
 		}
 	}
+	assertChannelOnboardingCredentials(t, credentialPath, retained, label)
 }
 
 func assertChannelOnboardingIdentityPreserved(t *testing.T, label string, before, after channelOnboardingJourneyReadback) {
@@ -1194,18 +1225,16 @@ func disableChannelOnboardingBusinessConsumers(t *testing.T, sourceRoot string) 
 		t.Fatal(err)
 	}
 	connections, ok := schema["connect"].([]any)
-	if !ok || len(connections) != 2 {
-		t.Fatal("onboarding fixture must have exactly the root and provider business-consumer connections")
+	if !ok || len(connections) != 1 {
+		t.Fatal("onboarding fixture must have exactly the root business-consumer connection")
 	}
-	for i, from := range []string{".", "telegram-ingress"} {
+	for i, from := range []string{"."} {
 		connection, ok := connections[i].(map[string]any)
 		if !ok || len(connection) != 4 || connection["from"] != from || connection["to"] != "telegram-chat" || connection["event"] != "inbound.telegram.text_message" || connection["resolution"] != "select-or-create" {
 			t.Fatalf("unexpected onboarding business-consumer connection: %#v", connections[i])
 		}
 	}
 	delete(schema, "connect")
-	delete(schema, "pins")
-	delete(schema, "imports")
 	raw, err = yaml.Marshal(schema)
 	if err != nil {
 		t.Fatal(err)

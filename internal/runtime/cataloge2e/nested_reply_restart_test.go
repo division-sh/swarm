@@ -14,7 +14,6 @@ import (
 	"github.com/division-sh/swarm/internal/runtime/runforkexecution"
 	"github.com/division-sh/swarm/internal/runtime/testfixtures/canonicalrouting"
 	"github.com/division-sh/swarm/internal/store/storetest"
-	"github.com/google/uuid"
 )
 
 func TestIssue642TwoOpenUnclaimedRepliesStagedRestartBothStores(t *testing.T) {
@@ -44,9 +43,8 @@ func TestIssue642TwoOpenUnclaimedRepliesStagedRestartBothStores(t *testing.T) {
 			loader, selection, _ := selectedContractForkFixtureSelection(t, h.ctx, repoRootFromCatalogE2E(t), root, selected)
 			owner := selectedContractExecutionOwnerForCatalogHarness(t, h)
 			options := selectedContractAgentRuntimeOptionsForCatalogHarness(h, testRuntimeConfig())
-			operation := runfork.ForkOperationRequest{OperationID: uuid.NewString(), Actor: "nested-unclaimed-restart", IdempotencyKey: uuid.NewString(),
-				TransportHash: "nested-unclaimed-restart", SourceRunID: catalogRuntimeRunID, ForkEventID: cut,
-				TargetBundleHash: selection.BundleHash, AllowSourceFreeze: true, ContractSelection: selection}
+			operation := catalogStagedForkOperation(t, h.ctx, selected, selection, catalogRuntimeRunID, cut)
+			operation.Actor, operation.TransportHash = "nested-unclaimed-restart", "nested-unclaimed-restart"
 			staged := stageCatalogSelectedContractFork(t, h.ctx, selected, owner, loader, selection, options, catalogRuntimeRunID, cut, operation)
 			childRows, inner := requireUnclaimedFanOutReplyStaging(t, h.ctx, selected, staged.ForkRunID, cut)
 			h, owner = restartNestedReplyChild(t, h, staged, childRows, operation, step)
@@ -90,7 +88,7 @@ func restartNestedReplyChild(t *testing.T, h *runtimeHarness, staged runfork.Run
 		Store: selected}
 	prepared, err := selectedContractExecutionOwnerForCatalogHarness(t, h).Prepare(h.ctx, runforkexecution.SelectedContractExecutionRequest{
 		SourceRunID: operation.SourceRunID, At: operation.ForkEventID, ForkOperation: &operation, AllowSourceFreeze: operation.AllowSourceFreeze,
-		SourceLoader: loader, ContractSelection: operation.ContractSelection, AgentRuntime: selectedContractAgentRuntimeOptionsForCatalogHarness(h, testRuntimeConfig()),
+		SourceLoader: loader, ContractSelection: operation.ContractSelection, AgentRuntime: selectedContractAgentRuntimeOptionsForCatalogHarness(h, testRuntimeConfig()), ExpectedBundleHash: operation.TargetBundleHash,
 	})
 	if err != nil {
 		t.Fatal(err)
@@ -105,7 +103,8 @@ func restartNestedReplyChild(t *testing.T, h *runtimeHarness, staged runfork.Run
 		t.Fatal(err)
 	}
 	readback.ForkOperation = nil
-	retry, err := selected.RequireMaterializedRunForkForSelectedContractExecution(correlation.WithSourceArtifactFact(h.ctx, readback.SourceArtifactFact), staged.ForkRunID, readback)
+	readbackCtx := correlation.WithRootAdmission(correlation.WithSourceArtifactFact(h.ctx, readback.SourceArtifactFact), readback.RootAdmission)
+	retry, err := selected.RequireMaterializedRunForkForSelectedContractExecution(readbackCtx, staged.ForkRunID, readback)
 	if err != nil {
 		t.Fatal(err)
 	}

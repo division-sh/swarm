@@ -258,6 +258,10 @@ func runScenarioTestCommand(ctx context.Context, RepoRoot string, out, errOut io
 	if err != nil {
 		return returnScenarioTestValidationError(errOut, fmt.Errorf("admit pack metadata: %w", err))
 	}
+	channelPlans, err := capturedChannelProjectionPlans(bundle)
+	if err != nil {
+		return returnScenarioTestValidationError(errOut, fmt.Errorf("admit captured channel plans: %w", err))
+	}
 	bundleHash, err := runtimecontracts.BundleHash(bundle)
 	if err != nil {
 		return returnScenarioTestValidationError(errOut, err)
@@ -268,7 +272,7 @@ func runScenarioTestCommand(ctx context.Context, RepoRoot string, out, errOut io
 	}
 	projection, err := runtime.AdmitEffectiveSourceProjection(runtime.EffectiveSourceProjectionRequest{
 		Source: semanticview.Wrap(bundle), SourceArtifactFact: sourceFact,
-		ProviderTriggerCatalog: metadata.ProviderTriggers, ChannelPlans: metadata.ChannelPlans,
+		ChannelPlans: channelPlans,
 	})
 	if err != nil {
 		return returnScenarioTestValidationError(errOut, fmt.Errorf("admit effective source: %w", err))
@@ -276,7 +280,7 @@ func runScenarioTestCommand(ctx context.Context, RepoRoot string, out, errOut io
 	source := projection.Source()
 	validation := runtime.StructuralWorkflowContractValidationOptions()
 	validation.ModelAliases = configResult.Config.LLM.Models
-	validation.ProviderTriggerCatalog, validation.ChannelPlans = metadata.ProviderTriggers, metadata.ChannelPlans
+	validation.ProviderTriggerCatalog, validation.ChannelPlans = metadata.ProviderTriggers, channelPlans
 	if _, err := runtime.ValidateWorkflowContractSurface(ctx, source, validation); err != nil {
 		return returnScenarioTestValidationError(errOut, err)
 	}
@@ -284,7 +288,7 @@ func runScenarioTestCommand(ctx context.Context, RepoRoot string, out, errOut io
 	if err != nil {
 		return returnScenarioTestValidationError(errOut, err)
 	}
-	if _, err := runtimebootverify.PrepareSourceBootEffectContext(source, profile, executionposture.MockOnly); err != nil {
+	if _, err := runtimebootverify.PrepareSourceBootEffectContext(source, profile, executionposture.MockOnly, true); err != nil {
 		return returnScenarioTestValidationError(errOut, fmt.Errorf("test completeness: %w", err))
 	}
 	var plans []scenarioderivation.Plan

@@ -36,7 +36,8 @@ func TestFlowConstructorScenarioImportCannotAcquireExecutionBothStores(t *testin
 						entitySchema = "record:\n  marker: text?\n"
 					}
 					f := newReceiverConfigActivationFixtureWithDocuments(t, backend, false, map[string]string{
-						"schema.yaml":   "name: imported-history\nstages:\n  pending: {}\n",
+						"manifest.yaml": "version: 1.0.0\nplatform_version: '*'\n",
+						"schema.yaml":   "stages:\n  pending: {}\n",
 						"events.yaml":   "checkpoint:\n",
 						"entities.yaml": entitySchema,
 					}, nil)
@@ -119,14 +120,18 @@ func TestFlowConstructorScenarioImportCannotAcquireExecutionBothStores(t *testin
 					if _, err := owner.CommitWorkflowEngineMutation(f.ctx, pipeline.WorkflowEngineMutationCommand{State: record}); err == nil || err.Error() != "workflow engine state route is missing: ." {
 						t.Fatalf("ordinary mutation granted construction to an import: %v", err)
 					}
-					prepared, err := prepareSelectedStoreForkForTest(t, f.ctx, f.store, runID, marker.ID(), runfork.RunForkContractSelection{Mode: "selected_contracts"})
+					prepared, err := prepareSelectedStoreForkForTest(t, f.ctx, f.store, runID, marker.ID(), runfork.RunForkContractSelection{Mode: "selected_contracts"}, f.bundle.SourceArtifact.BundleHash())
 					if prepared != nil || err == nil || !strings.Contains(err.Error(), runfork.RunForkMaterializedEntitySnapshotMetadataOwner) {
 						t.Fatalf("selected preparation granted construction to an import: prepared=%v err=%v", prepared, err)
 					}
 					if !reflect.DeepEqual(before, snapshotForkHistoricalExecutionTables(t, f.db, backend == "postgres")) {
 						t.Fatal("refused imported execution changed source or fork state")
 					}
-					request := runfork.RunForkMaterializeRequest{SourceRunID: runID, At: marker.ID()}
+					rootAdmission, present, err := correlation.RootAdmissionFromContext(f.ctx)
+					if err != nil || !present {
+						t.Fatalf("scenario fixture root admission: present=%t err=%v", present, err)
+					}
+					request := runfork.RunForkMaterializeRequest{SourceRunID: runID, At: marker.ID(), RootAdmission: rootAdmission}
 					fork, err := owner.MaterializeRunFork(f.ctx, request)
 					if err != nil {
 						t.Fatal(err)

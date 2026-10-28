@@ -88,7 +88,7 @@ func TestSelectedContractForkRemintsActivityRequestAndReusesRecordedWriteEvidenc
 	}, at.Format(time.RFC3339Nano), at)
 	captureRunForkTestRevision(t, db, sourceRunID)
 	materialized := materializeSelectedActivityAtCheckpoint(t, ctx, pg, sourceRunID, entityID)
-	events, err := pg.LoadRunForkSelectedContractSourceEvents(ctx, sourceRunID, materialized.ForkRunID, []string{requestEventID}, originalActivityCarriageAtPoint(t, pg, sourceRunID, materialized.ForkPoint))
+	events, err := pg.LoadRunForkSelectedContractSourceEvents(ctx, sourceRunID, materialized.ForkRunID, []string{requestEventID}, originalActivityCarriageAtPoint(t, pg, sourceRunID, materialized.ForkPoint), originalRootAdmissionForRun(t, pg, sourceRunID))
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -177,7 +177,7 @@ func TestSelectedContractForkProjectsUnissuedActivityWithoutAttempt(t *testing.T
 	}
 	captureRunForkTestRevision(t, db, sourceRunID)
 	materialized := materializeSelectedActivityAtCheckpoint(t, ctx, pg, sourceRunID, entityID)
-	prepared, err := pg.LoadRunForkSelectedContractSourceEvents(ctx, sourceRunID, materialized.ForkRunID, []string{requestEventID}, originalActivityCarriageAtPoint(t, pg, sourceRunID, materialized.ForkPoint))
+	prepared, err := pg.LoadRunForkSelectedContractSourceEvents(ctx, sourceRunID, materialized.ForkRunID, []string{requestEventID}, originalActivityCarriageAtPoint(t, pg, sourceRunID, materialized.ForkPoint), originalRootAdmissionForRun(t, pg, sourceRunID))
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -269,7 +269,7 @@ func TestSelectedContractForkPreservesTypedFailedWriteEvidence(t *testing.T) {
 	}, at.Format(time.RFC3339Nano), at)
 	captureRunForkTestRevision(t, db, sourceRunID)
 	materialized := materializeSelectedActivityAtCheckpoint(t, ctx, pg, sourceRunID, entityID)
-	prepared, err := pg.LoadRunForkSelectedContractSourceEvents(ctx, sourceRunID, materialized.ForkRunID, []string{requestEventID}, originalActivityCarriageAtPoint(t, pg, sourceRunID, materialized.ForkPoint))
+	prepared, err := pg.LoadRunForkSelectedContractSourceEvents(ctx, sourceRunID, materialized.ForkRunID, []string{requestEventID}, originalActivityCarriageAtPoint(t, pg, sourceRunID, materialized.ForkPoint), originalRootAdmissionForRun(t, pg, sourceRunID))
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -324,7 +324,7 @@ func seedDeclaredActivityRequestExecutionSource(t *testing.T, ctx context.Contex
 		semanticEventRecordFixtureEnvelope(entityID, "flow-a"), at.Add(-time.Microsecond))
 	selected := admitTestPostgresStore(t, db)
 	ctx = startupownership.CarryMutationAuthority(correlation.WithRunID(testAuthorActivityContextForBundle(bundle.SourceArtifact.BundleHash()), runID), ctx)
-	requireRunFixtureForTest(t, ctx, selected, semanticRunFixture{
+	ctx = requireRunFixtureForTest(t, ctx, selected, semanticRunFixture{
 		Origin: semanticScenarioSetupRunOriginForTest(), RunID: runID, StartedAt: at.Add(-time.Minute),
 		Artifact: bundle.SourceArtifact, BundleHash: bundle.SourceArtifact.BundleHash(),
 	})

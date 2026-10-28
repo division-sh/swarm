@@ -13,9 +13,11 @@ import (
 	"github.com/division-sh/swarm/internal/runtime/agenttopology"
 	"github.com/division-sh/swarm/internal/runtime/canonicaljson"
 	"github.com/division-sh/swarm/internal/runtime/core/actors"
+	"github.com/division-sh/swarm/internal/runtime/correlation"
 	"github.com/division-sh/swarm/internal/runtime/failures"
 	"github.com/division-sh/swarm/internal/runtime/manager"
 	"github.com/division-sh/swarm/internal/runtime/startupownership"
+	"github.com/division-sh/swarm/internal/sourceartifact"
 	"github.com/division-sh/swarm/internal/store/storetest"
 	"github.com/division-sh/swarm/internal/store/testutil/agentfixture"
 	"github.com/division-sh/swarm/internal/testutil"
@@ -44,10 +46,18 @@ func TestAgentRowNativeLostAckCacheAdoptionBothStores(t *testing.T) {
 						return owner
 					}
 				}
-				ctx := originalManagerFixtureContext(t, manager.TerminalPanicFixtureContext(), selected)
+				rooted, _ := sourceartifactfixture.Rooted(t, "review", sourceartifactfixture.Artifact())
+				ctx := originalManagerFixtureContext(t, correlation.WithRootAdmission(manager.TerminalPanicFixtureContext(), rooted.Admission()), selected)
 				record := manager.ReconfigureMemoryNativeFixture(t, false)
+				storetest.RequireRun(t, ctx, selected.(storetest.RunFixtureStore), storetest.RunFixture{
+					RunID: record.Config.Identity.RunID, Origin: storetest.ScenarioSetupOrigin(),
+					Artifact: rooted.Artifact(), StartedAt: record.StartedAt,
+				})
+				coordinate, err := agenttopology.NewSourceCoordinate(rooted.Admission())
+				if err != nil {
+					t.Fatal(err)
+				}
 				if cut != "replacement" {
-					storetest.RequireRunningRun(t, ctx, selected.(storetest.RunFixtureStore), record.Config.Identity.RunID, time.Now().UTC())
 					identity, err := record.Config.Identity.Plan()
 					if err != nil {
 						t.Fatal(err)
@@ -56,7 +66,6 @@ func TestAgentRowNativeLostAckCacheAdoptionBothStores(t *testing.T) {
 					if err != nil {
 						t.Fatal(err)
 					}
-					coordinate := agenttopology.SourceCoordinate{BundleHash: sourceartifactfixture.BundleHash}
 					plan, err := agenttopology.NewSourceSetPlan([]agenttopology.SourceCoordinate{coordinate}, []agenttopology.DesiredAgent{{Identity: identity, ConfigRevision: revision, Source: coordinate}})
 					if err != nil {
 						t.Fatal(err)
@@ -100,7 +109,7 @@ func TestAgentRowNativeLostAckCacheAdoptionBothStores(t *testing.T) {
 					if err != nil {
 						t.Fatal(err)
 					}
-					manager.ProveAgentRowNativeSpawnAdoption(t, ctx, grant, selected, selected.(manager.AgentLifecycleOutcomeReader), record, func() any {
+					manager.ProveAgentRowNativeSpawnAdoption(t, ctx, rooted, grant, selected, selected.(manager.AgentLifecycleOutcomeReader), record, func() any {
 						value, err := storetest.ReadSelectedForkApplicationStorageSnapshot(ctx, selected)
 						if err != nil {
 							t.Fatal(err)
@@ -123,12 +132,12 @@ func TestAgentRowNativeLostAckCacheAdoptionBothStores(t *testing.T) {
 					t.Fatalf("native row: found=%v err=%v", found, err)
 				}
 				record.Topology = view.Topology
-				proveNativeAgentRowCAS(t, selected, reopen(), record)
+				proveNativeAgentRowCAS(t, ctx, coordinate, selected, reopen(), record)
 				outcomes, ok := selected.(manager.AgentLifecycleOutcomeReader)
 				if !ok {
 					t.Fatal("selected store lacks the native immutable-outcome owner")
 				}
-				manager.ProveAgentRowNativeLostAckCacheAdoption(t, ctx, storetest.AgentLifecycleFixture(t, selected), selected, outcomes, record, func() any {
+				manager.ProveAgentRowNativeLostAckCacheAdoption(t, ctx, rooted, storetest.AgentLifecycleFixture(t, selected), selected, outcomes, record, func() any {
 					snapshot, err := storetest.ReadSelectedForkApplicationStorageSnapshot(ctx, selected)
 					if err != nil {
 						t.Fatal(err)
@@ -144,9 +153,8 @@ func TestAgentRowNativeLostAckCacheAdoptionBothStores(t *testing.T) {
 	}
 }
 
-func proveNativeAgentRowCAS(t *testing.T, selected storetest.AgentFixtureStore, peer manager.AgentLifecycleStateReader, record manager.PersistedAgent) {
+func proveNativeAgentRowCAS(t *testing.T, ctx context.Context, coordinate agenttopology.SourceCoordinate, selected storetest.AgentFixtureStore, peer manager.AgentLifecycleStateReader, record manager.PersistedAgent) {
 	t.Helper()
-	ctx := manager.TerminalPanicFixtureContext()
 	before, found, err := selected.LoadAgentLifecycleState(ctx, record.Config.Identity)
 	if err != nil || !found || before.Phase != manager.AgentLifecycleRunning {
 		t.Fatalf("native CAS predecessor: found=%v row=%+v err=%v", found, before, err)
@@ -163,7 +171,7 @@ func proveNativeAgentRowCAS(t *testing.T, selected storetest.AgentFixtureStore, 
 	if err != nil || !found {
 		t.Fatalf("native CAS source set: found=%v err=%v", found, err)
 	}
-	grant, err := agentfixture.AdmitGeneration(t, ctx, selected, plan, agenttopology.SourceCoordinate{BundleHash: before.ProcessBinding.BundleHash})
+	grant, err := agentfixture.AdmitGeneration(t, ctx, selected, plan, coordinate)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -295,17 +303,23 @@ func TestAgentRowIndividualSourceSetReplacementBothStores(t *testing.T) {
 			} else {
 				selected = storetest.StartSQLiteRuntimeStore(t)
 			}
-			ctx := manager.TerminalPanicFixtureContext()
+			rooted, _ := sourceartifactfixture.Rooted(t, "lifecycle", sourceartifactfixture.Artifact())
+			ctx := correlation.WithRootAdmission(manager.TerminalPanicFixtureContext(), rooted.Admission())
+			ctx = originalManagerFixtureContext(t, ctx, selected)
 			record := manager.TerminalPanicFixture(t)
 			record.Config.LLMBackend, record.Config.ResolvedLLMBackend = "anthropic", "anthropic"
 			record.Topology = agenttopology.Admission{}
+			storetest.RequireRun(t, ctx, selected.(storetest.RunFixtureStore), storetest.RunFixture{
+				RunID: record.Config.Identity.RunID, Origin: storetest.ScenarioSetupOrigin(),
+				Artifact: rooted.Artifact(), StartedAt: record.StartedAt,
+			})
 			storetest.RequireStaticAgentFixture(t, ctx, selected, record)
 			view, found, err := selected.LoadAgentLifecycleState(ctx, record.Config.Identity)
 			if err != nil || !found {
 				t.Fatalf("native fixture row: found=%v err=%v", found, err)
 			}
 			record.Topology = view.Topology
-			manager.ProveAgentRowIndividualSourceSetReplacement(t, storetest.AgentLifecycleFixture(t, selected), selected, record, func() (manager.AgentLifecyclePersistence, agenttopology.Admission) {
+			manager.ProveAgentRowIndividualSourceSetReplacement(t, ctx, rooted, storetest.AgentLifecycleFixture(t, selected), selected, record, func() (manager.AgentLifecyclePersistence, agenttopology.Admission) {
 				process, err := agentfixture.ProcessCapability(t, ctx, selected)
 				if err != nil {
 					t.Fatal(err)
@@ -314,11 +328,34 @@ func TestAgentRowIndividualSourceSetReplacementBothStores(t *testing.T) {
 				if err != nil || !found {
 					t.Fatalf("native source set: found=%v err=%v", found, err)
 				}
+				primary, err := agenttopology.NewSourceCoordinate(rooted.Admission())
+				if err != nil {
+					t.Fatal(err)
+				}
+				if len(current.Sources) != 1 || current.Sources[0].Key() != primary.Key() {
+					t.Fatalf("native source set lost its exact captured root: %+v", current.Sources)
+				}
+				additionalArtifact, err := sourceartifact.AdmitMembers(map[string][]byte{
+					"manifest.yaml": []byte("version: 1.0.0\nplatform_version: '*'\n"),
+					"events.yaml":   []byte("additional.input:\n"),
+				})
+				if err != nil {
+					t.Fatal(err)
+				}
+				additional, _ := sourceartifactfixture.Rooted(t, "additional", additionalArtifact)
+				sourceartifactfixture.RequireArtifact(t, ctx, selected, additional.Artifact())
+				coordinate, err := agenttopology.NewSourceCoordinate(additional.Admission())
+				if err != nil {
+					t.Fatal(err)
+				}
 				sources := append([]agenttopology.SourceCoordinate(nil), current.Sources...)
-				sources = append(sources, agenttopology.SourceCoordinate{BundleHash: "bundle-v2:sha256:" + strings.Repeat("c", 64)})
+				sources = append(sources, coordinate)
 				plan, err := agenttopology.NewSourceSetPlan(sources, current.Agents)
 				if err != nil {
 					t.Fatal(err)
+				}
+				if plan.Revision == current.Revision {
+					t.Fatal("additional captured source did not change the source-set revision")
 				}
 				if _, err := process.RestoreSourceSet(ctx, agenttopology.SourceSetCommitRequest{OperationID: uuid.NewString(), ExpectedRevision: current.Revision, Plan: plan}); err != nil {
 					t.Fatal(err)

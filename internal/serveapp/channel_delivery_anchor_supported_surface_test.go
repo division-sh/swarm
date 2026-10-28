@@ -95,7 +95,7 @@ func TestChannelDeliveryRealAnchorProducersPublicJourney(t *testing.T) {
 			var interfaceKey string
 			telegramIdentities := 0
 			for _, channel := range channels.Channels {
-				if channel.Identity.Interface.ChannelPackID == "provider.telegram.hitl_channel" {
+				if channel.Identity.Interface.ChannelPackID == "telegram" {
 					telegramIdentities++
 					interfaceKey = channel.Identity.Interface.Key()
 				}
@@ -105,15 +105,15 @@ func TestChannelDeliveryRealAnchorProducersPublicJourney(t *testing.T) {
 			}
 			for _, kind := range []decisioncard.AnchorKind{decisioncard.AnchorKindStageGate, decisioncard.AnchorKindHumanTask, decisioncard.AnchorKindProposedEffect} {
 				t.Run(string(kind), func(t *testing.T) {
-					flowInstance := "reviews"
+					flowInstance := "chat/reviews"
 					if kind == decisioncard.AnchorKindHumanTask {
-						flowInstance = "observers"
+						flowInstance = "chat/observers"
 					}
 					seed := requireServedEventPublishRPCResult(t, h.rpcEndpoint(), map[string]any{
 						"event_name": "work.requested", "bundle_hash": bundleHash,
 						"payload": map[string]any{"seed": true}, "idempotency_key": "channel-anchor-" + string(kind),
 					})
-					gateID := waitChannelPublicCard(t, h, seed.RunID, decisioncard.AnchorKindStageGate, "reviews")
+					gateID := waitChannelPublicCard(t, h, seed.RunID, decisioncard.AnchorKindStageGate, "chat/reviews")
 					waitChannelAnchorObservedReceipt(t, reader, gateID)
 					if kind != decisioncard.AnchorKindStageGate {
 						event := "observer.requested"
@@ -257,7 +257,7 @@ func TestChannelDeliveryReconciliationActivityDispatchPublicJourney(t *testing.T
 				"event_name": "effect.requested", "run_id": seed.RunID, "source_event_id": seed.EventID,
 				"payload": map[string]any{"seed": true}, "idempotency_key": "isolated-proposal-wake",
 			})
-			cardID := waitChannelPublicCard(t, h, seed.RunID, decisioncard.AnchorKindProposedEffect, "reviews")
+			cardID := waitChannelPublicCard(t, h, seed.RunID, decisioncard.AnchorKindProposedEffect, "chat/reviews")
 			messageID := waitChannelAnchorObservedReceipt(t, reader, cardID)
 			var item struct {
 				Card struct {
@@ -349,6 +349,7 @@ func startChannelAnchorPublicJourney(t *testing.T, backend servedparity.Backend,
 	h := newChannelOnboardingE2EHarness(t, backend, true)
 	h.opts.AbandonActiveRuns = false
 	writeChannelAnchorJourneySource(t, h.opts.SourceRoot, withSummary)
+	h.opts.SourceRoot = nestChannelAnchorJourneyHolder(t, h.opts.SourceRoot, withSummary)
 	h.opts.TestLLMRuntime = channelAnchorLLMRuntime{}
 	if configure != nil {
 		configure(&h.opts)
@@ -379,7 +380,10 @@ func startChannelAnchorPublicJourney(t *testing.T, backend servedparity.Backend,
 	if err != nil {
 		t.Fatal(err)
 	}
-	if err := credentials.Set(context.Background(), "telegram_bot_token", token); err != nil {
+	if err := credentials.Set(context.Background(), "telegram.telegram_bot_token", token); err != nil {
+		t.Fatal(err)
+	}
+	if err := credentials.Set(context.Background(), "telegram.webhook_signing_secret", "telegram-secret"); err != nil {
 		t.Fatal(err)
 	}
 	h.start(t)
@@ -401,6 +405,107 @@ func startChannelAnchorPublicJourney(t *testing.T, backend servedparity.Backend,
 	}
 	runChannelOnboardingCLIJourney(t, h.opts.ConfigPath, h.endpoint, h.provider, "connect", token, 1001, "private", 0)
 	return h, identity.SourceArtifacts[0].BundleHash
+}
+
+func nestChannelAnchorJourneyHolder(t *testing.T, sourceRoot string, withNotice bool) string {
+	t.Helper()
+	// The standing holder keeps its own scope; root business inputs connect
+	// directly to their receivers rather than relaying through that holder.
+	events := []string{"work.requested", "observer.requested", "effect.requested"}
+	if withNotice {
+		events = append(events, "notice.requested")
+	}
+	publicEvents := make(map[string]bool, len(events))
+	for _, event := range events {
+		publicEvents[event] = true
+	}
+	eventBody, err := os.ReadFile(filepath.Join(sourceRoot, "events.yaml"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	var eventDocument map[string]any
+	if err := yaml.Unmarshal(eventBody, &eventDocument); err != nil {
+		t.Fatal(err)
+	}
+	if len(eventDocument) != len(events) {
+		t.Fatal("channel journey must declare only its exact public business inputs")
+	}
+	for _, event := range events {
+		if _, found := eventDocument[event]; !found {
+			t.Fatalf("channel journey lacks public input %s", event)
+		}
+	}
+	schemaBody, err := os.ReadFile(filepath.Join(sourceRoot, "schema.yaml"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	var schema map[string]any
+	if err := yaml.Unmarshal(schemaBody, &schema); err != nil {
+		t.Fatal(err)
+	}
+	pins := schema["pins"].(map[string]any)
+	for _, direction := range []string{"inputs", "outputs"} {
+		values := pins[direction].([]any)
+		retained := make([]any, 0, len(values))
+		for _, value := range values {
+			if !publicEvents[value.(string)] {
+				retained = append(retained, value)
+			}
+		}
+		pins[direction] = retained
+	}
+	connections := schema["connect"].([]any)
+	if len(connections) != len(events) {
+		t.Fatal("channel journey has unexpected business connections")
+	}
+	for _, value := range connections {
+		connection := value.(map[string]any)
+		event, _ := connection["event"].(string)
+		target := "reviews"
+		if event == "observer.requested" || event == "notice.requested" {
+			target = "observers"
+		}
+		if !publicEvents[event] || len(connection) != 3 || connection["from"] != "." || connection["to"] != target {
+			t.Fatalf("channel journey changed its exact business connection: %#v", connection)
+		}
+	}
+	delete(schema, "connect")
+	schemaBody, err = yaml.Marshal(schema)
+	if err != nil {
+		t.Fatal(err)
+	}
+	root := filepath.Join(t.TempDir(), "journey")
+	if err := os.MkdirAll(root, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.Rename(sourceRoot, filepath.Join(root, "chat")); err != nil {
+		t.Fatal(err)
+	}
+	writeStandingCandidateFile(t, filepath.Join(root, "chat", "schema.yaml"), string(schemaBody))
+	if err := os.Remove(filepath.Join(root, "chat", "events.yaml")); err != nil {
+		t.Fatal(err)
+	}
+	var parent strings.Builder
+	parent.WriteString("stages: []\npins:\n  inputs:\n")
+	for _, event := range events {
+		fmt.Fprintf(&parent, "    - %s\n", event)
+	}
+	parent.WriteString("  outputs:\n")
+	for _, event := range events {
+		fmt.Fprintf(&parent, "    - %s\n", event)
+	}
+	parent.WriteString("connect:\n")
+	for _, event := range events {
+		target := "chat/reviews"
+		if event == "observer.requested" || event == "notice.requested" {
+			target = "chat/observers"
+		}
+		fmt.Fprintf(&parent, "  - {event: %s, from: ., to: %s}\n", event, target)
+	}
+	writeStandingCandidateFile(t, filepath.Join(root, "manifest.yaml"), "version: 1.0.0\nplatform_version: '*'\n")
+	writeStandingCandidateFile(t, filepath.Join(root, "schema.yaml"), parent.String())
+	writeStandingCandidateFile(t, filepath.Join(root, "events.yaml"), string(eventBody))
+	return root
 }
 
 func openChannelAnchorObservation(t *testing.T, h *channelOnboardingE2EHarness) storetest.ChannelObservation {
@@ -547,8 +652,9 @@ func writeChannelAnchorJourneySource(t *testing.T, root string, withNotice bool)
 	if err != nil {
 		t.Fatal(err)
 	}
-	if string(body) != "name: telegram-agent\n" {
-		t.Fatalf("channel anchor fixture requires the isolated root declaration, got:\n%s", body)
+	var rootSchema map[string]any
+	if err := yaml.Unmarshal(body, &rootSchema); err != nil {
+		t.Fatal(err)
 	}
 	var pins, connects strings.Builder
 	pins.WriteString("pins:\n  inputs:\n")
@@ -569,7 +675,21 @@ func writeChannelAnchorJourneySource(t *testing.T, root string, withNotice bool)
 		}
 		fmt.Fprintf(&connects, "  - {event: %s, from: ., to: %s}\n", event, target)
 	}
-	body = append(body, []byte(pins.String()+connects.String())...)
+	var routes map[string]any
+	if err := yaml.Unmarshal([]byte(pins.String()+connects.String()), &routes); err != nil {
+		t.Fatal(err)
+	}
+	rootPins := rootSchema["pins"].(map[string]any)
+	for key, values := range routes["pins"].(map[string]any) {
+		original, _ := rootPins[key].([]any)
+		rootPins[key] = append(original, values.([]any)...)
+	}
+	originalConnections, _ := rootSchema["connect"].([]any)
+	rootSchema["connect"] = append(originalConnections, routes["connect"].([]any)...)
+	body, err = yaml.Marshal(rootSchema)
+	if err != nil {
+		t.Fatal(err)
+	}
 	if err := os.WriteFile(path, body, 0o600); err != nil {
 		t.Fatal(err)
 	}

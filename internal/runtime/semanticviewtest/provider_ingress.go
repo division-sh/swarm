@@ -19,6 +19,6 @@ func (s providerIngressSource) SemanticCapabilities() semanticview.Capabilities 
 func WithProviderIngress(base semanticview.Source, declarations map[string][]string) semanticview.Source {
 	generation := triggergeneration.FromCanonicalBytes([]byte("isolated-provider-ingress-consumer-test"))
 	return providerIngressSource{Source: base, capabilities: base.SemanticCapabilities().
-		WithProviderTriggerEvents(base, generation, nil).
+		WithProviderTriggerEvents(base, generation, nil, nil).
 		WithProviderIngressEvents(declarations)}
 }

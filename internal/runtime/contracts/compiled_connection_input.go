@@ -41,6 +41,7 @@ type compiledReceiverEvents struct {
 type ConnectionInputPinProvider interface {
 	FlowInputEventPin(flowID, event string) (CompiledFlowInputPin, bool)
 	FlowInputEventPins(flowID string) []CompiledFlowInputPin
+	FlowOutputEventPin(flowID, event string) (CompiledFlowOutputPin, bool)
 }
 
 func (p CompiledConnectionInput) Mode() FlowInputResolutionMode {
@@ -231,6 +232,11 @@ func compileReceiverEventBindings(bundle *WorkflowContractBundle, pins Connectio
 				continue
 			}
 			schema, ok, err := bundle.ResolveCompiledFlowEventSchema(row.producerFlowID, row.producerEvent)
+			if !ok && err == nil {
+				if output, present := pins.FlowOutputEventPin(row.producerFlowID, packageEndpointLocalEvent(bundle, row.producerFlowID, row.producerEvent, false)); present {
+					schema, ok = output.EventSchema()
+				}
+			}
 			if err != nil || !ok {
 				continue
 			}

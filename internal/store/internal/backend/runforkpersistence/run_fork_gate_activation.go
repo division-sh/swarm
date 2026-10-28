@@ -12,7 +12,6 @@ import (
 	"github.com/division-sh/swarm/internal/runtime/contracts"
 	"github.com/division-sh/swarm/internal/runtime/core/activityidentity"
 	"github.com/division-sh/swarm/internal/runtime/core/attemptgeneration"
-	runtimeflowidentity "github.com/division-sh/swarm/internal/runtime/core/flowidentity"
 	decisioncard "github.com/division-sh/swarm/internal/runtime/decisioncard"
 	"github.com/division-sh/swarm/internal/runtime/gateruntime"
 	"github.com/division-sh/swarm/internal/runtime/loopruntime"
@@ -57,7 +56,13 @@ func materializeRunForkDecisionCards(ctx context.Context, decisions runForkDecis
 		if sourceAnchor.EntityID != projection.Source.EntityID || sourceAnchor.Route.InstancePath != projection.Source.FlowInstance {
 			return fmt.Errorf("source decision card %s owner does not match fork source entity ownership", sourceCard.CardID)
 		}
-		forkRoute := runtimeflowidentity.RouteForInstancePath(projection.Fork.FlowInstance)
+		forkRoute, err := runfork.ProjectExecutionRoute(sourceCard.RunID, forkRunID, sourceAnchor.FlowID, sourceAnchor.Route)
+		if err != nil {
+			return fmt.Errorf("project fork stage_gate route: %w", err)
+		}
+		if forkRoute.InstancePath != projection.Fork.FlowInstance {
+			return fmt.Errorf("fork stage_gate route disagrees with projected entity ownership")
+		}
 		forkSource, err := forkDecisionCardExecutionSource(sourceAnchor.Source, projection.Fork.FlowInstance, projection.Fork.EntityID)
 		if err != nil {
 			return fmt.Errorf("construct fork stage_gate source: %w", err)

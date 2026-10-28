@@ -12,11 +12,15 @@ import (
 
 func TestVerifyMultipleEventOwnersTeachingError(t *testing.T) {
 	isolateCLIAPIConfigEnv(t)
-	root := t.TempDir()
+	root := filepath.Join(t.TempDir(), "owner-diagnostic")
+	if err := os.Mkdir(root, 0700); err != nil {
+		t.Fatal(err)
+	}
 	for name, body := range map[string]string{
-		"schema.yaml": "name: owner-diagnostic\nstages: {waiting: {}, done: {final: true}}\n",
-		"events.yaml": "work.requested:\n",
-		"nodes.yaml":  "alpha:\n  event_handlers:\n    work.requested:\n      advances_to: done\nbeta:\n  event_handlers:\n    work.requested:\n      advances_to: done\n",
+		"manifest.yaml": "version: 1.0.0\nplatform_version: '*'\n",
+		"schema.yaml":   "stages: {waiting: {}, done: {final: true}}\n",
+		"events.yaml":   "work.requested:\n",
+		"nodes.yaml":    "alpha:\n  event_handlers:\n    work.requested:\n      advances_to: done\nbeta:\n  event_handlers:\n    work.requested:\n      advances_to: done\n",
 	} {
 		if err := os.WriteFile(filepath.Join(root, name), []byte(body), 0600); err != nil {
 			t.Fatal(err)

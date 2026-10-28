@@ -14,11 +14,9 @@ import (
 func TestSingleDeploymentConfigReleaseRelativePackSelection(t *testing.T) {
 	binary := buildReleaseBinary(t, t.TempDir())
 	type entry struct {
-		ID, Type, Version, Source, Directory string
-		ManifestHash                         string          `json:"manifest_hash"`
-		Origin                               json.RawMessage `json:"origin"`
-		Modified                             bool
-		ShadowsBase                          bool `json:"shadows_base"`
+		ID, Version, Source, Directory string
+		Bodies                         []string `json:"bodies"`
+		ManifestHash                   string   `json:"manifest_hash"`
 	}
 	type inventory struct {
 		BaseMode        string   `json:"base_mode"`
@@ -94,34 +92,29 @@ func TestSingleDeploymentConfigReleaseRelativePackSelection(t *testing.T) {
 					}
 				})
 			}
-			seenTypes := map[string]bool{}
 			for _, pack := range want.Packs {
-				if seenTypes[pack.Type] {
-					continue
-				}
-				seenTypes[pack.Type] = true
-				t.Run("show/"+pack.Type, func(t *testing.T) {
+				t.Run("show/"+pack.ID, func(t *testing.T) {
 					args := append([]string{"packs", "show", pack.ID, source, "--json"}, selector...)
 					result := runReleaseCommand(t, goldenStartupTimeout, root, env, "", binary, args...)
 					var show struct {
 						Pack         entry
-						EnvelopeYAML string `json:"envelope_yaml"`
-						ManifestYAML string `json:"manifest_yaml"`
+						ManifestYAML string            `json:"manifest_yaml"`
+						Bodies       map[string]string `json:"bodies"`
 					}
-					if err := json.Unmarshal([]byte(result.output), &show); err != nil || result.err != nil || !reflect.DeepEqual(show.Pack, pack) || show.ManifestYAML == "" {
+					if err := json.Unmarshal([]byte(result.output), &show); err != nil || result.err != nil || !reflect.DeepEqual(show.Pack, pack) || show.ManifestYAML == "" || len(show.Bodies) != len(pack.Bodies) {
 						t.Fatalf("compiled selected pack: command=%v json=%v\n%s", result.err, err, result.output)
 					}
 					files, err := os.ReadDir(pack.Directory)
-					if err != nil || len(files) != 2 {
+					if err != nil || len(files) != len(pack.Bodies)+1 {
 						t.Fatalf("pack fixture files: %v %v", files, err)
 					}
 					for _, file := range files {
 						body, err := os.ReadFile(filepath.Join(pack.Directory, file.Name()))
-						actual := show.ManifestYAML
-						if file.Name() == "pack.yaml" {
-							actual = show.EnvelopeYAML
+						actual, present := show.Bodies[file.Name()]
+						if file.Name() == "manifest.yaml" {
+							actual, present = show.ManifestYAML, true
 						}
-						if err != nil || actual != string(body) {
+						if err != nil || !present || actual != string(body) {
 							t.Fatalf("show changed selected %s bytes: %v", file.Name(), err)
 						}
 					}
@@ -140,8 +133,8 @@ func TestSingleDeploymentConfigReleaseRelativePackSelection(t *testing.T) {
 					result := runReleaseCommand(t, goldenStartupTimeout, root, env, "", binary, append(command.args, selector...)...)
 					exit, exited := result.err.(*exec.ExitError)
 					path := filepath.Join(filepath.Dir(configPath), "missing-pack")
-					if !exited || exit.ExitCode() != 2 || !strings.Contains(result.output, fmt.Sprintf("development platform pack %q", path)) || !strings.Contains(result.output, "must be a real directory") {
-						t.Fatalf("missing selected pack did not refuse at config-relative path: %v\n%s", result.err, result.output)
+					if !exited || exit.ExitCode() != 2 || !strings.Contains(result.output, fmt.Sprintf("capture provider %s: file does not exist", filepath.Base(path))) {
+						t.Fatalf("missing selected pack did not refuse at captured provider owner: %v\n%s", result.err, result.output)
 					}
 				})
 			}

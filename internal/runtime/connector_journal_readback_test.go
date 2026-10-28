@@ -13,6 +13,7 @@ import (
 	"github.com/division-sh/swarm/internal/runtime/startupownership"
 	"github.com/division-sh/swarm/internal/store/storetest"
 	"github.com/division-sh/swarm/internal/store/testutil/agentfixture"
+	"github.com/division-sh/swarm/internal/testutil/sourceartifactfixture"
 	"github.com/google/uuid"
 )
 
@@ -44,8 +45,13 @@ func TestRuntimeConnectorJournalWitnessesPreserveToolSourceAndEarliestAttemptBot
 				selected, _ = storetest.StartPostgresRuntimeStoreWithReopen(t)
 			}
 			ctx := testAuthorActivityContext(context.Background())
-			fact, _ := correlation.SourceArtifactFactFromContext(ctx)
-			coordinate := agenttopology.SourceCoordinate{BundleHash: fact.BundleHash()}
+			rooted, _ := sourceartifactfixture.Rooted(t, "fixture", sourceartifactfixture.Artifact())
+			ctx = correlation.WithRootAdmission(ctx, rooted.Admission())
+			sourceartifactfixture.RequireArtifact(t, ctx, selected.(sourceartifactfixture.Writer), rooted.Artifact())
+			coordinate, err := agenttopology.NewSourceCoordinate(rooted.Admission())
+			if err != nil {
+				t.Fatal(err)
+			}
 			plan, err := agenttopology.NewSourceSetPlan([]agenttopology.SourceCoordinate{coordinate}, nil)
 			if err != nil {
 				t.Fatal(err)

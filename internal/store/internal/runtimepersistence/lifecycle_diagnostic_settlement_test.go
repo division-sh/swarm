@@ -33,6 +33,7 @@ import (
 
 type lifecycleDiagnosticTestStore interface {
 	agentfixture.Store
+	rootedRunStore
 	runtimepkg.RuntimeLogPersistence
 	runtimemanager.AgentLifecycleDiagnosticPersistence
 	ApplyDestructiveResetQuiescence(context.Context, destructivereset.QuiescenceRequest) (destructivereset.QuiescenceResult, error)
@@ -63,7 +64,7 @@ func TestLifecycleDiagnosticPayloadAdmissionFailureIsAtomicBothStores(t *testing
 			logger := runtimepkg.NewRuntimeLogger(store, executionposture.Live, nil)
 			attempts := 0
 			admissionErr := errors.New("diagnostic payload rejected")
-			binder.SetEventPayloadAdmitter(func(context.Context, events.Event, string) (events.PayloadAdmission, error) {
+			binder.SetEventPayloadAdmitter(func(context.Context, events.Event, events.PayloadProducer) (events.PayloadAdmission, error) {
 				attempts++
 				return events.PayloadAdmission{}, admissionErr
 			})
@@ -77,9 +78,9 @@ func TestLifecycleDiagnosticPayloadAdmissionFailureIsAtomicBothStores(t *testing
 			if err != nil || len(pending) != 1 {
 				t.Fatalf("rejected diagnostic must remain pending: pending=%d err=%v", len(pending), err)
 			}
-			binder.SetEventPayloadAdmitter(func(ctx context.Context, event events.Event, flowID string) (events.PayloadAdmission, error) {
+			binder.SetEventPayloadAdmitter(func(ctx context.Context, event events.Event, payloadProducer events.PayloadProducer) (events.PayloadAdmission, error) {
 				attempts++
-				return storeTestPayloadAdmitter(ctx, event, flowID)
+				return storeTestPayloadAdmitter(ctx, event, payloadProducer)
 			})
 			for i := 0; i < 2; i++ {
 				if err := logger.ProjectLifecycleDiagnostic(ctx, item); err != nil {
@@ -201,6 +202,7 @@ func createNamedLifecycleDiagnostic(t *testing.T, ctx context.Context, store lif
 
 func createLifecycleDiagnosticWithIdentity(t *testing.T, ctx context.Context, store lifecycleDiagnosticTestStore, identity agentidentity.Identity) diaglog.LifecycleDiagnostic {
 	t.Helper()
+	ctx = requireRunFixtureForTest(t, ctx, store, semanticRunFixture{RunID: identity.RunID, Origin: semanticScenarioSetupRunOriginForTest()})
 	now := time.Now().UTC().Truncate(time.Microsecond)
 	record := runtimemanager.PersistedAgent{
 		Config: withRuntimePersistenceTestIntent(t, runtimeactors.AgentConfig{
@@ -265,6 +267,7 @@ func TestLifecycleDiagnosticRejectsMissingSinkAndAlteredSnapshot(t *testing.T) {
 		t.Run(fmt.Sprintf("sqlite=%t", sqlite), func(t *testing.T) {
 			store, db := newLifecycleDiagnosticTestStore(t, sqlite)
 			ctx := testAuthorActivityContext()
+			ctx = originalStoreFixtureContext(t, ctx, store)
 			item := createLifecycleDiagnostic(t, ctx, store)
 			var nilLogger *runtimepkg.RuntimeLogger
 			for _, logger := range []*runtimepkg.RuntimeLogger{nilLogger, runtimepkg.NewRuntimeLogger(nil, executionposture.Live, nil)} {

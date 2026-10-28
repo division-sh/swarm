@@ -72,7 +72,7 @@ func supportedArrivalJoinFixture(t *testing.T, flowID string) string {
 			writeSelectedContractFixtureFile(t, filepath.Join(root, name), string(body))
 		}
 		writeSelectedContractFixtureFile(t, filepath.Join(root, "events.yaml"), "item.completed:\n  order_id: text\n  member_id: text\n  result: JoinResult\n")
-		writeSelectedContractFixtureFile(t, filepath.Join(root, "schema.yaml"), "name: join-eventbus-proof\npins:\n  inputs: [item.completed]\nconnect:\n  - {event: item.completed, from: ., to: orders, resolution: select}\n")
+		writeSelectedContractFixtureFile(t, filepath.Join(root, "schema.yaml"), "pins:\n  inputs: [item.completed]\nconnect:\n  - {event: item.completed, from: ., to: orders, resolution: select}\n")
 		if err := os.Remove(filepath.Join(root, flowID, "events.yaml")); err != nil {
 			t.Fatal(err)
 		}
@@ -98,7 +98,7 @@ func seedArmedArrivalSource(t *testing.T, ctx context.Context, selected any, own
 		[]byte(`{"member_id":"cut","result":{"value":"cut"}}`), 0, runID, events.EventEnvelope{}, events.NoRoutingSource(), at.Add(time.Second), executionmode.Mock)
 	flowID := os.Getenv(publishedJoinFlowEnv)
 	if flowID != "orders" {
-		admission, err := rootruntime.NewRuntimePayloadAdmitter(nil, loaded.Source, loaded.SourceArtifactFact)(ctx, marker, ".")
+		admission, err := rootruntime.NewRuntimePayloadAdmitter(nil, loaded.Source, loaded.SourceArtifactFact)(ctx, marker, events.EventPayloadProducer(marker, "."))
 		if err != nil {
 			t.Fatal(err)
 		}
@@ -229,7 +229,7 @@ func seedArmedArrivalSource(t *testing.T, ctx context.Context, selected any, own
 		// distinct admitted event; source immutability includes both history rows.
 		marker = eventtest.ExistingRunRootIngressWithRoutingSourceAndMode(uuid.NewString(), marker.Type(), "source-runtime", "",
 			marker.Payload(), 0, runID, events.EventEnvelope{}, events.NoRoutingSource(), marker.CreatedAt().Add(time.Second), executionmode.Mock)
-		admission, err := rootruntime.NewRuntimePayloadAdmitter(nil, loaded.Source, loaded.SourceArtifactFact)(ctx, marker, "orders")
+		admission, err := rootruntime.NewRuntimePayloadAdmitter(nil, loaded.Source, loaded.SourceArtifactFact)(ctx, marker, events.EventPayloadProducer(marker, "orders"))
 		if err != nil {
 			t.Fatal(err)
 		}
@@ -307,7 +307,7 @@ func TestIssue642ArmedArrivalTimeoutContinuesExactDeliveryBothStores(t *testing.
 			selection := runforkadmission.SelectedContractSelection(loaded.Source)
 			operation := runfork.ForkOperationRequest{OperationID: uuid.NewString(), Actor: "armed-arrival", IdempotencyKey: "fixed-cut",
 				TransportHash: "armed-arrival-transport", SourceRunID: sourceRun, ForkEventID: marker,
-				TargetBundleHash: loaded.SourceArtifactFact.BundleHash(), AllowSourceFreeze: true, ContractSelection: selection}
+				TargetBundleHash: loaded.SourceArtifactFact.BundleHash(), TargetRootReference: loaded.RootedSource.Admission().Reference(), AllowSourceFreeze: true, ContractSelection: selection}
 			liveRuntime, liveContexts := liveForkRuntimeFixture(t, ctx, selected, owner, loaded, sourceRun, executionposture.MockOnly)
 			preservedSource := joinLiveForkFixtureClock(t, ctx, liveRuntime, selected, sourceRun, source.ID)
 			sourceCount, err := storetest.ReadLifecycleEventCardinality(ctx, selected, sourceRun, "platform.join_timeout")

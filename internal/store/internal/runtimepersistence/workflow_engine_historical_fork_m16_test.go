@@ -77,7 +77,7 @@ func TestWorkflowEngineHistoricalForkM16BothStores(t *testing.T) {
 			if err := commitSemanticPipelineProcessedEventFixture(ctx, fixture.store, postEvent); err != nil {
 				t.Fatal(err)
 			}
-			postRequest := prepareSelectedStoreMaterializationForTest(t, ctx, fixture.store, runID, postEvent.ID(), runfork.RunForkContractSelection{Mode: runfork.RunForkContractSelectionModeSelectedContracts})
+			postRequest := prepareSelectedStoreMaterializationForTest(t, ctx, fixture.store, runID, postEvent.ID(), runfork.RunForkContractSelection{Mode: runfork.RunForkContractSelectionModeSelectedContracts}, preRequest.SourceArtifactFact.BundleHash())
 			postPlan, err := owner.PlanRunFork(ctx, runfork.RunForkPlanRequest{SourceRunID: runID, At: postEvent.ID()})
 			if err != nil {
 				t.Fatal(err)

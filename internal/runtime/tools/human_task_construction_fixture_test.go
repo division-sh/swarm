@@ -17,9 +17,7 @@ import (
 	"github.com/division-sh/swarm/internal/runtime/executionposture"
 	"github.com/division-sh/swarm/internal/runtime/manager"
 	"github.com/division-sh/swarm/internal/runtime/pipeline"
-	"github.com/division-sh/swarm/internal/runtime/runlifecycle"
 	"github.com/division-sh/swarm/internal/runtime/semanticview"
-	"github.com/division-sh/swarm/internal/store/storetest"
 	"github.com/division-sh/swarm/internal/testutil/sourceartifactfixture"
 )
 
@@ -38,10 +36,16 @@ func humanTaskConstructedRequester(t *testing.T, ctx context.Context, selected h
 	if !found || bundle.SourceArtifact == nil {
 		t.Fatal("requester construction requires its admitted source artifact")
 	}
-	fact := sourceartifactfixture.RequireArtifact(t, ctx, selected.(sourceartifactfixture.Writer), bundle.SourceArtifact)
-	if _, err := storetest.ReviseRunSource(ctx, selected.(storetest.RunFixtureStore), runlifecycle.SourceRevisionRequest{RunID: runID, Source: fact}); err != nil {
-		t.Fatalf("admit requester run source: %v", err)
+	rooted, err := bundle.RootedSource()
+	if err != nil {
+		t.Fatal(err)
 	}
+	retained, err := selected.LoadRunRootedSource(ctx, runID)
+	if err != nil || !retained.Admission().Equal(rooted.Admission()) {
+		t.Fatalf("requester fixture lost its original captured source: %v", err)
+	}
+	fact := sourceartifactfixture.FactFor(rooted.Artifact())
+	ctx = correlation.WithRootAdmission(correlation.WithSourceArtifactFact(ctx, fact), rooted.Admission())
 	ctx = correlation.WithSourceArtifactFact(ctx, fact)
 	ctx = authoractivity.WithScope(ctx, authoractivity.BundleScope(authorActivityTestRuntimeInstanceID, fact.BundleHash()))
 	ctx = effects.WithExecutionMode(ctx, executionmode.Live)
@@ -98,9 +102,9 @@ func humanTaskConstructedRequester(t *testing.T, ctx context.Context, selected h
 func humanTaskImportedSource(t *testing.T, actor actors.AgentConfig) semanticview.Source {
 	t.Helper()
 	bundle := loadWave1EntityToolMultiFlowBundle(t, map[string]entityToolFlowFixture{
-		"gateway": {SchemaYAML: "name: gateway\n"},
+		"gateway": {SchemaYAML: "stages: []\n"},
 		"gateway/provider": {
-			SchemaYAML:   "name: provider\nstages:\n  queued: {}\n",
+			SchemaYAML:   "stages:\n  queued: {}\n",
 			EntitiesYAML: "provider_record:\n  status: text\n", AgentsYAML: entityToolAgentYAML(actor),
 		},
 	})

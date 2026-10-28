@@ -113,10 +113,12 @@ func TestDerivePromptEntityWriteEvidence_IncludesScopedDuplicateAgentIDs(t *test
 	repo := repoRoot(t)
 	root := t.TempDir()
 
-	writePromptWriterFixtureFile(t, filepath.Join(root, "schema.yaml"), "name: prompt-entity-writes-duplicate\n")
+	writePromptWriterFixtureFile(t, filepath.Join(root, "manifest.yaml"), "version: 1.0.0\nplatform_version: '*'\n")
+	writePromptWriterFixtureFile(t, filepath.Join(root, "schema.yaml"), "stages: []\n# fixture: prompt-entity-writes-duplicate\n")
 
 	for _, flowPath := range []string{"alpha", "beta"} {
-		writePromptWriterFixtureFile(t, filepath.Join(root, flowPath, "schema.yaml"), "name: "+flowPath+"\n")
+		writePromptWriterFixtureFile(t, filepath.Join(root, flowPath, "manifest.yaml"), "version: 1.0.0\nplatform_version: '*'\n")
+		writePromptWriterFixtureFile(t, filepath.Join(root, flowPath, "schema.yaml"), "stages: []\n# fixture: "+flowPath+"\n")
 		writePromptWriterFixtureFile(t, filepath.Join(root, flowPath, "entities.yaml"), `
 case:
   business_brief:

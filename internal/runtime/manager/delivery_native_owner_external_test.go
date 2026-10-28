@@ -11,6 +11,7 @@ import (
 	"github.com/division-sh/swarm/internal/events/eventtest"
 	"github.com/division-sh/swarm/internal/runtime/authoractivity"
 	runtimebus "github.com/division-sh/swarm/internal/runtime/bus"
+	"github.com/division-sh/swarm/internal/runtime/contracts"
 	"github.com/division-sh/swarm/internal/runtime/core/agentidentitytest"
 	"github.com/division-sh/swarm/internal/runtime/core/handlerselection"
 	"github.com/division-sh/swarm/internal/runtime/correlation"
@@ -19,8 +20,10 @@ import (
 	"github.com/division-sh/swarm/internal/runtime/pipelineobligation"
 	"github.com/division-sh/swarm/internal/runtime/runfork"
 	"github.com/division-sh/swarm/internal/runtime/runforkexecution"
+	"github.com/division-sh/swarm/internal/runtime/semanticview"
 	"github.com/division-sh/swarm/internal/runtime/startupownership"
 	"github.com/division-sh/swarm/internal/runtime/testfixtures/canonicalrouting"
+	"github.com/division-sh/swarm/internal/sourceartifact"
 	"github.com/division-sh/swarm/internal/store/storetest"
 	"github.com/division-sh/swarm/internal/store/testutil/agentfixture"
 	"github.com/division-sh/swarm/internal/testutil/sourceartifactfixture"
@@ -31,6 +34,7 @@ type managerNativeDeliveryOwner interface {
 	deliverylifecycle.Store
 	storetest.RunFixtureStore
 	sourceartifactfixture.Writer
+	sourceartifactfixture.RootedWriter
 	PipelineObligations() pipelineobligation.Store
 	CommitPublication(context.Context, runtimebus.PublicationCommand) (runtimebus.CommittedPublication, error)
 	RegisterAuthorActivityEventCatalog(authoractivity.Scope, []authoractivity.EventDescriptor) (*authoractivity.EventCatalogLease, error)
@@ -63,8 +67,11 @@ func originalManagerFixtureContext(t testing.TB, ctx context.Context, selected a
 	return ctx
 }
 
-func openManagerNativeDelivery(t *testing.T, backend string) *manager.ManagerDeliveryNativeFixture {
+func openManagerNativeDelivery(t *testing.T, backend string, sources ...semanticview.Source) *manager.ManagerDeliveryNativeFixture {
 	t.Helper()
+	if len(sources) > 1 {
+		t.Fatal("native delivery fixture accepts one exact compiled source")
+	}
 	var selected managerNativeDeliveryOwner
 	switch backend {
 	case "sqlite":
@@ -74,12 +81,36 @@ func openManagerNativeDelivery(t *testing.T, backend string) *manager.ManagerDel
 	default:
 		t.Fatalf("unsupported manager delivery fixture backend %q", backend)
 	}
-	source := sourceartifactfixture.Fact()
+	var rooted sourceartifact.RootedSource
+	ctx := manager.TerminalPanicFixtureContext()
+	var semanticSource semanticview.Source
+	if len(sources) == 1 {
+		semanticSource = sources[0]
+		bundle, present := semanticview.Bundle(semanticSource)
+		if !present || bundle == nil {
+			t.Fatal("native delivery fixture requires its compiled source")
+		}
+		var err error
+		rooted, err = bundle.RootedSource()
+		if err != nil {
+			t.Fatal(err)
+		}
+	} else {
+		rooted, _ = sourceartifactfixture.Rooted(t, "manager-delivery", sourceartifactfixture.Artifact())
+	}
+	artifact := rooted.Artifact()
+	ctx = correlation.WithRootAdmission(ctx, rooted.Admission())
+	source := sourceartifactfixture.FactFor(artifact)
+	ctx = correlation.WithSourceArtifactFact(ctx, source)
+	scope, present := authoractivity.ScopeFromContext(ctx)
+	if !present {
+		t.Fatal("native delivery fixture requires its original author scope")
+	}
+	ctx = authoractivity.WithScope(ctx, authoractivity.BundleScope(scope.RuntimeInstanceID, source.BundleHash()))
 	authority, err := deliverylifecycle.NewNormalExecutionAuthority(source, "manager-delivery-test", 1)
 	if err != nil {
 		t.Fatal(err)
 	}
-	ctx := manager.TerminalPanicFixtureContext()
 	original, ok := selected.(agentfixture.Store)
 	if !ok {
 		t.Fatalf("native manager fixture lacks its original process owner: %T", selected)
@@ -92,14 +123,14 @@ func openManagerNativeDelivery(t *testing.T, backend string) *manager.ManagerDel
 	if err != nil {
 		t.Fatal(err)
 	}
-	if err := sourceartifactfixture.Ensure(ctx, selected); err != nil {
+	if _, err := selected.EnsureRootedSource(ctx, rooted); err != nil {
 		t.Fatal(err)
 	}
 	if err := selected.ActivateDeliveryAuthority(ctx, authority); err != nil {
 		t.Fatal(err)
 	}
 	return &manager.ManagerDeliveryNativeFixture{
-		Store: selected, Authority: authority, Context: ctx, NormalAuthority: authority,
+		Store: selected, Authority: authority, Context: ctx, NormalAuthority: authority, SemanticSource: semanticSource,
 		MutationContext: func(operation context.Context) (context.Context, error) {
 			if startupownership.HasMutationAuthority(operation) {
 				_, err := startupownership.CaptureMutationAuthority(operation)
@@ -110,7 +141,10 @@ func openManagerNativeDelivery(t *testing.T, backend string) *manager.ManagerDel
 		CarryMutationContext: startupownership.CarryMutationAuthority,
 		RequireRun: func(t *testing.T, runID string) {
 			t.Helper()
-			storetest.RequireRunningRun(t, ctx, selected, runID, time.Now().UTC())
+			storetest.RequireRun(t, ctx, selected, storetest.RunFixture{
+				RunID: runID, Origin: storetest.ScenarioSetupOrigin(), Artifact: artifact,
+				RootAdmission: rooted.Admission(), StartedAt: time.Now().UTC(),
+			})
 		},
 		Publish: func(t *testing.T, ctx context.Context, event events.Event, routes []events.DeliveryRoute, authority deliverylifecycle.ExecutionAuthority) {
 			t.Helper()
@@ -164,6 +198,67 @@ func openManagerNativeDelivery(t *testing.T, backend string) *manager.ManagerDel
 	}
 }
 
+func managerProjectionDeliverySource(t *testing.T) semanticview.Source {
+	t.Helper()
+	repo := canonicalrouting.RepoRoot(t)
+	bundle, err := contracts.LoadWorkflowContractBundleWithOverrides(repo, canonicalrouting.WriteManagerExecutionProjection(t), contracts.DefaultPlatformSpecFile(repo))
+	if err != nil {
+		t.Fatal(err)
+	}
+	return semanticview.Wrap(bundle)
+}
+
+func managerSourceSetDeliverySource(t *testing.T) semanticview.Source {
+	t.Helper()
+	artifact, err := sourceartifact.AdmitMembers(map[string][]byte{
+		"manifest.yaml": []byte("version: 1.0.0\nplatform_version: '*'\n"),
+		"events.yaml":   []byte("test.source_set_wait:\ntest.source_set_cancelled:\n"),
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	rooted, _ := sourceartifactfixture.Rooted(t, "delivery", artifact)
+	bundle, err := contracts.LoadWorkflowContractBundleFromRootedSource(canonicalrouting.RepoRoot(t), rooted, "", contracts.WorkflowContractLoadOptions{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	return semanticview.Wrap(bundle)
+}
+
+func managerFailureDeliverySource(t *testing.T) semanticview.Source {
+	t.Helper()
+	artifact, err := sourceartifact.AdmitMembers(map[string][]byte{
+		"manifest.yaml": []byte("version: 1.0.0\nplatform_version: '*'\n"),
+		"events.yaml":   []byte("work.requested:\n"),
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	rooted, _ := sourceartifactfixture.Rooted(t, "delivery", artifact)
+	bundle, err := contracts.LoadWorkflowContractBundleFromRootedSource(canonicalrouting.RepoRoot(t), rooted, "", contracts.WorkflowContractLoadOptions{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	return semanticview.Wrap(bundle)
+}
+
+func managerClaimedExecutorDeliverySource(t *testing.T) semanticview.Source {
+	t.Helper()
+	artifact, err := sourceartifact.AdmitMembers(map[string][]byte{
+		"manifest.yaml": []byte("version: 1.0.0\nplatform_version: '*'\n"),
+		"events.yaml":   []byte("input.first:\ninput.second:\ntest.lane.child:\ntest.lane.later:\ntest.lane.root:\n"),
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	rooted, _ := sourceartifactfixture.Rooted(t, "delivery", artifact)
+	bundle, err := contracts.LoadWorkflowContractBundleFromRootedSource(canonicalrouting.RepoRoot(t), rooted, "", contracts.WorkflowContractLoadOptions{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	return semanticview.Wrap(bundle)
+}
+
 func publishManagerNativeDelivery(t *testing.T, ctx context.Context, selected managerNativeDeliveryOwner, event events.Event, routes []events.DeliveryRoute, authority deliverylifecycle.ExecutionAuthority) {
 	t.Helper()
 	publishManagerNativeDeliveryWithRoot(t, ctx, selected, event, routes, authority, nil)
@@ -180,6 +275,11 @@ func TestManagerDeliveryNativeOwnerRequiresExplicitPublicationBothStores(t *test
 			fixture := openManagerNativeDelivery(t, backend)
 			source := sourceartifactfixture.Fact()
 			ctx := correlation.WithSourceArtifactFact(fixture.Context, source)
+			root, present, err := correlation.RootAdmissionFromContext(fixture.Context)
+			if err != nil || !present {
+				t.Fatalf("native publication requires its captured root: present=%t err=%v", present, err)
+			}
+			ctx = correlation.WithRootAdmission(ctx, root)
 			ctx = authoractivity.WithScope(ctx, authoractivity.BundleScope("11111111-1111-1111-1111-111111111111", source.BundleHash()))
 			runID := uuid.NewString()
 			event := eventtest.RunCreatingRootIngress(uuid.NewString(), "work.requested", "source", "", nil, 0, runID, "", events.EventEnvelope{}, time.Now().UTC())
@@ -211,19 +311,21 @@ func TestManagerDeliveryNativeOwnerRequiresExplicitPublicationBothStores(t *test
 func TestManagerDeliveryStorageOnlySourceRefusesSelectedExecutionBothStores(t *testing.T) {
 	for _, backend := range []string{"sqlite", "postgres"} {
 		t.Run(backend, func(t *testing.T) {
-			fixture := openManagerNativeDelivery(t, backend)
+			fixture := openManagerNativeDelivery(t, backend, managerProjectionDeliverySource(t))
 			selected, ok := fixture.Store.(runforkexecution.SourceArtifactSelectedContractSourceStore)
 			if !ok {
 				t.Fatal("original native delivery owner has no retained selected source role")
 			}
 			repo := canonicalrouting.RepoRoot(t)
 			loader := runforkexecution.SourceArtifactSelectedContractSourceLoader{RepoRoot: repo, Store: selected}
-			ctx := manager.TerminalPanicFixtureContext()
+			ctx := fixture.Context
+			hash := fixture.Authority.SourceArtifact().BundleHash()
 			admitted, err := loader.InspectRunForkSelectedContractSourceForRequest(ctx, runforkexecution.SelectedContractSourceLoadRequest{
-				BundleHash: sourceartifactfixture.BundleHash,
-				Selection:  runfork.RunForkContractSelection{Mode: "bundle_hash", BundleHash: sourceartifactfixture.BundleHash},
+				Responsibility: runforkexecution.FreshSelectedSource(hash),
+				BundleHash:     hash,
+				Selection:      runfork.RunForkContractSelection{Mode: "bundle_hash", BundleHash: hash},
 			})
-			if err != nil || admitted.Source == nil || admitted.Module == nil || admitted.SourceArtifactFact.BundleHash() != sourceartifactfixture.BundleHash || admitted.RuntimeProjection != nil || admitted.Cleanup != nil {
+			if err != nil || admitted.Source == nil || admitted.Module == nil || admitted.SourceArtifactFact.BundleHash() != hash || admitted.RuntimeProjection != nil || admitted.Cleanup != nil {
 				t.Fatalf("admitted source inspection changed authority or materialized execution: %+v,error=%v", admitted, err)
 			}
 			writer, ok := fixture.Store.(sourceartifactfixture.Writer)
@@ -232,23 +334,34 @@ func TestManagerDeliveryStorageOnlySourceRefusesSelectedExecutionBothStores(t *t
 			}
 			// The shared fixture is now valid; this negative requires a declaration
 			// whose bytes can be stored but whose agent intent is not admitted.
-			storageOnly := sourceartifactfixture.New("agents.yaml", []byte("storage-only: {}\n"))
-			if err := sourceartifactfixture.EnsureArtifact(ctx, writer, storageOnly); err != nil {
+			storageArtifact, err := sourceartifact.AdmitMembers(map[string][]byte{
+				"manifest.yaml": []byte("version: 1.0.0\nplatform_version: '*'\n"),
+				"agents.yaml":   []byte("storage-only: {}\n"),
+			})
+			if err != nil {
 				t.Fatal(err)
 			}
-			before, err := selected.GetSourceArtifact(ctx, storageOnly.BundleHash())
+			storageRoot, _ := sourceartifactfixture.Rooted(t, "storage-only", storageArtifact)
+			storageOnly := storageRoot.Artifact()
+			storageCtx := correlation.WithSourceArtifactFact(ctx, sourceartifactfixture.FactFor(storageOnly))
+			storageCtx = correlation.WithRootAdmission(storageCtx, storageRoot.Admission())
+			if err := sourceartifactfixture.EnsureArtifact(storageCtx, writer, storageOnly); err != nil {
+				t.Fatal(err)
+			}
+			before, err := selected.GetSourceArtifact(storageCtx, storageOnly.BundleHash())
 			if err != nil {
 				t.Fatal(err)
 			}
 			probe := storetest.CollectTransactions(t, fixture.Store, storetest.TransactionProbeOptions{})
-			_, err = loader.InspectRunForkSelectedContractSourceForRequest(ctx, runforkexecution.SelectedContractSourceLoadRequest{
-				BundleHash: storageOnly.BundleHash(),
-				Selection:  runfork.RunForkContractSelection{Mode: "bundle_hash", BundleHash: storageOnly.BundleHash()},
+			_, err = loader.InspectRunForkSelectedContractSourceForRequest(storageCtx, runforkexecution.SelectedContractSourceLoadRequest{
+				Responsibility: runforkexecution.FreshSelectedSource(storageOnly.BundleHash()),
+				BundleHash:     storageOnly.BundleHash(),
+				Selection:      runfork.RunForkContractSelection{Mode: "bundle_hash", BundleHash: storageOnly.BundleHash()},
 			})
 			if err == nil || !strings.Contains(err.Error(), "BUNDLE_DATA_INTEGRITY_ERROR") || !strings.Contains(err.Error(), "agent intent source is required") {
 				t.Fatalf("storage-only artifact must not mint executable selected authority: %v", err)
 			}
-			after, err := selected.GetSourceArtifact(ctx, storageOnly.BundleHash())
+			after, err := selected.GetSourceArtifact(storageCtx, storageOnly.BundleHash())
 			if err != nil || !reflect.DeepEqual(before, after) {
 				t.Fatalf("refused inspection changed its stored source: before=%+v,after=%+v,error=%v", before, after, err)
 			}

@@ -109,6 +109,7 @@ func lifecycleDecisionParamsFromEndpoint(t *testing.T, endpoint, cardID, verdict
 func TestServedCompiledGateFrozenTransitionEvidenceOnBothStores(t *testing.T) {
 	for _, backend := range []string{"sqlite", "postgres"} {
 		t.Run(backend, func(t *testing.T) {
+			configureStandingLifecycleCredentials(t)
 			sourceA := canonicalrouting.CopyLifecycleEmitter(t, canonicalrouting.LifecycleGateSharedEvent)
 			sourceB := canonicalrouting.CopyLifecycleChangedGate(t)
 			opts, start := lifecycleRestartHarness(t, backend, sourceA)

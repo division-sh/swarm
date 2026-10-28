@@ -12,7 +12,9 @@ import (
 func TestWorkspaceClassFindingsCensusAmbiguousScopedDeclarations(t *testing.T) {
 	root := t.TempDir()
 
-	writeBootverifyFixtureFile(t, filepath.Join(root, "schema.yaml"), "name: scoped-workspace-validation\n")
+	writeBootverifyFixtureFile(t, filepath.Join(root, "manifest.yaml"), "version: 1.0.0\nplatform_version: '*'\n")
+	writeBootverifyFixtureFile(t, filepath.Join(root, "schema.yaml"), "stages: []\n")
+	writeBootverifyFixtureFile(t, filepath.Join(root, "packages", "manifest.yaml"), "version: 1.0.0\nplatform_version: '*'\n")
 	writeBootverifyFixtureFile(t, filepath.Join(root, "policy.yaml"), `
 workspace_classes:
   dedicated:
@@ -20,6 +22,7 @@ workspace_classes:
 `)
 	for _, project := range []string{"project-a", "project-b"} {
 		dir := filepath.Join(root, "packages", project)
+		writeBootverifyFixtureFile(t, filepath.Join(dir, "manifest.yaml"), "version: 1.0.0\nplatform_version: '*'\n")
 
 		writeBootverifyFixtureFile(t, filepath.Join(dir, "agents.yaml"), `
 shared-worker:

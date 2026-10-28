@@ -1,4 +1,4 @@
-name: collector
+# fixture: collector
 instance: batch_id
 stages:
   collecting: {}

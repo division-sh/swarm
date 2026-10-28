@@ -20,6 +20,7 @@ import (
 	"github.com/division-sh/swarm/internal/runtime/manager"
 	"github.com/division-sh/swarm/internal/runtime/runlifecycle"
 	"github.com/division-sh/swarm/internal/runtime/startupownership"
+	"github.com/division-sh/swarm/internal/testutil/sourceartifactfixture"
 )
 
 type shutdownFanOutSession struct{ *runtimeTestRetainedSession }
@@ -31,8 +32,12 @@ func (*shutdownFanOutSession) FanOutServingCapacity() (startupownership.FanOutCa
 func newShutdownFanOutRegistration(t *testing.T, ctx context.Context, rt *Runtime) *startupownership.FanOutServingRegistration {
 	t.Helper()
 	session := &shutdownFanOutSession{newRuntimeTestRetainedSession(t)}
-	var err error
-	session.plan, err = agenttopology.NewSourceSetPlan([]agenttopology.SourceCoordinate{{BundleHash: runtimeTestBundleHash}}, nil)
+	rooted, _ := sourceartifactfixture.Rooted(t, "shutdown", sourceartifactfixture.Artifact())
+	coordinate, err := agenttopology.NewSourceCoordinate(rooted.Admission())
+	if err != nil {
+		t.Fatal(err)
+	}
+	session.plan, err = agenttopology.NewSourceSetPlan([]agenttopology.SourceCoordinate{coordinate}, nil)
 	if err != nil {
 		t.Fatal(err)
 	}

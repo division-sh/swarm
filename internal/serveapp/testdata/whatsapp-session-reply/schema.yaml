@@ -1,11 +1,3 @@
-name: whatsapp-session-reply
-imports:
-  connector_packs:
-    - provider: whatsapp
-      tool: whatsapp.send_text
-  provider_trigger_events:
-    - provider: whatsapp
-      event: inbound.whatsapp.message
 stages:
   active:
     gate:
@@ -17,10 +9,7 @@ stages:
     final: true
 pins:
   inputs:
-    - inbound.whatsapp
+    - inbound.whatsapp.raw
+    - inbound.whatsapp.message
   outputs:
     - inbound.whatsapp.message
-ingress:
-  alias: reception
-  providers:
-    - provider: whatsapp

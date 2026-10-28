@@ -49,7 +49,8 @@ func TestIssue2655StagedRevisionRefusalAndRetryBothStores(t *testing.T) {
 			selection := runfork.RunForkContractSelection{Mode: runfork.RunForkContractSelectionModeSelectedContracts}
 			operation := runfork.ForkOperationRequest{
 				OperationID: uuid.NewString(), Actor: "staged-revision-proof", IdempotencyKey: uuid.NewString(), TransportHash: "staged-request",
-				SourceRunID: sourceRun, TargetBundleHash: f.runtime.sourceArtifactFact.BundleHash(), ContractSelection: selection,
+				SourceRunID: sourceRun, TargetBundleHash: f.runtime.sourceArtifactFact.BundleHash(),
+				TargetRootReference: notifyAllChildrenRootedSource(t, f.source).Admission().Reference(), ContractSelection: selection,
 				DataPinOverrides: []durabledata.ExplicitPin{{Declaration: laterVersion.Manifest.Declaration, VersionID: laterVersion.VersionID}},
 			}
 			owner, recovered := deploymentForkOwner(t, f)

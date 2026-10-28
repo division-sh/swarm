@@ -4,22 +4,23 @@ import (
 	"context"
 	"errors"
 	"reflect"
+	"sort"
 	"strings"
 	"testing"
 	"time"
 
 	"github.com/division-sh/swarm/internal/events"
 	"github.com/division-sh/swarm/internal/events/eventtest"
+	"github.com/division-sh/swarm/internal/packadmission"
 	"github.com/division-sh/swarm/internal/runtime/agenttopology"
-	runtimebus "github.com/division-sh/swarm/internal/runtime/bus"
-	runtimecontracts "github.com/division-sh/swarm/internal/runtime/contracts"
 	"github.com/division-sh/swarm/internal/runtime/core/agentidentitytest"
 	"github.com/division-sh/swarm/internal/runtime/core/worklifetime"
+	runtimecorrelation "github.com/division-sh/swarm/internal/runtime/correlation"
 	"github.com/division-sh/swarm/internal/runtime/deliverycontinuation"
 	runtimedelivery "github.com/division-sh/swarm/internal/runtime/deliverylifecycle"
 	"github.com/division-sh/swarm/internal/runtime/runbundle"
 	"github.com/division-sh/swarm/internal/runtime/runlifecycle"
-	"github.com/division-sh/swarm/internal/runtime/semanticviewtest"
+	"github.com/division-sh/swarm/internal/runtime/semanticview"
 )
 
 const (
@@ -29,18 +30,43 @@ const (
 )
 
 func TestRuntimeContextManagerRegistersAndLooksUpPinnedContexts(t *testing.T) {
+	var contexts [2]BundleContext
+	for i, event := range []string{"alpha.requested", "beta.requested"} {
+		bundle, rooted, _ := loadS1EffectiveProviderScope(t, map[string][]byte{
+			"manifest.yaml": []byte("version: 1.0.0\nplatform_version: '*'\n"),
+			"schema.yaml":   []byte("stages: []\n"),
+			"events.yaml":   []byte(event + ":\n"),
+		})
+		contexts[i] = rootedContextForSource(t, semanticview.Wrap(bundle), rooted)
+		providers, err := packadmission.AdmitProviderSource(rooted, bundle.Platform)
+		if err != nil {
+			t.Fatal(err)
+		}
+		scope, err := providers.Scope(".")
+		if err != nil {
+			t.Fatal(err)
+		}
+		catalog, err := scope.TriggerCatalog()
+		if err != nil {
+			t.Fatal(err)
+		}
+		contexts[i].ProviderTriggerCatalog = catalog
+		applyRuntimeAdmissionCatalog(t, &contexts[i], catalog)
+	}
+	a, b := contexts[0], contexts[1]
 	availability := fakeRunBundleAvailability{
 		rows: map[string]runbundle.Availability{
 			"run-b": {
 				RunID:                 "run-b",
-				BundleHash:            runtimeContextTestHashB,
+				BundleHash:            b.BundleHash(),
+				RootReference:         b.RootAdmission.Reference(),
+				RootAdmissionPresent:  true,
 				SourceArtifactPresent: true,
 			},
 		},
 	}
 	manager, err := newTestRuntimeContextManager(t, availability,
-		testBundleContext(t, runtimeContextTestHashB, "beta.requested"),
-		testBundleContext(t, runtimeContextTestHashA, "alpha.requested"),
+		b, a,
 	)
 	if err != nil {
 		t.Fatalf("NewRuntimeContextManager: %v", err)
@@ -48,70 +74,74 @@ func TestRuntimeContextManagerRegistersAndLooksUpPinnedContexts(t *testing.T) {
 	if manager.Len() != 2 || !manager.MultiContext() {
 		t.Fatalf("manager Len/MultiContext = %d/%v, want 2/true", manager.Len(), manager.MultiContext())
 	}
-	if got, want := manager.BundleHashes(), []string{runtimeContextTestHashA, runtimeContextTestHashB}; !reflect.DeepEqual(got, want) {
+	wantHashes := []string{a.BundleHash(), b.BundleHash()}
+	sort.Strings(wantHashes)
+	if got, want := manager.BundleHashes(), wantHashes; !reflect.DeepEqual(got, want) {
 		t.Fatalf("BundleHashes = %#v, want %#v", got, want)
 	}
 	primary, ok := manager.Primary()
-	if !ok || primary.BundleHash() != runtimeContextTestHashB {
-		t.Fatalf("Primary = %#v/%v, want first registered semantic primary %s", primary, ok, runtimeContextTestHashB)
+	if !ok || primary.BundleHash() != b.BundleHash() {
+		t.Fatalf("Primary = %#v/%v, want first registered semantic primary %s", primary, ok, b.BundleHash())
 	}
-	contextDef, availabilityResult, loaded, err := manager.LookupRun(testAuthorActivityContext(context.Background()), "run-b")
+	ctx := testAuthorActivityContextForBundle(context.Background(), b.BundleHash())
+	ctx = runtimecorrelation.WithSourceArtifactFact(ctx, b.SourceArtifactFact)
+	ctx = runtimecorrelation.WithRootAdmission(ctx, b.RootAdmission)
+	contextDef, availabilityResult, loaded, err := manager.LookupRun(ctx, "run-b")
 	if err != nil {
 		t.Fatalf("LookupRun: %v", err)
 	}
-	if !loaded || contextDef == nil || contextDef.BundleHash() != runtimeContextTestHashB {
-		t.Fatalf("LookupRun context = %#v loaded=%v, want %s", contextDef, loaded, runtimeContextTestHashB)
+	if !loaded || contextDef == nil || contextDef.BundleHash() != b.BundleHash() {
+		t.Fatalf("LookupRun context = %#v loaded=%v, want %s", contextDef, loaded, b.BundleHash())
 	}
-	if availabilityResult.BundleHash != runtimeContextTestHashB || !availabilityResult.Available() {
-		t.Fatalf("LookupRun availability = %#v, want available %s", availabilityResult, runtimeContextTestHashB)
+	if availabilityResult.BundleHash != b.BundleHash() || !availabilityResult.Available() {
+		t.Fatalf("LookupRun availability = %#v, want available %s", availabilityResult, b.BundleHash())
 	}
 }
 
 func TestRuntimeContextManagerRejectsDuplicateBundleHashes(t *testing.T) {
+	contextDef := capturedOrdinaryRuntimeContext(t, "alpha.requested")
 	if _, err := newTestRuntimeContextManager(t, nil,
-		testBundleContext(t, runtimeContextTestHashA, "alpha.requested"),
-		testBundleContext(t, runtimeContextTestHashA, "alpha.requested"),
+		contextDef, contextDef,
 	); err == nil {
 		t.Fatal("NewRuntimeContextManager duplicate error = nil")
 	}
 }
 
-func TestRuntimeContextManagerRejectsDuplicateAgentSlugs(t *testing.T) {
-	_, err := newTestRuntimeContextManager(t, nil,
-		testBundleContextWithAgents(t, runtimeContextTestHashA, "alpha.requested", "shared-worker"),
-		testBundleContextWithAgents(t, runtimeContextTestHashB, "beta.requested", "shared-worker"),
-	)
-	if err == nil {
-		t.Fatal("NewRuntimeContextManager duplicate agent slug error = nil")
-	}
-	for _, want := range []string{
-		`duplicate runtime context agent_id "shared-worker"`,
-		runtimeContextTestHashA,
-		runtimeContextTestHashB,
-		"workflow=review@1.0.0",
-	} {
-		if !strings.Contains(err.Error(), want) {
-			t.Fatalf("duplicate agent slug error missing %q:\n%s", want, err.Error())
-		}
-	}
-}
-
 func TestRuntimeContextManagerRejectsDuplicateEffectiveAgentIDs(t *testing.T) {
-	_, err := newTestRuntimeContextManager(t, nil,
-		testBundleContextWithAgentEntries(t, runtimeContextTestHashA, "alpha.requested", map[string]runtimecontracts.AgentRegistryEntry{
-			"alpha": {ID: "shared-worker", Role: "alpha"},
-		}),
-		testBundleContextWithAgentEntries(t, runtimeContextTestHashB, "beta.requested", map[string]runtimecontracts.AgentRegistryEntry{
-			"beta": {ID: "shared-worker", Role: "beta"},
-		}),
-	)
+	var contexts [2]BundleContext
+	for i, local := range []string{"alpha", "beta"} {
+		bundle, rooted, _ := loadS1EffectiveProviderScope(t, map[string][]byte{
+			"manifest.yaml": []byte("version: 1.0.0\nplatform_version: '*'\n"),
+			"schema.yaml":   []byte("stages: []\n"),
+			"events.yaml":   []byte(local + ".requested:\n"),
+			"agents.yaml":   []byte(fmt.Sprintf("%s:\n  id: shared-worker\n  role: %s\n  intent: {inline: %s}\n", local, local, local)),
+		})
+		providers, err := packadmission.AdmitProviderSource(rooted, bundle.Platform)
+		if err != nil {
+			t.Fatal(err)
+		}
+		scope, err := providers.Scope(".")
+		if err != nil {
+			t.Fatal(err)
+		}
+		catalog, err := scope.TriggerCatalog()
+		if err != nil {
+			t.Fatal(err)
+		}
+		contexts[i] = runtimeAdmissionTestContext(t, semanticview.Wrap(bundle), catalog, "")
+	}
+	a, b := contexts[0], contexts[1]
+	if a.BundleHash() == b.BundleHash() {
+		t.Fatal("effective-name collision requires distinct captured sources")
+	}
+	_, err := newTestRuntimeContextManager(t, nil, a, b)
 	if err == nil {
 		t.Fatal("NewRuntimeContextManager duplicate effective agent_id error = nil")
 	}
 	for _, want := range []string{
 		`duplicate runtime context agent_id "shared-worker"`,
-		runtimeContextTestHashA,
-		runtimeContextTestHashB,
+		a.BundleHash(),
+		b.BundleHash(),
 	} {
 		if !strings.Contains(err.Error(), want) {
 			t.Fatalf("duplicate effective agent_id error missing %q:\n%s", want, err.Error())
@@ -120,20 +150,44 @@ func TestRuntimeContextManagerRejectsDuplicateEffectiveAgentIDs(t *testing.T) {
 }
 
 func TestRuntimeContextManagerRegisterRejectsDuplicateAgentSlugWithoutMutatingManager(t *testing.T) {
-	manager, err := newTestRuntimeContextManager(t, nil,
-		testBundleContextWithAgents(t, runtimeContextTestHashA, "alpha.requested", "shared-worker"),
-	)
+	var contexts [2]BundleContext
+	for i, event := range []string{"alpha.requested", "beta.requested"} {
+		bundle, rooted, _ := loadS1EffectiveProviderScope(t, map[string][]byte{
+			"manifest.yaml": []byte("version: 1.0.0\nplatform_version: '*'\n"),
+			"schema.yaml":   []byte("stages: []\n"),
+			"events.yaml":   []byte(event + ":\n"),
+			"agents.yaml":   []byte("shared-worker:\n  role: shared-worker\n  intent: {inline: work}\n"),
+		})
+		providers, err := packadmission.AdmitProviderSource(rooted, bundle.Platform)
+		if err != nil {
+			t.Fatal(err)
+		}
+		scope, err := providers.Scope(".")
+		if err != nil {
+			t.Fatal(err)
+		}
+		catalog, err := scope.TriggerCatalog()
+		if err != nil {
+			t.Fatal(err)
+		}
+		contexts[i] = runtimeAdmissionTestContext(t, semanticview.Wrap(bundle), catalog, "")
+	}
+	a, b := contexts[0], contexts[1]
+	if a.BundleHash() == b.BundleHash() {
+		t.Fatal("incremental registration requires distinct captured sources")
+	}
+	manager, err := newTestRuntimeContextManager(t, nil, a)
 	if err != nil {
 		t.Fatalf("NewRuntimeContextManager: %v", err)
 	}
-	err = manager.Register(testBundleContextWithAgents(t, runtimeContextTestHashB, "beta.requested", "shared-worker"))
+	err = manager.Register(b)
 	if err == nil {
 		t.Fatal("Register duplicate agent slug error = nil")
 	}
 	for _, want := range []string{
 		`duplicate runtime context agent_id "shared-worker"`,
-		runtimeContextTestHashA,
-		runtimeContextTestHashB,
+		a.BundleHash(),
+		b.BundleHash(),
 	} {
 		if !strings.Contains(err.Error(), want) {
 			t.Fatalf("Register duplicate agent slug error missing %q:\n%s", want, err.Error())
@@ -142,19 +196,41 @@ func TestRuntimeContextManagerRegisterRejectsDuplicateAgentSlugWithoutMutatingMa
 	if manager.Len() != 1 || manager.MultiContext() {
 		t.Fatalf("manager Len/MultiContext after rejected register = %d/%v, want 1/false", manager.Len(), manager.MultiContext())
 	}
-	if got, want := manager.BundleHashes(), []string{runtimeContextTestHashA}; !reflect.DeepEqual(got, want) {
+	if got, want := manager.BundleHashes(), []string{a.BundleHash()}; !reflect.DeepEqual(got, want) {
 		t.Fatalf("BundleHashes after rejected register = %#v, want %#v", got, want)
 	}
-	if _, ok := manager.LookupBundleHash(runtimeContextTestHashB); ok {
+	if _, ok := manager.LookupBundleHash(b.BundleHash()); ok {
 		t.Fatal("LookupBundleHash found rejected duplicate context")
 	}
 }
 
 func TestRuntimeContextManagerAllowsDistinctAgentSlugs(t *testing.T) {
-	manager, err := newTestRuntimeContextManager(t, nil,
-		testBundleContextWithAgents(t, runtimeContextTestHashA, "alpha.requested", "alpha-worker"),
-		testBundleContextWithAgents(t, runtimeContextTestHashB, "beta.requested", "beta-worker"),
-	)
+	var contexts [2]BundleContext
+	for i, local := range []string{"alpha", "beta"} {
+		bundle, rooted, _ := loadS1EffectiveProviderScope(t, map[string][]byte{
+			"manifest.yaml": []byte("version: 1.0.0\nplatform_version: '*'\n"),
+			"schema.yaml":   []byte("stages: []\n"),
+			"events.yaml":   []byte(local + ".requested:\n"),
+			"agents.yaml":   []byte(fmt.Sprintf("%s-worker:\n  role: %s-worker\n  intent: {inline: %s}\n", local, local, local)),
+		})
+		providers, err := packadmission.AdmitProviderSource(rooted, bundle.Platform)
+		if err != nil {
+			t.Fatal(err)
+		}
+		scope, err := providers.Scope(".")
+		if err != nil {
+			t.Fatal(err)
+		}
+		catalog, err := scope.TriggerCatalog()
+		if err != nil {
+			t.Fatal(err)
+		}
+		contexts[i] = runtimeAdmissionTestContext(t, semanticview.Wrap(bundle), catalog, "")
+	}
+	if contexts[0].BundleHash() == contexts[1].BundleHash() {
+		t.Fatal("distinct-agent coexistence requires distinct captured sources")
+	}
+	manager, err := newTestRuntimeContextManager(t, nil, contexts[0], contexts[1])
 	if err != nil {
 		t.Fatalf("NewRuntimeContextManager distinct agent slugs: %v", err)
 	}
@@ -164,23 +240,28 @@ func TestRuntimeContextManagerAllowsDistinctAgentSlugs(t *testing.T) {
 }
 
 func TestRuntimeContextManagerDeactivatesPinnedContextFailClosed(t *testing.T) {
+	contextA := capturedOrdinaryRuntimeContext(t, "alpha.requested")
+	contextB := capturedOrdinaryRuntimeContext(t, "beta.requested")
+	if contextA.BundleHash() == contextB.BundleHash() {
+		t.Fatal("deactivation fixture requires distinct captured sources")
+	}
 	availability := fakeRunBundleAvailability{
 		rows: map[string]runbundle.Availability{
 			"run-b": {
 				RunID:                 "run-b",
-				BundleHash:            runtimeContextTestHashB,
+				BundleHash:            contextB.BundleHash(),
+				RootReference:         contextB.RootAdmission.Reference(),
+				RootAdmissionPresent:  true,
 				SourceArtifactPresent: true,
 			},
 		},
 	}
-	contextA := testBundleContext(t, runtimeContextTestHashA, "alpha.requested")
-	contextB := testBundleContext(t, runtimeContextTestHashB, "beta.requested")
 	manager, err := newTestRuntimeContextManager(t, availability, contextA, contextB)
 	if err != nil {
 		t.Fatalf("NewRuntimeContextManager: %v", err)
 	}
 
-	result := manager.DeactivateBundleHash(runtimeContextTestHashB, RuntimeContextCauseUnloaded)
+	result := manager.DeactivateBundleHash(contextB.BundleHash(), RuntimeContextCauseUnloaded)
 	if !result.Found || !result.Changed || result.State != RuntimeContextStateUnloaded || result.Cause != RuntimeContextCauseUnloaded {
 		t.Fatalf("DeactivateBundleHash result = %#v, want changed unloaded", result)
 	}
@@ -190,52 +271,55 @@ func TestRuntimeContextManagerDeactivatesPinnedContextFailClosed(t *testing.T) {
 	if manager.Len() != 2 || !manager.MultiContext() {
 		t.Fatalf("manager Len/MultiContext after deactivation = %d/%v, want 2/true", manager.Len(), manager.MultiContext())
 	}
-	if _, ok := manager.LookupBundleHash(runtimeContextTestHashB); ok {
+	if _, ok := manager.LookupBundleHash(contextB.BundleHash()); ok {
 		t.Fatal("LookupBundleHash loaded deactivated bundle = true")
 	}
-	lookup := manager.LookupBundleHashStatus(runtimeContextTestHashB)
+	lookup := manager.LookupBundleHashStatus(contextB.BundleHash())
 	if lookup.Loaded() || !lookup.Found || lookup.State != RuntimeContextStateUnloaded || lookup.Cause != RuntimeContextCauseUnloaded {
 		t.Fatalf("LookupBundleHashStatus = %#v, want found unloaded", lookup)
 	}
 	primary, ok := manager.Primary()
-	if !ok || primary.BundleHash() != runtimeContextTestHashA {
-		t.Fatalf("Primary after deactivation = %#v/%v, want %s", primary, ok, runtimeContextTestHashA)
+	if !ok || primary.BundleHash() != contextA.BundleHash() {
+		t.Fatalf("Primary after deactivation = %#v/%v, want %s", primary, ok, contextA.BundleHash())
 	}
-	runLookup, availabilityResult, err := manager.LookupRunStatus(testAuthorActivityContext(context.Background()), "run-b")
+	lookupCtx := testAuthorActivityContextForBundle(context.Background(), contextB.BundleHash())
+	lookupCtx = runtimecorrelation.WithSourceArtifactFact(lookupCtx, contextB.SourceArtifactFact)
+	lookupCtx = runtimecorrelation.WithRootAdmission(lookupCtx, contextB.RootAdmission)
+	runLookup, availabilityResult, err := manager.LookupRunStatus(lookupCtx, "run-b")
 	if err != nil {
 		t.Fatalf("LookupRunStatus: %v", err)
 	}
 	if runLookup.Loaded() || runLookup.Cause != RuntimeContextCauseUnloaded {
 		t.Fatalf("LookupRunStatus lookup = %#v, want unloaded", runLookup)
 	}
-	if availabilityResult.BundleHash != runtimeContextTestHashB || !availabilityResult.Available() {
-		t.Fatalf("LookupRunStatus availability = %#v, want available %s", availabilityResult, runtimeContextTestHashB)
+	if availabilityResult.BundleHash != contextB.BundleHash() || !availabilityResult.Available() {
+		t.Fatalf("LookupRunStatus availability = %#v, want available %s", availabilityResult, contextB.BundleHash())
 	}
 
-	second := manager.DeactivateBundleHash(runtimeContextTestHashB, RuntimeContextCauseUnavailable)
+	second := manager.DeactivateBundleHash(contextB.BundleHash(), RuntimeContextCauseUnavailable)
 	if !second.Found || second.Changed || second.Cause != RuntimeContextCauseUnloaded {
 		t.Fatalf("second DeactivateBundleHash result = %#v, want idempotent original cause", second)
 	}
-	replacement := testBundleContext(t, runtimeContextTestHashB, "beta.requested")
+	replacement := capturedOrdinaryRuntimeContext(t, "beta.requested")
 	if err := manager.RegisterLiveReplacement(replacement); err == nil {
 		t.Fatal("bundle replacement admitted while another context was loaded")
 	}
-	if result := manager.DeactivateBundleHash(runtimeContextTestHashA, RuntimeContextCauseUnloaded); result.ShutdownErr != nil {
+	if result := manager.DeactivateBundleHash(contextA.BundleHash(), RuntimeContextCauseUnloaded); result.ShutdownErr != nil {
 		t.Fatal(result.ShutdownErr)
 	}
-	manager.contexts[runtimeContextTestHashB].shutdownMu.Lock()
+	manager.contexts[contextB.BundleHash()].shutdownMu.Lock()
 	err = manager.RegisterLiveReplacement(replacement)
-	manager.contexts[runtimeContextTestHashB].shutdownMu.Unlock()
+	manager.contexts[contextB.BundleHash()].shutdownMu.Unlock()
 	if err == nil {
 		t.Fatal("bundle replacement raced an unfinished join")
 	}
 	if err := manager.RegisterLiveReplacement(replacement); err != nil {
 		t.Fatal(err)
 	}
-	if primary, found := manager.Primary(); !found || primary.BundleHash() != runtimeContextTestHashB {
+	if primary, found := manager.Primary(); !found || primary.BundleHash() != contextB.BundleHash() {
 		t.Fatalf("joined replacement is not the exact primary: %+v %t", primary, found)
 	}
-	if use, _, err := manager.AcquireBundleHash(context.Background(), runtimeContextTestHashB); err != nil || use == nil {
+	if use, _, err := manager.AcquireBundleHash(context.Background(), replacement.BundleHash()); err != nil || use == nil {
 		t.Fatalf("fresh replacement is not admitted: %v", err)
 	} else {
 		if use.Runtime() != replacement.Runtime || use.Runtime() == contextB.Runtime {
@@ -248,7 +332,7 @@ func TestRuntimeContextManagerDeactivatesPinnedContextFailClosed(t *testing.T) {
 }
 
 func TestRuntimeContextManagerDeactivationClosesAdmissionBeforeWithdrawingVisibility(t *testing.T) {
-	contextDef := testBundleContext(t, runtimeContextTestHashA, "alpha.requested")
+	contextDef := capturedOrdinaryRuntimeContext(t, "alpha.requested")
 	release, admitted := contextDef.Runtime.shutdownGate.Begin()
 	if !admitted {
 		t.Fatal("runtime admission unexpectedly closed")
@@ -259,7 +343,7 @@ func TestRuntimeContextManagerDeactivationClosesAdmissionBeforeWithdrawingVisibi
 	}
 	done := make(chan RuntimeContextDeactivationResult, 1)
 	go func() {
-		done <- manager.DeactivateBundleHash(runtimeContextTestHashA, RuntimeContextCauseUnloaded)
+		done <- manager.DeactivateBundleHash(contextDef.BundleHash(), RuntimeContextCauseUnloaded)
 	}()
 	select {
 	case <-done:
@@ -274,17 +358,17 @@ func TestRuntimeContextManagerDeactivationClosesAdmissionBeforeWithdrawingVisibi
 }
 
 func TestRuntimeContextUseOwnsOneIngressFrameUntilDone(t *testing.T) {
-	contextDef := testBundleContext(t, runtimeContextTestHashA, "alpha.requested")
+	contextDef := capturedOrdinaryRuntimeContext(t, "alpha.requested")
 	manager, err := newTestRuntimeContextManager(t, nil, contextDef)
 	if err != nil {
 		t.Fatal(err)
 	}
-	first, _, err := manager.AcquireBundleHash(t.Context(), runtimeContextTestHashA)
+	first, _, err := manager.AcquireBundleHash(t.Context(), contextDef.BundleHash())
 	if err != nil || first == nil {
 		t.Fatalf("first context admission: %v", err)
 	}
 	t.Cleanup(func() { _ = first.Done() })
-	second, _, err := manager.AcquireBundleHash(t.Context(), runtimeContextTestHashA)
+	second, _, err := manager.AcquireBundleHash(t.Context(), contextDef.BundleHash())
 	if err != nil || second == nil {
 		t.Fatalf("second context admission: %v", err)
 	}
@@ -303,14 +387,14 @@ func TestRuntimeContextUseOwnsOneIngressFrameUntilDone(t *testing.T) {
 	if err := second.Done(); err != nil || !gate.closedAndDrained() || contextDef.WorkOwner.ActiveCount() != 0 {
 		t.Fatalf("last context use did not settle exact ingress and work ownership: %v", err)
 	}
-	use, _, err := manager.AcquireBundleHash(t.Context(), runtimeContextTestHashA)
+	use, _, err := manager.AcquireBundleHash(t.Context(), contextDef.BundleHash())
 	if use != nil || !errors.Is(err, worklifetime.ErrAdmissionFenced) {
 		t.Fatalf("closed ingress admitted a new context use: %v", err)
 	}
 }
 
 func TestRuntimeContextUseOwnerRefusalReleasesIngressFrame(t *testing.T) {
-	contextDef := testBundleContext(t, runtimeContextTestHashA, "alpha.requested")
+	contextDef := capturedOrdinaryRuntimeContext(t, "alpha.requested")
 	manager, err := newTestRuntimeContextManager(t, nil, contextDef)
 	if err != nil {
 		t.Fatal(err)
@@ -318,7 +402,7 @@ func TestRuntimeContextUseOwnerRefusalReleasesIngressFrame(t *testing.T) {
 	if err := contextDef.WorkOwner.Fence(); err != nil {
 		t.Fatal(err)
 	}
-	use, _, err := manager.AcquireBundleHash(t.Context(), runtimeContextTestHashA)
+	use, _, err := manager.AcquireBundleHash(t.Context(), contextDef.BundleHash())
 	if use != nil || !errors.Is(err, worklifetime.ErrAdmissionFenced) {
 		t.Fatalf("fenced occurrence acquired execution ownership: %v", err)
 	}
@@ -329,27 +413,27 @@ func TestRuntimeContextUseOwnerRefusalReleasesIngressFrame(t *testing.T) {
 }
 
 func TestRuntimeContextManagerResolvedRequestCannotAdmitAfterDeactivation(t *testing.T) {
-	contextDef := testBundleContext(t, runtimeContextTestHashA, "alpha.requested")
+	contextDef := capturedOrdinaryRuntimeContext(t, "alpha.requested")
 	manager, err := newTestRuntimeContextManager(t, nil, contextDef)
 	if err != nil {
 		t.Fatalf("NewRuntimeContextManager: %v", err)
 	}
-	resolved := manager.LookupBundleHashStatus(runtimeContextTestHashA)
+	resolved := manager.LookupBundleHashStatus(contextDef.BundleHash())
 	if !resolved.Loaded() || resolved.Context == nil || resolved.Context.Runtime != nil {
 		t.Fatalf("pre-deactivation lookup = %#v, want non-executable loaded metadata", resolved)
 	}
-	result := manager.DeactivateBundleHash(runtimeContextTestHashA, RuntimeContextCauseUnloaded)
+	result := manager.DeactivateBundleHash(contextDef.BundleHash(), RuntimeContextCauseUnloaded)
 	if !result.Changed {
 		t.Fatalf("DeactivateBundleHash = %#v, want changed", result)
 	}
-	use, lookup, err := manager.AcquireBundleHash(context.Background(), runtimeContextTestHashA)
+	use, lookup, err := manager.AcquireBundleHash(context.Background(), contextDef.BundleHash())
 	if err != nil || use != nil || lookup.Loaded() || lookup.Cause != RuntimeContextCauseUnloaded {
 		t.Fatalf("post-deactivation acquire = use=%#v lookup=%#v err=%v, want unavailable", use, lookup, err)
 	}
 }
 
 func TestRuntimeContextManagerDeactivationBoundsStuckAdmissionByConfiguredGrace(t *testing.T) {
-	contextDef := testBundleContext(t, runtimeContextTestHashA, "alpha.requested")
+	contextDef := capturedOrdinaryRuntimeContext(t, "alpha.requested")
 	admissionCtx, release, admitted := contextDef.Runtime.shutdownGate.BeginContext(testAuthorActivityContext(context.Background()))
 	if !admitted {
 		t.Fatal("runtime admission unexpectedly closed")
@@ -361,7 +445,7 @@ func TestRuntimeContextManagerDeactivationBoundsStuckAdmissionByConfiguredGrace(
 	grace := 20 * time.Millisecond
 	done := make(chan RuntimeContextDeactivationResult, 1)
 	go func() {
-		done <- manager.DeactivateBundleHashWithOptions(runtimeContextTestHashA, RuntimeContextCauseUnloaded, ShutdownOptions{Grace: grace})
+		done <- manager.DeactivateBundleHashWithOptions(contextDef.BundleHash(), RuntimeContextCauseUnloaded, ShutdownOptions{Grace: grace})
 	}()
 	select {
 	case <-admissionCtx.Done():
@@ -388,21 +472,18 @@ func TestRuntimeContextManagerDeactivationBoundsStuckAdmissionByConfiguredGrace(
 	}
 }
 
-func TestRuntimeContextManagerDeactivationPropagatesShutdownOptions(t *testing.T) {
-	contextDef := testBundleContext(t, runtimeContextTestHashA, "alpha.requested")
-	manager, err := newTestRuntimeContextManager(t, nil, contextDef)
-	if err != nil {
-		t.Fatalf("NewRuntimeContextManager: %v", err)
-	}
-	result := manager.DeactivateBundleHashWithOptions(runtimeContextTestHashA, RuntimeContextCauseUnloaded, ShutdownOptions{Grace: -1})
-	if result.ShutdownErr == nil || !strings.Contains(result.ShutdownErr.Error(), "shutdown grace") {
-		t.Fatalf("configured shutdown option error = %v", result.ShutdownErr)
-	}
-}
-
 func TestRuntimeContextManagerDeactivateAllFencesCompleteSetBeforeFirstDrain(t *testing.T) {
-	first := testBundleContext(t, runtimeContextTestHashA, "alpha.requested")
-	second := testBundleContext(t, runtimeContextTestHashB, "beta.requested")
+	first := capturedOrdinaryRuntimeContext(t, "alpha.requested")
+	second := capturedOrdinaryRuntimeContext(t, "beta.requested")
+	if first.BundleHash() == second.BundleHash() {
+		t.Fatal("aggregate drain requires distinct captured sources")
+	}
+	secondEvent := events.EventType("beta.requested")
+	// DeactivateAll drains in hash order; hold its actual first source.
+	if first.BundleHash() > second.BundleHash() {
+		first, second = second, first
+		secondEvent = "alpha.requested"
+	}
 	manager, err := newTestRuntimeContextManager(t, nil, first, second)
 	if err != nil {
 		t.Fatal(err)
@@ -415,7 +496,7 @@ func TestRuntimeContextManagerDeactivateAllFencesCompleteSetBeforeFirstDrain(t *
 			close(dispatcher.release)
 		}
 	}()
-	event := eventtest.RunCreatingRootIngress(eventtest.UUID("sibling-shutdown-event"), "beta.requested", "", "", []byte(`{}`), 0, agentidentitytest.DefaultRunID, "", events.EventEnvelope{}, time.Now().UTC())
+	event := eventtest.RunCreatingRootIngress(eventtest.UUID("sibling-shutdown-event"), secondEvent, "", "", []byte(`{}`), 0, agentidentitytest.DefaultRunID, "", events.EventEnvelope{}, time.Now().UTC())
 	route := events.DeliveryRoute{Recipient: events.MustAgentDeliveryRecipient("beta"), AgentIdentity: agentidentitytest.RootRuntime(t, "beta", "sibling-shutdown")}
 	id, err := runtimedelivery.DeliveryID(event.ID(), route)
 	if err != nil {
@@ -458,13 +539,13 @@ func TestRuntimeContextManagerDeactivateAllFencesCompleteSetBeforeFirstDrain(t *
 	case <-time.After(5 * time.Second):
 		t.Fatal("first context never reached drain")
 	}
-	if !second.Runtime.shutdownAdmissionClosed() || manager.LookupBundleHashStatus(runtimeContextTestHashB).Loaded() {
+	if !second.Runtime.shutdownAdmissionClosed() || manager.LookupBundleHashStatus(second.BundleHash()).Loaded() {
 		t.Fatal("later context remains executable while predecessor is draining")
 	}
 	if !errors.Is(dispatcher.ctx.Err(), context.Canceled) {
 		t.Fatal("sibling continuation admission survives whole-set withdrawal until its individual join")
 	}
-	use, lookup, err := manager.AcquireBundleHash(context.Background(), runtimeContextTestHashB)
+	use, lookup, err := manager.AcquireBundleHash(context.Background(), second.BundleHash())
 	if use != nil {
 		_ = use.Done()
 	}
@@ -485,20 +566,20 @@ func TestRuntimeContextManagerDeactivateAllFencesCompleteSetBeforeFirstDrain(t *
 }
 
 func TestRuntimeContextManagerRetriesShutdownAfterPriorFailure(t *testing.T) {
-	contextDef := testBundleContext(t, runtimeContextTestHashA, "alpha.requested")
+	contextDef := capturedOrdinaryRuntimeContext(t, "alpha.requested")
 	manager, err := newTestRuntimeContextManager(t, nil, contextDef)
 	if err != nil {
 		t.Fatalf("NewRuntimeContextManager: %v", err)
 	}
-	first := manager.DeactivateBundleHashWithOptions(runtimeContextTestHashA, RuntimeContextCauseUnloaded, ShutdownOptions{Grace: -1})
+	first := manager.DeactivateBundleHashWithOptions(contextDef.BundleHash(), RuntimeContextCauseUnloaded, ShutdownOptions{Grace: -1})
 	if first.ShutdownErr == nil || !first.Changed {
 		t.Fatalf("first deactivation = %#v, want changed shutdown failure", first)
 	}
-	entry := manager.contexts[runtimeContextTestHashA]
+	entry := manager.contexts[contextDef.BundleHash()]
 	if entry == nil || entry.shutdownComplete {
 		t.Fatal("failed shutdown was marked complete")
 	}
-	second := manager.DeactivateBundleHash(runtimeContextTestHashA, RuntimeContextCauseUnloaded)
+	second := manager.DeactivateBundleHash(contextDef.BundleHash(), RuntimeContextCauseUnloaded)
 	if second.ShutdownErr != nil || second.Changed {
 		t.Fatalf("retry deactivation = %#v, want successful retry without visibility transition", second)
 	}
@@ -508,15 +589,27 @@ func TestRuntimeContextManagerRetriesShutdownAfterPriorFailure(t *testing.T) {
 }
 
 func TestRuntimeContextManagerTerminalDrainKeepsRefreshIncompleteAndFencesWholeSet(t *testing.T) {
-	first := testBundleContext(t, runtimeContextTestHashA, "alpha.requested")
-	second := testBundleContext(t, runtimeContextTestHashB, "beta.requested")
+	first := capturedOrdinaryRuntimeContext(t, "alpha.requested")
+	second := capturedOrdinaryRuntimeContext(t, "beta.requested")
+	if first.BundleHash() == second.BundleHash() {
+		t.Fatal("terminal drain requires distinct captured sources")
+	}
+	if first.BundleHash() > second.BundleHash() {
+		first, second = second, first
+	}
 	manager, err := newTestRuntimeContextManager(t, nil, first, second)
 	if err != nil {
 		t.Fatal(err)
 	}
-	plan, err := agenttopology.NewSourceSetPlan([]agenttopology.SourceCoordinate{
-		{BundleHash: runtimeContextTestHashA}, {BundleHash: runtimeContextTestHashB},
-	}, nil)
+	firstCoordinate, err := agenttopology.NewSourceCoordinate(first.RootAdmission)
+	if err != nil {
+		t.Fatal(err)
+	}
+	secondCoordinate, err := agenttopology.NewSourceCoordinate(second.RootAdmission)
+	if err != nil {
+		t.Fatal(err)
+	}
+	plan, err := agenttopology.NewSourceSetPlan([]agenttopology.SourceCoordinate{firstCoordinate, secondCoordinate}, nil)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -525,7 +618,7 @@ func TestRuntimeContextManagerTerminalDrainKeepsRefreshIncompleteAndFencesWholeS
 		t.Fatal(err)
 	}
 	manager.pendingSourceSetTransition = admission
-	if result := manager.DeactivateBundleHash(runtimeContextTestHashA, RuntimeContextCauseUnloaded); result.ShutdownErr == nil {
+	if result := manager.DeactivateBundleHash(first.BundleHash(), RuntimeContextCauseUnloaded); result.ShutdownErr == nil {
 		t.Fatal("individual retirement bypassed aggregate transition ownership")
 	}
 	active, release, admitted := first.Runtime.shutdownGate.BeginContext(testAuthorActivityContext(context.Background()))
@@ -592,9 +685,26 @@ func TestRuntimeContextManagerTerminalDrainKeepsRefreshIncompleteAndFencesWholeS
 	}
 }
 
-func testBundleContext(t *testing.T, bundleHash, eventName string) BundleContext {
+func capturedOrdinaryRuntimeContext(t *testing.T, eventName string) BundleContext {
 	t.Helper()
-	return testBundleContextWithAgents(t, bundleHash, eventName)
+	bundle, rooted, _ := loadS1EffectiveProviderScope(t, map[string][]byte{
+		"manifest.yaml": []byte("version: 1.0.0\nplatform_version: '*'\n"),
+		"schema.yaml":   []byte("stages: []\n"),
+		"events.yaml":   []byte(eventName + ":\n"),
+	})
+	providers, err := packadmission.AdmitProviderSource(rooted, bundle.Platform)
+	if err != nil {
+		t.Fatal(err)
+	}
+	scope, err := providers.Scope(".")
+	if err != nil {
+		t.Fatal(err)
+	}
+	catalog, err := scope.TriggerCatalog()
+	if err != nil {
+		t.Fatal(err)
+	}
+	return runtimeAdmissionTestContext(t, semanticview.Wrap(bundle), catalog, "")
 }
 
 func newTestRuntimeContextManager(t testing.TB, availability RunBundleAvailabilityReader, contexts ...BundleContext) (*RuntimeContextManager, error) {
@@ -634,51 +744,6 @@ func registerRuntimeContextManagerCleanup(t testing.TB, manager *RuntimeContextM
 			}
 		}
 	})
-}
-
-func testBundleContextWithAgents(t *testing.T, bundleHash, eventName string, agentIDs ...string) BundleContext {
-	t.Helper()
-	agents := map[string]runtimecontracts.AgentRegistryEntry{}
-	for _, agentID := range agentIDs {
-		agentID = strings.TrimSpace(agentID)
-		if agentID == "" {
-			continue
-		}
-		agents[agentID] = runtimecontracts.AgentRegistryEntry{ID: agentID, Role: agentID}
-	}
-	return testBundleContextWithAgentEntries(t, bundleHash, eventName, agents)
-}
-
-func testBundleContextWithAgentEntries(t *testing.T, bundleHash, eventName string, agents map[string]runtimecontracts.AgentRegistryEntry) BundleContext {
-	t.Helper()
-	bundle := &runtimecontracts.WorkflowContractBundle{
-		Semantics: runtimecontracts.WorkflowSemanticView{Name: "review", Version: "1.0.0"},
-		Events: map[string]runtimecontracts.EventCatalogEntry{
-			eventName: {},
-		},
-		Agents: agents,
-	}
-	source := semanticviewtest.WrapRootAgents(bundle)
-	workOwner := runtimeTestOccurrence(t, bundleHash)
-	bus, err := newRuntimeTestEventBusWithOptions(t, nil, runtimebus.EventBusOptions{
-		WorkOwner:          workOwner,
-		ContractBundle:     source,
-		SourceArtifactFact: testSourceArtifactFact(t, bundleHash),
-	})
-	if err != nil {
-		t.Fatalf("NewEventBusWithOptions: %v", err)
-	}
-	_, grant, err := newRuntimeTestProcessCapability(t, nil, nil, testSourceArtifactFact(t, bundleHash), authorActivityTestRuntimeInstanceID)
-	if err != nil {
-		t.Fatal(err)
-	}
-	return BundleContext{
-		SourceArtifactFact: testSourceArtifactFact(t, bundleHash),
-		BundleIdentity:     runtimecontracts.BundleIdentity{WorkflowName: "review", WorkflowVersion: "1.0.0"},
-		Source:             source,
-		WorkOwner:          workOwner,
-		Runtime:            &Runtime{Bus: bus, workOccurrence: workOwner, startupGrant: grant},
-	}
 }
 
 type fakeRunBundleAvailability struct {

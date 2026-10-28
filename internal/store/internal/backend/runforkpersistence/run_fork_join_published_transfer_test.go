@@ -63,10 +63,14 @@ func publishedArrivalTransferFixture(t *testing.T, root, completion bool, status
 		CreatedAt: source.CurrentDueAt, ExecutionMode: source.Command.ExecutionMode,
 	})
 	ref := join.JoinRef()
-	schema, err := events.NewPayloadSchemaBinding(events.PayloadSchemaBindingInput{
-		BundleHash: "bundle-v2:sha256:" + strings.Repeat("a", 64), FlowID: ref.FlowPath(), EventKey: source.Command.EventType,
-		SchemaDigest: "sha256:" + strings.Repeat("b", 64), SchemaClass: events.PayloadSchemaPlatform,
-	})
+	digest, err := events.JoinOccurrencePayloadDigest(event)
+	if err != nil {
+		t.Fatal(err)
+	}
+	schema, err := events.NewPlatformPayloadSchemaBinding(events.PayloadSchemaBindingInput{
+		BundleHash: "bundle-v2:sha256:" + strings.Repeat("a", 64), EventKey: source.Command.EventType,
+		SchemaDigest: digest, SchemaClass: events.PayloadSchemaPlatform,
+	}, events.EventPayloadProducer(event, ""), events.JoinOccurrencePayloadReference)
 	if err != nil {
 		t.Fatal(err)
 	}

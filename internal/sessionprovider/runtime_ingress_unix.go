@@ -243,6 +243,10 @@ func (i *runtimeIncoming) businessScope(ctx context.Context) (captureScope, capt
 	if err != nil || target.Provider != op.Provider {
 		return scope, source, errCaptureScopeChanged
 	}
+	ctx, err = i.handoff.bus.AdmitSourceArtifactFact(ctx)
+	if err != nil {
+		return scope, source, err
+	}
 	ownedSource, _ := correlation.SourceArtifactFactFromContext(ctx)
 	landing, found, err := i.store.LoadLandingRun(ctx, runlifecycle.LiveRunScope{FlowPath: target.FlowPath})
 	if err != nil {

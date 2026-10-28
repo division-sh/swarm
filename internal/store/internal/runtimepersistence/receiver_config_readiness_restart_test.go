@@ -236,7 +236,14 @@ func TestReceiverConfigReadinessRestartPreservesPendingAutoEmitBothStores(t *tes
 func (f receiverConfigActivationFixture) restartedReceiverConfigManager(t *testing.T, publisher pipeline.DynamicFlowRuntimeCreationOccurrencePublisher, workflowOverride ...*readinessPostcommitFaultWorkflow) receiverConfigActivationFixture {
 	t.Helper()
 	fact, _ := correlation.SourceArtifactFactFromContext(f.ctx)
-	coordinate := agenttopology.SourceCoordinate{BundleHash: fact.BundleHash()}
+	rooted, err := f.bundle.RootedSource()
+	if err != nil {
+		t.Fatal(err)
+	}
+	coordinate, err := agenttopology.NewSourceCoordinate(rooted.Admission())
+	if err != nil {
+		t.Fatal(err)
+	}
 	sourceSet, err := agenttopology.NewSourceSetPlan([]agenttopology.SourceCoordinate{coordinate}, nil)
 	if err != nil {
 		t.Fatal(err)

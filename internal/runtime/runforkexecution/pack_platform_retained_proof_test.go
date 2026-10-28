@@ -48,7 +48,7 @@ func TestPackPlatformRetainedSourceExecutesSelectedForkBothStores(t *testing.T) 
 			if err != nil {
 				t.Fatal(err)
 			}
-			for _, id := range []string{"provider.telegram", "provider.telegram.connector", "provider.telegram.hitl_channel"} {
+			for _, id := range []string{"telegram"} {
 				if changed, err := packartifact.ImportEmbeddedPack(root, id, base); err != nil || !changed {
 					t.Fatalf("import %s: %t %v", id, changed, err)
 				}
@@ -74,7 +74,7 @@ func TestPackPlatformRetainedSourceExecutesSelectedForkBothStores(t *testing.T) 
 			loader := SourceArtifactSelectedContractSourceLoader{RepoRoot: repo, Store: selected.(SourceArtifactSelectedContractSourceStore)}
 			selection := runfork.RunForkContractSelection{Mode: runfork.RunForkContractSelectionModeBundleHash, BundleHash: loaded.SourceArtifactFact.BundleHash()}
 			for i := 0; i < 2; i++ {
-				retained, err := loader.LoadRunForkSelectedContractSourceForRequest(ctx, SelectedContractSourceLoadRequest{SourceRunID: sourceRun, BundleHash: selection.BundleHash, Selection: selection})
+				retained, err := loader.LoadRunForkSelectedContractSourceForRequest(ctx, SelectedContractSourceLoadRequest{Responsibility: FreshSelectedSource(selection.BundleHash), BundleHash: selection.BundleHash, Selection: selection})
 				if err != nil {
 					t.Fatal(err)
 				}
@@ -91,7 +91,7 @@ func TestPackPlatformRetainedSourceExecutesSelectedForkBothStores(t *testing.T) 
 				}
 				for _, entry := range before.PackInventory.Entries() {
 					other, ok := after.PackInventory.Lookup(entry.ID())
-					if !ok || !bytes.Equal(entry.ManifestBody(), other.ManifestBody()) || !bytes.Equal(entry.EnvelopeBody(), other.EnvelopeBody()) {
+					if !ok || !reflect.DeepEqual(entry.Provider().Members(), other.Provider().Members()) {
 						t.Fatalf("retained pack bytes changed: %s", entry.ID())
 					}
 				}
@@ -99,8 +99,9 @@ func TestPackPlatformRetainedSourceExecutesSelectedForkBothStores(t *testing.T) 
 			}
 			result, err := q1ExecuteSelectedPhaseComponent(t, ctx, SelectedContractExecutionRequest{
 				SourceRunID: sourceRun, At: eventID, AllowSourceFreeze: true, Owner: owner, SourceLoader: loader,
-				ContractSelection: runforkadmission.SelectedContractSelection(loaded.Source),
-				AgentRuntime:      SelectedContractAgentRuntimeOptions{ExecutionPosture: executionposture.MockOnly, ProcessCapability: capability},
+				SourceArtifactFact: loaded.SourceArtifactFact,
+				ContractSelection:  runforkadmission.SelectedContractSelection(loaded.Source),
+				AgentRuntime:       SelectedContractAgentRuntimeOptions{ExecutionPosture: executionposture.MockOnly, ProcessCapability: capability},
 			})
 
 			if err != nil {

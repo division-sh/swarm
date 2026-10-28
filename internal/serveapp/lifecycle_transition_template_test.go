@@ -13,11 +13,13 @@ import (
 
 	"github.com/division-sh/swarm/internal/cliapp"
 	"github.com/division-sh/swarm/internal/operatorread"
+	"github.com/division-sh/swarm/internal/packartifact"
 	"github.com/division-sh/swarm/internal/runtime/gateruntime"
 	"github.com/division-sh/swarm/internal/runtime/pipeline"
 	"github.com/division-sh/swarm/internal/runtime/testfixtures/canonicalrouting"
 	"github.com/division-sh/swarm/internal/servedparity"
 	"github.com/division-sh/swarm/internal/store/storetest"
+	"github.com/division-sh/swarm/internal/testutil/packfixture"
 )
 
 type lifecycleTemplateSibling struct {
@@ -328,7 +330,11 @@ func TestServedCompiledTransitionNestedTemplatesFirstJourneyOnBothStores(t *test
 	for _, backend := range []servedparity.Backend{servedparity.BackendDefaultSQLite, servedparity.BackendExplicitPostgres} {
 		t.Run(string(backend), func(t *testing.T) {
 			root := canonicalrouting.CopyLifecycleNestedTemplates(t)
+			if _, err := packartifact.ImportEmbeddedPack(root, "telegram", packfixture.EmbeddedBase(t)); err != nil {
+				t.Fatal(err)
+			}
 			isolateCLIAPIConfigEnv(t)
+			configureStandingLifecycleCredentials(t)
 			var verifyOut, verifyErr bytes.Buffer
 			config := writeServeRuntimeTestConfig(t)
 			if code := cliapp.Execute(context.Background(), []string{"verify", root, "--portable", "--config", config}, &verifyOut, &verifyErr, nil, nil); code != 0 {

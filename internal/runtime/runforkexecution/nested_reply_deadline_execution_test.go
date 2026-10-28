@@ -23,6 +23,7 @@ import (
 	"github.com/division-sh/swarm/internal/runtime/core/identity"
 	"github.com/division-sh/swarm/internal/runtime/core/worklifetime"
 	"github.com/division-sh/swarm/internal/runtime/correlation"
+	runtimecredentials "github.com/division-sh/swarm/internal/runtime/credentials"
 	"github.com/division-sh/swarm/internal/runtime/deliverylifecycle"
 	"github.com/division-sh/swarm/internal/runtime/effects"
 	"github.com/division-sh/swarm/internal/runtime/executionmode"
@@ -89,12 +90,12 @@ func (p *nestedDeadlineWorkerHold) NotifyLifecycle(ctx context.Context, signal l
 // selected child alone can fire the original, overdue deadlines.
 func nestedDeadlineSourceRuntime(t *testing.T, ctx context.Context, selected any, owner SelectedContractExecutionOwner, loaded LoadedSelectedContractSource) (*rootruntime.Runtime, func()) {
 	t.Helper()
-	return nodeReplySourceRuntime(t, ctx, selected, owner, loaded, executionposture.MockOnly)
+	return nodeReplySourceRuntime(t, ctx, selected, owner, loaded, executionposture.MockOnly, nil)
 }
 
-func nodeReplySourceRuntime(t *testing.T, ctx context.Context, selected any, owner SelectedContractExecutionOwner, loaded LoadedSelectedContractSource, posture executionposture.Posture) (*rootruntime.Runtime, func()) {
+func nodeReplySourceRuntime(t *testing.T, ctx context.Context, selected any, owner SelectedContractExecutionOwner, loaded LoadedSelectedContractSource, posture executionposture.Posture, credentials runtimecredentials.Store) (*rootruntime.Runtime, func()) {
 	t.Helper()
-	rt, close, err := nodeReplyRuntime(t, ctx, selected, owner, loaded, posture, false)
+	rt, close, err := nodeReplyRuntimeWithAgentOptions(t, ctx, selected, owner, loaded, posture, false, SelectedContractAgentRuntimeOptions{Credentials: credentials})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -112,12 +113,30 @@ func nodeReplyRuntimeWithAgentOptions(t *testing.T, ctx context.Context, selecte
 	if err != nil {
 		t.Fatal(err)
 	}
+	bundle, found := semanticview.Bundle(loaded.Source)
+	if !found {
+		t.Fatal("ordinary fork runtime requires its captured source bundle")
+	}
+	providers, err := packadmission.AdmitProviderSource(loaded.RootedSource, bundle.Platform)
+	if err != nil {
+		t.Fatal(err)
+	}
+	scope, err := providers.Scope(".")
+	if err != nil {
+		t.Fatal(err)
+	}
+	catalog, err := scope.TriggerCatalog()
+	if err != nil {
+		t.Fatal(err)
+	}
 	process, _ := worklifetime.ProcessFromContext(ctx)
 	p := owner.ports
 	options := rootruntime.RuntimeOptions{ExecutionPosture: posture, RuntimeInstanceID: runForkTestRuntimeInstanceID,
 		SourceArtifactFact: loaded.SourceArtifactFact, ProcessWorkOwner: process,
-		ProviderCredentials: agents.ProviderCredentials,
-		WorkflowModule:      selectedContractWorkflowModule{source: loaded.Source, nodes: nodes, guardRegistry: pipeline.NewContractGuardRegistry(loaded.Source)}}
+		Credentials:            agents.Credentials,
+		ProviderTriggerCatalog: catalog,
+		ProviderCredentials:    agents.ProviderCredentials,
+		WorkflowModule:         selectedContractWorkflowModule{source: loaded.Source, nodes: nodes, guardRegistry: pipeline.NewContractGuardRegistry(loaded.Source)}}
 	var gateway *httptest.Server
 	if semanticview.SourceDeclaresAgents(loaded.Source) {
 		if loaded.RuntimeProjection == nil {
@@ -203,7 +222,10 @@ func nodeReplyRuntimeWithAgentOptions(t *testing.T, ctx context.Context, selecte
 			t.Error(err)
 		}
 	})
-	coordinate := agenttopology.SourceCoordinate{BundleHash: loaded.SourceArtifactFact.BundleHash()}
+	coordinate, err := agenttopology.NewSourceCoordinate(loaded.RootedSource.Admission())
+	if err != nil {
+		t.Fatal(err)
+	}
 	desired, err := rt.Manager.CompileStaticTopologyDesiredAgents(loaded.Source, coordinate)
 	if err != nil {
 		t.Fatal(err)
@@ -213,6 +235,10 @@ func nodeReplyRuntimeWithAgentOptions(t *testing.T, ctx context.Context, selecte
 		t.Fatal(err)
 	}
 	capability := owner.ports.contexts.capability
+	plan, err = startupownership.AdmitRetainedRunSources(ctx, capability, plan)
+	if err != nil {
+		t.Fatal(err)
+	}
 	current, present, err := capability.CurrentSourceSet(ctx)
 	if err != nil {
 		t.Fatal(err)
@@ -284,6 +310,11 @@ func nodeReplyRuntimeWithAgentOptions(t *testing.T, ctx context.Context, selecte
 
 func liveForkRuntimeFixture(t *testing.T, ctx context.Context, selected any, owner SelectedContractExecutionOwner, loaded LoadedSelectedContractSource, sourceRunID string, posture executionposture.Posture, agents ...SelectedContractAgentRuntimeOptions) (*rootruntime.Runtime, *rootruntime.RuntimeContextManager) {
 	t.Helper()
+	return liveForkRuntimeFixtureWithStartupContext(t, ctx, ctx, selected, owner, loaded, sourceRunID, posture, agents...)
+}
+
+func liveForkRuntimeFixtureWithStartupContext(t *testing.T, ctx, startupCtx context.Context, selected any, owner SelectedContractExecutionOwner, loaded LoadedSelectedContractSource, sourceRunID string, posture executionposture.Posture, agents ...SelectedContractAgentRuntimeOptions) (*rootruntime.Runtime, *rootruntime.RuntimeContextManager) {
+	t.Helper()
 	ctx = originalSelectedFixtureContext(t, ctx, selected.(startupownership.Store))
 	availability, err := owner.ports.fork.LoadRunBundleAvailability(ctx, sourceRunID)
 	if err != nil || !availability.Available() {
@@ -299,7 +330,7 @@ func liveForkRuntimeFixture(t *testing.T, ctx context.Context, selected any, own
 			t.Fatalf("park source before ordinary runtime recovery: outcome=%+v err=%v", outcome, err)
 		}
 	}
-	rt, contexts := ordinaryForkRuntimeFixture(t, ctx, selected, owner, loaded, posture, agents...)
+	rt, contexts := ordinaryForkRuntimeFixture(t, startupCtx, selected, owner, loaded, posture, agents...)
 	availability, err = owner.ports.fork.LoadRunBundleAvailability(ctx, sourceRunID)
 	if err != nil || !availability.Available() || availability.BundleHash != sourceHash || availability.Status != "paused" {
 		t.Fatalf("read retained native source: availability=%+v err=%v", availability, err)
@@ -314,7 +345,7 @@ func ordinaryForkRuntimeFixture(t *testing.T, ctx context.Context, selected any,
 	if !found || bundle.SourceArtifact == nil {
 		t.Fatal("ordinary fork fixture requires its retained source artifact")
 	}
-	storetest.RequireBundleDataCatalog(t, correlation.WithSourceArtifactFact(ctx, loaded.SourceArtifactFact), selected.(storetest.DurableDataCatalogStore), bundle)
+	storetest.RequireBundleDataCatalog(t, correlation.WithRootAdmission(correlation.WithSourceArtifactFact(ctx, loaded.SourceArtifactFact), loaded.RootedSource.Admission()), selected.(storetest.RootedDataCatalogStore), bundle)
 	var options SelectedContractAgentRuntimeOptions
 	if len(agents) > 1 {
 		t.Fatal("ordinary runtime fixture accepts one exact agent configuration")
@@ -327,20 +358,17 @@ func ordinaryForkRuntimeFixture(t *testing.T, ctx context.Context, selected any,
 		t.Fatal(err)
 	}
 	definition := rootruntime.BundleContext{
+		RootAdmission:      loaded.RootedSource.Admission(),
 		SourceArtifactFact: loaded.SourceArtifactFact, Source: loaded.Source,
-		Runtime: rt, WorkOwner: rt.WorkOccurrence(),
+		Runtime: rt, WorkOwner: rt.WorkOccurrence(), ProviderTriggerCatalog: rt.Options.ProviderTriggerCatalog,
 	}
-	if bundle, ok := semanticview.Bundle(loaded.Source); ok && bundle.PackInventory != nil {
+	if bundle.PackInventory != nil {
 		definition.PackInventoryDigest = bundle.PackInventory.Digest()
-		projection, err := packadmission.FromBundle(bundle)
-		if err != nil {
-			t.Fatal(err)
-		}
-		definition.ProviderTriggerGeneration = projection.ProviderTriggers.Generation()
-		definition.InstalledTriggerSubjects, err = projection.ProviderTriggers.InstalledCapabilitySubjects()
-		if err != nil {
-			t.Fatal(err)
-		}
+	}
+	definition.ProviderTriggerGeneration = definition.ProviderTriggerCatalog.Generation()
+	definition.InstalledTriggerSubjects, err = definition.ProviderTriggerCatalog.InstalledCapabilitySubjects()
+	if err != nil {
+		t.Fatal(err)
 	}
 	contexts, err := rootruntime.NewRuntimeContextManager(owner.ports.fork, definition)
 	if err != nil {
@@ -460,8 +488,8 @@ func proveSelectedNestedDeadlines(t *testing.T, refusals bool, restartVariant st
 				BundleHash: loaded.SourceArtifactFact.BundleHash(), Artifact: bundle.SourceArtifact, StartedAt: at.Add(-time.Minute)})
 			rt, stopSourceServing := nestedDeadlineSourceRuntime(t, ctx, selected, owner, loaded)
 			ctx = worklifetime.WithOccurrence(ctx, rt.WorkOccurrence())
-			created, err := rt.Manager.EnsureFlowInstance(ctx, pipeline.FlowInstanceActivationRequest{ContractBundle: loaded.Source,
-				Instance: flowidentity.Stored(loaded.Source, ".", runID, runID, "", ""), OccurredAt: at})
+			created, err := rt.Manager.EnsureFlowInstance(ctx, pipeline.FlowInstanceActivationRequest{ContractBundle: rt.Options.WorkflowModule.SemanticSource(),
+				Instance: flowidentity.Stored(rt.Options.WorkflowModule.SemanticSource(), ".", runID, runID, "", ""), OccurredAt: at})
 			if err != nil || !created {
 				t.Fatalf("construct source requester tree: created=%t error=%v", created, err)
 			}
@@ -562,7 +590,8 @@ func proveSelectedNestedDeadlines(t *testing.T, refusals bool, restartVariant st
 			t.Cleanup(resumeChild)
 			options.AgentManagerOptions.TestLifecycleProbe = childHold
 			operation := &runfork.ForkOperationRequest{OperationID: uuid.NewString(), Actor: "nested-deadline-proof", IdempotencyKey: uuid.NewString(),
-				TransportHash: "nested-deadline-proof", SourceRunID: runID, ForkEventID: cut, TargetBundleHash: loaded.SourceArtifactFact.BundleHash(), ContractSelection: selection, AllowSourceFreeze: true}
+				TransportHash: "nested-deadline-proof", SourceRunID: runID, ForkEventID: cut, TargetBundleHash: loaded.SourceArtifactFact.BundleHash(),
+				TargetRootReference: loaded.RootedSource.Admission().Reference(), ContractSelection: selection, AllowSourceFreeze: true}
 			var initialOperation *runfork.ForkOperationRequest
 			if restartVariant != "context_only" {
 				initialOperation = operation
@@ -591,7 +620,7 @@ func proveSelectedNestedDeadlines(t *testing.T, refusals bool, restartVariant st
 				for _, row := range immediateRows {
 					immediateArms[row.ID] = nestedDeadlineArm(t, ctx, owner, row)
 				}
-				staged, operation = stageContextOnlyDeadlineDescendant(t, ctx, selected, owner, loader, selection, options, loaded.SourceArtifactFact.BundleHash(), staged)
+				staged, operation = stageContextOnlyDeadlineDescendant(t, ctx, selected, owner, loader, selection, options, loaded.RootedSource, staged)
 			}
 			childRows, err := storetest.ReadReplyContextRecords(ctx, selected, staged.ForkRunID)
 			if err != nil || len(childRows) != levels {

@@ -13,6 +13,7 @@ import (
 	runtimegenericschedule "github.com/division-sh/swarm/internal/runtime/genericschedule"
 	runtimerunlifecycle "github.com/division-sh/swarm/internal/runtime/runlifecycle"
 	"github.com/division-sh/swarm/internal/runtime/semanticvalue"
+	"github.com/division-sh/swarm/internal/sourceartifact"
 	storegenericschedule "github.com/division-sh/swarm/internal/store/internal/backend/genericschedule"
 	"github.com/division-sh/swarm/internal/store/internal/backend/mutationprotocol"
 	"github.com/division-sh/swarm/internal/testutil/sourceartifactfixture"
@@ -324,7 +325,14 @@ func forkJoinInventoryRefusals(t *testing.T, f *forkJoinNativeFixture, reader fo
 	if rows, err := reader.ReadRunForkArrivalJoinScheduleInventoryTx(ctx, nil, childRunID); err == nil || len(rows) != 0 {
 		t.Fatal("inventory accepted no native attempt")
 	}
-	foreignFact := sourceartifactfixture.FactFor(sourceartifactfixture.New("agents.yaml", []byte("agents: {}\n# foreign source\n")))
+	foreign, err := sourceartifact.AdmitMembers(map[string][]byte{
+		"manifest.yaml": []byte("version: 1.0.0\nplatform_version: '*'\n"),
+		"agents.yaml":   []byte("agents: {}\n# foreign source\n"),
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	foreignFact := sourceartifactfixture.FactFor(foreign)
 	missingRun := uuid.NewString()
 	for _, refusal := range []struct {
 		name string

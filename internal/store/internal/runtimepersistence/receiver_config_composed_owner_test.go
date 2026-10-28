@@ -31,6 +31,7 @@ import (
 	"github.com/division-sh/swarm/internal/runtime/runlifecycle"
 	"github.com/division-sh/swarm/internal/runtime/semanticview"
 	"github.com/division-sh/swarm/internal/runtime/testfixtures/canonicalrouting"
+	"github.com/division-sh/swarm/internal/testutil/sourceartifactfixture"
 	"github.com/google/uuid"
 )
 
@@ -54,7 +55,7 @@ func newReceiverComposedFixture(t *testing.T, backend string) *receiverComposedF
 	ctx, seed, _, _ := seedDeclaredForkFanOutGenerationFromSource(t, backend, authorActivityReceiptFixture{store: raw.(authorActivityReceiptStore), db: db}, 3, time.Now().UTC().Truncate(time.Microsecond), false, false, root, nil, nil)
 	ctx, cancel := context.WithTimeout(storeTestWorkContext(t, ctx), 30*time.Second)
 	t.Cleanup(cancel)
-	bundle, err := contracts.LoadWorkflowContractBundleFromArtifact(pipeline.WorkflowRepoRoot(), seed.artifact, contracts.DefaultPlatformSpecFile(pipeline.WorkflowRepoRoot()), contracts.WorkflowContractLoadOptions{})
+	bundle, err := contracts.LoadWorkflowContractBundleFromRootedSource(pipeline.WorkflowRepoRoot(), sourceartifactfixture.CapturedRoot(t, seed.artifact), contracts.DefaultPlatformSpecFile(pipeline.WorkflowRepoRoot()), contracts.WorkflowContractLoadOptions{})
 	if err != nil {
 		t.Fatal(err)
 	}

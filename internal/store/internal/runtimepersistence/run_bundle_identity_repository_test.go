@@ -14,8 +14,7 @@ import (
 	"testing"
 
 	"github.com/division-sh/swarm/internal/checkoutsource"
-
-	"gopkg.in/yaml.v3"
+	yaml "gopkg.in/yaml.v3"
 )
 
 var runInsertPattern = regexp.MustCompile(`(?is)INSERT\s+INTO\s+runs\s*\(([^)]*)\)`)

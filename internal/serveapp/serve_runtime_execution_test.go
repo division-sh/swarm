@@ -13,9 +13,37 @@ import (
 	"github.com/division-sh/swarm/internal/runtime/bus"
 	"github.com/division-sh/swarm/internal/runtime/contracts"
 	"github.com/division-sh/swarm/internal/runtime/core/eventreceiver"
-	"github.com/division-sh/swarm/internal/runtime/semanticviewtest"
+	"github.com/division-sh/swarm/internal/runtime/semanticview"
 	storeselected "github.com/division-sh/swarm/internal/store/selected"
+	"github.com/division-sh/swarm/internal/testutil/sourceartifactfixture"
 )
+
+func serveExecutionContextForTest(t *testing.T) runtime.BundleContext {
+	t.Helper()
+	rooted, _ := sourceartifactfixture.Rooted(t, "dispatch", sourceartifactfixture.Artifact())
+	bundle, err := contracts.LoadWorkflowContractBundleFromRootedSource(repoRootForTest(), rooted, runtimePlatformSpecPath(t), contracts.WorkflowContractLoadOptions{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	fact := sourceartifactfixture.FactFor(rooted.Artifact())
+	owner := newSupervisorTestRuntimeOccurrence(t, fact.BundleHash())
+	source := semanticview.Wrap(bundle)
+	eventBus, err := bus.NewEphemeralEventBusWithOptions(nil, bus.EventBusOptions{
+		SourceArtifactFact: fact, WorkOwner: owner, ContractBundle: source, ReceiverExecution: eventreceiver.NormalExecution(),
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() {
+		if err := eventBus.ResetInMemoryState(); err != nil {
+			t.Error(err)
+		}
+	})
+	return completeServeTestPackContext(t, runtime.BundleContext{
+		SourceArtifactFact: fact, RootAdmission: rooted.Admission(), Source: source,
+		Runtime: &runtime.Runtime{Bus: eventBus}, WorkOwner: owner,
+	})
+}
 
 func TestSupervisorPreservesSelectedRetirementFailureAcrossShutdownBranches(t *testing.T) {
 	for _, managed := range []bool{false, true} {
@@ -93,21 +121,10 @@ func TestServeUnloadedResetRegistersExecutionWithoutRuntime(t *testing.T) {
 }
 
 func TestSupervisorDelegatesRegisteredResetContextShutdownOnlyToManager(t *testing.T) {
-	hash := runtimeContextTestHash("a")
-	owner := newSupervisorTestRuntimeOccurrence(t, hash)
-	fact := mustServeTestEphemeralSourceArtifactFact(hash)
-	source := semanticviewtest.WrapRootAgents(&contracts.WorkflowContractBundle{})
-	eventBus, err := bus.NewEphemeralEventBusWithOptions(nil, bus.EventBusOptions{
-		SourceArtifactFact: fact, WorkOwner: owner, ContractBundle: source, ReceiverExecution: eventreceiver.NormalExecution(),
-	})
-	if err != nil {
-		t.Fatal(err)
-	}
-	rt := &runtime.Runtime{Bus: eventBus}
-	manager, err := runtime.NewRuntimeContextManager(nil, runtime.BundleContext{
-		SourceArtifactFact: fact, Runtime: rt, WorkOwner: owner,
-		Source: source,
-	})
+	bundleContext := serveExecutionContextForTest(t)
+	fact, rt := bundleContext.SourceArtifactFact, bundleContext.Runtime
+	hash := fact.BundleHash()
+	manager, err := runtime.NewRuntimeContextManager(nil, bundleContext)
 	if err != nil {
 		t.Fatal(err)
 	}

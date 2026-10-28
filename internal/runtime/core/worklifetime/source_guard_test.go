@@ -127,6 +127,8 @@ var productionAsyncSiteLedger = map[string]asyncSiteLedgerEntry{
 	"go|internal/runtime/mcp/client.go|Client.Close":                                                                     {1, asyncSiteSynchronousJoin, "the existing discovery client retains an exact cleanup completion channel; Close joins owned transports and refresh before success, and incomplete cleanup returns an error"},
 	"go|internal/runtime/mcp/client.go|stdioRPCClient.Close":                                                             {1, asyncSiteSynchronousJoin, "the stdio client kills and closes its exact process and pipes, joins stderr and Wait, and publishes cleanup completion before successful Close"},
 	"after_func|internal/runtime/mcp/client.go|stdioRPCClient.Call":                                                      {1, asyncSiteSynchronousJoin, "call cancellation closes the owned stdio transport; the call defer stops or joins this bridge before returning"},
+
+	"after_func|internal/runtime/startupownership/selected_fork_mutation_context.go|generationGrant.requireSelectedChildParent": {1, asyncSiteCanonicalOwner, "the exact issuing-parent proof retains A custody while incoming cancellation invokes only idempotent context cancellation; the synchronous proof stops the bridge and cancels its private read context before returning"},
 }
 
 var retiredLifetimeOwners = []string{

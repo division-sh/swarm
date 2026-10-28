@@ -420,14 +420,14 @@ func openStateOnlyAcquisitionStore(t *testing.T, backend string) (stateOnlyAcqui
 	if backend == "sqlite" {
 		selected := newBootstrappedSQLiteRuntimeStoreForTest(t)
 		ctx = originalStoreFixtureContext(t, ctx, selected)
-		requireRunFixtureForTest(t, ctx, NewSQLiteRuntimeStoreForTest(selected.backend.ConstructionHandle()), semanticRunFixture{Origin: semanticScenarioSetupRunOriginForTest(), RunID: runID})
+		ctx = requireRunFixtureForTest(t, ctx, NewSQLiteRuntimeStoreForTest(selected.backend.ConstructionHandle()), semanticRunFixture{Origin: semanticScenarioSetupRunOriginForTest(), RunID: runID})
 		return selected, selected.backend.ConstructionHandle(), ctx, runID
 	}
 	_, db, cleanup := testutil.StartPostgres(t)
 	t.Cleanup(cleanup)
 	selected := newTestPostgresStore(t, db)
 	ctx = originalStoreFixtureContext(t, ctx, selected)
-	requireRunningRunForTest(t, ctx, selected, runID, time.Now().UTC())
+	ctx = requireRunningRunForTest(t, ctx, selected, runID, time.Now().UTC())
 	return selected, db, ctx, runID
 }
 
@@ -437,9 +437,14 @@ func openStateOnlyAcquisitionStoreWithSource(t *testing.T, backend string, sourc
 	if !ok || bundle.SourceArtifact == nil {
 		t.Fatal("state-only acquisition source requires admitted declarations")
 	}
+	rooted, err := bundle.RootedSource()
+	if err != nil {
+		t.Fatal(err)
+	}
 	runID := uuid.NewString()
 	ctx := runtimecorrelation.WithRunID(storeTestWorkContext(t, testAuthorActivityContextForBundle(bundle.SourceArtifact.BundleHash())), runID)
-	fixture := semanticRunFixture{Origin: semanticScenarioSetupRunOriginForTest(), RunID: runID, Artifact: bundle.SourceArtifact}
+	ctx = runtimecorrelation.WithRootAdmission(ctx, rooted.Admission())
+	fixture := semanticRunFixture{Origin: semanticScenarioSetupRunOriginForTest(), RunID: runID, Artifact: bundle.SourceArtifact, RootAdmission: rooted.Admission()}
 	if backend == "sqlite" {
 		selected := newBootstrappedSQLiteRuntimeStoreForTest(t)
 		db := selected.backend.ConstructionHandle()

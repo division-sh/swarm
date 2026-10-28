@@ -5,6 +5,7 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"github.com/division-sh/swarm/internal/sourceartifact"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -151,7 +152,7 @@ func TestIssue642MixedFanOutCrashRestartBothStores(t *testing.T) {
 				if err := family.BindSelectedProcess(ctx, process, capability); err != nil {
 					t.Fatal(err)
 				}
-				rt := startForkEngineOrdinarySuccessor(t, ctx, selected, process, capability, repo, root)
+				rt := startForkEngineOrdinarySuccessor(t, ctx, selected, process, capability, repo, checkpoint.Proof.SourceRunID)
 				beforeSource, err := selected.Entities().LoadOperatorEntity(ctx, checkpoint.SourceEntityID, checkpoint.Proof.SourceRunID)
 				if err != nil || forkFixtureEntityRevision(t, beforeSource.Entity.Revision) != checkpoint.SourceRevision || beforeSource.Fields["processed_token"] != checkpoint.Token {
 					t.Fatalf("crash changed the frozen source receiver: %+v err=%v", beforeSource, err)
@@ -171,8 +172,9 @@ func TestIssue642MixedFanOutCrashRestartBothStores(t *testing.T) {
 				options.AgentManagerOptions.TestLifecycleProbe = probe
 				wait, cancel := context.WithTimeout(ctx, 30*time.Second)
 				defer cancel()
-				live := forkEngineLiveRequest(t, rt, selected, runforkexecution.SelectedContractExecutionRequest{})
-				live.AcquireLiveRuntime = func(ctx context.Context, hash string) (*swarmruntime.RuntimeContextUse, error) {
+				live := forkEngineLiveRequest(t, rt, selected, runforkexecution.SelectedContractExecutionRequest{ForkOperation: &original.Request})
+				live.AcquireLiveRuntime = func(ctx context.Context, reference sourceartifact.RootAdmissionReference) (*swarmruntime.RuntimeContextUse, error) {
+					hash := reference.BundleHash
 					use, _, err := live.LiveContexts.AcquireBundleHash(ctx, hash)
 					return use, err
 				}

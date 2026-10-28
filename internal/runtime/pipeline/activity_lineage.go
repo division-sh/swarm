@@ -120,7 +120,7 @@ func FreshActivityRequestLineage(request, parent events.Event, source semanticvi
 	if !delivered {
 		return ActivityRequestLineage{}, fmt.Errorf("fresh activity has no completed exact parent delivery")
 	}
-	tool, ok := source.ToolEntries()[intent.Tool]
+	tool, ok := source.ActivityToolEntry(node, intent.Tool)
 	if _, hasHTTP := tool.HTTPExecution(); !ok || tool.Handler() != runtimecontracts.ToolHandlerHTTP || !hasHTTP {
 		return ActivityRequestLineage{}, fmt.Errorf("fresh selected activity effect is not admitted")
 	}

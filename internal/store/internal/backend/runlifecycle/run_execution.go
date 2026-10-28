@@ -80,13 +80,7 @@ func observeRunExecution(ctx context.Context, q sourceadmission.ExecutionQuery, 
 	if runID == "" {
 		return !materializedOnly && !selectedExecutionContext(ctx), nil
 	}
-	var err error
-	var fact runtimecorrelation.SourceArtifactFact
-	if postgres {
-		fact, err = sourceadmission.ReadPostgresActiveSourceQuery(ctx, q, runID)
-	} else {
-		fact, err = sourceadmission.ReadSQLiteActiveSourceQuery(ctx, q, runID)
-	}
+	fact, err := sourceadmission.ReadActiveObservationSourceQuery(ctx, q, runID, postgres)
 	if errors.Is(err, runtimerunlifecycle.ErrRunNotActive) || errors.Is(err, runtimerunlifecycle.ErrRunNotFound) {
 		return false, nil
 	}

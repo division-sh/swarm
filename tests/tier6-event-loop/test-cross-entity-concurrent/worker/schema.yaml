@@ -1,4 +1,4 @@
-name: worker
+# fixture: worker
 instance: work_id
 stages:
   pending: {}

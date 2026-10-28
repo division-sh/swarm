@@ -145,6 +145,18 @@ func proveSelectedForkPublicChangedTargetExecutionBothStores(t *testing.T, optio
 			if len(declarations) != 1 || declarations[0].LocalID != "same-name" || declarations[0].Entry.Role != "loaded-decoy" {
 				t.Fatalf("loaded source declaration is not the same-name decoy: %+v", declarations)
 			}
+			sourceBundle, present := semanticview.Bundle(rt.Runtime.Options.WorkflowModule.SemanticSource())
+			if !present {
+				t.Fatal("public selected fixture requires its captured source bundle")
+			}
+			sourceRoot, err := sourceBundle.RootedSource()
+			if err != nil {
+				t.Fatal(err)
+			}
+			sourceCoordinate, err := agenttopology.NewSourceCoordinate(sourceRoot.Admission())
+			if err != nil {
+				t.Fatal(err)
+			}
 			seed := requireServedEventPublishRPCResult(t, rt.Endpoint, map[string]any{
 				"event_name": "start.seeded", "bundle_hash": rt.BundleHash,
 				"payload": map[string]any{"token": "receiver-proof"}, "idempotency_key": "public-selected-seed",
@@ -325,7 +337,7 @@ func proveSelectedForkPublicChangedTargetExecutionBothStores(t *testing.T, optio
 					supervisor.processCapability = original
 					supervisor.operationMu.Unlock()
 				}()
-				requireForkLivePublicControls(t, rt.Endpoint, supervisor, selected.RuntimeDeps().EventStore, seed.RunID, rt.BundleHash, fork.ForkRunID, childHash, removalFault)
+				requireForkLivePublicControls(t, rt.Endpoint, supervisor, selected.RuntimeDeps().EventStore, seed.RunID, sourceCoordinate, fork.ForkRunID, childHash, removalFault)
 			}()
 			t.Run("live_public_readback", func(t *testing.T) {
 				requireSelectedForkDeclaredAgentReads(t, rt.Endpoint, selected.RuntimeDeps().EventStore, rt.BundleHash, fork.ForkRunID, completionCount)
@@ -445,8 +457,9 @@ func requireForkSourceSelfReleaseConservation(t *testing.T, owner runtimebus.Eve
 	}
 }
 
-func requireForkLivePublicControls(t *testing.T, endpoint string, supervisor *processLifecycleSupervisor, owner runtimebus.EventStore, sourceRunID, sourceHash, childRunID, childHash string, removalFault *liveRemovalFaultCapability) {
+func requireForkLivePublicControls(t *testing.T, endpoint string, supervisor *processLifecycleSupervisor, owner runtimebus.EventStore, sourceRunID string, sourceCoordinate agenttopology.SourceCoordinate, childRunID, childHash string, removalFault *liveRemovalFaultCapability) {
 	t.Helper()
+	sourceHash := sourceCoordinate.BundleHash
 	status := func(runID, want string) {
 		var result struct {
 			Run struct{ Status string } `json:"run"`
@@ -485,7 +498,7 @@ func requireForkLivePublicControls(t *testing.T, endpoint string, supervisor *pr
 	if err != nil || !found {
 		t.Fatalf("read live predecessor: found=%t err=%v", found, err)
 	}
-	target, err := agenttopology.NewSourceSetPlan([]agenttopology.SourceCoordinate{{BundleHash: sourceHash}}, nil)
+	target, err := agenttopology.NewSourceSetPlan([]agenttopology.SourceCoordinate{sourceCoordinate}, nil)
 	if err != nil {
 		t.Fatal(err)
 	}

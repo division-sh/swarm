@@ -7,12 +7,14 @@ import (
 	"sync"
 
 	runtimepkg "github.com/division-sh/swarm/internal/runtime"
+	"github.com/division-sh/swarm/internal/runtime/correlation"
 	"github.com/division-sh/swarm/internal/runtime/deliverycontinuation"
 	"github.com/division-sh/swarm/internal/runtime/effects"
 	"github.com/division-sh/swarm/internal/runtime/runcontrol"
 	"github.com/division-sh/swarm/internal/runtime/runfork"
 	"github.com/division-sh/swarm/internal/runtime/runlifecycle"
 	"github.com/division-sh/swarm/internal/runtime/startupownership"
+	"github.com/division-sh/swarm/internal/sourceartifact"
 )
 
 // Preparation must refuse before predecessor retirement. Once execution starts,
@@ -58,6 +60,9 @@ func executePreparedLiveFork(ctx context.Context, req SelectedContractExecutionR
 			return out, err
 		}
 		parked, parkCtx := use.Runtime(), use.WorkContext()
+		if live.Source.Matches(prepared.loadedSource.SourceArtifactFact) && use.Context.RootAdmission.Reference() != prepared.loadedSource.RootedSource.Admission().Reference() {
+			return out, errors.Join(errors.New("live predecessor has a different admitted root"), use.Done())
+		}
 		if live.Source.Matches(prepared.loadedSource.SourceArtifactFact) {
 			releaseUse := sync.OnceValue(use.Done)
 			defer func() { finalErr = errors.Join(finalErr, releaseUse()) }()
@@ -76,8 +81,8 @@ func executePreparedLiveFork(ctx context.Context, req SelectedContractExecutionR
 			defer func() { finalErr = errors.Join(finalErr, releaseUse()) }()
 			acquire := req.AcquireLiveRuntime
 			paused := false
-			req.AcquireLiveRuntime = func(ctx context.Context, hash string) (*runtimepkg.RuntimeContextUse, error) {
-				use, sourcePaused, err := pauseLiveSourceAndAcquire(ctx, pauseCtx, parked, live.RunID, hash, releaseUse, acquire)
+			req.AcquireLiveRuntime = func(ctx context.Context, root sourceartifact.RootAdmissionReference) (*runtimepkg.RuntimeContextUse, error) {
+				use, sourcePaused, err := pauseLiveSourceAndAcquire(ctx, pauseCtx, parked, live.RunID, root, releaseUse, acquire)
 				paused = sourcePaused
 				return use, err
 			}
@@ -90,7 +95,7 @@ func executePreparedLiveFork(ctx context.Context, req SelectedContractExecutionR
 	} else {
 		finalErr = execute(ctx)
 	}
-	if out.Activation.Activated {
+	if out.Activation.Activated && !out.liveReconciliationAttempted {
 		if !req.liveSelectionHeld {
 			releaseSelection := req.LiveContexts.BeginLiveRunSelection()
 			defer releaseSelection()
@@ -100,7 +105,7 @@ func executePreparedLiveFork(ctx context.Context, req SelectedContractExecutionR
 	return out, finalErr
 }
 
-func pauseLiveSourceAndAcquire(ctx, pauseCtx context.Context, parked *runtimepkg.Runtime, runID, hash string, release func() error, acquire func(context.Context, string) (*runtimepkg.RuntimeContextUse, error)) (*runtimepkg.RuntimeContextUse, bool, error) {
+func pauseLiveSourceAndAcquire(ctx, pauseCtx context.Context, parked *runtimepkg.Runtime, runID string, root sourceartifact.RootAdmissionReference, release func() error, acquire func(context.Context, sourceartifact.RootAdmissionReference) (*runtimepkg.RuntimeContextUse, error)) (*runtimepkg.RuntimeContextUse, bool, error) {
 	if acquire == nil || parked.RunControl == nil {
 		return nil, false, errors.New("bundle swap requires its existing runtime and run-control owners")
 	}
@@ -113,7 +118,7 @@ func pauseLiveSourceAndAcquire(ctx, pauseCtx context.Context, parked *runtimepkg
 	if err := release(); err != nil {
 		return nil, paused, err
 	}
-	use, err := acquire(ctx, hash)
+	use, err := acquire(ctx, root)
 	return use, paused, err
 }
 
@@ -125,7 +130,7 @@ func acquireLivePredecessor(ctx context.Context, contexts *runtimepkg.RuntimeCon
 		}
 		return nil, err
 	}
-	if !lookup.Loaded() || !availability.Available() || use == nil || use.Runtime() == nil || !use.Context.SourceArtifactFact.Matches(live.Source) {
+	if !lookup.Loaded() || !availability.Available() || use == nil || use.Runtime() == nil || !use.Context.SourceArtifactFact.Matches(live.Source) || use.Context.RootAdmission.Reference() != availability.RootReference {
 		var cleanupErr error
 		if use != nil {
 			cleanupErr = use.Done()
@@ -238,6 +243,7 @@ func (c selectedContractForkLocalRuntimeContainer) activateLiveHandoff(p *Prepar
 	}
 	ctx := startupownership.WithGenerationGrantEvidence(p.operation.Context(), evidence)
 	ctx = effects.WithAuthority(ctx, c.authority)
+	var releasePredecessorPark func()
 	if !req.liveSelectionHeld {
 		releaseSelection := req.LiveContexts.BeginLiveRunSelection()
 		defer releaseSelection()
@@ -259,8 +265,9 @@ func (c selectedContractForkLocalRuntimeContainer) activateLiveHandoff(p *Prepar
 			if err != nil {
 				return out, errors.Join(err, use.Done())
 			}
+			releasePredecessorPark = sync.OnceFunc(release)
 			defer func() {
-				release()
+				releasePredecessorPark()
 				if !out.Activation.Activated {
 					finalErr = errors.Join(finalErr, parked.ReconcileLiveRun(context.WithoutCancel(parkCtx), live.RunID))
 				}
@@ -268,7 +275,13 @@ func (c selectedContractForkLocalRuntimeContainer) activateLiveHandoff(p *Prepar
 			}()
 		}
 	}
+	process, err := p.agentRuntime.Options.ProcessCapability.Evidence()
+	if err != nil {
+		return out, err
+	}
 	activation, err := c.activate(ctx, runfork.RunForkSelectedContractExecutionActivateRequest{
+		OriginalRootAdmission:   p.originalSource.RootedSource.Admission(),
+		Process:                 process.LeaseStamp(),
 		OrdinaryGenerationGrant: ordinaryGrant,
 		InheritedSchedules:      p.readiness, ForkOperation: p.forkOperation, DataPins: result.Materialization.DataPins,
 		ExecutionSource: p.loadedSource.Source, ForkRunID: result.Materialization.ForkRunID,
@@ -280,18 +293,37 @@ func (c selectedContractForkLocalRuntimeContainer) activateLiveHandoff(p *Prepar
 		return out, errors.Join(err, fmt.Errorf("live handoff was not acknowledged; selected work remains recoverable"))
 	}
 	// Post-commit reconciliation can fail without undoing the immutable ACK.
+	// Direct targets may still be parked by the outer owner.
+	if use != nil {
+		if releasePredecessorPark != nil {
+			releasePredecessorPark()
+		}
+		out.liveReconciliationAttempted = true
+		err = errors.Join(err, target.ReconcileAcknowledgedLiveFork(use.WorkContext(), out.Materialization.ForkRunID))
+	}
 	return out, err
 }
 
 func (p *PreparedSelectedFork) acquireOrdinaryLiveTarget(req SelectedContractExecutionRequest) (*runtimepkg.Runtime, *runtimepkg.RuntimeContextUse, error) {
 	if req.LiveRuntime != nil {
+		if req.LiveRuntime.Bus == nil {
+			return nil, nil, errors.New("live fork target requires its compiled source admission")
+		}
+		admitted, err := req.LiveRuntime.Bus.AdmitSourceArtifactFact(p.operation.Context())
+		if err != nil {
+			return nil, nil, err
+		}
+		root, present, err := correlation.RootAdmissionFromContext(admitted)
+		if err != nil || !present || root.Reference() != p.loadedSource.RootedSource.Admission().Reference() {
+			return nil, nil, errors.Join(err, errors.New("live fork target has a different admitted root"))
+		}
 		return req.LiveRuntime, nil, nil
 	}
-	use, err := req.AcquireLiveRuntime(p.operation.Context(), p.loadedSource.SourceArtifactFact.BundleHash())
+	use, err := req.AcquireLiveRuntime(p.operation.Context(), p.loadedSource.RootedSource.Admission().Reference())
 	if err != nil {
 		return nil, use, err
 	}
-	if use == nil || use.Runtime() == nil || !use.Context.SourceArtifactFact.Matches(p.loadedSource.SourceArtifactFact) {
+	if use == nil || use.Runtime() == nil || !use.Context.SourceArtifactFact.Matches(p.loadedSource.SourceArtifactFact) || use.Context.RootAdmission.Reference() != p.loadedSource.RootedSource.Admission().Reference() {
 		return nil, use, errors.New("live fork requires its exact ordinarily admitted target")
 	}
 	return use.Runtime(), use, nil

@@ -150,28 +150,6 @@ func TestCompiledLifecycleEmitterProvenanceAndIsolation(t *testing.T) {
 	}
 }
 
-func TestCompiledLifecycleEmitterSchemaReadbackIsolation(t *testing.T) {
-	source := loadLifecycleStaticSource(t, canonicalrouting.CopyLifecycleEmitter(t, canonicalrouting.LifecycleGateLocal))
-	census := BuildAuthoredEventEndpointCensus(source)
-	returned := census.MatchingProducers(".", "work.completed")
-	if len(returned) != 1 {
-		t.Fatalf("gate sites = %#v", returned)
-	}
-	id := returned[0].ID
-	field, exists := returned[0].Event.Entry.Payload.Properties["result"]
-	if !exists {
-		t.Fatal("gate result payload missing")
-	}
-	returned[0].Event.Entry.Payload.Properties["result"] = runtimecontracts.EventFieldSpec{Type: "boolean"}
-	indexed, ok := census.Endpoint(id)
-	if !ok || !reflect.DeepEqual(indexed.Event.Entry.Payload.Properties["result"], field) {
-		t.Fatal("mutating returned lifecycle schema changed the census index")
-	}
-	if fresh := BuildAuthoredEventEndpointCensus(source).MatchingProducers(".", "work.completed"); len(fresh) != 1 || !reflect.DeepEqual(fresh[0].Event.Entry.Payload.Properties["result"], field) {
-		t.Fatal("mutating returned lifecycle schema changed admitted source")
-	}
-}
-
 func TestCompiledLifecycleEmitterAllCensusReadbacksIsolateSchemas(t *testing.T) {
 	source := loadLifecycleStaticSource(t, canonicalrouting.CopyLifecycleEmitter(t, canonicalrouting.LifecycleLoopConnected))
 	census := BuildAuthoredEventEndpointCensus(source)

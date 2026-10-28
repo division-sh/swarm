@@ -1,8 +1,8 @@
 observer:
   execution_type: system_node
-  subscribes_to: [inbound.telegram, inbound.telegram.text_message, inbound.telegram.callback_action]
+  subscribes_to: [inbound.telegram.raw, inbound.telegram.text_message, inbound.telegram.callback_action]
   event_handlers:
-    inbound.telegram:
+    inbound.telegram.raw:
       guard: {id: admit, check: true}
     inbound.telegram.text_message:
       guard: {id: admit, check: true}

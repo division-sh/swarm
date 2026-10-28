@@ -12,11 +12,13 @@ import (
 
 	"github.com/division-sh/swarm/internal/events"
 	"github.com/division-sh/swarm/internal/events/eventtest"
+	runtimecorrelation "github.com/division-sh/swarm/internal/runtime/correlation"
 	runtimedelivery "github.com/division-sh/swarm/internal/runtime/deliverylifecycle"
 	runtimefailures "github.com/division-sh/swarm/internal/runtime/failures"
 	runtimepipelineobligation "github.com/division-sh/swarm/internal/runtime/pipelineobligation"
 	runtimerunlifecycle "github.com/division-sh/swarm/internal/runtime/runlifecycle"
 	"github.com/division-sh/swarm/internal/store/internal/backend/transactiontest"
+	"github.com/division-sh/swarm/internal/testutil/sourceartifactfixture"
 	"github.com/google/uuid"
 )
 
@@ -26,6 +28,9 @@ func TestCanonicalEventFixtureReadbackUsesOriginalReadOwnerParity(t *testing.T) 
 			fixture := backend.open(t)
 			ctx := testAuthorActivityContext()
 			ctx = originalStoreFixtureContext(t, ctx, fixture.store)
+			rooted, _ := sourceartifactfixture.Rooted(t, "fixture", sourceartifactfixture.Artifact())
+			sourceartifactfixture.RequireArtifact(t, ctx, fixture.store.(sourceartifactfixture.Writer), rooted.Artifact())
+			ctx = runtimecorrelation.WithRootAdmission(ctx, rooted.Admission())
 			event := eventtest.RunCreatingRootIngress(uuid.NewString(), "fixture.readback", "gateway", "read-task", []byte("{\n  \"value\": 1.0\n}"), 2, uuid.NewString(), "", events.EventEnvelope{}, time.Date(2026, 10, 2, 12, 0, 0, 123456000, time.UTC))
 			if err := commitSemanticEventFixture(ctx, fixture.store.(semanticEventFixtureStore), event); err != nil {
 				t.Fatal(err)
@@ -179,6 +184,9 @@ func TestCanonicalEventFixtureReadbackBypassesSQLiteWriterAdmission(t *testing.T
 	ctx, cancel := context.WithTimeout(testAuthorActivityContext(), 10*time.Second)
 	ctx = originalStoreFixtureContext(t, ctx, fixture.store)
 	defer cancel()
+	rooted, _ := sourceartifactfixture.Rooted(t, "fixture", sourceartifactfixture.Artifact())
+	sourceartifactfixture.RequireArtifact(t, ctx, owner, rooted.Artifact())
+	ctx = runtimecorrelation.WithRootAdmission(ctx, rooted.Admission())
 	event := eventtest.RunCreatingRootIngress(uuid.NewString(), "fixture.readback", "gateway", "", []byte(`{}`), 0, uuid.NewString(), "", events.EventEnvelope{}, time.Now().UTC())
 	if err := commitSemanticEventFixture(ctx, owner, event); err != nil {
 		t.Fatal(err)

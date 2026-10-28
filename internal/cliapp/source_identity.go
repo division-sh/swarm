@@ -2,14 +2,13 @@ package cliapp
 
 import (
 	"fmt"
-	"strings"
 
 	"github.com/division-sh/swarm/internal/platform"
 	"github.com/division-sh/swarm/internal/sourceartifact"
 )
 
 func admitCLIIdentitySource(root InvocationRoot, raw string) (string, error) {
-	if strings.TrimSpace(raw) == "" {
+	if raw == "" {
 		return "", fmt.Errorf("--source must be a nonempty directory")
 	}
 	selected, err := ResolveSourceRoot(root.Path(), raw)

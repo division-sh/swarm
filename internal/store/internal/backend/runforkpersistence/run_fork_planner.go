@@ -91,8 +91,9 @@ func planRunForkSnapshot(
 	req runfork.RunForkPlanRequest,
 	validate runForkRevisionValidator,
 	resolve runForkRevisionPointResolver,
+	postgres bool,
 ) (runfork.RunForkPlan, error) {
-	return planRunForkSnapshotWithActivityOrigins(ctx, tx, req, validate, resolve, nil, false)
+	return planRunForkSnapshotWithActivityOrigins(ctx, tx, req, validate, resolve, nil, postgres)
 }
 
 // Readback-only callers retain their ordinary plan. Preparation additionally
@@ -304,6 +305,9 @@ func planRunForkSnapshotWithActivityOrigins(
 	}
 	plan.FanOutObligations = fanOutObligations
 	plan.FanOutObligationCount = len(fanOutObligations)
+	if err := retainFanOutExecutionSources(ctx, tx, snapshot, plan, postgres); err != nil {
+		return runfork.RunForkPlan{}, err
+	}
 	if err := runfork.ValidateFanOutPendingReplayAdmission(plan); err != nil {
 		return runfork.RunForkPlan{}, fmt.Errorf("fixed-revision fan-out admission: %w", err)
 	}

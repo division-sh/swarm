@@ -1,7 +1,6 @@
 package canonicalrouting
 
 import (
-	"bytes"
 	"go/parser"
 	"go/token"
 	"os"
@@ -9,24 +8,6 @@ import (
 	"strconv"
 	"testing"
 )
-
-func TestStageOrderedSourceRenameChangesOnlyMetadata(t *testing.T) {
-	root := CopyRootIngressLegacyTemplateTargetRoute(t)
-	path := filepath.Join(root, "schema.yaml")
-	before, err := os.ReadFile(path)
-	if err != nil {
-		t.Fatal(err)
-	}
-	RenameStoppedRunReadinessSource(t, root)
-	after, err := os.ReadFile(path)
-	if err != nil {
-		t.Fatal(err)
-	}
-	expected := bytes.Replace(before, []byte("name: routing-root-ingress\n"), []byte("name: audit2277-new-source\n"), 1)
-	if !bytes.Equal(after, expected) {
-		t.Fatal("metadata-only source replacement altered lifecycle declarations")
-	}
-}
 
 func TestStageOrderedFixtureConsumersUseClosedMutationOwner(t *testing.T) {
 	for _, file := range []string{

@@ -72,22 +72,24 @@ func TestDefaultPlatformCleanupCatalogMatchesPlatformSpecPolicy(t *testing.T) {
 }
 
 func TestCleanupCatalogPolicyMapsRequestScopedSourceArtifacts(t *testing.T) {
-	includeCatalog := CleanupCatalogByTableForPolicy(CleanupPolicy{IncludeSourceArtifacts: true})
-	includeEntry, ok := includeCatalog["source_artifacts"]
-	if !ok {
-		t.Fatal("include_source_artifacts=true catalog missing source_artifacts")
-	}
-	if includeEntry.Classification != CleanupDeleteAll || includeEntry.DeleteOrderGroup == 0 || includeEntry.PreservationProof != "" {
-		t.Fatalf("include_source_artifacts=true source artifacts entry = %#v, want delete_all without preservation proof", includeEntry)
-	}
+	for _, table := range []string{"source_artifacts", "source_root_admissions"} {
+		includeCatalog := CleanupCatalogByTableForPolicy(CleanupPolicy{IncludeSourceArtifacts: true})
+		includeEntry, ok := includeCatalog[table]
+		if !ok {
+			t.Fatal("include_source_artifacts=true catalog missing source_artifacts")
+		}
+		if includeEntry.Classification != CleanupDeleteAll || includeEntry.DeleteOrderGroup == 0 || includeEntry.PreservationProof != "" {
+			t.Fatalf("include_source_artifacts=true source artifacts entry = %#v, want delete_all without preservation proof", includeEntry)
+		}
 
-	preserveCatalog := CleanupCatalogByTableForPolicy(CleanupPolicy{IncludeSourceArtifacts: false})
-	preserveEntry, ok := preserveCatalog["source_artifacts"]
-	if !ok {
-		t.Fatal("include_source_artifacts=false catalog missing source_artifacts")
-	}
-	if preserveEntry.Classification != CleanupPreserve || preserveEntry.DeleteOrderGroup != 0 || preserveEntry.PreservationProof == "" {
-		t.Fatalf("include_source_artifacts=false source artifacts entry = %#v, want preserve with proof", preserveEntry)
+		preserveCatalog := CleanupCatalogByTableForPolicy(CleanupPolicy{IncludeSourceArtifacts: false})
+		preserveEntry, ok := preserveCatalog[table]
+		if !ok {
+			t.Fatal("include_source_artifacts=false catalog missing source_artifacts")
+		}
+		if preserveEntry.Classification != CleanupPreserve || preserveEntry.DeleteOrderGroup != 0 || preserveEntry.PreservationProof == "" {
+			t.Fatalf("include_source_artifacts=false source artifacts entry = %#v, want preserve with proof", preserveEntry)
+		}
 	}
 }
 

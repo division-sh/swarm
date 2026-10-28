@@ -11,11 +11,10 @@ import (
 
 func serveappCapacityMoves() map[string]string {
 	return map[string]string{
-		"TestChannelOnboardingPendingResetRestartToReadyE2E":                           "serveapp-channel",
-		"TestProviderAliasesDeliverOnlyLocalAndConnectedConsumersBothStores":           "serveapp-channel-neutral",
-		"TestProviderSelectedRootStandingBootBothStores":                               "serveapp-channel-neutral",
-		"TestProviderAliasPhysicalTupleProofPreservesScopeNullsAndMultiplicity":        "serveapp-channel-neutral",
-		"TestProviderIngressProofRoleRegistryRejectsHiddenAuthorityFromSupportedProof": "serveapp-channel-neutral",
+		"TestChannelOnboardingPendingResetRestartToReadyE2E":                    "serveapp-channel",
+		"TestProviderAliasesDeliverOnlyLocalAndConnectedConsumersBothStores":    "serveapp-channel-neutral",
+		"TestProviderSelectedRootStandingBootBothStores":                        "serveapp-channel-neutral",
+		"TestProviderAliasPhysicalTupleProofPreservesScopeNullsAndMultiplicity": "serveapp-channel-neutral",
 	}
 }
 

@@ -1,4 +1,4 @@
-name: static-data-invocation
+# fixture: static-data-invocation
 stages:
   pending: {}
   reading: {}

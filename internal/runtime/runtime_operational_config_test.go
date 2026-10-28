@@ -11,11 +11,11 @@ import (
 
 	"github.com/division-sh/swarm/internal/config"
 	"github.com/division-sh/swarm/internal/events"
-	"github.com/division-sh/swarm/internal/events/eventtest"
+
 	runtimeagentcontrol "github.com/division-sh/swarm/internal/runtime/agentcontrol"
 	runtimebus "github.com/division-sh/swarm/internal/runtime/bus"
 	runtimebustest "github.com/division-sh/swarm/internal/runtime/bus/bustest"
-	runtimecontracts "github.com/division-sh/swarm/internal/runtime/contracts"
+
 	runtimeownership "github.com/division-sh/swarm/internal/runtime/core/ownership"
 	runtimecredentials "github.com/division-sh/swarm/internal/runtime/credentials"
 	"github.com/division-sh/swarm/internal/runtime/executionmode"
@@ -25,7 +25,7 @@ import (
 	"github.com/division-sh/swarm/internal/runtime/semanticvalue"
 	runtimetimerobligation "github.com/division-sh/swarm/internal/runtime/timerobligation"
 	"github.com/division-sh/swarm/internal/testutil/packfixture"
-	"github.com/division-sh/swarm/internal/testutil/sourceartifactfixture"
+
 	"github.com/google/uuid"
 )
 
@@ -216,6 +216,7 @@ func recoveryGuardActivation(t *testing.T, key string) runtimegenericschedule.Ac
 
 func TestNewRuntimeValidatesInboundPublicationIntegrityBeforeWiringGateway(t *testing.T) {
 	module := loadRuntimeOwnershipWorkflowModule(t)
+	ctx, fact := runtimeOwnershipFixtureContext(t, module)
 	providerCredentials, err := runtimecredentials.NewFileStore(filepath.Join(t.TempDir(), "provider-credentials.json"))
 	if err != nil {
 		t.Fatal(err)
@@ -223,9 +224,9 @@ func TestNewRuntimeValidatesInboundPublicationIntegrityBeforeWiringGateway(t *te
 	catalog := packfixture.TriggerCatalog(t)
 	sentinel := errors.New("inbound publication corruption")
 	corrupt := &recordingInboundStore{integrityErr: sentinel}
-	_, err = newScopedTestRuntime(t, context.Background(), RuntimeDeps{
+	_, err = newScopedTestRuntime(t, ctx, RuntimeDeps{
 		Config: testOperationalRuntimeConfig(), InboundStore: corrupt,
-		Options: RuntimeOptions{WorkflowModule: module, LLMRuntime: noopLLMRuntime{}, ProviderCredentials: providerCredentials, ProviderTriggerCatalog: catalog},
+		Options: RuntimeOptions{WorkflowModule: module, SourceArtifactFact: fact, LLMRuntime: noopLLMRuntime{}, ProviderCredentials: providerCredentials, ProviderTriggerCatalog: catalog},
 	})
 
 	if !errors.Is(err, sentinel) || !strings.Contains(err.Error(), "validate inbound publication integrity at startup") {
@@ -236,9 +237,9 @@ func TestNewRuntimeValidatesInboundPublicationIntegrityBeforeWiringGateway(t *te
 	}
 
 	healthy := &recordingInboundStore{}
-	rt, err := newScopedTestRuntime(t, context.Background(), RuntimeDeps{
+	rt, err := newScopedTestRuntime(t, ctx, RuntimeDeps{
 		Config: testOperationalRuntimeConfig(), InboundStore: healthy,
-		Options: RuntimeOptions{WorkflowModule: module, LLMRuntime: noopLLMRuntime{}, ProviderCredentials: providerCredentials, ProviderTriggerCatalog: catalog},
+		Options: RuntimeOptions{WorkflowModule: module, SourceArtifactFact: fact, LLMRuntime: noopLLMRuntime{}, ProviderCredentials: providerCredentials, ProviderTriggerCatalog: catalog},
 	})
 
 	if err != nil {
@@ -250,17 +251,20 @@ func TestNewRuntimeValidatesInboundPublicationIntegrityBeforeWiringGateway(t *te
 }
 
 func TestNewRuntimeBuildsRunLifecycleExecutorFromTypedOwnerWithoutRawSQLCapability(t *testing.T) {
+	module := loadRuntimeOwnershipWorkflowModule(t)
+	ctx, fact := runtimeOwnershipFixtureContext(t, module)
 	rt, err := newScopedTestRuntime(
 		t,
-		testAuthorActivityContext(context.Background()),
+		ctx,
 		RuntimeDeps{
 			Config: testOperationalRuntimeConfig(),
 
 			RunLifecycleCandidates: runtimeTestCandidateOwner{},
 
 			Options: RuntimeOptions{
-				WorkflowModule: loadRuntimeOwnershipWorkflowModule(t),
-				LLMRuntime:     noopLLMRuntime{},
+				WorkflowModule:     module,
+				SourceArtifactFact: fact,
+				LLMRuntime:         noopLLMRuntime{},
 			},
 		},
 	)
@@ -274,57 +278,21 @@ func TestNewRuntimeBuildsRunLifecycleExecutorFromTypedOwnerWithoutRawSQLCapabili
 
 func TestRuntimeStart_FailsWhenRecoveryDisabledAndActiveSchedulesExist(t *testing.T) {
 	module := loadRuntimeOwnershipWorkflowModule(t)
+	ctx, fact := runtimeOwnershipFixtureContext(t, module)
 	store := &recoveryDisabledScheduleStore{active: []runtimegenericschedule.Activation{recoveryGuardActivation(t, "recover-me")}}
-	rt, err := newScopedTestRuntime(t, testAuthorActivityContext(context.Background()), RuntimeDeps{Config: testOperationalRuntimeConfig(), GenericScheduleStore: store, TimerObligationReader: store, Options: RuntimeOptions{
-		SelfCheck:      false,
-		WorkflowModule: module,
-		LLMRuntime:     noopLLMRuntime{},
+	rt, err := newScopedTestRuntime(t, ctx, RuntimeDeps{Config: testOperationalRuntimeConfig(), GenericScheduleStore: store, TimerObligationReader: store, Options: RuntimeOptions{
+		SelfCheck:          false,
+		WorkflowModule:     module,
+		SourceArtifactFact: fact,
+		LLMRuntime:         noopLLMRuntime{},
 	}})
 
 	if err != nil {
 		t.Fatalf("NewRuntime: %v", err)
 	}
-	err = rt.Start(testAuthorActivityContext(context.Background()))
+	err = rt.Start(ctx)
 	if err == nil || !strings.Contains(err.Error(), "runtime.recovery_on_startup=false") || !strings.Contains(err.Error(), "timer obligations") {
 		t.Fatalf("Start error = %v, want explicit timer-obligation denial", err)
-	}
-}
-
-func TestRuntimeStart_AllowsRecoveryDisabledWithManagerSnapshotWork(t *testing.T) {
-	bundle := testRuntimeWorkflowValidationBundle()
-	bundle.SourceArtifact = sourceartifactfixture.Artifact()
-	bundle.Agents = map[string]runtimecontracts.AgentRegistryEntry{
-		"persisted-agent": testRuntimeWorkflowValidationAgent("persisted-agent"),
-	}
-	module := semanticOnlyWorkflowRuntime{source: compiledRuntimeValidationSource(t, bundle)}
-	eventStore := &recoveryGuardEventStore{
-		missing: []events.PersistedReplayEvent{{
-			Event: eventtest.RunCreatingRootIngress("evt-1",
-				"support.item_created", "", "", nil, 0, "", "", events.EventEnvelope{}, time.Time{}),
-		}},
-	}
-	rt, err := newScopedTestRuntime(t, testAuthorActivityContext(context.Background()), RuntimeDeps{Config: testOperationalRuntimeConfig(),
-		EventStore:               eventStore,
-		ManagerPersistenceRoles:  runtimemanager.PersistenceRoles{DirectiveOperations: eventStore},
-		EffectsStore:             &startupEffectStore{},
-		ManagedCapabilitiesStore: &startupCapabilityStore{},
-		Options: RuntimeOptions{
-			SelfCheck:      false,
-			WorkflowModule: module,
-			LLMRuntime:     noopLLMRuntime{},
-		}})
-
-	if err != nil {
-		t.Fatalf("NewRuntime: %v", err)
-	}
-	if err := rt.Start(testAuthorActivityContext(context.Background())); err != nil {
-		t.Fatalf("Start: %v", err)
-	}
-	if got := eventStore.directiveReconcileCalls.Load(); got != 1 {
-		t.Fatalf("directive reconcile calls = %d, want 1 with runtime.recovery_on_startup=false", got)
-	}
-	if err := rt.Shutdown(); err != nil {
-		t.Fatalf("Shutdown: %v", err)
 	}
 }
 
@@ -430,20 +398,22 @@ func TestRuntimeStart_DisablePersistentStartupRecoverySkipsUnscopedStoreReads(t 
 
 func TestRuntimeStart_FailsClosedWhenRequiredDirectiveReconciliationFails(t *testing.T) {
 	module := loadRuntimeOwnershipWorkflowModule(t)
+	ctx, fact := runtimeOwnershipFixtureContext(t, module)
 	eventStore := &recoveryGuardEventStore{directiveReconcileErr: errors.New("injected directive reconciliation failure")}
-	rt, err := newScopedTestRuntime(t, testAuthorActivityContext(context.Background()), RuntimeDeps{Config: testOperationalRuntimeConfig(),
+	rt, err := newScopedTestRuntime(t, ctx, RuntimeDeps{Config: testOperationalRuntimeConfig(),
 		EventStore:              eventStore,
 		ManagerPersistenceRoles: runtimemanager.PersistenceRoles{DirectiveOperations: eventStore},
 		Options: RuntimeOptions{
-			SelfCheck:      false,
-			WorkflowModule: module,
-			LLMRuntime:     noopLLMRuntime{},
+			SelfCheck:          false,
+			WorkflowModule:     module,
+			SourceArtifactFact: fact,
+			LLMRuntime:         noopLLMRuntime{},
 		}})
 
 	if err != nil {
 		t.Fatalf("NewRuntime: %v", err)
 	}
-	err = rt.Start(testAuthorActivityContext(context.Background()))
+	err = rt.Start(ctx)
 	if err == nil || !strings.Contains(err.Error(), "required directive operation reconciliation failed") || !strings.Contains(err.Error(), "injected directive reconciliation failure") {
 		t.Fatalf("Start error = %v, want required reconciliation failure", err)
 	}

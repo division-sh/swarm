@@ -13,6 +13,7 @@ import (
 
 	"github.com/division-sh/swarm/internal/runtime/agenttopology"
 	"github.com/division-sh/swarm/internal/runtime/canonicaljson"
+	"github.com/division-sh/swarm/internal/runtime/correlation"
 	runtimeownership "github.com/division-sh/swarm/internal/runtime/startupownership"
 	"github.com/division-sh/swarm/internal/store/internal/backend/activityjournal"
 	"github.com/division-sh/swarm/internal/store/testutil/agentfixture"
@@ -93,9 +94,20 @@ func TestActivityExecutionGrantReadUsesExactHistoricalVersionBothStores(t *testi
 				control.Connector = native
 				return control
 			})
-			ctx := fixture.context
+			ctx := requireDefaultSourceArtifactForTest(t, fixture.context, fixture.store)
 			selected := fixture.store.(agentfixture.Store)
-			coordinate := agenttopology.SourceCoordinate{BundleHash: authorActivityTestBundleHash}
+			process, err := agentfixture.ProcessCapability(t, ctx, selected)
+			if err != nil {
+				t.Fatal(err)
+			}
+			root, present, err := correlation.RootAdmissionFromContext(ctx)
+			if err != nil || !present {
+				t.Fatalf("historical grant fixture source admission: present=%t error=%v", present, err)
+			}
+			coordinate, err := agenttopology.NewSourceCoordinate(root)
+			if err != nil {
+				t.Fatal(err)
+			}
 			plan, err := agenttopology.NewSourceSetPlan([]agenttopology.SourceCoordinate{coordinate}, nil)
 			if err != nil {
 				t.Fatal(err)
@@ -103,6 +115,10 @@ func TestActivityExecutionGrantReadUsesExactHistoricalVersionBothStores(t *testi
 			grant, err := agentfixture.AdmitGeneration(t, ctx, selected, plan, coordinate)
 			if err != nil {
 				t.Fatal(err)
+			}
+			installed, found, err := process.CurrentSourceSet(ctx)
+			if err != nil || !found || installed.Revision != plan.Revision || len(installed.Sources) != 1 || installed.Sources[0] != coordinate {
+				t.Fatalf("exact source plan unavailable: found=%t error=%v", found, err)
 			}
 			original, err := grant.Evidence()
 			if err == nil && original.State == runtimeownership.GrantPrepared {

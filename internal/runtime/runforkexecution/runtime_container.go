@@ -315,7 +315,7 @@ func (c *selectedContractForkLocalRuntimeContainer) PrepareAttachment(ctx contex
 	controller := runtimeeffects.NewController(c.ports.effects).WithExecutionPosture(c.req.AgentRuntime.Options.ExecutionPosture)
 	process := req.Prepared.processOwner
 	var sourceResult startupownership.PreparedForkSourceEventsResult
-	sourceOperation, err := startupownership.PreparedForkSourceEventsOperation(ctx, process, c.ports.replay, c.preparation, c.authority, req.SourceEvents, req.OriginalLoopCarriage, &sourceResult)
+	sourceOperation, err := startupownership.PreparedForkSourceEventsOperation(ctx, process, c.ports.replay, c.preparation, c.authority, req.SourceEvents, req.OriginalLoopCarriage, req.OriginalRootAdmission, &sourceResult)
 	if err != nil {
 		return err
 	}

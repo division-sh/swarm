@@ -10,6 +10,7 @@ import (
 	domain "github.com/division-sh/swarm/internal/channelonboarding"
 	"github.com/division-sh/swarm/internal/operatorchannel"
 	"github.com/division-sh/swarm/internal/runtime/plangeneration"
+	"github.com/division-sh/swarm/internal/testutil/sourceartifactfixture"
 	"github.com/google/uuid"
 )
 
@@ -26,7 +27,7 @@ func sessionReservation(t *testing.T, principal string, now time.Time) domain.St
 		Interface: operatorchannel.InterfaceIdentity{InterfaceRef: operatorchannel.InterfaceHITLChannelV2,
 			ChannelPackID: "provider.whatsapp.hitl_channel", ChannelPackVersion: "0.1.0",
 			ChannelManifestHash: "sha256:session-manifest", SemanticGeneration: "sha256:session-plan"},
-		Coordinate: domain.ChannelRuntimeContextCoordinate{BundleHash: "bundle-v2:sha256:" + strings.Repeat("a", 64),
+		Coordinate: domain.ChannelRuntimeContextCoordinate{BundleHash: sourceartifactfixture.BundleHash,
 			BundleIdentity: "session-proof", PackInventoryGeneration: "sha256:session-inventory",
 			RuntimeInstanceID: uuid.NewString(), ContextPublicationGeneration: 1, PlanGeneration: plan},
 		TargetSelector: "ingress:reception:whatsapp", Posture: domain.ActivationSessionConnection,

@@ -33,9 +33,6 @@ func (g *generationGrant) BindSelectedForkMutationContext(ctx context.Context) (
 	if err := requireSelectedChildIdentity(ctx, evidence); err != nil {
 		return nil, err
 	}
-	if err := g.ProveCurrent(ctx); err != nil {
-		return nil, err
-	}
 	source, err := correlation.NewSourceArtifactFact(evidence.BundleHash)
 	if err != nil {
 		return nil, err
@@ -44,7 +41,12 @@ func (g *generationGrant) BindSelectedForkMutationContext(ctx context.Context) (
 	ctx = correlation.WithRunID(ctx, evidence.SelectedFork.ForkRunID)
 	ctx = correlation.WithSourceArtifactFact(ctx, source)
 	ctx = authoractivity.WithScope(ctx, authoractivity.BundleScope(evidence.RuntimeInstanceID, evidence.BundleHash))
-	return context.WithValue(ctx, mutationAuthorityContextKey{}, g), nil
+	// B currentness must not consume the inherited A mutation owner.
+	candidate := context.WithValue(ctx, mutationAuthorityContextKey{}, g)
+	if err := g.ProveCurrent(candidate); err != nil {
+		return nil, err
+	}
+	return candidate, nil
 }
 
 func requireSelectedChildIdentity(ctx context.Context, evidence GrantEvidence) error {
@@ -104,15 +106,36 @@ func (g *generationGrant) requireSelectedChildParent(ctx context.Context) error 
 	default:
 		return ErrMutationAuthorityMissing
 	}
-	if parent == nil {
-		return g.owner.ProveCurrent(ctx)
+	if parent == g {
+		return g.ProveCurrent(ctx)
 	}
-	evidence, err := parent.Evidence()
+	issued, err := CaptureMutationAuthority(g.issuingParent)
 	if err != nil {
 		return err
 	}
-	if parent != g && evidence.SelectedFork != nil {
-		return errors.New("selected child context cannot replace another selected operation")
+	if issued.owner != g.owner || issued.grant != parent {
+		return errors.New("selected child context differs from its exact issuing parent")
 	}
-	return parent.ProveCurrent(ctx)
+	if parent != nil {
+		evidence, err := parent.Evidence()
+		if err != nil {
+			return err
+		}
+		if evidence.StateVersion != issued.evidence.StateVersion {
+			return errors.New("selected child context has stale issuing custody")
+		}
+		if evidence.SelectedFork != nil {
+			return errors.New("selected child context cannot replace another selected operation")
+		}
+	}
+	// Keep A's coherent custody while joining the incoming caller's cancellation.
+	read, cancel := context.WithCancelCause(g.issuingParent)
+	stop := context.AfterFunc(ctx, func() { cancel(context.Cause(ctx)) })
+	defer func() { stop(); cancel(nil) }()
+	if parent == nil {
+		err = g.owner.ProveCurrent(read)
+	} else {
+		err = parent.ProveCurrent(read)
+	}
+	return errors.Join(err, ctx.Err())
 }

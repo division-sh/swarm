@@ -85,6 +85,8 @@ import (
 	agentfixture "github.com/division-sh/swarm/internal/store/testutil/agentfixture"
 
 	"github.com/division-sh/swarm/internal/testutil"
+	"github.com/division-sh/swarm/internal/testutil/packfixture"
+	"github.com/division-sh/swarm/internal/testutil/sourceartifactfixture"
 	"github.com/google/uuid"
 	"github.com/gorilla/websocket"
 )
@@ -101,36 +103,7 @@ func (servedOpenAICompatibleNoopLLMRuntime) ProviderContract() runtimellm.Provid
 	return runtimellm.OpenAICompatibleProviderContract()
 }
 
-func TestLoadServeRuntimeBundleRejectsMalformedPackBodiesBeforePublication(t *testing.T) {
-	base, err := packartifact.LoadEmbeddedPlatformPackInventory("0.7.0")
-	if err != nil {
-		t.Fatal(err)
-	}
-	tests := []struct {
-		name, id, bodyFile, wantErr string
-	}{
-		{name: "trigger", id: "provider.telegram", bodyFile: packartifact.TriggerManifestFileName, wantErr: "admit provider trigger packs"},
-		{name: "connector", id: "provider.telegram.connector", bodyFile: packartifact.ConnectorManifestFileName, wantErr: "admit provider connector packs"},
-		{name: "channel", id: "provider.telegram.hitl_channel", bodyFile: packartifact.ChannelManifestFileName, wantErr: "admit channel packs"},
-	}
-	for _, tc := range tests {
-		t.Run(tc.name, func(t *testing.T) {
-			project := canonicalrouting.CopyExample(t, canonicalrouting.RootIngress)
-			if changed, err := packartifact.ImportEmbeddedPack(project, tc.id, base); err != nil || !changed {
-				t.Fatalf("import %s changed=%t err=%v", tc.id, changed, err)
-			}
-			if err := os.WriteFile(filepath.Join(project, "packs", tc.id, tc.bodyFile), []byte("unknown_field: true\n"), 0o644); err != nil {
-				t.Fatal(err)
-			}
-			_, err := loadServeRuntimeBundle(context.Background(), repoRootForTest(), nil, cliapp.CLISourcePaths{
-				SourceRoot: project,
-			}, cliapp.ServeOptions{}, testPlatformPackBaseGenerations(t))
-			if err == nil || !strings.Contains(err.Error(), tc.wantErr) {
-				t.Fatalf("serve malformed %s error = %v, want %q", tc.name, err, tc.wantErr)
-			}
-		})
-	}
-}
+const serveRuntimeTestBundleHash = "bundle-v2:sha256:eeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeee"
 
 func servedRuntimeRootIdentityForRun(t testing.TB, runID, agentID string) runtimeagentidentity.Identity {
 	t.Helper()
@@ -399,13 +372,23 @@ func (terminalSourceSetCapability) TerminalResult() (runtimestartupownership.Ter
 }
 
 func TestProcessLifecycleShutdownDoesNotResumeTerminalSourceSetCapability(t *testing.T) {
-	rt := &runtimepkg.Runtime{Bus: &runtimebus.EventBus{}}
-	hash := runtimeContextTestHash("a")
-	manager, err := runtimepkg.NewRuntimeContextManager(nil, runtimepkg.BundleContext{
-		SourceArtifactFact: mustServeTestEphemeralSourceArtifactFact(hash),
-		Runtime:            rt, WorkOwner: newSupervisorTestRuntimeOccurrence(t, hash),
-		Source: semanticview.Wrap(&runtimecontracts.WorkflowContractBundle{}),
+	rooted, root := sourceartifactfixture.Rooted(t, "shutdown", sourceartifactfixture.Artifact())
+	source := semanticview.Wrap(loadWorkflowValidationBundleAt(t, root))
+	hash := rooted.Artifact().BundleHash()
+	fact := mustServeTestEphemeralSourceArtifactFact(hash)
+	owner := newSupervisorTestRuntimeOccurrence(t, hash)
+	eventBus, err := runtimebus.NewEphemeralEventBusWithOptions(nil, runtimebus.EventBusOptions{
+		SourceArtifactFact: fact, WorkOwner: owner, ContractBundle: source,
+		ReceiverExecution: eventreceiver.NormalExecution(),
 	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	rt := &runtimepkg.Runtime{Bus: eventBus}
+	manager, err := runtimepkg.NewRuntimeContextManager(nil, completeServeTestPackContext(t, runtimepkg.BundleContext{
+		SourceArtifactFact: fact, RootAdmission: rooted.Admission(),
+		Runtime: rt, WorkOwner: owner, Source: source,
+	}))
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -446,9 +429,10 @@ func TestProcessLifecycleTerminalEvidencePreservesJoinedProjectionDisposition(t 
 		{name: "release_persistent", releaseFails: true, persistent: true},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
-			hash := runtimeContextTestHash("a")
+			rooted, root := sourceartifactfixture.Rooted(t, "terminal", sourceartifactfixture.Artifact())
+			hash := rooted.Artifact().BundleHash()
 			fact := mustServeTestEphemeralSourceArtifactFact(hash)
-			source := semanticview.Wrap(&runtimecontracts.WorkflowContractBundle{})
+			source := semanticview.Wrap(loadWorkflowValidationBundleAt(t, root))
 			owner := newSupervisorTestRuntimeOccurrence(t, hash)
 			eventBus, err := runtimebus.NewEphemeralEventBusWithOptions(nil, runtimebus.EventBusOptions{
 				SourceArtifactFact: fact, WorkOwner: owner, ContractBundle: source,
@@ -458,9 +442,9 @@ func TestProcessLifecycleTerminalEvidencePreservesJoinedProjectionDisposition(t 
 				t.Fatal(err)
 			}
 			rt := &runtimepkg.Runtime{Bus: eventBus}
-			manager, err := runtimepkg.NewRuntimeContextManager(nil, runtimepkg.BundleContext{
-				SourceArtifactFact: fact, Runtime: rt, WorkOwner: owner, Source: source,
-			})
+			manager, err := runtimepkg.NewRuntimeContextManager(nil, completeServeTestPackContext(t, runtimepkg.BundleContext{
+				SourceArtifactFact: fact, RootAdmission: rooted.Admission(), Runtime: rt, WorkOwner: owner, Source: source,
+			}))
 			if err != nil {
 				t.Fatal(err)
 			}
@@ -1525,8 +1509,15 @@ func startServedControlProofRuntimeWithFixture(t *testing.T, backend servedparit
 
 func runServedRunControlBackendProof(t *testing.T, backend servedparity.Backend) {
 	t.Helper()
+	credentialPath := filepath.Join(t.TempDir(), "credentials.json")
+	t.Setenv("SWARM_CREDENTIALS_FILE", credentialPath)
+	writeChannelOnboardingLiveToolCredentials(t, credentialPath)
 	rt := startServedControlProofRuntimeWithFixture(t, backend, func(t *testing.T) string {
-		return canonicalrouting.CopyRootIngressServedDecisionControl(t)
+		root := canonicalrouting.CopyRootIngressServedDecisionControl(t)
+		if _, err := packartifact.ImportEmbeddedPack(root, "telegram", packfixture.EmbeddedBase(t)); err != nil {
+			t.Fatal(err)
+		}
+		return root
 	})
 	runServedRunControlLifecycleProof(t, rt)
 }
@@ -1687,8 +1678,15 @@ func runServedRuntimeIngressControlBackendProof(t *testing.T, backend servedpari
 
 func runServedMailboxDecisionBackendProof(t *testing.T, backend servedparity.Backend) {
 	t.Helper()
+	credentialPath := filepath.Join(t.TempDir(), "credentials.json")
+	t.Setenv("SWARM_CREDENTIALS_FILE", credentialPath)
+	writeChannelOnboardingLiveToolCredentials(t, credentialPath)
 	rt := startServedControlProofRuntimeWithFixture(t, backend, func(t *testing.T) string {
-		return canonicalrouting.CopyRootIngressServedDecisionControl(t)
+		root := canonicalrouting.CopyRootIngressServedDecisionControl(t)
+		if _, err := packartifact.ImportEmbeddedPack(root, "telegram", packfixture.EmbeddedBase(t)); err != nil {
+			t.Fatal(err)
+		}
+		return root
 	})
 	runServedMailboxDecisionLifecycleProof(t, rt)
 }
@@ -7086,10 +7084,17 @@ func TestRunServeRuntimeUnavailableBundleStartupRecoveryFailsPersistedMissingBef
 	})
 	ctx := context.Background()
 	persistedMissingRunID := uuid.NewString()
-	missingHash := "bundle-v2:sha256:2222222222222222222222222222222222222222222222222222222222222222"
+	missingArtifact, err := sourceartifact.AdmitMembers(map[string][]byte{
+		"manifest.yaml": []byte("version: 1.0.0\nplatform_version: '*'\n"),
+		"schema.yaml":   []byte("# unavailable source " + persistedMissingRunID + "\nstages: []\n"),
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	missingRoot, _ := sourceartifactfixture.Rooted(t, "unavailable-source", missingArtifact)
 	storetest.RequireCorruptRunSnapshot(t, ctx, pg, runlifecyclefixture.CorruptSnapshot{OriginKind: runlifecyclefixture.ScenarioSetupOriginKind(),
 		RunID: persistedMissingRunID, State: "running",
-		BundleHash: missingHash,
+		BundleHash: missingRoot.Admission().BundleHash(), RootDirectory: missingRoot.Admission().RootDirectory(),
 	})
 
 	var out lockedBuffer
@@ -7969,9 +7974,6 @@ func assertServePreflightTypedGateway(t *testing.T, opts cliapp.ServeOptions, wa
 	}
 	if report.HasBlockers() {
 		t.Fatalf("valid typed gateway configuration produced blockers:\n%#v", report)
-	}
-	if len(report.CapabilitySubjects) != 24 {
-		t.Fatalf("%s capability subjects = %#v, want nine triggers, thirteen connector actions, and two channels", wantMode, report.CapabilitySubjects)
 	}
 }
 

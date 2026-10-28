@@ -12,8 +12,10 @@ import (
 	"github.com/division-sh/swarm/internal/events"
 	"github.com/division-sh/swarm/internal/events/eventtest"
 	"github.com/division-sh/swarm/internal/operatorread"
+	"github.com/division-sh/swarm/internal/runtime/correlation"
 	runtimefailures "github.com/division-sh/swarm/internal/runtime/failures"
 	"github.com/division-sh/swarm/internal/testutil"
+	"github.com/division-sh/swarm/internal/testutil/sourceartifactfixture"
 	"github.com/google/uuid"
 )
 
@@ -34,9 +36,16 @@ func TestRuntimeLogPredicateBoundariesBothStores(t *testing.T) {
 			ctx = originalStoreFixtureContext(t, ctx, selected)
 			base := time.Now().UTC().Add(-time.Minute).Truncate(time.Second)
 			artifactA, artifactB := storeTestSourceArtifact("predicate-a"), storeTestSourceArtifact("predicate-b")
+			rootA, _ := sourceartifactfixture.Rooted(t, "predicate-a", artifactA)
+			rootB, _ := sourceartifactfixture.Rooted(t, "predicate-b", artifactB)
+			artifactA, artifactB = rootA.Artifact(), rootB.Artifact()
+			ctxA := correlation.WithRootAdmission(correlation.WithSourceArtifactFact(testAuthorActivityContextForBundle(artifactA.BundleHash()), sourceartifactfixture.FactFor(artifactA)), rootA.Admission())
+			ctxB := correlation.WithRootAdmission(correlation.WithSourceArtifactFact(testAuthorActivityContextForBundle(artifactB.BundleHash()), sourceartifactfixture.FactFor(artifactB)), rootB.Admission())
+			ctxA = originalStoreFixtureContext(t, ctxA, selected)
+			ctxB = originalStoreFixtureContext(t, ctxB, selected)
 			runA, runB, entity := uuid.NewString(), uuid.NewString(), uuid.NewString()
-			requireRunFixtureForTest(t, ctx, selected, semanticRunFixture{Origin: semanticScenarioSetupRunOriginForTest(), RunID: runA, Artifact: artifactA, StartedAt: base.Add(-time.Minute)})
-			requireRunFixtureForTest(t, ctx, selected, semanticRunFixture{Origin: semanticScenarioSetupRunOriginForTest(), RunID: runB, Artifact: artifactB, StartedAt: base.Add(-time.Minute)})
+			requireRunFixtureForTest(t, ctxA, selected, semanticRunFixture{Origin: semanticScenarioSetupRunOriginForTest(), RunID: runA, Artifact: artifactA, StartedAt: base.Add(-time.Minute)})
+			requireRunFixtureForTest(t, ctxB, selected, semanticRunFixture{Origin: semanticScenarioSetupRunOriginForTest(), RunID: runB, Artifact: artifactB, StartedAt: base.Add(-time.Minute)})
 			id := func(n int) string { return fmt.Sprintf("00000000-0000-0000-0000-%012d", n) }
 			for _, row := range []struct {
 				n                                       int
@@ -62,7 +71,11 @@ func TestRuntimeLogPredicateBoundariesBothStores(t *testing.T) {
 					t.Fatal(err)
 				}
 				event := eventtest.DiagnosticDirect(id(row.n), events.EventTypePlatformRuntimeLog, "runtime", "", payload, 0, row.run, "", events.EventEnvelope{}, row.at)
-				if err := commitDiagnosticRuntimeLogFixture(ctx, selected, event); err != nil {
+				recordContext := ctxA
+				if row.run == runB {
+					recordContext = ctxB
+				}
+				if err := commitDiagnosticRuntimeLogFixture(recordContext, selected, event); err != nil {
 					t.Fatal(err)
 				}
 			}

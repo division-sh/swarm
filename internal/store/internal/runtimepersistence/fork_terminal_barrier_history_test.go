@@ -10,8 +10,11 @@ import (
 	"github.com/division-sh/swarm/internal/events"
 	"github.com/division-sh/swarm/internal/events/eventtest"
 	"github.com/division-sh/swarm/internal/runtime/canonicaljson"
+	"github.com/division-sh/swarm/internal/runtime/contracts"
 	"github.com/division-sh/swarm/internal/runtime/genericschedule"
+	"github.com/division-sh/swarm/internal/runtime/pipeline"
 	"github.com/division-sh/swarm/internal/runtime/runfork"
+	"github.com/division-sh/swarm/internal/runtime/semanticview"
 	"github.com/google/uuid"
 )
 
@@ -40,6 +43,22 @@ func TestForkTerminalBarrierHistoryCorruptionBothStores(t *testing.T) {
 					occurrenceID := genericschedule.OccurrenceEventID(activationID, activation.CurrentDueAt)
 					occurrence := eventtest.RuntimeControlWithRoutingSource(occurrenceID, events.EventType(activation.Command.EventType), genericschedule.OccurrenceProducerID(), activation.Command.TaskID, payload, 0, fixture.runID, "",
 						events.EventEnvelope{EntityID: fixture.runID}, activation.Command.RoutingSource, activation.CurrentDueAt)
+					rooted, err := fixture.artifact.RootedSource()
+					if err != nil {
+						t.Fatal(err)
+					}
+					bundle, err := contracts.LoadWorkflowContractBundleFromRootedSource(pipeline.WorkflowRepoRoot(), rooted, contracts.DefaultPlatformSpecFile(pipeline.WorkflowRepoRoot()), contracts.WorkflowContractLoadOptions{})
+					if err != nil {
+						t.Fatal(err)
+					}
+					admission, found, err := pipeline.ResolveWorkflowJoinOccurrencePayloadAdmission(semanticview.Wrap(bundle), occurrence, fixture.bundleHash)
+					if err != nil || !found {
+						t.Fatalf("admit actual join occurrence: found=%v %v", found, err)
+					}
+					occurrence, err = events.ApplyPayloadAdmission(occurrence, admission)
+					if err != nil {
+						t.Fatal(err)
+					}
 					ref, _ := handle.JoinRef()
 					route := events.DeliveryRoute{Recipient: events.MustNodeDeliveryRecipient(ref.Node()), Target: events.MustExistingEntityTarget(events.RouteIdentity{FlowID: ".", FlowInstance: fixture.runID, EntityID: fixture.runID})}
 					if err := commitSemanticEventFixtureWithRoutes(ctx, selected, occurrence, []events.DeliveryRoute{route}); err != nil {

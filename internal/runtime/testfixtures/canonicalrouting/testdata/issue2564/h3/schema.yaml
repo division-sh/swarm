@@ -1,4 +1,4 @@
-name: issue2564-proof
+# fixture: issue2564-proof
 pins:
   inputs: [hub.start, hub.begin, hub.close]
 connect:

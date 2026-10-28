@@ -17,6 +17,7 @@ import (
 	"github.com/division-sh/swarm/internal/events"
 	"github.com/division-sh/swarm/internal/events/eventtest"
 	"github.com/division-sh/swarm/internal/operatorchannel"
+	"github.com/division-sh/swarm/internal/packadmission"
 	"github.com/division-sh/swarm/internal/packs"
 	"github.com/division-sh/swarm/internal/providertriggers"
 	"github.com/division-sh/swarm/internal/runtime/authoractivity"
@@ -27,6 +28,7 @@ import (
 	"github.com/division-sh/swarm/internal/runtime/runlifecycle"
 	"github.com/division-sh/swarm/internal/runtime/startupownership"
 	"github.com/division-sh/swarm/internal/sessionprovider/input"
+	"github.com/division-sh/swarm/internal/sourceartifact"
 	"github.com/division-sh/swarm/internal/store/storetest"
 	"github.com/division-sh/swarm/internal/testutil"
 	"github.com/division-sh/swarm/internal/testutil/packfixture"
@@ -43,11 +45,17 @@ type activeInputStore interface {
 	sessionInputSelectedStore
 	runlifecycle.FlowRunOwner
 	runlifecycle.LandingRunReader
+	sourceartifactfixture.RootedWriter
+	GetRootedSource(context.Context, sourceartifact.RootAdmissionReference) (sourceartifact.RootedSource, error)
+	LoadRunRootedSource(context.Context, string) (sourceartifact.RootedSource, error)
 }
 
 type activeInputFixture struct {
+	businessPlanners []*manager.AgentManager
+
 	nativeProcess startupownership.ProcessCapability
 	nativeContext context.Context
+	rooted        sourceartifact.RootedSource
 	ctx           context.Context
 	claimEvent    capturedEvent
 	claim         operatorchannel.InboundClaim
@@ -104,19 +112,26 @@ func newActiveInputFixtureWithTarget(t *testing.T, backend string, outbound, sav
 		f.selected, _ = storetest.StartPostgresRuntimeStoreWithReopen(t, f.location)
 	}
 	ctx, now := context.Background(), time.Now().UTC().Truncate(time.Microsecond)
-	source := sourceartifactfixture.Require(t, ctx, f.selected)
 	manifest := sessionInputManifestFixture(t)
-	catalog, err := providertriggers.NewCatalogSnapshot(providertriggers.CatalogEntry{Manifest: manifest,
-		Identity: providertriggers.PackIdentity{ID: "provider.whatsapp.input", Version: "1.0.0", ManifestHash: packs.ManifestHash(manifest.SourceBytes()), Provenance: "test"}})
+	members := map[string][]byte{
+		"manifest.yaml": []byte("version: 1.0.0\nplatform_version: '*'\n"),
+		"schema.yaml":   []byte("stages: []\npins: {inputs: [inbound.whatsapp.raw, inbound.whatsapp.message, inbound.whatsapp.edit, inbound.whatsapp.revoke]}\n"),
+	}
+	for name, body := range packfixture.WhatsAppSessionProviderMembers(t, manifest.SourceBytes(), []string{"raw", "edit", "message", "revoke"}) {
+		members["whatsapp/"+name] = body
+	}
+	artifact, err := sourceartifact.AdmitMembers(members)
 	if err != nil {
 		t.Fatal(err)
 	}
-	f.catalog = catalog
-	f.trigger, err = catalog.CompileAdmission(providertriggers.CompileAdmissionRequest{Alias: "whatsapp", Provider: "whatsapp"})
-	if err != nil {
+	f.rooted, _ = sourceartifactfixture.Rooted(t, "session-business", artifact)
+	source := sourceartifactfixture.FactFor(artifact)
+	ctx = correlation.WithRootAdmission(ctx, f.rooted.Admission())
+	if _, err := f.selected.EnsureRootedSource(ctx, f.rooted); err != nil {
 		t.Fatal(err)
 	}
-	f.channel = activeInputChannelFixture(t, catalog)
+	f.catalog, f.trigger, f.channel = capturedActiveInputChannelFixture(t, f.rooted)
+	catalog := f.catalog
 	identity, err := f.channel.InterfaceIdentity()
 	if err != nil {
 		t.Fatal(err)
@@ -170,7 +185,7 @@ func newActiveInputFixtureWithTarget(t *testing.T, backend string, outbound, sav
 		}
 	}
 	f.peer = newSDKPeer(t)
-	f.ctx = authoractivity.WithScope(correlation.WithSourceArtifactFact(f.peer.ctx, source), authoractivity.BundleScope(f.source.Coordinate.RuntimeInstanceID, source.BundleHash()))
+	f.ctx = authoractivity.WithScope(correlation.WithRootAdmission(correlation.WithSourceArtifactFact(f.peer.ctx, source), f.rooted.Admission()), authoractivity.BundleScope(f.source.Coordinate.RuntimeInstanceID, source.BundleHash()))
 	process := worklifetime.NewProcess()
 	f.workOwner, err = process.NewRuntime(f.ctx, worklifetime.RuntimeIdentity{RuntimeInstanceID: f.source.Coordinate.RuntimeInstanceID, BundleHash: source.BundleHash()})
 	if err != nil {
@@ -644,5 +659,53 @@ func TestWhatsAppNativeIdentityBeginRejectsStaleParentBothStores(t *testing.T) {
 
 func activeInputChannelFixture(t *testing.T, catalog *providertriggers.CatalogSnapshot) packs.SatisfactionPlan {
 	t.Helper()
-	return packfixture.WhatsAppSessionChannel(t, "../../platform-spec.yaml", catalog)
+	entry, present := catalog.EntryByProvider("whatsapp")
+	if !present {
+		t.Fatal("native input catalog has no WhatsApp trigger")
+	}
+	_, plan := packfixture.WhatsAppSessionProvider(t, "../../platform-spec.yaml", entry.Manifest.SourceBytes(), []string{"raw", "edit", "message", "revoke"})
+	return plan
+}
+
+func capturedActiveInputChannelFixture(t *testing.T, rooted sourceartifact.RootedSource) (*providertriggers.CatalogSnapshot, providertriggers.InboundAdmissionPlan, packs.SatisfactionPlan) {
+	t.Helper()
+	repo := pipeline.WorkflowRepoRoot()
+	bundle, err := contracts.LoadWorkflowContractBundleFromRootedSource(repo, rooted, contracts.DefaultPlatformSpecFile(repo), contracts.WorkflowContractLoadOptions{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	providers, err := packadmission.AdmitProviderSource(rooted, bundle.Platform)
+	if err != nil {
+		t.Fatal(err)
+	}
+	scope, err := providers.Scope(".")
+	if err != nil {
+		t.Fatal(err)
+	}
+	definition, present := scope.Provider("whatsapp")
+	if !present || definition.Provider().DeclaringFlow() != "." {
+		t.Fatal("active input requires its exact root-held WhatsApp provider")
+	}
+	catalog, err := scope.TriggerCatalog()
+	if err != nil {
+		t.Fatal(err)
+	}
+	trigger, err := catalog.CompileAdmission(providertriggers.CompileAdmissionRequest{Alias: "whatsapp", Provider: "whatsapp"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	triggerDescriptor, hasTrigger := catalog.PackDescriptorForProvider("whatsapp")
+	connector, hasConnector := definition.ConnectorDescriptor()
+	if !hasTrigger || !hasConnector {
+		t.Fatal("active input requires its captured trigger and connector BODYs")
+	}
+	registry, err := packs.NewInterfaceRegistry(bundle.Platform)
+	if err != nil {
+		t.Fatal(err)
+	}
+	plan, err := packs.CompileProviderChannel(registry, definition.Provider(), triggerDescriptor, connector)
+	if err != nil {
+		t.Fatal(err)
+	}
+	return catalog, trigger, plan
 }

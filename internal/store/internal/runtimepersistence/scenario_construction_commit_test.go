@@ -29,9 +29,10 @@ func TestScenarioConstructionNativeCommitBothStores(t *testing.T) {
 			t.Run(backend+"/"+cut, func(t *testing.T) {
 				selected, db, connector := newP16RaceStore(t, backend)
 				f := newReceiverConfigActivationFixtureForStore(t, selected.(agentFixtureFlowStore), false, map[string]string{
-					"schema.yaml":        "name: scenario-construction\nstages:\n  pending: {}\n",
-					"entities.yaml":      "record:\n  marker: text\n",
-					"nested/schema.yaml": "name: nested\n",
+					"schema.yaml":          "# fixture: scenario-construction\nstages:\n  pending: {}\n",
+					"entities.yaml":        "record:\n  marker: text\n",
+					"nested/manifest.yaml": "version: 1.0.0\nplatform_version: '*'\n",
+					"nested/schema.yaml":   "stages: []\n",
 				}, nil, ownStoreTestAgentManager, nil)
 				runID := uuid.NewString()
 				ctx := correlation.WithRunID(f.ctx, runID)
@@ -133,7 +134,7 @@ func TestScenarioConstructionFieldlessStateBothStores(t *testing.T) {
 	for _, backend := range []string{"sqlite", "postgres"} {
 		t.Run(backend, func(t *testing.T) {
 			f := newReceiverConfigActivationFixtureWithDocuments(t, backend, false, map[string]string{
-				"schema.yaml": "name: fieldless-scenario\nstages:\n  pending: {}\n",
+				"schema.yaml": "# fixture: fieldless-scenario\nstages:\n  pending: {}\n",
 			}, nil)
 			runID := uuid.NewString()
 			ctx := correlation.WithRunID(f.ctx, runID)

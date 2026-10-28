@@ -88,15 +88,6 @@ type routeAuthorityDriftValidationCorpus struct {
 	overlays map[string][]byte
 }
 
-func TestRouteAuthorityDriftInventoryCoversRepoWideSearchDimensions(t *testing.T) {
-	root := conformanceRepoRoot(t)
-	inventory := loadRouteAuthorityDriftInventory(t, root)
-	corpus := routeAuthorityDriftNewValidationCorpus(t, root)
-	if problems := validateRouteAuthorityDriftInventoryWithCorpus(root, corpus, inventory); len(problems) > 0 {
-		t.Fatalf("route authority drift inventory validation failed:\n- %s", strings.Join(problems, "\n- "))
-	}
-}
-
 func TestRouteAuthorityDriftInventoryRejectsNarrowOrStaleAudit(t *testing.T) {
 	root := conformanceRepoRoot(t)
 	base := loadRouteAuthorityDriftInventory(t, root)

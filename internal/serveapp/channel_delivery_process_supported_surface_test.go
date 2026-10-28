@@ -26,7 +26,7 @@ func TestChannelDeliveryAbruptProcessDeathPublicJourney(t *testing.T) {
 				if err := db.QueryRow(`SELECT run_id FROM runs WHERE flow_path='telegram-ingress' AND landing_run=TRUE`).Scan(&standingRun); err != nil {
 					t.Fatal(err)
 				}
-				standingCard := waitChannelAnchorCard(t, db, standingRun, decisioncard.AnchorKindStageGate, "telegram-ingress")
+				standingCard := waitChannelAnchorCard(t, db, standingRun, decisioncard.AnchorKindStageGate, "chat")
 				waitChannelAnchorReceipt(t, db, standingCard)
 				waitChannelDeliverySendsSettled(t, db, backend)
 				var arrived <-chan int
@@ -66,7 +66,7 @@ func TestChannelDeliveryAbruptProcessDeathPublicJourney(t *testing.T) {
 							t.Errorf("resolve actual provider control scope: %v", err)
 							return false
 						}
-						return runID == seedRunID && scope.FlowInstance == "reviews"
+						return runID == seedRunID && scope.FlowInstance == "chat/reviews"
 					})
 					t.Cleanup(release)
 				}
@@ -76,7 +76,7 @@ func TestChannelDeliveryAbruptProcessDeathPublicJourney(t *testing.T) {
 				})
 				seedRunID = seed.RunID
 				close(seedAdmitted)
-				card := waitChannelAnchorCard(t, db, seed.RunID, decisioncard.AnchorKindStageGate, "reviews")
+				card := waitChannelAnchorCard(t, db, seed.RunID, decisioncard.AnchorKindStageGate, "chat/reviews")
 				messageID := 0
 				if arrived != nil {
 					select {

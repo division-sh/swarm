@@ -121,7 +121,7 @@ func proveSelectedQ1SessionSiblingReforkBothStores(t *testing.T) {
 				sourceCtx := correlation.WithSourceArtifactFact(correlation.WithRunID(use.WorkContext(), runID), loaded.SourceArtifactFact)
 				sourceCtx = authoractivity.WithScope(sourceCtx, authoractivity.BundleScope(grant.RuntimeInstanceID, loaded.SourceArtifactFact.BundleHash()))
 				created, err := ordinary.Manager.EnsureFlowInstance(sourceCtx, pipeline.FlowInstanceActivationRequest{
-					ContractBundle: loaded.Source, Instance: root, OccurredAt: at,
+					ContractBundle: ordinary.Options.WorkflowModule.SemanticSource(), Instance: root, OccurredAt: at,
 				})
 				err = errors.Join(err, use.Done())
 				if err != nil || !created {
@@ -161,7 +161,7 @@ func proveSelectedQ1SessionSiblingReforkBothStores(t *testing.T) {
 					operation := runfork.ForkOperationRequest{
 						OperationID: uuid.NewString(), Actor: "bearer:q1-operator", IdempotencyKey: uuid.NewString(), TransportHash: "sha256:q1-" + sourceID + ":" + point,
 						SourceRunID: sourceID, ForkEventID: point, TargetBundleHash: loaded.SourceArtifactFact.BundleHash(), AllowSourceFreeze: true,
-						ContractSelection: runforkadmission.SelectedContractSelection(loaded.Source),
+						ContractSelection: runforkadmission.SelectedContractSelection(loaded.Source), TargetRootReference: loaded.RootedSource.Admission().Reference(),
 					}
 					request := SelectedContractExecutionRequest{
 						SourceRunID: sourceID, At: point, AllowSourceFreeze: true, Owner: owner, SourceLoader: loader,

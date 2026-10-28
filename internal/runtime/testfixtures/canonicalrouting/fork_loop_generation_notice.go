@@ -26,7 +26,9 @@ func CopyForkLoopGenerationState(t testing.TB) string {
 	t.Helper()
 	root := t.TempDir()
 	files := map[string]string{
-		"schema.yaml": `name: fork-loop-generation-state
+		"manifest.yaml":        "version: 1.0.0\nplatform_version: '*'\n",
+		"review/manifest.yaml": "version: 1.0.0\nplatform_version: '*'\n",
+		"schema.yaml": `# fixture: fork-loop-generation-state
 stages:
   waiting: {}
   active: {}
@@ -60,7 +62,7 @@ connect:
     root.closed:
       advances_to: done
 `,
-		"review/schema.yaml": `name: review
+		"review/schema.yaml": `# fixture: review
 stages:
   queued: {}
   working: {}

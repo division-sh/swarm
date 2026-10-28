@@ -26,6 +26,7 @@ func TestChannelSigningFallbackPublicRefusalBothStores(t *testing.T) {
 					}
 					t.Run(string(backend)+"/"+keyKind+"/"+entry+"/"+state, func(t *testing.T) {
 						h := newChannelOnboardingE2EHarness(t, backend, true)
+						writeChannelOnboardingLiveToolCredentials(t, h.credentialPath)
 						h.start(t)
 						verb, key := channelonboarding.VerbConnect, ""
 						operationID := ""
@@ -91,7 +92,7 @@ func TestChannelSigningFallbackPublicRefusalBothStores(t *testing.T) {
 							var reserved channelOnboardingJourneyReadback
 							telegramIdentities := 0
 							for _, row := range rows {
-								if row.Identity.Interface.ChannelPackID == "provider.telegram.hitl_channel" {
+								if row.Identity.Interface.ChannelPackID == "telegram" {
 									telegramIdentities++
 									reserved = row
 								}

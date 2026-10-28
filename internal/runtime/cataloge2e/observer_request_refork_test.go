@@ -58,7 +58,7 @@ func executeObserverOnlyRequestRefork(t *testing.T, h *runtimeHarness, selected 
 		t.Fatalf("observer-only projection changed terminal meaning: source=%+v child=%+v error=%v", original, row, err)
 	}
 	executed, err := executeCatalogLiveFork(t, h, ctx, runforkexecution.SelectedContractExecutionRequest{
-		SourceRunID: sourceRun, At: cut, ForkOperation: &operation, AllowSourceFreeze: true, Owner: owner, SourceLoader: loader, ContractSelection: selection, AgentRuntime: options,
+		SourceRunID: sourceRun, At: cut, ForkOperation: &operation, AllowSourceFreeze: true, Owner: owner, SourceLoader: loader, ContractSelection: selection, AgentRuntime: options, ExpectedBundleHash: selection.BundleHash,
 	})
 	if err != nil || !executed.Activation.Activated || executed.Materialization.ForkRunID != staged.ForkRunID {
 		t.Fatalf("activate observer-only child: activation=%+v error=%v", executed.Activation, err)

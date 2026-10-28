@@ -7,6 +7,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/division-sh/swarm/internal/runtime/correlation"
 	runtimepipeline "github.com/division-sh/swarm/internal/runtime/pipeline"
 	"github.com/division-sh/swarm/internal/runtime/semanticview"
 	"github.com/division-sh/swarm/internal/store/storetest"
@@ -19,6 +20,7 @@ type scenarioSetupAckSelectedStore interface {
 	APIIdempotencyStore
 	RunBundleContextStore
 	sourceartifactfixture.Writer
+	sourceartifactfixture.RootedWriter
 	EntityReadStore
 	runtimepipeline.WorkflowInstancePersistenceReader
 }
@@ -68,8 +70,15 @@ func TestOperatorTestSetupAcknowledgedCleanupErrorCompletesIdempotencyBothStores
 			bundle := testSetupValidationBundle(t)
 			source := semanticview.Wrap(bundle)
 			fact := sourceartifactfixture.RequireArtifact(t, context.Background(), selected, bundle.SourceArtifact)
-			ctx := testAuthorActivityContextForSource(context.Background(), fact)
-			ctx = originalAPIFixtureContext(t, ctx, selected)
+			rooted, err := bundle.RootedSource()
+			if err != nil {
+				t.Fatal(err)
+			}
+			ctx := originalAPIFixtureContext(t, testAuthorActivityContextForSource(context.Background(), fact), selected)
+			ctx = correlation.WithRootAdmission(ctx, rooted.Admission())
+			if _, err := selected.EnsureRootedSource(ctx, rooted); err != nil {
+				t.Fatal(err)
+			}
 			fault := errors.New("scenario setup postcommit cleanup failed")
 			setup := &scenarioSetupPostCommitFaultStore{TestSetupStore: selected, fault: fault}
 			now := time.Date(2026, 5, 10, 12, 0, 0, 0, time.UTC)
@@ -77,7 +86,7 @@ func TestOperatorTestSetupAcknowledgedCleanupErrorCompletesIdempotencyBothStores
 				Idempotency:      selected,
 				RunBundleContext: selected,
 				SourceArtifact: scenarioSetupImportPublisher{
-					bundleScopedFailingEventPublisher: bundleScopedFailingEventPublisher{fact: fact},
+					bundleScopedFailingEventPublisher: bundleScopedFailingEventPublisher{fact: fact, root: rooted.Admission()},
 					TestSetupStore:                    setup,
 				},
 				Source: source,

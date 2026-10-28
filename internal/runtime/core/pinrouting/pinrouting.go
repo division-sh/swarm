@@ -206,7 +206,7 @@ func (r *OutputConsumerResolver) classify(flowID, eventType string, routingSourc
 }
 
 func PinDeclaredOutput(source semanticview.Source, flowID, eventType string) bool {
-	if source == nil {
+	if _, found := semanticview.FlowScopeByID(source, flowID); !found {
 		return false
 	}
 	proof := semanticview.ResolveFlowEventProof(source, flowID, eventType)
@@ -259,7 +259,6 @@ func Resolve(input ResolutionInput, evt events.Event) Resolution {
 }
 
 func ResolveEnvelope(input ResolutionInput, envelope events.EventEnvelope) Resolution {
-	input.FlowID = strings.TrimSpace(input.FlowID)
 	input.EventType = strings.TrimSpace(input.EventType)
 	sourceRoute := input.RoutingSource.Route().Normalized()
 	if !sourceRoute.Empty() {

@@ -22,7 +22,7 @@ func TestRunForkFreshInvocationsAtSameCutHaveIndependentChildrenBothStores(t *te
 			owner, db := fixture.store.(runForkSelectedLifecycleStore), fixture.db
 			runID, eventID := uuid.NewString(), uuid.NewString()
 			at := time.Now().UTC().Truncate(time.Microsecond)
-			requireRunFixtureForTest(t, ctx, owner, semanticRunFixture{
+			ctx = requireRunFixtureForTest(t, ctx, owner, semanticRunFixture{
 				Origin: semanticScenarioSetupRunOriginForTest(), RunID: runID, StartedAt: at.Add(-time.Minute),
 				BundleHash: authorActivityTestBundleHash,
 			})
@@ -42,7 +42,11 @@ func TestRunForkFreshInvocationsAtSameCutHaveIndependentChildrenBothStores(t *te
 			if err := tx.Commit(); err != nil {
 				t.Fatal(err)
 			}
-			request := runfork.RunForkMaterializeRequest{SourceRunID: runID, At: eventID}
+			rooted, err := fixture.store.(rootedRunStore).LoadRunRootedSource(ctx, runID)
+			if err != nil {
+				t.Fatal(err)
+			}
+			request := runfork.RunForkMaterializeRequest{SourceRunID: runID, At: eventID, RootAdmission: rooted.Admission()}
 			first, err := owner.MaterializeRunFork(ctx, request)
 			if err != nil {
 				t.Fatalf("first invocation: %v", err)
@@ -136,7 +140,7 @@ func TestSelectedForkLatestPreparationRetainsCapturedSelectorBothStores(t *testi
 		t.Run(backend.name, func(t *testing.T) {
 			fixture := backend.open(t)
 			ctx, seeded := forkWorkflowOwnershipRequest(t, fixture, backend.name == "postgres")
-			request := prepareSelectedStoreMaterializationForTest(t, ctx, fixture.store, seeded.SourceRunID, "", seeded.ContractSelection)
+			request := prepareSelectedStoreMaterializationForTest(t, ctx, fixture.store, seeded.SourceRunID, "", seeded.ContractSelection, seeded.SourceArtifactFact.BundleHash())
 			point := request.Preparation.ForkPoint
 			if point.Kind != runfork.RunForkPointStateRevision || point.Validate() != nil || point.Revision < 1 || point.EventID != "" || point.Input != "" || request.At != "" {
 				t.Fatalf("fixture did not retain the exact eventless committed head: point=%+v at=%q", point, request.At)
@@ -144,7 +148,7 @@ func TestSelectedForkLatestPreparationRetainsCapturedSelectorBothStores(t *testi
 			request.ForkOperation = &runfork.ForkOperationRequest{
 				OperationID: uuid.NewString(), Actor: "captured-head-native-fixture", IdempotencyKey: uuid.NewString(),
 				TransportHash: "captured-head-native-fixture", SourceRunID: request.SourceRunID, ResolvedPoint: &point,
-				TargetBundleHash: request.SourceArtifactFact.BundleHash(), ContractSelection: request.ContractSelection,
+				TargetBundleHash: request.SourceArtifactFact.BundleHash(), TargetRootReference: request.RootAdmission.Reference(), ContractSelection: request.ContractSelection,
 			}
 			owner := fixture.store.(forkWorkflowOwnershipStore)
 			child, err := owner.MaterializeRunForkForSelectedContractExecution(ctx, request)

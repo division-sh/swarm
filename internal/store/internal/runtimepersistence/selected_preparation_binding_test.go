@@ -41,8 +41,16 @@ func TestSelectedPreparationExecutionBindingBothStores(t *testing.T) {
 			request.ContainerPlanFingerprint = "sha256:" + strings.Repeat("1", 64)
 			request.ActorCensusFingerprint = "sha256:" + strings.Repeat("2", 64)
 			request.EffectiveConfigFingerprint = "sha256:" + strings.Repeat("3", 64)
+			rooted, err := selected.(rootedRunStore).LoadRunRootedSource(ctx, fixture.forkRun)
+			if err != nil {
+				t.Fatal(err)
+			}
+			coordinate, err := agenttopology.NewSourceCoordinate(rooted.Admission())
+			if err != nil {
+				t.Fatal(err)
+			}
 			request.DeclarationPlan, err = agenttopology.NewSelectedDeclarationPlan(request.DeclarationPlan.BundleHash, []agenttopology.DesiredAgent{{
-				Identity: plan, Source: agenttopology.SourceCoordinate{BundleHash: request.DeclarationPlan.BundleHash}, ConfigRevision: strings.Repeat("f", 64),
+				Identity: plan, Source: coordinate, ConfigRevision: strings.Repeat("f", 64),
 			}})
 			if err != nil {
 				t.Fatal(err)

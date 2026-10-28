@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"reflect"
 	"slices"
 	"time"
 
@@ -14,6 +15,7 @@ import (
 	"github.com/division-sh/swarm/internal/runtime/runcontrol"
 	"github.com/division-sh/swarm/internal/runtime/runfork"
 	"github.com/division-sh/swarm/internal/runtime/semanticview"
+	"github.com/division-sh/swarm/internal/sourceartifact"
 	"github.com/google/uuid"
 )
 
@@ -36,6 +38,7 @@ const (
 	PreparedForkConstructionFailure
 	PreparedForkDeliveryReconcile
 	PreparedForkActivate
+	PreparedOrdinaryForkActivate
 )
 
 // PreparedProcessOperation is a closed synchronous store command. Only the
@@ -68,7 +71,10 @@ func PreparedOperationEntered(ctx context.Context, kind PreparedOperationKind, t
 		return false
 	}
 	scope, ok := ctx.Value(preparedOperationContextKey{}).(preparedOperationScope)
-	return ok && scope.kind == kind && scope.target == target && scope.life.Err() == nil
+	if !ok || scope.kind != kind || !reflect.ValueOf(scope.target).Comparable() || !reflect.ValueOf(target).Comparable() {
+		return false
+	}
+	return scope.target == target && scope.life.Err() == nil
 }
 
 func (p *processCapability) RunPreparedOperation(ctx context.Context, operation PreparedProcessOperation) error {
@@ -240,8 +246,8 @@ func (r PreparedForkSourceEventsResult) Outcome(err error) ([]runfork.RunForkSel
 }
 
 func PreparedForkSourceEventsOperation(ctx context.Context, process ProcessCapability, store interface {
-	LoadRunForkSelectedContractSourceEvents(context.Context, string, string, []string, semanticview.OriginalLoopCarriage) ([]runfork.RunForkSelectedContractSourceEvent, error)
-}, binding runfork.SelectedForkPreparationBinding, authority effects.Authority, eventIDs []string, carriage semanticview.OriginalLoopCarriage, result *PreparedForkSourceEventsResult) (PreparedProcessOperation, error) {
+	LoadRunForkSelectedContractSourceEvents(context.Context, string, string, []string, semanticview.OriginalLoopCarriage, sourceartifact.RootAdmission) ([]runfork.RunForkSelectedContractSourceEvent, error)
+}, binding runfork.SelectedForkPreparationBinding, authority effects.Authority, eventIDs []string, carriage semanticview.OriginalLoopCarriage, originalRoot sourceartifact.RootAdmission, result *PreparedForkSourceEventsResult) (PreparedProcessOperation, error) {
 	op, p, err := preparedSelectedForkOperation(ctx, process, store, binding)
 	if err != nil {
 		return PreparedProcessOperation{}, err
@@ -267,7 +273,7 @@ func PreparedForkSourceEventsOperation(ctx context.Context, process ProcessCapab
 			return err
 		}
 		var err error
-		result.Events, err = store.LoadRunForkSelectedContractSourceEvents(owned, binding.SourceRunID, binding.ForkRunID, ids, carriage)
+		result.Events, err = store.LoadRunForkSelectedContractSourceEvents(owned, binding.SourceRunID, binding.ForkRunID, ids, carriage, originalRoot)
 		if err == nil {
 			result.failure = nil
 			return nil
@@ -398,7 +404,11 @@ func PreparedForkActivateOperation(ctx context.Context, process ProcessCapabilit
 	}
 	request.AllowedSourceEventIDs = slices.Clone(request.AllowedSourceEventIDs)
 	op.kind = PreparedForkActivate
+	op.stamp = &request.Process
 	op.run = func(owned context.Context) error {
+		if !PreparedOperationEntered(owned, PreparedForkActivate, store) {
+			return ErrProcessNotCurrent
+		}
 		if err := p.requirePreparedOriginal(ctx); err != nil {
 			return err
 		}
@@ -465,6 +475,20 @@ type PreparedForkStore interface {
 	ClaimRunForkSelectedContractRuntimeExecution(context.Context, runfork.SelectedContractRuntimeExecution, string, time.Duration) (effects.Authority, error)
 	RecoverSelectedFork(context.Context, runcontrol.SelectedForkRecoveryRequest) (runfork.SelectedForkRecoveryResult, error)
 	StopSelectedFork(context.Context, runcontrol.SelectedStopRequest) (runcontrol.State, error)
+}
+
+func PreparedOrdinaryForkActivateOperation(store interface {
+	ActivateRunFork(context.Context, runfork.RunForkActivateRequest) (runfork.RunForkActivation, error)
+}, request runfork.RunForkActivateRequest, result *runfork.RunForkActivation) PreparedProcessOperation {
+	if store == nil || result == nil {
+		return PreparedProcessOperation{}
+	}
+	op := PreparedProcessOperation{kind: PreparedOrdinaryForkActivate, target: store, stamp: &request.Process}
+	op.run = func(ctx context.Context) (err error) {
+		*result, err = store.ActivateRunFork(ctx, request)
+		return err
+	}
+	return op
 }
 
 func preparedForkOperation(kind PreparedOperationKind, store any, preparation runfork.SelectedForkPreparation) PreparedProcessOperation {

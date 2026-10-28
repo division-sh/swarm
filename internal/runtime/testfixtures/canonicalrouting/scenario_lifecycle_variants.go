@@ -61,18 +61,28 @@ func InstallNovelAuthoredScenarioLifecycle(t testing.TB, root string) {
   event_handlers:
     fulfillment.close_requested: {advances_to: done}
 `)
-	writeClosedVariantFile(t, root, "tools.yaml", `
-scenario.send:
-  description: Authored response materialization proof.
-  category: provider_connector
-  credentials: [scenario_mock_secret]
-  handler_type: http
-  http: {method: POST, url: https://example.invalid/send}
-  output_schema:
-    type: object
-    required: [marker]
-    properties: {marker: {type: string}}
-  response_success: {kind: http_status_2xx}
+	writeClosedVariantFile(t, root, "scenario/manifest.yaml", `version: 1.0.0
+platform_version: '*'
+capabilities:
+  can:
+    call_provider_actions: [send]
+    lower_through_activity: true
+    journal_activity_attempts: true
+  cannot: [expose credential values]
+`)
+	writeClosedVariantFile(t, root, "scenario/connector.yaml", `
+tools:
+  send:
+    description: Authored response materialization proof.
+    category: provider_connector
+    credentials: [scenario_mock_secret]
+    handler_type: http
+    http: {method: POST, url: https://example.invalid/send}
+    output_schema:
+      type: object
+      required: [marker]
+      properties: {marker: {type: string}}
+    response_success: {kind: http_status_2xx}
 `)
 	writeClosedVariantFile(t, root, "fulfillment/nodes.yaml", `
 complete-request:

@@ -20,7 +20,9 @@ import (
 	runtimepipelineobligation "github.com/division-sh/swarm/internal/runtime/pipelineobligation"
 	runtimerunlifecycle "github.com/division-sh/swarm/internal/runtime/runlifecycle"
 	"github.com/division-sh/swarm/internal/runtime/semanticview"
+	"github.com/division-sh/swarm/internal/sourceartifact"
 	"github.com/division-sh/swarm/internal/store/storetest"
+	"github.com/division-sh/swarm/internal/testutil/sourceartifactfixture"
 	"github.com/google/uuid"
 )
 
@@ -29,9 +31,20 @@ func TestHumanTaskDecisionAcknowledgmentLossReplaysWithoutDuplicateOnBothStores(
 		t.Run(backend, func(t *testing.T) {
 			bundle := runCompletionSystemNodeBundle(t)
 			fact := sourceArtifactFactForTestBundle(t, bundle)
-			ctx := testAuthorActivityContextForSource(context.Background(), fact)
-			cardStore, humanStore, idempotency, mailbox, workflowStore := newHumanTaskAckLossOwners(t, ctx, backend)
+			rooted, err := bundle.RootedSource()
+			if err != nil {
+				t.Fatal(err)
+			}
+			ctx := runtimecorrelation.WithRootAdmission(testAuthorActivityContextForSource(context.Background(), fact), rooted.Admission())
+			cardStore, humanStore, idempotency, mailbox, workflowStore := newHumanTaskAckLossOwners(t, ctx, backend, bundle)
 			ctx = originalAPIFixtureContext(t, ctx, cardStore)
+			rootOwner, ok := cardStore.(sourceartifactfixture.RootedWriter)
+			if !ok {
+				t.Fatal("human-task fixture requires its rooted source owner")
+			}
+			if _, err := rootOwner.EnsureRootedSource(ctx, rooted); err != nil {
+				t.Fatal(err)
+			}
 			principal, err := cardStore.(interface {
 				EnsureOperatorPrincipal(context.Context, time.Time) (operatorchannel.Principal, error)
 			}).EnsureOperatorPrincipal(ctx, time.Now())
@@ -57,6 +70,7 @@ func TestHumanTaskDecisionAcknowledgmentLossReplaysWithoutDuplicateOnBothStores(
 					Events: bundleScopedFailingEventPublisher{
 						failingRunStartPublisher: failingRunStartPublisher{err: errors.New("unexpected human-task API event publication")},
 						fact:                     fact,
+						root:                     rooted.Admission(),
 					},
 				}),
 			}, ctx)
@@ -101,28 +115,39 @@ func TestHumanTaskDecisionAcknowledgmentLossReplaysWithoutDuplicateOnBothStores(
 type bundleScopedFailingEventPublisher struct {
 	failingRunStartPublisher
 	fact runtimecorrelation.SourceArtifactFact
+	root sourceartifact.RootAdmission
 }
 
 func (p bundleScopedFailingEventPublisher) AdmitSourceArtifactFact(ctx context.Context) (context.Context, error) {
 	if err := p.fact.Validate(); err != nil {
 		return ctx, err
 	}
-	return runtimecorrelation.WithSourceArtifactFact(ctx, p.fact), nil
+	if err := p.root.Validate(); err != nil {
+		return ctx, err
+	}
+	if p.root.BundleHash() != p.fact.BundleHash() {
+		return ctx, fmt.Errorf("fixture source fact differs from its admitted root")
+	}
+	if err := runtimecorrelation.CheckRootAdmissionContext(ctx, p.root.Reference()); err != nil {
+		return ctx, err
+	}
+	return runtimecorrelation.WithRootAdmission(runtimecorrelation.WithSourceArtifactFact(ctx, p.fact), p.root), nil
 }
 
 func newHumanTaskAckLossOwners(
 	t *testing.T,
 	ctx context.Context,
 	backend string,
+	bundle *runtimecontracts.WorkflowContractBundle,
 ) (humanTaskAckLossCardFixtureStore, decisioncard.HumanTaskStore, APIIdempotencyStore, MailboxAPIStore, DecisionCardAuthority) {
 	t.Helper()
 	if backend == "postgres" {
 		pg := storetest.StartPostgresRuntimeStore(t)
-		return pg, pg, pg, pg, newHumanTaskAckLossDecisionAuthority(t, pg, runtimepipeline.NewWorkflowPersistence(pg), pg, pg)
+		return pg, pg, pg, pg, newHumanTaskAckLossDecisionAuthority(t, pg, runtimepipeline.NewWorkflowPersistence(pg), pg, pg, bundle)
 	}
 	sqliteStore := storetest.StartSQLiteRuntimeStoreWithContext(t, ctx)
 	return sqliteStore, sqliteStore, sqliteStore, sqliteStore,
-		newHumanTaskAckLossDecisionAuthority(t, sqliteStore, runtimepipeline.NewWorkflowPersistence(sqliteStore), sqliteStore, sqliteStore)
+		newHumanTaskAckLossDecisionAuthority(t, sqliteStore, runtimepipeline.NewWorkflowPersistence(sqliteStore), sqliteStore, sqliteStore, bundle)
 }
 
 type humanTaskAckLossCardFixtureStore interface {
@@ -143,9 +168,9 @@ func newHumanTaskAckLossDecisionAuthority(
 	persistence runtimepipeline.WorkflowPersistence,
 	cards decisioncard.Store,
 	humanTasks decisioncard.HumanTaskStore,
+	bundle *runtimecontracts.WorkflowContractBundle,
 ) DecisionCardAuthority {
 	t.Helper()
-	bundle := runCompletionSystemNodeBundle(t)
 	source := semanticview.Wrap(bundle)
 	eventBus, err := newScopedAPITestEventBus(t, selected, runtimebus.EventBusOptions{
 		ContractBundle: source, SourceArtifactFact: sourceArtifactFactForTestBundle(t, bundle),

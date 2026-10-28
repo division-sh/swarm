@@ -1,13 +1,17 @@
 package canonicalrouting
 
-import "testing"
+import (
+	"path/filepath"
+	"testing"
+)
 
 // CopyMailboxEntityFilter retains root-ingress routing and opens a real typed
 // gate so mailbox filtering is exercised without inserting synthetic cards.
 func CopyMailboxEntityFilter(t testing.TB) string {
 	t.Helper()
 	root := CopyExample(t, RootIngress)
-	writeClosedVariantFile(t, root, "schema.yaml", `name: mailbox-entity-filter
+	copyTree(t, filepath.Join(RepoRoot(t), "packs/providers/telegram"), filepath.Join(root, "telegram"))
+	writeClosedVariantFile(t, root, "schema.yaml", `# fixture: mailbox-entity-filter
 stages:
   new: {}
   waiting:

@@ -19,6 +19,7 @@ import (
 	runtimerunlifecycle "github.com/division-sh/swarm/internal/runtime/runlifecycle"
 	"github.com/division-sh/swarm/internal/store/internal/backend/mutationprotocol"
 	storerunhandoff "github.com/division-sh/swarm/internal/store/internal/runhandoff"
+	"github.com/division-sh/swarm/internal/testutil/sourceartifactfixture"
 	"github.com/division-sh/swarm/internal/testutil/stagecatalogfixture"
 	"github.com/google/uuid"
 )
@@ -211,9 +212,9 @@ func TestRunLifecyclePauseResumeSuccessorRaceParity(t *testing.T) {
 			ctx = originalStoreFixtureContext(t, ctx, fixture.store)
 			runID := uuid.NewString()
 			startedAt := time.Date(2026, 7, 29, 11, 0, 0, 0, time.UTC)
-			ensureRunLifecycleCandidateParityRun(t, fixture, ctx, runID, startedAt)
+			root := ensureRunLifecycleCandidateParityRun(t, fixture, ctx, runID, startedAt)
 			t.Run("live_selection", func(t *testing.T) {
-				requireLiveRunControlSelection(t, fixture, ctx)
+				requireLiveRunControlSelection(t, fixture, runtimecorrelation.WithRootAdmission(ctx, root))
 			})
 			if err := materializeCompletedRunEntityForTest(ctx, fixture.store, runID); err != nil {
 				t.Fatalf("materialize terminal entity: %v", err)
@@ -354,6 +355,7 @@ func TestRunLifecycleCrossBundleSameRevisionHandoffParity(t *testing.T) {
 			owner := fixture.store.(runtimerunlifecycle.OperationOwner)
 			ctx := testAuthorActivitySourceArtifactContext()
 			ctx = originalStoreFixtureContext(t, ctx, fixture.store)
+			replacementRoot, _ := sourceartifactfixture.Rooted(t, "candidate-replacement", runLifecycleCandidateParityReplacementArtifact)
 			runID := uuid.NewString()
 			ensureRunLifecycleCandidateParityRun(t, fixture, ctx, runID, time.Date(2026, 7, 29, 11, 0, 0, 0, time.UTC))
 			if err := materializeCompletedRunEntityForTest(ctx, fixture.store, runID); err != nil {
@@ -407,7 +409,7 @@ func TestRunLifecycleCrossBundleSameRevisionHandoffParity(t *testing.T) {
 			if err != nil {
 				t.Fatal(err)
 			}
-			if disposition, err := reviseRunLifecycleSourceParity(fixture, oldCtx, runID, replacement); err != nil || disposition != runtimerunlifecycle.MutationApplied {
+			if disposition, err := reviseRunLifecycleSourceParity(fixture, oldCtx, runID, replacement, replacementRoot); err != nil || disposition != runtimerunlifecycle.MutationApplied {
 				t.Fatalf("revise run source = %s/%v", disposition, err)
 			}
 			awaitRunLifecycleSignal(t, intercept.secondExecuted, "new-bundle same-revision execution")

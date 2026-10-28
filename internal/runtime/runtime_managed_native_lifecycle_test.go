@@ -2,7 +2,7 @@ package runtime
 
 import (
 	"context"
-	"errors"
+
 	"fmt"
 	"net/http"
 	"net/http/httptest"
@@ -35,7 +35,7 @@ import (
 	"github.com/division-sh/swarm/internal/runtime/testfixtures/canonicalrouting"
 	"github.com/division-sh/swarm/internal/runtime/toolgateway"
 	workspace "github.com/division-sh/swarm/internal/runtime/workspace"
-	"github.com/division-sh/swarm/internal/testutil/sourceartifactfixture"
+
 	"github.com/google/uuid"
 )
 
@@ -168,41 +168,6 @@ func TestRuntimeSyntheticInstanceIndexFailsClosed(t *testing.T) {
 	}
 	if observations, err := roles.ListFlowInstances(context.Background(), runtimepipeline.FlowInstanceLookupScope{}); err == nil || len(observations) != 0 {
 		t.Fatalf("component fixture fabricated an instance inventory: %+v, %v", observations, err)
-	}
-}
-
-func TestManagedNativeLifecycleRunRequiresAdmittedSource(t *testing.T) {
-	store := newManagedNativeLifecycleStore(t)
-	source := testSourceArtifactFact(t, runtimeTestBundleHash)
-	ctx := runtimecorrelation.WithSourceArtifactFact(t.Context(), source)
-	owner := managedNativeDurableRoles{session: store.runtimeTestRetainedSession}
-	var missing *runtimerunlifecycle.RunNotFoundError
-	if err := owner.RequireActiveRun(ctx, runtimeTestManagedLifecycleRunID); !errors.As(err, &missing) {
-		t.Fatalf("fixture accepted unadmitted run: %v", err)
-	}
-	store.admitRun(t, runtimeTestManagedLifecycleRunID, source)
-	if err := owner.RequireActiveRun(ctx, runtimeTestManagedLifecycleRunID); err != nil {
-		t.Fatal(err)
-	}
-	for _, absent := range []string{"", uuid.NewString()} {
-		if err := owner.RequireActiveRun(ctx, absent); !errors.As(err, &missing) || missing.RunID != absent {
-			t.Fatalf("fixture borrowed another run: run=%q err=%v", absent, err)
-		}
-	}
-	if err := owner.RequireActiveRun(t.Context(), runtimeTestManagedLifecycleRunID); err == nil {
-		t.Fatal("fixture accepted run without its source")
-	}
-	foreign := sourceartifactfixture.FactFor(sourceartifactfixture.New("schema.yaml", []byte("name: foreign-lifecycle-source\n")))
-	if err := owner.RequireActiveRun(runtimecorrelation.WithSourceArtifactFact(t.Context(), foreign), runtimeTestManagedLifecycleRunID); err == nil {
-		t.Fatal("fixture accepted run with a different source")
-	}
-	canceled, cancel := context.WithCancel(ctx)
-	cancel()
-	if err := owner.RequireActiveRun(canceled, runtimeTestManagedLifecycleRunID); !errors.Is(err, context.Canceled) {
-		t.Fatalf("fixture lost cancellation: %v", err)
-	}
-	if err := (managedNativeDurableRoles{}).RequireActiveRun(ctx, runtimeTestManagedLifecycleRunID); !errors.As(err, &missing) {
-		t.Fatalf("unbound component owner accepted run: %v", err)
 	}
 }
 

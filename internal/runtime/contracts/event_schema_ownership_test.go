@@ -102,6 +102,59 @@ func TestCompiledConnectEventConsumerProjectionCensus(t *testing.T) {
 
 func TestConnectedOutputBindingCompilesProducerSchemaIntoReceiverPin(t *testing.T) {
 	repo := repoRootForContractsTest(t)
+	t.Run("late imported rename", func(t *testing.T) {
+		root := t.TempDir()
+		for _, flow := range []string{".", "producer", "consumer"} {
+			writeFixtureFile(t, filepath.Join(root, flow, "manifest.yaml"), "version: 1.0.0\nplatform_version: '*'\n")
+		}
+		writeFixtureFile(t, filepath.Join(root, "schema.yaml"), "pins: {inputs: [root_received]}\nconnect:\n  - {event: work.ready, from: producer, to: consumer, rename: received}\n  - {event: work.ready, from: producer, to: ., rename: root_received}\n")
+		writeFixtureFile(t, filepath.Join(root, "producer/schema.yaml"), "pins: {outputs: [work.ready]}\n")
+		writeFixtureFile(t, filepath.Join(root, "consumer/schema.yaml"), "pins: {inputs: [received]}\n")
+		bundle, err := LoadWorkflowContractBundleWithOverrides(repo, root, DefaultPlatformSpecFile(repo))
+		if err != nil {
+			t.Fatal(err)
+		}
+		original, _ := bundle.FlowInputEventPin("consumer", "received")
+		if _, bound := original.ProducerEventSchema(); bound {
+			t.Fatal("unavailable provider schema was invented during initial compilation")
+		}
+		schema, err := CompileImportedEventSchema("producer", "work.ready", EventCatalogEntry{Payload: EventPayloadSpec{
+			Type: "object", Properties: map[string]EventFieldSpec{"value": {Type: "text"}}, Required: []string{"value"},
+		}}, CompiledEventSchemaSource{Layer: "provider_trigger_pack", File: "producer/provider/trigger.yaml"})
+		if err != nil {
+			t.Fatal(err)
+		}
+		output, _ := bundle.FlowOutputEventPin("producer", "work.ready")
+		output, err = output.BindImportedEventSchema(schema)
+		if err != nil {
+			t.Fatal(err)
+		}
+		bound, err := bundle.BindConnectedProviderInputPins(map[string][]CompiledFlowOutputPin{"producer": {output}})
+		if err != nil {
+			t.Fatal(err)
+		}
+		for flow, event := range map[string]string{"consumer": "received", ".": "root_received"} {
+			if len(bound[flow]) != 1 || bound[flow][0].EventType() != event {
+				t.Fatalf("receiver coordinate changed: %s %+v", flow, bound[flow])
+			}
+			pin := bound[flow][0]
+			got, found := pin.ProducerEventSchema()
+			before, _ := bundle.FlowInputEventPin(flow, event)
+			if !found || got.value != schema.value || pin.Provenance() != before.Provenance() || pin.Digest() == before.Digest() {
+				t.Fatalf("receiver %s lost exact producer/provenance/digest", flow)
+			}
+			if _, changed := before.ProducerEventSchema(); changed {
+				t.Fatal("late binding mutated the original compiled pin")
+			}
+		}
+		foreign, err := CompileFlowOutputPin(FlowPinCompilationContext{FlowID: "consumer", FlowPath: "consumer", SourceFile: "consumer/schema.yaml", EventSchema: schema}, FlowOutputEventPin{Event: "work.ready"})
+		if err != nil {
+			t.Fatal(err)
+		}
+		if _, err := bundle.BindConnectedProviderInputPins(map[string][]CompiledFlowOutputPin{"producer": {foreign}}); err == nil || !strings.Contains(err.Error(), "foreign output schema evidence") {
+			t.Fatalf("caller map key supplied producer authority: %v", err)
+		}
+	})
 	root := canonicalrouting.CopyExample(t, canonicalrouting.ParentConnect)
 	bundle, err := LoadWorkflowContractBundleWithOverrides(repo, root, DefaultPlatformSpecFile(repo))
 	if err != nil {
@@ -222,11 +275,19 @@ func TestConnectedRootInputUsesExactBindingForBothRootCoordinates(t *testing.T) 
 	}
 	for _, flow := range []string{".", ""} {
 		got, ok, err := bundle.ResolveEffectiveCompiledFlowEventSchema(flow, "work.ready")
-		if err != nil || !ok || got.value != producer.value {
+		if flow == "" {
+			if ok || got.value != nil {
+				t.Errorf("empty flow recovered compiled binding: found=%t err=%v", ok, err)
+			}
+		} else if err != nil || !ok || got.value != producer.value {
 			t.Errorf("root %q lost exact connected binding: %t %v", flow, ok, err)
 		}
 		entry, name, ok := bundle.ResolveFlowEventCatalogEntry(flow, "work.ready")
-		if !ok || name != producer.EventName() || entry.Payload.Properties["value"].Type != "text" {
+		if flow == "" {
+			if ok || name != "" || len(entry.Payload.Properties) != 0 {
+				t.Errorf("empty flow recovered producer catalog evidence: %q %t %+v", name, ok, entry)
+			}
+		} else if !ok || name != producer.EventName() || entry.Payload.Properties["value"].Type != "text" {
 			t.Errorf("root %q lost producer catalog evidence: %q %t %+v", flow, name, ok, entry)
 		}
 	}
@@ -324,13 +385,11 @@ func TestEffectiveEventResolutionPrefersConnectedProducerOverUnrelatedSameNameRo
 	source := filepath.Join(repo, "examples", "routing", "template-create-minted-key")
 	root := filepath.Join(t.TempDir(), "template-create-minted-key")
 	copyTree(t, source, root)
-	if err := os.WriteFile(filepath.Join(root, "events.yaml"), []byte("validation.requested:\n  wrong: text\n"), 0o644); err != nil {
+	if err := os.WriteFile(filepath.Join(root, "events.yaml"), []byte("validation.triggered:\n  candidate: text?\nvalidation.requested:\n  wrong: text\n"), 0o644); err != nil {
 		t.Fatal(err)
 	}
 	producerEvents := filepath.Join(root, "producer", "events.yaml")
-	if err := os.WriteFile(producerEvents, []byte(`validation.triggered:
-  candidate: text?
-validation.requested:
+	if err := os.WriteFile(producerEvents, []byte(`validation.requested:
   # Producer-owned request schema
   candidate:
     type: ProducerCandidate?
@@ -421,6 +480,21 @@ func TestEffectiveEventResolutionPreservesConnectedRenameOwnership(t *testing.T)
 }
 
 func TestConnectedEventSchemaOwnershipRejectsDistinctProducersIndependentOfConnectOrder(t *testing.T) {
+	t.Run("unbound producers retain distinct ownership", func(t *testing.T) {
+		root := t.TempDir()
+		for _, flow := range []string{".", "producer-a", "producer-b", "consumer"} {
+			writeFixtureFile(t, filepath.Join(root, flow, "manifest.yaml"), "version: 1.0.0\nplatform_version: '*'\n")
+		}
+		writeFixtureFile(t, filepath.Join(root, "schema.yaml"), "connect:\n  - {event: work.ready, from: producer-a, to: consumer}\n  - {event: work.ready, from: producer-b, to: consumer}\n")
+		for _, flow := range []string{"producer-a", "producer-b"} {
+			writeFixtureFile(t, filepath.Join(root, flow, "schema.yaml"), "pins: {outputs: [work.ready]}\n")
+		}
+		writeFixtureFile(t, filepath.Join(root, "consumer/schema.yaml"), "pins: {inputs: [work.ready]}\n")
+		repo := repoRootForContractsTest(t)
+		if _, err := LoadWorkflowContractBundleWithOverrides(repo, root, DefaultPlatformSpecFile(repo)); err == nil || !strings.Contains(err.Error(), "ambiguous connected producer ownership") {
+			t.Fatalf("unbound distinct producers did not refuse before schema selection: %v", err)
+		}
+	})
 	t.Run("qualified declaration coordinates", func(t *testing.T) {
 		repo := repoRootForContractsTest(t)
 		for _, tc := range []struct {
@@ -441,8 +515,9 @@ func TestConnectedEventSchemaOwnershipRejectsDistinctProducersIndependentOfConne
 			})
 		}
 		root := t.TempDir()
-		writeFixtureFile(t, filepath.Join(root, "schema.yaml"), "name: coordinates\n")
+		writeFixtureFile(t, filepath.Join(root, "schema.yaml"), "stages: []\n")
 		for _, flow := range []string{".", "nested"} {
+			writeFixtureFile(t, filepath.Join(root, flow, "manifest.yaml"), "version: 1.0.0\nplatform_version: '*'\n")
 			writeFixtureFile(t, filepath.Join(root, flow, "events.yaml"), "work.ready:\nchild/work.ready:\nother/work.ready:\n")
 		}
 		bundle, err := LoadWorkflowContractBundleWithOverrides(repo, root, DefaultPlatformSpecFile(repo))
@@ -464,8 +539,12 @@ func TestConnectedEventSchemaOwnershipRejectsDistinctProducersIndependentOfConne
 		}
 	})
 	root := t.TempDir()
-	writeFixtureFile(t, filepath.Join(root, "schema.yaml"), "name: ownership\n")
+	writeFixtureFile(t, filepath.Join(root, "schema.yaml"), "stages: []\n")
+	writeFixtureFile(t, filepath.Join(root, "manifest.yaml"), "version: 1.0.0\nplatform_version: '*'\n")
+	writeFixtureFile(t, filepath.Join(root, "consumer", "manifest.yaml"), "version: 1.0.0\nplatform_version: '*'\n")
+	writeFixtureFile(t, filepath.Join(root, "consumer", "schema.yaml"), "pins:\n  inputs: [work.ready]\n")
 	for endpoint, fieldType := range map[string]string{"producer-a": "text", "producer-b": "uuid"} {
+		writeFixtureFile(t, filepath.Join(root, endpoint, "manifest.yaml"), "version: 1.0.0\nplatform_version: '*'\n")
 		writeFixtureFile(t, filepath.Join(root, endpoint, "events.yaml"), "work.ready:\n  value: "+fieldType+"\n")
 	}
 	repo := repoRootForContractsTest(t)

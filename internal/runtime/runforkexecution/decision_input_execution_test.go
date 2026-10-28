@@ -68,10 +68,10 @@ func TestIssue642ForkDecisionInputControlsRequireCurrentGenerationBothStores(t *
 			ctx = originalSelectedFixtureContext(t, ctx, any(selected).(startupownership.Store))
 			storetest.RequireRun(t, ctx, selected.(storetest.RunFixtureStore), storetest.RunFixture{Origin: storetest.ScenarioSetupOrigin(), RunID: source,
 				BundleHash: loaded.SourceArtifactFact.BundleHash(), Artifact: bundle.SourceArtifact, StartedAt: at})
-			rt, _ := nodeReplySourceRuntime(t, ctx, selected, owner, loaded, executionposture.Live)
+			rt, _ := nodeReplySourceRuntime(t, ctx, selected, owner, loaded, executionposture.Live, nil)
 			ctx = worklifetime.WithOccurrence(ctx, rt.WorkOccurrence())
-			created, err := rt.Manager.EnsureFlowInstance(ctx, pipeline.FlowInstanceActivationRequest{ContractBundle: loaded.Source,
-				Instance: flowidentity.Stored(loaded.Source, ".", source, source, "", ""), OccurredAt: at})
+			created, err := rt.Manager.EnsureFlowInstance(ctx, pipeline.FlowInstanceActivationRequest{ContractBundle: rt.Options.WorkflowModule.SemanticSource(),
+				Instance: flowidentity.Stored(rt.Options.WorkflowModule.SemanticSource(), ".", source, source, "", ""), OccurredAt: at})
 			if err != nil || !created {
 				t.Fatalf("construct control source: created=%t error=%v", created, err)
 			}
@@ -244,7 +244,8 @@ func preparePendingDecisionControlComponent(t *testing.T, ctx context.Context, o
 	options := SelectedContractAgentRuntimeOptions{ExecutionPosture: executionposture.Live, ProcessCapability: owner.ports.contexts.capability}
 	selection := runforkadmission.SelectedContractSelection(loaded.Source)
 	prepared, err := owner.Prepare(ctx, SelectedContractExecutionRequest{SourceRunID: sourceRun, At: cut, AllowSourceFreeze: true,
-		Owner: owner, SourceLoader: loader, ContractSelection: selection, AgentRuntime: options})
+		Owner: owner, SourceLoader: loader, ContractSelection: selection, AgentRuntime: options,
+		ForkOperation: selectedForkFixtureOperation(t, loaded, sourceRun, cut)})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -274,7 +275,8 @@ func preparePendingDecisionControlComponent(t *testing.T, ctx context.Context, o
 func pendingDecisionStartInvocation(sourceRun string, loaded LoadedSelectedContractSource, selection runfork.RunForkContractSelection) *runfork.ForkOperationRequest {
 	return &runfork.ForkOperationRequest{OperationID: uuid.NewString(), Actor: "card-control-proof", IdempotencyKey: uuid.NewString(),
 		TransportHash: "card-control-proof", SourceRunID: sourceRun, AtStart: true, TargetBundleHash: loaded.SourceArtifactFact.BundleHash(),
-		AllowSourceFreeze: true, ContractSelection: selection}
+		AllowSourceFreeze: true, ContractSelection: selection, TargetRootReference: loaded.RootedSource.Admission().Reference(),
+	}
 }
 
 func forkCardControlRequest(card decisioncard.Card, principal, method string) apiidempotency.Request {

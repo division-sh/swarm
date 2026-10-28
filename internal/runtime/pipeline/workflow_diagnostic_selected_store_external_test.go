@@ -64,7 +64,8 @@ func newWorkflowDiagnosticNativeFixture(t *testing.T, backend string, bundle *ru
 			}
 		})
 		storetest.BootstrapPostgresRuntimeStore(t, s)
-		s.SetEventPayloadAdmitter(func(_ context.Context, event events.Event, flow string) (events.PayloadAdmission, error) {
+		s.SetEventPayloadAdmitter(func(_ context.Context, event events.Event, payloadProducer events.PayloadProducer) (events.PayloadAdmission, error) {
+			flow := payloadProducer.FlowID()
 			return eventtest.PayloadAdmission(event, flow, string(event.Type()))
 		})
 		selected, cards, persistence = s, s, runtimepipeline.NewWorkflowPersistence(s)
@@ -83,7 +84,8 @@ func newWorkflowDiagnosticNativeFixture(t *testing.T, backend string, bundle *ru
 	}
 	logPersistence := selected.(runtimeruntime.RuntimeLogPersistence)
 	bus.SetLoggerHook(workflowDiagnosticRuntimeLogger{logger: runtimeruntime.NewRuntimeLogger(logPersistence, executionposture.Live,
-		func(_ context.Context, event events.Event, flow string) (events.PayloadAdmission, error) {
+		func(_ context.Context, event events.Event, payloadProducer events.PayloadProducer) (events.PayloadAdmission, error) {
+			flow := payloadProducer.FlowID()
 			return eventtest.PayloadAdmission(event, flow, string(event.Type()))
 		})})
 	nodes, err := runtimepipeline.LoadWorkflowNodes(source)

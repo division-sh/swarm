@@ -15,10 +15,13 @@ import (
 	"time"
 
 	"github.com/division-sh/swarm/internal/apiv1"
+	"github.com/division-sh/swarm/internal/channelonboarding"
 	"github.com/division-sh/swarm/internal/cliapp"
 	"github.com/division-sh/swarm/internal/mailbox"
 	"github.com/division-sh/swarm/internal/operatorchannel"
+	"github.com/division-sh/swarm/internal/operatorread"
 	render "github.com/division-sh/swarm/internal/runtime/channeldelivery"
+	"github.com/division-sh/swarm/internal/runtime/channelnative"
 	"github.com/division-sh/swarm/internal/runtime/decisioncard"
 	runtimellm "github.com/division-sh/swarm/internal/runtime/llm"
 	"github.com/division-sh/swarm/internal/testutil"
@@ -320,7 +323,7 @@ func runChannelDeliveryInboundDispositionE2E(t *testing.T, backend, scenario str
 	}
 	sourceRoot := writeStandingTelegramServeFixture(t, telegram.URL)
 	if scenario == "action_pages" {
-		schemaPath := filepath.Join(sourceRoot, "telegram-ingress", "schema.yaml")
+		schemaPath := filepath.Join(sourceRoot, ".", "schema.yaml")
 		raw, err := os.ReadFile(schemaPath)
 		if err != nil {
 			t.Fatal(err)
@@ -343,7 +346,7 @@ func runChannelDeliveryInboundDispositionE2E(t *testing.T, backend, scenario str
 	}
 	if scenario == "required_input" || scenario == "invalid_input" || scenario == "ordered_input" || scenario == "edit_loss_resend" ||
 		scenario == "cancel_input" || scenario == "skip_input" || scenario == "draft_chooser" || scenario == "quoted_two" {
-		flowNames := []string{"telegram-ingress"}
+		flowNames := []string{"."}
 		if scenario == "draft_chooser" || scenario == "quoted_two" {
 			flowNames = append(flowNames, "telegram-stopped")
 		}
@@ -455,27 +458,25 @@ func runChannelDeliveryInboundDispositionE2E(t *testing.T, backend, scenario str
 		if scenario == "summary_open_many" {
 			count = 7
 		}
-		var runID string
 		for index := 0; index < count; index++ {
-			var published map[string]any
-			params := map[string]any{
-				"bundle_hash":     identity.SourceArtifacts[0].BundleHash,
-				"event_name":      "inbound.telegram.text_message",
-				"idempotency_key": fmt.Sprintf("preconnection-notice-%d", index),
-				"payload": map[string]any{
-					"text": "ordinary business text", "external_account": "7000",
-					"conversation_reference": "1001", "conversation_scope": "direct",
-					"provider_message_reference": 9100 + index,
+			body, err := json.Marshal(map[string]any{
+				"update_id": 9100 + index,
+				"message": map[string]any{
+					"message_id": 9100 + index, "text": "ordinary business text",
+					"from": map[string]any{"id": 7000},
+					"chat": map[string]any{"id": 1001, "type": "private"},
 				},
+			})
+			if err != nil {
+				t.Fatal(err)
 			}
-			if runID != "" {
-				params["run_id"] = runID
+			publication := sendStandingTelegramPublication(t, "http://"+publicListen, body, http.StatusAccepted, "accepted")
+			var published struct {
+				Run operatorread.RunHeader `json:"run"`
 			}
-			requireServedJSONRPCResult(t, rpcEndpoint, "event.publish", params, &published)
-			var ok bool
-			runID, ok = published["run_id"].(string)
-			if !ok || runID == "" {
-				t.Fatalf("preconnection publication lacks its exact live run: %+v", published)
+			requireServedJSONRPCResult(t, rpcEndpoint, "run.get", map[string]any{"run_id": publication.RunID}, &published)
+			if published.Run.BundleHash != identity.SourceArtifacts[0].BundleHash {
+				t.Fatalf("preconnection publication changed captured source: %+v", published.Run)
 			}
 			deadline := time.Now().Add(15 * time.Second)
 			for {
@@ -513,7 +514,7 @@ func runChannelDeliveryInboundDispositionE2E(t *testing.T, backend, scenario str
 	if scenario == "shared_audience" {
 		chatID, chatType = -1001, "group"
 	}
-	runChannelOnboardingCLIJourney(t, configPath, endpoint, provider, "connect", "bot-token", chatID, chatType, 0)
+	connected := runChannelOnboardingCLIJourney(t, configPath, endpoint, provider, "connect", "bot-token", chatID, chatType, 0)
 	var preRestartDeliveries int
 	if scenario == "inbox_restart" || scenario == "inbox_restart_mismatch" {
 		deadline := time.Now().Add(15 * time.Second)
@@ -569,14 +570,13 @@ func runChannelDeliveryInboundDispositionE2E(t *testing.T, backend, scenario str
 		if writes := provider.CommandWrites(); len(writes) != 0 {
 			t.Fatalf("successor wrote over launched predecessor: %v", writes)
 		}
-		for index := 0; ; index++ {
-			delivery := provider.Delivery(index)
-			if delivery == nil {
-				break
-			}
-			if strings.HasPrefix(fmt.Sprint(delivery["text"]), "Retire service") {
-				t.Fatalf("card delivered before native setting write settled: %v", delivery)
-			}
+		var current channelonboarding.Result
+		requireServedJSONRPCResult(t, endpoint+"/v1/rpc", "channel.onboarding_get", map[string]any{
+			"operation_id": connected.Operation.OperationID,
+		}, &current)
+		if current.Readiness == nil || !current.Readiness.NativeInboxRequired || current.Readiness.NativeInbox == nil ||
+			current.Readiness.NativeInbox.State == channelnative.QualificationQualified {
+			t.Fatalf("launched native setting became usable before settlement: %+v", current.Readiness)
 		}
 		releaseCommandApply()
 		deadline := time.Now().Add(15 * time.Second)
@@ -609,9 +609,19 @@ func runChannelDeliveryInboundDispositionE2E(t *testing.T, backend, scenario str
 		if writes := provider.CommandWrites(); len(writes) != wantWrites {
 			t.Fatalf("non-usable native setting caused %d writes, want %d: %v", len(writes), wantWrites, writes)
 		}
-		if delivery := provider.Delivery(1); delivery != nil {
-			reads, failures := provider.CommandReadbackCounts()
-			t.Fatalf("non-usable native setting admitted channel delivery: %v; readbacks=%d failures=%d writes=%v", delivery, reads, failures, provider.CommandWrites())
+		var current channelonboarding.Result
+		requireServedJSONRPCResult(t, endpoint+"/v1/rpc", "channel.onboarding_get", map[string]any{
+			"operation_id": connected.Operation.OperationID,
+		}, &current)
+		if current.Readiness == nil || !current.Readiness.NativeInboxRequired || current.Readiness.NativeInbox == nil ||
+			current.Readiness.NativeInbox.State != channelnative.QualificationInvalid ||
+			current.Readiness.NativeInbox.SettingID == "" || current.Readiness.NativeInbox.SettingGeneration <= 0 {
+			t.Fatalf("non-usable native setting lost exact qualification refusal: %+v", current.Readiness)
+		}
+		if scenario == "inbox_readback_failure" {
+			if reads, failures := provider.CommandReadbackCounts(); failures == 0 {
+				t.Fatalf("native readback failure cut was not reached: readbacks=%d failures=%d", reads, failures)
+			}
 		}
 		return
 	}
@@ -631,10 +641,10 @@ func runChannelDeliveryInboundDispositionE2E(t *testing.T, backend, scenario str
 			t.Fatal(err)
 		}
 		t.Cleanup(func() { _ = db.Close() })
-		cardMessages["telegram-ingress"] = waitChannelCardMessageID(t, db, backend, "telegram-ingress")
+		cardMessages["."] = waitChannelCardMessageID(t, db, backend, ".")
 		if scenario == "draft_chooser" || scenario == "quoted_two" {
 			cardMessages["telegram-stopped"] = waitChannelCardMessageID(t, db, backend, "telegram-stopped")
-			if cardMessages["telegram-ingress"] == cardMessages["telegram-stopped"] {
+			if cardMessages["."] == cardMessages["telegram-stopped"] {
 				t.Fatal("independent standing cards share one provider message")
 			}
 		}
@@ -718,7 +728,7 @@ func runChannelDeliveryInboundDispositionE2E(t *testing.T, backend, scenario str
 		scenario == "ordered_input" || scenario == "cancel_input" || scenario == "skip_input" || scenario == "draft_chooser" || scenario == "quoted_two" {
 		cardMessageID := 2
 		if scenario == "quoted_two" || scenario == "draft_chooser" {
-			cardMessageID = cardMessages["telegram-ingress"]
+			cardMessageID = cardMessages["."]
 		}
 		deadline := time.Now().Add(15 * time.Second)
 		for provider.Delivery(cardMessageID-1) == nil {
@@ -860,14 +870,14 @@ func runChannelDeliveryInboundDispositionE2E(t *testing.T, backend, scenario str
 		if len(admitted.EventNames) != 0 {
 			t.Fatalf("draft begin leaked business events: %v", admitted.EventNames)
 		}
-		proveChannelBareInputChooser(t, provider, callbackURL, signing, cardMessages["telegram-stopped"], cardMessages["telegram-ingress"], restartInteraction)
+		proveChannelBareInputChooser(t, provider, callbackURL, signing, cardMessages["telegram-stopped"], cardMessages["."], restartInteraction)
 		return
 	}
 	if scenario == "quoted_two" {
 		if len(admitted.EventNames) != 0 {
 			t.Fatalf("quoted-draft begin leaked business events: %v", admitted.EventNames)
 		}
-		proveChannelQuotedTwoDrafts(t, provider, callbackURL, signing, cardMessages["telegram-stopped"], cardMessages["telegram-ingress"])
+		proveChannelQuotedTwoDrafts(t, provider, callbackURL, signing, cardMessages["telegram-stopped"], cardMessages["."])
 		return
 	}
 	if (nativeInboxScenario || scenario == "verdict" || scenario == "verdict_ack_loss") && len(admitted.EventNames) != 0 {
@@ -1331,10 +1341,14 @@ func waitChannelCardMessageID(t *testing.T, db *sql.DB, backend, flowName string
 	t.Helper()
 	deadline := time.Now().Add(25 * time.Second)
 	runID := loadServedLandingRunByFlow(t, db, backend, flowName)
-	cardID := waitChannelAnchorCard(t, db, runID, decisioncard.AnchorKindStageGate, flowName)
+	flowInstance := flowName
+	if flowName == "." {
+		flowInstance = runID
+	}
+	cardID := waitChannelAnchorCard(t, db, runID, decisioncard.AnchorKindStageGate, flowInstance)
 	messageID := waitChannelAnchorReceipt(t, db, cardID)
 	if time.Now().After(deadline) {
-		t.Fatalf("exact standing card %s/%s exceeded its delivery deadline", runID, flowName)
+		t.Fatalf("exact standing card %s/%s exceeded its delivery deadline", runID, flowInstance)
 	}
 	return messageID
 }

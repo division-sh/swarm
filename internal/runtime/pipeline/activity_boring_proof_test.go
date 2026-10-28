@@ -410,7 +410,7 @@ func persistNativeActivityBoringRequestForTest(t *testing.T, fixture activityBor
 }
 
 func activityBoringSource(serverURL string) semanticview.Source {
-	return semanticview.Wrap(&runtimecontracts.WorkflowContractBundle{
+	return activityToolFixtureSource(&runtimecontracts.WorkflowContractBundle{
 		Tools: map[string]runtimecontracts.ToolSchemaEntry{
 			"source_scrape": runtimecontracts.MustToolSchemaEntry(runtimecontracts.WithToolHandler(runtimecontracts.MustToolHandlerKind("http")), runtimecontracts.WithToolSchemas(runtimecontracts.MustToolInputSchema(runtimecontracts.ToolSchemaObject), runtimecontracts.MustToolInputSchema(runtimecontracts.ToolSchemaKind("object"))), runtimecontracts.WithToolHTTP(runtimecontracts.HTTPToolSpec{
 				Method: "GET",
@@ -423,8 +423,10 @@ func activityBoringSource(serverURL string) semanticview.Source {
 func activityBoringFullFlowBundle(t *testing.T, serverURL string) *runtimecontracts.WorkflowContractBundle {
 	t.Helper()
 	return loadWorkflowTempBundle(t, map[string]string{
-		"schema.yaml":            "name: activity-boring-proof\nstages: []\n",
-		"research/schema.yaml":   "name: research\ninstance: marker\nstages:\n  pending: {}\n",
+		"manifest.yaml":          "version: 1.0.0\nplatform_version: \">=0.7.0 <0.8.0\"\n",
+		"schema.yaml":            "stages: []\n",
+		"research/manifest.yaml": "version: 1.0.0\nplatform_version: \">=0.7.0 <0.8.0\"\n",
+		"research/schema.yaml":   "instance: marker\nstages:\n  pending: {}\n",
 		"research/entities.yaml": "test_entity:\n  marker: text\n",
 		"research/events.yaml":   "source.requested:\n  url: text\n",
 		"research/nodes.yaml": `scanner:

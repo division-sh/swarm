@@ -1,9 +1,7 @@
 package runforkexecution
 
 import (
-	"bytes"
 	"context"
-	"encoding/binary"
 	"sync"
 	"testing"
 	"time"
@@ -21,26 +19,10 @@ var runForkTestSourceArtifact = mustRunForkTestSourceArtifact()
 var runForkTestBundleHash = runForkTestSourceArtifact.BundleHash()
 
 func mustRunForkTestSourceArtifact() *sourceartifact.AdmittedSourceArtifact {
-	const prelude = "swarm-bundle-v2\x00"
-	label := []byte("schema.yaml")
-	body := []byte("name: selected-fork-test\n")
-	var blob bytes.Buffer
-	blob.WriteString(prelude)
-	if err := binary.Write(&blob, binary.BigEndian, uint64(1)); err != nil {
-		panic(err)
-	}
-	if err := blob.WriteByte(byte(sourceartifact.DispositionDeclaration)); err != nil {
-		panic(err)
-	}
-	if err := binary.Write(&blob, binary.BigEndian, uint64(len(label))); err != nil {
-		panic(err)
-	}
-	blob.Write(label)
-	if err := binary.Write(&blob, binary.BigEndian, uint64(len(body))); err != nil {
-		panic(err)
-	}
-	blob.Write(body)
-	artifact, err := sourceartifact.DecodeLogical(blob.Bytes())
+	artifact, err := sourceartifact.AdmitMembers(map[string][]byte{
+		"manifest.yaml": []byte("version: 1.0.0\nplatform_version: '*'\n"),
+		"schema.yaml":   []byte("stages: []\n"),
+	})
 	if err != nil {
 		panic(err)
 	}

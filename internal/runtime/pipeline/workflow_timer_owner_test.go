@@ -122,11 +122,13 @@ func VerifyNativeWorkflowTimerLifecyclePreservesSiblingFlowDeclarationsAcrossRes
 				first := pipelineFlowPathNode(t, "a", "shared")
 				second := pipelineFlowPathNode(t, "b", "shared")
 				files := map[string]string{
-					"schema.yaml":   "name: workflow-timer-sibling-identity\nstages:\n  waiting: {}\n",
+					"manifest.yaml": "version: 1.0.0\nplatform_version: \">=0.7.0 <0.8.0\"\n",
+					"schema.yaml":   "stages:\n  waiting: {}\n",
 					"entities.yaml": "test_entity: {}\n",
 				}
 				for _, flow := range []string{"a", "b"} {
-					files[flow+"/schema.yaml"] = fmt.Sprintf("name: %s\nstages:\n  waiting: {}\n", flow)
+					files[flow+"/manifest.yaml"] = "version: 1.0.0\nplatform_version: \">=0.7.0 <0.8.0\"\n"
+					files[flow+"/schema.yaml"] = "stages:\n  waiting: {}\n"
 					files[flow+"/entities.yaml"] = "test_entity: {}\n"
 					files[flow+"/events.yaml"] = fmt.Sprintf("timer.arm:\ntimer.%s:\n", flow)
 					files[flow+"/nodes.yaml"] = fmt.Sprintf("shared:\n  execution_type: system_node\n  timers:\n    - {id: same, event: timer.%s, start_on: 'event:%s/timer.arm', delay: 2h}\n  event_handlers:\n    timer.arm: {}\n", flow, flow)
@@ -920,7 +922,7 @@ func VerifyNativeWorkflowTimerLifecycleReactivatesOnlyOnLaterStageEntryOnBothSto
 	for _, tc := range workflowJoinStoreCases() {
 		t.Run(tc.name, func(t *testing.T) {
 			files := workflowTimerOwnerSourceFiles()
-			files["schema.yaml"] = "name: workflow-timer-owner-test\nstages:\n  waiting:\n    timers:\n      - {id: waiting.timeout, after: 1h, emit: timer.timeout}\n  done: {}\n"
+			files["schema.yaml"] = "stages:\n  waiting:\n    timers:\n      - {id: waiting.timeout, after: 1h, emit: timer.timeout}\n  done: {}\n"
 			files["events.yaml"] += "work.noted:\n"
 			files["nodes.yaml"] += "    work.noted: {}\n"
 			bundle := loadWorkflowTempBundle(t, files)
@@ -2341,7 +2343,7 @@ func workflowTimerOwnerBundle(t *testing.T, recurring bool) *runtimecontracts.Wo
 func workflowTimerOwnerBundleWithDelay(t *testing.T, recurring bool, delay string) *runtimecontracts.WorkflowContractBundle {
 	t.Helper()
 	files := workflowTimerOwnerSourceFiles()
-	files["schema.yaml"] = fmt.Sprintf("name: workflow-timer-owner-test\nstages:\n  waiting:\n    timers:\n      - {id: waiting.timeout, after: %q, emit: timer.timeout}\n  done: {}\n", delay)
+	files["schema.yaml"] = fmt.Sprintf("stages:\n  waiting:\n    timers:\n      - {id: waiting.timeout, after: %q, emit: timer.timeout}\n  done: {}\n", delay)
 	bundle := loadWorkflowTempBundle(t, files)
 	// Recurrence is a scheduler variant, not a different transition declaration.
 	bundle.Semantics.Timers[0].Recurring = recurring
@@ -2350,7 +2352,8 @@ func workflowTimerOwnerBundleWithDelay(t *testing.T, recurring bool, delay strin
 
 func workflowTimerOwnerSourceFiles() map[string]string {
 	return map[string]string{
-		"schema.yaml":   "name: workflow-timer-owner-test\nstages:\n  waiting: {}\n  done: {}\n",
+		"manifest.yaml": "version: 1.0.0\nplatform_version: \">=0.7.0 <0.8.0\"\n",
+		"schema.yaml":   "stages:\n  waiting: {}\n  done: {}\n",
 		"entities.yaml": "test_entity: {}\n",
 		"events.yaml":   "timer.timeout:\nwork.completed:\nwork.reopened:\nreview.reopened:\ntest.workflow_progressed:\n",
 		"nodes.yaml": `timer-owner:
@@ -2373,7 +2376,8 @@ func workflowTimerSourceRevisionBundle(t *testing.T, revised bool) *runtimecontr
 		timers += "      - {id: waiting.changed, after: 1h, emit: timer.changed.v1}\n      - {id: waiting.removed, after: 1h, emit: timer.removed}\n"
 	}
 	return loadWorkflowTempBundle(t, map[string]string{
-		"schema.yaml":   "name: workflow-timer-source-revision\nstages:\n  waiting:\n    timers:\n" + timers,
+		"manifest.yaml": "version: 1.0.0\nplatform_version: \">=0.7.0 <0.8.0\"\n",
+		"schema.yaml":   "stages:\n  waiting:\n    timers:\n" + timers,
 		"entities.yaml": "test_entity: {}\n",
 		"events.yaml":   "timer.keep:\ntimer.changed.v1:\ntimer.changed.v2:\ntimer.added:\ntimer.removed:\n",
 	})
@@ -2381,11 +2385,12 @@ func workflowTimerSourceRevisionBundle(t *testing.T, revised bool) *runtimecontr
 
 func workflowTimerFirstDeclarationRevisionBundle(t *testing.T, revised bool) *runtimecontracts.WorkflowContractBundle {
 	t.Helper()
-	schema := "name: workflow-timer-first-revision\nstages:\n  waiting: {}\n"
+	schema := "stages:\n  waiting: {}\n"
 	if revised {
-		schema = "name: workflow-timer-first-revision\nstages:\n  waiting:\n    timers:\n      - {id: waiting.first, after: 1s, emit: timer.first}\n"
+		schema = "stages:\n  waiting:\n    timers:\n      - {id: waiting.first, after: 1s, emit: timer.first}\n"
 	}
 	return loadWorkflowTempBundle(t, map[string]string{
+		"manifest.yaml": "version: 1.0.0\nplatform_version: \">=0.7.0 <0.8.0\"\n",
 		"schema.yaml":   schema,
 		"entities.yaml": "test_entity: {}\n",
 		"events.yaml":   "timer.first:\n",
@@ -2395,7 +2400,7 @@ func workflowTimerFirstDeclarationRevisionBundle(t *testing.T, revised bool) *ru
 func workflowTimerProgressedSourceRevisionBundle(t *testing.T, revised bool) *runtimecontracts.WorkflowContractBundle {
 	t.Helper()
 	files := workflowTimerOwnerSourceFiles()
-	files["schema.yaml"] = "name: workflow-timer-progressed-revision\nstages:\n  waiting: {}\n  done: {}\n"
+	files["schema.yaml"] = "stages:\n  waiting: {}\n  done: {}\n"
 	files["events.yaml"] += "timer.keep:\ntimer.changed.v1:\ntimer.changed.v2:\ntimer.removed:\ntimer.added:\n"
 	files["nodes.yaml"] += "  timers:\n    - {id: waiting.keep, event: timer.keep, start_on: 'state:waiting', delay: 1h}\n"
 	if revised {
@@ -2409,7 +2414,8 @@ func workflowTimerProgressedSourceRevisionBundle(t *testing.T, revised bool) *ru
 func workflowTimerInitialAndEventBundle(t *testing.T) *runtimecontracts.WorkflowContractBundle {
 	t.Helper()
 	return loadWorkflowTempBundle(t, map[string]string{
-		"schema.yaml":   "name: workflow-timer-initial-event\nstages:\n  waiting:\n    timers:\n      - {id: waiting.initial, after: 2h, emit: timer.initial}\n",
+		"manifest.yaml": "version: 1.0.0\nplatform_version: \">=0.7.0 <0.8.0\"\n",
+		"schema.yaml":   "stages:\n  waiting:\n    timers:\n      - {id: waiting.initial, after: 2h, emit: timer.initial}\n",
 		"entities.yaml": "test_entity: {}\n",
 		"events.yaml":   "timer.arm:\ntimer.initial:\ntimer.event:\n",
 		"nodes.yaml":    "timer-owner:\n  execution_type: system_node\n  timers:\n    - {id: waiting.event, event: timer.event, start_on: 'event:timer.arm', delay: 2h}\n  event_handlers:\n    timer.arm: {}\n",
@@ -2420,13 +2426,14 @@ func workflowTimerFlowScopedBundle(t *testing.T) *runtimecontracts.WorkflowContr
 	t.Helper()
 	files := map[string]string{}
 	for _, flow := range []string{".", "flow-a", "flow-b"} {
-		path, name, prefix := flow+"/", flow, strings.ReplaceAll(flow, "-", "_")
+		path, prefix := flow+"/", strings.ReplaceAll(flow, "-", "_")
 		armEvent := flow + "/timer.arm"
 		if flow == "." {
-			path, name, prefix = "", "timer-flow-scope-root", "root"
+			path, prefix = "", "root"
 			armEvent = "timer.arm"
 		}
-		files[path+"schema.yaml"] = fmt.Sprintf("name: %s\nstages:\n  waiting:\n    timers:\n      - {id: initial.local, after: 2h, emit: %s.initial}\n", name, prefix)
+		files[path+"manifest.yaml"] = "version: 1.0.0\nplatform_version: \">=0.7.0 <0.8.0\"\n"
+		files[path+"schema.yaml"] = fmt.Sprintf("stages:\n  waiting:\n    timers:\n      - {id: initial.local, after: 2h, emit: %s.initial}\n", prefix)
 		files[path+"entities.yaml"] = "test_entity: {}\n"
 		files[path+"events.yaml"] = fmt.Sprintf("timer.arm:\n%s.initial:\n%s.event:\n", prefix, prefix)
 		files[path+"nodes.yaml"] = fmt.Sprintf("timer-owner:\n  execution_type: system_node\n  timers:\n    - {id: event.local, event: %s.event, start_on: 'event:%s', delay: 2h}\n  event_handlers:\n    timer.arm: {}\n", prefix, armEvent)
@@ -2437,7 +2444,8 @@ func workflowTimerFlowScopedBundle(t *testing.T) *runtimecontracts.WorkflowContr
 func workflowTimerEventOnlyStateTriggerBundle(t *testing.T) *runtimecontracts.WorkflowContractBundle {
 	t.Helper()
 	return loadWorkflowTempBundle(t, map[string]string{
-		"schema.yaml":   "name: workflow-timer-owner-test\nstages:\n  waiting:\n    timers:\n      - {id: waiting.state_entry, after: 1h, emit: timer.state_entry}\n",
+		"manifest.yaml": "version: 1.0.0\nplatform_version: \">=0.7.0 <0.8.0\"\n",
+		"schema.yaml":   "stages:\n  waiting:\n    timers:\n      - {id: waiting.state_entry, after: 1h, emit: timer.state_entry}\n",
 		"entities.yaml": "test_entity: {}\n",
 		"events.yaml":   "timer.arm:\nwork.noted:\ntimer.state_entry:\ntimer.event_armed:\n",
 		"nodes.yaml":    "observer:\n  execution_type: system_node\n  timers:\n    - {id: waiting.event_armed, event: timer.event_armed, start_on: 'event:timer.arm', cancel_on: 'state:waiting', delay: 1h}\n  event_handlers:\n    timer.arm: {}\n    work.noted: {}\n",
@@ -2447,7 +2455,8 @@ func workflowTimerEventOnlyStateTriggerBundle(t *testing.T) *runtimecontracts.Wo
 func workflowTimerLoopEventBundle(t *testing.T) *runtimecontracts.WorkflowContractBundle {
 	t.Helper()
 	return loadWorkflowTempBundle(t, map[string]string{
-		"schema.yaml":   "name: workflow-timer-owner-test\nstages:\n  ready: {}\n  waiting: {}\n  escaped: {}\nloops:\n  revision:\n    revision_field: revision_id\n    max_attempts: 3\n    escape: {advances_to: escaped}\n",
+		"manifest.yaml": "version: 1.0.0\nplatform_version: \">=0.7.0 <0.8.0\"\n",
+		"schema.yaml":   "stages:\n  ready: {}\n  waiting: {}\n  escaped: {}\nloops:\n  revision:\n    revision_field: revision_id\n    max_attempts: 3\n    escape: {advances_to: escaped}\n",
 		"entities.yaml": "test_entity: {}\n",
 		"events.yaml":   "loop.start:\nloop.repeat:\n  revision_id: text\ntimer.arm:\n  revision_id: text\ntimer.event_armed:\n",
 		"nodes.yaml": `observer:
@@ -2470,7 +2479,8 @@ func workflowTimerLoopEventBundle(t *testing.T) *runtimecontracts.WorkflowContra
 func workflowTimerHandledOutcomeBundle(t *testing.T) *runtimecontracts.WorkflowContractBundle {
 	t.Helper()
 	return loadWorkflowTempBundle(t, map[string]string{
-		"schema.yaml":   "name: workflow-timer-owner-test\nstages:\n  waiting: {}\n",
+		"manifest.yaml": "version: 1.0.0\nplatform_version: \">=0.7.0 <0.8.0\"\n",
+		"schema.yaml":   "stages:\n  waiting: {}\n",
 		"entities.yaml": "test_entity: {}\n",
 		"events.yaml":   "accepted.start:\naccepted.cancel:\nreject.target:\nguard.reject:\ndiscard.target:\nguard.discard:\ndedup.reset:\ndedup.target:\ndedup.event:\n  item_id: text\ntimer.accepted:\ntimer.reject.start:\ntimer.reject.target:\ntimer.discard.start:\ntimer.discard.target:\ntimer.dedup.start:\ntimer.dedup.target:\n",
 		"nodes.yaml": `observer:

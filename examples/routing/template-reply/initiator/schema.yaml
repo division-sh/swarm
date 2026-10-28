@@ -1,4 +1,4 @@
-name: initiator
+# fixture: initiator
 pins:
   inputs:
     - requester.setup.requested

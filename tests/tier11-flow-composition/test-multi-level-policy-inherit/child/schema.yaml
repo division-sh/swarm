@@ -1,4 +1,4 @@
-name: child
+# fixture: child
 stages:
   pending: {}
   done: {final: true}

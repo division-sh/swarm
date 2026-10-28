@@ -59,7 +59,10 @@ func consumeForkFanOutEmissions(t *testing.T, fixture authorActivityReceiptFixtu
 	}
 	defer lease.Release()
 	work := storeTestWorkOwner(t)
-	eventBus, err := newStoreTestEventBus(t, selected, bus.EventBusOptions{ContractBundle: source, SourceArtifactFact: fact, WorkOwner: work})
+	eventBus, err := newStoreTestEventBus(t, selected, bus.EventBusOptions{
+		ContractBundle: source, SourceArtifactFact: fact, WorkOwner: work,
+		PayloadAdmitter: runtimepkg.NewRuntimePayloadAdmitter(nil, source, fact),
+	})
 	if err != nil {
 		t.Fatal(err)
 	}

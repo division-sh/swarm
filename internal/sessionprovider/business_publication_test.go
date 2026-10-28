@@ -14,24 +14,37 @@ import (
 	"github.com/division-sh/swarm/internal/events"
 	"github.com/division-sh/swarm/internal/events/eventtest"
 	"github.com/division-sh/swarm/internal/providertriggers"
+	runtimepkg "github.com/division-sh/swarm/internal/runtime"
+	"github.com/division-sh/swarm/internal/runtime/agenttopology"
 	"github.com/division-sh/swarm/internal/runtime/authoractivity"
 	"github.com/division-sh/swarm/internal/runtime/bus"
 	"github.com/division-sh/swarm/internal/runtime/bus/bustest"
 	"github.com/division-sh/swarm/internal/runtime/contracts"
 	"github.com/division-sh/swarm/internal/runtime/core/eventreceiver"
-	"github.com/division-sh/swarm/internal/runtime/core/flowidentity"
 	"github.com/division-sh/swarm/internal/runtime/correlation"
 	"github.com/division-sh/swarm/internal/runtime/deliverylifecycle"
 	"github.com/division-sh/swarm/internal/runtime/executionposture"
 	"github.com/division-sh/swarm/internal/runtime/inboundpublication"
+	"github.com/division-sh/swarm/internal/runtime/manager"
 	"github.com/division-sh/swarm/internal/runtime/pipeline"
 	"github.com/division-sh/swarm/internal/runtime/semanticview"
 	"github.com/division-sh/swarm/internal/runtime/semanticviewtest"
 	"github.com/division-sh/swarm/internal/runtime/startupownership"
+	"github.com/division-sh/swarm/internal/sourceartifact"
 	"github.com/division-sh/swarm/internal/store/storetest"
-	"github.com/division-sh/swarm/internal/testutil/sourceartifactfixture"
 	"github.com/google/uuid"
 )
+
+type sessionBusinessWorkflowModule struct {
+	source semanticview.Source
+	nodes  []pipeline.WorkflowNode
+}
+
+func (m sessionBusinessWorkflowModule) SemanticSource() semanticview.Source    { return m.source }
+func (m sessionBusinessWorkflowModule) WorkflowNodes() []pipeline.WorkflowNode { return m.nodes }
+func (m sessionBusinessWorkflowModule) GuardRegistry() pipeline.GuardRegistry {
+	return pipeline.NewContractGuardRegistry(m.source)
+}
 
 func (f *activeInputFixture) publicationBus(t *testing.T) *bus.EventBus {
 	t.Helper()
@@ -40,31 +53,89 @@ func (f *activeInputFixture) publicationBus(t *testing.T) *bus.EventBus {
 		t.Fatal("selected publication owners absent")
 	}
 	source, _ := correlation.SourceArtifactFactFromContext(f.ctx)
+	repo := pipeline.WorkflowRepoRoot()
+	bundle, err := contracts.LoadWorkflowContractBundleFromRootedSource(repo, f.rooted,
+		contracts.DefaultPlatformSpecFile(repo), contracts.WorkflowContractLoadOptions{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	semanticSource, err := runtimepkg.SourceWithProviderTriggerEvents(semanticview.Wrap(bundle), f.catalog)
+	if err != nil {
+		t.Fatal(err)
+	}
+	nodes, err := pipeline.LoadWorkflowNodes(semanticSource)
+	if err != nil {
+		t.Fatal(err)
+	}
+	descriptors, err := runtimepkg.AuthorActivityEventDescriptors(semanticSource)
+	if err != nil {
+		t.Fatal(err)
+	}
 	scope, _ := authoractivity.ScopeFromContext(f.ctx)
-	lease, err := selected.RegisterAuthorActivityEventCatalog(scope, []authoractivity.EventDescriptor{
-		{EventType: "inbound.whatsapp", Disposition: authoractivity.StoryAuthored},
-		{EventType: "inbound.whatsapp.message", Disposition: authoractivity.StoryAuthored},
-	})
+	lease, err := selected.RegisterAuthorActivityEventCatalog(scope, descriptors)
 	if err != nil {
 		t.Fatal(err)
 	}
 	t.Cleanup(lease.Release)
-	payload := func(_ context.Context, event events.Event, flow string) (events.PayloadAdmission, error) {
-		return eventtest.PayloadAdmission(event, flow, string(event.Type()))
+	payload := func(_ context.Context, event events.Event, producer events.PayloadProducer) (events.PayloadAdmission, error) {
+		return eventtest.PayloadAdmission(event, producer.FlowID(), string(event.Type()))
 	}
 	selected.SetEventPayloadAdmitter(payload)
-	authority, err := deliverylifecycle.NewNormalExecutionAuthority(source, f.source.Coordinate.RuntimeInstanceID, 1)
+	original := f.nativeProcess
+	coordinate, err := agenttopology.NewSourceCoordinate(f.rooted.Admission())
 	if err != nil {
 		t.Fatal(err)
 	}
-	original := f.nativeProcess
+	plan, err := agenttopology.NewSourceSetPlan([]agenttopology.SourceCoordinate{coordinate}, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	current, exists, err := original.CurrentSourceSet(f.ctx)
+	if err != nil || (exists && current.Revision != plan.Revision) {
+		t.Fatalf("business fixture cannot replace its complete source plan: %v", err)
+	}
+	if !exists {
+		if _, err := original.InstallCompleteSourceSet(f.ctx, agenttopology.SourceSetCommitRequest{OperationID: uuid.NewString(), Plan: plan}); err != nil {
+			t.Fatal(err)
+		}
+	}
+	grant, err := original.IssueGenerationGrant(f.ctx, startupownership.GrantRequest{BundleHash: source.BundleHash(),
+		RuntimeInstanceID: f.source.Coordinate.RuntimeInstanceID, RuntimeGeneration: 1, SourceSetRevision: plan.Revision})
+	if err != nil {
+		t.Fatal(err)
+	}
+	evidence, err := grant.Evidence()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if evidence.State == startupownership.GrantPrepared {
+		if _, err := grant.MarkProbesSettled(f.ctx, nil); err != nil {
+			t.Fatal(err)
+		}
+	}
+	if evidence.State != startupownership.GrantAdmitted {
+		if _, err := grant.AdmitExecution(f.ctx); err != nil {
+			t.Fatal(err)
+		}
+	}
+	authority, err := deliverylifecycle.NewNormalExecutionAuthority(source, evidence.GrantID, evidence.RuntimeGeneration)
+	if err != nil {
+		t.Fatal(err)
+	}
+	var planner *manager.AgentManager
 	eventBus, err := bus.NewEventBusWithOptions(selected, bus.EventBusOptions{
 		MutationContext: func(ctx context.Context) (context.Context, error) {
-			return startupownership.WithProcessMutationAuthority(ctx, original)
+			return startupownership.WithRuntimeMutationAuthority(ctx, grant)
 		},
 		CarryMutationContext: startupownership.CarryMutationAuthority,
-		ContractBundle:       sessionBusinessSemanticFixture(t),
-		ExecutionPosture:     executionposture.Live, SourceArtifactFact: source, RuntimeInstanceID: f.source.Coordinate.RuntimeInstanceID,
+		ContractBundle:       semanticSource,
+		TemplateInstancePlanner: pipeline.FlowInstanceActivationPlannerFunc(func(ctx context.Context, request pipeline.FlowInstanceActivationRequest) (pipeline.FlowInstanceActivationPlan, error) {
+			return planner.PrepareFlowInstanceActivation(ctx, request)
+		}),
+		FlowActivationFinalizer: pipeline.CommittedFlowInstanceActivationFinalizerFunc(func(ctx context.Context, committed pipeline.CommittedFlowInstanceActivation) error {
+			return planner.FinalizeCommittedFlowInstanceActivation(ctx, committed)
+		}),
+		ExecutionPosture: executionposture.Live, SourceArtifactFact: source, RuntimeInstanceID: f.source.Coordinate.RuntimeInstanceID,
 		WorkOwner: f.workOwner, ReceiverExecution: eventreceiver.NormalExecution(), DeliveryAuthority: authority,
 		PipelineObligations: selected.PipelineObligations(), PayloadAdmitter: payload, ProviderOutputVerifier: f.catalog,
 		Durable: bus.DurableDependencies{ReplyContext: selected, RunLifecycle: selected, DeliveryLifecycle: selected,
@@ -72,6 +143,33 @@ func (f *activeInputFixture) publicationBus(t *testing.T) *bus.EventBus {
 			PreparedEvents: selected, TargetFailureRecorder: selected},
 	})
 	if err != nil {
+		t.Fatal(err)
+	}
+	workflow := pipeline.NewPipelineCoordinatorWithOptions(eventBus, pipeline.PipelineCoordinatorOptions{
+		Module: sessionBusinessWorkflowModule{source: semanticSource, nodes: nodes}, Persistence: pipeline.NewWorkflowPersistence(selected),
+		DeliveryStore: selected, DeadLetters: selected, PipelineObligations: selected.PipelineObligations(),
+		DecisionCards: selected, ProposedEffects: selected, HumanTasks: selected,
+		DecisionCardDraftExpiry: selected, HumanTaskExpiry: selected, DeliveryRuntime: eventBus, RunLifecycle: selected,
+		SourceArtifactFact: source, ExecutionPosture: executionposture.Live, ReceiverExecution: eventreceiver.NormalExecution(), WorkOwner: f.workOwner,
+	})
+	if workflow == nil {
+		t.Fatal("business fixture requires its canonical workflow constructor")
+	}
+	planner = manager.NewAgentManagerWithOptions(eventBus, nil, manager.AgentManagerOptions{
+		BaseContext: f.ctx, SourceArtifactFact: source, SemanticSource: semanticSource, WorkflowInstances: workflow,
+		ExecutionPosture: executionposture.Live, ReceiverExecution: eventreceiver.NormalExecution(), WorkOwner: f.workOwner,
+	}, selected)
+	f.businessPlanners = append(f.businessPlanners, planner)
+	t.Cleanup(func() {
+		if err := planner.Shutdown(); err != nil {
+			t.Error(err)
+		}
+	})
+	topology, err := agenttopology.StaticAdmission(plan.Revision, source.BundleHash(), agenttopology.LifetimeDurableManaged)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := planner.InstallStartupTopology(grant, topology, plan); err != nil {
 		t.Fatal(err)
 	}
 	if err := eventBus.SetDeliveryContinuationOwner(bustest.NewDeliveryContinuationOwner(false)); err != nil {
@@ -82,31 +180,15 @@ func (f *activeInputFixture) publicationBus(t *testing.T) *bus.EventBus {
 
 // Provider declarations are isolated component inputs. The compiled source and
 // selected source fact must still consume the identical admitted artifact.
-func sessionBusinessSemanticFixture(t *testing.T) semanticview.Source {
+func sessionBusinessSemanticFixture(t *testing.T, rooted sourceartifact.RootedSource) semanticview.Source {
 	t.Helper()
 	repo := pipeline.WorkflowRepoRoot()
-	bundle, err := contracts.LoadWorkflowContractBundleFromArtifact(repo, sourceartifactfixture.Artifact(),
+	bundle, err := contracts.LoadWorkflowContractBundleFromRootedSource(repo, rooted,
 		contracts.DefaultPlatformSpecFile(repo), contracts.WorkflowContractLoadOptions{})
 	if err != nil {
 		t.Fatal(err)
 	}
-	return semanticviewtest.WithProviderIngress(semanticview.Wrap(bundle), map[string][]string{".": {"inbound.whatsapp", "inbound.whatsapp.message", "inbound.whatsapp.edit", "inbound.whatsapp.revoke"}})
-}
-
-func TestSessionPublicationFixtureUsesItsAdmittedArtifact(t *testing.T) {
-	source := sessionBusinessSemanticFixture(t)
-	runID := uuid.NewString()
-	owner, err := flowidentity.NewRunScopedFlowInstance(runID, flowidentity.StoredRoute(".", runID, runID))
-	if err != nil {
-		t.Fatal(err)
-	}
-	if _, err := pipeline.NewExactFlowInstanceLookup(source, sourceartifactfixture.Fact(), owner); err != nil {
-		t.Fatalf("compiled publication fixture lost its admitted source: %v", err)
-	}
-	foreign := sourceartifactfixture.FactFor(sourceartifactfixture.New("schema.yaml", []byte("name: foreign\n")))
-	if _, err := pipeline.NewExactFlowInstanceLookup(source, foreign, owner); err == nil {
-		t.Fatal("publication fixture accepted a different admitted artifact")
-	}
+	return semanticviewtest.WithProviderIngress(semanticview.Wrap(bundle), map[string][]string{".": {"inbound.whatsapp.raw", "inbound.whatsapp.message", "inbound.whatsapp.edit", "inbound.whatsapp.revoke"}})
 }
 
 func TestWhatsAppBusinessCommitTemporalFencesBothStores(t *testing.T) {

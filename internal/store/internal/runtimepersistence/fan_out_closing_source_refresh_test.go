@@ -11,6 +11,7 @@ import (
 	"github.com/division-sh/swarm/internal/runtime/fanoutobligation"
 	"github.com/division-sh/swarm/internal/runtime/pipeline"
 	"github.com/division-sh/swarm/internal/runtime/startupownership"
+	"github.com/division-sh/swarm/internal/testutil/sourceartifactfixture"
 	"github.com/google/uuid"
 )
 
@@ -22,7 +23,8 @@ func TestFanOutClosingSourceHeadRefreshPreservesHealthyProgressBothStores(t *tes
 			selected, _, db, postgres := newFanOutOwnerPairForTest(t, backend)
 			ctx = originalStoreFixtureContext(t, ctx, selected)
 			closing := seedFanOutOwnerFixture(t, ctx, db, selected, postgres, 1, time.Now().UTC())
-			healthy := seedFanOutOwnerFixtureWithArtifact(t, ctx, db, selected, postgres, 1, time.Now().UTC(), storeTestSourceArtifact("closing-head-refresh-healthy-source"))
+			healthyRooted, _ := sourceartifactfixture.Rooted(t, "healthy", storeTestSourceArtifact("closing-head-refresh-healthy-source"))
+			healthy := seedFanOutOwnerFixtureWithArtifact(t, ctx, db, selected, postgres, 1, time.Now().UTC(), healthyRooted.Artifact())
 			process, grants, occurrences, originalPlan := newGrantedFanOutProcessForTest(t, ctx, selected, []fanOutOwnerFixture{closing, healthy})
 			workers := 1
 			capture := &captureFanOutExecutor{turns: make(chan capturedFanOutTurn, 1), errors: make(chan error, 8), done: make(chan struct{})}
@@ -60,7 +62,11 @@ func TestFanOutClosingSourceHeadRefreshPreservesHealthyProgressBothStores(t *tes
 			if err := grants[1].Retire(ctx); err != nil {
 				t.Fatal(err)
 			}
-			plan, err := agenttopology.NewSourceSetPlan([]agenttopology.SourceCoordinate{{BundleHash: healthy.bundleHash}}, nil)
+			coordinate, err := agenttopology.NewSourceCoordinate(healthyRooted.Admission())
+			if err != nil {
+				t.Fatal(err)
+			}
+			plan, err := agenttopology.NewSourceSetPlan([]agenttopology.SourceCoordinate{coordinate}, nil)
 			if err != nil {
 				t.Fatal(err)
 			}

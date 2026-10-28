@@ -6,6 +6,7 @@ import (
 	"database/sql"
 	"encoding/json"
 	"fmt"
+	"github.com/division-sh/swarm/internal/sourceartifact"
 	"net/http"
 	"net/http/httptest"
 	"os"
@@ -218,20 +219,31 @@ func deploymentLiveForkRequest(t *testing.T, f *deploymentResourceFixture, req r
 		if !ok {
 			t.Fatal("live deployment fixture requires its admitted source bundle")
 		}
-		projection, err := packadmission.Admit(bundle.PackInventory, bundle.Platform)
+		rooted, err := bundle.RootedSource()
 		if err != nil {
 			t.Fatal(err)
 		}
-		bundle.PackAdmission = projection
-		subjects, err := projection.ProviderTriggers.InstalledCapabilitySubjects()
+		providers, err := packadmission.AdmitProviderSource(rooted, bundle.Platform)
+		if err != nil {
+			t.Fatal(err)
+		}
+		scope, err := providers.Scope(semanticview.RootExecutionFlowID(f.source))
+		if err != nil {
+			t.Fatal(err)
+		}
+		catalog, err := scope.TriggerCatalog()
+		if err != nil {
+			t.Fatal(err)
+		}
+		subjects, err := catalog.InstalledCapabilitySubjects()
 		if err != nil {
 			t.Fatal(err)
 		}
 		f.liveContexts, err = runtimepkg.NewRuntimeContextManager(selected, runtimepkg.BundleContext{
-			SourceArtifactFact: f.runtime.sourceArtifactFact, Source: f.source,
+			SourceArtifactFact: f.runtime.sourceArtifactFact, Source: f.source, RootAdmission: rooted.Admission(),
 			Runtime: f.runtime.contextRuntime, WorkOwner: f.runtime.workOwner,
-			PackInventoryDigest:       bundle.PackInventory.Digest(),
-			ProviderTriggerGeneration: projection.ProviderTriggers.Generation(), InstalledTriggerSubjects: subjects,
+			PackInventoryDigest:    bundle.PackInventory.Digest(),
+			ProviderTriggerCatalog: catalog, ProviderTriggerGeneration: catalog.Generation(), InstalledTriggerSubjects: subjects,
 		})
 		if err != nil {
 			t.Fatal(err)
@@ -239,7 +251,8 @@ func deploymentLiveForkRequest(t *testing.T, f *deploymentResourceFixture, req r
 	}
 	req.LiveRuntime = f.runtime.contextRuntime
 	req.LiveContexts, req.LiveRuns = f.liveContexts, selected
-	req.AcquireLiveRuntime = func(ctx context.Context, hash string) (*runtimepkg.RuntimeContextUse, error) {
+	req.AcquireLiveRuntime = func(ctx context.Context, reference sourceartifact.RootAdmissionReference) (*runtimepkg.RuntimeContextUse, error) {
+		hash := reference.BundleHash
 		use, lookup, err := f.liveContexts.AcquireBundleHash(ctx, hash)
 		if err == nil && !lookup.Loaded() {
 			return nil, fmt.Errorf("deployment fork target %s is not its registered ordinary runtime", hash)

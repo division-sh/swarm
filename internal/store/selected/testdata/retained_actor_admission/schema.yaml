@@ -1,4 +1,4 @@
-name: retained-actor-admission
+# fixture: retained-actor-admission
 pins:
   inputs:
     - work.requested

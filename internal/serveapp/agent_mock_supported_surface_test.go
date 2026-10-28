@@ -26,7 +26,6 @@ import (
 	runtimellm "github.com/division-sh/swarm/internal/runtime/llm"
 	"github.com/division-sh/swarm/internal/runtime/llm/selection"
 	"github.com/division-sh/swarm/internal/runtime/mockperformance"
-	"github.com/division-sh/swarm/internal/runtime/testfixtures/canonicalrouting"
 	"github.com/division-sh/swarm/internal/runtime/toolgateway"
 	"github.com/division-sh/swarm/internal/sourceartifact"
 	"github.com/division-sh/swarm/internal/store"
@@ -91,7 +90,7 @@ func TestForkChatSandboxBuildsCanonicalMockAdapter(t *testing.T) {
 func runMockAgentSupportedSurface(t *testing.T, backend string) time.Duration {
 	t.Helper()
 	isolateCLIAPIConfigEnv(t)
-	sourceRoot := canonicalrouting.CopyExample(t, canonicalrouting.TelegramAgent)
+	sourceRoot := writeStandingMemoryServeFixture(t, "")
 	addCanonicalTelegramApprovalOverlay(t, sourceRoot)
 	credentialPath := filepath.Join(t.TempDir(), "credentials.json")
 	t.Setenv("SWARM_CREDENTIALS_FILE", credentialPath)
@@ -100,7 +99,8 @@ func runMockAgentSupportedSurface(t *testing.T, backend string) time.Duration {
 		t.Fatalf("NewFileStore: %v", err)
 	}
 	for key, value := range map[string]string{
-		"webhook_signing.telegram": "telegram-secret",
+		"telegram.webhook_signing_secret": "telegram-secret",
+		"telegram.telegram_bot_token":     "bot-token",
 	} {
 		if err := credentialStore.Set(context.Background(), key, value); err != nil {
 			t.Fatalf("set credential %s: %v", key, err)

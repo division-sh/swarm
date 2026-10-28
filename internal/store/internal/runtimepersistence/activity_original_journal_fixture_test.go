@@ -22,9 +22,9 @@ type activityFixtureJournal struct {
 
 // Selected preparation must share the seeding owner's possession, rather than
 // acquire a second native process while the original journal is still retained.
-func retainActivityFixtureProcessForMaterialization(t *testing.T, ctx context.Context, selected any) {
+func retainActivityFixtureProcessForMaterialization(t *testing.T, ctx context.Context, selected any, processOwner testing.TB) {
 	t.Helper()
-	process, err := agentfixture.ProcessCapability(t, ctx, selected.(agentfixture.Store))
+	process, err := agentfixture.ProcessCapability(processOwner, ctx, selected.(agentfixture.Store))
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -45,13 +45,18 @@ func retainActivityFixtureProcessForMaterialization(t *testing.T, ctx context.Co
 	work.capabilities[selected] = process
 }
 
-func activityNativeJournalForFixture(t *testing.T, fixture authorActivityReceiptFixture) pipeline.ActivityAttemptJournal {
+func activityNativeJournalForFixture(t *testing.T, fixture authorActivityReceiptFixture, runID string) pipeline.ActivityAttemptJournal {
 	t.Helper()
 	if fixture.activityJournal == nil || fixture.activityOwner == nil {
 		t.Fatal("native activity fixture has no retained original role slot")
 	}
 	fixture.activityJournal.once.Do(func() {
-		fixture.activityJournal.owner, fixture.activityJournal.binding, fixture.activityJournal.original = captureActivityFixtureJournalWithBinding(fixture.activityOwner, testAuthorActivityContext(), fixture.store)
+		rooted, err := fixture.store.(rootedRunStore).LoadRunRootedSource(testAuthorActivityContext(), runID)
+		if err != nil {
+			t.Fatal(err)
+		}
+		ctx := correlation.WithRootAdmission(correlation.WithSourceArtifactFact(testAuthorActivityContext(), mustStoreTestSourceArtifactFact(rooted.Artifact().BundleHash())), rooted.Admission())
+		fixture.activityJournal.owner, fixture.activityJournal.binding, fixture.activityJournal.original = captureActivityFixtureJournalWithBinding(fixture.activityOwner, ctx, fixture.store)
 	})
 	return fixture.activityJournal.owner
 }
@@ -79,13 +84,33 @@ func captureActivityFixtureJournalWithBinding(t testing.TB, ctx context.Context,
 	if err != nil {
 		t.Fatal(err)
 	}
+	var coordinate agenttopology.SourceCoordinate
 	if !found {
-		plan, err = agenttopology.NewSourceSetPlan([]agenttopology.SourceCoordinate{{BundleHash: fact.BundleHash()}}, nil)
+		root, present, rootErr := correlation.RootAdmissionFromContext(ctx)
+		if rootErr != nil || !present || root.BundleHash() != fact.BundleHash() {
+			t.Fatalf("native activity fixture requires its captured source: present=%v err=%v", present, rootErr)
+		}
+		coordinate, err = agenttopology.NewSourceCoordinate(root)
 		if err != nil {
 			t.Fatal(err)
 		}
+		plan, err = agenttopology.NewSourceSetPlan([]agenttopology.SourceCoordinate{coordinate}, nil)
+		if err != nil {
+			t.Fatal(err)
+		}
+	} else {
+		matches := 0
+		for _, source := range plan.Sources {
+			if source.BundleHash == fact.BundleHash() {
+				coordinate = source
+				matches++
+			}
+		}
+		if matches != 1 {
+			t.Fatal("native activity fixture requires one exact retained source coordinate")
+		}
 	}
-	grant, err := agentfixture.AdmitGeneration(t, ctx, store, plan, agenttopology.SourceCoordinate{BundleHash: fact.BundleHash()})
+	grant, err := agentfixture.AdmitGeneration(t, ctx, store, plan, coordinate)
 	if err != nil {
 		t.Fatal(err)
 	}

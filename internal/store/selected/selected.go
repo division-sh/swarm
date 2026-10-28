@@ -110,7 +110,7 @@ type requiredPorts struct {
 }
 
 type SourceArtifactDataWriter interface {
-	EnsureSourceArtifactWithData(context.Context, *sourceartifact.AdmittedSourceArtifact, durabledata.Catalog) (sourceartifact.EnsureResult, error)
+	EnsureRootedSourceWithData(context.Context, sourceartifact.RootedSource, durabledata.Catalog) (sourceartifact.RootedEnsureResult, error)
 }
 
 type productPorts struct {

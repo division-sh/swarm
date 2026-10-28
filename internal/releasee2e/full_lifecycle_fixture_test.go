@@ -3,8 +3,9 @@ package releasee2e
 import (
 	"os"
 	"path/filepath"
-	"strings"
 	"testing"
+
+	"gopkg.in/yaml.v3"
 )
 
 const fullLifecycleFixtureSource = "standing_telegram"
@@ -44,29 +45,25 @@ func fullLifecycleExecutableSource(t *testing.T) string {
 
 func mutateFullLifecycleFixtureWithoutExactConnectorResponse(t *testing.T, contracts string) {
 	t.Helper()
-	manifestPath := filepath.Join(contracts, "telegram-chat", "schema.yaml")
-	raw, err := os.ReadFile(manifestPath)
+	connectorPath := filepath.Join(contracts, "telegram", "connector.yaml")
+	raw, err := os.ReadFile(connectorPath)
 	if err != nil {
-		t.Fatalf("read lifecycle bot manifest: %v", err)
+		t.Fatalf("read lifecycle connector BODY: %v", err)
 	}
-	const connectorImport = "  connector_packs:\n    - provider: telegram\n      tool: telegram.send_message\n"
-	if !strings.Contains(string(raw), connectorImport) {
-		t.Fatalf("lifecycle bot manifest has no exact Telegram connector import:\n%s", raw)
+	var body struct {
+		Tools map[string]map[string]any `yaml:"tools"`
 	}
-	writeReleaseFile(t, manifestPath, strings.Replace(string(raw), connectorImport, "", 1))
-	writeReleaseFile(t, filepath.Join(contracts, "telegram-chat", "tools.yaml"), `telegram.send_message:
-  description: Deliberately unmocked transport for source-admission proof.
-  handler_type: http
-  credentials: [telegram_bot_token]
-  http:
-    method: POST
-    url: https://unreachable.invalid/bot{{credentials.telegram_bot_token}}/send
-  input_schema:
-    type: object
-    properties:
-      chat_id: {type: string}
-      text: {type: string}
-    required: [chat_id, text]
-  response_success: {kind: http_status_2xx}
-`)
+	if err := yaml.Unmarshal(raw, &body); err != nil {
+		t.Fatal(err)
+	}
+	tool, present := body.Tools["send_message"]
+	if !present || tool["category"] != "provider_connector" {
+		t.Fatal("lifecycle connector BODY has no exact send_message connector")
+	}
+	tool["category"] = "provider_registration"
+	mutated, err := yaml.Marshal(body)
+	if err != nil {
+		t.Fatal(err)
+	}
+	writeReleaseFile(t, connectorPath, string(mutated))
 }

@@ -3,6 +3,7 @@ package runforkexecution
 import (
 	"context"
 	"encoding/json"
+	"github.com/division-sh/swarm/internal/sourceartifact"
 	"os"
 
 	"reflect"
@@ -41,7 +42,7 @@ func runUnpublishedArrivalCrashHelper(t *testing.T, ctx context.Context, selecte
 		AllowSourceFreeze: true, Owner: owner, SourceLoader: loader, ContractSelection: selection,
 		ForkOperation: &runfork.ForkOperationRequest{OperationID: uuid.NewString(), Actor: "pending-join-parent", IdempotencyKey: "original-cut",
 			TransportHash: "pending-join-parent-transport", SourceRunID: ancestor, ForkEventID: marker,
-			TargetBundleHash: loaded.SourceArtifactFact.BundleHash(), AllowSourceFreeze: true, ContractSelection: selection},
+			TargetBundleHash: loaded.SourceArtifactFact.BundleHash(), TargetRootReference: loaded.RootedSource.Admission().Reference(), AllowSourceFreeze: true, ContractSelection: selection},
 		AgentRuntime: SelectedContractAgentRuntimeOptions{ExecutionPosture: executionposture.MockOnly, ProcessCapability: capability}})
 	parentRun := parent.materialized.ForkRunID
 	if err := parent.container.Quiesce(parent.prepared.operation.Context()); err != nil {
@@ -86,7 +87,7 @@ func runUnpublishedArrivalCrashHelper(t *testing.T, ctx context.Context, selecte
 	childOwner.ports = &childPorts
 	switch cut {
 	case "retained_pending_join_after_activation":
-		childOwner.ports.fork = selectedCrashActivated{SelectedContractForkLifecycle: owner.ports.fork, checkpoint: checkpoint}
+		childOwner.ports.fork = &selectedCrashActivated{SelectedContractForkLifecycle: owner.ports.fork, checkpoint: checkpoint}
 	case "retained_pending_join_event_committed":
 		childOwner.ports.replay = selectedOperationPublicationProbe{SelectedContractReplayPersistence: owner.ports.replay, after: func(ctx context.Context) {
 			occurrence, found := worklifetime.OccurrenceFromContext(ctx)
@@ -101,7 +102,7 @@ func runUnpublishedArrivalCrashHelper(t *testing.T, ctx context.Context, selecte
 	}
 	operation := runfork.ForkOperationRequest{OperationID: uuid.NewString(), Actor: "pending-join-crash", IdempotencyKey: "parent-start",
 		TransportHash: "pending-join-crash-transport", SourceRunID: parentRun, AtStart: true,
-		TargetBundleHash: loaded.SourceArtifactFact.BundleHash(), AllowSourceFreeze: true, ContractSelection: selection}
+		TargetBundleHash: loaded.SourceArtifactFact.BundleHash(), TargetRootReference: loaded.RootedSource.Admission().Reference(), AllowSourceFreeze: true, ContractSelection: selection}
 	ordinary, contexts := liveForkRuntimeFixture(t, ctx, selected, owner, loaded, ancestor, executionposture.MockOnly)
 	result, err := ExecuteSelectedContractRunFork(ctx, SelectedContractExecutionRequest{SourceRunID: parentRun, AtStart: true,
 		AllowSourceFreeze: true, Owner: childOwner, ForkOperation: &operation, SourceLoader: loader, ContractSelection: selection,
@@ -224,7 +225,7 @@ func TestIssue642UnpublishedArrivalCrashSuccessorBothStores(t *testing.T) {
 				if found && (!physical.Event.Event().CreatedAt().Equal(pending.Command.Due.Absolute) || physical.Event.Event().RunID() != crashed.ForkRun) {
 					t.Fatal("physical crash checkpoint changed child identity or original due")
 				}
-				loaded, err := loader.LoadRunForkSelectedContractSourceForRequest(ctx, SelectedContractSourceLoadRequest{SourceRunID: crashed.ForkRun, Selection: ack.Request.ContractSelection})
+				loaded, err := loader.LoadRunForkSelectedContractSourceForRequest(ctx, SelectedContractSourceLoadRequest{Responsibility: RetainedForkSource(crashed.ForkRun), Selection: ack.Request.ContractSelection})
 				if err != nil {
 					t.Fatal(err)
 				}
@@ -240,7 +241,8 @@ func TestIssue642UnpublishedArrivalCrashSuccessorBothStores(t *testing.T) {
 				recovered, err := owner.RecoverSelectedForkContexts(ctx, effects.NewRecoveryRequest(time.Now().UTC(), executionposture.MockOnly), SelectedForkRecoveryEnvironment{
 					SourceLoader: loader, AgentRuntime: SelectedContractAgentRuntimeOptions{ExecutionPosture: executionposture.MockOnly, ProcessCapability: capability},
 					LiveContexts: contexts, LiveRuns: selected.(runlifecycle.LiveRunReader),
-					AcquireLiveRuntime: func(ctx context.Context, hash string) (*rootruntime.RuntimeContextUse, error) {
+					AcquireLiveRuntime: func(ctx context.Context, reference sourceartifact.RootAdmissionReference) (*rootruntime.RuntimeContextUse, error) {
+						hash := reference.BundleHash
 						use, _, err := contexts.AcquireBundleHash(ctx, hash)
 						return use, err
 					}})

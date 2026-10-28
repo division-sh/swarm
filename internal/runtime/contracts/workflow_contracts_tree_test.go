@@ -250,7 +250,9 @@ func TestLoadWorkflowContractBundleLoadsCanonicalToolSchemasFromRootAndFlowTools
 	repoRoot := repoRootForContractsTest(t)
 	root := t.TempDir()
 
-	writeFixtureFile(t, filepath.Join(root, "schema.yaml"), "name: canonical-tool-schema\n")
+	writeFixtureFile(t, filepath.Join(root, "manifest.yaml"), "version: 1.0.0\nplatform_version: '*'\n")
+	writeFixtureFile(t, filepath.Join(root, "schema.yaml"), "stages: []\n# fixture: canonical-tool-schema\n")
+	writeFixtureFile(t, filepath.Join(root, "worker", "manifest.yaml"), "version: 1.0.0\nplatform_version: '*'\n")
 	writeFixtureFile(t, filepath.Join(root, "tools.yaml"), `
 root_lookup:
   description: Root-level lookup tool.
@@ -270,8 +272,9 @@ root_lookup:
       result:
         type: string
 `)
-	writeFixtureFile(t, filepath.Join(root, "worker", "schema.yaml"), `
-name: worker
+	writeFixtureFile(t, filepath.Join(root, "worker", "schema.yaml"), `stages: []
+
+# fixture: worker
 `)
 	writeFixtureFile(t, filepath.Join(root, "worker", "tools.yaml"), `
 flow_lookup:
@@ -367,9 +370,12 @@ func TestNodeEventHandler_LocalizesCrossFlowQualifiedInputEventToLocalHandler(t 
 item:
   item_id: string
 `)
-	writeFixtureFile(t, filepath.Join(root, "schema.yaml"), "name: cross-flow-localization\n")
+	writeFixtureFile(t, filepath.Join(root, "manifest.yaml"), "version: 1.0.0\nplatform_version: '*'\n")
+	writeFixtureFile(t, filepath.Join(root, "schema.yaml"), "stages: []\n# fixture: cross-flow-localization\n")
+	writeFixtureFile(t, filepath.Join(root, "scoring", "manifest.yaml"), "version: 1.0.0\nplatform_version: '*'\n")
+	writeFixtureFile(t, filepath.Join(root, "validation", "manifest.yaml"), "version: 1.0.0\nplatform_version: '*'\n")
 
-	writeFixtureFile(t, filepath.Join(root, "scoring", "schema.yaml"), `name: scoring
+	writeFixtureFile(t, filepath.Join(root, "scoring", "schema.yaml"), `# fixture: scoring
 stages:
   discovered: {}
   done: {final: true}
@@ -393,7 +399,7 @@ scoring-node:
       emit: vertical.shortlisted
 `)
 
-	writeFixtureFile(t, filepath.Join(root, "validation", "schema.yaml"), `name: validation
+	writeFixtureFile(t, filepath.Join(root, "validation", "schema.yaml"), `# fixture: validation
 stages:
   researching: {}
   done: {final: true}
@@ -441,9 +447,12 @@ func TestNodeEventHandler_ExternalizesOnSuccessEmitWithRules(t *testing.T) {
 item:
   item_id: string
 `)
-	writeFixtureFile(t, filepath.Join(root, "schema.yaml"), "name: cross-flow-on-success\n")
+	writeFixtureFile(t, filepath.Join(root, "manifest.yaml"), "version: 1.0.0\nplatform_version: '*'\n")
+	writeFixtureFile(t, filepath.Join(root, "schema.yaml"), "stages: []\n# fixture: cross-flow-on-success\n")
+	writeFixtureFile(t, filepath.Join(root, "scoring", "manifest.yaml"), "version: 1.0.0\nplatform_version: '*'\n")
+	writeFixtureFile(t, filepath.Join(root, "validation", "manifest.yaml"), "version: 1.0.0\nplatform_version: '*'\n")
 
-	writeFixtureFile(t, filepath.Join(root, "scoring", "schema.yaml"), `name: scoring
+	writeFixtureFile(t, filepath.Join(root, "scoring", "schema.yaml"), `# fixture: scoring
 stages:
   discovered: {}
   done: {final: true}
@@ -467,7 +476,7 @@ scoring-node:
       emit: vertical.shortlisted
 `)
 
-	writeFixtureFile(t, filepath.Join(root, "validation", "schema.yaml"), `name: validation
+	writeFixtureFile(t, filepath.Join(root, "validation", "schema.yaml"), `# fixture: validation
 stages:
   researching: {}
   done: {final: true}
@@ -537,6 +546,7 @@ item:
   item_id: string
   status: string
 `)
+	writeFixtureFile(t, filepath.Join(root, "manifest.yaml"), "version: 1.0.0\nplatform_version: '*'\n")
 	writeFixtureFile(t, filepath.Join(root, "schema.yaml"), `stages:
   idle: {}
   done: {final: true}
@@ -561,6 +571,7 @@ evidence.recorded:
   entity_id: string
   note: string
 `)
+	writeFixtureFile(t, filepath.Join(root, "manifest.yaml"), "version: 1.0.0\nplatform_version: '*'\n")
 	writeFixtureFile(t, filepath.Join(root, "nodes.yaml"), `
 audit-node:
   execution_type: system_node
@@ -579,8 +590,11 @@ func writeLayer3FlowTreeFixture(t *testing.T) string {
 	t.Helper()
 	root := t.TempDir()
 
+	writeFixtureFile(t, filepath.Join(root, "manifest.yaml"), "version: 1.0.0\nplatform_version: '*'\n")
+	writeFixtureFile(t, filepath.Join(root, "parent", "manifest.yaml"), "version: 1.0.0\nplatform_version: '*'\n")
+	writeFixtureFile(t, filepath.Join(root, "parent", "child", "manifest.yaml"), "version: 1.0.0\nplatform_version: '*'\n")
 	writeFixtureFile(t, filepath.Join(root, "schema.yaml"), `
-name: root-platform
+# fixture: root-platform
 required_agents:
   - role: root-agent
 `)
@@ -588,8 +602,9 @@ required_agents:
 root_policy: root
 shared: root
 `)
-	writeFixtureFile(t, filepath.Join(root, "parent", "schema.yaml"), `
-name: parent
+	writeFixtureFile(t, filepath.Join(root, "parent", "schema.yaml"), `stages: []
+
+# fixture: parent
 `)
 	writeFixtureFile(t, filepath.Join(root, "parent", "nodes.yaml"), `
 parent-node:
@@ -608,8 +623,9 @@ parent-agent:
 parent_policy: nested
 shared: package
 `)
-	writeFixtureFile(t, filepath.Join(root, "parent", "child", "schema.yaml"), `
-name: child
+	writeFixtureFile(t, filepath.Join(root, "parent", "child", "schema.yaml"), `stages: []
+
+# fixture: child
 `)
 	writeFixtureFile(t, filepath.Join(root, "parent", "child", "nodes.yaml"), `
 child-node:

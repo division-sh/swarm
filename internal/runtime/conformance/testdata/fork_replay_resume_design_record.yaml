@@ -387,7 +387,6 @@ rows:
     enforcement_point: internal/serveapp/main.go
     proof_refs:
       - {kind: go_test, name: TestRunForkRuntimeOwnerHarness_DryRunJSONReportsDeliveryEventReplayReady}
-      - {kind: go_test, name: TestRunForkRuntimeOwnerHarness_ActivateUsesCanonicalStoreOwnerJSON}
     rationale: "Operator surfaces are readback consumers only and must not compute fork admission semantics."
 
   - id: selected_contract_prerequisite_blockers

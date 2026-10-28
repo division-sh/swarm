@@ -82,6 +82,7 @@ func TestCatalogTypeAdmissionPublicRestartBothStores(t *testing.T) {
 			source := filepath.Join(base, "contracts")
 			copyReleaseTree(t, filepath.Join(releaseE2ERepoRoot(t), "tests/tier8-boot-verification/test-boot-success"), source)
 			writeReleaseFile(t, filepath.Join(source, "types.yaml"), admissionPublicTypes)
+			writeReleaseFile(t, filepath.Join(source, "manifest.yaml"), "version: 1.0.0\nplatform_version: '*'\n")
 			writeReleaseFile(t, filepath.Join(source, "schema.yaml"), "stages:\n  pending: {}\n  collecting: {}\n  done: {final: true}\npins:\n  inputs: [task.requested]\n")
 			fields := "  labels: [Label]\n  lookup: map[Label]Item\n  enums: map[Status]Item\n  uuids: map[ID]Item\n"
 			writeReleaseFile(t, filepath.Join(source, "events.yaml"), "task.requested:\n"+fields+"key.observed:\n  member_id: Label\n")
@@ -201,7 +202,10 @@ func TestCatalogTypeAdmissionPublicRestartBothStores(t *testing.T) {
 			} {
 				bad := filepath.Join(base, "refusal-"+string(rune('a'+index)))
 				copyReleaseTree(t, source, bad)
-				writeReleaseFile(t, filepath.Join(bad, "unused/schema.yaml"), "name: unused\nstages: {done: {final: true}}\n")
+				writeReleaseFile(t, filepath.Join(bad, "unused/manifest.yaml"), "version: 1.0.0\nplatform_version: '*'\n")
+				writeReleaseFile(t, filepath.Join(bad, "unused/manifest.yaml"), "version: 1.0.0\nplatform_version: '*'\n")
+				writeReleaseFile(t, filepath.Join(bad, "unused/manifest.yaml"), "version: 1.0.0\nplatform_version: '*'\n")
+				writeReleaseFile(t, filepath.Join(bad, "unused/schema.yaml"), "stages: {done: {final: true}}\n")
 				writeReleaseFile(t, filepath.Join(bad, "unused/types.yaml"), "types:\n  Unused:\n    "+invalid.declaration+"\n")
 				for _, command := range []string{"verify", "describe", "serve"} {
 					args := []string{command, bad, "--config", config}
