@@ -15,7 +15,26 @@ import (
 func TestServedClockRetainsWithoutIngressCredentialsBothStores(t *testing.T) {
 	for _, backend := range []string{"sqlite", "postgres"} {
 		t.Run(backend, func(t *testing.T) {
-			root := copyClockMixedIngress(t)
+			root := filepath.Join(t.TempDir(), "clock-retention")
+			trigger, err := os.ReadFile(filepath.Join(repoRootForTest(), "packs/providers/telegram/trigger.yaml"))
+			if err != nil {
+				t.Fatal(err)
+			}
+			const manifest = "version: 1.0.0\nplatform_version: '*'\n"
+			const pins = "pins: {inputs: [inbound.telegram.raw, inbound.telegram.callback_action, inbound.telegram.text_message]}\n"
+			for name, body := range map[string]string{
+				"manifest.yaml":      manifest,
+				"schema.yaml":        "stages: []\nschedules: {poll: {every: 1h, emit: poll.tick}}\npins:\n  inputs: [inbound.telegram.raw, inbound.telegram.callback_action, inbound.telegram.text_message]\n  outputs: [poll.tick]\n",
+				"events.yaml":        "poll.tick:\n",
+				"beta/manifest.yaml": manifest,
+				"beta/schema.yaml":   "stages: []\n" + pins,
+			} {
+				writeStandingCandidateFile(t, filepath.Join(root, name), body)
+			}
+			for _, holder := range []string{".", "beta"} {
+				writeStandingCandidateFile(t, filepath.Join(root, holder, "telegram/manifest.yaml"), manifest+"capabilities: {can: {emit_events: [raw, callback_action, text_message], verify_secret: webhook_signing_secret, persist_dedupe_markers: true}, cannot: [execute code]}\n")
+				writeStandingCandidateFile(t, filepath.Join(root, holder, "telegram/trigger.yaml"), string(trigger))
+			}
 			credentialPath := filepath.Join(t.TempDir(), "clock-credentials.json")
 			t.Setenv("SWARM_CREDENTIALS_FILE", credentialPath)
 			file, err := credentials.NewFileStore(credentialPath)
@@ -52,7 +71,7 @@ func TestServedClockRetainsWithoutIngressCredentialsBothStores(t *testing.T) {
 			if code := first.stop(); code != 0 {
 				t.Fatalf("dormant-ingress clock shutdown=%d", code)
 			}
-			for _, key := range []string{"telegram_bot_token", "webhook_signing.alpha", "webhook_signing.beta"} {
+			for _, key := range []string{"telegram.webhook_signing_secret"} {
 				if err := file.Set(context.Background(), key, "clock-binding-secret"); err != nil {
 					t.Fatal(err)
 				}
