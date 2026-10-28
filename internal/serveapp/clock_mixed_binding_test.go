@@ -22,6 +22,11 @@ func TestServedClockRetainsWithoutIngressCredentialsBothStores(t *testing.T) {
 			}
 			const manifest = "version: 1.0.0\nplatform_version: '*'\n"
 			const pins = "pins: {inputs: [inbound.telegram.raw, inbound.telegram.callback_action, inbound.telegram.text_message]}\n"
+			for _, holder := range []string{".", "beta"} {
+				if err := os.MkdirAll(filepath.Join(root, holder, "telegram"), 0o700); err != nil {
+					t.Fatal(err)
+				}
+			}
 			for name, body := range map[string]string{
 				"manifest.yaml":      manifest,
 				"schema.yaml":        "stages: []\nschedules: {poll: {every: 1h, emit: poll.tick}}\npins:\n  inputs: [inbound.telegram.raw, inbound.telegram.callback_action, inbound.telegram.text_message]\n  outputs: [poll.tick]\n",

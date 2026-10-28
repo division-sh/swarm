@@ -204,7 +204,7 @@ func TestDormantIngressProvisionRestartSignedInputBothStores(t *testing.T) {
 			assertCurrent := func(runID string) string {
 				t.Helper()
 				var gotRun, gotState string
-				if err := db.QueryRow(`SELECT run_id, status FROM runs WHERE flow_path='telegram-ingress' AND landing_run=TRUE`).Scan(&gotRun, &gotState); err != nil {
+				if err := db.QueryRow(`SELECT run_id, status FROM runs WHERE flow_path='.' AND landing_run=TRUE`).Scan(&gotRun, &gotState); err != nil {
 					t.Fatal(err)
 				}
 				if gotState != "live" || runID != "" && gotRun != runID {
@@ -283,7 +283,7 @@ func TestDormantIngressProvisionRestartSignedInputBothStores(t *testing.T) {
 			if code := process.stop(); code != 0 {
 				t.Fatalf("restored stop=%d", code)
 			}
-			if err := db.QueryRow(`SELECT COUNT(*) FROM runs WHERE flow_path='telegram-ingress'`).Scan(&published); err != nil || published != 1 {
+			if err := db.QueryRow(`SELECT COUNT(*) FROM runs WHERE flow_path='.'`).Scan(&published); err != nil || published != 1 {
 				t.Fatalf("credential restoration minted a successor: %d, %v", published, err)
 			}
 		})

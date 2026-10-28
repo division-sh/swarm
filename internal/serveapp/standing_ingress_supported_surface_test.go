@@ -917,7 +917,7 @@ func requireChangedStandingColdStartReconciled(t *testing.T, opts cliapp.ServeOp
 	if !ok {
 		t.Fatal("served store lacks its native landing run reader")
 	}
-	landing, found, err := reader.LoadLandingRun(t.Context(), runtimerunlifecycle.LiveRunScope{FlowPath: "telegram-ingress"})
+	landing, found, err := reader.LoadLandingRun(t.Context(), runtimerunlifecycle.LiveRunScope{FlowPath: "."})
 	if err != nil || !found || landing.RunID != originalRunID || landing.State != runtimerunlifecycle.StateLive {
 		t.Fatalf("source change discarded or replaced the retained flow run: %+v found=%t err=%v", landing, found, err)
 	}
