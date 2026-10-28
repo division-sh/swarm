@@ -10,7 +10,6 @@ import (
 	"time"
 
 	"github.com/division-sh/swarm/internal/config"
-	"github.com/division-sh/swarm/internal/durabledata"
 	"github.com/division-sh/swarm/internal/runtime/authoractivity"
 	"github.com/division-sh/swarm/internal/runtime/bus"
 	"github.com/division-sh/swarm/internal/runtime/contracts"
@@ -366,17 +365,19 @@ func TestC4F40SelectedStartTimerChildBothStores(t *testing.T) {
 			}
 			files["schema.yaml"] += "\n# Compatible live-fork source upgrade.\n"
 			candidate := loadLifecyclePersistenceFixtureForTest(t, files)
+			candidateRooted, err := candidate.RootedSource()
+			if err != nil {
+				t.Fatal(err)
+			}
 			catalog, err := contracts.BuildDurableDataCatalog(candidate)
 			if err != nil {
 				t.Fatal(err)
 			}
-			if _, err := selected.(interface {
-				EnsureSourceArtifactWithData(context.Context, *sourceartifact.AdmittedSourceArtifact, durabledata.Catalog) (sourceartifact.EnsureResult, error)
-			}).EnsureSourceArtifactWithData(ctx, candidate.SourceArtifact, catalog); err != nil {
+			if _, err := selected.(rootedSourceStore).EnsureRootedSourceWithData(ctx, candidateRooted, catalog); err != nil {
 				t.Fatal(err)
 			}
 			if _, err := selected.(runlifecycle.OperationOwner).ReviseRunSource(correlation.WithRunID(ctx, staged.ForkRunID), runlifecycle.SourceRevisionRequest{
-				RunID: staged.ForkRunID, Source: mustStoreTestSourceArtifactFact(candidate.SourceArtifact.BundleHash()),
+				RunID: staged.ForkRunID, Source: mustStoreTestSourceArtifactFact(candidate.SourceArtifact.BundleHash()), RootAdmission: candidateRooted.Admission(),
 			}); err != nil {
 				t.Fatalf("revise the live fork through its existing source owner: %v", err)
 			}
