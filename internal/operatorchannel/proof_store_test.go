@@ -102,7 +102,7 @@ func TestFileProofStoreClassifiesV1WithoutDecodingAuthorityAndQuarantinesOnFresh
 	if err != nil {
 		t.Fatal(err)
 	}
-	legacy := `{"version":1,"entries":{"untrusted":{"format":"swarm-verified-account-proof-v1","epoch":"legacy-authority","external_account_reference":"must-not-load"}}}`
+	legacy := `{"version":1,"entries":{"untrusted":{"format":"swarm-verified-account-proof-v1","epoch":"legacy-authority","external_account":"must-not-load"}}}`
 	if err := os.WriteFile(store.Path(), []byte(legacy), 0o600); err != nil {
 		t.Fatal(err)
 	}

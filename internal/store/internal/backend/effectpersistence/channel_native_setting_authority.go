@@ -75,7 +75,7 @@ func channelNativeSettingAuthorityCurrent(ctx context.Context, q schemaQueryer, 
 		AND binding.conversation_reference=activation.conversation_reference
 		AND ((setting.scope_kind='chat' AND binding.conversation_scope='direct' AND setting.member_reference='')
 			OR (setting.scope_kind='chat_member' AND binding.conversation_scope='shared'
-			AND setting.member_reference=binding.external_account_reference))
+			AND setting.member_reference=binding.external_account))
 		AND NOT EXISTS (SELECT 1 FROM runtime_external_effect_operations prior
 			WHERE prior.authority_kind='channel_native_setting'
 			AND json_extract(prior.authority_evidence, '$.setting_id')=setting.setting_id
@@ -118,7 +118,7 @@ func channelNativeSettingAuthorityCurrent(ctx context.Context, q schemaQueryer, 
 			AND binding.conversation_reference=activation.conversation_reference
 			AND ((setting.scope_kind='chat' AND binding.conversation_scope='direct' AND setting.member_reference='')
 				OR (setting.scope_kind='chat_member' AND binding.conversation_scope='shared'
-				AND setting.member_reference=binding.external_account_reference))
+				AND setting.member_reference=binding.external_account))
 			AND NOT EXISTS (SELECT 1 FROM runtime_external_effect_operations prior
 				WHERE prior.authority_kind='channel_native_setting'
 				AND prior.authority_evidence->>'setting_id'=setting.setting_id::text

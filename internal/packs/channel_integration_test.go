@@ -118,7 +118,7 @@ func TestChannelSchemaAdmissionRejectsRecursiveMalformedSchemasAtEveryTypedBound
 	}
 
 	registry, channel, trigger, connector := loadTelegramChannelCompilerInputs(t)
-	channel.Manifest.OpaqueTypes["external_account_reference"] = runtimecontracts.ToolInputSchema{}
+	channel.Manifest.OpaqueTypes["external_account"] = runtimecontracts.ToolInputSchema{}
 	if _, err := packs.CompileChannel(registry, channel, []packs.TriggerPackDescriptor{trigger}, []packs.ConnectorPackDescriptor{connector}); err == nil || !strings.Contains(err.Error(), "schema is missing") {
 		t.Fatalf("channel boundary accepted missing admitted schema: %v", err)
 	}
@@ -240,12 +240,12 @@ enum: ['0042']
 	}
 	compile := func(t *testing.T, schema runtimecontracts.ToolInputSchema) packs.SatisfactionPlan {
 		registry, channel, trigger, connector := loadTelegramChannelCompilerInputs(t)
-		channel.Manifest.OpaqueTypes["external_account_reference"] = schema
+		channel.Manifest.OpaqueTypes["external_account"] = schema
 		for _, eventName := range []string{"inbound.telegram.text_message", "inbound.telegram.callback_action"} {
 			event := trigger.Events[eventName]
-			field := event.Fields["external_account_reference"]
+			field := event.Fields["external_account"]
 			field.Schema = schema
-			event.Fields["external_account_reference"] = field
+			event.Fields["external_account"] = field
 			trigger.Events[eventName] = event
 		}
 		plan, err := packs.CompileChannel(registry, channel, []packs.TriggerPackDescriptor{trigger}, []packs.ConnectorPackDescriptor{connector})
@@ -256,7 +256,7 @@ enum: ['0042']
 	}
 	original := compile(t, exact)
 	for _, eventName := range []string{"text", "action"} {
-		eventSchema, ok := original.EventFieldSchema(eventName, "external_account_reference")
+		eventSchema, ok := original.EventFieldSchema(eventName, "external_account")
 		if !ok || eventSchema.Pattern() != "^0[0-9]+$" || channelSchemaEnumText(t, eventSchema) != "0042" {
 			t.Fatalf("%s exact schema = %#v", eventName, eventSchema)
 		}
@@ -553,10 +553,10 @@ func TestTelegramChannelCompilerConsumesExactNormalizedIdentifierSchemas(t *test
 		want  string
 	}{
 		{name: "text message", event: "inbound.telegram.text_message", field: "provider_message_reference", widen: withoutMaximum, want: "source maximum is broader"},
-		{name: "text account", event: "inbound.telegram.text_message", field: "external_account_reference", widen: withoutPattern, want: "not provably assignable"},
+		{name: "text account", event: "inbound.telegram.text_message", field: "external_account", widen: withoutPattern, want: "not provably assignable"},
 		{name: "text conversation", event: "inbound.telegram.text_message", field: "conversation_reference", widen: withoutMaximumLength, want: "source maximum is broader"},
 		{name: "callback message", event: "inbound.telegram.callback_action", field: "provider_message_reference", widen: withoutMaximum, want: "source maximum is broader"},
-		{name: "callback account", event: "inbound.telegram.callback_action", field: "external_account_reference", widen: withoutPattern, want: "not provably assignable"},
+		{name: "callback account", event: "inbound.telegram.callback_action", field: "external_account", widen: withoutPattern, want: "not provably assignable"},
 		{name: "callback conversation", event: "inbound.telegram.callback_action", field: "conversation_reference", widen: withoutMaximumLength, want: "source maximum is broader"},
 	}
 	for _, tc := range tests {
@@ -792,7 +792,7 @@ func TestChannelDeliveryReplyProjectionTelegram(t *testing.T) {
 		"telegram", "inbound.telegram.text_message", trigger.Identity.ID(), trigger.Identity.Version(), trigger.Identity.ManifestHash(), trigger.Generation,
 	)
 	base := map[string]any{
-		"text": "reason", "external_account_reference": "12345", "conversation_reference": "-100123",
+		"text": "reason", "external_account": "12345", "conversation_reference": "-100123",
 		"conversation_scope": "shared", "provider_message_reference": json.Number("17"),
 	}
 	fact, matched, err := plan.ProjectTextFact("inbound.telegram.text_message", authorization, base)
@@ -823,7 +823,7 @@ func TestChannelDeliveryReplyProjectionTelegram(t *testing.T) {
 		"telegram", "inbound.telegram.callback_action", trigger.Identity.ID(), trigger.Identity.Version(), trigger.Identity.ManifestHash(), trigger.Generation,
 	)
 	action, matched, err := plan.ProjectActionFact("inbound.telegram.callback_action", actionAuthorization, map[string]any{
-		"token": "approve_1", "interaction_reference": "callback-1", "external_account_reference": "12345",
+		"token": "approve_1", "interaction_reference": "callback-1", "external_account": "12345",
 		"conversation_reference": "-100123", "conversation_scope": "shared", "provider_message_reference": json.Number("11"),
 	})
 	if err != nil || !matched || action.Token != "approve_1" || action.InteractionRef != "callback-1" || action.MessageReference != `{"id":11}` {
@@ -2198,7 +2198,7 @@ func mockChannelSatisfier() (packs.LoadedChannelPack, packs.TriggerPackDescripto
 		},
 		OpaqueTypes: map[string]runtimecontracts.ToolInputSchema{
 			"destination": destination, "delivery_reference": deliveryReference, "delivery_receipt": deliveryReceipt,
-			"interaction_reference": interaction, "external_account_reference": externalAccount, "conversation_reference": conversation,
+			"interaction_reference": interaction, "external_account": externalAccount, "conversation_reference": conversation,
 		},
 		Operations: map[string]packs.ChannelOperationBinding{
 			"deliver": {
@@ -2241,11 +2241,11 @@ func mockChannelSatisfier() (packs.LoadedChannelPack, packs.TriggerPackDescripto
 		},
 		Events: map[string]packs.ChannelEventBinding{
 			"action": {Event: "mock.action", Fields: map[string]string{
-				"token": "event.token", "interaction_reference.cursor": "event.cursor", "external_account_reference.principal": "event.principal",
+				"token": "event.token", "interaction_reference.cursor": "event.cursor", "external_account.principal": "event.principal",
 				"conversation_reference.room": "event.room", "conversation_scope": "event.scope", "provider_message_reference": "event.message_ref",
 			}},
 			"text": {Event: "mock.text", Fields: map[string]string{
-				"text": "event.text", "external_account_reference.principal": "event.principal", "conversation_reference.room": "event.room", "conversation_scope": "event.scope", "provider_message_reference": "event.message_ref", "reply_to_message_reference": "event.reply_ref", "entry_invocation": "event.native_entry",
+				"text": "event.text", "external_account.principal": "event.principal", "conversation_reference.room": "event.room", "conversation_scope": "event.scope", "provider_message_reference": "event.message_ref", "reply_to_message_reference": "event.reply_ref", "entry_invocation": "event.native_entry",
 			}},
 		},
 	}

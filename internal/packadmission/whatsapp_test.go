@@ -46,7 +46,7 @@ func TestEmbeddedWhatsAppPackConsumesExactInventoryWithoutInventingExecution(t *
 	}
 	for _, input := range []string{"/inbox", "hello", "/inbox@foreign", "/boite"} {
 		payload, err := json.Marshal(map[string]any{"kind": "message", "text": input,
-			"external_account_reference": "customer@s.whatsapp.net", "conversation_reference": "customer@s.whatsapp.net",
+			"external_account": "customer@s.whatsapp.net", "conversation_reference": "customer@s.whatsapp.net",
 			"conversation_scope": "direct", "provider_message_reference": "message-1", "provider_timestamp_ms": 1, "ephemeral": false})
 		if err != nil {
 			t.Fatal(err)

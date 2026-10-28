@@ -29,7 +29,7 @@ const nativeQualificationSelect = `SELECT o.client_language, o.client_locale_rev
 		AND s.provider=a.provider AND s.conversation_reference=a.conversation_reference
 		AND s.pack_id=a.channel_pack_id AND s.pack_version=a.channel_pack_version AND s.pack_manifest_hash=a.channel_manifest_hash
 		AND s.scope_kind=CASE WHEN b.conversation_scope='direct' THEN 'chat' ELSE 'chat_member' END
-		AND s.member_reference=CASE WHEN b.conversation_scope='direct' THEN '' ELSE b.external_account_reference END
+		AND s.member_reference=CASE WHEN b.conversation_scope='direct' THEN '' ELSE b.external_account END
 	WHERE a.status='current' AND a.activation_id=`
 
 type nativeQualificationFacts struct {

@@ -19513,10 +19513,6 @@
           "account_confirmed": {
             "type": "boolean"
           },
-          "account_reference": {
-            "minLength": 1,
-            "type": "string"
-          },
           "activation_posture": {
             "enum": [
               "webhook_registration",
@@ -19579,6 +19575,10 @@
           },
           "operation_id": {
             "$ref": "#/components/schemas/OpaqueId"
+          },
+          "operator_account": {
+            "minLength": 1,
+            "type": "string"
           },
           "phase": {
             "enum": [
@@ -21799,7 +21799,7 @@
             ],
             "type": "string"
           },
-          "external_account_reference": {
+          "external_account": {
             "type": "string"
           },
           "interface": {
@@ -21950,7 +21950,7 @@
           "expires_at": {
             "$ref": "#/components/schemas/Timestamp"
           },
-          "external_account_reference": {
+          "external_account": {
             "type": "string"
           },
           "interface": {
@@ -22075,7 +22075,7 @@
             ],
             "type": "string"
           },
-          "external_account_reference": {
+          "external_account": {
             "minLength": 1,
             "type": "string"
           },
@@ -22131,7 +22131,7 @@
           "revision",
           "status",
           "interface",
-          "external_account_reference",
+          "external_account",
           "conversation_reference",
           "conversation_scope",
           "method",
@@ -22188,7 +22188,7 @@
             ],
             "type": "string"
           },
-          "external_account_reference": {
+          "external_account": {
             "type": "string"
           },
           "interface": {

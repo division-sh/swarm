@@ -355,7 +355,7 @@ func requireStandingRootTreeActionIntent(t *testing.T, store goldenStoreSelectio
 			Manifest   string `json:"channel_manifest_hash"`
 			Generation string `json:"semantic_generation"`
 		} `json:"interface"`
-		Account      string `json:"external_account_reference"`
+		Account      string `json:"external_account"`
 		Conversation string `json:"conversation_reference"`
 		Message      string `json:"provider_message_reference"`
 		Interaction  string `json:"interaction_reference"`

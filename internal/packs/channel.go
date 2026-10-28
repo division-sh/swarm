@@ -828,9 +828,9 @@ func (p SatisfactionPlan) ProjectTextFact(eventName string, authorization runtim
 		return operatorchannel.TextFact{}, matched, err
 	}
 	text, textOK := projected["text"].(string)
-	account, accountOK, err := operatorchannel.OpaqueReference(projected["external_account_reference"])
+	account, accountOK, err := operatorchannel.OpaqueReference(projected["external_account"])
 	if err != nil {
-		return operatorchannel.TextFact{}, false, fmt.Errorf("channel text event %q external_account_reference: %w", eventName, err)
+		return operatorchannel.TextFact{}, false, fmt.Errorf("channel text event %q external_account: %w", eventName, err)
 	}
 	conversation, conversationOK, err := operatorchannel.OpaqueReference(projected["conversation_reference"])
 	if err != nil {
@@ -890,9 +890,9 @@ func (p SatisfactionPlan) ProjectActionFact(eventName string, authorization runt
 	if err != nil || !matched {
 		return operatorchannel.ActionFact{}, matched, err
 	}
-	account, accountOK, err := operatorchannel.OpaqueReference(projected["external_account_reference"])
+	account, accountOK, err := operatorchannel.OpaqueReference(projected["external_account"])
 	if err != nil {
-		return operatorchannel.ActionFact{}, false, fmt.Errorf("channel action event %q external_account_reference: %w", eventName, err)
+		return operatorchannel.ActionFact{}, false, fmt.Errorf("channel action event %q external_account: %w", eventName, err)
 	}
 	conversation, conversationOK, err := operatorchannel.OpaqueReference(projected["conversation_reference"])
 	if err != nil {

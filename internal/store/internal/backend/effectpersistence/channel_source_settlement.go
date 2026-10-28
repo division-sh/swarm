@@ -58,7 +58,7 @@ type channelSettlementEvidence struct {
 	InterfaceKey                 string                       `json:"interface_key"`
 	DeliveryEpoch                int64                        `json:"delivery_epoch"`
 	BindingRevision              int64                        `json:"binding_revision"`
-	ExternalAccountRef           string                       `json:"external_account_reference"`
+	ExternalAccountRef           string                       `json:"external_account"`
 	ConversationRef              string                       `json:"conversation_reference"`
 	ActivationID                 string                       `json:"activation_id"`
 	ActivationRevision           int64                        `json:"activation_revision"`

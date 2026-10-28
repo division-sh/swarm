@@ -157,7 +157,7 @@ func TestWhatsAppSessionStateFailedJoinRetainsDatabaseAndPossession(t *testing.T
 }
 
 func TestWhatsAppSessionStateRefusesUnsafeOrConflictingState(t *testing.T) {
-	for _, cell := range []string{"missing_database", "missing_account", "foreign_account", "multiple_accounts", "database_symlink", "database_mode", "database_hardlink", "journal_symlink", "journal_mode", "wal_symlink", "wal_mode", "shm_symlink", "shm_mode", "corrupt_database", "invalid_account_reference"} {
+	for _, cell := range []string{"missing_database", "missing_account", "foreign_account", "multiple_accounts", "database_symlink", "database_mode", "database_hardlink", "journal_symlink", "journal_mode", "wal_symlink", "wal_mode", "shm_symlink", "shm_mode", "corrupt_database", "invalid_operator_account"} {
 		t.Run(cell, func(t *testing.T) {
 			base, connectionID := t.TempDir(), uuid.NewString()
 			if err := os.Chmod(base, 0o700); err != nil {
@@ -217,7 +217,7 @@ func TestWhatsAppSessionStateRefusesUnsafeOrConflictingState(t *testing.T) {
 				if err := os.WriteFile(path, []byte("corrupt provider state must not be repaired"), 0o600); err != nil {
 					t.Fatal(err)
 				}
-			case "invalid_account_reference":
+			case "invalid_operator_account":
 				account = "guessed_account"
 			}
 			before, readErr := os.ReadFile(path)

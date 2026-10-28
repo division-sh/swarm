@@ -35,7 +35,7 @@ func TestRootConnectedTemplatePublicationAcknowledgmentLossBothStores(t *testing
 			endpoint, db, bundleHash := startPublicInputRollbackRuntime(t, backend)
 			params := map[string]any{
 				"bundle_hash": bundleHash, "event_name": "inbound.telegram.text_message",
-				"payload":         map[string]any{"conversation_reference": "42", "conversation_scope": "direct", "external_account_reference": "42", "provider_message_reference": 1, "text": "acknowledgment proof"},
+				"payload":         map[string]any{"conversation_reference": "42", "conversation_scope": "direct", "external_account": "42", "provider_message_reference": 1, "text": "acknowledgment proof"},
 				"idempotency_key": "root-connected-ack-loss",
 			}
 			first := requireServedJSONRPCError(t, endpoint, "event.publish", params)

@@ -131,7 +131,7 @@ func loadReplyControlPageTx(ctx context.Context, tx *sql.Tx, text operatorchanne
 			JOIN channel_delivery_renders render ON render.render_id=action.render_id
 			JOIN channel_delivery_plans plan ON plan.delivery_id=render.delivery_id
 			JOIN channel_delivery_receipts receipt ON receipt.effect_operation_id=plan.current_receipt_operation_id
-			WHERE plan.interface_key=? AND plan.external_account_reference=?
+			WHERE plan.interface_key=? AND plan.external_account=?
 			AND plan.conversation_reference=? AND plan.conversation_scope=?
 			AND receipt.state='sent' AND receipt.render_id=render.render_id
 			AND plan.current_render_id=render.render_id AND action.action_token>?
@@ -141,7 +141,7 @@ func loadReplyControlPageTx(ctx context.Context, tx *sql.Tx, text operatorchanne
 				JOIN channel_delivery_renders render ON render.render_id=action.render_id
 				JOIN channel_delivery_plans plan ON plan.delivery_id=render.delivery_id
 				JOIN channel_delivery_receipts receipt ON receipt.effect_operation_id=plan.current_receipt_operation_id
-				WHERE plan.interface_key=$1 AND plan.external_account_reference=$2
+				WHERE plan.interface_key=$1 AND plan.external_account=$2
 				AND plan.conversation_reference=$3 AND plan.conversation_scope=$4
 				AND receipt.state='sent' AND receipt.render_id=render.render_id
 				AND plan.current_render_id=render.render_id AND action.action_token>$5::uuid

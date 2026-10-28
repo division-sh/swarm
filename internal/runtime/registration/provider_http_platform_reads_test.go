@@ -23,7 +23,7 @@ func TestTelegramPlatformReadsUseCompiledOperationPolicy(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	member, err := binding.RestoreOpaqueReference("external_account_reference", "7")
+	member, err := binding.RestoreOpaqueReference("external_account", "7")
 	if err != nil {
 		t.Fatal(err)
 	}

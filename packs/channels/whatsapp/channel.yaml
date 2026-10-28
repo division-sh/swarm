@@ -17,7 +17,7 @@ onboarding:
 opaque_types:
   destination: {type: string, minLength: 1}
   delivery_reference: {type: string, minLength: 1}
-  external_account_reference: {type: string, minLength: 1}
+  external_account: {type: string, minLength: 1}
   conversation_reference: {type: string, minLength: 1}
 operations:
   deliver:
@@ -32,7 +32,7 @@ events:
     event: inbound.whatsapp.message
     fields:
       text: event.text
-      external_account_reference: event.external_account_reference
+      external_account: event.external_account
       conversation_reference: event.conversation_reference
       conversation_scope: event.conversation_scope
       provider_message_reference: event.provider_message_reference

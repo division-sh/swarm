@@ -592,7 +592,7 @@ func (a Authority) Evidence() map[string]any {
 		evidence["interface_key"] = delivery.InterfaceKey
 		evidence["delivery_epoch"] = delivery.DeliveryEpoch
 		evidence["binding_revision"] = delivery.BindingRevision
-		evidence["external_account_reference"] = delivery.ExternalAccountRef
+		evidence["external_account"] = delivery.ExternalAccountRef
 		evidence["conversation_reference"] = delivery.ConversationRef
 		evidence["activation_id"] = delivery.ActivationID
 		evidence["activation_revision"] = delivery.ActivationRevision
@@ -611,7 +611,7 @@ func (a Authority) Evidence() map[string]any {
 		evidence["provider_event_id"] = ack.ProviderEventID
 		evidence["provider_authorization"] = ack.ProviderAuthorization
 		evidence["interface_key"] = ack.InterfaceKey
-		evidence["external_account_reference"] = ack.ExternalAccountRef
+		evidence["external_account"] = ack.ExternalAccountRef
 		evidence["conversation_reference"] = ack.ConversationRef
 		evidence["conversation_scope"] = ack.ConversationScope
 		evidence["message_reference"] = ack.MessageReference

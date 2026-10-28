@@ -267,7 +267,7 @@ func proveResponseAuthorityNegatives(t *testing.T, original context.Context, sel
 		{"unsettled_intent", `UPDATE ` + intentTable + ` SET state='pending', disposition=NULL, settled_at=NULL WHERE publication_id=$1`, publicationID},
 		{"missing_intent", `DELETE FROM ` + intentTable + ` WHERE publication_id=$1`, publicationID},
 		{"retired_binding", `UPDATE operator_channel_bindings SET status='unbound', provider_authority=NULL,
-			external_account_reference=NULL, conversation_reference=NULL,
+			external_account=NULL, conversation_reference=NULL,
 			conversation_scope=NULL, source=NULL WHERE interface_key=$1`, edit.ChannelDelivery.InterfaceKey},
 		{"retired_activation", `UPDATE connected_channel_activations SET status='retired', retired_at=CURRENT_TIMESTAMP, retirement_reason='test retirement' WHERE activation_id=$1`, edit.ChannelDelivery.ActivationID},
 		{"retired_default", `UPDATE channel_delivery_defaults SET state='retired' WHERE principal_id=$1`, edit.ChannelDelivery.PrincipalID},

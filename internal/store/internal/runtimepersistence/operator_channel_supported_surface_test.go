@@ -1270,7 +1270,7 @@ func runOperatorChannelSupportedSurface(t *testing.T, backend servedparity.Backe
 			t.Fatalf("%s unbind operation exposed zero %s: %#v", backend, absent, operationResult)
 		}
 	}
-	for _, absent := range []string{"external_account_reference", "conversation_reference", "conversation_scope", "account_presentation", "source", "proof_id", "proof_revision"} {
+	for _, absent := range []string{"external_account", "conversation_reference", "conversation_scope", "account_presentation", "source", "proof_id", "proof_revision"} {
 		if _, present := bindingResult[absent]; present {
 			t.Fatalf("%s unbind binding exposed inapplicable %s: %#v", backend, absent, bindingResult)
 		}

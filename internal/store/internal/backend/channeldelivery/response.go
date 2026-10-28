@@ -226,12 +226,12 @@ func insertResponsePlanTx(ctx context.Context, tx *sql.Tx, frozen render.Frozen,
 	}
 	deliveryID, renderID := uuid.NewString(), uuid.NewString()
 	query := `INSERT INTO channel_delivery_plans (delivery_id, source_kind, source_id, request_activation_id, principal_id,
-		interface_key, binding_revision, delivery_epoch, external_account_reference, conversation_reference,
+		interface_key, binding_revision, delivery_epoch, external_account, conversation_reference,
 		conversation_scope, state, current_render_id, created_at)
 		VALUES (?, 'response', ?, ?, ?, ?, ?, ?, ?, ?, ?, 'rendered', ?, ?)`
 	if postgres {
 		query = `INSERT INTO channel_delivery_plans (delivery_id, source_kind, source_id, request_activation_id, principal_id,
-			interface_key, binding_revision, delivery_epoch, external_account_reference, conversation_reference,
+			interface_key, binding_revision, delivery_epoch, external_account, conversation_reference,
 			conversation_scope, state, current_render_id, created_at)
 			VALUES ($1::uuid, 'response', $2::uuid, $3::uuid, $4::uuid, $5, $6, $7, $8, $9, $10, 'rendered', $11::uuid, $12)`
 	}

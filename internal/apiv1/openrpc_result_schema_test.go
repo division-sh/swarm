@@ -562,7 +562,7 @@ func successfulOperatorChannelRuntimeResult(methodName string) any {
 		return map[string]any{"proof": map[string]any{
 			"format": "swarm-verified-account-proof-v3", "proof_id": "00000000-0000-0000-0000-000000000802",
 			"revision": 2, "status": "revoked", "interface": identity,
-			"external_account_reference": "account", "conversation_reference": "conversation", "conversation_scope": "direct",
+			"external_account": "account", "conversation_reference": "conversation", "conversation_scope": "direct",
 			"method": "connect", "challenge": "SWARM-AAAAAAAAAAAAAAAA",
 			"original_operation_id": "00000000-0000-0000-0000-000000000803",
 			"minting_store_id":      "00000000-0000-0000-0000-000000000804",

@@ -127,7 +127,7 @@ func TestReceiverPublicInputFinalizesCreationWithoutRecoveryBothStores(t *testin
 				t.Fatal(err)
 			}
 			eventID := uuid.NewString()
-			event := eventtest.RunCreatingRootIngress(eventID, "inbound.telegram.text_message", "operator-api", "", []byte(`{"conversation_reference":"2307","conversation_scope":"direct","external_account_reference":"2307","provider_message_reference":7,"text":"first-pass"}`), 0, runID, "", events.EventEnvelope{}, time.Now().UTC())
+			event := eventtest.RunCreatingRootIngress(eventID, "inbound.telegram.text_message", "operator-api", "", []byte(`{"conversation_reference":"2307","conversation_scope":"direct","external_account":"2307","provider_message_reference":7,"text":"first-pass"}`), 0, runID, "", events.EventEnvelope{}, time.Now().UTC())
 			request := apiidempotency.Request{Method: "event.publish", Actor: apiidempotency.BearerActor("operator"), IdempotencyKey: "first-pass", RequestHash: "exact-request"}
 			completion := apiidempotency.Completion{ResourceID: eventID, Response: json.RawMessage(`{"event_id":"` + eventID + `"}`)}
 			initialEvent, err := json.Marshal(map[string]any{"event_name": event.Type(), "payload": json.RawMessage(event.Payload()), "emitter": "operator-api", "entity_id": "", "flow_instance": "", "source_event_id": ""})

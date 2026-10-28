@@ -135,7 +135,7 @@ func Decode(raw []byte, hash string) (Frozen, error) {
 			PrincipalID        string                            `json:"principal_id"`
 			InterfaceKey       string                            `json:"interface_key"`
 			DeliveryEpoch      int64                             `json:"delivery_epoch"`
-			ExternalAccountRef string                            `json:"external_account_reference"`
+			ExternalAccountRef string                            `json:"external_account"`
 			ConversationRef    string                            `json:"conversation_reference"`
 			ConversationScope  operatorchannel.ConversationScope `json:"conversation_scope"`
 		} `json:"audience"`
@@ -174,7 +174,7 @@ type frozenProjectionIndex struct {
 		PrincipalID        string `json:"principal_id"`
 		InterfaceKey       string `json:"interface_key"`
 		DeliveryEpoch      int64  `json:"delivery_epoch"`
-		ExternalAccountRef string `json:"external_account_reference"`
+		ExternalAccountRef string `json:"external_account"`
 		ConversationRef    string `json:"conversation_reference"`
 		ConversationScope  string `json:"conversation_scope"`
 	} `json:"audience"`
@@ -869,7 +869,7 @@ func freeze(input map[string]any, kind, id string, revision int64, audience Audi
 func audienceProjection(a Audience) map[string]any {
 	return map[string]any{
 		"principal_id": a.PrincipalID, "interface_key": a.InterfaceKey, "delivery_epoch": a.DeliveryEpoch,
-		"external_account_reference": a.ExternalAccountRef, "conversation_reference": a.ConversationRef,
+		"external_account": a.ExternalAccountRef, "conversation_reference": a.ConversationRef,
 		"conversation_scope": string(a.ConversationScope),
 	}
 }

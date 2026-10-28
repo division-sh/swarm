@@ -19,7 +19,7 @@ func admitNativeSettingScopeTx(ctx context.Context, tx *sql.Tx, admission channe
 	query := `SELECT a.provider, a.principal_id, a.interface_key, a.binding_revision,
 		a.activation_revision, a.context_publication_generation, a.channel_pack_id,
 		a.channel_pack_version, a.channel_manifest_hash, a.conversation_reference,
-		a.plan_generation, b.external_account_reference, b.conversation_scope, o.client_language, o.client_locale_revision
+		a.plan_generation, b.external_account, b.conversation_scope, o.client_language, o.client_locale_revision
 		FROM connected_channel_activations a
 		JOIN channel_onboarding_operations o ON o.operation_id=a.operation_id
 		JOIN operator_channel_bindings b ON b.interface_key=a.interface_key
@@ -31,7 +31,7 @@ func admitNativeSettingScopeTx(ctx context.Context, tx *sql.Tx, admission channe
 		query = `SELECT a.provider, a.principal_id::text, a.interface_key, a.binding_revision,
 			a.activation_revision, a.context_publication_generation, a.channel_pack_id,
 			a.channel_pack_version, a.channel_manifest_hash, a.conversation_reference,
-			a.plan_generation, b.external_account_reference, b.conversation_scope, o.client_language, o.client_locale_revision
+			a.plan_generation, b.external_account, b.conversation_scope, o.client_language, o.client_locale_revision
 			FROM connected_channel_activations a
 			JOIN channel_onboarding_operations o ON o.operation_id=a.operation_id
 			JOIN operator_channel_bindings b ON b.interface_key=a.interface_key

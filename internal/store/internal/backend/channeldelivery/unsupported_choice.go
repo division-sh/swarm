@@ -19,7 +19,7 @@ func loadUnsupportedChooserTextTx(ctx context.Context, tx *sql.Tx, fact operator
 		JOIN channel_delivery_plans plan ON plan.delivery_id=render.delivery_id
 		JOIN channel_delivery_receipts receipt ON receipt.render_id=render.render_id AND receipt.delivery_id=plan.delivery_id
 		WHERE action.action_token=? AND action.action_kind='select_draft' AND plan.source_kind='response'
-		AND plan.interface_key=? AND plan.external_account_reference=?
+		AND plan.interface_key=? AND plan.external_account=?
 		AND plan.conversation_reference=? AND plan.conversation_scope=? AND receipt.state='sent' LIMIT 2`
 	if postgres {
 		query = `SELECT action.action_token::text,action.action_kind,action.verdict,action.label,action.action_position,
@@ -29,7 +29,7 @@ func loadUnsupportedChooserTextTx(ctx context.Context, tx *sql.Tx, fact operator
 			JOIN channel_delivery_plans plan ON plan.delivery_id=render.delivery_id
 			JOIN channel_delivery_receipts receipt ON receipt.render_id=render.render_id AND receipt.delivery_id=plan.delivery_id
 			WHERE action.action_token=$1::uuid AND action.action_kind='select_draft' AND plan.source_kind='response'
-			AND plan.interface_key=$2 AND plan.external_account_reference=$3
+			AND plan.interface_key=$2 AND plan.external_account=$3
 			AND plan.conversation_reference=$4 AND plan.conversation_scope=$5 AND receipt.state='sent' LIMIT 2
 			FOR UPDATE OF action,render,plan,receipt`
 	}

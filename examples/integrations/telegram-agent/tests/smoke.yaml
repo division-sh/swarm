@@ -6,7 +6,7 @@ derive:
     generate: true
     set:
       text: hello from Telegram
-      external_account_reference: "42"
+      external_account: "42"
       conversation_reference: "1001"
       provider_message_reference: 1
 connector_responses:

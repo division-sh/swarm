@@ -181,18 +181,18 @@ func resolveActionFactTx(ctx context.Context, tx interface {
 		JOIN channel_onboarding_operations onboarding ON onboarding.identity_operation_id=binding.operation_id
 		JOIN connected_channel_activations activation ON activation.operation_id=onboarding.operation_id
 		WHERE action.action_token=? AND plan.interface_key=?
-		AND plan.external_account_reference=? AND plan.conversation_reference=? AND plan.conversation_scope=?
+		AND plan.external_account=? AND plan.conversation_reference=? AND plan.conversation_scope=?
 		AND selected.state='current' AND selected.principal_id=plan.principal_id
 		AND selected.delivery_epoch=plan.delivery_epoch
 		AND binding.status='current' AND binding.principal_id=plan.principal_id
 		AND binding.binding_revision>=plan.binding_revision
-		AND binding.external_account_reference=plan.external_account_reference
+		AND binding.external_account=plan.external_account
 		AND binding.conversation_reference=plan.conversation_reference
 		AND binding.conversation_scope=plan.conversation_scope
 		AND ((plan.source_kind='response' AND activation.activation_id=plan.request_activation_id)
 		 OR (plan.source_kind<>'response' AND selected.interface_key=plan.interface_key
 			AND selected.binding_revision=binding.binding_revision
-			AND selected.external_account_reference=plan.external_account_reference
+			AND selected.external_account=plan.external_account
 			AND selected.conversation_reference=plan.conversation_reference
 			AND selected.conversation_scope=plan.conversation_scope))
 		AND onboarding.phase='succeeded' AND activation.status='current'
@@ -217,18 +217,18 @@ func resolveActionFactTx(ctx context.Context, tx interface {
 			JOIN channel_onboarding_operations onboarding ON onboarding.identity_operation_id=binding.operation_id
 			JOIN connected_channel_activations activation ON activation.operation_id=onboarding.operation_id
 			WHERE action.action_token=$1::uuid AND plan.interface_key=$2
-			AND plan.external_account_reference=$3 AND plan.conversation_reference=$4 AND plan.conversation_scope=$5
+			AND plan.external_account=$3 AND plan.conversation_reference=$4 AND plan.conversation_scope=$5
 			AND selected.state='current' AND selected.principal_id=plan.principal_id
 			AND selected.delivery_epoch=plan.delivery_epoch
 			AND binding.status='current' AND binding.principal_id=plan.principal_id
 			AND binding.binding_revision>=plan.binding_revision
-			AND binding.external_account_reference=plan.external_account_reference
+			AND binding.external_account=plan.external_account
 			AND binding.conversation_reference=plan.conversation_reference
 			AND binding.conversation_scope=plan.conversation_scope
 			AND ((plan.source_kind='response' AND activation.activation_id=plan.request_activation_id)
 			 OR (plan.source_kind<>'response' AND selected.interface_key=plan.interface_key
 				AND selected.binding_revision=binding.binding_revision
-				AND selected.external_account_reference=plan.external_account_reference
+				AND selected.external_account=plan.external_account
 				AND selected.conversation_reference=plan.conversation_reference
 				AND selected.conversation_scope=plan.conversation_scope))
 			AND onboarding.phase='succeeded' AND activation.status='current'
