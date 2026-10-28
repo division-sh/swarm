@@ -206,7 +206,6 @@ func loadSelectedRecoveryRecordTx(ctx context.Context, tx *sql.Tx, snapshot runl
 		binding.ForkPoint.EventID != entry.Binding.ForkPoint.EventID ||
 		binding.ContractSelection != entry.Binding.ContractSelection ||
 		binding.TargetRootReference != entry.Binding.TargetRootReference ||
-		binding.TargetRootReference != snapshot.RootReference ||
 		!binding.CreatedAt.Equal(entry.Binding.CreatedAt) || snapshot.BundleHash != entry.BundleHash {
 		return result, fmt.Errorf("selected recovery binding changed")
 	}
@@ -222,7 +221,31 @@ func loadSelectedRecoveryRecordTx(ctx context.Context, tx *sql.Tx, snapshot runl
 	if err != nil {
 		return result, err
 	}
-	return loadSelectedRecoveryExecutionTx(ctx, tx, snapshot, result, sqlite, lock)
+	result, err = loadSelectedRecoveryExecutionTx(ctx, tx, snapshot, result, sqlite, lock)
+	if err != nil || binding.TargetRootReference == snapshot.RootReference {
+		return result, err
+	}
+	if binding.TargetRootReference.BundleHash == snapshot.BundleHash {
+		return result, fmt.Errorf("selected recovery binding changed")
+	}
+	// A completed live handoff remains control-only after an ordinary source
+	// revision; it cannot resume the executor recorded under the earlier root.
+	settled, complete, err := settledSelectedRecoveryTx(ctx, tx, snapshot, result, sqlite, lock)
+	if err != nil {
+		return result, err
+	}
+	if !complete || settled.Disposition != runfork.SelectedForkRecoveryControlOnly {
+		return result, fmt.Errorf("selected recovery binding changed")
+	}
+	effectsSettled, err := selectedForkRecoveryEffectsSettledTx(ctx, tx, result.RunID)
+	if err != nil {
+		return result, err
+	}
+	if !effectsSettled {
+		return result, fmt.Errorf("closed selected execution retains unsettled effects")
+	}
+	result.SelectedForkRecoveryResult = settled
+	return result, nil
 }
 
 func loadSelectedRecoveryExecutionTx(ctx context.Context, tx *sql.Tx, snapshot runlifecycle.Snapshot, result selectedRecoveryRecord, sqlite, lock bool) (selectedRecoveryRecord, error) {

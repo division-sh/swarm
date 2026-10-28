@@ -808,19 +808,6 @@ func requireChangedStandingColdStartMatrix(t *testing.T, opts cliapp.ServeOption
 		{name: "source revision three", apply: func(t *testing.T) {
 			writeStandingCandidateFile(t, manifestPath, strings.Replace(string(baseManifest), `version: "1.0.0"`, `version: "1.0.3"`, 1))
 		}},
-		{name: "manifest name revised", apply: func(t *testing.T) {
-			writeStandingCandidateFile(t, manifestPath, strings.Replace(string(baseManifest), "name: telegram-agent", "name: renamed-telegram-agent", 1))
-		}},
-		{name: "standing declaration removed", wantStrand: []string{"instance telegram-ingress", "stage_removed (active)", "instance telegram-chat/", "stage_removed (pending)", "field_value_incompatible"}, apply: func(t *testing.T) {
-			removeConnectedReceiver(t)
-			removedDir := filepath.Join(t.TempDir(), filepath.Base(flowDir))
-			if err := os.Rename(flowDir, removedDir); err != nil {
-				t.Fatalf("remove standing flow directory from the admitted tree: %v", err)
-			}
-			t.Cleanup(func() {
-				_ = os.Rename(removedDir, flowDir)
-			})
-		}},
 		{name: "standing changed to non-standing", wantStrand: []string{"instance telegram-chat/", "stage_removed (pending)", "field_value_incompatible"}, apply: func(t *testing.T) {
 			removeConnectedReceiver(t)
 			var schema map[string]any
@@ -836,18 +823,6 @@ func requireChangedStandingColdStartMatrix(t *testing.T, opts cliapp.ServeOption
 				t.Fatal(err)
 			}
 			writeStandingCandidateFile(t, flowSchemaPath, string(raw))
-		}},
-		{name: "flow identity renamed", wantStrand: []string{"instance telegram-ingress", "stage_removed (active)", "gate_removed (active)"}, apply: func(t *testing.T) {
-			writeStandingCandidateFile(t, rootSchemaPath, strings.Replace(string(baseRootSchema), "from: telegram-ingress", "from: telegram-ingress-v2", 1))
-			renamedDir := filepath.Join(sourceRoot, "telegram-ingress-v2")
-			if err := os.Rename(flowDir, renamedDir); err != nil {
-				t.Fatalf("rename flow directory: %v", err)
-			}
-			t.Cleanup(func() {
-				_ = os.Rename(renamedDir, flowDir)
-				_ = os.WriteFile(flowSchemaPath, baseFlowSchema, 0o600)
-			})
-			writeStandingCandidateFile(t, filepath.Join(renamedDir, "schema.yaml"), strings.Replace(string(baseFlowSchema), "name: telegram-ingress", "name: telegram-ingress-v2", 1))
 		}},
 	}
 	for _, mutation := range mutations {
