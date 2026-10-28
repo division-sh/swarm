@@ -579,34 +579,8 @@ func semanticValuesEqual(left, right any) bool {
 
 func validateValue(path string, schema map[string]any, value any) error {
 	if raw, declared := schema["oneOf"]; declared {
-		branches, ok := asArray(raw)
-		if !ok || len(branches) == 0 {
-			return violation(path, "oneOf", "non-empty schema array", "invalid oneOf", "%s.oneOf must be a non-empty schema array", path)
-		}
-		matched := 0
-		nullBranches, nonNullBranches := 0, 0
-		var nonNullFailure error
-		for _, branch := range branches {
-			child, ok := branch.(map[string]any)
-			if !ok || child == nil {
-				return violation(path, "oneOf", "schema object", "invalid branch", "%s.oneOf must contain schemas", path)
-			}
-			err := validateValue(path, child, value)
-			if err == nil {
-				matched++
-			}
-			if len(child) == 1 && child["type"] == "null" {
-				nullBranches++
-			} else if kind := optionalNullSchemaType(child); kind != "" && kind != "any" && kind != "null" && !schemaAllowsNull(child) {
-				nonNullBranches++
-				nonNullFailure = err
-			}
-		}
-		if matched != 1 {
-			if matched == 0 && value != nil && len(branches) == 2 && nullBranches == 1 && nonNullBranches == 1 && nonNullFailure != nil {
-				return nonNullFailure
-			}
-			return violation(path, "oneOf", "exactly one matching branch", fmt.Sprint(matched), "%s must match exactly one oneOf branch (matched %d)", path, matched)
+		if err := validateOneOfValue(path, raw, value); err != nil {
+			return err
 		}
 	}
 	if value == nil && schemaAllowsNull(schema) {
@@ -694,6 +668,39 @@ func validateValue(path string, schema map[string]any, value any) error {
 		}
 	default:
 		return violation(path, "type", "supported schema type", st, "%s has unsupported schema type %q", path, st)
+	}
+	return nil
+}
+
+func validateOneOfValue(path string, raw, value any) error {
+	branches, ok := asArray(raw)
+	if !ok || len(branches) == 0 {
+		return violation(path, "oneOf", "non-empty schema array", "invalid oneOf", "%s.oneOf must be a non-empty schema array", path)
+	}
+	matched := 0
+	nullBranches, nonNullBranches := 0, 0
+	var nonNullFailure error
+	for _, branch := range branches {
+		child, ok := branch.(map[string]any)
+		if !ok || child == nil {
+			return violation(path, "oneOf", "schema object", "invalid branch", "%s.oneOf must contain schemas", path)
+		}
+		err := validateValue(path, child, value)
+		if err == nil {
+			matched++
+		}
+		if len(child) == 1 && child["type"] == "null" {
+			nullBranches++
+		} else if kind := optionalNullSchemaType(child); kind != "" && kind != "any" && kind != "null" && !schemaAllowsNull(child) {
+			nonNullBranches++
+			nonNullFailure = err
+		}
+	}
+	if matched != 1 {
+		if matched == 0 && value != nil && len(branches) == 2 && nullBranches == 1 && nonNullBranches == 1 && nonNullFailure != nil {
+			return nonNullFailure
+		}
+		return violation(path, "oneOf", "exactly one matching branch", fmt.Sprint(matched), "%s must match exactly one oneOf branch (matched %d)", path, matched)
 	}
 	return nil
 }

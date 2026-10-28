@@ -52,12 +52,8 @@ func AdmitProviderDirectory(provider packartifact.AdmittedProvider, platform run
 		return ProviderDefinition{}, fmt.Errorf("provider admission requires a captured provider directory")
 	}
 	out := ProviderDefinition{provider: provider}
-	capabilities, _ := provider.Metadata().Capabilities()
-	if _, present := provider.Body(packmodel.BodyTrigger); !present && (len(capabilities.Can.EmitEvents) != 0 || capabilities.Can.VerifySecret != "" || capabilities.Can.PersistDedupeMarkers) {
-		return ProviderDefinition{}, fmt.Errorf("provider manifest trigger capabilities require trigger.yaml in the same directory")
-	}
-	if _, present := provider.Body(packmodel.BodyConnector); !present && (len(capabilities.Can.CallProviderActions) != 0 || capabilities.Can.LowerThroughActivity || capabilities.Can.JournalActivityAttempts) {
-		return ProviderDefinition{}, fmt.Errorf("provider manifest connector capabilities require connector.yaml in the same directory")
+	if err := validateProviderBodyCapabilities(provider); err != nil {
+		return ProviderDefinition{}, err
 	}
 	if body, present := provider.Body(packmodel.BodyTrigger); present {
 		manifest, err := providertriggers.AdmitBody(body)
@@ -106,4 +102,15 @@ func AdmitProviderDirectory(provider packartifact.AdmittedProvider, platform run
 		out.hasChannel = true
 	}
 	return out, nil
+}
+
+func validateProviderBodyCapabilities(provider packartifact.AdmittedProvider) error {
+	capabilities, _ := provider.Metadata().Capabilities()
+	if _, present := provider.Body(packmodel.BodyTrigger); !present && (len(capabilities.Can.EmitEvents) != 0 || capabilities.Can.VerifySecret != "" || capabilities.Can.PersistDedupeMarkers) {
+		return fmt.Errorf("provider manifest trigger capabilities require trigger.yaml in the same directory")
+	}
+	if _, present := provider.Body(packmodel.BodyConnector); !present && (len(capabilities.Can.CallProviderActions) != 0 || capabilities.Can.LowerThroughActivity || capabilities.Can.JournalActivityAttempts) {
+		return fmt.Errorf("provider manifest connector capabilities require connector.yaml in the same directory")
+	}
+	return nil
 }
