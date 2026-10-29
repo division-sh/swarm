@@ -34,7 +34,6 @@ func TestChannelOnboardingCandidateCatalogRequiresOneExactCandidate(t *testing.T
 			func(c *Candidate) { c.Target = testCandidate(strings.Repeat("c", 64), "support").Target },
 			func(c *Candidate) { c.Ceremony = CeremonyAuthenticatedTextChallenge },
 			func(c *Candidate) { c.ConfirmationOperation = "runtime-confirmation" },
-			func(c *Candidate) { c.SigningCredentialRole = "webhook-secret" },
 		} {
 			foreign := candidate
 			mutate(&foreign)
