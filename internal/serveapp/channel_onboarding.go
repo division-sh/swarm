@@ -5,7 +5,6 @@ import (
 	"errors"
 	"fmt"
 	"net/http"
-	"slices"
 	"sort"
 	"strings"
 	"time"
@@ -239,9 +238,7 @@ func compileServeChannelActivationSnapshot(ctx context.Context, manager *runtime
 
 func compileServeRegisteredChannelActivations(contexts []runtime.BundleContext, registered []channelonboarding.Operation) ([]channelonboarding.CompiledActivation, error) {
 	var activations []channelonboarding.CompiledActivation
-	registered = slices.DeleteFunc(slices.Clone(registered), func(op channelonboarding.Operation) bool {
-		return !op.AccountConfirmed || op.Provider != "whatsapp" || op.Phase == channelonboarding.PhaseFailed || op.Phase == channelonboarding.PhaseRetired
-	})
+	registered = channelonboarding.RetainedConfirmedAccounts(registered, "whatsapp")
 	for _, contextDef := range contexts {
 		declarations, err := contextDef.StandingTargetDeclarations()
 		if err != nil {
