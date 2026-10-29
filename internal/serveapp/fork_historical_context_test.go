@@ -87,6 +87,13 @@ func TestRunForkHistoricalIdentityPublicExecutionBothStores(t *testing.T) {
 			}
 			loader := runforkexecution.SourceArtifactSelectedContractSourceLoader{RepoRoot: repoRootForTest(), Store: selected.SourceArtifactStore()}
 			request, loaded := admitForkHistoricalSelectedRequest(t, ctx, family, loader, plan, rt.BundleHash, rt.ForkRuntime)
+			freshInvocation := func() runforkreadiness.MaterializeRequest {
+				fresh := request
+				operation := *request.ForkOperation
+				operation.OperationID = uuid.NewString()
+				fresh.ForkOperation = &operation
+				return fresh
+			}
 			var revision, latestRevision int64
 			var original, latest []byte
 			if err := rt.DB.QueryRow(`SELECT revision, fact FROM run_fork_fact_revisions WHERE run_id=$1 AND family='event_deliveries' AND fact_key=$2 AND revision<=$3 ORDER BY revision DESC LIMIT 1`, seed.RunID, deliveryID, plan.ForkPoint.Revision).Scan(&revision, &original); err != nil {
@@ -191,14 +198,14 @@ func TestRunForkHistoricalIdentityPublicExecutionBothStores(t *testing.T) {
 			// retained-row controls must not compare across its lawful retirement.
 			requireServedJSONRPCResult(t, rt.Endpoint, "run.pause", map[string]any{"run_id": sibling.RunID}, &paused)
 			before = applicationSnapshot()
-			_, err = direct.MaterializeRunForkForSelectedContractExecution(ctx, request)
+			_, err = direct.MaterializeRunForkForSelectedContractExecution(ctx, freshInvocation())
 			requireHistoricalRefusal(err)
 			writeFact(original)
 			var stillLatest []byte
 			if err := rt.DB.QueryRow(`SELECT fact FROM run_fork_fact_revisions WHERE run_id=$1 AND family='event_deliveries' AND fact_key=$2 AND revision=$3`, seed.RunID, deliveryID, latestRevision).Scan(&stillLatest); err != nil || string(stillLatest) != string(latest) {
 				t.Fatalf("latest fact was changed: %v", err)
 			}
-			staged, err := direct.MaterializeRunForkForSelectedContractExecution(ctx, request)
+			staged, err := direct.MaterializeRunForkForSelectedContractExecution(ctx, freshInvocation())
 			if err != nil || staged.ForkRunID == "" || staged.SelectedContractBinding == nil || staged.ForkRunStatus != runfork.RunForkMaterializedStatus {
 				t.Fatalf("lawful selected staging: %#v, %v", staged, err)
 			}
@@ -206,7 +213,7 @@ func TestRunForkHistoricalIdentityPublicExecutionBothStores(t *testing.T) {
 			// The staged child, binding, readiness and revision rows are lawful.
 			// Each refusal must preserve them exactly, not pretend no child exists.
 			before = applicationSnapshot()
-			_, err = direct.MaterializeRunForkForSelectedContractExecution(ctx, request)
+			_, err = direct.MaterializeRunForkForSelectedContractExecution(ctx, freshInvocation())
 			requireHistoricalRefusal(err)
 			_, eventIDs, _, err := runfork.RunForkContractFrontierEvidenceBinding(request.FrontierAdmission)
 			if err != nil {
@@ -287,10 +294,18 @@ func admitForkHistoricalSelectedRequest(t *testing.T, ctx context.Context, owner
 			}
 		})
 	}
-	// These event-cut probes check fresh materialization, not durable invocation replay.
+	operation, err := (runfork.ForkOperationRequest{
+		OperationID: uuid.NewString(), Actor: "selected-fork-fixture", TransportHash: "selected-fork-fixture",
+		SourceRunID: plan.SourceRunID, ForkEventID: plan.ForkPoint.EventID,
+		TargetBundleHash: loaded.SourceArtifactFact.BundleHash(), TargetRootReference: loaded.RootedSource.Admission().Reference(),
+		AllowSourceFreeze: false, ContractSelection: selection,
+	}).BindResolvedPoint(plan.ForkPoint)
+	if err != nil {
+		t.Fatal(err)
+	}
 	prepared, err := owner.Prepare(ctx, runforkexecution.SelectedContractExecutionRequest{
 		SourceRunID: plan.SourceRunID, At: plan.ForkPoint.EventID, ExpectedBundleHash: hash,
-		ContractSelection: selection, SourceLoader: loader, AgentRuntime: options,
+		ContractSelection: selection, SourceLoader: loader, AgentRuntime: options, ForkOperation: &operation,
 	})
 	if err != nil {
 		t.Fatal(err)
