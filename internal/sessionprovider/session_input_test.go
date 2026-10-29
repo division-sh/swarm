@@ -103,7 +103,7 @@ func runOwnedSessionInputBootstrapBothStores(t *testing.T, targetGeneration uint
 			}
 			connectionID := op.SessionConnectionID
 			state := sessionStateFixture(t, base, connectionID, "")
-			device := newSDKDeviceFixture(t, state.database)
+			device := newSDKDeviceFixture(t, state.database, types.NewJID("100000000002", types.DefaultUserServer))
 			account := operatorchannel.SessionAccountAdmission{Provider: "whatsapp", ConnectionID: connectionID,
 				AccountRef: device.ID.ToNonAD().String(), AdmissionID: uuid.NewString(), Revision: 1}
 			for _, nextPhase := range []channelonboarding.Phase{channelonboarding.PhaseCredentialsAdmitted, channelonboarding.PhaseActivatingProvider, channelonboarding.PhaseAwaitingExternalIdentity} {

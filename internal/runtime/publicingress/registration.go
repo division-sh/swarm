@@ -824,8 +824,9 @@ func (c *ProviderRegistrationController) Handler(next http.Handler) http.Handler
 			if state.Pair.Target != target || state.LastVerified == nil {
 				continue
 			}
-			if target.Provider != "telegram" && target.Provider != "whatsapp" {
-				continue
+			if state.Pair.Registration.Provider() != target.Provider {
+				http.Error(response, "receiving account unavailable", http.StatusServiceUnavailable)
+				return
 			}
 			prefix := target.Provider + ":" + state.Pair.Registration.SlotNamespace() + ":"
 			if !strings.HasPrefix(state.SelectionSlotID, prefix) {

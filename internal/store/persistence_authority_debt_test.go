@@ -299,8 +299,9 @@ func debtW1RunObservationSignatureTransitions() [10][2]authorityDebtSite {
 func debtRunFixtureSignatureComparisons(actual, head, base, source map[string]authorityDebtSite) (map[string]authorityDebtSite, map[string]authorityDebtSite, map[string]authorityDebtSite, []string) {
 	runFixtures, selectedFixtures := debtRunFixtureSignatureTransitions(), debtSelectedFixtureSignatureTransitions()
 	w1Fixtures := debtW1RunObservationSignatureTransitions()
-	pairs := append(runFixtures[:], debtSelectedBindingRootArgumentTransition())
+	pairs := append(runFixtures[:], debtDeploymentHandlerSignatureTransition())
 	forwardOnly := len(pairs)
+	pairs = append(pairs, debtSelectedBindingRootArgumentTransition())
 	pairs = append(append(pairs, selectedFixtures[:]...), w1Fixtures[:]...)
 	for index, pair := range pairs {
 		old, current := pair[0], pair[1]
@@ -331,6 +332,21 @@ func debtRunFixtureSignatureComparisons(actual, head, base, source map[string]au
 		}
 	}
 	return head, base, source, nil
+}
+
+// #2764/6498334917 preserves this counted, build-excluded nil-only stub.
+func debtDeploymentHandlerSignatureTransition() [2]authorityDebtSite {
+	old := authorityDebtSite{
+		Kind: "unresolved-excluded-source", File: "internal/serveapp/channel_deployment_unsupported.go",
+		Declaration: "deploymentChannelHandlers",
+		Operation:   "declaration:7890217cded1dd01ed764ec3a9fab9d2daad2c882b0920a7d3ead721e5710d50",
+		Resolved:    "unresolved|source-context:14375e4f0f053ea0b9c5c0715496c22cb494c816197b9efdb94415151ce4d24d",
+		Family:      "excluded-source-uncertainty", Replacement: "existing canonical owner or narrow source-evidenced classification; never a file exemption or baseline increase",
+		Multiplicity: 1,
+	}
+	current := old
+	current.Operation = "declaration:e62729fa9a6dac500f6809768d77fb1725871a7871addd5fa304b5e73726cb39"
+	return [2]authorityDebtSite{old, current}
 }
 
 // #2791/6396939990 preserves the same counted INSERT with exact rooted arguments.
@@ -1047,6 +1063,11 @@ func debtValidateCollectorIdentity(base, current string, trusted, head authority
 	}
 	if base == current && trusted.Collector == current && head.Collector == current {
 		return nil
+	}
+	if base == debtS1CollectorTo && trusted.Collector == base &&
+		current == debtS3AccountCollectorTo && reviewedTransition == current && head.Collector == current &&
+		debtSitesEqual(head.Sites, trusted.Sites) {
+		return nil // #2764/6498334917: two exact comparison correspondences, unchanged counted sites.
 	}
 	if base == debtW1RebasedComparisonCollectorTo && trusted.Collector == base &&
 		current == debtSourceLoaderCollectorTo && reviewedTransition == current && head.Collector == current &&

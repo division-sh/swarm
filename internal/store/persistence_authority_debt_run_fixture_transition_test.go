@@ -185,8 +185,19 @@ func TestPersistenceAuthorityDebtRunFixtureSignatureTransitionIsExact(t *testing
 		if failures := authorityDebtRatchet(before, before, after, after); len(failures) == 0 {
 			t.Fatal("reverse rooted INSERT correspondence admitted")
 		}
-		if failures := authorityDebtRatchet(after, after, before, after); len(failures) == 0 {
-			t.Fatal("rooted INSERT correspondence admitted without the old source occurrence")
+		if failures := authorityDebtRatchet(after, after, before, after); len(failures) != 0 {
+			t.Fatal("exact landed rooted INSERT source was not recognized", failures)
+		}
+		debtRunFixtureSignatureHostileControls(t, pair, before, after, true)
+	})
+	t.Run("deployment-handler-source-signature", func(t *testing.T) {
+		pair := debtDeploymentHandlerSignatureTransition()
+		before, after := debtControlSet(pair[0]), debtControlSet(pair[1])
+		if failures := authorityDebtRatchet(after, before, before, before); len(failures) != 0 {
+			t.Fatal("exact counted stub correspondence was not recognized", failures)
+		}
+		if failures := authorityDebtRatchet(after, before, before, after); len(failures) == 0 {
+			t.Fatal("stub correspondence admitted without its trusted predecessor")
 		}
 		debtRunFixtureSignatureHostileControls(t, pair, before, after, false)
 	})
@@ -415,7 +426,7 @@ func TestPersistenceAuthorityDebtRunFixtureCollectorTransitionIsPinned(t *testin
 		})
 	}
 	t.Run("w1-comparison-metadata-only", func(t *testing.T) {
-		for _, edge := range [][2]string{{debtCompletedSelectedFixturePinCollectorTo, debtW1ComparisonCollectorTo}, {debtW3LandedFixtureCollectorTo, debtW1RebasedComparisonCollectorTo}, {debtW1RebasedComparisonCollectorTo, debtSourceLoaderCollectorTo}} {
+		for _, edge := range [][2]string{{debtCompletedSelectedFixturePinCollectorTo, debtW1ComparisonCollectorTo}, {debtW3LandedFixtureCollectorTo, debtW1RebasedComparisonCollectorTo}, {debtW1RebasedComparisonCollectorTo, debtSourceLoaderCollectorTo}, {debtS1CollectorTo, debtS3AccountCollectorTo}} {
 			t.Run(edge[0], func(t *testing.T) {
 				for _, mutation := range []string{"exact", "foreign-base", "trusted-collector", "foreign-current", "head-collector", "unreviewed", "foreign-review", "reverse", "bootstrap", "remove-site", "add-site", "multiplicity", "replace-site"} {
 					t.Run(mutation, func(t *testing.T) {

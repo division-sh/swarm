@@ -86,12 +86,12 @@ func newCapturedProviderGateway(t *testing.T, bus *runtimebus.EventBus, source s
 
 func capturedTelegramOperatorSource(t *testing.T) semanticview.Source {
 	t.Helper()
-	return boundedStandingConnectorSource(t, "telegram", "https://api.telegram.org", "[inbound.telegram.raw, inbound.telegram.text_message, inbound.telegram.callback_action]", "")
+	return boundedStandingConnectorSource(t, "telegram", "https://api.telegram.org", "[inbound.telegram.raw, inbound.telegram.text_message, inbound.telegram.callback_action]", "", packmodel.BodyChannel)
 }
 
 // These five runtime fixtures author the same bounded ingress flow, with each
 // provider's HTTP endpoint changed in its BODY before source capture.
-func boundedStandingConnectorSource(t *testing.T, provider, baseURL, inputs, nodes string) semanticview.Source {
+func boundedStandingConnectorSource(t *testing.T, provider, baseURL, inputs, nodes string, additionalRoles ...packmodel.BodyRole) semanticview.Source {
 	t.Helper()
 	const manifest = "version: 1.0.0\nplatform_version: '*'\n"
 	files := map[string]string{
@@ -103,6 +103,9 @@ func boundedStandingConnectorSource(t *testing.T, provider, baseURL, inputs, nod
 	}
 	if nodes != "" {
 		files[boundedProviderFlowID+"/nodes.yaml"] = nodes
+	}
+	if len(additionalRoles) != 0 {
+		files[boundedProviderFlowID+"/entities.yaml"] = "bounded_entity:\n  operator_account: {type: text, initial: ''}\n"
 	}
 	providers := []string{provider}
 	if provider != "telegram" && provider != "github" {
@@ -120,7 +123,7 @@ func boundedStandingConnectorSource(t *testing.T, provider, baseURL, inputs, nod
 		}
 		directory := boundedProviderFlowID + "/" + key + "/"
 		files[directory+"manifest.yaml"] = string(entry.ManifestBody())
-		for _, role := range []packmodel.BodyRole{packmodel.BodyTrigger, packmodel.BodyConnector, packmodel.BodyChannel} {
+		for _, role := range append([]packmodel.BodyRole{packmodel.BodyTrigger, packmodel.BodyConnector}, additionalRoles...) {
 			body, present := entry.Provider().Body(role)
 			if !present {
 				continue
