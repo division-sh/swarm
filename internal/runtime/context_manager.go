@@ -1115,11 +1115,8 @@ func currentChannelActivationSigningKeys(entry *runtimeContextEntry) (map[string
 	for _, activation := range lease.Activations() {
 		// Registered accounts retain separate frozen keys per operation, not
 		// one replacement signing key for the whole source selector.
-		if activation.Source == channelonboarding.ActivationSourceRegistered {
-			continue
-		}
 		selector := strings.TrimSpace(activation.Plan.RegistrationTarget())
-		if selector == "" {
+		if activation.Source == channelonboarding.ActivationSourceRegistered || selector == "" {
 			continue
 		}
 		if activation.Coordinate.BundleHash != entry.context.SourceArtifactFact.BundleHash() ||
@@ -1567,39 +1564,7 @@ func (m *RuntimeContextManager) AdmitChannelStandingTarget(ctx context.Context, 
 	}
 	m.sourceSetMu.Lock()
 	defer m.sourceSetMu.Unlock()
-	m.mu.RLock()
-	entry := m.contexts[candidate.Coordinate.BundleHash]
-	if !runtimeContextEntryLoaded(entry) || entry.runtime == nil || entry.context.RuntimeInstanceID != candidate.Coordinate.RuntimeInstanceID || entry.context.PublicationGeneration != candidate.Coordinate.ContextPublicationGeneration {
-		m.mu.RUnlock()
-		return fmt.Errorf("%w: channel target runtime context is no longer current", channelonboarding.ErrRevisionConflict)
-	}
-	declarations, err := ResolveStandingTargetDeclarations(entry.context.Source, entry.context.ProviderTriggerCatalog)
-	if err != nil {
-		m.mu.RUnlock()
-		return err
-	}
-	owned := false
-	for _, declaration := range declarations {
-		if declaration.FlowPath != candidate.Target.FlowPath || declaration.Alias != candidate.Target.Alias {
-			continue
-		}
-		for _, ingress := range declaration.Ingress {
-			if ingress.Provider == candidate.Target.Provider && ingress.AdmissionPlan.Generation().Equal(candidate.Target.AdmissionGeneration) {
-				owned = true
-			}
-		}
-	}
-	if !owned {
-		m.mu.RUnlock()
-		return fmt.Errorf("channel target %s has no exact declaration owner", candidate.Target.Selector)
-	}
-	aliases := map[string]string{candidate.Target.Alias: candidate.Target.FlowPath}
-	if collision := m.duplicateLoadedIngressAliasesLocked(*entry.context, aliases); collision != nil {
-		m.mu.RUnlock()
-		return collision
-	}
-	use, err := m.acquireEntryLocked(ctx, entry)
-	m.mu.RUnlock()
+	use, entry, err := m.acquireDeclaredChannelTarget(ctx, candidate)
 	if err != nil {
 		return err
 	}
@@ -1643,6 +1608,40 @@ func (m *RuntimeContextManager) AdmitChannelStandingTarget(ctx context.Context, 
 		return barrier(channelonboarding.TestAfterStandingTargetPublication, op.OperationID)
 	}
 	return nil
+}
+
+// Caller retains source-set ownership through mutation and publication.
+func (m *RuntimeContextManager) acquireDeclaredChannelTarget(ctx context.Context, candidate channelonboarding.Candidate) (*RuntimeContextUse, *runtimeContextEntry, error) {
+	m.mu.RLock()
+	defer m.mu.RUnlock()
+	entry := m.contexts[candidate.Coordinate.BundleHash]
+	if !runtimeContextEntryLoaded(entry) || entry.runtime == nil || entry.context.RuntimeInstanceID != candidate.Coordinate.RuntimeInstanceID || entry.context.PublicationGeneration != candidate.Coordinate.ContextPublicationGeneration {
+		return nil, nil, fmt.Errorf("%w: channel target runtime context is no longer current", channelonboarding.ErrRevisionConflict)
+	}
+	declarations, err := ResolveStandingTargetDeclarations(entry.context.Source, entry.context.ProviderTriggerCatalog)
+	if err != nil {
+		return nil, nil, err
+	}
+	owned := false
+	for _, declaration := range declarations {
+		if declaration.FlowPath != candidate.Target.FlowPath || declaration.Alias != candidate.Target.Alias {
+			continue
+		}
+		for _, ingress := range declaration.Ingress {
+			if ingress.Provider == candidate.Target.Provider && ingress.AdmissionPlan.Generation().Equal(candidate.Target.AdmissionGeneration) {
+				owned = true
+			}
+		}
+	}
+	if !owned {
+		return nil, nil, fmt.Errorf("channel target %s has no exact declaration owner", candidate.Target.Selector)
+	}
+	aliases := map[string]string{candidate.Target.Alias: candidate.Target.FlowPath}
+	if collision := m.duplicateLoadedIngressAliasesLocked(*entry.context, aliases); collision != nil {
+		return nil, nil, collision
+	}
+	use, err := m.acquireEntryLocked(ctx, entry)
+	return use, entry, err
 }
 
 func (m *RuntimeContextManager) publishFlowTargets(flowPath string, targets []StandingTarget, activations []StandingActivation, admitted *RuntimeContextUse) error {

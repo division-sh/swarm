@@ -93,21 +93,7 @@ func (m *RuntimeContextManager) AccountHolders(ctx context.Context, ref channelo
 				continue
 			}
 			seen[activation.RunID] = true
-			use, _, availability, err := m.AcquireRun(ctx, activation.RunID)
-			if err != nil {
-				return nil, err
-			}
-			if use == nil {
-				continue
-			}
-			if !availability.Available() || availability.Status != string(runlifecycle.StateLive) {
-				if err := use.Done(); err != nil {
-					return nil, err
-				}
-				continue
-			}
-			rows, err := use.Runtime().AccountHolders(use.WorkContext(), activation.RunID, ref)
-			err = errors.Join(err, use.Done())
+			rows, err := m.activationAccountHolders(ctx, activation, ref)
 			if err != nil {
 				return nil, err
 			}
@@ -130,4 +116,16 @@ func (m *RuntimeContextManager) AccountHolders(ctx context.Context, ref channelo
 		return holders, fmt.Errorf("%w: account %s has competing flow holders; assign it to exactly one flow", channelonboarding.ErrConflict, ref.Account)
 	}
 	return holders, nil
+}
+
+func (m *RuntimeContextManager) activationAccountHolders(ctx context.Context, activation StandingActivation, ref channelonboarding.AccountReference) ([]channelonboarding.AccountHolder, error) {
+	use, _, availability, err := m.AcquireRun(ctx, activation.RunID)
+	if err != nil || use == nil {
+		return nil, err
+	}
+	if !availability.Available() || availability.Status != string(runlifecycle.StateLive) {
+		return nil, use.Done()
+	}
+	rows, err := use.Runtime().AccountHolders(use.WorkContext(), activation.RunID, ref)
+	return rows, errors.Join(err, use.Done())
 }
