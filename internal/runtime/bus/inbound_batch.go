@@ -51,10 +51,11 @@ func (eb *EventBus) PrepareInboundEvidence(ctx context.Context, event events.Eve
 type authenticatedProviderPublicationKey struct{}
 
 type authenticatedProviderPublication struct {
-	eventID string
-	source  events.RouteIdentity
-	kind    runtimeprovideroutput.Kind
-	account string
+	eventID  string
+	source   events.RouteIdentity
+	provider string
+	kind     runtimeprovideroutput.Kind
+	account  string
 }
 
 func authenticatedProviderPublicationForEvent(ctx context.Context, event events.Event) (authenticatedProviderPublication, bool) {
@@ -230,7 +231,7 @@ func (eb *EventBus) PrepareInboundDeliveryBatch(ctx context.Context, batch Inbou
 	for index, item := range validated.Events {
 		itemCtx := context.WithValue(ctx, authenticatedProviderPublicationKey{}, authenticatedProviderPublication{
 			eventID: item.Event.ID(), source: item.Event.RoutingSource().Route(), kind: item.Kind,
-			account: validated.Admission.OperatorAccount(),
+			provider: validated.Provider, account: validated.Admission.OperatorAccount(),
 		})
 		if item.Kind == runtimeprovideroutput.KindRaw {
 			itemCtx = withoutProviderOutputAuthorization(itemCtx)

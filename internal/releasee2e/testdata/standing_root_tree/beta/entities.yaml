@@ -1,2 +1,2 @@
 receiver:
-  operator_account: {type: text, initial: ''}
+  operator_account: text
