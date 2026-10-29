@@ -217,6 +217,10 @@ func TestInhabitDeterministicallyResolvesEqualityDependencies(t *testing.T) {
 	if err := ValidateValueAgainstSchema(schema, got); err != nil {
 		t.Fatalf("equality inhabitant failed validation: %v", err)
 	}
+	got, err = InhabitDeterministically(schema, InhabitationContext{Identity: "equality", Supplied: map[string]any{"copy": object["copy"]}})
+	if err != nil || !reflect.DeepEqual(got, object) {
+		t.Fatalf("supplied copy lost its missing target: got=%#v err=%v", got, err)
+	}
 	properties := schema["properties"].(map[string]any)
 	properties["source"].(map[string]any)["pattern"] = `^\+[1-9][0-9]{1,14}$`
 	properties["contact"] = map[string]any{
