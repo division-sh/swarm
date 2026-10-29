@@ -1,6 +1,7 @@
 package serveapp
 
 import (
+	"bytes"
 	"context"
 	"database/sql"
 	"encoding/json"
@@ -387,6 +388,26 @@ func startChannelAnchorPublicJourney(t *testing.T, backend servedparity.Backend,
 	}
 	if err := credentials.Set(context.Background(), "telegram.webhook_signing_secret", "telegram-secret"); err != nil {
 		t.Fatal(err)
+	}
+	input, err := os.CreateTemp(t.TempDir(), "account-token")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := input.WriteString(token + "\n"); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := input.Seek(0, 0); err != nil {
+		t.Fatal(err)
+	}
+	prior := os.Stdin
+	os.Stdin = input
+	var registered, registrationError bytes.Buffer
+	code := cliapp.Execute(t.Context(), []string{"--config", h.opts.ConfigPath, "channel", "connect", "telegram", "--yes"},
+		&registered, &registrationError, nil, nil, OpenChannelRegistration)
+	os.Stdin = prior
+	_ = input.Close()
+	if code != 0 || !strings.Contains(registered.String(), "Registered telegram account 420079.") {
+		t.Fatalf("anchor account registration exit=%d err=%s", code, registrationError.String())
 	}
 	h.start(t)
 	t.Cleanup(func() { h.stop(t) })
