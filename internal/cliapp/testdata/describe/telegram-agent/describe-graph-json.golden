@@ -130,9 +130,9 @@
           "event": "inbound.telegram.text_message",
           "resolved_event": "telegram-chat/inbound.telegram.text_message",
           "flow_path": "telegram-chat",
-          "producer_schema_digest": "sha256:d56e1a4417b8aed6c8891f576f1cce98f40ed9cd339c8a5e1f737bb489ea0e3f",
-          "receiver_schema_digest": "sha256:d56e1a4417b8aed6c8891f576f1cce98f40ed9cd339c8a5e1f737bb489ea0e3f",
-          "pin_digest": "sha256:ebb3c2a9f772bc2d9d44c6ee7a5ca175a7904184800519e50a7c9bf5ba2f545d",
+          "producer_schema_digest": "sha256:e19916a9f8b9e191854c67e94011f286bd4435cd6d35048cc6fe83a50a3afcf3",
+          "receiver_schema_digest": "sha256:e19916a9f8b9e191854c67e94011f286bd4435cd6d35048cc6fe83a50a3afcf3",
+          "pin_digest": "sha256:245688760131522cd61975f1429286e4ef5f3615ddb5b415757d96c7ee176d56",
           "source_file": "telegram-chat/schema.yaml",
           "source_line": 1,
           "source_column": 1
@@ -617,7 +617,7 @@
       "check_id": "cross_surface_named_type_use",
       "severity": "lint_evidence",
       "location": "global",
-      "message": "authored object shape reuse candidate: identical shape {command_invocation:object?, conversation_reference:text, conversation_scope:text, external_account:text, provider_message_reference:integer, reply_to_message_reference:integer?, text:text} appears in event inbound.telegram.text_message payload; event telegram-chat/inbound.telegram.text_message payload; consider extracting or reusing a named type if these represent the same concept"
+      "message": "authored object shape reuse candidate: identical shape {command_invocation:object?, conversation_reference:text, conversation_scope:text, external_account:text, operator_account:text?, provider_message_reference:integer, reply_to_message_reference:integer?, text:text} appears in event inbound.telegram.text_message payload; event telegram-chat/inbound.telegram.text_message payload; consider extracting or reusing a named type if these represent the same concept"
     },
     {
       "check_id": "entity_reader_coverage",
