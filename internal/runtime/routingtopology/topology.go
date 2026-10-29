@@ -245,11 +245,7 @@ func rootInputSourceViews(source semanticview.Source) ([]RootInputSource, error)
 	if bundle.SourceArtifact == nil || len(bundle.SourceArtifact.ProviderDirectories()) == 0 {
 		return out, nil
 	}
-	rooted, err := bundle.RootedSource()
-	if err != nil {
-		return out, err
-	}
-	providers, err := packadmission.AdmitProviderSource(rooted, bundle.Platform)
+	providers, err := packadmission.ProviderSourceForBundle(bundle)
 	if err != nil {
 		return out, err
 	}

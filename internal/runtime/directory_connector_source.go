@@ -36,7 +36,7 @@ func compileDirectoryConnectorSource(source semanticview.Source, fact runtimecor
 	if rooted.Admission().BundleHash() != fact.BundleHash() {
 		return nil, fmt.Errorf("directory connector composition differs from its admitted source fact")
 	}
-	providers, err := packadmission.AdmitProviderSource(rooted, bundle.Platform)
+	providers, err := packadmission.ProviderSourceForBundle(bundle)
 	if err != nil {
 		return nil, err
 	}
