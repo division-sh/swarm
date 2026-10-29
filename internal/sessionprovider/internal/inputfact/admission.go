@@ -128,6 +128,11 @@ func (a Admission) RequireBusiness(ctx context.Context, provider string, generat
 	if err != nil {
 		return err
 	}
+	return capture.requireBusinessBinding(ctx, op, activation, rows)
+}
+
+// HITL binding admission is separate from account-only customer admission.
+func (capture Capture) requireBusinessBinding(ctx context.Context, op channelonboarding.Operation, activation channelonboarding.ConnectedChannelActivation, rows []operatorchannel.Binding) error {
 	matched := 0
 	for _, binding := range rows {
 		if capture.Responsibility.MatchesBusinessBinding(op, activation, binding, capture.BindingRevision) {

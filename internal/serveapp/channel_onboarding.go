@@ -5,6 +5,7 @@ import (
 	"errors"
 	"fmt"
 	"net/http"
+	"slices"
 	"sort"
 	"strings"
 	"time"
@@ -214,31 +215,11 @@ func compileServeChannelActivationSnapshot(ctx context.Context, manager *runtime
 			if err != nil {
 				return serveChannelActivationSnapshot{}, err
 			}
-			for _, contextDef := range manager.LoadedContexts() {
-				declarations, err := contextDef.StandingTargetDeclarations()
-				if err != nil {
-					return serveChannelActivationSnapshot{}, err
-				}
-				candidates, err := serveChannelContextCandidates(contextDef, declarations)
-				if err != nil {
-					return serveChannelActivationSnapshot{}, err
-				}
-				for _, op := range registered {
-					if !op.AccountConfirmed || op.Provider != "whatsapp" || op.Phase == channelonboarding.PhaseFailed || op.Phase == channelonboarding.PhaseRetired {
-						continue
-					}
-					for _, candidate := range candidates {
-						if candidate.Provider != op.Provider || candidate.Coordinate.Validate() != nil {
-							continue
-						}
-						compiled, err := channelonboarding.CompileRegisteredActivation(candidate, op)
-						if err != nil {
-							return serveChannelActivationSnapshot{}, err
-						}
-						learned = append(learned, compiled)
-					}
-				}
+			compiled, err := compileServeRegisteredChannelActivations(manager.LoadedContexts(), registered)
+			if err != nil {
+				return serveChannelActivationSnapshot{}, err
 			}
+			learned = append(learned, compiled...)
 		}
 		prebinding, err = compileServePrebindingActivations(ctx, catalog, operations, projection)
 		if err != nil {
@@ -254,6 +235,36 @@ func compileServeChannelActivationSnapshot(ctx context.Context, manager *runtime
 		return serveChannelActivationSnapshot{}, err
 	}
 	return serveChannelActivationSnapshot{Activations: merged, Prebinding: prebinding}, nil
+}
+
+func compileServeRegisteredChannelActivations(contexts []runtime.BundleContext, registered []channelonboarding.Operation) ([]channelonboarding.CompiledActivation, error) {
+	var activations []channelonboarding.CompiledActivation
+	registered = slices.DeleteFunc(slices.Clone(registered), func(op channelonboarding.Operation) bool {
+		return !op.AccountConfirmed || op.Provider != "whatsapp" || op.Phase == channelonboarding.PhaseFailed || op.Phase == channelonboarding.PhaseRetired
+	})
+	for _, contextDef := range contexts {
+		declarations, err := contextDef.StandingTargetDeclarations()
+		if err != nil {
+			return nil, err
+		}
+		candidates, err := serveChannelContextCandidates(contextDef, declarations)
+		if err != nil {
+			return nil, err
+		}
+		for _, op := range registered {
+			for _, candidate := range candidates {
+				if candidate.Provider != op.Provider || candidate.Coordinate.Validate() != nil {
+					continue
+				}
+				compiled, err := channelonboarding.CompileRegisteredActivation(candidate, op)
+				if err != nil {
+					return nil, err
+				}
+				activations = append(activations, compiled)
+			}
+		}
+	}
+	return activations, nil
 }
 
 func compileServeLearnedChannelActivations(ctx context.Context, store channelonboarding.Store, catalog *channelonboarding.CandidateCatalog, activations []channelonboarding.ConnectedChannelActivation, projection *runtimecredentials.SecretBindingProjection, targetEnabled channelonboarding.TargetEnablementReader) ([]channelonboarding.CompiledActivation, error) {

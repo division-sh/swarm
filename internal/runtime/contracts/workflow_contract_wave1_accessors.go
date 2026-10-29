@@ -22,6 +22,15 @@ type FlowOperatorAccount struct {
 	Policy     string
 }
 
+// Value reads the one admitted placement; absent state is not an account default.
+func (a FlowOperatorAccount) Value(fields map[string]any) (string, bool) {
+	if a.FromPolicy {
+		return a.Policy, true
+	}
+	value, assigned := fields["operator_account"].(string)
+	return value, assigned
+}
+
 func (b *WorkflowContractBundle) ResolveFlowOperatorAccount(flowID string) (FlowOperatorAccount, error) {
 	var absent FlowOperatorAccount
 	schema, found := b.FlowSchemaByID(flowID)

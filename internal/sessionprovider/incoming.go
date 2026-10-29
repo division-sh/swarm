@@ -46,13 +46,8 @@ func captureSDKMessage(scope captureScope, source captureSource, occurrenceID st
 	if err := account.Validate(); err != nil {
 		return result, errCaptureScopeChanged
 	}
-	if event == nil || event.Message == nil || !exactMessageID(event.Info.ID) || event.Info.Timestamp.IsZero() || event.Info.Timestamp.UnixMilli() < 1 {
-		return result, errIncomingMalformed
-	}
-	if event.Info.IsFromMe || event.SourceWebMsg != nil || event.UnavailableRequestID != "" ||
-		event.IsViewOnce || event.IsViewOnceV2 || event.IsViewOnceV2Extension || event.IsBotInvoke ||
-		event.IsDocumentWithCaption || event.IsLottieSticker || event.NewsletterMeta != nil || event.Info.MsgBotInfo.EditType != "" {
-		return result, errIncomingUnsupported
+	if err := validateIncomingEnvelope(event); err != nil {
+		return result, err
 	}
 	chat, sender := event.Info.Chat.ToNonAD(), event.Info.Sender.ToNonAD()
 	if !personJID(sender) || !utf8.ValidString(chat.String()) || chat.IsEmpty() || chat.User == "" {
@@ -85,6 +80,18 @@ func captureSDKMessage(scope captureScope, source captureSource, occurrenceID st
 	result = capturedEvent{Scope: scope, OccurrenceID: occurrenceID, Conversation: payload.Conversation,
 		EventID: event.Info.ID, Kind: kind, Body: body, ReceivedAt: receivedAt.UTC(), Source: source}
 	return result, result.Validate()
+}
+
+func validateIncomingEnvelope(event *events.Message) error {
+	if event == nil || event.Message == nil || !exactMessageID(event.Info.ID) || event.Info.Timestamp.IsZero() || event.Info.Timestamp.UnixMilli() < 1 {
+		return errIncomingMalformed
+	}
+	if event.Info.IsFromMe || event.SourceWebMsg != nil || event.UnavailableRequestID != "" ||
+		event.IsViewOnce || event.IsViewOnceV2 || event.IsViewOnceV2Extension || event.IsBotInvoke ||
+		event.IsDocumentWithCaption || event.IsLottieSticker || event.NewsletterMeta != nil || event.Info.MsgBotInfo.EditType != "" {
+		return errIncomingUnsupported
+	}
+	return nil
 }
 
 func exactMessageID(id string) bool {
