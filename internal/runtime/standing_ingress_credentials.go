@@ -654,9 +654,8 @@ func (rt *Runtime) refreshStandingCredentialAdmission(ctx context.Context, selec
 	var siblingKeys []string
 	frozen := rt.standingCredentialAdmission
 	if frozen != nil {
-		if frozen.bindings[selected].registeredOnly {
-			return fmt.Errorf("registered account credentials require their explicit deployment admission")
-		}
+		// Explicit runtime enrollment owns its base entry, not the registered
+		// account entries: their captured evidence is validated and kept below.
 		for selector, binding := range frozen.bindings {
 			if selector != selected {
 				siblingKeys = append(siblingKeys, binding.credentialKeys...)

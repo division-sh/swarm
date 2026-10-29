@@ -60,7 +60,7 @@ func deploymentChannelHandlers(repo, config, directory string, stores *selected.
 		account, _ := req.Params["account"].(string)
 		if req.Method == "channel.list" && account != "" && runtimeOptions.manager != nil {
 			ref := channelonboarding.AccountReference{Provider: provider, Account: account}
-			return observeDeploymentAccountStatus(ctx, ref, runtimeOptions.manager, stores.DeploymentChannels(), clients, &mu)
+			return observeDeploymentAccountStatus(ctx, ref, runtimeOptions, stores.DeploymentChannels(), clients, &mu)
 		}
 		key := provider + ":" + id
 		mu.Lock()
@@ -75,7 +75,7 @@ func deploymentChannelHandlers(repo, config, directory string, stores *selected.
 		var result json.RawMessage
 		err = client.Dispatch(ctx, req.Method, req.Params, &result)
 		if err == nil && req.Method == "channel.list" && runtimeOptions.manager != nil {
-			result, err = observeDeploymentAccountList(ctx, result, runtimeOptions.manager, clients, &mu)
+			result, err = observeDeploymentAccountList(ctx, result, runtimeOptions, clients, &mu)
 		}
 		head, decodeErr := deploymentControlResult(result, err)
 		if decodeErr != nil {

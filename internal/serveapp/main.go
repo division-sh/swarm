@@ -1657,7 +1657,7 @@ func buildRuntimeComposition(ctx context.Context, req runtimeCompositionRequest)
 	var deploymentRegistration *runtimepublicingress.ProviderRegistrationController
 	deploymentChannels, deploymentClaims, restoreDeploymentChannels, closeDeploymentChannels := deploymentChannelHandlers(repo, cfgResult.Path, swarmDir.Path, stores, processWorkOwner, processCapability, func(ctx context.Context, callback, account string) bool {
 		return deploymentRegistration != nil && deploymentRegistration.OwnsAccountCallback(ctx, callback, account)
-	}, deploymentRuntimeOptions{manager: runtimeContextManager, sessions: sessionBootstrap, refresh: channelActivationRefresher.RefreshChannelActivations})
+	}, deploymentRuntimeOptions{manager: runtimeContextManager, sessions: sessionBootstrap, refresh: channelActivationRefresher.RefreshChannelActivations, ingress: ready})
 	defer func() {
 		if err := closeDeploymentChannels(); err != nil {
 			log.Printf("deployment channel shutdown failed: %T", err)
