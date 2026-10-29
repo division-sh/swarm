@@ -47,7 +47,7 @@ func TestChannelOneBotManyConversationsPublicJourney(t *testing.T) {
 				t.Fatal(err)
 			}
 			bundleHash := servedEventPublishFixtureBundleHash(t, h.opts.SourceRoot)
-			registerChannelFixtureAccount(t, h.opts.ConfigPath, "bot-token")
+			registerChannelFixtureAccount(t, h.opts.ConfigPath, "bot-token", "420079")
 			h.start(t)
 			defer h.stop(t)
 			connected := runChannelOnboardingCLIJourney(t, h.opts.ConfigPath, h.endpoint, h.provider,

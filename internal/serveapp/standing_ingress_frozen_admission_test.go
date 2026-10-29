@@ -7,6 +7,7 @@ import (
 	"fmt"
 	"io"
 	"net/http"
+	"net/http/httptest"
 	"os"
 	"path/filepath"
 	"strings"
@@ -48,7 +49,11 @@ func TestServeIngressFrozenCredentialSiblingIsolationBothStores(t *testing.T) {
 	for _, backend := range []string{"sqlite", "postgres"} {
 		for _, point := range []string{"independent_sibling", "shared_key_sibling"} {
 			t.Run(backend+"/"+point, func(t *testing.T) {
-				runServeIngressFrozenCredentialJourney(t, backend, "pack", point)
+				policy := "pack"
+				if point == "shared_key_sibling" {
+					policy = "raw" // A shared key is an ordinary signed-provider boundary, not two owners of one bot.
+				}
+				runServeIngressFrozenCredentialJourney(t, backend, policy, point)
 			})
 		}
 	}
@@ -90,7 +95,7 @@ func runServeIngressFrozenCredentialJourney(t *testing.T, backend, policy, point
 	}
 	hasSibling := point == "independent_sibling" || point == "shared_key_sibling"
 	if hasSibling {
-		key := "telegram.webhook_signing_secret"
+		key := signingKey
 		if point == "independent_sibling" {
 			key = "partner.webhook_signing_secret"
 			if err := file.Set(ctx, key, "original-secret"); err != nil {
@@ -140,27 +145,78 @@ func runServeIngressFrozenCredentialJourney(t *testing.T, backend, policy, point
 		opts.ConfigPath = writeChannelOnboardingPostgresRuntimeConfig(t, dsn)
 	}
 	enableChannelOnboardingRecoveryOnStartup(t, opts.ConfigPath)
+	originalSecret := "original-secret"
+	refusalStatus := http.StatusServiceUnavailable
+	var provider *channelOnboardingTelegramProvider
+	if policy == "pack" {
+		refusalStatus = http.StatusNotFound // Native callbacks lose currentness before gateway admission.
+		provider = &channelOnboardingTelegramProvider{}
+		telegram := httptest.NewServer(provider)
+		t.Cleanup(telegram.Close)
+		redirectExternalHosts(t, map[string]string{"api.telegram.org": telegram.URL})
+		op := registerChannelFixtureAccount(t, opts.ConfigPath, "fixture-bot-token", "420079")
+		found := false
+		for _, admission := range op.CredentialAdmissions {
+			if admission.Role != "telegram.webhook_signing_secret" {
+				continue
+			}
+			if found {
+				t.Fatal("duplicate registered signing role")
+			}
+			found, signingKey = true, admission.StoreKey
+			var present bool
+			originalSecret, present, err = file.Get(ctx, signingKey)
+			if err != nil || !present {
+				t.Fatalf("registered signing credential absent: %v", err)
+			}
+		}
+		if !found {
+			t.Fatal("registered operation has no signing credential")
+		}
+		opts.PublicWebhookBaseURL = "https://hooks.channel-onboarding.test"
+	}
 	var process *serveRuntimeTestProcess
 	var endpoint string
 	start := func() {
 		t.Helper()
+		if policy == "pack" {
+			opts.PublicWebhookListener = reserveChannelOnboardingListener(t)
+			opts.PublicWebhookListen = opts.PublicWebhookListener.Addr().String()
+			redirectExternalHosts(t, map[string]string{"hooks.channel-onboarding.test": "http://" + opts.PublicWebhookListen})
+		}
 		process = startServeRuntimeTestProcess(t, opts)
 		process.waitForReadyLine()
 		endpoint = "http://" + serveRuntimeAPIListenerFromOutput(t, process.outputString())
 	}
 	start()
 	t.Cleanup(func() { process.stop() })
+	if policy == "pack" {
+		_, secret, count := provider.Registration()
+		if count == 0 || secret != originalSecret {
+			t.Fatal("registered callback does not carry the independently known operation key")
+		}
+	}
+	inboundURL := func(alias, incomingProvider string) string {
+		if policy == "pack" {
+			if alias == "chat" && incomingProvider == "telegram" {
+				callback, _, _ := provider.Registration()
+				return callback
+			}
+			return opts.PublicWebhookBaseURL + "/webhooks/" + alias + "/" + incomingProvider
+		}
+		return endpoint + "/webhooks/" + alias + "/" + incomingProvider
+	}
 	postTo := func(id int, secret, provider string) int {
 		t.Helper()
 		alias := "chat"
 		if hasSibling && provider == "partner" {
 			alias = "chat.partner"
 			if point == "shared_key_sibling" {
-				provider = "telegram"
+				provider = providerName
 			}
 		}
 		body := fmt.Sprintf(`{"update_id":%d,"message":{"message_id":%d,"from":{"id":42},"chat":{"id":42,"type":"private"},"text":"probe"}}`, id, id)
-		req, err := http.NewRequest(http.MethodPost, endpoint+"/webhooks/"+alias+"/"+provider, strings.NewReader(body))
+		req, err := http.NewRequest(http.MethodPost, inboundURL(alias, provider), strings.NewReader(body))
 		if err != nil {
 			t.Fatal(err)
 		}
@@ -201,7 +257,7 @@ func runServeIngressFrozenCredentialJourney(t *testing.T, backend, policy, point
 					t.Fatalf("unexpected effective subject: %#v", subject)
 				}
 			}
-			for _, secret := range []string{"original-secret", "unadmitted-replacement"} {
+			for _, secret := range []string{originalSecret, "original-secret", "unadmitted-replacement"} {
 				if strings.Contains(packs.RenderSubject(subject, true), secret) {
 					t.Fatal("capability readback leaked signing bytes")
 				}
@@ -234,10 +290,10 @@ func runServeIngressFrozenCredentialJourney(t *testing.T, backend, policy, point
 		return result
 	}
 	assertReadback(true, packs.RequirementStatusBound)
-	if code := post(80001, "original-secret"); code != http.StatusAccepted {
+	if code := post(80001, originalSecret); code != http.StatusAccepted {
 		t.Fatalf("original admission HTTP %d", code)
 	}
-	if code := post(80001, "original-secret"); code != http.StatusOK {
+	if code := post(80001, originalSecret); code != http.StatusOK {
 		t.Fatalf("exact duplicate HTTP %d", code)
 	}
 	if hasSibling {
@@ -246,7 +302,7 @@ func runServeIngressFrozenCredentialJourney(t *testing.T, backend, policy, point
 		}
 		before := counts()
 		set("unadmitted-replacement")
-		if code := post(80811, "unadmitted-replacement"); code != http.StatusServiceUnavailable {
+		if code := post(80811, "unadmitted-replacement"); code != refusalStatus {
 			t.Fatalf("rotated main binding HTTP %d", code)
 		}
 		if after := counts(); fmt.Sprint(after) != fmt.Sprint(before) {
@@ -273,7 +329,7 @@ func runServeIngressFrozenCredentialJourney(t *testing.T, backend, policy, point
 			if err := os.WriteFile(credentialPath, []byte("{invalid credential document"), 0600); err != nil {
 				t.Fatal(err)
 			}
-			if code := post(80800, "original-secret"); code != http.StatusServiceUnavailable {
+			if code := post(80800, originalSecret); code != refusalStatus {
 				t.Fatalf("credential observation error HTTP %d", code)
 			}
 			owner, err := credentials.NewSnapshotOwner(file)
@@ -293,12 +349,12 @@ func runServeIngressFrozenCredentialJourney(t *testing.T, backend, policy, point
 		armed.Store(true)
 		if point == "body" {
 			reader, writer := io.Pipe()
-			req, err := http.NewRequest(http.MethodPost, endpoint+"/webhooks/chat/telegram", reader)
+			req, err := http.NewRequest(http.MethodPost, inboundURL("chat", providerName), reader)
 			if err != nil {
 				t.Fatal(err)
 			}
 			req.Header.Set("Content-Type", "application/json")
-			req.Header.Set("X-Telegram-Bot-Api-Secret-Token", "original-secret")
+			req.Header.Set("X-Telegram-Bot-Api-Secret-Token", originalSecret)
 			result := make(chan error, 1)
 			go func() {
 				response, err := http.DefaultClient.Do(req)
@@ -333,7 +389,7 @@ func runServeIngressFrozenCredentialJourney(t *testing.T, backend, policy, point
 			rt.Bus.SetProviderOutputAuthorizationVerifier(&frozenIngressMutationVerifier{verify: rt.Options.ProviderTriggerCatalog.VerifyProviderOutputAuthorization, mutate: func() error {
 				return file.Set(ctx, signingKey, "unadmitted-replacement")
 			}})
-			if code := post(80800, "original-secret"); code != http.StatusServiceUnavailable {
+			if code := post(80800, originalSecret); code != http.StatusServiceUnavailable {
 				t.Fatalf("mutation during publication preparation HTTP %d", code)
 			}
 		}
@@ -343,14 +399,24 @@ func runServeIngressFrozenCredentialJourney(t *testing.T, backend, policy, point
 		assertReadback(false, packs.RequirementStatusBound)
 		return
 	}
+	if policy == "pack" {
+		if code := process.stop(); code != 0 {
+			t.Fatalf("stop before registered restart=%d", code)
+		}
+		start()
+		assertReadback(true, packs.RequirementStatusBound)
+		if code := post(80002, originalSecret); code != http.StatusAccepted {
+			t.Fatalf("restart lost the exact admitted registration: %d", code)
+		}
+	}
 	for i, mutation := range []struct {
 		name, value, presence string
 		remove                bool
 	}{
 		{"rotation", "unadmitted-replacement", packs.RequirementStatusBound, false},
 		{"deletion", "", packs.RequirementStatusUnbound, true},
-		{"restoration_ABA", "original-secret", packs.RequirementStatusBound, false},
-		{"same_value_new_observation", "original-secret", packs.RequirementStatusBound, false},
+		{"restoration_ABA", originalSecret, packs.RequirementStatusBound, false},
+		{"same_value_new_observation", originalSecret, packs.RequirementStatusBound, false},
 		{"unusable_value", " \t\n", packs.RequirementStatusUnbound, false},
 	} {
 		func() {
@@ -363,8 +429,8 @@ func runServeIngressFrozenCredentialJourney(t *testing.T, backend, policy, point
 			} else {
 				set(mutation.value)
 			}
-			for j, secret := range []string{"original-secret", "unadmitted-replacement"} {
-				want := http.StatusServiceUnavailable
+			for j, secret := range []string{originalSecret, "unadmitted-replacement"} {
+				want := refusalStatus
 				if policy == "unsigned" {
 					want = http.StatusAccepted
 				}
@@ -373,7 +439,7 @@ func runServeIngressFrozenCredentialJourney(t *testing.T, backend, policy, point
 				}
 			}
 			if policy != "unsigned" {
-				if code := post(80001, "original-secret"); code != http.StatusServiceUnavailable {
+				if code := post(80001, originalSecret); code != refusalStatus {
 					t.Fatalf("stale authentication admitted a historical duplicate: %d", code)
 				}
 				if after := counts(); fmt.Sprint(after) != fmt.Sprint(before) {
@@ -386,6 +452,9 @@ func runServeIngressFrozenCredentialJourney(t *testing.T, backend, policy, point
 				t.Fatalf("diagnostic read acquired executable authority: %v -> %v", beforeReadback, after)
 			}
 		}()
+	}
+	if policy == "pack" {
+		return // Restart cannot adopt an unreceipted replacement of a private operation key.
 	}
 	set("unadmitted-replacement")
 	if code := process.stop(); code != 0 {
@@ -424,9 +493,9 @@ func addFrozenIngressSibling(t *testing.T, root, signingKey string) {
 	t.Helper()
 	sibling := filepath.Join(root, "partner")
 	provider := "partner"
-	if signingKey == "telegram.webhook_signing_secret" {
-		provider = "telegram"
-		copyReleaseFixtureTree(t, filepath.Join(root, "telegram"), filepath.Join(sibling, provider))
+	if signingKey == "telegram_raw.webhook_signing_secret" {
+		provider = "telegram_raw"
+		copyReleaseFixtureTree(t, filepath.Join(root, provider), filepath.Join(sibling, provider))
 	} else {
 		writeFrozenIngressTrigger(t, sibling, provider, false)
 	}

@@ -26,7 +26,7 @@ import (
 
 var channelOnboardingExactChoicePattern = regexp.MustCompile(`source=.+? --interface (\S+) --target (\S+)`)
 
-func registerChannelFixtureAccount(t *testing.T, config, token string) {
+func registerChannelFixtureAccount(t *testing.T, config, token, account string) channelonboarding.Operation {
 	t.Helper()
 	input, err := os.CreateTemp(t.TempDir(), "account-token")
 	if err != nil {
@@ -43,11 +43,14 @@ func registerChannelFixtureAccount(t *testing.T, config, token string) {
 	os.Stdin = input
 	defer func() { os.Stdin = prior }()
 	var out, errOut bytes.Buffer
-	code := cliapp.Execute(t.Context(), []string{"--config", config, "channel", "connect", "telegram", "--yes"},
+	code := cliapp.Execute(t.Context(), []string{"--config", config, "channel", "connect", "telegram", "--yes", "--json"},
 		&out, &errOut, nil, nil, OpenChannelRegistration)
-	if code != 0 || !strings.Contains(out.String(), "Registered telegram account 420079.") {
+	var result channelonboarding.Result
+	if code != 0 || json.Unmarshal(out.Bytes(), &result) != nil || result.Operation.Provider != "telegram" ||
+		result.Operation.AccountReference != account || !result.Operation.AccountConfirmed || result.Operation.Phase != channelonboarding.PhaseSucceeded {
 		t.Fatalf("fixture account registration exit=%d err=%s", code, errOut.String())
 	}
+	return result.Operation
 }
 
 type channelOnboardingExactChoice struct {

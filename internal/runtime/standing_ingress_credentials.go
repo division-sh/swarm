@@ -30,6 +30,8 @@ type standingBindingCredentials struct {
 	missing              []string
 	sessionOperation     *channelonboarding.Operation
 	registeredOperations []channelonboarding.Operation
+	registeredOnly       bool
+	registered           *registeredStandingCredential
 }
 
 type standingCredentialAdmission struct {
@@ -505,10 +507,15 @@ func (rt *Runtime) standingIngressCredentialScope(target InboundTarget) (standin
 		rt.standingCredentialMu.Unlock()
 		return standingBindingCredentials{}, nil, nil, fmt.Errorf("standing ingress has no frozen credential admission")
 	}
-	credential, found := admission.bindings[standingIngressSelector(target.FlowPath, target.Provider)]
+	selector := registeredStandingSelector(standingIngressSelector(target.FlowPath, target.Provider), target.RegisteredOperationID)
+	credential, found := admission.bindings[selector]
 	if !found || credential.alias != target.Alias || !credential.plan.Generation().Equal(target.AdmissionPlan.Generation()) || credential.signingKey != target.SigningSecret || target.BundleHash != rt.Options.SourceArtifactFact.BundleHash() {
 		rt.standingCredentialMu.Unlock()
 		return standingBindingCredentials{}, nil, nil, fmt.Errorf("standing ingress target contradicts its frozen credential admission")
+	}
+	if credential.registered != nil && (credential.registered.operation.OperationID != target.RegisteredOperationID || credential.registered.holder.RunID != target.RunID || credential.registered.holder.Flow != target.FlowPath) {
+		rt.standingCredentialMu.Unlock()
+		return standingBindingCredentials{}, nil, nil, channelonboarding.ErrRevisionConflict
 	}
 	rt.standingCredentialMu.Unlock()
 	validate := func(ctx context.Context) error {
@@ -518,8 +525,8 @@ func (rt *Runtime) standingIngressCredentialScope(target InboundTarget) (standin
 		if current == nil {
 			return fmt.Errorf("standing ingress credential admission was withdrawn")
 		}
-		selected, found := current.bindings[standingIngressSelector(target.FlowPath, target.Provider)]
-		if !found || selected.enabled != credential.enabled || selected.signingKey != credential.signingKey || selected.alias != credential.alias || !selected.plan.Generation().Equal(credential.plan.Generation()) || selected.operationID != credential.operationID || !reflect.DeepEqual(selected.credentialKeys, credential.credentialKeys) || !reflect.DeepEqual(selected.admissions, credential.admissions) || !reflect.DeepEqual(selected.sessionOperation, credential.sessionOperation) {
+		selected, found := current.bindings[selector]
+		if !found || selected.enabled != credential.enabled || selected.signingKey != credential.signingKey || selected.alias != credential.alias || !selected.plan.Generation().Equal(credential.plan.Generation()) || selected.operationID != credential.operationID || selected.registeredOnly != credential.registeredOnly || !reflect.DeepEqual(selected.registered, credential.registered) || !reflect.DeepEqual(selected.credentialKeys, credential.credentialKeys) || !reflect.DeepEqual(selected.admissions, credential.admissions) || !reflect.DeepEqual(selected.sessionOperation, credential.sessionOperation) {
 			return fmt.Errorf("selected standing ingress credential admission was replaced")
 		}
 		if err := rt.validateStandingSessionBinding(ctx, credential); err != nil {
@@ -550,6 +557,9 @@ func (rt *Runtime) AdmitInboundCredentials(ctx context.Context, target InboundTa
 	if !credential.enabled {
 		return runtimecredentials.SecretBinding{}, nil, fmt.Errorf("standing ingress binding is not credential-enabled")
 	}
+	if credential.registeredOnly {
+		return runtimecredentials.SecretBinding{}, nil, fmt.Errorf("registered ingress requires its exact receiving operation")
+	}
 	if err := validate(ctx); err != nil {
 		return runtimecredentials.SecretBinding{}, nil, err
 	}
@@ -566,6 +576,9 @@ func (rt *Runtime) evaluateStandingIngressAdmission(ctx context.Context, target 
 	})
 	if err != nil {
 		return packs.Subject{}, nil, err
+	}
+	if credential.registeredOnly {
+		return rt.evaluateRegisteredStandingIngress(ctx, target, subject, presence)
 	}
 	current, err := evaluateStandingIngressCapabilitySubject(ctx, target, subject, presence)
 	if err != nil {
@@ -641,6 +654,9 @@ func (rt *Runtime) refreshStandingCredentialAdmission(ctx context.Context, selec
 	var siblingKeys []string
 	frozen := rt.standingCredentialAdmission
 	if frozen != nil {
+		if frozen.bindings[selected].registeredOnly {
+			return fmt.Errorf("registered account credentials require their explicit deployment admission")
+		}
 		for selector, binding := range frozen.bindings {
 			if selector != selected {
 				siblingKeys = append(siblingKeys, binding.credentialKeys...)
@@ -663,9 +679,13 @@ func (rt *Runtime) refreshStandingCredentialAdmission(ctx context.Context, selec
 	if err == nil {
 		if frozen != nil {
 			for selector, binding := range frozen.bindings {
-				if selector != selected && binding.plan.Transport() == packs.ChannelTransportSession {
+				if selector != selected && (binding.plan.Transport() == packs.ChannelTransportSession || binding.registeredOnly || binding.registered != nil) {
 					admission.bindings[selector] = binding
 				}
+			}
+			admission.projection, err = rt.sealStandingCredentialBindings(ctx, admission.bindings, "")
+			if err != nil {
+				return err
 			}
 		}
 		rt.standingCredentialAdmission = admission

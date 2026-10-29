@@ -208,6 +208,9 @@ func newChannelLifecycleCommand(opts rootCommandOptions, verb string) *cobra.Com
 			return runChannelConnect(cmd.Context(), cmd.OutOrStdout(), cmd.ErrOrStderr(), args[0], commandOpts)
 		},
 	}
+	if verb == "connect" {
+		cmd.Long = cmd.Short + "\n\nConnect with serve stopped. Restart serve when a new holder appears."
+	}
 	if verb != "reconnect" {
 		cmd.Flags().BoolVar(&commandOpts.noSave, "no-save", false, "Do not save the verified account proof on this machine")
 	}

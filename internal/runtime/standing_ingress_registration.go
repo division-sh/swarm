@@ -42,7 +42,7 @@ func (rt *Runtime) admitPublicIngressBinding(publication channelonboarding.Chann
 	if !credential.enabled {
 		return InboundTarget{}, false, fmt.Errorf("ingress registration binding is not admitted")
 	}
-	managed := credential.operationID != ""
+	managed := credential.operationID != "" || credential.registeredOnly
 	selector := standingIngressSelector(target.FlowPath, target.Provider)
 	for _, binding := range publication.Bindings() {
 		if binding.RegistrationTarget() != selector {

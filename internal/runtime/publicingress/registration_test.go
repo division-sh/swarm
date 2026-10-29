@@ -897,7 +897,7 @@ func TestProviderRegistrationReconcilerCollisionConvergenceAndNoResend(t *testin
 }
 
 func TestRegistrationSelectionCurrentnessAtProviderBoundaries(t *testing.T) {
-	for _, boundary := range []string{"identify", "apply", "readback", "settlement", "callback", "registered_callback", "registered_account_mismatch", "registered_operation_missing"} {
+	for _, boundary := range []string{"identify", "apply", "readback", "settlement", "callback", "registered_callback", "registered_account_mismatch", "registered_operation_missing", "registered_target_operation_mismatch", "registered_holder_mismatch"} {
 		t.Run(boundary, func(t *testing.T) {
 			phase := strings.TrimPrefix(boundary, "registered_")
 			file, err := runtimecredentials.NewFileStore(filepath.Join(t.TempDir(), "credentials.json"))
@@ -921,11 +921,19 @@ func TestRegistrationSelectionCurrentnessAtProviderBoundaries(t *testing.T) {
 				}
 				pair.ActivationSource, pair.PrebindingOperationID = channelonboarding.ActivationSourceRegistered, ""
 				pair.ChannelActivationGeneration, pair.OperatorAccount = publication.Generation(), "42"
+				pair.Target.RegisteredOperationID = pair.OnboardingOperationID
+				pair.AccountHolder = channelonboarding.AccountHolder{BundleHash: pair.Target.BundleHash, Flow: pair.Target.FlowPath, RunID: uuid.NewString(), FlowInstance: "registered-source-holder"}
 				if phase == "account_mismatch" {
 					pair.OperatorAccount = "43"
 				}
 				if phase == "operation_missing" {
 					pair.OnboardingOperationID = ""
+				}
+				if phase == "target_operation_mismatch" {
+					pair.Target.RegisteredOperationID = uuid.NewString()
+				}
+				if phase == "holder_mismatch" {
+					pair.AccountHolder.Flow = "foreign-source"
 				}
 			}
 			transport := &telegramRegistrationTransport{t: t}
@@ -956,10 +964,10 @@ func TestRegistrationSelectionCurrentnessAtProviderBoundaries(t *testing.T) {
 			readiness.SetRuntimeReady(true)
 			readiness.SetExposure(ExposureEvidence{GenerationID: exposure.ID, StartupAuthorityID: startup.GrantID, ExpiresAt: exposure.CreatedAt.Add(EvidenceTTL)})
 			err = controller.Reconcile(context.Background(), exposure, []RegistrationPair{pair})
-			if phase == "account_mismatch" || phase == "operation_missing" {
+			if phase == "account_mismatch" || phase == "operation_missing" || phase == "target_operation_mismatch" || phase == "holder_mismatch" {
 				identified, applied := transport.counts()
 				wantIdentify := 1
-				if phase == "operation_missing" {
+				if phase != "account_mismatch" {
 					wantIdentify = 0
 				}
 				if err == nil || phase == "account_mismatch" && !errors.Is(err, channelonboarding.ErrConflict) || identified != wantIdentify || applied != 0 || len(effects.Attempts) != 0 {

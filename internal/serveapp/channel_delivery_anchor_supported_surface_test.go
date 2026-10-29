@@ -388,7 +388,7 @@ func startChannelAnchorPublicJourney(t *testing.T, backend servedparity.Backend,
 	if err := credentials.Set(context.Background(), "telegram.webhook_signing_secret", "telegram-secret"); err != nil {
 		t.Fatal(err)
 	}
-	registerChannelFixtureAccount(t, h.opts.ConfigPath, token)
+	registerChannelFixtureAccount(t, h.opts.ConfigPath, token, "420079")
 	h.start(t)
 	t.Cleanup(func() { h.stop(t) })
 	var identity apiv1.RuntimeIdentityResult

@@ -224,6 +224,8 @@ func (o *RegistrationSnapshotOwner) recordAdmissionFailure(pair RegistrationPair
 
 func sameRegistrationSelection(left, right RegistrationPair) bool {
 	return left.BindingID == right.BindingID &&
+		left.ActivationSource == right.ActivationSource && left.OperatorAccount == right.OperatorAccount && left.AccountHolder == right.AccountHolder &&
+		left.OnboardingOperationID == right.OnboardingOperationID &&
 		left.PlanGeneration.Diagnostic() == right.PlanGeneration.Diagnostic() &&
 		left.ChannelActivationGeneration.Diagnostic() == right.ChannelActivationGeneration.Diagnostic() &&
 		left.OnboardingRevision == right.OnboardingRevision &&
@@ -238,7 +240,8 @@ func sameRegistrationSelection(left, right RegistrationPair) bool {
 		left.Target.Alias == right.Target.Alias &&
 		left.Target.Provider == right.Target.Provider &&
 		left.Target.AdmissionPlanGeneration.Diagnostic() == right.Target.AdmissionPlanGeneration.Diagnostic() &&
-		left.Target.SigningCredentialKey == right.Target.SigningCredentialKey
+		left.Target.SigningCredentialKey == right.Target.SigningCredentialKey &&
+		left.Target.RegisteredOperationID == right.Target.RegisteredOperationID
 }
 
 func (o *RegistrationSnapshotOwner) state(key string) (registrationState, bool) {

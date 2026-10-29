@@ -1725,7 +1725,7 @@ func buildRuntimeComposition(ctx context.Context, req runtimeCompositionRequest)
 				return current.CurrentStartupGrantEvidence()
 			},
 			SelectionCurrent: func(ctx context.Context, pair runtimepublicingress.RegistrationPair, exactRevision bool) (bool, error) {
-				return serveRegistrationSelectionCurrent(ctx, channelOnboardingStore, pair, exactRevision)
+				return serveRegistrationSelectionCurrent(ctx, runtimeContextManager, channelOnboardingStore, pair, exactRevision)
 			},
 			Readiness: ready,
 		})
@@ -1857,6 +1857,10 @@ func buildRuntimeComposition(ctx context.Context, req runtimeCompositionRequest)
 	// prepared grant held before normal runtime startup.
 	if err := recoverServeSelectedForkContexts(ctx, apiStoreCaps, rt, supervisor.selectedRecoveryEnvironment); err != nil {
 		presenter.fail(22, "selected_fork_recovery", err)
+		return 1
+	}
+	if err := admitServeRegisteredWebhookCredentials(ctx, runtimeContextManager, channelOnboardingStore); err != nil {
+		presenter.fail(22, "channel_registration", err)
 		return 1
 	}
 	for _, contextDef := range runtimeContexts {

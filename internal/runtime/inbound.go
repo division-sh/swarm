@@ -42,6 +42,7 @@ type InboundTarget struct {
 	Alias                 string
 	Provider              string
 	SigningSecret         string
+	RegisteredOperationID string
 	AdmissionPlan         providertriggers.InboundAdmissionPlan
 	registrationAdmission func(context.Context) error
 }

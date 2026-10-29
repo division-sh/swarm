@@ -7,6 +7,8 @@ import (
 	"net/http"
 	"net/http/httptest"
 	"path/filepath"
+	"sort"
+	"strconv"
 	"strings"
 	"testing"
 	"time"
@@ -17,6 +19,7 @@ import (
 	"github.com/division-sh/swarm/internal/config"
 	"github.com/division-sh/swarm/internal/events"
 	"github.com/division-sh/swarm/internal/operatorread"
+	"github.com/division-sh/swarm/internal/packadmission"
 	runtimepkg "github.com/division-sh/swarm/internal/runtime"
 	runtimebus "github.com/division-sh/swarm/internal/runtime/bus"
 	"github.com/division-sh/swarm/internal/runtime/core/flowidentity"
@@ -53,6 +56,7 @@ type servedWorkspaceProofRuntime struct {
 	FlowRuns    runlifecycle.LandingRunReader
 	ForkRuntime selectedForkRuntimeProofOptions
 	Restart     func() servedWorkspaceProofRuntime
+	Telegram    *channelOnboardingTelegramProvider
 }
 
 func requireServedLandingRun(t testing.TB, rt *runtimepkg.Runtime, flow string) runlifecycle.LandingRun {
@@ -119,6 +123,42 @@ func startWorkspaceGatewayProofRuntimeWithPosture(t *testing.T, backend servedpa
 		t.Fatal("at most one handler-start barrier is supported")
 	}
 	proof := servedWorkspaceProofRuntime{BundleHash: servedEventPublishFixtureBundleHash(t, sourceRoot)}
+	var accounts []string
+	if posture == executionposture.Live {
+		bundle := loadWorkflowValidationBundleAt(t, sourceRoot)
+		rooted, err := bundle.RootedSource()
+		if err != nil {
+			t.Fatal(err)
+		}
+		providers, err := packadmission.AdmitProviderSource(rooted, bundle.Platform)
+		if err != nil {
+			t.Fatal(err)
+		}
+		seen := map[string]bool{}
+		for _, flow := range providers.FlowPaths() {
+			scope, err := providers.Scope(flow)
+			if err != nil {
+				t.Fatal(err)
+			}
+			provider, placement, err := scope.ConnectionAccount(bundle)
+			if err != nil {
+				t.Fatal(err)
+			}
+			plan, held := provider.ChannelPlan()
+			if !held || placement.FlowID == "" || plan.Provider() != "telegram" {
+				continue
+			}
+			account, assigned := placement.Value(nil)
+			if !assigned {
+				t.Fatal("live Telegram fixture must explicitly own its receiving account")
+			}
+			if !seen[account] {
+				accounts = append(accounts, account)
+				seen[account] = true
+			}
+		}
+		sort.Strings(accounts)
+	}
 	forkOptions := captureServedForkRuntimeOptions(t)
 	previousProjection := projectRuntimePersistenceForServe
 	projectRuntimePersistenceForServe = func(owner *selectedStoreOwner) serveRuntimePersistence {
@@ -207,7 +247,13 @@ func startWorkspaceGatewayProofRuntimeWithPosture(t *testing.T, backend servedpa
 		}))
 		t.Cleanup(provider.Close)
 		redirectExternalHosts(t, map[string]string{"api.anthropic.com": provider.URL})
-		setDoctorProviderSecret(t, "ANTHROPIC_API_KEY", "workspace-live-proof-key")
+		credentialStore, err := cliapp.CredentialFileStore()
+		if err != nil {
+			t.Fatal(err)
+		}
+		if err := credentialStore.Set(context.Background(), "ANTHROPIC_API_KEY", "workspace-live-proof-key"); err != nil {
+			t.Fatal(err)
+		}
 	}
 	if len(hooks) == 1 {
 		opts.TestWorkflowNodeHandlerStartHook = hooks[0]
@@ -237,14 +283,42 @@ func startWorkspaceGatewayProofRuntimeWithPosture(t *testing.T, backend servedpa
 		if posture == executionposture.Live {
 			opts.ConfigPath = writeStoreBackendRuntimeConfig(t, storebackend.BackendPostgres.String(), "")
 		}
+		if len(accounts) > 0 {
+			opts.ConfigPath = writeChannelOnboardingPostgresRuntimeConfig(t, dsn)
+		}
 		opts.StoreMode, opts.StoreModeSet = "postgres", true
 	default:
 		t.Fatalf("unknown served workspace backend %q", backend)
 	}
+	if len(accounts) > 0 {
+		proof.Telegram = &channelOnboardingTelegramProvider{}
+		provider := httptest.NewServer(proof.Telegram)
+		t.Cleanup(provider.Close)
+		redirectExternalHosts(t, map[string]string{"api.telegram.org": provider.URL})
+		for _, account := range accounts {
+			id, err := strconv.ParseInt(account, 10, 64)
+			if err != nil || id <= 0 {
+				t.Fatal("live Telegram fixture account must be a canonical bot ID")
+			}
+			token := "fixture-token-" + account
+			proof.Telegram.SetResourceID(token, id)
+			registerChannelFixtureAccount(t, opts.ConfigPath, token, account)
+		}
+		opts.PublicWebhookBaseURL = "https://hooks.channel-onboarding.test"
+	}
 	retainedRoot := ownedMockLifecycleRoot(t)
 	var process *serveRuntimeTestProcess
 	start := func() {
-		process = startOwnedLifecycleTestProcess(t, repoRootForTest(), retainedRoot, opts, posture)
+		if proof.Telegram != nil {
+			opts.PublicWebhookListener = reserveChannelOnboardingListener(t)
+			opts.PublicWebhookListen = opts.PublicWebhookListener.Addr().String()
+			redirectExternalHosts(t, map[string]string{"hooks.channel-onboarding.test": "http://" + opts.PublicWebhookListen})
+		}
+		if proof.Telegram != nil {
+			process = startServeRuntimeTestProcess(t, opts)
+		} else {
+			process = startOwnedLifecycleTestProcess(t, repoRootForTest(), retainedRoot, opts, posture)
+		}
 		process.waitForReadyLine()
 		proof.Endpoint = "http://" + serveRuntimeAPIListenerFromOutput(t, process.outputString()) + "/v1/rpc"
 		proof.Runtime = servedTestProcessRuntime(t, process)

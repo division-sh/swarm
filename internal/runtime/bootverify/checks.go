@@ -515,6 +515,11 @@ func (c *checkerContext) policyConflicts() []Finding {
 			if key == "" {
 				continue
 			}
+			if key == "operator_account" {
+				// Receiving accounts are independently selected per flow, not an
+				// inherited deployment restriction. Their placement is verified.
+				continue
+			}
 			rootValue, ok := root.Values[key]
 			if !ok {
 				continue

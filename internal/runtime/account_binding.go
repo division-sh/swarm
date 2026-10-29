@@ -111,7 +111,13 @@ func (m *RuntimeContextManager) AccountHolders(ctx context.Context, ref channelo
 			if err != nil {
 				return nil, err
 			}
-			holders = append(holders, rows...)
+			// W1 constructs the eager root tree in each ingress run. Copies in
+			// another flow's run are not that flow's receiving-account owner.
+			for _, row := range rows {
+				if row.Flow == activation.FlowPath {
+					holders = append(holders, row)
+				}
+			}
 		}
 	}
 	slices.SortFunc(holders, func(a, b channelonboarding.AccountHolder) int {
