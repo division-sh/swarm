@@ -57,6 +57,17 @@ func deploymentChannelHandlers(repo, config, directory string, stores *selected.
 		var err error
 		provider, _ := req.Params["provider"].(string)
 		id, _ := req.Params["operation_id"].(string)
+		if account, _ := req.Params["account"].(string); req.Method == "channel.list" && account != "" {
+			ref, err := channelonboarding.CanonicalAccount(provider, account)
+			if err != nil {
+				return nil, err
+			}
+			op, err := channelonboarding.RegisteredAccount(ctx, stores.DeploymentChannels(), ref)
+			if err != nil && !errors.Is(err, channelonboarding.ErrNotFound) {
+				return nil, err
+			}
+			id = op.OperationID
+		}
 		key := provider + ":" + id
 		mu.Lock()
 		client, found := clients[key]

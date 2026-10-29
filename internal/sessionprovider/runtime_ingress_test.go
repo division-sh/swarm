@@ -85,6 +85,8 @@ func TestWhatsAppRuntimeIncomingPublishesBeforeAcknowledgementBothStores(t *test
 			publication := inboundpublication.BindingGeneration{RunID: f.standing.RunID}
 			incoming := RuntimeIncomingOptions{Alias: "whatsapp", Trigger: f.trigger, Bus: f.publicationBus(t), Posture: executionposture.Live}
 			var held atomic.Bool
+			var changedRun, changedSource atomic.Bool
+			var releases atomic.Int64
 			selector := func(ctx context.Context, op channelonboarding.Operation) (RegisteredBusinessBinding, error) {
 				if op.OperationID != f.operation.OperationID || op.SessionAccount != f.operation.SessionAccount || !op.AccountConfirmed {
 					return RegisteredBusinessBinding{}, channelonboarding.ErrRevisionConflict
@@ -92,14 +94,21 @@ func TestWhatsAppRuntimeIncomingPublishesBeforeAcknowledgementBothStores(t *test
 				if !held.Load() {
 					return RegisteredBusinessBinding{}, ErrAccountUnclaimed
 				}
-				return RegisteredBusinessBinding{Context: f.ctx, Incoming: incoming, Coordinate: f.source.Coordinate,
-					TargetSelector: "ingress:.:whatsapp", Publication: publication,
+				coordinate, selectedPublication := f.source.Coordinate, publication
+				if changedRun.Load() {
+					selectedPublication.RunID = uuid.NewString()
+				}
+				if changedSource.Load() {
+					coordinate.BundleHash = "sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
+				}
+				return RegisteredBusinessBinding{Context: f.ctx, Incoming: incoming, Coordinate: coordinate,
+					TargetSelector: "ingress:.:whatsapp", Publication: selectedPublication,
 					Current: func(context.Context) error {
 						if !held.Load() {
 							return channelonboarding.ErrRevisionConflict
 						}
 						return f.ctx.Err()
-					}, Release: func() error { return nil }}, nil
+					}, Release: func() error { releases.Add(1); return nil }}, nil
 			}
 			if err := f.state.close(f.ctx); err != nil {
 				t.Fatal(err)
@@ -112,21 +121,27 @@ func TestWhatsAppRuntimeIncomingPublishesBeforeAcknowledgementBothStores(t *test
 			operations := f.selected.(interface {
 				DeploymentChannelOperations() channelonboarding.OperationStore
 			}).DeploymentChannelOperations()
-			c, err := OpenDeploymentConnection(f.ctx, DeploymentConnectionOptions{Directory: f.basePath, Store: f.selected,
-				Operations: operations, OperationID: f.operation.OperationID, Principal: principal, Process: process,
-				Plan: f.channel, Trigger: f.trigger, RegisteredBusiness: selector})
-			if err != nil {
-				t.Fatal(err)
+			open := func() *RuntimeConnection {
+				c, err := OpenDeploymentConnection(f.ctx, DeploymentConnectionOptions{Directory: f.basePath, Store: f.selected,
+					Operations: operations, OperationID: f.operation.OperationID, Principal: principal, Process: process,
+					Plan: f.channel, Trigger: f.trigger, RegisteredBusiness: selector})
+				if err != nil {
+					t.Fatal(err)
+				}
+				t.Cleanup(func() {
+					if err := c.Close(context.Background()); err != nil {
+						t.Error(err)
+					}
+				})
+				return c
 			}
 			t.Cleanup(func() {
-				if err := c.Close(context.Background()); err != nil {
-					t.Error(err)
-				}
 				process.Retire()
 				if _, err := process.Join(context.Background()); err != nil {
 					t.Error(err)
 				}
 			})
+			c := open()
 			connectRuntimeConnectionFixture(t, f, c)
 			unclaimed, at := uuid.NewString(), time.Now()
 			sendRuntimeIncomingAtFixture(t, f, c, unclaimed, "no current holder", at)
@@ -160,6 +175,47 @@ func TestWhatsAppRuntimeIncomingPublishesBeforeAcknowledgementBothStores(t *test
 			repeated, found, err := f.selected.(sessionBusinessStore).LoadInboundPublicationByIdentity(f.ctx, runtimeIncomingIdentityFixture(t, f, id))
 			if err != nil || !found || repeated.Request.RequestFingerprint != record.Request.RequestFingerprint || repeated.OutputCount != record.OutputCount {
 				t.Fatal("registered account replay changed its original runtime publication", found, err)
+			}
+			if err := storetest.SetSessionPublicationInsertFault(f.ctx, f.selected, true); err != nil {
+				t.Fatal(err)
+			}
+			t.Cleanup(func() { _ = storetest.SetSessionPublicationInsertFault(context.Background(), f.selected, false) })
+			recoveryID := uuid.NewString()
+			sendRuntimeIncomingFixture(t, f, c, recoveryID, "retained registered customer input")
+			waitRuntimeIncomingFailure(t, f, c, recoveryID)
+			fixture, spool := openCaptureFixture(t, filepath.Join(c.state.directory.path, "provider.db"), f.operation.SessionAccount.ConnectionID)
+			pending, err := spool.pendingPublications(f.ctx)
+			if err != nil || len(pending) != 1 || pending[0].request == nil || pending[0].event.EventID != recoveryID {
+				t.Fatal("registered publication failure lost exact retained request", len(pending), err)
+			}
+			frozen := bytes.Clone(pending[0].requestBytes)
+			if err := fixture.Close(); err != nil {
+				t.Fatal(err)
+			}
+			if err := storetest.SetSessionPublicationInsertFault(f.ctx, f.selected, false); err != nil {
+				t.Fatal(err)
+			}
+			c = open()
+			connectRuntimeConnectionFixture(t, f, c)
+			for _, changed := range []*atomic.Bool{&changedRun, &changedSource} {
+				changed.Store(true)
+				before := releases.Load()
+				if err := c.ReconcileIncoming(f.ctx); !errors.Is(err, errCaptureScopeChanged) || releases.Load() != before+1 {
+					t.Fatal("registered recovery adopted changed source/run or leaked its use", err)
+				}
+				changed.Store(false)
+			}
+			before := releases.Load()
+			if err := c.ReconcileIncoming(f.ctx); err != nil || releases.Load() != before+1 {
+				t.Fatal("registered recovery failed to reacquire and release the exact original holder", err)
+			}
+			recovered, found, err := f.selected.(sessionBusinessStore).LoadInboundPublicationByIdentity(f.ctx, runtimeIncomingIdentityFixture(t, f, recoveryID))
+			actual, encodeErr := publicationRequestBytes(recovered.Request)
+			if err != nil || !found || encodeErr != nil || !bytes.Equal(actual, frozen) {
+				t.Fatal("registered recovery lost or rewrote its retained publication", found, err, encodeErr)
+			}
+			if pending, err := c.captures.pending(f.ctx); err != nil || len(pending) != 0 {
+				t.Fatal("registered recovery did not retire completed capture", len(pending), err)
 			}
 		})
 		t.Run(backend, func(t *testing.T) {

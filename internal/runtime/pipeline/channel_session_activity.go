@@ -14,7 +14,6 @@ import (
 	correlation "github.com/division-sh/swarm/internal/runtime/correlation"
 	"github.com/division-sh/swarm/internal/runtime/engine"
 	"github.com/division-sh/swarm/internal/runtime/executionmode"
-	runtimefailures "github.com/division-sh/swarm/internal/runtime/failures"
 )
 
 func (pc *PipelineCoordinator) prepareSessionActivityIntents(ctx context.Context, intents []engine.ActivityIntent) ([]engine.ActivityIntent, func(), error) {
@@ -61,14 +60,6 @@ func (pc *PipelineCoordinator) prepareSessionActivityIntent(ctx context.Context,
 	if err != nil {
 		return intent, nil, fmt.Errorf("session activity account: %w", err)
 	}
-	if _, err := channelonboarding.RegisteredAccount(ctx, pc.registeredAccounts, ref); err != nil {
-		if err == channelonboarding.ErrNotFound {
-			err = runtimefailures.New(runtimefailures.ClassAuthenticationNeeded, "channel_account_not_linked", "activity-runtime", "prepare_session_activity", map[string]any{
-				"auth_kind": "channel_account", "provider": ref.Provider, "account": ref.Account,
-			})
-		}
-		return intent, nil, err
-	}
 	if intent.NativeSessionTarget != "" && account != ref.Account {
 		return intent, nil, fmt.Errorf("frozen session activity account is not canonical")
 	}
@@ -78,6 +69,9 @@ func (pc *PipelineCoordinator) prepareSessionActivityIntent(ctx context.Context,
 		return intent, nil, err
 	}
 	if pc.channelActivations == nil {
+		if _, err := pc.activityAccountRegistration(ctx, ref); err != nil {
+			return intent, nil, err
+		}
 		return intent, nil, fmt.Errorf("authored session activity requires its original activation owner")
 	}
 	fact, pinned := correlation.SourceArtifactFactFromContext(ctx)
@@ -90,13 +84,25 @@ func (pc *PipelineCoordinator) prepareSessionActivityIntent(ctx context.Context,
 	}
 	lease, err := pc.channelActivations.AcquirePresentationContext(ctx)
 	if err != nil {
+		if _, accountErr := pc.activityAccountRegistration(ctx, ref); accountErr != nil {
+			return intent, nil, accountErr
+		}
 		return intent, nil, err
 	}
 	intent.BundleHash, intent.WorkflowVersion = fact.BundleHash(), version
 	projection, err := pc.compileAuthoredSessionActivity(ctx, intent, lease)
 	if err != nil {
 		lease.Release()
+		if _, accountErr := pc.activityAccountRegistration(ctx, ref); accountErr != nil {
+			return intent, nil, accountErr
+		}
 		return intent, nil, err
+	}
+	if projection.Activation().Source == channelonboarding.ActivationSourceRegistered {
+		if _, err := pc.activityAccountRegistration(ctx, ref); err != nil {
+			lease.Release()
+			return intent, nil, err
+		}
 	}
 	private := projection.PrivateTarget()
 	if intent.NativeSessionTarget != "" && (intent.NativeSessionTarget != private.ToolID() || !intent.PlanGeneration.Equal(private.Generation()) || !intent.ChannelActivationGeneration.Equal(lease.Generation())) {

@@ -163,10 +163,18 @@ func (c *RuntimeConnection) registeredCustomerIncoming(ctx context.Context, inco
 	if terminal, err := c.captures.isUnclaimed(ctx, unclaimed); err != nil || terminal {
 		return nil, err
 	}
-	binding, err := c.registeredBusiness(ctx, op)
+	incoming, err = c.registeredBusinessIncoming(ctx, op)
 	if errors.Is(err, ErrAccountUnclaimed) {
 		return nil, c.captures.retainUnclaimed(ctx, unclaimed)
 	}
+	return incoming, err
+}
+
+func (c *RuntimeConnection) registeredBusinessIncoming(ctx context.Context, op channelonboarding.Operation) (*runtimeIncoming, error) {
+	if c.registeredBusiness == nil {
+		return nil, errRuntimeIngressUnavailable
+	}
+	binding, err := c.registeredBusiness(ctx, op)
 	if err != nil {
 		return nil, err
 	}
@@ -179,12 +187,37 @@ func (c *RuntimeConnection) registeredCustomerIncoming(ctx context.Context, inco
 	if err := binding.Current(binding.Context); err != nil {
 		return nil, errors.Join(err, binding.Release())
 	}
-	incoming, err = newRuntimeIncoming(c, binding.Incoming)
+	incoming, err := newRuntimeIncoming(c, binding.Incoming)
 	if err != nil {
 		return nil, errors.Join(err, binding.Release())
 	}
 	incoming.registered, incoming.handoff.input.registered = &binding, &binding
 	return incoming, nil
+}
+
+func (c *RuntimeConnection) reconcileRegisteredBusiness(ctx context.Context, event capturedEvent) (err error) {
+	op, err := c.currentOperation(ctx)
+	if err != nil {
+		return err
+	}
+	scope := event.Scope
+	if !scope.RegisteredBusiness || !scope.DeploymentRegistration || scope.Session != op.SessionAccount ||
+		scope.OnboardingOperation != op.OperationID || scope.PrincipalID != op.PrincipalID ||
+		!op.AccountConfirmed || !op.Phase.SupportsAccountBusiness() || op.Revision < scope.OperationRevision {
+		return errCaptureScopeChanged
+	}
+	incoming, err := c.registeredBusinessIncoming(ctx, op)
+	if err != nil {
+		return err
+	}
+	binding := incoming.registered
+	defer func() { err = errors.Join(err, binding.Release()) }()
+	if !binding.Coordinate.MatchesDurableIdentity(event.Source.Coordinate) ||
+		!binding.Coordinate.DurableIdentity().Matches(scope.Source) ||
+		binding.Publication != scope.PublicationBinding || binding.TargetSelector != scope.TargetSelector {
+		return errCaptureScopeChanged
+	}
+	return incoming.handoff.publish(binding.Context, event)
 }
 
 func (i *runtimeIncoming) receiveScope(ctx context.Context, message *events.Message) (captureScope, captureSource, error) {

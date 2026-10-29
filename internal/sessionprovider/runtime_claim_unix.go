@@ -25,6 +25,13 @@ func (i *runtimeIncoming) drain(ctx context.Context) error {
 		}
 	}
 	if i.connection.operation.DeploymentRegistration && i.registered == nil {
+		for _, row := range rows {
+			if row.event.Scope.Kind == channelonboarding.SessionInputBusiness {
+				if err := i.connection.reconcileRegisteredBusiness(ctx, row.event); err != nil {
+					return err
+				}
+			}
+		}
 		return nil
 	}
 	return i.handoff.drain(ctx)

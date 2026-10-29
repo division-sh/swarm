@@ -13,6 +13,7 @@ import (
 	contracts "github.com/division-sh/swarm/internal/runtime/contracts"
 	"github.com/division-sh/swarm/internal/runtime/credentials"
 	"github.com/division-sh/swarm/internal/runtime/engine"
+	runtimefailures "github.com/division-sh/swarm/internal/runtime/failures"
 	"github.com/division-sh/swarm/internal/runtime/semanticview"
 )
 
@@ -60,9 +61,9 @@ func (pc *PipelineCoordinator) accountActivityCredentials(ctx context.Context, i
 	if err != nil {
 		return nil, nil, nil, true, fmt.Errorf("activity account: %w", err)
 	}
-	op, err := channelonboarding.RegisteredAccount(ctx, pc.registeredAccounts, ref)
+	op, err := pc.activityAccountRegistration(ctx, ref)
 	if err != nil {
-		return nil, nil, nil, true, fmt.Errorf("account is not linked: run swarm channel connect %s: %w", ref.Provider, err)
+		return nil, nil, nil, true, err
 	}
 	owner, err := credentials.NewSnapshotOwner(pc.providerCredentials)
 	if err != nil {
@@ -74,7 +75,7 @@ func (pc *PipelineCoordinator) accountActivityCredentials(ctx context.Context, i
 		return nil, nil, nil, true, err
 	}
 	current := func(ctx context.Context) error {
-		selected, err := channelonboarding.RegisteredAccount(ctx, pc.registeredAccounts, ref)
+		selected, err := pc.activityAccountRegistration(ctx, ref)
 		if err != nil {
 			return err
 		}
@@ -85,6 +86,16 @@ func (pc *PipelineCoordinator) accountActivityCredentials(ctx context.Context, i
 		return projection.ValidateCurrent(ctx)
 	}
 	return values, secrets, current, true, current(ctx)
+}
+
+func (pc *PipelineCoordinator) activityAccountRegistration(ctx context.Context, ref channelonboarding.AccountReference) (channelonboarding.Operation, error) {
+	op, err := channelonboarding.RegisteredAccount(ctx, pc.registeredAccounts, ref)
+	if err == channelonboarding.ErrNotFound {
+		err = runtimefailures.New(runtimefailures.ClassAuthenticationNeeded, "channel_account_not_linked", "activity-runtime", "select_account", map[string]any{
+			"auth_kind": "channel_account", "provider": ref.Provider, "account": ref.Account,
+		})
+	}
+	return op, err
 }
 
 func exactAccountActivityConnector(scope packadmission.ProviderScope, toolID string) (packs.SatisfactionPlan, contracts.ToolSchemaEntry, bool, error) {

@@ -504,6 +504,23 @@ func serveSessionRetirementRequired(ctx context.Context, store channelonboarding
 		pending, err := channelonboarding.RetainedSessionLogoutPending(ctx, store, op)
 		return !pending, err
 	case channelonboarding.PhaseSucceeded:
+		if op.DeploymentRegistration {
+			scoped, ok := store.(interface {
+				DeploymentChannelOperations() channelonboarding.OperationStore
+			})
+			if !ok {
+				return false, channelonboarding.ErrInvalidRequest
+			}
+			current, err := channelonboarding.RegisteredAccount(ctx, scoped.DeploymentChannelOperations(),
+				channelonboarding.AccountReference{Provider: op.Provider, Account: op.AccountReference})
+			if errors.Is(err, channelonboarding.ErrNotFound) {
+				return true, nil
+			}
+			if err != nil {
+				return false, err
+			}
+			return !retainedSessionIdentityCurrent(current, op), ctx.Err()
+		}
 		current, err := channelonboarding.RetainedSessionCurrent(ctx, store, op)
 		if ctx.Err() != nil {
 			return false, errors.Join(err, context.Cause(ctx))
