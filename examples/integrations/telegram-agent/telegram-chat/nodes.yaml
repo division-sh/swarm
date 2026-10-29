@@ -7,5 +7,6 @@ telegram-responder:
         id: telegram_send_message
         tool: telegram.send_message
         input:
+          account: policy.operator_account
           chat_id: payload.chat_id
           text: payload.text

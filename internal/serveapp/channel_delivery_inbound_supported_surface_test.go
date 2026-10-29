@@ -443,6 +443,7 @@ func runChannelDeliveryInboundDispositionE2E(t *testing.T, backend, scenario str
 	if scenario == "delivery_loss_resend" || scenario == "edit_loss_resend" || scenario == "notice_uncertainty_readback" {
 		observation.configure(&opts)
 	}
+	registerChannelFixtureAccount(t, configPath, "bot-token")
 	process := startServeRuntimeTestProcess(t, opts)
 	t.Cleanup(func() { _ = process.stop() })
 	process.waitForReadyLine()
