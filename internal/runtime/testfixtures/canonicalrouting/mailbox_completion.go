@@ -42,6 +42,7 @@ func CopyMailboxCompletionMatrix(t testing.TB) string {
         tool: telegram.send_message
         approval: {decision: send_telegram_message}
         input:
+          account: "420079"
           chat_id: "42"
           text: "review"
 effect-revision:

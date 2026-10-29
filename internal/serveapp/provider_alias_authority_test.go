@@ -514,7 +514,7 @@ func writeProviderAliasAuthorityFixture(t *testing.T, scenario providerAliasScen
 			}
 		}
 		files[alias+"/schema.yaml"] = "stages: []\n" + pins + "  outputs: [" + strings.Join(connectedNames, ", ") + "]\n"
-		files[alias+"/entities.yaml"] = "service: {}\n"
+		files[alias+"/entities.yaml"] = "service:\n  operator_account: text\n"
 		files[alias+"/nodes.yaml"] = nodes
 		if scenario.noLocalConsumers {
 			delete(files, alias+"/nodes.yaml")

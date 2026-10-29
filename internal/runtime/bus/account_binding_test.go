@@ -116,7 +116,7 @@ func TestAuthenticatedAccountSelectsOnlyItsConstructedHolder(t *testing.T) {
 				for _, account := range accounts {
 					for _, kind := range []provideroutput.Kind{provideroutput.KindRaw, provideroutput.KindNormalized} {
 						ctx := context.WithValue(constructionIndexContext(t, source), authenticatedProviderPublicationKey{},
-							authenticatedProviderPublication{eventID: event.ID(), source: event.RoutingSource().Route(), kind: kind, account: account})
+							authenticatedProviderPublication{eventID: event.ID(), source: event.RoutingSource().Route(), provider: provider, kind: kind, account: account})
 						projection := selectedRunTargetOwnerProjection{source: source, context: ctx, instances: reader}
 						selected, scoped, err := projection.selectedAccountInstance(ctx, event)
 						want := flowidentity.Instance{}
@@ -148,6 +148,21 @@ func TestAuthenticatedAccountSelectsOnlyItsConstructedHolder(t *testing.T) {
 									t.Fatalf("unassigned/terminated account acquired a receiver: terminated=%t selected=%+v err=%v", terminated, selected, err)
 								}
 							}
+						}
+					}
+				}
+				for _, admittedProvider := range []string{provider, "github"} {
+					for _, account := range []string{"", "not-an-account"} {
+						ctx := context.WithValue(constructionIndexContext(t, source), authenticatedProviderPublicationKey{},
+							authenticatedProviderPublication{eventID: event.ID(), source: event.RoutingSource().Route(), provider: admittedProvider, account: account})
+						projection := selectedRunTargetOwnerProjection{source: source, context: ctx, instances: reader}
+						_, scoped, err := projection.selectedAccountInstance(ctx, event)
+						if admittedProvider == provider {
+							if !scoped || err == nil {
+								t.Fatal("connection ingress accepted absent or foreign account evidence", scoped, err)
+							}
+						} else if scoped || err != nil {
+							t.Fatal("unrelated provider acquired connection-account selection", scoped, err)
 						}
 					}
 				}
