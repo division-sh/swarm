@@ -740,16 +740,7 @@ func validateDetail(class Class, detail Detail) error {
 			return fmt.Errorf("data_limit_exceeded detail actual must be numeric")
 		}
 	case ClassAuthenticationNeeded:
-		if value, _ := detail.Attributes["auth_kind"].(string); strings.TrimSpace(value) == "" {
-			return fmt.Errorf("authentication_required detail auth_kind is required")
-		}
-		if detail.Code == "channel_account_not_linked" {
-			account, _ := detail.Attributes["account"].(string)
-			provider, _ := detail.Attributes["provider"].(string)
-			if account == "" || len(account) > 64 || strings.ContainsAny(account, "\r\n\t\x00") || provider != "whatsapp" && provider != "telegram" {
-				return fmt.Errorf("channel_account_not_linked requires a bounded account and its exact provider")
-			}
-		}
+		return validateAuthenticationDetail(detail)
 	case ClassAuthorizationDenied:
 		if value, _ := detail.Attributes["action"].(string); strings.TrimSpace(value) == "" {
 			return fmt.Errorf("authorization_denied detail action is required")
@@ -760,6 +751,20 @@ func validateDetail(class Class, detail Detail) error {
 			if len(detail.Attributes) != 0 {
 				return fmt.Errorf("%s detail forbids attributes", detail.Code)
 			}
+		}
+	}
+	return nil
+}
+
+func validateAuthenticationDetail(detail Detail) error {
+	if value, _ := detail.Attributes["auth_kind"].(string); strings.TrimSpace(value) == "" {
+		return fmt.Errorf("authentication_required detail auth_kind is required")
+	}
+	if detail.Code == "channel_account_not_linked" {
+		account, _ := detail.Attributes["account"].(string)
+		provider, _ := detail.Attributes["provider"].(string)
+		if account == "" || len(account) > 64 || strings.ContainsAny(account, "\r\n\t\x00") || provider != "whatsapp" && provider != "telegram" {
+			return fmt.Errorf("channel_account_not_linked requires a bounded account and its exact provider")
 		}
 	}
 	return nil

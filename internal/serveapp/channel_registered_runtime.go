@@ -14,13 +14,29 @@ import (
 	"github.com/division-sh/swarm/internal/sessionprovider"
 )
 
-func observeDeploymentAccountStatus(ctx context.Context, raw json.RawMessage, manager *runtime.RuntimeContextManager) (channelonboarding.AccountStatus, error) {
+func observeDeploymentAccountStatus(ctx context.Context, raw json.RawMessage, manager *runtime.RuntimeContextManager, operations channelonboarding.OperationStore, clients map[string]*cliapp.DeploymentChannelControl, mu *sync.Mutex) (json.RawMessage, error) {
 	var status channelonboarding.AccountStatus
 	if err := json.Unmarshal(raw, &status); err != nil {
-		return status, err
+		return nil, err
 	}
-	err := observeDeploymentAccountHolder(ctx, manager, &status)
-	return status, err
+	ref := channelonboarding.AccountReference{Provider: status.Provider, Account: status.Account}
+	op, err := channelonboarding.RegisteredAccount(ctx, operations, ref)
+	if err != nil && !errors.Is(err, channelonboarding.ErrNotFound) {
+		return nil, err
+	}
+	mu.Lock()
+	owner := clients[ref.Provider+":"+op.OperationID]
+	mu.Unlock()
+	if owner != nil {
+		status, err = owner.AccountStatus(ctx, ref)
+		if err != nil {
+			return nil, err
+		}
+	}
+	if err := observeDeploymentAccountHolder(ctx, manager, &status); err != nil {
+		return nil, err
+	}
+	return json.Marshal(status)
 }
 
 func observeDeploymentAccountList(ctx context.Context, raw json.RawMessage, manager *runtime.RuntimeContextManager, clients map[string]*cliapp.DeploymentChannelControl, mu *sync.Mutex) (json.RawMessage, error) {
