@@ -1001,6 +1001,11 @@ func debtValidateCollectorIdentity(base, current string, trusted, head authority
 	if base == current && trusted.Collector == current && head.Collector == current {
 		return nil
 	}
+	if base == debtW1RebasedComparisonCollectorTo && trusted.Collector == base &&
+		current == debtSourceLoaderCollectorTo && reviewedTransition == current && head.Collector == current &&
+		debtSitesEqual(head.Sites, trusted.Sites) {
+		return nil // #2727/6489643507: source loading and lazy formatting; exact same findings.
+	}
 	if base == debtCompletedSelectedFixturePinCollectorTo && trusted.Collector == base &&
 		current == debtW3LandedFixtureCollectorTo && reviewedTransition == current && head.Collector == current &&
 		debtSitesEqual(head.Sites, trusted.Sites) {

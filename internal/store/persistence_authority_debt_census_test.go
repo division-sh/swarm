@@ -73,7 +73,7 @@ func debtLoadPersistenceAuthorityFindings(t *testing.T, root string) []authority
 			Dir: root, Env: debtCensusEnvironment(), Fset: fset,
 			BuildFlags: []string{"-trimpath"},
 			Mode: packages.NeedName | packages.NeedFiles | packages.NeedCompiledGoFiles |
-				packages.NeedSyntax | packages.NeedTypes | packages.NeedTypesInfo | packages.NeedImports,
+				packages.NeedSyntax | packages.NeedTypes | packages.NeedTypesInfo | packages.NeedImports | packages.NeedDeps,
 			Tests: true,
 		}
 		pkgs, err := packages.Load(cfg, patterns...)
@@ -1170,22 +1170,23 @@ func (scan *debtAuthorityTypeScan) debtAuthorityCallFinding(path, enclosing stri
 	name := debtAuthorityCallName(call.Fun, info)
 	receiverType := debtAuthorityCallReceiverType(call.Fun, info)
 	raw := scan.debtContainsRawSQLType(callType) || scan.debtContainsRawSQLType(receiverType)
-	resolved := "func=" + debtResolvedTypeString(callType) + "|recv=" + debtResolvedTypeString(receiverType)
 	for _, arg := range call.Args {
-		argType := info.TypeOf(arg)
-		raw = raw || scan.debtContainsRawSQLType(argType)
-		resolved += "|arg=" + debtResolvedTypeString(argType)
-	}
-	if callType != nil {
-		if signature, ok := types.Unalias(callType).Underlying().(*types.Signature); ok {
-			resolved += "|results=" + debtResolvedTupleString(signature.Results())
-		}
+		raw = raw || scan.debtContainsRawSQLType(info.TypeOf(arg))
 	}
 	if !raw && !debtIsSQLOperationName(name) {
 		return authorityFinding{}, false
 	}
 	if !raw {
 		return authorityFinding{}, false
+	}
+	resolved := "func=" + debtResolvedTypeString(callType) + "|recv=" + debtResolvedTypeString(receiverType)
+	for _, arg := range call.Args {
+		resolved += "|arg=" + debtResolvedTypeString(info.TypeOf(arg))
+	}
+	if callType != nil {
+		if signature, ok := types.Unalias(callType).Underlying().(*types.Signature); ok {
+			resolved += "|results=" + debtResolvedTupleString(signature.Results())
+		}
 	}
 	return authorityFinding{
 		Kind:      "raw-operation",
