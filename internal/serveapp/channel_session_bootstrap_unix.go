@@ -315,22 +315,25 @@ func (s *serveSessionBootstrap) validateRetainedSessionOperation(ctx context.Con
 	if err != nil {
 		return err
 	}
-	coordinateCurrent := current.Coordinate.MatchesDeclaration(op.Coordinate)
-	if op.DeploymentRegistration {
-		coordinateCurrent = current.DeploymentRegistration && current.AccountConfirmed && current.Coordinate == op.Coordinate && current.AccountReference == op.AccountReference
-	}
-	if current.Revision != op.Revision || current.Phase != op.Phase || current.RequestHash != op.RequestHash ||
-		current.Provider != op.Provider || current.Posture != op.Posture ||
-		current.SlotKey != op.SlotKey || current.BindingRevision != op.BindingRevision || current.ActivationRevision != op.ActivationRevision ||
-		current.PrincipalID != op.PrincipalID || current.SessionAccount != op.SessionAccount || current.SessionConnectionID != op.SessionConnectionID ||
-		current.TargetSelector != op.TargetSelector || current.Interface.Normalized() != op.Interface.Normalized() ||
-		!coordinateCurrent {
+	if !retainedSessionIdentityCurrent(current, op) {
 		return channelonboarding.ErrRevisionConflict
 	}
 	if ctx.Err() != nil {
 		return context.Cause(ctx)
 	}
 	return nil
+}
+
+func retainedSessionIdentityCurrent(current, op channelonboarding.Operation) bool {
+	coordinateCurrent := current.Coordinate.MatchesDeclaration(op.Coordinate)
+	if op.DeploymentRegistration {
+		coordinateCurrent = current.DeploymentRegistration && current.AccountConfirmed && current.Coordinate == op.Coordinate && current.AccountReference == op.AccountReference
+	}
+	return current.Revision == op.Revision && current.Phase == op.Phase && current.RequestHash == op.RequestHash &&
+		current.Provider == op.Provider && current.Posture == op.Posture &&
+		current.SlotKey == op.SlotKey && current.BindingRevision == op.BindingRevision && current.ActivationRevision == op.ActivationRevision &&
+		current.PrincipalID == op.PrincipalID && current.SessionAccount == op.SessionAccount && current.SessionConnectionID == op.SessionConnectionID &&
+		current.TargetSelector == op.TargetSelector && current.Interface.Normalized() == op.Interface.Normalized() && coordinateCurrent
 }
 
 func (s *serveSessionBootstrap) operationsFor(op channelonboarding.Operation) (channelonboarding.OperationStore, error) {

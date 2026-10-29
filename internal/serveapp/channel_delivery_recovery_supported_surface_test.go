@@ -25,7 +25,7 @@ func TestChannelDeliveryRecoveryNoticePublicJourney(t *testing.T) {
 		t.Run(string(backend), func(t *testing.T) {
 			h := newChannelOnboardingE2EHarness(t, backend, true)
 			writeChannelOnboardingLiveToolCredentials(t, h.credentialPath)
-			if err := os.WriteFile(filepath.Join(h.opts.SourceRoot, "policy.yaml"), []byte("budget_warning_percent: 50\nbudget_throttle_percent: 75\nbudget_emergency_percent: 90\n"), 0o600); err != nil {
+			if err := os.WriteFile(filepath.Join(h.opts.SourceRoot, "policy.yaml"), []byte("operator_account: '420079'\nbudget_warning_percent: 50\nbudget_throttle_percent: 75\nbudget_emergency_percent: 90\n"), 0o600); err != nil {
 				t.Fatal(err)
 			}
 			body, err := os.ReadFile(h.opts.ConfigPath)

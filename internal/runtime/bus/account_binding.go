@@ -68,10 +68,7 @@ func (p selectedRunTargetOwnerProjection) selectedAccountInstance(ctx context.Co
 		if err != nil {
 			return selected, true, err
 		}
-		value, assigned := instance.Fields["operator_account"].(string)
-		if declaration.FromPolicy {
-			value, assigned = declaration.Policy, true
-		}
+		value, assigned := declaration.Value(instance.Fields)
 		if !assigned || value == "" || !instance.TerminatedAt.IsZero() {
 			continue
 		}

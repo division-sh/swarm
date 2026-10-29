@@ -83,28 +83,9 @@ func (pc *PipelineCoordinator) accountActivityCredentials(ctx context.Context, i
 		return nil, nil, nil, true, err
 	}
 	projection := owner.BeginSecretBindingProjection()
-	values, secrets := map[string]any{}, []string{}
-	for _, role := range tool.Credentials() {
-		if role != profile.ProviderCredential() {
-			return nil, nil, nil, true, fmt.Errorf("account activity requests an unowned credential role")
-		}
-		for _, admission := range op.CredentialAdmissions {
-			if admission.Role != role {
-				continue
-			}
-			if _, duplicate := values[role]; duplicate || admission.Validate() != nil {
-				return nil, nil, nil, true, channelonboarding.ErrConflict
-			}
-			value, current, err := projection.ObserveAdmittedActivationCredential(ctx, credentials.ValueEvidence{Key: admission.StoreKey, Seal: admission.ValueSeal}, admission.Receipt)
-			if err != nil || !current {
-				return nil, nil, nil, true, errors.Join(operatorchannel.ErrCredentialStale, err)
-			}
-			values[role] = value.CredentialValue()
-			secrets = append(secrets, value.CredentialValue())
-		}
-		if _, admitted := values[role]; !admitted {
-			return nil, nil, nil, true, fmt.Errorf("account activity credential is not admitted")
-		}
+	values, secrets, err := admittedActivityCredentialValues(ctx, projection, tool.Credentials(), profile.ProviderCredential(), op.CredentialAdmissions)
+	if err != nil {
+		return nil, nil, nil, true, err
 	}
 	current := func(ctx context.Context) error {
 		selected, err := channelonboarding.RegisteredAccount(ctx, pc.registeredAccounts, ref)
@@ -118,4 +99,33 @@ func (pc *PipelineCoordinator) accountActivityCredentials(ctx context.Context, i
 		return projection.ValidateCurrent(ctx)
 	}
 	return values, secrets, current, true, current(ctx)
+}
+
+// Resolve only the selected account's admitted roles through the existing
+// snapshot projection; this helper never selects an account or opens a store.
+func admittedActivityCredentialValues(ctx context.Context, projection *credentials.SecretBindingProjection, roles []string, providerRole string, admissions []channelonboarding.CredentialAdmission) (map[string]any, []string, error) {
+	values, secrets := map[string]any{}, []string{}
+	for _, role := range roles {
+		if role != providerRole {
+			return nil, nil, fmt.Errorf("account activity requests an unowned credential role")
+		}
+		for _, admission := range admissions {
+			if admission.Role != role {
+				continue
+			}
+			if _, duplicate := values[role]; duplicate || admission.Validate() != nil {
+				return nil, nil, channelonboarding.ErrConflict
+			}
+			value, current, err := projection.ObserveAdmittedActivationCredential(ctx, credentials.ValueEvidence{Key: admission.StoreKey, Seal: admission.ValueSeal}, admission.Receipt)
+			if err != nil || !current {
+				return nil, nil, errors.Join(operatorchannel.ErrCredentialStale, err)
+			}
+			values[role] = value.CredentialValue()
+			secrets = append(secrets, value.CredentialValue())
+		}
+		if _, admitted := values[role]; !admitted {
+			return nil, nil, fmt.Errorf("account activity credential is not admitted")
+		}
+	}
+	return values, secrets, nil
 }
