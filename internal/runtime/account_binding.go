@@ -119,6 +119,16 @@ func (m *RuntimeContextManager) AccountHolders(ctx context.Context, ref channelo
 }
 
 func (m *RuntimeContextManager) activationAccountHolders(ctx context.Context, activation StandingActivation, ref channelonboarding.AccountReference) ([]channelonboarding.AccountHolder, error) {
+	if m.landingRuns == nil {
+		return nil, fmt.Errorf("account binding requires the deployment landing-run reader")
+	}
+	landing, found, err := m.landingRuns.LoadLandingRun(ctx, runlifecycle.LiveRunScope{FlowPath: activation.FlowPath})
+	if err != nil {
+		return nil, err
+	}
+	if !found || landing.RunID != activation.RunID || landing.Source.BundleHash() != activation.BundleHash || landing.State != runlifecycle.StateLive {
+		return nil, nil
+	}
 	use, _, availability, err := m.AcquireRun(ctx, activation.RunID)
 	if err != nil || use == nil {
 		return nil, err
