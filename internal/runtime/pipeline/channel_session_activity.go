@@ -1,6 +1,7 @@
 package pipeline
 
 import (
+	"cmp"
 	"context"
 	"errors"
 	"fmt"
@@ -81,7 +82,7 @@ func (pc *PipelineCoordinator) prepareSessionActivityIntent(ctx context.Context,
 	}
 	fact, pinned := correlation.SourceArtifactFactFromContext(ctx)
 	version := pc.SemanticSource().WorkflowVersion()
-	if !pinned || version == "" || (intent.BundleHash != "" && intent.BundleHash != fact.BundleHash()) || (intent.WorkflowVersion != "" && intent.WorkflowVersion != version) {
+	if !pinned || version == "" || cmp.Or(intent.BundleHash, fact.BundleHash()) != fact.BundleHash() || cmp.Or(intent.WorkflowVersion, version) != version {
 		return intent, nil, fmt.Errorf("authored session activity has no exact source pin")
 	}
 	if intent.NativeSessionTarget == "" && (intent.PlanGeneration.Valid() || intent.ChannelActivationGeneration.Valid()) {
