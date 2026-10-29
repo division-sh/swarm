@@ -246,6 +246,41 @@ func TestInhabitDeterministicallyResolvesEqualityDependencies(t *testing.T) {
 	if generatedContact["to"] != phone {
 		t.Fatal("generated payload retained the caller's explicit object")
 	}
+	t.Run("partial equality object", func(t *testing.T) {
+		objectSchema := map[string]any{
+			"type": "object", "required": []any{"copy"},
+			"properties": map[string]any{
+				"copy": map[string]any{"type": "object", "x-swarm-equalTo": "source"},
+				"source": map[string]any{
+					"type": "object", "required": []any{"id", "details"},
+					"properties": map[string]any{
+						"id": map[string]any{"type": "string", "minLength": 6},
+						"details": map[string]any{"type": "object", "required": []any{"name", "count"}, "properties": map[string]any{
+							"name": map[string]any{"type": "string", "minLength": 1}, "count": map[string]any{"type": "integer"},
+						}},
+					},
+				},
+			},
+		}
+		baseline, err := InhabitDeterministically(objectSchema, InhabitationContext{Identity: "equality object"})
+		if err != nil {
+			t.Fatal(err)
+		}
+		target := baseline.(map[string]any)["source"].(map[string]any)
+		for _, partial := range []map[string]any{{}, {"details": map[string]any{"name": target["details"].(map[string]any)["name"]}}} {
+			value, err := InhabitDeterministically(objectSchema, InhabitationContext{Identity: "equality object", Supplied: map[string]any{"copy": partial}})
+			if err != nil || !reflect.DeepEqual(value, baseline) {
+				t.Fatalf("partial copy lost generated target fields: value=%#v err=%v", value, err)
+			}
+			value.(map[string]any)["copy"].(map[string]any)["details"].(map[string]any)["name"] = "changed copy"
+			if !reflect.DeepEqual(value.(map[string]any)["source"], target) || reflect.DeepEqual(partial["details"], map[string]any{"name": "changed copy"}) {
+				t.Fatal("equality copy aliases the target or supplied fixture")
+			}
+		}
+		if _, err := InhabitDeterministically(objectSchema, InhabitationContext{Identity: "equality object", Supplied: map[string]any{"copy": map[string]any{"id": "different"}}}); err == nil {
+			t.Fatal("explicit unequal overlay bypassed canonical validation")
+		}
+	})
 }
 
 func TestInhabitDeterministicallyRejectsAggregateExpansionBeforeCopyOrAllocation(t *testing.T) {

@@ -179,7 +179,10 @@ func inhabitObject(source, accepted map[string]any, identity, path string, depth
 		if !sourceOK || !acceptedOK {
 			return fmt.Errorf("%s: required property has no admitted schema", propertyPath)
 		}
-		if value, exists := supplied[name]; exists {
+		target := strings.TrimSpace(asString(acceptedProperty["x-swarm-equalTo"]))
+		value, exists := supplied[name]
+		partial, partialObject := value.(map[string]any)
+		if exists && (!partialObject || target == "") {
 			if nested, ok := value.(map[string]any); ok {
 				value, err := inhabitSchemaValue(sourceProperty, acceptedProperty, identity, propertyPath, depth+1, budget, nested)
 				if err != nil {
@@ -188,7 +191,7 @@ func inhabitObject(source, accepted map[string]any, identity, path string, depth
 				values[name] = value
 			}
 			state[name] = 2
-			if target := strings.TrimSpace(asString(acceptedProperty["x-swarm-equalTo"])); target != "" {
+			if target != "" {
 				return generate(target)
 			}
 			return nil
@@ -197,7 +200,6 @@ func inhabitObject(source, accepted map[string]any, identity, path string, depth
 			return err
 		}
 		state[name] = 1
-		target := strings.TrimSpace(asString(acceptedProperty["x-swarm-equalTo"]))
 		if target != "" {
 			if _, ok := acceptedProperties[target]; !ok {
 				return fmt.Errorf("%s: missing equality target %q", propertyPath, target)
@@ -211,6 +213,13 @@ func inhabitObject(source, accepted map[string]any, identity, path string, depth
 			copied, err := cloneSemanticJSON(values[target])
 			if err != nil {
 				return fmt.Errorf("%s: copy equality target %q: %w", propertyPath, target, err)
+			}
+			if partialObject {
+				object, ok := copied.(map[string]any)
+				if !ok {
+					return fmt.Errorf("%s: equality target %q is not an object", propertyPath, target)
+				}
+				applyObjectOverlay(object, partial)
 			}
 			if err := ValidateValueAgainstSchema(sourceProperty, copied); err != nil {
 				return fmt.Errorf("%s: equality target %q is incompatible: %w", propertyPath, target, err)
