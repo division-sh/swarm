@@ -129,16 +129,7 @@ func compileEndpoint(source semanticview.Source, identity scenarioexecution.Effe
 	if err != nil {
 		return Plan{}, err
 	}
-	generated, err := runtimeeventschema.InhabitDeterministically(resolution.Schema.Schema, runtimeeventschema.InhabitationContext{
-		Identity: strings.Join([]string{PlanVersion, identity.Digest(), endpoint.FlowID, endpoint.PinName, resolution.EventKey, schemaDigest}, "\x00"),
-	})
-	if err != nil {
-		return Plan{}, fmt.Errorf("derive flow %q input %q: %w", endpoint.FlowID, endpoint.PinName, err)
-	}
-	payload, ok := generated.(map[string]any)
-	if !ok {
-		return Plan{}, fmt.Errorf("derive flow %q input %q requires an object event schema, got %T", endpoint.FlowID, endpoint.PinName, generated)
-	}
+	var supplied map[string]any
 	if len(request.Set) > 0 {
 		data, err := scenariodocument.Materialize(request.Set)
 		if err != nil {
@@ -148,7 +139,18 @@ func compileEndpoint(source semanticview.Source, identity scenarioexecution.Effe
 		if err != nil {
 			return Plan{}, err
 		}
-		applyObjectOverlay(payload, projection.(map[string]any))
+		supplied = projection.(map[string]any)
+	}
+	generated, err := runtimeeventschema.InhabitDeterministically(resolution.Schema.Schema, runtimeeventschema.InhabitationContext{
+		Identity: strings.Join([]string{PlanVersion, identity.Digest(), endpoint.FlowID, endpoint.PinName, resolution.EventKey, schemaDigest}, "\x00"),
+		Supplied: supplied,
+	})
+	if err != nil {
+		return Plan{}, fmt.Errorf("derive flow %q input %q: %w", endpoint.FlowID, endpoint.PinName, err)
+	}
+	payload, ok := generated.(map[string]any)
+	if !ok {
+		return Plan{}, fmt.Errorf("derive flow %q input %q requires an object event schema, got %T", endpoint.FlowID, endpoint.PinName, generated)
 	}
 	if err := runtimeeventschema.ValidatePayloadAgainstSchema(resolution.Schema.Schema, payload); err != nil {
 		return Plan{}, fmt.Errorf("derive flow %q input %q payload overlay failed canonical validation: %w", endpoint.FlowID, endpoint.PinName, err)
@@ -199,24 +201,4 @@ func compileProfile(source semanticview.Source, identity scenarioexecution.Effec
 func emptyProfile(identity scenarioexecution.EffectiveSourceIdentity, endpoint semanticview.AuthoredEventEndpoint) (scenarioexecution.Profile, error) {
 	id := strings.Join([]string{"derived", strings.Trim(strings.TrimSpace(endpoint.FlowID), "/"), strings.TrimSpace(endpoint.PinName)}, "/")
 	return scenarioexecution.NewProfile(identity, id, nil)
-}
-
-func applyObjectOverlay(target map[string]any, overlay map[string]any) {
-	keys := make([]string, 0, len(overlay))
-	for key := range overlay {
-		keys = append(keys, key)
-	}
-	sort.Strings(keys)
-	for _, key := range keys {
-		value := overlay[key]
-		if nested, ok := value.(map[string]any); ok {
-			if current, exists := target[key].(map[string]any); exists {
-				applyObjectOverlay(current, nested)
-				continue
-			}
-			target[key] = nested
-			continue
-		}
-		target[key] = value
-	}
 }

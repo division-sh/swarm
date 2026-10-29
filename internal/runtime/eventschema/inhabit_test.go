@@ -217,6 +217,31 @@ func TestInhabitDeterministicallyResolvesEqualityDependencies(t *testing.T) {
 	if err := ValidateValueAgainstSchema(schema, got); err != nil {
 		t.Fatalf("equality inhabitant failed validation: %v", err)
 	}
+	properties := schema["properties"].(map[string]any)
+	properties["source"].(map[string]any)["pattern"] = `^\+[1-9][0-9]{1,14}$`
+	properties["contact"] = map[string]any{
+		"type": "object", "required": []any{"to", "count"},
+		"properties": map[string]any{
+			"to":    map[string]any{"type": "string", "pattern": `^\+[1-9][0-9]{1,14}$`},
+			"count": map[string]any{"type": "integer"},
+		},
+	}
+	schema["required"] = []any{"copy", "contact"}
+	const phone = "+15550100123"
+	contact := map[string]any{"to": phone}
+	got, err = InhabitDeterministically(schema, InhabitationContext{Identity: "equality", Supplied: map[string]any{"source": phone, "contact": contact}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	object = got.(map[string]any)
+	generatedContact := object["contact"].(map[string]any)
+	if object["copy"] != phone || object["source"] != phone || generatedContact["to"] != phone || generatedContact["count"] != float64(0) {
+		t.Fatalf("explicit paths or missing siblings changed: %#v", object)
+	}
+	contact["to"] = "caller mutation"
+	if generatedContact["to"] != phone {
+		t.Fatal("generated payload retained the caller's explicit object")
+	}
 }
 
 func TestInhabitDeterministicallyRejectsAggregateExpansionBeforeCopyOrAllocation(t *testing.T) {

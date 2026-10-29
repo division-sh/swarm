@@ -24,9 +24,11 @@ const (
 )
 
 // InhabitationContext stamps deterministic witnesses without granting the
-// generator any eligibility, routing, or mutation authority.
+// generator any eligibility, routing, or mutation authority. Supplied values
+// replace generation at their paths and remain subject to schema validation.
 type InhabitationContext struct {
 	Identity string
+	Supplied map[string]any
 }
 
 // InhabitDeterministically produces one bounded value from the schema
@@ -41,8 +43,16 @@ func InhabitDeterministically(schema map[string]any, context InhabitationContext
 		return nil, fmt.Errorf("$: deterministic inhabitation identity is required")
 	}
 	accepted := CanonicalAcceptanceSchema(schema)
+	var supplied map[string]any
+	if context.Supplied != nil {
+		value, err := cloneSemanticJSON(context.Supplied)
+		if err != nil {
+			return nil, fmt.Errorf("$: explicit fixture: %w", err)
+		}
+		supplied = value.(map[string]any)
+	}
 	budget := inhabitationBudget{remaining: MaxInhabitedAggregateCost}
-	value, err := inhabitSchemaValue(schema, accepted, context.Identity, "$", 0, &budget)
+	value, err := inhabitSchemaValue(schema, accepted, context.Identity, "$", 0, &budget, supplied)
 	if err != nil {
 		return nil, err
 	}
@@ -55,9 +65,12 @@ func InhabitDeterministically(schema map[string]any, context InhabitationContext
 	return value, nil
 }
 
-func inhabitSchemaValue(source, accepted map[string]any, identity, path string, depth int, budget *inhabitationBudget) (any, error) {
+func inhabitSchemaValue(source, accepted map[string]any, identity, path string, depth int, budget *inhabitationBudget, supplied map[string]any) (any, error) {
 	if depth > MaxInhabitationDepth {
 		return nil, fmt.Errorf("%s: schema exceeds maximum inhabitation depth %d", path, MaxInhabitationDepth)
+	}
+	if kind := asString(accepted["type"]); supplied != nil && kind != "" && kind != "object" {
+		return supplied, nil
 	}
 	if rawEnum, present := source["enum"]; present {
 		values, ok := asArray(rawEnum)
@@ -73,6 +86,13 @@ func inhabitSchemaValue(source, accepted map[string]any, identity, path string, 
 		value, err := cloneSemanticJSON(values[0])
 		if err != nil {
 			return nil, fmt.Errorf("%s.enum[0]: %w", path, err)
+		}
+		if supplied != nil {
+			if object, ok := value.(map[string]any); ok {
+				applyObjectOverlay(object, supplied)
+			} else {
+				value = supplied
+			}
 		}
 		if err := ValidateValueAgainstSchema(source, value); err != nil {
 			if hasPattern(accepted) {
@@ -97,7 +117,7 @@ func inhabitSchemaValue(source, accepted map[string]any, identity, path string, 
 
 	switch typeName {
 	case "object":
-		return inhabitObject(source, accepted, identity, path, depth, budget)
+		return inhabitObject(source, accepted, identity, path, depth, budget, supplied)
 	case "array":
 		return inhabitArray(source, accepted, identity, path, depth, budget)
 	case "string":
@@ -127,7 +147,7 @@ func inhabitSchemaValue(source, accepted map[string]any, identity, path string, 
 	}
 }
 
-func inhabitObject(source, accepted map[string]any, identity, path string, depth int, budget *inhabitationBudget) (map[string]any, error) {
+func inhabitObject(source, accepted map[string]any, identity, path string, depth int, budget *inhabitationBudget, supplied map[string]any) (map[string]any, error) {
 	sourceProperties := schemaProperties(source["properties"])
 	acceptedProperties := schemaProperties(accepted["properties"])
 	required := exactRequiredList(accepted["required"])
@@ -137,6 +157,9 @@ func inhabitObject(source, accepted map[string]any, identity, path string, depth
 		return nil, err
 	}
 	values := make(map[string]any)
+	for name, value := range supplied {
+		values[name] = value
+	}
 	state := make(map[string]uint8)
 	var generate func(string) error
 	generate = func(name string) error {
@@ -151,6 +174,17 @@ func inhabitObject(source, accepted map[string]any, identity, path string, depth
 		acceptedProperty, acceptedOK := acceptedProperties[name]
 		if !sourceOK || !acceptedOK {
 			return fmt.Errorf("%s: required property has no admitted schema", propertyPath)
+		}
+		if value, exists := supplied[name]; exists {
+			if nested, ok := value.(map[string]any); ok {
+				value, err := inhabitSchemaValue(sourceProperty, acceptedProperty, identity, propertyPath, depth+1, budget, nested)
+				if err != nil {
+					return err
+				}
+				values[name] = value
+			}
+			state[name] = 2
+			return nil
 		}
 		if err := budget.consumeProperty(propertyPath, name); err != nil {
 			return err
@@ -176,7 +210,7 @@ func inhabitObject(source, accepted map[string]any, identity, path string, depth
 			}
 			values[name] = copied
 		} else {
-			value, err := inhabitSchemaValue(sourceProperty, acceptedProperty, identity, propertyPath, depth+1, budget)
+			value, err := inhabitSchemaValue(sourceProperty, acceptedProperty, identity, propertyPath, depth+1, budget, nil)
 			if err != nil {
 				return err
 			}
@@ -223,13 +257,33 @@ func inhabitArray(source, accepted map[string]any, identity, path string, depth 
 	values := make([]any, 0, minimum)
 	for index := 0; index < minimum; index++ {
 		itemPath := fmt.Sprintf("%s.items[%d]", path, index)
-		value, err := inhabitSchemaValue(sourceItems, acceptedItems, identity, itemPath, depth+1, budget)
+		value, err := inhabitSchemaValue(sourceItems, acceptedItems, identity, itemPath, depth+1, budget, nil)
 		if err != nil {
 			return nil, err
 		}
 		values = append(values, value)
 	}
 	return values, nil
+}
+
+func applyObjectOverlay(target map[string]any, overlay map[string]any) {
+	keys := make([]string, 0, len(overlay))
+	for key := range overlay {
+		keys = append(keys, key)
+	}
+	sort.Strings(keys)
+	for _, key := range keys {
+		value := overlay[key]
+		if nested, ok := value.(map[string]any); ok {
+			if current, exists := target[key].(map[string]any); exists {
+				applyObjectOverlay(current, nested)
+				continue
+			}
+			target[key] = nested
+			continue
+		}
+		target[key] = value
+	}
 }
 
 func inhabitString(schema map[string]any, identity, path string, budget *inhabitationBudget) (string, error) {
