@@ -14,14 +14,13 @@ import (
 	"github.com/division-sh/swarm/internal/sessionprovider"
 )
 
-func observeDeploymentAccountStatus(ctx context.Context, raw json.RawMessage, manager *runtime.RuntimeContextManager, operations channelonboarding.OperationStore, clients map[string]*cliapp.DeploymentChannelControl, mu *sync.Mutex) (json.RawMessage, error) {
-	var status channelonboarding.AccountStatus
-	if err := json.Unmarshal(raw, &status); err != nil {
+func observeDeploymentAccountStatus(ctx context.Context, ref channelonboarding.AccountReference, manager *runtime.RuntimeContextManager, operations channelonboarding.OperationStore, clients map[string]*cliapp.DeploymentChannelControl, mu *sync.Mutex) (json.RawMessage, error) {
+	ref, err := channelonboarding.CanonicalAccount(ref.Provider, ref.Account)
+	if err != nil {
 		return nil, err
 	}
-	ref := channelonboarding.AccountReference{Provider: status.Provider, Account: status.Account}
-	op, err := channelonboarding.RegisteredAccount(ctx, operations, ref)
-	if err != nil && !errors.Is(err, channelonboarding.ErrNotFound) {
+	status, op, err := channelonboarding.RegisteredAccountStatus(ctx, operations, ref)
+	if err != nil {
 		return nil, err
 	}
 	mu.Lock()
