@@ -2375,6 +2375,15 @@
             ],
             "type": "string"
           }
+        },
+        {
+          "name": "account",
+          "required": false,
+          "schema": {
+            "description": "Exact deployment account status, including an account not yet linked; requires deployment scope and provider.",
+            "minLength": 1,
+            "type": "string"
+          }
         }
       ],
       "result": {
@@ -2384,6 +2393,9 @@
           "oneOf": [
             {
               "$ref": "#/components/schemas/OperatorChannelListResult"
+            },
+            {
+              "$ref": "#/components/schemas/ChannelAccountStatus"
             },
             {
               "additionalProperties": false,
@@ -15188,6 +15200,85 @@
           }
         ]
       },
+      "ChannelAccountStatus": {
+        "additionalProperties": false,
+        "properties": {
+          "account": {
+            "minLength": 1,
+            "type": "string"
+          },
+          "account_unclaimed": {
+            "minimum": 0,
+            "type": "integer"
+          },
+          "health": {
+            "enum": [
+              "pairing",
+              "connecting",
+              "connected",
+              "disconnected"
+            ],
+            "type": "string"
+          },
+          "holders": {
+            "items": {
+              "additionalProperties": false,
+              "properties": {
+                "bundle_hash": {
+                  "minLength": 1,
+                  "type": "string"
+                },
+                "flow": {
+                  "minLength": 1,
+                  "type": "string"
+                },
+                "flow_instance": {
+                  "minLength": 1,
+                  "type": "string"
+                },
+                "run_id": {
+                  "$ref": "#/components/schemas/OpaqueId"
+                }
+              },
+              "required": [
+                "bundle_hash",
+                "flow",
+                "run_id",
+                "flow_instance"
+              ],
+              "type": "object"
+            },
+            "type": "array"
+          },
+          "linked": {
+            "type": "boolean"
+          },
+          "provider": {
+            "minLength": 1,
+            "type": "string"
+          },
+          "reason": {
+            "type": "string"
+          },
+          "state": {
+            "enum": [
+              "live",
+              "refused",
+              "stopped"
+            ],
+            "type": "string"
+          }
+        },
+        "required": [
+          "provider",
+          "account",
+          "state",
+          "linked",
+          "health",
+          "holders"
+        ],
+        "type": "object"
+      },
       "ChannelCapabilityVector": {
         "additionalProperties": false,
         "properties": {
@@ -15496,6 +15587,9 @@
           },
           "readiness": {
             "$ref": "#/components/schemas/ConnectedChannelReadiness"
+          },
+          "status": {
+            "$ref": "#/components/schemas/ChannelAccountStatus"
           }
         },
         "required": [
@@ -15566,6 +15660,10 @@
           },
           "account_presentation": {
             "type": "string"
+          },
+          "account_unclaimed": {
+            "minimum": 0,
+            "type": "integer"
           },
           "linked": {
             "description": "Retained paired account exists; not operator identity or execution authority.",
