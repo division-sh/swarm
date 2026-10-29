@@ -175,7 +175,7 @@ func TestStandingIngressSupportedSurfaceSQLiteRestartPreservesAuthorityAndReplie
 	}))
 	defer telegram.Close()
 
-	sourceRoot := writeStandingTelegramServeFixture(t, telegram.URL)
+	sourceRoot := writeStandingTelegramServeFixture(t, telegram.URL, false)
 	dataRoot := t.TempDir()
 	sqlitePath := filepath.Join(dataRoot, "standing.sqlite")
 	credentialPath := filepath.Join(dataRoot, "credentials.json")
@@ -325,7 +325,7 @@ func TestServeAuthorActivityAttachmentFailureKeepsRuntimeHealthy(t *testing.T) {
 	}))
 	defer telegram.Close()
 
-	sourceRoot := writeStandingTelegramServeFixture(t, telegram.URL)
+	sourceRoot := writeStandingTelegramServeFixture(t, telegram.URL, false)
 	dataRoot := t.TempDir()
 	sqlitePath := filepath.Join(dataRoot, "standing.sqlite")
 	credentialPath := filepath.Join(dataRoot, "credentials.json")
@@ -404,7 +404,7 @@ func TestStandingIngressSupportedSurfacePostgresRestartPreservesAuthorityAndRepl
 		_, _ = w.Write([]byte(`{"ok":true}`))
 	}))
 	defer telegram.Close()
-	sourceRoot := writeStandingTelegramServeFixture(t, telegram.URL)
+	sourceRoot := writeStandingTelegramServeFixture(t, telegram.URL, false)
 	credentialPath := filepath.Join(t.TempDir(), "credentials.json")
 	t.Setenv("SWARM_CREDENTIALS_FILE", credentialPath)
 	credentialStore, err := runtimecredentials.NewFileStore(credentialPath)
@@ -1075,10 +1075,19 @@ func standingSQLiteDiagnostics(path string) string {
 	return strings.Join(parts, ",")
 }
 
-func writeStandingTelegramServeFixture(t testing.TB, telegramBaseURL string) string {
+func writeStandingTelegramServeFixture(t testing.TB, telegramBaseURL string, withConnection ...bool) string {
 	t.Helper()
 	root := canonicalrouting.CopyExample(t, canonicalrouting.TelegramAgent)
 	writeStandingCandidateFile(t, filepath.Join(root, "policy.yaml"), "operator_account: '420079'\n")
+	if len(withConnection) != 0 && !withConnection[0] {
+		// Raw webhook controls own the trigger and connector, not an admitted
+		// account. Connected-channel journeys retain the channel BODY.
+		for _, relative := range []string{"telegram/channel.yaml", "policy.yaml"} {
+			if err := os.Remove(filepath.Join(root, filepath.FromSlash(relative))); err != nil {
+				t.Fatal(err)
+			}
+		}
+	}
 	selected := filepath.Join(filepath.Dir(root), "chat")
 	if err := os.Rename(root, selected); err != nil {
 		t.Fatal(err)
