@@ -149,7 +149,7 @@ func TestChannelCLIPairingProgressRefusesContradictoryOrExpiredEvidence(t *testi
 }
 
 func TestChannelCLIExplicitPairingClaimConfirmationJourney(t *testing.T) {
-	for _, mode := range []string{"human", "human-receptionist", "human-login-handoff", "human-login-disconnected", "human-reentry", "human-reentry-receptionist", "--json", "--quiet"} {
+	for _, mode := range []string{"human", "human-receptionist", "human-login-handoff", "human-login-disconnected", "human-expired-disconnect", "human-cached-expiry", "human-expired-banned", "human-network-failure", "human-reentry", "human-reentry-receptionist", "--json", "--quiet"} {
 		t.Run(mode, func(t *testing.T) {
 			human := strings.HasPrefix(mode, "human")
 			loginHandoff := strings.HasPrefix(mode, "human-login-")
@@ -173,6 +173,19 @@ func TestChannelCLIExplicitPairingClaimConfirmationJourney(t *testing.T) {
 						result["pairing"].(map[string]any)["code"] = "replacement-material"
 					} else if human && pairingReads >= 3 {
 						result["pairing"] = map[string]any{"status": "qr_expired", "paired": false, "connected": false}
+						if mode == "human-cached-expiry" {
+							result["pairing"] = map[string]any{"status": "awaiting_qr", "code": "expired-material", "expires_at": time.Now().Add(-time.Second), "paired": false, "connected": false}
+						}
+						if mode == "human-expired-disconnect" || mode == "human-expired-banned" {
+							reason := "network unreachable"
+							if mode == "human-expired-banned" {
+								reason = "account temporarily banned"
+							}
+							result["connection"] = map[string]any{"state": "disconnected", "linked": false, "reason": reason}
+						}
+					}
+					if mode == "human-network-failure" {
+						result["connection"] = map[string]any{"state": "disconnected", "linked": false, "reason": "network unreachable"}
 					}
 				case 2:
 					result["pairing"] = map[string]any{"status": "paired", "paired": true, "connected": false}
@@ -230,6 +243,9 @@ func TestChannelCLIExplicitPairingClaimConfirmationJourney(t *testing.T) {
 						stage = 4
 					}
 				case "channel.onboarding_retry":
+					if mode == "human-expired-banned" || mode == "human-network-failure" {
+						t.Fatal("unrelated SDK failure authorized automatic renewal")
+					}
 					if req.Params["checkpoint_only"] == true {
 						if !loginHandoff || stage != 2 {
 							t.Fatal("unexpected pairing-only login handoff", stage, req.Params)
@@ -293,6 +309,13 @@ func TestChannelCLIExplicitPairingClaimConfirmationJourney(t *testing.T) {
 					opts.input = strings.NewReader("y\ny\n")
 				}
 				code := executeRootCommandWithOptions(context.Background(), project, []string{"channel", "connect", "whatsapp"}, &out, &errOut, opts)
+				if mode == "human-expired-banned" || mode == "human-network-failure" {
+					if code != 2 || strings.Contains(out.String(), "READY") || strings.Contains(errOut.String(), "[y/N]") ||
+						!strings.Contains(errOut.String(), "WhatsApp disconnected:") {
+						t.Fatal("unrelated SDK failure did not refuse", code, out.String(), errOut.String())
+					}
+					return
+				}
 				if mode == "human-login-disconnected" {
 					if code != 2 || checkpoints != 1 || loginReads != 2 ||
 						!strings.Contains(errOut.String(), "WhatsApp disconnected: network unreachable") ||
@@ -304,11 +327,12 @@ func TestChannelCLIExplicitPairingClaimConfirmationJourney(t *testing.T) {
 					}
 					return
 				}
-				if code != 0 || !strings.Contains(out.String(), "READY") || !reentry && (!strings.Contains(out.String(), "QR expired, new QR:") ||
+				if code != 0 || !strings.Contains(out.String(), "READY") || !reentry && (!strings.Contains(out.String(), "\x1b[J") ||
 					!strings.Contains(out.String(), "Linked Devices")) ||
 					strings.Contains(out.String(), "Native inbox") ||
 					!strings.Contains(errOut.String(), "[y/N]") || strings.Contains(out.String()+errOut.String(), operatorChannelCLIOperation) ||
-					strings.Contains(out.String(), "journey-material") || strings.Contains(out.String(), "replacement-material") {
+					strings.Contains(out.String(), "journey-material") || strings.Contains(out.String(), "replacement-material") ||
+					strings.Contains(out.String(), "expired-material") || strings.Contains(out.String(), "QR expired, new QR:") {
 					t.Fatal("single public connect lost pairing, refresh, claimant confirmation or config targeting", code, out.String(), errOut.String())
 				}
 				if receptionist {

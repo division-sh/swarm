@@ -91,7 +91,13 @@ func readSelectedChannelCredential(result channelOnboardingResult, opts channelC
 }
 
 func renderChannelOnboardingResult(out, errOut io.Writer, output cliOutputOptions, result channelOnboardingResult) error {
-	pending, err := result.SessionPairingPending(time.Now())
+	now := time.Now()
+	if !output.asJSON && !output.asYAML && !output.quiet {
+		if expired, err := result.SessionPairingExpired(now); err == nil && expired {
+			return nil // The blocking owner renews it; never print a stale QR.
+		}
+	}
+	pending, err := result.SessionPairingPending(now)
 	if err != nil {
 		return returnCLIValidationError(errOut, err)
 	}
@@ -192,7 +198,11 @@ func validateCLIChannelProgress(result channelOnboardingResult) (bool, error) {
 			return false, errors.New("channel registration readback changed its deployment or account")
 		}
 	}
-	pending, err := result.SessionPairingPending(time.Now())
+	now := time.Now()
+	pending, err := result.SessionPairingExpired(now)
+	if !pending && err == nil {
+		pending, err = result.SessionPairingPending(now)
+	}
 	if err != nil || result.Operation.OperationID == "" || result.Operation.Revision < 1 || !result.Operation.Phase.Valid() {
 		return false, errors.New("channel onboarding response has invalid progress evidence")
 	}

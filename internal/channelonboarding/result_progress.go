@@ -115,6 +115,30 @@ func (r Result) SessionPairingPending(now time.Time) (bool, error) {
 	return true, nil
 }
 
+// SessionPairingExpired admits renewal of authenticated, unpaired progress only.
+// A cached code must have been valid at its own deadline; it is never rendered.
+func (r Result) SessionPairingExpired(now time.Time) (bool, error) {
+	p := r.Pairing
+	if p == nil || p.Paired || p.Connected {
+		return false, nil
+	}
+	switch p.Status {
+	case "awaiting_qr":
+		if p.ExpiresAt.IsZero() || p.ExpiresAt.After(now) {
+			return false, nil
+		}
+		return r.SessionPairingPending(p.ExpiresAt.Add(-time.Nanosecond))
+	case "qr_expired":
+		projected := r
+		pairing := *p
+		pairing.Status = PairingStatusPreparing
+		projected.Pairing = &pairing
+		return projected.SessionPreparationPending()
+	default:
+		return false, nil
+	}
+}
+
 func unsafePairingCharacter(r rune) bool {
 	return unicode.IsControl(r) || unicode.Is(unicode.Cf, r)
 }
