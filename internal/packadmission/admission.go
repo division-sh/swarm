@@ -10,6 +10,7 @@ import (
 	"github.com/division-sh/swarm/internal/providerconnectors"
 	"github.com/division-sh/swarm/internal/providertriggers"
 	runtimecontracts "github.com/division-sh/swarm/internal/runtime/contracts"
+	"github.com/division-sh/swarm/internal/sourceartifact"
 	"github.com/division-sh/swarm/internal/yamlsource"
 )
 
@@ -22,6 +23,7 @@ type Projection struct {
 	LoadedProviderPacks []providertriggers.LoadedPack
 	ProviderConnectors  *providerconnectors.PackRegistry
 	ChannelPlans        []packs.SatisfactionPlan
+	providerSource      ProviderSource
 }
 
 func (p Projection) EffectivePackInventoryDigest() string {
@@ -88,12 +90,39 @@ func Admit(inventory *packartifact.EffectivePackInventory, platform runtimecontr
 	}, nil
 }
 
-func AdmitInventory(inventory *packartifact.EffectivePackInventory, platform runtimecontracts.PlatformSpecDocument) (runtimecontracts.PackAdmissionProjection, error) {
+func AdmitInventory(rooted sourceartifact.RootedSource, inventory *packartifact.EffectivePackInventory, platform runtimecontracts.PlatformSpecDocument) (runtimecontracts.PackAdmissionProjection, error) {
 	projection, err := Admit(inventory, platform)
 	if err != nil {
 		return nil, err
 	}
+	projection.providerSource, err = AdmitProviderSource(rooted, platform)
+	if err != nil {
+		return nil, err
+	}
 	return projection, nil
+}
+
+// ProviderSourceForBundle carries the rooted load's admission, without sharing
+// it across loads. Plain bundles without that admission still admit directly.
+func ProviderSourceForBundle(bundle *runtimecontracts.WorkflowContractBundle) (ProviderSource, error) {
+	if bundle == nil {
+		return ProviderSource{}, fmt.Errorf("provider source requires its compiled bundle")
+	}
+	rooted, err := bundle.RootedSource()
+	if err != nil {
+		return ProviderSource{}, err
+	}
+	if projection, ok := bundle.PackAdmission.(Projection); ok && projection.providerSource.rooted.Artifact() != nil {
+		if _, err := FromBundle(bundle); err != nil {
+			return ProviderSource{}, err
+		}
+		providers := projection.providerSource
+		if !providers.Valid() || !providers.rooted.Admission().Equal(rooted.Admission()) || providers.rooted.Artifact() != rooted.Artifact() {
+			return ProviderSource{}, fmt.Errorf("provider source admission does not own the compiled rooted source")
+		}
+		return providers, nil
+	}
+	return AdmitProviderSource(rooted, bundle.Platform)
 }
 
 func FromBundle(bundle *runtimecontracts.WorkflowContractBundle) (Projection, error) {

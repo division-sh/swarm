@@ -666,11 +666,7 @@ func validateRuntimeContextProviderCatalog(contextDef BundleContext) error {
 	if !contextDef.ProviderTriggerGeneration.Equal(catalog.Generation()) {
 		return fmt.Errorf("runtime context %s provider-trigger generation does not match its captured catalog", contextDef.BundleHash())
 	}
-	rooted, err := bundle.RootedSource()
-	if err != nil {
-		return err
-	}
-	providers, err := packadmission.AdmitProviderSource(rooted, bundle.Platform)
+	providers, err := packadmission.ProviderSourceForBundle(bundle)
 	if err != nil {
 		return err
 	}

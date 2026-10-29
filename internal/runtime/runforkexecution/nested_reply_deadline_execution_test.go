@@ -117,7 +117,7 @@ func nodeReplyRuntimeWithAgentOptions(t *testing.T, ctx context.Context, selecte
 	if !found {
 		t.Fatal("ordinary fork runtime requires its captured source bundle")
 	}
-	providers, err := packadmission.AdmitProviderSource(loaded.RootedSource, bundle.Platform)
+	providers, err := packadmission.ProviderSourceForBundle(bundle)
 	if err != nil {
 		t.Fatal(err)
 	}
