@@ -4,14 +4,12 @@ import (
 	"context"
 	"errors"
 	"fmt"
-	"maps"
 	"reflect"
 	"sort"
 	"strings"
 	"sync"
 
 	"github.com/division-sh/swarm/internal/channelonboarding"
-	"github.com/division-sh/swarm/internal/config"
 	"github.com/division-sh/swarm/internal/operatorchannel"
 	"github.com/division-sh/swarm/internal/packadmission"
 	"github.com/division-sh/swarm/internal/packs"
@@ -60,7 +58,6 @@ type BundleContext struct {
 	ChannelActivationGeneration channelonboarding.ChannelActivationGeneration
 	EffectiveSourceIdentity     scenarioexecution.EffectiveSourceIdentity
 	ScenarioProfileCatalog      *scenarioexecution.Catalog
-	deploymentTriggers          map[string]config.TriggerConfig
 }
 
 type RuntimeContextState string
@@ -76,9 +73,6 @@ const (
 )
 
 func (c BundleContext) normalized() BundleContext {
-	if c.Runtime != nil {
-		c.deploymentTriggers = maps.Clone(c.Runtime.Options.TriggerEntries)
-	}
 	c.RuntimeInstanceID = strings.TrimSpace(c.RuntimeInstanceID)
 	c.WorkspaceScopeKey = strings.TrimSpace(c.WorkspaceScopeKey)
 	c.PackInventoryDigest = strings.TrimSpace(c.PackInventoryDigest)
@@ -97,13 +91,6 @@ func (c BundleContext) normalized() BundleContext {
 
 func (c BundleContext) BundleHash() string {
 	return c.SourceArtifactFact.BundleHash()
-}
-
-func (c BundleContext) triggerEntries() map[string]config.TriggerConfig {
-	if c.Runtime == nil {
-		return c.deploymentTriggers
-	}
-	return c.Runtime.Options.TriggerEntries
 }
 
 type runtimeContextEntry struct {
@@ -807,7 +794,7 @@ func (m *RuntimeContextManager) refreshCapabilitySubjectsLocked() error {
 }
 
 func validateStandingTargetDeclarationOwner(contextDef *BundleContext, runtimeOwner *Runtime, target StandingTarget) error {
-	declarations, err := ResolveStandingTargetDeclarations(contextDef.Source, contextDef.ProviderTriggerCatalog, contextDef.triggerEntries())
+	declarations, err := ResolveStandingTargetDeclarations(contextDef.Source, contextDef.ProviderTriggerCatalog)
 	if err != nil {
 		return err
 	}
@@ -855,7 +842,7 @@ func validateStandingTargetDeclarationOwner(contextDef *BundleContext, runtimeOw
 }
 
 func declaredStandingCapabilitySubjects(contextDef *BundleContext, executableSubjects map[string]struct{}) ([]packs.Subject, error) {
-	declarations, err := ResolveStandingTargetDeclarations(contextDef.Source, contextDef.ProviderTriggerCatalog, contextDef.triggerEntries())
+	declarations, err := ResolveStandingTargetDeclarations(contextDef.Source, contextDef.ProviderTriggerCatalog)
 	if err != nil {
 		return nil, err
 	}
@@ -1581,7 +1568,7 @@ func (m *RuntimeContextManager) AdmitChannelStandingTarget(ctx context.Context, 
 		m.mu.RUnlock()
 		return fmt.Errorf("%w: channel target runtime context is no longer current", channelonboarding.ErrRevisionConflict)
 	}
-	declarations, err := ResolveStandingTargetDeclarations(entry.context.Source, entry.context.ProviderTriggerCatalog, entry.context.triggerEntries())
+	declarations, err := ResolveStandingTargetDeclarations(entry.context.Source, entry.context.ProviderTriggerCatalog)
 	if err != nil {
 		m.mu.RUnlock()
 		return err

@@ -61,15 +61,11 @@ func TestCompileAdmissionProjectsExactPackAuthentication(t *testing.T) {
 			if err != nil {
 				t.Fatal(err)
 			}
-			acknowledge := ""
-			if !requiresSecret {
-				acknowledge = UnsignedWebhookAcknowledgement
-			}
-			plan, err := catalog.CompileAdmission(CompileAdmissionRequest{Alias: "chat", Provider: "acme", SigningSecret: secret, Declaration: AdmissionDeclaration{Acknowledge: acknowledge}})
+			plan, err := catalog.CompileAdmission(CompileAdmissionRequest{Alias: "chat", Provider: "acme", SigningSecret: secret})
 			if err != nil {
 				t.Fatal(err)
 			}
-			if plan.RequestAuthentication() != tc.want || plan.RequiresSecret() != requiresSecret || plan.AcknowledgedUnsigned() != !requiresSecret {
+			if plan.RequestAuthentication() != tc.want || plan.RequiresSecret() != requiresSecret {
 				t.Fatalf("authentication = %s requires=%t", plan.RequestAuthentication(), plan.RequiresSecret())
 			}
 			subject, err := plan.EffectiveCapabilitySubject(EffectiveSubjectRequest{BundleHash: strings.Repeat("a", 64), FlowPath: ".", Alias: "chat", SigningSecret: secret})
@@ -174,7 +170,7 @@ func TestRawAdmissionPreservesRawPayloadWhileResolvingJSONPathDeliveryID(t *test
 	plan, err := catalog.CompileAdmission(CompileAdmissionRequest{
 		Alias: "partner", Provider: "partner-events",
 		Declaration: AdmissionDeclaration{
-			Kind: "raw", Acknowledge: UnsignedWebhookAcknowledgement,
+			Kind:  "raw",
 			Event: "inbound.partner", Payload: "raw",
 			Authentication: RawAuthenticationDeclaration{Kind: "none"},
 			DeliveryID:     RawDeliveryIDDeclaration{Source: "json_path", JSONPath: "$.delivery.id"},

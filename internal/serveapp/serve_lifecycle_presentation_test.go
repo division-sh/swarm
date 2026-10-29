@@ -505,7 +505,7 @@ func TestServeLifecyclePresenterPreservesWarningsOnLateStartupFailure(t *testing
 	presenter := newServeLifecyclePresenter(cliapp.ServeOptions{Output: &stdout, ErrorOutput: &stderr})
 	report := runtimebootverify.Report{}
 	report.Add(runtimebootverify.Finding{
-		CheckID:     "unsigned_webhook",
+		CheckID:     "inbound_unsigned_webhook",
 		Severity:    runtimebootverify.SeveritySemanticDriftWarn,
 		Location:    "telegram",
 		Message:     "telegram accepts unsigned webhooks",

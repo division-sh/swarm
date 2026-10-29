@@ -179,8 +179,14 @@ func (s directoryConnectorSource) FlowScopes() []semanticview.FlowScope {
 }
 
 func (s directoryConnectorSource) FlowScopeByID(id string) (semanticview.FlowScope, bool) {
-	for _, scope := range s.FlowScopes() {
+	for _, scope := range s.scopes {
 		if scope.ID == id {
+			scope.Events = cloneEventCatalog(scope.Events)
+			tools := make(map[string]runtimecontracts.ToolSchemaEntry, len(scope.Tools))
+			for name, tool := range scope.Tools {
+				tools[name] = tool
+			}
+			scope.Tools = tools
 			return scope, true
 		}
 	}

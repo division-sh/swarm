@@ -83,7 +83,6 @@ type RootInputAdmission struct {
 	PackID                 string `json:"pack_id,omitempty"`
 	DeclaredAuthentication string `json:"declared_authentication,omitempty"`
 	Event                  string `json:"event,omitempty"`
-	Acknowledgement        string `json:"acknowledgement,omitempty"`
 }
 
 type RootInputTarget struct {

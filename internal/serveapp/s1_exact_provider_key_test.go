@@ -23,7 +23,7 @@ func TestS1RuntimeRegistrationComparisonDoesNotRepairProviderKey(t *testing.T) {
 		t.Fatal(err)
 	}
 	plan, err := catalog.CompileAdmission(providertriggers.CompileAdmissionRequest{Alias: "shop", Provider: "telegram_sales",
-		Declaration: providertriggers.AdmissionDeclaration{Kind: "raw", Acknowledge: providertriggers.UnsignedWebhookAcknowledgement, Event: "business.message", Payload: "json",
+		Declaration: providertriggers.AdmissionDeclaration{Kind: "raw", Event: "business.message", Payload: "json",
 			Authentication: providertriggers.RawAuthenticationDeclaration{Kind: "none"}, DeliveryID: providertriggers.RawDeliveryIDDeclaration{Source: "body_sha256"}},
 	})
 	if err != nil {

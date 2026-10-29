@@ -167,7 +167,7 @@ func (rt *Runtime) standingCredentials(ctx context.Context) (*standingCredential
 
 func (rt *Runtime) observeStandingCredentials(ctx context.Context) (*standingCredentialAdmission, error) {
 	source := rt.Options.WorkflowModule.SemanticSource()
-	declarations, err := ResolveStandingTargetDeclarations(source, rt.Options.ProviderTriggerCatalog, rt.Options.TriggerEntries)
+	declarations, err := ResolveStandingTargetDeclarations(source, rt.Options.ProviderTriggerCatalog)
 	if err != nil {
 		return nil, err
 	}

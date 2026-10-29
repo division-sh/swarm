@@ -117,7 +117,6 @@ type StandingIngressProviderView struct {
 	PackID                string `json:"pack_id,omitempty"`
 	RequestAuthentication string `json:"request_authentication,omitempty"`
 	Event                 string `json:"event,omitempty"`
-	Acknowledgement       string `json:"acknowledgement,omitempty"`
 }
 
 type FlowSourceFiles struct {

@@ -6,7 +6,6 @@ import (
 	"path/filepath"
 	"strings"
 
-	"github.com/division-sh/swarm/internal/config"
 	"github.com/division-sh/swarm/internal/packartifact"
 	"github.com/division-sh/swarm/internal/packs"
 	"github.com/division-sh/swarm/internal/platform"
@@ -78,7 +77,7 @@ func appendProviderTriggerCapabilitySubjects(report *LocalPreflightReport, loade
 	report.addCapabilitySubjects(subjects)
 }
 
-func appendEffectiveProviderTriggerCapabilitySubjects(ctx context.Context, report *LocalPreflightReport, source semanticview.Source, catalog *providertriggers.CatalogSnapshot, providerCredentials runtimecredentials.Store, triggers map[string]config.TriggerConfig) {
+func appendEffectiveProviderTriggerCapabilitySubjects(ctx context.Context, report *LocalPreflightReport, source semanticview.Source, catalog *providertriggers.CatalogSnapshot, providerCredentials runtimecredentials.Store) {
 	if report == nil || source == nil || catalog == nil {
 		return
 	}
@@ -91,7 +90,7 @@ func appendEffectiveProviderTriggerCapabilitySubjects(ctx context.Context, repor
 			return
 		}
 	}
-	subjects, err := runtime.EffectiveStandingIngressCapabilitySubjects(ctx, source, catalog, owner, triggers)
+	subjects, err := runtime.EffectiveStandingIngressCapabilitySubjects(ctx, source, catalog, owner)
 	if err != nil {
 		report.add(localPreflightProviderPackPrerequisite, "provider_trigger_target_admission_failed", LocalPreflightSeverityBlocker, LocalPreflightStatusFailed, err.Error(), "fix the standing ingress provider admission declaration or configured trigger packs")
 		return

@@ -28,6 +28,7 @@ import (
 	"github.com/division-sh/swarm/internal/store/storetest"
 	"github.com/division-sh/swarm/internal/testutil"
 	"github.com/division-sh/swarm/internal/testutil/packfixture"
+	"github.com/division-sh/swarm/internal/testutil/sourceartifactfixture"
 )
 
 func TestInboundAdmissionSupportedSurfacePolicyMatrixSQLiteAndPostgres(t *testing.T) {
@@ -136,6 +137,14 @@ func runInboundAdmissionSupportedSurfacePolicyMatrix(t *testing.T, backend strin
 	isolateCLIAPIConfigEnv(t)
 	sourceRoot := writeInboundAdmissionPolicyMatrixFixture(t)
 	importProjectTelegramTrigger(t, sourceRoot)
+	_, bundle, err := cliapp.NewSwarmWorkflowModule(repoRootForTest(), sourceRoot)
+	if err != nil {
+		t.Fatal(err)
+	}
+	alias, found := bundle.FlowIngressAlias("matrix")
+	if !found {
+		t.Fatal("captured matrix holder has no webhook alias")
+	}
 	dataRoot := t.TempDir()
 	credentialPath := filepath.Join(dataRoot, "credentials.json")
 	t.Setenv("SWARM_CREDENTIALS_FILE", credentialPath)
@@ -144,9 +153,10 @@ func runInboundAdmissionSupportedSurfacePolicyMatrix(t *testing.T, backend strin
 		t.Fatal(err)
 	}
 	for key, value := range map[string]string{
-		"telegram.webhook_signing_secret": "telegram-secret",
-		"webhook_signing.intercom":        "intercom-secret",
-		"webhook_signing.partner":         "partner-secret",
+		"telegram.telegram_bot_token":         "matrix-bot-token",
+		"telegram.webhook_signing_secret":     "telegram-secret",
+		"intercom.webhook_signing_secret":     "intercom-secret",
+		"partner_auth.webhook_signing_secret": "partner-secret",
 	} {
 		if err := credentialStore.Set(context.Background(), key, value); err != nil {
 			t.Fatalf("set credential %s: %v", key, err)
@@ -194,22 +204,26 @@ func runInboundAdmissionSupportedSurfacePolicyMatrix(t *testing.T, backend strin
 	waitForInboundAdmissionServeOutput(t, process, "[WARN] inbound_unsigned_webhook")
 	serveOutput := process.outputString()
 	wantInventory := fmt.Sprintf("packs                      embedded · %d packs", len(packfixture.EmbeddedInventory(t).Entries()))
-	for _, want := range []string{wantInventory, "effective sha256:", "project provider.telegram"} {
+	for _, want := range []string{wantInventory, "effective sha256:", "telegram webhook", "TOKEN_EQUALITY"} {
 		if !strings.Contains(serveOutput, want) {
 			t.Fatalf("serve readback omitted imported Telegram inventory fact %q:\n%s", want, serveOutput)
 		}
 	}
-	var unsignedWarningLine string
+	unsignedWarnings := make(map[string]bool)
 	for _, line := range strings.Split(serveOutput, "\n") {
 		if strings.Contains(line, "[WARN] inbound_unsigned_webhook") {
-			if unsignedWarningLine != "" {
-				t.Fatalf("serve emitted duplicate unsigned warning:\n%s", serveOutput)
+			for _, provider := range []string{"acme_public", "partner_open", "partner_ack"} {
+				if strings.Contains(line, `provider "`+provider+`" accepts unsigned webhooks`) {
+					if unsignedWarnings[provider] {
+						t.Fatalf("serve emitted duplicate unsigned warning for %s:\n%s", provider, serveOutput)
+					}
+					unsignedWarnings[provider] = true
+				}
 			}
-			unsignedWarningLine = line
 		}
 	}
-	if unsignedWarningLine == "" || !strings.Contains(unsignedWarningLine, `provider "partner_open" accepts unsigned webhooks`) || strings.Contains(unsignedWarningLine, "partner_ack") || !strings.Contains(serveOutput, "remediation: add admission.acknowledge: unsigned_webhook") {
-		t.Fatalf("serve unsigned warning line=%q\noutput:\n%s", unsignedWarningLine, serveOutput)
+	if len(unsignedWarnings) != 3 || !strings.Contains(serveOutput, "remediation: configure secret: in the trigger BODY") {
+		t.Fatalf("serve unsigned warnings=%v\noutput:\n%s", unsignedWarnings, serveOutput)
 	}
 	for _, provider := range []string{"partner_open", "partner_ack"} {
 		found := false
@@ -236,12 +250,12 @@ func runInboundAdmissionSupportedSurfacePolicyMatrix(t *testing.T, backend strin
 		headers    map[string]string
 		eventNames []string
 	}{
-		{provider: "telegram", body: []byte(`{"update_id":901,"message":{"message_id":901,"from":{"id":7},"chat":{"id":42,"type":"private"},"text":"hello"}}`), headers: map[string]string{"X-Telegram-Bot-Api-Secret-Token": "telegram-secret"}, eventNames: []string{"inbound.telegram", "inbound.telegram.text_message"}},
-		{provider: "intercom", body: []byte(`{"id":"platform-unsigned-1","topic":"contact.created"}`), eventNames: []string{"inbound.intercom"}},
-		{provider: "acme_public", body: []byte(`{"id":"external-unsigned-1"}`), eventNames: []string{"inbound.acme_public"}},
-		{provider: "partner_auth", body: []byte(`{"value":1}`), headers: map[string]string{"X-Partner-Delivery": "partner-auth-1"}, eventNames: []string{"inbound.partner_auth"}},
-		{provider: "partner_open", body: []byte(`{"delivery":{"id":"partner-open-1"},"value":2}`), eventNames: []string{"inbound.partner_open"}},
-		{provider: "partner_ack", body: []byte("raw-open-body"), eventNames: []string{"inbound.partner_ack"}},
+		{provider: "telegram", body: []byte(`{"update_id":901,"message":{"message_id":901,"from":{"id":7},"chat":{"id":42,"type":"private"},"text":"hello"}}`), headers: map[string]string{"X-Telegram-Bot-Api-Secret-Token": "telegram-secret"}, eventNames: []string{"inbound.telegram.raw", "inbound.telegram.text_message"}},
+		{provider: "intercom", body: []byte(`{"id":"platform-unsigned-1","topic":"contact.created"}`), eventNames: []string{"inbound.intercom.raw"}},
+		{provider: "acme_public", body: []byte(`{"id":"external-unsigned-1"}`), eventNames: []string{"inbound.acme_public.raw"}},
+		{provider: "partner_auth", body: []byte(`{"value":1}`), headers: map[string]string{"X-Partner-Delivery": "partner-auth-1"}, eventNames: []string{"inbound.partner_auth.raw"}},
+		{provider: "partner_open", body: []byte(`{"delivery":{"id":"partner-open-1"},"value":2}`), eventNames: []string{"inbound.partner_open.raw"}},
+		{provider: "partner_ack", body: []byte("raw-open-body"), headers: map[string]string{"X-Partner-Delivery": "partner-raw-1"}, eventNames: []string{"inbound.partner_ack.raw"}},
 	}
 	for i := range tests {
 		test := &tests[i]
@@ -258,7 +272,7 @@ func runInboundAdmissionSupportedSurfacePolicyMatrix(t *testing.T, backend strin
 			_, _ = mac.Write(test.body)
 			test.headers["X-Partner-Signature"] = hex.EncodeToString(mac.Sum(nil))
 		}
-		status, response := sendInboundAdmissionSupportedRequest(t, baseURL, test.provider, test.body, test.headers)
+		status, response := sendInboundAdmissionSupportedRequest(t, baseURL, alias, test.provider, test.body, test.headers)
 		if status != http.StatusAccepted {
 			t.Fatalf("%s status=%d response=%s\nserve output:\n%s", test.provider, status, response, process.outputString())
 		}
@@ -266,7 +280,7 @@ func runInboundAdmissionSupportedSurfacePolicyMatrix(t *testing.T, backend strin
 		if strings.Join(accepted.EventNames, "\x00") != strings.Join(test.eventNames, "\x00") || len(accepted.EventIDs) != len(test.eventNames) {
 			t.Fatalf("%s accepted ordered children ids=%v names=%v, want names=%v", test.provider, accepted.EventIDs, accepted.EventNames, test.eventNames)
 		}
-		status, response = sendInboundAdmissionSupportedRequest(t, baseURL, test.provider, test.body, test.headers)
+		status, response = sendInboundAdmissionSupportedRequest(t, baseURL, alias, test.provider, test.body, test.headers)
 		if status != http.StatusOK {
 			t.Fatalf("%s duplicate status=%d response=%s", test.provider, status, response)
 		}
@@ -290,14 +304,14 @@ func runInboundAdmissionSupportedSurfacePolicyMatrix(t *testing.T, backend strin
 			}
 		}
 	}
-	status, _ := sendInboundAdmissionSupportedRequest(t, baseURL, "partner_auth", []byte(`{"value":1}`), map[string]string{
+	status, _ := sendInboundAdmissionSupportedRequest(t, baseURL, alias, "partner_auth", []byte(`{"value":1}`), map[string]string{
 		"X-Partner-Delivery":  "partner-auth-invalid",
 		"X-Partner-Signature": "invalid",
 	})
 	if status != http.StatusUnauthorized {
 		t.Fatalf("invalid authenticated raw status=%d, want 401", status)
 	}
-	status, response := sendInboundAdmissionSupportedRequest(t, baseURL, "telegram", []byte(`[]`), map[string]string{
+	status, response := sendInboundAdmissionSupportedRequest(t, baseURL, alias, "telegram", []byte(`[]`), map[string]string{
 		"X-Telegram-Bot-Api-Secret-Token": "telegram-secret",
 	})
 	if status != http.StatusBadRequest || !strings.Contains(response, "project telegram update object is required") {
@@ -336,16 +350,15 @@ func runInboundAdmissionSupportedSurfacePolicyMatrix(t *testing.T, backend strin
 	if err != nil {
 		t.Fatal(err)
 	}
-	projection, err := sourceartifact.MaterializeRuntimeProjection(artifact)
+	originalRoot, err := bundle.RootedSource()
 	if err != nil {
 		t.Fatal(err)
 	}
-	t.Cleanup(func() {
-		if err := projection.Release(); err != nil {
-			t.Error(err)
-		}
-	})
-	opts.SourceRoot = projection.PrivateRoot()
+	restoredRoot, restoredDirectory := sourceartifactfixture.Rooted(t, originalRoot.Admission().RootDirectory(), artifact)
+	if restoredRoot.Admission().Reference() != originalRoot.Admission().Reference() {
+		t.Fatal("persisted matrix source changed its exact root")
+	}
+	opts.SourceRoot = restoredDirectory
 	if sqliteStore != nil {
 		if err := sqliteStore.Close(); err != nil {
 			t.Fatal(err)
@@ -354,7 +367,7 @@ func runInboundAdmissionSupportedSurfacePolicyMatrix(t *testing.T, backend strin
 	restarted := startServeRuntimeTestProcess(t, opts)
 	restarted.waitForReadyLine()
 	restartURL := "http://" + serveRuntimeAPIListenerFromOutput(t, restarted.outputString())
-	status, response = sendInboundAdmissionSupportedRequest(t, restartURL, "telegram", []byte(`{"update_id":902,"message":{"message_id":902,"from":{"id":7},"chat":{"id":42,"type":"private"},"text":"after restart"}}`), map[string]string{
+	status, response = sendInboundAdmissionSupportedRequest(t, restartURL, alias, "telegram", []byte(`{"update_id":902,"message":{"message_id":902,"from":{"id":7},"chat":{"id":42,"type":"private"},"text":"after restart"}}`), map[string]string{
 		"X-Telegram-Bot-Api-Secret-Token": "telegram-secret",
 	})
 	if status != http.StatusAccepted {
@@ -409,8 +422,9 @@ func runInboundAdmissionSupportedSurfacePolicyMatrix(t *testing.T, backend strin
 
 func importProjectTelegramTrigger(t testing.TB, sourceRoot string) {
 	t.Helper()
+	sourceRoot = filepath.Join(sourceRoot, "matrix")
 	base := packfixture.EmbeddedBase(t)
-	if changed, err := packartifact.ImportEmbeddedPack(sourceRoot, "telegram", base); err != nil || !changed {
+	if changed, err := packartifact.ImportEmbeddedPack(sourceRoot, "telegram", base); err != nil {
 		t.Fatalf("import project Telegram trigger changed=%t: %v", changed, err)
 	}
 	path := filepath.Join(sourceRoot, "telegram", "trigger.yaml")
@@ -460,9 +474,9 @@ func decodeInboundAdmissionPublicationResponse(t testing.TB, raw string) inbound
 	return response
 }
 
-func sendInboundAdmissionSupportedRequest(t testing.TB, baseURL, provider string, body []byte, headers map[string]string) (int, string) {
+func sendInboundAdmissionSupportedRequest(t testing.TB, baseURL, alias, provider string, body []byte, headers map[string]string) (int, string) {
 	t.Helper()
-	req, err := http.NewRequest(http.MethodPost, strings.TrimRight(baseURL, "/")+"/webhooks/matrix/"+provider, bytes.NewReader(body))
+	req, err := http.NewRequest(http.MethodPost, strings.TrimRight(baseURL, "/")+"/webhooks/"+alias+"/"+provider, bytes.NewReader(body))
 	if err != nil {
 		t.Fatal(err)
 	}

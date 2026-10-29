@@ -26,8 +26,7 @@ func TestS1TriggerNormalizedOutputKeepsDirectoryKeyAndWireConversionSeparate(t *
 			if err != nil {
 				t.Fatal(err)
 			}
-			plan, err := catalog.CompileAdmission(CompileAdmissionRequest{Alias: "shop", Provider: key,
-				Declaration: AdmissionDeclaration{Acknowledge: UnsignedWebhookAcknowledgement}})
+			plan, err := catalog.CompileAdmission(CompileAdmissionRequest{Alias: "shop", Provider: key})
 			if err != nil {
 				t.Fatal(err)
 			}
@@ -162,7 +161,7 @@ func TestS1TriggerAndRawAdmissionRefuseNonportableProviderKeys(t *testing.T) {
 				t.Errorf("manifest admitted nonportable key %q", key)
 			}
 			plan, err := catalog.CompileAdmission(CompileAdmissionRequest{Alias: "shop", Provider: key,
-				Declaration: AdmissionDeclaration{Kind: "raw", Acknowledge: UnsignedWebhookAcknowledgement, Event: "business.message", Payload: "json",
+				Declaration: AdmissionDeclaration{Kind: "raw", Event: "business.message", Payload: "json",
 					Authentication: RawAuthenticationDeclaration{Kind: "none"}, DeliveryID: RawDeliveryIDDeclaration{Source: "body_sha256"}},
 			})
 			if err == nil || plan.Valid() {

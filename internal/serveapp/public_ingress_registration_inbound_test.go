@@ -23,7 +23,6 @@ import (
 
 	"github.com/division-sh/swarm/internal/channelonboarding"
 	"github.com/division-sh/swarm/internal/cliapp"
-	"github.com/division-sh/swarm/internal/config"
 	"github.com/division-sh/swarm/internal/packadmission"
 	"github.com/division-sh/swarm/internal/packs"
 	"github.com/division-sh/swarm/internal/providertriggers"
@@ -532,7 +531,6 @@ func TestResolveServeRegistrationPairsRejectsUnsignedIngressTarget(t *testing.T)
 	}
 	admission, err := catalog.CompileAdmission(providertriggers.CompileAdmissionRequest{
 		Alias: "chat", Provider: "telegram_raw",
-		Declaration: providertriggers.AdmissionDeclaration{Acknowledge: providertriggers.UnsignedWebhookAcknowledgement},
 	})
 	if err != nil {
 		t.Fatalf("CompileAdmission: %v", err)
@@ -571,8 +569,7 @@ func TestResolveServeRegistrationPairsRejectsUnsignedIngressTarget(t *testing.T)
 	rt := &runtimepkg.Runtime{ExecutionPosture: executionposture.Live, Bus: bus, ChannelActivations: activationOwner,
 		Options: runtimepkg.RuntimeOptions{RuntimeInstanceID: uuid.NewString(), WorkflowModule: module,
 			SourceArtifactFact:     mustServeTestEphemeralSourceArtifactFact(bundleHash),
-			ProviderTriggerCatalog: catalog, ProviderCredentials: credentialStore,
-			TriggerEntries: map[string]config.TriggerConfig{"telegram_raw/trigger.yaml": {Acknowledge: providertriggers.UnsignedWebhookAcknowledgement}}}}
+			ProviderTriggerCatalog: catalog, ProviderCredentials: credentialStore}}
 	if _, err := rt.PlanStandingTargets(); err != nil {
 		t.Fatal(err)
 	}

@@ -160,61 +160,30 @@ func CopyInboundAdmissionPolicyMatrix(t testing.TB) string {
 		"schema.yaml": "stages: []\n# fixture: inbound-admission-policy-matrix\n",
 		"matrix/schema.yaml": `# fixture: matrix
 stages: []
-ingress:
-  alias: matrix
-  providers:
-    - provider: telegram
-      signing_secret: webhook_signing.telegram
-      admission:
-        pack: {id: provider.telegram}
-    - provider: intercom
-      signing_secret: webhook_signing.intercom
-      admission:
-        pack: {id: provider.intercom}
-    - provider: acme_public
-      admission:
-        kind: raw
-        acknowledge: unsigned_webhook
-        authentication: {kind: none}
-        event: inbound.acme_public
-        delivery_id: {source: body_sha256}
-        payload: json
-    - provider: partner_auth
-      signing_secret: webhook_signing.partner
-      admission:
-        kind: raw
-        authentication: {kind: hmac_sha256, header: X-Partner-Signature, encoding: hex}
-        event: inbound.partner_auth
-        delivery_id: {source: header, header: X-Partner-Delivery}
-        payload: json
-    - provider: partner_open
-      admission:
-        kind: raw
-        authentication: {kind: none}
-        event: inbound.partner_open
-        delivery_id: {source: json_path, json_path: $.delivery.id}
-        payload: raw
-    - provider: partner_ack
-      admission:
-        kind: raw
-        acknowledge: unsigned_webhook
-        authentication: {kind: none}
-        event: inbound.partner_ack
-        delivery_id: {source: body_sha256}
-        payload: raw
 pins:
   inputs:
-    - inbound.telegram
+    - inbound.telegram.raw
     - inbound.telegram.text_message
-    - inbound.intercom
-    - inbound.acme_public
-    - inbound.partner_auth
-    - inbound.partner_open
-    - inbound.partner_ack
+    - inbound.intercom.raw
+    - inbound.acme_public.raw
+    - inbound.partner_auth.raw
+    - inbound.partner_open.raw
+    - inbound.partner_ack.raw
 `,
 		"matrix/entities.yaml": "matrix_service:\n  service_id:\n    type: text\n    initial: standing\n",
-		"matrix/events.yaml":   inboundAdmissionEvents(),
 		"matrix/nodes.yaml":    inboundAdmissionNodes(),
+	}
+	for _, provider := range []string{"telegram", "intercom"} {
+		copyTree(t, filepath.Join(RepoRoot(t), "packs", "providers", provider), filepath.Join(root, "matrix", provider))
+	}
+	for _, provider := range []struct{ name, policy, capabilities string }{
+		{"acme_public", "delivery_id: {json_path: $.id, required: true}\n", ""},
+		{"partner_auth", "secret: {required: true}\nsignature: {type: hmac_sha256, header: X-Partner-Signature, signed_payload: raw_body}\ndelivery_id: {header: X-Partner-Delivery, required: true}\n", ", verify_secret: webhook_signing_secret"},
+		{"partner_open", "delivery_id: {json_path: $.delivery.id, required: true}\n", ""},
+		{"partner_ack", "delivery_id: {header: X-Partner-Delivery, required: true}\n", ""},
+	} {
+		files["matrix/"+provider.name+"/manifest.yaml"] = "version: 1.0.0\nplatform_version: '*'\ncapabilities: {can: {emit_events: [raw]" + provider.capabilities + "}, cannot: [execute code]}\n"
+		files["matrix/"+provider.name+"/trigger.yaml"] = "transport: webhook\nevent_name: {literal: raw}\nevent_type: {literal: message, required: true}\n" + provider.policy
 	}
 	for name, body := range files {
 		writeClosedVariantFile(t, root, name, body)
@@ -222,16 +191,8 @@ pins:
 	return root
 }
 
-func inboundAdmissionEvents() string {
-	var out strings.Builder
-	for _, event := range []string{"inbound.acme_public", "inbound.partner_auth", "inbound.partner_open", "inbound.partner_ack"} {
-		fmt.Fprintf(&out, "%s:\n  provider: text\n  provider_event_id: text\n  provider_event_type: text\n  data: json\n", event)
-	}
-	return out.String()
-}
-
 func inboundAdmissionNodes() string {
-	events := []string{"inbound.telegram", "inbound.telegram.text_message", "inbound.intercom", "inbound.acme_public", "inbound.partner_auth", "inbound.partner_open", "inbound.partner_ack"}
+	events := []string{"inbound.telegram.raw", "inbound.telegram.text_message", "inbound.intercom.raw", "inbound.acme_public.raw", "inbound.partner_auth.raw", "inbound.partner_open.raw", "inbound.partner_ack.raw"}
 	var out strings.Builder
 	out.WriteString("matrix-sink:\n  execution_type: system_node\n  subscribes_to: [" + strings.Join(events, ", ") + "]\n  event_handlers:\n")
 	for _, event := range events {

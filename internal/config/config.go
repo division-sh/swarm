@@ -16,15 +16,14 @@ import (
 
 // Config contains platform-generic runtime configuration. Authored input enters through DecodeSource.
 type Config struct {
-	Runtime    RuntimeConfig            `yaml:"runtime"`
-	Database   DatabaseConfig           `yaml:"database"`
-	Store      StoreConfig              `yaml:"store"`
-	Workspace  WorkspaceConfig          `yaml:"workspace"`
-	LLM        LLMConfig                `yaml:"llm"`
-	Platform   PlatformConfig           `yaml:"platform"`
-	Channels   ChannelsConfig           `yaml:"channels"`
-	Triggers   map[string]TriggerConfig `yaml:"triggers,omitempty"`
-	Extensions map[string]any           `yaml:",inline"`
+	Runtime    RuntimeConfig   `yaml:"runtime"`
+	Database   DatabaseConfig  `yaml:"database"`
+	Store      StoreConfig     `yaml:"store"`
+	Workspace  WorkspaceConfig `yaml:"workspace"`
+	LLM        LLMConfig       `yaml:"llm"`
+	Platform   PlatformConfig  `yaml:"platform"`
+	Channels   ChannelsConfig  `yaml:"channels"`
+	Extensions map[string]any  `yaml:",inline"`
 
 	typedExtensions ExtensionsConfig `yaml:"-"`
 	extensionsReady bool             `yaml:"-"`
@@ -253,9 +252,6 @@ func (c *Config) Validate() error {
 }
 
 func (c *Config) validate(backendOverride string) error {
-	if err := c.validateTriggerEntries(); err != nil {
-		return err
-	}
 	if err := c.validateDecisionCardCadence(); err != nil {
 		return err
 	}

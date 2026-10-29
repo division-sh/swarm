@@ -61,7 +61,7 @@ func (g *testInboundGateway) HandleResolvedWebhook(w http.ResponseWriter, r *htt
 		declaration := providertriggers.AdmissionDeclaration{}
 		if _, installed := g.catalog.EntryByProvider(target.Provider); !installed && target.SigningSecret == "" {
 			declaration = providertriggers.AdmissionDeclaration{
-				Kind: "raw", Acknowledge: providertriggers.UnsignedWebhookAcknowledgement,
+				Kind:           "raw",
 				Authentication: providertriggers.RawAuthenticationDeclaration{Kind: "none"},
 				Event:          "inbound." + target.Provider,
 				DeliveryID:     providertriggers.RawDeliveryIDDeclaration{Source: "json_path", JSONPath: "$.id"}, Payload: "json",
@@ -517,7 +517,6 @@ func TestInboundGateway_Returns503WithoutCompensatingMarkerPathWhenBatchFails(t 
 	}
 	plan, err := capturedCatalog.CompileAdmission(providertriggers.CompileAdmissionRequest{
 		Alias: "entity-1", Provider: "custom",
-		Declaration: providertriggers.AdmissionDeclaration{Acknowledge: providertriggers.UnsignedWebhookAcknowledgement},
 	})
 	if err != nil {
 		t.Fatal(err)
@@ -606,7 +605,6 @@ func TestInboundGateway_PausedRuntimeUsesIngressOwnerAndAcceptsQueueableWebhook(
 	store := &recordingInboundStore{target: testInboundTarget("entity-1", ""), inserted: true}
 	store.target.AdmissionPlan, err = capturedCatalog.CompileAdmission(providertriggers.CompileAdmissionRequest{
 		Alias: "entity-1", Provider: "custom",
-		Declaration: providertriggers.AdmissionDeclaration{Acknowledge: providertriggers.UnsignedWebhookAcknowledgement},
 	})
 	if err != nil {
 		t.Fatal(err)
@@ -891,7 +889,6 @@ normalized_events:
 	}
 	plan, err := catalog.CompileAdmission(providertriggers.CompileAdmissionRequest{
 		Alias: "chat", Provider: "telegram",
-		Declaration: providertriggers.AdmissionDeclaration{Acknowledge: providertriggers.UnsignedWebhookAcknowledgement},
 	})
 	if err != nil {
 		t.Fatalf("CompileAdmission: %v", err)

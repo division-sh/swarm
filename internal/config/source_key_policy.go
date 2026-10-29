@@ -119,7 +119,6 @@ func SourceKeyRules() map[string]SourceKeyRule {
 		"channels.hitl":                           section,
 		"channels.hitl.provider":                  {},
 		"channels.hitl.account":                   {},
-		"triggers":                                section,
 		"budget":                                  section,
 		"budget.global_monthly_cap":               {},
 		"budget.per_entity_monthly_cap":           {},
