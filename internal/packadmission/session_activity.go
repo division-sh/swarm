@@ -27,11 +27,7 @@ func SessionActivityTrigger(source semanticview.Source, site contracts.ActivityS
 	if !backed || bundle == nil {
 		return absent, fmt.Errorf("session activity requires its captured source")
 	}
-	rooted, err := bundle.RootedSource()
-	if err != nil {
-		return absent, err
-	}
-	providers, err := AdmitProviderSource(rooted, bundle.Platform)
+	providers, err := ProviderSourceForBundle(bundle)
 	if err != nil {
 		return absent, err
 	}

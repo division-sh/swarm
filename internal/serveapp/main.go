@@ -484,11 +484,7 @@ func buildServeRuntimeBundleContext(req serveRuntimeBundleContextRequest) (resul
 		return serveRuntimeBundleContext{}, fmt.Errorf("admit effective source projection: %w", err)
 	}
 	loaded.source = projection.Source()
-	rooted, err := loaded.bundle.RootedSource()
-	if err != nil {
-		return serveRuntimeBundleContext{}, err
-	}
-	providers, err := packadmission.AdmitProviderSource(rooted, loaded.bundle.Platform)
+	providers, err := packadmission.ProviderSourceForBundle(loaded.bundle)
 	if err != nil {
 		return serveRuntimeBundleContext{}, err
 	}
