@@ -48,6 +48,7 @@ type RegistrationPair struct {
 	BindingID                   string
 	PlanGeneration              plangeneration.Generation
 	ActivationSource            channelonboarding.ActivationSource
+	OperatorAccount             string
 	OnboardingOperationID       string
 	OnboardingRevision          int64
 	ActivationRevision          int64
@@ -416,7 +417,7 @@ func (c *ProviderRegistrationController) admitAndIdentify(ctx context.Context, e
 			if operationID != "" {
 				return admittedPair{}, fmt.Errorf("declared provider registration cannot claim an onboarding operation")
 			}
-		case channelonboarding.ActivationSourceLearned:
+		case channelonboarding.ActivationSourceLearned, channelonboarding.ActivationSourceRegistered:
 			if operationID == "" {
 				return admittedPair{}, fmt.Errorf("learned provider registration requires its exact onboarding operation")
 			}
@@ -459,6 +460,10 @@ func (c *ProviderRegistrationController) admitAndIdentify(ctx context.Context, e
 		return admittedPair{}, err
 	}
 	resourceID := strings.TrimSpace(fmt.Sprint(projected["resource_id"]))
+	if pair.ActivationSource == channelonboarding.ActivationSourceRegistered &&
+		(resourceID != pair.OperatorAccount || (channelonboarding.AccountReference{Provider: pair.Target.Provider, Account: pair.OperatorAccount}).Validate() != nil) {
+		return admittedPair{}, channelonboarding.ErrConflict
+	}
 	slotID := strings.Join([]string{pair.Registration.Provider(), pair.Registration.SlotNamespace(), resourceID}, ":")
 	base, err := registrationBaseFingerprint(exposure, pair, provider, signing, slotID)
 	if err != nil {

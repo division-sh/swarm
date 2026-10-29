@@ -897,8 +897,9 @@ func TestProviderRegistrationReconcilerCollisionConvergenceAndNoResend(t *testin
 }
 
 func TestRegistrationSelectionCurrentnessAtProviderBoundaries(t *testing.T) {
-	for _, boundary := range []string{"identify", "apply", "readback", "settlement", "callback"} {
+	for _, boundary := range []string{"identify", "apply", "readback", "settlement", "callback", "registered_callback", "registered_account_mismatch", "registered_operation_missing"} {
 		t.Run(boundary, func(t *testing.T) {
+			phase := strings.TrimPrefix(boundary, "registered_")
 			file, err := runtimecredentials.NewFileStore(filepath.Join(t.TempDir(), "credentials.json"))
 			if err != nil {
 				t.Fatal(err)
@@ -913,6 +914,20 @@ func TestRegistrationSelectionCurrentnessAtProviderBoundaries(t *testing.T) {
 				t.Fatal(err)
 			}
 			pair := testRegistrationPair(t, loadTelegramRegistrationPlan(t), "hitl", "ingress:support:telegram", owner)
+			if strings.HasPrefix(boundary, "registered_") {
+				publication, err := channelonboarding.NewChannelActivationPublication(nil)
+				if err != nil {
+					t.Fatal(err)
+				}
+				pair.ActivationSource, pair.PrebindingOperationID = channelonboarding.ActivationSourceRegistered, ""
+				pair.ChannelActivationGeneration, pair.OperatorAccount = publication.Generation(), "42"
+				if phase == "account_mismatch" {
+					pair.OperatorAccount = "43"
+				}
+				if phase == "operation_missing" {
+					pair.OnboardingOperationID = ""
+				}
+			}
 			transport := &telegramRegistrationTransport{t: t}
 			effects := &registrationEffectStore{Harness: effecttest.New(), current: true}
 			readiness := NewReadinessOwner(true)
@@ -925,8 +940,8 @@ func TestRegistrationSelectionCurrentnessAtProviderBoundaries(t *testing.T) {
 				StartupAuthority: func() (startupownership.GrantEvidence, error) { return startup, nil },
 				SelectionCurrent: func(_ context.Context, _ RegistrationPair, exact bool) (bool, error) {
 					transport.mu.Lock()
-					atBoundary := boundary == "identify" || boundary == "apply" && transport.identifyCount > 0 ||
-						boundary == "readback" && transport.applyCount > 0 || boundary == "settlement" && transport.readbackCount > 0
+					atBoundary := phase == "identify" || phase == "apply" && transport.identifyCount > 0 ||
+						phase == "readback" && transport.applyCount > 0 || phase == "settlement" && transport.readbackCount > 0
 					transport.mu.Unlock()
 					if exact && atBoundary {
 						stale = true
@@ -941,7 +956,18 @@ func TestRegistrationSelectionCurrentnessAtProviderBoundaries(t *testing.T) {
 			readiness.SetRuntimeReady(true)
 			readiness.SetExposure(ExposureEvidence{GenerationID: exposure.ID, StartupAuthorityID: startup.GrantID, ExpiresAt: exposure.CreatedAt.Add(EvidenceTTL)})
 			err = controller.Reconcile(context.Background(), exposure, []RegistrationPair{pair})
-			if boundary == "callback" {
+			if phase == "account_mismatch" || phase == "operation_missing" {
+				identified, applied := transport.counts()
+				wantIdentify := 1
+				if phase == "operation_missing" {
+					wantIdentify = 0
+				}
+				if err == nil || phase == "account_mismatch" && !errors.Is(err, channelonboarding.ErrConflict) || identified != wantIdentify || applied != 0 || len(effects.Attempts) != 0 {
+					t.Fatal("registered account or operation mismatch reached a provider mutation", err, identified, applied)
+				}
+				return
+			}
+			if phase == "callback" {
 				if err != nil {
 					t.Fatal(err)
 				}
@@ -958,16 +984,16 @@ func TestRegistrationSelectionCurrentnessAtProviderBoundaries(t *testing.T) {
 			}
 			identified, applied := transport.counts()
 			wantIdentify, wantApply := 1, 1
-			if boundary == "identify" {
+			if phase == "identify" {
 				wantIdentify, wantApply = 0, 0
 			}
-			if boundary == "apply" {
+			if phase == "apply" {
 				wantApply = 0
 			}
 			if identified != wantIdentify || applied != wantApply {
 				t.Fatalf("provider work %d/%d, want %d/%d", identified, applied, wantIdentify, wantApply)
 			}
-			if boundary == "readback" || boundary == "settlement" {
+			if phase == "readback" || phase == "settlement" {
 				states := controller.snapshot.capture().registrations
 				for _, state := range states {
 					if state.Attempt == nil || !state.Attempt.Intent.HasPending {

@@ -231,7 +231,14 @@ func ResolveRuntimeStoreSelection(repo string, storeMode string, storeModeSet bo
 	if err != nil {
 		return storebackend.Selection{}, err
 	}
-	defaultPath := filepath.Join(swarmDir.Path, "stores", "default", "dev.db")
-	defaultSource := storebackend.SourceSwarmDirDefault
+	project := localRuntimeStateProject{}
+	if admitted.Path != "" {
+		projectRoot := filepath.Dir(admitted.Path)
+		if filepath.Base(projectRoot) == ".swarm" {
+			projectRoot = filepath.Dir(projectRoot)
+		}
+		project = resolveLocalRuntimeStateProject(projectRoot, CLISourcePaths{SourceRoot: projectRoot})
+	}
+	defaultPath, defaultSource := localRuntimeSQLiteDefault(swarmDir, project)
 	return resolveRuntimeStoreSelectionWithDefault(repo, storeMode, storeModeSet, admitted.Config, defaultPath, defaultSource)
 }

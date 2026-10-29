@@ -4,6 +4,7 @@ import (
 	"context"
 	"fmt"
 	"log"
+	"slices"
 	"sort"
 	"strings"
 	"sync"
@@ -20,6 +21,26 @@ import (
 func serveRegistrationSelectionCurrent(ctx context.Context, store channelonboarding.Store, pair runtimepublicingress.RegistrationPair, exactPendingRevision bool) (bool, error) {
 	if pair.ActivationSource == channelonboarding.ActivationSourceDeclared {
 		return pair.OnboardingOperationID == "" && pair.ChannelActivationGeneration.Valid(), nil
+	}
+	if pair.ActivationSource == channelonboarding.ActivationSourceRegistered {
+		scoped, ok := store.(interface {
+			DeploymentChannelOperations() channelonboarding.OperationStore
+		})
+		if !ok {
+			return false, channelonboarding.ErrInvalidRequest
+		}
+		op, err := channelonboarding.RegisteredAccount(ctx, scoped.DeploymentChannelOperations(), channelonboarding.AccountReference{
+			Provider: pair.Target.Provider, Account: pair.OperatorAccount,
+		})
+		if err == channelonboarding.ErrNotFound {
+			return false, nil
+		}
+		if err != nil {
+			return false, err
+		}
+		return op.OperationID == pair.OnboardingOperationID && pair.OnboardingRevision > 0 && op.Revision >= pair.OnboardingRevision &&
+			(!exactPendingRevision || op.Revision == pair.OnboardingRevision) && pair.ActivationRevision == 0 &&
+			slices.Equal(op.CredentialAdmissions, pair.CredentialAdmissions), nil
 	}
 	return channelonboarding.AdmissionResponsibilityCurrent(ctx, store, channelonboarding.AdmissionResponsibility{
 		OperationID: pair.OnboardingOperationID, OperationRevision: pair.OnboardingRevision,
@@ -109,6 +130,15 @@ func resolveServeRegistrationPairs(ctx context.Context, snapshot serveChannelAct
 		if targetErr != nil {
 			return fail(fmt.Errorf("channels.bindings.%s.register: %w", binding.BindingID(), targetErr))
 		}
+		if activation.Source == channelonboarding.ActivationSourceRegistered {
+			holders, err := manager.AccountHolders(ctx, channelonboarding.AccountReference{Provider: registration.Provider(), Account: activation.OperatorAccount})
+			if err != nil {
+				return fail(err)
+			}
+			if len(holders) != 1 || holders[0].BundleHash != contextDef.BundleHash() || holders[0].Flow != target.FlowPath || holders[0].RunID != target.RunID {
+				continue
+			}
+		}
 		planGeneration, err := binding.PlanGeneration()
 		if err != nil {
 			return fail(err)
@@ -124,6 +154,7 @@ func resolveServeRegistrationPairs(ctx context.Context, snapshot serveChannelAct
 		pairs = append(pairs, runtimepublicingress.RegistrationPair{
 			BindingID: binding.BindingID(), PlanGeneration: planGeneration,
 			ActivationSource:            activation.Source,
+			OperatorAccount:             activation.OperatorAccount,
 			OnboardingOperationID:       activation.OnboardingOperationID,
 			OnboardingRevision:          activation.OnboardingRevision,
 			ActivationRevision:          activation.ActivationRevision,

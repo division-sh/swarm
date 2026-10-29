@@ -251,6 +251,19 @@ func definition(class Class, taskFailure, retryable, deterministic bool, message
 	}
 }
 
+func (def Definition) message(detail Detail) string {
+	if def.Class == ClassAuthenticationNeeded && detail.Code == "channel_account_not_linked" {
+		account, _ := detail.Attributes["account"].(string)
+		provider, _ := detail.Attributes["provider"].(string)
+		message := account + " is not linked: run swarm channel connect " + provider
+		if provider == "whatsapp" {
+			message += " and scan it"
+		}
+		return message
+	}
+	return fmt.Sprintf(def.MessageTemplate, detail.Code)
+}
+
 func Classes() []Class {
 	return append([]Class(nil), classOrder...)
 }
@@ -622,7 +635,7 @@ func ValidateEnvelope(envelope Envelope) error {
 	if envelope.Retryable != expectedRetryable || envelope.Deterministic != expectedDeterministic {
 		return fmt.Errorf("failure envelope decisions do not match registry for %s/%s", envelope.Class, envelope.Detail.Code)
 	}
-	if envelope.Message != fmt.Sprintf(def.MessageTemplate, envelope.Detail.Code) {
+	if envelope.Message != def.message(envelope.Detail) {
 		return fmt.Errorf("failure envelope message does not match registry template")
 	}
 	if envelope.Remediation != fmt.Sprintf(def.RemediationTemplate, envelope.Detail.Code) {
@@ -647,7 +660,7 @@ func buildEnvelope(class Class, detailCode, component, operation string, attribu
 		Detail:        detail,
 		Retryable:     retryable,
 		Deterministic: deterministic,
-		Message:       fmt.Sprintf(def.MessageTemplate, detail.Code),
+		Message:       def.message(detail),
 		Remediation:   fmt.Sprintf(def.RemediationTemplate, detail.Code),
 		Component:     strings.TrimSpace(component),
 		Operation:     strings.TrimSpace(operation),
@@ -729,6 +742,13 @@ func validateDetail(class Class, detail Detail) error {
 	case ClassAuthenticationNeeded:
 		if value, _ := detail.Attributes["auth_kind"].(string); strings.TrimSpace(value) == "" {
 			return fmt.Errorf("authentication_required detail auth_kind is required")
+		}
+		if detail.Code == "channel_account_not_linked" {
+			account, _ := detail.Attributes["account"].(string)
+			provider, _ := detail.Attributes["provider"].(string)
+			if account == "" || len(account) > 64 || strings.ContainsAny(account, "\r\n\t\x00") || provider != "whatsapp" && provider != "telegram" {
+				return fmt.Errorf("channel_account_not_linked requires a bounded account and its exact provider")
+			}
 		}
 	case ClassAuthorizationDenied:
 		if value, _ := detail.Attributes["action"].(string); strings.TrimSpace(value) == "" {
