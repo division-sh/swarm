@@ -36,5 +36,5 @@ stage graph:
       - active decision retire_service authority=stage_activation_cas reminder=24h draft_ttl=15m
         - retire -> done
 diagnostics:
-  - [INFO] cross_surface_named_type_use @ global: authored object shape reuse candidate: identical shape {command_invocation:object?, conversation_reference:text, conversation_scope:text, external_account:text, provider_message_reference:integer, reply_to_message_reference:integer?, text:text} appears in event inbound.telegram.text_message payload; event telegram-chat/inbound.telegram.text_message payload; consider extracting or reusing a named type if these represent the same concept
+  - [INFO] cross_surface_named_type_use @ global: authored object shape reuse candidate: identical shape {command_invocation:object?, conversation_reference:text, conversation_scope:text, external_account:text, operator_account:text?, provider_message_reference:integer, reply_to_message_reference:integer?, text:text} appears in event inbound.telegram.text_message payload; event telegram-chat/inbound.telegram.text_message payload; consider extracting or reusing a named type if these represent the same concept
   - [INFO] entity_reader_coverage @ telegram-chat/schema.yaml: flow telegram-chat entity_type chat declares field conversation_reference with no detected internal reader coverage
