@@ -1,7 +1,9 @@
 # Telegram signing option 1: existing registration operation
 
-LOCAL, UNSELECTED RULING VARIANT. This is not an approved product change or a
-claim of completed Telegram runtime activation.
+LOCAL S3 DRAFT. Option 1 is classified INSIDE by LEAD's ruling:
+https://github.com/division-sh/swarm/issues/2764#issuecomment-6489106841
+The hunk remains under reviewer-g; this is not push/landing approval or a claim
+of completed Telegram runtime activation.
 
 The existing deployment registration reserves its admitted Telegram profile's
 signing role as well as its provider-token role. Service.admitCredentials and
@@ -19,4 +21,5 @@ Receipt replay retains the generated value after a lost checkpoint. A separate
 registration gets a separate occurrence. A missing or foreign receipt, unusable
 value or read error refuses rather than adopting shared credentials or
 silently rotating. Existing legacy registrations are not backfilled or reset.
-The user/LEAD must still select this consequence before integration.
+No key lifetime beyond the operation, rotation or new source authority is
+authorized. HITL Inbox option (a)/(b) remains a separate pending R38 choice.
