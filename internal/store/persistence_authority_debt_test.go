@@ -299,8 +299,9 @@ func debtW1RunObservationSignatureTransitions() [10][2]authorityDebtSite {
 func debtRunFixtureSignatureComparisons(actual, head, base, source map[string]authorityDebtSite) (map[string]authorityDebtSite, map[string]authorityDebtSite, map[string]authorityDebtSite, []string) {
 	runFixtures, selectedFixtures := debtRunFixtureSignatureTransitions(), debtSelectedFixtureSignatureTransitions()
 	w1Fixtures := debtW1RunObservationSignatureTransitions()
-	pairs := append(runFixtures[:], debtSelectedBindingRootArgumentTransition())
+	pairs := runFixtures[:]
 	forwardOnly := len(pairs)
+	pairs = append(pairs, debtSelectedBindingRootArgumentTransition())
 	pairs = append(append(pairs, selectedFixtures[:]...), w1Fixtures[:]...)
 	for index, pair := range pairs {
 		old, current := pair[0], pair[1]
@@ -1047,6 +1048,11 @@ func debtValidateCollectorIdentity(base, current string, trusted, head authority
 	}
 	if base == current && trusted.Collector == current && head.Collector == current {
 		return nil
+	}
+	if base == debtS1CollectorTo && trusted.Collector == base &&
+		current == debtProviderSourceCollectorTo && reviewedTransition == current && head.Collector == current &&
+		debtSitesEqual(head.Sites, trusted.Sites) {
+		return nil // #2727/6501014388: exact landed INSERT correspondence, unchanged counted sites.
 	}
 	if base == debtW1RebasedComparisonCollectorTo && trusted.Collector == base &&
 		current == debtSourceLoaderCollectorTo && reviewedTransition == current && head.Collector == current &&
