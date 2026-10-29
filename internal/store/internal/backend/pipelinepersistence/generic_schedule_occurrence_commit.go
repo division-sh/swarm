@@ -130,11 +130,6 @@ func commitGenericScheduleOccurrence(
 			if err := attempt.AddFact(next.Command.RunID, privaterunforkrevision.FamilyTimers, next.ID); err != nil {
 				return err
 			}
-			if next.Status == runtimegenericschedule.StatusFired && next.Command.RunID != "" {
-				if _, err := attempt.RequestCompletion(txctx, candidateWriter, next.Command.RunID, nil); err != nil {
-					return err
-				}
-			}
 			result = runtimegenericschedule.CommitResult{Outcome: outcome, Next: next, Publication: evidence}
 			return nil
 		})

@@ -29,7 +29,7 @@ func TestRetryDoesNotFreezeFinalSelectionBothStores(t *testing.T) {
 				ctx := testAuthorActivityContext()
 				ctx = originalStoreFixtureContext(t, ctx, fixture.store)
 				runID := uuid.NewString()
-				seedAuthorActivityReceiptRun(t, fixture, ctx, runID)
+				ctx = seedAuthorActivityReceiptRun(t, fixture, ctx, runID)
 				event := eventtest.PersistedProjection(uuid.NewString(), "projection.retry", "gateway", "", json.RawMessage(`{}`), 0, runID, "", events.EventEnvelope{}, time.Now().UTC())
 				route := events.DeliveryRoute{Recipient: events.MustNodeDeliveryRecipient(mustPersistenceRootNode("worker")), Target: events.MustExistingEntityTarget(events.RouteIdentity{FlowID: ".", FlowInstance: runID, EntityID: runID})}
 				if err := commitSemanticEventFixtureWithRoutes(ctx, selected, event, []events.DeliveryRoute{route}); err != nil {
@@ -82,7 +82,7 @@ func TestFinalSelectionLiveTraceAndHistoricalLifetimeBothStores(t *testing.T) {
 			ctx := testAuthorActivityContext()
 			ctx = originalStoreFixtureContext(t, ctx, fixture.store)
 			runID := uuid.NewString()
-			seedAuthorActivityReceiptRun(t, fixture, ctx, runID)
+			ctx = seedAuthorActivityReceiptRun(t, fixture, ctx, runID)
 			event := eventtest.PersistedProjection(uuid.NewString(), "trace.retry", "gateway", "", json.RawMessage("{\n \"fixed\": true\n}"), 0, runID, "", events.EventEnvelope{}, time.Now().UTC())
 			route := testEntitylessNodeDeliveryRoute("selection-worker")
 			if err := commitSemanticEventFixtureWithRoutes(ctx, selected, event, []events.DeliveryRoute{route}); err != nil {
@@ -178,7 +178,7 @@ func TestFinalSelectionTerminalPresenceReadMatrixBothStores(t *testing.T) {
 			for _, terminal := range []runtimedelivery.Status{runtimedelivery.StatusDelivered, runtimedelivery.StatusDeadLetter} {
 				t.Run(string(terminal), func(t *testing.T) {
 					runID := uuid.NewString()
-					seedAuthorActivityReceiptRun(t, fixture, ctx, runID)
+					ctx = seedAuthorActivityReceiptRun(t, fixture, ctx, runID)
 					event := eventtest.PersistedProjection(uuid.NewString(), "terminal.read", "gateway", "", []byte(`{}`), 0, runID, "", events.EventEnvelope{}, time.Now().UTC())
 					route := testEntitylessNodeDeliveryRoute("worker")
 					if err := commitSemanticEventFixtureWithRoutes(ctx, selected, event, []events.DeliveryRoute{route}); err != nil {
@@ -232,7 +232,7 @@ func TestUnreachedSelectionRetryExhaustionBothStores(t *testing.T) {
 			ctx := testAuthorActivityContext()
 			ctx = originalStoreFixtureContext(t, ctx, fixture.store)
 			runID := uuid.NewString()
-			seedAuthorActivityReceiptRun(t, fixture, ctx, runID)
+			ctx = seedAuthorActivityReceiptRun(t, fixture, ctx, runID)
 			event := eventtest.PersistedProjection(uuid.NewString(), "retry.exhaust", "gateway", "", []byte(`{}`), 0, runID, "", events.EventEnvelope{}, time.Now().UTC())
 			route := testEntitylessNodeDeliveryRoute("worker")
 			if err := commitSemanticEventFixtureWithRoutes(ctx, selected, event, []events.DeliveryRoute{route}); err != nil {
@@ -293,7 +293,7 @@ func TestFinalSelectionAdmissionFailureRollsBackBothStores(t *testing.T) {
 			for _, cut := range []string{"insert", "hydrate", "equality"} {
 				t.Run(cut, func(t *testing.T) {
 					runID := uuid.NewString()
-					seedAuthorActivityReceiptRun(t, fixture, ctx, runID)
+					ctx = seedAuthorActivityReceiptRun(t, fixture, ctx, runID)
 					event := eventtest.PersistedProjection(uuid.NewString(), "selection.atomic", "gateway", "", []byte(`{}`), 0, runID, "", events.EventEnvelope{}, time.Now().UTC())
 					route := testEntitylessNodeDeliveryRoute("worker")
 					if err := commitSemanticEventFixtureWithRoutes(ctx, selected, event, []events.DeliveryRoute{route}); err != nil {

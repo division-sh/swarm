@@ -32,13 +32,13 @@ import (
 	"github.com/division-sh/swarm/internal/runtime/lifecycleprobe"
 	"github.com/division-sh/swarm/internal/runtime/pipeline"
 	"github.com/division-sh/swarm/internal/runtime/pipelineobligation"
-	"github.com/division-sh/swarm/internal/runtime/runlifecycle"
+
 	"github.com/division-sh/swarm/internal/runtime/semanticview"
 	"github.com/division-sh/swarm/internal/runtime/startupownership"
 	"github.com/division-sh/swarm/internal/runtime/testfixtures/canonicalrouting"
 	"github.com/division-sh/swarm/internal/store/testutil/agentfixture"
 	"github.com/division-sh/swarm/internal/testutil"
-	"github.com/division-sh/swarm/internal/testutil/stagecatalogfixture"
+
 	"github.com/google/uuid"
 )
 
@@ -381,6 +381,10 @@ func runPublicationGroupCrashChild(t *testing.T, mode string) {
 	}
 	t.Cleanup(catalog.Release)
 	workProcess := worklifetime.NewProcess()
+	if err := workProcess.BindOriginalProcess(authority.LeaseStamp()); err != nil {
+		t.Fatal(err)
+	}
+	ctx = worklifetime.WithProcess(ctx, workProcess)
 	work, err := workProcess.NewRuntime(ctx, worklifetime.RuntimeIdentity{RuntimeInstanceID: request.RuntimeInstanceID, BundleHash: fact.BundleHash()})
 	if err != nil {
 		t.Fatal(err)
@@ -458,18 +462,8 @@ func runPublicationGroupCrashChild(t *testing.T, mode string) {
 	})
 	report := os.NewFile(3, "publication-group-crash-evidence")
 	defer report.Close()
-	sink := &pipelineGracefulSink{}
-	sinkRegistration, err := fixture.store.(runlifecycle.CandidateRegistrar).RegisterCompletionCandidateSink(ctx, runlifecycle.CandidateScope{BundleHash: fact.BundleHash()}, sink)
-	if err != nil {
-		t.Fatal(err)
-	}
-	t.Cleanup(sinkRegistration.Release)
 	control := &pipelineCrashConnector{cut: os.Getenv("SWARM_FAN_OUT_CRASH_CUT")}
-	var beforeSubmit int32
 	control.barrier = func() {
-		if (control.cut == "before_commit" || control.cut == "after_commit_before_ack") && sink.submits.Load() != beforeSubmit {
-			panic("group candidate submission preceded settlement acknowledgement")
-		}
 		if err := json.NewEncoder(report).Encode(fanOutCrashEvidence{Authority: authority}); err != nil {
 			panic(err)
 		}
@@ -484,7 +478,6 @@ func runPublicationGroupCrashChild(t *testing.T, mode string) {
 		if members != 3 {
 			panic(fmt.Sprintf("group crash requires actual full three-member settlement, got %d", members))
 		}
-		beforeSubmit = sink.submits.Load()
 	}
 	workers := 1
 	registration, err := startupownership.StartFanOutServing(ctx, live, work, &workers, serving)
@@ -533,38 +526,6 @@ func runPublicationGroupCrashChild(t *testing.T, mode string) {
 	wantHandlers := int32(3 - predecessorEffects)
 	if got := handlers.started.Load(); got != wantHandlers {
 		t.Fatalf("successor actual recipient executions=%d want=%d; acknowledged deliveries must not execute again", got, wantHandlers)
-	}
-	// Remove only the observation sink. The actual startup executor must find
-	// the durable candidate without a predecessor's after-commit submission.
-	sinkRegistration.Release()
-	observed := &pipelineCrashCandidateObserver{CandidateStore: fixture.store.(runlifecycle.CandidateStore), results: make(chan pipelineCrashCandidateResult, 8)}
-	lifecycle, err := runlifecycle.NewExecutor(observed, runlifecycle.CandidateScope{BundleHash: fact.BundleHash()}, stagecatalogfixture.NewFinalCatalog(nil, map[string][]string{".": {"done", "exhausted"}}), work, runlifecycle.ExecutorOptions{})
-	if err != nil {
-		t.Fatal(err)
-	}
-	t.Cleanup(func() {
-		deadline, cancel := context.WithTimeout(context.Background(), 5*time.Second)
-		defer cancel()
-		if err := lifecycle.Retire(deadline); err != nil {
-			t.Error(err)
-		}
-	})
-	if err := lifecycle.Start(ctx); err != nil {
-		t.Fatal(err)
-	}
-	select {
-	case result := <-observed.results:
-		if result.err != nil || result.candidate.RunID != runID || result.outcome.Outcome != runlifecycle.OutcomeAwaitMutation {
-			t.Fatalf("actual startup candidate recovery: %+v", result)
-		}
-	case <-time.After(5 * time.Second):
-		t.Fatal("startup did not discover durable group candidate")
-	}
-	if err := lifecycle.Retire(ctx); err != nil {
-		t.Fatal(err)
-	}
-	if observed.executions.Load() != 1 {
-		t.Fatalf("candidate executed %d times", observed.executions.Load())
 	}
 	if err := json.NewEncoder(report).Encode(fanOutCrashEvidence{Authority: authority, Recovered: true}); err != nil {
 		t.Fatal(err)

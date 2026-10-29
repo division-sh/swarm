@@ -250,32 +250,6 @@ func TestNewRuntimeValidatesInboundPublicationIntegrityBeforeWiringGateway(t *te
 	}
 }
 
-func TestNewRuntimeBuildsRunLifecycleExecutorFromTypedOwnerWithoutRawSQLCapability(t *testing.T) {
-	module := loadRuntimeOwnershipWorkflowModule(t)
-	ctx, fact := runtimeOwnershipFixtureContext(t, module)
-	rt, err := newScopedTestRuntime(
-		t,
-		ctx,
-		RuntimeDeps{
-			Config: testOperationalRuntimeConfig(),
-
-			RunLifecycleCandidates: runtimeTestCandidateOwner{},
-
-			Options: RuntimeOptions{
-				WorkflowModule:     module,
-				SourceArtifactFact: fact,
-				LLMRuntime:         noopLLMRuntime{},
-			},
-		},
-	)
-	if err != nil {
-		t.Fatalf("NewRuntime: %v", err)
-	}
-	if rt.runLifecycleExecutor == nil {
-		t.Fatal("typed run lifecycle candidate owner did not construct the runtime executor")
-	}
-}
-
 func TestRuntimeStart_FailsWhenRecoveryDisabledAndActiveSchedulesExist(t *testing.T) {
 	module := loadRuntimeOwnershipWorkflowModule(t)
 	ctx, fact := runtimeOwnershipFixtureContext(t, module)

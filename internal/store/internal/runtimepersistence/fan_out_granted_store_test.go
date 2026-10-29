@@ -59,11 +59,6 @@ func newGrantedFanOutProcessForTest(t *testing.T, ctx context.Context, selected 
 	if err != nil {
 		t.Fatal(err)
 	}
-	t.Cleanup(func() {
-		if err := capability.Release(context.Background()); err != nil {
-			t.Error(err)
-		}
-	})
 	sources := make([]agenttopology.SourceCoordinate, len(fixtures))
 	for i, fixture := range fixtures {
 		rooted, err := fixture.artifact.RootedSource()
@@ -91,8 +86,17 @@ func newGrantedFanOutProcessForTest(t *testing.T, ctx context.Context, selected 
 			t.Fatal(err)
 		}
 	}
-	work := worklifetime.NewProcess()
+	work, held := worklifetime.ProcessFromContext(ctx)
+	if !held {
+		work = worklifetime.NewProcess()
+	}
+	if err := work.BindOriginalProcess(authority.LeaseStamp()); err != nil {
+		t.Fatal(err)
+	}
 	t.Cleanup(func() {
+		if held {
+			return
+		}
 		work.Retire()
 		deadline, cancel := context.WithTimeout(context.Background(), 5*time.Second)
 		defer cancel()

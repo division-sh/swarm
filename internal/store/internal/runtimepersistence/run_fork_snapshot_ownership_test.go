@@ -14,12 +14,14 @@ import (
 	"github.com/division-sh/swarm/internal/events"
 	"github.com/division-sh/swarm/internal/events/eventtest"
 	"github.com/division-sh/swarm/internal/runtime/canonicaljson"
+	"github.com/division-sh/swarm/internal/runtime/contracts"
 	"github.com/division-sh/swarm/internal/runtime/core/flowidentity"
 	runtimecorrelation "github.com/division-sh/swarm/internal/runtime/correlation"
 	"github.com/division-sh/swarm/internal/runtime/mutationlog"
 	runtimepipeline "github.com/division-sh/swarm/internal/runtime/pipeline"
 	"github.com/division-sh/swarm/internal/runtime/runfork"
 	"github.com/division-sh/swarm/internal/runtime/semanticview"
+	entitystore "github.com/division-sh/swarm/internal/store/internal/backend/entityruntime"
 	runforkrevision "github.com/division-sh/swarm/internal/store/internal/backend/runforkrevision"
 	"github.com/google/uuid"
 )
@@ -37,6 +39,7 @@ type snapshotOwnershipFixture struct {
 	runID, entityID, eventID string
 	state                    runtimepipeline.WorkflowEngineStateRecord
 	initialMaterialization   json.RawMessage
+	stages                   contracts.WorkflowStageClassifier
 }
 
 func newSnapshotOwnershipFixture(t *testing.T, backend eventRecordContractBackend, eventContext, reverse bool) snapshotOwnershipFixture {
@@ -46,11 +49,18 @@ func newSnapshotOwnershipFixture(t *testing.T, backend eventRecordContractBacken
 		"manifest.yaml":       "version: 1.0.0\nplatform_version: '*'\n",
 		"schema.yaml":         "stages: []\n",
 		"owner/manifest.yaml": "version: 1.0.0\nplatform_version: '*'\n",
-		"owner/schema.yaml":   "instance: subject_id\nstages:\n  active: {}\n  ready: {}\n  later: {}\npins:\n  inputs:\n    - construct.requested\n",
+		"owner/schema.yaml":   "instance: subject_id\nstages:\n  active: {}\n  ready: {final: true}\n  later: {}\npins:\n  inputs:\n    - construct.requested\n",
 		"owner/entities.yaml": "review_item:\n  subject_id: text\n  entity_type: {type: text, initial: authored-not-owner}\n  value: text?\n",
 		"owner/events.yaml":   "construct.requested:\n",
 	}, nil, ownStoreTestAgentManager, nil)
 	f := snapshotOwnershipFixture{store: opened.store.(snapshotOwnershipStore), db: opened.db, ctx: construction.ctx, runID: runtimecorrelation.RunIDFromContext(construction.ctx)}
+	root, _ := construction.bundle.WorkflowStageTopology(".")
+	childStages, _ := construction.bundle.WorkflowStageTopology("owner")
+	var err error
+	f.stages, err = contracts.NewWorkflowStageClassifier(root, map[string]contracts.WorkflowStageTopology{"owner": childStages})
+	if err != nil {
+		t.Fatal(err)
+	}
 	at := time.Now().UTC().Add(-time.Minute).Truncate(time.Microsecond)
 	req := sqliteFlowActivationRequest(construction.bundle, "owner", "one", "", "owner/one")
 	parent := flowidentity.Stored(req.ContractBundle, semanticview.RootExecutionFlowID(req.ContractBundle), f.runID, f.runID, f.runID, "")
@@ -241,6 +251,14 @@ func assertSnapshotOwnershipEntity(t *testing.T, f snapshotOwnershipFixture, for
 		if !reflect.DeepEqual(got.Buckets[i], bucket) {
 			t.Fatalf("fork bucket = %#v, want %#v", got.Buckets[i], bucket)
 		}
+	}
+	dialect := entitystore.SummaryDialectSQLite
+	if _, postgres := f.store.(*PostgresStore); postgres {
+		dialect = entitystore.SummaryDialectPostgres
+	}
+	summary, err := entitystore.ReadRunSummary(f.ctx, f.db, dialect, forkRunID, f.stages)
+	if err != nil || summary.Total != 1 || summary.Terminal != 1 || summary.Nonterminal != 0 || summary.Malformed != 0 {
+		t.Fatalf("fork lost the fixed-cut instance finish fact: summary=%+v err=%v", summary, err)
 	}
 }
 

@@ -17,7 +17,9 @@ import (
 	"github.com/division-sh/swarm/internal/runtime/agentcontrol"
 	"github.com/division-sh/swarm/internal/runtime/core/actors"
 	"github.com/division-sh/swarm/internal/runtime/core/worklifetime"
+	"github.com/division-sh/swarm/internal/runtime/manager"
 	"github.com/division-sh/swarm/internal/store/storetest"
+	"github.com/division-sh/swarm/internal/store/testutil/agentfixture"
 	"github.com/google/uuid"
 )
 
@@ -48,6 +50,17 @@ func proveNativeAgentRestartAPICompletionLoss(t *testing.T, original context.Con
 	owner := &restartAfterNativeCommitLoss{Controller: controller}
 	owner.lose.Store(true)
 	process := worklifetime.NewProcess()
+	capability, err := agentfixture.ProcessCapability(t, manager.TerminalPanicFixtureContext(), selected)
+	if err != nil {
+		t.Fatal(err)
+	}
+	originalEvidence, err := capability.Evidence()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := process.BindOriginalProcess(originalEvidence.LeaseStamp()); err != nil {
+		t.Fatal(err)
+	}
 	defer func() {
 		process.Retire()
 		ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)

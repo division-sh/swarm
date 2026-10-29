@@ -259,6 +259,7 @@ func TestLifecycleDiagnosticCausalOrigin(t *testing.T) {
 				parent, runID := uuid.NewString(), first.Identity.RunID
 				if scenario == "foreign_parent" {
 					runID = uuid.NewString()
+					ctx = originalStoreFixtureContext(t, ctx, selected)
 					requireRunningRunForTest(t, ctx, selected, runID, time.Now().UTC())
 				}
 				if scenario != "missing_parent" {

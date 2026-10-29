@@ -252,8 +252,6 @@ type Runtime struct {
 	replacementQuiesced         bool
 	stopResult                  error
 	workOccurrence              *worklifetime.RuntimeOccurrence
-	runLifecycleExecutor        *runtimerunlifecycle.Executor
-	runLifecycleRegistration    runtimerunlifecycle.CandidateRegistration
 	deliveryContinuations       *runtimedeliverycontinuation.Coordinator
 	deliverySignalRegistration  *runtimepipeline.DeliveryContinuationSignalRegistration
 	startupAdmission            managedexecution.Admission
@@ -265,7 +263,6 @@ type Runtime struct {
 	authorActivityRegistrars    []AuthorActivityCatalogRegistrar
 	eventPayloadBinder          EventPayloadAdmissionBinder
 	inboundPayloadBinder        EventPayloadAdmissionBinder
-	runLifecycleCandidates      runtimerunlifecycle.CandidateOwner
 	deliveryStore               runtimedelivery.Store
 	timerObligationReader       runtimetimerobligation.Reader
 	mailboxStore                runtimetools.MailboxPersistence
@@ -396,6 +393,9 @@ func (rt *Runtime) InstallStartupGrant(grant runtimestartupownership.LiveGenerat
 	}
 	if evidence.BundleHash != rt.Options.SourceArtifactFact.BundleHash() || evidence.RuntimeInstanceID != strings.TrimSpace(rt.Options.RuntimeInstanceID) {
 		return fmt.Errorf("runtime generation grant does not match runtime source coordinate")
+	}
+	if err := runtimestartupownership.BindProcessWorkOwner(rt.Options.ProcessWorkOwner, grant); err != nil {
+		return err
 	}
 	plan, err := grant.SourceSetPlan(context.Background())
 	if err != nil {
@@ -1264,7 +1264,6 @@ func newRuntime(ctx context.Context, deps RuntimeDeps) (*Runtime, error) {
 		authorActivityRegistrars:  append([]AuthorActivityCatalogRegistrar(nil), runtimeDeps.AuthorActivityRegistrars...),
 		eventPayloadBinder:        runtimeDeps.EventPayloadAdmissionBinder,
 		inboundPayloadBinder:      runtimeDeps.InboundPayloadAdmissionBinder,
-		runLifecycleCandidates:    runtimeDeps.RunLifecycleCandidates,
 		deliveryStore:             runtimeDeps.DeliveryStore,
 		timerObligationReader:     runtimeDeps.TimerObligationReader,
 		mailboxStore:              runtimeDeps.MailboxStore,
@@ -1331,29 +1330,6 @@ func newRuntime(ctx context.Context, deps RuntimeDeps) (*Runtime, error) {
 			return nil, fmt.Errorf("build generic schedule lifecycle: %w", err)
 		}
 		rt.GenericSchedules = genericSchedules
-	}
-	if candidateOwner := runtimeDeps.RunLifecycleCandidates; candidateOwner != nil {
-		if runLifecycleRequiresGenericSchedules(source) && rt.GenericSchedules == nil {
-			return nil, fmt.Errorf("workflow run lifecycle completion executor requires the generic schedule lifecycle")
-		}
-		scope := runtimerunlifecycle.CandidateScope{BundleHash: boot.SourceArtifactFact.BundleHash()}
-		terminalCatalog, err := RunLifecycleTerminalCatalog(source)
-		if err != nil {
-			return nil, fmt.Errorf("build run lifecycle stage catalog: %w", err)
-		}
-		executor, err := runtimerunlifecycle.NewExecutor(
-			candidateOwner,
-			scope,
-			terminalCatalog,
-			workOccurrence,
-			runtimerunlifecycle.ExecutorOptions{GenericSchedules: rt.GenericSchedules},
-		)
-		if err != nil {
-			return nil, fmt.Errorf("build run lifecycle completion executor: %w", err)
-		}
-		rt.runLifecycleExecutor = executor
-	} else if runtimeDeps.WorkflowPersistence.Configured() {
-		return nil, fmt.Errorf("selected runtime store run lifecycle candidate owner is required")
 	}
 	if runtimeDeps.WorkflowPersistence.Valid() {
 		var registeredAccounts channelonboarding.OperationStore
@@ -1636,7 +1612,9 @@ func newRuntime(ctx context.Context, deps RuntimeDeps) (*Runtime, error) {
 	if runtimeDeps.InboundStore != nil {
 		rt.InboundGateway = NewInboundGateway(rt.Bus, rt.Logger, rt.shutdownAdmissionClosed, boot.ExecutionPosture, runtimeDeps.InboundStore)
 		rt.InboundGateway.SetChannelPlans(opts.ChannelPlans)
-		rt.InboundGateway.SetAdmissionGuard(rt.shutdownGate.BeginContext)
+		rt.InboundGateway.SetAdmissionGuard(func(ctx context.Context) (context.Context, func(), bool) {
+			return rt.shutdownGate.BeginContext(worklifetime.WithProcess(ctx, rt.Options.ProcessWorkOwner))
+		})
 		rt.InboundGateway.SetRuntimeIngress(rt.RuntimeIngress)
 		rt.InboundGateway.SetCredentialAdmission(rt.AdmitInboundCredentials)
 	}
@@ -1796,18 +1774,6 @@ func (rt *Runtime) prepareStartLocked(ctx context.Context) (*PreparedStartup, er
 	rt.lifecycleMu.Lock()
 	rt.startCtx = startCtx
 	rt.lifecycleMu.Unlock()
-	if rt.runLifecycleExecutor != nil {
-		scope := runtimerunlifecycle.CandidateScope{BundleHash: rt.Options.SourceArtifactFact.BundleHash()}
-		registration, err := rt.runLifecycleCandidates.RegisterCompletionCandidateSink(
-			startCtx,
-			scope,
-			rt.runLifecycleExecutor,
-		)
-		if err != nil {
-			return nil, fmt.Errorf("register run lifecycle completion executor: %w", err)
-		}
-		rt.runLifecycleRegistration = registration
-	}
 	bindRuntimeStorePayloadAdmitter(rt.eventPayloadBinder, rt.inboundPayloadBinder, rt.payloadAdmitter)
 	if rt.RuntimeIngress != nil {
 		if err := rt.RuntimeIngress.SyncState(ctx); err != nil {
@@ -2115,11 +2081,6 @@ func (rt *Runtime) releaseAutonomousStartupProducers(ctx, startCtx context.Conte
 	} else {
 		rt.emitBootProgress(8, "pipeline_maintenance", "skipped", "pipeline unavailable")
 	}
-	if rt.runLifecycleExecutor != nil {
-		if err := rt.runLifecycleExecutor.Start(startCtx); err != nil {
-			return fmt.Errorf("start run lifecycle completion executor after topology completion: %w", err)
-		}
-	}
 	return nil
 }
 
@@ -2334,16 +2295,6 @@ func (rt *Runtime) stopWithGraceLocked(grace time.Duration) error {
 			}
 		}
 	}
-	if rt.runLifecycleExecutor != nil {
-		// Retire may return an early settlement diagnostic; only the final
-		// join below reports it. The drain deadline remains a separate failure.
-		if err := rt.runLifecycleExecutor.Retire(drainCtx); err != nil && drainCtx.Err() != nil {
-			shutdownErr = errors.Join(
-				shutdownErr,
-				fmt.Errorf("run lifecycle executor retirement timed out after %s: %w", grace, context.Cause(drainCtx)),
-			)
-		}
-	}
 	if rt.Manager != nil {
 		deadline, _ := drainCtx.Deadline()
 		remaining := time.Until(deadline)
@@ -2412,15 +2363,6 @@ func (rt *Runtime) stopWithGraceLocked(grace time.Duration) error {
 			)
 			_, _ = rt.workOccurrence.RetireAndWait(context.Background())
 		}
-	}
-	if rt.runLifecycleExecutor != nil {
-		if err := rt.runLifecycleExecutor.Wait(context.Background()); err != nil {
-			shutdownErr = errors.Join(shutdownErr, fmt.Errorf("run lifecycle executor joined diagnostics: %w", err))
-		}
-	}
-	if rt.runLifecycleRegistration != nil {
-		rt.runLifecycleRegistration.Release()
-		rt.runLifecycleRegistration = nil
 	}
 	if grant != nil {
 		grantRetireCtx, cancelGrantRetire := context.WithTimeout(context.Background(), grace)

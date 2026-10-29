@@ -984,9 +984,14 @@ func (pc *PipelineCoordinator) finishClaimedNodeAttempt(a claimedNodeAttempt) (h
 	var snapshot runtimedelivery.Snapshot
 	var settleErr error
 	acknowledged := true
+	settlementCtx := a.ctx
+	if committed {
+		settlementCtx = guard.Context()
+	}
+	settlementCtx = runtimecorrelation.WithInboundEvent(settlementCtx, a.event)
 	if committed {
 		var outcome runtimedelivery.ClaimCommit
-		outcome, settleErr = pc.deliveryStore.SettleWorkflowNodeSuccess(a.ctx, a.claim, []string{"handler_completed"}, time.Since(a.started), selection)
+		outcome, settleErr = pc.deliveryStore.SettleWorkflowNodeSuccess(settlementCtx, a.claim, []string{"handler_completed"}, time.Since(a.started), selection)
 		snapshot, acknowledged = outcome.Snapshot, outcome.Acknowledged
 	} else {
 		failure := runtimefailures.FromError(a.executionErr, runtimeWorkflowID, "execute_handler")
@@ -1003,7 +1008,7 @@ func (pc *PipelineCoordinator) finishClaimedNodeAttempt(a claimedNodeAttempt) (h
 				reason = "chain_depth_exceeded"
 			}
 		}
-		snapshot, settleErr = pc.deliveryStore.SettleFailure(a.ctx, a.claim, runtimedelivery.Settlement{
+		snapshot, settleErr = pc.deliveryStore.SettleFailure(settlementCtx, a.claim, runtimedelivery.Settlement{
 			Disposition: disposition, ReasonCode: reason, Failure: &failure.Failure,
 			Duration: time.Since(a.started), RetryBase: a.retryBase,
 			RuleSelection: a.result.RuleSelection,

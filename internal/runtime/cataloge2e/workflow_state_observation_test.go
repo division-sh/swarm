@@ -95,7 +95,7 @@ func TestCatalogWorkflowStateDiagnosticUsesSelectedProjectionBothStores(t *testi
 				if err != nil {
 					t.Fatal(err)
 				}
-				ctx := testAuthorActivityContext(context.Background())
+				ctx := h.ctx
 				rows, err := storetest.ReadWorkflowStateObservationRows(ctx, reader)
 				if err != nil || len(rows) != 1 || rows[0].EntityID != catalogRuntimeRunID || rows[0].FlowInstance != catalogRuntimeRunID || rows[0].CurrentState == nil || *rows[0].CurrentState != tc.stage {
 					t.Fatalf("exact constructed diagnostic row=%+v err=%v", rows, err)

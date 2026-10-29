@@ -22,7 +22,7 @@ func TestLifecycleEventCardinalityPreservesDuplicatesNamesAndClassesBothStores(t
 			ctx = originalStoreFixtureContext(t, ctx, fixture.store)
 			at := time.Date(2026, 10, 4, 17, 0, 0, 0, time.UTC)
 			for _, run := range []string{runID, sibling} {
-				seedAuthorActivityReceiptRun(t, fixture, ctx, run)
+				ctx = seedAuthorActivityReceiptRun(t, fixture, ctx, run)
 				for _, name := range []string{"work.completed", "work.completed", "concrete/work.completed", "contract.diagnostic"} {
 					event := eventtest.ExistingRunRootIngress(uuid.NewString(), events.EventType(name), "fixture", "", []byte(`{}`), 0, run, events.EventEnvelope{}, at)
 					if err := commitSemanticEventFixture(ctx, fixture.store.(semanticEventFixtureStore), event); err != nil {

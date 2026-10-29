@@ -35,6 +35,12 @@ type authorActivityReceiptFixture struct {
 	activityOwner   testing.TB
 }
 
+func (f authorActivityReceiptFixture) originalContext(ctx context.Context) context.Context {
+	owner := f.activityOwner
+	owner.Helper()
+	return originalStoreFixtureContext(owner, storeTestWorkContext(owner, ctx), f.store)
+}
+
 func TestAuthorActivityDuplicateTerminalReceiptIsNoOpParity(t *testing.T) {
 	tests := []struct {
 		name string
@@ -49,7 +55,7 @@ func TestAuthorActivityDuplicateTerminalReceiptIsNoOpParity(t *testing.T) {
 			ctx := originalStoreFixtureContext(t, testAuthorActivityContext(), fixture.store)
 			eventID := uuid.NewString()
 			runID := uuid.NewString()
-			seedAuthorActivityReceiptRun(t, fixture, ctx, runID)
+			ctx = seedAuthorActivityReceiptRun(t, fixture, ctx, runID)
 			agentID := "normalizer"
 			event := eventtest.PersistedProjection(
 				eventID, events.EventType("test.delivery_receipt"), "runtime", "", []byte(`{"text":"how are you","secret":"must-not-render"}`), 0,
@@ -114,7 +120,7 @@ func TestAuthoredNodeEventProducerTypeParity(t *testing.T) {
 			ctx := originalStoreFixtureContext(t, testAuthorActivityContext(), fixture.store)
 			eventID := uuid.NewString()
 			runID := uuid.NewString()
-			seedAuthorActivityReceiptRun(t, fixture, ctx, runID)
+			ctx = seedAuthorActivityReceiptRun(t, fixture, ctx, runID)
 			parentID := eventtest.UUID("authored-node-parent:" + eventID)
 			parent := eventtest.RunCreatingRootIngress(
 				parentID, events.EventType("test.node_parent"), "test-ingress", "", []byte(`{}`), 0,
@@ -153,10 +159,16 @@ func TestAuthoredNodeEventProducerTypeParity(t *testing.T) {
 	}
 }
 
-func seedAuthorActivityReceiptRun(t *testing.T, fixture authorActivityReceiptFixture, ctx context.Context, runID string) {
+func seedAuthorActivityReceiptRun(t *testing.T, fixture authorActivityReceiptFixture, ctx context.Context, runID string) context.Context {
 	t.Helper()
 	startedAt := time.Date(2026, 7, 14, 12, 0, 0, 0, time.UTC)
+	if fixture.activityOwner != nil {
+		ctx = fixture.originalContext(ctx)
+	} else {
+		ctx = originalStoreFixtureContext(t, ctx, fixture.store)
+	}
 	requireRunningRunForTest(t, ctx, fixture.store, runID, startedAt)
+	return ctx
 }
 
 func readEventProducerIdentity(t *testing.T, fixture authorActivityReceiptFixture, ctx context.Context, eventID string) (string, string) {

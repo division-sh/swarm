@@ -89,7 +89,7 @@ func TestImportBoundaryConnectConsumesBindingsForInputAndRootOutputDelivery(t *t
 		runtimebus.AdmittedFlowInstanceObservationFixture(t, source, eventBusTestRunID, root, ""),
 		runtimebus.AdmittedFlowInstanceObservationFixture(t, source, eventBusTestRunID, worker, ""),
 	)
-	eb, err := newScopedTestEventBus(store, runtimebus.EventBusOptions{ContractBundle: source,
+	eb, err := newScopedTestEventBus(t, store, runtimebus.EventBusOptions{ContractBundle: source,
 		Durable: runtimebus.DurableDependencies{Instances: index},
 	})
 	if err != nil {

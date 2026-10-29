@@ -71,10 +71,22 @@ func runtimeContextTestHash(fill string) string {
 	return "bundle-v2:sha256:" + strings.Repeat(fill, 64)
 }
 
-func newSupervisorTestRuntimeOccurrence(t *testing.T, bundleHash string) *worklifetime.RuntimeOccurrence {
+func newSupervisorTestRuntimeOccurrence(t *testing.T, bundleHash string, originalContexts ...context.Context) *worklifetime.RuntimeOccurrence {
 	t.Helper()
 	process := worklifetime.NewProcess()
-	owner, err := process.NewRuntime(context.Background(), worklifetime.RuntimeIdentity{
+	ctx := context.Background()
+	if len(originalContexts) > 0 {
+		if len(originalContexts) != 1 {
+			t.Fatal("runtime fixture requires one original process context")
+		}
+		ctx = originalContexts[0]
+		var found bool
+		process, found = worklifetime.ProcessFromContext(ctx)
+		if !found {
+			t.Fatal("runtime fixture original process is missing")
+		}
+	}
+	owner, err := process.NewRuntime(ctx, worklifetime.RuntimeIdentity{
 		RuntimeInstanceID: "11111111-1111-4111-8111-111111111111",
 		BundleHash:        bundleHash,
 	})

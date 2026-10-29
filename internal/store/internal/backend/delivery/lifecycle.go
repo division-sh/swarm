@@ -713,7 +713,7 @@ func (s *DeliverySQLiteOwner) BindAgentSession(ctx context.Context, claim runtim
 }
 
 // SettleWorkflowNodeSuccess owns mutation-free node success: renewal, outcome,
-// exact claim settlement and completion evidence share one transaction.
+// exact claim settlement and its handler selection share one transaction.
 func (s *DeliveryPostgresOwner) SettleWorkflowNodeSuccess(ctx context.Context, claim runtimedelivery.Claim, sideEffects []string, duration time.Duration, selection runtimedelivery.HandlerRuleSelectionFact) (runtimedelivery.ClaimCommit, error) {
 	if claim.SubscriberClass() != runtimedelivery.SubscriberNode {
 		return runtimedelivery.ClaimCommit{}, fmt.Errorf("workflow node success requires a node claim")
@@ -725,9 +725,6 @@ func (s *DeliveryPostgresOwner) SettleWorkflowNodeSuccess(ctx context.Context, c
 		}
 		snapshot, err := s.SettleWorkflowNodeSuccessTx(txctx, attempt, claim, sideEffects, duration, selection)
 		if err != nil {
-			return runtimedelivery.Snapshot{}, err
-		}
-		if _, err := attempt.RequestCompletion(txctx, s.candidateRequests, claim.RunID(), nil); err != nil {
 			return runtimedelivery.Snapshot{}, err
 		}
 		return snapshot, nil
@@ -747,9 +744,6 @@ func (s *DeliverySQLiteOwner) SettleWorkflowNodeSuccess(ctx context.Context, cla
 		if err != nil {
 			return runtimedelivery.Snapshot{}, err
 		}
-		if _, err := attempt.RequestCompletion(txctx, s.candidateRequests, claim.RunID(), nil); err != nil {
-			return runtimedelivery.Snapshot{}, err
-		}
 		return snapshot, nil
 	})
 }
@@ -762,9 +756,6 @@ func (s *DeliveryPostgresOwner) SettleSuccess(ctx context.Context, claim runtime
 		}
 		snapshot, err := postgresDeliveryAdapter.SettleSuccess(txctx, attempt, claim, sideEffects, duration, selection)
 		if err != nil {
-			return runtimedelivery.Snapshot{}, err
-		}
-		if _, err := attempt.RequestCompletion(txctx, s.candidateRequests, claim.RunID(), nil); err != nil {
 			return runtimedelivery.Snapshot{}, err
 		}
 		return snapshot, nil
@@ -780,9 +771,6 @@ func (s *DeliverySQLiteOwner) SettleSuccess(ctx context.Context, claim runtimede
 		}
 		snapshot, err := sqliteDeliveryAdapter.SettleSuccess(txctx, attempt, claim, sideEffects, duration, selection)
 		if err != nil {
-			return runtimedelivery.Snapshot{}, err
-		}
-		if _, err := attempt.RequestCompletion(txctx, s.candidateRequests, claim.RunID(), nil); err != nil {
 			return runtimedelivery.Snapshot{}, err
 		}
 		return snapshot, nil
@@ -814,9 +802,6 @@ func (s *DeliveryPostgresOwner) SettleFailure(ctx context.Context, claim runtime
 		if err := s.RecordDeadLetterTx(txctx, attempt, diagnostic, true); err != nil {
 			return runtimedelivery.Snapshot{}, fmt.Errorf("commit terminal delivery diagnostic: %w", err)
 		}
-		if _, err := attempt.RequestCompletion(txctx, s.candidateRequests, claim.RunID(), nil); err != nil {
-			return runtimedelivery.Snapshot{}, err
-		}
 		return snapshot, nil
 	})
 	return commit.Snapshot, err
@@ -845,9 +830,6 @@ func (s *DeliverySQLiteOwner) SettleFailure(ctx context.Context, claim runtimede
 		}
 		if err := s.RecordDeadLetterTx(txctx, attempt, diagnostic, true); err != nil {
 			return runtimedelivery.Snapshot{}, fmt.Errorf("commit terminal delivery diagnostic: %w", err)
-		}
-		if _, err := attempt.RequestCompletion(txctx, s.candidateRequests, claim.RunID(), nil); err != nil {
-			return runtimedelivery.Snapshot{}, err
 		}
 		return snapshot, nil
 	})

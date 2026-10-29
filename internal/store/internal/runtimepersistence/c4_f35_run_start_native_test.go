@@ -139,7 +139,10 @@ func c4RequireAbsentCreation(t *testing.T, ctx context.Context, selected any, ru
 // The claim and descriptor are acquired before the test arms its creation cut.
 func c4CommitCreatingPublication(t *testing.T, ctx context.Context, selected any, admitted events.AdmittedEvent, arm func()) (bus.CommittedPublication, error) {
 	t.Helper()
-	ctx = originalStoreFixtureContext(t, ctx, selected)
+	ctx, err := agentfixture.ProcessContext(t, ctx, selected.(agentfixture.Store))
+	if err != nil {
+		t.Fatal(err)
+	}
 	ctx, releaseCatalog, err := semanticEventFixtureContext(ctx, selected, admitted.Event())
 	if err != nil {
 		t.Fatal(err)
@@ -188,7 +191,8 @@ func TestC4F35EventStartNativeCommitAccountingBothStores(t *testing.T) {
 			}
 			t.Run(backend+"/"+cut, func(t *testing.T) {
 				selected, db, connector := newP16RaceStore(t, backend)
-				ctx := requireDefaultSourceArtifactForTest(t, testAuthorActivityContext(), selected)
+				ctx := originalStoreFixtureContext(t, testAuthorActivityContext(), selected)
+				ctx = requireDefaultSourceArtifactForTest(t, testAuthorActivityContext(), selected)
 				runID := uuid.NewString()
 				input := eventtest.RunCreatingRootIngress(uuid.NewString(), "c4.atomic.birth", "ingress", "", []byte(`{"original":true}`), 0,
 					runID, "", events.EventEnvelope{}, time.Date(2026, 10, 9, 0, 0, 0, 0, time.UTC))
@@ -989,7 +993,10 @@ func TestC4F35DeploymentStartNativeCommitAccountingBothStores(t *testing.T) {
 				}
 				selected, _ = c4ReopenCreationStore(t, backend, selected, db, connector)
 				ctx = correlation.WithRootAdmission(testAuthorActivityContextForBundle(command.RunCreation.BundleHash), root)
-				ctx = originalStoreFixtureContext(t, ctx, selected)
+				ctx, err = agentfixture.ProcessContext(t, ctx, selected.(agentfixture.Store))
+				if err != nil {
+					t.Fatal(err)
+				}
 				owner = selected.(bus.DeploymentRunCreationCommitOwner)
 				if !committed {
 					c4RequireAbsentCreation(t, ctx, selected, runID)
@@ -1120,7 +1127,7 @@ func TestC4F35StandingStartNativeCommitAccountingBothStores(t *testing.T) {
 				selected, db, connector := newP16RaceStore(t, backend)
 				artifact := storeTestSourceArtifact("c4-standing-" + backend)
 				bundleHash := artifact.BundleHash()
-				setup := testAuthorActivityContextForBundle(bundleHash)
+				setup := originalStoreFixtureContext(t, testAuthorActivityContextForBundle(bundleHash), selected)
 				rooted, _ := sourceartifactfixture.Rooted(t, "c4-standing", artifact)
 				fact := sourceartifactfixture.FactFor(artifact)
 				setup = correlation.WithRootAdmission(setup, rooted.Admission())
@@ -1163,7 +1170,10 @@ func TestC4F35StandingStartNativeCommitAccountingBothStores(t *testing.T) {
 					c4RequireRevisionCount(t, ctx, selected, observed.RunID, 1)
 				}
 				selected, db = c4ReopenCreationStore(t, backend, selected, db, connector)
-				ctx = originalStoreFixtureContext(t, correlation.WithRootAdmission(correlation.WithSourceArtifactFact(testAuthorActivityRuntimeContext(), fact), rooted.Admission()), selected)
+				ctx, err = agentfixture.ProcessContext(t, correlation.WithRootAdmission(correlation.WithSourceArtifactFact(testAuthorActivityRuntimeContext(), fact), rooted.Admission()), selected.(agentfixture.Store))
+				if err != nil {
+					t.Fatal(err)
+				}
 				workflow = newWorkflowTestCoordinator(t, db, pipeline.NewWorkflowPersistence(selected.(workflowTestSelectedStore)), selected.(workflowTestSelectedStore))
 				reader = selected.(runOriginReadStore)
 				reopened, reopenedFound, err := selected.(runlifecycle.LandingRunReader).LoadLandingRun(ctx, candidate)

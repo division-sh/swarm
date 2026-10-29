@@ -6,8 +6,10 @@ import (
 	"fmt"
 	"sort"
 	"testing"
+	"time"
 
 	"github.com/division-sh/swarm/internal/operatorread"
+	"github.com/division-sh/swarm/internal/runtime/core/activityidentity"
 	runtimeeffects "github.com/division-sh/swarm/internal/runtime/effects"
 	"github.com/division-sh/swarm/internal/runtime/executionposture"
 	"github.com/division-sh/swarm/internal/runtime/failures"
@@ -17,6 +19,64 @@ import (
 type selectedRetainedExecutionObservation struct {
 	ExecutedEventCount int
 	ForkEvents         []SelectedContractExecutionForkEvent
+}
+
+func retireQuiescentSelectedTestContext(t testing.TB, ctx context.Context, owner SelectedContractExecutionOwner, child string) error {
+	t.Helper()
+	contexts := owner.ports.contexts
+	contexts.mu.Lock()
+	var prepared *PreparedSelectedFork
+	for _, entry := range contexts.entries {
+		if entry.binding.ForkRunID == child {
+			if prepared != nil {
+				contexts.mu.Unlock()
+				return errors.New("ambiguous retained selected execution")
+			}
+			prepared = entry.retained
+		}
+	}
+	contexts.mu.Unlock()
+	if prepared == nil {
+		return errors.New("selected test shutdown requires its retained execution")
+	}
+	prepared.bindMu.Lock()
+	runtime := prepared.retainedRuntime
+	complete, closeErr := prepared.cleanupComplete, prepared.closeErr
+	prepared.bindMu.Unlock()
+	if complete {
+		return closeErr
+	}
+	if runtime == nil {
+		return errors.New("selected test shutdown requires its retained runtime")
+	}
+	runtime.mu.Lock()
+	retainedContext, eventBus := runtime.cleanupContext, runtime.bus
+	runtime.mu.Unlock()
+	if retainedContext == nil {
+		return errors.New("selected test shutdown lacks its original execution context")
+	}
+	retainedContext = runForkOriginalContextForTest(t, retainedContext, prepared.processOwner)
+	owned, cancel := bindSelectedDecisionCaller(ctx, retainedContext)
+	defer cancel()
+	_, authority, err := selectedContractManagedExecutionAuthority(owned)
+	if err != nil {
+		return err
+	}
+	for {
+		if err := runtime.WaitForQuiescence(owned, eventBus); err != nil {
+			return err
+		}
+		err := owner.ports.runtimeExecution.RequireRunForkSelectedContractExecutionSettlement(owned, authority,
+			selectedContractExecutionFrontierEventIDs(prepared.frontier.FrontierEvents), prepared.loadedSource.Source)
+		if err == nil {
+			return owner.disposePreparation(prepared)
+		}
+		select {
+		case <-owned.Done():
+			return errors.Join(err, context.Cause(owned))
+		case <-time.After(10 * time.Millisecond):
+		}
+	}
 }
 
 // The activation ACK is not completion. Join its existing retained owner and
@@ -40,18 +100,48 @@ func observeSelectedRetainedExecution(t *testing.T, ctx context.Context, owner S
 	contexts.mu.Unlock()
 	var outcome error
 	if retained != nil {
-		select {
-		case <-wait.Done():
-			return selectedRetainedExecutionObservation{}, context.Cause(wait)
-		case <-retained.done:
+		storage, err := storetest.ReadSelectedExecutionStorage(wait, selected, child)
+		if err != nil {
+			return selectedRetainedExecutionObservation{}, err
+		}
+		for storage.State == "running" {
+			published := true
+			if retained.retained != nil {
+				for _, source := range selectedContractExecutionFrontierEventIDs(retained.retained.frontier.FrontierEvents) {
+					frontier, err := storetest.ReadCausalDeliveryFrontier(wait, selected, child, activityidentity.ForkLineageEventID(child, source))
+					if err != nil {
+						return selectedRetainedExecutionObservation{}, err
+					}
+					published = published && frontier.Observed != 0
+				}
+			}
+			pending, err := storetest.ReadServedIncompletePipelineHandoffCount(wait, selected, child)
+			if err != nil {
+				return selectedRetainedExecutionObservation{}, err
+			}
+			if published && pending == 0 {
+				break
+			}
+			select {
+			case <-wait.Done():
+				return selectedRetainedExecutionObservation{}, context.Cause(wait)
+			case <-time.After(10 * time.Millisecond):
+			}
+			storage, err = storetest.ReadSelectedExecutionStorage(wait, selected, child)
+			if err != nil {
+				return selectedRetainedExecutionObservation{}, err
+			}
+		}
+		if storage.State == "running" {
+			outcome = retireQuiescentSelectedTestContext(t, wait, owner, child)
 		}
 		contexts.mu.Lock()
-		outcome = retained.err
+		outcome = errors.Join(outcome, retained.err)
 		contexts.mu.Unlock()
 	}
 	storage, err := storetest.ReadSelectedExecutionStorage(wait, selected, child)
-	if err != nil || storage.State != "closed" || storage.Occurrences != 1 {
-		return selectedRetainedExecutionObservation{}, errors.Join(outcome, err, fmt.Errorf("selected execution is not exactly closed: %+v", storage))
+	if err != nil || storage.Occurrences != 1 {
+		return selectedRetainedExecutionObservation{}, errors.Join(outcome, err, fmt.Errorf("selected execution occurrence changed: %+v", storage))
 	}
 	header, err := selected.(interface {
 		LoadRunHeader(context.Context, string) (operatorread.RunHeader, error)
@@ -61,6 +151,13 @@ func observeSelectedRetainedExecution(t *testing.T, ctx context.Context, owner S
 	}
 	if header.Failure != nil {
 		outcome = errors.Join(outcome, failures.FromEnvelope(*header.Failure))
+	}
+	wantState := "running"
+	if header.Status != "running" || errors.Is(outcome, context.Canceled) {
+		wantState = "closed"
+	}
+	if storage.State != wantState {
+		return selectedRetainedExecutionObservation{}, errors.Join(outcome, fmt.Errorf("selected execution state=%s want=%s for run status=%s", storage.State, wantState, header.Status))
 	}
 	snapshot, err := storetest.ReadSelectedForkApplicationStorageSnapshot(wait, selected)
 	if err != nil {

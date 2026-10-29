@@ -25,7 +25,7 @@ func TestOperatorEventBatchPaginationBoundaryBothStores(t *testing.T) {
 			ctx = originalStoreFixtureContext(t, ctx, fixture.store)
 			store := fixture.store.(routeSettlementOperatorStore)
 			runID := uuid.NewString()
-			seedAuthorActivityReceiptRun(t, fixture, ctx, runID)
+			ctx = seedAuthorActivityReceiptRun(t, fixture, ctx, runID)
 			base := time.Date(2026, 8, 16, 12, 0, 0, 123456000, time.UTC)
 			ids := make([]string, 129)
 			for i := len(ids) - 1; i >= 0; i-- {
@@ -116,8 +116,8 @@ func TestOperatorEventBatchConsumedPrefixBothStores(t *testing.T) {
 			ctx = originalStoreFixtureContext(t, ctx, fixture.store)
 			store := fixture.store.(routeSettlementOperatorStore)
 			runID, foreignRun := uuid.NewString(), uuid.NewString()
-			seedAuthorActivityReceiptRun(t, fixture, ctx, runID)
-			seedAuthorActivityReceiptRun(t, fixture, ctx, foreignRun)
+			ctx = seedAuthorActivityReceiptRun(t, fixture, ctx, runID)
+			ctx = seedAuthorActivityReceiptRun(t, fixture, ctx, foreignRun)
 			base := time.Date(2026, 8, 16, 13, 0, 0, 0, time.UTC)
 			var ids [5]string
 			var originals [5]operatorread.OperatorEventFull
@@ -207,8 +207,8 @@ func TestOperatorEventBatchEvidenceMembershipAndFreshnessBothStores(t *testing.T
 			ctx = originalStoreFixtureContext(t, ctx, fixture.store)
 			store := fixture.store.(routeSettlementOperatorStore)
 			runID, foreignRun := uuid.NewString(), uuid.NewString()
-			seedAuthorActivityReceiptRun(t, fixture, ctx, runID)
-			seedAuthorActivityReceiptRun(t, fixture, ctx, foreignRun)
+			ctx = seedAuthorActivityReceiptRun(t, fixture, ctx, runID)
+			ctx = seedAuthorActivityReceiptRun(t, fixture, ctx, foreignRun)
 			queued, failed := testEntitylessNodeDeliveryRoute("queued"), testEntitylessNodeDeliveryRoute("failed")
 			event := eventtest.ExistingRunRootIngress(uuid.NewString(), "batch.evidence", "gateway", "", []byte(`{"evidence":true}`), 0, runID, events.EventEnvelope{}, time.Date(2026, 8, 16, 14, 0, 0, 0, time.UTC))
 			if err := commitSemanticEventFixtureWithRoutes(ctx, fixture.store, event, []events.DeliveryRoute{failed, queued}); err != nil {

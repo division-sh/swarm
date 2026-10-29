@@ -398,6 +398,7 @@ func seedEntityToolSourceRun(t *testing.T, selected any, bundle *contracts.Workf
 		t.Fatal(err)
 	}
 	ctx := authoractivity.WithScope(context.Background(), authoractivity.BundleScope(authorActivityTestRuntimeInstanceID, fact.BundleHash()))
+	ctx = correlation.WithRuntimeInstanceID(ctx, authorActivityTestRuntimeInstanceID)
 	ctx = effects.WithDifferentOwner(ctx, effects.OwnerBuildTestInfrastructure)
 	ctx = correlation.WithSourceArtifactFact(correlation.WithRunID(ctx, entityToolTestRunID), fact)
 	ctx = toolFixtureProcessContext(t, ctx, selected)

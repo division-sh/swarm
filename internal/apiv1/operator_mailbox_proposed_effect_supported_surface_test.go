@@ -219,7 +219,7 @@ func newProposedEffectMailboxHandler(
 	handler := testHandler(t, Options{
 		AuthTokens:          []string{testToken},
 		OperatorPrincipalID: principal.ID,
-		Handlers: testOperatorHandlers(testOperatorCapabilities{
+		Handlers: testOperatorHandlers(t, testOperatorCapabilities{
 			Now: func() time.Time { return time.Now().UTC() }, Ready: func() bool { return true }, Database: fakePinger{},
 			Runs: runs, Observability: observability, Idempotency: idempotency, Events: bus, Source: source,
 			RunBundleContext: runBundleContext, Mailbox: mailbox, DecisionCards: cards, DecisionAuthority: coordinator,

@@ -131,10 +131,26 @@ func loadMode(ctx context.Context, q RowQueryer, runID string, dialect privateac
 	}
 	runID = strings.TrimSpace(runID)
 	query := `SELECT status, bundle_hash, source_root_directory FROM runs WHERE run_id = ?`
+	exclusive := false
+	if lock {
+		tx, ok := q.(*sql.Tx)
+		if !ok {
+			return runtimecorrelation.SourceArtifactFact{}, sourceartifact.RootAdmissionReference{}, errors.New("mutable run admission requires transaction")
+		}
+		var err error
+		exclusive, err = mutationprotocol.RunRowLock(ctx, tx, runID, false)
+		if err != nil {
+			return runtimecorrelation.SourceArtifactFact{}, sourceartifact.RootAdmissionReference{}, err
+		}
+	}
 	if dialect == privateactivity.DialectPostgres {
 		query = `SELECT status, bundle_hash, source_root_directory FROM runs WHERE run_id = $1::uuid`
 		if lock {
-			query += ` FOR UPDATE`
+			if exclusive {
+				query += ` FOR UPDATE`
+			} else {
+				query += ` FOR SHARE`
+			}
 		}
 	}
 	var status string

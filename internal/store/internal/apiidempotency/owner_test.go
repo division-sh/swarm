@@ -16,8 +16,9 @@ import (
 )
 
 func TestPostgresAPIIdempotencyTerminalReleaseFailuresFailClosedAndRestoreCapacity(t *testing.T) {
-	_, db, cleanup := testutil.StartPostgres(t)
+	dsn, db, cleanup := testutil.StartPostgres(t)
 	t.Cleanup(cleanup)
+	original := statementOriginalContext(t, dsn)
 	db.SetMaxOpenConns(1)
 	if _, err := db.Exec(`
 		CREATE TABLE IF NOT EXISTS api_idempotency (
@@ -98,7 +99,7 @@ func TestPostgresAPIIdempotencyTerminalReleaseFailuresFailClosedAndRestoreCapaci
 				TTL:            time.Hour,
 			}
 			response := json.RawMessage(`{"z":[2,1], "a":9007199254740993, "u":"\u003c"}`)
-			completion, replay, err := owner.WithAPIIdempotency(context.Background(), req, func(context.Context) (apiidempotencycontract.Completion, error) {
+			completion, replay, err := owner.WithAPIIdempotency(original, req, func(context.Context) (apiidempotencycontract.Completion, error) {
 				return apiidempotencycontract.Completion{ResourceID: req.ResourceID, Response: response}, nil
 			})
 			if err == nil || !strings.Contains(err.Error(), tc.wantError) {
@@ -118,7 +119,7 @@ func TestPostgresAPIIdempotencyTerminalReleaseFailuresFailClosedAndRestoreCapaci
 			if err != nil {
 				t.Fatalf("new clean owner: %v", err)
 			}
-			reacquireCtx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+			reacquireCtx, cancel := context.WithTimeout(original, 5*time.Second)
 			defer cancel()
 			executed := false
 			completion, replay, err = clean.WithAPIIdempotency(reacquireCtx, req, func(context.Context) (apiidempotencycontract.Completion, error) {

@@ -44,7 +44,6 @@ type runForkActivityRequestPayload = storerunfork.RunForkActivityRequestPayload
 type runForkGateActivationBinding = storerunfork.RunForkGateActivationBinding
 type runForkEntityProjection = runfork.EntityProjection
 type runCompletionOwnerSummaries = storerunlifecycle.RunCompletionOwnerSummaries
-type terminalRunMutation = storerunlifecycle.TerminalRunMutation
 type standaloneRuntimePlatformRunRecord = storerunlifecycle.StandaloneRuntimePlatformRunRecord
 type conversationForkTimeValue = storerunfork.ConversationForkTimeValue
 type completionRecoveryAttempt = storeeffect.CompletionRecoveryAttempt

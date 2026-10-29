@@ -96,7 +96,7 @@ func TestA2MultiUntilIndependentRecipientEntriesAndRestartOnBothStores(t *testin
 					Mode: "template", RuntimeReadiness: &readiness, CurrentState: "awaiting", EntityType: "order_state",
 					Fields: map[string]any{"order_id": key, "expected": []any{"a", "b"}, "halt_count": int64(0)},
 				}, now)
-				markGateRecoveryTopologyReadyFixture(t, selected, readiness, now)
+				markGateRecoveryTopologyReadyFixture(t, ctx, selected, readiness, now)
 			}
 			requireConstructions()
 			load := func(index int) pipeline.WorkflowInstance {

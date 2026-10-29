@@ -52,7 +52,7 @@ func TestExactStageCompletionRealWriterAndRehydratedSourceBothStores(t *testing.
 			bundle := exactStageCompletionJourneyBundle(t)
 			source := semanticview.Wrap(bundle)
 			fact := sourceArtifactFactForTestBundle(t, bundle)
-			sourceartifactfixture.RequireArtifact(t, testAuthorActivityContextForSource(context.Background(), fact), selected, bundle.SourceArtifact)
+			sourceartifactfixture.RequireArtifact(t, originalAPIFixtureContext(t, testAuthorActivityContextForSource(context.Background(), fact), selected), selected, bundle.SourceArtifact)
 			var coordinator *runtimepipeline.PipelineCoordinator
 			bus, err := newScopedAPITestEventBus(t, selected, runtimebus.EventBusOptions{
 				ContractBundle: source, SourceArtifactFact: fact,

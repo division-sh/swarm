@@ -20,7 +20,6 @@ import (
 	runtimepipeline "github.com/division-sh/swarm/internal/runtime/pipeline"
 	"github.com/division-sh/swarm/internal/runtime/startupownership"
 	"github.com/division-sh/swarm/internal/store/storetest"
-	"github.com/division-sh/swarm/internal/store/testutil/agentfixture"
 	"github.com/google/uuid"
 )
 
@@ -48,8 +47,15 @@ func TestDisplacedHTTPActivityOriginalSessionRecoveryBothStores(t *testing.T) {
 			)
 			source := activityJournalProofSource(t, map[string]runtimecontracts.ToolSchemaEntry{"provider_write": tool})
 			runID := uuid.NewString()
-			ctx := requireActivityReplayRun(t, selected, source, runID)
-			bus := newActivityJournalProofBus(t, selected, source)
+			store := selected.events.(startupownership.Store)
+			request := startupownership.AcquireRequest{OwnerID: "activity-recovery-original", BootID: uuid.NewString(), RuntimeInstanceID: uuid.NewString()}
+			original, err := store.AcquireProcessCapability(context.Background(), request)
+			if err != nil {
+				t.Fatal(err)
+			}
+			t.Cleanup(func() { _ = original.Release(context.Background()) })
+			ctx := requireActivityReplayRun(t, selected, source, runID, original)
+			bus := newActivityJournalProofBus(t, selected, source, ctx)
 			pc := newGateRecoveryCoordinator(bus, selected, runtimepipeline.PipelineCoordinatorOptions{Module: gateRecoveryModule{source: source}})
 			intent := seedSelectedActivitySource(t, ctx, selected, pc, runtimepipeline.NonIdempotentActivityIntentForTest(runID, uuid.NewString(), uuid.NewString()))
 			fact, found := correlation.SourceArtifactFactFromContext(ctx)
@@ -57,11 +63,6 @@ func TestDisplacedHTTPActivityOriginalSessionRecoveryBothStores(t *testing.T) {
 				t.Fatal("activity fixture has no admitted source fact")
 			}
 			intent.BundleHash, intent.WorkflowVersion = fact.BundleHash(), source.WorkflowVersion()
-			store := selected.events.(startupownership.Store)
-			original, err := agentfixture.ProcessCapability(t, ctx, selected.events.(agentfixture.Store))
-			if err != nil {
-				t.Fatal(err)
-			}
 			processEvidence, err := original.Evidence()
 			if err != nil {
 				t.Fatal(err)
@@ -172,8 +173,11 @@ func TestDisplacedHTTPActivityOriginalSessionRecoveryBothStores(t *testing.T) {
 					t.Fatalf("recovery replay changed the original result: %v", err)
 				}
 			}
-			resultCtx := correlation.WithSourceArtifactFact(correlation.WithRuntimeInstanceID(correlation.WithRunID(context.Background(), runID), successorRequest.RuntimeInstanceID), fact)
+			replacePipelineExternalWorkOccurrenceForSource(t, fact, pipelineExternalTestWorkOwnerForSource(t, fact))
+			resultCtx := testAuthorActivityContextForSource(t, context.Background(), fact)
+			resultCtx = correlation.WithRuntimeInstanceID(correlation.WithRunID(resultCtx, runID), successorRequest.RuntimeInstanceID)
 			resultCtx = authoractivity.WithScope(resultCtx, authoractivity.BundleScope(successorRequest.RuntimeInstanceID, fact.BundleHash()))
+			resultCtx = nativeOriginalProcessContextFixture(t, resultCtx, successor)
 			resultBus, err := newScopedTestEventBus(t, selected.events, runtimebus.EventBusOptions{
 				ContractBundle: source, SourceArtifactFact: fact, RuntimeInstanceID: successorRequest.RuntimeInstanceID,
 				MutationContext: func(work context.Context) (context.Context, error) {

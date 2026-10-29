@@ -170,11 +170,12 @@ func TestConfiguredChannelRuntimeDispatchesImportedAgentDurablyAcrossSelectedSto
 			if !ok {
 				t.Fatalf("selected channel store %T does not own source artifacts", eventStore)
 			}
-			sourceFact := sourceartifactfixture.RequireArtifact(t, ctx, writer, bundle.SourceArtifact)
+			sourceFact := sourceartifactfixture.FactFor(bundle.SourceArtifact)
 			ctx = runtimecorrelation.WithSourceArtifactFact(ctx, sourceFact)
 			ctx = runtimecorrelation.WithRuntimeInstanceID(ctx, authorActivityTestRuntimeInstanceID)
 			ctx = runtimeauthoractivity.WithScope(ctx, runtimeauthoractivity.BundleScope(authorActivityTestRuntimeInstanceID, sourceFact.BundleHash()))
 			ctx = originalRuntimeFixtureContext(t, ctx, eventStore)
+			sourceartifactfixture.RequireArtifact(t, ctx, writer, bundle.SourceArtifact)
 			switch typed := eventStore.(type) {
 			case *store.PostgresStore:
 				storetest.RequireRun(t, ctx, typed, storetest.RunFixture{RunID: runID, Origin: storetest.ScenarioSetupOrigin(), Artifact: bundle.SourceArtifact})

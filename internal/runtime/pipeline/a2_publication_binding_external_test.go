@@ -225,7 +225,7 @@ func testA2StageEntryPublicationBinding(t *testing.T, scenarios []int) {
 						ParentFlowID: parent.Identity.TemplateID, ParentFlowInstance: parent.Identity.InstancePath, ParentEntityID: parent.Identity.EntityID,
 						Mode: "template", RuntimeReadiness: &readiness, CurrentState: "awaiting", EntityType: "order_state", Fields: map[string]any{"order_id": keys[index], "expected": []any{"a", "b"}},
 					}, now)
-					markGateRecoveryTopologyReadyFixture(t, selected, readiness, now)
+					markGateRecoveryTopologyReadyFixture(t, ctx, selected, readiness, now)
 					requireIndexedConstructionFixture(t, ctx, selected.persistence, source, runID, constructed.Identity)
 				}
 				original := []timeridentity.StageEntryRef{entry(0), entry(1)}

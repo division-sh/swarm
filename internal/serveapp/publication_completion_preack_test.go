@@ -168,7 +168,7 @@ func TestPublicCompletionAcknowledgedRetirementBothStores(t *testing.T) {
 				probe.mu.Lock()
 				request, native, process := probe.request, probe.native, probe.process
 				probe.mu.Unlock()
-				stored, found, err := native.LookupAPIEventPublication(t.Context(), request)
+				stored, found, err := native.LookupAPIEventPublication(probe.readbackContext(t), request)
 				if err != nil || !found {
 					t.Fatalf("retirement discarded the winning native ACK: found=%t err=%v", found, err)
 				}

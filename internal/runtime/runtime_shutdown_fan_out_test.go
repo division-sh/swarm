@@ -3,7 +3,6 @@ package runtime
 import (
 	"context"
 	"errors"
-	"sync"
 	"testing"
 	"time"
 
@@ -18,7 +17,6 @@ import (
 	"github.com/division-sh/swarm/internal/runtime/deliverylifecycle"
 	"github.com/division-sh/swarm/internal/runtime/executionposture"
 	"github.com/division-sh/swarm/internal/runtime/manager"
-	"github.com/division-sh/swarm/internal/runtime/runlifecycle"
 	"github.com/division-sh/swarm/internal/runtime/startupownership"
 	"github.com/division-sh/swarm/internal/testutil/sourceartifactfixture"
 )
@@ -161,30 +159,6 @@ func VerifyRuntimeShutdownFanOutCommittedTurnKeepsDependenciesLiveForTest(t *tes
 	}
 	awaitShutdownFanOut(t, started, "manager handler")
 
-	completion := &runtimeShutdownCompletionStore{
-		started: make(chan struct{}), release: make(chan struct{}), completed: make(chan struct{}), canceled: make(chan error, 1),
-	}
-	var releaseOnce sync.Once
-	releaseCompletion := func() { releaseOnce.Do(func() { close(completion.release) }) }
-	t.Cleanup(releaseCompletion)
-	executor, err := runlifecycle.NewExecutor(completion, runlifecycle.CandidateScope{BundleHash: runtimeTestBundleHash},
-		runlifecycle.FinalCatalog{}, rt.workOccurrence, runlifecycle.ExecutorOptions{})
-	if err != nil {
-		t.Fatal(err)
-	}
-	if err := executor.Start(ctx); err != nil {
-		t.Fatal(err)
-	}
-	t.Cleanup(func() {
-		releaseCompletion()
-		ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
-		defer cancel()
-		if err := executor.Retire(ctx); err != nil {
-			t.Error(err)
-		}
-	})
-	rt.runLifecycleExecutor = executor
-
 	// The newly committed obligation is not dispatch-eligible until the
 	// publication owner marks handoff. AcceptCommitted must still retain it.
 	dispatcher := &shutdownBlockedDispatcher{entered: make(chan struct{}), canceled: make(chan struct{}), release: make(chan struct{})}
@@ -204,12 +178,6 @@ func VerifyRuntimeShutdownFanOutCommittedTurnKeepsDependenciesLiveForTest(t *tes
 		t.Fatalf("admit finite turn: found=%v err=%v", found, err)
 	}
 	t.Cleanup(permit.Done)
-	// Match the production precommit reservation / postcommit Submit split.
-	admission, err := executor.ReserveCompletionCandidate(permit.Context())
-	if err != nil {
-		t.Fatal(err)
-	}
-	t.Cleanup(func() { _ = admission.Cancel() })
 	event := eventtest.ExistingRunRootIngress(eventtest.UUID("fan-out-shutdown-committed"),
 		"test.in", "tester", "", nil, 0, agentidentitytest.DefaultRunID, events.EventEnvelope{}, time.Now().UTC())
 	route := events.DeliveryRoute{Recipient: events.MustAgentDeliveryRecipient(agent.id),
@@ -228,8 +196,8 @@ func VerifyRuntimeShutdownFanOutCommittedTurnKeepsDependenciesLiveForTest(t *tes
 	go func() { shutdown <- rt.ShutdownWithOptions(ShutdownOptions{Grace: 10 * time.Second}) }()
 	awaitShutdownFanOut(t, permit.Context().Done(), "registration cancellation")
 	assertShutdownFanOutPending(t, shutdown)
-	if !rt.shutdownAdmissionClosed() || !executor.Ready() {
-		t.Fatal("ingress must be closed but completion executor must remain ready")
+	if !rt.shutdownAdmissionClosed() {
+		t.Fatal("ingress must be closed while admitted fan-out work drains")
 	}
 	if next, found, err := registration.BeginTurn(ctx); err == nil || found || next != nil {
 		if next != nil {
@@ -262,13 +230,6 @@ func VerifyRuntimeShutdownFanOutCommittedTurnKeepsDependenciesLiveForTest(t *tes
 	if _, err := continuation.Resolve(context.WithoutCancel(permit.Context()), worklifetime.DeliveryContinuationReturnUnqueued); err != nil {
 		t.Fatal(err)
 	}
-	if err := admission.Submit(runlifecycle.Candidate{
-		RunID: event.RunID(), BundleHash: runtimeTestBundleHash, Revision: 1,
-		DueAt: runlifecycle.CanonicalTimestamp(time.Now().UTC().Add(-time.Second)),
-	}); err != nil {
-		t.Fatalf("committed turn lost reserved completion consumer: %v", err)
-	}
-	awaitShutdownFanOut(t, completion.started, "postcommit completion persistence")
 	select {
 	case <-canceled:
 		t.Fatal("manager retired before committed turn completed")
@@ -279,11 +240,6 @@ func VerifyRuntimeShutdownFanOutCommittedTurnKeepsDependenciesLiveForTest(t *tes
 	}
 	assertShutdownFanOutPending(t, shutdown)
 	permit.Done()
-	// The turn may finish before its accepted completion persistence. Runtime
-	// must then join that consumer before releasing the generation.
-	assertShutdownFanOutPending(t, shutdown)
-	releaseCompletion()
-	awaitShutdownFanOut(t, completion.completed, "completion commit")
 	receiveShutdownFanOut(t, shutdown, "runtime shutdown")
 	awaitShutdownFanOut(t, canceled, "manager retirement")
 	awaitShutdownFanOut(t, grant.Done(), "generation retirement")

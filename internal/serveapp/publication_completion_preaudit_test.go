@@ -23,6 +23,7 @@ import (
 	runtimemanager "github.com/division-sh/swarm/internal/runtime/manager"
 	"github.com/division-sh/swarm/internal/runtime/pipeline"
 	"github.com/division-sh/swarm/internal/runtime/pipelineobligation"
+	"github.com/division-sh/swarm/internal/runtime/startupownership"
 	"github.com/division-sh/swarm/internal/runtime/testfixtures/canonicalrouting"
 	"github.com/division-sh/swarm/internal/servedparity"
 	"github.com/division-sh/swarm/internal/store/storetest"
@@ -60,7 +61,7 @@ func TestPublicPublicationCompletionBoundaryBothStores(t *testing.T) {
 			if count := probe.process.PublicCompletionCount(); count != 1 {
 				t.Fatalf("held consequence released its reservation: %d", count)
 			}
-			stored, found, err := native.LookupAPIEventPublication(t.Context(), request)
+			stored, found, err := native.LookupAPIEventPublication(probe.readbackContext(t), request)
 			if err != nil || !found {
 				t.Fatalf("completion at post-ACK cut: found=%t err=%v", found, err)
 			}
@@ -117,7 +118,7 @@ func TestPublicFeedOnlyCompletionUnloadRestartBothStores(t *testing.T) {
 			probe.mu.Lock()
 			native, request, committed, process := probe.native, probe.request, probe.deployment, probe.process
 			probe.mu.Unlock()
-			stored, found, err := native.LookupAPIEventPublication(t.Context(), request)
+			stored, found, err := native.LookupAPIEventPublication(probe.readbackContext(t), request)
 			if err != nil || !found || committed == nil || !committed.Acknowledged || !bytes.Equal(first.result, stored.Response) || !bytes.Equal(first.result, committed.Completion.Response) {
 				t.Fatalf("initial native/store/wire completion differs: found=%t err=%v", found, err)
 			}
@@ -192,7 +193,7 @@ func TestPublicPublicationCompletionExactBytesBothStores(t *testing.T) {
 			probe.mu.Lock()
 			request, native, committed := probe.request, probe.native, probe.committed
 			probe.mu.Unlock()
-			stored, found, err := native.LookupAPIEventPublication(t.Context(), request)
+			stored, found, err := native.LookupAPIEventPublication(probe.readbackContext(t), request)
 			if err != nil || !found || !committed.Acknowledged {
 				t.Fatalf("native completion: found=%t ack=%t err=%v", found, committed.Acknowledged, err)
 			}
@@ -237,7 +238,7 @@ func TestPublicPublicationRetirementRecoveryBothStores(t *testing.T) {
 			probe.mu.Lock()
 			process, native, request := probe.process, probe.native, probe.request
 			probe.mu.Unlock()
-			stored, found, err := native.LookupAPIEventPublication(t.Context(), request)
+			stored, found, err := native.LookupAPIEventPublication(probe.readbackContext(t), request)
 			if err != nil || !found || !bytes.Equal(first.result, stored.Response) || process.PublicCompletionCount() != 1 {
 				t.Fatalf("held exact responsibility: found=%t err=%v count=%d", found, err, process.PublicCompletionCount())
 			}
@@ -354,6 +355,7 @@ connect:
 
 type publicationCompletionAudit struct {
 	mu                  sync.Mutex
+	originalContext     context.Context
 	native              runtimebus.APIEventPublicationCommitOwner
 	workflow            pipeline.WorkflowPersistenceOwner
 	obligations         pipelineobligation.Store
@@ -382,6 +384,17 @@ type publicationCompletionAudit struct {
 	beforeCommit        func(context.Context)
 	afterCommit         func(context.Context, bool)
 	holdBeforeReadiness bool
+}
+
+func (p *publicationCompletionAudit) readbackContext(t *testing.T) context.Context {
+	t.Helper()
+	p.mu.Lock()
+	original := p.originalContext
+	p.mu.Unlock()
+	if original == nil {
+		t.Fatal("native completion readback requires its observed original operation")
+	}
+	return startupownership.CarryMutationAuthority(t.Context(), original)
 }
 
 func installPublicationCompletionAudit(t *testing.T, hold bool) *publicationCompletionAudit {
@@ -419,6 +432,7 @@ func (p *publicationCompletionAudit) commit(ctx context.Context, native runtimeb
 	result, err := native.CommitAPIEventPublication(ctx, command)
 	p.mu.Lock()
 	p.commits++
+	p.originalContext = ctx
 	p.request, p.committed = command.Idempotency, result
 	p.process, _ = worklifetime.ProcessFromContext(ctx)
 	p.run = command.Publication.Commit.Event.Event().RunID()
@@ -469,6 +483,7 @@ func (p *publicationCompletionAudit) observeDeployment(ctx context.Context, comm
 	p.mu.Lock()
 	defer p.mu.Unlock()
 	p.deployment = &result
+	p.originalContext = ctx
 	p.deployments++
 	p.request = command.Idempotency
 	p.process, _ = worklifetime.ProcessFromContext(ctx)

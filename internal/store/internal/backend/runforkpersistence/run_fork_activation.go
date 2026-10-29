@@ -37,6 +37,9 @@ type runForkActivationLineage struct {
 type RunForkActivationLineage = runForkActivationLineage
 
 func loadRunForkActivationLineage(ctx context.Context, lifecycle *privaterunlifecycle.RunLifecyclePostgresOwner, tx *sql.Tx, forkRunID string) (runForkActivationLineage, error) {
+	if _, err := mutationprotocol.RunRowLock(ctx, tx, forkRunID, true); err != nil {
+		return runForkActivationLineage{}, err
+	}
 	snapshot, err := lifecycle.LoadSnapshotTx(ctx, tx, forkRunID, true)
 	if err != nil {
 		if errors.Is(err, runtimerunlifecycle.ErrRunNotFound) {
@@ -66,6 +69,9 @@ func loadRunForkActivationLineage(ctx context.Context, lifecycle *privaterunlife
 	}
 	lineage.ForkEventRevision = lineage.ForkPoint.Revision
 	var forkEventTime sql.NullTime
+	if _, err := mutationprotocol.RunRowLock(ctx, tx, lineage.SourceRunID, true); err != nil {
+		return runForkActivationLineage{}, err
+	}
 	err = tx.QueryRowContext(ctx, `
 		SELECT
 			COALESCE(s.status, ''),
@@ -110,6 +116,9 @@ func loadRunForkActivationLineage(ctx context.Context, lifecycle *privaterunlife
 }
 
 func loadSQLiteRunForkActivationLineage(ctx context.Context, lifecycle *privaterunlifecycle.RunLifecycleSQLiteOwner, tx *sql.Tx, forkRunID string) (runForkActivationLineage, error) {
+	if _, err := mutationprotocol.RunRowLock(ctx, tx, forkRunID, true); err != nil {
+		return runForkActivationLineage{}, err
+	}
 	snapshot, err := lifecycle.LoadSnapshotTx(ctx, tx, forkRunID)
 	if err != nil {
 		if errors.Is(err, runtimerunlifecycle.ErrRunNotFound) {
@@ -132,6 +141,9 @@ func loadSQLiteRunForkActivationLineage(ctx context.Context, lifecycle *privater
 	}
 	lineage.ForkEventRevision = lineage.ForkPoint.Revision
 	var forkEventTimeRaw any
+	if _, err := mutationprotocol.RunRowLock(ctx, tx, lineage.SourceRunID, true); err != nil {
+		return runForkActivationLineage{}, err
+	}
 	err = tx.QueryRowContext(ctx, `
 		SELECT COALESCE(s.status, ''), COALESCE(s.bundle_hash, ''), COALESCE(s.source_root_directory, ''), COALESCE(e.event_name, ''), e.created_at
 		FROM runs s

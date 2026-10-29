@@ -1104,6 +1104,11 @@ func debtValidateCollectorIdentity(base, current string, trusted, head authority
 		debtSitesEqual(head.Sites, trusted.Sites) {
 		return nil // Compose the landed W4 matcher and reviewed W1 pairs; unchanged baseline.
 	}
+	if base == debtSelectedFixtureLandedCollectorTo && trusted.Collector == base &&
+		current == debtS2FixtureCollectorTo && head.Collector == current &&
+		debtSitesEqual(head.Sites, trusted.Sites) {
+		return nil // R19: exact native fixture body correspondence; debt identities are unchanged.
+	}
 	if base == debtSelectedFixtureComposedCollectorTo && trusted.Collector == base &&
 		current == debtSelectedFixtureLandedCollectorTo && head.Collector == current &&
 		debtSitesEqual(head.Sites, trusted.Sites) {

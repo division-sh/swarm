@@ -164,7 +164,10 @@ func TestFencedRuntimeRouteCarriesOnlyLiveAcceptedWork(t *testing.T) {
 	if _, err := route.NewEventDelivery(context.Background(), event); !errors.Is(err, ErrAdmissionFenced) {
 		t.Fatalf("unrelated delivery after fence = %v", err)
 	}
-	carried := CarryAcceptedLease(WithOccurrence(context.Background(), owner), accepted.Context())
+	carried := CarryAcceptedLease(WithOccurrence(context.Background(), owner), WithProcess(accepted.Context(), NewProcess()))
+	if original, found := ProcessFromContext(carried); !found || original != process {
+		t.Fatal("accepted handoff did not retain its lease's original process")
+	}
 	delivery, err := route.NewEventDelivery(carried, event)
 	if err != nil {
 		t.Fatalf("accepted route delivery after fence: %v", err)

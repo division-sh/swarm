@@ -25,7 +25,7 @@ func newOutboxPublicationBus(t *testing.T, store runtimebus.EventStore) *runtime
 	source := semanticview.Wrap(bundle)
 	identity := runtimebus.ConstructedFlowInstanceIdentityFixture(source, ".", "", runtimebustest.DefaultRunID)
 	observation := runtimebus.AdmittedFlowInstanceObservationFixture(t, source, runtimebustest.DefaultRunID, identity, "")
-	bus, err := newScopedTestEventBus(store, runtimebus.EventBusOptions{
+	bus, err := newScopedTestEventBus(t, store, runtimebus.EventBusOptions{
 		ContractBundle: source,
 		Durable: runtimebus.DurableDependencies{
 			Instances: runtimebus.FlowInstanceIndexFixture(observation),

@@ -9,6 +9,7 @@ import (
 
 	runtimebus "github.com/division-sh/swarm/internal/runtime/bus"
 
+	agentfixture "github.com/division-sh/swarm/internal/store/testutil/agentfixture"
 	"github.com/division-sh/swarm/internal/testutil/sourceartifactfixture"
 	"github.com/google/uuid"
 )
@@ -37,6 +38,11 @@ func TestRunFixtureRefusalsDoNotWrite(t *testing.T) {
 		t.Run(backend.name, func(t *testing.T) {
 			selected := backend.open(t)
 			ctx := context.Background()
+			if original, err := agentfixture.ProcessContext(t, ctx, any(selected).(agentfixture.Store)); err != nil {
+				t.Fatal(err)
+			} else {
+				ctx = original
+			}
 			rooted, _ := sourceartifactfixture.Rooted(t, "fixture", sourceartifactfixture.Artifact())
 			sourceartifactfixture.RequireArtifact(t, ctx, selected, rooted.Artifact())
 			ctx = correlation.WithRootAdmission(correlation.WithSourceArtifactFact(ctx, sourceartifactfixture.FactFor(rooted.Artifact())), rooted.Admission())
