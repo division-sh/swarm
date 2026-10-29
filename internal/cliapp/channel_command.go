@@ -2,7 +2,6 @@ package cliapp
 
 import (
 	"bufio"
-	"bytes"
 	"context"
 	"errors"
 	"fmt"
@@ -638,34 +637,19 @@ func waitForChannelOnboardingPairing(ctx context.Context, client channelControlC
 			(!expired || current.Connection.Reason != "network unreachable"):
 			return channelOnboardingResult{}, returnCLIValidationError(errOut, fmt.Errorf("WhatsApp disconnected: %s", cliSanitizeOneLineValue(current.Connection.Reason)))
 		case expired:
-			var next channelOnboardingResult
-			if err := client.call(ctx, "channel.onboarding_retry", map[string]any{"operation_id": current.Operation.OperationID}, &next); err != nil {
-				return channelOnboardingResult{}, returnCLIAPIError(errOut, err, channelErrorClassifier())
+			current, err = renewExpiredChannelPairing(ctx, client, current, errOut)
+			if err != nil {
+				return channelOnboardingResult{}, err
 			}
-			if _, err := validateCLIChannelContinuation(current, next, false); err != nil {
-				return channelOnboardingResult{}, returnCLIValidationError(errOut, err)
-			}
-			if stillExpired, err := next.SessionPairingExpired(time.Now()); err != nil || stillExpired {
-				return channelOnboardingResult{}, returnCLIValidationError(errOut, errors.New("the expired pairing batch could not be renewed"))
-			}
-			current, awaitLogin = next, false
+			awaitLogin = false
 			continue
 		case !pending && (current.Operation.Phase != channelonboarding.PhaseSucceeded || current.Connection == nil || !current.Connection.Linked || current.Readiness != nil && current.Readiness.Ready):
 			return current, nil
 		case pending && current.Pairing.Code != "" && current.Pairing.Code != lastQR:
-			var frame bytes.Buffer
-			if err := renderChannelOnboardingResult(&frame, errOut, opts.output, current); err != nil {
+			qrLines, err = writeChannelPairingQR(out, errOut, opts.output, current, qrLines)
+			if err != nil {
 				return channelOnboardingResult{}, err
 			}
-			if qrLines > 0 {
-				if _, err := fmt.Fprintf(out, "\x1b[%dF\x1b[J", qrLines); err != nil {
-					return channelOnboardingResult{}, err
-				}
-			}
-			if _, err := out.Write(frame.Bytes()); err != nil {
-				return channelOnboardingResult{}, err
-			}
-			qrLines = bytes.Count(frame.Bytes(), []byte{'\n'})
 			lastQR = current.Pairing.Code
 			awaitLogin = false
 		}
