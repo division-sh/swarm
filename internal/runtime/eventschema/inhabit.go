@@ -72,35 +72,8 @@ func inhabitSchemaValue(source, accepted map[string]any, identity, path string, 
 	if kind := asString(accepted["type"]); supplied != nil && kind != "" && kind != "object" {
 		return supplied, nil
 	}
-	if rawEnum, present := source["enum"]; present {
-		values, ok := asArray(rawEnum)
-		if !ok {
-			return nil, fmt.Errorf("%s.enum: must be an array", path)
-		}
-		if len(values) == 0 {
-			return nil, fmt.Errorf("%s.enum: must contain at least one value", path)
-		}
-		if err := budget.consumeSemanticValue(values[0], path+".enum[0]", depth); err != nil {
-			return nil, err
-		}
-		value, err := cloneSemanticJSON(values[0])
-		if err != nil {
-			return nil, fmt.Errorf("%s.enum[0]: %w", path, err)
-		}
-		if supplied != nil {
-			if object, ok := value.(map[string]any); ok {
-				applyObjectOverlay(object, supplied)
-			} else {
-				value = supplied
-			}
-		}
-		if err := ValidateValueAgainstSchema(source, value); err != nil {
-			if hasPattern(accepted) {
-				return nil, patternInhabitationError(path, accepted)
-			}
-			return nil, fmt.Errorf("%s.enum[0]: first authored value is not accepted: %w", path, err)
-		}
-		return value, nil
+	if _, present := source["enum"]; present {
+		return inhabitEnumValue(source, accepted, path, depth, budget, supplied)
 	}
 
 	typeName := strings.TrimSpace(asString(accepted["type"]))
@@ -145,6 +118,37 @@ func inhabitSchemaValue(source, accepted map[string]any, identity, path string, 
 	default:
 		return nil, fmt.Errorf("%s: unsupported schema type %q", path, typeName)
 	}
+}
+
+func inhabitEnumValue(source, accepted map[string]any, path string, depth int, budget *inhabitationBudget, supplied map[string]any) (any, error) {
+	values, ok := asArray(source["enum"])
+	if !ok {
+		return nil, fmt.Errorf("%s.enum: must be an array", path)
+	}
+	if len(values) == 0 {
+		return nil, fmt.Errorf("%s.enum: must contain at least one value", path)
+	}
+	if err := budget.consumeSemanticValue(values[0], path+".enum[0]", depth); err != nil {
+		return nil, err
+	}
+	value, err := cloneSemanticJSON(values[0])
+	if err != nil {
+		return nil, fmt.Errorf("%s.enum[0]: %w", path, err)
+	}
+	if supplied != nil {
+		if object, ok := value.(map[string]any); ok {
+			applyObjectOverlay(object, supplied)
+		} else {
+			value = supplied
+		}
+	}
+	if err := ValidateValueAgainstSchema(source, value); err != nil {
+		if hasPattern(accepted) {
+			return nil, patternInhabitationError(path, accepted)
+		}
+		return nil, fmt.Errorf("%s.enum[0]: first authored value is not accepted: %w", path, err)
+	}
+	return value, nil
 }
 
 func inhabitObject(source, accepted map[string]any, identity, path string, depth int, budget *inhabitationBudget, supplied map[string]any) (map[string]any, error) {
@@ -193,32 +197,11 @@ func inhabitObject(source, accepted map[string]any, identity, path string, depth
 			return err
 		}
 		state[name] = 1
-		target := strings.TrimSpace(asString(acceptedProperty["x-swarm-equalTo"]))
-		if target != "" {
-			if _, ok := acceptedProperties[target]; !ok {
-				return fmt.Errorf("%s: missing equality target %q", propertyPath, target)
-			}
-			if err := generate(target); err != nil {
-				return err
-			}
-			if err := budget.consumeSemanticValue(values[target], propertyPath, depth+1); err != nil {
-				return err
-			}
-			copied, err := cloneSemanticJSON(values[target])
-			if err != nil {
-				return fmt.Errorf("%s: copy equality target %q: %w", propertyPath, target, err)
-			}
-			if err := ValidateValueAgainstSchema(sourceProperty, copied); err != nil {
-				return fmt.Errorf("%s: equality target %q is incompatible: %w", propertyPath, target, err)
-			}
-			values[name] = copied
-		} else {
-			value, err := inhabitSchemaValue(sourceProperty, acceptedProperty, identity, propertyPath, depth+1, budget, nil)
-			if err != nil {
-				return err
-			}
-			values[name] = value
+		value, err := inhabitObjectProperty(sourceProperty, acceptedProperty, acceptedProperties, values, generate, identity, propertyPath, depth, budget)
+		if err != nil {
+			return err
 		}
+		values[name] = value
 		state[name] = 2
 		return nil
 	}
@@ -229,6 +212,38 @@ func inhabitObject(source, accepted map[string]any, identity, path string, depth
 		}
 	}
 	return values, nil
+}
+
+func inhabitObjectProperty(
+	source, accepted map[string]any,
+	properties map[string]map[string]any,
+	values map[string]any,
+	generate func(string) error,
+	identity, path string,
+	depth int,
+	budget *inhabitationBudget,
+) (any, error) {
+	target := strings.TrimSpace(asString(accepted["x-swarm-equalTo"]))
+	if target == "" {
+		return inhabitSchemaValue(source, accepted, identity, path, depth+1, budget, nil)
+	}
+	if _, ok := properties[target]; !ok {
+		return nil, fmt.Errorf("%s: missing equality target %q", path, target)
+	}
+	if err := generate(target); err != nil {
+		return nil, err
+	}
+	if err := budget.consumeSemanticValue(values[target], path, depth+1); err != nil {
+		return nil, err
+	}
+	copied, err := cloneSemanticJSON(values[target])
+	if err != nil {
+		return nil, fmt.Errorf("%s: copy equality target %q: %w", path, target, err)
+	}
+	if err := ValidateValueAgainstSchema(source, copied); err != nil {
+		return nil, fmt.Errorf("%s: equality target %q is incompatible: %w", path, target, err)
+	}
+	return copied, nil
 }
 
 func inhabitArray(source, accepted map[string]any, identity, path string, depth int, budget *inhabitationBudget) ([]any, error) {
