@@ -219,8 +219,13 @@ func TestRunForkHistoricalIdentityPublicExecutionBothStores(t *testing.T) {
 			if err != nil {
 				t.Fatal(err)
 			}
+			process, err := rt.ForkRuntime.ProcessCapability.Evidence()
+			if err != nil {
+				t.Fatal(err)
+			}
 			activation, err := direct.ActivateRunForkForSelectedContractExecution(ctx, runfork.RunForkSelectedContractExecutionActivateRequest{
 				ExecutionSource: loaded.Source, ForkRunID: staged.ForkRunID,
+				Process:               process.LeaseStamp(),
 				AllowedSourceEventIDs: eventIDs, FrontierAdmission: request.FrontierAdmission,
 				RouteTopology: request.RouteTopology, RecipientPlanning: request.RecipientPlanning,
 			})
