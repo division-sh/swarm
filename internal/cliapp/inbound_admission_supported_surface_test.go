@@ -62,15 +62,20 @@ func requireProviderBindingsBeforeHandlerMaterialization(t *testing.T, bundle *r
 	if err != nil {
 		t.Fatalf("runtime composition after module materialization: %v", err)
 	}
-	for _, event := range []string{"inbound.intercom", "inbound.telegram.text_message"} {
+	for _, event := range []string{"inbound.intercom.raw", "inbound.telegram.text_message"} {
 		pin, ok := source.FlowInputEventPin("matrix", event)
-		_, bound := pin.ProducerEventSchema()
-		if !ok || !bound {
+		producer, producerBound := pin.ProducerEventSchema()
+		receiver, receiverBound := pin.ReceiverEventSchema()
+		if !ok || !producerBound || !receiverBound || pin.Digest() == "" || producer.AcceptanceSchemaDigest() == "" || receiver.AcceptanceSchemaDigest() == "" {
 			t.Fatalf("%s missing exact imported binding", event)
 		}
 		for _, consumer := range []semanticview.Source{module.SemanticSource(), projection.Source()} {
 			got, ok := consumer.FlowInputEventPin("matrix", event)
-			if !ok || got != pin {
+			gotProducer, producerBound := got.ProducerEventSchema()
+			gotReceiver, receiverBound := got.ReceiverEventSchema()
+			if !ok || got.Digest() != pin.Digest() || got.Provenance() != pin.Provenance() ||
+				got.EventType() != pin.EventType() || got.FlowID() != pin.FlowID() || got.FlowPath() != pin.FlowPath() || got.QualifiedEventName() != pin.QualifiedEventName() ||
+				!producerBound || !receiverBound || gotProducer.AcceptanceSchemaDigest() != producer.AcceptanceSchemaDigest() || gotReceiver.AcceptanceSchemaDigest() != receiver.AcceptanceSchemaDigest() {
 				t.Fatalf("%s module/runtime consumer replaced the admitted binding", event)
 			}
 			if _, ok := consumer.FlowInputEventPin("unrelated", event); ok {
@@ -146,16 +151,13 @@ func TestVerifyConfiguredInventoryProjectsUnsignedWarningAndReadback(t *testing.
 	if code := runVerifyCommandWithOutput(context.Background(), emptyRepo, opts, &textOut, &textErr); code != 0 {
 		t.Fatalf("verify text exit=%d stdout=%s stderr=%s", code, textOut.String(), textErr.String())
 	}
-	if got := strings.Count(textErr.String(), "inbound_unsigned_webhook"); got != 1 {
-		t.Fatalf("verify text unsigned warning count=%d, want 1:\n%s", got, textErr.String())
+	if got := strings.Count(textErr.String(), "inbound_unsigned_webhook"); got != 3 {
+		t.Fatalf("verify text unsigned warning count=%d, want 3:\n%s", got, textErr.String())
 	}
-	for _, want := range []string{`provider "partner_open" accepts unsigned webhooks`, "add admission.acknowledge: unsigned_webhook"} {
+	for _, want := range []string{`provider "acme_public" accepts unsigned webhooks`, `provider "partner_open" accepts unsigned webhooks`, `provider "partner_ack" accepts unsigned webhooks`, "configure secret: in the trigger BODY"} {
 		if !strings.Contains(textErr.String(), want) {
 			t.Fatalf("verify text warning omitted %q:\n%s", want, textErr.String())
 		}
-	}
-	if strings.Contains(textErr.String(), `provider "partner_ack" accepts unsigned webhooks`) {
-		t.Fatalf("verify text did not suppress acknowledged warning:\n%s", textErr.String())
 	}
 
 	opts.output.asJSON = true
@@ -173,12 +175,12 @@ func TestVerifyConfiguredInventoryProjectsUnsignedWarningAndReadback(t *testing.
 			continue
 		}
 		unsignedWarnings++
-		if !strings.Contains(warning.Message, `provider "partner_open" accepts unsigned webhooks`) || warning.Remediation != "add admission.acknowledge: unsigned_webhook to confirm this intentional public endpoint" {
+		if !strings.Contains(warning.Message, "accepts unsigned webhooks") || warning.Remediation != "configure secret: in the trigger BODY to authenticate this endpoint" {
 			t.Fatalf("verify JSON unsigned warning=%#v", warning)
 		}
 	}
-	if unsignedWarnings != 1 {
-		t.Fatalf("verify JSON unsigned warnings=%d, want 1: %#v", unsignedWarnings, result.Warnings)
+	if unsignedWarnings != 3 {
+		t.Fatalf("verify JSON unsigned warnings=%d, want 3: %#v", unsignedWarnings, result.Warnings)
 	}
 
 	if result.LiveReadiness != "not_evaluated" {
@@ -201,11 +203,11 @@ func TestProviderTriggerCapabilitySubjectsPreserveInstalledEffectiveMultiplicity
 	if err != nil {
 		t.Fatal(err)
 	}
-	subjects, err := runtime.ProviderTriggerCapabilitySubjects(context.Background(), semanticview.Wrap(bundle), catalog, owner, nil)
+	subjects, err := runtime.ProviderTriggerCapabilitySubjects(context.Background(), semanticview.Wrap(bundle), catalog, owner)
 	if err != nil {
 		t.Fatal(err)
 	}
-	installed, effective, raw := 0, 0, 0
+	installed, effective := 0, 0
 	textProjection := ""
 	for _, subject := range subjects {
 		textProjection += packs.RenderSubject(subject, false) + "\n"
@@ -224,13 +226,13 @@ func TestProviderTriggerCapabilitySubjectsPreserveInstalledEffectiveMultiplicity
 			} else if subject.Status != packs.StatusNotReady || len(subject.Requirements) != 1 || subject.Requirements[0].Status != packs.RequirementStatusUnbound {
 				t.Fatalf("unbound authenticated effective subject = %#v, want NOT_READY/UNBOUND", subject)
 			}
-			if subject.TriggerAdmission != nil && subject.TriggerAdmission.PolicySource == "raw_declaration" {
-				raw++
+			if subject.TriggerAdmission.PolicySource != "verified_pack" {
+				t.Fatalf("captured BODY lost its admitted policy source: %#v", subject)
 			}
 		}
 	}
-	if installed != 9 || effective != 6 || raw != 4 {
-		t.Fatalf("subject multiplicity installed=%d effective=%d raw=%d", installed, effective, raw)
+	if installed != 9 || effective != 6 {
+		t.Fatalf("subject multiplicity installed=%d effective=%d", installed, effective)
 	}
 	body, err := json.Marshal(subjects)
 	if err != nil {

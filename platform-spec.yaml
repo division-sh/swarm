@@ -13537,6 +13537,9 @@ tool_model:
         A BODY with no required secret declares an open route. Verification reports a NOTE; there is no second acknowledgement
         grammar or automatic acknowledgement. Readback reports request_authentication=UNAUTHENTICATED. Signed BODYs still
         require their exact provider-qualified signing role, and missing, empty or invalid credentials cannot enable a route.
+        USER R2 (#2667/6490066542) deletes the acknowledgement control in every placement. Every unauthenticated webhook
+        reports the existing nonblocking inbound_unsigned_webhook finding, naming its route and BODY secret: remediation;
+        no consent setting suppresses that finding. Authenticated and session transports retain their existing rules.
       exact_request_authentication:
         TOKEN_EQUALITY: pack manifest token_equality
         TOKEN: explicit raw token equality
@@ -13553,13 +13556,13 @@ tool_model:
         Verification compiles every standing ingress binding into one immutable InboundAdmissionPlan containing the exact
         catalog generation, normalized provider, explicit transport (`webhook` or `session`), policy_source (`verified_pack` or `raw_declaration`), exact
         request_authentication, resolved pack id/version/manifest_hash/provenance when applicable, copied executable policy,
-        secret requirement, typed raw-versus-normalized output manifest, event-name policy, and unsigned acknowledgement fact. Runtime targets and effective capability
+        secret requirement, typed raw-versus-normalized output manifest, and event-name policy. Runtime targets and effective capability
         subjects carry this plan; a target without a valid plan is unavailable and the gateway fails before credential
         lookup, body interpretation, marker persistence, or publish.
       session_transport: >
         The verified trigger BODY selects session transport explicitly; provider names, absent signing secrets,
         SDK pointers, connected booleans and structural session-account records do not select or authorize it.
-        Session pack admission forbids signing_secret and unsigned_webhook acknowledgement, and raw admission remains
+        Session pack admission forbids signing_secret, and raw admission remains
         webhook-only. Both compiled-plan and direct BODY HTTP entry points reject session transport before interpretation.
         An admitted retained account and exact original onboarding/activation responsibility must authenticate session
         input before it reaches the same post-authentication BODY, normalization and sealed publication admission owners.
@@ -13584,7 +13587,7 @@ tool_model:
         effective subjects from the compiled owner. Source-free doctor consumes installed/base inventory only. Verify
         validates admitted source/pack facts and any distinct deployment admission, not operational subject readiness.
         Basic describe and routing topology remain declaration-only and show
-        authored admission kind/pin/auth/event/acknowledgement facts without claiming resolved pack identity, generation,
+        authored admission kind/pin/auth/event facts without claiming resolved pack identity, generation,
         request authentication, or readiness.
       inbound_validation_response: >
         A canonical schema violation while admitting the submitted inbound event, including required/collection/undeclared
@@ -15038,14 +15041,13 @@ flow_model:
       - duplicate providers within one alias
       - missing provider, required signing-secret reference, verified pack for pack-required admission, valid compiled admission plan, or compatible external event pin
       - raw admission selected by omission, fallback, provider-pack collision, partial policy, or heuristic request interpretation
-      - unsigned trigger without exact selected deployment `triggers[<provider-directory>/trigger.yaml].acknowledge: unsigned_webhook`, invalid acknowledgement token, or acknowledgement on authenticated/session admission
       - catalog-generation mismatch or incomplete all-context compilation during boot
       - unknown or unloaded alias/provider target
       - unbound signing-secret value at request time
       - missing, stale, foreign or unavailable native landing run or source during inbound publication
       readback: >
         Basic describe projects activation, alias, providers, signing-secret references, and authored admission kind, pack
-        pin, raw authentication/event policy, and acknowledgement from filesystem flow declarations only. It never claims a resolved
+        pin and raw authentication/event policy from filesystem flow declarations only. It never claims a resolved
         pack identity, catalog generation, effective request authentication, or readiness. Verify keeps structural and
         distinct deployment admission separate from operational readiness. Source-free doctor projects installed/base
         inventory only; source-bound local preflight and serve project installed and effective trigger subjects from the
@@ -15179,7 +15181,7 @@ flow_model:
           - inter_flow_connect delivery between authored producers and consumers through the compiled parent connect; child boundaries require declared pins, while endpoints local to the declaring parent require no extra public pin
           root_input_source_rule: >
             `root_input_sources` is the deterministic admission-provenance projection for declared standing ingress. Each
-            entry names the authored alias, provider, admission kind/pin/authentication/event/acknowledgement facts,
+            entry names the authored alias, provider, admission kind/pin/authentication/event facts,
             flow target and admitted authored source location. It does not claim compiled pack identity, catalog generation,
             or effective request authentication; create a producer endpoint or route edge; participate in delivery-scope
             counts; or authorize delivery.
@@ -24826,19 +24828,6 @@ configuration_source_authority:
             id/type set. Relative entries resolve from the selected document's directory. Missing, empty,
             partial, extra, duplicate, malformed, or incompatible replacement inventory fails before stores with no embedded
             fallback. Project-owned pack customization uses explicit `packs/manifest.yaml`, not config paths.
-        triggers:
-          keys:
-            '<captured-trigger-member>.acknowledge': supported_explicit_unsigned_webhook_consent
-          owner: providertriggers.CompileAdmission
-          shape: >
-            A typed map keyed by the exact captured selected-root-relative trigger BODY member, such as
-            `acme/trigger.yaml` or `child/acme/trigger.yaml`. Its only leaf is `acknowledge: unsigned_webhook`.
-            The key selects the consumed provider directory, not a provider basename, sibling, normalized alias,
-            inherited replacement, or reopened deployment filesystem path. Unselected or malformed keys refuse.
-            Trigger BODY and authored flow declarations carry no deployment acknowledgement. BODY schemas and
-            declared output metadata can compile without granting request admission. The one trigger admission
-            owner requires the unchanged exact token for unsigned webhook admission, rejects other tokens and
-            rejects any acknowledgement on authenticated webhook or session transport. No boolean, default or alias.
         provider_triggers:
           keys:
             packs.platform_dirs: split_unsupported_retired

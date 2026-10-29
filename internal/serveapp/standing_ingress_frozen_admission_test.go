@@ -140,22 +140,6 @@ func runServeIngressFrozenCredentialJourney(t *testing.T, backend, policy, point
 		opts.ConfigPath = writeChannelOnboardingPostgresRuntimeConfig(t, dsn)
 	}
 	enableChannelOnboardingRecoveryOnStartup(t, opts.ConfigPath)
-	if policy == "unsigned" {
-		body, err := os.ReadFile(opts.ConfigPath)
-		if err != nil {
-			t.Fatal(err)
-		}
-		var deployment map[string]any
-		if err := yaml.Unmarshal(body, &deployment); err != nil {
-			t.Fatal(err)
-		}
-		deployment["triggers"] = map[string]any{"telegram_raw/trigger.yaml": map[string]any{"acknowledge": "unsigned_webhook"}}
-		body, err = yaml.Marshal(deployment)
-		if err != nil {
-			t.Fatal(err)
-		}
-		writeStandingCandidateFile(t, opts.ConfigPath, string(body))
-	}
 	var process *serveRuntimeTestProcess
 	var endpoint string
 	start := func() {

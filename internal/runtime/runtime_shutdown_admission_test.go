@@ -12,7 +12,6 @@ import (
 	"testing"
 	"time"
 
-	"github.com/division-sh/swarm/internal/config"
 	"github.com/division-sh/swarm/internal/events"
 	"github.com/division-sh/swarm/internal/events/eventtest"
 	runtimebus "github.com/division-sh/swarm/internal/runtime/bus"
@@ -949,7 +948,6 @@ func TestRuntimeContextDeactivationCancelsStuckWebhookWithoutPublishing(t *testi
 	contextDef.Runtime = rt
 	contextDef.WorkOwner = rt.WorkOccurrence()
 	rt.Options = RuntimeOptions{WorkflowModule: semanticOnlyWorkflowRuntime{source: source}, ProviderTriggerCatalog: catalog, SourceArtifactFact: contextDef.SourceArtifactFact}
-	rt.Options.TriggerEntries = map[string]config.TriggerConfig{"chat/custom/trigger.yaml": {Acknowledge: "unsigned_webhook"}}
 	manager, err := newTestRuntimeContextManager(t, nil, contextDef)
 	if err != nil {
 		t.Fatalf("NewRuntimeContextManager: %v", err)

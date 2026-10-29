@@ -144,7 +144,6 @@ func TestTriggerReadbackReceiverTransportMatrix(t *testing.T) {
 			if err != nil {
 				t.Fatal(err)
 			}
-			compile.Declaration.Acknowledge = UnsignedWebhookAcknowledgement
 		}
 		plan, err := catalog.CompileAdmission(compile)
 		if err != nil {

@@ -48,12 +48,9 @@ const (
 	RequestAuthenticationSession       RequestAuthentication = "SESSION_ACCOUNT"
 )
 
-const UnsignedWebhookAcknowledgement = "unsigned_webhook"
-
 type AdmissionDeclaration struct {
 	Kind           string
 	PackID         string
-	Acknowledge    string
 	Authentication RawAuthenticationDeclaration
 	Event          string
 	DeliveryID     RawDeliveryIDDeclaration
@@ -98,7 +95,6 @@ type InboundAdmissionPlan struct {
 	raw                   *RawAdmissionPolicy
 	requiresSecret        bool
 	outputs               []OutputManifest
-	acknowledgedUnsigned  bool
 	registrationPolling   bool
 }
 
@@ -216,14 +212,9 @@ func (s *CatalogSnapshot) compilePackAdmission(alias, provider, signingSecret st
 	if err != nil {
 		return InboundAdmissionPlan{}, err
 	}
-	ack := declaration.Acknowledge
 	if auth == RequestAuthenticationSession {
-		if signingSecret != "" || ack != "" {
-			return InboundAdmissionPlan{}, fmt.Errorf("ingress alias %q provider %q session transport forbids signing_secret and webhook acknowledgement", alias, provider)
-		}
-	} else {
-		if err := validateAcknowledgement(alias, provider, auth, ack); err != nil {
-			return InboundAdmissionPlan{}, err
+		if signingSecret != "" {
+			return InboundAdmissionPlan{}, fmt.Errorf("ingress alias %q provider %q session transport forbids signing_secret", alias, provider)
 		}
 	}
 	requiresSecret := auth != RequestAuthenticationNone && auth != RequestAuthenticationSession
@@ -240,7 +231,6 @@ func (s *CatalogSnapshot) compilePackAdmission(alias, provider, signingSecret st
 		transport:             manifest.Transport(),
 		requestAuthentication: auth, packIdentity: &identity, manifest: &manifest,
 		requiresSecret: requiresSecret, outputs: manifest.OutputManifest(),
-		acknowledgedUnsigned: ack == UnsignedWebhookAcknowledgement,
 	}, nil
 }
 
@@ -255,10 +245,6 @@ func (s *CatalogSnapshot) compileRawAdmission(alias, provider, signingSecret str
 	}
 	policy, auth, err := compileRawPolicy(alias, provider, declaration)
 	if err != nil {
-		return InboundAdmissionPlan{}, err
-	}
-	ack := declaration.Acknowledge
-	if err := validateAcknowledgement(alias, provider, auth, ack); err != nil {
 		return InboundAdmissionPlan{}, err
 	}
 	requiresSecret := auth != RequestAuthenticationNone
@@ -276,7 +262,7 @@ func (s *CatalogSnapshot) compileRawAdmission(alias, provider, signingSecret str
 		generation: generation, provider: provider, policySource: PolicySourceRawDeclaration,
 		transport:             packs.ChannelTransportWebhook,
 		requestAuthentication: auth, raw: &policy, requiresSecret: requiresSecret,
-		outputs: []OutputManifest{{Kind: OutputKindRaw, EventName: EventNameManifest{Literal: policy.Event}}}, acknowledgedUnsigned: ack == UnsignedWebhookAcknowledgement,
+		outputs: []OutputManifest{{Kind: OutputKindRaw, EventName: EventNameManifest{Literal: policy.Event}}},
 	}, nil
 }
 
@@ -308,19 +294,6 @@ func (manifest Manifest) RequestAuthentication() (RequestAuthentication, error) 
 	default:
 		return "", fmt.Errorf("provider trigger manifest %q has unsupported request authentication %q", manifest.Provider(), manifest.value.definition.Signature.Type)
 	}
-}
-
-func validateAcknowledgement(alias, provider string, auth RequestAuthentication, acknowledge string) error {
-	if auth == RequestAuthenticationNone && acknowledge == "" {
-		return fmt.Errorf("trigger %q provider %q accepts unsigned webhooks; set acknowledge: %s under its exact deployment-config triggers entry", alias, provider, UnsignedWebhookAcknowledgement)
-	}
-	if acknowledge != "" && acknowledge != UnsignedWebhookAcknowledgement {
-		return fmt.Errorf("trigger %q provider %q deployment acknowledge must be %q when present; remove it or use the canonical token", alias, provider, UnsignedWebhookAcknowledgement)
-	}
-	if auth != RequestAuthenticationNone && acknowledge != "" {
-		return fmt.Errorf("trigger %q provider %q acknowledges unsigned_webhook, but the compiled admission uses %s; remove deployment acknowledge", alias, provider, auth)
-	}
-	return nil
 }
 
 func compileRawPolicy(alias, provider string, declaration AdmissionDeclaration) (RawAdmissionPolicy, RequestAuthentication, error) {
@@ -429,7 +402,6 @@ func (p InboundAdmissionPlan) PackIdentity() (PackIdentity, bool) {
 		Provenance:   source.Provenance(),
 	}, true
 }
-func (p InboundAdmissionPlan) AcknowledgedUnsigned() bool { return p.acknowledgedUnsigned }
 
 type EffectiveSubjectRequest struct {
 	BundleHash    string

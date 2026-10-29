@@ -333,7 +333,7 @@ func loadLocalPreflightCapabilitySource(ctx context.Context, req localPreflightR
 	}
 	source = projection.Source()
 	appendProviderConnectorCapabilitySubjects(ctx, report, source)
-	appendEffectiveProviderTriggerCapabilitySubjects(ctx, report, source, req.ProviderTriggerCatalog, req.ProviderCredentials, req.Config.Triggers)
+	appendEffectiveProviderTriggerCapabilitySubjects(ctx, report, source, req.ProviderTriggerCatalog, req.ProviderCredentials)
 	appendChannelCapabilitySubjects(report, req.ChannelPacks)
 	report.CredentialSources = append(report.CredentialSources, req.ChannelPacks.CredentialSources()...)
 	return source, sourceRoot, true

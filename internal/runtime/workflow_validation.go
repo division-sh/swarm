@@ -7,7 +7,6 @@ import (
 	"time"
 
 	"github.com/division-sh/swarm/internal/channelonboarding"
-	"github.com/division-sh/swarm/internal/config"
 	"github.com/division-sh/swarm/internal/packs"
 	"github.com/division-sh/swarm/internal/providerconnectors"
 	"github.com/division-sh/swarm/internal/providertriggers"
@@ -22,7 +21,6 @@ import (
 )
 
 type WorkflowContractValidationOptions struct {
-	TriggerEntries                 map[string]config.TriggerConfig
 	Purpose                        runtimebootverify.ValidationPurpose
 	ExecutionPosture               executionposture.Posture
 	PublicIngressAbsent            bool
@@ -209,7 +207,7 @@ func ValidateWorkflowContractSurface(ctx context.Context, source semanticview.So
 	result.finishAdmissionClause(phase)
 	phase = "standing_ingress_declaration"
 	result.startAdmissionClause(phase)
-	declarations, err := ResolveStandingTargetDeclarations(source, opts.ProviderTriggerCatalog, opts.TriggerEntries)
+	declarations, err := ResolveStandingTargetDeclarations(source, opts.ProviderTriggerCatalog)
 	if err != nil {
 		return result, fmt.Errorf("standing ingress validation failed: %w", err)
 	}
@@ -231,7 +229,7 @@ func ValidateWorkflowContractSurface(ctx context.Context, source semanticview.So
 			return result, fmt.Errorf("provider credential projection failed: %w", err)
 		}
 	}
-	result.CapabilitySubjects, err = ProviderTriggerCapabilitySubjects(ctx, source, opts.ProviderTriggerCatalog, providerCredentialOwner, opts.TriggerEntries)
+	result.CapabilitySubjects, err = ProviderTriggerCapabilitySubjects(ctx, source, opts.ProviderTriggerCatalog, providerCredentialOwner)
 	if err != nil {
 		return result, fmt.Errorf("provider trigger capability projection failed: %w", err)
 	}
@@ -283,16 +281,14 @@ func unsignedRawAdmissionFindings(declarations []StandingTargetDeclaration) []ru
 	var findings []runtimebootverify.Finding
 	for _, declaration := range declarations {
 		for _, binding := range declaration.Ingress {
-			if binding.AdmissionPlan.PolicySource() != providertriggers.PolicySourceRawDeclaration ||
-				binding.AdmissionPlan.RequestAuthentication() != providertriggers.RequestAuthenticationNone ||
-				binding.AdmissionPlan.AcknowledgedUnsigned() {
+			if binding.AdmissionPlan.RequestAuthentication() != providertriggers.RequestAuthenticationNone {
 				continue
 			}
 			findings = append(findings, runtimebootverify.Finding{
 				CheckID: "inbound_unsigned_webhook", Severity: runtimebootverify.SeveritySemanticDriftWarn,
 				Location:    declaration.SourcePath,
 				Message:     fmt.Sprintf("ingress alias %q provider %q accepts unsigned webhooks; anyone who learns /webhooks/%s/%s can POST events into this flow", declaration.Alias, binding.Provider, declaration.Alias, binding.Provider),
-				Remediation: "add admission.acknowledge: unsigned_webhook to confirm this intentional public endpoint",
+				Remediation: "configure secret: in the trigger BODY to authenticate this endpoint",
 			})
 		}
 	}

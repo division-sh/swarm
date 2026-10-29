@@ -5,7 +5,6 @@ import (
 	"errors"
 	"fmt"
 	"log/slog"
-	"maps"
 	"os"
 	"regexp"
 	"sort"
@@ -83,7 +82,6 @@ type AuthorActivityCatalogRegistrar interface {
 }
 
 type RuntimeOptions struct {
-	TriggerEntries                   map[string]config.TriggerConfig
 	ExecutionPosture                 executionposture.Posture
 	PublicIngressAbsent              bool
 	EnableDeclaredClockBinding       bool
@@ -815,10 +813,10 @@ func runtimeThrottleSuppressPrefixes(source semanticview.Source) []string {
 }
 
 func ensureWorkflowBootWiring(opts RuntimeOptions, profile llmselection.Profile, posture executionposture.Posture) (*providerconnectors.MockResponsePlan, runtimebootverify.SourceBootEffectReachability, error) {
-	return ensureWorkflowBootWiringWithModelAliases(opts, profile, posture, nil, opts.TriggerEntries)
+	return ensureWorkflowBootWiringWithModelAliases(opts, profile, posture, nil)
 }
 
-func ensureWorkflowBootWiringWithModelAliases(opts RuntimeOptions, profile llmselection.Profile, posture executionposture.Posture, modelAliases llmselection.ModelAliases, triggers map[string]config.TriggerConfig) (*providerconnectors.MockResponsePlan, runtimebootverify.SourceBootEffectReachability, error) {
+func ensureWorkflowBootWiringWithModelAliases(opts RuntimeOptions, profile llmselection.Profile, posture executionposture.Posture, modelAliases llmselection.ModelAliases) (*providerconnectors.MockResponsePlan, runtimebootverify.SourceBootEffectReachability, error) {
 	if opts.WorkflowModule == nil {
 		return nil, runtimebootverify.SourceBootEffectReachability{}, fmt.Errorf("workflow module is required: configure RuntimeOptions.WorkflowModule")
 	}
@@ -830,7 +828,6 @@ func ensureWorkflowBootWiringWithModelAliases(opts RuntimeOptions, profile llmse
 	}
 	validationOpts := DefaultWorkflowContractValidationOptions(opts.Credentials, posture)
 	validationOpts.PublicIngressAbsent = opts.PublicIngressAbsent
-	validationOpts.TriggerEntries = triggers
 	validationOpts.ManagedCredentials = opts.ManagedCredentials
 	validationOpts.ProviderCredentials = opts.ProviderCredentials
 	validationOpts.ProviderTriggerCatalog = opts.ProviderTriggerCatalog
@@ -954,8 +951,7 @@ func (deps RuntimeDeps) validated() (validatedRuntimeDeps, error) {
 	if err != nil {
 		return validatedRuntimeDeps{}, fmt.Errorf("compile scenario execution profile catalog: %w", err)
 	}
-	opts.TriggerEntries = maps.Clone(cfg.Triggers)
-	mockConnectorResponses, bootEffectReachability, err := ensureWorkflowBootWiringWithModelAliases(opts, profile, posture, cfg.LLM.Models, cfg.Triggers)
+	mockConnectorResponses, bootEffectReachability, err := ensureWorkflowBootWiringWithModelAliases(opts, profile, posture, cfg.LLM.Models)
 	if err != nil {
 		return validatedRuntimeDeps{}, fmt.Errorf("workflow contract validation failed: %w", err)
 	}

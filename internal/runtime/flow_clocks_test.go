@@ -49,7 +49,7 @@ func TestDeclaredClockBindingRequiresDeploymentSelection(t *testing.T) {
 
 func TestFiniteClockSelectionPreservesIngressBindings(t *testing.T) {
 	source := loadWorkflowValidationSourceAt(t, canonicalrouting.CopyClockDeployment(t, false))
-	declarations, err := ResolveStandingTargetDeclarations(source, nil, nil)
+	declarations, err := ResolveStandingTargetDeclarations(source, nil)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -77,7 +77,7 @@ func TestClockDeploymentDeclarationsAndExactPublication(t *testing.T) {
 	for _, nested := range []bool{false, true} {
 		t.Run(map[bool]string{false: "root", true: "nested"}[nested], func(t *testing.T) {
 			source := loadWorkflowValidationSourceAt(t, canonicalrouting.CopyClockDeployment(t, nested))
-			declarations, err := ResolveStandingTargetDeclarations(source, nil, nil)
+			declarations, err := ResolveStandingTargetDeclarations(source, nil)
 			if err != nil || len(declarations) != 1 || len(declarations[0].Clocks) != 1 || len(declarations[0].Ingress) != 0 || declarations[0].Alias != "" {
 				t.Fatalf("clock-only declaration=%+v err=%v", declarations, err)
 			}

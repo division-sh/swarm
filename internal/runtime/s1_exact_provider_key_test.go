@@ -3,7 +3,6 @@ package runtime
 import (
 	"testing"
 
-	"github.com/division-sh/swarm/internal/config"
 	"github.com/division-sh/swarm/internal/providertriggers"
 	"github.com/division-sh/swarm/internal/runtime/semanticview"
 	"github.com/division-sh/swarm/internal/runtime/triggergeneration"
@@ -20,8 +19,7 @@ func TestS1StandingAndSchemaOwnersKeepExactProviderKeys(t *testing.T) {
 			t.Errorf("schema owner changed %q to %q", key, owner.provider)
 		}
 	}
-	// Reach: deployment consent must select the exact captured child BODY,
-	// not another holder with the same provider key.
+	// Only the consumed child BODY declares ingress, not the visible sibling.
 	members := map[string][]byte{
 		"manifest.yaml":         []byte("version: 1.0.0\nplatform_version: '*'\n"),
 		"schema.yaml":           []byte("stages: []\n"),
@@ -35,33 +33,9 @@ func TestS1StandingAndSchemaOwnersKeepExactProviderKeys(t *testing.T) {
 		members[holder+"/acme/trigger.yaml"] = []byte("transport: webhook\nevent_name: {literal: raw}\ndelivery_id: {literal: receipt, required: true}\nevent_type: {literal: message, required: true}\n")
 	}
 	bundle, _, _ := loadS1EffectiveProviderScope(t, members)
-	for _, row := range []struct {
-		member, token string
-		valid         bool
-	}{
-		{"", "", false},
-		{"acme", "unsigned_webhook", false},
-		{"acme/trigger.yaml", "unsigned_webhook", false},
-		{"sibling/acme/trigger.yaml", "unsigned_webhook", false},
-		{"child/../child/acme/trigger.yaml", "unsigned_webhook", false},
-		{"child/acme/trigger.yaml", "true", false},
-		{"child/acme/trigger.yaml", " unsigned_webhook", false},
-		{"child/acme/trigger.yaml", "unsigned_webhook", true},
-	} {
-		entries := map[string]config.TriggerConfig{}
-		if row.member != "" {
-			entries[row.member] = config.TriggerConfig{Acknowledge: row.token}
-		}
-		declarations, err := ResolveStandingTargetDeclarations(semanticview.Wrap(bundle), nil, entries)
-		if !row.valid {
-			if err == nil || len(declarations) != 0 {
-				t.Fatalf("foreign/absent deployment consent admitted: %+v %v", row, err)
-			}
-			continue
-		}
-		if err != nil || len(declarations) != 1 || declarations[0].FlowPath != "child" || len(declarations[0].Ingress) != 1 || !declarations[0].Ingress[0].AdmissionPlan.AcknowledgedUnsigned() {
-			t.Fatalf("exact deployment consent lost selected child admission: %+v %v", declarations, err)
-		}
+	declarations, err := ResolveStandingTargetDeclarations(semanticview.Wrap(bundle), nil)
+	if err != nil || len(declarations) != 1 || declarations[0].FlowPath != "child" || len(declarations[0].Ingress) != 1 || declarations[0].Ingress[0].Provider != "acme" {
+		t.Fatalf("captured child declaration lost its exact provider: %+v %v", declarations, err)
 	}
 }
 

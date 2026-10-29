@@ -38,7 +38,7 @@ func sessionTriggerCatalog(t *testing.T) (*CatalogSnapshot, Manifest) {
 func TestSessionTriggerTransportDoesNotGrantWebhookAdmission(t *testing.T) {
 	catalog, manifest := sessionTriggerCatalog(t)
 	plan, err := catalog.CompileAdmission(CompileAdmissionRequest{Alias: "chat", Provider: "acme"})
-	if err != nil || !plan.Valid() || plan.Transport() != packs.ChannelTransportSession || plan.RequiresSecret() || plan.AcknowledgedUnsigned() {
+	if err != nil || !plan.Valid() || plan.Transport() != packs.ChannelTransportSession || plan.RequiresSecret() {
 		t.Fatalf("session compilation = %+v, %v", plan, err)
 	}
 	for _, req := range []Request{
@@ -58,7 +58,6 @@ func TestSessionTriggerTransportDoesNotGrantWebhookAdmission(t *testing.T) {
 	}
 	for _, req := range []CompileAdmissionRequest{
 		{Alias: "chat", Provider: "acme", SigningSecret: "dummy"},
-		{Alias: "chat", Provider: "acme", Declaration: AdmissionDeclaration{Acknowledge: UnsignedWebhookAcknowledgement}},
 		{Alias: "chat", Provider: "acme", Declaration: AdmissionDeclaration{Kind: "raw", Payload: "json"}},
 	} {
 		if plan, err := catalog.CompileAdmission(req); err == nil || plan.Valid() {
@@ -220,22 +219,12 @@ func TestTriggerWebhookTransportIsExplicitOrOmittedWithoutProviderGuessing(t *te
 			if err != nil {
 				t.Fatal(err)
 			}
-			if _, err := catalog.CompileAdmission(CompileAdmissionRequest{Alias: "chat", Provider: provider}); err == nil {
-				t.Fatal("omitted signature guessed a session instead of requiring explicit unsigned acknowledgement")
-			}
-			plan, err := catalog.CompileAdmission(CompileAdmissionRequest{Alias: "chat", Provider: provider,
-				Declaration: AdmissionDeclaration{Acknowledge: UnsignedWebhookAcknowledgement}})
+			plan, err := catalog.CompileAdmission(CompileAdmissionRequest{Alias: "chat", Provider: provider})
 			if err != nil || plan.Transport() != packs.ChannelTransportWebhook || plan.RequestAuthentication() != RequestAuthenticationNone {
 				t.Fatalf("explicit unsigned webhook = %+v, %v", plan, err)
 			}
 			if _, err := plan.AdmitRequest(Request{Payload: map[string]any{}}); err != nil {
 				t.Fatal(err)
-			}
-			for _, token := range []string{"true", "unsigned", " unsigned_webhook", "unsigned_webhook "} {
-				if plan, err := catalog.CompileAdmission(CompileAdmissionRequest{Alias: "chat", Provider: provider,
-					Declaration: AdmissionDeclaration{Acknowledge: token}}); err == nil || plan.Valid() {
-					t.Fatalf("noncanonical deployment consent %q admitted", token)
-				}
 			}
 		}
 	}

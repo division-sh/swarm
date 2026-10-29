@@ -116,7 +116,7 @@ func TestStandingLearnedAuthorityCredentialMatrix(t *testing.T) {
 				if !present {
 					t.Fatal("captured Telegram channel plan is unavailable")
 				}
-				declarations, err := ResolveStandingTargetDeclarations(source, catalog, nil)
+				declarations, err := ResolveStandingTargetDeclarations(source, catalog)
 				if err != nil || len(declarations) != 1 || declarations[0].FlowPath != "coordinator" {
 					t.Fatalf("captured coordinator declaration: %+v, %v", declarations, err)
 				}
@@ -417,7 +417,7 @@ func TestStandingRecoveryReadbackDoesNotObserveDeclarationFallback(t *testing.T)
 	contextDef.ProviderTriggerCatalog = catalog
 	applyRuntimeAdmissionCatalog(t, &contextDef, catalog)
 	rt := contextDef.Runtime
-	declarations, err := ResolveStandingTargetDeclarations(source, catalog, nil)
+	declarations, err := ResolveStandingTargetDeclarations(source, catalog)
 	if err != nil || len(declarations) != 1 || declarations[0].FlowPath != "coordinator" {
 		t.Fatalf("captured coordinator declaration: %+v, %v", declarations, err)
 	}
@@ -538,7 +538,7 @@ func TestExplicitStandingAdmissionCannotRefreshSiblingAuthority(t *testing.T) {
 			if !present {
 				t.Fatal("captured Telegram registration is unavailable")
 			}
-			declarations, err := ResolveStandingTargetDeclarations(source, catalog, nil)
+			declarations, err := ResolveStandingTargetDeclarations(source, catalog)
 			if err != nil || len(declarations) != 1 || declarations[0].FlowPath != "coordinator" {
 				t.Fatalf("captured coordinator declaration: %+v, %v", declarations, err)
 			}

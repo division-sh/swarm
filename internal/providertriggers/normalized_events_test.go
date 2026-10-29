@@ -63,7 +63,6 @@ func TestCompiledPackPlanOwnsNormalizedOutputAuthorization(t *testing.T) {
 	identity := entry.Identity
 	plan, err := catalog.CompileAdmission(CompileAdmissionRequest{
 		Alias: "chat", Provider: "telegram",
-		Declaration: AdmissionDeclaration{Acknowledge: UnsignedWebhookAcknowledgement},
 	})
 	if err != nil {
 		t.Fatalf("CompileAdmission: %v", err)
@@ -194,7 +193,6 @@ func TestAdmittedSemanticDigestRetainsRedactedConsumedValues(t *testing.T) {
 	}
 	plan, err := catalog.CompileAdmission(CompileAdmissionRequest{
 		Alias: "chat", Provider: "telegram",
-		Declaration: AdmissionDeclaration{Acknowledge: UnsignedWebhookAcknowledgement},
 	})
 	if err != nil {
 		t.Fatalf("CompileAdmission: %v", err)
@@ -304,7 +302,6 @@ func TestNormalizedEventPlanRejectsCompositeSchemaMismatchesWithPackProvenance(t
 			}
 			plan, err := catalog.CompileAdmission(CompileAdmissionRequest{
 				Alias: "chat", Provider: "telegram",
-				Declaration: AdmissionDeclaration{Acknowledge: UnsignedWebhookAcknowledgement},
 			})
 			if err != nil {
 				t.Fatalf("CompileAdmission: %v", err)
@@ -488,8 +485,7 @@ func TestNormalizedEventFiniteSemanticsAreDeeplyImmutable(t *testing.T) {
 		t.Fatalf("NewCatalogSnapshot: %v", err)
 	}
 	plan, err := catalog.CompileAdmission(CompileAdmissionRequest{
-		Alias: "chat", Provider: "telegram", Declaration: AdmissionDeclaration{Acknowledge: UnsignedWebhookAcknowledgement},
-	})
+		Alias: "chat", Provider: "telegram"})
 	if err != nil {
 		t.Fatalf("CompileAdmission: %v", err)
 	}
@@ -616,8 +612,7 @@ additionalProperties:
 		t.Fatalf("NewCatalogSnapshot: %v", err)
 	}
 	plan, err := catalog.CompileAdmission(CompileAdmissionRequest{
-		Alias: "chat", Provider: "telegram", Declaration: AdmissionDeclaration{Acknowledge: UnsignedWebhookAcknowledgement},
-	})
+		Alias: "chat", Provider: "telegram"})
 	if err != nil {
 		t.Fatalf("CompileAdmission: %v", err)
 	}

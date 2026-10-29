@@ -293,7 +293,7 @@ func compileTriggerTestPlan(t testing.TB, manifest Manifest) InboundAdmissionPla
 	if err != nil {
 		t.Fatal(err)
 	}
-	plan, err := catalog.CompileAdmission(CompileAdmissionRequest{Alias: "observed", Provider: manifest.Provider(), Declaration: AdmissionDeclaration{Acknowledge: UnsignedWebhookAcknowledgement}})
+	plan, err := catalog.CompileAdmission(CompileAdmissionRequest{Alias: "observed", Provider: manifest.Provider()})
 	if err != nil {
 		t.Fatal(err)
 	}

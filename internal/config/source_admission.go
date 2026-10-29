@@ -24,7 +24,7 @@ func DecodeSource(value yamlsource.Value, target *Config) error {
 	if err := value.Project(target); err != nil {
 		return err
 	}
-	return target.validateTriggerEntries()
+	return nil
 }
 
 // CLISourceConfig is the CLI-owned portion of the same swarm.yaml document.
@@ -63,11 +63,6 @@ func validateConfigValue(value yamlsource.Value, shape reflect.Type, owner strin
 	}
 	if err := validateConfigContainerShape(value, shape, owner); err != nil {
 		return err
-	}
-	if shape == reflect.TypeFor[TriggerConfig]() {
-		if err := validateTriggerConfigSource(value); err != nil {
-			return err
-		}
 	}
 	switch shape.Kind() {
 	case reflect.Struct:
@@ -134,11 +129,6 @@ func validateConfigMap(value yamlsource.Value, element reflect.Type, owner strin
 		return err
 	}
 	for _, field := range fields {
-		if owner == "config.triggers" {
-			if err := validateTriggerMember(field.Name); err != nil {
-				return err
-			}
-		}
 		if err := validateConfigValue(field.Value, element, owner+"."+field.Name); err != nil {
 			return err
 		}
