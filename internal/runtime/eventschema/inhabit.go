@@ -184,6 +184,9 @@ func inhabitObject(source, accepted map[string]any, identity, path string, depth
 				values[name] = value
 			}
 			state[name] = 2
+			if target := strings.TrimSpace(asString(acceptedProperty["x-swarm-equalTo"])); target != "" {
+				return generate(target)
+			}
 			return nil
 		}
 		if err := budget.consumeProperty(propertyPath, name); err != nil {
