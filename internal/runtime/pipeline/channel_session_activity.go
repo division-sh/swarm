@@ -41,7 +41,7 @@ func (pc *PipelineCoordinator) prepareSessionActivityIntents(ctx context.Context
 	return prepared, release, nil
 }
 
-func (pc *PipelineCoordinator) prepareSessionActivityIntent(ctx context.Context, intent engine.ActivityIntent) (engine.ActivityIntent, *channelactivation.Lease, error) {
+func (pc *PipelineCoordinator) prepareSessionActivityIntent(ctx context.Context, intent engine.ActivityIntent) (_ engine.ActivityIntent, _ *channelactivation.Lease, err error) {
 	tool, declared := pc.SemanticSource().ToolEntries()[intent.Tool]
 	nativeTarget, native := tool.InProcess()
 	requiresSession := declared && native && intent.ExecutionMode == executionmode.Live
@@ -68,10 +68,15 @@ func (pc *PipelineCoordinator) prepareSessionActivityIntent(ctx context.Context,
 	if err != nil {
 		return intent, nil, err
 	}
-	if pc.channelActivations == nil {
-		if _, err := pc.activityAccountRegistration(ctx, ref); err != nil {
-			return intent, nil, err
+	defer func() {
+		if err == nil || pc.registeredAccounts == nil {
+			return
 		}
+		if _, accountErr := pc.activityAccountRegistration(ctx, ref); accountErr != nil {
+			err = accountErr
+		}
+	}()
+	if pc.channelActivations == nil {
 		return intent, nil, fmt.Errorf("authored session activity requires its original activation owner")
 	}
 	fact, pinned := correlation.SourceArtifactFactFromContext(ctx)
@@ -84,25 +89,13 @@ func (pc *PipelineCoordinator) prepareSessionActivityIntent(ctx context.Context,
 	}
 	lease, err := pc.channelActivations.AcquirePresentationContext(ctx)
 	if err != nil {
-		if _, accountErr := pc.activityAccountRegistration(ctx, ref); accountErr != nil {
-			return intent, nil, accountErr
-		}
 		return intent, nil, err
 	}
 	intent.BundleHash, intent.WorkflowVersion = fact.BundleHash(), version
 	projection, err := pc.compileAuthoredSessionActivity(ctx, intent, lease)
 	if err != nil {
 		lease.Release()
-		if _, accountErr := pc.activityAccountRegistration(ctx, ref); accountErr != nil {
-			return intent, nil, accountErr
-		}
 		return intent, nil, err
-	}
-	if projection.Activation().Source == channelonboarding.ActivationSourceRegistered {
-		if _, err := pc.activityAccountRegistration(ctx, ref); err != nil {
-			lease.Release()
-			return intent, nil, err
-		}
 	}
 	private := projection.PrivateTarget()
 	if intent.NativeSessionTarget != "" && (intent.NativeSessionTarget != private.ToolID() || !intent.PlanGeneration.Equal(private.Generation()) || !intent.ChannelActivationGeneration.Equal(lease.Generation())) {

@@ -95,80 +95,14 @@ func resolveServeRegistrationPairs(ctx context.Context, snapshot serveChannelAct
 		}
 	}
 	for _, activation := range activations {
-		binding := activation.Plan
-		if binding.Transport() == packs.ChannelTransportSession {
-			continue
-		}
-		rawSelector := binding.RegistrationTarget()
-		if rawSelector == "" {
-			continue
-		}
-		if _, err := runtimepublicingress.ParseTargetSelector(rawSelector); err != nil {
-			return fail(fmt.Errorf("channels.bindings.%s.register: %w", binding.BindingID(), err))
-		}
-		registration, ok := binding.Registration()
-		if !ok {
-			return fail(fmt.Errorf("channels.bindings.%s.register has no compiled channel registration owner", binding.BindingID()))
-		}
-		contextDef, err := exactActivationContext(contexts, activation.Coordinate)
-		if err != nil {
-			return fail(fmt.Errorf("channels.bindings.%s.register: %w", binding.BindingID(), err))
-		}
-		target, targetErr := exactContextTarget(contextDef, rawSelector)
-		if targetErr == nil && !target.AdmissionPlan.RequiresSecret() {
-			return fail(fmt.Errorf("channels.bindings.%s.register target %q requires a signing credential role but the exact ingress target is %s", binding.BindingID(), rawSelector, target.AdmissionPlan.RequestAuthentication()))
-		}
-		if activation.Source == channelonboarding.ActivationSourceDeclared {
-			enabled, err := serveDeclaredRegistrationEnabled(ctx, manager, contextDef, binding)
-			if err != nil {
-				return fail(err)
-			}
-			if !enabled {
-				continue
-			}
-		}
-		if targetErr != nil {
-			return fail(fmt.Errorf("channels.bindings.%s.register: %w", binding.BindingID(), targetErr))
-		}
-		if activation.Source == channelonboarding.ActivationSourceRegistered {
-			holders, err := manager.AccountHolders(ctx, channelonboarding.AccountReference{Provider: registration.Provider(), Account: activation.OperatorAccount})
-			if err != nil {
-				return fail(err)
-			}
-			if len(holders) != 1 || holders[0].BundleHash != contextDef.BundleHash() || holders[0].Flow != target.FlowPath || holders[0].RunID != target.RunID {
-				continue
-			}
-		}
-		planGeneration, err := binding.PlanGeneration()
+		generation := activationGenerations[activation.Coordinate.BundleHash+"\x00"+activation.Coordinate.RuntimeInstanceID+"\x00"+fmt.Sprint(activation.Coordinate.ContextPublicationGeneration)]
+		pair, present, err := resolveServeActivationRegistrationPair(ctx, manager, contexts, activation, generation)
 		if err != nil {
 			return fail(err)
 		}
-		if strings.TrimSpace(target.SigningSecret) == "" {
-			return fail(fmt.Errorf("channels.bindings.%s.register target %q has no signing credential binding", binding.BindingID(), rawSelector))
+		if present {
+			pairs = append(pairs, pair)
 		}
-		credentialKeys := binding.CredentialStoreKeys()
-		signingCredentialKey := strings.TrimSpace(credentialKeys[registration.SigningCredential()])
-		if signingCredentialKey == "" {
-			return fail(fmt.Errorf("channels.bindings.%s.register signing credential role %q has no admitted store key", binding.BindingID(), registration.SigningCredential()))
-		}
-		pairs = append(pairs, runtimepublicingress.RegistrationPair{
-			BindingID: binding.BindingID(), PlanGeneration: planGeneration,
-			ActivationSource:            activation.Source,
-			OperatorAccount:             activation.OperatorAccount,
-			OnboardingOperationID:       activation.OnboardingOperationID,
-			OnboardingRevision:          activation.OnboardingRevision,
-			ActivationRevision:          activation.ActivationRevision,
-			OnboardingCoordinate:        activation.Coordinate,
-			ChannelActivationGeneration: activationGenerations[activation.Coordinate.BundleHash+"\x00"+activation.Coordinate.RuntimeInstanceID+"\x00"+fmt.Sprint(activation.Coordinate.ContextPublicationGeneration)],
-			Registration:                registration,
-			CredentialKeys:              credentialKeys,
-			CredentialAdmissions:        append([]channelonboarding.CredentialAdmission(nil), activation.CredentialAdmissions...),
-			Target: runtimepublicingress.RegistrationTarget{
-				Selector: rawSelector, BundleHash: target.BundleHash,
-				FlowPath: target.FlowPath, Alias: target.Alias, Provider: target.Provider,
-				AdmissionPlanGeneration: target.AdmissionPlan.Generation(), SigningCredentialKey: signingCredentialKey,
-			},
-		})
 	}
 	for _, intent := range snapshot.Prebinding {
 		pair, err := resolveServePrebindingRegistrationPair(intent)
@@ -185,6 +119,72 @@ func resolveServeRegistrationPairs(ctx context.Context, snapshot serveChannelAct
 	})
 	selection.Pairs = pairs
 	return selection, nil
+}
+
+func resolveServeActivationRegistrationPair(ctx context.Context, manager *runtime.RuntimeContextManager, contexts []runtime.BundleContext, activation channelonboarding.CompiledActivation, generation channelonboarding.ChannelActivationGeneration) (runtimepublicingress.RegistrationPair, bool, error) {
+	var absent runtimepublicingress.RegistrationPair
+	binding := activation.Plan
+	rawSelector := binding.RegistrationTarget()
+	if binding.Transport() == packs.ChannelTransportSession || rawSelector == "" {
+		return absent, false, nil
+	}
+	if _, err := runtimepublicingress.ParseTargetSelector(rawSelector); err != nil {
+		return absent, false, fmt.Errorf("channels.bindings.%s.register: %w", binding.BindingID(), err)
+	}
+	registration, ok := binding.Registration()
+	if !ok {
+		return absent, false, fmt.Errorf("channels.bindings.%s.register has no compiled channel registration owner", binding.BindingID())
+	}
+	contextDef, err := exactActivationContext(contexts, activation.Coordinate)
+	if err != nil {
+		return absent, false, fmt.Errorf("channels.bindings.%s.register: %w", binding.BindingID(), err)
+	}
+	target, targetErr := exactContextTarget(contextDef, rawSelector)
+	if targetErr == nil && !target.AdmissionPlan.RequiresSecret() {
+		return absent, false, fmt.Errorf("channels.bindings.%s.register target %q requires a signing credential role but the exact ingress target is %s", binding.BindingID(), rawSelector, target.AdmissionPlan.RequestAuthentication())
+	}
+	if activation.Source == channelonboarding.ActivationSourceDeclared {
+		enabled, err := serveDeclaredRegistrationEnabled(ctx, manager, contextDef, binding)
+		if err != nil || !enabled {
+			return absent, false, err
+		}
+	}
+	if targetErr != nil {
+		return absent, false, fmt.Errorf("channels.bindings.%s.register: %w", binding.BindingID(), targetErr)
+	}
+	if activation.Source == channelonboarding.ActivationSourceRegistered {
+		holders, err := manager.AccountHolders(ctx, channelonboarding.AccountReference{Provider: registration.Provider(), Account: activation.OperatorAccount})
+		if err != nil {
+			return absent, false, err
+		}
+		if len(holders) != 1 || holders[0].BundleHash != contextDef.BundleHash() || holders[0].Flow != target.FlowPath || holders[0].RunID != target.RunID {
+			return absent, false, nil
+		}
+	}
+	planGeneration, err := binding.PlanGeneration()
+	if err != nil {
+		return absent, false, err
+	}
+	if strings.TrimSpace(target.SigningSecret) == "" {
+		return absent, false, fmt.Errorf("channels.bindings.%s.register target %q has no signing credential binding", binding.BindingID(), rawSelector)
+	}
+	credentialKeys := binding.CredentialStoreKeys()
+	signingCredentialKey := strings.TrimSpace(credentialKeys[registration.SigningCredential()])
+	if signingCredentialKey == "" {
+		return absent, false, fmt.Errorf("channels.bindings.%s.register signing credential role %q has no admitted store key", binding.BindingID(), registration.SigningCredential())
+	}
+	return runtimepublicingress.RegistrationPair{
+		BindingID: binding.BindingID(), PlanGeneration: planGeneration, ActivationSource: activation.Source,
+		OperatorAccount: activation.OperatorAccount, OnboardingOperationID: activation.OnboardingOperationID,
+		OnboardingRevision: activation.OnboardingRevision, ActivationRevision: activation.ActivationRevision,
+		OnboardingCoordinate: activation.Coordinate, ChannelActivationGeneration: generation,
+		Registration: registration, CredentialKeys: credentialKeys,
+		CredentialAdmissions: append([]channelonboarding.CredentialAdmission(nil), activation.CredentialAdmissions...),
+		Target: runtimepublicingress.RegistrationTarget{
+			Selector: rawSelector, BundleHash: target.BundleHash, FlowPath: target.FlowPath, Alias: target.Alias, Provider: target.Provider,
+			AdmissionPlanGeneration: target.AdmissionPlan.Generation(), SigningCredentialKey: signingCredentialKey,
+		},
+	}, true, nil
 }
 
 func resolveServePrebindingRegistrationPair(intent servePrebindingActivation) (runtimepublicingress.RegistrationPair, error) {
