@@ -86,7 +86,11 @@ func TestWhatsAppRuntimeClaimSettlesBeforeAcknowledgementBothStores(t *testing.T
 func runtimeClaimEventFixture(t *testing.T, f *activeInputFixture, c *RuntimeConnection, id, text string, at time.Time) capturedEvent {
 	t.Helper()
 	person := types.NewJID("100000000003", types.DefaultUserServer).String()
-	body, err := json.Marshal(incomingPayload{Kind: "message", Conversation: person, ConversationScope: "direct",
+	account, err := types.ParseJID(f.scope.Session.AccountRef)
+	if err != nil {
+		t.Fatal(err)
+	}
+	body, err := json.Marshal(incomingPayload{Kind: "message", OperatorAccount: "+" + account.User, Conversation: person, ConversationScope: "direct",
 		Sender: person, MessageReference: id, Text: &text, ProviderTimestampMS: at.Unix() * 1000})
 	if err != nil {
 		t.Fatal(err)

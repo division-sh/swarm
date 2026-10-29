@@ -64,6 +64,7 @@ func sessionDiscoveryCapturedProvider(t *testing.T, flow string) (*providertrigg
 	}
 	members[filepath.ToSlash(filepath.Join(flow, "manifest.yaml"))] = members["manifest.yaml"]
 	members[filepath.ToSlash(filepath.Join(flow, "schema.yaml"))] = []byte("stages: []\npins: {inputs: [inbound.whatsapp.raw, inbound.whatsapp.message]}\n")
+	members[filepath.ToSlash(filepath.Join(flow, "policy.yaml"))] = []byte("operator_account: '+15551234567'\n")
 	for name, body := range packfixture.WhatsAppSessionProviderMembers(t, entry.Manifest.SourceBytes(), []string{"raw", "message"}) {
 		members[filepath.ToSlash(filepath.Join(flow, "whatsapp", name))] = body
 	}

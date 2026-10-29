@@ -234,6 +234,9 @@ func TestChannelDeliveryRealAnchorProducersPublicJourney(t *testing.T) {
 					if len(events.Events) != 1 || events.NextCursor != "" || events.Events[0].RunID != seed.RunID || events.Events[0].EventName != "mailbox.card_decided" {
 						t.Fatalf("double tap changed exact completion cardinality: %+v", events)
 					}
+					requireServedOKJSONRPC(t, h.rpcEndpoint(), "run.stop", map[string]any{
+						"run_id": seed.RunID, "idempotency_key": "channel-anchor-stop-" + string(kind),
+					})
 				})
 			}
 		})
@@ -568,6 +571,7 @@ func waitChannelAnchorPublicApproval(t *testing.T, h *channelOnboardingE2EHarnes
 
 func waitChannelAnchorRejectedIntent(t *testing.T, reader render.Observer, interfaceKey, providerEventID string) {
 	t.Helper()
+	providerEventID = channelFixtureProviderEventID(t, providerEventID)
 	deadline := time.Now().Add(15 * time.Second)
 	for {
 		result, found, err := reader.ObserveChannelIntent(context.Background(), render.IntentObservationQuery{

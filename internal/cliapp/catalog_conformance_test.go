@@ -268,6 +268,13 @@ func materializeRequiredArchetypeBundles(t testing.TB) []requiredConformanceBund
 		if err := scaffoldArchetype(mustInvocationRootForTest(t.TempDir()), io.Discard, id, destination); err != nil {
 			t.Fatalf("materialize required archetype %s: %v", id, err)
 		}
+		if id == "whatsapp-receptionist" {
+			// Complete the scaffold's documented account selection with the
+			// same test account used by the receptionist's native SDK peer.
+			if err := os.WriteFile(filepath.Join(destination, "policy.yaml"), []byte("operator_account: '+15551234567'\n"), 0o600); err != nil {
+				t.Fatal(err)
+			}
+		}
 		bundles = append(bundles, requiredConformanceBundle{
 			ID:   "archetypes/" + id,
 			Root: filepath.Clean(filepath.Join(destination, admittedArchetypes[id].WorkingDir)),

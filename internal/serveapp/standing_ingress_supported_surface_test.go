@@ -1078,6 +1078,7 @@ func standingSQLiteDiagnostics(path string) string {
 func writeStandingTelegramServeFixture(t testing.TB, telegramBaseURL string) string {
 	t.Helper()
 	root := canonicalrouting.CopyExample(t, canonicalrouting.TelegramAgent)
+	writeStandingCandidateFile(t, filepath.Join(root, "policy.yaml"), "operator_account: '420079'\n")
 	selected := filepath.Join(filepath.Dir(root), "chat")
 	if err := os.Rename(root, selected); err != nil {
 		t.Fatal(err)

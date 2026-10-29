@@ -9,8 +9,20 @@ import (
 	"time"
 
 	"github.com/division-sh/swarm/internal/runtime/decisioncard"
+	runtimeinbound "github.com/division-sh/swarm/internal/runtime/inboundpublication"
 	"github.com/division-sh/swarm/internal/servedparity"
 )
+
+// The provider double and source policy own bot 420079. Preserve the exact
+// account/update tuple; a customer or another registered bot cannot supply it.
+func channelFixtureProviderEventID(t testing.TB, update string) string {
+	t.Helper()
+	id, err := runtimeinbound.SemanticFingerprint([]string{"telegram", "420079", update})
+	if err != nil {
+		t.Fatal(err)
+	}
+	return id
+}
 
 func TestChannelDeliveryUncertainCopyAuthorityPublicJourney(t *testing.T) {
 	for _, backend := range servedparity.RequiredBackends {
@@ -130,8 +142,8 @@ func assertUncertainCopyRebindFence(t *testing.T, h *channelOnboardingE2EHarness
 	deadline := time.Now().Add(15 * time.Second)
 	for {
 		var rejected int
-		if err := db.QueryRow(`SELECT COUNT(*) FROM operator_channel_text_intents WHERE provider_event_id='901110'
-			AND state='settled' AND disposition='entry_rejected'`).Scan(&rejected); err != nil {
+		if err := db.QueryRow(`SELECT COUNT(*) FROM operator_channel_text_intents WHERE provider_event_id=$1
+			AND state='settled' AND disposition='entry_rejected'`, channelFixtureProviderEventID(t, "901110")).Scan(&rejected); err != nil {
 			t.Fatal(err)
 		}
 		if rejected == 1 {
@@ -197,7 +209,7 @@ func postUncertainCopyStaleControls(t *testing.T, h *channelOnboardingE2EHarness
 	for {
 		var settled int
 		if err := db.QueryRow(`SELECT COUNT(*) FROM operator_channel_action_intents WHERE state='settled'
-			AND disposition IN ('stale','rejected') AND provider_event_id IN ($1,$2)`, fmt.Sprint(update), fmt.Sprint(update+1)).Scan(&settled); err != nil {
+			AND disposition IN ('stale','rejected') AND provider_event_id IN ($1,$2)`, channelFixtureProviderEventID(t, fmt.Sprint(update)), channelFixtureProviderEventID(t, fmt.Sprint(update+1))).Scan(&settled); err != nil {
 			t.Fatal(err)
 		}
 		if settled == 2 {
@@ -218,7 +230,7 @@ func postUncertainCopyStaleControls(t *testing.T, h *channelOnboardingE2EHarness
 			for {
 				var rejected int
 				if err := db.QueryRow(`SELECT COUNT(*) FROM operator_channel_action_intents WHERE state='settled'
-					AND disposition IN ('stale','rejected') AND provider_event_id=$1`, fmt.Sprint(update+3)).Scan(&rejected); err != nil {
+					AND disposition IN ('stale','rejected') AND provider_event_id=$1`, channelFixtureProviderEventID(t, fmt.Sprint(update+3))).Scan(&rejected); err != nil {
 					t.Fatal(err)
 				}
 				if rejected == 1 {
@@ -239,7 +251,7 @@ func postUncertainCopyStaleControls(t *testing.T, h *channelOnboardingE2EHarness
 	for {
 		var settled int
 		if err := db.QueryRow(`SELECT COUNT(*) FROM operator_channel_text_intents WHERE state='settled'
-			AND disposition='teaching' AND provider_event_id=$1`, fmt.Sprint(update+2)).Scan(&settled); err != nil {
+			AND disposition='teaching' AND provider_event_id=$1`, channelFixtureProviderEventID(t, fmt.Sprint(update+2))).Scan(&settled); err != nil {
 			t.Fatal(err)
 		}
 		if settled > 0 {
@@ -247,7 +259,7 @@ func postUncertainCopyStaleControls(t *testing.T, h *channelOnboardingE2EHarness
 		}
 		if time.Now().After(deadline) {
 			var state, disposition, fact string
-			err := db.QueryRow(`SELECT state,COALESCE(disposition,''),CAST(fact AS TEXT) FROM operator_channel_text_intents WHERE provider_event_id=$1`, fmt.Sprint(update+2)).Scan(&state, &disposition, &fact)
+			err := db.QueryRow(`SELECT state,COALESCE(disposition,''),CAST(fact AS TEXT) FROM operator_channel_text_intents WHERE provider_event_id=$1`, channelFixtureProviderEventID(t, fmt.Sprint(update+2))).Scan(&state, &disposition, &fact)
 			t.Fatalf("stale quoted input lacks a durable non-mutation disposition: %s/%s %s %v", state, disposition, fact, err)
 		}
 		time.Sleep(20 * time.Millisecond)

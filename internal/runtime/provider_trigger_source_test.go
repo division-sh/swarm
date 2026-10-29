@@ -29,6 +29,7 @@ func TestSourceWithProviderTriggerEventsImportsEffectivePackSchemasWithoutAuthor
 		"schema.yaml":               []byte("stages: []\n"),
 		"coordinator/manifest.yaml": []byte("version: 1.0.0\nplatform_version: '*'\n"),
 		"coordinator/schema.yaml":   []byte("stages: []\npins: {inputs: [inbound.telegram.raw]}\n"),
+		"coordinator/policy.yaml":   []byte("operator_account: '420079'\n"),
 	}
 	for _, entry := range packfixture.EmbeddedInventory(t).Entries() {
 		if entry.ID() != "telegram" {
@@ -63,7 +64,7 @@ func TestSourceWithProviderTriggerEventsImportsEffectivePackSchemasWithoutAuthor
 		t.Fatal("pack event was misclassified as authored")
 	}
 	resolved, name, ok := wrapped.ResolveFlowEventCatalogEntry("coordinator", "inbound.telegram.text_message")
-	wantFields := []string{"command_invocation", "conversation_reference", "conversation_scope", "external_account", "provider_message_reference", "reply_to_message_reference", "text"}
+	wantFields := []string{"command_invocation", "conversation_reference", "conversation_scope", "external_account", "operator_account", "provider_message_reference", "reply_to_message_reference", "text"}
 	if !ok || name != "inbound.telegram.text_message" || len(resolved.Payload.Properties) != len(wantFields) {
 		t.Fatalf("flow catalog resolution = (%#v, %q, %v)", resolved, name, ok)
 	}
