@@ -1,6 +1,7 @@
 package serveapp
 
 import (
+	"bytes"
 	"context"
 	"database/sql"
 	"encoding/json"
@@ -24,6 +25,30 @@ import (
 )
 
 var channelOnboardingExactChoicePattern = regexp.MustCompile(`source=.+? --interface (\S+) --target (\S+)`)
+
+func registerChannelFixtureAccount(t *testing.T, config, token string) {
+	t.Helper()
+	input, err := os.CreateTemp(t.TempDir(), "account-token")
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer input.Close()
+	if _, err := input.WriteString(token + "\n"); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := input.Seek(0, 0); err != nil {
+		t.Fatal(err)
+	}
+	prior := os.Stdin
+	os.Stdin = input
+	defer func() { os.Stdin = prior }()
+	var out, errOut bytes.Buffer
+	code := cliapp.Execute(t.Context(), []string{"--config", config, "channel", "connect", "telegram", "--yes"},
+		&out, &errOut, nil, nil, OpenChannelRegistration)
+	if code != 0 || !strings.Contains(out.String(), "Registered telegram account 420079.") {
+		t.Fatalf("fixture account registration exit=%d err=%s", code, errOut.String())
+	}
+}
 
 type channelOnboardingExactChoice struct {
 	source       string

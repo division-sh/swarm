@@ -47,6 +47,7 @@ func TestChannelOneBotManyConversationsPublicJourney(t *testing.T) {
 				t.Fatal(err)
 			}
 			bundleHash := servedEventPublishFixtureBundleHash(t, h.opts.SourceRoot)
+			registerChannelFixtureAccount(t, h.opts.ConfigPath, "bot-token")
 			h.start(t)
 			defer h.stop(t)
 			connected := runChannelOnboardingCLIJourney(t, h.opts.ConfigPath, h.endpoint, h.provider,
@@ -197,6 +198,7 @@ func receptionistPendingMailbox(t *testing.T, h *channelOnboardingE2EHarness) []
 
 func waitReceptionistActionRejection(t *testing.T, h *channelOnboardingE2EHarness, providerID string) {
 	t.Helper()
+	providerID = channelFixtureProviderEventID(t, providerID)
 	driver, placeholder := "sqlite", "?"
 	if h.backend == servedparity.BackendExplicitPostgres {
 		driver, placeholder = "postgres", "$1"
