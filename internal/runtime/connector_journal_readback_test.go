@@ -45,9 +45,12 @@ func TestRuntimeConnectorJournalWitnessesPreserveToolSourceAndEarliestAttemptBot
 				selected, _ = storetest.StartPostgresRuntimeStoreWithReopen(t)
 			}
 			ctx := testAuthorActivityContext(context.Background())
+			ctx = originalRuntimeFixtureContext(t, ctx, selected)
 			rooted, _ := sourceartifactfixture.Rooted(t, "fixture", sourceartifactfixture.Artifact())
 			ctx = correlation.WithRootAdmission(ctx, rooted.Admission())
-			sourceartifactfixture.RequireArtifact(t, ctx, selected.(sourceartifactfixture.Writer), rooted.Artifact())
+			if _, err := selected.(sourceartifactfixture.RootedWriter).EnsureRootedSource(ctx, rooted); err != nil {
+				t.Fatal(err)
+			}
 			coordinate, err := agenttopology.NewSourceCoordinate(rooted.Admission())
 			if err != nil {
 				t.Fatal(err)

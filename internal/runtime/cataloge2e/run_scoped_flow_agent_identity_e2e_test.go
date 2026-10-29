@@ -143,6 +143,10 @@ func TestRunScopedTemplateFlowAndAgentExecutionSupportedSurfaceBothStores(t *tes
 			if err != nil {
 				t.Fatalf("stop settled run A = %v", err)
 			}
+			snapshotA, err = selected.LoadRunLifecycleSnapshot(catalogRunContext(h, runA), runA)
+			if err != nil || snapshotA.Status != "cancelled" || snapshotA.EndedAt == nil {
+				t.Fatalf("stopped run A lifecycle = %#v err=%v", snapshotA, err)
+			}
 			select {
 			case err := <-publishB:
 				t.Fatalf("run B stopped waiting while run A retired: %v", err)
@@ -164,7 +168,7 @@ func TestRunScopedTemplateFlowAndAgentExecutionSupportedSurfaceBothStores(t *tes
 			assertCatalogRunScopedAgent(t, h, selected, runB, flowPath, "delivered")
 			afterA, err := selected.LoadRunLifecycleSnapshot(catalogRunContext(h, runA), runA)
 			if err != nil || !reflect.DeepEqual(snapshotA, afterA) {
-				t.Fatalf("run B or refused stop changed completed run A: before=%#v after=%#v err=%v", snapshotA, afterA, err)
+				t.Fatalf("run B changed stopped run A: before=%#v after=%#v err=%v", snapshotA, afterA, err)
 			}
 			assertCatalogRunScopedFlowOwner(t, h, selected, runA, flowPath, "complete")
 			assertCatalogRunScopedAgent(t, h, selected, runA, flowPath, "delivered")

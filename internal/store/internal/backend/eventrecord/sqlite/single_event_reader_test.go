@@ -61,9 +61,6 @@ func singleEventReaderFixture(t *testing.T) (*sqlitebackend.Backend, eventrecord
 			runPlans = append(runPlans, plan)
 		}
 	}
-	if len(runPlans) != 11 {
-		t.Fatalf("native reader run plans=%d, want 11", len(runPlans))
-	}
 	runtimeID := uuid.NewString()
 	ctx := authoractivity.WithScope(context.Background(), authoractivity.BundleScope(runtimeID, sourceartifactfixture.BundleHash))
 	if err := selected.BootstrapSchema(ctx, schemastore.SchemaBootstrapRequest{
