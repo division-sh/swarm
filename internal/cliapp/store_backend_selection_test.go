@@ -30,8 +30,12 @@ func TestResolveRuntimeStoreSelectionConsumesCanonicalSources(t *testing.T) {
 		if got.Backend != storebackend.BackendSQLite || got.BackendSource != storebackend.SourceRolloutDefault {
 			t.Fatalf("selection = %#v, want sqlite rollout default", got)
 		}
-		if want := filepath.Join(swarmDir, "stores", "default", "dev.db"); got.SQLitePath != want || got.SQLitePathSource != storebackend.SourceSwarmDirDefault {
-			t.Fatalf("sqlite path = %q source %q, want %q from swarm-dir default", got.SQLitePath, got.SQLitePathSource, want)
+		project, err := filepath.EvalSymlinks(filepath.Dir(loaded.Path))
+		if err != nil {
+			t.Fatal(err)
+		}
+		if want := filepath.Join(project, ".swarm", "stores", "dev.db"); got.SQLitePath != want || got.SQLitePathSource != storebackend.SourceProjectDefault {
+			t.Fatalf("sqlite path = %q source %q, want %q from the deployment project", got.SQLitePath, got.SQLitePathSource, want)
 		}
 	})
 
