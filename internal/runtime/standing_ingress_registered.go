@@ -10,16 +10,14 @@ import (
 
 	"github.com/division-sh/swarm/internal/channelonboarding"
 	"github.com/division-sh/swarm/internal/packs"
-	"github.com/division-sh/swarm/internal/runtime/contracts"
 	"github.com/division-sh/swarm/internal/runtime/credentials"
 	"github.com/division-sh/swarm/internal/runtime/runlifecycle"
 	"github.com/division-sh/swarm/internal/runtime/semanticview"
 )
 
 type registeredStandingCredential struct {
-	operation   channelonboarding.Operation
-	holder      channelonboarding.AccountHolder
-	declaration contracts.FlowOperatorAccount
+	operation channelonboarding.Operation
+	holder    channelonboarding.AccountHolder
 }
 
 func registeredStandingSelector(selector, operation string) string {
@@ -47,22 +45,7 @@ func (rt *Runtime) validateRegisteredStandingCredential(ctx context.Context, evi
 		!slices.Equal(current.CredentialAdmissions, original.CredentialAdmissions) || evidence.holder.BundleHash != rt.Options.SourceArtifactFact.BundleHash() {
 		return channelonboarding.ErrRevisionConflict
 	}
-	var holders []channelonboarding.AccountHolder
-	if exact {
-		holders, err = rt.AccountHolders(ctx, evidence.holder.RunID, ref)
-	} else {
-		if evidence.declaration.FlowID != evidence.holder.Flow {
-			return channelonboarding.ErrRevisionConflict
-		}
-		if rt.Pipeline == nil {
-			return channelonboarding.ErrInvalidRequest
-		}
-		instances, readErr := rt.Pipeline.ListWorkflowInstances(ctx, evidence.holder.RunID)
-		if readErr != nil {
-			return readErr
-		}
-		holders, err = rt.accountHoldersForFlow(evidence.holder.RunID, ref, evidence.declaration, instances)
-	}
+	holders, err := rt.AccountHolders(ctx, evidence.holder.RunID, ref)
 	if err != nil {
 		return err
 	}
@@ -117,10 +100,6 @@ func (rt *Runtime) admitRegisteredStandingChannelTarget(ctx context.Context, op 
 	}
 	if holder.Flow != candidate.Target.FlowPath || holder.RunID == "" || holder.FlowInstance == "" {
 		return nil, nil, fmt.Errorf("registered ingress source holder: %w", channelonboarding.ErrRevisionConflict)
-	}
-	evidence.declaration, err = bundle.ResolveFlowOperatorAccount(holder.Flow)
-	if err != nil {
-		return nil, nil, err
 	}
 	sealed, err := scope.admit(op.CredentialAdmissions)
 	if err != nil {
