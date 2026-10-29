@@ -136,8 +136,8 @@ func CompileRegisteredActivation(candidate Candidate, op Operation) (CompiledAct
 	for _, admission := range op.CredentialAdmissions {
 		keys[admission.Role] = admission.StoreKey
 	}
-	plan, err := packs.NewOutboundBindingPlanWithRegistration("registered_"+operatorchannel.Hash("registered-account-activation-v1", op.OperationID, candidate.Target.Selector),
-		candidate.Plan, nil, nil, keys, candidate.Target.Selector)
+	plan, err := packs.NewRegisteredAccountBindingPlan("registered_"+operatorchannel.Hash("registered-account-activation-v1", op.OperationID, candidate.Target.Selector),
+		candidate.Plan, keys, candidate.Target.Selector)
 	if err != nil {
 		return CompiledActivation{}, err
 	}
