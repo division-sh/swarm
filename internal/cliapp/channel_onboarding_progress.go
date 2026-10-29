@@ -1,6 +1,7 @@
 package cliapp
 
 import (
+	"bytes"
 	"context"
 	"encoding/json"
 	"errors"
@@ -92,11 +93,6 @@ func readSelectedChannelCredential(result channelOnboardingResult, opts channelC
 
 func renderChannelOnboardingResult(out, errOut io.Writer, output cliOutputOptions, result channelOnboardingResult) error {
 	now := time.Now()
-	if !output.asJSON && !output.asYAML && !output.quiet {
-		if expired, err := result.SessionPairingExpired(now); err == nil && expired {
-			return nil // The blocking owner renews it; never print a stale QR.
-		}
-	}
 	pending, err := result.SessionPairingPending(now)
 	if err != nil {
 		return returnCLIValidationError(errOut, err)
@@ -144,6 +140,40 @@ func renderChannelOnboardingResult(out, errOut io.Writer, output cliOutputOption
 			writeChannelNativeQualification(w, result)
 		}
 	}, func() ([]string, error) { return []string{result.Operation.OperationID}, nil })
+}
+
+func renewExpiredChannelPairing(ctx context.Context, client channelControlClient, current channelOnboardingResult, errOut io.Writer) (channelOnboardingResult, error) {
+	var next channelOnboardingResult
+	if err := client.call(ctx, "channel.onboarding_retry", map[string]any{"operation_id": current.Operation.OperationID}, &next); err != nil {
+		return channelOnboardingResult{}, returnCLIAPIError(errOut, err, channelErrorClassifier())
+	}
+	if _, err := validateCLIChannelContinuation(current, next, false); err != nil {
+		return channelOnboardingResult{}, returnCLIValidationError(errOut, err)
+	}
+	if expired, err := next.SessionPairingExpired(time.Now()); err != nil || expired {
+		return channelOnboardingResult{}, returnCLIValidationError(errOut, errors.New("the expired pairing batch could not be renewed"))
+	}
+	return next, nil
+}
+
+func writeChannelPairingQR(out, errOut io.Writer, output cliOutputOptions, result channelOnboardingResult, previousLines int) (int, error) {
+	var frame, diagnostic bytes.Buffer
+	if err := renderChannelOnboardingResult(&frame, &diagnostic, output, result); err != nil {
+		if expired, expiryErr := result.SessionPairingExpired(time.Now()); expiryErr == nil && expired {
+			return previousLines, nil // Expired while rendering: let the wait owner renew it.
+		}
+		_, writeErr := errOut.Write(diagnostic.Bytes())
+		return previousLines, errors.Join(err, writeErr)
+	}
+	if previousLines > 0 {
+		if _, err := fmt.Fprintf(out, "\x1b[%dF\x1b[J", previousLines); err != nil {
+			return previousLines, err
+		}
+	}
+	if _, err := out.Write(frame.Bytes()); err != nil {
+		return previousLines, err
+	}
+	return bytes.Count(frame.Bytes(), []byte{'\n'}), nil
 }
 
 func renderDeploymentRegistration(out, errOut io.Writer, output cliOutputOptions, result channelOnboardingResult) error {
