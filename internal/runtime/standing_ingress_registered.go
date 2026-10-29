@@ -54,6 +54,9 @@ func (rt *Runtime) validateRegisteredStandingCredential(ctx context.Context, evi
 		if evidence.declaration.FlowID != evidence.holder.Flow {
 			return channelonboarding.ErrRevisionConflict
 		}
+		if rt.Pipeline == nil {
+			return channelonboarding.ErrInvalidRequest
+		}
 		instances, readErr := rt.Pipeline.ListWorkflowInstances(ctx, evidence.holder.RunID)
 		if readErr != nil {
 			return readErr
