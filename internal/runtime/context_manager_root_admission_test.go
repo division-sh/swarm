@@ -58,6 +58,7 @@ func rootedContextForSource(t *testing.T, source semanticview.Source, root sourc
 	}
 	runtime := &Runtime{
 		Bus: bus, Manager: manager.NewAgentManagerWithOptions(bus, nil, manager.AgentManagerOptions{
+			WorkOwner:        owner,
 			ExecutionPosture: executionposture.Live, ReceiverExecution: eventreceiver.NormalExecution(),
 		}), workOccurrence: owner,
 		Options: RuntimeOptions{

@@ -25,6 +25,7 @@ import (
 	storebackend "github.com/division-sh/swarm/internal/store/backendselection"
 	storeconstruction "github.com/division-sh/swarm/internal/store/construction"
 	"github.com/division-sh/swarm/internal/store/internal/backend/generationauthority"
+	"github.com/division-sh/swarm/internal/store/testutil/agentfixture"
 	"github.com/division-sh/swarm/internal/testutil"
 	"github.com/division-sh/swarm/internal/testutil/sourceartifactfixture"
 )
@@ -116,7 +117,11 @@ func TestAdmissionInspectionRealReadScopeBothStores(t *testing.T) {
 			if !ok {
 				t.Fatal("native bootstrap fixture does not retain its rooted source owner")
 			}
-			if _, err := writer.EnsureRootedSource(ctx, rooted); err != nil {
+			original, err := agentfixture.ProcessContext(t, ctx, bootstrap.(agentfixture.Store))
+			if err != nil {
+				t.Fatal(err)
+			}
+			if _, err := writer.EnsureRootedSource(original, rooted); err != nil {
 				t.Fatal(err)
 			}
 			var retained *AdmissionSnapshot

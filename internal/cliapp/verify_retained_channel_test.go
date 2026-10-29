@@ -14,6 +14,7 @@ import (
 	"github.com/division-sh/swarm/internal/runtime/bootverify"
 	"github.com/division-sh/swarm/internal/runtime/credentials"
 	"github.com/division-sh/swarm/internal/runtime/plangeneration"
+	"github.com/division-sh/swarm/internal/runtime/startupownership"
 	"github.com/division-sh/swarm/internal/store/storetest"
 	"github.com/google/uuid"
 )
@@ -23,74 +24,98 @@ func assertVerifyRetainedChannelPublicAdmission(t *testing.T, ctx context.Contex
 	selected := owner.(interface {
 		channelonboarding.Store
 		channelonboarding.TeardownStore
+		startupownership.Store
 		EnsureOperatorPrincipal(context.Context, time.Time) (operatorchannel.Principal, error)
 	})
-	now := time.Now().UTC()
-	principal, err := selected.EnsureOperatorPrincipal(ctx, now)
-	if err != nil {
-		t.Fatal(err)
-	}
-	generation, err := plangeneration.FromCanonicalValue(map[string]string{"test": "verify-retained-channel"})
-	if err != nil {
-		t.Fatal(err)
-	}
-	operation, err := selected.ReserveChannelOnboarding(ctx, channelonboarding.StartRequest{
-		OperationID: uuid.NewString(), RequestKeyHash: "verify-channel-key", RequestHash: "verify-channel-input", PrincipalID: principal.ID,
-		Verb: channelonboarding.VerbConnect, Provider: "telegram",
-		Interface: operatorchannel.InterfaceIdentity{
-			InterfaceRef: operatorchannel.InterfaceHITLChannelV2, ChannelPackID: "provider.telegram.hitl_channel",
-			ChannelPackVersion: "0.1.0", ChannelManifestHash: "sha256:manifest", SemanticGeneration: "sha256:plan",
-		},
-		Coordinate: channelonboarding.ChannelRuntimeContextCoordinate{
-			BundleHash: "bundle-v2:sha256:" + strings.Repeat("a", 64), BundleIdentity: "retained-channel-test",
-			PackInventoryGeneration: "sha256:inventory", RuntimeInstanceID: uuid.NewString(), ContextPublicationGeneration: 2,
-			PlanGeneration: generation,
-		},
-		TargetSelector: "ingress:support/flow:telegram", Posture: channelonboarding.ActivationWebhookRegistration,
-		Ceremony: channelonboarding.CeremonyAuthenticatedTextChallenge, SaveProof: true,
-		CredentialReservations: []channelonboarding.CredentialReservation{{Role: "bot_token", StoreKey: "telegram_bot_token"}}, RequestedAt: now,
-	})
-	if err != nil {
-		t.Fatal(err)
-	}
-	operation, err = selected.AdvanceChannelOnboarding(ctx, channelonboarding.AdvanceRequest{
-		OperationID: operation.OperationID, ExpectedRevision: operation.Revision, Phase: channelonboarding.PhaseCredentialsAdmitted,
-		CredentialAdmissions: []channelonboarding.CredentialAdmission{{Role: "bot_token", StoreKey: "telegram_bot_token.retained",
-			Kind: channelonboarding.CredentialAdmissionWritten, Receipt: "retained-receipt", ValueSeal: credentials.ValueSeal("credential-value-seal-v1:" + strings.Repeat("a", 64))}},
-		ReplaceCredentialAdmissions: true, Now: now.Add(time.Second),
-	})
-	if err != nil {
-		t.Fatal(err)
-	}
-	for _, phase := range []channelonboarding.Phase{channelonboarding.PhaseActivatingProvider, channelonboarding.PhaseAwaitingExternalIdentity, channelonboarding.PhaseAwaitingOperatorConfirmation, channelonboarding.PhasePublishingActivation} {
-		request := channelonboarding.AdvanceRequest{
-			OperationID: operation.OperationID, ExpectedRevision: operation.Revision, Phase: phase,
-			IdentityOperationID: uuid.NewString(), Now: now.Add(time.Duration(operation.Revision) * time.Second),
-		}
-		if phase == channelonboarding.PhaseAwaitingOperatorConfirmation || phase == channelonboarding.PhasePublishingActivation {
-			request.BindingRevision = 1
-		}
-		operation, err = selected.AdvanceChannelOnboarding(ctx, request)
+	withOriginal := func(write func(context.Context)) {
+		process, err := selected.AcquireProcessCapability(ctx, startupownership.AcquireRequest{
+			OwnerID: "verify-retained-channel-fixture", BootID: uuid.NewString(), RuntimeInstanceID: uuid.NewString(),
+		})
 		if err != nil {
-			t.Fatalf("seed retained onboarding phase %s: %v", phase, err)
+			t.Fatal(err)
 		}
+		defer func() {
+			if err := process.Release(context.WithoutCancel(ctx)); err != nil {
+				t.Error(err)
+			}
+		}()
+		original, err := startupownership.WithProcessMutationAuthority(ctx, process)
+		if err != nil {
+			t.Fatal(err)
+		}
+		write(original)
 	}
-	operation, activation, err := selected.PublishConnectedChannelActivation(ctx, channelonboarding.PublishActivationRequest{
-		OperationID: operation.OperationID, ExpectedRevision: operation.Revision, ActivationID: uuid.NewString(), BindingRevision: 1,
-		ConversationRef: "retained-conversation", ProofID: uuid.NewString(), ProofRevision: 1, Now: now.Add(8 * time.Second),
+	var operation channelonboarding.Operation
+	var activation channelonboarding.ConnectedChannelActivation
+	var teardown channelonboarding.TeardownOperation
+	withOriginal(func(ctx context.Context) {
+		now := time.Now().UTC()
+		principal, err := selected.EnsureOperatorPrincipal(ctx, now)
+		if err != nil {
+			t.Fatal(err)
+		}
+		generation, err := plangeneration.FromCanonicalValue(map[string]string{"test": "verify-retained-channel"})
+		if err != nil {
+			t.Fatal(err)
+		}
+		operation, err = selected.ReserveChannelOnboarding(ctx, channelonboarding.StartRequest{
+			OperationID: uuid.NewString(), RequestKeyHash: "verify-channel-key", RequestHash: "verify-channel-input", PrincipalID: principal.ID,
+			Verb: channelonboarding.VerbConnect, Provider: "telegram",
+			Interface: operatorchannel.InterfaceIdentity{
+				InterfaceRef: operatorchannel.InterfaceHITLChannelV2, ChannelPackID: "provider.telegram.hitl_channel",
+				ChannelPackVersion: "0.1.0", ChannelManifestHash: "sha256:manifest", SemanticGeneration: "sha256:plan",
+			},
+			Coordinate: channelonboarding.ChannelRuntimeContextCoordinate{
+				BundleHash: "bundle-v2:sha256:" + strings.Repeat("a", 64), BundleIdentity: "retained-channel-test",
+				PackInventoryGeneration: "sha256:inventory", RuntimeInstanceID: uuid.NewString(), ContextPublicationGeneration: 2,
+				PlanGeneration: generation,
+			},
+			TargetSelector: "ingress:support/flow:telegram", Posture: channelonboarding.ActivationWebhookRegistration,
+			Ceremony: channelonboarding.CeremonyAuthenticatedTextChallenge, SaveProof: true,
+			CredentialReservations: []channelonboarding.CredentialReservation{{Role: "bot_token", StoreKey: "telegram_bot_token"}}, RequestedAt: now,
+		})
+		if err != nil {
+			t.Fatal(err)
+		}
+		operation, err = selected.AdvanceChannelOnboarding(ctx, channelonboarding.AdvanceRequest{
+			OperationID: operation.OperationID, ExpectedRevision: operation.Revision, Phase: channelonboarding.PhaseCredentialsAdmitted,
+			CredentialAdmissions: []channelonboarding.CredentialAdmission{{Role: "bot_token", StoreKey: "telegram_bot_token.retained",
+				Kind: channelonboarding.CredentialAdmissionWritten, Receipt: "retained-receipt", ValueSeal: credentials.ValueSeal("credential-value-seal-v1:" + strings.Repeat("a", 64))}},
+			ReplaceCredentialAdmissions: true, Now: now.Add(time.Second),
+		})
+		if err != nil {
+			t.Fatal(err)
+		}
+		for _, phase := range []channelonboarding.Phase{channelonboarding.PhaseActivatingProvider, channelonboarding.PhaseAwaitingExternalIdentity, channelonboarding.PhaseAwaitingOperatorConfirmation, channelonboarding.PhasePublishingActivation} {
+			request := channelonboarding.AdvanceRequest{
+				OperationID: operation.OperationID, ExpectedRevision: operation.Revision, Phase: phase,
+				IdentityOperationID: uuid.NewString(), Now: now.Add(time.Duration(operation.Revision) * time.Second),
+			}
+			if phase == channelonboarding.PhaseAwaitingOperatorConfirmation || phase == channelonboarding.PhasePublishingActivation {
+				request.BindingRevision = 1
+			}
+			operation, err = selected.AdvanceChannelOnboarding(ctx, request)
+			if err != nil {
+				t.Fatalf("seed retained onboarding phase %s: %v", phase, err)
+			}
+		}
+		operation, activation, err = selected.PublishConnectedChannelActivation(ctx, channelonboarding.PublishActivationRequest{
+			OperationID: operation.OperationID, ExpectedRevision: operation.Revision, ActivationID: uuid.NewString(), BindingRevision: 1,
+			ConversationRef: "retained-conversation", ProofID: uuid.NewString(), ProofRevision: 1, Now: now.Add(8 * time.Second),
+		})
+		if err != nil {
+			t.Fatal(err)
+		}
+		teardown, err = selected.ReserveChannelTeardown(ctx, channelonboarding.ReserveTeardownRequest{
+			TeardownID: uuid.NewString(), RequestKeyHash: "verify-teardown-key", RequestHash: "verify-teardown-input",
+			Kind: channelonboarding.TeardownContextRetirement, PrincipalID: principal.ID,
+			Scope:       channelonboarding.TeardownScope{BundleHash: operation.Coordinate.BundleHash, ContextPublicationGeneration: operation.Coordinate.ContextPublicationGeneration},
+			RequestedAt: now,
+		})
+		if err != nil {
+			t.Fatal(err)
+		}
 	})
-	if err != nil {
-		t.Fatal(err)
-	}
-	teardown, err := selected.ReserveChannelTeardown(ctx, channelonboarding.ReserveTeardownRequest{
-		TeardownID: uuid.NewString(), RequestKeyHash: "verify-teardown-key", RequestHash: "verify-teardown-input",
-		Kind: channelonboarding.TeardownContextRetirement, PrincipalID: principal.ID,
-		Scope:       channelonboarding.TeardownScope{BundleHash: operation.Coordinate.BundleHash, ContextPublicationGeneration: operation.Coordinate.ContextPublicationGeneration},
-		RequestedAt: now,
-	})
-	if err != nil {
-		t.Fatal(err)
-	}
 	for _, mode := range []string{"json", "quiet", "text"} {
 		var out, diagnostic bytes.Buffer
 		args := []string{"verify", root, "--config", configPath}
@@ -132,9 +157,11 @@ func assertVerifyRetainedChannelPublicAdmission(t *testing.T, ctx context.Contex
 		t.Fatalf("verify settled teardown: %+v %v", actualTeardown, err)
 	}
 	hostileRuntime := uuid.NewString()
-	if err := storetest.ReplaceRetainedChannelRuntime(ctx, selected, activation.ActivationID, activation.Coordinate.RuntimeInstanceID, hostileRuntime); err != nil {
-		t.Fatal(err)
-	}
+	withOriginal(func(ctx context.Context) {
+		if err := storetest.ReplaceRetainedChannelRuntime(ctx, selected, activation.ActivationID, activation.Coordinate.RuntimeInstanceID, hostileRuntime); err != nil {
+			t.Fatal(err)
+		}
+	})
 	if _, err := channelonboarding.InspectRetainedActivations(ctx, selected); err == nil || !strings.Contains(err.Error(), "exact owning onboarding operation") {
 		t.Fatalf("boot's canonical durable ownership check missed crossed persisted evidence: %v", err)
 	}
@@ -142,7 +169,9 @@ func assertVerifyRetainedChannelPublicAdmission(t *testing.T, ctx context.Contex
 	if code := executeRootCommand(ctx, root, []string{"verify", root, "--config", configPath, "--json"}, &out, &diagnostic); code != cliExitConflict || !strings.Contains(out.String(), "exact owning onboarding operation") {
 		t.Fatalf("public verify hid boot's crossed evidence refusal: %d %s %s", code, &out, &diagnostic)
 	}
-	if err := storetest.ReplaceRetainedChannelRuntime(ctx, selected, activation.ActivationID, hostileRuntime, activation.Coordinate.RuntimeInstanceID); err != nil {
-		t.Fatal(err)
-	}
+	withOriginal(func(ctx context.Context) {
+		if err := storetest.ReplaceRetainedChannelRuntime(ctx, selected, activation.ActivationID, hostileRuntime, activation.Coordinate.RuntimeInstanceID); err != nil {
+			t.Fatal(err)
+		}
+	})
 }

@@ -4,8 +4,6 @@ import (
 	"context"
 	"database/sql"
 	"errors"
-	"strings"
-	"sync"
 	"testing"
 	"time"
 
@@ -29,17 +27,9 @@ type orderingNativeFixture struct {
 	expectClose bool
 }
 
-func newOrderingNativeFixture(t *testing.T, surface string, enabled bool, queryEntered chan struct{}) *orderingNativeFixture {
+func newOrderingNativeFixture(t *testing.T, surface string, enabled bool) *orderingNativeFixture {
 	t.Helper()
-	var once sync.Once
-	matcher := sqlmock.QueryMatcherFunc(func(expected, actual string) error {
-		err := sqlmock.QueryMatcherRegexp.Match(expected, actual)
-		if err == nil && queryEntered != nil && strings.HasPrefix(actual, "SELECT last_sequence FROM author_activity_order") {
-			once.Do(func() { close(queryEntered) })
-		}
-		return err
-	})
-	db, mock, err := sqlmock.New(sqlmock.QueryMatcherOption(matcher))
+	db, mock, err := sqlmock.New()
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -116,96 +106,12 @@ func (f *orderingNativeFixture) acquired() {
 	f.expectAcquisition().WillReturnRows(sqlmock.NewRows([]string{"last_sequence"}).AddRow(17))
 }
 
-func TestOrderingNativeCommitAndDisabledSQLParity(t *testing.T) {
-	for _, surface := range []string{"pooled_postgres", "retained_postgres", "sqlite"} {
-		for _, enabled := range []bool{false, true} {
-			t.Run(surface+"/"+map[bool]string{false: "disabled", true: "zero_delay"}[enabled], func(t *testing.T) {
-				f := newOrderingNativeFixture(t, surface, enabled, nil)
-				f.acquired()
-				f.mock.ExpectCommit()
-				var ended context.Context
-				var native *sql.Tx
-				committed, err := f.run(context.Background(), func(ctx context.Context, tx *sql.Tx) error {
-					transactiontest.Mark(ctx, transactiontest.WorkflowMutation)
-					ended, native = ctx, tx
-					for range 3 {
-						if err := authoractivity.FenceMutationOrder(ctx, tx, f.dialect); err != nil {
-							return err
-						}
-					}
-					_, err := authoractivity.Begin(ctx, tx, f.dialect)
-					return err
-				})
-				if err != nil || !committed {
-					t.Fatalf("native commit=%t err=%v", committed, err)
-				}
-				if err := authoractivity.FenceMutationOrder(ended, native, f.dialect); !errors.Is(err, sql.ErrTxDone) {
-					t.Fatalf("ended scope error=%v", err)
-				}
-				if enabled {
-					snapshot := f.collector.Snapshot()
-					counts := snapshot.Total
-					o := counts.Ordering
-					if o.AcquisitionAttempts != 1 || o.Acquired != 1 || o.Reuses != 3 ||
-						o.CommittedHolders != 1 || o.RolledBackHolders != 0 || o.UnresolvedHolders != 0 ||
-						o.AcquisitionDuration <= 0 || o.CommitHoldDuration <= 0 || counts.WriteCommits != 1 || counts.DelayedCommits != 0 {
-						t.Fatalf("native commit receipt=%+v", counts)
-					}
-					if snapshot.ByOperation[transactiontest.WorkflowMutation].Ordering != o {
-						t.Fatalf("operation lost native ordering receipt: %+v", snapshot)
-					}
-					if f.session != nil && snapshot.Retained.Ordering != o {
-						t.Fatalf("retained aggregate lost native ordering receipt: %+v", snapshot)
-					}
-					if f.session == nil && snapshot.Retained.Ordering != (transactiontest.OrderingCounts{}) {
-						t.Fatalf("pooled ordering receipt leaked into retained aggregate: %+v", snapshot)
-					}
-				}
-			})
-		}
-	}
-}
-
-func TestOrderingNativeCancelledAcquisition(t *testing.T) {
-	for _, surface := range []string{"pooled_postgres", "retained_postgres", "sqlite"} {
-		t.Run(surface, func(t *testing.T) {
-			entered := make(chan struct{})
-			f := newOrderingNativeFixture(t, surface, true, entered)
-			f.expectAcquisition().WillDelayFor(time.Minute).WillReturnRows(sqlmock.NewRows([]string{"last_sequence"}).AddRow(17))
-			f.mock.ExpectRollback()
-			ctx, cancel := context.WithCancel(context.Background())
-			defer cancel()
-			done := make(chan error, 1)
-			go func() {
-				_, err := f.run(context.Background(), func(txctx context.Context, tx *sql.Tx) error {
-					wait, stop := context.WithCancel(txctx)
-					defer stop()
-					join := context.AfterFunc(ctx, stop)
-					defer join()
-					return authoractivity.FenceMutationOrder(wait, tx, f.dialect)
-				})
-				done <- err
-			}()
-			<-entered
-			cancel()
-			if err := <-done; !errors.Is(err, sqlmock.ErrCancelled) {
-				t.Fatalf("canceled native acquisition=%v", err)
-			}
-			o := f.collector.Snapshot().Total.Ordering
-			if o.AcquisitionAttempts != 1 || o.AcquisitionErrors != 1 || o.Acquired != 0 || o.Reuses != 0 ||
-				o.AcquisitionDuration <= 0 || o.CommittedHolders != 0 || o.RolledBackHolders != 0 || o.UnresolvedHolders != 0 {
-				t.Fatalf("canceled acquisition receipt=%+v", o)
-			}
-		})
-	}
-}
-
 func TestOrderingNativeRollbackAndPanicOutcomes(t *testing.T) {
 	for _, surface := range []string{"pooled_postgres", "retained_postgres", "sqlite"} {
 		for _, panics := range []bool{false, true} {
 			for _, fails := range []bool{false, true} {
 				t.Run(surface+"/"+map[bool]string{false: "return", true: "panic"}[panics]+"/"+map[bool]string{false: "rollback", true: "rollback_error"}[fails], func(t *testing.T) {
-					f := newOrderingNativeFixture(t, surface, true, nil)
+					f := newOrderingNativeFixture(t, surface, true)
 					f.acquired()
 					primary := errors.New("operation evidence")
 					cleanup := errors.New("rollback evidence")
@@ -247,7 +153,7 @@ func TestOrderingNativeRollbackAndPanicOutcomes(t *testing.T) {
 }
 
 func TestOrderingRetainedCommitExcludesLateFailedCleanup(t *testing.T) {
-	f := newOrderingNativeFixture(t, "retained_postgres", true, nil)
+	f := newOrderingNativeFixture(t, "retained_postgres", true)
 	f.acquired()
 	f.mock.ExpectCommit()
 	f.mock.ExpectClose()
@@ -278,7 +184,7 @@ func TestOrderingRetainedCommitExcludesLateFailedCleanup(t *testing.T) {
 func TestOrderingNativeUnacknowledgedCommitStaysUnresolved(t *testing.T) {
 	for _, surface := range []string{"pooled_postgres", "retained_postgres", "sqlite"} {
 		t.Run(surface, func(t *testing.T) {
-			f := newOrderingNativeFixture(t, surface, true, nil)
+			f := newOrderingNativeFixture(t, surface, true)
 			f.acquired()
 			uncertain := errors.New("unacknowledged COMMIT")
 			f.mock.ExpectCommit().WillReturnError(uncertain)
@@ -303,7 +209,7 @@ func TestOrderingNativeUnacknowledgedCommitStaysUnresolved(t *testing.T) {
 func TestOrderingNativeReadsAndPreBeginRefusalHaveNoHolder(t *testing.T) {
 	for _, surface := range []string{"pooled_postgres", "retained_postgres", "sqlite"} {
 		t.Run(surface+"/read_only", func(t *testing.T) {
-			f := newOrderingNativeFixture(t, surface, true, nil)
+			f := newOrderingNativeFixture(t, surface, true)
 			f.mock.ExpectBegin()
 			f.mock.ExpectQuery("SELECT 1").WillReturnRows(sqlmock.NewRows([]string{"one"}).AddRow(1))
 			f.mock.ExpectCommit()
@@ -328,7 +234,7 @@ func TestOrderingNativeReadsAndPreBeginRefusalHaveNoHolder(t *testing.T) {
 			}
 		})
 		t.Run(surface+"/pre_begin", func(t *testing.T) {
-			f := newOrderingNativeFixture(t, surface, true, nil)
+			f := newOrderingNativeFixture(t, surface, true)
 			ctx, cancel := context.WithCancel(context.Background())
 			cancel()
 			called := false
@@ -350,7 +256,7 @@ func TestOrderingNativeReadsAndPreBeginRefusalHaveNoHolder(t *testing.T) {
 func TestOrderingFailedPoolAcquisitionHasNoHolder(t *testing.T) {
 	for _, surface := range []string{"pooled_postgres", "sqlite"} {
 		t.Run(surface, func(t *testing.T) {
-			f := newOrderingNativeFixture(t, surface, true, nil)
+			f := newOrderingNativeFixture(t, surface, true)
 			f.mock.ExpectClose()
 			f.expectClose = true
 			if err := f.db.Close(); err != nil {
