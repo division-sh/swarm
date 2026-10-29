@@ -27,7 +27,7 @@ func CopyStandingRootTreePublic(t testing.TB) string {
 		"policy.yaml":                         "operator_account: '420079'\n",
 		"beta/schema.yaml":                    "# fixture: beta\nstages: []\n" + pins + outputs,
 		"beta/entities.yaml":                  "receiver: {}\n",
-		"beta/policy.yaml":                    "operator_account: '420079'\n",
+		"beta/policy.yaml":                    "operator_account: '420080'\n",
 		"beta/nodes.yaml":                     nodes,
 		"alpha-receiver/detail/schema.yaml":   "stages: []\n# fixture: detail\n",
 	}
