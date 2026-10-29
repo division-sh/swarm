@@ -290,6 +290,10 @@ func newExternalRuntimeTestActivityCoordinator(t *testing.T, bus *runtimebus.Eve
 			t.Fatalf("activity source coordinate differs from its admitted fact: %v", err)
 		}
 		ctx = runtimecorrelation.WithRootAdmission(ctx, rooted.Admission())
+		ctx, err = agentfixture.ProcessContext(t, worklifetime.WithProcess(ctx, owner.process), store)
+		if err != nil {
+			t.Fatal(err)
+		}
 		if err := sourceartifactfixture.EnsureArtifact(ctx, writer, bundle.SourceArtifact); err != nil {
 			t.Fatal(err)
 		}
@@ -774,6 +778,12 @@ func newRuntimeTestEventBusWithOptions(t testing.TB, store runtimebus.EventStore
 			ctx := runtimecorrelation.WithRuntimeInstanceID(context.Background(), opts.RuntimeInstanceID)
 			if len(held) == 1 {
 				ctx = runtimestartupownership.CarryMutationAuthority(ctx, held[0])
+			} else if opts.MutationContext != nil {
+				var err error
+				ctx, err = opts.MutationContext(ctx)
+				if err != nil {
+					return nil, err
+				}
 			}
 			if _, err := agentfixture.ProcessContext(t, worklifetime.WithProcess(ctx, process), native); err != nil {
 				return nil, err

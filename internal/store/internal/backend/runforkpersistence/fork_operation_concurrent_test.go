@@ -4,13 +4,19 @@ import (
 	"context"
 	"database/sql"
 	"fmt"
+	"path/filepath"
 	"sync"
 	"testing"
 	"time"
 
+	"github.com/division-sh/swarm/internal/runtime/contracts"
+	"github.com/division-sh/swarm/internal/runtime/core/processbinding"
 	"github.com/division-sh/swarm/internal/runtime/runfork"
+	"github.com/division-sh/swarm/internal/store/internal/backend/generationauthority"
 	postgresbackend "github.com/division-sh/swarm/internal/store/internal/backend/postgres"
 	sqlitebackend "github.com/division-sh/swarm/internal/store/internal/backend/sqlite"
+	"github.com/division-sh/swarm/internal/store/internal/schemastore"
+	"github.com/division-sh/swarm/internal/store/platformschema"
 	"github.com/google/uuid"
 )
 
@@ -23,11 +29,23 @@ func TestForkOperationConcurrentInitialBindBothStores(t *testing.T) {
 			ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
 			defer cancel()
 			var transact func(func(context.Context, *sql.Tx) error) (bool, error)
+			var acquire func(context.Context, func(context.Context, *sql.Tx) error) (bool, error)
+			leaseBackend := processbinding.SQLiteLeaseBackend
 			if backend == "postgres" {
 				owner, err := postgresbackend.New(db)
 				if err != nil {
 					t.Fatal(err)
 				}
+				lease, err := postgresbackend.AcquireBlockingAdvisoryLockLease(ctx, owner, "concurrent-fork-original")
+				if err != nil {
+					t.Fatal(err)
+				}
+				t.Cleanup(func() {
+					if err := lease.Release(context.Background()); err != nil {
+						t.Error(err)
+					}
+				})
+				acquire, leaseBackend = lease.RunProcessAcquisitionOutcome, processbinding.PostgresLeaseBackend
 				transact = func(fn func(context.Context, *sql.Tx) error) (bool, error) {
 					return owner.RunTransactionOutcome(ctx, fn)
 				}
@@ -36,9 +54,54 @@ func TestForkOperationConcurrentInitialBindBothStores(t *testing.T) {
 				if err != nil {
 					t.Fatal(err)
 				}
+				acquire = owner.RunProcessAcquisitionOutcome
 				transact = func(fn func(context.Context, *sql.Tx) error) (bool, error) {
 					return owner.RunTransactionOutcome(ctx, "concurrent fork operation bind", fn)
 				}
+			}
+			spec, err := contracts.LoadPlatformSpecDocument(filepath.Join("..", "..", "..", "..", "..", "platform-spec.yaml"))
+			if err != nil {
+				t.Fatal(err)
+			}
+			plans, err := schemastore.GeneratePlatformTableDDLs(spec)
+			if err != nil {
+				t.Fatal(err)
+			}
+			for _, plan := range plans {
+				if plan.TableName != "runtime_process_generation" {
+					continue
+				}
+				statements := plan.Statements
+				if backend == "sqlite" {
+					statements, err = schemastore.SQLiteStatementsForPlan(plan)
+					if err != nil {
+						t.Fatal(err)
+					}
+				}
+				for _, statement := range statements {
+					if _, err := db.ExecContext(ctx, statement); err != nil {
+						t.Fatal(err)
+					}
+				}
+			}
+			if err := platformschema.SeedFreshProcessGeneration(ctx, db, plans); err != nil {
+				t.Fatal(err)
+			}
+			var original processbinding.LeaseStamp
+			committed, err := acquire(ctx, func(txctx context.Context, tx *sql.Tx) error {
+				var err error
+				original, err = generationauthority.AdvanceProcessGeneration(txctx, tx, processbinding.LeaseIdentity{
+					LeaseID: uuid.NewString(), OwnerID: "concurrent-fork-fixture", BootID: uuid.NewString(),
+					RuntimeInstanceID: uuid.NewString(), Backend: leaseBackend,
+				}, backend == "sqlite")
+				return err
+			})
+			if err != nil || !committed {
+				t.Fatalf("acquire original concurrent-fork fixture: committed=%t err=%v", committed, err)
+			}
+			ctx, err = generationauthority.MutationContext(ctx, original, false)
+			if err != nil {
+				t.Fatal(err)
 			}
 			base := runfork.ForkOperationRequest{
 				Actor: "bearer:operator", IdempotencyKey: "same-first-key",
