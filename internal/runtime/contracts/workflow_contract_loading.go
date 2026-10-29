@@ -14,7 +14,7 @@ import (
 type WorkflowContractLoadOptions struct {
 	PlatformPackBase   *packartifact.PlatformPackInventory
 	PlatformPackBases  packartifact.PlatformPackBaseResolver
-	AdmitPackInventory func(*packartifact.EffectivePackInventory, PlatformSpecDocument) (PackAdmissionProjection, error)
+	AdmitPackInventory func(sourceartifact.RootedSource, *packartifact.EffectivePackInventory, PlatformSpecDocument) (PackAdmissionProjection, error)
 }
 
 type PackAdmissionProjection interface {
@@ -138,7 +138,7 @@ func LoadWorkflowContractBundleFromRootedSource(repoRoot string, rooted sourcear
 		return nil, fmt.Errorf("resolve effective pack inventory: %w", err)
 	}
 	if options.AdmitPackInventory != nil {
-		admission, err := options.AdmitPackInventory(effective, bundle.Platform)
+		admission, err := options.AdmitPackInventory(rooted, effective, bundle.Platform)
 		if err != nil {
 			return nil, fmt.Errorf("admit effective pack inventory: %w", err)
 		}

@@ -48,11 +48,7 @@ func LoadBundlePackRuntime(ctx context.Context, cfgResult RuntimeConfigLoadResul
 }
 
 func capturedChannelProjectionPlans(bundle *runtimecontracts.WorkflowContractBundle) ([]packs.SatisfactionPlan, error) {
-	rooted, err := bundle.RootedSource()
-	if err != nil {
-		return nil, err
-	}
-	providers, err := packadmission.AdmitProviderSource(rooted, bundle.Platform)
+	providers, err := packadmission.ProviderSourceForBundle(bundle)
 	if err != nil {
 		return nil, err
 	}

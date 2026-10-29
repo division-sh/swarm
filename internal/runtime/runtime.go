@@ -1286,7 +1286,7 @@ func newRuntime(ctx context.Context, deps RuntimeDeps) (*Runtime, error) {
 	if err != nil {
 		return nil, err
 	}
-	providers, err := packadmission.AdmitProviderSource(rooted, bundle.Platform)
+	providers, err := packadmission.ProviderSourceForBundle(bundle)
 	if err != nil {
 		return nil, err
 	}

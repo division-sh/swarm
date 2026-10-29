@@ -87,11 +87,7 @@ func ResolveStandingTargetDeclarations(source semanticview.Source, _ *providertr
 	if !ok || bundle == nil {
 		return nil, fmt.Errorf("standing target declarations require a bundle-backed semantic source")
 	}
-	rooted, err := bundle.RootedSource()
-	if err != nil {
-		return nil, err
-	}
-	providers, err := packadmission.AdmitProviderSource(rooted, bundle.Platform)
+	providers, err := packadmission.ProviderSourceForBundle(bundle)
 	if err != nil {
 		return nil, err
 	}

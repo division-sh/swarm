@@ -10,6 +10,7 @@ import (
 	"time"
 
 	"github.com/division-sh/swarm/internal/packmodel"
+	runtimecontracts "github.com/division-sh/swarm/internal/runtime/contracts"
 	"github.com/division-sh/swarm/internal/sourceartifact"
 	"github.com/division-sh/swarm/internal/testutil/packfixture"
 	"github.com/division-sh/swarm/internal/testutil/sourceartifactfixture"
@@ -44,6 +45,50 @@ func capturedProviderSource(t *testing.T, members map[string][]byte) (sourcearti
 		t.Fatal(err)
 	}
 	return sourceartifactfixture.Rooted(t, "provider-shop", artifact)
+}
+
+func TestProviderSourceCarriageRequiresExactCompiledRoot(t *testing.T) {
+	rooted, _ := capturedProviderSource(t, scopedProviderMembers())
+	bundle, err := runtimecontracts.LoadWorkflowContractBundleFromRootedSource(repoRoot(t), rooted, "", runtimecontracts.WorkflowContractLoadOptions{AdmitPackInventory: AdmitInventory})
+	if err != nil {
+		t.Fatal(err)
+	}
+	projection, err := FromBundle(bundle)
+	if err != nil {
+		t.Fatal(err)
+	}
+	providers, err := ProviderSourceForBundle(bundle)
+	if err != nil || !providers.RootedSource().Admission().Equal(rooted.Admission()) {
+		t.Fatalf("exact admitted source was not carried: %v", err)
+	}
+	scope, err := providers.Scope(".")
+	if err != nil {
+		t.Fatal(err)
+	}
+	definition, found := scope.Provider("team-bot")
+	if !found {
+		t.Fatal("carriage lost the captured provider")
+	}
+	catalog, found := definition.TriggerCatalog()
+	originalScope, _ := projection.providerSource.Scope(".")
+	originalDefinition, _ := originalScope.Provider("team-bot")
+	originalCatalog, _ := originalDefinition.TriggerCatalog()
+	if !found || catalog != originalCatalog {
+		t.Fatal("carriage repeated provider admission instead of retaining its catalog")
+	}
+	foreign, _ := sourceartifactfixture.Rooted(t, "other-provider-shop", rooted.Artifact())
+	projection.providerSource, err = AdmitProviderSource(foreign, bundle.Platform)
+	if err != nil {
+		t.Fatal(err)
+	}
+	bundle.PackAdmission = projection
+	if _, err := ProviderSourceForBundle(bundle); err == nil {
+		t.Fatal("same bytes under a foreign root supplied the provider admission")
+	}
+	bundle.PackAdmission = nil
+	if plain, err := ProviderSourceForBundle(bundle); err != nil || !plain.RootedSource().Admission().Equal(rooted.Admission()) {
+		t.Fatalf("plain bundle lost its direct admission path: %v", err)
+	}
 }
 
 func TestS1ProviderSourceFreezesNearestWholeDirectories(t *testing.T) {
