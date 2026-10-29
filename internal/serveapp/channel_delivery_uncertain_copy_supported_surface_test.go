@@ -142,8 +142,10 @@ func assertUncertainCopyRebindFence(t *testing.T, h *channelOnboardingE2EHarness
 	deadline := time.Now().Add(15 * time.Second)
 	for {
 		var rejected int
-		if err := db.QueryRow(`SELECT COUNT(*) FROM operator_channel_text_intents WHERE provider_event_id=$1
-			AND state='settled' AND disposition='entry_rejected'`, channelFixtureProviderEventID(t, "901110")).Scan(&rejected); err != nil {
+		// Independent SHA-256 of ["telegram","420079","901110"], not an
+		// identifier learned from the incoming receipt being checked.
+		if err := db.QueryRow(`SELECT COUNT(*) FROM operator_channel_text_intents WHERE provider_event_id='788f337676ac8e8813e269fe48d0dfa5327d81c5893120d287a2f8864e97644b'
+			AND state='settled' AND disposition='entry_rejected'`).Scan(&rejected); err != nil {
 			t.Fatal(err)
 		}
 		if rejected == 1 {
