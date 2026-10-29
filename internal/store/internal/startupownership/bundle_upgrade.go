@@ -7,6 +7,7 @@ import (
 
 	"github.com/division-sh/swarm/internal/runtime/agenttopology"
 	"github.com/division-sh/swarm/internal/runtime/runbundle"
+	"github.com/division-sh/swarm/internal/runtime/semanticview"
 	"github.com/division-sh/swarm/internal/store/internal/backend/mutationprotocol"
 )
 
@@ -24,15 +25,24 @@ func (u sourceSetUpgrade) commit(ctx context.Context, plan *runbundle.UpgradePla
 	return u.owner.CommitBundleUpgradeTx(ctx, u.attempt, plan)
 }
 
-func sourceSetHasBundle(plan agenttopology.SourceSetPlan, hash string) bool {
-	return len(plan.Sources) == 1 && plan.Sources[0].BundleHash == hash
+func sourceSetHasUpgradeCandidate(plan agenttopology.SourceSetPlan, upgrade *runbundle.UpgradePlan) bool {
+	bundle, ok := semanticview.Bundle(upgrade.Sources[upgrade.BundleHash])
+	if !ok || bundle == nil {
+		return false
+	}
+	rooted, err := bundle.RootedSource()
+	if err != nil || rooted.Admission().BundleHash() != upgrade.BundleHash {
+		return false
+	}
+	coordinate, err := agenttopology.NewSourceCoordinate(rooted.Admission())
+	return err == nil && sourceSetContains(plan, coordinate)
 }
 
 func applySourceSetUpgrade(ctx context.Context, req agenttopology.SourceSetCommitRequest, upgrades []sourceSetUpgrade) error {
 	if req.BundleUpgrade == nil {
 		return nil
 	}
-	if len(upgrades) != 1 || !sourceSetHasBundle(req.Plan, req.BundleUpgrade.BundleHash) {
+	if len(upgrades) != 1 || !sourceSetHasUpgradeCandidate(req.Plan, req.BundleUpgrade) {
 		return errors.New("bundle upgrade requires its exact native source transition")
 	}
 	return upgrades[0].commit(ctx, req.BundleUpgrade)
