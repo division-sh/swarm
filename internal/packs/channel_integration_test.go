@@ -374,6 +374,31 @@ func TestLearnedActivationCompilationUsesDurableConversationDestination(t *testi
 	if _, err := channelonboarding.CompileLearnedActivation(candidate, activation); err == nil || !strings.Contains(err.Error(), "conversation") {
 		t.Fatalf("missing durable destination error = %v", err)
 	}
+
+	t.Run("registered_account_without_operator_destination", func(t *testing.T) {
+		op := channelonboarding.Operation{DeploymentRegistration: true, AccountConfirmed: true,
+			OperationID: uuid.NewString(), Revision: 3, Provider: "telegram", AccountReference: "420079",
+			Posture: channelonboarding.ActivationWebhookRegistration, Phase: channelonboarding.PhaseSucceeded,
+			CredentialAdmissions: activation.CredentialAdmissions}
+		registered, err := channelonboarding.CompileRegisteredActivation(candidate, op)
+		if err != nil {
+			t.Fatal(err)
+		}
+		tools, err := registered.Plan.RuntimeTools()
+		if err != nil || len(tools) != 0 || !registered.Plan.ActivitiesOnly() || registered.Plan.HasNativeInbox() || registered.Plan.Destination().Interface() != nil {
+			t.Fatalf("account registration acquired operator authority: tools=%d err=%v", len(tools), err)
+		}
+		if _, _, err := registered.Plan.PrepareOperation("deliver", map[string]any{}); err == nil {
+			t.Fatal("account registration acquired operator delivery")
+		}
+		if _, err := packs.NewOutboundBindingPlanWithRegistration("ordinary", plan, nil, nil, nil, target); err == nil {
+			t.Fatal("ordinary webhook binding accepted a missing destination")
+		}
+		op.AccountConfirmed = false
+		if _, err := channelonboarding.CompileRegisteredActivation(candidate, op); err == nil {
+			t.Fatal("unconfirmed registration acquired source activation")
+		}
+	})
 }
 
 func packTestCredentialSeal(digit string) runtimecredentials.ValueSeal {

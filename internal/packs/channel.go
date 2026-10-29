@@ -758,10 +758,10 @@ func (p OutboundBindingPlan) HasNativeInbox() bool {
 	return !p.ActivitiesOnly() && p.structural.HasNativeInbox()
 }
 
-// A native account without an operator destination can execute authored
+// An account without an operator destination can execute authored
 // activities, but cannot expose operator channel tools or an Inbox.
 func (p OutboundBindingPlan) ActivitiesOnly() bool {
-	return p.Transport() == ChannelTransportSession && p.destination.Interface() == nil
+	return p.destination.Interface() == nil
 }
 
 func (p SatisfactionPlan) InterfaceIdentity() (operatorchannel.InterfaceIdentity, error) {
@@ -1040,6 +1040,19 @@ func NewOutboundBindingPlanWithCredentials(id string, structural SatisfactionPla
 }
 
 func NewOutboundBindingPlanWithRegistration(id string, structural SatisfactionPlan, destination any, requirements []Requirement, credentialKeys map[string]string, registrationTarget string) (OutboundBindingPlan, error) {
+	return newOutboundBindingPlan(id, structural, destination, requirements, credentialKeys, registrationTarget, structural.Transport() == ChannelTransportSession)
+}
+
+// NewRegisteredAccountBindingPlan grants account registration, not an operator
+// destination. The ordinary binding constructor still validates destinations.
+func NewRegisteredAccountBindingPlan(id string, structural SatisfactionPlan, credentialKeys map[string]string, registrationTarget string) (OutboundBindingPlan, error) {
+	if _, ok := structural.OnboardingProfile(); !ok || strings.TrimSpace(registrationTarget) == "" {
+		return OutboundBindingPlan{}, fmt.Errorf("account registration requires its onboarding profile and target")
+	}
+	return newOutboundBindingPlan(id, structural, nil, nil, credentialKeys, registrationTarget, true)
+}
+
+func newOutboundBindingPlan(id string, structural SatisfactionPlan, destination any, requirements []Requirement, credentialKeys map[string]string, registrationTarget string, accountOnly bool) (OutboundBindingPlan, error) {
 	bindingID, err := admitChannelPlanIdentity("channel outbound binding id", id)
 	if err != nil {
 		return OutboundBindingPlan{}, err
@@ -1052,7 +1065,7 @@ func NewOutboundBindingPlanWithRegistration(id string, structural SatisfactionPl
 	if err != nil {
 		return OutboundBindingPlan{}, fmt.Errorf("channel outbound binding %q destination admission: %w", bindingID.String(), err)
 	}
-	if destination != nil || structural.Transport() != ChannelTransportSession {
+	if destination != nil || !accountOnly {
 		if err := destinationSchema.Validate(admitted.Interface()); err != nil {
 			return OutboundBindingPlan{}, fmt.Errorf("channel outbound binding %q destination: %w", bindingID.String(), err)
 		}
