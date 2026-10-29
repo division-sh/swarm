@@ -21,7 +21,7 @@ func TestWorkspaceMockInvocationStorageRetainsExactCountsBothStores(t *testing.T
 				t.Fatalf("fresh invocation counts: %+v %v", got, err)
 			}
 			runID := uuid.NewString()
-			seedAuthorActivityReceiptRun(t, fixture, ctx, runID)
+			ctx = seedAuthorActivityReceiptRun(t, fixture, ctx, runID)
 			at := time.Now().UTC()
 			completed := eventtest.PersistedProjection(uuid.NewString(), "work.completed", "runtime", "", []byte(`{}`), 0, runID, "", events.EventEnvelope{}, at)
 			if err := commitSemanticEventFixtureWithAgents(ctx, fixture.store, completed, []string{"worker", "pending-worker"}); err != nil {

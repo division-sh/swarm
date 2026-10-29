@@ -146,7 +146,7 @@ func runSelectedContractActivityForkCases(t *testing.T, fixture activityForkFixt
 			seedSelectedContractActivityLoop(t, ctx, fixture, loaded, sourceEvent, entityID, activation, at)
 			fixture.capture(t, ctx, sourceRunID)
 			if tt.sourceAttemptStatus != "" {
-				seedSelectedContractActivityAttempt(t, selected, sourceFact, sourceGeneration, tt.sourceAttemptStatus, tt.resultEventType, tt.failureClass, tt.failureCode, at)
+				seedSelectedContractActivityAttempt(t, ctx, selected, sourceFact, sourceGeneration, tt.sourceAttemptStatus, tt.resultEventType, tt.failureClass, tt.failureCode, at)
 			}
 			sourceBefore := readActivityForkSourceEvidence(t, selected, sourceRunID, entityID, sourceRequestEventID)
 			if sourceBefore.AttemptStatus != tt.sourceAttemptStatus {
@@ -677,7 +677,7 @@ func seedSelectedContractActivityLoop(t *testing.T, ctx context.Context, fixture
 	}
 }
 
-func seedSelectedContractActivityAttempt(t *testing.T, selected any, fact activityidentity.Fact, generation attemptgeneration.Generation, status, resultEventType, failureClass, failureCode string, at time.Time) {
+func seedSelectedContractActivityAttempt(t *testing.T, ctx context.Context, selected any, fact activityidentity.Fact, generation attemptgeneration.Generation, status, resultEventType, failureClass, failureCode string, at time.Time) {
 	t.Helper()
 	resultPayload := map[string]any{
 		"activity_id": "connector", "tool": "provider.connector", "revision_id": generation.RevisionID,
@@ -696,7 +696,8 @@ func seedSelectedContractActivityAttempt(t *testing.T, selected any, fact activi
 	requestEventID := activityidentity.RequestEventID(fact)
 	resultEventID := activityidentity.ResultEventID(fact, resultEventType)
 	inputHash := sha256.Sum256([]byte(`{"value":"x"}`))
-	if err := storetest.SeedHistoricalActivityForkAttempt(context.Background(), selected, pipeline.ActivityAttemptRecord{
+	ctx = nativeRunForkTestContext(t, ctx, selected)
+	if err := storetest.SeedHistoricalActivityForkAttempt(ctx, selected, pipeline.ActivityAttemptRecord{
 		RequestEventID: requestEventID, RunID: fact.RunID, ExecutionMode: executionmode.Live,
 		SourceEventID: fact.SourceEventID, EntityID: fact.EntityID, FlowInstance: "flow_a", NodeID: fact.Owner.Key(), HandlerEventKey: "review.requested",
 		ActivityID: "connector", Tool: "provider.connector", Attempt: 1, Status: status,

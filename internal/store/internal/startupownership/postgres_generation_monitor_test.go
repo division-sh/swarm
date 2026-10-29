@@ -182,7 +182,7 @@ func newPostgresGenerationMonitor(t *testing.T, phase string) (*postgresSession,
 	}
 	identity := processbinding.LeaseIdentity{LeaseID: uuid.NewString(), OwnerID: "generation-monitor", BootID: uuid.NewString(), RuntimeInstanceID: uuid.NewString(), Backend: processbinding.PostgresLeaseBackend}
 	var stamp processbinding.LeaseStamp
-	if err := lease.RunTransaction(context.Background(), func(ctx context.Context, tx *sql.Tx) error {
+	if _, err := lease.RunProcessAcquisitionOutcome(context.Background(), func(ctx context.Context, tx *sql.Tx) error {
 		var err error
 		stamp, err = generationauthority.AdvanceProcessGeneration(ctx, tx, identity, false)
 		return err
@@ -326,7 +326,7 @@ func TestPostgresGenerationMonitorHealthyQueueAndCancellation(t *testing.T) {
 			defer unblock()
 			workDone := make(chan error, 1)
 			go func() {
-				workDone <- session.lease.RunTransaction(context.Background(), func(context.Context, *sql.Tx) error {
+				workDone <- session.runTransaction(context.Background(), false, func(context.Context, *sql.Tx) error {
 					close(entered)
 					<-resume
 					return nil

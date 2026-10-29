@@ -116,7 +116,11 @@ func q1ExecuteSelectedPhaseComponent(t *testing.T, ctx context.Context, request 
 	if err := c.attachment.runtime.startExecution(ctx, c.attachment.pipeline, c.diagnostics, false); err != nil {
 		return out, err
 	}
-	continuations, err := deliverycontinuation.NewSelected(c.ports.busDurable.DeliveryLifecycle, c.attachment.deliveryAuthority, prepared.operation.selected, c.attachment.runtime.bus, func(_ context.Context, cause error) { c.attachment.cancel(cause) })
+	reconcile, err := c.selectedBarrierReconciler()
+	if err != nil {
+		return out, err
+	}
+	continuations, err := deliverycontinuation.NewSelected(c.ports.busDurable.DeliveryLifecycle, c.attachment.deliveryAuthority, prepared.operation.selected, c.attachment.runtime.bus, func(_ context.Context, cause error) { c.attachment.cancel(cause) }, reconcile)
 	if err != nil {
 		return out, err
 	}
@@ -485,6 +489,7 @@ func q1DeploymentComponentSource(t *testing.T, owner SelectedContractExecutionOw
 	ctx := correlation.WithSourceArtifactFact(runForkTestContext(t), mustComponentSourceFact(t, bundle.SourceArtifact.BundleHash()))
 	ctx = correlation.WithRootAdmission(ctx, rooted.Admission())
 	ctx = authoractivity.WithScope(ctx, authoractivity.BundleScope(runForkTestRuntimeInstanceID, bundle.SourceArtifact.BundleHash()))
+	ctx = originalSelectedFixtureContext(t, ctx, selected.(startupownership.Store))
 	ctx, err = eventreceiver.NormalExecution().Bind(ctx, executionmode.Live)
 	if err != nil {
 		t.Fatal(err)

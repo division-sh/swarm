@@ -25,7 +25,7 @@ type orderingTransaction struct {
 }
 
 // BindTransaction supplies transaction-local ordering possession without taking
-// the lock. The existing first consumer still acquires it before domain work.
+// the lock. A story reserves its batch here and acquires ordering at finalization.
 func BindTransaction(caller, ctx context.Context, tx *sql.Tx, dialect Dialect) (context.Context, func()) {
 	if caller == nil {
 		caller = context.Background()
@@ -42,7 +42,15 @@ func BindTransaction(caller, ctx context.Context, tx *sql.Tx, dialect Dialect) (
 	}
 }
 
-func (m *Mutation) lock(ctx context.Context, story bool) error {
+func (m *Mutation) reserve(ctx context.Context) error {
+	return m.order(ctx, false)
+}
+
+func (m *Mutation) lock(ctx context.Context) error {
+	return m.order(ctx, true)
+}
+
+func (m *Mutation) order(ctx context.Context, acquire bool) error {
 	if ctx == nil {
 		return errors.New("author activity ordering context is required")
 	}
@@ -61,13 +69,20 @@ func (m *Mutation) lock(ctx context.Context, story bool) error {
 	if err := ctx.Err(); err != nil {
 		return err
 	}
+	// Native PostgreSQL may drain SQL separately; the original caller still wins.
+	if err := scope.caller.Err(); err != nil {
+		return err
+	}
+	if !acquire {
+		if scope.story {
+			return errors.New("author activity transaction already owns its story batch")
+		}
+		scope.story = true
+		m.last = scope.last
+		return nil
+	}
 	reused := scope.held
 	if reused {
-		// Native PostgreSQL may drain an admitted SQL operation with a separate
-		// context. Reuse still observes the original caller's cancellation.
-		if err := scope.caller.Err(); err != nil {
-			return err
-		}
 		m.last = scope.last
 	} else {
 		acquisition := transactiontest.BeginOrderingAcquisition(ctx)
@@ -78,12 +93,6 @@ func (m *Mutation) lock(ctx context.Context, story bool) error {
 		acquisition.End(nil)
 		scope.last = m.last
 		scope.held = true
-	}
-	if story {
-		if scope.story {
-			return errors.New("author activity transaction already owns its story batch")
-		}
-		scope.story = true
 	}
 	if reused {
 		transactiontest.OrderingReused(ctx)

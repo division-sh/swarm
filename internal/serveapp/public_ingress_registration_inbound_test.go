@@ -31,6 +31,8 @@ import (
 	runtimechannelactivation "github.com/division-sh/swarm/internal/runtime/channelactivation"
 	runtimecontracts "github.com/division-sh/swarm/internal/runtime/contracts"
 	"github.com/division-sh/swarm/internal/runtime/core/eventreceiver"
+	"github.com/division-sh/swarm/internal/runtime/core/worklifetime"
+	"github.com/division-sh/swarm/internal/runtime/correlation"
 	runtimecredentials "github.com/division-sh/swarm/internal/runtime/credentials"
 
 	"github.com/division-sh/swarm/internal/runtime/executionposture"
@@ -106,7 +108,8 @@ func TestProviderRegistrationRotationCannotRefreshRuntimeIngressAdmission(t *tes
 	const runID = "41000000-0000-0000-0000-000000000001"
 	eventsStore := newProcessIngressEventStore(t, source, runID)
 	persistence.store = eventsStore
-	workOwner := newSupervisorTestRuntimeOccurrence(t, bundleHash)
+	process := newSupervisorTestProcessOwner(t)
+	workOwner := newSupervisorTestRuntimeOccurrence(t, bundleHash, worklifetime.WithProcess(t.Context(), process))
 	bus, err := runtimebus.NewEphemeralEventBusWithOptions(eventsStore, runtimebus.EventBusOptions{
 		ContractBundle:         source,
 		Durable:                runtimebus.DurableDependencies{Instances: eventsStore, ConstructionPublications: eventsStore},
@@ -157,12 +160,14 @@ func TestProviderRegistrationRotationCannotRefreshRuntimeIngressAdmission(t *tes
 		t.Fatalf("InstalledCapabilitySubjects: %v", err)
 	}
 	rt := &runtimepkg.Runtime{ExecutionPosture: executionposture.Live, Bus: bus, InboundGateway: gateway, ChannelActivations: activationOwner,
-		Options: runtimepkg.RuntimeOptions{RuntimeInstanceID: workOwner.Identity().RuntimeInstanceID, ProviderCredentials: credentialStore, WorkflowModule: module, ProviderTriggerCatalog: catalog, DeclaredChannelPublication: declaredPublication,
+		Options: runtimepkg.RuntimeOptions{ProcessWorkOwner: process, RuntimeInstanceID: workOwner.Identity().RuntimeInstanceID, ProviderCredentials: credentialStore, WorkflowModule: module, ProviderTriggerCatalog: catalog, DeclaredChannelPublication: declaredPublication,
 			SourceArtifactFact: mustServeTestEphemeralSourceArtifactFact(bundleHash)}}
 	selected := storetest.StartSQLiteRuntimeStore(t)
-	sourceartifactfixture.RequireArtifact(t, t.Context(), selected, bundle.SourceArtifact)
+	fixtureContext := worklifetime.WithProcess(worklifetime.WithOccurrence(correlation.WithRuntimeInstanceID(t.Context(), rt.Options.RuntimeInstanceID), workOwner), process)
+	fixtureContext = serveFixtureProcessContext(t, fixtureContext, selected)
+	sourceartifactfixture.RequireArtifact(t, fixtureContext, selected, bundle.SourceArtifact)
 	rt.Manager = runtimemanager.NewAgentManager(bus, nil)
-	grant := admitServeSessionProcessFixture(t, selected, rt.Options.RuntimeInstanceID, rooted.Admission())
+	grant := admitServeSessionProcessFixture(t, fixtureContext, selected, rt.Options.RuntimeInstanceID, rooted.Admission())
 	if err := rt.InstallStartupGrant(grant); err != nil {
 		t.Fatal(err)
 	}

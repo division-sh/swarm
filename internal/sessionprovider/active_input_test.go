@@ -59,6 +59,7 @@ type activeInputFixture struct {
 	nativeProcess startupownership.ProcessCapability
 	nativeContext context.Context
 	rooted        sourceartifact.RootedSource
+	nativeWork    *worklifetime.Process
 	ctx           context.Context
 	claimEvent    capturedEvent
 	claim         operatorchannel.InboundClaim
@@ -114,7 +115,21 @@ func newActiveInputFixtureWithTarget(t *testing.T, backend string, outbound, sav
 		f.location = testutil.StartPostgresDSN(t)
 		f.selected, _ = storetest.StartPostgresRuntimeStoreWithReopen(t, f.location)
 	}
-	ctx, now := context.Background(), time.Now().UTC().Truncate(time.Microsecond)
+	runtimeID := uuid.NewString()
+	f.ctx = context.Background()
+	capability := acquireLogoutProcessFixture(t, f, runtimeID)
+	original, err := capability.Evidence()
+	if err != nil {
+		t.Fatal(err)
+	}
+	process := f.nativeWork
+	if process == nil {
+		t.Fatal("active input fixture lost its acquired process work owner")
+	}
+	if err := process.BindOriginalProcess(original.LeaseStamp()); err != nil {
+		t.Fatal(err)
+	}
+	ctx, now := worklifetime.WithProcess(f.ctx, process), time.Now().UTC().Truncate(time.Microsecond)
 	manifest := sessionInputManifestFixture(t)
 	members := map[string][]byte{
 		"manifest.yaml": []byte("version: 1.0.0\nplatform_version: '*'\n"),
@@ -154,7 +169,7 @@ func newActiveInputFixtureWithTarget(t *testing.T, backend string, outbound, sav
 	}
 	f.source = captureSource{Coordinate: channelonboarding.ChannelRuntimeContextCoordinate{
 		BundleHash: source.BundleHash(), BundleIdentity: "active-native-input", PackInventoryGeneration: "sha256:active-native-input",
-		RuntimeInstanceID: uuid.NewString(), ContextPublicationGeneration: 1, PlanGeneration: generation}, CatalogGeneration: catalog.Generation()}
+		RuntimeInstanceID: runtimeID, ContextPublicationGeneration: 1, PlanGeneration: generation}, CatalogGeneration: catalog.Generation()}
 	id := uuid.NewString()
 	f.operation, err = f.selected.ReserveChannelOnboarding(ctx, channelonboarding.StartRequest{OperationID: id,
 		RequestKeyHash: id, RequestHash: id, PrincipalID: principal.ID, Verb: channelonboarding.VerbConnect, Provider: "whatsapp",
@@ -189,13 +204,13 @@ func newActiveInputFixtureWithTarget(t *testing.T, backend string, outbound, sav
 	}
 	f.peer = newSDKPeer(t)
 	f.ctx = authoractivity.WithScope(correlation.WithRootAdmission(correlation.WithSourceArtifactFact(f.peer.ctx, source), f.rooted.Admission()), authoractivity.BundleScope(f.source.Coordinate.RuntimeInstanceID, source.BundleHash()))
-	process := worklifetime.NewProcess()
+	f.ctx = worklifetime.WithProcess(f.ctx, process)
 	f.workOwner, err = process.NewRuntime(f.ctx, worklifetime.RuntimeIdentity{RuntimeInstanceID: f.source.Coordinate.RuntimeInstanceID, BundleHash: source.BundleHash()})
 	if err != nil {
 		t.Fatal(err)
 	}
 	f.ctx = worklifetime.WithOccurrence(f.ctx, f.workOwner)
-	f.nativeContext = f.ctx
+	f.nativeContext = authoractivity.WithScope(correlation.WithSourceArtifactFact(f.nativeContext, source), authoractivity.BundleScope(f.source.Coordinate.RuntimeInstanceID, source.BundleHash()))
 	acquireLogoutProcessFixture(t, f, f.operation.Coordinate.RuntimeInstanceID)
 	initialWorkOwner := f.workOwner
 	t.Cleanup(func() {

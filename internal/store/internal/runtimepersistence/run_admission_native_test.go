@@ -82,6 +82,9 @@ func TestRunAdmissionCanonicalInvalidationBothStores(t *testing.T) {
 					err := runSelectedFixtureMutation(ctx, fixture.store, "canonical admission invalidation", func(txctx context.Context, attempt *mutationprotocol.Attempt) error {
 						var original runtimecorrelation.SourceArtifactFact
 						if err := attempt.WithSQL(txctx, func(txctx context.Context, tx *sql.Tx) (err error) {
+							if _, err := mutationprotocol.RunRowLock(txctx, tx, runID, true); err != nil {
+								return err
+							}
 							original, err = writer.RequireActiveSourceTx(txctx, tx, runID)
 							return err
 						}); err != nil {

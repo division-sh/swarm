@@ -16,7 +16,7 @@ import (
 
 func TestSQLiteRuntimeStore_PrivateMutationRetriesBusy(t *testing.T) {
 	store, lockStore := newSQLiteRuntimeMutationBusyStores(t, time.Millisecond)
-	ctx, cancel := context.WithTimeout(storeTestWorkContext(t, testAuthorActivityContext()), 2*time.Second)
+	ctx, cancel := context.WithTimeout(originalStoreFixtureContext(t, storeTestWorkContext(t, testAuthorActivityContext()), store), 2*time.Second)
 	defer cancel()
 
 	lockTx, err := lockStore.backend.ConstructionHandle().BeginTx(ctx, nil)
@@ -76,7 +76,7 @@ func TestSQLiteRuntimeStore_PrivateMutationRetriesBusy(t *testing.T) {
 
 func TestSQLiteRuntimeStore_PrivateMutationStopsRetryOnContextDeadline(t *testing.T) {
 	store, lockStore := newSQLiteRuntimeMutationBusyStores(t, time.Millisecond)
-	baseCtx := testAuthorActivityContext()
+	baseCtx := originalStoreFixtureContext(t, testAuthorActivityContext(), store)
 
 	lockTx, err := lockStore.backend.ConstructionHandle().BeginTx(baseCtx, nil)
 	if err != nil {
@@ -109,7 +109,7 @@ func TestSQLiteRuntimeStore_PrivateMutationStopsRetryOnContextDeadline(t *testin
 
 func TestSQLiteRuntimeStore_PrivateMutationContextDeadlineCapsDriverBusyTimeout(t *testing.T) {
 	store, lockStore := newSQLiteRuntimeMutationBusyStores(t, 50*time.Millisecond)
-	baseCtx := testAuthorActivityContext()
+	baseCtx := originalStoreFixtureContext(t, testAuthorActivityContext(), store)
 
 	lockTx, err := lockStore.backend.ConstructionHandle().BeginTx(baseCtx, nil)
 	if err != nil {

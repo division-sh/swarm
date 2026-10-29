@@ -23,7 +23,7 @@ func proveServedResetFinalReceiptFailure(t *testing.T, proof servedControlProofR
 	if proof.Backend == "sqlite" {
 		selected = proof.SQLite
 	}
-	if err := storetest.SetResetFinalReceiptFault(context.Background(), selected, true); err != nil {
+	if err := storetest.SetResetFinalReceiptFault(servedControlProofAuthorActivityContext(t, proof), selected, true); err != nil {
 		t.Fatal(err)
 	}
 	params := map[string]any{"include_source_artifacts": false, "idempotency_key": "final-receipt-" + uuid.NewString()}
@@ -35,14 +35,15 @@ func proveServedResetFinalReceiptFailure(t *testing.T, proof servedControlProofR
 	if err := proof.DB.QueryRow("SELECT phase FROM runtime_reset_operations").Scan(&phase); err != nil || phase != "containers_settled" {
 		t.Fatalf("pending phase = %s, %v", phase, err)
 	}
-	if err := storetest.SetResetFinalReceiptFault(context.Background(), selected, false); err != nil {
-		t.Fatal(err)
-	}
 	use, _, err := proof.Contexts.AcquireBundleHash(context.Background(), proof.BundleHash)
 	if err != nil || use == nil {
 		t.Fatalf("converged successor unavailable: %v", err)
 	}
 	successor := use.Runtime()
+	if err := storetest.SetResetFinalReceiptFault(servedRuntimeProofAuthorActivityContext(t, successor, proof.BundleHash), selected, false); err != nil {
+		_ = use.Done()
+		t.Fatal(err)
+	}
 	grant, err := successor.CurrentStartupGrantEvidence()
 	if err != nil {
 		_ = use.Done()

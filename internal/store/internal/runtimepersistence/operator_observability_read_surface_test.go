@@ -458,9 +458,11 @@ func TestOperatorRuntimeObservabilityFiltersByBundleHash(t *testing.T) {
 	runA := uuid.NewString()
 	runB := uuid.NewString()
 	base := time.Now().UTC().Add(-time.Hour).Truncate(time.Second)
+	ctx = originalStoreFixtureContext(t, ctx, pg)
 	requireRunFixtureForTest(t, ctx, pg, semanticRunFixture{Origin: semanticScenarioSetupRunOriginForTest(),
 		RunID: runA, Artifact: artifactA, StartedAt: base,
 	})
+	ctx = originalStoreFixtureContext(t, ctx, pg)
 	requireRunFixtureForTest(t, ctx, pg, semanticRunFixture{Origin: semanticScenarioSetupRunOriginForTest(),
 		RunID: runB, Artifact: artifactB, StartedAt: base,
 	})

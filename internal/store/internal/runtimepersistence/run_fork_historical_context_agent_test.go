@@ -27,8 +27,8 @@ func TestRunForkHistoricalContextNestedAgentOwningRunBothStores(t *testing.T) {
 					opened := backend.open(t)
 					ctx := originalStoreFixtureContext(t, testAuthorActivityContext(), opened.store)
 					runID, foreignID := uuid.NewString(), uuid.NewString()
-					seedAuthorActivityReceiptRun(t, opened, ctx, runID)
-					seedAuthorActivityReceiptRun(t, opened, ctx, foreignID)
+					ctx = seedAuthorActivityReceiptRun(t, opened, ctx, runID)
+					ctx = seedAuthorActivityReceiptRun(t, opened, ctx, foreignID)
 					publishCompleteRunForkRevisionBaseline(t, ctx, opened.db, backend.name == "postgres", runID)
 					name, err := agentidentity.RuntimeName("history-agent", "store-test-fixture")
 					if err != nil {

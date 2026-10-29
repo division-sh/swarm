@@ -129,7 +129,7 @@ func loadFanOutSourceEvent(ctx context.Context, q eventReadQueryer, eventID stri
 		return empty, events.RouteSettlement{}, err
 	}
 	if !found {
-		return empty, events.RouteSettlement{}, fmt.Errorf("event %s not found", strings.TrimSpace(eventID))
+		return empty, events.RouteSettlement{}, fmt.Errorf("event %s not found: %w", strings.TrimSpace(eventID), sql.ErrNoRows)
 	}
 	return admitted.Event(), settlement, nil
 }

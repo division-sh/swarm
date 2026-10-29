@@ -62,6 +62,7 @@ func TestA2ActivationCarriesInitialJoinAtomicallyOnBothStores(t *testing.T) {
 					t.Fatal(err)
 				}
 				ctx := withLiveGateExecution(correlation.WithRunID(testAuthorActivityContextForSource(t, context.Background(), fact), runID))
+				ctx = nativeProcessContextFixture(t, ctx, selected.events)
 				runOwner, ok := selected.events.(storetest.RunFixtureStore)
 				if !ok {
 					t.Fatal("A2 native fixture requires the original selected run owner")

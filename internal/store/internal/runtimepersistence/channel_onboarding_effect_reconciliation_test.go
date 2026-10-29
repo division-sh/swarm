@@ -136,7 +136,7 @@ func beginSelectedChannelEffect(
 		ctx = runtimeeffects.WithLogicalOperationIdentity(testAuthorActivityContextForBundle(coordinate.BundleHash), "registration:"+string(state)+":"+onboardingID)
 		ctx = runtimeeffects.WithController(runtimeeffects.WithAuthority(ctx, authority), controller)
 	} else {
-		op, activation := selectedChannelConfirmationAuthorityFixture(t, selected, now, state)
+		op, activation := selectedChannelConfirmationAuthorityFixture(t, original, selected, now, state)
 		onboardingID, coordinate = op.OperationID, op.Coordinate
 		authority = runtimeeffects.Authority{
 			Kind: authorityKind, ID: op.ConfirmationOperationID, ExecutionOwner: "channel-onboarding:" + op.OperationID,
@@ -213,12 +213,13 @@ func advanceSelectedChannelEffect(t *testing.T, ctx context.Context, handle *run
 
 func selectedChannelConfirmationAuthorityFixture(
 	t *testing.T,
+	ctx context.Context,
 	selected channelOnboardingEffectSelectedStore,
 	now time.Time,
 	state runtimeeffects.State,
 ) (channelonboarding.Operation, channelonboarding.ConnectedChannelActivation) {
 	t.Helper()
-	principal, err := selected.EnsureOperatorPrincipal(context.Background(), now)
+	principal, err := selected.EnsureOperatorPrincipal(ctx, now)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -227,7 +228,7 @@ func selectedChannelConfirmationAuthorityFixture(
 	request.RequestHash = "confirmation-request-" + string(state)
 	request.TargetSelector = "ingress:support/flow/" + strings.ReplaceAll(string(state), "_", "-") + ":telegram"
 	request.Coordinate.BundleIdentity = fmt.Sprintf("confirmation-%s", state)
-	op, err := selected.ReserveChannelOnboarding(context.Background(), request)
+	op, err := selected.ReserveChannelOnboarding(ctx, request)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -235,7 +236,7 @@ func selectedChannelConfirmationAuthorityFixture(
 		Role: "bot_token", StoreKey: "telegram_bot_token." + string(state), Kind: channelonboarding.CredentialAdmissionWritten,
 		Receipt: "receipt-" + string(state), ValueSeal: operatorChannelProviderAuthority().Credential.Seal,
 	}}
-	op, err = selected.AdvanceChannelOnboarding(context.Background(), channelonboarding.AdvanceRequest{
+	op, err = selected.AdvanceChannelOnboarding(ctx, channelonboarding.AdvanceRequest{
 		OperationID: op.OperationID, ExpectedRevision: op.Revision, Phase: channelonboarding.PhaseCredentialsAdmitted,
 		CredentialAdmissions: admissions, ReplaceCredentialAdmissions: true, Now: now.Add(time.Second),
 	})
@@ -256,12 +257,12 @@ func selectedChannelConfirmationAuthorityFixture(
 		if phase == channelonboarding.PhaseAwaitingOperatorConfirmation || phase == channelonboarding.PhasePublishingActivation {
 			req.BindingRevision = 1
 		}
-		op, err = selected.AdvanceChannelOnboarding(context.Background(), req)
+		op, err = selected.AdvanceChannelOnboarding(ctx, req)
 		if err != nil {
 			t.Fatal(err)
 		}
 	}
-	op, activation, err := selected.PublishConnectedChannelActivation(context.Background(), channelonboarding.PublishActivationRequest{
+	op, activation, err := selected.PublishConnectedChannelActivation(ctx, channelonboarding.PublishActivationRequest{
 		OperationID: op.OperationID, ExpectedRevision: op.Revision, ActivationID: uuid.NewString(), BindingRevision: 1,
 		ConversationRef: "conversation-" + string(state), Now: now.Add(8 * time.Second),
 	})
@@ -279,7 +280,7 @@ func selectedChannelConfirmationAuthorityFixture(
 		if phase == channelonboarding.PhaseDeliveringConfirmation {
 			req.ConfirmationOperationID = uuid.NewString()
 		}
-		op, err = selected.AdvanceChannelOnboarding(context.Background(), req)
+		op, err = selected.AdvanceChannelOnboarding(ctx, req)
 		if err != nil {
 			t.Fatal(err)
 		}

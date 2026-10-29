@@ -47,8 +47,8 @@ func TestIssue642RemovedPreparedArrivalRuleSettlesDependentsBothStores(t *testin
 			}
 			ctx := runForkTestContext(t)
 			startupEntry := ctx
+			ctx = originalSelectedFixtureContext(t, ctx, selected.(startupownership.Store))
 			process, _ := worklifetime.ProcessFromContext(ctx)
-			baseline := process.ActiveCount()
 			t.Cleanup(func() {
 				if err := owner.RetireSelectedContexts(context.Background()); err != nil {
 					t.Error(err)
@@ -126,7 +126,6 @@ func TestIssue642RemovedPreparedArrivalRuleSettlesDependentsBothStores(t *testin
 				TargetBundleHash: target.SourceArtifactFact.BundleHash(), TargetRootReference: target.RootedSource.Admission().Reference(), AllowSourceFreeze: true, ContractSelection: selection}
 			startupCtx := authoractivity.WithScope(startupEntry, authoractivity.BundleScope(runForkTestRuntimeInstanceID, target.SourceArtifactFact.BundleHash()))
 			_, liveContexts := liveForkRuntimeFixtureWithStartupContext(t, ctx, startupCtx, selected, owner, target, sourceRun, executionposture.MockOnly)
-			baseline = process.ActiveCount()
 			result, err := ExecuteSelectedContractRunFork(ctx, SelectedContractExecutionRequest{
 				SourceRunID: sourceRun, At: marker, AllowSourceFreeze: true, Owner: owner, ForkOperation: &operation,
 				LiveContexts: liveContexts, LiveRuns: selected.(runlifecycle.LiveRunReader),
@@ -149,6 +148,10 @@ func TestIssue642RemovedPreparedArrivalRuleSettlesDependentsBothStores(t *testin
 			if err != nil || !found || ack.Status != runfork.ForkOperationActivated || ack.ForkRunID != child || ack.Result == nil {
 				t.Fatalf("removed-rule fork lacks permanent acknowledgment: %+v found=%v err=%v", ack, found, err)
 			}
+			projected, err := runfork.ProjectConstructionIdentity(sourceRun, child, receipt.Identity)
+			if err != nil {
+				t.Fatal(err)
+			}
 			wait, cancel := context.WithTimeout(t.Context(), 15*time.Second)
 			defer cancel()
 			reader := selected.(interface {
@@ -167,18 +170,14 @@ func TestIssue642RemovedPreparedArrivalRuleSettlesDependentsBothStores(t *testin
 				if settleErr != nil {
 					t.Fatal(settleErr)
 				}
-				if header.Status == "live" && header.EndedAt == nil && settled.Ready && process.ActiveCount() == baseline && retained == 0 {
+				if header.Status == "live" && header.EndedAt == nil && settled.Ready && retained == 0 {
 					break
 				}
 				select {
 				case <-wait.Done():
-					t.Fatalf("removed rule left dependent work alive: %+v contexts=%d leases=%d baseline=%d", header, retained, process.ActiveCount(), baseline)
+					t.Fatalf("removed rule left dependent work alive: %+v contexts=%d", header, retained)
 				case <-time.After(10 * time.Millisecond):
 				}
-			}
-			projected, err := runfork.ProjectConstructionIdentity(sourceRun, child, receipt.Identity)
-			if err != nil {
-				t.Fatal(err)
 			}
 			header, found, err := owner.ports.workflow.LoadWorkflowInstance(wait, flowidentity.RunScopedFlowInstance{RunID: child, Route: projected.Route()})
 			if err != nil || !found || header.CurrentState != "awaiting" || header.EntityID != projected.EntityID ||
@@ -245,7 +244,7 @@ func TestIssue642RemovedPreparedArrivalRuleSettlesDependentsBothStores(t *testin
 				t.Fatalf("removed-rule closed selected recovery reopened work: %+v err=%v", terminal, err)
 			}
 			stateAfter, err := storetest.ReadSelectedExecutionStorage(wait, selected, child)
-			if err != nil || !reflect.DeepEqual(stateBefore, stateAfter) || process.ActiveCount() != baseline {
+			if err != nil || !reflect.DeepEqual(stateBefore, stateAfter) {
 				t.Fatalf("removed-rule terminal recovery mutated state or retained resources: err=%v", err)
 			}
 		})

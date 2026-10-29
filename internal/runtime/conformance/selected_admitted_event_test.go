@@ -35,7 +35,7 @@ func TestIssue2655EventSelectorsKeepPreparedRevisionBothStores(t *testing.T) {
 				if len(recovered) != 0 {
 					t.Fatal("fresh event source unexpectedly requires selected recovery")
 				}
-				ctx := worklifetime.WithProcess(f.ctx, conformanceTestProcessOwner(t))
+				ctx := worklifetime.WithProcess(f.ctx, f.topology.process)
 				at := ""
 				if explicit {
 					at = eventID
@@ -167,7 +167,7 @@ func TestIssue2655EventOperationSelectorCorrespondenceBothStores(t *testing.T) {
 			t.Run(backend+"/"+map[bool]string{false: "omitted", true: "explicit"}[explicit], func(t *testing.T) {
 				f, sourceRun, eventID := issue2655EventSource(t, backend)
 				owner, _ := deploymentForkOwner(t, f)
-				ctx := worklifetime.WithProcess(f.ctx, conformanceTestProcessOwner(t))
+				ctx := worklifetime.WithProcess(f.ctx, f.topology.process)
 				at := ""
 				if explicit {
 					at = eventID

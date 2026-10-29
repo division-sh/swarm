@@ -834,15 +834,25 @@ func admitOriginalActivityRequestFixture(t *testing.T, ctx context.Context, decl
 	return admitted
 }
 
-func originalSourceForRun(t testing.TB, selected any, runID string) runforkexecution.LoadedSelectedContractSource {
+func originalSourceForRun(t testing.TB, selected any, runID string, held ...context.Context) runforkexecution.LoadedSelectedContractSource {
 	t.Helper()
 	store, ok := selected.(runforkexecution.SourceArtifactSelectedContractSourceStore)
 	if !ok {
 		t.Fatal("fixture requires the actual source artifact reader")
 	}
 	repo := canonicalrouting.RepoRoot(t)
+	var ctx context.Context
+	if len(held) > 1 {
+		t.Fatal("source fixture requires at most one held original context")
+	}
+	if len(held) == 1 {
+		ctx = held[0]
+	} else {
+		ctx = storeTestWorkContext(t, t.Context())
+	}
+	ctx = originalStoreFixtureContext(t, ctx, selected)
 	loaded, err := (runforkexecution.SourceArtifactSelectedContractSourceLoader{RepoRoot: repo,
-		Store: store}).LoadRunForkSelectedContractSourceForRequest(context.Background(), runforkexecution.SelectedContractSourceLoadRequest{
+		Store: store}).LoadRunForkSelectedContractSourceForRequest(ctx, runforkexecution.SelectedContractSourceLoadRequest{
 		Responsibility: runforkexecution.OriginalRunSource(runID), Selection: runfork.RunForkContractSelection{Mode: runfork.RunForkContractSelectionModeSelectedContracts},
 	})
 	if err != nil {
@@ -868,14 +878,21 @@ func originalCarriageForRun(t testing.TB, selected any, runID string) semanticvi
 	return owner
 }
 
-func originalActivityCarriageAtPoint(t *testing.T, store selectedActivityProjectionStore, sourceRunID string, point runfork.RunForkPoint) semanticview.OriginalLoopCarriage {
+func originalActivityCarriageAtPoint(t *testing.T, store selectedActivityProjectionStore, sourceRunID string, point runfork.RunForkPoint, held ...context.Context) semanticview.OriginalLoopCarriage {
 	t.Helper()
-	loaded := originalSourceForRun(t, store, sourceRunID)
+	loaded := originalSourceForRun(t, store, sourceRunID, held...)
 	carriage, err := semanticview.CompileOriginalLoopCarriage(loaded.Source)
 	if err != nil {
 		t.Fatal(err)
 	}
-	ctx := correlation.WithSourceArtifactFact(correlation.WithRunID(t.Context(), sourceRunID), loaded.SourceArtifactFact)
+	var ctx context.Context
+	if len(held) == 1 {
+		ctx = held[0]
+	} else {
+		ctx = storeTestWorkContext(t, t.Context())
+	}
+	ctx = correlation.WithSourceArtifactFact(correlation.WithRunID(ctx, sourceRunID), loaded.SourceArtifactFact)
+	ctx = originalStoreFixtureContext(t, ctx, store)
 	plan, err := store.PlanRunFork(ctx, runfork.RunForkPlanRequest{SourceRunID: sourceRunID, At: point.Input, ResolvedPoint: &point})
 	if err != nil {
 		t.Fatal(err)

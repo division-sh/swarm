@@ -247,6 +247,7 @@ func prepareP16PublicationGroup(t *testing.T, raw selectedFanOutLifecycleOwner, 
 	t.Helper()
 	artifact, bundle := fanOutMixedRouteSource(t)
 	ctx := testAuthorActivityContextForBundle(artifact.BundleHash())
+	ctx = originalStoreFixtureContext(t, ctx, raw)
 	fixture := seedFanOutOwnerFixtureWithArtifact(t, ctx, db, raw, backend == "postgres", cardinality, time.Now().UTC(), artifact)
 	route := events.RouteIdentity{FlowID: "producer", FlowInstance: "producer", EntityID: uuid.NewString()}.Normalized()
 	source, err := events.NewStaticFlowRoutingSource(route)

@@ -213,7 +213,9 @@ func recipientAuthorityRecoveryRequest(t *testing.T, ctx context.Context, store 
 	t.Helper()
 	source, child, eventID := uuid.NewString(), uuid.NewString(), uuid.NewString()
 	now := time.Now().UTC()
+	ctx = originalStoreFixtureContext(t, ctx, store)
 	requireRunningRunForTest(t, ctx, store, source, now)
+	ctx = originalStoreFixtureContext(t, ctx, store)
 	requireRunningRunForTest(t, ctx, store, child, now)
 	event := eventtest.ExistingRunRootIngress(eventID, "item.received", "route-recovery", "", []byte(`{}`), 0, source, events.EventEnvelope{}, now)
 	if err := commitSemanticEventFixture(ctx, store, event); err != nil {

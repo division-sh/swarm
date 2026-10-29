@@ -38,13 +38,14 @@ func selectedStoreActivationGateForTest(t *testing.T, ctx context.Context, selec
 	work := value.(*storeTestWorkFixture)
 	ctx = worklifetime.WithProcess(ctx, work.process)
 	capability := selectedMaterializationProcessForTest(t, work, selected)
+	ctx = originalStoreFixtureContext(t, ctx, selected)
 	fixed := &selectedStoreFixedPointComponent{SelectedContractForkLifecycle: selected.(runforkexecution.SelectedContractForkLifecycle)}
 	owner := selectedStorePreparationOwnerWithForkForTest(t, selected, fixed, observed...)
 	if err := owner.BindSelectedProcess(ctx, work.process, capability); err != nil {
 		t.Fatal(err)
 	}
 	t.Cleanup(func() {
-		if err := owner.RetireSelectedContexts(context.Background()); err != nil {
+		if err := owner.RetireSelectedContexts(context.WithoutCancel(ctx)); err != nil {
 			t.Error(err)
 		}
 	})

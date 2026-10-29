@@ -327,7 +327,7 @@ func TestOperatorConversationForkHandlersUseCanonicalOwnerAndIdempotency(t *test
 	}}
 	handler := testHandler(t, Options{
 		AuthTokens: []string{testToken},
-		Handlers: testOperatorHandlers(testOperatorCapabilities{
+		Handlers: testOperatorHandlers(t, testOperatorCapabilities{
 			Now:                       func() time.Time { return now },
 			ConversationForks:         forks,
 			ConversationForkLifecycle: forks,
@@ -514,7 +514,7 @@ func TestOperatorConversationForkHandlersTypedErrors(t *testing.T) {
 			tt.mutate(forks)
 			handler := testHandler(t, Options{
 				AuthTokens: []string{testToken},
-				Handlers: testOperatorHandlers(testOperatorCapabilities{
+				Handlers: testOperatorHandlers(t, testOperatorCapabilities{
 					Now:                       func() time.Time { return now },
 					ConversationForks:         forks,
 					ConversationForkLifecycle: forks,
@@ -560,7 +560,7 @@ func TestOperatorConversationForkChatHeartbeatFailurePreventsExecution(t *testin
 	executor := &fakeForkChatExecutor{result: runfork.ConversationForkChatExecution{AssistantMessage: "must not run"}}
 	handler := testHandler(t, Options{
 		AuthTokens: []string{testToken},
-		Handlers: testOperatorHandlers(testOperatorCapabilities{
+		Handlers: testOperatorHandlers(t, testOperatorCapabilities{
 			Now: func() time.Time { return now }, ConversationForkLifecycle: forks,
 			ForkChatExecutor: executor, Idempotency: newMutatingProbeIdempotencyStore(),
 		}),
@@ -888,7 +888,7 @@ func TestOperatorConversationForkRejectsInvalidForkPointBeforeOwner(t *testing.T
 			forks := &fakeConversationForkLifecycleStore{}
 			handler := testHandler(t, Options{
 				AuthTokens: []string{testToken},
-				Handlers: testOperatorHandlers(testOperatorCapabilities{
+				Handlers: testOperatorHandlers(t, testOperatorCapabilities{
 					Now:                       func() time.Time { return now },
 					ConversationForkLifecycle: forks,
 					Idempotency:               newMutatingProbeIdempotencyStore(),
@@ -926,7 +926,7 @@ func TestOperatorConversationForkIdempotencyConflict(t *testing.T) {
 	}
 	handler := testHandler(t, Options{
 		AuthTokens: []string{testToken},
-		Handlers: testOperatorHandlers(testOperatorCapabilities{
+		Handlers: testOperatorHandlers(t, testOperatorCapabilities{
 			Now:                       func() time.Time { return now },
 			ConversationForkLifecycle: forks,
 			Idempotency:               newMutatingProbeIdempotencyStore(),

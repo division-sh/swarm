@@ -829,12 +829,14 @@ func TestDurableDataHTTPPublicSurfaceAcrossSelectedStores(t *testing.T) {
 		t.Run(backend.name, func(t *testing.T) {
 			ctx := context.Background()
 			selected := backend.open(t)
+			ctx = apiTestOriginalProcessContext(t, ctx, selected)
 			db := storetest.Database(selected)
 			catalog, ref := dataHTTPProbeCatalog(t)
 			if _, err := selected.EnsureSourceArtifactWithData(ctx, dataProbeSourceArtifact, catalog); err != nil {
 				t.Fatalf("register catalog: %v", err)
 			}
 			handler := testHandler(t, Options{AuthTokens: []string{testToken}, Handlers: OperatorDataHandlers(DataHandlerOptions{Store: selected})})
+			bindAPITestHandlerOriginalProcess(t, handler, ctx)
 			call := func(method string, params map[string]any) map[string]any {
 				t.Helper()
 				status, response, body := callReadOnlyProbeRPC(t, handler, method, params, "Bearer "+testToken)

@@ -397,7 +397,12 @@ func VerifyDeliverySessionBindingRejectsForeignSourceWithExactClaimBeforeStoreMu
 	claim := store.claim(t, eventID, runID, route)
 	sessionID := fixture.Session(t, route.AgentIdentity)
 
-	foreignCtx := runtimedelivery.WithClaim(context.Background(), claim)
+	process, found := worklifetime.ProcessFromContext(fixture.Context)
+	if !found {
+		t.Fatal("native source-binding fixture lacks its original process")
+	}
+	originalCtx := worklifetime.WithProcess(context.Background(), process)
+	foreignCtx := runtimedelivery.WithClaim(originalCtx, claim)
 	foreignCtx = runtimecorrelation.WithSourceArtifactFact(foreignCtx, foreign)
 	if _, err := bus.MarkDeliveryInProgress(foreignCtx, "agent-a", sessionID); err == nil ||
 		!strings.Contains(err.Error(), "bundle source fact conflicts") {

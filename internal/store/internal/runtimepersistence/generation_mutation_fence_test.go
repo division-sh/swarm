@@ -62,6 +62,7 @@ func TestGenerationMutationFenceBothStores(t *testing.T) {
 					store := selected.(selectedForkDiscardStore)
 					sqlite := !postgres
 					ctx, cancel := context.WithTimeout(testAuthorActivityContext(), 20*time.Second)
+					ctx = originalStoreFixtureContext(t, ctx, selected)
 					defer cancel()
 					ctx = originalStoreFixtureContext(t, ctx, store)
 					var grant startupownership.GenerationGrant
