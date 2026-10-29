@@ -113,9 +113,6 @@ func ProviderSourceForBundle(bundle *runtimecontracts.WorkflowContractBundle) (P
 		return ProviderSource{}, err
 	}
 	if projection, ok := bundle.PackAdmission.(Projection); ok && projection.providerSource.rooted.Artifact() != nil {
-		if _, err := FromBundle(bundle); err != nil {
-			return ProviderSource{}, err
-		}
 		providers := projection.providerSource
 		if !providers.Valid() || !providers.rooted.Admission().Equal(rooted.Admission()) || providers.rooted.Artifact() != rooted.Artifact() {
 			return ProviderSource{}, fmt.Errorf("provider source admission does not own the compiled rooted source")
