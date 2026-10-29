@@ -129,6 +129,7 @@ func openManagerNativeDelivery(t *testing.T, backend string, sources ...semantic
 	if err := selected.ActivateDeliveryAuthority(ctx, authority); err != nil {
 		t.Fatal(err)
 	}
+	originalContext := ctx
 	return &manager.ManagerDeliveryNativeFixture{
 		Store: selected, Authority: authority, Context: ctx, NormalAuthority: authority, SemanticSource: semanticSource,
 		MutationContext: func(operation context.Context) (context.Context, error) {
@@ -148,12 +149,15 @@ func openManagerNativeDelivery(t *testing.T, backend string, sources ...semantic
 		},
 		Publish: func(t *testing.T, ctx context.Context, event events.Event, routes []events.DeliveryRoute, authority deliverylifecycle.ExecutionAuthority) {
 			t.Helper()
+			ctx = startupownership.CarryMutationAuthority(ctx, originalContext)
 			publishManagerNativeDelivery(t, ctx, selected, event, routes, authority)
 		},
 		ClaimHeartbeat: func(ctx context.Context, authority deliverylifecycle.ExecutionAuthority, event events.Event, route events.DeliveryRoute) (deliverylifecycle.ClaimResult, error) {
+			ctx = startupownership.CarryMutationAuthority(ctx, originalContext)
 			return storetest.ClaimManagerHeartbeatProof(ctx, selected, authority, event, route)
 		},
 		RenewHeartbeat: func(ctx context.Context, claim deliverylifecycle.Claim) (deliverylifecycle.ClaimCommit, error) {
+			ctx = startupownership.CarryMutationAuthority(ctx, originalContext)
 			return storetest.RenewManagerHeartbeatProof(ctx, selected, claim)
 		},
 		RetryReady: func(t *testing.T, event events.Event, route events.DeliveryRoute) {

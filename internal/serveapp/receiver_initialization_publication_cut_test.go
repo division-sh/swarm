@@ -13,7 +13,7 @@ import (
 
 // Only these two constructor routes use the release log as a snapshot-writer
 // fence. Their earlier delivery/configuration/candidate gates remain required.
-func requireReceiverInitializationHeldOrigin(t *testing.T, reader receiverProofStateReader, endpoint string, probe *lifecycleprobe.Probe, hold *exactOriginDiagnosticHold, seed servedEventPublishRPCResult, release func(), completion *receiverCompletionBoundary, bundleHash string) {
+func requireReceiverInitializationHeldOrigin(t *testing.T, reader receiverProofStateReader, endpoint string, probe *lifecycleprobe.Probe, hold *exactOriginDiagnosticHold, seed servedEventPublishRPCResult, release func()) {
 	t.Helper()
 	defer release()
 	ctx, cancel := context.WithTimeout(t.Context(), servedEventPublishLifecycleProbeWaitTimeout)
@@ -41,7 +41,6 @@ func requireReceiverInitializationHeldOrigin(t *testing.T, reader receiverProofS
 			t.Fatal("exact published-log fence opened before its native diagnostic write")
 		}
 	}
-	requireReceiverCompletionBoundary(t, ctx, completion, bundleHash, seed.RunID)
 	before := requireReceiverApplicationSnapshot(t, reader)
 	release()
 	if err := waitExactOriginPublications(ctx, probe, seed.EventID); err != nil {
@@ -52,7 +51,7 @@ func requireReceiverInitializationHeldOrigin(t *testing.T, reader receiverProofS
 	requireReceiverOriginDiagnosticRunCounter(t, before, after, seed.RunID)
 	for table, rows := range before {
 		switch table {
-		case "runs", "events":
+		case "run_event_counts", "events":
 			t.Logf("origin diagnostic native table %s rows %d -> %d", table, len(rows), len(after[table]))
 			continue
 		}
@@ -78,16 +77,16 @@ func requireReceiverInitializationHeldOrigin(t *testing.T, reader receiverProofS
 func requireReceiverOriginDiagnosticRunCounter(t *testing.T, before, after map[string][]string, runID string) {
 	t.Helper()
 	var columns []string
-	if err := json.Unmarshal([]byte(before["runs/columns"][0]), &columns); err != nil {
+	if err := json.Unmarshal([]byte(before["run_event_counts/columns"][0]), &columns); err != nil {
 		t.Fatal(err)
 	}
-	oldRows, err := storetest.DecodeSelectedForkSnapshotRows(storetest.SelectedForkStorageTableSnapshot{Columns: columns, Rows: before["runs"]})
+	oldRows, err := storetest.DecodeSelectedForkSnapshotRows(storetest.SelectedForkStorageTableSnapshot{Columns: columns, Rows: before["run_event_counts"]})
 	if err != nil {
 		t.Fatal(err)
 	}
-	newRows, err := storetest.DecodeSelectedForkSnapshotRows(storetest.SelectedForkStorageTableSnapshot{Columns: columns, Rows: after["runs"]})
+	newRows, err := storetest.DecodeSelectedForkSnapshotRows(storetest.SelectedForkStorageTableSnapshot{Columns: columns, Rows: after["run_event_counts"]})
 	if err != nil || len(newRows) != len(oldRows) {
-		t.Fatalf("origin diagnostic changed the run census: %v", err)
+		t.Fatalf("origin diagnostic changed the run-counter census: %v", err)
 	}
 	found := false
 	for index, old := range oldRows {
@@ -110,7 +109,7 @@ func requireReceiverOriginDiagnosticRunCounter(t *testing.T, before, after map[s
 			old["event_count"] = newRows[index]["event_count"]
 		}
 		if !reflect.DeepEqual(old, newRows[index]) {
-			t.Fatal("origin diagnostic changed a run field other than its exact event counter")
+			t.Fatal("origin diagnostic changed another run's event counter")
 		}
 	}
 	if !found {

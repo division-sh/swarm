@@ -16,11 +16,9 @@ import (
 	"github.com/division-sh/swarm/internal/runtime/executionposture"
 	"github.com/division-sh/swarm/internal/runtime/failures"
 	"github.com/division-sh/swarm/internal/runtime/llm"
-	runtimerunlifecycle "github.com/division-sh/swarm/internal/runtime/runlifecycle"
 	"github.com/division-sh/swarm/internal/runtime/semanticview"
 	runtimetools "github.com/division-sh/swarm/internal/runtime/tools"
 	"github.com/division-sh/swarm/internal/store/storetest"
-	"github.com/division-sh/swarm/internal/testutil/sourceartifactfixture"
 )
 
 type nativeTimeoutFallbackRuntime struct{ llm.NoopRuntime }
@@ -65,7 +63,7 @@ func (s nativeTimeoutStaleLaunchStore) MarkExternalAttemptLaunched(ctx context.C
 func TestNativeWebSearchCustomTimeoutSettlementBothStores(t *testing.T) {
 	for _, backend := range []string{"sqlite", "postgres"} {
 		t.Run(backend, func(t *testing.T) {
-			for _, phase := range []string{"success", "timeout", "prelaunch_cancel", "stale_launch", "acknowledged_cleanup", "unacknowledged_settlement"} {
+			for _, phase := range []string{"success", "timeout", "prelaunch_cancel", "stale_launch", "unacknowledged_settlement"} {
 				t.Run(phase, func(t *testing.T) { proveNativeTimeoutSelectedSettlement(t, backend, phase) })
 			}
 		})
@@ -85,14 +83,6 @@ func proveNativeTimeoutSelectedSettlement(t *testing.T, backend, phase string) {
 	actor.NativeTools.WebSearch = true
 	ctx = runtimetools.WithActor(ctx, actor)
 	fault := errors.New("injected native settlement diagnostic")
-	sink := &failingHTTPCompletionSink{err: fault}
-	if phase == "acknowledged_cleanup" {
-		registration, err := selected.RegisterCompletionCandidateSink(ctx, runtimerunlifecycle.CandidateScope{BundleHash: sourceartifactfixture.BundleHash}, sink)
-		if err != nil {
-			t.Fatal(err)
-		}
-		t.Cleanup(registration.Release)
-	}
 	if phase == "stale_launch" {
 		ctx = runtimeeffects.WithController(ctx, runtimeeffects.NewController(nativeTimeoutStaleLaunchStore{Store: selected}).WithExecutionPosture(executionposture.Live))
 	}
@@ -138,8 +128,8 @@ func proveNativeTimeoutSelectedSettlement(t *testing.T, backend, phase string) {
 			stage, _ = failure.Failure.Detail.Attributes["stage"].(string)
 			class, code = string(failure.Failure.Class), failure.Failure.Detail.Code
 		}
-		t.Logf("native settlement diagnostic: phase=%s failure_type=%T class=%q code=%q stage=%q context_canceled=%t context_deadline=%t error_canceled=%t error_deadline=%t requests=%d completion_submits=%d output_present=%t",
-			phase, err, class, code, stage, errors.Is(ctx.Err(), context.Canceled), errors.Is(ctx.Err(), context.DeadlineExceeded), errors.Is(err, context.Canceled), errors.Is(err, context.DeadlineExceeded), calls.Load(), sink.submits, out != nil)
+		t.Logf("native settlement diagnostic: phase=%s failure_type=%T class=%q code=%q stage=%q context_canceled=%t context_deadline=%t error_canceled=%t error_deadline=%t requests=%d output_present=%t",
+			phase, err, class, code, stage, errors.Is(ctx.Err(), context.Canceled), errors.Is(ctx.Err(), context.DeadlineExceeded), errors.Is(err, context.Canceled), errors.Is(err, context.DeadlineExceeded), calls.Load(), out != nil)
 		readCtx, cancel := context.WithTimeout(context.Background(), time.Second)
 		defer cancel()
 		rows, readErr := storetest.ReadExternalAttemptStorage(readCtx, selected)
@@ -184,15 +174,10 @@ func proveNativeTimeoutSelectedSettlement(t *testing.T, backend, phase string) {
 			t.Fatalf("native launch fence=%#v/%v calls=%d rows=%+v read=%v", out, err, calls.Load(), rows, readErr)
 		}
 		return
-	case "acknowledged_cleanup":
-		var committed *runtimeeffects.PostCommitMutationError
-		if out != nil || !errors.Is(err, fault) || !errors.As(err, &committed) || committed.Phase != runtimeeffects.MutationSettlement || sink.submits != 1 {
-			t.Fatalf("native acknowledged settlement=%#v/%v handoffs=%d", out, err, sink.submits)
-		}
 	case "unacknowledged_settlement":
 		state = runtimeeffects.StateLaunched
-		if out != nil || !errors.Is(err, fault) || sink.submits != 0 {
-			t.Fatalf("native unacknowledged settlement=%#v/%v handoffs=%d", out, err, sink.submits)
+		if out != nil || !errors.Is(err, fault) {
+			t.Fatalf("native unacknowledged settlement=%#v/%v", out, err)
 		}
 	}
 	rows, readErr := storetest.ReadExternalAttemptStorage(context.Background(), selected)

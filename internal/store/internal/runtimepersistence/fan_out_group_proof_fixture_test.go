@@ -326,7 +326,22 @@ func newGroupProofFixtureOn(t *testing.T, backend string, count int, parent *gro
 		})
 		f.raw = newStopCommitStoreOwner(t, backend, f.db)
 	}
-	ctx, cancel := context.WithTimeout(testAuthorActivityContext(), 30*time.Second)
+	baseCtx := testAuthorActivityContext()
+	if parent != nil {
+		baseCtx = parent.ctx
+	} else {
+		work := worklifetime.NewProcess()
+		baseCtx = worklifetime.WithProcess(baseCtx, work)
+		t.Cleanup(func() {
+			deadline, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+			defer cancel()
+			work.Retire()
+			if _, err := work.Join(deadline); err != nil {
+				t.Error(err)
+			}
+		})
+	}
+	ctx, cancel := context.WithTimeout(baseCtx, 30*time.Second)
 	t.Cleanup(cancel)
 	if parent != nil {
 		var err error
@@ -338,6 +353,7 @@ func newGroupProofFixtureOn(t *testing.T, backend string, count int, parent *gro
 		ctx = originalStoreFixtureContext(t, ctx, f.raw)
 	}
 	artifact, bundle := fanOutMixedRouteSource(t)
+	ctx = originalStoreFixtureContext(t, ctx, f.raw)
 	f.seed = seedFanOutOwnerFixtureWithArtifact(t, ctx, f.db, f.raw, f.postgres, count, time.Now().UTC().Truncate(time.Microsecond), artifact)
 	ctx = authoractivity.WithScope(ctx, authoractivity.BundleScope(authorActivityTestRuntimeInstanceID, f.seed.bundleHash))
 	ctx = correlation.WithSourceArtifactFact(correlation.WithRunID(ctx, f.seed.runID), mustStoreTestSourceArtifactFact(f.seed.bundleHash))

@@ -88,7 +88,7 @@ func TestProposedEffectCardLifecycleParity(t *testing.T) {
 	for _, backend := range []string{"sqlite", "postgres"} {
 		for _, verdict := range []string{"approve", "revise", "reject"} {
 			t.Run(backend+"/"+verdict, func(t *testing.T) {
-				ctx := testAuthorActivityContext()
+				ctx := storeTestWorkContext(t, testAuthorActivityContext())
 				cards, runID := decisionCardTestStore(t, backend)
 				ctx = originalStoreFixtureContext(t, ctx, cards)
 				store := cards.(decisioncard.ProposedEffectStore)
@@ -334,7 +334,7 @@ func TestProposedEffectContractPinParticipatesInDuplicateIdentityOnBothStores(t 
 			},
 		} {
 			t.Run(backend+"/"+mutate.name, func(t *testing.T) {
-				ctx := testAuthorActivityContext()
+				ctx := storeTestWorkContext(t, testAuthorActivityContext())
 				cards, runID := decisionCardTestStore(t, backend)
 				ctx = originalStoreFixtureContext(t, ctx, cards)
 				proposed := cards.(decisioncard.ProposedEffectStore)
@@ -374,7 +374,7 @@ func TestProposedEffectReadbackKeepsAuthorizationAndDispatchAxesSeparateOnBothSt
 			runtimepipeline.ActivityAttemptStatusUncertain,
 		} {
 			t.Run(backend+"/"+status, func(t *testing.T) {
-				ctx := testAuthorActivityContext()
+				ctx := storeTestWorkContext(t, testAuthorActivityContext())
 				cards, runID := decisionCardTestStore(t, backend)
 				ctx = originalStoreFixtureContext(t, ctx, cards)
 				rooted := decisionCardTestRootedSource(t, ctx, cards, runID)
@@ -517,7 +517,7 @@ func TestProposedEffectDecisionAndSupersessionWinnerParity(t *testing.T) {
 	for _, backend := range []string{"sqlite", "postgres"} {
 		for _, winner := range []string{"decision", "run_supersession", "loop_supersession"} {
 			t.Run(backend+"/"+winner, func(t *testing.T) {
-				ctx := testAuthorActivityContext()
+				ctx := storeTestWorkContext(t, testAuthorActivityContext())
 				cards, runID := decisionCardTestStore(t, backend)
 				ctx = originalStoreFixtureContext(t, ctx, cards)
 				store := cards.(decisioncard.ProposedEffectStore)
@@ -596,7 +596,7 @@ func TestProposedEffectDecisionAndSupersessionWinnerParity(t *testing.T) {
 func TestProposedEffectSupersessionScopesParity(t *testing.T) {
 	for _, backend := range []string{"sqlite", "postgres"} {
 		t.Run(backend, func(t *testing.T) {
-			ctx := testAuthorActivityContext()
+			ctx := storeTestWorkContext(t, testAuthorActivityContext())
 			cards, runID := decisionCardTestStore(t, backend)
 			ctx = originalStoreFixtureContext(t, ctx, cards)
 			store := cards.(decisioncard.ProposedEffectStore)

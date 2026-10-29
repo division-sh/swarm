@@ -45,18 +45,42 @@ func originalAPIFixtureContext(t testing.TB, ctx context.Context, selected any) 
 		if _, err := startupownership.CaptureMutationAuthority(ctx); err != nil {
 			t.Fatal(err)
 		}
-		return ctx
+	} else {
+		if _, found := runtimecorrelation.RuntimeInstanceIDFromContext(ctx); !found {
+			runtimeID := authorActivityTestRuntimeInstanceID
+			if scope, present := runtimeauthoractivity.ScopeFromContext(ctx); present {
+				runtimeID = scope.RuntimeInstanceID
+			}
+			ctx = runtimecorrelation.WithRuntimeInstanceID(ctx, runtimeID)
+		}
+		owner, ok := selected.(agentfixture.Store)
+		if !ok {
+			t.Fatalf("native API fixture lacks its original process owner: %T", selected)
+		}
+		var err error
+		ctx, err = agentfixture.ProcessContext(t, ctx, owner)
+		if err != nil {
+			t.Fatal(err)
+		}
 	}
-	owner, ok := selected.(agentfixture.Store)
-	if !ok {
-		t.Fatalf("native API fixture lacks its original process owner: %T", selected)
-	}
-	process, err := agentfixture.ProcessCapability(t, ctx, owner)
+	original, err := startupownership.CaptureMutationAuthority(ctx)
 	if err != nil {
 		t.Fatal(err)
 	}
-	ctx, err = startupownership.WithProcessMutationAuthority(ctx, process)
-	if err != nil {
+	process, found := worklifetime.ProcessFromContext(ctx)
+	if !found {
+		process = worklifetime.NewProcess()
+		ctx = worklifetime.WithProcess(ctx, process)
+		t.Cleanup(func() {
+			process.Retire()
+			wait, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+			defer cancel()
+			if _, err := process.Join(wait); err != nil {
+				t.Error(err)
+			}
+		})
+	}
+	if err := process.BindOriginalProcess(original.ProcessAuthority().LeaseStamp()); err != nil {
 		t.Fatal(err)
 	}
 	return ctx
@@ -124,6 +148,30 @@ type apiTestDurableEventStore interface {
 
 func testAuthorActivityRuntimeContext(ctx context.Context) context.Context {
 	return runtimeauthoractivity.WithScope(ctx, runtimeauthoractivity.RuntimeScope(authorActivityTestRuntimeInstanceID))
+}
+
+func apiTestOriginalProcessContext(t testing.TB, ctx context.Context, selected any) context.Context {
+	t.Helper()
+	return originalAPIFixtureContext(t, ctx, selected)
+}
+
+func bindAPITestHandlerOriginalProcess(t testing.TB, handler *Handler, ctx context.Context) {
+	t.Helper()
+	for name, method := range handler.handlers {
+		handler.handlers[name] = func(requestCtx context.Context, request Request) (any, error) {
+			if !startupownership.HasMutationAuthority(requestCtx) {
+				requestCtx = startupownership.CarryMutationAuthority(requestCtx, ctx)
+			}
+			return method(requestCtx, request)
+		}
+	}
+	original, err := startupownership.CaptureMutationAuthority(ctx)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := handler.workOwner.BindOriginalProcess(original.ProcessAuthority().LeaseStamp()); err != nil {
+		t.Fatal(err)
+	}
 }
 
 func testAuthorActivityContext(ctx context.Context) context.Context {
@@ -255,6 +303,25 @@ func newScopedAPITestEventBusWithDataCatalog(t *testing.T, eventStore runtimebus
 	if binder, ok := eventStore.(runtimepkg.EventPayloadAdmissionBinder); ok {
 		binder.SetEventPayloadAdmitter(opts.PayloadAdmitter)
 	}
+	if opts.WorkOwner == nil {
+		opts.WorkOwner = newAPITestRuntimeWorkOccurrence(t, opts.RuntimeInstanceID, opts.SourceArtifactFact.BundleHash())
+	}
+	setup, setupErr := opts.WorkOwner.Begin(registrationContext)
+	if setupErr != nil {
+		return nil, setupErr
+	}
+	defer func() {
+		if err := setup.Done(); err != nil {
+			t.Error(err)
+		}
+	}()
+	setupCtx := setup.Context()
+	if selected, native := eventStore.(agentfixture.Store); native {
+		setupCtx, setupErr = agentfixture.ProcessContext(t, setupCtx, selected)
+		if setupErr != nil {
+			return nil, setupErr
+		}
+	}
 	if registrar, ok := eventStore.(apiTestBundleDataCatalogRegistrar); ok {
 		catalog := durabledata.Catalog{BundleHash: opts.SourceArtifactFact.BundleHash()}
 		if exactCatalog != nil {
@@ -286,7 +353,7 @@ func newScopedAPITestEventBusWithDataCatalog(t *testing.T, eventStore runtimebus
 		if reader, ok := eventStore.(interface {
 			ListDataDeclarationSummaries(context.Context, string) ([]durabledata.DeclarationSummary, error)
 		}); ok {
-			existing, err := reader.ListDataDeclarationSummaries(context.Background(), catalog.BundleHash)
+			existing, err := reader.ListDataDeclarationSummaries(setupCtx, catalog.BundleHash)
 			if err != nil {
 				return nil, fmt.Errorf("read API test source artifact/data catalog: %w", err)
 			}
@@ -297,9 +364,6 @@ func newScopedAPITestEventBusWithDataCatalog(t *testing.T, eventStore runtimebus
 				return nil, fmt.Errorf("ensure API test source artifact/data catalog: %w", err)
 			}
 		}
-	}
-	if opts.WorkOwner == nil {
-		opts.WorkOwner = newAPITestRuntimeWorkOccurrence(t, opts.RuntimeInstanceID, opts.SourceArtifactFact.BundleHash())
 	}
 	if !opts.ReceiverExecution.Configured() {
 		opts.ReceiverExecution = eventreceiver.NormalExecution()

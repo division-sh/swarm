@@ -69,6 +69,7 @@ func TestAgentLifecycleRemovedSourceRetirementParity(t *testing.T) {
 			}
 			ctx := originalStoreFixtureContext(t, testAuthorActivityContext(), store)
 			identity := testAgentIdentity(t, "removed-source-agent", "")
+			ctx = originalStoreFixtureContext(t, ctx, store)
 			ctx = requireRunningRunForTest(t, ctx, store, identity.RunID, time.Now().UTC())
 			record := runtimemanager.PersistedAgent{
 				Config: withRuntimePersistenceTestIntent(t, runtimeactors.AgentConfig{
@@ -319,6 +320,7 @@ func proveAgentLifecycleProcessBindingReadback(t *testing.T, store lifecycleSour
 	staticIdentity := testAgentIdentity(t, "process-static-agent", "")
 	runID := uuid.NewString()
 	readinessIdentity := mustTestAgentIdentityForRun(runID, "process-readiness-agent", "readiness/instance-1")
+	ctx = originalStoreFixtureContext(t, ctx, store)
 	ctx = requireRunningRunForTest(t, ctx, store, staticIdentity.RunID, now)
 	ctx = requireRunningRunForTest(t, ctx, store, runID, now)
 	if err := agentfixture.UpsertStatic(t, ctx, store, runtimemanager.PersistedAgent{
@@ -656,6 +658,7 @@ func proveAgentLifecycleProcessBindingReadback(t *testing.T, store lifecycleSour
 	if err := predecessor.Release(ctx); err != nil {
 		t.Fatalf("release predecessor process capability: %v", err)
 	}
+	ctx = testAuthorActivityContext()
 	acquire := runtimestartupownership.AcquireRequest{
 		OwnerID: "process-binding-successor", BootID: uuid.NewString(), RuntimeInstanceID: uuid.NewString(),
 	}
@@ -886,6 +889,7 @@ func proveAgentLifecycleSourceSetRebind(t *testing.T, store lifecycleSourceSetRe
 	now := time.Date(2026, 8, 13, 12, 0, 0, 0, time.UTC)
 	agentID := "source-set-rebind-agent"
 	identity := testAgentIdentity(t, agentID, "global")
+	ctx = originalStoreFixtureContext(t, ctx, store)
 	ctx = requireRunningRunForTest(t, ctx, store, identity.RunID, now)
 	record := runtimemanager.PersistedAgent{
 		Config: withRuntimePersistenceTestIntent(t, runtimeactors.AgentConfig{

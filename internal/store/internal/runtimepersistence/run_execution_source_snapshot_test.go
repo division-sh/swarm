@@ -22,7 +22,7 @@ func TestRunExecutionSourceSnapshotBothStores(t *testing.T) {
 		t.Run(backend, func(t *testing.T) {
 			selected, db, sqlite := selectedForkDiscardTestStore(t, backend)
 			fixture := newSelectedCompletionFixture(t, selected, db, sqlite)
-			ctx := testAuthorActivityContext()
+			ctx := fixture.ctx
 			process := fixture.process
 			ctx, err := startupownership.WithProcessMutationAuthority(ctx, process)
 			if err != nil {

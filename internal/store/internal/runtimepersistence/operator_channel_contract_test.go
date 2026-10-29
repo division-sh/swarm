@@ -13,9 +13,11 @@ import (
 	"github.com/division-sh/swarm/internal/operatorchannel"
 	"github.com/division-sh/swarm/internal/packs"
 	render "github.com/division-sh/swarm/internal/runtime/channeldelivery"
+	runtimecorrelation "github.com/division-sh/swarm/internal/runtime/correlation"
 	runtimetools "github.com/division-sh/swarm/internal/runtime/tools"
 	"github.com/division-sh/swarm/internal/sessionprovider/authority"
 	channeldelivery "github.com/division-sh/swarm/internal/store/internal/backend/channeldelivery"
+	"github.com/division-sh/swarm/internal/store/testutil/agentfixture"
 	"github.com/division-sh/swarm/internal/testutil"
 	"github.com/google/uuid"
 )
@@ -26,6 +28,8 @@ type operatorChannelContractStore interface {
 }
 
 type operatorChannelContractFixture struct {
+	owner         testing.TB
+	ctx           context.Context
 	store         operatorChannelContractStore
 	settle        func(context.Context, operatorchannel.InboundClaim, time.Time) (operatorchannel.ClaimSettlement, error)
 	loadDefault   func(context.Context) (channeldelivery.Default, bool, error)
@@ -43,7 +47,11 @@ func TestOperatorChannelSelectedStoreContractParity(t *testing.T) {
 			fixture := openOperatorChannelContractFixture(t, backend)
 			runOperatorChannelContract(t, fixture)
 			t.Run("runtime_entry_cannot_claim_deployment_registration", func(t *testing.T) {
-				ctx, now := t.Context(), time.Now().UTC()
+				ctx, err := agentfixture.ProcessContext(fixture.owner, t.Context(), fixture.store.(agentfixture.Store))
+				if err != nil {
+					t.Fatal(err)
+				}
+				now := time.Now().UTC()
 				principal, err := fixture.store.EnsureOperatorPrincipal(ctx, now)
 				if err != nil {
 					t.Fatal(err)
@@ -352,7 +360,7 @@ func TestChannelDeliveryNoticeCutIsAtomicWithMailboxBothStores(t *testing.T) {
 
 func runOperatorChannelContract(t *testing.T, fixture operatorChannelContractFixture) {
 	t.Helper()
-	ctx := context.Background()
+	ctx := fixture.ctx
 	now := time.Date(2026, 8, 24, 12, 0, 0, 0, time.UTC)
 
 	const concurrentReaders = 8
@@ -821,7 +829,13 @@ func openOperatorChannelContractFixture(t *testing.T, backend string) operatorCh
 	switch backend {
 	case "sqlite":
 		selected := newBootstrappedSQLiteRuntimeStoreForTest(t)
+		ctx, err := agentfixture.ProcessContext(t, runtimecorrelation.WithRuntimeInstanceID(context.Background(), authorActivityTestRuntimeInstanceID), selected)
+		if err != nil {
+			t.Fatal(err)
+		}
 		return operatorChannelContractFixture{
+			owner:        t,
+			ctx:          ctx,
 			store:        selected,
 			insertNotice: selected.InsertMailboxItem,
 			countPlans: func(ctx context.Context, sourceID string) (int, error) {
@@ -884,7 +898,13 @@ func openOperatorChannelContractFixture(t *testing.T, backend string) operatorCh
 		_, db, cleanup := testutil.StartPostgres(t)
 		t.Cleanup(cleanup)
 		selected := admitTestPostgresStore(t, db)
+		ctx, err := agentfixture.ProcessContext(t, runtimecorrelation.WithRuntimeInstanceID(context.Background(), authorActivityTestRuntimeInstanceID), selected)
+		if err != nil {
+			t.Fatal(err)
+		}
 		return operatorChannelContractFixture{
+			owner:        t,
+			ctx:          ctx,
 			store:        selected,
 			insertNotice: selected.InsertMailboxItem,
 			countPlans: func(ctx context.Context, sourceID string) (int, error) {

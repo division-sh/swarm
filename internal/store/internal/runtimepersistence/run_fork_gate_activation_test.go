@@ -106,7 +106,9 @@ func TestMaterializeRunForkGateAuthoritiesSelectedStoreParity(t *testing.T) {
 			forkRunID := "00000000-0000-0000-0000-000000023611"
 			entityID := "00000000-0000-0000-0000-000000023612"
 			now := time.Date(2026, 8, 26, 15, 0, 0, 0, time.UTC)
+			ctx = originalStoreFixtureContext(t, ctx, selected)
 			requireRunningRunForTest(t, ctx, selected, sourceRunID, now)
+			ctx = originalStoreFixtureContext(t, ctx, selected)
 			requireRunningRunForTest(t, ctx, selected, forkRunID, now)
 
 			sourceActivation, err := gateruntime.New(sourceRunID, "launch/review", entityID, "launch", "awaiting_review", "launch_review", authorActivityTestBundleHash, testGateRoutes(t), "event-1", now)
@@ -248,6 +250,7 @@ func TestMaterializeRunForkRootAuthoritiesExecuteWithForkIdentitySelectedStorePa
 			ctx = originalStoreFixtureContext(t, ctx, selected)
 			forkRunID := "00000000-0000-0000-0000-000000023621"
 			now := time.Date(2026, 8, 28, 9, 0, 0, 0, time.UTC)
+			ctx = originalStoreFixtureContext(t, ctx, selected)
 			requireRunningRunForTest(t, ctx, selected, sourceRunID, now)
 
 			rootOutcomes := map[string]runtimecontracts.WorkflowGateOutcomePlan{
@@ -266,6 +269,7 @@ func TestMaterializeRunForkRootAuthoritiesExecuteWithForkIdentitySelectedStorePa
 			targetCtx := testAuthorActivityContextForBundle(target.BundleHash)
 			targetCtx = originalStoreFixtureContext(t, targetCtx, selected)
 			registerTestAuthorActivityCatalogForContext(t, selected, targetCtx)
+			targetCtx = originalStoreFixtureContext(t, targetCtx, selected)
 			requireRunFixtureForTest(t, targetCtx, selected, semanticRunFixture{Origin: semanticScenarioSetupRunOriginForTest(), RunID: forkRunID, BundleHash: target.BundleHash, Artifact: rootBundle.SourceArtifact, StartedAt: now})
 			rootGraph, found := rootBundle.WorkflowStageTopology(".")
 			if !found {
@@ -702,6 +706,7 @@ func TestMaterializeRunForkProposedEffectCreatesFreshPendingAuthority(t *testing
 					decisioncard.ProposedEffectStore
 				})
 				now := time.Date(2026, 7, 14, 18, 0, 0, 0, time.UTC)
+				ctx = originalStoreFixtureContext(t, ctx, f.store)
 				requireRunFixtureForTest(t, ctx, f.store, semanticRunFixture{Origin: semanticScenarioSetupRunOriginForTest(), RunID: forkRunID, Artifact: f.bundle.SourceArtifact, BundleHash: f.bundle.SourceArtifact.BundleHash()})
 				for _, runID := range []string{sourceRunID, forkRunID} {
 					constructHistoricalSourceFixture(t, runtimecorrelation.WithRunID(ctx, runID), f.store, sqliteFlowActivationRequest(f.bundle, ".", runID, "", runID))

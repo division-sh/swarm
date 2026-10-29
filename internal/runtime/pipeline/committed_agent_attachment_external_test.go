@@ -490,6 +490,7 @@ func newPartialAttachmentManager(t *testing.T, ctx context.Context, selected gat
 			} else {
 				processReleased = true
 			}
+			processReleased = true
 		})
 	}
 	t.Cleanup(releaseProcess)

@@ -136,6 +136,7 @@ func TestQ10ServedDiagnosticsPreserveMembershipAndAbsentLifecycleBothStores(t *t
 	for _, backend := range eventRecordContractBackends() {
 		t.Run(backend.name, func(t *testing.T) {
 			fixture, ctx := backend.open(t), testAuthorActivityContext()
+			ctx = originalStoreFixtureContext(t, ctx, fixture.store)
 			run, sibling := uuid.NewString(), uuid.NewString()
 			const (
 				fielded   = "96000000-0000-4000-8000-000000000001"

@@ -11,10 +11,15 @@ import (
 	"testing"
 	"time"
 
+	"github.com/division-sh/swarm/internal/runtime/contracts"
 	"github.com/division-sh/swarm/internal/runtime/core/handlerselection"
 	"github.com/division-sh/swarm/internal/runtime/core/identity"
+	"github.com/division-sh/swarm/internal/runtime/core/processbinding"
 	"github.com/division-sh/swarm/internal/runtime/deliverylifecycle"
+	"github.com/division-sh/swarm/internal/store/internal/backend/generationauthority"
 	sqlitebackend "github.com/division-sh/swarm/internal/store/internal/backend/sqlite"
+	"github.com/division-sh/swarm/internal/store/internal/schemastore"
+	"github.com/division-sh/swarm/internal/store/platformschema"
 	"github.com/division-sh/swarm/internal/testutil"
 	"github.com/google/uuid"
 	"github.com/lib/pq"
@@ -23,6 +28,7 @@ import (
 
 // This observes physical SQL at the native driver, not adapter invocations.
 type selectionSQLProbe struct {
+	originalContext  context.Context
 	mu               sync.Mutex
 	selects, inserts int
 	commitFailure    func(error)
@@ -135,7 +141,7 @@ func selectionWriterFixture(t *testing.T, backend string) (*sql.DB, *Adapter, *s
 	} else {
 		connector = selectionSQLiteConnector{dsn: "file:" + filepath.Join(t.TempDir(), "selection.db") + "?_pragma=busy_timeout(1000)"}
 	}
-	probe := &selectionSQLProbe{}
+	probe := &selectionSQLProbe{originalContext: context.Background()}
 	db := sql.OpenDB(selectionConnector{Connector: connector, probe: probe})
 	t.Cleanup(func() { _ = db.Close() })
 	_, err := db.Exec(`CREATE TABLE event_delivery_handler_rule_selections (
@@ -148,6 +154,52 @@ func selectionWriterFixture(t *testing.T, backend string) (*sql.DB, *Adapter, *s
 	dialect := DialectSQLite
 	if backend == "postgres" {
 		dialect = DialectPostgres
+	} else {
+		spec, err := contracts.LoadPlatformSpecDocument(filepath.Join("..", "..", "..", "..", "..", "platform-spec.yaml"))
+		if err != nil {
+			t.Fatal(err)
+		}
+		plans, err := platformschema.GeneratePlatformTableDDLs(spec)
+		if err != nil {
+			t.Fatal(err)
+		}
+		for _, plan := range plans {
+			if plan.TableName != "runtime_process_generation" {
+				continue
+			}
+			statements, err := schemastore.SQLiteStatementsForPlan(plan)
+			if err != nil {
+				t.Fatal(err)
+			}
+			for _, statement := range statements {
+				if _, err := db.ExecContext(probe.originalContext, statement); err != nil {
+					t.Fatal(err)
+				}
+			}
+		}
+		if err := platformschema.SeedFreshProcessGeneration(probe.originalContext, db, plans); err != nil {
+			t.Fatal(err)
+		}
+		owner, err := sqlitebackend.New(db)
+		if err != nil {
+			t.Fatal(err)
+		}
+		var original processbinding.LeaseStamp
+		acknowledged, err := owner.RunProcessAcquisitionOutcome(probe.originalContext, func(ctx context.Context, tx *sql.Tx) error {
+			var err error
+			original, err = generationauthority.AdvanceProcessGeneration(ctx, tx, processbinding.LeaseIdentity{
+				LeaseID: uuid.NewString(), OwnerID: "selection-native-fixture", BootID: uuid.NewString(),
+				RuntimeInstanceID: uuid.NewString(), Backend: processbinding.SQLiteLeaseBackend,
+			}, true)
+			return err
+		})
+		if err != nil || !acknowledged {
+			t.Fatalf("acquire original selection fixture: acknowledged=%v err=%v", acknowledged, err)
+		}
+		probe.originalContext, err = generationauthority.MutationContext(probe.originalContext, original, false)
+		if err != nil {
+			t.Fatal(err)
+		}
 	}
 	return db, &Adapter{dialect: dialect}, probe
 }
@@ -298,7 +350,7 @@ func TestHandlerSelectionCanonicalReadConcurrentBothStores(t *testing.T) {
 			}
 			t.Run(backend+"/"+name, func(t *testing.T) {
 				db, a, probe := selectionWriterFixture(t, backend)
-				ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+				ctx, cancel := context.WithTimeout(probe.originalContext, 10*time.Second)
 				defer cancel()
 				id := uuid.NewString()
 				fact := selectionFact(t, "first")
@@ -560,7 +612,7 @@ func TestHandlerSelectionCanonicalReadSQLiteHeldRawWriter(t *testing.T) {
 
 func TestHandlerSelectionCanonicalReadSQLiteNativeBusyRetry(t *testing.T) {
 	db, a, probe := selectionWriterFixture(t, "sqlite")
-	ctx := context.Background()
+	ctx := probe.originalContext
 	// DELETE journal permits the writer but a native reader blocks COMMIT.
 	if _, err := db.Exec(`PRAGMA journal_mode=DELETE`); err != nil {
 		t.Fatal(err)

@@ -121,18 +121,11 @@ func releaseServeTestAgentFixtureCapability(t testing.TB, selected storetest.Age
 
 func serveFixtureProcessContext(t testing.TB, ctx context.Context, selected any) context.Context {
 	t.Helper()
-	if runtimestartupownership.HasMutationAuthority(ctx) {
-		return ctx
-	}
 	store, ok := selected.(agentfixture.Store)
 	if !ok {
 		t.Fatalf("serve fixture requires its native lifecycle owner: %T", selected)
 	}
-	process, err := agentfixture.ProcessCapability(t, ctx, store)
-	if err != nil {
-		t.Fatal(err)
-	}
-	ctx, err = runtimestartupownership.WithProcessMutationAuthority(ctx, process)
+	ctx, err := agentfixture.ProcessContext(t, ctx, store)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -693,9 +686,10 @@ func startServedJoinProofRuntime(t *testing.T) (string, *sql.DB, string, *runtim
 	if err != nil {
 		t.Fatalf("project served join durable data: %v", err)
 	}
-	if _, err := pg.EnsureSourceArtifactWithData(context.Background(), bundle.SourceArtifact, catalog); err != nil {
+	if _, err := pg.EnsureSourceArtifactWithData(serveFixtureProcessContext(t, context.Background(), pg), bundle.SourceArtifact, catalog); err != nil {
 		t.Fatalf("persist served join source: %v", err)
 	}
+	releaseServeTestAgentFixtureCapability(t, pg)
 	bundleHash := bundle.SourceArtifact.BundleHash()
 	endpoint, rt := startServedEventPublishFollowUpRuntime(t, cliapp.ServeOptions{
 		ConfigPath:              writeServeRuntimeTestConfig(t),

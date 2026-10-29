@@ -28,6 +28,7 @@ func TestFanOutGrantedBatchObservationReadOnlyBothStores(t *testing.T) {
 			selected, _, db, postgres := newFanOutOwnerPairForTest(t, backend)
 			ctx = originalStoreFixtureContext(t, ctx, selected)
 			fixture := seedFanOutOwnerFixture(t, ctx, db, selected, postgres, 64, time.Now().UTC())
+			ctx = originalStoreFixtureContext(t, ctx, selected)
 			unregisteredRooted, _ := sourceartifactfixture.Rooted(t, "unregistered", storeTestSourceArtifact("unregistered-observed-source"))
 			unregistered := seedFanOutOwnerFixtureWithArtifact(t, ctx, db, selected, postgres, 1, time.Now().UTC(), unregisteredRooted.Artifact())
 			process, grants, occurrences, _ := newGrantedFanOutProcessForTest(t, ctx, selected, []fanOutOwnerFixture{fixture})
@@ -165,6 +166,7 @@ func TestFanOutGrantedSelectorObservationBypassesMutationFenceBothStores(t *test
 			ctx, cancel := context.WithTimeout(testAuthorActivityContext(), 10*time.Second)
 			defer cancel()
 			selected, _, db, postgres := newFanOutOwnerPairForTest(t, backend)
+			ctx = originalStoreFixtureContext(t, ctx, selected)
 			fixture := seedFanOutOwnerFixture(t, ctx, db, selected, postgres, 0, time.Now().UTC())
 			_, grants, occurrences, _ := newGrantedFanOutProcessForTest(t, ctx, selected, []fanOutOwnerFixture{fixture})
 			executor := &captureFanOutExecutor{turns: make(chan capturedFanOutTurn, 1), errors: make(chan error, 4), done: make(chan struct{})}
@@ -297,6 +299,7 @@ func TestFanOutGrantedSourceRefreshRegistrationWindowBothStores(t *testing.T) {
 			selected, _, db, postgres := newFanOutOwnerPairForTest(t, backend)
 			ctx = originalStoreFixtureContext(t, ctx, selected)
 			fixture := seedFanOutOwnerFixture(t, ctx, db, selected, postgres, 1, time.Now().UTC())
+			ctx = originalStoreFixtureContext(t, ctx, selected)
 			extraRooted, _ := sourceartifactfixture.Rooted(t, "extra", storeTestSourceArtifact("refresh-extra-source"))
 			seedFanOutOwnerFixtureWithArtifact(t, ctx, db, selected, postgres, 0, time.Now().UTC(), extraRooted.Artifact())
 			process, grants, occurrences, originalPlan := newGrantedFanOutProcessForTest(t, ctx, selected, []fanOutOwnerFixture{fixture})

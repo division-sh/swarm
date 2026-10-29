@@ -277,7 +277,7 @@ func TestA2KnownTargetWorkIssuedBeforeArmPublishesOutputBoundToActualArmOnBothSt
 				Mode: "template", RuntimeReadiness: &readiness, CurrentState: "dispatching", EntityType: "order_state",
 				Fields: map[string]any{"order_id": instanceID, "expected": []any{"a", "b"}},
 			}, now)
-			markGateRecoveryTopologyReadyFixture(t, selected, readiness, now)
+			markGateRecoveryTopologyReadyFixture(t, ctx, selected, readiness, now)
 			requireIndexedConstructionFixture(t, ctx, selected.persistence, source, runID, constructed.Identity)
 			load := func() runtimepipeline.WorkflowInstance {
 				t.Helper()

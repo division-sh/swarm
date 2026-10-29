@@ -21,7 +21,7 @@ func TestActivityAttemptStorageUsesOriginalSnapshotAndPhysicalInventoryBothStore
 			ctx, runID, otherRun, source := testAuthorActivityContext(), uuid.NewString(), uuid.NewString(), uuid.NewString()
 			ctx = originalStoreFixtureContext(t, ctx, fixture.store)
 			for _, run := range []string{runID, otherRun} {
-				seedAuthorActivityReceiptRun(t, fixture, ctx, run)
+				ctx = seedAuthorActivityReceiptRun(t, fixture, ctx, run)
 			}
 			journal := activityNativeJournalForFixture(t, fixture, runID)
 			at := time.Now().UTC().Add(-time.Hour).Truncate(time.Second)
@@ -101,6 +101,7 @@ func TestActivityAttemptStorageRejectsForeignOwnersAndUnavailableStorage(t *test
 	for _, backend := range eventRecordContractBackends() {
 		t.Run(backend.name, func(t *testing.T) {
 			fixture := backend.open(t)
+			ctx := fixture.originalContext(ctx)
 			for _, invalid := range []string{"", "invalid", uuid.Nil.String()} {
 				if got, err := ReadActivityAttemptStorageForTest(ctx, fixture.store, invalid); err == nil || got != nil {
 					t.Fatalf("invalid journal run identity returned evidence: %#v %v", got, err)

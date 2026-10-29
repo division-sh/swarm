@@ -2,6 +2,7 @@ package runtimepersistence
 
 import (
 	"context"
+	"database/sql"
 	"encoding/json"
 	"strings"
 	"testing"
@@ -12,6 +13,9 @@ import (
 	"github.com/division-sh/swarm/internal/runtime/effects"
 	"github.com/division-sh/swarm/internal/runtime/executionposture"
 	"github.com/division-sh/swarm/internal/runtime/startupownership"
+	"github.com/division-sh/swarm/internal/store/internal/backend/mutationprotocol"
+	postgresbackend "github.com/division-sh/swarm/internal/store/internal/backend/postgres"
+	sqlitebackend "github.com/division-sh/swarm/internal/store/internal/backend/sqlite"
 	"github.com/google/uuid"
 )
 
@@ -154,6 +158,36 @@ func TestPreparedSelectedForkProbeEffectBothStores(t *testing.T) {
 			}
 			if err := store.MarkExternalAttemptResponseObserved(ctx, attempt, map[string]any{"probe": true}, time.Now().UTC()); err != nil {
 				t.Fatal(err)
+			}
+			// A completed result entry cannot lend admission to another transaction.
+			resultRequest := effects.Settlement{OperationID: attempt.OperationID, AttemptID: attempt.AttemptID, Authority: attempt.Authority}
+			capture := func(ctx context.Context, _ *mutationprotocol.Attempt) (context.Context, error) { return ctx, nil }
+			var captured mutationprotocol.Result[context.Context]
+			var mutate func(context.Context, func(context.Context, *sql.Tx) error) error
+			if fixture.postgres {
+				native, err := postgresbackend.New(fixture.db)
+				if err != nil {
+					t.Fatal(err)
+				}
+				captured = mutationprotocol.RunPostgresExternalEffectResult(ctx, native, resultRequest, mutationprotocol.RevisionOnly, nil, capture)
+				mutate = native.RunTransaction
+			} else {
+				native, err := sqlitebackend.New(fixture.db)
+				if err != nil {
+					t.Fatal(err)
+				}
+				captured = mutationprotocol.RunSQLiteExternalEffectResult(ctx, native, "capture result admission", resultRequest, mutationprotocol.RevisionOnly, nil, capture)
+				mutate = func(ctx context.Context, write func(context.Context, *sql.Tx) error) error {
+					return native.RunTransaction(ctx, "refuse retained result admission", write)
+				}
+			}
+			retained, found := captured.Value()
+			if !captured.Acknowledged() || captured.Err() != nil || !found {
+				t.Fatalf("capture exact result admission: found=%v err=%v", found, captured.Err())
+			}
+			calls := 0
+			if err := mutate(context.WithoutCancel(retained), func(context.Context, *sql.Tx) error { calls++; return nil }); err == nil || calls != 0 {
+				t.Fatalf("retained result entered another transaction: calls=%d err=%v", calls, err)
 			}
 			if err := store.SettleExternalAttempt(ctx, effects.Settlement{OperationID: attempt.OperationID, AttemptID: attempt.AttemptID, Authority: authority, State: effects.StateSettled, Now: time.Now().UTC()}); err != nil {
 				t.Fatal(err)

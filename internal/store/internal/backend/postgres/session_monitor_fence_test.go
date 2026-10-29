@@ -332,7 +332,7 @@ func TestSessionNativePossessionAfterAdmittedTransactionAllowsSuccessor(t *testi
 			proofs.Add(1)
 		}
 	}
-	if err := lease.RunTransaction(context.Background(), func(ctx context.Context, tx *sql.Tx) error {
+	if err := lease.RunTransaction(probe.original, func(ctx context.Context, tx *sql.Tx) error {
 		_, err := tx.ExecContext(ctx, "SELECT 1")
 		return err
 	}); err != nil {
@@ -346,7 +346,7 @@ func TestSessionNativePossessionAfterAdmittedTransactionAllowsSuccessor(t *testi
 	if proofs.Load() != 1 || !lease.Current() || probe.closed.Load() != 0 {
 		t.Fatalf("healthy native proof: proofs=%d current=%t closed=%d", proofs.Load(), lease.Current(), probe.closed.Load())
 	}
-	if err := lease.RunTransaction(context.Background(), func(ctx context.Context, tx *sql.Tx) error {
+	if err := lease.RunTransaction(probe.original, func(ctx context.Context, tx *sql.Tx) error {
 		_, err := tx.ExecContext(ctx, "SELECT 1")
 		return err
 	}); err != nil {

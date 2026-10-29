@@ -88,7 +88,7 @@ func TestForkOperationConcurrentInitialBindBothStores(t *testing.T) {
 				}
 			}
 			if winner == "" {
-				t.Fatalf("neither first contender committed: %+v", outcomes)
+				t.Fatalf("neither first contender committed: %+v; errors: %v; %v", outcomes, outcomes[0].err, outcomes[1].err)
 			}
 			var count int
 			var durableChild string

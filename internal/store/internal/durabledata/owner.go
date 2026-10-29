@@ -711,7 +711,7 @@ func (o *Owner) Show(ctx context.Context, bundleHash string, ref runtimedata.Dec
 		return runtimedata.ResourceSnapshot{}, err
 	}
 	var snapshot runtimedata.ResourceSnapshot
-	err := o.runTransaction(ctx, func(txctx context.Context, tx *sql.Tx) error {
+	err := o.runReadTransaction(ctx, func(txctx context.Context, tx *sql.Tx) error {
 		declaration := runtimedata.Declaration{Ref: ref}
 		if strings.TrimSpace(bundleHash) != "" {
 			var err error
@@ -749,7 +749,7 @@ func (o *Owner) ListDeclarationSummaries(ctx context.Context, bundleHash string)
 		return nil, err
 	}
 	var summaries []runtimedata.DeclarationSummary
-	err := o.runTransaction(ctx, func(txctx context.Context, tx *sql.Tx) error {
+	err := o.runReadTransaction(ctx, func(txctx context.Context, tx *sql.Tx) error {
 		rows, err := tx.QueryContext(txctx, o.query(`
 			SELECT d.flow_path, d.event_name, d.display_name, d.schema_digest, d.canonical_schema_bytes,
 			       h.version_id, h.revision,
@@ -881,7 +881,7 @@ func (o *Owner) ListVersionSummaries(ctx context.Context, ref runtimedata.Declar
 		return nil, err
 	}
 	var summaries []runtimedata.VersionSummary
-	err := o.runTransaction(ctx, func(txctx context.Context, tx *sql.Tx) error {
+	err := o.runReadTransaction(ctx, func(txctx context.Context, tx *sql.Tx) error {
 		if err := o.requireDeclarationExistsTx(txctx, tx, ref); err != nil {
 			return err
 		}
@@ -931,7 +931,7 @@ func (o *Owner) ResolveVersionSummary(ctx context.Context, ref runtimedata.Decla
 		return runtimedata.VersionSummary{}, err
 	}
 	var summary runtimedata.VersionSummary
-	err := o.runTransaction(ctx, func(txctx context.Context, tx *sql.Tx) error {
+	err := o.runReadTransaction(ctx, func(txctx context.Context, tx *sql.Tx) error {
 		var err error
 		summary, err = o.resolveVersionSummaryTx(txctx, tx, ref, selector, false)
 		return err
@@ -1015,7 +1015,7 @@ func (o *Owner) ListVersionProvenance(ctx context.Context, versionID runtimedata
 		return nil, err
 	}
 	var out []runtimedata.Provenance
-	err := o.runTransaction(ctx, func(txctx context.Context, tx *sql.Tx) error {
+	err := o.runReadTransaction(ctx, func(txctx context.Context, tx *sql.Tx) error {
 		var marker int
 		if err := tx.QueryRowContext(txctx, o.query(`SELECT 1 FROM resource_versions WHERE version_id = %s`, 1), versionID).Scan(&marker); errors.Is(err, sql.ErrNoRows) {
 			return runtimedata.NewDomainError(runtimedata.CodeVersionMissing, "resource version %s does not exist", versionID)
@@ -1065,7 +1065,7 @@ func (o *Owner) ListPins(ctx context.Context, versionID runtimedata.VersionID, a
 		return nil, err
 	}
 	var pins []runtimedata.Pin
-	err := o.runTransaction(ctx, func(txctx context.Context, tx *sql.Tx) error {
+	err := o.runReadTransaction(ctx, func(txctx context.Context, tx *sql.Tx) error {
 		var packageKey, eventName string
 		var schemaDigest runtimedata.SchemaDigest
 		if err := tx.QueryRowContext(txctx, o.query(`SELECT flow_path, event_name, schema_digest FROM resource_versions WHERE version_id = %s`, 1), versionID).Scan(&packageKey, &eventName, &schemaDigest); errors.Is(err, sql.ErrNoRows) {
@@ -1118,7 +1118,7 @@ func (o *Owner) ListHeadHistory(ctx context.Context, ref runtimedata.Declaration
 		return nil, err
 	}
 	var history []runtimedata.HeadHistory
-	err := o.runTransaction(ctx, func(txctx context.Context, tx *sql.Tx) error {
+	err := o.runReadTransaction(ctx, func(txctx context.Context, tx *sql.Tx) error {
 		if err := o.requireDeclarationExistsTx(txctx, tx, ref); err != nil {
 			return err
 		}
@@ -1174,7 +1174,7 @@ func (o *Owner) LoadSourceOperation(ctx context.Context, id string) (runtimedata
 		return runtimedata.SourceOperationRecord{}, err
 	}
 	var record runtimedata.SourceOperationRecord
-	err := o.runTransaction(ctx, func(txctx context.Context, tx *sql.Tx) error {
+	err := o.runReadTransaction(ctx, func(txctx context.Context, tx *sql.Tx) error {
 		stored, found, err := o.readStoredSourceReceipt(txctx, tx, id)
 		if err != nil {
 			return err
@@ -1196,7 +1196,7 @@ func (o *Owner) LoadPruneOperation(ctx context.Context, id string) (runtimedata.
 		return runtimedata.PruneOperationResult{}, err
 	}
 	var result runtimedata.PruneOperationResult
-	err := o.runTransaction(ctx, func(txctx context.Context, tx *sql.Tx) error {
+	err := o.runReadTransaction(ctx, func(txctx context.Context, tx *sql.Tx) error {
 		stored, found, err := o.readStoredPruneReceipt(txctx, tx, id)
 		if err != nil {
 			return err
@@ -1218,7 +1218,7 @@ func (o *Owner) LoadPruneOperationPins(ctx context.Context, id string) ([]runtim
 		return nil, err
 	}
 	var pins []runtimedata.Pin
-	err := o.runTransaction(ctx, func(txctx context.Context, tx *sql.Tx) error {
+	err := o.runReadTransaction(ctx, func(txctx context.Context, tx *sql.Tx) error {
 		stored, found, err := o.readStoredPruneReceipt(txctx, tx, id)
 		if err != nil {
 			return err
@@ -1243,7 +1243,7 @@ func (o *Owner) LoadPins(ctx context.Context, versionID runtimedata.VersionID) (
 		return nil, err
 	}
 	var pins []runtimedata.Pin
-	err := o.runTransaction(ctx, func(txctx context.Context, tx *sql.Tx) error {
+	err := o.runReadTransaction(ctx, func(txctx context.Context, tx *sql.Tx) error {
 		var err error
 		pins, err = o.loadPins(txctx, tx, versionID)
 		return err
@@ -1259,7 +1259,7 @@ func (o *Owner) LoadHeadHistory(ctx context.Context, ref runtimedata.Declaration
 		return nil, err
 	}
 	var history []runtimedata.HeadHistory
-	err := o.runTransaction(ctx, func(txctx context.Context, tx *sql.Tx) error {
+	err := o.runReadTransaction(ctx, func(txctx context.Context, tx *sql.Tx) error {
 		rows, err := tx.QueryContext(txctx, o.query(`
 			SELECT revision, before_version_id, after_version_id, operation_kind, operation_id, committed_at
 			FROM resource_head_history WHERE flow_path = %s AND event_name = %s ORDER BY revision
@@ -1311,7 +1311,7 @@ func (o *Owner) LoadRunResourceAccess(ctx context.Context, runID string, declara
 	}
 
 	var out []runtimedata.ResourceAccessItem
-	err := o.runTransaction(ctx, func(txctx context.Context, tx *sql.Tx) error {
+	err := o.runReadTransaction(ctx, func(txctx context.Context, tx *sql.Tx) error {
 		if exists, err := o.runExistsTx(txctx, tx, runID); err != nil {
 			return err
 		} else if !exists {
@@ -1330,7 +1330,7 @@ func (o *Owner) LoadRunResourceAccess(ctx context.Context, runID string, declara
 			if err != nil {
 				return err
 			}
-			version, found, err := o.loadStoredVersion(txctx, tx, ref, versionID)
+			version, found, err := o.loadStoredVersion(txctx, tx, ref, versionID, false)
 			if err != nil {
 				return err
 			}
@@ -1481,8 +1481,8 @@ func scanVersionProvenance(row interface{ Scan(...any) error }, versionID runtim
 	return provenance, nil
 }
 
-func (o *Owner) loadStoredVersion(ctx context.Context, tx *sql.Tx, ref runtimedata.DeclarationRef, versionID runtimedata.VersionID) (runtimedata.Version, bool, error) {
-	version, found, err := o.loadStoredVersionPayload(ctx, tx, ref, versionID, true)
+func (o *Owner) loadStoredVersion(ctx context.Context, tx *sql.Tx, ref runtimedata.DeclarationRef, versionID runtimedata.VersionID, lock bool) (runtimedata.Version, bool, error) {
+	version, found, err := o.loadStoredVersionPayload(ctx, tx, ref, versionID, lock)
 	if err != nil || !found {
 		return version, found, err
 	}
@@ -1614,7 +1614,7 @@ func (o *Owner) Prune(ctx context.Context, command runtimedata.PruneCommand) (ru
 			return runtimedata.NewDomainError(runtimedata.CodeIntegrity, "resource declaration %s has no head aggregate", command.Declaration.Key())
 		}
 		result.ObservedHead = head.Before
-		version, found, err := o.loadStoredVersion(txctx, tx, command.Declaration, command.VersionID)
+		version, found, err := o.loadStoredVersion(txctx, tx, command.Declaration, command.VersionID, true)
 		if err != nil {
 			return err
 		}
@@ -1625,7 +1625,7 @@ func (o *Owner) Prune(ctx context.Context, command runtimedata.PruneCommand) (ru
 			return o.insertPruneReceipt(txctx, tx, command, hash, requestJSON, result, nil)
 		}
 		if head.Before.State == "version" && head.Before.VersionID != command.VersionID {
-			current, currentFound, currentErr := o.loadStoredVersion(txctx, tx, command.Declaration, head.Before.VersionID)
+			current, currentFound, currentErr := o.loadStoredVersion(txctx, tx, command.Declaration, head.Before.VersionID, true)
 			if currentErr != nil {
 				return currentErr
 			}

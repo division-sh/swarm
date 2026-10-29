@@ -16,6 +16,7 @@ import (
 )
 
 type exactFactStore struct {
+	ctx      context.Context
 	db       *sql.DB
 	postgres bool
 	selected runForkSelectedLifecycleStore
@@ -27,11 +28,14 @@ func eachExactFactStore(t *testing.T, prove func(*testing.T, exactFactStore)) {
 		t.Run(backend, func(t *testing.T) {
 			if backend == "sqlite" {
 				store := newBootstrappedSQLiteRuntimeStoreForTest(t)
-				prove(t, exactFactStore{db: store.backend.ConstructionHandle(), selected: store})
+				ctx := originalStoreFixtureContext(t, testAuthorActivityContext(), store)
+				prove(t, exactFactStore{ctx: ctx, db: store.backend.ConstructionHandle(), selected: store})
 				return
 			}
 			_, db, _ := testutil.StartPostgres(t)
-			prove(t, exactFactStore{db: db, postgres: true, selected: admitTestPostgresStore(t, db)})
+			store := admitTestPostgresStore(t, db)
+			ctx := originalStoreFixtureContext(t, testAuthorActivityContext(), store)
+			prove(t, exactFactStore{ctx: ctx, db: db, postgres: true, selected: store})
 		})
 	}
 }
@@ -162,14 +166,23 @@ func compareExactWithWhole(t *testing.T, ctx context.Context, tx *sql.Tx, s exac
 
 func exactTransaction(t *testing.T, s exactFactStore, fn func(context.Context, *sql.Tx)) {
 	t.Helper()
-	ctx := testAuthorActivityContext()
-	tx, err := s.db.BeginTx(ctx, nil)
-	if err != nil {
-		t.Fatal(err)
+	if s.ctx == nil {
+		t.Fatal("exact transaction fixture requires its retained original context")
 	}
-	defer tx.Rollback()
-	fn(ctx, tx)
-	if err := tx.Commit(); err != nil {
+	write := func(ctx context.Context, tx *sql.Tx) error {
+		fn(ctx, tx)
+		return nil
+	}
+	var err error
+	switch selected := s.selected.(type) {
+	case *PostgresStore:
+		err = selected.backend.RunTransaction(s.ctx, write)
+	case *SQLiteRuntimeStore:
+		err = selected.backend.RunTransaction(s.ctx, "exact fact fixture", write)
+	default:
+		t.Fatalf("exact transaction fixture requires its selected native owner, got %T", s.selected)
+	}
+	if err != nil {
 		t.Fatal(err)
 	}
 }

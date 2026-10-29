@@ -13,6 +13,7 @@ import (
 	runtimepkg "github.com/division-sh/swarm/internal/runtime"
 	"github.com/division-sh/swarm/internal/runtime/budgetspend"
 	runtimebus "github.com/division-sh/swarm/internal/runtime/bus"
+	runtimecorrelation "github.com/division-sh/swarm/internal/runtime/correlation"
 	"github.com/division-sh/swarm/internal/runtime/executionposture"
 	runtimepipeline "github.com/division-sh/swarm/internal/runtime/pipeline"
 	"github.com/division-sh/swarm/internal/runtime/semanticview"
@@ -92,13 +93,13 @@ func TestBudgetRecoveryLoadsExactRetainedStagesAndStatelessPostureBothStores(t *
 				t.Cleanup(cleanup)
 				selected, db = storetest.AdmitPostgresRuntimeStore(t, opened), opened
 			}
-			ctx := context.Background()
+			ctx := runtimecorrelation.WithRuntimeInstanceID(context.Background(), runStatusTestRuntimeInstanceID)
 			ctx = serveFixtureProcessContext(t, ctx, selected)
 			sharedEntity, terminalEntity := uuid.NewString(), uuid.NewString()
 			runs := make([]string, len(artifacts))
 			for i, artifact := range artifacts {
 				runs[i] = uuid.NewString()
-				sourceartifactfixture.RequireArtifact(t, runStatusAuthorActivityContext(sourceartifactfixture.FactFor(artifact)), selected, artifact)
+				sourceartifactfixture.RequireArtifact(t, runStatusAuthorActivityContext(sourceartifactfixture.FactFor(artifact), ctx), selected, artifact)
 				if _, err := selected.EnsureRootedSource(ctx, roots[i]); err != nil {
 					t.Fatal(err)
 				}

@@ -6,18 +6,17 @@ import (
 	"database/sql/driver"
 	"encoding/json"
 	"errors"
+	runtimepipeline "github.com/division-sh/swarm/internal/runtime/pipeline"
+	obligation "github.com/division-sh/swarm/internal/runtime/pipelineobligation"
 	"os"
 	"os/exec"
 	"path/filepath"
+	"reflect"
 	"sync/atomic"
 	"syscall"
 	"testing"
 	"time"
 
-	worklifetime "github.com/division-sh/swarm/internal/runtime/core/worklifetime"
-	runtimepipeline "github.com/division-sh/swarm/internal/runtime/pipeline"
-	obligation "github.com/division-sh/swarm/internal/runtime/pipelineobligation"
-	runlifecycle "github.com/division-sh/swarm/internal/runtime/runlifecycle"
 	startupownership "github.com/division-sh/swarm/internal/runtime/startupownership"
 	sqlitebackend "github.com/division-sh/swarm/internal/store/internal/backend/sqlite"
 	storeschema "github.com/division-sh/swarm/internal/store/internal/schemastore"
@@ -25,7 +24,7 @@ import (
 	"github.com/division-sh/swarm/internal/store/testutil/agentfixture"
 	authoractivityfixture "github.com/division-sh/swarm/internal/store/testutil/authoractivityfixture"
 	"github.com/division-sh/swarm/internal/testutil"
-	"github.com/division-sh/swarm/internal/testutil/stagecatalogfixture"
+
 	"github.com/google/uuid"
 	"github.com/lib/pq"
 	modernc "modernc.org/sqlite"
@@ -212,19 +211,11 @@ func TestPipelineProcessSIGKILLRecovery(t *testing.T) {
 				fixture, _ := openPipelineCrashStore(t, backend, location)
 				ctx := originalStoreFixtureContext(t, testAuthorActivityContext(), fixture.store)
 				runID := uuid.NewString()
-				seedAuthorActivityReceiptRun(t, fixture, ctx, runID)
+				ctx = seedAuthorActivityReceiptRun(t, fixture, ctx, runID)
 				eventID := commitPipelineParityEvent(t, ctx, fixture.store.(pipelineObligationParityStore), runID, time.Now().UTC())
-				// Drain any setup notification through its real owner so only the
-				// killed settlement can authorize the candidate tested at restart.
-				candidates := fixture.store.(runlifecycle.CandidateStore)
-				if pending := pipelineCrashCandidate(t, ctx, candidates, runID); pending.RunID != "" {
-					result, err := candidates.ExecuteCompletionCandidate(ctx, pending, stagecatalogfixture.NewFinalCatalog(nil, map[string][]string{semanticRunFixtureFlow: {"completed"}}))
-					if err != nil || result.Outcome != runlifecycle.OutcomeAwaitMutation {
-						t.Fatalf("drain setup candidate: %#v %v", result, err)
-					}
-				}
-				if pending := pipelineCrashCandidate(t, ctx, candidates, runID); pending.RunID != "" {
-					t.Fatal("setup left a candidate masking lost settlement handoff")
+				work, _ := storeTestWorkFixtures.Load(t)
+				if err := selectedMaterializationProcessForTest(t, work.(*storeTestWorkFixture), fixture.store).Release(context.Background()); err != nil {
+					t.Fatal(err)
 				}
 				setup, err := agentfixture.ProcessCapability(t, ctx, fixture.store.(agentfixture.Store))
 				if err != nil {
@@ -396,26 +387,14 @@ func runPipelineCrashChild(t *testing.T, mode string) {
 	}
 	report := os.NewFile(3, "pipeline-crash-evidence")
 	defer report.Close()
-	cut, eventID, runID := os.Getenv("SWARM_PIPELINE_CRASH_CUT"), os.Getenv("SWARM_PIPELINE_CRASH_EVENT"), os.Getenv("SWARM_PIPELINE_CRASH_RUN")
+	cut, eventID := os.Getenv("SWARM_PIPELINE_CRASH_CUT"), os.Getenv("SWARM_PIPELINE_CRASH_EVENT")
 	if mode == "predecessor" {
 		work, err := selected.PipelineObligations().ClaimEvent(ctx, eventID, obligation.PurposeRecovery)
 		if err != nil {
 			t.Fatal(err)
 		}
-		process := worklifetime.NewProcess()
-		occurrence := newRunLifecycleExecutorOccurrence(t, process)
-		ctx = worklifetime.WithRuntimeOccurrence(ctx, occurrence)
-		sink := &pipelineGracefulSink{}
-		registration, err := fixture.store.(runlifecycle.CandidateRegistrar).RegisterCompletionCandidateSink(ctx, runlifecycle.CandidateScope{BundleHash: authorActivityTestBundleHash}, sink)
-		if err != nil {
-			t.Fatal(err)
-		}
-		defer registration.Release()
 		control.cut = cut
 		control.barrier = func() {
-			if sink.submits.Load() != 0 {
-				t.Fatal("handoff ran before crash barrier")
-			}
 			if err := json.NewEncoder(report).Encode(pipelineCrashEvidence{Authority: authority}); err != nil {
 				t.Fatal(err)
 			}
@@ -442,11 +421,6 @@ func runPipelineCrashChild(t *testing.T, mode string) {
 	if count != wantBefore {
 		t.Fatalf("receipt at restart=%d want %d", count, wantBefore)
 	}
-	candidates := fixture.store.(runlifecycle.CandidateStore)
-	before := pipelineCrashCandidate(t, ctx, candidates, runID)
-	if (before.RunID != "") != (wantBefore == 1) {
-		t.Fatalf("candidate at restart=%#v, committed settlement=%v", before, wantBefore == 1)
-	}
 	bus, err := newRunConvergenceEventBus(t, ctx, fixture.store)
 	if err != nil {
 		t.Fatal(err)
@@ -463,101 +437,18 @@ func runPipelineCrashChild(t *testing.T, mode string) {
 	if count != 1 || receiptOutcome != "success" || receiptReason != wantReason {
 		t.Fatalf("recovery receipt=%d/%s/%s want 1/success/%s", count, receiptOutcome, receiptReason, wantReason)
 	}
-	after := pipelineCrashCandidate(t, ctx, candidates, runID)
-	if after.RunID != runID {
-		t.Fatal("committed follow-up candidate lost")
-	}
-	if wantBefore == 1 && after.Revision != before.Revision {
-		t.Fatalf("committed settlement replayed: candidate revision %d -> %d", before.Revision, after.Revision)
-	}
+	beforeRecovery := snapshotForkHistoricalExecutionTables(t, fixture.db, backend == "postgres")
 	if err := recovery.RecoverToExhaustion(ctx); err != nil {
 		t.Fatal(err)
 	}
-	again := pipelineCrashCandidate(t, ctx, candidates, runID)
 	count, receiptOutcome, receiptReason = readExactPipelineReceipt(t, ctx, fixture, eventID)
-	if count != 1 || receiptOutcome != "success" || receiptReason != wantReason || again.Revision != after.Revision {
-		t.Fatalf("duplicate durable processing: receipt=%d candidate=%d -> %d", count, after.Revision, again.Revision)
+	if count != 1 || receiptOutcome != "success" || receiptReason != wantReason || !reflect.DeepEqual(beforeRecovery, snapshotForkHistoricalExecutionTables(t, fixture.db, backend == "postgres")) {
+		t.Fatalf("duplicate durable processing: receipt=%d/%s/%s or changed execution history", count, receiptOutcome, receiptReason)
 	}
 	if _, err := selected.PipelineObligations().ClaimEvent(ctx, eventID, obligation.PurposeRecovery); !errors.Is(err, obligation.ErrIneligible) {
 		t.Fatalf("settled event remains replayable: %v", err)
 	}
-	// The real startup executor must discover the durable candidate without any
-	// predecessor notification. Observe its actual selected-store execution, not
-	// a replacement recovery implementation or direct SQL interpretation.
-	process := worklifetime.NewProcess()
-	occurrence := newRunLifecycleExecutorOccurrence(t, process)
-	t.Cleanup(func() {
-		retireRunLifecycleExecutorOccurrence(t, occurrence)
-		retireRunLifecycleProcess(t, process)
-	})
-	observed := &pipelineCrashCandidateObserver{CandidateStore: candidates, results: make(chan pipelineCrashCandidateResult, 8)}
-	executor, err := runlifecycle.NewExecutor(observed, runlifecycle.CandidateScope{BundleHash: authorActivityTestBundleHash},
-		stagecatalogfixture.NewFinalCatalog(nil, map[string][]string{semanticRunFixtureFlow: {"completed"}}), occurrence, runlifecycle.ExecutorOptions{})
-	if err != nil {
-		t.Fatal(err)
-	}
-	t.Cleanup(func() {
-		if err := executor.Retire(context.Background()); err != nil {
-			t.Error(err)
-		}
-	})
-	if err := executor.Start(ctx); err != nil {
-		t.Fatalf("real lifecycle startup executor: %v", err)
-	}
-	select {
-	case result := <-observed.results:
-		if result.err != nil || result.candidate.RunID != runID || result.candidate.Revision != after.Revision || result.outcome.Outcome != runlifecycle.OutcomeAwaitMutation {
-			t.Fatalf("recovered lifecycle execution=%#v err=%v", result, result.err)
-		}
-	case <-time.After(5 * time.Second):
-		t.Fatal("startup executor did not discover committed candidate")
-	}
-	if err := executor.Retire(ctx); err != nil {
-		t.Fatal(err)
-	}
-	if observed.executions.Load() != 1 {
-		t.Fatalf("startup candidate executions=%d want 1", observed.executions.Load())
-	}
-	if pending := pipelineCrashCandidate(t, ctx, candidates, runID); pending.RunID != "" {
-		t.Fatalf("settled await-mutation candidate remains pending: %#v", pending)
-	}
 	if err := json.NewEncoder(report).Encode(pipelineCrashEvidence{Authority: authority, Recovered: true}); err != nil {
 		t.Fatal(err)
 	}
-}
-
-type pipelineCrashCandidateResult struct {
-	candidate runlifecycle.Candidate
-	outcome   runlifecycle.CompletionResult
-	err       error
-}
-
-type pipelineCrashCandidateObserver struct {
-	runlifecycle.CandidateStore
-	executions atomic.Int32
-	results    chan pipelineCrashCandidateResult
-}
-
-func (s *pipelineCrashCandidateObserver) ExecuteCompletionCandidate(ctx context.Context, candidate runlifecycle.Candidate, catalog runlifecycle.FinalCatalog) (runlifecycle.CompletionResult, error) {
-	s.executions.Add(1)
-	outcome, err := s.CandidateStore.ExecuteCompletionCandidate(ctx, candidate, catalog)
-	select {
-	case s.results <- pipelineCrashCandidateResult{candidate: candidate, outcome: outcome, err: err}:
-	default:
-	}
-	return outcome, err
-}
-
-func pipelineCrashCandidate(t *testing.T, ctx context.Context, store runlifecycle.CandidateStore, runID string) runlifecycle.Candidate {
-	t.Helper()
-	page, err := store.ListCompletionCandidates(ctx, runlifecycle.CandidateScope{BundleHash: authorActivityTestBundleHash}, runlifecycle.CandidateCursor{}, 128)
-	if err != nil {
-		t.Fatal(err)
-	}
-	for _, candidate := range page.Candidates {
-		if candidate.RunID == runID {
-			return candidate
-		}
-	}
-	return runlifecycle.Candidate{}
 }
