@@ -139,6 +139,19 @@ func (p Phase) SupportsAccountBusiness() bool {
 	}
 }
 
+// RetainedConfirmedAccounts selects retained previews too; it is not runtime
+// activation or proof that the provider connection is currently executable.
+func RetainedConfirmedAccounts(operations []Operation, provider string) []Operation {
+	var retained []Operation
+	for _, op := range operations {
+		if op.Provider != provider || !op.AccountConfirmed || op.Phase == PhaseRetired || op.Phase == PhaseFailed {
+			continue
+		}
+		retained = append(retained, op)
+	}
+	return retained
+}
+
 func (expected AdmissionResponsibility) MatchesActivation(op Operation, activation ConnectedChannelActivation) bool {
 	activeAccount := op.AccountConnection() && op.ActivationRevision > 0 &&
 		(op.Phase == PhaseAwaitingExternalIdentity || op.Phase == PhaseAwaitingOperatorConfirmation)

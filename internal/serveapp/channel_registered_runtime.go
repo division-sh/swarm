@@ -14,6 +14,15 @@ import (
 	"github.com/division-sh/swarm/internal/sessionprovider"
 )
 
+func observeDeploymentAccountStatus(ctx context.Context, raw json.RawMessage, manager *runtime.RuntimeContextManager) (channelonboarding.AccountStatus, error) {
+	var status channelonboarding.AccountStatus
+	if err := json.Unmarshal(raw, &status); err != nil {
+		return status, err
+	}
+	err := observeDeploymentAccountHolder(ctx, manager, &status)
+	return status, err
+}
+
 func observeDeploymentAccountList(ctx context.Context, raw json.RawMessage, manager *runtime.RuntimeContextManager, clients map[string]*cliapp.DeploymentChannelControl, mu *sync.Mutex) (json.RawMessage, error) {
 	var list struct {
 		Accounts []channelonboarding.Result `json:"accounts"`
@@ -88,15 +97,7 @@ func serveRegisteredBusinessSelector(manager *runtime.RuntimeContextManager) ses
 		if !available.Available() || available.Status != string(runlifecycle.StateLive) || use.Context.BundleHash() != holder.BundleHash {
 			return fail(channelonboarding.ErrRevisionConflict)
 		}
-		declarations, err := use.Context.StandingTargetDeclarations()
-		if err != nil {
-			return fail(err)
-		}
-		candidates, err := serveChannelContextCandidates(use.Context, declarations)
-		if err != nil {
-			return fail(err)
-		}
-		selected, err := exactRegisteredBusinessCandidate(candidates, op.Provider, holder.Flow)
+		selected, declarations, err := exactRegisteredBusinessCandidate(use.Context, op.Provider, holder.Flow)
 		if err != nil {
 			return fail(err)
 		}
@@ -124,7 +125,15 @@ func serveRegisteredBusinessSelector(manager *runtime.RuntimeContextManager) ses
 	}
 }
 
-func exactRegisteredBusinessCandidate(candidates []channelonboarding.Candidate, provider, flow string) (*channelonboarding.Candidate, error) {
+func exactRegisteredBusinessCandidate(contextDef runtime.BundleContext, provider, flow string) (*channelonboarding.Candidate, []runtime.StandingTargetDeclaration, error) {
+	declarations, err := contextDef.StandingTargetDeclarations()
+	if err != nil {
+		return nil, nil, err
+	}
+	candidates, err := serveChannelContextCandidates(contextDef, declarations)
+	if err != nil {
+		return nil, nil, err
+	}
 	var selected *channelonboarding.Candidate
 	for index := range candidates {
 		candidate := &candidates[index]
@@ -132,12 +141,12 @@ func exactRegisteredBusinessCandidate(candidates []channelonboarding.Candidate, 
 			continue
 		}
 		if selected != nil {
-			return nil, channelonboarding.ErrConflict
+			return nil, nil, channelonboarding.ErrConflict
 		}
 		selected = candidate
 	}
 	if selected == nil || selected.Coordinate.Validate() != nil {
-		return nil, channelonboarding.ErrRevisionConflict
+		return nil, nil, channelonboarding.ErrRevisionConflict
 	}
-	return selected, nil
+	return selected, declarations, nil
 }
