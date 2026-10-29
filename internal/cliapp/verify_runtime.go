@@ -15,6 +15,7 @@ import (
 	runtimecontracts "github.com/division-sh/swarm/internal/runtime/contracts"
 	runtimecorrelation "github.com/division-sh/swarm/internal/runtime/correlation"
 	"github.com/division-sh/swarm/internal/runtime/failures"
+	"github.com/division-sh/swarm/internal/runtime/scenarioderivation"
 	"github.com/division-sh/swarm/internal/runtime/semanticview"
 	"github.com/division-sh/swarm/internal/sourceartifact"
 )
@@ -359,6 +360,17 @@ func admitStructuralSource(configResult RuntimeConfigLoadResult, bundle *runtime
 	})
 	if err != nil {
 		return nil, opts, err
+	}
+	located, err := scenarioderivation.LoadDeclarations(bundle.SourceArtifact)
+	if err != nil {
+		return nil, opts, fmt.Errorf("load scenario derivation profiles: %w", err)
+	}
+	declarations := make([]scenarioderivation.Declaration, 0, len(located))
+	for _, scenario := range located {
+		declarations = append(declarations, scenario.Declaration)
+	}
+	if _, err := scenarioderivation.CompileCatalog(projection.Source(), projection.Identity(), declarations...); err != nil {
+		return nil, opts, fmt.Errorf("compile scenario execution profile catalog: %w", err)
 	}
 	return projection.Source(), opts, nil
 }

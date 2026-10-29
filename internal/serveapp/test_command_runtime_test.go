@@ -53,6 +53,57 @@ func TestSwarmTestPrivateSQLiteNoLiveLLMProof(t *testing.T) {
 	if code != 0 || !strings.Contains(stdout.String(), "swarm test ok: scenarios=1") {
 		t.Fatalf("code=%d stderr=%s stdout=%s", code, stderr.String(), stdout.String())
 	}
+	for _, tc := range []struct {
+		name, payload, refusal string
+	}{
+		{"set provides pattern", "generate: true, set: {to: '+15550100123'}", ""},
+		{"missing fixture", "generate: true", "no canonical generated witness"},
+		{"invalid fixture", "generate: true, set: {to: invalid}", "pattern"},
+		{"generation disabled", "generate: false, set: {to: '+15550100123'}", "generate must be true"},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			root := canonicalrouting.CopyKeyedRootRawIngress(t)
+			writeWorkflowValidationFixtureFile(t, filepath.Join(root, "schema.yaml"), "instance: provider_event_id\nstages: []\npins: {inputs: [inbound.partner.raw, inbound.partner.message]}\n")
+			writeWorkflowValidationFixtureFile(t, filepath.Join(root, "partner/manifest.yaml"), "version: 1.0.0\nplatform_version: '*'\ncapabilities: {can: {emit_events: [raw, message], verify_secret: webhook_signing_secret}, cannot: [execute code]}\n")
+			writeWorkflowValidationFixtureFile(t, filepath.Join(root, "partner/trigger.yaml"), `transport: webhook
+payload_object_required: true
+secret: {required: true}
+signature: {type: hmac_sha256, header: X-Signature, prefix: 'sha256=', signed_payload: raw_body}
+delivery_id: {json_path: $.delivery_id, required: true}
+event_type: {literal: message, required: true}
+event_name: {literal: raw}
+normalized_events:
+  - event: message
+    fields:
+      provider_event_id: {from: delivery_id, schema: {type: string, minLength: 1}}
+      to: {from: to, schema: {type: string, pattern: '^\+[1-9][0-9]{1,14}$'}}
+`)
+			writeWorkflowValidationFixtureFile(t, filepath.Join(root, "tests/pattern.yaml"), "name: explicit pattern fixture\nderive:\n  flow: '.'\n  input: inbound.partner.message\n  payload: {"+tc.payload+"}\n")
+			for _, args := range [][]string{{"verify", root, "--portable"}, {"test", root}} {
+				t.Run(args[0], func(t *testing.T) {
+					var out, errOut bytes.Buffer
+					code := executeCLIFrom(t.Context(), repoRootForTest(), args, &out, &errOut, nil)
+					if tc.refusal == "" {
+						if code != 0 {
+							t.Fatalf("code=%d stdout=%s stderr=%s", code, &out, &errOut)
+						}
+					} else if code == 0 || !strings.Contains(out.String()+errOut.String(), tc.refusal) {
+						t.Fatalf("code=%d stdout=%s stderr=%s, want refusal %q", code, &out, &errOut, tc.refusal)
+					}
+				})
+			}
+			if tc.refusal != "" {
+				var out lockedBuffer
+				code := runFrom(t.Context(), repoRootForTest(), cliapp.ServeOptions{
+					SourceRoot: root, SwarmDir: t.TempDir(), SwarmDirSet: true, StoreMode: "sqlite",
+					APIListenAddr: "127.0.0.1:0", MCPListenAddr: "127.0.0.1:0", Output: &out,
+				})
+				if code == 0 || !strings.Contains(out.String(), tc.refusal) {
+					t.Fatalf("serve code=%d output=%s, want refusal %q", code, out.String(), tc.refusal)
+				}
+			}
+		})
+	}
 }
 
 func TestServedParityHarnessGeneratedInputFixtureLifecycle(t *testing.T) {
