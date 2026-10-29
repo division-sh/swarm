@@ -34,6 +34,10 @@ func (rt *Runtime) observeStandingSessionBinding(ctx context.Context, declaratio
 	if err != nil || len(operations) == 0 {
 		return result, err
 	}
+	return rt.observeRuntimeStandingSessionOperations(ctx, declaration, binding, result, operations)
+}
+
+func (rt *Runtime) observeRuntimeStandingSessionOperations(ctx context.Context, declaration StandingTargetDeclaration, binding StandingIngressBinding, result standingBindingCredentials, operations []channelonboarding.Operation) (standingBindingCredentials, error) {
 	bundle, ok := semanticview.Bundle(rt.Options.WorkflowModule.SemanticSource())
 	if !ok || bundle == nil || bundle.PackInventory == nil {
 		return result, fmt.Errorf("session standing admission requires the exact admitted source inventory")
@@ -58,7 +62,7 @@ func (rt *Runtime) observeStandingSessionBinding(ctx context.Context, declaratio
 				op.Coordinate.PackInventoryGeneration != bundle.PackInventory.Digest() || !op.Coordinate.PlanGeneration.Equal(generation) {
 				continue
 			}
-			current, err := store.SessionStandingBindingCurrent(ctx, op)
+			current, err := rt.Options.ChannelOnboardingStore.SessionStandingBindingCurrent(ctx, op)
 			if err != nil {
 				return result, err
 			}
@@ -78,10 +82,7 @@ func (rt *Runtime) observeStandingSessionBinding(ctx context.Context, declaratio
 
 func matchingRegisteredSessionOperations(registered []channelonboarding.Operation, provider string) []channelonboarding.Operation {
 	var selected []channelonboarding.Operation
-	for _, op := range registered {
-		if op.Provider != provider || !op.AccountConfirmed || op.Phase == channelonboarding.PhaseRetired || op.Phase == channelonboarding.PhaseFailed {
-			continue
-		}
+	for _, op := range channelonboarding.RetainedConfirmedAccounts(registered, provider) {
 		if op.ValidateSessionAccount() != nil || op.LogoutCompleted {
 			continue
 		}

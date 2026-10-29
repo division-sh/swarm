@@ -71,14 +71,7 @@ func deploymentChannelHandlers(repo, config, directory string, stores *selected.
 		err = client.Dispatch(ctx, req.Method, req.Params, &result)
 		if err == nil && req.Method == "channel.list" && runtimeOptions.manager != nil {
 			if account, _ := req.Params["account"].(string); account != "" {
-				var status channelonboarding.AccountStatus
-				if err := json.Unmarshal(result, &status); err != nil {
-					return nil, err
-				}
-				if err := observeDeploymentAccountHolder(ctx, runtimeOptions.manager, &status); err != nil {
-					return nil, err
-				}
-				return status, nil
+				return observeDeploymentAccountStatus(ctx, result, runtimeOptions.manager)
 			}
 			result, err = observeDeploymentAccountList(ctx, result, runtimeOptions.manager, clients, &mu)
 		}
@@ -145,10 +138,7 @@ func deploymentChannelHandlers(repo, config, directory string, stores *selected.
 		if err != nil || rootErr != nil {
 			return errors.Join(err, rootErr)
 		}
-		for _, op := range operations {
-			if op.Provider != "whatsapp" || !op.AccountConfirmed || op.Phase == channelonboarding.PhaseRetired || op.Phase == channelonboarding.PhaseFailed {
-				continue
-			}
+		for _, op := range channelonboarding.RetainedConfirmedAccounts(operations, "whatsapp") {
 			ref := channelonboarding.AccountReference{Provider: op.Provider, Account: op.AccountReference}
 			client, err := cliapp.UseDeploymentChannelControl(ctx, root, config, directory, op.Provider, stores, process, factory)
 			if err != nil {

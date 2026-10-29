@@ -38,23 +38,9 @@ func (pc *PipelineCoordinator) accountActivityCredentials(ctx context.Context, i
 	if err != nil {
 		return nil, nil, nil, false, err
 	}
-	var plan packs.SatisfactionPlan
-	var declared contracts.ToolSchemaEntry
-	matched := false
-	for _, definition := range scope.Providers() {
-		candidate, connected := definition.ChannelPlan()
-		connector, present := definition.ConnectorDescriptor()
-		if !connected || !present {
-			continue
-		}
-		tool, owns := connector.Tools[intent.Tool]
-		if !owns {
-			continue
-		}
-		if matched {
-			return nil, nil, nil, true, fmt.Errorf("account activity has competing connector owners")
-		}
-		plan, declared, matched = candidate, tool, true
+	plan, declared, matched, err := exactAccountActivityConnector(scope, intent.Tool)
+	if err != nil {
+		return nil, nil, nil, matched, err
 	}
 	if !matched {
 		return nil, nil, nil, false, nil
@@ -99,6 +85,28 @@ func (pc *PipelineCoordinator) accountActivityCredentials(ctx context.Context, i
 		return projection.ValidateCurrent(ctx)
 	}
 	return values, secrets, current, true, current(ctx)
+}
+
+func exactAccountActivityConnector(scope packadmission.ProviderScope, toolID string) (packs.SatisfactionPlan, contracts.ToolSchemaEntry, bool, error) {
+	var plan packs.SatisfactionPlan
+	var declared contracts.ToolSchemaEntry
+	matched := false
+	for _, definition := range scope.Providers() {
+		candidate, connected := definition.ChannelPlan()
+		connector, present := definition.ConnectorDescriptor()
+		if !connected || !present {
+			continue
+		}
+		tool, owns := connector.Tools[toolID]
+		if !owns {
+			continue
+		}
+		if matched {
+			return plan, declared, true, fmt.Errorf("account activity has competing connector owners")
+		}
+		plan, declared, matched = candidate, tool, true
+	}
+	return plan, declared, matched, nil
 }
 
 // Resolve only the selected account's admitted roles through the existing
