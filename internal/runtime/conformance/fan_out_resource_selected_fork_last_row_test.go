@@ -26,7 +26,7 @@ func TestDeploymentSourceSelectedLastRowPendingBlocksQuiescenceBothStores(t *tes
 			f := selectedDeploymentResourceFixtureWithDelivery(t, backend, "root", nil, func(owner runtimedelivery.Store) runtimedelivery.Store {
 				gate.Store = owner
 				return gate
-			}, nil)
+			}, decorate)
 			server := f.operatorServer(t)
 			start := func(name string, rows []byte) string {
 				t.Helper()
@@ -48,6 +48,9 @@ func TestDeploymentSourceSelectedLastRowPendingBlocksQuiescenceBothStores(t *tes
 			if err := f.runtime.bus.WaitForQuiescence(f.ctx); err != nil {
 				t.Fatal(err)
 			}
+			observed.mu.Lock()
+			observed.evaluated, observed.committed = nil, nil
+			observed.mu.Unlock()
 			gate.held.Store(true)
 			t.Cleanup(func() { gate.held.Store(false) })
 			owner, recovered := deploymentForkOwnerWithExecutor(t, f, gate, nil, nil, decorate)
