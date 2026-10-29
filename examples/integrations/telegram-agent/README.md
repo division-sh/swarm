@@ -30,25 +30,35 @@ selects its own account explicitly; customer identities do not choose it.
 
 No source edit, mock-block removal or separate graduation configuration is required. `serve` and `serve --dev` select live execution even when the source contains doubles. Configure the selected live provider's actual prerequisites before serving.
 
-An absent webhook signing credential leaves the declared Telegram ingress dormant. Swarm reports `DORMANT ingress` with the exact missing key and provisioning command; it publishes no Telegram route and creates no standing generation solely for that declaration. Other admissible work can still serve. This does not waive credentials required by the live model, outgoing Telegram replies, or another active capability. An empty or whitespace credential, a corrupt credential store, or a read failure is an error, not dormancy.
+Connect with serve stopped. Registration stores the bot credentials and its
+private webhook signing key through the channel owner. Serve admits that exact
+registration only for its sole current flow holder; it does not select the first
+linked bot or trust an account supplied in a webhook payload. No manual signing
+secret or `setWebhook` call is needed for this registered-account journey.
 
 For example, to use the Anthropic API backend:
 
 ```sh
-printf '%s' "$TELEGRAM_BOT_TOKEN" | swarm secrets set telegram.telegram_bot_token --stdin
+swarm channel connect telegram
 printf '%s' "$ANTHROPIC_API_KEY" | swarm secrets set ANTHROPIC_API_KEY --stdin
-swarm serve . --backend anthropic --dev --expose
+swarm serve . --backend anthropic --expose
 ```
 
-To enable the dormant ingress, provision its signing credential and restart the server:
+Enter the bot token at the hidden connect prompt and confirm the displayed bot
+account. Before serving, put that account in `policy.yaml` as described above.
+Operator verification is separate and only applies when the deployment declares
+an HITL operator; customers are never asked to authorize the connection.
 
-```sh
-printf '%s' "$WEBHOOK_SIGNING_SECRET" | swarm secrets set telegram.webhook_signing_secret --stdin
-```
+Restart serve when a new holder appears. Connecting or assigning an account
+while serve is running does not refresh that process's credential admission.
+Reading status, replacing a secret or rotating a provider registration cannot
+promote changed credentials. The exact operation, receipts and sealed values
+must remain current.
 
-Setting a secret or reading status does not activate a running dormant declaration. Stop and repeat the serve command. Read the ready output for the public `/webhooks/<root-folder>/telegram` URL (`/webhooks/telegram-agent/telegram` for the directory shown), then register that exact URL and the same signing secret with Telegram's `setWebhook` API. Telegram POSTs are rejected unless `X-Telegram-Bot-Api-Secret-Token` matches the admitted signing credential.
-
-For the declared Telegram channel, `swarm channel connect telegram` is the explicit in-process credential-admission and identity-ceremony path. It discovers the declaration before ingress is enabled. A stale previously learned credential instead reports `RECOVERY REQUIRED`; resume the exact reported operation with fresh credentials and complete the fresh ceremony. Neither restart nor a populated source-default key substitutes for that learned authority.
+An unheld Telegram bot stays idle without a webhook. Its messages are not
+received or counted as `account_unclaimed`; a source-less receiver to count them
+is not implemented. This is distinct from the pending deployment-HITL inbox
+transport.
 
 The default Claude CLI backend instead requires its own credentials, executable and supported workspace setup. Authored doubles do not waive those live requirements.
 

@@ -121,6 +121,7 @@ func serveAcquiredProcessWebhook(w http.ResponseWriter, r *http.Request, use *ru
 			return
 		}
 		inbound.SigningSecret = registrationTarget.SigningCredentialKey
+		inbound.RegisteredOperationID = registrationTarget.RegisteredOperationID
 	}
 	selectedRuntime := use.Runtime()
 	selectedRuntime.InboundGateway.HandleResolvedWebhook(w, r.WithContext(use.WorkContext()), inbound, use.Context.Source)

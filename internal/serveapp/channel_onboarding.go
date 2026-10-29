@@ -263,6 +263,49 @@ func compileServeRegisteredChannelActivations(contexts []runtime.BundleContext, 
 	return activations, nil
 }
 
+// Startup is the only deployment-to-runtime credential admission here. Later
+// registration/holder changes require a restart, not an implicit refresh.
+func admitServeRegisteredWebhookCredentials(ctx context.Context, manager *runtime.RuntimeContextManager, store channelonboarding.Store) error {
+	scoped, ok := store.(interface {
+		DeploymentChannelOperations() channelonboarding.OperationStore
+	})
+	if !ok {
+		return channelonboarding.ErrInvalidRequest
+	}
+	registered, err := scoped.DeploymentChannelOperations().ListChannelOnboardingOperations(ctx)
+	if err != nil {
+		return err
+	}
+	for _, contextDef := range manager.LoadedContexts() {
+		declarations, err := contextDef.StandingTargetDeclarations()
+		if err != nil {
+			return err
+		}
+		candidates, err := serveChannelContextCandidates(contextDef, declarations)
+		if err != nil {
+			return err
+		}
+		for _, candidate := range candidates {
+			if candidate.Posture != channelonboarding.ActivationWebhookRegistration {
+				continue
+			}
+			for _, op := range channelonboarding.RetainedConfirmedAccounts(registered, candidate.Provider) {
+				holders, err := manager.AccountHolders(ctx, channelonboarding.AccountReference{Provider: op.Provider, Account: op.AccountReference})
+				if err != nil {
+					return err
+				}
+				if len(holders) != 1 || holders[0].BundleHash != contextDef.BundleHash() || holders[0].Flow != candidate.Target.FlowPath {
+					continue
+				}
+				if err := manager.AdmitChannelStandingTarget(ctx, op, candidate, operatorchannel.ProviderAuthority{}, nil); err != nil {
+					return err
+				}
+			}
+		}
+	}
+	return nil
+}
+
 func compileServeLearnedChannelActivations(ctx context.Context, store channelonboarding.Store, catalog *channelonboarding.CandidateCatalog, activations []channelonboarding.ConnectedChannelActivation, projection *runtimecredentials.SecretBindingProjection, targetEnabled channelonboarding.TargetEnablementReader) ([]channelonboarding.CompiledActivation, error) {
 	learned := []channelonboarding.CompiledActivation{}
 	for _, activation := range activations {

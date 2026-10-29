@@ -427,6 +427,10 @@ func importProjectTelegramTrigger(t testing.TB, sourceRoot string) {
 	if changed, err := packartifact.ImportEmbeddedPack(sourceRoot, "telegram", base); err != nil {
 		t.Fatalf("import project Telegram trigger changed=%t: %v", changed, err)
 	}
+	// This matrix admits signed HTTP bodies, not a connected bot or HITL inbox.
+	if err := os.Remove(filepath.Join(sourceRoot, "telegram", "channel.yaml")); err != nil {
+		t.Fatal(err)
+	}
 	path := filepath.Join(sourceRoot, "telegram", "trigger.yaml")
 	body, err := os.ReadFile(path)
 	if err != nil {

@@ -92,6 +92,9 @@ func matchingRegisteredSessionOperations(registered []channelonboarding.Operatio
 }
 
 func (rt *Runtime) validateStandingSessionBinding(ctx context.Context, binding standingBindingCredentials) error {
+	if binding.registered != nil {
+		return rt.validateRegisteredStandingCredential(ctx, *binding.registered, false)
+	}
 	if len(binding.registeredOperations) > 0 {
 		scoped, ok := rt.Options.ChannelOnboardingStore.(interface {
 			DeploymentChannelOperations() channelonboarding.OperationStore

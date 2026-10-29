@@ -443,7 +443,7 @@ func runChannelDeliveryInboundDispositionE2E(t *testing.T, backend, scenario str
 	if scenario == "delivery_loss_resend" || scenario == "edit_loss_resend" || scenario == "notice_uncertainty_readback" {
 		observation.configure(&opts)
 	}
-	registerChannelFixtureAccount(t, configPath, "bot-token")
+	registerChannelFixtureAccount(t, configPath, "bot-token", "420079")
 	process := startServeRuntimeTestProcess(t, opts)
 	t.Cleanup(func() { _ = process.stop() })
 	process.waitForReadyLine()
@@ -471,7 +471,14 @@ func runChannelDeliveryInboundDispositionE2E(t *testing.T, backend, scenario str
 			if err != nil {
 				t.Fatal(err)
 			}
-			publication := sendStandingTelegramPublication(t, "http://"+publicListen, body, http.StatusAccepted, "accepted")
+			callback, signing, _ := provider.Registration()
+			status, response := postProviderAliasUpdate(t, callback, "", signing, string(body))
+			var publication standingTelegramPublication
+			if status != http.StatusAccepted || json.Unmarshal(response, &publication) != nil || publication.Status != "accepted" ||
+				publication.Provider != "telegram" || publication.ProviderEventID != channelFixtureProviderEventID(t, fmt.Sprint(9100+index)) ||
+				publication.PublicationID == "" || len(publication.EventIDs) != 2 || len(publication.EventNames) != 2 {
+				t.Fatalf("registered Telegram publication status=%d body=%s", status, response)
+			}
 			var published struct {
 				Run operatorread.RunHeader `json:"run"`
 			}

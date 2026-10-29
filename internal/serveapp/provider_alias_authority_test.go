@@ -72,13 +72,28 @@ func runProviderAliasAuthorityScenario(t *testing.T, scenario providerAliasScena
 				t.Cleanup(func() { projectRuntimePersistenceForServe = previous })
 			}
 			root := writeProviderAliasAuthorityFixture(t, scenario)
-			rt := startWorkspaceGatewayProofRuntime(t, backend, root, "", nil, "127.0.0.1:0")
+			rt := startWorkspaceLiveGatewayProofRuntime(t, backend, root, "", nil, "127.0.0.1:0")
 			requireIndependentStandingRootTrees(t, rt, scenario)
-			baseURL := strings.TrimSuffix(rt.Endpoint, "/v1/rpc")
 			for aliasIndex, alias := range []string{"alpha", "beta"} {
+				account := "420079"
+				if alias == "beta" {
+					account = "420080"
+				}
+				callback, signingSecret, count := rt.Telegram.RegistrationForCredential("fixture-token-" + account)
+				if count == 0 || callback == "" || signingSecret == "" {
+					t.Fatal("fixture account has no native registration")
+				}
+				foreign := "420079"
+				if account == foreign {
+					foreign = "420080"
+				}
+				_, foreignSecret, _ := rt.Telegram.RegistrationForCredential("fixture-token-" + foreign)
 				endpointAlias := filepath.Base(root)
 				if flow := scenario.source(alias); flow != "." {
 					endpointAlias += "." + flow
+				}
+				if !strings.Contains(callback, "/webhooks/"+endpointAlias+"/telegram?") {
+					t.Fatal("native callback does not belong to the independently expected source alias")
 				}
 				for shapeIndex, shape := range []string{"text", "callback"} {
 					t.Run(alias+"/"+shape, func(t *testing.T) {
@@ -93,18 +108,18 @@ func runProviderAliasAuthorityScenario(t *testing.T, scenario providerAliasScena
 						}
 						// Failed authentication must not claim the delivery identity: the exact
 						// same update succeeds only after presenting the bound signing secret.
-						for _, secret := range []string{"", "wrong-secret"} {
-							status, _ := postProviderAliasUpdate(t, baseURL, endpointAlias, secret, update)
+						for _, secret := range []string{"", "wrong-secret", foreignSecret} {
+							status, _ := postProviderAliasUpdate(t, callback, "", secret, update)
 							if status != http.StatusUnauthorized {
 								t.Fatalf("unauthenticated %s status=%d, want 401", alias, status)
 							}
 						}
-						status, response := postProviderAliasUpdate(t, baseURL, endpointAlias, "telegram-secret", update)
+						status, response := postProviderAliasUpdate(t, callback, "", signingSecret, update)
 						if fault != nil {
 							if status != http.StatusServiceUnavailable {
 								t.Fatalf("lost acknowledgment status=%d body=%s", status, response)
 							}
-							status, response = postProviderAliasUpdate(t, baseURL, endpointAlias, "telegram-secret", update)
+							status, response = postProviderAliasUpdate(t, callback, "", signingSecret, update)
 							if status != http.StatusOK {
 								t.Fatalf("committed retry status=%d body=%s", status, response)
 							}
@@ -140,7 +155,11 @@ func runProviderAliasAuthorityScenario(t *testing.T, scenario providerAliasScena
 							}
 						}
 						if shape == "callback" {
-							requireProviderAliasActionIntent(t, rt, receipt.PublicationID, runtimeinbound.Identity{RunID: receipt.RunID, Provider: "telegram", ProviderEventID: fmt.Sprint(id)}, scenario.source(alias))
+							providerID, err := runtimeinbound.SemanticFingerprint([]string{"telegram", account, fmt.Sprint(id)})
+							if err != nil {
+								t.Fatal(err)
+							}
+							requireProviderAliasActionIntent(t, rt, receipt.PublicationID, runtimeinbound.Identity{RunID: receipt.RunID, Provider: "telegram", ProviderEventID: providerID}, scenario.source(alias))
 						} else {
 							seen := map[string]bool{}
 							for _, eventID := range receipt.EventIDs {
@@ -160,7 +179,7 @@ func runProviderAliasAuthorityScenario(t *testing.T, scenario providerAliasScena
 								t.Fatalf("event kinds=%v", seen)
 							}
 						}
-						duplicateStatus, duplicateBody := postProviderAliasUpdate(t, baseURL, endpointAlias, "telegram-secret", update)
+						duplicateStatus, duplicateBody := postProviderAliasUpdate(t, callback, "", signingSecret, update)
 						var duplicate struct {
 							PublicationID string   `json:"publication_id"`
 							EventIDs      []string `json:"event_ids"`
@@ -308,7 +327,11 @@ func requireProviderAliasRootConnection(t *testing.T, rt servedWorkspaceProofRun
 
 func postProviderAliasUpdate(t *testing.T, baseURL, alias, secret, body string) (int, json.RawMessage) {
 	t.Helper()
-	req, err := http.NewRequest(http.MethodPost, baseURL+"/webhooks/"+alias+"/telegram", bytes.NewBufferString(body))
+	endpoint := baseURL
+	if alias != "" {
+		endpoint += "/webhooks/" + alias + "/telegram"
+	}
+	req, err := http.NewRequest(http.MethodPost, endpoint, bytes.NewBufferString(body))
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -515,7 +538,11 @@ func writeProviderAliasAuthorityFixture(t *testing.T, scenario providerAliasScen
 		}
 		files[alias+"/schema.yaml"] = "stages: []\n" + pins + "  outputs: [" + strings.Join(connectedNames, ", ") + "]\n"
 		files[alias+"/entities.yaml"] = "service: {}\n"
-		files[alias+"/policy.yaml"] = "operator_account: '420079'\n"
+		account := "420079"
+		if alias == "beta" {
+			account = "420080"
+		}
+		files[alias+"/policy.yaml"] = "operator_account: '" + account + "'\n"
 		files[alias+"/nodes.yaml"] = nodes
 		if scenario.noLocalConsumers {
 			delete(files, alias+"/nodes.yaml")

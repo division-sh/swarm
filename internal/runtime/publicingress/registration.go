@@ -42,6 +42,7 @@ type RegistrationTarget struct {
 	Provider                string
 	AdmissionPlanGeneration triggergeneration.Generation
 	SigningCredentialKey    string
+	RegisteredOperationID   string
 }
 
 type RegistrationPair struct {
@@ -49,6 +50,7 @@ type RegistrationPair struct {
 	PlanGeneration              plangeneration.Generation
 	ActivationSource            channelonboarding.ActivationSource
 	OperatorAccount             string
+	AccountHolder               channelonboarding.AccountHolder
 	OnboardingOperationID       string
 	OnboardingRevision          int64
 	ActivationRevision          int64
@@ -424,6 +426,11 @@ func (c *ProviderRegistrationController) admitAndIdentify(ctx context.Context, e
 		default:
 			return admittedPair{}, fmt.Errorf("provider registration activation source is invalid")
 		}
+	}
+	if pair.ActivationSource == channelonboarding.ActivationSourceRegistered &&
+		(pair.Target.RegisteredOperationID != operationID || pair.AccountHolder.BundleHash != pair.Target.BundleHash ||
+			pair.AccountHolder.Flow != pair.Target.FlowPath || pair.AccountHolder.RunID == "" || pair.AccountHolder.FlowInstance == "") {
+		return admittedPair{}, fmt.Errorf("registered provider ingress requires its exact operation and source holder")
 	}
 	if pair.Registration.Provider() != strings.TrimSpace(pair.Target.Provider) {
 		return admittedPair{}, fmt.Errorf("provider registration pair %s provider conflicts with compiled channel registration", key)
@@ -1038,7 +1045,7 @@ func registrationBaseFingerprint(exposure Generation, pair RegistrationPair, pro
 		snapshot := provider[logical]
 		providerEvidence[logical] = map[string]any{"key": snapshot.Key, "source": snapshot.Source, "observation_token": snapshot.ObservationToken()}
 	}
-	raw, err := canonicaljson.Bytes(map[string]any{
+	intent := map[string]any{
 		"exposure_generation": exposure.ID,
 		"public_origin":       exposure.PublicOrigin,
 		"binding_id":          pair.BindingID,
@@ -1052,7 +1059,11 @@ func registrationBaseFingerprint(exposure Generation, pair RegistrationPair, pro
 		"slot_id":                 slotID,
 		"provider_credentials":    providerEvidence,
 		"signing_credential":      map[string]any{"key": signing.Key, "source": signing.Source, "observation_token": signing.ObservationToken()},
-	})
+	}
+	if pair.ActivationSource == channelonboarding.ActivationSourceRegistered {
+		intent["account_holder"] = pair.AccountHolder
+	}
+	raw, err := canonicaljson.Bytes(intent)
 	if err != nil {
 		return "", err
 	}

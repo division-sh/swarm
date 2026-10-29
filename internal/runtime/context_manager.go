@@ -1113,6 +1113,11 @@ func currentChannelActivationSigningKeys(entry *runtimeContextEntry) (map[string
 	}
 	defer lease.Release()
 	for _, activation := range lease.Activations() {
+		// Registered accounts retain separate frozen keys per operation, not
+		// one replacement signing key for the whole source selector.
+		if activation.Source == channelonboarding.ActivationSourceRegistered {
+			continue
+		}
 		selector := strings.TrimSpace(activation.Plan.RegistrationTarget())
 		if selector == "" {
 			continue
@@ -1599,7 +1604,20 @@ func (m *RuntimeContextManager) AdmitChannelStandingTarget(ctx context.Context, 
 		return err
 	}
 	defer func() { _ = use.Done() }()
-	targets, activations, err := use.Runtime().AdmitChannelStandingTarget(use.WorkContext(), op, candidate, session)
+	var targets []StandingTarget
+	var activations []StandingActivation
+	if op.DeploymentRegistration {
+		holders, holderErr := m.AccountHolders(ctx, channelonboarding.AccountReference{Provider: op.Provider, Account: op.AccountReference})
+		if holderErr != nil {
+			return holderErr
+		}
+		if len(holders) != 1 || holders[0].BundleHash != candidate.Coordinate.BundleHash || holders[0].Flow != candidate.Target.FlowPath {
+			return channelonboarding.ErrRevisionConflict
+		}
+		targets, activations, err = use.Runtime().admitRegisteredStandingChannelTarget(use.WorkContext(), op, candidate, holders[0])
+	} else {
+		targets, activations, err = use.Runtime().AdmitChannelStandingTarget(use.WorkContext(), op, candidate, session)
+	}
 	if err != nil {
 		return err
 	}
