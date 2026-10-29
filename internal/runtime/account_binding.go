@@ -10,7 +10,6 @@ import (
 	"github.com/division-sh/swarm/internal/channelonboarding"
 	"github.com/division-sh/swarm/internal/packadmission"
 	contracts "github.com/division-sh/swarm/internal/runtime/contracts"
-	"github.com/division-sh/swarm/internal/runtime/pipeline"
 	"github.com/division-sh/swarm/internal/runtime/runlifecycle"
 	"github.com/division-sh/swarm/internal/runtime/semanticview"
 )
@@ -29,8 +28,10 @@ func (rt *Runtime) accountDeclarations() (packadmission.ProviderSource, *contrac
 	if err != nil {
 		return packadmission.ProviderSource{}, nil, err
 	}
-	providers, err := packadmission.AdmitProviderSource(rooted, bundle.Platform)
-	return providers, bundle, err
+	if !rt.providerSource.Valid() || !rt.providerSource.RootedSource().Admission().Equal(rooted.Admission()) {
+		return packadmission.ProviderSource{}, nil, fmt.Errorf("account binding requires the runtime's captured provider admission")
+	}
+	return rt.providerSource, bundle, nil
 }
 
 // AccountHolders observes ordinary state through the canonical instance reader.
@@ -61,34 +62,24 @@ func (rt *Runtime) AccountHolders(ctx context.Context, runID string, ref channel
 		if !held || declaration.FlowID == "" || plan.Provider() != ref.Provider {
 			continue
 		}
-		selected, err := rt.accountHoldersForFlow(runID, ref, declaration, instances)
-		if err != nil {
-			return nil, err
+		for _, instance := range instances {
+			if instance.WorkflowName != flow || !instance.TerminatedAt.IsZero() {
+				continue
+			}
+			value, present := declaration.Value(instance.Fields)
+			if !present || value == "" {
+				continue // Dynamic keyless holders may be populated by a later event.
+			}
+			account, err := channelonboarding.CanonicalAccount(ref.Provider, value)
+			if err != nil {
+				return nil, fmt.Errorf("flow %s operator_account: %w", flow, err)
+			}
+			if account != ref {
+				continue
+			}
+			holders = append(holders, channelonboarding.AccountHolder{BundleHash: rt.Options.SourceArtifactFact.BundleHash(),
+				Flow: flow, RunID: runID, FlowInstance: instance.StorageRef})
 		}
-		holders = append(holders, selected...)
-	}
-	return holders, nil
-}
-
-func (rt *Runtime) accountHoldersForFlow(runID string, ref channelonboarding.AccountReference, declaration contracts.FlowOperatorAccount, instances []pipeline.WorkflowInstance) ([]channelonboarding.AccountHolder, error) {
-	var holders []channelonboarding.AccountHolder
-	for _, instance := range instances {
-		if instance.WorkflowName != declaration.FlowID || !instance.TerminatedAt.IsZero() {
-			continue
-		}
-		value, present := declaration.Value(instance.Fields)
-		if !present || value == "" {
-			continue // Dynamic keyless holders may be populated by a later event.
-		}
-		account, err := channelonboarding.CanonicalAccount(ref.Provider, value)
-		if err != nil {
-			return nil, fmt.Errorf("flow %s operator_account: %w", declaration.FlowID, err)
-		}
-		if account != ref {
-			continue
-		}
-		holders = append(holders, channelonboarding.AccountHolder{BundleHash: rt.Options.SourceArtifactFact.BundleHash(),
-			Flow: declaration.FlowID, RunID: runID, FlowInstance: instance.StorageRef})
 	}
 	return holders, nil
 }

@@ -236,6 +236,7 @@ type BootProgressEvent struct {
 
 type Runtime struct {
 	bootCredentialSources       []runtimecredentials.SourceFact
+	providerSource              packadmission.ProviderSource
 	standingCredentialMu        sync.Mutex
 	standingCredentialAdmission *standingCredentialAdmission
 	generationMu                sync.Mutex
@@ -1290,6 +1291,7 @@ func newRuntime(ctx context.Context, deps RuntimeDeps) (*Runtime, error) {
 	if err != nil {
 		return nil, err
 	}
+	rt.providerSource = providers
 	bus, err := newRuntimeEventBus(runtimeDeps.EventStore, runtimeDeps.EventBusDurable, runtimeDeps.PipelineObligations, rt.Logger, source, boot.ExecutionPosture, boot.SourceArtifactFact, opts.RuntimeInstanceID, workOccurrence, func() []runtimebus.EventInterceptor {
 		if rt.Pipeline == nil {
 			return nil
