@@ -67,11 +67,14 @@ func openPrivateAt(parent int, name string, flags int, directory bool) (*os.File
 	return file, nil
 }
 
-// The caller supplies the existing private runtime-state base, not a source,
+// The caller supplies the private runtime-state base, not a source,
 // run, or process-occurrence directory. Opening never connects or pairs.
 func openSessionDirectory(basePath, connectionID string) (*sessionDirectory, error) {
 	if !filepath.IsAbs(basePath) || uuid.Validate(connectionID) != nil {
 		return nil, errSessionProtection
+	}
+	if err := unix.Mkdirat(unix.AT_FDCWD, basePath, 0o700); err != nil && !errors.Is(err, unix.EEXIST) {
+		return nil, err
 	}
 	base, err := openPrivateAt(unix.AT_FDCWD, basePath, unix.O_RDONLY, true)
 	if err != nil {

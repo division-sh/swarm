@@ -13,13 +13,14 @@ import (
 )
 
 func TestWhatsAppSessionDirectoryJoinFailureRetainsPossessionAndPairing(t *testing.T) {
-	base, connection := t.TempDir(), uuid.NewString()
-	if err := os.Chmod(base, 0o700); err != nil {
-		t.Fatal(err)
-	}
+	base, connection := filepath.Join(t.TempDir(), ".swarm"), uuid.NewString()
 	directory, err := openSessionDirectory(base, connection)
 	if err != nil {
 		t.Fatal(err)
+	}
+	info, err := os.Stat(base)
+	if err != nil || info.Mode().Perm() != 0o700 {
+		t.Fatal("fresh state base is not private", err)
 	}
 	defer func() { _ = directory.release() }()
 	path := filepath.Join(directory.path, "session.db")
@@ -59,7 +60,7 @@ func TestWhatsAppSessionDirectoryJoinFailureRetainsPossessionAndPairing(t *testi
 }
 
 func TestWhatsAppSessionDirectoryRefusesUnsafeAndCopiedState(t *testing.T) {
-	for _, cell := range []string{"directory_symlink", "directory_mode", "lock_symlink", "header_mode", "missing_header", "foreign_connection", "foreign_version", "unknown_header", "trailing_header", "duplicate_header"} {
+	for _, cell := range []string{"base_symlink", "base_mode", "directory_symlink", "directory_mode", "lock_symlink", "header_mode", "missing_header", "foreign_connection", "foreign_version", "unknown_header", "trailing_header", "duplicate_header"} {
 		t.Run(cell, func(t *testing.T) {
 			base, connection := t.TempDir(), uuid.NewString()
 			if err := os.Chmod(base, 0o700); err != nil {
@@ -75,6 +76,18 @@ func TestWhatsAppSessionDirectoryRefusesUnsafeAndCopiedState(t *testing.T) {
 			}
 			header := filepath.Join(path, "session.json")
 			switch cell {
+			case "base_symlink":
+				moved := base + "-moved"
+				if err := os.Rename(base, moved); err != nil {
+					t.Fatal(err)
+				}
+				if err := os.Symlink(moved, base); err != nil {
+					t.Fatal(err)
+				}
+			case "base_mode":
+				if err := os.Chmod(base, 0o755); err != nil {
+					t.Fatal(err)
+				}
 			case "directory_symlink":
 				moved := path + "-moved"
 				if err := os.Rename(path, moved); err != nil {
