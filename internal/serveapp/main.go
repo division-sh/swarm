@@ -556,7 +556,6 @@ func buildServeRuntimeBundleContext(req serveRuntimeBundleContextRequest) (resul
 		return serveRuntimeBundleContext{}, fmt.Errorf("compile declared-only channel activation publication: %w", err)
 	}
 	validationOpts.ChannelActivationPublication = declaredChannelPublication
-	validationOpts.TriggerEntries = req.Config.Triggers
 	profile, err := req.Config.LLMBackendProfile()
 	if err != nil {
 		return serveRuntimeBundleContext{}, fmt.Errorf("resolve llm backend profile for workflow validation: %w", err)
