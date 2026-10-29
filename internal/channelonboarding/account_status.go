@@ -56,24 +56,37 @@ func RegisteredAccount(ctx context.Context, operations OperationStore, ref Accou
 	return selected, nil
 }
 
-func (s *Service) DeploymentAccountStatus(ctx context.Context, ref AccountReference) (AccountStatus, error) {
-	if !s.deployment || ref.Validate() != nil {
-		return AccountStatus{}, ErrInvalidRequest
+// RegisteredAccountStatus observes durable link state only. The retained
+// transport owner, when present, separately supplies live connection health.
+func RegisteredAccountStatus(ctx context.Context, operations OperationStore, ref AccountReference) (AccountStatus, Operation, error) {
+	if ref.Validate() != nil {
+		return AccountStatus{}, Operation{}, ErrInvalidRequest
 	}
 	status := AccountStatus{Provider: ref.Provider, Account: ref.Account, State: "stopped", Health: "disconnected", Holders: []AccountHolder{}}
-	op, err := RegisteredAccount(ctx, s.store, ref)
+	op, err := RegisteredAccount(ctx, operations, ref)
 	if err == ErrNotFound {
 		status.Reason = "not_linked"
-		return status, nil
+		return status, Operation{}, nil
 	}
 	if err != nil {
-		return AccountStatus{}, err
+		return AccountStatus{}, Operation{}, err
+	}
+	status.Linked = true
+	return status, op, nil
+}
+
+func (s *Service) DeploymentAccountStatus(ctx context.Context, ref AccountReference) (AccountStatus, error) {
+	if !s.deployment {
+		return AccountStatus{}, ErrInvalidRequest
+	}
+	status, op, err := RegisteredAccountStatus(ctx, s.store, ref)
+	if err != nil || op.OperationID == "" {
+		return status, err
 	}
 	result, err := s.Get(ctx, op.OperationID)
 	if err != nil {
 		return AccountStatus{}, err
 	}
-	status.Linked = true
 	if result.Connection != nil {
 		status.Unclaimed = result.Connection.Unclaimed
 		status.Linked = result.Connection.Linked
