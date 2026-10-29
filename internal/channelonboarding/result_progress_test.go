@@ -57,6 +57,29 @@ func TestOnboardingSelectedProviderRequirementSurvivesReadback(t *testing.T) {
 		if pending, err := readback.SessionPreparationPending(); err != nil || !pending {
 			t.Fatal("non-executable preparation was lost", pending, err)
 		}
+		for _, cell := range []string{"cached", "exhausted", "current", "foreign_source", "malformed", "paired", "admitted"} {
+			expired := readback
+			expired.Pairing = &PairingReadback{Status: "awaiting_qr", Code: "private-expired-code", ExpiresAt: time.Now().Add(-time.Second)}
+			switch cell {
+			case "exhausted":
+				expired.Pairing = &PairingReadback{Status: "qr_expired"}
+			case "current":
+				expired.Pairing.ExpiresAt = time.Now().Add(time.Minute)
+			case "foreign_source":
+				expired.Operation.Coordinate.ContextPublicationGeneration++
+			case "malformed":
+				expired.Pairing.Code = "\x00"
+			case "paired":
+				expired.Pairing.Paired = true
+			case "admitted":
+				expired.Operation.ActivationRevision = 1
+			}
+			got, err := expired.SessionPairingExpired(time.Now())
+			want := cell == "cached" || cell == "exhausted"
+			if got != want || want && err != nil {
+				t.Fatal("renewal escaped exact unpaired, non-executable scope", cell, got, err)
+			}
+		}
 		readback.Operation.Coordinate.ContextPublicationGeneration++
 		if _, err := readback.ProviderCredentialRequirement(); err == nil {
 			t.Fatal("foreign operation borrowed the selected requirement")

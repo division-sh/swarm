@@ -15,7 +15,7 @@ import (
 
 func TestWhatsAppPairingReuseExpiryAndObservationErrorsBothStores(t *testing.T) {
 	for _, backend := range []string{"sqlite", "postgres"} {
-		for _, mode := range []string{"current", "expired", "observation_error", "scope_error", "canceled", "native_revocation", "native_revocation_during_lookup", "display_only"} {
+		for _, mode := range []string{"current", "expired", "expired_disconnect", "observation_error", "scope_error", "canceled", "native_revocation", "native_revocation_during_lookup", "display_only"} {
 			t.Run(backend+"/"+mode, func(t *testing.T) {
 				f := newRuntimeBootstrapFixture(t, backend)
 				started, err := f.service.Start(f.ctx, channelonboarding.StartInput{Verb: channelonboarding.VerbConnect,
@@ -49,9 +49,16 @@ func TestWhatsAppPairingReuseExpiryAndObservationErrorsBothStores(t *testing.T) 
 				var want error
 				nativeRevocation := mode == "native_revocation" || mode == "native_revocation_during_lookup"
 				switch mode {
-				case "expired":
+				case "expired", "expired_disconnect":
 					if err := pairing.handle(&events.QR{}); err != nil {
 						t.Fatal("expire the owned batch", err)
+					}
+					if mode == "expired_disconnect" {
+						occurrence.fenceAfterDisconnect(true, "network unreachable")
+						view, err := c.PairingReadback(f.ctx, f.principal)
+						if err != nil || view != (channelonboarding.PairingReadback{Status: "qr_expired"}) {
+							t.Fatal("expired disconnect lost authenticated zero-code renewal evidence", err)
+						}
 					}
 				case "observation_error":
 					want = errPairingFailed
@@ -161,7 +168,7 @@ func TestWhatsAppPairingReuseExpiryAndObservationErrorsBothStores(t *testing.T) 
 				if reuse != (mode == "current" || mode == "display_only") || !errors.Is(err, want) {
 					t.Fatal("reuse confused expired progress with health or converted an observation error to replacement", reuse, err)
 				}
-				if (c.CheckBootstrap(f.ctx) == nil) == nativeRevocation {
+				if (c.CheckBootstrap(f.ctx) == nil) == (nativeRevocation || mode == "expired_disconnect") {
 					t.Fatal("reuse observation retired the live transport instead of leaving explicit resume in charge")
 				}
 				select {
