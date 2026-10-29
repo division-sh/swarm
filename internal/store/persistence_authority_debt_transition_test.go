@@ -15,7 +15,7 @@ const debtQuiescenceCollectorTo = "4ab44a86253d3b09474c20463ca1a4e5c6296f4a4694e
 const debtRunFixtureCollectorTo = "dd36814075a0641f1085eb8fe8d74ae1cd61d8fba3b6047a8514b175ddbfa53e"
 const debtDeploymentRegistrationCollectorTo = "f765afc073439ecaa3e031c497a8bee3f06af9d9a0b3a816e97ab28f366c4834"
 const debtS1CollectorTo = "d101a9e94475eb2d5cb1e18d03c0db6999a997a71423325ae71364dfbb6d8adb"
-const debtS3AccountCollectorTo = "09986cb2391d6ac1d4d8649f2b70a17c9ead2f4876e7206bee5a6d80fb84eafc"
+const debtS3AccountCollectorTo = "4c54d764266f1e032505f8aedd76a8623e6f49a25d7a5083619623a4d458261c"
 
 func TestPersistenceAuthorityDebtG01TransitionIsExactAndMetadataOnly(t *testing.T) {
 	root := persistenceAuthorityRepoRoot(t)
