@@ -611,7 +611,8 @@ func completeChannelOnboarding(ctx context.Context, client channelControlClient,
 }
 
 func channelPairingWaitRequired(result channelOnboardingResult, pending bool) bool {
-	return pending || !result.Operation.DeploymentRegistration && result.Operation.Phase == channelonboarding.PhaseSucceeded && result.Connection != nil && result.Connection.Linked
+	return pending || !result.Operation.DeploymentRegistration && result.Operation.Phase == channelonboarding.PhaseSucceeded &&
+		result.Connection != nil && result.Connection.Linked && (result.Readiness == nil || !result.Readiness.Ready)
 }
 
 func waitForChannelOnboardingPairing(ctx context.Context, client channelControlClient, current channelOnboardingResult, opts channelConnectOptions, awaitLogin bool, out, errOut io.Writer) (channelOnboardingResult, error) {
@@ -643,7 +644,7 @@ func waitForChannelOnboardingPairing(ctx context.Context, client channelControlC
 			}
 			awaitLogin = false
 			continue
-		case !pending && (current.Operation.Phase != channelonboarding.PhaseSucceeded || current.Connection == nil || !current.Connection.Linked || current.Readiness != nil && current.Readiness.Ready):
+		case !channelPairingWaitRequired(current, pending):
 			return current, nil
 		case pending && current.Pairing.Code != "" && current.Pairing.Code != lastQR:
 			qrLines, err = writeChannelPairingQR(out, errOut, opts.output, current, qrLines)
