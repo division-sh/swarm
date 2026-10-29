@@ -42433,7 +42433,7 @@ api_specification:
       - {name: scope, required: false, schema: {type: string, const: deployment}}
       - {name: holder, required: false, schema: {$ref: '#/components/schemas/DeploymentChannelHolder'}}
       - {name: provider, required: false, schema: {type: string, enum: [whatsapp, telegram]}}
-      - {name: account, required: false, schema: {type: string, minLength: 1, description: Exact deployment account status, including an account not yet linked; requires deployment scope and provider.}}
+      - {name: account, required: false, schema: {type: string, minLength: 1, description: 'Exact deployment account status, including an account not yet linked; requires deployment scope and provider.'}}
       result: {name: result, required: true, schema: {oneOf: [{$ref: '#/components/schemas/OperatorChannelListResult'}, {$ref: '#/components/schemas/ChannelAccountStatus'}, {type: object, additionalProperties: false, required: [accounts], properties: {accounts: {type: array, items: {$ref: '#/components/schemas/ChannelOnboardingResult'}}}}]}}
       errors: [CHANNEL_PROOF_UNAVAILABLE]
     runtime.pause:
