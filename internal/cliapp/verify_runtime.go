@@ -121,7 +121,7 @@ func runVerifyCommandWithOutput(ctx context.Context, repo string, opts verifyCom
 		return refuse("source_loading", "internal/cliapp.NewSwarmWorkflowModuleWithPackBase", "source:"+sourceRoot, err, nil)
 	} else {
 		packReadback := packInventoryReadbackFromInventory(bundle.PackInventory)
-		source, validationOpts, err := admitStructuralSource(configResult, bundle)
+		source, validationOpts, err := admitVerifySource(configResult, bundle)
 		if err != nil {
 			return refuse("effective_source_admission", "internal/runtime.AdmitEffectiveSourceProjection", "source:"+bundle.SourceArtifact.BundleHash(), err, bundle.SourceArtifact)
 		}
@@ -341,23 +341,33 @@ func verifyWorkflowContractValidationOptions(configResult RuntimeConfigLoadResul
 }
 
 func admitStructuralSource(configResult RuntimeConfigLoadResult, bundle *runtimecontracts.WorkflowContractBundle) (semanticview.Source, runtime.WorkflowContractValidationOptions, error) {
+	projection, opts, err := admitStructuralSourceProjection(configResult, bundle)
+	return projection.Source(), opts, err
+}
+
+func admitStructuralSourceProjection(configResult RuntimeConfigLoadResult, bundle *runtimecontracts.WorkflowContractBundle) (runtime.AdmittedEffectiveSourceProjection, runtime.WorkflowContractValidationOptions, error) {
 	source := semanticview.Wrap(bundle)
 	opts, err := verifyWorkflowContractValidationOptions(configResult, source)
 	if err != nil {
-		return nil, opts, err
+		return runtime.AdmittedEffectiveSourceProjection{}, opts, err
 	}
 	hash, err := runtimecontracts.BundleHash(bundle)
 	if err != nil {
-		return nil, opts, err
+		return runtime.AdmittedEffectiveSourceProjection{}, opts, err
 	}
 	fact, err := runtimecorrelation.NewSourceArtifactFact(hash)
 	if err != nil {
-		return nil, opts, err
+		return runtime.AdmittedEffectiveSourceProjection{}, opts, err
 	}
 	projection, err := runtime.AdmitEffectiveSourceProjection(runtime.EffectiveSourceProjectionRequest{
 		Source: source, SourceArtifactFact: fact,
 		ChannelPlans: opts.ChannelPlans,
 	})
+	return projection, opts, err
+}
+
+func admitVerifySource(configResult RuntimeConfigLoadResult, bundle *runtimecontracts.WorkflowContractBundle) (semanticview.Source, runtime.WorkflowContractValidationOptions, error) {
+	projection, opts, err := admitStructuralSourceProjection(configResult, bundle)
 	if err != nil {
 		return nil, opts, err
 	}

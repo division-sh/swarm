@@ -92,6 +92,12 @@ normalized_events:
 					}
 				})
 			}
+			for _, args := range [][]string{{"describe", root, "--json"}, {"describe", "routes", root, "--json"}} {
+				var out, errOut bytes.Buffer
+				if code := executeCLIFrom(t.Context(), repoRootForTest(), args, &out, &errOut, nil); code != 0 || out.Len() == 0 {
+					t.Fatalf("diagnostic %v code=%d stdout=%s stderr=%s", args[:len(args)-1], code, &out, &errOut)
+				}
+			}
 			if tc.refusal != "" {
 				var out lockedBuffer
 				code := runFrom(t.Context(), repoRootForTest(), cliapp.ServeOptions{
