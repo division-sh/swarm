@@ -11,6 +11,7 @@ import (
 	"github.com/division-sh/swarm/internal/runtime"
 	"github.com/division-sh/swarm/internal/runtime/core/processbinding"
 	"github.com/division-sh/swarm/internal/runtime/correlation"
+	"github.com/division-sh/swarm/internal/runtime/publicingress"
 	"github.com/division-sh/swarm/internal/sessionprovider"
 	sessionexecution "github.com/division-sh/swarm/internal/sessionprovider/execution"
 )
@@ -23,6 +24,7 @@ type deploymentRuntimeOptions struct {
 	manager  *runtime.RuntimeContextManager
 	sessions serveSessionBootstrapOwner
 	refresh  func(context.Context) error
+	ingress  *publicingress.ReadinessOwner
 }
 
 type serveSessionBootstrapOwner interface {

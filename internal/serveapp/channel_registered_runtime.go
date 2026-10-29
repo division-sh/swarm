@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"errors"
 	"sync"
+	"time"
 
 	"github.com/division-sh/swarm/internal/channelonboarding"
 	"github.com/division-sh/swarm/internal/cliapp"
@@ -14,7 +15,7 @@ import (
 	"github.com/division-sh/swarm/internal/sessionprovider"
 )
 
-func observeDeploymentAccountStatus(ctx context.Context, ref channelonboarding.AccountReference, manager *runtime.RuntimeContextManager, operations channelonboarding.OperationStore, clients map[string]*cliapp.DeploymentChannelControl, mu *sync.Mutex) (json.RawMessage, error) {
+func observeDeploymentAccountStatus(ctx context.Context, ref channelonboarding.AccountReference, runtimeOptions deploymentRuntimeOptions, operations channelonboarding.OperationStore, clients map[string]*cliapp.DeploymentChannelControl, mu *sync.Mutex) (json.RawMessage, error) {
 	ref, err := channelonboarding.CanonicalAccount(ref.Provider, ref.Account)
 	if err != nil {
 		return nil, err
@@ -32,13 +33,16 @@ func observeDeploymentAccountStatus(ctx context.Context, ref channelonboarding.A
 			return nil, err
 		}
 	}
-	if err := observeDeploymentAccountHolder(ctx, manager, &status); err != nil {
+	if err := observeDeploymentAccountHolder(ctx, runtimeOptions.manager, &status); err != nil {
+		return nil, err
+	}
+	if err := observeDeploymentWebhookAccount(ctx, runtimeOptions, op, &status); err != nil {
 		return nil, err
 	}
 	return json.Marshal(status)
 }
 
-func observeDeploymentAccountList(ctx context.Context, raw json.RawMessage, manager *runtime.RuntimeContextManager, clients map[string]*cliapp.DeploymentChannelControl, mu *sync.Mutex) (json.RawMessage, error) {
+func observeDeploymentAccountList(ctx context.Context, raw json.RawMessage, runtimeOptions deploymentRuntimeOptions, clients map[string]*cliapp.DeploymentChannelControl, mu *sync.Mutex) (json.RawMessage, error) {
 	var list struct {
 		Accounts []channelonboarding.Result `json:"accounts"`
 	}
@@ -61,11 +65,51 @@ func observeDeploymentAccountList(ctx context.Context, raw json.RawMessage, mana
 			}
 			row.Status = &status
 		}
-		if err := observeDeploymentAccountHolder(ctx, manager, row.Status); err != nil {
+		if err := observeDeploymentAccountHolder(ctx, runtimeOptions.manager, row.Status); err != nil {
+			return nil, err
+		}
+		if err := observeDeploymentWebhookAccount(ctx, runtimeOptions, row.Operation, row.Status); err != nil {
 			return nil, err
 		}
 	}
 	return json.Marshal(list)
+}
+
+func observeDeploymentWebhookAccount(ctx context.Context, opts deploymentRuntimeOptions, op channelonboarding.Operation, status *channelonboarding.AccountStatus) (resultErr error) {
+	if op.Posture != channelonboarding.ActivationWebhookRegistration || !status.Linked || len(status.Holders) != 1 {
+		return nil
+	}
+	holder := status.Holders[0]
+	use, _, availability, err := opts.manager.AcquireRun(ctx, holder.RunID)
+	if err != nil {
+		return err
+	}
+	if use == nil || !availability.Available() {
+		status.State, status.Reason = "stopped", "holder_unavailable"
+		if use != nil {
+			return use.Done()
+		}
+		return nil
+	}
+	defer func() { resultErr = errors.Join(resultErr, use.Done()) }()
+	if holder.BundleHash != use.Context.BundleHash() || holder.RunID == "" ||
+		status.Provider != op.Provider || status.Account != op.AccountReference || !op.AccountConfirmed {
+		return channelonboarding.ErrRevisionConflict
+	}
+	candidate, _, err := exactRegisteredBusinessCandidate(use.Context, op.Provider, holder.Flow)
+	if err != nil {
+		return err
+	}
+	activation, err := channelonboarding.CompileRegisteredActivation(*candidate, op)
+	if err != nil {
+		return err
+	}
+	current, found := opts.ingress.ChannelRegistrationCurrent(use.WorkContext(), time.Now(), activation.Plan.BindingID(), candidate.Target.Selector, op.Provider)
+	status.State, status.Reason = "refused", "registration_not_current"
+	if found && current.Current {
+		status.State, status.Reason, status.Health = "live", "", "connected"
+	}
+	return nil
 }
 
 func observeDeploymentAccountHolder(ctx context.Context, manager *runtime.RuntimeContextManager, status *channelonboarding.AccountStatus) error {

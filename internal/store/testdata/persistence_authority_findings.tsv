@@ -1352,6 +1352,7 @@ typed-process-local	callback-type	typed	internal/runtime/shutdown_admission.go	(
 typed-process-local	callback-type	typed	internal/runtime/standing_ingress_credentials.go	(*github.com/division-sh/swarm/internal/runtime.Runtime).AdmitInboundCredentials	result:#2	func(context.Context) error
 typed-process-local	callback-type	typed	internal/runtime/standing_ingress_credentials.go	(*github.com/division-sh/swarm/internal/runtime.Runtime).evaluateStandingIngressAdmission	result:#2	func(context.Context) error
 typed-process-local	callback-type	typed	internal/runtime/standing_ingress_credentials.go	(*github.com/division-sh/swarm/internal/runtime.Runtime).standingIngressCredentialScope	result:#3	func(context.Context) error
+typed-process-local	callback-type	typed	internal/runtime/standing_ingress_registered.go	(*github.com/division-sh/swarm/internal/runtime.Runtime).evaluateRegisteredStandingIngress	result:#2	func(context.Context) error
 typed-process-local	callback-type	typed	internal/runtime/standing_targets.go	(*github.com/division-sh/swarm/internal/runtime.Runtime).PrepareStandingTargets	result:#3	func() error
 typed-process-local	callback-type	typed	internal/runtime/standing_targets.go	(*github.com/division-sh/swarm/internal/runtime.Runtime).standingTargetsMutation	result:#3	func() error
 typed-process-local	callback-type	typed	internal/runtime/startup_recovery_diagnostics.go	StartupRecoveryReadRequest	field:ReadManagerState	func(context.Context) (github.com/division-sh/swarm/internal/runtime/manager.RecoverableStateSnapshot, error)

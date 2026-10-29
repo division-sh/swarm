@@ -1,8 +1,10 @@
 package serveapp
 
 import (
+	"bytes"
 	"context"
 	"database/sql"
+	"encoding/json"
 	"errors"
 	"fmt"
 	"io"
@@ -16,6 +18,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/division-sh/swarm/internal/channelonboarding"
 	"github.com/division-sh/swarm/internal/cliapp"
 	"github.com/division-sh/swarm/internal/packs"
 	"github.com/division-sh/swarm/internal/runtime"
@@ -194,6 +197,14 @@ func runServeIngressFrozenCredentialJourney(t *testing.T, backend, policy, point
 		_, secret, count := provider.Registration()
 		if count == 0 || secret != originalSecret {
 			t.Fatal("registered callback does not carry the independently known operation key")
+		}
+		var out, errOut bytes.Buffer
+		code := cliapp.Execute(ctx, []string{"--config", opts.ConfigPath, "channel", "status", "telegram", "420079", "--json", "--api-server", endpoint},
+			&out, &errOut, nil, nil, OpenChannelRegistration)
+		var status channelonboarding.AccountStatus
+		if code != 0 || json.Unmarshal(out.Bytes(), &status) != nil || status.Provider != "telegram" || status.Account != "420079" ||
+			status.State != "live" || status.Health != "connected" || !status.Linked || len(status.Holders) != 1 {
+			t.Fatalf("public account status lacks exact native registration readiness: exit=%d status=%+v error=%s", code, status, errOut.String())
 		}
 	}
 	inboundURL := func(alias, incomingProvider string) string {
