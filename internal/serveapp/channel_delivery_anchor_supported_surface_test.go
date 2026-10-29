@@ -293,7 +293,11 @@ func TestChannelDeliveryReconciliationActivityDispatchPublicJourney(t *testing.T
 			select {
 			case <-arrived:
 			case <-time.After(15 * time.Second):
-				t.Fatal("approved activity did not reach the exact held provider call")
+				var state struct {
+					Effect decisioncard.ProposedEffectReadback `json:"effect"`
+				}
+				requireServedJSONRPCResult(t, h.rpcEndpoint(), "mailbox.get", map[string]any{"mailbox_id": cardID}, &state)
+				t.Fatalf("approved activity did not reach the exact held provider call: continuation=%s dispatch=%s", state.Effect.ContinuationState, state.Effect.DispatchState)
 			}
 			waitChannelAnchorDispatchEdit(t, h, messageID, "started")
 			// Earlier decision/start hints have all been consumed. With no repair
