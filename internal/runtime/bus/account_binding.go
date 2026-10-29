@@ -43,7 +43,7 @@ func (p selectedRunTargetOwnerProjection) selectedAccountInstance(ctx context.Co
 		return flowidentity.Instance{}, false, err
 	}
 	plan, held := provider.ChannelPlan()
-	if !held || declaration.FlowID == "" {
+	if !held || declaration.FlowID == "" || publication.provider != plan.Provider() {
 		return flowidentity.Instance{}, false, nil
 	}
 	account := channelonboarding.AccountReference{Provider: plan.Provider(), Account: publication.account}

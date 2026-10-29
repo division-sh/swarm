@@ -189,6 +189,7 @@ func TestPersistenceAuthorityDebtRunFixtureSignatureTransitionIsExact(t *testing
 			t.Fatal("exact landed rooted INSERT source was not recognized", failures)
 		}
 		debtRunFixtureSignatureHostileControls(t, pair, before, after, true)
+		debtRunFixtureSignatureHostileControls(t, pair, before, after, false)
 	})
 	t.Run("deployment-handler-source-signature", func(t *testing.T) {
 		pair := debtDeploymentHandlerSignatureTransition()

@@ -23,9 +23,9 @@ func CopyStandingRootTreePublic(t testing.TB) string {
 		"manifest.yaml":                       "version: 1.0.0\nplatform_version: '*'\n",
 		"schema.yaml":                         "# fixture: standing-root-tree\nstages: []\n" + pins + outputs + "connect:\n    - {event: inbound.telegram.text_message, from: ., to: alpha-receiver}\n    - {event: inbound.telegram.callback_action, from: ., to: alpha-receiver}\n    - {event: inbound.telegram.text_message, from: beta, to: beta-receiver}\n    - {event: inbound.telegram.callback_action, from: beta, to: beta-receiver}\n",
 		"nodes.yaml":                          nodes,
-		"entities.yaml":                       "receiver:\n  operator_account: {type: text, initial: ''}\n",
+		"entities.yaml":                       "receiver:\n  operator_account: text\n",
 		"beta/schema.yaml":                    "# fixture: beta\nstages: []\n" + pins + outputs,
-		"beta/entities.yaml":                  "receiver:\n  operator_account: {type: text, initial: ''}\n",
+		"beta/entities.yaml":                  "receiver:\n  operator_account: text\n",
 		"beta/nodes.yaml":                     nodes,
 		"alpha-receiver/detail/schema.yaml":   "stages: []\n# fixture: detail\n",
 	}
