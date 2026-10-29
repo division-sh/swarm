@@ -107,14 +107,16 @@ func (expected AdmissionResponsibility) MatchesOperation(op Operation) bool {
 	if expected.DeploymentRegistration != op.DeploymentRegistration {
 		return false
 	}
+	if expected.OperationRevision < 1 || op.OperationID != expected.OperationID || op.Revision < expected.OperationRevision ||
+		op.Provider != expected.Provider || op.SessionAccount != expected.SessionAccount ||
+		!slices.Equal(op.CredentialAdmissions, expected.Credentials) {
+		return false
+	}
 	if expected.RegisteredBusiness {
 		return expected.DeploymentRegistration && op.AccountConfirmed && !op.LogoutCompleted &&
 			op.ValidateSessionAccount() == nil && op.Coordinate == (ChannelRuntimeContextCoordinate{}) && op.TargetSelector == "" &&
 			expected.Coordinate.Validate() == nil && expected.TargetSelector != "" && expected.ActivationRevision == 0 &&
-			op.OperationID == expected.OperationID && expected.OperationRevision > 0 && op.Revision >= expected.OperationRevision &&
-			op.Provider == expected.Provider && op.SessionAccount == expected.SessionAccount &&
-			slices.Equal(op.CredentialAdmissions, expected.Credentials) &&
-			(op.Phase == PhaseSucceeded || op.Phase == PhaseAwaitingExternalIdentity || op.Phase == PhaseAwaitingOperatorConfirmation)
+			op.Phase.SupportsAccountBusiness()
 	}
 	coordinateCurrent := op.Coordinate.Matches(expected.Coordinate)
 	if op.DeploymentRegistration {
@@ -124,9 +126,17 @@ func (expected AdmissionResponsibility) MatchesOperation(op Operation) bool {
 	if !op.DeploymentRegistration && op.Posture == ActivationSessionConnection && expected.ActivationRevision == 0 && !op.Phase.RequiresExecutableTarget(op.Posture) {
 		coordinateCurrent = op.Coordinate.MatchesDeclaration(expected.Coordinate)
 	}
-	return expected.OperationID != "" && expected.OperationRevision > 0 && op.OperationID == expected.OperationID && coordinateCurrent && op.TargetSelector == expected.TargetSelector &&
-		op.Provider == expected.Provider && op.Revision >= expected.OperationRevision &&
-		slices.Equal(op.CredentialAdmissions, expected.Credentials) && op.SessionAccount == expected.SessionAccount
+	return expected.OperationID != "" && coordinateCurrent && op.TargetSelector == expected.TargetSelector
+}
+
+// Account business remains eligible while its separate operator ceremony waits.
+func (p Phase) SupportsAccountBusiness() bool {
+	switch p {
+	case PhaseSucceeded, PhaseAwaitingExternalIdentity, PhaseAwaitingOperatorConfirmation:
+		return true
+	default:
+		return false
+	}
 }
 
 func (expected AdmissionResponsibility) MatchesActivation(op Operation, activation ConnectedChannelActivation) bool {
@@ -153,7 +163,7 @@ func (expected AdmissionResponsibility) MatchesAccountConnection(op Operation, a
 }
 
 func (expected AdmissionResponsibility) MatchesAccountBusiness(op Operation, activation ConnectedChannelActivation) bool {
-	return (op.Phase == PhaseSucceeded || op.Phase == PhaseAwaitingExternalIdentity || op.Phase == PhaseAwaitingOperatorConfirmation) && expected.MatchesAccountConnection(op, activation)
+	return op.Phase.SupportsAccountBusiness() && expected.MatchesAccountConnection(op, activation)
 }
 
 // ResumeSessionBusiness projects only an existing activation's process-coordinate

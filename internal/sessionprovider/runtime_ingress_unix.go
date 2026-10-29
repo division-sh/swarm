@@ -17,6 +17,7 @@ import (
 	inbound "github.com/division-sh/swarm/internal/runtime/inboundpublication"
 	"github.com/division-sh/swarm/internal/runtime/runlifecycle"
 	"github.com/division-sh/swarm/internal/sessionprovider/authority"
+	"go.mau.fi/whatsmeow/types"
 	"go.mau.fi/whatsmeow/types/events"
 )
 
@@ -90,13 +91,7 @@ func (c *RuntimeConnection) receive(ctx context.Context, raw any) (err error) {
 		if err != nil {
 			return err
 		}
-		sender := message.Info.Sender.ToNonAD()
-		if device.ID == nil || sender.IsEmpty() || message.Message == nil || !exactMessageID(message.Info.ID) ||
-			message.Info.Timestamp.IsZero() || message.Info.Timestamp.UnixMilli() < 1 ||
-			sender != device.ID.ToNonAD() && sender != device.LID.ToNonAD() {
-			return errIncomingMalformed
-		}
-		return nil // The SDK owns linked-device echoes, not customer ingress.
+		return validateLinkedDeviceEcho(message, device.ID, device.LID)
 	}
 	incoming := c.incoming
 	if c.operation.DeploymentRegistration {
@@ -112,43 +107,12 @@ func (c *RuntimeConnection) receive(ctx context.Context, raw any) (err error) {
 			return err
 		}
 		if !claim && c.registeredBusiness != nil {
-			occurrence := c.state.currentOccurrence()
-			if occurrence == nil {
-				return errClientOccurrenceFenced
-			}
-			unclaimed, err := captureSDKMessage(captureScope{DeploymentRegistration: true, Kind: channelonboarding.SessionInputOnboarding,
-				Session: op.SessionAccount, OnboardingOperation: op.OperationID, OperationRevision: op.Revision, PrincipalID: op.PrincipalID},
-				captureSource{DeploymentRegistration: true, CatalogGeneration: incoming.handoff.trigger.Generation()}, occurrence.occurrenceID, message, time.Now().UTC().Truncate(time.Microsecond))
-			if err != nil {
+			incoming, err = c.registeredCustomerIncoming(work.Context(), incoming, op, message)
+			if err != nil || incoming == nil {
 				return err
 			}
-			if terminal, err := c.captures.isUnclaimed(work.Context(), unclaimed); err != nil || terminal {
-				return err
-			}
-			binding, err := c.registeredBusiness(work.Context(), op)
-			if errors.Is(err, ErrAccountUnclaimed) {
-				return c.captures.retainUnclaimed(work.Context(), unclaimed)
-			}
-			if err != nil {
-				return err
-			}
-			if binding.Release == nil || binding.Current == nil || binding.Context == nil || binding.Coordinate.Validate() != nil ||
-				binding.Publication.Validate() != nil {
-				if binding.Release != nil {
-					_ = binding.Release()
-				}
-				return errCaptureScopeChanged
-			}
-			defer func() { err = errors.Join(err, binding.Release()) }()
-			if err := binding.Current(binding.Context); err != nil {
-				return err
-			}
-			incoming, err = newRuntimeIncoming(c, binding.Incoming)
-			if err != nil {
-				return err
-			}
-			incoming.registered, incoming.handoff.input.registered = &binding, &binding
-			ctx = binding.Context
+			defer func() { err = errors.Join(err, incoming.registered.Release()) }()
+			ctx = incoming.registered.Context
 		}
 	}
 	if !c.operation.DeploymentRegistration || incoming.registered == nil {
@@ -172,6 +136,55 @@ func (c *RuntimeConnection) receive(ctx context.Context, raw any) (err error) {
 	// Local capture, selected-store publication and the SDK receipt remain
 	// distinct. Failure preserves capture and returns non-success to the SDK.
 	return incoming.drain(ctx)
+}
+
+// The SDK owns linked-device echoes, not customer ingress.
+func validateLinkedDeviceEcho(message *events.Message, id *types.JID, lid types.JID) error {
+	sender := message.Info.Sender.ToNonAD()
+	if id == nil || sender.IsEmpty() || message.Message == nil || !exactMessageID(message.Info.ID) ||
+		message.Info.Timestamp.IsZero() || message.Info.Timestamp.UnixMilli() < 1 ||
+		sender != id.ToNonAD() && sender != lid.ToNonAD() {
+		return errIncomingMalformed
+	}
+	return nil
+}
+
+func (c *RuntimeConnection) registeredCustomerIncoming(ctx context.Context, incoming *runtimeIncoming, op channelonboarding.Operation, message *events.Message) (*runtimeIncoming, error) {
+	occurrence := c.state.currentOccurrence()
+	if occurrence == nil {
+		return nil, errClientOccurrenceFenced
+	}
+	unclaimed, err := captureSDKMessage(captureScope{DeploymentRegistration: true, Kind: channelonboarding.SessionInputOnboarding,
+		Session: op.SessionAccount, OnboardingOperation: op.OperationID, OperationRevision: op.Revision, PrincipalID: op.PrincipalID},
+		captureSource{DeploymentRegistration: true, CatalogGeneration: incoming.handoff.trigger.Generation()}, occurrence.occurrenceID, message, time.Now().UTC().Truncate(time.Microsecond))
+	if err != nil {
+		return nil, err
+	}
+	if terminal, err := c.captures.isUnclaimed(ctx, unclaimed); err != nil || terminal {
+		return nil, err
+	}
+	binding, err := c.registeredBusiness(ctx, op)
+	if errors.Is(err, ErrAccountUnclaimed) {
+		return nil, c.captures.retainUnclaimed(ctx, unclaimed)
+	}
+	if err != nil {
+		return nil, err
+	}
+	if binding.Release == nil || binding.Current == nil || binding.Context == nil || binding.Coordinate.Validate() != nil || binding.Publication.Validate() != nil {
+		if binding.Release != nil {
+			_ = binding.Release()
+		}
+		return nil, errCaptureScopeChanged
+	}
+	if err := binding.Current(binding.Context); err != nil {
+		return nil, errors.Join(err, binding.Release())
+	}
+	incoming, err = newRuntimeIncoming(c, binding.Incoming)
+	if err != nil {
+		return nil, errors.Join(err, binding.Release())
+	}
+	incoming.registered, incoming.handoff.input.registered = &binding, &binding
+	return incoming, nil
 }
 
 func (i *runtimeIncoming) receiveScope(ctx context.Context, message *events.Message) (captureScope, captureSource, error) {

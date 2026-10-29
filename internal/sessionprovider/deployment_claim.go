@@ -130,19 +130,29 @@ func ConsumeDeploymentWebhookClaim(ctx context.Context, opts DeploymentConnectio
 		if err != nil {
 			return false, err
 		}
-		for _, output := range delivery.Events {
-			fact, matches, err := opts.Plan.ProjectTextFact(string(output.Name), output.Authorization, output.Payload)
-			if err != nil {
-				return false, err
-			}
-			if !matches || fact.Text != identity.Challenge {
-				continue
-			}
-			claim := operatorchannel.InboundClaim{TextFact: fact, Provider: op.Provider, ProviderEventID: delivery.ProviderEventID,
-				Challenge: identity.Challenge, ProviderAuthorization: operatorchannel.Hash("authenticated-deployment-webhook-v1", op.AccountReference, output.Authorization.Generation().Diagnostic())}
+		claim, matched, err := deploymentWebhookClaim(opts.Plan, delivery, op, identity.Challenge)
+		if err != nil {
+			return false, err
+		}
+		if matched {
 			err = settleDeploymentClaim(ctx, identities, op, claim, valid)
 			return err == nil, err
 		}
 	}
 	return false, nil
+}
+
+func deploymentWebhookClaim(plan packs.SatisfactionPlan, delivery providertriggers.Delivery, op channelonboarding.Operation, challenge string) (operatorchannel.InboundClaim, bool, error) {
+	for _, output := range delivery.Events {
+		fact, matches, err := plan.ProjectTextFact(string(output.Name), output.Authorization, output.Payload)
+		if err != nil {
+			return operatorchannel.InboundClaim{}, false, err
+		}
+		if !matches || fact.Text != challenge {
+			continue
+		}
+		return operatorchannel.InboundClaim{TextFact: fact, Provider: op.Provider, ProviderEventID: delivery.ProviderEventID,
+			Challenge: challenge, ProviderAuthorization: operatorchannel.Hash("authenticated-deployment-webhook-v1", op.AccountReference, output.Authorization.Generation().Diagnostic())}, true, nil
+	}
+	return operatorchannel.InboundClaim{}, false, nil
 }

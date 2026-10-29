@@ -48,17 +48,7 @@ func (s Scope) Validate() error {
 	if err := s.Session.Validate(); err != nil {
 		return err
 	}
-	if s.RegisteredBusiness {
-		if !s.DeploymentRegistration || s.Kind != channelonboarding.SessionInputBusiness || !s.AccountOnly ||
-			s.Source.Validate() != nil || s.TargetSelector == "" || s.BindingRevision != 0 || s.ActivationID != "" || s.ActivationRevision != 0 {
-			return ErrCaptureScopeChanged
-		}
-	} else if s.DeploymentRegistration {
-		if s.Source != (channelonboarding.ChannelDurableContextIdentity{}) || s.TargetSelector != "" ||
-			s.Kind != channelonboarding.SessionInputOnboarding || s.BindingRevision != 0 {
-			return ErrCaptureScopeChanged
-		}
-	} else if err := s.Source.Validate(); err != nil {
+	if err := s.validateRegistrationScope(); err != nil {
 		return err
 	}
 	switch s.Kind {
@@ -79,6 +69,25 @@ func (s Scope) Validate() error {
 	if s.Session.Provider != "whatsapp" || uuid.Validate(s.OnboardingOperation) != nil ||
 		uuid.Validate(s.PrincipalID) != nil || s.BindingRevision < 0 || s.OperationRevision < 1 || !s.DeploymentRegistration && s.TargetSelector == "" {
 		return fmt.Errorf("WhatsApp capture requires its exact existing onboarding/principal/source scope")
+	}
+	return nil
+}
+
+// Deployment registration has no runtime authority until a separate source/run
+// binding exists; ordinary runtime captures keep their original source domain.
+func (s Scope) validateRegistrationScope() error {
+	if s.RegisteredBusiness {
+		if !s.DeploymentRegistration || s.Kind != channelonboarding.SessionInputBusiness || !s.AccountOnly ||
+			s.Source.Validate() != nil || s.TargetSelector == "" || s.BindingRevision != 0 || s.ActivationID != "" || s.ActivationRevision != 0 {
+			return ErrCaptureScopeChanged
+		}
+	} else if s.DeploymentRegistration {
+		if s.Source != (channelonboarding.ChannelDurableContextIdentity{}) || s.TargetSelector != "" ||
+			s.Kind != channelonboarding.SessionInputOnboarding || s.BindingRevision != 0 {
+			return ErrCaptureScopeChanged
+		}
+	} else if err := s.Source.Validate(); err != nil {
+		return err
 	}
 	return nil
 }

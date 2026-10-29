@@ -40,12 +40,8 @@ func deploymentChannelHandlers(repo, config, directory string, stores *selected.
 	factory := func(ctx context.Context, opts cliapp.ChannelRegistrationOptions) (cliapp.ChannelRegistrationSession, error) {
 		opts.CurrentWebhook = webhook
 		value, err := OpenChannelRegistration(ctx, opts)
-		if err == nil && runtimeOptions.manager != nil {
-			session := value.(*deploymentChannelSession)
-			session.business = serveRegisteredBusinessSelector(runtimeOptions.manager)
-			if owner, ok := runtimeOptions.sessions.(*serveSessionBootstrap); ok {
-				session.opened = owner.registerDeploymentConnection
-			}
+		if err == nil {
+			configureDeploymentRuntimeSession(value, runtimeOptions)
 		}
 		return value, err
 	}
@@ -84,33 +80,7 @@ func deploymentChannelHandlers(repo, config, directory string, stores *selected.
 				}
 				return status, nil
 			}
-			var list struct {
-				Accounts []channelonboarding.Result `json:"accounts"`
-			}
-			if err := json.Unmarshal(result, &list); err != nil {
-				return nil, err
-			}
-			for index := range list.Accounts {
-				row := &list.Accounts[index]
-				if row.Status == nil {
-					continue // A pending pairing may not have an approved account yet.
-				}
-				ref := channelonboarding.AccountReference{Provider: row.Status.Provider, Account: row.Status.Account}
-				mu.Lock()
-				owner := clients[ref.Provider+":"+row.Operation.OperationID]
-				mu.Unlock()
-				if owner != nil {
-					status, err := owner.AccountStatus(ctx, ref)
-					if err != nil {
-						return nil, err
-					}
-					row.Status = &status
-				}
-				if err := observeDeploymentAccountHolder(ctx, runtimeOptions.manager, row.Status); err != nil {
-					return nil, err
-				}
-			}
-			result, err = json.Marshal(list)
+			result, err = observeDeploymentAccountList(ctx, result, runtimeOptions.manager, clients, &mu)
 		}
 		var head channelonboarding.Result
 		var decodeErr error
@@ -135,7 +105,7 @@ func deploymentChannelHandlers(repo, config, directory string, stores *selected.
 		if !found && head.Operation.OperationID == "" {
 			err = errors.Join(err, client.Close(context.WithoutCancel(ctx)))
 		}
-		if err == nil && req.Method != "channel.list" && req.Method != "channel.onboarding_get" && req.Method != "channel.onboarding_select" && runtimeOptions.refresh != nil {
+		if err == nil && !slices.Contains([]string{"channel.list", "channel.onboarding_get", "channel.onboarding_select"}, req.Method) && runtimeOptions.refresh != nil {
 			err = runtimeOptions.refresh(ctx)
 		}
 		return result, err
@@ -194,6 +164,17 @@ func deploymentChannelHandlers(repo, config, directory string, stores *selected.
 		return nil
 	}
 	return handler, claim, restore, close
+}
+
+func configureDeploymentRuntimeSession(value cliapp.ChannelRegistrationSession, runtimeOptions deploymentRuntimeOptions) {
+	if runtimeOptions.manager == nil {
+		return
+	}
+	session := value.(*deploymentChannelSession)
+	session.business = serveRegisteredBusinessSelector(runtimeOptions.manager)
+	if owner, ok := runtimeOptions.sessions.(*serveSessionBootstrap); ok {
+		session.opened = owner.registerDeploymentConnection
+	}
 }
 
 func closeDeploymentControls(clients map[string]*cliapp.DeploymentChannelControl) error {

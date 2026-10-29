@@ -81,7 +81,7 @@ func runServeIngressFrozenCredentialJourney(t *testing.T, backend, policy, point
 		}
 	}
 	set("original-secret")
-	root := writeStandingTelegramServeFixture(t, "http://127.0.0.1:1", false)
+	root := writeStandingTelegramServeFixture(t, "http://127.0.0.1:1")
 	disableChannelOnboardingBusinessConsumers(t, root)
 	providerName := "telegram"
 	if policy != "pack" {

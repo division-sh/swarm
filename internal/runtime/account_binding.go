@@ -64,10 +64,7 @@ func (rt *Runtime) AccountHolders(ctx context.Context, runID string, ref channel
 			if instance.WorkflowName != flow || !instance.TerminatedAt.IsZero() {
 				continue
 			}
-			value, present := instance.Fields["operator_account"].(string)
-			if declaration.FromPolicy {
-				value, present = declaration.Policy, true
-			}
+			value, present := declaration.Value(instance.Fields)
 			if !present || value == "" {
 				continue // Dynamic keyless holders may be populated by a later event.
 			}

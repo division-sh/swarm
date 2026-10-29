@@ -24,15 +24,7 @@ func (rt *Runtime) observeStandingSessionBinding(ctx context.Context, declaratio
 		if err != nil {
 			return result, err
 		}
-		for _, op := range registered {
-			if op.Provider != binding.Provider || !op.AccountConfirmed || op.Phase == channelonboarding.PhaseRetired || op.Phase == channelonboarding.PhaseFailed {
-				continue
-			}
-			if op.ValidateSessionAccount() != nil || op.LogoutCompleted {
-				continue
-			}
-			result.registeredOperations = append(result.registeredOperations, op)
-		}
+		result.registeredOperations = matchingRegisteredSessionOperations(registered, binding.Provider)
 		if len(result.registeredOperations) > 0 {
 			result.enabled, result.blockReason = true, ""
 			return result, nil
@@ -82,6 +74,20 @@ func (rt *Runtime) observeStandingSessionBinding(ctx context.Context, declaratio
 		}
 	}
 	return result, nil
+}
+
+func matchingRegisteredSessionOperations(registered []channelonboarding.Operation, provider string) []channelonboarding.Operation {
+	var selected []channelonboarding.Operation
+	for _, op := range registered {
+		if op.Provider != provider || !op.AccountConfirmed || op.Phase == channelonboarding.PhaseRetired || op.Phase == channelonboarding.PhaseFailed {
+			continue
+		}
+		if op.ValidateSessionAccount() != nil || op.LogoutCompleted {
+			continue
+		}
+		selected = append(selected, op)
+	}
+	return selected
 }
 
 func (rt *Runtime) validateStandingSessionBinding(ctx context.Context, binding standingBindingCredentials) error {
