@@ -1,6 +1,7 @@
 package cliapp
 
 import (
+	"fmt"
 	"os"
 	"path/filepath"
 	"strings"
@@ -9,6 +10,64 @@ import (
 	"github.com/division-sh/swarm/internal/config"
 	storebackend "github.com/division-sh/swarm/internal/store/backendselection"
 )
+
+func TestChannelAndServeUseSameDeploymentProjectStore(t *testing.T) {
+	for _, tc := range []struct {
+		name               string
+		absolute, explicit bool
+	}{
+		{name: "unset"}, {name: "absolute", absolute: true},
+		{name: "unset_explicit_store", explicit: true}, {name: "absolute_explicit_store", absolute: true, explicit: true},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			isolateCLIAPIConfigEnv(t)
+			root, source := writeLocalRuntimeStateProject(t)
+			t.Setenv("HOME", t.TempDir())
+			path := filepath.Join(root, ".swarm", "swarm.yaml")
+			if err := os.Mkdir(filepath.Dir(path), 0o700); err != nil {
+				t.Fatal(err)
+			}
+			body := "store:\n  backend: sqlite\n"
+			explicitStore := filepath.Join(t.TempDir(), "authored.sqlite")
+			if tc.explicit {
+				body += fmt.Sprintf("  sqlite:\n    path: %q\n", explicitStore)
+			}
+			if tc.absolute {
+				body += fmt.Sprintf("paths:\n  swarm_dir: %q\n", t.TempDir())
+			}
+			writeRuntimeConfigText(t, path, body)
+			loaded, err := LoadRuntimeConfigWithOptions(RuntimeConfigLoadOptions{RepoRoot: root})
+			if err != nil {
+				t.Fatal(err)
+			}
+			swarmDir, err := resolveCLISwarmDirFromConfig(mustInvocationRootForTest(root), cliSwarmDirOptions{}, loaded.cli)
+			if err != nil {
+				t.Fatal(err)
+			}
+			channel, err := ResolveRuntimeStoreSelection(root, "", false, loaded)
+			if err != nil {
+				t.Fatal(err)
+			}
+			serve, err := ResolveLocalRuntimeState(LocalRuntimeStateOptions{
+				RepoRoot: root, ResolvedPaths: CLISourcePaths{SourceRoot: source}, SwarmDir: swarmDir, Config: loaded.Config,
+			})
+			if err != nil {
+				t.Fatal(err)
+			}
+			want := filepath.Join(serve.Project.CanonicalProjectRoot, projectSQLiteStoreRelativePath)
+			wantSource := storebackend.SourceProjectDefault
+			if tc.explicit {
+				want, wantSource = explicitStore, storebackend.SourceRuntimeConfig
+			}
+			if channel != serve.StoreSelection || channel.SQLitePath != want || channel.SQLitePathSource != wantSource {
+				t.Fatalf("channel and serve selected different defaults: channel=%#v serve=%#v", channel, serve.StoreSelection)
+			}
+			if _, err := os.Stat(want); !os.IsNotExist(err) {
+				t.Fatal("store selection must remain read-only", err)
+			}
+		})
+	}
+}
 
 func TestResolveLocalRuntimeStateUsesProjectLocalStoreWithoutAmbientData(t *testing.T) {
 	projectRoot, sourceRoot := writeLocalRuntimeStateProject(t)

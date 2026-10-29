@@ -238,7 +238,6 @@ func compileServeChannelActivationSnapshot(ctx context.Context, manager *runtime
 
 func compileServeRegisteredChannelActivations(contexts []runtime.BundleContext, registered []channelonboarding.Operation) ([]channelonboarding.CompiledActivation, error) {
 	var activations []channelonboarding.CompiledActivation
-	registered = channelonboarding.RetainedConfirmedAccounts(registered, "whatsapp")
 	for _, contextDef := range contexts {
 		declarations, err := contextDef.StandingTargetDeclarations()
 		if err != nil {
@@ -248,9 +247,9 @@ func compileServeRegisteredChannelActivations(contexts []runtime.BundleContext, 
 		if err != nil {
 			return nil, err
 		}
-		for _, op := range registered {
-			for _, candidate := range candidates {
-				if candidate.Provider != op.Provider || candidate.Coordinate.Validate() != nil {
+		for _, candidate := range candidates {
+			for _, op := range channelonboarding.RetainedConfirmedAccounts(registered, candidate.Provider) {
+				if candidate.Coordinate.Validate() != nil {
 					continue
 				}
 				compiled, err := channelonboarding.CompileRegisteredActivation(candidate, op)

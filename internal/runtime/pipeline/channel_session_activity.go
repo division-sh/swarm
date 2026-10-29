@@ -14,6 +14,7 @@ import (
 	correlation "github.com/division-sh/swarm/internal/runtime/correlation"
 	"github.com/division-sh/swarm/internal/runtime/engine"
 	"github.com/division-sh/swarm/internal/runtime/executionmode"
+	runtimefailures "github.com/division-sh/swarm/internal/runtime/failures"
 )
 
 func (pc *PipelineCoordinator) prepareSessionActivityIntents(ctx context.Context, intents []engine.ActivityIntent) ([]engine.ActivityIntent, func(), error) {
@@ -59,6 +60,14 @@ func (pc *PipelineCoordinator) prepareSessionActivityIntent(ctx context.Context,
 	ref, err := channelonboarding.CanonicalAccount(nativeTarget.Provider(), account)
 	if err != nil {
 		return intent, nil, fmt.Errorf("session activity account: %w", err)
+	}
+	if _, err := channelonboarding.RegisteredAccount(ctx, pc.registeredAccounts, ref); err != nil {
+		if err == channelonboarding.ErrNotFound {
+			err = runtimefailures.New(runtimefailures.ClassAuthenticationNeeded, "channel_account_not_linked", "activity-runtime", "prepare_session_activity", map[string]any{
+				"auth_kind": "channel_account", "provider": ref.Provider, "account": ref.Account,
+			})
+		}
+		return intent, nil, err
 	}
 	if intent.NativeSessionTarget != "" && account != ref.Account {
 		return intent, nil, fmt.Errorf("frozen session activity account is not canonical")

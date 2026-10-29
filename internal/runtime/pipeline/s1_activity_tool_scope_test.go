@@ -20,6 +20,7 @@ import (
 	runtimeactivityidentity "github.com/division-sh/swarm/internal/runtime/core/activityidentity"
 	"github.com/division-sh/swarm/internal/runtime/core/identity"
 	runtimecredentials "github.com/division-sh/swarm/internal/runtime/credentials"
+	"github.com/division-sh/swarm/internal/runtime/failures"
 	"github.com/division-sh/swarm/internal/runtime/semanticview"
 	"github.com/google/uuid"
 )
@@ -30,6 +31,49 @@ func VerifyS1ScopedActivityDispatchUsesExactDeclarationForTest(t *testing.T, ope
 		t.Fatal("local activity journey requires the real effective-source compiler")
 	}
 	verifyS1ScopedActivityDispatch(t, open, compose, false)
+	t.Run("unlinked_whatsapp_refusal", func(t *testing.T) {
+		files := map[string]string{
+			"manifest.yaml": "version: 1.0.0\nplatform_version: '*'\n",
+			"schema.yaml":   "stages: []\npins:\n  inputs: [inbound.whatsapp.text_message]\n",
+			"policy.yaml":   "operator_account: '+15550100'\n",
+		}
+		for _, role := range []string{"manifest", "trigger", "connector", "channel"} {
+			body, err := os.ReadFile(filepath.Join(WorkflowRepoRoot(), "packs", "providers", "whatsapp", role+".yaml"))
+			if err != nil {
+				t.Fatal(err)
+			}
+			files["whatsapp/"+role+".yaml"] = string(body)
+		}
+		source := compose(t, semanticview.Wrap(loadWorkflowTempBundle(t, files)))
+		fixture := open(t, source)
+		accounts := fixture.AccountRegistrationOwners.DeploymentChannelOperations()
+		pc := fixture.NewCoordinator(&recordingPipelineBus{}, PipelineCoordinatorOptions{
+			Module: staticSemanticWorkflowModule{source: source}, RegisteredAccounts: accounts,
+		})
+		intent := testNonIdempotentActivityIntent(uuid.NewString(), uuid.NewString(), uuid.NewString())
+		intent.Tool, intent.ExecutionFlowID = "whatsapp.send_text", identity.NormalizeFlowID(".")
+		intent.Input = mustActivityInput(map[string]any{"account": "+15550100", "destination": "+15550200", "text": "customer reply"})
+		_, lease, err := pc.prepareSessionActivityIntent(fixture.Context, intent)
+		if lease != nil {
+			lease.Release()
+			t.Fatal("unlinked account acquired a native execution lease")
+		}
+		failure := failures.Normalize(err, "activity-runtime", "prepare_session_activity")
+		if failure.Class != failures.ClassAuthenticationNeeded || failure.Detail.Code != "channel_account_not_linked" ||
+			failure.Message != "+15550100 is not linked: run swarm channel connect whatsapp and scan it" || failure.Retryable {
+			t.Fatal("unlinked account lost its exact actionable refusal", failure)
+		}
+		raw, err := failures.MarshalEnvelope(failure)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if readback, err := failures.UnmarshalEnvelope(raw); err != nil || readback.Message != failure.Message {
+			t.Fatal("public failure readback changed the account refusal", err)
+		}
+		if rows, err := accounts.ListChannelOnboardingOperations(fixture.Context); err != nil || len(rows) != 0 {
+			t.Fatal("refused send created a registration", err)
+		}
+	})
 	t.Run("registered_account_credentials", func(t *testing.T) {
 		files := map[string]string{
 			"manifest.yaml": "version: 1.0.0\nplatform_version: '*'\n",

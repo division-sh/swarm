@@ -19,7 +19,7 @@ func TestRuntimeConfigStoreSelectionRetainsSelectedFile(t *testing.T) {
 			isolateCLIAPIConfigEnv(t)
 			repo := t.TempDir()
 			path := filepath.Join(t.TempDir(), "operator.yaml")
-			writeRuntimeConfigText(t, path, "paths:\n  swarm_dir: admitted-state\nstore:\n  backend: sqlite\n")
+			writeRuntimeConfigText(t, path, "paths:\n  swarm_dir: admitted-state\nstore:\n  backend: sqlite\n  sqlite:\n    path: captured/admitted.sqlite\n")
 			if cut == "explicit selector" {
 				if err := os.MkdirAll(filepath.Join(repo, ".swarm"), 0o700); err != nil {
 					t.Fatal(err)
@@ -43,8 +43,8 @@ func TestRuntimeConfigStoreSelectionRetainsSelectedFile(t *testing.T) {
 			if err != nil {
 				t.Fatalf("captured store selection re-read configuration: %v", err)
 			}
-			want := filepath.Join(repo, "admitted-state", "stores", "default", "dev.db")
-			if selection.Backend != storebackend.BackendSQLite || selection.BackendSource != storebackend.SourceRuntimeConfig || selection.SQLitePath != want || selection.SQLitePathSource != storebackend.SourceSwarmDirDefault || loaded.Path != path {
+			want := filepath.Join(repo, "captured", "admitted.sqlite")
+			if selection.Backend != storebackend.BackendSQLite || selection.BackendSource != storebackend.SourceRuntimeConfig || selection.SQLitePath != want || selection.SQLitePathSource != storebackend.SourceRuntimeConfig || loaded.Path != path {
 				t.Fatalf("selection = %#v, selected file=%q, want %s from %s", selection, loaded.Path, want, path)
 			}
 			if _, err := os.Stat(filepath.Dir(want)); !os.IsNotExist(err) {
