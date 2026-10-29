@@ -23,7 +23,7 @@ func debtReviewedNativeSelectedImport(path, alias string, file *ast.File) bool {
 	case "internal/runtime/pipeline/fork_published_barrier_crash_external_test.go":
 		pins = map[string]string{
 			"publishBarrierCrashCheckpoint":       "3e68bccee6ade3f449a47c7b4fe147082dc2e03f1afb3a1366d852381ddd2fc0",
-			"verifyBarrierCrashRestartBothStores": "7bd132be01e1625fb47479849cec3c9a0158e905e492f346f98992f850807526",
+			"verifyBarrierCrashRestartBothStores": "96030b8011ea63afde9e7acdbae45a3e2b67a7d177cff5f93fd6e7200a1f1bb2",
 		}
 	case "internal/runtime/pipeline/fork_published_barrier_failure_external_test.go":
 		pins = map[string]string{"verifyPublishedBarrierCompletionFailure": "9f11b5dea9efb5084ffe34e8054132e92abab1862d80a84a50c2d24ff6d2f516"}
