@@ -93,7 +93,19 @@ func deploymentChannelHandlers(repo, config, directory string, stores *selected.
 		defer mu.Unlock()
 		return closeDeploymentControls(clients)
 	}
-	claim := func(ctx context.Context, account channelonboarding.AccountReference, credential func(channelonboarding.CredentialAdmission) bool, admit func() (providertriggers.Delivery, error), current func() bool) (bool, error) {
+	claim := deploymentPendingClaimHandler(root, config, directory, stores, process, capability, factory)
+	restore := func(ctx context.Context) error {
+		operations, err := stores.DeploymentChannels().ListChannelOnboardingOperations(ctx)
+		if err != nil || rootErr != nil {
+			return errors.Join(err, rootErr)
+		}
+		return restoreDeploymentAccountControls(ctx, operations, root, config, directory, stores, process, factory, clients, &mu)
+	}
+	return handler, claim, restore, close
+}
+
+func deploymentPendingClaimHandler(root cliapp.InvocationRoot, config, directory string, stores *selected.Owner, process *worklifetime.Process, capability startupownership.ProcessCapability, factory cliapp.ChannelRegistrationFactory) publicingress.PendingDeploymentClaim {
+	return func(ctx context.Context, account channelonboarding.AccountReference, credential func(channelonboarding.CredentialAdmission) bool, admit func() (providertriggers.Delivery, error), current func() bool) (bool, error) {
 		work, err := process.Begin(ctx)
 		if err != nil {
 			return false, err
@@ -118,14 +130,6 @@ func deploymentChannelHandlers(repo, config, directory string, stores *selected.
 		defer func() { _ = client.Close(context.WithoutCancel(ctx)) }()
 		return client.ConsumeWebhookClaim(work.Context(), account, credential, admit, current)
 	}
-	restore := func(ctx context.Context) error {
-		operations, err := stores.DeploymentChannels().ListChannelOnboardingOperations(ctx)
-		if err != nil || rootErr != nil {
-			return errors.Join(err, rootErr)
-		}
-		return restoreDeploymentAccountControls(ctx, operations, root, config, directory, stores, process, factory, clients, &mu)
-	}
-	return handler, claim, restore, close
 }
 
 func deploymentControlResult(result json.RawMessage, dispatchErr error) (channelonboarding.Result, error) {
