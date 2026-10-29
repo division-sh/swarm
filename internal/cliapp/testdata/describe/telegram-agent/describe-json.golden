@@ -23,6 +23,7 @@
       ]
     },
     "source_files": {
+      "policy": "policy.yaml",
       "schema": "schema.yaml",
       "entities": "entities.yaml"
     },
@@ -33,6 +34,9 @@
     "primary_entity": {
       "type": "telegram_service",
       "source_file": "entities.yaml"
+    },
+    "policy": {
+      "operator_account": "420079"
     }
   },
   "flows": [
@@ -133,7 +137,10 @@
           "source_line": 1,
           "source_column": 1
         }
-      ]
+      ],
+      "policy": {
+        "operator_account": "420079"
+      }
     }
   ],
   "routing_topology": {

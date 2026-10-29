@@ -88,7 +88,9 @@ func copyInboundTransport(t testing.TB, flows []string, observe bool) string {
 				continue
 			}
 			write(flow+"/"+entry.ID()+"/manifest.yaml", string(entry.ManifestBody()))
-			for _, role := range []packmodel.BodyRole{packmodel.BodyTrigger, packmodel.BodyConnector, packmodel.BodyChannel} {
+			// These fixtures exercise signed HTTP delivery, not connected accounts.
+			// Unused channel bodies would add unrelated connection declarations.
+			for _, role := range []packmodel.BodyRole{packmodel.BodyTrigger, packmodel.BodyConnector} {
 				if body, present := entry.Provider().Body(role); present {
 					write(flow+"/"+entry.ID()+"/"+role.FileName(), string(body.Bytes()))
 				}

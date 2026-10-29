@@ -213,7 +213,7 @@ func waitChannelTextTeaching(t *testing.T, db *sql.DB, update int) {
 	for {
 		var count int
 		if err := db.QueryRow(`SELECT COUNT(*) FROM operator_channel_text_intents
-			WHERE provider_event_id=$1 AND state='settled' AND disposition='teaching'`, fmt.Sprint(update)).Scan(&count); err != nil {
+			WHERE provider_event_id=$1 AND state='settled' AND disposition='teaching'`, channelFixtureProviderEventID(t, fmt.Sprint(update))).Scan(&count); err != nil {
 			t.Fatal(err)
 		}
 		if count == 1 {
@@ -232,7 +232,7 @@ func waitChannelDraftCallbackRejection(t *testing.T, db *sql.DB, update int) {
 	for {
 		var count int
 		if err := db.QueryRow(`SELECT COUNT(*) FROM operator_channel_action_intents
-			WHERE provider_event_id=$1 AND state='settled' AND disposition IN ('stale','rejected')`, fmt.Sprint(update)).Scan(&count); err != nil {
+			WHERE provider_event_id=$1 AND state='settled' AND disposition IN ('stale','rejected')`, channelFixtureProviderEventID(t, fmt.Sprint(update))).Scan(&count); err != nil {
 			t.Fatal(err)
 		}
 		if count == 1 {

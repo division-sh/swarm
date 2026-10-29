@@ -23,6 +23,11 @@ Mock turn 1: hello from Telegram
 
 ## Serve Live
 
+Set `operator_account` in `policy.yaml` to the Telegram bot account selected by
+`swarm channel connect telegram`. The checked-in `420079` is the example peer's
+bot ID, not a fallback to the first registered account. Each receiving flow
+selects its own account explicitly; customer identities do not choose it.
+
 No source edit, mock-block removal or separate graduation configuration is required. `serve` and `serve --dev` select live execution even when the source contains doubles. Configure the selected live provider's actual prerequisites before serving.
 
 An absent webhook signing credential leaves the declared Telegram ingress dormant. Swarm reports `DORMANT ingress` with the exact missing key and provisioning command; it publishes no Telegram route and creates no standing generation solely for that declaration. Other admissible work can still serve. This does not waive credentials required by the live model, outgoing Telegram replies, or another active capability. An empty or whitespace credential, a corrupt credential store, or a read failure is an error, not dormancy.

@@ -114,7 +114,7 @@ func TestServeSessionIncomingSelectionConsumesExactCompiledOwners(t *testing.T) 
 	for _, member := range fixture.Artifact().Entries() {
 		label := member.Label()
 		members[label] = member.Bytes()
-		if label == "manifest.yaml" || label == "schema.yaml" || strings.HasPrefix(label, "whatsapp/") {
+		if label == "manifest.yaml" || label == "schema.yaml" || label == "policy.yaml" || strings.HasPrefix(label, "whatsapp/") {
 			members["support/"+label] = member.Bytes()
 		}
 	}

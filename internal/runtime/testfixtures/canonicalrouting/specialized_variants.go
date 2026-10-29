@@ -171,6 +171,7 @@ pins:
     - inbound.partner_ack.raw
 `,
 		"matrix/entities.yaml": "matrix_service:\n  service_id:\n    type: text\n    initial: standing\n",
+		"matrix/policy.yaml":   "operator_account: '420079'\n",
 		"matrix/nodes.yaml":    inboundAdmissionNodes(),
 	}
 	for _, provider := range []string{"telegram", "intercom"} {
