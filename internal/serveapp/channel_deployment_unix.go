@@ -75,26 +75,11 @@ func deploymentChannelHandlers(repo, config, directory string, stores *selected.
 			}
 			result, err = observeDeploymentAccountList(ctx, result, runtimeOptions.manager, clients, &mu)
 		}
-		var head channelonboarding.Result
-		var decodeErr error
-		if err == nil {
-			decodeErr = json.Unmarshal(result, &head)
-		}
+		head, decodeErr := deploymentControlResult(result, err)
 		if decodeErr != nil {
 			return nil, decodeErr
 		}
-		var required *channelonboarding.CredentialRequiredError
-		if errors.As(err, &required) {
-			head.Operation.OperationID = required.OperationID
-		}
-		mu.Lock()
-		if head.Operation.OperationID != "" {
-			clients[provider+":"+head.Operation.OperationID] = client
-		}
-		if head.Operation.IdentityOperationID != "" {
-			clients[provider+":"+head.Operation.IdentityOperationID] = client
-		}
-		mu.Unlock()
+		rememberDeploymentControl(clients, &mu, provider, head.Operation, client)
 		if !found && head.Operation.OperationID == "" {
 			err = errors.Join(err, client.Close(context.WithoutCancel(ctx)))
 		}
@@ -138,22 +123,51 @@ func deploymentChannelHandlers(repo, config, directory string, stores *selected.
 		if err != nil || rootErr != nil {
 			return errors.Join(err, rootErr)
 		}
-		for _, op := range channelonboarding.RetainedConfirmedAccounts(operations, "whatsapp") {
-			ref := channelonboarding.AccountReference{Provider: op.Provider, Account: op.AccountReference}
-			client, err := cliapp.UseDeploymentChannelControl(ctx, root, config, directory, op.Provider, stores, process, factory)
-			if err != nil {
-				return err
-			}
-			if err := client.ResumeRegisteredAccount(ctx, ref); err != nil {
-				return errors.Join(err, client.Close(context.WithoutCancel(ctx)))
-			}
-			mu.Lock()
-			clients[op.Provider+":"+op.OperationID] = client
-			mu.Unlock()
-		}
-		return nil
+		return restoreDeploymentAccountControls(ctx, operations, root, config, directory, stores, process, factory, clients, &mu)
 	}
 	return handler, claim, restore, close
+}
+
+func deploymentControlResult(result json.RawMessage, dispatchErr error) (channelonboarding.Result, error) {
+	var head channelonboarding.Result
+	if dispatchErr == nil {
+		if err := json.Unmarshal(result, &head); err != nil {
+			return head, err
+		}
+	}
+	var required *channelonboarding.CredentialRequiredError
+	if errors.As(dispatchErr, &required) {
+		head.Operation.OperationID = required.OperationID
+	}
+	return head, nil
+}
+
+func rememberDeploymentControl(clients map[string]*cliapp.DeploymentChannelControl, mu *sync.Mutex, provider string, op channelonboarding.Operation, client *cliapp.DeploymentChannelControl) {
+	mu.Lock()
+	defer mu.Unlock()
+	if op.OperationID != "" {
+		clients[provider+":"+op.OperationID] = client
+	}
+	if op.IdentityOperationID != "" {
+		clients[provider+":"+op.IdentityOperationID] = client
+	}
+}
+
+func restoreDeploymentAccountControls(ctx context.Context, operations []channelonboarding.Operation, root cliapp.InvocationRoot, config, directory string, stores *selected.Owner, process *worklifetime.Process, factory cliapp.ChannelRegistrationFactory, clients map[string]*cliapp.DeploymentChannelControl, mu *sync.Mutex) error {
+	for _, op := range channelonboarding.RetainedConfirmedAccounts(operations, "whatsapp") {
+		ref := channelonboarding.AccountReference{Provider: op.Provider, Account: op.AccountReference}
+		client, err := cliapp.UseDeploymentChannelControl(ctx, root, config, directory, op.Provider, stores, process, factory)
+		if err != nil {
+			return err
+		}
+		if err := client.ResumeRegisteredAccount(ctx, ref); err != nil {
+			return errors.Join(err, client.Close(context.WithoutCancel(ctx)))
+		}
+		mu.Lock()
+		clients[op.Provider+":"+op.OperationID] = client
+		mu.Unlock()
+	}
+	return nil
 }
 
 func configureDeploymentRuntimeSession(value cliapp.ChannelRegistrationSession, runtimeOptions deploymentRuntimeOptions) {
