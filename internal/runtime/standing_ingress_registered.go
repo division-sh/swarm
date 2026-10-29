@@ -213,12 +213,9 @@ func (rt *Runtime) evaluateRegisteredStandingIngress(ctx context.Context, target
 	}
 	current := expected
 	current.Requirements = nil
-	current.Capabilities = nil
-	for _, capability := range expected.Capabilities {
-		if capability.Code != packs.CapabilityVerifySecret {
-			current.Capabilities = append(current.Capabilities, capability)
-		}
-	}
+	current.Capabilities = slices.DeleteFunc(slices.Clone(expected.Capabilities), func(capability packs.Capability) bool {
+		return capability.Code == packs.CapabilityVerifySecret
+	})
 	rt.standingCredentialMu.Lock()
 	var selected []standingBindingCredentials
 	for _, binding := range rt.standingCredentialAdmission.bindings {
@@ -251,13 +248,10 @@ func (rt *Runtime) evaluateRegisteredStandingIngress(ctx context.Context, target
 		}
 		if err := validate(ctx); err != nil {
 			var stale *credentials.SecretBindingProjectionStaleError
-			if !errors.As(err, &stale) {
+			if !errors.As(err, &stale) || len(selected) != 1 {
 				return packs.Subject{}, nil, err
 			}
 			enabled = false
-			if len(selected) != 1 {
-				return packs.Subject{}, nil, err
-			}
 			current.TriggerAdmission.BindingBlockReason = string(runlifecycle.StandingBindingRecoveryRequired)
 			current.TriggerAdmission.RecoveryOperationID = binding.operationID
 			current.TriggerAdmission.RecoveryCommand = binding.recoveryCommand

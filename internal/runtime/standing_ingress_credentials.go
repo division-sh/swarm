@@ -670,25 +670,28 @@ func (rt *Runtime) refreshStandingCredentialAdmission(ctx context.Context, selec
 		}
 	}
 	admission, err := rt.observeStandingCredentials(ctx)
-	if err == nil && frozen != nil {
-		err = frozen.projection.ValidateCurrentKeys(ctx, siblingKeys)
+	if err != nil {
+		return err
 	}
-	if err == nil && !admission.bindings[selected].enabled {
-		err = fmt.Errorf("channel target %s remains credential-dormant", selected)
+	if frozen != nil {
+		if err := frozen.projection.ValidateCurrentKeys(ctx, siblingKeys); err != nil {
+			return err
+		}
 	}
-	if err == nil {
-		if frozen != nil {
-			for selector, binding := range frozen.bindings {
-				if selector != selected && (binding.plan.Transport() == packs.ChannelTransportSession || binding.registeredOnly || binding.registered != nil) {
-					admission.bindings[selector] = binding
-				}
-			}
-			admission.projection, err = rt.sealStandingCredentialBindings(ctx, admission.bindings, "")
-			if err != nil {
-				return err
+	if !admission.bindings[selected].enabled {
+		return fmt.Errorf("channel target %s remains credential-dormant", selected)
+	}
+	if frozen != nil {
+		for selector, binding := range frozen.bindings {
+			if selector != selected && (binding.plan.Transport() == packs.ChannelTransportSession || binding.registeredOnly || binding.registered != nil) {
+				admission.bindings[selector] = binding
 			}
 		}
-		rt.standingCredentialAdmission = admission
+		admission.projection, err = rt.sealStandingCredentialBindings(ctx, admission.bindings, "")
+		if err != nil {
+			return err
+		}
 	}
-	return err
+	rt.standingCredentialAdmission = admission
+	return nil
 }

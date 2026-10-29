@@ -402,39 +402,47 @@ func (c *ProviderRegistrationController) Preflight(ctx context.Context, exposure
 	return err
 }
 
-func (c *ProviderRegistrationController) admitAndIdentify(ctx context.Context, exposure Generation, pair RegistrationPair) (admittedPair, error) {
+func (pair RegistrationPair) validateAuthority() error {
 	key := pairSemanticKey(pair)
 	activationAuthority := pair.ChannelActivationGeneration.Valid()
 	prebindingAuthority := strings.TrimSpace(pair.PrebindingOperationID) != ""
 	if key == "" || !pair.PlanGeneration.Valid() || activationAuthority == prebindingAuthority || !pair.Target.AdmissionPlanGeneration.Valid() || strings.TrimSpace(pair.Target.BundleHash) == "" {
-		return admittedPair{}, fmt.Errorf("provider registration pair identity is incomplete")
+		return fmt.Errorf("provider registration pair identity is incomplete")
 	}
 	operationID := strings.TrimSpace(pair.OnboardingOperationID)
 	if prebindingAuthority && operationID != strings.TrimSpace(pair.PrebindingOperationID) {
-		return admittedPair{}, fmt.Errorf("provider registration prebinding authority contradicts its onboarding operation")
+		return fmt.Errorf("provider registration prebinding authority contradicts its onboarding operation")
 	}
 	if activationAuthority {
 		switch pair.ActivationSource {
 		case channelonboarding.ActivationSourceDeclared:
 			if operationID != "" {
-				return admittedPair{}, fmt.Errorf("declared provider registration cannot claim an onboarding operation")
+				return fmt.Errorf("declared provider registration cannot claim an onboarding operation")
 			}
 		case channelonboarding.ActivationSourceLearned, channelonboarding.ActivationSourceRegistered:
 			if operationID == "" {
-				return admittedPair{}, fmt.Errorf("learned provider registration requires its exact onboarding operation")
+				return fmt.Errorf("learned provider registration requires its exact onboarding operation")
 			}
 		default:
-			return admittedPair{}, fmt.Errorf("provider registration activation source is invalid")
+			return fmt.Errorf("provider registration activation source is invalid")
 		}
 	}
 	if pair.ActivationSource == channelonboarding.ActivationSourceRegistered &&
 		(pair.Target.RegisteredOperationID != operationID || pair.AccountHolder.BundleHash != pair.Target.BundleHash ||
 			pair.AccountHolder.Flow != pair.Target.FlowPath || pair.AccountHolder.RunID == "" || pair.AccountHolder.FlowInstance == "") {
-		return admittedPair{}, fmt.Errorf("registered provider ingress requires its exact operation and source holder")
+		return fmt.Errorf("registered provider ingress requires its exact operation and source holder")
 	}
 	if pair.Registration.Provider() != strings.TrimSpace(pair.Target.Provider) {
-		return admittedPair{}, fmt.Errorf("provider registration pair %s provider conflicts with compiled channel registration", key)
+		return fmt.Errorf("provider registration pair %s provider conflicts with compiled channel registration", key)
 	}
+	return nil
+}
+
+func (c *ProviderRegistrationController) admitAndIdentify(ctx context.Context, exposure Generation, pair RegistrationPair) (admittedPair, error) {
+	if err := pair.validateAuthority(); err != nil {
+		return admittedPair{}, err
+	}
+	key := pairSemanticKey(pair)
 	if err := c.requireSelectionCurrent(ctx, pair); err != nil {
 		return admittedPair{}, err
 	}
