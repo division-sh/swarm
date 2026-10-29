@@ -2,7 +2,9 @@ package serveapp
 
 import (
 	"encoding/json"
+	"fmt"
 	"net/http"
+	"net/http/httptest"
 	"os"
 	"path/filepath"
 	"reflect"
@@ -10,8 +12,8 @@ import (
 	"testing"
 
 	"github.com/division-sh/swarm/internal/channelonboarding"
+	"github.com/division-sh/swarm/internal/cliapp"
 	runtimepkg "github.com/division-sh/swarm/internal/runtime"
-	"github.com/division-sh/swarm/internal/runtime/credentials"
 	"github.com/division-sh/swarm/internal/runtime/testfixtures/canonicalrouting"
 	"github.com/division-sh/swarm/internal/servedparity"
 )
@@ -26,44 +28,50 @@ func TestA9RootedAliasesServeBothStores(t *testing.T) {
 
 func proveA9ServedAliases(t *testing.T, backend string) {
 	t.Helper()
-	credentialPath := filepath.Join(t.TempDir(), "credentials.json")
-	t.Setenv("SWARM_CREDENTIALS_FILE", credentialPath)
-	writeChannelOnboardingLiveToolCredentials(t, credentialPath)
-	file, err := credentials.NewFileStore(credentialPath)
-	if err != nil {
-		t.Fatal(err)
-	}
+	h := newChannelOnboardingE2EHarness(t, map[string]servedparity.Backend{"sqlite": servedparity.BackendDefaultSQLite, "postgres": servedparity.BackendExplicitPostgres}[backend], true)
+	writeChannelOnboardingLiveToolCredentials(t, h.credentialPath)
 	root := canonicalrouting.CopyStandingRootTreePublic(t)
 	selected := filepath.Join(filepath.Dir(root), "shop")
 	if err := os.Rename(root, selected); err != nil {
 		t.Fatal(err)
 	}
-	_, start := clockDeploymentHarness(t, backend, selected)
+	h.opts.SourceRoot, h.opts.AbandonActiveRuns = selected, false
+	for _, account := range []struct {
+		id    int64
+		token string
+	}{{420079, "root-bot-token"}, {420080, "beta-bot-token"}} {
+		h.provider.SetResourceID(account.token, account.id)
+		registerChannelFixtureAccount(t, h.opts.ConfigPath, account.token, fmt.Sprint(account.id))
+	}
 	for repetition := 0; repetition < 2; repetition++ {
-		process, served := start()
-		rt := servedTestProcessRuntime(t, process)
+		h.start(t)
+		rt := servedTestProcessRuntime(t, h.process)
 		statuses, err := readServedLandingRuns(t.Context(), rt)
 		if err != nil || len(statuses) != 2 {
 			t.Fatalf("binding readback=%+v err=%v", statuses, err)
 		}
 		for flow, alias := range map[string]string{".": "shop", "beta": "shop.beta"} {
-			proveA9AliasPublication(t, file, strings.TrimSuffix(served.Endpoint, "/v1/rpc"), flow, alias, repetition != 0)
+			token := "root-bot-token"
+			if flow == "beta" {
+				token = "beta-bot-token"
+			}
+			callback, secret, count := h.provider.RegistrationForCredential(token)
+			if count == 0 || callback == "" || secret == "" {
+				t.Fatal("rooted alias has no exact native registration")
+			}
+			proveA9AliasPublication(t, callback, secret, h.endpoint, flow, alias, repetition != 0)
 		}
-		if code := process.stop(); code != 0 {
-			t.Fatalf("joined shutdown=%d", code)
-		}
+		h.stop(t)
 	}
 }
 
-func proveA9AliasPublication(t *testing.T, file *credentials.FileStore, base, flow, alias string, restarted bool) {
+func proveA9AliasPublication(t *testing.T, callback, secret, base, flow, alias string, restarted bool) {
 	t.Helper()
-	const key = "telegram.webhook_signing_secret"
-	secret, present, err := file.Get(t.Context(), key)
-	if err != nil || !present {
-		t.Fatalf("signing credential %s: present=%t err=%v", key, present, err)
+	if !strings.Contains(callback, "/webhooks/"+alias+"/telegram?") {
+		t.Fatal("native callback changed its exact admitted alias")
 	}
 	body := `{"update_id":9701,"message":{"message_id":7,"from":{"id":41},"chat":{"id":42,"type":"private"},"text":"rooted"}}`
-	status, receipt := postProviderAliasUpdate(t, base, alias, secret, body)
+	status, receipt := postProviderAliasUpdate(t, callback, "", secret, body)
 	want := http.StatusAccepted
 	if restarted {
 		want = http.StatusOK
@@ -71,7 +79,10 @@ func proveA9AliasPublication(t *testing.T, file *credentials.FileStore, base, fl
 	if status != want {
 		t.Fatalf("%s source %s status=%d receipt=%s, want %d", alias, flow, status, receipt, want)
 	}
-	status, duplicate := postProviderAliasUpdate(t, base, alias, secret, body)
+	if a9AliasReceipt(t, receipt)["flow_path"] != flow {
+		t.Fatalf("native callback changed its declaring flow: %s", receipt)
+	}
+	status, duplicate := postProviderAliasUpdate(t, callback, "", secret, body)
 	if status != http.StatusOK || !reflect.DeepEqual(a9AliasReceipt(t, receipt), a9AliasReceipt(t, duplicate)) {
 		t.Fatalf("exact retry changed receipt: %s -> %s status=%d", receipt, duplicate, status)
 	}
@@ -174,7 +185,28 @@ func proveA9CrossContextAliasPromotion(t *testing.T, backend string) {
 		t.Fatal(err)
 	}
 	writeWorkflowValidationFixtureFile(t, path, string(body)+"\n# distinct admitted source\n")
+	writeStandingCandidateFile(t, filepath.Join(secondRoot, "policy.yaml"), "operator_account: '420080'\n")
 	secondOpts, secondStart := clockDeploymentHarness(t, backend, secondRoot)
+	provider := &channelOnboardingTelegramProvider{}
+	telegram := httptest.NewServer(provider)
+	t.Cleanup(telegram.Close)
+	routes := map[string]string{"api.telegram.org": telegram.URL}
+	for index, entry := range []struct {
+		opts    *cliapp.ServeOptions
+		account int64
+		token   string
+	}{{firstOpts, 420079, "first-alias-bot-token"}, {secondOpts, 420080, "second-alias-bot-token"}} {
+		listener := reserveChannelOnboardingListener(t)
+		entry.opts.PublicWebhookListener = listener
+		entry.opts.PublicWebhookListen = listener.Addr().String()
+		host := fmt.Sprintf("hooks.alias-%d.test", index)
+		entry.opts.PublicWebhookBaseURL = "https://" + host
+		routes[host] = "http://" + listener.Addr().String()
+		provider.SetResourceID(entry.token, entry.account)
+	}
+	redirectExternalHosts(t, routes)
+	registerChannelFixtureAccount(t, firstOpts.ConfigPath, "first-alias-bot-token", "420079")
+	registerChannelFixtureAccount(t, secondOpts.ConfigPath, "second-alias-bot-token", "420080")
 	firstOpts.TestRuntimeContextsReadyHook = func(manager *runtimepkg.RuntimeContextManager) { managers <- manager }
 	secondOpts.TestRuntimeContextsReadyHook = firstOpts.TestRuntimeContextsReadyHook
 	first, served := firstStart()
@@ -204,7 +236,11 @@ func proveA9CrossContextAliasPromotion(t *testing.T, backend string) {
 	if err != nil || !reflect.DeepEqual(before, after) {
 		t.Fatalf("failed cross-context admission mutated incumbent status: %+v -> %+v err=%v", before, after, err)
 	}
-	status, receipt := postProviderAliasUpdate(t, strings.TrimSuffix(served.Endpoint, "/v1/rpc"), "shared", "boot-signing-secret", `{"update_id":9901,"message":{"message_id":7,"from":{"id":41},"chat":{"id":42,"type":"private"},"text":"incumbent"}}`)
+	callback, signing, count := provider.RegistrationForCredential("first-alias-bot-token")
+	if count == 0 || callback == "" || signing == "" {
+		t.Fatal("incumbent source has no exact native callback")
+	}
+	status, receipt := postProviderAliasUpdate(t, callback, "", signing, `{"update_id":9901,"message":{"message_id":7,"from":{"id":41},"chat":{"id":42,"type":"private"},"text":"incumbent"}}`)
 	if status != http.StatusAccepted {
 		t.Fatalf("cross-context refusal lost incumbent delivery: status=%d receipt=%s", status, receipt)
 	}
@@ -236,6 +272,7 @@ func a9ServedAliasSource(t *testing.T) string {
 	t.Helper()
 	root := canonicalrouting.CopyExample(t, canonicalrouting.TelegramAgent)
 	disableChannelOnboardingBusinessConsumers(t, root)
+	writeStandingCandidateFile(t, filepath.Join(root, "policy.yaml"), "operator_account: '420079'\n")
 	selected := filepath.Join(filepath.Dir(root), "shared")
 	if err := os.Rename(root, selected); err != nil {
 		t.Fatal(err)
