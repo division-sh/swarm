@@ -529,6 +529,54 @@ func TestServeSessionBootstrapInstallsIncomingOwnersBothStores(t *testing.T) {
 
 func TestServeSessionBootstrapAttemptOutcomesBothStores(t *testing.T) {
 	for _, backend := range []string{"sqlite", "postgres"} {
+		t.Run(backend+"/deployment_retirement", func(t *testing.T) {
+			f := newServeBootstrapTestFixture(t, backend)
+			operations := f.adapter.store.(interface {
+				DeploymentChannelOperations() channelonboarding.OperationStore
+			}).DeploymentChannelOperations()
+			id, now := uuid.NewString(), time.Now().UTC()
+			op, err := operations.ReserveChannelOnboarding(f.ctx, channelonboarding.StartRequest{OperationID: id,
+				RequestKeyHash: id, RequestHash: id, PrincipalID: f.principal.ID, Verb: channelonboarding.VerbConnect,
+				Provider: "whatsapp", Interface: f.candidate.Interface, Posture: channelonboarding.ActivationSessionConnection,
+				DeploymentRegistration: true, Ceremony: channelonboarding.CeremonyAccountLink, RequestedAt: now})
+			if err != nil {
+				t.Fatal(err)
+			}
+			account := operatorchannel.SessionAccountAdmission{Provider: "whatsapp", ConnectionID: op.SessionConnectionID,
+				AccountRef: "15550100@s.whatsapp.net", AdmissionID: uuid.NewString(), Revision: 1}
+			for _, phase := range []channelonboarding.Phase{channelonboarding.PhaseCredentialsAdmitted, channelonboarding.PhaseActivatingProvider,
+				channelonboarding.PhaseAwaitingExternalIdentity, channelonboarding.PhaseAwaitingExternalIdentity,
+				channelonboarding.PhaseAwaitingOperatorConfirmation, channelonboarding.PhaseSucceeded} {
+				request := channelonboarding.AdvanceRequest{OperationID: id, ExpectedRevision: op.Revision, Phase: phase, Now: now}
+				if phase == channelonboarding.PhaseAwaitingExternalIdentity {
+					if op.Phase == phase {
+						request.ConfirmAccount = true
+					} else {
+						request.SessionAccount, request.AccountReference = &account, "+15550100"
+					}
+				}
+				op, err = operations.AdvanceChannelOnboarding(f.ctx, request)
+				if err != nil {
+					t.Fatal("advance deployment retention fixture", phase, err)
+				}
+			}
+			if retired, err := serveSessionRetirementRequired(f.ctx, f.adapter.store, op); err != nil || retired {
+				t.Fatal("current deployment account required a runtime activation to retain its connection", retired, err)
+			}
+			foreign := op
+			foreign.SessionConnectionID = uuid.NewString()
+			if retired, err := serveSessionRetirementRequired(f.ctx, f.adapter.store, foreign); err != nil || !retired {
+				t.Fatal("deployment retention adopted another connection", retired, err)
+			}
+			op, err = operations.AdvanceChannelOnboarding(f.ctx, channelonboarding.AdvanceRequest{OperationID: id,
+				ExpectedRevision: op.Revision, Phase: channelonboarding.PhaseRetired, FailureCode: "native_account_revoked", Now: now})
+			if err != nil {
+				t.Fatal(err)
+			}
+			if retired, err := serveSessionRetirementRequired(f.ctx, f.adapter.store, op); err != nil || !retired {
+				t.Fatal("revoked deployment account retained its connection", retired, err)
+			}
+		})
 		for _, mode := range []string{"dial_failure", "handshake_failure", "healthy_close", "healthy_retirement"} {
 			t.Run(backend+"/"+mode, func(t *testing.T) {
 				f := newServeBootstrapTestFixture(t, backend)
