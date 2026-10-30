@@ -83,7 +83,7 @@ func TestServePostgresGracefulContract(t *testing.T) {
 			serve.mu.Lock()
 			rt := serve.runtime
 			serve.mu.Unlock()
-			opCtx, cancelOperation := context.WithCancel(context.Background())
+			opCtx, cancelOperation := context.WithCancel(servedRuntimeProofAuthorActivityContext(t, rt, rt.Options.SourceArtifactFact.BundleHash()))
 			defer cancelOperation()
 			lease, err := rt.WorkOccurrence().Begin(opCtx)
 			if err != nil {

@@ -844,6 +844,11 @@ func commitFanOutChunk(
 			intent.LastServedAt, intent.NextChunkSize = servedAt, fanoutobligation.MaxChunkSize
 			intent.ClaimOwner, intent.LeaseExpiresAt = "", time.Time{}
 			result.Intent = intent
+			if status == fanoutobligation.StatusClosed {
+				if _, err := attempt.RequestCompletion(txctx, candidateWriter, command.Claim.Key.RunID, nil); err != nil {
+					return err
+				}
+			}
 			return nil
 		})
 		return result, err

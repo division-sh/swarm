@@ -415,14 +415,16 @@ func TestOperatorRuntimeContextManagerRoutesEveryDecisionMutationThroughSelected
 	if err != nil {
 		t.Fatal(err)
 	}
-	handler := testHandler(t, Options{AuthTokens: []string{testToken}, OperatorPrincipalID: principal.ID, Handlers: testOperatorHandlers(t, testOperatorCapabilities{
+	requestProcess, found := worklifetime.ProcessFromContext(apiTestOriginalProcessContext(t, context.Background(), fixture.pg))
+	if !found {
+		t.Fatal("decision routing fixture lacks its original process work owner")
+	}
+	handler := testHandler(t, Options{AuthTokens: []string{testToken}, OperatorPrincipalID: principal.ID, ProcessWorkOwner: requestProcess, Handlers: OperatorDecisionCardHandlers(testOperatorCapabilities{
 		Now: func() time.Time { return now.Add(time.Minute) }, Idempotency: fixture.pg,
 		Mailbox: fixture.pg, DecisionCards: fixture.pg, DecisionAuthority: primaryPipeline, Events: fixture.busA,
 		RunBundleContext: fixture.pg, RuntimeContexts: manager, Source: fixture.sourceA,
 		Bundle: runtimecontracts.BundleIdentity{WorkflowName: "review", WorkflowVersion: "1.0.0", BundleHash: runStartTestBundleHash},
-	})})
-	bindAPITestHandlerOriginalProcess(t, handler, apiTestOriginalProcessContext(t, context.Background(), fixture.pg))
-
+	}.decisionCards())})
 	begin := rpcCallWithPlainRequestContext(t, handler, fmt.Sprintf(`{"jsonrpc":"2.0","id":"begin","method":"mailbox.begin_input","params":{"card_id":%q,"verdict":"reject","observed_content_hash":%q,"idempotency_key":"selected-begin"}}`, card.CardID, card.CardContentHash))
 	if begin.Error != nil {
 		t.Fatalf("selected mailbox.begin_input error = %#v", begin.Error)

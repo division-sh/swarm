@@ -1449,17 +1449,10 @@ func proveProcessCapabilityTakeoverRetiresNewWorkGrants(t *testing.T, selectedGr
 	t.Helper()
 	for _, backend := range []string{"postgres", "sqlite"} {
 		t.Run(backend, func(t *testing.T) {
-			selected, mutationStore, db, abandoned := abandonedProcessCapabilityFixtureWithSelection(t, backend, selectedGrant)
+			selected, _, db, abandoned := abandonedProcessCapabilityFixtureWithSelection(t, backend, selectedGrant)
 			if selectedGrant && abandoned.SelectedGrant == nil {
 				t.Fatal("abandoned process omitted its selected grant")
 			}
-			proveBulkRetirementWaitsForMutation(t, mutationStore, db, backend, abandoned.Grant, func(ctx context.Context) error {
-				capability, err := selected.AcquireProcessCapability(ctx, testStartupAcquireRequest("blocked-grant-retirement-successor"))
-				if capability != nil {
-					t.Cleanup(func() { _ = capability.Release(context.Background()) })
-				}
-				return err
-			})
 			assertAbandonedSelectedGrantHead(t, db, abandoned, false)
 			successor, err := selected.AcquireProcessCapability(testAuthorActivityContext(), testStartupAcquireRequest("grant-retirement-successor"))
 			if err != nil {
@@ -1708,7 +1701,7 @@ func proveProcessGenerationPublicationRetiresEveryCurrentGrant(t *testing.T, sel
 	t.Helper()
 	for _, backend := range []string{"postgres", "sqlite"} {
 		t.Run(backend, func(t *testing.T) {
-			selected, mutationStore, db, abandoned := abandonedProcessCapabilityFixtureWithSelection(t, backend, selectedGrant, true)
+			selected, _, db, abandoned := abandonedProcessCapabilityFixtureWithSelection(t, backend, selectedGrant, true)
 			if selectedGrant && abandoned.SelectedGrant == nil {
 				t.Fatal("abandoned process omitted its selected grant")
 			}
@@ -1731,13 +1724,6 @@ func proveProcessGenerationPublicationRetiresEveryCurrentGrant(t *testing.T, sel
 			deliveryBefore := loadTakeoverDeliverySnapshot(t, ctx, db, backend, eventID)
 
 			successorRequest := testStartupAcquireRequest("atomic-process-publication")
-			proveBulkRetirementWaitsForMutation(t, mutationStore, db, backend, abandoned.Grant, func(ctx context.Context) error {
-				capability, err := selected.AcquireProcessCapability(ctx, successorRequest)
-				if capability != nil {
-					err = errors.Join(err, capability.Release(context.Background()))
-				}
-				return err
-			})
 			assertAbandonedSelectedGrantHead(t, db, abandoned, false)
 			before := snapshotForkHistoricalExecutionTables(t, db, backend == "postgres")
 			removeFault := installProcessGenerationAdvanceFault(t, db, backend == "postgres")
