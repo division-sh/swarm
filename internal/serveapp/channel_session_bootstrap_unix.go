@@ -15,6 +15,7 @@ import (
 	"github.com/division-sh/swarm/internal/operatorchannel"
 	"github.com/division-sh/swarm/internal/runtime/core/processbinding"
 	"github.com/division-sh/swarm/internal/runtime/credentials"
+	"github.com/division-sh/swarm/internal/runtime/failures"
 	"github.com/division-sh/swarm/internal/sessionprovider"
 	"github.com/division-sh/swarm/internal/sessionprovider/authority"
 	sessionexecution "github.com/division-sh/swarm/internal/sessionprovider/execution"
@@ -405,10 +406,11 @@ func (s *serveSessionBootstrap) ObserveSession(ctx context.Context, op channelon
 	return provider, observed, true, nil
 }
 
-func (s *serveSessionBootstrap) ChannelExecution(ctx context.Context, op channelonboarding.Operation) (sessionexecution.Channel, error) {
+func (s *serveSessionBootstrap) ChannelExecution(ctx context.Context, op channelonboarding.Operation) (execution sessionexecution.Channel, resultErr error) {
 	if err := s.validateRetainedSessionOperation(ctx, op); err != nil {
 		return sessionexecution.Channel{}, err
 	}
+	defer func() { resultErr = channelSessionExecutionFailure(op, resultErr) }()
 	// Capture the original connection before observing it. Concurrent explicit
 	// recovery cannot substitute a successor connection into this selection.
 	connection, err := s.currentConnection(ctx, op.OperationID)
@@ -421,6 +423,24 @@ func (s *serveSessionBootstrap) ChannelExecution(ctx context.Context, op channel
 		return sessionexecution.Channel{}, errors.Join(channelonboarding.ErrRevisionConflict, err)
 	}
 	return connection.ChannelExecution(ctx)
+}
+
+func channelSessionExecutionFailure(op channelonboarding.Operation, err error) error {
+	if _, typed := failures.As(err); typed || !failures.OnlyBranches(err, func(cause error) bool {
+		return cause == channelonboarding.ErrNotFound || cause == channelonboarding.ErrSessionPending || cause == channelonboarding.ErrRevisionConflict
+	}) {
+		return err
+	}
+	account := op.DeploymentAccount()
+	if account == "" {
+		account = op.SessionAccount.AccountRef
+	}
+	if account == "" {
+		return err
+	}
+	return failures.Wrap(failures.ClassTargetUnreachable, "channel_session_unavailable", "channel-session", "execute", map[string]any{
+		"provider": op.Provider, "account": account,
+	}, err)
 }
 
 func (s *serveSessionBootstrap) RetireInactiveSessions(ctx context.Context) error {

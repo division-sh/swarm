@@ -101,6 +101,9 @@ func TestChannelCLIPendingResumeReachesQRWithoutRevisionChange(t *testing.T) {
 				} else if mode == "--no-color" && strings.Contains(out, "\x1b[") {
 					t.Fatal("plain QR output contained ANSI styling", out)
 				}
+				if (mode == "human" || mode == "--no-color") && (strings.Contains(out, "Waiting for") || !strings.Contains(out, "Next: swarm channel connect whatsapp")) {
+					t.Fatal("single-step resume claimed to wait or omitted its continuation command", out)
+				}
 			})
 		}
 	}

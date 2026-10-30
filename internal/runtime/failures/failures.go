@@ -252,6 +252,9 @@ func definition(class Class, taskFailure, retryable, deterministic bool, message
 }
 
 func (def Definition) message(detail Detail) string {
+	if def.Class == ClassTargetUnreachable && detail.Code == "channel_session_unavailable" {
+		return fmt.Sprintf("No session for %s account %s: run swarm channel connect %s", detail.Attributes["provider"], detail.Attributes["account"], detail.Attributes["provider"])
+	}
 	if def.Class == ClassAuthenticationNeeded && detail.Code == "channel_account_not_linked" {
 		account, _ := detail.Attributes["account"].(string)
 		provider, _ := detail.Attributes["provider"].(string)
@@ -741,6 +744,14 @@ func validateDetail(class Class, detail Detail) error {
 		}
 	case ClassAuthenticationNeeded:
 		return validateAuthenticationDetail(detail)
+	case ClassTargetUnreachable:
+		if detail.Code == "channel_session_unavailable" {
+			account, _ := detail.Attributes["account"].(string)
+			provider, _ := detail.Attributes["provider"].(string)
+			if account == "" || len(account) > 64 || strings.ContainsAny(account, "\r\n\t\x00") || provider != "whatsapp" && provider != "telegram" {
+				return fmt.Errorf("channel_session_unavailable requires a bounded account and its exact provider")
+			}
+		}
 	case ClassAuthorizationDenied:
 		if value, _ := detail.Attributes["action"].(string); strings.TrimSpace(value) == "" {
 			return fmt.Errorf("authorization_denied detail action is required")
