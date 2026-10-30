@@ -172,10 +172,10 @@ func runMockAgentSupportedSurface(t *testing.T, backend string) time.Duration {
 	firstURL := "http://" + serveRuntimeAPIListenerFromOutput(t, first.outputString())
 	normalized := publishStandingMockInput(t, firstURL, bundleHash, 301, 42)
 	waitForMockAgentTurns(t, backend, location, 1)
-	if normalized.EntityID == "" || len(normalized.Deliveries) != 1 || normalized.Deliveries[0].Target.EntityID != normalized.EntityID {
+	if len(normalized.Deliveries) != 1 || normalized.Deliveries[0].Target.EntityID == "" {
 		t.Fatalf("mock receiver readback lost exact delivery target: %+v", normalized)
 	}
-	entityID := normalized.EntityID
+	entityID := normalized.Deliveries[0].Target.EntityID
 	cardID := waitForMockConnectorDecisionCard(t, backend, location, 1)
 	assertMockMailboxReadback(t, firstURL+"/v1/rpc", cardID)
 	approveMockDecisionCard(t, firstURL+"/v1/rpc", cardID)
@@ -193,7 +193,7 @@ func runMockAgentSupportedSurface(t *testing.T, backend string) time.Duration {
 	second.waitForReadyLine()
 	secondURL := "http://" + serveRuntimeAPIListenerFromOutput(t, second.outputString())
 	waitForMockConnectorAttempts(t, backend, location, 1)
-	if got := publishStandingMockInput(t, secondURL, bundleHash, 302, 42); got.RunID != normalized.RunID || got.EntityID != normalized.EntityID {
+	if got := publishStandingMockInput(t, secondURL, bundleHash, 302, 42); got.RunID != normalized.RunID || got.Deliveries[0].Target != normalized.Deliveries[0].Target {
 		t.Fatalf("post-restart mock input changed its exact run/entity: %+v, want %+v", got, normalized)
 	}
 	waitForMockAgentTurns(t, backend, location, 2)
