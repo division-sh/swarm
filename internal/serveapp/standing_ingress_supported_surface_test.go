@@ -164,7 +164,12 @@ func assertServedFlowRunState(t *testing.T, db *sql.DB, backend, runID, runStatu
 func TestStandingIngressSupportedSurfaceSQLiteRestartPreservesAuthorityAndReplies(t *testing.T) {
 	isolateCLIAPIConfigEnv(t)
 	calls := make(chan map[string]any, 4)
+	native := &channelOnboardingTelegramProvider{}
 	telegram := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if !strings.HasSuffix(r.URL.Path, "/sendMessage") {
+			native.ServeHTTP(w, r)
+			return
+		}
 		var body map[string]any
 		if err := json.NewDecoder(r.Body).Decode(&body); err != nil {
 			t.Errorf("decode Telegram call: %v", err)
@@ -196,11 +201,12 @@ func TestStandingIngressSupportedSurfaceSQLiteRestartPreservesAuthorityAndReplie
 		SelfCheck:      true,
 		TestLLMRuntime: telegramPhraseBotLLMRuntime{}, TestOutboxSweeperConfig: servedEventPublishProofOutboxSweeperConfig(),
 	}
+	registerChannelFixtureAccount(t, configPath, "bot-token", "420079")
+	prepareStandingTelegramCallback(t, &opts)
 	first := startServeRuntimeTestProcess(t, opts)
 	first.waitForReadyLine()
-	firstURL := "http://" + serveRuntimeAPIListenerFromOutput(t, first.outputString())
-	firstBinding := sendStandingTelegramUpdate(t, firstURL, 101, 42)
-	secondBinding := sendStandingTelegramUpdate(t, firstURL, 102, 42)
+	firstBinding := sendStandingTelegramUpdate(t, native, 101, 42)
+	secondBinding := sendStandingTelegramUpdate(t, native, 102, 42)
 	if firstBinding != secondBinding {
 		t.Fatalf("delivery bindings = %+v and %+v, want one standing generation", firstBinding, secondBinding)
 	}
@@ -237,16 +243,18 @@ func TestStandingIngressSupportedSurfaceSQLiteRestartPreservesAuthorityAndReplie
 	}
 
 	enableServeRuntimeRecovery(t, configPath)
+	prepareStandingTelegramCallback(t, &opts)
 	second := startServeRuntimeTestProcess(t, opts)
 	second.waitForReadyLine()
 	secondURL := "http://" + serveRuntimeAPIListenerFromOutput(t, second.outputString())
-	restartedBinding := sendStandingTelegramUpdate(t, secondURL, 103, 84)
+	restartedBinding := sendStandingTelegramUpdate(t, native, 103, 84)
 	if restartedBinding != firstBinding {
 		t.Fatalf("restart binding = %+v, want %+v", restartedBinding, firstBinding)
 	}
 	requireStandingTelegramCalls(t, calls, sqlitePath, 84)
 	waitForStandingDeliveryQuiescence(t, sqlitePath)
-	requireStandingDeclarationPublicationReadback(t, secondURL, firstBinding, []string{"101", "102", "103"})
+	requireStandingDeclarationPublicationReadback(t, secondURL, firstBinding, []string{
+		channelFixtureProviderEventID(t, "101"), channelFixtureProviderEventID(t, "102"), channelFixtureProviderEventID(t, "103")})
 	if code := second.stop(); code != 0 {
 		t.Fatalf("second serve exit = %d", code)
 	}
@@ -397,7 +405,12 @@ func TestStandingIngressSupportedSurfacePostgresRestartPreservesAuthorityAndRepl
 	})
 
 	calls := make(chan map[string]any, 4)
+	native := &channelOnboardingTelegramProvider{}
 	telegram := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if !strings.HasSuffix(r.URL.Path, "/sendMessage") {
+			native.ServeHTTP(w, r)
+			return
+		}
 		var body map[string]any
 		_ = json.NewDecoder(r.Body).Decode(&body)
 		calls <- body
@@ -417,15 +430,16 @@ func TestStandingIngressSupportedSurfacePostgresRestartPreservesAuthorityAndRepl
 		}
 	}
 	opts := cliapp.ServeOptions{
-		ConfigPath: writeServeRuntimeTestConfig(t), SourceRoot: sourceRoot, StoreMode: "postgres", APIListenAddr: "127.0.0.1:0", MCPListenAddr: "127.0.0.1:0",
+		ConfigPath: writeChannelOnboardingPostgresRuntimeConfig(t, dsn), SourceRoot: sourceRoot, StoreMode: "postgres", APIListenAddr: "127.0.0.1:0", MCPListenAddr: "127.0.0.1:0",
 		SelfCheck: true, Verbose: true,
 		TestLLMRuntime: telegramPhraseBotLLMRuntime{}, TestOutboxSweeperConfig: servedEventPublishProofOutboxSweeperConfig(),
 	}
+	registerChannelFixtureAccount(t, opts.ConfigPath, "bot-token", "420079")
+	prepareStandingTelegramCallback(t, &opts)
 	first := startServeRuntimeTestProcess(t, opts)
 	first.waitForReadyLine()
-	baseURL := "http://" + serveRuntimeAPIListenerFromOutput(t, first.outputString())
-	binding := sendStandingTelegramUpdate(t, baseURL, 201, 42)
-	if got := sendStandingTelegramUpdate(t, baseURL, 202, 42); got != binding {
+	binding := sendStandingTelegramUpdate(t, native, 201, 42)
+	if got := sendStandingTelegramUpdate(t, native, 202, 42); got != binding {
 		t.Fatalf("second binding = %+v, want %+v", got, binding)
 	}
 	requireStandingTelegramCalls(t, calls, "postgres:"+dsn, 42, 42)
@@ -438,14 +452,16 @@ func TestStandingIngressSupportedSurfacePostgresRestartPreservesAuthorityAndRepl
 		t.Fatalf("reopen PostgresStore: %v", err)
 	}
 	enableServeRuntimeRecovery(t, opts.ConfigPath)
+	prepareStandingTelegramCallback(t, &opts)
 	second := startServeRuntimeTestProcess(t, opts)
 	second.waitForReadyLine()
-	if got := sendStandingTelegramUpdate(t, "http://"+serveRuntimeAPIListenerFromOutput(t, second.outputString()), 203, 84); got != binding {
+	if got := sendStandingTelegramUpdate(t, native, 203, 84); got != binding {
 		t.Fatalf("restart binding = %+v, want %+v", got, binding)
 	}
 	requireStandingTelegramCalls(t, calls, "postgres:"+dsn, 84)
 	waitForStandingDeliveryQuiescence(t, "postgres:"+dsn)
-	requireStandingDeclarationPublicationReadback(t, "http://"+serveRuntimeAPIListenerFromOutput(t, second.outputString()), binding, []string{"201", "202", "203"})
+	requireStandingDeclarationPublicationReadback(t, "http://"+serveRuntimeAPIListenerFromOutput(t, second.outputString()), binding, []string{
+		channelFixtureProviderEventID(t, "201"), channelFixtureProviderEventID(t, "202"), channelFixtureProviderEventID(t, "203")})
 	if code := second.stop(); code != 0 {
 		t.Fatalf("second serve exit = %d", code)
 	}
@@ -528,7 +544,12 @@ func TestStandingRestartMixedHealthyAndTerminalProcessParity(t *testing.T) {
 		t.Run(backend, func(t *testing.T) {
 			isolateCLIAPIConfigEnv(t)
 			calls := make(chan map[string]any, 4)
+			native := &channelOnboardingTelegramProvider{}
 			telegram := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+				if !strings.HasSuffix(r.URL.Path, "/sendMessage") {
+					native.ServeHTTP(w, r)
+					return
+				}
 				var body map[string]any
 				if err := json.NewDecoder(r.Body).Decode(&body); err != nil {
 					t.Errorf("decode Telegram call: %v", err)
@@ -584,12 +605,14 @@ func TestStandingRestartMixedHealthyAndTerminalProcessParity(t *testing.T) {
 					buildStoresForServe = oldBuildStores
 					cliapp.ConfiguredWorkspaceLifecycleForServe = oldWorkspace
 				})
-				opts.ConfigPath = writeServeRuntimeTestConfig(t)
+				opts.ConfigPath = writeChannelOnboardingPostgresRuntimeConfig(t, dsn)
 				opts.StoreMode = "postgres"
 				opts.StoreModeSet = true
 				selectedStore = "postgres:" + dsn
 			}
 
+			registerChannelFixtureAccount(t, opts.ConfigPath, "bot-token", "420079")
+			prepareStandingTelegramCallback(t, &opts)
 			first := startServeRuntimeTestProcess(t, opts)
 			first.waitForReadyLine()
 			firstRuntime := waitForStandingRuntime(t, runtimes, backend, "first boot")
@@ -598,8 +621,7 @@ func TestStandingRestartMixedHealthyAndTerminalProcessParity(t *testing.T) {
 			}
 			healthyRun := loadServedLandingRunByFlow(t, db, backend, ".")
 			terminalRun := loadServedLandingRunByFlow(t, db, backend, "telegram-stopped")
-			firstURL := "http://" + serveRuntimeAPIListenerFromOutput(t, first.outputString())
-			if binding := sendStandingTelegramUpdate(t, firstURL, 301, 42); binding.RunID != healthyRun {
+			if binding := sendStandingTelegramUpdate(t, native, 301, 42); binding.RunID != healthyRun {
 				t.Fatalf("%s healthy standing service returned wrong binding before restart: %+v", backend, binding)
 			}
 			requireStandingTelegramCalls(t, calls, selectedStore, 42)
@@ -611,12 +633,12 @@ func TestStandingRestartMixedHealthyAndTerminalProcessParity(t *testing.T) {
 			}
 
 			enableServeRuntimeRecovery(t, opts.ConfigPath)
+			prepareStandingTelegramCallback(t, &opts)
 			second := startServeRuntimeTestProcess(t, opts)
 			second.waitForReadyLine()
 			_ = waitForStandingRuntime(t, runtimes, backend, "restart")
 			secondOutput := second.outputString()
-			secondURL := "http://" + serveRuntimeAPIListenerFromOutput(t, secondOutput)
-			if binding := sendStandingTelegramUpdate(t, secondURL, 302, 84); binding.RunID != healthyRun {
+			if binding := sendStandingTelegramUpdate(t, native, 302, 84); binding.RunID != healthyRun {
 				t.Fatalf("%s healthy standing service returned wrong binding after restart: %+v", backend, binding)
 			}
 			requireStandingTelegramCalls(t, calls, selectedStore, 84)
@@ -905,9 +927,9 @@ func requireChangedStandingColdStartReconciled(t *testing.T, opts cliapp.ServeOp
 	}
 }
 
-func sendStandingTelegramUpdate(t testing.TB, baseURL string, updateID, chatID int, diagnostics ...func() string) standingTelegramBinding {
+func sendStandingTelegramUpdate(t testing.TB, destination any, updateID, chatID int, diagnostics ...func() string) standingTelegramBinding {
 	t.Helper()
-	return sendStandingTelegramUpdatePublication(t, baseURL, updateID, chatID, diagnostics...).standingTelegramBinding
+	return sendStandingTelegramUpdatePublication(t, destination, updateID, chatID, diagnostics...).standingTelegramBinding
 }
 
 func standingWebhookDiagnostics(diagnostics []func() string) string {
