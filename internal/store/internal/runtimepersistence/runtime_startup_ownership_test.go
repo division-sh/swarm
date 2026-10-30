@@ -55,6 +55,10 @@ func admitRegistrationTestGeneration(
 	if err != nil {
 		t.Fatalf("AcquireProcessCapability: %v", err)
 	}
+	ctx, err = runtimestartupownership.WithProcessMutationAuthority(ctx, capability)
+	if err != nil {
+		t.Fatal(err)
+	}
 	rooted, _ := sourceartifactfixture.Rooted(t, "fixture", sourceartifactfixture.Artifact())
 	sourceartifactfixture.RequireArtifact(t, ctx, store.(sourceartifactfixture.Writer), rooted.Artifact())
 	coordinate, err := runtimeagenttopology.NewSourceCoordinate(rooted.Admission())
