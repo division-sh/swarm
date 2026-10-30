@@ -17,6 +17,7 @@ import (
 	"github.com/division-sh/swarm/internal/providertriggers"
 	"github.com/division-sh/swarm/internal/runtime/channeldelivery"
 	"github.com/division-sh/swarm/internal/runtime/core/worklifetime"
+	"github.com/division-sh/swarm/internal/runtime/decisioncard"
 	"github.com/division-sh/swarm/internal/runtime/executionposture"
 	runtimefailures "github.com/division-sh/swarm/internal/runtime/failures"
 	"github.com/division-sh/swarm/internal/runtime/inboundpublication"
@@ -148,6 +149,10 @@ func TestWhatsAppRuntimeIncomingPublishesBeforeAcknowledgementBothStores(t *test
 			waitRuntimeIncomingReceipt(t, f, c, unclaimed)
 			if count, err := c.UnclaimedCount(f.ctx); err != nil || count != 1 {
 				t.Fatal("unheld account did not retain exactly one terminal capture", count, err)
+			}
+			cards, _, err := f.selected.(decisioncard.Store).ListDecisionCards(f.ctx, decisioncard.ListOptions{Limit: 1})
+			if err != nil || len(cards) != 0 {
+				t.Fatal("unclaimed account traffic produced an operator Inbox card", len(cards), err)
 			}
 			held.Store(true)
 			id, businessAt := uuid.NewString(), time.Now()

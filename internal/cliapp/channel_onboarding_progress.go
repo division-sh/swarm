@@ -92,6 +92,10 @@ func readSelectedChannelCredential(result channelOnboardingResult, opts channelC
 }
 
 func renderChannelOnboardingResult(out, errOut io.Writer, output cliOutputOptions, result channelOnboardingResult) error {
+	if !result.Operation.DeploymentRegistration && result.Operation.Provider == "telegram" && result.Operation.Phase == channelonboarding.PhaseFailed &&
+		result.Operation.FailureCode == "registered_account_enrollment_refused" && result.Operation.FailureMessage != "" {
+		return returnCLIValidationError(errOut, errors.New(cliSanitizeOneLineValue(result.Operation.FailureMessage)))
+	}
 	now := time.Now()
 	pending, err := result.SessionPairingPending(now)
 	if err != nil {

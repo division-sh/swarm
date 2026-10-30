@@ -2,6 +2,7 @@ package serveapp
 
 import (
 	"bytes"
+	"context"
 	"errors"
 	"go/ast"
 	"go/parser"
@@ -9,10 +10,13 @@ import (
 	"io"
 	"os"
 	"path/filepath"
+	"reflect"
 	"strings"
 	"testing"
 	"time"
 
+	"github.com/division-sh/swarm/internal/apiv1"
+	"github.com/division-sh/swarm/internal/channelonboarding"
 	"github.com/division-sh/swarm/internal/cliapp"
 	"github.com/division-sh/swarm/internal/operatorchannel"
 	"github.com/division-sh/swarm/internal/packs"
@@ -44,6 +48,29 @@ func TestServeLifecyclePresenterMasksProofReuseFallbackPresentation(t *testing.T
 
 func TestServeLifecyclePresenterConciseReadinessUsesTypedFacts(t *testing.T) {
 	var out bytes.Buffer
+	accountRows := []channelonboarding.AccountStatus{
+		{Provider: "whatsapp", Account: "+15550100", State: "live", Holders: []channelonboarding.AccountHolder{{Flow: "frontdesk"}}},
+		{Provider: "whatsapp", Account: "+15550200", State: "refused", Reason: "registration_not_current"},
+	}
+	reads := 0
+	observed, err := serveReadyDeploymentAccounts(t.Context(), []channelonboarding.Operation{
+		{DeploymentRegistration: true, Provider: "whatsapp", AccountReference: "+15550200", AccountConfirmed: true, Phase: channelonboarding.PhaseSucceeded},
+		{DeploymentRegistration: true, Provider: "whatsapp", AccountReference: "+15550100", AccountConfirmed: true, Phase: channelonboarding.PhaseSucceeded},
+	}, func(_ context.Context, request apiv1.Request) (any, error) {
+		reads++
+		if request.Method != "channel.list" || request.Params["provider"] != "whatsapp" || request.Params["holder"] != "current holder" {
+			t.Fatalf("account readiness bypassed the existing holder/status read: %+v", request)
+		}
+		for _, row := range accountRows {
+			if row.Account == request.Params["account"] {
+				return row, nil
+			}
+		}
+		return nil, errors.New("unknown account")
+	}, "current holder")
+	if err != nil || reads != 2 || !reflect.DeepEqual(observed, accountRows) {
+		t.Fatalf("per-account readiness rows=%+v reads=%d err=%v", observed, reads, err)
+	}
 	presenter := newServeLifecyclePresenter(cliapp.ServeOptions{Dev: true, Output: &out})
 	presenter.boot(1, "process_start", "ok", "")
 	presenter.boot(7, "recovery_decision", "clean_start", "no_active_run")
@@ -79,6 +106,7 @@ func TestServeLifecyclePresenterConciseReadinessUsesTypedFacts(t *testing.T) {
 			{Provider: "telegram", URL: "http://127.0.0.1:8081/webhooks/ingress/telegram", BundleHash: "bundle-b", Subject: testServeIngressSubject("bundle-b", "ingress", "telegram", "webhook_signing.telegram", packs.RequirementStatusBound)},
 			{Provider: "github", URL: "http://127.0.0.1:8081/webhooks/ingress/github", BundleHash: "bundle-a", Subject: testServeIngressSubject("bundle-a", "ingress", "github", "webhook_signing.github", packs.RequirementStatusUnbound)},
 		},
+		Accounts: observed,
 	})
 	presenter.shutdown(nil)
 	presenter.finish()
@@ -95,6 +123,8 @@ func TestServeLifecyclePresenterConciseReadinessUsesTypedFacts(t *testing.T) {
 		"github webhook",
 		"webhook_signing.github unbound",
 		"telegram webhook",
+		"WhatsApp +15550100 (frontdesk): connected",
+		"WhatsApp +15550200: refused: registration_not_current",
 		"webhook_signing.telegram bound",
 		"shutdown · complete",
 		"credential telegram_bot_token · source file:/tmp/deployment/credentials.json",

@@ -1250,11 +1250,8 @@ func (s *Service) driveLocked(ctx context.Context, op Operation, candidate Candi
 				op = next
 				continue
 			}
-			promotedOp, promoted, err := s.admitConfirmedTarget(ctx, op, candidate)
-			if err != nil {
-				return s.blockedResult(readback, op, candidate, fmt.Errorf("admit channel target: %w", err))
-			}
-			op, candidate = promotedOp, promoted
+			// Registration preflight is read-only. A refused enrollment must not
+			// refresh the registered receiver's frozen source authority.
 			if err := s.activations.PreflightChannelActivation(ctx, op, candidate); err != nil {
 				if terminal, ok := AsTerminalActivationError(err); ok {
 					failed, failErr := s.failOperation(ctx, op, terminal.Code, terminal.Error())
@@ -1267,6 +1264,11 @@ func (s *Service) driveLocked(ctx context.Context, op Operation, candidate Candi
 				op, resetErr = s.resetRejectedCredentialAdmissions(context.WithoutCancel(ctx), op)
 				return s.blockedResult(readback, op, candidate, errors.Join(fmt.Errorf("preflight channel activation: %w", err), resetErr))
 			}
+			promotedOp, promoted, err := s.admitConfirmedTarget(ctx, op, candidate)
+			if err != nil {
+				return s.blockedResult(readback, op, candidate, fmt.Errorf("admit channel target: %w", err))
+			}
+			op, candidate = promotedOp, promoted
 			next, err := s.store.AdvanceChannelOnboarding(ctx, AdvanceRequest{
 				OperationID: op.OperationID, ExpectedRevision: op.Revision, Phase: PhaseActivatingProvider,
 				Now: s.now().UTC(),

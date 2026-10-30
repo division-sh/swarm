@@ -3,6 +3,7 @@ package runtime
 import (
 	"context"
 	"errors"
+	"reflect"
 	"sync"
 	"testing"
 
@@ -48,6 +49,20 @@ func TestManagerEffectiveIngressProjectionObservesSharedKeyOnceAndFencesRotation
 		owner *runtimecredentials.SnapshotOwner,
 	) ([]packs.Subject, error) {
 		return manager.EvaluatedCapabilitySubjects(ctx, owner)
+	})
+	t.Run("deployment subject retains structural requirement without account evidence", func(t *testing.T) {
+		catalog, source := runtimeAdmissionTestCatalog(t, "a", "deployment")
+		contextDef := runtimeAdmissionTestContext(t, source, catalog, uuid.NewString())
+		target := contextDef.StandingTargets[0]
+		base, err := target.CapabilitySubject()
+		if err != nil {
+			t.Fatal(err)
+		}
+		observed, validate, err := (&Runtime{}).evaluateRegisteredStandingIngress(t.Context(), target, base, nil)
+		if err != nil || validate != nil || !reflect.DeepEqual(observed, base) || observed.Status != packs.StatusAvailable ||
+			len(observed.Requirements) != 1 || observed.Requirements[0].Satisfied != nil || observed.TriggerAdmission.BindingEnabled != nil {
+			t.Fatalf("structural deployment subject=%+v validation=%t err=%v", observed, validate != nil, err)
+		}
 	})
 }
 

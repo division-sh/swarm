@@ -48,6 +48,20 @@ func TestNormalizeSubjectsOwnsEffectiveTriggerAdmissionShape(t *testing.T) {
 	if normalized[0].Status != StatusAvailable {
 		t.Fatalf("base effective trigger status = %q, want AVAILABLE while target binding is unevaluated", normalized[0].Status)
 	}
+	session := CloneSubjects([]Subject{base})[0]
+	session.TriggerAdmission.Transport, session.TriggerAdmission.RequestAuthentication = ChannelTransportSession, "SESSION_ACCOUNT"
+	session.Requirements = nil
+	session.Capabilities = []Capability{{Code: CapabilityReceiveSessionEvents, Target: "acme"}}
+	for _, state := range []struct {
+		enabled *bool
+		want    SubjectStatus
+	}{{nil, StatusAvailable}, {boolPointer(false), StatusNotReady}, {boolPointer(true), StatusReady}} {
+		session.TriggerAdmission.BindingEnabled = state.enabled
+		normalized, err = NormalizeSubjects([]Subject{session})
+		if err != nil || normalized[0].Status != state.want || len(normalized[0].Requirements) != 0 {
+			t.Fatalf("session structural/evaluated binding=%v subjects=%+v err=%v", state.enabled, normalized, err)
+		}
+	}
 
 	bound := base
 	bound.Requirements = []Requirement{RequirementWithStatus(RequirementSecret, "webhook_signing.acme", RequirementScopeTarget, RequirementStatusBound, "credential_store")}

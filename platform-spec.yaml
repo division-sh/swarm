@@ -11265,7 +11265,10 @@ tool_model:
       AVAILABLE: >
         Installed capability that is not effective in the current contract, or the immutable lifecycle-owned base projection
         of an effective provider-trigger target before read-time deployment credential evaluation. Source-bound preflight,
-        serve and prove surfaces evaluate effective target requirements and MUST NOT publish base AVAILABLE as readiness.
+        serve and prove surfaces evaluate effective target requirements and MUST NOT publish base AVAILABLE as readiness,
+        except that deployment-backed flow/provider subjects retain structural AVAILABLE with their declared requirement
+        and no account-derived evidence; their operational readiness is read per account from the existing account row's
+        state and reason in channel list and serve output, without changing either public schema.
         Source-free doctor retains target-free installed AVAILABLE inventory; structural verify/describe do not evaluate
         operational readiness, and default deployment verify retains its distinct scoped admission checks.
         Unimported connector actions are AVAILABLE and carry import remediation but MUST remain

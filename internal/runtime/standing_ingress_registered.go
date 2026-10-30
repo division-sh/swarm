@@ -2,7 +2,6 @@ package runtime
 
 import (
 	"context"
-	"errors"
 	"fmt"
 	"maps"
 	"reflect"
@@ -11,7 +10,6 @@ import (
 	"github.com/division-sh/swarm/internal/channelonboarding"
 	"github.com/division-sh/swarm/internal/packs"
 	"github.com/division-sh/swarm/internal/runtime/credentials"
-	"github.com/division-sh/swarm/internal/runtime/runlifecycle"
 	"github.com/division-sh/swarm/internal/runtime/semanticview"
 )
 
@@ -200,8 +198,8 @@ func (rt *Runtime) sealStandingCredentialBindings(ctx context.Context, bindings 
 	return projection, nil
 }
 
-// Source health aggregates the captured accounts; request admission above still
-// selects exactly one operation and never authenticates through this aggregate.
+// Deployment-backed subjects describe source structure only. Account rows own
+// readiness; request admission still selects one operation's frozen evidence.
 func (rt *Runtime) evaluateRegisteredStandingIngress(ctx context.Context, target StandingTarget, subject packs.Subject, presence *credentials.SecretBindingProjection) (packs.Subject, func(context.Context) error, error) {
 	expected, err := target.CapabilitySubject()
 	if err != nil {
@@ -211,67 +209,7 @@ func (rt *Runtime) evaluateRegisteredStandingIngress(ctx context.Context, target
 	if err != nil || len(normalized) != 1 || !reflect.DeepEqual(normalized[0], expected) {
 		return packs.Subject{}, nil, fmt.Errorf("registered ingress subject contradicts its source admission")
 	}
-	current := expected
-	current.Requirements = nil
-	current.Capabilities = slices.DeleteFunc(slices.Clone(expected.Capabilities), func(capability packs.Capability) bool {
-		return capability.Code == packs.CapabilityVerifySecret
-	})
-	rt.standingCredentialMu.Lock()
-	var selected []standingBindingCredentials
-	for _, binding := range rt.standingCredentialAdmission.bindings {
-		if binding.registered != nil && binding.registered.holder.Flow == target.FlowPath && binding.registered.operation.Provider == target.Provider {
-			selected = append(selected, binding)
-		}
-	}
-	rt.standingCredentialMu.Unlock()
-	if len(selected) == 0 {
-		return packs.Subject{}, nil, channelonboarding.ErrRevisionConflict
-	}
-	enabled := true
-	var validators []func(context.Context) error
-	for _, binding := range selected {
-		accountTarget := target
-		accountTarget.SigningSecret = binding.signingKey
-		accountSubject, err := accountTarget.CapabilitySubject()
-		if err != nil {
-			return packs.Subject{}, nil, err
-		}
-		observed, err := evaluateStandingIngressCapabilitySubject(ctx, accountTarget, accountSubject, presence)
-		if err != nil {
-			return packs.Subject{}, nil, err
-		}
-		_, _, validate, err := rt.standingIngressCredentialScope(InboundTarget{BundleHash: target.BundleHash, FlowPath: target.FlowPath,
-			RunID: binding.registered.holder.RunID, Alias: target.Alias, Provider: target.Provider,
-			SigningSecret: binding.signingKey, RegisteredOperationID: binding.operationID, AdmissionPlan: target.AdmissionPlan})
-		if err != nil {
-			return packs.Subject{}, nil, err
-		}
-		if err := validate(ctx); err != nil {
-			var stale *credentials.SecretBindingProjectionStaleError
-			if !errors.As(err, &stale) || len(selected) != 1 {
-				return packs.Subject{}, nil, err
-			}
-			enabled = false
-			current.TriggerAdmission.BindingBlockReason = string(runlifecycle.StandingBindingRecoveryRequired)
-			current.TriggerAdmission.RecoveryOperationID = binding.operationID
-			current.TriggerAdmission.RecoveryCommand = binding.recoveryCommand
-		}
-		validators = append(validators, validate)
-		current.Requirements = append(current.Requirements, observed.Requirements...)
-		current.Capabilities = append(current.Capabilities, packs.Capability{Code: packs.CapabilityVerifySecret, Target: binding.signingKey})
-	}
-	current.Status, current.TriggerAdmission.BindingEnabled = "", &enabled
-	if !enabled {
-		return current, nil, nil
-	}
-	return current, func(ctx context.Context) error {
-		for _, validate := range validators {
-			if err := validate(ctx); err != nil {
-				return err
-			}
-		}
-		return nil
-	}, nil
+	return expected, nil, nil
 }
 
 // RegisteredIngressCurrent observes the exact route/operation identity. Value

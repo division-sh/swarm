@@ -64,15 +64,16 @@ type RegistrationPair struct {
 }
 
 type RegistrationControllerOptions struct {
-	CredentialOwner   *runtimecredentials.SnapshotOwner
-	EffectsStore      runtimeeffects.Store
-	HTTP              runtimeregistration.HTTPExecutor
-	Posture           executionposture.Posture
-	RuntimeInstanceID string
-	StartupAuthority  func() (runtimestartupownership.GrantEvidence, error)
-	SelectionCurrent  func(context.Context, RegistrationPair, bool) (bool, error)
-	Readiness         *ReadinessOwner
-	Now               func() time.Time
+	CredentialOwner     *runtimecredentials.SnapshotOwner
+	EffectsStore        runtimeeffects.Store
+	HTTP                runtimeregistration.HTTPExecutor
+	Posture             executionposture.Posture
+	RuntimeInstanceID   string
+	StartupAuthority    func() (runtimestartupownership.GrantEvidence, error)
+	SelectionCurrent    func(context.Context, RegistrationPair, bool) (bool, error)
+	EnrollmentAdmission func(context.Context, channelonboarding.AccountReference) error
+	Readiness           *ReadinessOwner
+	Now                 func() time.Time
 }
 
 type ProviderRegistrationController struct {
@@ -475,6 +476,9 @@ func (c *ProviderRegistrationController) admitAndIdentify(ctx context.Context, e
 		return admittedPair{}, err
 	}
 	resourceID := strings.TrimSpace(fmt.Sprint(projected["resource_id"]))
+	if err := c.admitRuntimeEnrollment(ctx, pair, resourceID); err != nil {
+		return admittedPair{}, err
+	}
 	if pair.ActivationSource == channelonboarding.ActivationSourceRegistered &&
 		(resourceID != pair.OperatorAccount || (channelonboarding.AccountReference{Provider: pair.Target.Provider, Account: pair.OperatorAccount}).Validate() != nil) {
 		return admittedPair{}, channelonboarding.ErrConflict
@@ -757,6 +761,12 @@ func (c *ProviderRegistrationController) revalidateCredentials(ctx context.Conte
 	if err := c.requireSelectionCurrent(ctx, candidate.pair); err != nil {
 		return err
 	}
+	if candidate.slotID != "" {
+		prefix := candidate.pair.Registration.Provider() + ":" + candidate.pair.Registration.SlotNamespace() + ":"
+		if err := c.admitRuntimeEnrollment(ctx, candidate.pair, strings.TrimPrefix(candidate.slotID, prefix)); err != nil {
+			return err
+		}
+	}
 	for logical, admitted := range candidate.provider {
 		current, err := c.opts.CredentialOwner.Observe(ctx, admitted.Key)
 		if err != nil {
@@ -774,6 +784,13 @@ func (c *ProviderRegistrationController) revalidateCredentials(ctx context.Conte
 		return fmt.Errorf("provider registration signing credential changed before launch")
 	}
 	return nil
+}
+
+func (c *ProviderRegistrationController) admitRuntimeEnrollment(ctx context.Context, pair RegistrationPair, account string) error {
+	if pair.PrebindingOperationID == "" || pair.Target.Provider != "telegram" || c.opts.EnrollmentAdmission == nil {
+		return nil
+	}
+	return c.opts.EnrollmentAdmission(ctx, channelonboarding.AccountReference{Provider: pair.Target.Provider, Account: account})
 }
 
 func (c *ProviderRegistrationController) requireSelectionCurrent(ctx context.Context, pair RegistrationPair) error {
