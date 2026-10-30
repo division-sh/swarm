@@ -6953,6 +6953,7 @@ func Test2376DirectoryBootUsesExactSelectedStoreSource(t *testing.T) {
 				_, _, selected := installServeRuntimePostgresTestStores(t, func() cliapp.ServeWorkspaceLifecycle {
 					return serveRuntimeWorkspaceStub{bundleScopes: &workspaceBundleScopes}
 				})
+				storetest.BootstrapPostgresRuntimeStore(t, selected)
 				opts.ConfigPath = writeStoreBackendRuntimeConfig(t, backend.String(), "")
 				if _, err := selected.EnsureSourceArtifactWithData(serveFixtureProcessContext(t, context.Background(), selected), bundle.SourceArtifact, catalog); err != nil {
 					t.Fatalf("persist PostgreSQL source artifact: %v", err)
