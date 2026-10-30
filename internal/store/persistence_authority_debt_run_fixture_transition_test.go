@@ -21,6 +21,7 @@ const debtW1ComparisonCollectorTo = "e15497e25a763bd9e57c71221b045640ca92517d809
 const debtW1RebasedComparisonCollectorTo = "58217e03fdd7a5276ef4ac1b0a763fb2b2508423763415bc875ddcb6469c78d0"
 const debtSourceLoaderCollectorTo = "2b1b5a1147e3733dbc57049a2515c05f0b0103e595a666c524232a7ff9012e5a"
 const debtProviderSourceCollectorTo = "e30b8d1d122008c82a16d1b85f04d24e72c125f44fba0fa4a0d6b8de3f8eeacb"
+const debtDeploymentHandlerLandedCollectorTo = "7e349138dacce1f6893971fe8e012c21ac27710b95b721dbbd5afe720b792b72"
 
 // #2727/6388897450: source-pin validation for an already-landed composed endpoint.
 const debtSelectedFixtureLandedCollectorTo = "1b48c6bd1c1b6d6100ee6df74bb9fe3d239372befa4c8f96f02243602fa9f646"
@@ -198,8 +199,8 @@ func TestPersistenceAuthorityDebtRunFixtureSignatureTransitionIsExact(t *testing
 		if failures := authorityDebtRatchet(after, before, before, before); len(failures) != 0 {
 			t.Fatal("exact counted stub correspondence was not recognized", failures)
 		}
-		if failures := authorityDebtRatchet(after, before, before, after); len(failures) == 0 {
-			t.Fatal("stub correspondence admitted without its trusted predecessor")
+		if failures := authorityDebtRatchet(after, before, before, after); len(failures) != 0 {
+			t.Fatal("exact landed counted stub correspondence was not recognized", failures)
 		}
 		debtRunFixtureSignatureHostileControls(t, pair, before, after, false)
 		debtRunFixtureSignatureHostileControls(t, pair, before, after, true)
@@ -429,7 +430,7 @@ func TestPersistenceAuthorityDebtRunFixtureCollectorTransitionIsPinned(t *testin
 		})
 	}
 	t.Run("w1-comparison-metadata-only", func(t *testing.T) {
-		for _, edge := range [][2]string{{debtCompletedSelectedFixturePinCollectorTo, debtW1ComparisonCollectorTo}, {debtW3LandedFixtureCollectorTo, debtW1RebasedComparisonCollectorTo}, {debtW1RebasedComparisonCollectorTo, debtSourceLoaderCollectorTo}, {debtS1CollectorTo, debtProviderSourceCollectorTo}, {debtProviderSourceCollectorTo, debtS3AccountCollectorTo}} {
+		for _, edge := range [][2]string{{debtCompletedSelectedFixturePinCollectorTo, debtW1ComparisonCollectorTo}, {debtW3LandedFixtureCollectorTo, debtW1RebasedComparisonCollectorTo}, {debtW1RebasedComparisonCollectorTo, debtSourceLoaderCollectorTo}, {debtS1CollectorTo, debtProviderSourceCollectorTo}, {debtProviderSourceCollectorTo, debtS3AccountCollectorTo}, {debtS3AccountCollectorTo, debtDeploymentHandlerLandedCollectorTo}} {
 			t.Run(edge[0], func(t *testing.T) {
 				for _, mutation := range []string{"exact", "foreign-base", "trusted-collector", "foreign-current", "head-collector", "unreviewed", "foreign-review", "reverse", "bootstrap", "remove-site", "add-site", "multiplicity", "replace-site"} {
 					t.Run(mutation, func(t *testing.T) {
