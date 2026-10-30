@@ -275,6 +275,7 @@ func requireDefaultSourceArtifactForTest(t testing.TB, ctx context.Context, sele
 	if !ok {
 		t.Fatalf("default source artifact fixture requires rooted source writer, got %T", selected)
 	}
+	ctx = originalStoreFixtureContext(t, ctx, selected)
 	rooted, _ := sourceartifactfixture.Rooted(t, "fixture", sourceartifactfixture.Artifact())
 	ctx = runtimecorrelation.WithRootAdmission(ctx, rooted.Admission())
 	if _, err := writer.EnsureRootedSource(ctx, rooted); err != nil {
