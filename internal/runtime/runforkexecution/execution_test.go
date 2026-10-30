@@ -5412,7 +5412,7 @@ func seedSelectedExecutionSourceRunWithPrimaryRouteModeAndSource(
 		runtimeauthoractivity.BundleScope(runForkTestRuntimeInstanceID, sourceFact.BundleHash()),
 	)
 	ctx = originalSelectedFixtureContext(t, ctx, selected)
-	admitSelectedExecutionSourceArtifact(t, ctx, selected, db, sourceFact.BundleHash())
+	admitSelectedExecutionSourceArtifact(t, ctx, db, sourceFact.BundleHash())
 	payload, _ := json.Marshal(map[string]any{"entity_id": entityID})
 	if len(input.payload) != 0 {
 		payload = input.payload
@@ -5458,8 +5458,9 @@ func seedSelectedExecutionSourceRunWithPrimaryRouteModeAndSource(
 	return event
 }
 
-func admitSelectedExecutionSourceArtifact(t testing.TB, ctx context.Context, selected *store.PostgresStore, db *sql.DB, bundleHash string) {
+func admitSelectedExecutionSourceArtifact(t testing.TB, ctx context.Context, db *sql.DB, bundleHash string) {
 	t.Helper()
+	selected := storetest.AdmitPostgresRuntimeStore(t, db)
 	ctx = nativeRunForkTestContext(t, ctx, selected)
 	if artifact := selectedExecutionSourceArtifactIfKnown(t, bundleHash); artifact != nil {
 		if _, err := selected.EnsureSourceArtifact(ctx, artifact); err != nil {
