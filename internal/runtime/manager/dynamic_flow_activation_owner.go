@@ -121,6 +121,9 @@ func (am *AgentManager) beginDynamicFlowActiveAttempt(
 			if err := am.workflowInstances.VerifyDynamicFlowRuntimeActivationAttempt(ctx, previous.receipt); err == nil {
 				return previous, false, nil
 			} else if !errors.Is(err, runtimepipeline.ErrFlowAttachmentStale) {
+				if am.cleanReadinessShutdownReadCancellation(ctx, err) {
+					return previous, false, err
+				}
 				return nil, false, err
 			}
 		} else {
