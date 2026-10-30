@@ -193,7 +193,9 @@ func runMockAgentSupportedSurface(t *testing.T, backend string) time.Duration {
 	second.waitForReadyLine()
 	secondURL := "http://" + serveRuntimeAPIListenerFromOutput(t, second.outputString())
 	waitForMockConnectorAttempts(t, backend, location, 1)
-	if got := publishStandingMockInput(t, secondURL, bundleHash, 302, 42); got.RunID != normalized.RunID || got.Deliveries[0].Target != normalized.Deliveries[0].Target {
+	if got := publishStandingMockInput(t, secondURL, bundleHash, 302, 42); got.RunID != normalized.RunID ||
+		got.Deliveries[0].Target.EntityID != entityID || got.Deliveries[0].Target.FlowID != normalized.Deliveries[0].Target.FlowID ||
+		got.Deliveries[0].Target.FlowInstance != normalized.Deliveries[0].Target.FlowInstance {
 		t.Fatalf("post-restart mock input changed its exact run/entity: %+v, want %+v", got, normalized)
 	}
 	waitForMockAgentTurns(t, backend, location, 2)
