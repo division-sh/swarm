@@ -36,14 +36,15 @@ func TestLifecycleDiagnosticDisjointSourcesIgnoreAmbientAuthority(t *testing.T) 
 			for _, sourceName := range []string{"diagnostic-source-left", "diagnostic-source-right"} {
 				artifact := storeTestSourceArtifact(sourceName)
 				rooted, _ := sourceartifactfixture.Rooted(t, sourceName, artifact)
-				sourceartifactfixture.RequireArtifact(t, context.Background(), selected, rooted.Artifact())
+				owned := runtimecorrelation.WithRootAdmission(testAuthorActivityContextForBundle(artifact.BundleHash()), rooted.Admission())
+				owned = originalStoreFixtureContext(t, owned, selected)
+				sourceartifactfixture.RequireArtifact(t, owned, selected, rooted.Artifact())
 				source := mustStoreTestSourceArtifactFact(artifact.BundleHash())
 				runID := uuid.NewString()
 				identity := mustTestAgentIdentityForRun(runID, "same-worker", "global")
 				config := testOperatorAgentConfigForIdentity(identity, "worker")
 				config.ExecutionMode = executionmode.Live
 				config = withRuntimePersistenceTestIntent(t, config)
-				owned := runtimecorrelation.WithRootAdmission(testAuthorActivityContextForBundle(artifact.BundleHash()), rooted.Admission())
 				if err := agentfixture.UpsertStaticForSource(t, owned, selected, runtimemanager.PersistedAgent{
 					Config: config, Status: "active", StartedAt: time.Now().UTC(),
 				}, source); err != nil {

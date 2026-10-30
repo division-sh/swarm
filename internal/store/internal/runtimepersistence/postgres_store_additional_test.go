@@ -171,7 +171,7 @@ func TestPostgresStore_NormalCompletionUsesCanonicalCountersAndRejectsActiveDeli
 	runID := uuid.NewString()
 	entityID := uuid.NewString()
 	eventID := uuid.NewString()
-	requireRunFixtureForTest(t, ctx, newPostgresStoreWithBackend(mustPostgresBackend(db)), semanticRunFixture{Origin: semanticScenarioSetupRunOriginForTest(), RunID: runID})
+	requireRunFixtureForTest(t, ctx, pg, semanticRunFixture{Origin: semanticScenarioSetupRunOriginForTest(), RunID: runID})
 	seedPostgresStoreEvent(t, ctx, pg, eventID, runID, "scan.requested", events.EventProducerPlatform, "builder", entityID, "", time.Now().UTC())
 	seedPostgresEntityStateRows(t, db, ctx, runID, entityID)
 	seedWorkflowHeaderProjectionFixture(t, ctx, db, runID, entityID, "test-flow", "test-flow", "default", "ready", "{}", time.Now().UTC())
@@ -218,8 +218,8 @@ func TestPostgresStore_NormalCompletionUsesCanonicalCountersAndRejectsActiveDeli
 	`, runID).Scan(&status, &eventCount, &entityCount, &endedAt); err != nil {
 		t.Fatalf("load run row: %v", err)
 	}
-	if status != "running" {
-		t.Fatalf("run status = %q, want running after instance finish", status)
+	if status != "completed" {
+		t.Fatalf("run status = %q, want completed after finite scenario settlement", status)
 	}
 	if eventCount != 1 {
 		t.Fatalf("event_count = %d, want 1", eventCount)
@@ -227,8 +227,8 @@ func TestPostgresStore_NormalCompletionUsesCanonicalCountersAndRejectsActiveDeli
 	if entityCount != 1 {
 		t.Fatalf("entity_count = %d, want 1", entityCount)
 	}
-	if endedAt.Valid {
-		t.Fatal("instance finish ended its run")
+	if !endedAt.Valid {
+		t.Fatal("settled finite scenario has no end time")
 	}
 }
 

@@ -317,6 +317,7 @@ func enqueueDiagnosticTestIdentity(t *testing.T, selected diagnosticProjectionTe
 	req := diagnosticTestTransition(t, identity, origin, mode)
 	rooted, _ := sourceartifactfixture.Rooted(t, "fixture", sourceartifactfixture.Artifact())
 	ctx := runtimecorrelation.WithRootAdmission(testAuthorActivityContext(), rooted.Admission())
+	ctx = originalStoreFixtureContext(t, ctx, selected)
 	if _, err := selected.EnsureRootedSource(ctx, rooted); err != nil {
 		t.Fatal(err)
 	}
