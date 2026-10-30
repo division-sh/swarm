@@ -360,37 +360,6 @@ func completeRunLifecycleCandidateParity(
 	return snapshot, disposition, err
 }
 
-func loadRunLifecycleCandidateFacts(
-	t *testing.T,
-	fixture runLifecycleCandidateParityFixture,
-	ctx context.Context,
-	runID string,
-) (string, bool, int64) {
-	t.Helper()
-	query := `SELECT status, completion_due_at, completion_revision FROM runs WHERE run_id = ?`
-	if fixture.postgres {
-		query = `SELECT status, completion_due_at, completion_revision FROM runs WHERE run_id = $1::uuid`
-	}
-	var state string
-	var revision int64
-	if fixture.postgres {
-		var dueAt sql.NullTime
-		if err := fixture.db.QueryRowContext(ctx, query, runID).Scan(&state, &dueAt, &revision); err != nil {
-			t.Fatalf("load run lifecycle candidate facts: %v", err)
-		}
-		return state, dueAt.Valid, revision
-	}
-	var dueAt any
-	if err := fixture.db.QueryRowContext(ctx, query, runID).Scan(&state, &dueAt, &revision); err != nil {
-		t.Fatalf("load run lifecycle candidate facts: %v", err)
-	}
-	_, present, err := sqliteTimeValue(dueAt)
-	if err != nil {
-		t.Fatalf("decode run lifecycle candidate due_at: %v", err)
-	}
-	return state, present, revision
-}
-
 func loadRunLifecycleOriginFacts(
 	t *testing.T,
 	fixture runLifecycleCandidateParityFixture,

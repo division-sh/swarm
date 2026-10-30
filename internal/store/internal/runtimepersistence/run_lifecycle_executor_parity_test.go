@@ -4,7 +4,6 @@ import (
 	"context"
 
 	"errors"
-	"runtime"
 
 	"testing"
 	"time"
@@ -12,7 +11,6 @@ import (
 	worklifetime "github.com/division-sh/swarm/internal/runtime/core/worklifetime"
 
 	runtimepipelineobligation "github.com/division-sh/swarm/internal/runtime/pipelineobligation"
-	runtimerunlifecycle "github.com/division-sh/swarm/internal/runtime/runlifecycle"
 
 	"github.com/google/uuid"
 )
@@ -120,26 +118,6 @@ func newRunLifecycleExecutorOccurrenceForBundle(
 		t.Fatalf("create candidate runtime occurrence: %v", err)
 	}
 	return occurrence
-}
-
-func awaitRunLifecycleState(
-	t *testing.T,
-	store runLifecycleCandidateParityStore,
-	runID string,
-	want runtimerunlifecycle.State,
-) {
-	t.Helper()
-	deadline := time.Now().Add(5 * time.Second)
-	for {
-		snapshot, err := store.LoadRunLifecycleSnapshot(context.Background(), runID)
-		if err == nil && snapshot.Status == string(want) {
-			return
-		}
-		if time.Now().After(deadline) {
-			t.Fatalf("run state = %#v/%v, want %s", snapshot, err, want)
-		}
-		runtime.Gosched()
-	}
 }
 
 func retireRunLifecycleExecutorOccurrence(t *testing.T, occurrence *worklifetime.RuntimeOccurrence) {

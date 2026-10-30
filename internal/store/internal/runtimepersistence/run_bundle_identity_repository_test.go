@@ -213,11 +213,3 @@ func readRepositoryFile(t *testing.T, path string) string {
 	}
 	return string(data)
 }
-
-func normalizedSQLColumns(raw string) map[string]bool {
-	columns := map[string]bool{}
-	for _, column := range strings.Split(raw, ",") {
-		columns[strings.ToLower(strings.TrimSpace(column))] = true
-	}
-	return columns
-}
