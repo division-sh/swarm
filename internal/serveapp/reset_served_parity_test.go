@@ -149,7 +149,8 @@ func TestServedResetRetainClearAndHistoricalReplayBothStores(t *testing.T) {
 				}
 				// The domain receipt must survive transport-cache expiry even
 				// after later real runtime work has completed.
-				expireServedResetTransportCache(t, proof, supervisor.processCapability)
+				proof.ProcessCapability = supervisor.processCapability
+				expireServedResetTransportCache(t, proof)
 				for i := 0; i < 2; i++ {
 					replay := requestServedJSONRPC(t, proof.Endpoint, "runtime.nuke", params)
 					if replay.Error != nil {
@@ -222,7 +223,8 @@ func TestServedResetCLIDryRunApplyAndReplayBothStores(t *testing.T) {
 					t.Fatalf("apply retained %s: count=%d err=%v", table, count, err)
 				}
 			}
-			expireServedResetTransportCache(t, proof, supervisor.processCapability)
+			proof.ProcessCapability = supervisor.processCapability
+			expireServedResetTransportCache(t, proof)
 			replayed, stderr, code := runServedCLICommand(t, proof.Endpoint, args)
 			if code != 0 || stderr != "" || replayed != stdout {
 				t.Fatalf("replay: exit=%d stderr=%q\nfirst=%s\nreplay=%s", code, stderr, stdout, replayed)
@@ -234,7 +236,7 @@ func TestServedResetCLIDryRunApplyAndReplayBothStores(t *testing.T) {
 	}
 }
 
-func expireServedResetTransportCache(t *testing.T, proof servedControlProofRuntime, process startupownership.ProcessCapability) {
+func expireServedResetTransportCache(t *testing.T, proof servedControlProofRuntime) {
 	t.Helper()
 	var owner apiv1.APIIdempotencyStore = proof.Postgres
 	if proof.Backend == "sqlite" {
@@ -242,7 +244,7 @@ func expireServedResetTransportCache(t *testing.T, proof servedControlProofRunti
 	}
 	// Exercise the cache owner's expiry transaction, rather than racing a raw
 	// fixture DELETE against the selected runtime's SQLite write owner.
-	ctx, err := startupownership.WithProcessMutationAuthority(t.Context(), process)
+	ctx, err := startupownership.WithProcessMutationAuthority(t.Context(), proof.ProcessCapability)
 	if err != nil {
 		t.Fatal(err)
 	}

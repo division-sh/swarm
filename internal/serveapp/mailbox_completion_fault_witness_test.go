@@ -117,7 +117,7 @@ func installMailboxCompletionFaultWitness(t *testing.T, rt servedControlProofRun
 	if rt.Postgres != nil {
 		selected = rt.Postgres
 	}
-	ctx := servedControlProofAuthorActivityContext(t, rt)
+	ctx := servedRuntimeProofAuthorActivityContext(t, rt.Runtime, rt.BundleHash)
 	if err := storetest.SetMailboxCompletionInsertFault(ctx, selected, key, id, true); err != nil {
 		t.Fatal(err)
 	}

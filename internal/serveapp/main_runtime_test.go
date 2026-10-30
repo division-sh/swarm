@@ -1266,6 +1266,7 @@ func TestServedParityHarnessConversationForkLifecycle(t *testing.T) {
 }
 
 type servedControlProofRuntime struct {
+	ProcessCapability   runtimestartupownership.ProcessCapability
 	Endpoint            string
 	DB                  *sql.DB
 	Backend             string
