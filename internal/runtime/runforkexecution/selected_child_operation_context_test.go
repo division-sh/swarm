@@ -104,6 +104,7 @@ func selectedForkChildContextProof(t *testing.T, parent context.Context, selecte
 	}
 	foreignStore := storetest.StartSQLiteRuntimeStore(t)
 	foreignCtx := correlation.WithRootAdmission(correlation.WithSourceArtifactFact(runForkTestContext(t), source), root)
+	foreignCtx = originalSelectedFixtureContext(t, foreignCtx, foreignStore)
 	if _, err := foreignStore.EnsureRootedSource(foreignCtx, rooted); err != nil {
 		t.Fatal(err)
 	}

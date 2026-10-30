@@ -218,6 +218,7 @@ func admittedAPITestBusContext(t testing.TB, ctx context.Context, bus *runtimebu
 
 func admittedAPICompiledSourceContext(t *testing.T, ctx context.Context, selected runtimebus.EventStore, source semanticview.Source) context.Context {
 	t.Helper()
+	ctx = originalAPIFixtureContext(t, ctx, selected)
 	bundle, ok := semanticview.Bundle(source)
 	if !ok {
 		t.Fatal("API fixture requires its compiled captured source")
