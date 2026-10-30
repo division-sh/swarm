@@ -557,15 +557,15 @@ func (pc *PipelineCoordinator) InstallFanOutWorkNotifier(notifier FanOutWorkNoti
 
 func (pc *PipelineCoordinator) expireHumanTaskCards(ctx context.Context, expiry HumanTaskExpiry, now time.Time, limit int) error {
 	if pc == nil || pc.workflowStore == nil || !pc.workflowStore.enabled() {
-		return errors.New("human-task expiry requires the selected workflow store")
+		return humanTaskExpiryFailure("workflow_store", errors.New("human-task expiry requires the selected workflow store"))
 	}
 	planner, ok := pc.bus.(EnginePublicationPlanner)
 	if !ok {
-		return errors.New("human-task expiry requires the publication planner")
+		return humanTaskExpiryFailure("publication_planner", errors.New("human-task expiry requires the publication planner"))
 	}
 	expiredEvents, err := expiry.ListDueHumanTaskExpiryEvents(ctx, now, limit)
 	if err != nil || len(expiredEvents) == 0 {
-		return err
+		return humanTaskExpiryFailure("list", err)
 	}
 	intents := make([]runtimeengine.EmitIntent, 0, len(expiredEvents))
 	for _, event := range expiredEvents {
@@ -573,32 +573,32 @@ func (pc *PipelineCoordinator) expireHumanTaskCards(ctx context.Context, expiry 
 	}
 	plans, err := planner.PrepareEnginePublications(ctx, intents)
 	if err != nil {
-		return err
+		return humanTaskExpiryFailure("prepare", err)
 	}
 	if len(plans) != len(intents) {
 		releaseErr := planner.ReleaseEnginePublications(context.WithoutCancel(ctx), plans)
-		return errors.Join(fmt.Errorf("human-task expiry planner returned %d plans for %d events", len(plans), len(intents)), releaseErr)
+		return humanTaskExpiryFailure("plan_count", errors.Join(fmt.Errorf("human-task expiry planner returned %d plans for %d events", len(plans), len(intents)), releaseErr))
 	}
 	committed, err := expiry.CommitHumanTaskExpirations(ctx, HumanTaskExpiryCommand{ObservedAt: now, Limit: limit, Publications: plans})
 	if !committed.Acknowledged {
 		if err == nil {
 			err = errors.New("human-task expiry was not acknowledged")
 		}
-		return errors.Join(err, planner.ReleaseEnginePublications(context.WithoutCancel(ctx), plans))
+		return humanTaskExpiryFailure("commit", errors.Join(err, planner.ReleaseEnginePublications(context.WithoutCancel(ctx), plans)))
 	}
 	if validateErr := committed.Validate(); validateErr != nil {
-		return errors.Join(err, validateErr)
+		return humanTaskExpiryFailure("validate_commit", errors.Join(err, validateErr))
 	}
-	err = errors.Join(err, planner.FinalizeEnginePublications(ctx, committed.Publications))
+	err = errors.Join(humanTaskExpiryFailure("commit", err), humanTaskExpiryFailure("finalize", planner.FinalizeEnginePublications(ctx, committed.Publications)))
 	dispatcher := pc.bus.EngineDispatcher()
 	if dispatcher == nil {
-		return errors.Join(err, errors.New("human-task expiry requires post-commit dispatcher"))
+		return errors.Join(err, humanTaskExpiryFailure("dispatcher", errors.New("human-task expiry requires post-commit dispatcher")))
 	}
 	committedIntents := make([]runtimeengine.EmitIntent, 0, len(committed.Publications))
 	for _, publication := range committed.Publications {
 		committedIntents = append(committedIntents, publication.CommittedDurablePublicationIntent())
 	}
-	return errors.Join(err, dispatcher.DispatchPostCommit(context.WithoutCancel(ctx), committedIntents))
+	return errors.Join(err, humanTaskExpiryFailure("dispatch", dispatcher.DispatchPostCommit(context.WithoutCancel(ctx), committedIntents)))
 }
 
 func (pc *PipelineCoordinator) Intercept(ctx context.Context, evt events.Event) (bool, []events.Event, runtimepipelineobligation.ExecutionOutcome, error) {

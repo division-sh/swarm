@@ -344,10 +344,11 @@ func TestHumanTaskExpiryAndRunSupersessionParity(t *testing.T) {
 			due, dueContinuation := newHumanTaskDecisionCardTestFixture(t, runID, "expires", now, 0, now.Add(time.Hour))
 			due.ExecutionMode = executionmode.Mock
 			pending, pendingContinuation := newHumanTaskDecisionCardTestFixture(t, runID, "run-terminal", now.Add(time.Minute), 0, now.Add(24*time.Hour))
+			unplanned, unplannedContinuation := newHumanTaskDecisionCardTestFixture(t, runID, "not-in-planned-expiry", now, 0, now.Add(90*time.Minute))
 			for _, item := range []struct {
 				card         decisioncard.Card
 				continuation decisioncard.HumanTaskContinuation
-			}{{due, dueContinuation}, {pending, pendingContinuation}} {
+			}{{due, dueContinuation}, {pending, pendingContinuation}, {unplanned, unplannedContinuation}} {
 				if err := humanStore.CreateHumanTaskCard(ctx, item.card, item.continuation); err != nil {
 					t.Fatalf("CreateHumanTaskCard %s: %v", item.card.CardID, err)
 				}
@@ -372,14 +373,14 @@ func TestHumanTaskExpiryAndRunSupersessionParity(t *testing.T) {
 
 			expiryAt := now.Add(2 * time.Hour).Add(789 * time.Nanosecond)
 			wantExpiryAt := decisioncard.CanonicalTimestamp(expiryAt)
-			expiredEvents := expireHumanTaskCardsInTestMutation(t, ctx, cardStore, expiryAt, 10)
+			expiredEvents := expireHumanTaskCardsInTestMutation(t, ctx, cardStore, expiryAt, 10, due.CardID)
 			if len(expiredEvents) != 1 || expiredEvents[0].ID() == "" || expiredEvents[0].Type() != events.EventType("mailbox.card_expired") {
 				t.Fatalf("ExpireHumanTaskCardsInMutation events = %#v", expiredEvents)
 			}
 			if expiredEvents[0].ExecutionMode() != executionmode.Mock {
 				t.Fatalf("expired event execution mode = %q, want mock", expiredEvents[0].ExecutionMode())
 			}
-			if replayed := expireHumanTaskCardsInTestMutation(t, ctx, cardStore, expiryAt, 10); len(replayed) != 0 {
+			if replayed := expireHumanTaskCardsInTestMutation(t, ctx, cardStore, expiryAt, 10, due.CardID); len(replayed) != 0 {
 				t.Fatalf("replayed ExpireHumanTaskCardsInMutation events = %#v", replayed)
 			}
 			expiredCard, err := cardStore.GetDecisionCard(ctx, due.CardID)
@@ -389,6 +390,14 @@ func TestHumanTaskExpiryAndRunSupersessionParity(t *testing.T) {
 			expiredContinuation, err := humanStore.LoadHumanTaskContinuation(ctx, due.CardID)
 			if err != nil || expiredContinuation.State != decisioncard.HumanTaskContinuationExpired || expiredContinuation.DeferCause != "deadline_elapsed" || expiredContinuation.OutcomeEventID == "" || !expiredContinuation.UpdatedAt.Equal(wantExpiryAt) {
 				t.Fatalf("expired continuation = %#v, %v", expiredContinuation, err)
+			}
+			unplannedCard, err := cardStore.GetDecisionCard(ctx, unplanned.CardID)
+			if err != nil || unplannedCard.Status != decisioncard.StatusPending || !unplannedCard.DecidedAt.IsZero() {
+				t.Fatalf("expiry mutated an unplanned due card: %#v, %v", unplannedCard, err)
+			}
+			unplannedAfter, err := humanStore.LoadHumanTaskContinuation(ctx, unplanned.CardID)
+			if err != nil || unplannedAfter.State != decisioncard.HumanTaskContinuationPending || unplannedAfter.OutcomeEventID != "" {
+				t.Fatalf("expiry emitted an unplanned outcome: %#v, %v", unplannedAfter, err)
 			}
 
 			supersededAt := now.Add(3 * time.Hour).Add(789 * time.Nanosecond)
@@ -411,26 +420,26 @@ func TestHumanTaskExpiryAndRunSupersessionParity(t *testing.T) {
 	}
 }
 
-func expireHumanTaskCardsInTestMutation(t *testing.T, ctx context.Context, cardStore decisioncard.Store, at time.Time, limit int) []events.Event {
+func expireHumanTaskCardsInTestMutation(t *testing.T, ctx context.Context, cardStore decisioncard.Store, at time.Time, limit int, cardIDs ...string) []events.Event {
 	t.Helper()
-	eventsOut, mutationErr := expireHumanTaskCardsInTestMutationResult(ctx, cardStore, at, limit)
+	eventsOut, mutationErr := expireHumanTaskCardsInTestMutationResult(ctx, cardStore, at, limit, cardIDs...)
 	if mutationErr != nil {
 		t.Fatalf("expire human-task cards: %v", mutationErr)
 	}
 	return eventsOut
 }
 
-func expireHumanTaskCardsInTestMutationResult(ctx context.Context, cardStore decisioncard.Store, at time.Time, limit int) ([]events.Event, error) {
+func expireHumanTaskCardsInTestMutationResult(ctx context.Context, cardStore decisioncard.Store, at time.Time, limit int, cardIDs ...string) ([]events.Event, error) {
 	switch selected := cardStore.(type) {
 	case *PostgresStore:
 		result := mutationprotocol.RunPostgres(ctx, selected.backend, mutationprotocol.Story, mutationprotocol.Ordinary, nil, nil, func(txctx context.Context, attempt *mutationprotocol.Attempt) ([]events.Event, error) {
-			return selected.decisionPostgresOwner.ExpireHumanTasksTx(txctx, attempt, at, limit)
+			return selected.decisionPostgresOwner.ExpireHumanTasksTx(txctx, attempt, at, limit, cardIDs)
 		})
 		value, _ := result.Value()
 		return value, result.Err()
 	case *SQLiteRuntimeStore:
 		result := mutationprotocol.RunSQLite(ctx, selected.backend, "sqlite human-task expiry fixture", mutationprotocol.Story, mutationprotocol.Ordinary, nil, nil, func(txctx context.Context, attempt *mutationprotocol.Attempt) ([]events.Event, error) {
-			return selected.decisionSQLiteOwner.ExpireHumanTasksTx(txctx, attempt, at, limit)
+			return selected.decisionSQLiteOwner.ExpireHumanTasksTx(txctx, attempt, at, limit, cardIDs)
 		})
 		value, _ := result.Value()
 		return value, result.Err()
