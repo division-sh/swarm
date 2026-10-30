@@ -637,7 +637,6 @@ func TestStandingRestartMixedHealthyAndTerminalProcessParity(t *testing.T) {
 			second := startServeRuntimeTestProcess(t, opts)
 			second.waitForReadyLine()
 			_ = waitForStandingRuntime(t, runtimes, backend, "restart")
-			secondOutput := second.outputString()
 			if binding := sendStandingTelegramUpdate(t, native, 302, 84); binding.RunID != healthyRun {
 				t.Fatalf("%s healthy standing service returned wrong binding after restart: %+v", backend, binding)
 			}
