@@ -652,28 +652,7 @@ func (p *serveLifecyclePresenter) writeConciseReadyLocked(facts serveLifecycleRe
 	if len(facts.Standing) > 0 {
 		fmt.Fprintln(p.out)
 	}
-	p.writeStandingIngressLocked(facts.Standing)
-	for _, account := range facts.Accounts {
-		provider := account.Provider
-		switch provider {
-		case "whatsapp":
-			provider = "WhatsApp"
-		case "telegram":
-			provider = "Telegram"
-		}
-		label := provider + " " + account.Account
-		if len(account.Holders) == 1 {
-			label += " (" + account.Holders[0].Flow + ")"
-		}
-		state := account.State
-		if state == "live" {
-			state = "connected"
-		}
-		if account.Reason != "" {
-			state += ": " + account.Reason
-		}
-		fmt.Fprintf(p.out, "  %s: %s\n", label, state)
-	}
+	p.writeStandingIngressLocked(facts.Standing, facts.Accounts)
 	fmt.Fprintln(p.out)
 }
 
@@ -726,7 +705,7 @@ func (p *serveLifecyclePresenter) writeResolvedFactsLocked(facts serveLifecycleR
 		p.writeResolvedFactLocked("recovery action", serveLifecycleNoticeDetail(notice))
 	}
 	if p.verbose {
-		p.writeStandingIngressLocked(facts.Standing)
+		p.writeStandingIngressLocked(facts.Standing, facts.Accounts)
 	}
 }
 
@@ -783,10 +762,9 @@ func (p *serveLifecyclePresenter) recoveryDetailLocked() (string, string) {
 	}
 }
 
-func (p *serveLifecyclePresenter) writeStandingIngressLocked(facts []serveLifecycleIngressFact) {
+func (p *serveLifecyclePresenter) writeStandingIngressLocked(facts []serveLifecycleIngressFact, accounts []channelonboarding.AccountStatus) {
 	if len(facts) == 0 {
 		fmt.Fprintln(p.out, "  standing ingress           none configured")
-		return
 	}
 	sorted := append([]serveLifecycleIngressFact(nil), facts...)
 	sort.Slice(sorted, func(i, j int) bool {
@@ -805,6 +783,27 @@ func (p *serveLifecyclePresenter) writeStandingIngressLocked(facts []serveLifecy
 		}
 		fmt.Fprintf(p.out, "  %-27s %s\n", strings.TrimSpace(fact.Provider)+label, strings.TrimSpace(fact.URL))
 		fmt.Fprintf(p.out, "  %-27s %s\n", "capability", packs.RenderEffectiveTriggerReadiness(fact.Subject))
+	}
+	for _, account := range accounts {
+		provider := account.Provider
+		switch provider {
+		case "whatsapp":
+			provider = "WhatsApp"
+		case "telegram":
+			provider = "Telegram"
+		}
+		label := provider + " " + account.Account
+		if len(account.Holders) == 1 {
+			label += " (" + account.Holders[0].Flow + ")"
+		}
+		state := account.State
+		if state == "live" {
+			state = "connected"
+		}
+		if account.Reason != "" {
+			state += ": " + account.Reason
+		}
+		fmt.Fprintf(p.out, "  %s: %s\n", label, state)
 	}
 }
 
