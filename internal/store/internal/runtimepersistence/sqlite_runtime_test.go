@@ -1266,6 +1266,7 @@ func TestSQLiteRuntimeStoreAPIIdempotencyFailedNestedPublishLeavesNoCompletionOr
 func TestSQLiteRuntimeStoreAPIIdempotencyCompletionSerializesWithConcurrentMutation(t *testing.T) {
 	ctx := testAuthorActivityContext()
 	selected := newBootstrappedSQLiteRuntimeStoreForTest(t)
+	ctx = originalStoreFixtureContext(t, ctx, selected)
 	db := selected.backend.ConstructionHandle()
 	configureSQLiteBusyTimeoutForAllConnections(t, db, time.Millisecond)
 

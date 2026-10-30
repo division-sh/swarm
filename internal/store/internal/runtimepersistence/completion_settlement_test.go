@@ -1516,24 +1516,30 @@ func proveCompletionProviderHeadStaleAuthorityCannotSettle(t *testing.T, fixture
 	requireCompletionSettlementRows(t, fixture, handle.Attempt().AttemptID, settlement.AgentTurn.TurnID, runtimeeffects.StateResponseObserved, 0, 1)
 }
 
-func newCompletionSettlementFixture(t *testing.T, store completionSettlementTestStore, db *sql.DB, sqlite bool) completionSettlementFixture {
-	return newCompletionSettlementFixtureWithMemory(t, store, db, sqlite, agentmemory.Plan{Enabled: true})
+func newCompletionSettlementFixture(t *testing.T, store completionSettlementTestStore, db *sql.DB, sqlite bool, held ...context.Context) completionSettlementFixture {
+	return newCompletionSettlementFixtureWithMemory(t, store, db, sqlite, agentmemory.Plan{Enabled: true}, held...)
 }
 
-func newCompletionSettlementFixtureWithMemory(t *testing.T, store completionSettlementTestStore, db *sql.DB, sqlite bool, memory agentmemory.Plan) completionSettlementFixture {
-	return newCompletionSettlementFixtureForFlow(t, store, db, sqlite, memory, "global")
+func newCompletionSettlementFixtureWithMemory(t *testing.T, store completionSettlementTestStore, db *sql.DB, sqlite bool, memory agentmemory.Plan, held ...context.Context) completionSettlementFixture {
+	return newCompletionSettlementFixtureForFlow(t, store, db, sqlite, memory, "global", held...)
 }
 
-func newCompletionSettlementFixtureForFlow(t *testing.T, store completionSettlementTestStore, db *sql.DB, sqlite bool, memory agentmemory.Plan, flowInstance string) completionSettlementFixture {
+func newCompletionSettlementFixtureForFlow(t *testing.T, store completionSettlementTestStore, db *sql.DB, sqlite bool, memory agentmemory.Plan, flowInstance string, held ...context.Context) completionSettlementFixture {
 	t.Helper()
 	return newCompletionSettlementFixtureWithActor(t, store, db, sqlite, memory, flowInstance, runtimeactors.AgentConfig{
 		ExecutionMode: "live", LLMBackend: "claude_cli", ResolvedLLMBackend: "claude_cli",
-	})
+	}, held...)
 }
 
-func newCompletionSettlementFixtureWithActor(t *testing.T, store completionSettlementTestStore, db *sql.DB, sqlite bool, memory agentmemory.Plan, flowInstance string, actor runtimeactors.AgentConfig) completionSettlementFixture {
+func newCompletionSettlementFixtureWithActor(t *testing.T, store completionSettlementTestStore, db *sql.DB, sqlite bool, memory agentmemory.Plan, flowInstance string, actor runtimeactors.AgentConfig, held ...context.Context) completionSettlementFixture {
 	t.Helper()
 	ctx := testAuthorActivityContext()
+	if len(held) > 1 {
+		t.Fatal("completion fixture requires at most one held original context")
+	}
+	if len(held) == 1 {
+		ctx = held[0]
+	}
 	ctx = originalStoreFixtureContext(t, ctx, store)
 	now := time.Now().UTC()
 	agentID := "completion-settlement-agent"

@@ -16,12 +16,9 @@ import (
 func TestRunForkExactCompletionWriterPreservesTurnUUIDSpellingsBothStores(t *testing.T) {
 	eachExactFactStore(t, func(t *testing.T, s exactFactStore) {
 		store := s.selected.(completionSettlementTestStore)
-		if s.postgres {
-			store = admitTestPostgresStore(t, s.db)
-		}
 		for _, spelling := range []string{"canonical", "uppercase", "compact"} {
 			t.Run(spelling, func(t *testing.T) {
-				fixture := newCompletionSettlementFixture(t, store, s.db, !s.postgres)
+				fixture := newCompletionSettlementFixture(t, store, s.db, !s.postgres, s.ctx)
 				inputID := fixture.authority.Target.ID
 				switch spelling {
 				case "uppercase":

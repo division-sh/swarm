@@ -157,7 +157,7 @@ func TestSelectedContractOrdinarySourceStatePresenceBothStores(t *testing.T) {
 					}
 					before := selectedActivityPersistedSourceEvidence(t, fixture.db, event.ID())
 					beforeAll := snapshotForkHistoricalExecutionTables(t, fixture.db, backend.name == "postgres")
-					loaded, err := fixture.store.(selectedActivityProjectionStore).LoadRunForkSelectedContractSourceEvents(ctx, sourceRun, child.ForkRunID, []string{event.ID()}, originalCarriageForRun(t, fixture.store, sourceRun), originalRootAdmissionForRun(t, fixture.store.(selectedActivityProjectionStore), sourceRun))
+					loaded, err := fixture.store.(selectedActivityProjectionStore).LoadRunForkSelectedContractSourceEvents(ctx, sourceRun, child.ForkRunID, []string{event.ID()}, originalCarriageForRun(t, fixture.store, sourceRun, ctx), originalRootAdmissionForRun(t, fixture.store.(selectedActivityProjectionStore), sourceRun))
 					if after := selectedActivityPersistedSourceEvidence(t, fixture.db, event.ID()); !reflect.DeepEqual(before, after) {
 						t.Fatal("ordinary preparation changed source evidence")
 					}
