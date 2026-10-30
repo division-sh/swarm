@@ -27,11 +27,7 @@ func (pc *PipelineCoordinator) accountActivityCredentials(ctx context.Context, i
 	if !found || bundle == nil {
 		return nil, nil, nil, false, fmt.Errorf("provider activity requires its admitted source")
 	}
-	rooted, err := bundle.RootedSource()
-	if err != nil {
-		return nil, nil, nil, false, err
-	}
-	providers, err := packadmission.AdmitProviderSource(rooted, bundle.Platform)
+	providers, err := packadmission.ProviderSourceForBundle(bundle)
 	if err != nil {
 		return nil, nil, nil, false, err
 	}
