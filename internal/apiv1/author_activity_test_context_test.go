@@ -332,7 +332,7 @@ func newScopedAPITestEventBusWithDataCatalog(t *testing.T, eventStore runtimebus
 		}
 		artifact := authorActivityTestSourceArtifact
 		if bundle, ok := semanticview.Bundle(opts.ContractBundle); ok && bundle.SourceArtifact != nil {
-			if err := retainAPITestCompiledRoot(context.Background(), eventStore, bundle); err != nil {
+			if err := retainAPITestCompiledRoot(setupCtx, eventStore, bundle); err != nil {
 				return nil, err
 			}
 			if exactCatalog == nil {

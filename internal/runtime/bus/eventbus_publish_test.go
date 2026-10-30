@@ -216,7 +216,7 @@ func eventBusTestRunContext(t *testing.T, selected eventBusRunFixtureStore) cont
 func eventBusTestRunContextForSource(t *testing.T, selected eventBusRunFixtureStore, source semanticview.Source) context.Context {
 	t.Helper()
 	ctx := runtimecorrelation.WithRunID(testAuthorActivityContextForSource(context.Background(), source), eventBusTestRunID)
-	ctx = originalEventBusFixtureContext(t, ctx, selected)
+	ctx = nativeBusProcessContext(t, ctx, selected)
 	var rooted sourceartifact.RootedSource
 	if source == nil {
 		rooted, _ = sourceartifactfixture.Rooted(t, "bus-run", sourceartifactfixture.Artifact())
