@@ -25,11 +25,7 @@ func (p selectedRunTargetOwnerProjection) selectedAccountInstance(ctx context.Co
 	if !ok || bundle == nil {
 		return flowidentity.Instance{}, false, nil
 	}
-	rooted, err := bundle.RootedSource()
-	if err != nil {
-		return flowidentity.Instance{}, false, err
-	}
-	providers, err := packadmission.AdmitProviderSource(rooted, bundle.Platform)
+	providers, err := packadmission.ProviderSourceForBundle(bundle)
 	if err != nil {
 		return flowidentity.Instance{}, false, err
 	}
