@@ -249,7 +249,7 @@ func TestStandingIngressSupportedSurfaceSQLiteRestartPreservesAuthorityAndReplie
 		"listeners                  api 127.0.0.1:",
 		"ready in ",
 		"telegram webhook",
-		signingKey + " bound",
+		"Telegram 420079 (.): connected",
 		"shutdown · complete",
 	} {
 		if !strings.Contains(firstOutput, want) {

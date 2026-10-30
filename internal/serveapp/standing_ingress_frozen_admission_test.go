@@ -12,6 +12,7 @@ import (
 	"net/http/httptest"
 	"os"
 	"path/filepath"
+	"reflect"
 	"strings"
 	"sync"
 	"sync/atomic"
@@ -198,14 +199,6 @@ func runServeIngressFrozenCredentialJourney(t *testing.T, backend, policy, point
 		if count == 0 || secret != originalSecret {
 			t.Fatal("registered callback does not carry the independently known operation key")
 		}
-		var out, errOut bytes.Buffer
-		code := cliapp.Execute(ctx, []string{"--config", opts.ConfigPath, "channel", "status", "telegram", "420079", "--json", "--api-server", endpoint},
-			&out, &errOut, nil, nil, OpenChannelRegistration)
-		var status channelonboarding.AccountStatus
-		if code != 0 || json.Unmarshal(out.Bytes(), &status) != nil || status.Provider != "telegram" || status.Account != "420079" ||
-			status.State != "live" || status.Health != "connected" || !status.Linked || len(status.Holders) != 1 {
-			t.Fatalf("public account status lacks exact native registration readiness: exit=%d status=%+v error=%s", code, status, errOut.String())
-		}
 	}
 	inboundURL := func(alias, incomingProvider string) string {
 		if policy == "pack" {
@@ -274,13 +267,46 @@ func runServeIngressFrozenCredentialJourney(t *testing.T, backend, policy, point
 				}
 			}
 		}
-		if len(effective) != 1 || effective[0].TriggerAdmission.BindingEnabled == nil || *effective[0].TriggerAdmission.BindingEnabled != ready || (effective[0].Status == packs.StatusReady) != ready {
+		if len(effective) != 1 {
+			t.Fatalf("frozen admission readback ready=%t: %#v", ready, effective)
+		}
+		if policy == "pack" {
+			var declared []packs.Subject
+			for _, loaded := range manager.LoadedContexts() {
+				for _, target := range loaded.StandingTargets {
+					if target.Provider == providerName && target.FlowPath == "." {
+						subject, err := target.CapabilitySubject()
+						if err != nil {
+							t.Fatal(err)
+						}
+						declared = append(declared, subject)
+					}
+				}
+			}
+			if len(declared) != 1 || declared[0].Status != packs.StatusAvailable || !reflect.DeepEqual(effective[0], declared[0]) {
+				t.Fatalf("registered subject acquired account-derived evidence: actual=%#v declared=%#v", effective, declared)
+			}
+			var out, errOut bytes.Buffer
+			code := cliapp.Execute(ctx, []string{"--config", opts.ConfigPath, "channel", "status", "telegram", "420079", "--json", "--api-server", endpoint},
+				&out, &errOut, nil, nil, OpenChannelRegistration)
+			var status channelonboarding.AccountStatus
+			if code != 0 || json.Unmarshal(out.Bytes(), &status) != nil || status.Provider != "telegram" || status.Account != "420079" || !status.Linked || len(status.Holders) != 1 {
+				t.Fatalf("public account status lost exact registration: exit=%d status=%+v error=%s", code, status, errOut.String())
+			}
+			if ready {
+				if status.State != "live" || status.Reason != "" || status.Health != "connected" {
+					t.Fatalf("current registered account lost readiness: %+v", status)
+				}
+			} else if status.State != "refused" || status.Reason != "registration_not_current" {
+				t.Fatalf("stale registered account acquired readiness: %+v", status)
+			}
+		} else if effective[0].TriggerAdmission.BindingEnabled == nil || *effective[0].TriggerAdmission.BindingEnabled != ready || (effective[0].Status == packs.StatusReady) != ready {
 			t.Fatalf("frozen admission readback ready=%t: %#v", ready, effective)
 		}
 		if hasSibling && siblings != 1 {
 			t.Fatal("sibling declaration disappeared from readback")
 		}
-		if policy != "unsigned" && (len(effective[0].Requirements) != 1 || effective[0].Requirements[0].Status != requirement) {
+		if policy != "pack" && policy != "unsigned" && (len(effective[0].Requirements) != 1 || effective[0].Requirements[0].Status != requirement) {
 			t.Fatalf("current presence lost: %#v, want %s", effective[0].Requirements, requirement)
 		}
 	}
@@ -343,14 +369,18 @@ func runServeIngressFrozenCredentialJourney(t *testing.T, backend, policy, point
 			if code := post(80800, originalSecret); code != refusalStatus {
 				t.Fatalf("credential observation error HTTP %d", code)
 			}
-			owner, err := credentials.NewSnapshotOwner(file)
-			if err != nil {
-				t.Fatal(err)
-			}
-			subjects, err := manager.EvaluatedCapabilitySubjects(ctx, owner)
-			var observation *credentials.SecretBindingObservationError
-			if !errors.As(err, &observation) || len(subjects) != 0 {
-				t.Fatalf("credential observation error became a readiness claim: %#v, %v", subjects, err)
+			if policy == "pack" {
+				assertReadback(false, packs.RequirementStatusBound)
+			} else {
+				owner, err := credentials.NewSnapshotOwner(file)
+				if err != nil {
+					t.Fatal(err)
+				}
+				subjects, err := manager.EvaluatedCapabilitySubjects(ctx, owner)
+				var observation *credentials.SecretBindingObservationError
+				if !errors.As(err, &observation) || len(subjects) != 0 {
+					t.Fatalf("credential observation error became a readiness claim: %#v, %v", subjects, err)
+				}
 			}
 			if after := counts(); fmt.Sprint(after) != fmt.Sprint(before) {
 				t.Fatalf("observation refusal mutated publication/effects: %v -> %v", before, after)

@@ -1728,6 +1728,9 @@ func buildRuntimeComposition(ctx context.Context, req runtimeCompositionRequest)
 				return serveRegistrationSelectionCurrent(ctx, runtimeContextManager, channelOnboardingStore, pair, exactRevision)
 			},
 			EnrollmentAdmission: func(ctx context.Context, account channelonboarding.AccountReference) error {
+				if account.Provider != "telegram" {
+					return nil
+				}
 				op, err := channelonboarding.RegisteredAccount(ctx, stores.DeploymentChannels(), account)
 				if err == channelonboarding.ErrNotFound {
 					return nil
