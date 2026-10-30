@@ -28,8 +28,9 @@ scope:
     - provider-trigger manifest YAML
     - scenario/test YAML
   note: >-
-    Provider-trigger import declarations in schema.yaml imports are included. The provider-trigger
-    manifest grammar itself is the explicitly ruled second-wave census.
+    The 45 row identities and per-row corpus counts retain the original census.
+    S1 retired schema imports and ingress in favor of provider directories; the
+    provider-trigger manifest grammar is the separately completed #2487 census.
 
 classification_tests:
   fact: "If removed, no total spec-defined function of the remaining admitted contract reconstructs the same identity or semantic content."
@@ -55,12 +56,12 @@ additive_document_families:
     denominator_rule: "additive to the historical 45-row/11-decoder/67-site/24-root receipt; no reset or closure claim for #2300/#2287/#2293, #2486 or #2487"
 
 inventory:
-  custom_unmarshal_total: 11
-  custom_unmarshal_reachable: 9
+  custom_unmarshal_total: 10
+  custom_unmarshal_reachable: 8
   custom_unmarshal_retired: 0
   custom_unmarshal_excluded: 2
   custom_unmarshal_breakdown:
-    contracts: 9
+    contracts: 8
     flowmodel_policy: 0
     agentintent: 0
     channel_pack: 0
@@ -111,38 +112,38 @@ rows:
     corpus: {legacy_from_to_rows: 0, event_centric_rows: 34, adapters: 0}
 
   - id: schema.imports
-    ruled: mechanical-ratified
+    ruled: "issue-2667-comment-6207706820-A7.1"
     paths: "schema.imports.connector_packs[].provider, schema.imports.connector_packs[].tool, schema.imports.provider_trigger_events[].provider, schema.imports.provider_trigger_events[].event"
-    owners: [projectSchemaImportsValue, providerconnectors.CatalogSnapshot, providertriggers.Registry]
+    owners: [refuseRetiredFlowSchemaKeys, sourceartifact.ProviderDirectories, providerconnectors.CatalogSnapshot, providertriggers.Registry]
     information: {choice: [selected provider/tool and provider/event capability imports]}
     spelling:
-      canonical_candidate: normalized_underscore_token
-      retired_duplicates: [hyphenated_token, space_separated_token]
+      canonical: provider_directory_scope_without_schema_imports
+      retired_duplicates: [schema.imports, hyphenated_token, space_separated_token]
+    reconciliation: "The old paths and counts below are census evidence, not live import grammar; provider tools and events resolve through the directory-owned body."
     corpus: {connector_imports: 2, trigger_event_imports: 1, alternate_token_spellings: 0}
 
   - id: schema.ingress
-    ruled: issue-2438-A9-R14
+    ruled: "issue-2667-comment-6207706820-A7.2"
     paths: "schema.ingress.*"
-    owners: [projectSchemaIngressValue, compileFlowIngressAliases, WorkflowContractBundle.FlowIngressAlias, projectSchemaIngressAdmissionValue, providertriggers.CatalogSnapshot.CompileAdmission]
+    owners: [refuseRetiredFlowSchemaKeys, providertriggers.CatalogSnapshot.CompileAdmission]
     information:
       fact: [ingress provider/pack/event/delivery extraction and handoff event/flow]
       choice: [alias_override, acknowledge, authentication, payload, namespace]
       derived_projection: [rooted_alias_from_selected_root_name_and_declaration_path]
-    spelling: {canonical: strict_mappings_with_optional_exact_alias_override, distinct_overrides: [alias], retired_duplicates: []}
+    spelling: {canonical: provider_holder_inputs_and_trigger_body, distinct_overrides: [authentication, acknowledge, payload], retired_duplicates: [schema.ingress, alias_override]}
+    reconciliation: "The earlier alias information above is historical; S1 derives the webhook alias from the flow path and puts raw policy in trigger.yaml. No alias compatibility remains."
     corpus: {ingress_blocks: 0, handoffs: 0}
 
   - id: flow.identity_mode
     ruled: issue-2438-slice-1
-    paths: "schema.name, schema.instance; mode/entity are retired on presence"
+    paths: "schema.instance; name/mode/entity are retired on presence"
     owners: [AdmitFlowSchemaValue, FlowSchemaDocument.EffectiveMode]
     information:
       choice: [instance]
       derived_projection: [mode_from_instance_presence, entity]
-      fact: [name_when_consumed_by_default_ingress_alias]
-      annotation: [name_when_not_consumed_by_default_ingress_alias]
     spelling:
       canonical_candidate: omit_mode_and_entity_derive_shape_and_single_primary_entity
-      retired_duplicates: [explicit_entity, mode_static, mode_template, mode_singleton]
+      retired_duplicates: [schema.name, explicit_entity, mode_static, mode_template, mode_singleton]
       already_retired: [template_instance_mapping]
     corpus: {schemas: 34, entity_explicit: 0, instance_scalar: 7}
 
@@ -291,6 +292,7 @@ rows:
     f2_bug: "closed by #2333: the paired named/entity field family admits effective YAML once through yamlsource; named fields own recursive presence while top-level entity presence remains #2397"
     corpus: {entity_scalar: 4, entity_type_only_mapping: 5, entity_mapping_with_metadata: 7}
     list_proofs: [TestListSpellingRetirementTypedFields, TestListSpellingRetirementPresenceMatrix, TestListSpellingRetirementMetadataAndData, TestListSpellingRetirementBundleStyle]
+    reconciliation: "List spellings are retired. The metadata/paths/counts above describe historical or current-source evidence, not the #1745 destination. Under comments6218903402/6220360999 embedded fields transfer type and optionality only; indexed is own-state-only and initial values are state.yaml literals. Description/refinements/immutable/citation are not revived. #1745 owns the remaining cutover."
 
   - id: entity_document
     ruled: mechanical-ratified
@@ -300,7 +302,8 @@ rows:
       fact: [entity and field map keys]
       choice: [_owner]
       annotation: [_description]
-    spelling: {canonical: keyed_entity_and_field_maps, already_retired: [_state_model, state_field], retired_duplicates: []}
+    spelling: {canonical_candidate: wrapperless_state_yaml, already_retired: [_state_model, state_field], retired_duplicates: [entity_wrapper, entity_type_discriminator]}
+    reconciliation: "Keyed entities.yaml wrappers remain current-source/historical evidence only. #1745 owns wrapperless state.yaml and EntityType deletion under comment6220360999, including its schema/readers; this row does not claim that work landed."
     corpus: {entities: 6, fields: 16}
 
   - id: event.schema_ownership
@@ -628,14 +631,15 @@ rows:
     corpus: {rows: 0}
 
   - id: pack.inventory_envelope
-    ruled: mechanical-ratified
+    ruled: "issue-2667-comment-6207706820"
     paths: "packs/inventory.yaml.*, packs/manifest.yaml.*, packs/*/pack.yaml.*"
-    owners: [packartifact.admitInventoryManifest, packartifact.admitProjectManifest, packmodel.ParseEnvelopeAt, yamlsource.Document.Root/Value]
+    owners: [sourceartifact.projectManifest, sourceartifact.admitDirectoryMembership, packartifact.AdmittedProvider, yamlsource.Document.Root/Value]
     information:
       fact: [pack IDs/types/versions/platform ranges/capabilities/requirements]
       boundary_snapshot: [manifest hash, import origin hashes, effective/base selection digests]
       annotation: [tests]
-    spelling: {canonical: strict_known_fields_mapping, distinct_overrides: [], retired_duplicates: []}
+    spelling: {canonical: directory_owned_manifest_version_platform_version_and_provider_capabilities, distinct_overrides: [], retired_duplicates: [pack.yaml, manifest.name, manifest.type, manifest.requires, manifest.secrets, manifest.implements]}
+    reconciliation: "Paths and information above retain the original census. S1 source/provider directory framing supersedes the former pack envelopes; provider channel runtime activation remains its own owner."
 
   - id: pack.channel
     ruled: mechanical-ratified
@@ -704,10 +708,10 @@ decoder_coverage:
     type.scalar_enum_named: [TypeCatalogDocument, ScalarTypeDecl, EnumTypeDecl, NamedTypeDecl]
     typed_field: [TypeFieldSpec, EntityFieldDecl]
     entity_document: [EntityContractsDocument, EntityContract]
-  enums.go:
-    handler.collection_compute: [ComputeOperation]
 
 decoder_deleted:
+  enums.go:
+    handler.collection_compute: [ComputeOperation]
   workflow_contract_yaml_schema.go:
     tool.schema_value: [ToolInputSchema]
     tool.schema_entry: [ToolSchemaEntry]
@@ -739,7 +743,7 @@ decode_bypasses:
   # Direct roots count yaml.Unmarshal and yaml.NewDecoder calls repository-wide.
   # The canonical owner's root is classified but excluded from the off-owner ceiling.
   # CI compares each PR to the accepted base ledger, not just these initial ceilings.
-  node_site_ceiling: 49
+  node_site_ceiling: 48
   off_owner_direct_decode_ceiling: 17
   files:
     internal/cliapp/cli_output.go: {family: other_production_projection, node_sites: 0, direct_decode_roots: 1}
@@ -750,7 +754,6 @@ decode_bypasses:
     internal/providerconnectors/catalog_conformance.go: {family: excluded_test_tooling, node_sites: 0, direct_decode_roots: 1}
     # #2533 deletes the trigger BODY wire decoder and all catalog/plan YAML roundtrips.
     # Its lexical admission consumes yamlsource and existing shared schema leaves.
-    internal/runtime/contracts/enums.go: {family: wave_4_node_handler, node_sites: 1, direct_decode_roots: 0}
     internal/runtime/contracts/workflow_contract_yaml.go: {family: mixed_wave_4_wave_5, node_sites: 2, direct_decode_roots: 0}
     internal/runtime/contracts/workflow_contract_yaml_wave1.go: {family: mixed_existing_typed_admission, node_sites: 9, direct_decode_roots: 0}
     internal/runtime/testfixtures/canonicalrouting/fixture.go: {family: excluded_test_fixture, node_sites: 13, direct_decode_roots: 4}
@@ -761,7 +764,7 @@ decode_bypasses:
     internal/yamlsource/source.go: {family: canonical_owner, node_sites: 0, direct_decode_roots: 1}
 
 registry_result:
-  completeness: "all 11 remaining production custom unmarshallers classified as 9 bundle-reachable row owners and 2 deployment swarm.yaml exclusions; pack/platform and trigger BODY wire roots removed; conformance-fixture and scenario roots remain with their existing owners"
+  completeness: "all 10 remaining production custom unmarshallers classified as 8 bundle-reachable row owners and 2 deployment swarm.yaml exclusions; the unused ComputeOperation decoder is deleted and compute admission remains projectNodeComputeValue; conformance-fixture and scenario roots remain with their existing owners"
   wave_1_status: closed
   wave_2_status: closed
   later_wave_gate: "W4/W5 and #2486 pack/platform typed-admission cuts implemented; execution proof and independent gate are required for closure. Public scenario admission consumes scenariodocument (#2532); trigger bodies remain #2533 and private execution remains #2143. Accepted #2487 census is historical; publication #2322/#2376 and parent all-row proof #2287 remain separate."

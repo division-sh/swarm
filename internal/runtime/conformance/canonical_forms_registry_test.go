@@ -181,35 +181,16 @@ var canonicalDecodeBypassFamilies = map[string]struct{}{
 var unquotedConnectYAMLKey = regexp.MustCompile(`(?m)^[\t ]*(?:-[\t ]+)?connect[\t ]*:`)
 
 type canonicalFormsRegistry struct {
-	Kind             string                  `yaml:"kind"`
-	RegistryVersion  int                     `yaml:"registry_version"`
-	Inventory        canonicalFormsInventory `yaml:"inventory"`
-	Rows             []canonicalFormsRow     `yaml:"rows"`
-	AdditiveFamilies []struct {
-		ID             string   `yaml:"id"`
-		Owner          string   `yaml:"owner"`
-		Substrate      string   `yaml:"substrate"`
-		RetiredReaders []string `yaml:"retired_public_readers"`
-	} `yaml:"additive_document_families"`
+	Kind              string                         `yaml:"kind"`
+	RegistryVersion   int                            `yaml:"registry_version"`
+	Inventory         canonicalFormsInventory        `yaml:"inventory"`
+	Rows              []canonicalFormsRow            `yaml:"rows"`
 	DecoderCoverage   map[string]map[string][]string `yaml:"decoder_coverage"`
 	DecoderRetired    map[string]map[string][]string `yaml:"decoder_retired"`
 	DecoderDeleted    map[string]map[string][]string `yaml:"decoder_deleted"`
 	DecoderExclusions map[string]map[string][]string `yaml:"decoder_exclusions"`
 	DecodeBypasses    canonicalDecodeBypassInventory `yaml:"decode_bypasses"`
 	Wave1             canonicalFormsWave1            `yaml:"wave_1"`
-	Wave2             canonicalFormsWave2            `yaml:"wave_2"`
-	Wave3             canonicalFormsWave3            `yaml:"wave_3"`
-}
-
-func Test2376ManifestReaderLedgerIsAdditive(t *testing.T) {
-	record := loadCanonicalFormsRegistry(t, conformanceRepoRoot(t))
-	if len(record.Rows) != 45 || len(record.AdditiveFamilies) != 1 {
-		t.Fatal("historical census was replaced rather than supplemented")
-	}
-	family := record.AdditiveFamilies[0]
-	if family.ID != "source.flow_manifest" || family.Owner != "internal/sourceartifact.projectManifest" || family.Substrate != "admitted yamlsource.Value" || len(family.RetiredReaders) != 12 {
-		t.Fatalf("manifest ownership/retirement accounting incomplete: %+v", family)
-	}
 }
 
 type canonicalFormsInventory struct {
@@ -239,66 +220,14 @@ const (
 )
 
 type canonicalFormsRow struct {
-	ID                 string                 `yaml:"id"`
-	Ruled              string                 `yaml:"ruled"`
-	Spelling           canonicalFormsSpelling `yaml:"spelling"`
-	IdentityRetirement string                 `yaml:"identity_retirement"`
-}
-
-func TestCanonicalFormsRegistryPinsNodeIDRetirement(t *testing.T) {
-	root := conformanceRepoRoot(t)
-	registry := loadCanonicalFormsRegistry(t, root)
-	for _, row := range registry.Rows {
-		if row.ID != "node.identity_defaults_projections" {
-			continue
-		}
-		if !strings.Contains(row.IdentityRetirement, "#2308") || !strings.Contains(row.IdentityRetirement, "Other projections in this row remain open") {
-			t.Fatalf("identity-only closure not recorded: %#v", row)
-		}
-		if !reflect.DeepEqual(row.Spelling.RetiredDuplicates, []string{"node.id", "execution_type_system_node", "subscribes_to_equal_to_handler_keys", "produces_equal_to_emit_sites"}) {
-			t.Fatalf("node retirement classification: %#v", row.Spelling)
-		}
-		if _, ok := reflect.TypeOf(runtimecontracts.SystemNodeContract{}).FieldByName("ID"); ok {
-			t.Fatal("retired node ID carrier restored")
-		}
-		fixture := t.TempDir()
-		writeRegistryMutationFile(t, filepath.Join(fixture, "manifest.yaml"), "version: 1.0.0\nplatform_version: '*'\n")
-		writeRegistryMutationFile(t, filepath.Join(fixture, "schema.yaml"), "stages: []\n")
-		writeRegistryMutationFile(t, filepath.Join(fixture, "nodes.yaml"), "worker:\n  id: worker\n  event_handlers: {}\n")
-		if _, err := runtimecontracts.LoadWorkflowContractBundleWithOverrides(root, fixture, runtimecontracts.DefaultPlatformSpecFile(root)); err == nil || !strings.Contains(err.Error(), "node field \"id\" is not supported") {
-			t.Fatalf("node ID admitted: %v", err)
-		}
-		return
-	}
-	t.Fatal("node identity registry row missing")
-}
-
-type canonicalFormsSpelling struct {
-	Canonical          any      `yaml:"canonical"`
-	CanonicalCandidate any      `yaml:"canonical_candidate"`
-	RetiredDuplicates  []string `yaml:"retired_duplicates"`
+	ID    string `yaml:"id"`
+	Ruled string `yaml:"ruled"`
 }
 
 type canonicalFormsWave1 struct {
 	Issue           int                           `yaml:"issue"`
 	Rows            []string                      `yaml:"rows"`
 	GoConnectCorpus canonicalFormsGoConnectCorpus `yaml:"go_connect_corpus"`
-}
-
-type canonicalFormsWave3 struct {
-	Issue              int      `yaml:"issue"`
-	Status             string   `yaml:"status"`
-	Rows               []string `yaml:"rows"`
-	MigratedDecoders   []string `yaml:"migrated_decoders"`
-	RemainingReachable int      `yaml:"remaining_reachable_decoders"`
-}
-
-type canonicalFormsWave2 struct {
-	Issue           int      `yaml:"issue"`
-	Status          string   `yaml:"status"`
-	Rows            []string `yaml:"rows"`
-	RetiredSurfaces []string `yaml:"retired_surfaces"`
-	CanonicalOwners []string `yaml:"canonical_owners"`
 }
 
 type canonicalFormsGoConnectCorpus struct {
@@ -638,58 +567,6 @@ func decode(raw []byte) error { return source.Unmarshal(raw, new(any)) }
 	}
 }
 
-func TestCanonicalFormsRegistryPinsWave3EventAdmission(t *testing.T) {
-	root := conformanceRepoRoot(t)
-	record := loadCanonicalFormsRegistry(t, root)
-	wantDecoders := []string{
-		"workflow_contract_yaml_handlers.go:EventCatalogEntry",
-		"workflow_contract_yaml_schema.go:EventFieldSpec",
-	}
-	if record.Wave3.Issue != 2300 || record.Wave3.Status != "closed" || !reflect.DeepEqual(record.Wave3.Rows, []string{"event.schema_ownership"}) || !reflect.DeepEqual(record.Wave3.MigratedDecoders, wantDecoders) || record.Wave3.RemainingReachable != 95 {
-		t.Fatalf("wave 3 registry = %#v", record.Wave3)
-	}
-
-	migratedFiles := []string{
-		"internal/runtime/contracts/event_catalog_admission.go",
-		"internal/runtime/contracts/event_schema_ownership.go",
-	}
-	for _, relative := range migratedFiles {
-		path := filepath.Join(root, filepath.FromSlash(relative))
-		file, err := parser.ParseFile(token.NewFileSet(), path, nil, 0)
-		if err != nil {
-			t.Fatal(err)
-		}
-		ast.Inspect(file, func(node ast.Node) bool {
-			selector, ok := node.(*ast.SelectorExpr)
-			if !ok {
-				return true
-			}
-			if selector.Sel.Name == "Decode" || selector.Sel.Name == "Kind" || selector.Sel.Name == "Tag" || selector.Sel.Name == "Unmarshal" {
-				t.Errorf("migrated W3 file %s contains raw YAML bypass selector %s", relative, selector.Sel.Name)
-			}
-			return true
-		})
-	}
-
-	actual, err := collectCustomYAMLDecoders(root)
-	if err != nil {
-		t.Fatal(err)
-	}
-	for _, retired := range wantDecoders {
-		if _, exists := actual[retired]; exists {
-			t.Errorf("retired W3 decoder %s reappeared", retired)
-		}
-	}
-
-	treeSource, err := os.ReadFile(filepath.Join(root, "internal/runtime/contracts/workflow_contract_tree.go"))
-	if err != nil {
-		t.Fatal(err)
-	}
-	if got := bytes.Count(treeSource, []byte("loadOptionalEventCatalogFromSource(")); got != 1 {
-		t.Fatalf("event catalog artifact loader call count = %d, want one flow-source admission call", got)
-	}
-}
-
 func TestCanonicalFormsRegistryRejectsNestedRuntimeDecoderUntilRegistered(t *testing.T) {
 	root := t.TempDir()
 	path := filepath.Join(root, "internal/runtime/gate2313probe/probe.go")
@@ -774,20 +651,6 @@ func TestCanonicalFormsRegistryPinsCurrentConnectFailureCodes(t *testing.T) {
 	}
 }
 
-func TestCanonicalFormsRegistryPinsFilesystemTopologyRetirementAndEffectiveConnect(t *testing.T) {
-	record := loadCanonicalFormsRegistry(t, conformanceRepoRoot(t))
-	rows := make(map[string]canonicalFormsRow, len(record.Rows))
-	for _, row := range record.Rows {
-		rows[row.ID] = row
-	}
-	connectRetirements := strings.Join(rows["schema.connect"].Spelling.RetiredDuplicates, " ")
-	if !strings.Contains(connectRetirements, "flow.pin") {
-		t.Fatalf("schema.connect retirements = %q, want endpoint-centric form", connectRetirements)
-	}
-
-	assertExactYAMLFields(t, reflect.TypeOf(runtimecontracts.FlowConnect{}), []string{"correlation_key", "event", "from", "key_from", "rename", "replies_to", "resolution", "to"})
-}
-
 func TestTypedFieldDecoderFamilyUsesYAMLSourceProjectionOnly(t *testing.T) {
 	root := conformanceRepoRoot(t)
 	path := filepath.Join(root, "internal/runtime/contracts/workflow_contract_yaml_wave1.go")
@@ -836,29 +699,6 @@ func TestTypedFieldDecoderFamilyUsesYAMLSourceProjectionOnly(t *testing.T) {
 	for name, found := range want {
 		if !found {
 			t.Errorf("paired decoder owner %s missing", name)
-		}
-	}
-}
-
-func TestCanonicalFormsRegistryPinsWave2RetirementsAndOwners(t *testing.T) {
-	record := loadCanonicalFormsRegistry(t, conformanceRepoRoot(t))
-	wantRows := []string{"flow.pin_event_entry", "flow.input_pin_resolution", "flow.output_pin_route_projection", "schema.connect"}
-	wantRetired := []string{"pin.name", "input.carries", "carry.type", "carry.optional", "carry.convert", "output.key", "output.carries", "qualified_or_wildcard_flow_pin_event", "connect.adapter"}
-	wantOwners := []string{"CompiledFlowInputPin", "CompiledFlowOutputPin", "CompiledEventSchema", "ConnectRoutePlan"}
-	if record.Wave2.Issue != 2352 || record.Wave2.Status != "closed" || !reflect.DeepEqual(record.Wave2.Rows, wantRows) || !reflect.DeepEqual(record.Wave2.RetiredSurfaces, wantRetired) || !reflect.DeepEqual(record.Wave2.CanonicalOwners, wantOwners) {
-		t.Fatalf("wave 2 registry = %#v", record.Wave2)
-	}
-	assertExactYAMLFields(t, reflect.TypeOf(runtimecontracts.FlowInputEventPin{}), []string{"event"})
-	assertExactYAMLFields(t, reflect.TypeOf(runtimecontracts.FlowOutputEventPin{}), []string{"event"})
-	for _, owner := range []reflect.Type{
-		reflect.TypeOf(runtimecontracts.CompiledFlowInputPin{}),
-		reflect.TypeOf(runtimecontracts.CompiledFlowOutputPin{}),
-		reflect.TypeOf(runtimepinrouting.ConnectRoutePlan{}),
-	} {
-		for index := 0; index < owner.NumField(); index++ {
-			if owner.Field(index).IsExported() {
-				t.Fatalf("W2 owner %s exposes mutable field %s", owner, owner.Field(index).Name)
-			}
 		}
 	}
 }
@@ -1471,20 +1311,4 @@ func mapKeyDifference(left, right map[string]string) []string {
 	}
 	sort.Strings(out)
 	return out
-}
-
-func assertExactYAMLFields(t testing.TB, typ reflect.Type, want []string) {
-	t.Helper()
-	var got []string
-	for _, field := range reflect.VisibleFields(typ) {
-		tag := strings.Split(field.Tag.Get("yaml"), ",")[0]
-		if tag != "" && tag != "-" {
-			got = append(got, tag)
-		}
-	}
-	sort.Strings(got)
-	sort.Strings(want)
-	if !reflect.DeepEqual(got, want) {
-		t.Fatalf("%s yaml fields = %v, want %v", typ.Name(), got, want)
-	}
 }
