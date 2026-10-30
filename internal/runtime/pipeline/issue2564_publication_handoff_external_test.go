@@ -154,13 +154,7 @@ func (f *issue2564PublicationFixture) start(t *testing.T, generation uint64, gat
 		t.Fatal(err)
 	}
 	process := worklifetime.NewProcess()
-	capability, err := f.store.(startupownership.Store).AcquireProcessCapability(ctx, startupownership.AcquireRequest{
-		OwnerID: "issue2564-publication-fixture", BootID: uuid.NewString(), RuntimeInstanceID: runtimeID,
-	})
-	if err != nil {
-		t.Fatal(err)
-	}
-	ctx = nativeOriginalProcessContextFixture(t, worklifetime.WithProcess(ctx, process), capability)
+	ctx = nativeOriginalProcessContextFixture(t, worklifetime.WithProcess(ctx, process), original)
 	work, err := process.NewRuntime(ctx, worklifetime.RuntimeIdentity{RuntimeInstanceID: runtimeID, BundleHash: f.fact.BundleHash()})
 	if err != nil {
 		t.Fatal(err)
@@ -181,6 +175,13 @@ func (f *issue2564PublicationFixture) start(t *testing.T, generation uint64, gat
 	f.bus, err = newScopedTestEventBus(t, f.store, runtimebus.EventBusOptions{
 		ContractBundle: f.source, SourceArtifactFact: f.fact, RuntimeInstanceID: runtimeID, WorkOwner: work,
 		PayloadAdmitter: admitter, DeliveryAuthority: authority, TestLifecycleProbe: f.observer,
+		MutationContext: func(callCtx context.Context) (context.Context, error) {
+			if !startupownership.HasMutationAuthority(callCtx) {
+				callCtx = startupownership.CarryMutationAuthority(callCtx, ctx)
+			}
+			_, err := startupownership.CaptureMutationAuthority(callCtx)
+			return callCtx, err
+		},
 	})
 	if err != nil {
 		t.Fatal(err)

@@ -57,6 +57,14 @@ func openActivityReplayStore(t *testing.T, backend string) (gateRecoveryStoreCas
 		Close() error
 	}) func() error {
 		return func() error {
+			if actual, found := pipelineExternalTestWorkFixtures.Load(t); found {
+				ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+				defer cancel()
+				if err := actual.(*pipelineExternalTestWorkFixture).retireAndWait(ctx); err != nil {
+					return err
+				}
+				pipelineExternalTestWorkFixtures.CompareAndDelete(t, actual)
+			}
 			original, err := agentfixture.ProcessCapability(t, context.Background(), selected)
 			if err != nil {
 				return err
