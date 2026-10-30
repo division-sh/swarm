@@ -304,7 +304,8 @@ func TestOperatorRuntimeContextManagerRoutesRunControlByStoredBundle(t *testing.
 		&swruntime.Runtime{Bus: fixture.busB, RunControl: selectedControl},
 	)
 	handler := testHandler(t, Options{
-		AuthTokens: []string{testToken},
+		AuthTokens:       []string{testToken},
+		ProcessWorkOwner: fixture.process,
 		Handlers: testOperatorHandlers(t, testOperatorCapabilities{
 			Now:              func() time.Time { return time.Date(2026, 5, 10, 12, 0, 0, 0, time.UTC) },
 			Idempotency:      fixture.pg,
@@ -345,7 +346,8 @@ func TestOperatorRuntimeContextManagerRoutesAgentDirectiveByStoredBundle(t *test
 		&swruntime.Runtime{Bus: fixture.busB, Manager: selectedManager},
 	)
 	handler := testHandler(t, Options{
-		AuthTokens: []string{testToken},
+		AuthTokens:       []string{testToken},
+		ProcessWorkOwner: fixture.process,
 		Handlers: testOperatorHandlers(t, testOperatorCapabilities{
 			Now:              func() time.Time { return time.Date(2026, 5, 10, 12, 0, 0, 0, time.UTC) },
 			Idempotency:      fixture.pg,
@@ -677,6 +679,7 @@ func TestOperatorRuntimeContextManagerFailsClosedForAmbiguousRuntimeConsumers(t 
 type operatorRuntimeContextFixture struct {
 	db         *sql.DB
 	pg         *store.PostgresStore
+	process    *worklifetime.Process
 	sourceA    semanticview.Source
 	sourceB    semanticview.Source
 	admissionA sourceartifact.RootAdmission
@@ -732,9 +735,14 @@ func newOperatorRuntimeContextFixture(t *testing.T) operatorRuntimeContextFixtur
 	if err != nil {
 		t.Fatalf("NewRuntimeContextManager: %v", err)
 	}
+	process, found := worklifetime.ProcessFromContext(apiTestOriginalProcessContext(t, context.Background(), pg))
+	if !found {
+		t.Fatal("runtime context fixture lacks its original process work owner")
+	}
 	return operatorRuntimeContextFixture{
 		db:         db,
 		pg:         pg,
+		process:    process,
 		sourceA:    sourceA,
 		sourceB:    sourceB,
 		admissionA: rootedA.Admission(),
@@ -793,7 +801,8 @@ func runtimeContextTestDefinition(t *testing.T, definition swruntime.BundleConte
 func (f operatorRuntimeContextFixture) handler(t *testing.T) *Handler {
 	t.Helper()
 	handler := testHandler(t, Options{
-		AuthTokens: []string{testToken},
+		AuthTokens:       []string{testToken},
+		ProcessWorkOwner: f.process,
 		Handlers: testOperatorHandlers(t, testOperatorCapabilities{
 			Now:                func() time.Time { return time.Date(2026, 5, 10, 12, 0, 0, 0, time.UTC) },
 			Ready:              func() bool { return true },
@@ -813,7 +822,6 @@ func (f operatorRuntimeContextFixture) handler(t *testing.T) *Handler {
 			},
 		}),
 	})
-	bindAPITestHandlerOriginalProcess(t, handler, apiTestOriginalProcessContext(t, context.Background(), f.pg))
 	return handler
 }
 

@@ -171,7 +171,7 @@ func testOperatorHandlers(t testing.TB, c testOperatorCapabilities) map[string]M
 		OperatorConversationForkHandlers(ConversationForkHandlerOptions{ExecutionPosture: c.posture(), Now: c.Now, Reads: c.ConversationForks, Lifecycle: c.ConversationForkLifecycle, Chat: c.ForkChatExecutor, Idempotency: c.Idempotency}),
 		OperatorAgentControlHandlers(AgentControlHandlerOptions{Now: c.Now, Controller: c.AgentControl, Idempotency: c.Idempotency, RuntimeContexts: c.RuntimeContexts, SelectedForkControls: c.SelectedForkControls}),
 	)
-	if selected, native := c.Idempotency.(agentfixture.Store); native {
+	if selected, native := c.Idempotency.(agentfixture.Store); native && c.RuntimeContexts == nil {
 		original := c.OriginalContext
 		if original == nil {
 			original = context.Background()
