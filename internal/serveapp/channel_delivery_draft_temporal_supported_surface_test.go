@@ -22,6 +22,10 @@ func TestChannelDraftTerminalRestartPublicJourney(t *testing.T) {
 				if transition == "expire" {
 					ttl = 4 * time.Second
 				}
+				var receiverReader receiverProofStateReader
+				captureSelectedRuntimePersistence(t, func(p serveRuntimePersistence) {
+					receiverReader = requireReceiverProofStateReader(t, p.deps.EventStore)
+				})
 				h, db, hash := startChannelAnchorJourneyWithDraftTTL(t, backend, "draft-temporal-token", false, ttl)
 				seed := requireServedEventPublishRPCResult(t, h.rpcEndpoint(), map[string]any{
 					"event_name": "work.requested", "bundle_hash": hash,
@@ -49,14 +53,11 @@ func TestChannelDraftTerminalRestartPublicJourney(t *testing.T) {
 					if after.Status != want || string(after.Snapshot) != string(before.Snapshot) {
 						t.Fatalf("CLI/restart changed terminal card meaning: %+v", after)
 					}
-					var decisions int
 					expected := 0
 					if transition == "external_decision" {
 						expected = 1
 					}
-					if err := db.QueryRow(`SELECT COUNT(*) FROM events WHERE run_id=$1 AND event_name='mailbox.card_decided'`, seed.RunID).Scan(&decisions); err != nil || decisions != expected {
-						t.Fatalf("CLI terminal decision cardinality=%d want=%d err=%v", decisions, expected, err)
-					}
+					requireLifecycleTemplateEventCount(t, receiverReader, seed.RunID, "mailbox.card_decided", expected)
 					// Channel draft cancellation, TTL and stale controls below are
 					// retained, not certified by this CLI-only path (6526882297).
 					return

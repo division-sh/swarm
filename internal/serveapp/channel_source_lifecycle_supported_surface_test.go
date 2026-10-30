@@ -36,13 +36,15 @@ func TestChannelSourceLifecyclePublicJourney(t *testing.T) {
 				t.Cleanup(func() { buildSelectedAPICapabilities = previous })
 				var deliveryReader servedRunDeliveryReader
 				var receiverReader receiverProofStateReader
+				var sourceReader sourceArtifactReader
 				captureSelectedRuntimePersistence(t, func(p serveRuntimePersistence) {
 					deliveryReader = p.deps.DeliveryStore.SummarizeRun
 					receiverReader = requireReceiverProofStateReader(t, p.deps.EventStore)
+					sourceReader = p.sourceReader
 				})
 				h, db, hash := startChannelAnchorJourney(t, backend, "source-lifecycle-token", false)
 				if h.registration.DeploymentRegistration {
-					runRegisteredCLISourceLifecycle(t, h, db, hash, operation, receiverReader, deliveryReader)
+					runRegisteredCLISourceLifecycle(t, h, &sourceReader, hash, operation, receiverReader, deliveryReader)
 					return
 				}
 				var standingRun string
@@ -428,15 +430,15 @@ func TestChannelSourceLifecyclePublicJourney(t *testing.T) {
 	}
 }
 
-func runRegisteredCLISourceLifecycle(t *testing.T, h *channelOnboardingE2EHarness, db *sql.DB, hash, operation string, receiverReader receiverProofStateReader, deliveryReader servedRunDeliveryReader) {
+func runRegisteredCLISourceLifecycle(t *testing.T, h *channelOnboardingE2EHarness, sourceReader *sourceArtifactReader, hash, operation string, receiverReader receiverProofStateReader, deliveryReader servedRunDeliveryReader) {
 	t.Helper()
 	seed := requireServedEventPublishRPCResult(t, h.rpcEndpoint(), map[string]any{
 		"event_name": "work.requested", "bundle_hash": hash, "payload": map[string]any{"seed": true}, "idempotency_key": "cli-source-seed",
 	})
 	card := waitChannelPublicCard(t, h, seed.RunID, decisioncard.AnchorKindStageGate, "chat/reviews")
 	before := readRegisteredChannelCard(t, h, card)
-	var source []byte
-	if err := db.QueryRow(`SELECT source_blob FROM source_artifacts WHERE bundle_hash=$1`, hash).Scan(&source); err != nil {
+	source, err := (*sourceReader).GetSourceArtifact(t.Context(), hash)
+	if err != nil {
 		t.Fatal(err)
 	}
 	switch operation {
@@ -467,8 +469,7 @@ func runRegisteredCLISourceLifecycle(t *testing.T, h *channelOnboardingE2EHarnes
 				t.Fatal("new process did not capture the new source")
 			}
 		}
-		var retained []byte
-		if err := db.QueryRow(`SELECT source_blob FROM source_artifacts WHERE bundle_hash=$1`, hash).Scan(&retained); err != nil || !bytes.Equal(retained, source) {
+		if retained, err := (*sourceReader).GetSourceArtifact(t.Context(), hash); err != nil || !bytes.Equal(retained.SourceBlob, source.SourceBlob) {
 			t.Fatal("source replacement altered retained bytes", err)
 		}
 		if got := readRegisteredChannelCard(t, h, card); string(got.Snapshot) != string(before.Snapshot) {
@@ -482,9 +483,7 @@ func runRegisteredCLISourceLifecycle(t *testing.T, h *channelOnboardingE2EHarnes
 			t.Fatal("dry reset changed card authority", dry.Error)
 		}
 		if reset := requestServedJSONRPC(t, h.rpcEndpoint(), "runtime.nuke", params); reset.Error != nil {
-			var phase, record string
-			readErr := db.QueryRow(`SELECT phase,CAST(record AS TEXT) FROM runtime_reset_operations LIMIT 1`).Scan(&phase, &record)
-			t.Fatalf("public reset failed: error=%+v phase=%s record=%s read=%v", reset.Error, phase, record, readErr)
+			t.Fatalf("public reset failed: error=%+v\n%s", reset.Error, h.process.outputString())
 		}
 		if replay := requestServedJSONRPC(t, h.rpcEndpoint(), "runtime.nuke", params); replay.Error != nil {
 			t.Fatal(replay.Error)

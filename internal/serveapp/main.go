@@ -1799,8 +1799,18 @@ func buildRuntimeComposition(ctx context.Context, req runtimeCompositionRequest)
 	}
 	presenter.recordBootWarnings(bootReport)
 	supervisor.resetChannelPublication = stores.ChannelDelivery().NotifyChannelPublication
+	supervisor.resetChannelActivations = channelActivationRefresher
 	supervisor.resetRefresh = func(refreshCtx context.Context) error {
-		if err := channelActivationRefresher.RefreshChannelActivations(refreshCtx); err != nil {
+		supervisor.mu.RLock()
+		resetting := supervisor.resetting
+		supervisor.mu.RUnlock()
+		refresh := channelActivationRefresher.RefreshChannelActivations
+		if resetting {
+			// Reset publishes under its fence, then releases execution before
+			// registration reconciliation can acquire a current holding run.
+			refresh = channelActivationRefresher.reconcileChannelRegistrations
+		}
+		if err := refresh(refreshCtx); err != nil {
 			return err
 		}
 		current := supervisor.CurrentRuntime()
