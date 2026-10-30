@@ -1,11 +1,13 @@
 package serveapp
 
 import (
+	"encoding/json"
 	"fmt"
 	"strings"
 	"testing"
 	"time"
 
+	"github.com/division-sh/swarm/internal/operatorread"
 	"github.com/division-sh/swarm/internal/runtime/decisioncard"
 	"github.com/division-sh/swarm/internal/servedparity"
 )
@@ -48,6 +50,7 @@ func TestChannelDeliveryHumanTemporalReceiptPublicJourney(t *testing.T) {
 							time.Sleep(remaining)
 						}
 					}
+					restartedAt := time.Now().UTC()
 					h.start(t)
 					until := time.Now().Add(15 * time.Second)
 					for {
@@ -59,7 +62,27 @@ func TestChannelDeliveryHumanTemporalReceiptPublicJourney(t *testing.T) {
 							break
 						}
 						if time.Now().After(until) {
-							t.Fatalf("temporal card state=%s want=%s", after.Status, want)
+							t.Errorf("temporal card state=%s want=%s", after.Status, want)
+							if transition == "expire_restart" {
+								// Maintenance warnings have no run ID. Read only this
+								// restarted serve's bounded diagnostics after the original cut.
+								var logs operatorread.OperatorRuntimeLogListResult
+								requireServedJSONRPCResult(t, h.rpcEndpoint(), "runtime.logs", map[string]any{
+									"component": "workflow-runtime", "since": restartedAt.Format(time.RFC3339Nano),
+									"order": "asc", "limit": 1000,
+								}, &logs)
+								matched := 0
+								for _, row := range logs.Logs {
+									if row.Action != "admit_pipeline_maintenance" && row.Action != "expire_human_task_cards" {
+										continue
+									}
+									matched++
+									body, err := json.Marshal(row)
+									t.Logf("serve maintenance runtime-log row=%s encode_error=%v", body, err)
+								}
+								t.Logf("serve maintenance runtime-log matched=%d next_cursor=%q", matched, logs.NextCursor)
+							}
+							t.FailNow()
 						}
 						time.Sleep(20 * time.Millisecond)
 					}
