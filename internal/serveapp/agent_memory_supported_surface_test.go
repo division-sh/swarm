@@ -526,7 +526,7 @@ func addStandingMockInput(t *testing.T, root string) {
           text: payload.text
           external_account: payload.external_account
           conversation_reference: payload.conversation_reference
-          conversation_scope: '"direct"'
+          conversation_scope: direct
           provider_message_reference: payload.provider_message_reference
 `)
 }
