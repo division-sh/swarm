@@ -92,6 +92,7 @@ func runMockAgentSupportedSurface(t *testing.T, backend string) time.Duration {
 	isolateCLIAPIConfigEnv(t)
 	sourceRoot := writeStandingMemoryServeFixture(t, "")
 	addCanonicalTelegramApprovalOverlay(t, sourceRoot)
+	bundleHash := servedEventPublishFixtureBundleHash(t, sourceRoot)
 	credentialPath := filepath.Join(t.TempDir(), "credentials.json")
 	t.Setenv("SWARM_CREDENTIALS_FILE", credentialPath)
 	credentialStore, err := runtimecredentials.NewFileStore(credentialPath)
@@ -169,12 +170,9 @@ func runMockAgentSupportedSurface(t *testing.T, backend string) time.Duration {
 	first := startOwnedMockLifecycleTestProcess(t, repoRootForTest(), retainedRoot, opts)
 	first.waitForReadyLine()
 	firstURL := "http://" + serveRuntimeAPIListenerFromOutput(t, first.outputString())
-	publication := sendStandingTelegramUpdatePublication(t, firstURL, 301, 42)
-	binding := publication.standingTelegramBinding
+	normalized := publishStandingMockInput(t, firstURL, bundleHash, 301, 42)
 	waitForMockAgentTurns(t, backend, location, 1)
-	var normalized operatorread.OperatorEventFull
-	requireServedJSONRPCResult(t, firstURL+"/v1/rpc", "event.get", map[string]any{"event_id": publication.EventIDs[1]}, &normalized)
-	if normalized.RunID != binding.RunID || normalized.EntityID == "" || len(normalized.Deliveries) != 1 || normalized.Deliveries[0].Target.EntityID != normalized.EntityID {
+	if normalized.EntityID == "" || len(normalized.Deliveries) != 1 || normalized.Deliveries[0].Target.EntityID != normalized.EntityID {
 		t.Fatalf("mock receiver readback lost exact delivery target: %+v", normalized)
 	}
 	entityID := normalized.EntityID
@@ -195,8 +193,8 @@ func runMockAgentSupportedSurface(t *testing.T, backend string) time.Duration {
 	second.waitForReadyLine()
 	secondURL := "http://" + serveRuntimeAPIListenerFromOutput(t, second.outputString())
 	waitForMockConnectorAttempts(t, backend, location, 1)
-	if got := sendStandingTelegramUpdate(t, secondURL, 302, 42); got != binding {
-		t.Fatalf("post-restart binding = %+v, want %+v", got, binding)
+	if got := publishStandingMockInput(t, secondURL, bundleHash, 302, 42); got.RunID != normalized.RunID || got.EntityID != normalized.EntityID {
+		t.Fatalf("post-restart mock input changed its exact run/entity: %+v, want %+v", got, normalized)
 	}
 	waitForMockAgentTurns(t, backend, location, 2)
 	secondCardID := waitForMockConnectorDecisionCard(t, backend, location, 2)

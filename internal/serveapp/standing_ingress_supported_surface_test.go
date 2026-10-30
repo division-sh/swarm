@@ -217,13 +217,27 @@ func TestStandingIngressSupportedSurfaceSQLiteRestartPreservesAuthorityAndReplie
 	prepareStandingTelegramCallback(t, &opts)
 	first := startServeRuntimeTestProcess(t, opts)
 	first.waitForReadyLine()
-	firstBinding := sendStandingTelegramUpdate(t, native, 101, 42)
-	secondBinding := sendStandingTelegramUpdate(t, native, 102, 42)
+	firstURL := "http://" + serveRuntimeAPIListenerFromOutput(t, first.outputString())
+	requireStandingTelegramSignatureRejection(t, native)
+	requireStandingTelegramEvidenceCounts(t, "sqlite", sqlitePath, standingTelegramEvidenceCounts{}, "rejected signatures")
+	unmatched := sendStandingTelegramUnmatchedUpdate(t, native, 100)
+	waitForStandingTelegramRawCount(t, "sqlite", sqlitePath, 1)
+	requireStandingTelegramEvidenceCounts(t, "sqlite", sqlitePath, standingTelegramEvidenceCounts{Raw: 1}, "unmatched raw-only update")
+	requireStandingTelegramPublicationSettlement(t, firstURL, unmatched, false)
+	firstMatched := sendStandingTelegramUpdatePublication(t, native, 101, 42)
+	secondMatched := sendStandingTelegramUpdatePublication(t, native, 102, 42)
+	firstBinding, secondBinding := firstMatched.standingTelegramBinding, secondMatched.standingTelegramBinding
 	if firstBinding != secondBinding {
 		t.Fatalf("delivery bindings = %+v and %+v, want one standing generation", firstBinding, secondBinding)
 	}
 	requireStandingTelegramCalls(t, calls, sqlitePath, 42, 42)
 	waitForStandingDeliveryQuiescence(t, sqlitePath)
+	requireStandingTelegramPublicationSettlement(t, firstURL, firstMatched, true)
+	requireStandingTelegramPublicationSettlement(t, firstURL, secondMatched, true)
+	beforeRestart := standingTelegramEvidenceCounts{Raw: 3, Normalized: 2, Replies: 2, Activities: 2}
+	requireStandingTelegramEvidenceCounts(t, "sqlite", sqlitePath, beforeRestart, "before same-process duplicate")
+	requireStandingTelegramDuplicateIdentity(t, sendStandingTelegramDuplicate(t, native, 101, 42), firstMatched)
+	requireStandingTelegramEvidenceCounts(t, "sqlite", sqlitePath, beforeRestart, "same-process duplicate has no effects")
 	if code := first.stop(); code != 0 {
 		t.Fatalf("first serve exit = %d", code)
 	}
@@ -259,13 +273,20 @@ func TestStandingIngressSupportedSurfaceSQLiteRestartPreservesAuthorityAndReplie
 	second := startServeRuntimeTestProcess(t, opts)
 	second.waitForReadyLine()
 	secondURL := "http://" + serveRuntimeAPIListenerFromOutput(t, second.outputString())
-	restartedBinding := sendStandingTelegramUpdate(t, native, 103, 84)
+	requireStandingTelegramDuplicateIdentity(t, sendStandingTelegramDuplicate(t, native, 101, 42), firstMatched)
+	requireStandingTelegramPublicationSettlement(t, secondURL, unmatched, false)
+	requireStandingTelegramPublicationSettlement(t, secondURL, firstMatched, true)
+	requireStandingTelegramEvidenceCounts(t, "sqlite", sqlitePath, beforeRestart, "post-restart duplicate has no effects")
+	lastMatched := sendStandingTelegramUpdatePublication(t, native, 103, 84)
+	restartedBinding := lastMatched.standingTelegramBinding
 	if restartedBinding != firstBinding {
 		t.Fatalf("restart binding = %+v, want %+v", restartedBinding, firstBinding)
 	}
 	requireStandingTelegramCalls(t, calls, sqlitePath, 84)
 	waitForStandingDeliveryQuiescence(t, sqlitePath)
-	requireStandingDeclarationPublicationReadback(t, secondURL, firstBinding, []string{"101", "102", "103"})
+	requireStandingTelegramPublicationSettlement(t, secondURL, lastMatched, true)
+	requireStandingTelegramEvidenceCounts(t, "sqlite", sqlitePath, standingTelegramEvidenceCounts{Raw: 4, Normalized: 3, Replies: 3, Activities: 3}, "post-restart new input")
+	requireStandingDeclarationPublicationReadback(t, secondURL, firstBinding, []string{"100", "101", "102", "103"})
 	if code := second.stop(); code != 0 {
 		t.Fatalf("second serve exit = %d", code)
 	}
@@ -449,12 +470,27 @@ func TestStandingIngressSupportedSurfacePostgresRestartPreservesAuthorityAndRepl
 	prepareStandingTelegramCallback(t, &opts)
 	first := startServeRuntimeTestProcess(t, opts)
 	first.waitForReadyLine()
-	binding := sendStandingTelegramUpdate(t, native, 201, 42)
-	if got := sendStandingTelegramUpdate(t, native, 202, 42); got != binding {
+	firstURL := "http://" + serveRuntimeAPIListenerFromOutput(t, first.outputString())
+	requireStandingTelegramSignatureRejection(t, native)
+	requireStandingTelegramEvidenceCounts(t, "postgres", dsn, standingTelegramEvidenceCounts{}, "rejected signatures")
+	unmatched := sendStandingTelegramUnmatchedUpdate(t, native, 200)
+	waitForStandingTelegramRawCount(t, "postgres", dsn, 1)
+	requireStandingTelegramEvidenceCounts(t, "postgres", dsn, standingTelegramEvidenceCounts{Raw: 1}, "unmatched raw-only update")
+	requireStandingTelegramPublicationSettlement(t, firstURL, unmatched, false)
+	firstMatched := sendStandingTelegramUpdatePublication(t, native, 201, 42)
+	secondMatched := sendStandingTelegramUpdatePublication(t, native, 202, 42)
+	binding := firstMatched.standingTelegramBinding
+	if got := secondMatched.standingTelegramBinding; got != binding {
 		t.Fatalf("second binding = %+v, want %+v", got, binding)
 	}
 	requireStandingTelegramCalls(t, calls, "postgres:"+dsn, 42, 42)
 	waitForStandingDeliveryQuiescence(t, "postgres:"+dsn)
+	requireStandingTelegramPublicationSettlement(t, firstURL, firstMatched, true)
+	requireStandingTelegramPublicationSettlement(t, firstURL, secondMatched, true)
+	beforeRestart := standingTelegramEvidenceCounts{Raw: 3, Normalized: 2, Replies: 2, Activities: 2}
+	requireStandingTelegramEvidenceCounts(t, "postgres", dsn, beforeRestart, "before same-process duplicate")
+	requireStandingTelegramDuplicateIdentity(t, sendStandingTelegramDuplicate(t, native, 201, 42), firstMatched)
+	requireStandingTelegramEvidenceCounts(t, "postgres", dsn, beforeRestart, "same-process duplicate has no effects")
 	if code := first.stop(); code != 0 {
 		t.Fatalf("first serve exit = %d", code)
 	}
@@ -466,12 +502,20 @@ func TestStandingIngressSupportedSurfacePostgresRestartPreservesAuthorityAndRepl
 	prepareStandingTelegramCallback(t, &opts)
 	second := startServeRuntimeTestProcess(t, opts)
 	second.waitForReadyLine()
-	if got := sendStandingTelegramUpdate(t, native, 203, 84); got != binding {
+	secondURL := "http://" + serveRuntimeAPIListenerFromOutput(t, second.outputString())
+	requireStandingTelegramDuplicateIdentity(t, sendStandingTelegramDuplicate(t, native, 201, 42), firstMatched)
+	requireStandingTelegramPublicationSettlement(t, secondURL, unmatched, false)
+	requireStandingTelegramPublicationSettlement(t, secondURL, firstMatched, true)
+	requireStandingTelegramEvidenceCounts(t, "postgres", dsn, beforeRestart, "post-restart duplicate has no effects")
+	lastMatched := sendStandingTelegramUpdatePublication(t, native, 203, 84)
+	if got := lastMatched.standingTelegramBinding; got != binding {
 		t.Fatalf("restart binding = %+v, want %+v", got, binding)
 	}
 	requireStandingTelegramCalls(t, calls, "postgres:"+dsn, 84)
 	waitForStandingDeliveryQuiescence(t, "postgres:"+dsn)
-	requireStandingDeclarationPublicationReadback(t, "http://"+serveRuntimeAPIListenerFromOutput(t, second.outputString()), binding, []string{"201", "202", "203"})
+	requireStandingTelegramPublicationSettlement(t, secondURL, lastMatched, true)
+	requireStandingTelegramEvidenceCounts(t, "postgres", dsn, standingTelegramEvidenceCounts{Raw: 4, Normalized: 3, Replies: 3, Activities: 3}, "post-restart new input")
+	requireStandingDeclarationPublicationReadback(t, secondURL, binding, []string{"200", "201", "202", "203"})
 	if code := second.stop(); code != 0 {
 		t.Fatalf("second serve exit = %d", code)
 	}

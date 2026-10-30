@@ -407,32 +407,17 @@ func runStandingTelegramMemorySupportedSurface(t *testing.T, backend string, rec
 	first := startOwnedMockLifecycleTestProcess(t, repoRootForTest(), retainedRoot, opts)
 	first.waitForReadyLine()
 	firstURL := "http://" + serveRuntimeAPIListenerFromOutput(t, first.outputString())
-	firstDiagnostics := func() string {
-		return first.outputString() + "\ndiagnostics: " + standingMemoryStoreDiagnostics(backend, storeLocation)
-	}
-	requireStandingTelegramSignatureRejection(t, firstURL)
-	requireStandingTelegramEvidenceCounts(t, backend, storeLocation, standingTelegramEvidenceCounts{}, "rejected signatures")
-	unmatched := sendStandingTelegramUnmatchedUpdate(t, firstURL, 100)
-	waitForStandingTelegramRawCount(t, backend, storeLocation, 1)
-	requireStandingTelegramEvidenceCounts(t, backend, storeLocation, standingTelegramEvidenceCounts{Raw: 1}, "unmatched raw-only update")
-	requireStandingTelegramPublicationSettlement(t, firstURL, unmatched, false)
-	firstMatched := sendStandingTelegramUpdatePublication(t, firstURL, 101, 42, firstDiagnostics)
-	binding := firstMatched.standingTelegramBinding
+	firstInput := publishStandingMockInput(t, firstURL, bundleHash, 101, 42)
 	waitForStandingMemoryCompletion(t, backend, storeLocation, "mock", 1)
-	requireStandingTelegramPublicationSettlement(t, firstURL, firstMatched, true)
-	requireStandingTelegramDuplicateIdentity(t, sendStandingTelegramDuplicate(t, firstURL, 101, 42), firstMatched)
-	requireStandingMemoryAttemptCount(t, backend, storeLocation, "mock", 1, "same-process exact duplicate")
-	secondMatched := sendStandingTelegramUpdatePublication(t, firstURL, 102, 42, firstDiagnostics)
-	if secondMatched.standingTelegramBinding != binding {
-		t.Fatalf("A2 binding = %+v, want A1 binding %+v", secondMatched.standingTelegramBinding, binding)
+	secondInput := publishStandingMockInput(t, firstURL, bundleHash, 102, 42)
+	if secondInput.RunID != firstInput.RunID {
+		t.Fatalf("A2 run = %s, want A1 run %s", secondInput.RunID, firstInput.RunID)
 	}
-	thirdMatched := sendStandingTelegramUpdatePublication(t, firstURL, 103, 84, firstDiagnostics)
-	if thirdMatched.standingTelegramBinding != binding {
-		t.Fatalf("B1 binding = %+v, want standing binding %+v", thirdMatched.standingTelegramBinding, binding)
+	thirdInput := publishStandingMockInput(t, firstURL, bundleHash, 103, 84)
+	if thirdInput.RunID != firstInput.RunID {
+		t.Fatalf("B1 run = %s, want A1 run %s", thirdInput.RunID, firstInput.RunID)
 	}
 	waitForStandingMemoryCompletion(t, backend, storeLocation, "mock", 3)
-	requireStandingTelegramPublicationSettlement(t, firstURL, secondMatched, true)
-	requireStandingTelegramPublicationSettlement(t, firstURL, thirdMatched, true)
 	requireStandingPayloadOnlyTargetReadback(t, firstURL, bundleHash, "mock", 2, []string{
 		"Mock turn 1: hello 101",
 		"Mock turn 2: hello 102",
@@ -440,7 +425,7 @@ func runStandingTelegramMemorySupportedSurface(t *testing.T, backend string, rec
 	})
 	before := loadStandingMemorySessions(t, backend, storeLocation)
 	requireStandingMemorySessionShape(t, before)
-	beforeTranscript := readStandingPublicTranscript(t, firstURL, binding.RunID, 3)
+	beforeTranscript := readStandingPublicTranscript(t, firstURL, firstInput.RunID, 3)
 	proveStandingAgentRestartLostReply(t, firstURL, backend, storeLocation, before)
 	if code := first.stop(); code != 0 {
 		t.Fatalf("first serve exit = %d", code)
@@ -469,26 +454,21 @@ func runStandingTelegramMemorySupportedSurface(t *testing.T, backend string, rec
 		}
 	}
 	secondURL := "http://" + serveRuntimeAPIListenerFromOutput(t, second.outputString())
-	if afterTranscript := readStandingPublicTranscript(t, secondURL, binding.RunID, 3); !reflect.DeepEqual(beforeTranscript, afterTranscript) {
+	if afterTranscript := readStandingPublicTranscript(t, secondURL, firstInput.RunID, 3); !reflect.DeepEqual(beforeTranscript, afterTranscript) {
 		t.Fatalf("joined restart changed ordered public turns: before=%+v after=%+v", beforeTranscript, afterTranscript)
 	}
-	requireStandingTelegramDuplicateIdentity(t, sendStandingTelegramDuplicate(t, secondURL, 101, 42), firstMatched)
-	requireStandingTelegramPublicationSettlement(t, secondURL, unmatched, false)
-	requireStandingTelegramPublicationSettlement(t, secondURL, firstMatched, true)
-	requireStandingMemoryAttemptCount(t, backend, storeLocation, "mock", 3, "post-restart exact duplicate")
-	fourthMatched := sendStandingTelegramUpdatePublication(t, secondURL, 104, 42)
-	if fourthMatched.standingTelegramBinding != binding {
-		t.Fatalf("A3 binding = %+v, want standing binding %+v", fourthMatched.standingTelegramBinding, binding)
+	fourthInput := publishStandingMockInput(t, secondURL, bundleHash, 104, 42)
+	if fourthInput.RunID != firstInput.RunID {
+		t.Fatalf("A3 run = %s, want A1 run %s", fourthInput.RunID, firstInput.RunID)
 	}
 	waitForStandingMemoryCompletion(t, backend, storeLocation, "mock", 4)
-	requireStandingTelegramPublicationSettlement(t, secondURL, fourthMatched, true)
 	requireStandingPayloadOnlyTargetReadback(t, secondURL, bundleHash, "mock", 2, []string{
 		"Mock turn 1: hello 101",
 		"Mock turn 2: hello 102",
 		"Mock turn 1: hello 103",
 		"Mock turn 3: hello 104",
 	})
-	afterTranscript := readStandingPublicTranscript(t, secondURL, binding.RunID, 4)
+	afterTranscript := readStandingPublicTranscript(t, secondURL, firstInput.RunID, 4)
 	for sessionID, turns := range beforeTranscript {
 		current := afterTranscript[sessionID]
 		if len(current) < len(turns) || !reflect.DeepEqual(turns, current[:len(turns)]) {
@@ -500,6 +480,49 @@ func runStandingTelegramMemorySupportedSurface(t *testing.T, backend string, rec
 	}
 	after := loadStandingMemorySessions(t, backend, storeLocation)
 	assertStandingMemorySessionContinuity(t, before, after)
+}
+
+func publishStandingMockInput(t *testing.T, baseURL, bundleHash string, messageID, chatID int) operatorread.OperatorEventFull {
+	t.Helper()
+	endpoint := baseURL + "/v1/rpc"
+	var listed struct {
+		Runs       []operatorread.RunHeader `json:"runs"`
+		NextCursor string                   `json:"next_cursor"`
+	}
+	requireServedJSONRPCResult(t, endpoint, "run.list", map[string]any{"bundle_hash": bundleHash, "limit": 500}, &listed)
+	runID := ""
+	for _, run := range listed.Runs {
+		if run.FlowPath != "." || run.Status != "live" || run.BundleHash != bundleHash {
+			continue
+		}
+		if runID != "" {
+			t.Fatal("mock input has more than one exact admitted root run")
+		}
+		runID = run.RunID
+	}
+	if runID == "" || listed.NextCursor != "" {
+		t.Fatal("mock input has no complete exact admitted root-run selection")
+	}
+	var published struct {
+		RunID         string `json:"run_id"`
+		EventID       string `json:"event_id"`
+		NewRunCreated bool   `json:"new_run_created"`
+	}
+	requireServedJSONRPCResult(t, endpoint, "event.publish", map[string]any{
+		"run_id": runID, "event_name": "inbound.telegram.text_message", "idempotency_key": fmt.Sprintf("mock-message-%d", messageID),
+		"payload": map[string]any{"text": fmt.Sprintf("hello %d", messageID), "operator_account": "420079",
+			"external_account": fmt.Sprint(chatID), "conversation_reference": fmt.Sprint(chatID),
+			"conversation_scope": "direct", "provider_message_reference": messageID},
+	}, &published)
+	if published.NewRunCreated || published.RunID != runID || published.EventID == "" {
+		t.Fatalf("mock business input changed its admitted run: %+v", published)
+	}
+	var observed operatorread.OperatorEventFull
+	requireServedJSONRPCResult(t, endpoint, "event.get", map[string]any{"event_id": published.EventID}, &observed)
+	if observed.RunID != runID || observed.EventID != published.EventID || observed.EventName != "inbound.telegram.text_message" || string(observed.ExecutionMode) != "mock" {
+		t.Fatalf("mock business input lost its exact event/run/mode: %+v", observed)
+	}
+	return observed
 }
 
 type standingTelegramEvidenceCounts struct {
