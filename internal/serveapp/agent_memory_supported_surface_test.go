@@ -609,6 +609,11 @@ func publishStandingMockInput(t *testing.T, baseURL, bundleHash string, messageI
 			requireServedJSONRPCResult(t, endpoint, "event.list", map[string]any{
 				"filter": map[string]any{"run_id": runID}, "limit": 500,
 			}, &events)
+			for _, event := range events.Events {
+				if event.NoDelivery != nil && event.EventName == "inbound.telegram.text_message" {
+					t.Logf("mock constructor settlement: %+v", *event.NoDelivery)
+				}
+			}
 			t.Fatalf("mock business input has no actual child delivery: events=%+v", events.Events)
 		}
 		time.Sleep(10 * time.Millisecond)
