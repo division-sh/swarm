@@ -6939,10 +6939,11 @@ func Test2376DirectoryBootUsesExactSelectedStoreSource(t *testing.T) {
 					t.Fatalf("open SQLite selected store: %v", err)
 				}
 				bootstrapSQLiteSchemaForTest(t, context.Background(), selected, plans)
-				if _, err := selected.EnsureSourceArtifactWithData(context.Background(), bundle.SourceArtifact, catalog); err != nil {
+				if _, err := selected.EnsureSourceArtifactWithData(serveFixtureProcessContext(t, context.Background(), selected), bundle.SourceArtifact, catalog); err != nil {
 					_ = selected.Close()
 					t.Fatalf("persist SQLite source artifact: %v", err)
 				}
+				releaseServeTestAgentFixtureCapability(t, selected)
 				if err := selected.Close(); err != nil {
 					t.Fatalf("close seeded SQLite selected store: %v", err)
 				}
@@ -6951,9 +6952,10 @@ func Test2376DirectoryBootUsesExactSelectedStoreSource(t *testing.T) {
 					return serveRuntimeWorkspaceStub{bundleScopes: &workspaceBundleScopes}
 				})
 				opts.ConfigPath = writeStoreBackendRuntimeConfig(t, backend.String(), "")
-				if _, err := selected.EnsureSourceArtifactWithData(context.Background(), bundle.SourceArtifact, catalog); err != nil {
+				if _, err := selected.EnsureSourceArtifactWithData(serveFixtureProcessContext(t, context.Background(), selected), bundle.SourceArtifact, catalog); err != nil {
 					t.Fatalf("persist PostgreSQL source artifact: %v", err)
 				}
+				releaseServeTestAgentFixtureCapability(t, selected)
 			default:
 				t.Fatalf("unsupported selected store %q", backend)
 			}

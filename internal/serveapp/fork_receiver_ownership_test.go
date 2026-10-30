@@ -709,7 +709,7 @@ func runForkReceiverOwnershipJourney(t *testing.T, backend servedparity.Backend,
 		if selected == nil {
 			t.Fatal("missing selected store owner")
 		}
-		seedStandingRuntimeContextBundle(t, selected.SourceArtifactWriter(), bundle)
+		seedStandingRuntimeContextBundle(t, servedControlProofAuthorActivityContext(t, rt), selected.SourceArtifactWriter(), bundle)
 		selectedHash := servedEventPublishFixtureBundleHash(t, selectedRoot)
 		selectedFact, err := correlation.NewSourceArtifactFact(selectedHash)
 		if err != nil {

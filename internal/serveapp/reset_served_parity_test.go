@@ -16,6 +16,7 @@ import (
 	"github.com/division-sh/swarm/internal/apiv1"
 	"github.com/division-sh/swarm/internal/runtime/core/worklifetime"
 	"github.com/division-sh/swarm/internal/runtime/destructivereset"
+	"github.com/division-sh/swarm/internal/runtime/startupownership"
 	"github.com/division-sh/swarm/internal/servedparity"
 	"github.com/google/uuid"
 )
@@ -25,11 +26,13 @@ func TestServedResetRetainClearAndHistoricalReplayBothStores(t *testing.T) {
 	servedparity.Run(t, scenario, func(t *testing.T, backend servedparity.Backend) {
 		for _, clear := range []bool{false, true} {
 			t.Run(fmt.Sprintf("clear=%t", clear), func(t *testing.T) {
+				captured := captureSelectedResetSupervisor(t)
 				var originalRoot string
 				proof := startServedControlProofRuntimeWithFixture(t, backend, func(t *testing.T) string {
 					originalRoot = writeServedEventPublishFollowUpFixture(t)
 					return originalRoot
 				})
+				supervisor := <-captured
 				if err := os.RemoveAll(originalRoot); err != nil {
 					t.Fatal(err)
 				}
@@ -146,7 +149,7 @@ func TestServedResetRetainClearAndHistoricalReplayBothStores(t *testing.T) {
 				}
 				// The domain receipt must survive transport-cache expiry even
 				// after later real runtime work has completed.
-				expireServedResetTransportCache(t, proof)
+				expireServedResetTransportCache(t, proof, supervisor.processCapability)
 				for i := 0; i < 2; i++ {
 					replay := requestServedJSONRPC(t, proof.Endpoint, "runtime.nuke", params)
 					if replay.Error != nil {
@@ -185,7 +188,9 @@ func TestServedResetRetainClearAndHistoricalReplayBothStores(t *testing.T) {
 func TestServedResetCLIDryRunApplyAndReplayBothStores(t *testing.T) {
 	for _, backend := range []servedparity.Backend{servedparity.BackendDefaultSQLite, servedparity.BackendExplicitPostgres} {
 		t.Run(string(backend), func(t *testing.T) {
+			captured := captureSelectedResetSupervisor(t)
 			proof := startServedControlProofRuntime(t, backend)
+			supervisor := <-captured
 			initial := requireServedEventPublishRPCResult(t, proof.Endpoint, map[string]any{
 				"event_name": "item.received", "bundle_hash": proof.BundleHash,
 				"payload": map[string]any{"item_id": "cli-reset"}, "idempotency_key": uuid.NewString(),
@@ -217,7 +222,7 @@ func TestServedResetCLIDryRunApplyAndReplayBothStores(t *testing.T) {
 					t.Fatalf("apply retained %s: count=%d err=%v", table, count, err)
 				}
 			}
-			expireServedResetTransportCache(t, proof)
+			expireServedResetTransportCache(t, proof, supervisor.processCapability)
 			replayed, stderr, code := runServedCLICommand(t, proof.Endpoint, args)
 			if code != 0 || stderr != "" || replayed != stdout {
 				t.Fatalf("replay: exit=%d stderr=%q\nfirst=%s\nreplay=%s", code, stderr, stdout, replayed)
@@ -229,7 +234,7 @@ func TestServedResetCLIDryRunApplyAndReplayBothStores(t *testing.T) {
 	}
 }
 
-func expireServedResetTransportCache(t *testing.T, proof servedControlProofRuntime) {
+func expireServedResetTransportCache(t *testing.T, proof servedControlProofRuntime, process startupownership.ProcessCapability) {
 	t.Helper()
 	var owner apiv1.APIIdempotencyStore = proof.Postgres
 	if proof.Backend == "sqlite" {
@@ -237,7 +242,11 @@ func expireServedResetTransportCache(t *testing.T, proof servedControlProofRunti
 	}
 	// Exercise the cache owner's expiry transaction, rather than racing a raw
 	// fixture DELETE against the selected runtime's SQLite write owner.
-	_, _, err := owner.WithAPIIdempotency(context.Background(), apiidempotency.Request{
+	ctx, err := startupownership.WithProcessMutationAuthority(t.Context(), process)
+	if err != nil {
+		t.Fatal(err)
+	}
+	_, _, err = owner.WithAPIIdempotency(ctx, apiidempotency.Request{
 		Method: "test.expire-transport-cache", Actor: apiidempotency.BearerActor("expiry-proof"),
 		IdempotencyKey: uuid.NewString(), RequestHash: "expiry-proof",
 		Now: time.Now().UTC().Add(48 * time.Hour), TTL: time.Minute,

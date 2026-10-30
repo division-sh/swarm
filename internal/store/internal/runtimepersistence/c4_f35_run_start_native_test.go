@@ -192,7 +192,7 @@ func TestC4F35EventStartNativeCommitAccountingBothStores(t *testing.T) {
 			t.Run(backend+"/"+cut, func(t *testing.T) {
 				selected, db, connector := newP16RaceStore(t, backend)
 				ctx := originalStoreFixtureContext(t, testAuthorActivityContext(), selected)
-				ctx = requireDefaultSourceArtifactForTest(t, testAuthorActivityContext(), selected)
+				ctx = requireDefaultSourceArtifactForTest(t, ctx, selected)
 				runID := uuid.NewString()
 				input := eventtest.RunCreatingRootIngress(uuid.NewString(), "c4.atomic.birth", "ingress", "", []byte(`{"original":true}`), 0,
 					runID, "", events.EventEnvelope{}, time.Date(2026, 10, 9, 0, 0, 0, 0, time.UTC))
@@ -338,7 +338,7 @@ func TestC4F35ForkStartNativeCommitAccountingBothStores(t *testing.T) {
 					c4RequireRevisionCount(t, ctx, selected, forkRun, 1)
 				}
 				selected, _ = c4ReopenCreationStore(t, backend, selected, db, connector, p16CommitConnector{connector})
-				ctx = requireDefaultSourceArtifactForTest(t, testAuthorActivityContext(), selected)
+				ctx = requireDefaultSourceArtifactForTest(t, ctx, selected)
 				ctx = originalStoreFixtureContext(t, ctx, selected)
 				owner = selected.(c4ForkCreationOwner)
 				if !committed {

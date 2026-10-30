@@ -119,7 +119,7 @@ func proveSelectedForkPublicChangedTargetExecutionBothStores(t *testing.T, optio
 				if _, _, err := predecessor.StopSelectedFork(context.Background(), runcontrol.TransitionRequest{RunID: uuid.NewString()}); !errors.Is(err, worklifetime.ErrRetired) {
 					t.Fatalf("predecessor stop did not remain retired: %v", err)
 				}
-				expireWorkspaceProofResetTransportCache(t, selected.Idempotency(), selected.RuntimeDeps().EventStore)
+				expireWorkspaceProofResetTransportCache(t, selected.Idempotency(), selected.RuntimeDeps().EventStore, supervisor.processCapability)
 				replay := requestServedJSONRPC(t, rt.Endpoint, "runtime.nuke", params)
 				if replay.Error != nil || !reflect.DeepEqual(response.Result, replay.Result) {
 					t.Fatalf("reset outcome replay: %+v", replay)
