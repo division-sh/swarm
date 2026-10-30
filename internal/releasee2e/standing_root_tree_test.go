@@ -172,11 +172,12 @@ func prepareStandingRootTreeAccounts(t *testing.T, binary, root, contracts strin
 	writeReleaseFile(t, config, "paths:\n  swarm_dir: "+strconv.Quote(filepath.Join(root, ".swarm"))+"\n"+goldenRuntimeConfig(store)+packConfig)
 	env := goldenProcessEnv(t, root, store.passwordEnv, 0)
 	env = append(env, "SSL_CERT_FILE="+certificate)
+	credentialEnv := goldenProcessEnv(t, root, "", 0)
 	for key, value := range map[string]string{
 		"telegram.webhook_signing_secret": fullLifecycleSigningSecret,
 		"telegram.telegram_bot_token":     fullLifecycleBotToken,
 	} {
-		result := runReleaseCommand(t, 30*time.Second, root, env, value+"\n", binary, "secrets", "set", key, "--stdin")
+		result := runReleaseCommand(t, 30*time.Second, root, credentialEnv, value+"\n", binary, "secrets", "set", key, "--stdin")
 		if result.err != nil {
 			t.Fatalf("provision original source tool credential %s: %v\n%s", key, result.err, result.output)
 		}
