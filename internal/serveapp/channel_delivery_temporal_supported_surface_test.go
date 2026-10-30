@@ -29,7 +29,7 @@ func TestChannelDeliveryHumanTemporalReceiptPublicJourney(t *testing.T) {
 						"event_name": "observer.requested", "run_id": seed.RunID, "source_event_id": seed.EventID,
 						"payload": map[string]any{"seed": true, "deadline_at": deadline.Format(time.RFC3339Nano)}, "idempotency_key": "temporal-human",
 					})
-					card := waitChannelAnchorCard(t, db, seed.RunID, decisioncard.AnchorKindHumanTask, "chat/observers")
+					card := waitChannelPublicCard(t, h, seed.RunID, decisioncard.AnchorKindHumanTask, "chat/observers")
 					before := readRegisteredChannelCard(t, h, card)
 					want := decisioncard.StatusPending
 					switch transition {

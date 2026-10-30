@@ -383,8 +383,13 @@ func (s *processLifecycleSupervisor) reconstructResetContexts(ctx context.Contex
 	if err != nil {
 		return err
 	}
-	if s.resetRefresh != nil {
-		if err := s.resetRefresh(ctx); err != nil {
+	if r := s.resetChannelActivations; r != nil {
+		if r.sessions != nil {
+			if err := r.sessions.RetireInactiveSessions(ctx); err != nil {
+				return err
+			}
+		}
+		if err := r.publishChannelActivations(ctx); err != nil {
 			return err
 		}
 	}
@@ -396,6 +401,11 @@ func (s *processLifecycleSupervisor) reconstructResetContexts(ctx context.Contex
 	}
 	if err := release(); err != nil {
 		return err
+	}
+	if s.resetRefresh != nil {
+		if err := s.resetRefresh(ctx); err != nil {
+			return err
+		}
 	}
 	if s.selectedResetPredecessor != nil {
 		environment := s.selectedRecoveryEnvironment

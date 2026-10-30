@@ -211,17 +211,21 @@ func TestChannelDeliverySettlementDiagnosticBothStores(t *testing.T) {
 			card := waitChannelAnchorCard(t, db, runID, "stage_gate", "chat")
 			if h.registration.DeploymentRegistration {
 				registeredChannelMailboxCLI(t, h, true, "view", card)
-				var receipts int
-				if err := db.QueryRow(`SELECT COUNT(*) FROM channel_delivery_receipts r JOIN channel_delivery_plans p ON p.delivery_id=r.delivery_id WHERE p.source_id=$1`, card).Scan(&receipts); err != nil || receipts != 0 {
-					t.Fatalf("CLI-only card acquired channel receipt authority: receipts=%d err=%v", receipts, err)
+			} else {
+				waitChannelAnchorReceipt(t, db, card)
+				waitChannelDeliverySendsSettled(t, db, backend)
+			}
+			var deliveryID string
+			err := db.QueryRow(`SELECT CAST(p.delivery_id AS TEXT) FROM channel_delivery_plans p
+				JOIN channel_delivery_receipts r ON r.delivery_id=p.delivery_id
+				WHERE p.source_id=$1 ORDER BY p.created_at LIMIT 1`, card).Scan(&deliveryID)
+			if h.registration.DeploymentRegistration {
+				if err != sql.ErrNoRows {
+					t.Fatalf("CLI-only card acquired channel receipt authority: delivery=%s err=%v", deliveryID, err)
 				}
 				return
 			}
-			waitChannelAnchorReceipt(t, db, card)
-			waitChannelDeliverySendsSettled(t, db, backend)
-			var deliveryID string
-			if err := db.QueryRow(`SELECT CAST(delivery_id AS TEXT) FROM channel_delivery_plans
-				WHERE current_receipt_operation_id IS NOT NULL ORDER BY created_at LIMIT 1`).Scan(&deliveryID); err != nil {
+			if err != nil {
 				t.Fatal(err)
 			}
 			evidence, err := readChannelDeliverySettlementDiagnostic(context.Background(), db, deliveryID)
