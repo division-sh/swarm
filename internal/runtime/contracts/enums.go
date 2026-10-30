@@ -3,8 +3,6 @@ package contracts
 import (
 	"fmt"
 	"strings"
-
-	"gopkg.in/yaml.v3"
 )
 
 type ComputeOperation uint8
@@ -72,20 +70,4 @@ func (o ComputeOperation) String() string {
 	default:
 		return ""
 	}
-}
-
-func (o *ComputeOperation) UnmarshalYAML(node *yaml.Node) error {
-	if o == nil {
-		return nil
-	}
-	var raw string
-	if err := node.Decode(&raw); err != nil {
-		return err
-	}
-	parsed, err := ParseComputeOperation(raw)
-	if err != nil {
-		return err
-	}
-	*o = parsed
-	return nil
 }
