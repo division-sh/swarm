@@ -22,7 +22,7 @@ func TestLifecycleEventCardinalityPreservesDuplicatesNamesAndClassesBothStores(t
 			ctx = originalStoreFixtureContext(t, ctx, fixture.store)
 			at := time.Date(2026, 10, 4, 17, 0, 0, 0, time.UTC)
 			for _, run := range []string{runID, sibling} {
-				seedAuthorActivityReceiptRun(t, fixture, ctx, run)
+				ctx = seedAuthorActivityReceiptRun(t, fixture, ctx, run)
 				for _, name := range []string{"work.completed", "work.completed", "concrete/work.completed", "contract.diagnostic"} {
 					event := eventtest.ExistingRunRootIngress(uuid.NewString(), events.EventType(name), "fixture", "", []byte(`{}`), 0, run, events.EventEnvelope{}, at)
 					if err := commitSemanticEventFixture(ctx, fixture.store.(semanticEventFixtureStore), event); err != nil {
@@ -90,6 +90,7 @@ func TestLifecycleEventCardinalityRefusesInvalidCancelledAndUnavailableOwnership
 	for _, backend := range eventRecordContractBackends() {
 		t.Run(backend.name, func(t *testing.T) {
 			fixture := backend.open(t)
+			setupCtx := originalStoreFixtureContext(t, testAuthorActivityContext(), fixture.store)
 			for _, invalid := range []string{"", "bad", uuid.Nil.String(), strings.ToUpper(runID)} {
 				refuse(t, ctx, fixture.store, invalid, "work.completed")
 			}
@@ -99,7 +100,7 @@ func TestLifecycleEventCardinalityRefusesInvalidCancelledAndUnavailableOwnership
 			if got, err := ReadLifecycleEventCardinalityForTest(cancelled, fixture.store, runID, "work.completed"); !errors.Is(err, context.Canceled) || got != 0 {
 				t.Fatalf("cancelled evidence lost refusal: %d %v", got, err)
 			}
-			if err := runUnrevisionedEventFixtureTransactionForTest(testAuthorActivityContext(), fixture.store, func(ctx context.Context, tx *sql.Tx) error {
+			if err := runUnrevisionedEventFixtureTransactionForTest(setupCtx, fixture.store, func(ctx context.Context, tx *sql.Tx) error {
 				_, err := tx.ExecContext(ctx, `ALTER TABLE events RENAME TO unavailable_lifecycle_events`)
 				return err
 			}); err != nil {
@@ -107,7 +108,7 @@ func TestLifecycleEventCardinalityRefusesInvalidCancelledAndUnavailableOwnership
 			}
 			restored := false
 			restore := func() {
-				if err := runUnrevisionedEventFixtureTransactionForTest(testAuthorActivityContext(), fixture.store, func(ctx context.Context, tx *sql.Tx) error {
+				if err := runUnrevisionedEventFixtureTransactionForTest(setupCtx, fixture.store, func(ctx context.Context, tx *sql.Tx) error {
 					_, err := tx.ExecContext(ctx, `ALTER TABLE unavailable_lifecycle_events RENAME TO events`)
 					return err
 				}); err != nil {

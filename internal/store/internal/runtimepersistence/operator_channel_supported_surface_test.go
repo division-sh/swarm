@@ -72,8 +72,8 @@ var (
 func TestOperatorChannelConfirmationCurrentnessReadFailurePreservesPendingCeremonySelectedStoreParity(t *testing.T) {
 	for _, backend := range []string{"sqlite", "postgres"} {
 		t.Run(backend, func(t *testing.T) {
-			ctx := context.Background()
 			fixture := openOperatorChannelContractFixture(t, backend)
+			ctx := fixture.ctx
 			identity := operatorChannelContractIdentity("currentness-read-failure-" + backend)
 			proofs, err := operatorchannel.NewFileProofStore(t.TempDir())
 			if err != nil {
@@ -137,8 +137,8 @@ func TestOperatorChannelConfirmationCurrentnessReadFailurePreservesPendingCeremo
 func TestOperatorChannelBeginReplayPrecedesCredentialCurrentnessSelectedStoreParity(t *testing.T) {
 	for _, backend := range []string{"sqlite", "postgres"} {
 		t.Run(backend, func(t *testing.T) {
-			ctx := context.Background()
 			fixture := openOperatorChannelContractFixture(t, backend)
+			ctx := fixture.ctx
 			identity := operatorChannelContractIdentity("begin-replay-currentness-" + backend)
 			proofs, err := operatorchannel.NewFileProofStore(t.TempDir())
 			if err != nil {
@@ -198,8 +198,8 @@ func TestOperatorChannelBeginReplayPrecedesCredentialCurrentnessSelectedStorePar
 func TestOperatorChannelProofCurrentnessReadFailurePreservesPendingResponsibilitySelectedStoreParity(t *testing.T) {
 	for _, backend := range []string{"sqlite", "postgres"} {
 		t.Run(backend, func(t *testing.T) {
-			ctx := context.Background()
 			fixture := openOperatorChannelContractFixture(t, backend)
+			ctx := fixture.ctx
 			identity := operatorChannelContractIdentity("proof-currentness-read-failure-" + backend)
 			proofs, err := operatorchannel.NewFileProofStore(t.TempDir())
 			if err != nil {
@@ -304,7 +304,7 @@ type unresolvedOperatorChannelProofFixture struct {
 
 func seedUnresolvedOperatorChannelProof(t *testing.T, fixture operatorChannelContractFixture, identity operatorchannel.InterfaceIdentity, mode unresolvedOperatorChannelProofMode, now time.Time) unresolvedOperatorChannelProofFixture {
 	t.Helper()
-	ctx := context.Background()
+	ctx := fixture.ctx
 	proofs, err := operatorchannel.NewFileProofStore(t.TempDir())
 	if err != nil {
 		t.Fatal(err)
@@ -353,8 +353,8 @@ func TestServedParityHarnessOperatorChannelLifecycle(t *testing.T) {
 func TestOperatorChannelProofResponsibilityRecoversAfterCommittedBindingSelectedStoreParity(t *testing.T) {
 	for _, backend := range []string{"sqlite", "postgres"} {
 		t.Run(backend, func(t *testing.T) {
-			ctx := context.Background()
 			fixture := openOperatorChannelContractFixture(t, backend)
+			ctx := fixture.ctx
 			identity := operatorChannelContractIdentity("proof-responsibility-generation")
 			proofs, err := operatorchannel.NewFileProofStore(t.TempDir())
 			if err != nil {
@@ -425,8 +425,8 @@ func TestOperatorChannelTerminalReplayAfterCredentialRotationSelectedStoreParity
 	for _, backend := range []string{"sqlite", "postgres"} {
 		for _, mode := range []unresolvedOperatorChannelProofMode{unresolvedOperatorChannelProofWriteFailed, unresolvedOperatorChannelProofCompletionFailed} {
 			t.Run(backend+"/"+string(mode), func(t *testing.T) {
-				ctx := context.Background()
 				fixture := openOperatorChannelContractFixture(t, backend)
+				ctx := fixture.ctx
 				identity := operatorChannelContractIdentity("rotated-terminal-replay-" + backend + "-" + string(mode))
 				now := time.Date(2026, 8, 31, 13, 0, 0, 0, time.UTC)
 				current := true
@@ -491,8 +491,8 @@ func TestOperatorChannelProviderCredentialRotationSelectedStoreParity(t *testing
 			for _, saveProof := range []bool{false, true} {
 				name := fmt.Sprintf("%s/%s/save_proof_%t", backend, source, saveProof)
 				t.Run(name, func(t *testing.T) {
-					ctx := context.Background()
 					fixture := openOperatorChannelContractFixture(t, backend)
+					ctx := fixture.ctx
 					identity := operatorChannelContractIdentity("provider-rotation-" + strings.ReplaceAll(name, "/", "-"))
 					proofs, err := operatorchannel.NewFileProofStore(t.TempDir())
 					if err != nil {
@@ -649,11 +649,11 @@ func TestOperatorChannelProviderCredentialRotationSelectedStoreParity(t *testing
 func TestOperatorChannelProofResponsibilityReconcilesCommittedFileSelectedStoreParity(t *testing.T) {
 	for _, backend := range []string{"sqlite", "postgres"} {
 		t.Run(backend, func(t *testing.T) {
-			ctx := context.Background()
 			now := time.Date(2026, 8, 25, 11, 0, 0, 0, time.UTC)
 
 			t.Run("exact_file_converges_after_restart", func(t *testing.T) {
 				fixture := openOperatorChannelContractFixture(t, backend)
+				ctx := fixture.ctx
 				identity := operatorChannelContractIdentity("proof-file-first-recovery-generation")
 				proofs, err := operatorchannel.NewFileProofStore(t.TempDir())
 				if err != nil {
@@ -708,6 +708,7 @@ func TestOperatorChannelProofResponsibilityReconcilesCommittedFileSelectedStoreP
 
 			t.Run("same_revision_mismatch_fails_closed", func(t *testing.T) {
 				fixture := openOperatorChannelContractFixture(t, backend)
+				ctx := fixture.ctx
 				identity := operatorChannelContractIdentity("proof-file-first-mismatch-generation")
 				proofs, err := operatorchannel.NewFileProofStore(t.TempDir())
 				if err != nil {
@@ -762,8 +763,8 @@ func TestOperatorChannelUnresolvedProofResponsibilityFencesBindingMutationSelect
 	for _, backend := range []string{"sqlite", "postgres"} {
 		for _, mode := range []unresolvedOperatorChannelProofMode{unresolvedOperatorChannelProofWriteFailed, unresolvedOperatorChannelProofCompletionFailed} {
 			t.Run(backend+"/"+string(mode), func(t *testing.T) {
-				ctx := context.Background()
 				fixture := openOperatorChannelContractFixture(t, backend)
+				ctx := fixture.ctx
 				now := time.Date(2026, 8, 25, 13, 0, 0, 0, time.UTC)
 				identity := operatorChannelContractIdentity("unresolved-mutation-" + string(mode))
 				seed := seedUnresolvedOperatorChannelProof(t, fixture, identity, mode, now)
@@ -817,8 +818,8 @@ func TestOperatorChannelUnbindDischargesUnresolvedProofResponsibilitySelectedSto
 	for _, backend := range []string{"sqlite", "postgres"} {
 		for _, mode := range []unresolvedOperatorChannelProofMode{unresolvedOperatorChannelProofWriteFailed, unresolvedOperatorChannelProofCompletionFailed} {
 			t.Run(backend+"/"+string(mode), func(t *testing.T) {
-				ctx := context.Background()
 				fixture := openOperatorChannelContractFixture(t, backend)
+				ctx := fixture.ctx
 				now := time.Date(2026, 8, 25, 14, 0, 0, 0, time.UTC)
 				identity := operatorChannelContractIdentity("unresolved-unbind-" + string(mode))
 				seed := seedUnresolvedOperatorChannelProof(t, fixture, identity, mode, now)
@@ -866,8 +867,8 @@ func TestOperatorChannelUnresolvedProofResponsibilityConcurrentMutationSelectedS
 	for _, backend := range []string{"sqlite", "postgres"} {
 		t.Run(backend, func(t *testing.T) {
 			t.Run("completion_vs_begin", func(t *testing.T) {
-				ctx := context.Background()
 				fixture := openOperatorChannelContractFixture(t, backend)
+				ctx := fixture.ctx
 				now := time.Date(2026, 8, 25, 15, 0, 0, 0, time.UTC)
 				identity := operatorChannelContractIdentity("unresolved-concurrent-begin")
 				seed := seedUnresolvedOperatorChannelProof(t, fixture, identity, unresolvedOperatorChannelProofCompletionFailed, now)
@@ -898,8 +899,8 @@ func TestOperatorChannelUnresolvedProofResponsibilityConcurrentMutationSelectedS
 			})
 
 			t.Run("completion_vs_unbind", func(t *testing.T) {
-				ctx := context.Background()
 				fixture := openOperatorChannelContractFixture(t, backend)
+				ctx := fixture.ctx
 				now := time.Date(2026, 8, 25, 16, 0, 0, 0, time.UTC)
 				identity := operatorChannelContractIdentity("unresolved-concurrent-unbind")
 				seed := seedUnresolvedOperatorChannelProof(t, fixture, identity, unresolvedOperatorChannelProofCompletionFailed, now)
@@ -940,8 +941,8 @@ func TestOperatorChannelUnresolvedProofResponsibilityConcurrentMutationSelectedS
 func TestOperatorChannelRetainedLifecycleProjectionSelectedStoreParity(t *testing.T) {
 	for _, backend := range []string{"sqlite", "postgres"} {
 		t.Run(backend, func(t *testing.T) {
-			ctx := context.Background()
 			fixture := openOperatorChannelContractFixture(t, backend)
+			ctx := fixture.ctx
 			proofs, err := operatorchannel.NewFileProofStore(t.TempDir())
 			if err != nil {
 				t.Fatal(err)
@@ -1026,8 +1027,8 @@ func TestOperatorChannelRetainedLifecycleProjectionSelectedStoreParity(t *testin
 func TestOperatorChannelProofBootPreservesExactScopeSelectedStoreParity(t *testing.T) {
 	for _, backend := range []string{"sqlite", "postgres"} {
 		t.Run(backend, func(t *testing.T) {
-			ctx := context.Background()
 			fixture := openOperatorChannelContractFixture(t, backend)
+			ctx := fixture.ctx
 			proofs, err := operatorchannel.NewFileProofStore(t.TempDir())
 			if err != nil {
 				t.Fatal(err)
@@ -1099,7 +1100,7 @@ func runOperatorChannelSupportedSurface(t *testing.T, backend servedparity.Backe
 		t.Fatal(err)
 	}
 	now := time.Now().UTC().Truncate(time.Second)
-	principal, _, err := service.Bootstrap(context.Background(), now)
+	principal, _, err := service.Bootstrap(fixture.ctx, now)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -1116,12 +1117,12 @@ func runOperatorChannelSupportedSurface(t *testing.T, backend servedparity.Backe
 
 	bindingRevision := int64(0)
 	proofRevision := int64(0)
-	rejectedOperation, err := service.Begin(context.Background(), identity.Selector, operatorchannel.OperationConnect, 0,
+	rejectedOperation, err := service.Begin(fixture.ctx, identity.Selector, operatorchannel.OperationConnect, 0,
 		"reject-"+string(backend), "reject-request-"+string(backend), "", operatorChannelProviderAuthority(), false, now)
 	if err != nil {
 		t.Fatal(err)
 	}
-	rejectedSettlement, err := fixture.settle(context.Background(), operatorChannelContractClaim(rejectedOperation, operatorchannel.ConversationScopeDirect, "rejected-account", "rejected-conversation", uuid.NewString()), now.Add(30*time.Second))
+	rejectedSettlement, err := fixture.settle(fixture.ctx, operatorChannelContractClaim(rejectedOperation, operatorchannel.ConversationScopeDirect, "rejected-account", "rejected-conversation", uuid.NewString()), now.Add(30*time.Second))
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -1146,7 +1147,7 @@ func runOperatorChannelSupportedSurface(t *testing.T, backend servedparity.Backe
 		kind := map[string]operatorchannel.OperationKind{
 			"channel.connect": operatorchannel.OperationConnect, "channel.reconnect": operatorchannel.OperationReconnect, "channel.rebind": operatorchannel.OperationRebind,
 		}[lifecycle.method]
-		begun, err := service.Begin(context.Background(), identity.Selector, kind, bindingRevision,
+		begun, err := service.Begin(fixture.ctx, identity.Selector, kind, bindingRevision,
 			fmt.Sprintf("%s-%s", backend, lifecycle.method), fmt.Sprintf("%s-%s-request", backend, lifecycle.method),
 			"", operatorChannelProviderAuthority(), true, now.Add(time.Duration(index+1)*time.Second))
 		if err != nil {
@@ -1156,7 +1157,7 @@ func runOperatorChannelSupportedSurface(t *testing.T, backend servedparity.Backe
 			t.Fatalf("%s %s begin = %#v", backend, lifecycle.method, begun)
 		}
 		claim := operatorChannelContractClaim(begun, lifecycle.scope, lifecycle.account, lifecycle.conversation, uuid.NewString())
-		settlement, err := fixture.settle(context.Background(), claim, now.Add(time.Duration(index+1)*time.Minute))
+		settlement, err := fixture.settle(fixture.ctx, claim, now.Add(time.Duration(index+1)*time.Minute))
 		if err != nil || settlement.Disposition != operatorchannel.DispositionConsumedBinding || settlement.Operation.State != operatorchannel.StateAwaitingConfirmation {
 			t.Fatalf("%s %s claim = %#v, %v", backend, lifecycle.method, settlement, err)
 		}
@@ -1209,7 +1210,7 @@ func runOperatorChannelSupportedSurface(t *testing.T, backend servedparity.Backe
 	if statuses[identity.Selector] != operatorchannel.BindingStale || !strings.Contains(reasons[identity.Selector], "semantic generation changed") || statuses[successorIdentity.Selector] != operatorchannel.BindingUnbound {
 		t.Fatalf("%s replacement readback statuses=%#v reasons=%#v", backend, statuses, reasons)
 	}
-	if _, err := service.Begin(context.Background(), identity.Selector, operatorchannel.OperationReconnect, bindingRevision, "stale-key", "stale-request", "", operatorChannelProviderAuthority(), true, now.Add(9*time.Minute)); !errors.Is(err, operatorchannel.ErrNotFound) {
+	if _, err := service.Begin(fixture.ctx, identity.Selector, operatorchannel.OperationReconnect, bindingRevision, "stale-key", "stale-request", "", operatorChannelProviderAuthority(), true, now.Add(9*time.Minute)); !errors.Is(err, operatorchannel.ErrNotFound) {
 		t.Fatalf("%s stale predecessor begin error = %v", backend, err)
 	}
 	if err := service.ReplaceInterfaces([]operatorchannel.InterfaceIdentity{identity}); err != nil {
@@ -1225,7 +1226,7 @@ func runOperatorChannelSupportedSurface(t *testing.T, backend servedparity.Backe
 	if err != nil {
 		t.Fatal(err)
 	}
-	recoveredPrincipal, recoveredBindings, err := recoveredService.Bootstrap(context.Background(), now.Add(10*time.Minute))
+	recoveredPrincipal, recoveredBindings, err := recoveredService.Bootstrap(fixture.ctx, now.Add(10*time.Minute))
 	if err != nil {
 		t.Fatal(err)
 	}

@@ -89,7 +89,7 @@ func readSemanticEventFacts(ctx context.Context, tx *sql.Tx, postgres bool, runI
 	if evidence.RecordFound && evidence.Record.RunID != runID {
 		return fmt.Errorf("semantic event fixture %s does not belong to run %s", eventID, runID)
 	}
-	if err := tx.QueryRowContext(ctx, `SELECT status, COALESCE(event_count, 0) FROM runs WHERE run_id = $1`, runID).
+	if err := tx.QueryRowContext(ctx, `SELECT status, (SELECT c.event_count FROM run_event_counts c WHERE c.run_id = runs.run_id) FROM runs WHERE run_id = $1`, runID).
 		Scan(&evidence.RunStatus, &evidence.RunEventCount); err != nil && !errors.Is(err, sql.ErrNoRows) {
 		return err
 	}

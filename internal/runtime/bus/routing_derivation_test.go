@@ -81,7 +81,7 @@ func TestKeylessConstructionIndexUsesExactRunOwners(t *testing.T) {
 
 func TestEventBusFlowInstanceTemplateDerivesSubscriptionsFromHandlerKeys(t *testing.T) {
 	source := routeMaterializationNodeSource(t, "review", "  event_handlers:\n    task.started:\n      emit:\n        event: task.started\n")
-	eb, err := newScopedTestEventBus(&routePersistenceTestStore{}, runtimebus.EventBusOptions{ContractBundle: source})
+	eb, err := newScopedTestEventBus(t, &routePersistenceTestStore{}, runtimebus.EventBusOptions{ContractBundle: source})
 	if err != nil {
 		t.Fatalf("NewEventBus: %v", err)
 	}
@@ -354,7 +354,7 @@ func TestEventBusCompiledFlowInstanceBindingDoesNotRewritePersistence(t *testing
 	instance := runtimebus.ConstructedFlowInstanceIdentityFixture(source, "review", "inst-1", eventBusTestRunID)
 	observed := runtimebus.AdmittedFlowInstanceObservationFixture(t, source, eventBusTestRunID, instance, "acct-1")
 	index := runtimebus.FlowInstanceIndexFixture(observed)
-	eb, err := newScopedTestEventBus(store, runtimebus.EventBusOptions{ContractBundle: source, Durable: runtimebus.DurableDependencies{Instances: index}})
+	eb, err := newScopedTestEventBus(t, store, runtimebus.EventBusOptions{ContractBundle: source, Durable: runtimebus.DurableDependencies{Instances: index}})
 	if err != nil {
 		t.Fatalf("NewEventBus: %v", err)
 	}
@@ -376,7 +376,7 @@ func TestCompiledFlowInstanceBindingRejectsUnknownCanonicalTemplateWithoutMutati
 	instance := runtimebus.ConstructedFlowInstanceIdentityFixture(source, "known", "inst-1", eventBusTestRunID)
 	observed := runtimebus.AdmittedFlowInstanceObservationFixture(t, source, eventBusTestRunID, instance, "acct-1")
 	index := runtimebus.FlowInstanceIndexFixture(observed)
-	eb, err := newScopedTestEventBus(store, runtimebus.EventBusOptions{ContractBundle: source, Durable: runtimebus.DurableDependencies{Instances: index}})
+	eb, err := newScopedTestEventBus(t, store, runtimebus.EventBusOptions{ContractBundle: source, Durable: runtimebus.DurableDependencies{Instances: index}})
 	if err != nil {
 		t.Fatalf("NewEventBusWithOptions: %v", err)
 	}
@@ -444,7 +444,7 @@ func TestEventBusIndexedFlowInstanceDeliversDeclaredAgentSubscriber(t *testing.T
 	instance := runtimebus.ConstructedFlowInstanceIdentityFixture(source, "operating", "11111111-1111-4111-8111-111111111111", eventBusTestRunID)
 	observed := runtimebus.AdmittedFlowInstanceObservationFixture(t, source, eventBusTestRunID, instance, instance.InstanceID)
 	index := runtimebus.FlowInstanceIndexFixture(observed)
-	eb, err := newScopedTestEventBus(store, runtimebus.EventBusOptions{
+	eb, err := newScopedTestEventBus(t, store, runtimebus.EventBusOptions{
 		ContractBundle: source,
 		Durable:        runtimebus.DurableDependencies{Instances: index},
 	})

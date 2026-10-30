@@ -3,7 +3,6 @@ package cataloge2e
 import (
 	"context"
 	"encoding/json"
-	"errors"
 	"reflect"
 	"testing"
 	"time"
@@ -135,14 +134,18 @@ func TestRunScopedTemplateFlowAndAgentExecutionSupportedSurfaceBothStores(t *tes
 
 			controller := runtimeruncontrol.NewController(selected, h.rt.Bus, runtimeruncontrol.Options{})
 			snapshotA, err := selected.LoadRunLifecycleSnapshot(catalogRunContext(h, runA), runA)
-			if err != nil || snapshotA.Status != "completed" || snapshotA.EndedAt == nil {
-				t.Fatalf("run A completion snapshot = %#v err=%v", snapshotA, err)
+			if err != nil || snapshotA.Status != "running" || snapshotA.EndedAt != nil {
+				t.Fatalf("finished instance changed run A lifecycle = %#v err=%v", snapshotA, err)
 			}
 			_, err = controller.Stop(catalogRunContext(h, runA), runtimeruncontrol.TransitionRequest{
 				RunID: runA, Reason: "run-scoped identity proof", ControlledBy: "cataloge2e",
 			})
-			if !errors.Is(err, runtimeruncontrol.ErrAlreadyTerminal) {
-				t.Fatalf("stop completed run A = %v, want terminal refusal", err)
+			if err != nil {
+				t.Fatalf("stop settled run A = %v", err)
+			}
+			snapshotA, err = selected.LoadRunLifecycleSnapshot(catalogRunContext(h, runA), runA)
+			if err != nil || snapshotA.Status != "cancelled" || snapshotA.EndedAt == nil {
+				t.Fatalf("stopped run A lifecycle = %#v err=%v", snapshotA, err)
 			}
 			select {
 			case err := <-publishB:
@@ -165,7 +168,7 @@ func TestRunScopedTemplateFlowAndAgentExecutionSupportedSurfaceBothStores(t *tes
 			assertCatalogRunScopedAgent(t, h, selected, runB, flowPath, "delivered")
 			afterA, err := selected.LoadRunLifecycleSnapshot(catalogRunContext(h, runA), runA)
 			if err != nil || !reflect.DeepEqual(snapshotA, afterA) {
-				t.Fatalf("run B or refused stop changed completed run A: before=%#v after=%#v err=%v", snapshotA, afterA, err)
+				t.Fatalf("run B changed stopped run A: before=%#v after=%#v err=%v", snapshotA, afterA, err)
 			}
 			assertCatalogRunScopedFlowOwner(t, h, selected, runA, flowPath, "complete")
 			assertCatalogRunScopedAgent(t, h, selected, runA, flowPath, "delivered")

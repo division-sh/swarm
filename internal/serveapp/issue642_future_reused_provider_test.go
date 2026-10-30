@@ -49,7 +49,6 @@ func TestIssue642FutureKeyedProviderReusesConstructedInstanceBothStores(t *testi
 			if rt.Runtime == nil || rt.Runtime.Options.ProcessWorkOwner == nil {
 				t.Fatal("reused-provider proof lost its process work owner")
 			}
-			baseline := rt.Runtime.Options.ProcessWorkOwner.ActiveCount()
 			fork := requireSelectedForkExecutionRPCResult(t, rt.Endpoint, map[string]any{
 				"source_run_id": seed.RunID, "at_start": true, "allow_source_freeze": true,
 				"idempotency_key": "future-provider-reuse-start-cut",
@@ -74,7 +73,7 @@ func TestIssue642FutureKeyedProviderReusesConstructedInstanceBothStores(t *testi
 			if err != nil || !reflect.DeepEqual(sourceBefore, sourceAfter) {
 				t.Fatalf("reused-provider child changed its source domain: %v", err)
 			}
-			issue642WaitFutureProviderRetirement(t, rt, fork.ForkRunID, baseline, terminalDeadline)
+			issue642WaitFutureProviderRetirement(t, rt, fork.ForkRunID, terminalDeadline)
 		})
 	}
 }

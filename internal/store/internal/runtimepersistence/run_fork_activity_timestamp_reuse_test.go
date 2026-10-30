@@ -58,7 +58,7 @@ func TestRunForkActivityTimestampRecordedReuseBothStores(t *testing.T) {
 							SubscribeChannelReconciliation(context.Context) (*render.ReconcileSubscription, error)
 						}))
 						before := snapshotForkHistoricalExecutionTables(t, fixture.db, backend.name == "postgres")
-						original := originalActivityCarriageAtPoint(t, store, event.RunID(), child.ForkPoint)
+						original := originalActivityCarriageAtPoint(t, store, event.RunID(), child.ForkPoint, ctx)
 						loaded, err := store.LoadRunForkSelectedContractSourceEvents(ctx, event.RunID(), child.ForkRunID, []string{event.ID()}, original, originalRootAdmissionForRun(t, store, event.RunID()))
 						hints.expect(t, 0)
 						wantErr := ""
@@ -185,11 +185,11 @@ func TestOrdinaryForkActivityReplayCardDependencyBothStores(t *testing.T) {
 						t.Run(policy+"/"+status+"/"+presence, func(t *testing.T) {
 							fixture := backend.open(t)
 							child, event, sourceRecord := seedActivityEvidenceForFork(t, fixture, backend.name == "postgres", approved, status, 0, true, pendingCard)
-							original := originalActivityCarriageAtPoint(t, fixture.store.(selectedActivityProjectionStore), event.RunID(), child.ForkPoint)
 							source := selectedActivityProducerSourceOptions(t, false, false, true, !approved)
 							bundle, _ := semanticview.Bundle(source)
 							ctx := testAuthorActivityContextForBundle(bundle.SourceArtifact.BundleHash())
 							ctx = originalStoreFixtureContext(fixture.activityOwner, ctx, fixture.store)
+							original := originalActivityCarriageAtPoint(t, fixture.store.(selectedActivityProjectionStore), event.RunID(), child.ForkPoint, ctx)
 							journal := fixture.store.(activityTimestampJournal)
 							sourceOwner, err := activityidentity.ParseOwnerKey(sourceRecord.NodeID)
 							if err != nil {
@@ -328,7 +328,7 @@ func TestSelectedForkRecordedActivityCardDependencyBothStores(t *testing.T) {
 						SubscribeChannelReconciliation(context.Context) (*render.ReconcileSubscription, error)
 					}))
 					store := fixture.store.(selectedActivityProjectionStore)
-					loaded, err := store.LoadRunForkSelectedContractSourceEvents(ctx, event.RunID(), child.ForkRunID, []string{event.ID()}, originalActivityCarriageAtPoint(t, store, event.RunID(), child.ForkPoint), originalRootAdmissionForRun(t, store, event.RunID()))
+					loaded, err := store.LoadRunForkSelectedContractSourceEvents(ctx, event.RunID(), child.ForkRunID, []string{event.ID()}, originalActivityCarriageAtPoint(t, store, event.RunID(), child.ForkPoint, ctx), originalRootAdmissionForRun(t, store, event.RunID()))
 					if err != nil || len(loaded) != 1 {
 						t.Fatalf("selected recorded preparation: %+v error=%v", loaded, err)
 					}
@@ -385,7 +385,7 @@ func TestRunForkActivityTimestampRejectsIncompleteReuseBothStores(t *testing.T) 
 					}
 					before := snapshotForkHistoricalExecutionTables(t, fixture.db, backend.name == "postgres")
 					store := fixture.store.(selectedActivityProjectionStore)
-					_, err := store.LoadRunForkSelectedContractSourceEvents(ctx, event.RunID(), child.ForkRunID, []string{event.ID()}, originalActivityCarriageAtPoint(t, store, event.RunID(), child.ForkPoint), originalRootAdmissionForRun(t, store, event.RunID()))
+					_, err := store.LoadRunForkSelectedContractSourceEvents(ctx, event.RunID(), child.ForkRunID, []string{event.ID()}, originalActivityCarriageAtPoint(t, store, event.RunID(), child.ForkPoint, ctx), originalRootAdmissionForRun(t, store, event.RunID()))
 					if err == nil || !strings.Contains(err.Error(), column+" is required") {
 						t.Fatalf("incomplete recorded timestamp: got %v, want %s is required", err, column)
 					}
@@ -423,7 +423,7 @@ func TestRunForkActivityTimestampCopyPreservesStoredPrecisionBothStores(t *testi
 				t.Fatalf("source precision fixture: %#v err=%v", original, err)
 			}
 			store := fixture.store.(selectedActivityProjectionStore)
-			originalCarriage := originalActivityCarriageAtPoint(t, store, event.RunID(), child.ForkPoint)
+			originalCarriage := originalActivityCarriageAtPoint(t, store, event.RunID(), child.ForkPoint, ctx)
 			if _, err := store.LoadRunForkSelectedContractSourceEvents(ctx, event.RunID(), child.ForkRunID, []string{event.ID()}, originalCarriage, originalRootAdmissionForRun(t, store, event.RunID())); err != nil {
 				t.Fatal(err)
 			}

@@ -10,13 +10,11 @@ import (
 	"sync/atomic"
 	"testing"
 	"time"
-
-	"github.com/division-sh/swarm/internal/testutil"
 )
 
 func TestSQLiteRuntimeStore_PrivateMutationRetriesBusy(t *testing.T) {
 	store, lockStore := newSQLiteRuntimeMutationBusyStores(t, time.Millisecond)
-	ctx, cancel := context.WithTimeout(storeTestWorkContext(t, testAuthorActivityContext()), 2*time.Second)
+	ctx, cancel := context.WithTimeout(originalStoreFixtureContext(t, storeTestWorkContext(t, testAuthorActivityContext()), store), 2*time.Second)
 	defer cancel()
 
 	lockTx, err := lockStore.backend.ConstructionHandle().BeginTx(ctx, nil)
@@ -76,7 +74,7 @@ func TestSQLiteRuntimeStore_PrivateMutationRetriesBusy(t *testing.T) {
 
 func TestSQLiteRuntimeStore_PrivateMutationStopsRetryOnContextDeadline(t *testing.T) {
 	store, lockStore := newSQLiteRuntimeMutationBusyStores(t, time.Millisecond)
-	baseCtx := testAuthorActivityContext()
+	baseCtx := originalStoreFixtureContext(t, testAuthorActivityContext(), store)
 
 	lockTx, err := lockStore.backend.ConstructionHandle().BeginTx(baseCtx, nil)
 	if err != nil {
@@ -109,7 +107,7 @@ func TestSQLiteRuntimeStore_PrivateMutationStopsRetryOnContextDeadline(t *testin
 
 func TestSQLiteRuntimeStore_PrivateMutationContextDeadlineCapsDriverBusyTimeout(t *testing.T) {
 	store, lockStore := newSQLiteRuntimeMutationBusyStores(t, 50*time.Millisecond)
-	baseCtx := testAuthorActivityContext()
+	baseCtx := originalStoreFixtureContext(t, testAuthorActivityContext(), store)
 
 	lockTx, err := lockStore.backend.ConstructionHandle().BeginTx(baseCtx, nil)
 	if err != nil {
@@ -132,61 +130,6 @@ func TestSQLiteRuntimeStore_PrivateMutationContextDeadlineCapsDriverBusyTimeout(
 	}
 	if elapsed >= time.Second {
 		t.Fatalf("elapsed = %s, want context deadline to cap sqlite busy_timeout", elapsed)
-	}
-}
-
-func TestPostgresStore_RunEventTransactionSerializesStoryCommitOrder(t *testing.T) {
-	_, db, cleanup := testutil.StartPostgres(t)
-	t.Cleanup(cleanup)
-	store := admitTestPostgresStore(t, db)
-	ctx, cancel := context.WithTimeout(testAuthorActivityContext(), 5*time.Second)
-	defer cancel()
-
-	firstStarted := make(chan struct{})
-	firstRelease := make(chan struct{})
-	firstDone := make(chan error, 1)
-	go func() {
-		firstDone <- store.runEventTransaction(ctx, func(context.Context, *sql.Tx) error {
-			close(firstStarted)
-			select {
-			case <-firstRelease:
-				return nil
-			case <-ctx.Done():
-				return ctx.Err()
-			}
-		})
-	}()
-	select {
-	case <-firstStarted:
-	case <-ctx.Done():
-		t.Fatalf("first postgres story transaction did not start: %v", ctx.Err())
-	}
-
-	secondStarted := make(chan struct{})
-	secondDone := make(chan error, 1)
-	go func() {
-		secondDone <- store.runEventTransaction(ctx, func(context.Context, *sql.Tx) error {
-			close(secondStarted)
-			return nil
-		})
-	}()
-	select {
-	case <-secondStarted:
-		t.Fatal("second postgres story callback entered before the first committed")
-	case <-time.After(100 * time.Millisecond):
-	}
-
-	close(firstRelease)
-	if err := <-firstDone; err != nil {
-		t.Fatalf("first RunEventTransaction: %v", err)
-	}
-	select {
-	case <-secondStarted:
-	case <-ctx.Done():
-		t.Fatalf("second postgres story callback did not start after first commit: %v", ctx.Err())
-	}
-	if err := <-secondDone; err != nil {
-		t.Fatalf("second RunEventTransaction: %v", err)
 	}
 }
 

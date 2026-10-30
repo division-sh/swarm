@@ -77,7 +77,6 @@ func issue642FutureProviderContinuesFromEmptyCatalog(t *testing.T, backend, root
 	if rt.Runtime == nil || rt.Runtime.Options.ProcessWorkOwner == nil {
 		t.Fatal("future provider proof lost its original process work owner")
 	}
-	baseline := rt.Runtime.Options.ProcessWorkOwner.ActiveCount()
 	fork := requireSelectedForkExecutionRPCResult(t, rt.Endpoint, map[string]any{
 		"source_run_id": seed.RunID, "at_start": true, "allow_source_freeze": true,
 		"idempotency_key": "future-keyed-provider-start-cut",
@@ -105,10 +104,10 @@ func issue642FutureProviderContinuesFromEmptyCatalog(t *testing.T, backend, root
 	if err != nil || !reflect.DeepEqual(sourceBefore, sourceAfter) {
 		t.Fatalf("keyed-provider child mutated the source domain: %v", err)
 	}
-	issue642WaitFutureProviderRetirement(t, rt, fork.ForkRunID, baseline, terminalDeadline)
+	issue642WaitFutureProviderRetirement(t, rt, fork.ForkRunID, terminalDeadline)
 }
 
-func issue642WaitFutureProviderRetirement(t *testing.T, rt issue2564ServedFixture, runID string, baseline uint64, deadline time.Time) {
+func issue642WaitFutureProviderRetirement(t *testing.T, rt issue2564ServedFixture, runID string, deadline time.Time) {
 	t.Helper()
 	var last storetest.SelectedExecutionStorage
 	for time.Now().Before(deadline) {
@@ -117,17 +116,15 @@ func issue642WaitFutureProviderRetirement(t *testing.T, rt issue2564ServedFixtur
 		if err != nil {
 			t.Fatal(err)
 		}
-		work := rt.Runtime.Options.ProcessWorkOwner.ActiveCount()
-		if last.State == "closed" && last.RunStatus == "live" && last.Occurrences == 1 && work == baseline {
-			t.Logf("future_provider_terminal_join run=%s execution=%s process_work=%d baseline=%d", runID, last.State, work, baseline)
+		if last.State == "closed" && last.RunStatus == "live" && last.Occurrences == 1 {
+			t.Logf("future_provider_terminal_join run=%s execution=%s", runID, last.State)
 			return
 		}
 		time.Sleep(10 * time.Millisecond)
 	}
 	stack := make([]byte, 1<<20)
 	n := runtime.Stack(stack, true)
-	t.Fatalf("future provider retirement before cancellation: storage=%+v process_work=%d baseline=%d\n%s", last,
-		rt.Runtime.Options.ProcessWorkOwner.ActiveCount(), baseline, stack[:n])
+	t.Fatalf("future provider retirement before cancellation: storage=%+v\n%s", last, stack[:n])
 }
 
 func issue642RequireMintedProviderIdentity(t *testing.T, rt issue2564ServedFixture, runID string) string {

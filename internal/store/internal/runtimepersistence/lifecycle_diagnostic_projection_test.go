@@ -259,6 +259,7 @@ func TestLifecycleDiagnosticCausalOrigin(t *testing.T) {
 				parent, runID := uuid.NewString(), first.Identity.RunID
 				if scenario == "foreign_parent" {
 					runID = uuid.NewString()
+					ctx = originalStoreFixtureContext(t, ctx, selected)
 					requireRunningRunForTest(t, ctx, selected, runID, time.Now().UTC())
 				}
 				if scenario != "missing_parent" {
@@ -316,6 +317,7 @@ func enqueueDiagnosticTestIdentity(t *testing.T, selected diagnosticProjectionTe
 	req := diagnosticTestTransition(t, identity, origin, mode)
 	rooted, _ := sourceartifactfixture.Rooted(t, "fixture", sourceartifactfixture.Artifact())
 	ctx := runtimecorrelation.WithRootAdmission(testAuthorActivityContext(), rooted.Admission())
+	ctx = originalStoreFixtureContext(t, ctx, selected)
 	if _, err := selected.EnsureRootedSource(ctx, rooted); err != nil {
 		t.Fatal(err)
 	}

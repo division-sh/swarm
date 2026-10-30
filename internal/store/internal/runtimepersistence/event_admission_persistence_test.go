@@ -216,7 +216,7 @@ func TestPostgresTerminalEventAdmissionIsImmutableAndIdempotent(t *testing.T) {
 	_, db, _ := testutil.StartPostgres(t)
 	pg := newTestPostgresStore(t, db)
 	rooted, _ := sourceartifactfixture.Rooted(t, "fixture", sourceartifactfixture.Artifact())
-	sourceartifactfixture.RequireArtifact(t, testAuthorActivityContext(), pg, rooted.Artifact())
+	sourceartifactfixture.RequireArtifact(t, originalStoreFixtureContext(t, testAuthorActivityContext(), pg), pg, rooted.Artifact())
 	harness := terminalEventAdmissionHarness{
 		statuses: []string{"completed", "cancelled", "failed", "forked"},
 		append: func(ctx context.Context, evt events.Event) error {
@@ -260,7 +260,7 @@ func TestPostgresTerminalEventAdmissionIsImmutableAndIdempotent(t *testing.T) {
 func TestSQLiteTerminalEventAdmissionIsImmutableAndIdempotent(t *testing.T) {
 	sqliteStore := newBootstrappedSQLiteRuntimeStoreForTest(t)
 	rooted, _ := sourceartifactfixture.Rooted(t, "fixture", sourceartifactfixture.Artifact())
-	sourceartifactfixture.RequireArtifact(t, testAuthorActivityContext(), sqliteStore, rooted.Artifact())
+	sourceartifactfixture.RequireArtifact(t, originalStoreFixtureContext(t, testAuthorActivityContext(), sqliteStore), sqliteStore, rooted.Artifact())
 	harness := terminalEventAdmissionHarness{
 		statuses: []string{"completed", "cancelled", "failed"},
 		append: func(ctx context.Context, evt events.Event) error {
@@ -305,7 +305,7 @@ func TestPostgresRuntimeLogAdmissionPreservesEveryRunStatus(t *testing.T) {
 	_, db, _ := testutil.StartPostgres(t)
 	store := newTestPostgresStore(t, db)
 	rooted, _ := sourceartifactfixture.Rooted(t, "fixture", sourceartifactfixture.Artifact())
-	sourceartifactfixture.RequireArtifact(t, testAuthorActivityContext(), store, rooted.Artifact())
+	sourceartifactfixture.RequireArtifact(t, originalStoreFixtureContext(t, testAuthorActivityContext(), store), store, rooted.Artifact())
 	assertRuntimeLogAdmissionPreservesEveryRunStatus(t, originalStoreFixtureContext(t, testAuthorActivityContext(), store), runtimeLogStatusHarness{
 		statuses: []string{"running", "paused", "completed", "cancelled", "failed", "forked"},
 		appendOrdinary: func(ctx context.Context, evt events.Event) error {
@@ -349,7 +349,7 @@ func TestPostgresRuntimeLogAdmissionPreservesEveryRunStatus(t *testing.T) {
 					COALESCE(status, ''),
 					COALESCE(ended_at::text, ''),
 					COALESCE(failure::text, ''),
-					COALESCE(event_count, 0),
+					COALESCE((SELECT c.event_count FROM run_event_counts c WHERE c.run_id = runs.run_id), 0),
 					(SELECT COUNT(DISTINCT entity_id) FROM entity_state WHERE run_id = runs.run_id),
 					COALESCE((SELECT control_status FROM run_control_state WHERE run_id = runs.run_id), ''),
 					COALESCE((SELECT reason FROM run_control_state WHERE run_id = runs.run_id), '')
@@ -399,7 +399,7 @@ func TestPostgresRuntimeLogAdmissionPreservesEveryRunStatus(t *testing.T) {
 func TestSQLiteRuntimeLogAdmissionPreservesEveryRunStatus(t *testing.T) {
 	store := newBootstrappedSQLiteRuntimeStoreForTest(t)
 	rooted, _ := sourceartifactfixture.Rooted(t, "fixture", sourceartifactfixture.Artifact())
-	sourceartifactfixture.RequireArtifact(t, testAuthorActivityContext(), store, rooted.Artifact())
+	sourceartifactfixture.RequireArtifact(t, originalStoreFixtureContext(t, testAuthorActivityContext(), store), store, rooted.Artifact())
 	assertRuntimeLogAdmissionPreservesEveryRunStatus(t, originalStoreFixtureContext(t, testAuthorActivityContext(), store), runtimeLogStatusHarness{
 		statuses: []string{"running", "paused", "completed", "cancelled", "failed"},
 		appendOrdinary: func(ctx context.Context, evt events.Event) error {
@@ -443,7 +443,7 @@ func TestSQLiteRuntimeLogAdmissionPreservesEveryRunStatus(t *testing.T) {
 					COALESCE(status, ''),
 					COALESCE(CAST(ended_at AS TEXT), ''),
 					COALESCE(CAST(failure AS TEXT), ''),
-					COALESCE(event_count, 0),
+					COALESCE((SELECT c.event_count FROM run_event_counts c WHERE c.run_id = runs.run_id), 0),
 					(SELECT COUNT(DISTINCT entity_id) FROM entity_state WHERE run_id = runs.run_id),
 					COALESCE((SELECT control_status FROM run_control_state WHERE run_id = runs.run_id), ''),
 					COALESCE((SELECT reason FROM run_control_state WHERE run_id = runs.run_id), '')

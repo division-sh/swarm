@@ -202,8 +202,12 @@ func (f *deploymentResourceFixture) operatorServer(t *testing.T) *httptest.Serve
 			return map[string]any{"alive": true, "ready": true, "db_ok": true, "runtime_ok": true, "bundle": identity}, nil
 		}},
 	)
+	process := f.runtime.contextRuntime.Options.ProcessWorkOwner
+	if process == nil {
+		t.Fatal("deployment operator fixture lacks its held original process")
+	}
 	handler, err := apiv1.NewHandler(apiv1.Options{
-		AuthTokens: []string{apiv1.DefaultLoopbackAPIToken}, Handlers: methods,
+		AuthTokens: []string{apiv1.DefaultLoopbackAPIToken}, Handlers: methods, ProcessWorkOwner: process,
 	})
 	if err != nil {
 		t.Fatal(err)

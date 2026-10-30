@@ -68,9 +68,6 @@ func TestB10GroupNativeCommitRejectionBothStores(t *testing.T) {
 			if settlement.CommitAttempts != 1 || settlement.CommitFailures != 1 || settlement.Revision.Finalizations != 1 || counts.Total.WriteCommits != 0 || counts.Active != 0 {
 				t.Fatalf("failed native commit did not retire its exact transaction: %+v", counts)
 			}
-			if f.sink.reserves != 1 || f.sink.cancels != 1 || f.sink.submits != 0 {
-				t.Fatalf("rejected commit leaked candidate execution: %+v", f.sink)
-			}
 			f.requireSnapshot(t, before)
 			f.requireObservation(t, pipelineobligation.PublicationSettlementPending)
 			var children int
@@ -78,8 +75,8 @@ func TestB10GroupNativeCommitRejectionBothStores(t *testing.T) {
 				t.Fatalf("failed transaction remained visible: children=%d err=%v", children, err)
 			}
 			f.requireSnapshot(t, before)
-			if calls != 1 || f.sink.submits != 0 {
-				t.Fatal("observation retried a rejected commit or submitted its candidate")
+			if calls != 1 {
+				t.Fatal("observation retried a rejected commit")
 			}
 		})
 	}

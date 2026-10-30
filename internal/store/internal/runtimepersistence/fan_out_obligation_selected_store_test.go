@@ -25,7 +25,7 @@ import (
 	runtimecontracts "github.com/division-sh/swarm/internal/runtime/contracts"
 	runtimeflowidentity "github.com/division-sh/swarm/internal/runtime/core/flowidentity"
 	"github.com/division-sh/swarm/internal/runtime/core/identity"
-	"github.com/division-sh/swarm/internal/runtime/core/worklifetime"
+
 	runtimecorrelation "github.com/division-sh/swarm/internal/runtime/correlation"
 	runtimedelivery "github.com/division-sh/swarm/internal/runtime/deliverylifecycle"
 	runtimeengine "github.com/division-sh/swarm/internal/runtime/engine"
@@ -39,13 +39,14 @@ import (
 	"github.com/division-sh/swarm/internal/runtime/runfork"
 	"github.com/division-sh/swarm/internal/runtime/runforkexecution"
 	runtimerunlifecycle "github.com/division-sh/swarm/internal/runtime/runlifecycle"
+	"github.com/division-sh/swarm/internal/runtime/startupownership"
+
 	"github.com/division-sh/swarm/internal/runtime/semanticview"
 	"github.com/division-sh/swarm/internal/runtime/testfixtures/canonicalrouting"
 	"github.com/division-sh/swarm/internal/runtime/workflowexpr"
 	"github.com/division-sh/swarm/internal/sourceartifact"
 	"github.com/division-sh/swarm/internal/testutil"
 	"github.com/division-sh/swarm/internal/testutil/sourceartifactfixture"
-	"github.com/division-sh/swarm/internal/testutil/stagecatalogfixture"
 	"github.com/google/uuid"
 )
 
@@ -212,6 +213,7 @@ func TestFanOutChunkRejectsNonEmitSemanticEvidenceBeforeMutationOnBothStores(t *
 			ctx = originalStoreFixtureContext(t, ctx, owner)
 
 			now := time.Now().UTC().Truncate(time.Microsecond)
+			ctx = originalStoreFixtureContext(t, ctx, owner)
 			fixture := seedFanOutOwnerFixture(t, ctx, db, owner, postgres, 1, now)
 			_, claim, found, err := owner.ClaimFanOutIntent(ctx, pipeline.FanOutClaimRequest{
 				Owner: "closed-evidence-worker", BundleHash: fixture.bundleHash, Now: now.Add(time.Second), Lease: time.Minute,
@@ -359,6 +361,7 @@ func TestFanOutChunkCommitsMixedRealEventBusPlansAtomicallyOnBothStores(t *testi
 				runtimeauthoractivity.BundleScope(runtimeInstanceID, artifact.BundleHash()),
 			)
 			ctx = runtimecorrelation.WithSourceArtifactFact(ctx, mustStoreTestSourceArtifactFact(artifact.BundleHash()))
+			ctx = runtimecorrelation.WithRuntimeInstanceID(ctx, runtimeInstanceID)
 			var (
 				owner        selectedFanOutMixedRouteOwner
 				summaryOwner selectedFanOutTxSummaryOwner
@@ -407,6 +410,11 @@ func TestFanOutChunkCommitsMixedRealEventBusPlansAtomicallyOnBothStores(t *testi
 				ContractBundle:     semanticview.Wrap(bundle),
 				SourceArtifactFact: mustStoreTestSourceArtifactFact(fixture.bundleHash),
 				RuntimeInstanceID:  runtimeInstanceID,
+				MutationContext: func(work context.Context) (context.Context, error) {
+					work = startupownership.CarryMutationAuthority(work, ctx)
+					_, err := startupownership.CaptureMutationAuthority(work)
+					return work, err
+				},
 			})
 			if err != nil {
 				t.Fatalf("construct mixed-route EventBus: %v", err)
@@ -615,6 +623,7 @@ func TestFanOutCardinalityMatrixIsConstantAtTriggerAndExactAfterPumpOnBothStores
 			base := time.Now().UTC().Add(-8 * time.Minute).Truncate(time.Microsecond)
 			for caseIndex, cardinality := range []int{0, 1, 10, 25, 32, 33, 500, 1000} {
 				t.Run(fmt.Sprintf("n_%d", cardinality), func(t *testing.T) {
+					ctx = originalStoreFixtureContext(t, ctx, owner)
 					fixture := seedFanOutOwnerFixture(t, ctx, db, owner, postgres, cardinality, base.Add(time.Duration(caseIndex)*time.Minute))
 					var eventsCount, deliveriesCount, intentsCount, outcomesCount int
 					if err := db.QueryRowContext(ctx, `SELECT COUNT(*) FROM events WHERE run_id=$1`, fixture.runID).Scan(&eventsCount); err != nil {
@@ -699,6 +708,7 @@ func TestFanOutRepresentativeStoreSizeDoesNotChangeN25OrN500ProgressOnBothStores
 			base := time.Now().UTC().Add(-2 * time.Hour).Truncate(time.Microsecond)
 			for caseIndex, cardinality := range []int{25, 500} {
 				t.Run(fmt.Sprintf("n_%d", cardinality), func(t *testing.T) {
+					ctx = originalStoreFixtureContext(t, ctx, owner)
 					fixture := seedFanOutOwnerFixture(t, ctx, db, owner, postgres, cardinality, base.Add(time.Duration(caseIndex)*time.Hour))
 					tx, err := db.BeginTx(ctx, nil)
 					if err != nil {
@@ -1036,59 +1046,20 @@ func TestFanOutLifecycleBlocksCompletionAndStopCancelsClaimedSuffixOnBothStores(
 			}
 			assertPortableRunStatus(t, ctx, db, completing.runID, "running", false)
 
-			candidateOwner := selected.(runtimerunlifecycle.OperationOwner)
-			candidateRegistrar := selected.(runtimerunlifecycle.CandidateRegistrar)
-			if disposition, err := candidateOwner.RequestCompletionCandidate(ctx, runtimerunlifecycle.ImmediateCandidate(completing.runID)); err != nil || disposition != runtimerunlifecycle.CandidateRequested {
-				t.Fatalf("request racing completion candidate = %s/%v", disposition, err)
-			}
-			process := worklifetime.NewProcess()
-			occurrence := newRunLifecycleExecutorOccurrenceForBundle(t, process, completing.bundleHash)
-			runtimeCtx := worklifetime.WithRuntimeOccurrence(ctx, occurrence)
-			intercept := &runLifecycleSameRevisionInterceptStore{
-				delegate:       selected.(runtimerunlifecycle.CandidateStore),
-				firstStarted:   make(chan struct{}),
-				releaseFirst:   make(chan struct{}),
-				secondExecuted: make(chan struct{}),
-			}
-			executor := newRunLifecycleParityExecutorForScope(
-				t,
-				intercept,
-				occurrence,
-				completing.bundleHash,
-				stagecatalogfixture.NewFinalCatalog(nil, terminals),
-			)
-			registration, err := candidateRegistrar.RegisterCompletionCandidateSink(
-				runtimeCtx,
-				runtimerunlifecycle.CandidateScope{BundleHash: completing.bundleHash},
-				executor,
-			)
-			if err != nil {
-				t.Fatalf("register racing completion executor: %v", err)
-			}
-			defer registration.Release()
-			if err := executor.Start(runtimeCtx); err != nil {
-				t.Fatalf("start racing completion executor: %v", err)
-			}
-			awaitRunLifecycleSignal(t, intercept.firstStarted, "fan-out-blocked candidate execution")
-
 			_, claim, found, err := owner.ClaimFanOutIntent(ctx, pipeline.FanOutClaimRequest{
 				Owner: "completion-worker", BundleHash: completing.bundleHash, Now: base.Add(time.Second), Lease: time.Minute,
 			})
 			if err != nil || !found {
 				t.Fatalf("claim final completion range: found=%v err=%v", found, err)
 			}
-			if _, err := owner.CommitFanOutChunk(runtimeCtx, rejectedFanOutChunk(claim, 0, 1, base.Add(2*time.Second))); err != nil {
+			if _, err := owner.CommitFanOutChunk(ctx, rejectedFanOutChunk(claim, 0, 1, base.Add(2*time.Second))); err != nil {
 				t.Fatalf("close completion fan-out: %v", err)
 			}
-			close(intercept.releaseFirst)
-			awaitRunLifecycleSignal(t, intercept.secondExecuted, "fan-out-close same-revision recheck")
-			awaitRunLifecycleState(t, selected.(runLifecycleCandidateParityStore), completing.runID, runtimerunlifecycle.StateCompleted)
-			if err := executor.Retire(context.Background()); err != nil {
-				t.Fatalf("retire racing completion executor: %v", err)
+			presence, err = owner.PipelineObligations().GlobalWorkPresence(ctx)
+			if err != nil || presence.ProcessingEligible {
+				t.Fatalf("closed fan-out global work = %#v err=%v", presence, err)
 			}
-			retireRunLifecycleExecutorOccurrence(t, occurrence)
-			retireRunLifecycleProcess(t, process)
-			assertPortableRunStatus(t, ctx, db, completing.runID, "completed", true)
+			assertPortableRunStatus(t, ctx, db, completing.runID, "running", false)
 
 			ctx = originalStoreFixtureContext(t, ctx, owner)
 			stopping := seedFanOutOwnerFixture(t, ctx, db, owner, postgres, 3, base.Add(10*time.Second))
@@ -1233,6 +1204,7 @@ func TestFanOutTwoLevelRestartResumesParentPrefixAndNestedPendingOnBothStores(t 
 			firstOwner, restartedOwner, db, postgres := newFanOutOwnerPairForTest(t, backend)
 			ctx = originalStoreFixtureContext(t, ctx, firstOwner)
 			base := time.Now().UTC().Add(-time.Minute).Truncate(time.Microsecond)
+			ctx = originalStoreFixtureContext(t, ctx, firstOwner)
 			parent := seedFanOutOwnerFixture(t, ctx, db, firstOwner, postgres, 9, base)
 			nested := seedFanOutOwnerChildFixture(t, ctx, db, firstOwner, postgres, parent, 3, base.Add(time.Second))
 
@@ -1285,6 +1257,7 @@ func TestFanOutCancellationPreservesParentPrefixAndCancelsClaimedNestedSuffixOnB
 			owner, secondOwner, db, postgres := newFanOutOwnerPairForTest(t, backend)
 			ctx = originalStoreFixtureContext(t, ctx, owner)
 			base := time.Now().UTC().Add(-2 * time.Second).Truncate(time.Microsecond)
+			ctx = originalStoreFixtureContext(t, ctx, owner)
 			parent := seedFanOutOwnerFixture(t, ctx, db, owner, postgres, 9, base)
 			nested := seedFanOutOwnerChildFixture(t, ctx, db, owner, postgres, parent, 3, base.Add(time.Second))
 
@@ -1734,6 +1707,7 @@ func TestFanOutEntityRevisionRejectsUnrelatedRunWithoutProgressOnBothStores(t *t
 			}
 
 			unrelatedRunID := uuid.NewString()
+			ctx = originalStoreFixtureContext(t, ctx, owner)
 			requireRunFixtureForTest(t, ctx, owner, semanticRunFixture{Origin: semanticScenarioSetupRunOriginForTest(), RunID: unrelatedRunID, StartedAt: createdAt})
 			unrelatedEntityID, unrelatedMutationID := seedFanOutEntityRevision(t, ctx, db, postgres, unrelatedRunID, `["hostile-000","hostile-001","hostile-002"]`, createdAt)
 			bindFanOutEntityRevision(t, ctx, db, postgres, fixture, unrelatedRunID, unrelatedEntityID, unrelatedMutationID, createdAt)
@@ -1772,6 +1746,7 @@ func TestFanOutTriggerRejectsUnrelatedRunWithoutProgressOnBothStores(t *testing.
 			ctx = originalStoreFixtureContext(t, ctx, owner)
 			fixture := seedFanOutOwnerFixture(t, ctx, db, owner, postgres, 3, createdAt)
 			unrelatedRunID := uuid.NewString()
+			ctx = originalStoreFixtureContext(t, ctx, owner)
 			requireRunFixtureForTest(t, ctx, owner, semanticRunFixture{Origin: semanticScenarioSetupRunOriginForTest(), RunID: unrelatedRunID, StartedAt: createdAt})
 			unrelatedEventID := uuid.NewString()
 			unrelated := eventtest.ExistingRunRootIngressWithRoutingSource(
@@ -2133,6 +2108,7 @@ func seedFanOutOwnerFixtureWithArtifact(t *testing.T, ctx context.Context, db *s
 	}
 	fixture := fanOutOwnerFixture{runID: uuid.NewString(), eventID: uuid.NewString(), deliveryID: uuid.NewString(), flowPath: ".", semanticPath: `nodes["fan-out-source"].handlers["items.ready"].fan_out`, createdAt: createdAt, artifact: artifact}
 	fixture.plan = fanOutOwnerTypedPlanFixture(t)
+	ctx = originalStoreFixtureContext(t, ctx, selected)
 	setup := semanticRunFixture{Origin: semanticScenarioSetupRunOriginForTest(), RunID: fixture.runID, BundleHash: artifact.BundleHash(), Artifact: artifact, StartedAt: createdAt}
 	if len(liveScope) != 0 {
 		setup.Origin, setup.LiveScope = runtimerunlifecycle.DeploymentRunOrigin(), liveScope[0]

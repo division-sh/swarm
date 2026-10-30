@@ -1,7 +1,6 @@
 package serveapp
 
 import (
-	"context"
 	"database/sql/driver"
 	"encoding/json"
 	"fmt"
@@ -118,14 +117,15 @@ func installMailboxCompletionFaultWitness(t *testing.T, rt servedControlProofRun
 	if rt.Postgres != nil {
 		selected = rt.Postgres
 	}
-	if err := storetest.SetMailboxCompletionInsertFault(context.Background(), selected, key, id, true); err != nil {
+	ctx := servedRuntimeProofAuthorActivityContext(t, rt.Runtime, rt.BundleHash)
+	if err := storetest.SetMailboxCompletionInsertFault(ctx, selected, key, id, true); err != nil {
 		t.Fatal(err)
 	}
 	var removeOnce sync.Once
 	remove = func() {
 		t.Helper()
 		removeOnce.Do(func() {
-			if err := storetest.SetMailboxCompletionInsertFault(context.Background(), selected, key, id, false); err != nil {
+			if err := storetest.SetMailboxCompletionInsertFault(ctx, selected, key, id, false); err != nil {
 				t.Error(err)
 			}
 		})

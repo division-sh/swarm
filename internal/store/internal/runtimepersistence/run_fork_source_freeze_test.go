@@ -44,6 +44,7 @@ func TestRunForkSourceFreezeIsTheOnlyForkedStatusWriter(t *testing.T) {
 				}
 			} else {
 				store := newBootstrappedSQLiteRuntimeStoreForTest(t)
+				ctx := originalStoreFixtureContext(t, ctx, store)
 				db = store.backend.ConstructionHandle()
 				ctx = originalStoreFixtureContext(t, ctx, store)
 				requireRunFixtureForTest(t, ctx, store, semanticRunFixture{Origin: semanticScenarioSetupRunOriginForTest(), RunID: runID, StartedAt: now})
@@ -499,6 +500,7 @@ func seedRunForkSourceFreezePair(t *testing.T, ctx context.Context, db *sql.DB, 
 		RunID: lineage.SourceRunID, State: sourceState,
 		BundleHash: authorActivityTestBundleHash, StartedAt: now.Add(-time.Hour), EndedAt: now,
 	})
+	ctx = originalStoreFixtureContext(t, ctx, selected)
 	requireRunFixtureForTest(t, ctx, selected, semanticRunFixture{Origin: semanticScenarioSetupRunOriginForTest(),
 		RunID: lineage.ForkRunID, State: forkState,
 		BundleHash: authorActivityTestBundleHash, StartedAt: now, EndedAt: now,
@@ -508,6 +510,12 @@ func seedRunForkSourceFreezePair(t *testing.T, ctx context.Context, db *sql.DB, 
 
 func commitRunForkSourceFreezeForTest(ctx context.Context, store *PostgresStore, lineage runForkActivationLineage, now time.Time, confirmed bool) error {
 	return runSelectedFixtureMutation(ctx, store, "source freeze fixture", func(txctx context.Context, attempt *mutationprotocol.Attempt) error {
+		if err := attempt.WithSQL(txctx, func(ctx context.Context, tx *sql.Tx) error {
+			_, err := mutationprotocol.RunRowLock(ctx, tx, lineage.SourceRunID, true)
+			return err
+		}); err != nil {
+			return err
+		}
 		return store.runForkPostgresOwner.ApplyRunForkSourceFreezeTx(txctx, attempt, lineage, now, confirmed, nil)
 	})
 }

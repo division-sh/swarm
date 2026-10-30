@@ -36,6 +36,7 @@ func TestPayloadlessEventSourceArtifactBytesBothStores(t *testing.T) {
 				t.Cleanup(cleanup)
 				selected = newTestPostgresStore(t, db)
 			}
+			ctx := originalStoreFixtureContext(t, testAuthorActivityContext(), selected)
 			// The source owner is byte-preserving, not a second grammar interpreter.
 			for _, variant := range []string{"", "{}", `""`, "~", "null"} {
 				name := variant
@@ -56,7 +57,6 @@ func TestPayloadlessEventSourceArtifactBytesBothStores(t *testing.T) {
 					if err != nil {
 						t.Fatal(err)
 					}
-					ctx := context.Background()
 					if _, err := selected.EnsureSourceArtifact(ctx, artifact); err != nil {
 						t.Fatal(err)
 					}
@@ -128,6 +128,7 @@ func TestSourceArtifactStartupIntegrityParityPreservesRunHistory(t *testing.T) {
 						t.Fatal(err)
 					}
 					runID := uuid.NewString()
+					fixtureCtx = originalStoreFixtureContext(t, fixtureCtx, selected)
 					requireRunFixtureForTest(t, fixtureCtx, selected, semanticRunFixture{Origin: semanticScenarioSetupRunOriginForTest(), RunID: runID, Artifact: artifact, RootAdmission: rooted.Admission()})
 					setBlob := func(blob []byte) {
 						t.Helper()

@@ -141,7 +141,7 @@ func TestSQLiteRuntimeStoreSelectedCoreContracts(t *testing.T) {
 	if item.Status != "pending" || item.Type != runtimetools.NotifyHumanMailboxItemType {
 		t.Fatalf("mailbox item status=%q type=%q, want pending operator notice", item.Status, item.Type)
 	}
-	if err := noticeAcknowledgmentFixture(t, store, itemID)(testAuthorActivityContext()); err != nil {
+	if err := noticeAcknowledgmentFixture(t, ctx, store, itemID)(testAuthorActivityContext()); err != nil {
 		t.Fatalf("acknowledge informational notice: %v", err)
 	}
 	if unread, err := store.CountUnreadInformationalNotices(ctx); err != nil || unread != 0 {
@@ -253,6 +253,7 @@ func TestSQLiteRuntimeStoreInformationalNoticeSurvivesReopenAndAcknowledgment(t 
 	ctx := testAuthorActivityContext()
 	dbPath := filepath.Join(t.TempDir(), "notice-reopen.db")
 	store := newBootstrappedSQLiteRuntimeStoreForPath(t, dbPath)
+	ctx = originalStoreFixtureContext(t, ctx, store)
 	noticeID, err := store.InsertMailboxItem(ctx, runtimetools.MailboxItem{
 		FromAgent: "reviewer", Type: runtimetools.NotifyHumanMailboxItemType,
 		Priority: "normal", Status: "pending", Summary: "strong match found",
@@ -283,7 +284,7 @@ func TestSQLiteRuntimeStoreInformationalNoticeSurvivesReopenAndAcknowledgment(t 
 	if err != nil || len(listed) != 1 || listed[0].ID != noticeID {
 		t.Fatalf("reopened pending informational notices = %#v, err=%v", listed, err)
 	}
-	if err := noticeAcknowledgmentFixture(t, reopened, noticeID)(testAuthorActivityContext()); err != nil {
+	if err := noticeAcknowledgmentFixture(t, ctx, reopened, noticeID)(testAuthorActivityContext()); err != nil {
 		t.Fatalf("acknowledge reopened informational notice: %v", err)
 	}
 	if unread, countErr := reopened.CountUnreadInformationalNotices(ctx); countErr != nil || unread != 0 {
@@ -1135,6 +1136,7 @@ func assertFixtureActivationVariables(t *testing.T, plan runtimepipeline.FlowIns
 func TestSQLiteRuntimeStoreAPIIdempotencyAllowsNestedEventBusPublish(t *testing.T) {
 	ctx := testAuthorActivityContext()
 	store := newBootstrappedSQLiteRuntimeStoreForTest(t)
+	ctx = originalStoreFixtureContext(t, ctx, store)
 	rooted, _ := sourceartifactfixture.Rooted(t, "fixture", sourceartifactfixture.Artifact())
 	sourceartifactfixture.RequireArtifact(t, ctx, store, rooted.Artifact())
 	ctx = runtimecorrelation.WithRootAdmission(ctx, rooted.Admission())
@@ -1264,6 +1266,7 @@ func TestSQLiteRuntimeStoreAPIIdempotencyFailedNestedPublishLeavesNoCompletionOr
 func TestSQLiteRuntimeStoreAPIIdempotencyCompletionSerializesWithConcurrentMutation(t *testing.T) {
 	ctx := testAuthorActivityContext()
 	selected := newBootstrappedSQLiteRuntimeStoreForTest(t)
+	ctx = originalStoreFixtureContext(t, ctx, selected)
 	db := selected.backend.ConstructionHandle()
 	configureSQLiteBusyTimeoutForAllConnections(t, db, time.Millisecond)
 
@@ -1682,6 +1685,7 @@ func TestSQLiteRuntimeStoreSessionStartupConversationAndTraceVisibility(t *testi
 	if err := successorProcessCapability.Release(ctx); err != nil {
 		t.Fatalf("release successor process capability: %v", err)
 	}
+	retireStoreTestWorkFixture(t)
 	ctx = originalStoreFixtureContext(t, ctx, store)
 
 	identity := testAgentMemoryIdentity(t, runID, "agent-1", "global")

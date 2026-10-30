@@ -721,6 +721,7 @@ func TestOpaqueMissingEventIDReturnsNotFoundAcrossOperatorConsumersParity(t *tes
 			f := tc.open(t, ctx)
 			source := completeOperatorReplaySource(t)
 			ctx = admittedAPICompiledSourceContext(t, context.Background(), f.store, source)
+			ctx = originalAPIFixtureContext(t, ctx, f.store)
 			bundle, ok := semanticview.Bundle(source)
 			if !ok {
 				t.Fatal("missing captured replay source")
@@ -828,7 +829,7 @@ func completeOperatorReplayTestHandler(t *testing.T, owner completeOperatorRepla
 	bus = diagnosingReplayPublisher{eventReplayPublisher: bus, t: t}
 	return testHandler(t, Options{
 		AuthTokens: []string{testToken},
-		Handlers: testOperatorHandlers(testOperatorCapabilities{
+		Handlers: testOperatorHandlers(t, testOperatorCapabilities{
 			Now: func() time.Time { return now }, Ready: func() bool { return true }, Database: fakePinger{},
 			Runs: owner, Observability: owner, AgentConversations: owner, Idempotency: owner, Events: bus,
 			Source: completeOperatorReplaySource(t),
@@ -1117,6 +1118,7 @@ func seedCompleteReplayRun(t testing.TB, ctx context.Context, selected storetest
 	if !present {
 		t.Fatal("complete replay fixture requires its admitted root")
 	}
+	ctx = apiTestOriginalProcessContext(t, ctx, selected)
 	storetest.RequireRun(t, ctx, selected, storetest.RunFixture{Origin: storetest.ScenarioSetupOrigin(),
 		RunID: runID, StartedAt: startedAt, BundleHash: root.BundleHash(), RootAdmission: root,
 	})
@@ -1642,7 +1644,7 @@ func eventReplayTestHandlerWithPosture(t *testing.T, pg *store.PostgresStore, bu
 	t.Helper()
 	return testHandler(t, Options{
 		AuthTokens: []string{testToken},
-		Handlers: testOperatorHandlers(testOperatorCapabilities{
+		Handlers: testOperatorHandlers(t, testOperatorCapabilities{
 			ExecutionPosture:   posture,
 			Now:                func() time.Time { return time.Now().UTC() },
 			Ready:              func() bool { return true },
@@ -1667,6 +1669,7 @@ func seedReplayableOperatorEvent(t *testing.T, ctx context.Context, pg *store.Po
 	ctx = originalAPIFixtureContext(t, ctx, pg)
 	eventID := uuid.NewString()
 	runID := operatorReplayRunID
+	ctx = apiTestOriginalProcessContext(t, ctx, pg)
 	storetest.RequireRun(t, ctx, pg, storetest.RunFixture{Origin: storetest.ScenarioSetupOrigin(), RunID: runID})
 	semanticEvent := eventtest.PersistedProjection(
 		eventID,

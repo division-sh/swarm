@@ -4,6 +4,7 @@ import (
 	"context"
 	"database/sql"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"reflect"
 	"strings"
@@ -20,6 +21,7 @@ import (
 	"github.com/division-sh/swarm/internal/runtime/core/flowidentity"
 	runtimeidentity "github.com/division-sh/swarm/internal/runtime/core/identity"
 	"github.com/division-sh/swarm/internal/runtime/core/timeridentity"
+	"github.com/division-sh/swarm/internal/runtime/core/worklifetime"
 	"github.com/division-sh/swarm/internal/runtime/correlation"
 	runtimedelivery "github.com/division-sh/swarm/internal/runtime/deliverylifecycle"
 	runtimeengine "github.com/division-sh/swarm/internal/runtime/engine"
@@ -33,11 +35,12 @@ import (
 	"github.com/division-sh/swarm/internal/runtime/runfork"
 	runtimerunlifecycle "github.com/division-sh/swarm/internal/runtime/runlifecycle"
 	"github.com/division-sh/swarm/internal/runtime/semanticview"
+	"github.com/division-sh/swarm/internal/runtime/startupownership"
 	"github.com/division-sh/swarm/internal/store/internal/backend/mutationprotocol"
 	runforkrevision "github.com/division-sh/swarm/internal/store/internal/backend/runforkrevision"
 	"github.com/division-sh/swarm/internal/testutil/sourceartifactfixture"
-	"github.com/division-sh/swarm/internal/testutil/stagecatalogfixture"
 	"github.com/google/uuid"
+	"github.com/lib/pq"
 )
 
 func TestFanOutDeliveryBarrierMixedDispositionLifecycleOnBothStores(t *testing.T) {
@@ -228,38 +231,68 @@ func TestFanOutDeliveryBarrierRestartAndExactIntentIsolationOnBothStores(t *test
 func TestFanOutDeliveryBarrierCandidateReturnsExactPostCommitScheduleActivationOnBothStores(t *testing.T) {
 	for _, backend := range []string{"sqlite", "postgres"} {
 		t.Run(backend, func(t *testing.T) {
-			ctx := testAuthorActivityContext()
-			owner, _, db, postgres := newFanOutOwnerPairForTest(t, backend)
-			ctx = originalStoreFixtureContext(t, ctx, owner)
-			selected := owner.(storeTestDurableEventBusStore)
+			f := newFanOutConstructorFixture(t, backend)
+			ctx, cancel := context.WithTimeout(f.ctx, 5*time.Second)
+			defer cancel()
+			owner, db, postgres := f.store.(selectedFanOutOwner), f.db, backend == "postgres"
 			base := time.Now().UTC().Add(-time.Minute).Truncate(time.Microsecond)
-			fixture := seedFanOutOwnerFixture(t, ctx, db, owner, postgres, 0, base)
+			fixture := seedFanOutOwnerFixtureWithArtifact(t, ctx, db, owner, postgres, 0, base, f.bundle.SourceArtifact)
 			seedFanOutDeliveryBarrier(t, ctx, db, fixture, base)
-
-			operationOwner := selected.(runtimerunlifecycle.OperationOwner)
-			if disposition, err := operationOwner.RequestCompletionCandidate(ctx, runtimerunlifecycle.ImmediateCandidate(fixture.runID)); err != nil || disposition != runtimerunlifecycle.CandidateRequested {
-				t.Fatalf("request barrier completion candidate = %s/%v", disposition, err)
-			}
-			result, err := executeRunCompletionCandidateForRun(
-				ctx,
-				selected.(runtimerunlifecycle.CandidateStore),
-				fixture.bundleHash,
-				fixture.runID,
-				stagecatalogfixture.NewFinalCatalog([]string{"completed"}, nil),
-			)
+			evidence, err := f.grant.Evidence()
 			if err != nil {
-				t.Fatalf("execute barrier completion candidate: %v", err)
-			}
-			if result.Outcome != runtimerunlifecycle.OutcomeAwaitMutation || len(result.GenericScheduleActivations) != 1 {
-				t.Fatalf("barrier completion result = %#v, want await_mutation with one activation", result)
-			}
-			var persistedActivationID string
-			if err := db.QueryRowContext(ctx, `SELECT timer_id FROM timers WHERE run_id=$1`, fixture.runID).Scan(&persistedActivationID); err != nil {
 				t.Fatal(err)
 			}
-			if got := result.GenericScheduleActivations[0].ID(); got != persistedActivationID {
-				t.Fatalf("committed activation handoff = %s, want persisted %s", got, persistedActivationID)
+			process, found := worklifetime.ProcessFromContext(ctx)
+			if !found {
+				t.Fatal("serving control requires its original process work owner")
 			}
+			occurrence, err := process.NewRuntime(ctx, worklifetime.RuntimeIdentity{RuntimeInstanceID: evidence.RuntimeInstanceID, BundleHash: evidence.BundleHash})
+			if err != nil {
+				t.Fatal(err)
+			}
+			t.Cleanup(func() {
+				join, stop := context.WithTimeout(context.Background(), 5*time.Second)
+				defer stop()
+				if _, err := occurrence.RetireAndWait(join); err != nil {
+					t.Error(err)
+				}
+			})
+			var persistedActivationID string
+			for restart := range 2 {
+				executor := &captureFanOutExecutor{turns: make(chan capturedFanOutTurn, 1), errors: make(chan error, 8), done: make(chan struct{})}
+				workers := 1
+				registration, err := startupownership.StartFanOutServing(ctx, f.grant, occurrence, &workers, executor)
+				if err != nil {
+					t.Fatal(err)
+				}
+				t.Cleanup(registration.Close)
+				var turn capturedFanOutTurn
+				select {
+				case turn = <-executor.turns:
+				case err := <-executor.errors:
+					t.Fatal(err)
+				case <-ctx.Done():
+					t.Fatal(ctx.Err())
+				}
+				if turn.key.RunID != fixture.runID || turn.key.TriggeringDeliveryID != fixture.deliveryID {
+					t.Fatalf("serving selected a different barrier: %+v", turn.key)
+				}
+				activations, err := turn.owner.AdvanceFanOutBarriers(ctx, turn.key)
+				if err != nil || len(activations) != 1 {
+					t.Fatalf("serving/restart %d activation handoff = %+v/%v", restart, activations, err)
+				}
+				if err := db.QueryRowContext(ctx, `SELECT timer_id FROM timers WHERE run_id=$1`, fixture.runID).Scan(&persistedActivationID); err != nil {
+					t.Fatal(err)
+				}
+				if got := activations[0].ID(); got != persistedActivationID {
+					t.Fatalf("committed activation handoff = %s, want persisted %s", got, persistedActivationID)
+				}
+				// No handoff is acknowledged here. The next registration must
+				// rediscover closed_pending and return that same retained row.
+				registration.Close()
+				<-executor.done
+			}
+			assertFanOutBarrierTimerCount(t, ctx, db, fixture.runID, 1)
 			t.Run("live_prepared_occurrence", func(t *testing.T) {
 				owner, _, db, postgres := newFanOutOwnerPairForTest(t, backend)
 				ctx := originalStoreFixtureContext(t, testAuthorActivityContext(), owner)
@@ -300,6 +333,7 @@ func TestFanOutDeliveryBarrierCorruptFactsFailBeforeCloseOnBothStores(t *testing
 			t.Run(backend+"/"+corruption, func(t *testing.T) {
 				ctx := testAuthorActivityContext()
 				owner, restarted, db, postgres := newFanOutOwnerPairForTest(t, backend)
+				ctx = originalStoreFixtureContext(t, ctx, owner)
 				selected := restarted.(storeTestDurableEventBusStore)
 				base := time.Now().UTC().Add(-time.Minute).Truncate(time.Microsecond)
 				fixture := seedFanOutOwnerFixture(t, ctx, db, owner, postgres, 1, base)
@@ -677,16 +711,22 @@ func TestFanOutDeliveryBarrierCompletionFiresIdempotentlyOnBothStores(t *testing
 				go func() {
 					defer workers.Done()
 					<-start
+					var result runtimepipeline.CommittedWorkflowEngineMutation
+					var err error
 					switch store := selected.(type) {
 					case *PostgresStore:
-						_, err := store.CommitWorkflowEngineMutation(ctx, command)
-						errs <- err
+						result, err = store.CommitWorkflowEngineMutation(ctx, command)
 					case *SQLiteRuntimeStore:
-						_, err := store.CommitWorkflowEngineMutation(ctx, command)
-						errs <- err
+						result, err = store.CommitWorkflowEngineMutation(ctx, command)
 					default:
-						errs <- fmt.Errorf("unsupported store %T", selected)
+						err = fmt.Errorf("unsupported store %T", selected)
 					}
+					t.Logf("barrier completion: instance=%v acknowledged=%t err=%v", command.State.Identity, result.Committed, err)
+					var native *pq.Error
+					if errors.As(err, &native) {
+						t.Logf("native barrier failure: code=%s detail=%s where=%s", native.Code, native.Detail, native.Where)
+					}
+					errs <- err
 				}()
 			}
 			close(start)

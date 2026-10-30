@@ -109,14 +109,15 @@ func admitSelectedForkNativePhaseForTest(t *testing.T, ctx context.Context, fixt
 	grant := selectedFixtureGrantForAuthority(t, ctx, selectedCompletionFixture{
 		process: process, store: store, forkRun: child.ForkRunID, request: issue,
 	}, issued, authority)
+	cleanupCtx := context.WithoutCancel(ctx)
 	t.Cleanup(func() {
-		if err := grant.Retire(context.Background()); err != nil {
+		if err := grant.Retire(cleanupCtx); err != nil {
 			t.Error(err)
 		}
-		if err := store.QuiesceRunForkSelectedContractRuntimeExecution(context.Background(), authority); err != nil {
+		if err := store.QuiesceRunForkSelectedContractRuntimeExecution(cleanupCtx, authority); err != nil {
 			t.Error(err)
 		}
-		if _, err := store.CloseRunForkSelectedContractRuntimeExecution(context.Background(), issued.ExecutionID); err != nil {
+		if _, err := store.CloseRunForkSelectedContractRuntimeExecution(cleanupCtx, issued.ExecutionID); err != nil {
 			t.Error(err)
 		}
 	})

@@ -24,6 +24,7 @@ import (
 	runtimefailures "github.com/division-sh/swarm/internal/runtime/failures"
 	"github.com/division-sh/swarm/internal/store/internal/backend/mutationprotocol"
 	privaterunforkrevision "github.com/division-sh/swarm/internal/store/internal/backend/runforkrevision"
+	"github.com/division-sh/swarm/internal/store/internal/backend/runlifecycle/sourceadmission"
 	"github.com/google/uuid"
 )
 
@@ -300,6 +301,36 @@ func (a *Adapter) activateNormalAuthorityTx(ctx context.Context, tx *sql.Tx, att
 	if err := authority.Validate(); err != nil {
 		return err
 	}
+	rows, err := tx.QueryContext(ctx, `SELECT DISTINCT CAST(run_id AS TEXT) FROM event_deliveries
+		WHERE execution_authority_kind='normal_runtime' AND authority_bundle_hash=$1
+		  AND (execution_authority_id<>$2 OR execution_authority_generation<>$3)
+		  AND status IN ('pending','failed','in_progress') AND run_id IS NOT NULL
+		ORDER BY 1`, authority.SourceArtifact().BundleHash(), authority.ExecutionID(), authority.Generation())
+	if err != nil {
+		return err
+	}
+	var runIDs []string
+	for rows.Next() {
+		var runID string
+		if err := rows.Scan(&runID); err != nil {
+			return errors.Join(err, rows.Close())
+		}
+		runIDs = append(runIDs, runID)
+	}
+	if err := errors.Join(rows.Err(), rows.Close()); err != nil {
+		return err
+	}
+	for _, runID := range runIDs {
+		var err error
+		if a.dialect == DialectSQLite {
+			_, err = sourceadmission.LoadSQLiteTx(ctx, tx, runID, false, false)
+		} else {
+			_, err = sourceadmission.LoadPostgresTx(ctx, tx, runID, false, false)
+		}
+		if err != nil {
+			return err
+		}
+	}
 	now, err := a.databaseNow(ctx, tx)
 	if err != nil {
 		return err
@@ -328,6 +359,7 @@ func (a *Adapter) activateNormalAuthorityTx(ctx context.Context, tx *sql.Tx, att
 		  AND delivery.execution_authority_kind='normal_runtime'
 		  AND delivery.authority_bundle_hash=$2
 		  AND (delivery.execution_authority_id<>$3 OR delivery.execution_authority_generation<>$4)
+		  AND delivery.run_id=$5
 		  AND attempt.lease_expires_at>$1`
 	expireArgs := []any{reclaimAt, bundleHash, authority.ExecutionID(), authority.Generation()}
 	if a.dialect == DialectSQLite {
@@ -346,11 +378,9 @@ func (a *Adapter) activateNormalAuthorityTx(ctx context.Context, tx *sql.Tx, att
 				  AND delivery.execution_authority_kind='normal_runtime'
 				  AND delivery.authority_bundle_hash=?
 				  AND (delivery.execution_authority_id<>? OR delivery.execution_authority_generation<>?)
+				  AND delivery.run_id=?
 			  )`
 		expireArgs = []any{reclaimAt, reclaimAt, bundleHash, authority.ExecutionID(), authority.Generation()}
-	}
-	if _, err := tx.ExecContext(ctx, expireQuery, expireArgs...); err != nil {
-		return fmt.Errorf("expire predecessor delivery attempts: %w", err)
 	}
 	query := `
 		UPDATE event_deliveries
@@ -361,6 +391,7 @@ func (a *Adapter) activateNormalAuthorityTx(ctx context.Context, tx *sql.Tx, att
 		  AND NOT EXISTS (SELECT 1 FROM runs AS frozen WHERE frozen.run_id=event_deliveries.run_id AND frozen.status='forked')
 		  AND authority_bundle_hash=$3
 		  AND (execution_authority_id<>$1 OR execution_authority_generation<>$2)
+		  AND run_id=$4
 		  AND status IN ('pending','failed','in_progress')`
 	args := []any{authority.ExecutionID(), authority.Generation(), bundleHash}
 	if a.dialect == DialectSQLite {
@@ -376,11 +407,17 @@ func (a *Adapter) activateNormalAuthorityTx(ctx context.Context, tx *sql.Tx, att
 			  AND NOT EXISTS (SELECT 1 FROM runs AS frozen WHERE frozen.run_id=event_deliveries.run_id AND frozen.status='forked')
 			  AND authority_bundle_hash=?
 			  AND (execution_authority_id<>? OR execution_authority_generation<>?)
+			  AND run_id=?
 			  AND status IN ('pending','failed','in_progress')`
 		args = append(args, authority.ExecutionID(), authority.Generation())
 	}
-	if _, err := tx.ExecContext(ctx, query, args...); err != nil {
-		return fmt.Errorf("activate normal delivery execution authority: %w", err)
+	for _, runID := range runIDs {
+		if _, err := tx.ExecContext(ctx, expireQuery, append(expireArgs, runID)...); err != nil {
+			return fmt.Errorf("expire predecessor delivery attempts: %w", err)
+		}
+		if _, err := tx.ExecContext(ctx, query, append(args, runID)...); err != nil {
+			return fmt.Errorf("activate normal delivery execution authority: %w", err)
+		}
 	}
 	return declareAuthorityDeliveryRuns(ctx, tx, authority, attempt)
 }

@@ -34,7 +34,7 @@ func TestAuthorityTransactionOutcomeEvidence(t *testing.T) {
 			if err := conn.QueryRowContext(context.Background(), "SELECT pg_backend_pid()").Scan(&pid); err != nil {
 				t.Fatal(err)
 			}
-			ctx, cancel := context.WithCancel(context.Background())
+			ctx, cancel := context.WithCancel(probe.original)
 			defer cancel()
 			primary, cleanup := errors.New("independent outcome failure"), errors.New("independent settlement failure")
 			switch scenario {
@@ -111,7 +111,7 @@ func TestAuthorityTransactionOutcomeEvidence(t *testing.T) {
 			if lease.Current() == unsafe {
 				t.Errorf("possession current=%t unsafe=%t", lease.Current(), unsafe)
 			}
-			next, stop := context.WithTimeout(context.Background(), 3*time.Second)
+			next, stop := context.WithTimeout(probe.original, 3*time.Second)
 			defer stop()
 			err = RunAuthorityReadTransaction(next, session, func(sqlCtx context.Context, tx *sql.Tx) error {
 				if unsafe {

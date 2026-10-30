@@ -25,6 +25,7 @@ func TestPostgresRunReadBarrierOwnsJoinedRollbackAndRefusesForeignAuthority(t *t
 				}
 				return
 			}
+			ctx = originalStoreFixtureContext(t, testAuthorActivityContext(), fixture.store)
 			probe, restore, err := InstallTransactionProbeForTest(fixture.store, transactiontest.Options{})
 			if err != nil {
 				t.Fatal(err)

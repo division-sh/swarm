@@ -227,7 +227,7 @@ func TestA2PortfolioSupportedFiniteJoinSurfaceBothStores(t *testing.T) {
 					t.Fatalf("constructed operating instance lost its typed key: %+v", operating)
 				}
 				if !reflect.DeepEqual(operating, requireA2PortfolioKeyedEntity(t, rt, setup.RunID, "operating", "operating_instance_id", key)) {
-					t.Fatal("run completion changed its constructed operating instance")
+					t.Fatal("join settlement changed its constructed operating instance")
 				}
 				ctx := servedControlProofAuthorActivityContext(t, rt)
 				request, err := pipeline.NewExactFlowInstanceLookup(rt.Runtime.Options.WorkflowModule.SemanticSource(), rt.Runtime.Options.SourceArtifactFact,

@@ -77,12 +77,12 @@ func TestRunServeSourceArtifactIntegrityRejectsBeforeReadinessBothStores(t *test
 				if err != nil {
 					t.Fatal(err)
 				}
-				if _, err := artifacts.EnsureRootedSource(ctx, rooted); err != nil {
+				setupCtx := runtimecorrelation.WithRootAdmission(runtimecorrelation.WithSourceArtifactFact(ctx, sourceartifactfixture.FactFor(artifact)), rooted.Admission())
+				setupCtx = serveFixtureProcessContext(t, setupCtx, artifacts)
+				if _, err := artifacts.EnsureRootedSource(setupCtx, rooted); err != nil {
 					t.Fatal(err)
 				}
 				runID := uuid.NewString()
-				setupCtx := runtimecorrelation.WithRootAdmission(runtimecorrelation.WithSourceArtifactFact(ctx, sourceartifactfixture.FactFor(artifact)), rooted.Admission())
-				setupCtx = serveFixtureProcessContext(t, setupCtx, artifacts)
 				storetest.RequireRun(t, setupCtx, artifacts.(storetest.RunFixtureStore), storetest.RunFixture{Origin: storetest.ScenarioSetupOrigin(), RunID: runID, BundleHash: artifact.BundleHash(), RootAdmission: rooted.Admission()})
 				releaseServeTestAgentFixtureCapability(t, artifacts.(storetest.AgentFixtureStore))
 				placeholder := "?"

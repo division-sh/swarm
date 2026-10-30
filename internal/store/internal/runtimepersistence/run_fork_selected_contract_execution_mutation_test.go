@@ -1954,6 +1954,7 @@ func seedSelectedContractExecutionSourceWithEvent(t *testing.T, ctx context.Cont
 	ctx = startupownership.CarryMutationAuthority(runtimeeffects.WithExecutionMode(runtimecorrelation.WithRunID(testAuthorActivityContextForBundle(run.BundleHash), run.RunID), runtimeeffects.ExecutionModeLive), ctx)
 	selected := newPostgresStoreWithBackend(mustPostgresBackend(db))
 	selected.acceptCurrentSchemaForTest()
+	ctx = originalStoreFixtureContext(t, ctx, selected)
 	ctx = requireRunFixtureForTest(t, ctx, selected, run)
 	rooted, err := run.Artifact.RootedSource()
 	if err != nil {

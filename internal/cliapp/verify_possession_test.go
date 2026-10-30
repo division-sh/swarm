@@ -196,7 +196,7 @@ func TestVerifyPossessionPublicFormatsAndPortableBothStores(t *testing.T) {
 				t.Fatalf("successful public observation acquired authority: %+v -> %+v %v", before, after, err)
 			}
 			t.Run("retained_channel", func(t *testing.T) {
-				assertVerifyRetainedChannelPublicAdmission(t, ctx, root, configPath, owner.ChannelStore)
+				assertVerifyRetainedChannelPublicAdmission(t, ctx, root, configPath, owner)
 			})
 			contender, err := owner.AcquireProcessCapability(ctx, startupownership.AcquireRequest{
 				OwnerID: "contender-after-public-verification", BootID: uuid.NewString(), RuntimeInstanceID: uuid.NewString(),

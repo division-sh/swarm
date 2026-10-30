@@ -214,6 +214,7 @@ func TestSelectedResetFailedCandidateRemainsOwnedBothStores(t *testing.T) {
 			if _, _, err := failed.StopSelectedFork(context.Background(), runcontrol.TransitionRequest{RunID: "failed-candidate"}); !errors.Is(err, worklifetime.ErrRetired) {
 				t.Fatalf("failed candidate control admission survived cleanup: %v", err)
 			}
+			rt.ProcessCapability = supervisor.processCapability
 			expireServedResetTransportCache(t, rt)
 			retry := requestServedJSONRPC(t, rt.Endpoint, "runtime.nuke", params)
 			if retry.Error != nil {

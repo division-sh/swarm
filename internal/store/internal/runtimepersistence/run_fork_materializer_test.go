@@ -1844,6 +1844,7 @@ func TestRunForkActivation_FailsClosedForDeliveryAdvancementAndUsesTypedOriginLi
 	if err != nil {
 		t.Fatalf("construct orphan fork origin: %v", err)
 	}
+	ctx = originalStoreFixtureContext(t, ctx, pg)
 	requireRunFixtureForTest(t, ctx, pg, semanticRunFixture{
 		Origin:    orphanOrigin,
 		RunID:     orphanRunID,
@@ -1951,6 +1952,7 @@ func TestRunForkActivation_FailsClosedForForkSessionAndTurnReplayState(t *testin
 				originRunID := uuid.NewString()
 				identity := mustTestAgentIdentityForRun(originRunID, "agent-a", "fork-state")
 				fields := testAgentIdentityStorageFields(t, identity)
+				ctx = originalStoreFixtureContext(t, ctx, pg)
 				requireRunFixtureForTest(t, ctx, pg, semanticRunFixture{
 					Origin: semanticScenarioSetupRunOriginForTest(), RunID: originRunID, StartedAt: at.Add(-time.Minute),
 				})
@@ -2163,6 +2165,7 @@ func (n *sqlNullTime) Scan(value any) error {
 func seedActivationReadySourceRun(t *testing.T, ctx context.Context, db *sql.DB, sourceRunID, entityID, eventID string, at time.Time) {
 	t.Helper()
 	selected := newPostgresStoreWithBackend(mustPostgresBackend(db))
+	ctx = originalStoreFixtureContext(t, ctx, selected)
 	requireRunFixtureForTest(t, ctx, selected, semanticRunFixture{Origin: semanticScenarioSetupRunOriginForTest(), RunID: sourceRunID, StartedAt: at.Add(-time.Minute), BundleHash: authorActivityTestBundleHash})
 	commitPreparedWorkflowAggregateFixture(t, ctx, selected, sourceRunID, activationReadySourceInstance(entityID, at), at)
 	seedActivationReadySourceState(t, ctx, db, sourceRunID, entityID, eventID, at)

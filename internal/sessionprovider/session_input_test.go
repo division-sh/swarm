@@ -18,9 +18,11 @@ import (
 	"github.com/division-sh/swarm/internal/packartifact"
 	"github.com/division-sh/swarm/internal/packmodel"
 	"github.com/division-sh/swarm/internal/providertriggers"
+	"github.com/division-sh/swarm/internal/runtime/correlation"
 	"github.com/division-sh/swarm/internal/runtime/plangeneration"
 	nativeinput "github.com/division-sh/swarm/internal/sessionprovider/input"
 	"github.com/division-sh/swarm/internal/store/storetest"
+	"github.com/division-sh/swarm/internal/store/testutil/agentfixture"
 	"github.com/division-sh/swarm/internal/testutil/sourceartifactfixture"
 	"github.com/google/uuid"
 	"go.mau.fi/whatsmeow/proto/waE2E"
@@ -74,7 +76,12 @@ func runOwnedSessionInputBootstrapBothStores(t *testing.T, targetGeneration uint
 			} else {
 				selected = storetest.StartPostgresRuntimeStore(t)
 			}
-			ctx, now := context.Background(), time.Now().UTC()
+			runtimeID := uuid.NewString()
+			ctx, err := agentfixture.ProcessContext(t, correlation.WithRuntimeInstanceID(context.Background(), runtimeID), selected.(agentfixture.Store))
+			if err != nil {
+				t.Fatal(err)
+			}
+			now := time.Now().UTC()
 			source := sourceartifactfixture.Require(t, ctx, selected)
 			principal, err := selected.EnsureOperatorPrincipal(ctx, now)
 			if err != nil {
@@ -89,7 +96,7 @@ func runOwnedSessionInputBootstrapBothStores(t *testing.T, targetGeneration uint
 				t.Fatal(err)
 			}
 			coordinate := channelonboarding.ChannelRuntimeContextCoordinate{BundleHash: source.BundleHash(),
-				BundleIdentity: "owned-session-input", PackInventoryGeneration: "sha256:session-input", RuntimeInstanceID: uuid.NewString(),
+				BundleIdentity: "owned-session-input", PackInventoryGeneration: "sha256:session-input", RuntimeInstanceID: runtimeID,
 				ContextPublicationGeneration: 1, PlanGeneration: generation}
 			id := uuid.NewString()
 			op, err := selected.ReserveChannelOnboarding(ctx, channelonboarding.StartRequest{OperationID: id,

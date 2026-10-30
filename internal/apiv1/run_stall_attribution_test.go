@@ -23,7 +23,7 @@ func TestRunDiagnosisUsesOneCoherentReportAndPreservesMixedInstanceAttribution(t
 			}},
 		}},
 	}
-	handler := testHandler(t, Options{AuthTokens: []string{testToken}, Handlers: testOperatorHandlers(testOperatorCapabilities{Runs: reader})})
+	handler := testHandler(t, Options{AuthTokens: []string{testToken}, Handlers: testOperatorHandlers(t, testOperatorCapabilities{Runs: reader})})
 	response := rpcCall(t, handler, `{"jsonrpc":"2.0","id":"diagnosis","method":"run.diagnose","params":{"run_id":"run-1"}}`)
 	if response.Error != nil {
 		t.Fatalf("public diagnosis: %#v", response.Error)

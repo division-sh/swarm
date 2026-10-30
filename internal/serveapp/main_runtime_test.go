@@ -121,18 +121,11 @@ func releaseServeTestAgentFixtureCapability(t testing.TB, selected storetest.Age
 
 func serveFixtureProcessContext(t testing.TB, ctx context.Context, selected any) context.Context {
 	t.Helper()
-	if runtimestartupownership.HasMutationAuthority(ctx) {
-		return ctx
-	}
 	store, ok := selected.(agentfixture.Store)
 	if !ok {
 		t.Fatalf("serve fixture requires its native lifecycle owner: %T", selected)
 	}
-	process, err := agentfixture.ProcessCapability(t, ctx, store)
-	if err != nil {
-		t.Fatal(err)
-	}
-	ctx, err = runtimestartupownership.WithProcessMutationAuthority(ctx, process)
+	ctx, err := agentfixture.ProcessContext(t, ctx, store)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -683,6 +676,7 @@ func startServedJoinProofRuntime(t *testing.T) (string, *sql.DB, string, *runtim
 	_, db, pg := installServeRuntimePostgresTestStores(t, func() cliapp.ServeWorkspaceLifecycle {
 		return serveRuntimeWorkspaceStub{}
 	})
+	storetest.BootstrapPostgresRuntimeStore(t, pg)
 	root := canonicalrouting.CopyServedJoinProof(t)
 	repo := repoRootForTest()
 	_, bundle, err := cliapp.NewSwarmWorkflowModule(repo, root)
@@ -693,9 +687,10 @@ func startServedJoinProofRuntime(t *testing.T) (string, *sql.DB, string, *runtim
 	if err != nil {
 		t.Fatalf("project served join durable data: %v", err)
 	}
-	if _, err := pg.EnsureSourceArtifactWithData(context.Background(), bundle.SourceArtifact, catalog); err != nil {
+	if _, err := pg.EnsureSourceArtifactWithData(serveFixtureProcessContext(t, context.Background(), pg), bundle.SourceArtifact, catalog); err != nil {
 		t.Fatalf("persist served join source: %v", err)
 	}
+	releaseServeTestAgentFixtureCapability(t, pg)
 	bundleHash := bundle.SourceArtifact.BundleHash()
 	endpoint, rt := startServedEventPublishFollowUpRuntime(t, cliapp.ServeOptions{
 		ConfigPath:              writeServeRuntimeTestConfig(t),
@@ -1272,6 +1267,7 @@ func TestServedParityHarnessConversationForkLifecycle(t *testing.T) {
 }
 
 type servedControlProofRuntime struct {
+	ProcessCapability   runtimestartupownership.ProcessCapability
 	Endpoint            string
 	DB                  *sql.DB
 	Backend             string
@@ -6947,10 +6943,11 @@ func Test2376DirectoryBootUsesExactSelectedStoreSource(t *testing.T) {
 					t.Fatalf("open SQLite selected store: %v", err)
 				}
 				bootstrapSQLiteSchemaForTest(t, context.Background(), selected, plans)
-				if _, err := selected.EnsureSourceArtifactWithData(context.Background(), bundle.SourceArtifact, catalog); err != nil {
+				if _, err := selected.EnsureSourceArtifactWithData(serveFixtureProcessContext(t, context.Background(), selected), bundle.SourceArtifact, catalog); err != nil {
 					_ = selected.Close()
 					t.Fatalf("persist SQLite source artifact: %v", err)
 				}
+				releaseServeTestAgentFixtureCapability(t, selected)
 				if err := selected.Close(); err != nil {
 					t.Fatalf("close seeded SQLite selected store: %v", err)
 				}
@@ -6958,10 +6955,12 @@ func Test2376DirectoryBootUsesExactSelectedStoreSource(t *testing.T) {
 				_, _, selected := installServeRuntimePostgresTestStores(t, func() cliapp.ServeWorkspaceLifecycle {
 					return serveRuntimeWorkspaceStub{bundleScopes: &workspaceBundleScopes}
 				})
+				storetest.BootstrapPostgresRuntimeStore(t, selected)
 				opts.ConfigPath = writeStoreBackendRuntimeConfig(t, backend.String(), "")
-				if _, err := selected.EnsureSourceArtifactWithData(context.Background(), bundle.SourceArtifact, catalog); err != nil {
+				if _, err := selected.EnsureSourceArtifactWithData(serveFixtureProcessContext(t, context.Background(), selected), bundle.SourceArtifact, catalog); err != nil {
 					t.Fatalf("persist PostgreSQL source artifact: %v", err)
 				}
+				releaseServeTestAgentFixtureCapability(t, selected)
 			default:
 				t.Fatalf("unsupported selected store %q", backend)
 			}

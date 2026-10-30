@@ -22,6 +22,8 @@ const debtW1RebasedComparisonCollectorTo = "58217e03fdd7a5276ef4ac1b0a763fb2b250
 const debtSourceLoaderCollectorTo = "2b1b5a1147e3733dbc57049a2515c05f0b0103e595a666c524232a7ff9012e5a"
 const debtProviderSourceCollectorTo = "e30b8d1d122008c82a16d1b85f04d24e72c125f44fba0fa4a0d6b8de3f8eeacb"
 
+const debtS2OriginalContextCollectorTo = "5110cb1b58e692bddfa387926d95fb70ed6fb4b098bf347c7a5e41eae65562ec"
+
 // #2727/6388897450: source-pin validation for an already-landed composed endpoint.
 const debtSelectedFixtureLandedCollectorTo = "1b48c6bd1c1b6d6100ee6df74bb9fe3d239372befa4c8f96f02243602fa9f646"
 

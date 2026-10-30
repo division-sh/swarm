@@ -46,7 +46,7 @@ func TestSQLiteAgentUsageOwnerBacksSupportedAPISurface(t *testing.T) {
 
 	handler := testHandler(t, Options{
 		AuthTokens: []string{testToken},
-		Handlers: testOperatorHandlers(testOperatorCapabilities{
+		Handlers: testOperatorHandlers(t, testOperatorCapabilities{
 			AgentUsage: sqliteStore,
 		}),
 	})
@@ -91,6 +91,7 @@ func TestSQLiteAgentDeliveryLifecycleOwnerBacksSupportedAPISurface(t *testing.T)
 	runID := uuid.NewString()
 	eventID := uuid.NewString()
 	entityID := uuid.NewString()
+	ctx = apiTestOriginalProcessContext(t, ctx, sqliteStore)
 	storetest.RequireRun(t, ctx, sqliteStore, storetest.RunFixture{Origin: storetest.ScenarioSetupOrigin(), RunID: runID})
 	seedSQLiteAgentUsageAgentForRun(t, ctx, sqliteStore, runID, "agent-1")
 	evt := eventtest.ExistingRunRootIngress(
@@ -124,7 +125,7 @@ func TestSQLiteAgentDeliveryLifecycleOwnerBacksSupportedAPISurface(t *testing.T)
 
 	handler := testHandler(t, Options{
 		AuthTokens: []string{testToken},
-		Handlers: testOperatorHandlers(testOperatorCapabilities{
+		Handlers: testOperatorHandlers(t, testOperatorCapabilities{
 			AgentDeliveryLifecycle: sqliteStore,
 		}),
 	})

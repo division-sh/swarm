@@ -94,7 +94,8 @@ func TestActivityExecutionGrantReadUsesExactHistoricalVersionBothStores(t *testi
 				control.Connector = native
 				return control
 			})
-			ctx := requireDefaultSourceArtifactForTest(t, fixture.context, fixture.store)
+			ctx := originalStoreFixtureContext(t, fixture.context, fixture.store)
+			ctx = requireDefaultSourceArtifactForTest(t, ctx, fixture.store)
 			selected := fixture.store.(agentfixture.Store)
 			process, err := agentfixture.ProcessCapability(t, ctx, selected)
 			if err != nil {

@@ -28,7 +28,7 @@ func TestEventBusTerminalRefusalObservationSeesPresentEvidenceBothStores(t *test
 				selected = storetest.StartPostgresRuntimeStore(t)
 			}
 			source := busRuntimeControlSource(t)
-			if _, err := newScopedTestEventBus(selected, runtimebus.EventBusOptions{ContractBundle: source}); err != nil {
+			if _, err := newScopedTestEventBus(t, selected, runtimebus.EventBusOptions{ContractBundle: source}); err != nil {
 				t.Fatal(err)
 			}
 			ctx, runID := capturedBusSourceContext(t, context.Background(), source), uuid.NewString()

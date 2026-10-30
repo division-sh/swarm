@@ -182,6 +182,14 @@ func (f mutationProtocolJourneyFixture) start(t *testing.T, bootstrap bool) *mut
 	s.ctx = runtimecorrelation.WithRuntimeInstanceID(context.Background(), runtimeID)
 	s.ctx = runtimecorrelation.WithSourceArtifactFact(s.ctx, fact)
 	s.ctx = runtimeauthoractivity.WithScope(s.ctx, runtimeauthoractivity.BundleScope(runtimeID, fact.BundleHash()))
+	s.capability, err = selected.StartupOwnership().AcquireProcessCapability(s.ctx, startupownership.AcquireRequest{OwnerID: "mutation-protocol-journey", BootID: uuid.NewString(), RuntimeInstanceID: runtimeID})
+	if err != nil {
+		t.Fatal(err)
+	}
+	s.ctx, err = startupownership.WithProcessMutationAuthority(s.ctx, s.capability)
+	if err != nil {
+		t.Fatal(err)
+	}
 	if bootstrap {
 		storetest.RequireBundleDataCatalog(t, s.ctx, selected.SourceArtifactWriter(), bundle)
 	}
@@ -201,10 +209,6 @@ func (f mutationProtocolJourneyFixture) start(t *testing.T, bootstrap bool) *mut
 	deps.Config = cfgResult.Config
 	deps.Options = swarmruntime.RuntimeOptions{ExecutionPosture: executionposture.Live, WorkflowModule: module, SourceArtifactFact: fact, RuntimeInstanceID: runtimeID, ProcessWorkOwner: s.process, ProviderTriggerCatalog: catalog, ProviderCredentials: credentials}
 	s.runtime, err = swarmruntime.NewRuntime(s.ctx, deps)
-	if err != nil {
-		t.Fatal(err)
-	}
-	s.capability, err = selected.StartupOwnership().AcquireProcessCapability(s.ctx, startupownership.AcquireRequest{OwnerID: "mutation-protocol-journey", BootID: uuid.NewString(), RuntimeInstanceID: runtimeID})
 	if err != nil {
 		t.Fatal(err)
 	}

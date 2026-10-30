@@ -1040,8 +1040,7 @@ func (s *DecisionPostgresOwner) SupersedeDecisionCardsForStage(ctx context.Conte
 		if err != nil || !changed {
 			return changed, err
 		}
-		_, err = attempt.RequestCompletion(txctx, s.candidateRequests, runID, nil)
-		return changed, err
+		return changed, nil
 	})
 }
 
@@ -1053,8 +1052,7 @@ func (s *DecisionSQLiteOwner) SupersedeDecisionCardsForStage(ctx context.Context
 		if err != nil || !changed {
 			return changed, err
 		}
-		_, err = attempt.RequestCompletion(txctx, s.candidateRequests, runID, nil)
-		return changed, err
+		return changed, nil
 	})
 }
 

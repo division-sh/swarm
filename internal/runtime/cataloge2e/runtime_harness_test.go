@@ -441,6 +441,7 @@ func installCatalogRuntimeStartupGrant(
 	rt *runtime.Runtime,
 	root sourceartifact.RootAdmission,
 	componentExecution bool,
+	retained ...runtimestartupownership.ProcessCapability,
 ) runtimestartupownership.ProcessCapability {
 	t.Helper()
 	if capability == nil || rt == nil || rt.Manager == nil || rt.Options.WorkflowModule == nil {
