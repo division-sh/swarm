@@ -184,20 +184,23 @@ func startReleaseServe(t *testing.T, options releaseProcessSpec) *releaseServePr
 	binary := options.BinaryPath
 	env := append([]string(nil), options.Env...)
 	if options.InternalMockLifecycleBinary != "" {
-		if options.PublicWebhookBaseURL != "" || options.PublicWebhookListen != "" {
+		if !options.RetainedLiveExecution && (options.PublicWebhookBaseURL != "" || options.PublicWebhookListen != "") {
 			t.Fatal("internal mock lifecycle does not own public exposure/registration proof")
 		}
 		request, err := json.Marshal(struct {
-			ConfigPath    string
-			Source        string
-			StoredHash    string
-			Live          bool
-			Store         string
-			Dev           bool
-			APIPort       int
-			Token         string
-			ShutdownGrace time.Duration
-		}{options.ConfigPath, options.Source, options.RetainedBundleHash, options.RetainedLiveExecution, options.Store, options.Dev, options.APIPort, options.Token, shutdownGrace})
+			ConfigPath           string
+			Source               string
+			StoredHash           string
+			Live                 bool
+			Store                string
+			Dev                  bool
+			APIPort              int
+			Token                string
+			ShutdownGrace        time.Duration
+			PublicWebhookBaseURL string
+			PublicWebhookListen  string
+		}{options.ConfigPath, options.Source, options.RetainedBundleHash, options.RetainedLiveExecution, options.Store, options.Dev, options.APIPort, options.Token, shutdownGrace,
+			options.PublicWebhookBaseURL, options.PublicWebhookListen})
 		if err != nil {
 			t.Fatal(err)
 		}

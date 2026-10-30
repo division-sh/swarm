@@ -48,21 +48,26 @@ func TestOwnedMockLifecycleProcessEntry(t *testing.T) {
 		t.Skip("internal retained lifecycle child; launched by its parent proof")
 	}
 	var request struct {
-		ConfigPath    string
-		Source        string
-		StoredHash    string
-		Live          bool
-		Store         string
-		Dev           bool
-		APIPort       int
-		Token         string
-		ShutdownGrace time.Duration
+		ConfigPath           string
+		Source               string
+		StoredHash           string
+		Live                 bool
+		Store                string
+		Dev                  bool
+		APIPort              int
+		Token                string
+		ShutdownGrace        time.Duration
+		PublicWebhookBaseURL string
+		PublicWebhookListen  string
 	}
 	if err := json.Unmarshal([]byte(raw), &request); err != nil {
 		t.Fatal(err)
 	}
 	if request.Token == "" || request.APIPort < 0 || request.APIPort > 65535 || request.ShutdownGrace <= 0 {
 		t.Fatal("internal lifecycle child requires a valid listener port and exact parent auth facts")
+	}
+	if !request.Live && (request.PublicWebhookBaseURL != "" || request.PublicWebhookListen != "") {
+		t.Fatal("mock-only retained lifecycle cannot own public exposure or registration")
 	}
 	root, err := os.Getwd()
 	if err != nil {
@@ -78,6 +83,7 @@ func TestOwnedMockLifecycleProcessEntry(t *testing.T) {
 	opts.Output, opts.ErrorOutput = os.Stdout, os.Stderr
 	opts.NoColor, opts.SelfCheck = true, true
 	opts.ShutdownGrace = request.ShutdownGrace
+	opts.PublicWebhookBaseURL, opts.PublicWebhookListen = request.PublicWebhookBaseURL, request.PublicWebhookListen
 	posture := executionposture.MockOnly
 	if request.Live {
 		posture = executionposture.Live
