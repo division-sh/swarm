@@ -315,7 +315,7 @@ func runCommandLiveRestartJourney(t *testing.T, binary, project string, store go
 	fresh := converge(process, standing, 4, id, freshReceipt)
 	assertFullLifecycleSameRoute(t, old, fresh)
 	assertFullLifecycleStandingReceiptContinuity(t, firstReceipt, pendingReceipt, freshReceipt)
-	assertFullLifecycleOldEvidenceUnchanged(t, process.rpc, standing.RunID, checkpoint, before)
+	assertFullLifecycleOldEvidenceUnchanged(t, process.rpc, standing.RunID, checkpoint, before, "inbound.telegram.text_message")
 	retained := captureFullLifecycleHistory(t, process.rpc, standing.RunID)
 	retainedEvidence := captureFullLifecycleEvidence(t, process.rpc, standing.RunID)
 	stop(process)

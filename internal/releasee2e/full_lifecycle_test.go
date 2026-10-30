@@ -169,6 +169,7 @@ func prepareFullLifecycleProject(t *testing.T, binary, root string, store golden
 	writeReleaseFile(t, filepath.Join(ancestor, "go.mod"), "module hostile-full-lifecycle-ancestor\n\ngo 1.23.0\n")
 	contracts := filepath.Join(projectRoot, "contracts")
 	copyReleaseTree(t, fullLifecycleExecutableSource(t), contracts)
+	addFullLifecycleBusinessInput(t, contracts)
 	if _, err := os.Stat(filepath.Join(projectRoot, "go.mod")); !os.IsNotExist(err) {
 		t.Fatalf("full lifecycle child project must remain YAML-only: %v", err)
 	}
@@ -333,10 +334,10 @@ func runFullLifecycleGracefulJourney(
 	standing fullLifecycleRun,
 ) {
 	t.Helper()
-	firstReceipt := sendFullLifecycleTelegramUpdate(t, process, 1001, 42)
+	firstReceipt := publishFullLifecycleBusinessInput(t, process, standing.RunID, 1001, 42)
 	approveFullLifecycleEffect(t, process.rpc, standing.RunID, "graceful-first")
 	waitForFullLifecycleConvergence(t, process, standing.RunID, 1)
-	first := requireFullLifecycleReceiptEvents(t, process.rpc, standing.RunID, 1001, "42", firstReceipt)
+	first := requireFullLifecycleBusinessChild(t, process.rpc, firstReceipt, 1001, "42")
 	if err := process.stopAndWait(10 * time.Second); err != nil {
 		t.Fatalf("graceful lifecycle stop: %v\n%s", err, process.output.String())
 	}
@@ -348,11 +349,13 @@ func runFullLifecycleGracefulJourney(
 	if restored.RunID != standing.RunID {
 		t.Fatalf("graceful restart standing run = %s, want %s", restored.RunID, standing.RunID)
 	}
-	secondReceipt := sendFullLifecycleTelegramUpdate(t, process, 1002, 42)
+	secondReceipt := publishFullLifecycleBusinessInput(t, process, standing.RunID, 1002, 42)
 	approveFullLifecycleEffect(t, process.rpc, standing.RunID, "graceful-second")
 	waitForFullLifecycleConvergence(t, process, standing.RunID, 2)
-	second := requireFullLifecycleReceiptEvents(t, process.rpc, standing.RunID, 1002, "42", secondReceipt)
-	assertFullLifecycleStandingReceiptContinuity(t, firstReceipt, secondReceipt)
+	second := requireFullLifecycleBusinessChild(t, process.rpc, secondReceipt, 1002, "42")
+	if firstReceipt.RunID != secondReceipt.RunID {
+		t.Fatal("graceful restart changed business-input run")
+	}
 	assertFullLifecycleSameRoute(t, first, second)
 	assertFullLifecycleTimerCardinality(t, process.rpc, standing.RunID, 1)
 }
@@ -365,13 +368,13 @@ func runFullLifecycleCrashIntrinsicJourney(
 	standing fullLifecycleRun,
 ) {
 	t.Helper()
-	baselineReceipt := sendFullLifecycleTelegramUpdate(t, process, 2000, 42)
+	baselineReceipt := publishFullLifecycleBusinessInput(t, process, standing.RunID, 2000, 42)
 	approveFullLifecycleEffect(t, process.rpc, standing.RunID, "recovery-baseline")
 	waitForFullLifecycleConvergence(t, process, standing.RunID, 1)
-	baseline := requireFullLifecycleReceiptEvents(t, process.rpc, standing.RunID, 2000, "42", baselineReceipt)
+	baseline := requireFullLifecycleBusinessChild(t, process.rpc, baselineReceipt, 2000, "42")
 	pauseFullLifecycleRun(t, process.rpc, standing.RunID)
-	checkpointReceipt := sendFullLifecycleTelegramUpdate(t, process, 2001, 42)
-	checkpoint := waitForFullLifecycleCrashCheckpoint(t, process, standing.RunID, 2001, "42", checkpointReceipt)
+	checkpointReceipt := publishFullLifecycleBusinessInput(t, process, standing.RunID, 2001, 42)
+	checkpoint := waitForFullLifecycleBusinessCheckpoint(t, process, checkpointReceipt)
 	if err := process.killAndWait(10 * time.Second); err != nil {
 		t.Fatalf("force lifecycle process death: %v\n%s", err, process.output.String())
 	}
@@ -389,17 +392,19 @@ func runFullLifecycleCrashIntrinsicJourney(
 	approveFullLifecycleEffect(t, process.rpc, standing.RunID, "recovered-old")
 	waitForFullLifecycleConvergence(t, process, standing.RunID, 2)
 	assertFullLifecycleDeliveryCompleted(t, process.rpc, standing.RunID, checkpoint)
-	old := requireFullLifecycleEventByID(t, process.rpc, standing.RunID, checkpoint.EventID)
+	old := requireFullLifecycleBusinessChild(t, process.rpc, checkpointReceipt, 2001, "42")
 	assertFullLifecycleSameRoute(t, baseline, old)
 	before := captureFullLifecycleEvidence(t, process.rpc, standing.RunID)
 
-	freshReceipt := sendFullLifecycleTelegramUpdate(t, process, 2002, 42)
+	freshReceipt := publishFullLifecycleBusinessInput(t, process, standing.RunID, 2002, 42)
 	approveFullLifecycleEffect(t, process.rpc, standing.RunID, "recovered-fresh")
 	waitForFullLifecycleConvergence(t, process, standing.RunID, 3)
-	fresh := requireFullLifecycleReceiptEvents(t, process.rpc, standing.RunID, 2002, "42", freshReceipt)
-	assertFullLifecycleStandingReceiptContinuity(t, baselineReceipt, checkpointReceipt, freshReceipt)
+	fresh := requireFullLifecycleBusinessChild(t, process.rpc, freshReceipt, 2002, "42")
+	if baselineReceipt.RunID != checkpointReceipt.RunID || checkpointReceipt.RunID != freshReceipt.RunID {
+		t.Fatal("intrinsic recovery changed business-input run")
+	}
 	assertFullLifecycleSameRoute(t, old, fresh)
-	assertFullLifecycleOldEvidenceUnchanged(t, process.rpc, standing.RunID, checkpoint, before)
+	assertFullLifecycleOldEvidenceUnchanged(t, process.rpc, standing.RunID, checkpoint, before, "lifecycle.message_ready")
 	assertFullLifecycleTimerCardinality(t, process.rpc, standing.RunID, 1)
 }
 
@@ -412,13 +417,13 @@ func runFullLifecycleDevFreshJourney(
 	lifecycleCardID string,
 ) {
 	t.Helper()
-	baselineReceipt := sendFullLifecycleTelegramUpdate(t, process, 3000, 42)
+	baselineReceipt := publishFullLifecycleBusinessInput(t, process, standing.RunID, 3000, 42)
 	approveFullLifecycleEffect(t, process.rpc, standing.RunID, "dev-baseline")
 	waitForFullLifecycleConvergence(t, process, standing.RunID, 1)
-	requireFullLifecycleReceiptEvents(t, process.rpc, standing.RunID, 3000, "42", baselineReceipt)
+	requireFullLifecycleBusinessChild(t, process.rpc, baselineReceipt, 3000, "42")
 	pauseFullLifecycleRun(t, process.rpc, standing.RunID)
-	checkpointReceipt := sendFullLifecycleTelegramUpdate(t, process, 3001, 42)
-	checkpoint := waitForFullLifecycleCrashCheckpoint(t, process, standing.RunID, 3001, "42", checkpointReceipt)
+	checkpointReceipt := publishFullLifecycleBusinessInput(t, process, standing.RunID, 3001, 42)
+	checkpoint := waitForFullLifecycleBusinessCheckpoint(t, process, checkpointReceipt)
 	predecessorHistory := captureFullLifecycleHistory(t, process.rpc, standing.RunID)
 	predecessorHistory.EventIDs[checkpoint.EventID] = true
 	predecessorHistory.DeliveryIDs[checkpoint.Delivery.DeliveryID] = true
@@ -443,10 +448,10 @@ func runFullLifecycleDevFreshJourney(
 	decideFullLifecycleCard(t, process.rpc, card, "lifecycle-gate-"+fresh.RunID)
 	assertFullLifecycleCardDecided(t, process.rpc, card.CardID)
 	waitForFullLifecycleRunStatus(t, process.rpc, fresh.RunID, "live")
-	freshReceipt := sendFullLifecycleTelegramUpdate(t, process, 3002, 42)
+	freshReceipt := publishFullLifecycleBusinessInput(t, process, fresh.RunID, 3002, 42)
 	approveFullLifecycleEffect(t, process.rpc, fresh.RunID, "dev-fresh")
 	waitForFullLifecycleConvergence(t, process, fresh.RunID, 1)
-	requireFullLifecycleReceiptEvents(t, process.rpc, fresh.RunID, 3002, "42", freshReceipt)
+	requireFullLifecycleBusinessChild(t, process.rpc, freshReceipt, 3002, "42")
 }
 
 func assertFullLifecycleReadySurface(t *testing.T, process *releaseServeProcess) {
@@ -711,9 +716,28 @@ func assertFullLifecycleStandingReceiptContinuity(t *testing.T, first fullLifecy
 	}
 }
 
-func sendFullLifecycleTelegramUpdate(t *testing.T, process *releaseServeProcess, updateID, chatID int) fullLifecycleIngressReceipt {
+type fullLifecycleBusinessInput struct {
+	RunID         string `json:"run_id"`
+	EventID       string `json:"event_id"`
+	NewRunCreated bool   `json:"new_run_created"`
+}
+
+func publishFullLifecycleBusinessInput(t *testing.T, process *releaseServeProcess, runID string, updateID, chatID int) fullLifecycleBusinessInput {
 	t.Helper()
-	return sendLifecycleTelegramUpdateWithSecret(t, process, updateID, chatID, fullLifecycleSigningSecret)
+	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+	defer cancel()
+	var result fullLifecycleBusinessInput
+	if err := process.rpc.call(ctx, "event.publish", map[string]any{
+		"run_id": runID, "event_name": "lifecycle.message", "idempotency_key": fmt.Sprintf("lifecycle-input-%d", updateID),
+		"payload": map[string]any{"text": fmt.Sprintf("lifecycle %d", updateID), "external_account": fmt.Sprint(chatID),
+			"conversation_reference": fmt.Sprint(chatID), "provider_message_reference": updateID},
+	}, &result); err != nil {
+		t.Fatalf("publish authenticated lifecycle business input: %v\n%s", err, process.output.String())
+	}
+	if result.NewRunCreated || result.RunID != runID || result.EventID == "" {
+		t.Fatalf("business input changed its admitted run: %+v", result)
+	}
+	return result
 }
 
 func sendLifecycleTelegramUpdateWithSecret(t *testing.T, process *releaseServeProcess, updateID, chatID int, signingSecret string) fullLifecycleIngressReceipt {
@@ -1023,6 +1047,42 @@ func waitForFullLifecycleCrashCheckpoint(t *testing.T, process *releaseServeProc
 	return checkpoint
 }
 
+func waitForFullLifecycleBusinessCheckpoint(t *testing.T, process *releaseServeProcess, input fullLifecycleBusinessInput) fullLifecycleCrashCheckpoint {
+	t.Helper()
+	ctx, cancel := context.WithTimeout(context.Background(), fullLifecycleRunLimit)
+	defer cancel()
+	var checkpoint fullLifecycleCrashCheckpoint
+	var diagnosis goldenDiagnosis
+	err := pollReleaseCondition(ctx, 10*time.Millisecond, func() (bool, error) {
+		events, err := listFullLifecycleEvents(ctx, process.rpc, input.RunID)
+		if err != nil {
+			return false, err
+		}
+		for _, event := range events {
+			if event.EventID != input.EventID {
+				continue
+			}
+			if event.EventName != "lifecycle.message" || event.ExecutionMode != "mock" || len(event.Deliveries) != 1 || len(event.DeadLetters) != 0 {
+				return false, fmt.Errorf("paused lifecycle business input lost its exact delivery: %+v", event)
+			}
+			delivery := event.Deliveries[0]
+			if delivery.SubscriberType != "node" || delivery.SubscriberID == "" || delivery.Status != "pending" || delivery.Terminal ||
+				delivery.Target.Kind != "existing_entity" || delivery.Target.FlowID != "." || delivery.Target.EntityID != event.EntityID {
+				return false, fmt.Errorf("paused business-input route is not exact: %+v", delivery)
+			}
+			checkpoint = fullLifecycleCrashCheckpoint{EventID: event.EventID, Delivery: delivery}
+		}
+		if err := process.rpc.call(ctx, "run.diagnose", map[string]any{"run_id": input.RunID}, &diagnosis); err != nil {
+			return false, err
+		}
+		return checkpoint.EventID != "" && diagnosis.Run.Status == "paused" && diagnosis.TestQuiescence.ActiveDeliveries == 1, nil
+	})
+	if err != nil {
+		t.Fatalf("wait for queued lifecycle business input: %v checkpoint=%+v diagnosis=%+v\n%s", err, checkpoint, diagnosis, process.output.String())
+	}
+	return checkpoint
+}
+
 func assertFullLifecycleDeliveryCompleted(t *testing.T, rpc *releaseRPCClient, runID string, checkpoint fullLifecycleCrashCheckpoint) {
 	t.Helper()
 	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
@@ -1058,6 +1118,10 @@ func waitForLifecycleConvergenceMode(t *testing.T, process *releaseServeProcess,
 	defer cancel()
 	var diagnosis goldenDiagnosis
 	var last []fullLifecycleEvent
+	inputEvent, childEvent := "inbound.telegram.raw", "inbound.telegram.text_message"
+	if mode == "mock" {
+		inputEvent, childEvent = "lifecycle.message", "lifecycle.message_ready"
+	}
 	err := pollReleaseCondition(ctx, 10*time.Millisecond, func() (bool, error) {
 		if err := process.rpc.call(ctx, "run.diagnose", map[string]any{"run_id": runID}, &diagnosis); err != nil {
 			return false, err
@@ -1068,8 +1132,8 @@ func waitForLifecycleConvergenceMode(t *testing.T, process *releaseServeProcess,
 		}
 		last = events
 		return diagnosis.TestQuiescence.Ready && goldenActiveWork(diagnosis.TestQuiescence) == 0 &&
-			countFullLifecycleEvents(events, "inbound.telegram.raw") == ingressCount &&
-			countFullLifecycleEvents(events, "inbound.telegram.text_message") == ingressCount &&
+			countFullLifecycleEvents(events, inputEvent) == ingressCount &&
+			countFullLifecycleEvents(events, childEvent) == ingressCount &&
 			countFullLifecycleEvents(events, "platform.activity_requested") == ingressCount &&
 			countFullLifecycleEventSuffix(events, "/telegram.reply_requested") == ingressCount &&
 			countFullLifecycleEventSuffix(events, "/telegram_send_message.succeeded") == ingressCount, nil
@@ -1167,6 +1231,51 @@ func requireFullLifecycleReceiptEvents(t *testing.T, rpc *releaseRPCClient, runI
 	return normalized
 }
 
+func requireFullLifecycleBusinessChild(t *testing.T, rpc *releaseRPCClient, input fullLifecycleBusinessInput, messageID int, chatID string) fullLifecycleEvent {
+	t.Helper()
+	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+	defer cancel()
+	events, err := listFullLifecycleEvents(ctx, rpc, input.RunID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	var parent, child fullLifecycleEvent
+	for _, event := range events {
+		if event.EventID == input.EventID {
+			parent = event
+		}
+		if event.EventName != "lifecycle.message_ready" || !fullLifecycleEventHasTransport(event, messageID, chatID) {
+			continue
+		}
+		if child.EventID != "" || event.SourceEventID != input.EventID || event.RunID != input.RunID ||
+			event.ExecutionMode != "mock" || len(event.Deliveries) != 1 || event.NoDelivery != nil || len(event.DeadLetters) != 0 {
+			t.Fatalf("business input did not produce one exact child event: %+v", event)
+		}
+		child = event
+	}
+	if parent.EventName != "lifecycle.message" || len(parent.Deliveries) != 1 || parent.Deliveries[0].SubscriberType != "node" ||
+		child.EventID == "" || child.Source != parent.Deliveries[0].SubscriberID {
+		t.Fatalf("business input lost its authored constructor correspondence: parent=%+v child=%+v", parent, child)
+	}
+	delivery := child.Deliveries[0]
+	if delivery.SubscriberType != "agent" || !strings.Contains(delivery.SubscriberID, "phrase-bot") || delivery.Target.EntityID != child.EntityID ||
+		delivery.Target.FlowID != "telegram-chat" || delivery.Target.FlowInstance == "" ||
+		(delivery.Target.Kind != "existing_entity" && delivery.Target.Kind != "materializing_entity") {
+		t.Fatalf("business input lost its actual child delivery: %+v", child)
+	}
+	entities, err := readGoldenEntities(ctx, rpc, input.RunID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, entity := range entities {
+		if entity.EntityID == delivery.Target.EntityID && entity.FlowInstance == delivery.Target.FlowInstance {
+			return child
+		}
+	}
+	t.Fatalf("business child delivery has no exact retained entity: target=%+v entities=%+v", delivery.Target, entities)
+	return fullLifecycleEvent{}
+}
+
 func fullLifecycleReceiptEvents(events []fullLifecycleEvent, receipt fullLifecycleIngressReceipt, providerMessageReference int, conversationReference string) (fullLifecycleEvent, fullLifecycleEvent, error) {
 	if err := validateFullLifecycleIngressReceipt(receipt); err != nil {
 		return fullLifecycleEvent{}, fullLifecycleEvent{}, err
@@ -1214,26 +1323,6 @@ func fullLifecycleEventHasTransport(event fullLifecycleEvent, providerMessageRef
 	conversation, conversationOK := event.Payload["conversation_reference"].(string)
 	return ok && int(message) == providerMessageReference && message == float64(providerMessageReference) &&
 		conversationOK && conversation == conversationReference
-}
-
-func requireFullLifecycleEventByID(t *testing.T, rpc *releaseRPCClient, runID, eventID string) fullLifecycleEvent {
-	t.Helper()
-	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
-	defer cancel()
-	events, err := listFullLifecycleEvents(ctx, rpc, runID)
-	if err != nil {
-		t.Fatal(err)
-	}
-	for _, event := range events {
-		if event.EventID == eventID {
-			if event.EventName != "inbound.telegram.text_message" || len(event.Deliveries) != 1 {
-				t.Fatalf("checkpoint event %s is not one exact normalized delivery: %#v", eventID, event)
-			}
-			return event
-		}
-	}
-	t.Fatalf("event.list omitted event %s", eventID)
-	return fullLifecycleEvent{}
 }
 
 func assertFullLifecycleSameRoute(t *testing.T, first, second fullLifecycleEvent) {
@@ -1288,7 +1377,7 @@ func captureFullLifecycleEvidence(t *testing.T, rpc *releaseRPCClient, runID str
 	return snapshot
 }
 
-func assertFullLifecycleOldEvidenceUnchanged(t *testing.T, rpc *releaseRPCClient, runID string, checkpoint fullLifecycleCrashCheckpoint, before fullLifecycleEvidenceSnapshot) {
+func assertFullLifecycleOldEvidenceUnchanged(t *testing.T, rpc *releaseRPCClient, runID string, checkpoint fullLifecycleCrashCheckpoint, before fullLifecycleEvidenceSnapshot, inputEvent string) {
 	t.Helper()
 	assertFullLifecycleDeliveryCompleted(t, rpc, runID, checkpoint)
 	after := captureFullLifecycleEvidence(t, rpc, runID)
@@ -1305,7 +1394,7 @@ func assertFullLifecycleOldEvidenceUnchanged(t *testing.T, rpc *releaseRPCClient
 		t.Fatalf("old timer cardinality changed after fresh ingress: before=%#v after=%#v", before.EventCounts, after.EventCounts)
 	}
 	for _, name := range []string{
-		"inbound.telegram.text_message",
+		inputEvent,
 		"platform.activity_requested",
 	} {
 		if after.EventCounts[name] != before.EventCounts[name]+1 {
