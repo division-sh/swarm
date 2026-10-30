@@ -4,6 +4,7 @@ import (
 	"context"
 	"database/sql"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"reflect"
 	"strings"
@@ -39,6 +40,7 @@ import (
 	runforkrevision "github.com/division-sh/swarm/internal/store/internal/backend/runforkrevision"
 	"github.com/division-sh/swarm/internal/testutil/sourceartifactfixture"
 	"github.com/google/uuid"
+	"github.com/lib/pq"
 )
 
 func TestFanOutDeliveryBarrierMixedDispositionLifecycleOnBothStores(t *testing.T) {
@@ -709,16 +711,22 @@ func TestFanOutDeliveryBarrierCompletionFiresIdempotentlyOnBothStores(t *testing
 				go func() {
 					defer workers.Done()
 					<-start
+					var result runtimepipeline.CommittedWorkflowEngineMutation
+					var err error
 					switch store := selected.(type) {
 					case *PostgresStore:
-						_, err := store.CommitWorkflowEngineMutation(ctx, command)
-						errs <- err
+						result, err = store.CommitWorkflowEngineMutation(ctx, command)
 					case *SQLiteRuntimeStore:
-						_, err := store.CommitWorkflowEngineMutation(ctx, command)
-						errs <- err
+						result, err = store.CommitWorkflowEngineMutation(ctx, command)
 					default:
-						errs <- fmt.Errorf("unsupported store %T", selected)
+						err = fmt.Errorf("unsupported store %T", selected)
 					}
+					t.Logf("barrier completion: instance=%v acknowledged=%t err=%v", command.State.Identity, result.Committed, err)
+					var native *pq.Error
+					if errors.As(err, &native) {
+						t.Logf("native barrier failure: code=%s detail=%s where=%s", native.Code, native.Detail, native.Where)
+					}
+					errs <- err
 				}()
 			}
 			close(start)

@@ -391,10 +391,6 @@ func (a *Attempt) finalize(ctx context.Context, phase *Phase) error {
 		*phase = ActivityFinalize
 		return a.story.Finalize(ctx)
 	}
-	if a.evidence == AuthorityFence {
-		*phase = ActivityFinalize
-		return privateactivity.FenceMutationOrder(ctx, a.tx, a.dialect)
-	}
 	return nil
 }
 

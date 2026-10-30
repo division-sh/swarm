@@ -69,12 +69,13 @@ func TestOperatorTestSetupAcknowledgedCleanupErrorCompletesIdempotencyBothStores
 			selected := backend.open(t)
 			bundle := testSetupValidationBundle(t)
 			source := semanticview.Wrap(bundle)
-			fact := sourceartifactfixture.RequireArtifact(t, context.Background(), selected, bundle.SourceArtifact)
+			ctx := apiTestOriginalProcessContext(t, context.Background(), selected)
+			fact := sourceartifactfixture.RequireArtifact(t, ctx, selected, bundle.SourceArtifact)
 			rooted, err := bundle.RootedSource()
 			if err != nil {
 				t.Fatal(err)
 			}
-			ctx := originalAPIFixtureContext(t, testAuthorActivityContextForSource(context.Background(), fact), selected)
+			ctx = originalAPIFixtureContext(t, testAuthorActivityContextForSource(ctx, fact), selected)
 			ctx = correlation.WithRootAdmission(ctx, rooted.Admission())
 			if _, err := selected.EnsureRootedSource(ctx, rooted); err != nil {
 				t.Fatal(err)

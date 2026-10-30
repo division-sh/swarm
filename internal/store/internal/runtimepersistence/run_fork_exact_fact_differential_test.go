@@ -43,7 +43,7 @@ func eachExactFactStore(t *testing.T, prove func(*testing.T, exactFactStore)) {
 func newExactFactFixture(t *testing.T, s exactFactStore) runForkRevisionMatrixFixture {
 	t.Helper()
 	f := newRunForkRevisionMatrixFixture()
-	ctx := originalStoreFixtureContext(t, testAuthorActivityContext(), s.selected)
+	ctx := originalStoreFixtureContext(t, s.ctx, s.selected)
 	requireRunFixtureForTest(t, ctx, s.selected, semanticRunFixture{
 		Origin: semanticScenarioSetupRunOriginForTest(), RunID: f.runID, StartedAt: f.at,
 	})

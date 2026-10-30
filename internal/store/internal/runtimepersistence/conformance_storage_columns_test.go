@@ -63,6 +63,7 @@ func TestConformanceStorageColumnsDetectMissingCanonicalColumnsBothStores(t *tes
 		} {
 			t.Run(backend.name+"/"+item.table, func(t *testing.T) {
 				fixture, ctx := backend.open(t), context.Background()
+				ctx = originalStoreFixtureContext(t, ctx, fixture.store)
 				if err := runUnrevisionedEventFixtureTransactionForTest(ctx, fixture.store, func(ctx context.Context, tx *sql.Tx) error {
 					_, err := tx.ExecContext(ctx, `ALTER TABLE `+item.table+` RENAME COLUMN `+item.column+` TO unavailable_conformance_column`)
 					return err
@@ -89,9 +90,12 @@ func TestConformanceStorageColumnsIgnoreSiblingSchemaBothStores(t *testing.T) {
 	for _, backend := range eventRecordContractBackends() {
 		t.Run(backend.name, func(t *testing.T) {
 			fixture, ctx := backend.open(t), context.Background()
+			ctx = originalStoreFixtureContext(t, ctx, fixture.store)
 			if backend.name == "sqlite" {
+				selected := newBootstrappedSQLiteRuntimeStoreForPath(t, fixture.store.(*SQLiteRuntimeStore).Path())
+				fixture.store, fixture.db = selected, selected.backend.ConstructionHandle()
 				// Keep the connection-local hostile TEMP shadow on the same
-				// original pool connection used by the native read owner.
+				// read pool connection, separate from the retained possession.
 				fixture.db.SetMaxOpenConns(1)
 			}
 			if err := runUnrevisionedEventFixtureTransactionForTest(ctx, fixture.store, func(ctx context.Context, tx *sql.Tx) error {

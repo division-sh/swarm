@@ -215,13 +215,13 @@ func TestDeploymentRunStartFeedOnlyAcrossSelectedStores(t *testing.T) {
 
 func TestRunStartRejectsDeclaredFeedWithoutInputPinBeforeMutation(t *testing.T) {
 	forEachDataRunLifecycleStore(t, func(t *testing.T, fixture dataRunLifecycleFixture) {
-		ctx := context.Background()
 		source, catalog, _, _, openedRef := deploymentRunStartTestSource(t)
 		bundleHash := runStartTestBundleHashForSource(source)
 		bus, err := newScopedAPITestEventBusWithDataCatalog(t, fixture.primary, &catalog, runStartTestEventBusOptions(source))
 		if err != nil {
 			t.Fatal(err)
 		}
+		ctx := admittedAPITestBusContext(t, apiTestOriginalProcessContext(t, context.Background(), fixture.primary), bus)
 		handler := eventPublishTestHandlerWithStores(t, fixture.primary, fixture.primary, fixture.primary, bus, source)
 		assertRejected := func(name string, eventBacked bool, data map[string]any, sourceID string) {
 			t.Helper()

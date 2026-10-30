@@ -212,7 +212,7 @@ func newProposedEffectMailboxHandler(
 	runBundleContext, _ := persistence.(RunBundleContextStore)
 	principal, err := persistence.(interface {
 		EnsureOperatorPrincipal(context.Context, time.Time) (operatorchannel.Principal, error)
-	}).EnsureOperatorPrincipal(context.Background(), time.Now().UTC())
+	}).EnsureOperatorPrincipal(apiTestOriginalProcessContext(t, context.Background(), persistence), time.Now().UTC())
 	if err != nil {
 		t.Fatal(err)
 	}

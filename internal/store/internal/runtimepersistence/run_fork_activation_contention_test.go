@@ -365,6 +365,7 @@ func awaitForkContentionResult(t *testing.T, ctx context.Context, done <-chan fo
 
 type forkContentionBarrier struct {
 	backend, name                                string
+	runID                                        string
 	rollback                                     bool
 	entered                                      chan struct{}
 	busy                                         chan struct{}
@@ -404,6 +405,7 @@ func newForkContentionBarrier(t *testing.T, backend string, rollback bool) *fork
 
 func (b *forkContentionBarrier) install(t *testing.T, db *sql.DB, source, child, first string) {
 	t.Helper()
+	b.runID = source
 	table, predicate := "run_fork_revision_heads", fmt.Sprintf("OLD.run_id='%s'", source)
 	if first == "activation" {
 		table, predicate = "runs", fmt.Sprintf("OLD.run_id='%s' AND NEW.status='running' AND OLD.status<>'running'", child)
@@ -502,18 +504,11 @@ func (b *forkContentionBarrier) queueGate(t *testing.T, ctx context.Context, db 
 	if err := tx.QueryRowContext(ctx, `SELECT pg_backend_pid()`).Scan(&g.pid); err != nil {
 		t.Fatal(err)
 	}
-	// Every competing story/authority operation takes this native fence before
-	// domain rows. A wait on a different row does not order the two waiters.
+	// Queue an exclusive observer behind the winner's canonical run admission,
+	// ahead of the contender, without consuming the commit-tail story lock.
 	go func() {
-		// Stabilize the observer across versions of the updated singleton row.
-		// EXCLUSIVE conflicts with the writer's FOR UPDATE relation lock but
-		// permits the complete snapshot's ordinary ACCESS SHARE reads.
-		if _, err := tx.ExecContext(ctx, `LOCK TABLE author_activity_order IN EXCLUSIVE MODE`); err != nil {
-			g.acquired <- err
-			return
-		}
-		var sequence int64
-		err := tx.QueryRowContext(ctx, `SELECT last_sequence FROM author_activity_order WHERE singleton_id = 1 FOR UPDATE`).Scan(&sequence)
+		var locked int
+		err := tx.QueryRowContext(ctx, `SELECT 1 FROM runs WHERE run_id=$1::uuid FOR UPDATE`, b.runID).Scan(&locked)
 		g.acquired <- err
 	}()
 	forkContentionPoll(t, ctx, func() bool {
@@ -566,7 +561,7 @@ func (b *forkContentionBarrier) awaitPostgresContender(t *testing.T, ctx context
 		if err == sql.ErrNoRows {
 			return false
 		}
-		if gate.pid != 0 && (!wait.fenced || !strings.Contains(wait.query, "author_activity_order")) {
+		if gate.pid != 0 && (!wait.fenced || !strings.Contains(wait.query, "FROM runs")) {
 			return false
 		}
 		if err != nil {
@@ -631,7 +626,7 @@ func (b *forkContentionBarrier) assertContenderFenced(t *testing.T, ctx context.
 		t.Fatal("observer gate has no identified native contender")
 	}
 	wait, err := forkContentionPostgresWait(ctx, db, 0, gate.pid, gate.contender.pid)
-	if err != nil || !wait.fenced || wait.transaction != gate.contender.transaction || !strings.Contains(wait.query, "author_activity_order") {
+	if err != nil || !wait.fenced || wait.transaction != gate.contender.transaction || !strings.Contains(wait.query, "FROM runs") {
 		t.Fatalf("identified contender escaped observer fence: before=%+v after=%+v err=%v", gate.contender, wait, err)
 	}
 	t.Logf("observer_fence observer_pid=%d native_contender=%+v", gate.pid, wait)

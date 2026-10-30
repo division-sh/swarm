@@ -197,7 +197,8 @@ func TestOperatorRuntimeContextManagerRejectsExistingRunUnavailableSourceStates(
 				})
 			} else {
 				rooted, _ := sourceartifactfixture.Rooted(t, "unloaded-context", runtimeContextTestSourceArtifactC)
-				if _, err := fixture.pg.EnsureRootedSource(context.Background(), rooted); err != nil {
+				ctx := apiTestOriginalProcessContext(t, context.Background(), fixture.pg)
+				if _, err := fixture.pg.EnsureRootedSource(ctx, rooted); err != nil {
 					t.Fatal(err)
 				}
 				seedRuntimeContextRunBundle(t, fixture.pg, runID, tt.bundleHash, rooted.Admission())
@@ -410,7 +411,7 @@ func TestOperatorRuntimeContextManagerRoutesEveryDecisionMutationThroughSelected
 		&swruntime.Runtime{Bus: fixture.busA, Pipeline: primaryPipeline},
 		&swruntime.Runtime{Bus: fixture.busB, Pipeline: selectedPipeline},
 	)
-	principal, err := fixture.pg.EnsureOperatorPrincipal(context.Background(), now)
+	principal, err := fixture.pg.EnsureOperatorPrincipal(apiTestOriginalProcessContext(t, context.Background(), fixture.pg), now)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -420,6 +421,7 @@ func TestOperatorRuntimeContextManagerRoutesEveryDecisionMutationThroughSelected
 		RunBundleContext: fixture.pg, RuntimeContexts: manager, Source: fixture.sourceA,
 		Bundle: runtimecontracts.BundleIdentity{WorkflowName: "review", WorkflowVersion: "1.0.0", BundleHash: runStartTestBundleHash},
 	})})
+	bindAPITestHandlerOriginalProcess(t, handler, apiTestOriginalProcessContext(t, context.Background(), fixture.pg))
 
 	begin := rpcCallWithPlainRequestContext(t, handler, fmt.Sprintf(`{"jsonrpc":"2.0","id":"begin","method":"mailbox.begin_input","params":{"card_id":%q,"verdict":"reject","observed_content_hash":%q,"idempotency_key":"selected-begin"}}`, card.CardID, card.CardContentHash))
 	if begin.Error != nil {

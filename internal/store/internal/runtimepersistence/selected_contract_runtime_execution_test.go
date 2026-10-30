@@ -73,7 +73,7 @@ func TestSelectedForkCompletionAuthorityIssuanceConsumesExactAdmissionPostgres(t
 
 func proveSelectedForkCompletionAuthorityIssuance(t *testing.T, fixture selectedCompletionFixture) {
 	t.Helper()
-	ctx := testAuthorActivityContext()
+	ctx := fixture.ctx
 
 	invalidAdmissions := []struct {
 		name   string

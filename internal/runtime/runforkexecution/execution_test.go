@@ -509,7 +509,7 @@ func TestExecuteSelectedContractRunForkWritesForkLocalExecutionAndLineage(t *tes
 	if err := request.AgentRuntime.ProcessCapability.Release(ctx); err != nil {
 		t.Fatal(err)
 	}
-	if _, err := q1ExecuteSelectedPhaseComponent(t, ctx, request); err == nil || err.Error() != "process startup/topology capability is terminal" {
+	if _, err := q1ExecuteSelectedPhaseComponent(t, ctx, request); err == nil || strings.TrimPrefix(err.Error(), "prove selected owner's process capability: ") != "process startup/topology capability is terminal" {
 		t.Fatalf("retired process refusal = %v", err)
 	}
 	assertNoSelectedContractExecutionMutationForSource(t, db, sourceRunID, sourceEventID)
