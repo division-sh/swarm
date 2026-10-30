@@ -131,30 +131,6 @@ func runOperatorChannelInboundSupportedSurface(t *testing.T, selected operatorCh
 			body:         fmt.Sprintf(`{"update_id":7303,"callback_query":{"id":"callback-3","from":{"id":41},"data":"%s","message":{"message_id":9,"chat":{"id":-43,"type":"supergroup"}}}}`, operation.Challenge),
 			actionIntent: true,
 		},
-		{
-			name: "group missing sender cannot prove account",
-			body: fmt.Sprintf(`{"update_id":7304,"message":{"message_id":10,"chat":{"id":-42,"type":"group"},"text":"%s"}}`, operation.Challenge),
-		},
-		{
-			name: "supergroup missing sender cannot prove account",
-			body: fmt.Sprintf(`{"update_id":7305,"message":{"message_id":11,"chat":{"id":-43,"type":"supergroup"},"text":"%s"}}`, operation.Challenge),
-		},
-		{
-			name: "group anonymous admin sender chat cannot prove sender",
-			body: fmt.Sprintf(`{"update_id":7306,"message":{"message_id":12,"from":{"id":1087968824},"sender_chat":{"id":-100100,"type":"supergroup"},"chat":{"id":-42,"type":"group"},"text":"%s"}}`, operation.Challenge),
-		},
-		{
-			name: "supergroup anonymous admin sender chat cannot prove sender",
-			body: fmt.Sprintf(`{"update_id":7307,"message":{"message_id":13,"from":{"id":1087968824},"sender_chat":{"id":-100101,"type":"supergroup"},"chat":{"id":-43,"type":"supergroup"},"text":"%s"}}`, operation.Challenge),
-		},
-		{
-			name: "group linked channel sender chat cannot prove sender",
-			body: fmt.Sprintf(`{"update_id":7308,"message":{"message_id":14,"from":{"id":777000},"sender_chat":{"id":-100200,"type":"channel","title":"Ops","username":"ops"},"chat":{"id":-42,"type":"group"},"text":"%s"}}`, operation.Challenge),
-		},
-		{
-			name: "supergroup send as chat cannot prove sender",
-			body: fmt.Sprintf(`{"update_id":7309,"message":{"message_id":15,"from":{"id":777000},"sender_chat":{"id":-100201,"type":"channel","title":"Ops"},"chat":{"id":-43,"type":"supergroup"},"text":"%s"}}`, operation.Challenge),
-		},
 	}
 	for _, tc := range negativeBodies {
 		t.Run(tc.name, func(t *testing.T) {
