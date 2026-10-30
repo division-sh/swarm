@@ -10,12 +10,14 @@ import (
 	"io"
 	"net/http"
 	"net/http/httptest"
+	"net/http/httputil"
 	"net/url"
 	"os"
 	"path/filepath"
 	"reflect"
 	"strconv"
 	"strings"
+	"sync/atomic"
 	"testing"
 	"time"
 
@@ -28,6 +30,12 @@ import (
 var standingRootTreeAccounts = []struct{ alias, account, token string }{
 	{"alpha", "420079", "tree-alpha-token"},
 	{"beta", "420080", "tree-beta-token"},
+}
+
+type standingRootTreeProvider struct {
+	telegramapi.Double
+	endpoint *httptest.Server
+	listener atomic.Value
 }
 
 func TestStandingRootTreePublicRestartAndResetBothStores(t *testing.T) {
@@ -54,9 +62,10 @@ func TestStandingRootTreePublicRestartAndResetBothStores(t *testing.T) {
 			assertFullLifecycleVerifySuccess(t, verify)
 			start := func(source, storedHash string) *releaseServeProcess {
 				t.Helper()
+				native.listener.Store(fmt.Sprintf("127.0.0.1:%d", freeReleaseTCPPort(t)))
 				spec := releaseProcessSpec{BinaryPath: binary, WorkingDir: root, Source: source,
 					ConfigPath: config, Store: backend, TokenFile: token, Token: goldenAPIToken, Env: env,
-					PublicWebhookBaseURL: "https://hooks.root-tree.test", PublicWebhookListen: fmt.Sprintf("127.0.0.1:%d", freeReleaseTCPPort(t)),
+					PublicWebhookBaseURL: native.endpoint.URL, PublicWebhookListen: native.listener.Load().(string),
 					RedactValues: []string{fullLifecycleSigningSecret, fullLifecycleBotToken, "tree-alpha-token", "tree-beta-token"}}
 				if storedHash != "" {
 					spec.InternalMockLifecycleBinary, spec.RetainedBundleHash = retainedBinary, storedHash
@@ -105,9 +114,9 @@ func TestStandingRootTreePublicRestartAndResetBothStores(t *testing.T) {
 	}
 }
 
-func prepareStandingRootTreeAccounts(t *testing.T, binary, root, contracts string, store goldenStoreSelection) (*telegramapi.Double, string, []string) {
+func prepareStandingRootTreeAccounts(t *testing.T, binary, root, contracts string, store goldenStoreSelection) (*standingRootTreeProvider, string, []string) {
 	t.Helper()
-	native := &telegramapi.Double{}
+	native := &standingRootTreeProvider{}
 	for _, account := range standingRootTreeAccounts {
 		id, err := strconv.ParseInt(account.account, 10, 64)
 		if err != nil {
@@ -115,7 +124,21 @@ func prepareStandingRootTreeAccounts(t *testing.T, binary, root, contracts strin
 		}
 		native.SetResourceID(account.token, id)
 	}
-	server := httptest.NewTLSServer(native)
+	proxy := &httputil.ReverseProxy{Director: func(request *http.Request) {
+		request.URL.Scheme, request.URL.Host = "http", native.listener.Load().(string)
+	}}
+	server := httptest.NewTLSServer(http.HandlerFunc(func(w http.ResponseWriter, request *http.Request) {
+		if strings.HasPrefix(request.URL.Path, "/bot") {
+			native.ServeHTTP(w, request)
+			return
+		}
+		if native.listener.Load() == nil {
+			http.Error(w, "no child public listener", http.StatusServiceUnavailable)
+			return
+		}
+		proxy.ServeHTTP(w, request)
+	}))
+	native.endpoint = server
 	t.Cleanup(server.Close)
 	certificate := filepath.Join(root, "provider-ca.pem")
 	writeReleaseFile(t, certificate, string(pem.EncodeToMemory(&pem.Block{Type: "CERTIFICATE", Bytes: server.Certificate().Raw})))
@@ -149,6 +172,15 @@ func prepareStandingRootTreeAccounts(t *testing.T, binary, root, contracts strin
 	writeReleaseFile(t, config, "paths:\n  swarm_dir: "+strconv.Quote(filepath.Join(root, ".swarm"))+"\n"+goldenRuntimeConfig(store)+packConfig)
 	env := goldenProcessEnv(t, root, store.passwordEnv, 0)
 	env = append(env, "SSL_CERT_FILE="+certificate)
+	for key, value := range map[string]string{
+		"telegram.webhook_signing_secret": fullLifecycleSigningSecret,
+		"telegram.telegram_bot_token":     fullLifecycleBotToken,
+	} {
+		result := runReleaseCommand(t, 30*time.Second, root, env, value+"\n", binary, "secrets", "set", key, "--stdin")
+		if result.err != nil {
+			t.Fatalf("provision original source tool credential %s: %v\n%s", key, result.err, result.output)
+		}
+	}
 	for _, account := range standingRootTreeAccounts {
 		result := runReleaseCommand(t, 30*time.Second, root, env, account.token+"\n", binary,
 			"--config", config, "channel", "connect", "telegram", "--yes", "--json")
@@ -246,7 +278,7 @@ func requireStandingRootTreePublicEvidence(t *testing.T, store goldenStoreSelect
 	return result
 }
 
-func postStandingRootTreePublicUpdates(t *testing.T, p *releaseServeProcess, native *telegramapi.Double, store goldenStoreSelection, services map[string]fullLifecycleRun, base int) {
+func postStandingRootTreePublicUpdates(t *testing.T, p *releaseServeProcess, native *standingRootTreeProvider, store goldenStoreSelection, services map[string]fullLifecycleRun, base int) {
 	t.Helper()
 	type publicationReceipt struct {
 		RunID             string   `json:"run_id"`
@@ -261,7 +293,7 @@ func postStandingRootTreePublicUpdates(t *testing.T, p *releaseServeProcess, nat
 		alias := account.alias
 		callback, secret, _ := native.RegistrationForCredential(account.token)
 		location, err := url.Parse(callback)
-		if err != nil || location.Scheme != "https" || location.Host != "hooks.root-tree.test" || secret == "" {
+		if err != nil || location.Scheme != "https" || !strings.HasPrefix(callback, native.endpoint.URL+"/webhooks/") || secret == "" {
 			t.Fatalf("root-tree %s has no exact registered callback", alias)
 		}
 		for j, shape := range []string{"text", "callback"} {
@@ -270,13 +302,15 @@ func postStandingRootTreePublicUpdates(t *testing.T, p *releaseServeProcess, nat
 			if shape == "callback" {
 				body = fmt.Sprintf(`{"update_id":%d,"callback_query":{"id":"query-%d","from":{"id":41},"message":{"message_id":7,"chat":{"id":42,"type":"private"}},"data":"opaque-action-token"}}`, id, id)
 			}
-			req, err := http.NewRequest(http.MethodPost, p.apiBase+location.RequestURI(), bytes.NewBufferString(body))
+			req, err := http.NewRequest(http.MethodPost, callback, bytes.NewBufferString(body))
 			if err != nil {
 				t.Fatal(err)
 			}
 			req.Header.Set("Content-Type", "application/json")
 			req.Header.Set("X-Telegram-Bot-Api-Secret-Token", secret)
-			response, err := p.rpc.client.Do(req)
+			client := *native.endpoint.Client()
+			client.Timeout = p.rpc.client.Timeout
+			response, err := client.Do(req)
 			if err != nil {
 				t.Fatal(err)
 			}
@@ -307,7 +341,7 @@ func postStandingRootTreePublicUpdates(t *testing.T, p *releaseServeProcess, nat
 				t.Fatal(err)
 			}
 			duplicateRequest.Header = req.Header.Clone()
-			duplicateResponse, err := p.rpc.client.Do(duplicateRequest)
+			duplicateResponse, err := client.Do(duplicateRequest)
 			if err != nil {
 				t.Fatal(err)
 			}
