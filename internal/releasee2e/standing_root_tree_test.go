@@ -3,7 +3,9 @@ package releasee2e
 import (
 	"bytes"
 	"context"
+	"crypto/sha256"
 	"database/sql"
+	"encoding/hex"
 	"encoding/json"
 	"encoding/pem"
 	"fmt"
@@ -17,14 +19,10 @@ import (
 	"reflect"
 	"strconv"
 	"strings"
+	"sync"
 	"sync/atomic"
 	"testing"
 	"time"
-
-	"github.com/division-sh/swarm/internal/channelonboarding"
-	runtimeinbound "github.com/division-sh/swarm/internal/runtime/inboundpublication"
-	"github.com/division-sh/swarm/internal/testutil/packfixture"
-	"github.com/division-sh/swarm/internal/testutil/telegramapi"
 )
 
 var standingRootTreeAccounts = []struct{ alias, account, token string }{
@@ -33,9 +31,10 @@ var standingRootTreeAccounts = []struct{ alias, account, token string }{
 }
 
 type standingRootTreeProvider struct {
-	telegramapi.Double
 	endpoint *httptest.Server
 	listener atomic.Value
+	mu       sync.Mutex
+	webhooks map[string]struct{ URL, Secret string }
 }
 
 func TestStandingRootTreePublicRestartAndResetBothStores(t *testing.T) {
@@ -116,20 +115,42 @@ func TestStandingRootTreePublicRestartAndResetBothStores(t *testing.T) {
 
 func prepareStandingRootTreeAccounts(t *testing.T, binary, root, contracts string, store goldenStoreSelection) (*standingRootTreeProvider, string, []string) {
 	t.Helper()
-	native := &standingRootTreeProvider{}
-	for _, account := range standingRootTreeAccounts {
-		id, err := strconv.ParseInt(account.account, 10, 64)
-		if err != nil {
-			t.Fatal(err)
-		}
-		native.SetResourceID(account.token, id)
-	}
+	native := &standingRootTreeProvider{webhooks: make(map[string]struct{ URL, Secret string })}
 	proxy := &httputil.ReverseProxy{Director: func(request *http.Request) {
 		request.URL.Scheme, request.URL.Host = "http", native.listener.Load().(string)
 	}}
 	server := httptest.NewTLSServer(http.HandlerFunc(func(w http.ResponseWriter, request *http.Request) {
 		if strings.HasPrefix(request.URL.Path, "/bot") {
-			native.ServeHTTP(w, request)
+			w.Header().Set("Content-Type", "application/json")
+			for _, account := range standingRootTreeAccounts {
+				method, matched := strings.CutPrefix(request.URL.Path, "/bot"+account.token+"/")
+				if !matched {
+					continue
+				}
+				native.mu.Lock()
+				defer native.mu.Unlock()
+				switch method {
+				case "getMe":
+					fmt.Fprintf(w, `{"ok":true,"result":{"id":%s,"username":"SwarmTestBot"}}`, account.account)
+				case "getWebhookInfo":
+					json.NewEncoder(w).Encode(map[string]any{"ok": true, "result": map[string]string{"url": native.webhooks[account.token].URL}})
+				case "setWebhook":
+					var payload struct {
+						URL    string `json:"url"`
+						Secret string `json:"secret_token"`
+					}
+					if json.NewDecoder(request.Body).Decode(&payload) != nil {
+						http.Error(w, `{"ok":false}`, http.StatusBadRequest)
+						return
+					}
+					native.webhooks[account.token] = struct{ URL, Secret string }{payload.URL, payload.Secret}
+					io.WriteString(w, `{"ok":true,"result":true}`)
+				default:
+					http.Error(w, `{"ok":false}`, http.StatusNotFound)
+				}
+				return
+			}
+			http.Error(w, `{"ok":false}`, http.StatusUnauthorized)
 			return
 		}
 		if native.listener.Load() == nil {
@@ -144,13 +165,34 @@ func prepareStandingRootTreeAccounts(t *testing.T, binary, root, contracts strin
 	writeReleaseFile(t, certificate, string(pem.EncodeToMemory(&pem.Block{Type: "CERTIFICATE", Bytes: server.Certificate().Raw})))
 	config := filepath.Join(root, "swarm.yaml")
 	packConfig := "platform:\n  packs:\n    platform_dirs:\n"
-	for _, entry := range packfixture.EmbeddedBase(t).Entries() {
-		directory := filepath.Join(root, "platform", entry.ID())
-		for name, body := range entry.Provider().Members() {
-			if entry.ID() == "telegram" {
-				body = bytes.ReplaceAll(body, []byte("https://api.telegram.org"), []byte(server.URL))
+	credentialEnv := goldenProcessEnv(t, root, "", 0)
+	inventoryResult := runReleaseCommand(t, goldenStartupTimeout, root, credentialEnv, "", binary, "packs", "list", contracts, "--json")
+	var inventory struct {
+		BaseMode string                                   `json:"base_mode"`
+		Packs    []struct{ ID, Source, Directory string } `json:"packs"`
+	}
+	if inventoryResult.err != nil || json.Unmarshal([]byte(inventoryResult.output), &inventory) != nil || inventory.BaseMode != "embedded" || len(inventory.Packs) == 0 {
+		t.Fatalf("public embedded pack inventory: err=%v output=%s", inventoryResult.err, inventoryResult.output)
+	}
+	for _, entry := range inventory.Packs {
+		if entry.Source != "embedded" || !filepath.IsLocal(entry.Directory) || entry.ID == "" || filepath.Base(entry.ID) != entry.ID {
+			t.Fatalf("invalid fixture pack coordinates: %+v", entry)
+		}
+		directory := filepath.Join(root, "platform", entry.ID)
+		copyReleaseTree(t, filepath.Join(releaseE2ERepoRoot(t), "packs", entry.Directory), directory)
+		if entry.ID == "telegram" {
+			members, err := os.ReadDir(directory)
+			if err != nil {
+				t.Fatal(err)
 			}
-			writeReleaseFile(t, filepath.Join(directory, name), string(body))
+			for _, member := range members {
+				path := filepath.Join(directory, member.Name())
+				body, err := os.ReadFile(path)
+				if err != nil {
+					t.Fatal(err)
+				}
+				writeReleaseFile(t, path, strings.ReplaceAll(string(body), "https://api.telegram.org", server.URL))
+			}
 		}
 		packConfig += "      - " + strconv.Quote(directory) + "\n"
 	}
@@ -172,7 +214,6 @@ func prepareStandingRootTreeAccounts(t *testing.T, binary, root, contracts strin
 	writeReleaseFile(t, config, "paths:\n  swarm_dir: "+strconv.Quote(filepath.Join(root, ".swarm"))+"\n"+goldenRuntimeConfig(store)+packConfig)
 	env := goldenProcessEnv(t, root, store.passwordEnv, 0)
 	env = append(env, "SSL_CERT_FILE="+certificate)
-	credentialEnv := goldenProcessEnv(t, root, "", 0)
 	for key, value := range map[string]string{
 		"telegram.webhook_signing_secret": fullLifecycleSigningSecret,
 		"telegram.telegram_bot_token":     fullLifecycleBotToken,
@@ -185,10 +226,17 @@ func prepareStandingRootTreeAccounts(t *testing.T, binary, root, contracts strin
 	for _, account := range standingRootTreeAccounts {
 		result := runReleaseCommand(t, 30*time.Second, root, env, account.token+"\n", binary,
 			"--config", config, "channel", "connect", "telegram", "--yes", "--json")
-		var registered channelonboarding.Result
+		var registered struct {
+			Operation struct {
+				Provider         string `json:"provider"`
+				Account          string `json:"operator_account"`
+				AccountConfirmed bool   `json:"account_confirmed"`
+				Phase            string `json:"phase"`
+			} `json:"operation"`
+		}
 		if result.err != nil || json.Unmarshal([]byte(result.output), &registered) != nil ||
-			registered.Operation.Provider != "telegram" || registered.Operation.AccountReference != account.account ||
-			!registered.Operation.AccountConfirmed || registered.Operation.Phase != channelonboarding.PhaseSucceeded {
+			registered.Operation.Provider != "telegram" || registered.Operation.Account != account.account ||
+			!registered.Operation.AccountConfirmed || registered.Operation.Phase != "succeeded" {
 			t.Fatalf("register exact root-tree account %s: err=%v output=%s", account.alias, result.err, result.output)
 		}
 	}
@@ -292,7 +340,10 @@ func postStandingRootTreePublicUpdates(t *testing.T, p *releaseServeProcess, nat
 	}
 	for i, account := range standingRootTreeAccounts {
 		alias := account.alias
-		callback, secret, _ := native.RegistrationForCredential(account.token)
+		native.mu.Lock()
+		registration := native.webhooks[account.token]
+		native.mu.Unlock()
+		callback, secret := registration.URL, registration.Secret
 		location, err := url.Parse(callback)
 		if err != nil || location.Scheme != "https" || !strings.HasPrefix(callback, native.endpoint.URL+"/webhooks/") || secret == "" {
 			t.Fatalf("root-tree %s has no exact registered callback", alias)
@@ -504,11 +555,12 @@ func standingRootTreeProviderOccurrence(t *testing.T, alias string, updateID int
 		if account.alias != alias {
 			continue
 		}
-		id, err := runtimeinbound.SemanticFingerprint([]string{"telegram", account.account, fmt.Sprint(updateID)})
+		encoded, err := json.Marshal([]string{"telegram", account.account, fmt.Sprint(updateID)})
 		if err != nil {
 			t.Fatal(err)
 		}
-		return id
+		sum := sha256.Sum256(encoded)
+		return hex.EncodeToString(sum[:])
 	}
 	t.Fatalf("unknown root-tree account alias %s", alias)
 	return ""
