@@ -3,6 +3,7 @@ package releasee2e
 import (
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
 
 	"gopkg.in/yaml.v3"
@@ -50,27 +51,19 @@ func addFullLifecycleBusinessInput(t *testing.T, root string) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	var schema map[string]any
-	if err := yaml.Unmarshal(raw, &schema); err != nil {
-		t.Fatal(err)
+	// Stage order defines the initial stage; retain it while changing only pins.
+	schema := string(raw)
+	for _, replacement := range [][2]string{
+		{"  inputs:\n    - inbound.telegram.text_message", "  inputs:\n    - lifecycle.message"},
+		{"  outputs:\n    - inbound.telegram.text_message", "  outputs:\n    - lifecycle.message_ready"},
+		{"  - event: inbound.telegram.text_message\n    from: .\n    to: telegram-chat\n", "  - event: lifecycle.message_ready\n    from: .\n    to: telegram-chat\n    rename: inbound.telegram.text_message\n"},
+	} {
+		if strings.Count(schema, replacement[0]) != 1 {
+			t.Fatalf("lifecycle fixture lost its exact business-input replacement: %q", replacement[0])
+		}
+		schema = strings.Replace(schema, replacement[0], replacement[1], 1)
 	}
-	pins := schema["pins"].(map[string]any)
-	pins["inputs"] = []any{"lifecycle.message"}
-	pins["outputs"] = []any{"lifecycle.message_ready"}
-	connects := schema["connect"].([]any)
-	if len(connects) != 1 {
-		t.Fatal("lifecycle fixture lost its exact child connection")
-	}
-	connect := connects[0].(map[string]any)
-	if connect["event"] != "inbound.telegram.text_message" || connect["from"] != "." || connect["to"] != "telegram-chat" {
-		t.Fatal("lifecycle fixture child connection changed")
-	}
-	connect["event"], connect["rename"] = "lifecycle.message_ready", "inbound.telegram.text_message"
-	raw, err = yaml.Marshal(schema)
-	if err != nil {
-		t.Fatal(err)
-	}
-	writeReleaseFile(t, path, string(raw))
+	writeReleaseFile(t, path, schema)
 	for _, name := range []string{"events.yaml", "nodes.yaml", "types.yaml"} {
 		if _, err := os.Stat(filepath.Join(root, name)); !os.IsNotExist(err) {
 			t.Fatalf("lifecycle business input would overwrite %s: %v", name, err)
