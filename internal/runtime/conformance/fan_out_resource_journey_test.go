@@ -29,6 +29,7 @@ import (
 	"github.com/division-sh/swarm/internal/operatorread"
 	"github.com/division-sh/swarm/internal/runtime/bus"
 	"github.com/division-sh/swarm/internal/runtime/contracts"
+	"github.com/division-sh/swarm/internal/runtime/core/worklifetime"
 	"github.com/division-sh/swarm/internal/runtime/executionmode"
 	"github.com/division-sh/swarm/internal/runtime/semanticview"
 	"github.com/division-sh/swarm/internal/runtime/testfixtures/notifyallchildren"
@@ -202,8 +203,12 @@ func (f *deploymentResourceFixture) operatorServer(t *testing.T) *httptest.Serve
 			return map[string]any{"alive": true, "ready": true, "db_ok": true, "runtime_ok": true, "bundle": identity}, nil
 		}},
 	)
+	process, found := worklifetime.ProcessFromContext(f.ctx)
+	if !found {
+		t.Fatal("deployment operator fixture lacks its held original process")
+	}
 	handler, err := apiv1.NewHandler(apiv1.Options{
-		AuthTokens: []string{apiv1.DefaultLoopbackAPIToken}, Handlers: methods,
+		AuthTokens: []string{apiv1.DefaultLoopbackAPIToken}, Handlers: methods, ProcessWorkOwner: process,
 	})
 	if err != nil {
 		t.Fatal(err)
