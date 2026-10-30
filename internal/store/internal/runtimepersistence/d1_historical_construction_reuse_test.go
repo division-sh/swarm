@@ -115,7 +115,8 @@ func TestD1HistoricalReforkExactRequireSurvivesReopenBothStores(t *testing.T) {
 			if err := f.manager.Shutdown(); err != nil {
 				t.Fatal(err)
 			}
-			reopened, _ := c4ReopenCreationStore(t, backend, selected, db, connector)
+			reopened, _, reopenedCtx := c4ReopenCreationStore(t, f.ctx, backend, selected, db, connector)
+			f.ctx = reopenedCtx
 			defer func() {
 				if err := reopened.(interface{ Close() error }).Close(); err != nil {
 					t.Error(err)

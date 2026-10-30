@@ -5,11 +5,13 @@ import (
 	"errors"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/division-sh/swarm/internal/packadmission"
 	"github.com/division-sh/swarm/internal/runtime/agenttopology"
 	runtimebus "github.com/division-sh/swarm/internal/runtime/bus"
 	"github.com/division-sh/swarm/internal/runtime/core/eventreceiver"
+	"github.com/division-sh/swarm/internal/runtime/core/worklifetime"
 	"github.com/division-sh/swarm/internal/runtime/correlation"
 	"github.com/division-sh/swarm/internal/runtime/executionposture"
 	"github.com/division-sh/swarm/internal/runtime/manager"
@@ -28,7 +30,24 @@ func rootedContextFixture(t *testing.T, directory string) (BundleContext, source
 func rootedContextForSource(t *testing.T, source semanticview.Source, root sourceartifact.RootedSource) BundleContext {
 	t.Helper()
 	fact := sourceartifactfixture.FactFor(root.Artifact())
-	owner := runtimeTestOccurrence(t, fact.BundleHash())
+	process := worklifetime.NewProcess()
+	owner, err := process.NewRuntime(context.Background(), worklifetime.RuntimeIdentity{
+		RuntimeInstanceID: authorActivityTestRuntimeInstanceID, BundleHash: fact.BundleHash(),
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() {
+		ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+		defer cancel()
+		if _, err := owner.RetireAndWait(ctx); err != nil {
+			t.Error(err)
+		}
+		process.Retire()
+		if _, err := process.Join(ctx); err != nil {
+			t.Error(err)
+		}
+	})
 	bus, err := newRuntimeTestEventBusWithOptions(t, nil, runtimebus.EventBusOptions{
 		WorkOwner: owner, ContractBundle: source, SourceArtifactFact: fact,
 	})
@@ -63,7 +82,8 @@ func rootedContextForSource(t *testing.T, source semanticview.Source, root sourc
 		}), workOccurrence: owner,
 		Options: RuntimeOptions{
 			SourceArtifactFact: fact, RuntimeInstanceID: owner.Identity().RuntimeInstanceID,
-			WorkflowModule: startupReadinessWorkflowModule{source: source},
+			ProcessWorkOwner: process,
+			WorkflowModule:   startupReadinessWorkflowModule{source: source},
 		},
 	}
 	_, grant, err := newRuntimeTestProcessCapability(t, runtime.Manager, source, fact, owner.Identity().RuntimeInstanceID)

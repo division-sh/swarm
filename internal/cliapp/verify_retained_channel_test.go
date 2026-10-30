@@ -15,6 +15,7 @@ import (
 	"github.com/division-sh/swarm/internal/runtime/credentials"
 	"github.com/division-sh/swarm/internal/runtime/plangeneration"
 	"github.com/division-sh/swarm/internal/runtime/startupownership"
+	"github.com/division-sh/swarm/internal/store/selected/selectedtest"
 	"github.com/division-sh/swarm/internal/store/storetest"
 	"github.com/google/uuid"
 )
@@ -158,7 +159,11 @@ func assertVerifyRetainedChannelPublicAdmission(t *testing.T, ctx context.Contex
 	}
 	hostileRuntime := uuid.NewString()
 	withOriginal(func(ctx context.Context) {
-		if err := storetest.ReplaceRetainedChannelRuntime(ctx, selected, activation.ActivationID, activation.Coordinate.RuntimeInstanceID, hostileRuntime); err != nil {
+		faultOwner := channelonboarding.Store(selected)
+		if fixture, ok := owner.(*selectedtest.ProcessLeaseFixture); ok {
+			faultOwner = fixture.ChannelStore
+		}
+		if err := storetest.ReplaceRetainedChannelRuntime(ctx, faultOwner, activation.ActivationID, activation.Coordinate.RuntimeInstanceID, hostileRuntime); err != nil {
 			t.Fatal(err)
 		}
 	})
@@ -170,7 +175,11 @@ func assertVerifyRetainedChannelPublicAdmission(t *testing.T, ctx context.Contex
 		t.Fatalf("public verify hid boot's crossed evidence refusal: %d %s %s", code, &out, &diagnostic)
 	}
 	withOriginal(func(ctx context.Context) {
-		if err := storetest.ReplaceRetainedChannelRuntime(ctx, selected, activation.ActivationID, hostileRuntime, activation.Coordinate.RuntimeInstanceID); err != nil {
+		faultOwner := channelonboarding.Store(selected)
+		if fixture, ok := owner.(*selectedtest.ProcessLeaseFixture); ok {
+			faultOwner = fixture.ChannelStore
+		}
+		if err := storetest.ReplaceRetainedChannelRuntime(ctx, faultOwner, activation.ActivationID, hostileRuntime, activation.Coordinate.RuntimeInstanceID); err != nil {
 			t.Fatal(err)
 		}
 	})

@@ -175,6 +175,18 @@ func testAuthorActivityContextForSource(t *testing.T, ctx context.Context, fact 
 
 func nativeProcessContextFixture(t *testing.T, ctx context.Context, selected any) context.Context {
 	t.Helper()
+	if startupownership.HasMutationAuthority(ctx) {
+		original, err := startupownership.CaptureMutationAuthority(ctx)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if process, found := worklifetime.ProcessFromContext(ctx); found {
+			if err := process.BindOriginalProcess(original.ProcessAuthority().LeaseStamp()); err != nil {
+				t.Fatal(err)
+			}
+		}
+		return ctx
+	}
 	if _, found := runtimecorrelation.RuntimeInstanceIDFromContext(ctx); !found {
 		scope, scoped := runtimeauthoractivity.ScopeFromContext(ctx)
 		if !scoped || scope.RuntimeInstanceID == "" {
@@ -277,6 +289,10 @@ func newScopedTestEventBus(t *testing.T, eventStore scopedTestDurableStore, opts
 	if _, bound := process.OriginalProcess(); !bound {
 		ctx := runtimecorrelation.WithRuntimeInstanceID(admitted.Context(), opts.RuntimeInstanceID)
 		ctx = runtimeauthoractivity.WithScope(ctx, runtimeauthoractivity.BundleScope(opts.RuntimeInstanceID, opts.SourceArtifactFact.BundleHash()))
+		ctx, err = opts.MutationContext(ctx)
+		if err != nil {
+			return nil, errors.Join(err, admitted.Done())
+		}
 		nativeProcessContextFixture(t, ctx, eventStore)
 	}
 	if err := admitted.Done(); err != nil {

@@ -645,8 +645,8 @@ func TestDurableDataRunLifecycleAcrossSelectedStores(t *testing.T) {
 			if err != nil {
 				t.Fatal(err)
 			}
-			missingContext := admittedAPICompiledSourceContext(t, context.Background(), fixture.primary, semanticview.Wrap(missingBundle))
-			missingContext = startupownership.CarryMutationAuthority(missingContext, ctx)
+			missingContext := startupownership.CarryMutationAuthority(context.Background(), ctx)
+			missingContext = admittedAPICompiledSourceContext(t, missingContext, fixture.primary, semanticview.Wrap(missingBundle))
 			storetest.RequireRun(t, missingContext, fixture.primary, storetest.RunFixture{
 				RunID: missingTarget, State: runtimerunlifecycle.StateRunning, Origin: storetest.ScenarioSetupOrigin(),
 				BundleHash: dataRunMissingBundleHash, Artifact: missingRooted.Artifact(), RootAdmission: missingRooted.Admission(),

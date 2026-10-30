@@ -90,6 +90,7 @@ func TestRunLifecycleCreateIsInsertOrExactNoopParity(t *testing.T) {
 			ctx := testAuthorActivitySourceArtifactContext()
 			ctx = originalStoreFixtureContext(t, ctx, fixture.store)
 			rooted, _ := sourceartifactfixture.Rooted(t, "candidate-source", sourceartifactfixture.Artifact())
+			ctx = runtimecorrelation.WithRootAdmission(ctx, rooted.Admission())
 			sourceartifactfixture.RequireArtifact(t, ctx, fixture.store, rooted.Artifact())
 			source, err := runtimecorrelation.NewSourceArtifactFact(runLifecycleCandidateParityBundleHash)
 			if err != nil {

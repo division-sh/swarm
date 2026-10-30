@@ -446,7 +446,16 @@ func newGroupProofFixtureOn(t *testing.T, backend string, count int, parent *gro
 			t.Fatal(err)
 		}
 		t.Cleanup(catalog.Release)
-		f.bus, err = newStoreTestEventBus(t, f.raw.(storeTestDurableEventBusStore), bus.EventBusOptions{ContractBundle: semanticview.Wrap(bundle), SourceArtifactFact: mustStoreTestSourceArtifactFact(f.seed.bundleHash), RuntimeInstanceID: grantEvidence.RuntimeInstanceID})
+		f.bus, err = newStoreTestEventBus(t, f.raw.(storeTestDurableEventBusStore), bus.EventBusOptions{
+			ContractBundle: semanticview.Wrap(bundle), SourceArtifactFact: mustStoreTestSourceArtifactFact(f.seed.bundleHash),
+			RuntimeInstanceID: grantEvidence.RuntimeInstanceID, WorkOwner: f.occurrence,
+			MutationContext: func(work context.Context) (context.Context, error) {
+				process, _ := worklifetime.ProcessFromContext(ctx)
+				work = worklifetime.WithProcess(startupownership.CarryMutationAuthority(work, ctx), process)
+				_, err := startupownership.CaptureMutationAuthority(work)
+				return work, err
+			},
+		})
 		if err != nil {
 			t.Fatal(err)
 		}

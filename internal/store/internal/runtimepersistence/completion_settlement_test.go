@@ -821,9 +821,6 @@ func TestCompletionOriginalGrantFencesLaunchAndSettlementBothStores(t *testing.T
 		t.Run(phase, func(t *testing.T) {
 			eachExactFactStore(t, func(t *testing.T, selected exactFactStore) {
 				store := selected.selected.(completionSettlementTestStore)
-				if selected.postgres {
-					store = admitTestPostgresStore(t, selected.db)
-				}
 				fixture := newCompletionSettlementFixture(t, store, selected.db, !selected.postgres)
 				ctx := runtimeeffects.WithLogicalOperationIdentity(fixture.context, "exact-session-grant:"+phase)
 				ctx = withManagedCompletionTestSurface(t, ctx, fixture.authority, "claude_cli")
@@ -901,9 +898,6 @@ func TestCompletionOriginalGrantFencesLaunchAndSettlementBothStores(t *testing.T
 func TestCompletionLaunchChecksGrantExpiryAfterSessionLockBothStores(t *testing.T) {
 	eachExactFactStore(t, func(t *testing.T, selected exactFactStore) {
 		store := selected.selected.(completionSettlementTestStore)
-		if selected.postgres {
-			store = admitTestPostgresStore(t, selected.db)
-		}
 		fixture := newCompletionSettlementFixture(t, store, selected.db, !selected.postgres)
 		ctx := runtimeeffects.WithLogicalOperationIdentity(fixture.context, "grant-expiry-after-lock")
 		ctx = withManagedCompletionTestSurface(t, ctx, fixture.authority, "claude_cli")
@@ -968,9 +962,6 @@ func TestCompletionLaunchChecksGrantExpiryAfterSessionLockBothStores(t *testing.
 func TestCompletionSettlementChecksGrantExpiryAfterSessionLockBothStores(t *testing.T) {
 	eachExactFactStore(t, func(t *testing.T, selected exactFactStore) {
 		store := selected.selected.(completionSettlementTestStore)
-		if selected.postgres {
-			store = admitTestPostgresStore(t, selected.db)
-		}
 		fixture := newCompletionSettlementFixture(t, store, selected.db, !selected.postgres)
 		ctx := runtimeeffects.WithLogicalOperationIdentity(fixture.context, "grant-expiry-settlement-after-lock")
 		ctx = withManagedCompletionTestSurface(t, ctx, fixture.authority, "claude_cli")
@@ -1032,9 +1023,6 @@ func TestCompletionSettlementChecksGrantExpiryAfterSessionLockBothStores(t *test
 func TestCompletionOriginalGrantFencesProjectionButRecoveredGrantContinuesBothStores(t *testing.T) {
 	eachExactFactStore(t, func(t *testing.T, selected exactFactStore) {
 		store := selected.selected.(completionSettlementTestStore)
-		if selected.postgres {
-			store = admitTestPostgresStore(t, selected.db)
-		}
 		fixture := newCompletionSettlementFixture(t, store, selected.db, !selected.postgres)
 		ctx := runtimeeffects.WithLifecycleToken(fixture.context, fixture.authority.Normal)
 		ctx = runtimeeffects.WithLogicalOperationIdentity(ctx, "original-projection-grant")
@@ -1108,9 +1096,6 @@ func TestCompletionOriginalGrantFencesProjectionButRecoveredGrantContinuesBothSt
 func TestCompletionProjectionChecksGrantExpiryAfterSessionLockBothStores(t *testing.T) {
 	eachExactFactStore(t, func(t *testing.T, selected exactFactStore) {
 		store := selected.selected.(completionSettlementTestStore)
-		if selected.postgres {
-			store = admitTestPostgresStore(t, selected.db)
-		}
 		fixture := newCompletionSettlementFixture(t, store, selected.db, !selected.postgres)
 		ctx := runtimeeffects.WithLifecycleToken(fixture.context, fixture.authority.Normal)
 		ctx = runtimeeffects.WithLogicalOperationIdentity(ctx, "grant-expiry-projection-after-lock")

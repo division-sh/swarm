@@ -86,6 +86,24 @@ type storeTestWorkFixture struct {
 
 var storeTestWorkFixtures sync.Map
 
+func retireStoreTestWorkFixture(t testing.TB) {
+	t.Helper()
+	existing, found := storeTestWorkFixtures.LoadAndDelete(t)
+	if !found {
+		return
+	}
+	fixture := existing.(*storeTestWorkFixture)
+	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+	defer cancel()
+	if _, err := fixture.runtime.RetireAndWait(ctx); err != nil {
+		t.Fatal(err)
+	}
+	fixture.process.Retire()
+	if _, err := fixture.process.Join(ctx); err != nil {
+		t.Fatal(err)
+	}
+}
+
 func storeTestWorkOwner(t testing.TB, contexts ...context.Context) *worklifetime.RuntimeOccurrence {
 	t.Helper()
 	if existing, ok := storeTestWorkFixtures.Load(t); ok {

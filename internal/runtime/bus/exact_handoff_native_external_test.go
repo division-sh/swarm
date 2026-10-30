@@ -47,7 +47,7 @@ func openExactHandoffNative(t *testing.T, backend string, selectedExecution bool
 	var authority deliverylifecycle.ExecutionAuthority
 	fixture := runtimebus.ExactHandoffNativeFixtureForTest{Store: owner}
 	if !selectedExecution {
-		ctx = originalEventBusFixtureContext(t, ctx, owner)
+		ctx = nativeBusProcessContext(t, ctx, owner)
 	}
 	if selectedExecution {
 		original, err := agentfixture.ProcessCapability(t, ctx, owner)
