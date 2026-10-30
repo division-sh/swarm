@@ -736,7 +736,7 @@ func sendLifecycleTelegramUpdateWithSecret(t *testing.T, process *releaseServePr
 	}
 	var receipt fullLifecycleIngressReceipt
 	if err := json.Unmarshal(raw, &receipt); err != nil {
-		t.Fatalf("decode lifecycle webhook status=%d body=%q: %v", response.StatusCode, raw, err)
+		t.Fatalf("decode lifecycle webhook status=%d body=%q: %v\n%s", response.StatusCode, raw, err, process.output.String())
 	}
 	if response.StatusCode != http.StatusAccepted {
 		t.Fatalf("lifecycle webhook status=%d receipt=%#v\n%s", response.StatusCode, receipt, process.output.String())
