@@ -90,6 +90,7 @@ func TestLifecycleEventCardinalityRefusesInvalidCancelledAndUnavailableOwnership
 	for _, backend := range eventRecordContractBackends() {
 		t.Run(backend.name, func(t *testing.T) {
 			fixture := backend.open(t)
+			setupCtx := originalStoreFixtureContext(t, testAuthorActivityContext(), fixture.store)
 			for _, invalid := range []string{"", "bad", uuid.Nil.String(), strings.ToUpper(runID)} {
 				refuse(t, ctx, fixture.store, invalid, "work.completed")
 			}
@@ -99,7 +100,7 @@ func TestLifecycleEventCardinalityRefusesInvalidCancelledAndUnavailableOwnership
 			if got, err := ReadLifecycleEventCardinalityForTest(cancelled, fixture.store, runID, "work.completed"); !errors.Is(err, context.Canceled) || got != 0 {
 				t.Fatalf("cancelled evidence lost refusal: %d %v", got, err)
 			}
-			if err := runUnrevisionedEventFixtureTransactionForTest(testAuthorActivityContext(), fixture.store, func(ctx context.Context, tx *sql.Tx) error {
+			if err := runUnrevisionedEventFixtureTransactionForTest(setupCtx, fixture.store, func(ctx context.Context, tx *sql.Tx) error {
 				_, err := tx.ExecContext(ctx, `ALTER TABLE events RENAME TO unavailable_lifecycle_events`)
 				return err
 			}); err != nil {
@@ -107,7 +108,7 @@ func TestLifecycleEventCardinalityRefusesInvalidCancelledAndUnavailableOwnership
 			}
 			restored := false
 			restore := func() {
-				if err := runUnrevisionedEventFixtureTransactionForTest(testAuthorActivityContext(), fixture.store, func(ctx context.Context, tx *sql.Tx) error {
+				if err := runUnrevisionedEventFixtureTransactionForTest(setupCtx, fixture.store, func(ctx context.Context, tx *sql.Tx) error {
 					_, err := tx.ExecContext(ctx, `ALTER TABLE unavailable_lifecycle_events RENAME TO events`)
 					return err
 				}); err != nil {

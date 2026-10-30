@@ -436,6 +436,7 @@ func prepareStopRacePublications(t *testing.T, selected selectedFanOutLifecycleO
 	artifact, bundle := fanOutMixedRouteSource(t)
 	runtimeID := uuid.NewString()
 	ctx := runtimeauthoractivity.WithScope(testAuthorActivityContextForBundle(artifact.BundleHash()), runtimeauthoractivity.BundleScope(runtimeID, artifact.BundleHash()))
+	ctx = runtimecorrelation.WithRuntimeInstanceID(ctx, runtimeID)
 	ctx = originalStoreFixtureContext(t, ctx, selected)
 	ctx = runtimecorrelation.WithSourceArtifactFact(ctx, mustStoreTestSourceArtifactFact(artifact.BundleHash()))
 	ctx = originalStoreFixtureContext(t, ctx, owner)
