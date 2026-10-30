@@ -54,7 +54,7 @@ func addFullLifecycleBusinessInput(t *testing.T, root string) {
 	// Stage order defines the initial stage; retain it while changing only pins.
 	schema := string(raw)
 	for _, replacement := range [][2]string{
-		{"  inputs:\n    - inbound.telegram.text_message", "  inputs:\n    - lifecycle.message"},
+		{"  inputs:\n    - inbound.telegram.text_message", "  inputs:\n    - inbound.telegram.text_message\n    - lifecycle.message"},
 		{"  outputs:\n    - inbound.telegram.text_message", "  outputs:\n    - lifecycle.message_ready"},
 		{"  - event: inbound.telegram.text_message\n    from: .\n    to: telegram-chat\n", "  - event: lifecycle.message_ready\n    from: .\n    to: telegram-chat\n    rename: inbound.telegram.text_message\n"},
 	} {
