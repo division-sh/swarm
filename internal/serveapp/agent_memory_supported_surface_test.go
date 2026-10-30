@@ -516,7 +516,7 @@ func addStandingMockInput(t *testing.T, root string) {
 	writeStandingCandidateFile(t, filepath.Join(root, "nodes.yaml"), `mock-input:
   execution_type: system_node
   subscribes_to: [mock.message]
-  emits: [inbound.telegram.text_message]
+  produces: [inbound.telegram.text_message]
   event_handlers:
     mock.message:
       emit:
