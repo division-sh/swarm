@@ -108,11 +108,7 @@ func NormalizeFieldValue(contract Contract, fieldName string, value any) (any, e
 		if !ok || bundle == nil {
 			return nil, fieldTypeError(fieldName, "requires its admitted source")
 		}
-		rooted, err := bundle.RootedSource()
-		if err != nil {
-			return nil, err
-		}
-		providers, err := packadmission.AdmitProviderSource(rooted, bundle.Platform)
+		providers, err := packadmission.ProviderSourceForBundle(bundle)
 		if err != nil {
 			return nil, err
 		}

@@ -59,11 +59,7 @@ func checkTemplateInstanceValidation(c *checkerContext) []Finding {
 	if bundle.SourceArtifact == nil || len(bundle.SourceArtifact.ProviderDirectories()) == 0 {
 		return findings
 	}
-	rooted, err := bundle.RootedSource()
-	if err != nil {
-		return append(findings, Finding{CheckID: "template_instance_validation", Severity: "error", Message: err.Error()})
-	}
-	providers, err := packadmission.AdmitProviderSource(rooted, bundle.Platform)
+	providers, err := packadmission.ProviderSourceForBundle(bundle)
 	if err != nil {
 		return append(findings, Finding{CheckID: "template_instance_validation", Severity: "error", Message: err.Error()})
 	}
