@@ -5,12 +5,14 @@ package serveapp
 import (
 	"context"
 	"errors"
+	"strings"
 	"sync"
 	"testing"
 	"time"
 
 	"github.com/division-sh/swarm/internal/channelonboarding"
 	"github.com/division-sh/swarm/internal/operatorchannel"
+	"github.com/division-sh/swarm/internal/runtime/failures"
 	"github.com/google/uuid"
 )
 
@@ -206,6 +208,27 @@ func TestServeSessionReadinessRejectsChangedParentsAndObservationErrorsBothStore
 	for _, backend := range []string{"sqlite", "postgres"} {
 		t.Run(backend, func(t *testing.T) {
 			f, op, observer := pairedServeSessionObserver(t, backend)
+			f.adapter.mu.Lock()
+			attempt := f.adapter.connections[op.OperationID]
+			delete(f.adapter.connections, op.OperationID)
+			f.adapter.mu.Unlock()
+			_, executionErr := f.adapter.ChannelExecution(f.ctx, op)
+			f.adapter.mu.Lock()
+			f.adapter.connections[op.OperationID] = attempt
+			f.adapter.mu.Unlock()
+			failure := failures.FromError(executionErr, "activity-runtime", "execute_native_channel")
+			if !errors.Is(executionErr, channelonboarding.ErrNotFound) || failure.Failure.Class != failures.ClassTargetUnreachable ||
+				failure.Failure.Detail.Code != "channel_session_unavailable" || failure.Failure.Retryable ||
+				failure.Failure.Detail.Attributes["account"] != op.SessionAccount.AccountRef || !strings.Contains(failure.Error(), "swarm channel connect whatsapp") {
+				t.Fatal("missing session lost its exact non-retryable account refusal", executionErr, failure)
+			}
+			encoded, err := failures.MarshalEnvelope(failure.Failure)
+			if err != nil {
+				t.Fatal(err)
+			}
+			if restored, err := failures.UnmarshalEnvelope(encoded); err != nil || restored.Message != failure.Failure.Message {
+				t.Fatal("recorded session failure lost its operator guidance", err)
+			}
 			for _, mutate := range []func(*channelonboarding.Operation){
 				func(op *channelonboarding.Operation) { op.Revision++ },
 				func(op *channelonboarding.Operation) { op.PrincipalID = uuid.NewString() },
@@ -233,12 +256,19 @@ func TestServeSessionReadinessRejectsChangedParentsAndObservationErrorsBothStore
 			if !errors.Is(err, cause) || current || observation.Connected || f.selections.Load() != 2 {
 				t.Fatal("observation failure became absence, cached success or reconnect", current, observation, err)
 			}
+			fault.failAt.Store(fault.reads.Load() + 1)
+			if _, err := f.adapter.ChannelExecution(f.ctx, op); !errors.Is(err, cause) {
+				t.Fatal("session execution replaced the observation failure", err)
+			}
 			caller, cancel := context.WithCancel(f.ctx)
 			cancel()
 			provider, observation, current, err = observer.ObserveSession(caller, op)
 			provider.CloseExecution()
 			if !errors.Is(err, context.Canceled) || current || observation.Connected {
 				t.Fatal("canceled request disclosed readiness authority", current, observation, err)
+			}
+			if _, err := f.adapter.ChannelExecution(caller, op); err != context.Canceled {
+				t.Fatal("canceled session execution became an account refusal", err)
 			}
 			lookup, stop := context.WithCancel(f.ctx)
 			defer stop()

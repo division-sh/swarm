@@ -56,6 +56,19 @@ func TestChannelCLIReportsNativeQualificationWithoutInventingLocale(t *testing.T
 }
 
 func TestOperatorChannelCLIUsesAuthenticatedAPIAndExactSelectors(t *testing.T) {
+	t.Run("deployment idle hints", func(t *testing.T) {
+		for _, linked := range []bool{false, true} {
+			var out bytes.Buffer
+			writeDeploymentAccountStatus(&out, channelonboarding.AccountStatus{Provider: "whatsapp", Account: "+15550100123", State: "registered", Linked: linked})
+			want := "run swarm channel connect whatsapp"
+			if linked {
+				want = "set operator_account in a flow's policy.yaml and restart serve"
+			}
+			if !strings.Contains(out.String(), "idle") || !strings.Contains(out.String(), want) {
+				t.Fatal("idle account omitted the linking or flow step", linked, out.String())
+			}
+		}
+	})
 	t.Run("credential-required and list expose one exact resume path", func(t *testing.T) {
 		remediation := "swarm channel resume " + operatorChannelCLIOperation + " --credential-stdin"
 		errorServer := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, request *http.Request) {

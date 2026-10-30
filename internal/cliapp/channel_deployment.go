@@ -564,6 +564,12 @@ func writeDeploymentAccountStatus(w io.Writer, status channelonboarding.AccountS
 	role := "idle"
 	if len(status.Holders) == 1 {
 		role = "held by " + status.Holders[0].Flow
+	} else if len(status.Holders) == 0 {
+		if status.Linked {
+			role += " (set operator_account in a flow's policy.yaml and restart serve)"
+		} else {
+			role += " (run swarm channel connect " + cliSanitizeOneLineValue(status.Provider) + ")"
+		}
 	}
 	fmt.Fprintf(w, "%s %s · %s · %s · %s", status.Provider, status.Account, status.State, role, status.Health)
 	if status.Reason != "" {

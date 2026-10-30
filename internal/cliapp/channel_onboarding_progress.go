@@ -92,9 +92,9 @@ func readSelectedChannelCredential(result channelOnboardingResult, opts channelC
 }
 
 func renderChannelOnboardingResult(out, errOut io.Writer, output cliOutputOptions, result channelOnboardingResult) error {
-	if !result.Operation.DeploymentRegistration && result.Operation.Provider == "telegram" && result.Operation.Phase == channelonboarding.PhaseFailed &&
-		result.Operation.FailureCode == "registered_account_enrollment_refused" && result.Operation.FailureMessage != "" {
-		return returnCLIValidationError(errOut, errors.New(cliSanitizeOneLineValue(result.Operation.FailureMessage)))
+	if result.Operation.Phase == channelonboarding.PhaseFailed {
+		return returnCLIValidationError(errOut, fmt.Errorf("channel onboarding failed (%s): %s",
+			cliSanitizeOneLineValue(result.Operation.FailureCode), cliSanitizeOneLineValue(result.Operation.FailureMessage)))
 	}
 	now := time.Now()
 	pending, err := result.SessionPairingPending(now)
@@ -128,13 +128,14 @@ func renderChannelOnboardingResult(out, errOut io.Writer, output cliOutputOption
 	return renderCLIOutput(out, errOut, output, result, func(w io.Writer) {
 		if pending {
 			if result.Pairing.Status != channelonboarding.PairingStatusPreparing {
-				fmt.Fprintf(w, "Waiting for %s pairing...\n", result.Operation.Provider)
+				fmt.Fprintf(w, "Pairing with %s is pending.\n", result.Operation.Provider)
 				if result.Pairing.Code != "" {
 					fmt.Fprintf(w, "Open WhatsApp > Linked Devices > Link a device, then scan (expires %s):\n%s\n", result.Pairing.ExpiresAt.UTC().Format(time.RFC3339), pairingQR)
 				}
-				return
+			} else {
+				fmt.Fprintf(w, "Pairing preparation for %s is pending.\n", strings.TrimSpace(result.Operation.Provider))
 			}
-			fmt.Fprintf(w, "Connecting to %s...\n", strings.TrimSpace(result.Operation.Provider))
+			fmt.Fprintf(w, "Next: swarm channel connect %s\n", result.Operation.Provider)
 			return
 		}
 		if result.Operation.Provider == "whatsapp" {
@@ -143,6 +144,7 @@ func renderChannelOnboardingResult(out, errOut io.Writer, output cliOutputOption
 			fmt.Fprintf(w, "Connected %s channel READY at activation revision %d.\n", result.Operation.Provider, result.Operation.ActivationRevision)
 			writeChannelNativeQualification(w, result)
 		}
+		fmt.Fprintln(w, "Next: swarm channel list")
 	}, func() ([]string, error) { return []string{result.Operation.OperationID}, nil })
 }
 
@@ -191,7 +193,13 @@ func renderDeploymentRegistration(out, errOut io.Writer, output cliOutputOptions
 			verb = "Reverified"
 		}
 		fmt.Fprintf(w, "%s %s account %s.\n", verb, result.Operation.Provider, result.Operation.AccountReference)
+		writeChannelAccountNextSteps(w)
 	}, func() ([]string, error) { return []string{result.Operation.AccountReference}, nil })
+}
+
+func writeChannelAccountNextSteps(out io.Writer) {
+	fmt.Fprintln(out, "To use it, set operator_account in a flow's policy.yaml and restart serve.")
+	fmt.Fprintln(out, "Next: swarm channel list")
 }
 
 func writeWhatsAppConnection(out io.Writer, connection *channelonboarding.SessionConnectionReadback, ready bool) {
