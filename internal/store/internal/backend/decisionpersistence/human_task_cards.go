@@ -328,33 +328,24 @@ func expireHumanTaskCards(ctx context.Context, story runtimeauthoractivity.Mutat
 	if selected != nil && len(selected) == 0 {
 		return nil, nil
 	}
-	query := `SELECT h.card_id FROM human_task_continuations h JOIN decision_cards c ON c.card_id = h.card_id JOIN runs run ON run.run_id = h.run_id
-		WHERE h.state = 'pending' AND c.status = 'pending' AND run.status IN (` + runLifecycleActiveStateSQLValues + `) AND h.deadline_at <= ?1`
+	marker, limitClause := "?", "?2"
 	if postgres {
-		query = `SELECT h.card_id FROM human_task_continuations h JOIN decision_cards c ON c.card_id = h.card_id JOIN runs run ON run.run_id = h.run_id
-			WHERE h.state = 'pending' AND c.status = 'pending' AND run.status IN (` + runLifecycleActiveStateSQLValues + `) AND h.deadline_at <= $1`
+		marker, limitClause = "$", "$2 FOR UPDATE OF h, c, run SKIP LOCKED"
 	}
+	query := `SELECT h.card_id FROM human_task_continuations h JOIN decision_cards c ON c.card_id = h.card_id JOIN runs run ON run.run_id = h.run_id
+		WHERE h.state = 'pending' AND c.status = 'pending' AND run.status IN (` + runLifecycleActiveStateSQLValues + `) AND h.deadline_at <= ` + marker + "1"
 	arguments := []any{now, limit}
 	if selected != nil {
 		// The read/planning cut is closed: newly due cards belong to a later
 		// sweep, not to this transaction's prepared publication set.
 		placeholders := make([]string, len(selected))
 		for index, cardID := range selected {
-			marker := "?"
-			if postgres {
-				marker = "$"
-			}
 			placeholders[index] = fmt.Sprintf("%s%d", marker, index+3)
 			arguments = append(arguments, cardID)
 		}
 		query += " AND h.card_id IN (" + strings.Join(placeholders, ",") + ")"
 	}
-	query += " ORDER BY h.deadline_at, h.card_id LIMIT "
-	if postgres {
-		query += "$2 FOR UPDATE OF h, c, run SKIP LOCKED"
-	} else {
-		query += "?2"
-	}
+	query += " ORDER BY h.deadline_at, h.card_id LIMIT " + limitClause
 	rows, err := tx.QueryContext(ctx, query, arguments...)
 	if err != nil {
 		return nil, err
