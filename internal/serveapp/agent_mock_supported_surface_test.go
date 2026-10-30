@@ -90,6 +90,7 @@ func runMockAgentSupportedSurface(t *testing.T, backend string) time.Duration {
 	t.Helper()
 	isolateCLIAPIConfigEnv(t)
 	sourceRoot := writeStandingMemoryServeFixture(t, "")
+	addStandingMockInput(t, sourceRoot)
 	addCanonicalTelegramApprovalOverlay(t, sourceRoot)
 	bundleHash := servedEventPublishFixtureBundleHash(t, sourceRoot)
 	credentialPath := filepath.Join(t.TempDir(), "credentials.json")

@@ -33,6 +33,7 @@ import (
 	"github.com/division-sh/swarm/internal/store/storetest"
 	"github.com/division-sh/swarm/internal/testutil"
 	"github.com/google/uuid"
+	"gopkg.in/yaml.v3"
 )
 
 const standingMemoryAsyncProofTimeout = 30 * time.Second
@@ -347,6 +348,7 @@ func runStandingTelegramMemorySupportedSurface(t *testing.T, backend string, rec
 	t.Setenv("OPENAI_COMPATIBLE_API_KEY", "")
 	t.Setenv("TELEGRAM_BOT_TOKEN", "")
 	sourceRoot := writeStandingMemoryServeFixture(t, "")
+	addStandingMockInput(t, sourceRoot)
 	bundleHash := servedEventPublishFixtureBundleHash(t, sourceRoot)
 	credentialPath := filepath.Join(t.TempDir(), "credentials.json")
 	t.Setenv("SWARM_CREDENTIALS_FILE", credentialPath)
@@ -482,6 +484,53 @@ func runStandingTelegramMemorySupportedSurface(t *testing.T, backend string, rec
 	assertStandingMemorySessionContinuity(t, before, after)
 }
 
+func addStandingMockInput(t *testing.T, root string) {
+	t.Helper()
+	path := filepath.Join(root, "schema.yaml")
+	data, err := os.ReadFile(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	var schema map[string]any
+	if err := yaml.Unmarshal(data, &schema); err != nil {
+		t.Fatal(err)
+	}
+	pins := schema["pins"].(map[string]any)
+	pins["inputs"] = append(pins["inputs"].([]any), "mock.message")
+	data, err = yaml.Marshal(schema)
+	if err != nil {
+		t.Fatal(err)
+	}
+	writeStandingCandidateFile(t, path, string(data))
+	for _, name := range []string{"events.yaml", "nodes.yaml"} {
+		if _, err := os.Stat(filepath.Join(root, name)); !os.IsNotExist(err) {
+			t.Fatalf("mock input must not overwrite authored %s: %v", name, err)
+		}
+	}
+	writeStandingCandidateFile(t, filepath.Join(root, "events.yaml"), `mock.message:
+  text: text
+  external_account: text
+  conversation_reference: text
+  provider_message_reference: integer
+`)
+	writeStandingCandidateFile(t, filepath.Join(root, "nodes.yaml"), `mock-input:
+  execution_type: system_node
+  subscribes_to: [mock.message]
+  emits: [inbound.telegram.text_message]
+  event_handlers:
+    mock.message:
+      emit:
+        event: inbound.telegram.text_message
+        fields:
+          operator_account: policy.operator_account
+          text: payload.text
+          external_account: payload.external_account
+          conversation_reference: payload.conversation_reference
+          conversation_scope: '"direct"'
+          provider_message_reference: payload.provider_message_reference
+`)
+}
+
 func publishStandingMockInput(t *testing.T, baseURL, bundleHash string, messageID, chatID int) operatorread.OperatorEventFull {
 	t.Helper()
 	endpoint := baseURL + "/v1/rpc"
@@ -509,20 +558,58 @@ func publishStandingMockInput(t *testing.T, baseURL, bundleHash string, messageI
 		NewRunCreated bool   `json:"new_run_created"`
 	}
 	requireServedJSONRPCResult(t, endpoint, "event.publish", map[string]any{
-		"run_id": runID, "event_name": "inbound.telegram.text_message", "idempotency_key": fmt.Sprintf("mock-message-%d", messageID),
-		"payload": map[string]any{"text": fmt.Sprintf("hello %d", messageID), "operator_account": "420079",
+		"run_id": runID, "event_name": "mock.message", "idempotency_key": fmt.Sprintf("mock-message-%d", messageID),
+		"payload": map[string]any{"text": fmt.Sprintf("hello %d", messageID),
 			"external_account": fmt.Sprint(chatID), "conversation_reference": fmt.Sprint(chatID),
-			"conversation_scope": "direct", "provider_message_reference": messageID},
+			"provider_message_reference": messageID},
 	}, &published)
 	if published.NewRunCreated || published.RunID != runID || published.EventID == "" {
 		t.Fatalf("mock business input changed its admitted run: %+v", published)
 	}
 	var observed operatorread.OperatorEventFull
 	requireServedJSONRPCResult(t, endpoint, "event.get", map[string]any{"event_id": published.EventID}, &observed)
-	if observed.RunID != runID || observed.EventID != published.EventID || observed.EventName != "inbound.telegram.text_message" || string(observed.ExecutionMode) != "mock" {
+	if observed.RunID != runID || observed.EventID != published.EventID || observed.EventName != "mock.message" || string(observed.ExecutionMode) != "mock" {
 		t.Fatalf("mock business input lost its exact event/run/mode: %+v", observed)
 	}
-	return observed
+	deadline := time.Now().Add(standingMemoryAsyncProofTimeout)
+	for {
+		var events operatorread.OperatorEventListResult
+		requireServedJSONRPCResult(t, endpoint, "event.list", map[string]any{
+			"filter": map[string]any{"run_id": runID, "event_name": "inbound.telegram.text_message"}, "limit": 500,
+		}, &events)
+		var child *operatorread.OperatorEventFull
+		for _, event := range events.Events {
+			if event.RunID != runID || event.EventID == published.EventID || event.Payload["conversation_reference"] != fmt.Sprint(chatID) ||
+				fmt.Sprint(event.Payload["provider_message_reference"]) != fmt.Sprint(messageID) || len(event.Deliveries) != 1 {
+				continue
+			}
+			delivery := event.Deliveries[0]
+			if delivery.SubscriberType != "agent" || delivery.Target.FlowID != "telegram-chat" || delivery.Target.EntityID == "" || delivery.Target.FlowInstance == "" {
+				continue
+			}
+			if child != nil || events.NextCursor != "" {
+				t.Fatal("mock input did not select one exact child delivery")
+			}
+			if event.SourceEventID != published.EventID {
+				var parent operatorread.OperatorEventFull
+				requireServedJSONRPCResult(t, endpoint, "event.get", map[string]any{"event_id": event.SourceEventID}, &parent)
+				if parent.RunID != runID || parent.SourceEventID != published.EventID {
+					t.Fatal("mock child delivery lost its actual business-input parent")
+				}
+			}
+			if string(event.ExecutionMode) != "mock" {
+				t.Fatal("mock child delivery changed execution posture")
+			}
+			child = &event
+		}
+		if child != nil {
+			return *child
+		}
+		if time.Now().After(deadline) {
+			t.Fatal("mock business input has no actual child delivery")
+		}
+		time.Sleep(10 * time.Millisecond)
+	}
 }
 
 type standingTelegramEvidenceCounts struct {
