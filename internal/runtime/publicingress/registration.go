@@ -787,7 +787,7 @@ func (c *ProviderRegistrationController) revalidateCredentials(ctx context.Conte
 }
 
 func (c *ProviderRegistrationController) admitRuntimeEnrollment(ctx context.Context, pair RegistrationPair, account string) error {
-	if pair.PrebindingOperationID == "" || pair.Target.Provider != "telegram" || c.opts.EnrollmentAdmission == nil {
+	if pair.PrebindingOperationID == "" || c.opts.EnrollmentAdmission == nil {
 		return nil
 	}
 	return c.opts.EnrollmentAdmission(ctx, channelonboarding.AccountReference{Provider: pair.Target.Provider, Account: account})
