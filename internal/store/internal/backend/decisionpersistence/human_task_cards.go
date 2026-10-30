@@ -317,7 +317,7 @@ func completeHumanTaskOutcome(ctx context.Context, tx *sql.Tx, cardID, eventID s
 	return current, true, nil
 }
 
-func expireHumanTaskCards(ctx context.Context, story runtimeauthoractivity.Mutation, tx *sql.Tx, now time.Time, limit int, postgres bool) ([]events.Event, error) {
+func expireHumanTaskCards(ctx context.Context, story runtimeauthoractivity.Mutation, tx *sql.Tx, now time.Time, limit int, postgres bool, selected []string) ([]events.Event, error) {
 	now = decisioncard.CanonicalTimestamp(now)
 	if now.IsZero() {
 		return nil, fmt.Errorf("human-task expiry requires an authoritative timestamp")
@@ -325,13 +325,37 @@ func expireHumanTaskCards(ctx context.Context, story runtimeauthoractivity.Mutat
 	if limit <= 0 || limit > 200 {
 		limit = 200
 	}
+	if selected != nil && len(selected) == 0 {
+		return nil, nil
+	}
 	query := `SELECT h.card_id FROM human_task_continuations h JOIN decision_cards c ON c.card_id = h.card_id JOIN runs run ON run.run_id = h.run_id
-		WHERE h.state = 'pending' AND c.status = 'pending' AND run.status IN (` + runLifecycleActiveStateSQLValues + `) AND h.deadline_at <= ? ORDER BY h.deadline_at, h.card_id LIMIT ?`
+		WHERE h.state = 'pending' AND c.status = 'pending' AND run.status IN (` + runLifecycleActiveStateSQLValues + `) AND h.deadline_at <= ?1`
 	if postgres {
 		query = `SELECT h.card_id FROM human_task_continuations h JOIN decision_cards c ON c.card_id = h.card_id JOIN runs run ON run.run_id = h.run_id
-			WHERE h.state = 'pending' AND c.status = 'pending' AND run.status IN (` + runLifecycleActiveStateSQLValues + `) AND h.deadline_at <= $1 ORDER BY h.deadline_at, h.card_id LIMIT $2 FOR UPDATE OF h, c, run SKIP LOCKED`
+			WHERE h.state = 'pending' AND c.status = 'pending' AND run.status IN (` + runLifecycleActiveStateSQLValues + `) AND h.deadline_at <= $1`
 	}
-	rows, err := tx.QueryContext(ctx, query, now, limit)
+	arguments := []any{now, limit}
+	if selected != nil {
+		// The read/planning cut is closed: newly due cards belong to a later
+		// sweep, not to this transaction's prepared publication set.
+		placeholders := make([]string, len(selected))
+		for index, cardID := range selected {
+			marker := "?"
+			if postgres {
+				marker = "$"
+			}
+			placeholders[index] = fmt.Sprintf("%s%d", marker, index+3)
+			arguments = append(arguments, cardID)
+		}
+		query += " AND h.card_id IN (" + strings.Join(placeholders, ",") + ")"
+	}
+	query += " ORDER BY h.deadline_at, h.card_id LIMIT "
+	if postgres {
+		query += "$2 FOR UPDATE OF h, c, run SKIP LOCKED"
+	} else {
+		query += "?2"
+	}
+	rows, err := tx.QueryContext(ctx, query, arguments...)
 	if err != nil {
 		return nil, err
 	}
@@ -400,18 +424,18 @@ func expireHumanTaskCards(ctx context.Context, story runtimeauthoractivity.Mutat
 	return expiredEvents, nil
 }
 
-func ExpireHumanTaskCards(ctx context.Context, attempt *mutationprotocol.Attempt, now time.Time, limit int, postgres bool) ([]events.Event, error) {
+func ExpireHumanTaskCards(ctx context.Context, attempt *mutationprotocol.Attempt, now time.Time, limit int, postgres bool, selected []string) ([]events.Event, error) {
 	return withDecisionSQL(ctx, attempt, func(txctx context.Context, tx *sql.Tx) ([]events.Event, error) {
-		return expireHumanTaskCards(txctx, attempt, tx, now, limit, postgres)
+		return expireHumanTaskCards(txctx, attempt, tx, now, limit, postgres, selected)
 	})
 }
 
-func (s *DecisionPostgresOwner) ExpireHumanTasksTx(ctx context.Context, attempt *mutationprotocol.Attempt, now time.Time, limit int) ([]events.Event, error) {
-	return ExpireHumanTaskCards(ctx, attempt, now, limit, true)
+func (s *DecisionPostgresOwner) ExpireHumanTasksTx(ctx context.Context, attempt *mutationprotocol.Attempt, now time.Time, limit int, selected []string) ([]events.Event, error) {
+	return ExpireHumanTaskCards(ctx, attempt, now, limit, true, selected)
 }
 
-func (s *DecisionSQLiteOwner) ExpireHumanTasksTx(ctx context.Context, attempt *mutationprotocol.Attempt, now time.Time, limit int) ([]events.Event, error) {
-	return ExpireHumanTaskCards(ctx, attempt, now, limit, false)
+func (s *DecisionSQLiteOwner) ExpireHumanTasksTx(ctx context.Context, attempt *mutationprotocol.Attempt, now time.Time, limit int, selected []string) ([]events.Event, error) {
+	return ExpireHumanTaskCards(ctx, attempt, now, limit, false, selected)
 }
 
 func humanTaskExpiredEvent(card decisioncard.Card, continuation decisioncard.HumanTaskContinuation, now time.Time) (events.Event, error) {
