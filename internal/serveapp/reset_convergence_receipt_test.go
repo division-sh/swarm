@@ -23,7 +23,7 @@ func proveServedResetFinalReceiptFailure(t *testing.T, proof servedControlProofR
 	if proof.Backend == "sqlite" {
 		selected = proof.SQLite
 	}
-	if err := storetest.SetResetFinalReceiptFault(servedControlProofAuthorActivityContext(t, proof), selected, true); err != nil {
+	if err := storetest.SetResetFinalReceiptFault(servedRuntimeProofAuthorActivityContext(t, proof.Runtime, proof.BundleHash), selected, true); err != nil {
 		t.Fatal(err)
 	}
 	params := map[string]any{"include_source_artifacts": false, "idempotency_key": "final-receipt-" + uuid.NewString()}

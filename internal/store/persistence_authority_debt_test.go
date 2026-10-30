@@ -1074,6 +1074,11 @@ func debtValidateCollectorIdentity(base, current string, trusted, head authority
 		debtSitesEqual(head.Sites, trusted.Sites) {
 		return nil // Exact landed deployment-handler correspondence; counted sites and baseline are unchanged.
 	}
+	if base == debtProviderSourceCollectorTo && trusted.Collector == base &&
+		current == debtS2OriginalContextCollectorTo && reviewedTransition == current && head.Collector == current &&
+		debtSitesEqual(head.Sites, trusted.Sites) {
+		return nil // #2794/6508200313: same selected uses and native original; unchanged debt sites.
+	}
 	if base == debtS1CollectorTo && trusted.Collector == base &&
 		current == debtProviderSourceCollectorTo && reviewedTransition == current && head.Collector == current &&
 		debtSitesEqual(head.Sites, trusted.Sites) {
@@ -1103,11 +1108,6 @@ func debtValidateCollectorIdentity(base, current string, trusted, head authority
 		current == debtW1RebasedComparisonCollectorTo && reviewedTransition == current && head.Collector == current &&
 		debtSitesEqual(head.Sites, trusted.Sites) {
 		return nil // Compose the landed W4 matcher and reviewed W1 pairs; unchanged baseline.
-	}
-	if base == debtSelectedFixtureLandedCollectorTo && trusted.Collector == base &&
-		current == debtS2FixtureCollectorTo && head.Collector == current &&
-		debtSitesEqual(head.Sites, trusted.Sites) {
-		return nil // R19: exact native fixture body correspondence; debt identities are unchanged.
 	}
 	if base == debtSelectedFixtureComposedCollectorTo && trusted.Collector == base &&
 		current == debtSelectedFixtureLandedCollectorTo && head.Collector == current &&
