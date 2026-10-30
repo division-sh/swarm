@@ -28,6 +28,7 @@ import (
 	runtimecorrelation "github.com/division-sh/swarm/internal/runtime/correlation"
 	"github.com/division-sh/swarm/internal/runtime/executionposture"
 	"github.com/division-sh/swarm/internal/runtime/lifecycleprobe"
+	runtimepublicingress "github.com/division-sh/swarm/internal/runtime/publicingress"
 	"github.com/division-sh/swarm/internal/store/devscratch"
 	"github.com/division-sh/swarm/internal/store/storetest"
 	"github.com/google/uuid"
@@ -124,6 +125,18 @@ func observeGoldenCrashCut(ctx context.Context, raw string, out io.Writer) (retE
 func runOwnedLifecycle(ctx context.Context, root, retainedRoot string, opts cliapp.ServeOptions, auth apiv1.AuthTokenResolution, posture executionposture.Posture, storedHash string) (int, error) {
 	if storedHash != "" && (opts.SourceRoot != "" || opts.Dev) {
 		return 1, errors.New("retained artifact proof requires one exact stored hash, no directory or dev scratch")
+	}
+	publicMode, publicEnabled, err := cliapp.ResolveServePublicIngressMode(opts)
+	if err != nil {
+		return 1, err
+	}
+	if publicEnabled {
+		if posture != executionposture.Live {
+			return 1, errors.New("mock-only retained lifecycle cannot own public exposure or registration")
+		}
+		if err := runtimepublicingress.ValidateConfiguration(publicMode, opts.PublicWebhookBaseURL, opts.PublicWebhookListen); err != nil {
+			return 1, err
+		}
 	}
 	ctx, cancel := context.WithCancel(ctx)
 	defer cancel()
@@ -227,6 +240,7 @@ func runOwnedLifecycle(ctx context.Context, root, retainedRoot string, opts clia
 	}
 	code := buildRuntimeComposition(ctx, runtimeCompositionRequest{
 		Purpose: posture, ProviderIngress: true,
+		PublicIngressMode: publicMode, PublicIngressEnabled: publicEnabled,
 		AdmittedBundle: admitted,
 		Repo:           root, Options: opts, Config: configResult, ResolvedPaths: paths,
 		LocalState: local, SwarmDir: swarmDir, StoreSelection: selection, MountSources: local.MountSources,
