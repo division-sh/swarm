@@ -15,7 +15,6 @@ import (
 
 	"github.com/division-sh/swarm/internal/cliapp"
 	"github.com/division-sh/swarm/internal/config"
-	"github.com/division-sh/swarm/internal/operatorread"
 	"github.com/division-sh/swarm/internal/runtime/agentframe"
 	runtimeactors "github.com/division-sh/swarm/internal/runtime/core/actors"
 	runtimecredentials "github.com/division-sh/swarm/internal/runtime/credentials"
