@@ -131,6 +131,22 @@ func runRegisteredCLIProcessRestart(t *testing.T, h *channelOnboardingE2EHarness
 
 func runRegisteredChannelCLIInbox(t *testing.T, h *channelOnboardingE2EHarness, scenario string, retained bool) {
 	t.Helper()
+	landings, err := readServedLandingRuns(t.Context(), servedTestProcessRuntime(t, h.process))
+	if err != nil {
+		t.Fatal(err)
+	}
+	ownedRun := ""
+	for _, landing := range landings {
+		if landing.Scope.FlowPath == "." {
+			if ownedRun != "" {
+				t.Fatal("fixture has competing root landing runs")
+			}
+			ownedRun = landing.RunID
+		}
+	}
+	if ownedRun == "" {
+		t.Fatal("fixture has no root landing run")
+	}
 	var cards []decisioncard.ListItem
 	deadline := time.Now().Add(15 * time.Second)
 	for {
@@ -143,7 +159,7 @@ func runRegisteredChannelCLIInbox(t *testing.T, h *channelOnboardingE2EHarness, 
 		requireServedJSONRPCResult(t, h.rpcEndpoint(), "mailbox.list", map[string]any{"status": "pending", "limit": 200}, &page)
 		cards = nil
 		for _, item := range page.Items {
-			if item.Kind == "decision_card" {
+			if item.Kind == "decision_card" && item.Card.RunID == ownedRun {
 				cards = append(cards, item.Card)
 			}
 		}
@@ -159,6 +175,15 @@ func runRegisteredChannelCLIInbox(t *testing.T, h *channelOnboardingE2EHarness, 
 		}
 		time.Sleep(20 * time.Millisecond)
 	}
+	for index, card := range cards {
+		if card.Scope.FlowInstance == ownedRun {
+			cards[0], cards[index] = cards[index], cards[0]
+			break
+		}
+	}
+	if cards[0].Scope.FlowInstance != ownedRun {
+		t.Fatal("canonical root card is missing")
+	}
 	listing := registeredChannelMailboxCLI(t, h, true, "list", "--limit", "200")
 	for _, card := range cards {
 		if !strings.Contains(listing, card.CardID) {
@@ -168,6 +193,11 @@ func runRegisteredChannelCLIInbox(t *testing.T, h *channelOnboardingE2EHarness, 
 	}
 	card := readRegisteredChannelCard(t, h, cards[0].CardID)
 	if retained || strings.Contains(scenario, "restart") {
+		location := h.storeDSN
+		if h.opts.StoreMode == "postgres" {
+			location = "postgres:" + location
+		}
+		waitForStandingDeliveryQuiescence(t, location)
 		h.stop(t)
 		h.start(t)
 		after := readRegisteredChannelCard(t, h, card.CardID)
@@ -226,6 +256,11 @@ func runRegisteredChannelCLIInbox(t *testing.T, h *channelOnboardingE2EHarness, 
 		}
 	}
 	if retained || strings.Contains(scenario, "restart") {
+		location := h.storeDSN
+		if h.opts.StoreMode == "postgres" {
+			location = "postgres:" + location
+		}
+		waitForStandingDeliveryQuiescence(t, location)
 		h.stop(t)
 		h.start(t)
 		if got := readRegisteredChannelCard(t, h, card.CardID); got.DecisionEventID != decided.DecisionEventID || got.Verdict != decided.Verdict {

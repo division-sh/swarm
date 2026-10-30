@@ -515,7 +515,7 @@ func runChannelDeliveryInboundDispositionE2E(t *testing.T, backend, scenario str
 		}
 	}
 	if registered.DeploymentRegistration && scenario != "inbox" {
-		h := &channelOnboardingE2EHarness{opts: opts, provider: provider, endpoint: endpoint, process: process}
+		h := &channelOnboardingE2EHarness{opts: opts, provider: provider, endpoint: endpoint, process: process, storeDSN: observerDSN}
 		runRegisteredChannelCLIInbox(t, h, scenario, retainedInteraction)
 		process = h.process
 		return
