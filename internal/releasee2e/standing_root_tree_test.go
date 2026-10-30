@@ -5,6 +5,7 @@ import (
 	"context"
 	"database/sql"
 	"encoding/json"
+	"encoding/pem"
 	"fmt"
 	"io"
 	"net/http"
@@ -114,8 +115,10 @@ func prepareStandingRootTreeAccounts(t *testing.T, binary, root, contracts strin
 		}
 		native.SetResourceID(account.token, id)
 	}
-	server := httptest.NewServer(native)
+	server := httptest.NewTLSServer(native)
 	t.Cleanup(server.Close)
+	certificate := filepath.Join(root, "provider-ca.pem")
+	writeReleaseFile(t, certificate, string(pem.EncodeToMemory(&pem.Block{Type: "CERTIFICATE", Bytes: server.Certificate().Raw})))
 	config := filepath.Join(root, "swarm.yaml")
 	packConfig := "platform:\n  packs:\n    platform_dirs:\n"
 	for _, entry := range packfixture.EmbeddedBase(t).Entries() {
@@ -145,6 +148,7 @@ func prepareStandingRootTreeAccounts(t *testing.T, binary, root, contracts strin
 	}
 	writeReleaseFile(t, config, "paths:\n  swarm_dir: "+strconv.Quote(filepath.Join(root, ".swarm"))+"\n"+goldenRuntimeConfig(store)+packConfig)
 	env := goldenProcessEnv(t, root, store.passwordEnv, 0)
+	env = append(env, "SSL_CERT_FILE="+certificate)
 	for _, account := range standingRootTreeAccounts {
 		result := runReleaseCommand(t, 30*time.Second, root, env, account.token+"\n", binary,
 			"--config", config, "channel", "connect", "telegram", "--yes", "--json")
