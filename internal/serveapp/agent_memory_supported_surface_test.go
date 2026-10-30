@@ -497,12 +497,27 @@ func addStandingMockInput(t *testing.T, root string) {
 	}
 	pins := schema["pins"].(map[string]any)
 	pins["inputs"] = append(pins["inputs"].([]any), "mock.message")
+	outputs := pins["outputs"].([]any)
+	if len(outputs) != 1 || outputs[0] != "inbound.telegram.text_message" {
+		t.Fatal("mock fixture lost its exact child-constructor output")
+	}
+	outputs[0] = "mock.message_ready"
+	connects := schema["connect"].([]any)
+	if len(connects) != 1 {
+		t.Fatal("mock fixture lost its exact child-constructor connection")
+	}
+	connect := connects[0].(map[string]any)
+	if connect["event"] != "inbound.telegram.text_message" || connect["from"] != "." || connect["to"] != "telegram-chat" {
+		t.Fatal("mock fixture child-constructor connection changed")
+	}
+	connect["event"] = "mock.message_ready"
+	connect["rename"] = "inbound.telegram.text_message"
 	data, err = yaml.Marshal(schema)
 	if err != nil {
 		t.Fatal(err)
 	}
 	writeStandingCandidateFile(t, path, string(data))
-	for _, name := range []string{"events.yaml", "nodes.yaml"} {
+	for _, name := range []string{"events.yaml", "nodes.yaml", "types.yaml"} {
 		if _, err := os.Stat(filepath.Join(root, name)); !os.IsNotExist(err) {
 			t.Fatalf("mock input must not overwrite authored %s: %v", name, err)
 		}
@@ -512,15 +527,24 @@ func addStandingMockInput(t *testing.T, root string) {
   external_account: text
   conversation_reference: text
   provider_message_reference: integer
+mock.message_ready:
+  key: conversation_reference
+  operator_account: {type: text, pattern: '^[0-9]+$', length: {min: 1}}
+  text: {type: text, length: {min: 1, max: 4096}}
+  external_account: {type: text, pattern: '^[0-9]+$', length: {min: 1, max: 17}}
+  conversation_reference: {type: text, pattern: '^-?[0-9]+$', length: {min: 1, max: 17}}
+  conversation_scope: MockConversationScope
+  provider_message_reference: {type: integer, range: {min: 1, max: 2147483647}}
 `)
+	writeStandingCandidateFile(t, filepath.Join(root, "types.yaml"), "enums:\n  MockConversationScope: {values: [direct, shared], default: direct}\n")
 	writeStandingCandidateFile(t, filepath.Join(root, "nodes.yaml"), `mock-input:
   execution_type: system_node
   subscribes_to: [mock.message]
-  produces: [inbound.telegram.text_message]
+  produces: [mock.message_ready]
   event_handlers:
     mock.message:
       emit:
-        event: inbound.telegram.text_message
+        event: mock.message_ready
         fields:
           operator_account: policy.operator_account
           text: payload.text
@@ -575,7 +599,7 @@ func publishStandingMockInput(t *testing.T, baseURL, bundleHash string, messageI
 	for {
 		var events operatorread.OperatorEventListResult
 		requireServedJSONRPCResult(t, endpoint, "event.list", map[string]any{
-			"filter": map[string]any{"run_id": runID, "event_name": "inbound.telegram.text_message"}, "limit": 500,
+			"filter": map[string]any{"run_id": runID, "event_name": "mock.message_ready"}, "limit": 500,
 		}, &events)
 		var child *operatorread.OperatorEventFull
 		for _, event := range events.Events {
@@ -603,6 +627,13 @@ func publishStandingMockInput(t *testing.T, baseURL, bundleHash string, messageI
 			child = &event
 		}
 		if child != nil {
+			var entity operatorread.OperatorEntityFull
+			target := child.Deliveries[0].Target
+			requireServedJSONRPCResult(t, endpoint, "entity.get", map[string]any{"entity_id": target.EntityID}, &entity)
+			if entity.Entity.EntityID != target.EntityID || entity.Entity.RunID != runID || entity.Entity.FlowInstance != target.FlowInstance ||
+				entity.Fields["conversation_reference"] != fmt.Sprint(chatID) {
+				t.Fatalf("mock child delivery lost its exact constructed entity: %+v", entity)
+			}
 			return *child
 		}
 		if time.Now().After(deadline) {
@@ -610,7 +641,7 @@ func publishStandingMockInput(t *testing.T, baseURL, bundleHash string, messageI
 				"filter": map[string]any{"run_id": runID}, "limit": 500,
 			}, &events)
 			for _, event := range events.Events {
-				if event.NoDelivery != nil && event.EventName == "inbound.telegram.text_message" {
+				if event.NoDelivery != nil && event.EventName == "mock.message_ready" {
 					t.Logf("mock constructor settlement: %+v", *event.NoDelivery)
 				}
 			}
