@@ -145,12 +145,11 @@ func loadMode(ctx context.Context, q RowQueryer, runID string, dialect privateac
 	}
 	if dialect == privateactivity.DialectPostgres {
 		query = `SELECT status, bundle_hash, source_root_directory FROM runs WHERE run_id = $1::uuid`
-		if lock {
-			if exclusive {
-				query += ` FOR UPDATE`
-			} else {
-				query += ` FOR SHARE`
-			}
+		switch {
+		case lock && exclusive:
+			query += ` FOR UPDATE`
+		case lock:
+			query += ` FOR SHARE`
 		}
 	}
 	var status string
