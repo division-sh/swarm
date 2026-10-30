@@ -121,7 +121,7 @@ func prepareStandingRootTreeAccounts(t *testing.T, binary, root, contracts strin
 	for _, entry := range packfixture.EmbeddedBase(t).Entries() {
 		directory := filepath.Join(root, "platform", entry.ID())
 		for name, body := range entry.Provider().Members() {
-			if entry.ID() == "telegram" && name == "channel.yaml" {
+			if entry.ID() == "telegram" {
 				body = bytes.ReplaceAll(body, []byte("https://api.telegram.org"), []byte(server.URL))
 			}
 			writeReleaseFile(t, filepath.Join(directory, name), string(body))
@@ -133,12 +133,14 @@ func prepareStandingRootTreeAccounts(t *testing.T, binary, root, contracts strin
 		if index != 0 {
 			source = filepath.Join(source, "beta")
 		}
-		path := filepath.Join(source, "telegram", "channel.yaml")
-		body, err := os.ReadFile(path)
-		if err != nil {
-			t.Fatal(err)
+		for _, name := range []string{"channel.yaml", "connector.yaml"} {
+			path := filepath.Join(source, "telegram", name)
+			body, err := os.ReadFile(path)
+			if err != nil {
+				t.Fatal(err)
+			}
+			writeReleaseFile(t, path, strings.ReplaceAll(string(body), "https://api.telegram.org", server.URL))
 		}
-		writeReleaseFile(t, path, strings.ReplaceAll(string(body), "https://api.telegram.org", server.URL))
 		writeReleaseFile(t, filepath.Join(source, "policy.yaml"), "operator_account: "+strconv.Quote(account.account)+"\n")
 	}
 	writeReleaseFile(t, config, "paths:\n  swarm_dir: "+strconv.Quote(filepath.Join(root, ".swarm"))+"\n"+goldenRuntimeConfig(store)+packConfig)
