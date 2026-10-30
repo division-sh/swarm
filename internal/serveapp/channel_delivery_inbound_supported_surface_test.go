@@ -413,7 +413,7 @@ func runChannelDeliveryInboundDispositionE2E(t *testing.T, backend, scenario str
 	}
 	publicListener := reserveChannelOnboardingListener(t)
 	publicListen := publicListener.Addr().String()
-	redirectExternalHosts(t, map[string]string{"hooks.channel-onboarding.test": "http://" + publicListen})
+	redirectExternalHosts(t, map[string]string{"hooks.channel-onboarding.test": "http://" + publicListen, "api.telegram.org": telegram.URL})
 	var configPath, observerDSN string
 	if backend == "postgres" {
 		dsn, _, _ := testutil.StartPostgres(t)
@@ -443,7 +443,13 @@ func runChannelDeliveryInboundDispositionE2E(t *testing.T, backend, scenario str
 	if scenario == "delivery_loss_resend" || scenario == "edit_loss_resend" || scenario == "notice_uncertainty_readback" {
 		observation.configure(&opts)
 	}
-	registerChannelFixtureAccount(t, configPath, "bot-token", "420079")
+	var registered channelonboarding.Operation
+	if scenario == "inbox" {
+		registered = registerChannelFixtureAccount(t, configPath, "bot-token", "420079")
+	} else {
+		registered = registerChannelFixtureAccount(t, configPath, "bot-token", "420079", provider)
+		opts.AbandonActiveRuns = false
+	}
 	process := startServeRuntimeTestProcess(t, opts)
 	t.Cleanup(func() { _ = process.stop() })
 	process.waitForReadyLine()
@@ -465,7 +471,7 @@ func runChannelDeliveryInboundDispositionE2E(t *testing.T, backend, scenario str
 				"message": map[string]any{
 					"message_id": 9100 + index, "text": "ordinary business text",
 					"from": map[string]any{"id": 7000},
-					"chat": map[string]any{"id": 1001, "type": "private"},
+					"chat": map[string]any{"id": 9001, "type": "private"},
 				},
 			})
 			if err != nil {
@@ -508,6 +514,14 @@ func runChannelDeliveryInboundDispositionE2E(t *testing.T, backend, scenario str
 			}
 		}
 	}
+	if registered.DeploymentRegistration && scenario != "inbox" {
+		h := &channelOnboardingE2EHarness{opts: opts, provider: provider, endpoint: endpoint, process: process}
+		runRegisteredChannelCLIInbox(t, h, scenario, retainedInteraction)
+		process = h.process
+		return
+	}
+	// Channel-card assertions below are retained for the v0.8 transport design.
+	// Registered accounts use the CLI-only journey above (6526882297).
 	if scenario == "inbox_install_loss" {
 		provider.LoseNextCommandWriteAcknowledgment()
 	} else if scenario == "inbox_readback_failure" {

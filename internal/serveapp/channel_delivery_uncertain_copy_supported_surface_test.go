@@ -35,6 +35,27 @@ func TestChannelDeliveryUncertainCopyAuthorityPublicJourney(t *testing.T) {
 					"payload": map[string]any{"seed": true}, "idempotency_key": "uncertain-copy-seed",
 				})
 				cardID := waitChannelAnchorCard(t, db, seed.RunID, decisioncard.AnchorKindStageGate, "chat/reviews")
+				if h.registration.DeploymentRegistration {
+					before := readRegisteredChannelCard(t, h, cardID)
+					registeredChannelMailboxCLI(t, h, false, "decide", cardID, "reject")
+					h.stop(t)
+					h.start(t)
+					args := []string{"decide", cardID, "reject", "--input", "reason=fresh-copy-private-reason", "--idempotency-key", "cli-copy-decision"}
+					registeredChannelMailboxCLI(t, h, true, args...)
+					decided := readRegisteredChannelCard(t, h, cardID)
+					if decided.Verdict != "reject" || decided.Fields["reason"] != "fresh-copy-private-reason" || string(decided.Snapshot) != string(before.Snapshot) || decided.DecisionEventID == "" {
+						t.Fatalf("CLI lost exact decision authority: %+v", decided)
+					}
+					h.stop(t)
+					h.start(t)
+					registeredChannelMailboxCLI(t, h, true, args...)
+					if got := readRegisteredChannelCard(t, h, cardID); got.DecisionEventID != decided.DecisionEventID {
+						t.Fatal("restart/replay duplicated decision")
+					}
+					// Uncertain channel-copy application/rebind assertions stay below,
+					// deferred to the v0.8 design by 6526882297.
+					return
+				}
 				oldMessage := waitChannelAnchorReceipt(t, db, cardID)
 				oldToken, found := telegramCallbackToken(h.provider.Delivery(oldMessage-1), "reject")
 				if !found {

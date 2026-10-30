@@ -41,6 +41,10 @@ func TestChannelSourceLifecyclePublicJourney(t *testing.T) {
 					receiverReader = requireReceiverProofStateReader(t, p.deps.EventStore)
 				})
 				h, db, hash := startChannelAnchorJourney(t, backend, "source-lifecycle-token", false)
+				if h.registration.DeploymentRegistration {
+					runRegisteredCLISourceLifecycle(t, h, db, hash, operation, receiverReader, deliveryReader)
+					return
+				}
 				var standingRun string
 				if err := db.QueryRow(`SELECT run_id FROM runs WHERE flow_path='chat' AND landing_run=TRUE`).Scan(&standingRun); err != nil {
 					t.Fatal(err)
@@ -420,6 +424,107 @@ func TestChannelSourceLifecyclePublicJourney(t *testing.T) {
 					t.Fatal("source lifecycle changed historical receipt/render evidence")
 				}
 			})
+		}
+	}
+}
+
+func runRegisteredCLISourceLifecycle(t *testing.T, h *channelOnboardingE2EHarness, db *sql.DB, hash, operation string, receiverReader receiverProofStateReader, deliveryReader servedRunDeliveryReader) {
+	t.Helper()
+	seed := requireServedEventPublishRPCResult(t, h.rpcEndpoint(), map[string]any{
+		"event_name": "work.requested", "bundle_hash": hash, "payload": map[string]any{"seed": true}, "idempotency_key": "cli-source-seed",
+	})
+	card := waitChannelPublicCard(t, h, seed.RunID, decisioncard.AnchorKindStageGate, "chat/reviews")
+	before := readRegisteredChannelCard(t, h, card)
+	var source []byte
+	if err := db.QueryRow(`SELECT source_blob FROM source_artifacts WHERE bundle_hash=$1`, hash).Scan(&source); err != nil {
+		t.Fatal(err)
+	}
+	switch operation {
+	case "disk", "new_process":
+		path := filepath.Join(h.opts.SourceRoot, "chat", "reviews", "schema.yaml")
+		body, err := os.ReadFile(path)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if err := os.WriteFile(path, append(body, []byte("\n# Changed artifact bytes; retained decision remains frozen.\n")...), 0o600); err != nil {
+			t.Fatal(err)
+		}
+		var identity apiv1.RuntimeIdentityResult
+		requireServedJSONRPCResult(t, h.rpcEndpoint(), "runtime.identity", map[string]any{}, &identity)
+		if len(identity.SourceArtifacts) != 1 || identity.SourceArtifacts[0].BundleHash != hash {
+			t.Fatal("disk mutation changed captured authority")
+		}
+		if operation == "disk" {
+			if err := os.Remove(path); err != nil {
+				t.Fatal(err)
+			}
+			decideRegisteredAnchorCLI(t, h, card, false)
+		} else {
+			h.stop(t)
+			h.start(t)
+			requireServedJSONRPCResult(t, h.rpcEndpoint(), "runtime.identity", map[string]any{}, &identity)
+			if len(identity.SourceArtifacts) != 1 || identity.SourceArtifacts[0].BundleHash == hash {
+				t.Fatal("new process did not capture the new source")
+			}
+		}
+		var retained []byte
+		if err := db.QueryRow(`SELECT source_blob FROM source_artifacts WHERE bundle_hash=$1`, hash).Scan(&retained); err != nil || !bytes.Equal(retained, source) {
+			t.Fatal("source replacement altered retained bytes", err)
+		}
+		if got := readRegisteredChannelCard(t, h, card); string(got.Snapshot) != string(before.Snapshot) {
+			t.Fatal("source replacement rewrote the frozen decision")
+		}
+	case "retained_reset", "source_reset":
+		clear := operation == "source_reset"
+		params := map[string]any{"include_source_artifacts": clear, "idempotency_key": "cli-source-reset"}
+		dry := requestServedJSONRPC(t, h.rpcEndpoint(), "runtime.nuke", map[string]any{"dry_run": true, "include_source_artifacts": clear, "idempotency_key": "cli-source-dry"})
+		if dry.Error != nil || readRegisteredChannelCard(t, h, card).Status != before.Status {
+			t.Fatal("dry reset changed card authority", dry.Error)
+		}
+		if reset := requestServedJSONRPC(t, h.rpcEndpoint(), "runtime.nuke", params); reset.Error != nil {
+			var phase, record string
+			readErr := db.QueryRow(`SELECT phase,CAST(record AS TEXT) FROM runtime_reset_operations LIMIT 1`).Scan(&phase, &record)
+			t.Fatalf("public reset failed: error=%+v phase=%s record=%s read=%v", reset.Error, phase, record, readErr)
+		}
+		if replay := requestServedJSONRPC(t, h.rpcEndpoint(), "runtime.nuke", params); replay.Error != nil {
+			t.Fatal(replay.Error)
+		}
+		if result := requestServedJSONRPC(t, h.rpcEndpoint(), "mailbox.get", map[string]any{"mailbox_id": card}); result.Error == nil {
+			t.Fatal("reset retained deleted card execution")
+		}
+		publish := requestServedJSONRPC(t, h.rpcEndpoint(), "event.publish", map[string]any{"event_name": "work.requested", "bundle_hash": hash, "payload": map[string]any{"seed": true}, "idempotency_key": "cli-source-after-reset"})
+		if clear {
+			if publish.Error == nil || publish.Error.Data["code"] != apiv1.BundleUnavailableCode {
+				t.Fatal("source-inclusive reset revived execution", publish.Error)
+			}
+		} else if publish.Error != nil {
+			t.Fatal(publish.Error)
+		}
+		h.stop(t)
+		h.start(t)
+		if writes := h.provider.CommandWrites(); len(writes) != 0 {
+			t.Fatal("reset/restart installed a deferred native consumer")
+		}
+	case "fork":
+		frontier := requireServedEventPublishRPCResult(t, h.rpcEndpoint(), map[string]any{
+			"event_name": "work.requested", "run_id": seed.RunID, "source_event_id": seed.EventID, "payload": map[string]any{"seed": true}, "idempotency_key": "cli-source-frontier",
+		})
+		var fork apiv1.RunForkExecutionResult
+		requireServedJSONRPCResult(t, h.rpcEndpoint(), "run.fork", map[string]any{"source_run_id": seed.RunID, "fork_event_id": frontier.EventID, "allow_source_freeze": true, "idempotency_key": "cli-source-fork"}, &fork)
+		waitServedSelectedForkFrontier(t, receiverReader, deliveryReader, fork.ForkRunID, frontier.EventID)
+		child := waitChannelPublicCard(t, h, fork.ForkRunID, decisioncard.AnchorKindStageGate, "chat/reviews")
+		if fork.ForkRunID == seed.RunID || child == card {
+			t.Fatal("selected fork reused predecessor identity")
+		}
+		decideRegisteredAnchorCLI(t, h, child, false)
+		if got := readRegisteredChannelCard(t, h, card); got.DecisionEventID != "" {
+			t.Fatal("child decision escaped to parent")
+		}
+		decided := readRegisteredChannelCard(t, h, child)
+		h.stop(t)
+		h.start(t)
+		if got := readRegisteredChannelCard(t, h, child); got.DecisionEventID != decided.DecisionEventID || got.Verdict != decided.Verdict {
+			t.Fatal("restart changed selected-fork decision")
 		}
 	}
 }

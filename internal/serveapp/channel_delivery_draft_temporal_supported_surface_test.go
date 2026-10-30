@@ -28,6 +28,39 @@ func TestChannelDraftTerminalRestartPublicJourney(t *testing.T) {
 					"payload": map[string]any{"seed": true}, "idempotency_key": "draft-temporal-seed",
 				})
 				cardID := waitChannelAnchorCard(t, db, seed.RunID, decisioncard.AnchorKindStageGate, "chat/reviews")
+				if h.registration.DeploymentRegistration {
+					before := readRegisteredChannelCard(t, h, cardID)
+					registeredChannelMailboxCLI(t, h, false, "decide", cardID, "reject")
+					h.stop(t)
+					h.start(t)
+					want := decisioncard.StatusPending
+					switch transition {
+					case "external_decision":
+						decideRegisteredAnchorCLI(t, h, cardID, false)
+						want = decisioncard.StatusDecided
+					case "run_stop":
+						requireServedOKJSONRPC(t, h.rpcEndpoint(), "run.pause", map[string]any{"run_id": seed.RunID, "idempotency_key": "cli-draft-pause"})
+						requireServedOKJSONRPC(t, h.rpcEndpoint(), "run.stop", map[string]any{"run_id": seed.RunID, "idempotency_key": "cli-draft-stop"})
+						want = decisioncard.StatusSuperseded
+					}
+					h.stop(t)
+					h.start(t)
+					after := readRegisteredChannelCard(t, h, cardID)
+					if after.Status != want || string(after.Snapshot) != string(before.Snapshot) {
+						t.Fatalf("CLI/restart changed terminal card meaning: %+v", after)
+					}
+					var decisions int
+					expected := 0
+					if transition == "external_decision" {
+						expected = 1
+					}
+					if err := db.QueryRow(`SELECT COUNT(*) FROM events WHERE run_id=$1 AND event_name='mailbox.card_decided'`, seed.RunID).Scan(&decisions); err != nil || decisions != expected {
+						t.Fatalf("CLI terminal decision cardinality=%d want=%d err=%v", decisions, expected, err)
+					}
+					// Channel draft cancellation, TTL and stale controls below are
+					// retained, not certified by this CLI-only path (6526882297).
+					return
+				}
 				message := waitChannelAnchorReceipt(t, db, cardID)
 				initial := readChannelHistoricalRender(t, db, cardID)
 				reject, found := telegramCallbackToken(h.provider.Delivery(message-1), "reject")

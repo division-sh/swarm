@@ -20,6 +20,57 @@ func TestChannelDeliveryHumanTemporalReceiptPublicJourney(t *testing.T) {
 					"payload": map[string]any{"seed": true}, "idempotency_key": "temporal-seed",
 				})
 				gate := waitChannelAnchorCard(t, db, seed.RunID, decisioncard.AnchorKindStageGate, "chat/reviews")
+				if h.registration.DeploymentRegistration {
+					deadline := time.Now().UTC().Add(time.Hour)
+					if transition == "expire_restart" {
+						deadline = time.Now().UTC().Add(10 * time.Second)
+					}
+					requireServedEventPublishRPCResult(t, h.rpcEndpoint(), map[string]any{
+						"event_name": "observer.requested", "run_id": seed.RunID, "source_event_id": seed.EventID,
+						"payload": map[string]any{"seed": true, "deadline_at": deadline.Format(time.RFC3339Nano)}, "idempotency_key": "temporal-human",
+					})
+					card := waitChannelAnchorCard(t, db, seed.RunID, decisioncard.AnchorKindHumanTask, "chat/observers")
+					before := readRegisteredChannelCard(t, h, card)
+					want := decisioncard.StatusPending
+					switch transition {
+					case "defer_restart":
+						registeredChannelMailboxCLI(t, h, true, "defer", card, "--until", time.Now().UTC().Add(30*time.Minute).Format(time.RFC3339Nano))
+					case "expire_restart":
+						want = decisioncard.StatusExpired
+					case "stop_supersedes":
+						requireServedOKJSONRPC(t, h.rpcEndpoint(), "run.pause", map[string]any{"run_id": seed.RunID, "idempotency_key": "temporal-pause"})
+						requireServedOKJSONRPC(t, h.rpcEndpoint(), "run.stop", map[string]any{"run_id": seed.RunID, "idempotency_key": "temporal-stop"})
+						want = decisioncard.StatusSuperseded
+					}
+					h.stop(t)
+					if transition == "expire_restart" {
+						if remaining := time.Until(deadline); remaining > 0 {
+							time.Sleep(remaining)
+						}
+					}
+					h.start(t)
+					until := time.Now().Add(15 * time.Second)
+					for {
+						after := readRegisteredChannelCard(t, h, card)
+						if string(after.Snapshot) != string(before.Snapshot) || after.DecisionEventID != "" {
+							t.Fatal("temporal transition changed frozen card or emitted a decision")
+						}
+						if after.Status == want {
+							break
+						}
+						if time.Now().After(until) {
+							t.Fatalf("temporal card state=%s want=%s", after.Status, want)
+						}
+						time.Sleep(20 * time.Millisecond)
+					}
+					if want != decisioncard.StatusPending {
+						registeredChannelMailboxCLI(t, h, false, "decide", card, "approve")
+					}
+					if transition == "stop_supersedes" && readRegisteredChannelCard(t, h, gate).Status != decisioncard.StatusSuperseded {
+						t.Fatal("run stop did not supersede the gate")
+					}
+					return
+				}
 				gateMessage := waitChannelAnchorReceipt(t, db, gate)
 				deadline := time.Now().UTC().Add(time.Hour)
 				if transition == "expire_restart" {

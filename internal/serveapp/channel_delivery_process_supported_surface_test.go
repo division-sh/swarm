@@ -17,6 +17,10 @@ func TestChannelDeliveryAbruptProcessDeathPublicJourney(t *testing.T) {
 		for _, cut := range []string{"launched", "settled"} {
 			t.Run(string(backend)+"/"+cut, func(t *testing.T) {
 				h, db, hash := startChannelAnchorJourney(t, backend, "delivery-crash-token", false)
+				if h.registration.DeploymentRegistration {
+					runRegisteredCLIProcessRestart(t, h, hash, cut)
+					return
+				}
 				waitChannelDeliverySendsSettled(t, db, backend)
 				h.stop(t)
 				t.Setenv("TEST_CHANNEL_ONBOARDING_RETAIN_RUNS", "1")

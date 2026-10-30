@@ -95,7 +95,7 @@ func deploymentChannelHandlers(repo, config, directory string, stores *selected.
 		defer mu.Unlock()
 		return closeDeploymentControls(clients)
 	}
-	claim := deploymentPendingClaimHandler(root, config, directory, stores, process, capability, factory)
+	claim := deploymentPendingClaimHandler(root, config, directory, stores, process, capability, factory, runtimeOptions)
 	restore := func(ctx context.Context) error {
 		operations, err := stores.DeploymentChannels().ListChannelOnboardingOperations(ctx)
 		if err != nil || rootErr != nil {
@@ -106,7 +106,7 @@ func deploymentChannelHandlers(repo, config, directory string, stores *selected.
 	return handler, claim, restore, close
 }
 
-func deploymentPendingClaimHandler(root cliapp.InvocationRoot, config, directory string, stores *selected.Owner, process *worklifetime.Process, capability startupownership.ProcessCapability, factory cliapp.ChannelRegistrationFactory) publicingress.PendingDeploymentClaim {
+func deploymentPendingClaimHandler(root cliapp.InvocationRoot, config, directory string, stores *selected.Owner, process *worklifetime.Process, capability startupownership.ProcessCapability, factory cliapp.ChannelRegistrationFactory, runtimeOptions deploymentRuntimeOptions) publicingress.PendingDeploymentClaim {
 	return func(ctx context.Context, account channelonboarding.AccountReference, credential func(channelonboarding.CredentialAdmission) bool, admit func() (providertriggers.Delivery, error), current func() bool) (bool, error) {
 		work, err := process.Begin(ctx)
 		if err != nil {
@@ -121,7 +121,9 @@ func deploymentPendingClaimHandler(root cliapp.InvocationRoot, config, directory
 		case err != nil:
 			return false, err
 		case !slices.ContainsFunc(operations, func(op channelonboarding.Operation) bool {
-			return op.PendingDeploymentClaim(account)
+			return op.PendingDeploymentClaim(account) || op.DeploymentRegistration && op.Provider == account.Provider &&
+				op.AccountReference == account.Account && op.AccountConfirmed && op.IdentityOperationID != "" &&
+				op.Phase == channelonboarding.PhaseSucceeded && !op.LogoutCompleted
 		}):
 			return false, nil
 		}
@@ -130,7 +132,29 @@ func deploymentPendingClaimHandler(root cliapp.InvocationRoot, config, directory
 			return false, err
 		}
 		defer func() { _ = client.Close(context.WithoutCancel(ctx)) }()
-		return client.ConsumeWebhookClaim(work.Context(), account, credential, admit, current)
+		var plans []packs.SatisfactionPlan
+		registered, err := channelonboarding.RegisteredAccount(work.Context(), stores.DeploymentChannels(), account)
+		if err != nil {
+			return false, err
+		}
+		if registered.Phase == channelonboarding.PhaseSucceeded && registered.IdentityOperationID != "" {
+			if runtimeOptions.manager == nil {
+				return false, channelonboarding.ErrRevisionConflict
+			}
+			holders, err := runtimeOptions.manager.AccountHolders(work.Context(), account)
+			if err != nil || len(holders) != 1 {
+				return false, errors.Join(channelonboarding.ErrRevisionConflict, err)
+			}
+			use, _, availability, err := runtimeOptions.manager.AcquireRun(work.Context(), holders[0].RunID)
+			if use != nil {
+				defer func() { _ = use.Done() }()
+			}
+			if err != nil || use == nil || !availability.Available() || use.Context.BundleHash() != holders[0].BundleHash {
+				return false, errors.Join(channelonboarding.ErrRevisionConflict, err)
+			}
+			plans = use.Context.ChannelPlans
+		}
+		return client.ConsumeWebhookClaim(work.Context(), account, credential, admit, current, plans...)
 	}
 }
 

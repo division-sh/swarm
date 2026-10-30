@@ -2,7 +2,10 @@ package channelonboarding
 
 import (
 	"context"
+	"errors"
 	"fmt"
+
+	"github.com/division-sh/swarm/internal/operatorchannel"
 )
 
 // AccountHolder is a current runtime observation, not persisted registration or
@@ -23,6 +26,45 @@ type AccountStatus struct {
 	Linked    bool            `json:"linked"`
 	Health    string          `json:"health"`
 	Holders   []AccountHolder `json:"holders"`
+}
+
+// DeploymentOperatorBinding observes the exact confirmed operator for one
+// registered account, without granting runtime enrollment or card authority.
+func (s *Service) DeploymentOperatorBinding(ctx context.Context, ref AccountReference) (Result, error) {
+	if !s.deployment || ref != s.operatorAccount {
+		return Result{}, ErrNotFound
+	}
+	op, err := RegisteredAccount(ctx, s.store, ref)
+	if err != nil {
+		return Result{}, err
+	}
+	if op.IdentityOperationID == "" {
+		return Result{}, ErrNotFound
+	}
+	identity, err := s.identities.GetOperation(ctx, op.IdentityOperationID)
+	if err != nil {
+		return Result{}, err
+	}
+	if identity.State != operatorchannel.StateBound {
+		return Result{}, ErrNotFound
+	}
+	candidate, err := s.currentCandidate(op)
+	if err != nil {
+		return Result{}, err
+	}
+	expected, err := providerIdentityAuthority(op, candidate)
+	if err != nil {
+		return Result{}, err
+	}
+	binding, proofCurrent, err := s.identities.CurrentBindingReadiness(ctx, op.Interface)
+	if errors.Is(err, operatorchannel.ErrNotFound) || errors.Is(err, operatorchannel.ErrCredentialStale) || err == nil && !proofCurrent {
+		return Result{}, ErrNotFound
+	}
+	if err != nil || binding.OperationID != identity.OperationID || binding.Revision != op.BindingRevision ||
+		identity.OnboardingOperationID != op.OperationID || binding.ProviderAuthority != identity.ProviderAuthority || !binding.ProviderAuthority.SameProvenance(expected) {
+		return Result{}, errors.Join(ErrRevisionConflict, err)
+	}
+	return Result{Operation: op, Candidate: &candidate, Binding: &binding}, nil
 }
 
 // RegisteredAccount selects only confirmed deployment evidence. A pending

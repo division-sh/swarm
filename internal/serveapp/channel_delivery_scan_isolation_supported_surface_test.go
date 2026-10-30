@@ -29,10 +29,32 @@ func TestChannelDeliveryCompiledRenderFailureDoesNotStarveReceiptUpdates(t *test
 					"payload": map[string]any{"seed": true}, "idempotency_key": fmt.Sprintf("scan-isolation-%d", index),
 				})
 				cards[index] = waitChannelAnchorCard(t, db, seed.RunID, decisioncard.AnchorKindStageGate, "chat/reviews")
-				messages[index] = waitChannelAnchorReceipt(t, db, cards[index])
+				if !h.registration.DeploymentRegistration {
+					messages[index] = waitChannelAnchorReceipt(t, db, cards[index])
+				}
 				requireServedOKJSONRPC(t, h.rpcEndpoint(), "run.pause", map[string]any{
 					"run_id": seed.RunID, "idempotency_key": fmt.Sprintf("scan-isolation-pause-%d", index),
 				})
+			}
+			if h.registration.DeploymentRegistration {
+				before := readRegisteredChannelCard(t, h, cards[0])
+				registeredChannelMailboxCLI(t, h, false, "decide", cards[0], "not-an-authored-option")
+				registeredChannelMailboxCLI(t, h, true, "defer", cards[1], "--until", time.Now().UTC().Add(time.Hour).Format(time.RFC3339Nano))
+				if after := readRegisteredChannelCard(t, h, cards[0]); after.Status != before.Status || after.DecisionEventID != "" || string(after.Snapshot) != string(before.Snapshot) {
+					t.Fatal("refused CLI option gained authority over the sibling decision")
+				}
+				var second struct {
+					Card struct {
+						DeferredUntil string `json:"deferred_until"`
+					} `json:"decision_card"`
+				}
+				requireServedJSONRPCResult(t, h.rpcEndpoint(), "mailbox.get", map[string]any{"mailbox_id": cards[1]}, &second)
+				if second.Card.DeferredUntil == "" {
+					t.Fatal("independent CLI deferral was starved")
+				}
+				// The compiled channel-render fault and receipt update checks below
+				// remain deferred; this is canonical CLI mutation isolation only.
+				return
 			}
 			// Negative fault injection only: neither source cards nor authority are fabricated.
 			injectionCtx, cancelInjection := context.WithTimeout(context.Background(), 5*time.Second)

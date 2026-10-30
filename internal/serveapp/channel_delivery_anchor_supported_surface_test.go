@@ -95,12 +95,12 @@ func TestChannelDeliveryRealAnchorProducersPublicJourney(t *testing.T) {
 			var interfaceKey string
 			telegramIdentities := 0
 			for _, channel := range channels.Channels {
-				if channel.Identity.Interface.ChannelPackID == "telegram" {
+				if channel.Identity.Interface.ChannelPackID == "telegram" && (channel.Operation == nil || !channel.Operation.DeploymentRegistration) {
 					telegramIdentities++
 					interfaceKey = channel.Identity.Interface.Key()
 				}
 			}
-			if telegramIdentities != 1 {
+			if !h.registration.DeploymentRegistration && telegramIdentities != 1 {
 				t.Fatalf("anchor journey requires one exact Telegram channel identity, got %d", telegramIdentities)
 			}
 			for _, kind := range []decisioncard.AnchorKind{decisioncard.AnchorKindStageGate, decisioncard.AnchorKindHumanTask, decisioncard.AnchorKindProposedEffect} {
@@ -114,6 +114,24 @@ func TestChannelDeliveryRealAnchorProducersPublicJourney(t *testing.T) {
 						"payload": map[string]any{"seed": true}, "idempotency_key": "channel-anchor-" + string(kind),
 					})
 					gateID := waitChannelPublicCard(t, h, seed.RunID, decisioncard.AnchorKindStageGate, "chat/reviews")
+					if h.registration.DeploymentRegistration {
+						if kind != decisioncard.AnchorKindStageGate {
+							event := "observer.requested"
+							if kind == decisioncard.AnchorKindProposedEffect {
+								event = "effect.requested"
+							}
+							requireServedEventPublishRPCResult(t, h.rpcEndpoint(), map[string]any{
+								"event_name": event, "run_id": seed.RunID, "source_event_id": seed.EventID,
+								"payload": map[string]any{"seed": true}, "idempotency_key": "producer-" + string(kind),
+							})
+						}
+						card := waitChannelPublicCard(t, h, seed.RunID, kind, flowInstance)
+						decideRegisteredAnchorCLI(t, h, card, kind == decisioncard.AnchorKindProposedEffect)
+						requireServedOKJSONRPC(t, h.rpcEndpoint(), "run.pause", map[string]any{"run_id": seed.RunID, "idempotency_key": "cli-anchor-pause-" + string(kind)})
+						requireServedOKJSONRPC(t, h.rpcEndpoint(), "run.stop", map[string]any{"run_id": seed.RunID, "idempotency_key": "cli-anchor-stop-" + string(kind)})
+						return
+					}
+					// Registered channel-card assertions remain deferred under 6526882297.
 					waitChannelAnchorObservedReceipt(t, reader, gateID)
 					if kind != decisioncard.AnchorKindStageGate {
 						event := "observer.requested"
@@ -261,6 +279,10 @@ func TestChannelDeliveryReconciliationActivityDispatchPublicJourney(t *testing.T
 				"payload": map[string]any{"seed": true}, "idempotency_key": "isolated-proposal-wake",
 			})
 			cardID := waitChannelPublicCard(t, h, seed.RunID, decisioncard.AnchorKindProposedEffect, "chat/reviews")
+			if h.registration.DeploymentRegistration {
+				decideRegisteredAnchorCLI(t, h, cardID, true)
+				return
+			}
 			messageID := waitChannelAnchorObservedReceipt(t, reader, cardID)
 			var item struct {
 				Card struct {
@@ -388,7 +410,7 @@ func startChannelAnchorPublicJourney(t *testing.T, backend servedparity.Backend,
 	if err := credentials.Set(context.Background(), "telegram.webhook_signing_secret", "telegram-secret"); err != nil {
 		t.Fatal(err)
 	}
-	registerChannelFixtureAccount(t, h.opts.ConfigPath, token, "420079")
+	h.registration = registerChannelFixtureAccount(t, h.opts.ConfigPath, token, "420079", h.provider)
 	h.start(t)
 	t.Cleanup(func() { h.stop(t) })
 	var identity apiv1.RuntimeIdentityResult
@@ -406,7 +428,9 @@ func startChannelAnchorPublicJourney(t *testing.T, backend servedparity.Backend,
 			"run_id": notice.RunID, "idempotency_key": "uncertainty-summary-pause",
 		})
 	}
-	runChannelOnboardingCLIJourney(t, h.opts.ConfigPath, h.endpoint, h.provider, "connect", token, 1001, "private", 0)
+	if !h.registration.DeploymentRegistration {
+		runChannelOnboardingCLIJourney(t, h.opts.ConfigPath, h.endpoint, h.provider, "connect", token, 1001, "private", 0)
+	}
 	return h, identity.SourceArtifacts[0].BundleHash
 }
 

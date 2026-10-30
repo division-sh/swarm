@@ -203,12 +203,20 @@ func readChannelDeliveryDiagnosticRows(ctx context.Context, db *sql.DB, query st
 func TestChannelDeliverySettlementDiagnosticBothStores(t *testing.T) {
 	for _, backend := range servedparity.RequiredBackends {
 		t.Run(string(backend), func(t *testing.T) {
-			_, db, _ := startChannelAnchorJourney(t, backend, "settlement-diagnostic-token", false)
+			h, db, _ := startChannelAnchorJourney(t, backend, "settlement-diagnostic-token", false)
 			var runID string
 			if err := db.QueryRow(`SELECT run_id FROM runs WHERE flow_path='chat' AND landing_run=TRUE`).Scan(&runID); err != nil {
 				t.Fatal(err)
 			}
 			card := waitChannelAnchorCard(t, db, runID, "stage_gate", "chat")
+			if h.registration.DeploymentRegistration {
+				registeredChannelMailboxCLI(t, h, true, "view", card)
+				var receipts int
+				if err := db.QueryRow(`SELECT COUNT(*) FROM channel_delivery_receipts r JOIN channel_delivery_plans p ON p.delivery_id=r.delivery_id WHERE p.source_id=$1`, card).Scan(&receipts); err != nil || receipts != 0 {
+					t.Fatalf("CLI-only card acquired channel receipt authority: receipts=%d err=%v", receipts, err)
+				}
+				return
+			}
 			waitChannelAnchorReceipt(t, db, card)
 			waitChannelDeliverySendsSettled(t, db, backend)
 			var deliveryID string
