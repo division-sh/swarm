@@ -215,10 +215,6 @@ func runOwnedLifecycle(ctx context.Context, root, retainedRoot string, opts clia
 	}
 	presenter := newServeLifecyclePresenter(opts)
 	defer presenter.finish()
-	publicIngressMode, publicIngressEnabled, err := cliapp.ResolveServePublicIngressMode(opts)
-	if err != nil {
-		return 1, err
-	}
 	if os.Getenv("SWARM_TEST_INTERNAL_MOCK_LIFECYCLE_REQUEST") != "" {
 		stopEvidence := startOwnedLifecycleEvidence(presenter, opts.ErrorOutput)
 		defer stopEvidence()
@@ -229,8 +225,7 @@ func runOwnedLifecycle(ctx context.Context, root, retainedRoot string, opts clia
 		Repo:           root, Options: opts, Config: configResult, ResolvedPaths: paths,
 		LocalState: local, SwarmDir: swarmDir, StoreSelection: selection, MountSources: local.MountSources,
 		PlatformPackBase: base, PlatformPackBases: bases,
-		APIAuth:           auth,
-		PublicIngressMode: publicIngressMode, PublicIngressEnabled: publicIngressEnabled,
+		APIAuth:          auth,
 		ScratchAuthority: scratch,
 		Credentials:      credentials, ProviderCredentials: providerCredentials, ManagedCredentials: managedCredentials,
 		Presenter: presenter, NoticePresentation: newServeNoticePresentationSink(presenter), Cancel: cancel,

@@ -201,7 +201,19 @@ func TestStandingIngressSupportedSurfaceSQLiteRestartPreservesAuthorityAndReplie
 		SelfCheck:      true,
 		TestLLMRuntime: telegramPhraseBotLLMRuntime{}, TestOutboxSweeperConfig: servedEventPublishProofOutboxSweeperConfig(),
 	}
-	registerChannelFixtureAccount(t, configPath, "bot-token", "420079")
+	registration := registerChannelFixtureAccount(t, configPath, "bot-token", "420079")
+	signingKey := ""
+	for _, credential := range registration.CredentialAdmissions {
+		if credential.Role == "telegram.webhook_signing_secret" {
+			if signingKey != "" {
+				t.Fatal("registered fixture repeats its signing role")
+			}
+			signingKey = credential.StoreKey
+		}
+	}
+	if signingKey == "" {
+		t.Fatal("registered fixture is missing its signing role")
+	}
 	prepareStandingTelegramCallback(t, &opts)
 	first := startServeRuntimeTestProcess(t, opts)
 	first.waitForReadyLine()
@@ -223,7 +235,7 @@ func TestStandingIngressSupportedSurfaceSQLiteRestartPreservesAuthorityAndReplie
 		"listeners                  api 127.0.0.1:",
 		"ready in ",
 		"telegram webhook",
-		"telegram.webhook_signing_secret bound",
+		signingKey + " bound",
 		"shutdown · complete",
 	} {
 		if !strings.Contains(firstOutput, want) {
@@ -253,8 +265,7 @@ func TestStandingIngressSupportedSurfaceSQLiteRestartPreservesAuthorityAndReplie
 	}
 	requireStandingTelegramCalls(t, calls, sqlitePath, 84)
 	waitForStandingDeliveryQuiescence(t, sqlitePath)
-	requireStandingDeclarationPublicationReadback(t, secondURL, firstBinding, []string{
-		channelFixtureProviderEventID(t, "101"), channelFixtureProviderEventID(t, "102"), channelFixtureProviderEventID(t, "103")})
+	requireStandingDeclarationPublicationReadback(t, secondURL, firstBinding, []string{"101", "102", "103"})
 	if code := second.stop(); code != 0 {
 		t.Fatalf("second serve exit = %d", code)
 	}
@@ -460,8 +471,7 @@ func TestStandingIngressSupportedSurfacePostgresRestartPreservesAuthorityAndRepl
 	}
 	requireStandingTelegramCalls(t, calls, "postgres:"+dsn, 84)
 	waitForStandingDeliveryQuiescence(t, "postgres:"+dsn)
-	requireStandingDeclarationPublicationReadback(t, "http://"+serveRuntimeAPIListenerFromOutput(t, second.outputString()), binding, []string{
-		channelFixtureProviderEventID(t, "201"), channelFixtureProviderEventID(t, "202"), channelFixtureProviderEventID(t, "203")})
+	requireStandingDeclarationPublicationReadback(t, "http://"+serveRuntimeAPIListenerFromOutput(t, second.outputString()), binding, []string{"201", "202", "203"})
 	if code := second.stop(); code != 0 {
 		t.Fatalf("second serve exit = %d", code)
 	}

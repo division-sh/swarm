@@ -7,7 +7,6 @@ import (
 	"encoding/json"
 	"fmt"
 	"io/fs"
-	"net/http/httptest"
 	"os"
 	"path/filepath"
 	"strings"
@@ -143,19 +142,13 @@ func runMockAgentSupportedSurface(t *testing.T, backend string) time.Duration {
 			buildStoresForServe = oldBuildStores
 		})
 		prepareRestart = openStore
-		opts.ConfigPath = writeMockAgentRuntimeConfig(t, "postgres", dsn)
+		opts.ConfigPath = writeMockAgentRuntimeConfig(t, "postgres", "")
 		opts.StoreMode = "postgres"
 		opts.StoreModeSet = true
 	default:
 		t.Fatalf("unsupported backend %q", backend)
 	}
 
-	provider := &channelOnboardingTelegramProvider{}
-	telegram := httptest.NewServer(provider)
-	t.Cleanup(telegram.Close)
-	redirectExternalHosts(t, map[string]string{"api.telegram.org": telegram.URL})
-	registerChannelFixtureAccount(t, opts.ConfigPath, "bot-token", "420079")
-	prepareStandingTelegramCallback(t, &opts)
 	servedPathStarted := time.Now()
 	retainedRoot := t.TempDir()
 	// The real host lifecycle creates intentionally read-only data projections.
@@ -176,7 +169,7 @@ func runMockAgentSupportedSurface(t *testing.T, backend string) time.Duration {
 	first := startOwnedMockLifecycleTestProcess(t, repoRootForTest(), retainedRoot, opts)
 	first.waitForReadyLine()
 	firstURL := "http://" + serveRuntimeAPIListenerFromOutput(t, first.outputString())
-	publication := sendStandingTelegramUpdatePublication(t, provider, 301, 42)
+	publication := sendStandingTelegramUpdatePublication(t, firstURL, 301, 42)
 	binding := publication.standingTelegramBinding
 	waitForMockAgentTurns(t, backend, location, 1)
 	var normalized operatorread.OperatorEventFull
@@ -198,12 +191,11 @@ func runMockAgentSupportedSurface(t *testing.T, backend string) time.Duration {
 	if prepareRestart != nil {
 		prepareRestart()
 	}
-	prepareStandingTelegramCallback(t, &opts)
 	second := startOwnedMockLifecycleTestProcess(t, repoRootForTest(), retainedRoot, opts)
 	second.waitForReadyLine()
 	secondURL := "http://" + serveRuntimeAPIListenerFromOutput(t, second.outputString())
 	waitForMockConnectorAttempts(t, backend, location, 1)
-	if got := sendStandingTelegramUpdate(t, provider, 302, 42); got != binding {
+	if got := sendStandingTelegramUpdate(t, secondURL, 302, 42); got != binding {
 		t.Fatalf("post-restart binding = %+v, want %+v", got, binding)
 	}
 	waitForMockAgentTurns(t, backend, location, 2)
@@ -279,12 +271,25 @@ telegram-revision:
 
 func writeMockAgentRuntimeConfig(t *testing.T, backend, sqlitePath string) string {
 	t.Helper()
-	path := writeStandingMockRuntimeConfig(t, backend, sqlitePath)
-	data, err := os.ReadFile(path)
-	if err != nil {
-		t.Fatal(err)
+	lines := []string{
+		"runtime:",
+		"  recovery_on_startup: true",
+		"store:",
+		"  backend: " + backend,
 	}
-	source := withTestProviderTriggerPlatformInventory(t, strings.Replace(string(data), "backend: anthropic", "backend: claude_cli", 1))
+	if sqlitePath != "" {
+		lines = append(lines, "  sqlite:", "    path: "+sqlitePath)
+	}
+	lines = append(lines,
+		"llm:",
+		"  backend: claude_cli",
+		"  session:",
+		"    lock_ttl: 10s",
+		"    rotate_after_turns: 40",
+		"    rotate_on_parse_failures: 3",
+	)
+	path := filepath.Join(t.TempDir(), "swarm.yaml")
+	source := withTestProviderTriggerPlatformInventory(t, strings.Join(lines, "\n")+"\n")
 	if err := os.WriteFile(path, []byte(source), 0o644); err != nil {
 		t.Fatalf("write mock runtime config: %v", err)
 	}

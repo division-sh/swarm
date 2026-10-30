@@ -31,7 +31,6 @@ import (
 	"github.com/division-sh/swarm/internal/store"
 	storebackend "github.com/division-sh/swarm/internal/store/backendselection"
 	"github.com/division-sh/swarm/internal/store/storetest"
-	"github.com/division-sh/swarm/internal/testpostgres"
 	"github.com/division-sh/swarm/internal/testutil"
 	"github.com/google/uuid"
 )
@@ -397,19 +396,13 @@ func runStandingTelegramMemorySupportedSurface(t *testing.T, backend string, rec
 			buildStoresForServe = oldBuildStores
 		})
 		prepareRestart = openStore
-		opts.ConfigPath = writeStandingMockRuntimeConfig(t, "postgres", dsn)
+		opts.ConfigPath = writeStandingMockRuntimeConfig(t, "postgres", "")
 		opts.StoreMode = "postgres"
 		opts.StoreModeSet = true
 	default:
 		t.Fatalf("unsupported backend %q", backend)
 	}
 
-	native := &channelOnboardingTelegramProvider{}
-	telegram := httptest.NewServer(native)
-	t.Cleanup(telegram.Close)
-	redirectExternalHosts(t, map[string]string{"api.telegram.org": telegram.URL})
-	registerChannelFixtureAccount(t, opts.ConfigPath, "bot-token", "420079")
-	prepareStandingTelegramCallback(t, &opts)
 	retainedRoot := ownedMockLifecycleRoot(t)
 	first := startOwnedMockLifecycleTestProcess(t, repoRootForTest(), retainedRoot, opts)
 	first.waitForReadyLine()
@@ -417,23 +410,23 @@ func runStandingTelegramMemorySupportedSurface(t *testing.T, backend string, rec
 	firstDiagnostics := func() string {
 		return first.outputString() + "\ndiagnostics: " + standingMemoryStoreDiagnostics(backend, storeLocation)
 	}
-	requireStandingTelegramSignatureRejection(t, native)
+	requireStandingTelegramSignatureRejection(t, firstURL)
 	requireStandingTelegramEvidenceCounts(t, backend, storeLocation, standingTelegramEvidenceCounts{}, "rejected signatures")
-	unmatched := sendStandingTelegramUnmatchedUpdate(t, native, 100)
+	unmatched := sendStandingTelegramUnmatchedUpdate(t, firstURL, 100)
 	waitForStandingTelegramRawCount(t, backend, storeLocation, 1)
 	requireStandingTelegramEvidenceCounts(t, backend, storeLocation, standingTelegramEvidenceCounts{Raw: 1}, "unmatched raw-only update")
 	requireStandingTelegramPublicationSettlement(t, firstURL, unmatched, false)
-	firstMatched := sendStandingTelegramUpdatePublication(t, native, 101, 42, firstDiagnostics)
+	firstMatched := sendStandingTelegramUpdatePublication(t, firstURL, 101, 42, firstDiagnostics)
 	binding := firstMatched.standingTelegramBinding
 	waitForStandingMemoryCompletion(t, backend, storeLocation, "mock", 1)
 	requireStandingTelegramPublicationSettlement(t, firstURL, firstMatched, true)
-	requireStandingTelegramDuplicateIdentity(t, sendStandingTelegramDuplicate(t, native, 101, 42), firstMatched)
+	requireStandingTelegramDuplicateIdentity(t, sendStandingTelegramDuplicate(t, firstURL, 101, 42), firstMatched)
 	requireStandingMemoryAttemptCount(t, backend, storeLocation, "mock", 1, "same-process exact duplicate")
-	secondMatched := sendStandingTelegramUpdatePublication(t, native, 102, 42, firstDiagnostics)
+	secondMatched := sendStandingTelegramUpdatePublication(t, firstURL, 102, 42, firstDiagnostics)
 	if secondMatched.standingTelegramBinding != binding {
 		t.Fatalf("A2 binding = %+v, want A1 binding %+v", secondMatched.standingTelegramBinding, binding)
 	}
-	thirdMatched := sendStandingTelegramUpdatePublication(t, native, 103, 84, firstDiagnostics)
+	thirdMatched := sendStandingTelegramUpdatePublication(t, firstURL, 103, 84, firstDiagnostics)
 	if thirdMatched.standingTelegramBinding != binding {
 		t.Fatalf("B1 binding = %+v, want standing binding %+v", thirdMatched.standingTelegramBinding, binding)
 	}
@@ -457,9 +450,12 @@ func runStandingTelegramMemorySupportedSurface(t *testing.T, backend string, rec
 		prepareRestart()
 	}
 	if !recoveryOnRestart {
-		opts.ConfigPath = writeStandingMockRuntimeConfigWithRecovery(t, backend, storeLocation, false)
+		sqlitePath := ""
+		if backend == "sqlite" {
+			sqlitePath = storeLocation
+		}
+		opts.ConfigPath = writeStandingMockRuntimeConfigWithRecovery(t, backend, sqlitePath, false)
 	}
-	prepareStandingTelegramCallback(t, &opts)
 	second := startOwnedMockLifecycleTestProcess(t, repoRootForTest(), retainedRoot, opts)
 	second.waitForReadyLine()
 	afterStartup := loadStandingMemorySessions(t, backend, storeLocation)
@@ -476,11 +472,11 @@ func runStandingTelegramMemorySupportedSurface(t *testing.T, backend string, rec
 	if afterTranscript := readStandingPublicTranscript(t, secondURL, binding.RunID, 3); !reflect.DeepEqual(beforeTranscript, afterTranscript) {
 		t.Fatalf("joined restart changed ordered public turns: before=%+v after=%+v", beforeTranscript, afterTranscript)
 	}
-	requireStandingTelegramDuplicateIdentity(t, sendStandingTelegramDuplicate(t, native, 101, 42), firstMatched)
+	requireStandingTelegramDuplicateIdentity(t, sendStandingTelegramDuplicate(t, secondURL, 101, 42), firstMatched)
 	requireStandingTelegramPublicationSettlement(t, secondURL, unmatched, false)
 	requireStandingTelegramPublicationSettlement(t, secondURL, firstMatched, true)
 	requireStandingMemoryAttemptCount(t, backend, storeLocation, "mock", 3, "post-restart exact duplicate")
-	fourthMatched := sendStandingTelegramUpdatePublication(t, native, 104, 42)
+	fourthMatched := sendStandingTelegramUpdatePublication(t, secondURL, 104, 42)
 	if fourthMatched.standingTelegramBinding != binding {
 		t.Fatalf("A3 binding = %+v, want standing binding %+v", fourthMatched.standingTelegramBinding, binding)
 	}
@@ -1062,17 +1058,7 @@ func writeStandingMockRuntimeConfigWithRecovery(t *testing.T, backend, sqlitePat
 		"store:",
 		"  backend: " + backend,
 	}
-	if backend == "postgres" && sqlitePath != "" {
-		connection, err := testpostgres.ParseConnection(sqlitePath)
-		if err != nil {
-			t.Fatal(err)
-		}
-		parameters := connection.Parameters()
-		t.Setenv("PGPASSWORD", parameters.Password)
-		lines = append(lines, "database:", fmt.Sprintf("  host: %q", parameters.Host), fmt.Sprintf("  port: %d", parameters.Port),
-			fmt.Sprintf("  name: %q", parameters.Database), fmt.Sprintf("  user: %q", parameters.User),
-			"  password_env: PGPASSWORD", fmt.Sprintf("  sslmode: %q", parameters.SSLMode), "  pool_size: 5")
-	} else if sqlitePath != "" {
+	if sqlitePath != "" {
 		lines = append(lines, "  sqlite:", "    path: "+sqlitePath)
 	}
 	lines = append(lines,
