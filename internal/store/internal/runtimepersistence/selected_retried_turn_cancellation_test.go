@@ -122,6 +122,7 @@ func TestSelectedRetriedTurnCancellationBothStores(t *testing.T) {
 				if err := fixture.process.Release(ctx); err != nil {
 					t.Fatal(err)
 				}
+				retireStoreTestWorkFixture(t)
 				recoveryProcess := selectedPreparationProcessForTest(t, selected)
 				process, err := recoveryProcess.Evidence()
 				if err != nil {

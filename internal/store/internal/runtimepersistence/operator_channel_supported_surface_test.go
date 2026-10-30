@@ -649,11 +649,11 @@ func TestOperatorChannelProviderCredentialRotationSelectedStoreParity(t *testing
 func TestOperatorChannelProofResponsibilityReconcilesCommittedFileSelectedStoreParity(t *testing.T) {
 	for _, backend := range []string{"sqlite", "postgres"} {
 		t.Run(backend, func(t *testing.T) {
-			ctx := context.Background()
 			now := time.Date(2026, 8, 25, 11, 0, 0, 0, time.UTC)
 
 			t.Run("exact_file_converges_after_restart", func(t *testing.T) {
 				fixture := openOperatorChannelContractFixture(t, backend)
+				ctx := fixture.ctx
 				identity := operatorChannelContractIdentity("proof-file-first-recovery-generation")
 				proofs, err := operatorchannel.NewFileProofStore(t.TempDir())
 				if err != nil {
@@ -708,6 +708,7 @@ func TestOperatorChannelProofResponsibilityReconcilesCommittedFileSelectedStoreP
 
 			t.Run("same_revision_mismatch_fails_closed", func(t *testing.T) {
 				fixture := openOperatorChannelContractFixture(t, backend)
+				ctx := fixture.ctx
 				identity := operatorChannelContractIdentity("proof-file-first-mismatch-generation")
 				proofs, err := operatorchannel.NewFileProofStore(t.TempDir())
 				if err != nil {

@@ -249,8 +249,8 @@ func workflowTargetMutationEntry(t *testing.T, f receiverConfigActivationFixture
 
 func TestWorkflowTargetPersistenceReadNeverFabricatesMixedSnapshotOnBothStores(t *testing.T) {
 	for _, backend := range []string{"sqlite", "postgres"} {
-		t.Run(backend, func(t *testing.T) {
-			for attempt := range 12 {
+		for attempt := range 12 {
+			t.Run(fmt.Sprintf("%s/%d", backend, attempt), func(t *testing.T) {
 				f, plan := newWorkflowTargetConstructionFixture(t, backend)
 				persisted, err := plan.PersistenceRecord()
 				if err != nil {
@@ -298,8 +298,8 @@ func TestWorkflowTargetPersistenceReadNeverFabricatesMixedSnapshotOnBothStores(t
 				if err != nil || target.Presence != runtimepipeline.WorkflowTargetPersistenceComplete {
 					t.Fatalf("attempt %d final target presence = %d error = %v, want complete", attempt, target.Presence, err)
 				}
-			}
-		})
+			})
+		}
 	}
 }
 

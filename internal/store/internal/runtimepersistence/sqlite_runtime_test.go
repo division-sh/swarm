@@ -1685,6 +1685,7 @@ func TestSQLiteRuntimeStoreSessionStartupConversationAndTraceVisibility(t *testi
 	if err := successorProcessCapability.Release(ctx); err != nil {
 		t.Fatalf("release successor process capability: %v", err)
 	}
+	retireStoreTestWorkFixture(t)
 	ctx = originalStoreFixtureContext(t, ctx, store)
 
 	identity := testAgentMemoryIdentity(t, runID, "agent-1", "global")

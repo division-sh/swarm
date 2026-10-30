@@ -135,8 +135,8 @@ func TestOperatorChannelSelectedStoreContractParity(t *testing.T) {
 func TestChannelDeliveryDefaultFollowsOnlyVerifiedSelectedBindingBothStores(t *testing.T) {
 	for _, backend := range []string{"sqlite", "postgres"} {
 		t.Run(backend, func(t *testing.T) {
-			ctx := context.Background()
 			fixture := openOperatorChannelContractFixture(t, backend)
+			ctx := fixture.ctx
 			now := time.Date(2026, 9, 27, 12, 0, 0, 0, time.UTC)
 			principal, err := fixture.store.EnsureOperatorPrincipal(ctx, now)
 			if err != nil {
@@ -212,8 +212,8 @@ func TestChannelDeliveryDefaultFollowsOnlyVerifiedSelectedBindingBothStores(t *t
 func TestChannelDeliveryNoticeCutIsAtomicWithMailboxBothStores(t *testing.T) {
 	for _, backend := range []string{"sqlite", "postgres"} {
 		t.Run(backend, func(t *testing.T) {
-			ctx := context.Background()
 			fixture := openOperatorChannelContractFixture(t, backend)
+			ctx := fixture.ctx
 			hints := observeChannelHints(t, fixture.store)
 			notice := func(summary string) string {
 				t.Helper()
