@@ -56,7 +56,7 @@ func TestStandingRootTreePublicRestartAndResetBothStores(t *testing.T) {
 				t.Helper()
 				spec := releaseProcessSpec{BinaryPath: binary, WorkingDir: root, Source: source,
 					ConfigPath: config, Store: backend, TokenFile: token, Token: goldenAPIToken, Env: env,
-					PublicWebhookBaseURL: "https://hooks.root-tree.test", PublicWebhookListen: "127.0.0.1:0",
+					PublicWebhookBaseURL: "https://hooks.root-tree.test", PublicWebhookListen: fmt.Sprintf("127.0.0.1:%d", freeReleaseTCPPort(t)),
 					RedactValues: []string{fullLifecycleSigningSecret, fullLifecycleBotToken, "tree-alpha-token", "tree-beta-token"}}
 				if storedHash != "" {
 					spec.InternalMockLifecycleBinary, spec.RetainedBundleHash = retainedBinary, storedHash
