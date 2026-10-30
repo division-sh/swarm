@@ -746,11 +746,7 @@ func validateDetail(class Class, detail Detail) error {
 		return validateAuthenticationDetail(detail)
 	case ClassTargetUnreachable:
 		if detail.Code == "channel_session_unavailable" {
-			account, _ := detail.Attributes["account"].(string)
-			provider, _ := detail.Attributes["provider"].(string)
-			if account == "" || len(account) > 64 || strings.ContainsAny(account, "\r\n\t\x00") || provider != "whatsapp" && provider != "telegram" {
-				return fmt.Errorf("channel_session_unavailable requires a bounded account and its exact provider")
-			}
+			return validateChannelSessionDetail(detail)
 		}
 	case ClassAuthorizationDenied:
 		if value, _ := detail.Attributes["action"].(string); strings.TrimSpace(value) == "" {
@@ -777,6 +773,15 @@ func validateAuthenticationDetail(detail Detail) error {
 		if account == "" || len(account) > 64 || strings.ContainsAny(account, "\r\n\t\x00") || provider != "whatsapp" && provider != "telegram" {
 			return fmt.Errorf("channel_account_not_linked requires a bounded account and its exact provider")
 		}
+	}
+	return nil
+}
+
+func validateChannelSessionDetail(detail Detail) error {
+	account, _ := detail.Attributes["account"].(string)
+	provider, _ := detail.Attributes["provider"].(string)
+	if account == "" || len(account) > 64 || strings.ContainsAny(account, "\r\n\t\x00") || provider != "whatsapp" && provider != "telegram" {
+		return fmt.Errorf("channel_session_unavailable requires a bounded account and its exact provider")
 	}
 	return nil
 }
