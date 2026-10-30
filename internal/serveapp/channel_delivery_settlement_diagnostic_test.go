@@ -218,7 +218,7 @@ func TestChannelDeliverySettlementDiagnosticBothStores(t *testing.T) {
 			var deliveryID string
 			err := db.QueryRow(`SELECT CAST(p.delivery_id AS TEXT) FROM channel_delivery_plans p
 				JOIN channel_delivery_receipts r ON r.delivery_id=p.delivery_id
-				WHERE p.source_id=$1 ORDER BY p.created_at LIMIT 1`, card).Scan(&deliveryID)
+				WHERE p.source_kind='card' ORDER BY p.created_at LIMIT 1`).Scan(&deliveryID)
 			if h.registration.DeploymentRegistration {
 				if err != sql.ErrNoRows {
 					t.Fatalf("CLI-only card acquired channel receipt authority: delivery=%s err=%v", deliveryID, err)
