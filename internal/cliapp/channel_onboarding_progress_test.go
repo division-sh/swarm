@@ -129,7 +129,7 @@ func TestChannelCLIProgressFixturesRetainExactDeclarations(t *testing.T) {
 				t.Fatal(err)
 			}
 			var out, errOut bytes.Buffer
-			if err := renderChannelOnboardingResult(&out, &errOut, cliOutputOptions{}, result); err != nil || out.String() != "Registered "+provider+" account "+account+".\n" {
+			if err := renderChannelOnboardingResult(&out, &errOut, cliOutputOptions{}, result); err != nil || out.String() != "Registered "+provider+" account "+account+".\nTo use it, set operator_account in a flow's policy.yaml and restart serve.\nNext: swarm channel list\n" {
 				t.Fatal("registration invented runtime readiness", out.String(), errOut.String(), err)
 			}
 			result.Operation.AccountConfirmed = false
@@ -176,7 +176,7 @@ func requireChannelPendingCLIOutput(t *testing.T, out, errOut string, code int, 
 			t.Fatal("quiet pending output does not identify the retained operation", out)
 		}
 	default:
-		if !strings.Contains(out, "Connecting to whatsapp") || strings.Contains(out, operatorChannelCLIOperation) {
+		if !strings.Contains(out, "Pairing preparation for whatsapp is pending.") || !strings.Contains(out, "Next: swarm channel connect whatsapp") || strings.Contains(out, operatorChannelCLIOperation) {
 			t.Fatal("human output lost connection progress or exposed an operation ID", out)
 		}
 	}
@@ -240,6 +240,9 @@ func TestChannelCLIPendingResumeCanReachGenuineReady(t *testing.T) {
 	out, errOut, code := runChannelProgressCLI(t, server, &channelCredentialInput{}, "channel", "resume", operatorChannelCLIOperation)
 	if code != 0 || errOut != "" || !strings.Contains(out, "WhatsApp: READY") {
 		t.Fatal("genuine READY was not preserved", code, out, errOut)
+	}
+	if !strings.Contains(out, "Next: swarm channel list") {
+		t.Fatal("approved pairing omitted the next command", out)
 	}
 }
 
@@ -342,10 +345,12 @@ func TestChannelCLIRefusesMalformedPendingAndGenuineBlockage(t *testing.T) {
 			out.Len() != 0 || !strings.Contains(errOut.String(), "telegram account 420079 is registered to this deployment") || strings.Contains(errOut.String(), "private-operation-id") {
 			t.Fatalf("enrollment refusal output=%q error=%q err=%v", out.String(), errOut.String(), err)
 		}
-		result.Operation.FailureCode, result.Operation.FailureMessage = "unclassified", "must-not-disclose"
+		result.Operation.FailureCode, result.Operation.FailureMessage = "provider_slot_collision\n", "competing independent selections\nno registration was applied"
 		errOut.Reset()
-		if err := renderChannelOnboardingResult(&out, &errOut, cliOutputOptions{}, result); err == nil || strings.Contains(errOut.String(), "must-not-disclose") {
-			t.Fatal("unrelated failure was exposed as registered-account evidence")
+		if err := renderChannelOnboardingResult(&out, &errOut, cliOutputOptions{}, result); err == nil || out.Len() != 0 ||
+			!strings.Contains(errOut.String(), "provider_slot_collision") || !strings.Contains(errOut.String(), "competing independent selections no registration was applied") ||
+			strings.Contains(errOut.String(), "registered to this deployment") || strings.Count(errOut.String(), "\n") != 1 {
+			t.Fatal("terminal failure lost its sanitized details or invented registration evidence", out.String(), errOut.String(), err)
 		}
 	})
 	for _, cell := range []string{"absent_pairing", "missing_paired", "missing_connected", "null_role", "code", "paired", "connected", "ready", "identity", "candidate", "missing_role", "foreign_role", "foreign_target", "failed", "retired", "historical", "unknown_phase"} {

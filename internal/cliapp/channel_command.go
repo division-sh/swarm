@@ -449,6 +449,7 @@ func finishChannelOnboarding(ctx context.Context, client channelControlClient, b
 	if opts.account != "" && result.Operation.DeploymentRegistration && result.Operation.Phase == channelonboarding.PhaseSucceeded &&
 		!opts.output.asJSON && !opts.output.asYAML && !opts.output.quiet {
 		fmt.Fprintf(out, "Reverified %s account %s.\n", result.Operation.Provider, result.Operation.AccountReference)
+		writeChannelAccountNextSteps(out)
 		return nil
 	}
 	return renderChannelOnboardingResult(out, errOut, opts.output, result)
