@@ -147,7 +147,7 @@ func readCurrentTx(ctx context.Context, tx *sql.Tx, sqlite bool, mode lockMode) 
 		return processbinding.LeaseStamp{}, sql.ErrTxDone
 	}
 	if !scope.loaded {
-		stamp, err := readProcessGeneration(scope.caller, tx, sqlite, mode)
+		stamp, err := readProcessGeneration(ctx, tx, sqlite, mode)
 		if err != nil {
 			return processbinding.LeaseStamp{}, err
 		}
@@ -211,27 +211,25 @@ func fence(ctx context.Context, tx *sql.Tx, sqlite bool, requested lockMode) err
 		if requested == exclusive {
 			query = `SELECT pg_advisory_xact_lock(1398231629, 1)`
 		}
-		if _, err := tx.ExecContext(scope.caller, query); err != nil {
+		if _, err := tx.ExecContext(ctx, query); err != nil {
 			return fmt.Errorf("acquire generation transaction fence: %w", err)
 		}
-		if requested == exclusive {
-			// Grant/source retirement can leave the stamp unchanged. Touch its
-			// native version so an older repeatable-read snapshot cannot admit
-			// work from before that retirement after waiting for the fence.
-			result, err := tx.ExecContext(scope.caller, `UPDATE runtime_process_generation SET generation = generation WHERE singleton_id = 1`)
-			if err != nil {
-				return fmt.Errorf("fence generation snapshot: %w", err)
-			}
-			rows, err := result.RowsAffected()
-			if err != nil {
-				return fmt.Errorf("read generation snapshot fence: %w", err)
-			}
-			if rows != 1 {
-				return ErrProcessGenerationMissing
-			}
+	}
+	if sqlite || requested == exclusive {
+		// SQLite admission needs native writer possession. On PostgreSQL,
+		// retirements also invalidate older repeatable-read snapshots.
+		result, err := tx.ExecContext(ctx, `UPDATE runtime_process_generation SET generation = generation WHERE singleton_id = 1`)
+		if err != nil {
+			return fmt.Errorf("fence generation snapshot: %w", err)
+		}
+		rows, err := result.RowsAffected()
+		if err != nil {
+			return fmt.Errorf("read generation snapshot fence: %w", err)
+		}
+		if rows != 1 {
+			return ErrProcessGenerationMissing
 		}
 	}
-	// SQLite already holds its native mutation/writer possession.
 	scope.mode = requested
 	return nil
 }
