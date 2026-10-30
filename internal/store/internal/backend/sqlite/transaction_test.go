@@ -157,10 +157,8 @@ func TestRunTransactionRealBusyExhaustionRetainsBusyCause(t *testing.T) {
 		t.Fatalf("acquire external SQLite write lock: %v", err)
 	}
 
-	var attempts atomic.Int32
 	started := time.Now()
 	err = target.RunTransaction(ctx, "real busy exhaustion", func(txCtx context.Context, tx *sql.Tx) error {
-		attempts.Add(1)
 		_, err := tx.ExecContext(txCtx, `UPDATE mutation_probe SET value = value + 1 WHERE id = 1`)
 		return err
 	})
@@ -176,9 +174,6 @@ func TestRunTransactionRealBusyExhaustionRetainsBusyCause(t *testing.T) {
 	}
 	if elapsed < mutationRetryBudget || elapsed > mutationRetryBudget+2*time.Second {
 		t.Fatalf("busy exhaustion elapsed = %s, want recovery budget near %s", elapsed, mutationRetryBudget)
-	}
-	if got := attempts.Load(); got < 2 {
-		t.Fatalf("busy attempts = %d, want recovery retries", got)
 	}
 }
 

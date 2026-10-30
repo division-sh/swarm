@@ -10,6 +10,7 @@ import (
 	"github.com/division-sh/swarm/internal/apiidempotency"
 	"github.com/division-sh/swarm/internal/durabledata"
 	swruntime "github.com/division-sh/swarm/internal/runtime"
+	"github.com/division-sh/swarm/internal/runtime/core/worklifetime"
 	"github.com/division-sh/swarm/internal/store/storetest"
 	"github.com/google/uuid"
 )
@@ -45,7 +46,11 @@ func TestFeedOnlyRunStartReplayPrecedenceBothStores(t *testing.T) {
 		// The original exact runtime is retired and no source is selectable. The
 		// retained selected-store lookup remains non-executable authority.
 		now := time.Now().UTC()
-		unavailable := testHandler(t, Options{AuthTokens: []string{testToken, "foreign-test-token"}, Handlers: OperatorRunStartHandlers(RunStartHandlerOptions{
+		process, found := worklifetime.ProcessFromContext(apiTestOriginalProcessContext(t, t.Context(), fixture.primary))
+		if !found {
+			t.Fatal("completion replay fixture lacks its retained original process")
+		}
+		unavailable := testHandler(t, Options{AuthTokens: []string{testToken, "foreign-test-token"}, ProcessWorkOwner: process, Handlers: OperatorRunStartHandlers(RunStartHandlerOptions{
 			Publication: EventPublicationOptions{Idempotency: fixture.primary, Acknowledged: bus, RuntimeContexts: contexts, Now: func() time.Time { return now }},
 		})})
 		before, err := storetest.ReadFiniteRunStartStorageCounts(t.Context(), fixture.primary)
