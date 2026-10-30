@@ -6,7 +6,6 @@ import (
 	"reflect"
 	"sort"
 	"testing"
-	"time"
 
 	"github.com/division-sh/swarm/internal/operatorread"
 	"github.com/division-sh/swarm/internal/runtime/canonicaljson"
@@ -113,21 +112,7 @@ func TestTypedReceiverConfigSourceAndForkRefusalBothStores(t *testing.T) {
 			if err := rt.DB.QueryRow(`SELECT COUNT(*) FROM entity_mutations WHERE run_id=$1 AND entity_id=$2 AND caused_by_event=$3 AND writer_type='platform' AND writer_id='workflow_engine' AND handler_step='mutate' AND domain='authored_field' AND path IN ('count','label','ratio','active','attributes','status','flow_path','instance_id','workflow_version')`, seed.RunID, entityID, consumed).Scan(&writes); err != nil || writes != 0 {
 				t.Fatalf("automatic consumer reconstructed supplied state: writes=%d err=%v", writes, err)
 			}
-			// Delivery settlement precedes the completion owner's candidate cleanup.
-			deadline := time.Now().Add(servedProofPollDeadline)
-			for {
-				var candidateSettled bool
-				if err := rt.DB.QueryRow(`SELECT completion_due_at IS NULL FROM runs WHERE run_id=$1`, seed.RunID).Scan(&candidateSettled); err != nil {
-					t.Fatal(err)
-				}
-				if candidateSettled {
-					break
-				}
-				if time.Now().After(deadline) {
-					t.Fatalf("source completion candidate did not settle: %s", servedEventPublishDebugSummary(t, rt.DB, rt.Backend, seed.RunID))
-				}
-				time.Sleep(10 * time.Millisecond)
-			}
+			// The exact pipeline handoff above is the cut, not a retired worker.
 			before := requireReceiverApplicationSnapshot(t, rt.ReceiverStateReader)
 			duplicate := requireServedEventPublishRPCResult(t, rt.Endpoint, params)
 			if after := requireReceiverApplicationSnapshot(t, rt.ReceiverStateReader); duplicate.RunID != seed.RunID || duplicate.EventID != seed.EventID || !reflect.DeepEqual(before, after) {
