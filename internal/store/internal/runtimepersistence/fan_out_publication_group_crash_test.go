@@ -366,6 +366,7 @@ func runPublicationGroupCrashChild(t *testing.T, mode string) {
 		t.Fatal(err)
 	}
 	ctx = authoractivity.WithScope(ctx, authoractivity.BundleScope(request.RuntimeInstanceID, fact.BundleHash()))
+	ctx = correlation.WithRuntimeInstanceID(ctx, request.RuntimeInstanceID)
 	ctx, err = startupownership.WithRuntimeMutationAuthority(ctx, live)
 	if err != nil {
 		t.Fatal(err)

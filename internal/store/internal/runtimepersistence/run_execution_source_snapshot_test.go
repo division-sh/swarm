@@ -9,6 +9,7 @@ import (
 
 	"github.com/division-sh/swarm/internal/runtime/agenttopology"
 	"github.com/division-sh/swarm/internal/runtime/canonicaljson"
+	"github.com/division-sh/swarm/internal/runtime/correlation"
 	"github.com/division-sh/swarm/internal/runtime/manager"
 	"github.com/division-sh/swarm/internal/runtime/startupownership"
 	"github.com/division-sh/swarm/internal/sourceartifact"
@@ -150,9 +151,12 @@ func TestRunExecutionSourceSnapshotBothStores(t *testing.T) {
 			}
 			t.Run("other_normal_source", func(t *testing.T) {
 				otherRun := uuid.NewString()
-				requireRunFixtureForTest(t, ctx, selected, semanticRunFixture{
+				otherCtx := startupownership.CarryMutationAuthority(testAuthorActivityContextForBundle(otherHash), ctx)
+				otherCtx = correlation.WithRootAdmission(otherCtx, otherRooted.Admission())
+				requireRunFixtureForTest(t, otherCtx, selected, semanticRunFixture{
 					RunID: otherRun, BundleHash: otherHash, Artifact: otherArtifact,
-					Origin: semanticScenarioSetupRunOriginForTest(), StartedAt: time.Now().UTC(),
+					RootAdmission: otherRooted.Admission(),
+					Origin:        semanticScenarioSetupRunOriginForTest(), StartedAt: time.Now().UTC(),
 				})
 				inspect(t, ctx, otherRun, manager.RunExecutionOtherNormalSource, "", 1, 1)
 				inspect(t, ctx, fixture.sourceRun, manager.RunExecutionOwned, "", 1, 1)

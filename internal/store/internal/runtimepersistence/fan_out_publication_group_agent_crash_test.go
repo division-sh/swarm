@@ -276,6 +276,7 @@ func runPublicationGroupAgentCrashChild(t *testing.T, mode string) {
 	if err != nil {
 		t.Fatal(err)
 	}
+	ctx = correlation.WithRuntimeInstanceID(ctx, request.RuntimeInstanceID)
 	ctx, err = startupownership.WithRuntimeMutationAuthority(ctx, live)
 	if err != nil {
 		t.Fatal(err)

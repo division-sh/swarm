@@ -39,6 +39,7 @@ import (
 	"github.com/division-sh/swarm/internal/runtime/runfork"
 	"github.com/division-sh/swarm/internal/runtime/runforkexecution"
 	runtimerunlifecycle "github.com/division-sh/swarm/internal/runtime/runlifecycle"
+	"github.com/division-sh/swarm/internal/runtime/startupownership"
 
 	"github.com/division-sh/swarm/internal/runtime/semanticview"
 	"github.com/division-sh/swarm/internal/runtime/testfixtures/canonicalrouting"
@@ -360,6 +361,7 @@ func TestFanOutChunkCommitsMixedRealEventBusPlansAtomicallyOnBothStores(t *testi
 				runtimeauthoractivity.BundleScope(runtimeInstanceID, artifact.BundleHash()),
 			)
 			ctx = runtimecorrelation.WithSourceArtifactFact(ctx, mustStoreTestSourceArtifactFact(artifact.BundleHash()))
+			ctx = runtimecorrelation.WithRuntimeInstanceID(ctx, runtimeInstanceID)
 			var (
 				owner        selectedFanOutMixedRouteOwner
 				summaryOwner selectedFanOutTxSummaryOwner
@@ -408,6 +410,11 @@ func TestFanOutChunkCommitsMixedRealEventBusPlansAtomicallyOnBothStores(t *testi
 				ContractBundle:     semanticview.Wrap(bundle),
 				SourceArtifactFact: mustStoreTestSourceArtifactFact(fixture.bundleHash),
 				RuntimeInstanceID:  runtimeInstanceID,
+				MutationContext: func(work context.Context) (context.Context, error) {
+					work = startupownership.CarryMutationAuthority(work, ctx)
+					_, err := startupownership.CaptureMutationAuthority(work)
+					return work, err
+				},
 			})
 			if err != nil {
 				t.Fatalf("construct mixed-route EventBus: %v", err)

@@ -9,8 +9,10 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/division-sh/swarm/internal/runtime/correlation"
 	"github.com/division-sh/swarm/internal/runtime/testfixtures/canonicalrouting"
 	"github.com/division-sh/swarm/internal/store/storetest"
+	"github.com/division-sh/swarm/internal/store/testutil/agentfixture"
 )
 
 func TestCatalogWorkflowStateDiagnosticUsesSelectedProjectionBothStores(t *testing.T) {
@@ -104,6 +106,14 @@ func TestCatalogWorkflowStateDiagnosticUsesSelectedProjectionBothStores(t *testi
 				if rows[0].RunID != catalogRuntimeRunID || len(fieldsBefore) == 0 {
 					t.Fatalf("physical diagnostic omitted actual data ownership/fields: %+v", rows[0])
 				}
+				fact, found := correlation.SourceArtifactFactFromContext(ctx)
+				if !found {
+					t.Fatal("diagnostic fault requires the retained source fact")
+				}
+				faultCtx, err := agentfixture.ProcessContext(t, testAuthorActivityContextForBundle(context.Background(), fact), reader.(agentfixture.Store))
+				if err != nil {
+					t.Fatal(err)
+				}
 				probe := storetest.CollectTransactions(t, reader, storetest.TransactionProbeOptions{})
 				prefix := "[{entity_id:" + catalogRuntimeRunID + " flow_instance:" + catalogRuntimeRunID + " "
 				if dump, err := workflowStateDebugRows(reader); err != nil || dump != prefix+tc.want+"}]" {
@@ -112,7 +122,7 @@ func TestCatalogWorkflowStateDiagnosticUsesSelectedProjectionBothStores(t *testi
 				if proof := probe.Snapshot(); proof.Total.ReadCommits != 1 || proof.Total.WriteCommits != 0 || proof.Active != 0 {
 					t.Fatalf("literal diagnostic escaped original read owner: %+v", proof)
 				}
-				if changed, err := storetest.RemoveWorkflowProjectionHeader(ctx, reader, catalogRuntimeRunID, catalogRuntimeRunID); err != nil || changed != 1 {
+				if changed, err := storetest.RemoveWorkflowProjectionHeader(faultCtx, reader, catalogRuntimeRunID, catalogRuntimeRunID); err != nil || changed != 1 {
 					t.Fatalf("exact missing-header diagnostic fault: rows=%d err=%v", changed, err)
 				}
 				if dump, err := workflowStateDebugRows(reader); err != nil || dump != prefix+"state:null}]" {

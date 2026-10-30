@@ -55,7 +55,7 @@ type c4ForkCreationOwner interface {
 	RequireMaterializedRunFork(context.Context, string, runfork.RunForkMaterializeRequest) (runfork.RunForkMaterialization, error)
 }
 
-func c4ReopenCreationStore(t *testing.T, backend string, selected any, db *sql.DB, connector *stopCommitConnector, instrumentation ...driver.Connector) (selectedFanOutLifecycleOwner, *sql.DB) {
+func c4ReopenCreationStore(t *testing.T, ctx context.Context, backend string, selected any, db *sql.DB, connector *stopCommitConnector, instrumentation ...driver.Connector) (selectedFanOutLifecycleOwner, *sql.DB, context.Context) {
 	t.Helper()
 	process, err := agentfixture.ProcessCapability(t, context.Background(), selected.(agentfixture.Store))
 	if err != nil {
@@ -64,6 +64,7 @@ func c4ReopenCreationStore(t *testing.T, backend string, selected any, db *sql.D
 	if err := process.Release(context.Background()); err != nil {
 		t.Fatal(err)
 	}
+	retireStoreTestWorkFixture(t)
 	location := connector.dsn
 	if backend == "sqlite" {
 		parsed, err := url.Parse(location)
@@ -79,7 +80,25 @@ func c4ReopenCreationStore(t *testing.T, backend string, selected any, db *sql.D
 		t.Fatal(err)
 	}
 	reopened, _ := openPipelineCrashStore(t, backend, location, instrumentation...)
-	return reopened.store.(selectedFanOutLifecycleOwner), reopened.db
+	fact, found := correlation.SourceArtifactFactFromContext(ctx)
+	if !found {
+		t.Fatal("creation reopen requires its original source fact")
+	}
+	next := testAuthorActivityContextForBundle(fact.BundleHash())
+	if scope, present := authoractivity.ScopeFromContext(ctx); present {
+		next = authoractivity.WithScope(next, scope)
+	}
+	if runtimeID, present := correlation.RuntimeInstanceIDFromContext(ctx); present {
+		next = correlation.WithRuntimeInstanceID(next, runtimeID)
+	}
+	next = correlation.WithRunID(next, correlation.RunIDFromContext(ctx))
+	if root, present, err := correlation.RootAdmissionFromContext(ctx); err != nil {
+		t.Fatal(err)
+	} else if present {
+		next = correlation.WithRootAdmission(next, root)
+	}
+	next = originalStoreFixtureContext(t, next, reopened.store)
+	return reopened.store.(selectedFanOutLifecycleOwner), reopened.db, next
 }
 
 func c4ReadExactForkWithoutMutation(t *testing.T, ctx context.Context, selected any, backend, child string, request runfork.RunForkMaterializeRequest, present bool, connector *stopCommitConnector) runfork.RunForkMaterialization {
@@ -221,7 +240,7 @@ func TestC4F35EventStartNativeCommitAccountingBothStores(t *testing.T) {
 					c4RequireExclusiveStart(t, ctx, selected, runID, sourceartifactfixture.BundleHash, input.ID())
 					c4RequireRevisionCount(t, ctx, selected, runID, 1)
 				}
-				selected, _ = c4ReopenCreationStore(t, backend, selected, db, connector)
+				selected, _, ctx = c4ReopenCreationStore(t, ctx, backend, selected, db, connector)
 				if !committed {
 					c4RequireAbsentCreation(t, ctx, selected, runID)
 				} else {
@@ -337,7 +356,7 @@ func TestC4F35ForkStartNativeCommitAccountingBothStores(t *testing.T) {
 					c4RequireExclusiveStart(t, ctx, selected, forkRun, sourceartifactfixture.BundleHash, "")
 					c4RequireRevisionCount(t, ctx, selected, forkRun, 1)
 				}
-				selected, _ = c4ReopenCreationStore(t, backend, selected, db, connector, p16CommitConnector{connector})
+				selected, _, ctx = c4ReopenCreationStore(t, ctx, backend, selected, db, connector, p16CommitConnector{connector})
 				ctx = requireDefaultSourceArtifactForTest(t, ctx, selected)
 				ctx = originalStoreFixtureContext(t, ctx, selected)
 				owner = selected.(c4ForkCreationOwner)
@@ -623,6 +642,7 @@ func TestC4F35CreationCommitSIGKILLReopenBothStores(t *testing.T) {
 				var original runforkrevision.StartProjection
 				var originalPlan runfork.RunForkPlan
 				for reopen := 0; reopen < 2; reopen++ {
+					retireStoreTestWorkFixture(t)
 					fixture, _ := openPipelineCrashStore(t, backend, location)
 					ctx := c4CreationReplayContext(t, fixture.store, record)
 					firstTurn := ""
@@ -991,8 +1011,8 @@ func TestC4F35DeploymentStartNativeCommitAccountingBothStores(t *testing.T) {
 					c4RequireExclusiveStart(t, ctx, selected, runID, command.RunCreation.BundleHash, "")
 					c4RequireRevisionCount(t, ctx, selected, runID, 1)
 				}
-				selected, _ = c4ReopenCreationStore(t, backend, selected, db, connector)
-				ctx = correlation.WithRootAdmission(testAuthorActivityContextForBundle(command.RunCreation.BundleHash), root)
+				selected, _, ctx = c4ReopenCreationStore(t, ctx, backend, selected, db, connector)
+				ctx = correlation.WithRootAdmission(ctx, root)
 				ctx, err = agentfixture.ProcessContext(t, ctx, selected.(agentfixture.Store))
 				if err != nil {
 					t.Fatal(err)
@@ -1169,8 +1189,8 @@ func TestC4F35StandingStartNativeCommitAccountingBothStores(t *testing.T) {
 					c4RequireExclusiveStart(t, ctx, selected, observed.RunID, bundleHash, "")
 					c4RequireRevisionCount(t, ctx, selected, observed.RunID, 1)
 				}
-				selected, db = c4ReopenCreationStore(t, backend, selected, db, connector)
-				ctx, err = agentfixture.ProcessContext(t, correlation.WithRootAdmission(correlation.WithSourceArtifactFact(testAuthorActivityRuntimeContext(), fact), rooted.Admission()), selected.(agentfixture.Store))
+				selected, db, ctx = c4ReopenCreationStore(t, ctx, backend, selected, db, connector)
+				ctx, err = agentfixture.ProcessContext(t, correlation.WithRootAdmission(correlation.WithSourceArtifactFact(ctx, fact), rooted.Admission()), selected.(agentfixture.Store))
 				if err != nil {
 					t.Fatal(err)
 				}

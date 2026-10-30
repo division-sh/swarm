@@ -143,7 +143,7 @@ func TestForkHistoricalAgentGenerationBothStores(t *testing.T) {
 					if err != nil || originalRun != runID {
 						t.Fatalf("original run lookup: %s %v", originalRun, err)
 					}
-					original := originalCarriageForRun(t, fixture.store, originalRun)
+					original := originalCarriageForRun(t, fixture.store, originalRun, ctx)
 					switch cell {
 					case "missing_original":
 						original = semanticview.OriginalLoopCarriage{}

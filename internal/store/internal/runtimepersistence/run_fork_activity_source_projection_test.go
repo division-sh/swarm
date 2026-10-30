@@ -50,7 +50,7 @@ func TestSelectedContractSourceRejectsRehomedChildStateBothStores(t *testing.T) 
 					t.Run(owner+"/"+corrupt, func(t *testing.T) {
 						ctx, sourceRun, child, event := seedSelectedActivityProjectionFixture(t, fixture, backend.name == "postgres", owner == "root", true, false, json.RawMessage(`{"value":"unchanged"}`))
 						store := fixture.store.(selectedActivityProjectionStore)
-						original := originalActivityCarriageAtPoint(t, store, sourceRun, child.ForkPoint)
+						original := originalActivityCarriageAtPoint(t, store, sourceRun, child.ForkPoint, ctx)
 						loaded, err := store.LoadRunForkSelectedContractSourceEvents(ctx, sourceRun, child.ForkRunID, []string{event.ID()}, original, originalRootAdmissionForRun(t, store, sourceRun))
 						if err != nil || len(loaded) != 1 {
 							t.Fatalf("valid materialized child: count=%d err=%v", len(loaded), err)
@@ -97,7 +97,7 @@ func TestSelectedContractAbsentSourcePersistenceRejectsContradictoryEnvelopeBoth
 			fixture := backend.open(t)
 			ctx, sourceRun, child, event := seedSelectedActivityProjectionFixture(t, fixture, backend.name == "postgres", true, true, false, json.RawMessage(`{"value":"unchanged"}`))
 			owner := fixture.store.(selectedActivityProjectionStore)
-			original := originalActivityCarriageAtPoint(t, owner, sourceRun, child.ForkPoint)
+			original := originalActivityCarriageAtPoint(t, owner, sourceRun, child.ForkPoint, ctx)
 			if _, err := owner.LoadRunForkSelectedContractSourceEvents(ctx, sourceRun, child.ForkRunID, []string{event.ID()}, original, originalRootAdmissionForRun(t, owner, sourceRun)); err != nil {
 				t.Fatalf("typed source control: %v", err)
 			}
@@ -355,7 +355,7 @@ func TestSelectedContractActivitySourceProjectionBothStores(t *testing.T) {
 					ctx, sourceRun, child, original := seedSelectedActivityProjectionFixture(t, fixture, backend.name == "postgres", cell.root, cell.independentTarget, cell.wrongFlow, json.RawMessage(`{"value":"unchanged"}`))
 					before := selectedActivityPersistedSourceEvidence(t, fixture.db, original.ID())
 					store := fixture.store.(selectedActivityProjectionStore)
-					loaded, err := store.LoadRunForkSelectedContractSourceEvents(originalStoreFixtureContext(fixture.activityOwner, ctx, fixture.store), sourceRun, child.ForkRunID, []string{original.ID()}, originalActivityCarriageAtPoint(t, store, sourceRun, child.ForkPoint), originalRootAdmissionForRun(t, store, sourceRun))
+					loaded, err := store.LoadRunForkSelectedContractSourceEvents(originalStoreFixtureContext(fixture.activityOwner, ctx, fixture.store), sourceRun, child.ForkRunID, []string{original.ID()}, originalActivityCarriageAtPoint(t, store, sourceRun, child.ForkPoint, ctx), originalRootAdmissionForRun(t, store, sourceRun))
 					if after := selectedActivityPersistedSourceEvidence(t, fixture.db, original.ID()); !reflect.DeepEqual(before, after) {
 						t.Fatal("activity preparation mutated persisted source routing/payload evidence")
 					}
@@ -412,7 +412,7 @@ func TestSelectedContractActivitySourceProjectionPreservesNumericPayloadBothStor
 					input := json.RawMessage(`{"large":9007199254740991,"decimal":1.2300e+09,"zero":0,"nested":[-9007199254740991,4.2500]}`)
 					ctx, sourceRun, child, original := seedSelectedActivityProjectionFixture(t, fixture, backend.name == "postgres", owner == "root", true, false, input)
 					before := selectedActivityPersistedSourceEvidence(t, fixture.db, original.ID())
-					loaded, err := fixture.store.(selectedActivityProjectionStore).LoadRunForkSelectedContractSourceEvents(originalStoreFixtureContext(fixture.activityOwner, ctx, fixture.store), sourceRun, child.ForkRunID, []string{original.ID()}, originalActivityCarriageAtPoint(t, fixture.store.(selectedActivityProjectionStore), sourceRun, child.ForkPoint), originalRootAdmissionForRun(t, fixture.store.(selectedActivityProjectionStore), sourceRun))
+					loaded, err := fixture.store.(selectedActivityProjectionStore).LoadRunForkSelectedContractSourceEvents(originalStoreFixtureContext(fixture.activityOwner, ctx, fixture.store), sourceRun, child.ForkRunID, []string{original.ID()}, originalActivityCarriageAtPoint(t, fixture.store.(selectedActivityProjectionStore), sourceRun, child.ForkPoint, ctx), originalRootAdmissionForRun(t, fixture.store.(selectedActivityProjectionStore), sourceRun))
 					if err != nil || len(loaded) != 1 {
 						t.Fatalf("load numeric activity: events=%#v err=%v", loaded, err)
 					}
@@ -868,9 +868,9 @@ func originalSourceForRun(t testing.TB, selected any, runID string, held ...cont
 	return loaded
 }
 
-func originalCarriageForRun(t testing.TB, selected any, runID string) semanticview.OriginalLoopCarriage {
+func originalCarriageForRun(t testing.TB, selected any, runID string, held ...context.Context) semanticview.OriginalLoopCarriage {
 	t.Helper()
-	loaded := originalSourceForRun(t, selected, runID)
+	loaded := originalSourceForRun(t, selected, runID, held...)
 	owner, err := semanticview.CompileOriginalLoopCarriage(loaded.Source)
 	if err != nil {
 		t.Fatal(err)
@@ -892,6 +892,7 @@ func originalActivityCarriageAtPoint(t *testing.T, store selectedActivityProject
 		ctx = storeTestWorkContext(t, t.Context())
 	}
 	ctx = correlation.WithSourceArtifactFact(correlation.WithRunID(ctx, sourceRunID), loaded.SourceArtifactFact)
+	ctx = correlation.WithRootAdmission(ctx, loaded.RootedSource.Admission())
 	ctx = originalStoreFixtureContext(t, ctx, store)
 	plan, err := store.PlanRunFork(ctx, runfork.RunForkPlanRequest{SourceRunID: sourceRunID, At: point.Input, ResolvedPoint: &point})
 	if err != nil {
