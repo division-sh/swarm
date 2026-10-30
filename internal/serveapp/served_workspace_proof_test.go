@@ -28,6 +28,7 @@ import (
 	"github.com/division-sh/swarm/internal/runtime/pipeline"
 	"github.com/division-sh/swarm/internal/runtime/runlifecycle"
 	"github.com/division-sh/swarm/internal/runtime/semanticview"
+	"github.com/division-sh/swarm/internal/runtime/startupownership"
 	"github.com/division-sh/swarm/internal/runtime/workspace"
 	"github.com/division-sh/swarm/internal/servedparity"
 	"github.com/division-sh/swarm/internal/sourceartifact"
@@ -281,9 +282,13 @@ func readWorkspaceProofApplication(t *testing.T, owner runtimebus.EventStore) ma
 	return snapshot
 }
 
-func expireWorkspaceProofResetTransportCache(t *testing.T, owner apiv1.APIIdempotencyStore, reader runtimebus.EventStore) {
+func expireWorkspaceProofResetTransportCache(t *testing.T, owner apiv1.APIIdempotencyStore, reader runtimebus.EventStore, process startupownership.ProcessCapability) {
 	t.Helper()
-	_, _, err := owner.WithAPIIdempotency(context.Background(), apiidempotency.Request{
+	ctx, err := startupownership.WithProcessMutationAuthority(t.Context(), process)
+	if err != nil {
+		t.Fatal(err)
+	}
+	_, _, err = owner.WithAPIIdempotency(ctx, apiidempotency.Request{
 		Method: "test.expire-transport-cache", Actor: apiidempotency.BearerActor("expiry-proof"),
 		IdempotencyKey: uuid.NewString(), RequestHash: "expiry-proof",
 		Now: time.Now().UTC().Add(48 * time.Hour), TTL: time.Minute,

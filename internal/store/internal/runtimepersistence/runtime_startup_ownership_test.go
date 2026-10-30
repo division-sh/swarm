@@ -499,8 +499,12 @@ func TestRuntimeProcessCapabilityTransitionsPersistWithBackendParity(t *testing.
 			if err != nil || authority.Validate() != nil {
 				t.Fatalf("active capability = %#v err=%v", authority, err)
 			}
+			sourceCtx, err := runtimestartupownership.WithProcessMutationAuthority(ctx, capability)
+			if err != nil {
+				t.Fatal(err)
+			}
 			rooted, _ := sourceartifactfixture.Rooted(t, "canonical-run-bundle", testCanonicalSourceArtifact)
-			sourceartifactfixture.RequireArtifact(t, ctx, selected.(sourceartifactfixture.Writer), rooted.Artifact())
+			sourceartifactfixture.RequireArtifact(t, sourceCtx, selected.(sourceartifactfixture.Writer), rooted.Artifact())
 			coordinate, err := runtimeagenttopology.NewSourceCoordinate(rooted.Admission())
 			if err != nil {
 				t.Fatal(err)
@@ -650,10 +654,14 @@ func TestRuntimeProcessCapabilityClosedSourceSetOperationsPersistWithBackendPari
 			}
 			t.Cleanup(func() { _ = capability.Release(context.Background()) })
 
+			sourceCtx, err := runtimestartupownership.WithProcessMutationAuthority(ctx, capability)
+			if err != nil {
+				t.Fatal(err)
+			}
 			firstRoot, _ := sourceartifactfixture.Rooted(t, "canonical-run-bundle", testCanonicalSourceArtifact)
 			secondRoot, _ := sourceartifactfixture.Rooted(t, "second", storeTestSourceArtifact("second-source"))
 			for _, root := range []sourceartifact.RootedSource{firstRoot, secondRoot} {
-				sourceartifactfixture.RequireArtifact(t, ctx, selected.(sourceartifactfixture.Writer), root.Artifact())
+				sourceartifactfixture.RequireArtifact(t, sourceCtx, selected.(sourceartifactfixture.Writer), root.Artifact())
 			}
 			firstSource, err := runtimeagenttopology.NewSourceCoordinate(firstRoot.Admission())
 			if err != nil {
@@ -739,8 +747,12 @@ func TestPostgresProcessCapabilitySessionLossRetiresAndAdmitsAtomicSuccessor(t *
 	if err != nil {
 		t.Fatalf("Evidence: %v", err)
 	}
+	sourceCtx, err := runtimestartupownership.WithProcessMutationAuthority(ctx, capability)
+	if err != nil {
+		t.Fatal(err)
+	}
 	rooted, _ := sourceartifactfixture.Rooted(t, "canonical-run-bundle", testCanonicalSourceArtifact)
-	sourceartifactfixture.RequireArtifact(t, ctx, selected, rooted.Artifact())
+	sourceartifactfixture.RequireArtifact(t, sourceCtx, selected, rooted.Artifact())
 	coordinate, err := runtimeagenttopology.NewSourceCoordinate(rooted.Admission())
 	if err != nil {
 		t.Fatal(err)
@@ -1012,6 +1024,10 @@ func runSQLiteForcedDeathChild(t *testing.T) bool {
 		authority, err := capability.Evidence()
 		if err != nil {
 			t.Fatalf("read child process authority: %v", err)
+		}
+		ctx, err = runtimestartupownership.WithProcessMutationAuthority(ctx, capability)
+		if err != nil {
+			t.Fatal(err)
 		}
 		rooted, _ := sourceartifactfixture.Rooted(t, "fixture", sourceartifactfixture.Artifact())
 		sourceartifactfixture.RequireArtifact(t, ctx, selected, rooted.Artifact())
@@ -1636,8 +1652,12 @@ func TestProcessGenerationMissingRefusesReseedingParity(t *testing.T) {
 			if err != nil {
 				t.Fatalf("acquire predecessor: %v", err)
 			}
+			sourceCtx, err := runtimestartupownership.WithProcessMutationAuthority(ctx, capability)
+			if err != nil {
+				t.Fatal(err)
+			}
 			rooted, _ := sourceartifactfixture.Rooted(t, "canonical-run-bundle", testCanonicalSourceArtifact)
-			sourceartifactfixture.RequireArtifact(t, ctx, selected.(sourceartifactfixture.Writer), rooted.Artifact())
+			sourceartifactfixture.RequireArtifact(t, sourceCtx, selected.(sourceartifactfixture.Writer), rooted.Artifact())
 			coordinate, err := runtimeagenttopology.NewSourceCoordinate(rooted.Admission())
 			if err != nil {
 				t.Fatal(err)

@@ -101,7 +101,8 @@ func TestVerifyRunJobflowRegistryIntegrationBothStores(t *testing.T) {
 			if injectedEntity == "" {
 				t.Fatal("registry source entity was not constructed")
 			}
-			if err := storetest.CorruptRegistryVerdict(context.Background(), selected, runID, injectedEntity, "injected-drift"); err != nil {
+			ctx := servedRuntimeProofAuthorActivityContext(t, servedTestProcessRuntime(t, process), servedEventPublishFixtureBundleHash(t, root))
+			if err := storetest.CorruptRegistryVerdict(ctx, selected, runID, injectedEntity, "injected-drift"); err != nil {
 				t.Fatal(err)
 			}
 			for _, mode := range []string{"text", "json"} {

@@ -183,12 +183,13 @@ func requireHumanTaskForeignContinuationRefusal(t *testing.T, rt servedControlPr
 		{"requester_entity_id", uuid.NewString()},
 	} {
 		t.Run("reject_"+tc.column, func(t *testing.T) {
-			restore, err := storetest.CorruptHumanTaskRequester(context.Background(), selectedMailboxFixtureStore(rt), card.RunID, card.CardID, tc.column, tc.value)
+			ctx := servedControlProofAuthorActivityContext(t, rt)
+			restore, err := storetest.CorruptHumanTaskRequester(ctx, selectedMailboxFixtureStore(rt), card.RunID, card.CardID, tc.column, tc.value)
 			if err != nil {
 				t.Fatal(err)
 			}
 			t.Cleanup(func() {
-				if err := restore(context.Background()); err != nil {
+				if err := restore(ctx); err != nil {
 					t.Error(err)
 				}
 			})
