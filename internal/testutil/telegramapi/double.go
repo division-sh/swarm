@@ -4,6 +4,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"net/http"
+	"strconv"
 	"strings"
 	"sync"
 )
@@ -38,6 +39,7 @@ type Double struct {
 	ackResponseBarrier            *responseBarrier
 	delayedLostEdit               *responseBarrier
 	commandApplyBarrier           *responseBarrier
+	updates                       map[string][]map[string]any
 }
 
 type registration struct {
@@ -72,6 +74,8 @@ func (p *Double) ServeHTTP(w http.ResponseWriter, request *http.Request) {
 	switch {
 	case strings.HasSuffix(request.URL.Path, "/getMe"):
 		p.serveIdentity(w, request, credential)
+	case strings.HasSuffix(request.URL.Path, "/getUpdates"):
+		p.serveUpdates(w, request, physical)
 	case strings.HasSuffix(request.URL.Path, "/setMyCommands"):
 		p.serveCommandWrite(w, request, physical)
 	case strings.HasSuffix(request.URL.Path, "/getMyCommands"):
@@ -91,6 +95,40 @@ func (p *Double) ServeHTTP(w http.ResponseWriter, request *http.Request) {
 	default:
 		http.Error(w, `{"ok":false}`, http.StatusNotFound)
 	}
+}
+
+// QueueUpdate supplies a provider update; getUpdates retains it until the
+// consumer confirms its exact update_id with a greater offset.
+func (p *Double) QueueUpdate(credential string, update map[string]any) {
+	p.mu.Lock()
+	defer p.mu.Unlock()
+	if p.updates == nil {
+		p.updates = make(map[string][]map[string]any)
+	}
+	key := p.physicalResourceKey(credential)
+	p.updates[key] = append(p.updates[key], update)
+}
+
+func (p *Double) serveUpdates(w http.ResponseWriter, request *http.Request, physical string) {
+	offset, err := strconv.ParseInt(request.URL.Query().Get("offset"), 10, 64)
+	if err != nil {
+		http.Error(w, "invalid update offset", http.StatusBadRequest)
+		return
+	}
+	p.mu.Lock()
+	if p.updates == nil {
+		p.updates = make(map[string][]map[string]any)
+	}
+	retained := make([]map[string]any, 0)
+	for _, update := range p.updates[physical] {
+		id, err := strconv.ParseInt(fmt.Sprint(update["update_id"]), 10, 64)
+		if err == nil && id >= offset {
+			retained = append(retained, update)
+		}
+	}
+	p.updates[physical] = retained
+	p.mu.Unlock()
+	_ = json.NewEncoder(w).Encode(map[string]any{"ok": true, "result": retained})
 }
 
 func (p *Double) serveIdentity(w http.ResponseWriter, request *http.Request, credential string) {

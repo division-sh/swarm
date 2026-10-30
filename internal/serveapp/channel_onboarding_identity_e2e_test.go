@@ -1,7 +1,6 @@
 package serveapp
 
 import (
-	"bytes"
 	"context"
 	"database/sql"
 	"encoding/json"
@@ -19,15 +18,35 @@ import (
 
 	"github.com/division-sh/swarm/internal/channelonboarding"
 	"github.com/division-sh/swarm/internal/cliapp"
+	"github.com/division-sh/swarm/internal/operatorchannel"
 	"github.com/division-sh/swarm/internal/servedparity"
 	"github.com/division-sh/swarm/internal/testutil"
+	"github.com/division-sh/swarm/internal/testutil/telegramapi"
 	"gopkg.in/yaml.v3"
 )
 
 var channelOnboardingExactChoicePattern = regexp.MustCompile(`source=.+? --interface (\S+) --target (\S+)`)
 
-func registerChannelFixtureAccount(t *testing.T, config, token, account string) channelonboarding.Operation {
+func registerChannelFixtureAccount(t *testing.T, config, token, account string, hitl ...*telegramapi.Double) channelonboarding.Operation {
 	t.Helper()
+	if len(hitl) != 0 {
+		body, err := os.ReadFile(config)
+		if err != nil {
+			t.Fatal(err)
+		}
+		var document map[string]any
+		if err := yaml.Unmarshal(body, &document); err != nil {
+			t.Fatal(err)
+		}
+		document["channels"] = map[string]any{"hitl": map[string]any{"provider": "telegram", "account": account}}
+		body, err = yaml.Marshal(document)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if err := os.WriteFile(config, body, 0o600); err != nil {
+			t.Fatal(err)
+		}
+	}
 	input, err := os.CreateTemp(t.TempDir(), "account-token")
 	if err != nil {
 		t.Fatal(err)
@@ -42,11 +61,64 @@ func registerChannelFixtureAccount(t *testing.T, config, token, account string) 
 	prior := os.Stdin
 	os.Stdin = input
 	defer func() { os.Stdin = prior }()
-	var out, errOut bytes.Buffer
-	code := cliapp.Execute(t.Context(), []string{"--config", config, "channel", "connect", "telegram", "--yes", "--json"},
-		&out, &errOut, nil, nil, OpenChannelRegistration)
+	out, errOut := &lockedBuffer{}, &lockedBuffer{}
+	args := []string{"--config", config, "channel", "connect", "telegram", "--yes"}
+	if len(hitl) == 0 {
+		args = append(args, "--json")
+	}
+	ctx, cancel := context.WithCancel(t.Context())
+	done := make(chan int, 1)
+	progressDone := make(chan int, 1)
+	joined := false
+	defer func() {
+		cancel()
+		if !joined {
+			<-done
+		}
+	}()
+	go func() {
+		code := cliapp.Execute(ctx, args, out, errOut, nil, nil, OpenChannelRegistration)
+		done <- code
+		progressDone <- code
+	}()
+	if len(hitl) != 0 {
+		challenge := waitChannelOnboardingChallenge(t, out, errOut, progressDone)
+		hitl[0].QueueUpdate(token, map[string]any{"update_id": 1, "message": map[string]any{
+			"message_id": 1, "from": map[string]any{"id": 7000, "username": "operator"},
+			"chat": map[string]any{"id": 1001, "type": "private"}, "text": challenge,
+		}})
+	}
+	var code int
+	select {
+	case code = <-done:
+		joined = true
+	case <-time.After(20 * time.Second):
+		cancel()
+		<-done
+		joined = true
+		t.Fatalf("deployment claim did not finish: out=%s err=%s", out.String(), errOut.String())
+	}
+	if code != 0 {
+		t.Fatalf("fixture account registration exit=%d out=%s err=%s", code, out.String(), errOut.String())
+	}
 	var result channelonboarding.Result
-	if code != 0 || json.Unmarshal(out.Bytes(), &result) != nil || result.Operation.Provider != "telegram" ||
+	if len(hitl) != 0 {
+		if !strings.Contains(out.String(), "Claimed by") {
+			t.Fatalf("deployment connect did not confirm the operator: %s", out.String())
+		}
+		out, errOut = &lockedBuffer{}, &lockedBuffer{}
+		code = cliapp.Execute(t.Context(), []string{"--config", config, "channel", "list", "--json"}, out, errOut, nil, nil, OpenChannelRegistration)
+		var listed struct {
+			Accounts []channelonboarding.Result `json:"accounts"`
+		}
+		if code != 0 || json.Unmarshal([]byte(out.String()), &listed) != nil || len(listed.Accounts) != 1 || listed.Accounts[0].IdentityOperation == nil || listed.Accounts[0].IdentityOperation.State != operatorchannel.StateBound {
+			t.Fatalf("deployment claim readback exit=%d out=%s err=%s", code, out.String(), errOut.String())
+		}
+		result = listed.Accounts[0]
+	} else if err := json.Unmarshal([]byte(out.String()), &result); err != nil {
+		t.Fatal(err)
+	}
+	if result.Operation.Provider != "telegram" ||
 		result.Operation.AccountReference != account || !result.Operation.AccountConfirmed || result.Operation.Phase != channelonboarding.PhaseSucceeded {
 		t.Fatalf("fixture account registration exit=%d err=%s", code, errOut.String())
 	}
@@ -268,6 +340,7 @@ func addSecondChannelOnboardingTarget(t *testing.T, sourceRoot string) {
 }
 
 type channelOnboardingE2EHarness struct {
+	registration   channelonboarding.Operation
 	opts           cliapp.ServeOptions
 	provider       *channelOnboardingTelegramProvider
 	telegram       *httptest.Server
@@ -296,7 +369,7 @@ func newChannelOnboardingE2EHarness(t *testing.T, backend servedparity.Backend, 
 	if publicIngress {
 		publicListener := reserveChannelOnboardingListener(t)
 		publicListen := publicListener.Addr().String()
-		redirectExternalHosts(t, map[string]string{"hooks.channel-onboarding.test": "http://" + publicListen})
+		redirectExternalHosts(t, map[string]string{"hooks.channel-onboarding.test": "http://" + publicListen, "api.telegram.org": telegram.URL})
 		opts.PublicWebhookBaseURL = "https://hooks.channel-onboarding.test"
 		opts.PublicWebhookListen = publicListen
 		opts.PublicWebhookListener = publicListener

@@ -14,6 +14,7 @@ import (
 
 	"github.com/division-sh/swarm/internal/channelonboarding"
 	"github.com/division-sh/swarm/internal/operatorchannel"
+	"github.com/division-sh/swarm/internal/packs"
 	"github.com/division-sh/swarm/internal/packadmission"
 	"github.com/division-sh/swarm/internal/packartifact"
 	"github.com/division-sh/swarm/internal/providertriggers"
@@ -378,10 +379,64 @@ func (c *DeploymentChannelControl) AccountStatus(ctx context.Context, ref channe
 	return c.service.DeploymentAccountStatus(ctx, ref)
 }
 
-func (c *DeploymentChannelControl) ConsumeWebhookClaim(ctx context.Context, account channelonboarding.AccountReference, credential func(channelonboarding.CredentialAdmission) bool, admit func() (providertriggers.Delivery, error), current func() bool) (bool, error) {
+func (c *DeploymentChannelControl) ConsumeWebhookClaim(ctx context.Context, account channelonboarding.AccountReference, credential func(channelonboarding.CredentialAdmission) bool, admit func() (providertriggers.Delivery, error), current func() bool, plans ...packs.SatisfactionPlan) (bool, error) {
 	c.mu.Lock()
 	defer c.mu.Unlock()
+	if consumed, err := c.registeredOperatorInput(ctx, account, credential, admit, current, plans); consumed || err != nil {
+		return consumed, err
+	}
 	return c.session.ConsumeWebhookClaim(ctx, account, credential, admit, current)
+}
+
+func (c *DeploymentChannelControl) registeredOperatorInput(ctx context.Context, account channelonboarding.AccountReference, credential func(channelonboarding.CredentialAdmission) bool, admit func() (providertriggers.Delivery, error), current func() bool, plans []packs.SatisfactionPlan) (bool, error) {
+	selected, err := c.service.DeploymentOperatorBinding(ctx, account)
+	if errors.Is(err, channelonboarding.ErrNotFound) {
+		return false, nil
+	}
+	if err != nil {
+		return false, err
+	}
+	if len(plans) == 0 {
+		return false, channelonboarding.ErrRevisionConflict
+	}
+	provider, err := channelonboarding.ProviderCredentialAdmission(selected.Operation, selected.Candidate.ProviderCredentialRole)
+	if err != nil {
+		return false, err
+	}
+	if credential == nil || admit == nil || current == nil || !current() || !credential(provider) {
+		return false, channelonboarding.ErrRevisionConflict
+	}
+	delivery, err := admit()
+	if err != nil {
+		return false, err
+	}
+	reserved := false
+	for _, output := range delivery.Events {
+		for _, plan := range plans {
+			if plan.Provider() != account.Provider {
+				continue
+			}
+			text, matched, err := plan.ProjectTextFact(string(output.Name), output.Authorization, output.Payload)
+			if err != nil {
+				return false, err
+			}
+			if matched && text.ConversationRef == selected.Binding.ConversationRef && text.ConversationScope == selected.Binding.ConversationScope {
+				reserved = true
+			}
+			action, matched, err := plan.ProjectActionFact(string(output.Name), output.Authorization, output.Payload)
+			if err != nil {
+				return false, err
+			}
+			if matched && action.ConversationRef == selected.Binding.ConversationRef && action.ConversationScope == selected.Binding.ConversationScope {
+				reserved = true
+			}
+		}
+	}
+	latest, err := c.service.DeploymentOperatorBinding(ctx, account)
+	if err != nil || latest.Operation.OperationID != selected.Operation.OperationID || latest.Operation.Revision != selected.Operation.Revision || latest.Binding == nil || *latest.Binding != *selected.Binding || !current() || !credential(provider) {
+		return false, errors.Join(channelonboarding.ErrRevisionConflict, err)
+	}
+	return reserved, nil
 }
 
 func (c *DeploymentChannelControl) accounts(ctx context.Context) ([]channelonboarding.Result, error) {
