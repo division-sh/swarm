@@ -188,7 +188,12 @@ func (am *AgentManager) reconcileDynamicFlowRuntimeReadinessOnce(
 	if err := ctx.Err(); err != nil {
 		cleanupCtx, cancel := context.WithTimeout(context.WithoutCancel(ctx), dynamicFlowRuntimeReadinessCleanupTimeout)
 		defer cancel()
-		return errors.Join(beginErr, err, am.settleDynamicFlowActiveAttempt(cleanupCtx, key, active, retirement, flowActivationFailedRetirement))
+		cleanupErr := am.settleDynamicFlowActiveAttempt(cleanupCtx, key, active, retirement, flowActivationFailedRetirement)
+		readErr := errors.Join(beginErr, err)
+		if !created && cleanupErr == nil && am.cleanReadinessShutdownReadCancellation(ctx, readErr) {
+			return &readinessShutdownCancellation{cause: readErr, key: key, ordinal: admission.attemptOrdinal, planHash: admission.planHash}
+		}
+		return errors.Join(readErr, cleanupErr)
 	}
 	phase := readiness.Phase
 	if created {
@@ -300,6 +305,15 @@ func (am *AgentManager) reconcileDynamicFlowRuntimeReadinessOnce(
 	}
 	// route_installed records attachment progress, not mutable route membership.
 	if err := am.workflowInstances.VerifyDynamicFlowRuntimeActivationAttempt(ctx, active.receipt); err != nil {
+		if am.cleanReadinessShutdownReadCancellation(ctx, err) {
+			cleanupCtx, cancel := context.WithTimeout(context.WithoutCancel(ctx), dynamicFlowRuntimeReadinessCleanupTimeout)
+			defer cancel()
+			if cleanupErr := am.settleDynamicFlowActiveAttempt(cleanupCtx, key, active, retirement, flowActivationFailedRetirement); cleanupErr != nil {
+				return errors.Join(err, cleanupErr)
+			}
+			activationAccepted = true
+			return &readinessShutdownCancellation{cause: err, key: key, ordinal: admission.attemptOrdinal, planHash: admission.planHash}
+		}
 		return err
 	}
 	if eligible, err := advancePending(runtimepipeline.FlowAttachmentAgentsRegistered); err != nil {
