@@ -4,9 +4,12 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"fmt"
+	"sort"
 	"sync"
 	"time"
 
+	"github.com/division-sh/swarm/internal/apiv1"
 	"github.com/division-sh/swarm/internal/channelonboarding"
 	"github.com/division-sh/swarm/internal/cliapp"
 	"github.com/division-sh/swarm/internal/runtime"
@@ -14,6 +17,37 @@ import (
 	"github.com/division-sh/swarm/internal/runtime/runlifecycle"
 	"github.com/division-sh/swarm/internal/sessionprovider"
 )
+
+func serveReadyDeploymentAccounts(ctx context.Context, operations []channelonboarding.Operation, read apiv1.MethodHandler, holder any) ([]channelonboarding.AccountStatus, error) {
+	var rows []channelonboarding.AccountStatus
+	for _, op := range operations {
+		if !op.DeploymentRegistration || !op.AccountConfirmed || op.Phase == channelonboarding.PhaseRetired || op.Phase == channelonboarding.PhaseFailed {
+			continue
+		}
+		if err := (channelonboarding.AccountReference{Provider: op.Provider, Account: op.AccountReference}).Validate(); err != nil {
+			return nil, err
+		}
+		value, err := read(ctx, apiv1.Request{Method: "channel.list", Params: map[string]any{
+			"provider": op.Provider, "account": op.AccountReference, "holder": holder,
+		}})
+		if err != nil {
+			return nil, err
+		}
+		raw, err := json.Marshal(value)
+		var status channelonboarding.AccountStatus
+		if err != nil || json.Unmarshal(raw, &status) != nil || status.Provider != op.Provider || status.Account != op.AccountReference {
+			return nil, fmt.Errorf("deployment account status does not match its selected registration")
+		}
+		rows = append(rows, status)
+	}
+	sort.Slice(rows, func(i, j int) bool {
+		if rows[i].Provider != rows[j].Provider {
+			return rows[i].Provider < rows[j].Provider
+		}
+		return rows[i].Account < rows[j].Account
+	})
+	return rows, nil
+}
 
 func observeDeploymentAccountStatus(ctx context.Context, ref channelonboarding.AccountReference, runtimeOptions deploymentRuntimeOptions, operations channelonboarding.OperationStore, clients map[string]*cliapp.DeploymentChannelControl, mu *sync.Mutex) (json.RawMessage, error) {
 	ref, err := channelonboarding.CanonicalAccount(ref.Provider, ref.Account)

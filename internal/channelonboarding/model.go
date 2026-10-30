@@ -23,6 +23,17 @@ var (
 	ErrRevisionConflict = errors.New("channel onboarding revision conflict")
 )
 
+type RegisteredAccountEnrollmentError struct {
+	Account     AccountReference
+	OperationID string
+}
+
+func (e *RegisteredAccountEnrollmentError) Error() string {
+	return fmt.Sprintf("%s account %s is registered to this deployment; hold that account in the flow, or log it out before runtime enrollment", e.Account.Provider, e.Account.Account)
+}
+
+func (e *RegisteredAccountEnrollmentError) Unwrap() error { return ErrConflict }
+
 type ActivationPosture string
 
 const (

@@ -546,6 +546,42 @@ func TestProviderRegistrationReconcilerCollisionConvergenceAndNoResend(t *testin
 		}
 	})
 
+	t.Run("registered deployment bot refuses enrollment without a selected receiver", func(t *testing.T) {
+		isolatedTransport := &telegramRegistrationTransport{t: t}
+		refusal := &channelonboarding.RegisteredAccountEnrollmentError{
+			Account: channelonboarding.AccountReference{Provider: "telegram", Account: "42"}, OperationID: uuid.NewString(),
+		}
+		isolated, err := NewProviderRegistrationController(RegistrationControllerOptions{
+			CredentialOwner: snapshotOwner, EffectsStore: &registrationEffectStore{Harness: effecttest.New(), current: true},
+			HTTP:    runtimeregistration.HTTPExecutor{Client: &http.Client{Transport: isolatedTransport}},
+			Posture: executionposture.Live, RuntimeInstanceID: uuid.NewString(), Readiness: NewReadinessOwner(true),
+			StartupAuthority: func() (startupownership.GrantEvidence, error) { return startup, nil },
+			SelectionCurrent: func(context.Context, RegistrationPair, bool) (bool, error) { return true, nil },
+			EnrollmentAdmission: func(_ context.Context, account channelonboarding.AccountReference) error {
+				if account != refusal.Account {
+					t.Fatalf("enrollment checked a different physical bot: %+v", account)
+				}
+				return refusal
+			},
+		})
+		if err != nil {
+			t.Fatal(err)
+		}
+		err = isolated.Preflight(t.Context(), exposure, pair)
+		var observed *channelonboarding.RegisteredAccountEnrollmentError
+		if !errors.As(err, &observed) || observed != refusal || !errors.Is(err, channelonboarding.ErrConflict) ||
+			!strings.Contains(err.Error(), "telegram account 42 is registered to this deployment") {
+			t.Fatalf("registered bot enrollment refusal=%v", err)
+		}
+		if identified, applied := isolatedTransport.counts(); identified != 1 || applied != 0 || len(isolated.snapshot.capture().registrations) != 0 {
+			t.Fatalf("refused enrollment identified=%d applied=%d; must not select a second receiver", identified, applied)
+		}
+		isolated.opts.EnrollmentAdmission = func(context.Context, channelonboarding.AccountReference) error { return nil }
+		if err := isolated.Preflight(t.Context(), exposure, pair); err != nil {
+			t.Fatalf("unregistered bot enrollment changed: %v", err)
+		}
+	})
+
 	t.Run("distinct provider resources reconcile independently", func(t *testing.T) {
 		other := testRegistrationPair(t, registration, "alerts", "ingress:alerts:telegram", snapshotOwner)
 		other.CredentialKeys = map[string]string{"telegram.telegram_bot_token": "bot-other"}

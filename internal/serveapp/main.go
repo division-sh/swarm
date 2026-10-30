@@ -1727,6 +1727,16 @@ func buildRuntimeComposition(ctx context.Context, req runtimeCompositionRequest)
 			SelectionCurrent: func(ctx context.Context, pair runtimepublicingress.RegistrationPair, exactRevision bool) (bool, error) {
 				return serveRegistrationSelectionCurrent(ctx, runtimeContextManager, channelOnboardingStore, pair, exactRevision)
 			},
+			EnrollmentAdmission: func(ctx context.Context, account channelonboarding.AccountReference) error {
+				op, err := channelonboarding.RegisteredAccount(ctx, stores.DeploymentChannels(), account)
+				if err == channelonboarding.ErrNotFound {
+					return nil
+				}
+				if err != nil {
+					return err
+				}
+				return &channelonboarding.RegisteredAccountEnrollmentError{Account: account, OperationID: op.OperationID}
+			},
 			Readiness: ready,
 		})
 		if controllerErr != nil {
@@ -1943,6 +1953,21 @@ func buildRuntimeComposition(ctx context.Context, req runtimeCompositionRequest)
 		presenter.recordPublicIngressDisabledHint()
 	}
 	standing = publicIngressPresentation(standing, ready.Snapshot(time.Now().UTC()))
+	registeredOperations, err := stores.DeploymentChannels().ListChannelOnboardingOperations(ctx)
+	if err != nil {
+		presenter.fail(22, "channel_registration", err)
+		return 1
+	}
+	holder, err := processCapability.Evidence()
+	if err != nil {
+		presenter.fail(22, "channel_registration", err)
+		return 1
+	}
+	accountRows, err := serveReadyDeploymentAccounts(ctx, registeredOperations, deploymentChannels, holder)
+	if err != nil {
+		presenter.fail(22, "channel_registration", err)
+		return 1
+	}
 	if opts.TestBeforeReadinessCommit != nil {
 		if err := opts.TestBeforeReadinessCommit(); err != nil {
 			presenter.fail(22, "ready", err)
@@ -1995,6 +2020,7 @@ func buildRuntimeComposition(ctx context.Context, req runtimeCompositionRequest)
 		MCPListener:                addrString(mcpListener.Addr()),
 		ReadyAfter:                 readyAfter,
 		Standing:                   standing,
+		Accounts:                   accountRows,
 		Packs:                      serveLifecyclePackFacts(runtimeContexts),
 		UnreadInformationalNotices: unreadInformationalNotices,
 	}, func() {

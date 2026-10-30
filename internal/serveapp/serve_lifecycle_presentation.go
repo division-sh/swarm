@@ -11,6 +11,7 @@ import (
 	"time"
 
 	"github.com/charmbracelet/lipgloss"
+	"github.com/division-sh/swarm/internal/channelonboarding"
 	"github.com/division-sh/swarm/internal/cliapp"
 	"github.com/division-sh/swarm/internal/operatorchannel"
 	"github.com/division-sh/swarm/internal/packartifact"
@@ -57,6 +58,7 @@ type serveLifecycleReadyFacts struct {
 	MCPListener                string
 	ReadyAfter                 time.Duration
 	Standing                   []serveLifecycleIngressFact
+	Accounts                   []channelonboarding.AccountStatus
 	Packs                      []serveLifecyclePackFact
 	UnreadInformationalNotices int
 }
@@ -651,6 +653,27 @@ func (p *serveLifecyclePresenter) writeConciseReadyLocked(facts serveLifecycleRe
 		fmt.Fprintln(p.out)
 	}
 	p.writeStandingIngressLocked(facts.Standing)
+	for _, account := range facts.Accounts {
+		provider := account.Provider
+		switch provider {
+		case "whatsapp":
+			provider = "WhatsApp"
+		case "telegram":
+			provider = "Telegram"
+		}
+		label := provider + " " + account.Account
+		if len(account.Holders) == 1 {
+			label += " (" + account.Holders[0].Flow + ")"
+		}
+		state := account.State
+		if state == "live" {
+			state = "connected"
+		}
+		if account.Reason != "" {
+			state += ": " + account.Reason
+		}
+		fmt.Fprintf(p.out, "  %s: %s\n", label, state)
+	}
 	fmt.Fprintln(p.out)
 }
 

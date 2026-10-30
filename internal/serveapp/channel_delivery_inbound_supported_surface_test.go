@@ -522,6 +522,41 @@ func runChannelDeliveryInboundDispositionE2E(t *testing.T, backend, scenario str
 	if scenario == "shared_audience" {
 		chatID, chatType = -1001, "group"
 	}
+	if scenario == "inbox" {
+		callback, signing, _ := provider.Registration()
+		registrations, confirmations := provider.OnboardingCounts()
+		out, errOut := &lockedBuffer{}, &lockedBuffer{}
+		restoreInput := installChannelOnboardingCLIInput(t, "bot-token\n")
+		code := executeCLI(t.Context(), []string{"--config", configPath, "channel", "connect", "telegram", "--yes", "--client-language", "en",
+			"--idempotency-key", "registered-enrollment-refusal", "--api-server", endpoint}, out, errOut, nil)
+		restoreInput()
+		if code == 0 || !strings.Contains(errOut.String(), "telegram account 420079 is registered to this deployment") || strings.Contains(out.String(), "READY") {
+			t.Fatalf("registered account enrollment exit=%d out=%s err=%s", code, out.String(), errOut.String())
+		}
+		var refused channelonboarding.Result
+		// The public idempotency owner returns the same terminal operation;
+		// channel list intentionally omits failed enrollment attempts.
+		requireServedJSONRPCResult(t, endpoint+"/v1/rpc", "channel.onboarding_start", map[string]any{
+			"provider": "telegram", "verb": "connect", "save_proof": true, "client_language": "en",
+			"idempotency_key": "registered-enrollment-refusal", "provider_credential": "bot-token",
+		}, &refused)
+		if refused.Operation.OperationID == "" || refused.Operation.Provider != "telegram" || refused.Operation.DeploymentRegistration ||
+			!strings.HasSuffix(refused.Operation.TargetSelector, ":telegram") || refused.Operation.Phase != channelonboarding.PhaseFailed ||
+			refused.Operation.FailureCode != "registered_account_enrollment_refused" || refused.Operation.ActivationRevision != 0 || refused.IdentityOperation != nil {
+			t.Fatalf("runtime enrollment was not a typed non-executable refusal: %+v", refused.Operation)
+		}
+		afterCallback, afterSigning, _ := provider.Registration()
+		afterRegistrations, afterConfirmations := provider.OnboardingCounts()
+		if afterCallback != callback || afterSigning != signing || afterRegistrations != registrations || afterConfirmations != confirmations {
+			t.Fatal("refused enrollment replaced the registered receiver or sent a confirmation")
+		}
+		status, response := postProviderAliasUpdate(t, callback, "", signing, `{"update_id":9991,"message":{"message_id":91,"from":{"id":9001},"chat":{"id":9001,"type":"private"},"text":"customer after refused enrollment"}}`)
+		var publication standingTelegramPublication
+		if status != http.StatusAccepted || json.Unmarshal(response, &publication) != nil || len(publication.EventIDs) != 2 {
+			t.Fatalf("refused enrollment disturbed held-account customer ingress: status=%d body=%s", status, response)
+		}
+		return
+	}
 	connected := runChannelOnboardingCLIJourney(t, configPath, endpoint, provider, "connect", "bot-token", chatID, chatType, 0)
 	var preRestartDeliveries int
 	if scenario == "inbox_restart" || scenario == "inbox_restart_mismatch" {

@@ -380,7 +380,7 @@ func publicIngressPresentation(facts []serveLifecycleIngressFact, snapshot runti
 			continue
 		}
 		key := result[index].Alias + "\x00" + strings.TrimSpace(result[index].Provider)
-		if callback := registrationURLs[key]; callback != "" {
+		if callback := registrationURLs[key]; callback != "" && result[index].Subject.Status != packs.StatusAvailable {
 			result[index].URL = callback
 		} else if snapshot.PublicIngressEnabled && origin != "" {
 			result[index].URL = origin + "/webhooks/" + result[index].Alias + "/" + result[index].Provider

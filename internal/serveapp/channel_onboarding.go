@@ -701,6 +701,10 @@ func (r *serveChannelActivationRefresher) PreflightChannelActivation(ctx context
 		return nil
 	}
 	err := r.preflight(ctx, servePrebindingActivation{Operation: op, Candidate: candidate})
+	var registered *channelonboarding.RegisteredAccountEnrollmentError
+	if errors.As(err, &registered) {
+		return channelonboarding.NewTerminalActivationError("registered_account_enrollment_refused", err)
+	}
 	var collision *runtimepublicingress.SlotCollisionError
 	if errors.As(err, &collision) {
 		return channelonboarding.NewTerminalActivationError("provider_slot_collision", err)

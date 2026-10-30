@@ -689,7 +689,10 @@ func deriveTriggerRequirementStatus(subject *Subject) (SubjectStatus, error) {
 	}
 	if subject.Applicability == "effective" {
 		if subject.TriggerAdmission.Transport == ChannelTransportSession {
-			if subject.TriggerAdmission.BindingEnabled != nil && *subject.TriggerAdmission.BindingEnabled {
+			if subject.TriggerAdmission.BindingEnabled == nil {
+				return StatusAvailable, nil
+			}
+			if *subject.TriggerAdmission.BindingEnabled {
 				return StatusReady, nil
 			}
 			return StatusNotReady, nil

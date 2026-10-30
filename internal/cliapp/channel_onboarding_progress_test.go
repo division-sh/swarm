@@ -331,6 +331,23 @@ func TestChannelCLIRejectsInapplicableCredentialBeforeInput(t *testing.T) {
 }
 
 func TestChannelCLIRefusesMalformedPendingAndGenuineBlockage(t *testing.T) {
+	t.Run("registered bot enrollment names its registration", func(t *testing.T) {
+		refusal := &channelonboarding.RegisteredAccountEnrollmentError{
+			Account: channelonboarding.AccountReference{Provider: "telegram", Account: "420079"}, OperationID: "private-operation-id",
+		}
+		result := channelOnboardingResult{Operation: channelonboarding.Operation{Provider: "telegram", Phase: channelonboarding.PhaseFailed,
+			FailureCode: "registered_account_enrollment_refused", FailureMessage: refusal.Error()}}
+		var out, errOut bytes.Buffer
+		if err := renderChannelOnboardingResult(&out, &errOut, cliOutputOptions{}, result); err == nil ||
+			out.Len() != 0 || !strings.Contains(errOut.String(), "telegram account 420079 is registered to this deployment") || strings.Contains(errOut.String(), "private-operation-id") {
+			t.Fatalf("enrollment refusal output=%q error=%q err=%v", out.String(), errOut.String(), err)
+		}
+		result.Operation.FailureCode, result.Operation.FailureMessage = "unclassified", "must-not-disclose"
+		errOut.Reset()
+		if err := renderChannelOnboardingResult(&out, &errOut, cliOutputOptions{}, result); err == nil || strings.Contains(errOut.String(), "must-not-disclose") {
+			t.Fatal("unrelated failure was exposed as registered-account evidence")
+		}
+	})
 	for _, cell := range []string{"absent_pairing", "missing_paired", "missing_connected", "null_role", "code", "paired", "connected", "ready", "identity", "candidate", "missing_role", "foreign_role", "foreign_target", "failed", "retired", "historical", "unknown_phase"} {
 		t.Run(cell, func(t *testing.T) {
 			result := sessionProgressCLIResult("whatsapp", "", "activating_provider", false)

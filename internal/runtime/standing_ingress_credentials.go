@@ -577,7 +577,7 @@ func (rt *Runtime) evaluateStandingIngressAdmission(ctx context.Context, target 
 	if err != nil {
 		return packs.Subject{}, nil, err
 	}
-	if credential.registeredOnly {
+	if credential.registeredOnly || len(credential.registeredOperations) > 0 {
 		return rt.evaluateRegisteredStandingIngress(ctx, target, subject, presence)
 	}
 	current, err := evaluateStandingIngressCapabilitySubject(ctx, target, subject, presence)
