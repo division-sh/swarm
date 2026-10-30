@@ -31,6 +31,7 @@ import (
 	"github.com/division-sh/swarm/internal/store"
 	storebackend "github.com/division-sh/swarm/internal/store/backendselection"
 	"github.com/division-sh/swarm/internal/store/storetest"
+	"github.com/division-sh/swarm/internal/testpostgres"
 	"github.com/division-sh/swarm/internal/testutil"
 	"github.com/google/uuid"
 )
@@ -221,7 +222,12 @@ func TestCanonicalTelegramAgentLiveSelectionPreservesAuthoredDoubles(t *testing.
 	provider := httptest.NewServer(providerRecorder)
 	t.Cleanup(provider.Close)
 	telegramCalls := make(chan map[string]any, 4)
+	native := &channelOnboardingTelegramProvider{}
 	telegram := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, req *http.Request) {
+		if !strings.HasSuffix(req.URL.Path, "/sendMessage") {
+			native.ServeHTTP(w, req)
+			return
+		}
 		if req.URL.Path != "/botbot-token/sendMessage" {
 			t.Errorf("Telegram path = %q, want credential-bearing bot route", req.URL.Path)
 			http.Error(w, "unexpected path", http.StatusNotFound)
@@ -254,17 +260,19 @@ func TestCanonicalTelegramAgentLiveSelectionPreservesAuthoredDoubles(t *testing.
 		SelfCheck: true, Dev: true, LocalRun: true, Verbose: true,
 		TestOutboxSweeperConfig: servedEventPublishProofOutboxSweeperConfig(),
 	}
+	registerChannelFixtureAccount(t, configPath, "bot-token", "420079")
+	prepareStandingTelegramCallback(t, &opts)
 	process := startTelegramAgentServeRuntimeTestProcess(t, sourceRoot, opts)
 	process.waitForReadyLine()
 	baseURL := "http://" + serveRuntimeAPIListenerFromOutput(t, process.outputString())
 	diagnostics := func() string {
 		return process.outputString() + "\ndiagnostics: " + standingSQLiteDiagnostics(sqlitePath)
 	}
-	binding := sendStandingTelegramUpdate(t, baseURL, 201, 42, diagnostics)
+	binding := sendStandingTelegramUpdate(t, native, 201, 42, diagnostics)
 	providerRecorder.waitForInitialCount(t, 1)
 	waitForStandingMemoryCompletion(t, "sqlite", sqlitePath, "live", 1)
 	requireStandingLiveTelegramCalls(t, telegramCalls, "Live turn 1: hello 201")
-	if got := sendStandingTelegramUpdate(t, baseURL, 202, 42, diagnostics); got != binding {
+	if got := sendStandingTelegramUpdate(t, native, 202, 42, diagnostics); got != binding {
 		t.Fatalf("live graduation second binding = %+v, want same generation %+v", got, binding)
 	}
 	providerRecorder.waitForInitialCount(t, 2)
@@ -389,13 +397,19 @@ func runStandingTelegramMemorySupportedSurface(t *testing.T, backend string, rec
 			buildStoresForServe = oldBuildStores
 		})
 		prepareRestart = openStore
-		opts.ConfigPath = writeStandingMockRuntimeConfig(t, "postgres", "")
+		opts.ConfigPath = writeStandingMockRuntimeConfig(t, "postgres", dsn)
 		opts.StoreMode = "postgres"
 		opts.StoreModeSet = true
 	default:
 		t.Fatalf("unsupported backend %q", backend)
 	}
 
+	native := &channelOnboardingTelegramProvider{}
+	telegram := httptest.NewServer(native)
+	t.Cleanup(telegram.Close)
+	redirectExternalHosts(t, map[string]string{"api.telegram.org": telegram.URL})
+	registerChannelFixtureAccount(t, opts.ConfigPath, "bot-token", "420079")
+	prepareStandingTelegramCallback(t, &opts)
 	retainedRoot := ownedMockLifecycleRoot(t)
 	first := startOwnedMockLifecycleTestProcess(t, repoRootForTest(), retainedRoot, opts)
 	first.waitForReadyLine()
@@ -403,23 +417,23 @@ func runStandingTelegramMemorySupportedSurface(t *testing.T, backend string, rec
 	firstDiagnostics := func() string {
 		return first.outputString() + "\ndiagnostics: " + standingMemoryStoreDiagnostics(backend, storeLocation)
 	}
-	requireStandingTelegramSignatureRejection(t, firstURL)
+	requireStandingTelegramSignatureRejection(t, native)
 	requireStandingTelegramEvidenceCounts(t, backend, storeLocation, standingTelegramEvidenceCounts{}, "rejected signatures")
-	unmatched := sendStandingTelegramUnmatchedUpdate(t, firstURL, 100)
+	unmatched := sendStandingTelegramUnmatchedUpdate(t, native, 100)
 	waitForStandingTelegramRawCount(t, backend, storeLocation, 1)
 	requireStandingTelegramEvidenceCounts(t, backend, storeLocation, standingTelegramEvidenceCounts{Raw: 1}, "unmatched raw-only update")
 	requireStandingTelegramPublicationSettlement(t, firstURL, unmatched, false)
-	firstMatched := sendStandingTelegramUpdatePublication(t, firstURL, 101, 42, firstDiagnostics)
+	firstMatched := sendStandingTelegramUpdatePublication(t, native, 101, 42, firstDiagnostics)
 	binding := firstMatched.standingTelegramBinding
 	waitForStandingMemoryCompletion(t, backend, storeLocation, "mock", 1)
 	requireStandingTelegramPublicationSettlement(t, firstURL, firstMatched, true)
-	requireStandingTelegramDuplicateIdentity(t, sendStandingTelegramDuplicate(t, firstURL, 101, 42), firstMatched)
+	requireStandingTelegramDuplicateIdentity(t, sendStandingTelegramDuplicate(t, native, 101, 42), firstMatched)
 	requireStandingMemoryAttemptCount(t, backend, storeLocation, "mock", 1, "same-process exact duplicate")
-	secondMatched := sendStandingTelegramUpdatePublication(t, firstURL, 102, 42, firstDiagnostics)
+	secondMatched := sendStandingTelegramUpdatePublication(t, native, 102, 42, firstDiagnostics)
 	if secondMatched.standingTelegramBinding != binding {
 		t.Fatalf("A2 binding = %+v, want A1 binding %+v", secondMatched.standingTelegramBinding, binding)
 	}
-	thirdMatched := sendStandingTelegramUpdatePublication(t, firstURL, 103, 84, firstDiagnostics)
+	thirdMatched := sendStandingTelegramUpdatePublication(t, native, 103, 84, firstDiagnostics)
 	if thirdMatched.standingTelegramBinding != binding {
 		t.Fatalf("B1 binding = %+v, want standing binding %+v", thirdMatched.standingTelegramBinding, binding)
 	}
@@ -443,12 +457,9 @@ func runStandingTelegramMemorySupportedSurface(t *testing.T, backend string, rec
 		prepareRestart()
 	}
 	if !recoveryOnRestart {
-		sqlitePath := ""
-		if backend == "sqlite" {
-			sqlitePath = storeLocation
-		}
-		opts.ConfigPath = writeStandingMockRuntimeConfigWithRecovery(t, backend, sqlitePath, false)
+		opts.ConfigPath = writeStandingMockRuntimeConfigWithRecovery(t, backend, storeLocation, false)
 	}
+	prepareStandingTelegramCallback(t, &opts)
 	second := startOwnedMockLifecycleTestProcess(t, repoRootForTest(), retainedRoot, opts)
 	second.waitForReadyLine()
 	afterStartup := loadStandingMemorySessions(t, backend, storeLocation)
@@ -465,11 +476,11 @@ func runStandingTelegramMemorySupportedSurface(t *testing.T, backend string, rec
 	if afterTranscript := readStandingPublicTranscript(t, secondURL, binding.RunID, 3); !reflect.DeepEqual(beforeTranscript, afterTranscript) {
 		t.Fatalf("joined restart changed ordered public turns: before=%+v after=%+v", beforeTranscript, afterTranscript)
 	}
-	requireStandingTelegramDuplicateIdentity(t, sendStandingTelegramDuplicate(t, secondURL, 101, 42), firstMatched)
+	requireStandingTelegramDuplicateIdentity(t, sendStandingTelegramDuplicate(t, native, 101, 42), firstMatched)
 	requireStandingTelegramPublicationSettlement(t, secondURL, unmatched, false)
 	requireStandingTelegramPublicationSettlement(t, secondURL, firstMatched, true)
 	requireStandingMemoryAttemptCount(t, backend, storeLocation, "mock", 3, "post-restart exact duplicate")
-	fourthMatched := sendStandingTelegramUpdatePublication(t, secondURL, 104, 42)
+	fourthMatched := sendStandingTelegramUpdatePublication(t, native, 104, 42)
 	if fourthMatched.standingTelegramBinding != binding {
 		t.Fatalf("A3 binding = %+v, want standing binding %+v", fourthMatched.standingTelegramBinding, binding)
 	}
@@ -517,8 +528,34 @@ type standingTelegramPublication struct {
 	EventNames      []string `json:"event_names"`
 }
 
-func requireStandingTelegramSignatureRejection(t testing.TB, baseURL string) {
+func standingTelegramPublicationEndpoint(t testing.TB, destination any) (string, string) {
 	t.Helper()
+	switch target := destination.(type) {
+	case string:
+		return strings.TrimRight(target, "/") + "/webhooks/chat/telegram", "telegram-secret"
+	case *channelOnboardingTelegramProvider:
+		callback, secret, _ := target.Registration()
+		if callback == "" || secret == "" {
+			t.Fatal("registered Telegram fixture has no confirmed callback and signing credential")
+		}
+		return callback, secret
+	default:
+		t.Fatalf("unsupported Telegram fixture destination %T", destination)
+		return "", ""
+	}
+}
+
+func prepareStandingTelegramCallback(t *testing.T, opts *cliapp.ServeOptions) {
+	t.Helper()
+	opts.PublicWebhookListener = reserveChannelOnboardingListener(t)
+	opts.PublicWebhookListen = opts.PublicWebhookListener.Addr().String()
+	opts.PublicWebhookBaseURL = "https://hooks.channel-onboarding.test"
+	redirectExternalHosts(t, map[string]string{"hooks.channel-onboarding.test": "http://" + opts.PublicWebhookListen})
+}
+
+func requireStandingTelegramSignatureRejection(t testing.TB, destination any) {
+	t.Helper()
+	callback, _ := standingTelegramPublicationEndpoint(t, destination)
 	body := []byte(`{"update_id":90,"message":{"message_id":90,"from":{"id":42},"chat":{"id":42,"type":"private"},"text":"must not publish"}}`)
 	for _, tc := range []struct {
 		name   string
@@ -527,7 +564,7 @@ func requireStandingTelegramSignatureRejection(t testing.TB, baseURL string) {
 		{name: "missing"},
 		{name: "invalid", secret: "wrong-secret"},
 	} {
-		req, err := http.NewRequest(http.MethodPost, strings.TrimRight(baseURL, "/")+"/webhooks/chat/telegram", bytes.NewReader(body))
+		req, err := http.NewRequest(http.MethodPost, callback, bytes.NewReader(body))
 		if err != nil {
 			t.Fatalf("new %s-signature Telegram request: %v", tc.name, err)
 		}
@@ -547,26 +584,27 @@ func requireStandingTelegramSignatureRejection(t testing.TB, baseURL string) {
 	}
 }
 
-func sendStandingTelegramUnmatchedUpdate(t testing.TB, baseURL string, updateID int) standingTelegramPublication {
+func sendStandingTelegramUnmatchedUpdate(t testing.TB, destination any, updateID int) standingTelegramPublication {
 	t.Helper()
 	body := []byte(fmt.Sprintf(`{"update_id":%d,"channel_post":{"message_id":%d,"chat":{"id":-100,"type":"channel"},"text":"raw only"}}`, updateID, updateID))
-	return sendStandingTelegramPublication(t, baseURL, body, http.StatusAccepted, "accepted")
+	return sendStandingTelegramPublication(t, destination, body, http.StatusAccepted, "accepted")
 }
 
-func sendStandingTelegramUpdatePublication(t testing.TB, baseURL string, updateID, chatID int, diagnostics ...func() string) standingTelegramPublication {
+func sendStandingTelegramUpdatePublication(t testing.TB, destination any, updateID, chatID int, diagnostics ...func() string) standingTelegramPublication {
 	t.Helper()
 	body := []byte(fmt.Sprintf(`{"update_id":%d,"message":{"message_id":%d,"from":{"id":%d},"chat":{"id":%d,"type":"private"},"text":"hello %d"}}`, updateID, updateID, chatID, chatID, updateID))
-	return sendStandingTelegramPublication(t, baseURL, body, http.StatusAccepted, "accepted", diagnostics...)
+	return sendStandingTelegramPublication(t, destination, body, http.StatusAccepted, "accepted", diagnostics...)
 }
 
-func sendStandingTelegramPublication(t testing.TB, baseURL string, body []byte, wantCode int, wantStatus string, diagnostics ...func() string) standingTelegramPublication {
+func sendStandingTelegramPublication(t testing.TB, destination any, body []byte, wantCode int, wantStatus string, diagnostics ...func() string) standingTelegramPublication {
 	t.Helper()
-	req, err := http.NewRequest(http.MethodPost, strings.TrimRight(baseURL, "/")+"/webhooks/chat/telegram", bytes.NewReader(body))
+	callback, signing := standingTelegramPublicationEndpoint(t, destination)
+	req, err := http.NewRequest(http.MethodPost, callback, bytes.NewReader(body))
 	if err != nil {
 		t.Fatalf("new Telegram publication request: %v", err)
 	}
 	req.Header.Set("content-type", "application/json")
-	req.Header.Set("X-Telegram-Bot-Api-Secret-Token", "telegram-secret")
+	req.Header.Set("X-Telegram-Bot-Api-Secret-Token", signing)
 	resp, err := http.DefaultClient.Do(req)
 	if err != nil {
 		t.Fatalf("send Telegram publication: %v", err)
@@ -598,8 +636,15 @@ func sendStandingTelegramPublication(t testing.TB, baseURL string, body []byte, 
 	var update struct {
 		UpdateID int `json:"update_id"`
 	}
-	if err := json.Unmarshal(body, &update); err != nil || publication.ProviderEventID != fmt.Sprint(update.UpdateID) {
-		t.Fatalf("Telegram receipt changed provider delivery identity: %+v err=%v", publication, err)
+	if err := json.Unmarshal(body, &update); err != nil {
+		t.Fatal(err)
+	}
+	wantDelivery := fmt.Sprint(update.UpdateID)
+	if _, registered := destination.(*channelOnboardingTelegramProvider); registered {
+		wantDelivery = channelFixtureProviderEventID(t, wantDelivery)
+	}
+	if publication.ProviderEventID != wantDelivery {
+		t.Fatalf("Telegram receipt changed provider delivery identity: %+v", publication)
 	}
 	return publication
 }
@@ -654,10 +699,10 @@ func loadStandingTelegramEvidenceCounts(t testing.TB, backend, location string) 
 	return counts
 }
 
-func sendStandingTelegramDuplicate(t testing.TB, baseURL string, updateID, chatID int) standingTelegramPublication {
+func sendStandingTelegramDuplicate(t testing.TB, destination any, updateID, chatID int) standingTelegramPublication {
 	t.Helper()
 	body := []byte(fmt.Sprintf(`{"update_id":%d,"message":{"message_id":%d,"from":{"id":%d},"chat":{"id":%d,"type":"private"},"text":"hello %d"}}`, updateID, updateID, chatID, chatID, updateID))
-	return sendStandingTelegramPublication(t, baseURL, body, http.StatusOK, "duplicate")
+	return sendStandingTelegramPublication(t, destination, body, http.StatusOK, "duplicate")
 }
 
 func requireStandingTelegramDuplicateIdentity(t testing.TB, got, want standingTelegramPublication) {
@@ -1017,7 +1062,17 @@ func writeStandingMockRuntimeConfigWithRecovery(t *testing.T, backend, sqlitePat
 		"store:",
 		"  backend: " + backend,
 	}
-	if sqlitePath != "" {
+	if backend == "postgres" && sqlitePath != "" {
+		connection, err := testpostgres.ParseConnection(sqlitePath)
+		if err != nil {
+			t.Fatal(err)
+		}
+		parameters := connection.Parameters()
+		t.Setenv("PGPASSWORD", parameters.Password)
+		lines = append(lines, "database:", fmt.Sprintf("  host: %q", parameters.Host), fmt.Sprintf("  port: %d", parameters.Port),
+			fmt.Sprintf("  name: %q", parameters.Database), fmt.Sprintf("  user: %q", parameters.User),
+			"  password_env: PGPASSWORD", fmt.Sprintf("  sslmode: %q", parameters.SSLMode), "  pool_size: 5")
+	} else if sqlitePath != "" {
 		lines = append(lines, "  sqlite:", "    path: "+sqlitePath)
 	}
 	lines = append(lines,
