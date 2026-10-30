@@ -321,11 +321,13 @@ func (a *Adapter) activateNormalAuthorityTx(ctx context.Context, tx *sql.Tx, att
 		return err
 	}
 	for _, runID := range runIDs {
-		load := sourceadmission.LoadPostgresTx
+		var err error
 		if a.dialect == DialectSQLite {
-			load = sourceadmission.LoadSQLiteTx
+			_, err = sourceadmission.LoadSQLiteTx(ctx, tx, runID, false, false)
+		} else {
+			_, err = sourceadmission.LoadPostgresTx(ctx, tx, runID, false, false)
 		}
-		if _, err := load(ctx, tx, runID, false, false); err != nil {
+		if err != nil {
 			return err
 		}
 	}

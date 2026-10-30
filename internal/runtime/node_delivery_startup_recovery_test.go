@@ -183,7 +183,6 @@ func TestRuntimeStartHydratesPersistedAgentsBeforeRecoveringNodeDeliveriesParity
 				ctx := startupRecoverySourceContext(persistedSource, templateInstanceDeliveryRunID)
 				ctx = runtimecorrelation.WithSourceArtifactFact(ctx, persistedSource)
 				ctx = runtimecorrelation.WithRootAdmission(ctx, rooted.Admission())
-				ensureStartupRecoverySourceArtifact(t, ctx, selected, bundle.SourceArtifact)
 				return ctx, db, db, selected
 			},
 		},
@@ -194,7 +193,6 @@ func TestRuntimeStartHydratesPersistedAgentsBeforeRecoveringNodeDeliveriesParity
 				ctx := startupRecoverySourceContext(persistedSource, templateInstanceDeliveryRunID)
 				ctx = runtimecorrelation.WithSourceArtifactFact(ctx, persistedSource)
 				ctx = runtimecorrelation.WithRootAdmission(ctx, rooted.Admission())
-				ensureStartupRecoverySourceArtifact(t, ctx, selected, bundle.SourceArtifact)
 				return ctx, nil, storetest.Database(selected), selected
 			},
 		},
@@ -202,7 +200,9 @@ func TestRuntimeStartHydratesPersistedAgentsBeforeRecoveringNodeDeliveriesParity
 		t.Run(backend.name, func(t *testing.T) {
 			ctx, _, _, selected := backend.setup(t)
 			prepared := prepareExternalRuntimeFixtureProcess(t, ctx, selected)
-			storetest.RequireRun(t, externalRuntimeProcessContext(t, ctx, prepared), selected, storetest.RunFixture{
+			preparedCtx := externalRuntimeProcessContext(t, ctx, prepared)
+			ensureStartupRecoverySourceArtifact(t, preparedCtx, selected, bundle.SourceArtifact)
+			storetest.RequireRun(t, preparedCtx, selected, storetest.RunFixture{
 				Origin: storetest.ScenarioSetupOrigin(), RunID: templateInstanceDeliveryRunID,
 				BundleHash: persistedBundleHash, Artifact: rooted.Artifact(), RootAdmission: rooted.Admission(),
 			})
