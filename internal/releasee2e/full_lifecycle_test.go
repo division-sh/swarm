@@ -460,7 +460,7 @@ func assertFullLifecycleReadySurface(t *testing.T, process *releaseServeProcess)
 	defer cancel()
 	err := pollReleaseCondition(ctx, 10*time.Millisecond, func() (bool, error) {
 		output := process.output.String()
-		for _, text := range []string{"ready in", "config · bundle", "listeners"} {
+		for _, text := range []string{"ready in", "telegram webhook", "telegram.webhook_signing_secret", "bound"} {
 			if !strings.Contains(output, text) {
 				return false, nil
 			}
