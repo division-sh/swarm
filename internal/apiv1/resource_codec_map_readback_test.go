@@ -59,7 +59,7 @@ func TestResourceCodecCompiledMapImportReceiptAndPinnedPublicAgentReadbackBothSt
 		ctx := testAuthorActivityContextForSource(context.Background(), mustAPITestSourceArtifactFact(catalog.BundleHash))
 		ctx = originalAPIFixtureContext(t, ctx, fixture.primary)
 		storetest.RequireBundleDataCatalog(t, ctx, fixture.primary, bundle)
-		handler := testHandler(t, Options{AuthTokens: []string{testToken}, Handlers: OperatorDataHandlers(DataHandlerOptions{Store: fixture.primary})})
+		handler := testHandlerWithOriginalContext(t, Options{AuthTokens: []string{testToken}, Handlers: OperatorDataHandlers(DataHandlerOptions{Store: fixture.primary})}, ctx)
 		call := func(method string, params map[string]any) map[string]any {
 			t.Helper()
 			status, response, body := callReadOnlyProbeRPC(t, handler, method, params, "Bearer "+testToken)

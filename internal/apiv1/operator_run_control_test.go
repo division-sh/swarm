@@ -63,7 +63,7 @@ func TestOperatorRunStopDoesNotReplayCommittedTransitionAfterReconciliationFailu
 		t.Run(tc.name, func(t *testing.T) {
 			pg, _ := storetest.StartPostgresRuntimeStoreWithReopen(t)
 			controller := &committedStopRecoveryProbe{recovery: runtimeruncontrol.PostCommitRecovery{Disposition: tc.disposition, Err: errors.New(tc.diagnostic)}}
-			handler := testHandler(t, Options{AuthTokens: []string{testToken}, Handlers: OperatorRunControlHandlers(RunControlHandlerOptions{Idempotency: pg, Controller: controller})})
+			handler := testHandlerWithOriginalContext(t, Options{AuthTokens: []string{testToken}, Handlers: OperatorRunControlHandlers(RunControlHandlerOptions{Idempotency: pg, Controller: controller})}, apiTestOriginalProcessContext(t, context.Background(), pg))
 			runID := uuid.NewString()
 			body := runControlBody("run.stop", runID, "committed-stop-recovery")
 			for attempt := 0; attempt < 2; attempt++ {

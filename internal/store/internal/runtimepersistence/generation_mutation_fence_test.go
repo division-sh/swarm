@@ -15,43 +15,9 @@ import (
 	"github.com/division-sh/swarm/internal/runtime/startupownership"
 	"github.com/division-sh/swarm/internal/sourceartifact"
 	"github.com/division-sh/swarm/internal/store/internal/backend/agentpersistence"
-	"github.com/division-sh/swarm/internal/store/internal/backend/generationauthority"
 	"github.com/division-sh/swarm/internal/store/testutil/agentfixture"
 	"github.com/google/uuid"
 )
-
-// The caller supplies the real takeover/repair operation. No grant transition or
-// authorization result is replaced; only the outer mutation lifetime is held.
-func proveBulkRetirementWaitsForMutation(t *testing.T, selected any, db *sql.DB, backend string, evidence startupownership.GrantEvidence, retire func(context.Context) error) {
-	t.Helper()
-	ctx := testAuthorActivityContext()
-	rolledBack := errors.New("release bulk retirement fence by rollback")
-	retired := make(chan error, 1)
-	err := runUnrevisionedEventFixtureTransactionForTest(ctx, selected, func(txctx context.Context, tx *sql.Tx) error {
-		if err := generationauthority.FenceMutation(txctx, tx, backend == "sqlite"); err != nil {
-			return err
-		}
-		waiting, cancel := context.WithTimeout(ctx, time.Second)
-		defer cancel()
-		go func() { retired <- retire(waiting) }()
-		<-waiting.Done()
-		return rolledBack
-	})
-	if !errors.Is(err, rolledBack) {
-		t.Fatalf("bulk retirement fence rollback: %v", err)
-	}
-	if err := <-retired; !errors.Is(err, context.DeadlineExceeded) {
-		t.Fatalf("bulk retirement must wait for held mutation fence until cancelled: %v", err)
-	}
-	var state string
-	var version uint64
-	if err := db.QueryRowContext(ctx, `SELECT state,state_version FROM runtime_generation_grants WHERE grant_id=$1 ORDER BY state_version DESC LIMIT 1`, evidence.GrantID).Scan(&state, &version); err != nil {
-		t.Fatal(err)
-	}
-	if state != string(evidence.State) || version != evidence.StateVersion {
-		t.Fatalf("cancelled bulk retirement changed head: %s/%d", state, version)
-	}
-}
 
 func TestGenerationMutationFenceBothStores(t *testing.T) {
 	for _, backend := range []string{"sqlite", "postgres"} {
