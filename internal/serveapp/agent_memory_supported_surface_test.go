@@ -606,7 +606,10 @@ func publishStandingMockInput(t *testing.T, baseURL, bundleHash string, messageI
 			return *child
 		}
 		if time.Now().After(deadline) {
-			t.Fatal("mock business input has no actual child delivery")
+			requireServedJSONRPCResult(t, endpoint, "event.list", map[string]any{
+				"filter": map[string]any{"run_id": runID}, "limit": 500,
+			}, &events)
+			t.Fatalf("mock business input has no actual child delivery: events=%+v", events.Events)
 		}
 		time.Sleep(10 * time.Millisecond)
 	}
