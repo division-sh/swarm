@@ -221,6 +221,21 @@ func runChannelDynamicHolderLivePickup(t *testing.T, backend servedparity.Backen
 		t.Fatal("field update did not target the existing holder run")
 	}
 	callback, secret := waitChannelOnboardingRegistration(t, h.provider, &lockedBuffer{}, &lockedBuffer{}, nil)
+	deadline := time.Now().Add(15 * time.Second)
+	for {
+		response, err := http.Get(callback)
+		if err != nil {
+			t.Fatal(err)
+		}
+		_ = response.Body.Close()
+		if response.StatusCode == http.StatusMethodNotAllowed {
+			break
+		}
+		if time.Now().After(deadline) {
+			t.Fatalf("registered callback did not become current: HTTP %d", response.StatusCode)
+		}
+		time.Sleep(10 * time.Millisecond)
+	}
 	if names := postChannelTelegramUpdate(t, callback, secret, map[string]any{
 		"update_id": 84101, "message": map[string]any{"message_id": 84101, "from": map[string]any{"id": 2001},
 			"chat": map[string]any{"id": 2001, "type": "private"}, "text": "new holder customer"},
