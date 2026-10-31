@@ -548,6 +548,7 @@ func (e *Executor) Execute(ctx context.Context, req ExecutionRequest) (Execution
 				committed, err := e.persist(lockCtx, frame)
 				result = frame.result
 				result.Committed = committed.Committed
+				result.AccountHolder = committed.AccountHolder
 				if err != nil && !committed.Committed {
 					result.EmitIntents = nil
 					result.ActivityIntents = nil

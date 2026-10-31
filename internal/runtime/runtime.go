@@ -103,6 +103,7 @@ type RuntimeOptions struct {
 	ChannelPlans                     []packs.SatisfactionPlan
 	DeclaredChannelPublication       channelonboarding.ChannelActivationPublication
 	ChannelOnboardingStore           channelonboarding.Store
+	AccountHolderCreated             func(context.Context, channelonboarding.AccountReference) error
 	ChannelActivationPublication     channelonboarding.ChannelActivationPublication
 	ScenarioDeclarations             []scenarioderivation.Declaration
 	BootStartedAt                    time.Time
@@ -1383,6 +1384,7 @@ func newRuntime(ctx context.Context, deps RuntimeDeps) (*Runtime, error) {
 			Credentials:               rt.Credentials,
 			ProviderCredentials:       rt.Options.ProviderCredentials,
 			RegisteredAccounts:        registeredAccounts,
+			AccountHolderCreated:      opts.AccountHolderCreated,
 			ManagedCredentials:        rt.ManagedCredentials,
 			MockConnectorResponses:    boot.MockConnectorResponses,
 			ScenarioExecutionProfiles: runtimeDeps.ScenarioExecutionProfiles,

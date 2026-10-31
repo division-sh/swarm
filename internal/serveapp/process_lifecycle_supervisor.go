@@ -7,6 +7,7 @@ import (
 	"sync"
 
 	"github.com/division-sh/swarm/internal/apiv1"
+	"github.com/division-sh/swarm/internal/channelonboarding"
 	"github.com/division-sh/swarm/internal/runtime"
 	"github.com/division-sh/swarm/internal/runtime/core/worklifetime"
 	runtimecorrelation "github.com/division-sh/swarm/internal/runtime/correlation"
@@ -66,6 +67,16 @@ func newProcessLifecycleSupervisor(ready serveReadiness, initialRT *runtime.Runt
 		},
 	}
 	return s
+}
+
+func (s *processLifecycleSupervisor) refreshRegisteredAccount(ctx context.Context, ref channelonboarding.AccountReference) error {
+	s.mu.RLock()
+	refresher := s.resetChannelActivations
+	s.mu.RUnlock()
+	if refresher == nil {
+		return nil // Startup admits holders constructed before the refresher exists.
+	}
+	return refresher.refreshRegisteredAccount(ctx, ref)
 }
 
 func (s *processLifecycleSupervisor) SetProcessCapability(capability runtimestartupownership.ProcessCapability) {

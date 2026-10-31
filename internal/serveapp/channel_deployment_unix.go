@@ -86,7 +86,7 @@ func deploymentChannelHandlers(repo, config, directory string, stores *selected.
 			err = errors.Join(err, client.Close(context.WithoutCancel(ctx)))
 		}
 		if err == nil && !slices.Contains([]string{"channel.list", "channel.onboarding_get", "channel.onboarding_select"}, req.Method) && runtimeOptions.refresh != nil {
-			err = runtimeOptions.refresh(ctx)
+			err = runtimeOptions.refresh(ctx, channelonboarding.AccountReference{Provider: head.Operation.Provider, Account: head.Operation.AccountReference})
 		}
 		return result, err
 	}

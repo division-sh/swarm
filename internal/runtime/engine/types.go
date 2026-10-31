@@ -440,6 +440,7 @@ func (m *StateMutation) SetStateBuckets(raw map[string]map[string]any) {
 }
 
 type ExecutionResult struct {
+	AccountHolder *channelonboarding.AccountReference
 	// Committed is acknowledged persistence, not a prediction from partial intents.
 	Committed               bool
 	CommittedStage          *CommittedStage

@@ -368,6 +368,9 @@ func (o pipelineEngineMutationOwner) commitPreparedEngineMutation(
 	}
 	result.Committed = true
 	resultErr = commitErr
+	ref, notificationErr := o.state.coordinator.committedAccountHolder(mutation.Address.FlowID.String(), mutation.EvaluatedState.Fields, mutation.State.Fields)
+	result.AccountHolder = ref
+	resultErr = errors.Join(resultErr, notificationErr)
 	expectedStage, stageErr := CommittedWorkflowStage(command.State)
 	if stageErr == nil {
 		stageErr = committed.Stage.Validate()

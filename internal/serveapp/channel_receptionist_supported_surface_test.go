@@ -7,6 +7,8 @@ import (
 	"fmt"
 	"net/http"
 	"net/http/httptest"
+	"os"
+	"path/filepath"
 	"reflect"
 	"slices"
 	"strings"
@@ -14,6 +16,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/division-sh/swarm/internal/operatorread"
 	runtimecredentials "github.com/division-sh/swarm/internal/runtime/credentials"
 	"github.com/division-sh/swarm/internal/runtime/testfixtures/canonicalrouting"
 	"github.com/division-sh/swarm/internal/servedparity"
@@ -21,6 +24,9 @@ import (
 
 func TestChannelOneBotManyConversationsPublicJourney(t *testing.T) {
 	for _, backend := range servedparity.RequiredBackends {
+		t.Run(string(backend)+"/dynamic_holder", func(t *testing.T) {
+			runChannelDynamicHolderLivePickup(t, backend)
+		})
 		t.Run(string(backend), func(t *testing.T) {
 			h := newChannelOnboardingE2EHarness(t, backend, true)
 			backendName := "sqlite"
@@ -47,9 +53,14 @@ func TestChannelOneBotManyConversationsPublicJourney(t *testing.T) {
 				t.Fatal(err)
 			}
 			bundleHash := servedEventPublishFixtureBundleHash(t, h.opts.SourceRoot)
-			registered := registerChannelFixtureAccount(t, h.opts.ConfigPath, "bot-token", "420079", h.provider)
 			h.start(t)
 			defer h.stop(t)
+			config, err := os.ReadFile(h.opts.ConfigPath)
+			if err != nil {
+				t.Fatal(err)
+			}
+			writeStandingCandidateFile(t, h.opts.ConfigPath, string(config)+"\nconnection:\n  api_server: "+h.endpoint+"\n")
+			registered := registerChannelFixtureAccount(t, h.opts.ConfigPath, "bot-token", "420079", h.provider)
 			var cardMessageID int
 			var token string
 			if !registered.DeploymentRegistration {
@@ -152,6 +163,69 @@ func TestChannelOneBotManyConversationsPublicJourney(t *testing.T) {
 			}
 			requireReceptionistReplies(t, h, expectedDestinations)
 		})
+	}
+}
+
+func runChannelDynamicHolderLivePickup(t *testing.T, backend servedparity.Backend) {
+	t.Helper()
+	h := newChannelOnboardingE2EHarness(t, backend, true)
+	root := h.opts.SourceRoot
+	writeChannelOnboardingLiveToolCredentials(t, h.credentialPath)
+	if err := os.Remove(filepath.Join(root, "policy.yaml")); err != nil {
+		t.Fatal(err)
+	}
+	writeStandingCandidateFile(t, filepath.Join(root, "entities.yaml"), "telegram_service:\n  operator_account: text\n")
+	writeStandingCandidateFile(t, filepath.Join(root, "events.yaml"), "account.assigned:\n  operator_account: text\n")
+	writeStandingCandidateFile(t, filepath.Join(root, "schema.yaml"), "stages: {active: {}}\npins:\n  inputs: [inbound.telegram.text_message, account.assigned]\n")
+	writeStandingCandidateFile(t, filepath.Join(root, "nodes.yaml"), `assign-account:
+  execution_type: system_node
+  subscribes_to: [account.assigned]
+  event_handlers:
+    account.assigned:
+      data_accumulation:
+        source_event: account.assigned
+        writes: [{target_field: operator_account, value: payload.operator_account}]
+`)
+	registerChannelFixtureAccount(t, h.opts.ConfigPath, "bot-token", "420079")
+	hash := servedEventPublishFixtureBundleHash(t, root)
+	h.start(t)
+	defer h.stop(t)
+	if registrations, _ := h.provider.Counts(); registrations != 0 {
+		t.Fatal("an account without a holder acquired a webhook")
+	}
+	var listed struct {
+		Runs []operatorread.RunHeader `json:"runs"`
+	}
+	requireServedJSONRPCResult(t, h.rpcEndpoint(), "run.list", map[string]any{"bundle_hash": hash, "limit": 100}, &listed)
+	runID := ""
+	for _, run := range listed.Runs {
+		if run.FlowPath == "." && run.Status == "live" && run.BundleHash == hash {
+			if runID != "" {
+				t.Fatal("more than one current account-holder run")
+			}
+			runID = run.RunID
+		}
+	}
+	if runID == "" {
+		t.Fatal("missing current account-holder run")
+	}
+	var published struct {
+		RunID   string `json:"run_id"`
+		EventID string `json:"event_id"`
+	}
+	requireServedJSONRPCResult(t, h.rpcEndpoint(), "event.publish", map[string]any{
+		"run_id": runID, "event_name": "account.assigned", "idempotency_key": "assign-registered-account",
+		"payload": map[string]any{"operator_account": "420079"},
+	}, &published)
+	if published.RunID != runID || published.EventID == "" {
+		t.Fatal("field update did not target the existing holder run")
+	}
+	callback, secret := waitChannelOnboardingRegistration(t, h.provider, &lockedBuffer{}, &lockedBuffer{}, nil)
+	if names := postChannelTelegramUpdate(t, callback, secret, map[string]any{
+		"update_id": 84101, "message": map[string]any{"message_id": 84101, "from": map[string]any{"id": 2001},
+			"chat": map[string]any{"id": 2001, "type": "private"}, "text": "new holder customer"},
+	}); !slices.Contains(names, "inbound.telegram.text_message") {
+		t.Fatalf("field-only holder did not admit customer traffic: %v", names)
 	}
 }
 

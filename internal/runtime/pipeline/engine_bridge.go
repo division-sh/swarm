@@ -2,6 +2,7 @@ package pipeline
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"strings"
 
@@ -221,6 +222,9 @@ func (pc *PipelineCoordinator) executeNodeContractHandler(
 		Preview:         preview,
 		State:           stateSnapshot,
 	})
+	if result.Committed {
+		err = errors.Join(err, pc.notifyAccountHolder(ctx, result.AccountHolder))
+	}
 	if !preview {
 		logComputeModuleReplayEvidence(ctx, pc.bus, node.Key(), triggerCtx.Event, result.ComputeModuleTraces)
 		logLoopExecution(ctx, pc.bus, node.Key(), triggerCtx.Event, result.LoopTrace)
