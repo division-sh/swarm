@@ -128,8 +128,8 @@ func TestDeploymentWhatsAppFirstConnectThroughRunningServeBothStores(t *testing.
 			case <-ctx.Done():
 				t.Fatalf("public signed first-connect stalled: err=%s", errOut.String())
 			}
-			if !strings.Contains(out.String(), "READY") || !strings.Contains(out.String(), "Linked to +15551234567") {
-				t.Fatal("public connect omitted linked-account approval or READY")
+			if !strings.Contains(out.String(), "Registered whatsapp account +15551234567.") || !strings.Contains(out.String(), "Linked to +15551234567") {
+				t.Fatal("public connect omitted linked-account approval or registration")
 			}
 			var listing struct {
 				Accounts []channelonboarding.Result `json:"accounts"`

@@ -200,14 +200,6 @@ func TestChannelCLIExplicitPairingClaimConfirmationJourney(t *testing.T) {
 						result = sessionProgressCLIResult("whatsapp", "", "awaiting_external_identity", false)
 						result["connection"] = map[string]any{"state": "connected", "linked": true, "account_presentation": "+15550000001"}
 					}
-					if loginHandoff && loginReads >= 2 {
-						if mode == "human-login-disconnected" {
-							result["connection"] = map[string]any{"state": "disconnected", "linked": false, "reason": "network unreachable"}
-						} else {
-							result["pairing"].(map[string]any)["connected"] = true
-							result["pairing"].(map[string]any)["account_presentation"] = "+15550000001"
-						}
-					}
 				case 3:
 					result = sessionProgressCLIResult("whatsapp", "", "awaiting_external_identity", false)
 					result["identity_operation"] = operatorChannelCLIOperationResult("awaiting_claim", 1, 0)
@@ -255,7 +247,11 @@ func TestChannelCLIExplicitPairingClaimConfirmationJourney(t *testing.T) {
 						}
 						checkpoints++
 						if checkpoints == 1 {
-							return progress()
+							result := progress()
+							if mode == "human-login-disconnected" {
+								result["connection"] = map[string]any{"state": "disconnected", "linked": false, "reason": "network unreachable"}
+							}
+							return result
 						}
 						stage = 3
 						result := sessionProgressCLIResult("whatsapp", "", "awaiting_external_identity", false)
@@ -320,7 +316,7 @@ func TestChannelCLIExplicitPairingClaimConfirmationJourney(t *testing.T) {
 					return
 				}
 				if mode == "human-login-disconnected" {
-					if code != 2 || checkpoints != 1 || loginReads != 2 ||
+					if code != 2 || checkpoints != 1 || loginReads != 0 ||
 						!strings.Contains(errOut.String(), "WhatsApp disconnected: network unreachable") ||
 						strings.Contains(out.String(), "READY") || strings.Contains(errOut.String(), "[y/N]") ||
 						strings.Count(out.String(), "Connecting to whatsapp...") != 1 ||
@@ -329,6 +325,9 @@ func TestChannelCLIExplicitPairingClaimConfirmationJourney(t *testing.T) {
 						t.Fatal("disconnected retained pairing kept driving, prompted, or lost its plain reason", code, checkpoints, loginReads, methods)
 					}
 					return
+				}
+				if mode == "human-login-handoff" && (checkpoints != 2 || loginReads != 0) {
+					t.Fatal("pending login relied on GET to create its authenticated successor", checkpoints, loginReads)
 				}
 				if code != 0 || !strings.Contains(out.String(), "READY") || !reentry && (!strings.Contains(out.String(), "\x1b[J") ||
 					!strings.Contains(out.String(), "Linked Devices")) ||

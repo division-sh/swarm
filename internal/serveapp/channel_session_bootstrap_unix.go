@@ -357,10 +357,15 @@ func (s *serveSessionBootstrap) registerDeploymentConnection(op channelonboardin
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	if prior := s.connections[op.OperationID]; prior != nil {
-		if prior.connection != connection {
+		if prior.connection == connection {
+			return nil
+		}
+		if !prior.connection.Closed() || prior.operation.OperationID != op.OperationID ||
+			prior.operation.SessionConnectionID != op.SessionConnectionID || prior.operation.PrincipalID != op.PrincipalID ||
+			prior.operation.Provider != op.Provider || prior.operation.Interface.Normalized() != op.Interface.Normalized() ||
+			prior.operation.Coordinate != op.Coordinate || prior.operation.RequestHash != op.RequestHash {
 			return channelonboarding.ErrConflict
 		}
-		return nil
 	}
 	done := make(chan struct{})
 	close(done)

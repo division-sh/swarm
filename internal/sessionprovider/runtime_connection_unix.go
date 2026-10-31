@@ -559,6 +559,20 @@ func (c *RuntimeConnection) joinRetirement() {
 	}
 }
 
+// Closed reports completed SDK cleanup and work release, not cancellation or
+// transport disconnection. It never starts or waits for retirement.
+func (c *RuntimeConnection) Closed() bool {
+	if c == nil {
+		return false
+	}
+	select {
+	case <-c.closed:
+		return true
+	default:
+		return false
+	}
+}
+
 func (c *RuntimeConnection) Close(ctx context.Context) error {
 	if c == nil {
 		return nil
