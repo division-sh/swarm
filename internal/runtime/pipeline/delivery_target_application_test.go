@@ -5,6 +5,7 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"fmt"
 	"reflect"
 	"strings"
 	"testing"
@@ -276,9 +277,10 @@ func VerifyDeliveryTargetApplicationRejectsWrongRunRootTargetsBeforeMutationOnBo
 			)
 			route := events.RouteIdentity{FlowID: ".", FlowInstance: wrongRunID, EntityID: entityID}
 			owner := testCase.owner(route)
+			wantError := fmt.Sprintf("root target run %q disagrees with current run %q", wrongRunID, testPipelineRunID)
 
 			for attempt, coordinator := range []*PipelineCoordinator{newCoordinator(), newCoordinator()} {
-				if _, err := coordinator.prepareDeliveryTargetApplication(ctx, node.Key(), handlerFact, handler, evt, owner); err == nil || !strings.Contains(err.Error(), "disagrees with current root coordinate") {
+				if _, err := coordinator.prepareDeliveryTargetApplication(ctx, node.Key(), handlerFact, handler, evt, owner); err == nil || !strings.Contains(err.Error(), wantError) {
 					t.Fatalf("attempt %d wrong-run root error = %v", attempt+1, err)
 				}
 			}
@@ -747,6 +749,11 @@ func TestDeliveryTargetApplicationRequiresExactPreviewOwnerAndRejectsConflict(t 
 	}
 	if got := application.State(); got.EntityID != entityID || got.Control.FlowPath != target.FlowInstance || got.Metadata["marker"] != "preview" {
 		t.Fatalf("projected preview state = %#v", got)
+	}
+	retiredHandler := handler
+	retiredHandler.CreateEntity = true
+	if _, err := pc.prepareDeliveryTargetApplication(context.Background(), node.Key(), handlerFact, retiredHandler, evt, events.MustExistingEntityTarget(target), preview); err == nil || !strings.Contains(err.Error(), "handler create_entity is retired") {
+		t.Fatalf("receipt replaced the already-resolved executing handler: %v", err)
 	}
 
 	preview.EntityID = eventtest.UUID("conflicting-preview-target")

@@ -267,8 +267,11 @@ func TestJoinLifecycleHandlerResolutionRequiresExactDeclarationRef(t *testing.T)
 				t.Fatalf("delivery target = %#v handler=%#v, want flow=%q instance=%q entity=%q", target, handler, wantExecutionFlow, wantInstance, entityID)
 			}
 			owner := events.MustExistingEntityTarget(target)
-			if err := ValidateStampedDeliveryTargetOwnership(source, tc.event, recipient, handler, resolution.Handler, owner); err != nil {
+			if _, err := admitDeliveryTargetApplicationOwner(source, tc.event, recipient, handler, resolution.Handler, owner); err != nil {
 				t.Fatalf("valid stamped join occurrence: %v", err)
+			}
+			if _, err := admitDeliveryTargetApplicationOwner(source, tc.event, events.MustNodeDeliveryRecipient(pipelineNode(t, tc.flowID, "unrelated-node")), handler, resolution.Handler, owner); err == nil {
+				t.Fatal("stamped join accepted a foreign recipient")
 			}
 			admission, found, err := ResolveWorkflowJoinOccurrencePayloadAdmission(source, tc.event, bundle.SourceArtifact.BundleHash())
 			if err != nil || !found {
@@ -332,9 +335,11 @@ func TestJoinLifecycleHandlerResolutionRequiresExactDeclarationRef(t *testing.T)
 				{"wrong task", wrongTask, handler, owner},
 				{"wrong entity", tc.event, handler, events.MustExistingEntityTarget(wrongEntity)},
 				{"wrong handler event", tc.event, handler.ForEvent("unrelated.event"), owner},
+				{"omitted handler event", tc.event, MustDeliveryTargetHandler(wantNode), owner},
+				{"wrong handler node", tc.event, MustDeliveryTargetHandler(pipelineNode(t, tc.flowID, "unrelated-node")).ForEvent(events.EventType(resolution.Handle.EventType())), owner},
 			} {
 				t.Run(bad.name, func(t *testing.T) {
-					if err := ValidateStampedDeliveryTargetOwnership(source, bad.event, recipient, bad.handler, resolution.Handler, bad.owner); err == nil {
+					if _, err := admitDeliveryTargetApplicationOwner(source, bad.event, recipient, bad.handler, resolution.Handler, bad.owner); err == nil {
 						t.Fatalf("stamped join accepted %s", bad.name)
 					}
 				})

@@ -10,6 +10,7 @@ import (
 	runtimeflowidentity "github.com/division-sh/swarm/internal/runtime/core/flowidentity"
 	"github.com/division-sh/swarm/internal/runtime/core/identity"
 	runtimeengine "github.com/division-sh/swarm/internal/runtime/engine"
+	"github.com/division-sh/swarm/internal/runtime/semanticview"
 )
 
 // DeliveryTargetApplication is the immutable execution projection of one
@@ -105,13 +106,11 @@ func (pc *PipelineCoordinator) prepareDeliveryTargetApplication(
 		return DeliveryTargetApplication{}, fmt.Errorf("delivery target application requires pipeline coordinator")
 	}
 	source := pc.SemanticSource()
-	flowID := handlerFact.ExecutionFlowID(source)
-	if targetFlowID := strings.TrimSpace(owner.Route().FlowID); targetFlowID != "" {
-		flowID = targetFlowID
-	}
-	if err := ValidateStampedDeliveryTargetOwnership(source, evt, events.MustNodeDeliveryRecipient(handlerFact.Node()), handlerFact, handler, owner); err != nil {
+	lookup, err := admitDeliveryTargetApplicationOwner(source, evt, events.MustNodeDeliveryRecipient(handlerFact.Node()), handlerFact, handler, owner)
+	if err != nil {
 		return DeliveryTargetApplication{}, err
 	}
+	flowID := lookup.Coordinate().FlowID
 	if admitted, found := workflowNodeDeliveryRoute(ctx); found && len(admitted.Context.Joins) > 0 {
 		if _, _, err := PrepareWorkflowJoinAdmission(source, evt.RunID(), string(evt.Type()), admitted, nil); err != nil {
 			return DeliveryTargetApplication{}, err
@@ -194,6 +193,43 @@ func (pc *PipelineCoordinator) prepareDeliveryTargetApplication(
 		return DeliveryTargetApplication{}, err
 	}
 	return application, nil
+}
+
+func admitDeliveryTargetApplicationOwner(source semanticview.Source, evt events.Event, recipient events.DeliveryRecipient, handlerFact DeliveryTargetHandler, handler SystemNodeEventHandler, owner events.DeliveryTargetOwnership) (DeliveryTargetLookup, error) {
+	if err := owner.Validate(); err != nil {
+		return DeliveryTargetLookup{}, err
+	}
+	if handlerFact.Empty() {
+		return DeliveryTargetLookup{}, fmt.Errorf("receiver %s requires an admitted target handler", recipient.ID())
+	}
+	lookup, err := admitDeliveryTargetCoordinate(DeliveryTargetOwnershipRequest{
+		Source: source, Event: evt, Recipient: recipient, Blueprint: owner.Route(), Handler: handlerFact,
+	})
+	if err != nil {
+		return DeliveryTargetLookup{}, err
+	}
+	// Planning may complete coordinates and a join handler. Receipt must not
+	// repair the original persisted stamp or its executing handler into validity.
+	join := isJoinLifecycleEvent(evt.Type())
+	if join && !handlerFact.Equal(lookup.request.Handler) {
+		return DeliveryTargetLookup{}, fmt.Errorf("stamped join handler contradicts its exact declaration occurrence")
+	}
+	if (join || lookup.coordinate.FlowID == semanticview.RootExecutionFlowID(source)) && owner.Route() != lookup.coordinate {
+		return DeliveryTargetLookup{}, fmt.Errorf("stamped delivery target contradicts its exact declaration coordinate")
+	}
+	if err := ValidateExecutionHandlerDeclaration(source, handlerFact.Node(), handler); err != nil {
+		return DeliveryTargetLookup{}, err
+	}
+	if owner.EntitylessReceiver() {
+		return DeliveryTargetLookup{}, fmt.Errorf("entityless_receiver cannot authorize handler execution; every flow requires a constructed lifecycle header")
+	}
+	if !owner.ExistingEntity() && !owner.MaterializingEntity() {
+		return DeliveryTargetLookup{}, fmt.Errorf("delivery target ownership kind is unsupported")
+	}
+	if owner.MaterializingEntity() && owner.Route().EntityID != FlowInstanceEntityID(owner.Route().FlowInstance) {
+		return DeliveryTargetLookup{}, fmt.Errorf("materializing_entity ownership disagrees with canonical instance identity")
+	}
+	return lookup, nil
 }
 
 func (a *DeliveryTargetApplication) applyPersistedInstance(instance WorkflowInstance, presence WorkflowTargetPersistencePresence) error {
