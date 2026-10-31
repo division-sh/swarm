@@ -22,7 +22,7 @@ func TestHandlerEffectsCannotAdmitMissingConstruction(t *testing.T) {
 	for _, name := range []string{"existing", "entity-reader", "transitioner", "entityless"} {
 		t.Run(name, func(t *testing.T) {
 			node := pipelineNode(t, "review", name)
-			_, err := ClassifyDeliveryTargetOwnership(DeliveryTargetOwnershipRequest{
+			_, err := classifyDeliveryTargetOwnershipForTest(deliveryTargetOwnershipTestRequest{
 				Source: source, Event: evt, Recipient: events.MustNodeDeliveryRecipient(node),
 				Blueprint: events.RouteIdentity{FlowID: "review", FlowInstance: "review/one"},
 				Handler:   MustDeliveryTargetHandler(node).ForEvent("work.ready"),

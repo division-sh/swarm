@@ -15,6 +15,29 @@ import (
 	"github.com/division-sh/swarm/internal/runtime/semanticview"
 )
 
+type deliveryTargetOwnershipTestRequest struct {
+	Source     semanticview.Source
+	Event      events.Event
+	Recipient  events.DeliveryRecipient
+	Blueprint  events.RouteIdentity
+	Handler    DeliveryTargetHandler
+	Candidates []DeliveryTargetOwnerCandidate
+}
+
+func (r deliveryTargetOwnershipTestRequest) request() DeliveryTargetOwnershipRequest {
+	return DeliveryTargetOwnershipRequest{
+		Source: r.Source, Event: r.Event, Recipient: r.Recipient, Blueprint: r.Blueprint, Handler: r.Handler,
+	}
+}
+
+func classifyDeliveryTargetOwnershipForTest(r deliveryTargetOwnershipTestRequest) (events.DeliveryTargetOwnership, error) {
+	lookup, err := AdmitDeliveryTargetLookup(r.request())
+	if err != nil {
+		return events.DeliveryTargetOwnership{}, err
+	}
+	return ClassifyDeliveryTargetOwnership(lookup, r.Candidates)
+}
+
 func TestClassifyDeliveryTargetOwnershipClosedUnion(t *testing.T) {
 	source := deliveryTargetOwnershipSource(t)
 	evt := eventtest.RunCreatingRootIngress(eventtest.UUID("delivery-target-classification"), "work.ready", "", "", nil, 0, testPipelineRunID, "", events.EventEnvelope{}, time.Time{})
@@ -23,7 +46,7 @@ func TestClassifyDeliveryTargetOwnershipClosedUnion(t *testing.T) {
 			t.Run(fmt.Sprintf("%s/prospective=%t", nodeID, prospective), func(t *testing.T) {
 				node := pipelineNode(t, "review", nodeID)
 				target := events.RouteIdentity{FlowID: "review", FlowInstance: "review/one", EntityID: FlowInstanceEntityID("review/one")}
-				owner, err := ClassifyDeliveryTargetOwnership(DeliveryTargetOwnershipRequest{
+				owner, err := classifyDeliveryTargetOwnershipForTest(deliveryTargetOwnershipTestRequest{
 					Source: source, Event: evt, Recipient: events.MustNodeDeliveryRecipient(node), Blueprint: target,
 					Handler:    MustDeliveryTargetHandler(node).ForEvent("work.ready"),
 					Candidates: []DeliveryTargetOwnerCandidate{{Route: target, Materializing: prospective}},
@@ -102,7 +125,7 @@ func TestClassifyDeliveryTargetOwnershipFailsClosedOnMissingOrContradictoryEvide
 			if test.name == "raw blueprint entity is not ownership evidence" || test.name == "exact candidate disagrees with blueprint entity" {
 				blueprint.EntityID = canonicalID
 			}
-			_, err = ClassifyDeliveryTargetOwnership(DeliveryTargetOwnershipRequest{
+			_, err = classifyDeliveryTargetOwnershipForTest(deliveryTargetOwnershipTestRequest{
 				Source: source, Event: evt, Recipient: events.MustNodeDeliveryRecipient(node),
 				Blueprint: blueprint,
 				Handler:   handler.ForEvent("work.ready"), Candidates: test.candidates,
@@ -126,7 +149,7 @@ func TestClassifyDeliveryTargetOwnershipNeverPromotesSameFlowSibling(t *testing.
 		t.Fatalf("admit handler: %v", err)
 	}
 	entityID := eventtest.UUID("handler-flow-owner")
-	request := DeliveryTargetOwnershipRequest{
+	request := deliveryTargetOwnershipTestRequest{
 		Source: source, Event: evt, Recipient: events.MustNodeDeliveryRecipient(node),
 		Blueprint: events.RouteIdentity{FlowID: "review", FlowInstance: "review/producer-child"},
 		Handler:   handler.ForEvent("work.ready"),
@@ -134,14 +157,14 @@ func TestClassifyDeliveryTargetOwnershipNeverPromotesSameFlowSibling(t *testing.
 			FlowID: "review", FlowInstance: "review/one", EntityID: entityID,
 		}}},
 	}
-	if _, err := ClassifyDeliveryTargetOwnership(request); err == nil || !strings.Contains(err.Error(), "owner is missing") {
+	if _, err := classifyDeliveryTargetOwnershipForTest(request); err == nil || !strings.Contains(err.Error(), "owner is missing") {
 		t.Fatalf("single sibling classification error = %v, want exact-owner rejection", err)
 	}
 
 	request.Candidates = append(request.Candidates, DeliveryTargetOwnerCandidate{Route: events.RouteIdentity{
 		FlowID: "review", FlowInstance: "review/two", EntityID: eventtest.UUID("second-handler-flow-owner"),
 	}})
-	if _, err := ClassifyDeliveryTargetOwnership(request); err == nil || !strings.Contains(err.Error(), "owner is missing") {
+	if _, err := classifyDeliveryTargetOwnershipForTest(request); err == nil || !strings.Contains(err.Error(), "owner is missing") {
 		t.Fatalf("multiple sibling classification error = %v, want same exact-owner rejection", err)
 	}
 
@@ -149,7 +172,7 @@ func TestClassifyDeliveryTargetOwnershipNeverPromotesSameFlowSibling(t *testing.
 	request.Candidates = append(request.Candidates, DeliveryTargetOwnerCandidate{Route: events.RouteIdentity{
 		FlowID: "review", FlowInstance: "review/producer-child", EntityID: exactEntityID,
 	}})
-	owner, err := ClassifyDeliveryTargetOwnership(request)
+	owner, err := classifyDeliveryTargetOwnershipForTest(request)
 	if err != nil {
 		t.Fatalf("classify exact owner with hostile siblings: %v", err)
 	}
@@ -170,7 +193,7 @@ func TestClassifyDeliveryTargetOwnershipPreservesExactOwnerForEntityOptionalHand
 		t.Fatal(err)
 	}
 	entityID := eventtest.UUID("optional-existing-owner")
-	owner, err := ClassifyDeliveryTargetOwnership(DeliveryTargetOwnershipRequest{
+	owner, err := classifyDeliveryTargetOwnershipForTest(deliveryTargetOwnershipTestRequest{
 		Source: source, Event: evt, Recipient: events.MustNodeDeliveryRecipient(node),
 		Blueprint: events.RouteIdentity{FlowID: "review", FlowInstance: "review/one"},
 		Handler:   handler.ForEvent("work.ready"), Candidates: []DeliveryTargetOwnerCandidate{{
@@ -219,7 +242,7 @@ func TestClassifyDeliveryTargetOwnershipProjectsRootHandlerOntoSelectedRun(t *te
 	if err != nil {
 		t.Fatalf("admit handler: %v", err)
 	}
-	request := DeliveryTargetOwnershipRequest{
+	request := deliveryTargetOwnershipTestRequest{
 		Source: source, Event: evt, Recipient: events.MustNodeDeliveryRecipient(node),
 		Blueprint: events.RouteIdentity{FlowID: ".", FlowInstance: runID},
 		Handler:   handler.ForEvent("timer.cancel"),
@@ -227,7 +250,8 @@ func TestClassifyDeliveryTargetOwnershipProjectsRootHandlerOntoSelectedRun(t *te
 	for _, blueprint := range []events.RouteIdentity{{}, {FlowInstance: runID}, {FlowID: ".", FlowInstance: runID}} {
 		lookup := request
 		lookup.Blueprint = blueprint
-		got, err := AdmitDeliveryTargetLookupCoordinate(lookup)
+		admitted, err := AdmitDeliveryTargetLookup(lookup.request())
+		got := admitted.Coordinate()
 		if err != nil || got.FlowID != "." || got.FlowInstance != runID {
 			t.Fatalf("root lookup lost its handler/run coordinate: blueprint=%+v got=%+v err=%v", blueprint, got, err)
 		}
@@ -235,13 +259,13 @@ func TestClassifyDeliveryTargetOwnershipProjectsRootHandlerOntoSelectedRun(t *te
 	for _, blueprint := range []events.RouteIdentity{{FlowID: "review", FlowInstance: runID}, {FlowInstance: eventtest.UUID("foreign-root-coordinate")}} {
 		lookup := request
 		lookup.Blueprint = blueprint
-		if _, err := AdmitDeliveryTargetLookupCoordinate(lookup); err == nil {
+		if _, err := AdmitDeliveryTargetLookup(lookup.request()); err == nil {
 			t.Fatalf("contradictory root lookup admitted: %+v", blueprint)
 		}
 	}
 
 	request.Candidates = []DeliveryTargetOwnerCandidate{{Route: events.RouteIdentity{FlowInstance: runID, EntityID: existingEntityID}}}
-	owner, err := ClassifyDeliveryTargetOwnership(request)
+	owner, err := classifyDeliveryTargetOwnershipForTest(request)
 	if err != nil {
 		t.Fatalf("classify existing selected-run owner: %v", err)
 	}
@@ -251,13 +275,13 @@ func TestClassifyDeliveryTargetOwnershipProjectsRootHandlerOntoSelectedRun(t *te
 	}
 
 	request.Candidates = nil
-	owner, err = ClassifyDeliveryTargetOwnership(request)
+	owner, err = classifyDeliveryTargetOwnershipForTest(request)
 	if err == nil || !owner.Empty() || !strings.Contains(err.Error(), "construct it before handler delivery") {
 		t.Fatalf("missing root construction acquired ownership: owner=%#v err=%v", owner, err)
 	}
 	wantMaterializing := events.RouteIdentity{FlowID: ".", FlowInstance: runID, EntityID: FlowInstanceEntityID(runID)}
 	request.Candidates = []DeliveryTargetOwnerCandidate{{Route: wantMaterializing, Materializing: true}}
-	owner, err = ClassifyDeliveryTargetOwnership(request)
+	owner, err = classifyDeliveryTargetOwnershipForTest(request)
 	if err != nil {
 		t.Fatalf("classify explicit selected-run construction evidence: %v", err)
 	}
@@ -270,22 +294,36 @@ func TestTargetLookupCoordinatePreservesDeclaredNonRootAndHandlerIdentity(t *tes
 	source := deliveryTargetOwnershipSource(t)
 	node := pipelineNode(t, "review", "existing")
 	event := eventtest.RuntimeControl(eventtest.UUID("lookup-nested-handler"), "work.ready", "", "", nil, 0, testPipelineRunID, "", events.EventEnvelope{}, time.Time{})
-	request := DeliveryTargetOwnershipRequest{Source: source, Event: event, Recipient: events.MustNodeDeliveryRecipient(node),
+	request := deliveryTargetOwnershipTestRequest{Source: source, Event: event, Recipient: events.MustNodeDeliveryRecipient(node),
 		Handler: MustDeliveryTargetHandler(node).ForEvent("work.ready"), Blueprint: events.RouteIdentity{FlowInstance: "review/one"}}
-	coordinate, err := AdmitDeliveryTargetLookupCoordinate(request)
+	lookup, err := AdmitDeliveryTargetLookup(request.request())
+	coordinate := lookup.Coordinate()
 	if err != nil || coordinate.FlowID != "review" || coordinate.FlowInstance != "review/one" {
 		t.Fatalf("path-only nested lookup lost its declaration: %+v err=%v", coordinate, err)
 	}
 	for _, blueprint := range []events.RouteIdentity{{}, {FlowID: ".", FlowInstance: "review/one"}} {
 		wrong := request
 		wrong.Blueprint = blueprint
-		if _, err := AdmitDeliveryTargetLookupCoordinate(wrong); err == nil {
+		if _, err := AdmitDeliveryTargetLookup(wrong.request()); err == nil {
 			t.Fatalf("missing or contradictory nested coordinate admitted: %+v", blueprint)
 		}
 	}
 	request.Recipient = events.MustNodeDeliveryRecipient(pipelineNode(t, "review", "materializer"))
-	if _, err := AdmitDeliveryTargetLookupCoordinate(request); err == nil {
+	if _, err := AdmitDeliveryTargetLookup(request.request()); err == nil {
 		t.Fatal("lookup borrowed a different recipient's handler declaration")
+	}
+	request.Source = nil
+	request.Event = events.Event{}
+	request.Blueprint = events.RouteIdentity{FlowID: ".", FlowInstance: "foreign"}
+	request.Handler = DeliveryTargetHandler{}
+	target := coordinate
+	target.EntityID = eventtest.UUID("retained-lookup-owner")
+	owner, err := ClassifyDeliveryTargetOwnership(lookup, []DeliveryTargetOwnerCandidate{{Route: target}})
+	if err != nil || owner.Route() != target {
+		t.Fatalf("lookup did not retain its original admitted request: owner=%+v err=%v", owner, err)
+	}
+	if _, err := ClassifyDeliveryTargetOwnership(DeliveryTargetLookup{}, []DeliveryTargetOwnerCandidate{{Route: target}}); err == nil {
+		t.Fatal("unadmitted lookup acquired target ownership")
 	}
 }
 
@@ -342,7 +380,7 @@ func TestClassifyDeliveryTargetOwnershipConsumesExactInputAcquisitionMode(t *tes
 			if err != nil {
 				t.Fatalf("admit handler: %v", err)
 			}
-			owner, err := ClassifyDeliveryTargetOwnership(DeliveryTargetOwnershipRequest{
+			owner, err := classifyDeliveryTargetOwnershipForTest(deliveryTargetOwnershipTestRequest{
 				Source: source, Event: evt, Recipient: events.MustNodeDeliveryRecipient(node),
 				Blueprint: events.RouteIdentity{FlowID: "review", FlowInstance: "review/one"},
 				Handler:   handler.ForEvent(test.eventType), Candidates: test.candidates,
@@ -400,7 +438,7 @@ func TestClassifyDeliveryTargetOwnershipPreservesCompositionInstanceMatrix(t *te
 			if err != nil {
 				t.Fatal(err)
 			}
-			owner, err := ClassifyDeliveryTargetOwnership(DeliveryTargetOwnershipRequest{
+			owner, err := classifyDeliveryTargetOwnershipForTest(deliveryTargetOwnershipTestRequest{
 				Source: source, Event: evt, Recipient: events.MustNodeDeliveryRecipient(node),
 				Blueprint: events.RouteIdentity{FlowID: "review", FlowInstance: identity.InstancePath},
 				Handler:   handler.ForEvent("work.keyed"), Candidates: tc.candidates,
@@ -439,7 +477,7 @@ func TestClassifyDeliveryTargetOwnershipTargetedEventPreservesExactOwnerBeforeDe
 				"", "", mustJSON(map[string]any{"account_id": "account-1"}), 0, "", "",
 				events.EnvelopeForTargetRoute(events.EventEnvelope{}, exact), time.Time{},
 			)
-			owner, err := ClassifyDeliveryTargetOwnership(DeliveryTargetOwnershipRequest{
+			owner, err := classifyDeliveryTargetOwnershipForTest(deliveryTargetOwnershipTestRequest{
 				Source: source, Event: evt, Recipient: events.MustNodeDeliveryRecipient(node),
 				Blueprint: exact, Handler: handler.ForEvent("work.keyed"),
 				Candidates: []DeliveryTargetOwnerCandidate{{Route: exact}, {Route: competing}},
@@ -483,7 +521,7 @@ func TestClassifyDeliveryTargetOwnershipJoinOccurrencePreservesDeclarationOwnerB
 	if _, admitted := resolvedHandler.resolve(source, evt.Type()); !admitted {
 		t.Fatalf("resolved declaration-bound join handler %s/%s is not executable for %s: admission=%#v", resolvedHandler.FlowID(), resolvedHandler.NodeID(), evt.Type(), semanticview.ClassifyExecutableNodeSubscription(source, resolvedHandler.Node(), "item.completed"))
 	}
-	owner, err := ClassifyDeliveryTargetOwnership(DeliveryTargetOwnershipRequest{
+	owner, err := classifyDeliveryTargetOwnershipForTest(deliveryTargetOwnershipTestRequest{
 		Source: source, Event: evt,
 		Recipient: events.MustNodeDeliveryRecipient(plan.Node), Blueprint: target,
 		Handler:    targetHandler.ForEvent(events.EventType(handle.EventType())),

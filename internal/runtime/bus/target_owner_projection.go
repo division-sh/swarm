@@ -32,7 +32,7 @@ type selectedRunTargetOwnerProjection struct {
 func (p selectedRunTargetOwnerProjection) resolveRoutePlan(plan RoutePlan) (RoutePlan, error) {
 	plan = plan.Normalized()
 	var err error
-	if err = p.resolveNodeTargetOwners(&plan); err != nil {
+	if err = p.resolveNodeTargetOwners(&plan, nil); err != nil {
 		return RoutePlan{}, err
 	}
 	for index := range plan.DeliveryIntents {
@@ -114,7 +114,7 @@ func validateAgentLifecycleTargetOwnership(intent RoutePlanDeliveryIntent) error
 	return intent.Initialization.ValidateRoute(intent.deliveryRoute())
 }
 
-func (p selectedRunTargetOwnerProjection) resolveNodeTargetOwners(plan *RoutePlan) error {
+func (p selectedRunTargetOwnerProjection) resolveNodeTargetOwners(plan *RoutePlan, lookups []runtimepipeline.DeliveryTargetLookup) error {
 	for index := range plan.DeliveryIntents {
 		intent := &plan.DeliveryIntents[index]
 		if intent.Recipient.IsAgent() {
@@ -128,19 +128,24 @@ func (p selectedRunTargetOwnerProjection) resolveNodeTargetOwners(plan *RoutePla
 			if handler.Empty() {
 				return fmt.Errorf("resolve delivery target handler for %s: route intent has no exact admitted handler", intent.Recipient.ID())
 			}
-			request := runtimepipeline.DeliveryTargetOwnershipRequest{
-				Source: p.source, Event: plan.Event, Recipient: intent.Recipient, Blueprint: intent.TargetBlueprint,
-				Handler: handler,
+			var lookup runtimepipeline.DeliveryTargetLookup
+			if lookups != nil {
+				lookup = lookups[index]
+			} else {
+				var err error
+				lookup, err = runtimepipeline.AdmitDeliveryTargetLookup(runtimepipeline.DeliveryTargetOwnershipRequest{
+					Source: p.source, Event: plan.Event, Recipient: intent.Recipient, Blueprint: intent.TargetBlueprint,
+					Handler: handler,
+				})
+				if err != nil {
+					return err
+				}
 			}
-			target, err := runtimepipeline.AdmitDeliveryTargetLookupCoordinate(request)
+			candidates, err := p.decisionTargetCandidates(lookup.Coordinate())
 			if err != nil {
 				return err
 			}
-			request.Candidates, err = p.decisionTargetCandidates(target)
-			if err != nil {
-				return err
-			}
-			owner, err := runtimepipeline.ClassifyDeliveryTargetOwnership(request)
+			owner, err := runtimepipeline.ClassifyDeliveryTargetOwnership(lookup, candidates)
 			if err != nil {
 				return fmt.Errorf("resolve delivery target for %s: %w", intent.Recipient.ID(), err)
 			}
