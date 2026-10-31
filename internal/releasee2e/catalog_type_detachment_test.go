@@ -64,7 +64,7 @@ func TestCatalogTypeDetachmentPublicRestartBothStores(t *testing.T) {
 			var published struct {
 				RunID string `json:"run_id"`
 			}
-			if err := process.rpc.call(ctx, "event.publish", map[string]any{"bundle_hash": hash, "event_name": "task.requested", "payload": payload, "emitter": "releasee2e", "idempotency_key": "detached-valid"}, &published); err != nil || published.RunID == "" {
+			if err := process.rpc.call(ctx, "run.start", map[string]any{"bundle_hash": hash, "event_name": "task.requested", "payload": payload, "idempotency_key": "detached-valid"}, &published); err != nil || published.RunID == "" {
 				t.Fatalf("public admitted payload: %+v %v", published, err)
 			}
 			waitForGoldenTerminalRun(t, process, store, published.RunID, 30*time.Second)
@@ -94,7 +94,7 @@ func TestCatalogTypeDetachmentPublicRestartBothStores(t *testing.T) {
 				{"id": "valid", "peer": "different", "score": 3.5},
 			} {
 				var result json.RawMessage
-				if err := process.rpc.call(ctx, "event.publish", map[string]any{"bundle_hash": hash, "event_name": "task.requested", "payload": bad, "emitter": "releasee2e", "idempotency_key": "detached-refused-" + string(rune('a'+index))}, &result); err == nil || !strings.Contains(err.Error(), "PAYLOAD_VALIDATION_FAILED") {
+				if err := process.rpc.call(ctx, "run.start", map[string]any{"bundle_hash": hash, "event_name": "task.requested", "payload": bad, "idempotency_key": "detached-refused-" + string(rune('a'+index))}, &result); err == nil || !strings.Contains(err.Error(), "PAYLOAD_VALIDATION_FAILED") {
 					t.Fatalf("restart changed refusal: payload=%v err=%v", bad, err)
 				}
 			}

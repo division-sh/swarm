@@ -53,8 +53,8 @@ func TestA2MapRecipeSupportedSurfaceBothStores(t *testing.T) {
 			} {
 				t.Run(tc.name, func(t *testing.T) {
 					params := map[string]any{"bundle_hash": rt.BundleHash, "event_name": "batch.ready", "payload": map[string]any{"items": tc.items}, "idempotency_key": "a2-map-recipe-" + tc.name}
-					opened := requireServedEventPublishRPCResult(t, rt.Endpoint, params)
-					if !opened.NewRunCreated || opened.RunID == "" || opened.EventID == "" {
+					opened := requireServedRunStartRPCResult(t, rt.Endpoint, params)
+					if opened.Status != "live" || opened.RunID == "" || opened.EventID == "" {
 						t.Fatalf("root map ingress did not create a real run: %+v", opened)
 					}
 					waitServedRunDeliveryQuiescence(t, rt.ReadRunDeliveries, opened.RunID)
@@ -148,7 +148,7 @@ func TestA2MapRecipeSupportedSurfaceBothStores(t *testing.T) {
 				if !reflect.DeepEqual(batch.events, requireA2MapRecipeHealthyEvents(t, rt, batch.opened.RunID)) {
 					t.Fatal("normal serve restart duplicated or changed map publications/settlements")
 				}
-				replay := requireServedEventPublishRPCResult(t, rt.Endpoint, batch.params)
+				replay := requireServedRunStartRPCResult(t, rt.Endpoint, batch.params)
 				if replay.EventID != batch.opened.EventID || replay.RunID != batch.opened.RunID {
 					t.Fatalf("same-idempotency root replay changed identity: first=%+v replay=%+v", batch.opened, replay)
 				}

@@ -29,7 +29,7 @@ func TestTypedReceiverConfigSourceAndForkRefusalBothStores(t *testing.T) {
 				t.Fatalf("test transport lost explicit decimal tokens: %s err=%v", requestWire, err)
 			}
 			t.Logf("public input wire with explicit integral decimals: %s", requestWire)
-			seed := requireServedEventPublishRPCResult(t, rt.Endpoint, params)
+			seed := requireServedRunStartRPCResult(t, rt.Endpoint, params)
 			waitForkReceiverSourceCompletion(t, rt, seed.RunID)
 			if err := waitExactOriginPublications(t.Context(), publication, seed.EventID); err != nil {
 				t.Fatal(err)
@@ -129,7 +129,7 @@ func TestTypedReceiverConfigSourceAndForkRefusalBothStores(t *testing.T) {
 				time.Sleep(10 * time.Millisecond)
 			}
 			before := requireReceiverApplicationSnapshot(t, rt.ReceiverStateReader)
-			duplicate := requireServedEventPublishRPCResult(t, rt.Endpoint, params)
+			duplicate := requireServedRunStartRPCResult(t, rt.Endpoint, params)
 			if after := requireReceiverApplicationSnapshot(t, rt.ReceiverStateReader); duplicate.RunID != seed.RunID || duplicate.EventID != seed.EventID || !reflect.DeepEqual(before, after) {
 				t.Fatalf("source duplicate changed initialization or execution: run=%s event=%s changed_tables=%v", duplicate.RunID, duplicate.EventID, forkReceiverChangedTables(before, after))
 			}

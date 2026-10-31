@@ -258,14 +258,14 @@ func runStaticDataRead(t *testing.T, process *releaseServeProcess, hash, key, fo
 	defer cancel()
 	var admitted struct {
 		RunID  string `json:"run_id"`
-		NewRun bool   `json:"new_run_created"`
+		Status string `json:"status"`
 	}
-	if err := process.rpc.call(ctx, "event.publish", map[string]any{
-		"bundle_hash": hash, "event_name": "read.requested", "payload": map[string]any{"foreign_id": foreign, "request_key": key}, "emitter": "releasee2e", "idempotency_key": key,
+	if err := process.rpc.call(ctx, "run.start", map[string]any{
+		"bundle_hash": hash, "event_name": "read.requested", "payload": map[string]any{"foreign_id": foreign, "request_key": key}, "idempotency_key": key,
 	}, &admitted); err != nil {
 		t.Fatal(err)
 	}
-	if admitted.RunID == "" || !admitted.NewRun {
+	if admitted.RunID == "" || admitted.Status != "live" {
 		t.Fatalf("run admission: %#v", admitted)
 	}
 	observed := map[string]map[string]any{}

@@ -41,7 +41,7 @@ func TestReceiverCompositionFailureSettlementBothStores(t *testing.T) {
 			}
 			rt := startServedTestSetupEntitiesProofRuntimeFromSource(t, backend, root, hook)
 			t.Cleanup(func() { once.Do(func() { close(release) }) })
-			seed := requireServedEventPublishRPCResult(t, rt.Endpoint, map[string]any{
+			seed := requireServedRunStartRPCResult(t, rt.Endpoint, map[string]any{
 				"event_name": "work.seeded", "bundle_hash": rt.BundleHash,
 				"payload": map[string]any{"seed": true}, "idempotency_key": "receiver-seed",
 			})

@@ -131,7 +131,7 @@ func TestSelectedForkReceiverEffectOnlyFailureSettlementBothStores(t *testing.T)
 						t.Fatalf("loaded source lost the distinct same-name declaration: %+v", declarations)
 					}
 				}
-				seed := requireServedEventPublishRPCResult(t, rt.Endpoint, map[string]any{
+				seed := requireServedRunStartRPCResult(t, rt.Endpoint, map[string]any{
 					"event_name": "start.seeded", "bundle_hash": rt.BundleHash,
 					"payload": map[string]any{"token": "receiver-proof"}, "idempotency_key": "fork-settlement-seed",
 				})

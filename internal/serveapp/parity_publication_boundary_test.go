@@ -75,7 +75,7 @@ func TestServedParityConversationSourceActivationBoundaryBothStores(t *testing.T
 			t.Cleanup(func() { projectRuntimePersistenceForServe = previous })
 			rt := startServedConversationForkProofRuntime(t, backend)
 			hold.armed.Store(true)
-			initial := requireServedEventPublishRPCResult(t, rt.Endpoint, map[string]any{
+			initial := requireServedRunStartRPCResult(t, rt.Endpoint, map[string]any{
 				"event_name": "external.observed", "bundle_hash": rt.BundleHash,
 				"payload": map[string]any{}, "idempotency_key": "held-source-run",
 			})
