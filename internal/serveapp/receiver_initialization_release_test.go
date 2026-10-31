@@ -62,12 +62,14 @@ func requireR7ReleaseReceiverRestart(t *testing.T, binary string, backend served
 	var originalEntity operatorread.OperatorEntityFull
 	if !t.Run("before_restart", func(t *testing.T) {
 		endpoint := startReleaseServeEndpoint(t, binary, backend, root, config, env)
-		seed = requireServedEventPublishRPCResult(t, endpoint, params)
+		requireServedJSONRPCResult(t, endpoint, "run.start", params, &seed)
 		originalEvent, originalEntity = requireR7ReleaseReceiverResult(t, endpoint, seed, 1)
 		if originalEvent.Deliveries[0].Target.Kind != "materializing_entity" {
 			t.Fatalf("first connection did not retain its creating target authority: %+v", originalEvent)
 		}
-		if duplicate := requireServedEventPublishRPCResult(t, endpoint, params); duplicate.EventID != seed.EventID || duplicate.RunID != seed.RunID {
+		var duplicate servedEventPublishRPCResult
+		requireServedJSONRPCResult(t, endpoint, "run.start", params, &duplicate)
+		if duplicate.EventID != seed.EventID || duplicate.RunID != seed.RunID {
 			t.Fatalf("release duplicate changed the acknowledged publication: %+v -> %+v", seed, duplicate)
 		}
 		if event, entity := requireR7ReleaseReceiverResult(t, endpoint, seed, 1); !reflect.DeepEqual(event, originalEvent) || !reflect.DeepEqual(entity, originalEntity) {
@@ -80,7 +82,9 @@ func requireR7ReleaseReceiverRestart(t *testing.T, binary string, backend served
 	// the next process opens the same store. No in-process owner is injected.
 	t.Run("after_restart", func(t *testing.T) {
 		endpoint := startReleaseServeEndpoint(t, binary, backend, root, config, env)
-		if duplicate := requireServedEventPublishRPCResult(t, endpoint, params); duplicate.EventID != seed.EventID || duplicate.RunID != seed.RunID {
+		var duplicate servedEventPublishRPCResult
+		requireServedJSONRPCResult(t, endpoint, "run.start", params, &duplicate)
+		if duplicate.EventID != seed.EventID || duplicate.RunID != seed.RunID {
 			t.Fatalf("restart changed the original publication receipt: %+v -> %+v", seed, duplicate)
 		}
 		if event, entity := requireR7ReleaseReceiverResult(t, endpoint, seed, 1); !reflect.DeepEqual(event, originalEvent) || !reflect.DeepEqual(entity, originalEntity) {

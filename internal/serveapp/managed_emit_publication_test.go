@@ -21,6 +21,7 @@ func TestManagedEmitPublicationExactScopeBothStores(t *testing.T) {
 			t.Run(string(backend)+"/"+mode, func(t *testing.T) {
 				source := canonicalrouting.CopyManagedEmitPublication(t, mode)
 				rt, _, restart := newRetainedMailboxCompletionRuntime(t, backend, source)
+				seedServedPublicationLiveRun(t, rt)
 				scope, instance, request := ".", "", "work.requested"
 				if mode == "imported" {
 					scope, instance = "source", "source"
@@ -125,6 +126,7 @@ func TestManagedEmitPublicationExactScopeBothStores(t *testing.T) {
 				assertResult(accepted.RunID, scope, instance, "source-writer", "exact")
 				requireServedOKJSONRPC(t, rt.Endpoint, "run.pause", map[string]any{"run_id": accepted.RunID, "idempotency_key": "managed-primary-pause"})
 				siblingParams := map[string]any{"event_name": "sibling.requested", "bundle_hash": rt.BundleHash, "payload": map[string]any{"case_id": "sibling"}, "idempotency_key": "managed-sibling"}
+				seedServedPublicationLiveRun(t, rt)
 				sibling := requireServedEventPublishRPCResult(t, rt.Endpoint, siblingParams)
 				waitServedRunDeliveryQuiescence(t, rt.ReadRunDeliveries, sibling.RunID)
 				assertResult(sibling.RunID, "sibling", "sibling", "sibling-writer", true)
@@ -144,6 +146,7 @@ func TestManagedEmitPublicationExactScopeBothStores(t *testing.T) {
 				assertResult(sibling.RunID, "sibling", "sibling", "sibling-writer", true)
 
 				hostileParams := map[string]any{"event_name": request, "bundle_hash": rt.BundleHash, "payload": map[string]any{"case_id": "hostile"}, "idempotency_key": "managed-hostile"}
+				seedServedPublicationLiveRun(t, rt)
 				hostile := requireServedEventPublishRPCResult(t, rt.Endpoint, hostileParams)
 				waitServedRunDeliveryQuiescence(t, rt.ReadRunDeliveries, hostile.RunID)
 				var count int

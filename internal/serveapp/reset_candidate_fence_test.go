@@ -27,6 +27,7 @@ import (
 	"github.com/division-sh/swarm/internal/runtime/executionposture"
 	"github.com/division-sh/swarm/internal/runtime/lifecycleprobe/lifecycletest"
 	"github.com/division-sh/swarm/internal/runtime/startupownership"
+	"github.com/division-sh/swarm/internal/store/storetest"
 	"github.com/google/uuid"
 )
 
@@ -289,7 +290,7 @@ func TestResetCandidateSetFencesConsumersWhileSecondPreparesBothStores(t *testin
 				supervisor.execution = apiv1.OperatorEventPublishHandlers(apiv1.EventPublishHandlerOptions{Publication: apiv1.EventPublicationOptions{
 					ExecutionPosture: primary.ExecutionPosture, Idempotency: stores.Idempotency(),
 					Events: primary.Bus, Acknowledged: primary.Bus, RecipientPlans: primary.Bus, SourceArtifact: primary.Bus,
-					Runs: stores.Runs(), Entities: stores.Entities(), Observability: stores.Observability(),
+					Runs: stores.Runs(), LiveRuns: stores.LiveRuns(), Entities: stores.Entities(), Observability: stores.Observability(),
 					RunBundleContext: stores.RunBundleContext(), RuntimeContexts: manager,
 					Source: candidates[0].loaded.source, Bundle: candidates[0].bootIdentity,
 				}})
@@ -418,6 +419,11 @@ func TestResetCandidateSetFencesConsumersWhileSecondPreparesBothStores(t *testin
 				supervisor.mu.Lock()
 				supervisor.resetting = false
 				supervisor.mu.Unlock()
+				owner, ok := stores.RuntimeDeps().EventStore.(storetest.RunFixtureStore)
+				if !ok {
+					t.Fatal("converged candidate fixture requires its native run lifecycle owner")
+				}
+				seedOwnedPublicationLiveRun(t, candidates[1].runtime, candidates[1].sourceArtifactFact.BundleHash(), owner)
 				published := requireServedEventPublishRPCResult(t, server.URL+"/v1/rpc", map[string]any{
 					"event_name": "item.received", "bundle_hash": candidates[1].sourceArtifactFact.BundleHash(),
 					"payload": map[string]any{"item_id": "after-convergence"}, "idempotency_key": uuid.NewString(),

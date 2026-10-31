@@ -27,12 +27,15 @@ func TestR7ServedObserverOrdersExecutionAndRestartBothStores(t *testing.T) {
 				publish := func(event, key string, payload map[string]any) servedEventPublishRPCResult {
 					t.Helper()
 					params := map[string]any{"event_name": event, "idempotency_key": key, "payload": payload}
+					method := "event.publish"
 					if runID == "" {
 						params["bundle_hash"] = proof.BundleHash
+						method = "run.start"
 					} else {
 						params["run_id"] = runID
 					}
-					result := requireServedEventPublishRPCResult(t, proof.Endpoint, params)
+					var result servedEventPublishRPCResult
+					requireServedJSONRPCResult(t, proof.Endpoint, method, params, &result)
 					if runID != "" && result.RunID != runID {
 						t.Fatalf("observer publication changed its admitted run: %+v", result)
 					}
