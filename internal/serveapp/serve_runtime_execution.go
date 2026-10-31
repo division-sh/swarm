@@ -49,7 +49,7 @@ func buildServeRuntimeExecution(stores *storeselected.Owner, req selectedAPICapa
 	publication := apiv1.EventPublicationOptions{
 		ExecutionPosture: rt.ExecutionPosture,
 		Idempotency:      idempotency, Events: rt.Bus, Acknowledged: rt.Bus, RecipientPlans: rt.Bus, SourceArtifact: rt.Bus,
-		Runs: caps.Runs, Entities: caps.Entities, Observability: caps.Observability,
+		Runs: caps.Runs, LiveRuns: stores.LiveRuns(), Entities: caps.Entities, Observability: caps.Observability,
 		RunBundleContext: caps.RunBundleContext, RuntimeContexts: caps.RuntimeContexts,
 		SelectedForkControls: caps.SelectedForkControls,
 		Source:               req.Source, Bundle: primary.bootIdentity, ScenarioExecutionProfiles: stores.ScenarioExecutionProfiles(),

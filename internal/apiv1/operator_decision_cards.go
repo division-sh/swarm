@@ -338,6 +338,16 @@ func executeIdempotentDecisionCardMutation(ctx context.Context, req Request, opt
 		var selected selectedRuntimeContext
 		ctx, selected, err = runtimeBundleContextByHash(ctx, opts.RuntimeContexts, card.BundleHash, card.RunID)
 		if err != nil {
+			var unavailable *ApplicationError
+			if errors.As(err, &unavailable) && unavailable.Code == BundleUnavailableCode {
+				lookup, availability, readErr := opts.RuntimeContexts.LookupRunStatus(ctx, card.RunID)
+				if readErr == nil && availability.RunID == card.RunID && availability.BundleHash == card.BundleHash &&
+					availability.Status == "paused" && availability.Available() && !lookup.Loaded() {
+					if details, ok := unavailable.Details.(map[string]any); ok {
+						details["message"] = fmt.Sprintf("run %s is paused; run `swarm run continue %s` to load its source before deciding this card", card.RunID, card.RunID)
+					}
+				}
+			}
 			return nil, err
 		}
 		if selected.Runtime == nil || selected.Runtime.Pipeline == nil || selected.Runtime.Bus == nil {

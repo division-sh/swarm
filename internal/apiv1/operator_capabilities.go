@@ -12,6 +12,7 @@ import (
 	"github.com/division-sh/swarm/internal/runtime/executionposture"
 	"github.com/division-sh/swarm/internal/runtime/fanoutobligation"
 	runtimepipeline "github.com/division-sh/swarm/internal/runtime/pipeline"
+	"github.com/division-sh/swarm/internal/runtime/runlifecycle"
 	"github.com/division-sh/swarm/internal/runtime/scenarioexecution"
 	"github.com/division-sh/swarm/internal/runtime/semanticview"
 	"github.com/division-sh/swarm/internal/sourceartifact"
@@ -86,6 +87,7 @@ type EventPublicationOptions struct {
 	RecipientPlans            EventRecipientPlanChecker
 	SourceArtifact            SourceArtifactAdmitter
 	Runs                      RunReadStore
+	LiveRuns                  runlifecycle.LiveRunReader
 	Entities                  EntityReadStore
 	Observability             ObservabilityReadStore
 	RunBundleContext          RunBundleContextStore

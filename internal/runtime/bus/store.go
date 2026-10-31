@@ -23,6 +23,7 @@ import (
 	runtimepipelineobligation "github.com/division-sh/swarm/internal/runtime/pipelineobligation"
 	runtimereplycontext "github.com/division-sh/swarm/internal/runtime/replycontext"
 	"github.com/division-sh/swarm/internal/runtime/runfork"
+	"github.com/division-sh/swarm/internal/runtime/runlifecycle"
 )
 
 var (
@@ -74,11 +75,23 @@ type APIEventPublicationCommand struct {
 	Idempotency apiidempotency.Request
 	Completion  apiidempotency.Completion
 	RunCreation *durabledata.RunCreationCommand
+	LiveRun     *runlifecycle.LiveRun
 }
+
+var ErrAPIEventLiveRunChanged = runlifecycle.ErrLiveRunChanged
 
 func (c APIEventPublicationCommand) Validate() error {
 	if err := c.Publication.Validate(); err != nil {
 		return err
+	}
+	if live := c.LiveRun; live != nil {
+		if err := live.Scope.Validate(); err != nil {
+			return err
+		}
+		if c.Idempotency.Method != "event.publish" || c.RunCreation != nil || live.RunID != c.Publication.Commit.Event.Event().RunID() ||
+			!c.Publication.HasAuthorScope || live.Source.BundleHash() != c.Publication.AuthorScope.BundleHash {
+			return fmt.Errorf("live publication selection does not match its event and source")
+		}
 	}
 	if method := strings.TrimSpace(c.Idempotency.Method); method != "event.publish" && method != "run.start" {
 		return fmt.Errorf("API event publication requires event.publish or run.start method authority")
