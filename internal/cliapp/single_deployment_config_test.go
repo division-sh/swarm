@@ -215,7 +215,7 @@ func TestSingleDeploymentConfigKeepsSecretAndSplitRefusals(t *testing.T) {
 		for _, row := range []struct{ body, key, refusal string }{
 			{"database: {password: private-value-not-for-diagnostics}\n", "database.password", "plaintext secret"},
 			{"runtime: {max_concurrent_agents: 2}\n", "runtime.max_concurrent_agents", "recognized but not yet supported"},
-			{"llm: {claude_cli: {retries: 2}}\n", "llm.claude_cli.retries", "recognized but not yet supported"},
+			{"llm: {claude_cli: {retries: 2}}\n", "llm.claude_cli.retries", "unknown config key"},
 		} {
 			t.Run(selection+"/"+row.key, func(t *testing.T) {
 				isolateCLIAPIConfigEnv(t)

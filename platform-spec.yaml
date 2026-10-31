@@ -24796,9 +24796,9 @@ configuration_source_authority:
             claude_cli.command: supported
             claude_cli.timeout: supported
             claude_cli.output_format: supported
-            claude_cli.retries: split_unsupported
-            claude_cli.no_session_persistence: split_unsupported
-            claude_cli.use_tmux: split_unsupported
+            claude_cli.retries: retired_rejected
+            claude_cli.no_session_persistence: retired_rejected
+            claude_cli.use_tmux: retired_rejected
             openai_compatible.base_url: supported
             openai_compatible.default_model: split_unsupported
             openai_compatible.low_cost_model: split_unsupported
@@ -24811,9 +24811,9 @@ configuration_source_authority:
             `llm.models`; this spec does not re-admit them as accepted keys.
           claude_cli_control_cleanup: >
             `llm.claude_cli.retries`, `llm.claude_cli.use_tmux`, and
-            `llm.claude_cli.no_session_persistence` remain split_unsupported until #1803 or a later explicitly
-            gated production runtime owner promotes real behavior. Field presence/default seeding is not proof of
-            supported config semantics, and #1858 MUST keep these controls fail-closed with no supported replacement.
+            `llm.claude_cli.no_session_persistence` are retired by #1803 with no supported replacement.
+            They MUST fail closed as unknown config keys, including zero and false values, and MUST NOT
+            appear in the typed config schema, built-in defaults, or suggested supported fields.
           provider_limits_shape: >
             `llm.provider_limits.<profile>` profile ids and
             `llm.provider_limits.<profile>.models.<model>` model ids are dynamic map keys, but provider-limit policy
