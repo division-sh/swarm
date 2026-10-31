@@ -80,7 +80,6 @@ func TestStructuralCheckPurposeCensus(t *testing.T) {
 		"state_machine_coherence":                 "structural",
 		"semantic_drift_unreachable_state":        "structural",
 		"node_state_schema_typed_counterpart":     "structural",
-		"accumulator_entity_projection":           "structural",
 		"accumulator_handler_isolation":           "structural",
 		"accumulator_input_producer_path":         "structural",
 		"required_agents_match":                   "structural",

@@ -30,13 +30,12 @@ func lifecycleStateFixtureForTest(t *testing.T, flowID, from, to string, eventTy
 	t.Helper()
 	prefix := ""
 	files := map[string]string{"manifest.yaml": "version: 1.0.0\nplatform_version: \">=0.7.0 <0.8.0\"\n",
-		"schema.yaml": "stages: []\n", "entities.yaml": "test_entity: {}\n"}
+		"schema.yaml": "stages: []\n"}
 	if flowID != "." {
 		prefix = flowID + "/"
 	}
 	files[prefix+"manifest.yaml"] = "version: 1.0.0\nplatform_version: \">=0.7.0 <0.8.0\"\n"
 	files[prefix+"schema.yaml"] = fmt.Sprintf("stages:\n  %s: {}\n  %s: {}\n", from, to)
-	files[prefix+"entities.yaml"] = "test_entity: {}\n"
 	nodes := "lifecycle-owner:\n  execution_type: system_node\n  event_handlers:\n"
 	for _, eventType := range eventTypes {
 		files[prefix+"events.yaml"] += eventType + ":\n"

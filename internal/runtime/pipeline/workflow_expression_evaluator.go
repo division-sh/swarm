@@ -82,8 +82,8 @@ func (e *workflowExpressionEvaluator) EvalBoolWithOptions(expression string, ctx
 
 func projectWorkflowExpressionContext(ctx workflowExpressionContext) (workflowExpressionContext, error) {
 	projected, err := workflowexpr.ProjectCELValue(map[string]any{
-		"entity":      ctx.Entity,
-		"_entity":     ctx.PlatformEntity,
+		"state":       ctx.Entity,
+		"instance":    ctx.PlatformEntity,
 		"event":       ctx.Event,
 		"payload":     ctx.Payload,
 		"policy":      ctx.Policy,
@@ -98,8 +98,8 @@ func projectWorkflowExpressionContext(ctx workflowExpressionContext) (workflowEx
 	}
 	values := projected.(map[string]any)
 	return workflowExpressionContext{
-		Entity:                       workflowExpressionProjectedMap(values["entity"]),
-		PlatformEntity:               workflowExpressionProjectedMap(values["_entity"]),
+		Entity:                       workflowExpressionProjectedMap(values["state"]),
+		PlatformEntity:               workflowExpressionProjectedMap(values["instance"]),
 		Event:                        workflowExpressionProjectedMap(values["event"]),
 		Payload:                      workflowExpressionProjectedMap(values["payload"]),
 		Policy:                       workflowExpressionProjectedMap(values["policy"]),
@@ -297,7 +297,7 @@ func workflowExpressionResolveQueryOperand(raw string, ctx workflowExpressionCon
 	}
 	if root, scoped := workflowExpressionQueryOperandScope(raw); scoped {
 		switch root {
-		case "entity", "_entity", "event", "payload", "policy", "computed", "fan_out":
+		case "state", "instance", "event", "payload", "policy", "computed", "fan_out":
 			if ctx.AllowUnresolvedQueryOperands {
 				return raw, nil
 			}
@@ -331,10 +331,10 @@ func workflowExpressionQueryOperandScope(raw string) (string, bool) {
 func workflowExpressionLookupContextValue(ref string, ctx workflowExpressionContext) (any, bool) {
 	ref = strings.TrimSpace(ref)
 	switch {
-	case strings.HasPrefix(ref, "entity."):
-		return workflowExpressionLookupPath(ctx.Entity, strings.TrimPrefix(ref, "entity."))
-	case strings.HasPrefix(ref, "_entity."):
-		return workflowExpressionLookupPath(ctx.PlatformEntity, strings.TrimPrefix(ref, "_entity."))
+	case strings.HasPrefix(ref, "state."):
+		return workflowExpressionLookupPath(ctx.Entity, strings.TrimPrefix(ref, "state."))
+	case strings.HasPrefix(ref, "instance."):
+		return workflowExpressionLookupPath(ctx.PlatformEntity, strings.TrimPrefix(ref, "instance."))
 	case strings.HasPrefix(ref, "event."):
 		return workflowExpressionLookupPath(ctx.Event, strings.TrimPrefix(ref, "event."))
 	case strings.HasPrefix(ref, "payload."):

@@ -58,12 +58,12 @@ func TestEntityTools_SQLiteBackendNeutralEntityPersistence(t *testing.T) {
 		Role:          "operator",
 		Tools:         []string{"create_entity", "get_entity", "save_entity_field", "query_entities", "query_metrics", "search_entities"},
 	}
-	bundle := loadWave1EntityToolBundle(t, actor, "review", "accounts", "", `
-accounts:
-  status: text
-  score: numeric
-  priority: integer
-`)
+	bundle := loadWave1EntityToolBundle(t, actor, "review", "state", "", `
+status: text
+score: numeric
+priority: integer
+`,
+	)
 	sqliteStore := newSQLiteRuntimeToolStoreForTest(t)
 	sourceCtx := seedEntityToolSourceRun(t, sqliteStore, bundle)
 	fixture := sourceCtx.Value(entityToolImportFixtureKey{}).(entityToolImportFixture)
@@ -178,7 +178,9 @@ func TestEntityTools_ReadImportedCanonicalEntityContractOnBothStores(t *testing.
 	for _, backend := range []string{"sqlite", "postgres"} {
 		backend := backend
 		t.Run(backend, func(t *testing.T) {
-			bundle := loadWave1EntityToolBundle(t, actor, "review", "account_record", "", "account_record:\n  status: text\n")
+			bundle := loadWave1EntityToolBundle(t, actor, "review", "state", "", `
+status: text
+`)
 			var entityStore runtimetools.EntityPersistence
 			if backend == "sqlite" {
 				selected := newSQLiteRuntimeToolStoreForTest(t)
@@ -200,15 +202,15 @@ func TestEntityTools_ReadImportedCanonicalEntityContractOnBothStores(t *testing.
 				t.Fatalf("load persisted entity contract: %v", err)
 			}
 			persistedType := persisted.EntityType
-			if persistedType != "account_record" {
-				t.Fatalf("persisted entity type = %q, want account_record", persistedType)
+			if persistedType != "state" {
+				t.Fatalf("persisted entity type = %q, want state", persistedType)
 			}
 			out, err := exec.Execute(ctx, "get_entity", map[string]any{"entity_id": entityID})
 			if err != nil {
 				t.Fatalf("get created entity: %v", err)
 			}
-			if got := strings.TrimSpace(out.(map[string]any)["entity_type"].(string)); got != "account_record" {
-				t.Fatalf("tool readback entity type = %q, want account_record", got)
+			if got := strings.TrimSpace(out.(map[string]any)["entity_type"].(string)); got != "state" {
+				t.Fatalf("tool readback entity type = %q, want state", got)
 			}
 		})
 	}
@@ -216,7 +218,10 @@ func TestEntityTools_ReadImportedCanonicalEntityContractOnBothStores(t *testing.
 
 func TestSQLiteEntityPersistence_MarshalsStructuredFilterValues(t *testing.T) {
 	sqliteStore := newSQLiteRuntimeToolStoreForTest(t)
-	bundle := loadWave1EntityToolBundle(t, models.AgentConfig{ID: "tester", Role: "operator"}, "review", "account", "types:\n  Brief:\n    summary: text\n", "account:\n  business_brief: Brief\n  tags: [text]\n")
+	bundle := loadWave1EntityToolBundle(t, models.AgentConfig{ID: "tester", Role: "operator"}, "review", "state", "types:\n  Brief:\n    summary: text\n", `
+business_brief: Brief
+tags: [text]
+`)
 	ctx := seedEntityToolSourceRun(t, sqliteStore, bundle)
 	entityID := seedImportedEntityForToolTest(t, ctx, map[string]any{
 		"flow_instance": "review/inst-structured",
@@ -276,22 +281,22 @@ func TestRoleScopedEntityTools_SQLiteCurrentEntityPersistence(t *testing.T) {
 	)), actor)
 
 	names := roleScopedToolDefinitionMap(exec.ToolDefinitionsForActorInContext(currentCtx, actor))
-	if _, ok := names["read_validation_case"]; !ok {
+	if _, ok := names["read_state"]; !ok {
 		t.Fatalf("sqlite current entity did not enable generated read tool: %#v", sortedRoleScopedToolNames(names))
 	}
-	if _, err := exec.Execute(currentCtx, "save_validation_case_business_brief", map[string]any{
+	if _, err := exec.Execute(currentCtx, "save_state_business_brief", map[string]any{
 		"value": map[string]any{"summary": "after", "confidence": 9},
 	}); err != nil {
 		t.Fatalf("sqlite save_validation_case_business_brief: %v", err)
 	}
-	whole, err := exec.Execute(currentCtx, "read_validation_case", map[string]any{})
+	whole, err := exec.Execute(currentCtx, "read_state", map[string]any{})
 	if err != nil {
 		t.Fatalf("sqlite read_validation_case with hostile bookkeeping: %v", err)
 	}
 	if _, exists := whole.(map[string]any)["bookkeeping"]; exists {
 		t.Fatalf("sqlite role-scoped read exposed platform bookkeeping: %#v", whole)
 	}
-	got, err := exec.Execute(currentCtx, "read_validation_case_business_brief", map[string]any{})
+	got, err := exec.Execute(currentCtx, "read_state_business_brief", map[string]any{})
 	if err != nil {
 		t.Fatalf("sqlite read_validation_case_business_brief: %v", err)
 	}

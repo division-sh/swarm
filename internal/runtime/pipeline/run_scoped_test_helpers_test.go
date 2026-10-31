@@ -93,20 +93,20 @@ func TestComponentFixtureModeDoesNotDeriveFromReadinessOrRepairExplicitMode(t *t
 	}
 }
 
-func testEntityContractsForType(entityType string) runtimecontracts.EntityContractsDocument {
+func testStateContract() runtimecontracts.EntityContractsDocument {
 	return runtimecontracts.EntityContractsDocument{
-		strings.TrimSpace(entityType): {Fields: map[string]runtimecontracts.EntityFieldDecl{}},
+		"state": {Fields: map[string]runtimecontracts.EntityFieldDecl{}},
 	}
 }
 
-func testRootEntityContractSource(workflowName, entityType string) semanticview.Source {
+func testRootEntityContractSource(workflowName string) semanticview.Source {
 	root := runtimecontracts.FlowContractView{
 		Path: ".", Paths: runtimecontracts.FlowContractPaths{FlowPath: "."},
 		Schema: runtimecontracts.FlowSchemaDocument{Name: strings.TrimSpace(workflowName)},
 	}
 	return semanticview.Wrap(&runtimecontracts.WorkflowContractBundle{
 		Semantics:    runtimecontracts.WorkflowSemanticView{Name: strings.TrimSpace(workflowName)},
-		RootEntities: testEntityContractsForType(entityType),
+		RootEntities: testStateContract(),
 		RootSchema:   &root.Schema,
 		FlowTree: runtimecontracts.FlowTree{
 			Root: &root, ByID: map[string]*runtimecontracts.FlowContractView{".": &root},
@@ -117,16 +117,12 @@ func testRootEntityContractSource(workflowName, entityType string) semanticview.
 func admitSyntheticEntityContractsForTest(
 	t *testing.T,
 	base *runtimecontracts.WorkflowContractBundle,
-	rootEntityType string,
-	flowEntityTypes map[string]string,
+	rootState bool,
+	flowIDs []string,
 ) *runtimecontracts.WorkflowContractBundle {
 	t.Helper()
 	if base == nil {
 		t.Fatal("synthetic contract bundle is required")
-	}
-	flowIDs := make([]string, 0, len(flowEntityTypes))
-	for flowID := range flowEntityTypes {
-		flowIDs = append(flowIDs, strings.TrimSpace(flowID))
 	}
 	sort.Strings(flowIDs)
 	files := map[string]string{
@@ -134,16 +130,15 @@ func admitSyntheticEntityContractsForTest(
 		"schema.yaml":   "stages: []\n",
 	}
 	for _, flowID := range flowIDs {
-		entityType := strings.TrimSpace(flowEntityTypes[flowID])
-		if flowID == "" || entityType == "" {
-			t.Fatalf("synthetic flow entity contract requires nonblank flow and entity type: flow=%q type=%q", flowID, entityType)
+		if strings.TrimSpace(flowID) == "" {
+			t.Fatal("synthetic state contract requires a nonblank flow")
 		}
 		files[flowID+"/manifest.yaml"] = "version: 1.0.0\nplatform_version: \">=0.7.0 <0.8.0\"\n"
 		files[flowID+"/schema.yaml"] = "stages:\n  active: {}\n"
-		files[""+flowID+"/entities.yaml"] = fmt.Sprintf("%s:\n  instance_key: {type: text, _unused_reason: fixture instance identity}\n", entityType)
+		files[""+flowID+"/state.yaml"] = "instance_key: text\n"
 	}
-	if rootEntityType = strings.TrimSpace(rootEntityType); rootEntityType != "" {
-		files["entities.yaml"] = fmt.Sprintf("%s: {}\n", rootEntityType)
+	if rootState {
+		files["state.yaml"] = "instance_key: text?\n"
 	}
 
 	admitted := loadWorkflowTempBundle(t, files)

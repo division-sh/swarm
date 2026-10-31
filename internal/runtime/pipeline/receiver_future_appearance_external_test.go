@@ -68,7 +68,7 @@ func TestReceiverCompositionActivationReuseAndConflictBothStores(t *testing.T) {
 					construction58Instance, construction58Lifecycle, err := pc.PrepareInitialEntryLifecycle(construction58Ctx, unrelatedIdentity, runtimepipeline.WorkflowInstance{
 						InstanceID: unrelatedRoute.InstanceID, InstanceKey: unrelatedKey, StorageRef: unrelatedPath, EntityID: runtimeflowidentity.EntityID(unrelatedPath),
 						ParentFlowID: unrelatedConstructed.ParentRoute.FlowID, ParentFlowInstance: unrelatedConstructed.ParentRoute.FlowInstance, ParentEntityID: unrelatedConstructed.ParentEntityID,
-						WorkflowName: "review", WorkflowVersion: source.WorkflowVersion(), Mode: "template", CurrentState: "active", EntityType: "review_entity",
+						WorkflowName: "review", WorkflowVersion: source.WorkflowVersion(), Mode: "template", CurrentState: "active", EntityType: "state",
 						Fields: map[string]any{"receiver_id": unrelatedRoute.InstanceID, "account_id": "unrelated-key"}, RuntimeReadiness: &unrelatedReadiness,
 					}, construction58At)
 					if err != nil {
@@ -117,7 +117,7 @@ func TestReceiverCompositionActivationReuseAndConflictBothStores(t *testing.T) {
 				}
 				instance := runtimepipeline.WorkflowInstance{InstanceID: route.InstanceID, InstanceKey: instanceKey, StorageRef: instancePath, EntityID: entityID,
 					ParentFlowID: constructed.ParentRoute.FlowID, ParentFlowInstance: constructed.ParentRoute.FlowInstance, ParentEntityID: constructed.ParentEntityID,
-					WorkflowName: "review", WorkflowVersion: source.WorkflowVersion(), Mode: "template", CurrentState: "active", EntityType: "review_entity",
+					WorkflowName: "review", WorkflowVersion: source.WorkflowVersion(), Mode: "template", CurrentState: "active", EntityType: "state",
 					Fields: map[string]any{"receiver_id": receiverKey, "account_id": "stored-business-key", "owner": "appeared"}, RuntimeReadiness: &readiness}
 				// Composition activation establishes the receiver before handler execution.
 				// There is no lawful second, payload-derived future receiver to invent.

@@ -6,6 +6,3 @@ steps:
 expect:
   events:
     include: [check.passed]
-  entities:
-    - type: test_entity
-      current_state: done

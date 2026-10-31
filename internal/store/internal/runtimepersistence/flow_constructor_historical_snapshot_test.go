@@ -234,11 +234,11 @@ func proveFlowConstructorHistoricalSnapshot(t *testing.T, backend string, staged
 		"detail/schema.yaml": "stages: []\n", "manifest.yaml": "version: 1.0.0\nplatform_version: '*'\n", "detail/manifest.yaml": "version: 1.0.0\nplatform_version: '*'\n",
 	}
 	if fielded {
-		files["entities.yaml"] = "record:\n  marker: {type: text, initial: original}\n"
+		files["state.yaml"] = "marker: \"original\"\n"
 	}
 	if keyed {
 		files["schema.yaml"] += "instance: item_id\npins:\n  inputs:\n    - item.created\n"
-		files["entities.yaml"] += "  item_id: text\n"
+		files["state.yaml"] += "item_id: text\n"
 		files["events.yaml"] += "item.created:\n  item_id: text\n"
 	}
 	f := newReceiverConfigActivationFixtureWithDocuments(t, backend, false, files, nil)

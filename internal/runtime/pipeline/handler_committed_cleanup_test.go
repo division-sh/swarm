@@ -21,9 +21,9 @@ func VerifyNativeHandlerCommittedCleanupErrorRetainsExactOutcomeBothStoresForTes
 			bundle := loadWorkflowTempBundle(t, map[string]string{
 				"manifest.yaml": "version: 1.0.0\nplatform_version: \">=0.7.0 <0.8.0\"\n",
 				"schema.yaml":   "stages:\n  queued: {}\n  done: {final: true}\n",
-				"entities.yaml": "test_entity: {}\n",
-				"events.yaml":   "source.evt:\nsource.done:\n",
-				"nodes.yaml":    "node-a:\n  execution_type: system_node\n  subscribes_to: [source.evt]\n  event_handlers:\n    source.evt:\n      advances_to: done\n      emit: {event: source.done}\n",
+
+				"events.yaml": "source.evt:\nsource.done:\n",
+				"nodes.yaml":  "node-a:\n  execution_type: system_node\n  subscribes_to: [source.evt]\n  event_handlers:\n    source.evt:\n      advances_to: done\n      emit: {event: source.done}\n",
 			})
 			module := handlerTestWorkflowModuleWithBundle(bundle, ".", "node-a").(*previewWorkflowModule)
 			module.workflowNodes = []WorkflowNode{{
@@ -41,7 +41,7 @@ func VerifyNativeHandlerCommittedCleanupErrorRetainsExactOutcomeBothStoresForTes
 			evt := eventtest.ExistingRunRootIngressWithRoutingSource(uuid.NewString(), "source.evt", "src", "", []byte(`{}`), 0, runID, events.EnvelopeForTargetRoute(handlerTestWorkflowEnvelope(".", runID, entityID), events.RouteIdentity{FlowID: ".", FlowInstance: runID, EntityID: entityID}), testWorkflowRoutingSource(".", runID, entityID), time.Now().UTC())
 			if err := fixture.Construct(ctx, materializedWorkflowInstanceForSource(t, pc.SemanticSource(), ctx, WorkflowInstance{
 				InstanceID: runID, StorageRef: runID, EntityID: entityID, WorkflowName: ".", WorkflowVersion: pc.SemanticSource().WorkflowVersion(),
-				CurrentState: "queued", EntityType: "test_entity", Fields: map[string]any{},
+				CurrentState: "queued", Fields: map[string]any{},
 			})); err != nil {
 				t.Fatal(err)
 			}
@@ -86,9 +86,9 @@ func VerifyNativeGuardRejectedSettlementSurvivesContinuationCleanupFailureBothSt
 			bundle := loadWorkflowTempBundle(t, map[string]string{
 				"manifest.yaml": "version: 1.0.0\nplatform_version: \">=0.7.0 <0.8.0\"\n",
 				"schema.yaml":   "stages:\n  queued: {}\n  done: {final: true}\n",
-				"entities.yaml": "test_entity: {}\n",
-				"events.yaml":   "source.evt:\n",
-				"nodes.yaml":    "node-a:\n  execution_type: system_node\n  subscribes_to: [source.evt]\n  event_handlers:\n    source.evt:\n      guard: {id: reject-check, check: false, on_fail: reject}\n      advances_to: done\n",
+
+				"events.yaml": "source.evt:\n",
+				"nodes.yaml":  "node-a:\n  execution_type: system_node\n  subscribes_to: [source.evt]\n  event_handlers:\n    source.evt:\n      guard: {id: reject-check, check: false, on_fail: reject}\n      advances_to: done\n",
 			})
 			module := handlerTestWorkflowModuleWithBundle(bundle, ".", "node-a").(*previewWorkflowModule)
 			node := pipelineNode(t, ".", "node-a")
@@ -106,7 +106,7 @@ func VerifyNativeGuardRejectedSettlementSurvivesContinuationCleanupFailureBothSt
 			evt := eventtest.ExistingRunRootIngressWithRoutingSource(uuid.NewString(), "source.evt", "src", "", []byte(`{}`), 0, runID, events.EnvelopeForTargetRoute(handlerTestWorkflowEnvelope(".", runID, entityID), events.RouteIdentity{FlowID: ".", FlowInstance: runID, EntityID: entityID}), testWorkflowRoutingSource(".", runID, entityID), time.Now().UTC())
 			if err := fixture.Construct(ctx, materializedWorkflowInstanceForSource(t, pc.SemanticSource(), ctx, WorkflowInstance{
 				InstanceID: runID, StorageRef: runID, EntityID: entityID, WorkflowName: ".", WorkflowVersion: pc.SemanticSource().WorkflowVersion(),
-				CurrentState: "queued", EntityType: "test_entity", Fields: map[string]any{},
+				CurrentState: "queued", Fields: map[string]any{},
 			})); err != nil {
 				t.Fatal(err)
 			}

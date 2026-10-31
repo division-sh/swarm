@@ -50,7 +50,7 @@ func TestIssue2564M28OneEntityFenceDoesNotBlockIndependentEntityBothStores(t *te
 			request.Instance = child
 			request.OccurredAt = time.Now().UTC().Truncate(time.Microsecond)
 			request.ConstructorInput, request.ResolvedKey = "construct.requested", "independent"
-			request.TriggerEvent = eventtest.ExistingRunRootIngress(uuid.NewString(), "construct.requested", "constructor-fixture", "", []byte(`{}`), 0, f.state.Identity.RunID, events.EventEnvelope{}, request.OccurredAt)
+			request.TriggerEvent = eventtest.ExistingRunRootIngress(uuid.NewString(), "construct.requested", "constructor-fixture", "", []byte(issue2564ConstructorPayload), 0, f.state.Identity.RunID, events.EventEnvelope{}, request.OccurredAt)
 			activation, err := f.manager.PrepareFlowInstanceActivation(f.ctx, request)
 			if err != nil {
 				t.Fatal(err)
@@ -77,7 +77,7 @@ func TestIssue2564M28OneEntityFenceDoesNotBlockIndependentEntityBothStores(t *te
 			firstDone := make(chan outcome, 1)
 			joined := false
 			go func() {
-				result, err := writer.ApplyEntityFieldMutation(ctx, f.command(entityruntime.Mutation{Operation: "append", Target: "entity.items", Value: "first"}))
+				result, err := writer.ApplyEntityFieldMutation(ctx, f.command(entityruntime.Mutation{Operation: "append", Target: "state.items", Value: "first"}))
 				firstDone <- outcome{result, err}
 			}()
 			defer func() {
@@ -95,7 +95,7 @@ func TestIssue2564M28OneEntityFenceDoesNotBlockIndependentEntityBothStores(t *te
 			case <-ctx.Done():
 				t.Fatal("first entity did not reach its locked evaluation")
 			}
-			command := f.command(entityruntime.Mutation{Operation: "append", Target: "entity.items", Value: "second"})
+			command := f.command(entityruntime.Mutation{Operation: "append", Target: "state.items", Value: "second"})
 			command.Owner, command.EntityID = second.State.Identity, second.State.EntityID
 			result, err := writer.ApplyEntityFieldMutation(ctx, command)
 			if err != nil || !result.Acknowledged || result.Revision != 2 {

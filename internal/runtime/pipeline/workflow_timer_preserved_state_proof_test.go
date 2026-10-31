@@ -115,8 +115,8 @@ func VerifyMutationFreeAcceptedEventTimersBothStoresForTest(t *testing.T, factor
 					entityType := ""
 					values := map[string]any{}
 					if fields {
-						files["entities.yaml"] = "work:\n  marker: {type: text, initial: stable}\n"
-						entityType, values = "work", map[string]any{"marker": "stable"}
+						files["state.yaml"] = "marker: 'stable'\n"
+						entityType, values = "state", map[string]any{"marker": "stable"}
 					}
 					bundle := loadWorkflowTempBundle(t, files)
 					f := factory(t, backend, bundle)

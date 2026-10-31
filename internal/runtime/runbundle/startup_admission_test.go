@@ -165,8 +165,8 @@ func testUpgradeRetainedInstances(t *testing.T) {
 					},
 				}}},
 			}},
-			FlowSources: map[string]contracts.FlowSource{".": {Schema: "schema.yaml", Entities: "entities.yaml"}},
-			RootEntities: contracts.EntityContractsDocument{"record": {Fields: map[string]contracts.EntityFieldDecl{
+			FlowSources: map[string]contracts.FlowSource{".": {Schema: "schema.yaml", State: "state.yaml"}},
+			RootEntities: contracts.EntityContractsDocument{"state": {Fields: map[string]contracts.EntityFieldDecl{
 				"count": {Type: fieldType},
 			}}},
 			Events: map[string]contracts.EventCatalogEntry{"work.queued": {Payload: contracts.EventPayloadSpec{
@@ -266,7 +266,7 @@ func testUpgradeRetainedInstances(t *testing.T) {
 				Route: state.Instances[0].Route, EntityID: identity.EntityID,
 			}}}
 			candidate := source("later", "string", func(bundle *contracts.WorkflowContractBundle) {
-				bundle.FlowSources["."] = contracts.FlowSource{Schema: "candidate/schema.yaml", Entities: "candidate/entities.yaml", Nodes: "candidate/nodes.yaml", Events: "candidate/events.yaml"}
+				bundle.FlowSources["."] = contracts.FlowSource{Schema: "candidate/schema.yaml", State: "candidate/state.yaml", Nodes: "candidate/nodes.yaml", Events: "candidate/events.yaml"}
 			})
 			blockers, err := CheckUpgrade(context.Background(), current, candidate, queued)
 			if err != nil {

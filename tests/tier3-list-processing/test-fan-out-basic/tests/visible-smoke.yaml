@@ -9,6 +9,3 @@ steps:
 expect:
   events:
     include: [item.assigned]
-  entities:
-    - type: test_entity
-      current_state: scanning

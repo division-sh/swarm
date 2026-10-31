@@ -2,15 +2,15 @@ validation-node:
   execution_type: system_node
   subscribes_to: [order.submitted]
   produces: [order.validated]
-  gate_state:
-    validation_passed: gate set when validation succeeds
   event_handlers:
     order.submitted:
       guard:
         id: amount_check
         check: payload.amount >= policy.min_amount
       advances_to: validated
-      sets_gate: validation_passed
+      data_accumulation:
+        writes:
+          - {target_field: validation_passed, value: true}
       emit: order.validated
 
 completion-node:
@@ -21,7 +21,7 @@ completion-node:
     order.validated:
       guard:
         id: gate_check
-        check: _entity.gates.validation_passed == true
+        check: state.validation_passed == true
       advances_to: complete
       emit:
         event: order.finalized

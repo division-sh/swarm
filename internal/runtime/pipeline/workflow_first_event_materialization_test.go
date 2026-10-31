@@ -15,9 +15,9 @@ func VerifyNativeNodeContractFirstEventTransitionsFromCanonicalInitialStateOnBot
 	bundle := loadWorkflowTempBundle(t, map[string]string{
 		"manifest.yaml": "version: 1.0.0\nplatform_version: \">=0.7.0 <0.8.0\"\n",
 		"schema.yaml":   "stages:\n  waiting: {}\n  done: {final: true}\n",
-		"entities.yaml": "first_event_entity: {}\n",
-		"events.yaml":   "request.accepted:\n",
-		"nodes.yaml":    "acceptor:\n  execution_type: system_node\n  subscribes_to: [request.accepted]\n  event_handlers:\n    request.accepted:\n      advances_to: done\n",
+
+		"events.yaml": "request.accepted:\n",
+		"nodes.yaml":  "acceptor:\n  execution_type: system_node\n  subscribes_to: [request.accepted]\n  event_handlers:\n    request.accepted:\n      advances_to: done\n",
 	})
 
 	for _, tc := range workflowJoinStoreCases() {
@@ -62,8 +62,8 @@ func VerifyNativeNodeContractFirstEventTransitionsFromCanonicalInitialStateOnBot
 			if instance.CurrentState != "done" {
 				t.Fatalf("current state = %q, want done", instance.CurrentState)
 			}
-			if instance.EntityType != "first_event_entity" {
-				t.Fatalf("entity type = %q, want first_event_entity", instance.EntityType)
+			if instance.EntityType != "" {
+				t.Fatalf("fieldless flow acquired entity type %q", instance.EntityType)
 			}
 			if len(instance.TransitionHistory) != 1 {
 				t.Fatalf("transition history = %#v, want one transition", instance.TransitionHistory)

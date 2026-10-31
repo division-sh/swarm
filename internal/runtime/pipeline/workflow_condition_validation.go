@@ -45,8 +45,8 @@ func ValidateConditionCELWithOptions(expression string, context WorkflowConditio
 		return fmt.Errorf("computed.* is only available in rule and on_complete conditions")
 	}
 	opts.RequireBool = true
-	opts.AllowBareItem = context == WorkflowConditionContextFilter || context == WorkflowConditionContextCount || context == WorkflowConditionContextQueryFilter
 	opts.AllowAccumulated = context == WorkflowConditionContextOnComplete || opts.AllowBareItem
+	opts.AllowBareItem = context == WorkflowConditionContextFilter || context == WorkflowConditionContextCount || context == WorkflowConditionContextQueryFilter
 	return workflowexpr.ValidateValueExpressionWithOptions(normalized, opts)
 }
 
@@ -146,8 +146,8 @@ func workflowConditionRecognizedRoots(context WorkflowConditionContext) []string
 	roots := []string{
 		"payload",
 		"event",
-		"entity",
-		"_entity",
+		"state",
+		"instance",
 		"policy",
 		"query_entities",
 	}

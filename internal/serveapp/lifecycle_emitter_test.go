@@ -1,6 +1,7 @@
 package serveapp
 
 import (
+	"context"
 	"fmt"
 	"testing"
 	"time"
@@ -45,12 +46,12 @@ func TestServedLifecycleEmitterLoopEscapeJourney(t *testing.T) {
 			}
 			publish("loop.start", "loop-start", map[string]any{"seed": true})
 			requireServedEventPublishEntityState(t, rt.DB, rt.Backend, started.RunID, entityID, "drafting")
-			first := readLifecycleLoop(t, rt, started.RunID, entityID)
+			first := readLifecycleLoop(t, rt.ReceiverStateReader, started.RunID, entityID)
 			if first.Attempt != 1 || first.MaxAttempts != 2 || first.Status != loopruntime.StatusOpen {
 				t.Fatalf("first loop=%#v", first)
 			}
 			for attempt := 1; attempt <= 2; attempt++ {
-				current := readLifecycleLoop(t, rt, started.RunID, entityID)
+				current := readLifecycleLoop(t, rt.ReceiverStateReader, started.RunID, entityID)
 				if current.Attempt != attempt {
 					t.Fatalf("attempt=%#v", current)
 				}
@@ -64,7 +65,7 @@ func TestServedLifecycleEmitterLoopEscapeJourney(t *testing.T) {
 				}
 				requireServedEventPublishEntityState(t, rt.DB, rt.Backend, started.RunID, entityID, state)
 			}
-			closed := readLifecycleLoop(t, rt, started.RunID, entityID)
+			closed := readLifecycleLoop(t, rt.ReceiverStateReader, started.RunID, entityID)
 			if closed.Status != loopruntime.StatusClosed || closed.CloseReason != "escaped" || closed.Attempt != 2 || closed.RevisionID == first.RevisionID {
 				t.Fatalf("closed loop=%#v", closed)
 			}
@@ -82,9 +83,41 @@ func TestServedLifecycleEmitterLoopEscapeJourney(t *testing.T) {
 	}
 }
 
-func readLifecycleLoop(t *testing.T, rt servedControlProofRuntime, runID, entityID string) loopruntime.PublicActivation {
+func readLifecycleLoop(t *testing.T, reader receiverProofStateReader, runID, entityID string) loopruntime.PublicActivation {
 	t.Helper()
-	return readLifecycleLoopFromEndpoint(t, rt.Endpoint, runID, entityID)
+	var loops []loopruntime.PublicActivation
+	err := reader.InspectSnapshot(t.Context(), func(ctx context.Context) error {
+		instances, err := reader.ListWorkflowInstances(ctx, runID)
+		if err != nil {
+			return err
+		}
+		matches := 0
+		for _, instance := range instances {
+			if instance.EntityID != entityID {
+				continue
+			}
+			matches++
+			_, exact, err := loadReceiverTargetState(ctx, reader, runID, instance.WorkflowName, instance.StorageRef, entityID)
+			if err != nil {
+				return err
+			}
+			loops, err = loopruntime.PublicActivations(exact.StateBuckets)
+			if err != nil {
+				return err
+			}
+		}
+		if matches != 1 {
+			return fmt.Errorf("expected one loop receiver %s, got %d", entityID, matches)
+		}
+		return nil
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(loops) != 1 {
+		t.Fatalf("expected one loop activation: %#v", loops)
+	}
+	return loops[0]
 }
 
 func readLifecycleLoopFromEndpoint(t *testing.T, endpoint, runID, entityID string) loopruntime.PublicActivation {

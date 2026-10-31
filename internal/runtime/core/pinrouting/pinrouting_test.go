@@ -345,7 +345,7 @@ func loadFilesystemAgentOwnedByFlowSource(t *testing.T, mode string) semanticvie
 	instance := ""
 	if mode == runtimecontracts.FlowModeTemplate {
 		instance = "instance: instance_id\n"
-		write(filepath.Join(root, "support", "entities.yaml"), "support:\n  instance_id: text\n")
+		write(filepath.Join(root, "support", "state.yaml"), "instance_id: text\n")
 	}
 	write(filepath.Join(root, "support", "manifest.yaml"), "version: 1.0.0\nplatform_version: '*'\n")
 	write(filepath.Join(root, "support", "schema.yaml"), instance+"stages:\n  waiting: {}\n  done: {final: true}\n")

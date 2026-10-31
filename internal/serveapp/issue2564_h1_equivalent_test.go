@@ -2,15 +2,12 @@ package serveapp
 
 import (
 	"context"
-	"crypto/sha256"
 	"encoding/json"
 	"fmt"
 	"net/http"
 	"net/http/httptest"
 	"os"
-	"path/filepath"
 	"regexp"
-	"slices"
 	"strings"
 	"sync"
 	"testing"
@@ -98,48 +95,9 @@ func TestIssue2564ServedH1ReconstructedEquivalentBothStores(t *testing.T) {
 	}
 }
 
-func issue2564H1Corpus(t *testing.T, root string) map[string]string {
-	t.Helper()
-	files := make(map[string]string)
-	if err := filepath.WalkDir(root, func(path string, entry os.DirEntry, err error) error {
-		if err != nil || entry.IsDir() {
-			return err
-		}
-		relative, err := filepath.Rel(root, path)
-		if err != nil {
-			return err
-		}
-		contents, err := os.ReadFile(path)
-		if err != nil {
-			return err
-		}
-		files[filepath.ToSlash(relative)] = string(contents)
-		return nil
-	}); err != nil {
-		t.Fatal(err)
-	}
-	return files
-}
-
 func issue2564H1WriteCorpus(t *testing.T) string {
 	t.Helper()
-	root := canonicalrouting.CopyIssue2564H1Equivalent(t)
-	files := issue2564H1Corpus(t, root)
-	paths := make([]string, 0, len(files))
-	for path := range files {
-		paths = append(paths, path)
-	}
-	slices.Sort(paths)
-	manifest := sha256.New()
-	for _, path := range paths {
-		contents := files[path]
-		checksum := fmt.Sprintf("%x", sha256.Sum256([]byte(contents)))
-		fmt.Fprintf(manifest, "%s  %s\n", checksum, path)
-		t.Logf("H1_EQUIVALENT_SHA256 %s  %s", checksum, path)
-	}
-	checksum := fmt.Sprintf("%x", manifest.Sum(nil))
-	t.Logf("H1_EQUIVALENT_CORPUS_SHA256 %s", checksum)
-	return root
+	return canonicalrouting.CopyIssue2564H1Equivalent(t)
 }
 
 func issue2564H1StartServed(t *testing.T, backend, root string, provider *issue2564H1Provider) issue2564ServedFixture {
@@ -262,7 +220,7 @@ func (p *issue2564H1Provider) ServeHTTP(w http.ResponseWriter, r *http.Request) 
 		return
 	}
 	for n := 1; n <= issue2564H1Fields; n++ {
-		name := fmt.Sprintf("save_hub_%s%02d", side, n)
+		name := fmt.Sprintf("save_state_%s%02d", side, n)
 		found := false
 		for _, tool := range request.Tools {
 			if tool.Function.Name == name && issue2564H1SchemaProperty(tool.Function.Parameters, "value") {
@@ -293,7 +251,7 @@ func (p *issue2564H1Provider) ServeHTTP(w http.ResponseWriter, r *http.Request) 
 			result, _ := entry["result"].(map[string]any)
 			entity, _ := result["entity_id"].(string)
 			revision, _ := result["revision"].(float64)
-			if entry["name"] != "save_hub_"+field || entry["ok"] != true || result["field"] != field || entity == "" || revision < 1 || revision != float64(int(revision)) {
+			if entry["name"] != "save_state_"+field || entry["ok"] != true || result["field"] != field || entity == "" || revision < 1 || revision != float64(int(revision)) {
 				p.refuse(w, fmt.Errorf("unacknowledged H1 scalar %s/%s: %#v", key, field, entry))
 				return
 			}
@@ -314,7 +272,7 @@ func (p *issue2564H1Provider) ServeHTTP(w http.ResponseWriter, r *http.Request) 
 		first := round*issue2564H1Batch + 1
 		for n := first; n <= min(first+issue2564H1Batch-1, issue2564H1Fields); n++ {
 			field := fmt.Sprintf("%s%02d", side, n)
-			calls = append(calls, map[string]any{"id": hub + "-" + field, "type": "function", "function": map[string]any{"name": "save_hub_" + field, "arguments": `{"value":1}`}})
+			calls = append(calls, map[string]any{"id": hub + "-" + field, "type": "function", "function": map[string]any{"name": "save_state_" + field, "arguments": `{"value":1}`}})
 		}
 		message["content"], message["tool_calls"], finish = "", calls, "tool_calls"
 	}

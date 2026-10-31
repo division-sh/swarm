@@ -49,6 +49,7 @@ func accountingClosureRepo(t *testing.T) (string, string, accountingPolicy, []by
 		testplanning.GeneratedWeightModelPath, ".github/flake-ledger.json", "internal/apiv1/testdata/public_surface_backend_matrix.yaml",
 		formatproof.Ledger,
 		"scripts/rewrite-stages-2566/formatproof/testdata/original.go.txt",
+		"scripts/rewrite-stages-2566/formatproof/testdata/approved.go.txt",
 	} {
 		body, err := os.ReadFile(filepath.Join(root, path))
 		if err != nil {
@@ -56,7 +57,7 @@ func accountingClosureRepo(t *testing.T) (string, string, accountingPolicy, []by
 		}
 		put(path, body)
 	}
-	original, err := os.ReadFile(filepath.Join(root, formatproof.Source))
+	original, err := os.ReadFile(filepath.Join(root, "scripts/rewrite-stages-2566/formatproof/testdata/approved.go.txt"))
 	if err != nil {
 		t.Fatal(err)
 	}

@@ -6,5 +6,5 @@ expect:
   events:
     include: [digest.compiled]
   entities:
-    - type: items
+    - flow: .
       current_state: compiled

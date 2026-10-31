@@ -63,9 +63,6 @@ func (e *Executor) execSaveEntityField(ctx context.Context, actor models.AgentCo
 	if err != nil {
 		return nil, failures.WrapDetail("invalid_tool_input", "tool-executor", "exec_save_entity_field.field", map[string]any{"field": fieldName}, err)
 	}
-	if strings.TrimSpace(field.FieldDecl.MaterializeFrom) != "" {
-		return nil, failures.New(failures.ClassAuthorizationDenied, "runtime_materialized_field_write_forbidden", "tool-executor", "exec_save_entity_field.field", map[string]any{"action": "entity_write", "field": fieldName})
-	}
 	actorContract, ok := entityruntime.ResolveForActor(source, actor)
 	if !ok {
 		return nil, failures.New(failures.ClassAuthorizationDenied, "role_scoped_tool_forbidden", "tool-executor", "exec_save_entity_field.actor", map[string]any{"action": "entity_write", "actor_id": strings.TrimSpace(actor.ID)})
@@ -183,7 +180,7 @@ func entityToolLiteralMutation(contract entityruntime.Contract, field string, pa
 	}
 	key, hasKey := payload["key"]
 	index, hasIndex := payload["index"]
-	mutation := entityruntime.Mutation{Operation: op, Target: "entity." + field, Value: value, Key: key, HasKey: hasKey, Index: index, HasIndex: hasIndex}
+	mutation := entityruntime.Mutation{Operation: op, Target: "state." + field, Value: value, Key: key, HasKey: hasKey, Index: index, HasIndex: hasIndex}
 	if op == "" || (op == entityruntime.ContainedOperationSet && !hasKey) {
 		if hasKey || hasIndex {
 			return entityruntime.Mutation{}, fmt.Errorf("whole-value set must not declare key or index")

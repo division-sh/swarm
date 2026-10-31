@@ -366,9 +366,8 @@ func TestNodeEventHandler_LocalizesCrossFlowQualifiedInputEventToLocalHandler(t 
 	repoRoot := repoRootForContractsTest(t)
 	root := t.TempDir()
 
-	writeFixtureFile(t, filepath.Join(root, "entities.yaml"), `
-item:
-  item_id: string
+	writeFixtureFile(t, filepath.Join(root, "state.yaml"), `
+item_id: string
 `)
 	writeFixtureFile(t, filepath.Join(root, "manifest.yaml"), "version: 1.0.0\nplatform_version: '*'\n")
 	writeFixtureFile(t, filepath.Join(root, "schema.yaml"), "stages: []\n# fixture: cross-flow-localization\n")
@@ -443,9 +442,8 @@ func TestNodeEventHandler_ExternalizesOnSuccessEmitWithRules(t *testing.T) {
 	repoRoot := repoRootForContractsTest(t)
 	root := t.TempDir()
 
-	writeFixtureFile(t, filepath.Join(root, "entities.yaml"), `
-item:
-  item_id: string
+	writeFixtureFile(t, filepath.Join(root, "state.yaml"), `
+item_id: string
 `)
 	writeFixtureFile(t, filepath.Join(root, "manifest.yaml"), "version: 1.0.0\nplatform_version: '*'\n")
 	writeFixtureFile(t, filepath.Join(root, "schema.yaml"), "stages: []\n# fixture: cross-flow-on-success\n")
@@ -541,10 +539,9 @@ func currentWorkflowContractsDirForTest(t *testing.T) string {
 	t.Helper()
 	root := t.TempDir()
 
-	writeFixtureFile(t, filepath.Join(root, "entities.yaml"), `
-item:
-  item_id: string
-  status: string
+	writeFixtureFile(t, filepath.Join(root, "state.yaml"), `
+item_id: string
+status: string
 `)
 	writeFixtureFile(t, filepath.Join(root, "manifest.yaml"), "version: 1.0.0\nplatform_version: '*'\n")
 	writeFixtureFile(t, filepath.Join(root, "schema.yaml"), `stages:

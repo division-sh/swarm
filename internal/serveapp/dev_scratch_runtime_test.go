@@ -246,9 +246,6 @@ func promoteDevScratchFixtureToStanding(t *testing.T, sourceRoot string) {
 	if err := os.WriteFile(nodesPath, []byte(updatedNodes), 0o644); err != nil {
 		t.Fatal(err)
 	}
-	if err := os.WriteFile(filepath.Join(sourceRoot, "fulfillment", "entities.yaml"), []byte("fulfillment: {}\n"), 0o644); err != nil {
-		t.Fatal(err)
-	}
 }
 
 func requireSingleServedStandingRun(t *testing.T, endpoint, bundleHash string) operatorread.RunHeader {

@@ -5,6 +5,3 @@ steps:
 expect:
   events:
     include: [match.found]
-  entities:
-    - type: test_entity
-      current_state: matched

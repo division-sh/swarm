@@ -527,10 +527,12 @@ func buildFlows(source semanticview.Source, bundle *runtimecontracts.WorkflowCon
 			OutputPins: outputPinViews(source, flowID, source.FlowOutputEventPins(flowID)),
 		}
 		item.Ingress = standingIngressView(rootInputs, flowID)
-		if primary, err := bundle.ResolveFlowPrimaryEntity(flowID); err == nil {
-			item.PrimaryEntity = primaryEntityView(primary, flow.Paths.EntitiesFile)
-		} else {
-			item.PrimaryEntityError = err.Error()
+		if entities, _ := bundle.FlowEntityContractsByID(flowID); len(entities) != 0 {
+			if primary, err := bundle.ResolveFlowPrimaryEntity(flowID); err == nil {
+				item.PrimaryEntity = primaryEntityView(primary, flow.Paths.EntitiesFile)
+			} else {
+				item.PrimaryEntityError = err.Error()
+			}
 		}
 		if strings.TrimSpace(schema.EffectiveMode()) == runtimecontracts.FlowModeTemplate || !schema.Instance.Empty() {
 			if instance, err := bundle.ResolveFlowTemplateInstance(flowID); err == nil {

@@ -39,7 +39,7 @@ registry-finalize:
     assessment.reported:
       guard:
         id: still_investigating
-        check: _entity.current_state == 'investigating'
+        check: instance.stage == 'investigating'
         on_fail: discard
       data_accumulation:
         writes:
@@ -53,7 +53,7 @@ registry-finalize:
     investigation.timed_out:
       guard:
         id: still_investigating_timeout
-        check: _entity.current_state == 'investigating'
+        check: instance.stage == 'investigating'
         on_fail: discard
       data_accumulation:
         writes:

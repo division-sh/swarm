@@ -23,7 +23,7 @@ stages:
 pins:
   outputs:
     - work.ready
-`, "work.ready:\n  item_id: text\n", "producer_state:\n  item_id: {type: text}\n", "")
+`, "work.ready:\n  item_id: text\n", "item_id: text\n", "")
 	writeLegacyInstanceFlow(t, root, "other", `# fixture: other
 instance: item_id
 stages:
@@ -32,7 +32,7 @@ stages:
 pins:
   outputs:
     - other.ready
-`, "other.ready:\n  item_id: text\n", "other_state:\n  item_id: {type: text}\n", "")
+`, "other.ready:\n  item_id: text\n", "item_id: text\n", "")
 	writeLegacyInstanceFlow(t, root, "observer", `# fixture: observer
 instance: item_id
 stages:
@@ -42,7 +42,7 @@ pins:
   inputs:
     - work.ready
     - other.ready
-`, "", "observer_state:\n  item_id: {type: text}\n", `observe:
+`, "", "item_id: text\n", `observe:
   execution_type: system_node
   subscribes_to: [work.ready, other.ready]
 `)
@@ -93,7 +93,7 @@ observer.create:
 		if flow == "observer" {
 			nodes += "observe:\n  execution_type: system_node\n  subscribes_to: [work.ready, other.ready]\n  event_handlers:\n    work.ready:\n      guard: {id: observed, check: true}\n    other.ready:\n      guard: {id: observed, check: true}\n"
 		}
-		writeLegacyInstanceFlow(t, root, flow, schema, events, flow+"_state:\n  item_id: {type: text}\n", nodes)
+		writeLegacyInstanceFlow(t, root, flow, schema, events, "item_id: text\n", nodes)
 	}
 	return root
 }
@@ -162,7 +162,7 @@ observer.stop:
 		}
 		schema := "# fixture: " + flow + "\ninstance: item_id\n" + stages + "pins:\n  inputs: " + inputs + "\n  outputs: [" + output + "]\n"
 		events := output + ":\n  item_id: text\n  marker: text\n"
-		writeLegacyInstanceFlow(t, root, flow, schema, events, flow+"_state:\n  item_id: {type: text}\n", nodes+local)
+		writeLegacyInstanceFlow(t, root, flow, schema, events, "item_id: text\n", nodes+local)
 	}
 	return root
 }

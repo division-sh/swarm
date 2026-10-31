@@ -52,9 +52,9 @@ import (
 func boundedInboundTestSource(t *testing.T) semanticview.Source {
 	t.Helper()
 	bundle := loadRuntimeTempBundle(t, map[string]string{
-		"schema.yaml":                   "stages: []\n",
-		"bounded_inbound/schema.yaml":   "stages:\n  active: {}\n",
 		"bounded_inbound/entities.yaml": "bounded_entity: {}\n", "bounded_inbound/manifest.yaml": "version: 1.0.0\nplatform_version: '*'\n", "manifest.yaml": "version: 1.0.0\nplatform_version: '*'\n",
+		"schema.yaml":                 "stages: []\n",
+		"bounded_inbound/schema.yaml": "stages:\n  active: {}\n",
 	})
 	return semanticview.Wrap(bundle)
 }

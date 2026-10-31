@@ -126,6 +126,9 @@ func TestGuardTerminationHistoricalForkPreservesCauseBothStores(t *testing.T) {
 				if err != nil {
 					t.Fatalf("encode recorded guard fields: %v", err)
 				}
+				if metadata.EntityType == "" {
+					fields = nil
+				}
 				instance, err := pipeline.DecodeWorkflowInstancePersistenceRecord(pipeline.WorkflowInstancePersistenceRecord{
 					EntityID: entity.EntityID, FlowInstance: metadata.FlowInstance, EntityType: metadata.EntityType,
 					ParentInstance: metadata.ParentInstance, InstanceKey: metadata.InstanceKey, Mode: metadata.Mode,

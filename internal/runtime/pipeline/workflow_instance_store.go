@@ -206,7 +206,7 @@ func (o WorkflowEntityStateSelectionOwner) Owns(instancePath string) bool {
 }
 
 // WorkflowEntityCollectionOwner binds query.entities to one admitted flow and
-// its exact primary entity table. It does not infer entity rows from lifecycle
+// its state record. It does not infer entity rows from lifecycle
 // projections, which may legitimately be absent for state-only entities.
 type WorkflowEntityCollectionOwner struct {
 	stateOwner WorkflowEntityStateSelectionOwner
@@ -247,13 +247,6 @@ func (o WorkflowEntityCollectionOwner) ScopeKey() string {
 		return ""
 	}
 	return o.stateOwner.ScopeKey()
-}
-
-func (o WorkflowEntityCollectionOwner) EntityType() string {
-	if !o.Valid() {
-		return ""
-	}
-	return o.entityType
 }
 
 func (o WorkflowEntityCollectionOwner) Owns(record WorkflowEntityStatePersistenceRecord) bool {

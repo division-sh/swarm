@@ -860,7 +860,7 @@ func ambiguousScopedClaudeStartupSource(t *testing.T) semanticview.Source {
 	writeAgentFreeRuntimeFixtureFile(t, filepath.Join(root, "manifest.yaml"), "version: 1.0.0\nplatform_version: '*'\n")
 	writeAgentFreeRuntimeFixtureFile(t, filepath.Join(root, "schema.yaml"), "stages: []\n")
 	writeAgentFreeRuntimeFixtureFile(t, filepath.Join(root, "packages", "manifest.yaml"), "version: 1.0.0\nplatform_version: '*'\n")
-	writeAgentFreeRuntimeFixtureFile(t, filepath.Join(root, "entities.yaml"), "item:\n  item_id: string\n")
+	writeAgentFreeRuntimeFixtureFile(t, filepath.Join(root, "state.yaml"), "item_id: string\n")
 	writeAgentFreeRuntimeFixtureFile(t, filepath.Join(root, "agents.yaml"), `
 root-mock:
   model: regular

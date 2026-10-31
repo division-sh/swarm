@@ -32,7 +32,7 @@ func VerifyNativeTemplateFlowPilotPipelineDispatchUpdatesSelectedTemplateInstanc
 				WorkflowVersion: bundle.WorkflowVersion(),
 				CurrentState:    "pending",
 				Fields:          map[string]any{"account_id": "acct-1"},
-				EntityType:      "account_state",
+				EntityType:      "state",
 			})); err != nil {
 				t.Fatalf("seed scoring workflow instance: %v", err)
 			}

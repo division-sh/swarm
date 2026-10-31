@@ -59,11 +59,11 @@ func TestManagerNativeLostAdmissionCleanupBothStores(t *testing.T) {
 				var routes *bus.EventBus
 				var nativeOptions manager.AgentManagerOptions
 				f := newReceiverConfigActivationFixtureForStore(t, selected.(agentFixtureFlowStore), false, map[string]string{
-					"schema.yaml":          "stages: []\n",
-					"review/schema.yaml":   "instance: request_id\nstages:\n  pending: {}\npins:\n  inputs:\n    - task.started\n",
-					"review/entities.yaml": "review_item:\n  request_id: text\n",
-					"review/events.yaml":   "task.started:\n",
-					"review/agents.yaml":   "reviewer:\n  role: reviewer\n  intent: {inline: \"Review the task.\"}\n  model: regular\n  subscriptions: [task.started]\n", "manifest.yaml": "version: 1.0.0\nplatform_version: '*'\n", "review/manifest.yaml": "version: 1.0.0\nplatform_version: '*'\n",
+					"schema.yaml":        "stages: []\n",
+					"review/schema.yaml": "instance: request_id\nstages:\n  pending: {}\npins:\n  inputs:\n    - task.started\n",
+					"review/state.yaml":  "request_id: text\n",
+					"review/events.yaml": "task.started:\n",
+					"review/agents.yaml": "reviewer:\n  role: reviewer\n  intent: {inline: \"Review the task.\"}\n  model: regular\n  subscriptions: [task.started]\n", "manifest.yaml": "version: 1.0.0\nplatform_version: '*'\n", "review/manifest.yaml": "version: 1.0.0\nplatform_version: '*'\n",
 				}, nil, func(t *testing.T, original *manager.AgentManager) *manager.AgentManager {
 					if err := original.Shutdown(); err != nil {
 						t.Fatal(err)

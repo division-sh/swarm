@@ -109,10 +109,10 @@ func runFlowAttachmentAcquisitionCuts(t *testing.T, resource string) {
 					routes := &attachmentAgentAcquisitionRoutes{attachmentAgentRouteProbe: probe, resource: resource, after: cut == "after_publish", disposition: disposition, fault: errors.New("injected " + resource + " acquisition failure")}
 					routes.enabled.Store(true)
 					f := newReceiverConfigActivationFixtureWithOwnership(t, backend, true, map[string]string{
-						"schema.yaml":          "stages: []\n",
-						"review/schema.yaml":   "instance: request_id\nstages:\n  pending: {}\npins:\n  inputs:\n    - task.started\n",
-						"review/entities.yaml": "review_item:\n  request_id: text\n",
-						"review/events.yaml":   "task.started:\n", "manifest.yaml": "version: 1.0.0\nplatform_version: '*'\n", "review/manifest.yaml": "version: 1.0.0\nplatform_version: '*'\n",
+						"schema.yaml":        "stages: []\n",
+						"review/schema.yaml": "instance: request_id\nstages:\n  pending: {}\npins:\n  inputs:\n    - task.started\n",
+						"review/state.yaml":  "request_id: text\n",
+						"review/events.yaml": "task.started:\n", "manifest.yaml": "version: 1.0.0\nplatform_version: '*'\n", "review/manifest.yaml": "version: 1.0.0\nplatform_version: '*'\n",
 					}, nil, func(t *testing.T, am *manager.AgentManager) *manager.AgentManager {
 						t.Cleanup(func() {
 							close(workflow.retryRelease)

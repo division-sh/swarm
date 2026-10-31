@@ -20,7 +20,8 @@ import (
 func TestIssue2394NestedGroupHandoffAcknowledgmentLossBothStores(t *testing.T) {
 	for _, backend := range []string{"sqlite", "postgres"} {
 		t.Run(backend, func(t *testing.T) {
-			source := loadCanonicalRoutingSource(t, canonicalrouting.CopyNotifyAllChildrenNestedServing(t))
+			accounts := []string{"sibling-c", "sibling-a", "sibling-b"}
+			source := loadCanonicalRoutingSource(t, canonicalrouting.CopyNotifyAllChildrenNestedServing(t, accounts...))
 			probe := newNestedServingProbe(t)
 			rt, db := newNestedServingRuntime(t, backend, source, nil, probe)
 			t.Cleanup(func() {
@@ -41,7 +42,6 @@ func TestIssue2394NestedGroupHandoffAcknowledgmentLossBothStores(t *testing.T) {
 			}
 
 			publishNotifyAllChildrenRunCreatingEvent(t, ctx, rt, source, runID, "portfolio.opened", map[string]any{"portfolio_id": "portfolio-main"})
-			accounts := []string{"sibling-c", "sibling-a", "sibling-b"}
 			publishNotifyAllChildrenEvent(t, ctx, rt, source, runID, "portfolio.accounts.register.requested", map[string]any{"portfolio_id": "portfolio-main", "account_ids": accounts})
 			waitNotifyAllChildrenRuntime(t, rt, runID)
 			probe.armPostCommitHold(t)

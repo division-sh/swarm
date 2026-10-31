@@ -254,7 +254,7 @@ func TestSelectedForkReceiverEffectOnlyFailureSettlementBothStores(t *testing.T)
 				}
 				forkRows := readWorkspaceProofReceiverRows(t, selected.RuntimeDeps().EventStore, claim.RunID())
 				receiver := forkRows["consumer"]
-				if receiver.ID != target.Route().EntityID || receiver.State != "active" || receiver.Type != "receipt" || receiver.Fields["marker"] != "consumer-owned" || receiver.Fields["processed_token"] != "seeded" || receiver.ID == forkRows["producer"].ID {
+				if receiver.ID != target.Route().EntityID || receiver.State != "active" || receiver.Type != "state" || receiver.Fields["marker"] != "consumer-owned" || receiver.Fields["processed_token"] != "seeded" || receiver.ID == forkRows["producer"].ID {
 					t.Fatalf("fork preparation borrowed producer state: %+v", forkRows)
 				}
 				beforeFields, beforeRevision := readWorkspaceProofReceiverFields(t, fieldReader, claim.RunID(), receiver)

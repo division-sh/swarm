@@ -2,9 +2,7 @@ package bootverify
 
 import (
 	"context"
-	"os"
 	"path/filepath"
-	"strings"
 	"testing"
 
 	runtimecontracts "github.com/division-sh/swarm/internal/runtime/contracts"
@@ -38,48 +36,21 @@ stages:
 }
 
 func TestRunAcceptsNestedDeliveryJoinOnlyReachableTerminalStage(t *testing.T) {
-	root := canonicalrouting.CopyNotifyAllChildren(t, canonicalrouting.NotifyAllChildrenOptions{FanOutDeliveryBarrier: true})
-	nodesPath := filepath.Join(root, canonicalrouting.NotifyAllChildrenOwnerFlowID, "nodes.yaml")
-	schemaPath := filepath.Join(root, canonicalrouting.NotifyAllChildrenOwnerFlowID, "schema.yaml")
-	nodesRaw, err := os.ReadFile(nodesPath)
-	if err != nil {
-		t.Fatal(err)
-	}
-	nodes := strings.Replace(string(nodesRaw), `        on_complete:
-          emit:`, `        on_complete:
-          advances_to: done
-          emit:`, 1)
-	if nodes == string(nodesRaw) {
-		t.Fatal("delivery join completion fixture replacement did not apply")
-	}
-	if err := os.WriteFile(nodesPath, []byte(nodes), 0o644); err != nil {
-		t.Fatal(err)
-	}
-	schemaRaw, err := os.ReadFile(schemaPath)
-	if err != nil {
-		t.Fatal(err)
-	}
-	schema := string(schemaRaw) + "\nstages:\n  active: {}\n  done: {final: true}\n"
-	if schema == string(schemaRaw) {
-		t.Fatal("delivery join lifecycle fixture replacement did not apply")
-	}
-	if err := os.WriteFile(schemaPath, []byte(schema), 0o644); err != nil {
-		t.Fatal(err)
-	}
+	root := canonicalrouting.CopyForkFanOutBarrierReceiver(t)
 	repoRoot := repoRootForBootverifyTest(t)
 	bundle := loadFixtureBundleAt(t, repoRoot, root, runtimecontracts.DefaultPlatformSpecFile(repoRoot))
-	topology := bundle.Semantics.StageTopologies[canonicalrouting.NotifyAllChildrenOwnerFlowID]
+	topology := bundle.Semantics.StageTopologies["producer"]
 	var found bool
 	for _, edge := range topology.Edges {
-		if edge.Source == string(runtimecontracts.HandlerAdvanceCarrierJoinOnComplete) && edge.From == "active" && edge.To == "done" {
+		if edge.Source == string(runtimecontracts.HandlerAdvanceCarrierJoinOnComplete) && edge.From == "waiting" && edge.To == "active" {
 			found = true
 		}
 	}
 	if !found {
-		t.Fatalf("nested delivery join topology = %#v, want active -> done completion edge", topology.Edges)
+		t.Fatalf("nested delivery join topology = %#v, want waiting -> active completion edge", topology.Edges)
 	}
 	report := Run(context.Background(), compileBootverifySchemasPreservingPlans(bundle), Options{})
-	if reportContains(report.Errors(), "semantic_drift_unreachable_state", "done") {
+	if reportContains(report.Errors(), "semantic_drift_unreachable_state", "active") {
 		t.Fatalf("delivery-join-only terminal was classified unreachable: %#v", report.Errors())
 	}
 }

@@ -424,7 +424,7 @@ func assertSelectedContractDeferredWorkRejectionHasNoForkMutation(t testing.TB, 
 func TestSelectedRunRootEntityContractUsesExactRunCoordinate(t *testing.T) {
 	repoRoot := runForkExecutionRepoRoot(t)
 	loader := admittedFixtureSelectedContractSourceLoader{
-		RepoRoot: repoRoot, SourceRoot: filepath.Join(repoRoot, "tests/tier1-primitives/test-emits-multiple"),
+		RepoRoot: repoRoot, SourceRoot: filepath.Join(repoRoot, "tests/tier1-primitives/test-guard-entity-ref"),
 	}
 	loaded, err := loader.LoadRunForkSelectedContractSource(runForkTestContext(t), runfork.RunForkContractSelection{Mode: "selected_contracts"})
 	if err != nil {
@@ -432,7 +432,7 @@ func TestSelectedRunRootEntityContractUsesExactRunCoordinate(t *testing.T) {
 	}
 	runID := uuid.NewString()
 	contract, ok := entityruntime.ResolveForRuntimeInstance(loaded.Source, runID, runID)
-	if !ok || contract.EntityType != "test_entity" {
+	if !ok || contract.EntityType != "state" {
 		t.Fatalf("root contract = %+v, found=%t", contract, ok)
 	}
 	rowContract, ok := entityruntime.ResolveForEntityRow(loaded.Source, map[string]any{"run_id": runID, "flow_instance": runID})
@@ -1200,7 +1200,7 @@ func TestExecuteSelectedContractRunForkConstructsAgentRecipientWithoutHandlerMat
 	if err := db.QueryRowContext(ctx, `SELECT COUNT(*) FROM flow_instances WHERE run_id=$1 AND entity_id=$1`, result.Materialization.ForkRunID).Scan(&headers); err != nil || headers != 1 {
 		t.Fatalf("fork root headers=%d err=%v", headers, err)
 	}
-	if err := db.QueryRowContext(ctx, `SELECT COUNT(*) FROM entity_state WHERE run_id=$1 AND entity_id=$1`, result.Materialization.ForkRunID).Scan(&fields); err != nil || fields != 1 {
+	if err := db.QueryRowContext(ctx, `SELECT COUNT(*) FROM entity_state WHERE run_id=$1 AND entity_id=$1`, result.Materialization.ForkRunID).Scan(&fields); err != nil || fields != 0 {
 		t.Fatalf("fork root field rows=%d err=%v", fields, err)
 	}
 }

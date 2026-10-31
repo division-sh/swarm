@@ -53,7 +53,6 @@
         "source": "inferred",
         "agents": []
       },
-      "primary_entity_error": "INVALID-PRIMARY-ENTITY: flow producer has no declared entity types; stateful normal flows must declare exactly one entity type or be explicitly stateless/template",
       "input_pins": [
         {
           "event": "validation.triggered",
@@ -105,7 +104,7 @@
       "mode": "template",
       "source_files": {
         "schema": "validator/schema.yaml",
-        "entities": "validator/entities.yaml",
+        "entities": "validator/state.yaml",
         "nodes": "validator/nodes.yaml",
         "events": "validator/events.yaml"
       },
@@ -123,15 +122,15 @@
         "agents": []
       },
       "primary_entity": {
-        "type": "validation_case",
+        "type": "state",
         "fields": {
           "validation_case_id": "uuid"
         },
-        "source_file": "validator/entities.yaml"
+        "source_file": "validator/state.yaml"
       },
       "template_instance": {
         "field": "validation_case_id",
-        "primary_entity": "validation_case",
+        "primary_entity": "state",
         "identity": "run + flow + instance_key",
         "source_file": "validator/schema.yaml"
       },
@@ -744,7 +743,7 @@
       "severity": "lint_evidence",
       "location": "validator",
       "authored_location": "validator/schema.yaml",
-      "message": "flow validator entity_type validation_case declares field validation_case_id with no detected internal reader coverage"
+      "message": "flow validator entity_type state declares field validation_case_id with no detected internal reader coverage"
     }
   ],
   "equivalence": {

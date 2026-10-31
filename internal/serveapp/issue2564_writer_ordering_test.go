@@ -2,12 +2,10 @@ package serveapp
 
 import (
 	"context"
-
 	"encoding/json"
 	"fmt"
 	"net/http"
 	"net/http/httptest"
-
 	"path/filepath"
 	"reflect"
 	"slices"
@@ -40,10 +38,10 @@ func TestIssue2564ServedH3CollectionOperationsBothStores(t *testing.T) {
 							index = 1
 						}
 						p.scripts[actor] = []*issue2564ProviderStep{
-							newIssue2564Step(issue2564Call{"save_hub_items", map[string]any{"op": "append", "value": actor}}, issue2564Call{"save_hub_labels", map[string]any{"op": "set", "key": actor, "value": actor}}),
-							newIssue2564Step(issue2564Call{"save_hub_items", map[string]any{"op": "append", "value": "equal"}}),
-							newIssue2564Step(issue2564Call{"save_hub_labels", map[string]any{"op": "set", "key": "shared", "value": actor}}),
-							newIssue2564Step(issue2564Call{"save_hub_positions", map[string]any{"op": "update", "index": index, "value": actor}}),
+							newIssue2564Step(issue2564Call{"save_state_items", map[string]any{"op": "append", "value": actor}}, issue2564Call{"save_state_labels", map[string]any{"op": "set", "key": actor, "value": actor}}),
+							newIssue2564Step(issue2564Call{"save_state_items", map[string]any{"op": "append", "value": "equal"}}),
+							newIssue2564Step(issue2564Call{"save_state_labels", map[string]any{"op": "set", "key": "shared", "value": actor}}),
+							newIssue2564Step(issue2564Call{"save_state_positions", map[string]any{"op": "update", "index": index, "value": actor}}),
 							newIssue2564Step(),
 						}
 					}
@@ -121,7 +119,7 @@ func TestIssue2564ServedM33NonterminalDeadlineLateResultBothStores(t *testing.T)
 			t.Run(backend+"/"+order, func(t *testing.T) {
 				p := newIssue2564Provider(t, "a")
 				p.scripts["a"] = []*issue2564ProviderStep{
-					newIssue2564Step(issue2564Call{"save_hub_marker", map[string]any{"value": "retained"}}),
+					newIssue2564Step(issue2564Call{"save_state_marker", map[string]any{"value": "retained"}}),
 					newIssue2564Step(issue2564Call{"emit_hub_result", map[string]any{"hub_id": "m33", "value": "retained"}}),
 				}
 				resultEntered, releaseResult := make(chan struct{}, 1), make(chan struct{})

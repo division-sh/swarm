@@ -16,6 +16,7 @@ import (
 	"github.com/division-sh/swarm/internal/runtime/contracts"
 	"github.com/division-sh/swarm/internal/runtime/core/flowidentity"
 	"github.com/division-sh/swarm/internal/runtime/correlation"
+	"github.com/division-sh/swarm/internal/runtime/entityruntime"
 	"github.com/division-sh/swarm/internal/runtime/executionmode"
 	"github.com/division-sh/swarm/internal/runtime/executionposture"
 	"github.com/division-sh/swarm/internal/runtime/manager"
@@ -404,19 +405,16 @@ func workflowOwnershipSource(t *testing.T, dir string) semanticview.Source {
 func workflowOwnershipProjection(t *testing.T, source semanticview.Source, flow string) (runfork.RunForkPlan, runfork.RunForkSelectedContractRecipientPlanning, runfork.RunForkSelectedContractWorkflowState, map[string]executionmode.Mode, string) {
 	t.Helper()
 	runID, forkID, entityID := uuid.NewString(), uuid.NewString(), uuid.NewString()
-	path, entityType, mode := flow, "receipt", "static"
+	contract, _ := entityruntime.ResolveForFlow(source, flow)
+	path, entityType, mode := flow, contract.EntityType, "static"
 	schema, ok := source.FlowSchemaByID(flow)
 	if !ok {
 		t.Fatalf("fixture has no authored flow %s", flow)
 	}
 	if flow == "." {
-		path, entityID, entityType = runID, runID, "root"
-	} else if flow == "branch" {
-		entityType = "root"
-	} else if flow == "branch/producer" {
-		entityType = "work"
+		path, entityID = runID, runID
 	} else if schema.EffectiveMode() == "template" {
-		path, entityType, mode = flow+"/item", "deployment", "template"
+		path, mode = flow+"/item", "template"
 	}
 	instance := flowidentity.Stored(source, flow, path, flowidentity.LogicalInstanceID(path), entityID, "")
 	if mode == "static" {

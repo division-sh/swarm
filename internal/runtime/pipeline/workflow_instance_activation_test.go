@@ -37,7 +37,7 @@ func VerifyWorkflowInitialLifecyclePreparationRejectsUnownedEmissionsForTest(t *
 		InstanceID: "inst-1", StorageRef: "review/inst-1", WorkflowName: "review",
 		WorkflowVersion: "1.0.0", CurrentState: "pending",
 		Fields:     map[string]any{},
-		EntityType: "test_entity",
+		EntityType: "state",
 	}
 	if _, _, _, err := store.prepareInitialEntryLifecycle(ctx, testRunScopedWorkflowInstanceFromContext(ctx, instance.StorageRef), instance, time.Date(2026, time.July, 29, 12, 0, 0, 0, time.UTC)); err == nil {
 		t.Fatal("initial materialization accepted lifecycle emissions outside its atomic commit")
@@ -166,7 +166,7 @@ func VerifyNativeTemplateInstanceSystemNodeDeliveryUsesExactLocalHandlerKeyForTe
 		t.Run(backend, func(t *testing.T) {
 			source := loadWorkflowTempSource(t, map[string]string{
 
-				"operating/entities.yaml": "test_entity:\n  instance_key: text\n",
+				"operating/state.yaml":    "instance_key: text\n",
 				"manifest.yaml":           "version: 1.0.0\nplatform_version: \">=0.7.0 <0.8.0\"\n",
 				"operating/manifest.yaml": "version: 1.0.0\nplatform_version: \">=0.7.0 <0.8.0\"\n",
 				"operating/schema.yaml": `instance: instance_key
@@ -220,7 +220,7 @@ opco.ceo_ready:
 			if err := fixture.Construct(ctx, materializedWorkflowInstanceForSource(t, pc.SemanticSource(), ctx, WorkflowInstance{
 				InstanceID: "inst-1", StorageRef: "operating/inst-1", EntityID: "11111111-1111-1111-1111-111111111111",
 				WorkflowName: "operating", WorkflowVersion: bundle.WorkflowVersion(), CurrentState: "initializing", Fields: map[string]any{"instance_key": "inst-1"},
-				EntityType: "test_entity",
+				EntityType: "state",
 			})); err != nil {
 				t.Fatalf("seed exact selected template owner: %v", err)
 			}

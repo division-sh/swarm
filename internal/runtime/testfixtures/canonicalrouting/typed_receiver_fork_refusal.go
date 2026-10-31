@@ -62,18 +62,17 @@ work.ready:
   instance_id: text
   workflow_version: numeric
 `)
-	writeClosedVariantFile(t, root, "account/entities.yaml", `account_state:
-  account_id: {type: text, _unused_reason: receiver instance identity}
-  processed_count: integer?
-  count: integer
-  label: text
-  ratio: numeric
-  active: boolean
-  attributes: json
-  status: {type: boolean, initial: false}
-  flow_path: {type: text, initial: 'business/path'}
-  instance_id: {type: text, initial: 'business-instance'}
-  workflow_version: {type: numeric, initial: 7.0}
+	writeClosedVariantFile(t, root, "account/state.yaml", `account_id: text
+processed_count: integer?
+count: integer
+label: text
+ratio: numeric
+active: boolean
+attributes: json
+status: false
+flow_path: "business/path"
+instance_id: "business-instance"
+workflow_version: 7.0
 `)
 	applyClosedReplacement(t, filepath.Join(root, "account/nodes.yaml"), "  subscribes_to:\n    - work.ready\n", "  subscribes_to:\n    - work.ready\n    - account.initialized\n")
 	applyClosedReplacement(t, filepath.Join(root, "account/nodes.yaml"), "  event_handlers:\n", `  event_handlers:

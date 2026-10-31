@@ -44,7 +44,7 @@ func TestOperatorTestSetupHandlersPersistEntitiesAndReplayIdempotency(t *testing
 		t.Fatalf("result entities len = %d, want 1", len(entities))
 	}
 	entityResult := asMap(t, entities[0])
-	if state, present := entityResult["current_state"]; !present || state != nil || entityResult["alias"] != "subject" || entityResult["entity_id"] != entityID || entityResult["flow_instance"] != "operating" || entityResult["entity_type"] != "product" {
+	if state, present := entityResult["current_state"]; !present || state != nil || entityResult["alias"] != "subject" || entityResult["entity_id"] != entityID || entityResult["flow_instance"] != "operating" || entityResult["entity_type"] != "state" {
 		t.Fatalf("setup entity result = %#v", entityResult)
 	}
 	assertTestSetupPersistence(t, pg, bundleHash, runID, entityID, "seeded")
@@ -197,7 +197,7 @@ func TestOperatorTestSetupRejectsContractInvalidEntities(t *testing.T) {
 			edit: func(entity map[string]any) {
 				entity["flow_instance"] = "secondary"
 			},
-			wantField: "entities[0].entity_type",
+			wantField: "entities[0].fields.note",
 		},
 		{
 			name: "import declared current state",
@@ -258,8 +258,8 @@ func TestOperatorTestSetupRejectsContractInvalidEntities(t *testing.T) {
 			runID := uuid.NewString()
 			entity := validTestSetupEntity(uuid.NewString(), "seeded")
 			if tc.constructedRoot {
-				entity["entity_id"], entity["flow_instance"], entity["entity_type"] = runID, "", "item"
-				entity["current_state"], entity["fields"] = "new", map[string]any{}
+				entity["entity_id"], entity["flow_instance"], entity["entity_type"] = runID, "", "state"
+				entity["current_state"], entity["fields"] = "new", map[string]any{"topic": "seeded"}
 			}
 			baseline, err := testSetupEntityRequestFromParam(entity, 0, runID)
 			if err != nil {
@@ -369,7 +369,7 @@ func validTestSetupEntity(entityID, note string) map[string]any {
 		"alias":         "subject",
 		"entity_id":     entityID,
 		"flow_instance": "operating",
-		"entity_type":   "product",
+		"entity_type":   "state",
 		"fields": map[string]any{
 			"note": note,
 		},
@@ -432,7 +432,7 @@ func assertTestSetupImportedEntity(t *testing.T, selected interface {
 		t.Fatalf("load imported setup entity: %v", err)
 	}
 	entity := full.Entity
-	if entity.RunID != runID || entity.EntityID != entityID || entity.FlowInstance != "operating" || entity.EntityType != "product" || len(full.Fields) != 1 || full.Fields["note"] != note {
+	if entity.RunID != runID || entity.EntityID != entityID || entity.FlowInstance != "operating" || entity.EntityType != "state" || len(full.Fields) != 1 || full.Fields["note"] != note {
 		t.Fatalf("imported setup identity/fields = %+v", full)
 	}
 	if entity.StageDefined != nil || entity.CurrentState != nil || entity.Revision != nil || entity.EnteredStateAt != nil || entity.LifecycleCreatedAt != nil || entity.LifecycleUpdatedAt != nil || full.Gates != nil || full.Bookkeeping != nil || full.Accumulated != nil || full.Loops != nil {

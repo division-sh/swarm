@@ -21,7 +21,7 @@ func TestReceiverConstructionStoragePreservesExactPhysicalWitnessBothStores(t *t
 			t.Run(backend+"/"+shape, func(t *testing.T) {
 				documents := map[string]string{"schema.yaml": "stages: []\n", "review/schema.yaml": "stages:\n  queued: {}\n", "manifest.yaml": "version: 1.0.0\nplatform_version: '*'\n", "review/manifest.yaml": "version: 1.0.0\nplatform_version: '*'\n"}
 				if shape == "fields" {
-					documents["review/entities.yaml"] = "test_entity:\n  amount: {type: json, initial: 75.0}\n  literal: {type: text, initial: '${x}'}\n"
+					documents["review/state.yaml"] = "amount: 75.0\nliteral: '${x}'\n"
 				}
 				f := newReceiverConfigActivationFixtureWithDocuments(t, backend, false, documents, nil)
 				runID := correlation.RunIDFromContext(f.ctx)

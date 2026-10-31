@@ -31,7 +31,7 @@ func DescriptorAddressFields(values map[string]any) (map[string]string, error) {
 		default:
 			continue
 		}
-		out["entity."+key] = scalar
+		out["state."+key] = scalar
 	}
 	if len(out) == 0 {
 		return nil, nil

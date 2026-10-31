@@ -26,7 +26,7 @@ func TestW5AgentFieldPresenceMatrix(t *testing.T) {
 		{"max_turns_per_task", "7", "[7]", "{count: 7}", "missing,scalar"},
 		{"workspace_class", "sandbox", "[sandbox]", "{class: sandbox}", "missing,scalar"},
 		{"intent", "intents/worker.md", "[worker]", "{inline: business intent}", "scalar,mapping"},
-		{"entity_writes", "all", "[value]", "{Item: {create: all, save: [value]}}", "missing,empty_mapping,mapping"},
+		{"writes", "all", "[value]", "{Item: [value]}", "missing,scalar,sequence"},
 		{"data_access", "records", "[{data: records, flow_path: support}]", "{data: records}", "missing,empty_sequence,sequence"},
 		{"native_tools", "true", "[bash]", "{bash: true, web_search: false, file_io: true}", "missing,empty_mapping,mapping"},
 		{"mock", "python", "[python]", "{kind: python, module: mocks/worker.py, post_tool_tail_latency_ms: 3}", "missing,empty_mapping,mapping"},
@@ -69,8 +69,10 @@ func TestW5AgentFieldPresenceMatrix(t *testing.T) {
 					if state == "scalar" && tc.field == "max_turns_per_task" && entry.MaxTurnsPerTask != 7 {
 						t.Fatal("integer lost")
 					}
-					if state == "mapping" && tc.field == "entity_writes" && (!entry.EntityWrites["Item"].Create.All || !reflect.DeepEqual(entry.EntityWrites["Item"].Save.Fields, []string{"value"})) {
-						t.Fatal("grants lost")
+					if tc.field == "writes" {
+						if entry.Writes.All != (state == "scalar") || (state == "sequence" && !reflect.DeepEqual(entry.Writes.Fields, []string{"value"})) || (state == "missing" && entry.Writes.Declared()) {
+							t.Fatal("write grant changed")
+						}
 					}
 					if state == "sequence" && tc.field == "data_access" && !reflect.DeepEqual(entry.DataAccess, []DurableDataAccessRef{{Data: "records", FlowPath: "support"}}) {
 						t.Fatal("data grant lost")
@@ -159,10 +161,11 @@ func TestW5AgentNestedBranchPresence(t *testing.T) {
 	for _, tc := range []struct{ name, field string }{
 		{"null_create", "entity_writes: {Item: {create: null}}"},
 		{"unknown_null_write", "entity_writes: {Item: {unknown: null}}"},
-		{"numeric_write_list", "entity_writes: {Item: {save: [7]}}"},
-		{"empty_write", "entity_writes: {Item: {create: []}}"},
-		{"object_write", "entity_writes: {Item: {create: {fields: [value]}}}"},
-		{"mixed_all", "entity_writes: {Item: {save: [all, value]}}"},
+		{"numeric_write_list", "writes: [7]"},
+		{"empty_write", "writes: []"},
+		{"object_write", "writes: {fields: [value]}"},
+		{"cross_flow_write", "writes: {other: [value]}"},
+		{"retired_create", "create: all"},
 		{"numeric_data", "data_access: [{data: 7}]"},
 		{"missing_data", "data_access: [{flow_path: support}]"},
 		{"null_data", "data_access: null"},
@@ -201,6 +204,9 @@ func TestW5AgentNestedBranchPresence(t *testing.T) {
 			if err == nil {
 				t.Fatal("invalid nested shape admitted")
 			}
+			if (strings.HasPrefix(tc.field, "entity_writes:") || strings.HasPrefix(tc.field, "create:")) && !strings.Contains(err.Error(), "writes:") {
+				t.Fatalf("retired grant omitted writes: teaching: %v", err)
+			}
 			if diagnostic, ok := AsLoaderDiagnostic(err); ok {
 				if diagnostic.Location.File != path || diagnostic.Location.Line == 0 || !strings.Contains(diagnostic.Location.YAMLPath, "worker") {
 					t.Fatalf("source-located refusal missing: %+v", diagnostic)
@@ -209,6 +215,15 @@ func TestW5AgentNestedBranchPresence(t *testing.T) {
 				t.Fatalf("source-located refusal missing: %v", err)
 			}
 		})
+	}
+	for _, tc := range []struct {
+		text   string
+		fields []string
+	}{{"[all]", []string{"all"}}, {"[all, value]", []string{"all", "value"}}} {
+		entries, err := admitW5Agents(t, "worker:\n  intent: {inline: business intent}\n  writes: "+tc.text+"\n")
+		if err != nil || entries["worker"].Writes.All || !reflect.DeepEqual(entries["worker"].Writes.Fields, tc.fields) {
+			t.Fatalf("literal all field changed: entries=%+v err=%v", entries, err)
+		}
 	}
 }
 
@@ -240,7 +255,7 @@ func TestW5AgentDefaultRetirementAndMergedFields(t *testing.T) {
 
 func TestW5AgentAdmissionDiskCatalogRetainedParity(t *testing.T) {
 	for _, body := range []string{
-		"worker:\n  intent: {inline: '  exact business bytes  '}\n  model: regular\n  entity_writes: {Item: {save: [value]}}\n",
+		"worker:\n  intent: {inline: '  exact business bytes  '}\n  model: regular\n  writes: [value]\n",
 		"worker:\n  intent: {inline: business intent}\n  entity_writes: {Item: {create: null}}\n",
 		"worker:\n  intent: {inline: business intent}\n  <<: {memory: false}\n",
 	} {
@@ -351,16 +366,21 @@ func TestW5AgentAliasMergeNestedProvenance(t *testing.T) {
 	for _, tc := range []struct {
 		name, source string
 	}{
-		{"alias", "first: &agent\n  intent: {inline: business intent}\n  entity_writes: {Item: {save: [value]}}\nsecond: *agent\n"},
-		{"merge", "first: &agent\n  intent: {inline: business intent}\n  entity_writes: {Item: {save: [value]}}\nsecond:\n  <<: *agent\n"},
+		{"alias", "first: &agent\n  intent: {inline: business intent}\n  writes: [value]\nsecond: *agent\n"},
+		{"merge", "first: &agent\n  intent: {inline: business intent}\n  writes: [value]\nsecond:\n  <<: *agent\n"},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			entries, err := admitW5Agents(t, tc.source)
 			if err != nil {
 				t.Fatal(err)
 			}
-			if !reflect.DeepEqual(entries["second"].EntityWrites["Item"].Save.Fields, []string{"value"}) {
+			if !reflect.DeepEqual(entries["second"].Writes.Fields, []string{"value"}) {
 				t.Fatal("nested alias grant changed")
+			}
+			copy := cloneAgentRegistryEntry(entries["second"])
+			copy.Writes.Fields[0] = "changed"
+			if entries["second"].Writes.Fields[0] != "value" || entries["first"].Writes.Fields[0] != "value" {
+				t.Fatal("cloned or expanded grant shares mutable fields")
 			}
 		})
 	}

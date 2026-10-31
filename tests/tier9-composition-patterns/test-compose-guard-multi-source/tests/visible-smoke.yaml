@@ -2,7 +2,7 @@ name: test-compose-guard-multi-source setup visible smoke
 setup:
   entities:
   - as: entity
-    type: core
+    type: state
     fields:
       depth: 2
       child_count: 1

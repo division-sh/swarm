@@ -16,7 +16,7 @@ func a2ConstructedDescendantJoinFiles(count int, target string) map[string]strin
 	for _, path := range []string{"orders/child", "orders/child/leaf", "orders/audit", "orders/audit/leaf"} {
 		files[path+"/manifest.yaml"] = "version: 1.0.0\nplatform_version: \">=0.7.0 <0.8.0\"\n"
 		files[path+"/schema.yaml"] = "stages:\n  awaiting: {}\n"
-		files[path+"/entities.yaml"] = "child_state:\n  final_count: {type: integer, initial: -1}\n"
+		files[path+"/state.yaml"] = "final_count: -1\n"
 	}
 	files[target+"/nodes.yaml"] = collector
 	files[target+"/events.yaml"] = files["orders/events.yaml"]

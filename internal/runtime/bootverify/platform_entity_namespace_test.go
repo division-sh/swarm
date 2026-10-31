@@ -16,7 +16,7 @@ import (
 func TestWave1EntityResolverSplitsBusinessEntityAndPlatformEntity(t *testing.T) {
 	source := semanticview.Wrap(&runtimecontracts.WorkflowContractBundle{
 		RootEntities: runtimecontracts.EntityContractsDocument{
-			"record": {
+			"state": {
 				Fields: map[string]runtimecontracts.EntityFieldDecl{
 					"current_state": {Type: "text"},
 					"name":          {Type: "text"},
@@ -26,18 +26,18 @@ func TestWave1EntityResolverSplitsBusinessEntityAndPlatformEntity(t *testing.T) 
 	})
 
 	if got, _, err := wave1ResolveEntityPathWithOwner(source, "", "current_state"); err != nil {
-		t.Fatalf("entity.current_state declared business field failed to resolve: %v", err)
+		t.Fatalf("state.current_state declared business field failed to resolve: %v", err)
 	} else if got.Kind != "scalar" || got.Type != "text" {
-		t.Fatalf("entity.current_state = %#v, want scalar text", got)
+		t.Fatalf("state.current_state = %#v, want scalar text", got)
 	}
 
-	for _, ref := range []string{"id", "current_state", "flow_instance", "gates.reviewed"} {
+	for _, ref := range []string{"id", "stage", "path"} {
 		got, err := wave1ResolvePlatformEntityPath(ref)
 		if err != nil {
-			t.Fatalf("_entity.%s failed to resolve: %v", ref, err)
+			t.Fatalf("instance.%s failed to resolve: %v", ref, err)
 		}
 		if got.Kind == "" || got.Type == "" {
-			t.Fatalf("_entity.%s resolved to empty type %#v", ref, got)
+			t.Fatalf("instance.%s resolved to empty type %#v", ref, got)
 		}
 	}
 }
@@ -45,7 +45,7 @@ func TestWave1EntityResolverSplitsBusinessEntityAndPlatformEntity(t *testing.T) 
 func TestWave1EntityResolverRejectsLegacyAndUnsupportedPlatformEntityFields(t *testing.T) {
 	source := semanticview.Wrap(&runtimecontracts.WorkflowContractBundle{
 		RootEntities: runtimecontracts.EntityContractsDocument{
-			"record": {
+			"state": {
 				Fields: map[string]runtimecontracts.EntityFieldDecl{
 					"name": {Type: "text"},
 				},
@@ -54,37 +54,42 @@ func TestWave1EntityResolverRejectsLegacyAndUnsupportedPlatformEntityFields(t *t
 	})
 
 	if _, _, err := wave1ResolveEntityPathWithOwner(source, "", "current_state"); err == nil {
-		t.Fatal("expected undeclared entity.current_state platform metadata read to fail")
-	} else if !strings.Contains(err.Error(), "use _entity.current_state") {
-		t.Fatalf("entity.current_state error = %q, want _entity.current_state guidance", err)
+		t.Fatal("expected undeclared state.current_state platform metadata read to fail")
+	} else if !strings.Contains(err.Error(), "use instance.stage") {
+		t.Fatalf("state.current_state error = %q, want instance.stage guidance", err)
 	}
 	if _, _, err := wave1ResolveEntityPathWithOwner(source, "", "entity_id"); err == nil {
-		t.Fatal("expected undeclared entity.entity_id platform metadata read to fail")
-	} else if !strings.Contains(err.Error(), "use _entity.id") {
-		t.Fatalf("entity.entity_id error = %q, want _entity.id guidance", err)
+		t.Fatal("expected undeclared state.entity_id platform metadata read to fail")
+	} else if !strings.Contains(err.Error(), "use instance.id") {
+		t.Fatalf("state.entity_id error = %q, want instance.id guidance", err)
 	}
 
-	for _, ref := range []string{"entity_id", "revision", "created_at", "updated_at", "workflow_name", "name"} {
+	for _, ref := range []string{"entity_id", "current_state", "flow_instance", "state.reviewed", "revision", "created_at", "updated_at", "workflow_name", "name"} {
 		if _, err := wave1ResolvePlatformEntityPath(ref); err == nil {
-			t.Fatalf("expected _entity.%s to be unsupported", ref)
+			t.Fatalf("expected instance.%s to be unsupported", ref)
 		}
 	}
 }
 
 func TestWave1EntityResolverRejectsRetiredFanOutCountRead(t *testing.T) {
-	source := semanticview.Wrap(&runtimecontracts.WorkflowContractBundle{
+	bundle := &runtimecontracts.WorkflowContractBundle{
 		RootEntities: runtimecontracts.EntityContractsDocument{
-			"record": {
+			"state": {
 				Fields: map[string]runtimecontracts.EntityFieldDecl{
 					"fan_out_count": {Type: "integer"},
 				},
 			},
 		},
-	})
+	}
+	source := semanticview.Wrap(bundle)
+	if _, _, err := wave1ResolveEntityPathWithOwner(source, "", "fan_out_count"); err != nil {
+		t.Fatalf("declared business field refused: %v", err)
+	}
+	delete(bundle.RootEntities["state"].Fields, "fan_out_count")
 
 	_, _, err := wave1ResolveEntityPathWithOwner(source, "", "fan_out_count")
-	if err == nil || !strings.Contains(err.Error(), "entity.fan_out_count is platform bookkeeping; use the handler-local fan_out.count") {
-		t.Fatalf("entity.fan_out_count error = %v, want handler-local fan_out.count teaching error", err)
+	if err == nil || !strings.Contains(err.Error(), "state.fan_out_count is platform bookkeeping; use the handler-local fan_out.count") {
+		t.Fatalf("state.fan_out_count error = %v, want handler-local fan_out.count teaching error", err)
 	}
 }
 
@@ -108,7 +113,7 @@ func TestEntityContractDiagnosticsUseAuthorFacingVocabulary(t *testing.T) {
 						"item.received": {
 							Compute: &runtimecontracts.ComputeSpec{
 								Operation: runtimecontracts.ComputeOpCount,
-								StoreAs:   "entity.summary",
+								StoreAs:   "state.summary",
 							},
 						},
 					},
@@ -183,7 +188,7 @@ treasury-node:
     opco.spend_requested:
       `+acquisition+`:
         by:
-          vertical_id: _entity.id
+          vertical_id: instance.id
 `)
 			assertRetiredReceiverSelectorRejected(t, root)
 		})

@@ -89,32 +89,30 @@ func fixedForkConstructionWitness(plan pipeline.FlowInstanceActivationPlan, even
 	var fields map[string]any
 	var key, input, eventType string
 	component := false
-	switch plan.Identity.TemplateID + "|" + plan.Identity.InstancePath + "|" + plan.Instance.EntityType + "|" + plan.Instance.CurrentState {
-	case "flow|flow/forkchat|default|draft":
+	switch plan.Identity.TemplateID + "|" + plan.Identity.InstancePath + "|" + plan.Instance.EntityType + "|" + plan.Instance.CurrentState + "|" + string(event.Type()) {
+	case "flow|flow/forkchat|state|draft|flow/conversation.created":
 		fields, key = map[string]any{"name": "Before"}, "Before"
 		input, eventType = "conversation.created", "flow/conversation.created"
-	case "flow-a|flow-a/1|fork_entity|ready":
+	case "flow-a|flow-a/1|state|ready|matrix.event":
 		fields, key = map[string]any{"name": "Snapshot Entity"}, "Snapshot Entity"
 		input, eventType = "matrix.event", "matrix.event"
-	case "flow-a|flow-a/1|historical_entity|queued":
+	case "flow-a|flow-a/1|state|queued|fork.before":
 		fields, key = map[string]any{
 			"title": "before-title", "slug": "before-slug", "name": "Before Name",
 			"gates": map[string]any{"review": "authored-review"}, "accumulator": map[string]any{"total": "authored-total"},
 			"bookkeeping": map[string]any{"activation": "manual"},
 		}, "Before Name"
 		input, eventType = "fork.before", "fork.before"
-	case "flow-a|flow-a/1|default|ready":
-		if string(event.Type()) == "fork.state" {
-			fields = map[string]any{}
-			input, eventType, component = "fork.state", "fork.state", true
-		} else {
-			fields, key = map[string]any{"fixture_key": "1"}, "1"
-			input, eventType = "fork.pending", "fork.pending"
-		}
-	case "state-flow|state-flow/at-T|validation_case|pending":
+	case "flow-a|flow-a/1||ready|fork.state":
+		fields = map[string]any{}
+		input, eventType, component = "fork.state", "fork.state", true
+	case "flow-a|flow-a/1|state|ready|fork.pending":
+		fields, key = map[string]any{"fixture_key": "1"}, "1"
+		input, eventType = "fork.pending", "fork.pending"
+	case "state-flow|state-flow/at-T|state|pending|fork.no_event_flow":
 		fields, key = map[string]any{"name": "Fork Point Name"}, "Fork Point Name"
 		input, eventType = "fork.no_event_flow", "fork.no_event_flow"
-	case "state-flow|state-flow/at-T|source_case|pending":
+	case "state-flow|state-flow/at-T|state|pending|fork.conflicting_entity_type":
 		fields, key = map[string]any{"entity_type": "field_case"}, "field_case"
 		input, eventType = "fork.conflicting_entity_type", "fork.conflicting_entity_type"
 	default:
@@ -145,6 +143,8 @@ func fixedForkConstructionWitness(plan pipeline.FlowInstanceActivationPlan, even
 	wantPayload := map[string]any{}
 	wantProducerType, wantProducer := events.EventProducerPlatform, "test"
 	switch eventType {
+	case "fork.before":
+		wantPayload = map[string]any{"gates": fields["gates"], "accumulator": fields["accumulator"], "bookkeeping": fields["bookkeeping"]}
 	case "flow/conversation.created":
 		wantPayload = map[string]any{"name": "Before"}
 		wantProducerType, wantProducer = events.EventProducerExternal, "conversation-construction-fixture"
@@ -180,7 +180,7 @@ func fixedForkWitnessBuckets(plan pipeline.FlowInstanceActivationPlan, component
 	if err != nil || !present || entry != want || plan.Lifecycle.StageEntry == nil || *plan.Lifecycle.StageEntry != want {
 		return false
 	}
-	if plan.Instance.EntityType == "historical_entity" {
+	if plan.Identity.TemplateID == "flow-a" && plan.Instance.CurrentState == "queued" {
 		return len(plan.Instance.Bookkeeping) == 2 && plan.Instance.Bookkeeping["activation"] == "standing" &&
 			reflect.DeepEqual(plan.Instance.Gates, map[string]bool{"review": true}) && reflect.DeepEqual(plan.Instance.StateBuckets, map[string]any{"total": int64(7)})
 	}

@@ -72,8 +72,7 @@ func runForkRootGateBundleForTest(t *testing.T) *runtimecontracts.WorkflowContra
 	for name, contents := range map[string]string{
 		"schema.yaml": "stages:\n  awaiting_review:\n    gate:\n      decision: root_review\n      outcomes:\n        approve:\n          advances_to: done\n          emit: run_fork.compiled_root_gate_approved\n  done: {final: true}\n",
 
-		"entities.yaml": "default: {}\n",
-		"events.yaml":   "run_fork.compiled_root_gate_approved:\n", "manifest.yaml": "version: 1.0.0\nplatform_version: '*'\n",
+		"events.yaml": "run_fork.compiled_root_gate_approved:\n", "manifest.yaml": "version: 1.0.0\nplatform_version: '*'\n",
 	} {
 		if err := os.WriteFile(filepath.Join(root, name), []byte(contents), 0o600); err != nil {
 			t.Fatal(err)
@@ -341,7 +340,7 @@ func TestMaterializeRunForkRootAuthoritiesExecuteWithForkIdentitySelectedStorePa
 			// This component executes the inherited decision, so construction
 			// must retain its buckets rather than open a fresh child approval.
 			commitPreparedWorkflowAggregateFixture(t, ctx, selected.(agentFixtureFlowStore), forkRunID, runtimepipeline.WorkflowInstance{
-				InstanceID: forkRunID, StorageRef: forkRunID, EntityID: forkRunID, EntityType: "default",
+				InstanceID: forkRunID, StorageRef: forkRunID, EntityID: forkRunID,
 				WorkflowName: ".", WorkflowVersion: target.WorkflowVersion, Mode: "static", StageDefined: true,
 				CurrentState: forkActivation.Stage, Fields: map[string]any{}, StateBuckets: runtimeengine.NewStateCarrier(nil, nil, buckets).PersistedStateBuckets(),
 				EnteredStageAt: now, CreatedAt: now, UpdatedAt: now,
@@ -688,7 +687,7 @@ func TestMaterializeRunForkProposedEffectCreatesFreshPendingAuthority(t *testing
 				opened := backend.open(t)
 				files := map[string]string{"schema.yaml": "stages:\n  operating: {}\n", "manifest.yaml": "version: 1.0.0\nplatform_version: '*'\n"}
 				if fields {
-					files["entities.yaml"] = "item:\n  label: text?\n"
+					files["state.yaml"] = "label: text?\n"
 				}
 				f := newReceiverConfigActivationFixtureForStore(t, opened.store.(agentFixtureFlowStore), false, files, nil, ownStoreTestAgentManager, nil)
 				target, err := runtimecontracts.BootBundleIdentity(f.bundle)

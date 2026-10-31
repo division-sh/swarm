@@ -37,16 +37,16 @@ func TestA2ForkStageEntryPersistenceOnBothStores(t *testing.T) {
 					opened := backend.open(t)
 					flowID, path := "owner", "owner/one"
 					files := map[string]string{
-						"schema.yaml":         "stages: []\n",
-						"owner/schema.yaml":   "instance: owner_key\nstages:\n  active: {}\npins:\n  inputs:\n    - construct.requested\n",
-						"owner/entities.yaml": "review_item:\n  owner_key: text\n",
-						"owner/events.yaml":   "construct.requested:\n", "manifest.yaml": "version: 1.0.0\nplatform_version: '*'\n", "owner/manifest.yaml": "version: 1.0.0\nplatform_version: '*'\n",
+						"schema.yaml":       "stages: []\n",
+						"owner/schema.yaml": "instance: owner_key\nstages:\n  active: {}\npins:\n  inputs:\n    - construct.requested\n",
+						"owner/state.yaml":  "owner_key: text\n",
+						"owner/events.yaml": "construct.requested:\n", "manifest.yaml": "version: 1.0.0\nplatform_version: '*'\n", "owner/manifest.yaml": "version: 1.0.0\nplatform_version: '*'\n",
 					}
 					if root {
 						flowID, path = ".", "."
 						files = map[string]string{
-							"schema.yaml":   "stages:\n  active: {}\n",
-							"entities.yaml": "review_item:\n  owner_key: {type: text, initial: one}\n", "manifest.yaml": "version: 1.0.0\nplatform_version: '*'\n",
+							"schema.yaml": "stages:\n  active: {}\n",
+							"state.yaml":  "owner_key: \"one\"\n", "manifest.yaml": "version: 1.0.0\nplatform_version: '*'\n",
 						}
 					}
 					construction := newReceiverConfigActivationFixtureForStore(t, opened.store.(agentFixtureFlowStore), false, files, nil, ownStoreTestAgentManager, nil)

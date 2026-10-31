@@ -10,8 +10,8 @@ worker:
     overlap.arm:
       advances_to: timed
       data_accumulation:
-        writes: [{target_field: acknowledgments, value: entity.acknowledgments + 1}]
+        writes: [{target_field: acknowledgments, value: state.acknowledgments + 1}]
     overlap.finish:
       advances_to: done
       data_accumulation:
-        writes: [{target_field: acknowledgments, value: entity.acknowledgments + 1}]
+        writes: [{target_field: acknowledgments, value: state.acknowledgments + 1}]

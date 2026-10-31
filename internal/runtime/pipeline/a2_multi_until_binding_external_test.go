@@ -73,7 +73,7 @@ func TestA2MultiUntilIndependentRecipientEntriesAndRestartOnBothStores(t *testin
 			now := time.Now().UTC()
 			parent := commitA2FixtureConstruction(t, pc, selected.events, ctx, testRunScopedWorkflowInstanceForRun(runID, runID), pipeline.WorkflowInstance{
 				InstanceID: runID, StorageRef: runID, EntityID: runID, WorkflowName: source.WorkflowName(), WorkflowVersion: source.WorkflowVersion(),
-				CurrentState: "active", EntityType: "root_state", Fields: map[string]any{"work_count": int64(0)},
+				CurrentState: "active", EntityType: "state", Fields: map[string]any{"work_count": int64(0)},
 			}, now)
 			constructed := make([]pipeline.FlowInstanceActivationPlan, len(paths))
 			requireConstructions := func() {
@@ -93,7 +93,7 @@ func TestA2MultiUntilIndependentRecipientEntriesAndRestartOnBothStores(t *testin
 				constructed[index] = commitA2FixtureConstruction(t, pc, selected.events, ctx, testRunScopedWorkflowInstanceForRun(runID, path), pipeline.WorkflowInstance{
 					InstanceID: key, StorageRef: path, EntityID: flowidentity.EntityID(path), WorkflowName: flows[index], WorkflowVersion: source.WorkflowVersion(),
 					ParentFlowID: parent.Identity.TemplateID, ParentFlowInstance: parent.Identity.InstancePath, ParentEntityID: parent.Identity.EntityID,
-					Mode: "template", RuntimeReadiness: &readiness, CurrentState: "awaiting", EntityType: "order_state",
+					Mode: "template", RuntimeReadiness: &readiness, CurrentState: "awaiting", EntityType: "state",
 					Fields: map[string]any{"order_id": key, "expected": []any{"a", "b"}, "halt_count": int64(0)},
 				}, now)
 				markGateRecoveryTopologyReadyFixture(t, selected, readiness, now)

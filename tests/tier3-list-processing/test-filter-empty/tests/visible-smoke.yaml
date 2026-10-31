@@ -10,7 +10,7 @@ expect:
   events:
     include: [items.filtered]
   entities:
-    - type: core
+    - flow: .
       current_state: done
       fields:
         filtered: []

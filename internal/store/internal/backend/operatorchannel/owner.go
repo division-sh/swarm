@@ -802,22 +802,9 @@ func listProofResponsibilities(ctx context.Context, runner transactionRunner) ([
 			}
 			return nil, err
 		}
-		proof := proofFrom(op, binding)
-		out = append(out, domain.ProofResponsibility{Operation: op, Binding: binding, Proof: proof})
+		out = append(out, domain.ProofResponsibility{Operation: op, Binding: binding})
 	}
 	return out, rows.Err()
-}
-
-func proofFrom(op domain.Operation, binding domain.Binding) domain.VerifiedProof {
-	return domain.VerifiedProof{
-		Format: domain.ProofFormat, ProofID: op.ProofID, Revision: op.ProofRevision, Status: domain.ProofActive,
-		Interface: op.Interface, ExternalAccountRef: op.ExternalAccountRef, ConversationRef: op.ConversationRef,
-		ConversationScope: op.ConversationScope, AccountPresentation: op.AccountPresentation,
-		Method: string(op.Kind), Challenge: op.Challenge, OriginalOperationID: op.OperationID,
-		MintingStoreID: op.PrincipalID, MintingDeploymentID: op.PrincipalID,
-		VerifiedAt: op.CompletedAt, OperatorConfirmed: true, ConsentScopes: []domain.ConsentScope{domain.ConsentNotify, domain.ConsentDecide},
-		ProviderAuthority: op.ProviderAuthority,
-	}
 }
 
 func (s *PostgresOwner) CompleteProofResponsibility(ctx context.Context, operationID, proofID string, proofRevision int64, status domain.ProofStatus, failure string, now time.Time) error {

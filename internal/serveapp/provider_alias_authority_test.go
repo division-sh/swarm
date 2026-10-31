@@ -537,7 +537,6 @@ func writeProviderAliasAuthorityFixture(t *testing.T, scenario providerAliasScen
 			}
 		}
 		files[alias+"/schema.yaml"] = "stages: []\n" + pins + "  outputs: [" + strings.Join(connectedNames, ", ") + "]\n"
-		files[alias+"/entities.yaml"] = "service: {}\n"
 		account := "420079"
 		if alias == "beta" {
 			account = "420080"
@@ -595,11 +594,9 @@ func writeProviderAliasAuthorityFixture(t *testing.T, scenario providerAliasScen
 		}
 		files["schema.yaml"] = files["alpha/schema.yaml"] + "connect:\n" + strings.ReplaceAll(connections, "from: alpha,", "from: .,")
 		files["nodes.yaml"] = files["alpha/nodes.yaml"]
-		files["entities.yaml"] = files["alpha/entities.yaml"]
 		files["policy.yaml"] = files["alpha/policy.yaml"]
 		delete(files, "alpha/schema.yaml")
 		delete(files, "alpha/nodes.yaml")
-		delete(files, "alpha/entities.yaml")
 		delete(files, "alpha/policy.yaml")
 	}
 	for _, alias := range []string{"alpha", "beta"} {

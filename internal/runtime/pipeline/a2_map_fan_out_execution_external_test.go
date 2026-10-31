@@ -97,7 +97,7 @@ pins:
   outputs:
     - item.ready
 `,
-		"entities.yaml": "work:\n  items:\n    type: map[text][integer]\n    initial: {before: [999]}\n",
+		"state.yaml": "items: map[text][integer]\n",
 		"events.yaml": `seed:
 batch.ready:
   items: map[text][integer]
@@ -117,7 +117,7 @@ item.ready:
       data_accumulation:
         writes: [{target_field: items, value: payload.items}]
       fan_out:
-        items_from: entity.items
+        items_from: state.items
         as: key
         emit:
           event: item.ready
@@ -682,10 +682,7 @@ func (p *a2MapFanOutExecution) compositeContinuation(t *testing.T, pending gener
 func runA2MapToListDuplicateOrdinals(t *testing.T, selected gateRecoveryStoreCase) {
 	files := a2MapFanOutFiles(false)
 	files["schema.yaml"] = strings.Replace(files["schema.yaml"], "    - item.ready\n", "    - item.ready\n    - leaf.ready\n", 1)
-	files["entities.yaml"] += `  leaf_results:
-    type: "[integer]"
-    initial: []
-`
+	files["state.yaml"] += "leaf_results: [integer]\n"
 	files["events.yaml"] += `leaf.ready:
   member_id: text
   parent_key: text

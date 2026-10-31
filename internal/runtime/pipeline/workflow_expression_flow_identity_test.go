@@ -14,11 +14,11 @@ func VerifyPipelineExpressionPreservesExactExecutionFlowOnBothStoresForTest(t *t
 	source := loadWorkflowTempSource(t, map[string]string{
 		"manifest.yaml":       "version: 1.0.0\nplatform_version: \">=0.7.0 <0.8.0\"\n",
 		"schema.yaml":         "stages:\n  ready: {}\n",
-		"entities.yaml":       "root_entity:\n  root_only: text\n",
+		"state.yaml":          "root_only: text\n",
 		"events.yaml":         "query.requested:\n  value: text\n",
 		"child/manifest.yaml": "version: 1.0.0\nplatform_version: \">=0.7.0 <0.8.0\"\n",
 		"child/schema.yaml":   "stages:\n  ready: {}\n",
-		"child/entities.yaml": "child_entity:\n  child_only: text\n",
+		"child/state.yaml":    "child_only: text\n",
 		"child/events.yaml":   "query.requested:\n  value: text\n",
 	})
 	fixture := open(t, source)

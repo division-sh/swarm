@@ -2,7 +2,7 @@ name: test-guard-entity-ref setup visible smoke
 setup:
   entities:
   - as: entity
-    type: core
+    type: state
     fields:
       level: 5
 steps:

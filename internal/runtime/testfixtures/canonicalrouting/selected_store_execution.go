@@ -47,8 +47,8 @@ connect:
 `)
 	writeClosedVariantFile(t, root, "flow-a/schema.yaml", "stages: []\n# fixture: flow-a\n")
 	writeClosedVariantFile(t, root, "selected-state-flow/schema.yaml", "stages: []\n# fixture: selected-state-flow\n")
-	for _, owner := range []struct{ path, entity string }{{"flow-a/1", "default"}, {"selected-state-flow/at-t", "selected_case"}} {
-		writeClosedVariantFile(t, root, owner.path+"/manifest.yaml", "version: 1.0.0\nplatform_version: '*'\n")
+	for _, owner := range []string{"flow-a/1", "selected-state-flow/at-t"} {
+		writeClosedVariantFile(t, root, owner+"/manifest.yaml", "version: 1.0.0\nplatform_version: '*'\n")
 		writeClosedVariantFile(t, root, owner.path+"/manifest.yaml", "version: 1.0.0\nplatform_version: '*'\n")
 		writeClosedVariantFile(t, root, owner.path+"/manifest.yaml", "version: 1.0.0\nplatform_version: '*'\n")
 		writeClosedVariantFile(t, root, owner.path+"/schema.yaml", `# fixture: selected-store-state
@@ -60,8 +60,8 @@ pins:
     - state.seeded
     - state.closed
 `)
-		writeClosedVariantFile(t, root, owner.path+"/entities.yaml", owner.entity+":\n  name: text\n")
-		writeClosedVariantFile(t, root, owner.path+"/nodes.yaml", `state-owner:
+		writeClosedVariantFile(t, root, owner+"/state.yaml", "name: text\n")
+		writeClosedVariantFile(t, root, owner+"/nodes.yaml", `state-owner:
   execution_type: system_node
   subscribes_to: [state.seeded, state.closed]
   event_handlers:

@@ -17,14 +17,14 @@ root-completion:
   produces: [child.requested]
   event_handlers:
     read.completed:
-      guard: {id: reading_only, check: _entity.current_state == 'reading'}
+      guard: {id: reading_only, check: instance.stage == 'reading'}
       advances_to: child_reading
       data_accumulation:
         writes:
           - {source_field: content, target_field: content}
       emit:
         event: child.requested
-        fields: {request_key: entity.request_key}
+        fields: {request_key: state.request_key}
 child-completion:
   execution_type: system_node
   subscribes_to: [child.completed]

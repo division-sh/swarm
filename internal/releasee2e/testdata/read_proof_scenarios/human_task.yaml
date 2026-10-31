@@ -17,8 +17,8 @@ expect:
     include: [observer.requested, human_task.approved, work.completed]
   no_dead_letters: true
   entities:
-    - type: work
+    - flow: .
       count: 1
-    - type: work
+    - flow: .
       current_state: done
       fields: {result: approved}

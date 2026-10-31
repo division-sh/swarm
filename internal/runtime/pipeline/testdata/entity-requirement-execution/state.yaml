@@ -1,0 +1,4 @@
+revision_count: integer?
+dedup_key: text?
+accumulated_count: integer?
+marker: text?

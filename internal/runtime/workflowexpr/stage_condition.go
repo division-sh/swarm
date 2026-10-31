@@ -6,7 +6,7 @@ import (
 )
 
 // ConditionCanHoldAtStage narrows an existing topology scope using only literal
-// _entity.current_state comparisons and boolean composition in CEL's stock AST. Unknown
+// instance.stage comparisons and boolean composition in CEL's stock AST. Unknown
 // business predicates retain both outcomes; event names confer no stage facts.
 // The ordinary expression checker remains responsible for admission/type errors.
 func ConditionCanHoldAtStage(expression, stage string, truth bool) bool {
@@ -54,7 +54,7 @@ func stageConditionOutcomes(expr celast.Expr, stage string) uint8 {
 		for index := range args {
 			path, ok := workflowSelectionPath(args[index])
 			other := args[1-index]
-			if !ok || path != "_entity.current_state" || other.Kind() != celast.LiteralKind {
+			if !ok || path != "instance.stage" || other.Kind() != celast.LiteralKind {
 				continue
 			}
 			value, ok := other.AsLiteral().Value().(string)
