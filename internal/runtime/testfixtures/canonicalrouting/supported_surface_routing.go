@@ -8,7 +8,7 @@ func CopyHandlerRuleSelectionProof(t testing.TB) string {
 	t.Helper()
 	root := CopyExample(t, RootIngress)
 	removeClosedVariantFiles(t, root, "state.yaml")
-	writeClosedVariantFile(t, root, "schema.yaml", `name: handler-rule-selection-proof
+	writeClosedVariantFile(t, root, "schema.yaml", `# fixture: handler-rule-selection-proof
 pins:
   inputs:
     - rules.selected
@@ -106,7 +106,7 @@ pins:
 		writeClosedVariantFile(t, root, "types.yaml", joinTypes)
 		writeClosedVariantFile(t, root, "nodes.yaml", joinNodes)
 	case "orders":
-		writeClosedVariantFile(t, root, "schema.yaml", "name: join-eventbus-proof\n")
+		writeClosedVariantFile(t, root, "schema.yaml", "stages: []\n# fixture: join-eventbus-proof\n")
 		removeClosedVariantFiles(t, root, "state.yaml", "events.yaml", "nodes.yaml")
 		writeLegacyInstanceFlow(t, root, "orders", "instance: order_id\n"+joinSchema,
 			joinEvents, joinEntities+"order_id: text\n", joinNodes)
