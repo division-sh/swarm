@@ -85,7 +85,7 @@ func newEventPublishCommand(opts rootCommandOptions) *cobra.Command {
 		},
 	}
 	cmd.Flags().StringVar(&publishOpts.payloadJSON, "payload-json", "", "Required JSON object payload")
-	cmd.Flags().StringVar(&publishOpts.runID, "run-id", "", "Optional existing nonterminal run id to inject into")
+	cmd.Flags().StringVar(&publishOpts.runID, "run-id", "", "Optional existing nonterminal run id (default: the flow's live run)")
 	cmd.Flags().StringVar(&publishOpts.sourceEventID, "source-event-id", "", "Optional same-run parent event id for checkpoint lineage")
 	cmd.Flags().StringVar(&publishOpts.targetFlowInstance, "target-flow-instance", "", "Optional existing-run receiver target flow instance")
 	cmd.Flags().StringVar(&publishOpts.targetEntityID, "target-entity-id", "", "Optional existing-run receiver target entity id")
