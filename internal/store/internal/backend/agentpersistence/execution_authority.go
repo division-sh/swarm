@@ -130,6 +130,9 @@ func authorizeDynamicFlowGrantTx(ctx context.Context, tx *sql.Tx, binding runtim
 	}
 	var raw []byte
 	if err := tx.QueryRowContext(ctx, `SELECT snapshot FROM runtime_generation_grants WHERE grant_id=$1 ORDER BY state_version DESC LIMIT 1`, binding.GenerationGrantID).Scan(&raw); err != nil {
+		if err == context.Canceled {
+			return err
+		}
 		return fmt.Errorf("load flow activation generation grant: %w", err)
 	}
 	var evidence startupownership.GrantEvidence
@@ -155,6 +158,9 @@ func authorizeDynamicFlowGrantTx(ctx context.Context, tx *sql.Tx, binding runtim
 		}
 		var revision string
 		if err := tx.QueryRowContext(ctx, query).Scan(&revision); err != nil {
+			if err == context.Canceled {
+				return err
+			}
 			return fmt.Errorf("load flow activation source-set head: %w", err)
 		}
 		if revision != evidence.SourceSetRevision {
@@ -269,6 +275,9 @@ func VerifyFlowActivationRetirementBindingTx(ctx context.Context, tx *sql.Tx, re
 	}
 	var raw []byte
 	if err := tx.QueryRowContext(ctx, `SELECT snapshot FROM runtime_generation_grants WHERE grant_id=$1 ORDER BY state_version DESC LIMIT 1`, retired.GenerationGrantID).Scan(&raw); err != nil {
+		if err == context.Canceled {
+			return err
+		}
 		return fmt.Errorf("load retiring flow activation grant: %w", err)
 	}
 	var retiredGrant startupownership.GrantEvidence
@@ -292,6 +301,9 @@ func VerifyFlowActivationAttemptProcessTx(ctx context.Context, tx *sql.Tx, stamp
 	}
 	var raw []byte
 	if err := tx.QueryRowContext(ctx, `SELECT snapshot FROM runtime_generation_grants WHERE grant_id=$1 ORDER BY state_version DESC LIMIT 1`, stamp).Scan(&raw); err != nil {
+		if err == context.Canceled {
+			return err
+		}
 		return fmt.Errorf("load attachment process evidence: %w", err)
 	}
 	var evidence startupownership.GrantEvidence
@@ -515,6 +527,9 @@ func loadRunExecutionBindingModeTx(ctx context.Context, tx *sql.Tx, runID string
 	var hash string
 	var bindingID sql.NullString
 	if err := tx.QueryRowContext(ctx, query, runID).Scan(&hash, &bindingID); err != nil {
+		if err == context.Canceled {
+			return "", sql.NullString{}, err
+		}
 		return "", sql.NullString{}, fmt.Errorf("load run execution binding: %w", err)
 	}
 	if err := bundleidentity.ValidateCanonicalHash(hash); err != nil {

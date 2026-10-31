@@ -344,6 +344,9 @@ func loadDynamicFlowRuntimeReadiness(ctx context.Context, queryer dynamicFlowRea
 		return runtimepipeline.DynamicFlowRuntimeReadiness{}, false, nil
 	}
 	if err != nil {
+		if err == context.Canceled {
+			return runtimepipeline.DynamicFlowRuntimeReadiness{}, false, err
+		}
 		return runtimepipeline.DynamicFlowRuntimeReadiness{}, false, fmt.Errorf("load dynamic flow runtime readiness %s: %w", route.InstancePath, err)
 	}
 	record.AttemptState = attemptState.String
