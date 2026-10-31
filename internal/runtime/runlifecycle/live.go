@@ -38,7 +38,7 @@ type LiveRunReader interface {
 	LoadLiveRun(context.Context, LiveRunScope) (LiveRun, bool, error)
 }
 
-var ErrLiveRunChanged = errors.New("live run changed before its native admission")
+var ErrLiveRunChanged = errors.New("live predecessor changed before its handoff fence")
 
 // LandingRun remains selected during pause; execution still uses LiveRunReader.
 type LandingRun struct {
