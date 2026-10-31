@@ -102,6 +102,9 @@ func seedOperatorSnapshotInheritedOrdinal(t *testing.T, f operatorSnapshotFixtur
 	if err != nil {
 		t.Fatal(err)
 	}
+	if _, err := f.store.(runlifecycle.OperationOwner).TransitionActiveRun(ctx, runlifecycle.ActiveTransitionRequest{RunID: runID, State: runlifecycle.StatePaused}); err != nil {
+		t.Fatalf("pause source before selecting the inherited ordinal: %v", err)
+	}
 	if _, err := f.store.(runlifecycle.OperationOwner).TransitionActiveRun(ctx, runlifecycle.ActiveTransitionRequest{RunID: child.ForkRunID, State: runlifecycle.StateRunning}); err != nil {
 		t.Fatalf("resume materialized ordinal fixture: %v", err)
 	}
