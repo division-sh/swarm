@@ -1,6 +1,7 @@
 package runtime_test
 
 import (
+	"bytes"
 	"context"
 	"database/sql"
 	"encoding/json"
@@ -29,6 +30,7 @@ import (
 	"github.com/division-sh/swarm/internal/runtime/semanticview"
 	"github.com/division-sh/swarm/internal/store/storetest"
 	"github.com/division-sh/swarm/internal/testutil"
+	"github.com/division-sh/swarm/internal/testutil/telegramapi"
 )
 
 const telegramConnectorSupportedSurfaceTimeout = 15 * time.Second
@@ -114,6 +116,7 @@ type telegramConnectorSupportedSurfaceCall struct {
 func runTelegramConnectorSupportedSurfaceRoundTrip(t *testing.T, backend telegramConnectorSupportedSurfaceBackend) {
 	t.Helper()
 	calls := make(chan telegramConnectorSupportedSurfaceCall, 4)
+	provider := &telegramapi.Double{}
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		raw, err := io.ReadAll(r.Body)
 		if err != nil {
@@ -130,14 +133,8 @@ func runTelegramConnectorSupportedSurfaceRoundTrip(t *testing.T, backend telegra
 			body: body,
 			raw:  string(raw),
 		}
-		_ = json.NewEncoder(w).Encode(map[string]any{
-			"ok": true,
-			"result": map[string]any{
-				"message_id": 99,
-				"chat":       map[string]any{"id": 42},
-				"text":       body["text"],
-			},
-		})
+		r.Body = io.NopCloser(bytes.NewReader(raw))
+		provider.ServeHTTP(w, r)
 	}))
 	defer server.Close()
 

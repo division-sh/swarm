@@ -10,6 +10,7 @@ import (
 	"fmt"
 	"io"
 	"net/http"
+	"net/http/httptest"
 	"os"
 	"path/filepath"
 	"reflect"
@@ -26,6 +27,7 @@ import (
 	"github.com/division-sh/swarm/internal/testpostgres"
 	"github.com/division-sh/swarm/internal/testutil"
 	"github.com/division-sh/swarm/internal/testutil/packfixture"
+	"github.com/division-sh/swarm/internal/testutil/telegramapi"
 	"github.com/google/uuid"
 )
 
@@ -80,6 +82,7 @@ func TestDeploymentChannelRegistrationWithoutRuntimeBothStores(t *testing.T) {
 			var credentialOwner *credentials.SnapshotOwner
 			var claimedProvider operatorchannel.ProviderAuthority
 			var privateRegistration channelonboarding.Operation
+			telegram := &telegramapi.Double{}
 			factory := func(ctx context.Context, opts cliapp.ChannelRegistrationOptions) (cliapp.ChannelRegistrationSession, error) {
 				var native cliapp.ChannelRegistrationSession
 				profile, present := opts.Plan.OnboardingProfile()
@@ -94,13 +97,12 @@ func TestDeploymentChannelRegistrationWithoutRuntimeBothStores(t *testing.T) {
 					if request.URL.Host != "api.telegram.org" {
 						t.Fatalf("registration attempted an unexpected provider operation: %s", request.URL.Host)
 					}
-					var body string
+					credential, _, _ := strings.Cut(strings.TrimPrefix(request.URL.Path, "/bot"), "/")
+					telegram.SetResourceID(credential, int64(botID))
 					switch {
 					case strings.HasSuffix(request.URL.Path, "/getMe"):
 						reads++
-						body = fmt.Sprintf(`{"ok":true,"result":{"id":%d}}`, botID)
 					case strings.HasSuffix(request.URL.Path, "/getWebhookInfo"):
-						body = `{"ok":true,"result":{"url":""}}`
 						if webhook {
 							operations, err := opts.Identities.ListOperatorChannelOperations(ctx, opts.Principal.ID)
 							if err != nil {
@@ -185,7 +187,12 @@ func TestDeploymentChannelRegistrationWithoutRuntimeBothStores(t *testing.T) {
 									}
 								}
 							}
-							body = fmt.Sprintf(`{"ok":true,"result":{"url":%q}}`, callback)
+							registration := httptest.NewRecorder()
+							telegram.ServeHTTP(registration, httptest.NewRequest(http.MethodPost, "/bot"+credential+"/setWebhook",
+								strings.NewReader(fmt.Sprintf(`{"url":%q,"secret_token":"webhook-secret"}`, callback))))
+							if registration.Code != http.StatusOK {
+								t.Fatalf("seed provider-owned webhook: %s", registration.Body.String())
+							}
 						}
 					case strings.HasSuffix(request.URL.Path, "/getUpdates"):
 						if webhook {
@@ -218,7 +225,7 @@ func TestDeploymentChannelRegistrationWithoutRuntimeBothStores(t *testing.T) {
 								return &http.Response{StatusCode: http.StatusServiceUnavailable, Header: http.Header{}, Body: io.NopCloser(strings.NewReader(`{"ok":false}`))}, nil
 							}
 							// Later updates returned by this read must not be acknowledged.
-							body = `{"ok":true,"result":[{"update_id":50}]}`
+							telegram.QueueUpdate(credential, map[string]any{"update_id": 50})
 							break
 						}
 						polls++
@@ -241,12 +248,19 @@ func TestDeploymentChannelRegistrationWithoutRuntimeBothStores(t *testing.T) {
 								}
 							}
 						}
-						body = fmt.Sprintf(`{"ok":true,"result":[{"update_id":%d,"message":{"message_id":%d,"from":{"id":12345},"chat":{"id":12345,"type":"private"},"text":%q}}]}`, polls, polls, text)
+						telegram.QueueUpdate(credential, map[string]any{
+							"update_id": polls,
+							"message": map[string]any{
+								"message_id": polls, "from": map[string]any{"id": 12345},
+								"chat": map[string]any{"id": 12345, "type": "private"}, "text": text,
+							},
+						})
 					default:
 						t.Fatalf("registration attempted a provider mutation or unrelated read")
 					}
-					return &http.Response{StatusCode: 200, Header: http.Header{"Content-Type": {"application/json"}},
-						Body: io.NopCloser(strings.NewReader(body))}, nil
+					response := httptest.NewRecorder()
+					telegram.ServeHTTP(response, request)
+					return response.Result(), nil
 				})}
 				var err error
 				native, err = serveapp.OpenChannelRegistration(ctx, opts)
