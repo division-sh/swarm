@@ -24,16 +24,11 @@
     },
     "source_files": {
       "policy": "policy.yaml",
-      "schema": "schema.yaml",
-      "entities": "entities.yaml"
+      "schema": "schema.yaml"
     },
     "required_agents": {
       "source": "inferred",
       "agents": []
-    },
-    "primary_entity": {
-      "type": "telegram_service",
-      "source_file": "entities.yaml"
     },
     "policy": {
       "operator_account": "420079"
