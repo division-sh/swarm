@@ -14,7 +14,6 @@ import (
 	"github.com/division-sh/swarm/internal/runtime/authoractivity"
 	"github.com/division-sh/swarm/internal/runtime/core/flowidentity"
 	"github.com/division-sh/swarm/internal/runtime/core/timeridentity"
-	"github.com/division-sh/swarm/internal/runtime/core/worklifetime"
 	"github.com/division-sh/swarm/internal/runtime/correlation"
 	"github.com/division-sh/swarm/internal/runtime/deliverylifecycle"
 	"github.com/division-sh/swarm/internal/runtime/effects"
@@ -109,7 +108,6 @@ func TestIssue642PreparedArrivalTimeoutContinuesExactDeliveryBothStores(t *testi
 				selected, owner = s, selectedContractExecutionOwnerForTest(t, s)
 			}
 			ctx := runForkTestContext(t)
-			process, _ := worklifetime.ProcessFromContext(ctx)
 			t.Cleanup(func() {
 				if err := owner.RetireSelectedContexts(context.Background()); err != nil {
 					t.Error(err)

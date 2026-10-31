@@ -256,7 +256,6 @@ func TestIssue642ArmedArrivalTimeoutContinuesExactDeliveryBothStores(t *testing.
 				selected, owner = s, selectedContractExecutionOwnerForTest(t, s)
 			}
 			ctx := runForkTestContext(t)
-			process, _ := worklifetime.ProcessFromContext(ctx)
 			t.Cleanup(func() {
 				if err := owner.RetireSelectedContexts(context.Background()); err != nil {
 					t.Error(err)
