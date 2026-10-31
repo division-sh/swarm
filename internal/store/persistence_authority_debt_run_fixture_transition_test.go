@@ -23,7 +23,7 @@ const debtSourceLoaderCollectorTo = "2b1b5a1147e3733dbc57049a2515c05f0b0103e595a
 const debtProviderSourceCollectorTo = "e30b8d1d122008c82a16d1b85f04d24e72c125f44fba0fa4a0d6b8de3f8eeacb"
 const debtDeploymentHandlerLandedCollectorTo = "7e349138dacce1f6893971fe8e012c21ac27710b95b721dbbd5afe720b792b72"
 const debtRetiredSourceFreezeCollectorTo = "ae3603d66950e48dcee170a6a962982f6420cb8e5d2f40362dc210af029162ec"
-const debtW4ComparisonCollectorTo = "4dbc717d402a1e09a38fd15a34629b023854b0639400d0a3053a7d164804a356"
+const debtW4ComparisonCollectorTo = "d29c2f75bc329c11bf7ba4107081c55376ca71cee03e02e041d5e371df0009d1"
 
 // #2727/6388897450: source-pin validation for an already-landed composed endpoint.
 const debtSelectedFixtureLandedCollectorTo = "1b48c6bd1c1b6d6100ee6df74bb9fe3d239372befa4c8f96f02243602fa9f646"
@@ -511,7 +511,7 @@ func TestPersistenceAuthorityDebtRunFixtureCollectorTransitionIsPinned(t *testin
 	t.Run("w4-comparison-metadata-only", func(t *testing.T) {
 		for _, mutation := range []string{"exact", "foreign-base", "trusted-collector", "foreign-current", "head-collector", "unreviewed", "foreign-review", "reverse", "bootstrap", "remove-site", "add-site", "multiplicity", "replace-site"} {
 			t.Run(mutation, func(t *testing.T) {
-				before := authorityDebtBaseline{BootstrapSource: trusted.BootstrapSource, Collector: debtW3LandedFixtureCollectorTo, Sites: debtControlSet(legacy)}
+				before := authorityDebtBaseline{BootstrapSource: trusted.BootstrapSource, Collector: debtRetiredSourceFreezeCollectorTo, Sites: debtControlSet(legacy)}
 				after := before
 				after.Collector, after.Sites = debtW4ComparisonCollectorTo, maps.Clone(before.Sites)
 				base, collector, reviewed := before.Collector, after.Collector, after.Collector
