@@ -117,7 +117,7 @@ func TestAuthenticatedAccountSelectsOnlyItsConstructedHolder(t *testing.T) {
 					for _, kind := range []provideroutput.Kind{provideroutput.KindRaw, provideroutput.KindNormalized} {
 						ctx := context.WithValue(constructionIndexContext(t, source), authenticatedProviderPublicationKey{},
 							authenticatedProviderPublication{eventID: event.ID(), source: event.RoutingSource().Route(), provider: provider, kind: kind, account: account})
-						projection := selectedRunTargetOwnerProjection{source: source, context: ctx, instances: reader}
+						projection := publicationTargetOwnerEvidence{source: source, context: ctx, instances: reader}
 						selected, scoped, err := projection.selectedAccountInstance(ctx, event)
 						want := flowidentity.Instance{}
 						if account == accounts[index] {
@@ -155,7 +155,7 @@ func TestAuthenticatedAccountSelectsOnlyItsConstructedHolder(t *testing.T) {
 					for _, account := range []string{"", "not-an-account"} {
 						ctx := context.WithValue(constructionIndexContext(t, source), authenticatedProviderPublicationKey{},
 							authenticatedProviderPublication{eventID: event.ID(), source: event.RoutingSource().Route(), provider: admittedProvider, account: account})
-						projection := selectedRunTargetOwnerProjection{source: source, context: ctx, instances: reader}
+						projection := publicationTargetOwnerEvidence{source: source, context: ctx, instances: reader}
 						_, scoped, err := projection.selectedAccountInstance(ctx, event)
 						if admittedProvider == provider {
 							if !scoped || err == nil {

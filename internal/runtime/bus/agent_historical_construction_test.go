@@ -71,7 +71,7 @@ func TestHistoricalAgentAttachmentCannotBorrowNativeConstruction(t *testing.T) {
 		}},
 	} {
 		t.Run(cell.name, func(t *testing.T) {
-			projection := selectedRunTargetOwnerProjection{
+			projection := publicationTargetOwnerEvidence{
 				source: source, required: true,
 				context:   withSelectedTargetOwnerLookupScope(constructionIndexContext(t, source), selectedTargetOwnerLookupScope{lookup: lookup, observations: []pipeline.FlowInstanceObservation{cell.owner}}),
 				instances: FlowInstanceIndexFixture(cell.owner),

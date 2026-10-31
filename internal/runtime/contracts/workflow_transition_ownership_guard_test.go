@@ -407,7 +407,7 @@ func allowedTransitionBoundaryUses() map[string]int {
 		"internal/runtime/pipeline.PipelineCoordinator.notifyTestFlowTerminationCommitted::call internal/runtime/correlation.InboundEventFromContext": 1,
 		"internal/runtime.BudgetTracker.evaluateScope::call internal/runtime/correlation.InboundEventFromContext":                                     1,
 		"internal/runtime/bus.EventBus.beginReceiverDispatch::call internal/runtime/correlation.WithInboundEvent":                                     1,
-		"internal/runtime/bus.deliveryPlanner.materializedTargetOwnerProjection::call internal/runtime/correlation.WithInboundEvent":                  1,
+		"internal/runtime/bus.deliveryPlanner.materializedPublicationTargetOwners::call internal/runtime/correlation.WithInboundEvent":                1,
 		"internal/runtime/bus.EventBus.receiverRouteContext::call internal/runtime/correlation.WithInboundEvent":                                      1,
 		"internal/runtime/bus.InboundEventFromContext::call internal/runtime/correlation.InboundEventFromContext":                                     1,
 		"internal/runtime/bus.WithInboundEvent::call internal/runtime/correlation.WithInboundEvent":                                                   1,
@@ -436,7 +436,7 @@ func allowedTransitionBoundaryUses() map[string]int {
 		"internal/store/storetest.PersistManagedAgentTurnFixture::call internal/runtime/correlation.WithInboundEvent":                   1,
 
 		// Proposed-run authentication only; the event and source must validate the proposal (2617:6162858616).
-		"internal/runtime/bus.deliveryRecipientPolicy.loadSelectedRunTargetOwnerProjection::call internal/runtime/correlation.InboundEventFromContext": 1,
+		"internal/runtime/bus.deliveryRecipientPolicy.loadPublicationTargetOwners::call internal/runtime/correlation.InboundEventFromContext": 1,
 
 		// T19: accepted execution binding and the existing exact delivery owners.
 		"internal/runtime/pipeline.PipelineCoordinator.executeNodeContractHandler::call internal/runtime/correlation.WithInboundEvent":                                                    1,

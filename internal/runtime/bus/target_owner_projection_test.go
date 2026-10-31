@@ -25,7 +25,7 @@ func TestRouteTargetOwnerResolutionMatrix(t *testing.T) {
 	singletonOwner := eventtest.UUID("selected-singleton-owner")
 	templateOwner := eventtest.UUID("selected-template-owner")
 
-	projection := selectedRunTargetOwnerProjection{
+	projection := publicationTargetOwnerEvidence{
 		required: true,
 		candidates: []runtimepipeline.DeliveryTargetOwnerCandidate{
 			{
@@ -97,7 +97,7 @@ func TestRouteTargetOwnerResolutionMatrix(t *testing.T) {
 	for _, required := range []bool{false, true} {
 		t.Run(fmt.Sprintf("observed absence required=%t", required), func(t *testing.T) {
 			origin := events.RouteIdentity{FlowID: "review", FlowInstance: "review", EntityID: staticOwner}
-			owner, err := (selectedRunTargetOwnerProjection{required: required}).replyOriginOwner(origin)
+			owner, err := (publicationTargetOwnerEvidence{required: required}).replyOriginOwner(origin)
 			if required {
 				if err == nil || !owner.Empty() {
 					t.Fatalf("required origin manufactured an absent owner: owner=%+v err=%v", owner, err)
@@ -123,7 +123,7 @@ func TestTargetOwnerDedupPreservesUnavailableEvidenceInBothOrders(t *testing.T) 
 	unavailable := active
 	unavailable.Availability = runtimepipeline.NewDeliveryTargetAvailability("active", "draining", false)
 	for _, descriptors := range [][]runtimepipeline.DeliveryTargetOwnerCandidate{{active, unavailable}, {unavailable, active}} {
-		projection := selectedRunTargetOwnerProjection{required: true, source: source}
+		projection := publicationTargetOwnerEvidence{required: true, source: source}
 		ordered := newOrderedTargetOwnerCandidates(projection.candidates)
 		for _, descriptor := range descriptors {
 			ordered.add(descriptor)
@@ -144,7 +144,7 @@ func TestSelectedTargetOwnerNeverUsesParentDescriptor(t *testing.T) {
 		Route: events.RouteIdentity{FlowInstance: "parent",
 			EntityID: eventtest.UUID("parent-owner")},
 	}
-	projection := selectedRunTargetOwnerProjection{required: true, candidates: []runtimepipeline.DeliveryTargetOwnerCandidate{parent}}
+	projection := publicationTargetOwnerEvidence{required: true, candidates: []runtimepipeline.DeliveryTargetOwnerCandidate{parent}}
 	if _, err := projection.replyOriginOwner(blueprint); err == nil {
 		t.Fatal("parent descriptor became receiver-owned state")
 	}
@@ -173,15 +173,15 @@ func TestRouteTargetOwnerResolutionFailsClosedBeforeMutation(t *testing.T) {
 
 	tests := []struct {
 		name       string
-		projection selectedRunTargetOwnerProjection
+		projection publicationTargetOwnerEvidence
 		want       string
 	}{
 		{
-			name: "missing", projection: selectedRunTargetOwnerProjection{required: true},
+			name: "missing", projection: publicationTargetOwnerEvidence{required: true},
 			want: "owner is missing",
 		},
 		{
-			name: "ambiguous", projection: selectedRunTargetOwnerProjection{required: true, candidates: []runtimepipeline.DeliveryTargetOwnerCandidate{
+			name: "ambiguous", projection: publicationTargetOwnerEvidence{required: true, candidates: []runtimepipeline.DeliveryTargetOwnerCandidate{
 				{
 					Route: events.RouteIdentity{FlowInstance: "portfolio",
 						EntityID: eventtest.UUID("portfolio-owner-a")},
@@ -193,7 +193,7 @@ func TestRouteTargetOwnerResolutionFailsClosedBeforeMutation(t *testing.T) {
 			}}, want: "owner is ambiguous",
 		},
 		{
-			name: "foreign", projection: selectedRunTargetOwnerProjection{required: true, candidates: []runtimepipeline.DeliveryTargetOwnerCandidate{
+			name: "foreign", projection: publicationTargetOwnerEvidence{required: true, candidates: []runtimepipeline.DeliveryTargetOwnerCandidate{
 				{
 					Route: events.RouteIdentity{FlowInstance: "other",
 						EntityID: eventtest.UUID("other-owner")},
@@ -201,7 +201,7 @@ func TestRouteTargetOwnerResolutionFailsClosedBeforeMutation(t *testing.T) {
 			}}, want: "owner is missing",
 		},
 		{
-			name: "disagreeing", projection: selectedRunTargetOwnerProjection{required: true, candidates: []runtimepipeline.DeliveryTargetOwnerCandidate{
+			name: "disagreeing", projection: publicationTargetOwnerEvidence{required: true, candidates: []runtimepipeline.DeliveryTargetOwnerCandidate{
 				{
 					Route: events.RouteIdentity{FlowInstance: "portfolio",
 						EntityID: eventtest.UUID("portfolio-owner")},
@@ -209,7 +209,7 @@ func TestRouteTargetOwnerResolutionFailsClosedBeforeMutation(t *testing.T) {
 			}}, want: "owner is missing",
 		},
 		{
-			name: "ephemeral ambiguous", projection: selectedRunTargetOwnerProjection{candidates: []runtimepipeline.DeliveryTargetOwnerCandidate{
+			name: "ephemeral ambiguous", projection: publicationTargetOwnerEvidence{candidates: []runtimepipeline.DeliveryTargetOwnerCandidate{
 				{
 					Route: events.RouteIdentity{FlowInstance: "portfolio",
 						EntityID: eventtest.UUID("portfolio-owner-a")},
@@ -221,7 +221,7 @@ func TestRouteTargetOwnerResolutionFailsClosedBeforeMutation(t *testing.T) {
 			}}, want: "owner is ambiguous",
 		},
 		{
-			name: "ephemeral unavailable", projection: selectedRunTargetOwnerProjection{candidates: []runtimepipeline.DeliveryTargetOwnerCandidate{
+			name: "ephemeral unavailable", projection: publicationTargetOwnerEvidence{candidates: []runtimepipeline.DeliveryTargetOwnerCandidate{
 				{
 					Route: events.RouteIdentity{FlowInstance: "portfolio",
 						EntityID: eventtest.UUID("portfolio-owner")},
@@ -230,7 +230,7 @@ func TestRouteTargetOwnerResolutionFailsClosedBeforeMutation(t *testing.T) {
 			}}, want: "owner is unavailable",
 		},
 		{
-			name: "ephemeral contradictory", projection: selectedRunTargetOwnerProjection{candidates: []runtimepipeline.DeliveryTargetOwnerCandidate{
+			name: "ephemeral contradictory", projection: publicationTargetOwnerEvidence{candidates: []runtimepipeline.DeliveryTargetOwnerCandidate{
 				{
 					Route: events.RouteIdentity{FlowInstance: "portfolio",
 						EntityID: eventtest.UUID("portfolio-owner")},
@@ -278,8 +278,8 @@ func TestActiveTargetDescriptorsRequireExactEntityOwner(t *testing.T) {
 	}
 	for _, test := range tests {
 		t.Run(test.name, func(t *testing.T) {
-			projection := selectedRunTargetOwnerProjection{required: true, candidates: []runtimepipeline.DeliveryTargetOwnerCandidate{test.descriptor}}
-			if err := projection.validate(); err == nil || !strings.Contains(err.Error(), "missing exact entity identity") {
+			projection := publicationTargetOwnerEvidence{required: true, candidates: []runtimepipeline.DeliveryTargetOwnerCandidate{test.descriptor}}
+			if err := projection.validatePlanningShape(); err == nil || !strings.Contains(err.Error(), "missing exact entity identity") {
 				t.Fatalf("validate error = %v, want missing exact entity identity", err)
 			}
 		})
@@ -290,7 +290,7 @@ func TestExplicitAgentTargetConsumesExactTargetOwner(t *testing.T) {
 	agentOwner := eventtest.UUID("explicit-agent-owner")
 	agentIdentity := agentidentitytest.Runtime(t, "reviewer", "target-owner-proof", "review", "one", "review/one")
 	target := events.RouteIdentity{FlowID: "review", FlowInstance: "review/one", EntityID: agentOwner}
-	projection := selectedRunTargetOwnerProjection{
+	projection := publicationTargetOwnerEvidence{
 		required: true,
 		agents:   map[agentidentity.Identity]ActiveAgentDescriptor{agentIdentity: {Identity: agentIdentity, EntityID: agentOwner}},
 	}
@@ -367,7 +367,7 @@ func TestExplicitAgentTargetPreservesEntitylessAndSelectedEntityOwners(t *testin
 		Recipient: events.MustAgentDeliveryRecipient("reviewer"), AgentIdentity: identity,
 		TargetBlueprint: events.RouteIdentity{FlowID: "review", FlowInstance: "review/one"}, Persist: true,
 	}}}.Normalized()
-	projection := selectedRunTargetOwnerProjection{
+	projection := publicationTargetOwnerEvidence{
 		agentsAvailable: true,
 		agents: map[agentidentity.Identity]ActiveAgentDescriptor{
 			identity: {Identity: identity},
@@ -443,7 +443,7 @@ func TestSameFlowAgentPolicyDerivesExactSelectedRunOwners(t *testing.T) {
 	if !ok || bundle.FlowTree.Root == nil {
 		t.Fatal("declared-agent source requires a root flow")
 	}
-	projection := selectedRunTargetOwnerProjection{
+	projection := publicationTargetOwnerEvidence{
 		agentsAvailable: true,
 		agents: map[agentidentity.Identity]ActiveAgentDescriptor{
 			rootIdentity:   {Identity: rootIdentity, EntityID: rootOwner},
@@ -495,7 +495,7 @@ func TestSameFlowRuntimeCreatedAgentDoesNotConsumeSelectedOwner(t *testing.T) {
 	runID := eventtest.UUID("same-flow-runtime-carrier-run")
 	identity := agentidentitytest.RootRuntimeForRun(t, runID, "workflow-runtime", "same-flow-runtime-carrier")
 	ownerID := eventtest.UUID("same-flow-runtime-carrier-owner")
-	projection := selectedRunTargetOwnerProjection{
+	projection := publicationTargetOwnerEvidence{
 		agentsAvailable: true,
 		agents: map[agentidentity.Identity]ActiveAgentDescriptor{
 			identity: {Identity: identity},
@@ -540,7 +540,7 @@ func TestRuntimeCreatedTargetlessIgnoresNativeAndProspectiveConstruction(t *test
 					flow = "consumer"
 					identity = agentidentitytest.RuntimeForRun(t, runID, "workflow-runtime", "independent-runtime", flow, flow, flow)
 				}
-				projection := selectedRunTargetOwnerProjection{required: true, source: source, agentsAvailable: true,
+				projection := publicationTargetOwnerEvidence{required: true, source: source, agentsAvailable: true,
 					agents: map[agentidentity.Identity]ActiveAgentDescriptor{identity: {Identity: identity}},
 				}
 				if prospective {
@@ -583,7 +583,7 @@ func TestSameFlowDeclaredEntitylessAgentsDoNotInheritSelectedNodeOwners(t *testi
 	runID := eventtest.UUID("same-flow-entityless-run")
 	rootIdentity := agentidentitytest.RootDeclaredForRun(t, runID, "root-reviewer", "same-flow-entityless-root")
 	nestedIdentity := agentidentitytest.DeclaredForRun(t, runID, "nested-reviewer", "same-flow-entityless-nested", "consumer", "consumer", "consumer")
-	projection := selectedRunTargetOwnerProjection{
+	projection := publicationTargetOwnerEvidence{
 		agentsAvailable: true,
 		agents: map[agentidentity.Identity]ActiveAgentDescriptor{
 			rootIdentity:   {Identity: rootIdentity},
@@ -644,7 +644,7 @@ func TestSameFlowRootAgentOwnerContradictionFailsClosed(t *testing.T) {
 	identity := agentidentitytest.RootDeclaredForRun(t, runID, "reviewer", "same-flow-agent-contradiction")
 	source := connectRoutePlanRootProducerSingletonSource(t)
 	activeOwner := eventtest.UUID("root-active-owner")
-	projection := selectedRunTargetOwnerProjection{
+	projection := publicationTargetOwnerEvidence{
 		agentsAvailable: true,
 		agents:          map[agentidentity.Identity]ActiveAgentDescriptor{identity: {Identity: identity, EntityID: activeOwner}},
 		candidates: []runtimepipeline.DeliveryTargetOwnerCandidate{
@@ -685,7 +685,7 @@ func TestPendingAgentLifecycleRequiresInitializationBeyondExactMaterializingOwne
 		Recipient: events.MustAgentDeliveryRecipient("reviewer"), AgentIdentity: identity,
 		TargetBlueprint: target, AgentLifecycle: agentLifecycleAdmissionMaterializingFlow, Persist: true,
 	}}}.Normalized()
-	projection := selectedRunTargetOwnerProjection{
+	projection := publicationTargetOwnerEvidence{
 		agentsAvailable: true,
 		agents:          map[agentidentity.Identity]ActiveAgentDescriptor{identity: {Identity: identity, EntityID: target.EntityID}},
 		candidates: []runtimepipeline.DeliveryTargetOwnerCandidate{{
@@ -731,7 +731,7 @@ func TestPendingAgentLifecyclesConsumeIndependentStoredDependency(t *testing.T) 
 	for _, lifecycle := range []agentLifecycleAdmission{agentLifecycleAdmissionStaticDeclaration, agentLifecycleAdmissionMaterializingFlow} {
 		intent := base
 		intent.AgentLifecycle = lifecycle
-		projection := selectedRunTargetOwnerProjection{required: true, agents: map[agentidentity.Identity]ActiveAgentDescriptor{identity: {Identity: identity}}}
+		projection := publicationTargetOwnerEvidence{required: true, agents: map[agentidentity.Identity]ActiveAgentDescriptor{identity: {Identity: identity}}}
 		if _, err := projection.resolveRoutePlan(RoutePlan{Event: event, DeliveryIntents: []RoutePlanDeliveryIntent{intent}}); err == nil || !strings.Contains(err.Error(), "independent construction dependency") {
 			t.Fatalf("pending lifecycle=%d escaped dependency admission: %v", lifecycle, err)
 		}
@@ -758,7 +758,7 @@ func TestSpeculativeNodeOwnerCannotAuthorizePendingAgent(t *testing.T) {
 		if agentFirst {
 			intents[0], intents[1] = intents[1], intents[0]
 		}
-		projection := selectedRunTargetOwnerProjection{agentsAvailable: true, targetsAvailable: true, required: true}
+		projection := publicationTargetOwnerEvidence{agentsAvailable: true, targetsAvailable: true, required: true}
 		if _, err := projection.resolveRoutePlan(RoutePlan{DeliveryIntents: intents}); err == nil {
 			t.Fatalf("node's speculative future entity authorized agent lifecycle; agentFirst=%t", agentFirst)
 		}
@@ -776,7 +776,7 @@ func TestAdmittedTypedTargetOwnerRemainsAuthoritative(t *testing.T) {
 		TargetBlueprint: target, TargetOwnership: owner, Producer: routeIntentProducerDirectPolicy, Persist: true,
 	}}}.Normalized()
 
-	resolved, err := (selectedRunTargetOwnerProjection{required: true}).resolveRoutePlan(plan)
+	resolved, err := (publicationTargetOwnerEvidence{required: true}).resolveRoutePlan(plan)
 	if err != nil {
 		t.Fatalf("preserve admitted target owner without current descriptor: %v", err)
 	}
@@ -787,7 +787,7 @@ func TestAdmittedTypedTargetOwnerRemainsAuthoritative(t *testing.T) {
 	contradictory := plan
 	contradictory.DeliveryIntents = append([]RoutePlanDeliveryIntent(nil), plan.DeliveryIntents...)
 	contradictory.DeliveryIntents[0].TargetBlueprint.EntityID = eventtest.UUID("different-target-owner")
-	if _, err := (selectedRunTargetOwnerProjection{required: true}).resolveRoutePlan(contradictory); err == nil || !strings.Contains(err.Error(), "blueprint and typed owner disagree") {
+	if _, err := (publicationTargetOwnerEvidence{required: true}).resolveRoutePlan(contradictory); err == nil || !strings.Contains(err.Error(), "blueprint and typed owner disagree") {
 		t.Fatalf("contradictory admitted owner error = %v, want exact disagreement", err)
 	}
 }
@@ -801,7 +801,7 @@ func TestResolvedTargetOwnerCanonicalizesBlueprintForReplay(t *testing.T) {
 		TargetBlueprint: target,
 		Persist:         true,
 	}}}.Normalized()
-	projection := selectedRunTargetOwnerProjection{
+	projection := publicationTargetOwnerEvidence{
 		agents:   map[agentidentity.Identity]ActiveAgentDescriptor{identity: {Identity: identity, EntityID: target.EntityID}},
 		required: true,
 	}

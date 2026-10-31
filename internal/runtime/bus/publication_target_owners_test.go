@@ -34,20 +34,20 @@ func TestClosedPublicationTargetOwnerEvidenceBoundaries(t *testing.T) {
 		ProviderFlowID: "producer", ProviderInputPin: "work.requested", ProviderOutputPin: "work.completed", RequestCorrelationID: event.ID()}
 	base := publicationTargetOwnerEvidence{
 		event: event, present: true, origins: map[string]events.RouteIdentity{record.ID: origin},
-		projection: selectedRunTargetOwnerProjection{context: bounded, source: source, required: true,
-			candidates: []pipeline.DeliveryTargetOwnerCandidate{{
-				Route: events.RouteIdentity{FlowID: root.TemplateID,
-					FlowInstance: root.InstancePath,
-					EntityID:     root.EntityID},
-			}}},
+		context: bounded, source: source, required: true,
+		candidates: []pipeline.DeliveryTargetOwnerCandidate{{
+			Route: events.RouteIdentity{FlowID: root.TemplateID,
+				FlowInstance: root.InstancePath,
+				EntityID:     root.EntityID},
+		}},
 		planner: deliveryPlanner{connectPlanner: connectRoutePlanResolver{source: source, lifecycle: connectInstanceSelector{index: reader}}},
 	}
 	plan := RoutePlan{Event: event, ReplyCreations: []replycontext.Record{record}}
-	base.projection.instances = constructionIndexTestReader{err: errors.New("expired ordinary snapshot")}
+	base.instances = constructionIndexTestReader{err: errors.New("expired ordinary snapshot")}
 	preparer := base.planner
 	preparer.preparedOwners = &base
-	plan, err = preparer.resolvePreparedRoutePlan(base.projection, plan)
-	if err != nil || base.projection.instances != nil {
+	plan, err = preparer.resolvePreparedRoutePlan(base, plan)
+	if err != nil || base.instances != nil {
 		t.Fatalf("prepared owners retained their expired reader: %v", err)
 	}
 	if owner, err := base.returnOwner(ctx, event, &plan, record); err != nil || owner.Route() != origin || !owner.ExistingEntity() {
@@ -60,7 +60,7 @@ func TestClosedPublicationTargetOwnerEvidenceBoundaries(t *testing.T) {
 	reader.err = readFailure
 	for _, required := range []bool{false, true} {
 		candidate := base
-		candidate.projection.required = required
+		candidate.required = required
 		before, reads := plan, len(reader.lookups)
 		owner, err := candidate.returnOwner(ctx, event, &plan, record)
 		if !owner.Empty() || !errors.Is(err, readFailure) || len(reader.lookups) != reads+1 || !reflect.DeepEqual(before, plan) {
@@ -85,13 +85,13 @@ func TestClosedPublicationTargetOwnerEvidenceBoundaries(t *testing.T) {
 				}
 				incomingContext = correlation.WithSourceArtifactFact(ctx, foreign)
 			case "missing_scope":
-				candidate.projection.context = ctx
+				candidate.context = ctx
 			case "crossed_scope":
 				foreign, err := pipeline.NewFlowInstanceLookupScope(source, fact, eventtest.UUID("foreign-scope-run"), nil, nil)
 				if err != nil {
 					t.Fatal(err)
 				}
-				candidate.projection.context = withSelectedTargetOwnerLookupScope(bounded, selectedTargetOwnerLookupScope{lookup: foreign})
+				candidate.context = withSelectedTargetOwnerLookupScope(bounded, selectedTargetOwnerLookupScope{lookup: foreign})
 			case "logical_instance":
 				reply.Origin.FlowInstance = "producer/foreign"
 			case "parent":
@@ -147,18 +147,22 @@ func TestClosedPublicationReturnScopeExtendsOnlyCompiledOrigin(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	projection, err := planner.recipientPolicy.loadSelectedRunTargetOwnerProjection(withSelectedTargetOwnerLookupScope(bounded, scope))
+	projection, err := planner.recipientPolicy.loadPublicationTargetOwners(withSelectedTargetOwnerLookupScope(bounded, scope))
 	if err != nil {
 		t.Fatal(err)
 	}
 	origin := events.RouteIdentity{FlowID: root.TemplateID, FlowInstance: root.InstancePath, EntityID: root.EntityID}
 	record := replycontext.Record{ID: "prepared-reply", RunID: event.RunID(), RequestEventID: event.ID(), SourceRequestEventID: event.ID(), Origin: origin}
-	evidence := publicationTargetOwnerEvidence{event: event, projection: projection, present: true, planner: planner,
+	evidence := publicationTargetOwnerEvidence{event: event, present: true, planner: planner,
 		origins: map[string]events.RouteIdentity{record.ID: origin}}
+	evidence.replacePlanningEvidence(projection)
 	plan := RoutePlan{Event: event}
 	owner, err := evidence.returnOwner(ctx, event, &plan, record)
 	if err != nil || owner.Route() != origin || !owner.ExistingEntity() {
 		t.Fatalf("extended exact return = %+v, %v", owner, err)
+	}
+	if err := evidence.validate(ctx, event); err != nil || evidence.origins[record.ID] != origin || evidence.planner.connectPlanner.lifecycle.index != reader {
+		t.Fatalf("scope refresh changed the prepared publication boundary: %v", err)
 	}
 	if len(reader.requested) != 2 || !reflect.DeepEqual(reader.requested[1].FlowIDs(), []string{"producer"}) ||
 		!reflect.DeepEqual(reader.requested[1].Coordinates(), []flowidentity.RunScopedFlowInstance{{RunID: event.RunID(), Route: root.Route()}}) {
@@ -208,7 +212,7 @@ func TestClosedPublicationOwnersKeepProposedRunAndFinalConstruction(t *testing.T
 	if err != nil {
 		t.Fatal(err)
 	}
-	projection, err := planner.recipientPolicy.loadSelectedRunTargetOwnerProjection(withSelectedTargetOwnerLookupScope(bounded, scope))
+	projection, err := planner.recipientPolicy.loadPublicationTargetOwners(withSelectedTargetOwnerLookupScope(bounded, scope))
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -221,10 +225,10 @@ func TestClosedPublicationOwnersKeepProposedRunAndFinalConstruction(t *testing.T
 		t.Fatal(err)
 	}
 	owner, err := evidence.returnOwner(ctx, event, &plan, reply)
-	if err != nil || owner.Route() != origin || owner.ExistingEntity() || len(evidence.projection.activationOwners) != 2 {
-		t.Fatalf("proposed return lost exact construction: owner=%+v err=%v activations=%+v", owner, err, evidence.projection.activationOwners)
+	if err != nil || owner.Route() != origin || owner.ExistingEntity() || len(evidence.activationOwners) != 2 {
+		t.Fatalf("proposed return lost exact construction: owner=%+v err=%v activations=%+v", owner, err, evidence.activationOwners)
 	}
-	if len(evidence.projection.context.Value(selectedTargetOwnerLookupScopeKey{}).(selectedTargetOwnerLookupScope).observations) != 0 {
+	if len(evidence.context.Value(selectedTargetOwnerLookupScopeKey{}).(selectedTargetOwnerLookupScope).observations) != 0 {
 		t.Fatal("proposed construction became native evidence")
 	}
 }

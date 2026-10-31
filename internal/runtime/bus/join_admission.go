@@ -61,7 +61,7 @@ func (eb *EventBus) prepareReplyJoinAdmission(ctx context.Context, evt events.Ev
 		return err
 	}
 	planningContext, err := owners.planner.previewPreparedConstructions(
-		withSelectedRunTargetOwnerProjection(owners.projection.context, owners.projection), evt.RunID(), plan.ActivationPlans,
+		withPublicationTargetOwners(owners.context, *owners), evt.RunID(), plan.ActivationPlans,
 	)
 	if err != nil {
 		return err

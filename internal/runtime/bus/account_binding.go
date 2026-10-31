@@ -16,7 +16,7 @@ import (
 // selectedAccountInstance consumes the authenticated carrier and the same
 // snapshot index used by ordinary route planning. Customer fields cannot select
 // another account, and no account-to-flow registry is maintained.
-func (p selectedRunTargetOwnerProjection) selectedAccountInstance(ctx context.Context, event events.Event) (flowidentity.Instance, bool, error) {
+func (p publicationTargetOwnerEvidence) selectedAccountInstance(ctx context.Context, event events.Event) (flowidentity.Instance, bool, error) {
 	publication, authenticated := authenticatedProviderPublicationForEvent(ctx, event)
 	if !authenticated {
 		return flowidentity.Instance{}, false, nil
