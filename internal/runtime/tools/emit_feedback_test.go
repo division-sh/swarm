@@ -83,6 +83,12 @@ func (b *telemetryBusStub) PublishEmit(ctx context.Context, event events.Event, 
 type acknowledgedEmitFaultPublisher struct {
 	publishBusCapture
 	fault error
+	logs  []pipeline.RuntimeLogEntry
+}
+
+func (b *acknowledgedEmitFaultPublisher) LogRuntime(_ context.Context, entry pipeline.RuntimeLogEntry) error {
+	b.logs = append(b.logs, entry)
+	return nil
 }
 
 func (b *acknowledgedEmitFaultPublisher) PublishEmit(ctx context.Context, event events.Event, request pipeline.WorkflowPublicationStageRequest) (pipeline.WorkflowEmitResult, error) {
@@ -132,9 +138,27 @@ func TestHandleEmitToolRetainsAcknowledgedStageOnDispatchError(t *testing.T) {
 	}
 	first := &pipeline.NoHandlerError{FlowID: ".", FlowInstance: toolTestRunID, Stage: "done"}
 	second := &pipeline.NoHandlerError{FlowID: "sibling", FlowInstance: "sibling/one", Stage: "closed"}
-	publisher.fault = errors.Join(first, second)
-	_, err = executor.handleEmitTool(toolEventTestContext(actor), actor, "emit_root_done", map[string]any{})
+	publisher.fault = errors.Join(first, second, first)
+	publisher.logs = nil
+	value, err = executor.handleEmitTool(toolEventTestContext(actor), actor, "emit_root_done", map[string]any{})
 	if !errors.Is(err, first) || !errors.Is(err, second) {
 		t.Fatalf("joined receiver refusals were collapsed: %v", err)
+	}
+	output = value.(map[string]any)
+	refusals, ok := output["refusals"].([]failures.Envelope)
+	if !ok || len(refusals) != 2 || len(publisher.logs) != 2 || output["accepted"] != true || output["event_id"] != publisher.event.ID() {
+		t.Fatalf("joined receivers lost displayed or logged outcomes: output=%#v logs=%+v", output, publisher.logs)
+	}
+	for i, receiver := range []*pipeline.NoHandlerError{first, second} {
+		for _, refusal := range []*failures.Envelope{&refusals[i], publisher.logs[i].Failure} {
+			if refusal == nil || refusal.Class != failures.ClassUnexpectedArrival || refusal.Detail.Code != "no_route" ||
+				refusal.Detail.Attributes["flow_instance"] != receiver.FlowInstance || refusal.Detail.Attributes["stage"] != receiver.Stage {
+				t.Fatalf("receiver %q lost its exact envelope: %+v", receiver.FlowInstance, refusal)
+			}
+		}
+		detail, ok := publisher.logs[i].Detail.(map[string]any)
+		if !ok || publisher.logs[i].Action != emitToolOutcomeAction || detail["emitted_event_id"] != publisher.event.ID() {
+			t.Fatalf("receiver outcome lost its emitted event: %+v", publisher.logs[i])
+		}
 	}
 }

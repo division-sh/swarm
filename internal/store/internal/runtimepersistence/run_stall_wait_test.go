@@ -149,6 +149,7 @@ func TestRunOperationalFutureTimerIsWaitingBothStores(t *testing.T) {
 		emittedID, secondID := uuid.NewString(), uuid.NewString()
 		for _, item := range []struct{ path, eventID, action string }{
 			{"global", emittedID, "emit_tool_outcome"}, {"global", emittedID, "handler_failed"},
+			{fixture.origin.RunID(), emittedID, "emit_tool_outcome"}, {fixture.origin.RunID(), emittedID, "handler_failed"},
 			{"foreign", emittedID, "emit_tool_outcome"}, {"global", secondID, "handler_failed"},
 		} {
 			refusal := failures.FromError(&pipeline.NoHandlerError{FlowID: "global", FlowInstance: item.path, Stage: "done"}, "test", "readout")
@@ -167,10 +168,18 @@ func TestRunOperationalFutureTimerIsWaitingBothStores(t *testing.T) {
 		if err != nil {
 			t.Fatal(err)
 		}
+		found := map[string]bool{}
 		for _, instance := range operatorread.ProjectRunOperationalStatus(report).Instances {
+			found[instance.FlowInstance] = true
 			if instance.FlowInstance == "global" && (instance.Disposition != "live" || instance.Work.Timers != 2 || instance.Work.DueTimers != 1 || instance.RefusedEmits != 2) {
 				t.Fatalf("due wake or distinct exact-instance refusals were lost: %+v", instance)
 			}
+			if instance.FlowInstance == fixture.origin.RunID() && instance.RefusedEmits != 1 {
+				t.Fatalf("shared event lost its other receiver or counted duplicate logs: %+v", instance)
+			}
+		}
+		if !found["global"] || !found[fixture.origin.RunID()] || found["foreign"] {
+			t.Fatalf("receiver readback lost constructed instances or invented a foreign one: %v", found)
 		}
 		requireProviderAttemptCount(t, fixture, 0)
 	})
