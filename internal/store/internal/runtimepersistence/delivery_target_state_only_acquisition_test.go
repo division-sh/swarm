@@ -308,7 +308,7 @@ func TestEventBusCompositionOwnerExactConnectedReceiverBothStores(t *testing.T) 
 							} else if tc.state == "done" {
 								var refusal *runtimepipeline.NoHandlerError
 								if !errors.As(err, &refusal) || refusal.FlowID != scope.flow || refusal.FlowInstance != instance || refusal.Stage != tc.state {
-									t.Fatalf("final stage must retain its exact ordinary refusal: %v", err)
+									t.Fatalf("final stage must retain its exact ordinary refusal: %v, refusal=%#v want instance=%q", err, refusal, instance)
 								}
 							} else if err == nil || !strings.Contains(err.Error(), failure) {
 								t.Fatalf("Publish=%v, want %q", err, failure)
