@@ -5,6 +5,7 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"fmt"
 	"reflect"
 	"strings"
 	"testing"
@@ -276,9 +277,10 @@ func VerifyDeliveryTargetApplicationRejectsWrongRunRootTargetsBeforeMutationOnBo
 			)
 			route := events.RouteIdentity{FlowID: ".", FlowInstance: wrongRunID, EntityID: entityID}
 			owner := testCase.owner(route)
+			wantError := fmt.Sprintf("root target run %q disagrees with current run %q", wrongRunID, testPipelineRunID)
 
 			for attempt, coordinator := range []*PipelineCoordinator{newCoordinator(), newCoordinator()} {
-				if _, err := coordinator.prepareDeliveryTargetApplication(ctx, node.Key(), handlerFact, handler, evt, owner); err == nil || !strings.Contains(err.Error(), "disagrees with current root coordinate") {
+				if _, err := coordinator.prepareDeliveryTargetApplication(ctx, node.Key(), handlerFact, handler, evt, owner); err == nil || !strings.Contains(err.Error(), wantError) {
 					t.Fatalf("attempt %d wrong-run root error = %v", attempt+1, err)
 				}
 			}
