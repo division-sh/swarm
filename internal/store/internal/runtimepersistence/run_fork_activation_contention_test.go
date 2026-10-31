@@ -31,122 +31,11 @@ import (
 	"github.com/division-sh/swarm/internal/runtime/runlifecycle"
 	"github.com/division-sh/swarm/internal/runtime/semanticview"
 	"github.com/division-sh/swarm/internal/runtime/testfixtures/canonicalrouting"
-	"github.com/division-sh/swarm/internal/runtime/workflowlifecycle"
-	decisionstore "github.com/division-sh/swarm/internal/store/internal/backend/decisioncard"
+
 	sqlitebackend "github.com/division-sh/swarm/internal/store/internal/backend/sqlite"
 	"github.com/google/uuid"
 	modernsqlite "modernc.org/sqlite"
 )
-
-func requireForkContentionState(t *testing.T, db *sql.DB, f forkContentionFixture, child string, writerCommitted, activated bool) {
-	t.Helper()
-	for _, id := range []string{f.runID, child} {
-		var state, name string
-		var revision int64
-		if err := db.QueryRow(`SELECT f.current_state,e.name,f.revision FROM flow_instances f JOIN entity_state e ON e.run_id=f.run_id AND e.entity_id=f.entity_id WHERE f.run_id=$1 AND f.entity_id=$2`, id, id).Scan(&state, &name, &revision); err != nil {
-			t.Fatal(err)
-		}
-		wantState, wantName, wantRevision := "pending", "At R", int64(1)
-		if id == f.runID {
-			wantRevision = 2
-			if f.gateOwned {
-				wantRevision = 3
-			}
-			if writerCommitted {
-				wantRevision++
-				if f.gateOwned {
-					wantState = "done"
-				} else {
-					wantName = "After writer"
-				}
-			} else if activated && f.gateOwned {
-				// Freezing the source durably supersedes its exact open gate.
-				// That header CAS is a real activation write, not a field shadow.
-				wantRevision = 4
-			}
-		}
-		if state != wantState || name != wantName || revision != wantRevision {
-			t.Fatalf("%s entity state=%s/%s/r%d, want %s/%s/r%d", id, state, name, revision, wantState, wantName, wantRevision)
-		}
-	}
-	if !f.gateOwned {
-		var raw string
-		if err := db.QueryRow(`SELECT bookkeeping FROM flow_instances WHERE run_id=$1 AND entity_id=$2`, f.runID, f.entityID).Scan(&raw); err != nil {
-			t.Fatal(err)
-		}
-		var before, after map[string]any
-		if err := json.Unmarshal(f.state.Bookkeeping, &before); err != nil {
-			t.Fatal(err)
-		}
-		if err := json.Unmarshal([]byte(raw), &after); err != nil {
-			t.Fatal(err)
-		}
-		if !reflect.DeepEqual(before, after) {
-			t.Fatal("root-only field mutation or freeze repeated construction/stage entry")
-		}
-		requireForkContentionChildStatus(t, db, child, activated)
-		return
-	}
-	var accumulatorRaw string
-	if err := db.QueryRow(`SELECT accumulator FROM flow_instances WHERE run_id=$1 AND entity_id=$2`, f.runID, f.entityID).Scan(&accumulatorRaw); err != nil {
-		t.Fatal(err)
-	}
-	var buckets map[string]map[string]any
-	if err := json.Unmarshal([]byte(accumulatorRaw), &buckets); err != nil {
-		t.Fatal(err)
-	}
-	gate, found, err := gateruntime.Load(buckets, ".", "review")
-	wantGate, wantOpen := gateruntime.StatusDecisionCommitted, 1
-	if writerCommitted {
-		wantGate, wantOpen = gateruntime.StatusRouted, 0
-	} else if activated {
-		wantGate, wantOpen = gateruntime.StatusSuperseded, 0
-	}
-	if err != nil || !found || gate.CardID != f.cardID || gate.DecisionEventID != f.eventID || gate.Status != wantGate {
-		t.Fatalf("canonical gate disposition: %+v found=%t err=%v; want %s", gate, found, err, wantGate)
-	}
-	dialect := decisionstore.SummaryDialectPostgres
-	if _, sqlite := f.store.(*SQLiteRuntimeStore); sqlite {
-		dialect = decisionstore.SummaryDialectSQLite
-	}
-	summary, err := decisionstore.ReadRunSummary(f.ctx, db, dialect, f.runID)
-	if err != nil || summary.OpenGateObligations != wantOpen || summary.MalformedObligations != 0 {
-		t.Fatalf("completion authority disagrees with canonical gate: %+v err=%v; want open=%d", summary, err, wantOpen)
-	}
-	if activated && !writerCommitted && !decisionGateStatusMutationExists(t, f.ctx, db, dialect == decisionstore.SummaryDialectPostgres, f.runID, f.entityID, string(gateruntime.StatusSuperseded)) {
-		t.Fatal("terminal gate supersession omitted its canonical mutation journal")
-	}
-	if writerCommitted {
-		var raw string
-		if err := db.QueryRow(`SELECT bookkeeping FROM flow_instances WHERE run_id=$1 AND entity_id=$2`, f.runID, f.entityID).Scan(&raw); err != nil {
-			t.Fatal(err)
-		}
-		var bookkeeping map[string]any
-		if err := json.Unmarshal([]byte(raw), &bookkeeping); err != nil {
-			t.Fatal(err)
-		}
-		entry, found, err := workflowlifecycle.LoadStageEntry(bookkeeping)
-		if err != nil || !found || entry.Cause != "gate" || entry.EventID != f.eventID || entry.OccurrenceID != f.cardID || entry.TransitionID == "" || entry.Stage != "done" {
-			t.Fatalf("writer did not commit its exact admitted new StageEntry: %+v %t %v", entry, found, err)
-		}
-	}
-	requireForkContentionChildStatus(t, db, child, activated)
-}
-
-func requireForkContentionChildStatus(t *testing.T, db *sql.DB, child string, activated bool) {
-	t.Helper()
-	var status string
-	if err := db.QueryRow(`SELECT status FROM runs WHERE run_id=$1`, child).Scan(&status); err != nil {
-		t.Fatal(err)
-	}
-	want := runfork.RunForkMaterializedStatus
-	if activated {
-		want = runfork.RunForkActivatedStatus
-	}
-	if status != want {
-		t.Fatalf("child status=%s, want %s", status, want)
-	}
-}
 
 func forkContentionRowsForRun(t *testing.T, snapshot map[string][]string, run string) map[string][]string {
 	t.Helper()
@@ -397,10 +286,6 @@ func TestGenericConstructedGateForkUsesFixedSnapshotBothStores(t *testing.T) {
 	}
 }
 
-func stageForkContentionFixture(t *testing.T, f forkContentionFixture, selected bool) (runfork.RunForkMaterialization, runfork.RunForkSelectedContractExecutionActivateRequest) {
-	return stageForkContentionFixtureAt(t, f, selected, f.eventID, false)
-}
-
 func stageForkContentionFixtureAt(t *testing.T, f forkContentionFixture, selected bool, selector string, withOperation bool, pins ...durabledata.ExplicitPin) (runfork.RunForkMaterialization, runfork.RunForkSelectedContractExecutionActivateRequest) {
 	t.Helper()
 	rooted, err := f.store.(rootedRunStore).LoadRunRootedSource(f.ctx, f.runID)
@@ -475,13 +360,6 @@ func awaitForkContentionResult(t *testing.T, ctx context.Context, done <-chan fo
 	case <-ctx.Done():
 		t.Fatal("contention operation did not finish: ", ctx.Err())
 		return forkContentionResult{}
-	}
-}
-
-func requireForkContentionCancellation(t *testing.T, err error) {
-	t.Helper()
-	if err == nil || (!errors.Is(err, context.Canceled) && !strings.Contains(err.Error(), "canceling statement due to user request")) {
-		t.Fatalf("expected caller/driver cancellation, got %v", err)
 	}
 }
 

@@ -60,7 +60,7 @@ import (
 	"github.com/division-sh/swarm/internal/runtime/runcontrol"
 	"github.com/division-sh/swarm/internal/runtime/runfork"
 	"github.com/division-sh/swarm/internal/runtime/runforkadmission"
-	"github.com/division-sh/swarm/internal/runtime/runforkreadiness"
+
 	storerunlifecycle "github.com/division-sh/swarm/internal/runtime/runlifecycle"
 	"github.com/division-sh/swarm/internal/runtime/semanticview"
 	runtimestartupownership "github.com/division-sh/swarm/internal/runtime/startupownership"
@@ -375,37 +375,6 @@ func (p *selectedContractWorkspaceReleaseProbe) ReleaseSourceProjection(context.
 		return errors.New("release acknowledgment uncertain")
 	}
 	return nil
-}
-
-func selectedForkExecutableMutationSnapshotForTest(t testing.TB, ctx context.Context, db *sql.DB, forkRunID string) map[string]string {
-	t.Helper()
-	snapshot := map[string]string{}
-	var runStatus string
-	if err := db.QueryRowContext(ctx, `SELECT status FROM runs WHERE run_id = $1::uuid`, forkRunID).Scan(&runStatus); err != nil {
-		t.Fatalf("load selected fork status: %v", err)
-	}
-	snapshot["run_status"] = runStatus
-	for _, probe := range []struct {
-		name  string
-		query string
-	}{
-		{name: "events", query: `SELECT COUNT(*)::text FROM events WHERE run_id = $1::uuid`},
-		{name: "deliveries", query: `SELECT COUNT(*)::text FROM event_deliveries WHERE run_id = $1::uuid`},
-		{name: "entity_state", query: `SELECT COUNT(*)::text FROM entity_state WHERE run_id = $1::uuid`},
-		{name: "timers", query: `SELECT COUNT(*)::text FROM timers WHERE run_id = $1::uuid`},
-		{name: "readiness", query: `SELECT COUNT(*)::text FROM flow_instance_runtime_readiness WHERE run_id = $1::uuid`},
-		{name: "agents", query: `SELECT COUNT(*)::text FROM agents WHERE $1::uuid IS NOT NULL`},
-		{name: "flow_instances", query: `SELECT COUNT(*)::text FROM flow_instances WHERE $1::uuid IS NOT NULL`},
-		{name: "execution_lineage", query: `SELECT COUNT(*)::text FROM run_fork_selected_contract_executions WHERE fork_run_id = $1::uuid`},
-		{name: "runtime_executions", query: `SELECT COUNT(*)::text FROM run_fork_selected_contract_runtime_executions WHERE fork_run_id = $1::uuid`},
-	} {
-		var value string
-		if err := db.QueryRowContext(ctx, probe.query, forkRunID).Scan(&value); err != nil {
-			t.Fatalf("load selected fork %s snapshot: %v", probe.name, err)
-		}
-		snapshot[probe.name] = value
-	}
-	return snapshot
 }
 
 func selectedContractDynamicRuntimeGlobalSnapshot(t testing.TB, ctx context.Context, db *sql.DB) map[string]int {
@@ -4990,152 +4959,6 @@ func captureSelectedExecutionSourceRevision(t testing.TB, ctx context.Context, s
 	t.Helper()
 	ctx = originalSelectedFixtureContext(t, ctx, selected.(runtimestartupownership.Store))
 	return storetest.CaptureSelectedRunForkRevision(t, ctx, selected, runID, families...)
-}
-
-func materializeSelectedExecutionForkForTest(
-	t *testing.T,
-	ctx context.Context,
-	pg *store.PostgresStore,
-	loaded LoadedSelectedContractSource,
-	selection runfork.RunForkContractSelection,
-	sourceRunID string,
-	sourceEventID string,
-) runfork.RunForkMaterialization {
-	t.Helper()
-	ctx = originalSelectedFixtureContext(t, ctx, pg)
-	plan, err := pg.PlanRunFork(ctx, runfork.RunForkPlanRequest{SourceRunID: sourceRunID, At: sourceEventID})
-	if err != nil {
-		t.Fatalf("PlanRunFork: %v", err)
-	}
-	frontier, err := runforkadmission.AdmitContractFrontier(runforkadmission.ContractFrontierRequest{
-		Plan: plan, Source: loaded.Source, ContractSelection: selection,
-	})
-	if err != nil {
-		t.Fatalf("AdmitContractFrontier: %v", err)
-	}
-	routeAdmission, err := runforkadmission.AdmitSelectedContractRouteHistory(runforkadmission.SelectedContractRouteHistoryRequest{
-		Plan: plan, Source: loaded.Source, ContractSelection: selection, FrontierAdmission: frontier,
-	})
-	if err != nil {
-		t.Fatalf("AdmitSelectedContractRouteHistory: %v", err)
-	}
-	topology, err := BuildSelectedContractRouteTopology(SelectedContractRouteTopologyRequest{
-		Admission: frontier, RouteAdmission: routeAdmission,
-	})
-	if err != nil {
-		t.Fatalf("BuildSelectedContractRouteTopology: %v", err)
-	}
-	model, err := BuildSelectedContractExecutionModel(SelectedContractExecutionModelRequest{
-		Admission: frontier, RouteAdmission: routeAdmission, RouteTopology: topology,
-	})
-	if err != nil {
-		t.Fatalf("BuildSelectedContractExecutionModel: %v", err)
-	}
-	ctx = runtimecorrelation.WithSourceArtifactFact(ctx, loaded.SourceArtifactFact)
-	_, eventIDs, _, err := runfork.RunForkContractFrontierEvidenceBinding(frontier)
-	if err != nil {
-		t.Fatal(err)
-	}
-	modes, err := pg.LoadRunForkSelectedContractSourceEventModes(ctx, sourceRunID, eventIDs)
-	if err != nil || len(modes) != len(eventIDs) {
-		t.Fatalf("load complete frontier modes: %v, %v", modes, err)
-	}
-	sourceModes := make(map[string]executionmode.Mode, len(eventIDs))
-	for i, eventID := range eventIDs {
-		sourceModes[eventID] = modes[i]
-	}
-	options := SelectedContractAgentRuntimeOptions{
-		ProcessCapability: selectedContractTestProcessCapability(t, ctx, pg), ExecutionPosture: executionposture.Live,
-		Config: &config.Config{LLM: config.LLMConfig{Backend: llmselection.BackendAnthropic}},
-	}
-	modelOptions, _, err := selectedContractAgentModelOptions(options)
-	if err != nil {
-		t.Fatal(err)
-	}
-	readiness, err := runforkreadiness.Admit(runforkreadiness.AdmissionRequest{
-		Binding: runforkreadiness.Binding{Plan: plan, ContractSelection: selection,
-			SourceArtifactFact: loaded.SourceArtifactFact, FrontierAdmission: frontier,
-			EffectiveSourceIdentity: loaded.EffectiveSourceIdentity,
-			RecipientPlanning:       *model.RecipientPlanning, SourceModes: sourceModes},
-		Source: loaded.Source, ModelOptions: modelOptions,
-	})
-	if err != nil {
-		t.Fatalf("admit selected-contract readiness: %v", err)
-	}
-	projection, err := readiness.Projection()
-	if err != nil {
-		t.Fatal(err)
-	}
-	// The fixture process owns later activation too; its registered cleanup
-	// releases the capability after execution owners retire.
-	operation, err := beginSelectedContractOperation(ctx)
-	if err != nil {
-		t.Fatal(err)
-	}
-	defer func() {
-		if err := operation.Finish(); err != nil {
-			t.Error(err)
-		}
-	}()
-	agents, err := prepareSelectedContractAgentRuntimeMaterialization(ctx, loaded, *model.RecipientPlanning, projection.Blueprints, options)
-	if err != nil {
-		t.Fatal(err)
-	}
-	defer func() {
-		if err := agents.releaseWorkspaceProjection(); err != nil {
-			t.Error(err)
-		}
-	}()
-	ports, err := selectedContractExecutionOwnerForTest(t, pg).require()
-	if err != nil {
-		t.Fatal(err)
-	}
-	prepared, err := prepareSelectedFork(ctx, operation, ports, loaded, plan, frontier, *model.RecipientPlanning, agents)
-	if err != nil {
-		t.Fatal(err)
-	}
-	repo := runForkExecutionRepoRoot(t)
-	original, err := loadOriginalLoopCarriage(ctx, SourceArtifactSelectedContractSourceLoader{
-		RepoRoot: repo, Store: pg,
-	}, sourceRunID, prepared)
-	defer func() {
-		if err := prepared.Close(); err != nil {
-			t.Error(err)
-		}
-	}()
-	if err != nil {
-		t.Fatal(err)
-	}
-	materialized, err := pg.MaterializeRunForkForSelectedContractExecution(ctx, runforkreadiness.MaterializeRequest{
-		Preparation: prepared.evidence(), OriginalLoopCarriage: original,
-		SourceRunID: sourceRunID, At: sourceEventID, ContractSelection: selection, SourceArtifactFact: loaded.SourceArtifactFact,
-		RootAdmission:           loaded.RootedSource.Admission(),
-		EffectiveSourceIdentity: loaded.EffectiveSourceIdentity,
-		FrontierAdmission:       frontier, RouteTopology: topology, RecipientPlanning: *model.RecipientPlanning, Readiness: readiness,
-	})
-	if err != nil {
-		t.Fatalf("MaterializeRunForkForSelectedContractExecution: %v", err)
-	}
-	for _, state := range projection.States {
-		route := state.Route
-		entityID := state.EntityID
-		if state.AddressKind == runfork.RunForkSelectedContractWorkflowStateRunScope {
-			if state.EntityID != sourceRunID {
-				t.Fatalf("root readiness has non-root source entity %s", state.EntityID)
-			}
-			route = flowidentity.StoredRoute(".", materialized.ForkRunID, materialized.ForkRunID)
-			entityID = materialized.ForkRunID
-		}
-		owner, err := flowidentity.NewRunScopedFlowInstance(materialized.ForkRunID, route)
-		if err != nil {
-			t.Fatal(err)
-		}
-		instance, found, err := ports.workflow.LoadWorkflowInstance(ctx, owner)
-		if err != nil || !found || instance.EntityID != entityID || instance.WorkflowName != state.FlowID || instance.WorkflowVersion != state.WorkflowVersion || instance.Mode != state.Mode || instance.Status != "active" {
-			t.Fatalf("selected-contract constructed workflow owner: found=%v instance=%+v err=%v", found, instance, err)
-		}
-	}
-	return materialized
 }
 
 func selectedExecutionTestAgentRoute(t testing.TB, runID, agentID, flowInstance string) events.DeliveryRoute {

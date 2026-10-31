@@ -635,36 +635,6 @@ func loadRunForkChildDeploymentFeedKeyTx(ctx context.Context, tx *sql.Tx, runID 
 	return key, key.Validate()
 }
 
-func bindRunForkFanOutPendingReplays(
-	ctx context.Context,
-	tx *sql.Tx,
-	attempt *mutationprotocol.Attempt,
-	forkRunID string,
-	plan runfork.RunForkPlan,
-	now time.Time,
-) error {
-	if err := runfork.ValidateFanOutPendingReplayAdmission(plan); err != nil {
-		return err
-	}
-	for _, obligation := range plan.FanOutObligations {
-		if obligation.Intent.Request.Deployment != nil {
-			continue
-		}
-		for _, replay := range obligation.PendingReplays {
-			forkEventID, err := requireRunForkFanOutReplayMembershipTx(ctx, tx, plan.SourceRunID, forkRunID, replay)
-			if err != nil {
-				return err
-			}
-			key := obligation.Intent.Request.Key
-			key.RunID = forkRunID
-			if err := bindRunForkContinuedOutcomeTx(ctx, tx, attempt, key, replay, forkEventID, now); err != nil {
-				return err
-			}
-		}
-	}
-	return nil
-}
-
 func requireRunForkFanOutReplayMembershipTx(ctx context.Context, tx *sql.Tx, sourceRunID, forkRunID string, replay runfork.RunForkFanOutPendingReplay) (string, error) {
 	if tx == nil || sourceRunID == forkRunID || len(replay.SourceDeliveryIDs) == 0 {
 		return "", fmt.Errorf("fork fan-out pending ordinal %d requires exact replay membership", replay.Ordinal)
