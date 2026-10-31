@@ -106,7 +106,18 @@ func TestRunStartForegroundObserverOverflowFromReleaseBinary(t *testing.T) {
 		t.Fatal(err)
 	}
 	waitDone := make(chan error, 1)
-	go func() { waitDone <- cmd.Wait() }()
+	waitJoined := make(chan struct{})
+	go func() {
+		defer close(waitJoined)
+		waitDone <- cmd.Wait()
+	}()
+	// Failure reporting may consume waitDone; cleanup still joins the process.
+	defer func() {
+		cancel()
+		_ = stdoutWriter.Close()
+		_ = stdoutReader.Close()
+		<-waitJoined
+	}()
 	if err := waitForReleasePath(ctx, emitGate+".ready", waitDone); err != nil {
 		calls, _ := os.ReadFile(filepath.Join(fakeRoot, "calls.jsonl"))
 		t.Fatalf("wait for managed Claude emit gate: %v\nstderr:\n%s\ndocker calls:\n%s", err, stderr.String(), calls)
