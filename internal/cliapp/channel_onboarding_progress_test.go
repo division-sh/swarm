@@ -129,7 +129,7 @@ func TestChannelCLIProgressFixturesRetainExactDeclarations(t *testing.T) {
 				t.Fatal(err)
 			}
 			var out, errOut bytes.Buffer
-			if err := renderChannelOnboardingResult(&out, &errOut, cliOutputOptions{}, result); err != nil || out.String() != "Registered "+provider+" account "+account+".\nTo use it, set operator_account in a flow's policy.yaml and restart serve.\nNext: swarm channel list\n" {
+			if err := renderChannelOnboardingResult(&out, &errOut, cliOutputOptions{}, result); err != nil || out.String() != "Registered "+provider+" account "+account+".\nTo use it, set operator_account in a flow's policy.yaml.\nTelegram registration and channel list work while serve runs; a Telegram bot connected or newly held while serve runs receives after a serve restart.\nFor WhatsApp first pairing, connect with serve stopped, then start serve; a registered WhatsApp number receives live while serve runs.\nNext: swarm channel list\n" {
 				t.Fatal("registration invented runtime readiness", out.String(), errOut.String(), err)
 			}
 			result.Operation.AccountConfirmed = false

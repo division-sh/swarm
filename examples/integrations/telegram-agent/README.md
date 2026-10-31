@@ -30,7 +30,7 @@ selects its own account explicitly; customer identities do not choose it.
 
 No source edit, mock-block removal or separate graduation configuration is required. `serve` and `serve --dev` select live execution even when the source contains doubles. Configure the selected live provider's actual prerequisites before serving.
 
-Connect with serve stopped. Registration stores the bot credentials and its
+Connect works while serve runs. Registration stores the bot credentials and its
 private webhook signing key through the channel owner. Serve admits that exact
 registration only for its sole current flow holder; it does not select the first
 linked bot or trust an account supplied in a webhook payload. No manual signing
@@ -49,8 +49,9 @@ account. Before serving, put that account in `policy.yaml` as described above.
 Operator verification is separate and only applies when the deployment declares
 an HITL operator; customers are never asked to authorize the connection.
 
-Restart serve when a new holder appears. Connecting or assigning an account
-while serve is running does not refresh that process's credential admission.
+A Telegram bot connected or newly held while serve runs receives after a
+serve restart in v0.7. Connecting or assigning an account while serve is
+running does not refresh that process's credential admission.
 Reading status, replacing a secret or rotating a provider registration cannot
 promote changed credentials. The exact operation, receipts and sealed values
 must remain current.
