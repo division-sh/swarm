@@ -525,8 +525,7 @@ func closedReceiverEvidenceReady(t testing.TB, ctx context.Context, db *sql.DB, 
 func closedReceiverAuthorityFixtureFiles() map[string]string {
 	return map[string]string{
 
-		"schema.yaml": `name: closed-receiver-authority
-stages:
+		"schema.yaml": `stages:
   pending: {}
   done: {final: true}
 pins:

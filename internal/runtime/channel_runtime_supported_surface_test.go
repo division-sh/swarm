@@ -63,8 +63,7 @@ func configuredChannelAgentBundle(t *testing.T) *runtimecontracts.WorkflowContra
 	t.Helper()
 	return loadRuntimeTempBundle(t, map[string]string{
 		"schema.yaml": "stages: []\n",
-		"global/schema.yaml": `name: global
-stages:
+		"global/schema.yaml": `stages:
   active: {}
 `,
 

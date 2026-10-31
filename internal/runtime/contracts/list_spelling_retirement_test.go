@@ -324,7 +324,7 @@ func TestListSpellingRetirementCombinedNestedBundle(t *testing.T) {
 		} {
 			t.Run("recursive/"+surface+"/"+tc.name, func(t *testing.T) {
 				root := t.TempDir()
-				writeFixtureFile(t, root+"/schema.yaml", "name: nested-proof\nstages: {done: {final: true}}\n")
+				writeFixtureFile(t, root+"/schema.yaml", "stages: {done: {final: true}}\n")
 				file, body := "state.yaml", "items: "+tc.source+"\n"
 				switch surface {
 				case "indexed_state":
