@@ -60,22 +60,55 @@ func (am *AgentManager) reconcileDynamicFlowRuntimeReadinessOnce(
 	defer am.dynamicFlowAttachmentMu.RUnlock()
 	ctx := admission.ctx
 	var acknowledgedCleanupErr error
-	var cleanupCancels []context.CancelFunc
+	var active *dynamicFlowActiveAttempt
+	var retirement *preparedFlowTopologyRetirement
+	activationAccepted, shutdownCancellation := false, false
+	checkForward := func() error {
+		err := ctx.Err()
+		if err != nil {
+			shutdownCancellation = am.cleanReadinessShutdownReadCancellation(ctx, err)
+		}
+		return err
+	}
 	defer func() {
-		for _, cancel := range cleanupCancels {
-			cancel()
+		if shutdownCancellation && active == nil && retirement != nil {
+			am.dynamicFlowReadinessMu.Lock()
+			active = am.dynamicFlowActiveAttempts[admission.key]
+			am.dynamicFlowReadinessMu.Unlock()
+		}
+		var cleanupErr error
+		if active != nil {
+			am.dynamicFlowReadinessMu.Lock()
+			complete := active.complete
+			am.dynamicFlowReadinessMu.Unlock()
+			if shutdownCancellation || (!activationAccepted && !complete) {
+				cleanupCtx, cancel := context.WithTimeout(context.WithoutCancel(ctx), dynamicFlowRuntimeReadinessCleanupTimeout)
+				cleanupErr = am.settleDynamicFlowActiveAttempt(cleanupCtx, admission.key, active, retirement, flowActivationFailedRetirement)
+				cancel()
+			}
+		}
+		if retirement != nil {
+			cleanupErr = errors.Join(cleanupErr, retirement.abort())
+		}
+		retErr = errors.Join(retErr, acknowledgedCleanupErr, cleanupErr)
+		// Cancellation alone never proves completion: the exact admitted attempt
+		// must have joined retirement, or forward admission must not have begun.
+		if shutdownCancellation && acknowledgedCleanupErr == nil && cleanupErr == nil && am.ownsReadinessShutdownCancellation(ctx) {
+			retErr = &readinessShutdownCancellation{cause: retErr, key: admission.key, ordinal: admission.attemptOrdinal, planHash: admission.planHash}
 		}
 	}()
-	defer func() { retErr = errors.Join(retErr, acknowledgedCleanupErr) }()
 	if err := am.requireRunExecutionOwnership(ctx, admission.key.runID); err != nil {
 		return err
 	}
 	lease, err := am.beginWork(ctx, "readiness topology retirement")
 	if err != nil {
+		shutdownCancellation = am.cleanReadinessShutdownAdmissionRefusal(ctx, err)
 		return err
 	}
-	retirement := &preparedFlowTopologyRetirement{manager: am, lease: lease}
-	defer func() { retErr = errors.Join(retErr, retirement.abort()) }()
+	retirement = &preparedFlowTopologyRetirement{manager: am, lease: lease}
+	if err := checkForward(); err != nil {
+		return err
+	}
 	key := admission.key
 	source := admission.source.source
 	if source == nil {
@@ -90,6 +123,7 @@ func (am *AgentManager) reconcileDynamicFlowRuntimeReadinessOnce(
 	}
 	readiness, found, err := am.workflowInstances.LoadDynamicFlowRuntimeReadiness(ctx, key.runID, flowIdentity.Route)
 	if err != nil {
+		shutdownCancellation = am.cleanReadinessShutdownReadCancellation(ctx, err)
 		return err
 	}
 	if !found {
@@ -129,10 +163,14 @@ func (am *AgentManager) reconcileDynamicFlowRuntimeReadinessOnce(
 	ctx = runtimecorrelation.WithRunID(ctx, plan.RunID)
 	projection, err := am.workflowInstances.LoadRouteRecoveryProjection(ctx, flowIdentity)
 	if err != nil {
+		shutdownCancellation = am.cleanReadinessShutdownReadCancellation(ctx, err)
 		return err
 	}
 	if projection.Identity.Route() != plan.Identity.Route() || projection.Identity.TemplateID != plan.Identity.TemplateID || projection.Identity.EntityID != plan.Identity.EntityID {
 		return errors.Join(fmt.Errorf("dynamic flow runtime readiness %s persisted identity changed", readiness.InstancePath), am.retireCurrentDynamicFlowActiveAttempt(ctx, key, retirement, flowActivationProcessRetirement))
+	}
+	if err := checkForward(); err != nil {
+		return err
 	}
 	scope, ok := semanticview.FlowScopeByID(source, plan.Identity.TemplateID)
 	if !ok {
@@ -181,40 +219,36 @@ func (am *AgentManager) reconcileDynamicFlowRuntimeReadinessOnce(
 		}
 		return nil
 	}
-	active, created, beginErr := am.beginDynamicFlowActiveAttempt(ctx, key, plan, admission.attemptOrdinal, readiness.AttemptState)
-	if active == nil {
-		return beginErr
+	if err := checkForward(); err != nil {
+		return err
 	}
-	if err := ctx.Err(); err != nil {
-		cleanupCtx, cancel := context.WithTimeout(context.WithoutCancel(ctx), dynamicFlowRuntimeReadinessCleanupTimeout)
-		defer cancel()
-		cleanupErr := am.settleDynamicFlowActiveAttempt(cleanupCtx, key, active, retirement, flowActivationFailedRetirement)
-		readErr := errors.Join(beginErr, err)
-		if !created && cleanupErr == nil && am.cleanReadinessShutdownReadCancellation(ctx, readErr) {
-			return &readinessShutdownCancellation{cause: readErr, key: key, ordinal: admission.attemptOrdinal, planHash: admission.planHash}
-		}
-		return errors.Join(readErr, cleanupErr)
+	var created bool
+	var beginErr error
+	active, created, beginErr = am.beginDynamicFlowActiveAttempt(ctx, key, plan, admission.attemptOrdinal, readiness.AttemptState)
+	if active == nil {
+		shutdownCancellation = am.cleanReadinessShutdownAdmissionRefusal(ctx, beginErr)
+		return beginErr
 	}
 	phase := readiness.Phase
 	if created {
 		phase = runtimepipeline.FlowAttachmentPlanned
 	}
 	if beginErr != nil {
+		if !created && am.cleanReadinessShutdownReadCancellation(ctx, beginErr) {
+			shutdownCancellation = true
+			return beginErr
+		}
 		acknowledgedCleanupErr = errors.Join(acknowledgedCleanupErr, fmt.Errorf("admit dynamic flow activation %s: %w", readiness.InstancePath, beginErr))
-		followupCtx, cancel := context.WithTimeout(context.WithoutCancel(ctx), dynamicFlowRuntimeReadinessCleanupTimeout)
-		defer cancel()
-		ctx = followupCtx
 	}
-	activationAccepted := false
 	advance := func(previous runtimepipeline.FlowAttachmentPhase) (bool, error) {
+		if err := checkForward(); err != nil {
+			return false, err
+		}
 		result, err := am.workflowInstances.AdvanceFlowAttachment(ctx, active.receipt, previous, time.Now().UTC())
 		if !result.Acknowledged {
 			if am.cleanReadinessShutdownCancellation(ctx, result, err) {
-				if cleanupErr := am.settleDynamicFlowActiveAttempt(context.WithoutCancel(ctx), key, active, retirement, flowActivationFailedRetirement); cleanupErr != nil {
-					return false, errors.Join(err, cleanupErr)
-				}
-				activationAccepted = true
-				return false, &readinessShutdownCancellation{cause: err, key: key, ordinal: admission.attemptOrdinal, planHash: admission.planHash}
+				shutdownCancellation = true
+				return false, err
 			}
 			return false, errors.Join(err, errors.New("attachment progress was not acknowledged"))
 		}
@@ -233,13 +267,13 @@ func (am *AgentManager) reconcileDynamicFlowRuntimeReadinessOnce(
 		phase = result.Phase
 		if err != nil {
 			acknowledgedCleanupErr = errors.Join(acknowledgedCleanupErr, err)
-			followupCtx, cancel := context.WithTimeout(context.WithoutCancel(ctx), dynamicFlowRuntimeReadinessCleanupTimeout)
-			cleanupCancels = append(cleanupCancels, cancel)
-			ctx = followupCtx
 		}
 		return true, nil
 	}
 	advancePending := func(previous runtimepipeline.FlowAttachmentPhase) (bool, error) {
+		if err := checkForward(); err != nil {
+			return false, err
+		}
 		next, err := previous.Next()
 		if err != nil {
 			return false, err
@@ -249,15 +283,9 @@ func (am *AgentManager) reconcileDynamicFlowRuntimeReadinessOnce(
 		}
 		return advance(previous)
 	}
-	defer func() {
-		am.dynamicFlowReadinessMu.Lock()
-		complete := active.complete
-		am.dynamicFlowReadinessMu.Unlock()
-		if activationAccepted || complete {
-			return
-		}
-		retErr = errors.Join(retErr, am.settleDynamicFlowActiveAttempt(context.WithoutCancel(ctx), key, active, retirement, flowActivationFailedRetirement))
-	}()
+	if err := checkForward(); err != nil {
+		return err
+	}
 	topologyAuthority, err := DynamicFlowAgentTopologyAdmission(plan)
 	if err != nil {
 		return fmt.Errorf("authorize dynamic flow agent topology for %s: %w", readiness.InstancePath, err)
@@ -269,22 +297,21 @@ func (am *AgentManager) reconcileDynamicFlowRuntimeReadinessOnce(
 	if !admission.processPrepared && (admission.admittedPreRun || !phase.Includes(runtimepipeline.FlowAttachmentAgentsRegistered)) {
 		persistedAgents, err := am.loadDynamicFlowPersistedAgents(ctx, flowIdentity)
 		if err != nil {
+			shutdownCancellation = am.cleanReadinessShutdownReadCancellation(ctx, err)
 			return fmt.Errorf("load dynamic flow agents for %s: %w", readiness.InstancePath, err)
+		}
+		if err := checkForward(); err != nil {
+			return err
 		}
 		if err := am.reconcileDynamicFlowAgentSet(ctx, source, flowIdentity, records, persistedAgents, topologyAuthority, true, selectedRootReadiness); err != nil {
 			return fmt.Errorf("reconcile dynamic flow agent set for %s: %w", readiness.InstancePath, err)
 		}
 	}
+	if err := checkForward(); err != nil {
+		return err
+	}
 	if err := am.verifyDynamicFlowAgents(ctx, flowIdentity, records, topologyAuthority, selectedRootReadiness); err != nil {
-		if am.cleanReadinessShutdownReadCancellation(ctx, err) {
-			cleanupCtx, cancel := context.WithTimeout(context.WithoutCancel(ctx), dynamicFlowRuntimeReadinessCleanupTimeout)
-			defer cancel()
-			if cleanupErr := am.settleDynamicFlowActiveAttempt(cleanupCtx, key, active, retirement, flowActivationFailedRetirement); cleanupErr != nil {
-				return errors.Join(err, cleanupErr)
-			}
-			activationAccepted = true
-			return &readinessShutdownCancellation{cause: err, key: key, ordinal: admission.attemptOrdinal, planHash: admission.planHash}
-		}
+		shutdownCancellation = am.cleanReadinessShutdownReadCancellation(ctx, err)
 		return fmt.Errorf("verify dynamic flow agents for %s: %w", readiness.InstancePath, err)
 	}
 	if eligible, err := advancePending(runtimepipeline.FlowAttachmentPlanned); err != nil {
@@ -304,16 +331,11 @@ func (am *AgentManager) reconcileDynamicFlowRuntimeReadinessOnce(
 		return nil
 	}
 	// route_installed records attachment progress, not mutable route membership.
+	if err := checkForward(); err != nil {
+		return err
+	}
 	if err := am.workflowInstances.VerifyDynamicFlowRuntimeActivationAttempt(ctx, active.receipt); err != nil {
-		if am.cleanReadinessShutdownReadCancellation(ctx, err) {
-			cleanupCtx, cancel := context.WithTimeout(context.WithoutCancel(ctx), dynamicFlowRuntimeReadinessCleanupTimeout)
-			defer cancel()
-			if cleanupErr := am.settleDynamicFlowActiveAttempt(cleanupCtx, key, active, retirement, flowActivationFailedRetirement); cleanupErr != nil {
-				return errors.Join(err, cleanupErr)
-			}
-			activationAccepted = true
-			return &readinessShutdownCancellation{cause: err, key: key, ordinal: admission.attemptOrdinal, planHash: admission.planHash}
-		}
+		shutdownCancellation = am.cleanReadinessShutdownReadCancellation(ctx, err)
 		return err
 	}
 	if eligible, err := advancePending(runtimepipeline.FlowAttachmentAgentsRegistered); err != nil {
@@ -326,10 +348,14 @@ func (am *AgentManager) reconcileDynamicFlowRuntimeReadinessOnce(
 		return nil
 	}
 	if !phase.Includes(runtimepipeline.FlowAttachmentTimersArmed) {
+		if err := checkForward(); err != nil {
+			return err
+		}
 		am.dynamicFlowReadinessMu.Lock()
 		active.timersProjected = true
 		am.dynamicFlowReadinessMu.Unlock()
 		if err := am.workflowInstances.ReconcileInitialEntryTimersForAttempt(ctx, flowIdentity, active.receipt, plan); err != nil {
+			shutdownCancellation = am.cleanReadinessShutdownReadCancellation(ctx, err) || am.cleanReadinessShutdownAdmissionRefusal(ctx, err)
 			return fmt.Errorf("reconcile initial workflow timers for %s: %w", readiness.InstancePath, err)
 		}
 	}
@@ -349,6 +375,9 @@ func (am *AgentManager) reconcileDynamicFlowRuntimeReadinessOnce(
 		active.complete = true
 		am.dynamicFlowReadinessMu.Unlock()
 		return nil
+	}
+	if err := checkForward(); err != nil {
+		return err
 	}
 	evt, err := dynamicFlowRuntimeCreationEvent(source, plan)
 	if err != nil {
@@ -378,6 +407,8 @@ func (am *AgentManager) reconcileDynamicFlowRuntimeReadinessOnce(
 		},
 	); err != nil {
 		if eligible, progressErr := advance(runtimepipeline.FlowAttachmentTimersArmed); progressErr != nil {
+			// Progress cancellation cannot attest the publication's COMMIT outcome.
+			shutdownCancellation = false
 			return errors.Join(err, progressErr)
 		} else if !eligible {
 			return nil

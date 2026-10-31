@@ -28,6 +28,9 @@ type attachmentTimerAcquisitionWorkflow struct {
 	fault            error
 	ready            chan pipeline.DynamicFlowRuntimeActivationAttempt
 	readyOwner       atomic.Pointer[flowidentity.RunScopedFlowInstance]
+	shutdownCut      chan context.Context
+	shutdownRelease  chan struct{}
+	shutdownContext  context.Context
 }
 
 type attachmentTimerAcquisitionOccurrence struct {
@@ -39,7 +42,7 @@ type attachmentTimerAcquisitionOccurrence struct {
 func (o *attachmentTimerAcquisitionOccurrence) Begin(ctx context.Context) (*worklifetime.Lease, error) {
 	o.calls++
 	if o.calls == 2 && o.workflow.cut == "before_second" {
-		if err := o.workflow.inject(); err != nil {
+		if err := o.workflow.inject(ctx); err != nil {
 			return nil, err
 		}
 	}
@@ -50,7 +53,7 @@ func (o *attachmentTimerAcquisitionOccurrence) Begin(ctx context.Context) (*work
 	return lease, err
 }
 
-func (w *attachmentTimerAcquisitionWorkflow) inject() error {
+func (w *attachmentTimerAcquisitionWorkflow) inject(ctx context.Context) error {
 	if !w.enabled.CompareAndSwap(true, false) {
 		return nil
 	}
@@ -59,6 +62,10 @@ func (w *attachmentTimerAcquisitionWorkflow) inject() error {
 		panic(w.fault)
 	case "caller_cancel":
 		w.cancel()
+		return nil
+	case "shutdown":
+		w.shutdownCut <- w.shutdownContext
+		<-w.shutdownRelease
 		return nil
 	default:
 		return w.fault
@@ -74,9 +81,12 @@ func (w *attachmentTimerAcquisitionWorkflow) ReconcileInitialEntryTimersForAttem
 		return errors.New("timer acquisition proof requires the admitted execution occurrence")
 	}
 	probe := &attachmentTimerAcquisitionOccurrence{Occurrence: owner, workflow: w}
+	if w.disposition == "shutdown" {
+		w.shutdownContext = ctx
+	}
 	err := w.PipelineCoordinator.ReconcileInitialEntryTimersForAttempt(worklifetime.WithOccurrence(ctx, probe), identity, attempt, plan)
 	if err == nil && w.cut == "after_projection" {
-		return w.inject()
+		return w.inject(ctx)
 	}
 	return err
 }
@@ -119,7 +129,7 @@ func TestFlowAttachmentTimerAcquisitionCutsBothStores(t *testing.T) {
 	for _, backend := range []string{"sqlite", "postgres"} {
 		t.Run(backend, func(t *testing.T) {
 			for _, cut := range []string{"before_second", "after_projection"} {
-				for _, disposition := range []string{"error", "panic", "caller_cancel"} {
+				for _, disposition := range []string{"error", "panic", "caller_cancel", "shutdown"} {
 					t.Run(cut+"/"+disposition, func(t *testing.T) {
 						runFlowAttachmentTimerAcquisition(t, backend, cut, disposition)
 					})
@@ -134,6 +144,13 @@ func runFlowAttachmentTimerAcquisition(t *testing.T, backend, cut, disposition s
 	scheduler := pipeline.NewSchedulerWithWorkOwner(storeTestWorkOwner(t))
 	t.Cleanup(scheduler.Stop)
 	workflow := &attachmentTimerAcquisitionWorkflow{retryRelease: make(chan struct{}), cut: cut, disposition: disposition, fault: errors.New("injected partial timer acquisition failure"), ready: make(chan pipeline.DynamicFlowRuntimeActivationAttempt, 2)}
+	releaseShutdown := func() {}
+	if disposition == "shutdown" {
+		workflow.shutdownCut = make(chan context.Context, 1)
+		workflow.shutdownRelease = make(chan struct{})
+		releaseShutdown = sync.OnceFunc(func() { close(workflow.shutdownRelease) })
+		defer releaseShutdown()
+	}
 	workflow.enabled.Store(true)
 	f := newReceiverConfigActivationFixtureWithOwnership(t, backend, false, map[string]string{
 		"schema.yaml":          "stages: []\n",
@@ -197,12 +214,49 @@ func runFlowAttachmentTimerAcquisition(t *testing.T, backend, cut, disposition s
 	caller, cancelCaller := context.WithCancel(f.ctx)
 	defer cancelCaller()
 	workflow.cancel = cancelCaller
-	err = f.manager.FinalizeCommittedFlowInstanceActivation(caller, committed)
+	if disposition == "shutdown" {
+		finalized := make(chan error, 1)
+		go func() { finalized <- f.manager.FinalizeCommittedFlowInstanceActivation(caller, committed) }()
+		var admittedCtx context.Context
+		select {
+		case admittedCtx = <-workflow.shutdownCut:
+		case <-time.After(5 * time.Second):
+			t.Fatal("timer acquisition did not reach the shutdown cut")
+		}
+		shutdown := make(chan error, 1)
+		go func() { shutdown <- f.manager.ShutdownWithOptions(manager.ShutdownOptions{Grace: 5 * time.Second}) }()
+		select {
+		case <-admittedCtx.Done():
+		case <-time.After(5 * time.Second):
+			t.Fatal("shutdown did not cancel its accepted readiness owner")
+		}
+		releaseShutdown()
+		select {
+		case err = <-finalized:
+			t.Logf("readiness caller after shutdown cut: %v", err)
+		case <-time.After(5 * time.Second):
+			t.Fatal("shutdown did not join the readiness caller")
+		}
+		select {
+		case err = <-shutdown:
+			if err != nil {
+				t.Fatalf("owned timer admission refusal became terminal: %v", err)
+			}
+		case <-time.After(5 * time.Second):
+			t.Fatal("shutdown did not join exact timer and native attempt settlement")
+		}
+	} else {
+		err = f.manager.FinalizeCommittedFlowInstanceActivation(caller, committed)
+	}
 	want := workflow.fault.Error()
 	if cut == "stopped" {
 		want = "scheduler stopped"
 	}
-	if disposition == "caller_cancel" {
+	if disposition == "shutdown" {
+		if err != nil {
+			t.Fatal(err)
+		}
+	} else if disposition == "caller_cancel" {
 		if err != nil && !errors.Is(err, context.Canceled) {
 			t.Fatalf("caller cancellation changed accepted timer work: %v", err)
 		}
@@ -232,7 +286,7 @@ func runFlowAttachmentTimerAcquisition(t *testing.T, backend, cut, disposition s
 		if workflow.acquired.Load() != wantAcquired {
 			t.Fatalf("physical acquisition cut was not reached: acquired=%d want=%d", workflow.acquired.Load(), wantAcquired)
 		}
-		if cut != "stopped" {
+		if cut != "stopped" && disposition != "shutdown" {
 			if disposition == "automatic_retry" {
 				releaseRetry()
 			} else if created, err := f.manager.EnsureFlowInstance(f.ctx, req); created || err != nil {
@@ -240,7 +294,7 @@ func runFlowAttachmentTimerAcquisition(t *testing.T, backend, cut, disposition s
 			}
 		}
 	}
-	if cut != "stopped" {
+	if cut != "stopped" && disposition != "shutdown" {
 		readyWait := 5 * time.Second
 		if disposition == "automatic_retry" {
 			// Unlike synchronous Ensure, this proof includes the default 5s retry tick.
