@@ -172,6 +172,9 @@ func authorizeCurrentFlowActivationAttemptTx(ctx context.Context, tx *sql.Tx, po
 	}
 	var id, grantID, state sql.NullString
 	if err := tx.QueryRowContext(ctx, query, attempt.RunID(), attempt.InstancePath()).Scan(&id, &grantID, &state); err != nil {
+		if err == context.Canceled {
+			return "", err
+		}
 		return "", fmt.Errorf("load current flow activation attempt: %w", err)
 	}
 	if !id.Valid || id.String != attempt.ID() || !grantID.Valid ||
