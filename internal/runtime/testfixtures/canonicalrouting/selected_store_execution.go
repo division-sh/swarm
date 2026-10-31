@@ -49,9 +49,7 @@ connect:
 	writeClosedVariantFile(t, root, "selected-state-flow/schema.yaml", "stages: []\n# fixture: selected-state-flow\n")
 	for _, owner := range []string{"flow-a/1", "selected-state-flow/at-t"} {
 		writeClosedVariantFile(t, root, owner+"/manifest.yaml", "version: 1.0.0\nplatform_version: '*'\n")
-		writeClosedVariantFile(t, root, owner.path+"/manifest.yaml", "version: 1.0.0\nplatform_version: '*'\n")
-		writeClosedVariantFile(t, root, owner.path+"/manifest.yaml", "version: 1.0.0\nplatform_version: '*'\n")
-		writeClosedVariantFile(t, root, owner.path+"/schema.yaml", `# fixture: selected-store-state
+		writeClosedVariantFile(t, root, owner+"/schema.yaml", `# fixture: selected-store-state
 stages:
   pending: {}
   done: {final: true}
