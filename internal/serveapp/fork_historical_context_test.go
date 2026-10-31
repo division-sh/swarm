@@ -34,6 +34,7 @@ func TestRunForkHistoricalIdentityPublicExecutionBothStores(t *testing.T) {
 			publication := newExactOriginPublicationProbe(t)
 			root := canonicalrouting.CopyForkReceiverBusinessMutationOwnership(t, false)
 			rt := startServedLiveFlowProofRuntimeFromSource(t, backend, root)
+			seedServedPublicationLiveRun(t, rt)
 			applicationSnapshot := func() map[string][]string { return snapshotForkReceiverApplication(t, rt) }
 			seed := requireServedEventPublishRPCResult(t, rt.Endpoint, map[string]any{
 				"event_name": "start.seeded", "bundle_hash": rt.BundleHash,
@@ -58,6 +59,7 @@ func TestRunForkHistoricalIdentityPublicExecutionBothStores(t *testing.T) {
 			sourceRoute := requireForkReceiverBusinessMutation(t, rt, seed.RunID, frontier, sourceRows["consumer"].ID)
 			var paused map[string]any
 			requireServedJSONRPCResult(t, rt.Endpoint, "run.pause", map[string]any{"run_id": seed.RunID}, &paused)
+			seedServedPublicationLiveRun(t, rt)
 			sibling := requireServedEventPublishRPCResult(t, rt.Endpoint, map[string]any{
 				"event_name": "start.seeded", "bundle_hash": rt.BundleHash,
 				"payload": map[string]any{"token": "receiver-proof"}, "idempotency_key": "historical-context-sibling",

@@ -13,33 +13,9 @@ import (
 )
 
 func selectEventPublicationLiveRun(ctx context.Context, opts EventPublicationOptions, params eventPublicationParams, requestedHash string) (eventPublicationParams, error) {
-	sources := []semanticview.Source{opts.Source}
-	if opts.RuntimeContexts == nil && requestedHash != "" {
-		_, fact, present, err := eventPublicationRuntimeSourceContext(ctx, opts.SourceArtifact)
-		if err != nil {
-			return params, err
-		}
-		if !present || fact.BundleHash() != requestedHash {
-			return params, NewApplicationError(BundleUnavailableCode, false, map[string]any{
-				"bundle_hash": requestedHash, "cause": "single_active_runtime_unavailable",
-			})
-		}
-	}
-	if opts.RuntimeContexts != nil {
-		if requestedHash != "" {
-			lookup := opts.RuntimeContexts.LookupBundleHashStatus(requestedHash)
-			if !lookup.Loaded() {
-				return params, NewApplicationError(BundleUnavailableCode, false, map[string]any{
-					"bundle_hash": requestedHash, "cause": runtimeContextLookupCause(lookup),
-				})
-			}
-		}
-		sources = nil
-		for _, loaded := range opts.RuntimeContexts.LoadedContexts() {
-			if requestedHash == "" || loaded.SourceArtifactFact.BundleHash() == requestedHash {
-				sources = append(sources, loaded.Source)
-			}
-		}
+	sources, err := eventPublicationLiveSources(ctx, opts, requestedHash)
+	if err != nil {
+		return params, err
 	}
 	scope, err := eventPublicationFlowScope(sources, params.EventName)
 	if err != nil {
@@ -56,19 +32,55 @@ func selectEventPublicationLiveRun(ctx context.Context, opts EventPublicationOpt
 		params.RunID, params.LiveRun = live.RunID, &live
 		return params, nil
 	}
-	details := map[string]any{"event_name": params.EventName, "flow_path": scope.FlowPath, "reason": "no_run_yet"}
-	for cursor := ""; ; {
-		headers, next, err := opts.Runs.ListRunHeaders(ctx, operatorread.RunHeaderListOptions{Limit: 100, Cursor: cursor})
+	return params, eventPublicationNoLiveRun(ctx, opts.Runs, scope, params.EventName)
+}
+
+func eventPublicationLiveSources(ctx context.Context, opts EventPublicationOptions, requestedHash string) ([]semanticview.Source, error) {
+	sources := []semanticview.Source{opts.Source}
+	if opts.RuntimeContexts == nil && requestedHash != "" {
+		_, fact, present, err := eventPublicationRuntimeSourceContext(ctx, opts.SourceArtifact)
 		if err != nil {
-			return params, err
+			return nil, err
+		}
+		if !present || fact.BundleHash() != requestedHash {
+			return nil, NewApplicationError(BundleUnavailableCode, false, map[string]any{
+				"bundle_hash": requestedHash, "cause": "single_active_runtime_unavailable",
+			})
+		}
+	}
+	if opts.RuntimeContexts != nil {
+		if requestedHash != "" {
+			lookup := opts.RuntimeContexts.LookupBundleHashStatus(requestedHash)
+			if !lookup.Loaded() {
+				return nil, NewApplicationError(BundleUnavailableCode, false, map[string]any{
+					"bundle_hash": requestedHash, "cause": runtimeContextLookupCause(lookup),
+				})
+			}
+		}
+		sources = nil
+		for _, loaded := range opts.RuntimeContexts.LoadedContexts() {
+			if requestedHash == "" || loaded.SourceArtifactFact.BundleHash() == requestedHash {
+				sources = append(sources, loaded.Source)
+			}
+		}
+	}
+	return sources, nil
+}
+
+func eventPublicationNoLiveRun(ctx context.Context, runs RunReadStore, scope runlifecycle.LiveRunScope, eventName string) error {
+	details := map[string]any{"event_name": eventName, "flow_path": scope.FlowPath, "reason": "no_run_yet"}
+	for cursor := ""; ; {
+		headers, next, err := runs.ListRunHeaders(ctx, operatorread.RunHeaderListOptions{Limit: 100, Cursor: cursor})
+		if err != nil {
+			return err
 		}
 		for _, header := range headers {
 			if header.FlowPath != scope.FlowPath {
 				continue
 			}
 			if header.Status == "live" {
-				return params, NewApplicationError(EventPublishRejectedCode, false, map[string]any{
-					"event_name": params.EventName, "reason": "live_run_changed", "remediation": "select the live run again",
+				return NewApplicationError(EventPublishRejectedCode, false, map[string]any{
+					"event_name": eventName, "reason": "live_run_changed", "remediation": "select the live run again",
 				})
 			}
 			if header.Status == "paused" {
@@ -83,7 +95,7 @@ func selectEventPublicationLiveRun(ctx context.Context, opts EventPublicationOpt
 		}
 		cursor = next
 	}
-	return params, NewApplicationError(EventPublishRejectedCode, false, details)
+	return NewApplicationError(EventPublishRejectedCode, false, details)
 }
 
 func eventPublicationFlowScope(sources []semanticview.Source, eventName string) (runlifecycle.LiveRunScope, error) {
