@@ -1355,6 +1355,24 @@ func writeDiagnosticRunHeader(out io.Writer, run diagnosticRunHeader) {
 	})
 }
 
+func diagnosticRunInstanceRows(result DiagnosticRunDiagnosisResult) []cliLabeledDetailRow {
+	var rows []cliLabeledDetailRow
+	if result.ObservedAt != nil {
+		rows = append(rows, cliLabeledDetailRow{Label: "observed", Value: result.ObservedAt.UTC().Format(time.RFC3339Nano)})
+	}
+	for _, instance := range result.Instances {
+		value := fmt.Sprintf("%s: %s (%s)", instance.FlowInstance, instance.Stage, formatCLIHumanCode(cliHumanCodeOperationalState, instance.Disposition))
+		if instance.NextWakeAt != nil {
+			value += "; next wake " + instance.NextWakeAt.UTC().Format(time.RFC3339Nano)
+		}
+		if instance.RefusedEmits > 0 {
+			value += "; " + formatCLIHumanCount(instance.RefusedEmits, "refused emit", "refused emits")
+		}
+		rows = append(rows, cliLabeledDetailRow{Label: "instance", Value: value})
+	}
+	return rows
+}
+
 func writeDiagnosticRunDiagnosis(out io.Writer, result DiagnosticRunDiagnosisResult) {
 	if out == nil {
 		return
@@ -1392,19 +1410,7 @@ func writeDiagnosticRunDiagnosis(out io.Writer, result DiagnosticRunDiagnosisRes
 		}
 		rows = append(rows, cliLabeledDetailRow{Label: label, Value: value})
 	}
-	if result.ObservedAt != nil {
-		rows = append(rows, cliLabeledDetailRow{Label: "observed", Value: result.ObservedAt.UTC().Format(time.RFC3339Nano)})
-	}
-	for _, instance := range result.Instances {
-		value := fmt.Sprintf("%s: %s (%s)", instance.FlowInstance, instance.Stage, formatCLIHumanCode(cliHumanCodeOperationalState, instance.Disposition))
-		if instance.NextWakeAt != nil {
-			value += "; next wake " + instance.NextWakeAt.UTC().Format(time.RFC3339Nano)
-		}
-		if instance.RefusedEmits > 0 {
-			value += "; " + formatCLIHumanCount(instance.RefusedEmits, "refused emit", "refused emits")
-		}
-		rows = append(rows, cliLabeledDetailRow{Label: "instance", Value: value})
-	}
+	rows = append(rows, diagnosticRunInstanceRows(result)...)
 	rows = append(rows, diagnosticRunHeaderRows(result.Run)...)
 	if projectedRunStatus := diagnosticRunStatusLabel(result.Run); projectedRunStatus != formatCLIHumanCode(cliHumanCodeOperationalState, state) {
 		rows = append(rows, cliLabeledDetailRow{Label: "run status", Value: projectedRunStatus})

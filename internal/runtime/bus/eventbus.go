@@ -226,6 +226,7 @@ type PublishRecipientPlan struct {
 	SubscriptionRecipients []string
 	DeliveryRoutes         []events.DeliveryRoute
 	TargetFailure          string
+	targetFailureCause     error
 	canonicalAuthority     bool
 	actualPresent          bool
 	actuals                []PublishRecipientActual

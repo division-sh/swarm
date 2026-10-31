@@ -2425,6 +2425,7 @@ func (eb *EventBus) publishRecipientPlan(evt events.Event, routePlan RoutePlan) 
 		SubscriptionRecipients: uniqueStrings(routePlan.SubscribedRecipients),
 		DeliveryRoutes:         deliveryRoutes,
 		TargetFailure:          routePlan.TargetFailure.Code(),
+		targetFailureCause:     routePlan.unavailableReceiverError,
 		actualPresent:          true,
 		actuals:                actuals,
 		actualErr:              actualErr,
@@ -3162,6 +3163,10 @@ func targetDeliveryFailureRecord(evt events.Event, plan RoutePlan, failure runti
 		"delivery_routes":      plan.DeliveryRoutes(),
 	}
 	canonical := canonicalTargetDeliveryFailure(failure, "eventbus", "resolve_delivery_target", detail)
+	var noHandler *runtimepipeline.NoHandlerError
+	if errors.As(plan.unavailableReceiverError, &noHandler) {
+		canonical = runtimefailures.FromError(plan.unavailableReceiverError, "eventbus", "resolve_delivery_target")
+	}
 	detail["failure"] = canonical.Failure
 	deadLetterRoute := target
 	if deadLetterRoute.Empty() && len(targetSet) > 0 {
