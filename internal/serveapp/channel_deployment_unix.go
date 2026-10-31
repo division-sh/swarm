@@ -75,7 +75,7 @@ func deploymentChannelHandlers(repo, config, directory string, stores *selected.
 		var result json.RawMessage
 		err = client.Dispatch(ctx, req.Method, req.Params, &result)
 		if err == nil && req.Method == "channel.list" && runtimeOptions.manager != nil {
-			result, err = observeDeploymentAccountList(ctx, result, runtimeOptions, clients, &mu)
+			result, err = observeDeploymentAccountList(ctx, result, runtimeOptions, stores.DeploymentChannels(), clients, &mu)
 		}
 		head, decodeErr := deploymentControlResult(result, err)
 		if decodeErr != nil {

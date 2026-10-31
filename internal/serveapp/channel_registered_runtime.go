@@ -76,7 +76,7 @@ func observeDeploymentAccountStatus(ctx context.Context, ref channelonboarding.A
 	return json.Marshal(status)
 }
 
-func observeDeploymentAccountList(ctx context.Context, raw json.RawMessage, runtimeOptions deploymentRuntimeOptions, clients map[string]*cliapp.DeploymentChannelControl, mu *sync.Mutex) (json.RawMessage, error) {
+func observeDeploymentAccountList(ctx context.Context, raw json.RawMessage, runtimeOptions deploymentRuntimeOptions, operations channelonboarding.OperationStore, clients map[string]*cliapp.DeploymentChannelControl, mu *sync.Mutex) (json.RawMessage, error) {
 	var list struct {
 		Accounts []channelonboarding.Result `json:"accounts"`
 	}
@@ -89,6 +89,18 @@ func observeDeploymentAccountList(ctx context.Context, raw json.RawMessage, runt
 			continue // A pending pairing may not have an approved account yet.
 		}
 		ref := channelonboarding.AccountReference{Provider: row.Status.Provider, Account: row.Status.Account}
+		operation := row.Operation
+		if row.Status.Linked {
+			_, current, err := channelonboarding.RegisteredAccountStatus(ctx, operations, ref)
+			if err != nil {
+				return nil, err
+			}
+			if current.OperationID != operation.OperationID || current.Revision != operation.Revision ||
+				current.Provider != operation.Provider || current.AccountReference != operation.AccountReference {
+				return nil, channelonboarding.ErrRevisionConflict
+			}
+			operation = current
+		}
 		mu.Lock()
 		owner := clients[ref.Provider+":"+row.Operation.OperationID]
 		mu.Unlock()
@@ -102,7 +114,7 @@ func observeDeploymentAccountList(ctx context.Context, raw json.RawMessage, runt
 		if err := observeDeploymentAccountHolder(ctx, runtimeOptions.manager, row.Status); err != nil {
 			return nil, err
 		}
-		if err := observeDeploymentWebhookAccount(ctx, runtimeOptions, row.Operation, row.Status); err != nil {
+		if err := observeDeploymentWebhookAccount(ctx, runtimeOptions, operation, row.Status); err != nil {
 			return nil, err
 		}
 	}

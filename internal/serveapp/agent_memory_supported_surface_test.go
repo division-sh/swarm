@@ -231,6 +231,15 @@ func runCanonicalTelegramAgentLiveSelection(t *testing.T, backend string) {
 		listed.Accounts[0].Operation.AccountReference != "420079" {
 		t.Fatalf("connected account missing from channel list: %s", &listOut)
 	}
+	status := listed.Accounts[0].Status
+	if status == nil || !status.Linked || status.Provider != "telegram" || status.Account != "420079" || len(status.Holders) != 1 {
+		t.Fatalf("channel list lacks the registered account's exact holder: %s", &listOut)
+	}
+	for _, private := range []string{"credential-value-seal-v1:", "bot-token", "telegram-secret"} {
+		if strings.Contains(listOut.String(), private) {
+			t.Fatalf("channel list exposed private credential evidence: %s", &listOut)
+		}
+	}
 	if registrations, deliveries := native.Counts(); registrations != 0 || deliveries != 0 {
 		t.Fatalf("fresh Telegram connect bypassed required restart: registrations=%d deliveries=%d", registrations, deliveries)
 	}
