@@ -67,7 +67,7 @@ func TestGuardTerminationHistoricalForkPreservesCauseBothStores(t *testing.T) {
 			cfg := testRuntimeConfig()
 			cfg.LLM.Backend = "anthropic"
 			fork, err := executeCatalogLiveFork(t, h, ctx, runforkexecution.SelectedContractExecutionRequest{
-				SourceRunID: catalogRuntimeRunID, At: point, AllowSourceFreeze: true,
+				SourceRunID: catalogRuntimeRunID, At: point,
 				ExpectedBundleHash: loaded.SourceArtifactFact.BundleHash(), SourceArtifactFact: loaded.SourceArtifactFact,
 				Owner: selectedContractExecutionOwnerForCatalogHarness(t, h), SourceLoader: loader, ContractSelection: selection,
 				AgentRuntime: selectedContractAgentRuntimeOptionsForCatalogHarness(h, cfg),

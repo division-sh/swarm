@@ -5,7 +5,6 @@ import (
 	"crypto/sha256"
 	"encoding/hex"
 	"encoding/json"
-	"errors"
 
 	"fmt"
 
@@ -58,19 +57,9 @@ func sortedTrimmedStrings(values []string) []string {
 }
 
 const (
-	RunForkActivatedStatus    = "running"
-	RunForkLiveStatus         = "live"
-	RunForkSourceFrozenStatus = "forked"
+	RunForkActivatedStatus = "running"
+	RunForkLiveStatus      = "live"
 )
-
-type RunForkActivateRequest struct {
-	OriginalRootAdmission             sourceartifact.RootAdmission      `json:"-"`
-	Process                           processbinding.LeaseStamp         `json:"-"`
-	OriginalLoopCarriage              semanticview.OriginalLoopCarriage `json:"-"`
-	ForkRunID                         string
-	AllowSourceFreeze                 bool
-	HistoricalReplayExecutionAdmitter RunForkHistoricalReplayExecutionAdmitter
-}
 
 type RunForkActivation struct {
 	SourceRunID               string                                   `json:"source_run_id"`
@@ -1571,47 +1560,12 @@ type RunForkSelectedContractRouteRecovery struct {
 	CreatedAt                    time.Time                `json:"created_at"`
 }
 
-var ErrRunForkSourceFreezeConfirmationRequired = errors.New("run fork source freeze confirmation required")
-var ErrRunForkSourceFreezeBusy = errors.New("run fork source has in-flight execution authority")
-
 type RunForkMaterializationConflictError struct {
 	ForkRunID string
 }
 
 func (e *RunForkMaterializationConflictError) Error() string {
 	return fmt.Sprintf("fork point already has materialized fork run %s", e.ForkRunID)
-}
-
-type RunForkSourceFreezeConfirmationError struct {
-	SourceRunID string
-	ForkRunID   string
-}
-
-func (e *RunForkSourceFreezeConfirmationError) Error() string {
-	if e == nil {
-		return ErrRunForkSourceFreezeConfirmationRequired.Error()
-	}
-	return fmt.Sprintf("%s: source_run_id=%s fork_run_id=%s", ErrRunForkSourceFreezeConfirmationRequired, strings.TrimSpace(e.SourceRunID), strings.TrimSpace(e.ForkRunID))
-}
-
-func (e *RunForkSourceFreezeConfirmationError) Unwrap() error {
-	return ErrRunForkSourceFreezeConfirmationRequired
-}
-
-type RunForkSourceFreezeBusyError struct {
-	SourceRunID string
-	Blockers    []string
-}
-
-func (e *RunForkSourceFreezeBusyError) Error() string {
-	if e == nil {
-		return ErrRunForkSourceFreezeBusy.Error()
-	}
-	return fmt.Sprintf("%s: source_run_id=%s blockers=%s", ErrRunForkSourceFreezeBusy, strings.TrimSpace(e.SourceRunID), strings.Join(e.Blockers, ","))
-}
-
-func (e *RunForkSourceFreezeBusyError) Unwrap() error {
-	return ErrRunForkSourceFreezeBusy
 }
 
 type SelectedContractRuntimeExecutionIssueRequest struct {

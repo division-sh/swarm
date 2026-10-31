@@ -165,7 +165,7 @@ func (r ForkOperationResult) Validate(request ForkOperationRequest, forkRunID st
 	if r.SourceRunID != request.SourceRunID || (request.ForkEventID != "" && r.ForkEventID != request.ForkEventID) ||
 		r.ForkRunID != forkRunID || r.BundleHash != request.TargetBundleHash ||
 		(r.ForkRunStatus != RunForkActivatedStatus && r.ForkRunStatus != RunForkLiveStatus) || r.ExecutedEventCount < 0 ||
-		strings.TrimSpace(r.SourceRunStatus) == "" || r.SourceFrozen != (r.SourceRunStatus == RunForkSourceFrozenStatus) {
+		strings.TrimSpace(r.SourceRunStatus) == "" || r.SourceFrozen {
 		return fmt.Errorf("fork operation result contradicts its exact activation request")
 	}
 	seen := make(map[durabledata.DeclarationRef]struct{}, len(r.DataPins))

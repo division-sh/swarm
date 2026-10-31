@@ -23,7 +23,7 @@ func TestSelectedRecoveryActivatedResultIsOriginalAcknowledgment(t *testing.T) {
 	child := uuid.NewString()
 	record := ForkOperationRecord{Request: request, SemanticHash: hash, ForkRunID: child, BindingID: uuid.NewString(),
 		Status: ForkOperationActivated, Result: &ForkOperationResult{
-			SourceRunID: request.SourceRunID, SourceRunStatus: RunForkSourceFrozenStatus, SourceFrozen: true,
+			SourceRunID: request.SourceRunID, SourceRunStatus: "paused", SourceFrozen: false,
 			ForkRunID: child, ForkRunStatus: RunForkActivatedStatus, ForkPoint: point, BundleHash: request.TargetBundleHash,
 			ExecutedEventCount: 2, DataPins: []durabledata.Pin{{RunID: child, RunState: RunForkActivatedStatus,
 				Declaration:  durabledata.DeclarationRef{FlowPath: ".", EventName: "root.ready"},

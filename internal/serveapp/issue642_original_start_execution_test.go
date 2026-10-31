@@ -161,10 +161,10 @@ func TestIssue642OriginalStartFirstTurnExecutesBothStores(t *testing.T) {
 				t.Fatalf("original-start retry reinterpreted the recorded outcome: result=%+v ACK=%+v error=%v", replay, ack.Result, err)
 			}
 			tamperedOperation := operation
-			tamperedOperation.AllowSourceFreeze = !operation.AllowSourceFreeze
+			tamperedOperation.ContractSelection = runfork.RunForkContractSelection{Mode: runfork.RunForkContractSelectionModeBundleHash, BundleHash: operation.TargetBundleHash}
 			tamperedRequest := request
 			tamperedRequest.ForkOperation = &tamperedOperation
-			tamperedRequest.AllowSourceFreeze = tamperedOperation.AllowSourceFreeze
+			tamperedRequest.ContractSelection = tamperedOperation.ContractSelection
 			if _, err := family.Execute(ctx, tamperedRequest); err == nil || !strings.Contains(err.Error(), "original invocation semantics") {
 				t.Fatalf("same operation accepted changed invocation semantics or hit the wrong refusal: %v", err)
 			}
@@ -216,7 +216,7 @@ func TestIssue642OriginalStartFirstTurnExecutesBothStores(t *testing.T) {
 			}
 			coldTamper := reopenedRequest
 			coldTamper.ForkOperation = &tamperedOperation
-			coldTamper.AllowSourceFreeze = tamperedOperation.AllowSourceFreeze
+			coldTamper.ContractSelection = tamperedOperation.ContractSelection
 			if _, err := freshFamily.Execute(freshContext, coldTamper); err == nil || !strings.Contains(err.Error(), "original invocation semantics") {
 				t.Fatalf("reopened process admitted changed operation semantics or hit the wrong refusal: %v", err)
 			}

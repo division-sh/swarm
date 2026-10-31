@@ -109,12 +109,12 @@ func TestSelectedForkPendingInputMixedCompletionBothStores(t *testing.T) {
 				t.Fatal(err)
 			}
 			before := snapshotForkReceiverApplication(t, rt)
-			response := requestServedJSONRPC(t, rt.Endpoint, "run.fork", map[string]any{"source_run_id": seed.RunID, "fork_event_id": marker.EventID, "allow_source_freeze": true, "idempotency_key": "mixed-fork"})
+			response := requestServedJSONRPC(t, rt.Endpoint, "run.fork", map[string]any{"source_run_id": seed.RunID, "fork_event_id": marker.EventID, "idempotency_key": "mixed-fork"})
 			if response.Error == nil {
 				t.Fatal("historical non-agent delivery replay was enabled")
 			}
 			_, refusal := family.Execute(ctx, runforkexecution.SelectedContractExecutionRequest{
-				SourceRunID: seed.RunID, At: marker.EventID, AllowSourceFreeze: true, ExpectedBundleHash: rt.BundleHash,
+				SourceRunID: seed.RunID, At: marker.EventID, ExpectedBundleHash: rt.BundleHash,
 				SourceLoader: runforkexecution.SourceArtifactSelectedContractSourceLoader{RepoRoot: repoRootForTest(), Store: selected.SourceArtifactStore()},
 				AgentRuntime: rt.ForkRuntime,
 			})

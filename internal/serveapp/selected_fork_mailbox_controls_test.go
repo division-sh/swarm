@@ -49,8 +49,7 @@ func TestSelectedForkMailboxControlRefusalsBothStores(t *testing.T) {
 				t.Fatal(err)
 			}
 			fork := requireSelectedForkExecutionRPCResult(t, rt.Endpoint, map[string]any{
-				"source_run_id": seed.RunID, "fork_event_id": frontier, "allow_source_freeze": true,
-				"idempotency_key": "selected-card-fork",
+				"source_run_id": seed.RunID, "fork_event_id": frontier, "idempotency_key": "selected-card-fork",
 			})
 			waitServedSelectedForkFrontier(t, rt.ReceiverStateReader, rt.ReadRunDeliveries, fork.ForkRunID, frontier)
 			var cardID, contentHash, bindingID string

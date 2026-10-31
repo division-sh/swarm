@@ -28,7 +28,7 @@ import (
 )
 
 // runForkRuntimeOwnerHarness preserves internal runtime/store fork owner coverage for targeted tests.
-// The public `swarm run fork <source-run-id> [--bundle-hash <bundle_hash>] [--at-event <event-id>] [--allow-source-freeze] [--idempotency-key <key>]` command consumes /v1/rpc run.fork rather than this harness.
+// The public `swarm run fork <source-run-id> [--bundle-hash <bundle_hash>] [--at-event <event-id>] [--idempotency-key <key>]` command consumes /v1/rpc run.fork rather than this harness.
 func runForkRuntimeOwnerHarness(ctx context.Context, repo string, args []string, out io.Writer, observe ...func(context.Context, runtimerunforkexecution.SelectedContractExecutionResult) error) (code int) {
 	fs := flag.NewFlagSet("fork", flag.ContinueOnError)
 	fs.SetOutput(io.Discard)
@@ -40,8 +40,6 @@ func runForkRuntimeOwnerHarness(ctx context.Context, repo string, args []string,
 	at := fs.String("at", "", "Fork point event UUID")
 	dryRun := fs.Bool("dry-run", false, "Plan the fork without mutating runtime state")
 	materializeOnly := fs.Bool("materialize-only", false, "Create fork run and materialize state snapshot without resuming execution")
-	activate := fs.Bool("activate", false, "Activate an already materialized state-only fork")
-	allowSourceFreeze := fs.Bool("allow-source-freeze", false, "Confirm that activation may permanently freeze an active source run")
 	asJSON := fs.Bool("json", false, "Emit JSON")
 	if err := fs.Parse(args); err != nil {
 		if out != nil {
@@ -56,14 +54,14 @@ func runForkRuntimeOwnerHarness(ctx context.Context, repo string, args []string,
 		}
 	})
 	modeCount := 0
-	for _, enabled := range []bool{*dryRun, *materializeOnly, *activate} {
+	for _, enabled := range []bool{*dryRun, *materializeOnly} {
 		if enabled {
 			modeCount++
 		}
 	}
 	if modeCount > 1 {
 		if out != nil {
-			fmt.Fprintln(out, "fork failed: --dry-run, --materialize-only, and --activate are mutually exclusive")
+			fmt.Fprintln(out, "fork failed: --dry-run and --materialize-only are mutually exclusive")
 		}
 		return 2
 	}
@@ -78,13 +76,7 @@ func runForkRuntimeOwnerHarness(ctx context.Context, repo string, args []string,
 	}
 	if modeCount == 0 && !selectedBundleRequested {
 		if out != nil {
-			fmt.Fprintln(out, "fork failed: mutating fork execution requires --bundle-hash; use --dry-run, --materialize-only, --activate, or --bundle-hash")
-		}
-		return 2
-	}
-	if *activate && strings.TrimSpace(*at) != "" {
-		if out != nil {
-			fmt.Fprintln(out, "fork failed: --activate targets --run <fork_run_id> and does not accept --at")
+			fmt.Fprintln(out, "fork failed: mutating fork execution requires --bundle-hash; use --dry-run, --materialize-only, or --bundle-hash")
 		}
 		return 2
 	}
@@ -202,33 +194,7 @@ func runForkRuntimeOwnerHarness(ctx context.Context, repo string, args []string,
 			return 1
 		}
 	}
-	if *activate {
-		result, err := runForkOwner.Activate(ctx, runtimerunforkexecution.SelectedContractActivationGateRequest{
-			ForkRunID:         strings.TrimSpace(*runID),
-			AllowSourceFreeze: *allowSourceFreeze,
-			AgentRuntime: runtimerunforkexecution.SelectedContractAgentRuntimeOptions{
-				Config: cfg, ExecutionPosture: posture, ProcessCapability: capability,
-			},
-			SourceLoader: sourceLoader,
-		})
-		if err != nil {
-			if out != nil {
-				fmt.Fprintf(out, "fork failed: %v\n", err)
-			}
-			return 1
-		}
-		if *asJSON {
-			enc := json.NewEncoder(out)
-			enc.SetIndent("", "  ")
-			if err := enc.Encode(result); err != nil {
-				fmt.Fprintf(out, "fork failed: encode json: %v\n", err)
-				return 1
-			}
-			return 0
-		}
-		printRunForkActivation(out, result.RunForkActivation)
-		return 0
-	}
+
 	if *materializeOnly {
 		var contractSelection *runfork.RunForkContractSelection
 		if selectedBundleRequested {
@@ -546,36 +512,6 @@ func writeForkContractLoadError(out io.Writer, prefix string, err error) {
 		return
 	}
 	fmt.Fprintf(out, "%s: %v\n", strings.TrimSpace(prefix), err)
-}
-
-func printRunForkActivation(w io.Writer, result runfork.RunForkActivation) {
-	if w == nil {
-		return
-	}
-	fmt.Fprintf(w, "Fork activated for source run %s\n", result.SourceRunID)
-	fmt.Fprintf(w, "Fork Run: %s status=%s\n", result.ForkRunID, result.ForkRunStatus)
-	fmt.Fprintf(w, "Source Run: %s status=%s\n", result.SourceRunID, result.SourceRunStatus)
-	fmt.Fprintf(w, "Fork Point: %s (%s) at %s\n", result.ForkPoint.EventName, result.ForkPoint.EventID, result.ForkPoint.Timestamp.Format(time.RFC3339Nano))
-	fmt.Fprintf(w, "Summary: activated=%t source_frozen=%t replay_resume_blocked=%t materialized_entities=%d\n",
-		result.Activated,
-		result.SourceFrozen,
-		result.ReplayResumeBlocked,
-		result.MaterializedEntityCount,
-	)
-	if result.DeliveryEventReplay != nil {
-		fmt.Fprintf(w, "Delivery/Event Replay: events=%d deliveries=%d owner=%s\n",
-			result.DeliveryEventReplay.ReplayedEventCount,
-			result.DeliveryEventReplay.ReplayedDeliveryCount,
-			result.DeliveryEventReplay.Owner,
-		)
-	}
-	if result.SelectedContractBinding != nil {
-		fmt.Fprintf(w, "Selected Contract Binding: owner=%s mode=%s bundle_hash=%s\n",
-			result.SelectedContractBinding.Owner,
-			result.SelectedContractBinding.ContractSelection.Mode,
-			result.SelectedContractBinding.ContractSelection.BundleHash,
-		)
-	}
 }
 
 func printSelectedContractExecution(w io.Writer, result runtimerunforkexecution.SelectedContractExecutionResult) {

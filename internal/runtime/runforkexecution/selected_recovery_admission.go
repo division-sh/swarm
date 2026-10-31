@@ -23,7 +23,7 @@ func (o SelectedContractExecutionOwner) admitSelectedRecovery(ctx context.Contex
 	}
 	if request.SourceRunID != "" || request.At != "" || request.AtStart || request.ExpectedBundleHash != "" || request.ForkOperation != nil ||
 		request.DataPinOverrides != nil || request.ContractSelection != (runfork.RunForkContractSelection{}) ||
-		request.AllowSourceFreeze || request.SourceArtifactFact.BundleHash() != "" ||
+		request.SourceArtifactFact.BundleHash() != "" ||
 		request.EffectiveSourceIdentity.Digest() != "" || request.EffectiveSourceIdentity.SourceArtifactFact().BundleHash() != "" ||
 		request.Recovery != nil {
 		return selectedRecoveryAdmission{}, errors.New("selected recovery accepts source loader and runtime options, not caller-selected fork semantics")
@@ -53,7 +53,6 @@ func (o SelectedContractExecutionOwner) admitSelectedRecovery(ctx context.Contex
 	request.At = operation.ResolvedPoint.Input
 	request.ExpectedBundleHash = operation.TargetBundleHash
 	request.ContractSelection = operation.ContractSelection
-	request.AllowSourceFreeze = operation.AllowSourceFreeze
 	operation.DataPinOverrides = append(operation.DataPinOverrides[:0:0], operation.DataPinOverrides...)
 	request.DataPinOverrides = append(operation.DataPinOverrides[:0:0], operation.DataPinOverrides...)
 	point := *operation.ResolvedPoint

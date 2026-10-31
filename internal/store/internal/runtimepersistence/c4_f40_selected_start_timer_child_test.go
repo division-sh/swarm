@@ -116,14 +116,14 @@ func TestC4F40SelectedStartTimerChildBothStores(t *testing.T) {
 				OperationID: uuid.NewString(), Actor: "c4-f40-start-timer", IdempotencyKey: uuid.NewString(), TransportHash: "c4-f40-start-timer",
 				SourceRunID: sourceRun, AtStart: true, ResolvedPoint: &sourcePlan.ForkPoint, TargetBundleHash: bundleHash,
 				TargetRootReference: root.Reference(),
-				AllowSourceFreeze:   true, ContractSelection: selection,
+				ContractSelection:   selection,
 			}
 			if _, _, err := operation.Canonical(); err != nil {
 				t.Fatal(err)
 			}
 			repo := canonicalrouting.RepoRoot(t)
 			executionRequest := runforkexecution.SelectedContractExecutionRequest{
-				Owner: owner, SourceRunID: sourceRun, AtStart: true, ForkOperation: operation, AllowSourceFreeze: true,
+				Owner: owner, SourceRunID: sourceRun, AtStart: true, ForkOperation: operation,
 				ContractSelection: selection, ExpectedBundleHash: bundleHash,
 				SourceLoader: runforkexecution.SourceArtifactSelectedContractSourceLoader{
 					RepoRoot: repo, Store: selected.(runforkexecution.SourceArtifactSelectedContractSourceStore),

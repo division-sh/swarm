@@ -477,7 +477,7 @@ func TestOperatorRuntimeContextManagerFailsClosedForUnloadedBundle(t *testing.T)
 		}),
 	})
 	forkResp := rpcCallWithPlainRequestContext(t, forkHandler, fmt.Sprintf(
-		`{"jsonrpc":"2.0","id":"fork","method":"run.fork","params":{"source_run_id":%q,"fork_event_id":%q,"bundle_hash":%q,"allow_source_freeze":true,"idempotency_key":"fork-unloaded-context"}}`,
+		`{"jsonrpc":"2.0","id":"fork","method":"run.fork","params":{"source_run_id":%q,"fork_event_id":%q,"bundle_hash":%q,"idempotency_key":"fork-unloaded-context"}}`,
 		runForkTestSourceRunID,
 		runForkTestEventID,
 		runtimeContextTestBundleHashC,
@@ -540,7 +540,7 @@ func TestOperatorRuntimeContextManagerFailsClosedForDeactivatedBundle(t *testing
 		}),
 	})
 	forkResp := rpcCallWithPlainRequestContext(t, forkHandler, fmt.Sprintf(
-		`{"jsonrpc":"2.0","id":"fork","method":"run.fork","params":{"source_run_id":%q,"fork_event_id":%q,"bundle_hash":%q,"allow_source_freeze":true,"idempotency_key":"fork-deactivated-context"}}`,
+		`{"jsonrpc":"2.0","id":"fork","method":"run.fork","params":{"source_run_id":%q,"fork_event_id":%q,"bundle_hash":%q,"idempotency_key":"fork-deactivated-context"}}`,
 		runForkTestSourceRunID,
 		runForkTestEventID,
 		runtimeContextTestBundleHashB,
@@ -606,8 +606,8 @@ func TestOperatorRuntimeContextManagerFailsClosedForAmbiguousRuntimeConsumers(t 
 		result: RunForkExecutionResult{
 			Owner:              "runtime.run_fork.selected_contract_execution",
 			SourceRunID:        runForkTestSourceRunID,
-			SourceRunStatus:    runfork.RunForkSourceFrozenStatus,
-			SourceFrozen:       true,
+			SourceRunStatus:    "paused",
+			SourceFrozen:       false,
 			ForkRunID:          runForkTestForkRunID,
 			ForkPointKind:      string(runfork.RunForkPointEvent),
 			ForkRevision:       1,
@@ -627,7 +627,7 @@ func TestOperatorRuntimeContextManagerFailsClosedForAmbiguousRuntimeConsumers(t 
 		}),
 	})
 	forkResp := rpcCallWithPlainRequestContext(t, forkHandler, fmt.Sprintf(
-		`{"jsonrpc":"2.0","id":"fork","method":"run.fork","params":{"source_run_id":%q,"fork_event_id":%q,"bundle_hash":%q,"allow_source_freeze":true,"idempotency_key":"fork-context"}}`,
+		`{"jsonrpc":"2.0","id":"fork","method":"run.fork","params":{"source_run_id":%q,"fork_event_id":%q,"bundle_hash":%q,"idempotency_key":"fork-context"}}`,
 		runForkTestSourceRunID,
 		runForkTestEventID,
 		runtimeContextTestBundleHashB,
@@ -639,7 +639,6 @@ func TestOperatorRuntimeContextManagerFailsClosedForAmbiguousRuntimeConsumers(t 
 		t.Fatalf("run.fork executor calls = %d, want 1", executor.calls)
 	}
 	if executor.last.BundleHash != runtimeContextTestBundleHashB ||
-		!executor.last.AllowSourceFreeze ||
 		executor.last.ContractSelection.Mode != runfork.RunForkContractSelectionModeBundleHash ||
 		executor.last.ContractSelection.BundleHash != runtimeContextTestBundleHashB {
 		t.Fatalf("run.fork executor request = %#v", executor.last)

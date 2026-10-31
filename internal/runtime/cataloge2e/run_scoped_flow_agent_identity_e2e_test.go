@@ -38,7 +38,7 @@ const catalogSecondRunID = "99999999-9999-4999-8999-999999999999"
 
 type runScopedCatalogSelectedStore interface {
 	runtimeruncontrol.Store
-	runtimerunforkexecution.SelectedContractActivationStore
+	runtimerunforkexecution.SelectedContractForkLifecycle
 	MaterializeRunForkForSelectedContractExecution(context.Context, runforkreadiness.MaterializeRequest) (runfork.RunForkMaterialization, error)
 	runtimepipeline.FlowInstanceIndexReader
 	runtimebus.PreparedPublishEventReader
@@ -278,7 +278,7 @@ func TestRunScopedSelectedForkReconstructsFlowAndAgentOnBothStores(t *testing.T)
 				t, executionCtx, selected, selectedContractExecutionOwnerForCatalogHarness(t, h), loader, selection, operation, sourcePlan, agentRuntime, sourceEvent.ID(), flowPath, flowEntityID,
 			)
 			result, err := executeCatalogLiveFork(t, h, executionCtx, runtimerunforkexecution.SelectedContractExecutionRequest{
-				SourceRunID: sourceRunID, At: sourceEvent.ID(), AllowSourceFreeze: true, ForkOperation: &operation,
+				SourceRunID: sourceRunID, At: sourceEvent.ID(), ForkOperation: &operation,
 				Owner: selectedContractExecutionOwnerForCatalogHarness(t, h), SourceLoader: loader, ContractSelection: selection,
 				AgentRuntime: agentRuntime,
 			})

@@ -30,7 +30,7 @@ func TestForkCommandRunStartRequestAndReadback(t *testing.T) {
 				writeJSONRPCResult(t, w, captured.ID, result)
 			}))
 			defer server.Close()
-			args := []string{"run", "fork", sourceRunID, "--at-start", "--allow-source-freeze"}
+			args := []string{"run", "fork", sourceRunID, "--at-start"}
 			if jsonOutput {
 				args = append(args, "--json")
 			}
@@ -39,7 +39,7 @@ func TestForkCommandRunStartRequestAndReadback(t *testing.T) {
 			if code != 0 || stderr.Len() != 0 {
 				t.Fatalf("start command code=%d stderr=%s stdout=%s", code, stderr.String(), stdout.String())
 			}
-			assertForkRequest(t, captured, map[string]any{"source_run_id": sourceRunID, "at_start": true, "allow_source_freeze": true})
+			assertForkRequest(t, captured, map[string]any{"source_run_id": sourceRunID, "at_start": true})
 			if jsonOutput {
 				var result map[string]any
 				if err := json.Unmarshal(stdout.Bytes(), &result); err != nil || result["fork_point_kind"] != "run_start" || result["fork_revision"] != float64(7) {
@@ -67,9 +67,9 @@ func TestForkCommandExplicitFalseStartPreservesDefaultSelector(t *testing.T) {
 	}))
 	defer server.Close()
 	var stdout, stderr bytes.Buffer
-	code := executeRootCommandWithOptions(context.Background(), t.TempDir(), []string{"run", "fork", sourceRunID, "--at-start=false", "--allow-source-freeze"}, &stdout, &stderr, testRootCommandOptions(server))
+	code := executeRootCommandWithOptions(context.Background(), t.TempDir(), []string{"run", "fork", sourceRunID, "--at-start=false"}, &stdout, &stderr, testRootCommandOptions(server))
 	if code != 0 {
 		t.Fatalf("default command code=%d stderr=%s", code, stderr.String())
 	}
-	assertForkRequest(t, captured, map[string]any{"source_run_id": sourceRunID, "allow_source_freeze": true})
+	assertForkRequest(t, captured, map[string]any{"source_run_id": sourceRunID})
 }

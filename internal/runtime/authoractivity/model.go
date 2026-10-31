@@ -305,12 +305,12 @@ var kindContracts = map[Kind]kindContract{
 		Actions: map[string]string{"received": "directive received", "in_flight": "directive in flight", "completed": "directive completed", "failed": "directive failed", "outcome_uncertain": "directive outcome uncertain", "canceled": "directive canceled"},
 	},
 	KindRunLifecycle: {
-		Transitions: set("started", "fork_prepared", "paused", "resumed", "fork_started", "completed", "failed", "cancelled", "forked"), SourceOwner: "runs", SourceIdentityRequired: true,
+		Transitions: set("started", "fork_prepared", "paused", "resumed", "fork_started", "completed", "failed", "cancelled"), SourceOwner: "runs", SourceIdentityRequired: true,
 		AllowedProjectionFields:  set("subject_type", "subject_id", "parent_run_id", "fork_run_id", "trigger_event_type", "control_reason", "source"),
 		RequiredProjectionFields: set("subject_type", "subject_id"), FailureTransitions: set("failed"),
 		SubjectStrategy: subjectTypedIdentity, SubjectTypes: set("run"),
-		ScopeByTransition: scopeAll(ScopeBundle, "started", "fork_prepared", "paused", "resumed", "fork_started", "completed", "failed", "cancelled", "forked"), HumanVisibleTransitions: set("started", "fork_prepared", "paused", "resumed", "fork_started", "completed", "failed", "cancelled", "forked"),
-		Actions: map[string]string{"started": "started", "fork_prepared": "fork prepared", "paused": "paused", "resumed": "resumed", "fork_started": "fork started", "completed": "completed", "failed": "failed", "cancelled": "cancelled", "forked": "forked"},
+		ScopeByTransition: scopeAll(ScopeBundle, "started", "fork_prepared", "paused", "resumed", "fork_started", "completed", "failed", "cancelled"), HumanVisibleTransitions: set("started", "fork_prepared", "paused", "resumed", "fork_started", "completed", "failed", "cancelled"),
+		Actions: map[string]string{"started": "started", "fork_prepared": "fork prepared", "paused": "paused", "resumed": "resumed", "fork_started": "fork started", "completed": "completed", "failed": "failed", "cancelled": "cancelled"},
 	},
 	KindPlatformSignal: {
 		Transitions: set("agent_failed_retrying", "agent_failed", "event_quarantined", "event_no_delivery", "dead_letters_escalated", "run_stalled", "runtime_reset", "authorization_required", "budget_warning", "budget_throttle", "budget_emergency", "budget_ok", "runtime_paused", "runtime_resumed", "recovery_failed"),

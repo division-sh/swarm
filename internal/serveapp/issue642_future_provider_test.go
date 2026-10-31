@@ -77,7 +77,7 @@ func TestIssue642FutureProviderConstructsAfterEmptyCatalogBothStores(t *testing.
 				t.Fatal(err)
 			}
 			fork := requireSelectedForkExecutionRPCResult(t, rt.Endpoint, map[string]any{"source_run_id": seed.RunID, "at_start": true,
-				"allow_source_freeze": true, "idempotency_key": "future-provider-start-cut"})
+				"idempotency_key": "future-provider-start-cut"})
 			if fork.SourceRunID != seed.RunID || fork.ForkRunID == "" || fork.ForkRunID == seed.RunID || fork.ForkPointKind != string(runfork.RunForkPointRunStart) || fork.ForkEventID != "" {
 				t.Fatalf("future-provider fork did not acknowledge the exclusive start cut: %+v", fork)
 			}

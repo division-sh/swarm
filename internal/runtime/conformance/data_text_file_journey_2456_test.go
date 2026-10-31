@@ -264,7 +264,7 @@ func TestDataTextFile2456KeylessOperatorRouteRestartReplayBothStores(t *testing.
 			}
 			forkServer := deploymentForkServer(t, f, owner)
 			forked, rpcErr := deploymentForkRPC(t, f.ctx, forkServer, map[string]any{
-				"source_run_id": runID, "bundle_hash": before, "allow_source_freeze": true, "idempotency_key": uuid.NewString(),
+				"source_run_id": runID, "bundle_hash": before, "idempotency_key": uuid.NewString(),
 			})
 			if len(rpcErr) != 0 || forked.ForkRunID == "" || forked.ForkRunID == runID || len(forked.DataPins) != 1 || forked.DataPins[0].VersionID != version.VersionID {
 				t.Fatalf("old-version selected fork changed source pin: fork=%+v error=%s want=%s", forked, rpcErr, version.VersionID)

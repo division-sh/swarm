@@ -34,7 +34,7 @@ func (m terminalRunMutation) terminalizesDeliveries() (bool, error) {
 	switch m.State {
 	case runtimerunlifecycle.StateFailed, runtimerunlifecycle.StateCancelled:
 		return true, nil
-	case runtimerunlifecycle.StateCompleted, runtimerunlifecycle.StateForked:
+	case runtimerunlifecycle.StateCompleted:
 		return false, nil
 	default:
 		return false, fmt.Errorf("unsupported terminal lifecycle effect state %q", m.State)
@@ -49,18 +49,6 @@ func terminalRunMutationFromRequest(request runtimerunlifecycle.TerminalRequest)
 	return terminalRunMutation{
 		RunID: request.RunID, State: request.State, Failure: request.Failure,
 		ContinuedAsRunID: request.ContinuedAsRunID, EndedAt: request.EndedAt,
-	}, nil
-}
-
-func terminalRunMutationFromForkSource(request runtimerunlifecycle.ForkSourceRequest) (terminalRunMutation, error) {
-	request.EndedAt = runtimerunlifecycle.CanonicalTimestamp(request.EndedAt)
-	if err := request.Validate(); err != nil {
-		return terminalRunMutation{}, err
-	}
-	return terminalRunMutation{
-		RunID: request.RunID, State: runtimerunlifecycle.StateForked,
-		ContinuedAsRunID: request.ContinuedAsRunID, EndedAt: request.EndedAt,
-		IncludeCommittedDecisionCards: true,
 	}, nil
 }
 
@@ -293,36 +281,6 @@ func (s *RunLifecyclePostgresOwner) markRunTerminalTx(
 	changes *ChannelCardChanges,
 ) (runtimerunlifecycle.Snapshot, runtimerunlifecycle.MutationDisposition, error) {
 	mutation, err := terminalRunMutationFromRequest(request)
-	if err != nil {
-		return runtimerunlifecycle.Snapshot{}, "", err
-	}
-	mutation.ChannelCardChanges = changes
-	return s.markRunTerminalStateTx(ctx, tx, attempt, mutation)
-}
-
-func (s *RunLifecyclePostgresOwner) markForkSourceTx(
-	ctx context.Context,
-	tx *sql.Tx,
-	attempt *mutationprotocol.Attempt,
-	request runtimerunlifecycle.ForkSourceRequest,
-	changes *ChannelCardChanges,
-) (runtimerunlifecycle.Snapshot, runtimerunlifecycle.MutationDisposition, error) {
-	mutation, err := terminalRunMutationFromForkSource(request)
-	if err != nil {
-		return runtimerunlifecycle.Snapshot{}, "", err
-	}
-	mutation.ChannelCardChanges = changes
-	return s.markRunTerminalStateTx(ctx, tx, attempt, mutation)
-}
-
-func (s *RunLifecycleSQLiteOwner) markForkSourceTx(
-	ctx context.Context,
-	tx *sql.Tx,
-	attempt *mutationprotocol.Attempt,
-	request runtimerunlifecycle.ForkSourceRequest,
-	changes *ChannelCardChanges,
-) (runtimerunlifecycle.Snapshot, runtimerunlifecycle.MutationDisposition, error) {
-	mutation, err := terminalRunMutationFromForkSource(request)
 	if err != nil {
 		return runtimerunlifecycle.Snapshot{}, "", err
 	}

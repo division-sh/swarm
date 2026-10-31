@@ -137,7 +137,7 @@ func TestSelectedCompletion2270EvidenceBothStores(t *testing.T) {
 				}
 				storetest.CaptureRunForkSnapshot(t, ctx, selected, runID)
 				result, err := q1ExecuteSelectedPhaseComponent(t, ctx, SelectedContractExecutionRequest{
-					SourceRunID: runID, At: eventID, AllowSourceFreeze: true, Owner: owner, SourceLoader: loader,
+					SourceRunID: runID, At: eventID, Owner: owner, SourceLoader: loader,
 					ContractSelection: runforkadmission.SelectedContractSelection(loaded.Source),
 					AgentRuntime: SelectedContractAgentRuntimeOptions{Config: selectedForkAPIProviderConfig(protocol.backend, "request-A", provider.URL), ProviderCredentials: credentialStore,
 						ProcessCapability: capability, QuiescenceTimeout: selectedForkCapabilityProofQuiescenceTimeout},

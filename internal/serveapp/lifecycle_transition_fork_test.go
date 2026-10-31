@@ -66,7 +66,7 @@ func runLifecycleRootForkPolicy(t *testing.T) {
 				t.Fatal(err)
 			}
 			before := lifecycleStoredSnapshot(t, rt, seed.RunID)
-			params := map[string]any{"source_run_id": seed.RunID, "fork_event_id": frontier.EventID, "allow_source_freeze": true, "idempotency_key": "lifecycle-fork"}
+			params := map[string]any{"source_run_id": seed.RunID, "fork_event_id": frontier.EventID, "idempotency_key": "lifecycle-fork"}
 			var fork, duplicate apiv1.RunForkExecutionResult
 			requireServedJSONRPCResult(t, rt.Endpoint, "run.fork", params, &fork)
 			requireServedJSONRPCResult(t, rt.Endpoint, "run.fork", params, &duplicate)

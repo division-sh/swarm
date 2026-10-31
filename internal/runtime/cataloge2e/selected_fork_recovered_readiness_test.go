@@ -134,17 +134,17 @@ func TestSelectedForkRecoveredReceiverReadinessBothStores(t *testing.T) {
 				var activated forkexecution.SelectedContractExecutionResult
 				if lawful {
 					activated, err = executeCatalogLiveFork(t, h, ctx, forkexecution.SelectedContractExecutionRequest{
-						SourceRunID: catalogRuntimeRunID, At: frontierID, AllowSourceFreeze: true, ForkOperation: &operation,
+						SourceRunID: catalogRuntimeRunID, At: frontierID, ForkOperation: &operation,
 						Owner: executionOwner, SourceLoader: loader, ContractSelection: selection, AgentRuntime: options,
 					})
 				} else {
 					// These are native pre-handoff admission negatives, not live ACKs.
-					refused, refusal := forkexecution.ActivateSelectedContractRunFork(ctx, forkexecution.SelectedContractActivationGateRequest{
-						ForkRunID: child, AllowSourceFreeze: true, Store: selected,
-						ExecutionOwner: executionOwner, SourceLoader: loader, AgentRuntime: options,
+					refused, refusal := executeCatalogLiveFork(t, h, ctx, forkexecution.SelectedContractExecutionRequest{
+						SourceRunID: catalogRuntimeRunID, At: frontierID, ForkOperation: &operation,
+						Owner: executionOwner, SourceLoader: loader, AgentRuntime: options, ContractSelection: selection,
 					})
 					err = refusal
-					if refused.Activated || refused.ExecutedEventCount != 0 || refused.ForkLocalRuntimeContainer != nil || len(refused.ForkEvents) != 0 {
+					if refused.Activation.Activated || refused.ExecutedEventCount != 0 || refused.ForkLocalRuntimeContainer != nil || len(refused.ForkEvents) != 0 {
 						t.Fatalf("contradictory native child reached publication: %#v, %v", refused, err)
 					}
 				}

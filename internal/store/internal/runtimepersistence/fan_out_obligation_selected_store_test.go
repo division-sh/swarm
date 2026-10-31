@@ -1422,7 +1422,6 @@ func TestRunForkFanOutMaterializationPreservesPrefixAndResumesIndependently(t *t
 			pg := owner.(interface {
 				selectedFanOutOwner
 				MaterializeRunFork(context.Context, runfork.RunForkMaterializeRequest) (runfork.RunForkMaterialization, error)
-				ActivateRunFork(context.Context, runfork.RunForkActivateRequest) (runfork.RunForkActivation, error)
 			})
 			createdAt := time.Now().UTC().Truncate(time.Microsecond)
 			ctx, fixture := seedDeclaredNumericForkFanOutFixture(t, backend, authorActivityReceiptFixture{db: db, store: owner.(authorActivityReceiptStore)}, 3, createdAt, false)
@@ -1475,9 +1474,8 @@ func TestRunForkFanOutMaterializationPreservesPrefixAndResumesIndependently(t *t
 			if childCursor != 1 || childBundleHash != fixture.bundleHash || ownedEventID.Valid || inheritedEventID != issuedEventID {
 				t.Fatalf("materialized prefix = cursor:%d bundle:%q event:%v inherited:%q", childCursor, childBundleHash, ownedEventID, inheritedEventID)
 			}
-			activation, err := pg.ActivateRunFork(ctx, runfork.RunForkActivateRequest{ForkRunID: materialized.ForkRunID, AllowSourceFreeze: true})
-			if err != nil || !activation.Activated || !activation.SourceFrozen {
-				t.Fatalf("activate ordinary fork before suffix execution: %+v err=%v", activation, err)
+			if _, err := owner.(runtimerunlifecycle.OperationOwner).TransitionActiveRun(ctx, runtimerunlifecycle.ActiveTransitionRequest{RunID: materialized.ForkRunID, State: runtimerunlifecycle.StateRunning}); err != nil {
+				t.Fatalf("resume materialized fork before suffix execution: %v", err)
 			}
 
 			key := fanoutobligation.IntentKey{RunID: materialized.ForkRunID, TriggeringDeliveryID: fixture.deliveryID, ElementRef: runtimecontracts.FanOutElementRef{FlowPath: fixture.flowPath, Family: "fan_out", SemanticPath: fixture.semanticPath}}
@@ -1605,9 +1603,8 @@ func TestRunForkFanOutMaterializationRetainsExactEntityRevisionSource(t *testing
 	if !reflect.DeepEqual(beforePausedClaim, snapshotForkHistoricalExecutionTables(t, db, true)) {
 		t.Fatal("paused fork claim changed persisted execution or history")
 	}
-	activation, err := pg.ActivateRunFork(ctx, runfork.RunForkActivateRequest{ForkRunID: materialized.ForkRunID, AllowSourceFreeze: true})
-	if err != nil || !activation.Activated || !activation.SourceFrozen {
-		t.Fatalf("activate entity-source fork before claiming: %+v err=%v", activation, err)
+	if _, err := pg.TransitionActiveRun(ctx, runtimerunlifecycle.ActiveTransitionRequest{RunID: materialized.ForkRunID, State: runtimerunlifecycle.StateRunning}); err != nil {
+		t.Fatalf("resume entity-source fork before claiming: %v", err)
 	}
 	_, claim, found, err := pg.ClaimFanOutIntent(ctx, request)
 	if err != nil || !found {

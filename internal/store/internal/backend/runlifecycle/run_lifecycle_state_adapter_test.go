@@ -14,7 +14,7 @@ func TestTerminalMutationDeliveryEffectsAreClosed(t *testing.T) {
 		{runtimerunlifecycle.StateFailed, true, false},
 		{runtimerunlifecycle.StateCancelled, true, false},
 		{runtimerunlifecycle.StateCompleted, false, false},
-		{runtimerunlifecycle.StateForked, false, false},
+		{"forked", false, true},
 		{runtimerunlifecycle.StateRunning, false, true},
 		{runtimerunlifecycle.StatePaused, false, true},
 		{"", false, true},

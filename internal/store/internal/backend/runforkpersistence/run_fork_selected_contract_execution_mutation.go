@@ -914,8 +914,8 @@ func insertSQLiteSelectedForkExecutionLineageTx(ctx context.Context, tx *sql.Tx,
 }
 
 func runForkSelectedContractBranchSourceStatusSupported(status string) bool {
-	state, err := runtimerunlifecycle.ParseState(status)
-	return err == nil && state != runtimerunlifecycle.StateForked
+	_, err := runtimerunlifecycle.ParseState(status)
+	return err == nil
 }
 
 func collectRunForkSelectedContractSourceAdvancedFacts(ctx context.Context, tx *sql.Tx, lineage runForkActivationLineage) ([]string, error) {
@@ -924,7 +924,7 @@ func collectRunForkSelectedContractSourceAdvancedFacts(ctx context.Context, tx *
 		return nil, err
 	}
 	state, stateErr := runtimerunlifecycle.ParseState(lineage.SourceRunStatus)
-	if stateErr == nil && state.Terminal() && state != runtimerunlifecycle.StateForked {
+	if stateErr == nil && state.Terminal() {
 		facts = append(facts, "source_run_terminal_at_activation")
 	}
 	return uniqueNonEmptyStrings(facts), nil

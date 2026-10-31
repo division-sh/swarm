@@ -138,10 +138,10 @@ func TestSelectedForkSameKeyJoinsBoundOwnerBeforeExecutionBothStores(t *testing.
 			operation := runfork.ForkOperationRequest{
 				OperationID: uuid.NewString(), Actor: "bearer:operator", IdempotencyKey: "bound-live-winner", TransportHash: "sha256:same-request",
 				SourceRunID: sourceID, ForkEventID: selector, TargetBundleHash: loaded.SourceArtifactFact.BundleHash(),
-				AllowSourceFreeze: true, ContractSelection: selection, TargetRootReference: loaded.RootedSource.Admission().Reference(),
+				ContractSelection: selection, TargetRootReference: loaded.RootedSource.Admission().Reference(),
 			}
 			request := SelectedContractExecutionRequest{
-				Owner: owner, ForkOperation: &operation, SourceRunID: sourceID, At: selector, AllowSourceFreeze: true,
+				Owner: owner, ForkOperation: &operation, SourceRunID: sourceID, At: selector,
 				LiveRuntime: liveRuntime, LiveContexts: liveContexts, LiveRuns: selected.(runlifecycle.LiveRunReader),
 				ExpectedBundleHash: loaded.SourceArtifactFact.BundleHash(), ContractSelection: selection,
 				SourceLoader: SourceArtifactSelectedContractSourceLoader{RepoRoot: repo,
@@ -368,10 +368,10 @@ func ownerlessSelectedOperationFixtureFromSource(t *testing.T, backend, sourceRo
 	operation := runfork.ForkOperationRequest{
 		OperationID: uuid.NewString(), Actor: "bearer:operator", IdempotencyKey: "ownerless-winner", TransportHash: "sha256:same-request",
 		SourceRunID: sourceID, ForkEventID: eventID, TargetBundleHash: loaded.SourceArtifactFact.BundleHash(),
-		AllowSourceFreeze: true, ContractSelection: selection, TargetRootReference: loaded.RootedSource.Admission().Reference(),
+		ContractSelection: selection, TargetRootReference: loaded.RootedSource.Admission().Reference(),
 	}
 	return ctx, SelectedContractExecutionRequest{
-		Owner: owner, ForkOperation: &operation, SourceRunID: sourceID, At: eventID, AllowSourceFreeze: true,
+		Owner: owner, ForkOperation: &operation, SourceRunID: sourceID, At: eventID,
 		LiveRuntime: liveRuntime, LiveContexts: liveContexts, LiveRuns: selected.(runlifecycle.LiveRunReader),
 		ExpectedBundleHash: loaded.SourceArtifactFact.BundleHash(), ContractSelection: selection,
 		SourceLoader: SourceArtifactSelectedContractSourceLoader{RepoRoot: repo,

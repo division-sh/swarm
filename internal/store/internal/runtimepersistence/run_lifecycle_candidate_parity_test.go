@@ -426,48 +426,6 @@ func TestRunLifecycleCandidateTerminalRaceParity(t *testing.T) {
 	}
 }
 
-func TestRunLifecycleTerminalAbsorbsCandidatePostgres(t *testing.T) {
-	fixture := openRunLifecycleCandidateParityFixture(t, "postgres")
-	ctx := testAuthorActivitySourceArtifactContext()
-	ctx = originalStoreFixtureContext(t, ctx, fixture.store)
-	startedAt := time.Date(2026, 7, 29, 13, 45, 0, 0, time.UTC)
-	sourceRunID := uuid.NewString()
-	childRunID := uuid.NewString()
-	ensureRunLifecycleCandidateParityRun(t, fixture, ctx, sourceRunID, startedAt)
-	ensureRunLifecycleCandidateParityRun(t, fixture, ctx, childRunID, startedAt.Add(time.Second))
-	sourceCandidate := requestRunLifecycleCandidateParity(t, fixture, ctx, sourceRunID).Candidate
-
-	var (
-		snapshot    runtimerunlifecycle.Snapshot
-		disposition runtimerunlifecycle.MutationDisposition
-	)
-	var err error
-	snapshot, disposition, err = fixture.store.ForkRunSource(
-		ctx,
-		runtimerunlifecycle.ForkSourceRequest{
-			RunID: sourceRunID, ContinuedAsRunID: childRunID,
-			EndedAt: startedAt.Add(time.Minute),
-		},
-	)
-	if err != nil {
-		t.Fatalf("fork source lifecycle transition: %v", err)
-	}
-	if disposition != runtimerunlifecycle.MutationApplied ||
-		snapshot.State != runtimerunlifecycle.StateForked ||
-		snapshot.ContinuedAsRunID != childRunID {
-		t.Fatalf("fork source transition = %#v/%s", snapshot, disposition)
-	}
-	state, duePresent, revision := loadRunLifecycleCandidateFacts(t, fixture, ctx, sourceRunID)
-	if state != string(runtimerunlifecycle.StateForked) || duePresent ||
-		revision != sourceCandidate.Revision {
-		t.Fatalf("forked source candidate facts = state:%s due:%v revision:%d", state, duePresent, revision)
-	}
-	absorbed := requestRunLifecycleCandidateParity(t, fixture, ctx, sourceRunID)
-	if absorbed.Disposition != runtimerunlifecycle.CandidateAbsorbedTerminal {
-		t.Fatalf("forked source candidate request = %s", absorbed.Disposition)
-	}
-}
-
 func TestRunLifecycleCreateIsInsertOrExactNoopParity(t *testing.T) {
 	for _, backend := range []string{"sqlite", "postgres"} {
 		backend := backend

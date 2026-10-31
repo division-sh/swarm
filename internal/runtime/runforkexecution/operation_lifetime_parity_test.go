@@ -149,7 +149,7 @@ func TestSelectedContractOperationReplacementBothStores(t *testing.T) {
 					owner.ports.replay = selectedOperationPublicationProbe{SelectedContractReplayPersistence: owner.ports.replay, after: func(context.Context) { retireRuntime() }}
 				}
 				request := SelectedContractExecutionRequest{
-					SourceRunID: sourceID, At: eventID, AllowSourceFreeze: true, Owner: owner, SourceLoader: loader,
+					SourceRunID: sourceID, At: eventID, Owner: owner, SourceLoader: loader,
 					SourceArtifactFact: loaded.SourceArtifactFact,
 					ContractSelection:  runforkadmission.SelectedContractSelection(loaded.Source),
 					AgentRuntime:       SelectedContractAgentRuntimeOptions{ExecutionPosture: executionposture.MockOnly, ProcessCapability: capability},
@@ -158,7 +158,7 @@ func TestSelectedContractOperationReplacementBothStores(t *testing.T) {
 				request.ForkOperation = &runfork.ForkOperationRequest{
 					OperationID: uuid.NewString(), Actor: "operation-lifetime", IdempotencyKey: point,
 					TransportHash: "operation-lifetime-" + point, SourceRunID: sourceID, ForkEventID: eventID,
-					TargetBundleHash: loaded.SourceArtifactFact.BundleHash(), TargetRootReference: loaded.RootedSource.Admission().Reference(), ContractSelection: request.ContractSelection, AllowSourceFreeze: true,
+					TargetBundleHash: loaded.SourceArtifactFact.BundleHash(), TargetRootReference: loaded.RootedSource.Admission().Reference(), ContractSelection: request.ContractSelection,
 				}
 				result, err := ExecuteSelectedContractRunFork(ctx, request)
 				if point == "activation_failure" || point == "process_shutdown" {
@@ -259,8 +259,8 @@ func selectedForkFixtureOperation(t testing.TB, loaded LoadedSelectedContractSou
 	operation := runfork.ForkOperationRequest{
 		OperationID: uuid.NewString(), Actor: "selected-fork-fixture", TransportHash: "selected-fork-fixture",
 		SourceRunID: runID, ForkEventID: eventID, TargetBundleHash: loaded.SourceArtifactFact.BundleHash(),
-		TargetRootReference: loaded.RootedSource.Admission().Reference(), AllowSourceFreeze: true,
-		ContractSelection: runforkadmission.SelectedContractSelection(loaded.Source),
+		TargetRootReference: loaded.RootedSource.Admission().Reference(),
+		ContractSelection:   runforkadmission.SelectedContractSelection(loaded.Source),
 	}
 	canonical, _, err := operation.Canonical()
 	if err != nil {

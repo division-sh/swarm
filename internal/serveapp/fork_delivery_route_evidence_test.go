@@ -214,7 +214,7 @@ func TestServedForkConnectedDeliveryRouteEvidenceOnBothStores(t *testing.T) {
 				var fork apiv1.RunForkExecutionResult
 				requireServedJSONRPCResult(t, rt.Endpoint, "run.fork", map[string]any{
 					"source_run_id": seed.RunID, "fork_event_id": plan.ForkPoint.EventID,
-					"allow_source_freeze": true, "idempotency_key": "fork-history",
+					"idempotency_key": "fork-history",
 				}, &fork)
 				if fork.ForkRunID == "" || fork.ForkRunID == seed.RunID || fork.SourceRunID != seed.RunID || fork.ForkEventID != plan.ForkPoint.EventID {
 					t.Fatalf("invalid fork identity: %+v", fork)

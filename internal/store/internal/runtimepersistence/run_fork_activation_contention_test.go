@@ -38,179 +38,6 @@ import (
 	modernsqlite "modernc.org/sqlite"
 )
 
-// SQL triggers pause real operations after they own the durable write frontier.
-// Neither a pool waiter nor a goroutine-start signal counts as contention.
-func TestRunForkActivationFrontierContentionBothStores(t *testing.T) {
-	exerciseForkActivationFrontierContention(t)
-}
-
-func exerciseForkActivationFrontierContention(t *testing.T) {
-	for _, backend := range eventRecordContractBackends() {
-		for _, first := range []string{"writer", "activation"} {
-			for _, outcome := range []string{"commit", "rollback", "cancel_winner", "cancel_loser"} {
-				t.Run(backend.name+"/"+first+"/"+outcome, func(t *testing.T) {
-					barrier := newForkContentionBarrier(t, backend.name, outcome == "rollback" || outcome == "cancel_loser")
-					f := newForkActivationFrontierFixture(t, backend, false)
-					staged, _ := stageForkContentionFixture(t, f, false)
-					var err error
-					writer := f.store
-					observer := f.db
-					if backend.name == "sqlite" {
-						// A separate backend and pool must contend in SQLite, not on
-						// the per-backend mutation token or a one-connection pool.
-						var seq int
-						var name, path string
-						if err := f.db.QueryRow(`PRAGMA database_list`).Scan(&seq, &name, &path); err != nil {
-							t.Fatal(err)
-						}
-						other := newBootstrappedSQLiteRuntimeStoreForPath(t, path)
-						writer = other
-						if first == "writer" {
-							f.store = barrier.observeSQLiteStore(t, path)
-						} else {
-							writer = barrier.observeSQLiteStore(t, path)
-						}
-						observer, err = sql.Open("sqlite", path)
-						if err != nil {
-							t.Fatal(err)
-						}
-						t.Cleanup(func() { _ = observer.Close() })
-					} else {
-						f.db.SetMaxOpenConns(12)
-					}
-					barrier.install(t, f.db, f.runID, staged.ForkRunID, first)
-					before := snapshotForkHistoricalExecutionTables(t, observer, backend.name == "postgres")
-					ctx, cancel := context.WithTimeout(f.ctx, 25*time.Second)
-					defer cancel()
-					winnerCtx, cancelWinner := context.WithCancel(ctx)
-					defer cancelWinner()
-					loserCtx, cancelLoser := context.WithCancel(ctx)
-					defer cancelLoser()
-					loserCtx = context.WithValue(loserCtx, forkContentionContextKey{}, barrier)
-					invoke := func(ctx context.Context, operation string) forkContentionResult {
-						if operation == "writer" {
-							err := f.write(ctx, writer)
-							return forkContentionResult{err: err}
-						}
-						result, err := f.store.ActivateRunFork(ctx, runfork.RunForkActivateRequest{ForkRunID: staged.ForkRunID, AllowSourceFreeze: true})
-						return forkContentionResult{activation: result, err: err}
-					}
-					second := "writer"
-					if first == "writer" {
-						second = "activation"
-					}
-					winner := make(chan forkContentionResult, 1)
-					loser := make(chan forkContentionResult, 1)
-					winnerFinished, loserFinished := make(chan struct{}), make(chan struct{})
-					loserStarted := false
-					go func() { defer close(winnerFinished); winner <- invoke(winnerCtx, first) }()
-					t.Cleanup(func() {
-						cancelWinner()
-						cancelLoser()
-						barrier.release()
-						barrier.resume()
-						for _, finished := range []<-chan struct{}{winnerFinished, loserFinished} {
-							if finished == loserFinished && !loserStarted {
-								continue
-							}
-							select {
-							case <-finished:
-							case <-time.After(5 * time.Second):
-								t.Error("contention worker did not join cleanup")
-							}
-						}
-					})
-					winnerPID := barrier.awaitWinner(t, ctx, observer, winner)
-					// PostgreSQL queues an observer lock ahead of the losing operation.
-					// SQLite holds the loser after a real BUSY rollback, before retry.
-					gate := barrier.queueGate(t, ctx, observer, winnerPID)
-					loserStarted = true
-					go func() { defer close(loserFinished); loser <- invoke(loserCtx, second) }()
-					barrier.awaitContender(t, ctx, observer, winnerPID, gate, loser)
-					if outcome == "cancel_loser" {
-						cancelLoser()
-						barrier.resume()
-						if gate != nil {
-							gate.cancelRequested = true
-						}
-					}
-					if outcome == "cancel_winner" {
-						cancelWinner()
-					}
-					barrier.release()
-					won := awaitForkContentionResult(t, ctx, winner)
-					switch outcome {
-					case "commit":
-						if won.err != nil || (first == "activation" && !won.activation.Activated) {
-							t.Fatalf("winning %s did not commit: %#v", first, won)
-						}
-					case "cancel_winner":
-						requireForkContentionCancellation(t, won.err)
-					default:
-						if won.err == nil || !strings.Contains(won.err.Error(), "h18_requested_rollback") {
-							t.Fatalf("winning transaction did not roll back at SQL barrier: %v", won.err)
-						}
-					}
-					barrier.awaitGate(t, ctx, observer, gate)
-					if outcome == "cancel_loser" {
-						// Admitted PostgreSQL SQL drains despite logical cancellation.
-						// Settle the winner, then let this cancelled exception drain and
-						// join before inspecting the complete zero-effect snapshot.
-						barrier.openGate(t, gate)
-						barrier.resume()
-						got := awaitForkContentionResult(t, ctx, loser)
-						requireForkContentionCancellation(t, got.err)
-						select {
-						case <-loserFinished:
-						case <-ctx.Done():
-							t.Fatal("cancelled contender did not join: ", ctx.Err())
-						}
-					}
-					winnerOnly := snapshotForkHistoricalExecutionTables(t, observer, backend.name == "postgres")
-					if outcome != "commit" && !reflect.DeepEqual(before, winnerOnly) {
-						for _, diagnostic := range forkContentionFailureDiagnostics(before, winnerOnly, won, loser) {
-							t.Log(diagnostic)
-						}
-						t.Fatal("rolled-back/cancelled winner changed complete source/child/application tables")
-					}
-					if outcome == "cancel_loser" {
-						if !reflect.DeepEqual(before, snapshotForkHistoricalExecutionTables(t, observer, backend.name == "postgres")) {
-							t.Fatal("cancelled loser and rolled-back winner left durable effects")
-						}
-						return
-					}
-					barrier.assertContenderFenced(t, ctx, observer, gate)
-					if len(loser) != 0 {
-						t.Fatal("contender returned before the isolated snapshot gate opened")
-					}
-					barrier.openGate(t, gate)
-					barrier.resume()
-					lost := awaitForkContentionResult(t, ctx, loser)
-					if outcome == "commit" {
-						if first == "writer" {
-							if _, fact, ok := runForkReplayResumeBlockerFromError(lost.err); !ok || fact != runfork.RunForkReplayResumeFactSourceAdvanced || lost.activation.Activated {
-								t.Fatalf("generic losing activation must retain source-advanced refusal: %#v", lost)
-							}
-						} else if !errors.Is(lost.err, runlifecycle.ErrRunNotActive) && (lost.err == nil || !strings.Contains(lost.err.Error(), "gate route run "+f.runID+" is not routable in status forked")) {
-							t.Fatalf("losing writer must observe committed source freeze: %v", lost.err)
-						}
-						if !reflect.DeepEqual(winnerOnly, snapshotForkHistoricalExecutionTables(t, observer, backend.name == "postgres")) {
-							t.Fatal("rejected loser changed complete winner-only application contents")
-						}
-					} else if lost.err != nil || (second == "activation" && !lost.activation.Activated) {
-						t.Fatalf("loser did not proceed lawfully after winner rollback/cancellation: %v; activation=%+v", lost.err, lost.activation)
-					}
-					committedOperation := first
-					if outcome != "commit" {
-						committedOperation = second
-					}
-					requireForkContentionState(t, observer, f, staged.ForkRunID, committedOperation == "writer", committedOperation == "activation")
-				})
-			}
-		}
-	}
-}
-
 func requireForkContentionState(t *testing.T, db *sql.DB, f forkContentionFixture, child string, writerCommitted, activated bool) {
 	t.Helper()
 	for _, id := range []string{f.runID, child} {
@@ -527,21 +354,6 @@ func newConstructedGateFixtureWithOrigin(t *testing.T, backend eventRecordContra
 	return f
 }
 
-func TestRunForkActivationContentionFixtureControlBothStores(t *testing.T) {
-	for _, backend := range eventRecordContractBackends() {
-		for _, selected := range []bool{false} {
-			t.Run(fmt.Sprintf("%s/selected=%t", backend.name, selected), func(t *testing.T) {
-				f := newForkActivationFrontierFixture(t, backend, selected)
-				staged, _ := stageForkContentionFixture(t, f, selected)
-				activation, err := f.store.ActivateRunFork(f.ctx, runfork.RunForkActivateRequest{ForkRunID: staged.ForkRunID, AllowSourceFreeze: true})
-				if err != nil || !activation.Activated || !activation.SourceFrozen {
-					t.Fatalf("uncontended canonical activation: %v; result=%+v", err, activation)
-				}
-			})
-		}
-	}
-}
-
 func TestGenericConstructedGateForkUsesFixedSnapshotBothStores(t *testing.T) {
 	for _, backend := range eventRecordContractBackends() {
 		t.Run(backend.name, func(t *testing.T) {
@@ -629,7 +441,7 @@ func stageForkContentionFixtureAt(t *testing.T, f forkContentionFixture, selecte
 		request.ForkOperation = &runfork.ForkOperationRequest{
 			OperationID: uuid.NewString(), Actor: "bearer:branch-point-proof", IdempotencyKey: uuid.NewString(),
 			TransportHash: "sha256:branch-point-proof", SourceRunID: f.runID, ForkEventID: selector,
-			TargetBundleHash: loaded.SourceArtifactFact.BundleHash(), TargetRootReference: rooted.Admission().Reference(), ContractSelection: selection, AllowSourceFreeze: true,
+			TargetBundleHash: loaded.SourceArtifactFact.BundleHash(), TargetRootReference: rooted.Admission().Reference(), ContractSelection: selection,
 			DataPinOverrides: pins,
 		}
 	}
@@ -717,9 +529,6 @@ func (b *forkContentionBarrier) install(t *testing.T, db *sql.DB, source, child,
 	table, predicate := "run_fork_revision_heads", fmt.Sprintf("OLD.run_id='%s'", source)
 	if first == "activation" {
 		table, predicate = "runs", fmt.Sprintf("OLD.run_id='%s' AND NEW.status='running' AND OLD.status<>'running'", child)
-	}
-	if first == "source_freeze" {
-		table, predicate = "runs", fmt.Sprintf("OLD.run_id='%s' AND NEW.status='forked' AND OLD.status<>'forked'", source)
 	}
 	if first == "delivery_authority" {
 		table, predicate = "event_deliveries", fmt.Sprintf("OLD.run_id='%s' AND (NEW.execution_authority_id<>OLD.execution_authority_id OR NEW.execution_authority_generation<>OLD.execution_authority_generation)", source)

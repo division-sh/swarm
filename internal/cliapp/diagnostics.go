@@ -223,7 +223,6 @@ var diagnosticValidRunStatuses = map[string]struct{}{
 	"completed": {},
 	"failed":    {},
 	"cancelled": {},
-	"forked":    {},
 }
 
 var diagnosticValidOperationalStates = map[string]struct{}{
@@ -233,7 +232,6 @@ var diagnosticValidOperationalStates = map[string]struct{}{
 	"completed": {},
 	"failed":    {},
 	"cancelled": {},
-	"forked":    {},
 }
 
 func newRunsCommand(opts rootCommandOptions) *cobra.Command {
@@ -1280,10 +1278,7 @@ func validateDiagnosticRunHeader(prefix string, run diagnosticRunHeader) error {
 		return fmt.Errorf("malformed run header: %s.control_reason is required for cancelled status", prefix)
 	}
 	continuedAsRunID := strings.TrimSpace(run.ContinuedAsRunID)
-	if status == "forked" && continuedAsRunID == "" {
-		return fmt.Errorf("malformed run header: %s.continued_as_run_id is required for forked status", prefix)
-	}
-	if status != "forked" && continuedAsRunID != "" {
+	if continuedAsRunID != "" {
 		return fmt.Errorf("malformed run header: %s.continued_as_run_id is forbidden for status %s", prefix, status)
 	}
 	return nil
@@ -1490,9 +1485,6 @@ func writeDiagnosticRunDiagnosis(out io.Writer, result DiagnosticRunDiagnosisRes
 		))
 	}
 	titleState := formatCLIHumanCode(cliHumanCodeOperationalState, state)
-	if strings.EqualFold(strings.TrimSpace(state), "forked") {
-		titleState = diagnosticRunStatusLabel(result.Run)
-	}
 	writeCLILabeledDetail(out, cliLabeledDetail{
 		Title: fmt.Sprintf("Run %s  %s", result.Run.RunID, titleState),
 		Rows:  rows,
@@ -1527,9 +1519,6 @@ func fanOutSemanticRejectionFailureSummary(failure runtimefailures.Envelope) str
 
 func diagnosticRunStatusLabel(run diagnosticRunHeader) string {
 	status := formatCLIHumanCode(cliHumanCodeRunStatus, run.Status)
-	if strings.EqualFold(strings.TrimSpace(run.Status), "forked") && strings.TrimSpace(run.ContinuedAsRunID) != "" {
-		return fmt.Sprintf("%s - continued as run %s", status, strings.TrimSpace(run.ContinuedAsRunID))
-	}
 	return status
 }
 

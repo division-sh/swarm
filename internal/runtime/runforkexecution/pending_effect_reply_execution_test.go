@@ -123,7 +123,7 @@ func TestIssue642FreshPendingEffectReturnsOwnNestedReplyBothStores(t *testing.T)
 			}
 			selection := runforkadmission.SelectedContractSelection(loaded.Source)
 			options := SelectedContractAgentRuntimeOptions{ExecutionPosture: executionposture.Live, ProcessCapability: owner.ports.contexts.capability}
-			prepared, err := owner.Prepare(ctx, SelectedContractExecutionRequest{SourceRunID: runID, At: cut, AllowSourceFreeze: true,
+			prepared, err := owner.Prepare(ctx, SelectedContractExecutionRequest{SourceRunID: runID, At: cut,
 				Owner: owner, SourceLoader: loader, ContractSelection: selection, AgentRuntime: options})
 			if err != nil {
 				t.Fatal(err)
@@ -155,11 +155,11 @@ func TestIssue642FreshPendingEffectReturnsOwnNestedReplyBothStores(t *testing.T)
 			if err != nil {
 				t.Fatal(err)
 			}
-			childAttachment := q1StageBranchPointComponent(t, ctx, SelectedContractExecutionRequest{SourceRunID: staged.ForkRunID, AtStart: true, AllowSourceFreeze: true,
+			childAttachment := q1StageBranchPointComponent(t, ctx, SelectedContractExecutionRequest{SourceRunID: staged.ForkRunID, AtStart: true,
 				Owner: owner, SourceLoader: loader, ContractSelection: selection, AgentRuntime: options,
 				ForkOperation: &runfork.ForkOperationRequest{OperationID: uuid.NewString(), Actor: "pending-reply-proof", IdempotencyKey: uuid.NewString(),
 					TransportHash: "pending-reply-proof", SourceRunID: staged.ForkRunID, AtStart: true, TargetBundleHash: loaded.SourceArtifactFact.BundleHash(),
-					TargetRootReference: loaded.RootedSource.Admission().Reference(), AllowSourceFreeze: true, ContractSelection: selection}})
+					TargetRootReference: loaded.RootedSource.Admission().Reference(), ContractSelection: selection}})
 			childAttachment.serveSelectedControls(t)
 			child := childAttachment.materialized.ForkRunID
 			projected := requirePendingReplyCard(t, ctx, store, child)

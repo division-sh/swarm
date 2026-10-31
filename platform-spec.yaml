@@ -1631,7 +1631,7 @@ contract_formats:
           may create their exact missing run through the canonical run-creation owner. require-active events require
           a locked running or paused row. require-present is limited to typed run-bearing platform.runtime_log
           evidence and requires a row in any lifecycle status. runless events do not touch runs. Completed,
-          cancelled, failed, and forked runs reject ordinary new event persistence before any event, delivery,
+          cancelled and failed runs reject ordinary new event persistence before any event, delivery,
           receipt, replay-scope, outbox, state, or counter mutation. Event persistence never reopens a run or clears
           terminal evidence.
         duplicate_order: >
@@ -1811,7 +1811,7 @@ contract_formats:
           subtype_admission:
             platform.runtime_log: >
               RuntimeLogPersistence may append one event row globally without a run, or against an existing run in running,
-              paused, completed, cancelled, failed, or forked status. A run-scoped log locks and requires that row; it never
+              paused, completed, cancelled, or failed status. A run-scoped log locks and requires that row; it never
               creates or reopens a run. It creates no delivery, receipt, replay-scope, outbox, or execution authority.
             platform.inbound_recorded: >
               The selected-store inbound publication ledger may append this evidence row only while its locked target run is
@@ -7429,7 +7429,7 @@ engine:
             - Durable-data catalog-only and fork-pin fixtures enter named private operations on the exact selected backend and durable-data owner. They must not recover a database handle, reconstruct either owner, open independent transactions, or export transaction callbacks. Authored bundle catalog fixtures continue to use EnsureSourceArtifactWithData atomically; catalog-only setup does not authorize a production source-artifact bypass. Refused or unacknowledged fork-pin fixture operations return no pins, and queued SQLite cancellation must leave storage unchanged.
             - Semantic run fixtures consume the already-selected run-lifecycle and completion-candidate operation owners. The storetest run fixture family must not recover a raw handle or bootstrap a replacement store/coordinator; creation, pause, terminalization, completion and exact replay retain the original selected owner's admission and settlement authority.
             - Shared ordinary run setup must not emulate lifecycle SQL, source persistence, schema interpretation or transaction settlement in runlifecyclefixture. That package retains only explicit hostile snapshots and named faults; valid source and run creation consume the original native owners. Lower statement/decoder controls may admit their finite canonical schema fragment on the initially opened backend while retaining independent corruption/readback oracles; they do not establish full runtime-store admission or genuine selected-execution issuance.
-            - Admission fixtures must consume the native mutation attempt and original run/source owners, not restore a fixture-only existing-frame protocol. An explicit live attempt may lend its SQL frame to an unbound logical caller under the production cancellation and ownership rules. Missing runs return their exact typed identity and no valid fact or admission; cancelled and forked runs retain their exact refusal state. Artifact availability is checked on every active-source use even after run admission is warmed; a same-transaction private missing-artifact fault must not invalidate that cache to manufacture the refusal, and rollback restores the artifact without exporting a public transaction bridge.
+            - Admission fixtures must consume the native mutation attempt and original run/source owners, not restore a fixture-only existing-frame protocol. An explicit live attempt may lend its SQL frame to an unbound logical caller under the production cancellation and ownership rules. Missing runs return their exact typed identity and no valid fact or admission; cancelled runs retain their exact refusal state. Artifact availability is checked on every active-source use even after run admission is warmed; a same-transaction private missing-artifact fault must not invalidate that cache to manufacture the refusal, and rollback restores the artifact without exporting a public transaction bridge.
             - Shutdown and exact-handoff fixtures publish durable events and obligations through the original native publication owner before claiming or dispatching. Observation/fault spies may delegate those exact owners but must not seed at claim time, hydrate from a local event map or reconstruct transactions. Selected handoff witnesses reuse the existing real selected-execution claim gate, and session binding witnesses acquire genuine grants from the original registry; joined cleanup precedes capability and store release.
             - Backend roots retain their raw handle privately. The opaque selected Owner retains only private construction/lifetime state and exact typed projections; no raw handle, transaction method, query interface, dialect, or callback is promoted or recoverable.
             - A cross-domain atomic flow has one named operation owner. Shared transaction-scoped implementation is permitted only as an exact row-family helper below internal/store/internal/backend; generic repositories, transaction bundles, callback runners, and dialect service locators are forbidden.
@@ -7886,7 +7886,7 @@ engine:
         sqlite_support: supported through the same artifact-backed selected-contract run-fork owner as PostgreSQL, including exact changed-target preparation independent of loaded normal runtimes
         semantic_owner: internal/runtime/runforkexecution plus the closed internal/store/selected RunFork capability
       boundary: >
-          Both selected backends expose the same planning, historical readback, materialization, source-freeze,
+          Both selected backends expose the same planning, historical readback, materialization,
           decision/effect gate, binding, route-recovery, activation, selected execution, delivery/settlement,
           cleanup, and terminal public-readback contract. Backend SQL is private adapter implementation and does
           not own fork meaning. Selected-fork agent planning carries only runless declaration and route plans before
@@ -9289,7 +9289,7 @@ engine:
           - The declaring flow and every ancestor to the selected root must be keyless. A keyless child under keyed ancestry is potentially per-instance and is rejected with schedules fire per run; per-instance cadence is not supported. Selecting that same child standalone is valid.
           - The emitted event is an authored bare business event with an actual local consumer, an explicit compiled connection consumer, or a selected-root export. Root export with zero deliveries is valid. Input declaration, same name or a complete address is not a consumer.
           - Compilation and offline describe project declaration facts only. Describe renders declared; arms on deployment. No input pin, active binding, next-due coordinate or retention is inferred from a clock declaration.
-          - Only deployment through serve enables clock bindings. Offline verify, describe, test and finite run start do not arm clocks. The internal serve host used by local finite run start is not deployment authority and does not derive a clock-only standing generation, restore its clocks, infer declaration removal from unavailable deployment bindings, or mutate a declared clock through standing operator commands. An independent ingress declaration does not confer clock-binding authority on that finite host. An existing clock remains unchanged through finite hosting; full declaration-set reconciliation belongs to deployment only. A timer-only deployment requires no ingress or activation marker.
+          - Only deployment through serve enables clock bindings. Offline verify, describe and test do not arm clocks. A timer-only deployment requires no ingress or activation marker.
           - Arming consumes the genuine construction and attachment owner and the standing transaction's actual selected generation run. No synthetic instance, root entity, lazy constructor, generation prediction or ready-success substitute is permitted. Startup callback release ordering is unchanged.
           - Process execution scope consumes acknowledged deployment activation coordinates independently of provider transport targets. Clock-only services have no fabricated ingress alias or provider target. Startup recovery, context registration, reset and service controls consume the same exact run/generation coordinate; contradictory ingress and activation evidence is rejected.
           - Ordinary runtime restoration restores control-schedule families only. Serve admits or exactly replays declared instance clocks after construction, attachment and executable context publication, under the binding's exact standing work occurrence. Finite entry points cannot restore a deployment clock implicitly; replay preserves its existing activation and due coordinate.
@@ -20997,8 +20997,7 @@ platform_tables:
         infer origin from event history. source_root_directory pins the exact admitted root alongside bundle_hash;
         creation replay compares both and only the explicit source-revision owner may atomically revise the pair.
         The historical reference has no cascading source-content foreign key, so deletion removes availability,
-        never run history. Standing origins are additionally validated against the exact
-        standing_service_generations relation. Fork-materialized runs link back to their parent through the origin-owned
+        never run history. Fork-materialized runs link back to their parent through the origin-owned
         forked_from_run_id, forked_from_point_kind, and positive forked_from_revision coordinates. Event forks also
         retain forked_from_event_id; deployment-revision forks have no event ID and never invent one.
         event_count is the exact nonnegative projection of physical events rows linked by run_id, including durable
@@ -21016,7 +21015,7 @@ platform_tables:
       ddl: |-
         CREATE TABLE runs (
             run_id            UUID PRIMARY KEY DEFAULT gen_random_uuid(),
-            status            TEXT NOT NULL DEFAULT 'running' CHECK (status IN ('running', 'live', 'paused', 'completed', 'failed', 'cancelled', 'forked')),
+            status            TEXT NOT NULL DEFAULT 'running' CHECK (status IN ('running', 'live', 'paused', 'completed', 'failed', 'cancelled')),
             flow_path         TEXT,
             landing_run       BOOLEAN NOT NULL DEFAULT FALSE,
             bundle_hash        TEXT NOT NULL CHECK (bundle_hash ~ '^bundle-v2:sha256:[0-9a-f]{64}$'),
@@ -21037,7 +21036,6 @@ platform_tables:
             ended_at          TIMESTAMPTZ,
             CHECK ((origin_kind = 'event' AND trigger_event_id IS NOT NULL AND NULLIF(TRIM(trigger_event_type), '') IS NOT NULL AND forked_from_run_id IS NULL AND forked_from_point_kind IS NULL AND forked_from_revision IS NULL AND forked_from_event_id IS NULL) OR (origin_kind = 'deployment' AND trigger_event_id IS NULL AND trigger_event_type IS NULL AND forked_from_run_id IS NULL AND forked_from_point_kind IS NULL AND forked_from_revision IS NULL AND forked_from_event_id IS NULL) OR (origin_kind = 'scenario_setup' AND trigger_event_id IS NULL AND trigger_event_type IS NULL AND forked_from_run_id IS NULL AND forked_from_point_kind IS NULL AND forked_from_revision IS NULL AND forked_from_event_id IS NULL) OR (origin_kind = 'fork_materialization' AND trigger_event_id IS NULL AND trigger_event_type IS NULL AND forked_from_run_id IS NOT NULL AND forked_from_point_kind IN ('event', 'deployment_revision', 'run_start', 'state_revision') AND forked_from_revision > 0 AND ((forked_from_point_kind = 'event' AND forked_from_event_id IS NOT NULL) OR (forked_from_point_kind IN ('deployment_revision', 'run_start', 'state_revision') AND forked_from_event_id IS NULL)))),
             CHECK (continued_as_run_id IS NULL OR continued_as_run_id <> run_id),
-            CHECK ((status = 'forked') = (continued_as_run_id IS NOT NULL)),
             CHECK (completion_due_at IS NULL OR completion_revision > 0),
             CHECK (status = 'running' OR completion_due_at IS NULL),
             CHECK (flow_path IS NULL OR NULLIF(TRIM(flow_path), '') IS NOT NULL),
@@ -21076,9 +21074,6 @@ platform_tables:
         completed: All pipelines reached terminal states or idle. No in-flight events.
         failed: Unrecoverable error. Run cannot continue.
         cancelled: Admin-terminated. In-flight events drained but no new processing.
-        forked: 'A new run was forked from this one. Original run is frozen at the fork point,
-          admits no further execution or continuation mutation, and exposes continued_as_run_id as
-          its single forward lineage pointer. The forked run continues execution independently.'
       terminal_evidence:
         canonical_owner: internal/runtime/runlifecycle, private selected-store lifecycle adapters, and internal/runtime/failures
         store_enforcement:
@@ -21109,18 +21104,12 @@ platform_tables:
             failure: forbidden
             ended_at: required
             control_reason: required_nonempty_with_control_status_stopped; sole terminal cancellation reason
-          forked:
-            failure: forbidden
-            ended_at: required
-            control_reason: historical control evidence only; fork lineage explains the status
         explicit_terminalization_operation: >
           MarkTerminalRun accepts only failed and cancelled transitions, with typed failure evidence where the status
           requires it, and returns the authoritative persisted snapshot and exact mutation disposition from one named
-          selected-store transaction. It rejects completed and forked because generic terminalization owns neither
-          successful-completion eligibility nor selected-fork source lineage. Each selected-store adapter acquires the
-          run row before delivery rows so concurrent claim/settlement and terminalization use one lock order. The
-          selected-fork source operation owns the exact forked transition and continuation pointer on PostgreSQL and
-          SQLite; no generic terminal writer may emulate that operation.
+          selected-store transaction. It rejects completed because generic terminalization does not own
+          successful-completion eligibility. Each selected-store adapter acquires the
+          run row before delivery rows so concurrent claim/settlement and terminalization use one lock order.
         normal_completion_operation: >
           The durable completion-candidate executor is the sole successful-completion writer. For an ordinary run, one
           selected-store transaction locks the exact current candidate revision, observes selected-store time, and
@@ -21229,7 +21218,7 @@ platform_tables:
             that can expose terminal eligibility must choose immediate request, exact future request, deferred paused,
             terminal clear, or a structurally enforced proof that eligibility cannot change.
           terminal_absorption: >
-            Completed, failed, cancelled, and selected-store forked transitions clear completion_due_at in the same update
+            Completed, failed, and cancelled transitions clear completion_due_at in the same update
             that establishes terminal status. Exact duplicate terminal writes preserve the original snapshot and clear
             only an impossible stale current marker; conflicting terminal writes fail closed. Late blocker settlement
             returns absorbed_terminal and cannot reopen, revise, or otherwise mutate the terminal run.
@@ -21754,16 +21743,13 @@ run_model:
     fork_lineage: 'Forked runs link to their parent via runs.forked_from_run_id, forked_from_point_kind,
       and positive forked_from_revision. Event forks additionally retain forked_from_event_id;
       deployment-revision forks have no source event ID.
-      A source frozen by a freeze-style fork links forward through the source-owned runs.continued_as_run_id;
-      only the atomic source-freeze owner may write that pointer. This provides bidirectional cross-run lineage.
       The event tree within the forked run starts fresh (new event_ids, new source_event_id chains) — it does not
       extend the parent run''s event tree.'
   lifecycle:
     creation: >
       Every run is constructed with exactly one immutable typed origin and persists its discriminator and complete
       payload atomically with the run: event {event_id,event_type}; deployment with no fabricated
-      event and exact pinned declaration/version evidence in its durable feed records; scenario_setup with no payload;
-      standing_generation {service_id,generation} backed by the exact standing_service_generations relation; or
+      event and exact pinned declaration/version evidence in its durable feed records; scenario_setup with no payload; or
       fork_materialization {source_run_id,fork_point_kind,fork_revision,source_event_id only for event forks}.
       Later events and lifecycle transitions preserve the
       origin unchanged. Readers decode only these persisted facts and never infer origin from event history.
@@ -21850,7 +21836,7 @@ run_model:
       unfinished work; in-progress delivery, session, turn, audit, non-agent, route, retry/idempotency, and other
       unsupported historical facts remain permanently fail-closed unless a later issue names a concrete consumer and
       proves a new owner.'
-    command: 'public CLI: `swarm run fork <source-run-id> [--source <directory>] [--at-event <event-id>] [--pin <name@vN|ResourceVersionID>] [--allow-source-freeze] [--idempotency-key <key>]`, consuming /v1/rpc run.fork'
+    command: 'public CLI: `swarm run fork <source-run-id> [--source <directory>] [--at-event <event-id>] [--pin <name@vN|ResourceVersionID>] [--idempotency-key <key>]`, consuming /v1/rpc run.fork'
     dry_run_command: 'retired in v1 CLI; historical `swarm fork --dry-run` is not a supported operator command'
     materialize_only_command: 'retired in v1 CLI; historical `swarm fork --materialize-only` is not a supported operator command'
     activation_command: 'retired in v1 CLI; historical `swarm fork --activate` is not a supported operator command'
@@ -21886,27 +21872,6 @@ run_model:
       revision; they MUST NOT stamp entered_state_at with the selected event occurrence time unless that is when the
       current_state was entered.
       Full fork execution remains a separately gated operation.'
-    activation_admission: 'The activate form consumes an already materialized state-only fork and is the
-      supported activation slice for forks whose state was produced by materialize-only admission. Activation
-      requires a fork run with status=paused, fork lineage, fork-local entity_state rows, and a revalidated
-      execution_ready=true planner result at the original selected event revision. Activation atomically transitions the
-      fork run to status=running and the source run to status=forked through store.run_fork.source_freeze. A running or
-      paused source requires explicit allow_source_freeze=true; a completed or otherwise terminal source refuses before
-      confirmation or mutation. It may create fork-local event and delivery
-      rows only after runtime.run_fork.historical_replay_execution consumes a concrete
-      runtime.run_fork.historical_replay_execution_admission that marks event_deliveries as executable fork work for
-      source pending unstarted agent deliveries that the canonical replay_resume_admission taxonomy marks
-      delivery_event_replay_ready. Activation/store MUST consume owner-authorized executable work from
-      runtime.run_fork.historical_replay_execution and MUST NOT reselect replayable source deliveries directly from
-      RunForkPlan or store.run_fork.replay_resume_admission. The store delivery-event replay primitive uses fresh fork
-      event IDs, a direct committed replay-scope row, and run_fork_delivery_event_replays lineage rows. It fails closed with no partial mutation if the source run advanced
-      after the materialized source revision, if the fork already has events, deliveries, sessions, or turns, or if node, in-progress,
-      failed, dead-letter, timer, route, session, active-turn, replay, or contract-swap facts
-      would require unsupported historical replay. Source committed replay-scope facts remain fail-closed unless
-      an approved selected-contract scope policy classifies facts present in the selected revision as lineage/no-action evidence only.
-      Activation does not copy source event IDs, replay delivered/completed
-      or receipt-only facts, reconstruct timer, route, session, turn, or contract rows, or recompute recipients from
-      current subscriptions.'
     historical_delivery_cut_evidence: >-
       Delivery/event replay consumes publication and recipient facts only from the exact admitted source cut.
       After loading that revision, the native writer must not reload the source event or delivery from current
@@ -21914,55 +21879,13 @@ run_model:
       or out-of-cut facts fail closed before child writes. Existing event decoding, schema evidence, full publication
       receiver validation, current execution authority and generic historical-agent eligibility remain independent
       requirements. This index is neither a persisted cache nor permission to execute.
-    source_freeze:
-      owner: store.run_fork.source_freeze
-      contract: >
-        This is the only writer of source status=forked. In one caller-owned transaction it locks an existing running or
-        paused source, verifies explicit source-freeze confirmation and absence of live execution authority, writes
-        ended_at plus the unique source-owned continued_as_run_id forward pointer, supersedes source decision cards,
-        drafts, held human-task/proposed-effect continuations, and route obligations with append-only change evidence,
-        activates the paused child, and records both lifecycle author activities. Ordinary activation and selected-contract
-        unadvanced activation consume this owner. Generic terminal mutation rejects forked. Rollback leaves every coupled
-        source, child, decision, pointer, and activity fact unchanged.
-      selected_historical_source: >
-        Independently admitted selected-contract children may read a source already frozen by this owner. Materialization
-        and activation each validate its locked canonical lifecycle, original freeze successor origin and committed cut,
-        plus this child's own exact origin, binding, preparation and current attached execution authority. The original
-        successor may have completed; continued_as_run_id identifies that original freeze, not all independently owned
-        child branches. Historical admission activates only the new child, never freezes the source again, changes its
-        pointer or ended_at, emits another source-freeze mutation, resumes its execution, or fabricates divergence.
-        Actual post-cut advancement remains separately accounted. Results and immutable operation ACKs report the actual
-        source status forked and source_frozen=true, not a claim that this invocation performed the original freeze.
-        Generic/state-only activation and source execution retain their existing refusals.
-      selected_write_authority: >
-        The admitted fork-activation operation, together with its explicit current source-freeze consent and the
-        current native process generation admitted in that same transaction attempt, authorizes the original run's
-        complete freeze subtree. Exact original-root admission identifies that source but does not grant writes by
-        itself. The existing fork coordinator delegates source lifecycle, card, draft, gate and activity mutations to
-        canonical RunLifecycle under the original source's exact admission. Fork activation, result and cleanup retain
-        the selected target's admission. Neither the selected root nor its context nor a standing cross-run grant
-        authorizes source writes. A retained explicit activation has its own consent; a supplied permanent operation's
-        immutable consent must agree with that activation and must not be upgraded or discarded on mismatch.
-      preserved_lineage: >
-        Freeze preserves source events, deliveries, receipts, dead letters, timers, sessions, turns, audits, reply contexts,
-        state history, decision/effect/directive evidence, and fork facts as immutable history. It does not dead-letter,
-        settle, delete, migrate, copy, reopen, or reinterpret those rows as source execution. A post-freeze
-        continuation encountering the exact typed forked-run claim refusal returns its process-local carrier
-        without claiming or settling the preserved source delivery; only the fork-local delivery may execute.
-        Only an actual live lease, claim, reservation, or in-progress authority blocks the freeze; historical rows do not.
-      terminal_effect_selection: >
-        The shared terminal lifecycle mutation owner makes one closed effect decision before mutation. Failed and
-        cancelled transitions terminalize deliveries; successful completion and the named fork-source transition do not.
-        Unsupported states fail closed and never inherit cancellation effects. This distinction does not suppress
-        the specified source-freeze decision/draft/held-continuation/route-obligation supersession, lifecycle evidence,
-        or atomic child activation. The delivery adapter does not reinterpret a run_forked reason as an exception.
-      execution_admission: >
-        Every independently mutable run-scoped claimant uses internal/store/runlifecycle.RequireActive in its existing
-        transaction. RequireActive locks an existing running or paused row and never creates or reopens a run. Executable
-        selectors join the same status policy; read-only history remains visible. Runless/global work and standalone
-        conversation-fork chat are different concepts and do not infer a run association. Fork-specific selected execution,
-        binding, and recovery writers admit the active child; source columns remain lineage only. The selected
-        source-advanced divergence path remains source-preserving and never writes continued_as_run_id.
+    execution_admission: >
+      Every independently mutable run-scoped claimant uses internal/store/runlifecycle.RequireActive in its existing
+      transaction. RequireActive locks an existing running or paused row and never creates or reopens a run. Executable
+      selectors join the same status policy; read-only history remains visible. Runless/global work and standalone
+      conversation-fork chat are different concepts and do not infer a run association. Fork-specific selected execution,
+      binding, and recovery writers admit the active child; source columns remain lineage only. The selected
+      source-advanced divergence path remains source-preserving and never writes continued_as_run_id.
     planning_owner: 'Fork planning/admission is owned by the canonical store-backed fork planner. CLI,
       dashboard, and other operator surfaces MUST consume that owner and MUST NOT reimplement
       fork planning with direct SQL joins.'
@@ -21970,7 +21893,7 @@ run_model:
       Selected-contract materialization, activation, and discard are each interpreted once by the backend-neutral
       selected-contract run-fork owner. PostgreSQL and SQLite provide only private operation-specific transaction,
       lock, read, write, and finalize ports; they MUST NOT independently interpret lifecycle status, duplicate
-      disposition, source advancement, source freeze, route recovery, blocker meaning, cleanup, or result semantics.
+      disposition, source advancement, route recovery, blocker meaning, cleanup, or result semantics.
       Planning that guards one of these mutations executes inside the same source/fork-locked transaction. A generic
       repository, backend switch, ambient transaction detection, compatibility path, or backend-owned semantic
       state machine is forbidden.
@@ -22375,15 +22298,6 @@ run_model:
       events, timers, routes, sessions, turns, source-advanced policy, contract-swap state, or UI/API execution state.
       Missing, ambiguous, stale, incompatible, or unavailable binding/source/admission evidence is a hard admission
       failure before any selected-contract execution mutation.'
-    selected_contract_activation_gate: 'Selected-bound fork activation is owned by the runtime-side
-      runtime.run_fork.selected_contract_execution.activation_gate before store activation mutates lifecycle state.
-      The gate loads durable selected-contract binding, consumes selected_contract_execution_admission, and permits
-      activation to proceed only when the selected-bound fork has no selected executable frontier and no replayable source
-      delivery/event work. If selected-contract frontier evidence or source delivery/event replay would be required, the
-      gate fails closed before source freeze, fork activation, run_fork_delivery_event_replays insertion, fork event row
-      creation, or fork delivery row creation. This gate does not run handlers, create selected fork-local executable
-      event/delivery rows, write receipts, dead letters, idempotency state, emitted follow-up events, timers, routes,
-      sessions, turns, source-advanced policy, contract-swap state, or UI/API execution state.'
     selected_contract_source_advanced_branch: 'Mutating selected-contract event or deployment-revision execution treats a source run
       that advanced after the materialized source revision as branch divergence evidence, not as executable fork work and not as a fork
       suppressor. This policy is owned by runtime.run_fork.selected_contract_execution and its store-owned durable branch
@@ -22829,7 +22743,7 @@ run_model:
     historical_replay_delivery_event_replay_execution: 'The first mutating historical replay execution child is owned by
       runtime.run_fork.historical_replay_execution and is limited to the already-admitted
       delivery_event_replay_ready primitive. It consumes runtime.run_fork.historical_replay_execution_admission before
-      any source freeze, fork activation, event row creation, delivery row creation, committed replay-scope row, or
+      any fork activation, event row creation, delivery row creation, committed replay-scope row, or
       lineage write. It validates the complete historical fact matrix, keeps unsupported families as explicit blockers
       or split siblings, and emits owner-authorized delivery_event_replay_ready work identities. It may delegate physical
       fork-local row writes to store.run_fork.delivery_event_replay, but that store primitive is not the semantic
@@ -22883,15 +22797,6 @@ run_model:
         Source run status is unchanged. Copy reconstructed entity states into the fork context with fork-local
         revision=1 and entered_state_at from the selected revision''s current_state mutation evidence, then stop; do not boot,
         resume, redeliver, or mutate runtime delivery/session/timer/route state.'
-      3b_activate_materialized_fork: 'For an activation fork, consume a previously materialized fork run.
-        Revalidate the original selected revision against current source-run facts, require no source advancement and
-        no unsupported replay/timer/route/session/turn/contract-swap facts, optionally create fork-local event/delivery
-        rows and direct committed replay-scope rows for the delivery_event_replay_ready subset only through
-        runtime.run_fork.historical_replay_execution consuming historical replay execution admission and owner-authorized
-        executable delivery work, then atomically mark the source run forked and the fork run running. Activation/store
-        does not authorize replay directly from replay_resume_admission or RunForkPlan pending rows. Future runtime work uses the fork
-        run_id, fork-local entity_state rows, and fork-local pending delivery rows; broader source-run replay remains
-        unsupported outside the gated delivery/event primitive.'
       3b1_selected_contract_readiness_classifier: 'For selected-contract fixed-event readiness explanation, the
         runtime.run_fork.selected_contract_readiness_classifier owner consumes existing planner, replay taxonomy,
         contract-frontier, route/topology, recipient-planning, selected-execution, current-state/materialization,
@@ -23382,8 +23287,6 @@ run_model:
     isolation: 'Forked runs are fully isolated. They get their own event stream, their own entity state copies,
       and their own agent sessions. Fork state materialization writes entity_state rows under the fork run_id while
       preserving entity_id from the source run. Results can be compared side-by-side with the original run.'
-    original_run: 'The source run transitions to status=forked. It is frozen — no new events are processed.
-      Its data is preserved for comparison and audit.'
   mutation_log:
     description: 'The entity_mutations table is the audit trail for all entity state changes. It serves three
       purposes: (1) flight recorder — step-by-step view of what happened, (2) fork — state reconstruction at
@@ -28798,7 +28701,7 @@ cli_specification:
           families:
             run_status:
               machine_owner: components.schemas.RunStatus and canonical runtime/store run lifecycle writers
-              phrases: {running: running, paused: paused, completed: completed, failed: failed, cancelled: cancelled, forked: forked}
+              phrases: {running: running, paused: paused, completed: completed, failed: failed, cancelled: cancelled}
             agent_status:
               machine_owner: components.schemas.AgentStatus and operatorAgentProjection.v1Status
               phrases: {idle: idle, running: running, paused: paused, failed: failed, terminated: terminated}
@@ -28847,7 +28750,7 @@ cli_specification:
                 UNKNOWN: UNKNOWN
             operational_state:
               machine_owner: internal/operatorread/behavior.go ProjectRunOperationalStatus and components.schemas.OperationalState
-              phrases: {running: running, stalled: stalled, paused: paused, completed: completed, failed: failed, cancelled: cancelled, forked: forked}
+              phrases: {running: running, stalled: stalled, paused: paused, completed: completed, failed: failed, cancelled: cancelled}
             run_blocking_tuples:
               machine_owner: internal/operatorread/behavior.go ProjectRunOperationalStatus
               current_non_empty:
@@ -31257,8 +31160,7 @@ cli_specification:
           `--abandon-active-runs` is explicit; `--dev` does not imply abandon. Serve MUST NOT special-case SQLite as a
           skip/no-op and MUST NOT use raw Postgres handle presence as the capability decision.
         active_run_scope: >
-          The owner selects active non-standing source runs with `runs.status` in `running` or `paused`, excluding exactly each
-          `standing_services.current_run_id`. Each selected run is terminalized
+          The owner selects active source runs with `runs.status` in `running` or `paused`. Each selected run is terminalized
           as `runs.status=cancelled`, with `run_control_state.control_status=stopped`, `reason=server_restart_abandon`, and
           `controlled_by=swarm.serve.abandon_active_runs`.
         delivery_scope: >
@@ -32518,7 +32420,7 @@ cli_specification:
         Feed-ID publication policy remains held for the user's ruling and is not implemented by this arm.
         Fork selects the child as the live run and pauses whichever sibling is currently live for the exact flow,
         including when the source is an older paused sibling. Several forks at one point are allowed.
-        No source-freeze confirmation is required; --allow-source-freeze is deprecated.
+        No source-freeze confirmation or flag is accepted.
         The selected store owns the deployment and runs(flow_path) WHERE status='live' is the unique selector.
         Selected synchronous publication must settle under the selected grant. After exact actor self-release,
         one mutation attempt closes the selected executor, pauses/selects and transfers only acknowledged,
@@ -33075,7 +32977,7 @@ cli_specification:
         group: run_operate
         inherits_contract: cli_specification.command_catalog.trace
       run_fork:
-        command: swarm run fork <source-run-id> [--source <directory>] [--at-start | --at-event <event-id>] [--pin <name@vN|ResourceVersionID>] [--allow-source-freeze] [--idempotency-key <key>]
+        command: swarm run fork <source-run-id> [--source <directory>] [--at-start | --at-event <event-id>] [--pin <name@vN|ResourceVersionID>] [--idempotency-key <key>]
         group: run_operate
         inherits_contract: cli_specification.command_catalog.run_fork
         supersession_scope: >
@@ -33878,7 +33780,6 @@ api_specification:
         - completed
         - failed
         - cancelled
-        - forked
       RunOrigin:
         description: >
           Immutable, explicitly discriminated run creation provenance. Exactly one variant is present and readers
@@ -33986,7 +33887,7 @@ api_specification:
             $ref: '#/components/schemas/Timestamp'
           ended_at:
             $ref: '#/components/schemas/Timestamp'
-            description: Omitted while run is active; present once status is terminal (completed/failed/cancelled/forked).
+            description: Omitted while run is active; present once status is terminal (completed/failed/cancelled).
           continued_as_run_id:
             $ref: '#/components/schemas/OpaqueId'
             description: Present on a source frozen by a freeze-style fork; identifies the one run that continues its state.
@@ -34075,7 +33976,6 @@ api_specification:
         - completed
         - failed
         - cancelled
-        - forked
       BlockingLayer:
         type: string
         description: >-
@@ -35076,7 +34976,7 @@ api_specification:
             items:
               $ref: '#/components/schemas/EventReplayDelivery'
       RunForkResult:
-        description: Reports both the activated fork and the actual source lifecycle outcome. source_frozen is true exactly when source_run_status is forked; otherwise the source-advanced branch preserved the reported source status.
+        description: Reports both the activated fork and the actual source lifecycle outcome.
         oneOf:
         - type: object
           additionalProperties: false
@@ -40317,12 +40217,6 @@ api_specification:
         description: "Optional target/source bundle selector. Equal or omitted values use same-bundle selected_contracts semantics. A differing value selects the exact retained target artifact for independent process-owned selected preparation. Loaded normal runtime membership is irrelevant; missing target artifacts fail with BUNDLE_UNAVAILABLE and corrupt or mismatched artifact bytes fail with BUNDLE_DATA_INTEGRITY_ERROR."
         schema:
           $ref: '#/components/schemas/BundleHash'
-      - name: allow_source_freeze
-        required: false
-        description: Must be true before forking a running or paused source. It permits permanently freezing a source that has not advanced beyond the fork point; a frozen source cannot resume. An advanced source stays independently live. Withhold permission to cancel without starting a fork. The mutation rechecks source activity and this authorization in the source-freeze transaction, and the result reports the actual source_frozen and source_run_status outcome. Terminal sources refuse without requiring confirmation. The retired confirm_source_freeze parameter is rejected, not aliased.
-        schema:
-          type: boolean
-          default: false
       - name: data_pin_overrides
         required: false
         description: Exact structured declaration/version replacements. Head and alias selectors are forbidden; omission inherits the complete source pin set.
@@ -42811,7 +42705,7 @@ process_local_work_lifetime_authority:
       before dependencies are released. Cancellation of a retirement waiter does not release the
       read's lease. Neither query retry nor SQLSTATE-based error suppression is permitted.
     delivery_continuation: The exact opaque continuation capability is attached to the EventDelivery before enqueue. One scoped carrier guard retains the exact EventDelivery or raw continuation across every Manager and Pipeline exit and resolves the capability exactly once through one atomic typed operation. The only successful resolutions are returned to the same coordinator, consumed into a fenced execution attempt, or terminal-fenced because terminal settlement won the race. Terminal claim outcomes fence the exact continuation before returning rather than consuming the carrier, so direct dispatch reports terminal evidence rather than a fabricated transfer or deferral. Resolution errors remain visible and fence the owning generation; carriers never poll, sleep, retry the capability, or infer success. Retry settlement returns a fresh retry-scheduled snapshot to that coordinator before attempt completion. A current agent delivery that authors its own flow-terminal event retains its exact lifecycle generation while the route is fenced and the accepted carrier finishes; the loop finalizer publishes terminal lifecycle authority only after that carrier settles. Duplicate resolution and cross-authority transfer fail closed. Coordinator retirement rejects new carriers and attempt admission, including Consume after Acquire; that refusal retains typed retirement identity. Worker, scanner and finalizer classification consumes the actual coordinator retirement fence even before cancellation becomes visible in the admitted lease context. Every error branch must be that owner's typed retirement refusal or actual owning-context cancellation to be ordinary shutdown; an unowned retirement refusal, invalid result, independent joined failure, exact carrier-cleanup error or lease-settlement error remains fatal. An already accepted exact carrier must still return to its predecessor or resolve an existing terminal fence before process-local joins can finish; that cleanup cannot acquire, wake or mutate a successor.
-    coordinator: The normal runtime-generation coordinator begins under the runtime occurrence before readiness, enumerates its exact persisted authority to explicit bounded-cursor exhaustion, and is joined before runtime/store teardown. After startup publishes restored routes, one event-driven synchronization through that same coordinator returns the exact scan/dispatch result before readiness. Dispatch results are closed over transferred, already held by another proven exact owner, terminally settled, deferred under an exact named live agent-route/internal-subscription/carrier-return wake owner, and fatal. A fatal scan or dispatch result atomically retires the coordinator, rejects every later handoff/acquire/retain admission, closes runtime admission, and cancels the serving generation; a runtime cannot remain ready after losing its only continuation owner. Canonical construction and attachment precede ordinary node delivery; a node cannot defer behind topology that a retired handler-construction path would create. Successor authority activation uses selected-store time to make predecessor open attempts immediately reclaimable through the ordinary fenced claim path. In that same fenced transaction, positively recorded forked source runs are excluded from predecessor attempt expiry, authority rebinding and delivery-family revision declarations, including when their retained rows already bear the current authority. Their delivery, attempt, timestamp and revision evidence remains immutable. A descendant, fork origin or shared bundle alone does not freeze an independently live advanced source; eligible running and paused runs retain ordinary activation and reclaim. Canonical route, topology, authentication, carrier-return, and durable due-time lifecycle changes signal the coordinator; no free-form blockage interpreter, fixed scan/dispatch retry, manual backlog API, process-global retry registry, or successor-barrier reuse exists.
+    coordinator: The normal runtime-generation coordinator begins under the runtime occurrence before readiness, enumerates its exact persisted authority to explicit bounded-cursor exhaustion, and is joined before runtime/store teardown. After startup publishes restored routes, one event-driven synchronization through that same coordinator returns the exact scan/dispatch result before readiness. Dispatch results are closed over transferred, already held by another proven exact owner, terminally settled, deferred under an exact named live agent-route/internal-subscription/carrier-return wake owner, and fatal. A fatal scan or dispatch result atomically retires the coordinator, rejects every later handoff/acquire/retain admission, closes runtime admission, and cancels the serving generation; a runtime cannot remain ready after losing its only continuation owner. Canonical construction and attachment precede ordinary node delivery; a node cannot defer behind topology that a retired handler-construction path would create. Successor authority activation uses selected-store time to make predecessor open attempts immediately reclaimable through the ordinary fenced claim path. Eligible running and paused runs retain ordinary activation and reclaim. Canonical route, topology, authentication, carrier-return, and durable due-time lifecycle changes signal the coordinator; no free-form blockage interpreter, fixed scan/dispatch retry, manual backlog API, process-global retry registry, or successor-barrier reuse exists.
     concurrent_dispatch: >
       The coordinator may dispatch independent durable continuations concurrently through a
       bounded worker pool. The selected store may lower that operational bound to respect its
@@ -43159,7 +43053,7 @@ durable_pipeline_processing_obligation_authority:
       account for parked rows without claiming, acknowledging or changing them. Invalid control, source or standing
       authority is never inferred to be harmless parking. Global ingress, running-run refusal, busy claims and retry
       blockage retain their existing startup refusal semantics.
-      Terminal or forked lifecycle is not an operator pause. Its existing retirement/selected-execution dispatch
+      Terminal lifecycle is not an operator pause. Its existing retirement/selected-execution dispatch
       fencing remains authoritative; pause classification must not replace that outcome with an active-run error.
     startup_blockage_evidence: >
       Startup admission rejects every blocked result, including an exhausted scan with remembered blockage. Existing
@@ -43388,7 +43282,7 @@ durable_pipeline_processing_obligation_authority:
     run_summary: >
       RunSummary separately counts replayable absent acknowledgements, successful acknowledgements, terminal non-success
       acknowledgements, pending decision-route obligations, the pending subset that already has its processed
-      acknowledgement, and diagnostic-direct exclusions, and reports inactive and forked run state. Open-work projections
+      acknowledgement, and diagnostic-direct exclusions, and reports inactive run state. Open-work projections
       include every pending route. Successful-completion policy excludes the already-processed pending subset because its
       route execution is complete and only convergence settlement remains. Final run policy is owned by #2111 and consumes
       this projection without reinterpreting receipts.
@@ -43495,7 +43389,7 @@ durable_pipeline_processing_obligation_authority:
         - {path: internal/store/internal/runtimepersistence/pipeline_obligation_parity_test.go, test: TestPipelineObligationSQLitePostgresParityMatrix}
     PPO-SUM-001:
       owner_ref: platform-spec.yaml#durable_pipeline_processing_obligation_authority.projection_contracts
-      rule: Per-run summary preserves absent, successful, terminal non-success, deferred, diagnostic, inactive, and forked distinctions.
+      rule: Per-run summary preserves absent, successful, terminal non-success, deferred, diagnostic, and inactive distinctions.
       executable_proofs:
         - {path: internal/store/internal/runtimepersistence/pipeline_obligation_parity_test.go, test: TestPipelineObligationSQLitePostgresParityMatrix}
     PPO-FAM-001:

@@ -33,7 +33,7 @@ func TestSelectedRunForkAdapterPreservesOutcomeAndError(t *testing.T) {
 						Activation: runfork.RunForkActivation{
 							SourceRunID: runForkTestSourceRunID, ForkRunID: runForkTestForkRunID,
 							ForkPoint: runfork.RunForkPoint{Kind: runfork.RunForkPointEvent, EventID: runForkTestEventID, Revision: 1},
-							Activated: true, ForkRunStatus: "running", SourceFrozen: true, SourceRunStatus: "forked",
+							Activated: true, ForkRunStatus: "running", SourceFrozen: false, SourceRunStatus: "paused",
 						},
 						ExecutedEventCount: 2,
 					}, failure
@@ -49,7 +49,7 @@ func TestSelectedRunForkAdapterPreservesOutcomeAndError(t *testing.T) {
 				}
 				return
 			}
-			if result.Owner != runfork.RunForkSelectedContractExecutionOwner || result.SourceRunID != runForkTestSourceRunID || result.ForkRunID != runForkTestForkRunID || result.ForkEventID != runForkTestEventID || result.ForkRunStatus != "running" || result.SourceRunStatus != "forked" || !result.SourceFrozen || result.ExecutedEventCount != 2 || result.BundleHash != runForkTestBundleHash || !result.activationAcknowledged {
+			if result.Owner != runfork.RunForkSelectedContractExecutionOwner || result.SourceRunID != runForkTestSourceRunID || result.ForkRunID != runForkTestForkRunID || result.ForkEventID != runForkTestEventID || result.ForkRunStatus != "running" || result.SourceRunStatus != "paused" || result.SourceFrozen || result.ExecutedEventCount != 2 || result.BundleHash != runForkTestBundleHash || !result.activationAcknowledged {
 				t.Fatalf("lost execution result: %+v", result)
 			}
 		})
@@ -67,7 +67,7 @@ func TestSelectedRunForkAdapterRefusesContradictoryActivationEvidence(t *testing
 			SourceRunID: runForkTestSourceRunID, ForkRunID: runForkTestForkRunID,
 			ForkPoint: runfork.RunForkPoint{Kind: runfork.RunForkPointEvent, EventID: runForkTestEventID, Revision: 1},
 			Activated: true, ForkRunStatus: runfork.RunForkActivatedStatus,
-			SourceRunStatus: runfork.RunForkSourceFrozenStatus, SourceFrozen: true,
+			SourceRunStatus: "paused", SourceFrozen: false,
 		},
 	}
 	for _, tc := range []struct {

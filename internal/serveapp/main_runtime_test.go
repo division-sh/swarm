@@ -1554,15 +1554,13 @@ func runServedRunForkBackendProof(t *testing.T, backend servedparity.Backend) {
 	requireServedRunStatusWithDebug(t, rt.Endpoint, rt.DB, rt.Backend, started.RunID, "live")
 
 	forkParams := map[string]any{
-		"source_run_id":       started.RunID,
-		"fork_event_id":       published.EventID,
-		"allow_source_freeze": true,
-		"idempotency_key":     "issue-2361-" + rt.Backend + "-run-fork",
+		"source_run_id":   started.RunID,
+		"fork_event_id":   published.EventID,
+		"idempotency_key": "issue-2361-" + rt.Backend + "-run-fork",
 	}
 	stdout, stderr, code := runServedCLICommand(t, rt.Endpoint, []string{
 		"run", "fork", started.RunID,
 		"--at-event", published.EventID,
-		"--allow-source-freeze",
 		"--idempotency-key", forkParams["idempotency_key"].(string),
 		"--json",
 	})

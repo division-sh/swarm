@@ -81,8 +81,8 @@ func TestR2NamedRecordEmitSurvivesServedRestartBothStores(t *testing.T) {
 			}
 			fork := requireSelectedForkExecutionRPCResult(t, rt.Endpoint, map[string]any{
 				"source_run_id": published.RunID, "fork_event_id": completedEventID,
-				"bundle_hash":         rt.BundleHash,
-				"allow_source_freeze": true, "idempotency_key": "r2-record-fork",
+				"bundle_hash":     rt.BundleHash,
+				"idempotency_key": "r2-record-fork",
 			})
 			if fork.ForkRunID == "" || fork.ForkRunID == published.RunID {
 				t.Fatalf("invalid typed-record fork: %+v", fork)

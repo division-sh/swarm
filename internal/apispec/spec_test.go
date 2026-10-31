@@ -349,12 +349,11 @@ func TestGeneratedOpenRPCBundleIdentityDescriptionsPreserveConstraints(t *testin
 		"BUNDLE_UNAVAILABLE",
 		"BUNDLE_DATA_INTEGRITY_ERROR",
 	)
-	if _, ok := runForkParams["confirm_source_freeze"]; ok {
-		t.Fatal("generated run.fork still accepts retired freeze consent")
+	for _, retired := range []string{"confirm_source_freeze", "allow_source_freeze"} {
+		if _, ok := runForkParams[retired]; ok {
+			t.Fatalf("generated run.fork still accepts retired freeze parameter %q", retired)
+		}
 	}
-	assertOpenRPCParamDescriptionContains(t, "run.fork", runForkParams, "allow_source_freeze",
-		"permanently freezing", "advanced source stays independently live", "Terminal sources refuse",
-	)
 }
 
 func TestFilesystemSourceAuthorityPublishesOnlyAdmittedArtifactRuntimeMethods(t *testing.T) {

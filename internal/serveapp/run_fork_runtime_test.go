@@ -19,21 +19,6 @@ import (
 	"github.com/google/uuid"
 )
 
-func TestRunForkRuntimeOwnerHarness_ActivateWithBundleHashReachesSelectedActivationGate(t *testing.T) {
-	var buf bytes.Buffer
-	code := runForkRuntimeOwnerHarness(context.Background(), t.TempDir(), []string{
-		"--activate",
-		"--bundle-hash", storetest.SemanticFixtureBundleHash,
-		"--run", uuid.NewString(),
-	}, &buf)
-	if code != 1 {
-		t.Fatalf("runForkRuntimeOwnerHarness code=%d, want runtime failure after parsing; output=%s", code, buf.String())
-	}
-	if strings.Contains(buf.String(), "invalid --bundle-hash") {
-		t.Fatalf("output = %q, want --activate to consume canonical selected activation gate rather than parse-level bundle rejection", buf.String())
-	}
-}
-
 func TestRunForkRuntimeOwnerHarness_PersistedBundleDoesNotRequireAmbientSource(t *testing.T) {
 	dsn := testutil.StartPostgresDSN(t)
 	selected, _ := storetest.StartPostgresRuntimeStoreWithReopen(t, dsn)

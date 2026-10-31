@@ -174,7 +174,7 @@ func runSelectedContractActivityForkCases(t *testing.T, fixture activityForkFixt
 			}
 			loader := &fakeSelectedContractSourceLoader{loaded: loaded}
 			request := SelectedContractExecutionRequest{
-				SourceRunID: sourceRunID, At: sourceRequestEventID, AllowSourceFreeze: true, Owner: fixture.owner,
+				SourceRunID: sourceRunID, At: sourceRequestEventID, Owner: fixture.owner,
 				SourceLoader: loader, ContractSelection: selection,
 				AgentRuntime: SelectedContractAgentRuntimeOptions{ProcessCapability: fixture.owner.ports.contexts.capability},
 			}

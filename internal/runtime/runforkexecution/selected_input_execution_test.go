@@ -100,7 +100,7 @@ func TestSelectedInputExecutionEvidenceBothStores(t *testing.T) {
 				selection := runforkadmission.SelectedContractSelection(loaded.Source)
 				operation := runfork.ForkOperationRequest{OperationID: uuid.NewString(), Actor: "selected-input-evidence", IdempotencyKey: fault,
 					TransportHash: "selected-input-evidence-" + fault, SourceRunID: run, ForkEventID: eventID,
-					TargetBundleHash: loaded.SourceArtifactFact.BundleHash(), TargetRootReference: loaded.RootedSource.Admission().Reference(), AllowSourceFreeze: true, ContractSelection: selection}
+					TargetBundleHash: loaded.SourceArtifactFact.BundleHash(), TargetRootReference: loaded.RootedSource.Admission().Reference(), ContractSelection: selection}
 				claimed := false
 				var claimedAuthority effects.Authority
 				if fault == "missing_authority" || fault == "foreign_authority" || fault == "retired_execution" {
@@ -158,7 +158,7 @@ func TestSelectedInputExecutionEvidenceBothStores(t *testing.T) {
 					}
 				}}
 				result, err := ExecuteSelectedContractRunFork(ctx, SelectedContractExecutionRequest{
-					SourceRunID: run, At: eventID, AllowSourceFreeze: true, Owner: owner, SourceLoader: loader,
+					SourceRunID: run, At: eventID, Owner: owner, SourceLoader: loader,
 					ForkOperation: &operation, LiveRuntime: liveRuntime, LiveContexts: liveContexts, LiveRuns: selected.(runlifecycle.LiveRunReader),
 					SourceArtifactFact: loaded.SourceArtifactFact,
 					ContractSelection:  selection,

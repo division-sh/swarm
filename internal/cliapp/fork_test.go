@@ -42,7 +42,6 @@ func TestForkCommandUsesRunForkRPCAndRenders(t *testing.T) {
 	var stdout, stderr bytes.Buffer
 	code := executeRootCommandWithOptions(context.Background(), t.TempDir(), []string{
 		"run", "fork", sourceRunID,
-		"--allow-source-freeze",
 		"--source", sourceDir,
 		"--publication", forkEventID,
 		"--idempotency-key", "idem-fork-1",
@@ -51,13 +50,12 @@ func TestForkCommandUsesRunForkRPCAndRenders(t *testing.T) {
 		t.Fatalf("code = %d stderr=%s stdout=%s", code, stderr.String(), stdout.String())
 	}
 	assertForkRequest(t, captured, map[string]any{
-		"source_run_id":       sourceRunID,
-		"allow_source_freeze": true,
-		"bundle_hash":         bundleHash,
-		"fork_event_id":       forkEventID,
-		"idempotency_key":     "idem-fork-1",
+		"source_run_id":   sourceRunID,
+		"bundle_hash":     bundleHash,
+		"fork_event_id":   forkEventID,
+		"idempotency_key": "idem-fork-1",
 	})
-	for _, want := range []string{"Fork created", "source_run_id=" + sourceRunID, "source_status=forked source_frozen=true", "fork_run_id=33333333-3333-3333-3333-333333333333", "source=" + artifact.BundleHash()[len("bundle-v2:sha256:"):len("bundle-v2:sha256:")+7], "owner=run.fork.selected_contracts.v1"} {
+	for _, want := range []string{"Fork created", "source_run_id=" + sourceRunID, "source_status=paused source_frozen=false", "fork_run_id=33333333-3333-3333-3333-333333333333", "source=" + artifact.BundleHash()[len("bundle-v2:sha256:"):len("bundle-v2:sha256:")+7], "owner=run.fork.selected_contracts.v1"} {
 		if !strings.Contains(stdout.String(), want) {
 			t.Fatalf("stdout missing %q:\n%s", want, stdout.String())
 		}
@@ -84,11 +82,11 @@ func TestForkCommandJSONPreservesAPIShape(t *testing.T) {
 	defer server.Close()
 
 	var stdout, stderr bytes.Buffer
-	code := executeRootCommandWithOptions(context.Background(), t.TempDir(), []string{"run", "fork", sourceRunID, "--allow-source-freeze", "--json"}, &stdout, &stderr, testRootCommandOptions(server))
+	code := executeRootCommandWithOptions(context.Background(), t.TempDir(), []string{"run", "fork", sourceRunID, "--json"}, &stdout, &stderr, testRootCommandOptions(server))
 	if code != 0 {
 		t.Fatalf("code = %d stderr=%s stdout=%s", code, stderr.String(), stdout.String())
 	}
-	assertForkRequest(t, captured, map[string]any{"source_run_id": sourceRunID, "allow_source_freeze": true})
+	assertForkRequest(t, captured, map[string]any{"source_run_id": sourceRunID})
 	var decoded map[string]any
 	if err := json.Unmarshal(stdout.Bytes(), &decoded); err != nil {
 		t.Fatalf("decode stdout json: %v\n%s", err, stdout.String())
@@ -132,7 +130,7 @@ func TestForkCommandRejectsInvalidInputBeforeRequest(t *testing.T) {
 		{name: "blank idempotency", args: []string{"run", "fork", "11111111-1111-1111-1111-111111111111", "--idempotency-key", ""}, wantStderr: "--idempotency-key must be non-empty"},
 		{name: "legacy dry run flag", args: []string{"run", "fork", "run-1", "--dry-run"}, wantStderr: "unknown flag"},
 		{name: "retired source freeze flag", args: []string{"run", "fork", "11111111-1111-1111-1111-111111111111", "--confirm-source-freeze"}, wantStderr: "unknown flag"},
-		{name: "mixed source freeze flags", args: []string{"run", "fork", "11111111-1111-1111-1111-111111111111", "--allow-source-freeze", "--confirm-source-freeze"}, wantStderr: "unknown flag"},
+		{name: "removed source freeze flag", args: []string{"run", "fork", "11111111-1111-1111-1111-111111111111", "--allow-source-freeze"}, wantStderr: "unknown flag"},
 		{name: "legacy materialize flag", args: []string{"run", "fork", "run-1", "--materialize-only"}, wantStderr: "unknown flag"},
 		{name: "legacy activate flag", args: []string{"run", "fork", "run-1", "--activate"}, wantStderr: "unknown flag"},
 		{name: "legacy contracts flag", args: []string{"run", "fork", "run-1", "--contracts", "."}, wantStderr: "unknown flag"},
@@ -247,6 +245,7 @@ func TestForkCommandFailClosedOnRPCAndMalformedResponses(t *testing.T) {
 				_ = json.NewDecoder(r.Body).Decode(&req)
 				result := validRunForkResult(sourceRunID, bundleHash)
 				result["source_run_status"] = "running"
+				result["source_frozen"] = true
 				writeJSONRPCResult(t, w, req.ID, result)
 			},
 			wantCode:   CLIExitRuntime,
@@ -259,7 +258,7 @@ func TestForkCommandFailClosedOnRPCAndMalformedResponses(t *testing.T) {
 			defer server.Close()
 
 			var stdout, stderr bytes.Buffer
-			code := executeRootCommandWithOptions(context.Background(), t.TempDir(), []string{"run", "fork", sourceRunID, "--allow-source-freeze"}, &stdout, &stderr, testRootCommandOptions(server))
+			code := executeRootCommandWithOptions(context.Background(), t.TempDir(), []string{"run", "fork", sourceRunID}, &stdout, &stderr, testRootCommandOptions(server))
 			if code != tc.wantCode {
 				t.Fatalf("code = %d, want %d stdout=%s stderr=%s", code, tc.wantCode, stdout.String(), stderr.String())
 			}
@@ -284,8 +283,8 @@ func validRunForkResult(sourceRunID, bundleHash string) map[string]any {
 	return map[string]any{
 		"owner":                "run.fork.selected_contracts.v1",
 		"source_run_id":        sourceRunID,
-		"source_run_status":    "forked",
-		"source_frozen":        true,
+		"source_run_status":    "paused",
+		"source_frozen":        false,
 		"fork_run_id":          "33333333-3333-3333-3333-333333333333",
 		"fork_point_kind":      "event",
 		"fork_revision":        1,

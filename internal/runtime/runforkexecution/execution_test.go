@@ -144,11 +144,11 @@ func TestExecuteSelectedContractRunForkRejectsDeferredWorkBeforeMutation(t *test
 			catalog := &observedSelectedJoinCatalog{SelectedContractForkLifecycle: owner.ports.fork}
 			owner.ports.fork = catalog
 			result, err := executeLiveSelectedContractRunFork(ctx, SelectedContractExecutionRequest{
-				SourceRunID:       sourceRunID,
-				At:                sourceEventID,
-				AllowSourceFreeze: true,
-				Owner:             owner,
-				SourceLoader:      loader,
+				SourceRunID: sourceRunID,
+				At:          sourceEventID,
+
+				Owner:        owner,
+				SourceLoader: loader,
 				ContractSelection: runfork.RunForkContractSelection{
 					Mode: runfork.RunForkContractSelectionModeSelectedContracts,
 				},
@@ -377,170 +377,6 @@ func (p *selectedContractWorkspaceReleaseProbe) ReleaseSourceProjection(context.
 	return nil
 }
 
-func TestActivateSelectedContractRunForkRejectsDeferredWorkBeforeExecutableMutation(t *testing.T) {
-	// These admitted declarations still require the exact bound process owner,
-	// before either state-only activation or delivery replay can mutate the child.
-	for _, test := range []struct {
-		name         string
-		fixture      string
-		eventName    string
-		inputFlow    string
-		inputPayload string
-		stateOnly    bool
-	}{
-		{
-			name:         "delivery replay timed join lacks bound process capability",
-			fixture:      "examples/routing/fan-in/barrier",
-			eventName:    "portfolio/portfolio.setup",
-			inputFlow:    "portfolio",
-			inputPayload: `{"portfolio_id":"portfolio","expected_operating_ids":["op-a","op-b"],"period_id":"2026-Q1"}`,
-		},
-		{
-			name:         "state only timed join lacks bound process capability",
-			fixture:      "examples/routing/fan-in/barrier",
-			eventName:    "portfolio.setup",
-			inputFlow:    "portfolio",
-			inputPayload: `{"portfolio_id":"portfolio","expected_operating_ids":["op-a","op-b"],"period_id":"2026-Q1"}`,
-			stateOnly:    true,
-		},
-		{
-			name:         "delivery replay creation lacks bound process capability",
-			fixture:      "examples/routing/template-create-minted-key",
-			eventName:    "producer/validation.triggered",
-			inputFlow:    "producer",
-			inputPayload: `{"candidate":"candidate-1"}`,
-		},
-		{
-			name:         "delivery replay select or create lacks bound process capability",
-			fixture:      "examples/routing/template-select-or-create",
-			eventName:    "producer/account.requested",
-			inputFlow:    "producer",
-			inputPayload: `{"account_id":"account-1"}`,
-		},
-		{
-			name:      "state only select or create lacks bound process capability",
-			fixture:   "examples/routing/template-select-or-create",
-			eventName: "producer/account.requested",
-			stateOnly: true,
-		},
-	} {
-		t.Run(test.name, func(t *testing.T) {
-			_, db, _ := testutil.StartPostgres(t)
-			pg := storetest.AdmitPostgresRuntimeStore(t, db)
-			ctx := runForkTestContext(t)
-			repoRoot := runForkExecutionRepoRoot(t)
-			contractsRoot := filepath.Join(repoRoot, test.fixture)
-			loader := admittedFixtureSelectedContractSourceLoader{
-				RepoRoot:   repoRoot,
-				SourceRoot: contractsRoot,
-			}
-			loaded, err := loader.LoadRunForkSelectedContractSource(ctx, runfork.RunForkContractSelection{
-				Mode: runfork.RunForkContractSelectionModeSelectedContracts,
-			})
-			if err != nil {
-				t.Fatalf("LoadRunForkSelectedContractSource: %v", err)
-			}
-			selection := runforkadmission.SelectedContractSelection(loaded.Source)
-
-			sourceRunID := uuid.NewString()
-			sourceEventID := uuid.NewString()
-			at := time.Unix(1700002215, 0).UTC()
-			if test.stateOnly && test.inputFlow != "" {
-				// The state-only cut still needs the actual constructed receiver
-				// of its connected event; a bare event is not topology evidence.
-				event := seedSelectedConstructedRootHistory(t, ctx, pg, loaded, sourceRunID, sourceEventID, test.eventName, at,
-					executionmode.Live, nil, selectedExecutionInputFixture{flow: test.inputFlow, payload: []byte(test.inputPayload)})
-				parent := flowidentity.Stored(loaded.Source, semanticview.RootExecutionFlowID(loaded.Source), sourceRunID, sourceRunID, sourceRunID, "")
-				child, err := flowidentity.KeyedChild(loaded.Source, parent, test.inputFlow, "portfolio")
-				if err != nil {
-					t.Fatal(err)
-				}
-				command := selectedExecutionSourceFlowCommand(t, ctx, loaded, event, child, test.eventName)
-				writeCtx := runtimecorrelation.WithRunID(runtimecorrelation.WithSourceArtifactFact(ctx, loaded.SourceArtifactFact), sourceRunID)
-				writeCtx = originalSelectedFixtureContext(t, writeCtx, pg)
-				committed, err := pg.CommitFlowInstanceActivation(writeCtx, command)
-				if err != nil || !committed.Acknowledged || !committed.Created {
-					t.Fatalf("construct state-only joined receiver: %+v %v", committed, err)
-				}
-			} else if test.stateOnly {
-				writeCtx := runtimecorrelation.WithRootAdmission(runtimecorrelation.WithSourceArtifactFact(ctx, loaded.SourceArtifactFact), loaded.RootedSource.Admission())
-				writeCtx = runtimeauthoractivity.WithScope(writeCtx, runtimeauthoractivity.BundleScope(runForkTestRuntimeInstanceID, loaded.SourceArtifactFact.BundleHash()))
-				writeCtx = originalSelectedFixtureContext(t, writeCtx, pg)
-				storetest.RequireRun(t, writeCtx, pg, storetest.RunFixture{
-					Origin: storetest.ScenarioSetupOrigin(), RunID: sourceRunID, StartedAt: at.Add(-time.Minute),
-					BundleHash: loaded.SourceArtifactFact.BundleHash(), Artifact: loaded.RootedSource.Artifact(), RootAdmission: loaded.RootedSource.Admission(),
-				})
-				event := eventtest.ExistingRunRootIngress(sourceEventID, events.EventType(test.eventName), "source-runtime", "", json.RawMessage(`{}`), 0,
-					sourceRunID, events.EventEnvelope{Scope: events.EventScopeGlobal}, at)
-				storetest.CommitSemanticEventWithRoutes(t, writeCtx, pg, event, nil, runtimepipelineobligation.ScopeSubscribed)
-			} else {
-				route := selectedExecutionTestAgentRoute(t, sourceRunID, "source-agent-that-must-not-route", sourceRunID)
-				route.Target = events.MustExistingEntityTarget(events.RouteIdentity{FlowID: ".", FlowInstance: sourceRunID, EntityID: sourceRunID})
-				input := selectedExecutionInputFixture{flow: test.inputFlow, payload: []byte(test.inputPayload)}
-				seedSelectedConstructedRootHistory(t, ctx, pg, loaded, sourceRunID, sourceEventID, test.eventName, at, executionmode.Live, []events.DeliveryRoute{route}, input)
-			}
-			captureSelectedExecutionSourceRevision(t, ctx, pg, sourceRunID)
-			plan, err := pg.PlanRunFork(ctx, runfork.RunForkPlanRequest{SourceRunID: sourceRunID, At: sourceEventID})
-			if err != nil {
-				t.Fatalf("PlanRunFork: %v", err)
-			}
-			replayAdmission, err := runfork.RunForkSelectedContractReplayResumeAdmission(plan)
-			if err != nil {
-				t.Fatal(err)
-			}
-			frontier, err := runforkadmission.AdmitContractFrontier(runforkadmission.ContractFrontierRequest{
-				Plan: plan, Source: loaded.Source, ContractSelection: selection,
-			})
-			if err != nil {
-				t.Fatalf("AdmitContractFrontier: %v", err)
-			}
-			if _, err := runforkadmission.AdmitSelectedContractRouteHistory(runforkadmission.SelectedContractRouteHistoryRequest{
-				Plan: plan, Source: loaded.Source, ContractSelection: selection, FrontierAdmission: frontier,
-			}); err != nil {
-				t.Fatalf("AdmitSelectedContractRouteHistory: %v", err)
-			}
-			if test.stateOnly {
-				if !replayAdmission.StateOnlyExecutionReady || replayAdmission.DeliveryEventReplayReady {
-					t.Fatalf("state-only replay admission = %#v", replayAdmission)
-				}
-			} else if !replayAdmission.DeliveryEventReplayReady {
-				t.Fatalf("delivery replay admission = %#v", replayAdmission)
-			}
-
-			materialized := materializeSelectedExecutionForkForTest(t, ctx, pg, loaded, selection, sourceRunID, sourceEventID)
-			before := selectedForkExecutableMutationSnapshotForTest(t, ctx, db, materialized.ForkRunID)
-			var sourceStatusBefore string
-			if err := db.QueryRowContext(ctx, `SELECT status FROM runs WHERE run_id = $1::uuid`, sourceRunID).Scan(&sourceStatusBefore); err != nil {
-				t.Fatalf("load source status before activation: %v", err)
-			}
-
-			result, err := activateLiveSelectedContractRunFork(ctx, SelectedContractActivationGateRequest{
-				ForkRunID:         materialized.ForkRunID,
-				AllowSourceFreeze: true,
-				Store:             pg,
-				ExecutionOwner:    selectedContractExecutionOwnerForTest(t, pg),
-				SourceLoader:      loader,
-			})
-			if err == nil || err.Error() != "selected preparation requires its bound process capability" || result.Activated {
-				t.Fatalf("activation did not require exact process owner before mutation: result=%#v err=%v", result, err)
-			}
-			after := selectedForkExecutableMutationSnapshotForTest(t, ctx, db, materialized.ForkRunID)
-			for fact, want := range before {
-				if got := after[fact]; got != want {
-					t.Fatalf("activation changed %s from %q to %q", fact, want, got)
-				}
-			}
-			var sourceStatusAfter string
-			if err := db.QueryRowContext(ctx, `SELECT status FROM runs WHERE run_id = $1::uuid`, sourceRunID).Scan(&sourceStatusAfter); err != nil {
-				t.Fatalf("load source status after activation: %v", err)
-			}
-			if sourceStatusAfter != sourceStatusBefore {
-				t.Fatalf("source status changed from %q to %q", sourceStatusBefore, sourceStatusAfter)
-			}
-		})
-	}
-}
-
 func selectedForkExecutableMutationSnapshotForTest(t testing.TB, ctx context.Context, db *sql.DB, forkRunID string) map[string]string {
 	t.Helper()
 	snapshot := map[string]string{}
@@ -682,11 +518,11 @@ func TestExecuteSelectedContractRunForkWritesForkLocalExecutionAndLineage(t *tes
 	captureSelectedExecutionSourceRevision(t, ctx, pg, sourceRunID)
 
 	request := SelectedContractExecutionRequest{
-		SourceRunID:       sourceRunID,
-		At:                sourceEventID,
-		AllowSourceFreeze: true,
-		Owner:             selectedContractExecutionOwnerForTest(t, pg),
-		SourceLoader:      loader,
+		SourceRunID: sourceRunID,
+		At:          sourceEventID,
+
+		Owner:        selectedContractExecutionOwnerForTest(t, pg),
+		SourceLoader: loader,
 		ContractSelection: runforkadmission.SelectedContractSelection(
 			loaded.Source,
 		),
@@ -939,11 +775,11 @@ func TestExecuteSelectedContractRunForkAdmitsExactSourceModeBeforeMaterializatio
 	captureSelectedExecutionSourceRevision(t, ctx, pg, sourceRunID)
 
 	result, err := ExecuteSelectedContractRunFork(ctx, SelectedContractExecutionRequest{
-		SourceRunID:       sourceRunID,
-		At:                sourceEventID,
-		AllowSourceFreeze: true,
-		Owner:             selectedContractExecutionOwnerForTest(t, pg),
-		SourceLoader:      loader,
+		SourceRunID: sourceRunID,
+		At:          sourceEventID,
+
+		Owner:        selectedContractExecutionOwnerForTest(t, pg),
+		SourceLoader: loader,
 		ContractSelection: runforkadmission.SelectedContractSelection(
 			loaded.Source,
 		),
@@ -1130,11 +966,11 @@ func TestSelectedContractForkRejectsSyntheticCarryDynamicCreationBeforeMutation(
 	captureSelectedExecutionSourceRevision(t, ctx, pg, sourceRunID)
 
 	result, err := executeLiveSelectedContractRunFork(ctx, SelectedContractExecutionRequest{
-		SourceRunID:       sourceRunID,
-		At:                sourceEventID,
-		AllowSourceFreeze: true,
-		Owner:             selectedContractExecutionOwnerForTest(t, pg),
-		SourceLoader:      loader,
+		SourceRunID: sourceRunID,
+		At:          sourceEventID,
+
+		Owner:        selectedContractExecutionOwnerForTest(t, pg),
+		SourceLoader: loader,
 		ContractSelection: runforkadmission.SelectedContractSelection(
 			loaded.Source,
 		),
@@ -1199,8 +1035,8 @@ func TestExecuteSelectedContractRunForkLoadsDBBackedSourceAndStampsPersistedIden
 		SourceRunID:        sourceRunID,
 		At:                 sourceEventID,
 		SourceArtifactFact: testPersistedSourceArtifactFact(bundleHash),
-		AllowSourceFreeze:  true,
-		Owner:              selectedContractExecutionOwnerForTest(t, pg),
+
+		Owner: selectedContractExecutionOwnerForTest(t, pg),
 		SourceLoader: SourceArtifactSelectedContractSourceLoader{
 			RepoRoot: repoRoot,
 			Store:    pg,
@@ -1286,7 +1122,7 @@ func TestExecuteSelectedContractRunForkDispatchesSourceEventsInPersistedChronolo
 	captureSelectedExecutionSourceRevision(t, ctx, pg, sourceRunID)
 
 	result, err := q1ExecuteSelectedPhaseComponent(t, ctx, SelectedContractExecutionRequest{
-		SourceRunID: sourceRunID, At: laterEventID, AllowSourceFreeze: true,
+		SourceRunID: sourceRunID, At: laterEventID,
 		Owner: selectedContractExecutionOwnerForTest(t, pg), SourceLoader: loader,
 		ContractSelection: runforkadmission.SelectedContractSelection(loaded.Source),
 		AgentRuntime:      SelectedContractAgentRuntimeOptions{ProcessCapability: selectedContractTestProcessCapability(t, ctx, pg)},
@@ -1357,11 +1193,11 @@ func TestExecuteSelectedContractRunForkConstructsAgentRecipientWithoutHandlerMat
 	agent := &selectedContractForkTestAgent{source: loaded.Source}
 
 	result, err := q1ExecuteSelectedPhaseComponent(t, ctx, SelectedContractExecutionRequest{
-		SourceRunID:       sourceRunID,
-		At:                sourceEventID,
-		AllowSourceFreeze: true,
-		Owner:             selectedContractExecutionOwnerForTest(t, pg),
-		SourceLoader:      loader,
+		SourceRunID: sourceRunID,
+		At:          sourceEventID,
+
+		Owner:        selectedContractExecutionOwnerForTest(t, pg),
+		SourceLoader: loader,
 		ContractSelection: runforkadmission.SelectedContractSelection(
 			loaded.Source,
 		),
@@ -1428,11 +1264,11 @@ func TestExecuteSelectedContractRunForkMaterializesAndExecutesForkLocalAgentRunt
 
 	agent := &selectedContractForkTestAgent{source: loaded.Source}
 	result, err := q1ExecuteSelectedPhaseComponent(t, ctx, SelectedContractExecutionRequest{
-		SourceRunID:       sourceRunID,
-		At:                sourceEventID,
-		AllowSourceFreeze: true,
-		Owner:             selectedContractExecutionOwnerForTest(t, pg),
-		SourceLoader:      loader,
+		SourceRunID: sourceRunID,
+		At:          sourceEventID,
+
+		Owner:        selectedContractExecutionOwnerForTest(t, pg),
+		SourceLoader: loader,
 		ContractSelection: runforkadmission.SelectedContractSelection(
 			loaded.Source,
 		),
@@ -1733,7 +1569,7 @@ func TestSelectedContractForkProviderTurnsUseCanonicalExecutionFrames(t *testing
 			seedSourceOutcomeThatMustNotSuppressFork(t, db, sourceEventID, entityID, at)
 			captureSelectedExecutionSourceRevision(t, ctx, pg, sourceRunID)
 			result, err := q1ExecuteSelectedPhaseComponent(t, ctx, SelectedContractExecutionRequest{
-				SourceRunID: sourceRunID, At: sourceEventID, AllowSourceFreeze: true,
+				SourceRunID: sourceRunID, At: sourceEventID,
 				Owner: selectedContractExecutionOwnerForTest(t, pg), SourceLoader: loader,
 				ContractSelection: runforkadmission.SelectedContractSelection(loaded.Source),
 				AgentRuntime: SelectedContractAgentRuntimeOptions{
@@ -2185,7 +2021,7 @@ fi
 	at := time.Unix(1700002303, 0).UTC()
 	seedSelectedClaudeExecutionSource(t, ctx, selected, loaded, sourceRunID, sourceEventID, at)
 	result, err := q1ExecuteSelectedPhaseComponent(t, ctx, SelectedContractExecutionRequest{
-		SourceRunID: sourceRunID, At: sourceEventID, AllowSourceFreeze: true,
+		SourceRunID: sourceRunID, At: sourceEventID,
 		Owner: owner, SourceLoader: loader,
 		ContractSelection: runforkadmission.SelectedContractSelection(loaded.Source),
 		AgentRuntime: SelectedContractAgentRuntimeOptions{
@@ -3095,7 +2931,7 @@ func TestExecuteSelectedContractRunForkProviderFailurePreservesEvidenceThroughCl
 	seedSourceOutcomeThatMustNotSuppressFork(t, db, sourceEventID, entityID, at)
 	captureSelectedExecutionSourceRevision(t, ctx, pg, sourceRunID)
 	result, err := q1ExecuteSelectedPhaseComponent(t, ctx, SelectedContractExecutionRequest{
-		SourceRunID: sourceRunID, At: sourceEventID, AllowSourceFreeze: true,
+		SourceRunID: sourceRunID, At: sourceEventID,
 		Owner: selectedContractExecutionOwnerForTest(t, pg), SourceLoader: loader,
 		ContractSelection: runforkadmission.SelectedContractSelection(loaded.Source),
 		AgentRuntime: SelectedContractAgentRuntimeOptions{
@@ -3252,7 +3088,6 @@ func TestSelectedContractServedAndStandaloneContainersCompeteForOnePostgresAutho
 		}
 	}
 	operation := selectedForkFixtureOperation(t, loaded, sourceRunID, forkEventID)
-	operation.AllowSourceFreeze = false
 	materialized := materializeSelectedRuntimeOutcomeFork(t, ctx, selectedContractExecutionOwnerForTest(t, servedStore), SelectedContractExecutionRequest{
 		SourceRunID: sourceRunID, At: forkEventID, SourceLoader: loader, ContractSelection: selection,
 		SourceArtifactFact: loaded.SourceArtifactFact, ForkOperation: operation,
@@ -3780,11 +3615,11 @@ func TestExecuteSelectedContractRunForkTreatsDiagnosticPlatformOutcomeAsLineage(
 	captureSelectedExecutionSourceRevision(t, ctx, pg, sourceRunID)
 
 	result, err := q1ExecuteSelectedPhaseComponent(t, ctx, SelectedContractExecutionRequest{
-		SourceRunID:       sourceRunID,
-		At:                sourceEventID,
-		AllowSourceFreeze: true,
-		Owner:             selectedContractExecutionOwnerForTest(t, pg),
-		SourceLoader:      loader,
+		SourceRunID: sourceRunID,
+		At:          sourceEventID,
+
+		Owner:        selectedContractExecutionOwnerForTest(t, pg),
+		SourceLoader: loader,
 		ContractSelection: runforkadmission.SelectedContractSelection(
 			loaded.Source,
 		),
@@ -3878,7 +3713,7 @@ func TestActivateSelectedContractRunForkExecutesReplayReadyContractSwapThroughSe
 	captureSelectedExecutionSourceRevision(t, ctx, pg, sourceRunID)
 
 	result, err := q1ExecuteSelectedPhaseComponent(t, ctx, SelectedContractExecutionRequest{
-		SourceRunID: sourceRunID, At: sourceEventID, AllowSourceFreeze: true,
+		SourceRunID: sourceRunID, At: sourceEventID,
 		Owner: selectedContractExecutionOwnerForTest(t, pg), SourceLoader: loader, ContractSelection: selection,
 		AgentRuntime: SelectedContractAgentRuntimeOptions{ProcessCapability: selectedContractTestProcessCapability(t, ctx, pg)},
 	})
@@ -3986,7 +3821,7 @@ func TestActivateSelectedContractRunForkKeepsPostTReplayScopeSourceLocal(t *test
 	}
 
 	result, err := q1ExecuteSelectedPhaseComponent(t, ctx, SelectedContractExecutionRequest{
-		SourceRunID: sourceRunID, At: sourceEventID, AllowSourceFreeze: true,
+		SourceRunID: sourceRunID, At: sourceEventID,
 		Owner: selectedContractExecutionOwnerForTest(t, pg), SourceLoader: loader, ContractSelection: selection,
 		AgentRuntime: SelectedContractAgentRuntimeOptions{ProcessCapability: selectedContractTestProcessCapability(t, ctx, pg)},
 	})
@@ -4079,11 +3914,11 @@ func TestExecuteSelectedContractRunForkTreatsSourceConversationHistoryAsLineage(
 	captureSelectedExecutionSourceRevision(t, ctx, pg, sourceRunID)
 
 	result, err := q1ExecuteSelectedPhaseComponent(t, ctx, SelectedContractExecutionRequest{
-		SourceRunID:       sourceRunID,
-		At:                sourceEventID,
-		AllowSourceFreeze: true,
-		Owner:             selectedContractExecutionOwnerWithProcessForTest(t, pg, processCapability),
-		SourceLoader:      loader,
+		SourceRunID: sourceRunID,
+		At:          sourceEventID,
+
+		Owner:        selectedContractExecutionOwnerWithProcessForTest(t, pg, processCapability),
+		SourceLoader: loader,
 		ContractSelection: runforkadmission.SelectedContractSelection(
 			loaded.Source,
 		),
@@ -4198,11 +4033,11 @@ func TestExecuteSelectedContractRunForkAdmitsSameSourceActiveDeliveryForkPointEm
 	captureSelectedExecutionSourceRevision(t, ctx, pg, sourceRunID)
 
 	result, err := q1ExecuteSelectedPhaseComponent(t, ctx, SelectedContractExecutionRequest{
-		SourceRunID:       sourceRunID,
-		At:                forkPointEventID,
-		AllowSourceFreeze: true,
-		Owner:             selectedContractExecutionOwnerWithProcessForTest(t, pg, processCapability),
-		SourceLoader:      loader,
+		SourceRunID: sourceRunID,
+		At:          forkPointEventID,
+
+		Owner:        selectedContractExecutionOwnerWithProcessForTest(t, pg, processCapability),
+		SourceLoader: loader,
 		ContractSelection: runforkadmission.SelectedContractSelection(
 			loaded.Source,
 		),
@@ -4321,11 +4156,11 @@ func TestExecuteSelectedContractRunForkTreatsPostTSourceConversationHistoryAsBra
 	)
 
 	result, err := q1ExecuteSelectedPhaseComponent(t, ctx, SelectedContractExecutionRequest{
-		SourceRunID:       sourceRunID,
-		At:                sourceEventID,
-		AllowSourceFreeze: true,
-		Owner:             selectedContractExecutionOwnerWithProcessForTest(t, pg, processCapability),
-		SourceLoader:      loader,
+		SourceRunID: sourceRunID,
+		At:          sourceEventID,
+
+		Owner:        selectedContractExecutionOwnerWithProcessForTest(t, pg, processCapability),
+		SourceLoader: loader,
 		ContractSelection: runforkadmission.SelectedContractSelection(
 			loaded.Source,
 		),
@@ -4400,11 +4235,11 @@ func TestExecuteSelectedContractRunForkTreatsSourceReplayScopeMarkerAsLineage(t 
 	captureSelectedExecutionSourceRevision(t, ctx, pg, sourceRunID)
 
 	result, err := q1ExecuteSelectedPhaseComponent(t, ctx, SelectedContractExecutionRequest{
-		SourceRunID:       sourceRunID,
-		At:                sourceEventID,
-		AllowSourceFreeze: true,
-		Owner:             selectedContractExecutionOwnerForTest(t, pg),
-		SourceLoader:      loader,
+		SourceRunID: sourceRunID,
+		At:          sourceEventID,
+
+		Owner:        selectedContractExecutionOwnerForTest(t, pg),
+		SourceLoader: loader,
 		ContractSelection: runforkadmission.SelectedContractSelection(
 			loaded.Source,
 		),
@@ -4502,17 +4337,17 @@ func TestExecuteSelectedContractRunForkRejectsSameEventReplayScopeWriteSkew(t *t
 	operation := runfork.ForkOperationRequest{
 		OperationID: uuid.NewString(), Actor: "scope-conflict-proof", IdempotencyKey: uuid.NewString(), TransportHash: "scope-conflict-proof",
 		SourceRunID: sourceRunID, ForkEventID: sourceEventID, TargetBundleHash: loaded.SourceArtifactFact.BundleHash(),
-		ContractSelection: selection, AllowSourceFreeze: true, TargetRootReference: loaded.RootedSource.Admission().Reference(),
+		ContractSelection: selection, TargetRootReference: loaded.RootedSource.Admission().Reference(),
 	}
 	beforeSource, err := pg.LoadRunHeader(ctx, sourceRunID)
 	if err != nil {
 		t.Fatal(err)
 	}
 	result, executeErr := q1ExecuteSelectedPhaseComponent(t, ctx, SelectedContractExecutionRequest{
-		ForkOperation:     &operation,
-		SourceRunID:       sourceRunID,
-		At:                sourceEventID,
-		AllowSourceFreeze: true,
+		ForkOperation: &operation,
+		SourceRunID:   sourceRunID,
+		At:            sourceEventID,
+
 		Owner:             owner,
 		SourceLoader:      loader,
 		ContractSelection: selection,
@@ -4590,11 +4425,11 @@ func TestExecuteSelectedContractRunForkRejectsUnresolvedFrontierBeforeMaterializ
 	captureSelectedExecutionSourceRevision(t, ctx, pg, sourceRunID)
 
 	result, err := executeLiveSelectedContractRunFork(ctx, SelectedContractExecutionRequest{
-		SourceRunID:       sourceRunID,
-		At:                sourceEventID,
-		AllowSourceFreeze: true,
-		Owner:             selectedContractExecutionOwnerForTest(t, pg),
-		SourceLoader:      loader,
+		SourceRunID: sourceRunID,
+		At:          sourceEventID,
+
+		Owner:        selectedContractExecutionOwnerForTest(t, pg),
+		SourceLoader: loader,
 		ContractSelection: runforkadmission.SelectedContractSelection(
 			loaded.Source,
 		),
@@ -4670,11 +4505,11 @@ func TestExecuteSelectedContractRunForkBranchesWhenNonReplaySourceFactsAdvancedA
 	)
 
 	result, err := q1ExecuteSelectedPhaseComponent(t, ctx, SelectedContractExecutionRequest{
-		SourceRunID:       sourceRunID,
-		At:                sourceEventID,
-		AllowSourceFreeze: true,
-		Owner:             selectedContractExecutionOwnerForTest(t, pg),
-		SourceLoader:      loader,
+		SourceRunID: sourceRunID,
+		At:          sourceEventID,
+
+		Owner:        selectedContractExecutionOwnerForTest(t, pg),
+		SourceLoader: loader,
 		ContractSelection: runforkadmission.SelectedContractSelection(
 			loaded.Source,
 		),

@@ -151,7 +151,7 @@ func issue642NewlyArmedSelectedTimer(t *testing.T, backend, delay string) {
 	var fork apiv1.RunForkExecutionResult
 	requireServedJSONRPCResult(t, rt.Endpoint, "run.fork", map[string]any{
 		"source_run_id": seed.RunID, "fork_event_id": seed.EventID, "bundle_hash": target.BundleHash,
-		"allow_source_freeze": true, "idempotency_key": "issue642-new-selected-arm-fork",
+		"idempotency_key": "issue642-new-selected-arm-fork",
 	}, &fork)
 	if fork.SourceRunID != seed.RunID || fork.ForkRunID == "" || fork.ForkRunID == seed.RunID ||
 		fork.ForkEventID != seed.EventID || fork.ForkRevision != plan.ForkPoint.Revision || fork.SourceFrozen || fork.SourceRunStatus != "paused" {

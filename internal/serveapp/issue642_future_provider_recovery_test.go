@@ -260,8 +260,7 @@ func TestIssue642FutureProviderRecoveryProcessHelper(t *testing.T) {
 		forkResponse := make(chan publicationAuditHTTPResult, 1)
 		go func() {
 			forkResponse <- publicationCompletionHTTPMethod(forkCtx, rt.Endpoint, "run.fork", map[string]any{
-				"source_run_id": seed.RunID, "at_start": true, "allow_source_freeze": true,
-				"idempotency_key": "future-recovery-start-cut",
+				"source_run_id": seed.RunID, "at_start": true, "idempotency_key": "future-recovery-start-cut",
 			})
 		}()
 		observation := probe.waitClaim(t)

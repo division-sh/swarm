@@ -66,7 +66,7 @@ func TestSelectedForkPendingInputEvidenceBothStores(t *testing.T) {
 					if string(mutated) != `{"token":"changed-after-preparation"}` {
 						t.Fatalf("canonical byte fault did not apply: %s", mutated)
 					}
-					response := requestServedJSONRPC(t, rt.Endpoint, "run.fork", map[string]any{"source_run_id": seed.RunID, "fork_event_id": point.EventID, "allow_source_freeze": true, "idempotency_key": "stale-input"})
+					response := requestServedJSONRPC(t, rt.Endpoint, "run.fork", map[string]any{"source_run_id": seed.RunID, "fork_event_id": point.EventID, "idempotency_key": "stale-input"})
 					if response.Error == nil {
 						t.Fatal("live canonical payload divergence passed bound source validation")
 					}

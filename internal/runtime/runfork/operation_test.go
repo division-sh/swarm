@@ -242,7 +242,7 @@ func TestForkOperationRecordRequiresExactResolvedPoint(t *testing.T) {
 	}
 	record.Status = ForkOperationActivated
 	record.Result = &ForkOperationResult{
-		SourceRunID: request.SourceRunID, SourceRunStatus: RunForkSourceFrozenStatus, SourceFrozen: true,
+		SourceRunID: request.SourceRunID, SourceRunStatus: "paused", SourceFrozen: false,
 		ForkRunID: record.ForkRunID, ForkPoint: point, ForkRunStatus: RunForkActivatedStatus,
 		BundleHash: request.TargetBundleHash,
 	}
