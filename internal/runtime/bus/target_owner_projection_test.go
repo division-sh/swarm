@@ -60,12 +60,35 @@ func TestRouteTargetOwnerResolutionMatrix(t *testing.T) {
 
 	for _, test := range tests {
 		t.Run(test.name, func(t *testing.T) {
-			got, err := projection.resolveSelectedRoute(test.blueprint)
+			got, err := projection.replyOriginOwner(test.blueprint)
 			if err != nil {
 				t.Fatalf("resolve owner: %v", err)
 			}
 			if got.Route() != test.want.Normalized() || !got.ExistingEntity() {
 				t.Fatalf("owner = %#v, want %#v", got, test.want.Normalized())
+			}
+		})
+	}
+	t.Run("explicit reply entity narrows same-instance candidates", func(t *testing.T) {
+		candidate := projection
+		candidate.descriptors = append([]ActiveTargetDescriptor(nil), projection.descriptors...)
+		candidate.descriptors = append(candidate.descriptors, ActiveTargetDescriptor{ID: "foreign", FlowInstance: "review", EntityID: eventtest.UUID("foreign-reply-entity")})
+		origin := events.RouteIdentity{FlowID: "review", FlowInstance: "review", EntityID: staticOwner}
+		owner, err := candidate.replyOriginOwner(origin)
+		if err != nil || !owner.ExistingEntity() || owner.Route() != origin {
+			t.Fatalf("explicit reply origin lost its entity narrowing: owner=%+v err=%v", owner, err)
+		}
+	})
+	for _, required := range []bool{false, true} {
+		t.Run(fmt.Sprintf("observed absence required=%t", required), func(t *testing.T) {
+			origin := events.RouteIdentity{FlowID: "review", FlowInstance: "review", EntityID: staticOwner}
+			owner, err := (selectedRunTargetOwnerProjection{required: required}).replyOriginOwner(origin)
+			if required {
+				if err == nil || !owner.Empty() {
+					t.Fatalf("required origin manufactured an absent owner: owner=%+v err=%v", owner, err)
+				}
+			} else if err != nil || !owner.ExistingEntity() || owner.Route() != origin {
+				t.Fatalf("ephemeral observed-absence behavior changed: owner=%+v err=%v", owner, err)
 			}
 		})
 	}
@@ -91,7 +114,7 @@ func TestTargetOwnerDedupPreservesUnavailableEvidenceInBothOrders(t *testing.T) 
 		if len(projection.descriptors) != 2 {
 			t.Fatalf("dedup erased contradictory availability: %#v", projection.descriptors)
 		}
-		if _, err := projection.resolveSelectedRoute(blueprint); err == nil || !strings.Contains(err.Error(), "owner is unavailable") {
+		if _, err := projection.replyOriginOwner(blueprint); err == nil || !strings.Contains(err.Error(), "owner is unavailable") {
 			t.Fatalf("agent/exact-route projection admitted unavailable receiver: %v", err)
 		}
 	}
@@ -101,12 +124,12 @@ func TestSelectedTargetOwnerNeverUsesParentDescriptor(t *testing.T) {
 	blueprint := events.RouteIdentity{FlowID: "parent/child", FlowInstance: "parent/child"}
 	parent := ActiveTargetDescriptor{ID: "parent", FlowInstance: "parent", EntityID: eventtest.UUID("parent-owner")}
 	projection := selectedRunTargetOwnerProjection{required: true, descriptors: []ActiveTargetDescriptor{parent}}
-	if _, err := projection.resolveSelectedRoute(blueprint); err == nil {
+	if _, err := projection.replyOriginOwner(blueprint); err == nil {
 		t.Fatal("parent descriptor became receiver-owned state")
 	}
 	child := ActiveTargetDescriptor{ID: "child", FlowInstance: blueprint.FlowInstance, EntityID: eventtest.UUID("child-owner")}
 	projection.descriptors = append(projection.descriptors, child)
-	got, err := projection.resolveSelectedRoute(blueprint)
+	got, err := projection.replyOriginOwner(blueprint)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -149,6 +172,23 @@ func TestRouteTargetOwnerResolutionFailsClosedBeforeMutation(t *testing.T) {
 				{ID: "portfolio", FlowInstance: "portfolio", EntityID: eventtest.UUID("portfolio-owner")},
 			}}, want: "owner is missing",
 		},
+		{
+			name: "ephemeral ambiguous", projection: selectedRunTargetOwnerProjection{descriptors: []ActiveTargetDescriptor{
+				{ID: "portfolio-a", FlowInstance: "portfolio", EntityID: eventtest.UUID("portfolio-owner-a")},
+				{ID: "portfolio-b", FlowInstance: "portfolio", EntityID: eventtest.UUID("portfolio-owner-b")},
+			}}, want: "owner is ambiguous",
+		},
+		{
+			name: "ephemeral unavailable", projection: selectedRunTargetOwnerProjection{descriptors: []ActiveTargetDescriptor{
+				{ID: "portfolio", FlowInstance: "portfolio", EntityID: eventtest.UUID("portfolio-owner"), Availability: runtimepipeline.NewDeliveryTargetAvailability("", "draining", false)},
+			}}, want: "owner is unavailable",
+		},
+		{
+			name: "ephemeral contradictory", projection: selectedRunTargetOwnerProjection{descriptors: []ActiveTargetDescriptor{
+				{ID: "portfolio", FlowInstance: "portfolio", EntityID: eventtest.UUID("portfolio-owner")},
+				{ID: "portfolio", FlowInstance: "portfolio", EntityID: eventtest.UUID("portfolio-owner"), Materializing: true},
+			}}, want: "contradictory existing and materializing",
+		},
 	}
 
 	for _, test := range tests {
@@ -160,7 +200,7 @@ func TestRouteTargetOwnerResolutionFailsClosedBeforeMutation(t *testing.T) {
 			}
 			before := plan
 			before.DeliveryIntents = append([]RoutePlanDeliveryIntent(nil), plan.DeliveryIntents...)
-			if _, err := test.projection.resolveSelectedRoute(plan.DeliveryIntents[0].TargetBlueprint); err == nil || !strings.Contains(err.Error(), test.want) {
+			if _, err := test.projection.replyOriginOwner(plan.DeliveryIntents[0].TargetBlueprint); err == nil || !strings.Contains(err.Error(), test.want) {
 				t.Fatalf("resolve error = %v, want %q", err, test.want)
 			}
 			if !reflect.DeepEqual(plan, before) {
@@ -574,8 +614,8 @@ func TestPendingAgentLifecycleRequiresInitializationBeyondExactMaterializingOwne
 		required:         true,
 	}
 
-	owner, err := projection.resolveSelectedRoute(target)
-	if err != nil || !owner.MaterializingEntity() || owner.Route() != target.Normalized() {
+	owner, found, err := runtimepipeline.SelectDeliveryTargetOwner(projection.source, target, projection.targetOwnerCandidates())
+	if err != nil || !found || !owner.MaterializingEntity() || owner.Route() != target.Normalized() {
 		t.Fatalf("resolved owner = %#v, err=%v, want exact materializing target %#v", owner, err, target.Normalized())
 	}
 	// Ownership alone cannot substitute for a compiled activation or node

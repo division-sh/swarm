@@ -71,6 +71,7 @@ func TestClassifyDeliveryTargetOwnershipFailsClosedOnMissingOrContradictoryEvide
 		nodeID     string
 		candidates []DeliveryTargetOwnerCandidate
 		want       string
+		explicit   bool
 	}{
 		{name: "entity scoped handler without owner", nodeID: "entity-reader", want: "owner is missing"},
 		{
@@ -107,11 +108,19 @@ func TestClassifyDeliveryTargetOwnershipFailsClosedOnMissingOrContradictoryEvide
 			candidates: []DeliveryTargetOwnerCandidate{{
 				Route: events.RouteIdentity{FlowID: "review", FlowInstance: "review/one", EntityID: eventtest.UUID("contradictory-owner")},
 			}},
-			want: "disagrees with receiver entity",
+			want: "disagrees with receiver entity", explicit: true,
+		},
+		{
+			name: "matching node candidate cannot erase contradictory entity", nodeID: "entity-reader",
+			candidates: []DeliveryTargetOwnerCandidate{
+				{Route: events.RouteIdentity{FlowID: "review", FlowInstance: "review/one", EntityID: canonicalID}},
+				{Route: events.RouteIdentity{FlowID: "review", FlowInstance: "review/one", EntityID: eventtest.UUID("contradictory-owner")}},
+			},
+			want: "disagrees with receiver entity", explicit: true,
 		},
 		{
 			name: "raw blueprint entity is not ownership evidence", nodeID: "entity-reader",
-			want: "owner is missing",
+			want: "owner is missing", explicit: true,
 		},
 	}
 	for _, test := range tests {
@@ -122,7 +131,7 @@ func TestClassifyDeliveryTargetOwnershipFailsClosedOnMissingOrContradictoryEvide
 				t.Fatalf("admit handler: %v", err)
 			}
 			blueprint := events.RouteIdentity{FlowID: "review", FlowInstance: "review/one"}
-			if test.name == "raw blueprint entity is not ownership evidence" || test.name == "exact candidate disagrees with blueprint entity" {
+			if test.explicit {
 				blueprint.EntityID = canonicalID
 			}
 			_, err = classifyDeliveryTargetOwnershipForTest(deliveryTargetOwnershipTestRequest{
