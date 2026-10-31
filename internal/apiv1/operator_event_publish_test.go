@@ -838,15 +838,14 @@ func TestOperatorEventPublishPostCommitReceiptFailureReplaysWithoutDuplicate(t *
 	if got := countPipelineReceiptsForEvent(t, ctx, pg, eventID); got != 0 {
 		t.Fatalf("pipeline receipts after injected failure = %d, want 0", got)
 	}
-	missing, ok, err := claimNextAPIPipelineWork(t, ctx, pg.PipelineObligations())
-	if err != nil {
-		t.Fatalf("claim recoverable pipeline obligation: %v", err)
+	// Recovery may finish before the test can claim the row. Exercise that
+	// supported winner and assert its durable result, not transient ownership.
+	recovered, err := bus.SweepPipelineObligations(ctx, 200)
+	if err != nil || recovered.Settled != 1 || recovered.Blocked || !recovered.Exhausted {
+		t.Fatalf("recover committed publication through the runtime worker: result=%+v err=%v", recovered, err)
 	}
-	if !ok || missing.Event.ID() != eventID {
-		t.Fatalf("recoverable pipeline obligation = %#v, %t; want %s", missing.Event, ok, eventID)
-	}
-	if err := pg.PipelineObligations().Release(ctx, missing.Claim); err != nil {
-		t.Fatalf("release recoverable pipeline obligation: %v", err)
+	if got := countPipelineReceiptsForEvent(t, ctx, pg, eventID); got != 1 {
+		t.Fatalf("pipeline receipts after runtime recovery = %d, want 1", got)
 	}
 	requireAPIV1RuntimeBusEvent(t, ch, "event delivery after post-commit receipt failure")
 
@@ -862,6 +861,12 @@ func TestOperatorEventPublishPostCommitReceiptFailureReplaysWithoutDuplicate(t *
 	}
 	if count := countAPIIdempotencyRows(t, pg); count != 1 {
 		t.Fatalf("api_idempotency rows after replay = %d, want 1", count)
+	}
+	if got := countEventDeliveriesForEvent(t, ctx, pg, eventID); got != 1 {
+		t.Fatalf("event deliveries after recovery and replay = %d, want 1", got)
+	}
+	if got := countPipelineReceiptsForEvent(t, ctx, pg, eventID); got != 1 {
+		t.Fatalf("pipeline receipts after replay = %d, want 1", got)
 	}
 }
 
