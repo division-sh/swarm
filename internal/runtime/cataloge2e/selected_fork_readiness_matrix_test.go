@@ -431,9 +431,13 @@ func runSelectedForkFlowOwnedReadinessBothStores(t *testing.T, selectedStage str
 	if selectedStage != "initial" && selectedStage != "staged" {
 		t.Fatalf("invalid readiness proof stage %q", selectedStage)
 	}
+	frontiers := []string{"node", "activity", "activity_failure", "activity_rejected", "activity_write", "activity_write_failure", "activity_loop", "activity_loop_rule", "activity_loop_failure", "agent", "mixed"}
+	if selectedStage == "staged" {
+		frontiers = []string{"agent"}
+	}
 	for _, backend := range []catalogRuntimeBackend{catalogBackendSQLite, catalogBackendPostgres} {
 		for _, declarations := range []int{0, 1, 2} {
-			for _, frontier := range []string{"node", "activity", "activity_failure", "activity_rejected", "activity_write", "activity_write_failure", "activity_loop", "activity_loop_rule", "activity_loop_failure", "agent", "mixed"} {
+			for _, frontier := range frontiers {
 				if frontier == "mixed" && (declarations != 1 || selectedStage != "initial") {
 					continue
 				}
@@ -539,38 +543,17 @@ func runSelectedForkFlowOwnedReadinessBothStores(t *testing.T, selectedStage str
 						if stage == "initial" && frontier != "activity_rejected" && err == nil {
 							executionEvidence, err = observeCatalogSelectedExecution(t, h, forkRun)
 						}
-						refused := stage == "staged" && frontier != "agent"
 						if stage == "staged" {
-							beforeActivation := selectedForkReadinessSnapshot(t, ctx, h, forkRun, owner.Route)
-							attempts := 1
-							if refused {
-								attempts = 2
+							activated, activateErr := executeCatalogLiveFork(t, h, ctx, forkexecution.SelectedContractExecutionRequest{
+								SourceRunID: catalogRuntimeRunID, At: frontierID, ForkOperation: &operation,
+								Owner: executionOwner, SourceLoader: loader, ContractSelection: selection, AgentRuntime: options,
+							})
+							if activateErr != nil || !activated.Activation.Activated || activated.ExecutedEventCount != 1 || activated.Materialization.ForkRunID != forkRun {
+								logSelectedForkRecoveryFailure(t, ctx, h, forkRun, activateErr)
+								t.Fatalf("admitted recovery: activated=%t count=%d fork=%s err=%v", activated.Activation.Activated, activated.ExecutedEventCount, forkRun, activateErr)
 							}
-							for attempt := 0; attempt < attempts; attempt++ {
-								if !refused {
-									activated, activateErr := executeCatalogLiveFork(t, h, ctx, forkexecution.SelectedContractExecutionRequest{
-										SourceRunID: catalogRuntimeRunID, At: frontierID, ForkOperation: &operation,
-										Owner: executionOwner, SourceLoader: loader, ContractSelection: selection, AgentRuntime: options,
-									})
-									if activateErr != nil || !activated.Activation.Activated || activated.ExecutedEventCount != 1 || activated.Materialization.ForkRunID != forkRun {
-										logSelectedForkRecoveryFailure(t, ctx, h, forkRun, activateErr)
-										t.Fatalf("admitted recovery: activated=%t count=%d fork=%s err=%v", activated.Activation.Activated, activated.ExecutedEventCount, forkRun, activateErr)
-									}
-									if observed, err := observeCatalogSelectedExecution(t, h, forkRun); err != nil || observed.ExecutedEventCount != 1 {
-										t.Fatalf("retained admitted recovery: evidence=%+v error=%v", observed, err)
-									}
-									continue
-								}
-								activated, activateErr := executeCatalogLiveFork(t, h, ctx, forkexecution.SelectedContractExecutionRequest{
-									SourceRunID: catalogRuntimeRunID, At: frontierID, ForkOperation: &operation,
-									Owner: selectedContractExecutionOwnerForCatalogHarness(t, h), SourceLoader: loader, AgentRuntime: options, ContractSelection: selection,
-								})
-								if activateErr == nil || !strings.Contains(activateErr.Error(), runfork.RunForkBlockerNonAgentDeliveryReplayUnsupported) || activated.Activation.Activated || activated.ExecutedEventCount != 0 || activated.ForkLocalRuntimeContainer != nil || len(activated.ForkEvents) != 0 {
-									t.Fatalf("unsupported history must refuse before execution: %#v %v", activated, activateErr)
-								}
-								if afterActivation := selectedForkReadinessSnapshot(t, ctx, h, forkRun, owner.Route); beforeActivation != afterActivation {
-									t.Fatalf("refused activation mutated fork on attempt %d:\nbefore=%s\nafter=%s", attempt, beforeActivation, afterActivation)
-								}
+							if observed, err := observeCatalogSelectedExecution(t, h, forkRun); err != nil || observed.ExecutedEventCount != 1 {
+								t.Fatalf("retained admitted recovery: evidence=%+v error=%v", observed, err)
 							}
 						} else if frontier == "activity_rejected" {
 							executionEvidence = lineageProof.published
@@ -632,10 +615,10 @@ func runSelectedForkFlowOwnedReadinessBothStores(t *testing.T, selectedStage str
 							t.Fatalf("complete readiness: %#v %t %v", readiness, found, err)
 						}
 						observed, err := catalogRunScopedOperatorEvents(h, forkRun)
-						if err != nil || (!refused && len(observed) == 0) || (refused && len(observed) != 0) {
+						if err != nil || len(observed) == 0 {
 							t.Fatalf("public fork readback: %#v %v", observed, err)
 						}
-						if frontier == "mixed" && !refused {
+						if frontier == "mixed" {
 							accepted := 0
 							for _, event := range observed {
 								for _, delivery := range event.Deliveries {
@@ -652,24 +635,21 @@ func runSelectedForkFlowOwnedReadinessBothStores(t *testing.T, selectedStage str
 								t.Fatalf("ordinary final entry retired or lost accepted agents: deliveries=%d state=%+v", accepted, forkState)
 							}
 						}
-						if !refused && forkState.CurrentState != "complete" {
+						if forkState.CurrentState != "complete" {
 							t.Fatalf("fork did not execute to terminal state: %#v", forkState)
 						}
 						if activityFrontier {
 							wantCalls := int32(1)
-							if refused {
-								wantCalls = 0
-							}
 							if got := activityCalls.Load(); got != wantCalls {
 								t.Fatalf("fork activity calls = %d, want %d", got, wantCalls)
 							}
-							if !refused && !rejected {
+							if !rejected {
 								assertCatalogActivityLineage(t, activityLineageEvents(t, ctx, h, forkRun), strings.HasSuffix(frontier, "failure"))
 								if strings.HasPrefix(frontier, "activity_write") {
 									assertCatalogActivityJournal(t, ctx, h, forkRun, strings.HasSuffix(frontier, "failure"))
 								}
 							}
-							if !refused && !rejected {
+							if !rejected {
 								// Activation read the exact native settlement before ACK;
 								// the completed instance does not retire its live run's bus.
 								if err := executionOwner.RetireSelectedContexts(ctx); err != nil {

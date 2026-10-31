@@ -1,13 +1,16 @@
 package serveapp
 
 import (
+	"context"
 	"database/sql"
 	"errors"
 	"reflect"
 	"strings"
 	"testing"
 
+	"github.com/division-sh/swarm/internal/runtime/runfork"
 	"github.com/division-sh/swarm/internal/runtime/runforkexecution"
+	"github.com/division-sh/swarm/internal/runtime/runforkreadiness"
 	"github.com/division-sh/swarm/internal/store/storetest"
 )
 
@@ -57,7 +60,7 @@ func issue642StagedTimerCorruption(t *testing.T, backend string, fault storetest
 	rt.waitDeliveries(t, seed.RunID)
 	issue2564H2CompletionWaitReceipt(t, rt, seed.RunID, seed.EventID)
 	plan, source := issue642TimerContinuationPlan(t, reader, seed.RunID, seed.EventID, marker.EventID)
-	staged, operation := issue642MaterializePausedTimer(t, ctx, owners, rt, reader, plan, source)
+	staged, _ := issue642MaterializePausedTimer(t, ctx, owners, rt, reader, plan, source)
 	_, timer := issue642RequirePausedStagedTimer(t, rt, reader, staged, source)
 	if err := storetest.CorruptStagedWorkflowTimer(ctx, rt.selected, staged.ForkRunID, timer.Ref.ActivationID, fault); err != nil {
 		t.Fatalf("install exact hostile staged timer: %v", err)
@@ -74,12 +77,32 @@ func issue642StagedTimerCorruption(t *testing.T, backend string, fault storetest
 	if !errors.Is(err, sql.ErrNoRows) {
 		t.Fatalf("unactivated staged child unexpectedly has an execution: %v", err)
 	}
-	activation, err := owners.family.Execute(ctx, runforkexecution.SelectedContractExecutionRequest{
-		SourceRunID: plan.SourceRunID, At: plan.ForkPoint.EventID, ForkOperation: operation,
-		ContractSelection: operation.ContractSelection, SourceLoader: owners.executor.SourceLoader, AgentRuntime: owners.executor.AgentRuntime,
+	prepared, err := owners.family.Prepare(ctx, runforkexecution.SelectedContractExecutionRequest{
+		SourceRunID: plan.SourceRunID, At: plan.ForkPoint.EventID, ExpectedBundleHash: rt.BundleHash,
+		ContractSelection: runfork.RunForkContractSelection{Mode: runfork.RunForkContractSelectionModeSelectedContracts},
+		SourceLoader:      owners.executor.SourceLoader, AgentRuntime: owners.executor.AgentRuntime,
 	})
-	if err == nil || activation.Activation.Activated || !strings.Contains(strings.ToLower(err.Error()), "timer") {
-		t.Fatalf("hostile staged timer did not refuse at timer admission: activation=%+v err=%v", activation, err)
+	if err != nil {
+		t.Fatalf("prepare exact staged timer readback: %v", err)
+	}
+	defer func() {
+		if err := prepared.Close(); err != nil {
+			t.Error(err)
+		}
+	}()
+	request, err := prepared.MaterializationRequest()
+	if err != nil {
+		t.Fatal(err)
+	}
+	native, ok := owners.family.Availability().(interface {
+		RequireMaterializedRunForkForSelectedContractExecution(context.Context, string, runforkreadiness.MaterializeRequest) (runfork.RunForkMaterialization, error)
+	})
+	if !ok {
+		t.Fatalf("missing native staged readback: %T", owners.family.Availability())
+	}
+	_, err = native.RequireMaterializedRunForkForSelectedContractExecution(ctx, staged.ForkRunID, request)
+	if err == nil || !strings.Contains(strings.ToLower(err.Error()), "timer") {
+		t.Fatalf("hostile staged timer did not refuse at timer admission: %v", err)
 	}
 	childAfter, readErr := storetest.ReadSelectedForkSourceDomain(ctx, rt.selected, staged.ForkRunID)
 	if readErr != nil || !reflect.DeepEqual(childBefore, childAfter) {

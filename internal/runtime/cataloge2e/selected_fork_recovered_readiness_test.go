@@ -139,14 +139,24 @@ func TestSelectedForkRecoveredReceiverReadinessBothStores(t *testing.T) {
 					})
 				} else {
 					// These are native pre-handoff admission negatives, not live ACKs.
-					refused, refusal := executeCatalogLiveFork(t, h, ctx, forkexecution.SelectedContractExecutionRequest{
-						SourceRunID: catalogRuntimeRunID, At: frontierID, ForkOperation: &operation,
-						Owner: executionOwner, SourceLoader: loader, AgentRuntime: options, ContractSelection: selection,
+					prepared, refusal := executionOwner.Prepare(ctx, forkexecution.SelectedContractExecutionRequest{
+						SourceRunID: catalogRuntimeRunID, At: frontierID,
+						ExpectedBundleHash: loaded.SourceArtifactFact.BundleHash(),
+						SourceLoader:       loader, AgentRuntime: options, ContractSelection: selection,
 					})
-					err = refusal
-					if refused.Activation.Activated || refused.ExecutedEventCount != 0 || refused.ForkLocalRuntimeContainer != nil || len(refused.ForkEvents) != 0 {
-						t.Fatalf("contradictory native child reached publication: %#v, %v", refused, err)
+					if refusal != nil {
+						t.Fatalf("prepare exact native readback: %v", refusal)
 					}
+					defer func() {
+						if closeErr := prepared.Close(); closeErr != nil {
+							t.Error(closeErr)
+						}
+					}()
+					request, refusal := prepared.MaterializationRequest()
+					if refusal != nil {
+						t.Fatal(refusal)
+					}
+					_, err = forkStore.RequireMaterializedRunForkForSelectedContractExecution(ctx, child, request)
 				}
 				if lawful {
 					if sourceCleanup != nil && !errors.Is(err, sourceCleanup.failure) || sourceCleanup == nil && err != nil {
