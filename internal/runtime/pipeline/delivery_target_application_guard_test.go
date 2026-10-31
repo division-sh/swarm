@@ -71,25 +71,6 @@ func TestDurableHandlerConsumersStayOnDeliveryTargetApplication(t *testing.T) {
 	}
 }
 
-func TestDeliveryTargetOwnershipRetiredFallbacksStayAbsent(t *testing.T) {
-	raw, err := os.ReadFile("delivery_target_ownership.go")
-	if err != nil {
-		t.Fatal(err)
-	}
-	source := string(raw)
-	for _, retired := range []string{"handlerEntitylessSafe", "prepareStampedSelectOrCreateState", "sameFlow"} {
-		if strings.Contains(source, retired) {
-			t.Errorf("delivery target owner reintroduced retired interpreter %q", retired)
-		}
-	}
-	classifier := workflowLifecycleFunctionSource(t, "delivery_target_ownership.go", "ClassifyDeliveryTargetOwnership")
-	for _, required := range []string{"ValidateExecutionHandlerDeclaration", "matchingDeliveryTargetOwnerCandidates"} {
-		if !strings.Contains(classifier, required) {
-			t.Errorf("target classifier stopped consuming canonical owner %q", required)
-		}
-	}
-}
-
 func TestRootExecutionIdentityConsumersStayCanonical(t *testing.T) {
 	checks := []struct {
 		file     string

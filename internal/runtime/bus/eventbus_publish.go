@@ -2396,11 +2396,7 @@ func (eb *EventBus) materializePublishRecipientPlanWithPlanner(ctx context.Conte
 	}
 	routePlan.MarkLowerPrecedenceRouteProduction(routeIntentProducerRecipientMaterializer)
 	routePlan.AddDeliveryIntents(routePlanDeliveryIntentsFromRoutes(routes, routeIntentProducerRecipientMaterializer)...)
-	projection, err := planner.materializedTargetOwnerProjection(ctx, evt, routePlan)
-	if err != nil {
-		return RoutePlan{}, err
-	}
-	projection, err = projection.withActivationPlans(routePlan.ActivationPlans)
+	projection, err := planner.materializedTargetOwnerProjection(ctx, evt, &routePlan)
 	if err != nil {
 		return RoutePlan{}, err
 	}

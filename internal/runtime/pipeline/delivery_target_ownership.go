@@ -205,61 +205,85 @@ func AdmitDeliveryTargetHandler(source semanticview.Source, node runtimeidentity
 }
 
 type DeliveryTargetOwnershipRequest struct {
-	Source     semanticview.Source
-	Event      events.Event
-	Recipient  events.DeliveryRecipient
-	Blueprint  events.RouteIdentity
-	Handler    DeliveryTargetHandler
-	Candidates []DeliveryTargetOwnerCandidate
+	Source    semanticview.Source
+	Event     events.Event
+	Recipient events.DeliveryRecipient
+	Blueprint events.RouteIdentity
+	Handler   DeliveryTargetHandler
 }
 
-// ClassifyDeliveryTargetOwnership is the single receiver-side owner for exact
-// handler target classification. It returns one closed durable ownership
-// variant and never repairs missing evidence from source-event identity.
-func ClassifyDeliveryTargetOwnership(req DeliveryTargetOwnershipRequest) (events.DeliveryTargetOwnership, error) {
+// DeliveryTargetLookup retains the admitted request while its exact instance
+// evidence is read. It is neither a durable route nor execution authority.
+type DeliveryTargetLookup struct {
+	request    DeliveryTargetOwnershipRequest
+	coordinate events.RouteIdentity
+	present    bool
+}
+
+func (l DeliveryTargetLookup) Coordinate() events.RouteIdentity { return l.coordinate }
+
+// AdmitDeliveryTargetLookup resolves the receiving declaration once, before any
+// instance lookup. Classification consumes this fact, not a caller-built route.
+func AdmitDeliveryTargetLookup(req DeliveryTargetOwnershipRequest) (DeliveryTargetLookup, error) {
 	if !req.Recipient.IsNode() {
-		return events.DeliveryTargetOwnership{}, fmt.Errorf("delivery target ownership classification requires a node recipient")
+		return DeliveryTargetLookup{}, fmt.Errorf("node target lookup requires its admitted handler")
 	}
 	if isJoinLifecycleEvent(req.Event.Type()) {
 		recipient, target, handler, ok, err := ResolveWorkflowJoinOccurrenceDeliveryTarget(req.Source, req.Event)
 		if err != nil {
-			return events.DeliveryTargetOwnership{}, err
+			return DeliveryTargetLookup{}, err
 		}
 		if !ok {
-			return events.DeliveryTargetOwnership{}, fmt.Errorf("join lifecycle delivery requires its exact declaration handle")
+			return DeliveryTargetLookup{}, fmt.Errorf("join lifecycle delivery requires its exact declaration handle")
 		}
 		if req.Recipient != recipient || (!req.Handler.Empty() && !req.Handler.Node().Equal(handler.Node())) {
-			return events.DeliveryTargetOwnership{}, fmt.Errorf("join lifecycle delivery route contradicts its exact declaration handler")
+			return DeliveryTargetLookup{}, fmt.Errorf("join lifecycle delivery route contradicts its exact declaration handler")
 		}
 		if blueprint := req.Blueprint.Normalized(); !blueprint.Empty() && blueprint != target {
-			return events.DeliveryTargetOwnership{}, fmt.Errorf("join lifecycle delivery route contradicts its exact declaration target")
+			return DeliveryTargetLookup{}, fmt.Errorf("join lifecycle delivery route contradicts its exact declaration target")
 		}
 		req.Handler = handler
 		req.Blueprint = target
 	}
-	blueprint := req.Blueprint.Normalized()
 	handler, admitted := req.Handler.resolve(req.Source, req.Event.Type())
 	if !admitted {
-		return events.DeliveryTargetOwnership{}, fmt.Errorf("receiver %s requires an exact admitted target handler for event %s", req.Recipient.ID(), req.Event.Type())
+		return DeliveryTargetLookup{}, fmt.Errorf("receiver %s requires an exact admitted target handler for event %s", req.Recipient.ID(), req.Event.Type())
+	}
+	node, _ := req.Recipient.Node()
+	if !node.Equal(req.Handler.Node()) {
+		return DeliveryTargetLookup{}, fmt.Errorf("node target lookup disagrees with its handler recipient")
+	}
+	if err := ValidateExecutionHandlerDeclaration(req.Source, req.Handler.Node(), handler); err != nil {
+		return DeliveryTargetLookup{}, err
 	}
 	flowID := req.Handler.ExecutionFlowID(req.Source)
-	if err := ValidateExecutionHandlerDeclaration(req.Source, req.Handler.Node(), handler); err != nil {
-		return events.DeliveryTargetOwnership{}, err
+	blueprint := req.Blueprint.Normalized()
+	if blueprint.FlowID != "" && blueprint.FlowID != flowID {
+		return DeliveryTargetLookup{}, fmt.Errorf("target lookup declaration %q disagrees with handler declaration %q", blueprint.FlowID, flowID)
 	}
-	var err error
-	if strings.TrimSpace(flowID) == strings.TrimSpace(semanticview.RootExecutionFlowID(req.Source)) {
-		blueprint, err = selectedRunRootTargetBlueprint(req.Source, req.Event, blueprint, req.Event.HasTargetRoute())
+	if flowID == semanticview.RootExecutionFlowID(req.Source) {
+		var err error
+		blueprint, err = selectedRunRootTargetBlueprint(req.Source, req.Event, blueprint)
 		if err != nil {
-			return events.DeliveryTargetOwnership{}, err
+			return DeliveryTargetLookup{}, err
 		}
 	} else {
+		if blueprint.FlowInstance == "" {
+			return DeliveryTargetLookup{}, fmt.Errorf("non-root target lookup requires an exact instance coordinate")
+		}
 		blueprint.FlowID = flowID
-		blueprint = blueprint.Normalized()
 	}
-	if blueprint.FlowInstance == "" {
-		return events.DeliveryTargetOwnership{}, fmt.Errorf("receiver target blueprint requires an exact flow instance")
+	return DeliveryTargetLookup{request: req, coordinate: blueprint, present: true}, nil
+}
+
+// ClassifyDeliveryTargetOwnership consumes fresh candidates for the already
+// admitted request without resolving its handler or receiving coordinate again.
+func ClassifyDeliveryTargetOwnership(lookup DeliveryTargetLookup, candidates []DeliveryTargetOwnerCandidate) (events.DeliveryTargetOwnership, error) {
+	if !lookup.present {
+		return events.DeliveryTargetOwnership{}, fmt.Errorf("delivery target classification requires its admitted lookup")
 	}
-	existing, materializing, err := matchingDeliveryTargetOwnerCandidates(req.Source, blueprint, req.Candidates)
+	blueprint := lookup.coordinate
+	existing, materializing, err := matchingDeliveryTargetOwnerCandidates(lookup.request.Source, blueprint, candidates)
 	if err != nil {
 		return events.DeliveryTargetOwnership{}, err
 	}
@@ -278,45 +302,16 @@ func ClassifyDeliveryTargetOwnership(req DeliveryTargetOwnershipRequest) (events
 	return events.DeliveryTargetOwnership{}, fmt.Errorf("receiver target owner is missing for flow instance %q; construct it before handler delivery", blueprint.FlowInstance)
 }
 
-// AdmitDeliveryTargetLookupCoordinate supplies lookup identity, not execution
-// permission. A declaration comes from the admitted handler, never a stored path.
-func AdmitDeliveryTargetLookupCoordinate(req DeliveryTargetOwnershipRequest) (events.RouteIdentity, error) {
-	handler, admitted := req.Handler.resolve(req.Source, req.Event.Type())
-	if !req.Recipient.IsNode() || !admitted {
-		return events.RouteIdentity{}, fmt.Errorf("node target lookup requires its admitted handler")
-	}
-	node, _ := req.Recipient.Node()
-	if !node.Equal(req.Handler.Node()) {
-		return events.RouteIdentity{}, fmt.Errorf("node target lookup disagrees with its handler recipient")
-	}
-	if err := ValidateExecutionHandlerDeclaration(req.Source, req.Handler.Node(), handler); err != nil {
-		return events.RouteIdentity{}, err
-	}
-	flowID := req.Handler.ExecutionFlowID(req.Source)
-	blueprint := req.Blueprint.Normalized()
-	if blueprint.FlowID != "" && blueprint.FlowID != flowID {
-		return events.RouteIdentity{}, fmt.Errorf("target lookup declaration %q disagrees with handler declaration %q", blueprint.FlowID, flowID)
-	}
-	if flowID == semanticview.RootExecutionFlowID(req.Source) {
-		return selectedRunRootTargetBlueprint(req.Source, req.Event, blueprint, true)
-	}
-	if blueprint.FlowInstance == "" {
-		return events.RouteIdentity{}, fmt.Errorf("non-root target lookup requires an exact instance coordinate")
-	}
-	blueprint.FlowID = flowID
-	return blueprint, nil
-}
-
-func selectedRunRootTargetBlueprint(source semanticview.Source, evt events.Event, blueprint events.RouteIdentity, exactTarget bool) (events.RouteIdentity, error) {
+func selectedRunRootTargetBlueprint(source semanticview.Source, evt events.Event, blueprint events.RouteIdentity) (events.RouteIdentity, error) {
 	coordinate, err := semanticview.AdmitRootExecutionCoordinate(source, evt.RunID())
 	if err != nil {
 		return events.RouteIdentity{}, err
 	}
 	blueprint = blueprint.Normalized()
-	if exactTarget && blueprint.FlowID != "" && blueprint.FlowID != coordinate.FlowID() {
+	if blueprint.FlowID != "" && blueprint.FlowID != coordinate.FlowID() {
 		return events.RouteIdentity{}, fmt.Errorf("root target flow %q disagrees with authored root flow %q", blueprint.FlowID, coordinate.FlowID())
 	}
-	if exactTarget && blueprint.FlowInstance != "" && blueprint.FlowInstance != coordinate.RunID() {
+	if blueprint.FlowInstance != "" && blueprint.FlowInstance != coordinate.RunID() {
 		return events.RouteIdentity{}, fmt.Errorf("root target run %q disagrees with current run %q", blueprint.FlowInstance, coordinate.RunID())
 	}
 	blueprint.FlowID = coordinate.FlowID()

@@ -19,14 +19,14 @@ func TestReceiverCompositionMissingStatePolicy(t *testing.T) {
 			if err != nil {
 				t.Fatal(err)
 			}
-			req := DeliveryTargetOwnershipRequest{Source: source, Event: evt, Recipient: events.MustNodeDeliveryRecipient(node), Handler: handler.ForEvent("work.ready"), Blueprint: events.RouteIdentity{FlowID: "review", FlowInstance: "review/one"}}
-			got, err := ClassifyDeliveryTargetOwnership(req)
+			req := deliveryTargetOwnershipTestRequest{Source: source, Event: evt, Recipient: events.MustNodeDeliveryRecipient(node), Handler: handler.ForEvent("work.ready"), Blueprint: events.RouteIdentity{FlowID: "review", FlowInstance: "review/one"}}
+			got, err := classifyDeliveryTargetOwnershipForTest(req)
 			if err == nil || !got.Empty() || !strings.Contains(err.Error(), "construct it before handler delivery") {
 				t.Fatalf("missing construction acquired execution ownership: owner=%s err=%v", got.Code(), err)
 			}
 			if name == "entityless" {
 				req.Blueprint.EntityID = eventtest.UUID("unavailable-exact-receiver")
-				if _, err := ClassifyDeliveryTargetOwnership(req); err == nil {
+				if _, err := classifyDeliveryTargetOwnershipForTest(req); err == nil {
 					t.Fatal("exact target silently downgraded to entityless")
 				}
 			}

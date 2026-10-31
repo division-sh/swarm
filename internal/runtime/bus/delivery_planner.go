@@ -486,13 +486,15 @@ func routePlanFromConnectRouteDispatch(evt events.Event, connectPlan connectRout
 	return routePlan.Normalized()
 }
 
-func (p deliveryPlanner) materializedTargetOwnerProjection(ctx context.Context, evt events.Event, plan RoutePlan) (selectedRunTargetOwnerProjection, error) {
+func (p deliveryPlanner) materializedTargetOwnerProjection(ctx context.Context, evt events.Event, plan *RoutePlan) (selectedRunTargetOwnerProjection, error) {
 	p.recipientPolicy.instances = p.connectPlanner.lifecycle.index
 	ctx = runtimecorrelation.WithInboundEvent(ctx, evt)
+	var lookups []runtimepipeline.DeliveryTargetLookup
 	if p.connectPlanner.source != nil {
+		lookups = make([]runtimepipeline.DeliveryTargetLookup, len(plan.DeliveryIntents))
 		var targets []events.RouteIdentity
 		var owners []runtimeflowidentity.RunScopedFlowInstance
-		for _, intent := range plan.DeliveryIntents {
+		for index, intent := range plan.DeliveryIntents {
 			if intent.Recipient.IsAgent() {
 				identity := intent.AgentIdentity.Normalize()
 				if identity.Validate() != nil || identity.RunID != evt.RunID() || identity.AgentID() != intent.Recipient.ID() {
@@ -513,12 +515,13 @@ func (p deliveryPlanner) materializedTargetOwnerProjection(ctx context.Context, 
 			target := intent.TargetBlueprint
 			if intent.Recipient.IsNode() {
 				var err error
-				target, err = runtimepipeline.AdmitDeliveryTargetLookupCoordinate(runtimepipeline.DeliveryTargetOwnershipRequest{
+				lookups[index], err = runtimepipeline.AdmitDeliveryTargetLookup(runtimepipeline.DeliveryTargetOwnershipRequest{
 					Source: p.connectPlanner.source, Event: evt, Recipient: intent.Recipient, Blueprint: target, Handler: intent.Handler,
 				})
 				if err != nil {
 					return selectedRunTargetOwnerProjection{}, err
 				}
+				target = lookups[index].Coordinate()
 			}
 			targets = append(targets, target)
 		}
@@ -533,7 +536,18 @@ func (p deliveryPlanner) materializedTargetOwnerProjection(ctx context.Context, 
 		}
 		ctx = withSelectedTargetOwnerLookupScope(ctx, scope)
 	}
-	return p.recipientPolicy.loadSelectedRunTargetOwnerProjection(ctx)
+	projection, err := p.recipientPolicy.loadSelectedRunTargetOwnerProjection(ctx)
+	if err != nil {
+		return selectedRunTargetOwnerProjection{}, err
+	}
+	projection, err = projection.withActivationPlans(plan.ActivationPlans)
+	if err != nil {
+		return selectedRunTargetOwnerProjection{}, err
+	}
+	if err := projection.resolveNodeTargetOwners(plan, lookups); err != nil {
+		return selectedRunTargetOwnerProjection{}, err
+	}
+	return projection, nil
 }
 
 func (p deliveryPlanner) PlanDirect(ctx context.Context, evt events.Event, recipients []string) (RoutePlan, error) {
