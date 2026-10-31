@@ -1090,29 +1090,6 @@ func waitForStandingMemoryCompletion(t testing.TB, backend, location, executionM
 	t.Fatalf("%s supported path did not settle after %d Telegram attempts", backend, wantAttempts)
 }
 
-func requireStandingMemoryAttemptCount(t testing.TB, backend, location, executionMode string, want int, label string) {
-	t.Helper()
-	time.Sleep(250 * time.Millisecond)
-	driver, dsn := "sqlite", location
-	query := `SELECT COUNT(*) FROM activity_attempts WHERE tool = 'telegram.send_message' AND execution_mode = ? AND status = 'succeeded'`
-	if backend == "postgres" {
-		driver, dsn = "postgres", location
-		query = `SELECT COUNT(*) FROM activity_attempts WHERE tool = 'telegram.send_message' AND execution_mode = $1 AND status = 'succeeded'`
-	}
-	db, err := sql.Open(driver, dsn)
-	if err != nil {
-		t.Fatalf("open %s activity store: %v", backend, err)
-	}
-	defer db.Close()
-	var got int
-	if err := db.QueryRow(query, executionMode).Scan(&got); err != nil {
-		t.Fatalf("query %s %s activity attempts: %v", backend, label, err)
-	}
-	if got != want {
-		t.Fatalf("%s %s Telegram attempts = %d, want %d", backend, label, got, want)
-	}
-}
-
 func equalStringCounts(left, right map[string]int) bool {
 	if len(left) != len(right) {
 		return false
@@ -1228,11 +1205,4 @@ func writeStandingMockRuntimeConfigWithRecovery(t *testing.T, backend, sqlitePat
 func writeStandingMemoryServeFixture(t testing.TB, telegramBaseURL string) string {
 	t.Helper()
 	return writeStandingTelegramServeFixture(t, telegramBaseURL)
-}
-
-func standingMemoryStoreDiagnostics(backend, location string) string {
-	if backend == "postgres" {
-		return standingPostgresDiagnostics(location)
-	}
-	return standingSQLiteDiagnostics(location)
 }
