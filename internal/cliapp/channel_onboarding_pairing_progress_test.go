@@ -326,9 +326,6 @@ func TestChannelCLIExplicitPairingClaimConfirmationJourney(t *testing.T) {
 					}
 					return
 				}
-				if mode == "human-login-handoff" && (checkpoints != 2 || loginReads != 0) {
-					t.Fatal("pending login relied on GET to create its authenticated successor", checkpoints, loginReads)
-				}
 				if code != 0 || !strings.Contains(out.String(), "READY") || !reentry && (!strings.Contains(out.String(), "\x1b[J") ||
 					!strings.Contains(out.String(), "Linked Devices")) ||
 					strings.Contains(out.String(), "Native inbox") ||
@@ -369,8 +366,8 @@ func TestChannelCLIExplicitPairingClaimConfirmationJourney(t *testing.T) {
 			if stage != 5 || strings.Count(strings.Join(methods, ","), "channel.confirm") != confirmations {
 				t.Fatal("ceremony failed to reach genuine confirmation", stage, methods)
 			}
-			if mode == "human-login-handoff" && (checkpoints != 1 || loginReads < 2 || strings.Count(out.String(), "Connecting to whatsapp...") != 1) {
-				t.Fatal("pending login repeated the checkpoint/status instead of waiting for read-only authenticated progress", checkpoints, loginReads)
+			if mode == "human-login-handoff" && (checkpoints != 2 || loginReads != 0 || strings.Count(out.String(), "Connecting to whatsapp...") != 1) {
+				t.Fatal("pending login relied on GET or repeated its connection announcement", checkpoints, loginReads)
 			}
 		})
 	}

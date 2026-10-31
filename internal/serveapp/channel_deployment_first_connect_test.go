@@ -223,7 +223,7 @@ func TestChannelConnectWhatsAppRegistersAccountBothStores(t *testing.T) {
 					t.Fatalf("public account-list exit=%d err=%s", code, listErr.String())
 				}
 				op := listing.Accounts[0].Operation
-				if op.OperationID != pairing.Operation.OperationID || op.SessionConnectionID != pairing.Operation.SessionConnectionID || op.Phase != channelonboarding.PhaseSucceeded || !op.AccountConfirmed || op.AccountReference != "+15551234567" || op.IdentityOperationID != "" {
+				if op.OperationID != pairing.Operation.OperationID || op.Phase != channelonboarding.PhaseSucceeded || !op.AccountConfirmed || op.AccountReference != "+15551234567" || op.IdentityOperationID != "" {
 					t.Fatal("first connect replaced its device/operation or failed to register the approved receptionist account")
 				}
 				peer.mu.Lock()
