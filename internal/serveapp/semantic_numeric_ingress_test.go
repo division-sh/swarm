@@ -17,6 +17,7 @@ import (
 	"github.com/division-sh/swarm/internal/runtime/testfixtures/canonicalrouting"
 	"github.com/division-sh/swarm/internal/runtime/workflowexpr"
 	"github.com/division-sh/swarm/internal/servedparity"
+	"github.com/division-sh/swarm/internal/store/storetest"
 	"github.com/google/uuid"
 	"github.com/gorilla/websocket"
 )
@@ -30,6 +31,7 @@ func TestServedSemanticNumericIdempotencyReplay(t *testing.T) {
 			stubServeRuntimeWorkspaceLifecycle(t)
 			opts := cliapp.ServeOptions{SourceRoot: root, APIListenAddr: "127.0.0.1:0", MCPListenAddr: "127.0.0.1:0", SelfCheck: true, TestOutboxSweeperConfig: servedEventPublishProofOutboxSweeperConfig()}
 			var db *sql.DB
+			var owner storetest.RunFixtureStore
 			if backend == servedparity.BackendExplicitPostgres {
 				_, db, _ = installServeRuntimeEmptyPostgresTestStores(t, func() cliapp.ServeWorkspaceLifecycle { return serveRuntimeWorkspaceStub{} })
 				opts.ConfigPath = writeServeRuntimeTestConfig(t)
@@ -38,7 +40,10 @@ func TestServedSemanticNumericIdempotencyReplay(t *testing.T) {
 			} else {
 				opts.ConfigPath = writeStoreBackendRuntimeConfig(t, "sqlite", filepath.Join(t.TempDir(), "semantic.db"))
 			}
-			captureSelectedRuntimePersistence(t, func(p serveRuntimePersistence) { db, _, _ = selectedRuntimeStoreForTest(t, p) })
+			captureSelectedRuntimePersistence(t, func(p serveRuntimePersistence) {
+				db, _, _ = selectedRuntimeStoreForTest(t, p)
+				owner, _ = p.deps.EventStore.(storetest.RunFixtureStore)
+			})
 			start := func() (*serveRuntimeTestProcess, string) {
 				p := startServeRuntimeTestProcess(t, opts)
 				p.waitForReadyLine()
@@ -52,6 +57,9 @@ func TestServedSemanticNumericIdempotencyReplay(t *testing.T) {
 			var cases []replayCase
 			for _, method := range []string{"event.publish", "run.start"} {
 				for _, transport := range []string{"http"} {
+					if method == "event.publish" {
+						seedOwnedPublicationLiveRun(t, servedTestProcessRuntime(t, process), bundleHash, owner)
+					}
 					c := replayCase{method: method, transport: transport, run: uuid.NewString(), key: uuid.NewString()}
 					body := semanticNumericRequest(bundleHash, c.method, c.run, c.key, "7")
 					resp := semanticNumericRPC(t, endpoint, c.transport, body)
@@ -243,10 +251,11 @@ func semanticNumericIngressFixture(t *testing.T) string {
 }
 
 func semanticNumericRequest(bundleHash, method, run, key, number string) string {
+	runField := fmt.Sprintf(`"run_id":%q,`, run)
 	if method == "event.publish" {
-		run = ""
+		runField = ""
 	}
-	return fmt.Sprintf(`{"jsonrpc":"2.0","id":"numeric","method":%q,"params":{"bundle_hash":%q,"run_id":%q,"idempotency_key":%q,"event_name":"numeric.requested","payload":{"value":%s,"nested":{"numbers":[%s],"fraction":7.5}}}}`, method, bundleHash, run, key, number, number)
+	return fmt.Sprintf(`{"jsonrpc":"2.0","id":"numeric","method":%q,"params":{"bundle_hash":%q,%s"idempotency_key":%q,"event_name":"numeric.requested","payload":{"value":%s,"nested":{"numbers":[%s],"fraction":7.5}}}}`, method, bundleHash, runField, key, number, number)
 }
 
 func semanticNumericRPC(t *testing.T, endpoint, transport, body string) servedJSONRPCEnvelope {

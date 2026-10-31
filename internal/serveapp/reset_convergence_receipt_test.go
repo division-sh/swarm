@@ -51,10 +51,11 @@ func proveServedResetFinalReceiptFailure(t *testing.T, proof servedControlProofR
 	if err := use.Done(); err != nil {
 		t.Fatal(err)
 	}
-	later := requireServedEventPublishRPCResult(t, proof.Endpoint, map[string]any{
+	var later servedEventPublishRPCResult
+	requireServedJSONRPCResult(t, proof.Endpoint, "run.start", map[string]any{
 		"event_name": "item.received", "bundle_hash": proof.BundleHash,
 		"payload": map[string]any{"item_id": "after-uncertain-final-receipt"}, "idempotency_key": uuid.NewString(),
-	})
+	}, &later)
 	waitForServedEventPublishNodeDeliveryLifecycle(t, proof.DB, proof.Backend, later.RunID, later.EventID, proof.Probe)
 	for i := 0; i < 2; i++ {
 		retry := requestServedJSONRPC(t, proof.Endpoint, "runtime.nuke", params)

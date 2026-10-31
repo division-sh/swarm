@@ -56,7 +56,7 @@ func requireTypedReceiverInitializationCases(t *testing.T, rt servedControlProof
 			params := receiverInitializationPublishParams(rt, "missing-"+missing, "missing-"+missing, `{}`)
 			delete(params["payload"].(map[string]any), missing)
 			before := receiverIngressApplicationSnapshot(t, rt.ReceiverStateReader)
-			refusal := requireServedJSONRPCError(t, rt.Endpoint, "event.publish", params)
+			refusal := requireServedJSONRPCError(t, rt.Endpoint, "run.start", params)
 			if refusal.Data["code"] != apiv1.PayloadValidationFailedCode {
 				t.Fatalf("required message refusal=%+v", refusal)
 			}
@@ -92,7 +92,8 @@ func requireTypedReceiverInitializationCases(t *testing.T, rt servedControlProof
 		t.Run(tc.name, func(t *testing.T) {
 			account := "account-" + tc.name
 			params := receiverInitializationPublishParams(rt, tc.name, account, tc.values)
-			seed := requireServedEventPublishRPCResult(t, rt.Endpoint, params)
+			var seed servedEventPublishRPCResult
+			requireServedJSONRPCResult(t, rt.Endpoint, "run.start", params, &seed)
 			waitPublicationSiteCompletion(t, rt, seed.RunID)
 			if tc.name == "optional_null_normalized" {
 				var public operatorread.OperatorEventFull
@@ -110,7 +111,8 @@ func requireTypedReceiverInitializationCases(t *testing.T, rt servedControlProof
 			waitOrigin(t, seed)
 			before := readServedForkRecipientSourceDomain(t, rt, seed.RunID)
 			companions := readForkReceiverCompanions(t, rt, seed.RunID)
-			duplicate := requireServedEventPublishRPCResult(t, rt.Endpoint, params)
+			var duplicate servedEventPublishRPCResult
+			requireServedJSONRPCResult(t, rt.Endpoint, "run.start", params, &duplicate)
 			if duplicate.EventID != seed.EventID || duplicate.RunID != seed.RunID || !reflect.DeepEqual(before, readServedForkRecipientSourceDomain(t, rt, seed.RunID)) || !reflect.DeepEqual(companions, readForkReceiverCompanions(t, rt, seed.RunID)) {
 				t.Fatal("duplicate creation changed occurrence or execution history")
 			}
@@ -133,7 +135,7 @@ func requireTypedReceiverInitializationCases(t *testing.T, rt servedControlProof
 	}
 	t.Run("wrong_integer_at_ingress", func(t *testing.T) {
 		params := receiverInitializationPublishParams(rt, "wrong-integer", "wrong-integer", `{"count":"3","active":true,"label":"kept","attributes":{}}`)
-		err := requireServedJSONRPCError(t, rt.Endpoint, "event.publish", params)
+		err := requireServedJSONRPCError(t, rt.Endpoint, "run.start", params)
 		if err.Data["code"] != apiv1.PayloadValidationFailedCode {
 			t.Fatalf("wrong integer admission error=%+v", err)
 		}
@@ -141,7 +143,7 @@ func requireTypedReceiverInitializationCases(t *testing.T, rt servedControlProof
 		if count := requireReceiverEventIdempotencyCardinality(t, rt.ReceiverStateReader, key); count != 0 {
 			t.Fatalf("invalid ingress persisted %d events", count)
 		}
-		if count := servedEventPublishAPIIdempotencyCount(t, rt.DB, rt.Backend, "event.publish", key); count != 0 {
+		if count := servedEventPublishAPIIdempotencyCount(t, rt.DB, rt.Backend, "run.start", key); count != 0 {
 			t.Fatalf("invalid ingress persisted %d command receipts", count)
 		}
 	})

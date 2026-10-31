@@ -618,13 +618,18 @@ func TestCLI_ServeLifecycleRoutesDiagnosticsToStderr(t *testing.T) {
 
 func TestRunServeRuntimeJoinFailureReachesAPIAndCLI(t *testing.T) {
 	endpoint, db, bundleHash, _, _ := startServedJoinProofRuntime(t)
-	initial := requireServedEventPublishRPCResult(t, endpoint, map[string]any{
+	var initial struct {
+		RunID   string `json:"run_id"`
+		EventID string `json:"event_id"`
+		Status  string `json:"status"`
+	}
+	requireServedJSONRPCResult(t, endpoint, "run.start", map[string]any{
 		"event_name":      "order.started",
 		"bundle_hash":     bundleHash,
 		"payload":         map[string]any{"expected": []any{"a"}, "dispatch_id": "dispatch-1"},
 		"idempotency_key": "join-failure-run-" + uuid.NewString(),
-	})
-	if !initial.NewRunCreated || initial.RunID == "" || initial.EventID == "" {
+	}, &initial)
+	if initial.Status != "live" || initial.RunID == "" || initial.EventID == "" {
 		t.Fatalf("join failure initial run = %#v", initial)
 	}
 	waitServedEventPublishDeliveryStatusCountForRun(t, db, "postgres", initial.RunID, initial.EventID, "node", identitytest.RootNode(t, "starter").Key(), "delivered", 1)
@@ -756,7 +761,7 @@ func TestRunServeRuntimeEventPublishRunIDFollowUpServedPathDefaultSQLite(t *test
 	captureSelectedRuntimePersistence(t, func(persistence serveRuntimePersistence) {
 		servedDB, _, _ = selectedRuntimeStoreForTest(t, persistence)
 	})
-	endpoint, _ := startServedEventPublishFollowUpRuntime(t, cliapp.ServeOptions{
+	endpoint, _ := startServedPublicationLiveRunProof(t, cliapp.ServeOptions{
 		ConfigPath:              writeStoreBackendRuntimeConfig(t, storebackend.BackendSQLite.String(), sqlitePath),
 		SourceRoot:              sourceRoot,
 		APIListenAddr:           "127.0.0.1:0",
@@ -809,7 +814,7 @@ func TestRunServeRuntimeEventPublishTargetRouteServedPathDefaultSQLite(t *testin
 	captureSelectedRuntimePersistence(t, func(persistence serveRuntimePersistence) {
 		servedDB, _, _ = selectedRuntimeStoreForTest(t, persistence)
 	})
-	endpoint, _ := startServedEventPublishFollowUpRuntime(t, cliapp.ServeOptions{
+	endpoint, _ := startServedPublicationLiveRunProof(t, cliapp.ServeOptions{
 		ConfigPath:              writeStoreBackendRuntimeConfig(t, storebackend.BackendSQLite.String(), sqlitePath),
 		SourceRoot:              sourceRoot,
 		APIListenAddr:           "127.0.0.1:0",
@@ -833,7 +838,7 @@ func TestRunServeRuntimeEventPublishTargetRouteServedPathPostgres(t *testing.T) 
 	sourceRoot := writeServedEventPublishTargetRouteFixture(t)
 	bundleHash := servedEventPublishFixtureBundleHash(t, sourceRoot)
 	probe := lifecycletest.New(t, lifecycletest.WithTimeout(servedEventPublishLifecycleProbeWaitTimeout))
-	endpoint, _ := startServedEventPublishFollowUpRuntime(t, cliapp.ServeOptions{
+	endpoint, _ := startServedPublicationLiveRunProof(t, cliapp.ServeOptions{
 		ConfigPath:              writeServeRuntimeTestConfig(t),
 		SourceRoot:              sourceRoot,
 		StoreMode:               "postgres",
@@ -863,7 +868,7 @@ func TestRunServeRuntimeEventPublishExistingRunActiveLoadServedPathDefaultSQLite
 	captureSelectedRuntimePersistence(t, func(persistence serveRuntimePersistence) {
 		servedDB, _, _ = selectedRuntimeStoreForTest(t, persistence)
 	})
-	endpoint, _ := startServedEventPublishFollowUpRuntime(t, cliapp.ServeOptions{
+	endpoint, _ := startServedPublicationLiveRunProof(t, cliapp.ServeOptions{
 		ConfigPath:              writeStoreBackendRuntimeConfig(t, storebackend.BackendSQLite.String(), sqlitePath),
 		SourceRoot:              sourceRoot,
 		APIListenAddr:           "127.0.0.1:0",
@@ -891,7 +896,7 @@ func TestRunServeRuntimeEventPublishExistingRunActiveLoadServedPathPostgres(t *t
 	agentStarted := make(chan struct{}, 1)
 	release := make(chan struct{})
 	var releaseOnce sync.Once
-	endpoint, _ := startServedEventPublishFollowUpRuntime(t, cliapp.ServeOptions{
+	endpoint, _ := startServedPublicationLiveRunProof(t, cliapp.ServeOptions{
 		ConfigPath:              writeServeRuntimeTestConfig(t),
 		SourceRoot:              sourceRoot,
 		StoreMode:               "postgres",
@@ -967,10 +972,11 @@ func TestRunServeRuntimeNukeQuiescesSessionWriterBeforeCleanupPostgres(t *testin
 	if artifactAfter != artifactBefore {
 		t.Fatal("retained reset mutated the admitted source artifact")
 	}
-	postReset := requireServedEventPublishRPCResult(t, proof.Endpoint, map[string]any{
+	var postReset servedEventPublishRPCResult
+	requireServedJSONRPCResult(t, proof.Endpoint, "run.start", map[string]any{
 		"event_name": "item.received", "bundle_hash": proof.BundleHash,
 		"payload": map[string]any{"item_id": "after-reset"}, "idempotency_key": uuid.NewString(),
-	})
+	}, &postReset)
 	if postReset.RunID == "" || postReset.RunID == proof.RunID {
 		t.Fatalf("post-reset admission did not create fresh work: %+v", postReset)
 	}
@@ -1070,7 +1076,7 @@ func startServedSessionCleanupProof(t *testing.T) servedSessionCleanupProof {
 	release := make(chan struct{})
 	var releaseOnce sync.Once
 	contextsReady := make(chan *runtimepkg.RuntimeContextManager, 1)
-	endpoint, _ := startServedEventPublishFollowUpRuntime(t, cliapp.ServeOptions{
+	endpoint, _ := startServedPublicationLiveRunProof(t, cliapp.ServeOptions{
 		ConfigPath: writeServeRuntimeTestConfig(t), SourceRoot: sourceRoot, StoreMode: "postgres", StoreModeSet: true, APIListenAddr: "127.0.0.1:0", MCPListenAddr: "127.0.0.1:0",
 		SelfCheck: true, Verbose: true, TestLifecycleProbe: probe,
 		TestLLMRuntime:          servedSessionCleanupProofLLMRuntime{store: pg, started: started, release: release},
@@ -1295,15 +1301,23 @@ func servedControlProofAuthorActivityContext(t *testing.T, rt servedControlProof
 
 func seedServedPublicationLiveRun(t *testing.T, rt servedControlProofRuntime) string {
 	t.Helper()
-	ctx := servedControlProofAuthorActivityContext(t, rt)
-	source := rt.Runtime.Options.WorkflowModule.SemanticSource()
 	var owner storetest.RunFixtureStore = rt.SQLite
 	if rt.Postgres != nil {
 		owner = rt.Postgres
 	}
+	return seedOwnedPublicationLiveRun(t, rt.Runtime, rt.BundleHash, owner)
+}
+
+func seedOwnedPublicationLiveRun(t *testing.T, rt *runtimepkg.Runtime, bundleHash string, owner storetest.RunFixtureStore) string {
+	t.Helper()
+	if owner == nil {
+		t.Fatal("publication fixture requires its native run lifecycle owner")
+	}
+	ctx := servedRuntimeProofAuthorActivityContext(t, rt, bundleHash)
+	source := rt.Options.WorkflowModule.SemanticSource()
 	runID := uuid.NewString()
 	storetest.RequireRun(t, ctx, owner, storetest.RunFixture{
-		RunID: runID, BundleHash: rt.BundleHash, Origin: storerunlifecycle.DeploymentRunOrigin(),
+		RunID: runID, BundleHash: bundleHash, Origin: storerunlifecycle.DeploymentRunOrigin(),
 		State: storerunlifecycle.StateLive, LiveScope: storerunlifecycle.LiveRunScope{FlowPath: runtimeflowidentity.ScopeKey(source, ".")},
 	})
 	return runID
@@ -3350,7 +3364,7 @@ func runServedDynamicAutoEmitSQLiteProof(t *testing.T) {
 		hookMu sync.Mutex
 		hook   runtimepipeline.WorkflowNodeHandlerStartHook
 	)
-	endpoint, _ := startServedEventPublishFollowUpRuntime(t, cliapp.ServeOptions{
+	endpoint, _ := startServedPublicationLiveRunProof(t, cliapp.ServeOptions{
 		ConfigPath:              writeStoreBackendRuntimeConfig(t, storebackend.BackendSQLite.String(), sqlitePath),
 		SourceRoot:              sourceRoot,
 		APIListenAddr:           "127.0.0.1:0",
@@ -3392,7 +3406,7 @@ func runServedDynamicAutoEmitPostgresProof(t *testing.T) {
 	blocked := make(chan servedEventPublishPreHandlerProof, 1)
 	release := make(chan struct{})
 	var releaseOnce sync.Once
-	endpoint, _ := startServedEventPublishFollowUpRuntime(t, cliapp.ServeOptions{
+	endpoint, _ := startServedPublicationLiveRunProof(t, cliapp.ServeOptions{
 		ConfigPath:                       writeServeRuntimeTestConfig(t),
 		SourceRoot:                       sourceRoot,
 		StoreMode:                        "postgres",
@@ -3421,8 +3435,8 @@ func runServedDynamicAutoEmitProof(t *testing.T, endpoint string, db *sql.DB, ba
 		"payload":         map[string]any{"owner": "operator"},
 		"idempotency_key": "issue-1384-" + backend + "-bootstrap",
 	})
-	if !bootstrap.NewRunCreated || bootstrap.EventID == "" || bootstrap.RunID == "" {
-		t.Fatalf("bootstrap event.publish result = %#v, want new run and event id", bootstrap)
+	if bootstrap.NewRunCreated || bootstrap.EventID == "" || bootstrap.RunID == "" {
+		t.Fatalf("bootstrap event.publish result = %#v, want existing live run and event id", bootstrap)
 	}
 	runID := bootstrap.RunID
 	parentEntityID := requireServedEventPublishEntityState(t, db, backend, runID, "", "waiting")
@@ -3545,14 +3559,19 @@ func requireServedParitySettlementPostconditionsWithDebug(t *testing.T, endpoint
 
 func createServedControlWaitingRun(t *testing.T, rt servedControlProofRuntime, suffix string) (runID, eventID, entityID string) {
 	t.Helper()
-	result := requireServedEventPublishRPCResult(t, rt.Endpoint, map[string]any{
+	var result struct {
+		RunID   string `json:"run_id"`
+		EventID string `json:"event_id"`
+		Status  string `json:"status"`
+	}
+	requireServedJSONRPCResult(t, rt.Endpoint, "run.start", map[string]any{
 		"event_name":      "item.received",
 		"bundle_hash":     rt.BundleHash,
 		"payload":         map[string]any{"item_id": suffix},
 		"idempotency_key": "issue-1864-" + rt.Backend + "-" + suffix,
-	})
-	if !result.NewRunCreated || result.RunID == "" || result.EventID == "" {
-		t.Fatalf("%s control seed event.publish result = %#v, want new run", rt.Backend, result)
+	}, &result)
+	if result.Status != "live" || result.RunID == "" || result.EventID == "" {
+		t.Fatalf("%s control seed run.start result = %#v, want live run", rt.Backend, result)
 	}
 	waitForServedEventPublishNodeDeliveryLifecycleForNode(t, rt.DB, rt.Backend, result.RunID, result.EventID, identitytest.RootNode(t, "item-handler").Key(), rt.Probe)
 	entityID = requireServedEventPublishEntityState(t, rt.DB, rt.Backend, result.RunID, "", "waiting")
@@ -4676,6 +4695,17 @@ func servedEventPublishProofOutboxSweeperConfig() runtimebus.OutboxSweeperConfig
 	return cfg
 }
 
+func startServedPublicationLiveRunProof(t *testing.T, opts cliapp.ServeOptions) (string, *runtimepkg.Runtime) {
+	t.Helper()
+	var owner storetest.RunFixtureStore
+	captureSelectedRuntimePersistence(t, func(p serveRuntimePersistence) {
+		owner, _ = p.deps.EventStore.(storetest.RunFixtureStore)
+	})
+	endpoint, rt := startServedEventPublishFollowUpRuntime(t, opts)
+	seedOwnedPublicationLiveRun(t, rt, rt.Options.SourceArtifactFact.BundleHash(), owner)
+	return endpoint, rt
+}
+
 func startServedEventPublishFollowUpRuntime(t *testing.T, opts cliapp.ServeOptions) (string, *runtimepkg.Runtime) {
 	t.Helper()
 	serveCtx, cancelServe := context.WithCancel(context.Background())
@@ -4893,8 +4923,8 @@ func runServedEventPublishFollowUpProof(t *testing.T, endpoint string, db *sql.D
 	initial := parseServedEventPublishOutput(t, initialStdout)
 	runID := initial["run_id"]
 	initialEventID := initial["event_id"]
-	if initial["new_run_created"] != "true" || initial["deliveries"] == "0" || runID == "" || initialEventID == "" {
-		t.Fatalf("initial event publish fields = %#v, want new run with delivery", initial)
+	if initial["new_run_created"] != "false" || initial["deliveries"] == "0" || runID == "" || initialEventID == "" {
+		t.Fatalf("initial event publish fields = %#v, want existing live run with delivery", initial)
 	}
 	if got := servedEventPublishRowCount(t, db, backend, "runs", runID, ""); got != 1 {
 		t.Fatalf("%s runs for initial run = %d, want 1", backend, got)
@@ -5014,8 +5044,8 @@ func runServedEventPublishTargetRouteProof(t *testing.T, endpoint string, db *sq
 	bootstrap := parseServedEventPublishOutput(t, bootstrapStdout)
 	runID := bootstrap["run_id"]
 	bootstrapEventID := bootstrap["event_id"]
-	if bootstrap["new_run_created"] != "true" || bootstrap["deliveries"] == "0" || runID == "" || bootstrapEventID == "" {
-		t.Fatalf("bootstrap target-route event publish fields = %#v, want new run with delivery", bootstrap)
+	if bootstrap["new_run_created"] != "false" || bootstrap["deliveries"] == "0" || runID == "" || bootstrapEventID == "" {
+		t.Fatalf("bootstrap target-route event publish fields = %#v, want existing live run with delivery", bootstrap)
 	}
 	requireServedEventPublishEntityState(t, db, backend, runID, "", "waiting")
 
@@ -5094,8 +5124,8 @@ func runServedEventPublishActiveLoadProof(
 	})
 	runID := initial.RunID
 	initialEventID := initial.EventID
-	if !initial.NewRunCreated || runID == "" || initialEventID == "" {
-		t.Fatalf("%s initial event.publish result = %#v, want new run", backend, initial)
+	if initial.NewRunCreated || runID == "" || initialEventID == "" {
+		t.Fatalf("%s initial event.publish result = %#v, want existing live run", backend, initial)
 	}
 	waitForServedEventPublishNodeDeliveryLifecycleForNode(t, db, backend, runID, initialEventID, identitytest.RootNode(t, "item-handler").Key(), probe)
 	entityID := requireServedEventPublishEntityState(t, db, backend, runID, "", "waiting")

@@ -526,6 +526,7 @@ func startPublicInputRollbackRuntime(t *testing.T, backend servedparity.Backend)
 	sourceRoot := writePublicTelegramMockApprovalScenarioFixture(t)
 	bundleHash := servedEventPublishFixtureBundleHash(t, sourceRoot)
 	var db *sql.DB
+	var fixtureOwner storetest.RunFixtureStore
 	opts := cliapp.ServeOptions{
 		SourceRoot: sourceRoot, APIListenAddr: "127.0.0.1:0", MCPListenAddr: "127.0.0.1:0",
 		SelfCheck: true, Verbose: true,
@@ -539,23 +540,27 @@ func startPublicInputRollbackRuntime(t *testing.T, backend servedparity.Backend)
 			stores, err := oldBuildStores(ctx, selection, cfg)
 			if err == nil {
 				db = selectedStoreDatabaseForTest(t, stores)
+				fixtureOwner, _ = stores.RuntimeDeps().EventStore.(storetest.RunFixtureStore)
 			}
 			return stores, err
 		}
 		t.Cleanup(func() { buildStoresForServe = oldBuildStores })
 		opts.ConfigPath = writeMockAgentRuntimeConfig(t, storebackend.BackendSQLite.String(), filepath.Join(t.TempDir(), "public-input-rollback.sqlite"))
 	case servedparity.BackendExplicitPostgres:
-		_, db, _ = installServeRuntimeEmptyPostgresTestStores(t, func() cliapp.ServeWorkspaceLifecycle { return serveRuntimeWorkspaceStub{} })
+		var pg *store.PostgresStore
+		_, db, pg = installServeRuntimeEmptyPostgresTestStores(t, func() cliapp.ServeWorkspaceLifecycle { return serveRuntimeWorkspaceStub{} })
+		fixtureOwner = pg
 		opts.ConfigPath = writeMockAgentRuntimeConfig(t, storebackend.BackendPostgres.String(), "")
 		opts.StoreMode = storebackend.BackendPostgres.String()
 		opts.StoreModeSet = true
 	default:
 		t.Fatalf("unsupported backend %q", backend)
 	}
-	endpoint, _ := startOwnedMockLifecycleFollowUpRuntime(t, opts)
+	endpoint, rt := startOwnedMockLifecycleFollowUpRuntime(t, opts)
 	if db == nil {
 		t.Fatalf("%s selected database is required", backend)
 	}
+	seedOwnedPublicationLiveRun(t, rt, bundleHash, fixtureOwner)
 	return endpoint, db, bundleHash
 }
 
@@ -591,8 +596,9 @@ func requirePublicInputRollbackNoResidue(t *testing.T, db *sql.DB, backend serve
 		label string
 		sql   string
 		args  []any
+		want  int
 	}{
-		{label: "run", sql: `SELECT COUNT(*) FROM runs WHERE run_id = ?`, args: []any{runID}},
+		{label: "pre-existing live run", sql: `SELECT COUNT(*) FROM runs WHERE run_id = ?`, args: []any{runID}, want: 1},
 		{label: "flow instance", sql: `SELECT COUNT(*) FROM flow_instances WHERE flow_template = 'telegram-chat'`},
 		{label: "entity", sql: `SELECT COUNT(*) FROM entity_state WHERE run_id = ?`, args: []any{runID}},
 		{label: "construction receipt", sql: `SELECT COUNT(*) FROM workflow_instance_initial_materializations WHERE run_id = ?`, args: []any{runID}},
@@ -610,8 +616,8 @@ func requirePublicInputRollbackNoResidue(t *testing.T, db *sql.DB, backend serve
 		if err := db.QueryRowContext(context.Background(), statement, query.args...).Scan(&count); err != nil {
 			t.Fatalf("%s count %s rollback rows: %v", backend, query.label, err)
 		}
-		if count != 0 {
-			t.Fatalf("%s %s rows after public-input rollback = %d, want 0", backend, query.label, count)
+		if count != query.want {
+			t.Fatalf("%s %s rows after public-input rollback = %d, want %d", backend, query.label, count, query.want)
 		}
 	}
 	if got := servedEventPublishAPIIdempotencyCount(t, db, servedBackendLabel(backend), "event.publish", idempotencyKey); got != 0 {
