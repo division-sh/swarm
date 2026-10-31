@@ -355,7 +355,7 @@ func (am *AgentManager) reconcileDynamicFlowRuntimeReadinessOnce(
 		active.timersProjected = true
 		am.dynamicFlowReadinessMu.Unlock()
 		if err := am.workflowInstances.ReconcileInitialEntryTimersForAttempt(ctx, flowIdentity, active.receipt, plan); err != nil {
-			shutdownCancellation = am.cleanReadinessShutdownReadCancellation(ctx, err) || am.cleanReadinessShutdownAdmissionRefusal(ctx, err)
+			shutdownCancellation = am.cleanReadinessShutdownForwardCancellation(ctx, err)
 			return fmt.Errorf("reconcile initial workflow timers for %s: %w", readiness.InstancePath, err)
 		}
 	}

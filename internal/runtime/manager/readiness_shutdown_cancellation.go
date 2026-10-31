@@ -55,6 +55,15 @@ func (am *AgentManager) cleanReadinessShutdownAdmissionRefusal(ctx context.Conte
 	}) && am.ownsReadinessShutdownCancellation(ctx)
 }
 
+func (am *AgentManager) cleanReadinessShutdownForwardCancellation(ctx context.Context, err error) bool {
+	if _, classified := runtimefailures.As(err); classified {
+		return false
+	}
+	return runtimefailures.OnlyBranches(err, func(branch error) bool {
+		return branch == context.Canceled || branch == worklifetime.ErrRetired || branch == worklifetime.ErrAdmissionFenced
+	}) && am.ownsReadinessShutdownCancellation(ctx)
+}
+
 func isReadinessShutdownCompletion(err error, key dynamicFlowRuntimeReadinessKey, attempt *dynamicFlowRuntimeReadinessAttempt) bool {
 	if err == nil {
 		return false
