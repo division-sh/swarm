@@ -48,7 +48,8 @@ func TestIssue2564ServedH3CollectionOperationsBothStores(t *testing.T) {
 						}
 					}
 					_, rt := startIssue2564Served(t, backend, writeIssue2564Fixture(t, false), p, nil, nil)
-					seed := requireServedEventPublishRPCResult(t, rt.Endpoint, map[string]any{"event_name": "hub.start", "bundle_hash": rt.BundleHash, "payload": map[string]any{"hub_id": "h3"}, "idempotency_key": "h3-start"})
+					var seed servedEventPublishRPCResult
+					requireServedJSONRPCResult(t, rt.Endpoint, "run.start", map[string]any{"event_name": "hub.start", "bundle_hash": rt.BundleHash, "payload": map[string]any{"hub_id": "h3"}, "idempotency_key": "h3-start"}, &seed)
 					entityID := rt.waitEntityStage(t, seed.RunID, "", "idle")
 					requireServedEventPublishRPCResult(t, rt.Endpoint, map[string]any{"event_name": "hub.begin", "run_id": seed.RunID, "payload": map[string]any{"hub_id": "h3"}, "idempotency_key": "h3-begin"})
 					// Both sessions have captured literal operations before either
@@ -144,7 +145,8 @@ func TestIssue2564ServedM33NonterminalDeadlineLateResultBothStores(t *testing.T)
 						return ctx.Err()
 					}
 				}, issue2564StageTimerPublicationGate{release: releaseTimer})
-				seed := requireServedEventPublishRPCResult(t, rt.Endpoint, map[string]any{"event_name": "hub.start", "bundle_hash": rt.BundleHash, "payload": map[string]any{"hub_id": "m33"}, "idempotency_key": "m33-start"})
+				var seed servedEventPublishRPCResult
+				requireServedJSONRPCResult(t, rt.Endpoint, "run.start", map[string]any{"event_name": "hub.start", "bundle_hash": rt.BundleHash, "payload": map[string]any{"hub_id": "m33"}, "idempotency_key": "m33-start"}, &seed)
 				entityID := rt.waitEntityStage(t, seed.RunID, "", "idle")
 				requireServedEventPublishRPCResult(t, rt.Endpoint, map[string]any{"event_name": "hub.begin", "run_id": seed.RunID, "payload": map[string]any{"hub_id": "m33"}, "idempotency_key": "m33-begin"})
 				p.wait(t, "a", 0)

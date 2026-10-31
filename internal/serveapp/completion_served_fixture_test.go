@@ -37,13 +37,18 @@ func configureCompletion2270PostgresFixture(t *testing.T) {
 
 func createCompletion2270WaitingRun(t *testing.T, rt completion2270ServedProof) (string, string) {
 	t.Helper()
-	result := requireServedEventPublishRPCResult(t, rt.Endpoint, map[string]any{
+	var result struct {
+		RunID   string `json:"run_id"`
+		EventID string `json:"event_id"`
+		Status  string `json:"status"`
+	}
+	requireServedJSONRPCResult(t, rt.Endpoint, "run.start", map[string]any{
 		"event_name": "item.received", "bundle_hash": rt.BundleHash,
 		"payload":         map[string]any{"item_id": "completion-2270-" + uuid.NewString()},
 		"idempotency_key": "issue-1864-" + rt.Backend + "-" + uuid.NewString(),
-	})
-	if !result.NewRunCreated || result.RunID == "" || result.EventID == "" {
-		t.Fatalf("control seed event.publish result = %+v, want new run", result)
+	}, &result)
+	if result.Status != "live" || result.RunID == "" || result.EventID == "" {
+		t.Fatalf("control seed run.start result = %+v, want live run", result)
 	}
 	node := identitytest.RootNode(t, "item-handler").Key()
 	rt.Probe.RequireNodePending(result.EventID, node)
