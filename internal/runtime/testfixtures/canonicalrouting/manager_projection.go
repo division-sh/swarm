@@ -13,8 +13,7 @@ func WriteManagerExecutionProjection(t testing.TB) string {
 		"schema.yaml":        inputs,
 		"events.yaml":        eventDeclarations,
 		"review/schema.yaml": "instance: review_id\n" + inputs,
-		"review/entities.yaml": "review:\n" +
-			"  review_id: {type: text, immutable: true}\n",
+		"review/state.yaml":  "review_id: text\n",
 		"review/events.yaml": eventDeclarations, "manifest.yaml": "version: 1.0.0\nplatform_version: '*'\n", "review/manifest.yaml": "version: 1.0.0\nplatform_version: '*'\n",
 	} {
 		writeClosedVariantFile(t, root, relative, source)
