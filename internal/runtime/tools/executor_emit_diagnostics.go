@@ -9,10 +9,32 @@ import (
 	"github.com/division-sh/swarm/internal/events"
 	models "github.com/division-sh/swarm/internal/runtime/core/actors"
 	"github.com/division-sh/swarm/internal/runtime/diaglog"
+	"github.com/division-sh/swarm/internal/runtime/failures"
 	runtimepipeline "github.com/division-sh/swarm/internal/runtime/pipeline"
 )
 
 const emitToolOutcomeAction = "emit_tool_outcome"
+
+func emitReceiverRefusals(err error) []failures.Envelope {
+	var refusals []failures.Envelope
+	seen := make(map[string]bool)
+	if !failures.OnlyBranches(err, func(branch error) bool {
+		typed, ok := branch.(*failures.Error)
+		if !ok || typed.Failure.Class != failures.ClassUnexpectedArrival || typed.Failure.Detail.Code != "no_route" {
+			return false
+		}
+		refusal := failures.FromError(branch, "tool-executor", "handle_emit_tool.publish").Failure
+		instance, _ := refusal.Detail.Attributes["flow_instance"].(string)
+		if !seen[instance] {
+			seen[instance] = true
+			refusals = append(refusals, refusal)
+		}
+		return true
+	}) {
+		return nil
+	}
+	return refusals
+}
 
 func (e *Executor) logEmitToolOutcome(
 	ctx context.Context,

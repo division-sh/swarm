@@ -243,14 +243,12 @@ func (e *Executor) handleEmitTool(ctx context.Context, actor models.AgentConfig,
 		output["stage_origin"], output["dispatch"] = emitResult.Feedback.StageOrigin, emitResult.Feedback.Dispatch
 	}
 	if publishErr != nil {
-		if failures.OnlyBranches(publishErr, func(branch error) bool {
-			typed, ok := branch.(*failures.Error)
-			return ok && typed.Failure.Class == failures.ClassUnexpectedArrival && typed.Failure.Detail.Code == "no_route"
-		}) {
-			refusal := failures.FromError(publishErr, "tool-executor", "handle_emit_tool.publish")
-			output["status"], output["refusal"] = "refused", refusal.Failure
-			e.logEmitToolOutcome(ctx, actor, toolName, schemaEventType, eventType, preValidationPayload, postEnrichmentPayload, events.SomeEvent(emitted), "refused", "no_route", "publish", refusal)
-			return output, refusal
+		if refusals := emitReceiverRefusals(publishErr); len(refusals) != 0 {
+			output["status"], output["refusals"] = "refused", refusals
+			for _, refusal := range refusals {
+				e.logEmitToolOutcome(ctx, actor, toolName, schemaEventType, eventType, preValidationPayload, postEnrichmentPayload, events.SomeEvent(emitted), "refused", "no_route", "publish", &failures.Error{Failure: refusal})
+			}
+			return output, failures.FromError(publishErr, "tool-executor", "handle_emit_tool.publish")
 		}
 		output["status"] = "publish_failed"
 		if emitResult.Accepted {
