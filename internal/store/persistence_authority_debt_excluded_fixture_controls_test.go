@@ -67,7 +67,7 @@ func TestPersistenceAuthorityDebtReviewedExcludedHostileContexts(t *testing.T) {
 		if err != nil {
 			t.Fatal(err)
 		}
-		for _, mutation := range []string{"exact", "body", "helper-body", "binding", "import-alias", "tag", "foreign-path", "foreign-declaration", "extra-declaration", "duplicate", "injected-authority"} {
+		for _, mutation := range []string{"exact", "old-body", "body", "helper-body", "binding", "import-alias", "tag", "foreign-path", "foreign-declaration", "extra-declaration", "duplicate", "injected-authority"} {
 			t.Run(filepath.Base(path)+"/"+mutation, func(t *testing.T) {
 				candidate, source := path, string(data)
 				provider := strings.Contains(path, "future_provider")
@@ -77,6 +77,10 @@ func TestPersistenceAuthorityDebtReviewedExcludedHostileContexts(t *testing.T) {
 				}
 				uncertain := 0
 				switch mutation {
+				case "old-body":
+					if provider {
+						source = strings.Replace(source, `"idempotency_key": "future-provider-start-cut"`, `"allow_source_freeze": true, "idempotency_key": "future-provider-start-cut"`, 1)
+					}
 				case "body", "helper-body":
 					if provider {
 						if mutation == "helper-body" {

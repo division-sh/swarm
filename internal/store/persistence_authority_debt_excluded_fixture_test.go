@@ -12,6 +12,9 @@ func debtReviewedExcludedFixture(finding authorityFinding) string {
 	switch finding.File + "\x00" + finding.Enclosing {
 	case "internal/serveapp/issue642_future_provider_test.go\x00TestIssue642FutureProviderConstructsAfterEmptyCatalogBothStores":
 		declaration = "declaration:931af522b4f0b9379a9842b13e9a28e01e907202547ed55a48a510783d324121"
+		if finding.Member == "declaration:a93689c088d0eac109b63733b72f50d2c90bacd48405c1eff84a8b6105cf1d5b" {
+			declaration = finding.Member
+		}
 		context = "bf98ca60306a0fa727206f73aecb6d27e6a9a366183114a0fe7cd8bbfd62c02e"
 		reason = "native served construction; real selected executor; canonical source/turn readback; opt-in proof remains unqualified"
 	case "internal/serveapp/issue642_future_provider_test.go\x00issue642WaitFutureProviderCompletion":
