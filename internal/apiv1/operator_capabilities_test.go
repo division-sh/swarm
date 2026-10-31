@@ -11,6 +11,7 @@ import (
 	decisioncard "github.com/division-sh/swarm/internal/runtime/decisioncard"
 	"github.com/division-sh/swarm/internal/runtime/executionposture"
 	"github.com/division-sh/swarm/internal/runtime/pipeline"
+	"github.com/division-sh/swarm/internal/runtime/runlifecycle"
 	"github.com/division-sh/swarm/internal/runtime/semanticview"
 )
 
@@ -111,12 +112,13 @@ func (c testOperatorCapabilities) publication() EventPublicationOptions {
 	recipientPlans, _ := c.Events.(EventRecipientPlanChecker)
 	bundleSource, _ := c.Events.(SourceArtifactAdmitter)
 	instances, _ := c.Entities.(pipeline.FlowInstanceIndexReader)
+	liveRuns, _ := c.Runs.(runlifecycle.LiveRunReader)
 	return EventPublicationOptions{
 		ExecutionPosture: c.posture(),
 		Now:              c.Now, Idempotency: c.Idempotency, Events: c.Events, Acknowledged: acknowledged,
 		RecipientPlans: recipientPlans, SourceArtifact: bundleSource,
-		Runs: c.Runs, Entities: c.Entities, Observability: c.Observability,
-		Instances:        instances,
+		Runs: c.Runs, LiveRuns: liveRuns, Entities: c.Entities, Observability: c.Observability,
+		Instances: instances,
 		RunBundleContext: c.RunBundleContext, RuntimeContexts: c.RuntimeContexts,
 		Source: c.Source, Bundle: c.Bundle,
 		SelectedForkControls: c.SelectedForkControls,

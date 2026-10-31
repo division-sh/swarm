@@ -14,6 +14,7 @@ import (
 	runtimecontracts "github.com/division-sh/swarm/internal/runtime/contracts"
 	runtimepinrouting "github.com/division-sh/swarm/internal/runtime/core/pinrouting"
 	"github.com/division-sh/swarm/internal/runtime/core/worklifetime"
+	runtimefailures "github.com/division-sh/swarm/internal/runtime/failures"
 	runtimerunlifecycle "github.com/division-sh/swarm/internal/runtime/runlifecycle"
 	"github.com/division-sh/swarm/internal/runtime/semanticview"
 	"github.com/google/uuid"
@@ -263,6 +264,11 @@ func publicationApplicationError(eventName string, err error) error {
 }
 
 func eventCatalogPublishError(eventName string, err error) error {
+	if runtimefailures.OnlyBranches(err, func(branch error) bool { return branch == runtimebus.ErrAPIEventLiveRunChanged }) {
+		return NewApplicationError(EventPublishRejectedCode, false, map[string]any{
+			"event_name": eventName, "reason": "live_run_changed", "remediation": "select the live run again",
+		})
+	}
 	mapped := publicationApplicationError(eventName, err)
 	var appErr *ApplicationError
 	if errors.As(mapped, &appErr) {

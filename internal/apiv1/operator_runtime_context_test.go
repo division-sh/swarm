@@ -57,6 +57,7 @@ var (
 func TestOperatorRuntimeContextManagerRoutesCreateNewWorkToSelectedBundle(t *testing.T) {
 	fixture := newOperatorRuntimeContextFixture(t)
 	handler := fixture.handler(t)
+	seedEventPublishLiveRun(t, fixture.pg, fixture.busB, fixture.sourceB)
 
 	published := rpcCallWithPlainRequestContext(t, handler, eventPublishBodyWithBundleHash("", runtimeContextTestBundleHashB, "triage.requested", `{"topic":"context-b"}`, "", "idem-context-publish"))
 	if published.Error != nil {
@@ -90,6 +91,7 @@ func TestOperatorRuntimeContextManagerRoutesCreateNewWorkToSelectedBundle(t *tes
 func TestOperatorEventPublishIdempotencyReplayDoesNotRequireLoadedRuntimeContext(t *testing.T) {
 	fixture := newOperatorRuntimeContextFixture(t)
 	handler := fixture.handler(t)
+	seedEventPublishLiveRun(t, fixture.pg, fixture.busB, fixture.sourceB)
 	body := eventPublishBodyWithBundleHash("", runtimeContextTestBundleHashB, "triage.requested", `{"topic":"replay-after-unload"}`, "", "idem-context-replay-after-unload")
 
 	first := rpcCallWithPlainRequestContext(t, handler, body)
