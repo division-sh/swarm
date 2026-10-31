@@ -76,6 +76,14 @@ func (w *attachmentShutdownProgressWorkflow) AbandonDynamicFlowRuntimeActivation
 func proveAttachmentShutdownProgress(t *testing.T, backend, cut string) {
 	t.Helper()
 	selected, barrier := newAttachmentProgressBarrierStore(t, backend, cut == "after_progress")
+	switch cut {
+	case "activation_grant_read":
+		barrier.grantRead = 1
+	case "retiring_grant_read":
+		barrier.grantRead = 2
+	case "attachment_process_read":
+		barrier.grantRead = 3
+	}
 	workflow := &attachmentShutdownProgressWorkflow{
 		barrier: barrier, cut: cut, verification: cut == "before_verification" || cut == "reused_verification",
 		entered: make(chan context.Context, 1), release: make(chan struct{}),

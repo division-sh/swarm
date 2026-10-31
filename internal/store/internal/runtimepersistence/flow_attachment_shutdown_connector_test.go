@@ -14,13 +14,15 @@ import (
 	"github.com/lib/pq"
 )
 
-// This fixed-purpose fixture gates one exact attachment UPDATE on a real native
+// This fixed-purpose fixture gates one exact attachment statement on a real native
 // transaction. It observes its terminal outcome, not transaction-count budgets.
 type attachmentProgressNativeBarrier struct {
 	statement                              string
 	args                                   []driver.NamedValue
 	mu                                     sync.Mutex
 	runID, path, attemptID, previous, hash string
+	grantID                                string
+	grantRead, grantReads                  int
 	armed                                  bool
 	appliedRows                            int64
 	afterUpdate                            bool
@@ -34,6 +36,7 @@ func (b *attachmentProgressNativeBarrier) arm(attempt pipeline.DynamicFlowRuntim
 	b.mu.Lock()
 	defer b.mu.Unlock()
 	b.runID, b.path, b.attemptID = attempt.RunID(), attempt.InstancePath(), attempt.ID()
+	b.grantID = attempt.ProcessBinding().GenerationGrantID
 	b.previous, b.hash, b.armed = string(previous), hash, true
 }
 
@@ -43,12 +46,22 @@ func (b *attachmentProgressNativeBarrier) claim(query string, args []driver.Name
 	if tx == nil || !b.armed || b.target != nil || !b.matchesStatement(query, args) {
 		return false
 	}
+	if b.grantRead != 0 {
+		b.grantReads++
+		if b.grantReads != b.grantRead {
+			return false
+		}
+	}
 	b.armed, b.target = false, tx
 	b.statement, b.args = query, append([]driver.NamedValue(nil), args...)
 	return true
 }
 
 func (b *attachmentProgressNativeBarrier) matchesStatement(query string, args []driver.NamedValue) bool {
+	if b.grantRead != 0 {
+		return query == `SELECT snapshot FROM runtime_generation_grants WHERE grant_id=$1 ORDER BY state_version DESC LIMIT 1` &&
+			len(args) == 1 && args[0].Value == b.grantID
+	}
 	const postgres = `UPDATE flow_instance_runtime_readiness SET phase=$1,updated_at=$2 WHERE run_id=$3::uuid AND instance_path=$4 AND activation_attempt_id=$5 AND phase=$6 AND plan_hash=$7`
 	const sqlite = `UPDATE flow_instance_runtime_readiness SET phase=?,updated_at=? WHERE run_id=? AND instance_path=? AND activation_attempt_id=? AND phase=? AND plan_hash=?`
 	if (query != postgres && query != sqlite) || len(args) != 7 {
@@ -69,14 +82,18 @@ func (b *attachmentProgressNativeBarrier) requireExactCoordinates(t *testing.T) 
 	if !b.matchesStatement(b.statement, b.args) {
 		t.Fatal("actual native statement lost its exact barrier binding")
 	}
-	for _, coordinate := range []int{0, 2, 3, 4, 5, 6} {
+	coordinates := []int{0, 2, 3, 4, 5, 6}
+	if b.grantRead != 0 {
+		coordinates = []int{0}
+	}
+	for _, coordinate := range coordinates {
 		foreign := append([]driver.NamedValue(nil), b.args...)
 		foreign[coordinate].Value = "foreign-coordinate"
 		if b.matchesStatement(b.statement, foreign) {
 			t.Fatalf("native barrier accepted a foreign coordinate at argument %d", coordinate)
 		}
 	}
-	if b.matchesStatement(b.statement+" ", b.args) || b.matchesStatement(b.statement, b.args[:6]) {
+	if b.matchesStatement(b.statement+" ", b.args) || b.matchesStatement(b.statement, b.args[:len(b.args)-1]) {
 		t.Fatal("native barrier accepted a changed statement or missing binding")
 	}
 }
@@ -187,6 +204,17 @@ func (c *attachmentProgressConn) ExecContext(ctx context.Context, query string, 
 		}
 	}
 	return result, err
+}
+
+func (c *attachmentProgressConn) QueryContext(ctx context.Context, query string, args []driver.NamedValue) (driver.Rows, error) {
+	c.mu.Lock()
+	tx := c.active
+	c.mu.Unlock()
+	if c.barrier.claim(query, args, tx) {
+		c.barrier.entered <- ctx
+		<-c.barrier.release
+	}
+	return c.diagnosticSQLConn.QueryContext(ctx, query, args)
 }
 
 type attachmentProgressNativeTx struct {

@@ -1214,16 +1214,3 @@ func isCLIHumanOutputComposite(literal *ast.CompositeLit) bool {
 		return false
 	}
 }
-
-func uniqueSortedStrings(values []string) []string {
-	set := map[string]struct{}{}
-	for _, value := range values {
-		set[value] = struct{}{}
-	}
-	out := make([]string, 0, len(set))
-	for value := range set {
-		out = append(out, value)
-	}
-	sort.Strings(out)
-	return out
-}
