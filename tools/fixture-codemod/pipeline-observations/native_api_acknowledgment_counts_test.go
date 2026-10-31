@@ -117,7 +117,7 @@ func TestNativeAPIAcknowledgmentCountCallerInventoryIsComplete(t *testing.T) {
 		}
 	}
 	expected := map[string]map[string]int{"TestOperatorEventPublishReturnsDurableAckBeforePostCommitDispatchCompletes": {"countPipelineReceiptsForEvent": 2},
-		"TestOperatorEventPublishPostCommitReceiptFailureReplaysWithoutDuplicate":       {"countEventDeliveriesForEvent": 1, "countPipelineReceiptsForEvent": 1},
+		"TestOperatorEventPublishPostCommitReceiptFailureReplaysWithoutDuplicate":       {"countEventDeliveriesForEvent": 2, "countPipelineReceiptsForEvent": 3},
 		"TestOperatorEventPublishPostCommitCompletionFailureReplaysWithoutDuplicate":    {"countEventDeliveriesForEvent": 1},
 		"TestOperatorEventPublishExplicitRunFollowUpRequiresRecipientBeforePersistence": {"countEventDeliveriesForEvent": 1},
 		"TestOperatorEventPublishQueuesWhileRuntimePaused":                              {"countEventDeliveriesForEvent": 1, "countPipelineReceiptsForEvent": 2},
