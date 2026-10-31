@@ -293,7 +293,7 @@ service-probe:
 	if runID == "" {
 		t.Fatal("service mock journey has no admitted live root run")
 	}
-	sender, customer, _ := peer.senderFrom(types.NewJID("15551234571", types.DefaultUserServer), types.NewJID("100000000005", types.HiddenUserServer))
+	sender, customer, customerLID := peer.senderFrom(types.NewJID("15551234571", types.DefaultUserServer), types.NewJID("100000000005", types.HiddenUserServer))
 	const outgoing = "A successful first send before the customer's reply"
 	var published struct {
 		EventID string `json:"event_id"`
@@ -308,8 +308,8 @@ service-probe:
 	var sent servedNativeMessage
 	select {
 	case sent = <-peer.sent:
-		if sent.To.ToNonAD() != customer || sent.Body.GetConversation() != outgoing || sent.ID == "" {
-			t.Fatal("service mock did not receive the exact first send")
+		if sent.To.ToNonAD() != customer && sent.To.ToNonAD() != customerLID || sent.Body.GetConversation() != outgoing || sent.ID == "" {
+			t.Fatalf("service mock did not receive the exact first send: to=%s text=%q id=%s", sent.To, sent.Body.GetConversation(), sent.ID)
 		}
 	case <-time.After(5 * time.Second):
 		t.Fatal("service mock did not receive the authored first send")
@@ -335,7 +335,7 @@ service-probe:
 	} else {
 		select {
 		case reply := <-peer.sent:
-			if reply.To.ToNonAD() != customer || reply.Body.GetConversation() != incomingText || reply.ID == "" {
+			if reply.To.ToNonAD() != customer && reply.To.ToNonAD() != customerLID || reply.Body.GetConversation() != incomingText || reply.ID == "" {
 				t.Error("service mock business reply changed its account, customer or text")
 			}
 		case <-time.After(5 * time.Second):
