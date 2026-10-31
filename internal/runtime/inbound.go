@@ -1,12 +1,10 @@
 package runtime
 
 import (
-	"bytes"
 	"context"
 	"encoding/json"
 	"errors"
 	"fmt"
-	"io"
 	"mime"
 	"net/http"
 	"net/url"
@@ -193,18 +191,11 @@ func (g *InboundGateway) handleResolvedWebhook(w http.ResponseWriter, r *http.Re
 		return true
 	}
 
-	body, err := io.ReadAll(io.LimitReader(r.Body, inboundWebhookMaxBodyBytes+1))
-	if err != nil {
-		http.Error(w, "read body failed", http.StatusBadRequest)
+	transport, refusal := readInboundWebhookTransport(r)
+	if refusal != nil {
+		http.Error(w, refusal.Message, refusal.Status)
 		return
 	}
-	if len(body) > inboundWebhookMaxBodyBytes {
-		http.Error(w, "webhook body too large", http.StatusRequestEntityTooLarge)
-		return
-	}
-	requestURL := inboundRequestURL(r)
-	queryValues, queryParseError := inboundQueryValues(r)
-	formValues, formParsed, formParseError := inboundFormValues(r.Header.Get("Content-Type"), body)
 
 	signingValue := ""
 	if target.AdmissionPlan.RequiresSecret() {
@@ -221,34 +212,11 @@ func (g *InboundGateway) handleResolvedWebhook(w http.ResponseWriter, r *http.Re
 	if !validate() {
 		return
 	}
-	var payload any
-	decoder := json.NewDecoder(bytes.NewReader(body))
-	decoder.UseNumber()
-	if err := decoder.Decode(&payload); err != nil {
-		payload = string(body)
-	} else if err := decoder.Decode(&struct{}{}); err != io.EOF {
-		payload = string(body)
-	}
-	now := time.Now().UTC().Truncate(time.Microsecond)
-	admitted, err := target.AdmissionPlan.AdmitRequest(providertriggers.Request{
-		Provider: provider,
-		Target: providertriggers.Target{
-			WebhookSecret: signingValue,
-		},
-		Method:          r.Method,
-		URL:             requestURL,
-		Body:            body,
-		Headers:         r.Header,
-		Payload:         payload,
-		ContentType:     r.Header.Get("Content-Type"),
-		Query:           queryValues,
-		QueryParseError: queryParseError,
-		Form:            formValues,
-		FormParsed:      formParsed,
-		FormParseError:  formParseError,
-		Received:        now,
-		UserAgent:       r.UserAgent(),
-	})
+	request := transport.providerRequest(r)
+	request.Provider = provider
+	request.Target = providertriggers.Target{WebhookSecret: signingValue}
+	now := request.Received
+	admitted, err := target.AdmissionPlan.AdmitRequest(request)
 	if err != nil {
 		status := http.StatusBadRequest
 		if providerErr, ok := err.(providertriggers.Error); ok {
