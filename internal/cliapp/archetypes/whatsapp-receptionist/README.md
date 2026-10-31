@@ -1,6 +1,6 @@
 # WhatsApp receptionist
 
-Run `swarm channel connect whatsapp` here before starting serve. Scan the
+Run `swarm channel connect whatsapp` here. Scan the
 terminal QR from WhatsApp's Linked Devices screen, then confirm the linked
 account. Replace `<number>` in `policy.yaml` with that account's international
 number, including `+`, then run `swarm serve`. A customer can
@@ -14,9 +14,8 @@ entire `.swarm` directory private and out of source control.
 After restarting `swarm serve`, the retained pairing reconnects. To remove
 this linked device, run `swarm channel logout whatsapp`.
 
-Connect with serve stopped. Restart serve when a new holder appears: a
-registration or account assignment made while serve is running is not
-automatically admitted into that running process.
+Connect works while serve runs. WhatsApp receives live for the account's
+current flow holder; no serve restart is needed to pick up the connection.
 
 `swarm serve --dev` uses invocation-only session state in a private temporary
 directory, so a dev restart requires pairing again. Use plain `swarm serve`

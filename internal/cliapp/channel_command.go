@@ -209,7 +209,7 @@ func newChannelLifecycleCommand(opts rootCommandOptions, verb string) *cobra.Com
 		},
 	}
 	if verb == "connect" {
-		cmd.Long = cmd.Short + "\n\nConnect with serve stopped. Restart serve when a new holder appears."
+		cmd.Long = cmd.Short + "\n\nConnect while serve runs. Telegram bots connected or newly held while serve runs receive after a serve restart; WhatsApp receives live."
 	}
 	if verb != "reconnect" {
 		cmd.Flags().BoolVar(&commandOpts.noSave, "no-save", false, "Do not save the verified account proof on this machine")
