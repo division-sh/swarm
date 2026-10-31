@@ -25039,8 +25039,13 @@ workspace_model:
     validation_rule: >
       The command MUST build into a temporary image tag first and MUST NOT publish/replace the configured runtime image
       tag until validation passes. After build, the command MUST validate the temporary image by running a harmless
-      executable Claude CLI proof inside the image, equivalent to `command -v -- "$1" >/dev/null && "$1" --version
-      >/dev/null` with `$1=claude`. Image inspection alone and command lookup alone are insufficient.
+      executable Claude CLI proof inside the image using `command -v -- "$1" >/dev/null && "$1" --version` with `$1=claude`.
+      Its complete version output MUST match the exact CLAUDE_CODE_VERSION declared by the embedded
+      build plan, and validation MUST report the expected and actual versions. Missing, malformed or wrong output
+      MUST refuse before publishing the target tag. Image inspection alone and command lookup alone are insufficient.
+      The generated build plan installs only its declared scoped Claude package/version or fails, with no alternate
+      package, unversioned install or success-on-failure fallback, and disables automatic CLI updates in that image.
+      This pin does not impose a global version restriction on custom configured workspace images at runtime.
     workspace_worker_artifact_rule: >
       Optional --worker-binary supplies an explicit Linux amd64/arm64 swarm artifact through this same embedded
       build owner. The temporary image contains read-only executable bytes and pins their SHA-256, version, source
@@ -30560,8 +30565,9 @@ cli_specification:
         workspace build plan. The command uses `--docker-bin` when set, otherwise `workspace.docker_bin` from explicit
         config, otherwise the built-in `docker` default. It builds into a temporary image tag, targets `--image`,
         `workspace.image`, or `swarm-workspace:latest` by default, passes the approved `claude_cli` build args, validates
-        that the temporary image can execute `claude --version`, and only then tags the validated image as the configured
-        target. Optional --worker-binary provisions and validates the compatible revision/digest/ABI-pinned Linux worker
+        that the temporary image can execute `claude --version` and exactly matches the embedded declared version,
+        reports the expected and actual versions, and only then tags the validated image as the configured target.
+        Optional --worker-binary provisions and validates the compatible revision/digest/ABI-pinned Linux worker
         through the same temporary image before publication. `SWARM_DOCKER_BIN` and `SWARM_WORKSPACE_IMAGE` are retired
         and must not be read as fallback sources.
       boundaries:
