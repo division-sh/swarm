@@ -19,6 +19,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/division-sh/swarm/internal/channelonboarding"
 	"github.com/division-sh/swarm/internal/cliapp"
 	"github.com/division-sh/swarm/internal/config"
 	"github.com/division-sh/swarm/internal/events"
@@ -26,13 +27,11 @@ import (
 	runtimepkg "github.com/division-sh/swarm/internal/runtime"
 	runtimeidentity "github.com/division-sh/swarm/internal/runtime/core/identity"
 	runtimecredentials "github.com/division-sh/swarm/internal/runtime/credentials"
-	"github.com/division-sh/swarm/internal/runtime/startupownership"
 	"github.com/division-sh/swarm/internal/runtime/testfixtures/canonicalrouting"
 	"github.com/division-sh/swarm/internal/store"
 	storebackend "github.com/division-sh/swarm/internal/store/backendselection"
 	"github.com/division-sh/swarm/internal/store/storetest"
 	"github.com/division-sh/swarm/internal/testutil"
-	"github.com/google/uuid"
 	"gopkg.in/yaml.v3"
 )
 
@@ -134,13 +133,29 @@ func (r *standingLiveAnthropicRecorder) waitForInitialCount(t testing.TB, want i
 }
 
 func TestCanonicalTelegramAgentLiveSelectionPreservesAuthoredDoubles(t *testing.T) {
+	for _, backend := range []string{"sqlite", "postgres"} {
+		t.Run(backend, func(t *testing.T) {
+			runCanonicalTelegramAgentLiveSelection(t, backend)
+		})
+	}
+}
+
+func runCanonicalTelegramAgentLiveSelection(t *testing.T, backend string) {
+	t.Helper()
 	isolateCLIAPIConfigEnv(t)
 	unsetStoreSelectorEnv(t)
 	stubServeRuntimeWorkspaceLifecycle(t)
 
 	sourceRoot := writeStandingMemoryServeFixture(t, "")
-	sqlitePath := filepath.Join(t.TempDir(), "live.sqlite")
-	configPath := writeStandingMockRuntimeConfig(t, "sqlite", sqlitePath)
+	storeLocation := filepath.Join(t.TempDir(), "live.sqlite")
+	configPath := ""
+	if backend == "postgres" {
+		storeLocation = testutil.StartEmptyPostgresDSN(t)
+		configPath = writeChannelOnboardingPostgresRuntimeConfig(t, storeLocation)
+		enableChannelOnboardingRecoveryOnStartup(t, configPath)
+	} else {
+		configPath = writeStandingMockRuntimeConfig(t, backend, storeLocation)
+	}
 	bundleHash := servedEventPublishFixtureBundleHash(t, sourceRoot)
 
 	credentialPath := filepath.Join(t.TempDir(), "credentials.json")
@@ -160,45 +175,53 @@ func TestCanonicalTelegramAgentLiveSelectionPreservesAuthoredDoubles(t *testing.
 		}
 	}
 
-	// Default verification observes an existing deployment; it must not create
-	// the store or its possession coordinate as part of this observation.
-	prepared, err := store.NewSQLiteRuntimeStore(sqlitePath)
-	if err != nil {
-		t.Fatal(err)
-	}
-	preparedClosed := false
-	t.Cleanup(func() {
-		if !preparedClosed {
-			if err := prepared.Close(); err != nil {
-				t.Error(err)
-			}
+	providerRecorder := &standingLiveAnthropicRecorder{t: t}
+	provider := httptest.NewServer(providerRecorder)
+	t.Cleanup(provider.Close)
+	native := &channelOnboardingTelegramProvider{}
+	telegram := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, req *http.Request) {
+		if strings.HasSuffix(req.URL.Path, "/sendMessage") && req.URL.Path != "/botbot-token/sendMessage" {
+			t.Errorf("Telegram path = %q, want credential-bearing bot route", req.URL.Path)
 		}
+		native.ServeHTTP(w, req)
+	}))
+	t.Cleanup(telegram.Close)
+	redirectExternalHosts(t, map[string]string{
+		"api.anthropic.com": provider.URL,
+		"api.telegram.org":  telegram.URL,
 	})
-	bundle := loadWorkflowValidationBundleAt(t, sourceRoot)
-	plans, err := cliapp.StateStoreSchemaPlans(bundle)
-	if err != nil {
+
+	opts := cliapp.ServeOptions{
+		ConfigPath: configPath, SourceRoot: sourceRoot, APIListenAddr: "127.0.0.1:0", MCPListenAddr: "127.0.0.1:0",
+		StoreMode: backend, StoreModeSet: true, SelfCheck: true, LocalRun: true, Verbose: true,
+		TestOutboxSweeperConfig: servedEventPublishProofOutboxSweeperConfig(),
+	}
+	prepareStandingTelegramCallback(t, &opts)
+	first := startTelegramAgentServeRuntimeTestProcess(t, sourceRoot, opts)
+	first.waitForReadyLine()
+	connected := registerChannelFixtureAccount(t, configPath, "bot-token", "420079")
+	var listOut, listErr bytes.Buffer
+	if code := cliapp.Execute(t.Context(), []string{"--config", configPath, "channel", "list", "--json"},
+		&listOut, &listErr, nil, nil, OpenChannelRegistration); code != 0 {
+		t.Fatalf("channel list exit=%d\nstdout:\n%s\nstderr:\n%s", code, &listOut, &listErr)
+	}
+	var listed struct {
+		Accounts []channelonboarding.Result `json:"accounts"`
+	}
+	if err := json.Unmarshal(listOut.Bytes(), &listed); err != nil {
 		t.Fatal(err)
 	}
-	schema, err := cliapp.SchemaBootstrapRequest(bundle.Platform, plans.Platform, plans.State)
-	if err != nil {
-		t.Fatal(err)
+	if len(listed.Accounts) != 1 || listed.Accounts[0].Operation.OperationID != connected.OperationID ||
+		listed.Accounts[0].Operation.AccountReference != "420079" {
+		t.Fatalf("connected account missing from channel list: %s", &listOut)
 	}
-	if err := prepared.BootstrapSchema(context.Background(), schema); err != nil {
-		t.Fatal(err)
+	if registrations, deliveries := native.Counts(); registrations != 0 || deliveries != 0 {
+		t.Fatalf("fresh Telegram connect bypassed required restart: registrations=%d deliveries=%d", registrations, deliveries)
 	}
-	capability, err := prepared.AcquireProcessCapability(context.Background(), startupownership.AcquireRequest{
-		OwnerID: "live-channel-verification-fixture", BootID: uuid.NewString(), RuntimeInstanceID: uuid.NewString(),
-	})
-	if err != nil {
-		t.Fatal(err)
+	if code := first.stop(); code != 0 {
+		t.Fatalf("pre-restart serve exit = %d\n%s", code, first.outputString())
 	}
-	if err := capability.Release(context.Background()); err != nil {
-		t.Fatal(err)
-	}
-	if err := prepared.Close(); err != nil {
-		t.Fatal(err)
-	}
-	preparedClosed = true
+
 	var verifyOut, verifyErr bytes.Buffer
 	if code := executeCLIFrom(context.Background(), sourceRoot, []string{
 		"verify", sourceRoot, "--config", configPath, "--json",
@@ -218,66 +241,26 @@ func TestCanonicalTelegramAgentLiveSelectionPreservesAuthoredDoubles(t *testing.
 		t.Fatalf("live graduation did not complete admission without claiming execution: %s", &verifyOut)
 	}
 
-	providerRecorder := &standingLiveAnthropicRecorder{t: t}
-	provider := httptest.NewServer(providerRecorder)
-	t.Cleanup(provider.Close)
-	telegramCalls := make(chan map[string]any, 4)
-	native := &channelOnboardingTelegramProvider{}
-	telegram := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, req *http.Request) {
-		if !strings.HasSuffix(req.URL.Path, "/sendMessage") {
-			native.ServeHTTP(w, req)
-			return
-		}
-		if req.URL.Path != "/botbot-token/sendMessage" {
-			t.Errorf("Telegram path = %q, want credential-bearing bot route", req.URL.Path)
-			http.Error(w, "unexpected path", http.StatusNotFound)
-			return
-		}
-		var body map[string]any
-		if err := json.NewDecoder(req.Body).Decode(&body); err != nil {
-			t.Errorf("decode Telegram live request: %v", err)
-			http.Error(w, "bad request", http.StatusBadRequest)
-			return
-		}
-		select {
-		case telegramCalls <- body:
-		default:
-			t.Errorf("unexpected excess Telegram call: %#v", body)
-			http.Error(w, "unexpected excess call", http.StatusConflict)
-			return
-		}
-		w.Header().Set("content-type", "application/json")
-		_, _ = w.Write([]byte(`{"ok":true,"result":{"message_id":1}}`))
-	}))
-	t.Cleanup(telegram.Close)
-	redirectExternalHosts(t, map[string]string{
-		"api.anthropic.com": provider.URL,
-		"api.telegram.org":  telegram.URL,
-	})
-
-	opts := cliapp.ServeOptions{
-		ConfigPath: configPath, SourceRoot: sourceRoot, APIListenAddr: "127.0.0.1:0", MCPListenAddr: "127.0.0.1:0",
-		SelfCheck: true, Dev: true, LocalRun: true, Verbose: true,
-		TestOutboxSweeperConfig: servedEventPublishProofOutboxSweeperConfig(),
-	}
-	registerChannelFixtureAccount(t, configPath, "bot-token", "420079")
 	prepareStandingTelegramCallback(t, &opts)
 	process := startTelegramAgentServeRuntimeTestProcess(t, sourceRoot, opts)
 	process.waitForReadyLine()
 	baseURL := "http://" + serveRuntimeAPIListenerFromOutput(t, process.outputString())
 	diagnostics := func() string {
-		return process.outputString() + "\ndiagnostics: " + standingSQLiteDiagnostics(sqlitePath)
+		if backend == "postgres" {
+			return process.outputString() + "\ndiagnostics: " + standingPostgresDiagnostics(storeLocation)
+		}
+		return process.outputString() + "\ndiagnostics: " + standingSQLiteDiagnostics(storeLocation)
 	}
 	binding := sendStandingTelegramUpdate(t, native, 201, 42, diagnostics)
 	providerRecorder.waitForInitialCount(t, 1)
-	waitForStandingMemoryCompletion(t, "sqlite", sqlitePath, "live", 1)
-	requireStandingLiveTelegramCalls(t, telegramCalls, "Live turn 1: hello 201")
+	waitForStandingMemoryCompletion(t, backend, storeLocation, "live", 1)
+	requireStandingLiveTelegramCalls(t, native, "Live turn 1: hello 201")
 	if got := sendStandingTelegramUpdate(t, native, 202, 42, diagnostics); got != binding {
 		t.Fatalf("live graduation second binding = %+v, want same generation %+v", got, binding)
 	}
 	providerRecorder.waitForInitialCount(t, 2)
-	waitForStandingMemoryCompletion(t, "sqlite", sqlitePath, "live", 2)
-	requireStandingLiveTelegramCalls(t, telegramCalls, "Live turn 2: hello 202")
+	waitForStandingMemoryCompletion(t, backend, storeLocation, "live", 2)
+	requireStandingLiveTelegramCalls(t, native, "Live turn 1: hello 201", "Live turn 2: hello 202")
 	requireStandingPayloadOnlyTargetReadback(t, baseURL, bundleHash, "live", 1, []string{
 		"Live turn 1: hello 201",
 		"Live turn 2: hello 202",
@@ -285,7 +268,10 @@ func TestCanonicalTelegramAgentLiveSelectionPreservesAuthoredDoubles(t *testing.
 	if code := process.stop(); code != 0 {
 		t.Fatalf("live graduation serve exit = %d\n%s", code, process.outputString())
 	}
-	sessions := loadStandingMemorySessions(t, "sqlite", sqlitePath)
+	if _, deliveries := native.Counts(); deliveries != 2 {
+		t.Fatalf("live Telegram deliveries = %d, want exactly one per inbound message", deliveries)
+	}
+	sessions := loadStandingMemorySessions(t, backend, storeLocation)
 	if len(sessions) != 1 {
 		t.Fatalf("live graduation memory sessions = %#v, want one conversation owner", sessions)
 	}
@@ -324,19 +310,23 @@ func startTelegramAgentServeRuntimeTestProcess(t *testing.T, repo string, opts c
 	return process
 }
 
-func requireStandingLiveTelegramCalls(t testing.TB, calls <-chan map[string]any, wantTexts ...string) {
+func requireStandingLiveTelegramCalls(t testing.TB, provider *channelOnboardingTelegramProvider, wantTexts ...string) {
 	t.Helper()
-	for _, wantText := range wantTexts {
-		select {
-		case call := <-calls:
-			if got := strings.TrimSpace(fmt.Sprint(call["chat_id"])); got != "42" {
-				t.Fatalf("live Telegram chat_id = %q, want 42", got)
-			}
-			if got := strings.TrimSpace(fmt.Sprint(call["text"])); got != wantText {
-				t.Fatalf("live Telegram text = %q, want %q", got, wantText)
-			}
-		case <-time.After(standingMemoryAsyncProofTimeout):
+	for index, wantText := range wantTexts {
+		deadline := time.Now().Add(standingMemoryAsyncProofTimeout)
+		call := provider.Delivery(index)
+		for call == nil && time.Now().Before(deadline) {
+			time.Sleep(10 * time.Millisecond)
+			call = provider.Delivery(index)
+		}
+		if call == nil {
 			t.Fatalf("timed out waiting for live Telegram call with text %q", wantText)
+		}
+		if got := strings.TrimSpace(fmt.Sprint(call["chat_id"])); got != "42" {
+			t.Fatalf("live Telegram chat_id = %q, want 42", got)
+		}
+		if got := strings.TrimSpace(fmt.Sprint(call["text"])); got != wantText {
+			t.Fatalf("live Telegram text = %q, want %q", got, wantText)
 		}
 	}
 }
