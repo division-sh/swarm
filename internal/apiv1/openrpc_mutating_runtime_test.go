@@ -167,8 +167,8 @@ func mutatingHTTPRuntimeFixtures() map[string]mutatingHTTPRuntimeFixture {
 			SuccessEffects: 1,
 		},
 		"event.publish": {
-			Params:         map[string]any{"bundle_hash": runStartTestBundleHash, "event_name": "scan.requested", "payload": map[string]any{"topic": "medicine"}},
-			ConflictParams: map[string]any{"bundle_hash": runStartTestBundleHash, "event_name": "scan.requested", "payload": map[string]any{"topic": "dentistry"}},
+			Params:         map[string]any{"run_id": runID, "bundle_hash": runStartTestBundleHash, "event_name": "scan.requested", "payload": map[string]any{"topic": "medicine"}},
+			ConflictParams: map[string]any{"run_id": runID, "bundle_hash": runStartTestBundleHash, "event_name": "scan.requested", "payload": map[string]any{"topic": "dentistry"}},
 			ResultKeys:     []string{"event_id", "run_id", "new_run_created", "deliveries"},
 			SuccessEffects: 1,
 		},

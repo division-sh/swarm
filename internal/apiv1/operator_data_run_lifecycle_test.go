@@ -267,7 +267,7 @@ func TestDurableDataRunLifecycleAcrossSelectedStores(t *testing.T) {
 
 		var ordinaryRunID string
 		t.Run("ordinary declaration does not imply a pin", func(t *testing.T) {
-			response := rpcCall(t, handler, dataRunEventPublishBody("", "ordinary-no-data", nil))
+			response := rpcCall(t, handler, runStartBody("", runStartTestBundleHashForSource(source), "scan.requested", `{"topic":"trigger"}`, "ordinary-no-data"))
 			if response.Error != nil {
 				t.Fatalf("ordinary event.publish: %#v", response.Error)
 			}

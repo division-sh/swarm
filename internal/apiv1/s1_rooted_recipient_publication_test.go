@@ -37,6 +37,7 @@ func TestS1RootedRecipientPreviewPublicCreationAndReplayBothStores(t *testing.T)
 				t.Fatal(err)
 			}
 			handler := eventPublishTestHandlerWithStores(t, selected, selected, selected, bus, source)
+			seedEventPublishLiveRun(t, selected, bus, source)
 			body := eventPublishBody("", rooted.Artifact().BundleHash(), "bootstrap.requested", `{"topic":"first"}`, "", "s1-rooted-preview")
 			published := rpcCall(t, handler, body)
 			if published.Error != nil {
@@ -45,7 +46,7 @@ func TestS1RootedRecipientPreviewPublicCreationAndReplayBothStores(t *testing.T)
 			result := asMap(t, published.Result)
 			runID := stringValue(t, result["run_id"], "run_id")
 			eventID := stringValue(t, result["event_id"], "event_id")
-			if result["new_run_created"] != true || len(asSlice(t, result["deliveries"])) != 1 {
+			if result["new_run_created"] != false || len(asSlice(t, result["deliveries"])) != 1 {
 				t.Fatalf("new public publication lost its root delivery: %#v", result)
 			}
 			assertEventPublishDeliveriesContain(t, asSlice(t, result["deliveries"]), "node", identitytest.RootNode(t, "bootstrap-node").Key(), "pending", 1)
