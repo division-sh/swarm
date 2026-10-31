@@ -29,7 +29,7 @@ func TestServedFieldlessGateDeferralBothStores(t *testing.T) {
 					t.Fatal(err)
 				}
 				rt := startServedTestSetupEntitiesProofRuntimeFromSource(t, backend, root)
-				seed := requireServedEventPublishRPCResult(t, rt.Endpoint, map[string]any{
+				seed := requireServedRunStartRPCResult(t, rt.Endpoint, map[string]any{
 					"event_name": "item.received", "bundle_hash": rt.BundleHash,
 					"payload": map[string]any{}, "idempotency_key": "fieldless-gate-seed",
 				})

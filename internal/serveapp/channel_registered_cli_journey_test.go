@@ -97,7 +97,7 @@ func runRegisteredCLIProcessRestart(t *testing.T, h *channelOnboardingE2EHarness
 	t.Setenv("TEST_CHANNEL_ONBOARDING_RETAIN_RUNS", "1")
 	first := startChannelOnboardingCrashServeProcess(t, h.opts, h.telegram.URL)
 	h.endpoint = first.endpoint(t)
-	seed := requireServedEventPublishRPCResult(t, h.rpcEndpoint(), map[string]any{
+	seed := requireServedRunStartRPCResult(t, h.rpcEndpoint(), map[string]any{
 		"event_name": "work.requested", "bundle_hash": hash, "payload": map[string]any{"seed": true}, "idempotency_key": "cli-crash-seed",
 	})
 	card := waitChannelPublicCard(t, h, seed.RunID, decisioncard.AnchorKindStageGate, "chat/reviews")

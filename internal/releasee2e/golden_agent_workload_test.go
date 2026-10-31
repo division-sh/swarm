@@ -1045,23 +1045,22 @@ func goldenPublishIngress(t *testing.T, rpc *releaseRPCClient, bundleHash string
 func goldenPublishIngressWithKey(t *testing.T, rpc *releaseRPCClient, bundleHash string, candidateIDs []string, idempotencyKey string) string {
 	t.Helper()
 	var result struct {
-		EventID       string `json:"event_id"`
-		RunID         string `json:"run_id"`
-		NewRunCreated bool   `json:"new_run_created"`
+		EventID string `json:"event_id"`
+		RunID   string `json:"run_id"`
+		Status  string `json:"status"`
 	}
 	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
 	defer cancel()
-	if err := rpc.call(ctx, "event.publish", map[string]any{
+	if err := rpc.call(ctx, "run.start", map[string]any{
 		"bundle_hash":     bundleHash,
 		"event_name":      "search.requested",
 		"payload":         map[string]any{"query": "golden workload", "candidate_ids": candidateIDs},
-		"emitter":         "releasee2e",
 		"idempotency_key": idempotencyKey,
 	}, &result); err != nil {
 		t.Fatal(err)
 	}
-	if result.EventID == "" || result.RunID == "" || !result.NewRunCreated {
-		t.Fatalf("event.publish result = %#v, want a new durable run", result)
+	if result.EventID == "" || result.RunID == "" || result.Status != "live" {
+		t.Fatalf("run.start result = %#v, want a new durable run", result)
 	}
 	return result.RunID
 }

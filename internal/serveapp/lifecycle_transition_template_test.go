@@ -152,7 +152,12 @@ func prepareLifecycleTemplateSiblingsFromReader(t *testing.T, rt lifecycleTempla
 			} else {
 				params["run_id"], params["source_event_id"] = runID, sourceEvent
 			}
-			published := requireServedEventPublishRPCResult(t, rt.Endpoint, params)
+			var published servedEventPublishRPCResult
+			if runID == "" {
+				published = requireServedRunStartRPCResult(t, rt.Endpoint, params)
+			} else {
+				published = requireServedEventPublishRPCResult(t, rt.Endpoint, params)
+			}
 			s.publications = append(s.publications, published.EventID)
 			return published
 		}
