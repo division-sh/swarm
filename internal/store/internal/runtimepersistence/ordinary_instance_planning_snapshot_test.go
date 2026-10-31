@@ -6,12 +6,16 @@ import (
 	"testing"
 	"time"
 
+	"github.com/division-sh/swarm/internal/runtime/bus"
 	"github.com/division-sh/swarm/internal/runtime/core/flowidentity"
 	"github.com/division-sh/swarm/internal/runtime/correlation"
 	"github.com/division-sh/swarm/internal/runtime/pipeline"
+	"github.com/division-sh/swarm/internal/runtime/runlifecycle"
 	"github.com/division-sh/swarm/internal/runtime/semanticview"
+	"github.com/division-sh/swarm/internal/sourceartifact"
 	"github.com/division-sh/swarm/internal/store/internal/backend/pipelinepersistence"
 	"github.com/division-sh/swarm/internal/store/internal/backend/transactiontest"
+	"github.com/google/uuid"
 )
 
 func TestOrdinaryInstancePlanningOwnsOneFiniteReadCutBothStores(t *testing.T) {
@@ -120,9 +124,52 @@ func TestOrdinaryInstancePlanningOwnsOneFiniteReadCutBothStores(t *testing.T) {
 			if _, found, err := index.LookupFlowInstance(bounded, request); err != nil || !found {
 				t.Fatalf("completed planning retained the only free connection: found=%t err=%v", found, err)
 			}
+			preflight, ok := f.store.(bus.PublicationRunPreflightReader)
+			if !ok {
+				t.Fatal("selected store has no composed publication preflight")
+			}
+			eventID := uuid.NewString()
+			for _, composed := range []bool{false, true} {
+				collector, err = collector.Replace(transactiontest.Options{})
+				if err != nil {
+					t.Fatal(err)
+				}
+				t.Cleanup(collector.Stop)
+				started := time.Now()
+				for pass := 0; pass < 40; pass++ {
+					var found bool
+					var err error
+					if composed {
+						_, found, err = preflight.LoadPublicationRunPreflight(bounded, eventID, request.RunID())
+					} else {
+						_, found, err = f.store.(bus.PreparedPublishEventReader).LoadPreparedPublishEvent(bounded, eventID)
+						if err == nil && !found {
+							err = f.store.(runlifecycle.OperationOwner).RequireActiveRun(bounded, request.RunID())
+						}
+					}
+					if err != nil || found {
+						t.Fatalf("publication preflight composed=%t: found=%t err=%v", composed, found, err)
+					}
+				}
+				counts := collector.Snapshot()
+				if counts.Total.WriteCommits != 0 || counts.Total.Failed != 0 || counts.Active != 0 {
+					t.Fatalf("publication read retained a transaction or mutated state: %+v", counts)
+				}
+				t.Logf("publication preflight composed=%t elapsed=%s reads=%d writes=%d pool_wait=%s begin=%s commit=%s active=%d", composed, time.Since(started), counts.Total.ReadCommits, counts.Total.WriteCommits, counts.Total.PoolWait, counts.Total.BeginDuration, counts.Total.CommitDuration, counts.Active)
+			}
+			if _, found, err := preflight.LoadPublicationRunPreflight(bounded, eventID, uuid.NewString()); err == nil || found {
+				t.Fatalf("publication preflight admitted a missing run: found=%t err=%v", found, err)
+			}
+			invalid := correlation.WithRootAdmission(bounded, sourceartifact.RootAdmission{})
+			if _, found, err := preflight.LoadPublicationRunPreflight(invalid, eventID, request.RunID()); err == nil || found {
+				t.Fatalf("publication preflight accepted explicitly cleared root evidence: found=%t err=%v", found, err)
+			}
 			f.db.SetMaxOpenConns(capacity)
 			cancelled, cancel := context.WithCancel(ctx)
 			cancel()
+			if _, found, err := preflight.LoadPublicationRunPreflight(cancelled, eventID, request.RunID()); !errors.Is(err, context.Canceled) || found {
+				t.Fatalf("publication preflight lost cancellation: found=%t err=%v", found, err)
+			}
 			called := false
 			if err := planning.WithFlowInstancePlanningSnapshot(cancelled, scope, func(context.Context, pipeline.FlowInstanceIndexReader) error {
 				called = true

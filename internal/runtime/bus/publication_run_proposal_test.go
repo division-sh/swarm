@@ -24,6 +24,15 @@ type publicationRunPreflightTestStore struct {
 	fault error
 }
 
+type publicationRunPreflightTestReader struct {
+	preparedPublishEventReaderFunc
+	preflight func(context.Context, string, string) (PreparedPublishEvent, bool, error)
+}
+
+func (r publicationRunPreflightTestReader) LoadPublicationRunPreflight(ctx context.Context, eventID, runID string) (PreparedPublishEvent, bool, error) {
+	return r.preflight(ctx, eventID, runID)
+}
+
 func (s *publicationRunPreflightTestStore) RequireActiveRun(ctx context.Context, runID string) error {
 	if err := ctx.Err(); err != nil {
 		return err
@@ -163,6 +172,76 @@ func TestPublicationRunProposalRequiresExactIsolatedNativeAbsence(t *testing.T) 
 	if proposed, err := (&EventBus{store: &InMemoryEventStore{}, durable: DurableDependencies{RunLifecycle: &publicationRunPreflightTestStore{}}}).requireExistingRunActive(ctx, admitted); proposed || !errors.Is(err, context.Canceled) {
 		t.Fatalf("cancellation became a proposal: %t %v", proposed, err)
 	}
+	t.Run("independent composed preflights and canonical replay", func(t *testing.T) {
+		admitted := admitRunProposalEvent(t, false)
+		ledger, err := events.NewConnectEvaluationLedger(nil)
+		if err != nil {
+			t.Fatal(err)
+		}
+		settlement, err := events.NewNoDeliverySettlement(events.EventWriteNormalPublication, events.NoDeliveryMatchedNoRecipient, ledger)
+		if err != nil {
+			t.Fatal(err)
+		}
+		prepared := PreparedPublishEvent{Event: admitted, Settlement: settlement}
+		reads := 0
+		found := false
+		var refusal error
+		reader := publicationRunPreflightTestReader{
+			preparedPublishEventReaderFunc: func(context.Context, string) (PreparedPublishEvent, bool, error) {
+				t.Fatal("ordinary preflight used a separate prepared-event lookup")
+				return PreparedPublishEvent{}, false, nil
+			},
+			preflight: func(ctx context.Context, eventID, runID string) (PreparedPublishEvent, bool, error) {
+				reads++
+				if eventID != admitted.ID() || runID != busInternalTestRunID {
+					t.Fatalf("preflight changed its exact event/run: %s/%s", eventID, runID)
+				}
+				return prepared, found, errors.Join(ctx.Err(), refusal)
+			},
+		}
+		bus := &EventBus{store: &InMemoryEventStore{}, durable: DurableDependencies{
+			PreparedEvents: reader, RunLifecycle: &publicationRunPreflightTestStore{fault: independent},
+		}}
+		if proposed, err := bus.requireExistingRunActive(context.Background(), admitted); proposed || err != nil {
+			t.Fatalf("fresh composed preflight: %t %v", proposed, err)
+		}
+		refusal = missing
+		if _, err := bus.requireExistingRunActive(context.Background(), admitted); !errors.Is(err, missing) || reads != 2 {
+			t.Fatalf("later preflight reused admission: reads=%d err=%v", reads, err)
+		}
+		refusal, found = nil, true
+		if _, err := bus.requireExistingRunActive(context.Background(), admitted); err != nil {
+			t.Fatalf("canonical replay lost its persisted route settlement: %v", err)
+		}
+		prepared.Event = events.AdmittedEvent{}
+		if _, err := bus.requireExistingRunActive(context.Background(), admitted); err == nil {
+			t.Fatal("composed preflight accepted corrupt replay evidence")
+		}
+		foreign := eventtest.ExistingRunRootIngress(eventtest.UUID("foreign-preflight-event"), "task.requested", "operator", "", []byte(`{}`), 0, busInternalTestRunID, events.EventEnvelope{}, time.Now().UTC())
+		prepared.Event, err = events.AdmitForPersistence(foreign, events.AdmissionOptions{RequirePersistentUUIDIdentity: true})
+		if err != nil {
+			t.Fatal(err)
+		}
+		if _, err := bus.requireExistingRunActive(context.Background(), admitted); err == nil {
+			t.Fatal("composed preflight accepted a foreign replay event")
+		}
+		reader.preparedPublishEventReaderFunc = func(context.Context, string) (PreparedPublishEvent, bool, error) {
+			return PreparedPublishEvent{}, false, nil
+		}
+		bus.durable.PreparedEvents = reader
+		before := reads
+		for _, ctx := range []context.Context{
+			events.WithDeliveryContext(context.Background(), events.DeliveryContext{Reply: &events.ReplyContextRef{ID: "reply"}}),
+			context.WithValue(context.Background(), authenticatedProviderPublicationKey{}, authenticatedProviderPublication{}),
+		} {
+			if _, err := bus.requireExistingRunActive(ctx, admitted); err != independent || reads != before {
+				t.Fatalf("reply/provider path changed: reads=%d err=%v", reads, err)
+			}
+		}
+		if _, err := bus.requireExistingRunActive(context.Background(), admitRunProposalEvent(t, true)); err != independent || reads != before {
+			t.Fatalf("create-authorized path changed: reads=%d err=%v", reads, err)
+		}
+	})
 }
 
 func TestProposedRunSelectionConsumesOnlyExactPreparedConstruction(t *testing.T) {

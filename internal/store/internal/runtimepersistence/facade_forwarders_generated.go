@@ -769,6 +769,10 @@ func (s *PostgresStore) LoadProposedEffectContinuation(ctx context.Context, card
 	return s.decisionPostgresOwner.LoadProposedEffectContinuation(ctx, cardID)
 }
 
+func (s *PostgresStore) LoadPublicationRunPreflight(ctx context.Context, eventID string, runID string) (bus.PreparedPublishEvent, bool, error) {
+	return s.pipelinePostgresOwner.LoadPublicationRunPreflight(ctx, eventID, runID)
+}
+
 func (s *PostgresStore) LoadRecordedActivityResult(ctx context.Context, request activityresult.Query) (activityresult.Record, bool, error) {
 	return s.activityResultPostgresOwner.LoadRecordedActivityResult(ctx, request)
 }
@@ -1991,6 +1995,10 @@ func (s *SQLiteRuntimeStore) LoadPreparedPublishEvent(ctx context.Context, event
 
 func (s *SQLiteRuntimeStore) LoadProposedEffectContinuation(ctx context.Context, cardID string) (decisioncard.ProposedEffectContinuation, error) {
 	return s.decisionSQLiteOwner.LoadProposedEffectContinuation(ctx, cardID)
+}
+
+func (s *SQLiteRuntimeStore) LoadPublicationRunPreflight(ctx context.Context, eventID string, runID string) (bus.PreparedPublishEvent, bool, error) {
+	return s.pipelineSQLiteOwner.LoadPublicationRunPreflight(ctx, eventID, runID)
 }
 
 func (s *SQLiteRuntimeStore) LoadRecordedActivityResult(ctx context.Context, request activityresult.Query) (activityresult.Record, bool, error) {

@@ -337,6 +337,12 @@ type PreparedPublishEventReader interface {
 	LoadPreparedPublishEvent(context.Context, string) (PreparedPublishEvent, bool, error)
 }
 
+// PublicationRunPreflightReader checks for replay and, only on absence, admits
+// the active run's complete source in one read cut. It grants no write authority.
+type PublicationRunPreflightReader interface {
+	LoadPublicationRunPreflight(context.Context, string, string) (PreparedPublishEvent, bool, error)
+}
+
 // PreparedPublishEventIdentityVerifier delegates exact duplicate identity to
 // the selected store's event-record owner rather than reinterpreting it in routing.
 type PreparedPublishEventIdentityVerifier interface {

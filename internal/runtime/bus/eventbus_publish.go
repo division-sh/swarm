@@ -544,6 +544,20 @@ func (eb *EventBus) requireExistingRunActive(ctx context.Context, admitted event
 	if runID == "" {
 		return false, nil
 	}
+	_, providerBatch := ctx.Value(authenticatedProviderPublicationKey{}).(authenticatedProviderPublication)
+	if reader, ok := eb.durable.PreparedEvents.(PublicationRunPreflightReader); ok &&
+		admitted.RunDisposition() == events.AdmittedRunRequireActive &&
+		events.DeliveryContextFromContext(ctx).ReplyContextID() == "" && !providerBatch {
+		prepared, found, err := reader.LoadPublicationRunPreflight(ctx, event.ID(), runID)
+		if err != nil || !found {
+			return false, err
+		}
+		_, err = validatePreparedPublishEvent(prepared, event.ID())
+		if err != nil {
+			return false, fmt.Errorf("load publication event before run preflight: %w", err)
+		}
+		return false, nil
+	}
 	if reader := eb.durable.PreparedEvents; reader != nil {
 		_, found, err := loadValidatedPreparedPublishEvent(ctx, reader, event.ID())
 		if err != nil {
@@ -3116,14 +3130,19 @@ func loadValidatedPreparedPublishEvent(
 	if err != nil || !found {
 		return PreparedPublishEvent{}, found, err
 	}
+	prepared, err = validatePreparedPublishEvent(prepared, eventID)
+	return prepared, err == nil, err
+}
+
+func validatePreparedPublishEvent(prepared PreparedPublishEvent, eventID string) (PreparedPublishEvent, error) {
 	if err := prepared.Validate(); err != nil {
-		return PreparedPublishEvent{}, false, fmt.Errorf("validate prepared event %s: %w", eventID, err)
+		return PreparedPublishEvent{}, fmt.Errorf("validate prepared event %s: %w", eventID, err)
 	}
 	if prepared.Event.ID() != eventID {
-		return PreparedPublishEvent{}, false, fmt.Errorf("prepared event identity %s does not match requested event %s", prepared.Event.ID(), eventID)
+		return PreparedPublishEvent{}, fmt.Errorf("prepared event identity %s does not match requested event %s", prepared.Event.ID(), eventID)
 	}
 	prepared.DeliveryRoutes = events.NormalizeDeliveryRoutes(prepared.DeliveryRoutes)
-	return prepared, true, nil
+	return prepared, nil
 }
 
 func (eb *EventBus) recordTargetDeliveryFailure(ctx context.Context, evt events.Event, plan RoutePlan) {
