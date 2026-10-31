@@ -127,7 +127,11 @@ func (p selectedRunTargetOwnerProjection) validateProviderExecutionDescriptor(fl
 	if err != nil {
 		return err
 	}
-	return descriptor.Availability.Validate(p.source, flowID)
+	err = descriptor.Availability.Validate(p.source, flowID)
+	if refusal, ok := err.(*pipeline.NoHandlerError); ok {
+		refusal.FlowInstance = descriptor.FlowInstance
+	}
+	return err
 }
 
 func (s ordinaryPublicationSource) eventKeys(evt events.Event) []string {

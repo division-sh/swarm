@@ -59,6 +59,9 @@ func (p selectedRunTargetOwnerProjection) resolveRoutePlan(plan RoutePlan) (Rout
 			}
 			if !p.prospective.Empty() && !intent.TargetOwnership.EntitylessReceiver() && intent.TargetOwnership.Route() == p.prospective.Candidate().Route {
 				if err := p.prospective.Candidate().Availability.Validate(p.source, intent.TargetOwnership.Route().FlowID); err != nil {
+					if refusal, ok := err.(*runtimepipeline.NoHandlerError); ok {
+						refusal.FlowInstance = intent.TargetOwnership.Route().FlowInstance
+					}
 					return RoutePlan{}, err
 				}
 			}
@@ -302,6 +305,9 @@ func (p selectedRunTargetOwnerProjection) resolveSelectedRoute(blueprint events.
 		}
 		if !candidate.Materializing {
 			if err := candidate.Availability.Validate(p.source, blueprint.FlowID); err != nil {
+				if refusal, ok := err.(*runtimepipeline.NoHandlerError); ok {
+					refusal.FlowInstance = candidate.Route.FlowInstance
+				}
 				return events.DeliveryTargetOwnership{}, err
 			}
 		}
