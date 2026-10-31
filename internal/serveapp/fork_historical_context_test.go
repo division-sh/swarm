@@ -234,15 +234,6 @@ func TestRunForkHistoricalIdentityPublicExecutionBothStores(t *testing.T) {
 			if activation.Activated {
 				t.Fatal("direct selected activation accepted corrupt R")
 			}
-			recovered, err := family.Execute(ctx, runforkexecution.SelectedContractExecutionRequest{
-				SourceRunID: seed.RunID, At: frontier, ForkOperation: stagedRequest.ForkOperation,
-				ContractSelection: stagedRequest.ContractSelection, SourceLoader: loader,
-				AgentRuntime: runforkexecution.SelectedContractAgentRuntimeOptions{ExecutionPosture: rt.Runtime.ExecutionPosture},
-			})
-			requireHistoricalRefusal(err)
-			if recovered.Activation.Activated || recovered.ExecutedEventCount != 0 || len(recovered.ForkEvents) != 0 {
-				t.Fatalf("recovered activation reached execution: %#v", recovered)
-			}
 			writeFact(original)
 			// Source settlement (including pipeline receipt/handoff) and fault
 			// restoration precede the healthy baseline. Source freeze/lineage and

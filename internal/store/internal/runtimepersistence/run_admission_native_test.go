@@ -253,7 +253,7 @@ func TestInactiveAdmissionRefusalRejectsWrongStateIdentityAndLiveFact(t *testing
 	}{
 		{name: "exact", err: &runtimerunlifecycle.RunNotActiveError{RunID: runID, State: runtimerunlifecycle.StateCancelled}, wantPass: true},
 		{name: "wrong-run", err: &runtimerunlifecycle.RunNotActiveError{RunID: uuid.NewString(), State: runtimerunlifecycle.StateCancelled}},
-		{name: "wrong-state", err: &runtimerunlifecycle.RunNotActiveError{RunID: runID, State: runtimerunlifecycle.StateCancelled}},
+		{name: "wrong-state", err: &runtimerunlifecycle.RunNotActiveError{RunID: runID, State: runtimerunlifecycle.StateRunning}},
 		{name: "live-fact", fact: valid, err: &runtimerunlifecycle.RunNotActiveError{RunID: runID, State: runtimerunlifecycle.StateCancelled}},
 		{name: "untyped", err: errors.New("inactive")},
 		{name: "success", fact: valid},
