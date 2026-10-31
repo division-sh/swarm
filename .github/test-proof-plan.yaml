@@ -668,7 +668,7 @@ units:
   verify-run-native:
     packages:
       - github.com/division-sh/swarm/internal/store/internal/runtimepersistence
-    run: '^(TestVerifyRunNativeConstructionBothStores|TestMutationDomainsReachBothForkConsumersBothStores|TestForkActivationInventoriesConstructedHeadersBothStores|TestOrdinaryReplayInitializedReceiversBothStores|TestActivityAdmissionConsumesConstructedHeaderBothStores|TestConstructedHeaderGateSummaryBothStores|TestConstructedHeaderGateFreezeBothStores|TestSelectedContractActivitySourceProjectionBothStores|TestSelectedContractActivitySourceProjectionPreservesNumericPayloadBothStores|TestRunTerminalizationAtomicallyFencesGateActivationsAndCardsOnBothStores)$'
+    run: '^(TestVerifyRunNativeConstructionBothStores|TestMutationDomainsReachBothForkConsumersBothStores|TestForkActivationInventoriesConstructedHeadersBothStores|TestActivityAdmissionConsumesConstructedHeaderBothStores|TestConstructedHeaderGateSummaryBothStores|TestSelectedContractActivitySourceProjectionBothStores|TestSelectedContractActivitySourceProjectionPreservesNumericPayloadBothStores|TestRunTerminalizationAtomicallyFencesGateActivationsAndCardsOnBothStores)$'
     count_mode: count-1
     environment_ids: *postgres_gateway_empty
     budget_class: broad
@@ -1306,7 +1306,6 @@ units:
       TestChannelDeliveryOpenCardPlanningUsesCanonicalStatusAndEpochBothStores: [sqlite, postgres]
       TestChannelDeliveryEffectCurrentnessSelectedStoreParity: [sqlite/eligibility_before_authorize, sqlite/eligibility_before_launch, sqlite/eligibility_after_launch, sqlite/eligibility_after_observation, sqlite/eligibility_edit, sqlite/eligibility_uncertain, sqlite/eligibility_recover_authorized, sqlite/eligibility_recover_launched, sqlite/eligibility_recover_observed, postgres/eligibility_before_authorize, postgres/eligibility_before_launch, postgres/eligibility_after_launch, postgres/eligibility_after_observation, postgres/eligibility_edit, postgres/eligibility_uncertain, postgres/eligibility_recover_authorized, postgres/eligibility_recover_launched, postgres/eligibility_recover_observed]
       TestConstructedHeaderGateSummaryBothStores: [sqlite, postgres]
-      TestConstructedHeaderGateFreezeBothStores: [sqlite/fields=false, sqlite/fields=true, postgres/fields=false, postgres/fields=true]
       TestGenericConstructedGateForkUsesFixedSnapshotBothStores: [sqlite, postgres]
     count_mode: count-1
     environment_ids: *postgres_gateway_empty
@@ -1325,10 +1324,7 @@ units:
       TestLogicalTurnExecutionCancelsAndSettlesRealDeliveryOriginBothStores: [sqlite, postgres]
       TestLogicalTurnExecutionCancelsRealDirectiveWithoutDeliveryBothStores: [sqlite, postgres]
       TestOrdinaryHandlerRequiresCanonicalConstructionBothStores: [postgres/fielded_accumulation/absent, postgres/fielded_accumulation/constructed, postgres/fielded_stage/absent, postgres/fielded_stage/constructed, postgres/fieldless_emit/absent, postgres/fieldless_emit/constructed, postgres/fieldless_gate/absent, postgres/fieldless_gate/constructed, postgres/fieldless_stage/absent, postgres/fieldless_stage/constructed, sqlite/fielded_accumulation/absent, sqlite/fielded_accumulation/constructed, sqlite/fielded_stage/absent, sqlite/fielded_stage/constructed, sqlite/fieldless_emit/absent, sqlite/fieldless_emit/constructed, sqlite/fieldless_gate/absent, sqlite/fieldless_gate/constructed, sqlite/fieldless_stage/absent, sqlite/fieldless_stage/constructed]
-      TestOrdinaryForkFanOutOriginWriterEvaluatorBothStores: [sqlite/current, sqlite/historical, sqlite/no_loop, postgres/current, postgres/historical, postgres/no_loop]
-      TestOrdinaryForkOfForkFanOutOriginWriterEvaluatorBothStores: [sqlite/current, sqlite/historical, sqlite/no_loop, postgres/current, postgres/historical, postgres/no_loop]
       TestOrdinaryForkCreatingPredecessorBothStores: [sqlite/historical, sqlite/later_native, sqlite/corrupt_header, sqlite/missing_cut, sqlite/dual_evidence, postgres/historical, postgres/later_native, postgres/corrupt_header, postgres/missing_cut, postgres/dual_evidence]
-      TestOrdinaryReplayInitializedReceiversBothStores: [sqlite/wrong_path, sqlite/wrong_run, sqlite/foreign_template, sqlite/wrong_stage, sqlite/malformed_bookkeeping, sqlite/state_only_receiver, sqlite/missing_declared_fields, postgres/wrong_path, postgres/wrong_run, postgres/foreign_template, postgres/wrong_stage, postgres/malformed_bookkeeping, postgres/state_only_receiver, postgres/missing_declared_fields]
       TestOrdinaryWorkflowMutationCannotConstructOrRepairBothStores: [sqlite, postgres]
       TestManagerNativeLostAdmissionCleanupBothStores: [sqlite/commit, sqlite/rollback, sqlite/unresolved, sqlite/panic, postgres/commit, postgres/rollback, postgres/unresolved, postgres/panic]
       TestMaterializeRunForkProposedEffectCreatesFreshPendingAuthority: [sqlite/fields_false, sqlite/fields_true, postgres/fields_false, postgres/fields_true]
@@ -1455,8 +1451,6 @@ units:
       - github.com/division-sh/swarm/internal/store/internal/runtimepersistence
     run: '^TestRunFork.*$'
     required_children:
-      TestRunForkActivationFrontierContentionBothStores: [postgres/activation/cancel_loser, postgres/activation/cancel_winner, postgres/activation/commit, postgres/activation/rollback, postgres/writer/cancel_loser, postgres/writer/cancel_winner, postgres/writer/commit, postgres/writer/rollback, sqlite/activation/cancel_loser, sqlite/activation/cancel_winner, sqlite/activation/commit, sqlite/activation/rollback, sqlite/writer/cancel_loser, sqlite/writer/cancel_winner, sqlite/writer/commit, sqlite/writer/rollback]
-      TestRunForkActivationContentionFixtureControlBothStores: [postgres/selected=false, sqlite/selected=false]
     count_mode: count-1
     environment_ids: *postgres_gateway_empty
     budget_class: broad

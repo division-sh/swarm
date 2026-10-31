@@ -44,9 +44,9 @@ func stageContextOnlyDeadlineDescendant(t *testing.T, ctx context.Context, selec
 	}
 	operation := &runfork.ForkOperationRequest{OperationID: uuid.NewString(), Actor: "context-only-deadline", IdempotencyKey: uuid.NewString(),
 		TransportHash: "context-only-deadline", SourceRunID: parent.ForkRunID, AtStart: true,
-		TargetBundleHash: target.Admission().BundleHash(), TargetRootReference: target.Admission().Reference(), AllowSourceFreeze: true, ContractSelection: selection}
+		TargetBundleHash: target.Admission().BundleHash(), TargetRootReference: target.Admission().Reference(), ContractSelection: selection}
 	prepared, err := owner.Prepare(ctx, SelectedContractExecutionRequest{SourceRunID: parent.ForkRunID, AtStart: true,
-		AllowSourceFreeze: true, ForkOperation: operation, SourceLoader: loader, ContractSelection: selection, AgentRuntime: options})
+		ForkOperation: operation, SourceLoader: loader, ContractSelection: selection, AgentRuntime: options})
 	if err != nil {
 		t.Fatal(err)
 	}

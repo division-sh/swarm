@@ -385,7 +385,7 @@ func stageCatalogSelectedContractFork(
 		operation = &operations[0]
 	}
 	prepared, err := owner.Prepare(ctx, forkexecution.SelectedContractExecutionRequest{
-		SourceRunID: sourceRunID, At: eventID, AllowSourceFreeze: true, ForkOperation: operation,
+		SourceRunID: sourceRunID, At: eventID, ForkOperation: operation,
 		SourceLoader: loader, ContractSelection: selection, AgentRuntime: options, ExpectedBundleHash: selection.BundleHash,
 	})
 	if err != nil {
@@ -530,7 +530,7 @@ func runSelectedForkFlowOwnedReadinessBothStores(t *testing.T, selectedStage str
 							result.Materialization = stageCatalogSelectedContractFork(t, ctx, forkStore, executionOwner, loader, selection, options, catalogRuntimeRunID, frontierID, operation)
 						} else {
 							result, err = executeCatalogLiveFork(t, h, ctx, forkexecution.SelectedContractExecutionRequest{
-								SourceRunID: catalogRuntimeRunID, At: frontierID, AllowSourceFreeze: true, ForkOperation: &operation,
+								SourceRunID: catalogRuntimeRunID, At: frontierID, ForkOperation: &operation,
 								Owner: executionOwner, SourceLoader: loader, ContractSelection: selection, AgentRuntime: options, ExpectedBundleHash: selection.BundleHash,
 							})
 						}
@@ -549,7 +549,7 @@ func runSelectedForkFlowOwnedReadinessBothStores(t *testing.T, selectedStage str
 							for attempt := 0; attempt < attempts; attempt++ {
 								if !refused {
 									activated, activateErr := executeCatalogLiveFork(t, h, ctx, forkexecution.SelectedContractExecutionRequest{
-										SourceRunID: catalogRuntimeRunID, At: frontierID, AllowSourceFreeze: true, ForkOperation: &operation,
+										SourceRunID: catalogRuntimeRunID, At: frontierID, ForkOperation: &operation,
 										Owner: executionOwner, SourceLoader: loader, ContractSelection: selection, AgentRuntime: options,
 									})
 									if activateErr != nil || !activated.Activation.Activated || activated.ExecutedEventCount != 1 || activated.Materialization.ForkRunID != forkRun {
@@ -561,11 +561,11 @@ func runSelectedForkFlowOwnedReadinessBothStores(t *testing.T, selectedStage str
 									}
 									continue
 								}
-								activated, activateErr := forkexecution.ActivateSelectedContractRunFork(ctx, forkexecution.SelectedContractActivationGateRequest{
-									ForkRunID: forkRun, AllowSourceFreeze: true, Store: selected,
-									ExecutionOwner: selectedContractExecutionOwnerForCatalogHarness(t, h), SourceLoader: loader, AgentRuntime: options,
+								activated, activateErr := executeCatalogLiveFork(t, h, ctx, forkexecution.SelectedContractExecutionRequest{
+									SourceRunID: catalogRuntimeRunID, At: frontierID, ForkOperation: &operation,
+									Owner: selectedContractExecutionOwnerForCatalogHarness(t, h), SourceLoader: loader, AgentRuntime: options, ContractSelection: selection,
 								})
-								if activateErr == nil || !strings.Contains(activateErr.Error(), runfork.RunForkBlockerNonAgentDeliveryReplayUnsupported) || activated.Activated || activated.ExecutedEventCount != 0 || activated.ForkLocalRuntimeContainer != nil || len(activated.ForkEvents) != 0 {
+								if activateErr == nil || !strings.Contains(activateErr.Error(), runfork.RunForkBlockerNonAgentDeliveryReplayUnsupported) || activated.Activation.Activated || activated.ExecutedEventCount != 0 || activated.ForkLocalRuntimeContainer != nil || len(activated.ForkEvents) != 0 {
 									t.Fatalf("unsupported history must refuse before execution: %#v %v", activated, activateErr)
 								}
 								if afterActivation := selectedForkReadinessSnapshot(t, ctx, h, forkRun, owner.Route); beforeActivation != afterActivation {
@@ -679,18 +679,6 @@ func runSelectedForkFlowOwnedReadinessBothStores(t *testing.T, selectedStage str
 								wantStatus := "live"
 								if err != nil || terminal.Status != wantStatus {
 									t.Fatalf("terminal fork: %+v err=%v; want %s", terminal, err, wantStatus)
-								}
-								beforeRetry := activityLineageStateSnapshot(t, ctx, h, forkRun)
-								for attempt := 0; attempt < 2; attempt++ {
-									_, retryErr := forkexecution.ActivateSelectedContractRunFork(ctx, forkexecution.SelectedContractActivationGateRequest{
-										ForkRunID: forkRun, Store: selected, AllowSourceFreeze: true, ExecutionOwner: selectedContractExecutionOwnerForCatalogHarness(t, h), SourceLoader: loader, AgentRuntime: options,
-									})
-									if retryErr == nil || activityCalls.Load() != wantCalls {
-										t.Fatalf("repeated final verification executed: calls=%d err=%v", activityCalls.Load(), retryErr)
-									}
-								}
-								if afterRetry := activityLineageStateSnapshot(t, ctx, h, forkRun); afterRetry != beforeRetry {
-									t.Fatalf("repeated verification changed terminal fork:\nbefore=%s\nafter=%s", beforeRetry, afterRetry)
 								}
 							}
 						}

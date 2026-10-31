@@ -621,7 +621,7 @@ func runPendingEffectReplyCrashHelper(t *testing.T, ctx context.Context, selecte
 	}
 	selection := runforkadmission.SelectedContractSelection(loaded.Source)
 	options := SelectedContractAgentRuntimeOptions{ExecutionPosture: executionposture.Live, ProcessCapability: capability}
-	prepared, err := owner.Prepare(ctx, SelectedContractExecutionRequest{SourceRunID: sourceRun, At: page.Events[0].EventID, AllowSourceFreeze: true,
+	prepared, err := owner.Prepare(ctx, SelectedContractExecutionRequest{SourceRunID: sourceRun, At: page.Events[0].EventID,
 		Owner: owner, SourceLoader: loader, SourceArtifactFact: loaded.SourceArtifactFact, ContractSelection: selection, AgentRuntime: options})
 	if err != nil {
 		t.Fatal(err)
@@ -643,12 +643,12 @@ func runPendingEffectReplyCrashHelper(t *testing.T, ctx context.Context, selecte
 	if err != nil {
 		t.Fatal(err)
 	}
-	child := q1StageBranchPointComponent(t, ctx, SelectedContractExecutionRequest{SourceRunID: staged.ForkRunID, AtStart: true, AllowSourceFreeze: true,
+	child := q1StageBranchPointComponent(t, ctx, SelectedContractExecutionRequest{SourceRunID: staged.ForkRunID, AtStart: true,
 		Owner: owner, SourceLoader: loader, ContractSelection: selection, AgentRuntime: options,
 		ForkOperation: &runfork.ForkOperationRequest{OperationID: uuid.NewString(), Actor: "pending-reply-crash", IdempotencyKey: "before-journal",
 			TransportHash: "pending-reply-crash-transport", SourceRunID: staged.ForkRunID, AtStart: true, TargetBundleHash: loaded.SourceArtifactFact.BundleHash(),
 			TargetRootReference: loaded.RootedSource.Admission().Reference(),
-			AllowSourceFreeze:   true, ContractSelection: selection}})
+			ContractSelection:   selection}})
 	if err := owner.retainPrepared(child.prepared); err != nil {
 		t.Fatal(err)
 	}

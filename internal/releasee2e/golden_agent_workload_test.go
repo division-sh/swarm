@@ -1303,7 +1303,7 @@ func waitForGoldenTerminalRun(t *testing.T, process *releaseServeProcess, store 
 		switch last.Status {
 		case "completed":
 			return true, nil
-		case "failed", "cancelled", "forked", "stopped":
+		case "failed", "cancelled", "stopped":
 			return false, fmt.Errorf("run reached terminal status %s", last.Status)
 		default:
 			return false, nil

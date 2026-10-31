@@ -243,7 +243,7 @@ func preparePendingDecisionControlComponent(t *testing.T, ctx context.Context, o
 	t.Helper()
 	options := SelectedContractAgentRuntimeOptions{ExecutionPosture: executionposture.Live, ProcessCapability: owner.ports.contexts.capability}
 	selection := runforkadmission.SelectedContractSelection(loaded.Source)
-	prepared, err := owner.Prepare(ctx, SelectedContractExecutionRequest{SourceRunID: sourceRun, At: cut, AllowSourceFreeze: true,
+	prepared, err := owner.Prepare(ctx, SelectedContractExecutionRequest{SourceRunID: sourceRun, At: cut,
 		Owner: owner, SourceLoader: loader, ContractSelection: selection, AgentRuntime: options,
 		ForkOperation: selectedForkFixtureOperation(t, loaded, sourceRun, cut)})
 	if err != nil {
@@ -266,7 +266,7 @@ func preparePendingDecisionControlComponent(t *testing.T, ctx context.Context, o
 		t.Fatal(err)
 	}
 	component := q1StageBranchPointComponent(t, ctx, SelectedContractExecutionRequest{SourceRunID: staged.ForkRunID, AtStart: true,
-		AllowSourceFreeze: true, Owner: owner, SourceLoader: loader, ContractSelection: selection, AgentRuntime: options,
+		Owner: owner, SourceLoader: loader, ContractSelection: selection, AgentRuntime: options,
 		ForkOperation: pendingDecisionStartInvocation(staged.ForkRunID, loaded, selection)})
 	component.serveSelectedControls(t)
 	return SelectedContractExecutionResult{Materialization: component.materialized}
@@ -275,7 +275,7 @@ func preparePendingDecisionControlComponent(t *testing.T, ctx context.Context, o
 func pendingDecisionStartInvocation(sourceRun string, loaded LoadedSelectedContractSource, selection runfork.RunForkContractSelection) *runfork.ForkOperationRequest {
 	return &runfork.ForkOperationRequest{OperationID: uuid.NewString(), Actor: "card-control-proof", IdempotencyKey: uuid.NewString(),
 		TransportHash: "card-control-proof", SourceRunID: sourceRun, AtStart: true, TargetBundleHash: loaded.SourceArtifactFact.BundleHash(),
-		AllowSourceFreeze: true, ContractSelection: selection, TargetRootReference: loaded.RootedSource.Admission().Reference(),
+		ContractSelection: selection, TargetRootReference: loaded.RootedSource.Admission().Reference(),
 	}
 }
 

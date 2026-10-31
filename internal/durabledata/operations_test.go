@@ -521,7 +521,7 @@ func TestPermanentReceiptAggregateValidatorsRejectHostileContradictions(t *testi
 		})
 	}
 
-	for _, status := range []string{"running", "paused", "completed", "failed", "cancelled", "forked"} {
+	for _, status := range []string{"running", "paused", "completed", "failed", "cancelled"} {
 		t.Run("run_creation/status/"+status, func(t *testing.T) {
 			summary := runRecord.Summary
 			summary.Status = status
@@ -535,7 +535,7 @@ func TestPermanentReceiptAggregateValidatorsRejectHostileContradictions(t *testi
 			}
 		})
 	}
-	for _, status := range []string{"", "bogus", "Running", " running "} {
+	for _, status := range []string{"", "bogus", "Running", " running ", "forked"} {
 		t.Run("run_creation/status/reject/"+status, func(t *testing.T) {
 			summary := runRecord.Summary
 			summary.Status = status

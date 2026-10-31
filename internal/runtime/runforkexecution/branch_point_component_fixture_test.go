@@ -89,7 +89,7 @@ func q1ExecuteSelectedPhaseComponent(t *testing.T, ctx context.Context, request 
 			TransportHash: "selected-phase-component", SourceRunID: request.SourceRunID, ForkEventID: request.At, AtStart: request.AtStart,
 			TargetBundleHash: prepared.loadedSource.SourceArtifactFact.BundleHash(), ContractSelection: request.ContractSelection,
 			TargetRootReference: prepared.loadedSource.RootedSource.Admission().Reference(),
-			AllowSourceFreeze:   request.AllowSourceFreeze, DataPinOverrides: request.DataPinOverrides,
+			DataPinOverrides:    request.DataPinOverrides,
 		}, prepared.plan)
 		if err != nil {
 			return SelectedContractExecutionResult{}, errors.Join(err, prepared.Close())
@@ -454,8 +454,8 @@ func q1GateComponentSource(t *testing.T, owner SelectedContractExecutionOwner, d
 func q1GateComponentRequest(owner SelectedContractExecutionOwner, loader SourceArtifactSelectedContractSourceLoader, runID, eventID string, root sourceartifact.RootAdmission) SelectedContractExecutionRequest {
 	selection := testContractSelection()
 	operation := runfork.ForkOperationRequest{OperationID: uuid.NewString(), Actor: "bearer:branch-point-proof", IdempotencyKey: uuid.NewString(), TransportHash: "sha256:branch-point-proof",
-		SourceRunID: runID, ForkEventID: eventID, TargetBundleHash: root.BundleHash(), TargetRootReference: root.Reference(), ContractSelection: selection, AllowSourceFreeze: true}
-	return SelectedContractExecutionRequest{Owner: owner, SourceRunID: runID, At: eventID, ForkOperation: &operation, AllowSourceFreeze: true,
+		SourceRunID: runID, ForkEventID: eventID, TargetBundleHash: root.BundleHash(), TargetRootReference: root.Reference(), ContractSelection: selection}
+	return SelectedContractExecutionRequest{Owner: owner, SourceRunID: runID, At: eventID, ForkOperation: &operation,
 		ExpectedBundleHash: root.BundleHash(), SourceLoader: loader, ContractSelection: selection, AgentRuntime: SelectedContractAgentRuntimeOptions{ProcessCapability: owner.ports.contexts.capability, ExecutionPosture: executionposture.Live}}
 }
 
@@ -540,7 +540,7 @@ func q1DeploymentComponentSource(t *testing.T, owner SelectedContractExecutionOw
 	state.Transition, state.ExpectedState, state.ExpectedRevision = pipeline.WorkflowEngineStateTransitionUpdateStateAndCompanion, "pending", 1
 	state.Accumulator = json.RawMessage(`{"source_advanced":{"count":1}}`)
 	operation := runfork.ForkOperationRequest{OperationID: uuid.NewString(), Actor: "bearer:branch-point-proof", IdempotencyKey: uuid.NewString(), TransportHash: "sha256:branch-point-proof",
-		SourceRunID: runID, TargetBundleHash: catalog.BundleHash, TargetRootReference: loaded.RootedSource.Admission().Reference(), ContractSelection: testContractSelection(), AllowSourceFreeze: true}
+		SourceRunID: runID, TargetBundleHash: catalog.BundleHash, TargetRootReference: loaded.RootedSource.Admission().Reference(), ContractSelection: testContractSelection()}
 	latest, err := selected.PlanRunFork(ctx, runfork.RunForkPlanRequest{SourceRunID: runID})
 	if err != nil {
 		t.Fatal(err)
@@ -549,7 +549,7 @@ func q1DeploymentComponentSource(t *testing.T, owner SelectedContractExecutionOw
 	if err != nil {
 		t.Fatal(err)
 	}
-	request := SelectedContractExecutionRequest{Owner: owner, SourceRunID: runID, ForkOperation: &operation, AllowSourceFreeze: true,
+	request := SelectedContractExecutionRequest{Owner: owner, SourceRunID: runID, ForkOperation: &operation,
 		SourceLoader: loader, ExpectedBundleHash: catalog.BundleHash, ContractSelection: testContractSelection(), AgentRuntime: SelectedContractAgentRuntimeOptions{ProcessCapability: owner.ports.contexts.capability, ExecutionPosture: executionposture.Live}}
 	return ctx, request, func() {
 		if _, err := selected.(pipeline.WorkflowEngineMutationOwner).CommitWorkflowEngineMutation(ctx, pipeline.WorkflowEngineMutationCommand{State: state}); err != nil {

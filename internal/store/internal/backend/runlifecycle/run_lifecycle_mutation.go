@@ -100,18 +100,6 @@ func (s *RunLifecycleSQLiteOwner) MarkTerminalTx(ctx context.Context, attempt *m
 	})
 }
 
-func (s *RunLifecyclePostgresOwner) ForkSourceTx(ctx context.Context, attempt *mutationprotocol.Attempt, request runtimerunlifecycle.ForkSourceRequest, changes *ChannelCardChanges) (runtimerunlifecycle.Snapshot, runtimerunlifecycle.MutationDisposition, error) {
-	return withTerminalAttemptSQL(ctx, attempt, func(ctx context.Context, tx *sql.Tx) (runtimerunlifecycle.Snapshot, runtimerunlifecycle.MutationDisposition, error) {
-		return s.markForkSourceTx(ctx, tx, attempt, request, changes)
-	})
-}
-
-func (s *RunLifecycleSQLiteOwner) ForkSourceTx(ctx context.Context, attempt *mutationprotocol.Attempt, request runtimerunlifecycle.ForkSourceRequest, changes *ChannelCardChanges) (runtimerunlifecycle.Snapshot, runtimerunlifecycle.MutationDisposition, error) {
-	return withTerminalAttemptSQL(ctx, attempt, func(ctx context.Context, tx *sql.Tx) (runtimerunlifecycle.Snapshot, runtimerunlifecycle.MutationDisposition, error) {
-		return s.markForkSourceTx(ctx, tx, attempt, request, changes)
-	})
-}
-
 func (s *RunLifecyclePostgresOwner) ReviseSourceTx(ctx context.Context, attempt *mutationprotocol.Attempt, request runtimerunlifecycle.SourceRevisionRequest) (runtimerunlifecycle.MutationDisposition, error) {
 	var disposition runtimerunlifecycle.MutationDisposition
 	err := attempt.WithSQL(ctx, func(ctx context.Context, tx *sql.Tx) (err error) {
@@ -302,30 +290,6 @@ func (s *RunLifecycleSQLiteOwner) CreateRun(ctx context.Context, request runtime
 		return mutation.Create(ctx, request)
 	})
 	return value, classifyLiveScopeClaimFailure(ctx, s.backend, request.LiveScope, request.RunID, err)
-}
-
-func (s *RunLifecyclePostgresOwner) ForkRunSource(ctx context.Context, request runtimerunlifecycle.ForkSourceRequest) (runtimerunlifecycle.Snapshot, runtimerunlifecycle.MutationDisposition, error) {
-	type result struct {
-		snapshot    runtimerunlifecycle.Snapshot
-		disposition runtimerunlifecycle.MutationDisposition
-	}
-	value, err := runPostgresLifecycleOperation(ctx, s, func(ctx context.Context, mutation postgresRunLifecycleMutation) (result, error) {
-		snapshot, disposition, err := mutation.ForkSource(ctx, request)
-		return result{snapshot: snapshot, disposition: disposition}, err
-	})
-	return value.snapshot, value.disposition, err
-}
-
-func (s *RunLifecycleSQLiteOwner) ForkRunSource(ctx context.Context, request runtimerunlifecycle.ForkSourceRequest) (runtimerunlifecycle.Snapshot, runtimerunlifecycle.MutationDisposition, error) {
-	type result struct {
-		snapshot    runtimerunlifecycle.Snapshot
-		disposition runtimerunlifecycle.MutationDisposition
-	}
-	value, err := runSQLiteLifecycleOperation(ctx, s, func(ctx context.Context, mutation sqliteRunLifecycleMutation) (result, error) {
-		snapshot, disposition, err := mutation.ForkSource(ctx, request)
-		return result{snapshot: snapshot, disposition: disposition}, err
-	})
-	return value.snapshot, value.disposition, err
 }
 
 func (s *RunLifecyclePostgresOwner) ReviseRunSource(ctx context.Context, request runtimerunlifecycle.SourceRevisionRequest) (runtimerunlifecycle.MutationDisposition, error) {
@@ -838,26 +802,6 @@ func (m sqliteRunLifecycleMutation) MarkTerminal(
 		return runtimerunlifecycle.Snapshot{}, "", errors.New("SQLite terminal run lifecycle transition requires selected store")
 	}
 	return m.store.markRunTerminalTx(ctx, m.tx, m.attempt, request, m.channelCardChanges)
-}
-
-func (m postgresRunLifecycleMutation) ForkSource(
-	ctx context.Context,
-	request runtimerunlifecycle.ForkSourceRequest,
-) (runtimerunlifecycle.Snapshot, runtimerunlifecycle.MutationDisposition, error) {
-	if m.store == nil {
-		return runtimerunlifecycle.Snapshot{}, "", errors.New("PostgreSQL fork source lifecycle transition requires selected store")
-	}
-	return m.store.markForkSourceTx(ctx, m.tx, m.attempt, request, m.channelCardChanges)
-}
-
-func (m sqliteRunLifecycleMutation) ForkSource(
-	ctx context.Context,
-	request runtimerunlifecycle.ForkSourceRequest,
-) (runtimerunlifecycle.Snapshot, runtimerunlifecycle.MutationDisposition, error) {
-	if m.store == nil {
-		return runtimerunlifecycle.Snapshot{}, "", errors.New("SQLite fork source lifecycle transition requires selected store")
-	}
-	return m.store.markForkSourceTx(ctx, m.tx, m.attempt, request, m.channelCardChanges)
 }
 
 func (m postgresRunLifecycleMutation) classifyCreateExisting(

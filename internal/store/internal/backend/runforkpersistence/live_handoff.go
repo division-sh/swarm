@@ -83,7 +83,7 @@ func commitSelectedLiveHandoffTx(ctx context.Context, tx *sql.Tx, attempt *mutat
 		return "", err
 	}
 	evidence.lineage.ForkStatus = runfork.RunForkLiveStatus
-	if err := completeSelectedForkOperationAtActivation(ctx, tx, evidence.request, evidence.lineage, sourceStatus, sourceStatus == runfork.RunForkSourceFrozenStatus, !sqlite); err != nil {
+	if err := completeSelectedForkOperationAtActivation(ctx, tx, evidence.request, evidence.lineage, sourceStatus, false, !sqlite); err != nil {
 		return "", err
 	}
 	fact, err := correlation.DecodeSourceArtifactFact(grant.BundleHash)

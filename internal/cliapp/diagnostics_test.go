@@ -2113,7 +2113,7 @@ func validDiagnosticRunHeaderWithStatus(runID, status string) map[string]any {
 	case "cancelled":
 		run["ended_at"] = "2026-05-13T10:01:00Z"
 		run["control_reason"] = "operator_stopped"
-	case "completed", "forked":
+	case "completed":
 		run["ended_at"] = "2026-05-13T10:01:00Z"
 	}
 	return run

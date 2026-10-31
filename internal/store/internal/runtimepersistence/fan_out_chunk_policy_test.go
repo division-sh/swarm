@@ -11,6 +11,7 @@ import (
 	"github.com/division-sh/swarm/internal/runtime/fanoutobligation"
 	"github.com/division-sh/swarm/internal/runtime/pipeline"
 	"github.com/division-sh/swarm/internal/runtime/runfork"
+	"github.com/division-sh/swarm/internal/runtime/runlifecycle"
 )
 
 func TestFanOutRetrySQLPolicyAndRestartRecoveryBothStores(t *testing.T) {
@@ -196,11 +197,8 @@ func TestFanOutForkResetsOnlyOperationalBudgetBothStores(t *testing.T) {
 						t.Fatalf("fork changed source operational facts: before=%+v after=%+v", sourceBefore, after)
 					}
 					if prefix < 3 {
-						activation, err := owner.(interface {
-							ActivateRunFork(context.Context, runfork.RunForkActivateRequest) (runfork.RunForkActivation, error)
-						}).ActivateRunFork(ctx, runfork.RunForkActivateRequest{ForkRunID: child.ForkRunID, AllowSourceFreeze: true})
-						if err != nil || !activation.Activated || !activation.SourceFrozen {
-							t.Fatalf("ordinary fork activation: %+v err=%v", activation, err)
+						if _, err := owner.(runlifecycle.OperationOwner).TransitionActiveRun(ctx, runlifecycle.ActiveTransitionRequest{RunID: child.ForkRunID, State: runlifecycle.StateRunning}); err != nil {
+							t.Fatalf("resume materialized fork fixture: %v", err)
 						}
 						intent, claim, found, err := owner.ClaimFanOutIntent(ctx, pipeline.FanOutClaimRequest{Owner: "fork-reset-child", BundleHash: fixture.bundleHash, Candidate: &childRead.Key, Now: time.Now().UTC(), Lease: time.Minute})
 						if err != nil || !found || intent.Cursor != prefix {

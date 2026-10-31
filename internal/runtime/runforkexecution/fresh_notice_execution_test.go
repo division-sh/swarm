@@ -94,7 +94,7 @@ func TestIssue642FreshSelectedNoticeReadbackAcknowledgmentBothStores(t *testing.
 			}
 			baseline := process.ActiveCount()
 			result, err := q1ExecuteSelectedPhaseComponent(t, ctx, SelectedContractExecutionRequest{
-				SourceRunID: source, At: initial, AllowSourceFreeze: true, Owner: owner, SourceLoader: loader,
+				SourceRunID: source, At: initial, Owner: owner, SourceLoader: loader,
 				ContractSelection: runforkadmission.SelectedContractSelection(loaded.Source),
 				AgentRuntime: SelectedContractAgentRuntimeOptions{
 					ExecutionPosture: executionposture.MockOnly, ProcessCapability: capability, Workspace: manager, MailboxStore: selected,

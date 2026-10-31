@@ -104,6 +104,6 @@ func catalogStagedForkOperation(t testing.TB, ctx context.Context, selected runf
 	return runfork.ForkOperationRequest{
 		OperationID: id, Actor: "cataloge2e:" + t.Name(), IdempotencyKey: uuid.NewString(), TransportHash: "catalog-staged:" + id,
 		SourceRunID: sourceRunID, ForkEventID: eventID, TargetBundleHash: loaded.SourceArtifactFact.BundleHash(), TargetRootReference: loaded.RootedSource.Admission().Reference(),
-		AllowSourceFreeze: true, ContractSelection: selection,
+		ContractSelection: selection,
 	}
 }

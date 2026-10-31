@@ -123,12 +123,12 @@ func TestIssue642RemovedPreparedArrivalRuleSettlesDependentsBothStores(t *testin
 			selection := runforkadmission.SelectedContractSelection(target.Source)
 			operation := runfork.ForkOperationRequest{OperationID: uuid.NewString(), Actor: "removed-arrival", IdempotencyKey: "fixed-cut",
 				TransportHash: "removed-arrival-transport", SourceRunID: sourceRun, ForkEventID: marker,
-				TargetBundleHash: target.SourceArtifactFact.BundleHash(), TargetRootReference: target.RootedSource.Admission().Reference(), AllowSourceFreeze: true, ContractSelection: selection}
+				TargetBundleHash: target.SourceArtifactFact.BundleHash(), TargetRootReference: target.RootedSource.Admission().Reference(), ContractSelection: selection}
 			startupCtx := authoractivity.WithScope(startupEntry, authoractivity.BundleScope(runForkTestRuntimeInstanceID, target.SourceArtifactFact.BundleHash()))
 			_, liveContexts := liveForkRuntimeFixtureWithStartupContext(t, ctx, startupCtx, selected, owner, target, sourceRun, executionposture.MockOnly)
 			baseline = process.ActiveCount()
 			result, err := ExecuteSelectedContractRunFork(ctx, SelectedContractExecutionRequest{
-				SourceRunID: sourceRun, At: marker, AllowSourceFreeze: true, Owner: owner, ForkOperation: &operation,
+				SourceRunID: sourceRun, At: marker, Owner: owner, ForkOperation: &operation,
 				LiveContexts: liveContexts, LiveRuns: selected.(runlifecycle.LiveRunReader),
 				AcquireLiveRuntime: func(ctx context.Context, reference sourceartifact.RootAdmissionReference) (*rootruntime.RuntimeContextUse, error) {
 					use, _, err := liveContexts.AcquireBundleHash(ctx, reference.BundleHash)

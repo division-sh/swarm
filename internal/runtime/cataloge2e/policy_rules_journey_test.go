@@ -110,7 +110,7 @@ func TestR3RulesSelectedActorMachineBothStores(t *testing.T) {
 			cfg := testRuntimeConfig()
 			cfg.LLM.Backend = "anthropic"
 			result, err := executeCatalogLiveFork(t, h, ctx, runforkexecution.SelectedContractExecutionRequest{
-				SourceRunID: catalogRuntimeRunID, At: point, AllowSourceFreeze: true,
+				SourceRunID: catalogRuntimeRunID, At: point,
 				ExpectedBundleHash: loaded.SourceArtifactFact.BundleHash(), SourceArtifactFact: loaded.SourceArtifactFact,
 				Owner: selectedContractExecutionOwnerForCatalogHarness(t, h), SourceLoader: loader, ContractSelection: selection,
 				AgentRuntime: selectedContractAgentRuntimeOptionsForCatalogHarness(h, cfg),

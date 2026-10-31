@@ -192,7 +192,7 @@ func testPreparedTemplateArrivalTimeoutBothStores(t *testing.T, selectedDelay st
 			selection := runforkadmission.SelectedContractSelection(target.Source)
 			operation := runfork.ForkOperationRequest{OperationID: uuid.NewString(), Actor: "prepared-template-arrival", IdempotencyKey: "fixed-cut",
 				TransportHash: "prepared-template-arrival-transport", SourceRunID: sourceRun, ForkEventID: marker,
-				TargetBundleHash: target.SourceArtifactFact.BundleHash(), TargetRootReference: target.RootedSource.Admission().Reference(), AllowSourceFreeze: true, ContractSelection: selection}
+				TargetBundleHash: target.SourceArtifactFact.BundleHash(), TargetRootReference: target.RootedSource.Admission().Reference(), ContractSelection: selection}
 			startupCtx := authoractivity.WithScope(startupEntry, authoractivity.BundleScope(runForkTestRuntimeInstanceID, target.SourceArtifactFact.BundleHash()))
 			liveRuntime, liveContexts := liveForkRuntimeFixtureWithStartupContext(t, ctx, startupCtx, selected, owner, target, sourceRun, executionposture.MockOnly)
 			preservedSource := joinLiveForkFixtureClock(t, ctx, liveRuntime, selected, sourceRun, source.ID)
@@ -210,7 +210,7 @@ func testPreparedTemplateArrivalTimeoutBothStores(t *testing.T, selectedDelay st
 			}
 			baseline = process.ActiveCount()
 			request := SelectedContractExecutionRequest{
-				SourceRunID: sourceRun, At: marker, AllowSourceFreeze: true, Owner: owner, ForkOperation: &operation,
+				SourceRunID: sourceRun, At: marker, Owner: owner, ForkOperation: &operation,
 				LiveRuntime: liveRuntime, LiveContexts: liveContexts, LiveRuns: selected.(runlifecycle.LiveRunReader),
 				SourceLoader:       SourceArtifactSelectedContractSourceLoader{RepoRoot: repo, Store: selected.(SourceArtifactSelectedContractSourceStore)},
 				ExpectedBundleHash: target.SourceArtifactFact.BundleHash(), ContractSelection: selection,

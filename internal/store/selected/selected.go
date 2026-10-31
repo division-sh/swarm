@@ -165,7 +165,6 @@ type RunFork struct {
 	planner        runForkPlannerMaterializer
 	availability   apiv1.RunForkAvailabilityStore
 	operations     apiv1.RunForkOperationReader
-	activation     runtimerunforkexecution.SelectedContractActivationStore
 	executionOwner runtimerunforkexecution.SelectedContractExecutionOwner
 	construction   runForkConstruction
 }
@@ -282,15 +281,6 @@ func (o RunFork) RequireMaterialized(ctx context.Context, forkRunID string, req 
 		return runfork.RunForkMaterialization{}, errors.New("selected run.fork runtime owner is required")
 	}
 	return o.planner.RequireMaterializedRunFork(ctx, forkRunID, req)
-}
-
-func (o RunFork) Activate(ctx context.Context, req runtimerunforkexecution.SelectedContractActivationGateRequest) (runtimerunforkexecution.SelectedContractActivationGateResult, error) {
-	if o.activation == nil {
-		return runtimerunforkexecution.SelectedContractActivationGateResult{}, errors.New("selected run.fork runtime owner is required")
-	}
-	req.Store = o.activation
-	req.ExecutionOwner = o.executionOwner
-	return runtimerunforkexecution.ActivateSelectedContractRunFork(ctx, req)
 }
 
 func (o RunFork) Execute(ctx context.Context, req runtimerunforkexecution.SelectedContractExecutionRequest) (runtimerunforkexecution.SelectedContractExecutionResult, error) {
@@ -501,7 +491,7 @@ func newPostgresRunFork(selected *private.PostgresStore, workflow runtimepipelin
 	if err != nil {
 		return RunFork{}, err
 	}
-	return RunFork{planner: selected, availability: selected, operations: selected, activation: selected, executionOwner: execution, construction: postgresRunForkConstruction{selected, workflow}}, nil
+	return RunFork{planner: selected, availability: selected, operations: selected, executionOwner: execution, construction: postgresRunForkConstruction{selected, workflow}}, nil
 }
 
 func newSQLiteRunFork(selected *private.SQLiteRuntimeStore, workflow runtimepipeline.WorkflowPersistence) (RunFork, error) {
@@ -524,5 +514,5 @@ func newSQLiteRunFork(selected *private.SQLiteRuntimeStore, workflow runtimepipe
 	if err != nil {
 		return RunFork{}, err
 	}
-	return RunFork{planner: selected, availability: selected, operations: selected, activation: selected, executionOwner: execution, construction: sqliteRunForkConstruction{selected, workflow}}, nil
+	return RunFork{planner: selected, availability: selected, operations: selected, executionOwner: execution, construction: sqliteRunForkConstruction{selected, workflow}}, nil
 }

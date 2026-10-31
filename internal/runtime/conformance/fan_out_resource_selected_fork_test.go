@@ -686,9 +686,9 @@ func proveSourceChangedPinPublicForkAndLostResponse(t *testing.T, pointKind runf
 					forkServer := deploymentForkServer(t, f, owner)
 					key := uuid.NewString()
 					params := map[string]any{
-						"source_run_id":       sourceRunID,
-						"bundle_hash":         f.runtime.sourceArtifactFact.BundleHash(),
-						"allow_source_freeze": true, "idempotency_key": key,
+						"source_run_id":   sourceRunID,
+						"bundle_hash":     f.runtime.sourceArtifactFact.BundleHash(),
+						"idempotency_key": key,
 						"data_pin_overrides": []any{map[string]any{
 							"declaration": map[string]any{"flow_path": ".", "event": selectedDeploymentEvent},
 							"version_id":  string(changed.VersionID),
@@ -962,9 +962,9 @@ func TestDeploymentSourceDynamicReceiverSelectedForkRefusesWithoutMutation(t *te
 			owner, _ := deploymentForkOwner(t, f)
 			forkServer := deploymentForkServer(t, f, owner)
 			params := map[string]any{
-				"source_run_id":       sourceRunID,
-				"bundle_hash":         f.runtime.sourceArtifactFact.BundleHash(),
-				"allow_source_freeze": true, "idempotency_key": uuid.NewString(),
+				"source_run_id":   sourceRunID,
+				"bundle_hash":     f.runtime.sourceArtifactFact.BundleHash(),
+				"idempotency_key": uuid.NewString(),
 				"data_pin_overrides": []any{map[string]any{
 					"declaration": map[string]any{"flow_path": ".", "event": selectedDeploymentEvent},
 					"version_id":  changedVersion,

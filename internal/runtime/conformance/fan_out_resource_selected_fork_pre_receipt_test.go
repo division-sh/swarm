@@ -96,8 +96,8 @@ func TestDeploymentSourceFixedTPublishedBeforePipelineChangedPinBothStores(t *te
 			defer cancel()
 			result, rpcErr := deploymentForkRPC(t, ctx, forkServer, map[string]any{
 				"source_run_id": sourceRunID, "fork_event_id": pointEventID,
-				"bundle_hash":         f.runtime.sourceArtifactFact.BundleHash(),
-				"allow_source_freeze": true, "idempotency_key": uuid.NewString(),
+				"bundle_hash":     f.runtime.sourceArtifactFact.BundleHash(),
+				"idempotency_key": uuid.NewString(),
 				"data_pin_overrides": []any{map[string]any{
 					"declaration": map[string]any{"flow_path": ".", "event": selectedDeploymentEvent},
 					"version_id":  string(newVersion.VersionID),

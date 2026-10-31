@@ -230,7 +230,7 @@ func TestReceiverCompositionForkBothStores(t *testing.T) {
 				checkSource("before fork")
 				wantExecuted := 1
 				if surface == "admitted_http" {
-					params := map[string]any{"source_run_id": request.RunID, "fork_event_id": request.EventID, "allow_source_freeze": true, "idempotency_key": "receiver-fork"}
+					params := map[string]any{"source_run_id": request.RunID, "fork_event_id": request.EventID, "idempotency_key": "receiver-fork"}
 					var fork, duplicate apiv1.RunForkExecutionResult
 					requireServedJSONRPCResult(t, rt.Endpoint, "run.fork", params, &fork)
 					requireServedJSONRPCResult(t, rt.Endpoint, "run.fork", params, &duplicate)
@@ -256,10 +256,10 @@ func TestReceiverCompositionForkBothStores(t *testing.T) {
 					operation := runfork.ForkOperationRequest{
 						OperationID: uuid.NewString(), Actor: "receiver-composition", IdempotencyKey: surface, TransportHash: surface,
 						SourceRunID: request.RunID, ForkEventID: forkPoint, TargetBundleHash: rt.BundleHash,
-						TargetRootReference: use.Context.RootAdmission.Reference(), AllowSourceFreeze: true, ContractSelection: selection,
+						TargetRootReference: use.Context.RootAdmission.Reference(), ContractSelection: selection,
 					}
 					execution := runtimerunforkexecution.SelectedContractExecutionRequest{
-						SourceRunID: request.RunID, At: forkPoint, AllowSourceFreeze: true, ExpectedBundleHash: rt.BundleHash,
+						SourceRunID: request.RunID, At: forkPoint, ExpectedBundleHash: rt.BundleHash,
 						SourceLoader:      runtimerunforkexecution.SourceArtifactSelectedContractSourceLoader{RepoRoot: repoRootForTest(), Store: selected.SourceArtifactStore()},
 						ContractSelection: selection,
 						ForkOperation:     &operation,

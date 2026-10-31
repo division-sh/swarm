@@ -22,13 +22,12 @@ type forkCommandOptions struct {
 	apiOptions rootCommandOptions
 	output     cliOutputOptions
 
-	source            string
-	atEvent           string
-	publication       string
-	atStart           bool
-	allowSourceFreeze bool
-	idempotencyKey    string
-	pins              []string
+	source         string
+	atEvent        string
+	publication    string
+	atStart        bool
+	idempotencyKey string
+	pins           []string
 
 	sourceSet         bool
 	atEventSet        bool
@@ -79,7 +78,6 @@ func newForkCommand(opts rootCommandOptions) *cobra.Command {
 	cmd.Flags().StringVar(&forkOpts.publication, "publication", "", "Re-apply this source event publication's inputs")
 	cmd.Flags().BoolVar(&forkOpts.atStart, "at-start", false, "Fork at the original committed run start, before creating ingress; mutually exclusive with --at-event")
 	cmd.Flags().StringArrayVar(&forkOpts.pins, "pin", nil, "Exact data version override: name@vN or name@ResourceVersionID (repeatable)")
-	cmd.Flags().BoolVar(&forkOpts.allowSourceFreeze, "allow-source-freeze", false, "Legacy conditional-freeze permission; not required for the live-run switch")
 	cmd.Flags().StringVar(&forkOpts.idempotencyKey, "idempotency-key", "", "Optional idempotency key for retry-safe fork creation")
 	_ = cmd.Flags().MarkHidden("idempotency-key")
 	bindCLIOutputFlags(cmd, &forkOpts.output)
@@ -173,9 +171,6 @@ func (opts forkCommandOptions) params(rawSourceRunID string) (map[string]any, er
 	if opts.atStart {
 		params["at_start"] = true
 	}
-	if opts.allowSourceFreeze {
-		params["allow_source_freeze"] = true
-	}
 
 	if opts.sourceSet {
 		sourceHash, err := admitCLIIdentitySource(opts.apiOptions.invocationRoot, opts.source)
@@ -264,11 +259,11 @@ func validateRunForkResult(result runForkResult) error {
 	}
 	sourceStatus := strings.ToLower(strings.TrimSpace(result.SourceRunStatus))
 	switch sourceStatus {
-	case "running", "paused", "live", "completed", "failed", "cancelled", "forked":
+	case "running", "paused", "live", "completed", "failed", "cancelled":
 	default:
 		return fmt.Errorf("malformed run.fork result: source_run_status %q is invalid", result.SourceRunStatus)
 	}
-	if *result.SourceFrozen != (sourceStatus == "forked") {
+	if *result.SourceFrozen {
 		return fmt.Errorf("malformed run.fork result: source_frozen=%t contradicts source_run_status %q", *result.SourceFrozen, result.SourceRunStatus)
 	}
 	if _, err := validateRunForkUUIDValue("source_run_id", result.SourceRunID); err != nil {

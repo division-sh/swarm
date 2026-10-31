@@ -59,7 +59,7 @@ func TestSelectedDownstreamPreparationFailsBeforeMaterializationBothStores(t *te
 			options := selectedContractAgentRuntimeOptionsForCatalogHarness(h, testRuntimeConfig())
 			options.Config, options.AgentFactory = nil, nil
 			result, err := forkexecution.ExecuteSelectedContractRunFork(ctx, forkexecution.SelectedContractExecutionRequest{
-				SourceRunID: catalogRuntimeRunID, At: inputID, AllowSourceFreeze: true,
+				SourceRunID: catalogRuntimeRunID, At: inputID,
 				Owner: owner, SourceLoader: loader, ContractSelection: selection,
 				AgentRuntime: options, ExpectedBundleHash: selection.BundleHash,
 			})
@@ -75,7 +75,7 @@ func TestSelectedDownstreamPreparationFailsBeforeMaterializationBothStores(t *te
 			options = selectedContractAgentRuntimeOptionsForCatalogHarness(h, testRuntimeConfig())
 			options.Config.LLM.Backend = "anthropic"
 			prepared, err := owner.Prepare(ctx, forkexecution.SelectedContractExecutionRequest{
-				SourceRunID: catalogRuntimeRunID, At: inputID, AllowSourceFreeze: true,
+				SourceRunID: catalogRuntimeRunID, At: inputID,
 				Owner: owner, SourceLoader: loader, ContractSelection: selection, AgentRuntime: options, ExpectedBundleHash: selection.BundleHash,
 			})
 			if err != nil {

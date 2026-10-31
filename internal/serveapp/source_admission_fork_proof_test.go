@@ -332,7 +332,7 @@ func Test2376ForkSourceAndPinsFollowSourceRunBothStores(t *testing.T) {
 			for _, name := range []string{"missing", "contradictory"} {
 				t.Run(name, func(t *testing.T) {
 					p := parents[name]
-					args := []string{"run", "fork", p.runID, "--at-event", p.frontierID, "--allow-source-freeze", "--idempotency-key", "fork-" + name, "--json"}
+					args := []string{"run", "fork", p.runID, "--at-event", p.frontierID, "--idempotency-key", "fork-" + name, "--json"}
 					want := "--pin repeats"
 					if name == "missing" {
 						missing := copy2376ForkSourceWithFeed(t)
@@ -359,7 +359,7 @@ func Test2376ForkSourceAndPinsFollowSourceRunBothStores(t *testing.T) {
 			for _, name := range []string{"default", "pin", "explicit"} {
 				t.Run(name, func(t *testing.T) {
 					p := parents[name]
-					args := []string{"run", "fork", p.runID, "--at-event", p.frontierID, "--allow-source-freeze", "--idempotency-key", "fork-" + name, "--json"}
+					args := []string{"run", "fork", p.runID, "--at-event", p.frontierID, "--idempotency-key", "fork-" + name, "--json"}
 					want := hashA
 					if name == "pin" {
 						args = append(args, "--pin", "work.requested@v1")

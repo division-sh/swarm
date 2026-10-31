@@ -209,8 +209,8 @@ func mutatingHTTPRuntimeFixtures() map[string]mutatingHTTPRuntimeFixture {
 			SuccessEffects: 2,
 		},
 		"run.fork": {
-			Params:         map[string]any{"source_run_id": runID, "fork_event_id": runForkTestEventID, "allow_source_freeze": true},
-			ConflictParams: map[string]any{"source_run_id": otherRunID, "fork_event_id": runForkTestEventID, "allow_source_freeze": true},
+			Params:         map[string]any{"source_run_id": runID, "fork_event_id": runForkTestEventID},
+			ConflictParams: map[string]any{"source_run_id": otherRunID, "fork_event_id": runForkTestEventID},
 			ResultKeys:     []string{"owner", "source_run_id", "fork_run_id", "fork_event_id", "fork_run_status", "bundle_hash", "executed_event_count"},
 			SuccessEffects: 1,
 		},
@@ -760,8 +760,8 @@ func (e *mutatingProbeRunForkExecutor) ExecuteRunFork(_ context.Context, req Run
 	result := RunForkExecutionResult{
 		Owner:              "runtime.run_fork.selected_contract_execution",
 		SourceRunID:        strings.TrimSpace(req.SourceRunID),
-		SourceRunStatus:    runfork.RunForkSourceFrozenStatus,
-		SourceFrozen:       true,
+		SourceRunStatus:    "paused",
+		SourceFrozen:       false,
 		ForkRunID:          runForkTestForkRunID,
 		ForkPointKind:      string(runfork.RunForkPointEvent),
 		ForkRevision:       1,

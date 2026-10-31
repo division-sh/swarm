@@ -187,7 +187,7 @@ func runMixedFanOutPendingMatrixWithCrash(t *testing.T, refork bool, crash *mixe
 				forkCtx, forkCancel := context.WithTimeout(ctx, 30*time.Second)
 				defer forkCancel()
 				executionRequest := runforkexecution.SelectedContractExecutionRequest{
-					SourceRunID: runID, At: cutID, ExpectedBundleHash: rt.Options.SourceArtifactFact.BundleHash(), AllowSourceFreeze: true,
+					SourceRunID: runID, At: cutID, ExpectedBundleHash: rt.Options.SourceArtifactFact.BundleHash(),
 					SourceLoader:      runforkexecution.SourceArtifactSelectedContractSourceLoader{RepoRoot: repo, Store: selected.SourceArtifactStore()},
 					ContractSelection: runforkadmission.SelectedContractSelection(semanticview.Wrap(bundle)),
 					AgentRuntime: runforkexecution.SelectedContractAgentRuntimeOptions{ProcessCapability: capability, ExecutionPosture: rt.ExecutionPosture,
@@ -201,7 +201,7 @@ func runMixedFanOutPendingMatrixWithCrash(t *testing.T, refork bool, crash *mixe
 					OperationID: uuid.NewString(), Actor: "mixed-fanout-crash", IdempotencyKey: "pending-cut", TransportHash: "mixed-fanout-crash-transport",
 					SourceRunID: runID, ForkEventID: cutID, TargetBundleHash: executionRequest.ExpectedBundleHash,
 					TargetRootReference: rooted.Admission().Reference(),
-					AllowSourceFreeze:   true, ContractSelection: executionRequest.ContractSelection,
+					ContractSelection:   executionRequest.ContractSelection,
 				}
 				executionRequest = forkEngineLiveRequest(t, rt, selected, executionRequest)
 				acknowledged := make(chan forkEngineAcknowledgment, 1)
@@ -317,7 +317,7 @@ func runMixedFanOutPendingMatrixWithCrash(t *testing.T, refork bool, crash *mixe
 						OperationID: uuid.NewString(), Actor: "mixed-fanout-refork", IdempotencyKey: "continued-cut", TransportHash: "mixed-fanout-refork-transport",
 						SourceRunID: executionRequest.SourceRunID, ForkEventID: executionRequest.At, TargetBundleHash: executionRequest.ExpectedBundleHash,
 						TargetRootReference: rooted.Admission().Reference(),
-						AllowSourceFreeze:   executionRequest.AllowSourceFreeze, ContractSelection: executionRequest.ContractSelection,
+						ContractSelection:   executionRequest.ContractSelection,
 					}
 					proveMixedFanOutChildRefork(t, ctx, selected, executionRequest, afterChild, retained)
 				}

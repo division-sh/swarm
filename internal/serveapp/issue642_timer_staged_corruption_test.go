@@ -57,7 +57,7 @@ func issue642StagedTimerCorruption(t *testing.T, backend string, fault storetest
 	rt.waitDeliveries(t, seed.RunID)
 	issue2564H2CompletionWaitReceipt(t, rt, seed.RunID, seed.EventID)
 	plan, source := issue642TimerContinuationPlan(t, reader, seed.RunID, seed.EventID, marker.EventID)
-	staged, _ := issue642MaterializePausedTimer(t, ctx, owners, rt, reader, plan, source)
+	staged, operation := issue642MaterializePausedTimer(t, ctx, owners, rt, reader, plan, source)
 	_, timer := issue642RequirePausedStagedTimer(t, rt, reader, staged, source)
 	if err := storetest.CorruptStagedWorkflowTimer(ctx, rt.selected, staged.ForkRunID, timer.Ref.ActivationID, fault); err != nil {
 		t.Fatalf("install exact hostile staged timer: %v", err)
@@ -74,10 +74,11 @@ func issue642StagedTimerCorruption(t *testing.T, backend string, fault storetest
 	if !errors.Is(err, sql.ErrNoRows) {
 		t.Fatalf("unactivated staged child unexpectedly has an execution: %v", err)
 	}
-	activation, err := owners.family.Activate(ctx, runforkexecution.SelectedContractActivationGateRequest{
-		ForkRunID: staged.ForkRunID, AllowSourceFreeze: true, SourceLoader: owners.executor.SourceLoader, AgentRuntime: owners.executor.AgentRuntime,
+	activation, err := owners.family.Execute(ctx, runforkexecution.SelectedContractExecutionRequest{
+		SourceRunID: plan.SourceRunID, At: plan.ForkPoint.EventID, ForkOperation: operation,
+		ContractSelection: operation.ContractSelection, SourceLoader: owners.executor.SourceLoader, AgentRuntime: owners.executor.AgentRuntime,
 	})
-	if err == nil || activation.Activated || !strings.Contains(strings.ToLower(err.Error()), "timer") {
+	if err == nil || activation.Activation.Activated || !strings.Contains(strings.ToLower(err.Error()), "timer") {
 		t.Fatalf("hostile staged timer did not refuse at timer admission: activation=%+v err=%v", activation, err)
 	}
 	childAfter, readErr := storetest.ReadSelectedForkSourceDomain(ctx, rt.selected, staged.ForkRunID)

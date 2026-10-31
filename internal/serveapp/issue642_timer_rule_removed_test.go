@@ -120,7 +120,7 @@ func issue642RemovedArmedTimerFork(t *testing.T, backend string, final bool) {
 	var fork apiv1.RunForkExecutionResult
 	requireServedJSONRPCResult(t, rt.Endpoint, "run.fork", map[string]any{
 		"source_run_id": seed.RunID, "fork_event_id": marker.EventID, "bundle_hash": target.BundleHash,
-		"allow_source_freeze": true, "idempotency_key": "issue642-removed-armed-timer-fork",
+		"idempotency_key": "issue642-removed-armed-timer-fork",
 	}, &fork)
 	if fork.SourceRunID != seed.RunID || fork.ForkRunID == "" || fork.ForkRunID == seed.RunID ||
 		fork.ForkEventID != marker.EventID || fork.ForkRevision != plan.ForkPoint.Revision || fork.SourceFrozen || fork.SourceRunStatus != "paused" {

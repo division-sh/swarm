@@ -104,7 +104,7 @@ func TestIssue642ServedPublishedBarrierReachesFinalConsumerBothStores(t *testing
 			}
 			var fork apiv1.RunForkExecutionResult
 			requireServedJSONRPCResult(t, rt.Endpoint, "run.fork", map[string]any{"source_run_id": seed.RunID, "fork_event_id": original.event,
-				"allow_source_freeze": true, "idempotency_key": "served-published-barrier-fork"}, &fork)
+				"idempotency_key": "served-published-barrier-fork"}, &fork)
 			// The handoff ACK follows selected execution; ordinary final-consumer
 			// progress remains independently checked below.
 			if fork.SourceRunID != seed.RunID || fork.ForkRunID == seed.RunID || fork.ForkRunID == "" ||
@@ -157,7 +157,7 @@ func issue642RequireServedBarrierGrandchild(t *testing.T, rt issue2564ServedFixt
 		t.Fatal(err)
 	}
 	grandchild := requireSelectedForkExecutionRPCResult(t, rt.Endpoint, map[string]any{"source_run_id": parent.ForkRunID, "fork_event_id": inherited.EventID,
-		"allow_source_freeze": true, "idempotency_key": "served-published-barrier-grandchild"})
+		"idempotency_key": "served-published-barrier-grandchild"})
 	if grandchild.SourceRunID != parent.ForkRunID || grandchild.ForkRunID == "" || grandchild.ForkRunID == parent.ForkRunID || grandchild.ForkRunID == parent.SourceRunID ||
 		grandchild.ForkEventID != inherited.EventID || grandchild.ForkRevision != plan.ForkPoint.Revision || grandchild.ForkRunStatus != "live" ||
 		grandchild.Owner != runfork.RunForkSelectedContractExecutionOwner || grandchild.ExecutedEventCount != 1 {

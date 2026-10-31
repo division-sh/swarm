@@ -16,7 +16,7 @@ import (
 	"github.com/division-sh/swarm/internal/runtime/deliverylifecycle"
 	"github.com/division-sh/swarm/internal/runtime/pipeline"
 	"github.com/division-sh/swarm/internal/runtime/runfork"
-	"github.com/division-sh/swarm/internal/runtime/runforkexecution"
+	"github.com/division-sh/swarm/internal/runtime/runlifecycle"
 	"github.com/google/uuid"
 )
 
@@ -69,12 +69,8 @@ func newOrdinaryForkPredecessorFixtureForReceiver(t *testing.T, backend string, 
 	if err != nil {
 		t.Fatal(err)
 	}
-	activation, err := f.store.(runForkSelectedLifecycleStore).ActivateRunFork(f.ctx, runfork.RunForkActivateRequest{
-		ForkRunID: child.ForkRunID, AllowSourceFreeze: true, OriginalLoopCarriage: originalCarriageForRun(t, f.store, runID),
-		HistoricalReplayExecutionAdmitter: runforkexecution.HistoricalReplayExecutionAdmitter{},
-	})
-	if err != nil || !activation.Activated || !activation.SourceFrozen || activation.SourceRunID != runID {
-		t.Fatalf("activate ordinary historical receiver: %+v %v", activation, err)
+	if _, err := f.store.(runlifecycle.OperationOwner).TransitionActiveRun(f.ctx, runlifecycle.ActiveTransitionRequest{RunID: child.ForkRunID, State: runlifecycle.StateRunning}); err != nil {
+		t.Fatalf("resume materialized historical receiver: %v", err)
 	}
 	projected, err := runfork.ProjectEntityOwnership(runID, child.ForkRunID, plan.Identity.EntityID, plan.Identity.InstancePath)
 	if err != nil {

@@ -87,7 +87,7 @@ func TestRunOperationalStatusProjectsEveryInstanceWithoutChangingRunClock(t *tes
 }
 
 func TestRunOperationalStatusNeverInventsFinalCompletionOrOrigin(t *testing.T) {
-	for _, status := range []string{"running", "paused", "completed", "failed", "cancelled", "forked"} {
+	for _, status := range []string{"running", "paused", "completed", "failed", "cancelled"} {
 		t.Run(status, func(t *testing.T) {
 			got := ProjectRunOperationalStatus(RunDebugReport{RunTableStatus: status, OperationalFacts: &RunOperationalFacts{
 				Complete: true, Instances: []RunInstanceFacts{{FlowInstance: "work/a", Complete: true, Final: true}},

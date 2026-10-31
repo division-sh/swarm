@@ -24,7 +24,7 @@ import (
 	"github.com/division-sh/swarm/internal/runtime/fanoutobligation"
 	"github.com/division-sh/swarm/internal/runtime/pipeline"
 	"github.com/division-sh/swarm/internal/runtime/runfork"
-	"github.com/division-sh/swarm/internal/runtime/runforkexecution"
+	"github.com/division-sh/swarm/internal/runtime/runlifecycle"
 	"github.com/division-sh/swarm/internal/runtime/semanticview"
 	"github.com/division-sh/swarm/internal/runtime/testfixtures/canonicalrouting"
 	"github.com/division-sh/swarm/internal/store/internal/backend/eventrecord"
@@ -102,9 +102,8 @@ func seedOperatorSnapshotInheritedOrdinal(t *testing.T, f operatorSnapshotFixtur
 	if err != nil {
 		t.Fatal(err)
 	}
-	activation, err := forkOwner.ActivateRunFork(ctx, runfork.RunForkActivateRequest{ForkRunID: child.ForkRunID, AllowSourceFreeze: true, OriginalLoopCarriage: original, HistoricalReplayExecutionAdmitter: runforkexecution.HistoricalReplayExecutionAdmitter{}})
-	if err != nil || !activation.Activated || !activation.SourceFrozen {
-		t.Fatalf("ordinary fork activation: %+v err=%v", activation, err)
+	if _, err := f.store.(runlifecycle.OperationOwner).TransitionActiveRun(ctx, runlifecycle.ActiveTransitionRequest{RunID: child.ForkRunID, State: runlifecycle.StateRunning}); err != nil {
+		t.Fatalf("resume materialized ordinal fixture: %v", err)
 	}
 	key := fanoutobligation.IntentKey{RunID: child.ForkRunID, ElementRef: intent.Key.ElementRef}
 	if err := f.db.QueryRowContext(ctx, `SELECT triggering_delivery_id FROM fan_out_intents WHERE run_id=$1`, child.ForkRunID).Scan(&key.TriggeringDeliveryID); err != nil {

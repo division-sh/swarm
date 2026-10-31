@@ -109,14 +109,14 @@ func verifyUnpublishedTransferredBarrierRefork(t *testing.T, latePublication boo
 				t.Fatal(err)
 			}
 			request := runforkexecution.SelectedContractExecutionRequest{SourceRunID: ancestor, At: original.id,
-				AllowSourceFreeze: true, ExpectedBundleHash: rt.Options.SourceArtifactFact.BundleHash(),
-				SourceLoader:      runforkexecution.SourceArtifactSelectedContractSourceLoader{RepoRoot: repo, Store: selected.SourceArtifactStore()},
-				ContractSelection: runforkadmission.SelectedContractSelection(semanticview.Wrap(bundle)),
-				AgentRuntime:      runforkexecution.SelectedContractAgentRuntimeOptions{ProcessCapability: capability, ExecutionPosture: rt.ExecutionPosture}}
+				ExpectedBundleHash: rt.Options.SourceArtifactFact.BundleHash(),
+				SourceLoader:       runforkexecution.SourceArtifactSelectedContractSourceLoader{RepoRoot: repo, Store: selected.SourceArtifactStore()},
+				ContractSelection:  runforkadmission.SelectedContractSelection(semanticview.Wrap(bundle)),
+				AgentRuntime:       runforkexecution.SelectedContractAgentRuntimeOptions{ProcessCapability: capability, ExecutionPosture: rt.ExecutionPosture}}
 			request.ForkOperation = &runfork.ForkOperationRequest{
 				OperationID: uuid.NewString(), Actor: "pending-barrier-parent", IdempotencyKey: "ancestor-cut",
 				TransportHash: "sha256:pending-barrier-parent", SourceRunID: ancestor, ForkEventID: original.id,
-				TargetBundleHash: rt.Options.SourceArtifactFact.BundleHash(), ContractSelection: request.ContractSelection, AllowSourceFreeze: true,
+				TargetBundleHash: rt.Options.SourceArtifactFact.BundleHash(), ContractSelection: request.ContractSelection,
 				TargetRootReference: rooted.Admission().Reference(),
 			}
 			request = forkEngineLiveRequest(t, rt, selected, request)
@@ -179,7 +179,7 @@ func verifyUnpublishedTransferredBarrierRefork(t *testing.T, latePublication boo
 			request.SourceRunID, request.At, request.AtStart = parent.ForkRunID, "", true
 			request.ForkOperation = &runfork.ForkOperationRequest{OperationID: uuid.NewString(), Actor: "pending-barrier-refork", IdempotencyKey: "parent-start",
 				TransportHash: "pending-barrier-refork-transport", SourceRunID: parent.ForkRunID, AtStart: true,
-				TargetBundleHash: rt.Options.SourceArtifactFact.BundleHash(), TargetRootReference: rooted.Admission().Reference(), AllowSourceFreeze: true, ContractSelection: request.ContractSelection}
+				TargetBundleHash: rt.Options.SourceArtifactFact.BundleHash(), TargetRootReference: rooted.Admission().Reference(), ContractSelection: request.ContractSelection}
 			request.AgentRuntime.AgentManagerOptions = manager.AgentManagerOptions{TestLifecycleProbe: childProbe}
 			if childProbe.resume != nil {
 				acknowledged := make(chan forkEngineAcknowledgment, 1)

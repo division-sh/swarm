@@ -21,72 +21,13 @@ import (
 	runtimeidentity "github.com/division-sh/swarm/internal/runtime/core/identity"
 	runtimecorrelation "github.com/division-sh/swarm/internal/runtime/correlation"
 	runtimepipeline "github.com/division-sh/swarm/internal/runtime/pipeline"
-	runtimerunlifecycle "github.com/division-sh/swarm/internal/runtime/runlifecycle"
+
 	"github.com/division-sh/swarm/internal/runtime/semanticview"
 	"github.com/division-sh/swarm/internal/runtime/testfixtures/canonicalrouting"
 	"github.com/division-sh/swarm/internal/testutil"
 	"github.com/division-sh/swarm/internal/testutil/sourceartifactfixture"
 	"github.com/google/uuid"
 )
-
-func TestForkedSourceCanonicalTargetOwnersExcludeAndPreserveReadbackBothStores(t *testing.T) {
-	for _, backend := range []string{"sqlite", "postgres"} {
-		t.Run(backend, func(t *testing.T) {
-			source := stateOnlyAcquisitionSourceWithMode(t, "freeze", runtimecontracts.FlowModeTemplate)
-			bundle, _ := semanticview.Bundle(source)
-			selected, _, ctx, runID := openStateOnlyAcquisitionStoreWithSource(t, backend, source)
-			childRunID := uuid.NewString()
-			requireRunningRunForTest(t, ctx, selected, childRunID, time.Now().UTC())
-			root := runtimeflowidentity.Stored(source, ".", runID, runID, "", "")
-			constructHistoricalSourceFixture(t, ctx, selected.(agentFixtureFlowStore), runtimepipeline.FlowInstanceActivationRequest{ContractBundle: source, Instance: root, OccurredAt: time.Now().UTC()})
-			child, err := runtimeflowidentity.KeyedChild(source, root, "freeze", "instance")
-			if err != nil {
-				t.Fatal(err)
-			}
-			child.EntityID = uuid.NewString()
-			created := time.Now().UTC()
-			constructHistoricalSourceFixture(t, ctx, selected.(agentFixtureFlowStore), runtimepipeline.FlowInstanceActivationRequest{
-				ContractBundle: source, Instance: child, OccurredAt: created,
-				ConstructorInput: "test.node_emitted.upserter", ResolvedKey: "source",
-				TriggerEvent: eventtest.ExistingRunRootIngress(uuid.NewString(), "test.node_emitted.upserter", "fixture", "", []byte(`{"account_id":"source","instance_key":"source"}`), 0, runID, events.EventEnvelope{}, created),
-			})
-			fact := sourceartifactfixture.FactFor(bundle.SourceArtifact)
-			exact := runtimeflowidentity.RunScopedFlowInstance{RunID: runID, Route: child.Route()}
-			lookup, err := runtimepipeline.NewExactFlowInstanceLookup(source, fact, exact)
-			if err != nil {
-				t.Fatal(err)
-			}
-			before, found, err := selected.LookupFlowInstance(ctx, lookup)
-			if err != nil || !found || before.Identity() != child || before.RunState() != runtimerunlifecycle.StateRunning {
-				t.Fatalf("canonical owners before freeze = %#v, %v", before, err)
-			}
-			if err := before.ValidateSelection(lookup); err != nil {
-				t.Fatal(err)
-			}
-			original, err := selected.LoadWorkflowTargetPersistence(ctx, exact, runtimeidentity.NormalizeEntityID(child.EntityID))
-			if err != nil || original.Presence != runtimepipeline.WorkflowTargetPersistenceComplete {
-				t.Fatalf("initial constructed target = %#v, %v", original, err)
-			}
-			snapshot, disposition, err := selected.ForkRunSource(ctx, runtimerunlifecycle.ForkSourceRequest{
-				RunID: runID, ContinuedAsRunID: childRunID, EndedAt: time.Now().UTC(),
-			})
-			if err != nil || disposition != runtimerunlifecycle.MutationApplied || snapshot.State != runtimerunlifecycle.StateForked {
-				t.Fatalf("freeze = %#v, %v, %v", snapshot, disposition, err)
-			}
-			after, found, err := selected.LookupFlowInstance(ctx, lookup)
-			if err != nil || !found || after.Identity() != child || after.RunState() != runtimerunlifecycle.StateForked {
-				t.Fatalf("freeze erased stored ownership = %#v, found=%t, %v", after, found, err)
-			}
-			if readiness, present := after.Readiness(); !present || readiness.Eligible() {
-				t.Fatalf("forked source remained executable: %+v present=%t", readiness, present)
-			}
-			record, err := selected.LoadWorkflowTargetPersistence(ctx, exact, runtimeidentity.NormalizeEntityID(child.EntityID))
-			if err != nil || !reflect.DeepEqual(original, record) || record.State.EntityID != child.EntityID || len(record.State.Fields) == 0 || record.State.CreatedAt.IsZero() || record.State.UpdatedAt.IsZero() {
-				t.Fatalf("frozen source must preserve historical header/data without active ownership = %#v, %v", record, err)
-			}
-		})
-	}
-}
 
 func TestEventBusCompositionOwnerExactConnectedReceiverBothStores(t *testing.T) {
 	scopes := []struct {

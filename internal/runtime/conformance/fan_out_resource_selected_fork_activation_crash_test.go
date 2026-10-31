@@ -48,7 +48,7 @@ func TestDeploymentSourceQuiescedBeforeActivationCrashBothStores(t *testing.T) {
 			key := uuid.NewString()
 			params := map[string]any{
 				"source_run_id": sourceRunID, "bundle_hash": f.runtime.sourceArtifactFact.BundleHash(),
-				"allow_source_freeze": true, "idempotency_key": key,
+				"idempotency_key": key,
 			}
 			forkCtx, cancelFork := context.WithTimeout(f.ctx, 15*time.Second)
 			defer cancelFork()

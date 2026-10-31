@@ -179,7 +179,7 @@ func TestSelectedForkReceiverEffectOnlyFailureSettlementBothStores(t *testing.T)
 				forkOptions.AgentManagerOptions = runtimemanager.AgentManagerOptions{TestLifecycleProbe: barrier}
 				targetBundle := loadWorkflowValidationBundleAt(t, root)
 				request := runforkexecution.SelectedContractExecutionRequest{
-					SourceRunID: seed.RunID, At: frontier, AllowSourceFreeze: true, ExpectedBundleHash: rt.BundleHash,
+					SourceRunID: seed.RunID, At: frontier, ExpectedBundleHash: rt.BundleHash,
 					SourceLoader: runforkexecution.SourceArtifactSelectedContractSourceLoader{
 						RepoRoot: repoRootForTest(), Store: selected.SourceArtifactStore(),
 					},
@@ -207,7 +207,7 @@ func TestSelectedForkReceiverEffectOnlyFailureSettlementBothStores(t *testing.T)
 				request.ForkOperation = &runfork.ForkOperationRequest{
 					OperationID: uuid.NewString(), Actor: "receiver-settlement", IdempotencyKey: name, TransportHash: name,
 					SourceRunID: request.SourceRunID, ForkEventID: request.At, TargetBundleHash: request.ExpectedBundleHash,
-					TargetRootReference: rootedTarget.Admission().Reference(), ContractSelection: request.ContractSelection, AllowSourceFreeze: request.AllowSourceFreeze,
+					TargetRootReference: rootedTarget.Admission().Reference(), ContractSelection: request.ContractSelection,
 				}
 				var execution runforkexecution.SelectedContractExecutionResult
 				var executionErr error

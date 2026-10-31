@@ -67,7 +67,6 @@ func TestSelectedFiniteFeedRecoveryAdmitsOnlyExactDurableOperation(t *testing.T)
 		{"supplied_pin", SelectedContractExecutionRequest{DataPinOverrides: []durabledata.ExplicitPin{{Declaration: recovered.Continuation.Pins[0].Declaration, VersionID: recovered.Continuation.Pins[0].VersionID}}}},
 		{"matching_selection_is_not_caller_authority", SelectedContractExecutionRequest{ContractSelection: entry.Binding.ContractSelection}},
 		{"conflicting_selection", SelectedContractExecutionRequest{ContractSelection: runfork.RunForkContractSelection{Mode: runfork.RunForkContractSelectionModeBundleHash, BundleHash: entry.BundleHash}}},
-		{"source_freeze", SelectedContractExecutionRequest{AllowSourceFreeze: true}},
 		{"matching_source_fact_is_not_caller_authority", SelectedContractExecutionRequest{SourceArtifactFact: fact}},
 		{"effective_source_identity", SelectedContractExecutionRequest{EffectiveSourceIdentity: identity}},
 		{"recovery_override", SelectedContractExecutionRequest{Recovery: &recovered}},

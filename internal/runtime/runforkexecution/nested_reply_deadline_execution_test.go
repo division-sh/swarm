@@ -591,12 +591,12 @@ func proveSelectedNestedDeadlines(t *testing.T, refusals bool, restartVariant st
 			options.AgentManagerOptions.TestLifecycleProbe = childHold
 			operation := &runfork.ForkOperationRequest{OperationID: uuid.NewString(), Actor: "nested-deadline-proof", IdempotencyKey: uuid.NewString(),
 				TransportHash: "nested-deadline-proof", SourceRunID: runID, ForkEventID: cut, TargetBundleHash: loaded.SourceArtifactFact.BundleHash(),
-				TargetRootReference: loaded.RootedSource.Admission().Reference(), ContractSelection: selection, AllowSourceFreeze: true}
+				TargetRootReference: loaded.RootedSource.Admission().Reference(), ContractSelection: selection}
 			var initialOperation *runfork.ForkOperationRequest
 			if restartVariant != "context_only" {
 				initialOperation = operation
 			}
-			prepared, err := owner.Prepare(ctx, SelectedContractExecutionRequest{SourceRunID: runID, At: cut, AllowSourceFreeze: true,
+			prepared, err := owner.Prepare(ctx, SelectedContractExecutionRequest{SourceRunID: runID, At: cut,
 				SourceLoader: loader, ContractSelection: selection, AgentRuntime: options, ForkOperation: initialOperation})
 			if err != nil {
 				t.Fatal(err)

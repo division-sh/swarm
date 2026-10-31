@@ -98,7 +98,7 @@ func TestPackPlatformRetainedSourceExecutesSelectedForkBothStores(t *testing.T) 
 				cleanupLoadedSelectedContractSource(retained)
 			}
 			result, err := q1ExecuteSelectedPhaseComponent(t, ctx, SelectedContractExecutionRequest{
-				SourceRunID: sourceRun, At: eventID, AllowSourceFreeze: true, Owner: owner, SourceLoader: loader,
+				SourceRunID: sourceRun, At: eventID, Owner: owner, SourceLoader: loader,
 				SourceArtifactFact: loaded.SourceArtifactFact,
 				ContractSelection:  runforkadmission.SelectedContractSelection(loaded.Source),
 				AgentRuntime:       SelectedContractAgentRuntimeOptions{ExecutionPosture: executionposture.MockOnly, ProcessCapability: capability},

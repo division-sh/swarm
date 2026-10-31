@@ -37,7 +37,7 @@ func TestIssue642EventlessEmptyStartCompletesWithoutInventedIngressBothStores(t 
 				t.Fatal(err)
 			}
 			owner, _ := deploymentForkOwner(t, f)
-			params := map[string]any{"source_run_id": source, "at_start": true, "bundle_hash": f.runtime.sourceArtifactFact.BundleHash(), "allow_source_freeze": true, "idempotency_key": uuid.NewString()}
+			params := map[string]any{"source_run_id": source, "at_start": true, "bundle_hash": f.runtime.sourceArtifactFact.BundleHash(), "idempotency_key": uuid.NewString()}
 			server := deploymentForkServer(t, f, owner)
 			result, rpcErr := deploymentForkRPC(t, f.ctx, server, params)
 			if len(rpcErr) != 0 || result.ForkRunID == "" || result.ForkPointKind != string(runfork.RunForkPointRunStart) || result.ForkRevision != 1 || result.ForkEventID != "" || result.ExecutedEventCount != 0 || len(result.DataPins) != 1 {

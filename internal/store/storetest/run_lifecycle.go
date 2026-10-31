@@ -133,9 +133,6 @@ func MaterializeRun(
 	if fixture.State == runtimerunlifecycle.StateLive && fixture.LiveScope.Empty() {
 		return fmt.Errorf("live run fixture requires its exact flow scope")
 	}
-	if fixture.State == runtimerunlifecycle.StateForked {
-		return fmt.Errorf("semantic run fixture must use the named fork operation")
-	}
 	bundleHash := fixture.BundleHash
 	if fixture.Artifact != nil {
 		if bundleHash != "" && strings.TrimSpace(bundleHash) != fixture.Artifact.BundleHash() {
@@ -424,17 +421,6 @@ func TransitionRun(
 		return "", fmt.Errorf("semantic fixture active transition requires mutation owner")
 	}
 	return runner.TransitionActiveRun(ctx, request)
-}
-
-func ForkRun(
-	ctx context.Context,
-	runner RunFixtureStore,
-	request runtimerunlifecycle.ForkSourceRequest,
-) (runtimerunlifecycle.Snapshot, runtimerunlifecycle.MutationDisposition, error) {
-	if runner == nil {
-		return runtimerunlifecycle.Snapshot{}, "", fmt.Errorf("semantic fixture fork transition requires mutation owner")
-	}
-	return runner.ForkRunSource(ctx, request)
 }
 
 func ReviseRunSource(

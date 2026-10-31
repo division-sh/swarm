@@ -112,7 +112,7 @@ func TestIssue642SourceAndForkDecideOwnPendingEffectsBothStores(t *testing.T) {
 			}
 			selection := runforkadmission.SelectedContractSelection(loaded.Source)
 			component := q1StageBranchPointComponent(t, ctx, SelectedContractExecutionRequest{SourceRunID: sourceRun, AtStart: true,
-				AllowSourceFreeze: true, Owner: owner, SourceLoader: loader, ContractSelection: selection,
+				Owner: owner, SourceLoader: loader, ContractSelection: selection,
 				AgentRuntime:  SelectedContractAgentRuntimeOptions{ExecutionPosture: executionposture.Live, ProcessCapability: owner.ports.contexts.capability},
 				ForkOperation: pendingDecisionStartInvocation(sourceRun, loaded, selection)})
 			component.serveSelectedControls(t)

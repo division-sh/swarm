@@ -2,7 +2,7 @@ package runtimepersistence
 
 import (
 	"context"
-	"fmt"
+
 	"reflect"
 	"strings"
 	"testing"
@@ -10,8 +10,7 @@ import (
 
 	"github.com/division-sh/swarm/internal/events"
 	"github.com/division-sh/swarm/internal/events/eventtest"
-	runtimepkg "github.com/division-sh/swarm/internal/runtime"
-	"github.com/division-sh/swarm/internal/runtime/authoractivity"
+
 	"github.com/division-sh/swarm/internal/runtime/decisioncard"
 	"github.com/division-sh/swarm/internal/runtime/deliverylifecycle"
 	"github.com/division-sh/swarm/internal/runtime/failures"
@@ -23,14 +22,13 @@ import (
 
 func TestForkSourceDeliveryEffectMatrixBothStores(t *testing.T) {
 	for _, backend := range eventRecordContractBackends() {
-		for _, state := range []runlifecycle.State{runlifecycle.StateForked, runlifecycle.StateFailed, runlifecycle.StateCancelled} {
+		for _, state := range []runlifecycle.State{runlifecycle.StateFailed, runlifecycle.StateCancelled} {
 			t.Run(backend.name+"/"+string(state), func(t *testing.T) {
 				fixture := backend.open(t)
 				ctx := testAuthorActivityContext()
 				ctx = originalStoreFixtureContext(t, ctx, fixture.store)
-				runID, childID := uuid.NewString(), uuid.NewString()
+				runID := uuid.NewString()
 				seedAuthorActivityReceiptRun(t, fixture, ctx, runID)
-				seedAuthorActivityReceiptRun(t, fixture, ctx, childID)
 				store := fixture.store.(interface {
 					deliverylifecycle.Store
 					runlifecycle.OperationOwner
@@ -46,7 +44,6 @@ func TestForkSourceDeliveryEffectMatrixBothStores(t *testing.T) {
 					t.Fatal(err)
 				}
 				beforeDeliveries := map[string]deliverylifecycle.Snapshot{}
-				sourceEvents := map[string]events.Event{}
 				for _, deliveryState := range []deliverylifecycle.State{deliverylifecycle.StateQueued, deliverylifecycle.StateRetrying, deliverylifecycle.StateDelivered, deliverylifecycle.StateExhausted} {
 					event := eventtest.ExistingRunRootIngress(uuid.NewString(), "freeze.delivery", "test", "", []byte(`{}`), 0, runID, events.EventEnvelope{}, time.Now().UTC())
 					if err := insertCanonicalEventRecordFixture(ctx, fixture.store, event); err != nil {
@@ -55,13 +52,9 @@ func TestForkSourceDeliveryEffectMatrixBothStores(t *testing.T) {
 					failure := testFailureEnvelope(failures.ClassRetryExhausted, "fixture_failure", nil)
 					snapshot := seedDeliveryStateFixture(t, ctx, store, event, events.DeliveryRoute{Recipient: events.MustAgentDeliveryRecipient("freeze-" + string(deliveryState))}, deliveryState, &failure)
 					beforeDeliveries[snapshot.DeliveryID] = snapshot
-					sourceEvents[snapshot.DeliveryID] = event
 				}
-				before := snapshotForkHistoricalExecutionTables(t, fixture.db, backend.name == "postgres")
 				at := time.Now().UTC()
-				if state == runlifecycle.StateForked {
-					_, _, err = store.ForkRunSource(ctx, runlifecycle.ForkSourceRequest{RunID: runID, ContinuedAsRunID: childID, EndedAt: at})
-				} else {
+				{
 					request := runlifecycle.TerminalRequest{RunID: runID, State: state, EndedAt: at}
 					if state == runlifecycle.StateFailed {
 						failure := testFailureEnvelope(failures.ClassRetryExhausted, "run_failed", nil)
@@ -85,53 +78,13 @@ func TestForkSourceDeliveryEffectMatrixBothStores(t *testing.T) {
 					if err != nil {
 						t.Fatal(err)
 					}
-					if state == runlifecycle.StateForked || expected.Status == deliverylifecycle.StatusDelivered || expected.Status == deliverylifecycle.StatusDeadLetter {
+					if expected.Status == deliverylifecycle.StatusDelivered || expected.Status == deliverylifecycle.StatusDeadLetter {
 						if !reflect.DeepEqual(expected, got) {
 							t.Fatalf("terminal effect rewrote retained delivery %s: before=%+v after=%+v", id, expected, got)
 						}
 					} else if got.Status != deliverylifecycle.StatusDeadLetter || got.ReasonCode != "run_"+string(state) {
 						t.Fatalf("legitimate terminalization lost delivery effect: %+v", got)
 					}
-				}
-				if state != runlifecycle.StateForked {
-					return
-				}
-				after := snapshotForkHistoricalExecutionTables(t, fixture.db, backend.name == "postgres")
-				for _, table := range []string{"events", "event_deliveries", "dead_letters", "event_receipts"} {
-					if _, exists := before[table]; !exists {
-						t.Fatalf("missing history table %s", table)
-					}
-					if !reflect.DeepEqual(before[table], after[table]) {
-						t.Fatalf("freeze rewrote retained %s", table)
-					}
-				}
-				for id, snapshot := range beforeDeliveries {
-					if _, err := store.ClaimDelivery(ctx, snapshot.Authority, sourceEvents[id], snapshot.Route); err == nil {
-						t.Fatal("frozen source admitted delivery claim")
-					}
-					page, err := store.ScanDeliveryContinuations(ctx, snapshot.Authority, deliverylifecycle.ContinuationCursor{}, 200)
-					if err != nil {
-						t.Fatal(err)
-					}
-					for _, item := range page.Items {
-						if item.Snapshot.RunID == runID {
-							t.Fatal("recovery scan returned frozen source work")
-						}
-					}
-				}
-				summary, err := store.SummarizeRun(ctx, runID)
-				if err != nil || len(summary.ActiveDeliveryIDs) != 0 || summary.Pending != 1 || summary.RetryScheduled != 1 {
-					t.Fatalf("frozen source lost retained history or active-authority exclusion: %+v %v", summary, err)
-				}
-				_, disposition, err := store.ForkRunSource(ctx, runlifecycle.ForkSourceRequest{RunID: runID, ContinuedAsRunID: childID, EndedAt: at})
-				if err != nil || disposition != runlifecycle.MutationExactNoop {
-					t.Fatalf("exact freeze retry: %s %v", disposition, err)
-				}
-				if _, _, err := store.ForkRunSource(ctx, runlifecycle.ForkSourceRequest{RunID: runID, ContinuedAsRunID: uuid.NewString(), EndedAt: at}); err == nil {
-					t.Fatal("conflicting source pointer accepted")
-				}
-				if !reflect.DeepEqual(after, snapshotForkHistoricalExecutionTables(t, fixture.db, backend.name == "postgres")) {
-					t.Fatal("duplicate/conflicting freeze changed application facts")
 				}
 			})
 		}
@@ -161,87 +114,5 @@ func TestForkMaterializationLiveClaimRefusalBothStores(t *testing.T) {
 				t.Fatal("live-authority refusal mutated source or child")
 			}
 		})
-	}
-}
-
-func TestForkFreezeActivationDeliveryHistoryBothStores(t *testing.T) {
-	for _, backend := range eventRecordContractBackends() {
-		for _, selected := range []bool{false} {
-			for _, rollback := range []bool{false, true} {
-				for _, deliveryState := range []deliverylifecycle.State{deliverylifecycle.StateQueued, deliverylifecycle.StateDelivered} {
-					t.Run(fmt.Sprintf("%s/selected=%t/rollback=%t/%s", backend.name, selected, rollback, deliveryState), func(t *testing.T) {
-						f := newForkActivationFrontierFixture(t, backend, selected)
-						descriptors, err := runtimepkg.AuthorActivityEventDescriptors(f.source)
-						if err != nil {
-							t.Fatal(err)
-						}
-						scope, found := authoractivity.ScopeFromContext(f.ctx)
-						if !found {
-							t.Fatal("missing exact author scope")
-						}
-						catalog, err := f.store.(testAuthorActivityCatalogRegistrar).RegisterAuthorActivityEventCatalog(scope, descriptors)
-						if err != nil {
-							t.Fatal(err)
-						}
-						t.Cleanup(catalog.Release)
-						store := f.store.(deliverylifecycle.Store)
-						// Retained history predates the selected frontier. No post-frontier
-						// writer is allowed to turn this into the source-advanced branch.
-						event := eventtest.ExistingRunRootIngress(uuid.NewString(), "item.received", "freeze-test", "", []byte(`{}`), 0, f.runID, events.EventEnvelope{}, time.Now().UTC())
-						if err := insertCanonicalEventRecordFixture(f.ctx, f.store, event); err != nil {
-							t.Fatal(err)
-						}
-						snapshot := seedDeliveryStateFixture(t, f.ctx, store, event, events.DeliveryRoute{Recipient: events.MustAgentDeliveryRecipient("retained-agent")}, deliveryState, nil)
-						f.eventID = uuid.NewString()
-						point := eventtest.ExistingRunRootIngress(f.eventID, "item.received", "freeze-frontier", "", []byte(`{}`), 0, f.runID, events.EventEnvelope{}, time.Now().UTC())
-						if err := commitSemanticPipelineProcessedEventFixture(f.ctx, f.store, point); err != nil {
-							t.Fatal(err)
-						}
-						staged, _ := stageForkContentionFixture(t, f, selected)
-						if rollback {
-							query := fmt.Sprintf(`CREATE TRIGGER freeze_child_failure BEFORE UPDATE ON runs WHEN OLD.run_id='%s' AND NEW.status='running' BEGIN SELECT RAISE(ABORT, 'freeze_child_failure'); END`, staged.ForkRunID)
-							if backend.name == "postgres" {
-								query = fmt.Sprintf(`CREATE FUNCTION freeze_child_failure() RETURNS trigger LANGUAGE plpgsql AS $$ BEGIN RAISE EXCEPTION 'freeze_child_failure'; END $$; CREATE TRIGGER freeze_child_failure BEFORE UPDATE ON runs FOR EACH ROW WHEN (OLD.run_id='%s' AND NEW.status='running') EXECUTE FUNCTION freeze_child_failure()`, staged.ForkRunID)
-							}
-							if _, err := f.db.Exec(query); err != nil {
-								t.Fatal(err)
-							}
-						}
-						before := snapshotForkHistoricalExecutionTables(t, f.db, backend.name == "postgres")
-						var result runfork.RunForkActivation
-						admitter := &fakeRunForkHistoricalReplayExecutionAdmitter{work: func(r runfork.RunForkHistoricalReplayExecutionRequest) []runfork.RunForkHistoricalReplayExecutableWork {
-							var work []runfork.RunForkHistoricalReplayExecutableWork
-							for _, pending := range r.PendingWork {
-								if pending.SubscriberType == "agent" && pending.Status == "pending" {
-									work = append(work, runForkHistoricalReplayWorkFromPending(pending))
-								}
-							}
-							return work
-						}}
-						result, err = f.store.ActivateRunFork(f.ctx, runfork.RunForkActivateRequest{ForkRunID: staged.ForkRunID, AllowSourceFreeze: true, HistoricalReplayExecutionAdmitter: admitter, OriginalLoopCarriage: originalCarriageForRun(t, f.store.(selectedActivityProjectionStore), f.runID)})
-						if rollback {
-							if err == nil || !strings.Contains(err.Error(), "freeze_child_failure") {
-								t.Fatalf("wrong rollback frontier: %v", err)
-							}
-							if !reflect.DeepEqual(before, snapshotForkHistoricalExecutionTables(t, f.db, backend.name == "postgres")) {
-								t.Fatal("child activation failure left partial source/decision/history changes")
-							}
-							return
-						}
-						if err != nil || !result.Activated || !result.SourceFrozen || result.SourceAdvancedAfterFork {
-							t.Fatalf("activation did not freeze unadvanced source: %+v %v", result, err)
-						}
-						var headers int
-						if err := f.db.QueryRowContext(f.ctx, `SELECT COUNT(*) FROM flow_instances WHERE run_id=$1`, staged.ForkRunID).Scan(&headers); err != nil || headers == 0 || result.MaterializedEntityCount != headers {
-							t.Fatalf("activated constructed inventory: result=%d headers=%d err=%v", result.MaterializedEntityCount, headers, err)
-						}
-						got, err := store.Snapshot(f.ctx, snapshot.DeliveryID)
-						if err != nil || !reflect.DeepEqual(snapshot, got) {
-							t.Fatalf("activation rewrote retained source history: %+v %v", got, err)
-						}
-					})
-				}
-			}
-		}
 	}
 }

@@ -298,7 +298,7 @@ func TestChannelSourceLifecyclePublicJourney(t *testing.T) {
 						"event_name": "work.requested", "run_id": seed.RunID, "source_event_id": seed.EventID,
 						"payload": map[string]any{"seed": true}, "idempotency_key": uuid.NewString(),
 					})
-					params := map[string]any{"source_run_id": seed.RunID, "fork_event_id": frontier.EventID, "allow_source_freeze": true, "idempotency_key": uuid.NewString()}
+					params := map[string]any{"source_run_id": seed.RunID, "fork_event_id": frontier.EventID, "idempotency_key": uuid.NewString()}
 					var fork apiv1.RunForkExecutionResult
 					response := requestServedJSONRPC(t, h.rpcEndpoint(), "run.fork", params)
 					if response.Error != nil {
@@ -509,7 +509,7 @@ func runRegisteredCLISourceLifecycle(t *testing.T, h *channelOnboardingE2EHarnes
 			"event_name": "work.requested", "run_id": seed.RunID, "source_event_id": seed.EventID, "payload": map[string]any{"seed": true}, "idempotency_key": "cli-source-frontier",
 		})
 		var fork apiv1.RunForkExecutionResult
-		requireServedJSONRPCResult(t, h.rpcEndpoint(), "run.fork", map[string]any{"source_run_id": seed.RunID, "fork_event_id": frontier.EventID, "allow_source_freeze": true, "idempotency_key": "cli-source-fork"}, &fork)
+		requireServedJSONRPCResult(t, h.rpcEndpoint(), "run.fork", map[string]any{"source_run_id": seed.RunID, "fork_event_id": frontier.EventID, "idempotency_key": "cli-source-fork"}, &fork)
 		waitServedSelectedForkFrontier(t, receiverReader, deliveryReader, fork.ForkRunID, frontier.EventID)
 		child := waitChannelPublicCard(t, h, fork.ForkRunID, decisioncard.AnchorKindStageGate, "chat/reviews")
 		if fork.ForkRunID == seed.RunID || child == card {

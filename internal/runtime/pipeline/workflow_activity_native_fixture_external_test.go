@@ -322,14 +322,6 @@ func TestHumanTaskExpiryAcknowledgementControlsPublicationEffects(t *testing.T) 
 	verifyNativeActivityBothStores(t, pipeline.VerifyHumanTaskExpiryAcknowledgementControlsPublicationEffectsForTest)
 }
 
-func TestForkedSourceWorkflowInstanceMutationsRefuseAndPreserveReadback(t *testing.T) {
-	pipeline.VerifyForkedSourceWorkflowInstanceMutationsRefuseAndPreserveReadbackForTest(t, workflowActivityNativeFixture)
-}
-
-func TestForkedSourceActivityAttemptMutationsRefuseAndPreserveJournal(t *testing.T) {
-	pipeline.VerifyForkedSourceActivityAttemptMutationsRefuseAndPreserveJournalForTest(t, workflowActivityNativeFixture)
-}
-
 func TestReceiverConfigAndRuntimeControlsRoundTripBothStores(t *testing.T) {
 	pipeline.VerifyReceiverConfigAndRuntimeControlsRoundTripBothStoresForTest(t, workflowActivityNativeFixture)
 }
