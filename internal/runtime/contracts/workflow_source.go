@@ -12,7 +12,7 @@ type FlowSource struct {
 	FlowPath  string
 	Schema    string
 	Types     string
-	Entities  string
+	State     string
 	Nodes     string
 	Events    string
 	Agents    string
@@ -45,7 +45,7 @@ func indexFlowSources(artifact *sourceartifact.AdmittedSourceArtifact) (map[stri
 			return
 		}
 		source := FlowSource{FlowPath: node.Path(), Resources: map[string][]string{}}
-		for _, fileName := range []string{"schema.yaml", "types.yaml", "entities.yaml", "nodes.yaml", "events.yaml", "agents.yaml", "tools.yaml", "policy.yaml", "rules.yaml"} {
+		for _, fileName := range []string{"schema.yaml", "types.yaml", "state.yaml", "nodes.yaml", "events.yaml", "agents.yaml", "tools.yaml", "policy.yaml", "rules.yaml"} {
 			label, ok := node.Declaration(fileName)
 			if !ok {
 				continue
@@ -55,8 +55,8 @@ func indexFlowSources(artifact *sourceartifact.AdmittedSourceArtifact) (map[stri
 				source.Schema = label
 			case "types.yaml":
 				source.Types = label
-			case "entities.yaml":
-				source.Entities = label
+			case "state.yaml":
+				source.State = label
 			case "nodes.yaml":
 				source.Nodes = label
 			case "events.yaml":

@@ -18,7 +18,7 @@ pins:
   outputs:
     - ack
 `)
-	writeClosedVariantFile(t, root, "entities.yaml", "work:\n  marker: text\n")
+	writeClosedVariantFile(t, root, "state.yaml", "marker: text\n")
 	writeClosedVariantFile(t, root, "events.yaml", `seed:
 select:
 selected:
@@ -38,14 +38,14 @@ select:
   subscribes_to: [select]
   event_handlers:
     select:
-      guard: {check: has(entity.marker)}
+      guard: {check: has(state.marker)}
       rules:
-        - when: entity.marker == 'first'
+        - when: state.marker == 'first'
           emit: {event: selected, fields: {marker: "first"}}
-        - when: entity.marker == 'second'
+        - when: state.marker == 'second'
           emit: {event: selected, fields: {marker: "second"}}
       data_accumulation:
-        writes: [{target_field: marker, value: entity.marker}]
+        writes: [{target_field: marker, value: state.marker}]
 final:
   execution_type: system_node
   subscribes_to: [selected]

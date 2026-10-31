@@ -318,7 +318,7 @@ func TestExecutor_CELGuardEvaluatesAgainstEntityState(t *testing.T) {
 			MutationOwner: stubMutationOwner{},
 			Locker:        stubLocker{},
 		}, stubEvaluator{bools: map[string]bool{
-			"entity.score >= 75": allowed,
+			"state.score >= 75": allowed,
 		}})
 		if err != nil {
 			t.Fatalf("NewExecutor error: %v", err)
@@ -332,7 +332,7 @@ func TestExecutor_CELGuardEvaluatesAgainstEntityState(t *testing.T) {
 		Event:    eventtest.RunCreatingRootIngress("evt-1", "task.completed", "", "", nil, 0, "", "", events.EventEnvelope{}, time.Now().UTC()),
 		Handler: runtimecontracts.SystemNodeEventHandler{
 			Guard: &runtimecontracts.GuardSpec{
-				Check:  "entity.score >= 75",
+				Check:  "state.score >= 75",
 				OnFail: "reject",
 			},
 			AdvancesTo: "approved",
@@ -351,7 +351,7 @@ func TestExecutor_CELGuardEvaluatesAgainstEntityState(t *testing.T) {
 		Event:    eventtest.RunCreatingRootIngress("evt-2", "task.completed", "", "", nil, 0, "", "", events.EventEnvelope{}, time.Now().UTC()),
 		Handler: runtimecontracts.SystemNodeEventHandler{
 			Guard: &runtimecontracts.GuardSpec{
-				Check:  "entity.score >= 75",
+				Check:  "state.score >= 75",
 				OnFail: "reject",
 			},
 			AdvancesTo: "approved",
@@ -379,7 +379,7 @@ func mustEncodeJSON(t *testing.T, value any) []byte {
 
 func TestExecutor_OnCompleteRuleComputeAppliesValue(t *testing.T) {
 	source := semanticview.Wrap(&runtimecontracts.WorkflowContractBundle{
-		RootEntities: runtimecontracts.EntityContractsDocument{"subject": {Fields: map[string]runtimecontracts.EntityFieldDecl{"composite": {Type: "number"}}}},
+		RootEntities: runtimecontracts.EntityContractsDocument{"state": {Fields: map[string]runtimecontracts.EntityFieldDecl{"composite": {Type: "number"}}}},
 	})
 	repo := &persistentStateRepo{
 		found: true,
@@ -412,7 +412,7 @@ func TestExecutor_OnCompleteRuleComputeAppliesValue(t *testing.T) {
 				AdvancesTo: "passed",
 				Compute: &runtimecontracts.ComputeSpec{
 					Operation:   runtimecontracts.ComputeOpWeightedAverage,
-					StoreAs:     "entity.composite",
+					StoreAs:     "state.composite",
 					ValueField:  "score",
 					WeightField: "weight",
 				},
@@ -448,7 +448,7 @@ func TestExecutor_OnCompleteRuleComputeAppliesValue(t *testing.T) {
 
 func TestExecutor_AccumulationDuplicateStopsBeforeDownstreamEffects(t *testing.T) {
 	source := mustCompileEngineSource(&runtimecontracts.WorkflowContractBundle{
-		RootEntities: runtimecontracts.EntityContractsDocument{"subject": {Fields: map[string]runtimecontracts.EntityFieldDecl{"marker": {Type: "text"}}}},
+		RootEntities: runtimecontracts.EntityContractsDocument{"state": {Fields: map[string]runtimecontracts.EntityFieldDecl{"marker": {Type: "text"}}}},
 		Events: map[string]runtimecontracts.EventCatalogEntry{"task.completed": requiredEventPayload(map[string]runtimecontracts.EventFieldSpec{
 			"item_id": {Type: "text"}, "marker": {Type: "text"},
 		})},

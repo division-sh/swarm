@@ -42,14 +42,6 @@ func TestExecuteNodeContractHandlerCreateEntityPersistsNonValidationChildFlowIde
 	}
 }
 
-func TestExecuteNodeContractHandlerCreateEntityAllowsLaterClearOfSchemaInitialValue(t *testing.T) {
-	for _, backend := range []string{"sqlite", "postgres"} {
-		t.Run(backend, func(t *testing.T) {
-			pipeline.VerifyNativeExecuteNodeContractHandlerCreateEntityAllowsLaterClearOfSchemaInitialValueForTest(t, backend, pipelineDeliveryNativeFixture)
-		})
-	}
-}
-
 func TestExecuteNodeContractHandlerPublishesAfterPersistencePrerequisiteFieldSucceeds(t *testing.T) {
 	for _, backend := range []string{"sqlite", "postgres"} {
 		t.Run(backend, func(t *testing.T) {

@@ -676,10 +676,10 @@ func ValidateFanOutItemsSource(spec FanOutSpec) (paths.Path, error) {
 		return paths.Path{}, fmt.Errorf("fan_out.items_from is required")
 	}
 	if !path.HasExplicitRoot() {
-		return paths.Path{}, fmt.Errorf("fan_out.items_from %q must use an explicit payload.* or entity.* root", raw)
+		return paths.Path{}, fmt.Errorf("fan_out.items_from %q must use an explicit payload.* or state.* root", raw)
 	}
 	if path.Root != paths.RootPayload && path.Root != paths.RootEntity {
-		return paths.Path{}, fmt.Errorf("fan_out.items_from %q must read a declared payload.* or entity.* collection", raw)
+		return paths.Path{}, fmt.Errorf("fan_out.items_from %q must read a declared payload.* or state.* collection", raw)
 	}
 	if len(path.Segments) != 1 || strings.TrimSpace(path.Segments[0]) == "" {
 		return paths.Path{}, fmt.Errorf("fan_out.items_from %q must reference exactly one declared top-level collection field", raw)
@@ -706,7 +706,7 @@ func ValidateFanOutAlias(alias string) error {
 		return fmt.Errorf("as %q must be a simple identifier", alias)
 	}
 	switch alias {
-	case "payload", "entity", "_entity", "event", "policy", "computed", "fan_out", "accumulated", "query_entities", FanOutLegacyBareItemName:
+	case "payload", "entity", "_entity", "state", "instance", "event", "policy", "computed", "fan_out", "accumulated", "query_entities", FanOutLegacyBareItemName:
 		return fmt.Errorf("as %q collides with a reserved expression root", alias)
 	}
 	return nil
@@ -1081,8 +1081,6 @@ type EntityFieldDecl struct {
 	Immutable          bool              `yaml:"immutable"`
 	Description        string            `yaml:"description"`
 	Refinements        SchemaRefinements `yaml:"-"`
-	MaterializeFrom    string            `yaml:"materialize_from"`
-	Project            map[string]any    `yaml:"project"`
 	UnusedReason       string            `yaml:"_unused_reason"`
 	UnusedReaderReason string            `yaml:"_unused_reader_reason"`
 }
@@ -1337,9 +1335,17 @@ func (w WorkflowDataWrite) Target() string {
 	case strings.TrimSpace(w.TargetPathRef) != "":
 		return strings.TrimSpace(w.TargetPathRef)
 	case strings.TrimSpace(w.TargetField) != "":
-		return strings.TrimSpace(w.TargetField)
+		field := strings.TrimSpace(w.TargetField)
+		if !strings.Contains(field, ".") && paths.Parse(field).HasExplicitRoot() {
+			return "state." + field
+		}
+		return field
 	case strings.TrimSpace(w.Field) != "":
-		return strings.TrimSpace(w.Field)
+		field := strings.TrimSpace(w.Field)
+		if !strings.Contains(field, ".") && paths.Parse(field).HasExplicitRoot() {
+			return "state." + field
+		}
+		return field
 	default:
 		return strings.TrimSpace(w.SourceField)
 	}
@@ -1516,36 +1522,36 @@ type EventCatalogEntry struct {
 }
 
 type AgentRegistryEntry struct {
-	ID                     string                          `yaml:"id"`
-	Type                   string                          `yaml:"type"`
-	Role                   string                          `yaml:"role"`
-	Intent                 runtimeagentintent.Source       `yaml:"intent" json:"intent"`
-	ResolvedIntent         runtimeagentintent.Resolved     `yaml:"-" json:"resolved_intent"`
-	EntityWrites           map[string]AgentEntityWriteDecl `yaml:"entity_writes"`
-	Permissions            []string                        `yaml:"permissions" json:"permissions,omitempty"`
-	PermissionsBundle      string                          `yaml:"permissions_bundle" json:"permissions_bundle,omitempty"`
-	WorkspaceClass         string                          `yaml:"workspace_class"`
-	ManagerFallback        string                          `yaml:"manager_fallback"`
-	NodeType               string                          `yaml:"node_type"`
-	Model                  string                          `yaml:"model"`
-	Memory                 bool                            `yaml:"memory"`
-	Mock                   mockperformance.Performance     `yaml:"mock" json:"mock,omitempty"`
-	MemoryPlan             agentmemory.Plan                `yaml:"-" json:"memory_plan"`
-	MaxTurnsPerTask        int                             `yaml:"max_turns_per_task"`
-	TurnTimeout            *timeridentity.TurnTimeout      `yaml:"-" json:"turn_timeout,omitempty"`
-	Subscriptions          []string                        `yaml:"subscriptions"`
-	SubscriptionsBootstrap []string                        `yaml:"subscriptions_bootstrap"`
-	SubscribesTo           []string                        `yaml:"subscribes_to"`
-	Tools                  []string                        `yaml:"tools"`
-	ToolsTier2             []string                        `yaml:"tools_tier2"`
-	NativeTools            map[string]any                  `yaml:"native_tools"`
-	FlowDataAccess         []string                        `yaml:"flow_data_access" json:"flow_data_access,omitempty"`
-	DataAccess             []DurableDataAccessRef          `yaml:"data_access" json:"data_access,omitempty"`
-	Criteria               []string                        `yaml:"criteria" json:"criteria,omitempty"`
-	EmitEvents             []string                        `yaml:"emit_events"`
-	Implementation         string                          `yaml:"implementation"`
-	AuthoredFields         map[string]bool                 `yaml:"-" json:"-"`
-	EffectiveFieldSources  map[string]string               `yaml:"-" json:"-"`
+	ID                     string                      `yaml:"id"`
+	Type                   string                      `yaml:"type"`
+	Role                   string                      `yaml:"role"`
+	Intent                 runtimeagentintent.Source   `yaml:"intent" json:"intent"`
+	ResolvedIntent         runtimeagentintent.Resolved `yaml:"-" json:"resolved_intent"`
+	Writes                 AgentWriteGrant             `yaml:"writes"`
+	Permissions            []string                    `yaml:"permissions" json:"permissions,omitempty"`
+	PermissionsBundle      string                      `yaml:"permissions_bundle" json:"permissions_bundle,omitempty"`
+	WorkspaceClass         string                      `yaml:"workspace_class"`
+	ManagerFallback        string                      `yaml:"manager_fallback"`
+	NodeType               string                      `yaml:"node_type"`
+	Model                  string                      `yaml:"model"`
+	Memory                 bool                        `yaml:"memory"`
+	Mock                   mockperformance.Performance `yaml:"mock" json:"mock,omitempty"`
+	MemoryPlan             agentmemory.Plan            `yaml:"-" json:"memory_plan"`
+	MaxTurnsPerTask        int                         `yaml:"max_turns_per_task"`
+	TurnTimeout            *timeridentity.TurnTimeout  `yaml:"-" json:"turn_timeout,omitempty"`
+	Subscriptions          []string                    `yaml:"subscriptions"`
+	SubscriptionsBootstrap []string                    `yaml:"subscriptions_bootstrap"`
+	SubscribesTo           []string                    `yaml:"subscribes_to"`
+	Tools                  []string                    `yaml:"tools"`
+	ToolsTier2             []string                    `yaml:"tools_tier2"`
+	NativeTools            map[string]any              `yaml:"native_tools"`
+	FlowDataAccess         []string                    `yaml:"flow_data_access" json:"flow_data_access,omitempty"`
+	DataAccess             []DurableDataAccessRef      `yaml:"data_access" json:"data_access,omitempty"`
+	Criteria               []string                    `yaml:"criteria" json:"criteria,omitempty"`
+	EmitEvents             []string                    `yaml:"emit_events"`
+	Implementation         string                      `yaml:"implementation"`
+	AuthoredFields         map[string]bool             `yaml:"-" json:"-"`
+	EffectiveFieldSources  map[string]string           `yaml:"-" json:"-"`
 }
 
 var agentRegistryEntryFieldOptions = map[string]struct{}{
@@ -1553,7 +1559,7 @@ var agentRegistryEntryFieldOptions = map[string]struct{}{
 	"type":               {},
 	"role":               {},
 	"intent":             {},
-	"entity_writes":      {},
+	"writes":             {},
 	"permissions":        {},
 	"permissions_bundle": {},
 	"workspace_class":    {},

@@ -184,7 +184,7 @@ func TestEventBusCompositionOwnerExactConnectedReceiverBothStores(t *testing.T) 
 						if _, err := db.ExecContext(ctx, `DELETE FROM flow_instances WHERE run_id=$1 AND entity_id=$2`, runID, entityID); err != nil {
 							t.Fatal(err)
 						}
-						seedWorkflowHeaderProjectionFixture(t, ctx, db, runID, wrongID, instance, scope.flow, "review_item", "active", "{}", time.Now().UTC())
+						seedWorkflowHeaderProjectionFixture(t, ctx, db, runID, wrongID, instance, scope.flow, "state", "active", "{}", time.Now().UTC())
 					}
 					if tc.duplicateOwner {
 						seedStateOnlyAcquisitionEntity(t, backend, db, runID, uuid.NewString(), instance, "same-business-key")
@@ -465,10 +465,10 @@ func seedStateOnlyAcquisitionEntity(t *testing.T, backend string, db *sql.DB, ru
 	if err != nil {
 		t.Fatal(err)
 	}
-	query := `INSERT INTO entity_state (run_id, entity_id, flow_instance, entity_type, fields, created_at, updated_at) VALUES (?, ?, ?, 'review_item', ?, ?, ?)`
+	query := `INSERT INTO entity_state (run_id, entity_id, flow_instance, entity_type, fields, created_at, updated_at) VALUES (?, ?, ?, 'state', ?, ?, ?)`
 	args := []any{runID, entityID, instancePath, string(fields), now, now}
 	if backend == "postgres" {
-		query = `INSERT INTO entity_state (run_id, entity_id, flow_instance, entity_type, fields, created_at, updated_at) VALUES ($1::uuid, $2::uuid, $3, 'review_item', $4::jsonb, $5, $5)`
+		query = `INSERT INTO entity_state (run_id, entity_id, flow_instance, entity_type, fields, created_at, updated_at) VALUES ($1::uuid, $2::uuid, $3, 'state', $4::jsonb, $5, $5)`
 		args = []any{runID, entityID, instancePath, string(fields), now}
 	}
 	if _, err := db.ExecContext(context.Background(), query, args...); err != nil {

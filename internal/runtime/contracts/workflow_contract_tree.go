@@ -22,7 +22,7 @@ func flowViewChildren(view *FlowContractView) []*FlowContractView {
 func loadFlowContractViewFromSource(artifact *sourceartifact.AdmittedSourceArtifact, source FlowSource, schema FlowSchemaDocument) (FlowContractView, error) {
 	paths := FlowContractPaths{
 		FlowPath: source.FlowPath, SchemaFile: source.Schema, TypesFile: source.Types,
-		EntitiesFile: source.Entities, NodesFile: source.Nodes, EventsFile: source.Events,
+		EntitiesFile: source.State, NodesFile: source.Nodes, EventsFile: source.Events,
 		AgentsFile: source.Agents, ToolsFile: source.Tools, PolicyFile: source.Policy, RulesFile: source.Rules,
 	}
 	view := FlowContractView{

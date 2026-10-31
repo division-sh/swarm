@@ -652,9 +652,9 @@ func selectedActivityProducerSourceOptions(t *testing.T, ordinaryRootLoop, activ
 	t.Helper()
 	root := t.TempDir()
 	files := map[string]string{
-		"schema.yaml":   "stages:\n  pending: {}\n",
-		"entities.yaml": "default:\n  name: text\n",
-		"events.yaml":   "ordinary.ready:\nreview.inspect:\nsupport.drafted:\n",
+		"schema.yaml": "stages:\n  pending: {}\n",
+		"state.yaml":  "name: text\n",
+		"events.yaml": "ordinary.ready:\nreview.inspect:\nsupport.drafted:\n",
 		"nodes.yaml": `reader:
   execution_type: system_node
   subscribes_to: [review.inspect]
@@ -668,9 +668,9 @@ support:
     support.drafted:
       activity: {id: send_support_reply, tool: telegram.send_message, approval: {decision: support_reply}}
 `,
-		"flow-a/schema.yaml":   "stages:\n  pending: {}\n",
-		"flow-a/entities.yaml": "default:\n  name: text\n",
-		"flow-a/events.yaml":   "review.accepted:\nreview.inspect:\n",
+		"flow-a/schema.yaml": "stages:\n  pending: {}\n",
+		"flow-a/state.yaml":  "name: text\n",
+		"flow-a/events.yaml": "review.accepted:\nreview.inspect:\n",
 		"flow-a/nodes.yaml": `writer:
   execution_type: system_node
   subscribes_to: [review.accepted]
@@ -696,7 +696,7 @@ telegram.send_message:
 `, "flow-a/manifest.yaml": "version: 1.0.0\nplatform_version: '*'\n", "manifest.yaml": "version: 1.0.0\nplatform_version: '*'\n",
 	}
 	if !rootFields {
-		delete(files, "entities.yaml")
+		delete(files, "state.yaml")
 	}
 	if rootWrite {
 		files["events.yaml"] += "review.accepted:\n"

@@ -123,7 +123,7 @@ func TestRunForkMaterializer_CreatesPausedForkRunAndSnapshotWithoutResuming(t *t
 	at := time.Unix(1700000500, 0).UTC()
 	fieldOnlyAt := at.Add(30 * time.Second)
 	afterAt := at.Add(time.Minute)
-	creating := semanticEventRecordFixture(firstEventID, sourceRunID, "fork.before", eventtest.Producer(events.EventProducerPlatform, "test"), []byte(`{}`), semanticEventRecordFixtureEnvelope(entityID, ""), at)
+	creating := semanticEventRecordFixture(firstEventID, sourceRunID, "fork.before", eventtest.Producer(events.EventProducerPlatform, "test"), []byte(`{"gates":{"review":"authored-review"},"accumulator":{"total":"authored-total"},"bookkeeping":{"activation":"manual"}}`), semanticEventRecordFixtureEnvelope(entityID, ""), at)
 	native := prepareFixedForkHistoryFixture(t, pg, "materializer-state", sourceRunID, entityID, creating)
 	ctx = native.ctx
 	persistFixedForkHistoryFixture(t, native)
@@ -298,8 +298,8 @@ func TestRunForkMaterializer_CreatesPausedForkRunAndSnapshotWithoutResuming(t *t
 	`, result.ForkRunID, entityID).Scan(&forkFlow, &forkType, &forkSlug, &forkName); err != nil {
 		t.Fatalf("load fork display metadata: %v", err)
 	}
-	if forkFlow != "flow-a/1" || forkType != "historical_entity" {
-		t.Fatalf("fork owner metadata = flow:%s type:%s, want flow-a/1/historical_entity", forkFlow, forkType)
+	if forkFlow != "flow-a/1" || forkType != "state" {
+		t.Fatalf("fork owner metadata = flow:%s type:%s, want flow-a/1/state", forkFlow, forkType)
 	}
 	if forkSlug != "before-slug" || forkName != "Before Name" {
 		t.Fatalf("fork display metadata = %s/%s, want before-slug/Before Name", forkSlug, forkName)
@@ -434,7 +434,7 @@ func TestRunForkMaterializer_UsesSourceCurrentStateSnapshotMetadataWhenEventFlow
 	if metadata.Owner != runfork.RunForkMaterializedEntitySnapshotMetadataOwner ||
 		metadata.Source != runfork.RunForkMaterializedEntitySnapshotMetadataSourceFlowInstance ||
 		metadata.FlowInstance != "state-flow/at-T" ||
-		metadata.EntityType != "validation_case" {
+		metadata.EntityType != "state" {
 		t.Fatalf("materialization metadata = %#v", metadata)
 	}
 
@@ -454,7 +454,7 @@ func TestRunForkMaterializer_UsesSourceCurrentStateSnapshotMetadataWhenEventFlow
 	`, materialized.ForkRunID, entityID).Scan(&flowInstance, &entityType, &state, &name); err != nil {
 		t.Fatalf("load fork entity_state: %v", err)
 	}
-	if flowInstance != "state-flow/at-T" || entityType != "validation_case" || state != "pending" || name != "Fork Point Name" {
+	if flowInstance != "state-flow/at-T" || entityType != "state" || state != "pending" || name != "Fork Point Name" {
 		t.Fatalf("fork snapshot = flow:%s type:%s state:%s name:%s", flowInstance, entityType, state, name)
 	}
 }
@@ -576,7 +576,7 @@ func TestRunForkPlanner_TypedSourceMetadataWinsOverAuthoredEntityTypeCollision(t
 		t.Fatalf("plan blockers = %#v, authored entity_type must not challenge typed source metadata", plan.UnsupportedBlockers)
 	}
 	entity := fixedForkBusinessEntity(t, plan, native)
-	if entity.MaterializationMetadata.EntityType != "source_case" || entity.MaterializationMetadata.FlowInstance != "state-flow/at-T" ||
+	if entity.MaterializationMetadata.EntityType != "state" || entity.MaterializationMetadata.FlowInstance != "state-flow/at-T" ||
 		entity.MaterializationMetadata.Source != runfork.RunForkMaterializedEntitySnapshotMetadataSourceFlowInstance {
 		t.Fatalf("typed source metadata = %#v", entity.MaterializationMetadata)
 	}

@@ -27,9 +27,9 @@ func TestRun_ValidatesStagedJoinContract(t *testing.T) {
 			h.Join.OnDeadline = runtimecontracts.HandlerRuleEntry{}
 		}},
 		{name: "members must be list text", mutate: func(_ *runtimecontracts.SystemNodeEventHandler, b *runtimecontracts.WorkflowContractBundle) {
-			entity := b.RootEntities["Order"]
+			entity := b.RootEntities["state"]
 			entity.Fields["expected"] = runtimecontracts.EntityFieldDecl{Type: "text"}
-			b.RootEntities["Order"] = entity
+			b.RootEntities["state"] = entity
 		}, wantError: "requires [text] or map[text]T"},
 		{name: "deadline requires outcome", mutate: func(h *runtimecontracts.SystemNodeEventHandler, _ *runtimecontracts.WorkflowContractBundle) {
 			h.Join.OnDeadlineFound = false
@@ -204,11 +204,7 @@ pins:
     - item.received
 `,
 	)
-	writeBootverifyFixtureFile(t, filepath.Join(root, "a", "entities.yaml"), `
-state:
-  expected:
-    type: '[text]'
-    initial: []
+	writeBootverifyFixtureFile(t, filepath.Join(root, "a", "state.yaml"), `expected: [text]
 `)
 	writeBootverifyFixtureFile(t, filepath.Join(root, "a", "events.yaml"), `
 item.received:
@@ -307,7 +303,7 @@ func joinValidationBundle() *runtimecontracts.WorkflowContractBundle {
 	}
 	bundle := &runtimecontracts.WorkflowContractBundle{
 		RootSchema:   &runtimecontracts.FlowSchemaDocument{StageDeclarations: runtimecontracts.FlowStageDeclarations{Declared: true, Entries: []runtimecontracts.FlowStageDeclaration{{ID: "awaiting"}, {ID: "ready"}, {ID: "attention", Final: true}}}},
-		RootEntities: runtimecontracts.EntityContractsDocument{"Order": {Fields: map[string]runtimecontracts.EntityFieldDecl{"expected": {Type: "[text]", Initial: []any{}}}}},
+		RootEntities: runtimecontracts.EntityContractsDocument{"state": {Fields: map[string]runtimecontracts.EntityFieldDecl{"expected": {Type: "[text]", Initial: []any{}}}}},
 		Events: map[string]runtimecontracts.EventCatalogEntry{
 			"item.completed": {Payload: runtimecontracts.EventPayloadSpec{Properties: map[string]runtimecontracts.EventFieldSpec{"member_id": {Type: "text"}, "result": {Type: "text"}}, Required: []string{"member_id", "result"}}},
 			"join.completed": {Payload: runtimecontracts.EventPayloadSpec{Properties: map[string]runtimecontracts.EventFieldSpec{"results": {Type: "[text]"}}, Required: []string{"results"}}},

@@ -3,6 +3,7 @@ package serveapp
 import (
 	"testing"
 
+	"github.com/division-sh/swarm/internal/cliapp"
 	"github.com/division-sh/swarm/internal/runtime/testfixtures/canonicalrouting"
 	"github.com/division-sh/swarm/internal/servedparity"
 )
@@ -22,7 +23,11 @@ func TestServedCompiledGateAdvanceOnlyOnBothStores(t *testing.T) {
 			var result map[string]any
 			requireServedJSONRPCResult(t, rt.Endpoint, "mailbox.decide", params, &result)
 			requireServedEventPublishEntityState(t, rt.DB, rt.Backend, seed.RunID, entityID, "approved")
-			requireServedEntityReadback(t, rt.Endpoint, seed.RunID, entityID, "approved")
+			var diagnosis cliapp.DiagnosticRunDiagnosisResult
+			requireServedJSONRPCResult(t, rt.Endpoint, "run.diagnose", map[string]any{"run_id": seed.RunID}, &diagnosis)
+			if len(diagnosis.Instances) != 1 || diagnosis.Instances[0].FlowInstance != seed.RunID || diagnosis.Instances[0].Stage != "approved" {
+				t.Fatalf("advance-only public header readback: %+v", diagnosis.Instances)
+			}
 			waitServedRunDeliveryQuiescence(t, rt.ReadRunDeliveries, seed.RunID)
 			history := readLifecycleTransitionHistory(t, rt.ReceiverStateReader, seed.RunID, entityID)
 			if len(history) != 1 {

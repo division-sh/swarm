@@ -1,8 +1,4 @@
 name: test-clear-gates setup visible smoke
-setup:
-  entities:
-  - as: entity
-    type: test_entity
 steps:
 - publish: gates.clear_requested
   payload: {}
@@ -10,6 +6,3 @@ expect:
   events:
     include:
     - gates.cleared
-  entities:
-  - ref: entity
-    current_state: pending

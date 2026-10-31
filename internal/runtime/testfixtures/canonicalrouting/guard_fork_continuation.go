@@ -41,7 +41,7 @@ pins:
   inputs:
     - check.requested
 `)
-	writeClosedVariantFile(t, root, "guarded/entities.yaml", "test_entity: {}\n")
+	removeClosedVariantFiles(t, root, "guarded/state.yaml")
 	writeClosedVariantFile(t, root, "guarded/nodes.yaml", `test-node:
   execution_type: system_node
   subscribes_to: [check.requested]

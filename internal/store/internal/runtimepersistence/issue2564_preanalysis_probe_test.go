@@ -21,7 +21,7 @@ func TestIssue2564AgentWriteMustAdvanceCanonicalRevisionBothStores(t *testing.T)
 			writer := pipeline.NewPipelineCoordinatorWithOptions(workflowTestBus{}, opts)
 			result, err := writer.ApplyEntityFieldMutation(f.ctx, pipeline.EntityFieldMutation{
 				RunID: record.Identity.RunID, EntityID: record.EntityID, Owner: record.Identity, FlowID: "review",
-				Mutation: entityruntime.Mutation{Target: "entity.account_id", Value: "agent-committed"},
+				Mutation: entityruntime.Mutation{Target: "state.account_id", Value: "agent-committed"},
 				Source:   semanticview.Wrap(f.bundle), Writer: mutationlog.Writer{Type: "agent", ID: "probe", HandlerStep: "save_entity_field"},
 			})
 			if err != nil || !result.Acknowledged {

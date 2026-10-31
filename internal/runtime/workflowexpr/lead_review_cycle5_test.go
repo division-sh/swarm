@@ -82,10 +82,10 @@ func TestLeadReviewEntityExecution(t *testing.T) {
 	record := rc.ResolvedCatalogType{Kind: rc.CatalogTypeObject, Fields: []rc.ResolvedCatalogField{{Name: "note", Type: rc.ResolvedCatalogType{Kind: rc.CatalogTypeText}, IsOptional: true}}}
 	entityType := rc.ResolvedCatalogType{Kind: rc.CatalogTypeObject, Fields: []rc.ResolvedCatalogField{{Name: "profile", Type: record}}}
 	ctx := ValueContext{Entity: map[string]any{"profile": map[string]any{"id": "a", "status": "ready", "tags": []any{}}}}
-	for _, expr := range []string{`entity.profile.note != ""`, `has(entity.profile.note) && entity.profile.note != ""`, `entity.profile.?note.orValue("") != ""`} {
+	for _, expr := range []string{`state.profile.note != ""`, `has(state.profile.note) && state.profile.note != ""`, `state.profile.?note.orValue("") != ""`} {
 		got, err := EvalValueExpressionWithOptions(expr, ctx, ValueExpressionOptions{EntityType: &entityType})
 		t.Logf("%s result=%v err=%v", expr, got, err)
-		if expr == `entity.profile.?note.orValue("") != ""` && err != nil {
+		if expr == `state.profile.?note.orValue("") != ""` && err != nil {
 			t.Errorf("valid optional decision failed: %v", err)
 		}
 	}

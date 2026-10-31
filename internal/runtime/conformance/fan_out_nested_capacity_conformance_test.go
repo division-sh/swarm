@@ -56,7 +56,7 @@ func TestIssue2394NestedManyIntentRetainedHandoffBothStores(t *testing.T) {
 
 func proveNestedCapacityOneHandoff(t *testing.T, backend string, accounts []string, holdChild bool, childEntryTimeout, finalDrainTimeout time.Duration, rejection ...*nestedPreparedRejection) {
 	t.Helper()
-	source := loadCanonicalRoutingSource(t, canonicalrouting.CopyNotifyAllChildrenNestedServing(t))
+	source := loadCanonicalRoutingSource(t, canonicalrouting.CopyNotifyAllChildrenNestedServing(t, accounts...))
 	probe := newNestedServingProbe(t)
 	if len(rejection) == 1 {
 		probe.rejection = rejection[0]

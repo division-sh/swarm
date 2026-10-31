@@ -48,7 +48,7 @@ func validateFlowCatalogReferences(bundle *WorkflowContractBundle, source FlowSo
 	}
 	for _, name := range sortedEntityContractKeys(entities) {
 		for _, field := range sortedEntityFieldKeys(entities[name].Fields) {
-			if err := validateScopedCatalogReference(types, entities[name].Fields[field].Type, source.Entities, "entity "+name+"."+field); err != nil {
+			if err := validateScopedCatalogReference(types, entities[name].Fields[field].Type, source.State, "state."+field); err != nil {
 				return err
 			}
 		}

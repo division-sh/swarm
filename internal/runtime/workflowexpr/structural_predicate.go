@@ -25,7 +25,7 @@ func NewEntityPredicateEnv(entity runtimecontracts.ResolvedCatalogType, extra ..
 	if err != nil {
 		return nil, err
 	}
-	root, ok := provider.rootType("entity")
+	root, ok := provider.rootType("state")
 	if !ok || provider.nodes[root.TypeName()] == nil {
 		return nil, fmt.Errorf("predicate entity must be a structural record")
 	}

@@ -1682,7 +1682,7 @@ func fakeMCPCall(client *http.Client, endpoint string, headers map[string]string
 
 func exactReleaseFlowEmitTool(result map[string]any) (string, error) {
 	tools, _ := result["tools"].([]any)
-	wantNames := []string{"emit_agent_completed", "notify_human", "read_worker_state", "read_worker_state_requests"}
+	wantNames := []string{"emit_agent_completed", "notify_human", "read_state", "read_state_requests"}
 	names := listedToolNames(tools)
 	sort.Strings(names)
 	if !equalStrings(names, wantNames) {

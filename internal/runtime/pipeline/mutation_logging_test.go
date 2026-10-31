@@ -106,7 +106,7 @@ func nativeMutationLoggingFixtureForTest(t *testing.T, backend string, open pipe
 	bundle := loadWorkflowTempBundle(t, map[string]string{
 		"manifest.yaml": "version: 1.0.0\nplatform_version: \">=0.7.0 <0.8.0\"\n",
 		"schema.yaml":   "stages:\n  queued: {}\n  done: {}\n",
-		"entities.yaml": "test_entity:\n  status: text\n  business_status: text\n  verticals: map[text]Vertical\n  tags: [text]\n",
+		"state.yaml":    "status: text\nbusiness_status: text\nverticals: map[text]Vertical\ntags: [text]\n",
 		"types.yaml":    "types:\n  Job:\n    id: text\n    title: text\n  Vertical:\n    status: text\n    active_jobs: [Job]\n",
 		"events.yaml":   "flow.transitioned:\n",
 		"nodes.yaml":    "lifecycle-owner:\n  execution_type: system_node\n  event_handlers:\n    flow.transitioned: {advances_to: done}\n",

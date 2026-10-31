@@ -13,7 +13,7 @@ expect:
   events:
     include: [scores.computed]
   entities:
-    - type: core
+    - flow: .
       current_state: done
       fields:
         composite: 0

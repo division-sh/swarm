@@ -78,7 +78,7 @@ func TestStructuralMapResultComposition(t *testing.T) {
 	root := rc.ResolvedCatalogType{Kind: rc.CatalogTypeObject, Fields: []rc.ResolvedCatalogField{{Name: "labels", Type: dict}}}
 	opts := ValueExpressionOptions{PayloadType: &root, EntityType: &root}
 	ctx := ValueContext{Payload: map[string]any{"labels": map[string]any{}}, Entity: map[string]any{"labels": map[string]any{}}}
-	for _, name := range []string{"payload", "entity"} {
+	for _, name := range []string{"payload", "state"} {
 		for _, template := range []string{
 			`(true ? ROOT.labels : ROOT.labels)`, `[ROOT.labels][?0].value()`,
 			`optional.of(ROOT.labels).value()`, `[0].map(x, ROOT.labels)[?0].value()`,
@@ -106,7 +106,7 @@ func TestStructuralCollectionResultCompositionAcrossRoots(t *testing.T) {
 	text := rc.ResolvedCatalogType{Kind: rc.CatalogTypeText}
 	list := rc.ResolvedCatalogType{Kind: rc.CatalogTypeList, Element: &text}
 	root := rc.ResolvedCatalogType{Kind: rc.CatalogTypeObject, Fields: []rc.ResolvedCatalogField{{Name: "tags", Type: list}}}
-	for _, name := range []string{"payload", "entity", "row", "join"} {
+	for _, name := range []string{"payload", "state", "row", "join"} {
 		opts := ValueExpressionOptions{}
 		ctx := ValueContext{}
 		var variables map[string]any
@@ -115,7 +115,7 @@ func TestStructuralCollectionResultCompositionAcrossRoots(t *testing.T) {
 		case "payload":
 			opts.PayloadType = &root
 			ctx.Payload = data
-		case "entity":
+		case "state":
 			opts.EntityType = &root
 			ctx.Entity = data
 		case "row":

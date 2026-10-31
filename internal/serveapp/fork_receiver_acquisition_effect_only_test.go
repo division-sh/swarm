@@ -53,12 +53,12 @@ func requireSupplementalForkAcquisitionSettlement(t *testing.T, rt servedControl
 		t.Fatalf("public acquisition target/settlement: %+v", publicEvent)
 	}
 	row := readForkReceiverRows(t, rt, runID)["consumer"]
-	if row.ID != entityID || row.Flow != "consumer" || row.Type != "receipt" || row.State != "active" || !reflect.DeepEqual(row.Fields, map[string]any{"marker": "consumer-created"}) {
+	if row.ID != entityID || row.Flow != "consumer" || row.Type != "state" || row.State != "active" || !reflect.DeepEqual(row.Fields, map[string]any{"marker": "consumer-created"}) {
 		t.Fatalf("canonical receiver creation/marker: %+v", row)
 	}
 	var publicEntity operatorread.OperatorEntityFull
 	requireServedJSONRPCResult(t, rt.Endpoint, "entity.get", map[string]any{"run_id": runID, "entity_id": entityID}, &publicEntity)
-	if publicEntity.Entity.RunID != runID || publicEntity.Entity.EntityID != entityID || publicEntity.Entity.FlowInstance != "consumer" || publicEntity.Entity.EntityType != "receipt" || publicEntity.Entity.CurrentState == nil || *publicEntity.Entity.CurrentState != "active" || !reflect.DeepEqual(publicEntity.Fields, row.Fields) {
+	if publicEntity.Entity.RunID != runID || publicEntity.Entity.EntityID != entityID || publicEntity.Entity.FlowInstance != "consumer" || publicEntity.Entity.EntityType != "state" || publicEntity.Entity.CurrentState == nil || *publicEntity.Entity.CurrentState != "active" || !reflect.DeepEqual(publicEntity.Fields, row.Fields) {
 		t.Fatalf("public acquired receiver: %+v", publicEntity)
 	}
 	type markerMutation struct {
@@ -134,9 +134,9 @@ func TestSelectedForkSupplementalReceiverAcquisitionWithoutPostRevisionEmissionB
 				waitForkReceiverSourceCompletion(t, rt, seed.RunID)
 				seedRows := readForkReceiverRows(t, rt, seed.RunID)
 				wantSeedRows := map[string]forkReceiverRow{
-					seed.RunID: {ID: seed.RunID, Flow: seed.RunID, Type: "root", State: "active", Fields: map[string]any{"marker": "root-owned"}},
-					"producer": {ID: flowidentity.EntityID("producer"), Flow: "producer", Type: "work", State: "waiting", Fields: map[string]any{}},
-					"consumer": {ID: flowidentity.EntityID("consumer"), Flow: "consumer", Type: "receipt", State: "waiting", Fields: map[string]any{}},
+					seed.RunID: {ID: seed.RunID, Flow: seed.RunID, Type: "state", State: "active", Fields: map[string]any{"marker": "root-owned"}},
+					"producer": {ID: flowidentity.EntityID("producer"), Flow: "producer", Type: "state", State: "waiting", Fields: map[string]any{}},
+					"consumer": {ID: flowidentity.EntityID("consumer"), Flow: "consumer", Type: "state", State: "waiting", Fields: map[string]any{}},
 				}
 				if !reflect.DeepEqual(seedRows, wantSeedRows) {
 					t.Fatalf("seed did not construct the exact inert child tree: got=%+v want=%+v", seedRows, wantSeedRows)
@@ -154,7 +154,7 @@ func TestSelectedForkSupplementalReceiverAcquisitionWithoutPostRevisionEmissionB
 				sourceRoute := requireSupplementalForkAcquisitionSettlement(t, rt, seed.RunID, frontier, tc.policy)
 				sourceRows := readForkReceiverRows(t, rt, seed.RunID)
 				producer := sourceRows["producer"]
-				if len(sourceRows) != 3 || producer.ID != flowidentity.EntityID("producer") || producer.Type != "work" || producer.Fields["marker"] != "producer-owned" || producer.ID == flowidentity.EntityID("consumer") {
+				if len(sourceRows) != 3 || producer.ID != flowidentity.EntityID("producer") || producer.Type != "state" || producer.Fields["marker"] != "producer-owned" || producer.ID == flowidentity.EntityID("consumer") {
 					t.Fatalf("independent source producer/receiver ownership: %+v", sourceRows)
 				}
 				sourceEvidence := readForkReceiverProducerEvidence(t, rt, seed.RunID, frontier)
@@ -187,7 +187,7 @@ func TestSelectedForkSupplementalReceiverAcquisitionWithoutPostRevisionEmissionB
 					t.Fatalf("fork acquisition rehomed or duplicated a physical owner: source=%+v child=%+v", sourceRows, childRows)
 				}
 				root := childRows[fork.ForkRunID]
-				if root.ID != fork.ForkRunID || root.Type != "root" || root.State != "active" || root.Fields["marker"] != "root-owned" {
+				if root.ID != fork.ForkRunID || root.Type != "state" || root.State != "active" || root.Fields["marker"] != "root-owned" {
 					t.Fatalf("fork canonical root remapping: %+v", childRows)
 				}
 				childBefore, childCompanions := readServedForkRecipientSourceDomain(t, rt, fork.ForkRunID), readForkReceiverCompanions(t, rt, fork.ForkRunID)

@@ -9,7 +9,7 @@ scatter:
           - {source_field: items, target_field: items}
       advances_to: collecting
       fan_out:
-        items_from: entity.items
+        items_from: state.items
         as: member
         emit:
           event: item.requested

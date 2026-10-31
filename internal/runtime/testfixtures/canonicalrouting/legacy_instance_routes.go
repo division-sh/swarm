@@ -123,7 +123,7 @@ pins:
     - deploy.done
 `+secondPin,
 		"",
-		"deployment:\n  vertical_id:\n    type: string\n",
+		"vertical_id: string\n",
 		consumerNodes)
 	if consumerAgents != "" {
 		writeClosedVariantFile(t, root, "consumer/agents.yaml", consumerAgents)
@@ -168,10 +168,7 @@ deploy.done:
     inline: Preserve static source-set authority.
   subscriptions: [deploy.done]
 `)
-	writeClosedVariantFile(t, root, "flows/consumer/entities.yaml", `deployment:
-  vertical_id:
-    type: string
-    _unused_reason: source-set survivor topology proof identity field
+	writeClosedVariantFile(t, root, "flows/consumer/state.yaml", `vertical_id: string
 `)
 	return root
 }
@@ -185,7 +182,7 @@ func writeLegacyInstanceFlow(t testing.TB, root, id, schema, events, entities, n
 		writeClosedVariantFile(t, root, base+"/events.yaml", events)
 	}
 	if strings.TrimSpace(entities) != "" {
-		writeClosedVariantFile(t, root, base+"/entities.yaml", entities)
+		writeClosedVariantFile(t, root, base+"/state.yaml", entities)
 	}
 	if strings.TrimSpace(nodes) != "" {
 		writeClosedVariantFile(t, root, base+"/nodes.yaml", nodes)

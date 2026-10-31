@@ -1,4 +1,0 @@
-candidate_analysis:
-  candidate_id:
-    type: text
-    _unused_reason: template instance identity

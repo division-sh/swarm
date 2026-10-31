@@ -259,10 +259,10 @@ func loadTransitionRelationFixture(t *testing.T, family string, reordered bool) 
 	}
 	for _, flow := range flows {
 		files := map[string]string{
-			"schema.yaml":   schema,
-			"entities.yaml": "item:\n  expected: {type: '[text]', initial: []}\n  window: {type: text, initial: window}\n",
-			"events.yaml":   events,
-			"nodes.yaml":    "worker:\n  execution_type: system_node\n  event_handlers:\n" + handlers, "manifest.yaml": "version: 1.0.0\nplatform_version: '*'\n",
+			"schema.yaml": schema,
+			"state.yaml":  "expected: [text]\nwindow: \"window\"\n",
+			"events.yaml": events,
+			"nodes.yaml":  "worker:\n  execution_type: system_node\n  event_handlers:\n" + handlers, "manifest.yaml": "version: 1.0.0\nplatform_version: '*'\n",
 		}
 		for name, content := range files {
 			if reordered {

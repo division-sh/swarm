@@ -20,7 +20,7 @@ func VerifyNativePipelineRejectsFabricatedGuardCauseOnBothStoresForTest(t *testi
 	source := loadWorkflowTempSource(t, map[string]string{
 		"manifest.yaml": "version: 1.0.0\nplatform_version: \">=0.7.0 <0.8.0\"\n",
 		"schema.yaml":   "stages:\n  ready: {}\n  done: {final: true}\n  killed: {final: true}\n",
-		"entities.yaml": "test_entity:\n  marker: text\n",
+		"state.yaml":    "marker: text\n",
 		"events.yaml":   "observe:\nkill:\nkill_chain:\n",
 		"nodes.yaml": `router:
   event_handlers:
@@ -79,7 +79,7 @@ func VerifyNativePipelineRejectsFabricatedGuardCauseOnBothStoresForTest(t *testi
 				address.FlowInstance = testRunScopedWorkflowInstanceFromContext(ctx, runID)
 				if err := fixture.Construct(ctx, materializedWorkflowInstanceForSource(t, pc.SemanticSource(), ctx, WorkflowInstance{
 					InstanceID: runID, StorageRef: runID, EntityID: entityID, WorkflowName: ".", WorkflowVersion: "1",
-					Mode: contracts.FlowModeStatic, CurrentState: "ready", EntityType: "test_entity", Fields: map[string]any{"marker": "unchanged"},
+					Mode: contracts.FlowModeStatic, CurrentState: "ready", EntityType: "state", Fields: map[string]any{"marker": "unchanged"},
 				})); err != nil {
 					t.Fatal(err)
 				}

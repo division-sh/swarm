@@ -487,7 +487,8 @@ func TestFanOutDeliveryBarrierCompletesThroughRealEventBusAndPublicReadbackOnBot
 			selected, db := tc.setup(t)
 			runID := uuid.NewString()
 			ctx := runtimecorrelation.WithRunID(testAuthorActivityContext(context.Background()), runID)
-			source := notifyallchildren.LoadSource(t, notifyallchildren.Options{FanOutDeliveryBarrier: true})
+			accountIDs := []string{"acct-c", "acct-a", "acct-b"}
+			source := notifyallchildren.LoadSource(t, notifyallchildren.Options{FanOutDeliveryBarrier: true, InitialMembership: &accountIDs})
 			runtime := newNotifyAllChildrenRuntime(
 				t,
 				selected,
@@ -504,7 +505,6 @@ func TestFanOutDeliveryBarrierCompletesThroughRealEventBusAndPublicReadbackOnBot
 			publishNotifyAllChildrenRunCreatingEvent(t, ctx, runtime, source, runID, "portfolio.opened", map[string]any{
 				"portfolio_id": "portfolio-main",
 			})
-			accountIDs := []string{"acct-c", "acct-a", "acct-b"}
 			publishNotifyAllChildrenEvent(t, ctx, runtime, source, runID, "portfolio.accounts.register.requested", map[string]any{
 				"portfolio_id": "portfolio-main",
 				"account_ids":  accountIDs,

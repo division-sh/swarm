@@ -74,13 +74,13 @@ func TestSQLiteWorkflowInstanceStore_PreservesParentRouteControlMetadata(t *test
 		"schema.yaml":                    "stages:\n  created: {}\n",
 		"operating/manifest.yaml":        "version: 1.0.0\nplatform_version: \">=0.7.0 <0.8.0\"\n",
 		"operating/schema.yaml":          "instance: instance_key\nstages:\n  created: {}\n",
-		"operating/entities.yaml":        "test_entity:\n  instance_key: text\n",
+		"operating/state.yaml":           "instance_key: text\n",
 		"operating/review/manifest.yaml": "version: 1.0.0\nplatform_version: \">=0.7.0 <0.8.0\"\n",
 		"operating/review/schema.yaml":   "instance: instance_key\nstages:\n  created: {}\n",
-		"operating/review/entities.yaml": "test_entity:\n  instance_key: text\n",
+		"operating/review/state.yaml":    "instance_key: text\n",
 		"review/manifest.yaml":           "version: 1.0.0\nplatform_version: \">=0.7.0 <0.8.0\"\n",
 		"review/schema.yaml":             "instance: instance_key\nstages:\n  created: {}\n",
-		"review/entities.yaml":           "test_entity:\n  instance_key: text\n",
+		"review/state.yaml":              "instance_key: text\n",
 	})
 	source := semanticview.Wrap(bundle)
 	for _, backend := range []string{"sqlite", "postgres"} {
@@ -133,7 +133,7 @@ func workflowParentRouteControlNativeFixture(t *testing.T, backend string, sourc
 			InstanceID: parent.InstanceID, StorageRef: parent.InstancePath, EntityID: parent.EntityID,
 			ParentFlowID: parent.ParentRoute.FlowID, ParentFlowInstance: parent.ParentRoute.FlowInstance, ParentEntityID: parent.ParentEntityID,
 			WorkflowName: parent.TemplateID, WorkflowVersion: source.WorkflowVersion(), Mode: "template", InstanceKey: parentKey,
-			CurrentState: "created", StageDefined: true, EntityType: "test_entity", Fields: map[string]any{"instance_key": "root"},
+			CurrentState: "created", StageDefined: true, EntityType: "state", Fields: map[string]any{"instance_key": "root"},
 			CreatedAt: instance.CreatedAt, EnteredStageAt: instance.EnteredStageAt,
 		}, pipeline.WorkflowLifecycleMutationPlan{}, instance.CreatedAt)
 		if err != nil {

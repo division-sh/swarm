@@ -43,8 +43,8 @@ func VerifyNativePipelineCompiledTimerTransitionEvidenceOnBothStoresForTest(t *t
 				files := map[string]string{
 					"manifest.yaml": "version: 1.0.0\nplatform_version: \">=0.7.0 <0.8.0\"\n",
 					"schema.yaml":   "stages:\n  waiting:\n    timers:\n      - after: 1h\n" + timer + "  done: {final: true}\n",
-					"entities.yaml": "test_entity: {}\n",
-					"events.yaml":   "review.expired:\n",
+
+					"events.yaml": "review.expired:\n",
 				}
 				if loopOwned {
 					files["schema.yaml"] += "  ready: {}\n  escaped: {}\nloops:\n  revision:\n    revision_field: revision_id\n    max_attempts: 3\n    escape: {advances_to: escaped}\n"
@@ -266,7 +266,6 @@ func VerifyAcceptedLifecycleConsumerRejectsUnownedTransitionOnBothStoresForTest(
 		"schema.yaml":          "stages: []\n",
 		"orders/manifest.yaml": "version: 1.0.0\nplatform_version: \">=0.7.0 <0.8.0\"\n",
 		"orders/schema.yaml":   "stages:\n  queued:\n    gate:\n      decision: review\n      outcomes:\n        approve: {advances_to: active}\n  active: {}\n",
-		"orders/entities.yaml": "test_entity: {}\n",
 	})
 	gateGraph, found := gateBundle.WorkflowStageTopology("orders")
 	if !found {

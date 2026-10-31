@@ -14,9 +14,8 @@ func TestRunValidatesScalarTemplateInstanceIdentity(t *testing.T) {
 instance: account_id
 `,
 		`
-account:
-  tenant_id: text
-  account_id: uuid
+tenant_id: text
+account_id: uuid
 `)
 
 	report := Run(context.Background(), semanticview.Wrap(bundle), Options{})
@@ -39,8 +38,8 @@ func TestA9RootConstructorAdmissionUsesSharedOwners(t *testing.T) {
 			writeBootverifyFixtureFile(t, filepath.Join(root, "manifest.yaml"), "version: 1.0.0\nplatform_version: '*'\n")
 			writeBootverifyFixtureFile(t, filepath.Join(root, "schema.yaml"), "# fixture: root\ninstance: "+test.key+"\npins:\n  inputs: [account.opened]\n")
 			writeBootverifyFixtureFile(t, filepath.Join(root, "events.yaml"), "account.opened:\n  "+test.eventSchema+"\n")
-			writeBootverifyFixtureFile(t, filepath.Join(root, "entities.yaml"), "account:\n  account_id: text\n  region: text\n  count: {type: integer, initial: 0}\n")
-			writeBootverifyFixtureFile(t, filepath.Join(root, "nodes.yaml"), "receiver:\n  execution_type: system_node\n  subscribes_to: [account.opened]\n  event_handlers:\n    account.opened:\n      data_accumulation:\n        source_event: account.opened\n        writes:\n          - {target_field: count, value: size(entity.region)}\n")
+			writeBootverifyFixtureFile(t, filepath.Join(root, "state.yaml"), "account_id: text\nregion: text\ncount: 0\n")
+			writeBootverifyFixtureFile(t, filepath.Join(root, "nodes.yaml"), "receiver:\n  execution_type: system_node\n  subscribes_to: [account.opened]\n  event_handlers:\n    account.opened:\n      data_accumulation:\n        source_event: account.opened\n        writes:\n          - {target_field: count, value: size(state.region)}\n")
 			bundle := loadFixtureBundleAt(t, repo, root, runtimecontracts.DefaultPlatformSpecFile(repo))
 			report := Run(context.Background(), semanticview.Wrap(bundle), Options{})
 			if test.wantCheck != "" {
@@ -71,8 +70,7 @@ instance: missing_id
 `,
 
 			flowEntities: `
-account:
-  account_id: uuid
+account_id: uuid
 `,
 			want: "not declared",
 		},
@@ -83,8 +81,7 @@ instance: tags
 `,
 
 			flowEntities: `
-account:
-  tags: [text]
+tags: [text]
 `,
 			want: "scalar or enum",
 		},

@@ -129,7 +129,7 @@ func testA2BoundReplyJourney(t *testing.T, corruptEntryField, siblingFlow string
 			constructed := commitA2FixtureConstruction(t, pc, selected.events, ctx, owner, runtimepipeline.WorkflowInstance{
 				InstanceID: key, StorageRef: path, EntityID: flowidentity.EntityID(path), WorkflowName: "requester", WorkflowVersion: source.WorkflowVersion(),
 				ParentFlowID: parent.WorkflowName, ParentFlowInstance: parent.StorageRef, ParentEntityID: parent.EntityID,
-				Mode: "template", RuntimeReadiness: &readiness, CurrentState: "awaiting", EntityType: "request_state",
+				Mode: "template", RuntimeReadiness: &readiness, CurrentState: "awaiting", EntityType: "state",
 				Fields: map[string]any{"order_id": key, "expected": []any{"a", "b"}},
 			}, now)
 			markGateRecoveryTopologyReadyFixture(t, selected, readiness, now)
@@ -193,7 +193,7 @@ func testA2BoundReplyJourney(t *testing.T, corruptEntryField, siblingFlow string
 				siblingConstruction := commitA2FixtureConstruction(t, pc, selected.events, ctx, siblingOwner, runtimepipeline.WorkflowInstance{
 					InstanceID: siblingKey, StorageRef: siblingPath, EntityID: siblingEntity, WorkflowName: siblingFlow, WorkflowVersion: source.WorkflowVersion(),
 					ParentFlowID: parent.WorkflowName, ParentFlowInstance: parent.StorageRef, ParentEntityID: parent.EntityID,
-					Mode: "template", RuntimeReadiness: &siblingReadiness, CurrentState: "awaiting", EntityType: "request_state",
+					Mode: "template", RuntimeReadiness: &siblingReadiness, CurrentState: "awaiting", EntityType: "state",
 					Fields: map[string]any{"order_id": siblingKey, "expected": []any{"a", "b"}},
 				}, now)
 				markGateRecoveryTopologyReadyFixture(t, selected, siblingReadiness, now)

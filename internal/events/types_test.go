@@ -272,7 +272,7 @@ func TestDeliveryEventTargetlessRouteDoesNotConsumeJournalTargetSetProjection(t 
 
 func TestValidateEventContextReferenceRejectsLegacyReceiverProjections(t *testing.T) {
 	for _, ref := range []string{"entity_id", "flow_instance"} {
-		if err := ValidateEventContextReference(ref); err == nil || !strings.Contains(err.Error(), "_entity.") {
+		if err := ValidateEventContextReference(ref); err == nil || !strings.Contains(err.Error(), "instance.") {
 			t.Fatalf("ValidateEventContextReference(%q) = %v", ref, err)
 		}
 	}

@@ -32,7 +32,11 @@ func listRetirementDecode(t testing.TB, surface string, value yamlsource.Value) 
 		field, err := projectTypeFieldSpec(value)
 		return field.Type, field.IsOptional, nil, err
 	case "entities":
-		field, err := projectEntityFieldDecl(value)
+		field, err := projectStateField(value, TypeCatalogDocument{Types: map[string]NamedTypeDecl{
+			"ProbeItem": {Fields: map[string]TypeFieldSpec{"value": {Type: "text"}}},
+			"List":      {Fields: map[string]TypeFieldSpec{"value": {Type: "text"}}},
+			"LIST":      {Fields: map[string]TypeFieldSpec{"value": {Type: "text"}}},
+		}})
 		return field.Type, field.IsOptional, field.Initial, err
 	case "events":
 		field, optional, err := admitEventPayloadField(value)
@@ -47,7 +51,7 @@ func listRetirementDecode(t testing.TB, surface string, value yamlsource.Value) 
 }
 
 func TestListSpellingRetirementTypedFields(t *testing.T) {
-	for _, surface := range []string{"types", "entities", "events", "nodes"} {
+	for _, surface := range []string{"types", "events", "nodes"} {
 		for _, source := range []string{
 			"list<ProbeItem>", "'list<ProbeItem>'", "list<ProbeItem>?", "{type: list<ProbeItem>}",
 			"map[text]list<ProbeItem>", "'[list<ProbeItem>]'", "{type: '[list<ProbeItem>]'}",
@@ -91,7 +95,7 @@ func TestListSpellingRetirementPresenceMatrix(t *testing.T) {
 }
 
 func TestListSpellingRetirementMetadataAndData(t *testing.T) {
-	for _, surface := range []string{"types", "entities", "events"} {
+	for _, surface := range []string{"types", "events"} {
 		t.Run(surface, func(t *testing.T) {
 			typeRef, optional, _, err := listRetirementDecode(t, surface, listRetirementField(t, "{type: '[text]?', length: {min: 0, max: 3}, description: 'list<T> is business text'}"))
 			if err != nil || typeRef != "[text]" || !optional {
@@ -104,7 +108,7 @@ func TestListSpellingRetirementMetadataAndData(t *testing.T) {
 		})
 	}
 	for _, test := range []struct{ surface, source string }{
-		{"entities", "{type: '[text]', initial: ['list<T>', '[text]', 'text']}"},
+		{"entities", "['list<T>', '[text]', 'text']"},
 		{"nodes", "{type: '[ProbeItem]', default: ['list<T>', '[text]', 'text']}"},
 	} {
 		t.Run(test.surface+"/data", func(t *testing.T) {
@@ -141,13 +145,19 @@ func TestListSpellingRetirementBundleStyle(t *testing.T) {
 					"manifest.yaml": "version: 1.0.0\nplatform_version: '*'\n",
 					"schema.yaml":   "# fixture: list-proof\nstages:\n  ready: {}\n  done: {final: true}\n",
 					"types.yaml":    "types:\n  ProbeItem:\n    value: text\n",
-					"entities.yaml": "probe:\n  item: text\n",
+					"state.yaml":    "item: text\n",
 				}
 				switch surface {
 				case "types":
 					files["types.yaml"] += "  Container:\n    items: " + strings.ReplaceAll(form.source, "\n", "\n  ") + "\n"
 				case "entities":
-					files["entities.yaml"] = "probe:\n  items: " + form.source + "\n"
+					if strings.HasPrefix(form.source, "{") {
+						form.source = strings.TrimSuffix(form.source, "}") + ", indexed: true}"
+					}
+					if strings.HasPrefix(form.name, "bare_quoted") || form.name == "literal_block" || form.name == "folded_block" {
+						form.reject = false
+					}
+					files["state.yaml"] = "items: " + form.source + "\n"
 				case "events":
 					files["events.yaml"] = "proof.received:\n  items: " + form.source + "\n"
 				case "nodes":
@@ -159,7 +169,11 @@ func TestListSpellingRetirementBundleStyle(t *testing.T) {
 				repo := repoRootForContractsTest(t)
 				bundle, err := LoadWorkflowContractBundleWithOverrides(repo, root, DefaultPlatformSpecFile(repo))
 				if form.reject {
-					if err == nil || !strings.Contains(err.Error(), "[T]") || !strings.Contains(err.Error(), surface+".yaml") {
+					file := surface + ".yaml"
+					if surface == "entities" {
+						file = "state.yaml"
+					}
+					if err == nil || !strings.Contains(err.Error(), "[T]") || !strings.Contains(err.Error(), file) {
 						t.Fatalf("full bundle failed to teach the offending source: %v", err)
 					}
 					artifact, err := sourceartifact.AdmitDirectory(root)
@@ -179,7 +193,7 @@ func TestListSpellingRetirementBundleStyle(t *testing.T) {
 						t.Fatal(err)
 					}
 					for _, source := range []*sourceartifact.AdmittedSourceArtifact{artifact, catalog, retained} {
-						if _, err := LoadWorkflowContractBundleFromRootedSource(repo, capturedCompilerSource(t, artifact, source), DefaultPlatformSpecFile(repo), WorkflowContractLoadOptions{}); err == nil || !errors.Is(err, ErrInvalidField) || !strings.Contains(err.Error(), "[T]") || !strings.Contains(err.Error(), surface+".yaml") {
+						if _, err := LoadWorkflowContractBundleFromRootedSource(repo, capturedCompilerSource(t, artifact, source), DefaultPlatformSpecFile(repo), WorkflowContractLoadOptions{}); err == nil || !errors.Is(err, ErrInvalidField) || !strings.Contains(err.Error(), "[T]") || !strings.Contains(err.Error(), file) {
 							t.Fatalf("retained source bypassed shape/style admission: %v", err)
 						}
 					}
@@ -257,7 +271,7 @@ func TestListSpellingRetirementNodeState(t *testing.T) {
 }
 
 func TestListSpellingRetirementAliasMergeDiagnostics(t *testing.T) {
-	for _, surface := range []string{"types", "entities", "events", "nodes"} {
+	for _, surface := range []string{"types", "events", "nodes"} {
 		for _, source := range []string{
 			"definition: &value 'list<ProbeItem>'\nitems: *value\n",
 			"definition: &value ['ProbeItem']\nitems: *value\n",
@@ -295,6 +309,59 @@ func TestListSpellingRetirementNestedReferences(t *testing.T) {
 }
 
 func TestListSpellingRetirementCombinedNestedBundle(t *testing.T) {
+	for _, surface := range []string{"state", "indexed_state", "types", "events"} {
+		for _, tc := range []struct {
+			name, source, want string
+			refuse             bool
+		}{
+			{"nested", "[[integer]]", "[[integer]]", false},
+			{"deep", "[[[integer]]]", "[[[integer]]]", false},
+			{"unknown", "[[Missing]]", "", true},
+			{"empty", "[[]]", "", true},
+			{"mixed", "[[1, true]]", "", true},
+			{"multiple", "[[text, integer]]", "", true},
+			{"quoted", "[['integer']]", "", true},
+		} {
+			t.Run("recursive/"+surface+"/"+tc.name, func(t *testing.T) {
+				root := t.TempDir()
+				writeFixtureFile(t, root+"/schema.yaml", "name: nested-proof\nstages: {done: {final: true}}\n")
+				file, body := "state.yaml", "items: "+tc.source+"\n"
+				switch surface {
+				case "indexed_state":
+					body = "items: {type: " + tc.source + ", indexed: true}\n"
+				case "types":
+					file, body = "types.yaml", "types:\n  Container:\n    items: "+tc.source+"\n"
+				case "events":
+					file, body = "events.yaml", "proof.received:\n  items: "+tc.source+"\n"
+				}
+				writeFixtureFile(t, root+"/"+file, body)
+				repo := repoRootForContractsTest(t)
+				bundle, err := LoadWorkflowContractBundleWithOverrides(repo, root, DefaultPlatformSpecFile(repo))
+				if tc.refuse {
+					if err == nil || !strings.Contains(err.Error(), file) {
+						t.Fatalf("nested declaration admitted or lost source: %v", err)
+					}
+					return
+				}
+				if err != nil {
+					t.Fatal(err)
+				}
+				var got string
+				switch surface {
+				case "state", "indexed_state":
+					_, contract, _ := bundle.FlowPrimaryEntityContract(".")
+					got = contract.Fields["items"].Type
+				case "types":
+					got = bundle.RootTypes.Types["Container"].Fields["items"].Type
+				case "events":
+					got = bundle.Events["proof.received"].Payload.Properties["items"].Type
+				}
+				if got != tc.want {
+					t.Fatalf("recursive type = %q, want %q", got, tc.want)
+				}
+			})
+		}
+	}
 	for _, surface := range []string{"types", "entities", "events"} {
 		for _, scope := range []string{"", "child/"} {
 			for _, test := range []struct{ retired, canonical string }{
@@ -319,16 +386,25 @@ func TestListSpellingRetirementCombinedNestedBundle(t *testing.T) {
 					case "types":
 						prefix = "types:\n  Unused:\n    items: "
 					case "entities":
-						prefix = "probe:\n  items: "
+						file = scope + "state.yaml"
+						prefix = "items: "
 					case "events":
 						prefix = "proof.received:\n  items: "
 					}
 					repo := repoRootForContractsTest(t)
 					for _, source := range []string{test.retired, test.canonical} {
-						writeFixtureFile(t, root+"/"+file, prefix+"{type: '"+source+"'}\n")
+						indexed := ""
+						if surface == "entities" {
+							indexed = ", indexed: true"
+						}
+						writeFixtureFile(t, root+"/"+file, prefix+"{type: '"+source+"'"+indexed+"}\n")
 						bundle, err := LoadWorkflowContractBundleWithOverrides(repo, root, DefaultPlatformSpecFile(repo))
 						if source == test.retired {
-							if bundle != nil || !errors.Is(err, ErrInvalidField) || !strings.Contains(err.Error(), "use [") || !strings.Contains(err.Error(), file) {
+							located := err != nil && strings.Contains(err.Error(), file)
+							if diagnostic, ok := AsLoaderDiagnostic(err); ok {
+								located = located || diagnostic.Location.File == file
+							}
+							if bundle != nil || !errors.Is(err, ErrInvalidField) || !strings.Contains(err.Error(), "use [") || !located {
 								t.Fatalf("nested alternate escaped full source admission: %s: %v", source, err)
 							}
 							continue
@@ -348,6 +424,9 @@ func TestListSpellingRetirementPreservesNamedTypeCase(t *testing.T) {
 		t.Run(name, func(t *testing.T) {
 			for _, surface := range []string{"types", "entities", "events", "nodes"} {
 				for _, source := range []string{name, "{type: '" + name + "'}", "[" + name + "]"} {
+					if surface == "entities" && strings.HasPrefix(source, "{") {
+						source = strings.TrimSuffix(source, "}") + ", indexed: true}"
+					}
 					typeRef, optional, initial, err := listRetirementDecode(t, surface, listRetirementField(t, source))
 					want := name
 					if strings.HasPrefix(source, "[") {
@@ -363,7 +442,7 @@ func TestListSpellingRetirementPreservesNamedTypeCase(t *testing.T) {
 				"manifest.yaml": "version: 1.0.0\nplatform_version: '*'\n",
 				"schema.yaml":   "# fixture: case-proof\nstages:\n  ready: {}\n  done: {final: true}\n",
 				"types.yaml":    "types:\n  " + name + ":\n    value: text\n  Holder:\n    item: " + name + "\n",
-				"entities.yaml": "probe:\n  item: " + name + "\n",
+				"state.yaml":    "item: " + name + "\n",
 				"events.yaml":   "proof.received:\n  item: " + name + "\n",
 				"nodes.yaml":    "collector:\n  state_schema:\n    fields:\n      item: " + name + "\n",
 			} {

@@ -143,7 +143,7 @@ func TestConversationForkHistoricalClockDoesNotLeakToOrdinaryConstructionBothSto
 		t.Run(backend, func(t *testing.T) {
 			files := canonicalrouting.ConversationForkConstructionDocuments()
 			files["schema.yaml"] = canonicalrouting.ConversationForkHistoryRootDocument()
-			files["events.yaml"] = "conversation.created:\n  name: text\n"
+			files["events.yaml"] = canonicalrouting.ConversationForkCreatedEventDocument()
 			f := newReceiverConfigActivationFixtureWithDocuments(t, backend, false, files, nil)
 			run := correlation.RunIDFromContext(f.ctx)
 			cut := time.Date(2026, 1, 1, 0, 0, 30, 0, time.UTC)

@@ -85,7 +85,7 @@ func TestCatalogStructuralTypeFactoringPostDPrecedence(t *testing.T) {
 			catalogFactoringRefusal(t, err, tc.problem)
 		})
 	}
-	for _, surface := range []string{"types", "entities", "events", "nodes"} {
+	for _, surface := range []string{"types", "events", "nodes"} {
 		t.Run("source_decoder/"+surface, func(t *testing.T) {
 			decode := func(source string) (string, error) {
 				snapshot, err := yamlsource.Load([]byte("items: " + source + "\n"))
@@ -100,9 +100,6 @@ func TestCatalogStructuralTypeFactoringPostDPrecedence(t *testing.T) {
 				switch surface {
 				case "types":
 					field, err := projectTypeFieldSpec(value)
-					return field.Type, err
-				case "entities":
-					field, err := projectEntityFieldDecl(value)
 					return field.Type, err
 				case "events":
 					field, _, err := admitEventPayloadField(value)

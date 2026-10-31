@@ -47,6 +47,10 @@ func newWorkflowStructuralTypeProvider(base celtypes.Provider, opts ValueExpress
 		provider.knownPresence[path] = struct{}{}
 	}
 	loopType := runtimecontracts.ResolvedCatalogType{Kind: runtimecontracts.CatalogTypeObject}
+	instanceType := runtimecontracts.ResolvedCatalogType{Kind: runtimecontracts.CatalogTypeObject}
+	for _, name := range []string{"id", "stage", "path"} {
+		instanceType.Fields = append(instanceType.Fields, runtimecontracts.ResolvedCatalogField{Name: name, Type: runtimecontracts.ResolvedCatalogType{Kind: runtimecontracts.CatalogTypeText}})
+	}
 	for _, name := range []string{"id", "activation_id", "revision_id", "attempt", "max_attempts"} {
 		kind := runtimecontracts.CatalogTypeText
 		if name == "attempt" || name == "max_attempts" {
@@ -60,7 +64,8 @@ func newWorkflowStructuralTypeProvider(base celtypes.Provider, opts ValueExpress
 	}{
 		{name: "payload", type_: opts.PayloadType},
 		{name: "item", type_: opts.ItemType},
-		{name: "entity", type_: opts.EntityType},
+		{name: "state", type_: opts.EntityType},
+		{name: "instance", type_: &instanceType},
 		{name: "_loop", type_: &loopType},
 	} {
 		if root.type_ == nil || root.type_.Kind == "" {

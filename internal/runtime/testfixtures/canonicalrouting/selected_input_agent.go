@@ -14,7 +14,7 @@ func CopySelectedInputAgentProbe(t testing.TB) string {
 		instance := ""
 		if flow.mode == "template" {
 			instance = "instance: work_id\n"
-			writeClosedVariantFile(t, root, filepath.Join(flow.path, "entities.yaml"), "work:\n  work_id: text\n")
+			writeClosedVariantFile(t, root, filepath.Join(flow.path, "state.yaml"), "work_id: text\n")
 		}
 		for file, body := range map[string]string{
 			"manifest.yaml": "version: 1.0.0\nplatform_version: '*'\n",
@@ -38,9 +38,7 @@ func CopySelectedConstructedAgentInput(t testing.TB) string {
 		"manifest.yaml":           "version: 1.0.0\nplatform_version: '*'\n",
 		"schema.yaml":             "# fixture: selected-constructed-input\npins:\n  inputs:\n    - task.assigned\n  outputs:\n    - task.assigned\nconnect:\n  - {event: task.assigned, from: ., to: child}\n",
 		"events.yaml":             "task.assigned:\n",
-		"entities.yaml":           "run: {}\n",
 		"child/schema.yaml":       "# fixture: child\npins:\n  inputs:\n    - task.assigned\n",
-		"child/entities.yaml":     "child_state: {}\n",
 		"child/agents.yaml":       "worker:\n  model: regular\n  intent: prompts/worker.md\n  subscriptions: [task.assigned]\n",
 		"child/prompts/worker.md": "Consume the assigned task.\n",
 	} {
@@ -67,7 +65,7 @@ func copySelectedNestedConstructedAgentInput(t testing.TB, fields, observer bool
 		"events.yaml":         "task.assigned:\n  work_id: text\nconstruction.started:\n  work_id: text\n",
 		"nodes.yaml":          "anchor:\n  execution_type: system_node\n  subscribes_to: [construction.started]\n  event_handlers:\n    construction.started: {}\n",
 		"templ/schema.yaml":   "# fixture: templ\ninstance: work_id\nstages:\n  active: {}\n  done: {final: true}\npins:\n  inputs:\n    - task.assigned\n    - construction.started\n",
-		"templ/entities.yaml": "work:\n  work_id: text\n",
+		"templ/state.yaml":    "work_id: text\n",
 		"templ/events.yaml":   "construction.started:\n  work_id: text\n",
 		"templ/nodes.yaml":    "bootstrap:\n  execution_type: system_node\n  subscribes_to: [task.assigned]\n  produces: [construction.started]\n  event_handlers:\n    task.assigned:\n      emit:\n        event: construction.started\n        fields:\n          work_id: payload.work_id\nfinish:\n  execution_type: system_node\n  subscribes_to: [construction.started]\n  event_handlers:\n    construction.started:\n      advances_to: done\n",
 	} {
@@ -88,9 +86,9 @@ func copySelectedNestedConstructedAgentInput(t testing.TB, fields, observer bool
 				writeClosedVariantFile(t, root, filepath.Join(path, name), body)
 			}
 			if fields {
-				writeClosedVariantFile(t, root, filepath.Join(path, "entities.yaml"), "child_state:\n  value: {type: text, initial: retained}\n")
+				writeClosedVariantFile(t, root, filepath.Join(path, "state.yaml"), "value: \"retained\"\n")
 			} else {
-				writeClosedVariantFile(t, root, filepath.Join(path, "entities.yaml"), "child_state: {}\n")
+				removeClosedVariantFiles(t, root, filepath.Join(path, "state.yaml"))
 			}
 		}
 	}

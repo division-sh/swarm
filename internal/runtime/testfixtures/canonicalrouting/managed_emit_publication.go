@@ -63,7 +63,7 @@ func CopyManagedEmitPublication(t testing.TB, mode string) string {
 		}
 		writeClosedVariantFile(t, root, filepath.Join(flow, "events.yaml"), events)
 		if mode == "template" && !sibling {
-			writeClosedVariantFile(t, root, filepath.Join(flow, "entities.yaml"), "work:\n  case_id: text\n")
+			writeClosedVariantFile(t, root, filepath.Join(flow, "state.yaml"), "case_id: text\n")
 		}
 		nodes := "start:\n  execution_type: system_node\n  subscribes_to: [work.requested]\n  event_handlers:\n    work.requested:\n" + "      emit: {event: work.started, fields: {case_id: payload.case_id}}\nfinal:\n  execution_type: system_node\n  subscribes_to: [work.result]\n  event_handlers:\n    work.result:\n      emit: {event: work.ack, fields: {value: payload.value}}\n"
 		if sibling {

@@ -132,8 +132,8 @@ func TestReceiverConstructionPublicationObservesStandingTypedAbsenceBothStores(t
 					"service/schema.yaml": "stages: []\n", "manifest.yaml": "version: 1.0.0\nplatform_version: '*'\n", "service/manifest.yaml": "version: 1.0.0\nplatform_version: '*'\n",
 				}
 				if fielded {
-					documents["entities.yaml"] = "receipt:\n  marker: {type: text, initial: unchanged}\n"
-					documents["service/entities.yaml"] = documents["entities.yaml"]
+					documents["state.yaml"] = "marker: \"unchanged\"\n"
+					documents["service/state.yaml"] = documents["state.yaml"]
 				}
 				f := newReceiverConfigActivationFixtureWithDocuments(t, backend, false, documents, nil)
 				runID := correlation.RunIDFromContext(f.ctx)

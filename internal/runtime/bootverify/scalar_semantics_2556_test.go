@@ -10,7 +10,7 @@ import (
 )
 
 func TestScalar2556GateContextSourceDiagnostic(t *testing.T) {
-	for _, value := range []string{"ready", "${entity.name}", "'ready'", `"${7}"`} {
+	for _, value := range []string{"ready", "${state.name}", "'ready'", `"${7}"`} {
 		t.Run(value, func(t *testing.T) {
 			root := t.TempDir()
 			writeBootverifyFixtureFile(t, filepath.Join(root, "manifest.yaml"), "version: 1.0.0\nplatform_version: '*'\n")

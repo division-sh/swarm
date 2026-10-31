@@ -25,7 +25,7 @@ func TestEntityCreationMutationValidatesCombinedCandidate(t *testing.T) {
 				t.Fatal(err)
 			}
 			if value != "" {
-				if err := plan.Append(Mutation{Target: "entity.right", Value: value}); err != nil {
+				if err := plan.Append(Mutation{Target: "state.right", Value: value}); err != nil {
 					t.Fatal(err)
 				}
 			}

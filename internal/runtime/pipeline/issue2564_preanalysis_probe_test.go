@@ -16,7 +16,7 @@ func VerifyIssue2564EvaluatedSnapshotMustFenceCommitBothStoresForTest(t *testing
 			source := loadWorkflowTempSource(t, map[string]string{
 				"manifest.yaml": "version: 1.0.0\nplatform_version: \">=0.7.0 <0.8.0\"\n",
 				"schema.yaml":   "stages:\n  pending: {}\n",
-				"entities.yaml": "test_entity:\n  count: integer\n  marker: integer\n",
+				"state.yaml":    "count: integer\nmarker: integer\n",
 			})
 			fixture := open(t, tc.name, source)
 			pc := fixture.NewCoordinator(PipelineCoordinatorOptions{Module: &pipelineFixtureWorkflowModule{source: source}})
@@ -30,7 +30,7 @@ func VerifyIssue2564EvaluatedSnapshotMustFenceCommitBothStoresForTest(t *testing
 			if err := fixture.Construct(ctx, materializedWorkflowInstanceForSource(t, source, ctx, WorkflowInstance{
 				InstanceID: entityID, StorageRef: entityID, EntityID: entityID,
 				WorkflowName: ".", WorkflowVersion: source.WorkflowVersion(), CurrentState: "pending",
-				Fields: map[string]any{"count": 0, "marker": 0}, EntityType: "test_entity",
+				Fields: map[string]any{"count": 0, "marker": 0}, EntityType: "state",
 			})); err != nil {
 				t.Fatal(err)
 			}

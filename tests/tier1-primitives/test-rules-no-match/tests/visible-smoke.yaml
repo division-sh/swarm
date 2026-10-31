@@ -4,6 +4,5 @@ steps:
     payload:
       kind: c
 expect:
-  entities:
-    - type: test_entity
-      current_state: pending
+  events:
+    include: [item.received]

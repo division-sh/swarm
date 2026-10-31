@@ -9,7 +9,7 @@ import (
 )
 
 const (
-	EmitFromEntity  = "entity"
+	EmitFromEntity  = "state"
 	EmitFromPayload = "payload"
 )
 
@@ -85,7 +85,7 @@ func validateEmitFromSource(source string) error {
 	case "", EmitFromEntity, EmitFromPayload:
 		return nil
 	default:
-		return fmt.Errorf("emit.from source %q is unsupported; use entity or payload", source)
+		return fmt.Errorf("emit.from source %q is unsupported; use state or payload", source)
 	}
 }
 
@@ -174,7 +174,7 @@ func (b *WorkflowContractBundle) emitFieldSourceFields(ctx EmitFieldLoweringCont
 		}
 		return fields, nil
 	default:
-		return nil, fmt.Errorf("emit.from source %q is unsupported; use entity or payload", source)
+		return nil, fmt.Errorf("emit.from source %q is unsupported; use state or payload", source)
 	}
 }
 

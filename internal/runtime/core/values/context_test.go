@@ -27,8 +27,8 @@ func TestContextLookup_ByRoot(t *testing.T) {
 	ctx.Payload = Wrap(map[string]any{"score": 9})
 	ctx.Accumulated = Wrap(map[string]any{"count": 3})
 
-	if got, ok := ctx.Lookup(paths.Parse("entity.status")); !ok || got != "ready" {
-		t.Fatalf("entity lookup = %#v, %v", got, ok)
+	if got, ok := ctx.Lookup(paths.Parse("state.status")); !ok || got != "ready" {
+		t.Fatalf("state lookup = %#v, %v", got, ok)
 	}
 	if got, ok := ctx.Lookup(paths.Parse("payload.score")); !ok || got != 9 {
 		t.Fatalf("payload lookup = %#v, %v", got, ok)

@@ -1,6 +1,8 @@
 package canonicalrouting
 
 import (
+	"os"
+	"path/filepath"
 	"strings"
 	"testing"
 )
@@ -23,7 +25,12 @@ func CopyLifecycleEmitterLoopScopeTopology(t testing.TB, variant LifecycleLoopSc
 		t.Fatalf("unsupported loop scope variant %d", variant)
 	}
 	for _, scope := range []string{"left", "left/deep", "right"} {
-		for _, file := range []string{"manifest.yaml", "schema.yaml", "events.yaml", "nodes.yaml", "entities.yaml", "agents.yaml", "prompts/collector.md"} {
+		for _, file := range []string{"manifest.yaml", "schema.yaml", "events.yaml", "nodes.yaml", "state.yaml", "agents.yaml", "prompts/collector.md"} {
+			if file == "state.yaml" {
+				if _, err := os.Stat(filepath.Join(root, file)); os.IsNotExist(err) {
+					continue
+				}
+			}
 			writeClosedVariantFile(t, root, scope+"/"+file, lifecycleStaticRead(t, root, file))
 		}
 	}
@@ -39,13 +46,13 @@ func CopyLifecycleEmitterCompetingExit(t testing.TB, timer bool) string {
 	schema := lifecycleStaticRead(t, root, "schema.yaml")
 	schema = strings.Replace(schema, "  done: {final: true}", "  done: {final: true}\n  cancelled: {final: true}", 1)
 	nodes := lifecycleStaticRead(t, root, "nodes.yaml")
-	nodes = strings.Replace(nodes, "    work.completed:\n", "    work.completed:\n      guard: {id: approved_stage, check: _entity.current_state == 'approved'}\n", 1)
+	nodes = strings.Replace(nodes, "    work.completed:\n", "    work.completed:\n      guard: {id: approved_stage, check: instance.stage == 'approved'}\n", 1)
 	if timer {
 		schema = strings.Replace(schema, "  review:\n", "  review:\n    timers:\n      - {id: review_expired, after: 2s, advances_to: cancelled}\n", 1)
 	} else {
 		schema += "    - work.cancelled\n"
 		writeClosedVariantFile(t, root, "events.yaml", lifecycleStaticRead(t, root, "events.yaml")+"work.cancelled:\n  seed: boolean\n")
-		nodes += "canceller:\n  execution_type: system_node\n  subscribes_to: [work.cancelled]\n  event_handlers:\n    work.cancelled:\n      guard: {id: review_stage, check: _entity.current_state == 'review'}\n      advances_to: cancelled\n"
+		nodes += "canceller:\n  execution_type: system_node\n  subscribes_to: [work.cancelled]\n  event_handlers:\n    work.cancelled:\n      guard: {id: review_stage, check: instance.stage == 'review'}\n      advances_to: cancelled\n"
 	}
 	writeClosedVariantFile(t, root, "schema.yaml", schema)
 	writeClosedVariantFile(t, root, "nodes.yaml", nodes)

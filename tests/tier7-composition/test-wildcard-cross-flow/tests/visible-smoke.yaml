@@ -5,6 +5,3 @@ steps:
 expect:
   events:
     include: [job.alpha_done]
-  entities:
-    - type: default
-      current_state: done

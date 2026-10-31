@@ -223,14 +223,11 @@ types:
   ScoreBreakdown:
     total: numeric
 `)
-	writeFixtureFile(t, root+"/scoring/entities.yaml", `
-vertical:
-  _description: scoring vertical
-  name: text
-  review_count:
-    type: integer
-    indexed: true
-    initial: 0
+	writeFixtureFile(t, root+"/scoring/state.yaml", `
+name: text
+review_count:
+  type: integer
+  indexed: true
 `)
 	writeFixtureFile(t, root+"/scoring/events.yaml", `
 vertical.shortlisted:
@@ -262,7 +259,7 @@ vertical.shortlisted:
 	if !ok {
 		t.Fatal("expected scoring primary entity contract")
 	}
-	if entityType != "vertical" {
+	if entityType != stateEntityType {
 		t.Fatalf("FlowPrimaryEntityContract entity type = %q", entityType)
 	}
 	if got := entity.Fields["review_count"].Type; got != "integer" {
@@ -272,8 +269,8 @@ vertical.shortlisted:
 		t.Fatal("review_count Indexed = false, want true")
 	}
 	resolvedTypes := bundle.ResolvedTypeCatalogForFlow("scoring")
-	if _, ok := resolvedTypes.Scalars["URL"]; !ok {
-		t.Fatal("expected resolved flow type catalog to include root scalar")
+	if _, ok := resolvedTypes.Types["Brand"]; !ok {
+		t.Fatal("expected resolved flow type catalog to include root record")
 	}
 	if _, ok := resolvedTypes.Types["ScoreBreakdown"]; !ok {
 		t.Fatal("expected resolved flow type catalog to include flow-local type")
@@ -320,7 +317,7 @@ func TestWorkflowContractBundleResolveFlowTemplateInstance_UsesScalarIdentity(t 
 		},
 		flowEntities: map[string]EntityContractsDocument{
 			"spec_repo": {
-				"artifact_repo": {
+				"state": {
 					Fields: map[string]EntityFieldDecl{
 						"artifact_type": {Type: "text"},
 						"scope":         {Type: "text"},
@@ -408,7 +405,7 @@ func TestWorkflowContractBundleResolveFlowTemplateInstance_RejectsInvalidDeclara
 
 				Instance: missingField,
 			},
-			entities: EntityContractsDocument{"tenant": {Fields: map[string]EntityFieldDecl{"tenant_id": {Type: "text"}}}},
+			entities: EntityContractsDocument{"state": {Fields: map[string]EntityFieldDecl{"tenant_id": {Type: "text"}}}},
 			wantErr:  "not declared",
 		},
 		{
@@ -417,13 +414,13 @@ func TestWorkflowContractBundleResolveFlowTemplateInstance_RejectsInvalidDeclara
 
 				Instance: nonScalarField,
 			},
-			entities: EntityContractsDocument{"tenant": {Fields: map[string]EntityFieldDecl{"tags": {Type: "[text]"}}}},
+			entities: EntityContractsDocument{"state": {Fields: map[string]EntityFieldDecl{"tags": {Type: "[text]"}}}},
 			wantErr:  "scalar or enum",
 		},
 		{
 			name:     "static without instance key",
 			schema:   FlowSchemaDocument{},
-			entities: EntityContractsDocument{"tenant": {Fields: map[string]EntityFieldDecl{"tenant_id": {Type: "text"}}}},
+			entities: EntityContractsDocument{"state": {Fields: map[string]EntityFieldDecl{"tenant_id": {Type: "text"}}}},
 			wantErr:  "must declare instance: <field>",
 		},
 	}
@@ -459,7 +456,7 @@ func TestWorkflowContractBundleResolveFlowSingletonCoordinator_UsesPrimaryEntity
 		},
 		flowEntities: map[string]EntityContractsDocument{
 			"coordinator": {
-				"coordinator_state": {
+				"state": {
 					Fields: map[string]EntityFieldDecl{
 						"status":    {Type: "text"},
 						"verticals": {Type: "map[text]VerticalState"},
@@ -492,8 +489,8 @@ func TestWorkflowContractBundleResolveFlowSingletonCoordinator_UsesPrimaryEntity
 	if err != nil {
 		t.Fatalf("ResolveFlowSingletonCoordinator: %v", err)
 	}
-	if got := resolved.PrimaryEntity.EntityType; got != "coordinator_state" {
-		t.Fatalf("PrimaryEntity.EntityType = %q, want coordinator_state", got)
+	if got := resolved.PrimaryEntity.EntityType; got != stateEntityType {
+		t.Fatalf("PrimaryEntity.EntityType = %q, want %s", got, stateEntityType)
 	}
 	if len(resolved.ContainedState) != 2 {
 		t.Fatalf("ContainedState = %#v, want verticals/jobs", resolved.ContainedState)
@@ -515,14 +512,14 @@ func TestWorkflowContractBundleResolveFlowSingleton_AllowsEmptyAndScalarOnlyPrim
 		bundle := &WorkflowContractBundle{
 			FlowSchemas: map[string]FlowSchemaDocument{"service": {}},
 			flowEntities: map[string]EntityContractsDocument{
-				"service": {"service_state": {Fields: fields}},
+				"service": {"state": {Fields: fields}},
 			},
 		}
 		resolved, err := bundle.ResolveFlowSingleton("service")
 		if err != nil {
 			t.Fatalf("ResolveFlowSingleton(%#v): %v", fields, err)
 		}
-		if resolved.FlowID != "service" || resolved.PrimaryEntity.EntityType != "service_state" {
+		if resolved.FlowID != "service" || resolved.PrimaryEntity.EntityType != stateEntityType {
 			t.Fatalf("ResolveFlowSingleton = %#v", resolved)
 		}
 	}
@@ -545,7 +542,7 @@ func TestWorkflowContractBundleResolveFlowSingletonCoordinator_RejectsInvalidDec
 		{
 			name:     "static contained type must resolve",
 			schema:   FlowSchemaDocument{},
-			entities: EntityContractsDocument{"coordinator_state": {Fields: map[string]EntityFieldDecl{"verticals": {Type: "map[text]VerticalState"}}}},
+			entities: EntityContractsDocument{"state": {Fields: map[string]EntityFieldDecl{"verticals": {Type: "map[text]VerticalState"}}}},
 			wantErr:  "VerticalState",
 		},
 		{
@@ -554,35 +551,26 @@ func TestWorkflowContractBundleResolveFlowSingletonCoordinator_RejectsInvalidDec
 
 				Instance: instanceField,
 			},
-			entities: EntityContractsDocument{"coordinator_state": {Fields: map[string]EntityFieldDecl{"verticals": {Type: "map[text]VerticalState"}}}},
+			entities: EntityContractsDocument{"state": {Fields: map[string]EntityFieldDecl{"verticals": {Type: "map[text]VerticalState"}}}},
 			wantErr:  "has a template instance key",
 		},
 		{
 			name:     "agent memory only no contained state",
 			schema:   FlowSchemaDocument{},
-			entities: EntityContractsDocument{"coordinator_state": {Fields: map[string]EntityFieldDecl{"status": {Type: "text"}}}},
+			entities: EntityContractsDocument{"state": {Fields: map[string]EntityFieldDecl{"status": {Type: "text"}}}},
 			wantErr:  "agent conversation memory is not coordinator state authority",
 		},
 		{
 			name:     "unresolved map value type",
 			schema:   FlowSchemaDocument{},
-			entities: EntityContractsDocument{"coordinator_state": {Fields: map[string]EntityFieldDecl{"verticals": {Type: "map[text]MissingType"}}}},
+			entities: EntityContractsDocument{"state": {Fields: map[string]EntityFieldDecl{"verticals": {Type: "map[text]MissingType"}}}},
 			wantErr:  "MissingType",
 		},
 		{
 			name:     "unresolved list item type",
 			schema:   FlowSchemaDocument{},
-			entities: EntityContractsDocument{"coordinator_state": {Fields: map[string]EntityFieldDecl{"jobs": {Type: "[MissingType]"}}}},
+			entities: EntityContractsDocument{"state": {Fields: map[string]EntityFieldDecl{"jobs": {Type: "[MissingType]"}}}},
 			wantErr:  "MissingType",
-		},
-		{
-			name:   "multiple entity contracts",
-			schema: FlowSchemaDocument{},
-			entities: EntityContractsDocument{
-				"coordinator_state": {Fields: map[string]EntityFieldDecl{"verticals": {Type: "map[text]VerticalState"}}},
-				"legacy_state":      {Fields: map[string]EntityFieldDecl{"status": {Type: "text"}}},
-			},
-			wantErr: "multiple entity types",
 		},
 	}
 
@@ -640,54 +628,6 @@ func TestTypeDiagnosticsUseAuthorFacingVocabulary(t *testing.T) {
 	})
 }
 
-func TestLoadWorkflowContractBundle_RejectsMultipleFlowEntityTypes(t *testing.T) {
-	repoRoot := repoRootForContractsTest(t)
-	root := t.TempDir()
-
-	writeFixtureFile(t, root+"/manifest.yaml", "version: 1.0.0\nplatform_version: '*'\n")
-	writeFixtureFile(t, root+"/scoring/manifest.yaml", "version: 1.0.0\nplatform_version: '*'\n")
-	writeFixtureFile(t, root+"/schema.yaml", "stages: []\n# fixture: invalid-flow-entities\n")
-	writeFixtureFile(t, root+"/scoring/schema.yaml", `# fixture: scoring
-stages:
-  pending: {}
-  done: {final: true}
-`)
-	writeFixtureFile(t, root+"/scoring/entities.yaml", `
-vertical:
-  name: text
-campaign:
-  title: text
-`)
-
-	_, err := LoadWorkflowContractBundleWithOverrides(repoRoot, root, DefaultPlatformSpecFile(repoRoot))
-	if err == nil || !strings.Contains(err.Error(), "INVALID-PRIMARY-ENTITY") || !strings.Contains(err.Error(), "exactly one entity type") {
-		t.Fatalf("LoadWorkflowContractBundleWithOverrides error = %v, want INVALID-PRIMARY-ENTITY requiring exactly one entity type", err)
-	}
-}
-
-func TestLoadWorkflowContractBundle_RejectsMultipleRootEntityTypes(t *testing.T) {
-	repoRoot := repoRootForContractsTest(t)
-	root := t.TempDir()
-
-	writeFixtureFile(t, root+"/manifest.yaml", "version: 1.0.0\nplatform_version: '*'\n")
-	writeFixtureFile(t, root+"/schema.yaml", `# fixture: invalid-root-entities
-stages:
-  pending: {}
-  done: {final: true}
-`)
-	writeFixtureFile(t, root+"/entities.yaml", `
-vertical:
-  name: text
-campaign:
-  title: text
-`)
-
-	_, err := LoadWorkflowContractBundleWithOverrides(repoRoot, root, DefaultPlatformSpecFile(repoRoot))
-	if err == nil || !strings.Contains(err.Error(), "INVALID-PRIMARY-ENTITY") || !strings.Contains(err.Error(), "exactly one entity type") {
-		t.Fatalf("LoadWorkflowContractBundleWithOverrides error = %v, want INVALID-PRIMARY-ENTITY requiring exactly one entity type", err)
-	}
-}
-
 func TestLoadWorkflowContractBundle_RejectsSchemaEntitySelector(t *testing.T) {
 	repoRoot := repoRootForContractsTest(t)
 	root := t.TempDir()
@@ -701,9 +641,7 @@ stages:
   pending: {}
   done: {final: true}
 `)
-	writeFixtureFile(t, root+"/scoring/entities.yaml", `
-vertical:
-  name: text
+	writeFixtureFile(t, root+"/scoring/state.yaml", `name: text
 `)
 
 	_, err := LoadWorkflowContractBundleWithOverrides(repoRoot, root, DefaultPlatformSpecFile(repoRoot))
@@ -723,9 +661,7 @@ stages:
   pending: {}
   done: {final: true}
 `)
-	writeFixtureFile(t, root+"/entities.yaml", `
-vertical:
-  name: text
+	writeFixtureFile(t, root+"/state.yaml", `name: text
 `)
 
 	_, err := LoadWorkflowContractBundleWithOverrides(repoRoot, root, DefaultPlatformSpecFile(repoRoot))
@@ -851,19 +787,19 @@ func TestTypeCatalogDocumentDecode_RejectsInvalidOptionalMarkers(t *testing.T) {
 
 func TestEntityContractsDocumentDecode_PreservesOptionalTopLevelField(t *testing.T) {
 	var doc EntityContractsDocument
-	err := decodeNodeTestYAML([]byte("item:\n  label: text?\n"), &doc)
-	if err != nil || !doc["item"].Fields["label"].IsOptional {
+	err := decodeNodeTestYAML([]byte("label: text?\n"), &doc)
+	if err != nil || !doc[stateEntityType].Fields["label"].IsOptional {
 		t.Fatalf("decoded entity = %#v, error = %v", doc, err)
 	}
 }
 
 func TestCustomContractDocumentsDecodeMergeExpandedMappings(t *testing.T) {
 	var entities EntityContractsDocument
-	if err := decodeNodeTestYAML([]byte("<<: &entities\n  item: {}\n"), &entities); err != nil {
+	if err := decodeNodeTestYAML([]byte("<<: &fields\n  label: text\n"), &entities); err != nil {
 		t.Fatalf("yaml.Unmarshal entities: %v", err)
 	}
-	if _, ok := entities["item"]; !ok {
-		t.Fatalf("merged entities = %#v, want item", entities)
+	if _, ok := entities[stateEntityType].Fields["label"]; !ok {
+		t.Fatalf("merged state = %#v, want label", entities)
 	}
 	if _, ok := entities["<<"]; ok {
 		t.Fatalf("merged entities published pseudo-key: %#v", entities)

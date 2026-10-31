@@ -40,7 +40,7 @@
       "mode": "template",
       "source_files": {
         "schema": "account/schema.yaml",
-        "entities": "account/entities.yaml",
+        "entities": "account/state.yaml",
         "nodes": "account/nodes.yaml"
       },
       "required_agents": {
@@ -48,15 +48,15 @@
         "agents": []
       },
       "primary_entity": {
-        "type": "account_state",
+        "type": "state",
         "fields": {
           "account_id": "text"
         },
-        "source_file": "account/entities.yaml"
+        "source_file": "account/state.yaml"
       },
       "template_instance": {
         "field": "account_id",
-        "primary_entity": "account_state",
+        "primary_entity": "state",
         "identity": "run + flow + instance_key",
         "source_file": "account/schema.yaml"
       },
@@ -101,7 +101,6 @@
         "source": "inferred",
         "agents": []
       },
-      "primary_entity_error": "INVALID-PRIMARY-ENTITY: flow producer has no declared entity types; stateful normal flows must declare exactly one entity type or be explicitly stateless/template",
       "input_pins": [
         {
           "event": "account.requested",
@@ -512,7 +511,7 @@
       "severity": "lint_evidence",
       "location": "account",
       "authored_location": "account/schema.yaml",
-      "message": "flow account entity_type account_state declares field account_id with no detected internal reader coverage"
+      "message": "flow account entity_type state declares field account_id with no detected internal reader coverage"
     }
   ],
   "equivalence": {

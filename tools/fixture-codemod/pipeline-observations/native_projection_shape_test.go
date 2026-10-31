@@ -215,26 +215,3 @@ func projectionShapeDiagnosticPredecessor(row recipe, source []byte) (recipe, er
 	expected.Successor = ""
 	return expected, nil
 }
-
-func TestNativeProjectionShapeDiagnosticOwnerSuccessorPreservesExactHistory(t *testing.T) {
-	row := projectionShapeRecipe(t)
-	source, err := os.ReadFile(filepath.Join("..", "..", "..", row.File))
-	if err != nil {
-		t.Fatal(err)
-	}
-	if _, err := projectionShapeDiagnosticPredecessor(row, source); err != nil {
-		t.Fatal(err)
-	}
-	if files, changes, err := prepareFiles("../../..", []recipe{row}); err != nil || len(files) != 0 || len(changes) != 0 {
-		t.Fatalf("current diagnostic successor is not inert: %v", err)
-	}
-	for _, cut := range []string{"if changed != 1", "if err == nil", "if !strings.Contains(err.Error(), tc.wantContains)", "flow_instances.gates", "flow_instances.accumulator"} {
-		mutant := strings.Replace(row.Successor, cut, "foreignCut", 1)
-		if mutant == row.Successor {
-			t.Fatalf("missing diagnostic/assertion hostility cut: %s", cut)
-		}
-		if _, changed, err := rewriteFunction(row.File, []byte("package proof\n"+mutant), row); err == nil && !changed {
-			t.Fatalf("weakened diagnostic/assertion successor accepted: %s", cut)
-		}
-	}
-}

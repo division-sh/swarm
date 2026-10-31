@@ -67,7 +67,6 @@
         "source": "inferred",
         "agents": []
       },
-      "primary_entity_error": "INVALID-PRIMARY-ENTITY: flow ingress has no declared entity types; stateful normal flows must declare exactly one entity type or be explicitly stateless/template",
       "input_pins": [
         {
           "event": "operating.report.triggered",
@@ -107,7 +106,7 @@
       "mode": "template",
       "source_files": {
         "schema": "operating/schema.yaml",
-        "entities": "operating/entities.yaml",
+        "entities": "operating/state.yaml",
         "nodes": "operating/nodes.yaml",
         "events": "operating/events.yaml"
       },
@@ -128,15 +127,15 @@
         "agents": []
       },
       "primary_entity": {
-        "type": "operating_state",
+        "type": "state",
         "fields": {
           "operating_instance_id": "text"
         },
-        "source_file": "operating/entities.yaml"
+        "source_file": "operating/state.yaml"
       },
       "template_instance": {
         "field": "operating_instance_id",
-        "primary_entity": "operating_state",
+        "primary_entity": "state",
         "identity": "run + flow + instance_key",
         "source_file": "operating/schema.yaml"
       },
@@ -184,7 +183,7 @@
       "mode": "template",
       "source_files": {
         "schema": "portfolio/schema.yaml",
-        "entities": "portfolio/entities.yaml",
+        "entities": "portfolio/state.yaml",
         "nodes": "portfolio/nodes.yaml",
         "events": "portfolio/events.yaml"
       },
@@ -212,15 +211,15 @@
         "agents": []
       },
       "primary_entity": {
-        "type": "portfolio_context",
+        "type": "state",
         "fields": {
           "portfolio_id": "text"
         },
-        "source_file": "portfolio/entities.yaml"
+        "source_file": "portfolio/state.yaml"
       },
       "template_instance": {
         "field": "portfolio_id",
-        "primary_entity": "portfolio_context",
+        "primary_entity": "state",
         "identity": "run + flow + instance_key",
         "source_file": "portfolio/schema.yaml"
       },
@@ -296,7 +295,7 @@
       "mode": "template",
       "source_files": {
         "schema": "portfolio/period/schema.yaml",
-        "entities": "portfolio/period/entities.yaml",
+        "entities": "portfolio/period/state.yaml",
         "nodes": "portfolio/period/nodes.yaml"
       },
       "required_agents": {
@@ -304,17 +303,17 @@
         "agents": []
       },
       "primary_entity": {
-        "type": "period_state",
+        "type": "state",
         "fields": {
           "expected_operating_ids": "[text]",
           "period_id": "text",
           "portfolio_id": "text"
         },
-        "source_file": "portfolio/period/entities.yaml"
+        "source_file": "portfolio/period/state.yaml"
       },
       "template_instance": {
         "field": "period_id",
-        "primary_entity": "period_state",
+        "primary_entity": "state",
         "identity": "run + flow + instance_key",
         "source_file": "portfolio/period/schema.yaml"
       },
@@ -1613,7 +1612,7 @@
       "check_id": "cross_surface_named_type_use",
       "severity": "lint_evidence",
       "location": "global",
-      "message": "authored object shape reuse candidate: identical shape {expected_operating_ids:[text], period_id:text, portfolio_id:text} appears in entity portfolio/period.period_state; event portfolio.setup payload; event portfolio/period.setup payload; consider extracting or reusing a named type if these represent the same concept"
+      "message": "authored object shape reuse candidate: identical shape {expected_operating_ids:[text], period_id:text, portfolio_id:text} appears in entity portfolio/period.state; event portfolio.setup payload; event portfolio/period.setup payload; consider extracting or reusing a named type if these represent the same concept"
     },
     {
       "check_id": "cross_surface_named_type_use",
@@ -1632,28 +1631,28 @@
       "severity": "lint_evidence",
       "location": "operating",
       "authored_location": "operating/schema.yaml",
-      "message": "flow operating entity_type operating_state declares field operating_instance_id with no detected internal reader coverage"
+      "message": "flow operating entity_type state declares field operating_instance_id with no detected internal reader coverage"
     },
     {
       "check_id": "entity_reader_coverage",
       "severity": "lint_evidence",
       "location": "portfolio",
       "authored_location": "portfolio/schema.yaml",
-      "message": "flow portfolio entity_type portfolio_context declares field portfolio_id with no detected internal reader coverage"
+      "message": "flow portfolio entity_type state declares field portfolio_id with no detected internal reader coverage"
     },
     {
       "check_id": "entity_reader_coverage",
       "severity": "lint_evidence",
       "location": "portfolio/period",
       "authored_location": "portfolio/period/schema.yaml",
-      "message": "flow portfolio/period entity_type period_state declares field period_id with no detected internal reader coverage"
+      "message": "flow portfolio/period entity_type state declares field period_id with no detected internal reader coverage"
     },
     {
       "check_id": "entity_reader_coverage",
       "severity": "lint_evidence",
       "location": "portfolio/period",
       "authored_location": "portfolio/period/schema.yaml",
-      "message": "flow portfolio/period entity_type period_state declares field portfolio_id with no detected internal reader coverage"
+      "message": "flow portfolio/period entity_type state declares field portfolio_id with no detected internal reader coverage"
     }
   ],
   "equivalence": {

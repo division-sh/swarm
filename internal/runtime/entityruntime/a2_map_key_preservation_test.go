@@ -202,7 +202,7 @@ func TestA2WholeMapRejectsDuplicateNormalizedKeysAtomically(t *testing.T) {
 					if err != nil {
 						t.Fatal(err)
 					}
-					if err := plan.Append(Mutation{Target: "entity.items", Value: input}); err == nil || !strings.Contains(err.Error(), "duplicate normalized map key") {
+					if err := plan.Append(Mutation{Target: "state.items", Value: input}); err == nil || !strings.Contains(err.Error(), "duplicate normalized map key") {
 						t.Fatalf("whole set selected a collision winner: %v", err)
 					}
 					if got, err := plan.Validate(); err == nil || got != nil {

@@ -9,6 +9,3 @@ steps:
 expect:
   events:
     include: [task.dispatched]
-  entities:
-    - type: test_entity
-      current_state: processing

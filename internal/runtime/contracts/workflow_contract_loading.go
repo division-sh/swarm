@@ -181,7 +181,11 @@ func loadWorkflowFlowDeclarations(bundle *WorkflowContractBundle) (map[string]Fl
 		if err != nil {
 			return nil, err
 		}
-		flowEntities, err := loadOptionalEntityDeclarationsFromSource(artifact, source.Entities)
+		stateTypes := flowTypes
+		if source.FlowPath != "." {
+			stateTypes = mergeTypeCatalogDocuments(bundle.RootTypes, flowTypes)
+		}
+		flowEntities, err := loadOptionalEntityDeclarationsFromSource(artifact, source.State, stateTypes)
 		if err != nil {
 			return nil, err
 		}

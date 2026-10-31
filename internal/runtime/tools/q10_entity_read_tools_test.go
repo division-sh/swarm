@@ -15,7 +15,10 @@ func TestQ10AgentReadbackAndQueryOwnershipBothStores(t *testing.T) {
 		t.Run(backend, func(t *testing.T) {
 			actor := models.AgentConfig{ExecutionMode: "live", ID: "tester", Type: "internal", Role: "operator",
 				Tools: []string{"get_entity", "search_entities", "query_entities", "query_metrics"}}
-			bundle := loadWave1EntityToolBundleWithInitialStage(t, actor, "review", "accounts", "", "accounts:\n  status: text\n  score: numeric\n", "queued", true)
+			bundle := loadWave1EntityToolBundleWithInitialStage(t, actor, "review", "state", "", `
+status: text
+score: numeric
+`, "queued", true)
 			var selected runtimetools.EntityPersistence
 			if backend == "sqlite" {
 				selected = storetest.StartSQLiteRuntimeStore(t)

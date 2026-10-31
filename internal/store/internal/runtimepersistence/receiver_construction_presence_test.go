@@ -39,7 +39,7 @@ func TestReceiverReadinessRequiresConstructedHeaderBothStores(t *testing.T) {
 					"review/schema.yaml": "stages:\n  pending: {}\n", "manifest.yaml": "version: 1.0.0\nplatform_version: '*'\n", "review/manifest.yaml": "version: 1.0.0\nplatform_version: '*'\n",
 				}
 				if test.fielded {
-					documents["review/entities.yaml"] = "review_item:\n  marker: {type: text, initial: original}\n"
+					documents["review/state.yaml"] = "marker: \"original\"\n"
 				}
 				f := newReceiverConfigActivationFixtureWithDocuments(t, backend, false, documents, nil)
 				runID := correlation.RunIDFromContext(f.ctx)

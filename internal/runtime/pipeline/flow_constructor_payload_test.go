@@ -44,7 +44,7 @@ func TestFlowConstructorPayloadConsumesExactDeliveryProjection(t *testing.T) {
 	source := loadWorkflowTempSource(t, map[string]string{
 		"manifest.yaml": "version: 1.0.0\nplatform_version: \">=0.7.0 <0.8.0\"\n",
 		"schema.yaml":   "instance: item_id\npins:\n  inputs:\n    - item.created\n",
-		"entities.yaml": "item:\n  item_id: text\n  precise: double?\n  message: text?\n",
+		"state.yaml":    "item_id: text\nprecise: double?\nmessage: text?\n",
 		"events.yaml":   "item.created:\n  precise: double\n  message: text\n",
 	})
 	event := eventtest.ExistingRunRootIngress(uuid.NewString(), "source.created", "constructor-fixture", "", []byte(`{"precise":7.0,"message":"unchanged"}`), 0, uuid.NewString(), events.EventEnvelope{}, time.Now().UTC())
@@ -123,7 +123,7 @@ func TestFlowInstanceKeyRequiresScalarAdmissionBeforeFormatting(t *testing.T) {
 			source := loadWorkflowTempSource(t, map[string]string{
 				"manifest.yaml": "version: 1.0.0\nplatform_version: \">=0.7.0 <0.8.0\"\n",
 				"schema.yaml":   "instance: item_id\npins:\n  inputs:\n    - item.created\n",
-				"entities.yaml": "item:\n  item_id: " + test.fieldType + "\n",
+				"state.yaml":    "item_id: " + test.fieldType + "\n",
 				"events.yaml":   "item.created:\n  item_id: " + test.fieldType + "\n",
 			})
 			material, err := AdmitFlowInstanceKey(source, ".", test.value)
@@ -184,7 +184,7 @@ func TestFlowConstructorResolvedKeySatisfiesOnlyItsDeclaredSlot(t *testing.T) {
 			source := loadWorkflowTempSource(t, map[string]string{
 				"manifest.yaml": "version: 1.0.0\nplatform_version: \">=0.7.0 <0.8.0\"\n",
 				"schema.yaml":   "instance: item_id\npins:\n  inputs:\n    - item.created\n",
-				"entities.yaml": "item:\n  item_id: text\n  message: text?\n",
+				"state.yaml":    "item_id: text\nmessage: text?\n",
 				"events.yaml":   eventSchema,
 			})
 			constructor, err := CompileFlowConstructor(source, ".", "item.created")

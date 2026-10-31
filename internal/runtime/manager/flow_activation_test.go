@@ -1601,7 +1601,7 @@ func loadFlowActivationEntityContracts(
 		}
 		writeFlowActivationFixtureFile(t, filepath.Join(root, flowID, "manifest.yaml"), "version: 1.0.0\nplatform_version: '*'\n")
 		writeFlowActivationFixtureFile(t, filepath.Join(root, flowID, "schema.yaml"), "stages:\n  active: {}\n")
-		writeFlowActivationFixtureFile(t, filepath.Join(root, flowID, "entities.yaml"), fmt.Sprintf("%s:\n  instance_key: {type: text, _unused_reason: fixture instance identity}\n", entityType))
+		writeFlowActivationFixtureFile(t, filepath.Join(root, flowID, "state.yaml"), "instance_key: text\n")
 	}
 	writeFlowActivationFixtureFile(t, filepath.Join(root, "schema.yaml"), "stages: []\n")
 	repoRoot := runtimepipeline.WorkflowRepoRoot()
@@ -1856,8 +1856,8 @@ func TestActivateFlowInstanceUsesConstructedAttachmentEvidence(t *testing.T) {
 	if !flowActivationAttemptReadyForTest(am, ctx, req) {
 		t.Fatal("constructed receiver did not acquire its exact ready activation attempt")
 	}
-	if len(instances.creates) != 1 || instances.creates[0].EntityType != "review_entity" {
-		t.Fatalf("activation entity contract = %#v, want canonical review_entity and no schema.Entity interpretation", instances.creates)
+	if len(instances.creates) != 1 || instances.creates[0].EntityType != "state" {
+		t.Fatalf("activation state contract = %#v, want canonical state and no schema.Entity interpretation", instances.creates)
 	}
 	if _, ok := testFlowActivationAgentConfig(t, am, "reviewer", "review/inst-1"); !ok {
 		t.Fatal("expected activated flow agent config")
@@ -5723,9 +5723,8 @@ func loadFilesystemStaticAgentSource(t *testing.T) semanticview.Source {
 		writeFlowActivationFixtureFile(t, filepath.Join(root, flow, "manifest.yaml"), "version: 1.0.0\nplatform_version: '*'\n")
 	}
 
-	writeFlowActivationFixtureFile(t, filepath.Join(root, "entities.yaml"), `
-item:
-  item_id: string
+	writeFlowActivationFixtureFile(t, filepath.Join(root, "state.yaml"), `
+item_id: string
 `)
 	writeFlowActivationFixtureFile(t, filepath.Join(root, "schema.yaml"), "stages: []\n")
 	writeFlowActivationFixtureFile(t, filepath.Join(root, "events.yaml"), `
@@ -5773,9 +5772,8 @@ func loadNestedProjectAgentSource(t *testing.T, mode string) semanticview.Source
 		writeFlowActivationFixtureFile(t, filepath.Join(root, flow, "manifest.yaml"), "version: 1.0.0\nplatform_version: '*'\n")
 	}
 
-	writeFlowActivationFixtureFile(t, filepath.Join(root, "entities.yaml"), `
-item:
-  item_id: string
+	writeFlowActivationFixtureFile(t, filepath.Join(root, "state.yaml"), `
+item_id: string
 `)
 	writeFlowActivationFixtureFile(t, filepath.Join(root, "schema.yaml"), "stages: []\n")
 	writeFlowActivationFixtureFile(t, filepath.Join(root, "events.yaml"), `
@@ -5785,7 +5783,7 @@ item.created:
 	shape := ""
 	if mode == runtimecontracts.FlowModeTemplate {
 		shape = "instance: instance_key\n"
-		writeFlowActivationFixtureFile(t, filepath.Join(root, "support", "entities.yaml"), "support:\n  instance_key: {type: text, _unused_reason: fixture instance identity}\n")
+		writeFlowActivationFixtureFile(t, filepath.Join(root, "support", "state.yaml"), "instance_key: text\n")
 	}
 	writeFlowActivationFixtureFile(t, filepath.Join(root, "support", "schema.yaml"), fmt.Sprintf(`%sstages:
   waiting: {}

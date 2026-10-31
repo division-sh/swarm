@@ -427,7 +427,7 @@ func activityBoringFullFlowBundle(t *testing.T, serverURL string) *runtimecontra
 		"schema.yaml":            "stages: []\n",
 		"research/manifest.yaml": "version: 1.0.0\nplatform_version: \">=0.7.0 <0.8.0\"\n",
 		"research/schema.yaml":   "instance: marker\nstages:\n  pending: {}\n",
-		"research/entities.yaml": "test_entity:\n  marker: text\n",
+		"research/state.yaml":    "marker: text\n",
 		"research/events.yaml":   "source.requested:\n  url: text\n",
 		"research/nodes.yaml": `scanner:
   subscribes_to: [source.requested]

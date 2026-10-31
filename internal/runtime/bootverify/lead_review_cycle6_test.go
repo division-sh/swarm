@@ -15,12 +15,12 @@ func TestLeadReview6BootDerivedCollectionLookup(t *testing.T) {
 			bundle, _ := semanticview.Bundle(source)
 			bundle.Platform.Platform.Name = "review"
 			bundle.Platform.Platform.Version = "1"
-			entity := bundle.RootEntities["items"]
+			entity := bundle.RootEntities["state"]
 			for name, field := range entity.Fields {
 				field.UnusedReason = "externally populated review fixture"
 				entity.Fields[name] = field
 			}
-			bundle.RootEntities["items"] = entity
+			bundle.RootEntities["state"] = entity
 			report := Run(context.Background(), source, Options{})
 			found := false
 			for _, f := range report.Errors() {

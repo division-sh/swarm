@@ -50,12 +50,16 @@ func TestAdmitDirectoryBuildsFiniteFlowTreeAndBundleV2(t *testing.T) {
 }
 
 func TestAdmitDirectoryRetiresPackageAndFlows(t *testing.T) {
-	for _, label := range []string{"package.yaml", "flows/child/schema.yaml"} {
+	for _, label := range []string{"package.yaml", "flows/child/schema.yaml", "entities.yaml", "child/entities.yaml"} {
 		t.Run(label, func(t *testing.T) {
 			root := t.TempDir()
 			writeTestFile(t, root, label, "name: old\n")
 			_, err := AdmitDirectory(root)
-			if err == nil || !strings.Contains(err.Error(), "not an admitted") {
+			want := "not an admitted"
+			if strings.HasSuffix(label, "entities.yaml") {
+				want = "entities.yaml is retired; declare fields directly in state.yaml without an entity-name wrapper"
+			}
+			if err == nil || !strings.Contains(err.Error(), want) {
 				t.Fatalf("error = %v, want RETIRED", err)
 			}
 		})

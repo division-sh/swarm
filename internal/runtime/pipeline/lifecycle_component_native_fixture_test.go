@@ -13,6 +13,7 @@ import (
 	"github.com/division-sh/swarm/internal/runtime/correlation"
 	"github.com/division-sh/swarm/internal/runtime/decisioncard"
 	"github.com/division-sh/swarm/internal/runtime/deliverylifecycle"
+	"github.com/division-sh/swarm/internal/runtime/entityruntime"
 	"github.com/division-sh/swarm/internal/runtime/semanticview"
 	"github.com/division-sh/swarm/internal/runtime/workflowlifecycle"
 )
@@ -104,7 +105,8 @@ func nativeLifecycleComponentForTest(t *testing.T, backend string, bundle *contr
 		}
 	})
 	run := correlation.RunIDFromContext(ctx)
-	if err := fixture.Construct(ctx, materializedWorkflowInstanceForSource(t, pc.SemanticSource(), ctx, WorkflowInstance{InstanceID: run, StorageRef: run, EntityID: run, WorkflowName: ".", WorkflowVersion: bundle.WorkflowVersion(), CurrentState: initial, EnteredStageAt: time.Now().UTC(), Fields: map[string]any{}, EntityType: "test_entity"})); err != nil {
+	state, _ := entityruntime.ResolveForFlow(pc.SemanticSource(), ".")
+	if err := fixture.Construct(ctx, materializedWorkflowInstanceForSource(t, pc.SemanticSource(), ctx, WorkflowInstance{InstanceID: run, StorageRef: run, EntityID: run, WorkflowName: ".", WorkflowVersion: bundle.WorkflowVersion(), CurrentState: initial, EnteredStageAt: time.Now().UTC(), Fields: map[string]any{}, EntityType: state.EntityType})); err != nil {
 		t.Fatal(err)
 	}
 	return fixture, pc, ctx, mutations

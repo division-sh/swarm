@@ -456,8 +456,8 @@ func releaseE2ELiveAllowedTools() []string {
 		"WebSearch",
 		"mcp__runtime-tools__emit_agent_completed",
 		"mcp__runtime-tools__notify_human",
-		"mcp__runtime-tools__read_worker_state",
-		"mcp__runtime-tools__read_worker_state_requests",
+		"mcp__runtime-tools__read_state",
+		"mcp__runtime-tools__read_state_requests",
 	}
 }
 

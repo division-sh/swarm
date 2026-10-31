@@ -19,7 +19,7 @@ func TestCatalogWorkflowStateDiagnosticUsesSelectedProjectionBothStores(t *testi
 	}
 	for _, backend := range []catalogRuntimeBackend{catalogBackendSQLite, catalogBackendPostgres} {
 		t.Run(string(backend), func(t *testing.T) {
-			root := canonicalrouting.CopyReceiverOptionalChild(t, false)
+			root := canonicalrouting.CopyWorkflowStateDiagnostic(t, "waiting")
 			h := newRuntimeHarnessForBackend(t, root, backend, true)
 			reader, err := h.catalogOperatorEventLister()
 			if err != nil {

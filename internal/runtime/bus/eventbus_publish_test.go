@@ -4094,14 +4094,12 @@ func mixedNodeRouteWorkflowModule(t *testing.T) (runtimepipeline.WorkflowModule,
 	bundle := loadEventBusTempBundle(t, map[string]string{
 		"manifest.yaml":       "version: 1.0.0\nplatform_version: '*'\n",
 		"schema.yaml":         "stages:\n  active: {}\n",
-		"entities.yaml":       "test_entity: {}\n",
 		"events.yaml":         "route.start:\n",
-		"nodes.yaml":          "project-observer:\n  execution_type: system_node\n  event_handlers:\n    route.start:\n      guard:\n        id: selected_owner\n        check: _entity.id != \"\"\n",
+		"nodes.yaml":          "project-observer:\n  execution_type: system_node\n  event_handlers:\n    route.start:\n      guard:\n        id: selected_owner\n        check: instance.id != \"\"\n",
 		"child/manifest.yaml": "version: 1.0.0\nplatform_version: '*'\n",
 		"child/schema.yaml":   "stages:\n  active: {}\npins:\n  inputs: [route.start]\n",
-		"child/entities.yaml": "test_entity: {}\n",
 		"child/events.yaml":   "route.start:\n",
-		"child/nodes.yaml":    "child-intake:\n  execution_type: system_node\n  event_handlers:\n    route.start:\n      guard:\n        id: selected_owner\n        check: _entity.id != \"\"\n",
+		"child/nodes.yaml":    "child-intake:\n  execution_type: system_node\n  event_handlers:\n    route.start:\n      guard:\n        id: selected_owner\n        check: instance.id != \"\"\n",
 	})
 	source := semanticview.Wrap(bundle)
 	return &fixtureWorkflowModule{

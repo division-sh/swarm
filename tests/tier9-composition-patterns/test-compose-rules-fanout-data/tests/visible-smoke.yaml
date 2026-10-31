@@ -11,7 +11,7 @@ expect:
   events:
     include: [batch.dispatched]
   entities:
-    - type: core
+    - flow: .
       current_state: dispatched
       fields:
         dispatch_count: 3

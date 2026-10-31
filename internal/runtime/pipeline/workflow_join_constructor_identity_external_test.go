@@ -32,7 +32,7 @@ func TestWorkflowJoinConstructedDescendantAdmissionOnBothStores(t *testing.T) {
 			files := a2ActivationJoinFiles(1)
 			files["orders/child/manifest.yaml"] = "version: 1.0.0\nplatform_version: \">=0.7.0 <0.8.0\"\n"
 			files["orders/child/schema.yaml"] = "stages:\n  awaiting: {}\n"
-			files["orders/child/entities.yaml"] = "child_state:\n  final_count: {type: integer, initial: -1}\n"
+			files["orders/child/state.yaml"] = "final_count: -1\n"
 			files["orders/child/events.yaml"] = "item.completed:\n  member_id: text\n  result: text\n"
 			files["orders/child/nodes.yaml"] = files["orders/nodes.yaml"]
 			source := semanticview.Wrap(loadPipelineLifecycleFixtureBundle(t, files))
