@@ -85,7 +85,10 @@ func registerChannelFixtureAccount(t *testing.T, config, token, account string, 
 		challenge := waitChannelOnboardingChallenge(t, out, errOut, progressDone)
 		callback, signing, _ := hitl[0].Registration()
 		if callback != "" {
-			requireChannelClaimDisposition(t, "live deployment claim", submitChannelOnboardingClaimAs(t, callback, signing, challenge, 1, 7000, 1001, "operator"), "consumed_by_binding")
+			admission := submitChannelOnboardingClaimAs(t, callback, signing, challenge, 1, 7000, 1001, "operator")
+			if admission.StatusCode != http.StatusOK || len(admission.EventIDs) != 0 || len(admission.EventNames) != 0 {
+				t.Fatalf("live deployment claim admission=%#v out=%s err=%s", admission, out.String(), errOut.String())
+			}
 		} else {
 			hitl[0].QueueUpdate(token, map[string]any{"update_id": 1, "message": map[string]any{
 				"message_id": 1, "from": map[string]any{"id": 7000, "username": "operator"},
