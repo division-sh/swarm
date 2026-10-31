@@ -566,7 +566,7 @@ func writeDeploymentAccountStatus(w io.Writer, status channelonboarding.AccountS
 		role = "held by " + status.Holders[0].Flow
 	} else if len(status.Holders) == 0 {
 		if status.Linked {
-			role += " (set operator_account in a flow's policy.yaml and restart serve)"
+			role += " (set operator_account in a flow's policy.yaml; Telegram receives after a serve restart; WhatsApp first pairing: connect with serve stopped, then start serve; registered WhatsApp numbers receive live)"
 		} else {
 			role += " (run swarm channel connect " + cliSanitizeOneLineValue(status.Provider) + ")"
 		}
