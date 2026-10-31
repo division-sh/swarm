@@ -160,11 +160,11 @@ func proveSelectedQ1SessionSiblingReforkBothStores(t *testing.T) {
 					callsBefore, lookupBefore := providerCalls.Load(), lookupCalls.Load()
 					operation := runfork.ForkOperationRequest{
 						OperationID: uuid.NewString(), Actor: "bearer:q1-operator", IdempotencyKey: uuid.NewString(), TransportHash: "sha256:q1-" + sourceID + ":" + point,
-						SourceRunID: sourceID, ForkEventID: point, TargetBundleHash: loaded.SourceArtifactFact.BundleHash(), AllowSourceFreeze: true,
+						SourceRunID: sourceID, ForkEventID: point, TargetBundleHash: loaded.SourceArtifactFact.BundleHash(),
 						ContractSelection: runforkadmission.SelectedContractSelection(loaded.Source), TargetRootReference: loaded.RootedSource.Admission().Reference(),
 					}
 					request := SelectedContractExecutionRequest{
-						SourceRunID: sourceID, At: point, AllowSourceFreeze: true, Owner: owner, SourceLoader: loader,
+						SourceRunID: sourceID, At: point, Owner: owner, SourceLoader: loader,
 						LiveRuntime: ordinary, LiveContexts: liveContexts, LiveRuns: selected.(runlifecycle.LiveRunReader),
 						ForkOperation:     &operation,
 						ContractSelection: runforkadmission.SelectedContractSelection(loaded.Source),

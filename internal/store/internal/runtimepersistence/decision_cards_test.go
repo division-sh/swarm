@@ -23,7 +23,7 @@ import (
 	"github.com/division-sh/swarm/internal/runtime/gateruntime"
 	runtimepipelineobligation "github.com/division-sh/swarm/internal/runtime/pipelineobligation"
 	runtimeruncontrol "github.com/division-sh/swarm/internal/runtime/runcontrol"
-	runtimerunlifecycle "github.com/division-sh/swarm/internal/runtime/runlifecycle"
+
 	runtimerunquiescence "github.com/division-sh/swarm/internal/runtime/runquiescence"
 	"github.com/division-sh/swarm/internal/runtime/semanticvalue"
 	"github.com/division-sh/swarm/internal/sourceartifact"
@@ -660,74 +660,7 @@ func TestRunTerminalizationAtomicallyFencesGateActivationsAndCardsOnBothStores(t
 			}
 		})
 
-		t.Run(backend+"/committed_verdict_freezes_on_fork", func(t *testing.T) {
-			ctx := testAuthorActivityContext()
-			cardStore, runID := decisionCardTestStore(t, backend)
-			ctx = originalStoreFixtureContext(t, ctx, cardStore)
-			db, postgres := decisionCardStoreDB(t, cardStore)
-			now := time.Date(2026, 7, 12, 18, 0, 0, 0, time.UTC)
-			entityID := uuid.NewString()
-			activation, err := gateruntime.New(runID, "launch/review", entityID, "launch", "awaiting_review", "launch_review", authorActivityTestBundleHash, testGateRoutes(t), "state:awaiting_review", now)
-			if err != nil {
-				t.Fatal(err)
-			}
-			decisionEventID := uuid.NewString()
-			if err := activation.CommitDecision(decisionEventID, now.Add(time.Minute)); err != nil {
-				t.Fatal(err)
-			}
-			card := newDecisionCardTestCard(t, runID, now)
-			card.CardID = activation.CardID
-			card.Anchor = newDecisionCardTestStageAnchor("launch/review", "launch", entityID, activation.Stage, activation.ActivationID)
-			card.Snapshot.Decision, card.BundleHash = activation.DecisionID, activation.BundleHash
-			card, err = decisioncard.New(card)
-			if err != nil {
-				t.Fatal(err)
-			}
-			if err := cardStore.CreateDecisionCard(ctx, card); err != nil {
-				t.Fatal(err)
-			}
-			if _, err := DecisionCardDomainForTest(cardStore).ApplyDecisionForTest(ctx, decisioncard.DecideRequest{CardID: card.CardID, Verdict: "accept", PrincipalID: "operator", ObservedContentHash: card.CardContentHash, DecisionEventID: decisionEventID, Now: now.Add(time.Minute)}); err != nil {
-				t.Fatal(err)
-			}
-			seedDecisionCardGateEntity(t, db, postgres, runID, entityID, activation, now)
-			if postgres {
-				rooted := decisionCardTestRootedSource(t, ctx, cardStore, runID)
-				ctx = runtimecorrelation.WithRootAdmission(ctx, rooted.Admission())
-				childRunID := uuid.NewString()
-				if err := ensureEphemeralRunForTest(ctx, cardStore, childRunID, now); err != nil {
-					t.Fatal(err)
-				}
-				if _, _, err := forkRunForTest(ctx, cardStore, runtimerunlifecycle.ForkSourceRequest{
-					RunID: runID, ContinuedAsRunID: childRunID, EndedAt: now.Add(2 * time.Minute),
-				}); err != nil {
-					t.Fatal(err)
-				}
-			} else if err := freezeDecisionCardRunInTestMutation(ctx, cardStore, runID, now.Add(2*time.Minute)); err != nil {
-				t.Fatal(err)
-			}
-			if stored := loadDecisionCardGateActivation(t, db, postgres, runID, entityID); stored.Status != gateruntime.StatusSuperseded || stored.DecisionEventID != decisionEventID {
-				t.Fatalf("fork-frozen activation = %#v", stored)
-			}
-			if !decisionGateStatusMutationExists(t, ctx, db, postgres, runID, entityID, string(gateruntime.StatusSuperseded)) {
-				t.Fatal("fork freeze did not record the typed accumulator status mutation")
-			}
-		})
 	}
-}
-
-func freezeDecisionCardRunInTestMutation(ctx context.Context, cards decisioncard.Store, runID string, at time.Time) error {
-	return runSelectedFixtureMutation(ctx, cards, "test decision-card run freeze", func(txctx context.Context, attempt *mutationprotocol.Attempt) error {
-		switch selected := cards.(type) {
-		case *PostgresStore:
-			_, err := selected.decisionPostgresOwner.SupersedeRunTx(txctx, attempt, runID, "run_forked", at, true)
-			return err
-		case *SQLiteRuntimeStore:
-			_, err := selected.decisionSQLiteOwner.SupersedeRunTx(txctx, attempt, runID, "run_forked", at, true)
-			return err
-		default:
-			return fmt.Errorf("unexpected decision card store %T", cards)
-		}
-	})
 }
 
 func decisionGateStatusMutationExists(t *testing.T, ctx context.Context, db *sql.DB, postgres bool, runID, entityID, status string) bool {

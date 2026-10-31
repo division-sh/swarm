@@ -121,7 +121,7 @@ func TestServedCompiledTransitionTemplateSiblingForkOnBothStores(t *testing.T) {
 			cards := selected.RuntimeDeps().DecisionCards
 			preFreeze := readTemplateForkSourceEvidence(t, t.Context(), rt.ReceiverStateReader, cards, runID, siblings)
 			cut := requireLifecycleTemplatePendingCut(t, rt.BundleHash, selected, runID, frontier.EventID)
-			params := map[string]any{"source_run_id": runID, "fork_event_id": frontier.EventID, "allow_source_freeze": true, "idempotency_key": "template-fork"}
+			params := map[string]any{"source_run_id": runID, "fork_event_id": frontier.EventID, "idempotency_key": "template-fork"}
 			var fork, duplicate apiv1.RunForkExecutionResult
 			firstResponseTimeout := 5 * time.Second
 			if backend == servedparity.BackendDefaultSQLite && lifecycleTemplateRaceBuild {

@@ -1064,6 +1064,11 @@ func debtValidateCollectorIdentity(base, current string, trusted, head authority
 	if base == current && trusted.Collector == current && head.Collector == current {
 		return nil
 	}
+	if base == debtDeploymentHandlerLandedCollectorTo && trusted.Collector == base &&
+		current == debtRetiredSourceFreezeCollectorTo && reviewedTransition == current && head.Collector == current &&
+		debtSitesEqual(head.Sites, trusted.Sites) {
+		return nil // #1803/6547180022: one exact retired argument, unchanged accounting sites and baseline.
+	}
 	if base == debtS3AccountCollectorTo && trusted.Collector == base &&
 		current == debtDeploymentHandlerLandedCollectorTo && reviewedTransition == current && head.Collector == current &&
 		debtSitesEqual(head.Sites, trusted.Sites) {

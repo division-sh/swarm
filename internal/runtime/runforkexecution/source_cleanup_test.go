@@ -8,11 +8,10 @@ import (
 	"path/filepath"
 	"reflect"
 	"testing"
-	"time"
 
 	"github.com/division-sh/swarm/internal/runtime/core/worklifetime"
 	"github.com/division-sh/swarm/internal/runtime/correlation"
-	"github.com/division-sh/swarm/internal/runtime/effects"
+
 	"github.com/division-sh/swarm/internal/runtime/executionposture"
 	"github.com/division-sh/swarm/internal/runtime/runcontrol"
 	"github.com/division-sh/swarm/internal/runtime/runfork"
@@ -218,7 +217,7 @@ func TestSelectedSourceCleanupBothStores(t *testing.T) {
 						t.Error(err)
 					}
 				}()
-				request := SelectedContractExecutionRequest{SourceRunID: runID, At: eventID, AllowSourceFreeze: true, Owner: owner, SourceLoader: probe,
+				request := SelectedContractExecutionRequest{SourceRunID: runID, At: eventID, Owner: owner, SourceLoader: probe,
 					SourceArtifactFact: loaded.SourceArtifactFact,
 					ContractSelection:  runforkadmission.SelectedContractSelection(loaded.Source),
 					AgentRuntime:       SelectedContractAgentRuntimeOptions{ExecutionPosture: executionposture.MockOnly, ProcessCapability: capability}}
@@ -330,72 +329,6 @@ func TestSelectedSourceCleanupBothStores(t *testing.T) {
 				}
 			})
 		}
-	}
-}
-
-func TestSelectedSourceStagedCleanupOwnership(t *testing.T) {
-	for _, phase := range []string{"non_selected_compilation", "non_selected_activated", "selected_validation", "selected_original_compilation"} {
-		t.Run(phase, func(t *testing.T) {
-			_, process, ctx := contextLifetimeOwner(t)
-			native := storetest.StartSQLiteRuntimeStore(t)
-			owner := newSelectedContractSQLiteExecutionOwnerForTest(t, native)
-			capability := selectedContractTestProcessCapability(t, ctx, native)
-			if err := owner.BindSelectedProcess(ctx, process, capability); err != nil {
-				t.Fatal(err)
-			}
-			if _, err := owner.RecoverSelectedForkContexts(ctx, effects.NewRecoveryRequest(time.Now().UTC(), executionposture.Live), SelectedForkRecoveryEnvironment{}); err != nil {
-				t.Fatal(err)
-			}
-			store := &fakeSelectedContractActivationStore{originalRunID: uuid.NewString(), activation: runfork.RunForkActivation{Activated: true}}
-			binding := testSelectedContractBinding(uuid.NewString())
-			selected, original := rootedSourceCleanupFixture(t)
-			binding.TargetRootReference = selected.RootedSource.Admission().Reference()
-			availability := testSelectedContractBundleAvailability(binding.ForkRunID)
-			availability.BundleHash = selected.SourceArtifactFact.BundleHash()
-			availability.RootReference = binding.TargetRootReference
-			availability.RootAdmissionPresent = true
-			calls, repaired := 0, false
-			defer func() {
-				repaired = true
-				if err := owner.RetireSelectedContexts(context.Background()); err != nil {
-					t.Error(err)
-				}
-			}()
-			release := func() error {
-				calls++
-				if !repaired {
-					return errSourceRelease
-				}
-				return nil
-			}
-			if phase == "selected_validation" {
-				selected.Cleanup = release
-				selected.SourceArtifactFact = correlation.SourceArtifactFact{}
-			} else {
-				original.Cleanup = release
-				if phase != "non_selected_activated" {
-					original.Source = nil
-				}
-			}
-			if phase == "selected_validation" || phase == "selected_original_compilation" {
-				store.binding, store.bindingOK = binding, true
-				store.bundleAvailability = availability
-			}
-			result, err := ActivateSelectedContractRunFork(ctx, SelectedContractActivationGateRequest{ForkRunID: binding.ForkRunID, Store: store, ExecutionOwner: owner, AgentRuntime: SelectedContractAgentRuntimeOptions{ProcessCapability: owner.ports.contexts.capability}, SourceLoader: &fakeSelectedContractSourceLoader{loaded: selected, original: &original}})
-			if !errors.Is(err, errSourceRelease) || calls != 1 || process.ActiveCount() != 1 {
-				t.Fatalf("staged cleanup lost ownership: calls=%d active=%d err=%v", calls, process.ActiveCount(), err)
-			}
-			if (phase == "non_selected_activated") != result.Activated || store.activateCalled != result.Activated {
-				t.Fatal("activation evidence changed during cleanup")
-			}
-			if err := owner.RetireSelectedContexts(context.Background()); !errors.Is(err, errSourceRelease) || calls != 2 {
-				t.Fatalf("staged retry: calls=%d err=%v", calls, err)
-			}
-			repaired = true
-			if err := owner.RetireSelectedContexts(context.Background()); err != nil || calls != 3 || process.ActiveCount() != 0 {
-				t.Fatalf("staged settlement: calls=%d active=%d err=%v", calls, process.ActiveCount(), err)
-			}
-		})
 	}
 }
 

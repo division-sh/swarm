@@ -237,7 +237,7 @@ func proveSelectedForkPublicChangedTargetExecutionBothStores(t *testing.T, optio
 			}
 			params := map[string]any{
 				"source_run_id": seed.RunID, "fork_event_id": frontier, "bundle_hash": fact.BundleHash(),
-				"allow_source_freeze": true, "idempotency_key": "public-selected-changed-target",
+				"idempotency_key": "public-selected-changed-target",
 			}
 			if options.gatewayLoss {
 				requireSelectedForkGatewayLossBeforeModel(t, rt.Endpoint, selected.RuntimeDeps().EventStore, params, gatewayFault, seed.RunID)

@@ -224,12 +224,12 @@ func runSelectedActivityResultCrashHelper(t *testing.T, ctx context.Context, sel
 		}
 	}
 	liveRuntime, liveContexts := liveForkRuntimeFixture(t, ctx, selected, owner, loaded, sourceRun, executionposture.Live)
-	execution := SelectedContractExecutionRequest{SourceRunID: sourceRun, At: requestID, AllowSourceFreeze: true, Owner: owner,
+	execution := SelectedContractExecutionRequest{SourceRunID: sourceRun, At: requestID, Owner: owner,
 		LiveRuntime: liveRuntime, LiveContexts: liveContexts, LiveRuns: selected.(runlifecycle.LiveRunReader),
 		SourceLoader: &fakeSelectedContractSourceLoader{loaded: loaded}, ContractSelection: selection,
 		AgentRuntime: SelectedContractAgentRuntimeOptions{ExecutionPosture: executionposture.Live, ProcessCapability: capability},
 		ForkOperation: &runfork.ForkOperationRequest{OperationID: uuid.NewString(), Actor: "retained-crash", IdempotencyKey: "fixed-cut", TransportHash: "retained-crash-transport",
-			SourceRunID: sourceRun, ForkEventID: requestID, TargetBundleHash: loaded.SourceArtifactFact.BundleHash(), TargetRootReference: loaded.RootedSource.Admission().Reference(), AllowSourceFreeze: true, ContractSelection: selection}}
+			SourceRunID: sourceRun, ForkEventID: requestID, TargetBundleHash: loaded.SourceArtifactFact.BundleHash(), TargetRootReference: loaded.RootedSource.Admission().Reference(), ContractSelection: selection}}
 	if advanced {
 		_, err := q1ExecuteSelectedPhaseComponent(t, ctx, execution)
 		t.Fatalf("selected result consumer returned before its physical commit checkpoint: %v", err)

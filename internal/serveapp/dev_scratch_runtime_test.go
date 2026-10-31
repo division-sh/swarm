@@ -109,10 +109,9 @@ func TestRunServeRuntimeDevScratchRunForkLifecycleSQLite(t *testing.T) {
 
 	var fork apiv1.RunForkExecutionResult
 	forkResponse := requestServedJSONRPCWithTimeout(t, endpoint, "run.fork", map[string]any{
-		"source_run_id":       started.RunID,
-		"fork_event_id":       published.EventID,
-		"allow_source_freeze": true,
-		"idempotency_key":     "issue-2361-dev-scratch-run-fork",
+		"source_run_id":   started.RunID,
+		"fork_event_id":   published.EventID,
+		"idempotency_key": "issue-2361-dev-scratch-run-fork",
 	}, 30*time.Second)
 	if forkResponse.Error != nil {
 		logServedForkHandlerDiagnostics(t, servedControlProofRuntime{DB: db})

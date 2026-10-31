@@ -32,7 +32,7 @@ func requireUnpublishedJoinAncestorPurgeRefused(t *testing.T, ctx context.Contex
 	planned.Phase, planned.Revision = destructivereset.PhasePlanned, operation.Revision+1
 	planned.Plan = &destructivereset.Result{OperationName: destructivereset.DefaultOperationName, PlannedAt: now,
 		Plan: destructivereset.Plan{CleanupRunSetKnown: true, CleanupRuns: []destructivereset.RunRef{
-			{RunID: ancestor, Status: "forked"}, {RunID: parent, Status: "forked"},
+			{RunID: ancestor, Status: "paused"}, {RunID: parent, Status: "paused"},
 		}}}
 	if err := capability.AdvanceResetOperation(ctx, operation, planned); err != nil {
 		t.Fatal(err)

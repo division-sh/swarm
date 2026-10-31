@@ -9,7 +9,6 @@ import (
 
 	runtimebus "github.com/division-sh/swarm/internal/runtime/bus"
 
-	runtimerunlifecycle "github.com/division-sh/swarm/internal/runtime/runlifecycle"
 	"github.com/division-sh/swarm/internal/testutil/sourceartifactfixture"
 	"github.com/google/uuid"
 )
@@ -47,7 +46,7 @@ func TestRunFixtureRefusalsDoNotWrite(t *testing.T) {
 				fixture RunFixture
 			}{
 				{"blank_identity", RunFixture{Origin: ScenarioSetupOrigin()}},
-				{"fork_requires_named_operation", RunFixture{RunID: uuid.NewString(), State: runtimerunlifecycle.StateForked, Origin: ScenarioSetupOrigin()}},
+				{"retired_fork_state", RunFixture{RunID: uuid.NewString(), State: "forked", Origin: ScenarioSetupOrigin()}},
 				{"contradictory_source", RunFixture{RunID: uuid.NewString(), Origin: ScenarioSetupOrigin(), Artifact: sourceartifactfixture.Artifact(), BundleHash: "different"}},
 			} {
 				t.Run(refusal.name, func(t *testing.T) {

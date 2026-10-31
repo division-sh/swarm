@@ -31,7 +31,6 @@ type admissionLifecycleWriter interface {
 	ReviseSourceTx(context.Context, *mutationprotocol.Attempt, runtimerunlifecycle.SourceRevisionRequest) (runtimerunlifecycle.MutationDisposition, error)
 	MarkTerminalTx(context.Context, *mutationprotocol.Attempt, runtimerunlifecycle.TerminalRequest, *privaterunlifecycle.ChannelCardChanges) (runtimerunlifecycle.Snapshot, runtimerunlifecycle.MutationDisposition, error)
 	CompleteRunTx(context.Context, *mutationprotocol.Attempt, string, time.Time, *privaterunlifecycle.ChannelCardChanges) (runtimerunlifecycle.Snapshot, runtimerunlifecycle.MutationDisposition, error)
-	ForkSourceTx(context.Context, *mutationprotocol.Attempt, runtimerunlifecycle.ForkSourceRequest, *privaterunlifecycle.ChannelCardChanges) (runtimerunlifecycle.Snapshot, runtimerunlifecycle.MutationDisposition, error)
 }
 
 func selectedAdmissionLifecycleWriter(selected any) admissionLifecycleWriter {
@@ -67,17 +66,14 @@ func TestRunAdmissionCanonicalInvalidationBothStores(t *testing.T) {
 			ctx := runAdmissionFixtureContext(t, fixture)
 			replacementRoot, _ := sourceartifactfixture.Rooted(t, "candidate-replacement", runLifecycleCandidateParityReplacementArtifact)
 			sourceartifactfixture.RequireArtifact(t, ctx, fixture.store, replacementRoot.Artifact())
-			for _, change := range []string{"pause", "source-revision", "terminal", "complete", "fork-source", "terminal-uuid-alias", "terminal-unbound-caller"} {
+			for _, change := range []string{"pause", "source-revision", "terminal", "complete", "terminal-uuid-alias", "terminal-unbound-caller"} {
 				t.Run(change, func(t *testing.T) {
 					if !fixture.postgres && strings.HasSuffix(change, "uuid-alias") {
 						return // SQLite's run identity is exact TEXT, not PostgreSQL UUID equivalence.
 					}
-					runID, childID := uuid.NewString(), uuid.NewString()
+					runID := uuid.NewString()
 					started := time.Date(2026, 10, 8, 0, 0, 0, 0, time.UTC)
 					ensureRunLifecycleCandidateParityRun(t, fixture, ctx, runID, started)
-					if change == "fork-source" {
-						ensureRunLifecycleCandidateParityRun(t, fixture, ctx, childID, started)
-					}
 					rollback := errors.New("rollback after invalidation proof")
 					err := runSelectedFixtureMutation(ctx, fixture.store, "canonical admission invalidation", func(txctx context.Context, attempt *mutationprotocol.Attempt) error {
 						var original runtimecorrelation.SourceArtifactFact
@@ -106,8 +102,6 @@ func TestRunAdmissionCanonicalInvalidationBothStores(t *testing.T) {
 							_, _, err = writer.MarkTerminalTx(writeCtx, attempt, runtimerunlifecycle.TerminalRequest{RunID: writeID, State: runtimerunlifecycle.StateCancelled, EndedAt: started.Add(time.Minute)}, &cardChanges)
 						case "complete":
 							_, _, err = writer.CompleteRunTx(txctx, attempt, writeID, started.Add(time.Minute), &cardChanges)
-						case "fork-source":
-							_, _, err = writer.ForkSourceTx(txctx, attempt, runtimerunlifecycle.ForkSourceRequest{RunID: writeID, ContinuedAsRunID: childID, EndedAt: started.Add(time.Minute)}, &cardChanges)
 						}
 						if err != nil {
 							return err
@@ -132,8 +126,6 @@ func TestRunAdmissionCanonicalInvalidationBothStores(t *testing.T) {
 							state := runtimerunlifecycle.StateCancelled
 							if change == "complete" {
 								state = runtimerunlifecycle.StateCompleted
-							} else if change == "fork-source" {
-								state = runtimerunlifecycle.StateForked
 							}
 							return validateInactiveAdmissionRefusal(fact, err, runID, state)
 						}); err != nil {
@@ -259,15 +251,15 @@ func TestInactiveAdmissionRefusalRejectsWrongStateIdentityAndLiveFact(t *testing
 		err      error
 		wantPass bool
 	}{
-		{name: "exact", err: &runtimerunlifecycle.RunNotActiveError{RunID: runID, State: runtimerunlifecycle.StateForked}, wantPass: true},
-		{name: "wrong-run", err: &runtimerunlifecycle.RunNotActiveError{RunID: uuid.NewString(), State: runtimerunlifecycle.StateForked}},
-		{name: "wrong-state", err: &runtimerunlifecycle.RunNotActiveError{RunID: runID, State: runtimerunlifecycle.StateCancelled}},
-		{name: "live-fact", fact: valid, err: &runtimerunlifecycle.RunNotActiveError{RunID: runID, State: runtimerunlifecycle.StateForked}},
+		{name: "exact", err: &runtimerunlifecycle.RunNotActiveError{RunID: runID, State: runtimerunlifecycle.StateCancelled}, wantPass: true},
+		{name: "wrong-run", err: &runtimerunlifecycle.RunNotActiveError{RunID: uuid.NewString(), State: runtimerunlifecycle.StateCancelled}},
+		{name: "wrong-state", err: &runtimerunlifecycle.RunNotActiveError{RunID: runID, State: runtimerunlifecycle.StateRunning}},
+		{name: "live-fact", fact: valid, err: &runtimerunlifecycle.RunNotActiveError{RunID: runID, State: runtimerunlifecycle.StateCancelled}},
 		{name: "untyped", err: errors.New("inactive")},
 		{name: "success", fact: valid},
 	} {
 		t.Run(probe.name, func(t *testing.T) {
-			if err := validateInactiveAdmissionRefusal(probe.fact, probe.err, runID, runtimerunlifecycle.StateForked); (err == nil) != probe.wantPass {
+			if err := validateInactiveAdmissionRefusal(probe.fact, probe.err, runID, runtimerunlifecycle.StateCancelled); (err == nil) != probe.wantPass {
 				t.Fatalf("refusal oracle: %v", err)
 			}
 		})

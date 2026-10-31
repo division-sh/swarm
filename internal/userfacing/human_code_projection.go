@@ -28,11 +28,11 @@ const (
 var humanCodePhrases = map[HumanCodeFamily]map[string]string{
 	HumanCodeRunStatus: {
 		"running": "running", "paused": "paused", "completed": "completed",
-		"failed": "failed", "cancelled": "cancelled", "forked": "forked",
+		"failed": "failed", "cancelled": "cancelled",
 	},
 	HumanCodeOperationalState: {
 		"running": "running", "stalled": "stalled", "paused": "paused",
-		"completed": "completed", "failed": "failed", "cancelled": "cancelled", "forked": "forked",
+		"completed": "completed", "failed": "failed", "cancelled": "cancelled",
 	},
 	HumanCodeRunBlockingLayer: {
 		"delivery_lifecycle": "delivery lifecycle",

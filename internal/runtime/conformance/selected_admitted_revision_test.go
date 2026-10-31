@@ -78,7 +78,7 @@ func TestIssue2655ServedDeploymentKeepsAdmittedRevisionBothStores(t *testing.T) 
 			}
 			owner := selectedExternalOwnerWithCut(t, f, &selectedExternalEffectCut{}, probe)
 			forkServer := selectedExternalForkServer(t, f, owner, provider.URL)
-			params := map[string]any{"source_run_id": sourceRun, "bundle_hash": f.runtime.sourceArtifactFact.BundleHash(), "allow_source_freeze": true, "idempotency_key": uuid.NewString()}
+			params := map[string]any{"source_run_id": sourceRun, "bundle_hash": f.runtime.sourceArtifactFact.BundleHash(), "idempotency_key": uuid.NewString()}
 			ctx, cancel := context.WithTimeout(f.ctx, 15*time.Second)
 			defer cancel()
 			result, rpcErr, err := deploymentForkRPCRequest(ctx, forkServer, params)

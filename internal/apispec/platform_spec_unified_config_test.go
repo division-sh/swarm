@@ -127,8 +127,8 @@ func TestPlatformSpecUnifiedSwarmConfigSourceAuthority(t *testing.T) {
 		"claude_cli.no_session_persistence",
 		"claude_cli.use_tmux",
 	} {
-		if got := scalarValue(mustMappingValue(t, llmKeys, key)); got != "split_unsupported" {
-			t.Fatalf("llm.%s = %q, want split_unsupported", key, got)
+		if got := scalarValue(mustMappingValue(t, llmKeys, key)); got != "retired_rejected" {
+			t.Fatalf("llm.%s = %q, want retired_rejected", key, got)
 		}
 	}
 	for _, want := range []string{"retired model-selection inputs", "keep rejecting", "llm.models"} {
@@ -136,7 +136,7 @@ func TestPlatformSpecUnifiedSwarmConfigSourceAuthority(t *testing.T) {
 			t.Fatalf("retired model-selection rule missing %q:\n%s", want, scalarValue(mustMappingValue(t, llm, "retired_model_selection_keys")))
 		}
 	}
-	for _, want := range []string{"#1803", "remain split_unsupported", "no supported replacement"} {
+	for _, want := range []string{"#1803", "unknown config keys", "no supported replacement"} {
 		if !strings.Contains(scalarValue(mustMappingValue(t, llm, "claude_cli_control_cleanup")), want) {
 			t.Fatalf("Claude CLI controls cleanup rule missing %q:\n%s", want, scalarValue(mustMappingValue(t, llm, "claude_cli_control_cleanup")))
 		}

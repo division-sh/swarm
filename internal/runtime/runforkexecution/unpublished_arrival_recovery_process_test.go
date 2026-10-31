@@ -39,10 +39,10 @@ func runUnpublishedArrivalCrashHelper(t *testing.T, ctx context.Context, selecte
 	// This source is the real unpublished materialized cut, not an ACK before
 	// business dispatch. Its component closes without gaining live authority.
 	parent := q1StageBranchPointComponent(t, ctx, SelectedContractExecutionRequest{SourceRunID: ancestor, At: marker,
-		AllowSourceFreeze: true, Owner: owner, SourceLoader: loader, ContractSelection: selection,
+		Owner: owner, SourceLoader: loader, ContractSelection: selection,
 		ForkOperation: &runfork.ForkOperationRequest{OperationID: uuid.NewString(), Actor: "pending-join-parent", IdempotencyKey: "original-cut",
 			TransportHash: "pending-join-parent-transport", SourceRunID: ancestor, ForkEventID: marker,
-			TargetBundleHash: loaded.SourceArtifactFact.BundleHash(), TargetRootReference: loaded.RootedSource.Admission().Reference(), AllowSourceFreeze: true, ContractSelection: selection},
+			TargetBundleHash: loaded.SourceArtifactFact.BundleHash(), TargetRootReference: loaded.RootedSource.Admission().Reference(), ContractSelection: selection},
 		AgentRuntime: SelectedContractAgentRuntimeOptions{ExecutionPosture: executionposture.MockOnly, ProcessCapability: capability}})
 	parentRun := parent.materialized.ForkRunID
 	if err := parent.container.Quiesce(parent.prepared.operation.Context()); err != nil {
@@ -102,10 +102,10 @@ func runUnpublishedArrivalCrashHelper(t *testing.T, ctx context.Context, selecte
 	}
 	operation := runfork.ForkOperationRequest{OperationID: uuid.NewString(), Actor: "pending-join-crash", IdempotencyKey: "parent-start",
 		TransportHash: "pending-join-crash-transport", SourceRunID: parentRun, AtStart: true,
-		TargetBundleHash: loaded.SourceArtifactFact.BundleHash(), TargetRootReference: loaded.RootedSource.Admission().Reference(), AllowSourceFreeze: true, ContractSelection: selection}
+		TargetBundleHash: loaded.SourceArtifactFact.BundleHash(), TargetRootReference: loaded.RootedSource.Admission().Reference(), ContractSelection: selection}
 	ordinary, contexts := liveForkRuntimeFixture(t, ctx, selected, owner, loaded, ancestor, executionposture.MockOnly)
 	result, err := ExecuteSelectedContractRunFork(ctx, SelectedContractExecutionRequest{SourceRunID: parentRun, AtStart: true,
-		AllowSourceFreeze: true, Owner: childOwner, ForkOperation: &operation, SourceLoader: loader, ContractSelection: selection,
+		Owner: childOwner, ForkOperation: &operation, SourceLoader: loader, ContractSelection: selection,
 		LiveRuntime: ordinary, LiveContexts: contexts, LiveRuns: selected.(runlifecycle.LiveRunReader),
 		AgentRuntime: SelectedContractAgentRuntimeOptions{ExecutionPosture: executionposture.MockOnly, ProcessCapability: capability}})
 	if err != nil || !result.Activation.Activated {

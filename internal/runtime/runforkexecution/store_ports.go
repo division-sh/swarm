@@ -60,7 +60,6 @@ type SelectedContractForkLifecycle interface {
 	RequireRunForkSelectedContractBinding(context.Context, string) (runfork.RunForkSelectedContractBinding, error)
 	LoadRunBundleAvailability(context.Context, string) (runbundle.Availability, error)
 	LoadRunForkSelectedContractRouteRecovery(context.Context, string) (runfork.RunForkSelectedContractRouteRecovery, bool, error)
-	ActivateRunFork(context.Context, runfork.RunForkActivateRequest) (runfork.RunForkActivation, error)
 }
 
 // SelectedContractRuntimeExecutionLifecycle owns the selected runtime lease.

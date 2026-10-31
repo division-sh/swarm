@@ -27,7 +27,6 @@ const (
 	StateCompleted State = "completed"
 	StateFailed    State = "failed"
 	StateCancelled State = "cancelled"
-	StateForked    State = "forked"
 )
 
 type OriginKind string
@@ -232,7 +231,7 @@ func (o *RunOrigin) UnmarshalJSON(raw []byte) error {
 func ParseState(raw string) (State, error) {
 	state := State(strings.ToLower(strings.TrimSpace(raw)))
 	switch state {
-	case StateLive, StateRunning, StatePaused, StateCompleted, StateFailed, StateCancelled, StateForked:
+	case StateLive, StateRunning, StatePaused, StateCompleted, StateFailed, StateCancelled:
 		return state, nil
 	default:
 		return "", fmt.Errorf("invalid run lifecycle state %q", raw)
@@ -241,7 +240,7 @@ func ParseState(raw string) (State, error) {
 
 func (s State) Terminal() bool {
 	switch s {
-	case StateCompleted, StateFailed, StateCancelled, StateForked:
+	case StateCompleted, StateFailed, StateCancelled:
 		return true
 	default:
 		return false
@@ -290,7 +289,6 @@ var (
 	ErrRunNotFound               = errors.New("run not found")
 	ErrRunNotActive              = errors.New("run is not active")
 	ErrSourceArtifactUnavailable = errors.New("source artifact unavailable")
-	ErrForkSourceUnsupported     = errors.New("run lifecycle fork source transition is unsupported")
 )
 
 type RunNotFoundError struct {
@@ -386,28 +384,6 @@ func (r TerminalRequest) Validate() error {
 	}
 	if r.EndedAt.IsZero() {
 		return errors.New("terminal run lifecycle mutation requires ended_at")
-	}
-	return nil
-}
-
-type ForkSourceRequest struct {
-	RunID            string
-	ContinuedAsRunID string
-	EndedAt          time.Time
-}
-
-func (r ForkSourceRequest) Validate() error {
-	if strings.TrimSpace(r.RunID) == "" {
-		return errors.New("fork source lifecycle mutation requires run_id")
-	}
-	if strings.TrimSpace(r.ContinuedAsRunID) == "" {
-		return errors.New("fork source lifecycle mutation requires continued_as_run_id")
-	}
-	if strings.TrimSpace(r.RunID) == strings.TrimSpace(r.ContinuedAsRunID) {
-		return errors.New("fork source lifecycle continuation must reference a different run")
-	}
-	if r.EndedAt.IsZero() {
-		return errors.New("fork source lifecycle mutation requires ended_at")
 	}
 	return nil
 }
@@ -536,13 +512,10 @@ func (s Snapshot) Validate() error {
 	} else if s.Failure != nil {
 		return fmt.Errorf("run lifecycle state %s forbids failure", s.State)
 	}
-	if s.State == StateForked && strings.TrimSpace(s.ContinuedAsRunID) == "" {
-		return errors.New("forked run lifecycle snapshot requires continued_as_run_id")
-	}
 	if strings.TrimSpace(s.RunID) == strings.TrimSpace(s.ContinuedAsRunID) {
 		return errors.New("run lifecycle snapshot continuation must reference a different run")
 	}
-	if s.State != StateForked && strings.TrimSpace(s.ContinuedAsRunID) != "" {
+	if strings.TrimSpace(s.ContinuedAsRunID) != "" {
 		return fmt.Errorf("run lifecycle state %s forbids continued_as_run_id", s.State)
 	}
 	if s.State.Terminal() && s.EndedAt == nil {
@@ -912,6 +885,5 @@ type OperationOwner interface {
 	RequestCompletionCandidate(context.Context, CandidateRequest) (CandidateRequestDisposition, error)
 	TransitionActiveRun(context.Context, ActiveTransitionRequest) (MutationDisposition, error)
 	MarkTerminalRun(context.Context, TerminalRequest) (Snapshot, MutationDisposition, error)
-	ForkRunSource(context.Context, ForkSourceRequest) (Snapshot, MutationDisposition, error)
 	ReviseRunSource(context.Context, SourceRevisionRequest) (MutationDisposition, error)
 }

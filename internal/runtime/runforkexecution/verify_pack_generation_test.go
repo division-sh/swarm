@@ -98,7 +98,7 @@ func TestPublicVerifyRetainedForkUsesConfiguredPackGeneration(t *testing.T) {
 	seedSelectedOperationSource(t, ctx, s, loaded, sourceID, eventID, false)
 	owner := selectedContractSQLiteExecutionOwnerForTest(t, s)
 	fork, err := q1ExecuteSelectedPhaseComponent(t, ctx, SelectedContractExecutionRequest{
-		SourceRunID: sourceID, At: eventID, AllowSourceFreeze: true, Owner: owner, SourceLoader: loader,
+		SourceRunID: sourceID, At: eventID, Owner: owner, SourceLoader: loader,
 		SourceArtifactFact: loaded.SourceArtifactFact, ForkOperation: selectedForkFixtureOperation(t, loaded, sourceID, eventID),
 		ContractSelection: runforkadmission.SelectedContractSelection(loaded.Source),
 		AgentRuntime:      SelectedContractAgentRuntimeOptions{ExecutionPosture: executionposture.MockOnly, ProcessCapability: capability},

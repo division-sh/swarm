@@ -8,252 +8,18 @@ import (
 	"time"
 
 	"github.com/division-sh/swarm/internal/events"
-	runtimeauthoractivity "github.com/division-sh/swarm/internal/runtime/authoractivity"
-	runtimebus "github.com/division-sh/swarm/internal/runtime/bus"
+
 	"github.com/division-sh/swarm/internal/runtime/core/agentidentity"
-	runtimecorrelation "github.com/division-sh/swarm/internal/runtime/correlation"
+
 	runtimedelivery "github.com/division-sh/swarm/internal/runtime/deliverylifecycle"
-	runtimepipelineobligation "github.com/division-sh/swarm/internal/runtime/pipelineobligation"
+
 	"github.com/division-sh/swarm/internal/runtime/runfork"
-	"github.com/division-sh/swarm/internal/runtime/runlifecycle"
-	"github.com/division-sh/swarm/internal/runtime/semanticview"
-	storedelivery "github.com/division-sh/swarm/internal/store/internal/backend/delivery"
+
 	eventrecordpostgres "github.com/division-sh/swarm/internal/store/internal/backend/eventrecord/postgres"
 	"github.com/division-sh/swarm/internal/store/internal/backend/mutationprotocol"
-	"github.com/division-sh/swarm/internal/store/internal/backend/pipelinepersistence"
+
 	"github.com/google/uuid"
 )
-
-type runForkDeliveryEventReplayAdapter struct {
-	postgres       bool
-	requireCurrent func() error
-	events         eventCommitOwner
-	deliveries     *storedelivery.Adapter
-	commitScope    func(context.Context, *mutationprotocol.Attempt, string, runtimepipelineobligation.CommittedScope, time.Time) error
-	loadSnapshot   runForkLifecycleSnapshotLoader
-	sourceAt       func(context.Context, *sql.Tx, string) (runtimecorrelation.SourceArtifactFact, error)
-}
-
-func (s *RunForkPostgresOwner) deliveryEventReplayAdapter() runForkDeliveryEventReplayAdapter {
-	return runForkDeliveryEventReplayAdapter{
-		postgres:       true,
-		requireCurrent: s.requireCurrentSchema, events: s.events, deliveries: postgresDeliveryAdapter,
-		commitScope: s.PipelinePostgresOwner.CommitScopeAtTx,
-		sourceAt:    s.RequirePresentSourceTx,
-		loadSnapshot: func(ctx context.Context, tx *sql.Tx, runID string) (runlifecycle.Snapshot, error) {
-			return s.LoadSnapshotTx(ctx, tx, runID, false)
-		},
-	}
-}
-
-func (s *RunForkSQLiteOwner) deliveryEventReplayAdapter() runForkDeliveryEventReplayAdapter {
-	return runForkDeliveryEventReplayAdapter{
-		requireCurrent: s.requireCurrentSchema, events: s.events, deliveries: sqliteDeliveryAdapter,
-		commitScope:  s.PipelineSQLiteOwner.CommitScopeAtTx,
-		loadSnapshot: s.LoadSnapshotTx,
-		sourceAt:     s.RequirePresentSourceTx,
-	}
-}
-
-func applyRunForkDeliveryEventReplay(ctx context.Context, tx *sql.Tx, attempt *mutationprotocol.Attempt, store runForkDeliveryEventReplayAdapter, lineage runForkActivationLineage, execution runfork.RunForkHistoricalReplayExecution, original semanticview.OriginalLoopCarriage, now time.Time) (runfork.RunForkDeliveryEventReplayResult, error) {
-	result := runfork.RunForkDeliveryEventReplayResult{
-		Owner:       runfork.RunForkDeliveryEventReplayOwner,
-		SourceRunID: lineage.SourceRunID,
-		ForkRunID:   lineage.ForkRunID,
-	}
-	if strings.TrimSpace(execution.Owner) != runfork.RunForkHistoricalReplayExecutionOwner ||
-		strings.TrimSpace(execution.AdmissionOwner) != runfork.RunForkHistoricalReplayExecutionAdmissionOwner ||
-		!execution.DeliveryEventReplayReady ||
-		execution.EventDeliveriesAdmission.Fact != runfork.RunForkHistoricalReplayFactEventDeliveries ||
-		execution.EventDeliveriesAdmission.Admission != runfork.RunForkHistoricalReplayAdmissionExecutableForkWork {
-		return result, fmt.Errorf("store.run_fork.delivery_event_replay requires %s owner-authorized executable event_deliveries", runfork.RunForkHistoricalReplayExecutionOwner)
-	}
-	if attempt == nil {
-		return result, fmt.Errorf("run fork delivery/event replay requires private story ownership")
-	}
-	replayable := execution.DeliveryEventReplayWork
-	if len(replayable) == 0 {
-		return result, fmt.Errorf("store.run_fork.delivery_event_replay requires at least one owner-authorized delivery")
-	}
-
-	if store.requireCurrent == nil || store.events == nil || store.deliveries == nil || store.commitScope == nil {
-		return result, fmt.Errorf("run fork delivery/event replay adapters are required")
-	}
-	if err := store.requireCurrent(); err != nil {
-		return result, err
-	}
-	if err := original.RequireSource(lineage.SourceBundleHash); err != nil {
-		return result, err
-	}
-	snapshot, err := loadRunForkRevisionSnapshot(ctx, tx, lineage.SourceRunID, lineage.ForkEventRevision)
-	if err != nil {
-		return result, err
-	}
-	if err := validateRunForkEntityMetadataOwners(snapshot); err != nil {
-		return result, err
-	}
-	cut, err := newRunForkReplayCut(snapshot)
-	if err != nil {
-		return result, err
-	}
-	admission := runForkSourceStateAdmission{carriage: original, forkRunID: lineage.ForkRunID, snapshot: snapshot, postgres: store.postgres, sourceAt: store.sourceAt}
-	sourceEvents := map[string]events.Event{}
-	bundleSource, err := runtimecorrelation.NewSourceArtifactFact(lineage.ForkBundleHash)
-	if err != nil {
-		return result, fmt.Errorf("construct fork replay bundle source: %w", err)
-	}
-	deliveryAuthority, err := runtimedelivery.NewNormalExecutionAuthority(
-		bundleSource, runfork.RunForkDeliveryEventReplayOwner+":"+lineage.ForkRunID, 1,
-	)
-	if err != nil {
-		return result, fmt.Errorf("construct fork replay activation delivery authority: %w", err)
-	}
-	type preparedReplayDelivery struct {
-		item          runfork.RunForkHistoricalReplayExecutableWork
-		sourceEventID string
-		forkEventID   string
-		obligation    runtimedelivery.Obligation
-	}
-	preparedEvents := make(map[string]events.AdmittedEvent, len(replayable))
-	preparedRoutes := make(map[string][]events.DeliveryRoute, len(replayable))
-	eventOrder := make([]string, 0, len(replayable))
-	preparedDeliveries := make([]preparedReplayDelivery, 0, len(replayable))
-	for _, item := range replayable {
-		sourceEventID := strings.TrimSpace(item.SourceEventID)
-		sourceDeliveryID := strings.TrimSpace(item.SourceDeliveryID)
-		if item.Fact != runfork.RunForkHistoricalReplayFactEventDeliveries || sourceEventID == "" || sourceDeliveryID == "" {
-			return result, fmt.Errorf("store.run_fork.delivery_event_replay requires owner-authorized source event and delivery identity")
-		}
-		sourceEvent, ok := sourceEvents[sourceEventID]
-		if !ok {
-			loaded, err := cut.event(sourceEventID)
-			if err != nil {
-				return result, err
-			}
-			sourceEvent = loaded
-			sourceEvents[sourceEventID] = sourceEvent
-		}
-		forkEventID := deterministicRunForkReplayEventID(lineage.ForkRunID, sourceEventID)
-		if _, ok := preparedEvents[forkEventID]; !ok {
-			replayed, err := projectRunForkReplayEvent(ctx, tx, attempt, admission, sourceEvent, lineage, forkEventID, now)
-			if err != nil {
-				return result, err
-			}
-			preparedEvents[forkEventID] = replayed
-			eventOrder = append(eventOrder, forkEventID)
-		}
-		sourceDelivery, err := cut.delivery(sourceEventID, sourceDeliveryID)
-		if err != nil {
-			return result, fmt.Errorf("load source delivery %s for fork replay: %w", sourceDeliveryID, err)
-		}
-		if sourceDelivery.EventID != sourceEventID || string(sourceDelivery.SubscriberClass) != item.SubscriberType || sourceDelivery.SubscriberID != item.SubscriberID {
-			return result, fmt.Errorf("source delivery %s does not exactly match authorized fork replay work", sourceDeliveryID)
-		}
-		forkRoute, err := projectRunForkReplayInitializedReceiver(snapshot, sourceEvent, sourceDelivery, lineage.ForkRunID)
-		if err != nil {
-			return result, fmt.Errorf("project source delivery %s into fork ownership: %w", sourceDeliveryID, err)
-		}
-		receiverTarget, sourceTarget := forkRoute.Target, sourceDelivery.Route.Target
-		if !forkRoute.Initialization.Empty() {
-			receiverTarget = forkRoute.Initialization.ConstructionTarget()
-		}
-		if !sourceDelivery.Route.Initialization.Empty() {
-			sourceTarget = sourceDelivery.Route.Initialization.ConstructionTarget()
-		}
-		if receiverTarget.ExistingEntity() {
-			state, err := loadRunForkConstructedEntityState(snapshot, sourceTarget.Route().EntityID)
-			if err != nil {
-				return result, fmt.Errorf("load reconstructed replay receiver authority: %w", err)
-			}
-			target := receiverTarget.Route()
-			expected, err := projectRunForkHistoricalHeader(lineage.SourceRunID, lineage.ForkRunID, target.EntityID, target.FlowInstance, lineage.ForkBundleHash, state)
-			if err != nil {
-				return result, fmt.Errorf("project reconstructed replay receiver: %w", err)
-			}
-			if expected.WorkflowName != target.FlowID {
-				return result, fmt.Errorf("reconstructed replay receiver contradicts fixed-revision template")
-			}
-			header, err := pipelinepersistence.RequireSelectedHistoricalWorkflowHeader(ctx, tx, store.postgres, expected)
-			if err != nil {
-				return result, fmt.Errorf("reconstructed replay receiver contradicts fixed-revision ownership: %w", err)
-			}
-			if store.loadSnapshot == nil {
-				return result, fmt.Errorf("replay construction requires its immutable lifecycle owner")
-			}
-			child, err := store.loadSnapshot(ctx, tx, lineage.ForkRunID)
-			if err != nil {
-				return result, err
-			}
-			observed, found, err := readProjectedReceiverConstructionReceiptTx(ctx, tx, child, header)
-			if err != nil {
-				return result, err
-			}
-			if !found {
-				return result, fmt.Errorf("replay receiver lacks admitted historical construction")
-			}
-			plan, err := constructionPlanAtSnapshot(snapshot)
-			if err != nil {
-				return result, err
-			}
-			receipt, err := projectRunForkConstructionReceiptTx(ctx, tx, plan, lineage.ForkRunID, state, header.CreatedAt)
-			if err != nil {
-				return result, err
-			}
-			if err := pipelinepersistence.RequireSelectedHistoricalWorkflowReceipt(ctx, tx, receipt, observed); err != nil {
-				return result, err
-			}
-		}
-		obligation, err := runtimedelivery.NewObligation(forkEventID, lineage.ForkRunID, forkRoute, deliveryAuthority)
-		if err != nil {
-			return result, err
-		}
-		preparedRoutes[forkEventID] = append(preparedRoutes[forkEventID], obligation.Route())
-		preparedDeliveries = append(preparedDeliveries, preparedReplayDelivery{item: item, sourceEventID: sourceEventID, forkEventID: forkEventID, obligation: obligation})
-	}
-	for _, forkEventID := range eventOrder {
-		routes := events.NormalizeDeliveryRoutes(preparedRoutes[forkEventID])
-		settlement, err := events.NewDeliverySettlement(events.EventWriteHistoricalRunForkReplay, events.ConnectEvaluationLedger{})
-		if err != nil {
-			return result, err
-		}
-		if err := settlement.Validate(routes); err != nil {
-			return result, err
-		}
-		admitted := preparedEvents[forkEventID]
-		projected, changed, err := runtimebus.ResolvePreparedPublishEventTargetProjection(admitted.Event(), routes)
-		if err != nil {
-			return result, fmt.Errorf("project fork replay event %s from exact delivery routes: %w", forkEventID, err)
-		}
-		if changed {
-			admitted, err = admitRunForkReplayEventTargetProjection(projected)
-			if err != nil {
-				return result, fmt.Errorf("admit fork replay event %s target projection: %w", forkEventID, err)
-			}
-			preparedEvents[forkEventID] = admitted
-		}
-		outcome, _, err := store.deliveries.CommitHistoricalReplayInitialPublication(ctx, attempt, store.events,
-			runtimebus.PreparedPublishEvent{Event: admitted, Settlement: settlement, DeliveryRoutes: routes}, deliveryAuthority)
-		if err != nil {
-			return result, err
-		}
-		if err := store.commitScope(ctx, attempt, forkEventID, runtimepipelineobligation.ScopeDirect, now); err != nil {
-			return result, err
-		}
-		if outcome == runtimebus.EventAppendInserted {
-			result.ReplayedEventCount++
-		}
-	}
-	for _, prepared := range preparedDeliveries {
-		inserted, err := insertRunForkReplayDeliveryLineage(ctx, tx, lineage, prepared.item, prepared.sourceEventID, prepared.forkEventID, prepared.obligation, now)
-		if err != nil {
-			return result, err
-		}
-		if inserted {
-			result.ReplayedDeliveryCount++
-		}
-	}
-	return result, nil
-}
 
 // Replay consumes fixed-cut construction independently of the actor's entity.
 // It never runs a constructor or borrows source-run attachment authority.
@@ -380,10 +146,6 @@ func projectRunForkReplayDeliveryRoute(source events.DeliveryRoute, sourceRunID,
 	return source, nil
 }
 
-func admitRunForkReplayEventTargetProjection(projected events.Event) (events.AdmittedEvent, error) {
-	return events.AdmitForPersistence(projected, events.AdmissionOptions{RequirePersistentUUIDIdentity: true})
-}
-
 func validateRunForkDeliveryEventReplayWorkAgainstPlan(pending []runfork.RunForkPendingWork, work []runfork.RunForkHistoricalReplayExecutableWork) error {
 	evidenceByDeliveryID := make(map[string]runfork.RunForkPendingWork, len(pending))
 	for _, item := range pending {
@@ -453,60 +215,6 @@ func loadRunForkReplaySourceEvent(ctx context.Context, tx *sql.Tx, sourceRunID, 
 
 func LoadRunForkReplaySourceEvent(ctx context.Context, tx *sql.Tx, sourceRunID, sourceEventID string) (events.Event, error) {
 	return loadRunForkReplaySourceEvent(ctx, tx, sourceRunID, sourceEventID)
-}
-
-func projectRunForkReplayEvent(ctx context.Context, tx *sql.Tx, story runtimeauthoractivity.Mutation, admission runForkSourceStateAdmission, source events.Event, lineage runForkActivationLineage, forkEventID string, now time.Time) (events.AdmittedEvent, error) {
-	if source.RunID() != lineage.SourceRunID || admission.snapshot == nil || admission.snapshot.RunID != lineage.SourceRunID || admission.forkRunID != lineage.ForkRunID {
-		return events.AdmittedEvent{}, fmt.Errorf("historical replay source contradicts admitted fork context")
-	}
-	projected, err := prepareRunForkSelectedContractSourceEvent(ctx, tx, story, admission, runfork.RunForkSelectedContractSourceEvent{
-		SourceEventID: source.ID(), EventName: string(source.Type()), ExecutionMode: source.ExecutionMode(), Scope: string(source.Scope()), RoutingSource: source.RoutingSource(), Payload: source.Payload(),
-	})
-	if err != nil {
-		return events.AdmittedEvent{}, err
-	}
-	sourceAdmission, ok := source.PayloadAdmission()
-	if !ok {
-		return events.AdmittedEvent{}, fmt.Errorf("project fork replay event %s from source event %s: source payload admission evidence is required", forkEventID, source.ID())
-	}
-	selected, err := events.NewSelectedForkLineage(
-		lineage.ForkRunID,
-		lineage.SourceRunID,
-		source.ID(),
-		runfork.RunForkDeliveryEventReplayOwner,
-		source.TaskID(),
-		source.ExecutionMode(),
-	)
-	if err != nil {
-		return events.AdmittedEvent{}, err
-	}
-	envelope := source.Envelope()
-	envelope.Source = projected.RoutingSource.Route()
-	replayed, err := events.NewSelectedForkReplayEvent(events.SelectedForkReplayEventInput{
-		Facts: events.EventFacts{
-			ID: forkEventID, Type: source.Type(),
-			Producer: events.ProducerClaim{Type: source.ProducerType(), ID: source.SourceAgent()},
-			TaskID:   source.TaskID(), Payload: projected.Payload, Envelope: envelope,
-			RoutingSource: projected.RoutingSource, CreatedAt: now, ExecutionMode: source.ExecutionMode(),
-		},
-		Lineage: selected,
-	})
-	if err != nil {
-		return events.AdmittedEvent{}, err
-	}
-	projectedAdmission, err := events.NewPayloadAdmission(projected.Payload, sourceAdmission.Binding())
-	if err != nil {
-		return events.AdmittedEvent{}, fmt.Errorf("project fork replay event %s from source event %s payload binding: %w", forkEventID, source.ID(), err)
-	}
-	replayed, err = events.ApplyPayloadAdmission(replayed, projectedAdmission)
-	if err != nil {
-		return events.AdmittedEvent{}, fmt.Errorf("project fork replay event %s from source event %s payload admission: %w", forkEventID, source.ID(), err)
-	}
-	admitted, err := events.AdmitForPersistence(replayed, events.AdmissionOptions{RequirePersistentUUIDIdentity: true})
-	if err != nil {
-		return events.AdmittedEvent{}, fmt.Errorf("project fork replay event %s from source event %s: %w", forkEventID, source.ID(), err)
-	}
-	return admitted, nil
 }
 
 func insertRunForkReplayDeliveryLineage(ctx context.Context, tx *sql.Tx, lineage runForkActivationLineage, item runfork.RunForkHistoricalReplayExecutableWork, sourceEventID, forkEventID string, obligation runtimedelivery.Obligation, now time.Time) (bool, error) {

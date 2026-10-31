@@ -87,7 +87,7 @@ func restartNestedReplyChild(t *testing.T, h *runtimeHarness, staged runfork.Run
 	loader := runforkexecution.SourceArtifactSelectedContractSourceLoader{RepoRoot: repoRootFromCatalogE2E(t),
 		Store: selected}
 	prepared, err := selectedContractExecutionOwnerForCatalogHarness(t, h).Prepare(h.ctx, runforkexecution.SelectedContractExecutionRequest{
-		SourceRunID: operation.SourceRunID, At: operation.ForkEventID, ForkOperation: &operation, AllowSourceFreeze: operation.AllowSourceFreeze,
+		SourceRunID: operation.SourceRunID, At: operation.ForkEventID, ForkOperation: &operation,
 		SourceLoader: loader, ContractSelection: operation.ContractSelection, AgentRuntime: selectedContractAgentRuntimeOptionsForCatalogHarness(h, testRuntimeConfig()), ExpectedBundleHash: operation.TargetBundleHash,
 	})
 	if err != nil {

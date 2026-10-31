@@ -291,13 +291,3 @@ func contractSwapExecutionInvalidPaths(items []runfork.RunForkSelectedContractEx
 	)
 	return out
 }
-
-func contractSwapBootResumeSourceEvents(execution runfork.RunForkHistoricalReplayContractSwapBootResume) []string {
-	out := make([]string, 0, len(execution.ExecutableWork))
-	for _, item := range execution.ExecutableWork {
-		if eventID := strings.TrimSpace(item.SourceEventID); eventID != "" {
-			out = append(out, eventID)
-		}
-	}
-	return out
-}

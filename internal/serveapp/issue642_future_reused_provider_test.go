@@ -51,8 +51,7 @@ func TestIssue642FutureKeyedProviderReusesConstructedInstanceBothStores(t *testi
 			}
 			baseline := rt.Runtime.Options.ProcessWorkOwner.ActiveCount()
 			fork := requireSelectedForkExecutionRPCResult(t, rt.Endpoint, map[string]any{
-				"source_run_id": seed.RunID, "at_start": true, "allow_source_freeze": true,
-				"idempotency_key": "future-provider-reuse-start-cut",
+				"source_run_id": seed.RunID, "at_start": true, "idempotency_key": "future-provider-reuse-start-cut",
 			})
 			terminalDeadline := time.Now().Add(servedProofPollDeadline)
 			if fork.SourceRunID != seed.RunID || fork.ForkRunID == "" || fork.ForkRunID == seed.RunID ||

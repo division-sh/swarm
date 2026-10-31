@@ -87,7 +87,7 @@ func TestOperatorRunForkOutcomeRetainsOriginalStartSelector(t *testing.T) {
 				operations := newRecordingRunForkOperations()
 				request := runfork.ForkOperationRequest{OperationID: uuid.NewString(), Actor: "start-outcome", TransportHash: "start-outcome-transport",
 					SourceRunID: runForkTestSourceRunID, AtStart: start, TargetBundleHash: runForkTestBundleHash, TargetRootReference: apiArtifactRoot(t, runForkTestArtifact).Reference(),
-					AllowSourceFreeze: true, ContractSelection: runfork.RunForkContractSelection{Mode: runfork.RunForkContractSelectionModeSelectedContracts}}
+					ContractSelection: runfork.RunForkContractSelection{Mode: runfork.RunForkContractSelectionModeSelectedContracts}}
 				if keyed {
 					request.IdempotencyKey = "original-selector"
 				}
@@ -123,7 +123,7 @@ func TestOperatorRunForkActivatedPostCommitErrorReplaysWithoutReexecution(t *tes
 	selected := SelectedContractRunForkExecutor{
 		ExecuteSelectedContractRunFork: func(_ context.Context, req runforkexecution.SelectedContractExecutionRequest) (runforkexecution.SelectedContractExecutionResult, error) {
 			selectedCalls++
-			if req.SourceRunID != runForkTestSourceRunID || req.At != runForkTestEventID || req.ExpectedBundleHash != runForkTestBundleHash || !req.AllowSourceFreeze {
+			if req.SourceRunID != runForkTestSourceRunID || req.At != runForkTestEventID || req.ExpectedBundleHash != runForkTestBundleHash {
 				t.Fatalf("selected executor request = %#v", req)
 			}
 			return runforkexecution.SelectedContractExecutionResult{
@@ -136,7 +136,7 @@ func TestOperatorRunForkActivatedPostCommitErrorReplaysWithoutReexecution(t *tes
 					SourceRunID: runForkTestSourceRunID, ForkRunID: runForkTestForkRunID,
 					ForkPoint: runfork.RunForkPoint{Kind: runfork.RunForkPointEvent, Input: req.At, EventID: runForkTestEventID, Revision: 1},
 					Activated: true, ForkRunStatus: runfork.RunForkActivatedStatus,
-					SourceRunStatus: runfork.RunForkSourceFrozenStatus, SourceFrozen: true,
+					SourceRunStatus: "paused", SourceFrozen: false,
 				},
 				ExecutedEventCount: 2,
 			}, cleanupErr
@@ -336,7 +336,6 @@ func TestOperatorRunForkKeylessReadsExactOperationIDAfterCleanup(t *testing.T) {
 func runForkOperationTestRequest(key, hash string) Request {
 	params := map[string]any{
 		"source_run_id": runForkTestSourceRunID, "fork_event_id": runForkTestEventID,
-		"allow_source_freeze": true,
 	}
 	if key != "" {
 		params["idempotency_key"] = key
@@ -353,8 +352,8 @@ func invokeRunForkOperation(opts RunForkHandlerOptions, request Request) (any, e
 func runForkActivatedTestResult() RunForkExecutionResult {
 	return RunForkExecutionResult{
 		Owner:       runfork.RunForkSelectedContractExecutionOwner,
-		SourceRunID: runForkTestSourceRunID, SourceRunStatus: runfork.RunForkSourceFrozenStatus,
-		SourceFrozen: true, ForkRunID: runForkTestForkRunID,
+		SourceRunID: runForkTestSourceRunID, SourceRunStatus: "paused",
+		SourceFrozen: false, ForkRunID: runForkTestForkRunID,
 		ForkPointKind: string(runfork.RunForkPointEvent), ForkRevision: 1, ForkEventID: runForkTestEventID,
 		ForkRunStatus: runfork.RunForkActivatedStatus, BundleHash: runForkTestBundleHash,
 		ExecutedEventCount: 1,

@@ -148,7 +148,7 @@ func TestOperatorRunForkStartReadbackAndMaterializedRetry(t *testing.T) {
 	}
 	// Even a reader returning the same transport identity cannot alias selectors.
 	latest := request
-	latest.Params = map[string]any{"source_run_id": runForkTestSourceRunID, "allow_source_freeze": true, "idempotency_key": "start-retry"}
+	latest.Params = map[string]any{"source_run_id": runForkTestSourceRunID, "idempotency_key": "start-retry"}
 	if _, err := invokeRunForkOperation(opts, latest); err == nil || executor.calls != 2 || availability.calls != 1 {
 		t.Fatal("durable run-start operation aliased the latest selector")
 	}
@@ -160,7 +160,7 @@ func TestOperatorRunForkStartHTTPReadback(t *testing.T) {
 	handler := runForkTestHandler(t, &recordingRunForkAvailability{rows: map[string]runbundle.Availability{
 		runForkTestSourceRunID: runForkAvailable(runForkTestSourceRunID, apiArtifactRoot(t, runForkTestArtifact)),
 	}}, executor)
-	request := fmt.Sprintf(`{"jsonrpc":"2.0","id":"start","method":"run.fork","params":{"source_run_id":%q,"at_start":true,"allow_source_freeze":true,"idempotency_key":"start-http"}}`, runForkTestSourceRunID)
+	request := fmt.Sprintf(`{"jsonrpc":"2.0","id":"start","method":"run.fork","params":{"source_run_id":%q,"at_start":true,"idempotency_key":"start-http"}}`, runForkTestSourceRunID)
 	response := rpcCall(t, handler, request)
 	if response.Error != nil {
 		t.Fatalf("start selector HTTP response: %#v", response.Error)

@@ -170,7 +170,7 @@ func runMixedRequestWholePublicationWithResponseObserver(t *testing.T, settledPr
 				}
 			})
 			executed, err := executeCatalogLiveFork(t, h, h.ctx, runforkexecution.SelectedContractExecutionRequest{
-				SourceRunID: catalogRuntimeRunID, At: cut, ForkOperation: &operation, AllowSourceFreeze: true, Owner: owner, SourceLoader: loader, ContractSelection: selection, AgentRuntime: options, ExpectedBundleHash: selection.BundleHash,
+				SourceRunID: catalogRuntimeRunID, At: cut, ForkOperation: &operation, Owner: owner, SourceLoader: loader, ContractSelection: selection, AgentRuntime: options, ExpectedBundleHash: selection.BundleHash,
 			})
 			if err != nil || !executed.Activation.Activated || executed.Materialization.ForkRunID != staged.ForkRunID {
 				t.Fatalf("activate complete mixed request publication: %+v error=%v", executed.Activation, err)

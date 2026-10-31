@@ -99,7 +99,6 @@ var runListStatuses = map[string]struct{}{
 	"completed": {},
 	"failed":    {},
 	"cancelled": {},
-	"forked":    {},
 }
 
 func OperatorHealthHandlers(opts HealthHandlerOptions) map[string]MethodHandler {

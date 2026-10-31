@@ -224,12 +224,9 @@ type LLMProviderLimitPolicy struct {
 }
 
 type ClaudeCLIConfig struct {
-	Command              string        `yaml:"command"`
-	Timeout              time.Duration `yaml:"timeout"`
-	OutputFormat         string        `yaml:"output_format"`
-	Retries              int           `yaml:"retries"`
-	NoSessionPersistence bool          `yaml:"no_session_persistence"`
-	UseTMux              bool          `yaml:"use_tmux"`
+	Command      string        `yaml:"command"`
+	Timeout      time.Duration `yaml:"timeout"`
+	OutputFormat string        `yaml:"output_format"`
 }
 
 type OpenAICompatibleConfig struct {
@@ -291,9 +288,6 @@ func (c *Config) validate(backendOverride string) error {
 		case "json", "stream-json":
 		default:
 			return errors.New("llm.claude_cli.output_format must be json or stream-json for claude_cli backend")
-		}
-		if c.LLM.ClaudeCLI.NoSessionPersistence {
-			return errors.New("llm.claude_cli.no_session_persistence must be false for continuity")
 		}
 	}
 	if profile.ID == llmselection.BackendOpenAICompatible {

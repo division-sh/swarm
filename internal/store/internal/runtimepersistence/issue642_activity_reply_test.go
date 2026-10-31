@@ -1,17 +1,13 @@
 package runtimepersistence
 
 import (
-	"context"
 	"encoding/json"
 	"reflect"
 	"testing"
 
 	"github.com/division-sh/swarm/internal/runtime/core/activityidentity"
-	runtimecorrelation "github.com/division-sh/swarm/internal/runtime/correlation"
+
 	"github.com/division-sh/swarm/internal/runtime/replycontext"
-	"github.com/division-sh/swarm/internal/runtime/runfork"
-	"github.com/division-sh/swarm/internal/runtime/runforkexecution"
-	"github.com/division-sh/swarm/internal/sourceartifact"
 )
 
 func TestIssue642RecordedActivityRetainsChildReplyBothStores(t *testing.T) {
@@ -78,64 +74,6 @@ func TestIssue642RecordedActivityRetainsChildReplyBothStores(t *testing.T) {
 						}
 					})
 				}
-			}
-		})
-	}
-}
-
-func TestIssue642OrdinaryActivityReplayRetainsChildReplyBothStores(t *testing.T) {
-	for _, backend := range eventRecordContractBackends() {
-		t.Run(backend.name, func(t *testing.T) {
-			fixture := backend.open(t)
-			child, event, original := seedActivityEvidenceForForkWithReply(t, fixture, backend.name == "postgres", false, "succeeded", 0, true, false, true)
-			ctx := originalStoreFixtureContext(fixture.activityOwner, testAuthorActivityContext(), fixture.store)
-			rooted, err := fixture.store.(interface {
-				LoadRunRootedSource(context.Context, string) (sourceartifact.RootedSource, error)
-			}).LoadRunRootedSource(ctx, event.RunID())
-			if err != nil {
-				t.Fatal(err)
-			}
-			fact := mustStoreTestSourceArtifactFact(rooted.Admission().BundleHash())
-			ctx = runtimecorrelation.WithRootAdmission(runtimecorrelation.WithSourceArtifactFact(ctx, fact), rooted.Admission())
-			rows, err := ReadReplyContextRecordsForTest(ctx, fixture.store, child.ForkRunID)
-			if err != nil || len(rows) != 1 || rows[0].ID == original.ReplyContextID || rows[0].SourceRunID != event.RunID() {
-				t.Fatalf("ordinary materialization lost exact own context: %+v error=%v", rows, err)
-			}
-			owner := fixture.store.(interface {
-				RequireMaterializedRunFork(context.Context, string, runfork.RunForkMaterializeRequest) (runfork.RunForkMaterialization, error)
-				ActivateRunFork(context.Context, runfork.RunForkActivateRequest) (runfork.RunForkActivation, error)
-			})
-			repeat, err := owner.RequireMaterializedRunFork(ctx, child.ForkRunID, runfork.RunForkMaterializeRequest{
-				SourceRunID: event.RunID(), At: event.ID(), SourceArtifactFact: fact, RootAdmission: rooted.Admission(),
-			})
-			if err != nil || repeat.ForkRunID != child.ForkRunID {
-				t.Fatalf("ordinary exact repeated materialization: %+v error=%v", repeat, err)
-			}
-			activation, err := owner.ActivateRunFork(ctx, runfork.RunForkActivateRequest{
-				ForkRunID: child.ForkRunID, AllowSourceFreeze: true,
-				OriginalRootAdmission:             rooted.Admission(),
-				OriginalLoopCarriage:              originalActivityCarriageAtPoint(t, fixture.store.(selectedActivityProjectionStore), event.RunID(), child.ForkPoint),
-				HistoricalReplayExecutionAdmitter: runforkexecution.HistoricalReplayExecutionAdmitter{},
-			})
-			if err != nil || !activation.Activated || activation.DeliveryEventReplay == nil || activation.DeliveryEventReplay.ReplayedDeliveryCount != 1 {
-				t.Fatalf("ordinary admitted replay: %+v error=%v", activation, err)
-			}
-			executableOwner, err := activityidentity.ParseOwnerKey(original.NodeID)
-			if err != nil {
-				t.Fatal(err)
-			}
-			requestID := activityidentity.RequestEventID(activityidentity.Fact{
-				RunID: child.ForkRunID, SourceEventID: activityidentity.ForkLineageEventID(child.ForkRunID, event.ID()),
-				EntityID: child.ForkRunID, Owner: executableOwner, ExecutionFlowID: ".", HandlerEventKey: original.HandlerEventKey,
-				ActivityID: original.ActivityID, Tool: original.Tool, Attempt: 1,
-			})
-			copied, found, err := fixture.store.(activityTimestampJournal).LoadActivityAttempt(ctx, requestID)
-			if err != nil || !found || copied.ReplyContextID != rows[0].ID || copied.InputHash != original.InputHash || !reflect.DeepEqual(copied.ResultPayload, original.ResultPayload) {
-				t.Fatalf("ordinary replay failed to retain own reply and frozen result: %+v found=%t error=%v", copied, found, err)
-			}
-			source, found, err := fixture.store.(activityTimestampJournal).LoadActivityAttempt(ctx, original.RequestEventID)
-			if err != nil || !found || !reflect.DeepEqual(source, original) {
-				t.Fatalf("ordinary replay changed original activity: %+v found=%t error=%v", source, found, err)
 			}
 		})
 	}

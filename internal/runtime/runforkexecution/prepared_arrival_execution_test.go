@@ -163,7 +163,7 @@ func TestIssue642PreparedArrivalTimeoutContinuesExactDeliveryBothStores(t *testi
 			selection := runforkadmission.SelectedContractSelection(loaded.Source)
 			operation := runfork.ForkOperationRequest{OperationID: uuid.NewString(), Actor: "prepared-arrival", IdempotencyKey: "fixed-cut",
 				TransportHash: "prepared-arrival-transport", SourceRunID: sourceRun, ForkEventID: marker,
-				TargetBundleHash: loaded.SourceArtifactFact.BundleHash(), TargetRootReference: loaded.RootedSource.Admission().Reference(), AllowSourceFreeze: true, ContractSelection: selection}
+				TargetBundleHash: loaded.SourceArtifactFact.BundleHash(), TargetRootReference: loaded.RootedSource.Admission().Reference(), ContractSelection: selection}
 			liveRuntime, liveContexts := liveForkRuntimeFixture(t, sourceCtx, selected, owner, loaded, sourceRun, executionposture.MockOnly)
 			// The clock commit precedes its callback's diagnostic publication.
 			setup, cancelSetup := context.WithTimeout(sourceCtx, 15*time.Second)
@@ -187,7 +187,7 @@ func TestIssue642PreparedArrivalTimeoutContinuesExactDeliveryBothStores(t *testi
 			}
 			baseline = process.ActiveCount()
 			result, err := ExecuteSelectedContractRunFork(sourceCtx, SelectedContractExecutionRequest{
-				SourceRunID: sourceRun, At: marker, AllowSourceFreeze: true, Owner: owner, ForkOperation: &operation,
+				SourceRunID: sourceRun, At: marker, Owner: owner, ForkOperation: &operation,
 				LiveRuntime: liveRuntime, LiveContexts: liveContexts, LiveRuns: selected.(runlifecycle.LiveRunReader),
 				SourceLoader: loader, ContractSelection: selection,
 				AgentRuntime: SelectedContractAgentRuntimeOptions{ExecutionPosture: executionposture.MockOnly, ProcessCapability: owner.ports.contexts.capability},

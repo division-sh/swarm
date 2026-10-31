@@ -34,7 +34,6 @@ type SelectedContractExecutionRequest struct {
 	ExpectedBundleHash      string
 	SourceArtifactFact      runtimecorrelation.SourceArtifactFact
 	EffectiveSourceIdentity scenarioexecution.EffectiveSourceIdentity
-	AllowSourceFreeze       bool
 	LiveRuntime             *runtimepkg.Runtime
 	AcquireLiveRuntime      func(context.Context, sourceartifact.RootAdmissionReference) (*runtimepkg.RuntimeContextUse, error)
 	LiveContexts            *runtimepkg.RuntimeContextManager

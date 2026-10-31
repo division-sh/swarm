@@ -70,7 +70,7 @@ func runReceiverMaterializationSelectedForkExecution(t *testing.T, publicationFr
 			cfg.LLM.Backend = "anthropic"
 			executionOwner := selectedContractExecutionOwnerForCatalogHarness(t, h, lifecycle)
 			result, err := executeCatalogLiveFork(t, h, ctx, forkexecution.SelectedContractExecutionRequest{
-				SourceRunID: catalogRuntimeRunID, At: inputID, AllowSourceFreeze: true,
+				SourceRunID: catalogRuntimeRunID, At: inputID,
 				Owner: executionOwner, SourceLoader: loader, ContractSelection: selection,
 				AgentRuntime: selectedContractAgentRuntimeOptionsForCatalogHarness(h, cfg), ExpectedBundleHash: selection.BundleHash,
 			})

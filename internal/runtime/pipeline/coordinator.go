@@ -1131,13 +1131,6 @@ func admitWorkflowNodeDelivery(
 	}
 	claimResult, claimErr := deliveryStore.ClaimDelivery(ctx, authority, evt, route)
 	if !claimResult.Acknowledged {
-		var inactive *runtimerunlifecycle.RunNotActiveError
-		if errors.As(claimErr, &inactive) && inactive.RunID == evt.RunID() && inactive.State == runtimerunlifecycle.StateForked {
-			if err := returnCarrier(nil); err != nil {
-				return workflowNodeDeliveryAdmission{}, err
-			}
-			return workflowNodeDeliveryAdmission{handled: true}, nil
-		}
 		if claimErr == nil {
 			claimErr = errors.New("delivery claim was not acknowledged")
 		}

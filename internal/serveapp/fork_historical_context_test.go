@@ -169,7 +169,7 @@ func TestRunForkHistoricalIdentityPublicExecutionBothStores(t *testing.T) {
 				_, err = family.Materialize(ctx, runfork.RunForkMaterializeRequest{SourceRunID: seed.RunID, At: at})
 				requireHistoricalRefusal(err)
 				result, err := family.Execute(ctx, runforkexecution.SelectedContractExecutionRequest{
-					SourceRunID: seed.RunID, At: at, AllowSourceFreeze: true, ExpectedBundleHash: rt.BundleHash,
+					SourceRunID: seed.RunID, At: at, ExpectedBundleHash: rt.BundleHash,
 					SourceLoader:      runforkexecution.SourceArtifactSelectedContractSourceLoader{RepoRoot: repoRootForTest(), Store: selected.SourceArtifactStore()},
 					ContractSelection: runfork.RunForkContractSelection{Mode: runfork.RunForkContractSelectionModeBundleHash, BundleHash: rt.BundleHash},
 					AgentRuntime:      runforkexecution.SelectedContractAgentRuntimeOptions{ExecutionPosture: rt.Runtime.ExecutionPosture},
@@ -178,7 +178,7 @@ func TestRunForkHistoricalIdentityPublicExecutionBothStores(t *testing.T) {
 				if result.Materialization.ForkRunID != "" || result.ExecutedEventCount != 0 {
 					t.Fatalf("corrupt R reached child execution: %#v", result)
 				}
-				params := map[string]any{"source_run_id": seed.RunID, "allow_source_freeze": true, "idempotency_key": "historical-refusal-" + at}
+				params := map[string]any{"source_run_id": seed.RunID, "idempotency_key": "historical-refusal-" + at}
 				if at != "" {
 					params["fork_event_id"] = at
 				}
@@ -205,7 +205,8 @@ func TestRunForkHistoricalIdentityPublicExecutionBothStores(t *testing.T) {
 			if err := rt.DB.QueryRow(`SELECT fact FROM run_fork_fact_revisions WHERE run_id=$1 AND family='event_deliveries' AND fact_key=$2 AND revision=$3`, seed.RunID, deliveryID, latestRevision).Scan(&stillLatest); err != nil || string(stillLatest) != string(latest) {
 				t.Fatalf("latest fact was changed: %v", err)
 			}
-			staged, err := direct.MaterializeRunForkForSelectedContractExecution(ctx, freshInvocation())
+			stagedRequest := freshInvocation()
+			staged, err := direct.MaterializeRunForkForSelectedContractExecution(ctx, stagedRequest)
 			if err != nil || staged.ForkRunID == "" || staged.SelectedContractBinding == nil || staged.ForkRunStatus != runfork.RunForkMaterializedStatus {
 				t.Fatalf("lawful selected staging: %#v, %v", staged, err)
 			}
@@ -233,14 +234,6 @@ func TestRunForkHistoricalIdentityPublicExecutionBothStores(t *testing.T) {
 			if activation.Activated {
 				t.Fatal("direct selected activation accepted corrupt R")
 			}
-			recovered, err := family.Activate(ctx, runforkexecution.SelectedContractActivationGateRequest{
-				ForkRunID: staged.ForkRunID, AllowSourceFreeze: true, SourceLoader: loader,
-				AgentRuntime: runforkexecution.SelectedContractAgentRuntimeOptions{ExecutionPosture: rt.Runtime.ExecutionPosture},
-			})
-			requireHistoricalRefusal(err)
-			if recovered.Activated || recovered.ExecutedEventCount != 0 || len(recovered.ForkEvents) != 0 {
-				t.Fatalf("recovered activation reached execution: %#v", recovered)
-			}
 			writeFact(original)
 			// Source settlement (including pipeline receipt/handoff) and fault
 			// restoration precede the healthy baseline. Source freeze/lineage and
@@ -253,7 +246,7 @@ func TestRunForkHistoricalIdentityPublicExecutionBothStores(t *testing.T) {
 			sourceNotices := readForkReceiverNoticeDomain(t, rt, seed.RunID)
 			siblingNotices := readForkReceiverNoticeDomain(t, rt, sibling.RunID)
 			var result apiv1.RunForkExecutionResult
-			params := map[string]any{"source_run_id": seed.RunID, "fork_event_id": frontier, "allow_source_freeze": true, "idempotency_key": "historical-restored-control"}
+			params := map[string]any{"source_run_id": seed.RunID, "fork_event_id": frontier, "idempotency_key": "historical-restored-control"}
 			requireServedJSONRPCResult(t, rt.Endpoint, "run.fork", params, &result)
 			if result.ForkRunID == "" || result.ExecutedEventCount != 1 {
 				t.Fatalf("restored historical reader lost its immutable activation ACK: %#v", result)
@@ -303,7 +296,7 @@ func admitForkHistoricalSelectedRequest(t *testing.T, ctx context.Context, owner
 		OperationID: uuid.NewString(), Actor: "selected-fork-fixture", TransportHash: "selected-fork-fixture",
 		SourceRunID: plan.SourceRunID, ForkEventID: plan.ForkPoint.EventID,
 		TargetBundleHash: loaded.SourceArtifactFact.BundleHash(), TargetRootReference: loaded.RootedSource.Admission().Reference(),
-		AllowSourceFreeze: false, ContractSelection: selection,
+		ContractSelection: selection,
 	}).BindResolvedPoint(plan.ForkPoint)
 	if err != nil {
 		t.Fatal(err)

@@ -102,17 +102,6 @@ func executeLiveSelectedContractRunFork(ctx context.Context, req SelectedContrac
 	return executeSelectedContractRunForkForTest(ctx, req)
 }
 
-func activateLiveSelectedContractRunFork(ctx context.Context, req SelectedContractActivationGateRequest) (SelectedContractActivationGateResult, error) {
-	if !req.AgentRuntime.ExecutionPosture.Valid() {
-		req.AgentRuntime.ExecutionPosture = executionposture.Live
-	}
-	ctx, err := selectedFixtureEntryContext(ctx, req.ExecutionOwner)
-	if err != nil {
-		return SelectedContractActivationGateResult{}, err
-	}
-	return ActivateSelectedContractRunFork(ctx, req)
-}
-
 func liveTestEffectController(store runtimeeffects.Store) *runtimeeffects.Controller {
 	return runtimeeffects.NewController(store).WithExecutionPosture(executionposture.Live)
 }

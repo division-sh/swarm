@@ -38,7 +38,6 @@ const (
 	PreparedForkConstructionFailure
 	PreparedForkDeliveryReconcile
 	PreparedForkActivate
-	PreparedOrdinaryForkActivate
 )
 
 // PreparedProcessOperation is a closed synchronous store command. Only the
@@ -475,20 +474,6 @@ type PreparedForkStore interface {
 	ClaimRunForkSelectedContractRuntimeExecution(context.Context, runfork.SelectedContractRuntimeExecution, string, time.Duration) (effects.Authority, error)
 	RecoverSelectedFork(context.Context, runcontrol.SelectedForkRecoveryRequest) (runfork.SelectedForkRecoveryResult, error)
 	StopSelectedFork(context.Context, runcontrol.SelectedStopRequest) (runcontrol.State, error)
-}
-
-func PreparedOrdinaryForkActivateOperation(store interface {
-	ActivateRunFork(context.Context, runfork.RunForkActivateRequest) (runfork.RunForkActivation, error)
-}, request runfork.RunForkActivateRequest, result *runfork.RunForkActivation) PreparedProcessOperation {
-	if store == nil || result == nil {
-		return PreparedProcessOperation{}
-	}
-	op := PreparedProcessOperation{kind: PreparedOrdinaryForkActivate, target: store, stamp: &request.Process}
-	op.run = func(ctx context.Context) (err error) {
-		*result, err = store.ActivateRunFork(ctx, request)
-		return err
-	}
-	return op
 }
 
 func preparedForkOperation(kind PreparedOperationKind, store any, preparation runfork.SelectedForkPreparation) PreparedProcessOperation {

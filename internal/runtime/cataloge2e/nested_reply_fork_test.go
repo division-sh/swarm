@@ -3,12 +3,12 @@ package cataloge2e
 import (
 	"context"
 	"reflect"
-	"strings"
+
 	"testing"
 	"time"
 
 	"github.com/division-sh/swarm/internal/runtime/bus"
-	"github.com/division-sh/swarm/internal/runtime/correlation"
+
 	"github.com/division-sh/swarm/internal/runtime/replycontext"
 	"github.com/division-sh/swarm/internal/runtime/runfork"
 	"github.com/division-sh/swarm/internal/runtime/runforkexecution"
@@ -78,20 +78,6 @@ func TestIssue642TerminalNestedReplyNativeMaterializationBothStores(t *testing.T
 			after, err := storetest.ReadReplyContextRecords(h.ctx, reader, catalogRuntimeRunID)
 			if err != nil || !reflect.DeepEqual(sourceRows, after) {
 				t.Fatalf("native projection changed source reply authority: %+v %v", after, err)
-			}
-			// Reply readback must not erase an unrelated replay-policy refusal or
-			// create execution authority. The cut is publication, not its later drain.
-			recovered, err := runforkexecution.ActivateSelectedContractRunFork(correlation.WithRunID(h.ctx, staged.ForkRunID), runforkexecution.SelectedContractActivationGateRequest{
-				ForkRunID: staged.ForkRunID, AllowSourceFreeze: true, Store: runScopedCatalogStore(t, h),
-				ExecutionOwner: owner, SourceLoader: loader, AgentRuntime: options,
-			})
-			if err == nil || !strings.Contains(err.Error(), runfork.RunForkBlockerNonAgentDeliveryReplayUnsupported) ||
-				recovered.Activated || recovered.ExecutedEventCount != 0 || recovered.ForkLocalRuntimeContainer != nil || len(recovered.ForkEvents) != 0 {
-				t.Fatalf("terminal reply transfer bypassed the exact unrelated replay gate: %+v %v", recovered, err)
-			}
-			after, err = storetest.ReadReplyContextRecords(h.ctx, reader, staged.ForkRunID)
-			if err != nil || !reflect.DeepEqual(childRows, after) {
-				t.Fatalf("activation reopened or replaced terminal reply rows: %+v %v", after, err)
 			}
 			assertSourceRunLifecycle(t, runScopedCatalogStore(t, h), staged.ForkRunID, runfork.RunForkMaterializedStatus, false)
 		})

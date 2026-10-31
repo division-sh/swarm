@@ -34,27 +34,26 @@ import (
 // It exposes persistence mechanics while the materialization lifecycle executes
 // once in materializeRunForkForSelectedContractExecution.
 type runForkSelectedContractMaterializationPort struct {
-	postgres               bool
-	requireCurrent         func() error
-	runMutation            func(context.Context, func(context.Context, *sql.Tx, *mutationprotocol.Attempt) error) (bool, error)
-	plan                   func(context.Context, *sql.Tx, runfork.RunForkPlanRequest) (runfork.RunForkPlan, error)
-	deliveries             *storedelivery.Adapter
-	loadSource             func(context.Context, *sql.Tx, string) (runtimecorrelation.SourceArtifactFact, error)
-	activeForkSource       func(context.Context, *sql.Tx, string) (runtimecorrelation.SourceArtifactFact, error)
-	admitProfile           func(context.Context, *sql.Tx, string, scenarioexecution.EffectiveSourceIdentity, runtimecorrelation.SourceArtifactFact) (scenarioexecution.Profile, bool, error)
-	loadSnapshot           runForkLifecycleSnapshotLoader
-	readHistoricalSnapshot runForkLifecycleSnapshotLoader
-	requireProfile         func(context.Context, *sql.Tx, string, scenarioexecution.Profile, bool) error
-	durableData            *storedurabledata.Owner
-	insertRun              func(context.Context, *mutationprotocol.Attempt, string, string, runfork.RunForkPoint, time.Time, runtimecorrelation.SourceArtifactFact, sourceartifact.RootAdmission) error
-	ensureProfile          func(context.Context, *sql.Tx, string, scenarioexecution.Profile, time.Time) error
-	materializeEntity      func(context.Context, *sql.Tx, *mutationprotocol.Attempt, activeRunSourceOwnerFunc, string, contracts.BundleIdentity, runfork.RunForkPlan, runfork.RunForkEntityState, runForkEntityMetadata, time.Time, *privaterunlifecycle.ChannelCardChanges) error
-	publishChannelChanges  func(bool, bool) error
-	materializeBarriers    runForkFanOutBarrierOwner
-	workflowTimers         runForkWorkflowTimerMaterializationOwner
-	arrivalSchedules       runForkArrivalJoinMaterializationOwner
-	replies                runForkReplyContextOwner
-	now                    func() time.Time
+	postgres              bool
+	requireCurrent        func() error
+	runMutation           func(context.Context, func(context.Context, *sql.Tx, *mutationprotocol.Attempt) error) (bool, error)
+	plan                  func(context.Context, *sql.Tx, runfork.RunForkPlanRequest) (runfork.RunForkPlan, error)
+	deliveries            *storedelivery.Adapter
+	loadSource            func(context.Context, *sql.Tx, string) (runtimecorrelation.SourceArtifactFact, error)
+	activeForkSource      func(context.Context, *sql.Tx, string) (runtimecorrelation.SourceArtifactFact, error)
+	admitProfile          func(context.Context, *sql.Tx, string, scenarioexecution.EffectiveSourceIdentity, runtimecorrelation.SourceArtifactFact) (scenarioexecution.Profile, bool, error)
+	loadSnapshot          runForkLifecycleSnapshotLoader
+	requireProfile        func(context.Context, *sql.Tx, string, scenarioexecution.Profile, bool) error
+	durableData           *storedurabledata.Owner
+	insertRun             func(context.Context, *mutationprotocol.Attempt, string, string, runfork.RunForkPoint, time.Time, runtimecorrelation.SourceArtifactFact, sourceartifact.RootAdmission) error
+	ensureProfile         func(context.Context, *sql.Tx, string, scenarioexecution.Profile, time.Time) error
+	materializeEntity     func(context.Context, *sql.Tx, *mutationprotocol.Attempt, activeRunSourceOwnerFunc, string, contracts.BundleIdentity, runfork.RunForkPlan, runfork.RunForkEntityState, runForkEntityMetadata, time.Time, *privaterunlifecycle.ChannelCardChanges) error
+	publishChannelChanges func(bool, bool) error
+	materializeBarriers   runForkFanOutBarrierOwner
+	workflowTimers        runForkWorkflowTimerMaterializationOwner
+	arrivalSchedules      runForkArrivalJoinMaterializationOwner
+	replies               runForkReplyContextOwner
+	now                   func() time.Time
 }
 
 type runForkSelectedContractMaterializationMode uint8
@@ -83,7 +82,6 @@ func materializeRunForkForSelectedContractExecution(ctx context.Context, req run
 	}
 	if port.requireCurrent == nil || port.runMutation == nil || port.plan == nil ||
 		port.deliveries == nil || port.loadSource == nil || port.activeForkSource == nil || port.admitProfile == nil || port.loadSnapshot == nil ||
-		port.readHistoricalSnapshot == nil ||
 		port.requireProfile == nil || port.durableData == nil || port.insertRun == nil || port.ensureProfile == nil ||
 		port.materializeEntity == nil || port.materializeBarriers == nil || port.workflowTimers == nil || port.arrivalSchedules == nil || port.replies == nil || port.now == nil {
 		return runfork.RunForkMaterialization{}, fmt.Errorf("selected-contract fork materialization operations are incomplete")
@@ -128,7 +126,7 @@ func materializeRunForkForSelectedContractExecution(ctx context.Context, req run
 		if err != nil {
 			return err
 		}
-		if _, err := admitSelectedForkSource(txctx, tx, sourceRunID, sourceSnapshot, port.readHistoricalSnapshot, port.postgres); err != nil {
+		if err := admitSelectedForkSource(sourceRunID, sourceSnapshot); err != nil {
 			return err
 		}
 		point := req.Preparation.ForkPoint
@@ -592,9 +590,6 @@ func postgresRunForkSelectedContractMaterializationPort(s *RunForkPostgresOwner)
 		loadSnapshot: func(ctx context.Context, tx *sql.Tx, runID string) (runtimerunlifecycle.Snapshot, error) {
 			return s.RunLifecyclePostgresOwner.LoadSnapshotTx(ctx, tx, runID, true)
 		},
-		readHistoricalSnapshot: func(ctx context.Context, tx *sql.Tx, runID string) (runtimerunlifecycle.Snapshot, error) {
-			return s.RunLifecyclePostgresOwner.LoadSnapshotTx(ctx, tx, runID, false)
-		},
 		requireProfile: requireExactRunForkScenarioProfile,
 		durableData:    s.durableData,
 		insertRun:      s.InsertRunForkRunTx,
@@ -640,11 +635,10 @@ func sqliteRunForkSelectedContractMaterializationPort(s *RunForkSQLiteOwner) run
 		loadSnapshot: func(ctx context.Context, tx *sql.Tx, runID string) (runtimerunlifecycle.Snapshot, error) {
 			return s.RunLifecycleSQLiteOwner.LoadSnapshotTx(ctx, tx, runID)
 		},
-		readHistoricalSnapshot: s.RunLifecycleSQLiteOwner.LoadSnapshotTx,
-		requireProfile:         requireExactSQLiteRunForkScenarioProfile,
-		durableData:            s.durableData,
-		insertRun:              s.InsertRunForkRunTx,
-		ensureProfile:          scenarioexecutionpersistence.EnsureSQLite,
+		requireProfile: requireExactSQLiteRunForkScenarioProfile,
+		durableData:    s.durableData,
+		insertRun:      s.InsertRunForkRunTx,
+		ensureProfile:  scenarioexecutionpersistence.EnsureSQLite,
 		materializeEntity: func(ctx context.Context, tx *sql.Tx, attempt *mutationprotocol.Attempt, source activeRunSourceOwnerFunc, forkRunID string, target contracts.BundleIdentity, plan runfork.RunForkPlan, entity runfork.RunForkEntityState, metadata runForkEntityMetadata, now time.Time, changes *privaterunlifecycle.ChannelCardChanges) error {
 			return materializeRunForkEntityState(ctx, s.DecisionSQLiteOwner, s.MaterializeRunForkProposedEffectCardsTx, false, tx, attempt, source, forkRunID, target, plan, entity, metadata, now, changes)
 		},

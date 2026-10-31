@@ -23,7 +23,7 @@ import (
 	"github.com/division-sh/swarm/internal/runtime/loopruntime"
 	"github.com/division-sh/swarm/internal/runtime/pipeline"
 	"github.com/division-sh/swarm/internal/runtime/runfork"
-	"github.com/division-sh/swarm/internal/runtime/runforkexecution"
+
 	"github.com/division-sh/swarm/internal/runtime/runforkreadiness"
 	"github.com/division-sh/swarm/internal/runtime/semanticview"
 	"github.com/division-sh/swarm/internal/runtime/testfixtures/canonicalrouting"
@@ -41,15 +41,6 @@ type forkOrdinalUnusedDependencies struct {
 
 func TestSelectedForkFanOutBarrierMaterializationBothStores(t *testing.T) {
 	testForkFanOutGenerationWriterEvaluatorBothStores(t, true, false)
-}
-
-// Ordinary and selected activation retain their different authority contracts.
-func TestOrdinaryForkFanOutOriginWriterEvaluatorBothStores(t *testing.T) {
-	testForkFanOutGenerationWriterEvaluatorBothStores(t, false, false)
-}
-
-func TestOrdinaryForkOfForkFanOutOriginWriterEvaluatorBothStores(t *testing.T) {
-	testForkFanOutGenerationWriterEvaluatorBothStores(t, false, true)
 }
 
 func testForkFanOutGenerationWriterEvaluatorBothStores(t *testing.T, selectedExecution, forkAgain bool) {
@@ -81,10 +72,6 @@ func testForkFanOutGenerationWriterEvaluatorBothStores(t *testing.T, selectedExe
 						t.Fatal(err)
 					}
 					source := semanticview.Wrap(bundle)
-					original, err := semanticview.CompileOriginalLoopCarriage(source)
-					if err != nil {
-						t.Fatal(err)
-					}
 					runID := uuid.NewString()
 					ctx := seedSelectedActivitySourceRun(t, fixture, runID, source)
 					ctx = correlation.WithRunID(ctx, runID)
@@ -125,11 +112,7 @@ func testForkFanOutGenerationWriterEvaluatorBothStores(t *testing.T, selectedExe
 						triggerPayload["revision_id"] = generation.RevisionID
 					}
 					triggerEnvelope := events.EnvelopeForFlowInstance(events.EnvelopeForEntityID(events.EventEnvelope{}, runID), runID)
-					if !selectedExecution {
-						// A root ingress does not declare a flow instance. Its exact
-						// receiver remains carried by the persisted delivery route.
-						triggerEnvelope = events.EventEnvelope{}
-					}
+
 					trigger := eventtest.ExistingRunRootIngressWithRoutingSource(uuid.NewString(), "items.ready", "operator", "", []byte(forkTestJSON(t, triggerPayload)), 0, runID,
 						triggerEnvelope, eventtest.RootRoutingSource(runID), at)
 					selected := fixture.store.(storeTestDurableEventBusStore)
@@ -201,8 +184,7 @@ func testForkFanOutGenerationWriterEvaluatorBothStores(t *testing.T, selectedExe
 					forkOwner := fixture.store.(selectedActivityProjectionStore)
 					var materialize func() (runfork.RunForkMaterialization, error)
 					var selectedRequest runforkreadiness.MaterializeRequest
-					var materializeRequest runfork.RunForkMaterializeRequest
-					if selectedExecution {
+					{
 						if _, err := forkOwner.(selectedSourceArtifactStore).EnsureSourceArtifact(ctx, bundle.SourceArtifact); err != nil {
 							t.Fatal(err)
 						}
@@ -230,11 +212,6 @@ func testForkFanOutGenerationWriterEvaluatorBothStores(t *testing.T, selectedExe
 						materialize = func() (runfork.RunForkMaterialization, error) {
 							return forkOwner.MaterializeRunForkForSelectedContractExecution(ctx, request)
 						}
-					} else {
-						materializeRequest = runfork.RunForkMaterializeRequest{SourceRunID: runID, At: point.ID(), RootAdmission: rooted.Admission(), OriginalLoopCarriage: original}
-						materialize = func() (runfork.RunForkMaterialization, error) {
-							return fixture.store.(runForkSelectedLifecycleStore).MaterializeRunFork(ctx, materializeRequest)
-						}
 					}
 					child, err := materialize()
 					if err != nil {
@@ -245,33 +222,7 @@ func testForkFanOutGenerationWriterEvaluatorBothStores(t *testing.T, selectedExe
 					}
 					projectedGeneration := generation
 					protectedRuns := []string{runID}
-					if forkAgain {
-						firstChild := child.ForkRunID
-						protectedRuns = append(protectedRuns, firstChild)
-						firstActivation, err := fixture.store.(runForkSelectedLifecycleStore).ActivateRunFork(ctx, runfork.RunForkActivateRequest{
-							ForkRunID: firstChild, AllowSourceFreeze: true, OriginalLoopCarriage: original,
-							HistoricalReplayExecutionAdmitter: runforkexecution.HistoricalReplayExecutionAdmitter{},
-						})
-						if err != nil || !firstActivation.Activated || !firstActivation.SourceFrozen || firstActivation.SourceRunID != runID || firstActivation.ForkRunID != firstChild {
-							t.Fatalf("activate first generation before ordinary fork-of-fork: %+v err=%v", firstActivation, err)
-						}
-						checkpoint := eventtest.ExistingRunRootIngressWithRoutingSource(uuid.NewString(), "fork.checkpoint", "operator", "", []byte(`{}`), 0, firstChild, events.EventEnvelope{}, eventtest.RootRoutingSource(firstChild), at.Add(3*time.Minute))
-						if err := insertCanonicalEventRecordFixture(ctx, fixture.store, checkpoint); err != nil {
-							t.Fatal(err)
-						}
-						captureFanOutBarrierForkRevision(t, ctx, fixture.db, firstChild, backend.name == "postgres")
-						materializeRequest = runfork.RunForkMaterializeRequest{SourceRunID: firstChild, At: checkpoint.ID(), RootAdmission: rooted.Admission(), OriginalLoopCarriage: original}
-						child, err = fixture.store.(runForkSelectedLifecycleStore).MaterializeRunFork(ctx, materializeRequest)
-						if err != nil {
-							t.Fatalf("fork inherited intent a second time: %v", err)
-						}
-						if cell.loop {
-							projectedGeneration, err = loopruntime.ForkGeneration(generation, firstChild, firstChild)
-							if err != nil {
-								t.Fatal(err)
-							}
-						}
-					}
+
 					want := attemptgeneration.Generation{}
 					if cell.loop {
 						want, err = loopruntime.ForkGeneration(projectedGeneration, child.ForkRunID, child.ForkRunID)
@@ -293,12 +244,10 @@ func testForkFanOutGenerationWriterEvaluatorBothStores(t *testing.T, selectedExe
 					}
 					before := snapshotForkHistoricalExecutionTables(t, fixture.db, backend.name == "postgres")
 					var repeated runfork.RunForkMaterialization
-					if selectedExecution {
+					{
 						readbackRequest := selectedRequest
 						readbackRequest.ForkOperation = nil
 						repeated, err = forkOwner.RequireMaterializedRunForkForSelectedContractExecution(ctx, child.ForkRunID, readbackRequest)
-					} else {
-						repeated, err = fixture.store.(runForkSelectedLifecycleStore).RequireMaterializedRunFork(ctx, child.ForkRunID, materializeRequest)
 					}
 					if err != nil {
 						t.Fatalf("repeat exact fan-out materialization: %v", err)
@@ -328,20 +277,8 @@ func testForkFanOutGenerationWriterEvaluatorBothStores(t *testing.T, selectedExe
 					}
 					var grantedOwner pipeline.FanOutObligationOwner
 					var selectedConsumer selectedForkFanOutConsumer
-					if selectedExecution {
+					{
 						ctx, grantedOwner, selectedConsumer = admitSelectedForkFanOutForTest(t, ctx, fixture, source, child, selectedRequest)
-					} else {
-						// Ordinary materialization is paused; only its canonical activation
-						// may admit the child turn and freeze the immediate source run.
-						forkActivation, err := fixture.store.(runForkSelectedLifecycleStore).ActivateRunFork(ctx, runfork.RunForkActivateRequest{
-							ForkRunID: child.ForkRunID, AllowSourceFreeze: true, OriginalLoopCarriage: original,
-							HistoricalReplayExecutionAdmitter: runforkexecution.HistoricalReplayExecutionAdmitter{},
-						})
-						if err != nil || !forkActivation.Activated || !forkActivation.SourceFrozen || forkActivation.ForkRunStatus != runfork.RunForkActivatedStatus {
-							t.Fatalf("activate ordinary fork before child serving: %+v err=%v", forkActivation, err)
-						}
-						grantSeed := fanOutOwnerFixture{artifact: rooted.Artifact(), bundleHash: intent.PlanRef.BundleHash, runID: child.ForkRunID, deliveryID: key.TriggeringDeliveryID}
-						grantedOwner, _, _, _ = grantedFanOutOwnerForTest(t, ctx, owner, grantSeed)
 					}
 					childRooted, err := fixture.store.(rootedRunStore).LoadRunRootedSource(ctx, child.ForkRunID)
 					if err != nil {
@@ -413,10 +350,8 @@ func testForkFanOutGenerationWriterEvaluatorBothStores(t *testing.T, selectedExe
 							}
 						}
 					}()
-					if selectedExecution {
+					{
 						consumeSelectedForkFanOutEmissions(t, fixture, backend.name, source, ctx, grantedOwner, copied, claim, emissions, selectedConsumer, childHandle, expectedFailure)
-					} else {
-						consumeForkFanOutEmissions(t, fixture, backend.name, source, ctx, grantedOwner, copied, claim, emissions, expectedFailure, completeBarrier)
 					}
 				})
 			}

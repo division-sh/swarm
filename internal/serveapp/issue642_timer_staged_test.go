@@ -112,7 +112,7 @@ func issue642StagedOrdinaryTimerFork(t *testing.T, backend string) {
 	staged, operation := issue642MaterializePausedTimer(t, ctx, owners, rt, reader, plan, sourceTimer)
 	activation, err := owners.executor.ExecuteRunFork(ctx, apiv1.RunForkExecutionRequest{
 		SourceRunID: plan.SourceRunID, ForkEventID: plan.ForkPoint.EventID, BundleHash: rt.BundleHash,
-		AllowSourceFreeze: true, ContractSelection: operation.ContractSelection, ForkOperation: operation,
+		ContractSelection: operation.ContractSelection, ForkOperation: operation,
 	})
 	if err != nil || activation.ForkRunStatus != runfork.RunForkLiveStatus || activation.ForkRunID != staged.ForkRunID || activation.ForkRevision != plan.ForkPoint.Revision || activation.ForkPointKind != string(plan.ForkPoint.Kind) || activation.ForkEventID != plan.ForkPoint.EventID ||
 		activation.SourceRunID != seed.RunID || activation.SourceRunStatus != "paused" || activation.SourceFrozen {
@@ -147,11 +147,11 @@ func issue642MaterializePausedTimer(t *testing.T, ctx context.Context, owners is
 	selection := runfork.RunForkContractSelection{Mode: runfork.RunForkContractSelectionModeSelectedContracts}
 	prepared, err := owners.family.Prepare(ctx, runforkexecution.SelectedContractExecutionRequest{
 		SourceRunID: plan.SourceRunID, At: plan.ForkPoint.EventID, ExpectedBundleHash: rt.BundleHash,
-		AllowSourceFreeze: true, ContractSelection: selection,
+		ContractSelection: selection,
 		ForkOperation: &runfork.ForkOperationRequest{
 			OperationID: uuid.NewString(), Actor: "staged-timer-proof", IdempotencyKey: uuid.NewString(), TransportHash: "staged-timer-proof",
 			SourceRunID: plan.SourceRunID, ForkEventID: plan.ForkPoint.EventID, TargetBundleHash: rt.BundleHash,
-			TargetRootReference: root.Reference(), AllowSourceFreeze: true, ContractSelection: selection,
+			TargetRootReference: root.Reference(), ContractSelection: selection,
 		},
 		SourceLoader: owners.executor.SourceLoader, AgentRuntime: owners.executor.AgentRuntime,
 	})
@@ -171,7 +171,7 @@ func issue642MaterializePausedTimer(t *testing.T, ctx context.Context, owners is
 	request.ForkOperation = &runfork.ForkOperationRequest{
 		OperationID: uuid.NewString(), Actor: "native-staged-timer", IdempotencyKey: uuid.NewString(), TransportHash: "native-staged-timer",
 		SourceRunID: plan.SourceRunID, ForkEventID: point.EventID, ResolvedPoint: &point,
-		TargetBundleHash: rt.BundleHash, TargetRootReference: root.Reference(), ContractSelection: request.ContractSelection, AllowSourceFreeze: true,
+		TargetBundleHash: rt.BundleHash, TargetRootReference: root.Reference(), ContractSelection: request.ContractSelection,
 	}
 	if request.SourceRunID != plan.SourceRunID || request.At != plan.ForkPoint.EventID || request.SourceArtifactFact.BundleHash() != rt.BundleHash {
 		t.Fatalf("native staged request lost its exact source/cut/artifact: %+v", request)

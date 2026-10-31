@@ -59,7 +59,7 @@ func proveNativeNestedContextOnlyRefork(t *testing.T, h *runtimeHarness, selecte
 	operation.Actor, operation.TransportHash = "nested-context-only", "nested-context-only"
 	operation.AtStart = state == replycontext.StateOpen
 	prepared, err := owner.Prepare(ctx, runforkexecution.SelectedContractExecutionRequest{SourceRunID: sourceRun, At: cut, AtStart: operation.AtStart,
-		AllowSourceFreeze: true, ForkOperation: &operation, SourceLoader: loader, ContractSelection: selection, AgentRuntime: options, ExpectedBundleHash: selection.BundleHash})
+		ForkOperation: &operation, SourceLoader: loader, ContractSelection: selection, AgentRuntime: options, ExpectedBundleHash: selection.BundleHash})
 	if err != nil {
 		t.Fatalf("prepare exact context-only source cut: %v", err)
 	}

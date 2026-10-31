@@ -45,10 +45,9 @@ func TestDeploymentSourceEmptyVersionForkIsQuiescentAndReplayable(t *testing.T) 
 				}
 				forkServer := deploymentForkServer(t, f, owner)
 				params := map[string]any{
-					"source_run_id":       sourceRunID,
-					"bundle_hash":         f.runtime.sourceArtifactFact.BundleHash(),
-					"allow_source_freeze": true,
-					"idempotency_key":     uuid.NewString(),
+					"source_run_id":   sourceRunID,
+					"bundle_hash":     f.runtime.sourceArtifactFact.BundleHash(),
+					"idempotency_key": uuid.NewString(),
 				}
 				if selector == "start" {
 					params["at_start"] = true
@@ -156,7 +155,7 @@ func TestDeploymentSourceSelectedControlOnlyRepeatedStopBothStores(t *testing.T)
 			forkServer := deploymentForkServer(t, f, owner)
 			params := map[string]any{
 				"source_run_id": sourceRunID, "bundle_hash": f.runtime.sourceArtifactFact.BundleHash(),
-				"allow_source_freeze": true, "idempotency_key": uuid.NewString(),
+				"idempotency_key": uuid.NewString(),
 			}
 			forkCtx, cancelFork := context.WithTimeout(f.ctx, 15*time.Second)
 			defer cancelFork()

@@ -49,7 +49,7 @@ func TestRuntimeConfigExcludedFieldsRefuseBeforeOverrides(t *testing.T) {
 	} {
 		parts := strings.Split(fieldPath, ".")
 		key := parts[len(parts)-1]
-		for _, literal := range []string{"null", "''", "{}", "[]", "1", "false"} {
+		for _, literal := range []string{"null", "''", "{}", "[]", "0", "1", "false"} {
 			for _, merged := range []bool{false, true} {
 				source := key + ": " + literal
 				if merged {
@@ -88,6 +88,10 @@ func TestRuntimeConfigExcludedFieldsRefuseBeforeOverrides(t *testing.T) {
 						} else if fieldPath == "database.password" {
 							if diagnostic.Kind != unifiedConfigDiagnosticValidationFailed || !strings.Contains(diagnostic.Message, "unsupported plaintext secret material") || diagnostic.Remediation != "declare a file, secret key, or explicit env delegation field instead" {
 								t.Fatalf("override=%q: plaintext-secret refusal = %#v", override, diagnostic)
+							}
+						} else if strings.HasPrefix(fieldPath, "llm.claude_cli.") {
+							if diagnostic.Kind != unifiedConfigDiagnosticUnknownKey || diagnostic.Line == 0 || diagnostic.Column == 0 || !strings.Contains(diagnostic.Message, "unknown config key") || slices.Contains(diagnostic.ValidOptions, key) || !slices.Contains(diagnostic.ValidOptions, "command") {
+								t.Fatalf("override=%q: retired Claude CLI key refusal = %#v", override, diagnostic)
 							}
 						} else if diagnostic.Kind != unifiedConfigDiagnosticSplitUnsupported || !strings.Contains(diagnostic.Remediation, "tracked split:") || !strings.Contains(diagnostic.Remediation, "no supported replacement") {
 							t.Fatalf("override=%q: Split refusal = %#v", override, diagnostic)

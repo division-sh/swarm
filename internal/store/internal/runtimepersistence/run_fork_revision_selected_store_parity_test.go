@@ -166,7 +166,6 @@ type runForkSelectedLifecycleStore interface {
 	PlanRunFork(context.Context, runfork.RunForkPlanRequest) (runfork.RunForkPlan, error)
 	MaterializeRunFork(context.Context, runfork.RunForkMaterializeRequest) (runfork.RunForkMaterialization, error)
 	RequireMaterializedRunFork(context.Context, string, runfork.RunForkMaterializeRequest) (runfork.RunForkMaterialization, error)
-	ActivateRunFork(context.Context, runfork.RunForkActivateRequest) (runfork.RunForkActivation, error)
 }
 
 type runForkSelectedLifecycleProof struct {
@@ -175,9 +174,6 @@ type runForkSelectedLifecycleProof struct {
 	MaterializedEntities int
 	EntityState          string
 	EntityName           string
-	SourceFinalStatus    string
-	ForkFinalStatus      string
-	SourceFrozen         bool
 }
 
 func TestRunForkSelectedStoreLifecycleParity(t *testing.T) {
@@ -318,56 +314,9 @@ func proveRunForkSelectedStoreLifecycle(t *testing.T, selected runForkSelectedLi
 	if status != runfork.RunForkMaterializedStatus || sourceRunID != runID || sourceEventID != eventID || currentState != "ready" || name != "Snapshot Entity" {
 		t.Fatalf("materialized selected-store fork readback = %q %q %q %q %q", status, sourceRunID, sourceEventID, currentState, name)
 	}
-	if _, err := selected.ActivateRunFork(ctx, runfork.RunForkActivateRequest{ForkRunID: materialized.ForkRunID}); err == nil {
-		t.Fatal("fork activation without source-freeze confirmation succeeded")
-	}
-	if err := db.QueryRowContext(ctx, `SELECT status FROM runs WHERE run_id = $1`, runID).Scan(&status); err != nil {
-		t.Fatal(err)
-	}
-	if status != string(sourceState) {
-		t.Fatalf("source status after rejected activation = %q, want %q", status, sourceState)
-	}
-	cancelledCtx, cancel = context.WithCancel(ctx)
-	cancel()
-	if _, err := selected.ActivateRunFork(cancelledCtx, runfork.RunForkActivateRequest{ForkRunID: materialized.ForkRunID, AllowSourceFreeze: true}); err == nil {
-		t.Fatal("pre-cancelled fork activation succeeded")
-	}
-	var forkStatus string
-	if err := db.QueryRowContext(ctx, `SELECT status FROM runs WHERE run_id = $1`, materialized.ForkRunID).Scan(&forkStatus); err != nil {
-		t.Fatal(err)
-	}
-	if err := db.QueryRowContext(ctx, `SELECT status FROM runs WHERE run_id = $1`, runID).Scan(&status); err != nil {
-		t.Fatal(err)
-	}
-	if status != string(sourceState) || forkStatus != runfork.RunForkMaterializedStatus {
-		t.Fatalf("pre-cancelled activation changed source/fork state to %q/%q", status, forkStatus)
-	}
-	activation, err := selected.ActivateRunFork(ctx, runfork.RunForkActivateRequest{
-		ForkRunID: materialized.ForkRunID, AllowSourceFreeze: true,
-	})
-	if err != nil {
-		t.Fatalf("activate selected-store run fork: %v", err)
-	}
-	if !activation.Activated || !activation.SourceFrozen || activation.ForkRunStatus != runfork.RunForkActivatedStatus {
-		t.Fatalf("selected-store activation = %#v", activation)
-	}
-	var continuedAs string
-	if err := db.QueryRowContext(ctx, `SELECT status, continued_as_run_id FROM runs WHERE run_id = $1`, runID).Scan(&status, &continuedAs); err != nil {
-		t.Fatal(err)
-	}
-	if status != runfork.RunForkSourceFrozenStatus || continuedAs != materialized.ForkRunID {
-		t.Fatalf("selected-store source freeze readback = %q continued_as=%q", status, continuedAs)
-	}
-	if err := db.QueryRowContext(ctx, `SELECT status FROM runs WHERE run_id = $1`, materialized.ForkRunID).Scan(&status); err != nil {
-		t.Fatal(err)
-	}
-	if status != runfork.RunForkActivatedStatus {
-		t.Fatalf("selected-store fork status after activation = %q", status)
-	}
 	return runForkSelectedLifecycleProof{
 		SourceInitialStatus: string(sourceState), MaterializedStatus: materialized.ForkRunStatus,
 		MaterializedEntities: materialized.MaterializedEntityCount, EntityState: currentState, EntityName: name,
-		SourceFinalStatus: runfork.RunForkSourceFrozenStatus, ForkFinalStatus: status, SourceFrozen: activation.SourceFrozen,
 	}
 }
 

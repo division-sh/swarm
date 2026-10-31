@@ -120,7 +120,7 @@ func TestEntityProgressivePresencePublicServeRestartSQLitePostgres(t *testing.T)
 					t.Fatalf("CLI entity JSON changed sparse fields: command=%v decode=%v\n%s", read.err, err, read.output)
 				}
 				waitForGoldenTerminalRun(t, process, store, runID, 30*time.Second)
-				params := map[string]any{"source_run_id": runID, "fork_event_id": done.EventID, "allow_source_freeze": true, "idempotency_key": "presence-fork"}
+				params := map[string]any{"source_run_id": runID, "fork_event_id": done.EventID, "idempotency_key": "presence-fork"}
 				var fork map[string]any
 				ctx, cancel = context.WithTimeout(context.Background(), 30*time.Second)
 				err = process.rpc.call(ctx, "run.fork", params, &fork)

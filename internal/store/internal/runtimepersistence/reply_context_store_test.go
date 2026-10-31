@@ -4,7 +4,7 @@ import (
 	"context"
 	"database/sql"
 	"encoding/json"
-	"errors"
+
 	"sync"
 	"testing"
 	"time"
@@ -14,7 +14,7 @@ import (
 	"github.com/division-sh/swarm/internal/runtime/executionmode"
 	runtimegenericschedule "github.com/division-sh/swarm/internal/runtime/genericschedule"
 	runtimereplycontext "github.com/division-sh/swarm/internal/runtime/replycontext"
-	storerunlifecycle "github.com/division-sh/swarm/internal/runtime/runlifecycle"
+
 	"github.com/division-sh/swarm/internal/runtime/semanticvalue"
 	runtimetools "github.com/division-sh/swarm/internal/runtime/tools"
 	"github.com/division-sh/swarm/internal/testutil"
@@ -23,6 +23,19 @@ import (
 
 type replyContextStoreTestSurface interface {
 	runtimereplycontext.Store
+}
+
+func replyContextFreezeTestRecord(requestEventID, runID, suffix string, now time.Time) runtimereplycontext.Record {
+	record := runtimereplycontext.Record{
+		RunID: runID, RequestEventID: requestEventID,
+		SourceRunID: runID, SourceRequestEventID: requestEventID,
+		RequesterFlowID: "requester-" + suffix, RequestOutputPin: "provider_requested", ReplyInputPin: "provider_replied",
+		ProviderFlowID: "provider", ProviderInputPin: "provider_requested", ProviderOutputPin: "provider_replied",
+		Origin:               events.RouteIdentity{FlowID: "requester", FlowInstance: "requester/" + suffix, EntityID: uuid.NewString()},
+		RequestCorrelationID: requestEventID, State: runtimereplycontext.StateOpen, CreatedAt: now, UpdatedAt: now,
+	}
+	record.ID = runtimereplycontext.DeterministicID(record.RequestEventID, record.RequesterFlowID, record.RequestOutputPin, record.ReplyInputPin, record.ProviderFlowID, record.Origin)
+	return record
 }
 
 type replyContinuationStoreTestSurface interface {
@@ -297,149 +310,6 @@ func setupSQLiteReplyContextStoreTest(t *testing.T) (replyContextStoreTestSurfac
 			}
 		}
 		return nil
-	}
-}
-
-func TestReplyContextStore_ForkedSourceRejectsCreateAndClaimWithoutDestroyingLineage(t *testing.T) {
-	for _, tc := range []struct {
-		name  string
-		setup func(*testing.T) (replyContextStoreTestSurface, func(context.Context, string, ...string) error)
-	}{
-		{name: "postgres", setup: setupPostgresReplyContextStoreTest},
-	} {
-		t.Run(tc.name, func(t *testing.T) {
-			store, seed := tc.setup(t)
-			ctx := testAuthorActivitySourceArtifactContext()
-			ctx = originalStoreFixtureContext(t, ctx, store)
-			runID := uuid.NewString()
-			requestEventID := uuid.NewString()
-			replyEventID := uuid.NewString()
-			secondRequestEventID := uuid.NewString()
-			if err := seed(ctx, runID, requestEventID, replyEventID, secondRequestEventID); err != nil {
-				t.Fatal(err)
-			}
-			now := time.Now().UTC()
-			record := replyContextFreezeTestRecord(requestEventID, runID, "first", now)
-			if err := store.CreateReplyContext(ctx, record); err != nil {
-				t.Fatal(err)
-			}
-			freezeReplyContextTestRun(t, ctx, store, runID, now.Add(time.Second))
-
-			second := replyContextFreezeTestRecord(secondRequestEventID, runID, "second", now.Add(2*time.Second))
-			if err := store.CreateReplyContext(ctx, second); !errors.Is(err, storerunlifecycle.ErrRunNotActive) {
-				t.Fatalf("post-freeze create error = %v", err)
-			}
-			if _, _, err := store.ClaimReplyContext(ctx, record.ID, replyEventID); !errors.Is(err, storerunlifecycle.ErrRunNotActive) {
-				t.Fatalf("post-freeze claim error = %v", err)
-			}
-			preserved, err := store.LoadReplyContext(ctx, record.ID)
-			if err != nil || preserved.State != runtimereplycontext.StateOpen || preserved.AcceptedReplyEventID != "" {
-				t.Fatalf("preserved reply context = %#v, %v", preserved, err)
-			}
-			if _, err := store.LoadReplyContext(ctx, second.ID); !errors.Is(err, runtimereplycontext.ErrNotFound) {
-				t.Fatalf("rejected create left row: %v", err)
-			}
-		})
-	}
-}
-
-func TestReplyContextStore_ForkFreezeSerializesBothCreateAndClaimCommitOrders(t *testing.T) {
-	for _, tc := range []struct {
-		name  string
-		setup func(*testing.T) (replyContextStoreTestSurface, func(context.Context, string, ...string) error)
-	}{
-		{name: "postgres", setup: setupPostgresReplyContextStoreTest},
-	} {
-		for _, operation := range []string{"create", "claim"} {
-			for _, winner := range []string{"operation", "freeze"} {
-				t.Run(tc.name+"/"+operation+"_commits_first_"+winner, func(t *testing.T) {
-					store, seed := tc.setup(t)
-					ctx := testAuthorActivitySourceArtifactContext()
-					ctx = originalStoreFixtureContext(t, ctx, store)
-					runID := uuid.NewString()
-					requestEventID := uuid.NewString()
-					replyEventID := uuid.NewString()
-					if err := seed(ctx, runID, requestEventID, replyEventID); err != nil {
-						t.Fatal(err)
-					}
-					now := time.Now().UTC()
-					record := replyContextFreezeTestRecord(requestEventID, runID, operation, now)
-					if operation == "claim" {
-						if err := store.CreateReplyContext(ctx, record); err != nil {
-							t.Fatal(err)
-						}
-					}
-
-					if winner == "freeze" {
-						freezeReplyContextTestRun(t, ctx, store, runID, now.Add(time.Second))
-					}
-					var operationErr error
-					if operation == "create" {
-						operationErr = store.CreateReplyContext(ctx, record)
-					} else {
-						_, _, operationErr = store.ClaimReplyContext(ctx, record.ID, replyEventID)
-					}
-					if winner == "freeze" {
-						if !errors.Is(operationErr, storerunlifecycle.ErrRunNotActive) {
-							t.Fatalf("freeze-first %s error = %v", operation, operationErr)
-						}
-					} else {
-						if operationErr != nil {
-							t.Fatalf("operation-first %s: %v", operation, operationErr)
-						}
-						freezeReplyContextTestRun(t, ctx, store, runID, now.Add(time.Second))
-					}
-
-					loaded, err := store.LoadReplyContext(ctx, record.ID)
-					if operation == "create" {
-						if winner == "operation" && (err != nil || loaded.State != runtimereplycontext.StateOpen) {
-							t.Fatalf("operation-first create = %#v, %v", loaded, err)
-						}
-						if winner == "freeze" && !errors.Is(err, runtimereplycontext.ErrNotFound) {
-							t.Fatalf("freeze-first create row error = %v", err)
-						}
-					} else if err != nil || (winner == "operation" && loaded.AcceptedReplyEventID != replyEventID) || (winner == "freeze" && loaded.AcceptedReplyEventID != "") {
-						t.Fatalf("%s-first claim = %#v, %v", winner, loaded, err)
-					}
-				})
-			}
-		}
-	}
-}
-
-func replyContextFreezeTestRecord(requestEventID, runID, suffix string, now time.Time) runtimereplycontext.Record {
-	record := runtimereplycontext.Record{
-		RunID: runID, RequestEventID: requestEventID,
-		SourceRunID: runID, SourceRequestEventID: requestEventID,
-		RequesterFlowID: "requester-" + suffix, RequestOutputPin: "provider_requested", ReplyInputPin: "provider_replied",
-		ProviderFlowID: "provider", ProviderInputPin: "provider_requested", ProviderOutputPin: "provider_replied",
-		Origin:               events.RouteIdentity{FlowID: "requester", FlowInstance: "requester/" + suffix, EntityID: uuid.NewString()},
-		RequestCorrelationID: requestEventID, State: runtimereplycontext.StateOpen, CreatedAt: now, UpdatedAt: now,
-	}
-	record.ID = runtimereplycontext.DeterministicID(record.RequestEventID, record.RequesterFlowID, record.RequestOutputPin, record.ReplyInputPin, record.ProviderFlowID, record.Origin)
-	return record
-}
-
-func freezeReplyContextTestRun(t *testing.T, ctx context.Context, store replyContextStoreTestSurface, runID string, now time.Time) {
-	t.Helper()
-	forkRunID := uuid.NewString()
-	forkEventID := uuid.NewString()
-	switch backend := store.(type) {
-	case *PostgresStore:
-		requireRunFixtureForTest(t, ctx, backend, semanticRunFixture{Origin: semanticScenarioSetupRunOriginForTest(),
-			RunID: forkRunID, State: storerunlifecycle.StatePaused,
-			BundleHash: authorActivityTestBundleHash, StartedAt: now,
-		})
-		lineage := runForkActivationLineage{
-			SourceRunID: runID, ForkRunID: forkRunID, ForkEventID: forkEventID,
-			ForkEventName: "reply.freeze", ForkEventTime: now, ForkStatus: "paused", SourceRunStatus: "running",
-			SourceBundleHash: authorActivityTestBundleHash, ForkBundleHash: authorActivityTestBundleHash,
-		}
-		if err := commitRunForkSourceFreezeForTest(ctx, backend, lineage, now, true); err != nil {
-			t.Fatal(err)
-		}
-	default:
-		t.Fatalf("unsupported reply-context test store %T", store)
 	}
 }
 

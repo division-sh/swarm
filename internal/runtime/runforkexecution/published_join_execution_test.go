@@ -524,13 +524,13 @@ func TestIssue642PublishedJoinContinuesExactDeliveryBothStores(t *testing.T) {
 			selection := runforkadmission.SelectedContractSelection(loaded.Source)
 			operation := runfork.ForkOperationRequest{OperationID: uuid.NewString(), Actor: "published-join", IdempotencyKey: "fixed-cut",
 				TransportHash: "published-join-transport", SourceRunID: sourceRun, ForkEventID: marker,
-				TargetBundleHash: loaded.SourceArtifactFact.BundleHash(), TargetRootReference: loaded.RootedSource.Admission().Reference(), AllowSourceFreeze: true, ContractSelection: selection}
+				TargetBundleHash: loaded.SourceArtifactFact.BundleHash(), TargetRootReference: loaded.RootedSource.Admission().Reference(), ContractSelection: selection}
 			liveRuntime, liveContexts := liveForkRuntimeFixture(t, ctx, selected, owner, loaded, sourceRun, executionposture.MockOnly)
 			sourceBefore, err = storetest.ReadSelectedForkSourceDomain(ctx, selected, sourceRun)
 			if err != nil {
 				t.Fatal(err)
 			}
-			result, err := ExecuteSelectedContractRunFork(ctx, SelectedContractExecutionRequest{SourceRunID: sourceRun, At: marker, AllowSourceFreeze: true,
+			result, err := ExecuteSelectedContractRunFork(ctx, SelectedContractExecutionRequest{SourceRunID: sourceRun, At: marker,
 				Owner: owner, ForkOperation: &operation, SourceLoader: loader, ContractSelection: selection,
 				LiveRuntime: liveRuntime, LiveContexts: liveContexts, LiveRuns: selected.(runlifecycle.LiveRunReader),
 				AgentRuntime: SelectedContractAgentRuntimeOptions{ExecutionPosture: executionposture.MockOnly, ProcessCapability: owner.ports.contexts.capability}})

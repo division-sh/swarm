@@ -141,7 +141,7 @@ func issue642RetainedOrdinaryTimerFork(t *testing.T, backend string, selectedDel
 	var fork apiv1.RunForkExecutionResult
 	params := map[string]any{
 		"source_run_id": seed.RunID, "fork_event_id": marker.EventID,
-		"allow_source_freeze": true, "idempotency_key": "issue642-retained-timer-fork",
+		"idempotency_key": "issue642-retained-timer-fork",
 	}
 	if targetHash != "" {
 		params["bundle_hash"] = targetHash
