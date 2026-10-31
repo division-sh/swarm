@@ -7,7 +7,30 @@ import (
 	"errors"
 
 	"github.com/division-sh/swarm/internal/channelonboarding"
+	"github.com/division-sh/swarm/internal/sessionprovider"
 )
+
+// Deployment restore opens transport before holders are executable. Drain only
+// after their runtime contexts have been released, using the original owner.
+func (s *serveSessionBootstrap) reconcileDeploymentIncoming(ctx context.Context) error {
+	s.mu.Lock()
+	var connections []*sessionprovider.RuntimeConnection
+	for _, attempt := range s.connections {
+		if attempt.operation.DeploymentRegistration {
+			connections = append(connections, attempt.connection)
+		}
+	}
+	s.mu.Unlock()
+	for _, connection := range connections {
+		if err := connection.AwaitSessionAccount(ctx); err != nil {
+			return err
+		}
+		if err := connection.ReconcileIncoming(ctx); err != nil {
+			return err
+		}
+	}
+	return nil
+}
 
 func (s *serveSessionBootstrap) connectSessionAttempt(ctx context.Context, attempt *serveSessionBootstrapAttempt) (err error) {
 	if ctx == nil || attempt == nil {

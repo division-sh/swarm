@@ -1878,6 +1878,12 @@ func buildRuntimeComposition(ctx context.Context, req runtimeCompositionRequest)
 		presenter.fail(22, "selected_fork_recovery", err)
 		return 1
 	}
+	if sessionBootstrap != nil {
+		if err := sessionBootstrap.reconcileDeploymentIncoming(ctx); err != nil {
+			presenter.fail(22, "channel_onboarding", err)
+			return 1
+		}
+	}
 	if err := admitServeRegisteredWebhookCredentials(ctx, runtimeContextManager, channelOnboardingStore); err != nil {
 		presenter.fail(22, "channel_registration", err)
 		return 1

@@ -35,6 +35,7 @@ type serveSessionBootstrapOwner interface {
 	ObserveSession(context.Context, channelonboarding.Operation) (operatorchannel.ProviderAuthority, operatorchannel.SessionConnectionObservation, bool, error)
 	ChannelExecution(context.Context, channelonboarding.Operation) (sessionexecution.Channel, error)
 	RetireInactiveSessions(context.Context) error
+	reconcileDeploymentIncoming(context.Context) error
 }
 
 func selectServeChannelWrite(ctx context.Context, sessions serveSessionBootstrapOwner, op channelonboarding.Operation,
