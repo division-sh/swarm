@@ -296,7 +296,7 @@ func seedPublishedJoinSource(t *testing.T, ctx context.Context, selected any, ow
 	}
 	preparation := eventtest.ExistingRunRootIngressWithRoutingSourceAndMode(uuid.NewString(), events.EventType(preparationInput.EventKey()), "source-runtime", "",
 		preparationPayload, 0, runID, events.EventEnvelope{}, events.NoRoutingSource(), at, executionmode.Mock)
-	admission, err := rootruntime.NewRuntimePayloadAdmitter(nil, loaded.Source, loaded.SourceArtifactFact)(ctx, preparation, target.TemplateID)
+	admission, err := rootruntime.NewRuntimePayloadAdmitter(nil, loaded.Source, loaded.SourceArtifactFact)(ctx, preparation, events.EventPayloadProducer(preparation, target.TemplateID))
 	if err != nil {
 		t.Fatal(err)
 	}
