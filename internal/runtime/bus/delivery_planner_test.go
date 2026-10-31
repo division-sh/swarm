@@ -478,7 +478,7 @@ func TestImplicitLocalSourcePreservesAgentOwnedEntity(t *testing.T) {
 	} {
 		t.Run(test.name, func(t *testing.T) {
 			agents := map[agentidentity.Identity]ActiveAgentDescriptor{test.identity: {Identity: test.identity, EntityID: test.entity}}
-			projection := selectedRunTargetOwnerProjection{agentsAvailable: true, agents: agents, required: true, source: source}
+			projection := publicationTargetOwnerEvidence{agentsAvailable: true, agents: agents, required: true, source: source}
 			projection.context, projection.instances = admittedAgentConstructionFixture(t, source, identity.RunID)
 			local := ordinaryPublicationSource{route: events.RouteIdentity{FlowID: "consumer", FlowInstance: "consumer", EntityID: nodeEntity}}
 			envelope := events.EventEnvelope{}

@@ -10,7 +10,7 @@ import (
 	"github.com/division-sh/swarm/internal/runtime/semanticview"
 )
 
-func (p selectedRunTargetOwnerProjection) withObservedAgentConfigurations() (selectedRunTargetOwnerProjection, error) {
+func (p publicationTargetOwnerEvidence) withObservedAgentConfigurations() (publicationTargetOwnerEvidence, error) {
 	if p.context == nil {
 		return p, nil
 	}
@@ -52,7 +52,7 @@ func (p selectedRunTargetOwnerProjection) withObservedAgentConfigurations() (sel
 	return p, nil
 }
 
-func (p selectedRunTargetOwnerProjection) validateAdmittedAgentTarget(event events.Event, intent RoutePlanDeliveryIntent) error {
+func (p publicationTargetOwnerEvidence) validateAdmittedAgentTarget(event events.Event, intent RoutePlanDeliveryIntent) error {
 	if intent.AgentIdentity.Validate() != nil || intent.AgentIdentity.RunID != event.RunID() || intent.AgentIdentity.AgentID() != intent.Recipient.ID() {
 		return fmt.Errorf("admitted agent target has a foreign publication identity")
 	}
@@ -78,7 +78,7 @@ func (p selectedRunTargetOwnerProjection) validateAdmittedAgentTarget(event even
 
 // Agent state ownership comes from configuration; the separately selected flow
 // supplies construction/readiness, never an entity for an entityless actor.
-func (p selectedRunTargetOwnerProjection) admitAgentTarget(event events.Event, intent RoutePlanDeliveryIntent) (RoutePlanDeliveryIntent, error) {
+func (p publicationTargetOwnerEvidence) admitAgentTarget(event events.Event, intent RoutePlanDeliveryIntent) (RoutePlanDeliveryIntent, error) {
 	identity := intent.AgentIdentity.Normalize()
 	if identity.Validate() != nil || identity.RunID != event.RunID() || identity.AgentID() != intent.Recipient.ID() {
 		return intent, fmt.Errorf("agent delivery requires its exact publication run and recipient identity")
@@ -162,7 +162,7 @@ func runtimeCreatedTargetlessAgentIntent(intent RoutePlanDeliveryIntent) bool {
 		intent.ConnectPlan.Empty() && intent.ConnectClaim.Empty()
 }
 
-func (p selectedRunTargetOwnerProjection) agentRecipientTarget(event events.Event, descriptor ActiveAgentDescriptor, singular events.RouteIdentity, targets []events.RouteIdentity, root semanticview.RootExecutionCoordinate) (events.RouteIdentity, bool, error) {
+func (p publicationTargetOwnerEvidence) agentRecipientTarget(event events.Event, descriptor ActiveAgentDescriptor, singular events.RouteIdentity, targets []events.RouteIdentity, root semanticview.RootExecutionCoordinate) (events.RouteIdentity, bool, error) {
 	selector := explicitRootPublicationTarget(event)
 	if selector.Empty() || descriptor.Identity.Name.Source != agentidentity.NameSourceDeclared {
 		target, found := deliveryTargetForDescriptor(descriptor, singular, targets, root)
@@ -188,7 +188,7 @@ func (p selectedRunTargetOwnerProjection) agentRecipientTarget(event events.Even
 	return selector, publicSelectorMatchesConstruction(selector, selected), nil
 }
 
-func (p selectedRunTargetOwnerProjection) validateAgentTargetCoordinates(identity agentidentity.Identity, route events.RouteIdentity) error {
+func (p publicationTargetOwnerEvidence) validateAgentTargetCoordinates(identity agentidentity.Identity, route events.RouteIdentity) error {
 	if identity.Route.Presence == agentidentity.RoutePresent {
 		if route.FlowInstance != identity.Route.InstancePath {
 			return fmt.Errorf("target disagrees with exact agent identity instance")
@@ -210,7 +210,7 @@ func (p selectedRunTargetOwnerProjection) validateAgentTargetCoordinates(identit
 	return nil
 }
 
-func (p selectedRunTargetOwnerProjection) agentConstructionDependency(event events.Event, actor agentidentity.Identity, requested events.RouteIdentity) (events.ReceiverInitialization, events.RouteIdentity, error) {
+func (p publicationTargetOwnerEvidence) agentConstructionDependency(event events.Event, actor agentidentity.Identity, requested events.RouteIdentity) (events.ReceiverInitialization, events.RouteIdentity, error) {
 	var selectedPlan pipeline.FlowInstanceActivationPlan
 	var plannedTarget events.RouteIdentity
 	for target, plan := range p.activationOwners {

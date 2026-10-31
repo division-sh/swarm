@@ -16,11 +16,11 @@ func receiverOwnerConstructorBudget() map[string]int {
 	return map[string]int{
 		// #2413 child 2: actor ownership and header dependency have distinct
 		// canonical projections; the old agent reclassification is retired.
-		"runtime/bus::selectedRunTargetOwnerProjection.admitAgentTarget":            3,
-		"runtime/bus::selectedRunTargetOwnerProjection.agentConstructionDependency": 1,
-		"runtime/bus::admitObservedAgentConstructionDependency":                     2,
-		"runtime/bus::selectedRunTargetOwnerProjection.replyOriginOwner":            2,
-		"runtime/pipeline::SelectDeliveryTargetOwner":                               2,
+		"runtime/bus::publicationTargetOwnerEvidence.admitAgentTarget":            3,
+		"runtime/bus::publicationTargetOwnerEvidence.agentConstructionDependency": 1,
+		"runtime/bus::admitObservedAgentConstructionDependency":                   2,
+		"runtime/bus::publicationTargetOwnerEvidence.replyOriginOwner":            2,
+		"runtime/pipeline::SelectDeliveryTargetOwner":                             2,
 		// Approved #2433 fork projection preserves the three admitted target kinds;
 		// it does not elect a new receiver from producer context.
 		"store/internal/backend/runforkpersistence::projectRunForkFanOutExecutionOwnership": 3,

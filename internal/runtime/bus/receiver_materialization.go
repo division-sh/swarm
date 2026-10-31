@@ -15,7 +15,7 @@ func (intent RoutePlanDeliveryIntent) deliveryRoute() events.DeliveryRoute {
 
 // A future target is authorized only by the same publication's canonical
 // construction plan. Handler completion never supplies construction authority.
-func (p selectedRunTargetOwnerProjection) bindReceiverMaterializations(plan *RoutePlan) error {
+func (p publicationTargetOwnerEvidence) bindReceiverMaterializations(plan *RoutePlan) error {
 	for index := range plan.DeliveryIntents {
 		intent := &plan.DeliveryIntents[index]
 		if !intent.TargetOwnership.MaterializingEntity() || !intent.Initialization.Empty() {

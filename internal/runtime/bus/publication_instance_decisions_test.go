@@ -30,7 +30,7 @@ func (r *publicationDecisionTestReader) LookupFlowInstance(ctx context.Context, 
 	return r.constructionIndexTestReader.LookupFlowInstance(ctx, request)
 }
 
-func publicationDecisionFixture(t *testing.T) (selectedRunTargetOwnerProjection, *publicationDecisionTestReader, events.RouteIdentity) {
+func publicationDecisionFixture(t *testing.T) (publicationTargetOwnerEvidence, *publicationDecisionTestReader, events.RouteIdentity) {
 	t.Helper()
 	source := connectRoutePlanRootProducerSingletonSource(t)
 	runID := eventtest.UUID("publication-instance-decision-run")
@@ -46,7 +46,7 @@ func publicationDecisionFixture(t *testing.T) (selectedRunTargetOwnerProjection,
 		t.Fatal(err)
 	}
 	ctx = withSelectedTargetOwnerLookupScope(ctx, selectedTargetOwnerLookupScope{lookup: scope, observations: append([]pipeline.FlowInstanceObservation(nil), reader.observations...)})
-	projection := selectedRunTargetOwnerProjection{context: ctx, instances: reader, source: source, required: true}
+	projection := publicationTargetOwnerEvidence{context: ctx, instances: reader, source: source, required: true}
 	for _, observed := range reader.observations {
 		identity := observed.Identity()
 		projection.candidates = append(projection.candidates, pipeline.DeliveryTargetOwnerCandidate{

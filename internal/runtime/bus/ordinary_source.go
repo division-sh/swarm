@@ -19,7 +19,7 @@ type ordinaryPublicationSource struct {
 	declarationOnly bool
 }
 
-func (p selectedRunTargetOwnerProjection) ordinarySource(evt events.Event) (ordinaryPublicationSource, error) {
+func (p publicationTargetOwnerEvidence) ordinarySource(evt events.Event) (ordinaryPublicationSource, error) {
 	source := evt.RoutingSource()
 	if p.source != nil && !explicitRootPublicationTarget(evt).Empty() {
 		coordinate, err := semanticview.AdmitRootExecutionCoordinate(p.source, evt.RunID())
@@ -71,7 +71,7 @@ func (p selectedRunTargetOwnerProjection) ordinarySource(evt events.Event) (ordi
 	return ordinaryPublicationSource{}, fmt.Errorf("provider source ownership resolution failed")
 }
 
-func (p selectedRunTargetOwnerProjection) selectedProviderExecutionIdentity(event events.Event, flowID string, root bool) (runtimeflowidentity.Instance, error) {
+func (p publicationTargetOwnerEvidence) selectedProviderExecutionIdentity(event events.Event, flowID string, root bool) (runtimeflowidentity.Instance, error) {
 	if account, selected, err := p.selectedAccountInstance(p.context, event); selected || err != nil {
 		return account, err
 	}
@@ -101,7 +101,7 @@ func providerConstructionCandidate(flowID string, candidates []runtimeflowidenti
 	}
 }
 
-func (p selectedRunTargetOwnerProjection) providerExecutionIdentity(event events.Event, flowID string, root bool) (runtimeflowidentity.Instance, error) {
+func (p publicationTargetOwnerEvidence) providerExecutionIdentity(event events.Event, flowID string, root bool) (runtimeflowidentity.Instance, error) {
 	if root {
 		return runtimeflowidentity.Stored(p.source, flowID, event.RunID(), event.RunID(), runtimeflowidentity.EntityID(event.RunID()), ""), nil
 	}
@@ -112,7 +112,7 @@ func (p selectedRunTargetOwnerProjection) providerExecutionIdentity(event events
 	return runtimeflowidentity.StandingForGeneration(p.source, flowID, event.RunID())
 }
 
-func (p selectedRunTargetOwnerProjection) validateProviderExecutionDescriptor(flowID string, expected runtimeflowidentity.Instance, descriptor pipeline.DeliveryTargetOwnerCandidate) error {
+func (p publicationTargetOwnerEvidence) validateProviderExecutionDescriptor(flowID string, expected runtimeflowidentity.Instance, descriptor pipeline.DeliveryTargetOwnerCandidate) error {
 	if expected.InstancePath != "" && (descriptor.Route.FlowInstance != expected.InstancePath || descriptor.Route.EntityID != expected.EntityID) {
 		return fmt.Errorf("provider receiver disagrees with its canonical constructed identity")
 	}

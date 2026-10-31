@@ -42,7 +42,7 @@ func TestOrdinaryProviderSourceUsesExactSelectedOwner(t *testing.T) {
 				t.Fatal(err)
 			}
 			evt := eventtest.ExistingRunRootIngressWithRoutingSource(eventtest.UUID("event"), "inbound.telegram.text_message", "gateway", "", []byte("{}"), 0, runID, events.EventEnvelope{}, routing, time.Now())
-			projection := selectedRunTargetOwnerProjection{source: source, candidates: []pipeline.DeliveryTargetOwnerCandidate{
+			projection := publicationTargetOwnerEvidence{source: source, candidates: []pipeline.DeliveryTargetOwnerCandidate{
 				{
 					Route: events.RouteIdentity{FlowInstance: instance,
 						EntityID: entityID},

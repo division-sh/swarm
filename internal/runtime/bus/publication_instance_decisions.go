@@ -11,7 +11,7 @@ import (
 
 // Inventory narrows immutable coordinates. Only this exact read binds a
 // mutable decision to the live preparation owner; neither escapes in a route.
-func (p selectedRunTargetOwnerProjection) decisionObservation(listed pipeline.FlowInstanceObservation) (pipeline.FlowInstanceObservation, error) {
+func (p publicationTargetOwnerEvidence) decisionObservation(listed pipeline.FlowInstanceObservation) (pipeline.FlowInstanceObservation, error) {
 	if p.context == nil || p.instances == nil {
 		return pipeline.FlowInstanceObservation{}, fmt.Errorf("mutable instance decision requires its live canonical reader")
 	}
@@ -44,7 +44,7 @@ func (p selectedRunTargetOwnerProjection) decisionObservation(listed pipeline.Fl
 	return observed, nil
 }
 
-func (p selectedRunTargetOwnerProjection) decisionTargetCandidate(descriptor pipeline.DeliveryTargetOwnerCandidate) (pipeline.DeliveryTargetOwnerCandidate, error) {
+func (p publicationTargetOwnerEvidence) decisionTargetCandidate(descriptor pipeline.DeliveryTargetOwnerCandidate) (pipeline.DeliveryTargetOwnerCandidate, error) {
 	if descriptor.Materializing || p.context == nil {
 		return descriptor, nil
 	}
@@ -79,7 +79,7 @@ func (p selectedRunTargetOwnerProjection) decisionTargetCandidate(descriptor pip
 	return descriptor, nil
 }
 
-func (p selectedRunTargetOwnerProjection) decisionTargetCandidates(target events.RouteIdentity) ([]pipeline.DeliveryTargetOwnerCandidate, error) {
+func (p publicationTargetOwnerEvidence) decisionTargetCandidates(target events.RouteIdentity) ([]pipeline.DeliveryTargetOwnerCandidate, error) {
 	out := make([]pipeline.DeliveryTargetOwnerCandidate, 0, len(p.candidates)+1)
 	prospective := p.prospective.Candidate()
 	for _, candidate := range p.candidates {
@@ -104,7 +104,7 @@ func (p selectedRunTargetOwnerProjection) decisionTargetCandidates(target events
 
 // Every candidate, including a currently ineligible one, is read after identity
 // narrowing and before eligibility. Other instances' progress is not a decision.
-func (p selectedRunTargetOwnerProjection) decisionAgentDescriptor(identity agentidentity.Identity) (ActiveAgentDescriptor, bool, bool, error) {
+func (p publicationTargetOwnerEvidence) decisionAgentDescriptor(identity agentidentity.Identity) (ActiveAgentDescriptor, bool, bool, error) {
 	listed, candidate := p.observedAgents[identity]
 	if !candidate {
 		descriptor, found := p.agents[identity]

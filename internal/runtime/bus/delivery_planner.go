@@ -133,10 +133,10 @@ func (p deliveryRecipientPolicy) Evaluate(ctx context.Context, evt events.Event,
 }
 
 func (p deliveryRecipientPolicy) evaluate(ctx context.Context, evt events.Event, recipients []deliveryRecipientCandidate, localSource ordinaryPublicationSource) (deliveryRecipientManifest, error) {
-	projection, projected := selectedRunTargetOwnerProjectionFromContext(ctx)
+	projection, projected := publicationTargetOwnersFromContext(ctx)
 	if !projected {
 		var err error
-		projection, err = p.loadSelectedRunTargetOwnerProjection(ctx)
+		projection, err = p.loadPublicationTargetOwners(ctx)
 		if err != nil {
 			return deliveryRecipientManifest{}, err
 		}
@@ -244,7 +244,7 @@ func (p deliveryPlanner) planRecipients(ctx context.Context, evt events.Event) (
 	if bounded {
 		ctx = withSelectedTargetOwnerLookupScope(ctx, scope)
 	}
-	projection, err := p.recipientPolicy.loadSelectedRunTargetOwnerProjection(ctx)
+	projection, err := p.recipientPolicy.loadPublicationTargetOwners(ctx)
 	if err != nil {
 		return RoutePlan{}, err
 	}
@@ -254,7 +254,7 @@ func (p deliveryPlanner) planRecipients(ctx context.Context, evt events.Event) (
 		routePlan.MarkCanonicalRouteFailedClosed(routeIntentProducerInternalTargetCarrier, runtimepinrouting.FailureAccountUnclaimed)
 		return p.resolvePreparedRoutePlan(projection, routePlan)
 	}
-	ctx = withSelectedRunTargetOwnerProjection(ctx, projection)
+	ctx = withPublicationTargetOwners(ctx, projection)
 	joinRecipient, joinTarget, joinHandler, joinOccurrence, err := runtimepipeline.ResolveWorkflowJoinOccurrenceDeliveryTarget(
 		p.recipientPolicy.semanticSource, evt,
 	)
@@ -272,7 +272,7 @@ func (p deliveryPlanner) planRecipients(ctx context.Context, evt events.Event) (
 	if err != nil {
 		return RoutePlan{}, err
 	}
-	ctx = withSelectedRunTargetOwnerProjection(ctx, projection)
+	ctx = withPublicationTargetOwners(ctx, projection)
 	connectPlan, err := p.connectPlanner.Plan(ctx, evt)
 	if err != nil {
 		return RoutePlan{}, err
@@ -282,7 +282,7 @@ func (p deliveryPlanner) planRecipients(ctx context.Context, evt events.Event) (
 		if err != nil {
 			return RoutePlan{}, err
 		}
-		ctx = withSelectedRunTargetOwnerProjection(ctx, projection)
+		ctx = withPublicationTargetOwners(ctx, projection)
 		connectPlan.ActivationPlans = append(rootPlans, connectPlan.ActivationPlans...)
 		routePlan = routePlanFromConnectRouteDispatch(evt, connectPlan)
 		if routePlan.AuthorityState == RoutePlanAuthorityCanonicalFailedClosed {
@@ -340,7 +340,7 @@ func (p deliveryPlanner) planIndependentPubsubBranch(ctx context.Context, evt ev
 	if err != nil {
 		return RoutePlan{}, err
 	}
-	projection, ok := selectedRunTargetOwnerProjectionFromContext(ctx)
+	projection, ok := publicationTargetOwnersFromContext(ctx)
 	if !ok {
 		return RoutePlan{}, fmt.Errorf("ordinary publication requires selected-run ownership projection")
 	}
@@ -486,7 +486,7 @@ func routePlanFromConnectRouteDispatch(evt events.Event, connectPlan connectRout
 	return routePlan.Normalized()
 }
 
-func (p deliveryPlanner) materializedTargetOwnerProjection(ctx context.Context, evt events.Event, plan *RoutePlan) (selectedRunTargetOwnerProjection, error) {
+func (p deliveryPlanner) materializedPublicationTargetOwners(ctx context.Context, evt events.Event, plan *RoutePlan) (publicationTargetOwnerEvidence, error) {
 	p.recipientPolicy.instances = p.connectPlanner.lifecycle.index
 	ctx = runtimecorrelation.WithInboundEvent(ctx, evt)
 	var lookups []runtimepipeline.DeliveryTargetLookup
@@ -498,7 +498,7 @@ func (p deliveryPlanner) materializedTargetOwnerProjection(ctx context.Context, 
 			if intent.Recipient.IsAgent() {
 				identity := intent.AgentIdentity.Normalize()
 				if identity.Validate() != nil || identity.RunID != evt.RunID() || identity.AgentID() != intent.Recipient.ID() {
-					return selectedRunTargetOwnerProjection{}, fmt.Errorf("materialized agent requires its exact publication identity")
+					return publicationTargetOwnerEvidence{}, fmt.Errorf("materialized agent requires its exact publication identity")
 				}
 				if !runtimeCreatedTargetlessAgentIntent(intent) {
 					route := runtimeflowidentity.StoredRoute(identity.Route.ScopeKey, identity.Route.InstanceID, identity.Route.InstancePath)
@@ -507,7 +507,7 @@ func (p deliveryPlanner) materializedTargetOwnerProjection(ctx context.Context, 
 					}
 					owner, err := runtimeflowidentity.NewRunScopedFlowInstance(evt.RunID(), route)
 					if err != nil {
-						return selectedRunTargetOwnerProjection{}, err
+						return publicationTargetOwnerEvidence{}, err
 					}
 					owners = append(owners, owner)
 				}
@@ -519,7 +519,7 @@ func (p deliveryPlanner) materializedTargetOwnerProjection(ctx context.Context, 
 					Source: p.connectPlanner.source, Event: evt, Recipient: intent.Recipient, Blueprint: target, Handler: intent.Handler,
 				})
 				if err != nil {
-					return selectedRunTargetOwnerProjection{}, err
+					return publicationTargetOwnerEvidence{}, err
 				}
 				target = lookups[index].Coordinate()
 			}
@@ -527,25 +527,25 @@ func (p deliveryPlanner) materializedTargetOwnerProjection(ctx context.Context, 
 		}
 		targetOwners, err := p.connectPlanner.exactLookupCoordinates(evt.RunID(), targets)
 		if err != nil {
-			return selectedRunTargetOwnerProjection{}, err
+			return publicationTargetOwnerEvidence{}, err
 		}
 		owners = append(owners, targetOwners...)
 		scope, err := p.connectPlanner.lookupTargetScope(ctx, evt.RunID(), nil, owners)
 		if err != nil {
-			return selectedRunTargetOwnerProjection{}, err
+			return publicationTargetOwnerEvidence{}, err
 		}
 		ctx = withSelectedTargetOwnerLookupScope(ctx, scope)
 	}
-	projection, err := p.recipientPolicy.loadSelectedRunTargetOwnerProjection(ctx)
+	projection, err := p.recipientPolicy.loadPublicationTargetOwners(ctx)
 	if err != nil {
-		return selectedRunTargetOwnerProjection{}, err
+		return publicationTargetOwnerEvidence{}, err
 	}
 	projection, err = projection.withActivationPlans(plan.ActivationPlans)
 	if err != nil {
-		return selectedRunTargetOwnerProjection{}, err
+		return publicationTargetOwnerEvidence{}, err
 	}
 	if err := projection.resolveNodeTargetOwners(plan, lookups); err != nil {
-		return selectedRunTargetOwnerProjection{}, err
+		return publicationTargetOwnerEvidence{}, err
 	}
 	return projection, nil
 }
@@ -568,11 +568,11 @@ func (p deliveryPlanner) PlanDirect(ctx context.Context, evt events.Event, recip
 	if bounded {
 		ctx = withSelectedTargetOwnerLookupScope(ctx, scope)
 	}
-	projection, err := p.recipientPolicy.loadSelectedRunTargetOwnerProjection(ctx)
+	projection, err := p.recipientPolicy.loadPublicationTargetOwners(ctx)
 	if err != nil {
 		return RoutePlan{}, err
 	}
-	ctx = withSelectedRunTargetOwnerProjection(ctx, projection)
+	ctx = withPublicationTargetOwners(ctx, projection)
 	manifest, err := p.recipientPolicy.Evaluate(ctx, evt, agentDeliveryRecipientCandidates(requested))
 	if err != nil {
 		return RoutePlan{}, err
@@ -978,7 +978,7 @@ func filterDeliveryRecipientCandidates(
 	recipients []deliveryRecipientCandidate,
 	descriptors map[agentidentity.Identity]ActiveAgentDescriptor,
 	targetDescriptors []runtimepipeline.DeliveryTargetOwnerCandidate,
-	projection selectedRunTargetOwnerProjection,
+	projection publicationTargetOwnerEvidence,
 	localSource ordinaryPublicationSource,
 ) (deliveryRecipientManifest, error) {
 	recipients = normalizeDeliveryRecipientCandidates(recipients)
@@ -1105,7 +1105,7 @@ func matchingAgentDescriptors(
 func agentDeliveryRoutesForCandidates(
 	evt events.Event,
 	recipients []deliveryRecipientCandidate,
-	projection selectedRunTargetOwnerProjection,
+	projection publicationTargetOwnerEvidence,
 ) ([]events.DeliveryRoute, error) {
 	recipients = persistedDeliveryRecipientCandidates(recipients)
 	if len(recipients) == 0 {
