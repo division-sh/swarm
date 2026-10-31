@@ -57,6 +57,9 @@ func TestPublicOperationSemanticCarrierParity(t *testing.T) {
 			for _, method := range []string{"event.publish", "run.start"} {
 				t.Run(method, func(t *testing.T) {
 					var liveRunID string
+					if method == "event.publish" {
+						liveRunID = seedEventPublishLiveRun(t, selected, bus, source)
+					}
 					defer func() {
 						if liveRunID != "" {
 							pauseAPITestLiveRun(t, bus, selected, liveRunID)
