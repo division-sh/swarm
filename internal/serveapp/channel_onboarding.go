@@ -5,6 +5,7 @@ import (
 	"errors"
 	"fmt"
 	"net/http"
+	"slices"
 	"sort"
 	"strings"
 	"time"
@@ -263,9 +264,9 @@ func compileServeRegisteredChannelActivations(contexts []runtime.BundleContext, 
 	return activations, nil
 }
 
-// Startup is the only deployment-to-runtime credential admission here. Later
-// registration/holder changes require a restart, not an implicit refresh.
-func admitServeRegisteredWebhookCredentials(ctx context.Context, manager *runtime.RuntimeContextManager, store channelonboarding.Store) error {
+// Startup admits the complete set; explicit registration/holder mutations admit
+// only their account. Observation and reconciliation never refresh credentials.
+func admitServeRegisteredWebhookCredentials(ctx context.Context, manager *runtime.RuntimeContextManager, store channelonboarding.Store, selected ...channelonboarding.AccountReference) error {
 	scoped, ok := store.(interface {
 		DeploymentChannelOperations() channelonboarding.OperationStore
 	})
@@ -290,7 +291,11 @@ func admitServeRegisteredWebhookCredentials(ctx context.Context, manager *runtim
 				continue
 			}
 			for _, op := range channelonboarding.RetainedConfirmedAccounts(registered, candidate.Provider) {
-				holders, err := manager.AccountHolders(ctx, channelonboarding.AccountReference{Provider: op.Provider, Account: op.AccountReference})
+				ref := channelonboarding.AccountReference{Provider: op.Provider, Account: op.AccountReference}
+				if len(selected) != 0 && !slices.Contains(selected, ref) {
+					continue
+				}
+				holders, err := manager.AccountHolders(ctx, ref)
 				if err != nil {
 					return err
 				}
@@ -1162,6 +1167,15 @@ func (d *serveChannelConfirmationDispatcher) DispatchChannelConfirmation(ctx con
 		return channelonboarding.ConfirmationResult{}, fmt.Errorf("channel confirmation journal returned contradictory operation %q", delivery.OperationID)
 	}
 	return channelonboarding.ConfirmationResult{OperationID: operationID, TerminalSuccess: true}, nil
+}
+
+func (r *serveChannelActivationRefresher) refreshRegisteredAccount(ctx context.Context, ref channelonboarding.AccountReference) error {
+	if ref.Provider == "telegram" && ref.Validate() == nil {
+		if err := admitServeRegisteredWebhookCredentials(ctx, r.manager, r.store, ref); err != nil {
+			return err
+		}
+	}
+	return r.RefreshChannelActivations(ctx)
 }
 
 func (r *serveChannelActivationRefresher) RefreshChannelActivations(ctx context.Context) error {

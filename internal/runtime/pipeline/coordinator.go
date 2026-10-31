@@ -82,6 +82,7 @@ type PipelineCoordinator struct {
 	credentials            runtimecredentials.Store
 	providerCredentials    runtimecredentials.Store
 	registeredAccounts     channelonboarding.OperationStore
+	accountHolderCreated   func(context.Context, channelonboarding.AccountReference) error
 	managedCredentials     runtimemanagedcredentials.Store
 	mockConnectorResponses *providerconnectors.MockResponsePlan
 	scenarioProfiles       ScenarioExecutionProfileReader
@@ -128,6 +129,7 @@ type PipelineCoordinatorOptions struct {
 	Credentials                      runtimecredentials.Store
 	ProviderCredentials              runtimecredentials.Store
 	RegisteredAccounts               channelonboarding.OperationStore
+	AccountHolderCreated             func(context.Context, channelonboarding.AccountReference) error
 	ManagedCredentials               runtimemanagedcredentials.Store
 	MockConnectorResponses           *providerconnectors.MockResponsePlan
 	ScenarioExecutionProfiles        ScenarioExecutionProfileReader
@@ -376,6 +378,7 @@ func newPipelineCoordinatorWithOptions(bus Bus, opts PipelineCoordinatorOptions,
 		managedCredentials:               opts.ManagedCredentials,
 		providerCredentials:              opts.ProviderCredentials,
 		registeredAccounts:               opts.RegisteredAccounts,
+		accountHolderCreated:             opts.AccountHolderCreated,
 		mockConnectorResponses:           opts.MockConnectorResponses,
 		scenarioProfiles:                 opts.ScenarioExecutionProfiles,
 		effectiveSource:                  opts.EffectiveSourceIdentity,

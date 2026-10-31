@@ -63,8 +63,8 @@ func (rt *Runtime) validateRegisteredStandingCredential(ctx context.Context, evi
 	return nil
 }
 
-// This is invoked only by explicit startup admission, never registration
-// reconciliation or readback. Each entry retains one operation's authority.
+// Explicit startup or account/holder mutation admission invokes this owner,
+// never reconciliation or readback. Each entry retains one operation's authority.
 func (rt *Runtime) admitRegisteredStandingChannelTarget(ctx context.Context, op channelonboarding.Operation, candidate channelonboarding.Candidate, holder channelonboarding.AccountHolder) ([]StandingTarget, []StandingActivation, error) {
 	evidence := registeredStandingCredential{operation: op, holder: holder}
 	if err := rt.validateRegisteredStandingCredential(ctx, evidence, true); err != nil {

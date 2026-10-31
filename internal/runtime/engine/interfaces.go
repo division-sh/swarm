@@ -4,6 +4,7 @@ import (
 	"context"
 	"time"
 
+	"github.com/division-sh/swarm/internal/channelonboarding"
 	"github.com/division-sh/swarm/internal/events"
 	runtimeflowidentity "github.com/division-sh/swarm/internal/runtime/core/flowidentity"
 	"github.com/division-sh/swarm/internal/runtime/core/handlerselection"
@@ -115,6 +116,7 @@ type CommittedDurablePublication interface {
 }
 
 type CommittedEngineMutation struct {
+	AccountHolder          *channelonboarding.AccountReference
 	Committed              bool
 	Stage                  *CommittedStage
 	ActivityIntents        []ActivityIntent

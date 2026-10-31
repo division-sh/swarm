@@ -83,10 +83,15 @@ func registerChannelFixtureAccount(t *testing.T, config, token, account string, 
 	}()
 	if len(hitl) != 0 {
 		challenge := waitChannelOnboardingChallenge(t, out, errOut, progressDone)
-		hitl[0].QueueUpdate(token, map[string]any{"update_id": 1, "message": map[string]any{
-			"message_id": 1, "from": map[string]any{"id": 7000, "username": "operator"},
-			"chat": map[string]any{"id": 1001, "type": "private"}, "text": challenge,
-		}})
+		callback, signing, _ := hitl[0].Registration()
+		if callback != "" {
+			requireChannelClaimDisposition(t, "live deployment claim", submitChannelOnboardingClaimAs(t, callback, signing, challenge, 1, 7000, 1001, "operator"), "consumed_by_binding")
+		} else {
+			hitl[0].QueueUpdate(token, map[string]any{"update_id": 1, "message": map[string]any{
+				"message_id": 1, "from": map[string]any{"id": 7000, "username": "operator"},
+				"chat": map[string]any{"id": 1001, "type": "private"}, "text": challenge,
+			}})
+		}
 	}
 	var code int
 	select {

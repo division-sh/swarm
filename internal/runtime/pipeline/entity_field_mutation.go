@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"strings"
 
+	"github.com/division-sh/swarm/internal/channelonboarding"
 	runtimeflowidentity "github.com/division-sh/swarm/internal/runtime/core/flowidentity"
 	"github.com/division-sh/swarm/internal/runtime/core/identity"
 	runtimecorrelation "github.com/division-sh/swarm/internal/runtime/correlation"
@@ -62,6 +63,9 @@ func (pc *PipelineCoordinator) ApplyEntityFieldMutation(ctx context.Context, com
 			return EntityFieldMutationResult{}, err
 		}
 		result, err := pc.applyEntityFieldMutationAttempt(ctx, command, address)
+		if result.Acknowledged {
+			err = errors.Join(err, pc.notifyAccountHolder(ctx, result.accountHolder))
+		}
 		if result.Acknowledged || !failures.IsStateContention(err) {
 			return result, err
 		}
@@ -137,12 +141,14 @@ func (pc *PipelineCoordinator) applyEntityFieldMutationAttempt(ctx context.Conte
 		}
 		return EntityFieldMutationResult{}, err
 	}
-	return EntityFieldMutationResult{Acknowledged: true, Revision: int(snapshot.Revision + 1)}, err
+	ref, notificationErr := pc.committedAccountHolder(command.FlowID, snapshot.Fields, fields)
+	return EntityFieldMutationResult{Acknowledged: true, Revision: int(snapshot.Revision + 1), accountHolder: ref}, errors.Join(err, notificationErr)
 }
 
 type EntityFieldMutationResult struct {
-	Revision     int
-	Acknowledged bool
+	Revision      int
+	Acknowledged  bool
+	accountHolder *channelonboarding.AccountReference
 }
 
 type EntityFieldMutationWriter interface {

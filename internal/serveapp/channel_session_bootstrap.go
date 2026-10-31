@@ -23,7 +23,7 @@ type serveSessionBootstrapRuntime func(context.Context, channelonboarding.Candid
 type deploymentRuntimeOptions struct {
 	manager  *runtime.RuntimeContextManager
 	sessions serveSessionBootstrapOwner
-	refresh  func(context.Context) error
+	refresh  func(context.Context, channelonboarding.AccountReference) error
 	ingress  *publicingress.ReadinessOwner
 }
 

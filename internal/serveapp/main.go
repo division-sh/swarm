@@ -153,32 +153,33 @@ type serveRuntimeBundleContext struct {
 }
 
 type serveRuntimeBundleContextRequest struct {
-	RepoRoot            string
-	PlatformPackBases   *packartifact.PlatformPackBaseGenerationOwner
-	ExecutionPosture    executionposture.Posture
-	PublicIngressAbsent bool
-	Ctx                 context.Context
-	Stores              serveRuntimePersistence
-	Config              *config.Config
-	Loaded              serveRuntimeBundle
-	StateStoreSummary   string
-	Options             cliapp.ServeOptions
-	MountSources        cliapp.WorkspaceMountSources
-	WorkspaceBackend    cliapp.WorkspaceBackendSelection
-	Credentials         runtimecredentials.Store
-	ManagedCredentials  runtimemanagedcredentials.Store
-	ProviderCredentials runtimecredentials.Store
-	ChannelPlans        []packs.SatisfactionPlan
-	ChannelBindings     []packs.OutboundBindingPlan
-	BootStartedAt       time.Time
-	BootProgress        func(runtime.BootProgressEvent)
-	EnableToolGateway   bool
-	ToolGatewayBinding  toolgateway.Binding
-	UseStartupRecovery  bool
-	RuntimeInstanceID   string
-	DataProjectionRoot  string
-	ProcessWorkOwner    *worklifetime.Process
-	NoticePresentation  runtimetools.InformationalNoticePresentationSink
+	RepoRoot             string
+	PlatformPackBases    *packartifact.PlatformPackBaseGenerationOwner
+	ExecutionPosture     executionposture.Posture
+	PublicIngressAbsent  bool
+	Ctx                  context.Context
+	Stores               serveRuntimePersistence
+	Config               *config.Config
+	Loaded               serveRuntimeBundle
+	StateStoreSummary    string
+	Options              cliapp.ServeOptions
+	MountSources         cliapp.WorkspaceMountSources
+	WorkspaceBackend     cliapp.WorkspaceBackendSelection
+	Credentials          runtimecredentials.Store
+	ManagedCredentials   runtimemanagedcredentials.Store
+	ProviderCredentials  runtimecredentials.Store
+	ChannelPlans         []packs.SatisfactionPlan
+	ChannelBindings      []packs.OutboundBindingPlan
+	BootStartedAt        time.Time
+	BootProgress         func(runtime.BootProgressEvent)
+	EnableToolGateway    bool
+	ToolGatewayBinding   toolgateway.Binding
+	UseStartupRecovery   bool
+	RuntimeInstanceID    string
+	DataProjectionRoot   string
+	ProcessWorkOwner     *worklifetime.Process
+	NoticePresentation   runtimetools.InformationalNoticePresentationSink
+	AccountHolderCreated func(context.Context, channelonboarding.AccountReference) error
 }
 
 func (b serveRuntimeBundle) serveIdentityDetail() string {
@@ -594,6 +595,7 @@ func buildServeRuntimeBundleContext(req serveRuntimeBundleContextRequest) (resul
 		ProviderCredentials:              req.ProviderCredentials,
 		ProviderTriggerCatalog:           providerCatalog,
 		NoticePresentation:               req.NoticePresentation,
+		AccountHolderCreated:             req.AccountHolderCreated,
 		ChannelPlans:                     req.ChannelPlans,
 		DeclaredChannelPublication:       declaredChannelPublication,
 		ChannelOnboardingStore:           req.Stores.channelOnboarding,
@@ -1339,32 +1341,33 @@ func buildRuntimeComposition(ctx context.Context, req runtimeCompositionRequest)
 		presenter.recordWorkspace(workspaceLabels[i], workspaceBackend)
 		packLoad := bundlePackLoads[i]
 		request := serveRuntimeBundleContextRequest{
-			RepoRoot:            repo,
-			PlatformPackBases:   platformPackBases,
-			ExecutionPosture:    req.Purpose,
-			PublicIngressAbsent: !publicIngressEnabled,
-			DataProjectionRoot:  req.DataProjectionRoot,
-			Ctx:                 ctx,
-			Stores:              runtimePersistence,
-			Config:              cfg,
-			Loaded:              loaded,
-			StateStoreSummary:   serveStateStoreSummaryAt(stateStoreSummaries, i),
-			Options:             opts,
-			MountSources:        mountSources,
-			WorkspaceBackend:    workspaceBackend,
-			Credentials:         credentialStore,
-			ManagedCredentials:  managedCredentialStore,
-			ProviderCredentials: providerCredentialStore,
-			ChannelPlans:        packLoad.Channels.Plans,
-			ChannelBindings:     packLoad.Channels.Bindings,
-			BootStartedAt:       bootStartedAt,
-			BootProgress:        bootProgress,
-			EnableToolGateway:   i == 0,
-			ToolGatewayBinding:  contextToolGatewayBinding,
-			UseStartupRecovery:  len(loadedBundles) == 1,
-			RuntimeInstanceID:   runtimeInstanceID,
-			ProcessWorkOwner:    processWorkOwner,
-			NoticePresentation:  noticePresentation,
+			RepoRoot:             repo,
+			PlatformPackBases:    platformPackBases,
+			ExecutionPosture:     req.Purpose,
+			PublicIngressAbsent:  !publicIngressEnabled,
+			DataProjectionRoot:   req.DataProjectionRoot,
+			Ctx:                  ctx,
+			Stores:               runtimePersistence,
+			Config:               cfg,
+			Loaded:               loaded,
+			StateStoreSummary:    serveStateStoreSummaryAt(stateStoreSummaries, i),
+			Options:              opts,
+			MountSources:         mountSources,
+			WorkspaceBackend:     workspaceBackend,
+			Credentials:          credentialStore,
+			ManagedCredentials:   managedCredentialStore,
+			ProviderCredentials:  providerCredentialStore,
+			ChannelPlans:         packLoad.Channels.Plans,
+			ChannelBindings:      packLoad.Channels.Bindings,
+			BootStartedAt:        bootStartedAt,
+			BootProgress:         bootProgress,
+			EnableToolGateway:    i == 0,
+			ToolGatewayBinding:   contextToolGatewayBinding,
+			UseStartupRecovery:   len(loadedBundles) == 1,
+			RuntimeInstanceID:    runtimeInstanceID,
+			ProcessWorkOwner:     processWorkOwner,
+			NoticePresentation:   noticePresentation,
+			AccountHolderCreated: supervisor.refreshRegisteredAccount,
 		}
 		contextDef, err := buildServeRuntimeBundleContext(request)
 		if err != nil {
@@ -1653,7 +1656,7 @@ func buildRuntimeComposition(ctx context.Context, req runtimeCompositionRequest)
 	var deploymentRegistration *runtimepublicingress.ProviderRegistrationController
 	deploymentChannels, deploymentClaims, restoreDeploymentChannels, closeDeploymentChannels := deploymentChannelHandlers(repo, cfgResult.Path, swarmDir.Path, stores, processWorkOwner, processCapability, func(ctx context.Context, callback, account string) bool {
 		return deploymentRegistration != nil && deploymentRegistration.OwnsAccountCallback(ctx, callback, account)
-	}, deploymentRuntimeOptions{manager: runtimeContextManager, sessions: sessionBootstrap, refresh: channelActivationRefresher.RefreshChannelActivations, ingress: ready})
+	}, deploymentRuntimeOptions{manager: runtimeContextManager, sessions: sessionBootstrap, refresh: channelActivationRefresher.refreshRegisteredAccount, ingress: ready})
 	defer func() {
 		if err := closeDeploymentChannels(); err != nil {
 			log.Printf("deployment channel shutdown failed: %T", err)
@@ -1798,7 +1801,9 @@ func buildRuntimeComposition(ctx context.Context, req runtimeCompositionRequest)
 	}
 	presenter.recordBootWarnings(bootReport)
 	supervisor.resetChannelPublication = stores.ChannelDelivery().NotifyChannelPublication
+	supervisor.mu.Lock()
 	supervisor.resetChannelActivations = channelActivationRefresher
+	supervisor.mu.Unlock()
 	supervisor.resetRefresh = func(refreshCtx context.Context) error {
 		supervisor.mu.RLock()
 		resetting := supervisor.resetting
