@@ -283,23 +283,39 @@ func ClassifyDeliveryTargetOwnership(lookup DeliveryTargetLookup, candidates []D
 		return events.DeliveryTargetOwnership{}, fmt.Errorf("delivery target classification requires its admitted lookup")
 	}
 	blueprint := lookup.coordinate
-	existing, materializing, err := matchingDeliveryTargetOwnerCandidates(lookup.request.Source, blueprint, candidates)
+	owner, found, err := SelectDeliveryTargetOwner(lookup.request.Source, blueprint, candidates)
 	if err != nil {
 		return events.DeliveryTargetOwnership{}, err
 	}
+	if !found {
+		return events.DeliveryTargetOwnership{}, fmt.Errorf("receiver target owner is missing for flow instance %q; construct it before handler delivery", blueprint.FlowInstance)
+	}
+	if owner.MaterializingEntity() && owner.Route().EntityID != FlowInstanceEntityID(owner.Route().FlowInstance) {
+		return events.DeliveryTargetOwnership{}, fmt.Errorf("constructor target evidence disagrees with canonical instance identity")
+	}
+	return owner, nil
+}
+
+// SelectDeliveryTargetOwner decides only the supplied candidate evidence, not
+// handler or reply admission. Only found=false with no error means absence.
+func SelectDeliveryTargetOwner(source semanticview.Source, blueprint events.RouteIdentity, candidates []DeliveryTargetOwnerCandidate) (events.DeliveryTargetOwnership, bool, error) {
+	blueprint = blueprint.Normalized()
+	existing, materializing, err := matchingDeliveryTargetOwnerCandidates(source, blueprint, candidates)
+	if err != nil {
+		return events.DeliveryTargetOwnership{}, false, err
+	}
 	if len(existing)+len(materializing) > 1 {
-		return events.DeliveryTargetOwnership{}, ambiguousDeliveryTargetOwnerError(blueprint.FlowInstance, existing, materializing)
+		return events.DeliveryTargetOwnership{}, false, ambiguousDeliveryTargetOwnerError(blueprint.FlowInstance, existing, materializing)
 	}
 	if len(materializing) == 1 && len(existing) == 0 {
-		if materializing[0].EntityID != FlowInstanceEntityID(materializing[0].FlowInstance) {
-			return events.DeliveryTargetOwnership{}, fmt.Errorf("constructor target evidence disagrees with canonical instance identity")
-		}
-		return events.NewMaterializingEntityTarget(materializing[0])
+		owner, err := events.NewMaterializingEntityTarget(materializing[0])
+		return owner, true, err
 	}
 	if len(existing) == 1 && len(materializing) == 0 {
-		return events.NewExistingEntityTarget(existing[0])
+		owner, err := events.NewExistingEntityTarget(existing[0])
+		return owner, true, err
 	}
-	return events.DeliveryTargetOwnership{}, fmt.Errorf("receiver target owner is missing for flow instance %q; construct it before handler delivery", blueprint.FlowInstance)
+	return events.DeliveryTargetOwnership{}, false, nil
 }
 
 func selectedRunRootTargetBlueprint(source semanticview.Source, evt events.Event, blueprint events.RouteIdentity) (events.RouteIdentity, error) {

@@ -3,8 +3,6 @@ package bus
 import (
 	"context"
 	"fmt"
-	"sort"
-	"strings"
 
 	"github.com/division-sh/swarm/internal/events"
 	"github.com/division-sh/swarm/internal/runtime/core/agentidentity"
@@ -283,76 +281,6 @@ func (p selectedRunTargetOwnerProjection) validate() error {
 		}
 	}
 	return nil
-}
-
-func (p selectedRunTargetOwnerProjection) resolveSelectedRoute(blueprint events.RouteIdentity) (events.DeliveryTargetOwnership, error) {
-	blueprint = blueprint.Normalized()
-	if err := p.prospective.ValidateTarget(blueprint); err != nil {
-		return events.DeliveryTargetOwnership{}, err
-	}
-	if blueprint.Empty() {
-		if !p.required {
-			return events.DeliveryTargetOwnership{}, nil
-		}
-		return events.DeliveryTargetOwnership{}, fmt.Errorf("receiver target blueprint is required")
-	}
-	owners := make(map[events.DeliveryTargetOwnership]struct{})
-	candidates, err := p.decisionTargetCandidates(blueprint)
-	if err != nil {
-		return events.DeliveryTargetOwnership{}, err
-	}
-	for _, candidate := range candidates {
-		if blueprint.FlowInstance != "" && candidate.Route.FlowInstance != blueprint.FlowInstance {
-			continue
-		}
-		if blueprint.EntityID != "" && candidate.Route.EntityID != blueprint.EntityID {
-			continue
-		}
-		if !candidate.Materializing {
-			if err := candidate.Availability.Validate(p.source, blueprint.FlowID); err != nil {
-				if refusal, ok := err.(*runtimepipeline.NoHandlerError); ok {
-					refusal.FlowInstance = candidate.Route.FlowInstance
-				}
-				return events.DeliveryTargetOwnership{}, err
-			}
-		}
-		owner := blueprint
-		owner.EntityID = candidate.Route.EntityID
-		ownership, err := deliveryTargetOwnershipFromDescriptor(owner, ActiveTargetDescriptor{Materializing: candidate.Materializing})
-		if err != nil {
-			return events.DeliveryTargetOwnership{}, err
-		}
-		owners[ownership] = struct{}{}
-	}
-	if len(owners) != 1 {
-		if len(owners) == 0 && !p.required {
-			if blueprint.EntityID != "" {
-				return events.NewExistingEntityTarget(blueprint)
-			}
-			return events.NewEntitylessReceiverTarget(blueprint)
-		}
-		candidates := make([]string, 0, len(owners))
-		for owner := range owners {
-			route := owner.Route()
-			candidates = append(candidates, fmt.Sprintf("%s:%s/%s", owner.Code(), route.FlowInstance, route.EntityID))
-		}
-		sort.Strings(candidates)
-		if len(candidates) == 0 {
-			return events.DeliveryTargetOwnership{}, fmt.Errorf("receiver target owner is missing for flow instance %q", blueprint.FlowInstance)
-		}
-		return events.DeliveryTargetOwnership{}, fmt.Errorf("receiver target owner is ambiguous for flow instance %q; candidates: %s", blueprint.FlowInstance, strings.Join(candidates, ", "))
-	}
-	for owner := range owners {
-		return owner, nil
-	}
-	return events.DeliveryTargetOwnership{}, fmt.Errorf("receiver target owner resolution failed")
-}
-
-func deliveryTargetOwnershipFromDescriptor(route events.RouteIdentity, descriptor ActiveTargetDescriptor) (events.DeliveryTargetOwnership, error) {
-	if descriptor.Materializing {
-		return events.NewMaterializingEntityTarget(route)
-	}
-	return events.NewExistingEntityTarget(route)
 }
 
 func (p selectedRunTargetOwnerProjection) targetOwnerCandidates() []runtimepipeline.DeliveryTargetOwnerCandidate {

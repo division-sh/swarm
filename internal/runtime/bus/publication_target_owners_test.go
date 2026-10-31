@@ -54,10 +54,14 @@ func TestClosedPublicationTargetOwnerEvidenceBoundaries(t *testing.T) {
 	}
 	readFailure := errors.New("independent covered reply read failure")
 	reader.err = readFailure
-	before := plan
-	owner, err := base.returnOwner(ctx, event, &plan, record)
-	if !owner.Empty() || !errors.Is(err, readFailure) || len(reader.lookups) != 2 || !reflect.DeepEqual(before, plan) {
-		t.Fatalf("covered reply suppressed exact read failure or mutated the plan: owner=%+v err=%v reads=%+v", owner, err, reader.lookups)
+	for _, required := range []bool{false, true} {
+		candidate := base
+		candidate.projection.required = required
+		before, reads := plan, len(reader.lookups)
+		owner, err := candidate.returnOwner(ctx, event, &plan, record)
+		if !owner.Empty() || !errors.Is(err, readFailure) || len(reader.lookups) != reads+1 || !reflect.DeepEqual(before, plan) {
+			t.Fatalf("covered reply suppressed exact read failure or mutated the plan (required=%t): owner=%+v err=%v reads=%+v", required, owner, err, reader.lookups)
+		}
 	}
 	reader.err = nil
 	for _, name := range []string{"absent", "wrong_event", "wrong_run", "wrong_source", "missing_scope", "crossed_scope", "logical_instance", "parent", "cancelled"} {

@@ -6,6 +6,7 @@ import (
 
 	"github.com/division-sh/swarm/internal/events"
 	"github.com/division-sh/swarm/internal/runtime/correlation"
+	"github.com/division-sh/swarm/internal/runtime/pipeline"
 	"github.com/division-sh/swarm/internal/runtime/replycontext"
 )
 
@@ -135,5 +136,42 @@ func (p *publicationTargetOwnerEvidence) returnOwner(ctx context.Context, event 
 	if err != nil {
 		return events.DeliveryTargetOwnership{}, err
 	}
-	return p.projection.resolveSelectedRoute(origin)
+	return p.projection.replyOriginOwner(origin)
+}
+
+func (p selectedRunTargetOwnerProjection) replyOriginOwner(origin events.RouteIdentity) (events.DeliveryTargetOwnership, error) {
+	origin = origin.Normalized()
+	if err := p.prospective.ValidateTarget(origin); err != nil {
+		return events.DeliveryTargetOwnership{}, err
+	}
+	if origin.Empty() {
+		if !p.required {
+			return events.DeliveryTargetOwnership{}, nil
+		}
+		return events.DeliveryTargetOwnership{}, fmt.Errorf("receiver target blueprint is required")
+	}
+	candidates, err := p.decisionTargetCandidates(origin)
+	if err != nil {
+		return events.DeliveryTargetOwnership{}, err
+	}
+	// An explicit reply origin narrows candidates; node admission instead treats
+	// a contradictory entity at its exact instance as an error.
+	matching := make([]pipeline.DeliveryTargetOwnerCandidate, 0, len(candidates))
+	for _, candidate := range candidates {
+		if origin.FlowInstance != "" && candidate.Route.FlowInstance != origin.FlowInstance || origin.EntityID != "" && candidate.Route.EntityID != origin.EntityID {
+			continue
+		}
+		matching = append(matching, candidate)
+	}
+	owner, found, err := pipeline.SelectDeliveryTargetOwner(p.source, origin, matching)
+	if err != nil || found {
+		return owner, err
+	}
+	if !p.required {
+		if origin.EntityID != "" {
+			return events.NewExistingEntityTarget(origin)
+		}
+		return events.NewEntitylessReceiverTarget(origin)
+	}
+	return events.DeliveryTargetOwnership{}, fmt.Errorf("receiver target owner is missing for flow instance %q", origin.FlowInstance)
 }

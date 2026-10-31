@@ -59,7 +59,7 @@ func publicationDecisionFixture(t *testing.T) (selectedRunTargetOwnerProjection,
 
 func TestPublicationTargetDecisionReadsOnlyNarrowedCoordinate(t *testing.T) {
 	projection, reader, target := publicationDecisionFixture(t)
-	owner, err := projection.resolveSelectedRoute(target)
+	owner, err := projection.replyOriginOwner(target)
 	if err != nil || owner.Route() != target || !owner.ExistingEntity() {
 		t.Fatalf("exact target=%+v err=%v", owner, err)
 	}
@@ -68,7 +68,7 @@ func TestPublicationTargetDecisionReadsOnlyNarrowedCoordinate(t *testing.T) {
 	}
 	identity := reader.observations[1].Identity()
 	reader.observations[1] = TerminatedFlowInstanceObservationFixture(t, projection.source, reader.observations[1].Owner().RunID, identity)
-	_, err = projection.resolveSelectedRoute(target)
+	_, err = projection.replyOriginOwner(target)
 	var terminated *pipeline.TerminatedReceiverError
 	if !errors.As(err, &terminated) || len(reader.lookups) != 2 {
 		t.Fatalf("stale list availability replaced exact receiver refusal: %v reads=%+v", err, reader.lookups)
@@ -86,7 +86,7 @@ func TestPublicationTargetDecisionPreservesExactReadFailures(t *testing.T) {
 		t.Run(test.name, func(t *testing.T) {
 			projection, reader, target := publicationDecisionFixture(t)
 			reader.err = test.err
-			owner, err := projection.resolveSelectedRoute(target)
+			owner, err := projection.replyOriginOwner(target)
 			if !owner.Empty() || !errors.Is(err, test.err) || len(reader.lookups) != 1 {
 				t.Fatalf("failed exact read borrowed inventory: owner=%+v err=%v reads=%+v", owner, err, reader.lookups)
 			}
