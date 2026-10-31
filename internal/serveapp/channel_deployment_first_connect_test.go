@@ -24,7 +24,9 @@ import (
 	"github.com/division-sh/swarm/internal/channelonboarding"
 	"github.com/division-sh/swarm/internal/cliapp"
 	"github.com/division-sh/swarm/internal/operatorchannel"
+	"github.com/division-sh/swarm/internal/operatorread"
 	"github.com/division-sh/swarm/internal/testutil"
+	"go.mau.fi/whatsmeow/types"
 )
 
 type firstConnectCheckpointKey struct{}
@@ -232,7 +234,138 @@ func TestChannelConnectWhatsAppRegistersAccountBothStores(t *testing.T) {
 				if connections != 2 || logins != 1 || uploads != 1 {
 					t.Fatalf("pairing/login ownership: connections=%d logins=%d uploads=%d", connections, logins, uploads)
 				}
+				if !serving {
+					requireOfflinePairedWhatsAppServiceRoundTrip(t, opts, peer, op)
+				}
 			})
 		}
+	}
+}
+
+// Only the external WhatsApp service is mocked. Pairing, boot adoption, authored
+// send, encrypted customer ingress and restart use their ordinary owners.
+func requireOfflinePairedWhatsAppServiceRoundTrip(t *testing.T, opts cliapp.ServeOptions, peer *serveNativeProtocolPeer, registered channelonboarding.Operation) {
+	t.Helper()
+	source := t.TempDir()
+	copyReleaseFixtureTree(t, opts.SourceRoot, source)
+	opts.SourceRoot = source
+	writeStandingCandidateFile(t, filepath.Join(source, "events.yaml"), "outbound.requested:\n  destination: text\n  text: text\n")
+	schema, err := os.ReadFile(filepath.Join(source, "schema.yaml"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	writeStandingCandidateFile(t, filepath.Join(source, "schema.yaml"), strings.Replace(string(schema), "    - inbound.whatsapp.raw", "    - outbound.requested\n    - inbound.whatsapp.raw", 1))
+	nodes, err := os.ReadFile(filepath.Join(source, "nodes.yaml"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	writeStandingCandidateFile(t, filepath.Join(source, "nodes.yaml"), string(nodes)+`
+service-probe:
+  execution_type: system_node
+  subscribes_to: [outbound.requested]
+  event_handlers:
+    outbound.requested:
+      activity:
+        id: service_probe
+        tool: whatsapp.send_text
+        input:
+          account: policy.operator_account
+          destination: payload.destination
+          text: payload.text
+`)
+	process := startServeRuntimeTestProcess(t, opts)
+	process.waitForReadyLine()
+	endpoint := "http://" + serveRuntimeAPIListenerFromOutput(t, process.outputString()) + "/v1/rpc"
+	peer.awaitPostLogin()
+	var runs struct {
+		Runs []operatorread.RunHeader `json:"runs"`
+	}
+	requireServedJSONRPCResult(t, endpoint, "run.list", map[string]any{"limit": 100}, &runs)
+	runID := ""
+	for _, run := range runs.Runs {
+		if run.FlowPath == "." && run.Status == "live" {
+			if runID != "" {
+				t.Fatal("service mock journey found competing live root runs")
+			}
+			runID = run.RunID
+		}
+	}
+	if runID == "" {
+		t.Fatal("service mock journey has no admitted live root run")
+	}
+	sender, customer, _ := peer.senderFrom(types.NewJID("15551234571", types.DefaultUserServer), types.NewJID("100000000005", types.HiddenUserServer))
+	const outgoing = "A successful first send before the customer's reply"
+	var published struct {
+		EventID string `json:"event_id"`
+	}
+	requireServedJSONRPCResult(t, endpoint, "event.publish", map[string]any{
+		"run_id": runID, "event_name": "outbound.requested", "idempotency_key": "service-mock-first-send",
+		"payload": map[string]any{"destination": customer.String(), "text": outgoing},
+	}, &published)
+	if published.EventID == "" {
+		t.Fatal("service mock initial send has no authored input receipt")
+	}
+	var sent servedNativeMessage
+	select {
+	case sent = <-peer.sent:
+		if sent.To.ToNonAD() != customer || sent.Body.GetConversation() != outgoing || sent.ID == "" {
+			t.Fatal("service mock did not receive the exact first send")
+		}
+	case <-time.After(5 * time.Second):
+		t.Fatal("service mock did not receive the authored first send")
+	}
+	requireServedNativeActivityResult(t, endpoint, sent.ID, customer.String(), outgoing, false)
+	const incomingID = "OFFLINE_PAIRED_FIRST_BUSINESS_REPLY"
+	const incomingText = "The customer's first reply after the successful send"
+	peer.sendEncryptedFrame(sender.EncryptReply(t, incomingText, incomingID, sent.ID, outgoing))
+	acknowledged := false
+	select {
+	case receipt := <-peer.receipts:
+		acknowledged = receipt.Attrs["id"] == incomingID && receipt.Attrs["type"] != "retry"
+	case <-time.After(5 * time.Second):
+	}
+	if !acknowledged {
+		// Keep the original failure, but still exercise the next boot. A fenced
+		// account must not gain a permissive restart just to make this test green.
+		peer.mu.Lock()
+		connections, disconnected := peer.connections, peer.disconnected
+		peer.mu.Unlock()
+		t.Errorf("service mock first inbound reply was not durably acknowledged; connections=%d disconnected=%d", connections, disconnected)
+		t.Logf("serve output after first inbound reply:\n%s", process.outputString())
+	} else {
+		select {
+		case reply := <-peer.sent:
+			if reply.To.ToNonAD() != customer || reply.Body.GetConversation() != incomingText || reply.ID == "" {
+				t.Error("service mock business reply changed its account, customer or text")
+			}
+		case <-time.After(5 * time.Second):
+			t.Error("service mock inbound reply did not reach the authored customer flow")
+		}
+	}
+	if code := process.stop(); code != 0 {
+		t.Errorf("service mock first serve shutdown exit=%d", code)
+	}
+	process = startServeRuntimeTestProcess(t, opts)
+	process.waitForReadyLine()
+	peer.awaitPostLogin()
+	endpoint = "http://" + serveRuntimeAPIListenerFromOutput(t, process.outputString())
+	config, err := os.ReadFile(opts.ConfigPath)
+	if err != nil {
+		t.Fatal(err)
+	}
+	writeStandingCandidateFile(t, opts.ConfigPath, string(config)+fmt.Sprintf("\nconnection:\n  api_server: %q\n", endpoint))
+	var listing struct {
+		Accounts []channelonboarding.Result `json:"accounts"`
+	}
+	var out, errOut bytes.Buffer
+	if code := cliapp.Execute(t.Context(), []string{"--config", opts.ConfigPath, "channel", "list", "--json"}, &out, &errOut, nil, nil, OpenChannelRegistration); code != 0 || json.Unmarshal(out.Bytes(), &listing) != nil {
+		t.Errorf("service mock restart account readback exit=%d err=%s", code, errOut.String())
+	}
+	if len(listing.Accounts) != 1 || listing.Accounts[0].Operation.OperationID != registered.OperationID ||
+		listing.Accounts[0].Operation.AccountReference != registered.AccountReference || !listing.Accounts[0].Operation.AccountConfirmed {
+		t.Error("service mock restart replaced or lost the approved deployment account")
+	}
+	if code := process.stop(); code != 0 {
+		t.Errorf("service mock restarted serve shutdown exit=%d", code)
 	}
 }
