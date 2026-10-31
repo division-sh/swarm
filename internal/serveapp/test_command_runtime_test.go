@@ -1707,9 +1707,6 @@ expect:
   events:
     include: [item.received, item.processed]
   no_dead_letters: true
-  entities:
-    - type: item
-      current_state: done
 `)
 	return sourceRoot
 }

@@ -334,7 +334,7 @@ func b17RequirePipelineReceipt(t *testing.T, ctx context.Context, db *sql.DB, ev
 
 func b17MixedNestedSource(t *testing.T) string {
 	t.Helper()
-	root := canonicalrouting.CopyNotifyAllChildrenNestedServing(t)
+	root := canonicalrouting.CopyNotifyAllChildrenNestedServing(t, "sibling-b", "sibling-a")
 	agents, err := os.ReadFile(filepath.Join(canonicalrouting.RepoRoot(t), "examples/routing/notify-all-children/account/agents.yaml"))
 	if err != nil {
 		t.Fatal(err)

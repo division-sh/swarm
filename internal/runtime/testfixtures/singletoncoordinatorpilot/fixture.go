@@ -11,7 +11,7 @@ import (
 const (
 	FlowID       = "coordinator"
 	NodeID       = "coordinator-indexer"
-	EntityType   = "coordinator_state"
+	EntityType   = "state"
 	InputEvent   = "lead.observed"
 	FlowInstance = "coordinator"
 )

@@ -22,10 +22,9 @@ func CopyConnectionPolicies(t testing.TB, reverse bool) string {
 		"worker/manifest.yaml": "version: 1.0.0\nplatform_version: '*'\n",
 		"schema.yaml":          "# fixture: edge-policy\npins:\n  inputs: [work.requested]\n  outputs: [work.ready]\nconnect:\n" + edges,
 		"events.yaml":          "work.requested:\n  creation_id: text\n  reuse_id: text\nwork.ready:\n  creation_id: text\n  reuse_id: text\n",
-		"entities.yaml":        "run: {}\n",
 		"nodes.yaml":           "relay:\n  execution_type: system_node\n  event_handlers:\n    work.requested:\n      emit:\n        event: work.ready\n        fields:\n          creation_id: payload.creation_id\n          reuse_id: payload.reuse_id\n",
 		"worker/schema.yaml":   "# fixture: worker\ninstance: worker_id\npins:\n  inputs:\n    - work.ready\n",
-		"worker/entities.yaml": "work:\n  worker_id: {type: text, _unused_reason: receiver identity}\n",
+		"worker/state.yaml":    "worker_id: text\n",
 		"worker/nodes.yaml":    "worker:\n  execution_type: system_node\n  event_handlers:\n    work.ready:\n      guard: {check: payload.creation_id != ''}\n",
 	} {
 		writeClosedVariantFile(t, root, path, source)
@@ -40,7 +39,7 @@ func CopyIntegerConnectionPolicies(t testing.TB) string {
 		applyClosedReplacement(t, filepath.Join(root, "events.yaml"), "creation_id: text", "creation_id: integer")
 		applyClosedReplacement(t, filepath.Join(root, "events.yaml"), "reuse_id: text", "reuse_id: integer")
 	}
-	applyClosedReplacement(t, filepath.Join(root, "worker/entities.yaml"), "type: text", "type: integer")
+	applyClosedReplacement(t, filepath.Join(root, "worker/state.yaml"), "worker_id: text", "worker_id: integer")
 	applyClosedReplacement(t, filepath.Join(root, "worker/nodes.yaml"), "payload.creation_id != ''", "payload.creation_id > 0")
 	return root
 }
@@ -64,7 +63,7 @@ func CopyInstanceDeclarations(t testing.TB, flows ...string) string {
 		writeClosedVariantFile(t, root, flow+"/manifest.yaml", "version: 1.0.0\nplatform_version: '*'\n")
 		writeClosedVariantFile(t, root, flow+"/manifest.yaml", "version: 1.0.0\nplatform_version: '*'\n")
 		writeClosedVariantFile(t, root, flow+"/schema.yaml", "instance: instance_key\n")
-		writeClosedVariantFile(t, root, flow+"/entities.yaml", "work:\n  instance_key: {type: text, _unused_reason: fixture instance identity}\n")
+		writeClosedVariantFile(t, root, flow+"/state.yaml", "instance_key: text\n")
 	}
 	return root
 }
@@ -80,7 +79,7 @@ func CopyMixedConnectionProjections(t testing.TB, reverse bool, intrinsic string
 		applyClosedReplacement(t, filepath.Join(root, "events.yaml"), "creation_id: text", "creation_id: uuid")
 		applyClosedReplacement(t, filepath.Join(root, "events.yaml"), "reuse_id: text", "reuse_id: uuid")
 	}
-	applyClosedReplacement(t, filepath.Join(root, "worker/entities.yaml"), "type: text", "type: uuid")
+	applyClosedReplacement(t, filepath.Join(root, "worker/state.yaml"), "worker_id: text", "worker_id: uuid")
 	return root
 }
 

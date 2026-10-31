@@ -23,7 +23,7 @@ func conversationForkConstructionBundle(t *testing.T) *contracts.WorkflowContrac
 	t.Helper()
 	files := canonicalrouting.ConversationForkConstructionDocuments()
 	files["schema.yaml"] = canonicalrouting.ConversationForkHistoryRootDocument()
-	files["events.yaml"] = "conversation.created:\n  name: text\n"
+	files["events.yaml"] = canonicalrouting.ConversationForkCreatedEventDocument()
 	return loadLifecyclePersistenceFixtureForTest(t, files)
 }
 

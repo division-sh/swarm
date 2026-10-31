@@ -24,7 +24,7 @@ func constructNativeQueryEntitiesGuardInstanceForTest(t *testing.T, fixture *Pip
 		StageDefined:    true,
 		CurrentState:    "queued",
 		Fields:          map[string]any{"validation_id": entityID, "request_id": requestID},
-		EntityType:      "validation_request",
+		EntityType:      "state",
 	})
 	instance.InitialFieldValues = cloneStringAnyMap(instance.Fields)
 	if err := fixture.Construct(ctx, instance); err != nil {
@@ -38,7 +38,7 @@ func nativeEmitPersistenceBundleForTest(t *testing.T) *runtimecontracts.Workflow
 	return loadWorkflowTempBundle(t, map[string]string{
 		"manifest.yaml": "version: 1.0.0\nplatform_version: \">=0.7.0 <0.8.0\"\n",
 		"schema.yaml":   "stages:\n  researching: {}\n  mvp_speccing: {}\n",
-		"entities.yaml": "test_entity:\n  business_brief: {type: BusinessBrief}\n",
+		"state.yaml":    "business_brief: BusinessBrief\n",
 		"types.yaml":    "types:\n  BusinessBrief:\n    summary: text\n",
 		"events.yaml":   "research.completed:\n  business_brief: BusinessBrief?\nspec.requested:\n",
 		"nodes.yaml":    "node-a:\n  execution_type: system_node\n  subscribes_to: [research.completed]\n  event_handlers:\n    research.completed:\n      advances_to: mvp_speccing\n",

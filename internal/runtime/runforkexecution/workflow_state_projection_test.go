@@ -17,6 +17,7 @@ import (
 	"github.com/division-sh/swarm/internal/runtime/core/flowidentity"
 	"github.com/division-sh/swarm/internal/runtime/correlation"
 	"github.com/division-sh/swarm/internal/runtime/effects"
+	"github.com/division-sh/swarm/internal/runtime/entityruntime"
 	"github.com/division-sh/swarm/internal/runtime/executionmode"
 	"github.com/division-sh/swarm/internal/runtime/executionposture"
 	runtimemanager "github.com/division-sh/swarm/internal/runtime/manager"
@@ -75,7 +76,7 @@ func TestSelectedContractWorkflowStateProjectionDoesNotInventUndeclaredAgentRead
 	prepared, err := runforkreadiness.Project(
 		runfork.RunForkPlan{
 			SourceRunID: selectedContractAgentTestRunID,
-			Entities:    []runfork.RunForkEntityState{selectedContractConstructedReadinessTestEntity(t, source, "worker-flow", entityID, path, "worker")},
+			Entities:    []runfork.RunForkEntityState{selectedContractConstructedReadinessTestEntity(t, source, "worker-flow", entityID, path)},
 			PendingWork: []runfork.RunForkPendingWork{{
 				EventID: eventID,
 				DeliveryRoute: events.DeliveryRoute{
@@ -125,7 +126,7 @@ func TestSelectedContractWorkflowReadinessIndependentOfAgentFrontier(t *testing.
 						t.Fatalf("declaration count = %d, want %d", len(flow.Agents), declarations)
 					}
 					plan := runfork.RunForkPlan{SourceRunID: selectedContractAgentTestRunID,
-						Entities: []runfork.RunForkEntityState{selectedContractConstructedReadinessTestEntity(t, source, flowID, "entity-1", path, "worker")}}
+						Entities: []runfork.RunForkEntityState{selectedContractConstructedReadinessTestEntity(t, source, flowID, "entity-1", path)}}
 					planning := runfork.RunForkSelectedContractRecipientPlanning{Owner: runfork.RunForkSelectedContractRecipientPlanningOwner}
 					modes := map[string]executionmode.Mode{}
 					add := func(id, name string, recipients []runfork.RunForkContractFrontierRecipient) {
@@ -194,7 +195,7 @@ func TestSelectedContractWorkflowStateProjectionUsesPlatformActivityRoutingSourc
 	entityID := flowidentity.EntityID("producer")
 	source := selectedContractReceiverReadinessSource(t, canonicalrouting.ForkReceiverOptionalAbsent).Source
 	plan := runfork.RunForkPlan{SourceRunID: selectedContractAgentTestRunID,
-		Entities: []runfork.RunForkEntityState{selectedContractConstructedReadinessTestEntity(t, source, "producer", entityID, "producer", "work")}, PendingWork: []runfork.RunForkPendingWork{{
+		Entities: []runfork.RunForkEntityState{selectedContractConstructedReadinessTestEntity(t, source, "producer", entityID, "producer")}, PendingWork: []runfork.RunForkPendingWork{{
 			EventID: "activity-event", EventName: runfork.RunForkSelectedContractPlatformActivityEvent,
 			RoutingSource: eventtest.StaticFlowRoutingSource("producer", "producer", entityID),
 		}}}
@@ -263,7 +264,7 @@ func TestSelectedContractWorkflowStateProjectionMapsRootPlatformActivityToRunSco
 	}
 	states, err := selectedContractWorkflowStateProjection(
 		runfork.RunForkPlan{SourceRunID: selectedContractAgentTestRunID,
-			Entities: []runfork.RunForkEntityState{selectedContractConstructedReadinessTestEntity(t, source, ".", selectedContractAgentTestRunID, selectedContractAgentTestRunID, "root")}, PendingWork: []runfork.RunForkPendingWork{{
+			Entities: []runfork.RunForkEntityState{selectedContractConstructedReadinessTestEntity(t, source, ".", selectedContractAgentTestRunID, selectedContractAgentTestRunID)}, PendingWork: []runfork.RunForkPendingWork{{
 				EventID: "activity-event", EventName: runfork.RunForkSelectedContractPlatformActivityEvent, RoutingSource: rootSource,
 			}}},
 		source,
@@ -283,7 +284,7 @@ func TestSelectedContractWorkflowStateProjectionPreservesExactTemplateActivityRo
 	source := selectedContractReadinessFixture(t, 0).Source
 	prepared, err := runforkreadiness.Project(
 		runfork.RunForkPlan{SourceRunID: selectedContractAgentTestRunID,
-			Entities: []runfork.RunForkEntityState{selectedContractConstructedReadinessTestEntity(t, source, "worker-flow", "entity-1", path, "worker")}, PendingWork: []runfork.RunForkPendingWork{{
+			Entities: []runfork.RunForkEntityState{selectedContractConstructedReadinessTestEntity(t, source, "worker-flow", "entity-1", path)}, PendingWork: []runfork.RunForkPendingWork{{
 				EventID: "activity-event", EventName: runfork.RunForkSelectedContractPlatformActivityEvent,
 				RoutingSource: eventtest.ConcreteTemplateRoutingSource("worker-flow", path, "entity-1"),
 			}}},
@@ -342,8 +343,10 @@ func selectedContractTestFlowOwnedSource(t *testing.T, flowID, flowInstance, ent
 	return source
 }
 
-func selectedContractConstructedReadinessTestEntity(t *testing.T, source semanticview.Source, flowID, id, path, entityType string) runfork.RunForkEntityState {
+func selectedContractConstructedReadinessTestEntity(t *testing.T, source semanticview.Source, flowID, id, path string) runfork.RunForkEntityState {
 	t.Helper()
+	contract, _ := entityruntime.ResolveForFlow(source, flowID)
+	entityType := contract.EntityType
 	scope, ok := semanticview.FlowScopeByID(source, flowID)
 	if !ok {
 		t.Fatalf("readiness fixture has no flow %s", flowID)

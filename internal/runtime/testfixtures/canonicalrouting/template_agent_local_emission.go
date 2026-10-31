@@ -10,7 +10,7 @@ func CopyTemplateAgentLocalEmission(t testing.TB) string {
 		"review/manifest.yaml": "version: 1.0.0\nplatform_version: '*'\n",
 		"schema.yaml":          "# fixture: local-agent-emission\npins:\n  outputs: [assessment.reported]\nconnect:\n  - {event: assessment.reported, from: review, to: .}\n",
 		"review/schema.yaml":   "# fixture: review\ninstance: instance_key\npins:\n  outputs: [assessment.reported]\n",
-		"review/entities.yaml": "review:\n  instance_key: {type: text, _unused_reason: constructor identity}\n",
+		"review/state.yaml":    "instance_key: text\n",
 		"review/events.yaml":   "assessment.reported:\n",
 		"review/agents.yaml":   "reviewer:\n  model: regular\n  intent: {inline: Report the assessment.}\n  emit_events: [assessment.reported]\n",
 		"review/nodes.yaml":    "review-finalize:\n  execution_type: system_node\n  event_handlers:\n    assessment.reported:\n      guard: {id: observed, check: true}\n",

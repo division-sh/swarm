@@ -2,14 +2,15 @@ package platformcontext
 
 import "strings"
 
-const EntityRoot = "_entity"
+const EntityRoot = "instance"
 
-func EntityMetadata(entityID, currentState, flowInstance string, gates map[string]bool) map[string]any {
+func EntityMetadata(entityID, currentState, flowInstance string) map[string]any {
 	out := map[string]any{
-		"id":            strings.TrimSpace(entityID),
-		"current_state": strings.TrimSpace(currentState),
-		"flow_instance": strings.TrimSpace(flowInstance),
-		"gates":         boolMapToAnyMap(gates),
+		"id":   strings.TrimSpace(entityID),
+		"path": strings.TrimSpace(flowInstance),
+	}
+	if stage := strings.TrimSpace(currentState); stage != "" {
+		out["stage"] = stage
 	}
 	return out
 }
@@ -30,18 +31,4 @@ func LegacyEntityMetadataField(field string) bool {
 	default:
 		return false
 	}
-}
-
-func boolMapToAnyMap(in map[string]bool) map[string]any {
-	if len(in) == 0 {
-		return map[string]any{}
-	}
-	out := make(map[string]any, len(in))
-	for key, value := range in {
-		key = strings.TrimSpace(key)
-		if key != "" {
-			out[key] = value
-		}
-	}
-	return out
 }

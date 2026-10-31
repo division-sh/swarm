@@ -42,8 +42,8 @@ func nativeHumanTaskRoutingFixtureForTest(t *testing.T, backend string, global b
 	bundle := loadWorkflowTempBundle(t, map[string]string{
 		"manifest.yaml": "version: 1.0.0\nplatform_version: \">=0.7.0 <0.8.0\"\n",
 		"schema.yaml":   "stages:\n  active: {}\n",
-		"entities.yaml": "test_entity: {}\n",
-		"events.yaml":   "provider.requested:\nmailbox.card_decided:\nmailbox.card_deferred:\nmailbox.card_expired:\nhuman_task.approved:\nhuman_task.rejected:\nhuman_task.deferred:\nhuman_task.expired:\n",
+
+		"events.yaml": "provider.requested:\nmailbox.card_decided:\nmailbox.card_deferred:\nmailbox.card_expired:\nhuman_task.approved:\nhuman_task.rejected:\nhuman_task.deferred:\nhuman_task.expired:\n",
 	})
 	fixture, pc, ctx := nativePilotPipelineForTest(t, backend, bundle, open)
 	if err := fixture.Construct(ctx, constructedScenarioInstanceForTest(t, pc.SemanticSource(), ctx, ".")); err != nil {

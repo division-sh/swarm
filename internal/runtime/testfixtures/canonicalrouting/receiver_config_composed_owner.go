@@ -11,7 +11,7 @@ func CopyReceiverConfigComposedOwner(t testing.TB) string {
 		"manifest.yaml":        "version: 1.0.0\nplatform_version: '*'\n",
 		"review/manifest.yaml": "version: 1.0.0\nplatform_version: '*'\n",
 		"schema.yaml":          "# fixture: typed-owner-matrix\nstages:\n  pending: {}\n  review: {}\n  done: {}\npins:\n  outputs:\n    - items.child\nconnect:\n  - {event: items.child, from: ., to: review, resolution: select-or-create}\n",
-		"entities.yaml":        "root:\n  account_id: string\n  handled: boolean\n",
+		"state.yaml":           "account_id: string\nhandled: boolean\n",
 		"events.yaml":          "request:\nitems.ready:\n  items: [string]\nitems.child:\n  request_id: string\n  label: string\n  nested: json\n",
 		"nodes.yaml": `fan-out-source:
   execution_type: system_node
@@ -47,9 +47,9 @@ pins:
   inputs:
     - items.child
 `,
-		"review/entities.yaml": "review_item:\n  request_id: string\n  label: text\n  nested: json\n  enabled: {type: boolean, initial: true}\n",
-		"review/events.yaml":   "task.started:\n",
-		"review/nodes.yaml":    "receiver:\n  execution_type: system_node\n  subscribes_to: [items.child]\n  event_handlers:\n    items.child:\n      guard: {check: true}\n",
+		"review/state.yaml":  "request_id: string\nlabel: text\nnested: json\nenabled: true\n",
+		"review/events.yaml": "task.started:\n",
+		"review/nodes.yaml":  "receiver:\n  execution_type: system_node\n  subscribes_to: [items.child]\n  event_handlers:\n    items.child:\n      guard: {check: true}\n",
 	} {
 		writeClosedVariantFile(t, root, name, content)
 	}

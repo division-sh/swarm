@@ -6,7 +6,7 @@ events:
 root constructor: (no arguments)
 flows:
   - account (template)
-    primary entity: account_state
+    primary entity: state
     instance: field=account_id identity=run + flow + instance_key
     constructor: account.ready key=account_id supplied=[]
   - producer (static)
@@ -28,4 +28,4 @@ routing topology: routing-topology/v1
   boundary exposures:
     - producer/account.ready: producer.producer-node -> output producer.account.ready
 diagnostics:
-  - [INFO] entity_reader_coverage @ account/schema.yaml: flow account entity_type account_state declares field account_id with no detected internal reader coverage
+  - [INFO] entity_reader_coverage @ account/schema.yaml: flow account entity_type state declares field account_id with no detected internal reader coverage

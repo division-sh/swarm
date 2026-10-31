@@ -39,7 +39,7 @@ func VerifyNativeGuardTerminationVerifiedExecutionAndRestartBothStoresForTest(t 
 			"manifest.yaml": "version: 1.0.0\nplatform_version: \">=0.7.0 <0.8.0\"\n",
 			"schema.yaml":   "stages:\n  ready: {}\n  " + target + ": {final: true}\npins:\n  inputs: [kill]\n",
 			"events.yaml":   "kill:\n",
-			"entities.yaml": "test_entity:\n  marker: text\n",
+			"state.yaml":    "marker: text\n",
 			"nodes.yaml":    "router:\n  execution_type: system_node\n  subscribes_to: [kill]\n  event_handlers:\n    kill:\n" + tc.guard + advance + "      data_accumulation:\n        writes:\n          - {target_field: marker, value: \"skipped\"}\n",
 		}
 		root := t.TempDir()

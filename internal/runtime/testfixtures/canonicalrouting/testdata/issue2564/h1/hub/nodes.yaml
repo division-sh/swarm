@@ -14,5 +14,5 @@ hub-node:
     hub.bump:
       data_accumulation:
         writes:
-          - {target_field: count, value: entity.count + 1}
+          - {target_field: count, value: state.count + 1}
     hub.close: {advances_to: closed}

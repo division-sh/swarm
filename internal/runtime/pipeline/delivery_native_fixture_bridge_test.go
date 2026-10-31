@@ -236,7 +236,7 @@ func VerifyPipelineDeliveryNativeRecipePreservesExactStoreAndAuthorityForTest(t 
 				t.Fatal(err)
 			}
 			if err := fixture.Construct(ctx, materializedWorkflowInstanceForSource(t, pc.SemanticSource(), ctx, WorkflowInstance{
-				InstanceID: run, StorageRef: run, EntityID: run, EntityType: "test_entity", WorkflowName: ".",
+				InstanceID: run, StorageRef: run, EntityID: run, WorkflowName: ".",
 				WorkflowVersion: bundle.WorkflowVersion(), CurrentState: "queued", Fields: map[string]any{},
 			})); err != nil {
 				t.Fatal(err)

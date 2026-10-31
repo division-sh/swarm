@@ -22,7 +22,7 @@ func VerifySupportedHandlerAppendEmitReadbackAndRollbackBothStoresForTest(t *tes
 					"manifest.yaml": "version: 1.0.0\nplatform_version: \">=0.7.0 <0.8.0\"\n",
 					"schema.yaml":   "stages:\n  active: {}\n  done: {final: true}\n",
 					"types.yaml":    "types:\n  Finding:\n    summary: text\n",
-					"entities.yaml": "work:\n  findings: {type: '[Finding]', initial: []}\n  status: {type: text, initial: pending}\n",
+					"state.yaml":    "findings: [Finding]\nstatus: \"pending\"\n",
 					"events.yaml":   "finding.received:\n  summary: text\n  status: text\nfinding.recorded:\n  status: text\n",
 					"nodes.yaml": `writer:
   execution_type: system_node
@@ -32,7 +32,7 @@ func VerifySupportedHandlerAppendEmitReadbackAndRollbackBothStoresForTest(t *tes
       data_accumulation:
         writes:
           - op: append
-            target: entity.findings
+            target: state.findings
             value:
               summary: payload.summary
           - source_field: status
@@ -40,7 +40,7 @@ func VerifySupportedHandlerAppendEmitReadbackAndRollbackBothStoresForTest(t *tes
       emit:
         event: finding.recorded
         fields:
-          status: entity.status
+          status: state.status
 `,
 				})
 				bundle, ok := semanticview.Bundle(source)
@@ -63,7 +63,7 @@ func VerifySupportedHandlerAppendEmitReadbackAndRollbackBothStoresForTest(t *tes
 				at := time.Now().UTC()
 				if err := fixture.Construct(ctx, WorkflowInstance{
 					InstanceID: runID, StorageRef: runID, EntityID: runID,
-					EntityType: "work", WorkflowName: semanticview.RootExecutionFlowID(source), WorkflowVersion: source.WorkflowVersion(), Mode: "static",
+					EntityType: "state", WorkflowName: semanticview.RootExecutionFlowID(source), WorkflowVersion: source.WorkflowVersion(), Mode: "static",
 					CurrentState: "active", StageDefined: true, Status: "active", Fields: fields, CreatedAt: at, EnteredStageAt: at, UpdatedAt: at,
 				}); err != nil {
 					t.Fatal(err)

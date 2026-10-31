@@ -16,13 +16,13 @@ import (
 func TestExecutionFrameSchemaBindingUsesExactDeclarationScope(t *testing.T) {
 	root := t.TempDir()
 	for path, raw := range map[string]string{
-		"schema.yaml":         "stages: []\n",
-		"entities.yaml":       "subject:\n  threshold: boolean\n",
-		"left/schema.yaml":    "stages: []\n",
-		"left/entities.yaml":  "subject:\n  threshold: integer\n",
-		"right/schema.yaml":   "stages: []\n",
-		"right/entities.yaml": "subject:\n  threshold: text\n",
-		"empty/schema.yaml":   "stages: []\n", "manifest.yaml": "version: 1.0.0\nplatform_version: '*'\n", "left/manifest.yaml": "version: 1.0.0\nplatform_version: '*'\n", "right/manifest.yaml": "version: 1.0.0\nplatform_version: '*'\n", "empty/manifest.yaml": "version: 1.0.0\nplatform_version: '*'\n",
+		"schema.yaml":       "stages: []\n",
+		"state.yaml":        "threshold: boolean\n",
+		"left/schema.yaml":  "stages: []\n",
+		"left/state.yaml":   "threshold: integer\n",
+		"right/schema.yaml": "stages: []\n",
+		"right/state.yaml":  "threshold: text\n",
+		"empty/schema.yaml": "stages: []\n", "manifest.yaml": "version: 1.0.0\nplatform_version: '*'\n", "left/manifest.yaml": "version: 1.0.0\nplatform_version: '*'\n", "right/manifest.yaml": "version: 1.0.0\nplatform_version: '*'\n", "empty/manifest.yaml": "version: 1.0.0\nplatform_version: '*'\n",
 	} {
 		full := filepath.Join(root, path)
 		if err := os.MkdirAll(filepath.Dir(full), 0700); err != nil {
@@ -44,13 +44,13 @@ func TestExecutionFrameSchemaBindingUsesExactDeclarationScope(t *testing.T) {
 		want                               any
 		refuse                             bool
 	}{
-		{"root", ".", "", "entity.threshold", map[string]any{"threshold": true}, true, false},
-		{"child_integer", "left", "left", "entity.threshold + 1", map[string]any{"threshold": int64(75)}, int64(76), false},
-		{"concrete_execution", "left", "left/instance-proof", "entity.threshold + 1", map[string]any{"threshold": int64(75)}, int64(76), false},
-		{"same_name_sibling", "right", "right", `entity.threshold + "!"`, map[string]any{"threshold": "ready"}, "ready!", false},
-		{"wrong_sibling_type", "right", "left", "entity.threshold + 1", map[string]any{"threshold": int64(75)}, nil, true},
-		{"missing_schema", "empty", "left", "entity.threshold + 1", map[string]any{"threshold": int64(75)}, nil, true},
-		{"undeclared_field", "left", "left", "entity.unknown + 1", map[string]any{"unknown": int64(75)}, nil, true},
+		{"root", ".", "", "state.threshold", map[string]any{"threshold": true}, true, false},
+		{"child_integer", "left", "left", "state.threshold + 1", map[string]any{"threshold": int64(75)}, int64(76), false},
+		{"concrete_execution", "left", "left/instance-proof", "state.threshold + 1", map[string]any{"threshold": int64(75)}, int64(76), false},
+		{"same_name_sibling", "right", "right", `state.threshold + "!"`, map[string]any{"threshold": "ready"}, "ready!", false},
+		{"wrong_sibling_type", "right", "left", "state.threshold + 1", map[string]any{"threshold": int64(75)}, nil, true},
+		{"missing_schema", "empty", "left", "state.threshold + 1", map[string]any{"threshold": int64(75)}, nil, true},
+		{"undeclared_field", "left", "left", "state.unknown + 1", map[string]any{"unknown": int64(75)}, nil, true},
 		{"entityless", "empty", "empty", "1 + 1", nil, int64(2), false},
 	} {
 		t.Run(tc.name, func(t *testing.T) {

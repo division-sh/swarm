@@ -42,8 +42,8 @@ func VerifyWorkflowTimerCauseReplayEngineConsumersOnBothStoresForTest(t *testing
 					files := map[string]string{
 						"manifest.yaml": "version: 1.0.0\nplatform_version: \">=0.7.0 <0.8.0\"\n",
 						"schema.yaml":   "stages:\n  waiting: {}\n",
-						"entities.yaml": "test_entity: {}\n", "events.yaml": "timer.arm:\ntimer.elapsed:\n",
-						"nodes.yaml": "observer:\n  execution_type: system_node\n  event_handlers:\n    timer.arm: {}\n",
+						"events.yaml":   "timer.arm:\ntimer.elapsed:\n",
+						"nodes.yaml":    "observer:\n  execution_type: system_node\n  event_handlers:\n    timer.arm: {}\n",
 					}
 					if kind == workflowTimerCauseEvent {
 						files["nodes.yaml"] += "  timers:\n    - {id: event.timeout, event: timer.elapsed, start_on: 'event:timer.arm', delay: 1h}\n"
@@ -63,7 +63,7 @@ func VerifyWorkflowTimerCauseReplayEngineConsumersOnBothStoresForTest(t *testing
 					at := canonicalWorkflowTimerTime(time.Now().Add(-2 * time.Hour))
 					identity := testRunScopedWorkflowInstanceFromContext(f.Context, runID)
 					instance := workflowTimerMaterializedInstance(t, f.Coordinator.SemanticSource(), f.Context, entityID, runID, WorkflowInstance{
-						WorkflowVersion: f.Coordinator.SemanticSource().WorkflowVersion(), EntityType: "test_entity", CurrentState: initialStage,
+						WorkflowVersion: f.Coordinator.SemanticSource().WorkflowVersion(), CurrentState: initialStage,
 						CreatedAt: at, EnteredStageAt: at,
 					})
 					attempt, readiness := f.CommitConstruction(f.Context, identity, instance, at)

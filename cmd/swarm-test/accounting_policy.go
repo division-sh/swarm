@@ -338,6 +338,7 @@ func accountingClosure(ctx context.Context, root string) ([]accountingInput, err
 		paths[path] = true
 	}
 	paths["scripts/rewrite-stages-2566/formatproof/testdata/original.go.txt"] = true
+	paths["scripts/rewrite-stages-2566/formatproof/testdata/approved.go.txt"] = true
 	var inputs []accountingInput
 	for path := range paths {
 		info, err := os.Lstat(filepath.Join(root, path))

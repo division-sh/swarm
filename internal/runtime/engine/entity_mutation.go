@@ -3,7 +3,6 @@ package engine
 import (
 	"fmt"
 
-	"github.com/division-sh/swarm/internal/runtime/accprojection"
 	"github.com/division-sh/swarm/internal/runtime/entityruntime"
 )
 
@@ -23,29 +22,6 @@ func (e *Executor) appendEntityMutation(frame *executionFrame, op entityruntime.
 		return err
 	}
 	frame.state.State.StateCarrier.Fields = frame.entityMutations.Draft()
-	return nil
-}
-
-func (e *Executor) resetNodeEntityProjections(frame *executionFrame) error {
-	if !frame.req.Node.Valid() {
-		return fmt.Errorf("accumulator_state reset requires a current node")
-	}
-	result := accprojection.Resolve(e.deps.Source)
-	for _, issue := range result.Issues {
-		if issue.SourceNode.Key() == frame.req.Node.Key() {
-			return fmt.Errorf("accumulator reset projection: %s", issue.Message)
-		}
-	}
-	for _, binding := range result.Bindings {
-		if binding.SourceNode.Key() != frame.req.Node.Key() {
-			continue
-		}
-		if err := e.appendEntityMutation(frame, entityruntime.Mutation{
-			Target: "entity." + binding.TargetField, Value: []any{}, ProjectionSource: binding.TargetDecl.MaterializeFrom,
-		}); err != nil {
-			return err
-		}
-	}
 	return nil
 }
 

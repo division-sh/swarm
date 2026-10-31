@@ -9,7 +9,7 @@ numeric_feed:
   event: item.registered
   receiver_flow: registry
   receiver_node: registry-intake
-  receiver_type: item
+  receiver_type: state
   receiver_stage: registered
   state_fields: [batch_id, item_id, label, region, source_ref, openings, tags, origin, score, qualified]
   optional_event_fields: [note]

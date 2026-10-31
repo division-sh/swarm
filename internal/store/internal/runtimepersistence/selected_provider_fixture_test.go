@@ -49,7 +49,6 @@ func selectedProviderCompletionSourceForTest(t *testing.T) semanticview.Source {
 	writeStateOnlyAcquisitionFixtureFile(t, filepath.Join(root, "global/manifest.yaml"), "version: 1.0.0\nplatform_version: '*'\n")
 	writeStateOnlyAcquisitionFixtureFile(t, filepath.Join(root, "global/manifest.yaml"), "version: 1.0.0\nplatform_version: '*'\n")
 	writeStateOnlyAcquisitionFixtureFile(t, filepath.Join(root, "global/schema.yaml"), "stages:\n  active: {}\n  done: {final: true}\n")
-	writeStateOnlyAcquisitionFixtureFile(t, filepath.Join(root, "global/entities.yaml"), "receiver: {}\n")
 	writeStateOnlyAcquisitionFixtureFile(t, filepath.Join(root, "events.yaml"), "test.grant_receiver:\n")
 	compiled, err := contracts.LoadWorkflowContractBundleWithOverrides(pipeline.WorkflowRepoRoot(), root, contracts.DefaultPlatformSpecFile(pipeline.WorkflowRepoRoot()))
 	if err != nil {

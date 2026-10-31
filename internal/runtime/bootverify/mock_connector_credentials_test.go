@@ -419,7 +419,7 @@ func scopedAliasMockConnectorFixtureOptions(t *testing.T, includeLive, includeIn
 	root := t.TempDir()
 	writeBootverifyFixtureFile(t, filepath.Join(root, "manifest.yaml"), "version: 1.0.0\nplatform_version: '*'\n")
 	writeBootverifyFixtureFile(t, filepath.Join(root, "schema.yaml"), "stages: []\n")
-	writeBootverifyFixtureFile(t, filepath.Join(root, "entities.yaml"), "item:\n  item_id: string\n")
+	writeBootverifyFixtureFile(t, filepath.Join(root, "state.yaml"), "item_id: string\n")
 	writeScopedReachabilityAgentFile(t, filepath.Join(root, "agents.yaml"), "root-mock", "mocks/root-mock.py", false)
 	writeBootverifyFixtureFile(t, filepath.Join(root, "mocks", "root-mock.py"), "def handle(input):\n    return {'text': 'mock'}\n")
 	writeBootverifyFixtureFile(t, filepath.Join(root, "nodes.yaml"), `

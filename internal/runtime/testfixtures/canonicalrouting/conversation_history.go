@@ -8,9 +8,13 @@ func ConversationForkConstructionDocuments() map[string]string {
 	return map[string]string{
 		"flow/manifest.yaml": "version: 1.0.0\nplatform_version: '*'\n",
 		"flow/schema.yaml":   "instance: name\nstages:\n  draft: {}\n  after: {}\npins:\n  inputs: [conversation.created]\n",
-		"flow/entities.yaml": "default:\n  name: text\n  current_state: {type: 'text?', _unused_reason: Fixed historical same-spelling business-field witness.}\n  gates: {type: 'json?', _unused_reason: Fixed historical same-spelling business-field witness.}\n  accumulator: {type: 'json?', _unused_reason: Fixed historical same-spelling business-field witness.}\n  bookkeeping: {type: 'json?', _unused_reason: Fixed historical same-spelling business-field witness.}\n",
+		"flow/state.yaml":    "name: text\ncurrent_state: text?\ngates: json?\naccumulator: json?\nbookkeeping: json?\n",
 		"flow/nodes.yaml":    "advance:\n  execution_type: system_node\n  event_handlers:\n    conversation.created:\n      advances_to: after\n", "manifest.yaml": "version: 1.0.0\nplatform_version: '*'\n",
 	}
+}
+
+func ConversationForkCreatedEventDocument() string {
+	return "conversation.created:\n  name: text\n  current_state: text?\n  gates: json?\n  accumulator: json?\n  bookkeeping: json?\n"
 }
 
 func ConversationForkHistoryRootDocument() string {
@@ -22,7 +26,7 @@ func CopyConversationForkHistory(t testing.TB) string {
 	root := t.TempDir()
 	writeClosedVariantFile(t, root, "manifest.yaml", "version: 1.0.0\nplatform_version: '*'\n")
 	writeClosedVariantFile(t, root, "schema.yaml", ConversationForkHistoryRootDocument())
-	writeClosedVariantFile(t, root, "events.yaml", "conversation.created:\n  name: text\n")
+	writeClosedVariantFile(t, root, "events.yaml", ConversationForkCreatedEventDocument())
 	addConversationForkConstruction(t, root)
 	return root
 }

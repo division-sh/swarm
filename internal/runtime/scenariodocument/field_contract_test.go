@@ -40,7 +40,7 @@ func TestAllPublicFieldContracts(t *testing.T) {
 		{151, "ordinary", "expect.entities.0.fields", "object", false, object(`{"id":"x"}`)},
 		{152, "ordinary", "expect.entities.0.gates", "object", false, object(`{"approved":true}`)},
 		{153, "ordinary", "expect.entities.0.ref", "text", false, "item"},
-		{154, "ordinary", "expect.entities.0.type", "text", false, "task"},
+		{154, "ordinary", "expect.entities.0.flow", "text", false, "."},
 		{155, "ordinary", "expect.events", "events", false, object(`{"include":["request"]}`)},
 		{156, "ordinary", "expect.events.exact", "list", false, object(`["request"]`)},
 		{157, "ordinary", "expect.events.include", "list", false, object(`["request"]`)},
@@ -160,7 +160,7 @@ func fieldShapeAccepted(kind string, required bool, shape string) bool {
 
 func fieldContractFixture(t *testing.T, branch string) map[string]any {
 	t.Helper()
-	raw := `{"name":"scenario","setup":{"entities":[{"as":"item","type":"task"}]},"steps":[{"publish":"request","payload":{}}],"expect":{"events":{},"entities":[{"ref":"item","type":"task","current_state":"ready","fields":{}}]},"invalid":{"base":{"publish":"request","payload":{}},"cases":[{"set":{}}]}}`
+	raw := `{"name":"scenario","setup":{"entities":[{"as":"item","type":"task"}]},"steps":[{"publish":"request","payload":{}}],"expect":{"events":{},"entities":[{"ref":"item","flow":".","current_state":"ready","fields":{}}]},"invalid":{"base":{"publish":"request","payload":{}},"cases":[{"set":{}}]}}`
 	if branch == "derive" {
 		raw = `{"name":"profile","derive":{"flow":".","input":"request","payload":{"generate":true}},"connector_responses":{"tool":{}}}`
 	}
@@ -171,7 +171,7 @@ func fieldContractFixture(t *testing.T, branch string) map[string]any {
 		raw = `{"steps":[{"mailbox.defer":{"match":{"anchor_kind":"stage_gate"},"until":"2030-01-01T00:00:00Z"}}]}`
 	}
 	if branch == "count" {
-		raw = `{"steps":[{"publish":"request","payload":{}}],"expect":{"entities":[{"type":"task","count":0}]}}`
+		raw = `{"steps":[{"publish":"request","payload":{}}],"expect":{"entities":[{"flow":".","count":0}]}}`
 	}
 	if branch == "target" {
 		raw = `{"steps":[{"publish":"request","payload":{},"target_flow_instance":".","target_entity_id":"entity"}]}`

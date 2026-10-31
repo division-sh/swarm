@@ -8,9 +8,9 @@ import (
 // CopyNotifyAllChildrenNestedServing keeps the production example's root
 // ingress and direct barrier, then makes each account a genuine child producer.
 // Task identities repeat across account siblings but own distinct nested state.
-func CopyNotifyAllChildrenNestedServing(t testing.TB) string {
+func CopyNotifyAllChildrenNestedServing(t testing.TB, membership ...string) string {
 	t.Helper()
-	root := CopyNotifyAllChildren(t, NotifyAllChildrenOptions{FanOutDeliveryBarrier: true})
+	root := CopyNotifyAllChildren(t, NotifyAllChildrenOptions{FanOutDeliveryBarrier: true, InitialMembership: &membership})
 	applyClosedReplacement(t, filepath.Join(root, "schema.yaml"), "    - portfolio.notify.requested\n  outputs:\n", "    - portfolio.notify.requested\n    - account.tasks.completed\n    - account.task.completed\n  outputs:\n")
 	applyClosedReplacement(t, filepath.Join(root, "schema.yaml"), "    - portfolio.notify.requested\nconnect:\n", "    - portfolio.notify.requested\n    - account.tasks.completed\n    - account.task.completed\nconnect:\n")
 	applyClosedReplacement(t, filepath.Join(root, "schema.yaml"), "  - event: account.notify.requested\n    from: portfolio\n    to: account\n    resolution: select\n", "  - event: account.notify.requested\n    from: portfolio\n    to: account\n    resolution: select\n  - event: account.tasks.completed\n    from: account\n    to: .\n  - event: account.task.completed\n    from: account/task\n    to: .\n")
@@ -21,7 +21,7 @@ func CopyNotifyAllChildrenNestedServing(t testing.TB) string {
 	// This closed variant uses business system-node recipients, not the example's
 	// LLM agent that would terminate an account before its nested tasks settle.
 	removeClosedVariantFiles(t, root, "account/agents.yaml")
-	writeClosedVariantFile(t, root, "account/entities.yaml", "account_state:\n  account_id: text\n")
+	writeClosedVariantFile(t, root, "account/state.yaml", "account_id: text\n")
 	writeClosedVariantFile(t, root, "account/manifest.yaml", "version: 1.0.0\nplatform_version: '*'\n")
 	writeClosedVariantFile(t, root, "account/schema.yaml", `# fixture: account
 stages:
@@ -85,7 +85,7 @@ account.tasks.completed:
           emit:
             event: account.tasks.completed
             fields:
-              account_id: entity.account_id
+              account_id: state.account_id
               total: join.total
               succeeded: join.dispositions.succeeded
               dead_lettered: join.dispositions.dead_lettered
@@ -105,10 +105,9 @@ pins:
   outputs:
     - account.task.completed
 `)
-	writeClosedVariantFile(t, root, "account/task/entities.yaml", `task_state:
-  account_id: text
-  task: text
-  task_key: text
+	writeClosedVariantFile(t, root, "account/task/state.yaml", `account_id: text
+task: text
+task_key: text
 `)
 	writeClosedVariantFile(t, root, "account/task/events.yaml", `account.task.completed:
   account_id: text

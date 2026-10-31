@@ -30,16 +30,16 @@ func TestFlowConstructorScenarioImportCannotAcquireExecutionBothStores(t *testin
 			for _, empty := range []bool{false, true} {
 				t.Run(fmt.Sprintf("empty=%t", empty), func(t *testing.T) {
 					authoredFields := map[string]any{"marker": "recorded"}
-					entitySchema := "record:\n  marker: text\n"
+					entitySchema := "marker: text\n"
 					if empty {
 						authoredFields = map[string]any{}
-						entitySchema = "record:\n  marker: text?\n"
+						entitySchema = "marker: text?\n"
 					}
 					f := newReceiverConfigActivationFixtureWithDocuments(t, backend, false, map[string]string{
 						"manifest.yaml": "version: 1.0.0\nplatform_version: '*'\n",
 						"schema.yaml":   "stages:\n  pending: {}\n",
 						"events.yaml":   "checkpoint:\n",
-						"entities.yaml": entitySchema,
+						"state.yaml":    entitySchema,
 					}, nil)
 					owner := f.store.(interface {
 						SetupScenarioEntities(context.Context, pipeline.ScenarioSetupRequest) (pipeline.ScenarioSetupResult, error)
@@ -55,7 +55,7 @@ func TestFlowConstructorScenarioImportCannotAcquireExecutionBothStores(t *testin
 					at := time.Now().UTC().Add(-time.Minute).Truncate(time.Microsecond)
 					if _, err := owner.SetupScenarioEntities(f.ctx, pipeline.ScenarioSetupRequest{
 						RunID: runID, CreatedAt: at,
-						Entities: []pipeline.ScenarioSetupEntityRequest{{Alias: "import", EntityID: entityID, FlowInstance: ".", EntityType: "record", Fields: maps.Clone(authoredFields)}},
+						Entities: []pipeline.ScenarioSetupEntityRequest{{Alias: "import", EntityID: entityID, FlowInstance: ".", EntityType: "state", Fields: maps.Clone(authoredFields)}},
 					}); err != nil {
 						t.Fatal(err)
 					}
@@ -111,7 +111,7 @@ func TestFlowConstructorScenarioImportCannotAcquireExecutionBothStores(t *testin
 					record := stateOnlyWorkflowEngineMutationRecord(t, runID, ".", ".", entityID, "pending", 1, at)
 					record.Mode = f.bundle.FlowTree.ByID["."].Schema.EffectiveMode()
 					record.CurrentState = "pending"
-					record.EntityType = "record"
+					record.EntityType = "state"
 					record.Fields, err = json.Marshal(authoredFields)
 					if err != nil {
 						t.Fatal(err)

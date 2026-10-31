@@ -8,6 +8,3 @@ steps:
 expect:
   events:
     include: [task.finished]
-  entities:
-    - type: test_entity
-      current_state: done

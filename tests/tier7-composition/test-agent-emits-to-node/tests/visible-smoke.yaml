@@ -5,6 +5,3 @@ steps:
 expect:
   events:
     include: [task.acknowledged, task.completed, task.finalized]
-  entities:
-    - type: test_entity
-      current_state: done

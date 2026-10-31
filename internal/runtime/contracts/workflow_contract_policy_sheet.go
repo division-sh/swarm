@@ -358,7 +358,7 @@ func validatePolicySheetMonotonicityTerm(term string) error {
 }
 
 func validatePolicySheetSelector(selector, label string) error {
-	return validatePolicySheetPath(selector, label, []string{"payload", "entity", "policy", "event"})
+	return validatePolicySheetPath(selector, label, []string{"payload", "state", "instance", "policy", "event"})
 }
 
 func validatePolicySheetPath(expr, label string, allowedRoots []string) error {

@@ -293,7 +293,7 @@ func TestCreatingPredecessorNoInputBothStores(t *testing.T) {
 			t.Run(backend+"/"+shape, func(t *testing.T) {
 				documents := map[string]string{"schema.yaml": "stages: []\n", "service/schema.yaml": "stages: []\n", "manifest.yaml": "version: 1.0.0\nplatform_version: '*'\n", "service/manifest.yaml": "version: 1.0.0\nplatform_version: '*'\n"}
 				if shape == "fielded" {
-					documents["service/entities.yaml"] = "receipt:\n  marker: {type: text, initial: unchanged}\n"
+					documents["service/state.yaml"] = "marker: \"unchanged\"\n"
 				}
 				f := newReceiverConfigActivationFixtureWithDocuments(t, backend, false, documents, nil)
 				ctx, cancel := context.WithTimeout(f.ctx, 25*time.Second)

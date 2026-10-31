@@ -265,10 +265,8 @@ stages:
   awaiting: {}
   done: {final: true}
 `)
-		writeBootverifyFixtureFile(t, filepath.Join(root, flow, "entities.yaml"), `
-item:
-  expected: {type: "[text]", initial: []}
-  window: {type: text, initial: window}
+		writeBootverifyFixtureFile(t, filepath.Join(root, flow, "state.yaml"), `expected: [text]
+window: "window"
 `)
 		writeBootverifyFixtureFile(t, filepath.Join(root, flow, "events.yaml"), `
 direct:

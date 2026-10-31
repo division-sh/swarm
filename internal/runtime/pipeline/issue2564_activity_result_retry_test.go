@@ -359,7 +359,7 @@ func issue2564M25Bundle(t *testing.T, serverURL, success string, ruleActivity bo
 	return loadPipelineLifecycleFixtureBundle(t, map[string]string{
 		"manifest.yaml": "version: 1.0.0\nplatform_version: \">=0.7.0 <0.8.0\"\n",
 		"schema.yaml":   "stages: {pending: {}}\n",
-		"entities.yaml": "test_entity:\n  local: {type: integer, initial: 0}\n  folded: {type: integer, initial: 0}\n  received: {type: integer, initial: 0}\n  title: text\n",
+		"state.yaml":    "local: 0\nfolded: 0\nreceived: 0\ntitle: text\n",
 		"events.yaml":   "source.requested: {url: text}\n",
 		"nodes.yaml": fmt.Sprintf(`scanner:
   execution_type: system_node
@@ -377,8 +377,8 @@ consumer:
           data_accumulation:
             writes:
               - {target_field: title, value: payload.result.title}
-              - {target_field: folded, value: entity.local + 1}
-              - {target_field: received, value: entity.received + 1}
+              - {target_field: folded, value: state.local + 1}
+              - {target_field: received, value: state.received + 1}
         - data_accumulation:
             writes:
               - {target_field: title, value: 'unexpected result'}

@@ -22,7 +22,7 @@ import (
 )
 
 var (
-	workflowExpressionPlatformEntityReferencePattern = regexp.MustCompile(`(^|[^a-zA-Z0-9_])_entity\.([a-zA-Z_][a-zA-Z0-9_.]*)`)
+	workflowExpressionPlatformEntityReferencePattern = regexp.MustCompile(`(^|[^a-zA-Z0-9_])instance\.([a-zA-Z_][a-zA-Z0-9_.]*)`)
 	workflowExpressionLoopRootPattern                = regexp.MustCompile(`\bloop\.`)
 )
 
@@ -408,7 +408,7 @@ func (p *PreparedValueExpression) Eval(ctx ValueContext) (ValueResult, error) {
 	}
 	if activationMap == nil {
 		activation, err := ProjectCELValue(map[string]any{
-			"entity": ctx.Entity, "_entity": ctx.PlatformEntity,
+			"state": ctx.Entity, "instance": ctx.PlatformEntity,
 			"event": ctx.Event, "payload": ctx.Payload, "policy": ctx.Policy,
 			"computed": ctx.Computed, "accumulated": ctx.Accumulated,
 			"fan_out": ctx.FanOut, "join": ctx.Join, "_loop": ctx.Loop,
@@ -1101,7 +1101,6 @@ func requireStructuralExpressionRoots(expression string, opts ValueExpressionOpt
 
 func newDataExpressionEnv(allowBareItem bool, itemAlias string, opts ValueExpressionOptions) (*cel.Env, error) {
 	variables := []cel.EnvOption{
-		cel.Variable("_entity", cel.DynType),
 		cel.Variable("event", cel.DynType),
 		cel.Variable("policy", cel.DynType),
 		cel.Variable("computed", cel.DynType),
@@ -1119,9 +1118,6 @@ func newDataExpressionEnv(allowBareItem bool, itemAlias string, opts ValueExpres
 				cel.UnaryBinding(formatR2InterpolationValue)),
 		),
 	}
-	if opts.AllowAccumulated {
-		variables = append(variables, cel.Variable("accumulated", cel.DynType))
-	}
 	variables = append(variables, workflowNumericEnvOptions()...)
 	base, err := newWorkflowExpressionEnv(append(variables, cel.OptionalTypes())...)
 	if err != nil {
@@ -1131,7 +1127,7 @@ func newDataExpressionEnv(allowBareItem bool, itemAlias string, opts ValueExpres
 	if err != nil {
 		return nil, err
 	}
-	for _, root := range []string{"entity", "join", "_loop"} {
+	for _, root := range []string{"state", "instance", "join", "_loop"} {
 		rootType, ok := provider.rootType(root)
 		if !ok {
 			rootType = cel.DynType

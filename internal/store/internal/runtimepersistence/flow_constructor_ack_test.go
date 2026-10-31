@@ -66,10 +66,10 @@ func TestFlowConstructorAcknowledgedFailureRetainsExactIdentityBothStores(t *tes
 				owner := &flowConstructorFaultOwner{fault: fault, reject: !acknowledged}
 				lifecycle := &flowConstructorLifecycleRecorder{}
 				files := map[string]string{
-					"schema.yaml":          "stages: []\n",
-					"review/schema.yaml":   "instance: request_id\nstages:\n  pending: {}\npins:\n  inputs:\n    - task.started\n",
-					"review/entities.yaml": "review_item:\n  request_id: text\n",
-					"review/events.yaml":   "task.started:\n", "manifest.yaml": "version: 1.0.0\nplatform_version: '*'\n", "review/manifest.yaml": "version: 1.0.0\nplatform_version: '*'\n",
+					"schema.yaml":        "stages: []\n",
+					"review/schema.yaml": "instance: request_id\nstages:\n  pending: {}\npins:\n  inputs:\n    - task.started\n",
+					"review/state.yaml":  "request_id: text\n",
+					"review/events.yaml": "task.started:\n", "manifest.yaml": "version: 1.0.0\nplatform_version: '*'\n", "review/manifest.yaml": "version: 1.0.0\nplatform_version: '*'\n",
 				}
 				f := newReceiverConfigActivationFixtureWithDocuments(t, backend, false, files, func(base manager.FlowInstanceActivationCommitter) manager.FlowInstanceActivationCommitter {
 					owner.owner = base
@@ -154,17 +154,17 @@ func TestFlowConstructorActivationConsumesExactInputBothStores(t *testing.T) {
 			{name: "wrong supplied type", payload: `{"request_id":"r1","brief":7}`, key: "r1", refusal: "payload"},
 			{name: "undeclared input", payload: `{"request_id":"r1","brief":"scope"}`, key: "r1", input: "unknown", refusal: "not a declared input"},
 			{name: "internal collision", payload: `{"request_id":"r1","brief":"scope","count":7}`, key: "r1", eventFields: "  count: integer\n", refusal: "collides with internal"},
-			{name: "ineligible input", payload: `{"request_id":"r1","brief":"scope"}`, key: "r1", fields: "  missing: text\n", refusal: "not definitely assigned"},
+			{name: "ineligible input", payload: `{"request_id":"r1","brief":"scope"}`, key: "r1", fields: "missing: text\n", refusal: "not definitely assigned"},
 		} {
 			t.Run(backend+"/"+test.name, func(t *testing.T) {
 				files := map[string]string{
-					"schema.yaml":          "stages: []\n",
-					"review/schema.yaml":   "instance: request_id\nstages:\n  pending: {}\npins:\n  inputs:\n    - task.started\n",
-					"review/entities.yaml": "review_item:\n  request_id: text\n  brief: text\n  note: text?\n  count: {type: integer, initial: 0}\n" + test.fields,
-					"review/events.yaml":   "task.started:\n  request_id: text\n  brief: text\n  note: text?\n  message: text?\n" + test.eventFields, "manifest.yaml": "version: 1.0.0\nplatform_version: '*'\n", "review/manifest.yaml": "version: 1.0.0\nplatform_version: '*'\n",
+					"schema.yaml":        "stages: []\n",
+					"review/schema.yaml": "instance: request_id\nstages:\n  pending: {}\npins:\n  inputs:\n    - task.started\n",
+					"review/state.yaml":  "request_id: text\nbrief: text\nnote: text?\ncount: 0\n" + test.fields,
+					"review/events.yaml": "task.started:\n  request_id: text\n  brief: text\n  note: text?\n  message: text?\n" + test.eventFields, "manifest.yaml": "version: 1.0.0\nplatform_version: '*'\n", "review/manifest.yaml": "version: 1.0.0\nplatform_version: '*'\n",
 				}
 				if test.name == "ineligible input" {
-					files["review/nodes.yaml"] = "inspect:\n  execution_type: system_node\n  event_handlers:\n    task.started:\n      guard: {check: entity.missing != ''}\n"
+					files["review/nodes.yaml"] = "inspect:\n  execution_type: system_node\n  event_handlers:\n    task.started:\n      guard: {check: state.missing != ''}\n"
 				}
 				f := newReceiverConfigActivationFixtureWithDocuments(t, backend, false, files, nil)
 				f.constructKeylessRoot(t)

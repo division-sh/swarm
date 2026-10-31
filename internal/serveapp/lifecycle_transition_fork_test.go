@@ -58,7 +58,7 @@ func runLifecycleRootForkPolicy(t *testing.T) {
 			waitServedRunDeliveryQuiescence(t, rt.ReadRunDeliveries, seed.RunID)
 			requireServedOKJSONRPC(t, rt.Endpoint, "run.pause", map[string]any{"run_id": seed.RunID, "idempotency_key": "fork-pause"})
 			frontierEvent := "loop.admit"
-			frontierPayload := map[string]any{"revision_id": readLifecycleLoop(t, rt, seed.RunID, entityID).RevisionID}
+			frontierPayload := map[string]any{"revision_id": readLifecycleLoop(t, rt.ReceiverStateReader, seed.RunID, entityID).RevisionID}
 			frontier := requireServedEventPublishRPCResult(t, rt.Endpoint, map[string]any{"event_name": frontierEvent, "run_id": seed.RunID, "source_event_id": seed.EventID, "payload": frontierPayload, "idempotency_key": "fork-frontier"})
 			waitServedEventPublishedLog(t, rt.Endpoint, seed.RunID, frontier.EventID)
 			origins = append(origins, frontier.EventID)
@@ -128,7 +128,7 @@ func requireLifecycleRootLoopForkRevision(t *testing.T, rt servedControlProofRun
 		child.CloseReason != parent.CloseReason || child.LoopID != parent.LoopID || child.RevisionField != parent.RevisionField {
 		t.Fatalf("fork loop identity/business facts: parent=%#v child=%#v", parent, child)
 	}
-	public := readLifecycleLoop(t, rt, runID, entity)
+	public := readLifecycleLoop(t, rt.ReceiverStateReader, runID, entity)
 	if public.RevisionID != child.RevisionID || public.Status != loopruntime.StatusOpen {
 		t.Fatalf("child public loop=%#v", public)
 	}

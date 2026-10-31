@@ -540,7 +540,7 @@ pins:
   inputs: [review.start, review.requested, review.retry, review.close]
 `,
 
-		"flow_a/entities.yaml": "test_entity:\n  name: {type: text, _unused_reason: retained source identity witness}\n",
+		"flow_a/state.yaml": "name: \"activity-fork-proof\"\n",
 		"flow_a/nodes.yaml": `test-node:
   execution_type: system_node
   subscribes_to: [review.start, review.requested, review.retry, review.close]
@@ -584,7 +584,7 @@ pins:
 		t.Fatal("activity fixture requires its admitted source bundle")
 	}
 	entityType, _, ok := bundle.FlowPrimaryEntityContract("flow_a")
-	if !ok || entityType != "test_entity" {
+	if !ok || entityType != "state" {
 		t.Fatalf("activity fixture must declare its producer entity in flow_a: %q, present=%v", entityType, ok)
 	}
 	return loaded

@@ -7,7 +7,7 @@ reduce-node:
       reduce:
         items_from: payload.values
         operation: sum
-        store_as: entity.total
+        store_as: state.total
       emit:
         event: values.totaled
       advances_to: done

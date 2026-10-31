@@ -47,7 +47,7 @@ func preparedFanOutFixtureWithContext(t testing.TB, incoming events.DeliveryCont
 	handler, err := rc.QualifySystemNodeHandlerRuleRefsForEvent(node, "batch.ready", rc.SystemNodeEventHandler{FanOut: &rc.FanOutSpec{
 		ItemsFrom: "payload.items", As: "row", Identity: "string(row)",
 		Emit: rc.EmitSpec{Event: "item.ready", Fields: map[string]rc.ExpressionValue{
-			"value": rc.CELExpression("row + entity.offset"), "index": rc.CELExpression("fan_out.index"), "count": rc.CELExpression("fan_out.count"),
+			"value": rc.CELExpression("row + state.offset"), "index": rc.CELExpression("fan_out.index"), "count": rc.CELExpression("fan_out.count"),
 		}},
 	}})
 	if err != nil {
@@ -78,7 +78,7 @@ func preparedFanOutFixtureWithContext(t testing.TB, incoming events.DeliveryCont
 		FlowTree:     rc.FlowTree{Root: root, ByID: map[string]*rc.FlowContractView{".": root}, ByPath: map[string]*rc.FlowContractView{".": root}},
 		Nodes:        map[string]rc.SystemNodeContract{"worker": {EventHandlers: map[string]rc.SystemNodeEventHandler{"batch.ready": handler}}},
 		Semantics:    rc.WorkflowSemanticView{Name: "root", Version: "v-test", NodeHandlers: map[string]map[string]rc.SystemNodeEventHandler{"worker": {"batch.ready": handler}}},
-		RootEntities: rc.EntityContractsDocument{"subject": {Fields: map[string]rc.EntityFieldDecl{"offset": {Type: "integer"}}}},
+		RootEntities: rc.EntityContractsDocument{"state": {Fields: map[string]rc.EntityFieldDecl{"offset": {Type: "integer"}}}},
 	}
 	// The two compiled fixture variants must not claim the same artifact.
 	fixtureRoot := t.TempDir()

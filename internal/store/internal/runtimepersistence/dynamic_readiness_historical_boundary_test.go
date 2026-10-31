@@ -25,7 +25,7 @@ func TestR7ReadinessDiagnosticsDoNotExemptLaterNativeForkConstructionBothStores(
 				"schema.yaml":               "stages: []\n",
 				"events.yaml":               "checkpoint:\n",
 				"worker/schema.yaml":        "instance: item_id\npins:\n  inputs: [item.created]\n",
-				"worker/entities.yaml":      "item:\n  item_id: text\n",
+				"worker/state.yaml":         "item_id: text\n",
 				"worker/events.yaml":        "item.created:\n  item_id: text\n",
 				"worker/detail/schema.yaml": "stages: []\n", "manifest.yaml": "version: 1.0.0\nplatform_version: '*'\n", "worker/manifest.yaml": "version: 1.0.0\nplatform_version: '*'\n", "worker/detail/manifest.yaml": "version: 1.0.0\nplatform_version: '*'\n",
 			}, nil)

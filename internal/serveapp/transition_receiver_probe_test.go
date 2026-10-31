@@ -42,19 +42,17 @@ func proveReceiverMaterializationBothStores(t *testing.T, source func(testing.TB
 					t.Fatalf("ordinary producer delivery should execute and settle: %s", status)
 				}
 				var count int
-				if err := rt.DB.QueryRow(`SELECT count(*) FROM entity_state es JOIN flow_instances fi
-ON fi.run_id=es.run_id AND fi.instance_path=es.flow_instance AND fi.entity_id=es.entity_id
-WHERE es.run_id=$1 AND fi.current_state='done'`, started.RunID).Scan(&count); err != nil {
+				if err := rt.DB.QueryRow(`SELECT count(*) FROM flow_instances WHERE run_id=$1 AND current_state='done'`, started.RunID).Scan(&count); err != nil {
 					t.Fatal(err)
 				}
 				if count != 2 {
-					t.Fatalf("ordinary producer and sink should both complete; got %d entities", count)
+					t.Fatalf("ordinary producer and sink should both complete; got %d instances", count)
 				}
 				var parentID, childID string
-				if err := rt.DB.QueryRow(`SELECT entity_id FROM entity_state WHERE run_id=$1 AND flow_instance='sink'`, started.RunID).Scan(&childID); err != nil {
+				if err := rt.DB.QueryRow(`SELECT entity_id FROM flow_instances WHERE run_id=$1 AND instance_path='sink'`, started.RunID).Scan(&childID); err != nil {
 					t.Fatal(err)
 				}
-				if err := rt.DB.QueryRow(`SELECT entity_id FROM entity_state WHERE run_id=$1 AND flow_instance<>'sink'`, started.RunID).Scan(&parentID); err != nil {
+				if err := rt.DB.QueryRow(`SELECT entity_id FROM flow_instances WHERE run_id=$1 AND instance_path=CAST($1 AS TEXT)`, started.RunID).Scan(&parentID); err != nil {
 					t.Fatal(err)
 				}
 				if childID != flowidentity.EntityID("sink") || childID == parentID {

@@ -163,7 +163,7 @@ func (eb *EventBus) validateElectedConstruction(ctx context.Context, owner runti
 		return err
 	}
 	proposed, err := runtimepinrouting.DescriptorAddressFields(activation.Instance.Fields)
-	if err != nil || actual["entity."+key] == "" || actual["entity."+key] != proposed["entity."+key] {
+	if err != nil || actual["state."+key] == "" || actual["state."+key] != proposed["state."+key] {
 		return errors.Join(err, fmt.Errorf("elected construction contradicts its selected key"))
 	}
 	return nil

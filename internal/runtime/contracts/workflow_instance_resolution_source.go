@@ -83,7 +83,7 @@ func (b *WorkflowContractBundle) resolveFlowInputInstanceSourceType(schemaProvid
 
 	receiverDecl, ok := instance.PrimaryEntity.Contract.Fields[field]
 	if !ok || strings.TrimSpace(receiverDecl.Type) == "" {
-		return FlowInputInstanceSourceTypeEvidence{}, fmt.Errorf("receiver entity.%s has no declared type", field)
+		return FlowInputInstanceSourceTypeEvidence{}, fmt.Errorf("receiver state.%s has no declared type", field)
 	}
 	evidence := FlowInputInstanceSourceTypeEvidence{
 		Field:        instance.Field,
@@ -110,7 +110,7 @@ func (b *WorkflowContractBundle) resolveFlowInputInstanceSourceType(schemaProvid
 
 	if requireCompatibility {
 		if err := requireInstanceSourceTypesCompatible(evidence.SourceType, evidence.ReceiverType); err != nil {
-			return FlowInputInstanceSourceTypeEvidence{}, fmt.Errorf("key_types_incompatible: resolution source %s type %s is incompatible with receiver entity.%s type %s: %w", source.Path, evidence.SourceType.Type, field, evidence.ReceiverType.Type, err)
+			return FlowInputInstanceSourceTypeEvidence{}, fmt.Errorf("key_types_incompatible: resolution source %s type %s is incompatible with receiver state.%s type %s: %w", source.Path, evidence.SourceType.Type, field, evidence.ReceiverType.Type, err)
 		}
 	}
 	return evidence, nil

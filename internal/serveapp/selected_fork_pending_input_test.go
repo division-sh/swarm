@@ -52,7 +52,7 @@ func TestSelectedForkPendingInputBothStores(t *testing.T) {
 				}
 				if mode == "explicit_child" {
 					var entity string
-					if err := rt.DB.QueryRow(`SELECT entity_id FROM entity_state WHERE run_id=$1 AND flow_instance='child'`, seed.RunID).Scan(&entity); err != nil {
+					if err := rt.DB.QueryRow(`SELECT entity_id FROM flow_instances WHERE run_id=$1 AND instance_path='child'`, seed.RunID).Scan(&entity); err != nil {
 						t.Fatal(err)
 					}
 					params["target"] = map[string]any{"flow_instance": "child", "entity_id": entity}
@@ -181,10 +181,10 @@ func TestExplicitTargetRestrictsConnectedSiblingsBothStores(t *testing.T) {
 			requirePendingInputStateCount(t, rt, seed.RunID, "ready", 3)
 			requireServedOKJSONRPC(t, rt.Endpoint, "run.pause", map[string]any{"run_id": seed.RunID, "idempotency_key": "target-pause"})
 			var childEntity, siblingEntity string
-			if err := rt.DB.QueryRow(`SELECT entity_id FROM entity_state WHERE run_id=$1 AND flow_instance='child'`, seed.RunID).Scan(&childEntity); err != nil {
+			if err := rt.DB.QueryRow(`SELECT entity_id FROM flow_instances WHERE run_id=$1 AND instance_path='child'`, seed.RunID).Scan(&childEntity); err != nil {
 				t.Fatal(err)
 			}
-			if err := rt.DB.QueryRow(`SELECT entity_id FROM entity_state WHERE run_id=$1 AND flow_instance='sibling'`, seed.RunID).Scan(&siblingEntity); err != nil {
+			if err := rt.DB.QueryRow(`SELECT entity_id FROM flow_instances WHERE run_id=$1 AND instance_path='sibling'`, seed.RunID).Scan(&siblingEntity); err != nil {
 				t.Fatal(err)
 			}
 			params := map[string]any{
@@ -243,22 +243,23 @@ func assertNoUnselectedTargetActivation(t *testing.T, rt servedControlProofRunti
 
 func requirePendingInputPublicStates(t *testing.T, rt servedControlProofRuntime, runID string, wantDone int) {
 	t.Helper()
-	var list operatorread.OperatorEntityListResult
-	requireServedJSONRPCResult(t, rt.Endpoint, "entity.list", map[string]any{"run_id": runID}, &list)
-	if len(list.Entities) != 2 {
-		t.Fatalf("public entity census: %+v", list)
+	var report struct {
+		Run       operatorread.RunHeader                      `json:"run"`
+		Instances []operatorread.RunInstanceOperationalStatus `json:"instances"`
+	}
+	requireServedJSONRPCResult(t, rt.Endpoint, "run.diagnose", map[string]any{"run_id": runID}, &report)
+	if report.Run.RunID != runID || len(report.Instances) != 2 {
+		t.Fatalf("public instance census: %+v", report)
 	}
 	done := 0
-	for _, entity := range list.Entities {
-		var full operatorread.OperatorEntityFull
-		requireServedJSONRPCResult(t, rt.Endpoint, "entity.get", map[string]any{"run_id": runID, "entity_id": entity.EntityID}, &full)
-		if entity.RunID != runID || !reflect.DeepEqual(entity, full.Entity) {
-			t.Fatal("public input result lost exact run/entity identity")
+	for _, instance := range report.Instances {
+		if instance.FlowInstance != runID && instance.FlowInstance != "child" {
+			t.Fatalf("public input result acquired another instance: %+v", instance)
 		}
-		if entity.CurrentState != nil && *entity.CurrentState == "done" {
+		if instance.Stage == "done" {
 			done++
-		} else if entity.CurrentState == nil || *entity.CurrentState != "ready" {
-			t.Fatalf("unexpected public state: %+v", entity)
+		} else if instance.Stage != "ready" {
+			t.Fatalf("unexpected public state: %+v", instance)
 		}
 	}
 	if done != wantDone {
@@ -269,9 +270,7 @@ func requirePendingInputPublicStates(t *testing.T, rt servedControlProofRuntime,
 func requirePendingInputStateCount(t *testing.T, rt servedControlProofRuntime, runID, state string, want int) {
 	t.Helper()
 	var count int
-	if err := rt.DB.QueryRow(`SELECT COUNT(*) FROM entity_state es JOIN flow_instances fi
-ON fi.run_id=es.run_id AND fi.instance_path=es.flow_instance AND fi.entity_id=es.entity_id
-WHERE es.run_id=$1 AND fi.current_state=$2`, runID, state).Scan(&count); err != nil {
+	if err := rt.DB.QueryRow(`SELECT COUNT(*) FROM flow_instances WHERE run_id=$1 AND current_state=$2`, runID, state).Scan(&count); err != nil {
 		t.Fatal(err)
 	}
 	if count != want {

@@ -123,7 +123,7 @@ func TestA2SameBusinessCommitTransitionArmAndPublicationOnBothStores(t *testing.
 			now := time.Now().UTC()
 			commitA2FixtureConstruction(t, pc, selected.events, ctx, owner, runtimepipeline.WorkflowInstance{
 				InstanceID: runID, StorageRef: runID, EntityID: runID, WorkflowName: source.WorkflowName(), WorkflowVersion: source.WorkflowVersion(),
-				CurrentState: "dispatching", EntityType: "join_state", Fields: map[string]any{"expected": []any{"a", "b"}},
+				CurrentState: "dispatching", EntityType: "state", Fields: map[string]any{"expected": []any{"a", "b"}},
 			}, now)
 			load := func() runtimepipeline.WorkflowInstance {
 				t.Helper()
@@ -327,9 +327,9 @@ pins:
   outputs:
     - item.completed
 `,
-		"entities.yaml": "join_state:\n  expected: [text]\n",
-		"types.yaml":    "types:\n  JoinResult:\n    value: text\n",
-		"events.yaml":   "dispatch.completed:\nitem.completed:\n  member_id: text\n  result: JoinResult\n",
+		"state.yaml":  "expected: [text]\n",
+		"types.yaml":  "types:\n  JoinResult:\n    value: text\n",
+		"events.yaml": "dispatch.completed:\nitem.completed:\n  member_id: text\n  result: JoinResult\n",
 		"nodes.yaml": `dispatcher:
   execution_type: system_node
   event_handlers:

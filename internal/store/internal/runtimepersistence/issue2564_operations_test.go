@@ -70,7 +70,7 @@ func TestIssue2564EntityOperationsReapplyAfterRealCASBothStores(t *testing.T) {
 				}
 				current := issue2564LoadOperationInstance(t, f)
 				want := issue2564OperationExpected(scenario, losses)
-				field, _, _ := strings.Cut(strings.TrimPrefix(original.Target, "entity."), ".")
+				field, _, _ := strings.Cut(strings.TrimPrefix(original.Target, "state."), ".")
 				if !reflect.DeepEqual(current.Fields[field], want) {
 					t.Fatalf("%s reapplication used a stale collection or re-resolved the index: got %#v want %#v", scenario, current.Fields[field], want)
 				}
@@ -102,14 +102,14 @@ func TestIssue2564EntityOperationsAtomicRefusalBothStores(t *testing.T) {
 		name string
 		op   entityruntime.Mutation
 	}{
-		{"negative_index", entityruntime.Mutation{Operation: "update", Target: "entity.positions", Index: -1, HasIndex: true, Value: "literal"}},
-		{"fractional_index", entityruntime.Mutation{Operation: "update", Target: "entity.positions", Index: 0.5, HasIndex: true, Value: "literal"}},
-		{"out_of_range_index", entityruntime.Mutation{Operation: "update", Target: "entity.positions", Index: 2, HasIndex: true, Value: "literal"}},
-		{"missing_index", entityruntime.Mutation{Operation: "update", Target: "entity.positions", Value: "literal"}},
-		{"wrong_append_type", entityruntime.Mutation{Operation: "append", Target: "entity.items", Value: 7}},
-		{"invalid_map_key", entityruntime.Mutation{Operation: "set", Target: "entity.labels", HasKey: true, Key: "", Value: "literal"}},
-		{"keyed_list_forbidden", entityruntime.Mutation{Operation: "set", Target: "entity.items", HasKey: true, Key: "business-id", Value: "literal"}},
-		{"source_context_mismatch", entityruntime.Mutation{Operation: "append", Target: "entity.items", Value: "literal"}},
+		{"negative_index", entityruntime.Mutation{Operation: "update", Target: "state.positions", Index: -1, HasIndex: true, Value: "literal"}},
+		{"fractional_index", entityruntime.Mutation{Operation: "update", Target: "state.positions", Index: 0.5, HasIndex: true, Value: "literal"}},
+		{"out_of_range_index", entityruntime.Mutation{Operation: "update", Target: "state.positions", Index: 2, HasIndex: true, Value: "literal"}},
+		{"missing_index", entityruntime.Mutation{Operation: "update", Target: "state.positions", Value: "literal"}},
+		{"wrong_append_type", entityruntime.Mutation{Operation: "append", Target: "state.items", Value: 7}},
+		{"invalid_map_key", entityruntime.Mutation{Operation: "set", Target: "state.labels", HasKey: true, Key: "", Value: "literal"}},
+		{"keyed_list_forbidden", entityruntime.Mutation{Operation: "set", Target: "state.items", HasKey: true, Key: "business-id", Value: "literal"}},
+		{"source_context_mismatch", entityruntime.Mutation{Operation: "append", Target: "state.items", Value: "literal"}},
 	}
 	for _, backend := range []string{"sqlite", "postgres"} {
 		for _, tc := range cases {
@@ -163,7 +163,7 @@ func TestIssue2564EntityAppendAcknowledgedCleanupDoesNotRepeatBothStores(t *test
 				t.Fatal(err)
 			}
 			defer registration.Release()
-			result, err := issue2564OperationCoordinator(f, wrapped).ApplyEntityFieldMutation(f.ctx, f.command(entityruntime.Mutation{Operation: "append", Target: "entity.items", Value: "equal"}))
+			result, err := issue2564OperationCoordinator(f, wrapped).ApplyEntityFieldMutation(f.ctx, f.command(entityruntime.Mutation{Operation: "append", Target: "state.items", Value: "equal"}))
 			if !result.Acknowledged || !errors.Is(err, cleanup) || !failures.IsStateContention(err) || int64(result.Revision) != initial.Revision+1 || wrapped.calls != 1 || wrapped.ownCommits != 1 || submits != 1 {
 				t.Fatalf("acknowledged cleanup reissued append or lost receipt: result=%+v err=%v calls=%d commits=%d handoffs=%d", result, err, wrapped.calls, wrapped.ownCommits, submits)
 			}
@@ -187,7 +187,7 @@ func TestIssue2564EntityUnacknowledgedCommitHasNoRevisionBothStores(t *testing.T
 			ctx, cancel := context.WithCancel(f.ctx)
 			defer cancel()
 			wrapped := &issue2564OperationRaceStore{workflowTestSelectedStore: f.selected, t: t, fixture: f, cancelBeforeCommit: cancel}
-			result, err := issue2564OperationCoordinator(f, wrapped).ApplyEntityFieldMutation(ctx, f.command(entityruntime.Mutation{Operation: "append", Target: "entity.items", Value: "uncommitted"}))
+			result, err := issue2564OperationCoordinator(f, wrapped).ApplyEntityFieldMutation(ctx, f.command(entityruntime.Mutation{Operation: "append", Target: "state.items", Value: "uncommitted"}))
 			if !errors.Is(err, context.Canceled) || result.Acknowledged || result.Revision != 0 || wrapped.calls != 1 || wrapped.ownCommits != 0 {
 				t.Fatalf("unacknowledged SQL commit returned a fabricated revision: result=%+v err=%v calls=%d commits=%d", result, err, wrapped.calls, wrapped.ownCommits)
 			}
@@ -208,7 +208,7 @@ func TestIssue2564CanonicalWriterEvidenceNoopRollbackForkBothStores(t *testing.T
 			wrapped := &issue2564OperationRaceStore{workflowTestSelectedStore: f.selected, t: t, fixture: f}
 			writer := issue2564OperationCoordinator(f, wrapped)
 			beforeNoop := issue2564OperationEvidenceCounts(t, f)
-			noop, err := writer.ApplyEntityFieldMutation(f.ctx, f.command(entityruntime.Mutation{Target: "entity.profile.leaf", Value: "old-leaf"}))
+			noop, err := writer.ApplyEntityFieldMutation(f.ctx, f.command(entityruntime.Mutation{Target: "state.profile.leaf", Value: "old-leaf"}))
 			if err != nil || !noop.Acknowledged {
 				t.Fatalf("canonical no-op set: %+v %v", noop, err)
 			}
@@ -221,7 +221,7 @@ func TestIssue2564CanonicalWriterEvidenceNoopRollbackForkBothStores(t *testing.T
 				t.Fatal("no-op set changed constructed fields")
 			}
 			commits := wrapped.ownCommits
-			written, err := writer.ApplyEntityFieldMutation(f.ctx, f.command(entityruntime.Mutation{Operation: "append", Target: "entity.items", Value: "fork-retained"}))
+			written, err := writer.ApplyEntityFieldMutation(f.ctx, f.command(entityruntime.Mutation{Operation: "append", Target: "state.items", Value: "fork-retained"}))
 			if err != nil || !written.Acknowledged || wrapped.ownCommits != commits+1 {
 				t.Fatalf("retained history was not written through actual SQL COMMIT: %+v %v", written, err)
 			}
@@ -255,7 +255,7 @@ func TestIssue2564CanonicalWriterEvidenceNoopRollbackForkBothStores(t *testing.T
 			issue2564InstallOperationRollback(t, f, retained.Revision)
 			beforeRollback := snapshotForkHistoricalExecutionTables(t, f.db, backend == "postgres")
 			beforeCounts := issue2564OperationEvidenceCounts(t, f)
-			failed, err := writer.ApplyEntityFieldMutation(f.ctx, f.command(entityruntime.Mutation{Operation: "append", Target: "entity.items", Value: "must-rollback"}))
+			failed, err := writer.ApplyEntityFieldMutation(f.ctx, f.command(entityruntime.Mutation{Operation: "append", Target: "state.items", Value: "must-rollback"}))
 			if err == nil || !strings.Contains(err.Error(), "issue2564_late_rollback") || failed.Acknowledged || failed.Revision != 0 {
 				t.Fatalf("late SQL rollback was not an unacknowledged refusal: %+v %v", failed, err)
 			}
@@ -286,7 +286,7 @@ func TestIssue2564EntityExplicitTerminationPreservesAcknowledgedOperationsBothSt
 				var acknowledged pipeline.EntityFieldMutationResult
 				if order == "save_then_terminate" {
 					var err error
-					acknowledged, err = writer.ApplyEntityFieldMutation(f.ctx, f.command(entityruntime.Mutation{Operation: "append", Target: "entity.items", Value: "retained"}))
+					acknowledged, err = writer.ApplyEntityFieldMutation(f.ctx, f.command(entityruntime.Mutation{Operation: "append", Target: "state.items", Value: "retained"}))
 					if err != nil || !acknowledged.Acknowledged {
 						t.Fatalf("earlier operation not acknowledged: %+v %v", acknowledged, err)
 					}
@@ -301,7 +301,7 @@ func TestIssue2564EntityExplicitTerminationPreservesAcknowledgedOperationsBothSt
 				}
 				before := snapshotForkHistoricalExecutionTables(t, f.db, backend == "postgres")
 				calls := wrapped.calls
-				result, err := writer.ApplyEntityFieldMutation(f.ctx, f.command(entityruntime.Mutation{Operation: "append", Target: "entity.items", Value: "must-not-write"}))
+				result, err := writer.ApplyEntityFieldMutation(f.ctx, f.command(entityruntime.Mutation{Operation: "append", Target: "state.items", Value: "must-not-write"}))
 				failure := failures.Normalize(err, "issue2564", "terminated_operation")
 				if err == nil || result.Acknowledged || result.Revision != 0 || failure.Class != failures.ClassAuthorizationDenied || failure.Detail.Code != "entity_target_not_active" || failures.IsStateContention(err) || wrapped.calls != calls {
 					t.Fatalf("explicitly retired target accepted/retried an operation: result=%+v failure=%+v calls=%d/%d", result, failure, wrapped.calls, calls)
@@ -329,7 +329,7 @@ func TestIssue2564EntityRunRevokedDuringCASReevaluationBothStores(t *testing.T) 
 				}
 				revoked = snapshotForkHistoricalExecutionTables(t, f.db, backend == "postgres")
 			}
-			result, err := issue2564OperationCoordinator(f, wrapped).ApplyEntityFieldMutation(f.ctx, f.command(entityruntime.Mutation{Operation: "append", Target: "entity.items", Value: "must-not-write"}))
+			result, err := issue2564OperationCoordinator(f, wrapped).ApplyEntityFieldMutation(f.ctx, f.command(entityruntime.Mutation{Operation: "append", Target: "state.items", Value: "must-not-write"}))
 			// One stale CAS is reevaluated once. The next real SQL attempt is
 			// refused by run authority, not committed or treated as contention.
 			if !errors.Is(err, runlifecycle.ErrRunNotActive) || result.Acknowledged || result.Revision != 0 || failures.IsStateContention(err) || wrapped.calls != 2 || wrapped.conflicts != 1 || wrapped.ownCommits != 0 || wrapped.rivalCommits != 1 || revoked == nil {
@@ -426,6 +426,8 @@ type issue2564OperationFixture struct {
 	artifact sourceartifact.Persisted
 }
 
+const issue2564ConstructorPayload = `{"labels":{"kept":"initial"},"profile":{"leaf":"old-leaf","sibling":"initial"}}`
+
 func newIssue2564OperationFixture(t *testing.T, backend string) issue2564OperationFixture {
 	t.Helper()
 	const flow = "operations"
@@ -434,14 +436,13 @@ func newIssue2564OperationFixture(t *testing.T, backend string) issue2564Operati
 		"events.yaml":            "operations.requested:\noperations.snapshot:\n",
 		"types.yaml":             "types:\n  OperationProfile:\n    leaf: text\n    sibling: text\n",
 		"operations/schema.yaml": "instance: receiver_key\nstages:\n  active: {}\n  done: {final: true}\npins:\n  inputs: [construct.requested]\n",
-		"operations/entities.yaml": `operation_state:
-  receiver_key: text
-  items: {type: "[text]", initial: [equal]}
-  labels: {type: 'map[text]text', initial: {kept: initial}}
-  positions: {type: "[text]", initial: [old-0, old-1]}
-  profile: {type: OperationProfile, initial: {leaf: old-leaf, sibling: initial}}
+		"operations/state.yaml": `receiver_key: text
+items: ["equal"]
+labels: map[text]text
+positions: ["old-0", "old-1"]
+profile: OperationProfile
 `,
-		"operations/events.yaml": "construct.requested:\n", "manifest.yaml": "version: 1.0.0\nplatform_version: '*'\n", "operations/manifest.yaml": "version: 1.0.0\nplatform_version: '*'\n",
+		"operations/events.yaml": "construct.requested:\n  labels: map[text]text\n  profile: OperationProfile\n", "manifest.yaml": "version: 1.0.0\nplatform_version: '*'\n", "operations/manifest.yaml": "version: 1.0.0\nplatform_version: '*'\n",
 	}, nil)
 	f.constructKeylessRoot(t)
 	runID := correlation.RunIDFromContext(f.ctx)
@@ -454,7 +455,7 @@ func newIssue2564OperationFixture(t *testing.T, backend string) issue2564Operati
 	req.Instance = child
 	req.OccurredAt = time.Now().UTC().Add(-time.Minute).Truncate(time.Microsecond)
 	req.ConstructorInput, req.ResolvedKey = "construct.requested", "receiver"
-	req.TriggerEvent = eventtest.ExistingRunRootIngress(uuid.NewString(), "construct.requested", "constructor-fixture", "", []byte(`{}`), 0, runID, events.EventEnvelope{}, req.OccurredAt)
+	req.TriggerEvent = eventtest.ExistingRunRootIngress(uuid.NewString(), "construct.requested", "constructor-fixture", "", []byte(issue2564ConstructorPayload), 0, runID, events.EventEnvelope{}, req.OccurredAt)
 	activation, err := f.manager.PrepareFlowInstanceActivation(f.ctx, req)
 	if err != nil {
 		t.Fatal(err)
@@ -619,7 +620,7 @@ func issue2564OperationPair(scenario string) (entityruntime.Mutation, func(int) 
 	var rival func(int) entityruntime.Mutation
 	switch scenario {
 	case "append_distinct", "append_equal":
-		op.Operation, op.Target = "append", "entity.items"
+		op.Operation, op.Target = "append", "state.items"
 		if scenario == "append_equal" {
 			op.Value = "equal"
 		}
@@ -631,7 +632,7 @@ func issue2564OperationPair(scenario string) (entityruntime.Mutation, func(int) 
 			return entityruntime.Mutation{Operation: "append", Target: op.Target, Value: value}
 		}
 	case "map_distinct_key", "map_same_key":
-		op.Operation, op.Target, op.HasKey, op.Key = "set", "entity.labels", true, "captured-key"
+		op.Operation, op.Target, op.HasKey, op.Key = "set", "state.labels", true, "captured-key"
 		rival = func(n int) entityruntime.Mutation {
 			key := "other-key"
 			if scenario == "map_same_key" {
@@ -640,7 +641,7 @@ func issue2564OperationPair(scenario string) (entityruntime.Mutation, func(int) 
 			return entityruntime.Mutation{Operation: "set", Target: op.Target, HasKey: true, Key: key, Value: fmt.Sprintf("rival-%d", n)}
 		}
 	case "update_distinct_index", "update_same_index", "index_fresh_replacement", "index_out_of_range_after_replacement":
-		op.Operation, op.Target, op.HasIndex, op.Index = "update", "entity.positions", true, 1
+		op.Operation, op.Target, op.HasIndex, op.Index = "update", "state.positions", true, 1
 		rival = func(n int) entityruntime.Mutation {
 			if scenario == "index_fresh_replacement" {
 				return entityruntime.Mutation{Target: op.Target, Value: []any{fmt.Sprintf("replacement-%d", n), "old-0", "old-1"}}
@@ -655,9 +656,9 @@ func issue2564OperationPair(scenario string) (entityruntime.Mutation, func(int) 
 			return entityruntime.Mutation{Operation: "update", Target: op.Target, HasIndex: true, Index: index, Value: fmt.Sprintf("rival-%d", n)}
 		}
 	case "m20_named_record_leaf":
-		op.Target = "entity.profile.leaf"
+		op.Target = "state.profile.leaf"
 		rival = func(n int) entityruntime.Mutation {
-			return entityruntime.Mutation{Target: "entity.profile.sibling", Value: fmt.Sprintf("rival-%d", n)}
+			return entityruntime.Mutation{Target: "state.profile.sibling", Value: fmt.Sprintf("rival-%d", n)}
 		}
 	}
 	return op, rival

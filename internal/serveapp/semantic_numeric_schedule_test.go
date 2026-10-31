@@ -52,7 +52,7 @@ func TestGenericScheduleSemanticPayloadExecutionParity(t *testing.T) {
 			run := uuid.NewString()
 			var setup any
 			requireServedJSONRPCResult(t, rt.Endpoint, "test.setup_entities", map[string]any{"bundle_hash": rt.BundleHash, "run_id": run, "idempotency_key": uuid.NewString(),
-				"entities": []any{map[string]any{"alias": "subject", "entity_id": run, "entity_type": "widget", "current_state": "waiting", "fields": map[string]any{"score": 0}}}}, &setup)
+				"entities": []any{map[string]any{"alias": "subject", "entity_id": run, "entity_type": "state", "current_state": "waiting", "fields": map[string]any{"score": 0}}}}, &setup)
 			route, err := events.NewRootRoutingSource(run)
 			if err != nil {
 				t.Fatal(err)

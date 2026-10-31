@@ -5,6 +5,3 @@ steps:
 expect:
   events:
     include: [admission.granted]
-  entities:
-    - type: core
-      current_state: admitted

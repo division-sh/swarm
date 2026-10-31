@@ -136,9 +136,9 @@ func TestPublicSurfaceBackendMatrixRejectsStaleReferences(t *testing.T) {
 			name: "stale api method",
 			mutate: func(matrix *publicSurfaceBackendMatrix) {
 				row := publicSurfaceMatrixRowByID(t, matrix, "entity_read_api")
-				row.APIMethods = []string{"entity.missing"}
+				row.APIMethods = []string{"state.missing"}
 			},
-			want: "entity_read_api api_method entity.missing missing from platform method_catalog",
+			want: "entity_read_api api_method state.missing missing from platform method_catalog",
 		},
 		{
 			name: "stale cli command",

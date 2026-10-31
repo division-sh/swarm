@@ -139,8 +139,8 @@ func TestAuthoredEmitSites_LowersEmitFromToCanonicalFields(t *testing.T) {
 	if matches[0].Spec.From != "" {
 		t.Fatalf("semantic view retained authored emit.from = %q", matches[0].Spec.From)
 	}
-	if expr := matches[0].Spec.Fields["scan_id"]; expr.Kind != runtimecontracts.ExpressionKindCEL || expr.CEL != "entity.scan_id" {
-		t.Fatalf("scan_id field = %#v, want CEL entity.scan_id", expr)
+	if expr := matches[0].Spec.Fields["scan_id"]; expr.Kind != runtimecontracts.ExpressionKindCEL || expr.CEL != "state.scan_id" {
+		t.Fatalf("scan_id field = %#v, want CEL state.scan_id", expr)
 	}
 	if expr := matches[0].Spec.Fields["geography"]; expr.Kind != runtimecontracts.ExpressionKindCEL || expr.CEL != "payload.geography" {
 		t.Fatalf("geography field = %#v, want CEL payload.geography", expr)
@@ -279,10 +279,7 @@ market_research.scan_assigned:
   geography:
     type: string
 `)
-	writeSemanticviewFixtureFile(t, filepath.Join(root, "entities.yaml"), `
-scan:
-  scan_id:
-    type: text
+	writeSemanticviewFixtureFile(t, filepath.Join(root, "state.yaml"), `scan_id: text
 `)
 	writeSemanticviewFixtureFile(t, filepath.Join(root, "nodes.yaml"), `
 dispatcher:
@@ -291,7 +288,7 @@ dispatcher:
     scan.corpus_dispatch:
       emit:
         event: market_research.scan_assigned
-        from: entity
+        from: state
         fields:
           geography: payload.geography
 `)
