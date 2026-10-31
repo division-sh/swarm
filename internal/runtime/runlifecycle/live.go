@@ -2,6 +2,7 @@ package runlifecycle
 
 import (
 	"context"
+	"errors"
 	"fmt"
 
 	"github.com/division-sh/swarm/internal/runtime/core/identity"
@@ -36,6 +37,8 @@ type LiveRunReader interface {
 	FlowScopeReader
 	LoadLiveRun(context.Context, LiveRunScope) (LiveRun, bool, error)
 }
+
+var ErrLiveRunChanged = errors.New("live run changed before its native admission")
 
 // LandingRun remains selected during pause; execution still uses LiveRunReader.
 type LandingRun struct {

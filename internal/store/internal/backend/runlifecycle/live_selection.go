@@ -144,7 +144,7 @@ func LiveRunForTargetTx(ctx context.Context, tx *sql.Tx, runID string, postgres 
 		return live, false, err
 	}
 	if status != string(runtimerunlifecycle.StateLive) {
-		return live, false, errors.New("live predecessor changed before its handoff fence")
+		return live, false, runtimerunlifecycle.ErrLiveRunChanged
 	}
 	return live, true, nil
 }

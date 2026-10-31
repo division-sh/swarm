@@ -22,6 +22,7 @@ const (
 	EventNotDeclaredCode                   = "EVENT_NOT_DECLARED"
 	EventNotFoundCode                      = "EVENT_NOT_FOUND"
 	EventPublishFailedCode                 = "EVENT_PUBLISH_FAILED"
+	EventPublishRejectedCode               = "EVENT_PUBLISH_REJECTED"
 	EventObservationRunScopeRequiredCode   = "EVENT_OBSERVATION_RUN_SCOPE_REQUIRED"
 	EventReplayNoDeliveryHistoryCode       = "EVENT_REPLAY_NO_DELIVERY_HISTORY"
 	EventReplaySubscriberNotOriginalCode   = "EVENT_REPLAY_SUBSCRIBER_NOT_ORIGINAL"

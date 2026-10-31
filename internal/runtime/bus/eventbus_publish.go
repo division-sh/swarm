@@ -396,6 +396,7 @@ func (eb *EventBus) PublishAPIEventWithRunCreationAcknowledged(
 		Idempotency: idempotency,
 		Completion:  completion,
 		RunCreation: runCreation,
+		LiveRun:     endpoint.liveRun,
 	})
 	if commitErr != nil && !committed.Acknowledged && !committed.Replay {
 		return apiidempotency.Completion{}, false, errors.Join(commitErr, prepared.publicationClaim.Release(preparedCtx))
