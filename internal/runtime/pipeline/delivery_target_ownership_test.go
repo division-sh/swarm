@@ -380,10 +380,10 @@ func TestClassifyDeliveryTargetOwnershipPreservesCompositionInstanceMatrix(t *te
 		candidates                []DeliveryTargetOwnerCandidate
 	}{
 		{name: "required absent", node: "key-selector", failure: "owner is missing"},
-		{name: "terminal exact cannot be reinitialized", node: "key-upserter", failure: "owner is unavailable", candidates: []DeliveryTargetOwnerCandidate{{Route: exact, Availability: NewDeliveryTargetAvailability("done", "active", false)}}},
+		{name: "terminal exact cannot be reinitialized", node: "key-upserter", failure: "No handler", candidates: []DeliveryTargetOwnerCandidate{{Route: exact, Availability: NewDeliveryTargetAvailability("done", "active", false)}}},
 		{name: "draining exact cannot be reinitialized", node: "key-upserter", failure: "owner is unavailable", candidates: []DeliveryTargetOwnerCandidate{{Route: exact, Availability: NewDeliveryTargetAvailability("active", "draining", false)}}},
 		{name: "terminated exact cannot be reinitialized", node: "key-upserter", failure: "owner is unavailable", candidates: []DeliveryTargetOwnerCandidate{{Route: exact, Availability: NewDeliveryTargetAvailability("active", "active", true)}}},
-		{name: "active duplicate cannot hide terminal evidence", node: "key-selector", failure: "owner is unavailable", candidates: []DeliveryTargetOwnerCandidate{{Route: exact}, {Route: exact, Availability: NewDeliveryTargetAvailability("done", "active", false)}}},
+		{name: "active duplicate cannot hide terminal evidence", node: "key-selector", failure: "No handler", candidates: []DeliveryTargetOwnerCandidate{{Route: exact}, {Route: exact, Availability: NewDeliveryTargetAvailability("done", "active", false)}}},
 		{name: "terminal sibling cannot veto active receiver", node: "key-selector", kind: "existing_entity", candidates: []DeliveryTargetOwnerCandidate{{Route: sibling, Availability: NewDeliveryTargetAvailability("done", "terminated", true)}, {Route: exact}}},
 		{name: "required exact", node: "key-selector", kind: "existing_entity", candidates: []DeliveryTargetOwnerCandidate{{Route: exact}}},
 		{name: "required only sibling", node: "key-selector", failure: "owner is missing", candidates: []DeliveryTargetOwnerCandidate{{Route: sibling}}},

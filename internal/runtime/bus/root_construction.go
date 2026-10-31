@@ -164,6 +164,9 @@ func (p deliveryPlanner) validateRootConstructionReuse(ctx context.Context, even
 		stage = instance.CurrentState
 	}
 	if err := pipeline.NewDeliveryTargetAvailability(stage, instance.Status, !instance.TerminatedAt.IsZero()).Validate(p.recipientPolicy.semanticSource, observed.Identity().TemplateID); err != nil {
+		if refusal, ok := err.(*pipeline.NoHandlerError); ok {
+			refusal.FlowInstance = instance.StorageRef
+		}
 		return err
 	}
 	return p.validateRootConstructorKey(event, key, observed.InstanceKey())
