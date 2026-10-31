@@ -68,7 +68,7 @@ func (s *readinessVerificationReadStore) LoadAgents(ctx context.Context) ([]Pers
 }
 
 func TestReadinessShutdownCompletionKeepsStrictAdmissionAndIndependentFailures(t *testing.T) {
-	for _, mode := range []string{"after_readiness", "during_verification", "already_emitted", "cleanup_failure", "live_fenced", "before_verification_read", "before_verification_read_failure", "attempt_reuse_read", "attempt_route_read", "attempt_reuse_read_failure", "attempt_route_read_failure", "attempt_reuse_cleanup_failure", "attempt_route_cleanup_failure", "timer_projection", "timer_projection_read_failure", "timer_projection_cleanup_failure", "progress_cancellation", "progress_read_failure"} {
+	for _, mode := range []string{"after_readiness", "during_verification", "already_emitted", "cleanup_failure", "live_fenced", "before_verification_read", "before_verification_read_failure", "attempt_reuse_read", "attempt_route_read", "attempt_reuse_read_failure", "attempt_route_read_failure", "attempt_reuse_cleanup_failure", "attempt_route_cleanup_failure", "timer_projection", "timer_projection_mixed", "timer_projection_read_failure", "timer_projection_cleanup_failure", "progress_cancellation", "progress_read_failure"} {
 		t.Run(mode, func(t *testing.T) {
 			shutdown := mode != "after_readiness" && mode != "live_fenced"
 			autoEmit := ""
@@ -152,6 +152,9 @@ func TestReadinessShutdownCompletionKeepsStrictAdmissionAndIndependentFailures(t
 						}
 						if strings.HasSuffix(mode, "read_failure") {
 							return errors.Join(err, fault)
+						}
+						if mode == "timer_projection_mixed" {
+							return errors.Join(err, ctx.Err())
 						}
 						return err
 					}
@@ -310,7 +313,7 @@ func TestReadinessShutdownCompletionKeepsStrictAdmissionAndIndependentFailures(t
 				if attempt.err == nil || shutdownErr == nil || isReadinessShutdownRefusal(attempt.err) {
 					t.Fatalf("live corruption was treated as shutdown: attempt=%v shutdown=%v", attempt.err, shutdownErr)
 				}
-			case mode == "before_verification_read" || strings.HasPrefix(mode, "attempt_") || mode == "timer_projection" || mode == "progress_cancellation":
+			case mode == "before_verification_read" || strings.HasPrefix(mode, "attempt_") || mode == "timer_projection" || mode == "timer_projection_mixed" || mode == "progress_cancellation":
 				key := dynamicFlowRuntimeReadinessKey{runID: req.TriggerEvent.RunID(), instancePath: req.Instance.InstancePath}
 				if shutdownErr != nil || !isReadinessShutdownCompletion(attempt.err, key, attempt) {
 					t.Fatalf("owned read cancellation became terminal: attempt=%v shutdown=%v", attempt.err, shutdownErr)
