@@ -14,6 +14,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/Masterminds/semver/v3"
 	"github.com/division-sh/swarm/internal/platform"
 	workspace "github.com/division-sh/swarm/internal/runtime/workspace"
 	"github.com/division-sh/swarm/internal/runtime/workspace/worker"
@@ -92,6 +93,49 @@ func newWorkspaceBuildCommand(ctx context.Context, RepoRoot string) *cobra.Comma
 	return cmd
 }
 
+func workspaceBuildClaudeVersion(plan []byte) (string, error) {
+	var version string
+	for _, line := range strings.Split(string(plan), "\n") {
+		fields := strings.Fields(line)
+		if len(fields) < 2 || fields[0] != "ARG" {
+			continue
+		}
+		name, value, declared := strings.Cut(fields[1], "=")
+		if name != "CLAUDE_CODE_VERSION" {
+			continue
+		}
+		if !declared || len(fields) != 2 || version != "" {
+			return "", fmt.Errorf("embedded workspace build plan requires one exact CLAUDE_CODE_VERSION declaration")
+		}
+		if _, err := semver.StrictNewVersion(value); err != nil {
+			return "", fmt.Errorf("embedded workspace CLAUDE_CODE_VERSION %q is invalid: %w", value, err)
+		}
+		version = value
+	}
+	if version == "" {
+		return "", fmt.Errorf("embedded workspace build plan is missing CLAUDE_CODE_VERSION")
+	}
+	return version, nil
+}
+
+func validateWorkspaceBuildClaudeCLI(ctx context.Context, dockerBin, tempImage, expectedVersion string, out io.Writer) error {
+	actualVersion, err := runWorkspaceBuildDocker(ctx, dockerBin,
+		"run", "--rm", "--entrypoint", "sh", tempImage,
+		"-lc", `command -v -- "$1" >/dev/null && "$1" --version`,
+		"swarm-cli-proof", workspaceBuildClaudeCommand,
+	)
+	if err != nil {
+		return fmt.Errorf("configured Claude CLI command %q cannot execute; build or pull a workspace image that includes a runnable Claude CLI, set workspace.image, or pass --image with a compatible image: %w", workspaceBuildClaudeCommand, err)
+	}
+	if actualVersion != expectedVersion+" (Claude Code)" {
+		return fmt.Errorf("expected Claude CLI %s, actual %q; image not published", expectedVersion, actualVersion)
+	}
+	if out != nil {
+		fmt.Fprintf(out, "Validated Claude CLI %s (expected %s)\n", actualVersion, expectedVersion)
+	}
+	return nil
+}
+
 func runWorkspaceBuildCommand(ctx context.Context, out io.Writer, opts workspaceBuildOptions) error {
 	cfgResult, err := LoadRuntimeConfigWithOptions(RuntimeConfigLoadOptions{RepoRoot: opts.RepoRoot, ExplicitPath: opts.configPath})
 	if err != nil {
@@ -109,6 +153,10 @@ func runWorkspaceBuildCommand(ctx context.Context, out io.Writer, opts workspace
 		if err != nil {
 			return err
 		}
+	}
+	expectedVersion, err := workspaceBuildClaudeVersion(platform.WorkspaceDockerfile())
+	if err != nil {
+		return fmt.Errorf("workspace image build failed: %w", err)
 	}
 	dockerfile, err := platform.MaterializeWorkspaceDockerfile()
 	if err != nil {
@@ -175,12 +223,8 @@ func runWorkspaceBuildCommand(ctx context.Context, out io.Writer, opts workspace
 	if out != nil {
 		fmt.Fprintf(out, "Validating workspace image %s can execute %s\n", image, workspaceBuildClaudeCommand)
 	}
-	if _, err := runWorkspaceBuildDocker(ctx, dockerBin,
-		"run", "--rm", "--entrypoint", "sh", tempImage,
-		"-lc", `command -v -- "$1" >/dev/null && "$1" --version >/dev/null`,
-		"swarm-cli-proof", workspaceBuildClaudeCommand,
-	); err != nil {
-		return fmt.Errorf("workspace image validation failed: configured Claude CLI command %q cannot execute in workspace image %q; build or pull a workspace image that includes a runnable Claude CLI, set workspace.image, or pass --image with a compatible image: %w", workspaceBuildClaudeCommand, image, err)
+	if err := validateWorkspaceBuildClaudeCLI(ctx, dockerBin, tempImage, expectedVersion, out); err != nil {
+		return fmt.Errorf("workspace image validation failed for image %q: %w", image, err)
 	}
 	if _, err := runWorkspaceBuildDocker(ctx, dockerBin, "tag", tempImage, image); err != nil {
 		return fmt.Errorf("workspace image build failed to publish validated image %q: %w", image, err)
