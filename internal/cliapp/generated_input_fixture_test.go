@@ -369,14 +369,14 @@ steps:
 		switch rpc.Method {
 		case "runtime.identity":
 			writeScenarioRuntimeIdentity(t, w, rpc.ID, bundleHash)
-		case eventPublishMethod:
+		case "run.start":
 			if rpc.Params["event_name"] != "telegram-chat/inbound.telegram.text_message" || rpc.Params["bundle_hash"] != bundleHash {
 				t.Fatalf("event.publish params = %#v", rpc.Params)
 			}
 			if !reflect.DeepEqual(rpc.Params["payload"], wantPayload) {
 				t.Fatalf("generated Telegram payload = %#v, want %#v", rpc.Params["payload"], wantPayload)
 			}
-			writeJSONRPCResult(t, w, rpc.ID, eventPublishTestResult(true))
+			writeJSONRPCResult(t, w, rpc.ID, scenarioStartedRunResult())
 		case "run.diagnose":
 			writeJSONRPCResult(t, w, rpc.ID, scenarioRunDiagnoseTestResult(testPublishedRunID, true))
 		default:
@@ -395,7 +395,7 @@ steps:
 	if code != 0 {
 		t.Fatalf("code = %d stderr=%s stdout=%s", code, stderr.String(), stdout.String())
 	}
-	assertScenarioTestMethods(t, calls, []string{"runtime.identity", eventPublishMethod, "run.diagnose", "run.diagnose"})
+	assertScenarioTestMethods(t, calls, []string{"runtime.identity", "run.start", "run.diagnose", "run.diagnose"})
 	if !strings.Contains(stdout.String(), "swarm test ok: scenarios=1") || strings.TrimSpace(stderr.String()) != "" {
 		t.Fatalf("stdout=%q stderr=%q", stdout.String(), stderr.String())
 	}
