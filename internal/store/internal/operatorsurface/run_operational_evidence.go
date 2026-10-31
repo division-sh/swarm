@@ -161,26 +161,7 @@ func loadRunOperationalEvidence(ctx context.Context, q eventReadQueryer, adapter
 		if timer.Status != "active" {
 			continue
 		}
-		if facts.NextWakeAt == nil || timer.DueAt.Before(*facts.NextWakeAt) {
-			due := timer.DueAt
-			facts.NextWakeAt = &due
-		}
-		if i, ok := byPath[timer.FlowInstance]; ok {
-			instance := &facts.Instances[i]
-			instance.Work.Timers++
-			if !timer.DueAt.After(observedAt) {
-				instance.Work.DueTimers++
-			}
-			if instance.NextWakeAt == nil || timer.DueAt.Before(*instance.NextWakeAt) {
-				due := timer.DueAt
-				instance.NextWakeAt = &due
-			}
-		} else {
-			facts.UnscopedWork.Timers++
-			if !timer.DueAt.After(observedAt) {
-				facts.UnscopedWork.DueTimers++
-			}
-		}
+		addRunOperationalTimer(facts, byPath, timer, observedAt)
 	}
 	if err := loadRunOperationalWaits(ctx, q, header.RunID, byPath, facts); err != nil {
 		return nil, err
@@ -198,6 +179,26 @@ func loadRunOperationalEvidence(ctx context.Context, q eventReadQueryer, adapter
 	return facts, nil
 }
 
+func addRunOperationalTimer(facts *operatorread.RunOperationalFacts, byPath map[string]int, timer timerobligation.Activation, observedAt time.Time) {
+	if facts.NextWakeAt == nil || timer.DueAt.Before(*facts.NextWakeAt) {
+		due := timer.DueAt
+		facts.NextWakeAt = &due
+	}
+	work := &facts.UnscopedWork
+	if i, ok := byPath[timer.FlowInstance]; ok {
+		instance := &facts.Instances[i]
+		work = &instance.Work
+		if instance.NextWakeAt == nil || timer.DueAt.Before(*instance.NextWakeAt) {
+			due := timer.DueAt
+			instance.NextWakeAt = &due
+		}
+	}
+	work.Timers++
+	if !timer.DueAt.After(observedAt) {
+		work.DueTimers++
+	}
+}
+
 func loadRunRefusedEmits(ctx context.Context, q eventReadQueryer, runID string, postgres bool, byPath map[string]int, facts *operatorread.RunOperationalFacts) error {
 	field := func(path string) string { return "json_extract(payload, '$.details." + path + "')" }
 	if postgres {
@@ -205,10 +206,10 @@ func loadRunRefusedEmits(ctx context.Context, q eventReadQueryer, runID string, 
 			return "payload #>> '{details," + strings.ReplaceAll(path, ".", ",") + "}'"
 		}
 	}
-	query := fmt.Sprintf(`SELECT %s, %s FROM events
-		WHERE run_id=$1 AND event_name='platform.runtime_log' AND %s='emit_tool_outcome'
+	query := fmt.Sprintf(`SELECT %s, COALESCE(NULLIF(%s, ''), %s) FROM events
+		WHERE run_id=$1 AND event_name='platform.runtime_log'
 		AND %s='platform.unexpected_arrival' AND %s='no_route'
-		GROUP BY 1,2`, field("failure.detail.attributes.flow_instance"), field("emitted_event_id"), field("action"), field("failure.class"), field("failure.detail.code"))
+		GROUP BY 1,2`, field("failure.detail.attributes.flow_instance"), field("emitted_event_id"), field("event_id"), field("failure.class"), field("failure.detail.code"))
 	rows, err := q.QueryContext(ctx, query, runID)
 	if err != nil {
 		return fmt.Errorf("read refused emit outcomes: %w", err)

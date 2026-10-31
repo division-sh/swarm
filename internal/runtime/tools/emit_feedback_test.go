@@ -130,4 +130,11 @@ func TestHandleEmitToolRetainsAcknowledgedStageOnDispatchError(t *testing.T) {
 			t.Fatalf("late emit lost its ordinary refusal or committed result: %#v, %v", value, err)
 		}
 	}
+	first := &pipeline.NoHandlerError{FlowID: ".", FlowInstance: toolTestRunID, Stage: "done"}
+	second := &pipeline.NoHandlerError{FlowID: "sibling", FlowInstance: "sibling/one", Stage: "closed"}
+	publisher.fault = errors.Join(first, second)
+	_, err = executor.handleEmitTool(toolEventTestContext(actor), actor, "emit_root_done", map[string]any{})
+	if !errors.Is(err, first) || !errors.Is(err, second) {
+		t.Fatalf("joined receiver refusals were collapsed: %v", err)
+	}
 }

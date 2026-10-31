@@ -1,6 +1,7 @@
 package bus
 
 import (
+	"errors"
 	"fmt"
 	"strings"
 
@@ -27,6 +28,10 @@ func (p PublishRecipientPlan) TargetFailureError(component, operation string, at
 			err = fmt.Errorf("recipient plan contains noncanonical target failure %q", p.TargetFailure)
 		}
 		return runtimefailures.WrapDetail("route_plan_preflight_failed", component, operation, attributes, err)
+	}
+	var noHandler *runtimepipeline.NoHandlerError
+	if errors.As(p.targetFailureCause, &noHandler) {
+		return runtimefailures.FromError(p.targetFailureCause, component, operation)
 	}
 	return canonicalTargetDeliveryFailure(failure, component, operation, attributes)
 }

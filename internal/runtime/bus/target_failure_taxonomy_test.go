@@ -1,16 +1,27 @@
 package bus
 
 import (
+	"errors"
 	"reflect"
 	"testing"
 
+	"github.com/division-sh/swarm/internal/events"
 	"github.com/division-sh/swarm/internal/runtime/core/pinrouting"
 	"github.com/division-sh/swarm/internal/runtime/failures"
+	"github.com/division-sh/swarm/internal/runtime/pipeline"
 )
 
 func TestPublishRecipientPlanTargetFailureErrorKeepsCallerAndStrictVocabulary(t *testing.T) {
 	if err := (PublishRecipientPlan{}).TargetFailureError("tool-executor", "emit", nil); err != nil {
 		t.Fatalf("empty plan invented refusal: %v", err)
+	}
+	refusal := &pipeline.NoHandlerError{FlowID: "worker", FlowInstance: "worker/one", Stage: "done"}
+	view := (&EventBus{}).publishRecipientPlan(events.Event{}, RoutePlan{
+		TargetFailure: pinrouting.FailureTargetUnreachableTerminated, unavailableReceiverError: refusal,
+	})
+	err := view.TargetFailureError("tool-executor", "emit", nil)
+	if !errors.Is(err, refusal) || failures.Normalize(err, "test", "observe").Class != failures.ClassUnexpectedArrival {
+		t.Fatalf("pinned preflight changed an ordinary receiver refusal: %v", err)
 	}
 	for _, refusal := range []pinrouting.TargetFailure{
 		pinrouting.FailureTargetRequiredMissing, pinrouting.FailureReplyAlreadyTerminal, pinrouting.FailureStaleArrival,
