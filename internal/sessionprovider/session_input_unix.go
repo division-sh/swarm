@@ -141,8 +141,10 @@ func (r *sessionInputReader) readRetainedInput(ctx context.Context, reference Se
 		return result, errSessionAccount
 	}
 	account := device.ID.ToNonAD().String()
-	ownedSource, _ := correlation.SourceArtifactFactFromContext(occurrence.ctx)
-	ownedRoot, _, err := correlation.RootAdmissionFromContext(occurrence.ctx)
+	// Deployment sockets retain process possession; this delivery borrows its
+	// source and root from the verified holding runtime through the same lease.
+	ownedSource, _ := correlation.SourceArtifactFactFromContext(workContext)
+	ownedRoot, _, err := correlation.RootAdmissionFromContext(workContext)
 	if err != nil {
 		return result, err
 	}
