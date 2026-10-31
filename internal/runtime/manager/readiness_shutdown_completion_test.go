@@ -11,6 +11,7 @@ import (
 	"time"
 
 	runtimeagentidentitytest "github.com/division-sh/swarm/internal/runtime/core/agentidentitytest"
+	runtimeflowidentity "github.com/division-sh/swarm/internal/runtime/core/flowidentity"
 	"github.com/division-sh/swarm/internal/runtime/core/worklifetime"
 	runtimecorrelation "github.com/division-sh/swarm/internal/runtime/correlation"
 	runtimefailures "github.com/division-sh/swarm/internal/runtime/failures"
@@ -27,14 +28,36 @@ type readinessVerificationReadStore struct {
 
 type readinessAttemptVerificationStore struct {
 	*flowActivationTestInstanceStore
-	beforeVerify func(context.Context) error
+	beforeVerify   func(context.Context) error
+	beforeTimers   func(context.Context) error
+	beforeProgress func(context.Context, runtimepipeline.FlowAttachmentPhase) (runtimepipeline.FlowAttachmentAdvanceResult, error, bool)
 }
 
 func (s *readinessAttemptVerificationStore) VerifyDynamicFlowRuntimeActivationAttempt(ctx context.Context, attempt runtimepipeline.DynamicFlowRuntimeActivationAttempt) error {
-	if err := s.beforeVerify(ctx); err != nil {
-		return err
+	if s.beforeVerify != nil {
+		if err := s.beforeVerify(ctx); err != nil {
+			return err
+		}
 	}
 	return s.flowActivationTestInstanceStore.VerifyDynamicFlowRuntimeActivationAttempt(ctx, attempt)
+}
+
+func (s *readinessAttemptVerificationStore) ReconcileInitialEntryTimersForAttempt(ctx context.Context, identity runtimeflowidentity.RunScopedFlowInstance, attempt runtimepipeline.DynamicFlowRuntimeActivationAttempt, plan runtimepipeline.DynamicFlowRuntimeReadinessPlan) error {
+	if s.beforeTimers != nil {
+		if err := s.beforeTimers(ctx); err != nil {
+			return err
+		}
+	}
+	return s.flowActivationTestInstanceStore.ReconcileInitialEntryTimersForAttempt(ctx, identity, attempt, plan)
+}
+
+func (s *readinessAttemptVerificationStore) AdvanceFlowAttachment(ctx context.Context, attempt runtimepipeline.DynamicFlowRuntimeActivationAttempt, previous runtimepipeline.FlowAttachmentPhase, at time.Time) (runtimepipeline.FlowAttachmentAdvanceResult, error) {
+	if s.beforeProgress != nil {
+		if result, err, intercepted := s.beforeProgress(ctx, previous); intercepted {
+			return result, err
+		}
+	}
+	return s.flowActivationTestInstanceStore.AdvanceFlowAttachment(ctx, attempt, previous, at)
 }
 
 func (s *readinessVerificationReadStore) LoadAgents(ctx context.Context) ([]PersistedAgent, error) {
@@ -45,7 +68,7 @@ func (s *readinessVerificationReadStore) LoadAgents(ctx context.Context) ([]Pers
 }
 
 func TestReadinessShutdownCompletionKeepsStrictAdmissionAndIndependentFailures(t *testing.T) {
-	for _, mode := range []string{"after_readiness", "during_verification", "already_emitted", "cleanup_failure", "live_fenced", "before_verification_read", "before_verification_read_failure", "attempt_reuse_read", "attempt_route_read", "attempt_reuse_read_failure", "attempt_route_read_failure", "attempt_reuse_cleanup_failure", "attempt_route_cleanup_failure"} {
+	for _, mode := range []string{"after_readiness", "during_verification", "already_emitted", "cleanup_failure", "live_fenced", "before_verification_read", "before_verification_read_failure", "attempt_reuse_read", "attempt_route_read", "attempt_reuse_read_failure", "attempt_route_read_failure", "attempt_reuse_cleanup_failure", "attempt_route_cleanup_failure", "timer_projection", "timer_projection_read_failure", "timer_projection_cleanup_failure", "progress_cancellation", "progress_read_failure"} {
 		t.Run(mode, func(t *testing.T) {
 			shutdown := mode != "after_readiness" && mode != "live_fenced"
 			autoEmit := ""
@@ -108,7 +131,44 @@ func TestReadinessShutdownCompletionKeepsStrictAdmissionAndIndependentFailures(t
 			var verificationCtx context.Context
 			var retainedAtRead bool
 			fault := errors.New("independent durable abandonment failure")
-			if strings.HasPrefix(mode, "attempt_") {
+			if strings.HasPrefix(mode, "timer_") || strings.HasPrefix(mode, "progress_") {
+				cut := func(ctx context.Context) {
+					verificationCtx = ctx
+					once.Do(func() { close(entered); <-release })
+				}
+				workflow := &readinessAttemptVerificationStore{flowActivationTestInstanceStore: instances}
+				am.workflowInstances = workflow
+				switch {
+				case strings.HasPrefix(mode, "timer_"):
+					workflow.beforeTimers = func(ctx context.Context) error {
+						cut(ctx)
+						owner, ok := worklifetime.OccurrenceFromContext(ctx)
+						if !ok {
+							return errors.New("timer projection lost its accepted owner")
+						}
+						lease, err := owner.Begin(context.WithoutCancel(ctx))
+						if lease != nil {
+							return errors.Join(errors.New("timer projection admitted after shutdown"), lease.Done())
+						}
+						if strings.HasSuffix(mode, "read_failure") {
+							return errors.Join(err, fault)
+						}
+						return err
+					}
+				case strings.HasPrefix(mode, "progress_"):
+					workflow.beforeProgress = func(ctx context.Context, previous runtimepipeline.FlowAttachmentPhase) (runtimepipeline.FlowAttachmentAdvanceResult, error, bool) {
+						if previous != runtimepipeline.FlowAttachmentAgentsRegistered {
+							return runtimepipeline.FlowAttachmentAdvanceResult{}, nil, false
+						}
+						cut(ctx)
+						result, err := (runtimepipeline.FlowAttachmentAdvanceResult{}).WithCleanCancellation(ctx.Err(), false)
+						if strings.HasSuffix(mode, "read_failure") {
+							err = errors.Join(err, fault)
+						}
+						return result, err, true
+					}
+				}
+			} else if strings.HasPrefix(mode, "attempt_") {
 				var reads atomic.Int32
 				am.workflowInstances = &readinessAttemptVerificationStore{flowActivationTestInstanceStore: instances, beforeVerify: func(ctx context.Context) error {
 					if reads.Add(1) != 1 {
@@ -250,9 +310,9 @@ func TestReadinessShutdownCompletionKeepsStrictAdmissionAndIndependentFailures(t
 				if attempt.err == nil || shutdownErr == nil || isReadinessShutdownRefusal(attempt.err) {
 					t.Fatalf("live corruption was treated as shutdown: attempt=%v shutdown=%v", attempt.err, shutdownErr)
 				}
-			case mode == "before_verification_read" || strings.HasPrefix(mode, "attempt_"):
+			case mode == "before_verification_read" || strings.HasPrefix(mode, "attempt_") || mode == "timer_projection" || mode == "progress_cancellation":
 				key := dynamicFlowRuntimeReadinessKey{runID: req.TriggerEvent.RunID(), instancePath: req.Instance.InstancePath}
-				if shutdownErr != nil || !errors.Is(attempt.err, context.Canceled) || !isReadinessShutdownCompletion(attempt.err, key, attempt) {
+				if shutdownErr != nil || !isReadinessShutdownCompletion(attempt.err, key, attempt) {
 					t.Fatalf("owned read cancellation became terminal: attempt=%v shutdown=%v", attempt.err, shutdownErr)
 				}
 			default:
