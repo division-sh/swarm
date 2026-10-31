@@ -225,6 +225,23 @@ func (l DeliveryTargetLookup) Coordinate() events.RouteIdentity { return l.coord
 // AdmitDeliveryTargetLookup resolves the receiving declaration once, before any
 // instance lookup. Classification consumes this fact, not a caller-built route.
 func AdmitDeliveryTargetLookup(req DeliveryTargetOwnershipRequest) (DeliveryTargetLookup, error) {
+	lookup, err := admitDeliveryTargetCoordinate(req)
+	if err != nil {
+		return DeliveryTargetLookup{}, err
+	}
+	req = lookup.request
+	handler, admitted := req.Handler.resolve(req.Source, req.Event.Type())
+	if !admitted {
+		return DeliveryTargetLookup{}, fmt.Errorf("receiver %s requires an exact admitted target handler for event %s", req.Recipient.ID(), req.Event.Type())
+	}
+	if err := ValidateExecutionHandlerDeclaration(req.Source, req.Handler.Node(), handler); err != nil {
+		return DeliveryTargetLookup{}, err
+	}
+	return lookup, nil
+}
+
+// Coordinate admission is shared with receipt; only planning resolves a handler.
+func admitDeliveryTargetCoordinate(req DeliveryTargetOwnershipRequest) (DeliveryTargetLookup, error) {
 	if !req.Recipient.IsNode() {
 		return DeliveryTargetLookup{}, fmt.Errorf("node target lookup requires its admitted handler")
 	}
@@ -245,16 +262,12 @@ func AdmitDeliveryTargetLookup(req DeliveryTargetOwnershipRequest) (DeliveryTarg
 		req.Handler = handler
 		req.Blueprint = target
 	}
-	handler, admitted := req.Handler.resolve(req.Source, req.Event.Type())
-	if !admitted {
+	if req.Handler.Empty() {
 		return DeliveryTargetLookup{}, fmt.Errorf("receiver %s requires an exact admitted target handler for event %s", req.Recipient.ID(), req.Event.Type())
 	}
 	node, _ := req.Recipient.Node()
 	if !node.Equal(req.Handler.Node()) {
 		return DeliveryTargetLookup{}, fmt.Errorf("node target lookup disagrees with its handler recipient")
-	}
-	if err := ValidateExecutionHandlerDeclaration(req.Source, req.Handler.Node(), handler); err != nil {
-		return DeliveryTargetLookup{}, err
 	}
 	flowID := req.Handler.ExecutionFlowID(req.Source)
 	blueprint := req.Blueprint.Normalized()
@@ -333,56 +346,6 @@ func selectedRunRootTargetBlueprint(source semanticview.Source, evt events.Event
 	blueprint.FlowID = coordinate.FlowID()
 	blueprint.FlowInstance = coordinate.RunID()
 	return blueprint.Normalized(), nil
-}
-
-// ValidateStampedDeliveryTargetOwnership checks immutable route authority
-// against the already-resolved executing handler without consulting mutable
-// entity rows or rediscovering declarations from a concrete recipient ID.
-func ValidateStampedDeliveryTargetOwnership(source semanticview.Source, evt events.Event, recipient events.DeliveryRecipient, handlerFact DeliveryTargetHandler, handler SystemNodeEventHandler, owner events.DeliveryTargetOwnership) error {
-	if !recipient.IsNode() {
-		return fmt.Errorf("stamped delivery target ownership requires a node recipient")
-	}
-	if err := owner.Validate(); err != nil {
-		return err
-	}
-	if handlerFact.Empty() {
-		return fmt.Errorf("receiver %s requires an admitted target handler", recipient.ID())
-	}
-	if isJoinLifecycleEvent(evt.Type()) {
-		declaredRecipient, target, declaredHandler, found, err := ResolveWorkflowJoinOccurrenceDeliveryTarget(source, evt)
-		if err != nil {
-			return err
-		}
-		if !found || recipient != declaredRecipient || !handlerFact.Node().Equal(declaredHandler.Node()) || handlerFact.eventType != declaredHandler.eventType || owner.Route() != target {
-			return fmt.Errorf("stamped join lifecycle ownership contradicts its exact declaration occurrence")
-		}
-	}
-	flowID := handlerFact.ExecutionFlowID(source)
-	route := owner.Route()
-	if flowID == strings.TrimSpace(semanticview.RootExecutionFlowID(source)) {
-		coordinate, err := semanticview.AdmitRootExecutionCoordinate(source, evt.RunID())
-		if err != nil {
-			return err
-		}
-		if !coordinate.Matches(route.FlowID, route.FlowInstance) {
-			return fmt.Errorf("stamped root target (%q, %q) disagrees with current root coordinate (%q, %q)", route.FlowID, route.FlowInstance, coordinate.FlowID(), coordinate.RunID())
-		}
-	} else if routeFlowID := route.FlowID; routeFlowID != "" && routeFlowID != flowID {
-		return fmt.Errorf("stamped delivery target flow %q disagrees with handler flow %q", routeFlowID, flowID)
-	}
-	if err := ValidateExecutionHandlerDeclaration(source, handlerFact.Node(), handler); err != nil {
-		return err
-	}
-	if owner.EntitylessReceiver() {
-		return fmt.Errorf("entityless_receiver cannot authorize handler execution; every flow requires a constructed lifecycle header")
-	}
-	if !owner.ExistingEntity() && !owner.MaterializingEntity() {
-		return fmt.Errorf("delivery target ownership kind is unsupported")
-	}
-	if owner.MaterializingEntity() && route.EntityID != FlowInstanceEntityID(route.FlowInstance) {
-		return fmt.Errorf("materializing_entity ownership disagrees with canonical instance identity")
-	}
-	return nil
 }
 
 // ValidateExecutionHandlerDeclaration does not infer construction from effects

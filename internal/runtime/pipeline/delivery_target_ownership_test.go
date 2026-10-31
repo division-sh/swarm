@@ -215,6 +215,14 @@ func TestClassifyDeliveryTargetOwnershipPreservesExactOwnerForEntityOptionalHand
 	if !owner.ExistingEntity() || owner.Route().EntityID != entityID {
 		t.Fatalf("owner = %#v, want exact existing owner", owner)
 	}
+	executing, _ := handler.ForEvent("work.ready").resolve(source, evt.Type())
+	for _, flowID := range []string{"review", ""} {
+		stamp := owner.Route()
+		stamp.FlowID = flowID
+		if _, err := admitDeliveryTargetApplicationOwner(source, evt, events.MustNodeDeliveryRecipient(node), handler.ForEvent("work.ready"), executing, events.MustExistingEntityTarget(stamp)); err != nil {
+			t.Fatalf("non-root optional flow %q changed receipt semantics: %v", flowID, err)
+		}
+	}
 }
 
 func TestClassifyDeliveryTargetOwnershipProjectsRootHandlerOntoSelectedRun(t *testing.T) {
@@ -255,6 +263,19 @@ func TestClassifyDeliveryTargetOwnershipProjectsRootHandlerOntoSelectedRun(t *te
 		Source: source, Event: evt, Recipient: events.MustNodeDeliveryRecipient(node),
 		Blueprint: events.RouteIdentity{FlowID: ".", FlowInstance: runID},
 		Handler:   handler.ForEvent("timer.cancel"),
+	}
+	executing, _ := request.Handler.resolve(source, evt.Type())
+	for _, stamp := range []events.RouteIdentity{
+		{FlowInstance: runID, EntityID: existingEntityID},
+		{FlowID: "review", FlowInstance: runID, EntityID: existingEntityID},
+		{FlowID: ".", FlowInstance: eventtest.UUID("foreign-stamped-root"), EntityID: existingEntityID},
+	} {
+		if _, err := admitDeliveryTargetApplicationOwner(source, evt, request.Recipient, request.Handler, executing, events.MustExistingEntityTarget(stamp)); err == nil {
+			t.Fatalf("planning normalization repaired an invalid root stamp: %+v", stamp)
+		}
+	}
+	if _, err := admitDeliveryTargetApplicationOwner(source, evt, request.Recipient, request.Handler, executing, events.DeliveryTargetOwnership{}); err == nil {
+		t.Fatal("planning normalization supplied an omitted root stamp")
 	}
 	for _, blueprint := range []events.RouteIdentity{{}, {FlowInstance: runID}, {FlowID: ".", FlowInstance: runID}} {
 		lookup := request
@@ -563,9 +584,9 @@ func TestValidateStampedDeliveryTargetOwnershipRejectsWrongAcquisitionFutureID(t
 	wrong := events.MustMaterializingEntityTarget(events.RouteIdentity{
 		FlowID: "review", FlowInstance: "review/one", EntityID: eventtest.UUID("wrong-stamped-acquisition-owner"),
 	})
-	err = ValidateStampedDeliveryTargetOwnership(source, evt, events.MustNodeDeliveryRecipient(node), handlerFact, handler, wrong)
+	_, err = admitDeliveryTargetApplicationOwner(source, evt, events.MustNodeDeliveryRecipient(node), handlerFact, handler, wrong)
 	if err == nil || !strings.Contains(err.Error(), "materializing_entity ownership disagrees with canonical instance identity") {
-		t.Fatalf("ValidateStampedDeliveryTargetOwnership error = %v, want canonical construction identity rejection", err)
+		t.Fatalf("receipt owner error = %v, want canonical construction identity rejection", err)
 	}
 }
 

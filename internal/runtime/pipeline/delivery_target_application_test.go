@@ -748,6 +748,11 @@ func TestDeliveryTargetApplicationRequiresExactPreviewOwnerAndRejectsConflict(t 
 	if got := application.State(); got.EntityID != entityID || got.Control.FlowPath != target.FlowInstance || got.Metadata["marker"] != "preview" {
 		t.Fatalf("projected preview state = %#v", got)
 	}
+	retiredHandler := handler
+	retiredHandler.CreateEntity = true
+	if _, err := pc.prepareDeliveryTargetApplication(context.Background(), node.Key(), handlerFact, retiredHandler, evt, events.MustExistingEntityTarget(target), preview); err == nil || !strings.Contains(err.Error(), "handler create_entity is retired") {
+		t.Fatalf("receipt replaced the already-resolved executing handler: %v", err)
+	}
 
 	preview.EntityID = eventtest.UUID("conflicting-preview-target")
 	_, err = pc.prepareDeliveryTargetApplication(
