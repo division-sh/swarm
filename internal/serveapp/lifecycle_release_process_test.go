@@ -32,22 +32,16 @@ func TestReleaseCompiledLifecycleJourneysBothStores(t *testing.T) {
 			}
 			t.Run(string(backend)+"/"+name, func(t *testing.T) {
 				root := canonicalrouting.CopyLifecycleEmitter(t, variant)
-				if !gate {
-					nodesPath := filepath.Join(root, "nodes.yaml")
-					nodes, err := os.ReadFile(nodesPath)
-					if err != nil {
-						t.Fatal(err)
-					}
-					writeWorkflowValidationFixtureFile(t, nodesPath, string(nodes)+"\nseed:\n  execution_type: system_node\n  subscribes_to: [work.requested]\n  event_handlers:\n    work.requested: {}\n")
-				}
 				rt := startLifecycleReleaseProcess(t, binary, backend, root)
 				prefix := ""
+				initialEvent := "loop.start"
 				if gate {
 					prefix = "outer/inner/"
+					initialEvent = "work.requested"
 				}
 				var seed servedEventPublishRPCResult
 				requireServedJSONRPCResult(t, rt.Endpoint, "run.start", map[string]any{
-					"event_name": "work.requested", "bundle_hash": rt.BundleHash,
+					"event_name": initialEvent, "bundle_hash": rt.BundleHash,
 					"payload": map[string]any{"seed": true}, "idempotency_key": "release-seed",
 				}, &seed)
 				if gate {
@@ -80,16 +74,14 @@ func TestReleaseCompiledLifecycleJourneysBothStores(t *testing.T) {
 					return
 				}
 
-				entityID := requireServedEventPublishEntityState(t, rt.DB, rt.Backend, seed.RunID, seed.RunID, "waiting")
+				entityID := requireServedEventPublishEntityState(t, rt.DB, rt.Backend, seed.RunID, seed.RunID, "drafting")
 				publish := func(event, key string, payload map[string]any) servedEventPublishRPCResult {
 					return requireServedEventPublishRPCResult(t, rt.Endpoint, map[string]any{
 						"event_name": event, "run_id": seed.RunID, "source_event_id": seed.EventID,
 						"payload": payload, "idempotency_key": key,
 					})
 				}
-				started := publish("loop.start", "release-start", map[string]any{"seed": true})
-				requireServedEventPublishEntityState(t, rt.DB, rt.Backend, seed.RunID, entityID, "drafting")
-				requireLifecycleCurrentTransition(t, readLifecycleTransitionHistory(t, rt.ReceiverStateReader, seed.RunID, entityID), started.EventID, "waiting", "drafting")
+				requireLifecycleCurrentTransition(t, readLifecycleTransitionHistory(t, rt.ReceiverStateReader, seed.RunID, entityID), seed.EventID, "waiting", "drafting")
 				var finalEvent string
 				for attempt := 1; attempt <= 2; attempt++ {
 					current := readLifecycleLoop(t, rt, seed.RunID, entityID)
