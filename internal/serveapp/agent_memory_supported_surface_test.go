@@ -199,9 +199,25 @@ func runCanonicalTelegramAgentLiveSelection(t *testing.T, backend string) {
 	prepareStandingTelegramCallback(t, &opts)
 	first := startTelegramAgentServeRuntimeTestProcess(t, sourceRoot, opts)
 	first.waitForReadyLine()
-	connected := registerChannelFixtureAccount(t, configPath, "bot-token", "420079")
+	firstURL := "http://" + serveRuntimeAPIListenerFromOutput(t, first.outputString())
+	restoreInput := installChannelOnboardingCLIInput(t, "bot-token\n")
+	defer restoreInput()
+	connectCtx, cancelConnect := context.WithTimeout(t.Context(), 20*time.Second)
+	defer cancelConnect()
+	var connectOut, connectErr bytes.Buffer
+	if code := cliapp.Execute(connectCtx, []string{"--config", configPath,
+		"channel", "connect", "telegram", "--yes", "--json", "--api-server", firstURL}, &connectOut, &connectErr, nil, nil, OpenChannelRegistration); code != 0 {
+		t.Fatalf("fresh channel connect exit=%d\nstdout:\n%s\nstderr:\n%s", code, &connectOut, &connectErr)
+	}
+	var connected channelonboarding.Result
+	if err := json.Unmarshal(connectOut.Bytes(), &connected); err != nil {
+		t.Fatal(err)
+	}
+	if connected.Operation.Phase != channelonboarding.PhaseSucceeded || !connected.Operation.AccountConfirmed {
+		t.Fatalf("fresh channel connect did not succeed: %s", &connectOut)
+	}
 	var listOut, listErr bytes.Buffer
-	if code := cliapp.Execute(t.Context(), []string{"--config", configPath, "channel", "list", "--json"},
+	if code := cliapp.Execute(t.Context(), []string{"--config", configPath, "channel", "list", "--json", "--api-server", firstURL},
 		&listOut, &listErr, nil, nil, OpenChannelRegistration); code != 0 {
 		t.Fatalf("channel list exit=%d\nstdout:\n%s\nstderr:\n%s", code, &listOut, &listErr)
 	}
@@ -211,7 +227,7 @@ func runCanonicalTelegramAgentLiveSelection(t *testing.T, backend string) {
 	if err := json.Unmarshal(listOut.Bytes(), &listed); err != nil {
 		t.Fatal(err)
 	}
-	if len(listed.Accounts) != 1 || listed.Accounts[0].Operation.OperationID != connected.OperationID ||
+	if len(listed.Accounts) != 1 || listed.Accounts[0].Operation.OperationID != connected.Operation.OperationID ||
 		listed.Accounts[0].Operation.AccountReference != "420079" {
 		t.Fatalf("connected account missing from channel list: %s", &listOut)
 	}
