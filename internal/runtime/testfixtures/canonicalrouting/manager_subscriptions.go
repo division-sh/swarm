@@ -16,9 +16,9 @@ func WriteManagerSubscriptionAdmission(t testing.TB) string {
   event_handlers:
     root.ready: {}
 `,
-		"review/schema.yaml":   "instance: review_id\npins:\n  inputs: [task.ready]\n",
-		"review/entities.yaml": "review:\n  review_id: {type: text, immutable: true}\n",
-		"review/events.yaml":   "task.ready:\n",
+		"review/schema.yaml": "instance: review_id\npins:\n  inputs: [task.ready]\n",
+		"review/state.yaml":  "review_id: text\n",
+		"review/events.yaml": "task.ready:\n",
 		"review/agents.yaml": `reviewer:
   model: regular
   intent: {inline: Observe review-local work.}

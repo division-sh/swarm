@@ -1008,10 +1008,10 @@ func TestBuildShowsStatelessSingletonWithoutCoordinatorError(t *testing.T) {
 func TestBuildDoesNotInferCoordinatorFromUnusedContainedField(t *testing.T) {
 	repoRoot := canonicalrouting.RepoRoot(t)
 	root := canonicalrouting.CopySingletonCoordinatorPilot(t, canonicalrouting.SingletonCoordinatorPilotStatelessCountJoin)
-	entitiesPath := filepath.Join(root, "coordinator", "entities.yaml")
-	entities := []byte("coordinator_state:\n  unused_index:\n    type: map[text]json\n    initial: {}\n")
-	if err := os.WriteFile(entitiesPath, entities, 0o644); err != nil {
-		t.Fatalf("write standing singleton entities: %v", err)
+	statePath := filepath.Join(root, "coordinator", "state.yaml")
+	state := []byte("unused_index: map[text]json\n")
+	if err := os.WriteFile(statePath, state, 0o644); err != nil {
+		t.Fatalf("write standing singleton state: %v", err)
 	}
 	bundle, err := runtimecontracts.LoadWorkflowContractBundleWithOverrides(repoRoot, root, runtimecontracts.DefaultPlatformSpecFile(repoRoot))
 	if err != nil {
