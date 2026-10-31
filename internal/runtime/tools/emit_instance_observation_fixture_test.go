@@ -57,7 +57,7 @@ func emitInstanceActor(t testing.TB, source semanticview.Source, instance flowid
 	}
 }
 
-func emitInstanceObservation(t testing.TB, source semanticview.Source, identity flowidentity.Instance, key string) pipeline.FlowInstanceObservation {
+func emitInstanceObservation(t testing.TB, source semanticview.Source, identity flowidentity.Instance, key string, stage ...string) pipeline.FlowInstanceObservation {
 	t.Helper()
 	fact := emitInstanceSourceFact(t, source)
 	lookup, err := pipeline.NewExactFlowInstanceLookup(source, fact, flowidentity.RunScopedFlowInstance{RunID: toolTestRunID, Route: identity.Route()})
@@ -74,6 +74,9 @@ func emitInstanceObservation(t testing.TB, source semanticview.Source, identity 
 		InstanceID: identity.InstanceID, StorageRef: identity.InstancePath, EntityID: identity.EntityID, InstanceKey: key,
 		ParentFlowID: identity.ParentRoute.FlowID, ParentFlowInstance: identity.ParentRoute.FlowInstance, ParentEntityID: identity.ParentEntityID,
 		CurrentState: "active", Revision: 1, CreatedAt: at, UpdatedAt: at,
+	}
+	if len(stage) != 0 {
+		header.CurrentState, header.StageDefined = stage[0], true
 	}
 	if entity, declared := entityruntime.ResolveForFlow(source, identity.TemplateID); declared {
 		header.EntityType = entity.EntityType

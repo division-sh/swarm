@@ -36,6 +36,18 @@ func emitReceiverRefusals(err error) []failures.Envelope {
 	return refusals
 }
 
+func (e *Executor) emitRefusalOutput(ctx context.Context, actor models.AgentConfig, toolName, requestedEventType, resolvedEventType string,
+	preValidationPayload, postEnrichmentPayload map[string]any, emitted events.Event, output map[string]any, refusals []failures.Envelope, failureStage string) map[string]any {
+	if output == nil {
+		output = map[string]any{"event_type": string(emitted.Type()), "event_id": emitted.ID()}
+	}
+	output["status"], output["refusals"] = "refused", refusals
+	for _, refusal := range refusals {
+		e.logEmitToolOutcome(ctx, actor, toolName, requestedEventType, resolvedEventType, preValidationPayload, postEnrichmentPayload, events.SomeEvent(emitted), "refused", "no_route", failureStage, &failures.Error{Failure: refusal})
+	}
+	return output
+}
+
 func (e *Executor) logEmitToolOutcome(
 	ctx context.Context,
 	actor models.AgentConfig,

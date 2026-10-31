@@ -2,6 +2,7 @@ package tools
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"path/filepath"
 	"reflect"
@@ -27,10 +28,28 @@ import (
 // reply-planning test below must produce its failures without this injection.
 type emitRefusalBoundaryBus struct {
 	*bus.EventBus
-	code string
+	code         string
+	preflightErr error
+	preflight    events.Event
+	logs         []pipeline.RuntimeLogEntry
+	publications int
 }
 
-func (b emitRefusalBoundaryBus) CheckPublishRecipientPlan(ctx context.Context, event events.Event) (bus.PublishRecipientPlan, error) {
+func (b *emitRefusalBoundaryBus) PublishEmit(ctx context.Context, event events.Event, request pipeline.WorkflowPublicationStageRequest) (pipeline.WorkflowEmitResult, error) {
+	b.publications++
+	return b.EventBus.PublishEmit(ctx, event, request)
+}
+
+func (b *emitRefusalBoundaryBus) LogRuntime(_ context.Context, entry pipeline.RuntimeLogEntry) error {
+	b.logs = append(b.logs, entry)
+	return nil
+}
+
+func (b *emitRefusalBoundaryBus) CheckPublishRecipientPlan(ctx context.Context, event events.Event) (bus.PublishRecipientPlan, error) {
+	b.preflight = event
+	if b.preflightErr != nil {
+		return bus.PublishRecipientPlan{}, b.preflightErr
+	}
 	plan, err := b.EventBus.CheckPublishRecipientPlan(ctx, event)
 	if err != nil {
 		return plan, err
@@ -38,7 +57,9 @@ func (b emitRefusalBoundaryBus) CheckPublishRecipientPlan(ctx context.Context, e
 	if !plan.UsesCanonicalRouteAuthority() {
 		return plan, fmt.Errorf("fixture lacks canonical route authority")
 	}
-	plan.TargetFailure = b.code
+	if b.code != "" {
+		plan.TargetFailure = b.code
+	}
 	return plan, nil
 }
 
@@ -59,10 +80,13 @@ func emitRefusalNativeInstances(t testing.TB, source semanticview.Source) emitIn
 	return emitInstanceObservationFixture{observations: observations}
 }
 
-func emitRefusalSource(t *testing.T, reply bool) semanticview.Source {
+func emitRefusalSource(t *testing.T, reply bool, finalReceiver ...bool) semanticview.Source {
 	t.Helper()
 	root := canonicalrouting.CopyStaticAgentOutputConnect(t)
 	writeToolFlowDataFixtureFile(t, filepath.Join(root, "producer/agents.yaml"), "producer-agent:\n  role: producer\n  model: regular\n  intent: {inline: Report deployment completion.}\n  emit_events: [deploy.done]\n")
+	if len(finalReceiver) != 0 && finalReceiver[0] {
+		writeToolFlowDataFixtureFile(t, filepath.Join(root, "consumer/schema.yaml"), "stages: {active: {}, done: {final: true}}\npins:\n  inputs: [deploy.completed]\n")
+	}
 	if reply {
 		for name, body := range map[string]string{
 			"schema.yaml":          "connect:\n  - {event: deploy.requested, from: consumer, to: producer}\n  - {event: deploy.done, from: producer, to: consumer, rename: deploy.completed, replies_to: deploy.requested}\n",
@@ -101,7 +125,7 @@ func TestIssue642ToolEmitRefusalFailureTaxonomy(t *testing.T) {
 			store.instanceIndex = instances
 			eventBus := newEmitRoutePlanEventBus(t, store, source, emitInstanceSourceFact(t, source))
 			actor := emitInstanceActor(t, source, instances.observations[1].Identity(), "deploy.done")
-			executor := NewExecutorWithOptions(emitRefusalBoundaryBus{eventBus, test.code}, ExecutorOptions{WorkflowSource: source, EmitRegistry: NewEmitRegistry(source, nil)})
+			executor := NewExecutorWithOptions(&emitRefusalBoundaryBus{EventBus: eventBus, code: test.code}, ExecutorOptions{WorkflowSource: source, EmitRegistry: NewEmitRegistry(source, nil)})
 			actor = toolTestConstructedActor(t, executor, actor)
 			ctx := bus.WithInboundEvent(correlation.WithRunID(unmanagedToolTestContext(), actor.Identity.RunID), eventtest.RunCreatingRootIngress(
 				eventtest.UUID("issue642-refusal-parent"), "producer/deploy.requested", "runtime", "", nil, 0, actor.Identity.RunID, "", events.EventEnvelope{}, time.Now().UTC()))
@@ -117,6 +141,61 @@ func TestIssue642ToolEmitRefusalFailureTaxonomy(t *testing.T) {
 			}
 			if len(store.events) != 0 || len(store.routes) != 0 || len(store.active) != 0 {
 				t.Fatal("refusal published, persisted recipients or opened mutation work")
+			}
+		})
+	}
+	first := &pipeline.NoHandlerError{FlowID: "consumer", FlowInstance: "consumer", Stage: "done"}
+	second := &pipeline.NoHandlerError{FlowID: ".", FlowInstance: toolTestRunID, Stage: "closed"}
+	fault := errors.New("independent preflight failure")
+	for _, tc := range []struct {
+		name string
+		err  error
+		want int
+	}{
+		{"canonical_no_handler", nil, 1},
+		{"planner_no_handler", first, 1},
+		{"planner_joined_receivers", errors.Join(first, second, first), 2},
+		{"planner_mixed_failure", errors.Join(first, fault), 0},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			source := emitRefusalSource(t, false, true)
+			store := newEmitRoutePlanStore()
+			instances := emitRefusalNativeInstances(t, source)
+			instances.observations[2] = emitInstanceObservation(t, source, instances.observations[2].Identity(), "", "done")
+			store.instanceIndex = instances
+			eventBus := newEmitRoutePlanEventBus(t, store, source, emitInstanceSourceFact(t, source))
+			probe := &emitRefusalBoundaryBus{EventBus: eventBus, preflightErr: tc.err}
+			actor := emitInstanceActor(t, source, instances.observations[1].Identity(), "deploy.done")
+			executor := NewExecutorWithOptions(probe, ExecutorOptions{WorkflowSource: source, EmitRegistry: NewEmitRegistry(source, nil)})
+			actor = toolTestConstructedActor(t, executor, actor)
+			value, err := executor.handleEmitTool(toolEventTestContext(actor), actor, "emit_deploy_done", map[string]any{})
+			if probe.publications != 0 || len(store.events) != 0 || len(store.routes) != 0 || len(store.active) != 0 || len(store.stages) != 0 || len(store.feedback) != 0 {
+				t.Fatal("preflight refusal published or claimed committed stage feedback")
+			}
+			if tc.err != nil && !errors.Is(err, tc.err) {
+				t.Fatalf("preflight lost its original causes: %v", err)
+			}
+			if tc.want == 0 {
+				if !errors.Is(err, first) || !errors.Is(err, fault) || failures.Normalize(err, "test", "emit").Class != failures.ClassTargetUnreachable || value != nil {
+					t.Fatalf("receiver refusal hid an independent failure: output=%#v err=%v", value, err)
+				}
+				return
+			}
+			output, ok := value.(map[string]any)
+			if !ok || output["status"] != "refused" || output["event_id"] != probe.preflight.ID() || output["accepted"] != nil || output["feedback_committed"] != nil || output["stage"] != nil {
+				t.Fatalf("preflight lost refusal identity or invented acceptance: %#v, %v", value, err)
+			}
+			refusals, ok := output["refusals"].([]failures.Envelope)
+			if !ok || len(refusals) != tc.want || len(probe.logs) != tc.want || failures.Matches(failures.SelectorAnyTaskFailure, failures.Normalize(err, "test", "emit").Class) {
+				t.Fatalf("preflight receiver outcomes were lost or task-failing: output=%#v logs=%+v err=%v", value, probe.logs, err)
+			}
+			for i, receiver := range []*pipeline.NoHandlerError{first, second}[:tc.want] {
+				entry := probe.logs[i]
+				detail, ok := entry.Detail.(map[string]any)
+				if !ok || detail["emitted_event_id"] != probe.preflight.ID() || detail["failure_stage"] != "route_plan_preflight" || entry.Failure == nil || entry.Failure.Detail.Attributes["flow_instance"] != receiver.FlowInstance ||
+					refusals[i].Detail.Attributes["flow_instance"] != receiver.FlowInstance || refusals[i].Detail.Attributes["stage"] != receiver.Stage {
+					t.Fatalf("preflight lost exact receiver %q: %+v / %+v", receiver.FlowInstance, refusals[i], entry)
+				}
 			}
 		})
 	}

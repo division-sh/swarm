@@ -42,6 +42,9 @@ func (e *Executor) preflightPinnedEmit(ctx context.Context, actor models.AgentCo
 	if planner, ok := e.bus.(publishRecipientPlanner); ok && planner != nil {
 		plan, err := planner.CheckPublishRecipientPlan(ctx, emitted)
 		if err != nil {
+			if len(emitReceiverRefusals(err)) != 0 {
+				return emitted, err
+			}
 			wrapped := failures.WrapDetail(
 				"route_plan_preflight_failed",
 				"tool-executor",
@@ -59,6 +62,9 @@ func (e *Executor) preflightPinnedEmit(ctx context.Context, actor models.AgentCo
 					"handle_emit_tool.route_plan_preflight",
 					map[string]any{"tool": strings.TrimSpace(toolName), "event": eventType},
 				)
+				if len(emitReceiverRefusals(wrapped)) != 0 {
+					return emitted, wrapped
+				}
 				e.logEmitToolOutcome(ctx, actor, toolName, schemaEventType, eventType, preValidationPayload, postEnrichmentPayload, events.SomeEvent(emitted), "route_plan_preflight_failed", "publish", "route_plan_preflight", wrapped)
 				return prepared, wrapped
 			}
@@ -203,6 +209,9 @@ func (e *Executor) handleEmitTool(ctx context.Context, actor models.AgentConfig,
 	if runtimepinrouting.PinDeclaredOutput(e.workflowSource, flowID, eventType) {
 		emitted, err = e.preflightPinnedEmit(ctx, actor, toolName, flowID, schemaEventType, emitted, envelope, preValidationPayload, postEnrichmentPayload)
 		if err != nil {
+			if refusals := emitReceiverRefusals(err); len(refusals) != 0 {
+				return e.emitRefusalOutput(ctx, actor, toolName, schemaEventType, eventType, preValidationPayload, postEnrichmentPayload, emitted, nil, refusals, "route_plan_preflight"), failures.FromError(err, "tool-executor", "handle_emit_tool.route_plan_preflight")
+			}
 			return nil, err
 		}
 	}
@@ -244,11 +253,7 @@ func (e *Executor) handleEmitTool(ctx context.Context, actor models.AgentConfig,
 	}
 	if publishErr != nil {
 		if refusals := emitReceiverRefusals(publishErr); len(refusals) != 0 {
-			output["status"], output["refusals"] = "refused", refusals
-			for _, refusal := range refusals {
-				e.logEmitToolOutcome(ctx, actor, toolName, schemaEventType, eventType, preValidationPayload, postEnrichmentPayload, events.SomeEvent(emitted), "refused", "no_route", "publish", &failures.Error{Failure: refusal})
-			}
-			return output, failures.FromError(publishErr, "tool-executor", "handle_emit_tool.publish")
+			return e.emitRefusalOutput(ctx, actor, toolName, schemaEventType, eventType, preValidationPayload, postEnrichmentPayload, emitted, output, refusals, "publish"), failures.FromError(publishErr, "tool-executor", "handle_emit_tool.publish")
 		}
 		output["status"] = "publish_failed"
 		if emitResult.Accepted {
