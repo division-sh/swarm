@@ -23,6 +23,7 @@ import (
 	"github.com/division-sh/swarm/internal/runtime/runlifecycle"
 	storeapiidempotency "github.com/division-sh/swarm/internal/store/internal/apiidempotency"
 	"github.com/division-sh/swarm/internal/store/internal/backend/mutationprotocol"
+	storerunlifecycle "github.com/division-sh/swarm/internal/store/internal/backend/runlifecycle"
 	storedurabledata "github.com/division-sh/swarm/internal/store/internal/durabledata"
 )
 
@@ -386,6 +387,9 @@ func (s *EventPostgresOwner) CommitAPIEventPublication(ctx context.Context, comm
 	outcome := runPostgresEventMutationResult(ctx, s, true, func(txctx context.Context, attempt *mutationprotocol.Attempt) (runtimebus.CommittedAPIEventPublication, error) {
 		var result runtimebus.CommittedAPIEventPublication
 		err := attempt.WithSQL(txctx, func(txctx context.Context, tx *sql.Tx) error {
+			if err := requireAPIEventLiveRunTx(txctx, tx, command.LiveRun, true); err != nil {
+				return err
+			}
 			var plan *storedurabledata.RunCreationPlan
 			if command.RunCreation != nil {
 				prepared, prepareErr := storedurabledata.PrepareRunCreationTx(s.durableData, txctx, tx, *command.RunCreation)
@@ -487,6 +491,9 @@ func (s *EventSQLiteOwner) CommitAPIEventPublication(ctx context.Context, comman
 	outcome := runSQLiteEventMutationResult(ctx, s, "sqlite API event publication commit", true, func(txctx context.Context, attempt *mutationprotocol.Attempt) (runtimebus.CommittedAPIEventPublication, error) {
 		var result runtimebus.CommittedAPIEventPublication
 		err := attempt.WithSQL(txctx, func(txctx context.Context, tx *sql.Tx) error {
+			if err := requireAPIEventLiveRunTx(txctx, tx, command.LiveRun, false); err != nil {
+				return err
+			}
 			var plan *storedurabledata.RunCreationPlan
 			if command.RunCreation != nil {
 				prepared, prepareErr := storedurabledata.PrepareRunCreationTx(s.durableData, txctx, tx, *command.RunCreation)
@@ -695,6 +702,20 @@ func commitValidatedPublicationSQL(
 		}
 	}
 	return result, nil
+}
+
+func requireAPIEventLiveRunTx(ctx context.Context, tx *sql.Tx, expected *runlifecycle.LiveRun, postgres bool) error {
+	if expected == nil {
+		return nil
+	}
+	live, found, err := storerunlifecycle.LiveRunForTargetTx(ctx, tx, expected.RunID, postgres)
+	if err != nil {
+		return err
+	}
+	if !found || live.RunID != expected.RunID || live.Scope != expected.Scope || !live.Source.Matches(expected.Source) {
+		return runtimebus.ErrAPIEventLiveRunChanged
+	}
+	return nil
 }
 
 func publicationLiveScope(command runtimebus.PublicationCommand) runlifecycle.LiveRunScope {

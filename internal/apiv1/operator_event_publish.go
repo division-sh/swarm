@@ -72,6 +72,7 @@ type eventPublicationParams struct {
 	TargetRoute            events.RouteIdentity
 	TargetRouteSet         bool
 	APIEventEndpoint       *runtimebus.APIEventPublicationEndpoint
+	LiveRun                *runtimerunlifecycle.LiveRun
 	RunID                  string
 	SourceEventID          string
 	IdempotencyKey         string
@@ -226,6 +227,12 @@ func executeOperatorEventPublication(
 			return apiidempotency.Completion{}, err
 		}
 		selectedOpts := opts
+		if !cfg.rootInputOnly && !params.RunIDProvided {
+			params, err = selectEventPublicationLiveRun(ctx, opts, params, bundleIdentity.BundleHash)
+			if err != nil {
+				return apiidempotency.Completion{}, err
+			}
+		}
 		ctx, selectedOpts, params, err = resolveEventPublicationBundleScope(ctx, opts, params, bundleIdentity, cfg)
 		if err != nil {
 			return apiidempotency.Completion{}, err
@@ -255,6 +262,12 @@ func executeOperatorEventPublication(
 		endpoint, err := runtimebus.NewRootInputAPIEventPublicationEndpoint(selectedOpts.Source, resolvedEventName)
 		if err != nil {
 			return apiidempotency.Completion{}, err
+		}
+		if params.LiveRun != nil {
+			endpoint, err = endpoint.ForLiveRun(selectedOpts.Source, *params.LiveRun)
+			if err != nil {
+				return apiidempotency.Completion{}, err
+			}
 		}
 		params.APIEventEndpoint = &endpoint
 		params, err = validateEventPublication(ctx, selectedOpts, params, cfg)
@@ -388,8 +401,10 @@ func eventPublicationParamsFromRequest(req Request, cfg eventPublicationConfig) 
 	}
 	newRun := false
 	if runID == "" {
-		runID = uuid.NewString()
-		newRun = true
+		if cfg.rootInputOnly {
+			runID = uuid.NewString()
+			newRun = true
+		}
 	} else if parsed, err := uuid.Parse(runID); err != nil {
 		return eventPublicationParams{}, bundleIdentityParam{}, NewInvalidParamsError(map[string]any{"field": "run_id", "reason": "must be a UUID"})
 	} else {

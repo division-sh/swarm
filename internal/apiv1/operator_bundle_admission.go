@@ -217,7 +217,7 @@ func eventPublicationRunBundleContext(
 	params eventPublicationParams,
 	cfg eventPublicationConfig,
 ) (runbundle.Availability, bool, error) {
-	if !params.RunIDProvided {
+	if !params.RunIDProvided && params.LiveRun == nil {
 		return runbundle.Availability{}, false, nil
 	}
 	reader := opts.RunBundleContext

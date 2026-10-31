@@ -202,8 +202,8 @@ func TestEventPublishUsesServedSourceAndMapsUnavailable(t *testing.T) {
 	if code != 6 {
 		t.Fatalf("code = %d, want 6 stdout=%s stderr=%s", code, stdout.String(), stderr.String())
 	}
-	if captured.Params["bundle_hash"] != "bundle-v2:sha256:"+strings.Repeat("a", 64) {
-		t.Fatalf("CLI omitted derived runtime source identity: %#v", captured.Params)
+	if _, pinned := captured.Params["bundle_hash"]; pinned {
+		t.Fatalf("CLI pinned health source instead of selecting the live run: %#v", captured.Params)
 	}
 	if !strings.Contains(stderr.String(), "BUNDLE_UNAVAILABLE") {
 		t.Fatalf("stderr = %q, want BUNDLE_UNAVAILABLE", stderr.String())
@@ -245,8 +245,8 @@ func TestEventPublishPayloadEntityIDServerRejectionMapsSupportedCLISurface(t *te
 	if payload["entity_id"] != "11111111-1111-4111-8111-111111111111" || payload["amount"] != float64(50) {
 		t.Fatalf("payload = %#v, want supplied entity_id and amount", payload)
 	}
-	if captured.Params["bundle_hash"] != "bundle-v2:sha256:"+strings.Repeat("a", 64) {
-		t.Fatalf("CLI omitted derived runtime source identity: %#v", captured.Params)
+	if _, pinned := captured.Params["bundle_hash"]; pinned {
+		t.Fatalf("CLI pinned health source instead of selecting the live run: %#v", captured.Params)
 	}
 	if got := captured.Params["idempotency_key"]; got != "idem-cli-create-entity-supplied-id" {
 		t.Fatalf("idempotency_key = %#v", got)
@@ -299,9 +299,8 @@ func TestEventPublishOmitsOptionalParamsWhenNotProvided(t *testing.T) {
 		t.Fatalf("code = %d stderr=%s stdout=%s", code, stderr.String(), stdout.String())
 	}
 	wantParams := map[string]any{
-		"event_name":  "scan.requested",
-		"payload":     map[string]any{},
-		"bundle_hash": "bundle-v2:sha256:" + strings.Repeat("a", 64),
+		"event_name": "scan.requested",
+		"payload":    map[string]any{},
 	}
 	if !reflect.DeepEqual(captured.Params, wantParams) {
 		t.Fatalf("params = %#v, want %#v", captured.Params, wantParams)
