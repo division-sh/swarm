@@ -93,6 +93,7 @@ func TestFiniteRunStartDoesNotVetoOrdinaryServicePublicationBothStores(t *testin
 			t.Fatal(err)
 		}
 		handler := eventPublishTestHandlerWithStores(t, fixture.primary, fixture.primary, fixture.primary, bus, source)
+		seedEventPublishLiveRun(t, fixture.primary, bus, source)
 		created := rpcCall(t, handler, eventPublishBodyWithBundleHash("", runStartTestBundleHashForSource(source), "scan.requested", `{"topic":"service"}`, "", uuid.NewString()))
 		if created.Error != nil {
 			t.Fatalf("ordinary service publication gained a finite-start veto: %#v", created)
