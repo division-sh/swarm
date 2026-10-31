@@ -977,6 +977,10 @@ func TestWorkspaceImageCacheDockerfileInputsAreComplete(t *testing.T) {
 					}
 					defaults++
 				}
+			case "ENV":
+				if line != "ENV DISABLE_AUTOUPDATER=1" {
+					return fmt.Errorf("unreviewed workspace environment input: %s", line)
+				}
 			case "RUN", "USER", "WORKDIR":
 			default:
 				return fmt.Errorf("new Dockerfile dependency requires cache-key review: %s", line)
@@ -990,7 +994,7 @@ func TestWorkspaceImageCacheDockerfileInputsAreComplete(t *testing.T) {
 	if err := validate(raw); err != nil {
 		t.Fatal(err)
 	}
-	for _, extra := range []string{"COPY . /workspace", "ADD https://example.invalid/source /workspace", "RUN --mount=type=bind,target=/input true", "FROM golang:1.25-bookworm", "# syntax=docker/dockerfile:1", "#syntax = docker/dockerfile:1", "# escape=`", "ARG WORKSPACE_GOLANG_BASE=" + workspaceGHCRBase} {
+	for _, extra := range []string{"COPY . /workspace", "ADD https://example.invalid/source /workspace", "RUN --mount=type=bind,target=/input true", "FROM golang:1.25-bookworm", "# syntax=docker/dockerfile:1", "#syntax = docker/dockerfile:1", "# escape=`", "ARG WORKSPACE_GOLANG_BASE=" + workspaceGHCRBase, "ENV OTHER_INPUT=1", "ENV DISABLE_AUTOUPDATER=0"} {
 		if validate(append(append([]byte(nil), raw...), []byte("\n"+extra+"\n")...)) == nil {
 			t.Fatalf("unkeyed input accepted: %s", extra)
 		}
