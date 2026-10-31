@@ -272,17 +272,6 @@ func collectRunForkSourceAdvancedFacts(ctx context.Context, tx *sql.Tx, lineage 
 	return uniqueNonEmptyStrings(facts), nil
 }
 
-func ensureRunForkSourceNotAdvanced(ctx context.Context, tx *sql.Tx, lineage runForkActivationLineage) error {
-	facts, err := collectRunForkSourceAdvancedFacts(ctx, tx, lineage)
-	if err != nil {
-		return err
-	}
-	if len(facts) == 0 {
-		return nil
-	}
-	return runForkReplayResumeError(facts[0], runfork.RunForkReplayResumeFactSourceAdvanced, fmt.Sprintf("fork activation blocked: %s", facts[0]))
-}
-
 func runForkSourceAdvancedCode(family string) (string, bool) {
 	switch strings.TrimSpace(family) {
 	case "events":

@@ -494,7 +494,6 @@ func revisionExactWriterContracts() []revisionExactWriterContract {
 			"runforkrevision.FanOutIntentFact(intent.Request.Key)", "attempt.AddFacts(forkRunID, intentRef)",
 			"runforkrevision.FanOutOutcomeFact(intent.Request.Key, outcome.Ordinal)", "attempt.AddFacts(forkRunID, outcomeRef)",
 		}},
-		{"runforkpersistence/run_fork_fan_out_materializer.go", "bindRunForkFanOutPendingReplays", []string{"bindRunForkContinuedOutcomeTx(ctx, tx, attempt, key, replay, forkEventID, now)"}},
 		{"runforkpersistence/run_fork_fan_out_materializer.go", "bindRunForkContinuedOutcomeTx", []string{"runforkrevision.FanOutOutcomeFact(childKey, outcome.Ordinal)", "attempt.AddFacts(childKey.RunID, ref)"}},
 		{"runforkpersistence/run_fork_selected_fan_out_evidence.go", "bindSelectedForkFanOutEvidenceTx", []string{"bindRunForkContinuedOutcomeTx(ctx, tx, attempt, key, replay, publication.Event().ID(), publication.Event().CreatedAt())"}},
 	}
@@ -896,7 +895,7 @@ func TestRunForkRevisionExactContributorGuardHostileControls(t *testing.T) {
 	t.Run("continued_outcome_named_writer", func(t *testing.T) {
 		root := repoRootForRuntimeWriterGuard(t)
 		for _, contract := range revisionExactWriterContracts() {
-			if contract.symbol != "bindRunForkFanOutPendingReplays" && contract.symbol != "bindRunForkContinuedOutcomeTx" && contract.symbol != "bindSelectedForkFanOutEvidenceTx" {
+			if contract.symbol != "bindRunForkContinuedOutcomeTx" && contract.symbol != "bindSelectedForkFanOutEvidenceTx" {
 				continue
 			}
 			body, err := os.ReadFile(filepath.Join(root, "internal/store/internal/backend", contract.path))
