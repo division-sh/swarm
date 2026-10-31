@@ -15,7 +15,7 @@ func CopyOutputModeVerify(t testing.TB) string {
 	t.Helper()
 	root := CopyExample(t, RootIngress)
 
-	writeClosedVariantFile(t, root, "schema.yaml", "name: output-mode-verify\npins:\n  inputs:\n    - task.assigned\n  outputs:\n    - task.assigned\nconnect:\n  - {event: task.assigned, from: ., to: child}\n")
+	writeClosedVariantFile(t, root, "schema.yaml", "# fixture: output-mode-verify\npins:\n  inputs:\n    - task.assigned\n  outputs:\n    - task.assigned\nconnect:\n  - {event: task.assigned, from: ., to: child}\n")
 	removeClosedVariantFiles(t, root, "nodes.yaml", "events.yaml", "state.yaml")
 	writeClosedVariantFile(t, root, "events.yaml", "task.assigned:\n")
 	writeLegacyInstanceFlow(t, root, "child", `# fixture: child
@@ -81,9 +81,9 @@ func CopyDescribeStageGraph(t testing.TB) string {
 	t.Helper()
 	root := CopyExample(t, RootIngress)
 
-	writeClosedVariantFile(t, root, "schema.yaml", "name: stage-graph\npins:\n  inputs:\n    - ticket.opened\n    - ticket.closed\n  outputs:\n    - ticket.opened\n    - ticket.closed\nconnect:\n  - {event: ticket.opened, from: ., to: support}\n  - {event: ticket.closed, from: ., to: support}\n")
+	writeClosedVariantFile(t, root, "schema.yaml", "# fixture: stage-graph\npins:\n  inputs:\n    - ticket.opened\n    - ticket.closed\n  outputs:\n    - ticket.opened\n    - ticket.closed\nconnect:\n  - {event: ticket.opened, from: ., to: support}\n  - {event: ticket.closed, from: ., to: support}\n")
 	removeClosedVariantFiles(t, root, "nodes.yaml", "events.yaml", "state.yaml")
-	writeLegacyInstanceFlow(t, root, "support", `name: support
+	writeLegacyInstanceFlow(t, root, "support", `# fixture: support
 pins:
   inputs:
     - ticket.opened
@@ -272,7 +272,7 @@ func CopyFirstFlowTutorial(t testing.TB) string {
 	t.Helper()
 	root := CopyExample(t, RootIngress)
 
-	writeClosedVariantFile(t, root, "schema.yaml", "name: ticket-flow\nstages:\n  open: {}\n  assigned: {}\n  resolved: {final: true}\npins:\n  inputs:\n    - ticket.classified\n")
+	writeClosedVariantFile(t, root, "schema.yaml", "# fixture: ticket-flow\nstages:\n  open: {}\n  assigned: {}\n  resolved: {final: true}\npins:\n  inputs:\n    - ticket.classified\n")
 	writeClosedVariantFile(t, root, "state.yaml", `category: ""
 priority: ""
 resolution: ""

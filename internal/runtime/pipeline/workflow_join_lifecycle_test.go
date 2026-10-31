@@ -919,8 +919,7 @@ func workflowJoinLifecycleFixtureFiles(review bool, loop string) map[string]stri
 		"orders/manifest.yaml": "version: 1.0.0\nplatform_version: \">=0.7.0 <0.8.0\"\n",
 		"schema.yaml":          "stages: []\n",
 
-		"orders/schema.yaml": `name: orders
-instance: instance_key
+		"orders/schema.yaml": `instance: instance_key
 stages:
   awaiting: {}
   dispatching: {}

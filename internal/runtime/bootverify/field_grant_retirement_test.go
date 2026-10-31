@@ -19,7 +19,7 @@ func TestEntityContractResolutionCannotBorrowParentState(t *testing.T) {
 	writeBootverifyFixtureFile(t, filepath.Join(root, "child", "manifest.yaml"), "version: 1.0.0\nplatform_version: '*'\n")
 	writeBootverifyFixtureFile(t, filepath.Join(root, "child", "schema.yaml"), "stages: []\n")
 	writeBootverifyFixtureFile(t, filepath.Join(root, "child", "state.yaml"), "local: text\nshared: integer\n")
-	writeBootverifyFixtureFile(t, filepath.Join(root, "local-state", "schema.yaml"), "name: local-state\n")
+	writeBootverifyFixtureFile(t, filepath.Join(root, "local-state", "schema.yaml"), "stages: []\n")
 	bundle := loadFixtureBundleAt(t, repo, root, runtimecontracts.DefaultPlatformSpecFile(repo))
 	source := semanticview.Wrap(bundle)
 	if _, present := entityruntime.ResolveForFlow(source, "local-state"); present {
