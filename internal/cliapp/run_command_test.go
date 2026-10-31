@@ -795,7 +795,7 @@ func TestRunCommandConnectedForegroundReturnsOnRunQuiescence(t *testing.T) {
 		if code != 8 || !strings.Contains(stderr.String(), "swarm run status 7e3709ac-9ed5-5d2d-afb2-da8ed843f2ab") || !strings.Contains(stderr.String(), "work continues") {
 			t.Fatalf("code=%d stdout=%s stderr=%s", code, stdout.String(), stderr.String())
 		}
-		if !strings.Contains(stdout.String(), "1 processing (active) | 1 live") || strings.Contains(stdout.String(), "unrelated/active") {
+		if !strings.Contains(stdout.String(), "1 processing (live) | 1 live") || strings.Contains(stdout.String(), "unrelated/active") {
 			t.Fatalf("timeout lost run-wide counts or named another invocation's instance: %s", stdout.String())
 		}
 		if !strings.Contains(stdout.String(), "next wake 2030-01-01T01:00:00Z") {

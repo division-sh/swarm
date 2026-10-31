@@ -31,9 +31,19 @@ func (p PublishRecipientPlan) TargetFailureError(component, operation string, at
 	}
 	var noHandler *runtimepipeline.NoHandlerError
 	if errors.As(p.targetFailureCause, &noHandler) {
+		if !onlyNoHandlerRefusals(p.targetFailureCause) {
+			return runtimefailures.WrapDetail("route_plan_preflight_failed", component, operation, attributes, p.targetFailureCause)
+		}
 		return runtimefailures.FromError(p.targetFailureCause, component, operation)
 	}
 	return canonicalTargetDeliveryFailure(failure, component, operation, attributes)
+}
+
+func onlyNoHandlerRefusals(err error) bool {
+	return err != nil && runtimefailures.OnlyBranches(err, func(branch error) bool {
+		typed, ok := branch.(*runtimefailures.Error)
+		return ok && typed.Failure.Class == runtimefailures.ClassUnexpectedArrival && typed.Failure.Detail.Code == "no_route"
+	})
 }
 
 const (
