@@ -74,7 +74,7 @@ func TestMockNormalRealDockerEmissionBothStores(t *testing.T) {
 				return &activationGatewayDockerWorkspace{DockerManager: owner, fault: activationFault, network: cfg.WorkspaceNetwork}, nil
 			}
 			rt := startWorkspaceGatewayProofRuntime(t, backend, root, workspace.BackendDocker, factory, "0.0.0.0:0")
-			published := requireServedEventPublishRPCResult(t, rt.Endpoint, map[string]any{
+			published := requireServedRunStartRPCResult(t, rt.Endpoint, map[string]any{
 				"event_name": "items.ready", "bundle_hash": rt.BundleHash,
 				"payload": map[string]any{"items": []string{"container-emitted"}}, "idempotency_key": "normal-docker-emission",
 			})

@@ -94,7 +94,7 @@ func TestServedCanceledTurnRecoveryBothStores(t *testing.T) {
 				process, rt = start()
 			}
 			params := map[string]any{"event_name": "work.requested", "bundle_hash": rt.BundleHash, "payload": map[string]any{"case_id": "bounded-turn"}, "idempotency_key": "canceled-recovery"}
-			accepted := requireServedEventPublishRPCResult(t, rt.Endpoint, params)
+			accepted := requireServedRunStartRPCResult(t, rt.Endpoint, params)
 			var command effects.CanceledTurnCommand
 			wait := time.NewTimer(20 * time.Second)
 			defer wait.Stop()
@@ -191,7 +191,7 @@ func TestServedCanceledTurnRecoveryBothStores(t *testing.T) {
 			var exact operatorread.OperatorEventFull
 			requireServedJSONRPCResult(t, rt.Endpoint, "event.get", map[string]any{"event_id": cause}, &exact)
 			restart()
-			duplicate := requireServedEventPublishRPCResult(t, rt.Endpoint, params)
+			duplicate := requireServedRunStartRPCResult(t, rt.Endpoint, params)
 			if duplicate.EventID != accepted.EventID || duplicate.RunID != accepted.RunID {
 				t.Fatal("public retry changed the original ingress identity")
 			}

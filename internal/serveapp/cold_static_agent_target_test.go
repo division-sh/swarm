@@ -29,7 +29,7 @@ func TestServedColdStaticAgentConstructionBothStores(t *testing.T) {
 				"event_name": "task.assigned", "bundle_hash": rt.BundleHash,
 				"payload": map[string]any{"work_id": "one"}, "idempotency_key": "future-provider-source",
 			}
-			response := requestServedJSONRPCWithTimeout(t, rt.Endpoint, "event.publish", params, 30*time.Second)
+			response := requestServedJSONRPCWithTimeout(t, rt.Endpoint, "run.start", params, 30*time.Second)
 			if response.Error != nil {
 				t.Fatalf("cold-provider source admission: %+v\n%s", response.Error, process.outputString())
 			}
@@ -106,7 +106,7 @@ func TestServedColdStaticAgentConstructionBothStores(t *testing.T) {
 			if err != nil {
 				t.Fatal(err)
 			}
-			duplicate := requestServedJSONRPCWithTimeout(t, rt.Endpoint, "event.publish", params, 30*time.Second)
+			duplicate := requestServedJSONRPCWithTimeout(t, rt.Endpoint, "run.start", params, 30*time.Second)
 			if duplicate.Error != nil {
 				t.Fatalf("accepted source replay after completion: %+v", duplicate.Error)
 			}

@@ -23,7 +23,7 @@ func TestBaselineServedRepeatedStaticRunProbe(t *testing.T) {
 			var firstProducer string
 			var firstSnapshot map[string][][]string
 			for attempt := 1; attempt <= 2; attempt++ {
-				seed := requireServedEventPublishRPCResult(t, rt.Endpoint, map[string]any{
+				seed := requireServedRunStartRPCResult(t, rt.Endpoint, map[string]any{
 					"event_name": "parent.seeded", "bundle_hash": rt.BundleHash,
 					"payload":         map[string]any{"work_id": fmt.Sprintf("work-%d", attempt)},
 					"idempotency_key": fmt.Sprintf("baseline-static-%d", attempt),

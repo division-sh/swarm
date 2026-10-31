@@ -64,11 +64,11 @@ func TestA2JoinPublicProjectionAgreementBothStores(t *testing.T) {
 				}
 			}
 			process, rt := start()
-			opened := requireServedEventPublishRPCResult(t, rt.Endpoint, map[string]any{
+			opened := requireServedRunStartRPCResult(t, rt.Endpoint, map[string]any{
 				"bundle_hash": rt.BundleHash, "event_name": "order.started", "idempotency_key": "a2-m37-start",
 				"payload": map[string]any{"dispatch_id": "dispatch-m37", "expected": []string{"op-a", "op-b"}},
 			})
-			if !opened.NewRunCreated || opened.RunID == "" || opened.EventID == "" {
+			if opened.Status != "live" || opened.RunID == "" || opened.EventID == "" {
 				t.Fatalf("supported root ingress did not create the join run: %+v", opened)
 			}
 			a2WaitJoinPublicRun(t, rt, opened.RunID, "live", 0, true)

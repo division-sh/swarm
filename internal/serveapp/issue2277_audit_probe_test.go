@@ -25,7 +25,7 @@ func TestAudit2277ForkDurableResultBypassesGenericCompletionBothStores(t *testin
 	for _, backend := range []servedparity.Backend{servedparity.BackendDefaultSQLite, servedparity.BackendExplicitPostgres} {
 		t.Run(string(backend), func(t *testing.T) {
 			rt := startServedControlProofRuntimeWithFixture(t, backend, func(t *testing.T) string { return canonicalrouting.CopyRootIngressServedFollowUp(t) })
-			seed := requireServedEventPublishRPCResult(t, rt.Endpoint, map[string]any{"bundle_hash": rt.BundleHash, "event_name": "item.received", "payload": map[string]any{"item_id": "hold"}, "idempotency_key": "audit2277-source"})
+			seed := requireServedRunStartRPCResult(t, rt.Endpoint, map[string]any{"bundle_hash": rt.BundleHash, "event_name": "item.received", "payload": map[string]any{"item_id": "hold"}, "idempotency_key": "audit2277-source"})
 			waitServedRunDeliveryQuiescence(t, rt.ReadRunDeliveries, seed.RunID)
 			point := requireServedEventPublishRPCResult(t, rt.Endpoint, map[string]any{"bundle_hash": rt.BundleHash, "run_id": seed.RunID, "event_name": "item.processed", "payload": map[string]any{"item_id": "hold"}, "idempotency_key": "audit2277-point"})
 			waitServedRunDeliveryQuiescence(t, rt.ReadRunDeliveries, seed.RunID)
@@ -127,7 +127,7 @@ func TestAudit2277StoppedRunReadinessRestart(t *testing.T) {
 			first := startServeRuntimeTestProcess(t, opts)
 			first.waitForReadyLine()
 			endpoint := "http://" + serveRuntimeAPIListenerFromOutput(t, first.outputString()) + "/v1/rpc"
-			seed := requireServedEventPublishRPCResult(t, endpoint, map[string]any{"bundle_hash": bundle, "event_name": "opco.bootstrap_requested", "payload": map[string]any{"owner": "operator"}, "idempotency_key": "audit2277-stop-source"})
+			seed := requireServedRunStartRPCResult(t, endpoint, map[string]any{"bundle_hash": bundle, "event_name": "opco.bootstrap_requested", "payload": map[string]any{"owner": "operator"}, "idempotency_key": "audit2277-stop-source"})
 			requireServedEventPublishEntityState(t, db, backend, seed.RunID, "", "waiting")
 			spinup := requireServedEventPublishRPCResult(t, endpoint, map[string]any{"run_id": seed.RunID, "source_event_id": seed.EventID, "event_name": "opco.spinup_requested", "payload": map[string]any{"instance_id": "11111111-1111-4111-8111-111111111111", "product_id": "product-1"}, "idempotency_key": "audit2277-spinup"})
 			waitServedEventPublishEventID(t, db, backend, seed.RunID, servedTypedCreationInstancePath+"/opco.product_initialization_requested")

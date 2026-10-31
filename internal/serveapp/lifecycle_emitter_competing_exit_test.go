@@ -53,7 +53,7 @@ func TestServedLifecycleEmitterCompetingExitPublication(t *testing.T) {
 								t.Logf("failure-time finalization/claim stacks:\n%s", stack[:n])
 							})
 							admissionStarted = time.Now().UTC()
-							seed := requireServedEventPublishRPCResult(t, rt.Endpoint, map[string]any{"bundle_hash": rt.BundleHash, "event_name": "work.requested", "payload": map[string]any{"seed": true}, "idempotency_key": "competing-start"})
+							seed := requireServedRunStartRPCResult(t, rt.Endpoint, map[string]any{"bundle_hash": rt.BundleHash, "event_name": "work.requested", "payload": map[string]any{"seed": true}, "idempotency_key": "competing-start"})
 							admissionFinished = time.Now().UTC()
 							runID, seedID = seed.RunID, seed.EventID
 							if diagnostic != nil {
