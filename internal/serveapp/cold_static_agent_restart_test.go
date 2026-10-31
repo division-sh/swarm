@@ -41,7 +41,7 @@ func TestServedColdStaticAgentRestartBothStores(t *testing.T) {
 				"event_name": "task.assigned", "bundle_hash": served.BundleHash,
 				"payload": map[string]any{"work_id": "restart"}, "idempotency_key": "cold-static-restart",
 			}
-			body, err := json.Marshal(map[string]any{"jsonrpc": "2.0", "id": "cold-restart", "method": "event.publish", "params": params})
+			body, err := json.Marshal(map[string]any{"jsonrpc": "2.0", "id": "cold-restart", "method": "run.start", "params": params})
 			if err != nil {
 				t.Fatal(err)
 			}
@@ -126,7 +126,7 @@ func TestServedColdStaticAgentRestartBothStores(t *testing.T) {
 			})
 			// Reissue the accepted command through public admission, not through
 			// a reconstructed current descriptor or a new creation request.
-			duplicate := requireServedEventPublishRPCResult(t, recovered.Endpoint, params)
+			duplicate := requireServedRunStartRPCResult(t, recovered.Endpoint, params)
 			if duplicate.EventID != seed.EventID || duplicate.RunID != seed.RunID {
 				t.Fatalf("restart reminted the accepted source: before=%+v after=%+v", seed, duplicate)
 			}

@@ -1556,13 +1556,13 @@ func runServedRunForkBackendProof(t *testing.T, backend servedparity.Backend) {
 		return canonicalrouting.CopyRootIngressServedFollowUp(t)
 	})
 	publication := rt.Probe.Raw()
-	started := requireServedEventPublishRPCResult(t, rt.Endpoint, map[string]any{
+	started := requireServedRunStartRPCResult(t, rt.Endpoint, map[string]any{
 		"bundle_hash":     rt.BundleHash,
 		"event_name":      "item.received",
 		"payload":         map[string]any{"item_id": "selected-store-fork"},
 		"idempotency_key": "issue-2361-" + rt.Backend + "-source",
 	})
-	if !started.NewRunCreated || strings.TrimSpace(started.RunID) == "" || strings.TrimSpace(started.EventID) == "" {
+	if started.Status != "live" || strings.TrimSpace(started.RunID) == "" || strings.TrimSpace(started.EventID) == "" {
 		t.Fatalf("initial event.publish result = %#v, want a new run and event", started)
 	}
 	waitForServedEventPublishNodeDeliveryLifecycleForNode(t, rt.DB, rt.Backend, started.RunID, started.EventID, identitytest.RootNode(t, "item-handler").Key(), rt.Probe)
@@ -1859,13 +1859,13 @@ type servedConversationForkSource struct {
 
 func runServedConversationForkLifecycleProof(t *testing.T, rt servedConversationForkProofRuntime) {
 	t.Helper()
-	initial := requireServedEventPublishRPCResult(t, rt.Endpoint, map[string]any{
+	initial := requireServedRunStartRPCResult(t, rt.Endpoint, map[string]any{
 		"event_name":      "external.observed",
 		"bundle_hash":     rt.BundleHash,
 		"payload":         map[string]any{},
 		"idempotency_key": "issue-1997-" + rt.Backend + "-source-run",
 	})
-	if !initial.NewRunCreated || initial.RunID == "" {
+	if initial.Status != "live" || initial.RunID == "" {
 		t.Fatalf("%s conversation fork source run = %#v", rt.Backend, initial)
 	}
 	// Empty delivery queues do not join committed source-agent activation.
@@ -2595,13 +2595,13 @@ func runServedRuntimeIngressControlLifecycleProof(t *testing.T, rt servedControl
 		t.Fatalf("%s duplicate runtime.pause data = %#v, want %s", rt.Backend, duplicatePause.Data, apiv1.RuntimeAlreadyPausedCode)
 	}
 
-	queued := requireServedEventPublishRPCResult(t, rt.Endpoint, map[string]any{
+	queued := requireServedRunStartRPCResult(t, rt.Endpoint, map[string]any{
 		"event_name":      "external.observed",
 		"bundle_hash":     rt.BundleHash,
 		"payload":         map[string]any{},
 		"idempotency_key": keyPrefix + "-runtime-queued",
 	})
-	if !queued.NewRunCreated || queued.RunID == "" || queued.EventID == "" {
+	if queued.Status != "live" || queued.RunID == "" || queued.EventID == "" {
 		t.Fatalf("%s runtime-paused event.publish result = %#v, want new queued run", rt.Backend, queued)
 	}
 	requireNoServedReceiptOutcomeDuring(t, rt.DB, rt.Backend, queued.EventID, "platform", "pipeline", "success", 250*time.Millisecond)
@@ -3263,13 +3263,13 @@ func runServedCreateCarryProjectionPostgresProof(t *testing.T) {
 
 func runServedCreateCarryProjectionProof(t *testing.T, endpoint string, db *sql.DB, backend, bundleHash string) {
 	t.Helper()
-	root := requireServedEventPublishRPCResult(t, endpoint, map[string]any{
+	root := requireServedRunStartRPCResult(t, endpoint, map[string]any{
 		"event_name":      "validation.triggered",
 		"bundle_hash":     bundleHash,
 		"payload":         map[string]any{"candidate": "candidate-1"},
 		"idempotency_key": "issue-2025-" + backend,
 	})
-	if !root.NewRunCreated || root.RunID == "" || root.EventID == "" {
+	if root.Status != "live" || root.RunID == "" || root.EventID == "" {
 		t.Fatalf("%s create carry root result = %#v, want new run", backend, root)
 	}
 	requestedEventID := waitServedEventPublishEventID(t, db, backend, root.RunID, "producer/validation.requested")
@@ -4831,6 +4831,7 @@ func requireServedEventPublishPreHandlerProof(t *testing.T, db *sql.DB, backend 
 type servedEventPublishRPCResult struct {
 	EventID                  string `json:"event_id"`
 	RunID                    string `json:"run_id"`
+	Status                   string `json:"status,omitempty"`
 	OperatorReferenceEventID string `json:"operator_reference_event_id,omitempty"`
 	NewRunCreated            bool   `json:"new_run_created"`
 	Deliveries               []struct {
@@ -4844,6 +4845,16 @@ func requireServedEventPublishRPCResult(t *testing.T, endpoint string, params ma
 	t.Helper()
 	var result servedEventPublishRPCResult
 	requireServedJSONRPCResult(t, endpoint, "event.publish", params, &result)
+	return result
+}
+
+func requireServedRunStartRPCResult(t *testing.T, endpoint string, params map[string]any) servedEventPublishRPCResult {
+	t.Helper()
+	var result servedEventPublishRPCResult
+	requireServedJSONRPCResult(t, endpoint, "run.start", params, &result)
+	if result.Status != "live" || result.RunID == "" || result.EventID == "" {
+		t.Fatalf("run.start did not return its live run and initial event: %+v", result)
+	}
 	return result
 }
 

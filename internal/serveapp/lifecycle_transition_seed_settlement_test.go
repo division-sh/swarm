@@ -75,7 +75,7 @@ func TestServedCompiledTransitionSeedSettlementFenceBothStores(t *testing.T) {
 				}
 			})
 			reader := requireReceiverProofStateReader(t, rt.selected)
-			seed := requireServedEventPublishRPCResult(t, rt.Endpoint, map[string]any{
+			seed := requireServedRunStartRPCResult(t, rt.Endpoint, map[string]any{
 				"event_name": "work.seeded", "bundle_hash": rt.BundleHash,
 				"payload": map[string]any{"seed": true}, "idempotency_key": "held-carrier/seed",
 			})

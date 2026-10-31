@@ -32,7 +32,7 @@ func TestServedCompiledTransitionSelectedCarrierEvidenceOnBothStores(t *testing.
 					for _, choice := range []string{"alpha", "beta"} {
 						t.Run(handler+"/"+choice, func(t *testing.T) {
 							key := handler + "/" + choice
-							seed := requireServedEventPublishRPCResult(t, rt.Endpoint, map[string]any{"event_name": "work.seeded", "bundle_hash": rt.BundleHash, "payload": map[string]any{"seed": true}, "idempotency_key": key + "/seed"})
+							seed := requireServedRunStartRPCResult(t, rt.Endpoint, map[string]any{"event_name": "work.seeded", "bundle_hash": rt.BundleHash, "payload": map[string]any{"seed": true}, "idempotency_key": key + "/seed"})
 							var rootEventOwner any = rt.SQLite
 							if rt.Postgres != nil {
 								rootEventOwner = rt.Postgres
@@ -238,7 +238,7 @@ func TestServedCompiledLoopEscapeSuppressesOrdinaryRepeatOnBothStores(t *testing
 			})
 			var finish servedEventPublishRPCResult
 			var staleAdmitEventID string
-			started := requireServedEventPublishRPCResult(t, rt.Endpoint, map[string]any{"event_name": "work.requested", "bundle_hash": rt.BundleHash, "payload": map[string]any{"seed": true}, "idempotency_key": "create"})
+			started := requireServedRunStartRPCResult(t, rt.Endpoint, map[string]any{"event_name": "work.requested", "bundle_hash": rt.BundleHash, "payload": map[string]any{"seed": true}, "idempotency_key": "create"})
 			requireIssue2564LiveRootMode(t, rt, started.RunID, started.EventID)
 			entityID := rt.waitEntityStage(t, started.RunID, started.RunID, "waiting")
 			currentHistory := func() []pipeline.WorkflowTransitionRecord {

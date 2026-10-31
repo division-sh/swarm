@@ -489,7 +489,7 @@ func runForkReceiverOwnershipJourney(t *testing.T, backend servedparity.Backend,
 	}
 	publication := newExactOriginPublicationProbe(t)
 	rt := startServedLiveFlowProofRuntimeFromSource(t, backend, root)
-	seed := requireServedEventPublishRPCResult(t, rt.Endpoint, map[string]any{
+	seed := requireServedRunStartRPCResult(t, rt.Endpoint, map[string]any{
 		"event_name": seedName, "bundle_hash": rt.BundleHash,
 		"payload": map[string]any{"token": "receiver-proof"}, "idempotency_key": "ownership-seed",
 	})
@@ -634,7 +634,7 @@ func runForkReceiverOwnershipJourney(t *testing.T, backend servedparity.Backend,
 	t.Logf("source success reached: run=%s frontier=%s receivers=%d", seed.RunID, frontier, len(receivers))
 	requireServedOKJSONRPC(t, rt.Endpoint, "run.pause", map[string]any{"run_id": seed.RunID, "idempotency_key": "ownership-source-pause"})
 	if option.nested {
-		siblingSeed := requireServedEventPublishRPCResult(t, rt.Endpoint, map[string]any{"event_name": seedName, "bundle_hash": rt.BundleHash,
+		siblingSeed := requireServedRunStartRPCResult(t, rt.Endpoint, map[string]any{"event_name": seedName, "bundle_hash": rt.BundleHash,
 			"payload": map[string]any{"token": "receiver-proof"}, "idempotency_key": "ownership-sibling-seed"})
 		waitServedRunDeliveryQuiescence(t, rt.ReadRunDeliveries, siblingSeed.RunID)
 		waitForkReceiverSourceCompletion(t, rt, siblingSeed.RunID)
@@ -819,7 +819,7 @@ func TestSelectedForkReceiverAcquisitionCapabilityRefusalBothStores(t *testing.T
 			completion := installReceiverCompletionBoundary(t)
 			root := canonicalrouting.CopyTemplateCreateResolution(t, canonicalrouting.TemplateCreateResolutionOptions{Mint: canonicalrouting.CreateMintUUID})
 			rt := startServedLiveFlowProofRuntimeFromSource(t, backend, root)
-			seed := requireServedEventPublishRPCResult(t, rt.Endpoint, map[string]any{"event_name": "validation.triggered", "bundle_hash": rt.BundleHash,
+			seed := requireServedRunStartRPCResult(t, rt.Endpoint, map[string]any{"event_name": "validation.triggered", "bundle_hash": rt.BundleHash,
 				"payload": map[string]any{"candidate": "fork-capability"}, "idempotency_key": "capability-source"})
 			waitServedRunDeliveryQuiescence(t, rt.ReadRunDeliveries, seed.RunID)
 			waitForkReceiverSourceCompletion(t, rt, seed.RunID)
@@ -942,7 +942,7 @@ func TestServedForkSourceCompletionWithoutForkBothStores(t *testing.T) {
 		t.Run(string(backend), func(t *testing.T) {
 			publication := newExactOriginPublicationProbe(t)
 			rt := startServedLiveFlowProofRuntimeFromSource(t, backend, canonicalrouting.CopyForkDeliveryRouteEvidence(t))
-			seed := requireServedEventPublishRPCResult(t, rt.Endpoint, map[string]any{"event_name": "parent.seeded", "bundle_hash": rt.BundleHash,
+			seed := requireServedRunStartRPCResult(t, rt.Endpoint, map[string]any{"event_name": "parent.seeded", "bundle_hash": rt.BundleHash,
 				"payload": map[string]any{"work_id": "no-fork-completion"}, "idempotency_key": "no-fork-seed"})
 			waitServedRunDeliveryQuiescence(t, rt.ReadRunDeliveries, seed.RunID)
 			if err := waitExactOriginPublications(t.Context(), publication, seed.EventID); err != nil {
@@ -1143,7 +1143,7 @@ func TestSelectedForkIndependentReceiverBusinessMutationBothStores(t *testing.T)
 			t.Run(fmt.Sprintf("%s/entityless_producer=%t", backend, entityless), func(t *testing.T) {
 				publication := newExactOriginPublicationProbe(t)
 				rt := startServedLiveFlowProofRuntimeFromSource(t, backend, canonicalrouting.CopyForkReceiverBusinessMutationOwnership(t, entityless))
-				seed := requireServedEventPublishRPCResult(t, rt.Endpoint, map[string]any{"event_name": "start.seeded", "bundle_hash": rt.BundleHash, "payload": map[string]any{"token": "receiver-proof"}, "idempotency_key": "business-seed"})
+				seed := requireServedRunStartRPCResult(t, rt.Endpoint, map[string]any{"event_name": "start.seeded", "bundle_hash": rt.BundleHash, "payload": map[string]any{"token": "receiver-proof"}, "idempotency_key": "business-seed"})
 				waitServedRunDeliveryQuiescence(t, rt.ReadRunDeliveries, seed.RunID)
 				waitForkReceiverSourceCompletion(t, rt, seed.RunID)
 				seedRows := readForkReceiverRows(t, rt, seed.RunID)

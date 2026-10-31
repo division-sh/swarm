@@ -137,7 +137,7 @@ func TestIssue2564ServedM33NonterminalDeadlineLateResultBothStores(t *testing.T)
 				var timerOnce sync.Once
 				unblockTimer := func() { timerOnce.Do(func() { close(releaseTimer) }) }
 				defer unblockTimer()
-				_, rt := startIssue2564Served(t, backend, writeIssue2564Fixture(t, true), p, func(ctx context.Context, _ string, evt events.Event) error {
+				process, rt := startIssue2564Served(t, backend, writeIssue2564Fixture(t, true), p, func(ctx context.Context, _ string, evt events.Event) error {
 					if string(evt.Type()) != evt.FlowInstance()+"/hub.result" {
 						return nil
 					}
@@ -149,8 +149,12 @@ func TestIssue2564ServedM33NonterminalDeadlineLateResultBothStores(t *testing.T)
 						return ctx.Err()
 					}
 				}, issue2564StageTimerPublicationGate{release: releaseTimer})
-				var seed servedEventPublishRPCResult
-				requireServedJSONRPCResult(t, rt.Endpoint, "run.start", map[string]any{"event_name": "hub.start", "bundle_hash": rt.BundleHash, "payload": map[string]any{"hub_id": "m33"}, "idempotency_key": "m33-start"}, &seed)
+				owner, ok := rt.persistence.deps.EventStore.(storetest.RunFixtureStore)
+				if !ok {
+					t.Fatal("deadline fixture requires its native run lifecycle owner")
+				}
+				seedOwnedPublicationLiveRun(t, servedTestProcessRuntime(t, process), rt.BundleHash, owner)
+				seed := requireServedEventPublishRPCResult(t, rt.Endpoint, map[string]any{"event_name": "hub.start", "bundle_hash": rt.BundleHash, "payload": map[string]any{"hub_id": "m33"}, "idempotency_key": "m33-start"})
 				entityID := rt.waitEntityStage(t, seed.RunID, "", "idle")
 				requireServedEventPublishRPCResult(t, rt.Endpoint, map[string]any{"event_name": "hub.begin", "run_id": seed.RunID, "payload": map[string]any{"hub_id": "m33"}, "idempotency_key": "m33-begin"})
 				p.wait(t, "a", 0)

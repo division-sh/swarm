@@ -203,10 +203,13 @@ func publishPresenceEvent(t *testing.T, rpc *releaseRPCClient, hash, runID, name
 	t.Helper()
 	params := map[string]any{
 		"bundle_hash": hash, "event_name": name, "payload": payload,
-		"emitter": "releasee2e", "idempotency_key": "presence-" + name,
+		"idempotency_key": "presence-" + name,
 	}
+	method := "run.start"
 	if runID != "" {
 		params["run_id"] = runID
+		params["emitter"] = "releasee2e"
+		method = "event.publish"
 	}
 	var result struct {
 		EventID string `json:"event_id"`
@@ -214,7 +217,7 @@ func publishPresenceEvent(t *testing.T, rpc *releaseRPCClient, hash, runID, name
 	}
 	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
 	defer cancel()
-	if err := rpc.call(ctx, "event.publish", params, &result); err != nil {
+	if err := rpc.call(ctx, method, params, &result); err != nil {
 		t.Fatal(err)
 	}
 	if result.EventID == "" || result.RunID == "" || (runID != "" && result.RunID != runID) {

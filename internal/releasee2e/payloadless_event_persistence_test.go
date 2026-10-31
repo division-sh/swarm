@@ -79,9 +79,9 @@ func TestPayloadlessEventPublicPersistenceJourneyBothStores(t *testing.T) {
 				}
 				ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
 				defer cancel()
-				if err := process.rpc.call(ctx, "event.publish", map[string]any{
+				if err := process.rpc.call(ctx, "run.start", map[string]any{
 					"bundle_hash": bundleHash, "event_name": "task.requested", "payload": map[string]any{},
-					"emitter": "releasee2e", "idempotency_key": key,
+					"idempotency_key": key,
 				}, &published); err != nil || published.RunID == "" {
 					t.Fatalf("payload-less ingress: result=%+v err=%v", published, err)
 				}

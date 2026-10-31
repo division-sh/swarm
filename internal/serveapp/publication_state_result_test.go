@@ -30,7 +30,7 @@ func TestServedStateResultPublicationBothStores(t *testing.T) {
 					requestID := uuid.NewString()
 					params := map[string]any{"event_name": name, "bundle_hash": rt.BundleHash, "idempotency_key": "state-result-seed",
 						"payload": map[string]any{"request_id": requestID, "content": document, "result_kind": outcome}}
-					seed := requireServedEventPublishRPCResult(t, rt.Endpoint, params)
+					seed := requireServedRunStartRPCResult(t, rt.Endpoint, params)
 					eventName, otherEventName := local, "result.accepted"
 					if outcome == "accepted" {
 						otherEventName = "result.rejected"
@@ -141,7 +141,7 @@ func TestServedStateResultPublicationBothStores(t *testing.T) {
 					}
 					setServeRuntimeRecovery(t, opts.ConfigPath, false, true)
 					_, rt = start()
-					duplicate := requireServedEventPublishRPCResult(t, rt.Endpoint, params)
+					duplicate := requireServedRunStartRPCResult(t, rt.Endpoint, params)
 					if duplicate.EventID != seed.EventID || duplicate.RunID != seed.RunID || readback() != before {
 						t.Fatal("restart/duplicate changed state-result occurrence")
 					}

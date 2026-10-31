@@ -82,7 +82,7 @@ func TestIssue2564H2SynchronizedBranchesBothStores(t *testing.T) {
 				t.Fatalf("H2 native observation owner missing: %T", served.selected)
 			}
 			rt := issue2564H2Fixture{Endpoint: served.Endpoint, Backend: backend, BundleHash: served.BundleHash, selected: reader, cuts: map[issue2564H2CutCoordinate]issue2564H2CutWitness{}}
-			seed := requireServedEventPublishRPCResult(t, rt.Endpoint, map[string]any{"event_name": "hub.start", "bundle_hash": rt.BundleHash, "payload": map[string]any{"hub_id": "h05"}, "idempotency_key": "branch-start"})
+			seed := requireServedRunStartRPCResult(t, rt.Endpoint, map[string]any{"event_name": "hub.start", "bundle_hash": rt.BundleHash, "payload": map[string]any{"hub_id": "h05"}, "idempotency_key": "branch-start"})
 			accepted := map[string]string{}
 			var previous string
 			for i, stage := range []string{"s1", "s2"} {

@@ -38,11 +38,11 @@ func startServedMailboxEntityFilterProof(t *testing.T, backend servedparity.Back
 	})
 	var runs, entities, events []string
 	for i := 0; i < 3; i++ {
-		published := requireServedEventPublishRPCResult(t, rt.Endpoint, map[string]any{
+		published := requireServedRunStartRPCResult(t, rt.Endpoint, map[string]any{
 			"event_name": "review.requested", "bundle_hash": rt.BundleHash,
 			"payload": map[string]any{"item_id": uuid.NewString()}, "idempotency_key": uuid.NewString(),
 		})
-		if !published.NewRunCreated || published.RunID == "" || published.EventID == "" {
+		if published.Status != "live" || published.RunID == "" || published.EventID == "" {
 			t.Fatalf("event.publish = %+v, want new run", published)
 		}
 		waitForServedEventPublishNodeDeliveryLifecycleForNode(t, rt.DB, rt.Backend, published.RunID, published.EventID, identitytest.RootNode(t, "reviewer").Key(), rt.Probe)
