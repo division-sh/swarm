@@ -2806,10 +2806,7 @@ func TestDefaultRuntimeConfig_IgnoresRetiredRuntimeLLMConfigEnv(t *testing.T) {
 	}
 	if cfg.LLM.ClaudeCLI.Command != "claude" ||
 		cfg.LLM.ClaudeCLI.Timeout != time.Hour ||
-		cfg.LLM.ClaudeCLI.OutputFormat != "stream-json" ||
-		cfg.LLM.ClaudeCLI.Retries != 1 ||
-		cfg.LLM.ClaudeCLI.NoSessionPersistence ||
-		cfg.LLM.ClaudeCLI.UseTMux {
+		cfg.LLM.ClaudeCLI.OutputFormat != "stream-json" {
 		t.Fatalf("claude_cli defaults = %#v, want built-ins", cfg.LLM.ClaudeCLI)
 	}
 }

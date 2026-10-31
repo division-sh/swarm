@@ -213,9 +213,8 @@ func validDatabasePasswordConfig() *Config {
 				RotateOnParseFailures: 1,
 			},
 			ClaudeCLI: ClaudeCLIConfig{
-				Command:              "true",
-				OutputFormat:         "json",
-				NoSessionPersistence: false,
+				Command:      "true",
+				OutputFormat: "json",
 			},
 		},
 	}
@@ -358,7 +357,6 @@ func TestValidate_CLI_TestRequiresCommandAndJson(t *testing.T) {
 	c.LLM.Session.RotateOnParseFailures = 1
 	c.LLM.ClaudeCLI.Command = ""
 	c.LLM.ClaudeCLI.OutputFormat = "text"
-	c.LLM.ClaudeCLI.NoSessionPersistence = true
 	if err := c.Validate(); err == nil {
 		t.Fatal("expected error for missing command")
 	}

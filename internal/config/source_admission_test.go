@@ -78,7 +78,7 @@ func TestConfigSourceRejectsExcludedDeclaredFieldsBeforeProjection(t *testing.T)
 	} {
 		parts := strings.Split(row.path, ".")
 		key := parts[len(parts)-1]
-		for _, literal := range []string{"null", "''", "{}", "[]", "1", "false"} {
+		for _, literal := range []string{"null", "''", "{}", "[]", "0", "1", "false"} {
 			for _, merged := range []bool{false, true} {
 				source := key + ": " + literal
 				if merged {
