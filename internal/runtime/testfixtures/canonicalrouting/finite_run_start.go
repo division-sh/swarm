@@ -24,12 +24,13 @@ const (
 func CopyRootInputFeed(t testing.TB, kind DeploymentFeedRoot) string {
 	t.Helper()
 	files := map[string]string{
-		"registry/nodes.yaml": "register:\n  event_handlers:\n    item.registered: {advances_to: done}\n", "manifest.yaml": "version: 1.0.0\nplatform_version: '*'\n", "registry/manifest.yaml": "version: 1.0.0\nplatform_version: '*'\n",
-		"schema.yaml":          "stages: {done: {final: true}}\npins:\n  inputs: [item.registered]\nconnect:\n  - {event: item.registered, from: ., to: registry, resolution: create}\n",
-		"events.yaml":          "item.registered:\n  key: item_id\n  item_id: text\n",
-		"registry/schema.yaml": "instance: item_id\nstages: {pending: {}, done: {final: true}}\npins:\n  inputs: [item.registered]\n",
-		"registry/state.yaml":  "item_id: text\n",
-		"registry/nodes.yaml":  "register:\n  event_handlers:\n    item.registered: {advances_to: done}\n",
+		"manifest.yaml":          "version: 1.0.0\nplatform_version: '*'\n",
+		"registry/manifest.yaml": "version: 1.0.0\nplatform_version: '*'\n",
+		"schema.yaml":            "stages: {done: {final: true}}\npins:\n  inputs: [item.registered]\nconnect:\n  - {event: item.registered, from: ., to: registry, resolution: create}\n",
+		"events.yaml":            "item.registered:\n  key: item_id\n  item_id: text\n",
+		"registry/schema.yaml":   "instance: item_id\nstages: {pending: {}, done: {final: true}}\npins:\n  inputs: [item.registered]\n",
+		"registry/state.yaml":    "item_id: text\n",
+		"registry/nodes.yaml":    "register:\n  event_handlers:\n    item.registered: {advances_to: done}\n",
 	}
 	switch kind {
 	case DeploymentFeedConnectedRoot:
