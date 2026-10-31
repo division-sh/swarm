@@ -159,8 +159,8 @@ func TestGeneratedInputFixturePublishesResolvedEventThroughPublicRPC(t *testing.
 			t.Fatalf("decode RPC: %v", err)
 		}
 		calls = append(calls, rpc)
-		if rpc.Method != eventPublishMethod {
-			t.Fatalf("method = %q, want %s", rpc.Method, eventPublishMethod)
+		if rpc.Method != "run.start" {
+			t.Fatalf("method = %q, want run.start", rpc.Method)
 		}
 		if rpc.Params["event_name"] != "item.received" || rpc.Params["bundle_hash"] != bundleHash {
 			t.Fatalf("event.publish params = %#v", rpc.Params)
@@ -168,7 +168,7 @@ func TestGeneratedInputFixturePublishesResolvedEventThroughPublicRPC(t *testing.
 		if !reflect.DeepEqual(rpc.Params["payload"], map[string]any{"item_id": ""}) {
 			t.Fatalf("generated payload = %#v, want schema-valid root input", rpc.Params["payload"])
 		}
-		writeJSONRPCResult(t, w, rpc.ID, eventPublishTestResult(true))
+		writeJSONRPCResult(t, w, rpc.ID, scenarioStartedRunResult())
 	}))
 	defer server.Close()
 	client, err := newCLIAPIClientForTest(t, rootCommandOptions{invocationRoot: mustInvocationRootForTest(t.TempDir()), apiServer: strings.TrimSuffix(server.URL, "/")})
@@ -182,7 +182,7 @@ func TestGeneratedInputFixturePublishesResolvedEventThroughPublicRPC(t *testing.
 		t.Fatalf("run generated publish step: %v", err)
 	}
 	if len(calls) != 1 {
-		t.Fatalf("RPC calls = %#v, want one public event.publish", calls)
+		t.Fatalf("RPC calls = %#v, want one public run.start", calls)
 	}
 }
 
@@ -231,13 +231,13 @@ func TestGeneratedInputFixtureLoadsComposedTelegramSchemaAndPublishesNormalizedE
 		if err := json.NewDecoder(request.Body).Decode(&call); err != nil {
 			t.Fatalf("decode RPC: %v", err)
 		}
-		if call.Method != eventPublishMethod || call.Params["event_name"] != "telegram-chat/"+eventName || call.Params["bundle_hash"] != bundleHash {
+		if call.Method != "run.start" || call.Params["event_name"] != "telegram-chat/"+eventName || call.Params["bundle_hash"] != bundleHash {
 			t.Fatalf("event.publish params = %#v", call.Params)
 		}
 		if !reflect.DeepEqual(call.Params["payload"], wantPayload) {
 			t.Fatalf("generated Telegram payload = %#v, want %#v", call.Params["payload"], wantPayload)
 		}
-		writeJSONRPCResult(t, w, call.ID, eventPublishTestResult(true))
+		writeJSONRPCResult(t, w, call.ID, scenarioStartedRunResult())
 	}))
 	defer server.Close()
 	client, err := newCLIAPIClientForTest(t, rootCommandOptions{invocationRoot: mustInvocationRootForTest(t.TempDir()), apiServer: strings.TrimSuffix(server.URL, "/")})
@@ -304,13 +304,13 @@ text: authored fixture
 				if err := json.NewDecoder(request.Body).Decode(&call); err != nil {
 					t.Fatalf("decode RPC: %v", err)
 				}
-				if call.Method != eventPublishMethod || call.Params["event_name"] != "telegram-chat/inbound.telegram.text_message" || call.Params["bundle_hash"] != bundleHash {
+				if call.Method != "run.start" || call.Params["event_name"] != "telegram-chat/inbound.telegram.text_message" || call.Params["bundle_hash"] != bundleHash {
 					t.Fatalf("event.publish params = %#v", call.Params)
 				}
 				if !reflect.DeepEqual(call.Params["payload"], wantPayload) {
 					t.Fatalf("authored Telegram payload = %#v, want %#v", call.Params["payload"], wantPayload)
 				}
-				writeJSONRPCResult(t, w, call.ID, eventPublishTestResult(true))
+				writeJSONRPCResult(t, w, call.ID, scenarioStartedRunResult())
 			}))
 			defer server.Close()
 			client, err := newCLIAPIClientForTest(t, rootCommandOptions{invocationRoot: mustInvocationRootForTest(t.TempDir()), apiServer: strings.TrimSuffix(server.URL, "/")})

@@ -32,6 +32,14 @@ func TestReleaseCompiledLifecycleJourneysBothStores(t *testing.T) {
 			}
 			t.Run(string(backend)+"/"+name, func(t *testing.T) {
 				root := canonicalrouting.CopyLifecycleEmitter(t, variant)
+				if !gate {
+					nodesPath := filepath.Join(root, "nodes.yaml")
+					nodes, err := os.ReadFile(nodesPath)
+					if err != nil {
+						t.Fatal(err)
+					}
+					writeWorkflowValidationFixtureFile(t, nodesPath, string(nodes)+"\nseed:\n  execution_type: system_node\n  subscribes_to: [work.requested]\n  event_handlers:\n    work.requested: {}\n")
+				}
 				rt := startLifecycleReleaseProcess(t, binary, backend, root)
 				prefix := ""
 				if gate {
