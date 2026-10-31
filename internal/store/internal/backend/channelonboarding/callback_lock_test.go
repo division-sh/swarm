@@ -399,6 +399,10 @@ func TestNeutralChannelMutationPrincipalFirstBothStores(t *testing.T) {
 						continue
 					}
 					trimmed := strings.TrimSpace(query)
+					if trimmed == "UPDATE runtime_process_generation SET generation = generation WHERE singleton_id = 1" {
+						// SQLite writer possession is an authority fence, not channel-domain work.
+						continue
+					}
 					if strings.Contains(query, "FOR UPDATE") || strings.HasPrefix(trimmed, "INSERT ") || strings.HasPrefix(trimmed, "UPDATE ") || strings.HasPrefix(trimmed, "DELETE ") {
 						mutation = true
 						if !principal {

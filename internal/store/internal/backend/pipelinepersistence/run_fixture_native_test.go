@@ -37,7 +37,7 @@ func statementRunSchemaRequest(t testing.TB, snapshot bool) schemastore.SchemaBo
 	var selected []schemastore.SchemaTableDDL
 	for _, plan := range plans {
 		switch plan.TableName {
-		case "runtime_store_metadata", "runtime_process_generation", "runs", "run_event_counts", "source_artifacts", "source_root_admissions", "author_activity_order", "author_activity_occurrences",
+		case "runtime_store_metadata", "runtime_process_generation", "runs", "run_event_counts", "run_completion_evidence", "source_artifacts", "source_root_admissions", "author_activity_order", "author_activity_occurrences",
 			"run_fork_revision_heads", "run_fork_revisions", "run_fork_fact_revisions":
 			selected = append(selected, plan)
 		case "events", "entity_state":

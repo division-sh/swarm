@@ -33,6 +33,7 @@ type selectionSQLProbe struct {
 	selects, inserts int
 	commitFailure    func(error)
 	rollbackComplete func(error)
+	writerResult     func(error)
 }
 
 func (p *selectionSQLProbe) observe(query string) {
@@ -87,7 +88,16 @@ func (c *selectionConn) QueryContext(ctx context.Context, query string, args []d
 }
 func (c *selectionConn) ExecContext(ctx context.Context, query string, args []driver.NamedValue) (driver.Result, error) {
 	c.probe.observe(query)
-	return c.Conn.(driver.ExecerContext).ExecContext(ctx, query, args)
+	result, err := c.Conn.(driver.ExecerContext).ExecContext(ctx, query, args)
+	if strings.TrimSpace(query) == "UPDATE runtime_process_generation SET generation = generation WHERE singleton_id = 1" {
+		c.probe.mu.Lock()
+		hook := c.probe.writerResult
+		c.probe.mu.Unlock()
+		if hook != nil {
+			hook(err)
+		}
+	}
+	return result, err
 }
 func (c *selectionConn) BeginTx(ctx context.Context, opts driver.TxOptions) (driver.Tx, error) {
 	tx, err := c.Conn.(driver.ConnBeginTx).BeginTx(ctx, opts)
@@ -367,23 +377,28 @@ func TestHandlerSelectionCanonicalReadConcurrentBothStores(t *testing.T) {
 					other = selectionFact(t, "second")
 				}
 				done := make(chan error, 1)
-				released := make(chan struct{})
 				busy := make(chan error, 1)
 				type rollbackEvidence struct{ rollback, heldCommit error }
 				rolledBack := make(chan rollbackEvidence, 1)
+				var nativeWrites []error
 				pid := make(chan int, 1)
-				var releaseOnce, rollbackOnce sync.Once
+				var rollbackOnce sync.Once
 				joined := false
 				defer func() {
 					cancel()
 					_ = tx.Rollback()
-					releaseOnce.Do(func() { close(released) })
 					if !joined {
 						<-done
 					}
 				}()
 				if backend == "sqlite" {
 					probe.mu.Lock()
+					probe.writerResult = func(err error) {
+						nativeWrites = append(nativeWrites, err)
+						if len(nativeWrites) == 1 {
+							busy <- err
+						}
+					}
 					probe.rollbackComplete = func(err error) {
 						rollbackOnce.Do(func() {
 							evidence := rollbackEvidence{rollback: err}
@@ -391,16 +406,12 @@ func TestHandlerSelectionCanonicalReadConcurrentBothStores(t *testing.T) {
 							// retry owner starts its budget, not on observer scheduling.
 							if err == nil {
 								evidence.heldCommit = tx.Commit()
-								if evidence.heldCommit == nil {
-									releaseOnce.Do(func() { close(released) })
-								}
 							}
 							rolledBack <- evidence
 						})
 					}
 					probe.mu.Unlock()
 				}
-				attempts := 0
 				type attemptSQL struct{ selects, inserts int }
 				var calls []attemptSQL
 				go func() {
@@ -411,21 +422,10 @@ func TestHandlerSelectionCanonicalReadConcurrentBothStores(t *testing.T) {
 							return
 						}
 						done <- owner.RunTransaction(ctx, "handler selection insert contention", func(ctx context.Context, contender *sql.Tx) error {
-							attempts++
-							if attempts > 1 {
-								select {
-								case <-released:
-								case <-ctx.Done():
-									return ctx.Err()
-								}
-							}
 							beforeSelects, beforeInserts := probe.counts()
 							err := a.persistHandlerRuleSelectionSQL(ctx, contender, id, other)
 							afterSelects, afterInserts := probe.counts()
 							calls = append(calls, attemptSQL{afterSelects - beforeSelects, afterInserts - beforeInserts})
-							if attempts == 1 {
-								busy <- err
-							}
 							return err
 						})
 						return
@@ -442,7 +442,6 @@ func TestHandlerSelectionCanonicalReadConcurrentBothStores(t *testing.T) {
 						return
 					}
 					pid <- backendPID
-					attempts++
 					beforeSelects, beforeInserts := probe.counts()
 					err = a.persistHandlerRuleSelectionSQL(ctx, contender, id, other)
 					afterSelects, afterInserts := probe.counts()
@@ -497,7 +496,6 @@ func TestHandlerSelectionCanonicalReadConcurrentBothStores(t *testing.T) {
 					if err := tx.Commit(); err != nil {
 						t.Fatal(err)
 					}
-					releaseOnce.Do(func() { close(released) })
 				}
 				if !joined {
 					err = <-done
@@ -513,16 +511,17 @@ func TestHandlerSelectionCanonicalReadConcurrentBothStores(t *testing.T) {
 					}
 				}
 				selects, inserts := probe.counts()
-				wantAttempts, wantInserts := 1, 2
+				wantInserts := 2
 				if backend == "sqlite" {
-					wantAttempts, wantInserts = 2, 3
-					if len(calls) != 2 || calls[0] != (attemptSQL{0, 1}) || calls[1] != (attemptSQL{1, 1}) {
-						t.Fatalf("native contention per-attempt SQL: %+v", calls)
+					// BUSY occurs at the native generation writer before selection SQL.
+					if len(nativeWrites) != 2 || nativeWrites[1] != nil {
+						t.Fatalf("native writer BUSY/retry results: %v", nativeWrites)
 					}
-				} else if len(calls) != 1 || calls[0] != (attemptSQL{1, 1}) {
-					t.Fatalf("native PostgreSQL contention SQL: %+v", calls)
 				}
-				if attempts != wantAttempts || selects != 2 || inserts != wantInserts {
+				if len(calls) != 1 || calls[0] != (attemptSQL{1, 1}) {
+					t.Fatalf("canonical contention SQL: %+v", calls)
+				}
+				if selects != 2 || inserts != wantInserts {
 					t.Fatalf("concurrent SQL selects=%d inserts=%d", selects, inserts)
 				}
 				readTx, err := db.BeginTx(ctx, nil)
