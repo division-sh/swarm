@@ -305,6 +305,11 @@ func TestEventBusCompositionOwnerExactConnectedReceiverBothStores(t *testing.T) 
 								if !errors.As(err, &missing) || missing.RequestedKey != scope.flow {
 									t.Fatalf("absent native receiver must be an exact lookup miss: %v", err)
 								}
+							} else if tc.state == "done" {
+								var refusal *runtimepipeline.NoHandlerError
+								if !errors.As(err, &refusal) || refusal.FlowID != scope.flow || refusal.FlowInstance != instance || refusal.Stage != tc.state {
+									t.Fatalf("final stage must retain its exact ordinary refusal: %v", err)
+								}
 							} else if err == nil || !strings.Contains(err.Error(), failure) {
 								t.Fatalf("Publish=%v, want %q", err, failure)
 							}

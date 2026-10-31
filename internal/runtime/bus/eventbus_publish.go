@@ -3163,8 +3163,7 @@ func targetDeliveryFailureRecord(evt events.Event, plan RoutePlan, failure runti
 		"delivery_routes":      plan.DeliveryRoutes(),
 	}
 	canonical := canonicalTargetDeliveryFailure(failure, "eventbus", "resolve_delivery_target", detail)
-	var noHandler *runtimepipeline.NoHandlerError
-	if errors.As(plan.unavailableReceiverError, &noHandler) {
+	if onlyNoHandlerRefusals(plan.unavailableReceiverError) {
 		canonical = runtimefailures.FromError(plan.unavailableReceiverError, "eventbus", "resolve_delivery_target")
 	}
 	detail["failure"] = canonical.Failure

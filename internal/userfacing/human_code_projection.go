@@ -31,7 +31,7 @@ var humanCodePhrases = map[HumanCodeFamily]map[string]string{
 		"failed": "failed", "cancelled": "cancelled", "forked": "forked",
 	},
 	HumanCodeOperationalState: {
-		"running": "running", "stalled": "stalled", "live": "live", "waiting": "waiting", "done": "done", "retired": "retired", "unknown": "unknown", "paused": "paused",
+		"running": "running", "stalled": "stalled", "paused": "paused",
 		"completed": "completed", "failed": "failed", "cancelled": "cancelled", "forked": "forked",
 	},
 	HumanCodeRunBlockingLayer: {

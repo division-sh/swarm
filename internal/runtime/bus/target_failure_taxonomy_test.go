@@ -23,6 +23,12 @@ func TestPublishRecipientPlanTargetFailureErrorKeepsCallerAndStrictVocabulary(t 
 	if !errors.Is(err, refusal) || failures.Normalize(err, "test", "observe").Class != failures.ClassUnexpectedArrival {
 		t.Fatalf("pinned preflight changed an ordinary receiver refusal: %v", err)
 	}
+	cleanup := errors.New("preflight cleanup failed")
+	view.targetFailureCause = errors.Join(refusal, cleanup)
+	err = view.TargetFailureError("tool-executor", "emit", nil)
+	if !errors.Is(err, cleanup) || !errors.Is(err, refusal) || failures.Normalize(err, "test", "observe").Class == failures.ClassUnexpectedArrival {
+		t.Fatalf("ordinary refusal hid an independent preflight failure: %v", err)
+	}
 	for _, refusal := range []pinrouting.TargetFailure{
 		pinrouting.FailureTargetRequiredMissing, pinrouting.FailureReplyAlreadyTerminal, pinrouting.FailureStaleArrival,
 		pinrouting.TargetFailureFromConnect(pinrouting.ConnectFailureTargetUnresolved),
