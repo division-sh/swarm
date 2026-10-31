@@ -118,6 +118,24 @@ func workspaceBuildClaudeVersion(plan []byte) (string, error) {
 	return version, nil
 }
 
+func validateWorkspaceBuildClaudeCLI(ctx context.Context, dockerBin, tempImage, expectedVersion string, out io.Writer) error {
+	actualVersion, err := runWorkspaceBuildDocker(ctx, dockerBin,
+		"run", "--rm", "--entrypoint", "sh", tempImage,
+		"-lc", `command -v -- "$1" >/dev/null && "$1" --version`,
+		"swarm-cli-proof", workspaceBuildClaudeCommand,
+	)
+	if err != nil {
+		return fmt.Errorf("configured Claude CLI command %q cannot execute; build or pull a workspace image that includes a runnable Claude CLI, set workspace.image, or pass --image with a compatible image: %w", workspaceBuildClaudeCommand, err)
+	}
+	if actualVersion != expectedVersion+" (Claude Code)" {
+		return fmt.Errorf("expected Claude CLI %s, actual %q; image not published", expectedVersion, actualVersion)
+	}
+	if out != nil {
+		fmt.Fprintf(out, "Validated Claude CLI %s (expected %s)\n", actualVersion, expectedVersion)
+	}
+	return nil
+}
+
 func runWorkspaceBuildCommand(ctx context.Context, out io.Writer, opts workspaceBuildOptions) error {
 	cfgResult, err := LoadRuntimeConfigWithOptions(RuntimeConfigLoadOptions{RepoRoot: opts.RepoRoot, ExplicitPath: opts.configPath})
 	if err != nil {
@@ -205,19 +223,8 @@ func runWorkspaceBuildCommand(ctx context.Context, out io.Writer, opts workspace
 	if out != nil {
 		fmt.Fprintf(out, "Validating workspace image %s can execute %s\n", image, workspaceBuildClaudeCommand)
 	}
-	actualVersion, err := runWorkspaceBuildDocker(ctx, dockerBin,
-		"run", "--rm", "--entrypoint", "sh", tempImage,
-		"-lc", `command -v -- "$1" >/dev/null && "$1" --version`,
-		"swarm-cli-proof", workspaceBuildClaudeCommand,
-	)
-	if err != nil {
-		return fmt.Errorf("workspace image validation failed: configured Claude CLI command %q cannot execute in workspace image %q; build or pull a workspace image that includes a runnable Claude CLI, set workspace.image, or pass --image with a compatible image: %w", workspaceBuildClaudeCommand, image, err)
-	}
-	if actualVersion != expectedVersion+" (Claude Code)" {
-		return fmt.Errorf("workspace image validation failed: expected Claude CLI %s, actual %q in workspace image %q; image not published", expectedVersion, actualVersion, image)
-	}
-	if out != nil {
-		fmt.Fprintf(out, "Validated Claude CLI %s (expected %s)\n", actualVersion, expectedVersion)
+	if err := validateWorkspaceBuildClaudeCLI(ctx, dockerBin, tempImage, expectedVersion, out); err != nil {
+		return fmt.Errorf("workspace image validation failed for image %q: %w", image, err)
 	}
 	if _, err := runWorkspaceBuildDocker(ctx, dockerBin, "tag", tempImage, image); err != nil {
 		return fmt.Errorf("workspace image build failed to publish validated image %q: %w", image, err)
