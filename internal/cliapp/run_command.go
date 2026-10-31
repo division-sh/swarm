@@ -35,7 +35,6 @@ const (
 	runCommandStatusCompleted      = "completed"
 	runCommandStatusFailed         = "failed"
 	runCommandStatusCancelled      = "cancelled"
-	runCommandStatusForked         = "forked"
 	defaultRunTraceAttachTimeout   = 5 * time.Second
 	defaultRunCommandTimeout       = 10 * time.Minute
 	runTraceObserverDetachedType   = "run_trace_observer_detached"
@@ -1156,7 +1155,7 @@ func runCommandStop(ctx context.Context, client *cliAPIClient, runID string) err
 
 func runCommandTerminalStatus(status string) bool {
 	switch strings.TrimSpace(status) {
-	case runCommandStatusCompleted, runCommandStatusFailed, runCommandStatusCancelled, runCommandStatusForked:
+	case runCommandStatusCompleted, runCommandStatusFailed, runCommandStatusCancelled:
 		return true
 	default:
 		return false

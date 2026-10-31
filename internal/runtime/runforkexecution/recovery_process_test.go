@@ -302,7 +302,7 @@ func TestSelectedForkCrashProcessHelper(t *testing.T) {
 		}
 		joinLiveForkFixtureClock(t, ctx, liveRuntime, selected, sourceRun, plan.JoinSchedules[0].ID)
 	}
-	request := SelectedContractExecutionRequest{SourceRunID: sourceRun, At: eventID, AllowSourceFreeze: true, Owner: owner, SourceLoader: sourceLoader,
+	request := SelectedContractExecutionRequest{SourceRunID: sourceRun, At: eventID, Owner: owner, SourceLoader: sourceLoader,
 		LiveRuntime: liveRuntime, LiveContexts: liveContexts, LiveRuns: selected.(runlifecycle.LiveRunReader),
 		SourceArtifactFact: loaded.SourceArtifactFact,
 		ContractSelection:  runforkadmission.SelectedContractSelection(loaded.Source), AgentRuntime: options}
@@ -310,7 +310,7 @@ func TestSelectedForkCrashProcessHelper(t *testing.T) {
 		request.ForkOperation = &runfork.ForkOperationRequest{
 			OperationID: uuid.NewString(), Actor: "retained-crash", IdempotencyKey: "fixed-cut",
 			TransportHash: "retained-crash-transport", SourceRunID: sourceRun, ForkEventID: eventID,
-			TargetBundleHash: loaded.SourceArtifactFact.BundleHash(), TargetRootReference: loaded.RootedSource.Admission().Reference(), AllowSourceFreeze: true, ContractSelection: request.ContractSelection,
+			TargetBundleHash: loaded.SourceArtifactFact.BundleHash(), TargetRootReference: loaded.RootedSource.Admission().Reference(), ContractSelection: request.ContractSelection,
 		}
 	}
 	result, err := ExecuteSelectedContractRunFork(ctx, request)

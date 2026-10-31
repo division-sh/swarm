@@ -154,8 +154,8 @@ func TestIssue642PublishedChildHistoricalClosureBothStores(t *testing.T) {
 				targetCtx := correlation.WithRootAdmission(correlation.WithSourceArtifactFact(ctx, fact), target.Admission())
 				selection := runfork.RunForkContractSelection{Mode: "selected_contracts"}
 				operation := runfork.ForkOperationRequest{OperationID: uuid.NewString(), Actor: "published-descendant", IdempotencyKey: "child-cut", TransportHash: "descendant-transport",
-					SourceRunID: checkpoint.ForkRun, ForkEventID: id, TargetBundleHash: availability.BundleHash, TargetRootReference: target.Admission().Reference(), AllowSourceFreeze: true, ContractSelection: selection}
-				result, err := ExecuteSelectedContractRunFork(targetCtx, SelectedContractExecutionRequest{SourceRunID: checkpoint.ForkRun, At: id, AllowSourceFreeze: true,
+					SourceRunID: checkpoint.ForkRun, ForkEventID: id, TargetBundleHash: availability.BundleHash, TargetRootReference: target.Admission().Reference(), ContractSelection: selection}
+				result, err := ExecuteSelectedContractRunFork(targetCtx, SelectedContractExecutionRequest{SourceRunID: checkpoint.ForkRun, At: id,
 					ExpectedBundleHash: availability.BundleHash,
 					Owner:              owner, ForkOperation: &operation, SourceLoader: loader, ContractSelection: selection,
 					LiveRuntime: ordinary, LiveContexts: contexts, LiveRuns: selected.(runlifecycle.LiveRunReader),

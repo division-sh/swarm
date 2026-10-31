@@ -143,7 +143,7 @@ func TestIssue642SettledFanOutSelectedRemovalAndReforkBothStores(t *testing.T) {
 						OperationID: uuid.NewString(), Actor: "bearer:settled-fan-out-proof", IdempotencyKey: uuid.NewString(),
 						TransportHash: "sha256:settled-fan-out-proof", SourceRunID: fixture.runID, ForkEventID: cut.ID(),
 						TargetBundleHash: target.BundleHash(), TargetRootReference: rooted.Admission().Reference(),
-						ContractSelection: selection, AllowSourceFreeze: true,
+						ContractSelection: selection,
 					}
 					child, err := forks.MaterializeRunForkForSelectedContractExecution(selectedCtx, request)
 					if err != nil {
@@ -184,7 +184,7 @@ func TestIssue642SettledFanOutSelectedRemovalAndReforkBothStores(t *testing.T) {
 						OperationID: uuid.NewString(), Actor: "bearer:settled-fan-out-proof", IdempotencyKey: uuid.NewString(),
 						TransportHash: "sha256:settled-fan-out-refork-proof", SourceRunID: child.ForkRunID, ForkEventID: checkpoint.ID(),
 						TargetBundleHash: target.BundleHash(), TargetRootReference: rooted.Admission().Reference(),
-						ContractSelection: selection, AllowSourceFreeze: true,
+						ContractSelection: selection,
 					}
 					second, err := forks.MaterializeRunForkForSelectedContractExecution(childCtx, secondRequest)
 					if err != nil {

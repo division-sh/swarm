@@ -103,7 +103,7 @@ func TestSelectedForkPendingInputBothStores(t *testing.T) {
 					requirePendingInputPublicStates(t, rt, seed.RunID, 2)
 					return
 				}
-				forkParams := map[string]any{"source_run_id": seed.RunID, "fork_event_id": point.EventID, "allow_source_freeze": true, "idempotency_key": "input-fork"}
+				forkParams := map[string]any{"source_run_id": seed.RunID, "fork_event_id": point.EventID, "idempotency_key": "input-fork"}
 				if mode == "compatible" || mode == "incompatible" || mode == "missing_input" {
 					variant := canonicalrouting.PendingInputCompatible
 					if mode == "incompatible" {

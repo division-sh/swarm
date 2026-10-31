@@ -78,8 +78,8 @@ func TestDeploymentSourceSelectedPredecessorClaimCannotSettleAfterRecoveryBothSt
 			key := uuid.NewString()
 			params := map[string]any{
 				"source_run_id": sourceRunID, "bundle_hash": f.runtime.sourceArtifactFact.BundleHash(),
-				"fork_event_id":       pointEventID,
-				"allow_source_freeze": true, "idempotency_key": key,
+				"fork_event_id":   pointEventID,
+				"idempotency_key": key,
 				"data_pin_overrides": []any{map[string]any{
 					"declaration": map[string]any{"flow_path": ".", "event": selectedDeploymentEvent},
 					"version_id":  string(changed.VersionID),

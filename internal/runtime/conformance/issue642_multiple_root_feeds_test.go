@@ -90,7 +90,7 @@ func TestIssue642MultipleRootFeedsStartForkAndRestartBothStores(t *testing.T) {
 				process := conformanceTestProcessOwner(t)
 				initialBaseline := process.ActiveCount()
 				owner, _ := deploymentForkOwner(t, f)
-				params := map[string]any{"source_run_id": source, "at_start": true, "bundle_hash": f.runtime.sourceArtifactFact.BundleHash(), "allow_source_freeze": true, "idempotency_key": uuid.NewString()}
+				params := map[string]any{"source_run_id": source, "at_start": true, "bundle_hash": f.runtime.sourceArtifactFact.BundleHash(), "idempotency_key": uuid.NewString()}
 				forkServer := deploymentForkServer(t, f, owner)
 				result, rpcErr := deploymentForkRPC(t, f.ctx, forkServer, params)
 				if len(rpcErr) != 0 || result.ForkRunID == "" || result.ForkRevision != 1 || result.ForkPointKind != string(runfork.RunForkPointRunStart) || result.ForkEventID != "" || result.ExecutedEventCount != 0 || len(result.DataPins) != 2 {

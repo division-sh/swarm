@@ -141,7 +141,7 @@ func TestLifecycleDiagnosticForkActivationBothStores(t *testing.T) {
 						t: t, h: h, scenario: scenario, settled: make(chan error, 1),
 					}
 					result, err := executeCatalogLiveFork(t, h, ctx, forkexecution.SelectedContractExecutionRequest{
-						SourceRunID: catalogRuntimeRunID, At: frontierID, AllowSourceFreeze: true,
+						SourceRunID: catalogRuntimeRunID, At: frontierID,
 						Owner: selectedContractExecutionOwnerForCatalogHarness(t, h, probe), SourceLoader: loader, ContractSelection: selection,
 						AgentRuntime: selectedContractAgentRuntimeOptionsForCatalogHarness(h, cfg), ExpectedBundleHash: selection.BundleHash,
 					})

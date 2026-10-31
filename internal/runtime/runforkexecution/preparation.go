@@ -133,7 +133,7 @@ func validateSelectedForkRecoveryRequest(req SelectedContractExecutionRequest) e
 	}
 	if opHash != providedHash || pinHash != opPinHash || req.SourceRunID != op.SourceRunID ||
 		req.At != op.ResolvedPoint.Input || req.AtStart != op.AtStart || req.ExpectedBundleHash != op.TargetBundleHash ||
-		req.ContractSelection != op.ContractSelection || req.AllowSourceFreeze != op.AllowSourceFreeze {
+		req.ContractSelection != op.ContractSelection {
 		return fmt.Errorf("selected resume request differs from permanent operation")
 	}
 	seen := make(map[durabledata.DeclarationRef]bool, len(result.Continuation.Pins))

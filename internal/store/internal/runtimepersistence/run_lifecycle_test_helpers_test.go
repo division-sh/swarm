@@ -79,9 +79,6 @@ func materializeRunFixtureForTest(
 	if fixture.State == "" {
 		fixture.State = runtimerunlifecycle.StateRunning
 	}
-	if fixture.State == runtimerunlifecycle.StateForked {
-		return errors.New("semantic fork fixture requires the named fork operation")
-	}
 	if fixture.Artifact != nil {
 		artifactHash := fixture.Artifact.BundleHash()
 		if bundleHash := strings.TrimSpace(fixture.BundleHash); bundleHash != "" && bundleHash != artifactHash {
@@ -458,13 +455,6 @@ func markRunTerminalStatusForTest(
 	if err != nil {
 		return runtimebus.RunLifecycleSnapshot{}, err
 	}
-	if state == runtimerunlifecycle.StateForked {
-		return runtimebus.RunLifecycleSnapshot{}, fmt.Errorf(
-			"%w: run_id=%s",
-			runtimerunlifecycle.ErrForkSourceUnsupported,
-			strings.TrimSpace(runID),
-		)
-	}
 	if endedAt.IsZero() {
 		endedAt = time.Now().UTC()
 	}
@@ -490,21 +480,6 @@ func transitionRunForTest(
 		return "", fmt.Errorf("test run lifecycle owner is required, got %T", selected)
 	}
 	return owner.TransitionActiveRun(ctx, request)
-}
-
-func forkRunForTest(
-	ctx context.Context,
-	selected any,
-	request runtimerunlifecycle.ForkSourceRequest,
-) (runtimerunlifecycle.Snapshot, runtimerunlifecycle.MutationDisposition, error) {
-	owner, ok := selected.(runLifecycleTerminalTestStore)
-	if !ok || owner == nil {
-		return runtimerunlifecycle.Snapshot{}, "", fmt.Errorf(
-			"test run lifecycle owner is required, got %T",
-			selected,
-		)
-	}
-	return owner.ForkRunSource(ctx, request)
 }
 
 func executeRunCompletionCandidateForEvent(

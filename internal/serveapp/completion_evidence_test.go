@@ -497,7 +497,7 @@ func proveCompletion2270ServedSelected(t *testing.T, rt completion2270ServedProo
 	if err != nil {
 		t.Fatal(err)
 	}
-	params := map[string]any{"source_run_id": seed.RunID, "fork_event_id": eventID, "bundle_hash": fact.BundleHash(), "allow_source_freeze": true, "idempotency_key": "completion-2270-selected"}
+	params := map[string]any{"source_run_id": seed.RunID, "fork_event_id": eventID, "bundle_hash": fact.BundleHash(), "idempotency_key": "completion-2270-selected"}
 	fork := requireSelectedForkExecutionRPCResult(t, rt.Endpoint, params)
 	if fork.ForkRunID == "" || fork.ForkRunID == seed.RunID {
 		t.Fatalf("served-selected launch: %+v, calls=%d", fork, calls.Load())

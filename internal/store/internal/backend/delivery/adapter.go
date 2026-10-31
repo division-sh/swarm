@@ -324,7 +324,6 @@ func (a *Adapter) activateNormalAuthorityTx(ctx context.Context, tx *sql.Tx, att
 		  AND attempt.open_marker=TRUE
 		  AND delivery.current_attempt_open=TRUE
 		  AND delivery.status='in_progress'
-		  AND NOT EXISTS (SELECT 1 FROM runs AS frozen WHERE frozen.run_id=delivery.run_id AND frozen.status='forked')
 		  AND delivery.execution_authority_kind='normal_runtime'
 		  AND delivery.authority_bundle_hash=$2
 		  AND (delivery.execution_authority_id<>$3 OR delivery.execution_authority_generation<>$4)
@@ -342,7 +341,6 @@ func (a *Adapter) activateNormalAuthorityTx(ctx context.Context, tx *sql.Tx, att
 				  AND delivery.current_attempt_version=event_delivery_attempts.claim_version
 				  AND delivery.current_attempt_open=TRUE
 				  AND delivery.status='in_progress'
-				  AND NOT EXISTS (SELECT 1 FROM runs AS frozen WHERE frozen.run_id=delivery.run_id AND frozen.status='forked')
 				  AND delivery.execution_authority_kind='normal_runtime'
 				  AND delivery.authority_bundle_hash=?
 				  AND (delivery.execution_authority_id<>? OR delivery.execution_authority_generation<>?)
@@ -358,7 +356,6 @@ func (a *Adapter) activateNormalAuthorityTx(ctx context.Context, tx *sql.Tx, att
 			execution_authority_generation=$2,
 			updated_at=GREATEST(updated_at, CURRENT_TIMESTAMP)
 		WHERE execution_authority_kind='normal_runtime'
-		  AND NOT EXISTS (SELECT 1 FROM runs AS frozen WHERE frozen.run_id=event_deliveries.run_id AND frozen.status='forked')
 		  AND authority_bundle_hash=$3
 		  AND (execution_authority_id<>$1 OR execution_authority_generation<>$2)
 		  AND status IN ('pending','failed','in_progress')`
@@ -373,7 +370,6 @@ func (a *Adapter) activateNormalAuthorityTx(ctx context.Context, tx *sql.Tx, att
 					ELSE updated_at
 				END
 			WHERE execution_authority_kind='normal_runtime'
-			  AND NOT EXISTS (SELECT 1 FROM runs AS frozen WHERE frozen.run_id=event_deliveries.run_id AND frozen.status='forked')
 			  AND authority_bundle_hash=?
 			  AND (execution_authority_id<>? OR execution_authority_generation<>?)
 			  AND status IN ('pending','failed','in_progress')`

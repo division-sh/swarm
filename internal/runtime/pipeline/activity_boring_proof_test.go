@@ -267,8 +267,8 @@ func VerifyNativeActivityBoringProofReadOnlyForkReexecuteUsesForkLocalRequestIde
 					persistNativeActivityBoringRequestForTest(t, fixture, ctx, intent, request.Event)
 				} else {
 					sourceCtx := runtimecorrelation.WithRunID(ctx, sourceRunID)
-					if _, _, err := fixture.native.Runs.ForkRunSource(sourceCtx, runlifecycle.ForkSourceRequest{
-						RunID: sourceRunID, ContinuedAsRunID: forkRunID, EndedAt: time.Now().UTC(),
+					if _, err := fixture.native.Runs.TransitionActiveRun(sourceCtx, runlifecycle.ActiveTransitionRequest{
+						RunID: sourceRunID, State: runlifecycle.StatePaused,
 					}); err != nil {
 						t.Fatal(err)
 					}

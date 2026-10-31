@@ -222,7 +222,7 @@ func TestSelectedRecoveryAllTypedCutsAndActivatedAcknowledgment(t *testing.T) {
 			recovered.ExecutionID = uuid.NewString()
 			recovered.Operation.Status = runfork.ForkOperationActivated
 			recovered.Operation.Result = &runfork.ForkOperationResult{
-				SourceRunID: operation.SourceRunID, SourceRunStatus: runfork.RunForkSourceFrozenStatus, SourceFrozen: true,
+				SourceRunID: operation.SourceRunID, SourceRunStatus: "paused", SourceFrozen: false,
 				ForkRunID: recovered.RunID, ForkRunStatus: runfork.RunForkActivatedStatus,
 				ForkPoint: point, ForkEventID: point.EventID, BundleHash: entry.BundleHash, ExecutedEventCount: 2,
 			}

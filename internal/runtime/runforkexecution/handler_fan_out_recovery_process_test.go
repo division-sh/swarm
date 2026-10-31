@@ -129,11 +129,11 @@ func runSelectedHandlerFanOutCrashHelper(t *testing.T, ctx context.Context, sele
 	})
 	selection := runforkadmission.SelectedContractSelection(loaded.Source)
 	result, err := q1ExecuteSelectedPhaseComponent(t, ctx, SelectedContractExecutionRequest{
-		SourceRunID: sourceRun, At: eventID, AllowSourceFreeze: true, Owner: owner, SourceLoader: loader, ContractSelection: selection,
+		SourceRunID: sourceRun, At: eventID, Owner: owner, SourceLoader: loader, ContractSelection: selection,
 		AgentRuntime: SelectedContractAgentRuntimeOptions{ExecutionPosture: executionposture.MockOnly, ProcessCapability: capability},
 		ForkOperation: &runfork.ForkOperationRequest{OperationID: uuid.NewString(), Actor: "retained-handler-fan-out", IdempotencyKey: "intent-cut",
 			TransportHash: "retained-handler-fan-out-transport", SourceRunID: sourceRun, ForkEventID: eventID,
-			TargetBundleHash: loaded.SourceArtifactFact.BundleHash(), AllowSourceFreeze: true, ContractSelection: selection, TargetRootReference: loaded.RootedSource.Admission().Reference(),
+			TargetBundleHash: loaded.SourceArtifactFact.BundleHash(), ContractSelection: selection, TargetRootReference: loaded.RootedSource.Admission().Reference(),
 		},
 	})
 	if err != nil || result.Materialization.ForkRunID == "" || result.Activation.Activated {

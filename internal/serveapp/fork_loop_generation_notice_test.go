@@ -57,7 +57,7 @@ func TestServedForkLoopGenerationStateEffectBothStores(t *testing.T) {
 			}
 			sourceDomain := readServedForkRecipientSourceDomain(t, rt, started.RunID)
 			sourceNotices := readForkReceiverNoticeDomain(t, rt, started.RunID)
-			params := map[string]any{"source_run_id": started.RunID, "fork_event_id": frontier, "allow_source_freeze": true, "idempotency_key": "loop-notice-fork"}
+			params := map[string]any{"source_run_id": started.RunID, "fork_event_id": frontier, "idempotency_key": "loop-notice-fork"}
 			var fork apiv1.RunForkExecutionResult
 			requireServedJSONRPCResult(t, rt.Endpoint, "run.fork", params, &fork)
 			if fork.SourceRunID != started.RunID || fork.ForkEventID != frontier || fork.ForkRunID == "" || fork.ForkRunID == started.RunID || fork.ExecutedEventCount != 1 {

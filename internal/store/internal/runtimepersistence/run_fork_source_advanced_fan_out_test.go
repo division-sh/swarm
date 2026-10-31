@@ -7,14 +7,13 @@ import (
 	"time"
 
 	"github.com/division-sh/swarm/internal/durabledata"
-	"github.com/division-sh/swarm/internal/events"
-	"github.com/division-sh/swarm/internal/events/eventtest"
+
 	"github.com/division-sh/swarm/internal/runtime/core/worklifetime"
 	"github.com/division-sh/swarm/internal/runtime/pipeline"
 	"github.com/division-sh/swarm/internal/runtime/runfork"
 	"github.com/division-sh/swarm/internal/runtime/runforkexecution"
 	"github.com/division-sh/swarm/internal/runtime/startupownership"
-	"github.com/division-sh/swarm/internal/runtime/testfixtures/canonicalrouting"
+
 	"github.com/google/uuid"
 )
 
@@ -100,56 +99,6 @@ func TestRunForkSelectedSourceAdvancedFanOutConsumersBothStores(t *testing.T) {
 				after, err := owner.FanOutRunSummary(f.ctx, f.runID, observedAt)
 				if err != nil || !reflect.DeepEqual(before, after) {
 					t.Fatalf("activation rewrote source fan-out progress: before=%+v after=%+v err=%v", before, after, err)
-				}
-			})
-		}
-	}
-}
-
-func TestRunForkGenericSourceAdvancedFanOutConsumersBothStores(t *testing.T) {
-	for _, backend := range eventRecordContractBackends() {
-		for _, position := range []string{"before_frontier", "after_frontier"} {
-			t.Run(backend.name+"/"+position, func(t *testing.T) {
-				opened := backend.open(t)
-				frontier := uuid.NewString()
-				ctx, fixture, _, _ := seedDeclaredForkFanOutGenerationFromSource(t, backend.name, opened, 0, time.Now().UTC(), false, false,
-					canonicalrouting.CopyForkFanOutCarrier(t, false, false), nil, nil, frontier)
-				owner := opened.store.(snapshotOwnershipStore)
-				if position == "before_frontier" {
-					// The empty intent was closed by the real handler commit. A
-					// later lawful ingress puts those facts before the chosen point.
-					event := eventtest.ExistingRunRootIngressWithRoutingSource(uuid.NewString(), "items.ready", "fan-out-test", "", []byte(`{"items":[]}`), 0,
-						fixture.runID, events.EventEnvelope{}, eventtest.RootRoutingSource(fixture.runID), time.Now().UTC())
-					if err := commitSemanticEventFixture(ctx, opened.store.(storeTestDurableEventBusStore), event); err != nil {
-						t.Fatal(err)
-					}
-					frontier = event.ID()
-				}
-				original := originalCarriageForRun(t, owner, fixture.runID)
-				rooted, err := owner.(rootedRunStore).LoadRunRootedSource(ctx, fixture.runID)
-				if err != nil {
-					t.Fatal(err)
-				}
-				fork, err := owner.MaterializeRunFork(ctx, runfork.RunForkMaterializeRequest{SourceRunID: fixture.runID, At: frontier, RootAdmission: rooted.Admission(), OriginalLoopCarriage: original})
-				if err != nil {
-					t.Fatal(err)
-				}
-				wantInherited := 1
-				if position == "after_frontier" {
-					wantInherited = 0
-				}
-				if fork.MaterializedFanOutCount != wantInherited {
-					t.Fatalf("fork copied fan-out beyond its exact frontier: count=%d want=%d", fork.MaterializedFanOutCount, wantInherited)
-				}
-				activation, err := owner.ActivateRunFork(ctx, runfork.RunForkActivateRequest{ForkRunID: fork.ForkRunID, AllowSourceFreeze: true, OriginalLoopCarriage: original,
-					HistoricalReplayExecutionAdmitter: runforkexecution.HistoricalReplayExecutionAdmitter{}})
-				if position == "after_frontier" {
-					_, fact, ok := runForkReplayResumeBlockerFromError(err)
-					if !ok || fact != runfork.RunForkReplayResumeFactSourceAdvanced || activation.Activated || !activation.SourceAdvancedAfterFork {
-						t.Fatalf("generic activation did not refuse revisioned fan-out advancement: %+v err=%v", activation, err)
-					}
-				} else if err != nil || !activation.Activated || activation.SourceAdvancedAfterFork {
-					t.Fatalf("at/before-frontier closed intent must not be advancement: %+v err=%v", activation, err)
 				}
 			})
 		}

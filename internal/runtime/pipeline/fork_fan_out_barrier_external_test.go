@@ -174,7 +174,7 @@ func TestIssue642FanOutBarrierFrontierBothStores(t *testing.T) {
 				}
 				probe := &forkBarrierCompletionProbe{Probe: lifecycleprobe.New(), claimed: make(chan forkEngineObservation, 1)}
 				executionRequest := runforkexecution.SelectedContractExecutionRequest{
-					SourceRunID: runID, At: cutID, ExpectedBundleHash: rt.Options.SourceArtifactFact.BundleHash(), AllowSourceFreeze: true,
+					SourceRunID: runID, At: cutID, ExpectedBundleHash: rt.Options.SourceArtifactFact.BundleHash(),
 					SourceLoader:      runforkexecution.SourceArtifactSelectedContractSourceLoader{RepoRoot: repo, Store: selected.SourceArtifactStore()},
 					ContractSelection: runforkadmission.SelectedContractSelection(semanticview.Wrap(bundle)),
 					AgentRuntime: runforkexecution.SelectedContractAgentRuntimeOptions{ProcessCapability: capability, ExecutionPosture: rt.ExecutionPosture,
@@ -187,7 +187,7 @@ func TestIssue642FanOutBarrierFrontierBothStores(t *testing.T) {
 				executionRequest.ForkOperation = &runfork.ForkOperationRequest{
 					OperationID: uuid.NewString(), Actor: "barrier-frontier", IdempotencyKey: "pending-cut", TransportHash: "barrier-frontier-transport",
 					SourceRunID: runID, ForkEventID: cutID, TargetBundleHash: executionRequest.ExpectedBundleHash,
-					TargetRootReference: rooted.Admission().Reference(), AllowSourceFreeze: true, ContractSelection: executionRequest.ContractSelection,
+					TargetRootReference: rooted.Admission().Reference(), ContractSelection: executionRequest.ContractSelection,
 				}
 				result, err := family.Execute(phase, forkEngineLiveRequest(t, rt, selected, executionRequest))
 				if err != nil || !result.Activation.Activated || result.ForkLocalRuntimeContainer == nil {

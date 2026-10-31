@@ -201,14 +201,6 @@ func TestRunForkSnapshotOwnershipMetadataBothStores(t *testing.T) {
 					if after := snapshotOwnershipCounts(t, f, materialized.ForkRunID); after != before {
 						t.Fatalf("exact replay wrote facts: before=%v after=%v", before, after)
 					}
-					if _, err := f.store.ActivateRunFork(f.ctx, runfork.RunForkActivateRequest{ForkRunID: materialized.ForkRunID, AllowSourceFreeze: true}); err == nil {
-						t.Fatal("state-only activation accepted source advancement")
-					} else if _, fact, ok := runForkReplayResumeBlockerFromError(err); !ok || fact != runfork.RunForkReplayResumeFactSourceAdvanced {
-						t.Fatalf("activation refused for wrong reason: %v", err)
-					}
-					if after := snapshotOwnershipCounts(t, f, materialized.ForkRunID); after != before {
-						t.Fatalf("refused activation wrote facts: before=%v after=%v", before, after)
-					}
 					var sourceState, sourceName string
 					if err := f.db.QueryRowContext(f.ctx, `SELECT fi.current_state, es.name
 FROM entity_state es JOIN flow_instances fi

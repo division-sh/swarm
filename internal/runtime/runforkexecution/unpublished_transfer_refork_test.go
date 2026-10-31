@@ -67,13 +67,13 @@ func verifyUnpublishedTransferredArrivalRefork(t *testing.T, latePublication boo
 			cut, cause := seedPublishedJoinSource(t, ctx, selected, owner, loaded, ancestor)
 			selection := runforkadmission.SelectedContractSelection(loaded.Source)
 			lifecycle := selected.(SelectedContractForkLifecycle)
-			parentRequest := SelectedContractExecutionRequest{SourceRunID: ancestor, At: cut, AllowSourceFreeze: true,
+			parentRequest := SelectedContractExecutionRequest{SourceRunID: ancestor, At: cut,
 				Owner: owner, SourceLoader: loader, ContractSelection: selection,
 				AgentRuntime: SelectedContractAgentRuntimeOptions{ExecutionPosture: executionposture.MockOnly, ProcessCapability: capability}}
 			if latePublication {
 				parentRequest.ForkOperation = &runfork.ForkOperationRequest{OperationID: uuid.NewString(), Actor: "unpublished-parent", IdempotencyKey: "late-publication",
 					TransportHash: "late-parent-transport", SourceRunID: ancestor, ForkEventID: cut,
-					TargetBundleHash: loaded.SourceArtifactFact.BundleHash(), TargetRootReference: loaded.RootedSource.Admission().Reference(), AllowSourceFreeze: true, ContractSelection: selection}
+					TargetBundleHash: loaded.SourceArtifactFact.BundleHash(), TargetRootReference: loaded.RootedSource.Admission().Reference(), ContractSelection: selection}
 			}
 			preparedParent, err := owner.Prepare(ctx, parentRequest)
 			if err != nil {
@@ -111,7 +111,7 @@ func verifyUnpublishedTransferredArrivalRefork(t *testing.T, latePublication boo
 			}
 			operation := runfork.ForkOperationRequest{OperationID: uuid.NewString(), Actor: "unpublished-descendant", IdempotencyKey: "parent-start",
 				TransportHash: "unpublished-descendant-transport", SourceRunID: parentRun, AtStart: true,
-				TargetBundleHash: loaded.SourceArtifactFact.BundleHash(), AllowSourceFreeze: true, ContractSelection: selection, TargetRootReference: loaded.RootedSource.Admission().Reference(),
+				TargetBundleHash: loaded.SourceArtifactFact.BundleHash(), ContractSelection: selection, TargetRootReference: loaded.RootedSource.Admission().Reference(),
 			}
 			childOwner := owner
 			if latePublication {
@@ -136,7 +136,7 @@ func verifyUnpublishedTransferredArrivalRefork(t *testing.T, latePublication boo
 				}}
 			}
 			result, err := ExecuteSelectedContractRunFork(ctx, SelectedContractExecutionRequest{SourceRunID: parentRun, AtStart: true,
-				AllowSourceFreeze: true, Owner: childOwner, ForkOperation: &operation, SourceLoader: loader, ContractSelection: selection,
+				Owner: childOwner, ForkOperation: &operation, SourceLoader: loader, ContractSelection: selection,
 				LiveRuntime: ordinary, LiveContexts: contexts, LiveRuns: selected.(runlifecycle.LiveRunReader),
 				AgentRuntime: SelectedContractAgentRuntimeOptions{ExecutionPosture: executionposture.MockOnly, ProcessCapability: capability}})
 			if err != nil || !result.Activation.Activated {

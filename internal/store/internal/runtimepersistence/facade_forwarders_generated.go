@@ -93,10 +93,6 @@ func (s *PostgresStore) ActivateDeliveryAuthority(ctx context.Context, authority
 	return s.deliveryPostgresOwner.ActivateDeliveryAuthority(ctx, authority)
 }
 
-func (s *PostgresStore) ActivateRunFork(ctx context.Context, req runfork.RunForkActivateRequest) (runfork.RunForkActivation, error) {
-	return s.runForkPostgresOwner.ActivateRunFork(ctx, req)
-}
-
 func (s *PostgresStore) ActivateRunForkForSelectedContractExecution(ctx context.Context, req runfork.RunForkSelectedContractExecutionActivateRequest) (runfork.RunForkActivation, error) {
 	return s.runForkPostgresOwner.ActivateRunForkForSelectedContractExecution(ctx, req)
 }
@@ -411,10 +407,6 @@ func (s *PostgresStore) FinalizeDirectiveSuccess(ctx context.Context, operationI
 
 func (s *PostgresStore) FindChannelBindingBeginReplay(ctx context.Context, req operatorchannel.BeginReplayRequest) (operatorchannel.Operation, bool, error) {
 	return s.operatorChannelPostgresOwner.FindChannelBindingBeginReplay(ctx, req)
-}
-
-func (s *PostgresStore) ForkRunSource(ctx context.Context, request runlifecycle.ForkSourceRequest) (runlifecycle.Snapshot, runlifecycle.MutationDisposition, error) {
-	return s.runLifecyclePostgresOwner.ForkRunSource(ctx, request)
 }
 
 func (s *PostgresStore) GetChannelOnboarding(ctx context.Context, operationID string) (channelonboarding.Operation, error) {
@@ -1341,10 +1333,6 @@ func (s *SQLiteRuntimeStore) ActivateDeliveryAuthority(ctx context.Context, auth
 	return s.deliverySQLiteOwner.ActivateDeliveryAuthority(ctx, authority)
 }
 
-func (s *SQLiteRuntimeStore) ActivateRunFork(ctx context.Context, req runfork.RunForkActivateRequest) (runfork.RunForkActivation, error) {
-	return s.runForkSQLiteOwner.ActivateRunFork(ctx, req)
-}
-
 func (s *SQLiteRuntimeStore) ActivateRunForkForSelectedContractExecution(ctx context.Context, req runfork.RunForkSelectedContractExecutionActivateRequest) (runfork.RunForkActivation, error) {
 	return s.runForkSQLiteOwner.ActivateRunForkForSelectedContractExecution(ctx, req)
 }
@@ -1659,10 +1647,6 @@ func (s *SQLiteRuntimeStore) FinalizeDirectiveSuccess(ctx context.Context, opera
 
 func (s *SQLiteRuntimeStore) FindChannelBindingBeginReplay(ctx context.Context, req operatorchannel.BeginReplayRequest) (operatorchannel.Operation, bool, error) {
 	return s.operatorChannelSQLiteOwner.FindChannelBindingBeginReplay(ctx, req)
-}
-
-func (s *SQLiteRuntimeStore) ForkRunSource(ctx context.Context, request runlifecycle.ForkSourceRequest) (runlifecycle.Snapshot, runlifecycle.MutationDisposition, error) {
-	return s.runLifecycleSQLiteOwner.ForkRunSource(ctx, request)
 }
 
 func (s *SQLiteRuntimeStore) GetChannelOnboarding(ctx context.Context, operationID string) (channelonboarding.Operation, error) {

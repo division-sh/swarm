@@ -184,7 +184,7 @@ func verifyPublishedFanOutBarrierContinuation(t *testing.T, proof publishedBarri
 				})
 			}
 			request := runforkexecution.SelectedContractExecutionRequest{
-				SourceRunID: runID, At: original.id, ExpectedBundleHash: rt.Options.SourceArtifactFact.BundleHash(), AllowSourceFreeze: true,
+				SourceRunID: runID, At: original.id, ExpectedBundleHash: rt.Options.SourceArtifactFact.BundleHash(),
 				SourceLoader:      runforkexecution.SourceArtifactSelectedContractSourceLoader{RepoRoot: repo, Store: selected.SourceArtifactStore()},
 				ContractSelection: runforkadmission.SelectedContractSelection(semanticview.Wrap(bundle)),
 				AgentRuntime: runforkexecution.SelectedContractAgentRuntimeOptions{ProcessCapability: capability, ExecutionPosture: rt.ExecutionPosture,
@@ -205,7 +205,7 @@ func verifyPublishedFanOutBarrierContinuation(t *testing.T, proof publishedBarri
 				OperationID: uuid.NewString(), Actor: "published-barrier-crash", IdempotencyKey: "pending-cut", TransportHash: "published-barrier-crash-transport",
 				SourceRunID: runID, ForkEventID: original.id, TargetBundleHash: request.ExpectedBundleHash,
 				TargetRootReference: rooted.Admission().Reference(),
-				AllowSourceFreeze:   true, ContractSelection: request.ContractSelection,
+				ContractSelection:   request.ContractSelection,
 			}
 			var sourceDomain map[string]storetest.SelectedForkStorageTableSnapshot
 			if failingCompletion {

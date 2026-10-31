@@ -197,9 +197,9 @@ func TestIssue642SupportedOneShotReturnsOwnChildReplyBothStores(t *testing.T) {
 			contractSelection := runforkadmission.SelectedContractSelection(loaded.Source)
 			operation := &runfork.ForkOperationRequest{OperationID: uuid.NewString(), Actor: "one-shot-proof", IdempotencyKey: "own-return",
 				TransportHash: "one-shot-proof-transport", SourceRunID: runID, ForkEventID: page.Events[0].EventID,
-				TargetBundleHash: loaded.SourceArtifactFact.BundleHash(), AllowSourceFreeze: true, ContractSelection: contractSelection, TargetRootReference: loaded.RootedSource.Admission().Reference(),
+				TargetBundleHash: loaded.SourceArtifactFact.BundleHash(), ContractSelection: contractSelection, TargetRootReference: loaded.RootedSource.Admission().Reference(),
 			}
-			result, err := ExecuteSelectedContractRunFork(ctx, SelectedContractExecutionRequest{SourceRunID: runID, At: page.Events[0].EventID, AllowSourceFreeze: true,
+			result, err := ExecuteSelectedContractRunFork(ctx, SelectedContractExecutionRequest{SourceRunID: runID, At: page.Events[0].EventID,
 				LiveRuntime: rt, LiveContexts: liveContexts, LiveRuns: selected.(runlifecycle.LiveRunReader),
 				Owner: owner, SourceLoader: loader, ForkOperation: operation, ContractSelection: contractSelection, AgentRuntime: SelectedContractAgentRuntimeOptions{
 					ExecutionPosture: executionposture.MockOnly, ProcessCapability: owner.ports.contexts.capability, Workspace: manager,

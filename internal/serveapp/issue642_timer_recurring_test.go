@@ -82,7 +82,7 @@ func issue642RetainedRecurringTimerFork(t *testing.T, backend string) {
 	var fork apiv1.RunForkExecutionResult
 	requireServedJSONRPCResult(t, rt.Endpoint, "run.fork", map[string]any{
 		"source_run_id": seed.RunID, "fork_event_id": marker.EventID,
-		"allow_source_freeze": true, "idempotency_key": "issue642-retained-recurring-timer-fork",
+		"idempotency_key": "issue642-retained-recurring-timer-fork",
 	}, &fork)
 	if fork.SourceRunID != seed.RunID || fork.ForkRunID == "" || fork.ForkRunID == seed.RunID ||
 		fork.ForkEventID != marker.EventID || fork.ForkRevision != plan.ForkPoint.Revision || fork.SourceFrozen || fork.SourceRunStatus != "paused" {

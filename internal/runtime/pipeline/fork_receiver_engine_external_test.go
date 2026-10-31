@@ -168,7 +168,7 @@ func forkEngineLiveRequest(t *testing.T, rt *swarmruntime.Runtime, selected *sto
 		request.ForkOperation = &runfork.ForkOperationRequest{
 			OperationID: uuid.NewString(), Actor: "pipeline:" + t.Name(), IdempotencyKey: uuid.NewString(), TransportHash: "pipeline-live-fork",
 			SourceRunID: request.SourceRunID, ForkEventID: request.At, AtStart: request.AtStart,
-			TargetBundleHash: request.ExpectedBundleHash, TargetRootReference: rooted.Admission().Reference(), ContractSelection: request.ContractSelection, AllowSourceFreeze: request.AllowSourceFreeze,
+			TargetBundleHash: request.ExpectedBundleHash, TargetRootReference: rooted.Admission().Reference(), ContractSelection: request.ContractSelection,
 		}
 	}
 	request.LiveRuntime, request.LiveRuns, request.LiveContexts = rt, selected.LiveRuns(), contexts
@@ -284,7 +284,7 @@ func TestSelectedForkReceiverSupportedDeliveryBothStores(t *testing.T) {
 				go func() {
 					defer close(done)
 					result, err := family.Execute(forkCtx, forkEngineLiveRequest(t, rt, selected, runforkexecution.SelectedContractExecutionRequest{
-						SourceRunID: runID, At: frontier, ExpectedBundleHash: rt.Options.SourceArtifactFact.BundleHash(), AllowSourceFreeze: true,
+						SourceRunID: runID, At: frontier, ExpectedBundleHash: rt.Options.SourceArtifactFact.BundleHash(),
 						SourceLoader:      runforkexecution.SourceArtifactSelectedContractSourceLoader{RepoRoot: repo, Store: selected.SourceArtifactStore()},
 						ContractSelection: runforkadmission.SelectedContractSelection(semanticview.Wrap(bundle)),
 						AgentRuntime:      runforkexecution.SelectedContractAgentRuntimeOptions{ProcessCapability: capability, ExecutionPosture: rt.ExecutionPosture, AgentManagerOptions: runtimemanager.AgentManagerOptions{TestLifecycleProbe: probe}},

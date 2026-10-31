@@ -43,16 +43,6 @@ func TestForkActivationInventoriesConstructedHeadersBothStores(t *testing.T) {
 					if headers == 0 || (shape == "fieldless" && headers <= fields) {
 						t.Fatalf("fixture headers=%d fields=%d", headers, fields)
 					}
-					owner := fixture.store.(interface {
-						ActivateRunFork(context.Context, runfork.RunForkActivateRequest) (runfork.RunForkActivation, error)
-					})
-					result, err := owner.ActivateRunFork(ctx, runfork.RunForkActivateRequest{ForkRunID: child.ForkRunID, OriginalRootAdmission: original.Admission(), Process: evidence.LeaseStamp()})
-					if result.MaterializedEntityCount != headers {
-						t.Fatalf("constructed inventory=%d headers=%d fields=%d later admission=%v", result.MaterializedEntityCount, headers, fields, err)
-					}
-					if err == nil || result.Activated {
-						t.Fatalf("inventory proof unexpectedly crossed source-freeze admission: result=%+v err=%v", result, err)
-					}
 					selected := fixture.store.(interface {
 						ActivateRunForkForSelectedContractExecution(context.Context, runfork.RunForkSelectedContractExecutionActivateRequest) (runfork.RunForkActivation, error)
 					})

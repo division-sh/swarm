@@ -10251,15 +10251,6 @@
           }
         },
         {
-          "name": "allow_source_freeze",
-          "required": false,
-          "description": "Must be true before forking a running or paused source. It permits permanently freezing a source that has not advanced beyond the fork point; a frozen source cannot resume. An advanced source stays independently live. Withhold permission to cancel without starting a fork. The mutation rechecks source activity and this authorization in the source-freeze transaction, and the result reports the actual source_frozen and source_run_status outcome. Terminal sources refuse without requiring confirmation. The retired confirm_source_freeze parameter is rejected, not aliased.",
-          "schema": {
-            "default": false,
-            "type": "boolean"
-          }
-        },
-        {
           "name": "data_pin_overrides",
           "required": false,
           "description": "Exact structured declaration/version replacements. Head and alias selectors are forbidden; omission inherits the complete source pin set.",
@@ -21409,8 +21400,7 @@
           "paused",
           "completed",
           "failed",
-          "cancelled",
-          "forked"
+          "cancelled"
         ],
         "type": "string"
       },
@@ -22312,7 +22302,7 @@
         "type": "object"
       },
       "RunForkResult": {
-        "description": "Reports both the activated fork and the actual source lifecycle outcome. source_frozen is true exactly when source_run_status is forked; otherwise the source-advanced branch preserved the reported source status.",
+        "description": "Reports both the activated fork and the actual source lifecycle outcome.",
         "oneOf": [
           {
             "additionalProperties": false,
@@ -22477,7 +22467,7 @@
           },
           "ended_at": {
             "$ref": "#/components/schemas/Timestamp",
-            "description": "Omitted while run is active; present once status is terminal (completed/failed/cancelled/forked)."
+            "description": "Omitted while run is active; present once status is terminal (completed/failed/cancelled)."
           },
           "entity_count": {
             "minimum": 0,
@@ -22807,8 +22797,7 @@
           "paused",
           "completed",
           "failed",
-          "cancelled",
-          "forked"
+          "cancelled"
         ],
         "type": "string"
       },

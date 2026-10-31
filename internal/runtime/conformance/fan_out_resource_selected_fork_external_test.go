@@ -200,8 +200,8 @@ func TestSelectedExternalEffectFixtureControlBothStores(t *testing.T) {
 			forkServer := selectedExternalForkServer(t, f, owner, provider.URL)
 			params := map[string]any{
 				"source_run_id": sourceRunID, "bundle_hash": f.runtime.sourceArtifactFact.BundleHash(),
-				"fork_event_id":       point,
-				"allow_source_freeze": true, "idempotency_key": uuid.NewString(),
+				"fork_event_id":   point,
+				"idempotency_key": uuid.NewString(),
 			}
 			result, rpcErr := deploymentForkRPC(t, f.ctx, forkServer, params)
 			if len(rpcErr) != 0 || result.ForkRunID == "" {
@@ -449,8 +449,8 @@ func TestSelectedDeploymentExternalEffectRecoveryBothStores(t *testing.T) {
 				key := uuid.NewString()
 				params := map[string]any{
 					"source_run_id": sourceRunID, "bundle_hash": f.runtime.sourceArtifactFact.BundleHash(),
-					"fork_event_id":       point,
-					"allow_source_freeze": true, "idempotency_key": key,
+					"fork_event_id":   point,
+					"idempotency_key": key,
 				}
 				forkCtx, cancel := context.WithTimeout(f.ctx, 15*time.Second)
 				defer cancel()

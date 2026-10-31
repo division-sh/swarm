@@ -88,8 +88,7 @@ const sqliteExternalEffectActiveOwnerPredicate = `(o.authority_kind = 'conversat
 const runLifecycleTerminalStateSQLValues = "'" +
 	string(runtimerunlifecycle.StateCompleted) + "', '" +
 	string(runtimerunlifecycle.StateFailed) + "', '" +
-	string(runtimerunlifecycle.StateCancelled) + "', '" +
-	string(runtimerunlifecycle.StateForked) + "'"
+	string(runtimerunlifecycle.StateCancelled) + "'"
 
 const postgresProviderCompletionRecoveryOwnerPredicate = `(o.authority_kind = 'normal_agent' OR ` + postgresExternalEffectActiveOwnerPredicate + `)`
 const sqliteProviderCompletionRecoveryOwnerPredicate = `(o.authority_kind = 'normal_agent' OR ` + sqliteExternalEffectActiveOwnerPredicate + `)`

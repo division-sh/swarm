@@ -81,12 +81,12 @@ func TestIssue642TerminalNestedReplyNativeMaterializationBothStores(t *testing.T
 			}
 			// Reply readback must not erase an unrelated replay-policy refusal or
 			// create execution authority. The cut is publication, not its later drain.
-			recovered, err := runforkexecution.ActivateSelectedContractRunFork(correlation.WithRunID(h.ctx, staged.ForkRunID), runforkexecution.SelectedContractActivationGateRequest{
-				ForkRunID: staged.ForkRunID, AllowSourceFreeze: true, Store: runScopedCatalogStore(t, h),
-				ExecutionOwner: owner, SourceLoader: loader, AgentRuntime: options,
+			recovered, err := executeCatalogLiveFork(t, h, correlation.WithRunID(h.ctx, staged.ForkRunID), runforkexecution.SelectedContractExecutionRequest{
+				SourceRunID: catalogRuntimeRunID, At: cut, ForkOperation: &operation,
+				Owner: owner, SourceLoader: loader, AgentRuntime: options, ContractSelection: selection,
 			})
 			if err == nil || !strings.Contains(err.Error(), runfork.RunForkBlockerNonAgentDeliveryReplayUnsupported) ||
-				recovered.Activated || recovered.ExecutedEventCount != 0 || recovered.ForkLocalRuntimeContainer != nil || len(recovered.ForkEvents) != 0 {
+				recovered.Activation.Activated || recovered.ExecutedEventCount != 0 || recovered.ForkLocalRuntimeContainer != nil || len(recovered.ForkEvents) != 0 {
 				t.Fatalf("terminal reply transfer bypassed the exact unrelated replay gate: %+v %v", recovered, err)
 			}
 			after, err = storetest.ReadReplyContextRecords(h.ctx, reader, staged.ForkRunID)

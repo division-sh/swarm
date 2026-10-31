@@ -81,7 +81,7 @@ func TestW5ToolsPinnedModuleRunsThroughSelectedForkBothStores(t *testing.T) {
 			}
 			seedSelectedOperationSource(t, ctx, selected, loaded, runID, eventID, false, input)
 			result, err := q1ExecuteSelectedPhaseComponent(t, ctx, SelectedContractExecutionRequest{
-				SourceRunID: runID, At: eventID, AllowSourceFreeze: true, Owner: owner, SourceLoader: loader,
+				SourceRunID: runID, At: eventID, Owner: owner, SourceLoader: loader,
 				SourceArtifactFact: loaded.SourceArtifactFact,
 				ContractSelection:  runforkadmission.SelectedContractSelection(loaded.Source),
 				AgentRuntime:       SelectedContractAgentRuntimeOptions{ExecutionPosture: executionposture.Live, ProcessCapability: capability},

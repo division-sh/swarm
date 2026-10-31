@@ -380,7 +380,7 @@ func proveSelectedConstructedAgentInput(t *testing.T, backend string, nested, fi
 		}
 	}
 	request := SelectedContractExecutionRequest{
-		SourceRunID: runID, At: eventID, AllowSourceFreeze: true, Owner: owner, SourceLoader: sourceLoader,
+		SourceRunID: runID, At: eventID, Owner: owner, SourceLoader: sourceLoader,
 		ContractSelection: runforkadmission.SelectedContractSelection(loaded.Source),
 		AgentRuntime: SelectedContractAgentRuntimeOptions{ExecutionPosture: executionposture.Live,
 			ProcessCapability: selectedContractTestProcessCapability(t, ctx, selected),
