@@ -6,6 +6,7 @@ import (
 	"bytes"
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"io"
 	"net/http"
@@ -25,6 +26,8 @@ import (
 	"github.com/division-sh/swarm/internal/cliapp"
 	"github.com/division-sh/swarm/internal/operatorchannel"
 	"github.com/division-sh/swarm/internal/operatorread"
+	"github.com/division-sh/swarm/internal/sessioncapture"
+	"github.com/division-sh/swarm/internal/store/sessionstate"
 	"github.com/division-sh/swarm/internal/testutil"
 	"go.mau.fi/whatsmeow/types"
 )
@@ -246,6 +249,7 @@ func TestChannelConnectWhatsAppRegistersAccountBothStores(t *testing.T) {
 // send, encrypted customer ingress and restart use their ordinary owners.
 func requireOfflinePairedWhatsAppServiceRoundTrip(t *testing.T, opts cliapp.ServeOptions, peer *serveNativeProtocolPeer, registered channelonboarding.Operation) {
 	t.Helper()
+	enableChannelOnboardingRecoveryOnStartup(t, opts.ConfigPath)
 	source := t.TempDir()
 	copyReleaseFixtureTree(t, opts.SourceRoot, source)
 	opts.SourceRoot = source
@@ -345,6 +349,11 @@ service-probe:
 	if code := process.stop(); code != 0 {
 		t.Errorf("service mock first serve shutdown exit=%d", code)
 	}
+	if !acknowledged {
+		pending := readOfflinePairedWhatsAppCaptures(t, opts, registered)
+		t.Logf("first reply capture retained=%d original_run=%t request_absent=%t", len(pending), len(pending) == 1 && pending[0].Event.Scope.PublicationBinding.RunID == runID,
+			len(pending) == 1 && pending[0].Request == nil)
+	}
 	process = startServeRuntimeTestProcess(t, opts)
 	process.waitForReadyLine()
 	peer.awaitPostLogin()
@@ -365,7 +374,80 @@ service-probe:
 		listing.Accounts[0].Operation.AccountReference != registered.AccountReference || !listing.Accounts[0].Operation.AccountConfirmed {
 		t.Error("service mock restart replaced or lost the approved deployment account")
 	}
+	// An existing verifier fault leaves a genuine capture with no staged request,
+	// the field failure's durable shape. The first subsequent boot must drain it.
+	process.mu.Lock()
+	rt := process.runtime
+	process.mu.Unlock()
+	rt.Bus.SetProviderOutputAuthorizationVerifier(&frozenIngressMutationVerifier{
+		verify: rt.Options.ProviderTriggerCatalog.VerifyProviderOutputAuthorization,
+		mutate: func() error { return errors.New("service mock interruption before publication staging") },
+	})
+	const retainedID = "OFFLINE_PAIRED_RETAINED_BUSINESS_REPLY"
+	const retainedText = "A reply retained before publication staging"
+	peer.sendEncryptedFrame(sender.EncryptReply(t, retainedText, retainedID, sent.ID, outgoing))
+	deadline := time.Now().Add(5 * time.Second)
+	for {
+		peer.mu.Lock()
+		fenced := peer.disconnected == peer.connections
+		peer.mu.Unlock()
+		if fenced {
+			break
+		}
+		if time.Now().After(deadline) {
+			t.Fatal("service mock interruption did not fence the original occurrence")
+		}
+		time.Sleep(10 * time.Millisecond)
+	}
+	if code := process.stop(); code != 0 {
+		t.Errorf("service mock interrupted serve shutdown exit=%d", code)
+	}
+	pending := readOfflinePairedWhatsAppCaptures(t, opts, registered)
+	if len(pending) != 1 || pending[0].Request != nil || pending[0].Event.EventID != retainedID || pending[0].Event.Scope.PublicationBinding.RunID != runID {
+		t.Fatal("service mock interruption did not retain the exact original reply without a publication request")
+	}
+	process = startServeRuntimeTestProcess(t, opts)
+	process.waitForReadyLine()
+	peer.awaitPostLogin()
+	select {
+	case reply := <-peer.sent:
+		if reply.To.ToNonAD() != customer && reply.To.ToNonAD() != customerLID || reply.Body.GetConversation() != retainedText || reply.ID == "" {
+			t.Error("first fixed boot changed the retained customer reply")
+		}
+	case <-time.After(5 * time.Second):
+		t.Error("first fixed boot did not drain the retained reply into the holding flow")
+	}
 	if code := process.stop(); code != 0 {
 		t.Errorf("service mock restarted serve shutdown exit=%d", code)
 	}
+	if pending := readOfflinePairedWhatsAppCaptures(t, opts, registered); len(pending) != 0 {
+		t.Fatal("first fixed boot left the acknowledged reply in private capture")
+	}
+}
+
+func readOfflinePairedWhatsAppCaptures(t *testing.T, opts cliapp.ServeOptions, registered channelonboarding.Operation) []sessioncapture.PendingCapture {
+	t.Helper()
+	paths, err := filepath.Glob(filepath.Join(opts.SwarmDir, "*", "provider.db"))
+	if err != nil || len(paths) != 1 {
+		t.Fatal("service mock has no exact private account database", err)
+	}
+	fixture, owner, err := sessionstate.OpenSDKFixture(t.Context(), paths[0])
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer fixture.Close()
+	spool, err := owner.Captures(t.Context(), filepath.Base(filepath.Dir(paths[0])))
+	if err != nil {
+		t.Fatal(err)
+	}
+	rows, err := spool.PendingPublications(t.Context())
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, row := range rows {
+		if row.Event.Scope.OnboardingOperation != registered.OperationID || !row.Event.Scope.RegisteredBusiness {
+			t.Fatal("service mock capture belongs to another registration")
+		}
+	}
+	return rows
 }
