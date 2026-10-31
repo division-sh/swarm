@@ -42,10 +42,12 @@ func TestEntityMutationFinalCandidateEquality(t *testing.T) {
 func TestEntityMutationPresenceAndOwnership(t *testing.T) {
 	c := Contract{Entity: rc.EntityContract{Fields: map[string]rc.EntityFieldDecl{
 		"required": {Type: "text"}, "optional": {Type: "text", IsOptional: true},
-		"fixed":      {Type: "text", IsOptional: true, Immutable: true},
-		"projection": {Type: "[text]", MaterializeFrom: "node.items"},
-		"profile":    {Type: "Profile", IsOptional: true},
-		"items":      {Type: "[text]"}, "lookup": {Type: "map[text]text"},
+		"fixed":   {Type: "text", IsOptional: true, Immutable: true},
+		"profile": {Type: "Profile", IsOptional: true},
+		"entity":  {Type: "Profile", IsOptional: true},
+		"_entity": {Type: "Profile", IsOptional: true},
+		"gates":   {Type: "Profile", IsOptional: true},
+		"items":   {Type: "[text]"}, "lookup": {Type: "map[text]text"},
 	}}, Types: rc.TypeCatalogDocument{Types: map[string]rc.NamedTypeDecl{
 		"Profile": {Fields: map[string]rc.TypeFieldSpec{"name": {Type: "text"}, "note": {Type: "text", IsOptional: true}}},
 	}}}
@@ -59,9 +61,11 @@ func TestEntityMutationPresenceAndOwnership(t *testing.T) {
 		{"absent_optional_clear", nil, []Mutation{{Operation: MutationClear, Target: "optional"}}, true},
 		{"immutable_clear", map[string]any{"fixed": "x"}, []Mutation{{Operation: MutationClear, Target: "fixed"}}, false},
 		{"immutable_same", map[string]any{"fixed": "x"}, []Mutation{{Target: "fixed", Value: "x"}}, true},
-		{"projection_foreign", nil, []Mutation{{Target: "projection", Value: []any{}}}, false},
-		{"projection_owner", nil, []Mutation{{Target: "projection", Value: []any{}, ProjectionSource: "node.items"}}, true},
 		{"missing_parent", nil, []Mutation{{Target: "profile.note", Value: "x"}}, false},
+		{"retired_entity_root", map[string]any{"entity": map[string]any{"name": "x"}}, []Mutation{{Target: "entity.note", Value: "y"}}, false},
+		{"retired_platform_root", map[string]any{"_entity": map[string]any{"name": "x"}}, []Mutation{{Target: "_entity.note", Value: "y"}}, false},
+		{"retired_gate_root", map[string]any{"gates": map[string]any{"name": "x"}}, []Mutation{{Target: "gates.note", Value: "y"}}, false},
+		{"explicit_business_entity", map[string]any{"entity": map[string]any{"name": "x"}}, []Mutation{{Target: "state.entity.note", Value: "y"}}, true},
 		{"clear_missing_parent", nil, []Mutation{{Operation: MutationClear, Target: "profile.note"}}, true},
 		{"clear_missing_required_child", nil, []Mutation{{Operation: MutationClear, Target: "profile.name"}}, false},
 		{"clear_twice", nil, []Mutation{{Operation: MutationClear, Target: "optional"}, {Operation: MutationClear, Target: "optional"}}, true},

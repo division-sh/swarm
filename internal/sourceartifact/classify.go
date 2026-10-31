@@ -11,7 +11,7 @@ import (
 )
 
 var declarationFiles = map[string]struct{}{
-	"schema.yaml": {}, "types.yaml": {}, "entities.yaml": {}, "nodes.yaml": {},
+	"schema.yaml": {}, "types.yaml": {}, "state.yaml": {}, "nodes.yaml": {},
 	"events.yaml": {}, "agents.yaml": {}, "tools.yaml": {}, "policy.yaml": {}, "rules.yaml": {},
 }
 
@@ -93,6 +93,9 @@ func classifyLabel(label string) (Disposition, error) {
 	}
 	if local == "manifest.yaml" {
 		return DispositionManifest, nil
+	}
+	if local == "entities.yaml" {
+		return 0, fmt.Errorf("entities.yaml is retired; declare fields directly in state.yaml without an entity-name wrapper")
 	}
 	if _, body := packmodel.BodyRoleForFile(local); body {
 		return DispositionResource, nil

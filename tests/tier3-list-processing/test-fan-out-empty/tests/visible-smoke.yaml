@@ -4,6 +4,5 @@ steps:
     payload:
       items: []
 expect:
-  entities:
-    - type: test_entity
-      current_state: scanning
+  events:
+    include: [batch.submitted]

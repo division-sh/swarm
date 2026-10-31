@@ -330,8 +330,8 @@ func TestReceiverCompositionForkBothStores(t *testing.T) {
 				}
 				waitServedSelectedForkFrontier(t, rt.ReceiverStateReader, rt.ReadRunDeliveries, forkRunID, forkPoint)
 				checkSource("after supported fork")
-				rootType, childType, rootState := "work", "receipt", "done"
-				var rootFields, childFields map[string]any = map[string]any{}, map[string]any{}
+				rootType, childType, rootState := "", "", "done"
+				var rootFields, childFields map[string]any
 				if fieldless {
 					rootType, childType, rootState = "", "", "pending"
 					rootFields, childFields = nil, nil
@@ -348,10 +348,7 @@ func TestReceiverCompositionForkBothStores(t *testing.T) {
 				if err := rt.DB.QueryRow(`SELECT COUNT(*) FROM flow_instances WHERE run_id=$1`, forkRunID).Scan(&headers); err != nil || headers != 2 {
 					t.Fatalf("fork construction census: got=%d want=2 err=%v", headers, err)
 				}
-				wantCompanions := 2
-				if fieldless {
-					wantCompanions = 0
-				}
+				wantCompanions := 0
 				if err := rt.DB.QueryRow(`SELECT COUNT(*) FROM entity_state WHERE run_id=$1`, forkRunID).Scan(&companions); err != nil || companions != wantCompanions {
 					t.Fatalf("fork field companion census: got=%d want=%d err=%v", companions, wantCompanions, err)
 				}

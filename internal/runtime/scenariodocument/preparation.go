@@ -42,18 +42,26 @@ func PrepareCLI(out CLI, evaluator *Evaluator, fixture func(string) (semanticval
 func validateAliases(out CLI, evaluator *Evaluator) error {
 	aliases := map[string]string{}
 	for _, entity := range out.Setup.Entities {
-		aliases[entity.Alias] = entity.EntityType
+		flow := "."
+		if entity.Flow != nil {
+			value, err := evaluator.Evaluate(entity.Flow)
+			if err != nil {
+				return err
+			}
+			flow = value.(string)
+		}
+		aliases[entity.Alias] = flow
 	}
 	for _, expectation := range out.Expect.Entities {
 		if expectation.Ref == "" {
 			continue
 		}
-		entityType, found := aliases[expectation.Ref]
+		flow, found := aliases[expectation.Ref]
 		if !found {
 			return fmt.Errorf("expect.entities.ref %q is not a setup alias", expectation.Ref)
 		}
-		if expectation.EntityType != "" && expectation.EntityType != entityType {
-			return fmt.Errorf("expect.entities.type disagrees with setup alias %q", expectation.Ref)
+		if expectation.Flow != "" && expectation.Flow != flow {
+			return fmt.Errorf("expect.entities.flow disagrees with setup alias %q", expectation.Ref)
 		}
 	}
 	for _, step := range out.Steps {

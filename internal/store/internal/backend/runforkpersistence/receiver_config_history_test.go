@@ -84,11 +84,11 @@ func TestRuntimeHeaderHistoricalCaptureAndReadinessBothStores(t *testing.T) {
 			if _, err := tx.Exec(`INSERT INTO runs (run_id,origin_kind) VALUES ($1,'deployment')`, runID); err != nil {
 				t.Fatal(err)
 			}
-			if _, err := tx.Exec(`INSERT INTO entity_state VALUES ($1,$2,$3,'deployment','','','2026-09-21T00:00:00Z','2026-09-21T00:00:00Z')`, runID, entityID, path); err != nil {
+			if _, err := tx.Exec(`INSERT INTO entity_state VALUES ($1,$2,$3,'state','','','2026-09-21T00:00:00Z','2026-09-21T00:00:00Z')`, runID, entityID, path); err != nil {
 				t.Fatal(err)
 			}
 			insertHeader := `INSERT INTO flow_instances (run_id,instance_path,entity_id,entity_type,slug,name,config,stage_defined,flow_template,mode,parent_instance,instance_key,status,current_state,entered_state_at,created_at,updated_at)
-				VALUES ($1,$2,$3,'deployment','','',$4,TRUE,'consumer','template',$6,$7,'active',$5,'2026-09-21T00:00:00Z','2026-09-21T00:00:00Z','2026-09-21T00:00:00Z')`
+				VALUES ($1,$2,$3,'state','','',$4,TRUE,'consumer','template',$6,$7,'active',$5,'2026-09-21T00:00:00Z','2026-09-21T00:00:00Z','2026-09-21T00:00:00Z')`
 			metadata := plan.Entities[0].MaterializationMetadata
 			bundle, found := semanticview.Bundle(source)
 			if !found || bundle.SourceArtifact == nil {
@@ -99,7 +99,7 @@ func TestRuntimeHeaderHistoricalCaptureAndReadinessBothStores(t *testing.T) {
 				t.Fatal("constructed historical header is missing its declared stage")
 			}
 			construction := selectedWorkflowConstructionRecordFixture(t, runID, bundle.SourceArtifact.BundleHash(), instance, pipeline.WorkflowInstance{
-				WorkflowVersion: "v1", Mode: metadata.Mode, Status: "active", EntityType: "deployment", InstanceKey: metadata.InstanceKey,
+				WorkflowVersion: "v1", Mode: metadata.Mode, Status: "active", EntityType: metadata.EntityType, InstanceKey: metadata.InstanceKey,
 				CurrentState: *plan.Entities[0].CurrentState, Fields: plan.Entities[0].Fields, StageDefined: true, EnteredStageAt: at, CreatedAt: at,
 			}, executionmode.Live)
 			metadata.InitialMaterialization = construction.InitialMaterialization

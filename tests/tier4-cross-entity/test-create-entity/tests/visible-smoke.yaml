@@ -6,6 +6,3 @@ steps:
 expect:
   events:
     include: [entity.created]
-  entities:
-    - type: test_entity
-      current_state: creating

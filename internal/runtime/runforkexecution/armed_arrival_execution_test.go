@@ -45,15 +45,15 @@ func armedArrivalFixture(t *testing.T) string {
 	t.Helper()
 	flowID := os.Getenv(publishedJoinFlowEnv)
 	root := supportedArrivalJoinFixture(t, flowID)
-	path := filepath.Join(root, flowID, "entities.yaml")
+	path := filepath.Join(root, flowID, "state.yaml")
 	data, err := os.ReadFile(path)
 	if err != nil {
 		t.Fatal(err)
 	}
-	if strings.Count(string(data), "    initial: []\n") != 1 {
+	if strings.Count(string(data), "expected: [text]\n") != 1 {
 		t.Fatal("armed arrival fixture lost its exact membership initializer")
 	}
-	data = []byte(strings.Replace(string(data), "    initial: []\n", "    initial: [member-a]\n", 1))
+	data = []byte(strings.Replace(string(data), "expected: [text]\n", "expected: [\"member-a\"]\n", 1))
 	if err := os.WriteFile(path, data, 0o600); err != nil {
 		t.Fatal(err)
 	}

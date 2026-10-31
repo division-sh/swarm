@@ -36,8 +36,8 @@ loops:
     escape:
       advances_to: escaped
 `,
-		"entities.yaml": "test_entity: {}\n",
-		"events.yaml":   "loop.start:\nloop.rule:\n  revision_id: text\nloop.complete:\n  revision_id: text\nloop.repeat:\n  revision_id: text\nloop.close:\n  revision_id: text\n",
+
+		"events.yaml": "loop.start:\nloop.rule:\n  revision_id: text\nloop.complete:\n  revision_id: text\nloop.repeat:\n  revision_id: text\nloop.close:\n  revision_id: text\n",
 		"nodes.yaml": `starter:
   event_handlers:
     loop.start:
@@ -95,7 +95,7 @@ func newCompiledLoopEvidenceHarness(t *testing.T, storeCase workflowJoinStoreCas
 	now := canonicalWorkflowTimerTime(time.Now().UTC())
 	instance := materializedWorkflowInstanceForSource(t, source, ctx, WorkflowInstance{
 		InstanceID: runID, StorageRef: runID, EntityID: entityID, WorkflowName: ".", WorkflowVersion: source.WorkflowVersion(),
-		CurrentState: "waiting", CreatedAt: now, EnteredStageAt: now, EntityType: "test_entity", Fields: map[string]any{},
+		CurrentState: "waiting", CreatedAt: now, EnteredStageAt: now, Fields: map[string]any{},
 	})
 	if err := fixture.Construct(ctx, instance); err != nil {
 		t.Fatal(err)

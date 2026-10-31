@@ -102,7 +102,7 @@ func testForkFanOutGenerationWriterEvaluatorBothStores(t *testing.T, selectedExe
 						}
 					}
 					constructed := commitPreparedWorkflowAggregateFixture(t, ctx, fixture.store.(agentFixtureFlowStore), runID, pipeline.WorkflowInstance{
-						InstanceID: runID, StorageRef: runID, EntityID: runID, EntityType: "root", WorkflowName: ".", WorkflowVersion: source.WorkflowVersion(),
+						InstanceID: runID, StorageRef: runID, EntityID: runID, EntityType: "state", WorkflowName: ".", WorkflowVersion: source.WorkflowVersion(),
 						Mode: "static", StageDefined: true, CurrentState: "pending", Fields: map[string]any{}, CreatedAt: at, EnteredStageAt: at,
 					}, at)
 					routeID := events.RouteIdentity{FlowID: ".", FlowInstance: runID, EntityID: runID}
@@ -156,7 +156,7 @@ func testForkFanOutGenerationWriterEvaluatorBothStores(t *testing.T, selectedExe
 					record.Transition = pipeline.WorkflowEngineStateTransitionUpdateStateAndCompanion
 					record.ExpectedState, record.ExpectedRevision = "pending", 1
 					record.UpdatedAt = at.Add(time.Second)
-					record.CurrentState, record.EntityType, record.Mode = "review", "root", "static"
+					record.CurrentState, record.EntityType, record.Mode = "review", "state", "static"
 					record.Accumulator = json.RawMessage(forkTestJSON(t, buckets))
 					beforeUnsafe := snapshotForkHistoricalExecutionTables(t, fixture.db, backend.name == "postgres")
 					_, unsafeErr := fixture.store.(pipeline.WorkflowEngineMutationOwner).CommitWorkflowEngineMutation(ctx, pipeline.WorkflowEngineMutationCommand{

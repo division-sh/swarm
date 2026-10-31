@@ -62,7 +62,7 @@ func testSelectedOwnerPolicy(owners ...runtimepipeline.DeliveryTargetOwnerCandid
 
 func existingOwnerHandlerFixture() runtimecontracts.SystemNodeEventHandler {
 	return runtimecontracts.SystemNodeEventHandler{Guard: &runtimecontracts.GuardSpec{
-		ID: "selected_owner", Check: `_entity.id != ""`,
+		ID: "selected_owner", Check: `instance.id != ""`,
 	}}
 }
 

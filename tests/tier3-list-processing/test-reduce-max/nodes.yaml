@@ -7,7 +7,7 @@ reduce-node:
       reduce:
         items_from: payload.values
         operation: max
-        store_as: entity.maximum
+        store_as: state.maximum
       emit:
         event: values.reduced
       advances_to: done

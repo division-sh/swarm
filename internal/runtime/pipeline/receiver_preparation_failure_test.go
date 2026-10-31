@@ -199,7 +199,6 @@ func VerifyNativeReceiverPreparationFailureClaimMatrixBothStoresForTest(t *testi
 					owner := fixture.Store
 					bus := observeNativePipelineDeliveryBusForTest(t, pc)
 					runID := runtimecorrelation.RunIDFromContext(ctx)
-					entityID := runID
 					id, err := runtimedelivery.DeliveryID(evt.ID(), route)
 					if err != nil {
 						t.Fatal(err)
@@ -209,9 +208,6 @@ func VerifyNativeReceiverPreparationFailureClaimMatrixBothStoresForTest(t *testi
 						reader.failure = runtimefailures.Wrap(runtimefailures.ClassDependencyUnavailable, "receiver_read_unavailable", "receiver-test", "load_target", nil, errors.New("injected independent target read failure"))
 					} else {
 						// The delivery was valid at publication; storage disappears afterwards.
-						if removed, err := fixture.MissingFields(ctx, runID, entityID); err != nil || removed != 1 {
-							t.Fatalf("remove exact receiver fields: %d/%v", removed, err)
-						}
 						if removed, err := fixture.MissingHeader(ctx, runID, runID); err != nil || removed != 1 {
 							t.Fatalf("remove exact receiver header: %d/%v", removed, err)
 						}

@@ -415,7 +415,6 @@ func grantReceiverEntitySource(t *testing.T) semanticview.Source {
 	writeStateOnlyAcquisitionFixtureFile(t, filepath.Join(root, "schema.yaml"), "stages:\n  active: {}\n  done: {final: true}\n")
 	writeStateOnlyAcquisitionFixtureFile(t, filepath.Join(root, "global/manifest.yaml"), "version: 1.0.0\nplatform_version: '*'\n")
 	writeStateOnlyAcquisitionFixtureFile(t, filepath.Join(root, "global/schema.yaml"), "stages:\n  active: {}\n  done: {final: true}\n")
-	writeStateOnlyAcquisitionFixtureFile(t, filepath.Join(root, "global/entities.yaml"), "receiver: {}\n")
 	bundle, err := contracts.LoadWorkflowContractBundleWithOverrides(pipeline.WorkflowRepoRoot(), root, contracts.DefaultPlatformSpecFile(pipeline.WorkflowRepoRoot()))
 	if err != nil {
 		t.Fatalf("load grant receiver source: %v", err)

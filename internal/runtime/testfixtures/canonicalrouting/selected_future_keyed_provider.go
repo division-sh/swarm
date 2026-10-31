@@ -41,9 +41,8 @@ required_agents:
   - {role: worker, subscribes_to: [work.assigned]}
 `
 
-	workEntity := `job:
-  work_id: text
-  result: text
+	workEntity := `work_id: text
+result: text
 `
 	if minted {
 		schema = `stages:
@@ -68,16 +67,14 @@ required_agents:
   - {role: worker, subscribes_to: [work.assigned]}
 `
 
-		workEntity = `job:
-  case_id: text
-  work_id: text
-  result: text
+		workEntity = `case_id: text
+work_id: text
+result: text
 `
 	}
 	for path, body := range map[string]string{
 		"schema.yaml": schema,
-		"entities.yaml": `run:
-  counter: {type: integer, initial: 0}
+		"state.yaml": `counter: 0
 `,
 		"events.yaml": `start.requested:
   work_id: text
@@ -98,10 +95,10 @@ work.assigned:
       data_accumulation:
         source_event: work.finished
         writes:
-          - {target_field: counter, value: entity.counter + 1}
+          - {target_field: counter, value: state.counter + 1}
 `,
-		"work/schema.yaml":   workSchema,
-		"work/entities.yaml": workEntity,
+		"work/schema.yaml": workSchema,
+		"work/state.yaml":  workEntity,
 		"work/events.yaml": `work.finished:
   work_id: text
   result: text

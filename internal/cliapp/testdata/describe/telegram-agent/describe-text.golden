@@ -7,7 +7,7 @@ flows:
   - telegram-chat (template)
     events:
       - telegram.reply_requested (fields: chat_id, text)
-    primary entity: chat
+    primary entity: state
     instance: field=conversation_reference identity=run + flow + instance_key
     constructor: inbound.telegram.text_message key=conversation_reference supplied=[]
 routing topology: routing-topology/v1

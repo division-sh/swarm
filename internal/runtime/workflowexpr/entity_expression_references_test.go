@@ -10,14 +10,14 @@ func TestEntityReferencesUseStockCELScopeAndOptionalSelectors(t *testing.T) {
 		expression    string
 		refs, missing []string
 	}{
-		{`entity.profile.?note.orValue("")`, []string{"profile.note"}, nil},
-		{`has(entity.profile.note) && entity.profile.note != ""`, []string{"profile.note"}, nil},
-		{`(has(entity.profile.note) || has(entity.profile.note)) && entity.profile.note != ""`, []string{"profile.note"}, nil},
-		{`has(entity.profile.note) || entity.profile.note != ""`, []string{"profile.note"}, []string{"entity.profile.note"}},
-		{`[{}].exists(entity, entity.note != "")`, nil, nil},
-		{`[{}].exists(entity, entity.?note.orValue("") != "") && entity.profile.id == "1"`, []string{"profile.id"}, nil},
-		{`entity.?profile.optFlatMap(p, p.?note).orValue("")`, []string{"profile"}, nil},
-		{`"entity.profile.nope" == ""`, nil, nil},
+		{`state.profile.?note.orValue("")`, []string{"profile.note"}, nil},
+		{`has(state.profile.note) && state.profile.note != ""`, []string{"profile.note"}, nil},
+		{`(has(state.profile.note) || has(state.profile.note)) && state.profile.note != ""`, []string{"profile.note"}, nil},
+		{`has(state.profile.note) || state.profile.note != ""`, []string{"profile.note"}, []string{"state.profile.note"}},
+		{`[{}].exists(state, state.note != "")`, nil, nil},
+		{`[{}].exists(state, state.?note.orValue("") != "") && state.profile.id == "1"`, []string{"profile.id"}, nil},
+		{`state.?profile.optFlatMap(p, p.?note).orValue("")`, []string{"profile"}, nil},
+		{`"state.profile.nope" == ""`, nil, nil},
 	} {
 		t.Run(tc.expression, func(t *testing.T) {
 			if got := EntityReferences(tc.expression); !reflect.DeepEqual(got, tc.refs) {
@@ -32,12 +32,17 @@ func TestEntityReferencesUseStockCELScopeAndOptionalSelectors(t *testing.T) {
 }
 
 func TestEntityReaderRequiresDeclaredTypeWithoutCapturingShadowedRoots(t *testing.T) {
-	for _, expr := range []string{`entity`, `entity.profile`, `entity.?profile`, `has(entity.profile)`} {
+	for _, expression := range []string{`entity.note`, `_entity.id`, `gates.ready`, `instance.gates.ready`, `instance.current_state`, `instance.flow_instance`} {
+		if err := ValidateValueExpression(expression); err == nil {
+			t.Fatalf("retired context admitted: %s", expression)
+		}
+	}
+	for _, expr := range []string{`state`, `state.profile`, `state.?profile`, `has(state.profile)`} {
 		if err := ValidateValueExpression(expr); err == nil {
 			t.Fatalf("untyped entity admitted: %s", expr)
 		}
 	}
-	if err := ValidateValueExpression(`[{}].exists(entity, has(entity.note))`); err != nil {
+	if err := ValidateValueExpression(`[{}].exists(state, has(state.note))`); err != nil {
 		t.Fatal(err)
 	}
 }

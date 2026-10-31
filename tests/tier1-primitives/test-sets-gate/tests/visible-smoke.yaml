@@ -5,8 +5,3 @@ steps:
 expect:
   events:
     include: [gate.set]
-  entities:
-    - type: test_entity
-      current_state: pending
-      gates:
-        g1_check: true

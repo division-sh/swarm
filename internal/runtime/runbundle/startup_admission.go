@@ -259,7 +259,7 @@ func (c *upgradeCheck) instance(instance UpgradeInstance) error {
 		}
 	}
 	if err := checkUpgradeFields(c.candidate, instance); err != nil {
-		c.add(instance.Route.InstancePath, instance.EntityID, instance.FlowID, "field_value_incompatible", err.Error(), "entities", "")
+		c.add(instance.Route.InstancePath, instance.EntityID, instance.FlowID, "field_value_incompatible", err.Error(), "state", "")
 	}
 	buckets, err := joinruntime.PersistedBuckets(instance.StateBuckets)
 	if err != nil {
@@ -410,7 +410,7 @@ func upgradeLocation(source semanticview.Source, flow, family, member string) st
 	if !found {
 		flow, declaration, member = ".", bundle.FlowSources["."], ""
 	}
-	file := map[string]string{"schema": declaration.Schema, "entities": declaration.Entities, "events": declaration.Events, "nodes": declaration.Nodes}[family]
+	file := map[string]string{"schema": declaration.Schema, "state": declaration.State, "events": declaration.Events, "nodes": declaration.Nodes}[family]
 	if file == "" {
 		file, member = declaration.Schema, ""
 	}

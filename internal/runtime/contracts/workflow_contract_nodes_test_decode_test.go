@@ -72,12 +72,12 @@ func decodeNodeTestYAML(body []byte, target any) error {
 		}
 		*out, err = projectAgentDeclarationsValue(snapshot.Document("agents.yaml").Root())
 		return err
-	case *AgentEntityWriteRule:
+	case *AgentWriteGrant:
 		snapshot, err := yamlsource.Load(body)
 		if err != nil {
 			return err
 		}
-		*out, err = projectAgentWriteRuleValue(snapshot.Document("agents.yaml").Root())
+		*out, err = projectAgentWritesValue(snapshot.Document("agents.yaml").Root())
 		return err
 	case *agentintent.Source:
 		snapshot, err := yamlsource.Load(body)

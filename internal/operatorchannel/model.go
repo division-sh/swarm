@@ -531,9 +531,8 @@ func SessionClaimReceiptID(parentID, providerEventID string) string {
 }
 
 type ProofResponsibility struct {
-	Operation Operation     `json:"operation"`
-	Binding   Binding       `json:"binding"`
-	Proof     VerifiedProof `json:"proof"`
+	Operation Operation `json:"operation"`
+	Binding   Binding   `json:"binding"`
 }
 
 type Store interface {

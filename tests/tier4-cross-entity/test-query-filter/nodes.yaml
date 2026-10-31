@@ -5,8 +5,8 @@ test-node:
   event_handlers:
     filter.requested:
       query:
-        entities: items
-        filter: has(entity.status) && entity.status == 'active'
+        entities: state
+        filter: has(state.status) && state.status == 'active'
       emit:
         event: filter.completed
       advances_to: filtered

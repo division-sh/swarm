@@ -55,17 +55,17 @@ func VerifyNativeAuthoredSelectionRetryReloadsCurrentStateBothStoresForTest(t *t
   event_handlers:
     source.evt:
       rules:
-        - {when: entity.marker == 'first', advances_to: done}
-        - {when: entity.marker == 'second', advances_to: done}
+        - {when: state.marker == 'first', advances_to: done}
+        - {when: state.marker == 'second', advances_to: done}
         - {when: true}
 `
 				if first == "evaluation_failed" {
-					nodes = strings.Replace(nodes, "entity.marker == 'first'", "query_entities(marker == 'first').count == 1", 1)
+					nodes = strings.Replace(nodes, "state.marker == 'first'", "query_entities(marker == 'first').count == 1", 1)
 				}
 				bundle := loadWorkflowTempBundle(t, map[string]string{
 					"manifest.yaml": "version: 1.0.0\nplatform_version: \">=0.7.0 <0.8.0\"\n",
 					"schema.yaml":   "stages:\n  queued: {}\n  done: {final: true}\n",
-					"entities.yaml": "test_entity:\n  marker: text\n",
+					"state.yaml":    "marker: text\n",
 					"events.yaml":   "source.evt:\n",
 					"nodes.yaml":    nodes,
 				})
@@ -82,7 +82,7 @@ func VerifyNativeAuthoredSelectionRetryReloadsCurrentStateBothStoresForTest(t *t
 				}
 				if err := fixture.Construct(ctx, materializedWorkflowInstanceForSource(t, pc.SemanticSource(), ctx, WorkflowInstance{
 					InstanceID: runID, StorageRef: runID, EntityID: runID, WorkflowName: ".", WorkflowVersion: bundle.WorkflowVersion(),
-					EntityType: "test_entity", CurrentState: "queued", Fields: map[string]any{"marker": "unchanged"},
+					EntityType: "state", CurrentState: "queued", Fields: map[string]any{"marker": "unchanged"},
 				})); err != nil {
 					t.Fatal(err)
 				}
@@ -125,7 +125,7 @@ func VerifyNativeAuthoredSelectionRetryReloadsCurrentStateBothStoresForTest(t *t
 					t.Fatalf("failure observations = %#v", observed.failures)
 				}
 				attempt, err := observed.failures[0].ResolvedFact()
-				firstIndex, firstLabel := 0, "rules[0]: when entity.marker == 'first'"
+				firstIndex, firstLabel := 0, "rules[0]: when state.marker == 'first'"
 				if first == "fallback" {
 					firstIndex, firstLabel = 2, "rules[2]: when true"
 				} else if first == "evaluation_failed" {
@@ -163,7 +163,7 @@ func VerifyNativeAuthoredSelectionRetryReloadsCurrentStateBothStoresForTest(t *t
 					t.Fatalf("final delivery: %#v %v", settled, err)
 				}
 				fact, err := settled.FinalSelection.Fact()
-				if err != nil || fact.DisplayLabel() != "rules[1]: when entity.marker == 'second'" || fact.Disposition() != handlerselection.DispositionSelected || fact.Context() != handlerselection.ContextRules || fact.Ref().Flow().String() != "." || fact.Ref().SemanticPath() != `nodes["router"].handlers["source.evt"].rules[1]` {
+				if err != nil || fact.DisplayLabel() != "rules[1]: when state.marker == 'second'" || fact.Disposition() != handlerselection.DispositionSelected || fact.Context() != handlerselection.ContextRules || fact.Ref().Flow().String() != "." || fact.Ref().SemanticPath() != `nodes["router"].handlers["source.evt"].rules[1]` {
 					t.Fatalf("did not reevaluate current state: %#v %v", fact, err)
 				}
 				after, found := load()

@@ -248,7 +248,7 @@ func exactFactEntitySource(t *testing.T) semanticview.Source {
 	writeStateOnlyAcquisitionFixtureFile(t, filepath.Join(root, "schema.yaml"), "stages:\n  active: {}\n  done: {final: true}\n")
 	writeStateOnlyAcquisitionFixtureFile(t, filepath.Join(root, "exact-fact/manifest.yaml"), "version: 1.0.0\nplatform_version: '*'\n")
 	writeStateOnlyAcquisitionFixtureFile(t, filepath.Join(root, "exact-fact/schema.yaml"), "stages:\n  active: {}\n  done: {final: true}\n")
-	writeStateOnlyAcquisitionFixtureFile(t, filepath.Join(root, "exact-fact/entities.yaml"), "review_item:\n  account_id: {type: text, initial: preserved}\n  handled: {type: boolean, initial: false}\n")
+	writeStateOnlyAcquisitionFixtureFile(t, filepath.Join(root, "exact-fact/state.yaml"), "account_id: \"preserved\"\nhandled: false\n")
 	bundle, err := contracts.LoadWorkflowContractBundleWithOverrides(pipeline.WorkflowRepoRoot(), root, contracts.DefaultPlatformSpecFile(pipeline.WorkflowRepoRoot()))
 	if err != nil {
 		t.Fatalf("load exact-fact entity source: %v", err)

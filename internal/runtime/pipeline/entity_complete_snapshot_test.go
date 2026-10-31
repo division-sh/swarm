@@ -16,7 +16,7 @@ func VerifyEntityLastFieldClearAndColdReloadBothStoresForTest(t *testing.T, open
 	source := loadWorkflowTempSource(t, map[string]string{
 		"manifest.yaml": "version: 1.0.0\nplatform_version: \">=0.7.0 <0.8.0\"\n",
 		"schema.yaml":   "stages:\n  active: {}\n",
-		"entities.yaml": "test_entity:\n  revision_count: integer?\n",
+		"state.yaml":    "revision_count: integer?\n",
 		"events.yaml":   "work.clear:\n",
 		"nodes.yaml": `node-a:
   execution_type: system_node
@@ -26,7 +26,7 @@ func VerifyEntityLastFieldClearAndColdReloadBothStoresForTest(t *testing.T, open
       data_accumulation:
         writes:
           - op: clear
-            target: entity.revision_count
+            target: state.revision_count
 `,
 	})
 	fixture := open(t, source)
@@ -88,7 +88,7 @@ func VerifySelectedHandlerSparsePresenceWriteAndEmitBothStoresForTest(t *testing
 	source := loadWorkflowTempSource(t, map[string]string{
 		"manifest.yaml": "version: 1.0.0\nplatform_version: \">=0.7.0 <0.8.0\"\n",
 		"schema.yaml":   "stages:\n  active: {}\n",
-		"entities.yaml": "test_entity:\n  kill_reason: text?\n  observed_absence: boolean?\n",
+		"state.yaml":    "kill_reason: text?\nobserved_absence: boolean?\n",
 		"events.yaml":   "work.ready:\nwork.emitted:\n  observed_absence: boolean\n",
 		"nodes.yaml": `node-a:
   execution_type: system_node
@@ -99,11 +99,11 @@ func VerifySelectedHandlerSparsePresenceWriteAndEmitBothStoresForTest(t *testing
         writes:
           - target_field: observed_absence
             value: |-
-                     !has(entity.kill_reason)
+                     !has(state.kill_reason)
       emit:
         event: work.emitted
         fields:
-          observed_absence: entity.observed_absence
+          observed_absence: state.observed_absence
 `,
 	})
 	fixture := open(t, source)
@@ -124,59 +124,5 @@ func VerifySelectedHandlerSparsePresenceWriteAndEmitBothStoresForTest(t *testing
 	var payload map[string]any
 	if err := json.Unmarshal(result.emissions[0].Payload(), &payload); err != nil || payload["observed_absence"] != true {
 		t.Fatalf("sparse presence payload = %#v, err=%v", payload, err)
-	}
-}
-
-func VerifySelectedHandlerSparseEqualityMutationsBothStoresForTest(t *testing.T, open func(*testing.T, semanticview.Source) WorkflowHandlerNativeFixtureForTest) {
-	for _, tc := range []struct {
-		name       string
-		event      string
-		wantFields map[string]any
-	}{
-		{"ordered-pair-write", "work.set", map[string]any{"left": "new", "right": "new"}},
-		{"paired-clear", "work.clear", map[string]any{}},
-	} {
-		t.Run(tc.name, func(t *testing.T) {
-			source := loadWorkflowTempSource(t, map[string]string{
-				"manifest.yaml": "version: 1.0.0\nplatform_version: \">=0.7.0 <0.8.0\"\n",
-				"schema.yaml":   "stages:\n  active: {}\n",
-				"entities.yaml": `test_entity:
-  left: text?
-  right:
-    type: text?
-    equal_to: left
-`,
-				"events.yaml": "work.set:\nwork.clear:\n",
-				"nodes.yaml": `node-a:
-  execution_type: system_node
-  subscribes_to: [work.set, work.clear]
-  event_handlers:
-    work.set:
-      data_accumulation:
-        writes:
-          - target_field: left
-            value: |-
-                     'new'
-          - target_field: right
-            value: entity.left
-    work.clear:
-      data_accumulation:
-        writes:
-          - op: clear
-            target: entity.left
-          - op: clear
-            target: entity.right
-`,
-			})
-			fixture := open(t, source)
-			pc := fixture.NewCoordinator(PipelineCoordinatorOptions{
-				Module: staticSemanticWorkflowModule{source: source},
-			})
-			ctx := nativeWorkflowHandlerRunContextForTest(t, fixture)
-			instance, result := executeExistingOwnerBehavior(t, fixture, ctx, pc, tc.name, tc.event, json.RawMessage(`{}`), map[string]any{"left": "old", "right": "old"}, nil)
-			if !result.handled || !reflect.DeepEqual(instance.Fields, tc.wantFields) {
-				t.Fatalf("selected handler result: handled=%t fields=%#v, want %#v", result.handled, instance.Fields, tc.wantFields)
-			}
-		})
 	}
 }

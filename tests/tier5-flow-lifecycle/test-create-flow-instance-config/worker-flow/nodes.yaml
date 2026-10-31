@@ -7,11 +7,11 @@ worker-node:
       guard:
         check: payload.worker_id != ''
       rules:
-        - when: _entity.current_state == 'awaiting_spawned'
+        - when: instance.stage == 'awaiting_spawned'
           advances_to: complete
         - advances_to: awaiting_ready
     worker.ready:
       rules:
-        - when: _entity.current_state == 'awaiting_ready'
+        - when: instance.stage == 'awaiting_ready'
           advances_to: complete
         - advances_to: awaiting_spawned

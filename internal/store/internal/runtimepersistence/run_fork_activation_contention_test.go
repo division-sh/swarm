@@ -82,9 +82,9 @@ func newForkActivationFrontierFixture(t *testing.T, backend eventRecordContractB
 		return newForkContentionFixture(t, backend)
 	}
 	f := newReceiverConfigActivationFixtureWithDocuments(t, backend.name, false, map[string]string{
-		"schema.yaml":   "stages:\n  pending: {}\n  done: {}\n",
-		"entities.yaml": "subject:\n  name: {type: text, initial: 'At R'}\n",
-		"events.yaml":   "item.received:\n", "manifest.yaml": "version: 1.0.0\nplatform_version: '*'\n",
+		"schema.yaml": "stages:\n  pending: {}\n  done: {}\n",
+		"state.yaml":  "name: \"At R\"\n",
+		"events.yaml": "item.received:\n", "manifest.yaml": "version: 1.0.0\nplatform_version: '*'\n",
 	}, nil)
 	runID := runtimecorrelation.RunIDFromContext(f.ctx)
 	fixture := forkContentionFixture{snapshotOwnershipFixture: snapshotOwnershipFixture{
@@ -176,7 +176,7 @@ func newConstructedGateFixtureWithOrigin(t *testing.T, backend eventRecordContra
 	f.state.ExpectedState, f.state.ExpectedRevision = "pending", 1
 	// Set historical fields through the ordinary writer; retain the constructor's
 	// real initial gate and stage-entry evidence.
-	f.state.CurrentState, f.state.EntityType, f.state.Name = "pending", "default", "At R"
+	f.state.CurrentState, f.state.EntityType, f.state.Name = "pending", "state", "At R"
 	f.state.Fields = json.RawMessage(`{"name":"At R"}`)
 	if !fields {
 		f.state.EntityType, f.state.Name, f.state.Fields = "", "", json.RawMessage(`{}`)

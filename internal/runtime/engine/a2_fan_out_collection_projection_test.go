@@ -38,7 +38,7 @@ func a2FanOutCollectionFixture(t *testing.T, sourcePath, typ string, payload, st
 		FlowTree:     rc.FlowTree{Root: root, ByID: map[string]*rc.FlowContractView{".": root}, ByPath: map[string]*rc.FlowContractView{".": root}},
 		Nodes:        map[string]rc.SystemNodeContract{"scatter": {EventHandlers: map[string]rc.SystemNodeEventHandler{"batch.ready": handler}}},
 		Semantics:    rc.WorkflowSemanticView{Name: "root", Version: "v-test", NodeHandlers: map[string]map[string]rc.SystemNodeEventHandler{"scatter": {"batch.ready": handler}}},
-		RootEntities: rc.EntityContractsDocument{"subject": {Fields: map[string]rc.EntityFieldDecl{"items": {Type: typ}}}},
+		RootEntities: rc.EntityContractsDocument{"state": {Fields: map[string]rc.EntityFieldDecl{"items": {Type: typ}}}},
 	}
 	exec, err := NewExecutor(RuntimeDependencies{Source: fanOutSourceWithBundleIdentity(t, bundle), StateRepo: stubStateRepo{}, MutationOwner: stubMutationOwner{}, Locker: stubLocker{}, PayloadShaper: stubPayloadShaper{}}, nil)
 	if err != nil {
@@ -54,7 +54,7 @@ func a2FanOutCollectionFixture(t *testing.T, sourcePath, typ string, payload, st
 }
 
 func TestA2FanOutMapProjectionAndTypedOrdinalAlias(t *testing.T) {
-	for _, source := range []string{"payload.items", "entity.items"} {
+	for _, source := range []string{"payload.items", "state.items"} {
 		t.Run(source, func(t *testing.T) {
 			value := map[string]any{"z": []any{4}, " a ": []any{1, 1}, "a": []any{2}}
 			exec, trigger, result, err := a2FanOutCollectionFixture(t, source, "map[text][integer]", map[string]any{"items": value}, map[string]any{"items": value}, nil, 0)
@@ -65,14 +65,14 @@ func TestA2FanOutMapProjectionAndTypedOrdinalAlias(t *testing.T) {
 			if request.Cardinality != 3 || request.Capsule.SourceProjection.ItemType.Kind != rc.CatalogTypeText {
 				t.Fatalf("wrong projection: %#v", request)
 			}
-			if source == "entity.items" {
+			if source == "state.items" {
 				if _, ok := request.Capsule.StateFields["items"]; ok {
 					t.Fatal("source duplicated into capsule")
 				}
 			}
 			now := time.Now().UTC()
 			intent := fanoutobligation.Intent{Request: request, Source: request.Source, Status: fanoutobligation.StatusOpen, NextChunkSize: 2, CreatedAt: now, UpdatedAt: now, Cursor: 1}
-			if source == "entity.items" {
+			if source == "state.items" {
 				intent.Source.MutationID = eventtest.UUID("immutable-source")
 			}
 			prepared, err := exec.PrepareFanOutEvaluation(context.Background(), intent, trigger)
@@ -108,7 +108,7 @@ func TestA2FanOutMapProjectionAndTypedOrdinalAlias(t *testing.T) {
 
 func TestA2FanOutSelectedPostWriteMapAndFailClosedSources(t *testing.T) {
 	replacement := map[string]any{"b": 2, "a": 1}
-	_, _, result, err := a2FanOutCollectionFixture(t, "entity.items", "map[text]integer", map[string]any{"items": replacement}, map[string]any{"items": map[string]any{"old": 9}}, []rc.WorkflowDataWrite{{TargetRef: "entity.items", Value: rc.LiteralExpression(replacement)}}, 0)
+	_, _, result, err := a2FanOutCollectionFixture(t, "state.items", "map[text]integer", map[string]any{"items": replacement}, map[string]any{"items": map[string]any{"old": 9}}, []rc.WorkflowDataWrite{{TargetRef: "state.items", Value: rc.LiteralExpression(replacement)}}, 0)
 	if err != nil || result.FanOutIntent == nil {
 		t.Fatalf("postwrite capture: %v", err)
 	}

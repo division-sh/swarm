@@ -16,8 +16,7 @@ func TestRun_UsesSingleEntityAsPrimaryForStatefulNormalFlow(t *testing.T) {
   done: {final: true}
 `,
 		`
-vertical:
-  name: text
+name: text
 `)
 
 	report := Run(context.Background(), semanticview.Wrap(bundle), Options{})
@@ -28,11 +27,16 @@ vertical:
 }
 
 func TestRun_AllowsFieldlessStagedStaticFlow(t *testing.T) {
-	bundle := loadPrimaryEntityFixtureBundle(t, `stages:
+	root := t.TempDir()
+	writeBootverifyFixtureFile(t, filepath.Join(root, "schema.yaml"), `stages:
   pending: {}
   done: {final: true}
-`,
-		"")
+`)
+	writeBootverifyFixtureFile(t, filepath.Join(root,
+		"events.yaml"), "work.ready:\n")
+	writeBootverifyFixtureFile(t, filepath.Join(root, "nodes.yaml"), "worker:\n  execution_type: system_node\n  event_handlers:\n    work.ready:\n      advances_to: done\n")
+	repo := repoRootForBootverifyTest(t)
+	bundle := loadFixtureBundleAt(t, repo, root, runtimecontracts.DefaultPlatformSpecFile(repo))
 
 	report := Run(context.Background(), semanticview.Wrap(bundle), Options{})
 
@@ -70,7 +74,7 @@ stages: []
 }
 
 func TestRun_RequiresPrimaryEntityForActualOperation(t *testing.T) {
-	for _, handler := range []string{"advances_to: done", "data_accumulation: {writes: [{target_field: entity.count, value: payload.count}]}"} {
+	for _, handler := range []string{"data_accumulation: {writes: [{target_field: count, value: payload.count}]}"} {
 		t.Run(handler, func(t *testing.T) {
 			root := t.TempDir()
 			writeBootverifyFixtureFile(t, filepath.Join(root, "manifest.yaml"), "version: 1.0.0\nplatform_version: '*'\n")
@@ -81,7 +85,7 @@ func TestRun_RequiresPrimaryEntityForActualOperation(t *testing.T) {
 			writeBootverifyFixtureFile(t, filepath.Join(root, "scoring", "nodes.yaml"), "worker:\n  execution_type: system_node\n  event_handlers:\n    work.ready:\n      "+handler+"\n")
 			bundle := loadFixtureBundleAt(t, repoRootForBootverifyTest(t), root, runtimecontracts.DefaultPlatformSpecFile(repoRootForBootverifyTest(t)))
 			report := Run(context.Background(), semanticview.Wrap(bundle), Options{})
-			if !reportContains(report.Errors(), "primary_entity_validation", "no declared entity") {
+			if !reportContains(report.Errors(), "primary_entity_validation", "no state.yaml") {
 				t.Fatalf("actual operation without primary entity admitted: %#v", report.Errors())
 			}
 		})
@@ -99,34 +103,6 @@ func TestRun_RejectsInvalidRootPrimaryEntityForConstructedBundle(t *testing.T) {
 			t.Fatalf("root entity selector error = %v", err)
 		}
 	})
-	tests := []struct {
-		name      string
-		bundle    *runtimecontracts.WorkflowContractBundle
-		wantError string
-	}{
-		{
-			name: "multiple root entities",
-			bundle: &runtimecontracts.WorkflowContractBundle{
-				RootSchema: &runtimecontracts.FlowSchemaDocument{Name: "root-primary-entity"},
-				RootEntities: runtimecontracts.EntityContractsDocument{
-					"campaign": {Fields: map[string]runtimecontracts.EntityFieldDecl{"title": {Type: "text"}}},
-					"vertical": {Fields: map[string]runtimecontracts.EntityFieldDecl{"name": {Type: "text"}}},
-				},
-				FlowSchemas: map[string]runtimecontracts.FlowSchemaDocument{},
-			},
-			wantError: "exactly one entity type",
-		},
-	}
-
-	for _, tc := range tests {
-		t.Run(tc.name, func(t *testing.T) {
-			report := Run(context.Background(), semanticview.Wrap(tc.bundle), Options{})
-			if !reportContains(report.Errors(), "primary_entity_validation", "flow <root>") ||
-				!reportContains(report.Errors(), "primary_entity_validation", tc.wantError) {
-				t.Fatalf("expected root primary_entity_validation containing %q, got %#v", tc.wantError, report.Errors())
-			}
-		})
-	}
 }
 
 func loadPrimaryEntityFixtureBundle(t *testing.T, flowSchema, flowEntities string) *runtimecontracts.WorkflowContractBundle {
@@ -148,7 +124,7 @@ func admitPrimaryEntityFixtureBundle(t *testing.T, flowSchema, flowEntities stri
 	writeBootverifyFixtureFile(t, filepath.Join(root, "scoring", "manifest.yaml"), "version: 1.0.0\nplatform_version: '*'\n")
 	writeBootverifyFixtureFile(t, filepath.Join(root, "scoring", "schema.yaml"), strings.TrimSpace(flowSchema)+"\n")
 	if strings.TrimSpace(flowEntities) != "" {
-		writeBootverifyFixtureFile(t, filepath.Join(root, "scoring", "entities.yaml"), strings.TrimSpace(flowEntities)+"\n")
+		writeBootverifyFixtureFile(t, filepath.Join(root, "scoring", "state.yaml"), strings.TrimSpace(flowEntities)+"\n")
 	}
 	return runtimecontracts.LoadWorkflowContractBundleWithOverrides(repoRoot, root, runtimecontracts.DefaultPlatformSpecFile(repoRoot))
 }

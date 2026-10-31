@@ -39,7 +39,7 @@ func TestD1HistoricalObservationKeepsLegitimateProgressBothStores(t *testing.T) 
 			}
 			result, err := f.workflows.ApplyEntityFieldMutation(f.ctx, pipeline.EntityFieldMutation{
 				RunID: f.owner.RunID, EntityID: f.entityID, Owner: f.owner, FlowID: "review", Source: lookup.Source(),
-				Mutation: entityruntime.Mutation{Target: "entity.label", Value: "legitimate-progress"},
+				Mutation: entityruntime.Mutation{Target: "state.label", Value: "legitimate-progress"},
 				Writer:   mutationlog.Writer{Type: "agent", ID: "historical-progress-proof", HandlerStep: "save_entity_field"},
 			})
 			if err != nil || !result.Acknowledged || int64(result.Revision) != initial.Revision+1 {
@@ -85,10 +85,10 @@ func TestD1HistoricalReforkExactRequireSurvivesReopenBothStores(t *testing.T) {
 		t.Run(backend, func(t *testing.T) {
 			selected, db, connector := newP16RaceStore(t, backend)
 			files := map[string]string{
-				"schema.yaml":          "stages: []\n",
-				"review/schema.yaml":   "instance: request_id\nstages: {pending: {}}\npins:\n  inputs: [task.create]\n",
-				"review/entities.yaml": "review_item:\n  request_id: text\n  label: text\n  nested: json\n  enabled: {type: boolean, initial: true}\n",
-				"review/events.yaml":   "task.create:\n  request_id: text\n  label: text\n  nested: json\ntask.started:\n", "manifest.yaml": "version: 1.0.0\nplatform_version: '*'\n", "review/manifest.yaml": "version: 1.0.0\nplatform_version: '*'\n",
+				"schema.yaml":        "stages: []\n",
+				"review/schema.yaml": "instance: request_id\nstages: {pending: {}}\npins:\n  inputs: [task.create]\n",
+				"review/state.yaml":  "request_id: text\nlabel: text\nnested: json\nenabled: true\n",
+				"review/events.yaml": "task.create:\n  request_id: text\n  label: text\n  nested: json\ntask.started:\n", "manifest.yaml": "version: 1.0.0\nplatform_version: '*'\n", "review/manifest.yaml": "version: 1.0.0\nplatform_version: '*'\n",
 			}
 			component := newReceiverConfigActivationFixtureForStore(t, any(selected).(agentFixtureFlowStore), false, files, nil, ownStoreTestAgentManager, nil)
 			f := newOrdinaryForkPredecessorFixtureForReceiver(t, backend, component)

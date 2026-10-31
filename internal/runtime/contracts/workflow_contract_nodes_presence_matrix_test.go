@@ -222,8 +222,8 @@ func TestW4HandlerContainerPresence(t *testing.T) {
 				t.Fatalf("count=%#v", h.Count)
 			}
 		}},
-		{"clear", "rows", "[rows]", "{targets: [entity.rows]}", [8]bool{true, false, false, false, false, false, true, true}, func(t *testing.T, h SystemNodeEventHandler) {
-			if h.Clear == nil || !reflect.DeepEqual(h.Clear.Targets, []string{"entity.rows"}) {
+		{"clear", "rows", "[rows]", "{targets: [state.rows]}", [8]bool{true, false, false, false, false, false, true, true}, func(t *testing.T, h SystemNodeEventHandler) {
+			if h.Clear == nil || !reflect.DeepEqual(h.Clear.Targets, []string{"state.rows"}) {
 				t.Fatalf("clear=%#v", h.Clear)
 			}
 		}},

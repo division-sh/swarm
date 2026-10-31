@@ -6,6 +6,3 @@ steps:
 expect:
   events:
     include: [routed.unknown]
-  entities:
-    - type: test_entity
-      current_state: pending

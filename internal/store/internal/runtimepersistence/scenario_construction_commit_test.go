@@ -29,16 +29,16 @@ func TestScenarioConstructionNativeCommitBothStores(t *testing.T) {
 			t.Run(backend+"/"+cut, func(t *testing.T) {
 				selected, db, connector := newP16RaceStore(t, backend)
 				f := newReceiverConfigActivationFixtureForStore(t, selected.(agentFixtureFlowStore), false, map[string]string{
-					"schema.yaml":          "# fixture: scenario-construction\nstages:\n  pending: {}\n",
-					"entities.yaml":        "record:\n  marker: text\n",
 					"nested/manifest.yaml": "version: 1.0.0\nplatform_version: '*'\n",
+					"schema.yaml":          "# fixture: scenario-construction\nstages:\n  pending: {}\n",
+					"state.yaml":           "marker: text\n",
 					"nested/schema.yaml":   "stages: []\n",
 				}, nil, ownStoreTestAgentManager, nil)
 				runID := uuid.NewString()
 				ctx := correlation.WithRunID(f.ctx, runID)
 				at := time.Now().UTC().Truncate(time.Microsecond)
 				seed := pipeline.ScenarioSetupEntityRequest{
-					Alias: "root", EntityID: runID, FlowInstance: runID, EntityType: "record",
+					Alias: "root", EntityID: runID, FlowInstance: runID, EntityType: "state",
 					CurrentState: mutationlog.PresentLifecycleState("pending"), Fields: map[string]any{"marker": "imported"}, Gates: map[string]bool{},
 				}
 				source := semanticview.Wrap(f.bundle)
@@ -127,41 +127,5 @@ func TestScenarioConstructionNativeCommitBothStores(t *testing.T) {
 				}
 			})
 		}
-	}
-}
-
-func TestScenarioConstructionFieldlessStateBothStores(t *testing.T) {
-	for _, backend := range []string{"sqlite", "postgres"} {
-		t.Run(backend, func(t *testing.T) {
-			f := newReceiverConfigActivationFixtureWithDocuments(t, backend, false, map[string]string{
-				"schema.yaml": "# fixture: fieldless-scenario\nstages:\n  pending: {}\n",
-			}, nil)
-			runID := uuid.NewString()
-			ctx := correlation.WithRunID(f.ctx, runID)
-			at := time.Now().UTC().Truncate(time.Microsecond)
-			seed := pipeline.ScenarioSetupEntityRequest{Alias: "root", EntityID: runID, FlowInstance: runID,
-				EntityType: "default", CurrentState: mutationlog.PresentLifecycleState("pending"), Fields: map[string]any{}, Gates: map[string]bool{}}
-			source := semanticview.Wrap(f.bundle)
-			plan, err := f.manager.PrepareFlowInstanceActivation(ctx, pipeline.FlowInstanceActivationRequest{
-				ContractBundle: source, OccurredAt: at, ScenarioSeed: &seed,
-				Instance: flowidentity.Stored(source, semanticview.RootExecutionFlowID(source), runID, runID, "", ""),
-			})
-			if err != nil {
-				t.Fatal(err)
-			}
-			command := runtimebus.ScenarioSetupCommand{Setup: pipeline.ScenarioSetupRequest{RunID: runID, CreatedAt: at, Entities: []pipeline.ScenarioSetupEntityRequest{seed}},
-				Activations: []runtimebus.FlowInstanceActivationCommand{{Plan: plan}}}
-			result, err := f.store.(runtimebus.ScenarioSetupCommitOwner).CommitScenarioSetup(ctx, command)
-			if err != nil || !result.Acknowledged || len(result.Activations) != 1 || !result.Activations[0].Created {
-				t.Fatalf("fieldless scenario construction: %+v err=%v", result, err)
-			}
-			var headers, fields int
-			if err := f.db.QueryRowContext(ctx, `SELECT COUNT(*) FROM flow_instances WHERE run_id=$1 AND entity_id=$1 AND current_state='pending'`, runID).Scan(&headers); err != nil {
-				t.Fatal(err)
-			}
-			if err := f.db.QueryRowContext(ctx, `SELECT COUNT(*) FROM entity_state WHERE run_id=$1`, runID).Scan(&fields); err != nil || headers != 1 || fields != 0 {
-				t.Fatalf("fieldless setup invented a field companion: headers=%d fields=%d err=%v", headers, fields, err)
-			}
-		})
 	}
 }

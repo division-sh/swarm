@@ -7,7 +7,7 @@ expected:
 
   handler_outcome: success
   entity_state: complete
-  gates:
+  entity_fields:
     validation_passed: true
   emitted_events:
     - order.validated

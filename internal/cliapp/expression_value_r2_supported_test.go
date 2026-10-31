@@ -7,6 +7,8 @@ import (
 	"path/filepath"
 	"strings"
 	"testing"
+
+	"github.com/division-sh/swarm/internal/runtime/testfixtures/canonicalrouting"
 )
 
 func TestVerifyCommandR2LiteralEmitUsesDestinationSchema(t *testing.T) {
@@ -19,10 +21,7 @@ func TestVerifyCommandR2LiteralEmitUsesDestinationSchema(t *testing.T) {
 		{"valid quoted text", `"ready"`, true},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
-			root := t.TempDir()
-			if err := os.CopyFS(root, os.DirFS(filepath.Join(RepoRoot(), "examples", "routing", "root-ingress"))); err != nil {
-				t.Fatal(err)
-			}
+			root := canonicalrouting.CopyExample(t, canonicalrouting.RootIngress)
 			path := filepath.Join(root, "nodes.yaml")
 			raw, err := os.ReadFile(path)
 			if err != nil {
@@ -59,10 +58,7 @@ func TestVerifyCommandR2RecursiveRecordUsesNamedDestination(t *testing.T) {
 		{"null sibling of dynamic field", `{name: string("Ada"), count: null}`, false},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
-			root := t.TempDir()
-			if err := os.CopyFS(root, os.DirFS(filepath.Join(RepoRoot(), "examples", "routing", "root-ingress"))); err != nil {
-				t.Fatal(err)
-			}
+			root := canonicalrouting.CopyExample(t, canonicalrouting.RootIngress)
 			if err := os.WriteFile(filepath.Join(root, "types.yaml"), []byte("types:\n  Report:\n    name: text\n    count: integer\n"), 0o600); err != nil {
 				t.Fatal(err)
 			}
@@ -118,10 +114,7 @@ func TestVerifyCommandR2ConstructorAndCommentCrossProduct(t *testing.T) {
 		{"nested trailing comment", "Child", "\n            n: |-\n              1 // comment", true},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
-			root := t.TempDir()
-			if err := os.CopyFS(root, os.DirFS(filepath.Join(RepoRoot(), "examples", "routing", "root-ingress"))); err != nil {
-				t.Fatal(err)
-			}
+			root := canonicalrouting.CopyExample(t, canonicalrouting.RootIngress)
 			if err := os.WriteFile(filepath.Join(root, "types.yaml"), []byte("types:\n  Child:\n    n: integer\n  Pair:\n    left: integer\n    right: integer\n  Envelope:\n    child: Child\n    label: text\n  OptionalReport:\n    label: text\n    n: integer?\n"), 0o600); err != nil {
 				t.Fatal(err)
 			}
@@ -169,10 +162,7 @@ func TestVerifyScalar2556SourceSlotDiagnosticsBeforeEffects(t *testing.T) {
 		{"sole interpolation is text", `'${7}'`, nil, true},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
-			root := t.TempDir()
-			if err := os.CopyFS(root, os.DirFS(filepath.Join(RepoRoot(), "examples", "routing", "root-ingress"))); err != nil {
-				t.Fatal(err)
-			}
+			root := canonicalrouting.CopyExample(t, canonicalrouting.RootIngress)
 			path := filepath.Join(root, "nodes.yaml")
 			raw, err := os.ReadFile(path)
 			if err != nil {

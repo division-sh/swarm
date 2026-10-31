@@ -241,7 +241,7 @@ func TestWorkflowJoinDurableEventBusDeliveryClaimPreservesExactDeclarationOnBoth
 					InstanceID: instanceID, StorageRef: path, WorkflowName: workflowName, WorkflowVersion: source.WorkflowVersion(),
 					EntityID: entityID, CurrentState: "awaiting", StageDefined: true, EnteredStageAt: createdAt, CreatedAt: createdAt,
 					Fields:     fields,
-					EntityType: "join_state",
+					EntityType: "state",
 				}, createdAt)
 				constructed := constructedPlan.Identity
 				requireIndexedConstructionFixture(t, ctx, selected.persistence, source, runID, constructed)
@@ -476,7 +476,7 @@ func TestWorkflowJoinScheduleOccurrencePreservesExactDeclarationThroughDurableEv
 						InstanceID: instanceID, StorageRef: path, WorkflowName: workflowName, WorkflowVersion: source.WorkflowVersion(),
 						EntityID: entityID, CurrentState: "awaiting", StageDefined: true, EnteredStageAt: createdAt, CreatedAt: createdAt,
 						Fields:     fields,
-						EntityType: "join_state",
+						EntityType: "state",
 					}, createdAt)
 					constructed := constructedPlan.Identity
 					requireIndexedConstructionFixture(t, ctx, selected.persistence, source, runID, constructed)

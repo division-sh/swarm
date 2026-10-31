@@ -35,7 +35,7 @@ func TestBundleUpgradeAdmissionPreservesLiveWorkBothStores(t *testing.T) {
 		"events.yaml":          "clock.removed:\nclock.retained:\n",
 		"review/manifest.yaml": "version: 1.0.0\nplatform_version: '*'\n",
 		"review/schema.yaml":   "instance: request_id\nstages:\n  pending:\n    timers:\n      - {id: pending.timeout, after: 1h, emit: timer.elapsed}\npins:\n  inputs: [task.create]\n",
-		"review/entities.yaml": "review_item:\n  request_id: text\n  label: text\n  nested: json\n  enabled: {type: boolean, initial: true}\n",
+		"review/state.yaml":    "request_id: text\nlabel: text\nnested: json\nenabled: true\n",
 		"review/events.yaml":   "task.create:\n  request_id: text\n  label: text\n  nested: json\ntask.started:\ntimer.elapsed:\n",
 	}
 	candidateFiles := maps.Clone(files)

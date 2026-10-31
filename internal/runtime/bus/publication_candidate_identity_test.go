@@ -105,7 +105,7 @@ func TestPublicationDiagnosticDoesNotInventReceiverLocalIdentity(t *testing.T) {
 	write("schema.yaml", "stages: []\n")
 	write("validation/manifest.yaml", "version: 1.0.0\nplatform_version: '*'\n")
 	write("validation/schema.yaml", "instance: review_id\nstages:\n  active: {}\n")
-	write("validation/entities.yaml", "review:\n  review_id: text\n")
+	write("validation/state.yaml", "review_id: text\n")
 	write("validation/events.yaml", "thing.reviewed:\n  review_id: text\n")
 	write("validation/nodes.yaml", `entity-writer:
   execution_type: system_node
@@ -114,7 +114,7 @@ func TestPublicationDiagnosticDoesNotInventReceiverLocalIdentity(t *testing.T) {
     thing.reviewed:
       guard:
         id: selected_owner
-        check: _entity.id != ""
+        check: instance.id != ""
 `)
 	eb := &EventBus{semanticSource: loadConnectRoutePlanCanonicalSource(t, root)}
 	subscriber := Subscriber{

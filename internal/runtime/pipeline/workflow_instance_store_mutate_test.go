@@ -25,9 +25,9 @@ func VerifyWorkflowEngineCompleteCarrierPreservesBookkeepingForTest(t *testing.T
 	fixture := open(t, testPipelineRunID)
 	ctx := fixture.Context
 
-	source := testRootEntityContractSource("bookkeeping", "test_entity")
+	source := testRootEntityContractSource("bookkeeping")
 	bundle, _ := semanticview.Bundle(source)
-	bundle.RootEntities["test_entity"].Fields["status"] = runtimecontracts.EntityFieldDecl{Type: "text"}
+	bundle.RootEntities["state"].Fields["status"] = runtimecontracts.EntityFieldDecl{Type: "text"}
 	entityID := uuid.NewString()
 	route := testRunScopedWorkflowInstance("bookkeeping/root")
 	instance := materializedWorkflowInstanceForTest(WorkflowInstance{
@@ -36,7 +36,7 @@ func VerifyWorkflowEngineCompleteCarrierPreservesBookkeepingForTest(t *testing.T
 		EnteredStageAt: time.Now().UTC(), Fields: map[string]any{"status": "before"},
 		Bookkeeping: map[string]any{}, Gates: map[string]bool{"ready": true},
 		StateBuckets: map[string]any{"join": map[string]any{"count": float64(1)}},
-		EntityType:   "test_entity",
+		EntityType:   "state",
 	})
 	if err := fixture.Construct(ctx, instance); err != nil {
 		t.Fatalf("create workflow instance: %v", err)
@@ -150,7 +150,7 @@ func VerifyWorkflowInstanceStoreAddressesRowsOnlyByExactRouteOnBothStoresForTest
 				CurrentState:    "active",
 				EnteredStageAt:  time.Now().UTC(),
 				Fields:          map[string]any{},
-				EntityType:      "test_entity",
+				EntityType:      "state",
 			})); err != nil {
 				t.Fatalf("create workflow instance: %v", err)
 			}
@@ -356,7 +356,7 @@ func VerifyWorkflowInstanceStoreMutate_IgnoresSchedulerOwnedTimerRowsForTest(t *
 		CurrentState:    "queued",
 		Fields:          map[string]any{},
 		StateBuckets:    map[string]any{},
-		EntityType:      "test_entity",
+		EntityType:      "state",
 	})); err != nil {
 		t.Fatalf("seed workflow instance: %v", err)
 	}
@@ -411,7 +411,7 @@ func seedWorkflowInstanceForMutationTest(t *testing.T, fixture WorkflowMutationN
 		CurrentState:    "queued",
 		Fields:          map[string]any{},
 		StateBuckets:    map[string]any{},
-		EntityType:      "test_entity",
+		EntityType:      "state",
 	})); err != nil {
 		t.Fatalf("seed workflow instance: %v", err)
 	}

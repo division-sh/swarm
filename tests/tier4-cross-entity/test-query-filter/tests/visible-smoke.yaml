@@ -6,5 +6,5 @@ expect:
   events:
     include: [filter.completed]
   entities:
-    - type: items
+    - flow: .
       current_state: filtered

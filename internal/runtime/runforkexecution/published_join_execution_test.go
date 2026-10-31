@@ -17,10 +17,12 @@ import (
 	rootruntime "github.com/division-sh/swarm/internal/runtime"
 	"github.com/division-sh/swarm/internal/runtime/authoractivity"
 	"github.com/division-sh/swarm/internal/runtime/bus"
+	"github.com/division-sh/swarm/internal/runtime/bus/bustest"
 	"github.com/division-sh/swarm/internal/runtime/canonicaljson"
 	"github.com/division-sh/swarm/internal/runtime/core/activityidentity"
 	"github.com/division-sh/swarm/internal/runtime/core/eventreceiver"
 	"github.com/division-sh/swarm/internal/runtime/core/flowidentity"
+	runtimeidentity "github.com/division-sh/swarm/internal/runtime/core/identity"
 	"github.com/division-sh/swarm/internal/runtime/core/timeridentity"
 	"github.com/division-sh/swarm/internal/runtime/core/worklifetime"
 	"github.com/division-sh/swarm/internal/runtime/correlation"
@@ -105,6 +107,55 @@ func publishedJoinFixture(t *testing.T) string {
 	if err := os.WriteFile(path, data, 0o600); err != nil {
 		t.Fatal(err)
 	}
+	preparationDeclaration := "join.prepared:\n  expected: [text]\n"
+	if flowID == "orders" {
+		preparationDeclaration += "  order_id: text\n"
+	}
+	for name, replacement := range map[string][2]string{
+		"schema.yaml": {"stages:\n  awaiting:", "stages:\n  preparing: {}\n  awaiting:"},
+		"events.yaml": {"item.completed:\n", preparationDeclaration + "item.completed:\n  expected: [text]\n"},
+		"nodes.yaml":  {"  event_handlers:\n", "  event_handlers:\n    join.prepared:\n      data_accumulation:\n        writes: [expected]\n      advances_to: awaiting\n"},
+	} {
+		path := filepath.Join(root, flowID, name)
+		if flowID == "orders" && name == "events.yaml" {
+			path = filepath.Join(root, name)
+		}
+		body, err := os.ReadFile(path)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if strings.Count(string(body), replacement[0]) != 1 {
+			t.Fatalf("published join fixture lost its exact %s preparation cut", name)
+		}
+		updated := strings.Replace(string(body), replacement[0], replacement[1], 1)
+		if name == "schema.yaml" {
+			const input = "    - item.completed\n"
+			if strings.Count(updated, input) != 1 {
+				t.Fatal("published join fixture lost its exact input declaration")
+			}
+			updated = strings.Replace(updated, input, input+"    - join.prepared\n", 1)
+		}
+		if err := os.WriteFile(path, []byte(updated), 0o600); err != nil {
+			t.Fatal(err)
+		}
+	}
+	if flowID == "orders" {
+		path := filepath.Join(root, "schema.yaml")
+		body, err := os.ReadFile(path)
+		if err != nil {
+			t.Fatal(err)
+		}
+		const inputs = "inputs: [item.completed]"
+		const connection = "  - {event: item.completed, from: ., to: orders, resolution: select}\n"
+		if strings.Count(string(body), inputs) != 1 || strings.Count(string(body), connection) != 1 {
+			t.Fatal("published orders join fixture lost its exact root input handoff")
+		}
+		updated := strings.Replace(string(body), inputs, "inputs: [item.completed, join.prepared]", 1)
+		updated = strings.Replace(updated, connection, connection+"  - {event: join.prepared, from: ., to: orders, resolution: select}\n", 1)
+		if err := os.WriteFile(path, []byte(updated), 0o600); err != nil {
+			t.Fatal(err)
+		}
+	}
 	return root
 }
 
@@ -134,7 +185,7 @@ func seedPublishedJoinSource(t *testing.T, ctx context.Context, selected any, ow
 	storetest.RequireRun(t, ctx, selected.(storetest.RunFixtureStore), storetest.RunFixture{RunID: runID,
 		Origin: runlifecycle.DeploymentRunOrigin(), LiveScope: runlifecycle.LiveRunScope{FlowPath: "."}, Artifact: bundle.SourceArtifact, BundleHash: loaded.SourceArtifactFact.BundleHash(), StartedAt: at})
 	event := eventtest.ExistingRunRootIngressWithRoutingSourceAndMode(uuid.NewString(), "item.completed", "source-runtime", "",
-		[]byte(`{"member_id":"source","result":{"value":"source"}}`), 0, runID, events.EventEnvelope{}, events.NoRoutingSource(), at, executionmode.Mock)
+		[]byte(`{"expected":[],"member_id":"source","result":{"value":"source"}}`), 0, runID, events.EventEnvelope{}, events.NoRoutingSource(), at, executionmode.Mock)
 	identity := flowidentity.Stored(loaded.Source, semanticview.RootExecutionFlowID(loaded.Source), runID, runID, runID, "")
 	work, _ := worklifetime.OccurrenceFromContext(ctx)
 	authority, err := deliverylifecycle.NewNormalExecutionAuthority(loaded.SourceArtifactFact, runForkTestRuntimeInstanceID, 1)
@@ -145,19 +196,33 @@ func seedPublishedJoinSource(t *testing.T, ctx context.Context, selected any, ow
 		ExecutionPosture: executionposture.MockOnly, WorkOwner: work, PipelineObligations: owner.ports.pipelineObligations,
 		ContractBundle: loaded.Source, SourceArtifactFact: loaded.SourceArtifactFact, RuntimeInstanceID: runForkTestRuntimeInstanceID,
 		DeliveryAuthority: authority, ReceiverExecution: eventreceiver.NormalExecution(), Durable: owner.ports.busDurable,
-		PayloadAdmitter: rootruntime.NewRuntimePayloadAdmitter(nil, loaded.Source, loaded.SourceArtifactFact),
+		PayloadAdmitter:      rootruntime.NewRuntimePayloadAdmitter(nil, loaded.Source, loaded.SourceArtifactFact),
+		CarryMutationContext: startupownership.CarryMutationAuthority,
 	})
 	if err != nil {
 		t.Fatal(err)
 	}
+	driver, dispatch := &publishedJoinSourceDriver{}, &publishedJoinSourceDispatch{}
+	schedules := selected.(genericschedule.Store)
+	logger := rootruntime.NewGenericScheduleRuntimeLogger(rootruntime.NewRuntimeLogger(owner.ports.logs, executionposture.MockOnly, nil))
+	clock, err := genericschedule.NewLifecycle(schedules, driver, eventBus, dispatch, logger, executionposture.MockOnly)
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() {
+		if err := clock.Stop(context.Background()); err != nil {
+			t.Error(err)
+		}
+	})
 	coordinator := pipeline.NewPipelineCoordinatorWithOptions(eventBus, pipeline.PipelineCoordinatorOptions{
-		Module: selectedContractWorkflowModule{source: loaded.Source}, Persistence: owner.ports.workflow,
+		Module: loaded.Module, Persistence: owner.ports.workflow,
 		SourceArtifactFact: loaded.SourceArtifactFact, ExecutionPosture: executionposture.MockOnly,
 		ReceiverExecution: eventreceiver.NormalExecution(), WorkOwner: work, RunLifecycle: selected.(runlifecycle.OperationOwner),
 		PipelineObligations: owner.ports.pipelineObligations, DeliveryStore: owner.ports.busDurable.DeliveryLifecycle,
 		DeadLetters: selected.(deadletters.AcknowledgedRecorder), DeliveryRuntime: eventBus,
 		DecisionCards: owner.ports.decisionCards, ProposedEffects: owner.ports.proposedEffects, HumanTasks: owner.ports.humanTasks,
 		DecisionCardDraftExpiry: owner.ports.decisionCardDraftExpiry, HumanTaskExpiry: owner.ports.humanTaskExpiry,
+		GenericSchedules: clock,
 	})
 	if coordinator == nil {
 		t.Fatal("published join source lifecycle planner was not admitted")
@@ -180,19 +245,86 @@ func seedPublishedJoinSource(t *testing.T, ctx context.Context, selected any, ow
 			t.Fatalf("canonical empty-join construction: %+v err=%v", commit, err)
 		}
 	}
-	driver, dispatch := &publishedJoinSourceDriver{}, &publishedJoinSourceDispatch{}
-	schedules := selected.(genericschedule.Store)
-	logger := rootruntime.NewGenericScheduleRuntimeLogger(rootruntime.NewRuntimeLogger(owner.ports.logs, executionposture.MockOnly,
-		rootruntime.NewRuntimePayloadAdmitter(nil, loaded.Source, loaded.SourceArtifactFact)))
-	clock, err := genericschedule.NewLifecycle(schedules, driver, eventBus, dispatch, logger, executionposture.MockOnly)
+	instances, err := coordinator.ListWorkflowInstances(ctx, runID)
 	if err != nil {
 		t.Fatal(err)
 	}
-	t.Cleanup(func() {
-		if err := clock.Stop(context.Background()); err != nil {
-			t.Error(err)
+	flowID := semanticview.RootExecutionFlowID(loaded.Source)
+	if os.Getenv(publishedJoinFlowEnv) == "orders" {
+		flowID = "orders"
+	}
+	var target flowidentity.Instance
+	matched := 0
+	for _, instance := range instances {
+		if instance.WorkflowName == flowID {
+			matched++
+			target = flowidentity.Stored(loaded.Source, instance.WorkflowName, instance.StorageRef, instance.InstanceID, instance.EntityID, instance.ParentEntityID)
 		}
-	})
+	}
+	var node runtimeidentity.ExecutableNode
+	for _, record := range loaded.Source.ExecutableNodeRecords() {
+		candidate, err := record.Identity()
+		if err != nil {
+			t.Fatal(err)
+		}
+		if candidate.FlowPath() == target.TemplateID && candidate.NodeID() == "join-node" {
+			node = candidate
+		}
+	}
+	if !node.Valid() || matched != 1 || target.InstancePath == "" {
+		t.Fatal("published join preparation lost its exact constructed node")
+	}
+	preparationPayload := []byte(`{"expected":[]}`)
+	if target.TemplateID == "orders" {
+		var fields map[string]json.RawMessage
+		if err := json.Unmarshal(event.Payload(), &fields); err != nil {
+			t.Fatal(err)
+		}
+		orderID, found := fields["order_id"]
+		if !found {
+			t.Fatal("published orders join preparation lost its creating input key")
+		}
+		var err error
+		preparationPayload, err = json.Marshal(map[string]json.RawMessage{"expected": json.RawMessage(`[]`), "order_id": orderID})
+		if err != nil {
+			t.Fatal(err)
+		}
+	}
+	preparationInput := semanticview.ResolveFlowEventProof(loaded.Source, target.TemplateID, "join.prepared")
+	if !preparationInput.HasSchema {
+		t.Fatal("published join preparation lost its admitted input declaration")
+	}
+	preparation := eventtest.ExistingRunRootIngressWithRoutingSourceAndMode(uuid.NewString(), events.EventType(preparationInput.EventKey()), "source-runtime", "",
+		preparationPayload, 0, runID, events.EventEnvelope{}, events.NoRoutingSource(), at, executionmode.Mock)
+	admission, err := rootruntime.NewRuntimePayloadAdmitter(nil, loaded.Source, loaded.SourceArtifactFact)(ctx, preparation, target.TemplateID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	preparation, err = events.ApplyPayloadAdmission(preparation, admission)
+	if err != nil {
+		t.Fatal(err)
+	}
+	route := events.DeliveryRoute{Recipient: events.MustNodeDeliveryRecipient(node), Target: events.MustExistingEntityTarget(events.RouteIdentity{
+		FlowID: target.TemplateID, FlowInstance: target.InstancePath, EntityID: target.EntityID,
+	})}
+	storetest.CommitSemanticEventWithRoutes(t, ctx, selected, preparation, []events.DeliveryRoute{route}, pipelineobligation.ScopeSubscribed)
+	eventBus.SetInterceptors(coordinator)
+	if err := eventBus.SetDeliveryContinuationOwner(bustest.NewDeliveryContinuationOwner(false)); err != nil {
+		t.Fatal(err)
+	}
+	if err := owner.ports.busDurable.DeliveryLifecycle.ActivateDeliveryAuthority(ctx, authority); err != nil {
+		t.Fatal(err)
+	}
+	proof, err := owner.ports.busDurable.DeliveryLifecycle.ProveHandoff(ctx, preparation.ID(), route)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := eventBus.AcceptCommittedDeliveryHandoffs([]deliverylifecycle.DurableHandoffProof{proof}); err != nil {
+		t.Fatal(err)
+	}
+	if result := eventBus.DispatchDeliveryContinuation(ctx, preparation, route); result.Failure() != nil {
+		t.Fatalf("native empty-join preparation: %v", result.Failure())
+	}
 	if err := clock.ReconcileRunWakeups(ctx, runID); err != nil {
 		t.Fatal(err)
 	}
@@ -257,10 +389,21 @@ func seedPublishedOrdersJoinConstruction(t *testing.T, ctx context.Context, sele
 		t.Fatal(err)
 	}
 	constructors, err := pipeline.CompileFlowConstructors(loaded.Source, "orders")
-	if err != nil || len(constructors) != 1 {
-		t.Fatalf("orders fixture requires its exact existing constructor pin: count=%d err=%v", len(constructors), err)
+	if err != nil {
+		t.Fatal(err)
 	}
-	input := constructors[0].Input()
+	var input string
+	matched := 0
+	for _, constructor := range constructors {
+		declaration := semanticview.ResolveFlowEventProof(loaded.Source, "orders", constructor.Input())
+		if declaration.CatalogKey == "item.completed" {
+			input = constructor.Input()
+			matched++
+		}
+	}
+	if matched != 1 {
+		t.Fatalf("orders fixture requires one exact item.completed constructor pin: count=%d", matched)
+	}
 	declaration := semanticview.ResolveFlowEventProof(loaded.Source, "orders", input)
 	producer := semanticview.ResolveFlowEventProof(loaded.Source, semanticview.RootExecutionFlowID(loaded.Source), declaration.CatalogKey)
 	authoredSchema := declaration.IsAuthored(loaded.Source) ||

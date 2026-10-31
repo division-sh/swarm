@@ -101,7 +101,7 @@ deploy.done:
 	entities := ""
 	if opts.consumerTemplateInstance {
 		instance = "instance: vertical_id\n"
-		entities = "deployment:\n  vertical_id:\n    type: string\n    _unused_reason: composition connect route-key proof field\n"
+		entities = "vertical_id: string\n"
 	}
 	writeLegacyInstanceFlow(t, root, "consumer", `# fixture: consumer
 `+instance+`stages:
@@ -130,7 +130,7 @@ func CopyCompositionConnectAmbiguity(t testing.TB) string {
 
 	writeClosedVariantFile(t, root, "schema.yaml", "stages: []\n# fixture: composition-connect-ambiguity\n")
 	removeClosedVariantFiles(t, root,
-		"consumer/agents.yaml", "consumer/entities.yaml", "consumer/events.yaml", "consumer/nodes.yaml",
+		"consumer/agents.yaml", "consumer/state.yaml", "consumer/events.yaml", "consumer/nodes.yaml",
 	)
 	for _, flowID := range []string{"producer_a", "producer_b"} {
 		writeLegacyInstanceFlow(t, root, flowID, "# fixture: "+flowID+"\npins:\n  outputs:\n    - ticket.ready\n", "ticket.ready:\n  key: entity_id\n  entity_id: string\n", "", "")
@@ -192,7 +192,7 @@ connect:
     consumer.work.ready: {}
 `)
 	if includeDynamic {
-		writeLegacyInstanceFlow(t, root, "dynamic", "# fixture: dynamic\ninstance: work_id\npins:\n  inputs:\n    - dynamic.work.ready\n", "", "dynamic_state:\n  work_id: string\n", `dynamic-node:
+		writeLegacyInstanceFlow(t, root, "dynamic", "# fixture: dynamic\ninstance: work_id\npins:\n  inputs:\n    - dynamic.work.ready\n", "", "work_id: text\n", `dynamic-node:
   execution_type: system_node
   subscribes_to: [dynamic.work.ready]
   event_handlers:

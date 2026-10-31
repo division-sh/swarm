@@ -6,7 +6,6 @@ import (
 	"sort"
 	"strings"
 
-	"github.com/division-sh/swarm/internal/runtime/accprojection"
 	c "github.com/division-sh/swarm/internal/runtime/contracts"
 	"github.com/division-sh/swarm/internal/runtime/core/identity"
 	"github.com/division-sh/swarm/internal/runtime/entityruntime"
@@ -341,8 +340,8 @@ func (a *EntityAssignmentAnalysis) transfer(node identity.ExecutableNode, event 
 	}
 	assume := func(condition string, truth bool) {
 		for _, path := range workflowexpr.ConditionPresenceFacts(condition, truth) {
-			if strings.HasPrefix(path, "entity.") {
-				facts[strings.TrimPrefix(path, "entity.")] = struct{}{}
+			if strings.HasPrefix(path, "state.") {
+				facts[strings.TrimPrefix(path, "state.")] = struct{}{}
 			}
 		}
 	}
@@ -360,7 +359,7 @@ func (a *EntityAssignmentAnalysis) transfer(node identity.ExecutableNode, event 
 		}
 		return true
 	}
-	topWritten, ruleWritten, projected := false, false, false
+	topWritten, ruleWritten := false, false
 	applyWrites := func(selected bool) bool {
 		if selected && outcome.rule != nil && !ruleWritten {
 			if !writes(outcome.rule.DataAccumulation, true) {
@@ -375,16 +374,6 @@ func (a *EntityAssignmentAnalysis) transfer(node identity.ExecutableNode, event 
 			topWritten = true
 		}
 		return true
-	}
-	applyProjection := func() {
-		if projected {
-			return
-		}
-		bindings, _ := accprojection.ForExecutableHandler(a.source, node, event)
-		for _, binding := range bindings {
-			assign("entity." + binding.TargetField)
-		}
-		projected = true
 	}
 	fanOut := func(step Step, selected bool) bool {
 		kind, index := c.FanOutSiteHandler, -1
@@ -412,7 +401,6 @@ func (a *EntityAssignmentAnalysis) transfer(node identity.ExecutableNode, event 
 		if !applyWrites(selected) {
 			return false
 		}
-		applyProjection()
 		return point == nil || point.Step != step || !point.FanOut
 	}
 	for _, step := range OrderedSteps {
@@ -494,22 +482,6 @@ func (a *EntityAssignmentAnalysis) transfer(node identity.ExecutableNode, event 
 		case StepDataWrites:
 			if !applyWrites(true) {
 				return facts
-			}
-		case StepProjection:
-			applyProjection()
-		case StepClear:
-			if handler.Clear == nil {
-				continue
-			}
-			for _, target := range handler.Clear.Targets {
-				if target != "accumulator_state" {
-					continue
-				}
-				for _, binding := range accprojection.Resolve(a.source).Bindings {
-					if binding.SourceNode.Equal(node) {
-						assign("entity." + binding.TargetField)
-					}
-				}
 			}
 		}
 	}
@@ -634,7 +606,7 @@ func entityAssignmentEdgeSelects(edge c.WorkflowStageTopologyEdge, handler c.Sys
 func EntityAssignmentPresencePaths(facts entityruntime.AssignmentFacts) []string {
 	paths := make([]string, 0, len(facts))
 	for path := range facts {
-		paths = append(paths, "entity."+path)
+		paths = append(paths, "state."+path)
 	}
 	sort.Strings(paths)
 	return paths

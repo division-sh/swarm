@@ -340,7 +340,7 @@ func TestIssue642PreparedArrivalTimeoutContinuesExactDeliveryBothStores(t *testi
 						t.Logf("source business table %s added: %+v", table, after)
 					}
 				}
-				t.Fatalf("child timeout changed prepared source business facts: %v", err)
+				t.Fatalf("child timeout changed prepared source business facts: %v; before=%+v after=%+v", err, sourceBefore, sourceAfter)
 			}
 			sourceSettlement, err := owner.ports.busDurable.DeliveryLifecycle.SummarizeRun(wait, sourceRun)
 			if err != nil || !reflect.DeepEqual(sourceSettlement, sourceDeliveries) {

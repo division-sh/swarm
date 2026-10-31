@@ -8,7 +8,7 @@ import "testing"
 func CopySelectedFutureProviderInput(t testing.TB) string {
 	t.Helper()
 	root := CopySelectedNestedConstructedAgentInput(t, false)
-	writeClosedVariantFile(t, root, "entities.yaml", "run: {}\n")
+	removeClosedVariantFiles(t, root, "state.yaml")
 	writeClosedVariantFile(t, root, "schema.yaml", `# fixture: selected-future-provider
 stages:
   pending: {}

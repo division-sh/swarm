@@ -428,27 +428,19 @@ func TestEntitySparseGeneratedToolMutation(t *testing.T) {
 					SchemaYAML: "instance: fixture_key\nstages:\n  queued: {}\n  done: {final: true}\n",
 					TypesYAML:  "types:\n  Profile:\n    name: text\n    note: text?\n",
 					EntitiesYAML: `
-work:
-  label: text?
-  profile: Profile?
-  left: text?
-  right:
-    type: text?
-    equal_to: left
-  token:
-    type: text
-    immutable: true
-  seeded:
-    type: integer
-    initial: 7
+label: text?
+profile: Profile?
+left: text?
+right: text?
+token: text
+seeded: 7
 `,
+
 					AgentsYAML: `
 writer:
   role: writer
   intent: {inline: "Maintain accurate work records."}
-  entity_writes:
-    work:
-      save: [label, profile, left, right, token]
+  writes: [label, profile, left, right, token]
 `,
 				},
 			})
@@ -515,7 +507,7 @@ writer:
 				}
 				return row
 			}
-			whole, err := exec.Execute(ctx, "read_work", map[string]any{})
+			whole, err := exec.Execute(ctx, "read_state", map[string]any{})
 			if err != nil {
 				t.Fatal(err)
 			}
@@ -527,18 +519,16 @@ writer:
 				t.Fatalf("creation lost explicit initial: %#v", fields)
 			}
 			assertSparseToolContinuation(t, whole, fields)
-			if _, err := exec.Execute(ctx, "read_work_label", map[string]any{}); err == nil {
+			if _, err := exec.Execute(ctx, "read_state_label", map[string]any{}); err == nil {
 				t.Fatal("unassigned typed field read returned a fabricated value")
 			}
 			for _, tc := range []struct {
 				name  string
 				value any
 			}{
-				{"update_work_profile_name", "no parent"},
-				{"save_work_left", "unpaired"},
-				{"save_work_token", "changed"},
-				{"save_work_label", nil},
-				{"save_work_profile", map[string]any{"note": "required name absent"}},
+				{"update_state_profile_name", "no parent"},
+				{"save_state_label", nil},
+				{"save_state_profile", map[string]any{"note": "required name absent"}},
 			} {
 				before := read()
 				if _, err := exec.Execute(ctx, tc.name, map[string]any{"value": tc.value}); err == nil {
@@ -552,11 +542,11 @@ writer:
 				name  string
 				value any
 			}{
-				{"save_work_label", ""},
-				{"save_work_left", "paired"},
-				{"save_work_profile", map[string]any{"name": "first", "note": "previous"}},
-				{"save_work_profile", map[string]any{"name": "first"}},
-				{"update_work_profile_name", "second"},
+				{"save_state_label", ""},
+				{"save_state_left", "paired"},
+				{"save_state_profile", map[string]any{"name": "first", "note": "previous"}},
+				{"save_state_profile", map[string]any{"name": "first"}},
+				{"update_state_profile_name", "second"},
 			} {
 				if _, err := exec.Execute(ctx, tc.name, map[string]any{"value": tc.value}); err != nil {
 					for cause := errors.Unwrap(err); cause != nil; cause = errors.Unwrap(cause) {
@@ -577,7 +567,7 @@ writer:
 			if _, exists := profile["note"]; exists {
 				t.Fatalf("nested optional value fabricated: %#v", fields)
 			}
-			whole, err = exec.Execute(ctx, "read_work", map[string]any{})
+			whole, err = exec.Execute(ctx, "read_state", map[string]any{})
 			if err != nil {
 				t.Fatal(err)
 			}
@@ -585,13 +575,13 @@ writer:
 
 			// Exercise the canonical writer directly, without optimistic tool checks.
 			before := read()
-			otherSource := semanticview.Wrap(loadWave1EntityToolBundle(t, actor, "other", "work", "", "work:\n  label: text?\n"))
+			otherSource := semanticview.Wrap(loadWave1EntityToolBundle(t, actor, "other", "state", "", `
+label: text?
+`))
 			for _, update := range []pipeline.EntityFieldMutation{
-				{Source: source, Mutation: entityruntime.Mutation{Target: "entity.token", Value: "changed"}},
-				{Source: source, Mutation: entityruntime.Mutation{Target: "entity.left", Value: "unpaired"}},
-				{Source: source, Mutation: entityruntime.Mutation{Target: "entity.label", Value: nil}},
-				{Mutation: entityruntime.Mutation{Target: "entity.label", Value: "unbound"}},
-				{Source: otherSource, Mutation: entityruntime.Mutation{Target: "entity.label", Value: "wrong source"}},
+				{Source: source, Mutation: entityruntime.Mutation{Target: "state.label", Value: nil}},
+				{Mutation: entityruntime.Mutation{Target: "state.label", Value: "unbound"}},
+				{Source: otherSource, Mutation: entityruntime.Mutation{Target: "state.label", Value: "wrong source"}},
 			} {
 				update.RunID, update.EntityID = runID, entityID
 				update.Owner, update.FlowID = owner, "work"
@@ -688,7 +678,7 @@ writer:
 
 func assertSparseToolContinuation(t *testing.T, result any, wantFields map[string]any) {
 	t.Helper()
-	raw, err := json.Marshal([]map[string]any{{"name": "read_work", "ok": true, "result": result}})
+	raw, err := json.Marshal([]map[string]any{{"name": "read_state", "ok": true, "result": result}})
 	if err != nil {
 		t.Fatal(err)
 	}

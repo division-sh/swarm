@@ -423,8 +423,8 @@ func TestDescribeCommandJSONRendersRootPrimaryEntity(t *testing.T) {
 	if view.Root.PrimaryEntity == nil {
 		t.Fatalf("root primary entity missing: %#v", view.Root)
 	}
-	if view.Root.PrimaryEntity.Type != "workspace" {
-		t.Fatalf("root primary entity type = %q, want workspace", view.Root.PrimaryEntity.Type)
+	if view.Root.PrimaryEntity.Type != "state" {
+		t.Fatalf("root primary entity type = %q, want state", view.Root.PrimaryEntity.Type)
 	}
 	if view.Root.PrimaryEntity.Fields["org_id"] != "text" {
 		t.Fatalf("root primary entity fields = %#v, want org_id text", view.Root.PrimaryEntity.Fields)
@@ -777,9 +777,7 @@ func writeDescribeScalarTemplateInstanceContracts(t testing.TB) string {
 instance: account_id
 `,
 	)
-	writeDescribeTestFile(t, filepath.Join(root, "scoring", "entities.yaml"), `
-account:
-  account_id: uuid
+	writeDescribeTestFile(t, filepath.Join(root, "scoring", "state.yaml"), `account_id: uuid
 `)
 	return root
 }
@@ -795,10 +793,8 @@ func writeDescribeRootPrimaryEntityContracts(t testing.TB) string {
 
 	writeDescribeTestFile(t, filepath.Join(root, "manifest.yaml"), "version: 1.0.0\nplatform_version: '*'\n")
 	writeDescribeTestFile(t, filepath.Join(root, "schema.yaml"), "stages: []\n")
-	writeDescribeTestFile(t, filepath.Join(root, "entities.yaml"), `
-workspace:
-  org_id: text
-  region: text
+	writeDescribeTestFile(t, filepath.Join(root, "state.yaml"), `org_id: text
+region: text
 `)
 	return root
 }

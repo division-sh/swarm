@@ -2,7 +2,7 @@ name: test-clear-state setup visible smoke
 setup:
   entities:
   - as: entity
-    type: test_entity
+    type: state
     fields:
       accumulated_count: 5
       accumulated_total: 250

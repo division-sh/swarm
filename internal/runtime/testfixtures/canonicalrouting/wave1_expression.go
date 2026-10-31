@@ -31,35 +31,22 @@ pins:
   inputs: [task.assigned, task.feedback]
   outputs: [task.result]
 `)
-	writeClosedVariantFile(t, root, filepath.Join("child", "entities.yaml"), `
-task:
-  retry_count:
-    type: integer
-    initial: 0
-  revision_count:
-    type: integer
-    initial: 0
-  kill_reason:
-    type: text
-    _unused_reason: optional test surface field
-  base_score:
-    type: numeric
-    _unused_reason: optional test surface field
-  adjusted_score:
-    type: numeric
-    _unused_reason: optional test surface field
-  filtered_score:
-    type: numeric
-    _unused_reason: optional test surface field
-  filtered_items:
-    type: text
-    _unused_reason: optional test surface field
-  composite_score:
-    type: numeric
-    _unused_reason: optional test surface field
-  expected_count:
-    type: integer
-    initial: 1
+	writeClosedVariantFile(t, root, filepath.Join("child", "state.yaml"), `retry_count: 0
+revision_count: 0
+kill_reason: text
+base_score: numeric
+adjusted_score: numeric
+filtered_score: numeric
+filtered_items: text
+composite_score: numeric
+expected_count: 1
+`)
+	writeClosedVariantFile(t, root, filepath.Join("child", "agents.yaml"), `writer:
+  role: writer
+  intent: {inline: "Maintain the declared expression fixture fields."}
+  model: regular
+  subscriptions: [task.feedback]
+  writes: [kill_reason, base_score, adjusted_score, filtered_score, filtered_items, composite_score]
 `)
 	writeClosedVariantFile(t, root, filepath.Join("child", "events.yaml"), `
 task.result:

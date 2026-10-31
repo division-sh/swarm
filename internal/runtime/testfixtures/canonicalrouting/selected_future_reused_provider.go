@@ -44,7 +44,7 @@ work.assigned:
       data_accumulation:
         source_event: work.finished
         writes:
-          - {target_field: counter, value: entity.counter + 1}
+          - {target_field: counter, value: state.counter + 1}
 `,
 		"work/schema.yaml": `instance: work_id
 stages:

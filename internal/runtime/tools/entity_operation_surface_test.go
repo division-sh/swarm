@@ -77,8 +77,8 @@ func newOperationSurfaceFixture(t *testing.T) (context.Context, models.AgentConf
 	bundle := loadWave1EntityToolMultiFlowBundle(t, map[string]entityToolFlowFixture{
 		"review": {
 			SchemaYAML:   "stages:\n  queued: {}\n  marginal_review: {}\n  closed: {final: true}\n",
-			EntitiesYAML: "case:\n  status: text\n  items: [text]\n  labels: map[text]text\n  protected: text\n",
-			AgentsYAML:   "writer:\n  role: operator\n  intent: {inline: Write declared fields.}\n  entity_writes:\n    case:\n      save: [status, items, labels]\n",
+			EntitiesYAML: "status: text\nitems: [text]\nlabels: map[text]text\nprotected: text\n",
+			AgentsYAML:   "writer:\n  role: operator\n  intent: {inline: Write declared fields.}\n  writes: [status, items, labels]\n",
 		},
 	})
 	source := semanticview.Wrap(bundle)
@@ -118,7 +118,7 @@ func newOperationSurfaceFixture(t *testing.T) (context.Context, models.AgentConf
 		t.Fatal(err)
 	}
 	reader := &operationSurfaceReader{row: map[string]any{
-		"entity_id": instance.EntityID, "flow_instance": instance.InstancePath, "entity_type": "case",
+		"entity_id": instance.EntityID, "flow_instance": instance.InstancePath, "entity_type": "state",
 		"current_state": "marginal_review", "fields": fields,
 	}}
 	fresh, err := entityruntime.NormalizeState(contract, fields)
@@ -139,12 +139,12 @@ func TestEntityOperationSurfaceDistinctIndicesAppendAndMapKeys(t *testing.T) {
 		tool  string
 		input map[string]any
 	}{
-		{"save_case_items", map[string]any{"op": "update", "index": 0, "value": "index-0"}},
-		{"save_case_items", map[string]any{"op": "update", "index": 1, "value": "index-1"}},
-		{"save_case_items", map[string]any{"op": "append", "value": "equal"}},
-		{"save_case_items", map[string]any{"op": "append", "value": "equal"}},
-		{"save_case_labels", map[string]any{"op": "set", "key": "first", "value": "one"}},
-		{"save_case_labels", map[string]any{"op": "set", "key": "second", "value": "two"}},
+		{"save_state_items", map[string]any{"op": "update", "index": 0, "value": "index-0"}},
+		{"save_state_items", map[string]any{"op": "update", "index": 1, "value": "index-1"}},
+		{"save_state_items", map[string]any{"op": "append", "value": "equal"}},
+		{"save_state_items", map[string]any{"op": "append", "value": "equal"}},
+		{"save_state_labels", map[string]any{"op": "set", "key": "first", "value": "one"}},
+		{"save_state_labels", map[string]any{"op": "set", "key": "second", "value": "two"}},
 	}
 	start := make(chan struct{})
 	results := make(chan error, len(inputs))
@@ -191,10 +191,10 @@ func TestEntityOperationSurfaceSameSlotOrderingAndWholeSetControls(t *testing.T)
 		tool  string
 		input map[string]any
 	}{
-		{"save_case_items", map[string]any{"op": "update", "index": 1, "value": "first"}},
-		{"save_case_items", map[string]any{"op": "update", "index": 1, "value": "last"}},
-		{"save_case_labels", map[string]any{"op": "set", "key": "same", "value": "first"}},
-		{"save_case_labels", map[string]any{"op": "set", "key": "same", "value": "last"}},
+		{"save_state_items", map[string]any{"op": "update", "index": 1, "value": "first"}},
+		{"save_state_items", map[string]any{"op": "update", "index": 1, "value": "last"}},
+		{"save_state_labels", map[string]any{"op": "set", "key": "same", "value": "first"}},
+		{"save_state_labels", map[string]any{"op": "set", "key": "same", "value": "last"}},
 	} {
 		if _, err := exec.Execute(ctx, input.tool, input.input); err != nil {
 			t.Fatal(err)
@@ -214,7 +214,7 @@ func TestEntityOperationSurfaceSameSlotOrderingAndWholeSetControls(t *testing.T)
 			if op != "" {
 				input["op"] = op
 			}
-			if _, err := exec.Execute(ctx, "save_case_"+tc.field, input); err != nil {
+			if _, err := exec.Execute(ctx, "save_state_"+tc.field, input); err != nil {
 				t.Fatal(err)
 			}
 			if !reflect.DeepEqual(writer.fields[tc.field], tc.value) {
@@ -227,7 +227,7 @@ func TestEntityOperationSurfaceSameSlotOrderingAndWholeSetControls(t *testing.T)
 func TestEntityOperationSurfaceFreshSlotAndAtomicInvalidIndex(t *testing.T) {
 	ctx, _, exec, _, writer := newOperationSurfaceFixture(t)
 	writer.fields["items"] = []any{"replacement-0", "replacement-1", "replacement-2"}
-	if _, err := exec.Execute(ctx, "save_case_items", map[string]any{"op": "update", "index": 1, "value": "updated"}); err != nil {
+	if _, err := exec.Execute(ctx, "save_state_items", map[string]any{"op": "update", "index": 1, "value": "updated"}); err != nil {
 		t.Fatal(err)
 	}
 	if !reflect.DeepEqual(writer.fields["items"], []any{"replacement-0", "updated", "replacement-2"}) {
@@ -235,11 +235,11 @@ func TestEntityOperationSurfaceFreshSlotAndAtomicInvalidIndex(t *testing.T) {
 	}
 	before, revision := len(writer.requests), writer.revision
 	for _, index := range []any{-1, 0.5, "0", nil, true} {
-		if out, err := exec.Execute(ctx, "save_case_items", map[string]any{"op": "update", "index": index, "value": "bad"}); err == nil || out != nil {
+		if out, err := exec.Execute(ctx, "save_state_items", map[string]any{"op": "update", "index": index, "value": "bad"}); err == nil || out != nil {
 			t.Fatalf("invalid optimistic index %#v accepted: %#v, %v", index, out, err)
 		}
 	}
-	if out, err := exec.Execute(ctx, "save_case_items", map[string]any{"op": "update", "index": 2, "value": "fresh-slot"}); err != nil || out == nil {
+	if out, err := exec.Execute(ctx, "save_state_items", map[string]any{"op": "update", "index": 2, "value": "fresh-slot"}); err != nil || out == nil {
 		t.Fatalf("fresh valid position was refused by stale read: %#v, %v", out, err)
 	}
 	if len(writer.requests) != before+1 || writer.revision != revision+1 {
@@ -247,7 +247,7 @@ func TestEntityOperationSurfaceFreshSlotAndAtomicInvalidIndex(t *testing.T) {
 	}
 	revision = writer.revision
 	writer.fields["items"] = []any{}
-	out, err := exec.Execute(ctx, "save_case_items", map[string]any{"op": "update", "index": 1, "value": "bad"})
+	out, err := exec.Execute(ctx, "save_state_items", map[string]any{"op": "update", "index": 1, "value": "bad"})
 	if err == nil || out != nil || writer.revision != revision || len(writer.fields["items"].([]any)) != 0 {
 		t.Fatalf("index removed in fresh state did not reject atomically: %#v, %v", out, err)
 	}
@@ -258,7 +258,9 @@ func TestEntityOperationSurfaceFreshIndexAdmissionOnBothStores(t *testing.T) {
 	for _, backend := range []string{"sqlite", "postgres"} {
 		t.Run(backend, func(t *testing.T) {
 			actor := models.AgentConfig{ExecutionMode: "live", ID: "writer", Role: "writer"}
-			bundle := loadWave1EntityToolBundle(t, actor, "review", "case", "", "case:\n  items: [text]\n")
+			bundle := loadWave1EntityToolBundle(t, actor, "review", "state", "", `
+items: [text]
+`)
 			var selected runtimetools.EntityPersistence
 			if backend == "sqlite" {
 				selected = storetest.StartSQLiteRuntimeStoreWithContext(t, unmanagedToolTestContext())
@@ -272,9 +274,9 @@ func TestEntityOperationSurfaceFreshIndexAdmissionOnBothStores(t *testing.T) {
 			inbound := eventtest.RunCreatingRootIngress("fresh-index", events.EventType("review.started"), "", "", nil, 0, entityToolTestRunID, "",
 				events.EnvelopeForFlowInstance(events.EnvelopeForEntityID(events.EventEnvelope{}, entityID), "review/inst-1"), time.Time{})
 			ctx = runtimetools.WithActor(runtimebus.WithInboundEvent(ctx, inbound), actor)
-			stale := &operationSurfaceReader{row: map[string]any{"entity_id": entityID, "flow_instance": "review/inst-1", "entity_type": "case", "current_state": "queued", "fields": map[string]any{"items": []any{}}}}
+			stale := &operationSurfaceReader{row: map[string]any{"entity_id": entityID, "flow_instance": "review/inst-1", "entity_type": "state", "current_state": "queued", "fields": map[string]any{"items": []any{}}}}
 			exec := runtimetools.NewExecutorWithOptions(nil, runtimetools.ExecutorOptions{EntityStore: stale, EntityWriter: fixture.pipeline, WorkflowSource: fixture.source})
-			if out, err := exec.Execute(ctx, "save_case_items", map[string]any{"op": "update", "index": 1, "value": "updated"}); err != nil || out == nil {
+			if out, err := exec.Execute(ctx, "save_state_items", map[string]any{"op": "update", "index": 1, "value": "updated"}); err != nil || out == nil {
 				t.Fatalf("stale reader refused fresh valid slot: %#v, %v", out, err)
 			}
 			identity := runtimetools.EntityIdentity{RunID: entityToolTestRunID, EntityID: entityID}
@@ -283,7 +285,7 @@ func TestEntityOperationSurfaceFreshIndexAdmissionOnBothStores(t *testing.T) {
 				t.Fatalf("fresh index effect: %#v found=%v err=%v", before, found, err)
 			}
 			stale.row["fields"] = map[string]any{"items": []any{"stale-0", "stale-1", "stale-2"}}
-			out, err := exec.Execute(ctx, "save_case_items", map[string]any{"op": "update", "index": 2, "value": "invalid"})
+			out, err := exec.Execute(ctx, "save_state_items", map[string]any{"op": "update", "index": 2, "value": "invalid"})
 			if out != nil {
 				t.Fatalf("fresh invalid slot returned acknowledgment: %#v", out)
 			}
@@ -308,11 +310,11 @@ func TestEntityOperationSurfaceFreshIndexAdmissionOnBothStores(t *testing.T) {
 func TestEntityOperationSurfaceWriterDependencyAndPostCommitResponse(t *testing.T) {
 	ctx, _, exec, reader, writer := newOperationSurfaceFixture(t)
 	withoutWriter := runtimetools.NewExecutorWithOptions(nil, runtimetools.ExecutorOptions{EntityStore: reader, WorkflowSource: writer.source})
-	if out, err := withoutWriter.Execute(ctx, "save_case_status", map[string]any{"value": "bad"}); out != nil || err == nil || !strings.Contains(err.Error(), "dependency_unavailable") {
+	if out, err := withoutWriter.Execute(ctx, "save_state_status", map[string]any{"value": "bad"}); out != nil || err == nil || !strings.Contains(err.Error(), "dependency_unavailable") {
 		t.Fatalf("missing canonical writer = %#v, %v", out, err)
 	}
 	writer.fault = errors.New("cleanup password=private-token")
-	out, err := exec.Execute(ctx, "save_case_items", map[string]any{"op": "append", "value": "equal"})
+	out, err := exec.Execute(ctx, "save_state_items", map[string]any{"op": "append", "value": "equal"})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -325,7 +327,7 @@ func TestEntityOperationSurfaceWriterDependencyAndPostCommitResponse(t *testing.
 		t.Fatalf("post-commit response leaked internal cause: %s, %v", encoded, err)
 	}
 	writer.reject = true
-	if out, err := exec.Execute(ctx, "save_case_items", map[string]any{"op": "append", "value": "uncommitted"}); out != nil || !errors.Is(err, writer.fault) {
+	if out, err := exec.Execute(ctx, "save_state_items", map[string]any{"op": "append", "value": "uncommitted"}); out != nil || !errors.Is(err, writer.fault) {
 		t.Fatalf("unacknowledged response = %#v, %v", out, err)
 	}
 	if !reflect.DeepEqual(writer.fields["items"], []any{"a", "b", "equal"}) {
@@ -350,16 +352,16 @@ func TestEntityOperationSurfaceActorRouteAndWriteOwnership(t *testing.T) {
 		t.Run(tc.name, func(t *testing.T) {
 			changed := actor
 			tc.alter(&changed)
-			if out, err := exec.Execute(runtimetools.WithActor(ctx, changed), "save_case_status", map[string]any{"value": "forbidden"}); err == nil || out != nil {
+			if out, err := exec.Execute(runtimetools.WithActor(ctx, changed), "save_state_status", map[string]any{"value": "forbidden"}); err == nil || out != nil {
 				t.Fatalf("wrong actor authority accepted: %#v, %v", out, err)
 			}
 		})
 	}
-	if out, err := exec.Execute(ctx, "save_case_protected", map[string]any{"value": "forbidden"}); err == nil || out != nil {
+	if out, err := exec.Execute(ctx, "save_state_protected", map[string]any{"value": "forbidden"}); err == nil || out != nil {
 		t.Fatalf("undeclared write field accepted: %#v, %v", out, err)
 	}
 	reader.row["entity_id"] = "22222222-2222-2222-2222-222222222222"
-	if out, err := exec.Execute(ctx, "save_case_status", map[string]any{"value": "forbidden"}); err == nil || out != nil {
+	if out, err := exec.Execute(ctx, "save_state_status", map[string]any{"value": "forbidden"}); err == nil || out != nil {
 		t.Fatalf("wrong stored entity accepted: %#v, %v", out, err)
 	}
 	if len(writer.requests) != 0 {
@@ -380,27 +382,27 @@ func TestEntityOperationSurfaceSchemaAndMCPParity(t *testing.T) {
 		input map[string]any
 		valid bool
 	}{
-		{"save_case_items", map[string]any{"value": []any{"whole"}}, true},
-		{"save_case_items", map[string]any{"op": "set", "value": []any{"whole"}}, true},
-		{"save_case_items", map[string]any{"op": "append", "value": "element"}, true},
-		{"save_case_items", map[string]any{"op": "update", "index": 0, "value": "element"}, true},
-		{"save_case_labels", map[string]any{"op": "set", "key": "entry", "value": "element"}, true},
-		{"save_case_labels", map[string]any{"value": map[string]any{"entry": "whole"}}, true},
-		{"save_case_items", map[string]any{"op": "append", "value": []any{"wrong"}}, false},
-		{"save_case_items", map[string]any{"op": "update", "value": "missing-index"}, false},
-		{"save_case_items", map[string]any{"op": "update", "index": "0", "value": "wrong-index"}, false},
-		{"save_case_items", map[string]any{"op": "update", "index": -1, "value": "wrong-index"}, false},
-		{"save_case_items", map[string]any{"op": "update", "index": 0.5, "value": "wrong-index"}, false},
-		{"save_case_items", map[string]any{"op": "append", "key": "id", "value": "wrong-selector"}, false},
-		{"save_case_items", map[string]any{"op": "set", "key": "id", "value": "keyed-list"}, false},
-		{"save_case_items", map[string]any{"op": "clear", "value": []any{}}, false},
-		{"save_case_items", map[string]any{"op": "append", "index": 0, "value": "wrong-selector"}, false},
-		{"save_case_labels", map[string]any{"op": "set", "key": "entry", "value": map[string]any{"whole": "wrong"}}, false},
-		{"save_case_labels", map[string]any{"op": "set", "key": "", "value": "empty-key"}, false},
-		{"save_case_labels", map[string]any{"op": "set", "key": "entry", "index": 0, "value": "wrong-selector"}, false},
-		{"save_case_labels", map[string]any{"op": "merge", "key": "entry", "value": "wrong-op"}, false},
-		{"save_case_status", map[string]any{"op": "append", "value": "wrong-op"}, false},
-		{"save_case_status", map[string]any{"op": "set", "value": "valid", "extra": nil}, false},
+		{"save_state_items", map[string]any{"value": []any{"whole"}}, true},
+		{"save_state_items", map[string]any{"op": "set", "value": []any{"whole"}}, true},
+		{"save_state_items", map[string]any{"op": "append", "value": "element"}, true},
+		{"save_state_items", map[string]any{"op": "update", "index": 0, "value": "element"}, true},
+		{"save_state_labels", map[string]any{"op": "set", "key": "entry", "value": "element"}, true},
+		{"save_state_labels", map[string]any{"value": map[string]any{"entry": "whole"}}, true},
+		{"save_state_items", map[string]any{"op": "append", "value": []any{"wrong"}}, false},
+		{"save_state_items", map[string]any{"op": "update", "value": "missing-index"}, false},
+		{"save_state_items", map[string]any{"op": "update", "index": "0", "value": "wrong-index"}, false},
+		{"save_state_items", map[string]any{"op": "update", "index": -1, "value": "wrong-index"}, false},
+		{"save_state_items", map[string]any{"op": "update", "index": 0.5, "value": "wrong-index"}, false},
+		{"save_state_items", map[string]any{"op": "append", "key": "id", "value": "wrong-selector"}, false},
+		{"save_state_items", map[string]any{"op": "set", "key": "id", "value": "keyed-list"}, false},
+		{"save_state_items", map[string]any{"op": "clear", "value": []any{}}, false},
+		{"save_state_items", map[string]any{"op": "append", "index": 0, "value": "wrong-selector"}, false},
+		{"save_state_labels", map[string]any{"op": "set", "key": "entry", "value": map[string]any{"whole": "wrong"}}, false},
+		{"save_state_labels", map[string]any{"op": "set", "key": "", "value": "empty-key"}, false},
+		{"save_state_labels", map[string]any{"op": "set", "key": "entry", "index": 0, "value": "wrong-selector"}, false},
+		{"save_state_labels", map[string]any{"op": "merge", "key": "entry", "value": "wrong-op"}, false},
+		{"save_state_status", map[string]any{"op": "append", "value": "wrong-op"}, false},
+		{"save_state_status", map[string]any{"op": "set", "value": "valid", "extra": nil}, false},
 	} {
 		schema, ok := plain[tc.tool].Schema.(map[string]any)
 		if !ok {
@@ -470,7 +472,7 @@ func TestEntityOperationSurfaceSchemaAndMCPParity(t *testing.T) {
 		t.Fatal("MCP listing lost the planned capability surface")
 	}
 	for _, tool := range observed.Tools {
-		if !strings.HasPrefix(tool.Name, "save_case_") {
+		if !strings.HasPrefix(tool.Name, "save_state_") {
 			continue
 		}
 		listed := slices.ContainsFunc(tool.Evidence, func(evidence managedcapabilities.DeliveryEvidence) bool {
@@ -483,7 +485,7 @@ func TestEntityOperationSurfaceSchemaAndMCPParity(t *testing.T) {
 	}
 	matched := 0
 	for _, tool := range rpc.Result.Tools {
-		if !strings.HasPrefix(tool.Name, "save_case_") {
+		if !strings.HasPrefix(tool.Name, "save_state_") {
 			continue
 		}
 		expected, err := json.Marshal(plain[tool.Name].Schema)

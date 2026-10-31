@@ -101,7 +101,7 @@ func TestA2CountJoinRealExecutionAndRestartOnBothStores(t *testing.T) {
 				owner := testRunScopedWorkflowInstanceForRun(runID, runID)
 				commitA2FixtureConstruction(t, pc, selected.events, ctx, owner, pipeline.WorkflowInstance{
 					InstanceID: runID, StorageRef: runID, EntityID: runID, WorkflowName: source.WorkflowName(), WorkflowVersion: source.WorkflowVersion(),
-					CurrentState: "awaiting", EntityType: "count_state", Fields: map[string]any{
+					CurrentState: "awaiting", EntityType: "state", Fields: map[string]any{
 						"final_expected": int64(0), "final_completed": int64(0), "final_results": []any{}, "final_reason": "",
 					},
 				}, time.Now().UTC())
@@ -300,7 +300,7 @@ func a2CountJoinFiles(count int) map[string]string {
 	return map[string]string{
 		"manifest.yaml": "version: 1.0.0\nplatform_version: \">=0.7.0 <0.8.0\"\n",
 		"schema.yaml":   "stages:\n  awaiting: {}\n  ready: {final: true}\npins:\n  inputs:\n    - item.completed\n    - halt.requested\n",
-		"entities.yaml": "count_state:\n  final_expected: integer\n  final_completed: integer\n  final_results: [JoinResult]\n  final_reason: text\n",
+		"state.yaml":    "final_expected: integer\nfinal_completed: integer\nfinal_results: [JoinResult]\nfinal_reason: text\n",
 		"types.yaml":    "types:\n  JoinResult:\n    value: text\n",
 		"events.yaml":   "item.completed:\n  member_id: text\n  result: JoinResult\nhalt.requested:\n",
 		"nodes.yaml": fmt.Sprintf(`collector:

@@ -8,5 +8,5 @@ expect:
   events:
     include: [evidence.recorded]
   entities:
-    - type: evidence_case
+    - flow: .
       current_state: pending

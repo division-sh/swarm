@@ -329,7 +329,7 @@ func TestFlowBackedAgentConsumersUseOwningFlowInsteadOfStorageScopeKind(t *testi
 		t.Fatalf("criteria declaration = entry %#v flow %q ok %v", entry, flowID, ok)
 	}
 	entity, ok := entityruntime.ResolveForActor(source, actor)
-	if !ok || entity.FlowID != "support" || entity.EntityType != "support_state" {
+	if !ok || entity.FlowID != "support" || entity.EntityType != "state" {
 		t.Fatalf("entity contract = %#v ok %v", entity, ok)
 	}
 }
@@ -699,7 +699,7 @@ func loadFlowDataToolSourceWithAccess(t *testing.T, access []string) (semanticvi
 
 	writeToolFlowDataFixtureFile(t, filepath.Join(root, "support", "manifest.yaml"), "version: 1.0.0\nplatform_version: '*'\n")
 	writeToolFlowDataFixtureFile(t, filepath.Join(root, "support", "schema.yaml"), "stages: []\n")
-	writeToolFlowDataFixtureFile(t, filepath.Join(root, "support", "entities.yaml"), "support_state:\n  support_id: string\n")
+	writeToolFlowDataFixtureFile(t, filepath.Join(root, "support", "state.yaml"), "support_id: string\n")
 	writeToolFlowDataFixtureFile(t, filepath.Join(root, "support", "agents.yaml"), `
 factory-cto:
   id: public-factory-cto
@@ -710,7 +710,7 @@ factory-cto:
 
 	writeToolFlowDataFixtureFile(t, filepath.Join(root, "other", "manifest.yaml"), "version: 1.0.0\nplatform_version: '*'\n")
 	writeToolFlowDataFixtureFile(t, filepath.Join(root, "other", "schema.yaml"), "stages: []\n")
-	writeToolFlowDataFixtureFile(t, filepath.Join(root, "other", "entities.yaml"), "other_state:\n  other_id: string\n")
+	writeToolFlowDataFixtureFile(t, filepath.Join(root, "other", "state.yaml"), "other_id: string\n")
 	writeToolFlowDataFixtureFile(t, filepath.Join(root, "other", "agents.yaml"), `
 factory-cto:
   id: public-factory-cto
@@ -740,7 +740,7 @@ func loadResourceDataToolSourceWithEventName(t *testing.T, eventName string) (se
 
 	writeToolFlowDataFixtureFile(t, filepath.Join(root, "support", "manifest.yaml"), "version: 1.0.0\nplatform_version: '*'\n")
 	writeToolFlowDataFixtureFile(t, filepath.Join(root, "support", "schema.yaml"), "stages: []\n")
-	writeToolFlowDataFixtureFile(t, filepath.Join(root, "support", "entities.yaml"), "support_state:\n  support_id: string\n")
+	writeToolFlowDataFixtureFile(t, filepath.Join(root, "support", "state.yaml"), "support_id: string\n")
 	writeToolFlowDataFixtureFile(t, filepath.Join(root, "support", "agents.yaml"), fmt.Sprintf(`
 factory-cto:
   id: public-factory-cto

@@ -65,7 +65,7 @@ func VerifyNativeWorkflowJoinUsesSelectedStoreScheduleOwnerOnBothStoresForTest(t
 			root := runtimecorrelation.RunIDFromContext(ctx)
 			if err := fixture.Construct(ctx, materializedWorkflowInstanceForSource(t, pc.SemanticSource(), ctx, WorkflowInstance{
 				InstanceID: root, StorageRef: root, EntityID: root, WorkflowName: ".", WorkflowVersion: bundle.WorkflowVersion(),
-				CurrentState: "dispatching", Fields: map[string]any{"expected": []any{"a", "b"}}, EntityType: "test_entity",
+				CurrentState: "dispatching", Fields: map[string]any{"expected": []any{"a", "b"}}, EntityType: "state",
 			})); err != nil {
 				t.Fatalf("construct explicit parent component: %v", err)
 			}
@@ -74,7 +74,7 @@ func VerifyNativeWorkflowJoinUsesSelectedStoreScheduleOwnerOnBothStoresForTest(t
 			if err := fixture.Construct(ctx, materializedWorkflowInstanceForSource(t, pc.SemanticSource(), ctx, WorkflowInstance{
 				InstanceID: strings.TrimPrefix(path, "orders/"), StorageRef: path, WorkflowName: "orders", WorkflowVersion: bundle.WorkflowVersion(),
 				CurrentState: "awaiting", EnteredStageAt: time.Now().UTC(), Fields: map[string]any{"expected": []any{"a"}, "instance_key": strings.TrimPrefix(path, "orders/")},
-				EntityType: "test_entity",
+				EntityType: "state",
 			})); err != nil {
 				t.Fatal(err)
 			}
@@ -114,7 +114,7 @@ func VerifyNativeWorkflowJoinSchedulePreservesMockExecutionModeOnBothStoresForTe
 			root := runtimecorrelation.RunIDFromContext(ctx)
 			if err := fixture.Construct(ctx, materializedWorkflowInstanceForSource(t, pc.SemanticSource(), ctx, WorkflowInstance{
 				InstanceID: root, StorageRef: root, EntityID: root, WorkflowName: ".", WorkflowVersion: bundle.WorkflowVersion(),
-				CurrentState: "dispatching", Fields: map[string]any{"expected": []any{"a", "b"}}, EntityType: "test_entity",
+				CurrentState: "dispatching", Fields: map[string]any{"expected": []any{"a", "b"}}, EntityType: "state",
 			})); err != nil {
 				t.Fatalf("construct explicit parent component: %v", err)
 			}
@@ -124,7 +124,7 @@ func VerifyNativeWorkflowJoinSchedulePreservesMockExecutionModeOnBothStoresForTe
 			if err := fixture.Construct(ctx, materializedWorkflowInstanceForSource(t, pc.SemanticSource(), ctx, WorkflowInstance{
 				InstanceID: strings.TrimPrefix(path, "orders/"), StorageRef: path, WorkflowName: "orders", WorkflowVersion: bundle.WorkflowVersion(),
 				CurrentState: "dispatching", EnteredStageAt: enteredAt, Fields: map[string]any{"expected": []any{"a"}, "instance_key": strings.TrimPrefix(path, "orders/")},
-				EntityType: "test_entity",
+				EntityType: "state",
 			})); err != nil {
 				t.Fatal(err)
 			}
@@ -158,7 +158,7 @@ func VerifyNativeArmWorkflowJoinPersistsActivationAndScheduleAtomicallyForTest(t
 			root := runtimecorrelation.RunIDFromContext(ctx)
 			if err := fixture.Construct(ctx, materializedWorkflowInstanceForSource(t, pc.SemanticSource(), ctx, WorkflowInstance{
 				InstanceID: root, StorageRef: root, EntityID: root, WorkflowName: ".", WorkflowVersion: bundle.WorkflowVersion(),
-				CurrentState: "dispatching", Fields: map[string]any{"expected": []any{"a", "b"}}, EntityType: "test_entity",
+				CurrentState: "dispatching", Fields: map[string]any{"expected": []any{"a", "b"}}, EntityType: "state",
 			})); err != nil {
 				t.Fatalf("construct explicit parent component: %v", err)
 			}
@@ -166,7 +166,7 @@ func VerifyNativeArmWorkflowJoinPersistsActivationAndScheduleAtomicallyForTest(t
 			if err := fixture.Construct(ctx, materializedWorkflowInstanceForSource(t, pc.SemanticSource(), ctx, WorkflowInstance{
 				InstanceID: "order-1", StorageRef: "orders/order-1", WorkflowName: "orders", WorkflowVersion: "1.0.0",
 				CurrentState: "awaiting", EnteredStageAt: time.Now().UTC(), Fields: map[string]any{"expected": tc.members, "instance_key": "order-1"},
-				EntityType: "test_entity",
+				EntityType: "state",
 			})); err != nil {
 				t.Fatal(err)
 			}
@@ -222,14 +222,14 @@ func VerifyNativeArmWorkflowJoinPostgresParityForTest(t *testing.T, open pipelin
 			root := runtimecorrelation.RunIDFromContext(ctx)
 			if err := fixture.Construct(ctx, materializedWorkflowInstanceForSource(t, pc.SemanticSource(), ctx, WorkflowInstance{
 				InstanceID: root, StorageRef: root, EntityID: root, WorkflowName: ".", WorkflowVersion: pc.SemanticSource().WorkflowVersion(),
-				CurrentState: "dispatching", Fields: map[string]any{"expected": []any{"a", "b"}}, EntityType: "test_entity",
+				CurrentState: "dispatching", Fields: map[string]any{"expected": []any{"a", "b"}}, EntityType: "state",
 			})); err != nil {
 				t.Fatalf("construct explicit parent component: %v", err)
 			}
 			path := "orders/" + uuid.NewString()
 			entityID := FlowInstanceEntityID(path)
 			if err := fixture.Construct(ctx, materializedWorkflowInstanceForSource(t, pc.SemanticSource(), ctx, WorkflowInstance{InstanceID: strings.TrimPrefix(path, "orders/"), StorageRef: path, WorkflowName: "orders", WorkflowVersion: "1.0.0", CurrentState: "awaiting", EnteredStageAt: time.Now().UTC(), Fields: map[string]any{"expected": tc.members, "instance_key": strings.TrimPrefix(path, "orders/")},
-				EntityType: "test_entity"})); err != nil {
+				EntityType: "state"})); err != nil {
 				t.Fatal(err)
 			}
 			if err := applyTestInitialEntryEffect(ctx, pc, testWorkflowInstanceRoute(path), entityID); err != nil {
@@ -267,7 +267,7 @@ func VerifyNativeWorkflowJoinCountWaitsDespiteEmptyStateMembersOnBothStoresForTe
 			root := runtimecorrelation.RunIDFromContext(ctx)
 			if err := fixture.Construct(ctx, materializedWorkflowInstanceForSource(t, pc.SemanticSource(), ctx, WorkflowInstance{
 				InstanceID: root, StorageRef: root, EntityID: root, WorkflowName: ".", WorkflowVersion: bundle.WorkflowVersion(),
-				CurrentState: "dispatching", Fields: map[string]any{"expected": []any{"a", "b"}}, EntityType: "test_entity",
+				CurrentState: "dispatching", Fields: map[string]any{"expected": []any{"a", "b"}}, EntityType: "state",
 			})); err != nil {
 				t.Fatalf("construct explicit parent component: %v", err)
 			}
@@ -276,7 +276,7 @@ func VerifyNativeWorkflowJoinCountWaitsDespiteEmptyStateMembersOnBothStoresForTe
 			if err := fixture.Construct(ctx, materializedWorkflowInstanceForSource(t, pc.SemanticSource(), ctx, WorkflowInstance{
 				InstanceID: strings.TrimPrefix(path, "orders/"), StorageRef: path, WorkflowName: "orders", WorkflowVersion: bundle.WorkflowVersion(),
 				CurrentState: "awaiting", EnteredStageAt: time.Now().UTC(), Fields: map[string]any{"expected": []any{}, "instance_key": strings.TrimPrefix(path, "orders/")},
-				EntityType: "test_entity",
+				EntityType: "state",
 			})); err != nil {
 				t.Fatal(err)
 			}
@@ -331,7 +331,7 @@ func VerifyNativeWorkflowJoinDurableIdentityIncludesStageOnBothStoresForTest(t *
 			root := runtimecorrelation.RunIDFromContext(ctx)
 			if err := fixture.Construct(ctx, materializedWorkflowInstanceForSource(t, pc.SemanticSource(), ctx, WorkflowInstance{
 				InstanceID: root, StorageRef: root, EntityID: root, WorkflowName: ".", WorkflowVersion: bundle.WorkflowVersion(),
-				CurrentState: "dispatching", Fields: map[string]any{"expected": []any{"a", "b"}}, EntityType: "test_entity",
+				CurrentState: "dispatching", Fields: map[string]any{"expected": []any{"a", "b"}}, EntityType: "state",
 			})); err != nil {
 				t.Fatalf("construct explicit parent component: %v", err)
 			}
@@ -340,7 +340,7 @@ func VerifyNativeWorkflowJoinDurableIdentityIncludesStageOnBothStoresForTest(t *
 			if err := fixture.Construct(ctx, materializedWorkflowInstanceForSource(t, pc.SemanticSource(), ctx, WorkflowInstance{
 				InstanceID: strings.TrimPrefix(path, "orders/"), StorageRef: path, WorkflowName: "orders", WorkflowVersion: bundle.WorkflowVersion(),
 				CurrentState: "awaiting", EnteredStageAt: time.Now().UTC(), Fields: map[string]any{"expected": []any{"a"}, "instance_key": strings.TrimPrefix(path, "orders/")},
-				EntityType: "test_entity",
+				EntityType: "state",
 			})); err != nil {
 				t.Fatal(err)
 			}
@@ -830,14 +830,14 @@ func VerifyNativeWorkflowJoinFailurePersistsCanonicalDeliveryOutcomeAndRuntimeLo
 			root := runtimecorrelation.RunIDFromContext(ctx)
 			if err := fixture.Construct(ctx, materializedWorkflowInstanceForSource(t, pc.SemanticSource(), ctx, WorkflowInstance{
 				InstanceID: root, StorageRef: root, EntityID: root, WorkflowName: ".", WorkflowVersion: bundle.WorkflowVersion(),
-				CurrentState: "dispatching", Fields: map[string]any{"expected": []any{"a", "b"}}, EntityType: "test_entity",
+				CurrentState: "dispatching", Fields: map[string]any{"expected": []any{"a", "b"}}, EntityType: "state",
 			})); err != nil {
 				t.Fatalf("construct explicit parent component: %v", err)
 			}
 			path := "orders/" + uuid.NewString()
 			entityID := FlowInstanceEntityID(path)
 			if err := fixture.Construct(ctx, materializedWorkflowInstanceForSource(t, pc.SemanticSource(), ctx, WorkflowInstance{InstanceID: strings.TrimPrefix(path, "orders/"), StorageRef: path, WorkflowName: "orders", WorkflowVersion: bundle.WorkflowVersion(), CurrentState: "dispatching", EnteredStageAt: time.Now().UTC(), Fields: map[string]any{"expected": []any{"a"}, "instance_key": strings.TrimPrefix(path, "orders/")},
-				EntityType: "test_entity"})); err != nil {
+				EntityType: "state"})); err != nil {
 				t.Fatal(err)
 			}
 			if err := applyTestInitialEntryEffect(ctx, pc, testWorkflowInstanceRoute(path), entityID); err != nil {
@@ -916,18 +916,19 @@ func workflowJoinLifecycleBundleWithOptions(t *testing.T, review bool, loop stri
 func workflowJoinLifecycleFixtureFiles(review bool, loop string) map[string]string {
 	files := map[string]string{
 		"manifest.yaml":        "version: 1.0.0\nplatform_version: \">=0.7.0 <0.8.0\"\n",
-		"schema.yaml":          "stages: []\n",
-		"entities.yaml":        "test_entity: {}\n",
 		"orders/manifest.yaml": "version: 1.0.0\nplatform_version: \">=0.7.0 <0.8.0\"\n",
-		"orders/schema.yaml": `instance: instance_key
+		"schema.yaml":          "stages: []\n",
+
+		"orders/schema.yaml": `name: orders
+instance: instance_key
 stages:
   awaiting: {}
   dispatching: {}
   ready: {final: true}
   attention: {final: true}
 `,
-		"orders/entities.yaml": "test_entity:\n  instance_key: {type: text, _unused_reason: fixture instance identity}\n  expected: [text]\n",
-		"orders/types.yaml":    "types:\n  ItemResult:\n    ok: boolean\n  LineItem:\n    id: text\n",
+		"orders/state.yaml": "instance_key: text\nexpected: [text]\n",
+		"orders/types.yaml": "types:\n  ItemResult:\n    ok: boolean\n  LineItem:\n    id: text\n",
 		"orders/events.yaml": `item.completed:
   member_id: text
   result: ItemResult
@@ -1009,7 +1010,7 @@ join-node:
 	}
 	// Root and child executions use independently compiled declarations, even
 	// when the fixture deliberately gives them identical local names.
-	for _, name := range []string{"schema.yaml", "entities.yaml", "events.yaml", "types.yaml", "nodes.yaml"} {
+	for _, name := range []string{"schema.yaml", "state.yaml", "events.yaml", "types.yaml", "nodes.yaml"} {
 		files[name] = files["orders/"+name]
 	}
 	files["schema.yaml"] = strings.Replace(files["schema.yaml"], "instance: instance_key\n", "", 1)

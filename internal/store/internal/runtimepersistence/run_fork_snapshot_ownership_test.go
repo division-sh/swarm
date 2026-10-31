@@ -47,7 +47,7 @@ func newSnapshotOwnershipFixture(t *testing.T, backend eventRecordContractBacken
 		"schema.yaml":         "stages: []\n",
 		"owner/manifest.yaml": "version: 1.0.0\nplatform_version: '*'\n",
 		"owner/schema.yaml":   "instance: subject_id\nstages:\n  active: {}\n  ready: {}\n  later: {}\npins:\n  inputs:\n    - construct.requested\n",
-		"owner/entities.yaml": "review_item:\n  subject_id: text\n  entity_type: {type: text, initial: authored-not-owner}\n  value: text?\n",
+		"owner/state.yaml":    "subject_id: text\nentity_type: \"authored-not-owner\"\nvalue: text?\n",
 		"owner/events.yaml":   "construct.requested:\n",
 	}, nil, ownStoreTestAgentManager, nil)
 	f := snapshotOwnershipFixture{store: opened.store.(snapshotOwnershipStore), db: opened.db, ctx: construction.ctx, runID: runtimecorrelation.RunIDFromContext(construction.ctx)}
@@ -156,7 +156,7 @@ func TestRunForkSnapshotOwnershipMetadataBothStores(t *testing.T) {
 						InitialMaterialization: canonicalSnapshotOwnershipJSON(t, f.initialMaterialization),
 						FlowConfig:             canonicalSnapshotOwnershipJSON(t, f.state.Config),
 						Owner:                  runfork.RunForkMaterializedEntitySnapshotMetadataOwner, Source: runfork.RunForkMaterializedEntitySnapshotMetadataSourceFlowInstance,
-						FlowInstance: "owner/one", EntityType: "review_item", Slug: "snapshot-slug", Name: "Snapshot Name",
+						FlowInstance: "owner/one", EntityType: "state", Slug: "snapshot-slug", Name: "Snapshot Name",
 						ParentInstance: f.runID, InstanceKey: "one",
 						StageDefined: true, FlowTemplate: "owner", Mode: "template", Status: "active",
 						CreatedAt: f.state.CreatedAt, UpdatedAt: f.state.UpdatedAt, EnteredStateAt: f.state.EnteredStageAt,
@@ -315,7 +315,7 @@ func TestRunForkSnapshotOwnershipInvalidMetadataBothStores(t *testing.T) {
 								metadataEntityID, wantEntities = uuid.NewString(), 3
 								if _, err := f.store.SetupScenarioEntities(f.ctx, runtimepipeline.ScenarioSetupRequest{
 									RunID: f.runID, CreatedAt: importedAt,
-									Entities: []runtimepipeline.ScenarioSetupEntityRequest{{Alias: "empty", EntityID: metadataEntityID, FlowInstance: "owner/import", EntityType: "review_item", Fields: map[string]any{}}},
+									Entities: []runtimepipeline.ScenarioSetupEntityRequest{{Alias: "empty", EntityID: metadataEntityID, FlowInstance: "owner/import", EntityType: "state", Fields: map[string]any{}}},
 								}); err != nil {
 									t.Fatal(err)
 								}

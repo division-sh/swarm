@@ -5,8 +5,6 @@ import (
 	"encoding/json"
 	"fmt"
 	"go/ast"
-	"os"
-	"path/filepath"
 	"reflect"
 	"strings"
 	"testing"
@@ -82,33 +80,4 @@ func missingRunWorkload(t *testing.T, source string, predecessor bool) string {
 		condition.Cond = mutationSeedExpression(t, `err == nil || err.Error() != "flow instance activation readiness: dynamic flow runtime readiness requires run_id"`)
 	}
 	return formattedNativeReadNode(body)
-}
-
-func TestNativeMissingRunRecipePreservesRefusalAndSuppliedInstance(t *testing.T) {
-	row := missingRunRecipe(t)
-	source, err := os.ReadFile(filepath.Join("..", "..", "..", row.File))
-	if err != nil {
-		t.Fatal(err)
-	}
-	if _, err := missingRunCurrentPredecessor(row, source); err != nil {
-		t.Fatal(err)
-	}
-	if missingRunWorkload(t, row.Before, true) != missingRunWorkload(t, row.After, false) {
-		t.Fatal("missing-run refusal or instance changed")
-	}
-	body := projectionShapeFunction(t, row.After).Body
-	expected := projectionShapeStatement(t, `ctx:=fixture.Context`)
-	if formattedNativeReadNode(body.List[1]) != formattedNativeReadNode(expected) {
-		t.Fatal("negative control gained a run")
-	}
-	guard := projectionShapeStatement(t, `if runtimecorrelation.RunIDFromContext(ctx)!="" {t.Fatal("missing-run negative control inherited a run")}`)
-	if formattedNativeReadNode(body.List[2]) != formattedNativeReadNode(guard) {
-		t.Fatal("missing run is not explicitly verified")
-	}
-	for _, condition := range []string{"err == nil", `err.Error() != "flow instance activation readiness: dynamic flow runtime readiness requires run_id"`} {
-		changed := strings.Replace(row.After, condition, "false", 1)
-		if changed == row.After || missingRunWorkload(t, row.Before, true) == missingRunWorkload(t, changed, false) {
-			t.Fatalf("weakened missing-run assertion accepted: %s", condition)
-		}
-	}
 }

@@ -613,7 +613,7 @@ func TestDeliveryTargetWorkflowInstanceAvailabilityIsActiveOnly(t *testing.T) {
 	for _, testCase := range tests {
 		t.Run(testCase.name, func(t *testing.T) {
 			instance := WorkflowInstance{Status: testCase.status, CurrentState: testCase.state, TerminatedAt: testCase.terminated,
-				EntityType: "review_entity"}
+				EntityType: "state"}
 			if got := deliveryTargetWorkflowInstanceUnavailable(source, ".", instance); got != testCase.unavailable {
 				t.Fatalf("delivery target unavailable = %t, want %t for status=%q state=%q", got, testCase.unavailable, testCase.status, testCase.state)
 			}
@@ -650,7 +650,7 @@ func deliveryTargetOwnershipSource(t *testing.T) semanticview.Source {
 			"transitioner": deliveryTargetOwnershipNode("transitioner", runtimecontracts.SystemNodeEventHandler{AdvancesTo: "done"}),
 			"entityless":   deliveryTargetOwnershipNode("entityless", runtimecontracts.SystemNodeEventHandler{}),
 			"entity-reader": deliveryTargetOwnershipNode("entity-reader", runtimecontracts.SystemNodeEventHandler{
-				Condition: "entity.status == 'ready'",
+				Condition: "state.status == 'ready'",
 			}),
 			"pin-creator":  deliveryTargetOwnershipEventNode("pin-creator", "work.created", runtimecontracts.SystemNodeEventHandler{}),
 			"pin-selector": deliveryTargetOwnershipEventNode("pin-selector", "work.selected", runtimecontracts.SystemNodeEventHandler{Accumulate: &runtimecontracts.AccumulateSpec{Into: "items", From: "payload"}}),
@@ -669,7 +669,7 @@ func deliveryTargetOwnershipSource(t *testing.T) semanticview.Source {
 			Root: &root, ByID: map[string]*runtimecontracts.FlowContractView{".": &root, "review": &root.Children[0]},
 		},
 		FlowSchemas: map[string]runtimecontracts.FlowSchemaDocument{".": root.Schema, "review": flow.Schema},
-	}, "", map[string]string{"review": "review_entity"})
+	}, false, []string{"review"})
 	if err := runtimecontracts.CompileWorkflowSemantics(bundle); err != nil {
 		t.Fatalf("compile delivery-target ownership semantics: %v", err)
 	}
