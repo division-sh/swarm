@@ -209,6 +209,9 @@ func TestWhatsAppRuntimeConnectionFailedCloseRetainsPossessionAndWork(t *testing
 	f := newActiveInputFixture(t, "sqlite")
 	c := openRuntimeConnectionFixture(t, f)
 	connectRuntimeConnectionFixture(t, f, c)
+	if c.Closed() {
+		t.Fatal("live connection reported joined cleanup")
+	}
 	entered, finish := make(chan struct{}), make(chan struct{})
 	var once sync.Once
 	defer once.Do(func() { close(finish) })
@@ -226,7 +229,7 @@ func TestWhatsAppRuntimeConnectionFailedCloseRetainsPossessionAndWork(t *testing
 	if err := c.Close(canceled); !errors.Is(err, context.Canceled) {
 		t.Fatal("unjoined runtime connection reported a completed close", err)
 	}
-	if f.workOwner.ActiveCount() == 0 || c.state.database == nil || c.state.closed {
+	if c.Closed() || f.workOwner.ActiveCount() == 0 || c.state.database == nil || c.state.closed {
 		t.Fatal("failed SDK join dropped runtime or possession evidence")
 	}
 	other, err := openSessionState(context.Background(), f.basePath, f.operation.SessionAccount.ConnectionID, f.operation.SessionAccount.AccountRef)
@@ -242,7 +245,7 @@ func TestWhatsAppRuntimeConnectionFailedCloseRetainsPossessionAndWork(t *testing
 	}
 	ctx, stop := context.WithTimeout(context.Background(), 5*time.Second)
 	defer stop()
-	if err := c.Close(ctx); err != nil || f.workOwner.ActiveCount() != 0 {
+	if err := c.Close(ctx); err != nil || !c.Closed() || f.workOwner.ActiveCount() != 0 {
 		t.Fatal("complete cleanup did not release runtime responsibility", err)
 	}
 }

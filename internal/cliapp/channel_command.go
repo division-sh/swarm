@@ -532,7 +532,6 @@ func completeChannelOnboarding(ctx context.Context, client channelControlClient,
 	sharedAudienceAnnounced := false
 	acceptedAccount := ""
 	advancePending := opts.verb == "resume"
-	awaitLogin := false
 	now := time.Now
 	if opts.apiOptions.now != nil {
 		now = opts.apiOptions.now
@@ -547,7 +546,7 @@ func completeChannelOnboarding(ctx context.Context, client channelControlClient,
 		}
 		if opts.waitForPairing {
 			if channelPairingWaitRequired(result, pending) {
-				result, err = waitForChannelOnboardingPairing(ctx, client, result, opts, awaitLogin, progressOut, errOut)
+				result, err = waitForChannelOnboardingPairing(ctx, client, result, opts, progressOut, errOut)
 				if err != nil {
 					return channelOnboardingResult{}, err
 				}
@@ -557,7 +556,6 @@ func completeChannelOnboarding(ctx context.Context, client channelControlClient,
 			if err != nil {
 				return channelOnboardingResult{}, err
 			}
-			awaitLogin = previewPending
 			if previewPending {
 				continue
 			}
@@ -616,7 +614,7 @@ func channelPairingWaitRequired(result channelOnboardingResult, pending bool) bo
 		result.Connection != nil && result.Connection.Linked && (result.Readiness == nil || !result.Readiness.Ready)
 }
 
-func waitForChannelOnboardingPairing(ctx context.Context, client channelControlClient, current channelOnboardingResult, opts channelConnectOptions, awaitLogin bool, out, errOut io.Writer) (channelOnboardingResult, error) {
+func waitForChannelOnboardingPairing(ctx context.Context, client channelControlClient, current channelOnboardingResult, opts channelConnectOptions, out, errOut io.Writer) (channelOnboardingResult, error) {
 	poll := opts.apiOptions.channelConnectPoll
 	if poll <= 0 {
 		poll = 500 * time.Millisecond
@@ -643,7 +641,6 @@ func waitForChannelOnboardingPairing(ctx context.Context, client channelControlC
 			if err != nil {
 				return channelOnboardingResult{}, err
 			}
-			awaitLogin = false
 			continue
 		case !channelPairingWaitRequired(current, pending):
 			return current, nil
@@ -653,14 +650,15 @@ func waitForChannelOnboardingPairing(ctx context.Context, client channelControlC
 				return channelOnboardingResult{}, err
 			}
 			lastQR = current.Pairing.Code
-			awaitLogin = false
 		}
 		select {
 		case <-ctx.Done():
 			return channelOnboardingResult{}, returnCLIValidationError(errOut, errors.New("channel connection stopped"))
 		case <-ticker.C:
 		}
-		if pending && current.Pairing.Status != channelonboarding.PairingStatusPreparing && current.Pairing.Code == "" && (!awaitLogin || current.Pairing.Connected) {
+		// A paired socket needs the explicit login checkpoint; GET cannot dial
+		// its authenticated successor, even when the first checkpoint is pending.
+		if pending && current.Pairing.Status != channelonboarding.PairingStatusPreparing && current.Pairing.Code == "" {
 			break
 		}
 		var next channelOnboardingResult
