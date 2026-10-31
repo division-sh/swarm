@@ -384,7 +384,7 @@ func withSelectedTargetOwnerLookupScope(ctx context.Context, scope selectedTarge
 	return context.WithValue(ctx, selectedTargetOwnerLookupScopeKey{}, scope)
 }
 
-func (eb *EventBus) activeTargetDescriptors(ctx context.Context) ([]ActiveTargetDescriptor, bool, error) {
+func (eb *EventBus) targetOwnerCandidates(ctx context.Context) ([]runtimepipeline.DeliveryTargetOwnerCandidate, bool, error) {
 	eb.mu.RLock()
 	withoutSource := eb.semanticSource == nil
 	eb.mu.RUnlock()
@@ -403,7 +403,7 @@ func (eb *EventBus) activeTargetDescriptors(ctx context.Context) ([]ActiveTarget
 	if !present || !scope.lookup.SourceFact().Matches(fact) {
 		return nil, true, errors.New("target owners require their admitted source")
 	}
-	owners := make([]ActiveTargetDescriptor, 0, len(scope.observations))
+	owners := make([]runtimepipeline.DeliveryTargetOwnerCandidate, 0, len(scope.observations))
 	for _, observed := range scope.observations {
 		instance, err := observed.WorkflowInstance()
 		if err != nil {
@@ -414,79 +414,58 @@ func (eb *EventBus) activeTargetDescriptors(ctx context.Context) ([]ActiveTarget
 		if instance.StageDefined {
 			stage = instance.CurrentState
 		}
-		owners = append(owners, ActiveTargetDescriptor{
-			FlowID: identity.TemplateID, ID: identity.InstanceID, EntityID: identity.EntityID, FlowInstance: identity.InstancePath,
+		owners = append(owners, runtimepipeline.DeliveryTargetOwnerCandidate{
+			Route: events.RouteIdentity{FlowID: identity.TemplateID,
+				EntityID:     identity.EntityID,
+				FlowInstance: identity.InstancePath},
 			Availability: runtimepipeline.NewDeliveryTargetAvailability(stage, instance.Status, !instance.TerminatedAt.IsZero()),
 		})
 	}
 	return owners, true, nil
 }
 
-func activeTargetDescriptorsFromAgents(descriptors map[agentidentity.Identity]ActiveAgentDescriptor) []ActiveTargetDescriptor {
-	if len(descriptors) == 0 {
-		return nil
-	}
-	ordered := newOrderedActiveTargetDescriptors(make([]ActiveTargetDescriptor, 0, len(descriptors)))
-	for _, descriptor := range descriptors {
-		target := descriptor.TargetDescriptor()
-		if target.EntityID == "" {
-			continue
-		}
-		ordered.add(target)
-	}
-	return ordered.descriptors
+func normalizedTargetOwnerCandidate(candidate runtimepipeline.DeliveryTargetOwnerCandidate) runtimepipeline.DeliveryTargetOwnerCandidate {
+	candidate.Route = candidate.Route.Normalized()
+	return candidate
 }
 
-type activeTargetDescriptorKey struct {
-	id            string
-	entityID      string
-	flowInstance  string
-	materializing bool
-	availability  runtimepipeline.DeliveryTargetAvailability
+type orderedTargetOwnerCandidates struct {
+	candidates []runtimepipeline.DeliveryTargetOwnerCandidate
+	seen       map[runtimepipeline.DeliveryTargetOwnerCandidate]struct{}
 }
 
-type orderedActiveTargetDescriptors struct {
-	descriptors []ActiveTargetDescriptor
-	seen        map[activeTargetDescriptorKey]struct{}
+func targetOwnerCandidateKey(candidate runtimepipeline.DeliveryTargetOwnerCandidate) runtimepipeline.DeliveryTargetOwnerCandidate {
+	candidate = normalizedTargetOwnerCandidate(candidate)
+	candidate.Route.FlowID = ""
+	return candidate
 }
 
-func newOrderedActiveTargetDescriptors(initial []ActiveTargetDescriptor) orderedActiveTargetDescriptors {
-	ordered := orderedActiveTargetDescriptors{
-		descriptors: initial,
-		seen:        make(map[activeTargetDescriptorKey]struct{}, len(initial)),
-	}
-	for _, descriptor := range initial {
-		ordered.seen[activeTargetDescriptorKeyFor(descriptor)] = struct{}{}
+func newOrderedTargetOwnerCandidates(initial []runtimepipeline.DeliveryTargetOwnerCandidate) orderedTargetOwnerCandidates {
+	ordered := orderedTargetOwnerCandidates{candidates: initial, seen: make(map[runtimepipeline.DeliveryTargetOwnerCandidate]struct{}, len(initial))}
+	for _, candidate := range initial {
+		ordered.seen[targetOwnerCandidateKey(candidate)] = struct{}{}
 	}
 	return ordered
 }
 
-func activeTargetDescriptorKeyFor(descriptor ActiveTargetDescriptor) activeTargetDescriptorKey {
-	return activeTargetDescriptorKey{
-		id: strings.TrimSpace(descriptor.ID), entityID: strings.TrimSpace(descriptor.EntityID),
-		flowInstance:  strings.Trim(strings.TrimSpace(descriptor.FlowInstance), "/"),
-		materializing: descriptor.Materializing, availability: descriptor.Availability,
-	}
-}
-
-func (o *orderedActiveTargetDescriptors) add(descriptor ActiveTargetDescriptor) {
-	descriptor = descriptor.Normalized()
-	if descriptor.FlowInstance == "" && descriptor.EntityID == "" {
+func (o *orderedTargetOwnerCandidates) add(candidate runtimepipeline.DeliveryTargetOwnerCandidate) {
+	candidate = normalizedTargetOwnerCandidate(candidate)
+	if candidate.Route.FlowInstance == "" && candidate.Route.EntityID == "" {
 		return
 	}
-	key := activeTargetDescriptorKeyFor(descriptor)
+	key := targetOwnerCandidateKey(candidate)
 	if _, exists := o.seen[key]; exists {
-		if descriptor.FlowID != "" {
-			for index := range o.descriptors {
-				if activeTargetDescriptorKeyFor(o.descriptors[index]) == key {
-					o.descriptors[index].FlowID = descriptor.FlowID
+		if candidate.Route.FlowID != "" {
+			for index := range o.candidates {
+				if targetOwnerCandidateKey(o.candidates[index]) == key {
+					o.candidates[index].Route.FlowID = candidate.Route.FlowID
 				}
 			}
 		}
 		return
 	}
 	o.seen[key] = struct{}{}
-	o.descriptors = append(o.descriptors, descriptor)
+	o.candidates = append(o.candidates, candidate)
 }
 
 // RegisterRuntimeActiveAgentDescriptor adds in-memory active-agent metadata for

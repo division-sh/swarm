@@ -39,14 +39,17 @@ func TestTargetOwnerProjectionConsumesOnlyScopedIndexObservations(t *testing.T) 
 	if err != nil || !bounded || len(scope.observations) != 2 {
 		t.Fatalf("native target scope lost exact constructed owners: %+v bounded=%t err=%v", scope, bounded, err)
 	}
-	owners, available, err := bus.activeTargetDescriptors(withSelectedTargetOwnerLookupScope(ctx, scope))
+	owners, available, err := bus.targetOwnerCandidates(withSelectedTargetOwnerLookupScope(ctx, scope))
 	if err != nil || !available || len(owners) != 2 {
 		t.Fatalf("target projection consulted a parallel descriptor reader: %+v available=%t err=%v", owners, available, err)
 	}
-	candidates := (selectedRunTargetOwnerProjection{descriptors: owners}).targetOwnerCandidates()
+	candidates, err := (selectedRunTargetOwnerProjection{candidates: owners}).decisionTargetCandidates(events.RouteIdentity{})
+	if err != nil {
+		t.Fatal(err)
+	}
 	for i, observed := range scope.observations {
 		identity := observed.Identity()
-		if owners[i].FlowID != identity.TemplateID || owners[i].FlowInstance != identity.InstancePath || owners[i].EntityID != identity.EntityID {
+		if owners[i].Route.FlowID != identity.TemplateID || owners[i].Route.FlowInstance != identity.InstancePath || owners[i].Route.EntityID != identity.EntityID {
 			t.Fatalf("target owner lost its admitted declaration/coordinate: %+v != %+v", owners[i], identity)
 		}
 		if candidates[i].Route.FlowID != identity.TemplateID || candidates[i].Route.FlowInstance != identity.InstancePath || candidates[i].Route.EntityID != identity.EntityID {
@@ -58,14 +61,14 @@ func TestTargetOwnerProjectionConsumesOnlyScopedIndexObservations(t *testing.T) 
 	if err != nil || !bounded {
 		t.Fatal(err)
 	}
-	owners, available, err = bus.activeTargetDescriptors(withSelectedTargetOwnerLookupScope(ctx, empty))
+	owners, available, err = bus.targetOwnerCandidates(withSelectedTargetOwnerLookupScope(ctx, empty))
 	if err != nil || !available || len(owners) != 0 {
 		t.Fatalf("source declaration invented existing target: %+v available=%t err=%v", owners, available, err)
 	}
-	if _, _, err := bus.activeTargetDescriptors(ctx); err == nil {
+	if _, _, err := bus.targetOwnerCandidates(ctx); err == nil {
 		t.Fatal("unbounded target inventory substituted for compiled scope")
 	}
-	if _, _, err := bus.activeTargetDescriptors(withSelectedTargetOwnerLookupScope(correlation.WithInboundEvent(context.Background(), event), scope)); err == nil {
+	if _, _, err := bus.targetOwnerCandidates(withSelectedTargetOwnerLookupScope(correlation.WithInboundEvent(context.Background(), event), scope)); err == nil {
 		t.Fatal("target lookup accepted missing admitted source")
 	}
 }
@@ -85,7 +88,7 @@ func TestControlPublicationKeepsEmptyCompiledTargetScope(t *testing.T) {
 	if len(reader.requested) != 1 || reader.requested[0].RunID() != event.RunID() || !reader.requested[0].SourceFact().Matches(scope.lookup.SourceFact()) {
 		t.Fatalf("control lookup lost exact source/run admission: %+v", reader.requested)
 	}
-	owners, available, err := bus.activeTargetDescriptors(withSelectedTargetOwnerLookupScope(ctx, scope))
+	owners, available, err := bus.targetOwnerCandidates(withSelectedTargetOwnerLookupScope(ctx, scope))
 	if err != nil || !available || len(owners) != 0 {
 		t.Fatalf("empty scope must be known absence, not unbounded target discovery: %+v available=%t err=%v", owners, available, err)
 	}
@@ -121,7 +124,7 @@ func TestDirectPlanningPropagatesScopedIndexFailures(t *testing.T) {
 			loadActiveAgentDescriptors: func(context.Context) (map[agentidentity.Identity]ActiveAgentDescriptor, bool, error) {
 				return nil, false, nil
 			},
-			loadActiveTargetDescriptors: bus.activeTargetDescriptors,
+			loadTargetOwnerCandidates: bus.targetOwnerCandidates,
 		},
 	}
 	for _, failure := range []error{context.Canceled, errors.New("direct index failure"), errors.Join(context.Canceled, errors.New("independent direct index failure"))} {
@@ -156,16 +159,16 @@ func TestMaterializedTargetProjectionUsesExactIndexScope(t *testing.T) {
 		FlowID: identity.TemplateID, FlowInstance: identity.InstancePath, EntityID: identity.EntityID,
 	}}}
 	projection, err := bus.deliveryPlanner.materializedTargetOwnerProjection(ctx, event, &plan)
-	if err != nil || len(projection.descriptors) != 1 || projection.descriptors[0].EntityID != identity.EntityID {
-		t.Fatalf("materialized receiver lost exact native owner: %+v err=%v", projection.descriptors, err)
+	if err != nil || len(projection.candidates) != 1 || projection.candidates[0].Route.EntityID != identity.EntityID {
+		t.Fatalf("materialized receiver lost exact native owner: %+v err=%v", projection.candidates, err)
 	}
 	if len(reader.requested) != 1 || len(reader.requested[0].FlowIDs()) != 0 || len(reader.requested[0].Coordinates()) != 1 || reader.requested[0].Coordinates()[0].Key() != observed.Owner().Key() {
 		t.Fatalf("materializer escaped exact receiver scope: %+v", reader.requested)
 	}
 	reader.observations = nil
 	projection, err = bus.deliveryPlanner.materializedTargetOwnerProjection(ctx, event, &plan)
-	if err != nil || len(projection.descriptors) != 0 {
-		t.Fatalf("materializer substituted declarations for native absence: %+v err=%v", projection.descriptors, err)
+	if err != nil || len(projection.candidates) != 0 {
+		t.Fatalf("materializer substituted declarations for native absence: %+v err=%v", projection.candidates, err)
 	}
 	for _, failure := range []error{context.Canceled, errors.New("materializer index failure"), errors.Join(context.Canceled, errors.New("independent materializer failure"))} {
 		reader.err = failure

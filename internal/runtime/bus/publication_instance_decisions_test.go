@@ -49,8 +49,10 @@ func publicationDecisionFixture(t *testing.T) (selectedRunTargetOwnerProjection,
 	projection := selectedRunTargetOwnerProjection{context: ctx, instances: reader, source: source, required: true}
 	for _, observed := range reader.observations {
 		identity := observed.Identity()
-		projection.descriptors = append(projection.descriptors, ActiveTargetDescriptor{
-			FlowID: identity.TemplateID, ID: identity.InstanceID, FlowInstance: identity.InstancePath, EntityID: identity.EntityID,
+		projection.candidates = append(projection.candidates, pipeline.DeliveryTargetOwnerCandidate{
+			Route: events.RouteIdentity{FlowID: identity.TemplateID,
+				FlowInstance: identity.InstancePath,
+				EntityID:     identity.EntityID},
 		})
 	}
 	identity := reader.observations[1].Identity()

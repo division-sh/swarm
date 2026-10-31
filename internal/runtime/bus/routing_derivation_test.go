@@ -319,7 +319,7 @@ func exactSubscriptionRouteSource(t *testing.T, nodeSubscription string, agentSu
 }
 
 type routePersistenceTestStore struct {
-	targetOwners []runtimebus.ActiveTargetDescriptor
+	targetOwners []runtimepipeline.DeliveryTargetOwnerCandidate
 	deliveries   map[string][]string
 }
 
@@ -456,8 +456,9 @@ func TestEventBusIndexedFlowInstanceDeliversDeclaredAgentSubscriber(t *testing.T
 	}))
 	routeIdentity := runtimeflowidentity.DeriveRoute("operating", "11111111-1111-4111-8111-111111111111")
 	identity := testRunScopedFlowRoute(routeIdentity)
-	store.targetOwners = []runtimebus.ActiveTargetDescriptor{{
-		ID: "operating-owner", FlowInstance: routeIdentity.InstancePath, EntityID: runtimeflowidentity.EntityID(routeIdentity.InstancePath),
+	store.targetOwners = []runtimepipeline.DeliveryTargetOwnerCandidate{{
+		Route: events.RouteIdentity{FlowInstance: routeIdentity.InstancePath,
+			EntityID: runtimeflowidentity.EntityID(routeIdentity.InstancePath)},
 	}}
 	agentIdentity, admission := routeMaterializationAgentRoute(t, source, identity)
 	agentPlan, err := agentIdentity.Plan()
