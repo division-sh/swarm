@@ -123,7 +123,7 @@ func TestWhatsAppRuntimeIncomingPublishesBeforeAcknowledgementBothStores(t *test
 				DeploymentChannelOperations() channelonboarding.OperationStore
 			}).DeploymentChannelOperations()
 			open := func() *RuntimeConnection {
-				c, err := OpenDeploymentConnection(f.ctx, DeploymentConnectionOptions{Directory: f.basePath, Store: f.selected,
+				c, err := OpenDeploymentConnection(context.Background(), DeploymentConnectionOptions{Directory: f.basePath, Store: f.selected,
 					Operations: operations, OperationID: f.operation.OperationID, Principal: principal, Process: process,
 					Plan: f.channel, Trigger: f.trigger, RegisteredBusiness: selector})
 				if err != nil {
