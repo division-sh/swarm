@@ -198,7 +198,7 @@ func renderDeploymentRegistration(out, errOut io.Writer, output cliOutputOptions
 }
 
 func writeChannelAccountNextSteps(out io.Writer) {
-	fmt.Fprintln(out, "To use it, set operator_account in a flow's policy.yaml and restart serve.")
+	fmt.Fprintln(out, "To use it, set operator_account in a flow's policy.yaml. Telegram bots connected or newly held while serve runs receive after a serve restart; WhatsApp receives live.")
 	fmt.Fprintln(out, "Next: swarm channel list")
 }
 
