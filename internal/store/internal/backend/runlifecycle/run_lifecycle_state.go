@@ -366,8 +366,7 @@ func (s *RunLifecyclePostgresOwner) markRunTerminalStateTx(
 		SET status = $2,
 		    failure = $3::jsonb,
 		    ended_at = $4,
-		    continued_as_run_id = NULLIF($5, '')::uuid,
-		    completion_due_at = NULL
+		    continued_as_run_id = NULLIF($5, '')::uuid
 		WHERE run_id = $1::uuid
 		  AND status IN (`+runLifecycleActiveStateSQLValues+`)
 	`, request.RunID, string(request.State), failureJSON, request.EndedAt.UTC(), strings.TrimSpace(request.ContinuedAsRunID))
@@ -378,6 +377,9 @@ func (s *RunLifecyclePostgresOwner) markRunTerminalStateTx(
 		return runtimerunlifecycle.Snapshot{}, "", rowsErr
 	} else if rows != 1 {
 		return runtimerunlifecycle.Snapshot{}, "", errors.New("PostgreSQL terminal run lifecycle lost locked transition")
+	}
+	if err := clearPostgresCompletionCandidateTx(ctx, tx, request.RunID); err != nil {
+		return runtimerunlifecycle.Snapshot{}, "", err
 	}
 	if err := mutationprotocol.InvalidateActiveRunSource(ctx, tx, request.RunID); err != nil {
 		return runtimerunlifecycle.Snapshot{}, "", err
@@ -466,8 +468,7 @@ func (s *RunLifecycleSQLiteOwner) markRunTerminalStateTx(
 		SET status = ?,
 		    failure = ?,
 		    ended_at = ?,
-		    continued_as_run_id = NULLIF(?, ''),
-		    completion_due_at = NULL
+		    continued_as_run_id = NULLIF(?, '')
 		WHERE run_id = ?
 		  AND status IN (`+runLifecycleActiveStateSQLValues+`)
 	`, string(request.State), failureJSON, request.EndedAt.UTC(), strings.TrimSpace(request.ContinuedAsRunID), request.RunID)
@@ -478,6 +479,9 @@ func (s *RunLifecycleSQLiteOwner) markRunTerminalStateTx(
 		return runtimerunlifecycle.Snapshot{}, "", rowsErr
 	} else if rows != 1 {
 		return runtimerunlifecycle.Snapshot{}, "", errors.New("SQLite terminal run lifecycle lost locked transition")
+	}
+	if err := clearSQLiteCompletionCandidateTx(ctx, tx, request.RunID); err != nil {
+		return runtimerunlifecycle.Snapshot{}, "", err
 	}
 	if err := mutationprotocol.InvalidateActiveRunSource(ctx, tx, request.RunID); err != nil {
 		return runtimerunlifecycle.Snapshot{}, "", err

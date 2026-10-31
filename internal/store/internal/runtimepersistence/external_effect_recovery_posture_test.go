@@ -490,11 +490,8 @@ func readExternalEffectRecoverySnapshot(t *testing.T, db *sql.DB, sqlite bool, a
 		`SELECT COUNT(*) FROM author_activity_occurrences WHERE source_owner='runtime_external_effect_attempts' AND source_identity LIKE $1 || ':%'`,
 	)
 	if strings.TrimSpace(attempt.RunID) != "" {
-		runQuery := `SELECT status, COALESCE(CAST(completion_due_at AS TEXT), ''), completion_revision FROM runs WHERE run_id=?`
-		if !sqlite {
-			runQuery = `SELECT status, COALESCE(completion_due_at::text, ''), completion_revision FROM runs WHERE run_id=$1::uuid`
-		}
-		if err := db.QueryRow(runQuery, attempt.RunID).Scan(&snapshot.RunStatus, &snapshot.CompletionDueAt, &snapshot.CompletionRevision); err != nil {
+		var bundle string
+		if err := db.QueryRow(completionEvidenceNativeSnapshotSQL, attempt.RunID).Scan(&snapshot.RunStatus, &snapshot.CompletionRevision, &snapshot.CompletionDueAt, &bundle); err != nil {
 			t.Fatalf("read recovery run snapshot for %s: %v", attempt.AttemptID, err)
 		}
 	}

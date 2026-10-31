@@ -455,57 +455,18 @@ func (s *LLMSQLiteOwner) ResetAll(ctx context.Context, metadata runtimesessions.
 	if err := s.requireCurrentSchema(); err != nil {
 		return runtimesessions.ResetSummary{}, err
 	}
-	source := strings.TrimSpace(metadata.Source)
-	now := s.now()
-	result := mutationprotocol.RunSQLite(ctx, s.backend, "sqlite session reset", mutationprotocol.RevisionOnly, mutationprotocol.Ordinary, nil, s.runLifecycleCandidates, func(ctx context.Context, attempt *mutationprotocol.Attempt) (runtimesessions.ResetSummary, error) {
+	result := mutationprotocol.RunSQLite(ctx, s.backend, "sqlite session reset", mutationprotocol.RevisionOnly, mutationprotocol.Ordinary, nil, s.runLifecycleCandidates, func(sqlCtx context.Context, attempt *mutationprotocol.Attempt) (runtimesessions.ResetSummary, error) {
 		var summary runtimesessions.ResetSummary
-		err := attempt.WithSQL(ctx, func(ctx context.Context, tx *sql.Tx) error {
-			rows, err := tx.QueryContext(ctx, `SELECT session_id, run_id, agent_id, flow_instance, status FROM agent_sessions WHERE status IN ('active','suspended') ORDER BY run_id, agent_id, flow_instance, session_id`)
-			if err != nil {
-				return err
-			}
-			defer rows.Close()
-			for rows.Next() {
-				var d runtimesessions.ResetDisposition
-				if err := rows.Scan(&d.SessionID, &d.RunID, &d.AgentID, &d.FlowInstance, &d.PreviousStatus); err != nil {
-					return err
-				}
-				d.TerminationReason = runtimesessions.TerminationReasonOrphaned.String()
-				d.TerminationDetail = source
-				summary.OrphanedSessions = append(summary.OrphanedSessions, d)
-			}
-			if err := rows.Err(); err != nil {
-				return err
-			}
-			if _, err = tx.ExecContext(ctx, `UPDATE agent_sessions SET status='terminated', termination_reason=?, termination_detail=?, terminated_at=COALESCE(terminated_at,?), lease_holder=NULL, lease_grant_id=NULL, lease_expires_at=NULL, updated_at=? WHERE status IN ('active','suspended')`, runtimesessions.TerminationReasonOrphaned.String(), sqliteNullString(source), now, now); err != nil {
-				return err
-			}
-			seenRuns := make(map[string]struct{}, len(summary.OrphanedSessions))
-			for _, disposition := range summary.OrphanedSessions {
-				if err := addAgentSessionFacts(attempt, disposition.RunID, disposition.SessionID); err != nil {
-					return err
-				}
-				if _, exists := seenRuns[disposition.RunID]; exists {
-					continue
-				}
-				seenRuns[disposition.RunID] = struct{}{}
-				if _, err := attempt.RequestCompletion(ctx, s.lifecycle, disposition.RunID, nil); err != nil {
-					return err
-				}
-			}
-			return nil
+		err := attempt.WithSQL(sqlCtx, func(sqlCtx context.Context, tx *sql.Tx) (err error) {
+			summary, err = resetSessionsTx(sqlCtx, tx, false, attempt, s.lifecycle, strings.TrimSpace(metadata.Source), s.now())
+			return err
 		})
 		return summary, err
 	})
-	if result.Err() != nil {
-		if !result.Acknowledged() {
-			return runtimesessions.ResetSummary{}, fmt.Errorf("reset sqlite live sessions: %w", result.Err())
-		}
-		summary, _ := result.Value()
-		return summary, fmt.Errorf("reset sqlite live sessions: %w", result.Err())
+	if summary, ok := result.Value(); ok {
+		return summary, result.Err()
 	}
-	summary, _ := result.Value()
-	return summary, nil
+	return runtimesessions.ResetSummary{}, result.Err()
 }
 
 func (s *LLMSQLiteOwner) SetNowFnForTest(nowFn func() time.Time) {

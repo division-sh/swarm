@@ -127,16 +127,20 @@ func expectSelectedCompletionMembership(mock sqlmock.Sqlmock, postgres, selected
 }
 
 func expectSelectedCompletionRunLock(mock sqlmock.Sqlmock, postgres bool, state string, revision int64, dueAt, now time.Time) {
-	rows := sqlmock.NewRows([]string{"status", "bundle_hash", "completion_revision", "completion_due_at"})
-	query := `SELECT LOWER(status), bundle_hash, completion_revision, completion_due_at FROM runs WHERE run_id = ?`
+	rows := sqlmock.NewRows([]string{"status", "bundle_hash"})
+	query := `SELECT LOWER(status), bundle_hash FROM runs WHERE run_id = ?`
 	if postgres {
-		query = `SELECT LOWER(status), bundle_hash, completion_revision, completion_due_at, clock_timestamp() FROM runs WHERE run_id = $1::uuid FOR UPDATE`
-		rows = sqlmock.NewRows([]string{"status", "bundle_hash", "completion_revision", "completion_due_at", "now"}).
-			AddRow(state, selectedCompletionBundle, revision, dueAt, now)
+		query = `SELECT LOWER(status), bundle_hash, clock_timestamp() FROM runs WHERE run_id = $1::uuid FOR UPDATE`
+		rows = sqlmock.NewRows([]string{"status", "bundle_hash", "now"}).AddRow(state, selectedCompletionBundle, now)
 	} else {
-		rows.AddRow(state, selectedCompletionBundle, revision, dueAt.Format(time.RFC3339Nano))
+		rows.AddRow(state, selectedCompletionBundle)
 	}
 	mock.ExpectQuery(regexp.QuoteMeta(query)).WithArgs(selectedCompletionRunID).WillReturnRows(rows)
+}
+
+func expectSelectedCompletionEvidence(mock sqlmock.Sqlmock, revision int64, due driver.Value) {
+	mock.ExpectQuery(`SELECT COALESCE\(c.revision,0\), CASE WHEN consumed.run_id IS NULL THEN c.due_at ELSE NULL END`).
+		WithArgs(selectedCompletionRunID).WillReturnRows(sqlmock.NewRows([]string{"revision", "due"}).AddRow(revision, due))
 }
 
 func executeSelectedCompletionTest(ctx context.Context, tx *sql.Tx, postgres bool, candidate runtimerunlifecycle.Candidate, owner runAuthorityOwner, now time.Time) (runtimerunlifecycle.CompletionResult, error) {
@@ -185,20 +189,16 @@ func TestSelectedCompletionRequestDerivesModeFromBindingBothDialects(t *testing.
 						}
 					}
 					if postgres {
-						mock.ExpectQuery(`SELECT LOWER\(status\), bundle_hash, completion_due_at, completion_revision, clock_timestamp\(\).*`).WithArgs(selectedCompletionRunID).
-							WillReturnRows(sqlmock.NewRows([]string{"state", "bundle", "due", "revision", "now"}).AddRow("running", selectedCompletionBundle, due, 3, now))
+						mock.ExpectQuery(`SELECT LOWER\(status\), bundle_hash, clock_timestamp\(\).*FOR SHARE`).WithArgs(selectedCompletionRunID).
+							WillReturnRows(sqlmock.NewRows([]string{"state", "bundle", "now"}).AddRow("running", selectedCompletionBundle, now))
 					} else {
-						mock.ExpectQuery(`SELECT LOWER\(status\), bundle_hash, completion_due_at, completion_revision.*`).WithArgs(selectedCompletionRunID).
-							WillReturnRows(sqlmock.NewRows([]string{"state", "bundle", "due", "revision"}).AddRow("running", selectedCompletionBundle, due, 3))
+						mock.ExpectQuery(`SELECT LOWER\(status\), bundle_hash FROM runs`).WithArgs(selectedCompletionRunID).
+							WillReturnRows(sqlmock.NewRows([]string{"state", "bundle"}).AddRow("running", selectedCompletionBundle))
 					}
 					expectSelectedCompletionMembership(mock, postgres, selected)
+					expectSelectedCompletionEvidence(mock, 3, due)
 					if !already {
-						if postgres {
-							mock.ExpectQuery(`UPDATE runs`).WithArgs(selectedCompletionRunID, now, "running").
-								WillReturnRows(sqlmock.NewRows([]string{"run_id", "bundle", "revision", "due"}).AddRow(selectedCompletionRunID, selectedCompletionBundle, 4, now))
-						} else {
-							mock.ExpectExec(`UPDATE runs`).WithArgs(now, selectedCompletionRunID, "running").WillReturnResult(sqlmock.NewResult(0, 1))
-						}
+						mock.ExpectExec(`INSERT INTO run_completion_evidence`).WithArgs(selectedCompletionRunID, int64(4), now).WillReturnResult(sqlmock.NewResult(0, 1))
 					}
 					var result runtimerunlifecycle.CandidateRequestResult
 					var err error
@@ -374,6 +374,7 @@ func TestSelectedCompletionFreshFencePreservesRearmAndOrdinaryBehavior(t *testin
 				now := candidate.DueAt.Add(-time.Second)
 				expectSelectedCompletionRunLock(mock, postgres, "running", candidate.Revision, candidate.DueAt, now)
 				expectSelectedCompletionMembership(mock, postgres, selected)
+				expectSelectedCompletionEvidence(mock, candidate.Revision, candidate.DueAt)
 				result, err := executeSelectedCompletionTest(ctx, tx, postgres, candidate, probe, now)
 				if err != nil || result.Outcome != runtimerunlifecycle.OutcomeRearmAt || result.Candidate != candidate {
 					t.Fatalf("unchanged rearm algorithm = %+v, %v", result, err)
@@ -399,7 +400,8 @@ func TestSelectedCompletionTerminalClearOccursOnlyAfterFreshFence(t *testing.T) 
 			now := candidate.DueAt.Add(time.Second)
 			expectSelectedCompletionRunLock(mock, postgres, "completed", candidate.Revision, candidate.DueAt, now)
 			expectSelectedCompletionMembership(mock, postgres, true)
-			mock.ExpectExec(`UPDATE runs SET completion_due_at = NULL`).WithArgs(candidate.RunID, candidate.Revision).WillReturnResult(sqlmock.NewResult(0, 1))
+			expectSelectedCompletionEvidence(mock, candidate.Revision, candidate.DueAt)
+			mock.ExpectExec(`INSERT INTO run_completion_evidence`).WithArgs(candidate.RunID, candidate.Revision).WillReturnResult(sqlmock.NewResult(0, 1))
 			result, err := executeSelectedCompletionTest(ctx, tx, postgres, candidate, probe, now)
 			if err != nil || result.Outcome != runtimerunlifecycle.OutcomeExactNoop || probe.calls != 1 {
 				t.Fatalf("terminal due clearing bypassed exact fence: %+v, %v calls=%d", result, err, probe.calls)

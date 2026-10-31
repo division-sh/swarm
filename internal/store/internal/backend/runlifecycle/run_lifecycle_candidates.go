@@ -18,8 +18,8 @@ func ReadStandaloneCompletionCandidateTx(ctx context.Context, tx *sql.Tx, postgr
 		return runtimerunlifecycle.Candidate{}, fmt.Errorf("standalone candidate evidence requires its selected read transaction")
 	}
 	var candidate runtimerunlifecycle.Candidate
-	query := `SELECT CAST(r.run_id AS TEXT),r.bundle_hash,r.completion_revision,r.completion_due_at
-FROM runs r JOIN events e ON e.run_id=r.run_id WHERE e.event_id=$1`
+	query := `SELECT CAST(r.run_id AS TEXT),r.bundle_hash,COALESCE(c.revision,0),` + completionEvidenceDue + `
+FROM runs r ` + completionEvidenceJoin + ` JOIN events e ON e.run_id=r.run_id WHERE e.event_id=$1`
 	if postgres {
 		if err := tx.QueryRowContext(ctx, query, eventID).Scan(&candidate.RunID, &candidate.BundleHash, &candidate.Revision, &candidate.DueAt); err != nil {
 			return runtimerunlifecycle.Candidate{}, err
@@ -51,7 +51,8 @@ func (s *RunLifecycleSQLiteOwner) ReadSelectedControlAwaitingMutationTx(ctx cont
 
 func readSelectedControlAwaitingMutationTx(ctx context.Context, tx *sql.Tx, runID, loadedBundleHash string) (bool, error) {
 	var awaiting bool
-	err := tx.QueryRowContext(ctx, `SELECT status='running' AND (bundle_hash <> $2 OR completion_due_at IS NULL) FROM runs WHERE run_id=$1`, runID, loadedBundleHash).Scan(&awaiting)
+	err := tx.QueryRowContext(ctx, `SELECT r.status='running' AND (r.bundle_hash <> $2 OR `+completionEvidenceDue+` IS NULL)
+		FROM runs r `+completionEvidenceJoin+` WHERE r.run_id=$1`, runID, loadedBundleHash).Scan(&awaiting)
 	return awaiting, err
 }
 
@@ -64,9 +65,9 @@ func (s *RunLifecycleSQLiteOwner) ReadRunDebugStorageTx(ctx context.Context, tx 
 }
 
 func readRunDebugStorageTx(ctx context.Context, tx *sql.Tx, postgres bool, runID string) ([]string, string, error) {
-	query := `SELECT status, completion_revision, COALESCE(completion_due_at, ''), bundle_hash FROM runs WHERE run_id = ?`
+	query := `SELECT r.status, COALESCE(c.revision,0), COALESCE(` + completionEvidenceDue + `, ''), r.bundle_hash FROM runs r ` + completionEvidenceJoin + ` WHERE r.run_id = ?`
 	if postgres {
-		query = `SELECT status, completion_revision, COALESCE(completion_due_at::text, ''), bundle_hash FROM runs WHERE run_id = $1::uuid`
+		query = `SELECT r.status, COALESCE(c.revision,0), COALESCE((` + completionEvidenceDue + `)::text, ''), r.bundle_hash FROM runs r ` + completionEvidenceJoin + ` WHERE r.run_id = $1::uuid`
 	}
 	rows, err := tx.QueryContext(ctx, query, runID)
 	if err != nil {
@@ -211,183 +212,16 @@ func (s *RunLifecycleSQLiteOwner) RequestCompletionCandidate(
 	return value.Disposition, result.Err()
 }
 
-func requestPostgresCompletionCandidateTx(
-	ctx context.Context,
-	tx *sql.Tx,
-	runID string,
-	dueAt *time.Time,
-	forceRevision bool,
-	observedAt *time.Time,
-) (runtimerunlifecycle.CandidateRequestResult, error) {
-	runID = nullUUIDString(runID)
-	if tx == nil || runID == "" {
-		return runtimerunlifecycle.CandidateRequestResult{}, errors.New("completion candidate requires transaction and run_id")
-	}
-	var (
-		state       string
-		bundleHash  string
-		currentDue  sql.NullTime
-		currentRev  int64
-		selectedNow time.Time
-	)
-	if err := tx.QueryRowContext(ctx, `
-		SELECT LOWER(status), bundle_hash, completion_due_at, completion_revision, clock_timestamp()
-		FROM runs
-		WHERE run_id = $1::uuid
-		FOR UPDATE
-	`, runID).Scan(&state, &bundleHash, &currentDue, &currentRev, &selectedNow); err != nil {
-		if errors.Is(err, sql.ErrNoRows) {
-			return runtimerunlifecycle.CandidateRequestResult{}, &runtimerunlifecycle.RunNotFoundError{RunID: runID}
-		}
-		return runtimerunlifecycle.CandidateRequestResult{}, fmt.Errorf("lock completion candidate: %w", err)
-	}
-	lifecycleState, err := runtimerunlifecycle.ParseState(state)
-	if err != nil {
-		return runtimerunlifecycle.CandidateRequestResult{}, err
-	}
-	if lifecycleState.Terminal() {
-		return runtimerunlifecycle.CandidateRequestResult{Disposition: runtimerunlifecycle.CandidateAbsorbedTerminal}, nil
-	}
-	if lifecycleState == runtimerunlifecycle.StatePaused {
-		return runtimerunlifecycle.CandidateRequestResult{Disposition: runtimerunlifecycle.CandidateDeferredPaused}, nil
-	}
-	if lifecycleState == runtimerunlifecycle.StateLive {
-		if observedAt != nil {
-			*observedAt = runtimerunlifecycle.CanonicalTimestamp(selectedNow)
-		}
-		return runtimerunlifecycle.CandidateRequestResult{Disposition: runtimerunlifecycle.CandidateRetainedLive,
-			Candidate: runtimerunlifecycle.Candidate{RunID: runID, BundleHash: bundleHash}}, nil
-	}
-	selectedRunID, err := selectedRunBinding(ctx, tx, true, runID)
-	if err != nil {
-		return runtimerunlifecycle.CandidateRequestResult{}, err
-	}
-	selectedNow = runtimerunlifecycle.CanonicalTimestamp(selectedNow)
-	requestedDue := selectedNow
-	if dueAt != nil {
-		requestedDue = runtimerunlifecycle.CanonicalTimestamp(*dueAt)
-	}
-	currentDueAt := runtimerunlifecycle.CanonicalTimestamp(currentDue.Time)
-	currentIsImmediate := currentDue.Valid && !currentDueAt.After(selectedNow)
-	sameCoordinate := currentDue.Valid && currentDueAt.Equal(requestedDue)
-	if !forceRevision && (sameCoordinate || currentIsImmediate) {
-		result := runtimerunlifecycle.CandidateRequestResult{
-			Disposition: runtimerunlifecycle.CandidateAlreadyCurrent,
-			Candidate: runtimerunlifecycle.Candidate{
-				RunID: runID, BundleHash: strings.TrimSpace(bundleHash),
-				Revision: currentRev, DueAt: currentDueAt, SelectedForkRunID: selectedRunID,
-			},
-		}
-		return result, result.Validate()
-	}
-	var candidate runtimerunlifecycle.Candidate
-	if err := tx.QueryRowContext(ctx, `
-		UPDATE runs
-		SET completion_revision = completion_revision + 1,
-		    completion_due_at = $2
-		WHERE run_id = $1::uuid
-		  AND status = $3
-		RETURNING run_id::text, bundle_hash, completion_revision, completion_due_at
-	`, runID, requestedDue, string(runtimerunlifecycle.StateRunning)).Scan(
-		&candidate.RunID,
-		&candidate.BundleHash,
-		&candidate.Revision,
-		&candidate.DueAt,
-	); err != nil {
-		return runtimerunlifecycle.CandidateRequestResult{}, fmt.Errorf("request completion candidate: %w", err)
-	}
-	candidate.SelectedForkRunID = selectedRunID
-	candidate.DueAt = runtimerunlifecycle.CanonicalTimestamp(candidate.DueAt)
-	result := runtimerunlifecycle.CandidateRequestResult{Disposition: runtimerunlifecycle.CandidateRequested, Candidate: candidate}
-	return result, result.Validate()
+func requestPostgresCompletionCandidateTx(ctx context.Context, tx *sql.Tx, runID string, dueAt *time.Time, forceRevision bool, observedAt *time.Time) (runtimerunlifecycle.CandidateRequestResult, error) {
+	return requestCompletionEvidenceTx(ctx, tx, true, runID, dueAt, time.Time{}, forceRevision, observedAt)
 }
 
 func RequestPostgresCompletionCandidateTx(ctx context.Context, tx *sql.Tx, runID string, dueAt *time.Time) (runtimerunlifecycle.CandidateRequestResult, error) {
 	return requestPostgresCompletionCandidateTx(ctx, tx, runID, dueAt, false, nil)
 }
 
-func requestSQLiteCompletionCandidateTx(
-	ctx context.Context,
-	tx *sql.Tx,
-	runID string,
-	dueAt *time.Time,
-	selectedNow time.Time,
-	forceRevision bool,
-) (runtimerunlifecycle.CandidateRequestResult, error) {
-	runID = nullUUIDString(runID)
-	if tx == nil || runID == "" {
-		return runtimerunlifecycle.CandidateRequestResult{}, errors.New("completion candidate requires transaction and run_id")
-	}
-	var (
-		state      string
-		bundleHash string
-		currentDue any
-		currentRev int64
-	)
-	if err := tx.QueryRowContext(ctx, `
-		SELECT LOWER(status), bundle_hash, completion_due_at, completion_revision
-		FROM runs
-		WHERE run_id = ?
-	`, runID).Scan(&state, &bundleHash, &currentDue, &currentRev); err != nil {
-		if errors.Is(err, sql.ErrNoRows) {
-			return runtimerunlifecycle.CandidateRequestResult{}, &runtimerunlifecycle.RunNotFoundError{RunID: runID}
-		}
-		return runtimerunlifecycle.CandidateRequestResult{}, fmt.Errorf("lock sqlite completion candidate: %w", err)
-	}
-	lifecycleState, err := runtimerunlifecycle.ParseState(state)
-	if err != nil {
-		return runtimerunlifecycle.CandidateRequestResult{}, err
-	}
-	if lifecycleState.Terminal() {
-		return runtimerunlifecycle.CandidateRequestResult{Disposition: runtimerunlifecycle.CandidateAbsorbedTerminal}, nil
-	}
-	if lifecycleState == runtimerunlifecycle.StatePaused {
-		return runtimerunlifecycle.CandidateRequestResult{Disposition: runtimerunlifecycle.CandidateDeferredPaused}, nil
-	}
-	if lifecycleState == runtimerunlifecycle.StateLive {
-		return runtimerunlifecycle.CandidateRequestResult{Disposition: runtimerunlifecycle.CandidateRetainedLive,
-			Candidate: runtimerunlifecycle.Candidate{RunID: runID, BundleHash: bundleHash}}, nil
-	}
-	selectedRunID, err := selectedRunBinding(ctx, tx, false, runID)
-	if err != nil {
-		return runtimerunlifecycle.CandidateRequestResult{}, err
-	}
-	selectedNow = runtimerunlifecycle.CanonicalTimestamp(selectedNow)
-	requestedDue := selectedNow
-	if dueAt != nil {
-		requestedDue = runtimerunlifecycle.CanonicalTimestamp(*dueAt)
-	}
-	if parsed, ok, err := sqliteTimeValue(currentDue); err != nil {
-		return runtimerunlifecycle.CandidateRequestResult{}, err
-	} else if !forceRevision && ok && (runtimerunlifecycle.CanonicalTimestamp(parsed).Equal(requestedDue) || !runtimerunlifecycle.CanonicalTimestamp(parsed).After(selectedNow)) {
-		result := runtimerunlifecycle.CandidateRequestResult{
-			Disposition: runtimerunlifecycle.CandidateAlreadyCurrent,
-			Candidate: runtimerunlifecycle.Candidate{
-				RunID: runID, BundleHash: strings.TrimSpace(bundleHash),
-				Revision: currentRev, DueAt: runtimerunlifecycle.CanonicalTimestamp(parsed), SelectedForkRunID: selectedRunID,
-			},
-		}
-		return result, result.Validate()
-	}
-	result, err := tx.ExecContext(ctx, `
-		UPDATE runs
-		SET completion_revision = completion_revision + 1,
-		    completion_due_at = ?
-		WHERE run_id = ?
-		  AND status = ?
-	`, requestedDue, runID, string(runtimerunlifecycle.StateRunning))
-	if err != nil {
-		return runtimerunlifecycle.CandidateRequestResult{}, fmt.Errorf("request sqlite completion candidate: %w", err)
-	}
-	if rows, rowsErr := result.RowsAffected(); rowsErr != nil || rows != 1 {
-		return runtimerunlifecycle.CandidateRequestResult{}, fmt.Errorf("request sqlite completion candidate affected %d rows: %w", rows, rowsErr)
-	}
-	candidate := runtimerunlifecycle.Candidate{
-		RunID: runID, BundleHash: strings.TrimSpace(bundleHash),
-		Revision: currentRev + 1, DueAt: requestedDue, SelectedForkRunID: selectedRunID,
-	}
-	request := runtimerunlifecycle.CandidateRequestResult{Disposition: runtimerunlifecycle.CandidateRequested, Candidate: candidate}
-	return request, request.Validate()
+func requestSQLiteCompletionCandidateTx(ctx context.Context, tx *sql.Tx, runID string, dueAt *time.Time, now time.Time, forceRevision bool) (runtimerunlifecycle.CandidateRequestResult, error) {
+	return requestCompletionEvidenceTx(ctx, tx, false, runID, dueAt, now, forceRevision, nil)
 }
 
 func RequestSQLiteCompletionCandidateTx(ctx context.Context, tx *sql.Tx, runID string, dueAt *time.Time, now time.Time) (runtimerunlifecycle.CandidateRequestResult, error) {
@@ -395,31 +229,11 @@ func RequestSQLiteCompletionCandidateTx(ctx context.Context, tx *sql.Tx, runID s
 }
 
 func clearPostgresCompletionCandidateTx(ctx context.Context, tx *sql.Tx, runID string) error {
-	if tx == nil {
-		return errors.New("clear completion candidate requires transaction")
-	}
-	if _, err := tx.ExecContext(ctx, `
-		UPDATE runs
-		SET completion_due_at = NULL
-		WHERE run_id = $1::uuid
-	`, nullUUIDString(runID)); err != nil {
-		return fmt.Errorf("clear completion candidate: %w", err)
-	}
-	return nil
+	return clearCompletionEvidenceTx(ctx, tx, nullUUIDString(runID), 0)
 }
 
 func clearSQLiteCompletionCandidateTx(ctx context.Context, tx *sql.Tx, runID string) error {
-	if tx == nil {
-		return errors.New("clear sqlite completion candidate requires transaction")
-	}
-	if _, err := tx.ExecContext(ctx, `
-		UPDATE runs
-		SET completion_due_at = NULL
-		WHERE run_id = ?
-	`, nullUUIDString(runID)); err != nil {
-		return fmt.Errorf("clear sqlite completion candidate: %w", err)
-	}
-	return nil
+	return clearCompletionEvidenceTx(ctx, tx, nullUUIDString(runID), 0)
 }
 
 func transitionPostgresActiveRunStateTx(
@@ -429,12 +243,14 @@ func transitionPostgresActiveRunStateTx(
 	state runtimerunlifecycle.State,
 	current runtimerunlifecycle.State,
 ) (sql.Result, error) {
+	if err := clearPostgresCompletionCandidateTx(ctx, tx, runID); err != nil {
+		return nil, err
+	}
 	return tx.ExecContext(ctx, `
 		UPDATE runs
 		SET status = $2,
 		    ended_at = NULL,
-		    failure = NULL,
-		    completion_due_at = NULL
+		    failure = NULL
 		WHERE run_id = $1::uuid
 		  AND status = $3
 	`, runID, string(state), string(current))
@@ -447,12 +263,14 @@ func transitionSQLiteActiveRunStateTx(
 	state runtimerunlifecycle.State,
 	current runtimerunlifecycle.State,
 ) (sql.Result, error) {
+	if err := clearSQLiteCompletionCandidateTx(ctx, tx, runID); err != nil {
+		return nil, err
+	}
 	return tx.ExecContext(ctx, `
 		UPDATE runs
 		SET status = ?,
 		    ended_at = NULL,
-		    failure = NULL,
-		    completion_due_at = NULL
+		    failure = NULL
 		WHERE run_id = ?
 		  AND status = ?
 	`, string(state), runID, string(current))
@@ -522,6 +340,9 @@ func (s *RunLifecyclePostgresOwner) ExecuteCompletionCandidate(
 		transactiontest.Mark(txctx, transactiontest.RunCompletionCandidate)
 		var outcome runtimerunlifecycle.CompletionResult
 		err := attempt.WithSQL(txctx, func(txctx context.Context, tx *sql.Tx) (err error) {
+			if _, err := mutationprotocol.RunRowLock(txctx, tx, candidate.RunID, true); err != nil {
+				return err
+			}
 			outcome, err = s.executeCompletionCandidateTx(txctx, tx, attempt, candidate, catalog, &changes)
 			return err
 		})
@@ -551,6 +372,9 @@ func (s *RunLifecycleSQLiteOwner) ExecuteCompletionCandidate(
 		transactiontest.Mark(txctx, transactiontest.RunCompletionCandidate)
 		var outcome runtimerunlifecycle.CompletionResult
 		err := attempt.WithSQL(txctx, func(txctx context.Context, tx *sql.Tx) (err error) {
+			if _, err := mutationprotocol.RunRowLock(txctx, tx, candidate.RunID, true); err != nil {
+				return err
+			}
 			outcome, err = s.executeCompletionCandidateTx(txctx, tx, attempt, candidate, catalog, &changes)
 			return err
 		})
@@ -575,17 +399,14 @@ func (s *RunLifecyclePostgresOwner) executeCompletionCandidateTx(
 	var (
 		state       string
 		bundleHash  string
-		currentRev  int64
-		currentDue  sql.NullTime
 		selectedNow time.Time
 	)
 	err := tx.QueryRowContext(ctx, `
-		SELECT LOWER(status), bundle_hash, completion_revision, completion_due_at,
-		       clock_timestamp()
+		SELECT LOWER(status), bundle_hash, clock_timestamp()
 		FROM runs
 		WHERE run_id = $1::uuid
 		FOR UPDATE
-	`, candidate.RunID).Scan(&state, &bundleHash, &currentRev, &currentDue, &selectedNow)
+	`, candidate.RunID).Scan(&state, &bundleHash, &selectedNow)
 	if errors.Is(err, sql.ErrNoRows) {
 		return runtimerunlifecycle.CompletionResult{Outcome: runtimerunlifecycle.OutcomeExactNoop}, nil
 	}
@@ -593,6 +414,10 @@ func (s *RunLifecyclePostgresOwner) executeCompletionCandidateTx(
 		return runtimerunlifecycle.CompletionResult{}, err
 	}
 	if err := requireCompletionCandidateAuthorityTx(ctx, tx, true, candidate, bundleHash, s.runAuthority); err != nil {
+		return runtimerunlifecycle.CompletionResult{}, err
+	}
+	currentRev, currentDue, err := readCompletionEvidenceTx(ctx, tx, candidate.RunID)
+	if err != nil {
 		return runtimerunlifecycle.CompletionResult{}, err
 	}
 	if strings.TrimSpace(bundleHash) != candidate.BundleHash || !currentDue.Valid || currentRev != candidate.Revision {
@@ -613,10 +438,7 @@ func (s *RunLifecyclePostgresOwner) executeCompletionCandidateTx(
 		return runtimerunlifecycle.CompletionResult{}, err
 	}
 	if lifecycleState.Terminal() {
-		if _, err := tx.ExecContext(ctx, `
-			UPDATE runs SET completion_due_at = NULL
-			WHERE run_id = $1::uuid AND completion_revision = $2
-		`, candidate.RunID, candidate.Revision); err != nil {
+		if err := clearCompletionEvidenceTx(ctx, tx, candidate.RunID, candidate.Revision); err != nil {
 			return runtimerunlifecycle.CompletionResult{}, err
 		}
 		return runtimerunlifecycle.CompletionResult{Outcome: runtimerunlifecycle.OutcomeExactNoop}, nil
@@ -704,10 +526,7 @@ func (s *RunLifecyclePostgresOwner) finishBlockedPostgresCandidate(
 		}
 		return runtimerunlifecycle.CompletionResult{Outcome: runtimerunlifecycle.OutcomeRearmAt, Candidate: request.Candidate}, nil
 	}
-	if _, err := tx.ExecContext(ctx, `
-		UPDATE runs SET completion_due_at = NULL
-		WHERE run_id = $1::uuid AND completion_revision = $2
-	`, candidate.RunID, candidate.Revision); err != nil {
+	if err := clearCompletionEvidenceTx(ctx, tx, candidate.RunID, candidate.Revision); err != nil {
 		return runtimerunlifecycle.CompletionResult{}, err
 	}
 	return runtimerunlifecycle.CompletionResult{Outcome: runtimerunlifecycle.OutcomeAwaitMutation}, nil
@@ -724,14 +543,12 @@ func (s *RunLifecycleSQLiteOwner) executeCompletionCandidateTx(
 	var (
 		state      string
 		bundleHash string
-		currentRev int64
-		currentDue any
 	)
 	err := tx.QueryRowContext(ctx, `
-		SELECT LOWER(status), bundle_hash, completion_revision, completion_due_at
+		SELECT LOWER(status), bundle_hash
 		FROM runs
 		WHERE run_id = ?
-	`, candidate.RunID).Scan(&state, &bundleHash, &currentRev, &currentDue)
+	`, candidate.RunID).Scan(&state, &bundleHash)
 	if errors.Is(err, sql.ErrNoRows) {
 		return runtimerunlifecycle.CompletionResult{Outcome: runtimerunlifecycle.OutcomeExactNoop}, nil
 	}
@@ -741,14 +558,14 @@ func (s *RunLifecycleSQLiteOwner) executeCompletionCandidateTx(
 	if err := requireCompletionCandidateAuthorityTx(ctx, tx, false, candidate, bundleHash, s.runAuthority); err != nil {
 		return runtimerunlifecycle.CompletionResult{}, err
 	}
-	dueAt, duePresent, err := sqliteTimeValue(currentDue)
+	currentRev, currentDue, err := readCompletionEvidenceTx(ctx, tx, candidate.RunID)
 	if err != nil {
 		return runtimerunlifecycle.CompletionResult{}, err
 	}
-	if strings.TrimSpace(bundleHash) != candidate.BundleHash || !duePresent || currentRev != candidate.Revision {
+	if strings.TrimSpace(bundleHash) != candidate.BundleHash || !currentDue.Valid || currentRev != candidate.Revision {
 		return runtimerunlifecycle.CompletionResult{Outcome: runtimerunlifecycle.OutcomeExactNoop}, nil
 	}
-	storedDue := runtimerunlifecycle.CanonicalTimestamp(dueAt)
+	storedDue := currentDue.Time
 	if !storedDue.Equal(candidate.DueAt) {
 		return runtimerunlifecycle.CompletionResult{Outcome: runtimerunlifecycle.OutcomeExactNoop}, nil
 	}
@@ -763,10 +580,7 @@ func (s *RunLifecycleSQLiteOwner) executeCompletionCandidateTx(
 		return runtimerunlifecycle.CompletionResult{}, err
 	}
 	if lifecycleState.Terminal() {
-		if _, err := tx.ExecContext(ctx, `
-			UPDATE runs SET completion_due_at = NULL
-			WHERE run_id = ? AND completion_revision = ?
-		`, candidate.RunID, candidate.Revision); err != nil {
+		if err := clearCompletionEvidenceTx(ctx, tx, candidate.RunID, candidate.Revision); err != nil {
 			return runtimerunlifecycle.CompletionResult{}, err
 		}
 		return runtimerunlifecycle.CompletionResult{Outcome: runtimerunlifecycle.OutcomeExactNoop}, nil
@@ -855,10 +669,7 @@ func (s *RunLifecycleSQLiteOwner) finishBlockedSQLiteCandidate(
 		}
 		return runtimerunlifecycle.CompletionResult{Outcome: runtimerunlifecycle.OutcomeRearmAt, Candidate: request.Candidate}, nil
 	}
-	if _, err := tx.ExecContext(ctx, `
-		UPDATE runs SET completion_due_at = NULL
-		WHERE run_id = ? AND completion_revision = ?
-	`, candidate.RunID, candidate.Revision); err != nil {
+	if err := clearCompletionEvidenceTx(ctx, tx, candidate.RunID, candidate.Revision); err != nil {
 		return runtimerunlifecycle.CompletionResult{}, err
 	}
 	return runtimerunlifecycle.CompletionResult{Outcome: runtimerunlifecycle.OutcomeAwaitMutation}, nil

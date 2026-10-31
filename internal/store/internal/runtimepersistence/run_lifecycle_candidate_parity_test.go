@@ -22,6 +22,14 @@ import (
 
 const runLifecycleCandidateParityBundleHash = sourceartifactfixture.BundleHash
 
+// Physical readback stays independent of the lifecycle owner's projection.
+const completionEvidenceNativeSnapshotSQL = `SELECT r.status, COALESCE(e.revision,0),
+	COALESCE(CAST(CASE WHEN consumed.run_id IS NULL THEN e.due_at ELSE NULL END AS TEXT),''),r.bundle_hash
+	FROM runs r LEFT JOIN run_completion_evidence e ON e.run_id=r.run_id AND e.record_kind='request'
+	AND e.revision=(SELECT MAX(revision) FROM run_completion_evidence WHERE run_id=r.run_id AND record_kind='request')
+	LEFT JOIN run_completion_evidence consumed ON consumed.run_id=e.run_id AND consumed.revision=e.revision AND consumed.record_kind='clear'
+	WHERE r.run_id=$1`
+
 var runLifecycleCandidateParityReplacementArtifact = func() *sourceartifact.AdmittedSourceArtifact {
 	artifact, err := sourceartifact.AdmitMembers(map[string][]byte{
 		"manifest.yaml": []byte("version: 1.0.0\nplatform_version: '*'\n"),

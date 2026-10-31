@@ -495,55 +495,14 @@ func (s *LLMPostgresOwner) ResetAll(ctx context.Context, metadata runtimesession
 	if s == nil || s.backend == nil {
 		return runtimesessions.ResetSummary{}, nil
 	}
-	source := strings.TrimSpace(metadata.Source)
+	if err := s.requireCurrentSchema(); err != nil {
+		return runtimesessions.ResetSummary{}, err
+	}
 	result := mutationprotocol.RunPostgres(ctx, s.backend, mutationprotocol.RevisionOnly, mutationprotocol.Ordinary, nil, s.runLifecycleCandidates, func(sqlCtx context.Context, attempt *mutationprotocol.Attempt) (runtimesessions.ResetSummary, error) {
 		var summary runtimesessions.ResetSummary
-		err := attempt.WithSQL(sqlCtx, func(sqlCtx context.Context, tx *sql.Tx) error {
-			rows, err := tx.QueryContext(sqlCtx, `
-			WITH affected AS (
-				SELECT session_id, run_id, agent_id, flow_instance, status FROM agent_sessions
-				WHERE status IN ('active', 'suspended') FOR UPDATE
-			), updated AS (
-				UPDATE agent_sessions AS current SET status='terminated', termination_reason='orphaned', termination_detail=NULLIF($1,''),
-				terminated_at=COALESCE(current.terminated_at,now()), lease_holder=NULL, lease_grant_id=NULL, lease_expires_at=NULL, updated_at=now()
-				FROM affected WHERE current.session_id=affected.session_id
-				RETURNING affected.session_id::text, affected.run_id::text, affected.agent_id, affected.flow_instance, affected.status
-			)
-			SELECT session_id, run_id, agent_id, flow_instance, status FROM updated ORDER BY run_id, agent_id, flow_instance, session_id
-		`, source)
-			if err != nil {
-				return fmt.Errorf("reset postgres live sessions: %w", err)
-			}
-			defer rows.Close()
-			for rows.Next() {
-				var d runtimesessions.ResetDisposition
-				if err := rows.Scan(&d.SessionID, &d.RunID, &d.AgentID, &d.FlowInstance, &d.PreviousStatus); err != nil {
-					return fmt.Errorf("scan postgres live session reset: %w", err)
-				}
-				d.TerminationReason = runtimesessions.TerminationReasonOrphaned.String()
-				d.TerminationDetail = source
-				summary.OrphanedSessions = append(summary.OrphanedSessions, d)
-			}
-			if err := rows.Err(); err != nil {
-				return fmt.Errorf("read postgres live session reset: %w", err)
-			}
-			if err := rows.Close(); err != nil {
-				return fmt.Errorf("close postgres live session reset: %w", err)
-			}
-			seenRuns := make(map[string]struct{}, len(summary.OrphanedSessions))
-			for _, disposition := range summary.OrphanedSessions {
-				if err := addAgentSessionFacts(attempt, disposition.RunID, disposition.SessionID); err != nil {
-					return err
-				}
-				if _, exists := seenRuns[disposition.RunID]; exists {
-					continue
-				}
-				seenRuns[disposition.RunID] = struct{}{}
-				if _, err := attempt.RequestCompletion(sqlCtx, s.lifecycle, disposition.RunID, nil); err != nil {
-					return err
-				}
-			}
-			return nil
+		err := attempt.WithSQL(sqlCtx, func(sqlCtx context.Context, tx *sql.Tx) (err error) {
+			summary, err = resetSessionsTx(sqlCtx, tx, true, attempt, s.lifecycle, strings.TrimSpace(metadata.Source), time.Time{})
+			return err
 		})
 		return summary, err
 	})

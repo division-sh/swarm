@@ -846,7 +846,7 @@ func TestCompletionOriginalGrantFencesLaunchAndSettlementBothStores(t *testing.T
 				beforeRevision := snapshotRotationTableRows(t, acquireCtx, selected.db, revisionQuery, identity.RunID)
 				if phase == "prelaunch" {
 					beforeAttempt := snapshotRotationTableRows(t, acquireCtx, selected.db, `SELECT * FROM runtime_external_effect_attempts WHERE attempt_id=$1`, handle.Attempt().AttemptID)
-					beforeCandidate := snapshotRotationTableRows(t, acquireCtx, selected.db, `SELECT completion_due_at,completion_revision FROM runs WHERE run_id=$1`, identity.RunID)
+					beforeCandidate := snapshotRotationTableRows(t, acquireCtx, selected.db, `SELECT revision,record_kind,due_at FROM run_completion_evidence WHERE run_id=$1 ORDER BY revision,record_kind`, identity.RunID)
 					if err := handle.MarkLaunched(ctx); err == nil {
 						t.Fatal("stale grant crossed launch boundary")
 					}
@@ -859,7 +859,7 @@ func TestCompletionOriginalGrantFencesLaunchAndSettlementBothStores(t *testing.T
 					if after := snapshotRotationTableRows(t, acquireCtx, selected.db, `SELECT * FROM runtime_external_effect_attempts WHERE attempt_id=$1`, handle.Attempt().AttemptID); !reflect.DeepEqual(beforeAttempt, after) {
 						t.Fatalf("prelaunch refusal changed attempt: before=%v after=%v", beforeAttempt, after)
 					}
-					if after := snapshotRotationTableRows(t, acquireCtx, selected.db, `SELECT completion_due_at,completion_revision FROM runs WHERE run_id=$1`, identity.RunID); !reflect.DeepEqual(beforeCandidate, after) {
+					if after := snapshotRotationTableRows(t, acquireCtx, selected.db, `SELECT revision,record_kind,due_at FROM run_completion_evidence WHERE run_id=$1 ORDER BY revision,record_kind`, identity.RunID); !reflect.DeepEqual(beforeCandidate, after) {
 						t.Fatalf("prelaunch refusal changed candidate: before=%v after=%v", beforeCandidate, after)
 					}
 				} else if phase == "launched" {
@@ -907,7 +907,7 @@ func TestCompletionLaunchChecksGrantExpiryAfterSessionLockBothStores(t *testing.
 		}
 		readCtx := runtimeeffects.WithDifferentOwner(fixture.original, runtimeeffects.OwnerBuildTestInfrastructure)
 		attemptQuery := `SELECT * FROM runtime_external_effect_attempts WHERE attempt_id=$1`
-		candidateQuery := `SELECT completion_due_at,completion_revision FROM runs WHERE run_id=$1`
+		candidateQuery := `SELECT revision,record_kind,due_at FROM run_completion_evidence WHERE run_id=$1 ORDER BY revision,record_kind`
 		sessionQuery := `SELECT conversation,turn_count,runtime_state,lease_grant_id,status FROM agent_sessions WHERE run_id=$1 ORDER BY session_id`
 		revisionQuery := `SELECT * FROM run_fork_fact_revisions WHERE run_id=$1 AND family='agent_sessions' ORDER BY revision,fact_key`
 		beforeAttempt := snapshotRotationTableRows(t, readCtx, selected.db, attemptQuery, handle.Attempt().AttemptID)

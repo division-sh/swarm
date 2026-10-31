@@ -21001,6 +21001,23 @@ platform_tables:
             run_id UUID PRIMARY KEY REFERENCES runs(run_id) ON DELETE CASCADE,
             event_count BIGINT NOT NULL DEFAULT 0 CHECK (event_count >= 0)
         );
+    run_completion_evidence:
+      description: >-
+        Insert-only run-owned completion requests and exact-revision clears. The greatest request revision is
+        current until its matching clear exists. Cleared requests retain their identity; a later request receives
+        a greater revision. Concurrent identical requests fold the winning revision without replaying domain work.
+        Ordinary request and clear work never updates or upgrades the active run row. Only the distinct real
+        lifecycle transition admits exclusively before domain locks. The existing candidate listing and acknowledged
+        handoff consume this same evidence after restart; no executor, completion flag or live-run completion is added.
+      ddl: |-
+        CREATE TABLE run_completion_evidence (
+            run_id UUID NOT NULL REFERENCES runs(run_id) ON DELETE CASCADE,
+            revision BIGINT NOT NULL CHECK (revision > 0),
+            record_kind TEXT NOT NULL CHECK (record_kind IN ('request', 'clear')),
+            due_at TIMESTAMPTZ,
+            PRIMARY KEY (run_id, revision, record_kind),
+            CHECK ((record_kind = 'request' AND due_at IS NOT NULL) OR (record_kind = 'clear' AND due_at IS NULL))
+        );
     runs:
       description: 'Platform run registry. A run is a top-level execution context with one immutable, explicitly
         discriminated origin: event, deployment, scenario setup, standing generation, or fork materialization. Every event,
@@ -21036,8 +21053,6 @@ platform_tables:
             origin_kind        TEXT NOT NULL CHECK (origin_kind IN ('event', 'deployment', 'scenario_setup', 'fork_materialization')),
             trigger_event_id   UUID,
             trigger_event_type TEXT,
-            completion_due_at TIMESTAMPTZ,
-            completion_revision BIGINT NOT NULL DEFAULT 0 CHECK (completion_revision >= 0),
             forked_from_run_id UUID REFERENCES runs(run_id),
             forked_from_point_kind TEXT CHECK (forked_from_point_kind IN ('event', 'deployment_revision', 'run_start', 'state_revision')),
             forked_from_revision BIGINT CHECK (forked_from_revision > 0),
@@ -21048,15 +21063,12 @@ platform_tables:
             ended_at          TIMESTAMPTZ,
             CHECK ((origin_kind = 'event' AND trigger_event_id IS NOT NULL AND NULLIF(TRIM(trigger_event_type), '') IS NOT NULL AND forked_from_run_id IS NULL AND forked_from_point_kind IS NULL AND forked_from_revision IS NULL AND forked_from_event_id IS NULL) OR (origin_kind = 'deployment' AND trigger_event_id IS NULL AND trigger_event_type IS NULL AND forked_from_run_id IS NULL AND forked_from_point_kind IS NULL AND forked_from_revision IS NULL AND forked_from_event_id IS NULL) OR (origin_kind = 'scenario_setup' AND trigger_event_id IS NULL AND trigger_event_type IS NULL AND forked_from_run_id IS NULL AND forked_from_point_kind IS NULL AND forked_from_revision IS NULL AND forked_from_event_id IS NULL) OR (origin_kind = 'fork_materialization' AND trigger_event_id IS NULL AND trigger_event_type IS NULL AND forked_from_run_id IS NOT NULL AND forked_from_point_kind IN ('event', 'deployment_revision', 'run_start', 'state_revision') AND forked_from_revision > 0 AND ((forked_from_point_kind = 'event' AND forked_from_event_id IS NOT NULL) OR (forked_from_point_kind IN ('deployment_revision', 'run_start', 'state_revision') AND forked_from_event_id IS NULL)))),
             CHECK (continued_as_run_id IS NULL OR continued_as_run_id <> run_id),
-            CHECK (completion_due_at IS NULL OR completion_revision > 0),
-            CHECK (status = 'running' OR completion_due_at IS NULL),
             CHECK (flow_path IS NULL OR NULLIF(TRIM(flow_path), '') IS NOT NULL),
             CHECK (status <> 'live' OR flow_path IS NOT NULL),
             CHECK (NOT landing_run OR flow_path IS NOT NULL),
             UNIQUE INDEX idx_runs_live_flow (flow_path) WHERE status = 'live',
             UNIQUE INDEX idx_runs_landing_flow (flow_path) WHERE landing_run = TRUE,
             INDEX idx_runs_status (status, started_at),
-            INDEX idx_runs_completion_candidates (bundle_hash, completion_due_at, run_id) WHERE completion_due_at IS NOT NULL,
             INDEX idx_runs_fork (forked_from_run_id) WHERE forked_from_run_id IS NOT NULL,
             INDEX idx_runs_fork_point (forked_from_run_id, forked_from_point_kind, forked_from_revision) WHERE forked_from_run_id IS NOT NULL,
             UNIQUE INDEX idx_runs_continued_as (continued_as_run_id) WHERE continued_as_run_id IS NOT NULL,
@@ -21129,8 +21141,9 @@ platform_tables:
           run.diagnose test_quiescence/Ready projection without persisting completion.
           Barrier settlement belongs to the existing fan-out serving and exact-child delivery-continuation
           lifecycles, using the canonical atomic fold/schedule owner and retained activation readback.
-          The remaining native candidate storage and explicit finite-initiation/standing-service producers are
-          held deletion dependencies, not an automatic live-run completion mechanism or permission to rebuild one.
+          Native completion requests and exact clears append run-owned completion evidence; candidate discovery
+          and acknowledged handoff fold that evidence without updating runs. This serves explicit finite/test
+          consumers, not an automatic live-run completion mechanism or permission to restore retired initiation.
         continue_post_commit_recovery:
           canonical_owner: internal/runtime/runcontrol.Controller consuming the selected-store pipeline-obligation SweepResult
           transition_rule: >

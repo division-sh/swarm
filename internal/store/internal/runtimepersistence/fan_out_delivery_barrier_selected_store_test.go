@@ -660,7 +660,7 @@ func TestFanOutDeliveryBarrierConcurrentCandidatesCloseExactlyOnceOnBothStores(t
 				assertFanOutBarrierTimerCount(t, ctx, db, fixture.runID, 1)
 				var status string
 				var due any
-				if err := db.QueryRowContext(ctx, `SELECT status,completion_due_at FROM runs WHERE run_id=$1`, fixture.runID).Scan(&status, &due); err != nil || status != "live" || due != nil {
+				if err := db.QueryRowContext(ctx, `SELECT status,(SELECT MAX(due_at) FROM run_completion_evidence WHERE run_id=r.run_id) FROM runs r WHERE run_id=$1`, fixture.runID).Scan(&status, &due); err != nil || status != "live" || due != nil {
 					t.Fatalf("live fold armed run completion: status=%s due=%v err=%v", status, due, err)
 				}
 			})

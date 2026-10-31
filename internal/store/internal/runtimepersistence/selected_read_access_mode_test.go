@@ -181,11 +181,9 @@ func captureSelectedReadSideEffects(t *testing.T, db *sql.DB, postgres bool, run
 	}
 	headQuery := `SELECT COALESCE((SELECT last_revision FROM run_fork_revision_heads WHERE run_id = ?), 0)`
 	rowsQuery := `SELECT COUNT(*) FROM run_fork_revisions WHERE run_id = ?`
-	candidateQuery := `SELECT completion_revision, COALESCE(CAST(completion_due_at AS TEXT), '') FROM runs WHERE run_id = ?`
 	if postgres {
 		headQuery = `SELECT COALESCE((SELECT last_revision FROM run_fork_revision_heads WHERE run_id = $1::uuid), 0)`
 		rowsQuery = `SELECT COUNT(*) FROM run_fork_revisions WHERE run_id = $1::uuid`
-		candidateQuery = `SELECT completion_revision, COALESCE(completion_due_at::text, '') FROM runs WHERE run_id = $1::uuid`
 	}
 	if err := db.QueryRow(headQuery, runID).Scan(&state.revisionHead); err != nil {
 		t.Fatalf("read revision head: %v", err)
@@ -193,7 +191,8 @@ func captureSelectedReadSideEffects(t *testing.T, db *sql.DB, postgres bool, run
 	if err := db.QueryRow(rowsQuery, runID).Scan(&state.revisionRows); err != nil {
 		t.Fatalf("count revisions: %v", err)
 	}
-	if err := db.QueryRow(candidateQuery, runID).Scan(&state.candidateRev, &state.candidateDue); err != nil {
+	var status, bundle string
+	if err := db.QueryRow(completionEvidenceNativeSnapshotSQL, runID).Scan(&status, &state.candidateRev, &state.candidateDue, &bundle); err != nil {
 		t.Fatalf("read completion candidate state: %v", err)
 	}
 	return state

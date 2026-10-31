@@ -80,13 +80,9 @@ func TestServedRunDebugStoragePreservesFourNativeFieldsBothStores(t *testing.T) 
 // This is the frozen native four-column oracle, not the owner implementation.
 func servedRunDebugNativeOracle(t *testing.T, ctx context.Context, fixture runLifecycleCandidateParityFixture, runID string) string {
 	t.Helper()
-	query := `SELECT status, completion_revision, COALESCE(completion_due_at, ''), bundle_hash FROM runs WHERE run_id = ?`
-	if fixture.postgres {
-		query = `SELECT status, completion_revision, COALESCE(completion_due_at::text, ''), bundle_hash FROM runs WHERE run_id = $1::uuid`
-	}
 	var status, due, bundle string
 	var revision int64
-	err := fixture.db.QueryRowContext(ctx, query, runID).Scan(&status, &revision, &due, &bundle)
+	err := fixture.db.QueryRowContext(ctx, completionEvidenceNativeSnapshotSQL, runID).Scan(&status, &revision, &due, &bundle)
 	if err == sql.ErrNoRows {
 		return "runs: []"
 	}
