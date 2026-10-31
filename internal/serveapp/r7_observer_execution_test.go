@@ -13,6 +13,7 @@ import (
 	"github.com/division-sh/swarm/internal/runtime/semanticview"
 	"github.com/division-sh/swarm/internal/runtime/testfixtures/canonicalrouting"
 	"github.com/division-sh/swarm/internal/servedparity"
+	"github.com/division-sh/swarm/internal/store/storetest"
 )
 
 func TestR7ServedObserverOrdersExecutionAndRestartBothStores(t *testing.T) {
@@ -23,19 +24,17 @@ func TestR7ServedObserverOrdersExecutionAndRestartBothStores(t *testing.T) {
 				requireA2PortfolioVerification(t, root)
 				source := semanticview.Wrap(loadWorkflowValidationBundleAt(t, root))
 				proof := startWorkspaceGatewayProofRuntime(t, backend, root, "", nil, "127.0.0.1:0")
-				var runID string
+				owner, ok := proof.Events.(storetest.RunFixtureStore)
+				if !ok {
+					t.Fatal("observer fixture requires its native run lifecycle owner")
+				}
+				runID := seedOwnedPublicationLiveRun(t, proof.Runtime, proof.BundleHash, owner)
 				publish := func(event, key string, payload map[string]any) servedEventPublishRPCResult {
 					t.Helper()
 					params := map[string]any{"event_name": event, "idempotency_key": key, "payload": payload}
-					method := "event.publish"
-					if runID == "" {
-						params["bundle_hash"] = proof.BundleHash
-						method = "run.start"
-					} else {
-						params["run_id"] = runID
-					}
+					params["run_id"] = runID
 					var result servedEventPublishRPCResult
-					requireServedJSONRPCResult(t, proof.Endpoint, method, params, &result)
+					requireServedJSONRPCResult(t, proof.Endpoint, "event.publish", params, &result)
 					if runID != "" && result.RunID != runID {
 						t.Fatalf("observer publication changed its admitted run: %+v", result)
 					}

@@ -48,8 +48,12 @@ func TestIssue2564ServedH3CollectionOperationsBothStores(t *testing.T) {
 						}
 					}
 					_, rt := startIssue2564Served(t, backend, writeIssue2564Fixture(t, false), p, nil, nil)
-					var seed servedEventPublishRPCResult
-					requireServedJSONRPCResult(t, rt.Endpoint, "run.start", map[string]any{"event_name": "hub.start", "bundle_hash": rt.BundleHash, "payload": map[string]any{"hub_id": "h3"}, "idempotency_key": "h3-start"}, &seed)
+					owner, ok := rt.persistence.deps.EventStore.(storetest.RunFixtureStore)
+					if !ok {
+						t.Fatal("writer fixture requires its native run lifecycle owner")
+					}
+					seedOwnedPublicationLiveRun(t, rt.Runtime, rt.BundleHash, owner)
+					seed := requireServedEventPublishRPCResult(t, rt.Endpoint, map[string]any{"event_name": "hub.start", "bundle_hash": rt.BundleHash, "payload": map[string]any{"hub_id": "h3"}, "idempotency_key": "h3-start"})
 					entityID := rt.waitEntityStage(t, seed.RunID, "", "idle")
 					requireServedEventPublishRPCResult(t, rt.Endpoint, map[string]any{"event_name": "hub.begin", "run_id": seed.RunID, "payload": map[string]any{"hub_id": "h3"}, "idempotency_key": "h3-begin"})
 					// Both sessions have captured literal operations before either
