@@ -45,7 +45,7 @@ func TestKeyedRootInputAdmissionConsumesDeclarationsBeforeConstruction(t *testin
 		"manifest.yaml": "version: 1.0.0\nplatform_version: '*'\n",
 		"schema.yaml":   "instance: provider_event_id\nstages: []\npins: {inputs: [account.opened]}\n",
 		"events.yaml":   "account.opened:\n  provider: text\n  provider_event_id: text\n  provider_event_type: text\n  data: json\n",
-		"entities.yaml": "account_state:\n  provider_event_id: text\n",
+		"state.yaml":    "provider_event_id: text\n",
 		"nodes.yaml":    "receiver:\n  execution_type: system_node\n  event_handlers:\n    account.opened: {}\n",
 	} {
 		if err := os.WriteFile(filepath.Join(root, label), []byte(body), 0o600); err != nil {

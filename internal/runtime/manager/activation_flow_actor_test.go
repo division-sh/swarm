@@ -82,7 +82,7 @@ func TestWorkspaceGatewayConstructedActorUsesCurrentNativeAttempt(t *testing.T) 
 	}
 	writeFlowActivationFixtureFile(t, filepath.Join(root, "schema.yaml"), "stages: []\n")
 	writeFlowActivationFixtureFile(t, filepath.Join(root, "review", "schema.yaml"), "instance: instance_key\npins:\n  inputs: [task.started]\nstages:\n  active: {}\n")
-	writeFlowActivationFixtureFile(t, filepath.Join(root, "review", "entities.yaml"), "review_entity:\n  instance_key: {type: text, _unused_reason: fixture instance identity}\n")
+	writeFlowActivationFixtureFile(t, filepath.Join(root, "review", "state.yaml"), "instance_key: text\n")
 	writeFlowActivationFixtureFile(t, filepath.Join(root, "review", "events.yaml"), "task.started:\n  instance_key: text\n")
 	writeFlowActivationFixtureFile(t, filepath.Join(root, "review", "agents.yaml"), "reviewer:\n  role: reviewer\n  intent: {inline: Review the declared task.}\n  subscriptions: [task.started]\n")
 	repo := filepath.Clean("../../..")

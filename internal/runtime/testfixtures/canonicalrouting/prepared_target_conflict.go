@@ -26,8 +26,8 @@ validator:
   event_handlers:
     test.work: {}
 `,
-		"review/schema.yaml":   "instance: instance_key\n",
-		"review/entities.yaml": "review:\n  instance_key: {type: text, immutable: true}\n",
+		"review/schema.yaml": "instance: instance_key\n",
+		"review/state.yaml":  "instance_key: text\n",
 	} {
 		writeClosedVariantFile(t, root, relative, source)
 	}
