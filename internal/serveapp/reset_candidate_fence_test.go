@@ -292,7 +292,8 @@ func TestResetCandidateSetFencesConsumersWhileSecondPreparesBothStores(t *testin
 					Events: primary.Bus, Acknowledged: primary.Bus, RecipientPlans: primary.Bus, SourceArtifact: primary.Bus,
 					Runs: stores.Runs(), LiveRuns: stores.LiveRuns(), Entities: stores.Entities(), Observability: stores.Observability(),
 					RunBundleContext: stores.RunBundleContext(), RuntimeContexts: manager,
-					Source: candidates[0].loaded.source, Bundle: candidates[0].bootIdentity,
+					ScenarioExecutionProfiles: stores.ScenarioExecutionProfiles(),
+					Source:                    candidates[0].loaded.source, Bundle: candidates[0].bootIdentity,
 				}})
 				if supervisor.execution["event.publish"] == nil {
 					t.Fatal("canonical publication handler is not configured")
