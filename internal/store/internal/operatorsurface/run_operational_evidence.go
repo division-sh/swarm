@@ -3,9 +3,11 @@ package operatorsurface
 import (
 	"bytes"
 	"context"
+	"database/sql"
 	"errors"
 	"fmt"
 	"slices"
+	"strings"
 	"time"
 
 	"github.com/division-sh/swarm/internal/operatorread"
@@ -164,9 +166,20 @@ func loadRunOperationalEvidence(ctx context.Context, q eventReadQueryer, adapter
 			facts.NextWakeAt = &due
 		}
 		if i, ok := byPath[timer.FlowInstance]; ok {
-			facts.Instances[i].Work.Timers++
+			instance := &facts.Instances[i]
+			instance.Work.Timers++
+			if !timer.DueAt.After(observedAt) {
+				instance.Work.DueTimers++
+			}
+			if instance.NextWakeAt == nil || timer.DueAt.Before(*instance.NextWakeAt) {
+				due := timer.DueAt
+				instance.NextWakeAt = &due
+			}
 		} else {
 			facts.UnscopedWork.Timers++
+			if !timer.DueAt.After(observedAt) {
+				facts.UnscopedWork.DueTimers++
+			}
 		}
 	}
 	if err := loadRunOperationalWaits(ctx, q, header.RunID, byPath, facts); err != nil {
@@ -175,11 +188,42 @@ func loadRunOperationalEvidence(ctx context.Context, q eventReadQueryer, adapter
 	if err := loadRunOperationalSessions(ctx, q, header.RunID, byPath, facts, observedAt); err != nil {
 		return nil, err
 	}
+	if err := loadRunRefusedEmits(ctx, q, header.RunID, adapter == operatorPostgresDelivery, byPath, facts); err != nil {
+		return nil, err
+	}
 	if err := loadRunTurnAttributions(ctx, q, adapter == operatorPostgresDelivery, header.RunID, instances, deliveries, byPath, facts); err != nil {
 		return nil, err
 	}
 	facts.Complete = true
 	return facts, nil
+}
+
+func loadRunRefusedEmits(ctx context.Context, q eventReadQueryer, runID string, postgres bool, byPath map[string]int, facts *operatorread.RunOperationalFacts) error {
+	field := func(path string) string { return "json_extract(payload, '$.details." + path + "')" }
+	if postgres {
+		field = func(path string) string {
+			return "payload #>> '{details," + strings.ReplaceAll(path, ".", ",") + "}'"
+		}
+	}
+	query := fmt.Sprintf(`SELECT %s, %s FROM events
+		WHERE run_id=$1 AND event_name='platform.runtime_log' AND %s='emit_tool_outcome'
+		AND %s='platform.unexpected_arrival' AND %s='no_route'
+		GROUP BY 1,2`, field("failure.detail.attributes.flow_instance"), field("emitted_event_id"), field("action"), field("failure.class"), field("failure.detail.code"))
+	rows, err := q.QueryContext(ctx, query, runID)
+	if err != nil {
+		return fmt.Errorf("read refused emit outcomes: %w", err)
+	}
+	defer rows.Close()
+	for rows.Next() {
+		var path, eventID sql.NullString
+		if err := rows.Scan(&path, &eventID); err != nil {
+			return err
+		}
+		if i, known := byPath[path.String]; known && eventID.Valid && eventID.String != "" {
+			facts.Instances[i].RefusedEmits++
+		}
+	}
+	return rows.Err()
 }
 
 func loadRunOperationalInstances(ctx context.Context, instances PipelineObligationSource, source semanticview.Source, header operatorread.RunHeader, facts *operatorread.RunOperationalFacts) (map[string]int, error) {

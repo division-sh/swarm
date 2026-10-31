@@ -1172,7 +1172,7 @@ func VerifyNativeExecuteNodeContractHandlerReturnsTerminalRejectForTerminalEntit
 			state := mustCurrentWorkflowState(t, pc, ctx, testRunScopedWorkflowInstanceFromContext(ctx, instance.StorageRef).Route, instance.EntityID)
 			counts := fixture.Transactions()
 			result, err := executeNodeContractHandlerWithHandoff(t, pc, ctx, pipelineNode(t, ".", "node-a"), runtimecontracts.SystemNodeEventHandler{}, workflowTriggerContext{Event: event, State: state}, false)
-			var refusal *TerminalReceiverError
+			var refusal *NoHandlerError
 			if !errors.As(err, &refusal) || refusal.Stage != "done" || refusal.FlowID != "." || result.Committed {
 				t.Fatalf("terminal target admission result=%#v err=%v, want exact terminal refusal before mutation", result, err)
 			}

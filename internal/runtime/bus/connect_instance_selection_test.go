@@ -22,8 +22,8 @@ func TestConnectSelectionPreservesJoinedLookupFailure(t *testing.T) {
 	rootObservation := constructionIndexObservation(t, source, busInternalTestRunID, root, "")
 	missing := &pipeline.WorkflowInstanceLookupMiss{RequestedKey: "account"}
 	independent := errors.New("independent index failure")
-	terminal := &pipeline.TerminalReceiverError{FlowID: "account", Stage: "completed"}
-	foreign := &pipeline.TerminalReceiverError{FlowID: "foreign", Stage: "completed"}
+	terminal := &pipeline.NoHandlerError{FlowID: "account", Stage: "completed"}
+	foreign := &pipeline.NoHandlerError{FlowID: "foreign", Stage: "completed"}
 	corrupt := &pipeline.FlowInstanceConstructionCorruption{RunID: busInternalTestRunID, FlowID: "account", Cause: terminal}
 	terminated := &pipeline.TerminatedReceiverError{FlowID: "account"}
 	unknownTerminated := pipeline.NewDeliveryTargetAvailability("active", "failed", true).Validate(source, "account")

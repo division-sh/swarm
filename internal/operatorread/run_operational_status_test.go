@@ -39,17 +39,21 @@ func TestRunOperationalStatusProjectsEveryInstanceWithoutChangingRunClock(t *tes
 	}
 	second := first
 	second.FlowInstance, second.DeliveryID, second.EventID, second.LogicalTurnID = "workers/b", "delivery-b", "event-b", "logical-b"
+	nextWake := now.Add(time.Minute)
 	for _, tc := range []struct {
 		name        string
 		other       RunInstanceFacts
 		want        string
 		disposition string
 	}{
-		{"two_stalls", RunInstanceFacts{FlowInstance: second.FlowInstance, Complete: true, LastTurn: &second}, "stalled", "stalled"},
-		{"active_sibling", RunInstanceFacts{FlowInstance: "workers/b", Complete: true, Work: RunInstanceWork{Deliveries: 1}}, "running", "active"},
-		{"future_timer", RunInstanceFacts{FlowInstance: "workers/b", Complete: true, Work: RunInstanceWork{Timers: 1}}, "running", "waiting"},
+		{"two_waiters", RunInstanceFacts{FlowInstance: second.FlowInstance, Complete: true, LastTurn: &second}, "stalled", "waiting"},
+		{"active_sibling", RunInstanceFacts{FlowInstance: "workers/b", Complete: true, Work: RunInstanceWork{Deliveries: 1}}, "running", "live"},
+		{"future_timer", RunInstanceFacts{FlowInstance: "workers/b", Complete: true, Work: RunInstanceWork{Timers: 1}, NextWakeAt: &nextWake}, "running", "waiting"},
+		{"due_timer", RunInstanceFacts{FlowInstance: "workers/b", Complete: true, Work: RunInstanceWork{Timers: 1, DueTimers: 1}}, "running", "live"},
+		{"final_with_due_timer", RunInstanceFacts{FlowInstance: "workers/b", Complete: true, Final: true, Work: RunInstanceWork{Timers: 1, DueTimers: 1}}, "running", "live"},
+		{"final_with_future_timer", RunInstanceFacts{FlowInstance: "workers/b", Complete: true, Final: true, Work: RunInstanceWork{Timers: 1}}, "running", "waiting"},
 		{"human_wait", RunInstanceFacts{FlowInstance: "workers/b", Complete: true, Work: RunInstanceWork{Await: 1}}, "running", "waiting"},
-		{"final_sibling", RunInstanceFacts{FlowInstance: "workers/b", Complete: true, Final: true}, "stalled", "final"},
+		{"final_sibling", RunInstanceFacts{FlowInstance: "workers/b", Complete: true, Final: true}, "stalled", "done"},
 		{"unknown_sibling", RunInstanceFacts{FlowInstance: "workers/b"}, "running", "unknown"},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
@@ -62,11 +66,21 @@ func TestRunOperationalStatusProjectsEveryInstanceWithoutChangingRunClock(t *tes
 				len(got.Instances) != 2 || got.Instances[1].Disposition != tc.disposition {
 				t.Fatalf("projection = %+v, want state=%s sibling=%s and exact first origin", got, tc.want, tc.disposition)
 			}
-			if tc.name == "two_stalls" && (len(got.Attributions) != 2 || !reflect.DeepEqual(got.Attributions[1], second)) {
+			if tc.name == "two_waiters" && (len(got.Attributions) != 2 || !reflect.DeepEqual(got.Attributions[1], second)) {
 				t.Fatalf("second same-slug origin lost: %+v", got.Attributions)
 			}
 			if report.LastEventAt != now || report.OperationalFacts.LastProgressAt != now.Add(-400*time.Second) {
 				t.Fatal("projection changed the run-level progress clock")
+			}
+			if tc.other.NextWakeAt != nil {
+				wake := got.Instances[1].NextWakeAt
+				if wake == nil || !wake.Equal(*tc.other.NextWakeAt) {
+					t.Fatalf("instance lost its next wake: %+v", got.Instances[1])
+				}
+				*wake = now
+				if !tc.other.NextWakeAt.Equal(nextWake) {
+					t.Fatal("projection leaked the instance's wake pointer")
+				}
 			}
 		})
 	}

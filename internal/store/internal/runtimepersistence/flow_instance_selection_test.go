@@ -171,7 +171,7 @@ func TestR7SelectCreateSelectOrCreateBothStores(t *testing.T) {
 								t.Fatalf("final-stage create lost occupied identity: %v", err)
 							}
 						} else {
-							var terminal *pipeline.TerminalReceiverError
+							var terminal *pipeline.NoHandlerError
 							if !errors.As(err, &terminal) || terminal.FlowID != "worker" || terminal.Stage != "done" {
 								t.Fatalf("final-stage selection lost proven availability refusal: %v", err)
 							}

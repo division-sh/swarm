@@ -776,7 +776,7 @@ func TestRunCommandConnectedForegroundReturnsOnRunQuiescence(t *testing.T) {
 					result := runCommandReadResult(req.Method, validDiagnosticRunHeader("7e3709ac-9ed5-5d2d-afb2-da8ed843f2ab"))
 					result["next_wake_at"] = "2030-01-01T01:00:00Z"
 					result["instances"] = []operatorread.RunInstanceOperationalStatus{
-						{FlowInstance: "unrelated/active", Stage: "processing", Revision: 1, Disposition: "active", Work: operatorread.RunInstanceWork{Deliveries: 1}},
+						{FlowInstance: "unrelated/active", Stage: "processing", Revision: 1, Disposition: "live", Work: operatorread.RunInstanceWork{Deliveries: 1}},
 					}
 					return result
 				default:

@@ -550,7 +550,7 @@ func TestDeliveryTargetWorkflowInstanceAvailabilityIsActiveOnly(t *testing.T) {
 				t.Fatalf("delivery target unavailable = %t, want %t for status=%q state=%q", got, testCase.unavailable, testCase.status, testCase.state)
 			}
 			err := NewDeliveryTargetAvailability(testCase.state, testCase.status, !testCase.terminated.IsZero()).Validate(source, ".")
-			var terminal *TerminalReceiverError
+			var terminal *NoHandlerError
 			if errors.As(err, &terminal) != (testCase.state == "killed") {
 				t.Fatalf("terminal receiver classification=%#v err=%v", terminal, err)
 			}

@@ -15,6 +15,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/division-sh/swarm/internal/operatorread"
 	runtimefailures "github.com/division-sh/swarm/internal/runtime/failures"
 	"github.com/gorilla/websocket"
 )
@@ -270,6 +271,11 @@ func TestStatusLeadsWithOperationalStateAndExactTurnAttribution(t *testing.T) {
 					t.Fatalf("status performed a second interpretation or re-drive: %s", req.Method)
 				}
 				result := validDiagnosticRunDiagnosis(runID, "stalled", "delivery_lifecycle", "no_active_deliveries", []any{})
+				result["observed_at"] = "2026-10-31T02:00:00Z"
+				result["instances"] = []any{map[string]any{
+					"flow_instance": "review/one", "stage": "review", "revision": 1, "disposition": "waiting",
+					"work": operatorread.RunInstanceWork{Timers: 1}, "next_wake_at": "2026-10-31T03:00:00Z", "refused_emits": 2,
+				}}
 				result["attributions"] = []any{map[string]any{
 					"flow_instance": "review/one", "agent_id": "reviewer", "event_id": "request-id", "event_type": "review.requested", "delivery_id": "delivery-id", "logical_turn_id": "logical-id",
 					"provider_turns": []any{"provider-id"}, "granted_emit_tools": []any{"emit_review_done"}, "emitted_events": []any{}, "emission_evidence": "none", "historical": false,
@@ -293,6 +299,11 @@ func TestStatusLeadsWithOperationalStateAndExactTurnAttribution(t *testing.T) {
 				}
 				if !strings.Contains(text, "frozen emit grants: emit_review_done") {
 					t.Fatalf("text lost the frozen emit grant: %s", text)
+				}
+				for _, expected := range []string{"review/one: review (waiting)", "next wake 2026-10-31T03:00:00Z", "2 refused emits", "2026-10-31T02:00:00Z"} {
+					if !strings.Contains(text, expected) {
+						t.Fatalf("instance readout lost %s: %s", expected, text)
+					}
 				}
 			} else {
 				for _, expected := range []string{`"operational_state":"stalled"`, `"delivery_id":"delivery-id"`, `"emission_evidence":"none"`, `"granted_emit_tools":["emit_review_done"]`} {

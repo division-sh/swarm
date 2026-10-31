@@ -118,7 +118,7 @@ func ProjectRunOperationalStatus(report RunDebugReport) RunOperationalStatus {
 		work.FanOutOwed != 0 || work.FanOutUnsettled != 0 || work.FanOutBarriers != 0 || work.DueTimers != 0 || work.ActiveSessionLeases != 0
 	stalled := false
 	for _, instance := range out.Instances {
-		stalled = stalled || instance.Disposition == "stalled"
+		stalled = stalled || instance.Disposition == "waiting" && !instance.Work.waiting()
 	}
 	if !busy && stalled {
 		out.State, out.BlockingLayer, out.BlockingReason = "stalled", "delivery_lifecycle", "no_active_deliveries"

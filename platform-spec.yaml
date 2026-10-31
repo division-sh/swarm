@@ -6810,26 +6810,26 @@ engine:
     querying: State is queryable at any time without side effects. The platform may provide a query_flow_state tool for agents
       to read entity state, accumulator, and gates without emitting events.
     terminal_state_behavior:
-      description: When an entity reaches a terminal state (from schema.yaml stages terminal metadata), all state is preserved. Entity
+      description: When an entity reaches a final stage (from schema.yaml stages final metadata), all state is preserved. Entity
         state, accumulator state, gate state, and event history remain queryable indefinitely.
       no_cleanup: The platform does NOT clear entity data on terminal state. Terminated entities retain all accumulated data
         and decision history for post-mortem analysis.
       behavior:
-      - Entity stops accepting new events (handlers reject events for terminal entities)
+      - A final stage has no eligible handlers or newly armed timers. Late events have the ordinary typed no_route outcome.
       - Stage changes, including entry to a terminal stage, do not cancel accepted agent work or discard late results. A stage deadline only advances the stage.
       - Stage movement does not itself retire the flow instance or its agents. Authored cancellation and work-derived resource cleanup are separate from graph terminality; explicit termination and cleanup retain their existing ownership and validation.
       - All persisted state remains in the database
       - Entity remains queryable through explicit read/query surfaces; for normal agents this means generated current-entity
         reads, while legacy query_entities remains a trusted runtime-internal compatibility surface.
       archival: Future concern — retention policy and cold storage are not specified in v1.1.0.
-      event_rejection: 'When an event arrives targeting an entity in a terminal state, the platform rejects it before handler
-        execution. No guard runs, no handler runs, no state changes. The event is marked as rejected with reason: terminal_entity.
-        This is unconditional — no configuration can override it. Terminal means terminal.'
-      absorbing: Terminal states are absorbing by default. Once an entity reaches a terminal state, it cannot leave. All events
-        for that entity are rejected. This is unconditional.
-      no_reopen_mechanism: There is no opt-in mechanism to reopen a terminal entity. If a business process needs to "reopen"
-        a killed/closed entity, the correct pattern is to create a NEW entity (new entity_id) with data copied from the old
-        one. The old entity remains terminal. This preserves audit trail integrity.
+      event_rejection: >-
+        An event without a handler in the receiver's current stage is a typed no_route outcome, naming that stage and
+        the events it handles. It is not a run or capture failure. Refused late emits are counted per instance from
+        recorded outcomes; a diagnostic never grants execution or settlement authority.
+      absorbing: No ordinary handler transitions out of a final stage. Entering final neither cancels accepted work nor
+        fences its trailing results; explicit lifecycle termination is a separate action.
+      instance_restart: The run-model completed-key rule governs starting a quiescent finished instance over through its
+        authored constructor. Ordinary handler delivery cannot reopen it or clear its memory.
       backward_transitions: Backward transitions (e.g., review → draft) are allowed for NON-terminal states. The prohibition
         is specifically on leaving terminal states, not on backward movement in general. Revision loops, reset-to-earlier-state,
         and similar patterns are valid.
@@ -34063,17 +34063,11 @@ api_specification:
                 type: string
       OperationalState:
         type: string
-        description: 'Operational state of a run. Source of truth:
-
-          internal/operatorread/behavior.go
-
-          ProjectRunOperationalStatus. Values are RunTableStatus values
-
-          lowercased plus "stalled" as the projection''s special
-
-          "running-but-not-progressing" state.
-
-          '
+        description: >-
+          Operational state of a run, projected by internal/operatorread/behavior.go ProjectRunOperationalStatus.
+          Per-instance live, waiting and done readout is diagnostic and does not decide run completion. The separate
+          run-level stalled incident retains the attributed operational alert from issue 2720; it is not a kill,
+          failure, completion or automatic retry decision.
         enum:
         - running
         - stalled
@@ -34086,8 +34080,8 @@ api_specification:
         type: string
         description: >-
           Generic blocking layer from operatorread.ProjectRunOperationalStatus. Empty
-          for running or terminal runs; delivery_lifecycle denotes an idle non-final
-          constructed instance with no owed work or legitimate wait. Authored domain
+          for running or terminal runs; delivery_lifecycle identifies the existing attributed no-work stall incident,
+          not a run failure or termination. An idle non-final instance's own disposition remains waiting. Authored domain
           and event names never create platform-owned output obligations. This remains
           a string rather than an enum for additive diagnostic compatibility.
       DiagnosisEvidence:
@@ -34461,18 +34455,21 @@ api_specification:
       RunInstanceOperationalStatus:
         type: object
         additionalProperties: false
-        required: [flow_instance, revision, disposition, work]
+        required: [flow_instance, revision, disposition, work, refused_emits]
         properties:
           flow_instance: {type: string}
           stage: {type: string}
           revision: {type: integer, minimum: 1}
           disposition:
             type: string
-            enum: [active, waiting, stalled, final, retired, unknown]
+            enum: [live, waiting, done, retired, unknown]
+          next_wake_at:
+            $ref: '#/components/schemas/Timestamp'
+          refused_emits: {type: integer, minimum: 0}
           work:
             type: object
             additionalProperties: false
-            required: [deliveries, retries, pipeline, fan_out, barriers, timers, await, sessions]
+            required: [deliveries, retries, pipeline, fan_out, barriers, timers, due_timers, await, sessions]
             properties:
               deliveries: {type: integer, minimum: 0}
               retries: {type: integer, minimum: 0}
@@ -34480,6 +34477,7 @@ api_specification:
               fan_out: {type: integer, minimum: 0}
               barriers: {type: integer, minimum: 0}
               timers: {type: integer, minimum: 0}
+              due_timers: {type: integer, minimum: 0}
               await: {type: integer, minimum: 0}
               sessions: {type: integer, minimum: 0}
       RunDiagnosis:
@@ -34501,6 +34499,8 @@ api_specification:
         - instances
         - attributions
         properties:
+          observed_at:
+            $ref: '#/components/schemas/Timestamp'
           next_wake_at:
             $ref: '#/components/schemas/Timestamp'
             description: Earliest active timer due from the same canonical run timer-obligation snapshot. Future wakes are shown by the CLI, never awaited by test quiescence.

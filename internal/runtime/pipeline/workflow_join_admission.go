@@ -2,7 +2,6 @@ package pipeline
 
 import (
 	"context"
-	"errors"
 	"fmt"
 
 	"github.com/division-sh/swarm/internal/events"
@@ -20,17 +19,12 @@ import (
 // Join admission belongs to the exact retained entry, independently of graph
 // terminality. This never authorizes fresh publication or execution.
 func validateAdmittedReceiverAvailability(ctx context.Context, source semanticview.Source, flowID string, evt events.Event, instance WorkflowInstance) error {
-	err := NewDeliveryTargetAvailability(instance.CurrentState, instance.Status, !instance.TerminatedAt.IsZero()).Validate(source, flowID)
-	var terminal *TerminalReceiverError
-	if err != nil && !errors.As(err, &terminal) {
+	availability := NewDeliveryTargetAvailability(instance.CurrentState, instance.Status, !instance.TerminatedAt.IsZero())
+	if _, err := availability.validateOwner(source, flowID); err != nil {
 		return err
 	}
 	route, admitted := workflowNodeDeliveryRoute(ctx)
-	if !admitted {
-		return err
-	}
-	join := false
-	if len(route.Context.Joins) > 0 {
+	if admitted && len(route.Context.Joins) > 0 {
 		if _, _, check := PrepareWorkflowJoinAdmission(source, evt.RunID(), string(evt.Type()), route, nil); check != nil {
 			return check
 		}
@@ -42,21 +36,20 @@ func validateAdmittedReceiverAvailability(ctx context.Context, source semanticvi
 				return failures.New(failures.ClassStaleArrival, "join_stage_closed", "runtime.pipeline", "receiver_preparation", map[string]any{"flow_id": flowID, "stage": instance.CurrentState})
 			}
 		}
-		join = true
-	}
-	if !errors.As(err, &terminal) {
-		return err
-	}
-	if !join && isJoinLifecycleEvent(evt.Type()) {
-		_, _, _, join, err = ResolveWorkflowJoinOccurrenceDeliveryTarget(source, evt)
+	} else if admitted && isJoinLifecycleEvent(evt.Type()) {
+		resolution, found, err := resolveWorkflowJoinOccurrence(source, evt)
 		if err != nil {
 			return err
 		}
+		if found && resolution.Ref.Stage() != instance.CurrentState {
+			return failures.New(failures.ClassStaleArrival, "join_stage_closed", "runtime.pipeline", "receiver_preparation", map[string]any{"flow_id": flowID, "stage": instance.CurrentState})
+		}
 	}
-	if join {
-		return failures.New(failures.ClassStaleArrival, "join_stage_closed", "runtime.pipeline", "receiver_preparation", map[string]any{"flow_id": flowID, "stage": terminal.Stage})
+	err := availability.Validate(source, flowID)
+	if refusal, ok := err.(*NoHandlerError); ok {
+		refusal.FlowInstance = instance.StorageRef
 	}
-	return terminal
+	return err
 }
 
 // WorkflowJoinAdmissionFence protects first publication against concurrent

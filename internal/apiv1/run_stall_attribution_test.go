@@ -10,6 +10,7 @@ import (
 
 func TestRunDiagnosisUsesOneCoherentReportAndPreservesMixedInstanceAttribution(t *testing.T) {
 	const runID = "run-1"
+	observed := time.Unix(500, 0).UTC()
 	turn := operatorread.RunTurnAttribution{FlowInstance: "workers/idle", AgentID: "worker", EventID: "request", EventType: "work.requested", DeliveryID: "delivery", LogicalTurnID: "logical", ProviderTurns: []string{"provider"}, Emission: operatorread.RunEmissionNone}
 	reader := &fakeRunReadStore{
 		headers: map[string]operatorread.RunHeader{runID: {
@@ -17,7 +18,7 @@ func TestRunDiagnosisUsesOneCoherentReportAndPreservesMixedInstanceAttribution(t
 		}},
 		reports: map[string]operatorread.RunDebugReport{runID: {
 			RunID: runID, RunTableStatus: "running", FanOut: fanoutobligation.RunSummary{RunID: runID},
-			OperationalFacts: &operatorread.RunOperationalFacts{Complete: true, Instances: []operatorread.RunInstanceFacts{
+			OperationalFacts: &operatorread.RunOperationalFacts{ObservedAt: observed, Complete: true, Instances: []operatorread.RunInstanceFacts{
 				{FlowInstance: "workers/active", Complete: true, Revision: 1, Work: operatorread.RunInstanceWork{Deliveries: 1}},
 				{FlowInstance: "workers/idle", Complete: true, Revision: 1, LastTurn: &turn},
 			}},
@@ -29,11 +30,14 @@ func TestRunDiagnosisUsesOneCoherentReportAndPreservesMixedInstanceAttribution(t
 		t.Fatalf("public diagnosis: %#v", response.Error)
 	}
 	result := asMap(t, response.Result)
+	if result["observed_at"] != observed.Format(time.RFC3339Nano) {
+		t.Fatalf("diagnosis lost selected-store observation time: %#v", result)
+	}
 	if reader.headerReads != 0 || reader.reportReads != 1 || result["operational_state"] != "running" {
 		t.Fatalf("diagnosis reread or reinterpreted a sibling: report=%d header=%d result=%#v", reader.reportReads, reader.headerReads, result)
 	}
 	instances, ok := result["instances"].([]any)
-	if !ok || len(instances) != 2 || asMap(t, instances[0])["disposition"] != "active" || asMap(t, instances[1])["disposition"] != "stalled" {
+	if !ok || len(instances) != 2 || asMap(t, instances[0])["disposition"] != "live" || asMap(t, instances[1])["disposition"] != "waiting" {
 		t.Fatalf("public instance dispositions: %#v", result)
 	}
 	attributions, ok := result["attributions"].([]any)

@@ -252,6 +252,9 @@ func definition(class Class, taskFailure, retryable, deterministic bool, message
 }
 
 func (def Definition) message(detail Detail) string {
+	if def.Class == ClassUnexpectedArrival && detail.Code == "no_route" {
+		return fmt.Sprintf("No handler in stage %q of flow %q; handled events: %v. Further emits without a handler will be refused.", detail.Attributes["stage"], detail.Attributes["flow_id"], detail.Attributes["handled_events"])
+	}
 	if def.Class == ClassTargetUnreachable && detail.Code == "channel_session_unavailable" {
 		return fmt.Sprintf("No session for %s account %s: run swarm channel connect %s", detail.Attributes["provider"], detail.Attributes["account"], detail.Attributes["provider"])
 	}

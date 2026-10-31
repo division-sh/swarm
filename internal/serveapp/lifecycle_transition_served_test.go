@@ -425,7 +425,7 @@ func TestServedCompiledLoopEscapeSuppressesOrdinaryRepeatOnBothStores(t *testing
 				t.Fatalf("late repeat admission=%#v", late.Error)
 			}
 			details, _ := late.Error.Data["details"].(map[string]any)
-			if details["reason"] != "receiver_entity_terminal" || details["stage"] != "escaped" || details["flow_id"] != "." {
+			if details["reason"] != "no_route" || details["stage"] != "escaped" || details["flow_id"] != "." {
 				t.Fatalf("late repeat reason=%#v", details)
 			}
 			waitOtherDeliveries()
@@ -444,7 +444,7 @@ func TestServedCompiledLoopEscapeSuppressesOrdinaryRepeatOnBothStores(t *testing
 				t.Fatalf("completed repeat admission=%#v", terminal.Error)
 			}
 			terminalDetails, _ := terminal.Error.Data["details"].(map[string]any)
-			if terminalDetails["reason"] != "receiver_entity_terminal" || terminalDetails["stage"] != "escaped" || terminalDetails["flow_id"] != "." {
+			if terminalDetails["reason"] != "no_route" || terminalDetails["stage"] != "escaped" || terminalDetails["flow_id"] != "." {
 				t.Fatalf("completed repeat reason=%#v", terminalDetails)
 			}
 			if after := snapshot(); after != completed {

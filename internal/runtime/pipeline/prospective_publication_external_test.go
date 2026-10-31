@@ -220,7 +220,7 @@ func TestProspectivePublicationRealPlannerTerminalAndOrdinaryWriterFenceBothStor
 					t.Fatal(err)
 				}
 				if terminal {
-					var refusal *runtimepipeline.TerminalReceiverError
+					var refusal *runtimepipeline.NoHandlerError
 					if !errors.As(observed.err, &refusal) || refusal.Stage != "done" || refusal.FlowID != "." {
 						t.Fatalf("exact planning refusal=%v", observed.err)
 					}

@@ -41,12 +41,13 @@ type RunInstanceWork struct {
 	FanOut     int `json:"fan_out"`
 	Barriers   int `json:"barriers"`
 	Timers     int `json:"timers"`
+	DueTimers  int `json:"due_timers"`
 	Await      int `json:"await"`
 	Sessions   int `json:"sessions"`
 }
 
 func (w RunInstanceWork) active() bool {
-	return w.Deliveries != 0 || w.Retries != 0 || w.Pipeline != 0 || w.FanOut != 0 || w.Barriers != 0 || w.Sessions != 0
+	return w.Deliveries != 0 || w.Retries != 0 || w.Pipeline != 0 || w.FanOut != 0 || w.Barriers != 0 || w.Sessions != 0 || w.DueTimers != 0
 }
 
 func (w RunInstanceWork) waiting() bool { return w.Timers != 0 || w.Await != 0 }
@@ -60,6 +61,8 @@ type RunInstanceFacts struct {
 	Work         RunInstanceWork
 	LastTurn     *RunTurnAttribution
 	Retired      bool
+	NextWakeAt   *time.Time
+	RefusedEmits int
 }
 
 // RunOperationalFacts must be assembled within one selected-store snapshot.
@@ -80,6 +83,8 @@ type RunInstanceOperationalStatus struct {
 	Revision     int64           `json:"revision"`
 	Disposition  string          `json:"disposition"`
 	Work         RunInstanceWork `json:"work"`
+	NextWakeAt   *time.Time      `json:"next_wake_at,omitempty"`
+	RefusedEmits int             `json:"refused_emits"`
 }
 
 func projectRunInstances(facts *RunOperationalFacts) ([]RunInstanceOperationalStatus, []RunTurnAttribution, bool) {
@@ -95,25 +100,32 @@ func projectRunInstances(facts *RunOperationalFacts) ([]RunInstanceOperationalSt
 		}
 	}
 	for _, instance := range facts.Instances {
-		disposition := "stalled"
+		disposition := "waiting"
 		switch {
-		case !instance.Complete:
+		case !facts.Complete || !instance.Complete:
 			disposition, busy = "unknown", true
 		case instance.Work.active():
-			disposition, busy = "active", true
+			disposition, busy = "live", true
 		case instance.Work.waiting():
 			disposition, busy = "waiting", true
-		case instance.Final:
-			disposition = "final"
 		case instance.Retired:
 			disposition = "retired"
 		case facts.UnscopedWork.active() || facts.UnscopedWork.waiting():
 			disposition, busy = "unknown", true
+		case instance.Final:
+			disposition = "done"
+		}
+		var nextWakeAt *time.Time
+		if instance.NextWakeAt != nil {
+			due := *instance.NextWakeAt
+			nextWakeAt = &due
 		}
 		instances = append(instances, RunInstanceOperationalStatus{
 			FlowInstance: instance.FlowInstance, Stage: instance.Stage, Revision: instance.Revision, Disposition: disposition, Work: instance.Work,
+			NextWakeAt:   nextWakeAt,
+			RefusedEmits: instance.RefusedEmits,
 		})
-		if disposition != "stalled" {
+		if disposition != "waiting" || instance.Work.waiting() {
 			continue
 		}
 		attribution := RunTurnAttribution{FlowInstance: instance.FlowInstance, Emission: RunEmissionUnknown, EvidenceReason: "settled_origin_unproven"}

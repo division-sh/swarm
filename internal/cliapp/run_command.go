@@ -752,7 +752,7 @@ func writeRunCommandStageCounts(out io.Writer, diagnosis DiagnosticRunDiagnosisR
 	for _, instance := range diagnosis.Instances {
 		label := instance.Stage + " (" + formatCLIHumanCode(cliHumanCodeOperationalState, instance.Disposition) + ")"
 		counts[label]++
-		if instance.Disposition == "active" {
+		if instance.Disposition == "live" {
 			live++
 		}
 	}

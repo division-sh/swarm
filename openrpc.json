@@ -15058,7 +15058,7 @@
         "type": "object"
       },
       "BlockingLayer": {
-        "description": "Generic blocking layer from operatorread.ProjectRunOperationalStatus. Empty for running or terminal runs; delivery_lifecycle denotes an idle non-final constructed instance with no owed work or legitimate wait. Authored domain and event names never create platform-owned output obligations. This remains a string rather than an enum for additive diagnostic compatibility.",
+        "description": "Generic blocking layer from operatorread.ProjectRunOperationalStatus. Empty for running or terminal runs; delivery_lifecycle identifies the existing attributed no-work stall incident, not a run failure or termination. An idle non-final instance's own disposition remains waiting. Authored domain and event names never create platform-owned output obligations. This remains a string rather than an enum for additive diagnostic compatibility.",
         "type": "string"
       },
       "BoundedLoopActivation": {
@@ -21402,7 +21402,7 @@
         "type": "string"
       },
       "OperationalState": {
-        "description": "Operational state of a run. Source of truth:\ninternal/operatorread/behavior.go\nProjectRunOperationalStatus. Values are RunTableStatus values\nlowercased plus \"stalled\" as the projection's special\n\"running-but-not-progressing\" state.\n",
+        "description": "Operational state of a run, projected by internal/operatorread/behavior.go ProjectRunOperationalStatus. Per-instance live, waiting and done readout is diagnostic and does not decide run completion. The separate run-level stalled incident retains the attributed operational alert from issue 2720; it is not a kill, failure, completion or automatic retry decision.",
         "enum": [
           "running",
           "stalled",
@@ -22284,6 +22284,9 @@
             "$ref": "#/components/schemas/Timestamp",
             "description": "Earliest active timer due from the same canonical run timer-obligation snapshot. Future wakes are shown by the CLI, never awaited by test quiescence."
           },
+          "observed_at": {
+            "$ref": "#/components/schemas/Timestamp"
+          },
           "operational_state": {
             "$ref": "#/components/schemas/OperationalState"
           },
@@ -22516,10 +22519,9 @@
         "properties": {
           "disposition": {
             "enum": [
-              "active",
+              "live",
               "waiting",
-              "stalled",
-              "final",
+              "done",
               "retired",
               "unknown"
             ],
@@ -22527,6 +22529,13 @@
           },
           "flow_instance": {
             "type": "string"
+          },
+          "next_wake_at": {
+            "$ref": "#/components/schemas/Timestamp"
+          },
+          "refused_emits": {
+            "minimum": 0,
+            "type": "integer"
           },
           "revision": {
             "minimum": 1,
@@ -22547,6 +22556,10 @@
                 "type": "integer"
               },
               "deliveries": {
+                "minimum": 0,
+                "type": "integer"
+              },
+              "due_timers": {
                 "minimum": 0,
                 "type": "integer"
               },
@@ -22578,6 +22591,7 @@
               "fan_out",
               "barriers",
               "timers",
+              "due_timers",
               "await",
               "sessions"
             ],
@@ -22588,7 +22602,8 @@
           "flow_instance",
           "revision",
           "disposition",
-          "work"
+          "work",
+          "refused_emits"
         ],
         "type": "object"
       },
