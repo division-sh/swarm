@@ -35,7 +35,11 @@ func TestClosedPublicationTargetOwnerEvidenceBoundaries(t *testing.T) {
 	base := publicationTargetOwnerEvidence{
 		event: event, present: true, origins: map[string]events.RouteIdentity{record.ID: origin},
 		projection: selectedRunTargetOwnerProjection{context: bounded, source: source, required: true,
-			descriptors: []ActiveTargetDescriptor{{ID: root.InstanceID, FlowID: root.TemplateID, FlowInstance: root.InstancePath, EntityID: root.EntityID}}},
+			candidates: []pipeline.DeliveryTargetOwnerCandidate{{
+				Route: events.RouteIdentity{FlowID: root.TemplateID,
+					FlowInstance: root.InstancePath,
+					EntityID:     root.EntityID},
+			}}},
 		planner: deliveryPlanner{connectPlanner: connectRoutePlanResolver{source: source, lifecycle: connectInstanceSelector{index: reader}}},
 	}
 	plan := RoutePlan{Event: event, ReplyCreations: []replycontext.Record{record}}
@@ -137,7 +141,7 @@ func TestClosedPublicationReturnScopeExtendsOnlyCompiledOrigin(t *testing.T) {
 		recipientPolicy: testSelectedOwnerPolicy(),
 	}
 	planner.recipientPolicy.semanticSource = source
-	planner.recipientPolicy.loadActiveTargetDescriptors = (&EventBus{semanticSource: source}).activeTargetDescriptors
+	planner.recipientPolicy.loadTargetOwnerCandidates = (&EventBus{semanticSource: source}).targetOwnerCandidates
 	bounded := correlation.WithInboundEvent(ctx, event)
 	scope, err := planner.connectPlanner.lookupTargetScope(bounded, event.RunID(), map[string]struct{}{"producer": {}}, nil)
 	if err != nil {

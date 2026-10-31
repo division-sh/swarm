@@ -49,15 +49,15 @@ func (p selectedRunTargetOwnerProjection) ordinarySource(evt events.Event) (ordi
 		return ordinaryPublicationSource{route: route, root: root, declarationOnly: true}, nil
 	}
 	owners := make(map[events.RouteIdentity]struct{})
-	for _, descriptor := range p.descriptors {
-		descriptor = descriptor.Normalized()
-		if descriptor.FlowInstance != expected.InstancePath {
+	for _, descriptor := range p.candidates {
+		descriptor = normalizedTargetOwnerCandidate(descriptor)
+		if descriptor.Route.FlowInstance != expected.InstancePath {
 			continue
 		}
 		if err := p.validateProviderExecutionDescriptor(route.FlowID, expected, descriptor); err != nil {
 			return ordinaryPublicationSource{}, err
 		}
-		owners[events.RouteIdentity{FlowID: route.FlowID, FlowInstance: descriptor.FlowInstance, EntityID: descriptor.EntityID}] = struct{}{}
+		owners[events.RouteIdentity{FlowID: route.FlowID, FlowInstance: descriptor.Route.FlowInstance, EntityID: descriptor.Route.EntityID}] = struct{}{}
 	}
 	if len(owners) == 0 {
 		return ordinaryPublicationSource{route: route, root: root, declarationOnly: true}, nil
@@ -112,24 +112,24 @@ func (p selectedRunTargetOwnerProjection) providerExecutionIdentity(event events
 	return runtimeflowidentity.StandingForGeneration(p.source, flowID, event.RunID())
 }
 
-func (p selectedRunTargetOwnerProjection) validateProviderExecutionDescriptor(flowID string, expected runtimeflowidentity.Instance, descriptor ActiveTargetDescriptor) error {
-	if expected.InstancePath != "" && (descriptor.FlowInstance != expected.InstancePath || descriptor.EntityID != expected.EntityID) {
+func (p selectedRunTargetOwnerProjection) validateProviderExecutionDescriptor(flowID string, expected runtimeflowidentity.Instance, descriptor pipeline.DeliveryTargetOwnerCandidate) error {
+	if expected.InstancePath != "" && (descriptor.Route.FlowInstance != expected.InstancePath || descriptor.Route.EntityID != expected.EntityID) {
 		return fmt.Errorf("provider receiver disagrees with its canonical constructed identity")
 	}
 	if descriptor.Materializing {
-		owner := events.RouteIdentity{FlowID: flowID, FlowInstance: descriptor.FlowInstance, EntityID: descriptor.EntityID}
+		owner := events.RouteIdentity{FlowID: flowID, FlowInstance: descriptor.Route.FlowInstance, EntityID: descriptor.Route.EntityID}
 		if _, admitted := p.activationOwners[owner]; !admitted {
 			return fmt.Errorf("provider receiver has no admitted same-publication constructor")
 		}
 	}
 	var err error
-	descriptor, err = p.decisionTargetDescriptor(descriptor)
+	descriptor, err = p.decisionTargetCandidate(descriptor)
 	if err != nil {
 		return err
 	}
 	err = descriptor.Availability.Validate(p.source, flowID)
 	if refusal, ok := err.(*pipeline.NoHandlerError); ok {
-		refusal.FlowInstance = descriptor.FlowInstance
+		refusal.FlowInstance = descriptor.Route.FlowInstance
 	}
 	return err
 }

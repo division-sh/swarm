@@ -44,7 +44,7 @@ func (p selectedRunTargetOwnerProjection) decisionObservation(listed pipeline.Fl
 	return observed, nil
 }
 
-func (p selectedRunTargetOwnerProjection) decisionTargetDescriptor(descriptor ActiveTargetDescriptor) (ActiveTargetDescriptor, error) {
+func (p selectedRunTargetOwnerProjection) decisionTargetCandidate(descriptor pipeline.DeliveryTargetOwnerCandidate) (pipeline.DeliveryTargetOwnerCandidate, error) {
 	if descriptor.Materializing || p.context == nil {
 		return descriptor, nil
 	}
@@ -52,7 +52,7 @@ func (p selectedRunTargetOwnerProjection) decisionTargetDescriptor(descriptor Ac
 	var selected pipeline.FlowInstanceObservation
 	for _, listed := range scope.observations {
 		identity := listed.Identity()
-		if identity.InstancePath != descriptor.FlowInstance || identity.EntityID != descriptor.EntityID {
+		if identity.InstancePath != descriptor.Route.FlowInstance || identity.EntityID != descriptor.Route.EntityID {
 			continue
 		}
 		if selected.Valid() {
@@ -80,19 +80,26 @@ func (p selectedRunTargetOwnerProjection) decisionTargetDescriptor(descriptor Ac
 }
 
 func (p selectedRunTargetOwnerProjection) decisionTargetCandidates(target events.RouteIdentity) ([]pipeline.DeliveryTargetOwnerCandidate, error) {
-	bound := p
-	bound.descriptors = append([]ActiveTargetDescriptor(nil), p.descriptors...)
-	for i, descriptor := range bound.descriptors {
-		if descriptor.FlowInstance != target.FlowInstance || target.EntityID != "" && descriptor.EntityID != target.EntityID {
+	out := make([]pipeline.DeliveryTargetOwnerCandidate, 0, len(p.candidates)+1)
+	prospective := p.prospective.Candidate()
+	for _, candidate := range p.candidates {
+		if candidate.Route.FlowInstance == target.FlowInstance && (target.EntityID == "" || candidate.Route.EntityID == target.EntityID) {
+			var err error
+			candidate, err = p.decisionTargetCandidate(candidate)
+			if err != nil {
+				return nil, err
+			}
+		}
+		candidate = normalizedTargetOwnerCandidate(candidate)
+		if !p.prospective.Empty() && candidate.Route.FlowInstance == prospective.Route.FlowInstance && candidate.Route.EntityID == prospective.Route.EntityID {
 			continue
 		}
-		var err error
-		bound.descriptors[i], err = p.decisionTargetDescriptor(descriptor)
-		if err != nil {
-			return nil, err
-		}
+		out = append(out, candidate)
 	}
-	return bound.targetOwnerCandidates(), nil
+	if !p.prospective.Empty() {
+		out = append(out, prospective)
+	}
+	return out, nil
 }
 
 // Every candidate, including a currently ineligible one, is read after identity

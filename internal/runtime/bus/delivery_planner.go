@@ -119,13 +119,13 @@ type deliveryRecipientManifest struct {
 }
 
 type deliveryRecipientPolicy struct {
-	prospective                 runtimepipeline.PreparedWorkflowPublicationState
-	instances                   runtimepipeline.FlowInstanceIndexReader
-	loadActiveAgentDescriptors  func(context.Context) (map[agentidentity.Identity]ActiveAgentDescriptor, bool, error)
-	loadActiveTargetDescriptors func(context.Context) ([]ActiveTargetDescriptor, bool, error)
-	semanticSource              semanticview.Source
-	requireTargetOwners         bool
-	runProposal                 runtimepipeline.FlowInstanceRunProposal
+	prospective                runtimepipeline.PreparedWorkflowPublicationState
+	instances                  runtimepipeline.FlowInstanceIndexReader
+	loadActiveAgentDescriptors func(context.Context) (map[agentidentity.Identity]ActiveAgentDescriptor, bool, error)
+	loadTargetOwnerCandidates  func(context.Context) ([]runtimepipeline.DeliveryTargetOwnerCandidate, bool, error)
+	semanticSource             semanticview.Source
+	requireTargetOwners        bool
+	runProposal                runtimepipeline.FlowInstanceRunProposal
 }
 
 func (p deliveryRecipientPolicy) Evaluate(ctx context.Context, evt events.Event, recipients []deliveryRecipientCandidate) (deliveryRecipientManifest, error) {
@@ -143,7 +143,7 @@ func (p deliveryRecipientPolicy) evaluate(ctx context.Context, evt events.Event,
 	}
 	descriptors := projection.agents
 	ok := projection.agentsAvailable
-	targetDescriptors := projection.descriptors
+	targetDescriptors := projection.candidates
 	targetDescriptorsOK := projection.targetsAvailable
 	if !ok {
 		liveRecipients := normalizeDeliveryRecipientCandidates(recipients)
@@ -160,7 +160,7 @@ func (p deliveryRecipientPolicy) evaluate(ctx context.Context, evt events.Event,
 			AgentLifecycles:     agentLifecycleAdmissionsForCandidates(persistedRecipients),
 		}
 		if targetDescriptorsOK && len(eventDeliveryTargetRoutes(evt)) > 0 && len(manifest.Recipients) == 0 {
-			manifest.TargetFailure = targetDeliveryFailure(evt, targetDescriptors)
+			manifest.TargetFailure = targetDeliveryFailure(evt, targetDescriptors, nil)
 		}
 		return manifest, nil
 	}
@@ -745,10 +745,10 @@ func (eb *EventBus) newEventBusDeliveryPlanner() deliveryPlanner {
 			describeSubscribersForEvent:         eb.describeSubscribersForEvent,
 		},
 		deliveryRecipientPolicy{
-			loadActiveAgentDescriptors:  eb.activeAgentDescriptors,
-			loadActiveTargetDescriptors: eb.activeTargetDescriptors,
-			semanticSource:              eb.semanticSource,
-			requireTargetOwners:         !eb.ephemeral,
+			loadActiveAgentDescriptors: eb.activeAgentDescriptors,
+			loadTargetOwnerCandidates:  eb.targetOwnerCandidates,
+			semanticSource:             eb.semanticSource,
+			requireTargetOwners:        !eb.ephemeral,
 		},
 		eb.connectRoutePlanner,
 	)
@@ -977,18 +977,16 @@ func filterDeliveryRecipientCandidates(
 	evt events.Event,
 	recipients []deliveryRecipientCandidate,
 	descriptors map[agentidentity.Identity]ActiveAgentDescriptor,
-	targetDescriptors []ActiveTargetDescriptor,
+	targetDescriptors []runtimepipeline.DeliveryTargetOwnerCandidate,
 	projection selectedRunTargetOwnerProjection,
 	localSource ordinaryPublicationSource,
 ) (deliveryRecipientManifest, error) {
 	recipients = normalizeDeliveryRecipientCandidates(recipients)
-	targetFailureDescriptors := append([]ActiveTargetDescriptor(nil), targetDescriptors...)
-	targetFailureDescriptors = append(targetFailureDescriptors, activeTargetDescriptorsFromAgents(descriptors)...)
 	eventEntityID := strings.TrimSpace(evt.EntityID())
 	targets := eventDeliveryTargetRoutes(evt)
 	if len(recipients) == 0 {
 		return deliveryRecipientManifest{
-			TargetFailure: targetDeliveryFailure(evt, targetFailureDescriptors),
+			TargetFailure: targetDeliveryFailure(evt, targetDescriptors, descriptors),
 		}, nil
 	}
 	singularTarget := evt.TargetRoute()
@@ -1068,7 +1066,7 @@ func filterDeliveryRecipientCandidates(
 		AgentLifecycles:     agentLifecycleAdmissionsForCandidates(allowedCandidates),
 	}
 	if len(targets) > 0 && len(manifest.LiveRecipients) == 0 {
-		manifest.TargetFailure = targetDeliveryFailure(evt, targetFailureDescriptors)
+		manifest.TargetFailure = targetDeliveryFailure(evt, targetDescriptors, descriptors)
 	}
 	return manifest, nil
 }
@@ -1520,12 +1518,12 @@ func exactRootTarget(route events.RouteIdentity, root semanticview.RootExecution
 	return root.Matches(route.FlowID, route.FlowInstance)
 }
 
-func targetDeliveryFailure(evt events.Event, descriptors []ActiveTargetDescriptor) runtimepinrouting.TargetFailure {
+func targetDeliveryFailure(evt events.Event, candidates []runtimepipeline.DeliveryTargetOwnerCandidate, agents map[agentidentity.Identity]ActiveAgentDescriptor) runtimepinrouting.TargetFailure {
 	targets := eventDeliveryTargetRoutes(evt)
 	if len(targets) == 0 {
 		return 0
 	}
-	if !allTargetsHaveLiveDescriptor(targets, descriptors) {
+	if !allTargetsHaveLiveOwner(targets, candidates, agents) {
 		return runtimepinrouting.FailureTargetUnreachableTerminated
 	}
 	return runtimepinrouting.FailureTargetNotSubscribed
@@ -1538,19 +1536,25 @@ func eventDeliveryTargetRoutes(evt events.Event) []events.RouteIdentity {
 	return evt.TargetRoutes()
 }
 
-func allTargetsHaveLiveDescriptor(targets []events.RouteIdentity, descriptors []ActiveTargetDescriptor) bool {
+func allTargetsHaveLiveOwner(targets []events.RouteIdentity, candidates []runtimepipeline.DeliveryTargetOwnerCandidate, agents map[agentidentity.Identity]ActiveAgentDescriptor) bool {
 	if len(targets) == 0 {
 		return true
 	}
-	if len(descriptors) == 0 {
-		return false
-	}
 	for _, target := range targets {
 		found := false
-		for _, descriptor := range descriptors {
-			if routeMatchesTargetDescriptor(target, descriptor) {
+		for _, candidate := range candidates {
+			if routeMatchesTargetCoordinate(target, candidate.Route) {
 				found = true
 				break
+			}
+		}
+		if !found {
+			for _, agent := range agents {
+				agent = agent.Normalized()
+				if agent.EntityID != "" && routeMatchesTargetCoordinate(target, events.RouteIdentity{EntityID: agent.EntityID, FlowInstance: agent.Identity.FlowInstance()}) {
+					found = true
+					break
+				}
 			}
 		}
 		if !found {
@@ -1581,24 +1585,24 @@ func routeMatchesAgentDescriptor(route events.RouteIdentity, descriptor ActiveAg
 	if descriptor.Identity.Route.Presence == agentidentity.RouteRoot {
 		return exactRootTarget(route, root) && descriptor.EntityID == route.Normalized().EntityID
 	}
-	return routeMatchesTargetDescriptor(route, descriptor.TargetDescriptor())
+	return routeMatchesTargetCoordinate(route, events.RouteIdentity{EntityID: descriptor.EntityID, FlowInstance: descriptor.Identity.FlowInstance()})
 }
 
-func routeMatchesTargetDescriptor(route events.RouteIdentity, descriptor ActiveTargetDescriptor) bool {
+func routeMatchesTargetCoordinate(route, owner events.RouteIdentity) bool {
 	route = route.Normalized()
-	descriptor = descriptor.Normalized()
-	if descriptor.EntityID == "" && descriptor.FlowInstance == "" {
+	owner = owner.Normalized()
+	if owner.EntityID == "" && owner.FlowInstance == "" {
 		return false
 	}
 	matched := false
 	if route.EntityID != "" {
-		if descriptor.EntityID != route.EntityID {
+		if owner.EntityID != route.EntityID {
 			return false
 		}
 		matched = true
 	}
 	if route.FlowInstance != "" {
-		if descriptor.FlowInstance != route.FlowInstance {
+		if owner.FlowInstance != route.FlowInstance {
 			return false
 		}
 		matched = true

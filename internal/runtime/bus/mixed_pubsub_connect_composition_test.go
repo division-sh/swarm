@@ -13,6 +13,7 @@ import (
 	"github.com/division-sh/swarm/internal/events"
 	"github.com/division-sh/swarm/internal/runtime/core/agentidentity"
 	runtimepinrouting "github.com/division-sh/swarm/internal/runtime/core/pinrouting"
+	runtimepipeline "github.com/division-sh/swarm/internal/runtime/pipeline"
 	"github.com/division-sh/swarm/internal/runtime/semanticview"
 	"github.com/google/uuid"
 	"gopkg.in/yaml.v3"
@@ -141,14 +142,14 @@ func TestMixedPubsubConnectCompositionNodeAgentConnect(t *testing.T) {
 	}
 	agentIdentity := connectRoutePlanTestDeclaredAgentIdentity(t, source, "producer", "producer-agent", "producer")
 	agentAdmission := testAgentSubscriptionAdmissionForFlow(t, "producer-agent", "producer", events.EventType("producer/"+eventName))
-	_ = subscribeTestAgentAdmissionWithIdentity(t, eb, agentAdmission, agentIdentity, owners[0].EntityID)
+	_ = subscribeTestAgentAdmissionWithIdentity(t, eb, agentAdmission, agentIdentity, owners[0].Route.EntityID)
 	defer unsubscribeTestAgent(eb, "producer-agent")
 
 	event := connectRoutePlanStaticProducerEvent(
 		uuid.NewString(), events.EventType("producer/"+eventName), "", "", []byte(`{"seed":"node-agent-connect"}`), 0, "", "",
 		events.EnvelopeForEntityID(events.EventEnvelope{Source: events.RouteIdentity{
-			FlowID: "producer", FlowInstance: "producer", EntityID: owners[0].EntityID,
-		}}, owners[0].EntityID),
+			FlowID: "producer", FlowInstance: "producer", EntityID: owners[0].Route.EntityID,
+		}}, owners[0].Route.EntityID),
 		time.Now().UTC(),
 	)
 	plan, err := eb.CheckPublishRecipientPlan(context.Background(), event)
@@ -270,22 +271,25 @@ func mixedFanoutToFanoutSource(t *testing.T, reverse bool) semanticview.Source {
 	return semanticview.Wrap(loadTargetRouteTempBundle(t, files))
 }
 
-func mixedStaticOwners(t testing.TB, source semanticview.Source, flowIDs ...string) []ActiveTargetDescriptor {
+func mixedStaticOwners(t testing.TB, source semanticview.Source, flowIDs ...string) []runtimepipeline.DeliveryTargetOwnerCandidate {
 	t.Helper()
-	out := make([]ActiveTargetDescriptor, 0, len(flowIDs))
+	out := make([]runtimepipeline.DeliveryTargetOwnerCandidate, 0, len(flowIDs))
 	for _, flowID := range flowIDs {
 		instance := ConstructedFlowInstanceIdentityFixture(source, flowID, "", busInternalTestRunID)
-		out = append(out, ActiveTargetDescriptor{ID: flowID + "-owner", FlowInstance: instance.InstancePath, EntityID: instance.EntityID})
+		out = append(out, runtimepipeline.DeliveryTargetOwnerCandidate{
+			Route: events.RouteIdentity{FlowInstance: instance.InstancePath,
+				EntityID: instance.EntityID},
+		})
 	}
 	return out
 }
 
-func installMixedStaticConstructionFixture(t testing.TB, store *targetRouteMemoryStore, source semanticview.Source, owners []ActiveTargetDescriptor) {
+func installMixedStaticConstructionFixture(t testing.TB, store *targetRouteMemoryStore, source semanticview.Source, owners []runtimepipeline.DeliveryTargetOwnerCandidate) {
 	t.Helper()
 	root := ConstructedFlowInstanceIdentityFixture(source, semanticview.RootExecutionFlowID(source), "", busInternalTestRunID)
 	store.installIndexObservation(constructionIndexObservation(t, source, busInternalTestRunID, root, ""))
 	for _, owner := range owners {
-		instance := StoredFlowInstanceIdentityFixture(source, owner.FlowInstance, "", busInternalTestRunID, owner.EntityID)
+		instance := StoredFlowInstanceIdentityFixture(source, owner.Route.FlowInstance, "", busInternalTestRunID, owner.Route.EntityID)
 		observed := constructionIndexObservation(t, source, busInternalTestRunID, instance, "")
 		store.installIndexObservation(observed)
 		receipt, native, err := observed.NativeConstruction()
@@ -296,19 +300,19 @@ func installMixedStaticConstructionFixture(t testing.TB, store *targetRouteMemor
 	}
 }
 
-func mixedOwnerMap(owners []ActiveTargetDescriptor) map[string]ActiveTargetDescriptor {
-	out := make(map[string]ActiveTargetDescriptor, len(owners))
+func mixedOwnerMap(owners []runtimepipeline.DeliveryTargetOwnerCandidate) map[string]runtimepipeline.DeliveryTargetOwnerCandidate {
+	out := make(map[string]runtimepipeline.DeliveryTargetOwnerCandidate, len(owners))
 	for _, owner := range owners {
-		out[owner.FlowInstance] = owner
+		out[owner.Route.FlowInstance] = owner
 	}
 	return out
 }
 
-func mixedStaticSourceEvent(flowID, localEvent string, owner ActiveTargetDescriptor, seed string) events.Event {
+func mixedStaticSourceEvent(flowID, localEvent string, owner runtimepipeline.DeliveryTargetOwnerCandidate, seed string) events.Event {
 	return connectRoutePlanStaticProducerEvent(
 		uuid.NewString(), events.EventType(flowID+"/"+localEvent), "", "", []byte(fmt.Sprintf(`{"seed":%q}`, seed)), 0, "", "",
 		events.EventEnvelope{Source: events.RouteIdentity{
-			FlowID: flowID, FlowInstance: flowID, EntityID: owner.EntityID,
+			FlowID: flowID, FlowInstance: flowID, EntityID: owner.Route.EntityID,
 		}},
 		time.Now().UTC(),
 	)

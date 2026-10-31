@@ -636,61 +636,10 @@ func (d ActiveAgentDescriptor) Normalized() ActiveAgentDescriptor {
 	}
 }
 
-func (d ActiveAgentDescriptor) TargetDescriptor() ActiveTargetDescriptor {
-	d = d.Normalized()
-	return ActiveTargetDescriptor{
-		ID:           d.Identity.AgentID(),
-		EntityID:     d.EntityID,
-		FlowInstance: d.Identity.FlowInstance(),
-	}.Normalized()
-}
-
 // ActiveAgentDescriptorLister is an optional capability for runtime delivery
 // planning. PostgresStore implements this; InMemoryEventStore does not.
 type ActiveAgentDescriptorLister interface {
 	ListActiveAgentDescriptors(ctx context.Context, runID string) ([]ActiveAgentDescriptor, error)
-}
-
-type ActiveTargetDescriptor struct {
-	FlowID        string
-	Availability  runtimepipeline.DeliveryTargetAvailability
-	ID            string
-	EntityID      string
-	FlowInstance  string
-	AddressFields map[string]string
-	Materializing bool
-}
-
-func (d ActiveTargetDescriptor) Normalized() ActiveTargetDescriptor {
-	flowInstance := strings.Trim(strings.TrimSpace(d.FlowInstance), "/")
-	return ActiveTargetDescriptor{
-		FlowID:        d.FlowID,
-		Availability:  d.Availability,
-		ID:            strings.TrimSpace(d.ID),
-		EntityID:      strings.TrimSpace(d.EntityID),
-		FlowInstance:  flowInstance,
-		AddressFields: normalizeDescriptorAddressFields(d.AddressFields),
-		Materializing: d.Materializing,
-	}
-}
-
-func normalizeDescriptorAddressFields(in map[string]string) map[string]string {
-	if len(in) == 0 {
-		return nil
-	}
-	out := make(map[string]string, len(in))
-	for key, value := range in {
-		key = strings.TrimSpace(key)
-		value = strings.TrimSpace(value)
-		if key == "" || value == "" {
-			continue
-		}
-		out[key] = value
-	}
-	if len(out) == 0 {
-		return nil
-	}
-	return out
 }
 
 type RunLifecycleSnapshot struct {

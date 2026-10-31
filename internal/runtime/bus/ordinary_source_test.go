@@ -42,9 +42,15 @@ func TestOrdinaryProviderSourceUsesExactSelectedOwner(t *testing.T) {
 				t.Fatal(err)
 			}
 			evt := eventtest.ExistingRunRootIngressWithRoutingSource(eventtest.UUID("event"), "inbound.telegram.text_message", "gateway", "", []byte("{}"), 0, runID, events.EventEnvelope{}, routing, time.Now())
-			projection := selectedRunTargetOwnerProjection{source: source, descriptors: []ActiveTargetDescriptor{
-				{FlowInstance: instance, EntityID: entityID},
-				{FlowInstance: "beta", EntityID: entityID},
+			projection := selectedRunTargetOwnerProjection{source: source, candidates: []pipeline.DeliveryTargetOwnerCandidate{
+				{
+					Route: events.RouteIdentity{FlowInstance: instance,
+						EntityID: entityID},
+				},
+				{
+					Route: events.RouteIdentity{FlowInstance: "beta",
+						EntityID: entityID},
+				},
 			}}
 			constructed := StoredFlowInstanceIdentityFixture(source, flow, "", runID, entityID)
 			observation := constructionIndexObservation(t, source, runID, constructed, "")
@@ -101,7 +107,7 @@ func TestOrdinaryProviderSourceUsesExactSelectedOwner(t *testing.T) {
 				projection.agents = map[agentidentity.Identity]ActiveAgentDescriptor{localAgent: {Identity: localAgent, EntityID: descriptorEntity}}
 				manifest, err := filterDeliveryRecipientCandidates(source, evt, []deliveryRecipientCandidate{candidate},
 					projection.agents,
-					projection.descriptors, projection, local)
+					projection.candidates, projection, local)
 				if err != nil {
 					t.Fatal(err)
 				}
@@ -121,16 +127,26 @@ func TestOrdinaryProviderSourceUsesExactSelectedOwner(t *testing.T) {
 			if evt.RoutingSource() != routing || evt.HasTargetRoute() {
 				t.Fatal("agent filtering rewrote the admitted source or invented an event target")
 			}
-			projection.descriptors = []ActiveTargetDescriptor{{FlowInstance: "beta", EntityID: entityID}}
+			projection.candidates = []pipeline.DeliveryTargetOwnerCandidate{{
+				Route: events.RouteIdentity{FlowInstance: "beta",
+					EntityID: entityID},
+			}}
 			absent, err := projection.ordinarySource(evt)
 			if err != nil || !absent.declarationOnly || len(absent.eventKeys(evt)) != 0 || absent.includesSubscriber(Subscriber{Recipient: events.MustAgentDeliveryRecipient(localAgent.AgentID()), AgentPlan: localPlan}) {
 				t.Fatalf("zero-instance declaration borrowed foreign execution: %+v err=%v", absent, err)
 			}
-			projection.descriptors = []ActiveTargetDescriptor{{FlowInstance: instance, EntityID: eventtest.UUID("other-entity")}}
+			projection.candidates = []pipeline.DeliveryTargetOwnerCandidate{{
+				Route: events.RouteIdentity{FlowInstance: instance,
+					EntityID: eventtest.UUID("other-entity")},
+			}}
 			if _, err := projection.ordinarySource(evt); err == nil {
 				t.Fatal("wrong entity supplied the source instance")
 			}
-			projection.descriptors = []ActiveTargetDescriptor{{FlowInstance: instance, EntityID: entityID, Materializing: true}}
+			projection.candidates = []pipeline.DeliveryTargetOwnerCandidate{{
+				Route: events.RouteIdentity{FlowInstance: instance,
+					EntityID: entityID},
+				Materializing: true,
+			}}
 			if _, err := projection.ordinarySource(evt); err == nil {
 				t.Fatal("uncommitted activation supplied provider source authority")
 			}

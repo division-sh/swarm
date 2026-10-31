@@ -10,6 +10,7 @@ import (
 	runtimebus "github.com/division-sh/swarm/internal/runtime/bus"
 	runtimecontracts "github.com/division-sh/swarm/internal/runtime/contracts"
 	runtimeflowidentity "github.com/division-sh/swarm/internal/runtime/core/flowidentity"
+	runtimepipeline "github.com/division-sh/swarm/internal/runtime/pipeline"
 	"github.com/division-sh/swarm/internal/runtime/semanticview"
 	"github.com/division-sh/swarm/internal/runtime/testfixtures/canonicalrouting"
 )
@@ -72,9 +73,15 @@ func TestImportBoundaryConnectConsumesBindingsForInputAndRootOutputDelivery(t *t
 	if len(issues) != 0 || len(plans) != 2 {
 		t.Fatalf("connect plans = %#v, issues = %#v, want two valid plans", plans, issues)
 	}
-	store := &routePersistenceTestStore{targetOwners: []runtimebus.ActiveTargetDescriptor{
-		{ID: ".", FlowInstance: eventBusTestRunID, EntityID: runtimeflowidentity.EntityID(eventBusTestRunID)},
-		{ID: "worker", FlowInstance: "worker", EntityID: runtimeflowidentity.EntityID("worker")},
+	store := &routePersistenceTestStore{targetOwners: []runtimepipeline.DeliveryTargetOwnerCandidate{
+		{
+			Route: events.RouteIdentity{FlowInstance: eventBusTestRunID,
+				EntityID: runtimeflowidentity.EntityID(eventBusTestRunID)},
+		},
+		{
+			Route: events.RouteIdentity{FlowInstance: "worker",
+				EntityID: runtimeflowidentity.EntityID("worker")},
+		},
 	}}
 	root := runtimebus.ConstructedFlowInstanceIdentityFixture(source, ".", "", eventBusTestRunID)
 	worker := runtimebus.ConstructedFlowInstanceIdentityFixture(source, "worker", "", eventBusTestRunID)
