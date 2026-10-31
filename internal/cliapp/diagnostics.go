@@ -83,6 +83,7 @@ type diagnosticRunGetResult struct {
 
 type DiagnosticRunDiagnosisResult struct {
 	Run              diagnosticRunHeader                         `json:"run"`
+	ObservedAt       *time.Time                                  `json:"observed_at,omitempty"`
 	NextWakeAt       *time.Time                                  `json:"next_wake_at,omitempty"`
 	OperationalState *string                                     `json:"operational_state"`
 	BlockingLayer    *string                                     `json:"blocking_layer"`
@@ -1057,6 +1058,9 @@ func validateDiagnosticRunListResult(result diagnosticRunListResult) error {
 }
 
 func validateDiagnosticRunDiagnosis(result DiagnosticRunDiagnosisResult) error {
+	if result.ObservedAt != nil && result.ObservedAt.IsZero() {
+		return fmt.Errorf("malformed run.diagnose result: observed_at must be a nonzero timestamp")
+	}
 	if result.NextWakeAt != nil && result.NextWakeAt.IsZero() {
 		return fmt.Errorf("malformed run.diagnose result: next_wake_at must be a nonzero timestamp")
 	}
@@ -1387,6 +1391,19 @@ func writeDiagnosticRunDiagnosis(out io.Writer, result DiagnosticRunDiagnosisRes
 			value += "; " + attribution.EvidenceReason
 		}
 		rows = append(rows, cliLabeledDetailRow{Label: label, Value: value})
+	}
+	if result.ObservedAt != nil {
+		rows = append(rows, cliLabeledDetailRow{Label: "observed", Value: result.ObservedAt.UTC().Format(time.RFC3339Nano)})
+	}
+	for _, instance := range result.Instances {
+		value := fmt.Sprintf("%s: %s (%s)", instance.FlowInstance, instance.Stage, formatCLIHumanCode(cliHumanCodeOperationalState, instance.Disposition))
+		if instance.NextWakeAt != nil {
+			value += "; next wake " + instance.NextWakeAt.UTC().Format(time.RFC3339Nano)
+		}
+		if instance.RefusedEmits > 0 {
+			value += "; " + formatCLIHumanCount(instance.RefusedEmits, "refused emit", "refused emits")
+		}
+		rows = append(rows, cliLabeledDetailRow{Label: "instance", Value: value})
 	}
 	rows = append(rows, diagnosticRunHeaderRows(result.Run)...)
 	if projectedRunStatus := diagnosticRunStatusLabel(result.Run); projectedRunStatus != formatCLIHumanCode(cliHumanCodeOperationalState, state) {

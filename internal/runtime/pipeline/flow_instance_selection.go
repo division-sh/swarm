@@ -118,7 +118,7 @@ func selectObservedFlowInstance(request FlowInstanceSelectionRequest, observatio
 	}
 	if err := NewDeliveryTargetAvailability(stage, instance.Status, !instance.TerminatedAt.IsZero()).Validate(request.Lookup.Source(), request.Lookup.FlowID()); err != nil {
 		switch err.(type) {
-		case *TerminalReceiverError, *TerminatedReceiverError:
+		case *NoHandlerError, *TerminatedReceiverError:
 			return FlowInstanceSelection{unavailable: observation.Owner()}, err
 		}
 		return FlowInstanceSelection{}, err

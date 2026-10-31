@@ -7,13 +7,17 @@ import (
 
 	"github.com/division-sh/swarm/internal/operatorread"
 	"github.com/division-sh/swarm/internal/platform"
+	runtimepkg "github.com/division-sh/swarm/internal/runtime"
 	"github.com/division-sh/swarm/internal/runtime/agentmemory"
 	"github.com/division-sh/swarm/internal/runtime/contracts"
 	"github.com/division-sh/swarm/internal/runtime/correlation"
 	"github.com/division-sh/swarm/internal/runtime/decisioncard"
 	"github.com/division-sh/swarm/internal/runtime/deliverylifecycle"
 	"github.com/division-sh/swarm/internal/runtime/effects"
+	"github.com/division-sh/swarm/internal/runtime/executionposture"
+	"github.com/division-sh/swarm/internal/runtime/failures"
 	"github.com/division-sh/swarm/internal/runtime/genericschedule"
+	"github.com/division-sh/swarm/internal/runtime/pipeline"
 	"github.com/division-sh/swarm/internal/runtime/sessions"
 	"github.com/division-sh/swarm/internal/testutil/sourceartifactfixture"
 	"github.com/google/uuid"
@@ -68,9 +72,9 @@ func TestRunOperationalSessionWorkIsNotStalledBothStores(t *testing.T) {
 					t.Fatal(err)
 				}
 				projected := operatorread.ProjectRunOperationalStatus(report)
-				wantState, wantDisposition, wantSessions := "running", "active", 1
+				wantState, wantDisposition, wantSessions := "running", "live", 1
 				if released {
-					wantState, wantDisposition, wantSessions = "stalled", "stalled", 0
+					wantState, wantDisposition, wantSessions = "stalled", "waiting", 0
 				}
 				if projected.State != wantState || report.TestQuiescence.ActiveSessionLeases != wantSessions || report.EventCount != 1 {
 					t.Fatalf("session work changed classification: released=%t status=%+v work=%+v", released, projected, report.TestQuiescence)
@@ -125,7 +129,7 @@ func TestRunOperationalFutureTimerIsWaitingBothStores(t *testing.T) {
 			for _, instance := range projected.Instances {
 				if instance.FlowInstance == "global" {
 					found = true
-					if instance.Disposition != "waiting" || instance.Work.Timers != 1 || instance.Work.Deliveries != 0 || instance.Work.Sessions != 0 {
+					if instance.Disposition != "waiting" || instance.Work.Timers != 1 || instance.Work.DueTimers != 0 || instance.NextWakeAt == nil || !instance.NextWakeAt.After(time.Now()) || instance.Work.Deliveries != 0 || instance.Work.Sessions != 0 {
 						t.Fatalf("timer ownership = %+v", instance)
 					}
 				}
@@ -137,6 +141,28 @@ func TestRunOperationalFutureTimerIsWaitingBothStores(t *testing.T) {
 				if attribution.FlowInstance == "global" {
 					t.Fatalf("waiting instance acquired stall blame: %+v", attribution)
 				}
+			}
+		}
+		due := testAgentGenericScheduleCommand(t, fixture.origin.RunID(), fixture.agentID, "global", source.Route().EntityID, "due-wake-proof", genericschedule.AbsoluteDue(time.Now().UTC().Add(-time.Minute)))
+		admitGenericScheduleFixture(t, ctx, selected.selected.(genericschedule.Store), due)
+		logger := runtimepkg.NewRuntimeLogger(fixture.store.(runtimepkg.RuntimeLogPersistence), executionposture.Live, currentPlatformPayloadAdmitterForStoreTest(t))
+		emittedID := uuid.NewString()
+		for _, path := range []string{"global", "global", "foreign"} {
+			refusal := failures.FromError(&pipeline.NoHandlerError{FlowID: "global", FlowInstance: path, Stage: "done"}, "test", "readout")
+			if err := logger.Log(correlation.WithRootAdmission(ctx, rooted.Admission()), runtimepkg.RuntimeLogEntry{
+				Level: "warn", Message: refusal.Failure.Message, Component: "tool-executor", Action: "emit_tool_outcome", Failure: &refusal.Failure,
+				Detail: map[string]any{"emitted_event_id": emittedID},
+			}); err != nil {
+				t.Fatal(err)
+			}
+		}
+		report, err := fixture.store.(operatorread.RunReader).LoadRunDebugReport(ctx, fixture.origin.RunID(), operatorread.RunDebugQueryOptions{})
+		if err != nil {
+			t.Fatal(err)
+		}
+		for _, instance := range operatorread.ProjectRunOperationalStatus(report).Instances {
+			if instance.FlowInstance == "global" && (instance.Disposition != "live" || instance.Work.Timers != 2 || instance.Work.DueTimers != 1 || instance.RefusedEmits != 1) {
+				t.Fatalf("due wake or distinct exact-instance refusals were lost: %+v", instance)
 			}
 		}
 		requireProviderAttemptCount(t, fixture, 0)

@@ -1293,7 +1293,7 @@ func waitForGoldenTerminalRun(t *testing.T, process *releaseServeProcess, store 
 				if instance.Stage == "" {
 					continue
 				}
-				if instance.Disposition != "final" {
+				if instance.Disposition != "done" {
 					return false, nil
 				}
 				finals++

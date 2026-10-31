@@ -156,7 +156,7 @@ func TestA2JoinAdmissionFirstPublicationAndRetainedEvidence(t *testing.T) {
 				return
 			}
 			if test.class == "" {
-				var refusal *TerminalReceiverError
+				var refusal *NoHandlerError
 				if !errors.As(err, &refusal) {
 					t.Fatalf("fresh terminal publication was admitted or reclassified: %v", err)
 				}

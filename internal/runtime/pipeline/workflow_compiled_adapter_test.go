@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"context"
 	"encoding/json"
+	"errors"
 	"reflect"
 	"slices"
 	"strings"
@@ -536,8 +537,9 @@ func VerifyNativePipelineCompiledTransitionStageGuardsOnBothStoresForTest(t *tes
 				if tc.reject {
 					handler := f.pc.SemanticSource().ExecutableNodeEventHandlers(f.node)["direct"]
 					_, admissionErr := f.pc.prepareDeliveryTargetApplication(f.ctx, f.node.Key(), MustDeliveryTargetHandler(f.node).ForEvent("direct"), handler, evt, events.MustExistingEntityTarget(events.RouteIdentity{FlowID: f.flow, FlowInstance: f.path, EntityID: f.entityID}))
-					if admissionErr == nil || !strings.Contains(admissionErr.Error(), `terminal state "Ready"`) {
-						t.Fatalf("terminal receiver admission = %v, want exact terminal refusal", admissionErr)
+					var refusal *NoHandlerError
+					if !errors.As(admissionErr, &refusal) || refusal.Stage != "Ready" {
+						t.Fatalf("receiver admission = %v, want exact no-handler refusal", admissionErr)
 					}
 					result, err = executeNodeContractHandlerWithHandoff(t, f.pc, f.ctx, f.node, handler, workflowTriggerContext{Event: evt, HandlerEventKey: "direct", State: f.state()}, false)
 				} else {

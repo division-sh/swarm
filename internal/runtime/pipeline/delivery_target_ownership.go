@@ -9,6 +9,7 @@ import (
 	"github.com/division-sh/swarm/internal/events"
 	runtimeidentity "github.com/division-sh/swarm/internal/runtime/core/identity"
 	runtimedelivery "github.com/division-sh/swarm/internal/runtime/deliverylifecycle"
+	"github.com/division-sh/swarm/internal/runtime/failures"
 	"github.com/division-sh/swarm/internal/runtime/semanticview"
 )
 
@@ -30,15 +31,22 @@ type DeliveryTargetAvailability struct {
 	terminated bool
 }
 
-// TerminalReceiverError is a proven receiver-state refusal, not an inactive
-// lifecycle or storage failure. Wrapping must preserve this typed cause.
-type TerminalReceiverError struct {
-	FlowID string
-	Stage  string
+// NoHandlerError describes ordinary receiver eligibility, not resource lifetime.
+type NoHandlerError struct {
+	FlowID        string
+	FlowInstance  string
+	Stage         string
+	HandledEvents []string
 }
 
-func (e *TerminalReceiverError) Error() string {
-	return fmt.Sprintf("receiver target owner is unavailable: terminal state %q in flow %q", e.Stage, e.FlowID)
+func (e *NoHandlerError) Error() string {
+	return e.Unwrap().Error()
+}
+
+func (e *NoHandlerError) Unwrap() error {
+	return failures.New(failures.ClassUnexpectedArrival, "no_route", "pipeline", "receiver_admission", map[string]any{
+		"flow_id": e.FlowID, "flow_instance": e.FlowInstance, "stage": e.Stage, "handled_events": append([]string{}, e.HandledEvents...),
+	})
 }
 
 // TerminatedReceiverError proves occupied, non-executable construction.
@@ -59,26 +67,35 @@ func NewDeliveryTargetAvailability(stage, status string, terminated bool) Delive
 }
 
 func (a DeliveryTargetAvailability) Validate(source semanticview.Source, flowID string) error {
+	final, err := a.validateOwner(source, flowID)
+	if err != nil {
+		return err
+	}
+	if final {
+		return &NoHandlerError{FlowID: flowID, Stage: a.stage, HandledEvents: []string{}}
+	}
+	return nil
+}
+
+func (a DeliveryTargetAvailability) validateOwner(source semanticview.Source, flowID string) (bool, error) {
 	if a.inactive {
 		if a.terminated {
-			return &TerminatedReceiverError{FlowID: flowID}
+			return false, &TerminatedReceiverError{FlowID: flowID}
 		}
-		return fmt.Errorf("receiver target owner is unavailable: lifecycle is not active")
+		return false, fmt.Errorf("receiver target owner is unavailable: lifecycle is not active")
 	}
 	if a.stage != "" {
 		graph, ok := semanticview.WorkflowStageTopology(source, flowID)
 		if !ok || graph.FlowID != flowID {
-			return fmt.Errorf("receiver flow %q has no selected compiled stage topology", flowID)
+			return false, fmt.Errorf("receiver flow %q has no selected compiled stage topology", flowID)
 		}
 		stage, err := graph.ResolveStoredStage(a.stage)
 		if err != nil {
-			return fmt.Errorf("receiver stage admission: %w", err)
+			return false, fmt.Errorf("receiver stage admission: %w", err)
 		}
-		if stage.IsFinal() {
-			return &TerminalReceiverError{FlowID: flowID, Stage: stage.ID()}
-		}
+		return stage.IsFinal(), nil
 	}
-	return nil
+	return false, nil
 }
 
 // DeliveryTargetHandler is the admitted, non-durable receiver fact consumed by
@@ -392,6 +409,9 @@ func matchingDeliveryTargetOwnerCandidates(source semanticview.Source, blueprint
 		}
 		if !candidate.Materializing {
 			if err := candidate.Availability.Validate(source, blueprint.FlowID); err != nil {
+				if refusal, ok := err.(*NoHandlerError); ok {
+					refusal.FlowInstance = route.FlowInstance
+				}
 				return nil, nil, err
 			}
 		}

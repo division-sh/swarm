@@ -51,9 +51,9 @@ func (r connectRoutePlanResolver) explicitReceiverTerminated(ctx context.Context
 		stage = instance.CurrentState
 	}
 	err = pipeline.NewDeliveryTargetAvailability(stage, instance.Status, false).Validate(r.source, instance.WorkflowName)
-	var terminal *pipeline.TerminalReceiverError
+	var terminal *pipeline.NoHandlerError
 	if errors.As(err, &terminal) {
-		return pipeline.StandingConstructionIsKeyless(r.source, instance.WorkflowName)
+		terminal.FlowInstance = instance.StorageRef
 	}
 	return false, err
 }
@@ -89,7 +89,7 @@ func (r connectRoutePlanResolver) replyOriginAvailable(ctx context.Context, runI
 		stage = instance.CurrentState
 	}
 	err = pipeline.NewDeliveryTargetAvailability(stage, instance.Status, !instance.TerminatedAt.IsZero()).Validate(r.source, instance.WorkflowName)
-	var terminal *pipeline.TerminalReceiverError
+	var terminal *pipeline.NoHandlerError
 	if errors.As(err, &terminal) {
 		return false, nil
 	}

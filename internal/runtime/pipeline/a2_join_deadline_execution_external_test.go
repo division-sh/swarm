@@ -207,7 +207,7 @@ func TestA2JoinDeadlineExecutionRetainsEntryAndPartialContextOnBothStores(t *tes
 				late := eventtest.ExistingRunRootIngressWithRoutingSource(uuid.NewString(), "item.completed", "operator", "",
 					[]byte(`{"member_id":"a","result":{"value":"a"}}`), 0, runID,
 					events.EnvelopeForEntityID(events.EventEnvelope{}, runID), eventtest.RootRoutingSource(runID), time.Now().UTC())
-				var terminal *pipeline.TerminalReceiverError
+				var terminal *pipeline.NoHandlerError
 				if err := bus.PublishAcknowledged(ctx, late); !errors.As(err, &terminal) || terminal.Stage != "ready" {
 					t.Fatalf("new late publication did not retain strict terminal-owner refusal: %v", err)
 				}

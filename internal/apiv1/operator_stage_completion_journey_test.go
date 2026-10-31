@@ -123,7 +123,7 @@ func TestExactStageCompletionRealWriterAndRehydratedSourceBothStores(t *testing.
 				}
 				for _, instance := range diagnosis.Instances {
 					if instance.FlowInstance == "discovery" {
-						return instance.Stage == "Ready" && instance.Disposition == "final" && diagnosis.TestQuiescence.Ready && diagnosis.Run.Status == "live" && diagnosis.Run.EndedAt == nil,
+						return instance.Stage == "Ready" && instance.Disposition == "done" && diagnosis.TestQuiescence.Ready && diagnosis.Run.Status == "live" && diagnosis.Run.EndedAt == nil,
 							fmt.Errorf("final instance=%+v settlement=%+v run=%+v", instance, diagnosis.TestQuiescence, diagnosis.Run)
 					}
 				}

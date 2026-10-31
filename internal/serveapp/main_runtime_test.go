@@ -5322,7 +5322,7 @@ func requireServedFinalInstancesSettled(t *testing.T, endpoint, runID string, st
 			found := false
 			for _, instance := range last.Instances {
 				if instance.FlowInstance == path {
-					found = instance.Stage == stage && instance.Disposition == "final"
+					found = instance.Stage == stage && instance.Disposition == "done"
 					break
 				}
 			}

@@ -1006,16 +1006,22 @@ func eventPublishFailureError(params eventPublicationParams, err error, retryabl
 	if errors.As(err, &live) {
 		return runControlError(params.RunID, err)
 	}
-	var terminal *pipeline.TerminalReceiverError
-	if errors.As(err, &terminal) {
+	var terminal *pipeline.NoHandlerError
+	if errors.As(err, &terminal) && runtimefailures.OnlyBranches(err, func(branch error) bool {
+		failure, ok := branch.(*runtimefailures.Error)
+		return ok && failure.Failure.Class == runtimefailures.ClassUnexpectedArrival && failure.Failure.Detail.Code == "no_route"
+	}) {
 		return NewApplicationError(EventPublishFailedCode, false, map[string]any{
-			"event_name": params.EventName,
-			"event_id":   params.EventID,
-			"run_id":     params.RunID,
-			"phase":      "publish",
-			"reason":     "receiver_entity_terminal",
-			"flow_id":    terminal.FlowID,
-			"stage":      terminal.Stage,
+			"event_name":     params.EventName,
+			"event_id":       params.EventID,
+			"run_id":         params.RunID,
+			"phase":          "publish",
+			"reason":         "no_route",
+			"flow_id":        terminal.FlowID,
+			"stage":          terminal.Stage,
+			"flow_instance":  terminal.FlowInstance,
+			"handled_events": append([]string{}, terminal.HandledEvents...),
+			"failure":        runtimefailures.FromError(err, "eventbus", "publish").Failure,
 		})
 	}
 	return NewApplicationError(EventPublishFailedCode, retryable, map[string]any{

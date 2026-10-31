@@ -79,6 +79,7 @@ type runTraceListResult struct {
 
 type runDiagnosis struct {
 	Run              operatorread.RunHeader                      `json:"run"`
+	ObservedAt       *time.Time                                  `json:"observed_at,omitempty"`
 	NextWakeAt       *time.Time                                  `json:"next_wake_at,omitempty"`
 	OperationalState string                                      `json:"operational_state"`
 	BlockingLayer    string                                      `json:"blocking_layer"`
@@ -217,13 +218,18 @@ func OperatorRunReadHandlers(opts RunReadHandlerOptions) map[string]MethodHandle
 			if failedDeliveries == nil {
 				failedDeliveries = []operatorread.RunDebugFailureDelivery{}
 			}
-			var nextWakeAt *time.Time
+			var nextWakeAt, observedAt *time.Time
 			if report.OperationalFacts != nil {
 				nextWakeAt = report.OperationalFacts.NextWakeAt
+				if !report.OperationalFacts.ObservedAt.IsZero() {
+					observed := report.OperationalFacts.ObservedAt
+					observedAt = &observed
+				}
 			}
 			return runDiagnosis{
 				Run:              report.Header,
 				NextWakeAt:       nextWakeAt,
+				ObservedAt:       observedAt,
 				OperationalState: strings.TrimSpace(status.State),
 				BlockingLayer:    strings.TrimSpace(status.BlockingLayer),
 				BlockingReason:   strings.TrimSpace(status.BlockingReason),

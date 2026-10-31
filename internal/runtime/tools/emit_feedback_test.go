@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"strings"
 	"testing"
 
 	"github.com/division-sh/swarm/internal/events"
@@ -12,6 +13,7 @@ import (
 	"github.com/division-sh/swarm/internal/runtime/core/actors"
 	"github.com/division-sh/swarm/internal/runtime/core/flowidentity"
 	"github.com/division-sh/swarm/internal/runtime/engine"
+	"github.com/division-sh/swarm/internal/runtime/failures"
 	"github.com/division-sh/swarm/internal/runtime/pipeline"
 	"github.com/division-sh/swarm/internal/runtime/pipelineobligation"
 )
@@ -106,5 +108,26 @@ func TestHandleEmitToolRetainsAcknowledgedStageOnDispatchError(t *testing.T) {
 	output, ok := value.(map[string]any)
 	if !ok || output["accepted"] != true || output["feedback_committed"] != true || output["retry_write"] != false || output["stage"] != "component-fixture" || output["stage_origin"] != pipeline.EmitStageAcceptance || output["dispatch"] != pipeline.EmitDispatchError || output["event_id"] != publisher.event.ID() {
 		t.Fatalf("tool discarded exact committed feedback: %#v", value)
+	}
+	for _, joined := range []bool{false, true} {
+		refusal := &pipeline.NoHandlerError{FlowID: ".", FlowInstance: toolTestRunID, Stage: "done"}
+		publisher.fault = refusal
+		if joined {
+			publisher.fault = errors.Join(refusal, fault)
+		}
+		value, err := executor.handleEmitTool(toolEventTestContext(actor), actor, "emit_root_done", map[string]any{})
+		typed := failures.FromError(err, "test", "emit")
+		if joined {
+			if !errors.Is(err, fault) || typed.Failure.Class != failures.ClassDependencyUnavailable {
+				t.Fatalf("semantic refusal hid an independent failure: %v", err)
+			}
+			continue
+		}
+		output := value.(map[string]any)
+		if typed.Failure.Class != failures.ClassUnexpectedArrival || failures.Matches(failures.SelectorAnyTaskFailure, typed.Failure.Class) || typed.Failure.Detail.Code != "no_route" ||
+			output["status"] != "refused" || output["accepted"] != true || output["stage"] != "component-fixture" ||
+			!strings.Contains(typed.Failure.Message, "done") || !strings.Contains(typed.Failure.Message, "handled events") {
+			t.Fatalf("late emit lost its ordinary refusal or committed result: %#v, %v", value, err)
+		}
 	}
 }

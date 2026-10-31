@@ -29,9 +29,10 @@ func TestPublicationTerminalReceiverErrorPreservesTypedCause(t *testing.T) {
 				err      error
 				terminal bool
 			}{
-				{"terminal", &pipeline.TerminalReceiverError{FlowID: "child", Stage: "done"}, true},
-				{"wrapped", fmt.Errorf("planning: %w", &pipeline.TerminalReceiverError{FlowID: "child", Stage: "done"}), true},
-				{"identical text is not authority", errors.New((&pipeline.TerminalReceiverError{FlowID: "child", Stage: "done"}).Error()), false},
+				{"terminal", &pipeline.NoHandlerError{FlowID: "child", Stage: "done"}, true},
+				{"wrapped", fmt.Errorf("planning: %w", &pipeline.NoHandlerError{FlowID: "child", Stage: "done"}), true},
+				{"independent cleanup failure", errors.Join(&pipeline.NoHandlerError{FlowID: "child", Stage: "done"}, errors.New("cleanup unavailable")), false},
+				{"identical text is not authority", errors.New((&pipeline.NoHandlerError{FlowID: "child", Stage: "done"}).Error()), false},
 				{"storage", errors.New("database unavailable"), false},
 				{"live conflict text is not authority", errors.New(live.Error()), false},
 				{"inactive", errors.New("receiver target owner is unavailable: lifecycle is not active"), false},
@@ -42,7 +43,7 @@ func TestPublicationTerminalReceiverErrorPreservesTypedCause(t *testing.T) {
 						t.Fatalf("publication error=%#v err=%v", app, err)
 					}
 					details := app.Details.(map[string]any)
-					if tc.terminal && (details["reason"] != "receiver_entity_terminal" || details["flow_id"] != "child" || details["stage"] != "done") {
+					if tc.terminal && (details["reason"] != "no_route" || details["flow_id"] != "child" || details["stage"] != "done") {
 						t.Fatalf("terminal details=%#v", details)
 					}
 				})

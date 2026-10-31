@@ -150,7 +150,7 @@ func TestServedLifecycleEmitterCompetingExitPublication(t *testing.T) {
 								lateTerminal := code == apiv1.EventPublishFailedCode && details["phase"] == "publish" && details["reason"] == "run is not active: run_id="+seed.RunID+" state=completed"
 								// #2808/6390886029: entity completion can precede run completion.
 								terminalReceiver := code == apiv1.EventPublishFailedCode && details["phase"] == "publish" &&
-									details["reason"] == "receiver_entity_terminal" && details["run_id"] == seed.RunID &&
+									details["reason"] == "no_route" && details["run_id"] == seed.RunID &&
 									details["flow_id"] == "." && details["stage"] == "done" && exitReply.Error.Data["retryable"] == false
 								if !won || (code != apiv1.RunAlreadyTerminalCode && !lateTerminal && !terminalReceiver) {
 									t.Fatalf("unexpected ordinary exit rejection: %#v", exitReply.Error)

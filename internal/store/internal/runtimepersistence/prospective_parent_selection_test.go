@@ -144,7 +144,7 @@ func TestR7ProspectiveParentSelectionUsesCurrentNativeReceiverBothStores(t *test
 						}
 						return
 					}
-					var terminal *pipeline.TerminalReceiverError
+					var terminal *pipeline.NoHandlerError
 					var terminated *pipeline.TerminatedReceiverError
 					if state == "final" && (!errors.As(err, &terminal) || terminal.Stage != "done") || state == "terminated" && !errors.As(err, &terminated) {
 						t.Fatalf("stale inventory hid the current native refusal: %+v err=%v", selected, err)
