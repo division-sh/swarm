@@ -11,8 +11,6 @@ import (
 	"testing"
 	"time"
 
-	"github.com/division-sh/swarm/internal/runtime/testfixtures/decisioncardtest"
-
 	"github.com/division-sh/swarm/internal/events"
 	"github.com/division-sh/swarm/internal/events/eventtest"
 	runtimebootverify "github.com/division-sh/swarm/internal/runtime/bootverify"
@@ -34,6 +32,7 @@ import (
 	runtimepipelineobligation "github.com/division-sh/swarm/internal/runtime/pipelineobligation"
 	runtimereplycontext "github.com/division-sh/swarm/internal/runtime/replycontext"
 	"github.com/division-sh/swarm/internal/runtime/semanticview"
+	"github.com/division-sh/swarm/internal/runtime/testfixtures/decisioncardtest"
 	"github.com/division-sh/swarm/internal/runtime/testfixtures/templatereply"
 	"github.com/division-sh/swarm/internal/store"
 	"github.com/division-sh/swarm/internal/store/storetest"
@@ -937,20 +936,20 @@ func seedDurableReplyConformanceTargetOwners(t *testing.T, ctx context.Context, 
 		t.Fatalf("construct reply root and fieldless provider: %v", err)
 	}
 	for _, owner := range replyConformanceTargetOwners() {
-		accountID := runtimeflowidentity.LogicalInstanceID(owner.FlowInstance)
+		accountID := runtimeflowidentity.LogicalInstanceID(owner.Route.FlowInstance)
 		payload, err := json.Marshal(map[string]any{"account_id": accountID})
 		if err != nil {
 			t.Fatal(err)
 		}
 		trigger := eventtest.ExistingRunRootIngress(uuid.NewString(), "requester.setup", "fixture", "", payload, 0, runID, events.EventEnvelope{}, time.Now().UTC())
 		instance := replyConformanceRequesterIdentity(t, source, runID, accountID)
-		instance.EntityID = owner.EntityID
+		instance.EntityID = owner.Route.EntityID
 		if err := runtime.manager.ActivateFlowInstance(ctx, runtimepipeline.FlowInstanceActivationRequest{
 			ContractBundle:   source,
 			Instance:         instance,
 			ConstructorInput: "requester.setup", ResolvedKey: accountID, TriggerEvent: trigger, OccurredAt: trigger.CreatedAt(),
 		}); err != nil {
-			t.Fatalf("construct and attach requester %s: %v", owner.FlowInstance, err)
+			t.Fatalf("construct and attach requester %s: %v", owner.Route.FlowInstance, err)
 		}
 	}
 }
@@ -1138,14 +1137,13 @@ func (s *replyConformanceStore) CommitPublication(ctx context.Context, command b
 	})
 }
 
-func replyConformanceTargetOwners() []bus.ActiveTargetDescriptor {
-	out := make([]bus.ActiveTargetDescriptor, 0, 2)
+func replyConformanceTargetOwners() []runtimepipeline.DeliveryTargetOwnerCandidate {
+	out := make([]runtimepipeline.DeliveryTargetOwnerCandidate, 0, 2)
 	for _, accountID := range []string{"account-a", "account-b"} {
 		flowInstance := templatereply.RequesterFlowID + "/" + accountID
-		out = append(out, bus.ActiveTargetDescriptor{
-			ID:           flowInstance,
-			FlowInstance: flowInstance,
-			EntityID:     runtimeflowidentity.EntityID(flowInstance),
+		out = append(out, runtimepipeline.DeliveryTargetOwnerCandidate{
+			Route: events.RouteIdentity{FlowInstance: flowInstance,
+				EntityID: runtimeflowidentity.EntityID(flowInstance)},
 		})
 	}
 	return out

@@ -16,16 +16,11 @@ func receiverOwnerConstructorBudget() map[string]int {
 	return map[string]int{
 		// #2413 child 2: actor ownership and header dependency have distinct
 		// canonical projections; the old agent reclassification is retired.
-		"runtime/bus::selectedRunTargetOwnerProjection.admitAgentTarget":                 3,
-		"runtime/bus::selectedRunTargetOwnerProjection.agentConstructionDependency":      1,
-		"runtime/bus::admitObservedAgentConstructionDependency":                          2,
-		"runtime/bus::selectedRunTargetOwnerProjection.replyOriginOwner":                 2,
-		"runtime/pipeline::SelectDeliveryTargetOwner":                                    2,
-		"runtime/bus::selectedRunTargetOwnerProjection.withActivationPlans [descriptor]": 1,
-		"runtime/bus::ActiveAgentDescriptor.TargetDescriptor [descriptor]":               1,
-		"runtime/bus::ActiveTargetDescriptor.Normalized [descriptor]":                    1,
-		// #2594 projects only the exact scope's already admitted observations.
-		"runtime/bus::EventBus.activeTargetDescriptors [descriptor]": 1,
+		"runtime/bus::selectedRunTargetOwnerProjection.admitAgentTarget":            3,
+		"runtime/bus::selectedRunTargetOwnerProjection.agentConstructionDependency": 1,
+		"runtime/bus::admitObservedAgentConstructionDependency":                     2,
+		"runtime/bus::selectedRunTargetOwnerProjection.replyOriginOwner":            2,
+		"runtime/pipeline::SelectDeliveryTargetOwner":                               2,
 		// Approved #2433 fork projection preserves the three admitted target kinds;
 		// it does not elect a new receiver from producer context.
 		"store/internal/backend/runforkpersistence::projectRunForkFanOutExecutionOwnership": 3,
@@ -88,11 +83,6 @@ func receiverOwnerConstructorViolations(t *testing.T) []string {
 					scope += resolved.Name()
 				}
 				ast.Inspect(decl, func(node ast.Node) bool {
-					if literal, ok := node.(*ast.CompositeLit); ok {
-						if typ, ok := types.Unalias(pkg.TypesInfo.TypeOf(literal)).(*types.Named); ok && typ.Obj().Pkg() != nil && typ.Obj().Pkg().Path() == "github.com/division-sh/swarm/internal/runtime/bus" && typ.Obj().Name() == "ActiveTargetDescriptor" {
-							counts[scope+" [descriptor]"]++
-						}
-					}
 					id, ok := node.(*ast.Ident)
 					if !ok {
 						return true

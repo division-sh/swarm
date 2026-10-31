@@ -48,13 +48,13 @@ func testActiveAgentDescriptors(descriptors ...ActiveAgentDescriptor) map[agenti
 	return out
 }
 
-func testSelectedOwnerPolicy(owners ...ActiveTargetDescriptor) deliveryRecipientPolicy {
+func testSelectedOwnerPolicy(owners ...runtimepipeline.DeliveryTargetOwnerCandidate) deliveryRecipientPolicy {
 	return deliveryRecipientPolicy{
 		loadActiveAgentDescriptors: func(context.Context) (map[agentidentity.Identity]ActiveAgentDescriptor, bool, error) {
 			return map[agentidentity.Identity]ActiveAgentDescriptor{}, true, nil
 		},
-		loadActiveTargetDescriptors: func(context.Context) ([]ActiveTargetDescriptor, bool, error) {
-			return append([]ActiveTargetDescriptor(nil), owners...), true, nil
+		loadTargetOwnerCandidates: func(context.Context) ([]runtimepipeline.DeliveryTargetOwnerCandidate, bool, error) {
+			return append([]runtimepipeline.DeliveryTargetOwnerCandidate(nil), owners...), true, nil
 		},
 		requireTargetOwners: true,
 	}
@@ -412,8 +412,11 @@ func TestDeliveryRecipientPolicy_BindsOnlyConstructedStaticDeclarations(t *testi
 					}
 					return descriptors, true, nil
 				},
-				loadActiveTargetDescriptors: func(context.Context) ([]ActiveTargetDescriptor, bool, error) {
-					return []ActiveTargetDescriptor{{ID: runID, FlowInstance: runID, EntityID: target.EntityID}}, true, nil
+				loadTargetOwnerCandidates: func(context.Context) ([]runtimepipeline.DeliveryTargetOwnerCandidate, bool, error) {
+					return []runtimepipeline.DeliveryTargetOwnerCandidate{{
+						Route: events.RouteIdentity{FlowInstance: runID,
+							EntityID: target.EntityID},
+					}}, true, nil
 				},
 				requireTargetOwners: true,
 			}
@@ -563,13 +566,15 @@ func TestDeliveryRecipientPolicy_TargetedFlowInstanceWithoutSubscriberIsNotSubsc
 		loadActiveAgentDescriptors: func(context.Context) (map[agentidentity.Identity]ActiveAgentDescriptor, bool, error) {
 			return map[agentidentity.Identity]ActiveAgentDescriptor{}, true, nil
 		},
-		loadActiveTargetDescriptors: func(context.Context) ([]ActiveTargetDescriptor, bool, error) {
-			return []ActiveTargetDescriptor{{
-				FlowInstance: "component-scaffold/aaaaaaaa-1111-4111-8111-aaaaaaaa1111",
+		loadTargetOwnerCandidates: func(context.Context) ([]runtimepipeline.DeliveryTargetOwnerCandidate, bool, error) {
+			return []runtimepipeline.DeliveryTargetOwnerCandidate{{
+				Route: events.RouteIdentity{FlowInstance: "component-scaffold/aaaaaaaa-1111-4111-8111-aaaaaaaa1111"},
 			}}, true, nil
 		},
 	}
-	target := ActiveTargetDescriptor{FlowInstance: "component-scaffold/aaaaaaaa-1111-4111-8111-aaaaaaaa1111"}.Normalized()
+	target := normalizedTargetOwnerCandidate(runtimepipeline.DeliveryTargetOwnerCandidate{
+		Route: events.RouteIdentity{FlowInstance: "component-scaffold/aaaaaaaa-1111-4111-8111-aaaaaaaa1111"},
+	})
 
 	manifest, err := policy.Evaluate(
 		context.Background(),
@@ -583,8 +588,8 @@ func TestDeliveryRecipientPolicy_TargetedFlowInstanceWithoutSubscriberIsNotSubsc
 			"",
 			"",
 			events.EnvelopeForTargetRoute(events.EventEnvelope{}, events.RouteIdentity{
-				EntityID:     target.EntityID,
-				FlowInstance: target.FlowInstance,
+				EntityID:     target.Route.EntityID,
+				FlowInstance: target.Route.FlowInstance,
 			}),
 			time.Time{},
 		),
@@ -604,9 +609,9 @@ func TestDeliveryRecipientPolicy_TargetedFlowInstanceMissingIsUnreachableTermina
 		loadActiveAgentDescriptors: func(context.Context) (map[agentidentity.Identity]ActiveAgentDescriptor, bool, error) {
 			return map[agentidentity.Identity]ActiveAgentDescriptor{}, true, nil
 		},
-		loadActiveTargetDescriptors: func(context.Context) ([]ActiveTargetDescriptor, bool, error) {
-			return []ActiveTargetDescriptor{{
-				FlowInstance: "component-scaffold/live",
+		loadTargetOwnerCandidates: func(context.Context) ([]runtimepipeline.DeliveryTargetOwnerCandidate, bool, error) {
+			return []runtimepipeline.DeliveryTargetOwnerCandidate{{
+				Route: events.RouteIdentity{FlowInstance: "component-scaffold/live"},
 			}}, true, nil
 		},
 	}
@@ -623,7 +628,9 @@ func TestDeliveryRecipientPolicy_TargetedFlowInstanceMissingIsUnreachableTermina
 			"",
 			"",
 			events.EnvelopeForTargetRoute(events.EventEnvelope{}, events.RouteIdentity{
-				EntityID:     ActiveTargetDescriptor{FlowInstance: "component-scaffold/missing"}.Normalized().EntityID,
+				EntityID: normalizedTargetOwnerCandidate(runtimepipeline.DeliveryTargetOwnerCandidate{
+					Route: events.RouteIdentity{FlowInstance: "component-scaffold/missing"},
+				}).Route.EntityID,
 				FlowInstance: "component-scaffold/missing",
 			}),
 			time.Time{},
@@ -700,7 +707,7 @@ func TestDeliveryPlanner_ExactDirectRoutePreservesCommittedTargetWithoutDescript
 			loadActiveAgentDescriptors: func(context.Context) (map[agentidentity.Identity]ActiveAgentDescriptor, bool, error) {
 				return testActiveAgentDescriptors(descriptor), true, nil
 			},
-			loadActiveTargetDescriptors: func(context.Context) ([]ActiveTargetDescriptor, bool, error) {
+			loadTargetOwnerCandidates: func(context.Context) ([]runtimepipeline.DeliveryTargetOwnerCandidate, bool, error) {
 				targetReads++
 				return nil, false, errors.New("exact direct target was reinterpreted")
 			},
@@ -770,8 +777,11 @@ func TestDeliveryPlanner_ComposesRoutingPolicyAndManifest(t *testing.T) {
 					observerIdentity: {Identity: observerIdentity},
 				}, true, nil
 			},
-			loadActiveTargetDescriptors: func(context.Context) ([]ActiveTargetDescriptor, bool, error) {
-				return []ActiveTargetDescriptor{{ID: "root-owner", FlowInstance: runID, EntityID: runID}}, true, nil
+			loadTargetOwnerCandidates: func(context.Context) ([]runtimepipeline.DeliveryTargetOwnerCandidate, bool, error) {
+				return []runtimepipeline.DeliveryTargetOwnerCandidate{{
+					Route: events.RouteIdentity{FlowInstance: runID,
+						EntityID: runID},
+				}}, true, nil
 			},
 			requireTargetOwners: true,
 		},
@@ -827,7 +837,10 @@ func TestDeliveryPlanner_DoesNotDeadLetterExactlyTargetedRootWorkflowNodeSubscri
 				return []PublishDiagnosticRecipient{{ID: "parent-listener", Type: "node"}}
 			},
 		},
-		testSelectedOwnerPolicy(ActiveTargetDescriptor{ID: "root-owner", FlowInstance: rootTarget.FlowInstance, EntityID: rootTarget.EntityID}),
+		testSelectedOwnerPolicy(runtimepipeline.DeliveryTargetOwnerCandidate{
+			Route: events.RouteIdentity{FlowInstance: rootTarget.FlowInstance,
+				EntityID: rootTarget.EntityID},
+		}),
 	)
 
 	ctx := deliveryPlannerIndexContext(t, &planner, rootRunID, ConstructedFlowInstanceIdentityFixture(planner.recipientPolicy.semanticSource, ".", "", rootRunID))
@@ -878,7 +891,10 @@ func TestDeliveryPlanner_TargetedParentRoutePersistsSemanticNodeRoute(t *testing
 				return []PublishDiagnosticRecipient{{ID: "parent-collector", Type: "node", Path: "parent/inst-1"}}
 			},
 		},
-		testSelectedOwnerPolicy(ActiveTargetDescriptor{ID: "parent-owner", FlowInstance: parentRoute.FlowInstance, EntityID: parentRoute.EntityID}),
+		testSelectedOwnerPolicy(runtimepipeline.DeliveryTargetOwnerCandidate{
+			Route: events.RouteIdentity{FlowInstance: parentRoute.FlowInstance,
+				EntityID: parentRoute.EntityID},
+		}),
 	)
 
 	parent := StoredFlowInstanceIdentityFixture(planner.recipientPolicy.semanticSource, "parent", "inst-1", runID, parentRoute.EntityID)
@@ -908,8 +924,14 @@ func TestDeliveryPlanner_PreservesTargetFailureWhenRoutedNodeDoesNotMatchTarget(
 			},
 		},
 		testSelectedOwnerPolicy(
-			ActiveTargetDescriptor{ID: "child-a-owner", FlowInstance: "child-a/inst-1", EntityID: "ent-a"},
-			ActiveTargetDescriptor{ID: "child-b-owner", FlowInstance: "child-b/inst-1", EntityID: "ent-b"},
+			runtimepipeline.DeliveryTargetOwnerCandidate{
+				Route: events.RouteIdentity{FlowInstance: "child-a/inst-1",
+					EntityID: "ent-a"},
+			},
+			runtimepipeline.DeliveryTargetOwnerCandidate{
+				Route: events.RouteIdentity{FlowInstance: "child-b/inst-1",
+					EntityID: "ent-b"},
+			},
 		),
 	)
 
@@ -951,8 +973,14 @@ func TestDeliveryPlanner_ExpandsTargetSetForInternalWorkflowRecipient(t *testing
 			},
 		},
 		testSelectedOwnerPolicy(
-			ActiveTargetDescriptor{ID: "child-a-owner", FlowInstance: "child-a/inst-1", EntityID: "ent-a"},
-			ActiveTargetDescriptor{ID: "child-b-owner", FlowInstance: "child-b/inst-1", EntityID: "ent-b"},
+			runtimepipeline.DeliveryTargetOwnerCandidate{
+				Route: events.RouteIdentity{FlowInstance: "child-a/inst-1",
+					EntityID: "ent-a"},
+			},
+			runtimepipeline.DeliveryTargetOwnerCandidate{
+				Route: events.RouteIdentity{FlowInstance: "child-b/inst-1",
+					EntityID: "ent-b"},
+			},
 		),
 	)
 
@@ -1028,8 +1056,14 @@ func TestDeliveryPlanner_ExpandsTargetSetForSameSemanticNode(t *testing.T) {
 			},
 		},
 		testSelectedOwnerPolicy(
-			ActiveTargetDescriptor{ID: "worker-one", FlowInstance: "worker/w-001", EntityID: "worker/w-001"},
-			ActiveTargetDescriptor{ID: "worker-two", FlowInstance: "worker/w-002", EntityID: "worker/w-002"},
+			runtimepipeline.DeliveryTargetOwnerCandidate{
+				Route: events.RouteIdentity{FlowInstance: "worker/w-001",
+					EntityID: "worker/w-001"},
+			},
+			runtimepipeline.DeliveryTargetOwnerCandidate{
+				Route: events.RouteIdentity{FlowInstance: "worker/w-002",
+					EntityID: "worker/w-002"},
+			},
 		),
 	)
 
@@ -1084,8 +1118,9 @@ func TestDeliveryPlanner_NoTargetConcreteRoutedNodePersistsSemanticNodeRoute(t *
 				return nil
 			},
 		},
-		testSelectedOwnerPolicy(ActiveTargetDescriptor{
-			ID: "operating-owner", FlowInstance: "operating/inst-1", EntityID: "ent-operating-owner",
+		testSelectedOwnerPolicy(runtimepipeline.DeliveryTargetOwnerCandidate{
+			Route: events.RouteIdentity{FlowInstance: "operating/inst-1",
+				EntityID: "ent-operating-owner"},
 		}),
 	)
 
@@ -1305,8 +1340,9 @@ func TestDeliveryPlanner_NoTargetRootRoutedNodeUsesSemanticNodeDeliveryRoute(t *
 				return nil
 			},
 		},
-		testSelectedOwnerPolicy(ActiveTargetDescriptor{
-			ID: "root-owner", FlowInstance: runID, EntityID: runID,
+		testSelectedOwnerPolicy(runtimepipeline.DeliveryTargetOwnerCandidate{
+			Route: events.RouteIdentity{FlowInstance: runID,
+				EntityID: runID},
 		}),
 	)
 
@@ -1353,8 +1389,9 @@ func TestDeliveryPlanner_NoTargetRootLocalEventWithFlowInstanceUsesRootNodeRoute
 				return nil
 			},
 		},
-		testSelectedOwnerPolicy(ActiveTargetDescriptor{
-			ID: "root-owner", FlowInstance: runID, EntityID: runID,
+		testSelectedOwnerPolicy(runtimepipeline.DeliveryTargetOwnerCandidate{
+			Route: events.RouteIdentity{FlowInstance: runID,
+				EntityID: runID},
 		}),
 	)
 
@@ -1418,8 +1455,9 @@ func TestDeliveryPlanner_NoTargetScopedRoutedNodeWithoutFlowInstanceFailsClosed(
 				return nil
 			},
 		},
-		testSelectedOwnerPolicy(ActiveTargetDescriptor{
-			ID: "child-owner", FlowInstance: "child", EntityID: "ent-child-owner",
+		testSelectedOwnerPolicy(runtimepipeline.DeliveryTargetOwnerCandidate{
+			Route: events.RouteIdentity{FlowInstance: "child",
+				EntityID: "ent-child-owner"},
 		}),
 	)
 
@@ -1447,8 +1485,9 @@ func TestDeliveryPlanner_LiveCarrierDoesNotAuthorizeNoTargetScopedRoutedNode(t *
 				return nil
 			},
 		},
-		testSelectedOwnerPolicy(ActiveTargetDescriptor{
-			ID: "child-owner", FlowInstance: "child", EntityID: "ent-child-owner",
+		testSelectedOwnerPolicy(runtimepipeline.DeliveryTargetOwnerCandidate{
+			Route: events.RouteIdentity{FlowInstance: "child",
+				EntityID: "ent-child-owner"},
 		}),
 	)
 
@@ -1473,8 +1512,9 @@ func TestDeliveryPlanner_StaticRootSameInstanceRouteUsesSelectedRunOwner(t *test
 			},
 			describeSubscribersForEvent: func(string, []Subscriber) []PublishDiagnosticRecipient { return nil },
 		},
-		testSelectedOwnerPolicy(ActiveTargetDescriptor{
-			ID: "root-owner", FlowInstance: runID, EntityID: runID,
+		testSelectedOwnerPolicy(runtimepipeline.DeliveryTargetOwnerCandidate{
+			Route: events.RouteIdentity{FlowInstance: runID,
+				EntityID: runID},
 		}),
 	)
 
@@ -1589,8 +1629,14 @@ func TestDeliveryPlanner_NoTargetMixedRootAndUnrelatedScopedNodeFailsClosed(t *t
 			},
 		},
 		testSelectedOwnerPolicy(
-			ActiveTargetDescriptor{ID: "root-owner", FlowInstance: runID, EntityID: runID},
-			ActiveTargetDescriptor{ID: "child-owner", FlowInstance: "child", EntityID: flowidentity.EntityID("child")},
+			runtimepipeline.DeliveryTargetOwnerCandidate{
+				Route: events.RouteIdentity{FlowInstance: runID,
+					EntityID: runID},
+			},
+			runtimepipeline.DeliveryTargetOwnerCandidate{
+				Route: events.RouteIdentity{FlowInstance: "child",
+					EntityID: flowidentity.EntityID("child")},
+			},
 		),
 	)
 
@@ -1623,8 +1669,9 @@ func TestDeliveryPlanner_QualifiedRootInputDoesNotAuthorizePrivateConsumer(t *te
 			},
 			describeSubscribersForEvent: func(string, []Subscriber) []PublishDiagnosticRecipient { return nil },
 		},
-		testSelectedOwnerPolicy(ActiveTargetDescriptor{
-			ID: "worker-owner", FlowInstance: "worker", EntityID: "ent-worker-owner",
+		testSelectedOwnerPolicy(runtimepipeline.DeliveryTargetOwnerCandidate{
+			Route: events.RouteIdentity{FlowInstance: "worker",
+				EntityID: "ent-worker-owner"},
 		}),
 	)
 
@@ -1656,8 +1703,9 @@ func TestDeliveryPlanner_NoTargetCrossFlowStaticRoutedNodeFailsClosed(t *testing
 				return nil
 			},
 		},
-		testSelectedOwnerPolicy(ActiveTargetDescriptor{
-			ID: "flow-a-owner", FlowInstance: "flow-a", EntityID: "ent-flow-a-owner",
+		testSelectedOwnerPolicy(runtimepipeline.DeliveryTargetOwnerCandidate{
+			Route: events.RouteIdentity{FlowInstance: "flow-a",
+				EntityID: "ent-flow-a-owner"},
 		}),
 	)
 
@@ -1698,8 +1746,9 @@ func TestDeliveryPlanner_NoTargetWildcardCrossFlowRoutedNodeFailsClosed(t *testi
 				return nil
 			},
 		},
-		testSelectedOwnerPolicy(ActiveTargetDescriptor{
-			ID: "repo-owner", FlowInstance: "repo-scaffold", EntityID: "ent-repo-owner",
+		testSelectedOwnerPolicy(runtimepipeline.DeliveryTargetOwnerCandidate{
+			Route: events.RouteIdentity{FlowInstance: "repo-scaffold",
+				EntityID: "ent-repo-owner"},
 		}),
 	)
 
@@ -1740,8 +1789,9 @@ func TestDeliveryPlanner_NoTargetDescendantScopedRoutedNodeFailsClosed(t *testin
 				return nil
 			},
 		},
-		testSelectedOwnerPolicy(ActiveTargetDescriptor{
-			ID: "grandchild-owner", FlowInstance: "child/inst-1/grandchild", EntityID: "ent-grandchild-owner",
+		testSelectedOwnerPolicy(runtimepipeline.DeliveryTargetOwnerCandidate{
+			Route: events.RouteIdentity{FlowInstance: "child/inst-1/grandchild",
+				EntityID: "ent-grandchild-owner"},
 		}),
 	)
 
@@ -1790,8 +1840,9 @@ func TestRouteTargetOwnerIgnoresAbsentAndForeignSourceEntity(t *testing.T) {
 					},
 					describeSubscribersForEvent: func(string, []Subscriber) []PublishDiagnosticRecipient { return nil },
 				},
-				testSelectedOwnerPolicy(ActiveTargetDescriptor{
-					ID: "operating-owner", FlowInstance: owner.FlowInstance, EntityID: owner.EntityID,
+				testSelectedOwnerPolicy(runtimepipeline.DeliveryTargetOwnerCandidate{
+					Route: events.RouteIdentity{FlowInstance: owner.FlowInstance,
+						EntityID: owner.EntityID},
 				}),
 			)
 			envelope := events.EnvelopeForFlowInstance(events.EventEnvelope{}, owner.FlowInstance)

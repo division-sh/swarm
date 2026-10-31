@@ -54,7 +54,7 @@ type targetRouteMemoryStore struct {
 	claims                  map[string]runtimepipelineobligation.Claim
 	scans                   map[string]runtimepipelineobligation.ScanRequest
 	active                  map[string]bool
-	targetOwners            []ActiveTargetDescriptor
+	targetOwners            []runtimepipeline.DeliveryTargetOwnerCandidate
 	workflowInstances       []runtimepipeline.WorkflowInstance
 }
 
@@ -82,18 +82,19 @@ func (s *targetRouteMemoryStore) LoadFlowConstructionPublication(ctx context.Con
 	return evidence, nil
 }
 
-func (s *targetRouteMemoryStore) setTargetOwners(owners ...ActiveTargetDescriptor) {
+func (s *targetRouteMemoryStore) setTargetOwners(owners ...runtimepipeline.DeliveryTargetOwnerCandidate) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
-	s.targetOwners = append([]ActiveTargetDescriptor(nil), owners...)
+	s.targetOwners = append([]runtimepipeline.DeliveryTargetOwnerCandidate(nil), owners...)
 }
 
 func (s *targetRouteMemoryStore) setTargetOwnerRoutes(routes ...events.RouteIdentity) {
-	owners := make([]ActiveTargetDescriptor, 0, len(routes))
-	for index, route := range routes {
+	owners := make([]runtimepipeline.DeliveryTargetOwnerCandidate, 0, len(routes))
+	for _, route := range routes {
 		route = route.Normalized()
-		owners = append(owners, ActiveTargetDescriptor{
-			ID: fmt.Sprintf("selected-owner-%d", index), EntityID: route.EntityID, FlowInstance: route.FlowInstance,
+		owners = append(owners, runtimepipeline.DeliveryTargetOwnerCandidate{
+			Route: events.RouteIdentity{EntityID: route.EntityID,
+				FlowInstance: route.FlowInstance},
 		})
 	}
 	s.setTargetOwners(owners...)
@@ -117,10 +118,11 @@ func (s *targetRouteMemoryStore) ListWorkflowInstances(context.Context, string) 
 	return append([]runtimepipeline.WorkflowInstance(nil), s.workflowInstances...), nil
 }
 
-func testSelectedRunTargetOwner(id, flowInstance, entitySeed string) ActiveTargetDescriptor {
-	return ActiveTargetDescriptor{
-		ID: id, FlowInstance: flowInstance, EntityID: eventtest.UUID(entitySeed),
-	}.Normalized()
+func testSelectedRunTargetOwner(flowInstance, entitySeed string) runtimepipeline.DeliveryTargetOwnerCandidate {
+	return normalizedTargetOwnerCandidate(runtimepipeline.DeliveryTargetOwnerCandidate{
+		Route: events.RouteIdentity{FlowInstance: flowInstance,
+			EntityID: eventtest.UUID(entitySeed)},
+	})
 }
 
 func newTargetRouteMemoryStore() *targetRouteMemoryStore {
@@ -723,12 +725,13 @@ func TestEventBusSelectedTargetEvidenceFailsClosedOrPreservesExactOwner(t *testi
 	}
 }
 
-func targetOwnerDescriptors(routes ...events.RouteIdentity) []ActiveTargetDescriptor {
-	owners := make([]ActiveTargetDescriptor, 0, len(routes))
-	for index, route := range routes {
+func targetOwnerDescriptors(routes ...events.RouteIdentity) []runtimepipeline.DeliveryTargetOwnerCandidate {
+	owners := make([]runtimepipeline.DeliveryTargetOwnerCandidate, 0, len(routes))
+	for _, route := range routes {
 		route = route.Normalized()
-		owners = append(owners, ActiveTargetDescriptor{
-			ID: fmt.Sprintf("target-owner-%d", index), FlowInstance: route.FlowInstance, EntityID: route.EntityID,
+		owners = append(owners, runtimepipeline.DeliveryTargetOwnerCandidate{
+			Route: events.RouteIdentity{FlowInstance: route.FlowInstance,
+				EntityID: route.EntityID},
 		})
 	}
 	return owners
@@ -762,7 +765,10 @@ func TestEventBusCompositionReceiverSettlesBeforePersistence(t *testing.T) {
 			store := newTargetRouteMemoryStore()
 			store.workflowInstances = append([]runtimepipeline.WorkflowInstance(nil), test.instances...)
 			for _, instance := range test.instances {
-				store.targetOwners = append(store.targetOwners, ActiveTargetDescriptor{ID: instance.EntityID, EntityID: instance.EntityID, FlowInstance: instance.StorageRef})
+				store.targetOwners = append(store.targetOwners, runtimepipeline.DeliveryTargetOwnerCandidate{
+					Route: events.RouteIdentity{EntityID: instance.EntityID,
+						FlowInstance: instance.StorageRef},
+				})
 			}
 			node := testFlowNode(t, "review", "target-node")
 			source := newSource()
@@ -1273,9 +1279,12 @@ func nodeOnlyDeliveryPlanner(t testing.TB, source semanticview.Source, nodeID st
 			loadActiveAgentDescriptors: func(context.Context) (map[agentidentity.Identity]ActiveAgentDescriptor, bool, error) {
 				return map[agentidentity.Identity]ActiveAgentDescriptor{}, true, nil
 			},
-			loadActiveTargetDescriptors: func(ctx context.Context) ([]ActiveTargetDescriptor, bool, error) {
+			loadTargetOwnerCandidates: func(ctx context.Context) ([]runtimepipeline.DeliveryTargetOwnerCandidate, bool, error) {
 				runID := runtimecorrelation.RunIDFromContext(ctx)
-				return []ActiveTargetDescriptor{{ID: runID, FlowInstance: runID, EntityID: runtimeflowidentity.EntityID(runID)}}, true, nil
+				return []runtimepipeline.DeliveryTargetOwnerCandidate{{
+					Route: events.RouteIdentity{FlowInstance: runID,
+						EntityID: runtimeflowidentity.EntityID(runID)},
+				}}, true, nil
 			},
 		},
 	)
@@ -2049,7 +2058,10 @@ func TestEventBusCheckPublishRecipientPlan_SemanticScopeFlowInstanceMaterializes
 		"validation/nodes.yaml":    "entity-writer:\n  execution_type: system_node\n  subscribes_to: [thing.reviewed]\n  event_handlers:\n    thing.reviewed:\n      guard:\n        id: selected_owner\n        check: _entity.id != \"\"\n",
 	}))
 	store.setTargetOwnerRoutes(events.RouteIdentity{FlowID: "validation", FlowInstance: "validation", EntityID: entityID})
-	installMixedStaticConstructionFixture(t, store, source, []ActiveTargetDescriptor{{FlowInstance: "validation", EntityID: entityID}})
+	installMixedStaticConstructionFixture(t, store, source, []runtimepipeline.DeliveryTargetOwnerCandidate{{
+		Route: events.RouteIdentity{FlowInstance: "validation",
+			EntityID: entityID},
+	}})
 	eb, err := newScopedTestEventBus(store, EventBusOptions{
 		ContractBundle: source, Durable: DurableDependencies{RunLifecycle: &publicationRunPreflightTestStore{runID: busInternalTestRunID}},
 	})
@@ -2117,7 +2129,10 @@ func TestEventBusCheckPublishRecipientPlan_SemanticScopeFlowInstanceMaterializes
 		"validation/nodes.yaml":    "entity-writer:\n  execution_type: system_node\n  subscribes_to: [thing.reviewed]\n  event_handlers:\n    thing.reviewed:\n      guard:\n        id: selected_owner\n        check: _entity.id != \"\"\n",
 	}))
 	store.setTargetOwnerRoutes(events.RouteIdentity{FlowID: "validation", FlowInstance: "validation", EntityID: entityID})
-	installMixedStaticConstructionFixture(t, store, source, []ActiveTargetDescriptor{{FlowInstance: "validation", EntityID: entityID}})
+	installMixedStaticConstructionFixture(t, store, source, []runtimepipeline.DeliveryTargetOwnerCandidate{{
+		Route: events.RouteIdentity{FlowInstance: "validation",
+			EntityID: entityID},
+	}})
 	eb, err := newScopedTestEventBus(store, EventBusOptions{
 		ContractBundle: source, Durable: DurableDependencies{RunLifecycle: &publicationRunPreflightTestStore{runID: busInternalTestRunID}},
 	})
@@ -3193,8 +3208,9 @@ func TestEventBusPublish_TopLevelProjectNodePersistsRouteBeforeInterceptor(t *te
 func TestEventBusPublish_NodeRouteFailsClosedWithoutRouteSetPersistence(t *testing.T) {
 	runID := uuid.NewString()
 	owner := events.RouteIdentity{FlowID: "top-level-project-node", FlowInstance: runID, EntityID: runtimeflowidentity.EntityID(runID)}
-	store := rejectingDeliveryRouteStore{owners: []ActiveTargetDescriptor{{
-		ID: "rejecting-store-owner", FlowInstance: runID, EntityID: owner.EntityID,
+	store := rejectingDeliveryRouteStore{owners: []runtimepipeline.DeliveryTargetOwnerCandidate{{
+		Route: events.RouteIdentity{FlowInstance: runID,
+			EntityID: owner.EntityID},
 	}}}
 	source := semanticview.Wrap(routedTopLevelProjectNodeBundle(t))
 	store.construction = runtimepipeline.FlowConstructionPublicationEvidence{Identity: ConstructedFlowInstanceIdentityFixture(source, ".", runID, runID)}
@@ -3216,7 +3232,7 @@ func TestEventBusPublish_NodeRouteFailsClosedWithoutRouteSetPersistence(t *testi
 }
 
 type rejectingDeliveryRouteStore struct {
-	owners       []ActiveTargetDescriptor
+	owners       []runtimepipeline.DeliveryTargetOwnerCandidate
 	construction runtimepipeline.FlowConstructionPublicationEvidence
 }
 

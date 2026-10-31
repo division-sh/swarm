@@ -22,6 +22,7 @@ import (
 	runtimeprovideroutput "github.com/division-sh/swarm/internal/runtime/core/provideroutput"
 	runtimecorrelation "github.com/division-sh/swarm/internal/runtime/correlation"
 	"github.com/division-sh/swarm/internal/runtime/eventschema"
+	runtimepipeline "github.com/division-sh/swarm/internal/runtime/pipeline"
 	"github.com/division-sh/swarm/internal/runtime/semanticview"
 	"github.com/division-sh/swarm/internal/runtime/semanticviewtest"
 	"github.com/division-sh/swarm/internal/runtime/testfixtures/canonicalrouting"
@@ -387,7 +388,10 @@ func TestPrepareInboundDeliveryBatchUsesLiveSourceOwnerAndSettlesConsumerlessRaw
 			}
 			if state == "constructed receiver without consumer" {
 				instance := installConnectionSourceConstructionForRun(t, bus, source, "telegram-ingress", batch.Events[0].Event.RunID())
-				store.setTargetOwners(ActiveTargetDescriptor{ID: "constructed", FlowInstance: instance.InstancePath, EntityID: instance.EntityID})
+				store.setTargetOwners(runtimepipeline.DeliveryTargetOwnerCandidate{
+					Route: events.RouteIdentity{FlowInstance: instance.InstancePath,
+						EntityID: instance.EntityID},
+				})
 			}
 			plan, err := bus.PrepareInboundDeliveryBatch(inboundBatchAuthorContext(t, source), batch)
 			if err != nil {
@@ -498,7 +502,10 @@ func TestAuthenticatedRawSettlementCannotEraseGenuineLocalConsumer(t *testing.T)
 	base = providerOutputAuthorizedTestSource{Source: base, declaringFlow: flow, generation: catalog.Generation(), input: pin}
 	store := newTargetRouteMemoryStore()
 	instance := ConstructedFlowInstanceIdentityFixture(base, flow, "", busInternalTestRunID)
-	store.setTargetOwners(ActiveTargetDescriptor{ID: flow, FlowInstance: instance.InstancePath, EntityID: instance.EntityID})
+	store.setTargetOwners(runtimepipeline.DeliveryTargetOwnerCandidate{
+		Route: events.RouteIdentity{FlowInstance: instance.InstancePath,
+			EntityID: instance.EntityID},
+	})
 	bus, err := newScopedTestEventBus(store, EventBusOptions{ContractBundle: base, ProviderOutputVerifier: catalog,
 		Durable: DurableDependencies{RunLifecycle: &publicationRunPreflightTestStore{runID: busInternalTestRunID}},
 	})
@@ -524,7 +531,10 @@ func TestGenericPublicationCannotMintProviderRawSettlementAdmission(t *testing.T
 	entityID := eventtest.UUID("generic-provider-raw-settlement-entity")
 	target := events.RouteIdentity{FlowInstance: "telegram-ingress/standing", EntityID: entityID}
 	store := newTargetRouteMemoryStore()
-	store.setTargetOwners(ActiveTargetDescriptor{ID: "standing", FlowInstance: target.FlowInstance, EntityID: target.EntityID})
+	store.setTargetOwners(runtimepipeline.DeliveryTargetOwnerCandidate{
+		Route: events.RouteIdentity{FlowInstance: target.FlowInstance,
+			EntityID: target.EntityID},
+	})
 	source := inboundRawSettlementSource(t, true)
 	bus, err := newScopedTestEventBus(store, EventBusOptions{ContractBundle: source})
 	if err != nil {

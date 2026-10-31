@@ -21,7 +21,7 @@ type selectedRunTargetOwnerProjection struct {
 	constructingAgents map[agentidentity.Identity]struct{}
 	activationOwners   map[events.RouteIdentity]runtimepipeline.FlowInstanceActivationPlan
 	agentsAvailable    bool
-	descriptors        []ActiveTargetDescriptor
+	candidates         []runtimepipeline.DeliveryTargetOwnerCandidate
 	targetsAvailable   bool
 	source             semanticview.Source
 	required           bool
@@ -162,7 +162,7 @@ func (p selectedRunTargetOwnerProjection) resolveNodeTargetOwners(plan *RoutePla
 }
 
 func (p selectedRunTargetOwnerProjection) withActivationPlans(plans []runtimepipeline.FlowInstanceActivationPlan) (selectedRunTargetOwnerProjection, error) {
-	ordered := newOrderedActiveTargetDescriptors(p.descriptors)
+	ordered := newOrderedTargetOwnerCandidates(p.candidates)
 	agents := make(map[agentidentity.Identity]ActiveAgentDescriptor, len(p.agents))
 	for identity, descriptor := range p.agents {
 		agents[identity] = descriptor
@@ -190,11 +190,10 @@ func (p selectedRunTargetOwnerProjection) withActivationPlans(plans []runtimepip
 		}
 		activationOwners[events.RouteIdentity{FlowID: normalized.Identity.TemplateID,
 			FlowInstance: normalized.Identity.InstancePath, EntityID: normalized.Identity.EntityID}] = normalized
-		ordered.add(ActiveTargetDescriptor{
-			FlowID:        normalized.Identity.TemplateID,
-			ID:            normalized.Identity.InstanceID,
-			FlowInstance:  normalized.Identity.InstancePath,
-			EntityID:      normalized.Identity.EntityID,
+		ordered.add(runtimepipeline.DeliveryTargetOwnerCandidate{
+			Route: events.RouteIdentity{FlowID: normalized.Identity.TemplateID,
+				FlowInstance: normalized.Identity.InstancePath,
+				EntityID:     normalized.Identity.EntityID},
 			Materializing: true,
 		})
 		for _, expected := range normalized.Readiness.Agents {
@@ -208,7 +207,7 @@ func (p selectedRunTargetOwnerProjection) withActivationPlans(plans []runtimepip
 	p.agents = agents
 	p.constructingAgents = constructing
 	p.activationOwners = activationOwners
-	p.descriptors = ordered.descriptors
+	p.candidates = ordered.candidates
 	return p, nil
 }
 
@@ -245,10 +244,10 @@ func (p deliveryRecipientPolicy) loadSelectedRunTargetOwnerProjection(ctx contex
 	if err != nil {
 		return selectedRunTargetOwnerProjection{}, err
 	}
-	ordered := newOrderedActiveTargetDescriptors(nil)
+	ordered := newOrderedTargetOwnerCandidates(nil)
 	targetsAvailable := false
-	if p.loadActiveTargetDescriptors != nil {
-		loaded, available, err := p.loadActiveTargetDescriptors(ctx)
+	if p.loadTargetOwnerCandidates != nil {
+		loaded, available, err := p.loadTargetOwnerCandidates(ctx)
 		if err != nil {
 			return selectedRunTargetOwnerProjection{}, err
 		}
@@ -262,7 +261,7 @@ func (p deliveryRecipientPolicy) loadSelectedRunTargetOwnerProjection(ctx contex
 		context:     ctx,
 		instances:   p.instances,
 		agents:      agents, agentsAvailable: agentsAvailable,
-		descriptors: ordered.descriptors, targetsAvailable: targetsAvailable,
+		candidates: ordered.candidates, targetsAvailable: targetsAvailable,
 		source: p.semanticSource, required: p.requireTargetOwners,
 	}
 	if projection.required {
@@ -274,35 +273,11 @@ func (p deliveryRecipientPolicy) loadSelectedRunTargetOwnerProjection(ctx contex
 }
 
 func (p selectedRunTargetOwnerProjection) validate() error {
-	for _, descriptor := range p.descriptors {
-		descriptor = descriptor.Normalized()
-		if descriptor.FlowInstance == "" || descriptor.EntityID == "" {
-			return fmt.Errorf("selected-run target owner %q is missing exact entity identity or flow-instance identity: flow_instance=%q entity_id=%q", descriptor.ID, descriptor.FlowInstance, descriptor.EntityID)
+	for _, descriptor := range p.candidates {
+		descriptor = normalizedTargetOwnerCandidate(descriptor)
+		if descriptor.Route.FlowInstance == "" || descriptor.Route.EntityID == "" {
+			return fmt.Errorf("selected-run target owner is missing exact entity identity or flow-instance identity: flow_instance=%q entity_id=%q", descriptor.Route.FlowInstance, descriptor.Route.EntityID)
 		}
 	}
 	return nil
-}
-
-func (p selectedRunTargetOwnerProjection) targetOwnerCandidates() []runtimepipeline.DeliveryTargetOwnerCandidate {
-	out := make([]runtimepipeline.DeliveryTargetOwnerCandidate, 0, len(p.descriptors))
-	prospective := p.prospective.Candidate()
-	for _, descriptor := range p.descriptors {
-		descriptor = descriptor.Normalized()
-		if !p.prospective.Empty() && descriptor.FlowInstance == prospective.Route.FlowInstance && descriptor.EntityID == prospective.Route.EntityID {
-			continue
-		}
-		out = append(out, runtimepipeline.DeliveryTargetOwnerCandidate{
-			Route: events.RouteIdentity{
-				FlowID:       descriptor.FlowID,
-				FlowInstance: descriptor.FlowInstance,
-				EntityID:     descriptor.EntityID,
-			},
-			Materializing: descriptor.Materializing,
-			Availability:  descriptor.Availability,
-		})
-	}
-	if !p.prospective.Empty() {
-		out = append(out, prospective)
-	}
-	return out
 }
