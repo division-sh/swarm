@@ -15,6 +15,7 @@ import (
 	"github.com/division-sh/swarm/internal/runtime/testfixtures/canonicalrouting"
 	"github.com/division-sh/swarm/internal/runtime/workflowexpr"
 	"github.com/division-sh/swarm/internal/servedparity"
+	"github.com/division-sh/swarm/internal/store"
 )
 
 func TestServedSemanticNumericScenarioModes(t *testing.T) {
@@ -153,6 +154,8 @@ func startSemanticNumericRuntime(t *testing.T, backend servedparity.Backend, roo
 	unsetStoreSelectorEnv(t)
 	stubServeRuntimeWorkspaceLifecycle(t)
 	var db *sql.DB
+	var pg *store.PostgresStore
+	var sq *store.SQLiteRuntimeStore
 	opts := cliapp.ServeOptions{SourceRoot: root, APIListenAddr: "127.0.0.1:0", MCPListenAddr: "127.0.0.1:0", SelfCheck: true,
 		TestOutboxSweeperConfig: servedEventPublishProofOutboxSweeperConfig()}
 	dialect := "sqlite"
@@ -164,7 +167,7 @@ func startSemanticNumericRuntime(t *testing.T, backend servedparity.Backend, roo
 	} else {
 		opts.ConfigPath = writeMockAgentRuntimeConfig(t, dialect, filepath.Join(t.TempDir(), "numeric.db"))
 	}
-	captureSelectedRuntimePersistence(t, func(p serveRuntimePersistence) { db, _, _ = selectedRuntimeStoreForTest(t, p) })
+	captureSelectedRuntimePersistence(t, func(p serveRuntimePersistence) { db, pg, sq = selectedRuntimeStoreForTest(t, p) })
 	retainedRoot := t.TempDir()
 	start := func() (*serveRuntimeTestProcess, servedControlProofRuntime) {
 		var process *serveRuntimeTestProcess
@@ -176,7 +179,7 @@ func startSemanticNumericRuntime(t *testing.T, backend servedparity.Backend, roo
 		}
 		process.waitForReadyLine()
 		endpoint := "http://" + serveRuntimeAPIListenerFromOutput(t, process.outputString()) + "/v1/rpc"
-		return process, servedControlProofRuntime{ReadRunDeliveries: deliveryReader, ReceiverStateReader: receiverReader, Endpoint: endpoint, DB: db, Backend: dialect, BundleHash: servedEventPublishFixtureBundleHash(t, root), Runtime: servedTestProcessRuntime(t, process)}
+		return process, servedControlProofRuntime{ReadRunDeliveries: deliveryReader, ReceiverStateReader: receiverReader, Endpoint: endpoint, DB: db, Backend: dialect, BundleHash: servedEventPublishFixtureBundleHash(t, root), Runtime: servedTestProcessRuntime(t, process), Postgres: pg, SQLite: sq}
 	}
 	process, rt := start()
 	return rt, func() servedControlProofRuntime {

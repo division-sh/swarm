@@ -56,6 +56,11 @@ func TestPublicPublicationCreatingTurnOrderBothStores(t *testing.T) {
 			}
 			process, rt := start()
 			rt.Runtime = servedTestProcessRuntime(t, process)
+			fixtureOwner, ok := rt.persistence.deps.EventStore.(storetest.RunFixtureStore)
+			if !ok {
+				t.Fatal("creating-turn fixture requires its native run lifecycle owner")
+			}
+			seedOwnedPublicationLiveRun(t, rt.Runtime, rt.BundleHash, fixtureOwner)
 			t.Cleanup(func() {
 				unblock()
 				if code := process.stop(); code != 0 {
@@ -232,6 +237,11 @@ func TestPublicPublicationCreatingTurnRestartBothStores(t *testing.T) {
 				return nil
 			}
 			process, rt := start()
+			fixtureOwner, ok := rt.persistence.deps.EventStore.(storetest.RunFixtureStore)
+			if !ok {
+				t.Fatal("creating-turn restart fixture requires its native run lifecycle owner")
+			}
+			seedOwnedPublicationLiveRun(t, servedTestProcessRuntime(t, process), rt.BundleHash, fixtureOwner)
 			t.Cleanup(func() {
 				if code := process.stop(); code != 0 {
 					t.Errorf("creating-turn recovery shutdown=%d", code)
