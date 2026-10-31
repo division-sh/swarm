@@ -5,6 +5,7 @@ import (
 	"context"
 	"fmt"
 	"os"
+	"os/exec"
 	"path/filepath"
 	"runtime"
 	"strings"
@@ -32,6 +33,7 @@ func TestWorkspaceBuildClaudeCLIUsesEmbeddedBuildPlanFromTempCWD(t *testing.T) {
 	for _, want := range []string{
 		"Building workspace image swarm-workspace:latest for backend claude_cli",
 		"Validating workspace image swarm-workspace:latest can execute claude",
+		"Validated Claude CLI 2.1.87 (Claude Code) (expected 2.1.87)",
 		"Workspace image swarm-workspace:latest is ready for claude_cli",
 	} {
 		if !strings.Contains(stdout.String(), want) {
@@ -74,7 +76,7 @@ func TestWorkspaceBuildClaudeCLIUsesEmbeddedBuildPlanFromTempCWD(t *testing.T) {
 	validate := calls[2]
 	for _, want := range []string{
 		"run --rm --entrypoint sh " + tempImage,
-		"command -v -- \"$1\" >/dev/null && \"$1\" --version >/dev/null",
+		"command -v -- \"$1\" >/dev/null && \"$1\" --version",
 		"swarm-cli-proof claude",
 	} {
 		if !strings.Contains(validate, want) {
@@ -169,28 +171,57 @@ func TestWorkspaceBuildClaudeCLIFailsOnDockerBuildError(t *testing.T) {
 			t.Fatalf("stderr missing %q:\n%s", want, stderr.String())
 		}
 	}
+	t.Run("installer_failure", func(t *testing.T) {
+		plan := string(platform.WorkspaceDockerfile())
+		_, install, ok := strings.Cut(plan, "RUN if [ \"$INSTALL_CLAUDE_CLI\" = \"true\" ]; then")
+		if !ok {
+			t.Fatal("embedded Claude installation step missing")
+		}
+		install, _, _ = strings.Cut(install, "\n\n")
+		command := exec.Command("sh", "-c", "npm() { return 42; }\nif [ \"$INSTALL_CLAUDE_CLI\" = \"true\" ]; then"+install)
+		command.Env = append(os.Environ(), "INSTALL_CLAUDE_CLI=true", "CLAUDE_CODE_VERSION=2.1.87")
+		output, err := command.CombinedOutput()
+		if exit, ok := err.(*exec.ExitError); !ok || exit.ExitCode() != 42 {
+			t.Fatalf("package installation failure was not propagated: %v, %s", err, output)
+		}
+	})
 }
 
 func TestWorkspaceBuildClaudeCLIFailsOnValidationError(t *testing.T) {
-	stub := configureWorkspaceBuildDockerStub(t)
-	t.Setenv("SWARM_TEST_DOCKER_FAIL_VALIDATE", "1")
-
-	var stdout, stderr bytes.Buffer
-	code := executeRootCommandWithOptions(context.Background(), t.TempDir(), []string{"workspace", "build", "--backend", "claude_cli", "--docker-bin", stub.dockerPath}, &stdout, &stderr, defaultRootCommandOptions())
-	if code != CLIExitRuntime {
-		t.Fatalf("code = %d, want %d stdout=%s stderr=%s", code, CLIExitRuntime, stdout.String(), stderr.String())
-	}
-	for _, want := range []string{"workspace image validation failed", "configured Claude CLI command \"claude\" cannot execute", "claude missing"} {
-		if !strings.Contains(stderr.String(), want) {
-			t.Fatalf("stderr missing %q:\n%s", want, stderr.String())
-		}
-	}
-	calls := strings.Join(readWorkspaceBuildDockerCalls(t, stub.callsPath), "\n")
-	if strings.Contains(calls, "\ntag ") || strings.HasPrefix(calls, "tag ") {
-		t.Fatalf("docker calls published final image after validation failure:\n%s", calls)
-	}
-	if !strings.Contains(calls, "\nimage rm swarm-workspace-build-") {
-		t.Fatalf("docker calls did not clean up temp validation image:\n%s", calls)
+	for _, tc := range []struct {
+		name, actual, fail, detail string
+	}{
+		{"missing_command", "", "1", "configured Claude CLI command \"claude\" cannot execute"},
+		{"wrong_version", "0.0.0 (Claude Code)", "", "expected Claude CLI 2.1.87"},
+		{"empty_version", "", "", "expected Claude CLI 2.1.87"},
+		{"substring_version", "2.1.870 (Claude Code)", "", "expected Claude CLI 2.1.87"},
+		{"malformed_version", "warning: 2.1.87 (Claude Code)", "", "expected Claude CLI 2.1.87"},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			stub := configureWorkspaceBuildDockerStub(t)
+			t.Setenv("SWARM_TEST_CLAUDE_VERSION", tc.actual)
+			t.Setenv("SWARM_TEST_DOCKER_FAIL_VALIDATE", tc.fail)
+			var stdout, stderr bytes.Buffer
+			code := executeRootCommandWithOptions(context.Background(), t.TempDir(), []string{"workspace", "build", "--backend", "claude_cli", "--docker-bin", stub.dockerPath}, &stdout, &stderr, defaultRootCommandOptions())
+			if code != CLIExitRuntime {
+				t.Fatalf("code = %d, want %d stdout=%s stderr=%s", code, CLIExitRuntime, stdout.String(), stderr.String())
+			}
+			for _, want := range []string{"workspace image validation failed", tc.detail} {
+				if !strings.Contains(stderr.String(), want) {
+					t.Fatalf("stderr missing %q:\n%s", want, stderr.String())
+				}
+			}
+			if tc.fail != "" && !strings.Contains(stderr.String(), "claude missing") {
+				t.Fatalf("missing original command failure: %s", stderr.String())
+			}
+			calls := strings.Join(readWorkspaceBuildDockerCalls(t, stub.callsPath), "\n")
+			if strings.Contains(calls, "\ntag ") || strings.HasPrefix(calls, "tag ") {
+				t.Fatalf("docker calls published final image after validation failure:\n%s", calls)
+			}
+			if !strings.Contains(calls, "\nimage rm swarm-workspace-build-") {
+				t.Fatalf("docker calls did not clean up temp validation image:\n%s", calls)
+			}
+		})
 	}
 }
 
@@ -210,6 +241,17 @@ func TestWorkspaceBuildClaudeCLIFailsOnUnavailableDocker(t *testing.T) {
 }
 
 func TestWorkspaceBuildClaudeCLIValidationErrors(t *testing.T) {
+	for _, plan := range []string{
+		"",
+		"ARG CLAUDE_CODE_VERSION",
+		"ARG CLAUDE_CODE_VERSION=latest",
+		"ARG CLAUDE_CODE_VERSION=2.1.87 extra",
+		"ARG CLAUDE_CODE_VERSION=2.1.87\nARG CLAUDE_CODE_VERSION=2.1.87",
+	} {
+		if version, err := workspaceBuildClaudeVersion([]byte(plan)); err == nil || version != "" {
+			t.Fatalf("invalid embedded declaration accepted: %q -> %q, %v", plan, version, err)
+		}
+	}
 	tests := []struct {
 		name string
 		args []string
@@ -388,6 +430,7 @@ case "$1" in
       echo "claude missing" >&2
       exit 43
     fi
+    printf '%s\n' "$SWARM_TEST_CLAUDE_VERSION"
     exit 0
     ;;
   tag)
@@ -412,6 +455,7 @@ esac
 	t.Setenv("SWARM_TEST_DOCKER_CALLS", callsPath)
 	t.Setenv("SWARM_TEST_DOCKER_FAIL_BUILD", "")
 	t.Setenv("SWARM_TEST_DOCKER_FAIL_VALIDATE", "")
+	t.Setenv("SWARM_TEST_CLAUDE_VERSION", "2.1.87 (Claude Code)")
 	return workspaceBuildDockerStub{callsPath: callsPath, dockerPath: dockerPath}
 }
 
