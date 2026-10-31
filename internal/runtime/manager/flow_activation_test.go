@@ -1458,7 +1458,7 @@ func testFlowBundle(t *testing.T, autoEmit string, edits ...func(string)) *runti
 		schema += fmt.Sprintf("auto_emit_on_create: {event: %s}\n", autoEmit)
 	}
 	writeFlowActivationFixtureFile(t, filepath.Join(root, "review/schema.yaml"), schema)
-	writeFlowActivationFixtureFile(t, filepath.Join(root, "review/entities.yaml"), "review_entity:\n  instance_key: {type: text, _unused_reason: fixture instance identity}\n")
+	writeFlowActivationFixtureFile(t, filepath.Join(root, "review/state.yaml"), "instance_key: text\n")
 	writeFlowActivationFixtureFile(t, filepath.Join(root, "review/events.yaml"), "task.started:\n  instance_key: text\n")
 	writeFlowActivationFixtureFile(t, filepath.Join(root, "review/agents.yaml"), "reviewer:\n  role: reviewer\n  intent: {inline: \"Perform the manager test agent's assigned work.\"}\n  subscriptions: [task.started]\n")
 	for _, edit := range edits {

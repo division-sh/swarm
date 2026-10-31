@@ -16,8 +16,8 @@ func WriteManagerMockAlternatives(t testing.TB) string {
   intent: {inline: Handle static support work.}
   mock: {kind: python, module: mocks/agent.py}
 `,
-		"template-support/schema.yaml":   "instance: instance_id\n",
-		"template-support/entities.yaml": "instance:\n  instance_id: {type: text, immutable: true}\n",
+		"template-support/schema.yaml": "instance: instance_id\n",
+		"template-support/state.yaml":  "instance_id: text\n",
 		"template-support/agents.yaml": `worker:
   role: worker
   model: regular
