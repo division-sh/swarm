@@ -1033,13 +1033,14 @@ func normalizeWorkflowInstanceForPersistence(instance WorkflowInstance) (Workflo
 	return instance, identity, true, nil
 }
 
-func (s *workflowInstanceStore) QueryEntityCount(ctx context.Context, runID string, source semanticview.Source, contract entityruntime.Contract, predicate workflowEntityQueryPredicate) (int, error) {
+func (s *workflowInstanceStore) QueryEntityCount(ctx context.Context, runID string, source semanticview.Source, flowID string, contract entityruntime.Contract, predicate workflowEntityQueryPredicate) (int, error) {
 	if s == nil || s.entityQuery == nil {
 		return 0, fmt.Errorf("workflow entity query reader is required")
 	}
 	return s.entityQuery.CountWorkflowEntities(ctx, entityquery.Request{
 		RunID:    runID,
 		Source:   source,
+		FlowID:   flowID,
 		Contract: contract,
 		Predicate: entityquery.Predicate{
 			Field: predicate.Field,

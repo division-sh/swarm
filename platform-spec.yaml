@@ -3907,6 +3907,10 @@ runtime_enforcement:
       Static validation may accept syntactically valid scoped operands whose
       values are only available at runtime, but runtime evaluation must not
       reinterpret unresolved scoped operands as string literals.
+      A current_state predicate counts lifecycle headers in flow_instances
+      for the current run and flow, including flows without state.yaml.
+      A business-field predicate still requires the flow's state contract.
+      Neither dummy state nor field-row population substitutes for headers.
   error_shape:
     invalid_field: cause=invalid_tool_input with nearest declared matches
     immutable_write: cause=invalid_tool_input for post-create immutable writes
