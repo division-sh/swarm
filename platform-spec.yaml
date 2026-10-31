@@ -39138,6 +39138,9 @@ api_specification:
             $ref: '#/components/schemas/BundleHash'
           active_bundle_hash:
             $ref: '#/components/schemas/BundleHash'
+          message:
+            description: Exact paused-run continue guidance when the retained source is available but unloaded.
+            type: string
           cause:
             type: string
       BUNDLE_DATA_INTEGRITY_ERROR:
@@ -39196,6 +39199,21 @@ api_specification:
           reason:
             description: Named server rejection branch. Root-input values are not_declared_root_input and declared_root_input_not_routable.
             type: string
+      EVENT_PUBLISH_REJECTED:
+        type: object
+        additionalProperties: false
+        required: [event_name, reason]
+        properties:
+          event_name: {type: string}
+          reason:
+            type: string
+            enum: [no_run_yet, all_runs_paused, all_runs_ended, ambiguous_flow, live_run_changed]
+          flow_path: {type: string}
+          run_id: {$ref: '#/components/schemas/OpaqueId'}
+          matches:
+            type: array
+            items: {type: string}
+          remediation: {type: string}
       EVENT_PUBLISH_FAILED:
         type: object
         additionalProperties: false
@@ -39804,8 +39822,11 @@ api_specification:
         remains available through explicit compiled connections from admitted root or provider events, with shared private
         receiver registration. No selected-root template lifecycle accommodation is introduced.
 
-        If run_id is omitted, the server creates a run and persists this event as its trigger, returning new_run_created=true.
-        Otherwise run_id must name an existing nonterminal run; missing or terminal runs fail closed. Event and payload
+        If run_id is omitted, select the matching public flow's existing live run without creating a run. Refuse
+        ambiguous flows naming the matches; distinguish no run yet, paused runs with continue guidance, and all runs ended.
+        Revalidate the exact selected flow, run and source under the native run lock in the event/completion transaction;
+        a pause or live switch refuses without writes or retargeting. Explicit run_id must name an existing nonterminal run.
+        Missing or terminal runs fail closed. Event and payload
         admission, target validation, selected delivery planning, and idempotency completion precede acknowledgment.
         The selected-store transaction commits run, lifecycle, event, delivery, replay-scope and deterministic API completion
         facts atomically. Pre-commit failure leaves no residue. Commit acknowledgment loss does not prove rollback:
@@ -39914,6 +39935,7 @@ api_specification:
       - UNSUPPORTED_BUNDLE_HASH
       - EVENT_NOT_DECLARED
       - EVENT_PUBLISH_FAILED
+      - EVENT_PUBLISH_REJECTED
       - PAYLOAD_VALIDATION_FAILED
       - RUN_NOT_FOUND
       - EVENT_NOT_FOUND

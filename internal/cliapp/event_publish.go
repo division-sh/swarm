@@ -109,12 +109,11 @@ func runEventPublishCommand(ctx context.Context, out, errOut io.Writer, args []s
 		return commandExitError{code: eventPublishErrorExitCode(err)}
 	}
 	if _, existingRun := params["run_id"]; !existingRun {
-		health, err := runCommandHealth(ctx, client)
+		_, err := runCommandHealth(ctx, client)
 		if err != nil {
 			writeCLIAPIError(errOut, err)
 			return commandExitError{code: eventPublishErrorExitCode(err)}
 		}
-		params["bundle_hash"] = health.Bundle.BundleHash
 	}
 
 	var result eventPublishResult
@@ -334,6 +333,7 @@ func eventPublishErrorExitCode(err error) int {
 			"UNSUPPORTED_BUNDLE_HASH",
 			"EVENT_NOT_DECLARED",
 			"EVENT_PUBLISH_FAILED",
+			"EVENT_PUBLISH_REJECTED",
 			"PAYLOAD_VALIDATION_FAILED",
 			"RUN_ALREADY_TERMINAL",
 			"IDEMPOTENCY_CONFLICT",

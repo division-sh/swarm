@@ -10,6 +10,7 @@ import (
 	runtimecorrelation "github.com/division-sh/swarm/internal/runtime/correlation"
 	decisioncard "github.com/division-sh/swarm/internal/runtime/decisioncard"
 	"github.com/division-sh/swarm/internal/runtime/executionposture"
+	"github.com/division-sh/swarm/internal/runtime/runlifecycle"
 	"github.com/division-sh/swarm/internal/runtime/semanticview"
 )
 
@@ -109,11 +110,12 @@ func (c testOperatorCapabilities) publication() EventPublicationOptions {
 	acknowledged, _ := c.Events.(AcknowledgedEventPublisher)
 	recipientPlans, _ := c.Events.(EventRecipientPlanChecker)
 	bundleSource, _ := c.Events.(SourceArtifactAdmitter)
+	liveRuns, _ := c.Runs.(runlifecycle.LiveRunReader)
 	return EventPublicationOptions{
 		ExecutionPosture: c.posture(),
 		Now:              c.Now, Idempotency: c.Idempotency, Events: c.Events, Acknowledged: acknowledged,
 		RecipientPlans: recipientPlans, SourceArtifact: bundleSource,
-		Runs: c.Runs, Entities: c.Entities, Observability: c.Observability,
+		Runs: c.Runs, LiveRuns: liveRuns, Entities: c.Entities, Observability: c.Observability,
 		RunBundleContext: c.RunBundleContext, RuntimeContexts: c.RuntimeContexts,
 		Source: c.Source, Bundle: c.Bundle,
 		SelectedForkControls: c.SelectedForkControls,
