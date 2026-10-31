@@ -126,16 +126,6 @@ func (o SelectedContractExecutionOwner) requirePreparationProcess(ctx context.Co
 	return nil
 }
 
-func (o SelectedContractExecutionOwner) bindStagedPreparation(op *selectedContractOperation, binding runfork.RunForkSelectedContractBinding) error {
-	if err := validateSelectedContractExecutionBinding(binding.ForkRunID, binding); err != nil {
-		return err
-	}
-	contexts := o.ports.contexts
-	contexts.mu.Lock()
-	defer contexts.mu.Unlock()
-	return contexts.bindStagedPreparationLocked(op, binding)
-}
-
 func (contexts *selectedForkContexts) bindStagedPreparationLocked(op *selectedContractOperation, binding runfork.RunForkSelectedContractBinding) error {
 	entry := contexts.entries[op]
 	if contexts.retired || entry == nil || entry.retiring {

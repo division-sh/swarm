@@ -23,7 +23,6 @@ import (
 	"github.com/division-sh/swarm/internal/runtime/runfork"
 	storerunlifecycle "github.com/division-sh/swarm/internal/runtime/runlifecycle"
 	"github.com/division-sh/swarm/internal/runtime/scenarioexecution"
-	"github.com/division-sh/swarm/internal/runtime/semanticview"
 
 	deliveryadapter "github.com/division-sh/swarm/internal/store/internal/backend/delivery"
 	"github.com/division-sh/swarm/internal/store/internal/backend/mutationprotocol"
@@ -872,19 +871,6 @@ func TestRunForkMaterializer_ReplaysExactAndFailsClosedOnUnsupportedBlockers(t *
 	}
 }
 
-func assertRunForkCompleteEventSnapshot(t *testing.T, got, want events.Event) {
-	t.Helper()
-	if got.ID() != want.ID() || got.Type() != want.Type() || !got.Producer().Equal(want.Producer()) ||
-		got.TaskID() != want.TaskID() || got.ChainDepth() != want.ChainDepth() || got.RunID() != want.RunID() ||
-		got.ParentEventID() != want.ParentEventID() || got.ExecutionMode() != want.ExecutionMode() ||
-		!got.CreatedAt().Truncate(time.Microsecond).Equal(want.CreatedAt().Truncate(time.Microsecond)) ||
-		!bytes.Equal(got.Payload(), want.Payload()) || !reflect.DeepEqual(got.Envelope(), want.Envelope()) {
-		t.Fatalf("dispatched historical replay snapshot changed\n got: id=%s type=%s producer=%s/%s task=%s depth=%d run=%s parent=%s mode=%s at=%s payload=%s envelope=%#v\nwant: id=%s type=%s producer=%s/%s task=%s depth=%d run=%s parent=%s mode=%s at=%s payload=%s envelope=%#v",
-			got.ID(), got.Type(), got.ProducerType(), got.SourceAgent(), got.TaskID(), got.ChainDepth(), got.RunID(), got.ParentEventID(), got.ExecutionMode(), got.CreatedAt(), got.Payload(), got.Envelope(),
-			want.ID(), want.Type(), want.ProducerType(), want.SourceAgent(), want.TaskID(), want.ChainDepth(), want.RunID(), want.ParentEventID(), want.ExecutionMode(), want.CreatedAt(), want.Payload(), want.Envelope())
-	}
-}
-
 func TestRunForkDeliveryEventReplayValidationRejectsUnsafeCurrentEvidence(t *testing.T) {
 	base := runfork.RunForkPendingWork{
 		EventID:        uuid.NewString(),
@@ -936,49 +922,6 @@ func TestRunForkDeliveryEventReplayValidationRejectsUnsafeCurrentEvidence(t *tes
 	}
 }
 
-type sqlNullTime struct {
-	Time  time.Time
-	Valid bool
-}
-
-type fakeRunForkHistoricalReplayExecutionAdmitter struct {
-	called  bool
-	request runfork.RunForkHistoricalReplayExecutionRequest
-	err     error
-	work    func(runfork.RunForkHistoricalReplayExecutionRequest) []runfork.RunForkHistoricalReplayExecutableWork
-}
-
-func (a *fakeRunForkHistoricalReplayExecutionAdmitter) AdmitRunForkHistoricalReplayExecution(_ context.Context, req runfork.RunForkHistoricalReplayExecutionRequest) (runfork.RunForkHistoricalReplayExecution, error) {
-	a.called = true
-	a.request = req
-	if a.err != nil {
-		return runfork.RunForkHistoricalReplayExecution{}, a.err
-	}
-	deliveryEventReplayWork := []runfork.RunForkHistoricalReplayExecutableWork{
-		runForkHistoricalReplayWorkFromPending(req.PendingWork[0]),
-	}
-	if a.work != nil {
-		deliveryEventReplayWork = a.work(req)
-	}
-	return runfork.RunForkHistoricalReplayExecution{
-		Owner:                      runfork.RunForkHistoricalReplayExecutionOwner,
-		AdmissionOwner:             runfork.RunForkHistoricalReplayExecutionAdmissionOwner,
-		ReplayResumeAdmissionOwner: req.ReplayResumeAdmission.Owner,
-		ForkRunID:                  req.ForkRunID,
-		SourceRunID:                req.SourceRunID,
-		ForkEventID:                req.ForkEventID,
-		ClosureLevel:               "canonical_owner_promotion_with_delivery_event_replay_ready_only",
-		DeliveryEventReplayReady:   true,
-		EventDeliveriesAdmission: runfork.RunForkHistoricalReplayFactAdmission{
-			Fact:        runfork.RunForkHistoricalReplayFactEventDeliveries,
-			Admission:   runfork.RunForkHistoricalReplayAdmissionExecutableForkWork,
-			SourceOwner: runfork.RunForkReplayResumeAdmissionOwner,
-			Message:     "test admission",
-		},
-		DeliveryEventReplayWork: deliveryEventReplayWork,
-	}, nil
-}
-
 func runForkHistoricalReplayWorkFromPending(item runfork.RunForkPendingWork) runfork.RunForkHistoricalReplayExecutableWork {
 	return runfork.RunForkHistoricalReplayExecutableWork{
 		Fact:             runfork.RunForkHistoricalReplayFactEventDeliveries,
@@ -991,67 +934,8 @@ func runForkHistoricalReplayWorkFromPending(item runfork.RunForkPendingWork) run
 	}
 }
 
-func runForkHistoricalReplayWorkForDelivery(req runfork.RunForkHistoricalReplayExecutionRequest, deliveryID string) runfork.RunForkHistoricalReplayExecutableWork {
-	for _, item := range req.PendingWork {
-		if item.DeliveryID == deliveryID {
-			return runForkHistoricalReplayWorkFromPending(item)
-		}
-	}
-	return runfork.RunForkHistoricalReplayExecutableWork{
-		Fact:             runfork.RunForkHistoricalReplayFactEventDeliveries,
-		SourceEventID:    req.PendingWork[0].EventID,
-		SourceDeliveryID: deliveryID,
-		SubscriberType:   req.PendingWork[0].SubscriberType,
-		SubscriberID:     req.PendingWork[0].SubscriberID,
-		ReasonCode:       req.PendingWork[0].ReasonCode,
-		Classification:   req.PendingWork[0].Classification,
-	}
-}
-
-func assertRunForkActivationReplayMutationAbsent(t *testing.T, db *sql.DB, sourceRunID, forkRunID string) {
-	t.Helper()
-	ctx := testAuthorActivityContext()
-	var sourceStatus, forkStatus string
-	if err := db.QueryRowContext(ctx, `SELECT status FROM runs WHERE run_id = $1::uuid`, sourceRunID).Scan(&sourceStatus); err != nil {
-		t.Fatalf("load source status after blocked activation: %v", err)
-	}
-	if err := db.QueryRowContext(ctx, `SELECT status FROM runs WHERE run_id = $1::uuid`, forkRunID).Scan(&forkStatus); err != nil {
-		t.Fatalf("load fork status after blocked activation: %v", err)
-	}
-	if sourceStatus != "running" || forkStatus != runfork.RunForkMaterializedStatus {
-		t.Fatalf("blocked activation lifecycle = source:%s fork:%s, want running/%s", sourceStatus, forkStatus, runfork.RunForkMaterializedStatus)
-	}
-	for name, query := range map[string]string{
-		"fork events":     `SELECT COUNT(*) FROM events WHERE run_id = $1::uuid`,
-		"fork deliveries": `SELECT COUNT(*) FROM event_deliveries WHERE run_id = $1::uuid`,
-		"lineage rows":    `SELECT COUNT(*) FROM run_fork_delivery_event_replays WHERE fork_run_id = $1::uuid`,
-	} {
-		var count int
-		if err := db.QueryRowContext(ctx, query, forkRunID).Scan(&count); err != nil {
-			t.Fatalf("count %s after blocked activation: %v", name, err)
-		}
-		if count != 0 {
-			t.Fatalf("%s after blocked activation = %d, want 0", name, count)
-		}
-	}
-}
-
 type execContextDB interface {
 	ExecContext(context.Context, string, ...any) (sql.Result, error)
-}
-
-func (n *sqlNullTime) Scan(value any) error {
-	if value == nil {
-		n.Valid = false
-		return nil
-	}
-	tm, ok := value.(time.Time)
-	if !ok {
-		return fmt.Errorf("sqlNullTime expected time.Time, got %T", value)
-	}
-	n.Time = tm
-	n.Valid = true
-	return nil
 }
 
 func seedActivationReadySourceRun(t *testing.T, ctx context.Context, db *sql.DB, sourceRunID, entityID, eventID string, at time.Time) {
@@ -1069,22 +953,6 @@ func activationReadySourceInstance(entityID string, at time.Time) runtimepipelin
 		Name: "Activation Entity", CurrentState: "ready", Fields: map[string]any{"name": "Activation Entity"},
 		CreatedAt: at, EnteredStageAt: at,
 	}
-}
-
-// Settlement controls contribute a prepared component aggregate through the
-// constructor owner; they do not qualify public constructor selection.
-func constructReplaySettlementSourceState(t *testing.T, ctx context.Context, selected *PostgresStore, source semanticview.Source, runID, entityID, eventID string, at time.Time) {
-	t.Helper()
-	event := semanticEventRecordFixture(eventID, runID, "fork.ready", eventtest.Producer(events.EventProducerPlatform, "test"), []byte(`{}`), semanticEventRecordFixtureEnvelope(entityID, ""), at)
-	if err := insertCanonicalEventRecordFixture(ctx, selected, event); err != nil {
-		t.Fatal(err)
-	}
-	commitPreparedWorkflowAggregateFixture(t, ctx, selected, runID, runtimepipeline.WorkflowInstance{
-		InstanceID: "1", StorageRef: "flow-a/1", EntityID: entityID, EntityType: "fork_entity",
-		Name: "Activation Entity", WorkflowName: "flow-a", WorkflowVersion: source.WorkflowVersion(),
-		Mode: "static", StageDefined: true, CurrentState: "ready", Fields: map[string]any{"name": "Activation Entity"},
-		CreatedAt: at, UpdatedAt: at, EnteredStageAt: at,
-	}, at)
 }
 
 func seedActivationReadySourceState(t *testing.T, ctx context.Context, db *sql.DB, sourceRunID, entityID, eventID string, at time.Time) {
