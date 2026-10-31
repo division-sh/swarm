@@ -173,7 +173,7 @@ pins:
     - inbound.partner_ack.raw
 `,
 		"matrix/state.yaml":  "service_id: \"standing\"\n",
-		"matrix/events.yaml": inboundAdmissionEvents(),
+		"matrix/policy.yaml": "operator_account: '420079'\n",
 		"matrix/nodes.yaml":  inboundAdmissionNodes(),
 	}
 	for _, provider := range []string{"telegram", "intercom", "stripe", "twilio", "shopify", "typeform"} {

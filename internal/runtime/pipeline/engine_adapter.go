@@ -910,20 +910,22 @@ func (e pipelineEngineEvaluator) queryEntityCount(ctx workflowExpressionContext,
 		return 0, fmt.Errorf("query_entities requires event.run_id in expression context")
 	}
 	flowID := strings.TrimSpace(ctx.WorkflowName)
-	contract, ok := entityruntime.ResolveForFlow(e.coordinator.SemanticSource(), flowID)
-	if !ok {
-		flowLabel := flowID
-		if flowLabel == "" {
-			flowLabel = "<root>"
+	var contract entityruntime.Contract
+	if parsed.Field != "current_state" {
+		var ok bool
+		contract, ok = entityruntime.ResolveForFlow(e.coordinator.SemanticSource(), flowID)
+		if !ok {
+			flowLabel := flowID
+			if flowLabel == "" {
+				flowLabel = "<root>"
+			}
+			return 0, fmt.Errorf("flow-owned entity contract is not available for workflow %s", flowLabel)
 		}
-		return 0, fmt.Errorf("flow-owned entity contract is not available for workflow %s", flowLabel)
-	}
-	if strings.TrimSpace(parsed.Field) != "current_state" {
 		if _, err := entityruntime.ResolveLeafField(contract, parsed.Field); err != nil {
 			return 0, err
 		}
 	}
-	return e.coordinator.workflowStore.QueryEntityCount(context.Background(), runID, e.coordinator.SemanticSource(), contract, parsed)
+	return e.coordinator.workflowStore.QueryEntityCount(context.Background(), runID, e.coordinator.SemanticSource(), flowID, contract, parsed)
 }
 
 func coordinatorEngineDependencies(pc *PipelineCoordinator) runtimeengine.RuntimeDependencies {

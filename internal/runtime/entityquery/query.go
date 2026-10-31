@@ -24,6 +24,7 @@ type Predicate struct {
 type Request struct {
 	RunID     string
 	Source    semanticview.Source
+	FlowID    string
 	Contract  entityruntime.Contract
 	Predicate Predicate
 }
@@ -35,7 +36,11 @@ func (r Request) Validate() error {
 	if r.Source == nil {
 		return fmt.Errorf("workflow entity query requires semantic source")
 	}
-	if strings.TrimSpace(r.Contract.FlowID) == "" {
+	if r.Predicate.Field == "current_state" {
+		if _, ok := r.Source.FlowSchemaByID(r.FlowID); !ok {
+			return fmt.Errorf("workflow entity query requires a declared flow identity")
+		}
+	} else if strings.TrimSpace(r.Contract.FlowID) == "" {
 		return fmt.Errorf("workflow entity query requires flow contract")
 	}
 	if strings.TrimSpace(r.Predicate.Field) == "" {

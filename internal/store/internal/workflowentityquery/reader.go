@@ -33,6 +33,12 @@ func NewSQLite(backend *sqlitebackend.Backend) (*SQLite, error) {
 }
 
 func (o *Postgres) Count(ctx context.Context, request entityquery.Request) (int, error) {
+	if request.Predicate.Field == "current_state" {
+		return countStages(request, func(runID, flowID string) (rowIterator, error) {
+			return o.backend.QueryContext(ctx, `SELECT current_state, stage_defined FROM flow_instances
+				WHERE run_id = $1::uuid AND flow_template = $2`, runID, flowID)
+		})
+	}
 	return count(request, func(runID string) (rowIterator, error) {
 		return o.backend.QueryContext(ctx, `SELECT `+workflowheader.DataReadColumns+` `+workflowheader.DataReadFrom+`
 		WHERE es.run_id = $1::uuid ORDER BY es.entity_id`, runID)
@@ -40,6 +46,12 @@ func (o *Postgres) Count(ctx context.Context, request entityquery.Request) (int,
 }
 
 func (o *SQLite) Count(ctx context.Context, request entityquery.Request) (int, error) {
+	if request.Predicate.Field == "current_state" {
+		return countStages(request, func(runID, flowID string) (rowIterator, error) {
+			return o.backend.QueryContext(ctx, `SELECT current_state, stage_defined FROM flow_instances
+				WHERE run_id = ? AND flow_template = ?`, runID, flowID)
+		})
+	}
 	return count(request, func(runID string) (rowIterator, error) {
 		return o.backend.QueryContext(ctx, `SELECT `+workflowheader.DataReadColumns+` `+workflowheader.DataReadFrom+`
 		WHERE es.run_id = ? ORDER BY es.entity_id`, runID)
@@ -51,6 +63,41 @@ type rowIterator interface {
 	Scan(...any) error
 	Err() error
 	Close() error
+}
+
+func countStages(request entityquery.Request, query func(string, string) (rowIterator, error)) (int, error) {
+	if err := request.Validate(); err != nil {
+		return 0, err
+	}
+	runID, err := runtimecurrentstate.ValidateRunID(request.RunID)
+	if err != nil {
+		return 0, err
+	}
+	rows, err := query(runID, request.FlowID)
+	if err != nil {
+		return 0, err
+	}
+	defer rows.Close()
+	matched := 0
+	for rows.Next() {
+		var stage string
+		var defined bool
+		if err := rows.Scan(&stage, &defined); err != nil {
+			return 0, err
+		}
+		var value any
+		if defined {
+			value = stage
+		}
+		matches, err := entityquery.Matches(map[string]any{"current_state": value}, request.Predicate)
+		if err != nil {
+			return 0, err
+		}
+		if matches {
+			matched++
+		}
+	}
+	return matched, rows.Err()
 }
 
 func count(request entityquery.Request, query func(string) (rowIterator, error)) (int, error) {

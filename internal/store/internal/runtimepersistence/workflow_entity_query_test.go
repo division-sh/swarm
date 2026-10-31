@@ -58,7 +58,7 @@ func TestWorkflowEntityQueryProjectionOnBothStores(t *testing.T) {
 			if count != 1 {
 				t.Fatalf("numeric count = %d, want one in-scope entity", count)
 			}
-			for _, field := range []string{"current_state", "workflow_state"} {
+			for _, field := range []string{"workflow_state"} {
 				for _, op := range []string{"==", "!="} {
 					want := 0
 					if op == "!=" {
@@ -72,6 +72,35 @@ func TestWorkflowEntityQueryProjectionOnBothStores(t *testing.T) {
 						t.Fatalf("data-only %s %s ready count=%d want=%d err=%v", field, op, count, want, err)
 					}
 				}
+			}
+			headerSource := semanticview.Wrap(loadLifecyclePersistenceFixtureForTest(t, map[string]string{
+				"manifest.yaml":       "version: 1.0.0\nplatform_version: '*'\n",
+				"schema.yaml":         "stages: []\n",
+				"child/manifest.yaml": "version: 1.0.0\nplatform_version: '*'\n",
+				"child/schema.yaml":   "stages: {ready: {}, done: {final: true}}\n",
+			}))
+			for _, header := range []struct{ flow, path, stage string }{
+				{"child", "child/ready", "ready"},
+				{"child", "child/done", "done"},
+				{"sibling", "sibling/ready", "ready"},
+			} {
+				seedWorkflowHeaderProjectionFixture(t, ctx, db, runID, uuid.NewString(), header.path,
+					header.flow, "", header.stage, "{}", time.Now().UTC())
+			}
+			for _, op := range []string{"==", "!="} {
+				count, err := owner.CountWorkflowEntities(ctx, entityquery.Request{
+					RunID: runID, Source: headerSource, FlowID: "child",
+					Predicate: entityquery.Predicate{Field: "current_state", Op: op, Value: "ready"},
+				})
+				if err != nil || count != 1 {
+					t.Fatalf("fieldless lifecycle current_state %s ready count=%d want=1 err=%v", op, count, err)
+				}
+			}
+			if _, err := owner.CountWorkflowEntities(ctx, entityquery.Request{
+				RunID: runID, Source: headerSource, FlowID: "child",
+				Predicate: entityquery.Predicate{Field: "request_id", Op: "==", Value: "req-1"},
+			}); err == nil {
+				t.Fatal("fieldless flow admitted a business-field query without a state contract")
 			}
 		})
 	}
