@@ -151,6 +151,11 @@ def handle(input):
 				targetBackend = workspace.BackendDocker
 			}
 			rt := startWorkspaceGatewayProofRuntime(t, backend, root, targetBackend, factory, listener)
+			fixtureOwner, ok := rt.Events.(storetest.RunFixtureStore)
+			if !ok {
+				t.Fatal("fork-chat fixture requires its native run lifecycle owner")
+			}
+			seedOwnedPublicationLiveRun(t, rt.Runtime, rt.BundleHash, fixtureOwner)
 			seed := requireServedEventPublishRPCResult(t, rt.Endpoint, map[string]any{
 				"event_name": "external.observed", "bundle_hash": rt.BundleHash,
 				"payload": map[string]any{}, "idempotency_key": "mock-forkchat-source",

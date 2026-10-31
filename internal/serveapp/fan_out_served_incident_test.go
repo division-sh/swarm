@@ -34,10 +34,11 @@ func TestIssue2394ServedFanOutFailureIncidentBothStores(t *testing.T) {
 			opts, start := lifecycleRestartHarness(t, backend, root)
 			opts.TestLLMRuntime = servedNoopLLMRuntime{}
 			_, rt := start()
-			opened := requireServedEventPublishRPCResult(t, rt.Endpoint, map[string]any{
+			var opened servedEventPublishRPCResult
+			requireServedJSONRPCResult(t, rt.Endpoint, "run.start", map[string]any{
 				"bundle_hash": rt.BundleHash, "event_name": "portfolio.opened", "idempotency_key": uuid.NewString(),
 				"payload": map[string]any{"portfolio_id": "incident", "threshold": 75},
-			})
+			}, &opened)
 			waitPublicationSiteCompletion(t, rt, opened.RunID)
 			requireServedEventPublishRPCResult(t, rt.Endpoint, map[string]any{
 				"run_id": opened.RunID, "event_name": "portfolio.accounts.register.requested", "idempotency_key": uuid.NewString(),
