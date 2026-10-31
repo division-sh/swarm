@@ -109,7 +109,7 @@ func TestChannelDeliveryRealAnchorProducersPublicJourney(t *testing.T) {
 					if kind == decisioncard.AnchorKindHumanTask {
 						flowInstance = "chat/observers"
 					}
-					seed := requireServedEventPublishRPCResult(t, h.rpcEndpoint(), map[string]any{
+					seed := requireServedRunStartRPCResult(t, h.rpcEndpoint(), map[string]any{
 						"event_name": "work.requested", "bundle_hash": bundleHash,
 						"payload": map[string]any{"seed": true}, "idempotency_key": "channel-anchor-" + string(kind),
 					})
@@ -270,7 +270,7 @@ func TestChannelDeliveryReconciliationActivityDispatchPublicJourney(t *testing.T
 				opts.TestChannelReconcileCadence = render.ReconcileCadence{Ordinary: time.Hour, Native: time.Hour}
 			})
 			reader := openChannelAnchorObservation(t, h)
-			seed := requireServedEventPublishRPCResult(t, h.rpcEndpoint(), map[string]any{
+			seed := requireServedRunStartRPCResult(t, h.rpcEndpoint(), map[string]any{
 				"event_name": "work.requested", "bundle_hash": hash,
 				"payload": map[string]any{"seed": true}, "idempotency_key": "isolated-activity-wake",
 			})
@@ -419,7 +419,7 @@ func startChannelAnchorPublicJourney(t *testing.T, backend servedparity.Backend,
 		t.Fatalf("anchor journey requires one admitted source: %+v", identity)
 	}
 	if withSummary {
-		notice := requireServedEventPublishRPCResult(t, h.rpcEndpoint(), map[string]any{
+		notice := requireServedRunStartRPCResult(t, h.rpcEndpoint(), map[string]any{
 			"event_name": "notice.requested", "bundle_hash": identity.SourceArtifacts[0].BundleHash,
 			"payload": map[string]any{"seed": true}, "idempotency_key": "uncertainty-summary-notice",
 		})

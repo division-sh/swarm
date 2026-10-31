@@ -183,7 +183,7 @@ func executeNodeIdentityWork(t *testing.T, process *releaseServeProcess, hash, s
 		payload["body"] = strings.Repeat("long \u03bb \u4e16\u754c payload ", 300)
 		payload["context"] = map[string]any{"title": "nested title", "values": []any{true, "complete", float64(42)}}
 	}
-	if err := process.rpc.call(ctx, "event.publish", map[string]any{"bundle_hash": hash, "event_name": expected.Request, "payload": payload, "emitter": "releasee2e", "idempotency_key": marker}, &admitted); err != nil {
+	if err := process.rpc.call(ctx, "run.start", map[string]any{"bundle_hash": hash, "event_name": expected.Request, "payload": payload, "idempotency_key": marker}, &admitted); err != nil {
 		t.Fatal(err)
 	}
 	if admitted.RunID == "" {

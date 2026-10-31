@@ -143,7 +143,7 @@ func mailboxCompletionFixtureInRuntime(t *testing.T, rt servedControlProofRuntim
 			requireServedOKJSONRPC(t, rt.Endpoint, "run.pause", map[string]any{"run_id": run.RunID, "idempotency_key": "matrix-pause-" + uuid.NewString()})
 		}
 	}
-	seed := requireServedEventPublishRPCResult(t, rt.Endpoint, map[string]any{"event_name": "work.requested", "bundle_hash": rt.BundleHash, "payload": map[string]any{"seed": true}, "idempotency_key": "matrix-seed-" + uuid.NewString()})
+	seed := requireServedRunStartRPCResult(t, rt.Endpoint, map[string]any{"event_name": "work.requested", "bundle_hash": rt.BundleHash, "payload": map[string]any{"seed": true}, "idempotency_key": "matrix-seed-" + uuid.NewString()})
 	requireServedEventPublishEntityState(t, rt.DB, rt.Backend, seed.RunID, "", "review")
 	waitServedRunDeliveryQuiescence(t, rt.ReadRunDeliveries, seed.RunID)
 	var id string

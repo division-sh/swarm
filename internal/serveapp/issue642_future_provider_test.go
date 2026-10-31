@@ -60,7 +60,7 @@ func TestIssue642FutureProviderConstructsAfterEmptyCatalogBothStores(t *testing.
 			// Cold native provider construction includes the real workspace probe.
 			// Use the existing selected-provider operation budget, not the generic
 			// five-second read/control HTTP helper; no timing acceptance is claimed.
-			response := requestServedJSONRPCWithTimeout(t, rt.Endpoint, "event.publish", map[string]any{"event_name": "task.assigned", "bundle_hash": rt.BundleHash,
+			response := requestServedJSONRPCWithTimeout(t, rt.Endpoint, "run.start", map[string]any{"event_name": "task.assigned", "bundle_hash": rt.BundleHash,
 				"payload": map[string]any{"work_id": "one"}, "idempotency_key": "future-provider-source"}, 30*time.Second)
 			if response.Error != nil {
 				t.Fatalf("future-provider source admission: %+v", response.Error)

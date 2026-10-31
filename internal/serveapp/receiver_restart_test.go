@@ -71,7 +71,7 @@ func TestReceiverCompositionRestartBothStores(t *testing.T) {
 			first.waitForReadyLine()
 			endpoint := "http://" + serveRuntimeAPIListenerFromOutput(t, first.outputString()) + "/v1/rpc"
 			params := map[string]any{"event_name": "work.requested", "bundle_hash": bundle, "payload": map[string]any{"seed": true}, "idempotency_key": "receiver-restart"}
-			published := requireServedEventPublishRPCResult(t, endpoint, params)
+			published := requireServedRunStartRPCResult(t, endpoint, params)
 			var claim runtimedelivery.Claim
 			select {
 			case claim = <-reached:
@@ -128,7 +128,7 @@ WHERE es.run_id=$1 AND fi.current_state='done'`, published.RunID).Scan(&entities
 			if entities != 2 {
 				t.Fatalf("restart did not create exactly parent and child: %d", entities)
 			}
-			duplicate := requireServedEventPublishRPCResult(t, endpoint, params)
+			duplicate := requireServedRunStartRPCResult(t, endpoint, params)
 			if duplicate.EventID != published.EventID {
 				t.Fatal("restart duplicate reminted source")
 			}

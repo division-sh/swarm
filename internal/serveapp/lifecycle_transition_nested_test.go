@@ -68,7 +68,7 @@ func TestServedCompiledTransitionNestedCarrierCollisionOnBothStores(t *testing.T
 				entered = make(chan string, 1)
 				rt.Runtime.Bus.SetLoggerHook(&snapshotPublicationLogBarrier{logger: rt.Runtime.Logger, entered: entered, release: release})
 			}
-			seed := requireServedEventPublishRPCResult(t, rt.Endpoint, map[string]any{"event_name": "left.work.requested", "bundle_hash": rt.BundleHash, "payload": map[string]any{"seed": true}, "idempotency_key": "tree-seed"})
+			seed := requireServedRunStartRPCResult(t, rt.Endpoint, map[string]any{"event_name": "left.work.requested", "bundle_hash": rt.BundleHash, "payload": map[string]any{"seed": true}, "idempotency_key": "tree-seed"})
 			runID := seed.RunID
 			// Activation precedes this exact milestone; hold delivery so the
 			// complete initial-tree assertion cannot observe a later handler state.
@@ -123,7 +123,7 @@ func TestServedCompiledTransitionNestedCarrierCollisionOnBothStores(t *testing.T
 					t.Fatal("original publication diagnostic did not enter the barrier")
 				}
 				requireServedOKJSONRPC(t, rt.Endpoint, "run.pause", map[string]any{"run_id": runID, "idempotency_key": "held-tree-pause"})
-				other := requireServedEventPublishRPCResult(t, rt.Endpoint, map[string]any{
+				other := requireServedRunStartRPCResult(t, rt.Endpoint, map[string]any{
 					"event_name": "right.work.requested", "bundle_hash": rt.BundleHash,
 					"payload": map[string]any{"seed": true}, "idempotency_key": "other-tree-seed",
 				})

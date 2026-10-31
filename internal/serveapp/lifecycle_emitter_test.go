@@ -34,7 +34,7 @@ func TestServedLifecycleEmitterLoopEscapeJourney(t *testing.T) {
 					t.Logf("terminal delivery failure: %s", failure)
 				}
 			}()
-			started := requireServedEventPublishRPCResult(t, rt.Endpoint, map[string]any{
+			started := requireServedRunStartRPCResult(t, rt.Endpoint, map[string]any{
 				"event_name": "work.requested", "bundle_hash": rt.BundleHash, "payload": map[string]any{"seed": true}, "idempotency_key": "loop-create",
 			})
 			entityID := requireServedEventPublishEntityState(t, rt.DB, rt.Backend, started.RunID, started.RunID, "waiting")
@@ -112,7 +112,7 @@ func TestServedLifecycleEmitterGateJourney(t *testing.T) {
 				t.Run(tc.name, func(t *testing.T) {
 					root := canonicalrouting.CopyLifecycleEmitter(t, tc.variant)
 					rt := startServedTestSetupEntitiesProofRuntimeFromSource(t, backend, root)
-					started := requireServedEventPublishRPCResult(t, rt.Endpoint, map[string]any{
+					started := requireServedRunStartRPCResult(t, rt.Endpoint, map[string]any{
 						"event_name": "work.requested", "payload": map[string]any{"seed": true}, "idempotency_key": "gate-start", "bundle_hash": rt.BundleHash,
 					})
 					entityID := requireServedEventPublishEntityState(t, rt.DB, rt.Backend, started.RunID, "", "review")

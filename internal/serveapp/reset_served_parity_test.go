@@ -41,7 +41,7 @@ func TestServedResetRetainClearAndHistoricalReplayBothStores(t *testing.T) {
 				if err := proof.DB.QueryRow("SELECT source_blob FROM source_artifacts WHERE bundle_hash = $1", proof.BundleHash).Scan(&originalSource); err != nil {
 					t.Fatal(err)
 				}
-				initial := requireServedEventPublishRPCResult(t, proof.Endpoint, map[string]any{
+				initial := requireServedRunStartRPCResult(t, proof.Endpoint, map[string]any{
 					"event_name": "item.received", "bundle_hash": proof.BundleHash,
 					"payload": map[string]any{"item_id": "before-reset"}, "idempotency_key": uuid.NewString(),
 				})
@@ -136,7 +136,7 @@ func TestServedResetRetainClearAndHistoricalReplayBothStores(t *testing.T) {
 					if grantErr != nil || successor == proof.Runtime || grant.GrantID == predecessorGrant.GrantID {
 						t.Fatalf("reset did not create fresh execution authority: %v", grantErr)
 					}
-					later := requireServedEventPublishRPCResult(t, proof.Endpoint, map[string]any{
+					later := requireServedRunStartRPCResult(t, proof.Endpoint, map[string]any{
 						"event_name": "item.received", "bundle_hash": proof.BundleHash,
 						"payload": map[string]any{"item_id": "after-reset"}, "idempotency_key": uuid.NewString(),
 					})
@@ -186,7 +186,7 @@ func TestServedResetCLIDryRunApplyAndReplayBothStores(t *testing.T) {
 	for _, backend := range []servedparity.Backend{servedparity.BackendDefaultSQLite, servedparity.BackendExplicitPostgres} {
 		t.Run(string(backend), func(t *testing.T) {
 			proof := startServedControlProofRuntime(t, backend)
-			initial := requireServedEventPublishRPCResult(t, proof.Endpoint, map[string]any{
+			initial := requireServedRunStartRPCResult(t, proof.Endpoint, map[string]any{
 				"event_name": "item.received", "bundle_hash": proof.BundleHash,
 				"payload": map[string]any{"item_id": "cli-reset"}, "idempotency_key": uuid.NewString(),
 			})
