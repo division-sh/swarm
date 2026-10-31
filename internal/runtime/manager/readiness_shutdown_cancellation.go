@@ -3,12 +3,13 @@ package manager
 import (
 	"context"
 
+	"github.com/division-sh/swarm/internal/runtime/core/worklifetime"
 	runtimefailures "github.com/division-sh/swarm/internal/runtime/failures"
 	runtimepipeline "github.com/division-sh/swarm/internal/runtime/pipeline"
 )
 
-// This outcome is minted only after the exact attachment's native cancellation
-// and durable abandonment have joined. It remains cancellation to its caller.
+// This outcome is minted only after exact attachment settlement joins, or its
+// owner refuses forward admission. It remains cancellation to its caller.
 type readinessShutdownCancellation struct {
 	cause    error
 	key      dynamicFlowRuntimeReadinessKey
@@ -36,8 +37,22 @@ func (am *AgentManager) ownsReadinessShutdownCancellation(ctx context.Context) b
 }
 
 func (am *AgentManager) cleanReadinessShutdownReadCancellation(ctx context.Context, err error) bool {
+	if _, classified := runtimefailures.As(err); classified {
+		return false
+	}
 	return runtimefailures.OnlyBranches(err, func(branch error) bool { return branch == context.Canceled }) &&
 		am.ownsReadinessShutdownCancellation(ctx)
+}
+
+// The forward owner refused admission. This is not a cleanup result: the
+// readiness owner must still join its exact native attempt before completing.
+func (am *AgentManager) cleanReadinessShutdownAdmissionRefusal(ctx context.Context, err error) bool {
+	if _, classified := runtimefailures.As(err); classified {
+		return false
+	}
+	return runtimefailures.OnlyBranches(err, func(branch error) bool {
+		return branch == worklifetime.ErrRetired || branch == worklifetime.ErrAdmissionFenced
+	}) && am.ownsReadinessShutdownCancellation(ctx)
 }
 
 func isReadinessShutdownCompletion(err error, key dynamicFlowRuntimeReadinessKey, attempt *dynamicFlowRuntimeReadinessAttempt) bool {

@@ -216,7 +216,7 @@ func (am *AgentManager) completeDeclaredDynamicFlowReadiness(admission dynamicFl
 		current.ctx = context.WithValue(current.ctx, readinessRetirementWaitersKey{}, attempt)
 		attemptErr := am.reconcileDynamicFlowRuntimeReadinessOnce(current)
 		am.dynamicFlowReadinessMu.Lock()
-		if attempt.successorRequired {
+		if attempt.successorRequired && lease.Context().Err() == nil {
 			current = *attempt.successor
 			attempt.attemptOrdinal = current.attemptOrdinal
 			attempt.planHash = current.planHash
