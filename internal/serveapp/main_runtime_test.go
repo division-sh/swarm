@@ -1293,6 +1293,22 @@ func servedControlProofAuthorActivityContext(t *testing.T, rt servedControlProof
 	return servedRuntimeProofAuthorActivityContext(t, rt.Runtime, rt.BundleHash)
 }
 
+func seedServedPublicationLiveRun(t *testing.T, rt servedControlProofRuntime) string {
+	t.Helper()
+	ctx := servedControlProofAuthorActivityContext(t, rt)
+	source := rt.Runtime.Options.WorkflowModule.SemanticSource()
+	var owner storetest.RunFixtureStore = rt.SQLite
+	if rt.Postgres != nil {
+		owner = rt.Postgres
+	}
+	runID := uuid.NewString()
+	storetest.RequireRun(t, ctx, owner, storetest.RunFixture{
+		RunID: runID, BundleHash: rt.BundleHash, Origin: storerunlifecycle.DeploymentRunOrigin(),
+		State: storerunlifecycle.StateLive, LiveScope: storerunlifecycle.LiveRunScope{FlowPath: runtimeflowidentity.ScopeKey(source, ".")},
+	})
+	return runID
+}
+
 func servedRuntimeProofAuthorActivityContext(t *testing.T, rt *runtimepkg.Runtime, bundleHash string, process ...runtimestartupownership.ProcessCapability) context.Context {
 	t.Helper()
 	if rt == nil {
