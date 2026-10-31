@@ -28,36 +28,37 @@ import (
 // Only the external TLS/Noise peer is replaced. RunServe constructs the real
 // SDK, selected persistence, capture, identity and target owners.
 type serveNativeProtocolPeer struct {
-	t              *testing.T
-	ctx            context.Context
-	account        types.JID
-	lid            types.JID
-	mu             sync.Mutex
-	wire           *whatsappfixture.Transport
-	postLoginWire  *whatsappfixture.Transport
-	registration   *waWa6.ClientPayload_DevicePairingRegistrationData
-	prekeys        []waBinary.Node
-	prekeyUploads  int
-	postLogins     int
-	connections    int
-	disconnected   int
-	paired         chan struct{}
-	receipts       chan waBinary.Node
-	sender         *whatsappfixture.SignalSender
-	receivers      map[types.JID]servedNativeReceiver
-	ownedSenders   []*whatsappfixture.SignalSender
-	from           types.JID
-	fromLID        types.JID
-	sent           chan servedNativeMessage
-	logouts        chan waBinary.Node
-	withholdLogout bool
-	malformedAck   string
-	withholdAck    string
-	clientTrust    servedNativeClientTrust
-	disconnect     func()
-	onACKTimeout   func(string)
-	replacementQR  *servedReplacementQRBatchCut
-	loginHandoff   bool
+	t                   *testing.T
+	ctx                 context.Context
+	account             types.JID
+	lid                 types.JID
+	mu                  sync.Mutex
+	wire                *whatsappfixture.Transport
+	postLoginWire       *whatsappfixture.Transport
+	registration        *waWa6.ClientPayload_DevicePairingRegistrationData
+	prekeys             []waBinary.Node
+	prekeyUploads       int
+	postLogins          int
+	connections         int
+	disconnected        int
+	paired              chan struct{}
+	receipts            chan waBinary.Node
+	sender              *whatsappfixture.SignalSender
+	receivers           map[types.JID]servedNativeReceiver
+	ownedSenders        []*whatsappfixture.SignalSender
+	from                types.JID
+	fromLID             types.JID
+	sent                chan servedNativeMessage
+	logouts             chan waBinary.Node
+	withholdLogout      bool
+	malformedAck        string
+	withholdAck         string
+	clientTrust         servedNativeClientTrust
+	disconnect          func()
+	onACKTimeout        func(string)
+	replacementQR       *servedReplacementQRBatchCut
+	loginHandoff        bool
+	loginHandoffRelease <-chan struct{}
 }
 
 type servedNativeMessage struct {
@@ -241,8 +242,16 @@ func (p *serveNativeProtocolPeer) serve(wire *whatsappfixture.Transport) {
 			}
 			p.mu.Lock()
 			loginHandoff := p.loginHandoff
+			loginRelease := p.loginHandoffRelease
 			p.mu.Unlock()
 			if loginHandoff {
+				if loginRelease != nil {
+					select {
+					case <-loginRelease:
+					case <-p.ctx.Done():
+						return
+					}
+				}
 				if err := wire.Send(p.ctx, waBinary.Node{Tag: "stream:error", Attrs: waBinary.Attrs{"code": "515"}}); err != nil {
 					p.t.Error(err)
 				}
