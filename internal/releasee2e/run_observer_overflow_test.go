@@ -105,10 +105,14 @@ func TestRunStartForegroundObserverOverflowFromReleaseBinary(t *testing.T) {
 	if err := cmd.Start(); err != nil {
 		t.Fatal(err)
 	}
+	type stdoutResult struct {
+		output []byte
+		err    error
+	}
+	var stdoutDone chan stdoutResult
 	waitDone := make(chan error, 1)
-	waitJoined := make(chan struct{})
 	go func() {
-		defer close(waitJoined)
+		defer close(waitDone)
 		waitDone <- cmd.Wait()
 	}()
 	// Failure reporting may consume waitDone; cleanup still joins the process.
@@ -116,7 +120,12 @@ func TestRunStartForegroundObserverOverflowFromReleaseBinary(t *testing.T) {
 		cancel()
 		_ = stdoutWriter.Close()
 		_ = stdoutReader.Close()
-		<-waitJoined
+		for range waitDone {
+		}
+		if stdoutDone != nil {
+			for range stdoutDone {
+			}
+		}
 	}()
 	if err := waitForReleasePath(ctx, emitGate+".ready", waitDone); err != nil {
 		calls, _ := os.ReadFile(filepath.Join(fakeRoot, "calls.jsonl"))
@@ -135,10 +144,6 @@ func TestRunStartForegroundObserverOverflowFromReleaseBinary(t *testing.T) {
 	if err := stdoutWriter.Close(); err != nil {
 		t.Fatalf("close parent release stdout writer: %v", err)
 	}
-	type stdoutResult struct {
-		output []byte
-		err    error
-	}
 	select {
 	case <-stderr.signal:
 	case err := <-waitDone:
@@ -149,10 +154,12 @@ func TestRunStartForegroundObserverOverflowFromReleaseBinary(t *testing.T) {
 			t.Fatalf("release foreground run exited before observer overflow: %v\nstderr:\n%s", err, stderr.String())
 		}
 	case <-ctx.Done():
-		t.Fatalf("release foreground run did not shed its blocked observer: %v\nstderr:\n%s", ctx.Err(), stderr.String())
+		calls, _ := os.ReadFile(filepath.Join(fakeRoot, "calls.jsonl"))
+		t.Fatalf("release foreground run did not shed its blocked observer: %v\nstderr:\n%s\nserve:\n%s\ndocker calls:\n%s", ctx.Err(), stderr.String(), process.output.String(), calls)
 	}
-	stdoutDone := make(chan stdoutResult, 1)
+	stdoutDone = make(chan stdoutResult, 1)
 	go func() {
+		defer close(stdoutDone)
 		output, err := io.ReadAll(stdoutReader)
 		stdoutDone <- stdoutResult{output: output, err: err}
 	}()
@@ -324,9 +331,9 @@ func writeReleaseObserverOverflowFixture(t *testing.T, repo, root string, eventC
 	writeReleaseFile(t, filepath.Join(root, "payload.json"), string(payload))
 	flowRoot := filepath.Join(root, "contracts", "worker")
 	writeReleaseFile(t, filepath.Join(flowRoot, "entities.yaml"), "worker_state:\n  requests: {type: \"[text]\", initial: []}\n")
-	writeReleaseFile(t, filepath.Join(flowRoot, "events.yaml"), "agent.requested:\n  request: {type: \"[text]?\"}\nagent.completed:\n  flow_result: text?\ncompletion.item:\n  request: text?\n")
+	writeReleaseFile(t, filepath.Join(flowRoot, "events.yaml"), "agent.requested:\n  request: {type: \"[text]?\"}\nagent.completed:\n  flow_result: text?\ncompletion.item:\n  request: text\n")
 	writeReleaseFile(t, filepath.Join(flowRoot, "manifest.yaml"), "version: 1.0.0\nplatform_version: '*'\n")
-	writeReleaseFile(t, filepath.Join(flowRoot, "schema.yaml"), "stages:\n  pending: {}\n  active:\n    timers:\n      - id: complete_after_overflow\n        after: 10s\n        advances_to: done\n  done:\n    final: true\npins:\n  inputs:\n    - task.assigned\n")
+	writeReleaseFile(t, filepath.Join(flowRoot, "schema.yaml"), "stages:\n  pending: {}\n  active: {}\n  done:\n    final: true\npins:\n  inputs:\n    - task.assigned\n")
 	writeReleaseFile(t, filepath.Join(flowRoot, "nodes.yaml"), fmt.Sprintf(`intake:
   execution_type: system_node
   subscribes_to: [task.assigned]
@@ -364,9 +371,12 @@ completion-sink:
   subscribes_to: [completion.item]
   event_handlers:
     completion.item:
-      guard:
-        check: _entity.current_state == 'active'
-      advances_to: active
+      join:
+        stage: active
+        members: {from: state.requests, by: payload.request}
+        output: payload.request
+        on_complete:
+          advances_to: done
 `, eventCount))
 }
 
