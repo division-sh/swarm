@@ -165,6 +165,10 @@ pins:
     - inbound.telegram.raw
     - inbound.telegram.text_message
     - inbound.intercom.raw
+    - inbound.stripe.raw
+    - inbound.twilio.raw
+    - inbound.shopify.raw
+    - inbound.typeform.raw
     - inbound.acme_public.raw
     - inbound.partner_auth.raw
     - inbound.partner_open.raw
@@ -174,7 +178,7 @@ pins:
 		"matrix/policy.yaml":   "operator_account: '420079'\n",
 		"matrix/nodes.yaml":    inboundAdmissionNodes(),
 	}
-	for _, provider := range []string{"telegram", "intercom"} {
+	for _, provider := range []string{"telegram", "intercom", "stripe", "twilio", "shopify", "typeform"} {
 		copyTree(t, filepath.Join(RepoRoot(t), "packs", "providers", provider), filepath.Join(root, "matrix", provider))
 	}
 	for _, provider := range []struct{ name, policy, capabilities string }{
@@ -193,7 +197,7 @@ pins:
 }
 
 func inboundAdmissionNodes() string {
-	events := []string{"inbound.telegram.raw", "inbound.telegram.text_message", "inbound.intercom.raw", "inbound.acme_public.raw", "inbound.partner_auth.raw", "inbound.partner_open.raw", "inbound.partner_ack.raw"}
+	events := []string{"inbound.telegram.raw", "inbound.telegram.text_message", "inbound.intercom.raw", "inbound.stripe.raw", "inbound.twilio.raw", "inbound.shopify.raw", "inbound.typeform.raw", "inbound.acme_public.raw", "inbound.partner_auth.raw", "inbound.partner_open.raw", "inbound.partner_ack.raw"}
 	var out strings.Builder
 	out.WriteString("matrix-sink:\n  execution_type: system_node\n  subscribes_to: [" + strings.Join(events, ", ") + "]\n  event_handlers:\n")
 	for _, event := range events {

@@ -6,12 +6,17 @@ import (
 	"crypto/hmac"
 	"crypto/sha1"
 	"crypto/sha256"
+	"encoding/base64"
 	"encoding/hex"
 	"encoding/json"
 	"fmt"
+	"maps"
 	"net/http"
+	"net/url"
 	"os"
 	"path/filepath"
+	"slices"
+	"strconv"
 	"strings"
 	"testing"
 	"time"
@@ -156,6 +161,10 @@ func runInboundAdmissionSupportedSurfacePolicyMatrix(t *testing.T, backend strin
 		"telegram.telegram_bot_token":         "matrix-bot-token",
 		"telegram.webhook_signing_secret":     "telegram-secret",
 		"intercom.webhook_signing_secret":     "intercom-secret",
+		"stripe.webhook_signing_secret":       "stripe-secret",
+		"twilio.webhook_signing_secret":       "twilio-secret",
+		"shopify.webhook_signing_secret":      "shopify-secret",
+		"typeform.webhook_signing_secret":     "typeform-secret",
 		"partner_auth.webhook_signing_secret": "partner-secret",
 	} {
 		if err := credentialStore.Set(context.Background(), key, value); err != nil {
@@ -245,13 +254,34 @@ func runInboundAdmissionSupportedSurfacePolicyMatrix(t *testing.T, backend strin
 	baseURL := "http://" + serveRuntimeAPIListenerFromOutput(t, process.outputString())
 
 	tests := []struct {
-		provider   string
-		body       []byte
-		headers    map[string]string
-		eventNames []string
+		provider      string
+		body          []byte
+		headers       map[string]string
+		eventNames    []string
+		signingSecret string
+		deliveryID    string
+		eventType     string
 	}{
 		{provider: "telegram", body: []byte(`{"update_id":901,"message":{"message_id":901,"from":{"id":7},"chat":{"id":42,"type":"private"},"text":"hello"}}`), headers: map[string]string{"X-Telegram-Bot-Api-Secret-Token": "telegram-secret"}, eventNames: []string{"inbound.telegram.raw", "inbound.telegram.text_message"}},
 		{provider: "intercom", body: []byte(`{"id":"platform-unsigned-1","topic":"contact.created"}`), eventNames: []string{"inbound.intercom.raw"}},
+		{
+			provider: "stripe", body: []byte(`{"id":"evt_matrix_1","type":"payment_intent.succeeded","data":{"object":{"id":"pi_matrix_1"}}}`),
+			eventNames: []string{"inbound.stripe.raw"}, signingSecret: "stripe-secret", deliveryID: "evt_matrix_1", eventType: "payment_intent_succeeded",
+		},
+		{
+			provider: "twilio", body: []byte(url.Values{"MessageSid": {"SM_matrix_1"}, "From": {"+15550000001"}, "To": {"+15550000002"}, "Body": {"hello + goodbye & thanks"}}.Encode()),
+			headers:    map[string]string{"Content-Type": "application/x-www-form-urlencoded"},
+			eventNames: []string{"inbound.twilio.raw"}, signingSecret: "twilio-secret", deliveryID: "SM_matrix_1", eventType: "message_received",
+		},
+		{
+			provider: "shopify", body: []byte(`{"id":4201,"email":"customer@example.invalid"}`),
+			headers:    map[string]string{"X-Shopify-Webhook-Id": "shopify-matrix-1", "X-Shopify-Topic": "orders/create"},
+			eventNames: []string{"inbound.shopify.raw"}, signingSecret: "shopify-secret", deliveryID: "shopify-matrix-1", eventType: "orders_create",
+		},
+		{
+			provider: "typeform", body: []byte(`{"event_id":"typeform-matrix-1","event_type":"form_response","form_response":{"token":"matrix-response"}}`),
+			eventNames: []string{"inbound.typeform.raw"}, signingSecret: "typeform-secret", deliveryID: "typeform-matrix-1", eventType: "form_response",
+		},
 		{provider: "acme_public", body: []byte(`{"id":"external-unsigned-1"}`), eventNames: []string{"inbound.acme_public.raw"}},
 		{provider: "partner_auth", body: []byte(`{"value":1}`), headers: map[string]string{"X-Partner-Delivery": "partner-auth-1"}, eventNames: []string{"inbound.partner_auth.raw"}},
 		{provider: "partner_open", body: []byte(`{"delivery":{"id":"partner-open-1"},"value":2}`), eventNames: []string{"inbound.partner_open.raw"}},
@@ -271,6 +301,15 @@ func runInboundAdmissionSupportedSurfacePolicyMatrix(t *testing.T, backend strin
 			mac := hmac.New(sha256.New, []byte("partner-secret"))
 			_, _ = mac.Write(test.body)
 			test.headers["X-Partner-Signature"] = hex.EncodeToString(mac.Sum(nil))
+		}
+		if test.signingSecret != "" {
+			requestURL := baseURL + "/webhooks/" + alias + "/" + test.provider
+			invalidHeaders := signedInboundAdmissionProviderHeaders(t, test.provider, test.signingSecret+"-wrong", requestURL, test.body, test.headers)
+			status, response := sendInboundAdmissionSupportedRequest(t, baseURL, alias, test.provider, test.body, invalidHeaders)
+			if status != http.StatusUnauthorized {
+				t.Fatalf("%s invalid signature status=%d response=%s, want 401", test.provider, status, response)
+			}
+			test.headers = signedInboundAdmissionProviderHeaders(t, test.provider, test.signingSecret, requestURL, test.body, test.headers)
 		}
 		status, response := sendInboundAdmissionSupportedRequest(t, baseURL, alias, test.provider, test.body, test.headers)
 		if status != http.StatusAccepted {
@@ -296,6 +335,9 @@ func runInboundAdmissionSupportedSurfacePolicyMatrix(t *testing.T, backend strin
 			requireServedJSONRPCResult(t, baseURL+"/v1/rpc", "event.get", map[string]any{"event_id": eventID}, &public)
 			if public.EventName != test.eventNames[index] {
 				t.Fatalf("public provider readback changed event identity: %+v", public)
+			}
+			if test.signingSecret != "" && (public.Payload["provider"] != test.provider || public.Payload["provider_event_id"] != test.deliveryID || public.Payload["provider_event_type"] != test.eventType) {
+				t.Fatalf("%s public provider identity changed: %#v", test.provider, public.Payload)
 			}
 			if test.provider == "telegram" && index == 1 {
 				if public.Payload["text"] != "hello" || public.Payload["command_invocation"] != nil {
@@ -418,6 +460,51 @@ func runInboundAdmissionSupportedSurfacePolicyMatrix(t *testing.T, backend strin
 			}
 		}
 	}
+}
+
+func signedInboundAdmissionProviderHeaders(t testing.TB, provider, secret, requestURL string, body []byte, headers map[string]string) map[string]string {
+	t.Helper()
+	headers = maps.Clone(headers)
+	if headers == nil {
+		headers = make(map[string]string)
+	}
+	switch provider {
+	case "stripe":
+		timestamp := strconv.FormatInt(time.Now().Unix(), 10)
+		mac := hmac.New(sha256.New, []byte(secret))
+		_, _ = mac.Write([]byte(timestamp + "."))
+		_, _ = mac.Write(body)
+		headers["Stripe-Signature"] = "t=" + timestamp + ",v1=" + hex.EncodeToString(mac.Sum(nil))
+	case "twilio":
+		form, err := url.ParseQuery(string(body))
+		if err != nil {
+			t.Fatal(err)
+		}
+		keys := make([]string, 0, len(form))
+		for key := range form {
+			keys = append(keys, key)
+		}
+		slices.Sort(keys)
+		mac := hmac.New(sha1.New, []byte(secret))
+		_, _ = mac.Write([]byte(requestURL))
+		for _, key := range keys {
+			for _, value := range form[key] {
+				_, _ = mac.Write([]byte(key + value))
+			}
+		}
+		headers["X-Twilio-Signature"] = base64.StdEncoding.EncodeToString(mac.Sum(nil))
+	case "shopify":
+		mac := hmac.New(sha256.New, []byte(secret))
+		_, _ = mac.Write(body)
+		headers["X-Shopify-Hmac-Sha256"] = base64.StdEncoding.EncodeToString(mac.Sum(nil))
+	case "typeform":
+		mac := hmac.New(sha256.New, []byte(secret))
+		_, _ = mac.Write(body)
+		headers["Typeform-Signature"] = "sha256=" + base64.StdEncoding.EncodeToString(mac.Sum(nil))
+	default:
+		t.Fatalf("no public-journey signer for %s", provider)
+	}
+	return headers
 }
 
 func importProjectTelegramTrigger(t testing.TB, sourceRoot string) {
