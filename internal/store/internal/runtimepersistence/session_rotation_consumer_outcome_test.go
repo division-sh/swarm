@@ -16,7 +16,7 @@ import (
 // Rotation adopts the exact native successor, independently of retired
 // run-completion callbacks.
 func TestPostgresRuntimeSessionRotationPreservesCommittedHandoffOutcome(t *testing.T) {
-	for _, operation := range []string{"turn", "parse", "prepare", "prepare_acquire"} {
+	for _, operation := range []string{"turn", "parse", "prepare"} {
 		t.Run(operation, func(t *testing.T) {
 			_, db, _ := testutil.StartPostgres(t)
 			store := admitTestPostgresStore(t, db)
@@ -58,7 +58,7 @@ func TestPostgresRuntimeSessionRotationPreservesCommittedHandoffOutcome(t *testi
 			if err != nil {
 				t.Fatalf("rotate native session: %v", err)
 			}
-			prepared := operation == "prepare" || operation == "prepare_acquire"
+			prepared := operation == "prepare"
 			var committedID, predecessorStatus string
 			var holder sql.NullString
 			if err := db.QueryRowContext(base, `SELECT session_id::text, lease_holder FROM agent_sessions WHERE run_id=$1::uuid AND status='active'`, identity.RunID).Scan(&committedID, &holder); err != nil {

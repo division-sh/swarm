@@ -21,66 +21,8 @@ type selectedRetainedExecutionObservation struct {
 	ForkEvents         []SelectedContractExecutionForkEvent
 }
 
-func retireQuiescentSelectedTestContext(t testing.TB, ctx context.Context, owner SelectedContractExecutionOwner, child string) error {
-	t.Helper()
-	contexts := owner.ports.contexts
-	contexts.mu.Lock()
-	var prepared *PreparedSelectedFork
-	for _, entry := range contexts.entries {
-		if entry.binding.ForkRunID == child {
-			if prepared != nil {
-				contexts.mu.Unlock()
-				return errors.New("ambiguous retained selected execution")
-			}
-			prepared = entry.retained
-		}
-	}
-	contexts.mu.Unlock()
-	if prepared == nil {
-		return errors.New("selected test shutdown requires its retained execution")
-	}
-	prepared.bindMu.Lock()
-	runtime := prepared.retainedRuntime
-	complete, closeErr := prepared.cleanupComplete, prepared.closeErr
-	prepared.bindMu.Unlock()
-	if complete {
-		return closeErr
-	}
-	if runtime == nil {
-		return errors.New("selected test shutdown requires its retained runtime")
-	}
-	runtime.mu.Lock()
-	retainedContext, eventBus := runtime.cleanupContext, runtime.bus
-	runtime.mu.Unlock()
-	if retainedContext == nil {
-		return errors.New("selected test shutdown lacks its original execution context")
-	}
-	retainedContext = runForkOriginalContextForTest(t, retainedContext, prepared.processOwner)
-	owned, cancel := bindSelectedDecisionCaller(ctx, retainedContext)
-	defer cancel()
-	_, authority, err := selectedContractManagedExecutionAuthority(owned)
-	if err != nil {
-		return err
-	}
-	for {
-		if err := runtime.WaitForQuiescence(owned, eventBus); err != nil {
-			return err
-		}
-		err := owner.ports.runtimeExecution.RequireRunForkSelectedContractExecutionSettlement(owned, authority,
-			selectedContractExecutionFrontierEventIDs(prepared.frontier.FrontierEvents), prepared.loadedSource.Source)
-		if err == nil {
-			return owner.disposePreparation(prepared)
-		}
-		select {
-		case <-owned.Done():
-			return errors.Join(err, context.Cause(owned))
-		case <-time.After(10 * time.Millisecond):
-		}
-	}
-}
-
-// The activation ACK is not completion. Join its existing retained owner and
-// read canonical publication evidence without adding fields to that ACK.
+// The activation ACK is not completion. Observe canonical publication evidence
+// without retiring the execution or adding fields to that ACK.
 func observeSelectedRetainedExecution(t *testing.T, ctx context.Context, owner SelectedContractExecutionOwner, selected any, child string) (selectedRetainedExecutionObservation, error) {
 	t.Helper()
 	wait, cancel := context.WithTimeout(ctx, selectedForkCapabilityProofQuiescenceTimeout)
@@ -105,6 +47,12 @@ func observeSelectedRetainedExecution(t *testing.T, ctx context.Context, owner S
 			return selectedRetainedExecutionObservation{}, err
 		}
 		for storage.State == "running" {
+			contexts.mu.Lock()
+			outcome = retained.err
+			contexts.mu.Unlock()
+			if outcome != nil {
+				break
+			}
 			published := true
 			if retained.retained != nil {
 				for _, source := range selectedContractExecutionFrontierEventIDs(retained.retained.frontier.FrontierEvents) {
@@ -132,9 +80,6 @@ func observeSelectedRetainedExecution(t *testing.T, ctx context.Context, owner S
 				return selectedRetainedExecutionObservation{}, err
 			}
 		}
-		if storage.State == "running" {
-			outcome = retireQuiescentSelectedTestContext(t, wait, owner, child)
-		}
 		contexts.mu.Lock()
 		outcome = errors.Join(outcome, retained.err)
 		contexts.mu.Unlock()
@@ -152,9 +97,9 @@ func observeSelectedRetainedExecution(t *testing.T, ctx context.Context, owner S
 	if header.Failure != nil {
 		outcome = errors.Join(outcome, failures.FromEnvelope(*header.Failure))
 	}
-	wantState := "running"
-	if header.Status != "running" || errors.Is(outcome, context.Canceled) {
-		wantState = "closed"
+	wantState := "closed"
+	if retained != nil && (header.Status == "running" || header.Status == "live") && !errors.Is(outcome, context.Canceled) {
+		wantState = "running"
 	}
 	if storage.State != wantState {
 		return selectedRetainedExecutionObservation{}, errors.Join(outcome, fmt.Errorf("selected execution state=%s want=%s for run status=%s", storage.State, wantState, header.Status))
