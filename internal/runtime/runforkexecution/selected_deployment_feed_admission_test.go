@@ -68,6 +68,9 @@ func TestSelectedDeploymentFeedAgreementUsesFixedSourceDeclarations(t *testing.T
 		if err := validateSelectedDeploymentFeedAgreement(sameDeclaration, []fanoutobligation.IntentRequest{childFirst, other}, bound, forkRun, bundle); err != nil {
 			t.Fatalf("exact distinct publication identities collapsed: %v", err)
 		}
+		if err := validateSelectedDeploymentFeedAgreement(sameDeclaration, []fanoutobligation.IntentRequest{childFirst}, bound[:1], forkRun, bundle); err == nil {
+			t.Fatal("missing publication hidden by another feed of the same declaration")
+		}
 		bound[1].PublicationID = bound[0].PublicationID
 		if err := validateSelectedDeploymentFeedAgreement(sameDeclaration, []fanoutobligation.IntentRequest{childFirst, other}, bound, forkRun, bundle); err == nil {
 			t.Fatal("foreign publication binding accepted as another feed")

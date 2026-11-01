@@ -1031,12 +1031,14 @@ func validateSelectedDeploymentFeedAgreement(plan runfork.RunForkPlan, feeds []f
 	if err != nil {
 		return err
 	}
-	for declaration := range inherited {
-		present := false
+	for declaration, count := range inherited {
+		present := 0
 		for _, pin := range expected {
-			present = present || pin.Declaration == declaration
+			if pin.Declaration == declaration {
+				present++
+			}
 		}
-		if !present {
+		if present < count {
 			return errors.New("selected deployment is missing an inherited child pin")
 		}
 	}
@@ -1101,8 +1103,8 @@ func selectedDeploymentChildPins(pins []durabledata.PinnedSource) (map[string]du
 	return expected, nil
 }
 
-func selectedDeploymentSourceDeclarations(plan runfork.RunForkPlan) (map[durabledata.DeclarationRef]struct{}, error) {
-	expected := make(map[durabledata.DeclarationRef]struct{})
+func selectedDeploymentSourceDeclarations(plan runfork.RunForkPlan) (map[durabledata.DeclarationRef]int, error) {
+	expected := make(map[durabledata.DeclarationRef]int)
 	seen := make(map[fanoutobligation.IntentKey]bool)
 	for _, obligation := range plan.FanOutObligations {
 		request := obligation.Intent.Request
@@ -1120,7 +1122,7 @@ func selectedDeploymentSourceDeclarations(plan runfork.RunForkPlan) (map[durable
 		}
 		seen[request.Key] = true
 		declaration := request.Deployment.Declaration
-		expected[declaration] = struct{}{}
+		expected[declaration]++
 	}
 	if len(expected) > 0 {
 		if err := plan.ForkPoint.Validate(); err != nil {
