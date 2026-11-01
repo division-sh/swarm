@@ -103,7 +103,7 @@ func requireServedNativeNoticeAcknowledgment(t *testing.T, endpoint string, peer
 	requireServedJSONRPCResult(t, endpoint, "run.list", map[string]any{"limit": 10}, &runs)
 	var live []operatorread.RunHeader
 	for _, run := range runs.Runs {
-		if run.BundleHash == op.Coordinate.BundleHash && run.Status == "live" {
+		if run.BundleHash == op.Coordinate.BundleHash && run.FlowPath == "." && run.Status == "live" {
 			live = append(live, run)
 		}
 	}

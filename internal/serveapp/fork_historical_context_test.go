@@ -58,10 +58,11 @@ func TestRunForkHistoricalIdentityPublicExecutionBothStores(t *testing.T) {
 			sourceRoute := requireForkReceiverBusinessMutation(t, rt, seed.RunID, frontier, sourceRows["consumer"].ID)
 			var paused map[string]any
 			requireServedJSONRPCResult(t, rt.Endpoint, "run.pause", map[string]any{"run_id": seed.RunID}, &paused)
-			sibling := requireServedEventPublishRPCResult(t, rt.Endpoint, map[string]any{
+			var sibling servedEventPublishRPCResult
+			requireServedJSONRPCResult(t, rt.Endpoint, "run.start", map[string]any{
 				"event_name": "start.seeded", "bundle_hash": rt.BundleHash,
 				"payload": map[string]any{"token": "receiver-proof"}, "idempotency_key": "historical-context-sibling",
-			})
+			}, &sibling)
 			waitForkReceiverSourceCompletion(t, rt, sibling.RunID)
 			if err := waitExactOriginPublications(t.Context(), publication, seed.EventID, started.EventID, sibling.EventID); err != nil {
 				t.Fatal(err)
