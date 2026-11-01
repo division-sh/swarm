@@ -567,6 +567,10 @@ func settleProviderDrainOriginRecovery(
 	if code := strings.TrimSpace(settlement.Settlement.Failure.Detail.Code); code != "" {
 		reason = code
 	}
+	executionID := ""
+	if settlement.Settlement.Authority.Kind == runtimeeffects.AuthoritySelectedContractFork {
+		executionID = settlement.Settlement.Authority.SelectedFork.ExecutionID
+	}
 	return delivery.SettleProviderOriginRecoveryFailureTx(ctx, mutation, origin.Delivery, runtimedelivery.Settlement{
 		Disposition:   disposition,
 		RetryBase:     retryBase,
@@ -574,7 +578,7 @@ func settleProviderDrainOriginRecovery(
 		Failure:       settlement.Settlement.Failure,
 		Duration:      duration,
 		RuleSelection: runtimedelivery.NotApplicableHandlerRuleObservation(),
-	})
+	}, executionID)
 }
 
 func directiveDrainFailure(settlement runtimeeffects.CompletionSettlement) runtimefailures.Envelope {
