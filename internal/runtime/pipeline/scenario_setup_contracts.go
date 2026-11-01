@@ -4,6 +4,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/division-sh/swarm/internal/runtime/runlifecycle"
 	"github.com/division-sh/swarm/internal/runtime/scenarioexecution"
 )
 
@@ -12,6 +13,7 @@ type ScenarioSetupRequest struct {
 	Entities                 []ScenarioSetupEntityRequest
 	CreatedAt                time.Time
 	ScenarioExecutionProfile *scenarioexecution.Profile
+	Origin                   runlifecycle.RunOrigin
 }
 
 type ScenarioSetupEntityRequest struct {

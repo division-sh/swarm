@@ -21,10 +21,12 @@ type TestSessionRequest struct {
 }
 
 type TestSessionEndpoint struct {
-	APIServer string
-	Token     string
+	APIServer     string
+	Token         string
+	StartScenario func(context.Context, map[string]any) (string, error)
 }
 
 // TestSessionRunner owns acquisition and joined cleanup around one ready callback.
-// The callback has public API access only; no store or runtime handle escapes.
+// Only the closed scenario-start operation accompanies public API access;
+// no store or runtime handle escapes.
 type TestSessionRunner func(context.Context, TestSessionRequest, func(context.Context, TestSessionEndpoint) error) error

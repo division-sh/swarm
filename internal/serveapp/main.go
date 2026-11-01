@@ -45,6 +45,7 @@ import (
 	runtimerunforkexecution "github.com/division-sh/swarm/internal/runtime/runforkexecution"
 	runtimerunlifecycle "github.com/division-sh/swarm/internal/runtime/runlifecycle"
 	"github.com/division-sh/swarm/internal/runtime/scenarioderivation"
+	"github.com/division-sh/swarm/internal/runtime/scenarioexecution"
 	"github.com/division-sh/swarm/internal/runtime/semanticview"
 	"github.com/division-sh/swarm/internal/runtime/sessions"
 	runtimestartupownership "github.com/division-sh/swarm/internal/runtime/startupownership"
@@ -964,7 +965,7 @@ type runtimeCompositionRequest struct {
 	Cancel               context.CancelFunc
 	BootStartedAt        time.Time
 	RuntimeInstanceID    string
-	OnReady              func(context.Context, string) error
+	OnReady              func(context.Context, string, apiv1.EventPublicationOptions) error
 	AdmittedBundle       *runtimecontracts.WorkflowContractBundle
 	DataProjectionRoot   string
 }
@@ -2081,7 +2082,7 @@ func buildRuntimeHost(ctx context.Context, req runtimeCompositionRequest, reconc
 	}
 
 	if req.OnReady != nil {
-		err := req.OnReady(ctx, "http://"+apiListener.Addr().String())
+		err := req.OnReady(ctx, "http://"+apiListener.Addr().String(), serveRuntimePublicationOptions(stores, apiStoreCaps, primaryContext))
 		ready.Store(false)
 		if err != nil {
 			presenter.runtimeFailure("test_execution", err)
@@ -2689,6 +2690,9 @@ func newAPIServer(ready serveReadiness, apiV1Handler http.Handler, inboundHandle
 	mux := http.NewServeMux()
 	gateReady := func(next http.Handler, control bool) http.Handler {
 		return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+			if len(baseContexts) > 0 && baseContexts[0] != nil {
+				r = r.WithContext(scenarioexecution.CarryPrivateHostScope(baseContexts[0], r.Context()))
+			}
 			available := ready == nil || runtimeAdmissionReady(ready)
 			if control {
 				if controlReady, ok := ready.(interface{ ControlReady() bool }); ok {
