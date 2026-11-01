@@ -151,10 +151,12 @@ def handle(input):
 				targetBackend = workspace.BackendDocker
 			}
 			rt := startWorkspaceGatewayProofRuntime(t, backend, root, targetBackend, factory, listener)
-			seed := requireServedEventPublishRPCResult(t, rt.Endpoint, map[string]any{
+			pauseServedLandingForCreation(t, rt.Endpoint, rt.BundleHash, ".")
+			var seed servedEventPublishRPCResult
+			requireServedJSONRPCResult(t, rt.Endpoint, "run.start", map[string]any{
 				"event_name": "external.observed", "bundle_hash": rt.BundleHash,
 				"payload": map[string]any{}, "idempotency_key": "mock-forkchat-source",
-			})
+			}, &seed)
 			ready := requireServedEventPublishRPCResult(t, rt.Endpoint, map[string]any{
 				"event_name": "fork.source_message", "run_id": seed.RunID, "source_event_id": seed.EventID,
 				"payload": map[string]any{"note": "actual source conversation"}, "idempotency_key": "mock-forkchat-turn",
