@@ -167,7 +167,7 @@ func upgradeMemoryReply(request llmapi.Request) (llmapi.Reply, error) {
 	if request.Number == 2 && (!strings.Contains(string(request.Body), "upgrade input 1") || !strings.Contains(string(request.Body), "upgrade answer 1")) {
 		return llmapi.Reply{}, fmt.Errorf("upgraded turn lost its retained user/assistant history")
 	}
-	return llmapi.Reply{ID: fmt.Sprintf("memory-%d", request.Number), Model: body.Model, Text: fmt.Sprintf("upgrade answer %d", request.Number), InputTokens: 10, OutputTokens: 3, TotalTokens: 13}, nil
+	return llmapi.Reply{ID: fmt.Sprintf("memory-%d", request.Number), TextID: fmt.Sprintf("answer-%d", request.Number), Model: body.Model, Text: fmt.Sprintf("upgrade answer %d", request.Number), InputTokens: 10, OutputTokens: 3, TotalTokens: 13}, nil
 }
 
 func configureUpgradeMemoryCLI(t *testing.T, opts *cliapp.ServeOptions, text *string) {
