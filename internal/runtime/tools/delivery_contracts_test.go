@@ -1,6 +1,7 @@
 package tools_test
 
 import (
+	"strings"
 	"testing"
 
 	models "github.com/division-sh/swarm/internal/runtime/core/actors"
@@ -31,6 +32,7 @@ enums:
     default: low
 `, `
 review_subject:
+  _description: Keep the author's business context.
   status: text
   priority: integer
   active: boolean
@@ -45,6 +47,15 @@ review_subject:
 	for _, def := range defs {
 		schema, _ := def.Schema.(map[string]any)
 		defByName[def.Name] = schema
+		if def.Name == "read_review_subject" {
+			want := "Read the fields of this review_subject\nKeep the author's business context."
+			if got := llm.DeliveredToolDescription(def); got != want {
+				t.Fatalf("model read description=%q want=%q", got, want)
+			}
+		}
+		if strings.Contains(llm.DeliveredToolDescription(def), "ask_human") {
+			t.Fatalf("%s description names ungranted ask_human", def.Name)
+		}
 	}
 
 	for _, legacy := range []string{"create_entity", "get_entity", "save_entity_field", "search_entities", "query_entities", "query_metrics"} {
