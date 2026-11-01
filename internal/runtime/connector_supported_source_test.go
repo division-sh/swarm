@@ -152,7 +152,7 @@ func telegramConnectorSupportedSurfaceSource(t *testing.T, baseURL, flowInstance
   subscribes_to: [inbound.telegram.text_message]
   event_handlers:
     inbound.telegram.text_message:
-      guard: {check: _entity.id != ""}
+      guard: {check: instance.id != ""}
       activity:
         id: telegram_send_message
         tool: telegram.send_message
@@ -169,7 +169,7 @@ func slackManagedConnectorSource(t *testing.T, baseURL, flowInstance string) sem
   subscribes_to: [inbound.telegram.text_message]
   event_handlers:
     inbound.telegram.text_message:
-      guard: {check: _entity.id != ""}
+      guard: {check: instance.id != ""}
       activity:
         id: slack_post_message
         tool: slack.post_message
@@ -186,7 +186,7 @@ func notionManagedConnectorSource(t *testing.T, baseURL, flowInstance string) se
   subscribes_to: [inbound.telegram.text_message]
   event_handlers:
     inbound.telegram.text_message:
-      guard: {check: _entity.id != ""}
+      guard: {check: instance.id != ""}
       activity:
         id: notion_append_block_children
         tool: notion.append_block_children
@@ -209,7 +209,7 @@ func microsoftGraphConnectorSource(t *testing.T, baseURL, flowInstance string) s
   subscribes_to: [inbound.telegram.text_message]
   event_handlers:
     inbound.telegram.text_message:
-      guard: {check: _entity.id != ""}
+      guard: {check: instance.id != ""}
       activity:
         id: microsoft_graph_send_mail
         tool: microsoft_graph.send_mail
