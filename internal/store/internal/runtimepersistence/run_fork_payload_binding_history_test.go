@@ -62,6 +62,7 @@ func TestRunForkRevisionPreservesPayloadBindingBothStores(t *testing.T) {
 			if err := process.Release(ctx); err != nil {
 				t.Fatal(err)
 			}
+			retireStoreTestWorkFixture(t)
 			if err := fixture.db.Close(); err != nil {
 				t.Fatal(err)
 			}
