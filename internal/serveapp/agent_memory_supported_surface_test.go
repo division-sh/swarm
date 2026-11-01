@@ -156,6 +156,22 @@ func runCanonicalTelegramAgentLiveSelection(t *testing.T, backend string) {
 	} else {
 		configPath = writeStandingMockRuntimeConfig(t, backend, storeLocation)
 	}
+	configBytes, err := os.ReadFile(configPath)
+	if err != nil {
+		t.Fatal(err)
+	}
+	var configDocument map[string]any
+	if err := yaml.Unmarshal(configBytes, &configDocument); err != nil {
+		t.Fatal(err)
+	}
+	configDocument["serve"] = map[string]any{"api_listen_addr": "127.0.0.1:0", "mcp_listen_addr": "127.0.0.1:0"}
+	configBytes, err = yaml.Marshal(configDocument)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(configPath, configBytes, 0o600); err != nil {
+		t.Fatal(err)
+	}
 	bundleHash := servedEventPublishFixtureBundleHash(t, sourceRoot)
 
 	credentialPath := filepath.Join(t.TempDir(), "credentials.json")
