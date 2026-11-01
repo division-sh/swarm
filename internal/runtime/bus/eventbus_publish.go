@@ -2384,7 +2384,7 @@ func (eb *EventBus) materializePublishRecipientPlanWithPlanner(ctx context.Conte
 	if eb == nil || eb.recipientPlanMaterializer == nil {
 		return routePlan, nil
 	}
-	if !routePlan.AllowsLowerPrecedenceRouteProduction() {
+	if routePlan.CanonicalRouteOwnerMatched() {
 		return routePlan, nil
 	}
 	routes, err := eb.recipientPlanMaterializer(ctx, evt, eb.publishRecipientPlan(evt, routePlan))
@@ -2394,7 +2394,7 @@ func (eb *EventBus) materializePublishRecipientPlanWithPlanner(ctx context.Conte
 	if len(routes) == 0 {
 		return routePlan, nil
 	}
-	routePlan.MarkLowerPrecedenceRouteProduction(routeIntentProducerRecipientMaterializer)
+	routePlan.recordOrdinaryRouteProducer(routeIntentProducerRecipientMaterializer)
 	routePlan.AddDeliveryIntents(routePlanDeliveryIntentsFromRoutes(routes, routeIntentProducerRecipientMaterializer)...)
 	projection, err := planner.materializedPublicationTargetOwners(ctx, evt, &routePlan)
 	if err != nil {

@@ -121,8 +121,8 @@ func TestEventBusFinalFlowInstanceAuthoringFixture_RenamedConnectRoutePersistsRe
 	if err != nil {
 		t.Fatalf("post-publish planSubscribedRoutePlan: %v", err)
 	}
-	if routePlan.AuthorityState != RoutePlanAuthorityCanonicalMatched || routePlan.AuthorityOwner != routeIntentProducerConnectRoutePlan {
-		t.Fatalf("post-publish route plan authority = %q/%q, want matched connect route plan", routePlan.AuthorityState, routePlan.AuthorityOwner)
+	if !routePlan.CanonicalRouteOwnerMatched() || !routePlan.TargetFailure.Empty() || routePlan.AuthorityOwner != routeIntentProducerConnectRoutePlan {
+		t.Fatalf("post-publish route plan authority = %t/%q, want matched connect route plan", routePlan.CanonicalRouteOwnerMatched(), routePlan.AuthorityOwner)
 	}
 
 	retryTarget := subscribeInternalDeliveriesForTest(t, eb, persistedRoutes[0].Recipient.ID())

@@ -436,8 +436,8 @@ func TestMixedPubsubConnectCompositionMatchedConnectPreservesLocal(t *testing.T)
 	if err != nil {
 		t.Fatalf("CheckPublishRecipientPlan: %v", err)
 	}
-	if plan.AuthorityState != RoutePlanAuthorityCanonicalMatched || plan.AuthorityOwner != routeIntentProducerConnectRoutePlan {
-		t.Fatalf("route plan authority = %q/%q, want matched connect precedence", plan.AuthorityState, plan.AuthorityOwner)
+	if !plan.CanonicalRouteOwnerMatched() || !plan.TargetFailure.Empty() || plan.AuthorityOwner != routeIntentProducerConnectRoutePlan {
+		t.Fatalf("route plan authority = %t/%q, want matched connect precedence", plan.CanonicalRouteOwnerMatched(), plan.AuthorityOwner)
 	}
 	routes := plan.DeliveryRoutes()
 	if len(routes) != 2 {
@@ -563,7 +563,7 @@ func TestMixedPubsubConnectCompositionNoConnectMatchPreservesLocal(t *testing.T)
 		t.Fatalf("planSubscribedRoutePlan: %v", err)
 	}
 	if plan.CanonicalRouteOwnerMatched() {
-		t.Fatalf("route authority = %q/%q, want no connect match", plan.AuthorityState, plan.AuthorityOwner)
+		t.Fatalf("route authority = %t/%q, want no connect match", plan.CanonicalRouteOwnerMatched(), plan.AuthorityOwner)
 	}
 	if routes := plan.DeliveryRoutes(); len(routes) != 1 || routes[0].Recipient.LocalID() != "local-observer" || routes[0].Target.Route().EntityID != producerOwner.Route.EntityID {
 		t.Fatalf("local routes = %#v, want exact producer owner", routes)
@@ -951,8 +951,8 @@ func TestStaticConnectRouteUsesExactPersistedTargetOwner(t *testing.T) {
 	if err != nil {
 		t.Fatalf("planSubscribedRoutePlan: %v", err)
 	}
-	if routePlan.AuthorityState != RoutePlanAuthorityCanonicalMatched || routePlan.AuthorityOwner != routeIntentProducerConnectRoutePlan {
-		t.Fatalf("route plan authority = %q/%q, want matched connect route plan", routePlan.AuthorityState, routePlan.AuthorityOwner)
+	if !routePlan.CanonicalRouteOwnerMatched() || !routePlan.TargetFailure.Empty() || routePlan.AuthorityOwner != routeIntentProducerConnectRoutePlan {
+		t.Fatalf("route plan authority = %t/%q, want matched connect route plan", routePlan.CanonicalRouteOwnerMatched(), routePlan.AuthorityOwner)
 	}
 	if !deliveryRoutesContain(routePlan.DeliveryRoutes(), want) {
 		t.Fatalf("route plan delivery routes = %#v, want %#v", routePlan.DeliveryRoutes(), want)
@@ -1174,8 +1174,8 @@ func TestEventBusPublish_RootConnectRoutePlanPersistsSingularTarget(t *testing.T
 	if err != nil {
 		t.Fatalf("planSubscribedRoutePlan: %v", err)
 	}
-	if routePlan.AuthorityState != RoutePlanAuthorityCanonicalMatched || routePlan.AuthorityOwner != routeIntentProducerConnectRoutePlan {
-		t.Fatalf("route plan authority = %q/%q, want matched root connect route plan", routePlan.AuthorityState, routePlan.AuthorityOwner)
+	if !routePlan.CanonicalRouteOwnerMatched() || !routePlan.TargetFailure.Empty() || routePlan.AuthorityOwner != routeIntentProducerConnectRoutePlan {
+		t.Fatalf("route plan authority = %t/%q, want matched root connect route plan", routePlan.CanonicalRouteOwnerMatched(), routePlan.AuthorityOwner)
 	}
 	if !deliveryRoutesContain(routePlan.DeliveryRoutes(), want) {
 		t.Fatalf("route plan delivery routes = %#v, want %#v", routePlan.DeliveryRoutes(), want)
@@ -1648,8 +1648,8 @@ func TestEventBusPublish_RootConnectRoutePlanDoesNotCaptureChildScopedSameNameEv
 	if err != nil {
 		t.Fatalf("planSubscribedRoutePlan: %v", err)
 	}
-	if routePlan.AuthorityOwner == routeIntentProducerConnectRoutePlan || routePlan.AuthorityState == RoutePlanAuthorityCanonicalMatched {
-		t.Fatalf("route plan authority = %q/%q, root connect must not match child-scoped same-name event", routePlan.AuthorityState, routePlan.AuthorityOwner)
+	if routePlan.AuthorityOwner == routeIntentProducerConnectRoutePlan || (routePlan.CanonicalRouteOwnerMatched() && routePlan.TargetFailure.Empty()) {
+		t.Fatalf("route plan authority = %t/%q, root connect must not match child-scoped same-name event", routePlan.CanonicalRouteOwnerMatched(), routePlan.AuthorityOwner)
 	}
 	if deliveryRoutesContain(routePlan.DeliveryRoutes(), forbidden) {
 		t.Fatalf("route plan delivery routes = %#v, must not include root-connect receiver for child-scoped same-name event", routePlan.DeliveryRoutes())
@@ -1916,8 +1916,8 @@ func TestEnginePublication_ConnectRoutePlanPersistsSharedRoutePlan(t *testing.T)
 		t.Fatalf("PrepareEnginePublications: %v", err)
 	}
 	planned := plans[0].(EnginePublicationPlan).prepared.plan
-	if planned.AuthorityState != RoutePlanAuthorityCanonicalMatched || planned.AuthorityOwner != routeIntentProducerConnectRoutePlan {
-		t.Fatalf("outbox route plan authority = %q/%q, want matched connect route plan", planned.AuthorityState, planned.AuthorityOwner)
+	if !planned.CanonicalRouteOwnerMatched() || !planned.TargetFailure.Empty() || planned.AuthorityOwner != routeIntentProducerConnectRoutePlan {
+		t.Fatalf("outbox route plan authority = %t/%q, want matched connect route plan", planned.CanonicalRouteOwnerMatched(), planned.AuthorityOwner)
 	}
 	if !deliveryRoutesContain(planned.DeliveryRoutes(), want) {
 		t.Fatalf("outbox route plan delivery routes = %#v, want %#v", planned.DeliveryRoutes(), want)
@@ -2026,8 +2026,8 @@ func TestEventBusResetInMemoryStateRefreshesConnectRoutePlanner(t *testing.T) {
 	if err != nil {
 		t.Fatalf("planSubscribedRoutePlan after reset: %v", err)
 	}
-	if routePlan.AuthorityState != RoutePlanAuthorityCanonicalMatched || routePlan.AuthorityOwner != routeIntentProducerConnectRoutePlan {
-		t.Fatalf("route plan authority = %q/%q, want matched connect route plan", routePlan.AuthorityState, routePlan.AuthorityOwner)
+	if !routePlan.CanonicalRouteOwnerMatched() || !routePlan.TargetFailure.Empty() || routePlan.AuthorityOwner != routeIntentProducerConnectRoutePlan {
+		t.Fatalf("route plan authority = %t/%q, want matched connect route plan", routePlan.CanonicalRouteOwnerMatched(), routePlan.AuthorityOwner)
 	}
 	if !deliveryRoutesContain(routePlan.DeliveryRoutes(), wantBeta) || len(routePlan.DeliveryRoutes()) != 1 {
 		t.Fatalf("route plan delivery routes = %#v, want only refreshed beta route", routePlan.DeliveryRoutes())
@@ -2076,8 +2076,8 @@ func TestEventBusPublish_ConnectRoutePlanPersistsTemplateInstanceKeyTarget(t *te
 	if err != nil {
 		t.Fatalf("planSubscribedRoutePlan: %v", err)
 	}
-	if routePlan.AuthorityState != RoutePlanAuthorityCanonicalMatched || routePlan.AuthorityOwner != routeIntentProducerConnectRoutePlan {
-		t.Fatalf("route plan authority = %q/%q, want matched connect route plan", routePlan.AuthorityState, routePlan.AuthorityOwner)
+	if !routePlan.CanonicalRouteOwnerMatched() || !routePlan.TargetFailure.Empty() || routePlan.AuthorityOwner != routeIntentProducerConnectRoutePlan {
+		t.Fatalf("route plan authority = %t/%q, want matched connect route plan", routePlan.CanonicalRouteOwnerMatched(), routePlan.AuthorityOwner)
 	}
 	if !deliveryRoutesContain(routePlan.DeliveryRoutes(), want) || len(routePlan.DeliveryRoutes()) != 1 {
 		t.Fatalf("route plan delivery routes = %#v, want instance-key route %#v", routePlan.DeliveryRoutes(), want)
@@ -2897,8 +2897,8 @@ func TestEventBusPublish_ConnectRoutePlanSelectResolutionFailsClosedForTargetGap
 			if err != nil {
 				t.Fatalf("planSubscribedRoutePlan: %v", err)
 			}
-			if routePlan.AuthorityState != RoutePlanAuthorityCanonicalFailedClosed || routePlan.AuthorityOwner != routeIntentProducerConnectRoutePlan {
-				t.Fatalf("route plan authority = %q/%q, want fail-closed connect route plan", routePlan.AuthorityState, routePlan.AuthorityOwner)
+			if !routePlan.CanonicalRouteOwnerMatched() || routePlan.TargetFailure.Empty() || routePlan.AuthorityOwner != routeIntentProducerConnectRoutePlan {
+				t.Fatalf("route plan authority = %t/%q, want fail-closed connect route plan", routePlan.CanonicalRouteOwnerMatched(), routePlan.AuthorityOwner)
 			}
 			if routePlan.TargetFailure != tc.wantFailure {
 				t.Fatalf("target failure = %q, want %q", routePlan.TargetFailure, tc.wantFailure)
@@ -3697,8 +3697,8 @@ func TestEventBusPublish_ConnectRoutePlanPersistsRenamedTemplateInstanceKeyTarge
 	if err != nil {
 		t.Fatalf("planSubscribedRoutePlan: %v", err)
 	}
-	if routePlan.AuthorityState != RoutePlanAuthorityCanonicalMatched || routePlan.AuthorityOwner != routeIntentProducerConnectRoutePlan {
-		t.Fatalf("route plan authority = %q/%q, want matched connect route plan", routePlan.AuthorityState, routePlan.AuthorityOwner)
+	if !routePlan.CanonicalRouteOwnerMatched() || !routePlan.TargetFailure.Empty() || routePlan.AuthorityOwner != routeIntentProducerConnectRoutePlan {
+		t.Fatalf("route plan authority = %t/%q, want matched connect route plan", routePlan.CanonicalRouteOwnerMatched(), routePlan.AuthorityOwner)
 	}
 	if !deliveryRoutesContain(routePlan.DeliveryRoutes(), want) || len(routePlan.DeliveryRoutes()) != 1 {
 		t.Fatalf("route plan delivery routes = %#v, want renamed instance-key route %#v", routePlan.DeliveryRoutes(), want)
@@ -3750,8 +3750,8 @@ func TestEventBusPublish_ConnectRoutePlanFailsClosedForRenamedTemplateInstanceKe
 	if err != nil {
 		t.Fatalf("planSubscribedRoutePlan: %v", err)
 	}
-	if routePlan.AuthorityState != RoutePlanAuthorityCanonicalFailedClosed || routePlan.AuthorityOwner != routeIntentProducerConnectRoutePlan {
-		t.Fatalf("route plan authority = %q/%q, want fail-closed connect route plan", routePlan.AuthorityState, routePlan.AuthorityOwner)
+	if !routePlan.CanonicalRouteOwnerMatched() || routePlan.TargetFailure.Empty() || routePlan.AuthorityOwner != routeIntentProducerConnectRoutePlan {
+		t.Fatalf("route plan authority = %t/%q, want fail-closed connect route plan", routePlan.CanonicalRouteOwnerMatched(), routePlan.AuthorityOwner)
 	}
 	if routePlan.TargetFailure != runtimepinrouting.TargetFailureFromConnect(runtimepinrouting.ConnectFailureInstanceSourceValueMissing) {
 		t.Fatalf("target failure = %q, want %q", routePlan.TargetFailure, runtimepinrouting.ConnectFailureInstanceSourceValueMissing)
@@ -3842,8 +3842,8 @@ func TestEventBusPublish_ConnectRoutePlanFailsClosedForTemplateInstanceKeyGaps(t
 			if err != nil {
 				t.Fatalf("planSubscribedRoutePlan: %v", err)
 			}
-			if routePlan.AuthorityState != RoutePlanAuthorityCanonicalFailedClosed || routePlan.AuthorityOwner != routeIntentProducerConnectRoutePlan {
-				t.Fatalf("route plan authority = %q/%q, want fail-closed connect route plan", routePlan.AuthorityState, routePlan.AuthorityOwner)
+			if !routePlan.CanonicalRouteOwnerMatched() || routePlan.TargetFailure.Empty() || routePlan.AuthorityOwner != routeIntentProducerConnectRoutePlan {
+				t.Fatalf("route plan authority = %t/%q, want fail-closed connect route plan", routePlan.CanonicalRouteOwnerMatched(), routePlan.AuthorityOwner)
 			}
 			if routePlan.TargetFailure != tc.wantFailure {
 				t.Fatalf("target failure = %q, want %q", routePlan.TargetFailure, tc.wantFailure)
@@ -3907,8 +3907,8 @@ func TestMixedPubsubConnectCompositionMatchedZeroConnectRecipientsPreservesLocal
 	if err != nil {
 		t.Fatalf("planSubscribedRoutePlan: %v", err)
 	}
-	if routePlan.AuthorityState != RoutePlanAuthorityCanonicalMatched || routePlan.AuthorityOwner != routeIntentProducerConnectRoutePlan {
-		t.Fatalf("route plan authority = %q/%q, want matched connect route plan", routePlan.AuthorityState, routePlan.AuthorityOwner)
+	if !routePlan.CanonicalRouteOwnerMatched() || !routePlan.TargetFailure.Empty() || routePlan.AuthorityOwner != routeIntentProducerConnectRoutePlan {
+		t.Fatalf("route plan authority = %t/%q, want matched connect route plan", routePlan.CanonicalRouteOwnerMatched(), routePlan.AuthorityOwner)
 	}
 	if !routePlan.TargetFailure.Empty() {
 		t.Fatalf("target failure = %q, want none for typed no-delivery settlement", routePlan.TargetFailure)
@@ -3916,7 +3916,7 @@ func TestMixedPubsubConnectCompositionMatchedZeroConnectRecipientsPreservesLocal
 	if routes := routePlan.DeliveryRoutes(); len(routes) != 1 || routes[0].Recipient.LocalID() != "producer-node" {
 		t.Fatalf("delivery routes = %#v, want independent local producer-node route", routes)
 	}
-	if routePlan.AllowsLowerPrecedenceRouteProduction() {
+	if !routePlan.CanonicalRouteOwnerMatched() {
 		t.Fatal("matched zero-recipient connect decision allowed recipient-materializer fallback")
 	}
 
@@ -3987,8 +3987,8 @@ func TestEventBusPublish_ConnectRoutePlanFailureSkipsRecipientPlanMaterializer(t
 	if materializerCalled {
 		t.Fatalf("recipient plan materializer was called for matched lowered connect failure")
 	}
-	if routePlan.AuthorityState != RoutePlanAuthorityCanonicalFailedClosed || routePlan.AuthorityOwner != routeIntentProducerConnectRoutePlan {
-		t.Fatalf("route plan authority = %q/%q, want fail-closed connect route plan", routePlan.AuthorityState, routePlan.AuthorityOwner)
+	if !routePlan.CanonicalRouteOwnerMatched() || routePlan.TargetFailure.Empty() || routePlan.AuthorityOwner != routeIntentProducerConnectRoutePlan {
+		t.Fatalf("route plan authority = %t/%q, want fail-closed connect route plan", routePlan.CanonicalRouteOwnerMatched(), routePlan.AuthorityOwner)
 	}
 	if len(routePlan.LiveRecipients) != 0 || len(routePlan.DeliveryIntents) != 0 || len(routePlan.DeliveryRoutes()) != 0 {
 		t.Fatalf("fail-closed plan has executable routes: live=%#v intents=%#v routes=%#v", routePlan.LiveRecipients, routePlan.DeliveryIntents, routePlan.DeliveryRoutes())
@@ -4023,8 +4023,8 @@ func TestEventBusPlan_UnmatchedCanonicalRouteUsesLowerPrecedenceFallback(t *test
 	if err != nil {
 		t.Fatalf("planSubscribedRoutePlan: %v", err)
 	}
-	if routePlan.AuthorityState != RoutePlanAuthorityLowerPrecedence || routePlan.AuthorityOwner != routeIntentProducerAgentPolicy {
-		t.Fatalf("route plan authority = %q/%q, want lower-precedence agent policy", routePlan.AuthorityState, routePlan.AuthorityOwner)
+	if routePlan.CanonicalRouteOwnerMatched() || routePlan.AuthorityOwner != routeIntentProducerAgentPolicy {
+		t.Fatalf("route plan authority = %t/%q, want lower-precedence agent policy", routePlan.CanonicalRouteOwnerMatched(), routePlan.AuthorityOwner)
 	}
 	if !containsString(routePlan.RecipientIDs(), "legacy-agent") {
 		t.Fatalf("route plan recipients = %#v, want legacy-agent", routePlan.RecipientIDs())
@@ -4051,8 +4051,8 @@ func TestRoutePlanCanonicalFailClosedDropsExecutableRoutes(t *testing.T) {
 	})
 
 	got := routePlan.Normalized()
-	if got.AuthorityState != RoutePlanAuthorityCanonicalFailedClosed || got.AuthorityOwner != routeIntentProducerConnectRoutePlan {
-		t.Fatalf("route plan authority = %q/%q, want fail-closed connect route plan", got.AuthorityState, got.AuthorityOwner)
+	if !got.CanonicalRouteOwnerMatched() || got.TargetFailure.Empty() || got.AuthorityOwner != routeIntentProducerConnectRoutePlan {
+		t.Fatalf("route plan authority = %t/%q, want fail-closed connect route plan", got.CanonicalRouteOwnerMatched(), got.AuthorityOwner)
 	}
 	if got.TargetFailure != runtimepinrouting.FailureTargetNotSubscribed {
 		t.Fatalf("target failure = %q, want %q", got.TargetFailure, runtimepinrouting.FailureTargetNotSubscribed)
@@ -4175,7 +4175,7 @@ func TestPublicInputRoutePlanRejectsNoncanonicalOrEmptyDelivery(t *testing.T) {
 			name: "noncanonical route owner",
 			plan: func() RoutePlan {
 				plan := newRoutePlan(connectRoutePlanStaticProducerEvent(uuid.NewString(), "deploy.done", "", "", nil, 0, "", "", events.EventEnvelope{}, time.Now().UTC()))
-				plan.MarkLowerPrecedenceRouteProduction(routeIntentProducerAgentPolicy)
+				plan.recordOrdinaryRouteProducer(routeIntentProducerAgentPolicy)
 				return plan
 			},
 			want: "canonical connect route owner",
@@ -4211,11 +4211,21 @@ func TestRoutePlanNormalizationPreservesAuthorityState(t *testing.T) {
 	})
 
 	got := routePlan.Normalized()
-	if got.AuthorityState != RoutePlanAuthorityCanonicalMatched || got.AuthorityOwner != routeIntentProducerConnectRoutePlan {
-		t.Fatalf("normalized route plan authority = %q/%q, want matched connect route plan", got.AuthorityState, got.AuthorityOwner)
+	if !got.CanonicalRouteOwnerMatched() || !got.TargetFailure.Empty() || got.AuthorityOwner != routeIntentProducerConnectRoutePlan {
+		t.Fatalf("normalized route plan authority = %t/%q, want matched connect route plan", got.CanonicalRouteOwnerMatched(), got.AuthorityOwner)
 	}
 	if !deliveryRoutesContain(got.DeliveryRoutes(), connectRoutePlanStaticDeliveryRoute(t)) {
 		t.Fatalf("normalized route plan delivery routes = %#v, want static connect route", got.DeliveryRoutes())
+	}
+	ordinary := newRoutePlan(evt)
+	ordinary.recordOrdinaryRouteProducer(routeIntentProducerAgentPolicy)
+	ordinary.recordOrdinaryRouteProducer(routeIntentProducerRecipientMaterializer)
+	if ordinary.CanonicalRouteOwnerMatched() || ordinary.AuthorityOwner != routeIntentProducerAgentPolicy {
+		t.Fatalf("ordinary production lost first-owner recording or acquired admission: %+v", ordinary)
+	}
+	routePlan.recordOrdinaryRouteProducer(routeIntentProducerAgentPolicy)
+	if !routePlan.CanonicalRouteOwnerMatched() || routePlan.AuthorityOwner != routeIntentProducerConnectRoutePlan {
+		t.Fatalf("ordinary production replaced canonical admission: %+v", routePlan)
 	}
 }
 
