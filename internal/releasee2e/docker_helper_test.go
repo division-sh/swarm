@@ -1287,10 +1287,10 @@ func validateReleaseClaudeArgs(args []string, startup bool) error {
 		return fmt.Errorf("Claude --output-format = %q, want stream-json", valueFlags["--output-format"])
 	}
 	resumed := os.Getenv(releaseResourceReadEnv) == "1" && valueFlags["--resume"] != ""
-	if resumed && (!validReleaseUUID(valueFlags["--resume"]) || !boolFlags["--fork-session"] || valueFlags["--system-prompt"] != "") {
-		return fmt.Errorf("resumed resource turn has invalid predecessor or prompt")
+	if resumed && (!validReleaseUUID(valueFlags["--resume"]) || !boolFlags["--fork-session"]) {
+		return fmt.Errorf("resumed resource turn has invalid predecessor")
 	}
-	if !resumed && strings.TrimSpace(valueFlags["--system-prompt"]) == "" {
+	if strings.TrimSpace(valueFlags["--system-prompt"]) == "" {
 		return fmt.Errorf("Claude invocation omitted --system-prompt")
 	}
 	if tools := splitAllowedTools(valueFlags["--tools"]); !equalStrings(tools, releaseE2EBuiltinTools()) {
