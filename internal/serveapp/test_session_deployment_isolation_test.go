@@ -8,6 +8,7 @@ import (
 	"net/http/httptest"
 	"os"
 	"path/filepath"
+	"reflect"
 	"strings"
 	"sync/atomic"
 	"testing"
@@ -16,6 +17,90 @@ import (
 	"github.com/division-sh/swarm/internal/config"
 	storebackend "github.com/division-sh/swarm/internal/store/backendselection"
 )
+
+func TestSwarmTestUsesCompleteDeploymentLLMConfig(t *testing.T) {
+	const completeLLM = `llm:
+  backend: openai_compatible
+  models:
+    regular: {openai_compatible: configured-model}
+  session:
+    lock_ttl: 17s
+    rotate_after_turns: 19
+    rotate_on_parse_failures: 2
+  provider_limits:
+    openai_compatible:
+      max_concurrency: 2
+      max_concurrency_max_wait: 3s
+  claude_cli:
+    command: configured-claude
+    timeout: 23s
+    output_format: json
+  openai_compatible:
+    base_url: http://127.0.0.1:9/v1
+  openai_responses:
+    base_url: http://127.0.0.1:9/responses
+`
+	for _, test := range []struct {
+		name, config, refusal string
+		explicit              bool
+	}{
+		{name: "defaults", config: "{}\n"},
+		{name: "configured_endpoint", config: "llm:\n  backend: openai_compatible\n  openai_compatible:\n    base_url: http://127.0.0.1:9/v1\n"},
+		{name: "complete_discovered", config: completeLLM},
+		{name: "complete_explicit", config: completeLLM, explicit: true},
+		{name: "responses_endpoint", config: "llm:\n  backend: openai_responses\n  openai_responses:\n    base_url: http://127.0.0.1:9/v1\n"},
+		{name: "missing_endpoint", config: "llm:\n  backend: openai_compatible\n", refusal: "llm.openai_compatible.base_url is required"},
+		{name: "invalid_endpoint", config: "llm:\n  backend: openai_compatible\n  openai_compatible:\n    base_url: localhost:9/v1\n", refusal: "llm.openai_compatible.base_url must be an http(s) URL"},
+	} {
+		t.Run(test.name, func(t *testing.T) {
+			isolateCLIAPIConfigEnv(t)
+			unsetStoreSelectorEnv(t)
+			source := scaffoldConformanceArchetype(t, "zero-agent-automation")
+			configPath := filepath.Join(source, ".swarm", "swarm.yaml")
+			if err := os.WriteFile(configPath, []byte(test.config), 0o600); err != nil {
+				t.Fatal(err)
+			}
+			defer unchangedPrivateTestDeployment(t, source)()
+			loadOptions := cliapp.RuntimeConfigLoadOptions{RepoRoot: source}
+			args := []string{"test", ".", "tests/smoke.yaml", "--timeout", "10s", "--poll-interval", "10ms"}
+			if test.explicit {
+				loadOptions.ExplicitPath = configPath
+				args = append(args, "--config", configPath)
+			}
+			expected, loadErr := cliapp.LoadRuntimeConfigWithOptions(loadOptions)
+			if test.refusal == "" && loadErr != nil {
+				t.Fatal(loadErr)
+			}
+			original := buildStoresForServe
+			t.Cleanup(func() { buildStoresForServe = original })
+			acquired := false
+			buildStoresForServe = func(ctx context.Context, selected storebackend.Selection, cfg *config.Config) (*selectedStoreOwner, error) {
+				acquired = true
+				if test.refusal != "" {
+					t.Fatal("invalid endpoint reached private resource acquisition")
+				}
+				if !reflect.DeepEqual(cfg.LLM, expected.Config.LLM) {
+					t.Fatalf("private LLM config differs from canonical reader: got=%#v want=%#v", cfg.LLM, expected.Config.LLM)
+				}
+				if selected.Backend != storebackend.BackendSQLite || strings.HasPrefix(selected.SQLitePath, source+string(os.PathSeparator)) {
+					t.Fatalf("test did not keep its private store: %#v", selected)
+				}
+				return original(ctx, selected, cfg)
+			}
+			var out, errOut bytes.Buffer
+			code := executeCLIFrom(t.Context(), source, args, &out, &errOut, nil)
+			if test.refusal != "" {
+				if code != 2 || acquired || !strings.Contains(errOut.String(), test.refusal) {
+					t.Fatalf("endpoint refusal code=%d acquired=%t stdout=%s stderr=%s", code, acquired, &out, &errOut)
+				}
+				return
+			}
+			if code != 0 || !acquired || !strings.Contains(out.String(), "swarm test ok: scenarios=1") {
+				t.Fatalf("public test code=%d acquired=%t stdout=%s stderr=%s", code, acquired, &out, &errOut)
+			}
+		})
+	}
+}
 
 func TestPrivateTestIgnoresDeploymentResources(t *testing.T) {
 	for _, backend := range []string{"sqlite", "postgres"} {

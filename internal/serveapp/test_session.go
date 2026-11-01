@@ -58,7 +58,7 @@ func RunTestSession(ctx context.Context, in cliapp.TestSessionRequest, execute f
 	if err != nil {
 		return err
 	}
-	cfg.LLM.Backend, cfg.LLM.Models = in.LiveBackend, in.ModelAliases
+	cfg.LLM = in.LLM
 	if err := cfg.Validate(); err != nil {
 		return err
 	}
