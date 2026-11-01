@@ -3,7 +3,6 @@ package apiv1
 import (
 	"context"
 	"errors"
-	"fmt"
 	"strings"
 	"time"
 
@@ -13,11 +12,9 @@ import (
 	runtimebus "github.com/division-sh/swarm/internal/runtime/bus"
 	runtimecontracts "github.com/division-sh/swarm/internal/runtime/contracts"
 	runtimepinrouting "github.com/division-sh/swarm/internal/runtime/core/pinrouting"
-	"github.com/division-sh/swarm/internal/runtime/core/worklifetime"
 	runtimefailures "github.com/division-sh/swarm/internal/runtime/failures"
 	runtimerunlifecycle "github.com/division-sh/swarm/internal/runtime/runlifecycle"
 	"github.com/division-sh/swarm/internal/runtime/semanticview"
-	"github.com/google/uuid"
 )
 
 const runStartIDempotencyTTL = 24 * time.Hour
@@ -31,14 +28,6 @@ type runStartResult struct {
 
 type bundleIdentityParam struct {
 	BundleHash string
-}
-
-// The selected-store owner must commit the run, pins, feed obligations and
-// permanent run-creation receipt in one transaction. A transport cache is not
-// an implementation of this port.
-type deploymentRunStartOwner interface {
-	LookupAPIEventPublication(context.Context, apiidempotency.Request) (apiidempotency.Completion, bool, error)
-	StartDeploymentRunAcknowledged(context.Context, durabledata.RunCreationCommand, apiidempotency.Request) (runtimebus.CommittedDeploymentRunCreation, error)
 }
 
 func OperatorRunStartHandlers(opts RunStartHandlerOptions) map[string]MethodHandler {
@@ -73,10 +62,11 @@ func runStartConfigured(opts RunStartHandlerOptions) bool {
 }
 
 func executeRunStart(ctx context.Context, req Request, opts EventPublicationOptions, now time.Time) (any, error) {
-	_, eventPresent := req.Params["event_name"]
-	_, payloadPresent := req.Params["payload"]
-	if !eventPresent && !payloadPresent {
-		return executeDeploymentRunStart(ctx, req, opts, now)
+	if _, rows := req.Params["data"]; rows {
+		return nil, NewApplicationError(string(durabledata.CodeRunDataImmutable), false, map[string]any{
+			"operation": "run.start", "reason": "live_run_rows_binding_unavailable",
+			"message": "run start cannot publish rows into a live run with immutable data bindings",
+		})
 	}
 	cfg := eventPublicationConfig{
 		sourceAgent:                    func(Request) string { return "api.v1" },
@@ -87,8 +77,12 @@ func executeRunStart(ctx context.Context, req Request, opts EventPublicationOpti
 		durablePublishAck:              true,
 		atomicAPICompletion:            true,
 		publishError:                   runStartEventPublishError,
-		buildCompletion: func(_ context.Context, _ EventPublicationOptions, params eventPublicationParams) (any, string, error) {
-			return runStartResult{RunID: params.RunID, EventID: params.EventID, Status: "live", DataBinding: durabledata.DataBinding{State: "none"}}, params.EventID, nil
+		buildCompletion: func(ctx context.Context, selected EventPublicationOptions, params eventPublicationParams) (any, string, error) {
+			header, err := selected.Runs.LoadRunHeader(ctx, params.RunID)
+			if err != nil {
+				return nil, "", err
+			}
+			return runStartResult{RunID: params.RunID, EventID: params.EventID, Status: header.Status, DataBinding: durabledata.DataBinding{State: "none"}}, params.EventID, nil
 		},
 	}
 	completion, _, err := executeOperatorEventPublication(ctx, req, opts, now, cfg)
@@ -96,86 +90,6 @@ func executeRunStart(ctx context.Context, req Request, opts EventPublicationOpti
 		return nil, runStartIdempotencyError(err)
 	}
 	return recordedPublicCompletionResult(completion)
-}
-
-func executeDeploymentRunStart(ctx context.Context, req Request, opts EventPublicationOptions, now time.Time) (any, error) {
-	completion, replay, idempotency, err := lookupPublicPublication(ctx, req, opts, now)
-	if err != nil {
-		return nil, runStartIdempotencyError(err)
-	}
-	if replay {
-		return recordedPublicCompletionResult(completion)
-	}
-	data, present, err := runCreationDataEnvelopeParam(req.Method, req.Params)
-	if err != nil {
-		return nil, err
-	}
-	if !present || len(data.Imports)+len(data.Pins) == 0 {
-		return nil, NewInvalidParamsError(map[string]any{"field": "data", "reason": "feed-only run creation requires at least one import or pin"})
-	}
-	rawRunID, provided, err := optionalStringParam(req.Params, "run_id")
-	if err != nil {
-		return nil, err
-	}
-	parsedRunID, parseErr := uuid.Parse(rawRunID)
-	if !provided || parseErr != nil || parsedRunID == uuid.Nil || parsedRunID.String() != rawRunID {
-		return nil, NewInvalidParamsError(map[string]any{"field": "run_id", "reason": "feed-only creation requires one canonical non-zero UUID"})
-	}
-	identity, err := bundleIdentityInputParam(req.Params)
-	if err != nil {
-		return nil, err
-	}
-	params := eventPublicationParams{RunID: rawRunID, RunIDProvided: true, Data: data, DataPresent: true}
-	ctx, selectedOpts, params, err := resolveEventPublicationBundleScope(ctx, opts, params, identity, eventPublicationConfig{rootInputOnly: true})
-	if err != nil {
-		return nil, err
-	}
-	if _, err := admitRunStartDeploymentFeeds(selectedOpts.Source, data); err != nil {
-		return nil, err
-	}
-	owner, ok := selectedOpts.Acknowledged.(deploymentRunStartOwner)
-	if !ok || owner == nil {
-		return nil, fmt.Errorf("selected store does not support atomic deployment run creation")
-	}
-	selector, err := scenarioExecutionSelectorParam(req.Params)
-	if err != nil {
-		return nil, err
-	}
-	ctx, err = admitScenarioExecutionSelector(ctx, selectedOpts, rawRunID, params.NewRunCreated, selector)
-	if err != nil {
-		return nil, err
-	}
-	command := durabledata.RunCreationCommand{
-		RunID: rawRunID, Actor: req.ActorTokenID, BundleHash: params.SourceArtifactFact.BundleHash(), Data: data,
-	}
-	if _, _, command, err = command.RequestHash(); err != nil {
-		return nil, NewInvalidParamsError(map[string]any{"field": "data", "reason": err.Error()})
-	}
-	committed, err := owner.StartDeploymentRunAcknowledged(ctx, command, idempotency)
-	if err != nil {
-		var live *runtimerunlifecycle.LiveRunConflictError
-		if errors.As(err, &live) {
-			return nil, runControlError(command.RunID, err)
-		}
-		if errors.Is(err, worklifetime.ErrPublicCompletionCapacity) {
-			return nil, NewApplicationError(EventPublishFailedCode, true, map[string]any{"reason": err.Error()})
-		}
-		return nil, runStartIdempotencyError(dataApplicationError(err))
-	}
-	record := committed.Record
-	if err := durabledata.ValidateRunCreationReceiptForCommand(record, command); err != nil {
-		return nil, fmt.Errorf("deployment run creation returned contradictory receipt: %w", err)
-	}
-	if record.Summary.Outcome != "created" {
-		code := durabledata.CodeRunDataRejected
-		if record.Summary.Outcome == "head_conflict" {
-			code = durabledata.CodeRunHeadConflict
-		}
-		return nil, dataApplicationError(durabledata.NewDomainErrorWithDetails(code,
-			map[string]any{"run_id": record.Summary.RunID, "operation": record.Summary},
-			"run creation %s", record.Summary.Outcome))
-	}
-	return recordedPublicCompletionResult(committed.Completion)
 }
 
 func admitRunStartDeploymentFeeds(source semanticview.Source, data durabledata.RunCreationDataEnvelope) ([]runtimepinrouting.SourceEvent, error) {

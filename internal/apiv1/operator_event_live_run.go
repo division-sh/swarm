@@ -9,17 +9,27 @@ import (
 	"github.com/division-sh/swarm/internal/operatorread"
 	"github.com/division-sh/swarm/internal/runtime/core/flowidentity"
 	"github.com/division-sh/swarm/internal/runtime/runlifecycle"
+	"github.com/division-sh/swarm/internal/runtime/scenarioexecution"
 	"github.com/division-sh/swarm/internal/runtime/semanticview"
 )
 
 func selectEventPublicationLiveRun(ctx context.Context, opts EventPublicationOptions, params eventPublicationParams, requestedHash string) (eventPublicationParams, error) {
-	sources, err := eventPublicationLiveSources(ctx, opts, requestedHash)
-	if err != nil {
-		return params, err
-	}
-	scope, err := eventPublicationFlowScope(sources, params.EventName)
-	if err != nil {
-		return params, err
+	var scope runlifecycle.LiveRunScope
+	if scenarioexecution.HasPrivateRunScope(ctx) {
+		selected, ok := scenarioexecution.PrivateRunScopeFromContext(ctx)
+		if !ok {
+			return params, fmt.Errorf("private scenario publication requires its exact run scope")
+		}
+		scope.FlowPath = selected.FlowPath
+	} else {
+		sources, err := eventPublicationLiveSources(ctx, opts, requestedHash)
+		if err != nil {
+			return params, err
+		}
+		scope, err = eventPublicationFlowScope(sources, params.EventName)
+		if err != nil {
+			return params, err
+		}
 	}
 	if opts.LiveRuns == nil || opts.Runs == nil {
 		return params, fmt.Errorf("event publication requires the live-run and run-history readers")
@@ -37,6 +47,11 @@ func selectEventPublicationLiveRun(ctx context.Context, opts EventPublicationOpt
 		}
 		params.RunID, params.LiveRun = live.RunID, &live
 		return params, nil
+	}
+	if scenarioexecution.HasPrivateRunScope(ctx) {
+		return params, NewApplicationError(EventPublishRejectedCode, false, map[string]any{
+			"run_id": params.RunID, "reason": "scenario_run_not_live",
+		})
 	}
 	return params, eventPublicationNoLiveRun(ctx, opts.Runs, scope, params.EventName)
 }
