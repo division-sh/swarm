@@ -342,7 +342,7 @@ func (b *Backend) runTransactionOnceOutcome(ctx context.Context, opts *sql.TxOpt
 			err = &transactionTerminationError{errors.Join(err, finalized.err)}
 		}
 		var terminal *transactionTerminationError
-		if retryContext != nil && !commitAttempted && finalized.rolledBack && finalized.connectionJoined && finalized.err == nil && !errors.As(err, &terminal) && mutationBusyError(err) {
+		if retryContext != nil && err != nil && !commitAttempted && finalized.rolledBack && finalized.connectionJoined && finalized.err == nil && !errors.As(err, &terminal) && mutationBusyError(err) {
 			next, retryErr := generationauthority.ExternalEffectResultRetryContext(*retryContext, ctx, tx)
 			if retryErr != nil {
 				err = &transactionTerminationError{errors.Join(err, retryErr)}
