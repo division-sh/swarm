@@ -355,7 +355,6 @@ func writeConnectorPublicSource(t *testing.T, root string, endpoints map[string]
 	t.Helper()
 	writeReleaseFile(t, filepath.Join(root, "manifest.yaml"), "version: 1.0.0\nplatform_version: '*'\n")
 	writeReleaseFile(t, filepath.Join(root, "schema.yaml"), "stages: []\npins:\n  inputs: [slack.requested, notion.requested, microsoft_graph.requested, github.requested, inbound.github.issue_opened]\n")
-	writeReleaseFile(t, filepath.Join(root, "entities.yaml"), "connector_work: {}\n")
 	inputs := map[string]any{}
 	nodes := map[string]any{}
 	literal := func(value any) *yaml.Node {
