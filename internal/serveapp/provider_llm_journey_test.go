@@ -246,7 +246,7 @@ func providerJourneyToolResult(content, callID string) (json.RawMessage, error) 
 	return results[0].Payload, nil
 }
 
-func configureProviderJourneyLLM(t *testing.T, path, backend, baseURL string) {
+func configureProviderJourneyLLM(t *testing.T, path, backend, baseURL string, models ...string) {
 	t.Helper()
 	raw, err := os.ReadFile(path)
 	if err != nil {
@@ -259,7 +259,11 @@ func configureProviderJourneyLLM(t *testing.T, path, backend, baseURL string) {
 	llm := document["llm"].(map[string]any)
 	llm["backend"] = backend
 	llm[backend] = map[string]any{"base_url": baseURL}
-	llm["models"] = map[string]any{"regular": map[string]any{backend: "fixture-model"}}
+	model := "fixture-model"
+	if len(models) > 0 {
+		model = models[0]
+	}
+	llm["models"] = map[string]any{"regular": map[string]any{backend: model}}
 	raw, err = yaml.Marshal(document)
 	if err != nil {
 		t.Fatal(err)
