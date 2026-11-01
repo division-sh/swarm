@@ -699,9 +699,9 @@ func commitFanOutChunk(
 	if err := command.Validate(); err != nil {
 		return runtimepipeline.CommittedFanOutChunk{}, err
 	}
-	publications, err := fanOutChunkPublications(command)
-	if err != nil {
-		return runtimepipeline.CommittedFanOutChunk{}, err
+	publications, collectionErr := fanOutChunkPublications(command)
+	if collectionErr != nil {
+		return runtimepipeline.CommittedFanOutChunk{}, collectionErr
 	}
 	result := runtimepipeline.CommittedFanOutChunk{Publications: make([]runtimeengine.CommittedDurablePublication, 0, len(command.Outcomes))}
 	outcome := run(ctx, func(txctx context.Context, attempt *mutationprotocol.Attempt) (runtimepipeline.CommittedFanOutChunk, error) {
