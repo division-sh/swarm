@@ -13,6 +13,7 @@ import (
 
 	"github.com/division-sh/swarm/internal/config"
 	"github.com/division-sh/swarm/internal/events"
+	"github.com/division-sh/swarm/internal/runtime/agentframe"
 	runtimeactors "github.com/division-sh/swarm/internal/runtime/core/actors"
 	"github.com/division-sh/swarm/internal/runtime/core/managedcapabilities"
 	runtimeeffects "github.com/division-sh/swarm/internal/runtime/effects"
@@ -255,6 +256,11 @@ func (r *OpenAICompatibleRuntime) continueSession(ctx context.Context, s *Sessio
 	reqBody, err := r.buildRequest(s, message, resolvedModel.ConcreteModel)
 	if err != nil {
 		return nil, err
+	}
+	if managed != nil && managed.frame.Turn.Kind == agentframe.TurnToolContinuation {
+		if err := replayOpenAICompatibleToolRound(&reqBody, s, managed); err != nil {
+			return nil, err
+		}
 	}
 	deliveredTools := make([]ToolDefinition, 0, len(reqBody.Tools))
 	for _, tool := range reqBody.Tools {
@@ -690,10 +696,11 @@ type openAICompatibleRequest struct {
 }
 
 type openAICompatibleMessage struct {
-	Role       string                     `json:"role"`
-	Content    string                     `json:"content"`
-	ToolCallID string                     `json:"tool_call_id,omitempty"`
-	ToolCalls  []openAICompatibleToolCall `json:"tool_calls,omitempty"`
+	Role             string                     `json:"role"`
+	Content          string                     `json:"content"`
+	ToolCallID       string                     `json:"tool_call_id,omitempty"`
+	ToolCalls        []openAICompatibleToolCall `json:"tool_calls,omitempty"`
+	ReasoningContent json.RawMessage            `json:"reasoning_content,omitempty"`
 }
 
 type openAICompatibleTool struct {
@@ -721,18 +728,7 @@ type openAICompatibleToolCallFunction struct {
 type openAICompatibleResponse struct {
 	Model   string `json:"model"`
 	Choices []struct {
-		Message struct {
-			Role      string `json:"role"`
-			Content   string `json:"content"`
-			ToolCalls []struct {
-				ID       string `json:"id"`
-				Type     string `json:"type"`
-				Function struct {
-					Name      string `json:"name"`
-					Arguments string `json:"arguments"`
-				} `json:"function"`
-			} `json:"tool_calls"`
-		} `json:"message"`
+		Message openAICompatibleMessage `json:"message"`
 	} `json:"choices"`
 	Usage struct {
 		PromptTokens     *int `json:"prompt_tokens"`

@@ -226,7 +226,7 @@ func (c *Conversation) stepManaged(ctx context.Context, draft agentframe.TurnDra
 				return nil, runtimefailures.New(runtimefailures.ClassLifecycleConflict, "managed_causal_event_missing", "llm-conversation", "resume_tool_continuation", nil)
 			}
 			prior := resp.completionCleanupDiagnostics
-			resp, err = c.continueManagedOnce(ctx, resp.completionSuccessor.Draft(*c.causalEvent))
+			resp, err = c.continueManagedToolRound(ctx, resp.completionSuccessor.Draft(*c.causalEvent), resp)
 			if resp != nil {
 				resp.completionCleanupDiagnostics = errors.Join(prior, resp.completionCleanupDiagnostics)
 			}
@@ -339,6 +339,10 @@ func (c *Conversation) ensureSession(ctx context.Context) error {
 }
 
 func (c *Conversation) continueManagedOnce(ctx context.Context, draft agentframe.TurnDraft) (*Response, error) {
+	return c.continueManagedToolRound(ctx, draft, nil)
+}
+
+func (c *Conversation) continueManagedToolRound(ctx context.Context, draft agentframe.TurnDraft, previous *Response) (*Response, error) {
 	if c.TurnCount >= c.MaxTurns {
 		return nil, runtimefailures.New(runtimefailures.ClassBudgetExhausted, "agent_turn_budget_exhausted", "llm-conversation", "continue", map[string]any{
 			"budget_kind": "agent_turns",
@@ -375,6 +379,11 @@ func (c *Conversation) continueManagedOnce(ctx context.Context, draft agentframe
 	call, err := newManagedCall(frame)
 	if err != nil {
 		return nil, err
+	}
+	if draft.Kind == agentframe.TurnToolContinuation && previous != nil && previous.completionHandle != nil {
+		if round, ok := previous.completionHandle.CompletionContinuation(); ok {
+			call.toolRound = &round
+		}
 	}
 	runtime, ok := c.runtime.(ManagedSessionRuntime)
 	if !ok {
@@ -522,7 +531,7 @@ func (c *Conversation) resolveToolCalls(ctx context.Context, initial *Response) 
 			if c.causalEvent == nil {
 				return nil, runtimefailures.New(runtimefailures.ClassLifecycleConflict, "managed_causal_event_missing", "llm-conversation", "continue_tool_round", nil)
 			}
-			next, err = c.continueManagedOnce(ctx, successor.Draft(*c.causalEvent))
+			next, err = c.continueManagedToolRound(ctx, successor.Draft(*c.causalEvent), resp)
 		} else {
 			next, err = c.continueForkChatOnce(ctx, toolMsg)
 		}
