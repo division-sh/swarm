@@ -423,7 +423,7 @@ func explicitRootPublicationTarget(evt events.Event) events.RouteIdentity {
 }
 
 func (p RoutePlan) authorizesTerminalTargetDiagnostic(event events.Event) bool {
-	if p.TargetFailure != runtimepinrouting.FailureTargetUnreachableTerminated || p.AuthorityOwner != routePlanSourceConnectRoutePlan || p.AuthorityState != RoutePlanAuthorityCanonicalFailedClosed {
+	if p.TargetFailure != runtimepinrouting.FailureTargetUnreachableTerminated || p.AuthorityOwner != routeIntentProducerConnectRoutePlan || p.AuthorityState != RoutePlanAuthorityCanonicalFailedClosed {
 		return false
 	}
 	target := explicitRootPublicationTarget(event)
@@ -447,7 +447,7 @@ func blockedConnectTargetsMatch(ledger events.ConnectEvaluationLedger, targets [
 func composeIndependentPubsubBranch(connectPlan, localPlan RoutePlan) RoutePlan {
 	connectPlan = connectPlan.Normalized()
 	localPlan = localPlan.Normalized()
-	if connectPlan.AuthorityState != RoutePlanAuthorityCanonicalMatched || connectPlan.AuthorityOwner != routePlanSourceConnectRoutePlan {
+	if connectPlan.AuthorityState != RoutePlanAuthorityCanonicalMatched || connectPlan.AuthorityOwner != routeIntentProducerConnectRoutePlan {
 		return connectPlan
 	}
 	connectPlan.ordinarySource = localPlan.ordinarySource
