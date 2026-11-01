@@ -2771,11 +2771,16 @@ func requireServedMailboxSubscription(t *testing.T, endpoint, cardID string) {
 			Result       map[string]any `json:"result"`
 		} `json:"params"`
 	}
-	if err := conn.ReadJSON(&notification); err != nil {
-		t.Fatalf("read mailbox subscription notification: %v", err)
-	}
-	if notification.Method != "rpc.subscription" || notification.Params.Subscription != response.Result.SubscriptionID || notification.Params.Result["card_id"] != cardID {
-		t.Fatalf("mailbox subscription notification = %#v", notification)
+	for {
+		if err := conn.ReadJSON(&notification); err != nil {
+			t.Fatalf("read mailbox subscription notification for %s: %v", cardID, err)
+		}
+		if notification.Method != "rpc.subscription" || notification.Params.Subscription != response.Result.SubscriptionID {
+			t.Fatalf("mailbox subscription notification = %#v", notification)
+		}
+		if notification.Params.Result["card_id"] == cardID {
+			return
+		}
 	}
 }
 
