@@ -319,7 +319,11 @@ type providerEvidenceObservation struct {
 	input, output             int64
 	usageResponses            int
 	empty, tools, toolAck     bool
-	emptyAck                  bool
+	emptyPending              bool
+	emptyAssistantIndex       int
+	assistantMessages         int
+	emptyReplayChecked        bool
+	emptyReplayLost           bool
 	reasoning                 bool
 	readReasoning             bool
 	reasoningAck              bool
@@ -410,9 +414,13 @@ func (o *providerEvidenceObservation) observeRequest(body io.Reader) {
 	defer o.mu.Unlock()
 	linked := map[string]bool{}
 	reasoning := map[string][32]byte{}
+	assistantCount, emptyPreserved := 0, false
 	for _, message := range request.Messages {
 		if message.Role == "assistant" {
-			o.emptyAck = o.emptyAck || (o.empty && message.Content != nil && *message.Content == "")
+			if o.emptyPending && assistantCount == o.emptyAssistantIndex {
+				emptyPreserved = message.Content != nil && *message.Content == ""
+			}
+			assistantCount++
 			linked = map[string]bool{}
 			for _, call := range message.Calls {
 				linked[call.ID] = true
@@ -430,6 +438,12 @@ func (o *providerEvidenceObservation) observeRequest(body io.Reader) {
 			}
 		}
 	}
+	if o.emptyPending {
+		o.emptyReplayChecked = true
+		o.emptyReplayLost = o.emptyReplayLost || !emptyPreserved
+		o.emptyPending = false
+	}
+	o.assistantMessages = assistantCount
 }
 
 func (o *providerEvidenceObservation) observe(status int, body []byte) {
@@ -467,8 +481,9 @@ func (o *providerEvidenceObservation) observe(status int, body []byte) {
 			o.cost[field] += cost
 		}
 	}
-	for _, choice := range parsed.Choices {
-		o.empty = o.empty || string(choice.Message["content"]) == `""`
+	for index, choice := range parsed.Choices {
+		empty := string(choice.Message["content"]) == `""`
+		o.empty = o.empty || empty
 		var calls []struct {
 			ID       string `json:"id"`
 			Function struct {
@@ -478,6 +493,11 @@ func (o *providerEvidenceObservation) observe(status int, body []byte) {
 		var reasoning string
 		_ = json.Unmarshal(choice.Message["reasoning_content"], &reasoning)
 		_ = json.Unmarshal(choice.Message["tool_calls"], &calls)
+		// The adapter replays the first choice in the next assistant slot.
+		if index == 0 && empty {
+			o.emptyPending = true
+			o.emptyAssistantIndex = o.assistantMessages
+		}
 		o.reasoning = o.reasoning || reasoning != ""
 		for _, call := range calls {
 			o.tools = o.tools || (call.ID != "" && call.Function.Name != "")
@@ -492,13 +512,29 @@ func (o *providerEvidenceObservation) observe(status int, body []byte) {
 	}
 }
 
-func (o *providerEvidenceObservation) requireShape(t *testing.T, cell string) {
-	t.Helper()
+func (o *providerEvidenceObservation) emptyReplayOutcome() string {
 	o.mu.Lock()
 	defer o.mu.Unlock()
-	if cell == "empty_content" && !o.emptyAck {
-		t.Log("boundary=empty_content outcome=NOT_EXERCISED")
+	if o.emptyReplayLost {
+		return "FAIL"
 	}
+	if o.emptyReplayChecked {
+		return "EXERCISED"
+	}
+	return "NOT_EXERCISED"
+}
+
+func (o *providerEvidenceObservation) requireShape(t *testing.T, cell string) {
+	t.Helper()
+	if cell == "empty_content" {
+		outcome := o.emptyReplayOutcome()
+		if outcome == "FAIL" {
+			t.Fatal("observed empty-content response lost its message or content on the next replay")
+		}
+		t.Log("boundary=empty_content outcome=" + outcome)
+	}
+	o.mu.Lock()
+	defer o.mu.Unlock()
 	if cell == "tool_round" && !o.readReasoning {
 		t.Log("boundary=reasoning_content outcome=NOT_EXERCISED")
 	}
