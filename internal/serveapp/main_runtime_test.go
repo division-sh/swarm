@@ -624,7 +624,7 @@ func TestRunServeRuntimeJoinFailureReachesAPIAndCLI(t *testing.T) {
 		"payload":         map[string]any{"expected": []any{"a"}, "dispatch_id": "dispatch-1"},
 		"idempotency_key": "join-failure-run-" + uuid.NewString(),
 	})
-	if !initial.NewRunCreated || initial.RunID == "" || initial.EventID == "" {
+	if initial.NewRunCreated || initial.RunID == "" || initial.EventID == "" {
 		t.Fatalf("join failure initial run = %#v", initial)
 	}
 	waitServedEventPublishDeliveryStatusCountForRun(t, db, "postgres", initial.RunID, initial.EventID, "node", identitytest.RootNode(t, "starter").Key(), "delivered", 1)
@@ -1532,8 +1532,8 @@ func runServedRunForkBackendProof(t *testing.T, backend servedparity.Backend) {
 		"payload":         map[string]any{"item_id": "selected-store-fork"},
 		"idempotency_key": "issue-2361-" + rt.Backend + "-source",
 	})
-	if !started.NewRunCreated || strings.TrimSpace(started.RunID) == "" || strings.TrimSpace(started.EventID) == "" {
-		t.Fatalf("initial event.publish result = %#v, want a new run and event", started)
+	if started.NewRunCreated || strings.TrimSpace(started.RunID) == "" || strings.TrimSpace(started.EventID) == "" {
+		t.Fatalf("initial event.publish result = %#v, want the existing live run and a new event", started)
 	}
 	waitForServedEventPublishNodeDeliveryLifecycleForNode(t, rt.DB, rt.Backend, started.RunID, started.EventID, identitytest.RootNode(t, "item-handler").Key(), rt.Probe)
 	var published struct {
@@ -1835,7 +1835,7 @@ func runServedConversationForkLifecycleProof(t *testing.T, rt servedConversation
 		"payload":         map[string]any{},
 		"idempotency_key": "issue-1997-" + rt.Backend + "-source-run",
 	})
-	if !initial.NewRunCreated || initial.RunID == "" {
+	if initial.NewRunCreated || initial.RunID == "" {
 		t.Fatalf("%s conversation fork source run = %#v", rt.Backend, initial)
 	}
 	// Empty delivery queues do not join committed source-agent activation.
@@ -2571,8 +2571,8 @@ func runServedRuntimeIngressControlLifecycleProof(t *testing.T, rt servedControl
 		"payload":         map[string]any{},
 		"idempotency_key": keyPrefix + "-runtime-queued",
 	})
-	if !queued.NewRunCreated || queued.RunID == "" || queued.EventID == "" {
-		t.Fatalf("%s runtime-paused event.publish result = %#v, want new queued run", rt.Backend, queued)
+	if queued.NewRunCreated || queued.RunID == "" || queued.EventID == "" {
+		t.Fatalf("%s runtime-paused event.publish result = %#v, want event queued in the existing live run", rt.Backend, queued)
 	}
 	requireNoServedReceiptOutcomeDuring(t, rt.DB, rt.Backend, queued.EventID, "platform", "pipeline", "success", 250*time.Millisecond)
 
@@ -3239,8 +3239,8 @@ func runServedCreateCarryProjectionProof(t *testing.T, endpoint string, db *sql.
 		"payload":         map[string]any{"candidate": "candidate-1"},
 		"idempotency_key": "issue-2025-" + backend,
 	})
-	if !root.NewRunCreated || root.RunID == "" || root.EventID == "" {
-		t.Fatalf("%s create carry root result = %#v, want new run", backend, root)
+	if root.NewRunCreated || root.RunID == "" || root.EventID == "" {
+		t.Fatalf("%s create carry root result = %#v, want the existing live run", backend, root)
 	}
 	requestedEventID := waitServedEventPublishEventID(t, db, backend, root.RunID, "producer/validation.requested")
 
@@ -3535,8 +3535,8 @@ func createServedControlWaitingRun(t *testing.T, rt servedControlProofRuntime, s
 		"payload":         map[string]any{"item_id": suffix},
 		"idempotency_key": "issue-1864-" + rt.Backend + "-" + suffix,
 	})
-	if !result.NewRunCreated || result.RunID == "" || result.EventID == "" {
-		t.Fatalf("%s control seed event.publish result = %#v, want new run", rt.Backend, result)
+	if result.NewRunCreated || result.RunID == "" || result.EventID == "" {
+		t.Fatalf("%s control seed event.publish result = %#v, want the existing live run", rt.Backend, result)
 	}
 	waitForServedEventPublishNodeDeliveryLifecycleForNode(t, rt.DB, rt.Backend, result.RunID, result.EventID, identitytest.RootNode(t, "item-handler").Key(), rt.Probe)
 	entityID = requireServedEventPublishEntityState(t, rt.DB, rt.Backend, result.RunID, "", "waiting")
