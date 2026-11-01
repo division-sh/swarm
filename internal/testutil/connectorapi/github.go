@@ -19,7 +19,7 @@ import (
 	"testing"
 	"time"
 
-	"gopkg.in/yaml.v3"
+	"github.com/division-sh/swarm/internal/providerconnectors"
 )
 
 type GitHub struct {
@@ -28,16 +28,7 @@ type GitHub struct {
 	Calls       atomic.Int64
 	TokenCalls  atomic.Int64
 	SideEffects chan Call
-	Fixture     struct {
-		Input              map[string]any    `yaml:"input"`
-		ManagedCredentials map[string]string `yaml:"managed_credentials"`
-		Expected           struct {
-			Method  string            `yaml:"method"`
-			URL     string            `yaml:"url"`
-			Headers map[string]string `yaml:"headers"`
-			Body    map[string]any    `yaml:"body"`
-		} `yaml:"expected"`
-	}
+	Fixture     providerconnectors.CatalogConformanceFixture
 }
 
 // NewGitHub uses the catalog's reviewed issues/create request, not a second schema.
@@ -48,7 +39,8 @@ func NewGitHub(t testing.TB, fixturePath string) *GitHub {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if err := yaml.Unmarshal(raw, &fake.Fixture); err != nil {
+	fake.Fixture, err = providerconnectors.ParseCatalogConformanceFixture(raw)
+	if err != nil {
 		t.Fatal(err)
 	}
 	key, err := rsa.GenerateKey(rand.Reader, 2048)
