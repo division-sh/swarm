@@ -61,7 +61,7 @@ func validateBusinessTurnAnchor(anchor, current runtimeeffects.Attempt) error {
 	if err != nil {
 		return err
 	}
-	if anchorID != currentID || anchorOwner != currentOwner || anchor.Authority.Target.AgentID != current.Authority.Target.AgentID || anchor.Authority.Kind != current.Authority.Kind || anchor.Authority.ExecutionMode != current.Authority.ExecutionMode {
+	if anchorID != currentID || anchorOwner != currentOwner || anchor.Authority.Target.AgentID != current.Authority.Target.AgentID || anchor.Authority.ExecutionMode != current.Authority.ExecutionMode {
 		return fmt.Errorf("business turn history contradicts its current owner")
 	}
 	if anchor.Origin.Kind == runtimeeffects.CompletionOriginDirective {

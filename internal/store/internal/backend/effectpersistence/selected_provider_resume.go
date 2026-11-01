@@ -166,7 +166,7 @@ func providerResumeDecisionRecordedTx(ctx context.Context, tx *sql.Tx, sqlite bo
 		return false, err
 	}
 	sameActor, err := agentidentity.Equal(frame.Session.AgentIdentity, attempt.Authority.Target.AgentIdentity)
-	if err != nil || !sameActor || recovered.AuthorityKind != child.AuthorityKind || successor.Call.Memory != journal.Call.Memory ||
+	if err != nil || !sameActor || successor.Call.Memory != journal.Call.Memory ||
 		successor.Call.TurnCount != journal.Call.TurnCount || !bytes.Equal(successor.Call.Messages, journal.Call.Messages) ||
 		!bytes.Equal(successor.Call.ProviderContract, journal.Call.ProviderContract) {
 		return false, err
