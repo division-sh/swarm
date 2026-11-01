@@ -238,6 +238,23 @@ func (j ProviderCallJournal) ReadOnly(surface managedcapabilities.Surface) bool 
 	return true
 }
 
+func CompletionJournalBodyFingerprint(raw, fingerprint, operationID, attemptID string) (string, error) {
+	if !strings.HasPrefix(fingerprint, ProviderCallJournalVersion+":") {
+		return fingerprint, nil
+	}
+	var evidence struct {
+		Journal *ProviderCallJournal `json:"provider_call_journal"`
+	}
+	if json.Unmarshal([]byte(raw), &evidence) != nil || evidence.Journal == nil {
+		return "", fmt.Errorf("completion request journal is missing")
+	}
+	j := evidence.Journal
+	if err := j.ValidateRequestBinding(operationID, attemptID, fingerprint); err != nil {
+		return "", err
+	}
+	return Fingerprint(j.Call.Request.Body), nil
+}
+
 func newProviderCallJournal(authority Authority, req AuthorizeRequest) (ProviderCallJournal, error) {
 	operation, err := uuid.Parse(req.OperationID)
 	wantAttempt, attemptErr := AttemptID(req.OperationID, 1)

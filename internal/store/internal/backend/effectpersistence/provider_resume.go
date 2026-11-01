@@ -142,23 +142,6 @@ func providerResumeRetryBaseTx(ctx context.Context, tx *sql.Tx, attempt runtimee
 	return max(0, expiry.Time.Sub(now)), nil
 }
 
-func completionJournalBodyFingerprint(raw, fingerprint, operationID, attemptID string) (string, error) {
-	if !strings.HasPrefix(fingerprint, runtimeeffects.ProviderCallJournalVersion+":") {
-		return fingerprint, nil
-	}
-	var evidence struct {
-		Journal *runtimeeffects.ProviderCallJournal `json:"provider_call_journal"`
-	}
-	if json.Unmarshal([]byte(raw), &evidence) != nil || evidence.Journal == nil {
-		return "", fmt.Errorf("completion request journal is missing")
-	}
-	j := evidence.Journal
-	if err := j.ValidateRequestBinding(operationID, attemptID, fingerprint); err != nil {
-		return "", err
-	}
-	return runtimeeffects.Fingerprint(j.Call.Request.Body), nil
-}
-
 func (s *EffectPostgresOwner) LoadProviderCallResume(ctx context.Context, req runtimeeffects.CompletionContinuationRequest) (runtimeeffects.ProviderCallRecovery, bool, error) {
 	if err := s.requireCurrent(); err != nil {
 		return runtimeeffects.ProviderCallRecovery{}, false, err

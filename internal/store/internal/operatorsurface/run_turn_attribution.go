@@ -304,6 +304,10 @@ func (r completionAttributionRow) addEvidence(delivery privatedelivery.RunOperat
 	if r.state != string(effects.StateSettled) || r.phase == "" {
 		return closed, nil
 	}
+	r.fingerprint, err = effects.CompletionJournalBodyFingerprint(string(r.authorityEvidence), r.fingerprint, r.operationID, r.attemptID)
+	if err != nil {
+		return false, err
+	}
 	payload, err := effects.ReadCompletionContinuationPayload(json.RawMessage(r.evidence), r.fingerprint)
 	if err != nil {
 		return false, err
