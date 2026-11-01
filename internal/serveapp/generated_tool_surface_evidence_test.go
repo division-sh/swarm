@@ -366,8 +366,9 @@ func (r *generatedToolEvidenceRecorder) requireSurface(t *testing.T, cell string
 				t.Error("read description does not preserve its model-facing verb and author line")
 			}
 			if tool.Function.Name == "read_evidence" {
+				_, present := tool.Function.Parameters["properties"]
 				properties, ok := tool.Function.Parameters["properties"].(map[string]any)
-				if !ok || len(properties) != 0 || tool.Function.Parameters["additionalProperties"] != false {
+				if (present && (!ok || len(properties) != 0)) || tool.Function.Parameters["type"] != "object" || tool.Function.Parameters["additionalProperties"] != false {
 					t.Error("whole-entity read is not a closed argument-free tool")
 				}
 			}
