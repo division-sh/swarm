@@ -74,6 +74,10 @@ func TestSelectedDeploymentServingRequiresExactLiveGrantBothStores(t *testing.T)
 			}
 			servingCtx := startupownership.WithGenerationGrantEvidence(runtimeeffects.WithAuthority(ctx, authority), evidence)
 			servingCtx = correlation.WithRunID(servingCtx, fixture.forkRun)
+			servingCtx, err = startupownership.WithRuntimeMutationAuthority(servingCtx, grant)
+			if err != nil {
+				t.Fatal(err)
+			}
 			serving := store.(interface {
 				BindSelectedFanOutGrant(startupownership.GrantEvidence) (pipeline.FanOutObligationOwner, error)
 				ListSelectedDeploymentFeeds(context.Context, startupownership.GrantEvidence) ([]fanoutobligation.Intent, error)
