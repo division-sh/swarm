@@ -465,9 +465,47 @@ func proveRetainedAcknowledgment(t *testing.T, fault string) {
 				if err != nil {
 					t.Fatal(err)
 				}
-				for _, table := range []string{"entity_state", "event_delivery_attempts", "event_delivery_handler_rule_selections"} {
+				for _, table := range []string{"entity_state", "event_delivery_handler_rule_selections"} {
 					if !reflect.DeepEqual(childBefore[table], childAfter[table]) {
 						t.Fatalf("failed continuation startup changed %s: before=%+v after=%+v", table, childBefore[table], childAfter[table])
+					}
+				}
+				deliveries, err := storetest.DecodeSelectedForkSnapshotRows(childAfter["event_deliveries"])
+				if err != nil {
+					t.Fatal(err)
+				}
+				attempts, err := storetest.DecodeSelectedForkSnapshotRows(childAfter["event_delivery_attempts"])
+				if err != nil {
+					t.Fatal(err)
+				}
+				if len(childBefore["event_delivery_attempts"].Rows) != 0 || len(attempts) == 0 || len(attempts) != len(deliveries) {
+					t.Fatalf("startup retirement did not terminalize each unexecuted delivery once: deliveries=%d attempts=%d", len(deliveries), len(attempts))
+				}
+				remaining := make(map[string]bool, len(deliveries))
+				for _, row := range deliveries {
+					id, err := row["delivery_id"].Text()
+					if err != nil || id == "" || remaining[id] {
+						t.Fatalf("invalid exact child delivery identity: %q %v", id, err)
+					}
+					remaining[id] = true
+				}
+				for _, row := range attempts {
+					id, err := row["delivery_id"].Text()
+					if err != nil || !remaining[id] {
+						t.Fatalf("retirement attempt has foreign or duplicate delivery: %q %v", id, err)
+					}
+					delete(remaining, id)
+					for column, want := range map[string]string{"closure_kind": "settled", "outcome": "terminalized", "reason_code": "run_failed"} {
+						value, err := row[column].Text()
+						if err != nil || value != want {
+							t.Fatalf("startup cleanup %s=%q want=%q: %v", column, value, want, err)
+						}
+					}
+					open := string(row["open_marker"].Value)
+					if (open != "false" && open != "0") || string(row["claim_version"].Value) != "1" || string(row["completed_at"].Value) == "null" ||
+						string(row["current_delivery_id"].Value) != "null" || string(row["active_session_id"].Value) != "null" ||
+						string(row["side_effects"].Value) != "null" || string(row["duration_ms"].Value) != "0" {
+						t.Fatalf("startup retirement contained executing or dispatched work: %+v", row)
 					}
 				}
 			}

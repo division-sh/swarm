@@ -3259,7 +3259,11 @@ func (a *Adapter) loadByID(ctx context.Context, q interface {
 	}
 	query := a.selectRecord() + ` WHERE d.delivery_id = $1::uuid`
 	if lock && a.dialect == DialectPostgres {
-		query += ` FOR UPDATE OF d`
+		// A waiting joined lock can refresh d without refreshing its attempt.
+		var lockedID string
+		if err := q.QueryRowContext(ctx, `SELECT delivery_id::text FROM event_deliveries WHERE delivery_id=$1::uuid FOR UPDATE`, deliveryID).Scan(&lockedID); err != nil {
+			return deliveryRecord{}, err
+		}
 	}
 	if a.dialect == DialectSQLite {
 		query = a.selectRecord() + ` WHERE d.delivery_id = ?`
@@ -3272,7 +3276,10 @@ func (a *Adapter) loadByEventAndRoute(ctx context.Context, q interface {
 }, eventID string, identity events.DeliveryRouteIdentity, lock bool) (deliveryRecord, error) {
 	query := a.selectRecord() + ` WHERE d.event_id = $1::uuid AND d.route_identity = $2`
 	if lock && a.dialect == DialectPostgres {
-		query += ` FOR UPDATE OF d`
+		var lockedID string
+		if err := q.QueryRowContext(ctx, `SELECT delivery_id::text FROM event_deliveries WHERE event_id=$1::uuid AND route_identity=$2 FOR UPDATE`, strings.TrimSpace(eventID), events.EncodeDeliveryRouteIdentity(identity)).Scan(&lockedID); err != nil {
+			return deliveryRecord{}, err
+		}
 	}
 	if a.dialect == DialectSQLite {
 		query = a.selectRecord() + ` WHERE d.event_id = ? AND d.route_identity = ?`
