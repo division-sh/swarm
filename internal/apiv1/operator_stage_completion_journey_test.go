@@ -19,7 +19,6 @@ import (
 	"github.com/division-sh/swarm/internal/store/storetest"
 	"github.com/division-sh/swarm/internal/testutil"
 	"github.com/division-sh/swarm/internal/testutil/sourceartifactfixture"
-	"github.com/google/uuid"
 )
 
 type stageCompletionJourneyStore interface {
@@ -72,7 +71,7 @@ func TestExactStageCompletionRealWriterAndRehydratedSourceBothStores(t *testing.
 				SourceArtifactFact: fact,
 			}))
 			handler := eventPublishTestHandlerWithStores(t, selected, selected, selected, bus, source)
-			runID := uuid.NewString()
+			runID := seedEventPublishLiveRun(t, selected, bus, source)
 			started := rpcCall(t, handler, runStartBody(runID, fact.BundleHash(), "flow.started", `{"topic":"case-distinct"}`, "idem-case-start"))
 			if started.Error != nil {
 				t.Fatalf("run.start: %#v", started.Error)
