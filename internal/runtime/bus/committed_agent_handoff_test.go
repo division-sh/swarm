@@ -24,7 +24,7 @@ func preparedAgentTransition(t *testing.T) (*EventBus, PreparedPublish, Committe
 	prepared.Event = eventtest.RunCreatingRootIngress(prepared.Event.ID(), prepared.Event.Type(), "operator", "", prepared.Event.Payload(), 0,
 		prepared.Event.RunID(), "", events.EnvelopeForTargetRoute(events.EventEnvelope{}, route.Target.Route()), prepared.Event.CreatedAt())
 	prepared.plan.AddLiveRecipients(RoutePlanLiveRecipient{Recipient: route.Recipient, AgentIdentity: identity, PersistAsDelivery: true})
-	prepared.plan.AddDeliveryIntents(RoutePlanDeliveryIntent{Recipient: route.Recipient, AgentIdentity: identity, TargetOwnership: route.Target, TargetBlueprint: route.Target.Route(), Persist: true, Producer: routeIntentProducerAgentPolicy})
+	prepared.plan.AddDeliveryIntents(RoutePlanDeliveryIntent{Recipient: route.Recipient, AgentIdentity: identity, TargetOwnership: route.Target, TargetBlueprint: route.Target.Route(), Persist: true, Producer: routeIntentProducerOrdinary})
 	id, err := deliverylifecycle.DeliveryID(prepared.Event.ID(), route)
 	if err != nil {
 		t.Fatal(err)

@@ -53,7 +53,7 @@ func selectedRecipientContextFixture(t *testing.T) (context.Context, events.Even
 	}
 	recipients = append(recipients, actorEvidence)
 	plan.DeliveryIntents = append(plan.DeliveryIntents, RoutePlanDeliveryIntent{Recipient: actorEvidence.Recipient,
-		AgentIdentity: actor, Producer: routeIntentProducerAgentPolicy, Persist: true})
+		AgentIdentity: actor, Producer: routeIntentProducerOrdinary, Persist: true})
 	ctx, err := WithSelectedForkRecipientPlan(context.Background(), event, recipients)
 	if err != nil {
 		t.Fatal(err)

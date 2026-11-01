@@ -82,24 +82,21 @@ func TestRoutePlanDeliveryIntentsCarryTypedProducer(t *testing.T) {
 	}
 	intent := intents[0]
 	if intent.Producer != routeIntentProducerConnectRoutePlan {
-		t.Fatalf("intent producer = %q, want %q", routeIntentProducerCode(intent.Producer), routeIntentProducerCode(routeIntentProducerConnectRoutePlan))
+		t.Fatalf("intent producer = %d, want %d", intent.Producer, routeIntentProducerConnectRoutePlan)
 	}
 	for _, test := range []struct {
 		producer routeIntentProducer
 		value    uint8
-		code     string
 	}{
-		{routeIntentProducerAgentPolicy, 1, "agent_policy/matched_agent_subscription"},
-		{routeIntentProducerDirectPolicy, 2, "direct_policy/direct_publish"},
-		{routeIntentProducerInternalTargetCarrier, 3, "internal_target_route/internal_carrier"},
-		{routeIntentProducerInternalTargetRoute, 4, "internal_target_route/route_table_node"},
-		{routeIntentProducerConcreteNodeRoute, 5, "concrete_node_route/route_table_node"},
-		{routeIntentProducerRootNodeRoute, 7, "root_node_route/route_table_node"},
-		{routeIntentProducerRecipientMaterializer, 8, "recipient_plan_materializer/materialized_route"},
-		{routeIntentProducerConnectRoutePlan, 9, "connect_route_plan/lowered_connect_route_plan"},
+		{routeIntentProducerOrdinary, 1},
+		{routeIntentProducerInternalTargetCarrier, 3},
+		{routeIntentProducerInternalTargetRoute, 4},
+		{routeIntentProducerConcreteNodeRoute, 5},
+		{routeIntentProducerRootNodeRoute, 7},
+		{routeIntentProducerConnectRoutePlan, 9},
 	} {
-		if uint8(test.producer) != test.value || routeIntentProducerCode(test.producer) != test.code {
-			t.Fatalf("producer value/code = %d/%q, want %d/%q", test.producer, routeIntentProducerCode(test.producer), test.value, test.code)
+		if uint8(test.producer) != test.value {
+			t.Fatalf("producer value = %d, want %d", test.producer, test.value)
 		}
 		got := (RoutePlan{AuthorityOwner: test.producer}).Normalized()
 		if got.AuthorityOwner != test.producer {
@@ -109,9 +106,12 @@ func TestRoutePlanDeliveryIntentsCarryTypedProducer(t *testing.T) {
 			t.Fatalf("producer %d alone established canonical admission", test.producer)
 		}
 	}
-	for _, unknown := range []routeIntentProducer{0, 6, 255} {
-		if !unknown.Empty() || routeIntentProducerCode(unknown) != "" || (RoutePlan{AuthorityOwner: unknown}).Normalized().AuthorityOwner != routeIntentProducerUnknown {
+	for _, unknown := range []routeIntentProducer{0, 2, 6, 8, 255} {
+		if !unknown.Empty() || (RoutePlan{AuthorityOwner: unknown}).Normalized().AuthorityOwner != routeIntentProducerUnknown {
 			t.Fatalf("unknown or retired producer %d acquired authority", unknown)
+		}
+		if err := validateRecipientIntentProducer(RoutePlanDeliveryIntent{Producer: unknown}); err == nil {
+			t.Fatalf("unknown or retired producer %d passed intent admission", unknown)
 		}
 	}
 }

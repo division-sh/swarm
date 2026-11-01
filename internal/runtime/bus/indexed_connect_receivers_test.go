@@ -219,7 +219,7 @@ func TestMaterializedTargetProjectionKeepsRuntimeTargetlessOutsideConstructionSc
 	plan := newRoutePlan(event)
 	plan.DeliveryIntents = []RoutePlanDeliveryIntent{{
 		Recipient: events.MustAgentDeliveryRecipient(actor.AgentID()), AgentIdentity: actor,
-		Producer: routeIntentProducerAgentPolicy, Persist: true,
+		Producer: routeIntentProducerOrdinary, Persist: true,
 	}}
 	projection, err := bus.deliveryPlanner.materializedPublicationTargetOwners(ctx, event, &plan)
 	if err != nil {

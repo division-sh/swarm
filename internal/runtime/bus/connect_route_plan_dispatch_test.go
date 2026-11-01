@@ -4023,7 +4023,7 @@ func TestEventBusPlan_UnmatchedCanonicalRouteUsesLowerPrecedenceFallback(t *test
 	if err != nil {
 		t.Fatalf("planSubscribedRoutePlan: %v", err)
 	}
-	if routePlan.CanonicalRouteOwnerMatched() || routePlan.AuthorityOwner != routeIntentProducerAgentPolicy {
+	if routePlan.CanonicalRouteOwnerMatched() || routePlan.AuthorityOwner != routeIntentProducerOrdinary {
 		t.Fatalf("route plan authority = %t/%q, want lower-precedence agent policy", routePlan.CanonicalRouteOwnerMatched(), routePlan.AuthorityOwner)
 	}
 	if !containsString(routePlan.RecipientIDs(), "legacy-agent") {
@@ -4044,7 +4044,7 @@ func TestRoutePlanCanonicalFailClosedDropsExecutableRoutes(t *testing.T) {
 	routePlan.MarkCanonicalRouteFailedClosed(routeIntentProducerConnectRoutePlan, runtimepinrouting.FailureTargetNotSubscribed)
 	routePlan.AddLiveRecipients(RoutePlanLiveRecipient{Recipient: events.MustNodeDeliveryRecipient(testRootNode(t, "bogus-node")), PersistAsDelivery: true})
 	routePlan.AddDeliveryIntents(RoutePlanDeliveryIntent{Recipient: events.MustNodeDeliveryRecipient(testRootNode(t, "bogus-node")), TargetBlueprint: events.RouteIdentity{FlowID: "bogus", FlowInstance: "bogus", EntityID: "bogus"},
-		Producer: routeIntentProducerRecipientMaterializer,
+		Producer: routeIntentProducerOrdinary,
 		Persist:  true,
 	})
 
@@ -4173,7 +4173,7 @@ func TestPublicInputRoutePlanRejectsNoncanonicalOrEmptyDelivery(t *testing.T) {
 			name: "noncanonical route owner",
 			plan: func() RoutePlan {
 				plan := newRoutePlan(connectRoutePlanStaticProducerEvent(uuid.NewString(), "deploy.done", "", "", nil, 0, "", "", events.EventEnvelope{}, time.Now().UTC()))
-				plan.recordOrdinaryRouteProducer(routeIntentProducerAgentPolicy)
+				plan.recordOrdinaryRouteProducer()
 				return plan
 			},
 			want: "canonical connect route owner",
@@ -4216,12 +4216,17 @@ func TestRoutePlanNormalizationPreservesAuthorityState(t *testing.T) {
 		t.Fatalf("normalized route plan delivery routes = %#v, want static connect route", got.DeliveryRoutes())
 	}
 	ordinary := newRoutePlan(evt)
-	ordinary.recordOrdinaryRouteProducer(routeIntentProducerAgentPolicy)
-	ordinary.recordOrdinaryRouteProducer(routeIntentProducerRecipientMaterializer)
-	if ordinary.CanonicalRouteOwnerMatched() || ordinary.AuthorityOwner != routeIntentProducerAgentPolicy {
+	ordinary.recordOrdinaryRouteProducer()
+	ordinary.recordOrdinaryRouteProducer()
+	if ordinary.CanonicalRouteOwnerMatched() || ordinary.AuthorityOwner != routeIntentProducerOrdinary {
 		t.Fatalf("ordinary production lost first-owner recording or acquired admission: %+v", ordinary)
 	}
-	routePlan.recordOrdinaryRouteProducer(routeIntentProducerAgentPolicy)
+	retained := RoutePlan{AuthorityOwner: routeIntentProducerInternalTargetCarrier}
+	retained.recordOrdinaryRouteProducer()
+	if retained.AuthorityOwner != routeIntentProducerInternalTargetCarrier || retained.CanonicalRouteOwnerMatched() {
+		t.Fatalf("ordinary recording replaced an existing owner or acquired admission: %+v", retained)
+	}
+	routePlan.recordOrdinaryRouteProducer()
 	if !routePlan.CanonicalRouteOwnerMatched() || routePlan.AuthorityOwner != routeIntentProducerConnectRoutePlan {
 		t.Fatalf("ordinary production replaced canonical admission: %+v", routePlan)
 	}
