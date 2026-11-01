@@ -9,6 +9,8 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"reflect"
+	"regexp"
 	"strings"
 	"sync"
 	"testing"
@@ -23,12 +25,14 @@ import (
 	"github.com/division-sh/swarm/internal/testutil/llmapi"
 )
 
-var turnRenderingCells = []string{"payload", "string", "object", "results", "read", "long", "environment", "leak_reply", "leak_error", "leak_ok"}
+var turnRenderingCells = []string{"payload", "string", "object", "results", "read", "long", "environment", "emit_refusal", "leak_reply", "leak_error", "leak_ok"}
+
+var renderingEvidenceKeyPattern = regexp.MustCompile(`\bsk-[A-Za-z0-9_-]{16,}`)
 
 func TestProviderTurnRenderingJourneyBothStores(t *testing.T) {
 	for _, backend := range servedparity.RequiredBackends {
 		t.Run(string(backend), func(t *testing.T) {
-			for _, cell := range turnRenderingCells[:7] {
+			for _, cell := range turnRenderingCells[:8] {
 				t.Run(cell, func(t *testing.T) { runTurnRenderingJourney(t, backend, cell, false) })
 			}
 		})
@@ -110,6 +114,9 @@ func runTurnRenderingJourney(t *testing.T, backend servedparity.Backend, cell st
 	t.Cleanup(func() { http.DefaultTransport = observation.base })
 	t.Cleanup(func() {
 		observation.report(t)
+		if strings.HasPrefix(cell, "leak_") {
+			recorder.reportMarkup(t)
+		}
 		if live {
 			recorder.save(t, backend, cell)
 		}
@@ -143,6 +150,18 @@ func runTurnRenderingJourney(t *testing.T, backend servedparity.Backend, cell st
 		}
 		sessionID = current
 		requireProviderEvidenceOutput(t, h, runID, inputID, sequence)
+		var turns operatorread.OperatorConversationTurnListResult
+		requireServedJSONRPCResult(t, h.rpcEndpoint(), "conversation.list_turns", map[string]any{"session_id": sessionID}, &turns)
+		for _, turn := range turns.Turns {
+			if turn.TriggerEventID != inputID {
+				continue
+			}
+			var detail operatorread.OperatorPublicConversationTurnDetail
+			requireServedJSONRPCResult(t, h.rpcEndpoint(), "conversation.get_turn", map[string]any{"session_id": sessionID, "turn_id": turn.TurnID}, &detail)
+			if detail.Frame.FrameID == "" || detail.Frame.ContentHash == "" || detail.ProviderRendering == nil || detail.ProviderRendering.Status != "recorded" || !recorder.containsRendering(*detail.ProviderRendering) {
+				t.Fatal("public turn inspection lost frame identity or exact recorded provider rendering")
+			}
+		}
 	}
 	recorder.requireRendering(t, cell)
 }
@@ -219,6 +238,8 @@ func writeTurnRenderingSource(t *testing.T, cell string) string {
 	case "environment":
 		extra = "  native_tools: {file_io: true}\n"
 		intent = "Read the runtime environment facts without executing a tool. For each input use emit_evidence_completed with its current sequence. Produce no prose."
+	case "emit_refusal":
+		intent = "This is a synthetic refusal exercise. On synthetic turn 1 first call emit_evidence_completed with an empty argument object, observe its required-field refusal, then correct the call with sequence 1. On synthetic turn 2 emit sequence 2. Produce no prose."
 	case "leak_reply":
 		intent = "Write a brief friendly acknowledgment of the current synthetic input, then call emit_evidence_completed with the current sequence. Do not imitate tool markup."
 	case "leak_ok":
@@ -354,6 +375,9 @@ func turnRenderingReply(request llmapi.Request, cell string) (llmapi.Reply, erro
 	}
 	name := "emit_evidence_completed"
 	args := map[string]any{"sequence": sequence}
+	if cell == "emit_refusal" && sequence == 1 && results == 0 {
+		args = map[string]any{}
+	}
 	if (cell == "read" || cell == "long") && results == 0 {
 		name = "read_evidence"
 		args = map[string]any{}
@@ -397,7 +421,6 @@ func (r *turnRenderingRecorder) requireRendering(t *testing.T, cell string) {
 	r.mu.Lock()
 	defer r.mu.Unlock()
 	seenError, seenRead, seenLong, seenOK := false, false, false, false
-	leaked := false
 	for _, pair := range r.pairs {
 		var request struct {
 			User     json.RawMessage                        `json:"user"`
@@ -448,6 +471,53 @@ func (r *turnRenderingRecorder) requireRendering(t *testing.T, cell string) {
 		if (cell == "environment" && environments != 1) || (cell != "environment" && environments != 0) {
 			t.Fatalf("runtime environment count=%d cell=%s", environments, cell)
 		}
+	}
+	if !seenOK {
+		t.Error("accepted emit result not replayed as ok")
+	}
+	if (cell == "results" || cell == "emit_refusal") && !seenError {
+		t.Error("typed error result was not observed")
+	}
+	if cell == "long" && !seenLong {
+		t.Error("long output did not retain head, tail and marker")
+	}
+	if cell == "read" && !seenRead {
+		t.Error("declared-field-only read was not observed")
+	}
+}
+
+func (r *turnRenderingRecorder) containsRendering(rendering operatorread.OperatorProviderRendering) bool {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	var got []any
+	if json.Unmarshal(rendering.Input, &got) != nil || len(got) == 0 {
+		return false
+	}
+	var tools any
+	if json.Unmarshal(rendering.Tools, &tools) != nil {
+		return false
+	}
+	for _, pair := range r.pairs {
+		var request struct {
+			Messages []any `json:"messages"`
+			Tools    any   `json:"tools"`
+		}
+		if json.Unmarshal(pair.Request, &request) != nil || len(request.Messages) < len(got) {
+			continue
+		}
+		if reflect.DeepEqual(got, request.Messages[len(request.Messages)-len(got):]) && reflect.DeepEqual(tools, request.Tools) {
+			return true
+		}
+	}
+	return false
+}
+
+func (r *turnRenderingRecorder) reportMarkup(t *testing.T) {
+	t.Helper()
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	leaked := false
+	for _, pair := range r.pairs {
 		var response struct {
 			Choices []struct {
 				Message struct {
@@ -462,24 +532,10 @@ func (r *turnRenderingRecorder) requireRendering(t *testing.T, cell string) {
 			}
 		}
 	}
-	if !seenOK {
-		t.Error("accepted emit result not replayed as ok")
-	}
-	if cell == "results" && !seenError {
-		t.Error("typed error result was not observed")
-	}
-	if cell == "long" && !seenLong {
-		t.Error("long output did not retain head, tail and marker")
-	}
-	if cell == "read" && !seenRead {
-		t.Error("declared-field-only read was not observed")
-	}
-	if strings.HasPrefix(cell, "leak_") {
-		if leaked {
-			t.Log("synthetic_markup=REPRODUCED (runtime policy unchanged)")
-		} else {
-			t.Log("synthetic_markup=NOT_REPRODUCED; one two-input synthetic conversation, all attempts retained")
-		}
+	if leaked {
+		t.Logf("synthetic_markup=REPRODUCED requests=%d (runtime policy unchanged)", len(r.pairs))
+	} else {
+		t.Logf("synthetic_markup=NOT_REPRODUCED requests=%d; one two-input synthetic conversation, all attempts retained", len(r.pairs))
 	}
 }
 
@@ -511,11 +567,21 @@ func (r *turnRenderingRecorder) save(t *testing.T, backend servedparity.Backend,
 			return
 		}
 	}
+	if renderingEvidenceKeyPattern.Match(raw) {
+		t.Error("synthetic evidence contains a possible credential; not written")
+		return
+	}
 	if err := os.MkdirAll(dir, 0o700); err != nil {
 		t.Error("cannot retain synthetic evidence")
 		return
 	}
-	if err := os.WriteFile(filepath.Join(dir, string(backend)+"-"+cell+".json"), raw, 0o600); err != nil {
+	file, err := os.OpenFile(filepath.Join(dir, string(backend)+"-"+cell+".json"), os.O_WRONLY|os.O_CREATE|os.O_EXCL, 0o600)
+	if err != nil {
 		t.Error("cannot retain synthetic evidence")
+		return
+	}
+	_, writeErr := file.Write(raw)
+	if closeErr := file.Close(); writeErr != nil || closeErr != nil {
+		t.Error("cannot complete synthetic evidence")
 	}
 }

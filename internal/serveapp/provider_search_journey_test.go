@@ -160,16 +160,11 @@ func searchJourneyReply(request llmapi.Request) (llmapi.Reply, error) {
 	}
 	name, searchResult, searchCallID := "", "", ""
 	for _, message := range body.Messages {
-		var frame struct {
-			Kind  string `json:"kind"`
-			Event struct {
-				Payload struct {
-					Query string `json:"query"`
-				} `json:"payload"`
-			} `json:"event"`
+		var payload struct {
+			Query string `json:"query"`
 		}
-		if message.Role == "user" && json.Unmarshal([]byte(message.Content), &frame) == nil && frame.Kind == "initial" {
-			name, _, _ = strings.Cut(frame.Event.Payload.Query, " ")
+		if message.Role == "user" && json.Unmarshal([]byte(message.Content), &payload) == nil && payload.Query != "" {
+			name, _, _ = strings.Cut(payload.Query, " ")
 		}
 		if message.Role == "tool" && strings.HasPrefix(message.ToolCallID, "search-") {
 			searchResult, searchCallID = message.Content, message.ToolCallID
@@ -194,20 +189,13 @@ func searchJourneyReply(request llmapi.Request) (llmapi.Reply, error) {
 	if searchCallID != "search-"+name {
 		return llmapi.Reply{}, fmt.Errorf("%s tool continuation changed its call identity", name)
 	}
-	payload, err := providerJourneyToolResult(searchResult, searchCallID)
-	if err != nil {
-		return llmapi.Reply{}, err
-	}
 	var result struct {
-		OK     bool `json:"ok"`
-		Result struct {
-			Results []map[string]any `json:"results"`
-		} `json:"result"`
+		Results []map[string]any `json:"results"`
 	}
-	if err := json.Unmarshal(payload, &result); err != nil || !result.OK || len(result.Result.Results) != 1 || !reflect.DeepEqual(result.Result.Results[0], providerSearchResult(name)) {
+	if err := json.Unmarshal([]byte(searchResult), &result); err != nil || len(result.Results) != 1 || !reflect.DeepEqual(result.Results[0], providerSearchResult(name)) {
 		return llmapi.Reply{}, fmt.Errorf("%s tool continuation lost exact normalized search result", name)
 	}
-	args, _ := json.Marshal(result.Result.Results[0])
+	args, _ := json.Marshal(result.Results[0])
 	reply.Tools = []llmapi.ToolCall{{ID: "output-" + name, Name: "emit_search_" + name + "_completed", Arguments: args}}
 	return reply, nil
 }

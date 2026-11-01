@@ -126,7 +126,7 @@ func TestProviderTurnRendering(t *testing.T) {
 			{"bash", "actor_config", true, false}, {"web_search", "native_tool", true, false}, {"bash", "native_tool", true, true},
 		} {
 			c := &Conversation{Session: &Session{}}
-			surface := managedcapabilities.Surface{Tools: []managedcapabilities.Tool{{EffectiveCallable: test.callable, EffectiveVisible: true, Capability: toolcapabilities.Capability{Name: test.name, AuthorizationClass: test.class}}}}
+			surface := managedcapabilities.Surface{Tools: []managedcapabilities.Tool{{Capability: toolcapabilities.Capability{Name: test.name, AuthorizationClass: test.class, Visible: true, Callable: test.callable}}}}
 			if err := prepareEnvironmentFrame(c.Session, surface); err != nil {
 				t.Fatal(err)
 			}
