@@ -1132,6 +1132,7 @@ func TestOperatorEventPublishExplicitRunTargetRequiresExistingNonterminalRun(t *
 	}
 	handler := eventPublishTestHandler(t, pg, bus, source)
 
+	seedEventPublishLiveRun(t, pg, bus, source)
 	initial := rpcCall(t, handler, runStartBody("", runStartTestBundleHashForSource(source), "scan.requested", `{"topic":"first"}`, "idem-new-run"))
 	if initial.Error != nil {
 		t.Fatalf("initial event.publish error = %#v", initial.Error)
@@ -1214,6 +1215,7 @@ func TestOperatorEventPublishExplicitRunFollowUpRequiresRecipientBeforePersisten
 	ctx := context.Background()
 	handler := eventPublishTestHandler(t, pg, bus, source)
 
+	seedEventPublishLiveRun(t, pg, bus, source)
 	initial := rpcCall(t, handler, runStartBody("", runStartTestBundleHashForSource(source), "scan.requested", `{"topic":"first"}`, "idem-followup-initial"))
 	if initial.Error != nil {
 		t.Fatalf("initial event.publish error = %#v", initial.Error)
@@ -1292,6 +1294,7 @@ func TestOperatorEventPublishPrivateTargetCannotAuthorizePublication(t *testing.
 	}
 	handler := eventPublishTestHandler(t, pg, bus, source)
 
+	seedEventPublishLiveRun(t, pg, bus, source)
 	initial := rpcCall(t, handler, runStartBody("", bundleHash, "bootstrap.requested", `{"topic":"first"}`, "idem-target-route-initial"))
 	if initial.Error != nil {
 		t.Fatalf("initial event.publish error = %#v", initial.Error)
@@ -1349,6 +1352,7 @@ func TestOperatorEventPublishRootEventTemplateInputNameCollisionPayloadEntityIDD
 	}
 	handler := eventPublishTestHandler(t, pg, bus, source)
 
+	seedEventPublishLiveRun(t, pg, bus, source)
 	initial := rpcCall(t, handler, runStartBody("", bundleHash, "review.requested", `{"topic":"first"}`, "idem-root-template-collision-initial"))
 	if initial.Error != nil {
 		t.Fatalf("initial event.publish error = %#v", initial.Error)
@@ -1457,6 +1461,7 @@ func TestOperatorEventPublishPrivateTemplateDeniedBeforePublication(t *testing.T
 	}
 	publisher := &publicInputPublishProbe{EventBus: bus}
 	rootHandler := eventPublishTestHandlerWithStores(t, sqliteStore, sqliteStore, sqliteStore, bus, source)
+	seedEventPublishLiveRun(t, sqliteStore, bus, source)
 	initial := rpcCall(t, rootHandler, runStartBody("", runStartTestBundleHashForSource(source), "bootstrap.requested", `{}`, uuid.NewString()))
 	if initial.Error != nil {
 		t.Fatalf("create admitted root run: %+v", initial.Error)
@@ -1560,6 +1565,7 @@ func TestOperatorEventPublishExistingRunTargetRouteRejectsInvalidTargetBeforePer
 	}
 	handler := eventPublishTestHandler(t, pg, bus, source)
 
+	seedEventPublishLiveRun(t, pg, bus, source)
 	initial := rpcCall(t, handler, runStartBody("", bundleHash, "bootstrap.requested", `{"topic":"first"}`, "idem-target-route-invalid-initial"))
 	if initial.Error != nil {
 		t.Fatalf("initial event.publish error = %#v", initial.Error)
@@ -1676,6 +1682,7 @@ func TestOperatorEventPublishExplicitRunIsUnavailableWithoutRecipientPlanChecker
 	}
 	handler := eventPublishTestHandler(t, pg, bus, source)
 
+	seedEventPublishLiveRun(t, pg, bus, source)
 	initial := rpcCall(t, handler, runStartBody("", runStartTestBundleHashForSource(source), "scan.requested", `{"topic":"first"}`, "idem-followup-missing-plan-initial"))
 	if initial.Error != nil {
 		t.Fatalf("initial event.publish error = %#v", initial.Error)
@@ -1717,6 +1724,7 @@ func TestOperatorEventPublishSQLiteExplicitRunFollowUpUsesSelectedRun(t *testing
 	}
 	handler := eventPublishTestHandlerWithStores(t, sqliteStore, sqliteStore, sqliteStore, bus, source)
 
+	seedEventPublishLiveRun(t, sqliteStore, bus, source)
 	initial := rpcCall(t, handler, runStartBody("", runStartTestBundleHashForSource(source), "scan.requested", `{"topic":"first"}`, "idem-sqlite-followup-initial"))
 	if initial.Error != nil {
 		t.Fatalf("sqlite initial event.publish error = %#v", initial.Error)
@@ -1977,6 +1985,7 @@ func TestOperatorEventPublishOperatorReferenceValidatesSameRunProvenance(t *test
 	ctx := context.Background()
 	handler := eventPublishTestHandler(t, pg, bus, source)
 
+	seedEventPublishLiveRun(t, pg, bus, source)
 	parent := rpcCall(t, handler, runStartBody("", runStartTestBundleHashForSource(source), "scan.requested", `{"topic":"medicine"}`, "idem-source-parent"))
 	if parent.Error != nil {
 		t.Fatalf("parent event.publish error = %#v", parent.Error)
@@ -2025,6 +2034,7 @@ func TestOperatorEventPublishOperatorReferenceRejectsInvalidReferenceBeforePersi
 	}
 	handler := eventPublishTestHandler(t, pg, bus, source)
 
+	seedEventPublishLiveRun(t, pg, bus, source)
 	first := rpcCall(t, handler, runStartBody("", runStartTestBundleHashForSource(source), "scan.requested", `{"topic":"first"}`, "idem-source-first"))
 	if first.Error != nil {
 		t.Fatalf("first event.publish error = %#v", first.Error)
@@ -2033,6 +2043,7 @@ func TestOperatorEventPublishOperatorReferenceRejectsInvalidReferenceBeforePersi
 	firstEventID := stringValue(t, asMap(t, first.Result)["event_id"], "event_id")
 
 	pauseAPITestLiveRun(t, bus, pg, firstRunID)
+	seedEventPublishLiveRun(t, pg, bus, source)
 	second := rpcCall(t, handler, runStartBody("", runStartTestBundleHashForSource(source), "scan.requested", `{"topic":"second"}`, "idem-source-second"))
 	if second.Error != nil {
 		t.Fatalf("second event.publish error = %#v", second.Error)
@@ -2323,12 +2334,16 @@ func eventPublishTestHandler(t *testing.T, pg *store.PostgresStore, bus *runtime
 
 func seedEventPublishLiveRun(t *testing.T, selected any, bus *runtimebus.EventBus, source semanticview.Source) string {
 	t.Helper()
+	return seedEventPublishLiveRunID(t, selected, bus, source, uuid.NewString())
+}
+
+func seedEventPublishLiveRunID(t *testing.T, selected any, bus *runtimebus.EventBus, source semanticview.Source, runID string) string {
+	t.Helper()
 	owner, ok := selected.(storetest.RunFixtureStore)
 	if !ok {
 		t.Fatalf("publication fixture lacks native run lifecycle: %T", selected)
 	}
 	ctx := admittedAPITestBusContext(t, context.Background(), bus)
-	runID := uuid.NewString()
 	storetest.RequireRun(t, ctx, owner, storetest.RunFixture{
 		RunID: runID, BundleHash: runStartTestBundleHashForSource(source), Origin: storerunlifecycle.DeploymentRunOrigin(),
 		State: storerunlifecycle.StateLive, LiveScope: storerunlifecycle.LiveRunScope{FlowPath: runtimeflowidentity.ScopeKey(source, ".")},

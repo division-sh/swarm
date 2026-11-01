@@ -38,6 +38,7 @@ import (
 	runtimeruncontrol "github.com/division-sh/swarm/internal/runtime/runcontrol"
 	"github.com/division-sh/swarm/internal/runtime/runfork"
 	"github.com/division-sh/swarm/internal/runtime/runforkexecution"
+	"github.com/division-sh/swarm/internal/runtime/runlifecycle"
 	"github.com/division-sh/swarm/internal/runtime/semanticvalue"
 	"github.com/division-sh/swarm/internal/runtime/semanticview"
 	"github.com/division-sh/swarm/internal/runtime/testfixtures/decisioncardtest"
@@ -314,7 +315,7 @@ type mutatingRuntimeProbeState struct {
 	method              string
 	now                 time.Time
 	idempotency         *mutatingProbeIdempotencyStore
-	runs                *fakeRunReadStore
+	runs                *mutatingProbeRunReadStore
 	observability       *fakeObservabilityReadStore
 	events              *mutatingProbeEventPublisher
 	runFork             *mutatingProbeRunForkExecutor
@@ -342,14 +343,14 @@ func newMutatingRuntimeProbeState(t *testing.T, methodName string) *mutatingRunt
 		method:      methodName,
 		now:         now,
 		idempotency: newMutatingProbeIdempotencyStore(),
-		runs: &fakeRunReadStore{
+		runs: &mutatingProbeRunReadStore{fakeRunReadStore: &fakeRunReadStore{
 			headers: map[string]operatorread.RunHeader{
 				runID: {
 					RunID: runID, Status: "running",
 					Origin: mustEventRunOrigin(t, "evt-1", "scan.requested"), StartedAt: now,
 				},
 			},
-		},
+		}},
 		observability: &fakeObservabilityReadStore{events: map[string]operatorread.OperatorEventFull{}},
 		runControl:    &mutatingProbeRunControl{errs: map[string]error{}},
 		agentControl:  &mutatingProbeAgentControl{errs: map[string]error{}, results: map[string]mutatingProbeDirectiveResult{}},
@@ -359,6 +360,12 @@ func newMutatingRuntimeProbeState(t *testing.T, methodName string) *mutatingRunt
 		nuke: newRecordingRuntimeNukeOwners(),
 	}
 	state.observability.events["evt-1"] = mutatingProbeOriginalEvent(t, "evt-1", []string{"agent-a"}, runtimedelivery.StatusDelivered)
+	if methodName == "run.start" {
+		header := state.runs.headers[runID]
+		header.Status, header.FlowPath, header.BundleHash = "live", ".", runStartTestBundleHash
+		header.Origin = runlifecycle.DeploymentRunOrigin()
+		state.runs.headers[runID] = header
+	}
 	state.testSetup = &mutatingProbeTestSetupStore{state: state}
 	state.events = &mutatingProbeEventPublisher{
 		mutatingProbeTestSetupStore: state.testSetup,
@@ -536,6 +543,24 @@ func (s *mutatingRuntimeProbeState) options(t *testing.T) testOperatorCapabiliti
 
 func (s *mutatingRuntimeProbeState) recordEffect() {
 	s.effects++
+}
+
+type mutatingProbeRunReadStore struct {
+	*fakeRunReadStore
+}
+
+func (s *mutatingProbeRunReadStore) LoadRunLiveScope(ctx context.Context, runID string) (runlifecycle.LiveRunScope, error) {
+	header, err := s.LoadRunHeader(ctx, runID)
+	return runlifecycle.LiveRunScope{FlowPath: header.FlowPath}, err
+}
+
+func (s *mutatingProbeRunReadStore) LoadLiveRun(_ context.Context, scope runlifecycle.LiveRunScope) (runlifecycle.LiveRun, bool, error) {
+	for _, header := range s.headers {
+		if header.Status == "live" && header.FlowPath == scope.FlowPath {
+			return runlifecycle.LiveRun{RunID: header.RunID, Scope: scope, Source: mustAPITestPersistedSourceArtifactFact(header.BundleHash)}, true, nil
+		}
+	}
+	return runlifecycle.LiveRun{}, false, nil
 }
 
 type mutatingProbeIdempotencyStore struct {
