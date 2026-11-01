@@ -13,6 +13,7 @@ import (
 
 	"github.com/division-sh/swarm/internal/cliapp"
 	"github.com/division-sh/swarm/internal/config"
+	"github.com/division-sh/swarm/internal/operatorread"
 	"github.com/division-sh/swarm/internal/runtime/core/identitytest"
 	runtimecredentials "github.com/division-sh/swarm/internal/runtime/credentials"
 	"github.com/division-sh/swarm/internal/runtime/lifecycleprobe/lifecycletest"
@@ -87,6 +88,23 @@ func TestProviderMemorySurvivesAdmittedBundleUpgradeBothStores(t *testing.T) {
 				}()
 				process.waitForReadyLine()
 				endpoint := "http://" + serveRuntimeAPIListenerFromOutput(t, process.outputString()) + "/v1/rpc"
+				defer func() {
+					if t.Failed() && process != nil {
+						var conversations operatorread.OperatorConversationListResult
+						requireServedJSONRPCResult(t, endpoint, "conversation.list", map[string]any{}, &conversations)
+						readback, _ := json.Marshal(conversations)
+						t.Logf("upgrade conversation readback: %s", readback)
+						for _, conversation := range conversations.Conversations {
+							var turns operatorread.OperatorConversationTurnListResult
+							requireServedJSONRPCResult(t, endpoint, "conversation.list_turns", map[string]any{"session_id": conversation.SessionID}, &turns)
+							readback, _ := json.Marshal(turns)
+							t.Logf("upgrade turn readback: %s", readback)
+						}
+						if provider != nil {
+							t.Logf("upgrade provider requests: %d", len(provider.Requests()))
+						}
+					}
+				}()
 				seed := requireServedEventPublishRPCResult(t, endpoint, map[string]any{
 					"event_name": "item.received", "bundle_hash": servedEventPublishFixtureBundleHash(t, root),
 					"payload": map[string]any{"item_id": "memory-upgrade"}, "idempotency_key": "memory-seed",
