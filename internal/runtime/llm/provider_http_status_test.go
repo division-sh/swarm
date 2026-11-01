@@ -51,11 +51,33 @@ func TestManagedProviderHTTPRejections(t *testing.T) {
 				if err := harness.RequireState(adapter, runtimeeffects.StateTerminalFailure); err != nil {
 					t.Fatal(err)
 				}
+				settlements := harness.CompletionSettlementsForAdapter(adapter)
+				if len(settlements) != 1 || settlements[0].Failure == nil || settlements[0].Failure.Detail.Attributes["response_body"] != test.body {
+					t.Fatalf("provider body was lost at settlement: %+v", settlements)
+				}
 				if len(server.Requests()) != 1 {
 					t.Fatalf("provider refusal was redispatched: %d requests", len(server.Requests()))
 				}
 			})
 		}
+		t.Run(adapter+"/server_error_stays_uncertain", func(t *testing.T) {
+			protocol, path := llmapi.OpenAICompatible, "/v1/chat/completions"
+			if adapter == "anthropic_api" {
+				protocol, path = llmapi.Anthropic, "/v1/messages"
+			} else if adapter == "openai_responses" {
+				protocol, path = llmapi.OpenAIResponses, "/v1/responses"
+			}
+			server := llmapi.New(t, protocol, path, "test", func(llmapi.Request) (llmapi.Reply, error) {
+				return llmapi.Reply{StatusCode: 500, ErrorBody: `{"error":{"message":"generation outcome unknown"}}`}, nil
+			})
+			harness := effecttest.New()
+			ctx := llmTestWorkContext(t, managedEffectHarnessContext(t, harness, adapter+"-server-error"))
+			dispatch, err := sendProviderStatusRequest(t, ctx, adapter, server)
+			failure := runtimefailures.Normalize(err, "test", "server_error")
+			if err == nil || failure.Class != runtimefailures.ClassOutcomeUncertain || dispatch.state != runtimeeffects.StateOutcomeUncertain || len(server.Requests()) != 1 {
+				t.Fatalf("server error changed its existing uncertainty/no-redispatch boundary: failure=%+v err=%v", failure, err)
+			}
+		})
 	}
 }
 

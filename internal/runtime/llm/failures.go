@@ -2,6 +2,7 @@ package llm
 
 import (
 	"errors"
+	"fmt"
 	"net/http"
 	"strings"
 
@@ -9,22 +10,22 @@ import (
 	"github.com/division-sh/swarm/internal/runtime/sessions"
 )
 
-func providerStatusFailure(provider string, status int) error {
-	attributes := map[string]any{"provider": strings.TrimSpace(provider), "status": status}
+func providerStatusFailure(provider string, status int, body []byte) error {
+	attributes := map[string]any{"provider": strings.TrimSpace(provider), "status": status, "response_body": string(body)}
+	class, code := runtimefailures.ClassConnectorFailure, "provider_http_status"
 	switch status {
 	case http.StatusUnauthorized:
 		attributes["auth_kind"] = "provider_credential"
-		return runtimefailures.New(runtimefailures.ClassAuthenticationNeeded, "provider_unauthorized", "llm-provider", "http_status", attributes)
+		class, code = runtimefailures.ClassAuthenticationNeeded, "provider_unauthorized"
 	case http.StatusForbidden:
 		attributes["action"] = "llm_provider_request"
-		return runtimefailures.New(runtimefailures.ClassAuthorizationDenied, "provider_forbidden", "llm-provider", "http_status", attributes)
+		class, code = runtimefailures.ClassAuthorizationDenied, "provider_forbidden"
 	case http.StatusPaymentRequired:
-		return runtimefailures.New(runtimefailures.ClassConnectorFailure, "provider_credit_exhausted", "llm-provider", "http_status", attributes)
+		code = "provider_credit_exhausted"
 	case http.StatusRequestTimeout:
-		return runtimefailures.New(runtimefailures.ClassTimeout, "provider_request_timeout", "llm-provider", "http_status", attributes)
-	default:
-		return runtimefailures.New(runtimefailures.ClassConnectorFailure, "provider_http_status", "llm-provider", "http_status", attributes)
+		class, code = runtimefailures.ClassTimeout, "provider_request_timeout"
 	}
+	return fmt.Errorf("%w: %s", runtimefailures.New(class, code, "llm-provider", "http_status", attributes), body)
 }
 
 func claudeCLIProcessFailure(stderrText, stdoutText, detailCode, operation string, cause error) error {
