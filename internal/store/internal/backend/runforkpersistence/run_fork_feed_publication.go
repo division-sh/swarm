@@ -53,14 +53,15 @@ func projectRunForkDeploymentFeeds(ctx context.Context, tx *sql.Tx, data *stored
 	}
 	for _, obligation := range plan.FanOutObligations {
 		intent := obligation.Intent
-		if intent.Request.Deployment != nil {
-			if err := intent.Validate(); err != nil {
-				return nil, err
-			}
-			sources[intent.Request.Key.DeploymentFeedID] = runtimedata.DeploymentFeed{
-				RunID: plan.SourceRunID, BundleHash: intent.Request.Deployment.BundleHash, Declaration: intent.Source.Declaration,
-				VersionID: intent.Source.VersionID, SchemaDigest: intent.Request.Deployment.SchemaDigest, RowCount: uint64(intent.Request.Cardinality),
-			}
+		if intent.Request.Deployment == nil {
+			continue
+		}
+		if err := intent.Validate(); err != nil {
+			return nil, err
+		}
+		sources[intent.Request.Key.DeploymentFeedID] = runtimedata.DeploymentFeed{
+			RunID: plan.SourceRunID, BundleHash: intent.Request.Deployment.BundleHash, Declaration: intent.Source.Declaration,
+			VersionID: intent.Source.VersionID, SchemaDigest: intent.Request.Deployment.SchemaDigest, RowCount: uint64(intent.Request.Cardinality),
 		}
 	}
 	publications, err := storedurabledata.MaterializeForkFeedPublicationsTx(data, ctx, tx, plan.SourceRunID, forkRunID, targetBundle, sources, overrides, replay)
@@ -75,20 +76,21 @@ func projectRunForkDeploymentFeeds(ctx context.Context, tx *sql.Tx, data *stored
 		if source.Intent.Request.Deployment == nil {
 			continue
 		}
-		if feed, present := publications[source.Intent.Request.Key.DeploymentFeedID]; present {
-			target, err := storedurabledata.RequireFeedSourceTx(ctx, data, tx, forkRunID, targetBundle, feed.PublicationID(), feed.Declaration)
-			if err != nil {
-				return nil, err
-			}
-			projected = append(projected, runForkDeploymentProjection{feed, target, source})
-			publicationDeclarations[feed.Declaration] = true
-		} else {
+		feed, present := publications[source.Intent.Request.Key.DeploymentFeedID]
+		if !present {
 			ref := source.Intent.Source.Declaration
 			if legacy[ref] != nil {
 				return nil, fmt.Errorf("fork source repeats an unqualified deployment feed")
 			}
 			legacy[ref] = source
+			continue
 		}
+		target, err := storedurabledata.RequireFeedSourceTx(ctx, data, tx, forkRunID, targetBundle, feed.PublicationID(), feed.Declaration)
+		if err != nil {
+			return nil, err
+		}
+		projected = append(projected, runForkDeploymentProjection{feed, target, source})
+		publicationDeclarations[feed.Declaration] = true
 	}
 	for _, pin := range pins {
 		if pin.RunID != forkRunID {

@@ -392,56 +392,63 @@ func (o *Owner) loadFeedPublicationTx(ctx context.Context, tx *sql.Tx, command r
 		}
 	}
 	for _, item := range stored.Data.Imports {
-		var contextJSON []byte
-		var sourceID, digest, selection, feedID string
-		var version sql.NullString
-		err := tx.QueryRowContext(ctx, o.query(`SELECT source_invocation_id,evaluation_json,schema_digest,version_id,selection,deployment_feed_id
-			FROM resource_feed_publication_members WHERE publication_id=%s AND flow_path=%s AND event_name=%s`, 3),
-			publicationID, item.Declaration.FlowPath, item.Declaration.EventName).Scan(&sourceID, &contextJSON, &digest, &version, &selection, &feedID)
-		feed := runtimedata.DeploymentFeed{RunID: runID, Declaration: item.Declaration, Publication: publicationID}
-		if err != nil || sourceID != item.SourceInvocationID || selection != "fused_import" || feedID != feed.PublicationID() ||
-			version.Valid != (record.Summary.Outcome == "created") {
-			return record, false, errors.Join(err, fmt.Errorf("publication source custody contradicts its request"))
-		}
-		var evaluation runtimedata.SourceEvaluationContext
-		if err := json.Unmarshal(contextJSON, &evaluation); err != nil {
+		if err := o.validateFeedPublicationSourceTx(ctx, tx, stored, item, record); err != nil {
 			return record, false, err
-		}
-		if evaluation.Declaration.Ref != item.Declaration || string(evaluation.Declaration.SchemaDigest) != digest {
-			return record, false, fmt.Errorf("publication source schema contradicts its admitted evaluation")
-		}
-		child := fusedSourceCommand(stored, item)
-		if record.Summary.Outcome == "created" {
-			receipt, found, err := o.readStoredSourceReceipt(ctx, tx, sourceID)
-			if err != nil || !found {
-				return record, false, errors.Join(err, fmt.Errorf("publication source receipt is missing"))
-			}
-			source, original, err := o.validateStoredSourceReceipt(ctx, tx, sourceID, receipt)
-			if err != nil || !reflect.DeepEqual(child, original) || !reflect.DeepEqual(source.Evaluation, evaluation) {
-				return record, false, errors.Join(err, fmt.Errorf("publication source receipt contradicts its admitted evaluation"))
-			}
-		} else {
-			projection, defects, err := evaluation.FusedProjection(child)
-			if err != nil {
-				return record, false, err
-			}
-			var matched bool
-			for _, expected := range record.Evidence.ChildEvaluations {
-				matched = matched || reflect.DeepEqual(expected, projection)
-			}
-			var retained []runtimedata.ValidationDefect
-			for _, defect := range record.Evidence.ChildDefects {
-				if defect.SourceInvocationID == sourceID {
-					retained = append(retained, defect.Defect)
-				}
-			}
-			if !matched || len(defects) != len(retained) || !reflect.DeepEqual(defects, retained) && len(defects) != 0 {
-				return record, false, fmt.Errorf("rejected publication lost its original child evaluation")
-			}
-			if err := o.requireNoSourceCommitFacts(ctx, tx, sourceID); err != nil {
-				return record, false, err
-			}
 		}
 	}
 	return record, true, nil
+}
+
+func (o *Owner) validateFeedPublicationSourceTx(ctx context.Context, tx *sql.Tx, stored runtimedata.RunCreationCommand, item runtimedata.FusedImport, record runtimedata.RunCreationOperationRecord) error {
+	var contextJSON []byte
+	var sourceID, digest, selection, feedID string
+	var version sql.NullString
+	err := tx.QueryRowContext(ctx, o.query(`SELECT source_invocation_id,evaluation_json,schema_digest,version_id,selection,deployment_feed_id
+		FROM resource_feed_publication_members WHERE publication_id=%s AND flow_path=%s AND event_name=%s`, 3),
+		stored.PublicationID, item.Declaration.FlowPath, item.Declaration.EventName).Scan(&sourceID, &contextJSON, &digest, &version, &selection, &feedID)
+	feed := runtimedata.DeploymentFeed{RunID: stored.RunID, Declaration: item.Declaration, Publication: stored.PublicationID}
+	if err != nil || sourceID != item.SourceInvocationID || selection != "fused_import" || feedID != feed.PublicationID() ||
+		version.Valid != (record.Summary.Outcome == "created") {
+		return errors.Join(err, fmt.Errorf("publication source custody contradicts its request"))
+	}
+	var evaluation runtimedata.SourceEvaluationContext
+	if err := json.Unmarshal(contextJSON, &evaluation); err != nil {
+		return err
+	}
+	if evaluation.Declaration.Ref != item.Declaration || string(evaluation.Declaration.SchemaDigest) != digest {
+		return fmt.Errorf("publication source schema contradicts its admitted evaluation")
+	}
+	child := fusedSourceCommand(stored, item)
+	if record.Summary.Outcome == "created" {
+		receipt, found, err := o.readStoredSourceReceipt(ctx, tx, sourceID)
+		if err != nil || !found {
+			return errors.Join(err, fmt.Errorf("publication source receipt is missing"))
+		}
+		source, original, err := o.validateStoredSourceReceipt(ctx, tx, sourceID, receipt)
+		if err != nil || !reflect.DeepEqual(child, original) || !reflect.DeepEqual(source.Evaluation, evaluation) {
+			return errors.Join(err, fmt.Errorf("publication source receipt contradicts its admitted evaluation"))
+		}
+	} else {
+		projection, defects, err := evaluation.FusedProjection(child)
+		if err != nil {
+			return err
+		}
+		var matched bool
+		for _, expected := range record.Evidence.ChildEvaluations {
+			matched = matched || reflect.DeepEqual(expected, projection)
+		}
+		var retained []runtimedata.ValidationDefect
+		for _, defect := range record.Evidence.ChildDefects {
+			if defect.SourceInvocationID == sourceID {
+				retained = append(retained, defect.Defect)
+			}
+		}
+		if !matched || len(defects) != len(retained) || !reflect.DeepEqual(defects, retained) && len(defects) != 0 {
+			return fmt.Errorf("rejected publication lost its original child evaluation")
+		}
+		if err := o.requireNoSourceCommitFacts(ctx, tx, sourceID); err != nil {
+			return err
+		}
+	}
+	return nil
 }

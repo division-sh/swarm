@@ -86,6 +86,13 @@ func (c APIEventPublicationCommand) Validate() error {
 	if err := c.Publication.Validate(); err != nil {
 		return err
 	}
+	if err := c.validateLiveRunSelection(); err != nil {
+		return err
+	}
+	return c.validateCompletion()
+}
+
+func (c APIEventPublicationCommand) validateLiveRunSelection() error {
 	if live := c.LiveRun; live != nil {
 		if err := live.Scope.Validate(); err != nil {
 			return err
@@ -96,6 +103,10 @@ func (c APIEventPublicationCommand) Validate() error {
 			return fmt.Errorf("live publication selection does not match its event and source")
 		}
 	}
+	return nil
+}
+
+func (c APIEventPublicationCommand) validateCompletion() error {
 	if method := strings.TrimSpace(c.Idempotency.Method); method != "event.publish" && method != "run.start" {
 		return fmt.Errorf("API event publication requires event.publish or run.start method authority")
 	}
