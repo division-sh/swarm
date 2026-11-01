@@ -15,7 +15,6 @@ import (
 	"testing"
 
 	"github.com/division-sh/swarm/internal/operatorread"
-	"github.com/division-sh/swarm/internal/runtime/agentframe"
 	runtimecredentials "github.com/division-sh/swarm/internal/runtime/credentials"
 	"github.com/division-sh/swarm/internal/runtime/testfixtures/canonicalrouting"
 	"github.com/division-sh/swarm/internal/servedparity"
@@ -201,7 +200,7 @@ func channelResponsesReply(request llmapi.Request, text string) (llmapi.Reply, e
 	}
 	switch request.Number {
 	case 1:
-		if !strings.Contains(string(request.Body), "Responses customer") || !strings.Contains(string(request.Body), `\"kind\":\"initial\"`) {
+		if !strings.Contains(string(request.Body), "Responses customer") || strings.Contains(string(request.Body), "payload_bytes_base64") {
 			return llmapi.Reply{}, fmt.Errorf("Responses request lost the real channel execution frame")
 		}
 		args, _ := json.Marshal(map[string]string{"kind": "static_file", "static_id": staticID})
@@ -210,18 +209,11 @@ func channelResponsesReply(request llmapi.Request, text string) (llmapi.Reply, e
 	case 2:
 		for _, input := range body.Input {
 			if input.Type == "function_call_output" && input.CallID == "customer-read" {
-				payload, err := providerJourneyToolResult(input.Output, input.CallID)
-				if err != nil {
-					return llmapi.Reply{}, err
-				}
 				var observed struct {
-					OK     bool `json:"ok"`
-					Result struct {
-						StaticID string `json:"static_id"`
-						Content  string `json:"content"`
-					} `json:"result"`
+					StaticID string `json:"static_id"`
+					Content  string `json:"content"`
 				}
-				if err := json.Unmarshal(payload, &observed); err != nil || !observed.OK || observed.Result.StaticID != staticID || observed.Result.Content != "Responses customer\n" {
+				if err := json.Unmarshal([]byte(input.Output), &observed); err != nil || observed.StaticID != staticID || observed.Content != "Responses customer\n" {
 					return llmapi.Reply{}, fmt.Errorf("Responses continuation lost its genuine read-only tool result")
 				}
 				args, _ := json.Marshal(map[string]string{"chat_id": "2001", "text": text})
@@ -233,17 +225,6 @@ func channelResponsesReply(request llmapi.Request, text string) (llmapi.Reply, e
 	default:
 		return llmapi.Reply{}, fmt.Errorf("unexpected Responses request %d", request.Number)
 	}
-}
-
-func providerJourneyToolResult(content, callID string) (json.RawMessage, error) {
-	results, err := agentframe.DecodeProviderToolResults(content)
-	if err != nil {
-		return nil, err
-	}
-	if len(results) != 1 || results[0].CallID != callID || !results[0].OK {
-		return nil, fmt.Errorf("provider continuation lacks the exact successful tool result %q", callID)
-	}
-	return results[0].Payload, nil
 }
 
 func configureProviderJourneyLLM(t *testing.T, path, backend, baseURL string, models ...string) {
