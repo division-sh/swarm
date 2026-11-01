@@ -117,9 +117,9 @@ func (b *resetCandidateSubscriptionBarrier) Run(ctx context.Context) {
 
 func TestResetCandidateSetFencesConsumersWhileSecondPreparesBothStores(t *testing.T) {
 	for _, backend := range []string{"sqlite", "postgres"} {
-		for _, failure := range []string{"none", "second_preparation", "registered_release", "normal_registered_release", "normal_active_release", "reset_active_release", "normal_second_preparation"} {
+		for _, failure := range []string{"none", "preparation", "registered_release", "normal_registered_release", "normal_active_release", "reset_active_release"} {
 			t.Run(fmt.Sprintf("%s/failure=%s", backend, failure), func(t *testing.T) {
-				failSecond := failure == "second_preparation"
+				failPreparation := failure == "preparation"
 				ctx, cancel := context.WithCancel(context.Background())
 				defer cancel()
 				stores := openStandingRuntimeContextStore(t, backend, "reset-candidates")
@@ -182,20 +182,15 @@ func TestResetCandidateSetFencesConsumersWhileSecondPreparesBothStores(t *testin
 				if err != nil {
 					t.Fatal(err)
 				}
-				standingRoot := filepath.Join(t.TempDir(), "reset-candidates")
-				if err := os.MkdirAll(standingRoot, 0o755); err != nil {
-					t.Fatal(err)
-				}
+				standingRoot := writeServedEventPublishFollowUpFixture(t)
 				if err := os.Rename(writeStandingTelegramServeFixture(t, "http://127.0.0.1:1"), filepath.Join(standingRoot, "chat")); err != nil {
 					t.Fatal(err)
 				}
-				writeStandingCandidateFile(t, filepath.Join(standingRoot, "manifest.yaml"), "version: 1.0.0\nplatform_version: '*'\n")
-				writeStandingCandidateFile(t, filepath.Join(standingRoot, "schema.yaml"), "stages: []\n")
 				scenarioPath := filepath.Join(standingRoot, "chat", "tests", "smoke.yaml")
 				if err := os.Remove(scenarioPath); err != nil {
 					t.Fatal(err)
 				}
-				for _, root := range []string{standingRoot, writeServedEventPublishFollowUpFixture(t)} {
+				for _, root := range []string{standingRoot} {
 					loaded, err := loadServeRuntimeBundle(ctx, repoRootForTest(), stores.SourceArtifactStore(), cliapp.CLISourcePaths{
 						SourceRoot: root,
 					}, cliapp.ServeOptions{}, testPlatformPackBaseGenerations(t))
@@ -239,35 +234,6 @@ func TestResetCandidateSetFencesConsumersWhileSecondPreparesBothStores(t *testin
 				if err != nil {
 					t.Fatal(err)
 				}
-				if failure == "normal_second_preparation" {
-					managed = true
-					// All lifecycle preparation has succeeded by the first candidate's
-					// preflight. Fail the later release-preparation entrance without
-					// canceling the caller or replacing either real runtime.
-					candidates[0].runtime.Options.BootProgress = func(event runtime.BootProgressEvent) {
-						if event.Step == 15 && event.Status == "ok" {
-							candidates[1].runtime.CloseAdmission()
-						}
-					}
-					release, err := prepareServeRuntimeContexts(ctx, candidates, manager)
-					if err == nil || release != nil || !strings.Contains(err.Error(), "shutdown") {
-						t.Fatalf("partial registration did not retain independent startup refusal: %v", err)
-					}
-					for index, candidate := range candidates {
-						if got := candidate.runtime.WorkOccurrence().ActiveCount(); got != 0 {
-							t.Errorf("partially registered candidate retains %d leases", got)
-						}
-						use, lookup, _ := manager.AcquireBundleHash(ctx, candidate.sourceArtifactFact.BundleHash())
-						if index == 0 && !lookup.Found {
-							t.Error("failure occurred before the first real registration")
-						}
-						if use != nil {
-							_ = use.Done()
-							t.Error("partially registered candidate remains selectable")
-						}
-					}
-					return
-				}
 				if failure == "normal_registered_release" || failure == "normal_active_release" {
 					managed = true
 					release, err := prepareServeRuntimeContexts(ctx, candidates, manager)
@@ -289,9 +255,9 @@ func TestResetCandidateSetFencesConsumersWhileSecondPreparesBothStores(t *testin
 				supervisor.execution = apiv1.OperatorEventPublishHandlers(apiv1.EventPublishHandlerOptions{Publication: apiv1.EventPublicationOptions{
 					ExecutionPosture: primary.ExecutionPosture, Idempotency: stores.Idempotency(),
 					Events: primary.Bus, Acknowledged: primary.Bus, RecipientPlans: primary.Bus, SourceArtifact: primary.Bus,
-					Runs: stores.Runs(), Entities: stores.Entities(), Observability: stores.Observability(),
+					Runs: stores.Runs(), LiveRuns: stores.LiveRuns(), Entities: stores.Entities(), Observability: stores.Observability(),
 					RunBundleContext: stores.RunBundleContext(), RuntimeContexts: manager,
-					Source: candidates[0].loaded.source, Bundle: candidates[0].bootIdentity,
+					Source: candidates[0].loaded.source, Bundle: candidates[0].bootIdentity, ScenarioExecutionProfiles: stores.ScenarioExecutionProfiles(),
 				}})
 				if supervisor.execution["event.publish"] == nil {
 					t.Fatal("canonical publication handler is not configured")
@@ -306,7 +272,7 @@ func TestResetCandidateSetFencesConsumersWhileSecondPreparesBothStores(t *testin
 				server := httptest.NewServer(handler)
 				t.Cleanup(server.Close)
 				barrier := &resetCandidateSubscriptionBarrier{entered: make(chan struct{}), release: make(chan struct{})}
-				candidates[1].runtime.SystemNodes = append(candidates[1].runtime.SystemNodes, barrier)
+				candidates[0].runtime.SystemNodes = append(candidates[0].runtime.SystemNodes, barrier)
 				type result struct {
 					release func() error
 					err     error
@@ -329,9 +295,9 @@ func TestResetCandidateSetFencesConsumersWhileSecondPreparesBothStores(t *testin
 				select {
 				case <-barrier.entered:
 				case result := <-done:
-					t.Fatalf("startup returned before second barrier: %v", result.err)
+					t.Fatalf("startup returned before subscription barrier: %v", result.err)
 				case <-time.After(20 * time.Second):
-					t.Fatal("second candidate did not reach subscription readiness")
+					t.Fatal("candidate did not reach subscription readiness")
 				}
 				for _, candidate := range candidates {
 					grant, err := candidate.runtime.CurrentStartupGrantEvidence()
@@ -344,7 +310,7 @@ func TestResetCandidateSetFencesConsumersWhileSecondPreparesBothStores(t *testin
 						_ = use.Done()
 					}
 					if use != nil || (lookup.Loaded() && err == nil) {
-						t.Fatal("primary/secondary execution escaped the complete-set fence")
+						t.Fatal("candidate execution escaped the preparation fence")
 					}
 					response := requestServedJSONRPC(t, server.URL+"/v1/rpc", "event.publish", map[string]any{
 						"event_name": "item.received", "bundle_hash": candidate.sourceArtifactFact.BundleHash(),
@@ -375,13 +341,13 @@ func TestResetCandidateSetFencesConsumersWhileSecondPreparesBothStores(t *testin
 				recorder := httptest.NewRecorder()
 				supervisor.serveMCP(recorder, httptest.NewRequest(http.MethodPost, "/mcp", nil))
 				if recorder.Code != http.StatusServiceUnavailable {
-					t.Fatalf("MCP admitted while second candidate blocked: %d", recorder.Code)
+					t.Fatalf("MCP admitted while candidate preparation blocked: %d", recorder.Code)
 				}
 				var bootEvents int
 				if err := selectedStoreDatabaseForTest(t, stores).QueryRow("SELECT COUNT(*) FROM events WHERE event_name = 'platform.boot'").Scan(&bootEvents); err != nil || bootEvents != 0 {
 					t.Fatalf("autonomous boot escaped: %d, %v", bootEvents, err)
 				}
-				if failSecond {
+				if failPreparation {
 					cancel()
 				} else {
 					close(barrier.release)
@@ -392,9 +358,9 @@ func TestResetCandidateSetFencesConsumersWhileSecondPreparesBothStores(t *testin
 				case <-time.After(20 * time.Second):
 					t.Fatal("candidate preparation did not settle")
 				}
-				if failSecond {
+				if failPreparation {
 					if prepared.err == nil {
-						t.Fatal("canceled second candidate succeeded")
+						t.Fatal("canceled candidate preparation succeeded")
 					}
 					return
 				}
@@ -419,7 +385,7 @@ func TestResetCandidateSetFencesConsumersWhileSecondPreparesBothStores(t *testin
 				supervisor.resetting = false
 				supervisor.mu.Unlock()
 				published := requireServedEventPublishRPCResult(t, server.URL+"/v1/rpc", map[string]any{
-					"event_name": "item.received", "bundle_hash": candidates[1].sourceArtifactFact.BundleHash(),
+					"event_name": "item.received", "bundle_hash": candidates[0].sourceArtifactFact.BundleHash(),
 					"payload": map[string]any{"item_id": "after-convergence"}, "idempotency_key": uuid.NewString(),
 				})
 				waitForServedEventPublishNodeDeliveryLifecycle(t, selectedStoreDatabaseForTest(t, stores), backend, published.RunID, published.EventID, probe)

@@ -123,7 +123,7 @@ func requireServedNativePairingRun(t *testing.T, endpoint, bundleHash string) st
 	}
 	var live string
 	for _, run := range runs.Runs {
-		if run.Status != "live" {
+		if run.BundleHash != bundleHash || run.FlowPath != "." || run.Status != "live" {
 			continue
 		}
 		if live != "" {

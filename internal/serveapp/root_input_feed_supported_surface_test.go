@@ -29,6 +29,7 @@ func TestServedRootInputFeedsExecuteAndSettleBothStores(t *testing.T) {
 			} {
 				t.Run(tc.name, func(t *testing.T) {
 					_, rt := startServedBoundaryFixture(t, backend, canonicalrouting.CopyRootInputFeed(t, tc.kind))
+					pauseServedLandingForCreation(t, rt.Endpoint, rt.BundleHash, ".")
 					owner := rt.Selected.RuntimeDeps().EventStore
 					params := map[string]any{
 						"bundle_hash": rt.BundleHash, "run_id": uuid.NewString(), "idempotency_key": uuid.NewString(),
