@@ -38,7 +38,7 @@ func TestChannelOneBotOpenAICompatibleEmptyMemoryJourney(t *testing.T) {
 					t.Fatal(err)
 				}
 			}
-			registerChannelFixtureAccount(t, h.opts.ConfigPath, "bot-token", "420080", h.provider)
+			registerChannelFixtureAccount(t, h.opts.ConfigPath, "bot-token", "420079", h.provider)
 			h.start(t)
 			defer h.stop(t)
 			callback, signing, _ := h.provider.Registration()

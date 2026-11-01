@@ -73,7 +73,7 @@ func sendProviderStatusRequest(t *testing.T, ctx context.Context, adapter string
 		_, _, dispatch, err := runtime.sendRequest(ctx, payload, managed)
 		return dispatch, err
 	case "openai_responses":
-		runtime := &OpenAIResponsesRuntime{httpClient: server.Client(), baseURL: server.URL, credentialCache: providerCredentialCache{value: "test"}}
+		runtime := &OpenAIResponsesRuntime{httpClient: server.Client(), baseURL: server.URL + "/v1", credentialCache: providerCredentialCache{value: "test"}}
 		_, _, dispatch, err := runtime.sendRequest(ctx, payload, managed)
 		return dispatch, err
 	default:
