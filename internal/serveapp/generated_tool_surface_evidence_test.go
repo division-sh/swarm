@@ -211,7 +211,7 @@ func (r *generatedToolEvidenceRecorder) followMarkupWithCustomerTurn(t *testing.
 		return
 	}
 	requireServedEventPublishRPCResult(t, h.rpcEndpoint(), map[string]any{
-		"bundle_hash": servedEventPublishFixtureBundleHash(t, h.opts.SourceRoot), "event_name": "evidence.submitted",
+		"bundle_hash": servedEventPublishFixtureBundleHash(t, h.opts.SourceRoot), "event_name": "evidence.submitted", "run_id": runID,
 		"payload":         map[string]any{"conversation": "synthetic", "sequence": 2, "task": "The customer now asks you to confirm the opening time. Publish sequence 2 and value 'We open at nine.'."},
 		"idempotency_key": "synthetic-tool-surface-followup",
 	})
