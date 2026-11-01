@@ -349,10 +349,6 @@ func waitForMicrosoftGraphFailureEventsForSource(t *testing.T, backend slackMana
 	}
 }
 
-func microsoftGraphMessageSubject(body map[string]any) string {
-	return slackManagedConnectorString(microsoftGraphMessageValue(body, "subject"))
-}
-
 func microsoftGraphMessageRecipients(body map[string]any) []any {
 	recipients, _ := microsoftGraphMessageValue(body, "toRecipients").([]any)
 	return recipients
