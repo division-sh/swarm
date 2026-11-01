@@ -5,6 +5,8 @@ import (
 	"testing"
 
 	runtimecontracts "github.com/division-sh/swarm/internal/runtime/contracts"
+	models "github.com/division-sh/swarm/internal/runtime/core/actors"
+	"github.com/division-sh/swarm/internal/runtime/llm"
 	runtimemcp "github.com/division-sh/swarm/internal/runtime/mcp"
 	"github.com/division-sh/swarm/internal/runtime/semanticview"
 )
@@ -50,11 +52,7 @@ func TestValidateUsageHintCoverage_ExternalMCPMissingHintIsLintOnly(t *testing.T
 	t.Fatalf("findings = %#v, want external MCP lint finding", findings)
 }
 
-func TestValidateUsageHintCoverage_RejectsGeneratedEmitHintMentioningCEL(t *testing.T) {
-	original := emitToolUsageHint
-	emitToolUsageHint = "Use CEL"
-	t.Cleanup(func() { emitToolUsageHint = original })
-
+func TestValidateUsageHintCoverage_GeneratedEmitUsesModelDescription(t *testing.T) {
 	source := wrapRootAgentBundle(&runtimecontracts.WorkflowContractBundle{
 		Agents: map[string]runtimecontracts.AgentRegistryEntry{
 			"agent": {
@@ -73,20 +71,19 @@ func TestValidateUsageHintCoverage_RejectsGeneratedEmitHintMentioningCEL(t *test
 		},
 	})
 
-	findings := ValidateUsageHintCoverage(source, nil)
-	for _, finding := range findings {
-		if finding.ToolName == "emit_item_done" && finding.Severity == "error" && strings.Contains(finding.Message, "must not instruct") {
+	exec := NewExecutorWithOptions(nil, ExecutorOptions{WorkflowSource: source})
+	for _, definition := range exec.ToolDefinitionsForActor(models.AgentConfig{ID: "agent", EmitEvents: []string{"item.done"}}) {
+		if definition.Name == "emit_item_done" {
+			if got := llm.DeliveredToolDescription(definition); got != "Send a item.done event" {
+				t.Fatalf("model emit description=%q", got)
+			}
 			return
 		}
 	}
-	t.Fatalf("findings = %#v, want generated emit CEL usage rejection", findings)
+	t.Fatal("declared emit tool was not generated")
 }
 
 func TestValidateUsageHintCoverageDoesNotInventRoleDerivedEmitTools(t *testing.T) {
-	original := emitToolUsageHint
-	emitToolUsageHint = "Use CEL"
-	t.Cleanup(func() { emitToolUsageHint = original })
-
 	source := wrapRootAgentBundle(&runtimecontracts.WorkflowContractBundle{
 		Agents: map[string]runtimecontracts.AgentRegistryEntry{
 			"agent-instance-1": {
