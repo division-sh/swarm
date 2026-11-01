@@ -350,7 +350,7 @@ func (p *receptionistAnthropicDouble) ServeHTTP(w http.ResponseWriter, request *
 	}
 	content := body.Messages[len(body.Messages)-1].Content
 	w.Header().Set("Content-Type", "application/json")
-	if strings.HasPrefix(content, "Tool result:\n") {
+	if content == "ok" {
 		_ = json.NewEncoder(w).Encode(map[string]any{
 			"model": "claude-test", "usage": map[string]int{"input_tokens": 8, "output_tokens": 2},
 			"content": []any{map[string]any{"type": "text", "text": "Telegram reply sent."}},
@@ -358,20 +358,15 @@ func (p *receptionistAnthropicDouble) ServeHTTP(w http.ResponseWriter, request *
 		return
 	}
 	var turn struct {
-		Kind  string `json:"kind"`
-		Event struct {
-			Payload struct {
-				Conversation string `json:"conversation_reference"`
-				Text         string `json:"text"`
-			} `json:"payload"`
-		} `json:"event"`
+		Conversation string `json:"conversation_reference"`
+		Text         string `json:"text"`
 	}
-	if err := json.Unmarshal([]byte(content), &turn); err != nil || turn.Kind != "initial" || turn.Event.Payload.Conversation == "" {
+	if err := json.Unmarshal([]byte(content), &turn); err != nil || turn.Conversation == "" {
 		p.t.Errorf("invalid managed provider frame: %v content=%s", err, content)
 		http.Error(w, "invalid frame", http.StatusBadRequest)
 		return
 	}
-	chatID, text := turn.Event.Payload.Conversation, turn.Event.Payload.Text
+	chatID, text := turn.Conversation, turn.Text
 	joined := ""
 	for _, message := range body.Messages {
 		joined += message.Content + "\n"
