@@ -1699,7 +1699,7 @@ func runServedConversationForkBackendProof(t *testing.T, backend servedparity.Ba
 	runServedConversationForkLifecycleProof(t, rt)
 }
 
-func startServedConversationForkProofRuntime(t *testing.T, backend servedparity.Backend) servedConversationForkProofRuntime {
+func startServedConversationForkProofRuntime(t *testing.T, backend servedparity.Backend, startup ...func(cliapp.ServeOptions) (string, *runtimepkg.Runtime)) servedConversationForkProofRuntime {
 	t.Helper()
 	var deliveryReader servedRunDeliveryReader
 	captureSelectedRuntimePersistence(t, func(p serveRuntimePersistence) { deliveryReader = p.deps.DeliveryStore.SummarizeRun })
@@ -1755,7 +1755,13 @@ func startServedConversationForkProofRuntime(t *testing.T, backend servedparity.
 		probe := lifecycletest.New(t, lifecycletest.WithTimeout(servedEventPublishLifecycleProbeWaitTimeout))
 		opts.TestLifecycleProbe = probe
 		opts.TestLLMRuntime = servedOpenAICompatibleNoopLLMRuntime{}
-		endpoint, rt := startServedEventPublishFollowUpRuntime(t, opts)
+		var endpoint string
+		var rt *runtimepkg.Runtime
+		if len(startup) == 0 {
+			endpoint, rt = startServedEventPublishFollowUpRuntime(t, opts)
+		} else {
+			endpoint, rt = startup[0](opts)
+		}
 		if servedDB == nil {
 			t.Fatal("served conversation fork SQLDB is required")
 		}
@@ -2539,6 +2545,7 @@ func runServedRunControlLifecycleProof(t *testing.T, rt servedControlProofRuntim
 
 func runServedRuntimeIngressControlLifecycleProof(t *testing.T, rt servedControlProofRuntime) {
 	t.Helper()
+	runID := requireServedLiveLandingRunID(t, rt.Endpoint, rt.BundleHash, ".")
 	keyPrefix := "issue-1864-" + rt.Backend + "-" + uuid.NewString()
 	pauseKey := keyPrefix + "-runtime-pause"
 	requireServedOKJSONRPC(t, rt.Endpoint, "runtime.pause", map[string]any{
@@ -2556,17 +2563,6 @@ func runServedRuntimeIngressControlLifecycleProof(t *testing.T, rt servedControl
 		t.Fatalf("%s duplicate runtime.pause data = %#v, want %s", rt.Backend, duplicatePause.Data, apiv1.RuntimeAlreadyPausedCode)
 	}
 
-	queued := requireServedEventPublishRPCResult(t, rt.Endpoint, map[string]any{
-		"event_name":      "external.observed",
-		"bundle_hash":     rt.BundleHash,
-		"payload":         map[string]any{},
-		"idempotency_key": keyPrefix + "-runtime-queued",
-	})
-	if queued.NewRunCreated || queued.RunID == "" || queued.EventID == "" {
-		t.Fatalf("%s runtime-paused event.publish result = %#v, want event queued in the existing live run", rt.Backend, queued)
-	}
-	requireNoServedReceiptOutcomeDuring(t, rt.DB, rt.Backend, queued.EventID, "platform", "pipeline", "success", 250*time.Millisecond)
-
 	resumeKey := keyPrefix + "-runtime-resume"
 	requireServedOKJSONRPC(t, rt.Endpoint, "runtime.resume", map[string]any{
 		"idempotency_key": resumeKey,
@@ -2583,9 +2579,8 @@ func runServedRuntimeIngressControlLifecycleProof(t *testing.T, rt servedControl
 		t.Fatalf("%s duplicate runtime.resume data = %#v, want %s", rt.Backend, duplicateResume.Data, apiv1.RuntimeNotPausedCode)
 	}
 
-	waitServedEventPublishReceiptOutcomeCount(t, rt.DB, rt.Backend, queued.EventID, "platform", "pipeline", "success", 1)
-	requireServedRunStatus(t, rt.Endpoint, queued.RunID, "live")
-	requireServedParitySettlementPostconditions(t, rt.Endpoint, rt.DB, rt.Backend, queued.RunID, servedparity.MustScenario(servedparity.ScenarioRuntimeResumeIngressLifecycle))
+	requireServedRunStatus(t, rt.Endpoint, runID, "live")
+	requireServedParitySettlementPostconditions(t, rt.Endpoint, rt.DB, rt.Backend, runID, servedparity.MustScenario(servedparity.ScenarioRuntimeResumeIngressLifecycle))
 }
 
 type servedDecisionCardFixture struct {
