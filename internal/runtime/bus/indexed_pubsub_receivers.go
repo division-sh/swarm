@@ -252,7 +252,7 @@ func (rt *RouteTable) bindPubsubDefinitions(declaration routeFlowTemplate, path 
 
 func (rt *RouteTable) matchPubsubDefinition(declaration routeFlowTemplate, subscriber Subscriber, pattern routeSubscriberTemplatePattern, keys []string) []Subscriber {
 	var out []Subscriber
-	for _, resolved := range routeProjectAdmittedSubscriberPatterns(pattern.admission, declaration.FlowID, subscriber.Path, pattern.inputEvent, rt.inputProducers) {
+	for _, resolved := range routeProjectAdmittedSubscriberPatterns(pattern.admission, subscriber.Path) {
 		for _, key := range keys {
 			if !RouteMatches(resolved.EventPattern, key) || pattern.admission.Pattern() && !pubsubPatternEventDeclared(pattern, declaration, subscriber.Path, key) {
 				continue

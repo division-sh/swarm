@@ -44,10 +44,9 @@ func TestTemplateSubscriptionProjectionMatchesFreshAdmission(t *testing.T) {
 						if !admission.Admitted() {
 							t.Fatal(admission.Message())
 						}
-						inputEvent := !admission.Pattern() && source.FlowHasInputEvent(scope.ID, admission.LocalEvent())
 						for _, instancePath := range []string{path + "/first", path + "/second"} {
-							want := routeProjectAdmittedSubscriberPatterns(admission, template.FlowID, instancePath, inputEvent, inputProducers)
-							got := routeProjectAdmittedSubscriberPatterns(pattern.admission, template.FlowID, instancePath, pattern.inputEvent, inputProducers)
+							want := routeProjectAdmittedSubscriberPatterns(admission, instancePath)
+							got := routeProjectAdmittedSubscriberPatterns(pattern.admission, instancePath)
 							if !reflect.DeepEqual(got, want) {
 								t.Fatalf("%s %s %s: compiled projection = %#v, fresh admission = %#v", path, pattern.raw, instancePath, got, want)
 							}

@@ -4,6 +4,7 @@ import (
 	"testing"
 
 	runtimecontracts "github.com/division-sh/swarm/internal/runtime/contracts"
+	runtimepinrouting "github.com/division-sh/swarm/internal/runtime/core/pinrouting"
 	"github.com/division-sh/swarm/internal/runtime/semanticview"
 	"github.com/division-sh/swarm/internal/runtime/testfixtures/canonicalrouting"
 )
@@ -11,7 +12,8 @@ import (
 func TestNamesOnlyPrivateInputDoesNotInventExternalProducer(t *testing.T) {
 	source := loadNamesOnlyRouteSource(t, canonicalrouting.WritePublicTemplateInputRoute(t))
 	routes := derivedRouteTableFixture(t, source)
-	if routeFlowInputProducerIsExternal(routes.inputProducers.Resolve("operating", "opco.product_initialization_requested")) {
+	_, inputProducers := runtimepinrouting.CompileConnectGraphWithInputProducerResolver(source)
+	if routeFlowInputProducerIsExternal(inputProducers.Resolve("operating", "opco.product_initialization_requested")) {
 		t.Fatal("unconnected private input acquired external producer authority")
 	}
 
@@ -26,18 +28,17 @@ func TestNamesOnlyPrivateInputDoesNotInventExternalProducer(t *testing.T) {
 
 func TestRouteResolveSubscriberPatterns_PrivatePinKeepsOrdinarySubscription(t *testing.T) {
 	source := loadNamesOnlyRouteSource(t, canonicalrouting.WritePublicTemplateInputRoute(t))
-	routes := derivedRouteTableFixture(t, source)
+	_, inputProducers := runtimepinrouting.CompileConnectGraphWithInputProducerResolver(source)
 	scope, found := source.FlowScopeByID("operating")
 	if !found {
 		t.Fatal("worker flow scope missing")
 	}
 	admission := routeClassifyAuthoredSubscription(source, subscriberNode, scope.ID, scope.InputEvents, scope.Path,
-		routeFlowLocalEventSetWithInputProducers(scope, routes.inputProducers), "opco.product_initialization_requested")
+		routeFlowLocalEventSetWithInputProducers(scope, inputProducers), "opco.product_initialization_requested")
 	if !admission.Admitted() {
 		t.Fatal(admission.Message())
 	}
-	inputEvent := !admission.Pattern() && source.FlowHasInputEvent(scope.ID, admission.LocalEvent())
-	patterns := routeProjectAdmittedSubscriberPatterns(admission, scope.ID, scope.Path, inputEvent, routes.inputProducers)
+	patterns := routeProjectAdmittedSubscriberPatterns(admission, scope.Path)
 	if len(patterns) == 0 {
 		t.Fatal("ordinary authored subscription did not resolve")
 	}
