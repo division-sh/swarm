@@ -68,8 +68,9 @@ func TestCompletionProviderHeadSettlementSQLite(t *testing.T) {
 
 func TestCompletionProviderHeadSettlementPostgres(t *testing.T) {
 	_, db, _ := testutil.StartPostgres(t)
-	proveCompletionProviderHeadSettlement(t, newCompletionSettlementFixture(t, admitTestPostgresStore(t, db), db, false))
-	proveClaudeBackingOrigin(t, newCompletionSettlementFixture(t, admitTestPostgresStore(t, db), db, false))
+	store := admitTestPostgresStore(t, db)
+	proveCompletionProviderHeadSettlement(t, newCompletionSettlementFixture(t, store, db, false))
+	proveClaudeBackingOrigin(t, newCompletionSettlementFixture(t, store, db, false))
 }
 
 func TestCompletionOperationOwnsExactAgentFrameSQLite(t *testing.T) {

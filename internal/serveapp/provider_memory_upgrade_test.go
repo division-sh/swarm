@@ -225,7 +225,11 @@ if (!startup) {
     if (!fs.readFileSync(directory + '/' + parent + '.jsonl', 'utf8').includes('upgrade input 1')) throw Error('upgraded invocation lost provider history');
   }
 }`, 1)
-	program = strings.Replace(program, "{type: 'assistant', sessionId: session}", "{type: 'assistant', sessionId: session, input}", 1)
+	program = strings.Replace(program,
+		"fs.writeFileSync(directory + '/' + session + '.jsonl', JSON.stringify({type: 'assistant', sessionId: session}) + '\\n');",
+		`const parent = flags.get('--resume');
+  const retained = parent ? fs.readFileSync(directory + '/' + parent + '.jsonl', 'utf8') : '';
+  fs.writeFileSync(directory + '/' + session + '.jsonl', retained + JSON.stringify({type: 'assistant', sessionId: session, input}) + '\n');`, 1)
 	image := buildCompletion2270CLIImageWithProgram(t, program)
 	*text += fmt.Sprintf("  claude_cli:\n    command: completion-proof-cli\n    output_format: stream-json\nworkspace:\n  image: %s\n", image)
 	opts.WorkspaceBackend, opts.WorkspaceBackendSet = workspace.BackendDocker, true
