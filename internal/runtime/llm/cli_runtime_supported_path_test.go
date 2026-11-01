@@ -289,10 +289,19 @@ func testClaudeCLIManagedRequestInventory(t *testing.T, rejectAt int, inventory 
 	if err != nil {
 		t.Fatalf("read tool-result stdin: %v", err)
 	}
-	if !bytes.Contains(secondInput, []byte(`"kind":"tool_continuation"`)) {
-		t.Fatalf("second stdin does not contain canonical continuation frame: %s", secondInput)
+	if !bytes.HasPrefix(secondInput, []byte(`{"content":"`)) || !bytes.Contains(secondInput, []byte("[... tool output truncated ...]")) || !bytes.HasSuffix(secondInput, []byte(fmt.Sprintf(`","size_bytes":%d}`, len(huge)))) {
+		t.Fatalf("second stdin lost bounded head/tail read output: %s", secondInput)
 	}
-	payload, err := decodeTestToolResultEntries(secondInput)
+	var frame agentframe.Frame
+	for _, authorization := range effects.Authorizations {
+		if authorization.AgentFrame != nil && authorization.AgentFrame.FrameID == "agent-frame:v1:"+settlements[1].AgentTurn.TurnID {
+			frame = *authorization.AgentFrame
+		}
+	}
+	if err := frame.Validate(); err != nil {
+		t.Fatalf("retained continuation frame: %v", err)
+	}
+	payload, err := decodeTestToolResultEntries(frame.Turn.ToolResult)
 	if err != nil {
 		t.Fatalf("unmarshal second stdin: %v", err)
 	}
@@ -491,17 +500,7 @@ func runFirstTurnFakeDockerHelper() int {
 }
 
 func isReadFileToolResultPayload(input []byte) bool {
-	payload, err := decodeTestToolResultEntries(input)
-	if err != nil {
-		return false
-	}
-	for _, entry := range payload {
-		ok, _ := entry["ok"].(bool)
-		if ok && strings.TrimSpace(asString(entry["name"])) == "read_file" {
-			return true
-		}
-	}
-	return false
+	return bytes.HasPrefix(input, []byte(`{"content":"`)) && bytes.Contains(input, []byte("[... tool output truncated ...]")) && bytes.Contains(input, []byte(`"size_bytes":`))
 }
 
 func decodeTestToolResultEntries(input []byte) ([]map[string]any, error) {
@@ -535,7 +534,7 @@ func capturedToolResultInput(captureDir string) ([]byte, error) {
 		if err != nil {
 			return nil, err
 		}
-		if bytes.Contains(data, []byte(`"name":"read_file"`)) && bytes.Contains(data, []byte(`"ok":true`)) && bytes.Contains(data, []byte(`"size_bytes":`)) {
+		if isReadFileToolResultPayload(data) {
 			return data, nil
 		}
 	}

@@ -14190,15 +14190,16 @@ agent_intent_model:
       closed.
   environment_postamble:
     rule: >
-      The canonical ProviderPrompt assembly appends workspace facts after the immutable runtime intent-and-criteria carrier
-      when constructing the provider-visible system prompt. Normal execution and startup preflight use that same assembly.
-      The postamble is generated platform context, is not authorable, does not list tools, and does not alter durable
-      intent/criteria facts, the resolved intent artifact, or hashes.
+      Per #2886 (6564806104), generated environment facts are never appended to the authored system prompt.
+      After exact session acquisition, a callable workspace execution grant supplies one runtime-tagged user frame
+      at the beginning of a new conversation. Restored history is not prepended or reprojected. An agent with no
+      execution grant receives no environment frame. This does not alter authored intent/criteria identity or grant authority.
     required_content:
-      - 'Workspace: /workspace (read-write logical path)'
-      - 'Reference data: /data (read-only logical path)'
-      - 'Contracts: /opt/swarm/source (read-only logical path)'
-      - Docker-backed command execution exposes those logical paths as OS paths; trusted host bash uses the workspace backing directory and host namespace/permissions.
+      - '[swarm:environment]'
+      - 'Workspace: /workspace (read-write)'
+      - 'Reference data: /data (read-only)'
+      - 'Source: /opt/swarm/source (read-only)'
+      - Use relative paths for files in the workspace.
   retired_surfaces:
     authored_fields:
     - prompt_ref
@@ -14266,7 +14267,7 @@ agent_execution_frame:
     - role and authored flow identity
     - resolved business-intent artifact and identity
     - canonical criteria references plus criteria identity bound to the bundle
-    - canonical provider-visible prompt assembled from intent, criteria, and generated environment context
+    - canonical provider-visible system prompt assembled from intent and criteria only
     - resolved runtime mode, provider, transport, and the paired authored model alias plus concrete model when selected
     provider_model_selection: >
       `model_alias` is the exact canonical authored alias and `model` is its resolved concrete provider model. They are
@@ -14281,7 +14282,7 @@ agent_execution_frame:
       Initial, continuation, board, and remediation frames retain the typed admitted event projection including event and
       producer identities, run/task/parent/depth/execution-mode facts, exact payload bytes, source/target/target-set routes,
       flow/entity scope, and canonical routing-source authority. `payload` retains the admitted JSON bytes in memory and
-      `payload_bytes_base64` carries those same exact bytes through deterministic frame hashing and provider transport;
+      `payload_bytes_base64` carries those same exact bytes through deterministic frame hashing and durable storage;
       mismatch fails closed. Provider prompts are not an event identity owner.
     capability_plan: >
       The frame records only the pre-dispatch managed capability surface identity, plan fingerprint, authorized candidates,
@@ -14296,6 +14297,24 @@ agent_execution_frame:
       literal object `{status: unresolved}` otherwise. Absence must never be replaced with guesses from payloads, names,
       paths, mutable stores, or prompt sidecars.
   provider_boundaries:
+    visible_rendering: >
+      Per #2886 (6564806104), the provider copy is distinct from the complete private frame. Initial user content
+      defaults to the event payload JSON. The optional agents.yaml content expression uses the existing expression
+      language and exact admitted input schema; strings are sent verbatim and other JSON values as JSON. event.at
+      is the operator-visible admitted event time in UTC seconds. Chat Completions user name is the exact producing
+      node declaration name, never an encoded identity or guessed anonymous participant. No request-level user is sent.
+      Event/run/entity/instance/parent IDs, scope, routing/provenance, base64 payload and unresolved lifecycle blocks
+      are not provider content. Old stored messages retain their recorded rendering; declaration changes affect new turns only.
+    tool_result_rendering: >
+      Each native tool result retains its exact call linkage and complete internal typed receipt. The provider sees
+      output text only, or error: <typed reason>: <detail>. Long output is cut head and tail with an in-band marker
+      inside existing byte limits. Successful emit renders exactly ok, meaning accepted rather than delivered.
+      Whole entity reads return declared fields only; implicit keys and row metadata are excluded unless explicitly authored as fields.
+    rendering_inspection: >
+      Effective agent.frame distinguishes unresolved occurrence rendering from source configuration. For an executed
+      turn, conversation.get_turn returns provider_rendering from that exact turn's recorded provider request alongside
+      private-frame identity facts. This is not a re-evaluation against current source. Assistant history/reasoning,
+      credentials, headers and CLI arguments are not exposed by this rendering projection.
     managed_call: >
       ManagedSessionRuntime accepts only the sealed ManagedCall carrying a validated AgentExecutionFrame and exact managed
       provider-turn/capability authorities. The old raw managed ContinueSession/Step boundary is unsupported.
@@ -35767,6 +35786,8 @@ api_specification:
                   identity: {type: string, pattern: '^agent-criteria:v1:sha256:[a-f0-9]{64}$'}
               provider: {$ref: '#/components/schemas/AgentFrameProviderPresence'}
               provider_prompt: {type: string, minLength: 1}
+              content_projection: {type: string}
+          provider_rendering: {$ref: '#/components/schemas/AgentFramePresenceString'}
           turn_context:
             type: object
             additionalProperties: false
@@ -36710,6 +36731,15 @@ api_specification:
             $ref: '#/components/schemas/Turn'
           frame:
             $ref: '#/components/schemas/AgentExecutionFrameFacts'
+          provider_rendering:
+            type: object
+            additionalProperties: false
+            required: [status, source]
+            properties:
+              status: {type: string, enum: [unresolved, recorded]}
+              source: {type: string, const: recorded_provider_request}
+              input: {}
+              tools: {}
       AgentExecutionFrameFacts:
         description: Required author-safe identity projection derived from the validated private frame persisted with this exact turn. It never contains provider input, event/tool payloads, capability evidence, directive/remediation content, or private reasoning.
         oneOf:

@@ -46,6 +46,7 @@ type conversationTurnCursor struct {
 
 type conversationTurnRecord struct {
 	CompletionEvidenceRaw []byte
+	RequestPayloadRaw     []byte
 	ResolvedModel         sql.NullString
 	TurnID                string
 	Ordinal               int
@@ -425,13 +426,13 @@ func (s conversationProjection) loadOperatorConversationTurn(ctx context.Context
 				parse_ok, COALESCE(latency_ms, 0) AS latency_ms, COALESCE(retry_count, 0) AS retry_count,
 				COALESCE(usage_exactness, '') AS usage_exactness, execution_mode, input_tokens, output_tokens,
 				COALESCE(CAST(failure AS TEXT), 'null') AS failure, created_at, agent_frame_bytes,
-				CAST(completion_evidence AS TEXT) AS completion_evidence, resolved_model
+				CAST(completion_evidence AS TEXT) AS completion_evidence, resolved_model, CAST(request_payload AS TEXT) AS request_payload
 			FROM agent_turns
 			WHERE session_id = ?
 		)
 		SELECT ordinal, turn_id, run_id, agent_id, session_id, entity_id, trigger_event_id,
 			trigger_event_type, task_id, turn_blocks, parse_ok, latency_ms, retry_count,
-			usage_exactness, execution_mode, input_tokens, output_tokens, failure, created_at, agent_frame_bytes, completion_evidence, resolved_model
+			usage_exactness, execution_mode, input_tokens, output_tokens, failure, created_at, agent_frame_bytes, completion_evidence, resolved_model, request_payload
 		FROM ordered
 		WHERE turn_id = ?
 	`, runIDProjection), sessionID, turnID)
@@ -450,7 +451,11 @@ func (s conversationProjection) loadOperatorConversationTurn(ctx context.Context
 	if err != nil {
 		return operatorread.OperatorPublicConversationTurnDetail{}, err
 	}
-	return operatorread.OperatorPublicConversationTurnDetail{Session: summary, Turn: turn, Frame: frame}, nil
+	rendering, err := projectProviderRendering(record.RequestPayloadRaw)
+	if err != nil {
+		return operatorread.OperatorPublicConversationTurnDetail{}, err
+	}
+	return operatorread.OperatorPublicConversationTurnDetail{Session: summary, Turn: turn, Frame: frame, ProviderRendering: &rendering}, nil
 }
 
 func (s conversationProjection) loadLatestPublicConversationTurn(ctx context.Context, sessionID string) (*operatorread.OperatorPublicConversationTurn, error) {
@@ -625,6 +630,7 @@ func scanConversationTurnDetailRecord(scanner operatorRowScanner) (conversationT
 		&record.UsageExactness, &record.ExecutionMode, &record.InputTokens, &record.OutputTokens,
 		&failureRaw, &createdAtRaw, &frameBytes,
 		&record.CompletionEvidenceRaw, &record.ResolvedModel,
+		&record.RequestPayloadRaw,
 	); err != nil {
 		return conversationTurnRecord{}, nil, err
 	}

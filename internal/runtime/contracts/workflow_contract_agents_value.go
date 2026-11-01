@@ -65,6 +65,8 @@ func projectAgentValue(key string, value yamlsource.Value) (AgentRegistryEntry, 
 			switch name {
 			case "intent":
 				out.Intent, err = agentintent.AdmitSource(field)
+			case "content":
+				out.Content, err = projectNodeScalarExpression(field, "agent.content", false)
 			case "memory":
 				out.Memory, err = agentValueBool(field)
 			case "max_turns_per_task":

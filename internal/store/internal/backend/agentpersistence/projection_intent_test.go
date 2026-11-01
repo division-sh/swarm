@@ -18,6 +18,7 @@ import (
 
 func TestPersistedAgentProjectionRoundTripsExactIntentArtifact(t *testing.T) {
 	cfg := persistedIntentTestAgent(t)
+	cfg.Content = "payload.message"
 	projection, err := ProjectPersistedAgentConfig(cfg, "")
 	if err != nil {
 		t.Fatalf("ProjectPersistedAgentConfig: %v", err)
@@ -28,6 +29,9 @@ func TestPersistedAgentProjectionRoundTripsExactIntentArtifact(t *testing.T) {
 	}
 	if !reflect.DeepEqual(hydrated.Intent, cfg.Intent) {
 		t.Fatalf("hydrated intent = %#v, want %#v", hydrated.Intent, cfg.Intent)
+	}
+	if hydrated.Content != cfg.Content || len(hydrated.ContentPrograms) != 0 {
+		t.Fatal("stored content expression changed or acquired an executable program")
 	}
 	if !hydrated.Prompt.Empty() {
 		t.Fatal("hydration restored a persisted derived prompt instead of requiring canonical reconstruction")
