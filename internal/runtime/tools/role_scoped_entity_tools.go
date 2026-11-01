@@ -169,28 +169,7 @@ func roleScopedEntityWholeReadOutputSchema(contract entityruntime.Contract) map[
 		}
 		fieldProps[field] = entityContractJSONSchemaWithRefinements(contract, decl.Type, decl.Refinements, true, map[string]struct{}{})
 	}
-	properties := map[string]any{
-		"entity_id":     map[string]any{"type": "string"},
-		"flow_instance": map[string]any{"type": "string"},
-		"entity_type":   map[string]any{"type": "string"},
-		"current_state": map[string]any{},
-		"fields":        ObjectSchema(fieldProps),
-	}
-	required := []string{"entity_id", "flow_instance", "entity_type", "current_state", "fields"}
-	schema := ObjectSchema(properties, required...)
-	// Keep required null distinct from omission using the existing closed
-	// object alternatives, without adding a tool-schema union interpreter.
-	branches := make([]any, 0, 2)
-	for _, stageType := range []string{"string", "null"} {
-		branch := make(map[string]any, len(properties))
-		for name, property := range properties {
-			branch[name] = property
-		}
-		branch["current_state"] = map[string]any{"type": stageType}
-		branches = append(branches, ObjectSchema(branch, required...))
-	}
-	schema["oneOf"] = branches
-	return schema
+	return ObjectSchema(fieldProps)
 }
 
 func roleScopedEntityToolDescription(spec roleScopedEntityToolSpec) string {
@@ -461,7 +440,8 @@ func (e *Executor) execRoleScopedEntityTool(ctx context.Context, actor models.Ag
 		if err != nil {
 			return nil, failures.Wrap(failures.ClassInternalFailure, "entity_materialization_failed", "tool-executor", "role_scoped_entity_tool.materialize", map[string]any{"entity_id": entityID}, err)
 		}
-		return materialized, nil
+		fields, _ := materialized["fields"].(map[string]any)
+		return entityruntime.DeclaredValues(contract, fields), nil
 	case roleScopedEntityToolReadField:
 		materialized, err := materializeEntityStateRow(source, row)
 		if err != nil {

@@ -47,7 +47,7 @@ func TestOpenAIResponsesManagedRequestEncodesCanonicalExecutionFrame(t *testing.
 			if len(req.Tools) != 1 || req.Tools[0].Type != "function" || req.Tools[0].Name != "notify_human" {
 				t.Fatalf("tools = %#v, want notify_human function tool", req.Tools)
 			}
-			if !openAIResponsesRequestHasMessage(req.Input, "user", `"kind":"initial"`) {
+			if !openAIResponsesRequestHasMessage(req.Input, "user", `{"work":"admitted"}`) {
 				t.Fatalf("first request input missing canonical initial execution frame: %#v", req.Input)
 			}
 			_, _ = w.Write([]byte(`{
@@ -257,7 +257,7 @@ func openAIResponsesRequestHasMessage(items []any, role, content string) bool {
 func openAIResponsesRequestHasContinuationFrame(items []any) bool {
 	for _, item := range items {
 		obj, ok := item.(map[string]any)
-		if ok && obj["type"] == "function_call_output" && strings.Contains(fmtString(obj["output"]), `"kind":"tool_continuation"`) {
+		if ok && obj["type"] == "function_call_output" && fmtString(obj["output"]) == `{"answer":"ok"}` {
 			return true
 		}
 	}

@@ -100,7 +100,7 @@ func TestMockManagedRequestConsumesCanonicalExecutionFrame(t *testing.T) {
 	if len(settlements) == 1 && settlements[0].AgentTurn != nil {
 		_ = json.Unmarshal(settlements[0].AgentTurn.RequestPayload, &input)
 	}
-	if len(settlements) != 1 || settlements[0].AgentTurn == nil || len(input.Messages) != 1 || !strings.Contains(input.Messages[0].Content, `"kind":"initial"`) {
+	if len(settlements) != 1 || settlements[0].AgentTurn == nil || len(input.Messages) != 1 || input.Messages[0].Content != `{"work":"admitted"}` {
 		t.Fatalf("mock settlements = %#v, want one canonical frame request", settlements)
 	}
 	if settlements[0].Usage.ResolvedModel != "" || settlements[0].Spend.ResolvedModel != "" || len(settlements[0].Usage.Evidence.Models) != 0 {
@@ -115,8 +115,7 @@ import json
 
 def handle(input):
     frame = json.loads(input["messages"][-1]["content"])
-    assert frame["kind"] == "initial"
-    assert frame["event"]["type"] == "work.requested"
+    assert frame == {"work": "admitted"}
     assert "event" not in input
     return {"text": "done", "usage": {"input_tokens": 5, "output_tokens": 2}}
 `)

@@ -19,6 +19,7 @@ import (
 	"github.com/division-sh/swarm/internal/runtime/core/bundleidentity"
 	"github.com/division-sh/swarm/internal/runtime/core/managedcapabilities"
 	"github.com/division-sh/swarm/internal/runtime/executionmode"
+	"github.com/google/cel-go/cel"
 )
 
 const (
@@ -47,17 +48,19 @@ func (k TurnKind) Valid() bool {
 }
 
 type SessionSeed struct {
-	AgentIdentity  agentidentity.Identity
-	Role           string
-	FlowID         string
-	Intent         agentintent.Resolved
-	Criteria       []string
-	ProviderPrompt agentintent.ProviderPrompt
-	RuntimeMode    string
-	Provider       string
-	Transport      string
-	ModelAlias     string
-	Model          string
+	AgentIdentity   agentidentity.Identity
+	Role            string
+	FlowID          string
+	Intent          agentintent.Resolved
+	Content         string
+	ContentPrograms map[string]cel.Program
+	Criteria        []string
+	ProviderPrompt  agentintent.ProviderPrompt
+	RuntimeMode     string
+	Provider        string
+	Transport       string
+	ModelAlias      string
+	Model           string
 }
 
 func (s SessionSeed) Validate() error {
@@ -486,32 +489,13 @@ func validateTurnShape(turn TurnContext) error {
 }
 
 func renderProviderInput(turn TurnContext) (ProviderInput, error) {
-	role := "user"
-	payload := any(struct {
-		Kind           TurnKind       `json:"kind"`
-		Parent         string         `json:"parent_frame_id,omitempty"`
-		Event          Event          `json:"event"`
-		Directive      *Directive     `json:"directive,omitempty"`
-		Remediation    *Remediation   `json:"remediation,omitempty"`
-		Lifecycle      Lifecycle      `json:"lifecycle"`
-		PackProvenance UnresolvedFact `json:"pack_provenance"`
-	}{turn.Kind, turn.ParentFrameID, turn.Event, turn.Directive, turn.Remediation, turn.Lifecycle, turn.PackProvenance})
 	if turn.Kind == TurnToolContinuation {
-		role = "tool"
-		payload = struct {
-			Kind           TurnKind        `json:"kind"`
-			Parent         string          `json:"parent_frame_id"`
-			Event          Event           `json:"event"`
-			ToolResult     json.RawMessage `json:"tool_result"`
-			Lifecycle      Lifecycle       `json:"lifecycle"`
-			PackProvenance UnresolvedFact  `json:"pack_provenance"`
-		}{turn.Kind, turn.ParentFrameID, turn.Event, turn.ToolResult, turn.Lifecycle, turn.PackProvenance}
+		return ProviderInput{Role: "tool", Content: string(turn.ToolResult)}, nil
 	}
-	raw, err := json.Marshal(payload)
-	if err != nil {
-		return ProviderInput{}, fmt.Errorf("encode provider turn input: %w", err)
+	if turn.Directive != nil {
+		return ProviderInput{Role: "user", Content: turn.Directive.Text}, nil
 	}
-	return ProviderInput{Role: role, Content: string(raw)}, nil
+	return ProviderInput{Role: "user", Content: string(turn.Event.Payload)}, nil
 }
 
 func projectEvent(event events.Event) (Event, error) {
@@ -779,18 +763,23 @@ func (f Frame) ProviderInput() (role, content string, err error) {
 // DecodeProviderToolResults is the canonical decoder for the transport-neutral
 // tool-continuation projection emitted by ProviderInput.
 func DecodeProviderToolResults(content string) ([]ToolResultEntry, error) {
+	content = strings.TrimSpace(content)
+	raw := json.RawMessage(content)
 	var projection struct {
 		Kind       TurnKind        `json:"kind"`
 		ToolResult json.RawMessage `json:"tool_result"`
 	}
-	if err := json.Unmarshal([]byte(strings.TrimSpace(content)), &projection); err != nil {
-		return nil, err
-	}
-	if projection.Kind != TurnToolContinuation || len(projection.ToolResult) == 0 {
-		return nil, fmt.Errorf("provider input is not a tool continuation")
+	if !strings.HasPrefix(content, "[") {
+		if err := json.Unmarshal(raw, &projection); err != nil {
+			return nil, err
+		}
+		if projection.Kind != TurnToolContinuation || len(projection.ToolResult) == 0 {
+			return nil, fmt.Errorf("provider input is not a tool continuation")
+		}
+		raw = projection.ToolResult
 	}
 	var entries []map[string]any
-	if err := json.Unmarshal(projection.ToolResult, &entries); err != nil {
+	if err := json.Unmarshal(raw, &entries); err != nil {
 		return nil, fmt.Errorf("decode provider tool results: %w", err)
 	}
 	results := make([]ToolResultEntry, 0, len(entries))

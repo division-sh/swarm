@@ -132,6 +132,7 @@ func snapshotEvaluationValue(value any, seen map[evaluationSnapshotVisit]bool) (
 }
 
 type ValueExpressionOptions struct {
+	AllowEventAt     bool
 	DeclaredPolicy   map[string]any
 	KnownPresence    []string
 	AllowBareItem    bool
@@ -204,7 +205,7 @@ func prepareCheckedValueExpression(expression string, opts ValueExpressionOption
 	if !opts.AllowJoin && ExpressionReferencesRoot(expression, "join") {
 		return nil, nil, fmt.Errorf("join.* is only available inside join completion and deadline outcomes")
 	}
-	if err := ValidateEventReferences(expression); err != nil {
+	if err := validateEventReferences(expression, opts.AllowEventAt); err != nil {
 		return nil, nil, err
 	}
 	if err := requireStructuralExpressionRoots(expression, opts); err != nil {
@@ -862,7 +863,11 @@ func skipBracketExpression(expression string, start int) int {
 }
 
 func ValidateEventReferences(expression string) error {
-	invalid := InvalidEventReferences(expression)
+	return validateEventReferences(expression, false)
+}
+
+func validateEventReferences(expression string, allowAt bool) error {
+	invalid := invalidEventReferences(expression, allowAt)
 	if len(invalid) == 0 {
 		return nil
 	}
@@ -870,10 +875,17 @@ func ValidateEventReferences(expression string) error {
 }
 
 func InvalidEventReferences(expression string) []string {
+	return invalidEventReferences(expression, false)
+}
+
+func invalidEventReferences(expression string, allowAt bool) []string {
 	refs, invalid := scanEventReferences(expression)
 	out := make([]string, 0, len(refs)+len(invalid))
 	out = append(out, invalid...)
 	for _, ref := range refs {
+		if allowAt && ref == "at" {
+			continue
+		}
 		if err := events.ValidateEventContextReference(ref); err != nil {
 			out = append(out, err.Error())
 		}

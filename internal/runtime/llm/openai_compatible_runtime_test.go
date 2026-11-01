@@ -45,7 +45,7 @@ func TestOpenAICompatibleManagedRequestEncodesCanonicalExecutionFrame(t *testing
 			if len(req.Tools) != 1 || req.Tools[0].Type != "function" || req.Tools[0].Function.Name != "notify_human" {
 				t.Fatalf("tools = %#v, want notify_human function tool", req.Tools)
 			}
-			if !openAICompatibleRequestHasFrame(req.Messages, `"kind":"initial"`) {
+			if !openAICompatibleRequestHasFrame(req.Messages, `{"work":"admitted"}`) {
 				t.Fatalf("first request does not contain canonical initial execution frame: %#v", req.Messages)
 			}
 			_, _ = w.Write([]byte(`{
@@ -57,7 +57,7 @@ func TestOpenAICompatibleManagedRequestEncodesCanonicalExecutionFrame(t *testing
 			if req.Model != "test-model" {
 				t.Fatalf("second request model = %q, want sealed frame model", req.Model)
 			}
-			if !openAICompatibleRequestHasFrame(req.Messages, `"kind":"tool_continuation"`) {
+			if !openAICompatibleRequestHasFrame(req.Messages, `{"answer":"ok"}`) {
 				t.Fatalf("second request does not contain canonical continuation frame: %#v", req.Messages)
 			}
 			if !requestHasToolResult(req.Messages, "call_1") {
@@ -155,7 +155,7 @@ func TestAnthropicManagedRequestEncodesCanonicalExecutionFrame(t *testing.T) {
 			if len(req.Tools) != 1 || req.Tools[0].Name != "notify_human" {
 				t.Fatalf("tools = %#v, want notify_human", req.Tools)
 			}
-			if !anthropicRequestHasFrame(req.Messages, `"kind":"initial"`) {
+			if !anthropicRequestHasFrame(req.Messages, `{"work":"admitted"}`) {
 				t.Fatalf("first request does not contain canonical initial frame: %#v", req.Messages)
 			}
 			_, _ = w.Write([]byte(`{"model":"claude-test","usage":{"input_tokens":7,"output_tokens":3},"content":[{"type":"tool_use","id":"call_1","name":"notify_human","input":{"summary":"Strong match found"}}]}`))
@@ -163,7 +163,7 @@ func TestAnthropicManagedRequestEncodesCanonicalExecutionFrame(t *testing.T) {
 			if req.Model != "test-model" {
 				t.Fatalf("second request model = %q, want sealed frame model", req.Model)
 			}
-			if !anthropicRequestHasFrame(req.Messages, `"kind":"tool_continuation"`) {
+			if !anthropicRequestHasFrame(req.Messages, `{"answer":"ok"}`) {
 				t.Fatalf("second request does not contain canonical continuation frame: %#v", req.Messages)
 			}
 			_, _ = w.Write([]byte(`{"model":"claude-test","usage":{"input_tokens":9,"output_tokens":2},"content":[{"type":"text","text":"done"}]}`))

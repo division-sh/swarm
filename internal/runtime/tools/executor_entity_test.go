@@ -775,8 +775,13 @@ func TestRoleScopedEntityTools_CurrentEntityBindingAndBypassRejection(t *testing
 	if err != nil {
 		t.Fatalf("read_state with hostile bookkeeping: %v", err)
 	}
-	if _, exists := whole.(map[string]any)["bookkeeping"]; exists {
-		t.Fatalf("role-scoped read exposed platform bookkeeping: %#v", whole)
+	for _, field := range []string{"bookkeeping", "entity_id", "flow_instance", "entity_type", "current_state", "fields", "revision"} {
+		if _, exists := whole.(map[string]any)[field]; exists {
+			t.Fatalf("role-scoped read exposed platform field %s: %#v", field, whole)
+		}
+	}
+	if brief, ok := whole.(map[string]any)["business_brief"].(map[string]any); !ok || brief["summary"] != "after" {
+		t.Fatalf("whole read lost declared current fields: %#v", whole)
 	}
 	got, err := exec.Execute(currentCtx, "read_state_business_brief", map[string]any{})
 	if err != nil {
@@ -868,8 +873,7 @@ func TestRoleScopedEntityTools_ReadsLargeValidationCaseWithoutLoss(t *testing.T)
 	if !ok {
 		t.Fatalf("whole read = %T, want map", whole)
 	}
-	fields, _ := wholeMap["fields"].(map[string]any)
-	mvp, _ := fields["mvp_spec"].(map[string]any)
+	mvp, _ := wholeMap["mvp_spec"].(map[string]any)
 	if asString(mvp["problem_statement"]) != specProblem {
 		t.Fatalf("whole read mvp_spec.problem_statement length = %d, want %d", len(asString(mvp["problem_statement"])), len(specProblem))
 	}

@@ -254,7 +254,7 @@ func validateConversationMemory(rec runtimellm.ConversationRecord) (agentmemory.
 func conversationPayloads(rec runtimellm.ConversationRecord) ([]byte, string, error) {
 	messages := make([]runtimellm.Message, 0, len(rec.Messages))
 	for _, message := range rec.Messages {
-		stored := runtimellm.Message{Role: strings.TrimSpace(message.Role), Content: storeagent.RedactText(message.Content)}
+		stored := runtimellm.Message{Role: strings.TrimSpace(message.Role), Content: storeagent.RedactText(message.Content), Name: message.Name, RuntimeContext: message.RuntimeContext}
 		if len(message.ToolCalls) != 0 {
 			stored.ToolCalls = make([]runtimellm.ToolCall, len(message.ToolCalls))
 			for i, call := range message.ToolCalls {

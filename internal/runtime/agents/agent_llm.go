@@ -81,17 +81,19 @@ func newLLMAgent(cfg models.AgentConfig, modelRuntime llm.Runtime, toolExecutor 
 		return nil, fmt.Errorf("invalid memory plan for agent %s: %w", agentLabel, err)
 	}
 	c, err := llm.NewManagedConversation(agentframe.SessionSeed{
-		AgentIdentity:  cfg.Identity,
-		Role:           cfg.Role,
-		FlowID:         cfg.FlowID,
-		Intent:         cfg.Intent,
-		Criteria:       append([]string(nil), cfg.Criteria...),
-		ProviderPrompt: providerPrompt,
-		RuntimeMode:    providerContract.RuntimeMode,
-		Provider:       providerContract.Provider,
-		Transport:      string(providerContract.Transport),
-		ModelAlias:     cfg.Model,
-		Model:          cfg.ResolvedModel,
+		AgentIdentity:   cfg.Identity,
+		Role:            cfg.Role,
+		FlowID:          cfg.FlowID,
+		Intent:          cfg.Intent,
+		Content:         cfg.Content,
+		ContentPrograms: cfg.ContentPrograms,
+		Criteria:        append([]string(nil), cfg.Criteria...),
+		ProviderPrompt:  providerPrompt,
+		RuntimeMode:     providerContract.RuntimeMode,
+		Provider:        providerContract.Provider,
+		Transport:       string(providerContract.Transport),
+		ModelAlias:      cfg.Model,
+		Model:           cfg.ResolvedModel,
 	}, "", tools, cfg.Memory, maxTurns, modelRuntime)
 	if err != nil {
 		return nil, err

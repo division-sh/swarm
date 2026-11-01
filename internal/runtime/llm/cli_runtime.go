@@ -298,6 +298,18 @@ func (r *ClaudeCLIRuntime) continueClaudeTurn(ctx context.Context, s *Session, m
 	}
 
 	prompt := message.Content
+	if message.Role == "tool" && strings.HasPrefix(strings.TrimSpace(prompt), "[") {
+		if results := providerToolResults(prompt); len(results) != 0 {
+			var outputs []string
+			for _, result := range results {
+				outputs = append(outputs, result.Payload)
+			}
+			prompt = strings.Join(outputs, "\n")
+		}
+	}
+	if s.TurnCount == 0 && len(s.Messages) == 1 && s.Messages[0].RuntimeContext == "environment" {
+		prompt = s.Messages[0].Content + "\n\n" + prompt
+	}
 	if strings.TrimSpace(prompt) == "" {
 		err := runtimefailures.New(runtimefailures.ClassSchemaInvalid, "empty_agent_prompt", "llm-runtime", "claude_cli_turn", nil)
 		s.ParseFailures++
@@ -444,6 +456,7 @@ func (r *ClaudeCLIRuntime) executeClaudeContinuation(ctx context.Context, s *Ses
 	requestPayload := jsonBytes(map[string]any{
 		"args":                          args,
 		"message":                       message,
+		"provider_input":                prepared.prompt,
 		"provider_session_id":           strings.TrimSpace(s.ProviderSessionID),
 		"prompt_arg_fallback_attempted": fallback.Attempted,
 		"prompt_arg_fallback_used":      fallback.Used,

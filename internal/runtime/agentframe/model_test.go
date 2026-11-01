@@ -75,9 +75,8 @@ func TestExecutionFrameCapabilityProjectionUsesPlanNotObservedEvidence(t *testin
 	if err != nil || role != "user" {
 		t.Fatalf("ProviderInput = role %q err %v", role, err)
 	}
-	var rendered map[string]any
-	if err := json.Unmarshal([]byte(content), &rendered); err != nil || rendered["kind"] != string(TurnInitial) {
-		t.Fatalf("provider rendering = %q err=%v", content, err)
+	if content != string(event.Payload()) {
+		t.Fatalf("provider rendering = %q, want exact payload %q", content, event.Payload())
 	}
 
 	observed, err := surface.Observe(managedcapabilities.DeliveryEvidence{
@@ -251,15 +250,8 @@ func TestExecutionFramePreservesAndHashesExactAdmittedPayloadBytes(t *testing.T)
 		if err != nil {
 			t.Fatal(err)
 		}
-		var rendered struct {
-			Event Event `json:"event"`
-		}
-		if err := json.Unmarshal([]byte(providerInput), &rendered); err != nil {
-			t.Fatal(err)
-		}
-		providerBytes, err := base64.StdEncoding.DecodeString(rendered.Event.PayloadBytesBase64)
-		if err != nil || string(providerBytes) != payload {
-			t.Fatalf("provider payload evidence = %q err=%v, want %q", providerBytes, err, payload)
+		if providerInput != payload {
+			t.Fatalf("provider payload = %q, want %q", providerInput, payload)
 		}
 		frames = append(frames, frame)
 	}

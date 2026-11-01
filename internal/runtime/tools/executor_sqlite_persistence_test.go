@@ -293,8 +293,13 @@ func TestRoleScopedEntityTools_SQLiteCurrentEntityPersistence(t *testing.T) {
 	if err != nil {
 		t.Fatalf("sqlite read_validation_case with hostile bookkeeping: %v", err)
 	}
-	if _, exists := whole.(map[string]any)["bookkeeping"]; exists {
-		t.Fatalf("sqlite role-scoped read exposed platform bookkeeping: %#v", whole)
+	for _, field := range []string{"bookkeeping", "entity_id", "flow_instance", "entity_type", "current_state", "fields", "revision"} {
+		if _, exists := whole.(map[string]any)[field]; exists {
+			t.Fatalf("sqlite role-scoped read exposed platform field %s: %#v", field, whole)
+		}
+	}
+	if brief, ok := whole.(map[string]any)["business_brief"].(map[string]any); !ok || brief["summary"] != "after" {
+		t.Fatalf("sqlite whole read lost declared current fields: %#v", whole)
 	}
 	got, err := exec.Execute(currentCtx, "read_state_business_brief", map[string]any{})
 	if err != nil {
