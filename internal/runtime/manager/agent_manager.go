@@ -775,21 +775,12 @@ func (am *AgentManager) teardownIdentityWithTopology(
 }
 
 func reconfigureSessionMutationPlan(current, updated models.AgentConfig) sessions.LifecycleMutationPlan {
-	if !current.Memory.Enabled {
+	if !current.Memory.Enabled || updated.Memory.Enabled {
 		return sessions.LifecycleMutationPlan{Action: sessions.LifecycleMutationNone}
 	}
-	plan := sessions.LifecycleMutationPlan{
+	return sessions.LifecycleMutationPlan{
 		Action:            sessions.LifecycleMutationTerminateCurrentSet,
 		TerminationReason: sessions.TerminationReasonNormal,
 		TerminationDetail: "agent_reconfigured_identity_changed",
-	}
-	if !updated.Memory.Enabled {
-		return plan
-	}
-	return sessions.LifecycleMutationPlan{
-		Action:            sessions.LifecycleMutationRotateCurrentSet,
-		TerminationReason: sessions.TerminationReasonNormal,
-		TerminationDetail: "agent_reconfigured",
-		CheckpointSummary: "agent reconfigured",
 	}
 }
