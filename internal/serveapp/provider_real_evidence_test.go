@@ -14,8 +14,9 @@ import (
 )
 
 const (
-	realModelSHAEnv   = "SWARM_REAL_MODEL_EVIDENCE_SHA"
-	realModelCellsEnv = "SWARM_REAL_MODEL_EVIDENCE_CELLS"
+	realModelSHAEnv       = "SWARM_REAL_MODEL_EVIDENCE_SHA"
+	realModelCellsEnv     = "SWARM_REAL_MODEL_EVIDENCE_CELLS"
+	realModelTransportEnv = "SWARM_REAL_MODEL_EVIDENCE_TRANSPORT"
 )
 
 var realModelCells = []string{"memory", "tool_round", "empty_content", "refusal"}
@@ -38,20 +39,23 @@ func TestProviderDeepSeekRealModelEvidence(t *testing.T) {
 	}
 	// Inspection uses the same file-tier owner as the adapter, not an env key or
 	// a credential copied into the disposable project.
-	store, err := cliapp.BuildProviderCredentialStore()
-	if err != nil {
-		t.Skip("NOT RUN: credential store unavailable (details withheld)")
-	}
-	profile, _ := llmselection.ResolveActiveBackend(llmselection.BackendOpenAICompatible)
-	credential, err := runtimellm.NewProviderCredentialResolver(store).Inspect(context.Background(), profile)
-	if err != nil || credential.Value == "" {
-		t.Skip("NOT RUN: DeepSeek credential unavailable; no mock fallback")
+	live := os.Getenv(realModelTransportEnv) != "mock"
+	if live {
+		store, err := cliapp.BuildProviderCredentialStore()
+		if err != nil {
+			t.Skip("NOT RUN: credential store unavailable (details withheld)")
+		}
+		profile, _ := llmselection.ResolveActiveBackend(llmselection.BackendOpenAICompatible)
+		credential, err := runtimellm.NewProviderCredentialResolver(store).Inspect(context.Background(), profile)
+		if err != nil || credential.Value == "" {
+			t.Skip("NOT RUN: DeepSeek credential unavailable; no mock fallback")
+		}
 	}
 	for _, backend := range servedparity.RequiredBackends {
 		t.Run(string(backend), func(t *testing.T) {
 			for _, cell := range realModelCells {
 				if selected[cell] {
-					t.Run(cell, func(t *testing.T) { runProviderEvidenceJourney(t, backend, cell, true) })
+					t.Run(cell, func(t *testing.T) { runProviderEvidenceJourney(t, backend, cell, live) })
 				}
 			}
 		})
@@ -61,6 +65,9 @@ func TestProviderDeepSeekRealModelEvidence(t *testing.T) {
 func realModelSelection(env func(string) string, source func() (string, bool)) (map[string]bool, string) {
 	if env("CI") != "" || env("GITHUB_ACTIONS") != "" {
 		return nil, "real-model evidence never runs in CI"
+	}
+	if mode := env(realModelTransportEnv); mode != "" && mode != "mock" && mode != "deepseek" {
+		return nil, "transport must be deepseek or explicitly selected mock"
 	}
 	requested, cells := env(realModelSHAEnv), env(realModelCellsEnv)
 	if requested == "" || cells == "" {
@@ -123,6 +130,17 @@ func TestProviderRealModelEvidenceSelection(t *testing.T) {
 			t.Fatal("GitHub execution was admitted")
 		}
 	})
+	t.Run("invalid_transport", func(t *testing.T) {
+		_, reason := realModelSelection(func(key string) string {
+			if key == realModelTransportEnv {
+				return "other"
+			}
+			return ""
+		}, func() (string, bool) { t.Fatal("invalid transport reached source or credentials"); return "", false })
+		if reason == "" {
+			t.Fatal("unknown transport was admitted")
+		}
+	})
 	t.Run("observation_is_allowlisted", func(t *testing.T) {
 		o := &providerEvidenceObservation{}
 		o.observe(200, []byte(`{"choices":[{"message":{"content":"","reasoning_content":"synthetic-private-reasoning","tool_calls":[{"id":"read-1","function":{"name":"read_flow_data"}}]}}],"usage":{"prompt_tokens":17,"completion_tokens":3,"cost":0.125}}`))
@@ -137,6 +155,10 @@ func TestProviderRealModelEvidenceSelection(t *testing.T) {
 		o.observe(429, nil)
 		if !o.inconclusive {
 			t.Fatal("rate limit was not inconclusive")
+		}
+		o.observe(200, []byte(`{"usage":{"cost_usd":null}}`))
+		if _, present := o.cost["cost_usd"]; present {
+			t.Fatal("null provider cost became a zero-cost claim")
 		}
 	})
 }
