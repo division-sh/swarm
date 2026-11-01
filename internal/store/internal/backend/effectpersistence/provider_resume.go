@@ -182,10 +182,7 @@ func (s *EffectPostgresOwner) LoadProviderCallResume(ctx context.Context, req ru
 		return value, err
 	})
 	value, acknowledged := result.Value()
-	if !acknowledged {
-		return runtimeeffects.ProviderCallRecovery{}, false, result.Err()
-	}
-	return value.recovery, value.found, result.Err()
+	return value.recovery, acknowledged && value.found, result.Err()
 }
 
 func (s *EffectSQLiteOwner) LoadProviderCallResume(ctx context.Context, req runtimeeffects.CompletionContinuationRequest) (runtimeeffects.ProviderCallRecovery, bool, error) {
@@ -211,10 +208,7 @@ func (s *EffectSQLiteOwner) LoadProviderCallResume(ctx context.Context, req runt
 		return value, err
 	})
 	value, acknowledged := result.Value()
-	if !acknowledged {
-		return runtimeeffects.ProviderCallRecovery{}, false, result.Err()
-	}
-	return value.recovery, value.found, result.Err()
+	return value.recovery, acknowledged && value.found, result.Err()
 }
 
 func loadProviderCallResumeTx(ctx context.Context, tx *sql.Tx, postgres bool, req runtimeeffects.CompletionContinuationRequest) (providerCallRecoveryResult, error) {
