@@ -59,6 +59,32 @@ func proveProviderCallJournalBinding(t *testing.T, ctx context.Context, req Auth
 	if bytes.Contains(operationEvidence, []byte("provider_call_journal")) {
 		t.Fatal("request journal changed operation authority")
 	}
+	for _, adapter := range []string{"claude_cli", "mock_python", "unknown"} {
+		j := evidence.Journal
+		j.Adapter = adapter
+		if j.ReadOnly(surface) {
+			t.Fatalf("non-HTTP adapter %s admitted for recovery", adapter)
+		}
+	}
+	for _, capability := range []string{"Bash", "WebSearch", "FileIO"} {
+		var value map[string]any
+		if err := json.Unmarshal(contract, &value); err != nil {
+			t.Fatal(err)
+		}
+		value["NativeTools"].(map[string]any)["Capabilities"].(map[string]any)[capability] = true
+		raw, _ := json.Marshal(value)
+		native, err := managedcapabilities.New(managedcapabilities.Plan{ActorIdentity: surface.ActorIdentity,
+			RuntimeMode: surface.RuntimeMode, Provider: surface.Provider, Transport: surface.Transport,
+			ProviderContract: Fingerprint(raw), Authority: surface.Authority, CreatedAt: surface.CreatedAt})
+		if err != nil {
+			t.Fatal(err)
+		}
+		j := evidence.Journal
+		j.Call.ProviderContract, j.SurfaceID, j.SurfaceHash = raw, native.ID, native.IntegrityHash
+		if j.ReadOnly(native) {
+			t.Fatalf("frozen provider capability %s admitted for recovery", capability)
+		}
+	}
 	for _, scenario := range []string{"body", "destination", "version_header", "session", "frame", "surface", "attempt", "source", "version"} {
 		t.Run("journal_"+scenario, func(t *testing.T) {
 			var copy struct {
