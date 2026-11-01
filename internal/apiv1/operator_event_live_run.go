@@ -90,16 +90,20 @@ func eventPublicationLiveSources(ctx context.Context, opts EventPublicationOptio
 
 func eventPublicationNoLiveRun(ctx context.Context, runs RunReadStore, scope runlifecycle.LiveRunScope, eventName string) error {
 	details := map[string]any{"event_name": eventName, "flow_path": scope.FlowPath, "reason": "no_run_yet"}
+	private, privateScope := scenarioexecution.PrivateRunScopeFromContext(ctx)
 	for cursor := ""; ; {
 		headers, next, err := runs.ListRunHeaders(ctx, operatorread.RunHeaderListOptions{Limit: 100, Cursor: cursor})
 		if err != nil {
 			return err
 		}
 		for _, header := range headers {
-			if header.FlowPath != scope.FlowPath {
+			if privateScope && header.RunID != private.RunID {
 				continue
 			}
-			if header.Status == "live" {
+			if !privateScope && header.FlowPath != scope.FlowPath {
+				continue
+			}
+			if header.Status == "live" || (privateScope && header.Status == "running") {
 				return NewApplicationError(EventPublishRejectedCode, false, map[string]any{
 					"event_name": eventName, "reason": "live_run_changed", "remediation": "select the live run again",
 				})
