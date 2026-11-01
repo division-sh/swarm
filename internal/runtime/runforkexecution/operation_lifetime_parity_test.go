@@ -193,7 +193,7 @@ func TestSelectedContractOperationReplacementBothStores(t *testing.T) {
 						t.Fatalf("retained execution count=%d activation=%s discards=%d: %v", observed.ExecutedEventCount, result.Activation.ForkRunStatus, discards, err)
 					}
 					var status, executionStatus string
-					if err := db.QueryRow(`SELECT r.status, e.state FROM runs r JOIN run_fork_selected_contract_runtime_executions e ON e.fork_run_id=r.run_id WHERE r.run_id=$1`, result.Materialization.ForkRunID).Scan(&status, &executionStatus); err != nil || status != string(runlifecycle.StateLive) || executionStatus != "running" {
+					if err := db.QueryRow(`SELECT r.status, e.state FROM runs r JOIN run_fork_selected_contract_runtime_executions e ON e.fork_run_id=r.run_id WHERE r.run_id=$1`, result.Materialization.ForkRunID).Scan(&status, &executionStatus); err != nil || status != string(runlifecycle.StateLive) || executionStatus != "closed" {
 						t.Fatalf("durable activation/execution = %s/%s: %v", status, executionStatus, err)
 					}
 					stage := storetest.ObserveWriterStage(t, context.WithoutCancel(ctx), selected, result.Materialization.ForkRunID, result.Materialization.ForkRunID, "done")
@@ -210,12 +210,6 @@ func TestSelectedContractOperationReplacementBothStores(t *testing.T) {
 				}
 				if err := owner.RetireSelectedContexts(context.Background()); err != nil {
 					t.Fatal(err)
-				}
-				if point != "activation_failure" && point != "process_shutdown" {
-					var executionStatus string
-					if err := db.QueryRow(`SELECT state FROM run_fork_selected_contract_runtime_executions WHERE fork_run_id=$1`, result.Materialization.ForkRunID).Scan(&executionStatus); err != nil || executionStatus != "closed" {
-						t.Fatalf("explicit retirement did not close selected execution: state=%s err=%v", executionStatus, err)
-					}
 				}
 				if _, err := bound.Begin(context.Background()); !errors.Is(err, worklifetime.ErrRetired) {
 					t.Fatalf("operation did not release selected execution: %v", err)

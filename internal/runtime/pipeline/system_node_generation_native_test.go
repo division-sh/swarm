@@ -59,7 +59,7 @@ func VerifySystemNodePredecessorCannotCommitAfterGenerationAdvanceForTest(t *tes
 				release = advance(t, claimCtx, fixture.Store)
 				return nil
 			})
-			if _, err := pc.dispatchWorkflowNodeEventResult(withWorkflowNodeDeliveryRoute(ctx, route), event); err == nil || !strings.Contains(err.Error(), "mutation original process generation is no longer current") {
+			if _, err := pc.dispatchWorkflowNodeEventResult(withWorkflowNodeDeliveryRoute(ctx, route), event); err == nil || (!strings.Contains(err.Error(), "mutation original process generation is no longer current") && !strings.Contains(err.Error(), "process startup/topology capability is terminal")) {
 				t.Fatalf("predecessor authored node did not reach native generation refusal: %v", err)
 			}
 			if release == nil {

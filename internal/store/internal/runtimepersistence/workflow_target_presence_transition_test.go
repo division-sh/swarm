@@ -249,57 +249,59 @@ func workflowTargetMutationEntry(t *testing.T, f receiverConfigActivationFixture
 
 func TestWorkflowTargetPersistenceReadNeverFabricatesMixedSnapshotOnBothStores(t *testing.T) {
 	for _, backend := range []string{"sqlite", "postgres"} {
-		for attempt := range 12 {
-			t.Run(fmt.Sprintf("%s/%d", backend, attempt), func(t *testing.T) {
-				f, plan := newWorkflowTargetConstructionFixture(t, backend)
-				persisted, err := plan.PersistenceRecord()
-				if err != nil {
-					t.Fatal(err)
-				}
-				record, ctx := persisted.State, f.ctx
-				reader := f.store.(runtimepipeline.WorkflowTargetPersistenceReader)
-				routeEntityID := runtimeidentity.NormalizeEntityID(record.EntityID)
+		t.Run(backend, func(t *testing.T) {
+			for attempt := range 12 {
+				t.Run(fmt.Sprint(attempt), func(t *testing.T) {
+					f, plan := newWorkflowTargetConstructionFixture(t, backend)
+					persisted, err := plan.PersistenceRecord()
+					if err != nil {
+						t.Fatal(err)
+					}
+					record, ctx := persisted.State, f.ctx
+					reader := f.store.(runtimepipeline.WorkflowTargetPersistenceReader)
+					routeEntityID := runtimeidentity.NormalizeEntityID(record.EntityID)
 
-				initial, err := reader.LoadWorkflowTargetPersistence(ctx, record.Identity, routeEntityID)
-				if err != nil || initial.Presence != runtimepipeline.WorkflowTargetPersistenceAbsent {
-					t.Fatalf("attempt %d initial target presence = %d error = %v, want absent", attempt, initial.Presence, err)
-				}
+					initial, err := reader.LoadWorkflowTargetPersistence(ctx, record.Identity, routeEntityID)
+					if err != nil || initial.Presence != runtimepipeline.WorkflowTargetPersistenceAbsent {
+						t.Fatalf("attempt %d initial target presence = %d error = %v, want absent", attempt, initial.Presence, err)
+					}
 
-				start := make(chan struct{})
-				errors := make(chan error, 49)
-				var readers sync.WaitGroup
-				for range 3 {
-					readers.Add(1)
-					go func() {
-						defer readers.Done()
-						<-start
-						for range 16 {
-							target, err := reader.LoadWorkflowTargetPersistence(ctx, record.Identity, routeEntityID)
-							if err != nil {
-								errors <- err
-								continue
+					start := make(chan struct{})
+					errors := make(chan error, 49)
+					var readers sync.WaitGroup
+					for range 3 {
+						readers.Add(1)
+						go func() {
+							defer readers.Done()
+							<-start
+							for range 16 {
+								target, err := reader.LoadWorkflowTargetPersistence(ctx, record.Identity, routeEntityID)
+								if err != nil {
+									errors <- err
+									continue
+								}
+								if target.Presence != runtimepipeline.WorkflowTargetPersistenceAbsent && target.Presence != runtimepipeline.WorkflowTargetPersistenceComplete {
+									errors <- fmt.Errorf("observed impossible atomic create presence %d", target.Presence)
+								}
 							}
-							if target.Presence != runtimepipeline.WorkflowTargetPersistenceAbsent && target.Presence != runtimepipeline.WorkflowTargetPersistenceComplete {
-								errors <- fmt.Errorf("observed impossible atomic create presence %d", target.Presence)
-							}
-						}
-					}()
-				}
-				close(start)
-				if _, err := (agentFixtureFlowActivationCommitter{store: f.store}).CommitFlowInstanceActivation(ctx, plan); err != nil {
-					t.Fatalf("attempt %d commit atomic target pair: %v", attempt, err)
-				}
-				readers.Wait()
-				close(errors)
-				for err := range errors {
-					t.Fatalf("attempt %d target snapshot read: %v", attempt, err)
-				}
-				target, err := reader.LoadWorkflowTargetPersistence(ctx, record.Identity, routeEntityID)
-				if err != nil || target.Presence != runtimepipeline.WorkflowTargetPersistenceComplete {
-					t.Fatalf("attempt %d final target presence = %d error = %v, want complete", attempt, target.Presence, err)
-				}
-			})
-		}
+						}()
+					}
+					close(start)
+					if _, err := (agentFixtureFlowActivationCommitter{store: f.store}).CommitFlowInstanceActivation(ctx, plan); err != nil {
+						t.Fatalf("attempt %d commit atomic target pair: %v", attempt, err)
+					}
+					readers.Wait()
+					close(errors)
+					for err := range errors {
+						t.Fatalf("attempt %d target snapshot read: %v", attempt, err)
+					}
+					target, err := reader.LoadWorkflowTargetPersistence(ctx, record.Identity, routeEntityID)
+					if err != nil || target.Presence != runtimepipeline.WorkflowTargetPersistenceComplete {
+						t.Fatalf("attempt %d final target presence = %d error = %v, want complete", attempt, target.Presence, err)
+					}
+				})
+			}
+		})
 	}
 }
 
