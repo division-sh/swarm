@@ -69,6 +69,7 @@ func TestDeploymentRunStartFeedOnlyAcrossSelectedStores(t *testing.T) {
 		} {
 			t.Run(tc.name, func(t *testing.T) {
 				runID, sourceID, key := uuid.NewString(), uuid.NewString(), uuid.NewString()
+				seedEventPublishLiveRunID(t, fixture.primary, bus, source, runID)
 				ref := scanRef
 				if tc.rowCount == 0 {
 					ref = scoreRef
@@ -108,7 +109,9 @@ func TestDeploymentRunStartFeedOnlyAcrossSelectedStores(t *testing.T) {
 				if err != nil || origin.Kind() != "deployment" || origin.EventID() != "" {
 					t.Fatalf("deployment origin = %#v, %v", origin, err)
 				}
-				receipt, err := fixture.reconstructed.LoadDataRunCreationOperation(ctx, runID)
+				receipt, err := fixture.reconstructed.(interface {
+					LoadDataRowsPublicationOperation(context.Context, string) (durabledata.RunCreationOperationRecord, error)
+				}).LoadDataRowsPublicationOperation(ctx, result["publication_id"].(string))
 				if err != nil || receipt.Summary.EventID != "" || receipt.Summary.PinCount != 1 {
 					t.Fatalf("permanent feed-only receipt = %#v, %v", receipt, err)
 				}
@@ -175,7 +178,7 @@ func TestDeploymentRunStartFeedOnlyAcrossSelectedStores(t *testing.T) {
 						"declaration": dataRunDeclaration(ref), "version_id": sourceReceipt.Result.Candidate.VersionID,
 					}}}
 					blocked := rpcCall(t, handler, deploymentRunStartBody(blockedID, uuid.NewString(), bundleHash, pinData))
-					if blocked.Error == nil || asMap(t, blocked.Error.Data)["code"] != RunFlowAlreadyLiveCode {
+					if blocked.Error == nil || asMap(t, blocked.Error.Data)["code"] != EventPublishRejectedCode || asMap(t, asMap(t, blocked.Error.Data)["details"])["reason"] != "live_run_mismatch" {
 						t.Fatalf("conflicting feed-only start lacks its typed live-flow refusal: %+v", blocked.Error)
 					}
 					after, err := storetest.ReadFiniteRunStartStorageCounts(ctx, fixture.primary)
@@ -188,6 +191,7 @@ func TestDeploymentRunStartFeedOnlyAcrossSelectedStores(t *testing.T) {
 		}
 		t.Run("multiple explicit pins create independent feeds", func(t *testing.T) {
 			runID := uuid.NewString()
+			seedEventPublishLiveRunID(t, fixture.primary, bus, source, runID)
 			data := map[string]any{
 				"imports": []any{},
 				"pins": []any{
@@ -209,6 +213,7 @@ func TestDeploymentRunStartFeedOnlyAcrossSelectedStores(t *testing.T) {
 		})
 		t.Run("one invalid pin rejects the whole run", func(t *testing.T) {
 			runID := uuid.NewString()
+			seedEventPublishLiveRunID(t, fixture.primary, bus, source, runID)
 			data := map[string]any{
 				"imports": []any{},
 				"pins": []any{
@@ -216,29 +221,38 @@ func TestDeploymentRunStartFeedOnlyAcrossSelectedStores(t *testing.T) {
 					map[string]any{"declaration": dataRunDeclaration(scoreRef), "version_id": "resource-version-v1:sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"},
 				},
 			}
-			body := deploymentRunStartBody(runID, uuid.NewString(), bundleHash, data)
+			key := uuid.NewString()
+			body := deploymentRunStartBody(runID, key, bundleHash, data)
 			response := rpcCall(t, handler, body)
 			if response.Error == nil {
 				t.Fatalf("invalid second pin admitted: %#v", response)
 			}
 			for _, table := range []string{"runs", "events", "resource_version_pins", "fan_out_intents"} {
-				if got := dataRunCount(t, fixture, table, "run_id", runID); got != 0 {
+				want := 0
+				if table == "runs" {
+					want = 1
+				}
+				if got := dataRunCount(t, fixture, table, "run_id", runID); got != want {
 					t.Fatalf("invalid second pin left %d %s rows", got, table)
 				}
 			}
-			receipt, err := fixture.reconstructed.LoadDataRunCreationOperation(ctx, runID)
+			receipt, err := fixture.reconstructed.(interface {
+				LoadDataRowsPublicationOperation(context.Context, string) (durabledata.RunCreationOperationRecord, error)
+			}).LoadDataRowsPublicationOperation(ctx, durabledata.RowsPublicationID(actorTokenID(testToken), key))
 			if err != nil || receipt.Summary.Outcome != "data_rejected" || receipt.Summary.PinCount != 0 ||
 				receipt.Summary.Rejection.Code != durabledata.RunCreationRejectionVersionMissing {
 				t.Fatalf("invalid second pin receipt = %#v, %v", receipt, err)
 			}
 			replay := rpcCall(t, handler, body)
 			if replay.Error == nil || !reflect.DeepEqual(replay.Error, response.Error) ||
-				dataRunCount(t, fixture, "resource_run_creation_operations", "run_id", runID) != 1 {
+				dataRunCount(t, fixture, "resource_feed_publications", "run_id", runID) != 1 {
 				t.Fatalf("invalid second pin replay changed the permanent rejection: first=%#v replay=%#v", response, replay)
 			}
+			pauseAPITestLiveRun(t, bus, fixture.primary, runID)
 		})
 		t.Run("event plus feed admits exact root input", func(t *testing.T) {
 			runID := uuid.NewString()
+			seedEventPublishLiveRunID(t, fixture.primary, bus, source, runID)
 			data := map[string]any{"imports": []any{}, "pins": []any{
 				map[string]any{"declaration": dataRunDeclaration(scoreRef), "version_id": versions[scoreRef.Key()]},
 			}}
@@ -246,8 +260,11 @@ func TestDeploymentRunStartFeedOnlyAcrossSelectedStores(t *testing.T) {
 			if response.Error != nil || asMap(t, asMap(t, response.Result)["data_binding"])["pin_count"] != float64(1) {
 				t.Fatalf("event-plus-feed run.start = %#v", response)
 			}
-			if got := dataRunCount(t, fixture, "resource_version_pins", "run_id", runID); got != 1 {
-				t.Fatalf("event-plus-feed pins = %d, want 1", got)
+			record, err := fixture.reconstructed.(interface {
+				LoadDataRowsPublicationOperation(context.Context, string) (durabledata.RunCreationOperationRecord, error)
+			}).LoadDataRowsPublicationOperation(ctx, asMap(t, response.Result)["publication_id"].(string))
+			if err != nil || record.Summary.PinCount != 1 {
+				t.Fatalf("event-plus-feed native pin set = %+v, want 1 (err=%v)", record.Summary, err)
 			}
 			if got := dataRunCount(t, fixture, "fan_out_intents", "run_id", runID); got != 1 {
 				t.Fatalf("event-plus-feed intents = %d, want 1", got)
@@ -270,6 +287,7 @@ func TestRunStartRejectsDeclaredFeedWithoutInputPinBeforeMutation(t *testing.T) 
 			t.Helper()
 			t.Run(name, func(t *testing.T) {
 				runID, key := uuid.NewString(), uuid.NewString()
+				seedEventPublishLiveRunID(t, fixture.primary, bus, source, runID)
 				before, err := fixture.primary.ShowDataResource(ctx, bundleHash, openedRef)
 				if err != nil {
 					t.Fatal(err)
@@ -291,7 +309,11 @@ func TestRunStartRejectsDeclaredFeedWithoutInputPinBeforeMutation(t *testing.T) 
 					t.Fatalf("rejection did not come from compiled root-input admission: %#v", response.Error)
 				}
 				for _, table := range []string{"runs", "events", "resource_version_pins", "fan_out_intents", "resource_run_creation_operations"} {
-					if got := dataRunCount(t, fixture, table, "run_id", runID); got != 0 {
+					want := 0
+					if table == "runs" {
+						want = 1
+					}
+					if got := dataRunCount(t, fixture, table, "run_id", runID); got != want {
 						t.Fatalf("failed admission mutated %s: %d rows", table, got)
 					}
 				}
@@ -306,6 +328,7 @@ func TestRunStartRejectsDeclaredFeedWithoutInputPinBeforeMutation(t *testing.T) 
 				if err != nil || !reflect.DeepEqual(before.Head, after.Head) || len(before.Versions) != len(after.Versions) {
 					t.Fatalf("failed admission changed resource: before=%#v after=%#v err=%v", before, after, err)
 				}
+				pauseAPITestLiveRun(t, bus, fixture.primary, runID)
 			})
 		}
 		for _, eventBacked := range []bool{false, true} {

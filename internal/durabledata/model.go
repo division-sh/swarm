@@ -515,10 +515,11 @@ type Pin struct {
 // PinnedSource is the immutable metadata needed to create or verify one
 // resource-backed fan-out intent. Row bytes are not part of trigger admission.
 type PinnedSource struct {
-	Declaration  DeclarationRef
-	VersionID    VersionID
-	SchemaDigest SchemaDigest
-	RowCount     int
+	PublicationID string
+	Declaration   DeclarationRef
+	VersionID     VersionID
+	SchemaDigest  SchemaDigest
+	RowCount      int
 }
 
 func SortPins(pins []Pin) {

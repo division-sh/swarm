@@ -27,7 +27,8 @@ func TestFeedOnlyRunStartReplayPrecedenceBothStores(t *testing.T) {
 		}
 		handler := eventPublishTestHandlerWithStores(t, fixture.primary, fixture.primary, fixture.primary, bus, source)
 		data := map[string]any{"imports": []any{dataRunFusedImport(uuid.NewString(), ref, durabledata.AbsentHead(), []byte("{\"topic\":\"one\"}\n"))}, "pins": []any{}}
-		body := deploymentRunStartBody(uuid.NewString(), uuid.NewString(), hash, data)
+		runID := seedEventPublishLiveRunID(t, fixture.primary, bus, source, uuid.NewString())
+		body := deploymentRunStartBody(runID, uuid.NewString(), hash, data)
 		first := rpcCall(t, handler, body)
 		if first.Error != nil {
 			t.Fatalf("initial eventless start: %+v", first.Error)
@@ -82,8 +83,8 @@ func TestFeedOnlyRunStartReplayPrecedenceBothStores(t *testing.T) {
 			t.Fatal("source-unavailable new key created executable work")
 		}
 		now = now.Add(runStartIDempotencyTTL + time.Second)
-		if expired := rpcCall(t, unavailable, body); expired.Error == nil {
-			t.Fatal("expired completion resurrected unavailable source")
+		if expired := rpcCall(t, unavailable, body); expired.Error != nil || !bytes.Equal(marshalTestResult(t, first.Result), marshalTestResult(t, expired.Result)) {
+			t.Fatalf("permanent publication replay after transport expiry: %+v", expired)
 		}
 		after, err := storetest.ReadFiniteRunStartStorageCounts(context.Background(), fixture.primary)
 		// Expiration may remove only the expired transport cache. It may not
