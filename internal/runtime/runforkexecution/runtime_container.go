@@ -651,6 +651,19 @@ func (c selectedContractForkLocalRuntimeContainer) serveCommittedAttachment() (f
 	if err := bus.SetDeliveryContinuationOwner(continuations); err != nil {
 		return err
 	}
+	if err := c.admitSelectedDeploymentFeeds(runCtx); err != nil {
+		return err
+	}
+	// Bind the pending ordinal publications before the first canonical fold.
+	inputs, err := c.commitSelectedInputs()
+	if err != nil {
+		return err
+	}
+	defer func() {
+		for _, input := range inputs {
+			finalErr = errors.Join(finalErr, bus.AbandonPreparedPublish(context.WithoutCancel(input.ctx), input.prepared))
+		}
+	}()
 	if err := continuations.Start(runCtx); err != nil {
 		return fmt.Errorf("start selected delivery continuations: %w", err)
 	}
@@ -666,20 +679,6 @@ func (c selectedContractForkLocalRuntimeContainer) serveCommittedAttachment() (f
 	if err := agentRuntime.genericSchedules.ReconcileRunWakeups(runCtx, req.ForkRunID); err != nil {
 		return fmt.Errorf("restore selected child generic schedule wakeups: %w", err)
 	}
-	if err := c.admitSelectedDeploymentFeeds(runCtx); err != nil {
-		return err
-	}
-	// Finish initial serializable commits before autonomous writes. Dispatch
-	// remains separate because it can wait for a handler or an original deadline.
-	inputs, err := c.commitSelectedInputs()
-	if err != nil {
-		return err
-	}
-	defer func() {
-		for _, input := range inputs {
-			finalErr = errors.Join(finalErr, bus.AbandonPreparedPublish(context.WithoutCancel(input.ctx), input.prepared))
-		}
-	}()
 	if err := c.startSelectedServing(runCtx); err != nil {
 		return err
 	}
