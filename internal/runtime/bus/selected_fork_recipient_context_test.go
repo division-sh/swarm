@@ -39,7 +39,7 @@ func selectedRecipientContextFixture(t *testing.T) (context.Context, events.Even
 		recipients = append(recipients, evidence)
 		plan.DeliveryIntents = append(plan.DeliveryIntents, RoutePlanDeliveryIntent{Recipient: evidence.Recipient,
 			TargetOwnership: events.MustEntitylessReceiverTarget(events.RouteIdentity{FlowID: ".", FlowInstance: child}),
-			Handler:         pipeline.MustDeliveryTargetHandler(node).ForEvent(event.Type()), Producer: routeIntentProducerRootNodeRoute, Persist: true})
+			Handler:         pipeline.MustDeliveryTargetHandler(node).ForEvent(event.Type()), Producer: routeIntentProducerOrdinary, Persist: true})
 	}
 	actor := agentidentitytest.RootDeclaredForRun(t, child, "worker", "reply-owner")
 	actorPlan, err := actor.Plan()

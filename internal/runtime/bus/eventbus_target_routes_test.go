@@ -1334,7 +1334,7 @@ func nodeOnlyDeliveryPlan(t testing.TB, evt events.Event, nodeID string) RoutePl
 	targetRoute := events.RouteIdentity{FlowID: ".", FlowInstance: "root"}
 	target := events.MustEntitylessReceiverTarget(targetRoute)
 	plan.AddLiveRecipients(RoutePlanLiveRecipient{Recipient: events.MustNodeDeliveryRecipient(node), PersistAsDelivery: false})
-	plan.AddDeliveryIntents(RoutePlanDeliveryIntent{Recipient: events.MustNodeDeliveryRecipient(node), Producer: routeIntentProducerInternalTargetCarrier,
+	plan.AddDeliveryIntents(RoutePlanDeliveryIntent{Recipient: events.MustNodeDeliveryRecipient(node), Producer: routeIntentProducerOrdinary,
 		TargetBlueprint: targetRoute, TargetOwnership: target, Persist: true,
 	})
 	return plan.Normalized()

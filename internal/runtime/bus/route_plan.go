@@ -46,22 +46,16 @@ func onlyNoHandlerRefusals(err error) bool {
 type routeIntentProducer uint8
 
 const (
-	routeIntentProducerUnknown               routeIntentProducer = 0
-	routeIntentProducerOrdinary              routeIntentProducer = 1
-	routeIntentProducerInternalTargetCarrier routeIntentProducer = 3
-	routeIntentProducerInternalTargetRoute   routeIntentProducer = 4
-	routeIntentProducerConcreteNodeRoute     routeIntentProducer = 5
-	routeIntentProducerRootNodeRoute         routeIntentProducer = 7
-	routeIntentProducerConnectRoutePlan      routeIntentProducer = 9
+	routeIntentProducerUnknown           routeIntentProducer = 0
+	routeIntentProducerOrdinary          routeIntentProducer = 1
+	routeIntentProducerConcreteNodeRoute routeIntentProducer = 5
+	routeIntentProducerConnectRoutePlan  routeIntentProducer = 9
 )
 
 func (p routeIntentProducer) Normalized() routeIntentProducer {
 	switch p {
 	case routeIntentProducerOrdinary,
-		routeIntentProducerInternalTargetCarrier,
-		routeIntentProducerInternalTargetRoute,
 		routeIntentProducerConcreteNodeRoute,
-		routeIntentProducerRootNodeRoute,
 		routeIntentProducerConnectRoutePlan:
 		return p
 	default:

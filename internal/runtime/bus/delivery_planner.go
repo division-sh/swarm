@@ -250,7 +250,7 @@ func (p deliveryPlanner) planRecipients(ctx context.Context, evt events.Event) (
 	if account, selected, err := projection.selectedAccountInstance(ctx, evt); err != nil {
 		return RoutePlan{}, err
 	} else if selected && account.InstancePath == "" {
-		routePlan.MarkCanonicalRouteFailedClosed(routeIntentProducerInternalTargetCarrier, runtimepinrouting.FailureAccountUnclaimed)
+		routePlan.MarkCanonicalRouteFailedClosed(routeIntentProducerOrdinary, runtimepinrouting.FailureAccountUnclaimed)
 		return p.resolvePreparedRoutePlan(projection, routePlan)
 	}
 	ctx = withPublicationTargetOwners(ctx, projection)
@@ -263,7 +263,7 @@ func (p deliveryPlanner) planRecipients(ctx context.Context, evt events.Event) (
 	if joinOccurrence {
 		routePlan.AddDeliveryIntents(RoutePlanDeliveryIntent{
 			Recipient: joinRecipient, TargetBlueprint: joinTarget, Handler: joinHandler,
-			Producer: routeIntentProducerInternalTargetCarrier, Persist: true,
+			Producer: routeIntentProducerOrdinary, Persist: true,
 		})
 		return p.resolvePreparedRoutePlan(projection, routePlan)
 	}

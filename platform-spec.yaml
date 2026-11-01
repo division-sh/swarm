@@ -2360,10 +2360,7 @@ contract_formats:
           canonical_code_owner: internal/runtime/bus.routeIntentProducer
           producers:
           - ordinary
-          - internal_target_carrier
-          - internal_target_route
           - concrete_node_route
-          - root_node_route
           - connect_route_plan
           rule: |
             EventBus RoutePlan producer identity MUST be represented by a closed
@@ -2377,9 +2374,12 @@ contract_formats:
             not by itself create delivery authority, override
             the canonical-admission decision, or permit lower-precedence repair after a
             canonical matched or canonical failed-closed route decision.
-            Subscription, direct and recipient-materializer paths share the
-            ordinary internal producer role; connect, internal-target, concrete
-            and root-node roles retain their distinct typed identities.
+            Subscription, direct, recipient-materializer, join, explicit-target
+            and root-node paths share the ordinary internal producer role;
+            concrete-node and connect roles retain their distinct typed identities.
+            Account-unclaimed refusal still explicitly marks canonical admission
+            and typed failure and clears all executable projections; an ordinary
+            producer identity alone grants no canonical admission.
             Retired role values MUST normalize to unknown, never alias to the
             ordinary role. #1496 removes the
             legacy EventBus eventDeliveryPlan compatibility projection as a live
