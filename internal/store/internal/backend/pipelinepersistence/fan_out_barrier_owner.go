@@ -1039,10 +1039,17 @@ func observeFanOutBarriers(ctx context.Context, tx *sql.Tx, postgres bool, admis
 		runID = key.RunID
 	}
 	owned, err := admission.ObserveFanOutRunTx(ctx, tx, grant, runID)
-	if err != nil || !owned {
+	if err != nil {
 		return nil, err
 	}
+	if !owned {
+		return nil, fanoutobligation.ErrStaleClaim
+	}
 	if key != nil {
+		// Delivery barriers belong to handler declarations, not deployment feeds.
+		if key.DeploymentFeedID != "" {
+			return nil, nil
+		}
 		return loadFanOutBarriers(ctx, tx, postgres, runID, "", key, false)
 	}
 	var observed []fanoutbarrier.Barrier

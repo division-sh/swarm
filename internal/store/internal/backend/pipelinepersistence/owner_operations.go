@@ -3217,6 +3217,12 @@ func (s *PipelinePostgresOwner) TerminalizeRunTx(
 	}
 	var count int
 	err := attempt.WithSQL(ctx, func(ctx context.Context, tx *sql.Tx) error {
+		if _, err := mutationprotocol.RunRowLock(ctx, tx, runID, true); err != nil {
+			return err
+		}
+		if _, err := s.RequirePresentSourceTx(ctx, tx, runID); err != nil {
+			return err
+		}
 		diagnostics := diagnosticDirectReplayEventArgs()
 		args := append([]any{strings.TrimSpace(runID)}, diagnostics...)
 		rows, err := tx.QueryContext(ctx, fmt.Sprintf(`
@@ -3273,6 +3279,12 @@ func (s *PipelineSQLiteOwner) TerminalizeRunTx(
 	}
 	var count int
 	err := attempt.WithSQL(ctx, func(ctx context.Context, tx *sql.Tx) error {
+		if _, err := mutationprotocol.RunRowLock(ctx, tx, runID, true); err != nil {
+			return err
+		}
+		if _, err := s.RequirePresentSourceTx(ctx, tx, runID); err != nil {
+			return err
+		}
 		args := append([]any{strings.TrimSpace(runID)}, diagnosticDirectReplayEventArgs()...)
 		rows, err := tx.QueryContext(ctx, `
 		SELECT e.event_id

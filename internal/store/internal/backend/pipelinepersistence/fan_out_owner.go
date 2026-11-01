@@ -1117,6 +1117,12 @@ func cancelRunFanOut(ctx context.Context, postgres bool, effects interface {
 func (s *PipelinePostgresOwner) CancelRunFanOut(ctx context.Context, runID, reason string, at time.Time) error {
 	outcome := mutationprotocol.RunPostgres(ctx, s.backend, mutationprotocol.Story, mutationprotocol.Ordinary, nil, nil, func(txctx context.Context, attempt *mutationprotocol.Attempt) (struct{}, error) {
 		return struct{}{}, attempt.WithSQL(txctx, func(txctx context.Context, tx *sql.Tx) error {
+			if _, err := mutationprotocol.RunRowLock(txctx, tx, runID, true); err != nil {
+				return err
+			}
+			if _, err := s.RequirePresentSourceTx(txctx, tx, runID); err != nil {
+				return err
+			}
 			return cancelRunFanOut(txctx, true, attempt, tx, runID, reason, at)
 		})
 	})
@@ -1126,6 +1132,12 @@ func (s *PipelinePostgresOwner) CancelRunFanOut(ctx context.Context, runID, reas
 func (s *PipelineSQLiteOwner) CancelRunFanOut(ctx context.Context, runID, reason string, at time.Time) error {
 	outcome := mutationprotocol.RunSQLite(ctx, s.backend, "cancel run fan-out", mutationprotocol.Story, mutationprotocol.Ordinary, nil, nil, func(txctx context.Context, attempt *mutationprotocol.Attempt) (struct{}, error) {
 		return struct{}{}, attempt.WithSQL(txctx, func(txctx context.Context, tx *sql.Tx) error {
+			if _, err := mutationprotocol.RunRowLock(txctx, tx, runID, true); err != nil {
+				return err
+			}
+			if _, err := s.RequirePresentSourceTx(txctx, tx, runID); err != nil {
+				return err
+			}
 			return cancelRunFanOut(txctx, false, attempt, tx, runID, reason, at)
 		})
 	})

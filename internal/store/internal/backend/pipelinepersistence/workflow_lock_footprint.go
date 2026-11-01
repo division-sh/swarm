@@ -132,6 +132,9 @@ func lockWorkflowPublicationFootprintTx(ctx context.Context, tx *sql.Tx, postgre
 	}
 	ordered := make([]flowidentity.RunScopedFlowInstance, 0, len(strong))
 	for owner := range strong {
+		if err := owner.Validate(); err != nil {
+			return fmt.Errorf("prepared workflow footprint %v: %w", owner, err)
+		}
 		ordered = append(ordered, owner)
 	}
 	sort.Slice(ordered, func(i, j int) bool {
@@ -148,7 +151,7 @@ func lockWorkflowPublicationFootprintTx(ctx context.Context, tx *sql.Tx, postgre
 	sort.Strings(runIDs)
 	for _, runID := range runIDs {
 		if _, err := sourceadmission.LoadPostgresTx(ctx, tx, runID, false, false); err != nil {
-			return err
+			return fmt.Errorf("admit prepared workflow run %s: %w", runID, err)
 		}
 	}
 	if err := lockWorkflowInstancesTx(ctx, tx, true, ordered); err != nil {
@@ -157,20 +160,20 @@ func lockWorkflowPublicationFootprintTx(ctx context.Context, tx *sql.Tx, postgre
 	for _, owner := range ordered {
 		if strong[owner] {
 			if _, _, err := workflowheader.LoadForMutation(ctx, tx, true, owner.RunID, "", owner.Route.InstancePath); err != nil {
-				return err
+				return fmt.Errorf("lock prepared workflow header %v: %w", owner, err)
 			}
 		} else {
 			var id string
 			err := tx.QueryRowContext(ctx, `SELECT entity_id FROM flow_instances WHERE run_id=$1::uuid AND instance_path=$2 FOR SHARE`, owner.RunID, owner.Route.InstancePath).Scan(&id)
 			if err != nil && !errors.Is(err, sql.ErrNoRows) {
-				return err
+				return fmt.Errorf("lock prepared publication stage %v: %w", owner, err)
 			}
 		}
 	}
 	for _, owner := range ordered {
 		if ready[owner] {
 			if _, _, err := loadDynamicFlowRuntimeReadiness(ctx, tx, true, owner.RunID, owner.Route, true); err != nil {
-				return err
+				return fmt.Errorf("lock prepared workflow readiness %v: %w", owner, err)
 			}
 		}
 	}

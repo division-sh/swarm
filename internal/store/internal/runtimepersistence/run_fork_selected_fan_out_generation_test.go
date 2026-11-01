@@ -385,7 +385,9 @@ func consumeSelectedForkFanOutEmissions(t *testing.T, fixture authorActivityRece
 	if expectedFailure != "" && fenced != len(emissions) {
 		t.Fatalf("historical failure accounting lost committed ordinals: fenced=%d committed=%d", fenced, len(emissions))
 	}
-	advanceFanOutBarriersForTest(t, ctx, selected, intent.Request.Key.RunID, time.Now().UTC())
+	if _, err := owner.AdvanceFanOutBarriers(ctx, intent.Request.Key); err != nil {
+		t.Fatal(err)
+	}
 	wantStatus := fanoutbarrier.StatusClosedPending
 	wantSummary := &fanoutbarrier.Summary{Total: len(emissions), Succeeded: len(emissions)}
 	wantSchedule := handle.TaskID()

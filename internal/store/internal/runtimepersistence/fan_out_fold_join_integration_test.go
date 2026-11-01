@@ -24,17 +24,18 @@ func TestFanOutFoldJoinRollbackAndFreshSiblingBothStores(t *testing.T) {
 			}
 			firstHandle := seedFanOutDeliveryBarrier(t, ctx, db, first, base)
 			secondHandle := seedFanOutDeliveryBarrier(t, ctx, db, second, base)
-			// The first barrier closes before the second fold sees a missing fact.
+			// Exact barriers settle independently; corruption rolls back only its
+			// own summary/schedule, not a sibling already physically committed.
 			if _, err := db.ExecContext(ctx, `UPDATE fan_out_intents SET cardinality=1,cursor=1 WHERE run_id=$1 AND semantic_path=$2`, second.runID, second.semanticPath); err != nil {
 				t.Fatal(err)
 			}
 			if err := advanceFanOutBarriersAttempt(ctx, selected, first.runID, base.Add(time.Second)); err == nil || !strings.Contains(err.Error(), "ordinal outcomes") {
 				t.Fatalf("later corrupt sibling must reject transaction: %v", err)
 			}
-			for _, fixture := range []fanOutOwnerFixture{first, second} {
-				assertFanOutBarrierState(t, ctx, db, fixture.runID, fixture.deliveryID, fixture.semanticPath, fanoutbarrier.StatusArmed, nil, "")
-			}
-			assertFanOutBarrierTimerCount(t, ctx, db, first.runID, 0)
+			empty := fanoutbarrier.Summary{}
+			assertFanOutBarrierState(t, ctx, db, first.runID, first.deliveryID, first.semanticPath, fanoutbarrier.StatusClosedPending, &empty, firstHandle.TaskID())
+			assertFanOutBarrierState(t, ctx, db, second.runID, second.deliveryID, second.semanticPath, fanoutbarrier.StatusArmed, nil, "")
+			assertFanOutBarrierTimerCount(t, ctx, db, first.runID, 1)
 
 			// A new call must see the repaired, still-open sibling rather than
 			// reusing any facts from the aborted transaction.
@@ -42,7 +43,6 @@ func TestFanOutFoldJoinRollbackAndFreshSiblingBothStores(t *testing.T) {
 				t.Fatal(err)
 			}
 			advanceFanOutBarriersForTest(t, ctx, selected, first.runID, base.Add(2*time.Second))
-			empty := fanoutbarrier.Summary{}
 			assertFanOutBarrierState(t, ctx, db, first.runID, first.deliveryID, first.semanticPath, fanoutbarrier.StatusClosedPending, &empty, firstHandle.TaskID())
 			assertFanOutBarrierState(t, ctx, db, second.runID, second.deliveryID, second.semanticPath, fanoutbarrier.StatusArmed, nil, "")
 			assertFanOutBarrierTimerCount(t, ctx, db, first.runID, 1)
