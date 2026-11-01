@@ -7168,7 +7168,9 @@ func writePromptWriterCoverageFixture(t *testing.T, agentsYAML, entitiesYAML, pr
 	t.Helper()
 	root := t.TempDir()
 
+	writeBootverifyFixtureFile(t, filepath.Join(root, "manifest.yaml"), "version: 1.0.0\nplatform_version: '*'\n")
 	writeBootverifyFixtureFile(t, filepath.Join(root, "schema.yaml"), "stages: []\n")
+	writeBootverifyFixtureFile(t, filepath.Join(root, "child", "manifest.yaml"), "version: 1.0.0\nplatform_version: '*'\n")
 	writeBootverifyFixtureFile(t, filepath.Join(root, "child", "schema.yaml"), `stages:
   idle: {}
   done: {final: true}

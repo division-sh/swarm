@@ -4693,7 +4693,7 @@ func TestEventBusPublish_RecordsNestedTemplateInstanceLocalizedEvent(t *testing.
 		"child/schema.yaml":              "stages: []\n",
 		"child/grandchild/manifest.yaml": "version: 1.0.0\nplatform_version: '*'\n",
 		"child/grandchild/schema.yaml":   "instance: instance_key\n",
-		"child/grandchild/entities.yaml": "work:\n  instance_key: {type: text, _unused_reason: fixture instance identity}\n",
+		"child/grandchild/state.yaml":    "instance_key: text\n",
 		"child/grandchild/events.yaml":   "micro.done:\n",
 		"child/grandchild/nodes.yaml":    "worker:\n  execution_type: system_node\n  subscribes_to: [micro.done]\n  event_handlers:\n    micro.done: {}\n",
 	})

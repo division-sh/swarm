@@ -42,7 +42,7 @@ func TestReceiverPublicInputFinalizesCreationWithoutRecoveryBothStores(t *testin
 				"events.yaml":                 "conversation.received:\n  conversation_reference: text\n  conversation_scope: text\n  external_account: text\n  provider_message_reference: integer\n  text: text\n",
 				"telegram-chat/manifest.yaml": "version: 1.0.0\nplatform_version: '*'\n",
 				"telegram-chat/schema.yaml":   "instance: conversation_reference\nauto_emit_on_create:\n  event: chat.initialized\npins:\n  inputs: [conversation.received]\n",
-				"telegram-chat/entities.yaml": "chat:\n  conversation_reference: {type: text, _unused_reason: canonical receiver key}\n  text: text\n  provider_message_reference: integer\n  enabled: {type: boolean, initial: false}\n",
+				"telegram-chat/state.yaml":    "conversation_reference: text\ntext: text\nprovider_message_reference: integer\nenabled: false\n",
 				"telegram-chat/events.yaml":   "chat.initialized:\n  conversation_reference: text\n  text: text\n  provider_message_reference: integer\n  enabled: boolean\n",
 				"telegram-chat/nodes.yaml":    "receiver:\n  execution_type: system_node\n  subscribes_to: [conversation.received, chat.initialized]\n  event_handlers:\n    conversation.received:\n      guard: {check: payload.conversation_reference != ''}\n    chat.initialized:\n      data_accumulation:\n        writes: [text, provider_message_reference, enabled]\n",
 			} {

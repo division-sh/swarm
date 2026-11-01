@@ -2600,7 +2600,7 @@ func eventPublishTemplateInputTestBundle(t testing.TB, eventName string, authore
 		"schema.yaml":             []byte("stages: []\n"),
 		"operating/manifest.yaml": []byte("version: 1.0.0\nplatform_version: '*'\n"),
 		"operating/schema.yaml":   []byte(fmt.Sprintf("instance: instance_key\nstages: []\npins:\n  inputs: [%s]\n", eventName)),
-		"operating/entities.yaml": []byte("work:\n  instance_key: {type: text, _unused_reason: fixture instance identity}\n"),
+		"operating/state.yaml":    []byte("instance_key: text\n"),
 		"operating/events.yaml":   []byte(eventName + ":\n  topic: text\n  entity_id: uuid?\n"),
 	}
 	if authoredRoot {
