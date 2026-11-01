@@ -131,12 +131,19 @@ func requireSelectedRoundSession(session *Session, call *managedProviderCall, pr
 
 func requireOpenAICompatibleRoundSession(session *Session, call *managedProviderCall, projection completionProjection) error {
 	surface := call.toolRound.Surface
+	predecessorSession := session.ID
+	if call.resume != nil {
+		predecessorSession = call.resume.Journal.Call.SessionID
+		if projection.SessionID != predecessorSession {
+			return fmt.Errorf("openai-compatible recovered predecessor differs from its journal session")
+		}
+	}
 	if call.frame.Turn.Kind != agentframe.TurnToolContinuation ||
 		(projection.Memory.Enabled && projection.SessionID != session.ID) || projection.Identity.Normalize() != session.MemoryIdentity.Normalize() ||
 		projection.Memory != session.Memory || projection.TurnCount != session.TurnCount ||
 		projection.FrameID == "" || projection.FrameID != call.frame.Turn.ParentFrameID ||
 		len(session.Messages) != len(projection.Messages) ||
-		!surface.MatchesActor(session.MemoryIdentity) || surface.Authority.SessionID != session.ID ||
+		!surface.MatchesActor(session.MemoryIdentity) || surface.Authority.SessionID != predecessorSession ||
 		surface.RuntimeMode != call.provider.RuntimeMode || surface.Provider != call.provider.Provider || surface.Transport != call.provider.Transport {
 		return fmt.Errorf("openai-compatible tool continuation predecessor differs from acquired session/frame")
 	}
