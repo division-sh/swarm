@@ -174,7 +174,7 @@ func runChannelDynamicHolderLivePickup(t *testing.T, backend servedparity.Backen
 	if err := os.Remove(filepath.Join(root, "policy.yaml")); err != nil {
 		t.Fatal(err)
 	}
-	writeStandingCandidateFile(t, filepath.Join(root, "entities.yaml"), "telegram_service:\n  operator_account: text\n")
+	writeStandingCandidateFile(t, filepath.Join(root, "state.yaml"), "operator_account: text\n")
 	writeStandingCandidateFile(t, filepath.Join(root, "events.yaml"), "account.assigned:\n  operator_account: text\n")
 	writeStandingCandidateFile(t, filepath.Join(root, "schema.yaml"), "stages: {active: {}}\npins:\n  inputs: [inbound.telegram.text_message, account.assigned]\n")
 	writeStandingCandidateFile(t, filepath.Join(root, "nodes.yaml"), `assign-account:
