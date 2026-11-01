@@ -11,19 +11,8 @@ import (
 	runtimeeffects "github.com/division-sh/swarm/internal/runtime/effects"
 	runtimellm "github.com/division-sh/swarm/internal/runtime/llm"
 	"github.com/division-sh/swarm/internal/runtime/sessions"
-	"github.com/division-sh/swarm/internal/testutil"
 	"github.com/google/uuid"
 )
-
-func TestCompletionToolResultConsumptionSQLite(t *testing.T) {
-	store := newBootstrappedSQLiteRuntimeStoreForTest(t)
-	proveCompletionToolResultConsumption(t, newCompletionSettlementFixture(t, store, store.backend.ConstructionHandle(), true))
-}
-
-func TestCompletionToolResultConsumptionPostgres(t *testing.T) {
-	_, db, _ := testutil.StartPostgres(t)
-	proveCompletionToolResultConsumption(t, newCompletionSettlementFixture(t, admitTestPostgresStore(t, db), db, false))
-}
 
 func proveCompletionToolResultConsumption(t *testing.T, fixture completionSettlementFixture) {
 	t.Helper()
@@ -78,7 +67,7 @@ func proveCompletionToolResultConsumption(t *testing.T, fixture completionSettle
 		{"parent", "agent-frame:v1:" + uuid.NewString(), result},
 		{"call", frameID, json.RawMessage(`[{"tool_call_id":"foreign","name":"echo","ok":true,"result":{}}]`)},
 		{"name", frameID, json.RawMessage(`[{"tool_call_id":"call-1","name":"other","ok":true,"result":{}}]`)},
-		{"missing", frameID, json.RawMessage(`[]`)},
+		{"cardinality", frameID, json.RawMessage(`[{"tool_call_id":"call-1","name":"echo","ok":true,"result":{}},{"tool_call_id":"extra","name":"echo","ok":true,"result":{}}]`)},
 	} {
 		t.Run(hostile.name, func(t *testing.T) {
 			candidate, err := agentframe.NewToolContinuation(hostile.parent, hostile.payload)
