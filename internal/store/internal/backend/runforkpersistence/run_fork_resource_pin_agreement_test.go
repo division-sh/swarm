@@ -1,6 +1,7 @@
 package runforkpersistence
 
 import (
+	"context"
 	"testing"
 
 	"github.com/division-sh/swarm/internal/durabledata"
@@ -42,7 +43,7 @@ func TestForkResourceSourcePinAgreementPreservesChildPinAuthority(t *testing.T) 
 		{"duplicate-pin", runfork.RunForkPlan{}, append(pins(oldVersion), durabledata.Pin{Declaration: ref, VersionID: oldVersion}), true},
 	} {
 		t.Run(test.name, func(t *testing.T) {
-			err := requireForkResourceSourcePinAgreement(test.plan, test.pins)
+			err := requireForkResourceSourcePinAgreement(context.Background(), nil, nil, test.plan, test.pins)
 			if (err != nil) != test.reject {
 				t.Fatalf("fixed-revision agreement: reject=%t err=%v", test.reject, err)
 			}

@@ -20,6 +20,14 @@ func (s *SQLiteRuntimeStore) LoadPinnedSource(ctx context.Context, runID, bundle
 	return s.durableDataOwner.LoadPinnedSource(ctx, runID, bundleHash, ref)
 }
 
+func (s *PostgresStore) LoadFeedSource(ctx context.Context, runID, bundleHash, feedID string, ref runtimedata.DeclarationRef) (runtimedata.PinnedSource, error) {
+	return s.durableDataOwner.LoadFeedSource(ctx, runID, bundleHash, feedID, ref)
+}
+
+func (s *SQLiteRuntimeStore) LoadFeedSource(ctx context.Context, runID, bundleHash, feedID string, ref runtimedata.DeclarationRef) (runtimedata.PinnedSource, error) {
+	return s.durableDataOwner.LoadFeedSource(ctx, runID, bundleHash, feedID, ref)
+}
+
 func (s *PostgresStore) LoadPinnedRowsRange(ctx context.Context, runID, bundleHash string, source runtimedata.PinnedSource, start, end int) ([]any, error) {
 	return s.durableDataOwner.LoadPinnedRowsRange(ctx, runID, bundleHash, source, start, end)
 }

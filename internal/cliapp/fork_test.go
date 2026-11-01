@@ -52,7 +52,7 @@ func TestForkCommandUsesRunForkRPCAndRenders(t *testing.T) {
 	assertForkRequest(t, captured, map[string]any{
 		"source_run_id":   sourceRunID,
 		"bundle_hash":     bundleHash,
-		"fork_event_id":   forkEventID,
+		"publication_id":  forkEventID,
 		"idempotency_key": "idem-fork-1",
 	})
 	for _, want := range []string{"Fork created", "source_run_id=" + sourceRunID, "source_status=paused source_frozen=false", "fork_run_id=33333333-3333-3333-3333-333333333333", "source=" + artifact.BundleHash()[len("bundle-v2:sha256:"):len("bundle-v2:sha256:")+7], "owner=run.fork.selected_contracts.v1"} {
