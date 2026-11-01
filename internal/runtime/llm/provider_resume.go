@@ -91,7 +91,7 @@ func (c *Conversation) recoverInterruptedProviderCall(ctx context.Context, previ
 		return nil, true, fmt.Errorf("provider resume causal event differs from its delivery")
 	}
 	draft := agentframe.TurnDraft{Kind: recovery.Frame.Turn.Kind, Event: *c.causalEvent,
-		ParentFrameID: recovery.Frame.Turn.ParentFrameID, InputRole: role, InputContent: content}
+		ParentFrameID: recovery.Frame.Turn.ParentFrameID}
 	if draft.Kind == agentframe.TurnToolContinuation {
 		continuation, err := agentframe.NewToolContinuation(draft.ParentFrameID, recovery.Frame.Turn.ToolResult)
 		if err != nil {
