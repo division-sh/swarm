@@ -3262,6 +3262,9 @@ func (a *Adapter) loadByID(ctx context.Context, q interface {
 		// A waiting joined lock can refresh d without refreshing its attempt.
 		var lockedID string
 		if err := q.QueryRowContext(ctx, `SELECT delivery_id::text FROM event_deliveries WHERE delivery_id=$1::uuid FOR UPDATE`, deliveryID).Scan(&lockedID); err != nil {
+			if errors.Is(err, sql.ErrNoRows) {
+				return deliveryRecord{}, ErrNotFound
+			}
 			return deliveryRecord{}, err
 		}
 	}
@@ -3278,6 +3281,9 @@ func (a *Adapter) loadByEventAndRoute(ctx context.Context, q interface {
 	if lock && a.dialect == DialectPostgres {
 		var lockedID string
 		if err := q.QueryRowContext(ctx, `SELECT delivery_id::text FROM event_deliveries WHERE event_id=$1::uuid AND route_identity=$2 FOR UPDATE`, strings.TrimSpace(eventID), events.EncodeDeliveryRouteIdentity(identity)).Scan(&lockedID); err != nil {
+			if errors.Is(err, sql.ErrNoRows) {
+				return deliveryRecord{}, ErrNotFound
+			}
 			return deliveryRecord{}, err
 		}
 	}

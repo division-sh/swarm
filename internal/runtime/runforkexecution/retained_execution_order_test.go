@@ -465,10 +465,8 @@ func proveRetainedAcknowledgment(t *testing.T, fault string) {
 				if err != nil {
 					t.Fatal(err)
 				}
-				for _, table := range []string{"entity_state", "event_delivery_handler_rule_selections"} {
-					if !reflect.DeepEqual(childBefore[table], childAfter[table]) {
-						t.Fatalf("failed continuation startup changed %s: before=%+v after=%+v", table, childBefore[table], childAfter[table])
-					}
+				if !reflect.DeepEqual(childBefore["entity_state"], childAfter["entity_state"]) {
+					t.Fatal("failed continuation startup changed child entity state")
 				}
 				deliveries, err := storetest.DecodeSelectedForkSnapshotRows(childAfter["event_deliveries"])
 				if err != nil {
@@ -494,7 +492,7 @@ func proveRetainedAcknowledgment(t *testing.T, fault string) {
 					if err != nil || !remaining[id] {
 						t.Fatalf("retirement attempt has foreign or duplicate delivery: %q %v", id, err)
 					}
-					delete(remaining, id)
+					remaining[id] = false
 					for column, want := range map[string]string{"closure_kind": "settled", "outcome": "terminalized", "reason_code": "run_failed"} {
 						value, err := row[column].Text()
 						if err != nil || value != want {
@@ -506,6 +504,29 @@ func proveRetainedAcknowledgment(t *testing.T, fault string) {
 						string(row["current_delivery_id"].Value) != "null" || string(row["active_session_id"].Value) != "null" ||
 						string(row["side_effects"].Value) != "null" || string(row["duration_ms"].Value) != "0" {
 						t.Fatalf("startup retirement contained executing or dispatched work: %+v", row)
+					}
+				}
+				selections, err := storetest.DecodeSelectedForkSnapshotRows(childAfter["event_delivery_handler_rule_selections"])
+				if err != nil || len(childBefore["event_delivery_handler_rule_selections"].Rows) != 0 || len(selections) != len(attempts) {
+					t.Fatalf("startup cleanup lost its exact non-handler selections: count=%d %v", len(selections), err)
+				}
+				for _, row := range selections {
+					id, err := row["delivery_id"].Text()
+					seen, found := remaining[id]
+					if err != nil || !found || seen {
+						t.Fatalf("cleanup selection has foreign or duplicate delivery: %q %v", id, err)
+					}
+					remaining[id] = true
+					for column, want := range map[string]string{"selection_context": "none", "disposition": "not_applicable", "display_label": ""} {
+						value, err := row[column].Text()
+						if err != nil || value != want {
+							t.Fatalf("startup cleanup selected a handler: %s=%q want=%q: %v", column, value, want, err)
+						}
+					}
+					for _, column := range []string{"flow_path", "declaration_family", "semantic_path"} {
+						if string(row[column].Value) != "null" {
+							t.Fatalf("startup cleanup retained handler identity: %+v", row)
+						}
 					}
 				}
 			}
