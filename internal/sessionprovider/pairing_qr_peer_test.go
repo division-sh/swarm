@@ -15,6 +15,37 @@ import (
 )
 
 func TestWhatsAppDirectQRPublicSDKRepeatedBatches(t *testing.T) {
+	t.Run("unpaired_provider_reconnect_refused", func(t *testing.T) {
+		peer := newSDKPeerMode(t, false)
+		o := newPairingOccurrenceFixture(t, peer)
+		scope := pairingScopeFixture(t)
+		scope.ConnectionID, scope.OccurrenceID = o.connectionID, o.occurrenceID
+		if _, err := o.bindPairing(scope); err != nil {
+			t.Fatal(err)
+		}
+		if _, err := o.bindCallbacks(func(context.Context, any) error { return nil },
+			func(context.Context, callbackFailure) error { return nil }); err != nil {
+			t.Fatal(err)
+		}
+		if err := o.connect(o.ctx); err != nil {
+			t.Fatal(err)
+		}
+		socket := pairingSocketFixture(t, peer)
+		if err := socket.send(peer.ctx, waBinary.Node{Tag: "stream:error", Attrs: waBinary.Attrs{"code": "515"}}); err != nil {
+			t.Fatal(err)
+		}
+		select {
+		case <-o.ctx.Done():
+		case <-peer.ctx.Done():
+			t.Fatal("unpaired provider reconnect did not fence its occurrence")
+		}
+		o.mu.Lock()
+		reconnect, reason := o.loginReconnect, o.failureReason
+		o.mu.Unlock()
+		if reconnect || o.client.Store.ID != nil || reason != "connection must be re-established" {
+			t.Fatal("unpaired reconnect gained pairing or account authority")
+		}
+	})
 	peer := newSDKPeerMode(t, false)
 	o := newPairingOccurrenceFixture(t, peer)
 	scope := pairingScopeFixture(t)

@@ -318,7 +318,7 @@ func runScenarioTestCommand(ctx context.Context, RepoRoot string, out, errOut io
 		return returnScenarioTestValidationError(errOut, fmt.Errorf("private test session runner is unavailable"))
 	}
 	err = opts.apiOptions.runTest(ctx, TestSessionRequest{
-		Bundle: bundle, SourceRoot: sourceRoot, PlatformPackBase: platformPackBase, LiveBackend: profile.ID, ModelAliases: configResult.Config.LLM.Models,
+		Bundle: bundle, SourceRoot: sourceRoot, PlatformPackBase: platformPackBase, LLM: configResult.Config.LLM,
 		WorkspaceBackend: workspaceBackend,
 	}, func(sessionCtx context.Context, endpoint TestSessionEndpoint) error {
 		rpcEndpoint, err := cliAPIRPCEndpointFromServer(endpoint.APIServer, "private test session")

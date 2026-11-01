@@ -283,20 +283,15 @@ func ProveReconfigureMemoryEnabledConfigChange(t *testing.T, ctx context.Context
 		t.Fatalf("ReconfigureAgent: %v", err)
 	}
 	rec, ok, err := selected.LoadActiveConversation(context.Background(), agentmemory.Identity(cfg.Identity))
-	if err != nil || !ok || rec.SessionID == lease.SessionID {
-		t.Fatalf("memory session = %#v ok=%v err=%v, want rotated successor", rec, ok, err)
+	if err != nil || !ok || rec.SessionID != lease.SessionID {
+		t.Fatalf("memory session = %#v ok=%v err=%v, want retained session %s", rec, ok, err, lease.SessionID)
 	}
 	if rec.Identity != reconfigureMemoryIdentity(t, am, cfg.ID, cfg.FlowPath) {
 		t.Fatalf("memory identity = %+v, want exact run/agent/flow identity", rec.Identity)
 	}
 	rows := history(agentmemory.Identity(cfg.Identity))
-	if len(rows) != 2 {
-		t.Fatalf("native rotation history = %#v", rows)
-	}
-	for _, prior := range rows {
-		if prior.SessionID == lease.SessionID && (prior.Status != "terminated" || prior.SuccessorSessionID != rec.SessionID) {
-			t.Fatalf("native predecessor lineage = %#v", prior)
-		}
+	if len(rows) != 1 || rows[0].SessionID != lease.SessionID || rows[0].Status != "active" || rows[0].SuccessorSessionID != "" {
+		t.Fatalf("retained native memory history = %#v", rows)
 	}
 }
 
@@ -349,8 +344,8 @@ func ProveReconfigureExplicitTrue(t *testing.T, ctx context.Context, persistence
 		t.Fatalf("omitted memory changed plan to %+v", got.Memory)
 	}
 	current, ok, err := selected.LoadActiveConversation(context.Background(), agentmemory.Identity(cfg.Identity))
-	if err != nil || !ok || current.SessionID == lease.SessionID {
-		t.Fatalf("retained enabled memory did not rotate on config change: %#v ok=%v err=%v", current, ok, err)
+	if err != nil || !ok || current.SessionID != lease.SessionID {
+		t.Fatalf("enabled memory changed on config change: %#v ok=%v err=%v", current, ok, err)
 	}
 }
 

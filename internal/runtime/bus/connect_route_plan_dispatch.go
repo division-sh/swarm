@@ -1107,7 +1107,6 @@ func connectRoutePlanLiveRecipients(runID string, routes []runtimepinrouting.Con
 			Recipient:         route.Recipient,
 			AgentIdentity:     identity,
 			PersistAsDelivery: route.Recipient.IsAgent(),
-			Producer:          routeIntentProducerConnectRoutePlan,
 		})
 	}
 	return normalizeRoutePlanLiveRecipients(out), nil

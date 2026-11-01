@@ -101,7 +101,7 @@ func TestClaudeContinuationCharacterization(t *testing.T) {
 				}
 				first := characterizationArgs(t, dir, 1)
 				second := characterizationArgs(t, dir, 2)
-				if argValue(first, "--resume") != "" || slices.Contains(first, "--fork-session") || argValue(second, "--resume") != firstHead || !slices.Contains(second, "--fork-session") || argValue(second, "--system-prompt") != "" {
+				if argValue(first, "--resume") != "" || slices.Contains(first, "--fork-session") || argValue(second, "--resume") != firstHead || !slices.Contains(second, "--fork-session") || argValue(second, "--system-prompt") != conv.Session.SystemPrompt {
 					t.Fatalf("fresh/resumed arguments first=%v second=%v", first, second)
 				}
 				for _, args := range [][]string{first, second} {

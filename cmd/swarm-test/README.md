@@ -142,3 +142,53 @@ The 30-minute local goal is a measurement target, not a relaxed test deadline or
 an assurance of success. Missing, failed, interrupted, and unstarted work earns no
 full qualification. A killed supervisor does not release authority still retained
 by a surviving descendant.
+
+## Reviewer-Selected Real-Model Evidence
+
+[#2563's design](https://github.com/division-sh/swarm/issues/2563#issuecomment-6553907557)
+and [account/model authorization](https://github.com/division-sh/swarm/issues/2563#issuecomment-6553950351)
+define advisory DeepSeek evidence, not a CI tier or merge gate. A reviewer records
+the exact reviewed SHA, selected cells and integration-risk reason on the requesting
+PR. An authorized executor runs that selection on the approved private test host
+only, never hosted or self-hosted CI. Presence of a key does not select a run.
+
+After that request and the initial selection-path merge, from a clean checkout:
+
+```sh
+SWARM_REAL_MODEL_EVIDENCE_SHA="$(git rev-parse HEAD)" \
+SWARM_REAL_MODEL_EVIDENCE_CELLS=memory,tool_round,empty_content,refusal \
+go run ./cmd/swarm-test -- ./internal/serveapp \
+  -run '^TestProviderDeepSeekRealModelEvidence$' -count=1 -timeout=30m -v
+```
+
+Set `SWARM_CREDENTIALS_FILE` to the existing private credential store when it is
+not the standard store location; do not move or copy the key. The normal provider
+credential owner reads `OPENAI_COMPATIBLE_API_KEY` from that store, never an inline
+key or deprecated API-key environment variable. Missing selection, a mismatched
+or dirty checkout, CI, and missing credentials produce an explicit clean skip,
+without a provider call or mock fallback. The model is `deepseek-flash`.
+
+To explicitly select the strict provider double, also set
+`SWARM_REAL_MODEL_EVIDENCE_TRANSPORT=mock` on that same command. It uses the same
+journey body and does not read the live credential. This is an explicit transport
+selection, never a missing-key fallback. Both modes of this new diagnostic suite
+remain advisory; the existing deterministic test roots stay required and unchanged.
+Live evidence uses the real adapter
+and authenticated business input/readback; it makes no real channel sends. Each
+cell runs serially on both stores, with at most six HTTP completion requests
+including continuations and a three-minute completion wait per input. These are
+finite execution bounds, not a monetary cap. Outage/rate-limit observations are
+inconclusive and stop further paid dispatch for that cell, without paid retries.
+
+Summaries contain only shape/outcome facts, request counts and provider-reported
+usage/cost fields. A missing empty-content/reasoning/refusal shape is
+`NOT_EXERCISED`, not evidence it passed. No prose golden or memory-retention
+decision is inferred. `refusal` observes a real rejection if one occurs; it does
+not manufacture one by changing the real request or credential. Provider bodies
+are compared privately for preservation, never printed. Cost fields retain their
+provider names/units; absent usage or cost is `NOT_REPORTED`, not zero or an estimate.
+Token totals include only responses that reported both token fields; their count
+is reported separately from attempted completion requests.
+Report all first-full-run tokens and available cost to the orchestrator for the
+user. Do not publish credentials, account details, raw reasoning/responses,
+unrestricted provider errors, private paths or the private host's name.

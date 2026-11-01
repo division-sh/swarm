@@ -18,6 +18,7 @@ import (
 	"github.com/division-sh/swarm/internal/runtime/core/eventreceiver"
 	runtimeflowidentity "github.com/division-sh/swarm/internal/runtime/core/flowidentity"
 	runtimepinrouting "github.com/division-sh/swarm/internal/runtime/core/pinrouting"
+	runtimeprovideroutput "github.com/division-sh/swarm/internal/runtime/core/provideroutput"
 	worklifetime "github.com/division-sh/swarm/internal/runtime/core/worklifetime"
 	runtimecorrelation "github.com/division-sh/swarm/internal/runtime/correlation"
 	runtimedeadletters "github.com/division-sh/swarm/internal/runtime/deadletters"
@@ -2174,7 +2175,15 @@ func (eb *EventBus) withAuthorActivityEventDescriptor(ctx context.Context, evt e
 		}
 	}
 	if !proof.HasSchema {
-		return ctx, nil
+		publication, authenticated := authenticatedProviderPublicationForEvent(ctx, evt)
+		if !authenticated || publication.kind != runtimeprovideroutput.KindRaw || !publication.hasRuntimeConsumer {
+			return ctx, nil
+		}
+		// A consumed delivery's dynamic raw companion needs its exact output
+		// seal for story metadata, not a fabricated authored raw consumer.
+		if err := publication.admission.ValidateOutput(scope.BundleHash, publication.provider, publication.ordinal, publication.count, evt, publication.kind, runtimeprovideroutput.Authorization{}); err != nil {
+			return ctx, fmt.Errorf("raw publication metadata: %w", err)
+		}
 	}
 	disposition := runtimeauthoractivity.StoryDifferent
 	if proof.IsAuthored(eb.semanticSource) {
@@ -2384,7 +2393,7 @@ func (eb *EventBus) materializePublishRecipientPlanWithPlanner(ctx context.Conte
 	if eb == nil || eb.recipientPlanMaterializer == nil {
 		return routePlan, nil
 	}
-	if !routePlan.AllowsLowerPrecedenceRouteProduction() {
+	if routePlan.CanonicalRouteOwnerMatched() {
 		return routePlan, nil
 	}
 	routes, err := eb.recipientPlanMaterializer(ctx, evt, eb.publishRecipientPlan(evt, routePlan))
@@ -2394,7 +2403,7 @@ func (eb *EventBus) materializePublishRecipientPlanWithPlanner(ctx context.Conte
 	if len(routes) == 0 {
 		return routePlan, nil
 	}
-	routePlan.MarkLowerPrecedenceRouteProduction(routeIntentProducerRecipientMaterializer)
+	routePlan.recordOrdinaryRouteProducer(routeIntentProducerRecipientMaterializer)
 	routePlan.AddDeliveryIntents(routePlanDeliveryIntentsFromRoutes(routes, routeIntentProducerRecipientMaterializer)...)
 	projection, err := planner.materializedPublicationTargetOwners(ctx, evt, &routePlan)
 	if err != nil {

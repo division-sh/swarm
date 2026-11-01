@@ -222,7 +222,7 @@ func TestDeliveryRouteResolver_SeparatesRouteResolutionAndDiagnostics(t *testing
 		resolveRoutedSubscribers: func(context.Context, events.Event, []string, ordinaryPublicationSource) ([]Subscriber, error) {
 			return []Subscriber{{Recipient: events.MustNodeDeliveryRecipient(testRootNode(t, "scan-orchestrator")), Path: "discovery",
 				MatchPattern: "producer/scan.requested",
-				routeSource:  subscriberRouteSourcePinAutoWire,
+				routeSource:  subscriberRouteSourceSubscription,
 			}}, nil
 		},
 		resolveSubscribedRecipients: func(string) []deliveryRecipientCandidate {
@@ -238,7 +238,7 @@ func TestDeliveryRouteResolver_SeparatesRouteResolutionAndDiagnostics(t *testing
 				Type:           "node",
 				Path:           "discovery",
 				MatchedPattern: "producer/scan.requested",
-				RouteSource:    "pin_auto_wire",
+				RouteSource:    "subscription",
 				LocalizedEvent: "scan.requested",
 			}}
 		},

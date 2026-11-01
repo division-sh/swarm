@@ -189,6 +189,10 @@ func (s *PostgresStore) ClassifyLiveRunCreationFailure(ctx context.Context, scop
 	return s.runLifecyclePostgresOwner.ClassifyLiveRunCreationFailure(ctx, scope, runID, err)
 }
 
+func (s *PostgresStore) ClaudeBackingOrigin(ctx context.Context, identity agentidentity.Identity, session string, head string) (string, error) {
+	return s.effectPostgresOwner.ClaudeBackingOrigin(ctx, identity, session, head)
+}
+
 func (s *PostgresStore) CloseRunForkSelectedContractRuntimeExecution(ctx context.Context, executionID string) (bool, error) {
 	return s.runForkPostgresOwner.CloseRunForkSelectedContractRuntimeExecution(ctx, executionID)
 }
@@ -1423,6 +1427,10 @@ func (s *SQLiteRuntimeStore) ClaimRunForkSelectedContractRuntimeExecution(ctx co
 
 func (s *SQLiteRuntimeStore) ClassifyLiveRunCreationFailure(ctx context.Context, scope runlifecycle.LiveRunScope, runID string, err error) error {
 	return s.runLifecycleSQLiteOwner.ClassifyLiveRunCreationFailure(ctx, scope, runID, err)
+}
+
+func (s *SQLiteRuntimeStore) ClaudeBackingOrigin(ctx context.Context, identity agentidentity.Identity, session string, head string) (string, error) {
+	return s.effectSQLiteOwner.ClaudeBackingOrigin(ctx, identity, session, head)
 }
 
 func (s *SQLiteRuntimeStore) CloseRunForkSelectedContractRuntimeExecution(ctx context.Context, executionID string) (bool, error) {

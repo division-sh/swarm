@@ -285,7 +285,7 @@ func (p deliveryPlanner) planRecipients(ctx context.Context, evt events.Event) (
 		ctx = withPublicationTargetOwners(ctx, projection)
 		connectPlan.ActivationPlans = append(rootPlans, connectPlan.ActivationPlans...)
 		routePlan = routePlanFromConnectRouteDispatch(evt, connectPlan)
-		if routePlan.AuthorityState == RoutePlanAuthorityCanonicalFailedClosed {
+		if routePlan.canonicalRouteFailedClosed() {
 			localPlan, localErr := p.planIndependentPubsubBranch(ctx, evt, true)
 			if localErr != nil {
 				return RoutePlan{}, localErr
@@ -423,7 +423,7 @@ func explicitRootPublicationTarget(evt events.Event) events.RouteIdentity {
 }
 
 func (p RoutePlan) authorizesTerminalTargetDiagnostic(event events.Event) bool {
-	if p.TargetFailure != runtimepinrouting.FailureTargetUnreachableTerminated || p.AuthorityOwner != routeIntentProducerConnectRoutePlan || p.AuthorityState != RoutePlanAuthorityCanonicalFailedClosed {
+	if p.TargetFailure != runtimepinrouting.FailureTargetUnreachableTerminated || p.AuthorityOwner != routeIntentProducerConnectRoutePlan || !p.CanonicalRouteOwnerMatched() {
 		return false
 	}
 	target := explicitRootPublicationTarget(event)
@@ -447,7 +447,7 @@ func blockedConnectTargetsMatch(ledger events.ConnectEvaluationLedger, targets [
 func composeIndependentPubsubBranch(connectPlan, localPlan RoutePlan) RoutePlan {
 	connectPlan = connectPlan.Normalized()
 	localPlan = localPlan.Normalized()
-	if connectPlan.AuthorityState != RoutePlanAuthorityCanonicalMatched || connectPlan.AuthorityOwner != routeIntentProducerConnectRoutePlan {
+	if !connectPlan.CanonicalRouteOwnerMatched() || !connectPlan.TargetFailure.Empty() || connectPlan.AuthorityOwner != routeIntentProducerConnectRoutePlan {
 		return connectPlan
 	}
 	connectPlan.ordinarySource = localPlan.ordinarySource
@@ -783,26 +783,15 @@ func normalizeDeliveryRecipientCandidates(in []deliveryRecipientCandidate) []del
 		}
 		if idx, ok := indexByKey[key]; ok {
 			out[idx].PersistAsDelivery = out[idx].PersistAsDelivery || candidate.PersistAsDelivery
-			out[idx] = mergeDeliveryRecipientAuthority(out[idx], candidate)
+			out[idx].LiveAuthority, out[idx].AgentRoute = mergeLiveRecipientAuthority(
+				out[idx].LiveAuthority, out[idx].AgentRoute, candidate.LiveAuthority, candidate.AgentRoute,
+			)
 			continue
 		}
 		indexByKey[key] = len(out)
 		out = append(out, candidate)
 	}
 	return out
-}
-
-func mergeDeliveryRecipientAuthority(current, candidate deliveryRecipientCandidate) deliveryRecipientCandidate {
-	if current.LiveAuthority.Normalized() == liveRecipientAuthorityIdentity || candidate.LiveAuthority.Normalized() == liveRecipientAuthorityIdentity {
-		current.LiveAuthority = liveRecipientAuthorityIdentity
-		current.AgentRoute = nil
-		return current
-	}
-	current.LiveAuthority = liveRecipientAuthorityAgentRoute
-	if current.AgentRoute == nil {
-		current.AgentRoute = candidate.AgentRoute
-	}
-	return current
 }
 
 func routedSubscriberCandidates(runID string, in []Subscriber) []deliveryRecipientCandidate {

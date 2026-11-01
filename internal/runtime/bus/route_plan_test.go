@@ -27,7 +27,7 @@ func TestTerminalTargetDiagnosticRequiresExactBlockedConnectionEvidence(t *testi
 	if err != nil {
 		t.Fatal(err)
 	}
-	plan := RoutePlan{AuthorityOwner: routeIntentProducerConnectRoutePlan, AuthorityState: RoutePlanAuthorityCanonicalFailedClosed,
+	plan := RoutePlan{AuthorityOwner: routeIntentProducerConnectRoutePlan, canonicalAdmission: true,
 		TargetFailure: pinrouting.FailureTargetUnreachableTerminated, ConnectEvaluation: ledger}
 	if !plan.authorizesTerminalTargetDiagnostic(event) {
 		t.Fatal("exact terminal diagnostic refused")
@@ -40,7 +40,7 @@ func TestTerminalTargetDiagnosticRequiresExactBlockedConnectionEvidence(t *testi
 		{"wrong owner", func(p *RoutePlan) { p.AuthorityOwner = 0 }},
 		{"internal carrier", func(p *RoutePlan) { p.AuthorityOwner = routeIntentProducerInternalTargetCarrier }},
 		{"internal route", func(p *RoutePlan) { p.AuthorityOwner = routeIntentProducerInternalTargetRoute }},
-		{"wrong disposition", func(p *RoutePlan) { p.AuthorityState = RoutePlanAuthorityCanonicalMatched }},
+		{"missing canonical admission", func(p *RoutePlan) { p.canonicalAdmission = false }},
 		{"different failure", func(p *RoutePlan) { p.TargetFailure = pinrouting.FailureTargetNotSubscribed }},
 	} {
 		t.Run(test.name, func(t *testing.T) {
@@ -101,8 +101,12 @@ func TestRoutePlanDeliveryIntentsCarryTypedProducer(t *testing.T) {
 		if uint8(test.producer) != test.value || routeIntentProducerCode(test.producer) != test.code {
 			t.Fatalf("producer value/code = %d/%q, want %d/%q", test.producer, routeIntentProducerCode(test.producer), test.value, test.code)
 		}
-		if got := (RoutePlan{AuthorityOwner: test.producer}).Normalized().AuthorityOwner; got != test.producer {
-			t.Fatalf("normalized producer owner = %d, want %d", got, test.producer)
+		got := (RoutePlan{AuthorityOwner: test.producer}).Normalized()
+		if got.AuthorityOwner != test.producer {
+			t.Fatalf("normalized producer owner = %d, want %d", got.AuthorityOwner, test.producer)
+		}
+		if got.CanonicalRouteOwnerMatched() {
+			t.Fatalf("producer %d alone established canonical admission", test.producer)
 		}
 	}
 	for _, unknown := range []routeIntentProducer{0, 6, 255} {
