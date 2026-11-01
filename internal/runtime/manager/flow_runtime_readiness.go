@@ -294,7 +294,7 @@ func (am *AgentManager) reconcileDynamicFlowRuntimeReadinessOnce(
 	if err != nil {
 		return fmt.Errorf("bind dynamic flow agent topology to activation attempt for %s: %w", readiness.InstancePath, err)
 	}
-	if !admission.processPrepared && (admission.admittedPreRun || !phase.Includes(runtimepipeline.FlowAttachmentAgentsRegistered)) {
+	if !admission.processPrepared && (admission.admittedPreRun || admission.processOnly || !phase.Includes(runtimepipeline.FlowAttachmentAgentsRegistered)) {
 		persistedAgents, err := am.loadDynamicFlowPersistedAgents(ctx, flowIdentity)
 		if err != nil {
 			shutdownCancellation = am.cleanReadinessShutdownReadCancellation(ctx, err)

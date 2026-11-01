@@ -310,56 +310,6 @@ func (am *AgentManager) PrepareAdmittedDynamicFlowAgentsForStart(ctx context.Con
 	return nil
 }
 
-// Selected recovery hydrates retained actors without changing their custody.
-// The admitted reconciler, not hydration, owns the current-attempt replacement.
-func (am *AgentManager) PrepareAdmittedDynamicFlowInstanceForStart(ctx context.Context, owner runtimeflowidentity.RunScopedFlowInstance) error {
-	if am == nil || am.lifecycle == nil || am.workflowInstances == nil || am.lifecycle.phaseSnapshot() != runtimeLifecycleStopped {
-		return errors.New("admitted dynamic flow recovery requires a stopped manager and workflow store")
-	}
-	owner = owner.Normalize()
-	if err := owner.Validate(); err != nil {
-		return err
-	}
-	readiness, found, err := am.workflowInstances.LoadDynamicFlowRuntimeReadiness(ctx, owner.RunID, owner.Route)
-	if err != nil {
-		return err
-	}
-	if !found || !readiness.Eligible() || readiness.Plan.RunID != owner.RunID || readiness.Plan.Identity.Route() != owner.Route {
-		return errors.New("admitted dynamic flow recovery requires its exact current readiness owner")
-	}
-	source, err := am.dynamicFlowRuntimeReadinessSource(ctx)
-	if err != nil {
-		return err
-	}
-	if err := validateDynamicFlowRuntimeReadinessCallbackSource(readiness.Plan, source); err != nil {
-		return err
-	}
-	persisted, err := am.loadDynamicFlowPersistedAgents(ctx, owner)
-	if err != nil {
-		return err
-	}
-	for identity, rec := range persisted {
-		var expected []runtimepipeline.DynamicFlowRuntimeAgentExpectation
-		for _, agent := range readiness.Plan.Agents {
-			if agent.Identity == identity {
-				expected = append(expected, agent)
-			}
-		}
-		if err := verifyDynamicFlowAgentExpectations([]PersistedAgent{rec}, expected); err != nil {
-			return err
-		}
-		authority := rec.Topology.Authority.Readiness
-		if rec.Topology.Authority.Kind != runtimeagenttopology.AuthorityFlowReadinessPlan || authority == nil ||
-			authority.RunID != owner.RunID || authority.InstancePath != owner.Route.InstancePath || authority.PlanFingerprint != readiness.PlanHash {
-			return errors.New("retained dynamic flow agent differs from its exact readiness plan")
-		}
-		if err := am.adoptPersistedAgentForLifecycle(ctx, source.source, rec); err != nil {
-			return err
-		}
-	}
-	return am.prepareAdmittedDynamicFlowReadinessForStart(ctx, readiness, source)
-}
-
 func (am *AgentManager) prepareAdmittedDynamicFlowReadinessForStart(ctx context.Context, readiness runtimepipeline.DynamicFlowRuntimeReadiness, source dynamicFlowRuntimeReadinessSource) error {
 	plan, err := readiness.Plan.Normalized()
 	if err != nil {
