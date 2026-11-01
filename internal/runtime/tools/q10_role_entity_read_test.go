@@ -24,12 +24,12 @@ func TestQ10RoleScopedReadLifecycleBothStores(t *testing.T) {
 			bundle := loadWave1EntityToolMultiFlowBundle(t, map[string]entityToolFlowFixture{
 				"review": {
 					SchemaYAML:   "instance: fixture_key\nstages:\n  unknown: {}\n  done: {final: true}\n",
-					EntitiesYAML: "current_state: text\n",
+					EntitiesYAML: "fixture_key: text\ncurrent_state: text\n",
 					AgentsYAML:   entityToolAgentYAML(actor),
 				},
 				"nostage": {
 					SchemaYAML:   "instance: fixture_key\nstages: []\n",
-					EntitiesYAML: "current_state: text\n",
+					EntitiesYAML: "fixture_key: text\ncurrent_state: text\n",
 					AgentsYAML:   entityToolAgentYAML(noStageActor),
 				},
 			})
@@ -50,11 +50,10 @@ func TestQ10RoleScopedReadLifecycleBothStores(t *testing.T) {
 				posture, flowID, storedStage string
 				actor                        models.AgentConfig
 				constructed, namedStage      bool
-				publicStage                  any
 			}{
-				{"constructed", "review", "unknown", actor, true, true, "unknown"},
-				{"import", "review", "", actor, false, false, nil},
-				{"constructed-no-stage", "nostage", "pending", noStageActor, true, false, nil},
+				{"constructed", "review", "unknown", actor, true, true},
+				{"import", "review", "", actor, false, false},
+				{"constructed-no-stage", "nostage", "pending", noStageActor, true, false},
 			} {
 				t.Run(tc.posture, func(t *testing.T) {
 					path := tc.flowID + "/" + tc.posture
@@ -88,24 +87,10 @@ func TestQ10RoleScopedReadLifecycleBothStores(t *testing.T) {
 						t.Fatal(err)
 					}
 					row := output.(map[string]any)
-					stage, present := row["current_state"]
-					if !present || stage != tc.publicStage || row["entity_id"] != entityID {
-						t.Fatalf("role read lost lifecycle presence or identity: %#v", row)
+					if len(row) != 2 || row["current_state"] != "business-"+tc.posture || row["fixture_key"] != tc.posture {
+						t.Fatalf("role read changed declared business fields: %#v", row)
 					}
-					if tc.constructed {
-						if row["stage_defined"] != tc.namedStage || testNumericValue(row["revision"]) < 1 {
-							t.Fatalf("constructed role read acquired imported metadata: %#v", row)
-						}
-					} else if row["stage_defined"] != nil || row["revision"] != nil {
-						t.Fatalf("imported role read acquired lifecycle metadata: %#v", row)
-					}
-					if tc.publicStage == nil && row["entered_state_at"] != nil {
-						t.Fatalf("role read fabricated a named-stage entry clock: %#v", row)
-					}
-					if fields := row["fields"].(map[string]any); fields["current_state"] != "business-"+tc.posture {
-						t.Fatalf("business field became lifecycle: %#v", fields)
-					}
-					for _, private := range []string{"bookkeeping", "loops"} {
+					for _, private := range []string{"entity_id", "flow_instance", "entity_type", "stage_defined", "revision", "entered_state_at", "fields", "bookkeeping", "loops"} {
 						if _, present := row[private]; present {
 							t.Fatalf("role read exposed %s", private)
 						}
@@ -118,8 +103,9 @@ func TestQ10RoleScopedReadLifecycleBothStores(t *testing.T) {
 					if err := json.Unmarshal(encoded, &wire); err != nil {
 						t.Fatal(err)
 					}
-					if tc.publicStage == nil && string(wire["current_state"]) != "null" {
-						t.Fatalf("role read omitted or coerced null: %s", encoded)
+					want, err := json.Marshal("business-" + tc.posture)
+					if err != nil || string(wire["current_state"]) != string(want) {
+						t.Fatalf("role read changed the declared current_state field: %s", encoded)
 					}
 				})
 			}
