@@ -135,9 +135,8 @@ func completionJournalBodyFingerprint(raw, fingerprint, operationID, attemptID s
 		return "", fmt.Errorf("completion request journal is missing")
 	}
 	j := evidence.Journal
-	bound, err := j.Call.Request.Fingerprint()
-	if err != nil || bound != fingerprint || j.Version != runtimeeffects.ProviderCallJournalVersion || j.OperationID != operationID || j.AttemptID != attemptID {
-		return "", fmt.Errorf("completion request journal contradicts its physical attempt")
+	if err := j.ValidateRequestBinding(operationID, attemptID, fingerprint); err != nil {
+		return "", err
 	}
 	return runtimeeffects.Fingerprint(j.Call.Request.Body), nil
 }

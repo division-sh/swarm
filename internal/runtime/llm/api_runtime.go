@@ -479,7 +479,16 @@ func (r *AnthropicAPIRuntime) sendRequest(ctx context.Context, payload []byte, m
 	req.Header.Set("content-type", "application/json")
 	req.Header.Set("x-api-key", r.credentialCache.snapshot())
 	req.Header.Set("anthropic-version", "2023-06-01")
-	attempt, err := beginManagedHTTPProviderCall(ctx, "anthropic_api", payload, req, managed)
+	var attempt *runtimeeffects.Handle
+	if managed != nil {
+		call, callErr := managedHTTPProviderCall(payload, req, managed)
+		if callErr != nil {
+			return nil, anthropicResponse{}, nil, callErr
+		}
+		attempt, err = runtimeeffects.BeginManagedProviderCall(ctx, "anthropic_api", managed.frame, call)
+	} else {
+		attempt, err = runtimeeffects.BeginCompletion(ctx, "anthropic_api", payload, nil)
+	}
 	if err != nil {
 		return nil, anthropicResponse{}, nil, err
 	}

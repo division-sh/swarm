@@ -259,7 +259,14 @@ func (h *Harness) SettleCompletion(_ context.Context, attempt runtimeeffects.Att
 		if err != nil {
 			return runtimeeffects.CompletionSettlementResult{}, err
 		}
-		admitted, err := runtimeeffects.AdmitCompletionContinuation(attempt, evidence, authorization.RequestFingerprint, *authorization.CapabilitySurface, settlement.Settlement.CompletionProjectionPhase, nil)
+		fingerprint := authorization.RequestFingerprint
+		if authorization.ProviderCall != nil {
+			if err := authorization.ProviderCall.Validate(attempt.Authority, authorization); err != nil {
+				return runtimeeffects.CompletionSettlementResult{}, err
+			}
+			fingerprint = runtimeeffects.Fingerprint(authorization.ProviderCall.Request.Body)
+		}
+		admitted, err := runtimeeffects.AdmitCompletionContinuation(attempt, evidence, fingerprint, *authorization.CapabilitySurface, settlement.Settlement.CompletionProjectionPhase, nil)
 		if err != nil {
 			return runtimeeffects.CompletionSettlementResult{}, err
 		}
