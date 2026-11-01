@@ -12,7 +12,7 @@ import (
 // Carry only the account key out of the acknowledged mutation. The receiver
 // resolves current holders itself, after the entity lock has been released.
 func (pc *PipelineCoordinator) committedAccountHolder(flow string, before, after map[string]any) (*channelonboarding.AccountReference, error) {
-	if pc.accountHolderCommit == nil {
+	if pc == nil || pc.accountHolderCommit == nil {
 		return nil, nil
 	}
 	bundle, ok := semanticview.Bundle(pc.SemanticSource())
