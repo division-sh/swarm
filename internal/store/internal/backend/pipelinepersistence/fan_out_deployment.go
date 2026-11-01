@@ -56,7 +56,7 @@ func createDeploymentFeedTx(ctx context.Context, tx *sql.Tx, data *storedurabled
 	if tx == nil || data == nil {
 		return errors.New("deployment feed requires its selected transaction and durable-data owner")
 	}
-	source, err := storedurabledata.RequirePinnedSourceTx(ctx, data, tx, feed.RunID, feed.BundleHash, feed.Declaration)
+	source, err := storedurabledata.RequireFeedSourceTx(ctx, data, tx, feed.RunID, feed.BundleHash, feed.PublicationID(), feed.Declaration)
 	if err != nil {
 		return err
 	}

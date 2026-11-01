@@ -152,12 +152,14 @@ def handle(input):
 			}
 			rt := startWorkspaceGatewayProofRuntime(t, backend, root, targetBackend, factory, listener)
 			seedRunID := requireServedLiveLandingRunID(t, rt.Endpoint, rt.BundleHash, ".")
-			seed := requireServedEventPublishRPCResult(t, rt.Endpoint, map[string]any{
-				"event_name": "external.observed", "bundle_hash": rt.BundleHash, "run_id": seedRunID,
-				"payload": map[string]any{}, "idempotency_key": "mock-forkchat-source",
-			})
+			initial := a9RootConstructionReceipt(t, rt.Runtime.Pipeline, seedRunID)
+			if initial.CreatingInput.EventID != "" || initial.CreatingInput.Input != "" || len(initial.Fields) != 0 {
+				t.Fatalf("boot keyless root did not retain its empty construction origin: %+v", initial)
+			}
+			// Run birth and its empty-origin construction belong to serve boot.
+			seed := servedEventPublishRPCResult{RunID: seedRunID}
 			ready := requireServedEventPublishRPCResult(t, rt.Endpoint, map[string]any{
-				"event_name": "fork.source_message", "run_id": seed.RunID, "source_event_id": seed.EventID,
+				"event_name": "fork.source_message", "run_id": seed.RunID,
 				"payload": map[string]any{"note": "actual source conversation"}, "idempotency_key": "mock-forkchat-turn",
 			})
 			waitWorkspaceProofSourceAgentReady(t, rt, seed.RunID, ready.EventID)

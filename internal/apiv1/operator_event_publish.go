@@ -82,6 +82,7 @@ type eventPublicationParams struct {
 	RunIDProvided          bool
 	ScenarioExecution      *scenarioexecution.Selector
 	Data                   durabledata.RunCreationDataEnvelope
+	PublicationID          string
 	DataPresent            bool
 }
 
@@ -244,10 +245,12 @@ func executeOperatorEventPublication(
 		if cfg.rootInputOnly && !params.PayloadEntityIDPresent && params.EntityID == "" {
 			params.EntityID = params.RunID
 		}
-		if params.DataPresent && !params.NewRunCreated {
+		if params.DataPresent && !params.NewRunCreated && !cfg.rootInputOnly {
 			return apiidempotency.Completion{}, NewApplicationError(string(durabledata.CodeRunDataImmutable), false, map[string]any{"run_id": params.RunID})
 		}
 		if req.Method == "run.start" && params.DataPresent {
+			params.PublicationID = rowsPublicationID(req, idempotency)
+			params.EventID = uuid.NewSHA1(uuid.NameSpaceOID, []byte("swarm.rows-publication.event.v1\x00"+params.PublicationID)).String()
 			if _, err := admitRunStartDeploymentFeeds(selectedOpts.Source, params.Data); err != nil {
 				return apiidempotency.Completion{}, err
 			}
@@ -317,7 +320,7 @@ func executeOperatorEventPublication(
 				return apiidempotency.Completion{}, errors.New("event.publish requires atomic selected-store publication and API completion")
 			}
 			var runCreation *durabledata.RunCreationCommand
-			if params.NewRunCreated {
+			if params.NewRunCreated || params.DataPresent {
 				semanticRequest, semanticErr := runCreationInitialEvent(params)
 				if semanticErr != nil {
 					return apiidempotency.Completion{}, semanticErr
@@ -325,6 +328,9 @@ func executeOperatorEventPublication(
 				command := durabledata.RunCreationCommand{
 					RunID: params.RunID, Actor: req.ActorTokenID, BundleHash: params.SourceArtifactFact.BundleHash(),
 					EventID: params.EventID, InitialEvent: semanticRequest, Data: params.Data,
+				}
+				if !params.NewRunCreated {
+					command.PublicationID = params.PublicationID
 				}
 				runCreation = &command
 			}
@@ -434,7 +440,7 @@ func eventPublicationParamsFromRequest(req Request, cfg eventPublicationConfig) 
 	if runIDProvided && dataPresent && !cfg.rootInputOnly {
 		newRun = true
 	}
-	if dataPresent && !runIDProvided {
+	if dataPresent && !runIDProvided && !cfg.rootInputOnly {
 		return eventPublicationParams{}, bundleIdentityParam{}, NewInvalidParamsError(map[string]any{"field": "run_id", "reason": "is required for data-bearing create-new publication"})
 	}
 	payload, payloadEntityIDPresent, err := eventPublicationPayload(req.Params)

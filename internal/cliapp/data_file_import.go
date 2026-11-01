@@ -61,10 +61,14 @@ func loadFileImportShape(ctx context.Context, client *cliAPIClient, bundleHash s
 	return shape, nil
 }
 
-func loadRunCreationRequestBinding(ctx context.Context, client *cliAPIClient, runID string) (*durabledata.RunCreationRequestBinding, error) {
+func loadRunCreationRequestBinding(ctx context.Context, client *cliAPIClient, runID string, publicationKey ...string) (*durabledata.RunCreationRequestBinding, error) {
 	var binding durabledata.RunCreationRequestBinding
+	ref := map[string]any{"kind": "run_creation", "run_id": runID}
+	if len(publicationKey) != 0 {
+		ref = map[string]any{"kind": "rows_publication", "idempotency_key": publicationKey[0]}
+	}
 	err := client.call(ctx, dataShowMethod, map[string]any{
-		"view": "operation", "operation_ref": map[string]any{"kind": "run_creation", "run_id": runID},
+		"view": "operation", "operation_ref": ref,
 		"detail": "request_binding",
 	}, &binding)
 	if err != nil {
@@ -74,7 +78,7 @@ func loadRunCreationRequestBinding(ctx context.Context, client *cliAPIClient, ru
 		}
 		return nil, err
 	}
-	if err := binding.Validate(); err != nil || binding.RunID != runID {
+	if err := binding.Validate(); err != nil || (runID != "" && binding.RunID != runID) {
 		return nil, fmt.Errorf("run %s request binding is invalid or contradictory: %v", runID, err)
 	}
 	return &binding, nil
@@ -437,9 +441,10 @@ func rebindRunDataEnvelope(envelope map[string]any, binding durabledata.RunCreat
 			return fmt.Errorf("run %s has malformed prepared import", binding.RunID)
 		}
 		original := binding.Imports[index]
-		if item["declaration"] != original.Declaration || item["source_invocation_id"] != original.SourceInvocationID {
+		if item["declaration"] != original.Declaration {
 			return fmt.Errorf("run %s import %d contradicts its permanent request", binding.RunID, index)
 		}
+		item["source_invocation_id"] = original.SourceInvocationID
 		item["expected_head"] = original.ExpectedHead
 	}
 	for index, raw := range pins {
