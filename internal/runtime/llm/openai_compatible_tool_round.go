@@ -9,9 +9,9 @@ import (
 	"github.com/division-sh/swarm/internal/runtime/agentframe"
 )
 
-// The admitted predecessor retains the provider's round even when the durable
-// conversation deliberately projects only role/content. Never hydrate memory
-// from this request-only reconstruction.
+// The admitted predecessor retains the provider's round even when durable
+// memory redacts its content or arguments. Never hydrate memory from this
+// request-only reconstruction.
 func replayOpenAICompatibleToolRound(request *openAICompatibleRequest, session *Session, call *managedProviderCall) error {
 	if call.toolRound == nil {
 		return fmt.Errorf("openai-compatible tool continuation requires its admitted predecessor")

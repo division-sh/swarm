@@ -3,6 +3,7 @@ package runtimepersistence
 import (
 	"context"
 	"errors"
+	"reflect"
 	"testing"
 	"time"
 
@@ -25,6 +26,7 @@ func TestSelectedSameOwnerReplacementFencesEverySessionWriterBothStores(t *testi
 		store := selected.selected.(interface {
 			sessions.Registry
 			runtimellm.ConversationPersistence
+			LoadActiveConversation(context.Context, agentmemory.Identity) (runtimellm.ConversationRecord, bool, error)
 		})
 		first, err := store.Acquire(ctx, identity, "worker")
 		if err != nil {
@@ -76,10 +78,35 @@ func TestSelectedSameOwnerReplacementFencesEverySessionWriterBothStores(t *testi
 		if err != nil || renewed == nil || renewed.GrantID != second.GrantID || renewed.ExpiresAt.Before(second.ExpiresAt) {
 			t.Fatalf("current renewal changed grant or regressed expiry: lease=%+v err=%v", renewed, err)
 		}
-		conversation.Messages = []runtimellm.Message{{Role: "assistant", Content: "current"}}
+		arguments := map[string]any{"customer": map[string]any{"email": "customer@example.com", "name": "Alice"}}
+		conversation.Messages = []runtimellm.Message{
+			{Role: "assistant", Content: "current", ToolCalls: []runtimellm.ToolCall{
+				{ID: "call-read", Name: "read_customer", Arguments: arguments},
+				{ID: "call-check", Name: "check_customer", Arguments: map[string]any{"enabled": true}},
+			}},
+			{Role: "tool", Content: `[{"tool_call_id":"call-read","result":"customer@example.com"},{"tool_call_id":"call-check","result":true}]`},
+		}
 		conversation.TurnCount = 0
 		if err := store.UpsertConversation(ctx, second, conversation); err != nil {
 			t.Fatalf("current conversation: %v", err)
+		}
+		stored, found, err := store.LoadActiveConversation(ctx, identity)
+		if err != nil || !found {
+			t.Fatalf("load current conversation: found=%v err=%v", found, err)
+		}
+		expectedMessages := []runtimellm.Message{
+			{Role: "assistant", Content: "current", ToolCalls: []runtimellm.ToolCall{
+				{ID: "call-read", Name: "read_customer", Arguments: map[string]any{"customer": map[string]any{"email": "[EMAIL]", "name": "A."}}},
+				{ID: "call-check", Name: "check_customer", Arguments: map[string]any{"enabled": true}},
+			}},
+			{Role: "tool", Content: `[{"tool_call_id":"call-read","result":"[EMAIL]"},{"tool_call_id":"call-check","result":true}]`},
+		}
+		if !reflect.DeepEqual(stored.Messages, expectedMessages) {
+			t.Fatalf("stored tool round = %#v, want %#v", stored.Messages, expectedMessages)
+		}
+		if !reflect.DeepEqual(arguments, map[string]any{"customer": map[string]any{"email": "customer@example.com", "name": "Alice"}}) ||
+			conversation.Messages[1].Content != `[{"tool_call_id":"call-read","result":"customer@example.com"},{"tool_call_id":"call-check","result":true}]` {
+			t.Fatal("conversation persistence mutated the caller's tool round")
 		}
 		if err := store.UpdateLiveSessionWatchdog(ctx, second, watchdog); err != nil {
 			t.Fatalf("current watchdog: %v", err)
