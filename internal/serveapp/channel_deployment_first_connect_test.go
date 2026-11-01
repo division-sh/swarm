@@ -238,6 +238,69 @@ func TestChannelConnectWhatsAppRegistersAccountBothStores(t *testing.T) {
 				}
 				if !serving {
 					requireOfflinePairedWhatsAppServiceRoundTrip(t, opts, peer, op)
+					t.Run("phone_unlink_reverify", func(t *testing.T) {
+						peer.mu.Lock()
+						peer.rejectNextLogin = true
+						peer.mu.Unlock()
+						process := startServeRuntimeTestProcess(t, opts)
+						if code, exited := process.waitForExit(5 * time.Second); !exited || code != 1 ||
+							!strings.Contains(process.outputString(), "WhatsApp client occurrence is fenced") || serveOutputIsReady(process.outputString()) {
+							t.Fatalf("revoked account did not refuse startup: exit=%d exited=%t\n%s", code, exited, process.outputString())
+						}
+						select {
+						case <-qr:
+						default:
+						}
+						peer.mu.Lock()
+						peer.rejectNextLogin = true
+						peer.mu.Unlock()
+						ctx, cancel := context.WithTimeout(t.Context(), 20*time.Second)
+						out, errOut := &lockedBuffer{}, &lockedBuffer{}
+						done := make(chan int, 1)
+						joined := false
+						defer func() {
+							cancel()
+							if !joined {
+								<-done
+							}
+						}()
+						go func() {
+							done <- cliapp.Execute(ctx, []string{"--config", opts.ConfigPath, "channel", "connect", "whatsapp", op.AccountReference, "--yes"}, out, errOut, nil, nil, factory)
+						}()
+						var replacement channelonboarding.Result
+						select {
+						case replacement = <-qr:
+						case code := <-done:
+							joined = true
+							t.Fatalf("revoked-account reverify exited before relink QR: exit=%d err=%s", code, errOut.String())
+						case <-ctx.Done():
+							t.Fatal("revoked-account reverify did not offer relink")
+						}
+						if replacement.Operation.OperationID == op.OperationID || replacement.Operation.SessionConnectionID == op.SessionConnectionID ||
+							replacement.Operation.AccountConfirmed || replacement.Pairing.Paired || !strings.Contains(out.String(), "Account was logged out from the phone. Link it again:") {
+							t.Fatal("revoked account retained approval or missed exact relink")
+						}
+						peer.pair(replacement.Pairing.Code)
+						select {
+						case code := <-done:
+							joined = true
+							if code != 0 {
+								t.Fatalf("public same-account relink exit=%d err=%s", code, errOut.String())
+							}
+						case <-ctx.Done():
+							t.Fatal("public same-account relink did not register")
+						}
+						var listed, listErr bytes.Buffer
+						if code := cliapp.Execute(ctx, []string{"--config", opts.ConfigPath, "channel", "list", "--json"}, &listed, &listErr, nil, nil, factory); code != 0 ||
+							json.Unmarshal(listed.Bytes(), &listing) != nil || len(listing.Accounts) != 1 {
+							t.Fatalf("relinked public account-list exit=%d err=%s", code, listErr.String())
+						}
+						current := listing.Accounts[0].Operation
+						if current.OperationID != replacement.Operation.OperationID || current.SessionConnectionID != replacement.Operation.SessionConnectionID ||
+							current.AccountReference != op.AccountReference || !current.AccountConfirmed || current.Phase != channelonboarding.PhaseSucceeded || current.IdentityOperationID != "" {
+							t.Fatal("relink did not register exactly the same approved account under its fresh reservation")
+						}
+					})
 				}
 			})
 		}

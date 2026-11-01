@@ -60,6 +60,7 @@ type serveNativeProtocolPeer struct {
 	loginHandoff        bool
 	loginHandoffRelease <-chan struct{}
 	nextLogin           *servedNativeLoginGate
+	rejectNextLogin     bool
 }
 
 type servedNativeLoginGate struct {
@@ -173,6 +174,7 @@ func (p *serveNativeProtocolPeer) serve(wire *whatsappfixture.Transport) {
 	var connection int
 	var replacement *servedReplacementQRBatchCut
 	var login *servedNativeLoginGate
+	var rejectLogin bool
 	defer func() {
 		p.mu.Lock()
 		p.disconnected++
@@ -193,6 +195,7 @@ func (p *serveNativeProtocolPeer) serve(wire *whatsappfixture.Transport) {
 		p.registration = payload.DevicePairingData
 	} else {
 		login, p.nextLogin = p.nextLogin, nil
+		rejectLogin, p.rejectNextLogin = p.rejectNextLogin, false
 	}
 	p.mu.Unlock()
 	if payload.DevicePairingData != nil {
@@ -219,6 +222,12 @@ func (p *serveNativeProtocolPeer) serve(wire *whatsappfixture.Transport) {
 			case <-p.ctx.Done():
 				return
 			}
+		}
+		if rejectLogin {
+			if err := wire.Send(p.ctx, waBinary.Node{Tag: "failure", Attrs: waBinary.Attrs{"reason": "401"}}); err != nil {
+				p.t.Error(err)
+			}
+			return
 		}
 		if err := p.success(wire); err != nil {
 			p.t.Error(err)
