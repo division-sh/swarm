@@ -301,10 +301,7 @@ func TestRoleScopedEntityTools_SQLiteCurrentEntityPersistence(t *testing.T) {
 	if brief, ok := whole.(map[string]any)["business_brief"].(map[string]any); !ok || brief["summary"] != "after" {
 		t.Fatalf("sqlite whole read lost declared current fields: %#v", whole)
 	}
-	got, err := exec.Execute(currentCtx, "read_state_business_brief", map[string]any{})
-	if err != nil {
-		t.Fatalf("sqlite read_validation_case_business_brief: %v", err)
-	}
+	got := whole.(map[string]any)["business_brief"]
 	brief, ok := got.(map[string]any)
 	if !ok || strings.TrimSpace(asString(brief["summary"])) != "after" {
 		t.Fatalf("sqlite role-scoped brief = %#v, want updated summary", got)
