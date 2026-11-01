@@ -37,11 +37,10 @@ func TestR2NamedRecordEmitSurvivesServedRestartBothStores(t *testing.T) {
 				}
 			}
 			rt, restart := startSemanticNumericLiveRuntime(t, backend, root)
-			var published servedEventPublishRPCResult
-			requireServedJSONRPCResult(t, rt.Endpoint, "run.start", map[string]any{
+			published := requireServedEventPublishRPCResult(t, rt.Endpoint, map[string]any{
 				"bundle_hash": rt.BundleHash, "event_name": "numeric.requested", "idempotency_key": uuid.NewString(),
 				"payload": map[string]any{"value": 7, "nested": map[string]any{"numbers": []any{7}, "fraction": 7.5}},
-			}, &published)
+			})
 			checkReport := func(runID string) {
 				t.Helper()
 				var raw string

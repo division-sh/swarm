@@ -171,7 +171,7 @@ func TestServePostgresLostCommitResponseRecoversDurablePublication(t *testing.T)
 	first.waitForReadyLine()
 	endpoint := "http://" + serveRuntimeAPIListenerFromOutput(t, first.outputString()) + "/v1/rpc"
 	params := map[string]any{"event_name": "item.received", "bundle_hash": servedEventPublishFixtureBundleHash(t, root), "payload": map[string]any{"item_id": "2444-commit-cut"}, "idempotency_key": "lost-response-publication"}
-	response := requestServedJSONRPC(t, endpoint, "run.start", params)
+	response := requestServedJSONRPC(t, endpoint, "event.publish", params)
 	select {
 	case <-lost:
 	case <-time.After(5 * time.Second):
@@ -203,7 +203,7 @@ func TestServePostgresLostCommitResponseRecoversDurablePublication(t *testing.T)
 	nextEndpoint := "http://" + serveRuntimeAPIListenerFromOutput(t, restarted.outputString()) + "/v1/rpc"
 	entity := requireServedEventPublishEntityState(t, observer, "postgres", runID, "", "waiting")
 	requireServedEntityReadback(t, nextEndpoint, runID, entity, "waiting")
-	replay := requireServedRunStartRPCResult(t, nextEndpoint, params)
+	replay := requireServedEventPublishRPCResult(t, nextEndpoint, params)
 	if replay.RunID != runID || replay.EventID != eventID {
 		t.Fatalf("public idempotency replay lost exact durable identity: %#v", replay)
 	}

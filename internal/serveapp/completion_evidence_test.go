@@ -482,7 +482,7 @@ func proveCompletion2270ServedSelected(t *testing.T, rt completion2270ServedProo
 	t.Helper()
 	owner := selected.RuntimeDeps().EventStore
 	workspaceProof := servedWorkspaceProofRuntime{Events: owner}
-	seed := requireServedRunStartRPCResult(t, rt.Endpoint, map[string]any{"event_name": "start.seeded", "bundle_hash": rt.BundleHash,
+	seed := requireServedEventPublishRPCResult(t, rt.Endpoint, map[string]any{"event_name": "start.seeded", "bundle_hash": rt.BundleHash,
 		"payload": map[string]any{"token": "completion-2270"}, "idempotency_key": "completion-2270-selected-seed"})
 	waitWorkspaceProofPipelineHandoff(t, workspaceProof, seed.RunID)
 	requireServedEventPublishRPCResult(t, rt.Endpoint, map[string]any{"event_name": "start.requested", "run_id": seed.RunID, "source_event_id": seed.EventID,

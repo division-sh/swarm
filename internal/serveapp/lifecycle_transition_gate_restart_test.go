@@ -49,7 +49,7 @@ func proveServedCompiledGateOutcomeRestart(t *testing.T) {
 				}
 			}
 			first, rt := start()
-			seed := requireServedRunStartRPCResult(t, rt.Endpoint, map[string]any{"event_name": "work.requested", "bundle_hash": rt.BundleHash, "payload": map[string]any{"seed": true}, "idempotency_key": "gate-cut-seed"})
+			seed := requireServedEventPublishRPCResult(t, rt.Endpoint, map[string]any{"event_name": "work.requested", "bundle_hash": rt.BundleHash, "payload": map[string]any{"seed": true}, "idempotency_key": "gate-cut-seed"})
 			entityID := requireServedEventPublishEntityState(t, rt.DB, rt.Backend, seed.RunID, "", "review")
 			params := lifecycleGateDecisionParams(t, rt, seed.RunID, "approve")
 			var decision map[string]any

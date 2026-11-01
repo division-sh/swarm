@@ -23,7 +23,7 @@ func TestSelectedForkMailboxControlRefusalsBothStores(t *testing.T) {
 			}
 			publication := newExactOriginPublicationProbe(t)
 			rt := startServedLiveFlowProofRuntimeFromSource(t, backend, root)
-			seed := requireServedRunStartRPCResult(t, rt.Endpoint, map[string]any{
+			seed := requireServedEventPublishRPCResult(t, rt.Endpoint, map[string]any{
 				"event_name": "start.seeded", "bundle_hash": rt.BundleHash,
 				"payload": map[string]any{"token": "receiver-proof"}, "idempotency_key": "selected-card-seed",
 			})

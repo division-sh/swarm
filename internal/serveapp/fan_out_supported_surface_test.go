@@ -20,7 +20,6 @@ import (
 	"github.com/division-sh/swarm/internal/runtime/core/identitytest"
 	"github.com/division-sh/swarm/internal/runtime/fanoutobligation"
 	"github.com/division-sh/swarm/internal/runtime/testfixtures/canonicalrouting"
-	"github.com/division-sh/swarm/internal/store/storetest"
 	"github.com/division-sh/swarm/internal/testutil"
 	"github.com/google/uuid"
 )
@@ -32,10 +31,6 @@ func TestIssue2394ServedFanOutSupportedSurfacesBothStores(t *testing.T) {
 		t.Run(backend, func(t *testing.T) {
 			root := issue2394ServedReporterSource(t)
 			opts, start := lifecycleRestartHarness(t, backend, root)
-			var owner storetest.RunFixtureStore
-			captureSelectedRuntimePersistence(t, func(p serveRuntimePersistence) {
-				owner, _ = p.deps.EventStore.(storetest.RunFixtureStore)
-			})
 			opts.TestLLMRuntime = servedNoopLLMRuntime{}
 			process, rt := start()
 			t.Cleanup(func() {
@@ -52,8 +47,6 @@ func TestIssue2394ServedFanOutSupportedSurfacesBothStores(t *testing.T) {
 					}
 					if method == "run.start" {
 						params["run_id"] = uuid.NewString()
-					} else {
-						seedOwnedPublicationLiveRun(t, servedTestProcessRuntime(t, process), rt.BundleHash, owner)
 					}
 					var opened struct {
 						RunID   string `json:"run_id"`
@@ -143,11 +136,7 @@ func TestIssue2394HeldReporterConsumerKeepsRunUnreadyBothStores(t *testing.T) {
 						return ctx.Err()
 					}
 				}
-				var owner storetest.RunFixtureStore
-				captureSelectedRuntimePersistence(t, func(p serveRuntimePersistence) {
-					owner, _ = p.deps.EventStore.(storetest.RunFixtureStore)
-				})
-				process, rt := start()
+				_, rt := start()
 				portfolio := "held-" + uuid.NewString()
 				params := map[string]any{
 					"bundle_hash": rt.BundleHash, "event_name": "portfolio.opened",
@@ -155,8 +144,6 @@ func TestIssue2394HeldReporterConsumerKeepsRunUnreadyBothStores(t *testing.T) {
 				}
 				if method == "run.start" {
 					params["run_id"] = uuid.NewString()
-				} else {
-					seedOwnedPublicationLiveRun(t, servedTestProcessRuntime(t, process), rt.BundleHash, owner)
 				}
 				var opened struct {
 					RunID string `json:"run_id"`

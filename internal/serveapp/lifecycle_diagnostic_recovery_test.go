@@ -78,11 +78,10 @@ func TestLifecycleDiagnosticServedCrashRecoveryAndResetBothStores(t *testing.T) 
 				"SWARM_TEST_DIAGNOSTIC_SOURCE=" + source, "SWARM_TEST_DIAGNOSTIC_STORE=" + storeMode, "TMPDIR=" + temporary}
 			first := startServedCrashProcess(t, "TestLifecycleDiagnosticServeProcessHelper", append(env, "SWARM_TEST_DIAGNOSTIC_FAIL=1"))
 			proof := servedControlProofRuntime{Endpoint: first.endpoint(t) + "/v1/rpc", DB: db, Backend: backendName, BundleHash: hash}
-			var initial servedEventPublishRPCResult
-			requireServedJSONRPCResult(t, proof.Endpoint, "run.start", map[string]any{
+			initial := requireServedEventPublishRPCResult(t, proof.Endpoint, map[string]any{
 				"event_name": "item.received", "bundle_hash": hash,
 				"payload": map[string]any{"item_id": "diagnostic-recovery"}, "idempotency_key": uuid.NewString(),
-			}, &initial)
+			})
 			requireServedEventPublishEntityState(t, db, backendName, initial.RunID, "", "waiting")
 			publishServedLiveAgentHoldEvent(t, proof, initial.RunID, initial.EventID, "before-crash")
 			var restarted servedAgentRestartProofResult
@@ -120,11 +119,10 @@ func TestLifecycleDiagnosticServedCrashRecoveryAndResetBothStores(t *testing.T) 
 			if response := requestServedJSONRPC(t, proof.Endpoint, "runtime.nuke", params); response.Error != nil {
 				t.Fatalf("served reset: %+v", response.Error)
 			}
-			var later servedEventPublishRPCResult
-			requireServedJSONRPCResult(t, proof.Endpoint, "run.start", map[string]any{
+			later := requireServedEventPublishRPCResult(t, proof.Endpoint, map[string]any{
 				"event_name": "item.received", "bundle_hash": hash,
 				"payload": map[string]any{"item_id": "after-reset"}, "idempotency_key": uuid.NewString(),
-			}, &later)
+			})
 			requireServedEventPublishEntityState(t, db, backendName, later.RunID, "", "waiting")
 			if response := requestServedJSONRPC(t, proof.Endpoint, "runtime.nuke", params); response.Error != nil {
 				t.Fatalf("historical reset replay: %+v", response.Error)

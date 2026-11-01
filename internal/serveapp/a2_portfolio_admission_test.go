@@ -15,7 +15,6 @@ func TestA2PortfolioPublicTypedIngressRefusesBeforeMutationBothStores(t *testing
 			t.Run(string(backend)+"/"+string(fixture), func(t *testing.T) {
 				root := canonicalrouting.CopyExample(t, fixture)
 				rt := startServedTestSetupEntitiesProofRuntimeFromSource(t, backend, root)
-				seedServedPublicationLiveRun(t, rt)
 				event, field := "operating.report.triggered", "period_id"
 				valid := map[string]any{"period_id": "period-one", "revenue": 100}
 				if fixture == canonicalrouting.FanInBarrier {

@@ -24,7 +24,7 @@ func TestChannelDeliveryCompiledRenderFailureDoesNotStarveReceiptUpdates(t *test
 			var cards [2]string
 			var messages [2]int
 			for index := range cards {
-				seed := requireServedRunStartRPCResult(t, h.rpcEndpoint(), map[string]any{
+				seed := requireServedEventPublishRPCResult(t, h.rpcEndpoint(), map[string]any{
 					"event_name": "work.requested", "bundle_hash": bundleHash,
 					"payload": map[string]any{"seed": true}, "idempotency_key": fmt.Sprintf("scan-isolation-%d", index),
 				})

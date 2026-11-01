@@ -97,7 +97,7 @@ func TestReceiverCompositionForkBothStores(t *testing.T) {
 				var seedEventID string
 				params := map[string]any{"event_name": "work.requested", "bundle_hash": rt.BundleHash, "payload": map[string]any{"seed": true}, "idempotency_key": "fork-request"}
 				if !fieldless {
-					seed := requireServedRunStartRPCResult(t, rt.Endpoint, map[string]any{"event_name": "work.seeded", "bundle_hash": rt.BundleHash, "payload": map[string]any{"seed": true}, "idempotency_key": "fork-seed"})
+					seed := requireServedEventPublishRPCResult(t, rt.Endpoint, map[string]any{"event_name": "work.seeded", "bundle_hash": rt.BundleHash, "payload": map[string]any{"seed": true}, "idempotency_key": "fork-seed"})
 					if admitted {
 						var rootEventOwner any = rt.SQLite
 						if rt.Postgres != nil {
@@ -113,7 +113,7 @@ func TestReceiverCompositionForkBothStores(t *testing.T) {
 					}
 					params = map[string]any{"event_name": "work.requested", "run_id": seed.RunID, "source_event_id": seed.EventID, "payload": map[string]any{"seed": true}, "idempotency_key": "fork-request"}
 				} else {
-					seed := requireServedRunStartRPCResult(t, rt.Endpoint, map[string]any{"event_name": "fork.seeded", "bundle_hash": rt.BundleHash, "payload": map[string]any{}, "idempotency_key": "empty-fork-seed"})
+					seed := requireServedEventPublishRPCResult(t, rt.Endpoint, map[string]any{"event_name": "fork.seeded", "bundle_hash": rt.BundleHash, "payload": map[string]any{}, "idempotency_key": "empty-fork-seed"})
 					var rootEventOwner any = rt.SQLite
 					if rt.Postgres != nil {
 						rootEventOwner = rt.Postgres

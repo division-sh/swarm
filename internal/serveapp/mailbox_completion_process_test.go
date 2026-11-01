@@ -90,7 +90,7 @@ func TestServedMailboxCompletionProcessBoundariesBothStores(t *testing.T) {
 				start, readyR, releaseW := mailboxCompletionProcessHarness(t, backend, root)
 				first, rt := start(true)
 				db := rt.DB
-				seed := requireServedRunStartRPCResult(t, rt.Endpoint, map[string]any{"event_name": "work.requested", "bundle_hash": rt.BundleHash, "payload": map[string]any{"seed": true}, "idempotency_key": "seed"})
+				seed := requireServedEventPublishRPCResult(t, rt.Endpoint, map[string]any{"event_name": "work.requested", "bundle_hash": rt.BundleHash, "payload": map[string]any{"seed": true}, "idempotency_key": "seed"})
 				entityID := requireServedEventPublishEntityState(t, db, backend, seed.RunID, "", "review")
 				waitServedRunDeliveryQuiescence(t, rt.ReadRunDeliveries, seed.RunID)
 				var id, hash string

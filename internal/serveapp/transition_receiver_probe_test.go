@@ -28,7 +28,7 @@ func proveReceiverMaterializationBothStores(t *testing.T, source func(testing.TB
 					"event_name": "work.requested", "bundle_hash": rt.BundleHash, "payload": map[string]any{"seed": true}, "idempotency_key": "ordinary-cross-flow",
 				}
 				if existing {
-					seed := requireServedRunStartRPCResult(t, rt.Endpoint, map[string]any{"event_name": "work.seeded", "bundle_hash": rt.BundleHash, "payload": map[string]any{"seed": true}, "idempotency_key": "create-seed"})
+					seed := requireServedEventPublishRPCResult(t, rt.Endpoint, map[string]any{"event_name": "work.seeded", "bundle_hash": rt.BundleHash, "payload": map[string]any{"seed": true}, "idempotency_key": "create-seed"})
 					requireServedEventPublishEntityState(t, rt.DB, rt.Backend, seed.RunID, "", "active")
 					params = map[string]any{"event_name": "work.requested", "run_id": seed.RunID, "source_event_id": seed.EventID, "payload": map[string]any{"seed": true}, "idempotency_key": "ordinary-cross-flow"}
 				}
