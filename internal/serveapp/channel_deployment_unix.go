@@ -107,7 +107,7 @@ func deploymentChannelHandlers(repo, config, directory string, stores *selected.
 }
 
 func deploymentPendingClaimHandler(root cliapp.InvocationRoot, config, directory string, stores *selected.Owner, process *worklifetime.Process, capability startupownership.ProcessCapability, factory cliapp.ChannelRegistrationFactory, runtimeOptions deploymentRuntimeOptions) publicingress.PendingDeploymentClaim {
-	return func(ctx context.Context, account channelonboarding.AccountReference, credential func(channelonboarding.CredentialAdmission) bool, admit func() (providertriggers.Delivery, error), current func() bool) (bool, error) {
+	return func(ctx context.Context, account channelonboarding.AccountReference, credential func(channelonboarding.CredentialAdmission) bool, admit func() (providertriggers.Delivery, error), claim func(providertriggers.InboundAdmissionPlan) (providertriggers.Delivery, error), current func() bool) (bool, error) {
 		work, err := process.Begin(ctx)
 		if err != nil {
 			return false, err
@@ -137,7 +137,7 @@ func deploymentPendingClaimHandler(root cliapp.InvocationRoot, config, directory
 		if err != nil {
 			return false, err
 		}
-		if registered.IdentityOperationID != "" {
+		if registered.Phase == channelonboarding.PhaseSucceeded && registered.IdentityOperationID != "" {
 			if runtimeOptions.manager == nil {
 				return false, channelonboarding.ErrRevisionConflict
 			}
@@ -152,16 +152,9 @@ func deploymentPendingClaimHandler(root cliapp.InvocationRoot, config, directory
 			if err != nil || use == nil || !availability.Available() || use.Context.BundleHash() != holders[0].BundleHash {
 				return false, errors.Join(channelonboarding.ErrRevisionConflict, err)
 			}
-			for _, plan := range use.Context.ChannelPlans {
-				if plan.Provider() == account.Provider && plan.MatchesCapturedHolder(holders[0].Flow) {
-					plans = append(plans, plan)
-				}
-			}
-			if len(plans) == 0 {
-				return false, channelonboarding.ErrRevisionConflict
-			}
+			plans = use.Context.ChannelPlans
 		}
-		return client.ConsumeWebhookClaim(work.Context(), account, credential, admit, current, plans...)
+		return client.ConsumeWebhookClaim(work.Context(), account, credential, admit, claim, current, plans...)
 	}
 }
 
@@ -439,8 +432,8 @@ func (c *deploymentChannelSession) PollOperatorClaim(ctx context.Context, op cha
 	return err
 }
 
-func (c *deploymentChannelSession) ConsumeWebhookClaim(ctx context.Context, account channelonboarding.AccountReference, credential func(channelonboarding.CredentialAdmission) bool, admit func() (providertriggers.Delivery, error), current func() bool, plans ...packs.SatisfactionPlan) (bool, error) {
-	return sessionprovider.ConsumeDeploymentWebhookClaim(ctx, sessionprovider.DeploymentConnectionOptions{Operations: c.opts.Operations, Principal: c.opts.Principal, Plan: c.opts.Plan}, c.opts.Identities, account, credential, admit, current, plans...)
+func (c *deploymentChannelSession) ConsumeWebhookClaim(ctx context.Context, account channelonboarding.AccountReference, credential func(channelonboarding.CredentialAdmission) bool, admit func(providertriggers.InboundAdmissionPlan) (providertriggers.Delivery, error), current func() bool) (bool, error) {
+	return sessionprovider.ConsumeDeploymentWebhookClaim(ctx, sessionprovider.DeploymentConnectionOptions{Operations: c.opts.Operations, Principal: c.opts.Principal, Plan: c.opts.Plan, Trigger: c.opts.Webhook}, c.opts.Identities, account, credential, admit, current)
 }
 
 func (c *deploymentChannelSession) VerifyRegistration(ctx context.Context, op channelonboarding.Operation) (bool, error) {

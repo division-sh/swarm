@@ -159,7 +159,9 @@ func TestDeploymentChannelRegistrationWithoutRuntimeBothStores(t *testing.T) {
 										value, current, err := opts.Credentials.ObserveValueMatchingSeal(ctx, credentials.ValueEvidence{Key: admission.StoreKey, Seal: admission.ValueSeal})
 										return err == nil && current && value.CredentialValue() == "420080:other-credential"
 									}
-									ordinary := func() (providertriggers.Delivery, error) { return deliver("ordinary customer message"), nil }
+									ordinary := func(providertriggers.InboundAdmissionPlan) (providertriggers.Delivery, error) {
+										return deliver("ordinary customer message"), nil
+									}
 									if consumed, err := native.ConsumeWebhookClaim(ctx, receiving, credential, ordinary, current); err != nil || consumed {
 										t.Fatal("ordinary traffic became a deployment ceremony", consumed, err)
 									}
@@ -168,7 +170,7 @@ func TestDeploymentChannelRegistrationWithoutRuntimeBothStores(t *testing.T) {
 										t.Fatal("pending operator credentials blocked ordinary customer traffic", consumed, err)
 									}
 									exact := deliver(identity.Challenge)
-									admit := func() (providertriggers.Delivery, error) { return exact, nil }
+									admit := func(providertriggers.InboundAdmissionPlan) (providertriggers.Delivery, error) { return exact, nil }
 									if consumed, err := native.ConsumeWebhookClaim(ctx, receiving, stale, admit, current); err == nil || consumed {
 										t.Fatal("stale pending credential admitted an operator claim", consumed, err)
 									}
