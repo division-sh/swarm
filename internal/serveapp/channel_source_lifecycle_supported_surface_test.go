@@ -18,6 +18,7 @@ import (
 	"github.com/division-sh/swarm/internal/operatorread"
 	"github.com/division-sh/swarm/internal/runtime/channelnative"
 	"github.com/division-sh/swarm/internal/runtime/decisioncard"
+	runtimepublicingress "github.com/division-sh/swarm/internal/runtime/publicingress"
 	"github.com/division-sh/swarm/internal/servedparity"
 	"github.com/google/uuid"
 )
@@ -502,6 +503,23 @@ func runRegisteredCLISourceLifecycle(t *testing.T, h *channelOnboardingE2EHarnes
 		}
 		if !clear {
 			callback, signing, _ := h.provider.Registration()
+			// Reset changes startup authority; its existing public probe renewal
+			// must become current before a business callback can be admitted.
+			deadline := time.Now().Add(runtimepublicingress.RenewalInterval + 15*time.Second)
+			for {
+				response, err := http.Get(callback)
+				if err != nil {
+					t.Fatal(err)
+				}
+				_ = response.Body.Close()
+				if response.StatusCode == http.StatusMethodNotAllowed {
+					break
+				}
+				if time.Now().After(deadline) {
+					t.Fatalf("policy-backed holder callback did not become current after reset: HTTP %d", response.StatusCode)
+				}
+				time.Sleep(10 * time.Millisecond)
+			}
 			if names := postChannelTelegramUpdate(t, callback, signing, map[string]any{
 				"update_id": 978101, "message": map[string]any{"message_id": 978101, "from": map[string]any{"id": 2001},
 					"chat": map[string]any{"id": 2001, "type": "private"}, "text": "customer after retained reset"},
