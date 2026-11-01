@@ -88,8 +88,15 @@ func TestProviderMemorySurvivesAdmittedBundleUpgradeBothStores(t *testing.T) {
 				}()
 				process.waitForReadyLine()
 				endpoint := "http://" + serveRuntimeAPIListenerFromOutput(t, process.outputString()) + "/v1/rpc"
+				lastEventID := ""
 				defer func() {
 					if t.Failed() && process != nil {
+						if lastEventID != "" {
+							var event operatorread.OperatorEventFull
+							requireServedJSONRPCResult(t, endpoint, "event.get", map[string]any{"event_id": lastEventID}, &event)
+							readback, _ := json.Marshal(event)
+							t.Logf("upgrade event readback: %s", readback)
+						}
 						var conversations operatorread.OperatorConversationListResult
 						requireServedJSONRPCResult(t, endpoint, "conversation.list", map[string]any{}, &conversations)
 						readback, _ := json.Marshal(conversations)
@@ -110,7 +117,7 @@ func TestProviderMemorySurvivesAdmittedBundleUpgradeBothStores(t *testing.T) {
 					"payload": map[string]any{"item_id": "memory-upgrade"}, "idempotency_key": "memory-seed",
 				})
 				probe.Expect(seed.EventID).NodeDelivered(identitytest.RootNode(t, "item-handler").Key()).Within(servedEventPublishLifecycleProbeWaitTimeout)
-				publishUpgradeMemoryTurn(t, endpoint, seed.RunID, seed.EventID, 1)
+				lastEventID = publishUpgradeMemoryTurn(t, endpoint, seed.RunID, seed.EventID, 1)
 				session := requireProviderMemoryTurns(t, endpoint, seed.RunID, 1)
 				if code := process.stop(); code != 0 {
 					t.Fatalf("stop before upgrade: exit=%d", code)
@@ -120,7 +127,7 @@ func TestProviderMemorySurvivesAdmittedBundleUpgradeBothStores(t *testing.T) {
 				process = startServeRuntimeTestProcess(t, opts)
 				process.waitForReadyLine()
 				endpoint = "http://" + serveRuntimeAPIListenerFromOutput(t, process.outputString()) + "/v1/rpc"
-				publishUpgradeMemoryTurn(t, endpoint, seed.RunID, seed.EventID, 2)
+				lastEventID = publishUpgradeMemoryTurn(t, endpoint, seed.RunID, seed.EventID, 2)
 				if current := requireProviderMemoryTurns(t, endpoint, seed.RunID, 2); current != session {
 					t.Fatalf("upgrade replaced memory session: before=%s after=%s", session, current)
 				}
@@ -156,7 +163,7 @@ func setUpgradeMemoryAgent(t *testing.T, root, revision string) {
 	}
 }
 
-func publishUpgradeMemoryTurn(t *testing.T, endpoint, runID, sourceEventID string, turn int) {
+func publishUpgradeMemoryTurn(t *testing.T, endpoint, runID, sourceEventID string, turn int) string {
 	t.Helper()
 	result := requireServedEventPublishRPCResult(t, endpoint, map[string]any{
 		"event_name": "item.agent_hold", "run_id": runID, "source_event_id": sourceEventID,
@@ -165,6 +172,7 @@ func publishUpgradeMemoryTurn(t *testing.T, endpoint, runID, sourceEventID strin
 	if result.RunID != runID || result.EventID == "" || result.NewRunCreated {
 		t.Fatalf("memory turn changed run or lost its event: %+v", result)
 	}
+	return result.EventID
 }
 
 func upgradeMemoryReply(request llmapi.Request) (llmapi.Reply, error) {
