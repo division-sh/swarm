@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"net/http"
 	"net/http/httptest"
+	"regexp"
 	"strings"
 	"sync/atomic"
 	"testing"
@@ -21,6 +22,7 @@ func TestManagedHITLProjectionOwnsDefinitionsGrantsAndExecution(t *testing.T) {
 	exec := NewExecutorWithOptions(nil, ExecutorOptions{})
 
 	withoutPermission := definitionMap(exec.ToolDefinitionsForActor(actor))
+	assertDescriptionsNameOnlyGrantedTools(t, exec.ToolDefinitionsForActor(actor))
 	notify, ok := withoutPermission[NotifyHumanToolName]
 	if !ok {
 		t.Fatal("notify_human is not auto-granted")
@@ -31,8 +33,13 @@ func TestManagedHITLProjectionOwnsDefinitionsGrantsAndExecution(t *testing.T) {
 	if _, ok := withoutPermission[RetiredAgentMessageTool]; ok {
 		t.Fatal("agent_message was delivered despite retirement")
 	}
-	if notify.Description != "Sends an informational notice to the human operator. Does NOT request approval and does not pause the flow - to ask for a decision that gates the flow, use ask_human." {
+	if notify.Description != "Send a notice to the human operator. The conversation continues without waiting for a reply." {
 		t.Fatalf("notify_human description = %q", notify.Description)
+	}
+	for _, descriptor := range managedHITLToolDescriptors() {
+		if _, granted := withoutPermission[descriptor.name]; !granted && strings.Contains(llm.DeliveredToolDescription(notify), descriptor.name) {
+			t.Fatalf("notice description recommends ungranted tool %s", descriptor.name)
+		}
 	}
 	properties, _ := notify.Schema.(map[string]any)["properties"].(map[string]any)
 	if len(properties) != 2 || properties["summary"] == nil || properties["context"] == nil {
@@ -41,6 +48,7 @@ func TestManagedHITLProjectionOwnsDefinitionsGrantsAndExecution(t *testing.T) {
 
 	actor.Permissions = []string{AskHumanToolName}
 	withPermission := definitionMap(exec.ToolDefinitionsForActor(actor))
+	assertDescriptionsNameOnlyGrantedTools(t, exec.ToolDefinitionsForActor(actor))
 	if _, ok := withPermission[AskHumanToolName]; !ok {
 		t.Fatal("ask_human was not delivered with its exact permission")
 	}
@@ -51,6 +59,26 @@ func TestManagedHITLProjectionOwnsDefinitionsGrantsAndExecution(t *testing.T) {
 	}
 	if err := NewToolAuthorizer(nil, nil).Authorize(unmanagedToolTestContext(), actor, RetiredAgentMessageTool); err == nil {
 		t.Fatal("agent_message execution authorization succeeded")
+	}
+}
+
+func assertDescriptionsNameOnlyGrantedTools(t *testing.T, definitions []llm.ToolDefinition) {
+	t.Helper()
+	known, err := executionToolsForRuntime(nil, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	granted := definitionMap(definitions)
+	for _, definition := range definitions {
+		for name := range known {
+			if _, ok := granted[name]; ok {
+				continue
+			}
+			reference := regexp.MustCompile(`(^|[^a-zA-Z0-9_.])` + regexp.QuoteMeta(name) + `($|[^a-zA-Z0-9_.])`)
+			if reference.MatchString(llm.DeliveredToolDescription(definition)) {
+				t.Fatalf("%s description names ungranted tool %s", definition.Name, name)
+			}
+		}
 	}
 }
 

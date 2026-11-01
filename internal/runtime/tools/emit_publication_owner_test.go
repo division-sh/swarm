@@ -6,6 +6,7 @@ import (
 
 	runtimecontracts "github.com/division-sh/swarm/internal/runtime/contracts"
 	models "github.com/division-sh/swarm/internal/runtime/core/actors"
+	"github.com/division-sh/swarm/internal/runtime/llm"
 )
 
 func TestEmitPublicationSchemaRefusalRemainsVisibleToValidators(t *testing.T) {
@@ -30,6 +31,9 @@ func TestEmitPublicationSchemaRefusalRemainsVisibleToValidators(t *testing.T) {
 				definitions := registry.GenerateEmitToolsForActor(actor, nil)
 				if len(definitions) != 1 {
 					t.Fatalf("%s generated tools=%d, want 1 before corruption", flow, len(definitions))
+				}
+				if got, want := llm.DeliveredToolDescription(definitions[0]), "Send a result.done event"; got != want {
+					t.Fatalf("model emit description=%q want=%q", got, want)
 				}
 			}
 			bundle.FlowTree.ByID["left"].Events["result.done"].Payload.Properties["value"] = runtimecontracts.EventFieldSpec{Type: "MissingLeftType"}
