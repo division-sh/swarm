@@ -21,6 +21,7 @@ import (
 	runtimecredentials "github.com/division-sh/swarm/internal/runtime/credentials"
 	"github.com/division-sh/swarm/internal/runtime/executionposture"
 	runtimemanagedcredentials "github.com/division-sh/swarm/internal/runtime/managedcredentials"
+	"github.com/division-sh/swarm/internal/runtime/scenarioexecution"
 	storebackend "github.com/division-sh/swarm/internal/store/backendselection"
 	"github.com/google/uuid"
 )
@@ -96,6 +97,10 @@ func RunTestSession(ctx context.Context, in cliapp.TestSessionRequest, execute f
 	runtimeID := uuid.NewString()
 	ctx = runtimecorrelation.WithRuntimeInstanceID(ctx, runtimeID)
 	ctx = runtimeauthoractivity.WithScope(ctx, runtimeauthoractivity.RuntimeScope(runtimeID))
+	ctx, err = scenarioexecution.WithPrivateHostScope(ctx, runtimeID)
+	if err != nil {
+		return err
+	}
 	presenter := newServeLifecyclePresenter(opts)
 	defer presenter.finish()
 	var executionErr error
@@ -116,9 +121,13 @@ func RunTestSession(ctx context.Context, in cliapp.TestSessionRequest, execute f
 		Presenter:          presenter, NoticePresentation: newServeNoticePresentationSink(presenter),
 		Cancel: cancel, BootStartedAt: time.Now().UTC(), RuntimeInstanceID: runtimeID,
 		DataProjectionRoot: filepath.Join(privateRoot, "data-projections"),
-		OnReady: func(readyCtx context.Context, server string) error {
+		OnReady: func(readyCtx context.Context, server string, publication apiv1.EventPublicationOptions) error {
 			called = true
-			executionErr = execute(readyCtx, cliapp.TestSessionEndpoint{APIServer: server, Token: token})
+			executionErr = execute(readyCtx, cliapp.TestSessionEndpoint{APIServer: server, Token: token,
+				StartScenario: func(ctx context.Context, params map[string]any) (string, error) {
+					return apiv1.StartPrivateScenario(ctx, publication, params, time.Now().UTC())
+				},
+			})
 			return executionErr
 		},
 	})

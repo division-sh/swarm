@@ -52,7 +52,7 @@ func TestServedSemanticNumericScenarioModes(t *testing.T) {
 					args = append(args, "--derive", ".", "--input", "fulfillment.requested")
 				}
 				var stdout, stderr bytes.Buffer
-				if code := executeScenarioInOwnedLifecycle(t, repoRootForTest(), args, rt.Endpoint, &stdout, &stderr); code != 0 {
+				if code := executeScenarioInOwnedLifecycle(t, repoRootForTest(), args, rt.Endpoint, &stdout, &stderr, rt.Runtime); code != 0 {
 					rows, err := rt.DB.Query(`SELECT CAST(failure AS TEXT) FROM dead_letters ORDER BY created_at`)
 					if err == nil {
 						for rows.Next() {
