@@ -12,7 +12,7 @@ func prepareEnvironmentFrame(session *Session, surface managedcapabilities.Surfa
 		return nil
 	}
 	for _, tool := range surface.Tools {
-		if !tool.EffectiveCallable || !tool.EffectiveVisible || tool.Capability.AuthorizationClass != "native_tool" {
+		if !tool.Capability.Callable || !tool.Capability.Visible || tool.Capability.DenialReason != "" || tool.Capability.AuthorizationClass != "native_tool" {
 			continue
 		}
 		switch tool.Capability.Name {

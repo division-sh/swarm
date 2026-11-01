@@ -11,6 +11,9 @@ import (
 // today's config. Assistant history/reasoning and CLI arguments stay private.
 func projectProviderRendering(raw []byte) (operatorread.OperatorProviderRendering, error) {
 	out := operatorread.OperatorProviderRendering{Status: "unresolved", Source: "recorded_provider_request"}
+	if len(raw) == 0 {
+		return out, nil
+	}
 	var request map[string]json.RawMessage
 	if err := json.Unmarshal(raw, &request); err != nil {
 		return out, fmt.Errorf("decode recorded provider rendering: %w", err)
