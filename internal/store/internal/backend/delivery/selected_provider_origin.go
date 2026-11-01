@@ -4,10 +4,12 @@ import (
 	"context"
 	"database/sql"
 	"fmt"
+	"strings"
 
 	"github.com/division-sh/swarm/internal/runtime/core/agentidentity"
 	"github.com/division-sh/swarm/internal/runtime/correlation"
 	"github.com/division-sh/swarm/internal/runtime/deliverylifecycle"
+	"github.com/division-sh/swarm/internal/store/internal/backend/mutationprotocol"
 )
 
 func validateSelectedProviderOrigin(ctx context.Context, tx *sql.Tx, adapter *Adapter, claim deliverylifecycle.Claim, actor agentidentity.Identity, authority deliverylifecycle.ExecutionAuthority) error {
@@ -66,4 +68,41 @@ func (s *DeliveryPostgresOwner) ValidateSelectedProviderOriginTx(ctx context.Con
 
 func (s *DeliverySQLiteOwner) ValidateSelectedProviderOriginTx(ctx context.Context, tx *sql.Tx, claim deliverylifecycle.Claim, actor agentidentity.Identity, authority deliverylifecycle.ExecutionAuthority) error {
 	return validateSelectedProviderOrigin(ctx, tx, sqliteDeliveryAdapter, claim, actor, authority)
+}
+
+func settleSelectedProviderOriginRecoveryFailure(ctx context.Context, tx *sql.Tx, mutation *mutationprotocol.Attempt, adapter *Adapter, claim deliverylifecycle.Claim, settlement deliverylifecycle.Settlement, executionID string) (deliverylifecycle.Snapshot, error) {
+	if settlement.Disposition != deliverylifecycle.FailureRetry && settlement.Disposition != deliverylifecycle.FailureDeadLetter {
+		return deliverylifecycle.Snapshot{}, fmt.Errorf("delivery failure disposition %q is invalid", settlement.Disposition)
+	}
+	if settlement.Failure == nil {
+		return deliverylifecycle.Snapshot{}, fmt.Errorf("delivery failure settlement requires a failure envelope")
+	}
+	if settlement.Disposition == deliverylifecycle.FailureDeadLetter && strings.TrimSpace(settlement.ReasonCode) == "" {
+		return deliverylifecycle.Snapshot{}, fmt.Errorf("terminal delivery failure requires a reason code")
+	}
+	if settlement.Duration < 0 {
+		return deliverylifecycle.Snapshot{}, fmt.Errorf("delivery settlement duration cannot be negative")
+	}
+	if err := settlement.RuleSelection.Validate(); err != nil {
+		return deliverylifecycle.Snapshot{}, fmt.Errorf("delivery handler rule selection: %w", err)
+	}
+	if err := validateSelectedOriginExecution(ctx, tx, adapter, claim, executionID); err != nil {
+		return deliverylifecycle.Snapshot{}, err
+	}
+	var fenced bool
+	if err := tx.QueryRowContext(ctx, `SELECT state IN ('failed','closed','quiesced') AND lease_expires_at IS NULL FROM run_fork_selected_contract_runtime_executions WHERE execution_id=$1`, executionID).Scan(&fenced); err != nil {
+		return deliverylifecycle.Snapshot{}, err
+	}
+	if !fenced {
+		return deliverylifecycle.Snapshot{}, fmt.Errorf("selected provider recovery requires its fenced execution")
+	}
+	terminal, err := adapter.prepareProviderOriginRecovery(ctx, tx, claim)
+	if err != nil || terminal {
+		return deliverylifecycle.Snapshot{}, err
+	}
+	record, now, err := adapter.requireExactClaim(ctx, tx, claim)
+	if err != nil {
+		return deliverylifecycle.Snapshot{}, err
+	}
+	return adapter.settleExactClaim(ctx, tx, mutation, claim, settlement, "", record, now)
 }

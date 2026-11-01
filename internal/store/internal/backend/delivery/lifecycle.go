@@ -678,8 +678,27 @@ func (s *DeliveryPostgresOwner) SettleProviderOriginRecoveryFailureTx(
 	attempt *mutationprotocol.Attempt,
 	claim runtimedelivery.Claim,
 	settlement runtimedelivery.Settlement,
+	executionID string,
 ) error {
 	return attempt.WithSQL(ctx, func(ctx context.Context, tx *sql.Tx) error {
+		if executionID != "" {
+			snapshot, err := settleSelectedProviderOriginRecoveryFailure(ctx, tx, attempt, postgresDeliveryAdapter, claim, settlement, executionID)
+			if err != nil || snapshot.Status != runtimedelivery.StatusDeadLetter {
+				return err
+			}
+			record, found, err := eventrecordpostgres.Load(ctx, tx, snapshot.EventID)
+			if err != nil || !found {
+				if err == nil {
+					err = eventrecord.Missing(snapshot.EventID)
+				}
+				return err
+			}
+			diagnostic, err := deliveryDeadLetterRecord(record, snapshot)
+			if err != nil {
+				return err
+			}
+			return s.RecordDeadLetterTx(ctx, attempt, diagnostic, true)
+		}
 		alreadyTerminal, err := postgresDeliveryAdapter.prepareProviderOriginRecovery(ctx, tx, claim)
 		if err != nil || alreadyTerminal {
 			return err
@@ -693,8 +712,27 @@ func (s *DeliverySQLiteOwner) SettleProviderOriginRecoveryFailureTx(
 	attempt *mutationprotocol.Attempt,
 	claim runtimedelivery.Claim,
 	settlement runtimedelivery.Settlement,
+	executionID string,
 ) error {
 	return attempt.WithSQL(ctx, func(ctx context.Context, tx *sql.Tx) error {
+		if executionID != "" {
+			snapshot, err := settleSelectedProviderOriginRecoveryFailure(ctx, tx, attempt, sqliteDeliveryAdapter, claim, settlement, executionID)
+			if err != nil || snapshot.Status != runtimedelivery.StatusDeadLetter {
+				return err
+			}
+			record, found, err := eventrecordsqlite.Load(ctx, tx, snapshot.EventID)
+			if err != nil || !found {
+				if err == nil {
+					err = eventrecord.Missing(snapshot.EventID)
+				}
+				return err
+			}
+			diagnostic, err := deliveryDeadLetterRecord(record, snapshot)
+			if err != nil {
+				return err
+			}
+			return s.RecordDeadLetterTx(ctx, attempt, diagnostic, true)
+		}
 		alreadyTerminal, err := sqliteDeliveryAdapter.prepareProviderOriginRecovery(ctx, tx, claim)
 		if err != nil || alreadyTerminal {
 			return err
