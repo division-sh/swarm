@@ -81,12 +81,14 @@ func executeRunStart(ctx context.Context, req Request, opts EventPublicationOpti
 	cfg := eventPublicationConfig{
 		sourceAgent:                    func(Request) string { return "api.v1" },
 		rootInputOnly:                  true,
+		requireExistingExplicitRun:     true,
 		injectRunIDEntityIDWhenMissing: true,
+		injectRunIDEntityIDOnlyNewRun:  true,
 		durablePublishAck:              true,
 		atomicAPICompletion:            true,
 		publishError:                   runStartEventPublishError,
 		buildCompletion: func(_ context.Context, _ EventPublicationOptions, params eventPublicationParams) (any, string, error) {
-			return runStartResult{RunID: params.RunID, EventID: params.EventID, Status: "live", DataBinding: durabledata.DataBinding{State: "none"}}, params.RunID, nil
+			return runStartResult{RunID: params.RunID, EventID: params.EventID, Status: "live", DataBinding: durabledata.DataBinding{State: "none"}}, params.EventID, nil
 		},
 	}
 	completion, _, err := executeOperatorEventPublication(ctx, req, opts, now, cfg)
