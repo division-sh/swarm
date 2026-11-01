@@ -102,6 +102,7 @@ func TestPublicFeedOnlyCompletionUnloadRestartBothStores(t *testing.T) {
 				t.Fatalf("initial source selection: %+v", identity)
 			}
 			hash := identity.SourceArtifacts[0].BundleHash
+			pauseServedLandingForCreation(t, h.rpcEndpoint(), hash, ".")
 			params := map[string]any{
 				"bundle_hash": hash, "run_id": uuid.NewString(), "idempotency_key": uuid.NewString(),
 				"data": map[string]any{"imports": []any{map[string]any{

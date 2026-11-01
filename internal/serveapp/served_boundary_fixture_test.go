@@ -13,6 +13,7 @@ import (
 	runtimepkg "github.com/division-sh/swarm/internal/runtime"
 	"github.com/division-sh/swarm/internal/runtime/core/identitytest"
 	"github.com/division-sh/swarm/internal/runtime/lifecycleprobe/lifecycletest"
+	"github.com/division-sh/swarm/internal/runtime/runlifecycle"
 	storebackend "github.com/division-sh/swarm/internal/store/backendselection"
 	storeselected "github.com/division-sh/swarm/internal/store/selected"
 	"github.com/division-sh/swarm/internal/store/storetest"
@@ -25,6 +26,30 @@ type servedBoundaryFixture struct {
 	Runtime                       *runtimepkg.Runtime
 	Probe                         *lifecycletest.Probe
 	ReceiverStateReader           receiverProofStateReader
+}
+
+func pauseServedLandingForCreation(t *testing.T, endpoint, bundleHash, flowPath string) string {
+	t.Helper()
+	var result struct {
+		Runs []operatorread.RunHeader `json:"runs"`
+	}
+	requireServedJSONRPCResult(t, endpoint, "run.list", map[string]any{"bundle_hash": bundleHash, "limit": 500}, &result)
+	var runID string
+	for _, run := range result.Runs {
+		if run.BundleHash != bundleHash || run.FlowPath != flowPath || run.Status != "live" || run.Origin.Kind() != runlifecycle.OriginDeployment {
+			continue
+		}
+		if runID != "" {
+			t.Fatalf("flow %s has multiple live deployment landings: %+v", flowPath, result.Runs)
+		}
+		runID = run.RunID
+	}
+	if runID == "" {
+		t.Fatalf("flow %s lacks its live deployment landing: %+v", flowPath, result.Runs)
+	}
+	requireServedOKJSONRPC(t, endpoint, "run.pause", map[string]any{"run_id": runID, "idempotency_key": "creation-fixture-pause-" + runID})
+	requireServedRunStatus(t, endpoint, runID, "paused")
+	return runID
 }
 
 func startServedBoundaryFixture(t *testing.T, backend, sourceRoot string) (*serveRuntimeTestProcess, servedBoundaryFixture) {

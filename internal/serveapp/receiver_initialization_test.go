@@ -73,6 +73,7 @@ func requireTypedReceiverInitializationCases(t *testing.T, rt servedControlProof
 			}
 		})
 	}
+	var lastRunID string
 	for _, tc := range []struct {
 		name, values string
 		config       map[string]any
@@ -92,7 +93,15 @@ func requireTypedReceiverInitializationCases(t *testing.T, rt servedControlProof
 		t.Run(tc.name, func(t *testing.T) {
 			account := "account-" + tc.name
 			params := receiverInitializationPublishParams(rt, tc.name, account, tc.values)
-			seed := requireServedEventPublishRPCResult(t, rt.Endpoint, params)
+			var seed servedEventPublishRPCResult
+			method := "event.publish"
+			if lastRunID == "" {
+				seed = requireServedEventPublishRPCResult(t, rt.Endpoint, params)
+			} else {
+				method = "run.start"
+				requireServedJSONRPCResult(t, rt.Endpoint, method, params, &seed)
+			}
+			lastRunID = seed.RunID
 			waitPublicationSiteCompletion(t, rt, seed.RunID)
 			if tc.name == "optional_null_normalized" {
 				var public operatorread.OperatorEventFull
@@ -110,7 +119,8 @@ func requireTypedReceiverInitializationCases(t *testing.T, rt servedControlProof
 			waitOrigin(t, seed)
 			before := readServedForkRecipientSourceDomain(t, rt, seed.RunID)
 			companions := readForkReceiverCompanions(t, rt, seed.RunID)
-			duplicate := requireServedEventPublishRPCResult(t, rt.Endpoint, params)
+			var duplicate servedEventPublishRPCResult
+			requireServedJSONRPCResult(t, rt.Endpoint, method, params, &duplicate)
 			if duplicate.EventID != seed.EventID || duplicate.RunID != seed.RunID || !reflect.DeepEqual(before, readServedForkRecipientSourceDomain(t, rt, seed.RunID)) || !reflect.DeepEqual(companions, readForkReceiverCompanions(t, rt, seed.RunID)) {
 				t.Fatal("duplicate creation changed occurrence or execution history")
 			}
@@ -131,8 +141,13 @@ func requireTypedReceiverInitializationCases(t *testing.T, rt servedControlProof
 			})
 		})
 	}
+	if lastRunID == "" {
+		t.Fatal("receiver cases did not establish their intended run")
+	}
+	requireServedOKJSONRPC(t, rt.Endpoint, "run.continue", map[string]any{"run_id": lastRunID, "idempotency_key": "typed-init-schema-negative-continue"})
 	t.Run("wrong_integer_at_ingress", func(t *testing.T) {
 		params := receiverInitializationPublishParams(rt, "wrong-integer", "wrong-integer", `{"count":"3","active":true,"label":"kept","attributes":{}}`)
+		params["run_id"] = lastRunID
 		err := requireServedJSONRPCError(t, rt.Endpoint, "event.publish", params)
 		if err.Data["code"] != apiv1.PayloadValidationFailedCode {
 			t.Fatalf("wrong integer admission error=%+v", err)

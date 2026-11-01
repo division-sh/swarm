@@ -144,6 +144,7 @@ func TestPublicCompletionAcknowledgedRetirementBothStores(t *testing.T) {
 				if method == "event.publish" {
 					params["event_name"], params["payload"] = "scan.requested", map[string]any{"topic": "acknowledged-retirement"}
 				}
+				pauseServedLandingForCreation(t, h.rpcEndpoint(), identity.SourceArtifacts[0].BundleHash, ".")
 				finished := make(chan publicationAuditHTTPResult, 1)
 				go func() { finished <- publicationCompletionHTTPMethod(t.Context(), h.rpcEndpoint(), method, params) }()
 				var operation context.Context

@@ -125,7 +125,8 @@ func TestManagedEmitPublicationExactScopeBothStores(t *testing.T) {
 				assertResult(accepted.RunID, scope, instance, "source-writer", "exact")
 				requireServedOKJSONRPC(t, rt.Endpoint, "run.pause", map[string]any{"run_id": accepted.RunID, "idempotency_key": "managed-primary-pause"})
 				siblingParams := map[string]any{"event_name": "sibling.requested", "bundle_hash": rt.BundleHash, "payload": map[string]any{"case_id": "sibling"}, "idempotency_key": "managed-sibling"}
-				sibling := requireServedEventPublishRPCResult(t, rt.Endpoint, siblingParams)
+				var sibling servedEventPublishRPCResult
+				requireServedJSONRPCResult(t, rt.Endpoint, "run.start", siblingParams, &sibling)
 				waitServedRunDeliveryQuiescence(t, rt.ReadRunDeliveries, sibling.RunID)
 				assertResult(sibling.RunID, "sibling", "sibling", "sibling-writer", true)
 				requireServedOKJSONRPC(t, rt.Endpoint, "run.pause", map[string]any{"run_id": sibling.RunID, "idempotency_key": "managed-sibling-pause"})
@@ -136,7 +137,8 @@ func TestManagedEmitPublicationExactScopeBothStores(t *testing.T) {
 				}
 				waitServedRunDeliveryQuiescence(t, rt.ReadRunDeliveries, accepted.RunID)
 				assertResult(accepted.RunID, scope, instance, "source-writer", "exact")
-				siblingDuplicate := requireServedEventPublishRPCResult(t, rt.Endpoint, siblingParams)
+				var siblingDuplicate servedEventPublishRPCResult
+				requireServedJSONRPCResult(t, rt.Endpoint, "run.start", siblingParams, &siblingDuplicate)
 				if siblingDuplicate.EventID != sibling.EventID || siblingDuplicate.RunID != sibling.RunID {
 					t.Fatal("sibling restart replay changed identity")
 				}
@@ -144,7 +146,8 @@ func TestManagedEmitPublicationExactScopeBothStores(t *testing.T) {
 				assertResult(sibling.RunID, "sibling", "sibling", "sibling-writer", true)
 
 				hostileParams := map[string]any{"event_name": request, "bundle_hash": rt.BundleHash, "payload": map[string]any{"case_id": "hostile"}, "idempotency_key": "managed-hostile"}
-				hostile := requireServedEventPublishRPCResult(t, rt.Endpoint, hostileParams)
+				var hostile servedEventPublishRPCResult
+				requireServedJSONRPCResult(t, rt.Endpoint, "run.start", hostileParams, &hostile)
 				waitServedRunDeliveryQuiescence(t, rt.ReadRunDeliveries, hostile.RunID)
 				var count int
 				var failure []byte

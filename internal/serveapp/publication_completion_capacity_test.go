@@ -29,6 +29,7 @@ func TestPublicCompletionCapacityServedBothStores(t *testing.T) {
 			if len(identity.SourceArtifacts) != 1 {
 				t.Fatalf("initial source selection: %+v", identity)
 			}
+			pauseServedLandingForCreation(t, h.rpcEndpoint(), identity.SourceArtifacts[0].BundleHash, ".")
 			declaration := map[string]any{"flow_path": ".", "event": "scan.requested"}
 			data := map[string]any{"imports": []any{map[string]any{
 				"source_invocation_id": uuid.NewString(), "declaration": declaration,
