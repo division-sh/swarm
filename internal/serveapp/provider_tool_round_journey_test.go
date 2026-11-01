@@ -107,7 +107,7 @@ func reasoningToolRoundReply(t *testing.T, request llmapi.Request) (llmapi.Reply
 		Messages []struct {
 			Role       string          `json:"role"`
 			Content    string          `json:"content"`
-			Reasoning  string          `json:"reasoning_content"`
+			Reasoning  json.RawMessage `json:"reasoning_content"`
 			ToolCallID string          `json:"tool_call_id"`
 			ToolCalls  json.RawMessage `json:"tool_calls"`
 		} `json:"messages"`
@@ -143,6 +143,11 @@ func reasoningToolRoundReply(t *testing.T, request llmapi.Request) (llmapi.Reply
 			Tools: []llmapi.ToolCall{{ID: "round-call", Name: "read_flow_data", Arguments: args}}}, nil
 	}
 	if request.Number == 3 {
+		for _, message := range body.Messages {
+			if len(message.Reasoning) != 0 {
+				return llmapi.Reply{StatusCode: http.StatusBadRequest, ErrorBody: "completed turn retained reasoning_content"}, nil
+			}
+		}
 		read, err := retainedProviderToolResult(request, "round-call", "read_flow_data")
 		if err != nil {
 			return llmapi.Reply{StatusCode: http.StatusBadRequest, ErrorBody: err.Error()}, nil
@@ -171,7 +176,8 @@ func reasoningToolRoundReply(t *testing.T, request llmapi.Request) (llmapi.Reply
 		t.Logf("strict provider returned HTTP 400: %s", refusal)
 		return llmapi.Reply{StatusCode: http.StatusBadRequest, ErrorBody: refusal}, nil
 	}
-	if assistant.Reasoning != toolRoundReasoning {
+	var reasoning string
+	if err := json.Unmarshal(assistant.Reasoning, &reasoning); err != nil || reasoning != toolRoundReasoning {
 		const refusal = `{"error":{"message":"The reasoning_content in the thinking mode must be passed back to the API"}}`
 		t.Logf("strict provider returned HTTP 400: %s", refusal)
 		return llmapi.Reply{StatusCode: http.StatusBadRequest, ErrorBody: refusal}, nil
