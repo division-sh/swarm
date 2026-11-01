@@ -1008,7 +1008,7 @@ units:
   serveapp-journeys-d-l:
     packages:
       - github.com/division-sh/swarm/internal/serveapp
-    run: '^TestServed[D-L].*$'
+    run: '^Test(Served[D-L].*|InterruptedReadOnlyProviderTurnResumesOnlyInterruptedCallBothStores)$'
     required_children:
       TestServedFieldlessGateDeferralBothStores: [default_sqlite/fields=false, default_sqlite/fields=true, explicit_postgres/fields=false, explicit_postgres/fields=true]
     count_mode: count-1
@@ -1064,7 +1064,7 @@ units:
   serveapp-other:
     packages:
       - github.com/division-sh/swarm/internal/serveapp
-    run: '^Test([ABD-H].*|2376.*|InterruptedReadOnlyProviderTurnResumesOnlyInterruptedCallBothStores)$'
+    run: '^Test([ABD-H].*|2376.*)$'
     required_children:
       TestAudit2277ForkDurableResultBypassesGenericCompletionBothStores: [default_sqlite, explicit_postgres]
       TestExactOriginPublicationWaitHeldDiagnosticBothStores: [default_sqlite, explicit_postgres]

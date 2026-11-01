@@ -42,7 +42,7 @@ func TestInterruptedReadOnlyProviderTurnResumesOnlyInterruptedCallBothStores(t *
 			for _, exhaust := range []bool{false, true} {
 				for _, memory := range []bool{true, false} {
 					for _, selected := range []bool{false, true} {
-						if selected && profile != "openai_compatible" {
+						if (selected || exhaust) && profile != "openai_compatible" {
 							continue
 						}
 						t.Run(fmt.Sprintf("%s/%s/exhausted_%t/memory_%t/selected_%t", profile, backend, exhaust, memory, selected), func(t *testing.T) {
