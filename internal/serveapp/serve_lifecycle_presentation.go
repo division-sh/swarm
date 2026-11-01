@@ -291,9 +291,14 @@ func (p *serveLifecyclePresenter) recordPublicIngressDisabledHint() {
 	p.mu.Unlock()
 }
 
-func (p *serveLifecyclePresenter) recordNoConnectedChannels() {
-	if p == nil {
+func (p *serveLifecyclePresenter) recordNoConnectedChannels(httpRegistrations int, accounts []channelonboarding.AccountStatus) {
+	if p == nil || httpRegistrations > 0 {
 		return
+	}
+	for _, account := range accounts {
+		if account.Linked && account.State == "live" {
+			return
+		}
 	}
 	p.mu.Lock()
 	p.operatorWarnings = append(p.operatorWarnings, "No channels connected yet. Run: swarm channel connect telegram")
@@ -782,7 +787,9 @@ func (p *serveLifecyclePresenter) writeStandingIngressLocked(facts []serveLifecy
 			label = " session"
 		}
 		fmt.Fprintf(p.out, "  %-27s %s\n", strings.TrimSpace(fact.Provider)+label, strings.TrimSpace(fact.URL))
-		fmt.Fprintf(p.out, "  %-27s %s\n", "capability", packs.RenderEffectiveTriggerReadiness(fact.Subject))
+		if !serveSessionAdmissionObserved(fact, accounts) {
+			fmt.Fprintf(p.out, "  %-27s %s\n", "capability", packs.RenderEffectiveTriggerReadiness(fact.Subject))
+		}
 	}
 	for _, account := range accounts {
 		provider := account.Provider
@@ -805,6 +812,26 @@ func (p *serveLifecyclePresenter) writeStandingIngressLocked(facts []serveLifecy
 		}
 		fmt.Fprintf(p.out, "  %s: %s\n", label, state)
 	}
+}
+
+func serveSessionAdmissionObserved(fact serveLifecycleIngressFact, accounts []channelonboarding.AccountStatus) bool {
+	if !sessionIngressFact(fact) || fact.Subject.Status != packs.StatusNotReady ||
+		fact.Subject.TriggerAdmission.BindingBlockReason != string(runtimerunlifecycle.StandingBindingSessionRequired) {
+		return false
+	}
+	if _, err := packs.NormalizeSubjects([]packs.Subject{fact.Subject}); err != nil {
+		return false
+	}
+	for _, account := range accounts {
+		if account.Provider != fact.Provider || !account.Linked || account.State != "live" || account.Reason != "" || len(account.Holders) != 1 {
+			continue
+		}
+		holder := account.Holders[0]
+		if holder.BundleHash == fact.BundleHash && holder.Flow == fact.Subject.TriggerAdmission.FlowPath {
+			return true
+		}
+	}
+	return false
 }
 
 func (p *serveLifecyclePresenter) writeWarningsLocked() {

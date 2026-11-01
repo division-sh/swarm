@@ -143,6 +143,65 @@ func TestServeLifecyclePresenterConciseReadinessUsesTypedFacts(t *testing.T) {
 	if strings.Count(text, "source env:TELEGRAM_BOT_TOKEN") != 1 || strings.Contains(text, "credential missing") {
 		t.Fatalf("credential facts were key-deduplicated, repeated, or fabricated:\n%s", text)
 	}
+	for _, state := range []string{"none", "stopped", "refused", "live"} {
+		for _, scope := range []string{"exact", "provider", "bundle", "flow", "unlinked", "recovery", "invalid", "http"} {
+			t.Run(state+"/"+scope, func(t *testing.T) {
+				bundle, enabled := "bundle-v2:sha256:"+strings.Repeat("a", 64), false
+				subject := packs.Subject{
+					ID: "ingress:" + bundle + ":frontdesk:whatsapp", Kind: packs.SubjectProviderTrigger,
+					Provider: "whatsapp", Source: "trigger_pack_binding", Applicability: "effective", Status: packs.StatusNotReady,
+					TriggerAdmission: &packs.TriggerAdmission{
+						Transport: packs.ChannelTransportSession, BindingEnabled: &enabled, BindingBlockReason: "session_admission_required",
+						BundleHash: bundle, FlowPath: "frontdesk", Alias: "frontdesk", CatalogGeneration: strings.Repeat("b", 64),
+						PolicySource: "verified_pack", RequestAuthentication: "SESSION_ACCOUNT", Event: "inbound.whatsapp.raw",
+						Pack: &packs.TriggerPackIdentity{ID: "provider.whatsapp", Version: "1.0.0", ManifestHash: "sha256:" + strings.Repeat("c", 64), Provenance: "external"},
+					},
+					Capabilities: []packs.Capability{{Code: packs.CapabilityReceiveSessionEvents, Target: "whatsapp"}},
+				}
+				account := channelonboarding.AccountStatus{Provider: "whatsapp", Account: "+15550100", Linked: true, State: state,
+					Holders: []channelonboarding.AccountHolder{{BundleHash: bundle, Flow: "frontdesk"}}}
+				registrations := 0
+				switch scope {
+				case "provider":
+					account.Provider = "telegram"
+				case "bundle":
+					account.Holders[0].BundleHash = "other-bundle"
+				case "flow":
+					account.Holders[0].Flow = "other-flow"
+				case "unlinked":
+					account.Linked = false
+				case "recovery":
+					subject.TriggerAdmission.BindingBlockReason = "recovery_required"
+					subject.TriggerAdmission.RecoveryOperationID, subject.TriggerAdmission.RecoveryCommand = "recovery-operation", "swarm channel connect whatsapp"
+				case "invalid":
+					subject.TriggerAdmission.RequestAuthentication = "HMAC_SHA256"
+				case "http":
+					registrations = 1
+				}
+				accounts := []channelonboarding.AccountStatus{account}
+				if state == "none" {
+					accounts = nil
+				} else if state == "refused" {
+					accounts[0].Reason = "registration_not_current"
+				}
+				var output bytes.Buffer
+				p := newServeLifecyclePresenter(cliapp.ServeOptions{Output: &output})
+				p.recordNoConnectedChannels(registrations, accounts)
+				p.readyPresentation(serveLifecycleReadyFacts{Accounts: accounts, Standing: []serveLifecycleIngressFact{
+					{Provider: "whatsapp", BundleHash: bundle, URL: "in-process session", Subject: subject},
+				}})
+				text := output.String()
+				wantWarning := registrations == 0 && (state != "live" || scope == "unlinked")
+				wantCapability := state != "live" || scope != "exact" && scope != "http"
+				if strings.Contains(text, "No channels connected yet") != wantWarning || strings.Contains(text, "  capability ") != wantCapability {
+					t.Fatalf("warning=%t capability=%t expected:\n%s", wantWarning, wantCapability, text)
+				}
+				if scope == "recovery" && !strings.Contains(text, "recovery required") || scope == "invalid" && !strings.Contains(text, "INVALID") {
+					t.Fatalf("independent declaration refusal was hidden:\n%s", text)
+				}
+			})
+		}
+	}
 }
 
 func TestServeLifecyclePresenterStylesOnlyWaitingToken(t *testing.T) {
