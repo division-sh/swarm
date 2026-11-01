@@ -37,10 +37,17 @@ func TestReleaseCompiledLifecycleJourneysBothStores(t *testing.T) {
 				if gate {
 					prefix = "outer/inner/"
 				}
-				seed := requireServedEventPublishRPCResult(t, rt.Endpoint, map[string]any{
+				seedParams := map[string]any{
 					"event_name": "work.requested", "bundle_hash": rt.BundleHash,
 					"payload": map[string]any{"seed": true}, "idempotency_key": "release-seed",
-				})
+				}
+				var seed servedEventPublishRPCResult
+				if gate {
+					seed = requireServedEventPublishRPCResult(t, rt.Endpoint, seedParams)
+				} else {
+					pauseServedLandingForCreation(t, rt.Endpoint, rt.BundleHash, ".")
+					requireServedJSONRPCResult(t, rt.Endpoint, "run.start", seedParams, &seed)
+				}
 				if gate {
 					entityID := requireServedEventPublishEntityState(t, rt.DB, rt.Backend, seed.RunID, "", "review")
 					params := lifecycleGateDecisionParams(t, rt, seed.RunID, "approve")

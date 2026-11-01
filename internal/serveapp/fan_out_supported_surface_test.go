@@ -33,6 +33,7 @@ func TestIssue2394ServedFanOutSupportedSurfacesBothStores(t *testing.T) {
 			opts, start := lifecycleRestartHarness(t, backend, root)
 			opts.TestLLMRuntime = servedNoopLLMRuntime{}
 			process, rt := start()
+			bootRunID := pauseServedLandingForCreation(t, rt.Endpoint, rt.BundleHash, ".")
 			t.Cleanup(func() {
 				if t.Failed() {
 					t.Logf("served output:\n%s", process.outputString())
@@ -40,6 +41,9 @@ func TestIssue2394ServedFanOutSupportedSurfacesBothStores(t *testing.T) {
 			})
 			for _, method := range []string{"run.start", "event.publish"} {
 				t.Run(method, func(t *testing.T) {
+					if method == "event.publish" {
+						requireServedOKJSONRPC(t, rt.Endpoint, "run.continue", map[string]any{"run_id": bootRunID, "idempotency_key": "surface-boot-continue-" + bootRunID})
+					}
 					portfolio := "surface-" + uuid.NewString()
 					params := map[string]any{
 						"bundle_hash": rt.BundleHash, "event_name": "portfolio.opened",
@@ -137,6 +141,9 @@ func TestIssue2394HeldReporterConsumerKeepsRunUnreadyBothStores(t *testing.T) {
 					}
 				}
 				_, rt := start()
+				if method == "run.start" {
+					pauseServedLandingForCreation(t, rt.Endpoint, rt.BundleHash, ".")
+				}
 				portfolio := "held-" + uuid.NewString()
 				params := map[string]any{
 					"bundle_hash": rt.BundleHash, "event_name": "portfolio.opened",
@@ -216,6 +223,7 @@ func TestIssue2566ReporterFiniteFixtureCanCloseBothStores(t *testing.T) {
 			process.waitForReadyLine()
 			endpoint := "http://" + serveRuntimeAPIListenerFromOutput(t, process.outputString()) + "/v1/rpc"
 			bundleHash := servedEventPublishFixtureBundleHash(t, root)
+			pauseServedLandingForCreation(t, endpoint, bundleHash, ".")
 			var opened struct {
 				RunID string `json:"run_id"`
 			}
