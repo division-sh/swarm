@@ -177,33 +177,9 @@ func recordDeploymentRunFeedFactsTx(ctx context.Context, tx *sql.Tx, recorder de
 		if err != nil {
 			return fmt.Errorf("read created deployment feed: %w", err)
 		}
-		var feedID, bundleHash, versionID, schemaDigest string
-		var cardinality int64
-		if !rows.Next() {
-			err := rows.Err()
-			_ = rows.Close()
-			if err != nil {
-				return err
-			}
-			return fmt.Errorf("created deployment feed for %s is missing", feed.Declaration.Key())
-		}
-		if err := rows.Scan(&feedID, &bundleHash, &versionID, &schemaDigest, &cardinality); err != nil {
-			_ = rows.Close()
+		feedID, err := readCreatedDeploymentFeed(rows, feed)
+		if err != nil {
 			return err
-		}
-		if rows.Next() {
-			_ = rows.Close()
-			return fmt.Errorf("created deployment feed for %s is ambiguous", feed.Declaration.Key())
-		}
-		if err := rows.Err(); err != nil {
-			_ = rows.Close()
-			return err
-		}
-		if err := rows.Close(); err != nil {
-			return err
-		}
-		if bundleHash != feed.BundleHash || versionID != string(feed.VersionID) || schemaDigest != string(feed.SchemaDigest) || cardinality != int64(feed.RowCount) {
-			return fmt.Errorf("created deployment feed for %s contradicts its pinned source", feed.Declaration.Key())
 		}
 		ref, err := runforkrevision.FanOutIntentFact(fanoutobligation.IntentKey{RunID: runID, DeploymentFeedID: feedID})
 		if err != nil {
@@ -221,6 +197,38 @@ func recordDeploymentRunFeedFactsTx(ctx context.Context, tx *sql.Tx, recorder de
 		return ordinary.AddFacts(runID, refs...)
 	}
 	return recorder.AddRunStartFacts(ctx, runID, refs...)
+}
+
+func readCreatedDeploymentFeed(rows *sql.Rows, feed runtimedata.DeploymentFeed) (string, error) {
+	var feedID, bundleHash, versionID, schemaDigest string
+	var cardinality int64
+	if !rows.Next() {
+		err := rows.Err()
+		_ = rows.Close()
+		if err != nil {
+			return "", err
+		}
+		return "", fmt.Errorf("created deployment feed for %s is missing", feed.Declaration.Key())
+	}
+	if err := rows.Scan(&feedID, &bundleHash, &versionID, &schemaDigest, &cardinality); err != nil {
+		_ = rows.Close()
+		return "", err
+	}
+	if rows.Next() {
+		_ = rows.Close()
+		return "", fmt.Errorf("created deployment feed for %s is ambiguous", feed.Declaration.Key())
+	}
+	if err := rows.Err(); err != nil {
+		_ = rows.Close()
+		return "", err
+	}
+	if err := rows.Close(); err != nil {
+		return "", err
+	}
+	if bundleHash != feed.BundleHash || versionID != string(feed.VersionID) || schemaDigest != string(feed.SchemaDigest) || cardinality != int64(feed.RowCount) {
+		return "", fmt.Errorf("created deployment feed for %s contradicts its pinned source", feed.Declaration.Key())
+	}
+	return feedID, nil
 }
 
 func deploymentRunCompletion(record runtimedata.RunCreationOperationRecord) (apiidempotency.Completion, error) {

@@ -70,25 +70,8 @@ func executeLiveRunRows(ctx context.Context, req Request, opts EventPublicationO
 	if err != nil {
 		return nil, err
 	}
-	if opts.LiveRuns == nil || opts.Runs == nil {
-		return nil, fmt.Errorf("rows publication requires native live-run readers")
-	}
-	live, found, err := opts.LiveRuns.LoadLiveRun(ctx, scope)
+	ctx, selected, params, live, err := selectRowsLiveRun(ctx, opts, params, identity, scope, data, runID, provided)
 	if err != nil {
-		return nil, err
-	}
-	if !found {
-		return nil, eventPublicationNoLiveRun(ctx, opts.Runs, scope, "")
-	}
-	if provided && runID != live.RunID {
-		return nil, NewApplicationError(EventPublishRejectedCode, false, map[string]any{"run_id": runID, "live_run_id": live.RunID, "reason": "live_run_mismatch"})
-	}
-	params.RunID, params.RunIDProvided, params.LiveRun = live.RunID, true, &live
-	ctx, selected, params, err := resolveEventPublicationBundleScope(ctx, opts, params, identity, eventPublicationConfig{rootInputOnly: true, requireExistingExplicitRun: true})
-	if err != nil {
-		return nil, err
-	}
-	if _, err := admitRunStartDeploymentFeeds(selected.Source, data); err != nil {
 		return nil, err
 	}
 	ctx, err = admitScenarioExecutionSelector(ctx, selected, params.RunID, false, selector)
@@ -117,6 +100,31 @@ func executeLiveRunRows(ctx context.Context, req Request, opts EventPublicationO
 			map[string]any{"operation": committed.Record.Summary}, "rows publication %s", committed.Record.Summary.Outcome))
 	}
 	return recordedPublicCompletionResult(committed.Completion)
+}
+
+func selectRowsLiveRun(ctx context.Context, opts EventPublicationOptions, params eventPublicationParams, identity bundleIdentityParam, scope runlifecycle.LiveRunScope, data durabledata.RunCreationDataEnvelope, runID string, provided bool) (context.Context, EventPublicationOptions, eventPublicationParams, runlifecycle.LiveRun, error) {
+	if opts.LiveRuns == nil || opts.Runs == nil {
+		return ctx, opts, params, runlifecycle.LiveRun{}, fmt.Errorf("rows publication requires native live-run readers")
+	}
+	live, found, err := opts.LiveRuns.LoadLiveRun(ctx, scope)
+	if err != nil {
+		return ctx, opts, params, live, err
+	}
+	if !found {
+		return ctx, opts, params, live, eventPublicationNoLiveRun(ctx, opts.Runs, scope, "")
+	}
+	if provided && runID != live.RunID {
+		return ctx, opts, params, live, NewApplicationError(EventPublishRejectedCode, false, map[string]any{"run_id": runID, "live_run_id": live.RunID, "reason": "live_run_mismatch"})
+	}
+	params.RunID, params.RunIDProvided, params.LiveRun = live.RunID, true, &live
+	ctx, selected, params, err := resolveEventPublicationBundleScope(ctx, opts, params, identity, eventPublicationConfig{rootInputOnly: true, requireExistingExplicitRun: true})
+	if err != nil {
+		return ctx, selected, params, live, err
+	}
+	if _, err := admitRunStartDeploymentFeeds(selected.Source, data); err != nil {
+		return ctx, selected, params, live, err
+	}
+	return ctx, selected, params, live, nil
 }
 
 func appendRowsDeclarations(data durabledata.RunCreationDataEnvelope) []durabledata.DeclarationRef {

@@ -98,27 +98,9 @@ func prepareRunDataTx(o *Owner, ctx context.Context, tx *sql.Tx, canonical runti
 		}
 	}
 	plan := RunCreationPlan{command: canonical, requestHash: hash, requestJSON: requestJSON, publicationID: publicationID}
-	imports := make(map[string]runtimedata.FusedImport, len(canonical.Data.Imports))
-	for _, item := range canonical.Data.Imports {
-		imports[item.Declaration.Key()] = item
-	}
-	explicit := make(map[string]runtimedata.ExplicitPin, len(canonical.Data.Pins))
-	for _, item := range canonical.Data.Pins {
-		explicit[item.Declaration.Key()] = item
-	}
-	known := make(map[string]runtimedata.Declaration, len(declarations))
-	for _, declaration := range declarations {
-		known[declaration.Ref.Key()] = declaration
-	}
-	for key := range imports {
-		if _, ok := known[key]; !ok {
-			return RunCreationPlan{}, runtimedata.NewDomainError(runtimedata.CodePinConflict, "fused import selects declaration %s outside exact bundle", key)
-		}
-	}
-	for key := range explicit {
-		if _, ok := known[key]; !ok {
-			return RunCreationPlan{}, runtimedata.NewDomainError(runtimedata.CodePinConflict, "explicit pin selects declaration %s outside exact bundle", key)
-		}
+	known, err := runDataDeclarations(canonical.Data, declarations)
+	if err != nil {
+		return RunCreationPlan{}, err
 	}
 
 	validationRejected := false
@@ -215,6 +197,32 @@ func prepareRunDataTx(o *Owner, ctx context.Context, tx *sql.Tx, canonical runti
 		return runtimedata.CompareDeclarationRef(plan.feeds[i].Declaration, plan.feeds[j].Declaration) < 0
 	})
 	return plan, nil
+}
+
+func runDataDeclarations(data runtimedata.RunCreationDataEnvelope, declarations []runtimedata.Declaration) (map[string]runtimedata.Declaration, error) {
+	imports := make(map[string]runtimedata.FusedImport, len(data.Imports))
+	for _, item := range data.Imports {
+		imports[item.Declaration.Key()] = item
+	}
+	explicit := make(map[string]runtimedata.ExplicitPin, len(data.Pins))
+	for _, item := range data.Pins {
+		explicit[item.Declaration.Key()] = item
+	}
+	known := make(map[string]runtimedata.Declaration, len(declarations))
+	for _, declaration := range declarations {
+		known[declaration.Ref.Key()] = declaration
+	}
+	for key := range imports {
+		if _, ok := known[key]; !ok {
+			return nil, runtimedata.NewDomainError(runtimedata.CodePinConflict, "fused import selects declaration %s outside exact bundle", key)
+		}
+	}
+	for key := range explicit {
+		if _, ok := known[key]; !ok {
+			return nil, runtimedata.NewDomainError(runtimedata.CodePinConflict, "explicit pin selects declaration %s outside exact bundle", key)
+		}
+	}
+	return known, nil
 }
 
 func (o *Owner) rejectRunCreationTx(ctx context.Context, tx *sql.Tx, plan RunCreationPlan, outcome string, rejection runtimedata.RunCreationRejection) (RunCreationPlan, error) {

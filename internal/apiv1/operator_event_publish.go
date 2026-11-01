@@ -270,20 +270,9 @@ func executeOperatorEventPublication(
 		}
 		params.EventName = resolvedEventName
 		if privateScenario && cfg.rootInputOnly {
-			header, err := selectedOpts.Runs.LoadRunHeader(ctx, params.RunID)
+			params, err = bindScenarioFirstPublicationEvent(ctx, selectedOpts, params)
 			if err != nil {
 				return apiidempotency.Completion{}, err
-			}
-			if header.Origin.Kind() == runtimerunlifecycle.OriginEvent {
-				_, err := selectedOpts.Observability.LoadOperatorEvent(ctx, header.Origin.EventID())
-				if errors.Is(err, operatorread.ErrEventNotFound) {
-					if header.Origin.EventType() != params.EventName {
-						return apiidempotency.Completion{}, fmt.Errorf("scenario first publication differs from its admitted input")
-					}
-					params.EventID = header.Origin.EventID()
-				} else if err != nil {
-					return apiidempotency.Completion{}, err
-				}
 			}
 		}
 		endpoint, err := runtimebus.NewRootInputAPIEventPublicationEndpoint(selectedOpts.Source, resolvedEventName)
@@ -360,6 +349,25 @@ func executeOperatorEventPublication(
 		return completion, atomicReplay, err
 	}
 	return opts.Idempotency.WithAPIIdempotency(ctx, idempotency, execute)
+}
+
+func bindScenarioFirstPublicationEvent(ctx context.Context, opts EventPublicationOptions, params eventPublicationParams) (eventPublicationParams, error) {
+	header, err := opts.Runs.LoadRunHeader(ctx, params.RunID)
+	if err != nil {
+		return params, err
+	}
+	if header.Origin.Kind() == runtimerunlifecycle.OriginEvent {
+		_, err := opts.Observability.LoadOperatorEvent(ctx, header.Origin.EventID())
+		if errors.Is(err, operatorread.ErrEventNotFound) {
+			if header.Origin.EventType() != params.EventName {
+				return params, fmt.Errorf("scenario first publication differs from its admitted input")
+			}
+			params.EventID = header.Origin.EventID()
+		} else if err != nil {
+			return params, err
+		}
+	}
+	return params, nil
 }
 
 func eventPublicationCompletion(ctx context.Context, opts EventPublicationOptions, params eventPublicationParams, cfg eventPublicationConfig) (apiidempotency.Completion, error) {

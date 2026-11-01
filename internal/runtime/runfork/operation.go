@@ -32,44 +32,8 @@ type ForkOperationRequest struct {
 }
 
 func (r ForkOperationRequest) Canonical() (ForkOperationRequest, string, error) {
-	if r.PublicationID != "" {
-		id, err := uuid.Parse(r.PublicationID)
-		if err != nil || id == uuid.Nil || id.String() != r.PublicationID || r.AtStart || r.ForkEventID != "" {
-			return ForkOperationRequest{}, "", fmt.Errorf("fork publication requires one canonical UUID and no other cut selector")
-		}
-	}
-	if r.AtStart && r.ForkEventID != "" {
-		return ForkOperationRequest{}, "", fmt.Errorf("fork operation start and event selectors are mutually exclusive")
-	}
-	for _, id := range []string{r.OperationID, r.SourceRunID} {
-		parsed, err := uuid.Parse(id)
-		if err != nil || parsed == uuid.Nil || parsed.String() != id {
-			return ForkOperationRequest{}, "", fmt.Errorf("fork operation requires canonical operation and source-run UUIDs")
-		}
-	}
-	if r.ForkEventID != "" {
-		parsed, err := uuid.Parse(r.ForkEventID)
-		if err != nil || parsed == uuid.Nil || parsed.String() != r.ForkEventID {
-			return ForkOperationRequest{}, "", fmt.Errorf("fork operation event selector must be a canonical UUID")
-		}
-	}
-	if r.ResolvedPoint != nil {
-		if err := r.ResolvedPoint.Validate(); err != nil {
-			return ForkOperationRequest{}, "", fmt.Errorf("fork operation resolved point: %w", err)
-		}
-		if r.AtStart != (r.ResolvedPoint.Kind == RunForkPointRunStart) {
-			return ForkOperationRequest{}, "", fmt.Errorf("fork operation resolved point disagrees with start selector")
-		}
-		selector := r.ForkEventID
-		if r.PublicationID != "" && r.ResolvedPoint.Kind == RunForkPointEvent {
-			selector = r.PublicationID
-		}
-		if r.ResolvedPoint.Input != selector || (selector != "" && r.ResolvedPoint.EventID != selector) {
-			return ForkOperationRequest{}, "", fmt.Errorf("fork operation resolved point disagrees with original event selector")
-		}
-		if r.PublicationID != "" && r.ResolvedPoint.Kind != RunForkPointStateRevision && r.ResolvedPoint.Kind != RunForkPointEvent {
-			return ForkOperationRequest{}, "", fmt.Errorf("rows publication requires its committed state revision")
-		}
+	if err := r.validateCutSelectors(); err != nil {
+		return ForkOperationRequest{}, "", err
 	}
 	if strings.TrimSpace(r.Actor) == "" || strings.TrimSpace(r.TransportHash) == "" || strings.TrimSpace(r.TargetBundleHash) == "" {
 		return ForkOperationRequest{}, "", fmt.Errorf("fork operation requires actor, transport hash and selected bundle")
@@ -114,6 +78,49 @@ func (r ForkOperationRequest) Canonical() (ForkOperationRequest, string, error) 
 		return ForkOperationRequest{}, "", err
 	}
 	return r, hash, nil
+}
+
+func (r ForkOperationRequest) validateCutSelectors() error {
+	if r.PublicationID != "" {
+		id, err := uuid.Parse(r.PublicationID)
+		if err != nil || id == uuid.Nil || id.String() != r.PublicationID || r.AtStart || r.ForkEventID != "" {
+			return fmt.Errorf("fork publication requires one canonical UUID and no other cut selector")
+		}
+	}
+	if r.AtStart && r.ForkEventID != "" {
+		return fmt.Errorf("fork operation start and event selectors are mutually exclusive")
+	}
+	for _, id := range []string{r.OperationID, r.SourceRunID} {
+		parsed, err := uuid.Parse(id)
+		if err != nil || parsed == uuid.Nil || parsed.String() != id {
+			return fmt.Errorf("fork operation requires canonical operation and source-run UUIDs")
+		}
+	}
+	if r.ForkEventID != "" {
+		parsed, err := uuid.Parse(r.ForkEventID)
+		if err != nil || parsed == uuid.Nil || parsed.String() != r.ForkEventID {
+			return fmt.Errorf("fork operation event selector must be a canonical UUID")
+		}
+	}
+	if r.ResolvedPoint != nil {
+		if err := r.ResolvedPoint.Validate(); err != nil {
+			return fmt.Errorf("fork operation resolved point: %w", err)
+		}
+		if r.AtStart != (r.ResolvedPoint.Kind == RunForkPointRunStart) {
+			return fmt.Errorf("fork operation resolved point disagrees with start selector")
+		}
+		selector := r.ForkEventID
+		if r.PublicationID != "" && r.ResolvedPoint.Kind == RunForkPointEvent {
+			selector = r.PublicationID
+		}
+		if r.ResolvedPoint.Input != selector || (selector != "" && r.ResolvedPoint.EventID != selector) {
+			return fmt.Errorf("fork operation resolved point disagrees with original event selector")
+		}
+		if r.PublicationID != "" && r.ResolvedPoint.Kind != RunForkPointStateRevision && r.ResolvedPoint.Kind != RunForkPointEvent {
+			return fmt.Errorf("rows publication requires its committed state revision")
+		}
+	}
+	return nil
 }
 
 func (r ForkOperationRequest) BindResolvedPoint(point RunForkPoint) (ForkOperationRequest, error) {
