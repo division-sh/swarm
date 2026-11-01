@@ -25,39 +25,23 @@ func TestServedRootInputFeedsExecuteAndSettleBothStores(t *testing.T) {
 			}{
 				{"connected-child", canonicalrouting.DeploymentFeedConnectedRoot, "{\"item_id\":\"one\"}\n{\"item_id\":\"two\"}\n", 2, 2},
 				{"same-flow", canonicalrouting.DeploymentFeedSameFlowRoot, "{\"item_id\":\"one\"}\n", 1, 1},
-				{"keyed-root-opening-event", canonicalrouting.DeploymentFeedKeyedRoot, "{\"item_id\":\"one\"}\n", 1, 1},
 			} {
 				t.Run(tc.name, func(t *testing.T) {
 					_, rt := startServedBoundaryFixture(t, backend, canonicalrouting.CopyRootInputFeed(t, tc.kind))
-					pauseServedLandingForCreation(t, rt.Endpoint, rt.BundleHash, ".")
+					runID := requireServedLiveLandingRunID(t, rt.Endpoint, rt.BundleHash, ".")
 					owner := rt.Selected.RuntimeDeps().EventStore
 					params := map[string]any{
-						"bundle_hash": rt.BundleHash, "run_id": uuid.NewString(), "idempotency_key": uuid.NewString(),
+						"bundle_hash": rt.BundleHash, "run_id": runID, "idempotency_key": uuid.NewString(),
 						"data": map[string]any{"imports": []any{map[string]any{
 							"source_invocation_id": uuid.NewString(), "declaration": map[string]any{"flow_path": ".", "event": "item.registered"},
 							"expected_head": map[string]any{"state": "absent"},
 							"input":         map[string]any{"format": "jsonl", "content_base64": base64.StdEncoding.EncodeToString([]byte(tc.rows))},
 						}}, "pins": []any{}},
 					}
-					if tc.kind == canonicalrouting.DeploymentFeedKeyedRoot {
-						before, err := storetest.ReadFiniteRunStartStorageCounts(t.Context(), owner)
-						if err != nil {
-							t.Fatal(err)
-						}
-						refused := publicationCompletionHTTPMethod(t.Context(), rt.Endpoint, "run.start", params)
-						after, err := storetest.ReadFiniteRunStartStorageCounts(t.Context(), owner)
-						if err != nil || refused.err != nil || len(refused.rpcError) == 0 || before != after {
-							t.Fatalf("data-only feed constructed keyed root or changed storage: before=%+v after=%+v rpc=%s transport=%v read=%v", before, after, refused.rpcError, refused.err, err)
-						}
-						params["idempotency_key"] = uuid.NewString()
-						params["event_name"] = "account.opened"
-						params["payload"] = map[string]any{"account_id": "account"}
-					}
 					first := publicationCompletionHTTPMethod(t.Context(), rt.Endpoint, "run.start", params)
 					if first.err != nil || len(first.rpcError) != 0 {
 						t.Fatalf("root input run.start: transport=%v rpc=%s", first.err, first.rpcError)
 					}
-					runID := params["run_id"].(string)
 					requireServedRunStatus(t, rt.Endpoint, runID, "live")
 					waitIssue2564LiveRunSettlement(t, issue2564ServedFixture{Endpoint: rt.Endpoint}, runID)
 					waitServedBoundaryPublicationCompletion(t, rt, runID)

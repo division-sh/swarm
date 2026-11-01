@@ -24,73 +24,75 @@ import (
 func TestServedSemanticNumericIdempotencyReplay(t *testing.T) {
 	for _, backend := range []servedparity.Backend{servedparity.BackendDefaultSQLite, servedparity.BackendExplicitPostgres} {
 		t.Run(string(backend), func(t *testing.T) {
-			root := semanticNumericIngressFixture(t)
-			bundleHash := servedEventPublishFixtureBundleHash(t, root)
-			unsetStoreSelectorEnv(t)
-			stubServeRuntimeWorkspaceLifecycle(t)
-			opts := cliapp.ServeOptions{SourceRoot: root, APIListenAddr: "127.0.0.1:0", MCPListenAddr: "127.0.0.1:0", SelfCheck: true, TestOutboxSweeperConfig: servedEventPublishProofOutboxSweeperConfig()}
-			var db *sql.DB
-			if backend == servedparity.BackendExplicitPostgres {
-				_, db, _ = installServeRuntimeEmptyPostgresTestStores(t, func() cliapp.ServeWorkspaceLifecycle { return serveRuntimeWorkspaceStub{} })
-				opts.ConfigPath = writeServeRuntimeTestConfig(t)
-				opts.StoreMode = "postgres"
-				opts.StoreModeSet = true
-			} else {
-				opts.ConfigPath = writeStoreBackendRuntimeConfig(t, "sqlite", filepath.Join(t.TempDir(), "semantic.db"))
-			}
-			captureSelectedRuntimePersistence(t, func(p serveRuntimePersistence) { db, _, _ = selectedRuntimeStoreForTest(t, p) })
-			start := func() (*serveRuntimeTestProcess, string) {
-				p := startServeRuntimeTestProcess(t, opts)
-				p.waitForReadyLine()
-				return p, "http://" + serveRuntimeAPIListenerFromOutput(t, p.outputString()) + "/v1/rpc"
-			}
-			process, endpoint := start()
-			type replayCase struct {
-				method, transport, run, key string
-				result                      json.RawMessage
-			}
-			var cases []replayCase
 			for _, method := range []string{"event.publish", "run.start"} {
-				for _, transport := range []string{"http"} {
-					c := replayCase{method: method, transport: transport, run: uuid.NewString(), key: uuid.NewString()}
-					body := semanticNumericRequest(bundleHash, c.method, c.run, c.key, "7")
-					resp := semanticNumericRPC(t, endpoint, c.transport, body)
-					if resp.Error != nil {
-						t.Fatalf("%s/%s: %#v", method, transport, resp.Error)
+				t.Run(method, func(t *testing.T) {
+					root := semanticNumericIngressFixture(t)
+					bundleHash := servedEventPublishFixtureBundleHash(t, root)
+					unsetStoreSelectorEnv(t)
+					stubServeRuntimeWorkspaceLifecycle(t)
+					opts := cliapp.ServeOptions{SourceRoot: root, APIListenAddr: "127.0.0.1:0", MCPListenAddr: "127.0.0.1:0", SelfCheck: true, TestOutboxSweeperConfig: servedEventPublishProofOutboxSweeperConfig()}
+					var db *sql.DB
+					if backend == servedparity.BackendExplicitPostgres {
+						_, db, _ = installServeRuntimeEmptyPostgresTestStores(t, func() cliapp.ServeWorkspaceLifecycle { return serveRuntimeWorkspaceStub{} })
+						opts.ConfigPath = writeServeRuntimeTestConfig(t)
+						opts.StoreMode = "postgres"
+						opts.StoreModeSet = true
+					} else {
+						opts.ConfigPath = writeStoreBackendRuntimeConfig(t, "sqlite", filepath.Join(t.TempDir(), "semantic.db"))
 					}
-					c.result = resp.Result
-					var result struct {
-						RunID string `json:"run_id"`
+					captureSelectedRuntimePersistence(t, func(p serveRuntimePersistence) { db, _, _ = selectedRuntimeStoreForTest(t, p) })
+					start := func() (*serveRuntimeTestProcess, string) {
+						p := startServeRuntimeTestProcess(t, opts)
+						p.waitForReadyLine()
+						return p, "http://" + serveRuntimeAPIListenerFromOutput(t, p.outputString()) + "/v1/rpc"
 					}
-					if err := json.Unmarshal(resp.Result, &result); err != nil || result.RunID == "" {
-						t.Fatalf("run result %s: %v", resp.Result, err)
+					process, endpoint := start()
+					type replayCase struct {
+						method, transport, run, key string
+						result                      json.RawMessage
 					}
-					c.run = result.RunID
-					for _, equivalent := range []string{"7.0", "7e0"} {
-						replay := semanticNumericRPC(t, endpoint, c.transport, semanticNumericRequest(bundleHash, c.method, c.run, c.key, equivalent))
+					var cases []replayCase
+					for _, transport := range []string{"http"} {
+						c := replayCase{method: method, transport: transport, run: requireServedLiveLandingRunID(t, endpoint, bundleHash, "."), key: uuid.NewString()}
+						body := semanticNumericRequest(bundleHash, c.method, c.run, c.key, "7")
+						resp := semanticNumericRPC(t, endpoint, c.transport, body)
+						if resp.Error != nil {
+							t.Fatalf("%s/%s: %#v", method, transport, resp.Error)
+						}
+						c.result = resp.Result
+						var result struct {
+							RunID string `json:"run_id"`
+						}
+						if err := json.Unmarshal(resp.Result, &result); err != nil || result.RunID != c.run {
+							t.Fatalf("selected run %s result %s: %v", c.run, resp.Result, err)
+						}
+						c.run = result.RunID
+						for _, equivalent := range []string{"7.0", "7e0"} {
+							replay := semanticNumericRPC(t, endpoint, c.transport, semanticNumericRequest(bundleHash, c.method, c.run, c.key, equivalent))
+							requireSemanticReplay(t, c.result, replay)
+						}
+						semanticNumericOutput(t, endpoint, db, c.run)
+						conflict := semanticNumericRPC(t, endpoint, c.transport, semanticNumericRequest(bundleHash, c.method, c.run, c.key, "8"))
+						if conflict.Error == nil || conflict.Error.Data["code"] != apiv1.IdempotencyConflictCode {
+							t.Fatalf("conflict = %#v", conflict)
+						}
+						semanticNumericOutput(t, endpoint, db, c.run)
+						cases = append(cases, c)
+						requireServedOKJSONRPC(t, endpoint, "run.pause", map[string]any{"run_id": c.run, "idempotency_key": uuid.NewString()})
+					}
+					if code := process.stop(); code != 0 {
+						t.Fatalf("stop = %d: %s", code, process.outputString())
+					}
+					process, endpoint = start()
+					for _, c := range cases {
+						replay := semanticNumericRPC(t, endpoint, c.transport, semanticNumericRequest(bundleHash, c.method, c.run, c.key, "7e0"))
 						requireSemanticReplay(t, c.result, replay)
+						semanticNumericOutput(t, endpoint, db, c.run)
 					}
-					semanticNumericOutput(t, endpoint, db, c.run)
-					conflict := semanticNumericRPC(t, endpoint, c.transport, semanticNumericRequest(bundleHash, c.method, c.run, c.key, "8"))
-					if conflict.Error == nil || conflict.Error.Data["code"] != apiv1.IdempotencyConflictCode {
-						t.Fatalf("conflict = %#v", conflict)
+					if code := process.stop(); code != 0 {
+						t.Fatalf("restart stop=%d", code)
 					}
-					semanticNumericOutput(t, endpoint, db, c.run)
-					cases = append(cases, c)
-					requireServedOKJSONRPC(t, endpoint, "run.pause", map[string]any{"run_id": c.run, "idempotency_key": uuid.NewString()})
-				}
-			}
-			if code := process.stop(); code != 0 {
-				t.Fatalf("stop = %d: %s", code, process.outputString())
-			}
-			process, endpoint = start()
-			for _, c := range cases {
-				replay := semanticNumericRPC(t, endpoint, c.transport, semanticNumericRequest(bundleHash, c.method, c.run, c.key, "7e0"))
-				requireSemanticReplay(t, c.result, replay)
-				semanticNumericOutput(t, endpoint, db, c.run)
-			}
-			if code := process.stop(); code != 0 {
-				t.Fatalf("restart stop=%d", code)
+				})
 			}
 		})
 	}
@@ -150,17 +152,18 @@ func TestServedSemanticIngressRejectsBeforeMutation(t *testing.T) {
 func TestServedSemanticNumericEventSubscription(t *testing.T) {
 	for _, backend := range []servedparity.Backend{servedparity.BackendDefaultSQLite, servedparity.BackendExplicitPostgres} {
 		t.Run(string(backend), func(t *testing.T) {
-			rt := startServedTestSetupEntitiesProofRuntimeFromSource(t, backend, semanticNumericIngressFixture(t))
+			rt := startServedLiveFlowProofRuntimeFromSource(t, backend, semanticNumericIngressFixture(t))
 			watermark := time.Now().UTC().Add(-time.Second)
-			response := semanticNumericRPC(t, rt.Endpoint, "http", semanticNumericRequest(rt.BundleHash, "run.start", uuid.NewString(), uuid.NewString(), "7e0"))
+			runID := requireServedLiveLandingRunID(t, rt.Endpoint, rt.BundleHash, ".")
+			response := semanticNumericRPC(t, rt.Endpoint, "http", semanticNumericRequest(rt.BundleHash, "run.start", runID, uuid.NewString(), "7e0"))
 			if response.Error != nil {
 				t.Fatalf("publication: %#v", response.Error)
 			}
 			var started struct {
 				RunID string `json:"run_id"`
 			}
-			if err := json.Unmarshal(response.Result, &started); err != nil {
-				t.Fatal(err)
+			if err := json.Unmarshal(response.Result, &started); err != nil || started.RunID != runID {
+				t.Fatalf("selected run %s result %s: %v", runID, response.Result, err)
 			}
 			semanticNumericOutput(t, rt.Endpoint, rt.DB, started.RunID)
 			url := "ws" + strings.TrimPrefix(strings.TrimSuffix(rt.Endpoint, "/v1/rpc"), "http") + "/v1/ws"

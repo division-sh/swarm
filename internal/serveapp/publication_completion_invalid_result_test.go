@@ -134,6 +134,17 @@ func (s *publicationAuditPipelineRelease) Release(ctx context.Context, claim pip
 }
 
 func (s *publicationAuditPipelineRelease) Settle(ctx context.Context, claim pipelineobligation.Claim, disposition pipelineobligation.Disposition) (pipelineobligation.SettlementOutcome, error) {
+	// Existing receivers need no fresh activation; retain the exact ACK claim.
+	s.probe.mu.Lock()
+	hold := s.probe.hold && s.probe.committed.Acknowledged && claim.EventID() == s.probe.eventID
+	s.probe.mu.Unlock()
+	if hold {
+		s.probe.enterOnce.Do(func() { close(s.probe.entered) })
+		select {
+		case <-s.probe.release:
+		case <-ctx.Done():
+		}
+	}
 	outcome, err := s.Store.Settle(ctx, claim, disposition)
 	if outcome.Committed() {
 		s.recordClaimDisposition(claim, err, false)
@@ -196,9 +207,6 @@ func TestPublicPublicationInvalidAcknowledgedResultBothStores(t *testing.T) {
 				}
 				probe.mu.Lock()
 				probe.resultFault, probe.hold, probe.holdRelease = "", false, false
-				if probe.plan.RunID == "" && len(committed.Publication.Activations) != 0 {
-					probe.plan = committed.Publication.Activations[0].Plan.Readiness
-				}
 				probe.mu.Unlock()
 				h.start(t)
 				waitPublicationCompletionDisposition(t, probe)
