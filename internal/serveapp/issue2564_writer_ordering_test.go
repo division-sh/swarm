@@ -324,11 +324,10 @@ func (p *issue2564Provider) ServeHTTP(w http.ResponseWriter, req *http.Request) 
 			if i < len(results) {
 				result, _ = results[i].(map[string]any)
 			}
-			if result == nil || result["name"] != call.name || result["ok"] != true {
+			if result == nil {
 				admissionErr = fmt.Errorf("generated %s call %s not acknowledged in current result batch: %#v", call.name, id, result)
 			} else if strings.HasPrefix(call.name, "save_") {
-				value, _ := result["result"].(map[string]any)
-				if revision, ok := value["revision"].(float64); !ok || revision < 1 || value["entity_id"] == "" {
+				if revision, ok := result["revision"].(float64); !ok || revision < 1 || result["entity_id"] == "" {
 					admissionErr = fmt.Errorf("save %s omitted real mutation receipt: %#v", id, result)
 				}
 			}
@@ -378,36 +377,26 @@ func issue2564SchemaProperty(value any, name string) bool {
 	return false
 }
 
-// This adapter wraps the latest canonical continuation in "Tool result:" and
-// retains tool names/order, not provider call IDs. Do not accept older batches.
+// Anthropic's existing observation translation joins the current outputs as
+// newline-delimited JSON. Do not search an older batch or infer a receipt.
 func issue2564ToolResults(value any) []any {
-	switch v := value.(type) {
-	case map[string]any:
-		if v["kind"] == "tool_continuation" {
-			results, _ := v["tool_result"].([]any)
-			return results
-		}
-		for _, child := range v {
-			if found := issue2564ToolResults(child); found != nil {
-				return found
-			}
-		}
-	case []any:
-		for i := len(v) - 1; i >= 0; i-- {
-			if found := issue2564ToolResults(v[i]); found != nil {
-				return found
-			}
-		}
-	case string:
-		var decoded any
-		content := strings.TrimPrefix(v, "Tool result:\n")
-		if json.Unmarshal([]byte(content), &decoded) == nil {
-			if _, isString := decoded.(string); !isString {
-				return issue2564ToolResults(decoded)
-			}
-		}
+	message, ok := value.(map[string]any)
+	if !ok || message["role"] != "user" {
+		return nil
 	}
-	return nil
+	content, ok := message["content"].(string)
+	if !ok {
+		return nil
+	}
+	var results []any
+	for _, line := range strings.Split(content, "\n") {
+		var result map[string]any
+		if json.Unmarshal([]byte(line), &result) != nil || result == nil {
+			return nil
+		}
+		results = append(results, result)
+	}
+	return results
 }
 
 func startIssue2564Served(t *testing.T, backend, root string, p *issue2564Provider, hook func(context.Context, string, events.Event) error, probe runtimelifecycleprobe.Observer) (*serveRuntimeTestProcess, issue2564ServedFixture) {

@@ -36839,8 +36839,15 @@ api_specification:
             properties:
               status: {type: string, enum: [unresolved, recorded]}
               source: {type: string, const: recorded_provider_request}
-              input: {}
-              tools: {}
+              input:
+                oneOf:
+                - type: array
+                  items: {type: object}
+                - type: object
+                - type: string
+              tools:
+                type: array
+                items: {type: object}
       AgentExecutionFrameFacts:
         description: Required author-safe identity projection derived from the validated private frame persisted with this exact turn. It never contains provider input, event/tool payloads, capability evidence, directive/remediation content, or private reasoning.
         oneOf:
