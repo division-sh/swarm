@@ -1805,6 +1805,9 @@ func buildRuntimeComposition(ctx context.Context, req runtimeCompositionRequest)
 	supervisor.resetChannelActivations = channelActivationRefresher
 	supervisor.mu.Unlock()
 	supervisor.resetRefresh = func(refreshCtx context.Context) error {
+		if err := admitServeRegisteredWebhookCredentials(refreshCtx, runtimeContextManager, channelOnboardingStore); err != nil {
+			return err
+		}
 		supervisor.mu.RLock()
 		resetting := supervisor.resetting
 		supervisor.mu.RUnlock()
