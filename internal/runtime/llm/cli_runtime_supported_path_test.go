@@ -331,6 +331,9 @@ func testClaudeCLIManagedRequestInventory(t *testing.T, rejectAt int, inventory 
 		t.Fatalf("second args = %#v, want resume %q with fork", secondArgs, firstChild)
 	}
 	for index, args := range [][]string{firstArgs, secondArgs} {
+		if got := argValue(args, "--system-prompt"); got == "" || got != argValue(firstArgs, "--system-prompt") {
+			t.Fatalf("invocation %d --system-prompt = %q, want the exact invocation prompt", index+1, got)
+		}
 		if got := argValue(args, "--model"); got != "test-model" {
 			t.Fatalf("invocation %d --model = %q, want sealed frame model", index+1, got)
 		}

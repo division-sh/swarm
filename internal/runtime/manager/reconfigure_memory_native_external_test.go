@@ -17,7 +17,7 @@ import (
 	"github.com/google/uuid"
 )
 
-func TestReconfigureAgent_MemoryEnabledConfigChangeRotatesExactIdentity(t *testing.T) {
+func TestReconfigureAgent_MemoryEnabledConfigChangeRetainsExactIdentity(t *testing.T) {
 	proveNativeReconfigureMemoryBothStores(t, true, manager.ProveReconfigureMemoryEnabledConfigChange)
 }
 
