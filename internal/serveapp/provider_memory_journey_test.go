@@ -59,7 +59,7 @@ func TestChannelOneBotOpenAICompatibleEmptyMemoryJourney(t *testing.T) {
 					t.Fatalf("memory conversation rotated: before=%q after=%q", sessionID, current)
 				}
 				sessionID = current
-				reply := fmt.Sprintf("Memory reply %d", turn)
+				reply := fmt.Sprintf("Swarm heard: memory reply %d", turn)
 				waitUncertainCopyDelivery(t, h, turn-1, reply)
 				replies[reply] = "2001"
 				requireReceptionistReplies(t, h, replies)
@@ -101,7 +101,7 @@ func emptyAssistantMemoryReply(t *testing.T, request llmapi.Request) (llmapi.Rep
 	if assistants != request.Number-1 || (request.Number == 2 && !strings.Contains(string(request.Body), "memory input 1")) {
 		return llmapi.Reply{}, fmt.Errorf("memory replay lost its first user/assistant pair")
 	}
-	arguments, _ := json.Marshal(map[string]string{"chat_id": "2001", "text": fmt.Sprintf("Memory reply %d", request.Number)})
+	arguments, _ := json.Marshal(map[string]string{"chat_id": "2001", "text": fmt.Sprintf("Swarm heard: memory reply %d", request.Number)})
 	return llmapi.Reply{ID: fmt.Sprintf("memory-response-%d", request.Number), Model: "strict-compatible", InputTokens: 10, OutputTokens: 3, TotalTokens: 13,
 		Tools: []llmapi.ToolCall{{ID: fmt.Sprintf("memory-reply-%d", request.Number), Name: "emit_telegram_reply_requested", Arguments: arguments}}}, nil
 }
