@@ -90,7 +90,7 @@ func pollDeploymentIdentityClaim(ctx context.Context, client *http.Client, ident
 	return offset, nil
 }
 
-func ConsumeDeploymentWebhookClaim(ctx context.Context, opts DeploymentConnectionOptions, identities operatorchannel.Store, account channelonboarding.AccountReference, credential func(channelonboarding.CredentialAdmission) bool, admit func() (providertriggers.Delivery, error), current func() bool, plans ...packs.SatisfactionPlan) (bool, error) {
+func ConsumeDeploymentWebhookClaim(ctx context.Context, opts DeploymentConnectionOptions, identities operatorchannel.Store, account channelonboarding.AccountReference, credential func(channelonboarding.CredentialAdmission) bool, admit func(providertriggers.InboundAdmissionPlan) (providertriggers.Delivery, error), current func() bool) (bool, error) {
 	if account.Provider != "telegram" || account.Validate() != nil || credential == nil || admit == nil || current == nil {
 		return false, channelonboarding.ErrInvalidRequest
 	}
@@ -126,14 +126,11 @@ func ConsumeDeploymentWebhookClaim(ctx context.Context, opts DeploymentConnectio
 			return false, channelonboarding.ErrConflict
 		}
 		valid := func() bool { return current() && credential(provider) }
-		delivery, err := admit()
+		delivery, err := admit(opts.Trigger)
 		if err != nil {
 			return false, err
 		}
-		if len(plans) == 0 {
-			plans = []packs.SatisfactionPlan{opts.Plan}
-		}
-		claim, matched, err := deploymentWebhookClaim(plans, delivery, op, identity.Challenge)
+		claim, matched, err := deploymentWebhookClaim(opts.Plan, delivery, op, identity.Challenge)
 		if err != nil {
 			return false, err
 		}
@@ -145,19 +142,17 @@ func ConsumeDeploymentWebhookClaim(ctx context.Context, opts DeploymentConnectio
 	return false, nil
 }
 
-func deploymentWebhookClaim(plans []packs.SatisfactionPlan, delivery providertriggers.Delivery, op channelonboarding.Operation, challenge string) (operatorchannel.InboundClaim, bool, error) {
+func deploymentWebhookClaim(plan packs.SatisfactionPlan, delivery providertriggers.Delivery, op channelonboarding.Operation, challenge string) (operatorchannel.InboundClaim, bool, error) {
 	for _, output := range delivery.Events {
-		for _, plan := range plans {
-			fact, matches, err := plan.ProjectTextFact(string(output.Name), output.Authorization, output.Payload)
-			if err != nil {
-				return operatorchannel.InboundClaim{}, false, err
-			}
-			if !matches || fact.Text != challenge {
-				continue
-			}
-			return operatorchannel.InboundClaim{TextFact: fact, Provider: op.Provider, ProviderEventID: delivery.ProviderEventID,
-				Challenge: challenge, ProviderAuthorization: operatorchannel.Hash("authenticated-deployment-webhook-v1", op.AccountReference, output.Authorization.Generation().Diagnostic())}, true, nil
+		fact, matches, err := plan.ProjectTextFact(string(output.Name), output.Authorization, output.Payload)
+		if err != nil {
+			return operatorchannel.InboundClaim{}, false, err
 		}
+		if !matches || fact.Text != challenge {
+			continue
+		}
+		return operatorchannel.InboundClaim{TextFact: fact, Provider: op.Provider, ProviderEventID: delivery.ProviderEventID,
+			Challenge: challenge, ProviderAuthorization: operatorchannel.Hash("authenticated-deployment-webhook-v1", op.AccountReference, output.Authorization.Generation().Diagnostic())}, true, nil
 	}
 	return operatorchannel.InboundClaim{}, false, nil
 }

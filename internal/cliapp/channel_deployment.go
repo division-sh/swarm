@@ -215,12 +215,15 @@ func (c *DeploymentChannelControl) initializeRegistration(ctx context.Context, d
 	if err != nil {
 		return err
 	}
-	var trigger providertriggers.InboundAdmissionPlan
+	var trigger, webhook providertriggers.InboundAdmissionPlan
 	switch provider {
 	case "whatsapp":
 		trigger, err = triggers.CompileAdmission(providertriggers.CompileAdmissionRequest{Provider: provider, Alias: provider})
 	case "telegram":
 		trigger, err = triggers.CompileRegistrationPolling(provider)
+		if err == nil {
+			webhook, err = triggers.CompileAdmission(providertriggers.CompileAdmissionRequest{Provider: provider, Alias: provider, SigningSecret: candidate.SigningCredentialRole})
+		}
 	}
 	if err != nil {
 		return err
@@ -230,7 +233,7 @@ func (c *DeploymentChannelControl) initializeRegistration(ctx context.Context, d
 	}
 	c.session, err = opts.channelRegistration(ctx, ChannelRegistrationOptions{Directory: directory, Principal: principal,
 		Process: c.process, Store: owner.ChannelOnboarding(), Operations: owner.DeploymentChannels(), Credentials: currentness,
-		Identities: owner.OperatorChannels(), HTTP: opts.httpClient, Plan: candidate.Plan, Trigger: trigger})
+		Identities: owner.OperatorChannels(), HTTP: opts.httpClient, Plan: candidate.Plan, Trigger: trigger, Webhook: webhook})
 	if err != nil {
 		return err
 	}
@@ -379,13 +382,13 @@ func (c *DeploymentChannelControl) AccountStatus(ctx context.Context, ref channe
 	return c.service.DeploymentAccountStatus(ctx, ref)
 }
 
-func (c *DeploymentChannelControl) ConsumeWebhookClaim(ctx context.Context, account channelonboarding.AccountReference, credential func(channelonboarding.CredentialAdmission) bool, admit func() (providertriggers.Delivery, error), current func() bool, plans ...packs.SatisfactionPlan) (bool, error) {
+func (c *DeploymentChannelControl) ConsumeWebhookClaim(ctx context.Context, account channelonboarding.AccountReference, credential func(channelonboarding.CredentialAdmission) bool, admit func() (providertriggers.Delivery, error), claim func(providertriggers.InboundAdmissionPlan) (providertriggers.Delivery, error), current func() bool, plans ...packs.SatisfactionPlan) (bool, error) {
 	c.mu.Lock()
 	defer c.mu.Unlock()
 	if consumed, err := c.registeredOperatorInput(ctx, account, credential, admit, current, plans); consumed || err != nil {
 		return consumed, err
 	}
-	return c.session.ConsumeWebhookClaim(ctx, account, credential, admit, current, plans...)
+	return c.session.ConsumeWebhookClaim(ctx, account, credential, claim, current)
 }
 
 func (c *DeploymentChannelControl) registeredOperatorInput(ctx context.Context, account channelonboarding.AccountReference, credential func(channelonboarding.CredentialAdmission) bool, admit func() (providertriggers.Delivery, error), current func() bool, plans []packs.SatisfactionPlan) (bool, error) {

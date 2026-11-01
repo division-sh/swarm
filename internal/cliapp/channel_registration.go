@@ -20,7 +20,7 @@ type ChannelRegistrationSession interface {
 	operatorchannel.SessionAdmissionOwner
 	channelonboarding.DeploymentSessionOwner
 	PollOperatorClaim(context.Context, channelonboarding.Operation) error
-	ConsumeWebhookClaim(context.Context, channelonboarding.AccountReference, func(channelonboarding.CredentialAdmission) bool, func() (providertriggers.Delivery, error), func() bool, ...packs.SatisfactionPlan) (bool, error)
+	ConsumeWebhookClaim(context.Context, channelonboarding.AccountReference, func(channelonboarding.CredentialAdmission) bool, func(providertriggers.InboundAdmissionPlan) (providertriggers.Delivery, error), func() bool) (bool, error)
 	ReadSessionConnection(context.Context, channelonboarding.Operation) (channelonboarding.SessionConnectionReadback, error)
 	Close(context.Context) error
 }
@@ -36,6 +36,7 @@ type ChannelRegistrationOptions struct {
 	HTTP           *http.Client
 	Plan           packs.SatisfactionPlan
 	Trigger        providertriggers.InboundAdmissionPlan
+	Webhook        providertriggers.InboundAdmissionPlan
 	CurrentWebhook func(context.Context, string, string) bool
 }
 

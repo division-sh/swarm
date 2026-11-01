@@ -194,7 +194,7 @@ type admittedPair struct {
 	base     string
 }
 
-type PendingDeploymentClaim func(context.Context, channelonboarding.AccountReference, func(channelonboarding.CredentialAdmission) bool, func() (providertriggers.Delivery, error), func() bool) (bool, error)
+type PendingDeploymentClaim func(context.Context, channelonboarding.AccountReference, func(channelonboarding.CredentialAdmission) bool, func() (providertriggers.Delivery, error), func(providertriggers.InboundAdmissionPlan) (providertriggers.Delivery, error), func() bool) (bool, error)
 
 func (c *ProviderRegistrationController) OwnsAccountCallback(ctx context.Context, raw, account string) bool {
 	callback, err := url.Parse(raw)
@@ -244,8 +244,12 @@ func (c *ProviderRegistrationController) ConsumePendingDeploymentClaim(request *
 			return request.Context().Err() == nil && c.snapshot.currentRevision(snapshot.revision) &&
 				err == nil && credentialsCurrent
 		}
-		admit := func() (providertriggers.Delivery, error) {
+		admit := func(selected providertriggers.InboundAdmissionPlan) (providertriggers.Delivery, error) {
 			if !plan.Valid() || !plan.Generation().Equal(target.AdmissionPlanGeneration) || plan.Provider() != target.Provider {
+				return providertriggers.Delivery{}, channelonboarding.ErrConflict
+			}
+			if !selected.Valid() || selected.Provider() != target.Provider || selected.PolicySource() != providertriggers.PolicySourceVerifiedPack ||
+				selected.Transport() != packs.ChannelTransportWebhook || selected.RequestAuthentication() != providertriggers.RequestAuthenticationTokenEquality {
 				return providertriggers.Delivery{}, channelonboarding.ErrConflict
 			}
 			_, signing, err := c.admitCredentials(request.Context(), state.Pair)
@@ -264,11 +268,11 @@ func (c *ProviderRegistrationController) ConsumePendingDeploymentClaim(request *
 			if err := canonicaljson.DecodePreservingNumberLexemes(body, &payload); err != nil {
 				return providertriggers.Delivery{}, err
 			}
-			return plan.Accept(providertriggers.Request{Provider: target.Provider, Method: request.Method,
+			return selected.Accept(providertriggers.Request{Provider: target.Provider, Method: request.Method,
 				URL: request.URL.String(), Body: body, Headers: request.Header, Payload: payload, ContentType: request.Header.Get("Content-Type"),
 				Target: providertriggers.Target{WebhookSecret: signing.CredentialValue()}, Received: c.opts.Now()})
 		}
-		return consume(request.Context(), account, credential, admit, current)
+		return consume(request.Context(), account, credential, func() (providertriggers.Delivery, error) { return admit(plan) }, admit, current)
 	}
 	return false, channelonboarding.ErrConflict
 }
