@@ -34,16 +34,17 @@ type InspectionSelector struct {
 }
 
 type InspectionSession struct {
-	BundleHash     string                           `json:"bundle_hash"`
-	AgentID        string                           `json:"agent_id"`
-	AuthoredFlow   string                           `json:"authored_flow"`
-	AgentIdentity  Presence[agentidentity.Identity] `json:"agent_identity"`
-	Role           string                           `json:"role,omitempty"`
-	FlowID         string                           `json:"flow_id,omitempty"`
-	Intent         Intent                           `json:"intent"`
-	Criteria       Criteria                         `json:"criteria"`
-	Provider       Presence[Provider]               `json:"provider"`
-	ProviderPrompt string                           `json:"provider_prompt"`
+	BundleHash        string                           `json:"bundle_hash"`
+	AgentID           string                           `json:"agent_id"`
+	AuthoredFlow      string                           `json:"authored_flow"`
+	AgentIdentity     Presence[agentidentity.Identity] `json:"agent_identity"`
+	Role              string                           `json:"role,omitempty"`
+	FlowID            string                           `json:"flow_id,omitempty"`
+	Intent            Intent                           `json:"intent"`
+	Criteria          Criteria                         `json:"criteria"`
+	Provider          Presence[Provider]               `json:"provider"`
+	ProviderPrompt    string                           `json:"provider_prompt"`
+	ContentProjection string                           `json:"content_projection,omitempty"`
 }
 
 type InspectionTurn struct {
@@ -60,25 +61,27 @@ type InspectionTurn struct {
 }
 
 type Inspection struct {
-	SourceLabel string             `json:"source_label"`
-	Version     string             `json:"version"`
-	Scope       InspectionScope    `json:"scope"`
-	Selector    InspectionSelector `json:"selector"`
-	Session     InspectionSession  `json:"session_contract"`
-	Turn        InspectionTurn     `json:"turn_context"`
+	SourceLabel       string             `json:"source_label"`
+	Version           string             `json:"version"`
+	Scope             InspectionScope    `json:"scope"`
+	Selector          InspectionSelector `json:"selector"`
+	Session           InspectionSession  `json:"session_contract"`
+	Turn              InspectionTurn     `json:"turn_context"`
+	ProviderRendering Presence[string]   `json:"provider_rendering"`
 }
 
 type PreviewSeed struct {
-	BundleHash     string
-	AgentID        string
-	AuthoredFlow   string
-	AgentIdentity  *agentidentity.Identity
-	Role           string
-	FlowID         string
-	Intent         agentintent.Resolved
-	Criteria       []string
-	Provider       *Provider
-	ProviderPrompt string
+	BundleHash        string
+	AgentID           string
+	AuthoredFlow      string
+	AgentIdentity     *agentidentity.Identity
+	Role              string
+	FlowID            string
+	Intent            agentintent.Resolved
+	Criteria          []string
+	Provider          *Provider
+	ProviderPrompt    string
+	ContentProjection string
 }
 
 func InspectStatic(selector InspectionSelector, seed PreviewSeed) (Inspection, error) {
@@ -145,6 +148,7 @@ func inspect(scope InspectionScope, selector InspectionSelector, seed PreviewSee
 		Intent:        Intent{Kind: string(seed.Intent.Kind), Coordinate: seed.Intent.Coordinate, Provenance: seed.Intent.Provenance, Content: seed.Intent.Content, ContentHash: seed.Intent.ContentHash, Identity: seed.Intent.Identity},
 		Criteria:      Criteria{References: append([]string{}, seed.Criteria...), Identity: criteriaIdentity},
 		Provider:      unresolved[Provider](), ProviderPrompt: seed.ProviderPrompt,
+		ContentProjection: seed.ContentProjection,
 	}
 	if seed.AgentIdentity != nil {
 		identity := seed.AgentIdentity.Normalize()
@@ -165,6 +169,7 @@ func inspect(scope InspectionScope, selector InspectionSelector, seed PreviewSee
 	}
 	return Inspection{
 		Version: Version, Scope: scope, Selector: selector, Session: session,
+		ProviderRendering: unresolved[string](),
 		Turn: InspectionTurn{
 			FrameID: unresolved[string](), ContentHash: unresolved[string](), Kind: unresolved[TurnKind](), ParentFrame: unresolved[string](),
 			Event: unresolved[Event](), Capability: unresolved[CapabilityPlan](), Directive: unresolved[Directive](), Remediation: unresolved[Remediation](),

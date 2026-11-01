@@ -578,7 +578,7 @@ func openAICompatibleChatCompletionsURL(baseURL string) string {
 
 func toOpenAICompatibleMessages(m Message) []openAICompatibleMessage {
 	role := strings.ToLower(strings.TrimSpace(m.Role))
-	content := strings.TrimSpace(m.Content)
+	content := m.Content
 	switch role {
 	case "assistant":
 		msg := openAICompatibleMessage{Role: "assistant", Content: content}
@@ -597,11 +597,13 @@ func toOpenAICompatibleMessages(m Message) []openAICompatibleMessage {
 			return nil
 		}
 		return []openAICompatibleMessage{{Role: "system", Content: content}}
+	case "user":
+		return []openAICompatibleMessage{{Role: "user", Content: content, Name: m.Name}}
 	default:
 		if content == "" {
 			return nil
 		}
-		return []openAICompatibleMessage{{Role: "user", Content: content}}
+		return []openAICompatibleMessage{{Role: "user", Content: content, Name: m.Name}}
 	}
 }
 
@@ -710,6 +712,7 @@ type openAICompatibleRequest struct {
 type openAICompatibleMessage struct {
 	Role             string                     `json:"role"`
 	Content          string                     `json:"content"`
+	Name             string                     `json:"name,omitempty"`
 	ToolCallID       string                     `json:"tool_call_id,omitempty"`
 	ToolCalls        []openAICompatibleToolCall `json:"tool_calls,omitempty"`
 	ReasoningContent json.RawMessage            `json:"reasoning_content,omitempty"`
