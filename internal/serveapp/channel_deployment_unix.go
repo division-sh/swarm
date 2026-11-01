@@ -137,7 +137,7 @@ func deploymentPendingClaimHandler(root cliapp.InvocationRoot, config, directory
 		if err != nil {
 			return false, err
 		}
-		if registered.Phase == channelonboarding.PhaseSucceeded && registered.IdentityOperationID != "" {
+		if registered.IdentityOperationID != "" {
 			if runtimeOptions.manager == nil {
 				return false, channelonboarding.ErrRevisionConflict
 			}
@@ -152,7 +152,14 @@ func deploymentPendingClaimHandler(root cliapp.InvocationRoot, config, directory
 			if err != nil || use == nil || !availability.Available() || use.Context.BundleHash() != holders[0].BundleHash {
 				return false, errors.Join(channelonboarding.ErrRevisionConflict, err)
 			}
-			plans = use.Context.ChannelPlans
+			for _, plan := range use.Context.ChannelPlans {
+				if plan.Provider() == account.Provider && plan.MatchesCapturedHolder(holders[0].Flow) {
+					plans = append(plans, plan)
+				}
+			}
+			if len(plans) == 0 {
+				return false, channelonboarding.ErrRevisionConflict
+			}
 		}
 		return client.ConsumeWebhookClaim(work.Context(), account, credential, admit, current, plans...)
 	}
@@ -432,8 +439,8 @@ func (c *deploymentChannelSession) PollOperatorClaim(ctx context.Context, op cha
 	return err
 }
 
-func (c *deploymentChannelSession) ConsumeWebhookClaim(ctx context.Context, account channelonboarding.AccountReference, credential func(channelonboarding.CredentialAdmission) bool, admit func() (providertriggers.Delivery, error), current func() bool) (bool, error) {
-	return sessionprovider.ConsumeDeploymentWebhookClaim(ctx, sessionprovider.DeploymentConnectionOptions{Operations: c.opts.Operations, Principal: c.opts.Principal, Plan: c.opts.Plan}, c.opts.Identities, account, credential, admit, current)
+func (c *deploymentChannelSession) ConsumeWebhookClaim(ctx context.Context, account channelonboarding.AccountReference, credential func(channelonboarding.CredentialAdmission) bool, admit func() (providertriggers.Delivery, error), current func() bool, plans ...packs.SatisfactionPlan) (bool, error) {
+	return sessionprovider.ConsumeDeploymentWebhookClaim(ctx, sessionprovider.DeploymentConnectionOptions{Operations: c.opts.Operations, Principal: c.opts.Principal, Plan: c.opts.Plan}, c.opts.Identities, account, credential, admit, current, plans...)
 }
 
 func (c *deploymentChannelSession) VerifyRegistration(ctx context.Context, op channelonboarding.Operation) (bool, error) {

@@ -20,7 +20,7 @@ type ChannelRegistrationSession interface {
 	operatorchannel.SessionAdmissionOwner
 	channelonboarding.DeploymentSessionOwner
 	PollOperatorClaim(context.Context, channelonboarding.Operation) error
-	ConsumeWebhookClaim(context.Context, channelonboarding.AccountReference, func(channelonboarding.CredentialAdmission) bool, func() (providertriggers.Delivery, error), func() bool) (bool, error)
+	ConsumeWebhookClaim(context.Context, channelonboarding.AccountReference, func(channelonboarding.CredentialAdmission) bool, func() (providertriggers.Delivery, error), func() bool, ...packs.SatisfactionPlan) (bool, error)
 	ReadSessionConnection(context.Context, channelonboarding.Operation) (channelonboarding.SessionConnectionReadback, error)
 	Close(context.Context) error
 }
