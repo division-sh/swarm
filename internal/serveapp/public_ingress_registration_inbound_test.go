@@ -276,7 +276,7 @@ func TestProviderRegistrationRotationCannotRefreshRuntimeIngressAdmission(t *tes
 	}
 	handler := runtimeProcessInboundHandler{contexts: manager, publicRegistration: controller}
 	claimReads := 0
-	handler.pendingClaim = func(ctx context.Context, account channelonboarding.AccountReference, credential func(channelonboarding.CredentialAdmission) bool, admit func() (providertriggers.Delivery, error), current func() bool) (bool, error) {
+	handler.pendingClaim = func(ctx context.Context, account channelonboarding.AccountReference, credential func(channelonboarding.CredentialAdmission) bool, _ func() (providertriggers.Delivery, error), claim func(providertriggers.InboundAdmissionPlan) (providertriggers.Delivery, error), current func() bool) (bool, error) {
 		if account.Provider != "telegram" || account.Account != "42" || !current() {
 			t.Fatal("claim bridge lost the admitted receiving account or current credentials")
 		}
@@ -289,7 +289,7 @@ func TestProviderRegistrationRotationCannotRefreshRuntimeIngressAdmission(t *tes
 		if !credential(providerAdmission) {
 			t.Fatal("receiving provider credential was lost")
 		}
-		delivery, err := admit()
+		delivery, err := claim(target.AdmissionPlan)
 		if err != nil {
 			return false, err
 		}
@@ -330,7 +330,7 @@ func TestProviderRegistrationRotationCannotRefreshRuntimeIngressAdmission(t *tes
 	}
 	// With no pending deployment claim, the runtime's original credential/target
 	// refusal order remains authoritative and the callback body is not read.
-	handler.pendingClaim = func(_ context.Context, _ channelonboarding.AccountReference, _ func(channelonboarding.CredentialAdmission) bool, _ func() (providertriggers.Delivery, error), _ func() bool) (bool, error) {
+	handler.pendingClaim = func(_ context.Context, _ channelonboarding.AccountReference, _ func(channelonboarding.CredentialAdmission) bool, _ func() (providertriggers.Delivery, error), _ func(providertriggers.InboundAdmissionPlan) (providertriggers.Delivery, error), _ func() bool) (bool, error) {
 		return false, nil
 	}
 	use, lookup, err := manager.AcquireIngress(t.Context(), "chat", "telegram")
