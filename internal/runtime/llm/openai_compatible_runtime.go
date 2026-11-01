@@ -214,6 +214,9 @@ func (r *OpenAICompatibleRuntime) continueSession(ctx context.Context, s *Sessio
 	if err := requireManagedAcquiredBase(ctx, s, previousTurnCount, managed); err != nil {
 		return nil, releasePreProviderSessionLease(ctx, r.sessions, lease, s.AgentID, r.events, err)
 	}
+	if err := freezeManagedProviderInput(s, managed, r.ProviderContract()); err != nil {
+		return nil, releasePreProviderSessionLease(ctx, r.sessions, lease, s.AgentID, r.events, err)
+	}
 	if resolved.Enabled() {
 		defer func() { retErr = releaseCompletedSessionLease(ctx, r.sessions, lease, s.AgentID, r.events, retErr) }()
 		var cancelLease context.CancelFunc
@@ -492,12 +495,7 @@ func (r *OpenAICompatibleRuntime) sendRequest(ctx context.Context, payload []byt
 	}
 	req.Header.Set("content-type", "application/json")
 	req.Header.Set("authorization", "Bearer "+r.credentialCache.snapshot())
-	var attempt *runtimeeffects.Handle
-	if managed == nil {
-		attempt, err = runtimeeffects.BeginCompletion(ctx, "openai_compatible", payload, nil)
-	} else {
-		attempt, err = runtimeeffects.BeginManagedCompletion(ctx, "openai_compatible", payload, managed.frame, nil)
-	}
+	attempt, err := beginManagedHTTPProviderCall(ctx, "openai_compatible", payload, req, managed)
 	if err != nil {
 		return nil, openAICompatibleResponse{}, nil, err
 	}
