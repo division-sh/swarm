@@ -8,9 +8,10 @@ import (
 	"testing"
 	"time"
 
+	"github.com/division-sh/swarm/internal/cliapp"
+	runtimepkg "github.com/division-sh/swarm/internal/runtime"
 	"github.com/division-sh/swarm/internal/runtime/core/identitytest"
 	"github.com/division-sh/swarm/internal/runtime/diaglog"
-	"github.com/division-sh/swarm/internal/runtime/lifecycleprobe"
 	"github.com/division-sh/swarm/internal/runtime/manager"
 	"github.com/division-sh/swarm/internal/runtime/pipelineobligation"
 	"github.com/division-sh/swarm/internal/servedparity"
@@ -65,51 +66,66 @@ func TestServedParityConversationSourceActivationBoundaryBothStores(t *testing.T
 			unblock := sync.OnceFunc(func() { close(release) })
 			defer unblock()
 			hold := &servedAgentStartDiagnosticHold{entered: make(chan diaglog.LifecycleDiagnostic, 1), release: release}
+			var deliveryReader servedRunDeliveryReader
 			previous := projectRuntimePersistenceForServe
 			projectRuntimePersistenceForServe = func(owner *selectedStoreOwner) serveRuntimePersistence {
 				projected := previous(owner)
+				deliveryReader = projected.deps.DeliveryStore.SummarizeRun
 				hold.AgentLifecycleDiagnosticPersistence = projected.deps.ManagerPersistenceRoles.LifecycleDiagnostics
 				projected.deps.ManagerPersistenceRoles.LifecycleDiagnostics = hold
 				return projected
 			}
 			t.Cleanup(func() { projectRuntimePersistenceForServe = previous })
-			rt := startServedConversationForkProofRuntime(t, backend)
 			hold.armed.Store(true)
-			initial := requireServedEventPublishRPCResult(t, rt.Endpoint, map[string]any{
-				"event_name": "external.observed", "bundle_hash": rt.BundleHash,
-				"payload": map[string]any{}, "idempotency_key": "held-source-run",
-			})
 			ctx, cancel := context.WithTimeout(t.Context(), servedEventPublishLifecycleProbeWaitTimeout)
 			defer cancel()
-			select {
-			case diagnostic := <-hold.entered:
-				if diagnostic.Identity.RunID != initial.RunID || diagnostic.AgentID != "fork-source-agent" {
-					t.Fatalf("held a different registered agent: %+v", diagnostic)
+			var runID string
+			rt := startServedConversationForkProofRuntime(t, backend, func(opts cliapp.ServeOptions) (string, *runtimepkg.Runtime) {
+				process := startRuntimeTestProcessWithRunner(t, repoRootForTest(), opts, runFrom)
+				t.Cleanup(func() {
+					if code := process.stop(); code != 0 {
+						t.Errorf("served activation boundary shutdown exit=%d\n%s", code, process.outputString())
+					}
+				})
+				select {
+				case diagnostic := <-hold.entered:
+					if diagnostic.Identity.RunID == "" || diagnostic.AgentID != "fork-source-agent" {
+						t.Fatalf("held a different registered agent: %+v", diagnostic)
+					}
+					runID = diagnostic.Identity.RunID
+					t.Logf("exact source agent before start: run=%s generation=%v phase=%v", runID, diagnostic.Payload["generation"], diagnostic.Payload["phase"])
+				case <-ctx.Done():
+					t.Fatal(ctx.Err())
 				}
-				t.Logf("exact source agent before start: run=%s generation=%v phase=%v", diagnostic.Identity.RunID, diagnostic.Payload["generation"], diagnostic.Payload["phase"])
-			case <-ctx.Done():
-				t.Fatal(ctx.Err())
-			}
-			// The old gate returns even though the real source owner cannot start yet.
-			for range 4 {
-				summary, err := rt.ReadRunDeliveries(ctx, initial.RunID)
-				if err != nil || summary.RunID != initial.RunID || summary.Pending != 0 || summary.InProgress != 0 {
-					t.Fatalf("held source does not meet the original empty-delivery predicate: %+v (%v)", summary, err)
+				for range 4 {
+					summary, err := deliveryReader(ctx, runID)
+					if err != nil || summary.RunID != runID || summary.Pending != 0 || summary.InProgress != 0 {
+						t.Fatalf("held source does not meet the original empty-delivery predicate: %+v (%v)", summary, err)
+					}
 				}
+				if serveOutputIsReady(process.outputString()) {
+					t.Fatal("empty delivery queues advertised completed source activation/readiness")
+				}
+				unblock()
+				process.waitForReadyLine()
+				process.mu.Lock()
+				nativeRuntime := process.runtime
+				process.mu.Unlock()
+				if nativeRuntime == nil {
+					t.Fatal("served activation boundary did not expose its native runtime")
+				}
+				return "http://" + serveRuntimeAPIListenerFromOutput(t, process.outputString()) + "/v1/rpc", nativeRuntime
+			})
+			if liveRun := requireServedLiveLandingRunID(t, rt.Endpoint, rt.BundleHash, "."); liveRun != runID {
+				t.Fatalf("held source run %s differs from the live landing run %s", runID, liveRun)
 			}
-			canceled, cancelWait := context.WithCancel(ctx)
-			cancelWait()
-			if _, err := rt.Probe.Raw().Wait(canceled, lifecycleprobe.Signal{Kind: lifecycleprobe.EventPersisted, EventID: initial.EventID}); !errors.Is(err, context.Canceled) {
-				t.Fatalf("empty delivery queues advertised completed source activation: %v", err)
-			}
-			unblock()
-			rt.Probe.RequireEventPersisted(initial.EventID)
 			ready := requireServedEventPublishRPCResult(t, rt.Endpoint, map[string]any{
-				"event_name": "fork.source_message", "run_id": initial.RunID, "source_event_id": initial.EventID,
+				"event_name": "fork.source_message", "run_id": runID,
 				"payload": map[string]any{"note": "after activation"}, "idempotency_key": "held-source-after",
 			})
-			waitServedConversationForkSourceAgentReady(t, rt, initial.RunID, ready.EventID)
-			t.Logf("empty queues preceded native start; exact finalized source %s admitted %s", initial.EventID, ready.EventID)
+			rt.Probe.RequireEventPersisted(ready.EventID)
+			waitServedConversationForkSourceAgentReady(t, rt, runID, ready.EventID)
+			t.Logf("empty queues preceded native start; exact finalized source run %s admitted %s", runID, ready.EventID)
 		})
 	}
 }
