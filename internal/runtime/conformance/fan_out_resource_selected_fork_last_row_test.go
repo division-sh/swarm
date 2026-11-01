@@ -20,13 +20,16 @@ func TestDeploymentSourceSelectedLastRowPendingBlocksQuiescenceBothStores(t *tes
 		t.Run(backend, func(t *testing.T) {
 			gate := &selectedDeploymentClaimGate{kind: runtimedelivery.ExecutionAuthorityNormalRuntime, entered: make(chan string, 16)}
 			observed := newSelectedDeploymentSettlementObservation()
+			ordinary := newSelectedDeploymentSettlementObservation()
 			decorate := func(executor startupownership.FanOutExecutor) startupownership.FanOutExecutor {
 				return &selectedDeploymentSettlementExecutor{FanOutExecutor: executor, observed: observed}
 			}
 			f := selectedDeploymentResourceFixtureWithDelivery(t, backend, "root", nil, func(owner runtimedelivery.Store) runtimedelivery.Store {
 				gate.Store = owner
 				return gate
-			}, nil)
+			}, func(executor startupownership.FanOutExecutor) startupownership.FanOutExecutor {
+				return &selectedDeploymentSettlementExecutor{FanOutExecutor: executor, observed: ordinary}
+			})
 			server := f.operatorServer(t)
 			start := func(name string, rows []byte) string {
 				t.Helper()
@@ -95,7 +98,7 @@ func TestDeploymentSourceSelectedLastRowPendingBlocksQuiescenceBothStores(t *tes
 			case <-ctx.Done():
 				t.Fatalf("R6a selected final receiver claim not reached: %v", ctx.Err())
 			}
-			if err := observed.waitCommitted(ctx, finalEventID); err != nil {
+			if err := ordinary.waitCommitted(ctx, finalEventID); err != nil {
 				t.Fatalf("R6a final publication settlement not reached: %v", err)
 			}
 			var childID, operationState, executionState, feedStatus, deliveryStatus string
@@ -105,13 +108,18 @@ func TestDeploymentSourceSelectedLastRowPendingBlocksQuiescenceBothStores(t *tes
 				t.Fatal(err)
 			}
 			evaluated, _ := observed.snapshot()
-			if len(evaluated) == 0 {
-				t.Fatal("selected fork publication did not pass through BeginFanOutEvaluation")
-			}
 			for _, runID := range evaluated {
 				if runID != childID {
 					t.Fatalf("selected composite evaluation used run %q, want exact fork %q", runID, childID)
 				}
+			}
+			ordinaryEvaluated, _ := ordinary.snapshot()
+			childEvaluated := false
+			for _, runID := range ordinaryEvaluated {
+				childEvaluated = childEvaluated || runID == childID
+			}
+			if !childEvaluated {
+				t.Fatal("acknowledged child publication did not pass through its ordinary successor's BeginFanOutEvaluation")
 			}
 			if err := f.db.QueryRowContext(ctx, `SELECT state FROM run_fork_selected_contract_runtime_executions WHERE fork_run_id=$1`, childID).Scan(&executionState); err != nil {
 				t.Fatal(err)
