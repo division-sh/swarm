@@ -1108,7 +1108,7 @@ func TestCompletionOriginalGrantFencesProjectionButRecoveredGrantContinuesBothSt
 			t.Fatalf("fresh recovered projection: %v", err)
 		}
 		requireCompletionProjectionState(t, fixture, handle.Attempt().AttemptID, runtimeeffects.CompletionProjectionConversationProjected, 1,
-			json.RawMessage(`[{"role":"user","content":"start"},{"role":"assistant","content":"use tool"}]`))
+			json.RawMessage(`[{"role":"user","content":"start"},{"role":"assistant","content":"use tool","tool_calls":[{"id":"call-1","name":"echo","arguments":{"value":"stable"}}]}]`))
 	})
 }
 

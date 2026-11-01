@@ -178,6 +178,7 @@ type Response struct {
 	ToolOutputAuthority            *ToolOutputAuthority         `json:"tool_output_authority,omitempty"`
 	completionHandle               *runtimeeffects.Handle
 	completionAttempt              *runtimeeffects.Attempt
+	completionDispatch             *completionDispatch
 	completionCleanupDiagnostics   error
 	completionFrameID              string
 	completionSuccessor            *agentframe.ToolContinuation
@@ -236,8 +237,9 @@ type ForkChatSessionRuntime interface {
 // ManagedCall is the only provider-call carrier admitted for managed agents.
 // Its payload is sealed so callers cannot substitute transport-local messages.
 type ManagedCall struct {
-	frame     agentframe.Frame
-	toolRound *runtimeeffects.CompletionContinuationSnapshot
+	frame             agentframe.Frame
+	toolRound         *runtimeeffects.CompletionContinuationSnapshot
+	selectedToolRound *Response
 }
 
 func newManagedCall(frame agentframe.Frame) (ManagedCall, error) {
@@ -315,10 +317,11 @@ func validateManagedCall(ctx context.Context, session *Session, call ManagedCall
 }
 
 type managedProviderCall struct {
-	message   Message
-	provider  agentframe.Provider
-	frame     agentframe.Frame
-	toolRound *runtimeeffects.CompletionContinuationSnapshot
+	message           Message
+	provider          agentframe.Provider
+	frame             agentframe.Frame
+	toolRound         *runtimeeffects.CompletionContinuationSnapshot
+	selectedToolRound *Response
 }
 
 func validateManagedProviderCall(ctx context.Context, session *Session, call ManagedCall, contract ProviderContract) (managedProviderCall, error) {
@@ -329,14 +332,14 @@ func validateManagedProviderCall(ctx context.Context, session *Session, call Man
 	if err := contract.Validate(); err != nil {
 		return managedProviderCall{}, err
 	}
-	if call.toolRound != nil && call.frame.Turn.Kind != agentframe.TurnToolContinuation {
+	if (call.toolRound != nil || call.selectedToolRound != nil) && call.frame.Turn.Kind != agentframe.TurnToolContinuation {
 		return managedProviderCall{}, fmt.Errorf("provider round is only valid for an in-turn tool continuation")
 	}
 	provider := call.Frame().Session.Provider
 	if provider.RuntimeMode != contract.RuntimeMode || provider.Provider != contract.Provider || provider.Transport != string(contract.Transport) {
 		return managedProviderCall{}, fmt.Errorf("managed call frame provider contract does not match adapter")
 	}
-	return managedProviderCall{message: message, provider: provider, frame: call.Frame(), toolRound: call.toolRound}, nil
+	return managedProviderCall{message: message, provider: provider, frame: call.Frame(), toolRound: call.toolRound, selectedToolRound: call.selectedToolRound}, nil
 }
 
 func (c managedProviderCall) resolvedModel(profile llmselection.Profile) (llmselection.ResolvedModel, error) {
