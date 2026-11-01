@@ -144,11 +144,11 @@ func reasoningToolRoundReply(t *testing.T, request llmapi.Request) (llmapi.Reply
 	if request.Number == 3 {
 		read, err := retainedProviderToolResult(request, "round-call", "read_flow_data")
 		if err != nil {
-			return llmapi.Reply{}, err
+			return llmapi.Reply{StatusCode: http.StatusBadRequest, ErrorBody: err.Error()}, nil
 		}
 		emit, err := retainedProviderToolResult(request, "round-reply", "emit_telegram_reply_requested")
 		if err != nil || read >= emit {
-			return llmapi.Reply{}, fmt.Errorf("completed round lost ordered call/results: %v", err)
+			return llmapi.Reply{StatusCode: http.StatusBadRequest, ErrorBody: fmt.Sprintf("completed round lost ordered call/results: %v", err)}, nil
 		}
 		reply, _ := json.Marshal(map[string]string{"chat_id": "2001", "text": "Swarm heard: remembered customer"})
 		return llmapi.Reply{ID: "round-next", Model: "strict-thinking", InputTokens: 15, OutputTokens: 4, TotalTokens: 19,
