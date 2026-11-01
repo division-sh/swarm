@@ -10,6 +10,7 @@ import (
 	"github.com/division-sh/swarm/internal/runtime/agentmemory"
 	runtimeeffects "github.com/division-sh/swarm/internal/runtime/effects"
 	runtimellm "github.com/division-sh/swarm/internal/runtime/llm"
+	"github.com/division-sh/swarm/internal/runtime/sessions"
 	"github.com/division-sh/swarm/internal/testutil"
 	"github.com/google/uuid"
 )
@@ -27,7 +28,8 @@ func TestCompletionToolResultConsumptionPostgres(t *testing.T) {
 func proveCompletionToolResultConsumption(t *testing.T, fixture completionSettlementFixture) {
 	t.Helper()
 	const adapter, request = "openai_compatible", "consume-terminal-tool-result"
-	ctx := runtimeeffects.WithLogicalOperationIdentity(fixture.context, request)
+	ctx := runtimeeffects.WithLifecycleToken(fixture.context, fixture.authority.Normal)
+	ctx = runtimeeffects.WithLogicalOperationIdentity(ctx, request)
 	handle := beginObservedCompletionForSettlementTest(t, ctx, adapter, request)
 	settlement := completionSettlementForTest(t, handle.Attempt().Authority.Target, fixture, adapter, "", "")
 	settlement.ProviderHead = nil
@@ -39,11 +41,27 @@ func proveCompletionToolResultConsumption(t *testing.T, fixture completionSettle
 	if _, err := handle.SettleCompletion(ctx, settlement); err != nil {
 		t.Fatal(err)
 	}
+	controller := newCompletionControllerForTest(fixture.store)
+	handle, found, err := controller.RecoverCompletionContinuation(managedExecutionStoreTestContext(t, fixture.context), fixture.sessionID, settlement.AgentTurn.Memory)
+	if err != nil || !found {
+		t.Fatalf("recover settled tool response: found=%v err=%v", found, err)
+	}
+	lease, err := fixture.store.(sessions.Registry).Acquire(ctx, fixture.authority.Target.AgentIdentity, fixture.leaseHolder)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := handle.BindRecoveredContinuationGrant(runtimeeffects.SessionGrant{SessionID: lease.SessionID, GrantID: lease.GrantID, LockOwner: lease.LockOwner}); err != nil {
+		t.Fatal(err)
+	}
+	snapshot, ok := handle.CompletionContinuation()
+	if !ok {
+		t.Fatal("recovered tool response has no immutable continuation")
+	}
 	projectionMessages, err := json.Marshal(messages)
 	if err != nil {
 		t.Fatal(err)
 	}
-	projection := runtimeeffects.CompletionConversationProjection{Payload: payload, SessionID: fixture.sessionID,
+	projection := runtimeeffects.CompletionConversationProjection{Payload: snapshot.Payload, SessionID: fixture.sessionID,
 		Identity: settlement.AgentTurn.Identity, Memory: settlement.AgentTurn.Memory, ExpectedTurnCount: 0, TurnCount: 1, Messages: projectionMessages}
 	if err := handle.ProjectCompletionConversation(ctx, projection); err != nil {
 		t.Fatal(err)
