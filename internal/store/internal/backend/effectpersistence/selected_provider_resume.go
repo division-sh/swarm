@@ -1,11 +1,13 @@
 package effectpersistence
 
 import (
+	"bytes"
 	"context"
 	"database/sql"
-	"encoding/json"
 	"time"
 
+	"github.com/division-sh/swarm/internal/runtime/agentframe"
+	"github.com/division-sh/swarm/internal/runtime/core/agentidentity"
 	runtimeeffects "github.com/division-sh/swarm/internal/runtime/effects"
 	"github.com/division-sh/swarm/internal/store/internal/backend/mutationprotocol"
 )
@@ -138,9 +140,11 @@ func providerResumeDecisionRecordedTx(ctx context.Context, tx *sql.Tx, sqlite bo
 	rows, err := tx.QueryContext(ctx, query+`JOIN event_delivery_attempts prior ON prior.delivery_id=a.origin_delivery_id
 		AND prior.claim_version=$2 AND prior.claim_token=$3
 		WHERE a.origin_delivery_id=$1 AND a.origin_claim_version=$2+1 AND o.effect_kind='provider_turn'
+		AND a.origin_run_id=$4 AND a.origin_route_identity=$5 AND a.origin_subscriber_id=$6 AND a.origin_subscriber_type='agent'
 		AND prior.closure_kind='settled' AND prior.open_marker=FALSE AND prior.completed_at IS NOT NULL
 		AND prior.outcome='retry_scheduled' AND prior.reason_code='effect_recovery_outcome_unconfirmed'
-		AND a.state='settled' AND o.state='settled' LIMIT 2`, recovered.OriginDeliveryID, recovered.OriginClaimVersion, recovered.OriginClaimToken)
+		AND a.state='settled' AND o.state='settled' LIMIT 2`, recovered.OriginDeliveryID, recovered.OriginClaimVersion, recovered.OriginClaimToken,
+		recovered.OriginRunID, recovered.OriginRouteIdentity, recovered.OriginSubscriber)
 	if err != nil {
 		return false, err
 	}
@@ -157,7 +161,17 @@ func providerResumeDecisionRecordedTx(ctx context.Context, tx *sql.Tx, sqlite bo
 	if err != nil || successor == nil || successor.Call.PredecessorAttemptID != recovered.AttemptID || successor.SourceHash != journal.SourceHash {
 		return false, err
 	}
-	oldInput, _ := json.Marshal(journal.Call.Request)
-	newInput, _ := json.Marshal(successor.Call.Request)
-	return string(oldInput) == string(newInput), nil
+	frame, err := agentframe.DecodeDurable(recovered.AgentFrame)
+	if err != nil {
+		return false, err
+	}
+	sameActor, err := agentidentity.Equal(frame.Session.AgentIdentity, attempt.Authority.Target.AgentIdentity)
+	if err != nil || !sameActor || recovered.AuthorityKind != child.AuthorityKind || successor.Call.Memory != journal.Call.Memory ||
+		successor.Call.TurnCount != journal.Call.TurnCount || !bytes.Equal(successor.Call.Messages, journal.Call.Messages) ||
+		!bytes.Equal(successor.Call.ProviderContract, journal.Call.ProviderContract) {
+		return false, err
+	}
+	oldFingerprint, oldErr := journal.Call.Request.Fingerprint()
+	newFingerprint, newErr := successor.Call.Request.Fingerprint()
+	return oldErr == nil && newErr == nil && oldFingerprint == newFingerprint, nil
 }
