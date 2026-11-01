@@ -261,10 +261,10 @@ func (e *Executor) ToolDefinitionsForActor(actor models.AgentConfig) []llm.ToolD
 	source := e.workflowSource
 	client := e.mcpClient
 	e.mu.RUnlock()
-	return e.toolDefinitionsForActor(actor, source, client, nil)
+	return e.toolDefinitionsForActor(context.Background(), actor, source, client, nil)
 }
 
-func (e *Executor) toolDefinitionsForActor(actor models.AgentConfig, source semanticview.Source, client *runtimemcp.Client, channelTools map[string]runtimecontracts.ToolSchemaEntry) []llm.ToolDefinition {
+func (e *Executor) toolDefinitionsForActor(ctx context.Context, actor models.AgentConfig, source semanticview.Source, client *runtimemcp.Client, channelTools map[string]runtimecontracts.ToolSchemaEntry) []llm.ToolDefinition {
 	if channelTools != nil {
 		var err error
 		source, err = semanticview.WithChannelRuntimeToolProjection(source, channelTools)
@@ -279,7 +279,7 @@ func (e *Executor) toolDefinitionsForActor(actor models.AgentConfig, source sema
 	}
 	definitions, err := admittedActorToolDefinitions(source, actor, discovered, e.emitRegistry,
 		func(name string) toolAuthorizationDecision { return e.toolAuthorizationDecision(actor, name) },
-		func(name string) bool { return e.nativeToolAdmittedForTool(context.Background(), actor, name) },
+		func(name string) bool { return e.nativeToolAdmittedForTool(ctx, actor, name) },
 		func(_ string, component string, format string, args ...any) { processWarn(component, format, args...) })
 	if err != nil {
 		processWarn("tool-executor", "failed to load actor-scoped contract tool definitions: %v", err)
@@ -296,7 +296,7 @@ func (e *Executor) ToolDefinitionsForActorInContext(ctx context.Context, actor m
 	source := e.workflowSource
 	client := e.mcpClient
 	e.mu.RUnlock()
-	definitions := e.toolDefinitionsForActor(actor, source, client, nil)
+	definitions := e.toolDefinitionsForActor(ctx, actor, source, client, nil)
 	return e.filterToolDefinitionsForActorInContext(ctx, actor, definitions)
 }
 
@@ -313,14 +313,14 @@ func (e *Executor) AcquireToolDefinitionsForActorInContext(ctx context.Context, 
 		if _, inherited := runtimechannelactivation.PresentationFromContext(ctx); inherited {
 			return ctx, nil, func() {}, fmt.Errorf("inherited channel presentation has no matching owner")
 		}
-		definitions := e.toolDefinitionsForActor(actor, source, client, nil)
+		definitions := e.toolDefinitionsForActor(ctx, actor, source, client, nil)
 		return ctx, e.filterToolDefinitionsForActorInContext(ctx, actor, definitions), func() {}, nil
 	}
 	pinnedCtx, lease, err := activations.AcquirePresentationForContext(ctx, channelPresentationScope(ctx, actor))
 	if err != nil {
 		return ctx, nil, func() {}, fmt.Errorf("acquire channel activation publication: %w", err)
 	}
-	definitions := e.toolDefinitionsForActor(actor, source, client, lease.ToolEntries())
+	definitions := e.toolDefinitionsForActor(pinnedCtx, actor, source, client, lease.ToolEntries())
 	return pinnedCtx, e.filterToolDefinitionsForActorInContext(pinnedCtx, actor, definitions), lease.Release, nil
 }
 
@@ -340,10 +340,14 @@ func (e *Executor) filterToolDefinitionsForActorInContext(ctx context.Context, a
 }
 
 func (e *Executor) ToolCapabilitiesForActor(actor models.AgentConfig, names []string, requestAllowed map[string]struct{}) toolcapabilities.Set {
+	return e.toolCapabilitiesForActor(context.Background(), actor, names, requestAllowed)
+}
+
+func (e *Executor) toolCapabilitiesForActor(ctx context.Context, actor models.AgentConfig, names []string, requestAllowed map[string]struct{}) toolcapabilities.Set {
 	return actorToolCapabilities(names, requestAllowed,
 		func(name string) toolAuthorizationDecision { return e.toolAuthorizationDecision(actor, name) },
 		func(name string) (bool, string) {
-			return e.nativeToolAdmissionForTool(context.Background(), actor, name)
+			return e.nativeToolAdmissionForTool(ctx, actor, name)
 		})
 }
 
@@ -396,7 +400,7 @@ func actorToolCapabilities(names []string, requestAllowed map[string]struct{}, a
 }
 
 func (e *Executor) ToolCapabilitiesForActorInContext(ctx context.Context, actor models.AgentConfig, names []string, requestAllowed map[string]struct{}) toolcapabilities.Set {
-	set := e.ToolCapabilitiesForActor(actor, names, requestAllowed)
+	set := e.toolCapabilitiesForActor(ctx, actor, names, requestAllowed)
 	roleScopedNames := e.RoleScopedEntityToolNamesForActor(actor)
 	caps := make([]toolcapabilities.Capability, 0, len(set.ByName))
 	for name, cap := range set.ByName {

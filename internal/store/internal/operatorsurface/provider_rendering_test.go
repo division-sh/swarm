@@ -24,9 +24,11 @@ func TestRecordedProviderRenderingDoesNotReprojectOrExposeAssistantHistory(t *te
 			}
 		})
 	}
-	got, err := projectProviderRendering([]byte(`{}`))
-	if err != nil || got.Status != "unresolved" || len(got.Input) != 0 {
-		t.Fatal("missing historical evidence was invented")
+	for _, missing := range [][]byte{nil, []byte(`{}`)} {
+		got, err := projectProviderRendering(missing)
+		if err != nil || got.Status != "unresolved" || len(got.Input) != 0 {
+			t.Fatal("missing historical evidence was invented")
+		}
 	}
 	if _, err := projectProviderRendering([]byte(`broken`)); err == nil {
 		t.Fatal("malformed recorded evidence accepted")

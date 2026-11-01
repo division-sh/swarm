@@ -187,15 +187,11 @@ func providerEvidenceReply(request llmapi.Request, cell string) (llmapi.Reply, e
 		if message.Role == "tool" && !linked[message.CallID] {
 			return llmapi.Reply{StatusCode: http.StatusBadRequest, ErrorBody: `{"error":{"message":"synthetic strict provider: orphaned tool message"}}`}, nil
 		}
-		var frame struct {
-			Event struct {
-				Payload struct {
-					Sequence int `json:"sequence"`
-				} `json:"payload"`
-			} `json:"event"`
+		var payload struct {
+			Sequence int `json:"sequence"`
 		}
-		if message.Role == "user" && json.Unmarshal([]byte(message.Content), &frame) == nil && frame.Event.Payload.Sequence > 0 {
-			sequence = frame.Event.Payload.Sequence
+		if message.Role == "user" && json.Unmarshal([]byte(message.Content), &payload) == nil && payload.Sequence > 0 {
+			sequence = payload.Sequence
 		}
 	}
 	if cell == "tool_round" && request.Number == 1 {

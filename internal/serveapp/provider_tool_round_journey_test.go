@@ -182,17 +182,11 @@ func reasoningToolRoundReply(t *testing.T, request llmapi.Request) (llmapi.Reply
 		t.Logf("strict provider returned HTTP 400: %s", refusal)
 		return llmapi.Reply{StatusCode: http.StatusBadRequest, ErrorBody: refusal}, nil
 	}
-	payload, err := providerJourneyToolResult(tool.Content, "round-call")
-	if err != nil {
-		return llmapi.Reply{}, err
-	}
 	var result struct {
-		Result struct {
-			StaticID string `json:"static_id"`
-			Content  string `json:"content"`
-		} `json:"result"`
+		StaticID string `json:"static_id"`
+		Content  string `json:"content"`
 	}
-	if err := json.Unmarshal(payload, &result); err != nil || result.Result.StaticID != staticID || result.Result.Content != "round customer\n" {
+	if err := json.Unmarshal([]byte(tool.Content), &result); err != nil || result.StaticID != staticID || result.Content != "round customer\n" {
 		return llmapi.Reply{}, fmt.Errorf("continuation lost its genuine read result")
 	}
 	reply, _ := json.Marshal(map[string]string{"chat_id": "2001", "text": "Swarm heard: round customer"})
@@ -225,16 +219,15 @@ func retainedProviderToolResult(request llmapi.Request, callID, name string) (in
 			if i+1 >= len(body.Messages) || body.Messages[i+1].Role != "tool" || body.Messages[i+1].ToolCallID != callID {
 				return 0, fmt.Errorf("stored assistant call %s lost its immediately following result", callID)
 			}
-			payload, err := providerJourneyToolResult(body.Messages[i+1].Content, callID)
-			if err != nil {
-				payload = json.RawMessage(body.Messages[i+1].Content)
+			content := body.Messages[i+1].Content
+			var read struct {
+				Content string `json:"content"`
 			}
-			var result struct {
-				CallID string `json:"tool_call_id"`
-				Name   string `json:"name"`
-				OK     bool   `json:"ok"`
+			valid := content == "ok"
+			if name == "read_flow_data" {
+				valid = json.Unmarshal([]byte(content), &read) == nil && read.Content == "round customer\n"
 			}
-			if err := json.Unmarshal(payload, &result); err != nil || result.CallID != callID || result.Name != name || !result.OK {
+			if !valid {
 				return 0, fmt.Errorf("stored result %s lost its actual successful outcome", callID)
 			}
 			return i, nil
