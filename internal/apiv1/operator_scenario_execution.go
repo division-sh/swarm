@@ -16,6 +16,26 @@ import (
 	"github.com/google/uuid"
 )
 
+func bindPrivateScenarioPublicationScope(ctx context.Context, opts EventPublicationOptions, params eventPublicationParams, identity bundleIdentityParam) (context.Context, EventPublicationOptions, eventPublicationParams, bool, error) {
+	if !scenarioexecution.HasPrivateHostScope(ctx) || params.RunID == "" {
+		return ctx, opts, params, false, nil
+	}
+	ctx, opts, params, err := resolveEventPublicationBundleScope(ctx, opts, params, identity, eventPublicationConfig{requireExistingExplicitRun: true})
+	if err != nil {
+		return ctx, opts, params, false, err
+	}
+	ctx, err = admitScenarioExecutionSelector(ctx, opts, params.RunID, false, params.ScenarioExecution)
+	if err != nil {
+		return ctx, opts, params, false, err
+	}
+	header, err := opts.Runs.LoadRunHeader(ctx, params.RunID)
+	if err != nil || header.Origin.Kind() == runlifecycle.OriginDeployment {
+		return ctx, opts, params, false, err
+	}
+	ctx, err = scenarioexecution.WithPrivateRunScope(ctx, params.RunID, flowidentity.ScopeKey(opts.Source, semanticview.RootExecutionFlowID(opts.Source)))
+	return ctx, opts, params, err == nil, err
+}
+
 // StartPrivateScenario is handed directly to swarm test by its private host.
 // It is deliberately absent from the public RPC method registry.
 func StartPrivateScenario(ctx context.Context, opts EventPublicationOptions, input map[string]any, now time.Time) (string, error) {

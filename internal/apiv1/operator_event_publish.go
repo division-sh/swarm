@@ -227,28 +227,9 @@ func executeOperatorEventPublication(
 		if err != nil {
 			return apiidempotency.Completion{}, err
 		}
-		selectedOpts := opts
-		privateScenario := false
-		if scenarioexecution.HasPrivateHostScope(ctx) && params.RunID != "" {
-			ctx, selectedOpts, params, err = resolveEventPublicationBundleScope(ctx, opts, params, bundleIdentity, eventPublicationConfig{requireExistingExplicitRun: true})
-			if err != nil {
-				return apiidempotency.Completion{}, err
-			}
-			ctx, err = admitScenarioExecutionSelector(ctx, selectedOpts, params.RunID, false, params.ScenarioExecution)
-			if err != nil {
-				return apiidempotency.Completion{}, err
-			}
-			header, err := selectedOpts.Runs.LoadRunHeader(ctx, params.RunID)
-			if err != nil {
-				return apiidempotency.Completion{}, err
-			}
-			if header.Origin.Kind() != runtimerunlifecycle.OriginDeployment {
-				ctx, err = scenarioexecution.WithPrivateRunScope(ctx, params.RunID, runtimeflowidentity.ScopeKey(selectedOpts.Source, semanticview.RootExecutionFlowID(selectedOpts.Source)))
-				if err != nil {
-					return apiidempotency.Completion{}, err
-				}
-				privateScenario = true
-			}
+		ctx, selectedOpts, params, privateScenario, err := bindPrivateScenarioPublicationScope(ctx, opts, params, bundleIdentity)
+		if err != nil {
+			return apiidempotency.Completion{}, err
 		}
 		if cfg.rootInputOnly || !params.RunIDProvided || privateScenario {
 			params, err = selectEventPublicationLiveRun(ctx, selectedOpts, params, bundleIdentity.BundleHash)

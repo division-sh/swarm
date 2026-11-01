@@ -1168,18 +1168,6 @@ func (r scenarioRunner) runPublishStep(ctx context.Context, file scenarioTestFil
 		}
 	}
 	if state.RunID == "" {
-		if r.startScenario == nil {
-			return fmt.Errorf("private scenario start is unavailable")
-		}
-		runID, err := r.startScenario(ctx, params)
-		if err != nil {
-			return err
-		}
-		if strings.TrimSpace(runID) == "" {
-			return fmt.Errorf("private scenario start returned no run")
-		}
-		state.RunID = runID
-		params["run_id"] = runID
 		return r.startPublicationRun(ctx, state, params)
 	}
 	var result eventPublishResult
@@ -1195,6 +1183,18 @@ func (r scenarioRunner) runPublishStep(ctx context.Context, file scenarioTestFil
 }
 
 func (r scenarioRunner) startPublicationRun(ctx context.Context, state *scenarioRunState, params map[string]any) error {
+	if r.startScenario == nil {
+		return fmt.Errorf("private scenario start is unavailable")
+	}
+	runID, err := r.startScenario(ctx, params)
+	if err != nil {
+		return err
+	}
+	if strings.TrimSpace(runID) == "" {
+		return fmt.Errorf("private scenario start returned no run")
+	}
+	state.RunID = runID
+	params["run_id"] = runID
 	var result runStartResult
 	if err := r.client.call(ctx, "run.start", params, &result); err != nil {
 		return err
