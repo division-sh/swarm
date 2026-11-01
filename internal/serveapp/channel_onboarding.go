@@ -277,6 +277,9 @@ func admitServeRegisteredWebhookCredentials(ctx context.Context, manager *runtim
 	if err != nil {
 		return err
 	}
+	registered = slices.DeleteFunc(slices.Clone(registered), func(op channelonboarding.Operation) bool {
+		return len(selected) != 0 && !slices.Contains(selected, channelonboarding.AccountReference{Provider: op.Provider, Account: op.AccountReference})
+	})
 	for _, contextDef := range manager.LoadedContexts() {
 		declarations, err := contextDef.StandingTargetDeclarations()
 		if err != nil {
@@ -292,9 +295,6 @@ func admitServeRegisteredWebhookCredentials(ctx context.Context, manager *runtim
 			}
 			for _, op := range channelonboarding.RetainedConfirmedAccounts(registered, candidate.Provider) {
 				ref := channelonboarding.AccountReference{Provider: op.Provider, Account: op.AccountReference}
-				if len(selected) != 0 && !slices.Contains(selected, ref) {
-					continue
-				}
 				holders, err := manager.AccountHolders(ctx, ref)
 				if err != nil {
 					return err

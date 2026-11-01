@@ -245,11 +245,7 @@ func (c *ProviderRegistrationController) ConsumePendingDeploymentClaim(request *
 				err == nil && credentialsCurrent
 		}
 		admit := func(selected providertriggers.InboundAdmissionPlan) (providertriggers.Delivery, error) {
-			if !plan.Valid() || !plan.Generation().Equal(target.AdmissionPlanGeneration) || plan.Provider() != target.Provider {
-				return providertriggers.Delivery{}, channelonboarding.ErrConflict
-			}
-			if !selected.Valid() || selected.Provider() != target.Provider || selected.PolicySource() != providertriggers.PolicySourceVerifiedPack ||
-				selected.Transport() != packs.ChannelTransportWebhook || selected.RequestAuthentication() != providertriggers.RequestAuthenticationTokenEquality {
+			if !matchesDeploymentClaimAdmission(plan, selected, target) {
 				return providertriggers.Delivery{}, channelonboarding.ErrConflict
 			}
 			_, signing, err := c.admitCredentials(request.Context(), state.Pair)
@@ -275,6 +271,12 @@ func (c *ProviderRegistrationController) ConsumePendingDeploymentClaim(request *
 		return consume(request.Context(), account, credential, func() (providertriggers.Delivery, error) { return admit(plan) }, admit, current)
 	}
 	return false, channelonboarding.ErrConflict
+}
+
+func matchesDeploymentClaimAdmission(receiver, selected providertriggers.InboundAdmissionPlan, target RegistrationTarget) bool {
+	return receiver.Valid() && receiver.Generation().Equal(target.AdmissionPlanGeneration) && receiver.Provider() == target.Provider &&
+		selected.Valid() && selected.Provider() == target.Provider && selected.PolicySource() == providertriggers.PolicySourceVerifiedPack &&
+		selected.Transport() == packs.ChannelTransportWebhook && selected.RequestAuthentication() == providertriggers.RequestAuthenticationTokenEquality
 }
 
 // SlotCollisionError is a permanent physical ownership rejection, not a
