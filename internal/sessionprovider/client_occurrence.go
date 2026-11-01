@@ -107,7 +107,9 @@ func newClientOccurrence(ctx context.Context, connectionID, occurrenceID string,
 			o.mu.Unlock()
 			if pairing != nil {
 				view, err := pairing.read(pairing.scope)
-				if err == nil && view.Paired && !view.Connected && o.client.Store.ID != nil {
+				if err == nil && !view.Connected && o.client.Store.ID != nil {
+					// The SDK persists pairing before acknowledging the provider;
+					// its PairSuccess callback may follow the provider's 515.
 					// The explicit onboarding caller owns the next authenticated
 					// socket; this is not a failed scan or SDK auto-reconnect.
 					o.mu.Lock()
