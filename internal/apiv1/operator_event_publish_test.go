@@ -114,6 +114,13 @@ func TestEventPublishCanonicalClassAndProvenanceReadbackParity(t *testing.T) {
 			if countAllRunRows(t, f.store) != 0 || countAllEventRows(t, f.store) != 0 || countAPIIdempotencyRows(t, f.store) != 0 {
 				t.Fatal("no-live refusal left storage residue")
 			}
+			noStart := rpcCall(t, handler, runStartBodyWithoutBundle("", "scan.requested", `{"topic":"no-live-start"}`, "no-live-start"))
+			if noStart.Error == nil || asMap(t, asMap(t, noStart.Error.Data)["details"])["reason"] != "no_run_yet" {
+				t.Fatalf("run.start with no live run = %#v", noStart)
+			}
+			if countAllRunRows(t, f.store) != 0 || countAllEventRows(t, f.store) != 0 || countAPIIdempotencyRows(t, f.store) != 0 {
+				t.Fatal("run.start no-live refusal left storage residue")
+			}
 
 			publish := func(label, body string) (string, string) {
 				t.Helper()
@@ -124,7 +131,22 @@ func TestEventPublishCanonicalClassAndProvenanceReadbackParity(t *testing.T) {
 				result := asMap(t, response.Result)
 				return stringValue(t, result["event_id"], label+" event_id"), stringValue(t, result["run_id"], label+" run_id")
 			}
-			rootID, runID := publish("new-run root", runStartBody("", runStartTestBundleHashForSource(source), "scan.requested", `{"topic":"root"}`, "canonical-root"))
+			runID := seedEventPublishLiveRun(t, f.store, bus, source)
+			mismatched := rpcCall(t, handler, runStartBody(uuid.NewString(), runStartTestBundleHashForSource(source), "scan.requested", `{"topic":"mismatched"}`, "mismatched-start"))
+			if mismatched.Error == nil || asMap(t, asMap(t, mismatched.Error.Data)["details"])["reason"] != "live_run_mismatch" {
+				t.Fatalf("run.start accepted a caller-minted run: %#v", mismatched)
+			}
+			if countAllRunRows(t, f.store) != 1 || countAllEventRows(t, f.store) != 0 || countAPIIdempotencyRows(t, f.store) != 0 {
+				t.Fatal("mismatched run.start left storage residue")
+			}
+			rootID, startedRunID := publish("live-run start", runStartBody("", runStartTestBundleHashForSource(source), "scan.requested", `{"topic":"root"}`, "canonical-root"))
+			if startedRunID != runID || countAllRunRows(t, f.store) != 1 {
+				t.Fatalf("run.start created or selected another run: got %s, want %s", startedRunID, runID)
+			}
+			startReplay := rpcCall(t, handler, runStartBody("", runStartTestBundleHashForSource(source), "scan.requested", `{"topic":"root"}`, "canonical-root"))
+			if startReplay.Error != nil || asMap(t, startReplay.Result)["event_id"] != rootID || countAllEventRows(t, f.store) != 1 {
+				t.Fatalf("run.start replay changed its publication: %#v", startReplay)
+			}
 			operatorID, operatorRunID := publish("existing-run operator", eventPublishBody(runID, runStartTestBundleHashForSource(source), "scan.requested", `{"topic":"operator"}`, "", "canonical-operator"))
 			if operatorRunID != runID {
 				t.Fatalf("existing-run operator run_id = %s, want %s", operatorRunID, runID)
@@ -145,7 +167,7 @@ func TestEventPublishCanonicalClassAndProvenanceReadbackParity(t *testing.T) {
 				referenceID  string
 				hasReference bool
 			}{
-				{"new-run root", rootID, events.EventAdmissionRootIngress, "", false},
+				{"live-run start", rootID, events.EventAdmissionOperatorInjected, "", false},
 				{"existing-run operator", operatorID, events.EventAdmissionOperatorInjected, "", false},
 				{"referenced operator", referencedID, events.EventAdmissionOperatorInjected, rootID, true},
 			} {
@@ -154,7 +176,7 @@ func TestEventPublishCanonicalClassAndProvenanceReadbackParity(t *testing.T) {
 					t.Fatalf("canonical readback %s: %v", expected.name, err)
 				}
 				producer := wantProducer
-				if expected.class == events.EventAdmissionRootIngress {
+				if expected.name == "live-run start" {
 					producer, err = events.NewProducerIdentity(events.EventProducerExternal, "api.v1")
 					if err != nil {
 						t.Fatal(err)
@@ -195,9 +217,17 @@ func TestEventPublishCanonicalClassAndProvenanceReadbackParity(t *testing.T) {
 			if pausedDetails["reason"] != "all_runs_paused" || pausedDetails["run_id"] != runID || pausedDetails["remediation"] != "swarm run continue "+runID {
 				t.Fatalf("paused refusal = %#v", paused.Error)
 			}
+			pausedStart := rpcCall(t, handler, runStartBodyWithoutBundle("", "scan.requested", `{"topic":"paused-start"}`, "paused-start"))
+			if pausedStart.Error == nil || asMap(t, asMap(t, pausedStart.Error.Data)["details"])["reason"] != "all_runs_paused" {
+				t.Fatalf("run.start reached a paused run: %#v", pausedStart)
+			}
 			replay := rpcCall(t, handler, omitted)
 			if replay.Error != nil || !reflect.DeepEqual(replay.Result, selected.Result) {
 				t.Fatalf("completed omitted publication did not replay across pause: %#v", replay)
+			}
+			startAfterPause := rpcCall(t, handler, runStartBody("", runStartTestBundleHashForSource(source), "scan.requested", `{"topic":"root"}`, "canonical-root"))
+			if startAfterPause.Error != nil || !reflect.DeepEqual(startAfterPause.Result, startReplay.Result) {
+				t.Fatalf("completed run.start did not replay across pause: %#v", startAfterPause)
 			}
 			owner := f.store.(storetest.RunFixtureStore)
 			if _, _, err := storetest.TerminalizeRun(originalAPIFixtureContext(t, testAuthorActivityContext(context.Background()), f.store), owner, storerunlifecycle.TerminalRequest{
@@ -208,6 +238,10 @@ func TestEventPublishCanonicalClassAndProvenanceReadbackParity(t *testing.T) {
 			ended := rpcCall(t, handler, eventPublishBodyWithoutBundle("", "scan.requested", `{"topic":"ended"}`, "", "ended-refusal"))
 			if ended.Error == nil || asMap(t, asMap(t, ended.Error.Data)["details"])["reason"] != "all_runs_ended" {
 				t.Fatalf("ended refusal = %#v", ended)
+			}
+			endedStart := rpcCall(t, handler, runStartBodyWithoutBundle("", "scan.requested", `{"topic":"ended-start"}`, "ended-start"))
+			if endedStart.Error == nil || asMap(t, asMap(t, endedStart.Error.Data)["details"])["reason"] != "all_runs_ended" {
+				t.Fatalf("run.start revived an ended flow: %#v", endedStart)
 			}
 			if countAllRunRows(t, f.store) != 1 || countAllEventRows(t, f.store) != 4 || countAPIIdempotencyRows(t, f.store) != 4 {
 				t.Fatal("no-live refusal or replay changed the exact committed footprint")

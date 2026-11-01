@@ -227,7 +227,7 @@ func executeOperatorEventPublication(
 			return apiidempotency.Completion{}, err
 		}
 		selectedOpts := opts
-		if !cfg.rootInputOnly && !params.RunIDProvided {
+		if cfg.rootInputOnly || !params.RunIDProvided {
 			params, err = selectEventPublicationLiveRun(ctx, opts, params, bundleIdentity.BundleHash)
 			if err != nil {
 				return apiidempotency.Completion{}, err
@@ -400,17 +400,14 @@ func eventPublicationParamsFromRequest(req Request, cfg eventPublicationConfig) 
 		return eventPublicationParams{}, bundleIdentityParam{}, NewInvalidParamsError(map[string]any{"field": "run_id", "reason": "is required when target is provided"})
 	}
 	newRun := false
-	if runID == "" {
-		if cfg.rootInputOnly {
-			runID = uuid.NewString()
-			newRun = true
+	if runID != "" {
+		parsed, err := uuid.Parse(runID)
+		if err != nil {
+			return eventPublicationParams{}, bundleIdentityParam{}, NewInvalidParamsError(map[string]any{"field": "run_id", "reason": "must be a UUID"})
 		}
-	} else if parsed, err := uuid.Parse(runID); err != nil {
-		return eventPublicationParams{}, bundleIdentityParam{}, NewInvalidParamsError(map[string]any{"field": "run_id", "reason": "must be a UUID"})
-	} else {
 		runID = parsed.String()
 	}
-	if runIDProvided && (cfg.rootInputOnly || dataPresent) {
+	if runIDProvided && dataPresent && !cfg.rootInputOnly {
 		newRun = true
 	}
 	if dataPresent && !runIDProvided {
@@ -724,9 +721,6 @@ func validateEventPublication(ctx context.Context, opts EventPublicationOptions,
 			}},
 			"event_name": params.EventName,
 		})
-	}
-	if cfg.rootInputOnly {
-		return params, nil
 	}
 	if cfg.requireExistingExplicitRun && !params.NewRunCreated {
 		runs, err := requireRunReadStore(opts.Runs)

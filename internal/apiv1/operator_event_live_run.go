@@ -29,6 +29,12 @@ func selectEventPublicationLiveRun(ctx context.Context, opts EventPublicationOpt
 		return params, err
 	}
 	if found {
+		if params.RunID != "" && params.RunID != live.RunID {
+			return params, NewApplicationError(EventPublishRejectedCode, false, map[string]any{
+				"event_name": params.EventName, "run_id": params.RunID, "live_run_id": live.RunID,
+				"reason": "live_run_mismatch", "remediation": "omit run_id to publish into the flow's live run",
+			})
+		}
 		params.RunID, params.LiveRun = live.RunID, &live
 		return params, nil
 	}
