@@ -40,7 +40,11 @@ func loadRuntimeCompositionBundles(ctx context.Context, req runtimeCompositionRe
 	return []serveRuntimeBundle{loaded}, nil
 }
 
-// RunTestSession uses the production composition with privately owned resources.
+func buildPrivateTestComposition(ctx context.Context, req runtimeCompositionRequest) int {
+	return buildRuntimeHost(ctx, req, nil)
+}
+
+// RunTestSession shares acquisition and joined cleanup, not serve's boot maker.
 // Source/scenario admission belongs to the calling CLI before this acquisition.
 func RunTestSession(ctx context.Context, in cliapp.TestSessionRequest, execute func(context.Context, cliapp.TestSessionEndpoint) error) (retErr error) {
 	if in.Bundle == nil || in.Bundle.SourceArtifact == nil || in.PlatformPackBase == nil || execute == nil {
@@ -96,7 +100,7 @@ func RunTestSession(ctx context.Context, in cliapp.TestSessionRequest, execute f
 	defer presenter.finish()
 	var executionErr error
 	called := false
-	code := buildRuntimeComposition(ctx, runtimeCompositionRequest{
+	code := buildPrivateTestComposition(ctx, runtimeCompositionRequest{
 		Purpose: executionposture.MockOnly, ProviderIngress: false,
 		WorkspacePreference: preference,
 		Repo:                privateRoot, Options: opts,
