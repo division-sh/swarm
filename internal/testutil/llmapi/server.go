@@ -33,6 +33,8 @@ type ToolCall struct {
 }
 
 type Reply struct {
+	StatusCode   int
+	ErrorBody    string
 	ID           string
 	Model        string
 	Text         string
@@ -100,6 +102,11 @@ func New(t testing.TB, protocol Protocol, path, key string, respond func(Request
 
 // WriteReply also serves callers whose request/history handler is test-owned.
 func WriteReply(w http.ResponseWriter, protocol Protocol, reply Reply) error {
+	if reply.StatusCode >= 300 {
+		w.WriteHeader(reply.StatusCode)
+		_, err := io.WriteString(w, reply.ErrorBody)
+		return err
+	}
 	if err := validateReply(protocol, reply); err != nil {
 		return err
 	}
