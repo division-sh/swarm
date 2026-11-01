@@ -21,6 +21,14 @@ import (
 	"github.com/google/uuid"
 )
 
+const scenarioInitialEventID = "00000000-0000-4000-8000-000000000001"
+
+func scenarioStartedRunResult() map[string]any {
+	result := runStartCommandResult(testPublishedRunID, "live")
+	result["event_id"] = scenarioInitialEventID
+	return result
+}
+
 // Unit-level RPC doubles are injected through the command-owned session port,
 // never selected through a public connection flag or ambient target.
 func scenarioProtocolTestOptions(server *httptest.Server) rootCommandOptions {
@@ -56,12 +64,12 @@ func TestSwarmTestRunsScenarioThroughPublicRPC(t *testing.T) {
 		switch req.Method {
 		case "runtime.identity":
 			writeScenarioRuntimeIdentity(t, w, req.ID, bundleHash)
-		case eventPublishMethod:
+		case "run.start", eventPublishMethod:
 			publishCalls++
 			switch publishCalls {
 			case 1:
-				if _, supplied := req.Params["run_id"]; supplied {
-					t.Fatalf("first scenario publication supplied a run instead of selecting its boot live run: %#v", req.Params)
+				if req.Method != "run.start" {
+					t.Fatalf("first scenario publication method = %q", req.Method)
 				}
 				if req.Params["event_name"] != "item.received" || req.Params["bundle_hash"] != bundleHash || req.Params["idempotency_key"] != scenarioSHA40("empire-cost-router") {
 					t.Fatalf("event.publish initial params = %#v", req.Params)
@@ -70,9 +78,9 @@ func TestSwarmTestRunsScenarioThroughPublicRPC(t *testing.T) {
 				if !ok || payload["item_id"] != "initial" {
 					t.Fatalf("event.publish initial payload = %#v", req.Params["payload"])
 				}
-				writeJSONRPCResult(t, w, req.ID, eventPublishTestResult(false))
+				writeJSONRPCResult(t, w, req.ID, scenarioStartedRunResult())
 			case 2:
-				if req.Params["event_name"] != "item.processed" || req.Params["bundle_hash"] != bundleHash || req.Params["run_id"] != testPublishedRunID || req.Params["source_event_id"] != "event-1" {
+				if req.Method != eventPublishMethod || req.Params["event_name"] != "item.processed" || req.Params["bundle_hash"] != bundleHash || req.Params["run_id"] != testPublishedRunID || req.Params["source_event_id"] != scenarioInitialEventID {
 					t.Fatalf("event.publish follow-up params = %#v", req.Params)
 				}
 				payload, ok := req.Params["payload"].(map[string]any)
@@ -81,7 +89,7 @@ func TestSwarmTestRunsScenarioThroughPublicRPC(t *testing.T) {
 				}
 				result := eventPublishTestResult(false)
 				result["event_id"] = "event-2"
-				result["operator_reference_event_id"] = "event-1"
+				result["operator_reference_event_id"] = scenarioInitialEventID
 				writeJSONRPCResult(t, w, req.ID, result)
 			default:
 				t.Fatalf("unexpected extra event.publish params = %#v", req.Params)
@@ -90,7 +98,7 @@ func TestSwarmTestRunsScenarioThroughPublicRPC(t *testing.T) {
 			writeJSONRPCResult(t, w, req.ID, scenarioRunDiagnoseTestResult(testPublishedRunID, true))
 		case "run.trace":
 			traceCalls++
-			row := validRunCommandTraceRow("event-1")
+			row := validRunCommandTraceRow(scenarioInitialEventID)
 			row["event_name"] = "item.received"
 			rows := []map[string]any{row}
 			followUp := validRunCommandTraceRow("event-2")
@@ -133,7 +141,7 @@ func TestSwarmTestRunsScenarioThroughPublicRPC(t *testing.T) {
 	}
 	assertScenarioTestMethods(t, calls, []string{
 		"runtime.identity",
-		eventPublishMethod,
+		"run.start",
 		"run.diagnose",
 		eventPublishMethod,
 		"run.diagnose",
@@ -402,7 +410,7 @@ func TestSwarmTestRunsCatalogSmokeCompanionVisibleBehavior(t *testing.T) {
 		switch req.Method {
 		case "runtime.identity":
 			writeScenarioRuntimeIdentity(t, w, req.ID, bundleHash)
-		case eventPublishMethod:
+		case "run.start":
 			if req.Params["event_name"] != "item.received" || req.Params["bundle_hash"] != bundleHash {
 				t.Fatalf("event.publish params = %#v", req.Params)
 			}
@@ -410,11 +418,11 @@ func TestSwarmTestRunsCatalogSmokeCompanionVisibleBehavior(t *testing.T) {
 			if !ok || payload["item_id"] != "smoke-item" || len(payload) != 1 {
 				t.Fatalf("event.publish payload = %#v, want canonical item_id", req.Params["payload"])
 			}
-			writeJSONRPCResult(t, w, req.ID, eventPublishTestResult(false))
+			writeJSONRPCResult(t, w, req.ID, scenarioStartedRunResult())
 		case "run.diagnose":
 			writeJSONRPCResult(t, w, req.ID, scenarioRunDiagnoseTestResult(testPublishedRunID, true))
 		case "run.trace":
-			received := validRunCommandTraceRow("event-1")
+			received := validRunCommandTraceRow(scenarioInitialEventID)
 			received["event_name"] = "item.received"
 			processed := validRunCommandTraceRow("event-2")
 			processed["event_name"] = "item.processed"
@@ -454,7 +462,7 @@ func TestSwarmTestRunsCatalogSmokeCompanionVisibleBehavior(t *testing.T) {
 	}
 	assertScenarioTestMethods(t, calls, []string{
 		"runtime.identity",
-		eventPublishMethod,
+		"run.start",
 		"run.diagnose",
 		"run.diagnose",
 		"run.trace",
@@ -645,13 +653,20 @@ func assertSwarmTestScenarioThroughPublicRPC(t *testing.T, sourceRoot string, do
 				})
 			}
 			writeJSONRPCResult(t, w, req.ID, map[string]any{"run_id": runID, "entities": resultRows})
-		case eventPublishMethod:
+		case "run.start", eventPublishMethod:
 			if publishCalls >= len(doc.Steps) {
 				t.Fatalf("unexpected extra event.publish params = %#v", req.Params)
 			}
 			step := doc.Steps[publishCalls]
 			publishCalls++
-			eventID := fmt.Sprintf("event-%d", publishCalls)
+			eventID := fmt.Sprintf("00000000-0000-4000-8000-%012d", publishCalls)
+			wantMethod := eventPublishMethod
+			if len(doc.Setup.Entities) == 0 && publishCalls == 1 {
+				wantMethod = "run.start"
+			}
+			if req.Method != wantMethod {
+				t.Fatalf("publication method = %q, want %q", req.Method, wantMethod)
+			}
 			if req.Params["event_name"] != step.PublishEvent || req.Params["bundle_hash"] != bundleHash {
 				t.Fatalf("event.publish params = %#v", req.Params)
 			}
@@ -672,7 +687,7 @@ func assertSwarmTestScenarioThroughPublicRPC(t *testing.T, sourceRoot string, do
 				}
 			}
 			if publishCalls > 1 {
-				wantSource := fmt.Sprintf("event-%d", publishCalls-1)
+				wantSource := fmt.Sprintf("00000000-0000-4000-8000-%012d", publishCalls-1)
 				if step.SourceEventID == nil && req.Params["source_event_id"] != wantSource {
 					t.Fatalf("event.publish[%d] source_event_id = %#v, want %#v; params=%#v", publishCalls, req.Params["source_event_id"], wantSource, req.Params)
 				}
@@ -710,6 +725,9 @@ func assertSwarmTestScenarioThroughPublicRPC(t *testing.T, sourceRoot string, do
 				t.Fatalf("event.publish unexpectedly sent emitter: %#v", req.Params)
 			}
 			result := eventPublishTestResult(len(doc.Setup.Entities) == 0 && publishCalls == 1)
+			if req.Method == "run.start" {
+				result = runStartCommandResult(activeRunID, "live")
+			}
 			result["event_id"] = eventID
 			result["run_id"] = activeRunID
 			if source, ok := req.Params["source_event_id"].(string); ok {
@@ -723,7 +741,7 @@ func assertSwarmTestScenarioThroughPublicRPC(t *testing.T, sourceRoot string, do
 		case "run.trace":
 			rows := make([]map[string]any, 0, len(doc.Steps)+len(doc.Expect.Events.Include))
 			for i, step := range doc.Steps {
-				rows = append(rows, scenarioTraceRowForEvent(fmt.Sprintf("event-%d", i+1), step.PublishEvent))
+				rows = append(rows, scenarioTraceRowForEvent(fmt.Sprintf("00000000-0000-4000-8000-%012d", i+1), step.PublishEvent))
 			}
 			for i, eventName := range doc.Expect.Events.Include {
 				rows = append(rows, scenarioTraceRowForEvent(fmt.Sprintf("observed-%d", i+1), eventName))
@@ -797,8 +815,12 @@ func assertSwarmTestScenarioThroughPublicRPC(t *testing.T, sourceRoot string, do
 	if len(doc.Setup.Entities) > 0 {
 		wantMethods = append(wantMethods, scenarioTestSetupEntitiesMethod)
 	}
-	for range doc.Steps {
-		wantMethods = append(wantMethods, eventPublishMethod, "run.diagnose")
+	for index := range doc.Steps {
+		method := eventPublishMethod
+		if index == 0 && len(doc.Setup.Entities) == 0 {
+			method = "run.start"
+		}
+		wantMethods = append(wantMethods, method, "run.diagnose")
 	}
 	wantMethods = append(wantMethods, "run.diagnose", "run.trace")
 	if len(doc.Expect.Entities) > 0 {
@@ -1091,8 +1113,8 @@ steps:
 		switch req.Method {
 		case "runtime.identity":
 			writeScenarioRuntimeIdentity(t, w, req.ID, bundleHash)
-		case eventPublishMethod:
-			writeJSONRPCResult(t, w, req.ID, eventPublishTestResult(false))
+		case "run.start":
+			writeJSONRPCResult(t, w, req.ID, scenarioStartedRunResult())
 		case "run.diagnose":
 			writeJSONRPCResult(t, w, req.ID, scenarioRunDiagnoseTestResult(testPublishedRunID, true))
 		case "mailbox.list":
@@ -1130,7 +1152,7 @@ steps:
 	}
 	assertScenarioTestMethods(t, calls, []string{
 		"runtime.identity",
-		eventPublishMethod,
+		"run.start",
 		"run.diagnose",
 		"mailbox.list",
 		"mailbox.get",
@@ -1183,8 +1205,8 @@ steps:
 				switch req.Method {
 				case "runtime.identity":
 					writeScenarioRuntimeIdentity(t, w, req.ID, bundleHash)
-				case eventPublishMethod:
-					writeJSONRPCResult(t, w, req.ID, eventPublishTestResult(false))
+				case "run.start":
+					writeJSONRPCResult(t, w, req.ID, scenarioStartedRunResult())
 				case "run.diagnose":
 					writeJSONRPCResult(t, w, req.ID, scenarioRunDiagnoseTestResult(testPublishedRunID, true))
 				case "mailbox.list":
@@ -1223,7 +1245,7 @@ steps:
 				t.Fatalf("code = %d stderr=%s stdout=%s", code, stderr.String(), stdout.String())
 			}
 			assertScenarioTestMethods(t, calls, []string{
-				"runtime.identity", eventPublishMethod, "run.diagnose", "mailbox.list", "mailbox.get", action, "run.diagnose", "run.diagnose",
+				"runtime.identity", "run.start", "run.diagnose", "mailbox.list", "mailbox.get", action, "run.diagnose", "run.diagnose",
 			})
 		})
 	}
@@ -1264,8 +1286,8 @@ steps:
 				switch req.Method {
 				case "runtime.identity":
 					writeScenarioRuntimeIdentity(t, w, req.ID, bundleHash)
-				case eventPublishMethod:
-					writeJSONRPCResult(t, w, req.ID, eventPublishTestResult(false))
+				case "run.start":
+					writeJSONRPCResult(t, w, req.ID, scenarioStartedRunResult())
 				case "run.diagnose":
 					writeJSONRPCResult(t, w, req.ID, scenarioRunDiagnoseTestResult(testPublishedRunID, true))
 				case "mailbox.list":
@@ -1313,8 +1335,8 @@ steps:
 		switch req.Method {
 		case "runtime.identity":
 			writeScenarioRuntimeIdentity(t, w, req.ID, bundleHash)
-		case eventPublishMethod:
-			writeJSONRPCResult(t, w, req.ID, eventPublishTestResult(false))
+		case "run.start":
+			writeJSONRPCResult(t, w, req.ID, scenarioStartedRunResult())
 		case "run.diagnose":
 			writeJSONRPCResult(t, w, req.ID, scenarioRunDiagnoseTestResult(testPublishedRunID, true))
 		default:
