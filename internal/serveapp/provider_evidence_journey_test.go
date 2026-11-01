@@ -161,6 +161,15 @@ func providerEvidenceReply(request llmapi.Request, cell string) (llmapi.Reply, e
 	if err := json.Unmarshal(request.Body, &body); err != nil {
 		return llmapi.Reply{}, fmt.Errorf("invalid synthetic request")
 	}
+	var wire struct {
+		Messages []map[string]json.RawMessage `json:"messages"`
+	}
+	_ = json.Unmarshal(request.Body, &wire)
+	for _, message := range wire.Messages {
+		if string(message["role"]) == `"assistant"` && len(message["content"]) == 0 && len(message["tool_calls"]) == 0 {
+			return llmapi.Reply{StatusCode: http.StatusBadRequest, ErrorBody: `{"error":{"message":"synthetic strict provider: content or tool_calls required"}}`}, nil
+		}
+	}
 	sequence := 0
 	linked := map[string]bool{}
 	for _, message := range body.Messages {
@@ -345,19 +354,35 @@ func (o *providerEvidenceObservation) RoundTrip(request *http.Request) (*http.Re
 		o.mu.Lock()
 		o.inconclusive = true
 		o.mu.Unlock()
-		return nil, fmt.Errorf("evidence provider transport unavailable (details withheld)")
+		return nil, err
 	}
-	body, err := io.ReadAll(response.Body)
-	_ = response.Body.Close()
-	if err != nil {
-		o.mu.Lock()
-		o.inconclusive = true
-		o.mu.Unlock()
-		return nil, fmt.Errorf("evidence provider response unavailable (details withheld)")
-	}
-	response.Body = io.NopCloser(bytes.NewReader(body))
-	o.observe(response.StatusCode, body)
+	response.Body = &providerEvidenceBody{ReadCloser: response.Body, observation: o, status: response.StatusCode}
 	return response, nil
+}
+
+// Observe the adapter's own read without moving read failures into send_request.
+type providerEvidenceBody struct {
+	io.ReadCloser
+	observation *providerEvidenceObservation
+	status      int
+	raw         bytes.Buffer
+	finished    bool
+}
+
+func (b *providerEvidenceBody) Read(buffer []byte) (int, error) {
+	n, err := b.ReadCloser.Read(buffer)
+	_, _ = b.raw.Write(buffer[:n])
+	if err != nil && !b.finished {
+		b.finished = true
+		if err == io.EOF {
+			b.observation.observe(b.status, b.raw.Bytes())
+		} else {
+			b.observation.mu.Lock()
+			b.observation.inconclusive = true
+			b.observation.mu.Unlock()
+		}
+	}
+	return n, err
 }
 
 func (o *providerEvidenceObservation) observeRequest(body io.Reader) {

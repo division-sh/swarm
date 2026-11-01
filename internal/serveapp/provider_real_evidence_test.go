@@ -2,6 +2,7 @@ package serveapp
 
 import (
 	"context"
+	"io"
 	"os"
 	"os/exec"
 	"strings"
@@ -159,6 +160,18 @@ func TestProviderRealModelEvidenceSelection(t *testing.T) {
 		o.observe(200, []byte(`{"usage":{"cost_usd":null}}`))
 		if _, present := o.cost["cost_usd"]; present {
 			t.Fatal("null provider cost became a zero-cost claim")
+		}
+	})
+	t.Run("observation_body_is_transparent", func(t *testing.T) {
+		const raw = `{"usage":{"prompt_tokens":3,"completion_tokens":2}}`
+		o := &providerEvidenceObservation{}
+		body := &providerEvidenceBody{ReadCloser: io.NopCloser(strings.NewReader(raw)), observation: o, status: 200}
+		observed, err := io.ReadAll(body)
+		if err != nil || string(observed) != raw || o.input != 3 || o.output != 2 {
+			t.Fatal("observation changed the adapter response or usage")
+		}
+		if err := body.Close(); err != nil {
+			t.Fatal("observation changed response close")
 		}
 	})
 }
