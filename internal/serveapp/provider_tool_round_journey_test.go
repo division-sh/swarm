@@ -220,13 +220,14 @@ func retainedProviderToolResult(request llmapi.Request, callID, name string) (in
 			}
 			payload, err := providerJourneyToolResult(body.Messages[i+1].Content, callID)
 			if err != nil {
-				return 0, err
+				payload = json.RawMessage(body.Messages[i+1].Content)
 			}
 			var result struct {
-				Name string `json:"name"`
-				OK   bool   `json:"ok"`
+				CallID string `json:"tool_call_id"`
+				Name   string `json:"name"`
+				OK     bool   `json:"ok"`
 			}
-			if err := json.Unmarshal(payload, &result); err != nil || result.Name != name || !result.OK {
+			if err := json.Unmarshal(payload, &result); err != nil || result.CallID != callID || result.Name != name || !result.OK {
 				return 0, fmt.Errorf("stored result %s lost its actual successful outcome", callID)
 			}
 			return i, nil
