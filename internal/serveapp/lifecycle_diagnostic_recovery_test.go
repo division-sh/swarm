@@ -78,6 +78,13 @@ func TestLifecycleDiagnosticServedCrashRecoveryAndResetBothStores(t *testing.T) 
 				"SWARM_TEST_DIAGNOSTIC_SOURCE=" + source, "SWARM_TEST_DIAGNOSTIC_STORE=" + storeMode, "TMPDIR=" + temporary}
 			first := startServedCrashProcess(t, "TestLifecycleDiagnosticServeProcessHelper", append(env, "SWARM_TEST_DIAGNOSTIC_FAIL=1"))
 			proof := servedControlProofRuntime{Endpoint: first.endpoint(t) + "/v1/rpc", DB: db, Backend: backendName, BundleHash: hash}
+			bootRunID := requireServedLiveLandingRunID(t, proof.Endpoint, hash, ".")
+			bootReceipts := readServedLifecycleDiagnosticReceipts(t, db, bootRunID)
+			for id, receipt := range bootReceipts {
+				if receipt == nil {
+					t.Fatalf("boot readiness preceded diagnostic %s settlement", id)
+				}
+			}
 			initial := requireServedEventPublishRPCResult(t, proof.Endpoint, map[string]any{
 				"event_name": "item.received", "bundle_hash": hash,
 				"payload": map[string]any{"item_id": "diagnostic-recovery"}, "idempotency_key": uuid.NewString(),
@@ -95,10 +102,18 @@ func TestLifecycleDiagnosticServedCrashRecoveryAndResetBothStores(t *testing.T) 
 			// operation is diagnostic projection, not an ambiguous provider attempt.
 			publishServedLiveAgentHoldEvent(t, proof, initial.RunID, initial.EventID, "after-restart")
 			pending := readServedLifecycleDiagnosticReceipts(t, db, initial.RunID)
-			if len(pending) == 0 {
+			if initial.RunID != bootRunID || len(pending) <= len(bootReceipts) {
 				t.Fatal("real lifecycle operations produced no pending diagnostics")
 			}
+			for id, original := range bootReceipts {
+				if receipt, found := pending[id]; !found || !reflect.DeepEqual(original, receipt) {
+					t.Fatalf("diagnostic outage lost or changed boot receipt %s", id)
+				}
+			}
 			for id, receipt := range pending {
+				if _, existed := bootReceipts[id]; existed {
+					continue
+				}
 				if receipt != nil {
 					t.Fatalf("faulted diagnostic %s was acknowledged", id)
 				}

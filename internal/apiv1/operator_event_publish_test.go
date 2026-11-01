@@ -122,11 +122,11 @@ func TestEventPublishCanonicalClassAndProvenanceReadbackParity(t *testing.T) {
 				t.Fatal("run.start no-live refusal left storage residue")
 			}
 			for _, eventFields := range []string{"", `,"event_name":"scan.requested","payload":{"topic":"rows"}`} {
-				body := fmt.Sprintf(`{"jsonrpc":"2.0","id":"rows","method":"run.start","params":{"run_id":%q,"idempotency_key":"rows-refusal","data":{"imports":[],"pins":[]}%s}}`, uuid.NewString(), eventFields)
+				body := fmt.Sprintf(`{"jsonrpc":"2.0","id":"rows","method":"run.start","params":{"run_id":%q,"idempotency_key":"rows-refusal","data":{"imports":[{"source_invocation_id":%q,"declaration":{"flow_path":".","event":"scan.requested"},"expected_head":{"state":"absent"},"input":{"format":"jsonl","content_base64":""}}],"pins":[]}%s}}`, uuid.NewString(), uuid.NewString(), eventFields)
 				refused := rpcCall(t, handler, body)
-				if refused.Error == nil || asMap(t, refused.Error.Data)["code"] != string(durabledata.CodeRunDataImmutable) ||
-					asMap(t, asMap(t, refused.Error.Data)["details"])["reason"] != "live_run_rows_binding_unavailable" {
-					t.Fatalf("rows arm did not retain its typed refusal: %#v", refused)
+				if refused.Error == nil || asMap(t, refused.Error.Data)["code"] != EventPublishRejectedCode ||
+					asMap(t, asMap(t, refused.Error.Data)["details"])["reason"] != "no_run_yet" {
+					t.Fatalf("rows arm without a live run did not retain its typed refusal: %#v", refused)
 				}
 			}
 			if countAllRunRows(t, f.store) != 0 || countAllEventRows(t, f.store) != 0 || countAPIIdempotencyRows(t, f.store) != 0 {
