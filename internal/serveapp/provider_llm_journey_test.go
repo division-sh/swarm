@@ -3,7 +3,6 @@ package serveapp
 import (
 	"bytes"
 	"context"
-	"database/sql"
 	"encoding/json"
 	"fmt"
 	"io"
@@ -15,6 +14,7 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/division-sh/swarm/internal/operatorread"
 	"github.com/division-sh/swarm/internal/runtime/agentframe"
 	runtimecredentials "github.com/division-sh/swarm/internal/runtime/credentials"
 	"github.com/division-sh/swarm/internal/runtime/testfixtures/canonicalrouting"
@@ -102,18 +102,27 @@ func TestChannelOneBotOpenAIResponsesPublicJourney(t *testing.T) {
 				t.Fatalf("Responses requests=%d, want one tool roundtrip", len(provider.Requests()))
 			}
 			requireReceptionistReplies(t, h, map[string]string{reply: "2001"})
-			db, err := sql.Open(driver, h.storeDSN)
-			if err != nil {
-				t.Fatal(err)
-			}
-			defer db.Close()
-			var completions, input, output int
-			if err := db.QueryRow(`SELECT COUNT(*),SUM(input_tokens),SUM(output_tokens) FROM spend_ledger
-				WHERE backend_profile='openai_responses' AND provider='openai' AND transport='api'
-				AND resolved_model='gpt-5.4-nano' AND execution_mode='live'`).Scan(&completions, &input, &output); err != nil || completions != 2 || input != 25 || output != 9 {
-				t.Fatalf("Responses committed evidence: completions=%d input=%d output=%d err=%v", completions, input, output, err)
-			}
+			requireResponsesChannelUsage(t, h.rpcEndpoint(), accepted.RunID)
 		})
+	}
+}
+
+func requireResponsesChannelUsage(t *testing.T, endpoint, runID string) {
+	t.Helper()
+	var sessions operatorread.OperatorConversationListResult
+	requireServedJSONRPCResult(t, endpoint, "conversation.list", map[string]any{"run_id": runID}, &sessions)
+	if len(sessions.Conversations) != 1 || sessions.Conversations[0].AgentID == "" || sessions.Conversations[0].SessionID == "" || sessions.Conversations[0].RunID != runID || sessions.Conversations[0].ExecutionMode != "live" {
+		t.Fatalf("Responses channel lost its exact live conversation: %+v", sessions)
+	}
+	var usage operatorread.OperatorAgentUsage
+	requireServedJSONRPCResult(t, endpoint, "agent.usage", map[string]any{"run_id": runID, "agent_id": sessions.Conversations[0].AgentID}, &usage)
+	if usage.AgentID != sessions.Conversations[0].AgentID || usage.Usage.Exact.LedgerEntries != 2 || usage.Usage.Exact.InputTokens != 25 || usage.Usage.Exact.OutputTokens != 9 || usage.Usage.Estimated.LedgerEntries != 0 || len(usage.Breakdown) == 0 {
+		t.Fatalf("Responses committed usage differs: %+v", usage)
+	}
+	for _, row := range usage.Breakdown {
+		if row.BackendProfile != "openai_responses" || row.Provider != "openai" || row.Transport != "api" || row.ResolvedModel != "gpt-5.4-nano" || row.ExecutionMode != "live" || row.UsageAccounting != operatorread.AgentUsageAccountingExact {
+			t.Fatalf("Responses usage lost its exact provider/model/mode evidence: %+v", row)
+		}
 	}
 }
 
