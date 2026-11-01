@@ -59,6 +59,12 @@ type serveNativeProtocolPeer struct {
 	replacementQR       *servedReplacementQRBatchCut
 	loginHandoff        bool
 	loginHandoffRelease <-chan struct{}
+	nextLogin           *servedNativeLoginGate
+}
+
+type servedNativeLoginGate struct {
+	held    chan struct{}
+	release chan bool
 }
 
 type servedNativeMessage struct {
@@ -166,6 +172,7 @@ func newServeNativeProtocolPeer(t *testing.T) *serveNativeProtocolPeer {
 func (p *serveNativeProtocolPeer) serve(wire *whatsappfixture.Transport) {
 	var connection int
 	var replacement *servedReplacementQRBatchCut
+	var login *servedNativeLoginGate
 	defer func() {
 		p.mu.Lock()
 		p.disconnected++
@@ -184,6 +191,8 @@ func (p *serveNativeProtocolPeer) serve(wire *whatsappfixture.Transport) {
 	connection, replacement = p.connections, p.replacementQR
 	if payload.DevicePairingData != nil {
 		p.registration = payload.DevicePairingData
+	} else {
+		login, p.nextLogin = p.nextLogin, nil
 	}
 	p.mu.Unlock()
 	if payload.DevicePairingData != nil {
@@ -199,9 +208,22 @@ func (p *serveNativeProtocolPeer) serve(wire *whatsappfixture.Transport) {
 			p.t.Error(err)
 			return
 		}
-	} else if err := p.success(wire); err != nil {
-		p.t.Error(err)
-		return
+	} else {
+		if login != nil {
+			close(login.held)
+			select {
+			case proceed := <-login.release:
+				if !proceed {
+					return
+				}
+			case <-p.ctx.Done():
+				return
+			}
+		}
+		if err := p.success(wire); err != nil {
+			p.t.Error(err)
+			return
+		}
 	}
 	for {
 		node, err := wire.Read(p.ctx)
