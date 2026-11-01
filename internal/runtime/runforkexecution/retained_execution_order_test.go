@@ -467,7 +467,7 @@ func proveRetainedAcknowledgment(t *testing.T, fault string) {
 				}
 				for _, table := range []string{"entity_state", "entity_mutations", "event_delivery_attempts"} {
 					if !reflect.DeepEqual(childBefore[table], childAfter[table]) {
-						t.Fatalf("failed continuation startup dispatched child work in %s", table)
+						t.Fatalf("failed continuation startup changed %s: before=%+v after=%+v", table, childBefore[table], childAfter[table])
 					}
 				}
 			}

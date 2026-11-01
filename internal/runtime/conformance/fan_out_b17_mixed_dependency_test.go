@@ -129,7 +129,7 @@ func TestB17MixedNestedDependencyCapacityOneBothStores(t *testing.T) {
 			wantReturns := before.Started + 3
 			pending := probe.snapshot()
 			if pending.Active != 1 || pending.PeakActive != 1 || pending.Started != wantReturns || pending.Returned != wantReturns-1 {
-				t.Fatalf("incorrect committed pre-return cut: %+v", pending)
+				t.Fatalf("incorrect committed pre-return cut: %+v want_returns=%d before=%+v", pending, wantReturns, before)
 			}
 			receipts := make([]nestedServingReceipt, 0, wantReturns)
 			returnDeadline := time.NewTimer(5 * time.Second)
