@@ -281,8 +281,8 @@ func (s *PostgresStore) ConfirmChannelBinding(ctx context.Context, req operatorc
 	return s.operatorChannelPostgresOwner.ConfirmChannelBinding(ctx, req)
 }
 
-func (s *PostgresStore) ConsumeCompletionResponse(ctx context.Context, attempt effects.Attempt, successor *agentframe.ToolContinuation) error {
-	return s.effectPostgresOwner.ConsumeCompletionResponse(ctx, attempt, successor)
+func (s *PostgresStore) ConsumeCompletionResponse(ctx context.Context, attempt effects.Attempt, successor *agentframe.ToolContinuation, terminalResult *agentframe.ToolContinuation) error {
+	return s.effectPostgresOwner.ConsumeCompletionResponse(ctx, attempt, successor, terminalResult)
 }
 
 func (s *PostgresStore) CountMailboxItems(ctx context.Context, status string) (int, error) {
@@ -1517,8 +1517,8 @@ func (s *SQLiteRuntimeStore) ConfirmChannelBinding(ctx context.Context, req oper
 	return s.operatorChannelSQLiteOwner.ConfirmChannelBinding(ctx, req)
 }
 
-func (s *SQLiteRuntimeStore) ConsumeCompletionResponse(ctx context.Context, attempt effects.Attempt, successor *agentframe.ToolContinuation) error {
-	return s.effectSQLiteOwner.ConsumeCompletionResponse(ctx, attempt, successor)
+func (s *SQLiteRuntimeStore) ConsumeCompletionResponse(ctx context.Context, attempt effects.Attempt, successor *agentframe.ToolContinuation, terminalResult *agentframe.ToolContinuation) error {
+	return s.effectSQLiteOwner.ConsumeCompletionResponse(ctx, attempt, successor, terminalResult)
 }
 
 func (s *SQLiteRuntimeStore) CountMailboxItems(ctx context.Context, status string) (int, error) {

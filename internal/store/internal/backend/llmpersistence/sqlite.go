@@ -137,13 +137,17 @@ func (s *LLMSQLiteOwner) UpsertConversation(ctx context.Context, lease *runtimes
 }
 
 func (s *LLMSQLiteOwner) ProjectCompletionConversationTx(ctx context.Context, attempt *mutationprotocol.Attempt, rec runtimellm.ConversationRecord, expectedTurnCount int, now time.Time) error {
+	if expectedTurnCount < 0 || rec.TurnCount != expectedTurnCount+1 {
+		return fmt.Errorf("completion conversation projection requires one exact turn transition")
+	}
+	return s.writeCompletionConversationTx(ctx, attempt, rec, expectedTurnCount, now)
+}
+
+func (s *LLMSQLiteOwner) writeCompletionConversationTx(ctx context.Context, attempt *mutationprotocol.Attempt, rec runtimellm.ConversationRecord, expectedTurnCount int, now time.Time) error {
 	return attempt.WithSQL(ctx, func(ctx context.Context, tx *sql.Tx) error {
 		plan, identity, err := validateConversationMemory(rec)
 		if err != nil {
 			return err
-		}
-		if expectedTurnCount < 0 || rec.TurnCount != expectedTurnCount+1 {
-			return fmt.Errorf("completion conversation projection requires one exact turn transition")
 		}
 		messages, state, err := conversationPayloads(rec)
 		if err != nil {

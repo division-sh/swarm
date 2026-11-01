@@ -251,7 +251,7 @@ func (c *Conversation) stepManaged(ctx context.Context, draft agentframe.TurnDra
 	}
 
 	if c.toolExecutor == nil || len(resp.ToolCalls) == 0 {
-		if err := consumeCompletionContinuation(ctx, resp, nil); err != nil {
+		if err := consumeCompletionContinuation(ctx, resp, nil, nil); err != nil {
 			return nil, err
 		}
 		return resp, nil
@@ -460,7 +460,7 @@ func (c *Conversation) resolveToolCalls(ctx context.Context, initial *Response) 
 	}
 	for round := 0; round < rounds; round++ {
 		if len(resp.ToolCalls) == 0 {
-			if err := consumeCompletionContinuation(ctx, resp, nil); err != nil {
+			if err := consumeCompletionContinuation(ctx, resp, nil, nil); err != nil {
 				return nil, err
 			}
 			resp.completionCleanupDiagnostics = errors.Join(committedDiagnostics, resp.completionCleanupDiagnostics)
@@ -508,14 +508,19 @@ func (c *Conversation) resolveToolCalls(ctx context.Context, initial *Response) 
 		}
 		terminal := shouldTerminateAfterToolCalls(executed)
 		var successor *agentframe.ToolContinuation
-		if !terminal && c.kind == conversationManaged {
+		var terminalResult *agentframe.ToolContinuation
+		if c.kind == conversationManaged {
 			continuation, continuationErr := agentframe.NewToolContinuation(c.lastFrameID, json.RawMessage(toolPayload))
 			if continuationErr != nil {
 				return nil, runtimefailures.Wrap(runtimefailures.ClassSchemaInvalid, "managed_tool_continuation_invalid", "llm-conversation", "continue_tool_round", nil, continuationErr)
 			}
-			successor = &continuation
+			if terminal {
+				terminalResult = &continuation
+			} else {
+				successor = &continuation
+			}
 		}
-		if err := consumeCompletionContinuation(ctx, resp, successor); err != nil {
+		if err := consumeCompletionContinuation(ctx, resp, successor, terminalResult); err != nil {
 			return nil, err
 		}
 		committedDiagnostics = errors.Join(committedDiagnostics, resp.completionCleanupDiagnostics)

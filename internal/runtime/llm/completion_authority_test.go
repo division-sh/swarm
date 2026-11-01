@@ -152,7 +152,7 @@ func (p *settledContinuationProbe) ProjectCompletionConversation(_ context.Conte
 	return nil
 }
 
-func (p *settledContinuationProbe) ConsumeCompletionResponse(context.Context, runtimeeffects.Attempt, *agentframe.ToolContinuation) error {
+func (p *settledContinuationProbe) ConsumeCompletionResponse(context.Context, runtimeeffects.Attempt, *agentframe.ToolContinuation, *agentframe.ToolContinuation) error {
 	p.consumed++
 	return nil
 }
@@ -235,7 +235,7 @@ func TestSettledCompletionRecoveryUsesImmutableProjectedTurn(t *testing.T) {
 	if len(probe.projections) != 1 || probe.projections[0].ExpectedTurnCount != 0 || probe.projections[0].TurnCount != 1 || probe.projections[0].SessionID != session.ID {
 		t.Fatalf("canonical projection calls=%#v", probe.projections)
 	}
-	if err := consumeCompletionContinuation(ctx, response, nil); err != nil {
+	if err := consumeCompletionContinuation(ctx, response, nil, nil); err != nil {
 		t.Fatal(err)
 	}
 	if probe.consumed != 1 {

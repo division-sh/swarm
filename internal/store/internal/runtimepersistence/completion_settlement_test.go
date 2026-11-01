@@ -363,7 +363,7 @@ func proveCompletionResponseSuccessorCheckpointMatrix(t *testing.T, store comple
 					t.Fatal(err)
 				}
 				beforeMissingPair = historicalContextDatabaseRows(t, db, !sqlite)
-				if err := projected.ConsumeCompletionResponse(ctx, &successor); err == nil || !strings.Contains(err.Error(), "lacks its exact live-parent association") {
+				if err := projected.ConsumeCompletionResponse(ctx, &successor, nil); err == nil || !strings.Contains(err.Error(), "lacks its exact live-parent association") {
 					t.Fatalf("unpaired audit did not refuse actual ready-to-consume response: %v", err)
 				}
 				historicalContextRequireUnchanged(t, beforeMissingPair, historicalContextDatabaseRows(t, db, !sqlite))
@@ -371,7 +371,7 @@ func proveCompletionResponseSuccessorCheckpointMatrix(t *testing.T, store comple
 					SELECT turn_id,run_id,completion_attempt_id,capability_surface_id FROM agent_turns WHERE turn_id=$1`, settlement.AgentTurn.TurnID); err != nil {
 					t.Fatal(err)
 				}
-				if err := projected.ConsumeCompletionResponse(ctx, &successor); err != nil {
+				if err := projected.ConsumeCompletionResponse(ctx, &successor, nil); err != nil {
 					t.Fatalf("consume response with exact successor: %v", err)
 				}
 
@@ -385,14 +385,14 @@ func proveCompletionResponseSuccessorCheckpointMatrix(t *testing.T, store comple
 					committed.ParentFrameID() != successor.ParentFrameID() || string(committed.ToolResult()) != string(successor.ToolResult()) {
 					t.Fatalf("recovered checkpoint=%+v successor=%s present=%v", recoveredSnapshot, committed.ToolResult(), hasSuccessor)
 				}
-				if err := recovered.ConsumeCompletionResponse(ctx, &successor); err != nil {
+				if err := recovered.ConsumeCompletionResponse(ctx, &successor, nil); err != nil {
 					t.Fatalf("repeat exact successor consumption: %v", err)
 				}
 				foreign, err := agentframe.NewToolContinuation("agent-frame:v1:"+uuid.NewString(), successor.ToolResult())
 				if err != nil {
 					t.Fatal(err)
 				}
-				if err := recovered.ConsumeCompletionResponse(ctx, &foreign); err == nil {
+				if err := recovered.ConsumeCompletionResponse(ctx, &foreign, nil); err == nil {
 					t.Fatal("consumed response accepted a different successor frame")
 				}
 				if err := requireCompletionPhaseDDLRejectsSuccessorRollback(fixture, handle.Attempt().AttemptID); err == nil {
@@ -508,7 +508,7 @@ func proveSettledProviderResponseContinuationAdvancesExactActiveTurn(t *testing.
 	}); err != nil {
 		t.Fatalf("project first completion continuation: %v", err)
 	}
-	if err := first.ConsumeCompletionResponse(firstCtx, nil); err != nil {
+	if err := first.ConsumeCompletionResponse(firstCtx, nil, nil); err != nil {
 		t.Fatalf("consume first completion continuation: %v", err)
 	}
 
@@ -606,7 +606,7 @@ func proveSettledProviderResponseRebindsStatelessSession(t *testing.T, fixture c
 	if err := continuation.ProjectCompletionConversation(successorCtx, projection); err != nil {
 		t.Fatalf("project stateless completion continuation: %v", err)
 	}
-	if err := continuation.ConsumeCompletionResponse(successorCtx, nil); err != nil {
+	if err := continuation.ConsumeCompletionResponse(successorCtx, nil, nil); err != nil {
 		t.Fatalf("consume stateless completion continuation: %v", err)
 	}
 	requireCompletionProjectionPhase(t, fixture, handle.Attempt().AttemptID, runtimeeffects.CompletionProjectionResponseConsumed)
@@ -691,7 +691,7 @@ func proveSettledProviderResponseContinuesExactReclaimedDelivery(t *testing.T, f
 		Identity: settlement.AgentTurn.Identity, Memory: settlement.AgentTurn.Memory,
 		ExpectedTurnCount: 0, TurnCount: 1, Messages: messages,
 	}
-	if err := continuation.ConsumeCompletionResponse(successorCtx, nil); err == nil {
+	if err := continuation.ConsumeCompletionResponse(successorCtx, nil, nil); err == nil {
 		t.Fatal("completion response was consumed before conversation projection")
 	}
 	hostileProjection := projection
@@ -714,10 +714,10 @@ func proveSettledProviderResponseContinuesExactReclaimedDelivery(t *testing.T, f
 	if !ok || projectedSnapshot.Phase != runtimeeffects.CompletionProjectionConversationProjected {
 		t.Fatalf("projected continuation=%+v present=%v", projectedSnapshot, ok)
 	}
-	if err := recovered.ConsumeCompletionResponse(successorCtx, nil); err != nil {
+	if err := recovered.ConsumeCompletionResponse(successorCtx, nil, nil); err != nil {
 		t.Fatalf("consume settled completion response: %v", err)
 	}
-	if err := recovered.ConsumeCompletionResponse(successorCtx, nil); err != nil {
+	if err := recovered.ConsumeCompletionResponse(successorCtx, nil, nil); err != nil {
 		t.Fatalf("repeat settled completion response consumption: %v", err)
 	}
 	requireCompletionProjectionState(t, fixture, handle.Attempt().AttemptID, runtimeeffects.CompletionProjectionResponseConsumed, 1, messages)

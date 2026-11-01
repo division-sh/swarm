@@ -185,13 +185,17 @@ func (s *LLMPostgresOwner) UpsertConversation(ctx context.Context, lease *runtim
 }
 
 func (s *LLMPostgresOwner) ProjectCompletionConversationTx(ctx context.Context, attempt *mutationprotocol.Attempt, rec runtimellm.ConversationRecord, expectedTurnCount int) error {
+	if expectedTurnCount < 0 || rec.TurnCount != expectedTurnCount+1 {
+		return fmt.Errorf("completion conversation projection requires one exact turn transition")
+	}
+	return s.writeCompletionConversationTx(ctx, attempt, rec, expectedTurnCount)
+}
+
+func (s *LLMPostgresOwner) writeCompletionConversationTx(ctx context.Context, attempt *mutationprotocol.Attempt, rec runtimellm.ConversationRecord, expectedTurnCount int) error {
 	return attempt.WithSQL(ctx, func(ctx context.Context, tx *sql.Tx) error {
 		plan, identity, err := validateConversationMemory(rec)
 		if err != nil {
 			return err
-		}
-		if expectedTurnCount < 0 || rec.TurnCount != expectedTurnCount+1 {
-			return fmt.Errorf("completion conversation projection requires one exact turn transition")
 		}
 		messages, state, err := conversationPayloads(rec)
 		if err != nil {
