@@ -8,7 +8,10 @@ import (
 	"time"
 
 	"github.com/division-sh/swarm/internal/durabledata"
+	"github.com/division-sh/swarm/internal/runtime/canonicaljson"
 	runtimecontracts "github.com/division-sh/swarm/internal/runtime/contracts"
+	"github.com/division-sh/swarm/internal/runtime/correlation"
+	runtimeeffects "github.com/division-sh/swarm/internal/runtime/effects"
 	"github.com/division-sh/swarm/internal/runtime/fanoutobligation"
 	"github.com/division-sh/swarm/internal/runtime/pipeline"
 	"github.com/division-sh/swarm/internal/runtime/runfork"
@@ -50,25 +53,74 @@ func TestSelectedDeploymentServingRequiresExactLiveGrantBothStores(t *testing.T)
 					}
 				})
 			}
-			servingCtx, bound, _ := admitSelectedForkNativePhaseForTest(t, ctx, fixture, loaded.Source, materialized, request)
-			original, err := startupownership.CaptureMutationAuthority(servingCtx)
+			declarations := emptySelectedDeclarationForTest(t, db, forkRun)
+			containerFingerprint, err := canonicaljson.Hash(request.RecipientPlanning)
 			if err != nil {
 				t.Fatal(err)
 			}
-			evidence := original.GrantEvidence()
+			actorFingerprint, err := canonicaljson.Hash(request.Preparation.Actors)
+			if err != nil {
+				t.Fatal(err)
+			}
+			binding := materialized.SelectedContractBinding
+			if binding == nil {
+				t.Fatal("materialized child lacks its selected binding")
+			}
+			issue := runfork.SelectedContractRuntimeExecutionIssueRequest{
+				Preparation:     runfork.SelectedForkPreparationBinding{ForkRunID: forkRun, SelectedForkPreparation: request.Preparation},
+				DeclarationPlan: declarations,
+				Admission: runfork.RunForkSelectedContractExecutionAdmission{
+					Owner: runfork.RunForkSelectedContractExecutionAdmissionOwner, FutureExecutionOwner: runfork.RunForkSelectedContractExecutionOwner,
+					NonMutating: true, ForkRunID: forkRun, SourceRunID: binding.SourceRunID, ForkPoint: binding.ForkPoint, ForkEventID: binding.ForkEventID,
+					ContractSelection: binding.ContractSelection, ContractBindingOwner: binding.Owner,
+					AdmissionOwner: request.FrontierAdmission.Owner, AdmissionUse: runfork.RunForkSelectedContractExecutionAdmissionUseDurableBinding,
+					ExecutionModelOwner: runfork.RunForkSelectedContractExecutionModelOwner, DeferredWorkAdmissionOwner: runfork.RunForkSelectedContractDeferredWorkAdmissionOwner,
+					SourceWorkflowName: loaded.Source.WorkflowName(), SourceWorkflowVersion: loaded.Source.WorkflowVersion(),
+					RouteTopology: &request.RouteTopology, RecipientPlanning: &request.RecipientPlanning,
+				},
+				ContainerPlanFingerprint: containerFingerprint, ActorCensusFingerprint: actorFingerprint,
+				EffectiveConfigFingerprint: "sha256:" + request.Preparation.Coordinates.ConfigurationFingerprint,
+				ExecutionMode:              runtimeeffects.ExecutionModeLive, Now: time.Now().UTC(),
+			}
+			execution := store.(selectedCompletionAuthorityStore)
+			issued, err := execution.IssueRunForkSelectedContractRuntimeExecution(ctx, issue)
+			if err != nil {
+				t.Fatal(err)
+			}
+			authority, err := execution.ClaimRunForkSelectedContractRuntimeExecution(ctx, issued, "feed-worker", time.Minute)
+			if err != nil {
+				t.Fatal(err)
+			}
+			grant := selectedFixtureGrantForAuthority(t, ctx, selectedCompletionFixture{
+				process: selectedPreparationProcessForTest(t, store), store: execution, forkRun: forkRun, request: issue,
+			}, issued, authority)
+			evidence, err := grant.Evidence()
+			if err != nil {
+				t.Fatal(err)
+			}
+			servingCtx := correlation.WithRunID(runtimeeffects.WithAuthority(ctx, authority), forkRun)
+			servingCtx, err = startupownership.WithRuntimeMutationAuthority(servingCtx, grant)
+			if err != nil {
+				t.Fatal(err)
+			}
 			servingCtx = startupownership.WithGenerationGrantEvidence(servingCtx, evidence)
 			serving := store.(interface {
 				BindSelectedFanOutGrant(startupownership.GrantEvidence) (pipeline.FanOutObligationOwner, error)
 				ListSelectedDeploymentFeeds(context.Context, startupownership.GrantEvidence) ([]fanoutobligation.Intent, error)
 			})
+			bound, err := serving.BindSelectedFanOutGrant(evidence)
 			owner, ok := bound.(pipeline.SelectedFanOutObligationOwner)
-			if !ok {
-				t.Fatalf("exact selected bind: owner=%T", bound)
+			if err != nil || !ok {
+				t.Fatalf("exact selected bind: owner=%T err=%v", bound, err)
 			}
 			if activations, err := owner.ReconcileFanOutBarriers(servingCtx); err != nil || len(activations) != 0 {
 				t.Fatalf("empty exact child barrier recovery: activations=%v err=%v", activations, err)
 			}
-			base := time.Now().UTC().Add(-time.Minute).Truncate(time.Microsecond)
+			now := time.Now().UTC()
+			if sqlite {
+				now = store.(*SQLiteRuntimeStore).now()
+			}
+			base := now.Add(-time.Minute).Truncate(time.Microsecond)
 			for _, runID := range []string{sourceRun, forkRun} {
 				barrier := seedFanOutOwnerChildFixture(t, ctx, db, store, !sqlite, fanOutOwnerFixture{
 					runID: runID, flowPath: ".", bundleHash: evidence.BundleHash, plan: fanOutOwnerTypedPlanFixture(t),
@@ -133,7 +185,6 @@ func TestSelectedDeploymentServingRequiresExactLiveGrantBothStores(t *testing.T)
 			if err != nil {
 				t.Fatal(err)
 			}
-			now := time.Now().UTC()
 			if _, err := db.ExecContext(ctx, `INSERT INTO resource_declarations (flow_path,event_name,admitted_at) VALUES ($1,$2,$3) ON CONFLICT DO NOTHING`, ref.FlowPath, ref.EventName, now); err != nil {
 				t.Fatal(err)
 			}
