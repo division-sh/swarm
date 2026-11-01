@@ -16793,7 +16793,22 @@
           "provider_rendering": {
             "additionalProperties": false,
             "properties": {
-              "input": {},
+              "input": {
+                "oneOf": [
+                  {
+                    "items": {
+                      "type": "object"
+                    },
+                    "type": "array"
+                  },
+                  {
+                    "type": "object"
+                  },
+                  {
+                    "type": "string"
+                  }
+                ]
+              },
               "source": {
                 "const": "recorded_provider_request",
                 "type": "string"
@@ -16805,7 +16820,12 @@
                 ],
                 "type": "string"
               },
-              "tools": {}
+              "tools": {
+                "items": {
+                  "type": "object"
+                },
+                "type": "array"
+              }
             },
             "required": [
               "status",
