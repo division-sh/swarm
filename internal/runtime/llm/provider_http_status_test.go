@@ -52,7 +52,7 @@ func TestManagedProviderHTTPRejections(t *testing.T) {
 					t.Fatal(err)
 				}
 				settlements := harness.CompletionSettlementsForAdapter(adapter)
-				if len(settlements) != 1 || settlements[0].Failure == nil || settlements[0].Failure.Detail.Attributes["response_body"] != test.body {
+				if len(settlements) != 1 || settlements[0].Settlement.Failure == nil || settlements[0].Settlement.Failure.Detail.Attributes["response_body"] != test.body {
 					t.Fatalf("provider body was lost at settlement: %+v", settlements)
 				}
 				if len(server.Requests()) != 1 {
@@ -76,6 +76,10 @@ func TestManagedProviderHTTPRejections(t *testing.T) {
 			failure := runtimefailures.Normalize(err, "test", "server_error")
 			if err == nil || failure.Class != runtimefailures.ClassOutcomeUncertain || dispatch.state != runtimeeffects.StateOutcomeUncertain || len(server.Requests()) != 1 {
 				t.Fatalf("server error changed its existing uncertainty/no-redispatch boundary: failure=%+v err=%v", failure, err)
+			}
+			settleEffectTestCompletionFailure(t, ctx, dispatch, err, dispatch.state)
+			if err := harness.RequireState(adapter, runtimeeffects.StateOutcomeUncertain); err != nil {
+				t.Fatal(err)
 			}
 		})
 	}
