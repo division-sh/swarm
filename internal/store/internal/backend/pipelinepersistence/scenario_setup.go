@@ -337,12 +337,7 @@ func normalizeScenarioSetupRequest(ctx context.Context, req runtimepipeline.Scen
 	if req.Origin.Kind() == "" {
 		req.Origin = runtimerunlifecycle.ScenarioSetupRunOrigin()
 	} else {
-		scope, scoped := scenarioexecution.PrivateRunScopeFromContext(ctx)
-		profileDigest := ""
-		if req.ScenarioExecutionProfile != nil {
-			profileDigest = req.ScenarioExecutionProfile.Digest()
-		}
-		if !scoped || scope.RunID != req.RunID || scope.ProfileDigest != profileDigest || req.Origin.Kind() != runtimerunlifecycle.OriginEvent {
+		if !matchesPrivateScenarioStart(ctx, req) || req.Origin.Kind() != runtimerunlifecycle.OriginEvent {
 			return runtimepipeline.ScenarioSetupRequest{}, fmt.Errorf("scenario input origin requires its private start owner")
 		}
 		if err := req.Origin.Validate(); err != nil {
@@ -354,15 +349,8 @@ func normalizeScenarioSetupRequest(ctx context.Context, req runtimepipeline.Scen
 	} else {
 		req.CreatedAt = req.CreatedAt.UTC()
 	}
-	if len(req.Entities) == 0 {
-		scope, scoped := scenarioexecution.PrivateRunScopeFromContext(ctx)
-		profileDigest := ""
-		if req.ScenarioExecutionProfile != nil {
-			profileDigest = req.ScenarioExecutionProfile.Digest()
-		}
-		if !scoped || scope.RunID != req.RunID || scope.ProfileDigest != profileDigest {
-			return runtimepipeline.ScenarioSetupRequest{}, fmt.Errorf("entities is required outside a private scenario start")
-		}
+	if len(req.Entities) == 0 && !matchesPrivateScenarioStart(ctx, req) {
+		return runtimepipeline.ScenarioSetupRequest{}, fmt.Errorf("entities is required outside a private scenario start")
 	}
 	aliases := map[string]struct{}{}
 	ids := map[string]struct{}{}
@@ -402,6 +390,15 @@ func normalizeScenarioSetupRequest(ctx context.Context, req runtimepipeline.Scen
 		}
 	}
 	return req, nil
+}
+
+func matchesPrivateScenarioStart(ctx context.Context, req runtimepipeline.ScenarioSetupRequest) bool {
+	scope, scoped := scenarioexecution.PrivateRunScopeFromContext(ctx)
+	profileDigest := ""
+	if req.ScenarioExecutionProfile != nil {
+		profileDigest = req.ScenarioExecutionProfile.Digest()
+	}
+	return scoped && scope.RunID == req.RunID && scope.ProfileDigest == profileDigest
 }
 
 func scenarioSetupEntityJSON(entity runtimepipeline.ScenarioSetupEntityRequest) (json.RawMessage, json.RawMessage, map[string]any, map[string]any, error) {

@@ -233,13 +233,10 @@ func runRunCommand(ctx context.Context, root InvocationRoot, out, errOut io.Writ
 		return commandExitError{code: cliExitConflict}
 	}
 
-	var payload map[string]any
-	if strings.TrimSpace(opts.eventName) != "" && len(opts.dataImports) == 0 && len(opts.dataPins) == 0 {
-		payload, err = loadRunCommandPayload(root.Resolve(opts.payloadPath))
-		if err != nil {
-			writeCLIAPIError(errOut, err)
-			return commandExitError{code: 2}
-		}
+	payload, err := loadRunCommandPayload(root.Resolve(opts.payloadPath))
+	if err != nil {
+		writeCLIAPIError(errOut, err)
+		return commandExitError{code: 2}
 	}
 
 	if strings.TrimSpace(opts.connectURL) == "" {
