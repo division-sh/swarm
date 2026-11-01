@@ -64,6 +64,21 @@ func TestSwarmTestPrivateSQLiteNoLiveLLMProof(t *testing.T) {
 		t.Run(tc.name, func(t *testing.T) {
 			root := canonicalrouting.CopyKeyedRootRawIngress(t)
 			writeWorkflowValidationFixtureFile(t, filepath.Join(root, "schema.yaml"), "instance: provider_event_id\nstages: []\npins: {inputs: [inbound.partner.raw, inbound.partner.message]}\n")
+			writeWorkflowValidationFixtureFile(t, filepath.Join(root, "nodes.yaml"), `receiver:
+  execution_type: system_node
+  subscribes_to: [inbound.partner.raw, inbound.partner.message]
+  event_handlers:
+    inbound.partner.raw:
+      data_accumulation:
+        source_event: inbound.partner.raw
+        writes:
+          - {target_field: processed_count, value: entity.processed_count + 1}
+    inbound.partner.message:
+      data_accumulation:
+        source_event: inbound.partner.message
+        writes:
+          - {target_field: processed_count, value: entity.processed_count + 1}
+`)
 			writeWorkflowValidationFixtureFile(t, filepath.Join(root, "partner/manifest.yaml"), "version: 1.0.0\nplatform_version: '*'\ncapabilities: {can: {emit_events: [raw, message], verify_secret: webhook_signing_secret}, cannot: [execute code]}\n")
 			writeWorkflowValidationFixtureFile(t, filepath.Join(root, "partner/trigger.yaml"), `transport: webhook
 payload_object_required: true
