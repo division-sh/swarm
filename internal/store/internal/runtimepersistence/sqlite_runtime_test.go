@@ -1360,7 +1360,24 @@ func configureSQLiteBusyTimeoutForAllConnections(t *testing.T, db *sql.DB, timeo
 func TestSQLiteRuntimeStoreAPIIdempotencySerializesAcrossSamePathHandles(t *testing.T) {
 	ctx := testAuthorActivityContext()
 	dbPath := filepath.Join(t.TempDir(), ".swarm", "dev.db")
-	storeA := newBootstrappedSQLiteRuntimeStoreForPath(t, dbPath)
+	firstStarted := make(chan struct{})
+	releaseFirst := make(chan struct{})
+	var writerOnce, releaseOnce sync.Once
+	release := func() { releaseOnce.Do(func() { close(releaseFirst) }) }
+	t.Cleanup(release)
+	var armed atomic.Bool
+	fixture, _ := openPipelineCrashStore(t, "sqlite", dbPath, diagnosticSQLConnector{
+		Connector: diagnosticSQLiteConnector{path: dbPath},
+		execResult: func(query string, err error) {
+			if armed.Load() && err == nil && strings.TrimSpace(query) == "UPDATE runtime_process_generation SET generation = generation WHERE singleton_id = 1" {
+				writerOnce.Do(func() {
+					close(firstStarted)
+					<-releaseFirst
+				})
+			}
+		},
+	})
+	storeA := fixture.store.(*SQLiteRuntimeStore)
 	storeB := newBootstrappedSQLiteRuntimeStoreForPath(t, dbPath)
 	ctx = originalStoreFixtureContext(t, ctx, storeA)
 	req := apiidempotency.Request{
@@ -1376,20 +1393,17 @@ func TestSQLiteRuntimeStoreAPIIdempotencySerializesAcrossSamePathHandles(t *test
 		replayed   bool
 		err        error
 	}
-	firstStarted := make(chan struct{})
-	releaseFirst := make(chan struct{})
 	secondExecuted := make(chan struct{}, 1)
 	firstDone := make(chan callResult, 1)
 	secondDone := make(chan callResult, 1)
 	var callbackCalls atomic.Int32
+	armed.Store(true)
 
 	go func() {
 		completion, replayed, err := storeA.WithAPIIdempotency(ctx, req, func(context.Context) (apiidempotency.Completion, error) {
 			if calls := callbackCalls.Add(1); calls != 1 {
 				secondExecuted <- struct{}{}
 			}
-			close(firstStarted)
-			<-releaseFirst
 			return apiidempotency.Completion{ResourceID: "resource-1", Response: json.RawMessage(`{"ok":true}`)}, nil
 		})
 		firstDone <- callResult{completion: completion, replayed: replayed, err: err}
@@ -1398,7 +1412,7 @@ func TestSQLiteRuntimeStoreAPIIdempotencySerializesAcrossSamePathHandles(t *test
 	select {
 	case <-firstStarted:
 	case <-time.After(time.Second):
-		t.Fatal("first idempotency callback did not start")
+		t.Fatal("first idempotency native writer did not acquire")
 	}
 
 	go func() {
@@ -1412,13 +1426,13 @@ func TestSQLiteRuntimeStoreAPIIdempotencySerializesAcrossSamePathHandles(t *test
 
 	select {
 	case <-secondExecuted:
-		close(releaseFirst)
+		release()
 		first := <-firstDone
 		second := <-secondDone
 		t.Fatalf("second handle executed callback before first completion; first=%+v second=%+v calls=%d", first, second, callbackCalls.Load())
 	case <-time.After(250 * time.Millisecond):
 	}
-	close(releaseFirst)
+	release()
 
 	var first callResult
 	select {
