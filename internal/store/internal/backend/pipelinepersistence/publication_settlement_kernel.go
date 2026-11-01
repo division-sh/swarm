@@ -47,17 +47,22 @@ func settlePipelineMemberTx(ctx context.Context, attempt *mutationprotocol.Attem
 	}); err != nil {
 		return err
 	}
+	// Match delivery settlement's delivery-row-before-barrier lock order.
+	if disposition.Successful() {
+		var err error
+		if postgres {
+			err = postgresDeliveryAdapter.CommitPipelineHandoff(ctx, attempt, claim.EventID())
+		} else {
+			err = sqliteDeliveryAdapter.CommitPipelineHandoff(ctx, attempt, claim.EventID())
+		}
+		if err != nil {
+			return err
+		}
+	}
 	if runID != "" {
 		if _, err := attempt.RequestCompletion(ctx, candidates, runID, nil); err != nil {
 			return err
 		}
 	}
-	if !disposition.Successful() {
-		return nil
-	}
-	if postgres {
-		return postgresDeliveryAdapter.CommitPipelineHandoff(ctx, attempt, claim.EventID())
-	} else {
-		return sqliteDeliveryAdapter.CommitPipelineHandoff(ctx, attempt, claim.EventID())
-	}
+	return nil
 }
