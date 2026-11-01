@@ -246,6 +246,14 @@ func (s *SQLiteRuntimeStore) LoadDataRunCreationOperation(ctx context.Context, r
 	return s.durableDataOwner.LoadRunCreationOperation(ctx, runID)
 }
 
+func (s *PostgresStore) LoadDataRowsPublicationOperation(ctx context.Context, publicationID string) (runtimedata.RunCreationOperationRecord, error) {
+	return s.durableDataOwner.LoadFeedPublication(ctx, publicationID)
+}
+
+func (s *SQLiteRuntimeStore) LoadDataRowsPublicationOperation(ctx context.Context, publicationID string) (runtimedata.RunCreationOperationRecord, error) {
+	return s.durableDataOwner.LoadFeedPublication(ctx, publicationID)
+}
+
 func (s *PostgresStore) LoadRunResourceAccess(ctx context.Context, runID string, declarations []runtimedata.DeclarationRef) ([]runtimedata.ResourceAccessItem, error) {
 	return s.durableDataOwner.LoadRunResourceAccess(ctx, runID, declarations)
 }

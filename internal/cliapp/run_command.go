@@ -76,6 +76,7 @@ type runCommandOptions struct {
 }
 
 type runStartResult struct {
+	PublicationID     string                  `json:"publication_id,omitempty"`
 	RunID             string                  `json:"run_id"`
 	EventID           string                  `json:"event_id,omitempty"`
 	DeploymentFeedIDs []string                `json:"deployment_feed_ids,omitempty"`
@@ -193,8 +194,8 @@ func newRunCommand(root InvocationRoot, rootOpts rootCommandOptions) *cobra.Comm
 	cmd.Flags().DurationVar(&opts.timeout, "timeout", defaultRunCommandTimeout, "Maximum time to follow after publication; 0 waits indefinitely; expiry never cancels work")
 	cmd.Flags().StringVar(&opts.reattachRunID, "reattach", "", "Existing run id to reattach to")
 	cmd.Flags().StringVar(&opts.configPath, "config", "", deploymentConfigFlagHelp)
-	cmd.Flags().StringArrayVar(&opts.dataImports, "data", nil, "Rows input: name=file.jsonl (currently refused for immutable live-run bindings)")
-	cmd.Flags().StringArrayVar(&opts.dataPins, "pin", nil, "Data version: name@head, name@vN, or name@ResourceVersionID (currently refused for immutable live-run bindings)")
+	cmd.Flags().StringArrayVar(&opts.dataImports, "data", nil, "Publish rows into the live run: name=file.jsonl")
+	cmd.Flags().StringArrayVar(&opts.dataPins, "pin", nil, "Publish a data version: name@head, name@vN, or name@ResourceVersionID")
 	cmd.Flags().StringVar(&opts.idempotencyKey, "idempotency-key", "", "Optional idempotency key for run.start")
 	_ = cmd.Flags().MarkHidden("idempotency-key")
 	cmd.Flags().StringVar(&opts.runID, "run-id", "", "Optional expected live run id; never creates a run")
@@ -227,16 +228,14 @@ func runRunCommand(ctx context.Context, root InvocationRoot, out, errOut io.Writ
 	if strings.TrimSpace(opts.reattachRunID) != "" {
 		return runReattachCommand(ctx, out, errOut, opts, wsEndpoint)
 	}
-	if len(opts.dataImports) > 0 || len(opts.dataPins) > 0 {
-		writeCLIAPIError(errOut, durabledata.NewDomainError(durabledata.CodeRunDataImmutable,
-			"run start cannot publish rows into a live run with immutable data bindings"))
-		return commandExitError{code: cliExitConflict}
-	}
 
-	payload, err := loadRunCommandPayload(root.Resolve(opts.payloadPath))
-	if err != nil {
-		writeCLIAPIError(errOut, err)
-		return commandExitError{code: 2}
+	var payload map[string]any
+	if strings.TrimSpace(opts.eventName) != "" {
+		payload, err = loadRunCommandPayload(root.Resolve(opts.payloadPath))
+		if err != nil {
+			writeCLIAPIError(errOut, err)
+			return commandExitError{code: 2}
+		}
 	}
 
 	if strings.TrimSpace(opts.connectURL) == "" {
@@ -468,21 +467,19 @@ func runCommandStart(ctx context.Context, root InvocationRoot, client *cliAPICli
 	}
 	runID := strings.TrimSpace(opts.runID)
 	dataRequested := len(opts.dataImports) > 0 || len(opts.dataPins) > 0
-	if dataRequested {
-		if runID == "" {
-			runID = uuid.NewString()
-		}
-	}
 	var binding *durabledata.RunCreationRequestBinding
-	if dataRequested && strings.TrimSpace(opts.runID) != "" {
+	if dataRequested && strings.TrimSpace(opts.idempotencyKey) != "" {
 		var err error
-		binding, err = loadRunCreationRequestBinding(ctx, client, runID)
+		binding, err = loadRunCreationRequestBinding(ctx, client, runID, opts.idempotencyKey)
 		if err != nil {
 			return runStartResult{}, err
 		}
 		if binding != nil && (binding.EventID != "") != (strings.TrimSpace(opts.eventName) != "") {
 			return runStartResult{}, fmt.Errorf("run %s event initiation contradicts its permanent request", runID)
 		}
+	}
+	if dataRequested && strings.TrimSpace(opts.idempotencyKey) == "" {
+		opts.idempotencyKey = uuid.NewString()
 	}
 	bundleHash := strings.TrimSpace(health.Bundle.BundleHash)
 	if binding != nil {
@@ -521,10 +518,10 @@ func runCommandStart(ctx context.Context, root InvocationRoot, client *cliAPICli
 	}
 	var result runStartResult
 	if err := client.call(ctx, runCommandMethodStart, params, &result); err != nil {
-		if !dataRequested || binding != nil || strings.TrimSpace(opts.runID) == "" || !isRunCreationInvocationConflict(err) {
+		if !dataRequested || binding != nil || !isRunCreationInvocationConflict(err) {
 			return runStartResult{}, err
 		}
-		recovered, readErr := loadRunCreationRequestBinding(ctx, client, runID)
+		recovered, readErr := loadRunCreationRequestBinding(ctx, client, runID, opts.idempotencyKey)
 		if readErr != nil {
 			return runStartResult{}, readErr
 		}
@@ -570,6 +567,9 @@ func validateRunStartResult(result runStartResult) error {
 		return fmt.Errorf("malformed run.start result: status=%q is not a valid RunStatus", status)
 	}
 	ids := append([]string{}, result.DeploymentFeedIDs...)
+	if result.PublicationID != "" {
+		ids = append(ids, result.PublicationID)
+	}
 	if result.EventID != "" {
 		ids = append(ids, result.EventID)
 	}
@@ -1196,6 +1196,9 @@ func writeRunCommandStarted(out io.Writer, result runStartResult) {
 		return
 	}
 	fmt.Fprintf(out, "run started: run_id=%s status=%s\n", result.RunID, formatCLIHumanCode(cliHumanCodeRunStatus, result.Status))
+	if result.PublicationID != "" {
+		fmt.Fprintf(out, "rows published: publication_id=%s\n", result.PublicationID)
+	}
 	if result.EventID != "" {
 		fmt.Fprintf(out, "input published: event_id=%s\n", result.EventID)
 	}

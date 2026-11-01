@@ -166,6 +166,7 @@ func TestPublicCompletionCapacityNativeMixedBothStores(t *testing.T) {
 			buses = append(buses, bus)
 		}
 		seedRun, sourceID := uuid.NewString(), uuid.NewString()
+		seedEventPublishLiveRunID(t, selected, buses[0], source, seedRun)
 		seedData := map[string]any{"imports": []any{dataRunFusedImport(sourceID, ref, durabledata.AbsentHead(), []byte("{\"topic\":\"one\"}\n"))}, "pins": []any{}}
 		if response := rpcCall(t, handlers[0], deploymentRunStartBody(seedRun, uuid.NewString(), hash, seedData)); response.Error != nil {
 			t.Fatalf("admit shared data: %+v native_error=%v", response.Error, cut.err)
@@ -200,6 +201,9 @@ func TestPublicCompletionCapacityNativeMixedBothStores(t *testing.T) {
 			responses[index] = make(chan publicCompletionObservedResponse, 1)
 		}
 		for index := range worklifetime.PublicCompletionLimit {
+			if index >= 2 {
+				seedEventPublishLiveRunID(t, selected, buses[index%2], source, runIDs[index])
+			}
 			go func() {
 				responses[index] <- publicCompletionObservedRPC(t, handlers[index%2], bodies[index], testToken)
 			}()
@@ -219,13 +223,15 @@ func TestPublicCompletionCapacityNativeMixedBothStores(t *testing.T) {
 			t.Fatalf("shared process reservations=%d", count)
 		}
 		t.Logf("N=%d, native pool=%+v", process.PublicCompletionCount(), storetest.ObserveSelectedPool(t, fixture.primary))
+		readmit := worklifetime.PublicCompletionLimit
+		seedEventPublishLiveRunID(t, selected, buses[0], source, runIDs[readmit])
 		before, err := storetest.ReadFiniteRunStartStorageCounts(t.Context(), fixture.primary)
 		if err != nil {
 			t.Fatal(err)
 		}
 		refused := rpcCall(t, handlers[0], bodies[worklifetime.PublicCompletionLimit])
 		if refused.Error == nil || asMap(t, refused.Error.Data)["retryable"] != true || !strings.Contains(fmt.Sprint(refused.Error.Data), worklifetime.ErrPublicCompletionCapacity.Error()) {
-			t.Fatalf("N+1 did not refuse nonblockingly/retryably: %+v", refused)
+			t.Fatalf("N+1 did not refuse nonblockingly/retryably: %+v", refused.Error)
 		}
 		for _, index := range []int{0, 1, 2} {
 			var request map[string]any
@@ -236,7 +242,9 @@ func TestPublicCompletionCapacityNativeMixedBothStores(t *testing.T) {
 			params["idempotency_key"] = uuid.NewString()
 			if index == 0 {
 				params["payload"] = map[string]any{"topic": "capacity-refusal"}
-			} else {
+			}
+			params["run_id"] = runIDs[readmit]
+			if index == 1 {
 				params["run_id"] = uuid.NewString()
 			}
 			raw, err := json.Marshal(request)
@@ -282,7 +290,6 @@ func TestPublicCompletionCapacityNativeMixedBothStores(t *testing.T) {
 			}
 			time.Sleep(time.Millisecond)
 		}
-		readmit := worklifetime.PublicCompletionLimit
 		go func() { responses[readmit] <- publicCompletionObservedRPC(t, handlers[0], bodies[readmit], testToken) }()
 		select {
 		case key := <-cut.entered:

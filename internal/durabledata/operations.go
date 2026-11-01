@@ -399,12 +399,17 @@ func (e RunCreationDataEnvelope) Canonical() (RunCreationDataEnvelope, error) {
 // publication input, never wrapper or transport fields. Both event fields are
 // absent for deployment-origin, feed-only initiation.
 type RunCreationCommand struct {
-	RunID        string                  `json:"run_id"`
-	Actor        string                  `json:"actor"`
-	BundleHash   string                  `json:"bundle_hash"`
-	EventID      string                  `json:"event_id,omitempty"`
-	InitialEvent json.RawMessage         `json:"initial_event,omitempty"`
-	Data         RunCreationDataEnvelope `json:"data"`
+	PublicationID string                  `json:"publication_id,omitempty"`
+	RunID         string                  `json:"run_id"`
+	Actor         string                  `json:"actor"`
+	BundleHash    string                  `json:"bundle_hash"`
+	EventID       string                  `json:"event_id,omitempty"`
+	InitialEvent  json.RawMessage         `json:"initial_event,omitempty"`
+	Data          RunCreationDataEnvelope `json:"data"`
+}
+
+func RowsPublicationID(actor, key string) string {
+	return uuid.NewSHA1(uuid.NameSpaceOID, []byte("swarm.rows-publication.v1\x00"+actor+"\x00run.start\x00"+key)).String()
 }
 
 type RunCreationInitiation string
@@ -419,6 +424,7 @@ const (
 // any operator event. RowCount zero is a real, completed feed, not an absent one.
 type DeploymentFeed struct {
 	RunID              string         `json:"run_id"`
+	Publication        string         `json:"publication,omitempty"`
 	SourceInvocationID string         `json:"source_invocation_id,omitempty"`
 	BundleHash         string         `json:"bundle_hash"`
 	Declaration        DeclarationRef `json:"declaration"`
@@ -431,13 +437,20 @@ type DeploymentFeed struct {
 // Explicit pins retain their existing run/declaration identity.
 func (f DeploymentFeed) PublicationID() string {
 	key := "swarm.deployment-feed.v1\x00" + f.RunID + "\x00" + f.Declaration.Key()
-	if f.SourceInvocationID != "" {
+	if f.Publication != "" {
+		key += "\x00publication\x00" + f.Publication
+	} else if f.SourceInvocationID != "" {
 		key += "\x00" + f.SourceInvocationID
 	}
 	return uuid.NewSHA1(uuid.NameSpaceOID, []byte(key)).String()
 }
 
 func (f DeploymentFeed) Validate() error {
+	if f.Publication != "" {
+		if parsed, err := uuid.Parse(f.Publication); err != nil || parsed == uuid.Nil || parsed.String() != f.Publication {
+			return fmt.Errorf("deployment feed requires a canonical publication")
+		}
+	}
 	if f.SourceInvocationID != "" {
 		if parsed, err := uuid.Parse(f.SourceInvocationID); err != nil || parsed == uuid.Nil || parsed.String() != f.SourceInvocationID {
 			return fmt.Errorf("deployment feed requires a canonical source_invocation_id")
@@ -484,6 +497,11 @@ func (c RunCreationCommand) Initiation() (RunCreationInitiation, error) {
 }
 
 func (c RunCreationCommand) RequestHash() (string, []byte, RunCreationCommand, error) {
+	if c.PublicationID != "" {
+		if err := validateCanonicalUUID(c.PublicationID, "publication_id"); err != nil {
+			return "", nil, RunCreationCommand{}, err
+		}
+	}
 	runID, err := uuid.Parse(c.RunID)
 	if err != nil || runID == uuid.Nil || runID.String() != c.RunID {
 		return "", nil, RunCreationCommand{}, fmt.Errorf("run_id must be one canonical non-zero UUID")
@@ -588,16 +606,17 @@ func SummarizeSource(record SourceOperationRecord) SourceOperationSummary {
 }
 
 type RunCreationOperationSummary struct {
-	Kind        string               `json:"kind"`
-	Outcome     string               `json:"outcome"`
-	RunID       string               `json:"run_id"`
-	BundleHash  string               `json:"bundle_hash"`
-	EventID     string               `json:"event_id,omitempty"`
-	Status      string               `json:"status,omitempty"`
-	PinCount    int                  `json:"pin_count"`
-	ImportCount int                  `json:"import_count"`
-	Rejection   RunCreationRejection `json:"rejection"`
-	CompletedAt time.Time            `json:"completed_at"`
+	PublicationID string               `json:"publication_id,omitempty"`
+	Kind          string               `json:"kind"`
+	Outcome       string               `json:"outcome"`
+	RunID         string               `json:"run_id"`
+	BundleHash    string               `json:"bundle_hash"`
+	EventID       string               `json:"event_id,omitempty"`
+	Status        string               `json:"status,omitempty"`
+	PinCount      int                  `json:"pin_count"`
+	ImportCount   int                  `json:"import_count"`
+	Rejection     RunCreationRejection `json:"rejection"`
+	CompletedAt   time.Time            `json:"completed_at"`
 }
 
 type RunCreationRejection struct {
@@ -697,7 +716,7 @@ type RunCreationOperationRecord struct {
 func (r RunCreationOperationRecord) DeploymentFeedIDs() []string {
 	ids := make([]string, 0, len(r.Evidence.RunBinding))
 	for _, item := range r.Evidence.RunBinding {
-		feed := DeploymentFeed{RunID: r.Summary.RunID}
+		feed := DeploymentFeed{RunID: r.Summary.RunID, Publication: r.Summary.PublicationID}
 		if item.Kind == "import" && item.Import != nil {
 			feed.Declaration, feed.SourceInvocationID = item.Import.Declaration, item.Import.SourceInvocationID
 		} else if item.Kind == "pin" && item.Pin != nil && item.Pin.Selection == "explicit" {

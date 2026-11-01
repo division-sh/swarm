@@ -2447,7 +2447,15 @@ func prepareServeRuntimeContextSet(ctx context.Context, contexts []serveRuntimeB
 			return nil, err
 		}
 		releases = append(releases, func() error {
-			if err := release.Start(completeStanding); err != nil {
+			if err := release.Start(func() error {
+				if err := contextDef.runtime.CompleteLiveFlowStartup(ctx); err != nil {
+					return err
+				}
+				if completeStanding != nil {
+					return completeStanding()
+				}
+				return nil
+			}); err != nil {
 				return err
 			}
 			return contextDef.runtime.ArmDeclaredFlowClocks(ctx, activations)

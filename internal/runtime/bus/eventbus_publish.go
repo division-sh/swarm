@@ -275,6 +275,17 @@ func (eb *EventBus) StartDeploymentRunAcknowledged(
 	command durabledata.RunCreationCommand,
 	request apiidempotency.Request,
 ) (result CommittedDeploymentRunCreation, err error) {
+	return eb.publishDeploymentFeedsAcknowledged(ctx, command, request, nil)
+}
+
+func (eb *EventBus) PublishDeploymentFeedsAcknowledged(ctx context.Context, command durabledata.RunCreationCommand, request apiidempotency.Request, live runtimerunlifecycle.LiveRun) (CommittedDeploymentRunCreation, error) {
+	if command.PublicationID == "" {
+		return CommittedDeploymentRunCreation{}, errors.New("rows publication requires its publication identity")
+	}
+	return eb.publishDeploymentFeedsAcknowledged(ctx, command, request, &live)
+}
+
+func (eb *EventBus) publishDeploymentFeedsAcknowledged(ctx context.Context, command durabledata.RunCreationCommand, request apiidempotency.Request, live *runtimerunlifecycle.LiveRun) (result CommittedDeploymentRunCreation, err error) {
 	_, _, canonical, err := command.RequestHash()
 	if err != nil {
 		return CommittedDeploymentRunCreation{}, err
@@ -318,15 +329,18 @@ func (eb *EventBus) StartDeploymentRunAcknowledged(
 	}
 	ctx = runtimeeffects.WithExecutionMode(ctx, mode)
 	ctx = runtimecorrelation.WithRunID(ctx, canonical.RunID)
-	root, err := eb.templateInstancePlanner.PrepareFlowInstanceActivation(ctx, runtimepipeline.FlowInstanceActivationRequest{
-		Context: events.DeliveryContextFromContext(ctx), ContractBundle: eb.semanticSource,
-		Instance:   runtimeflowidentity.Stored(eb.semanticSource, semanticview.RootExecutionFlowID(eb.semanticSource), canonical.RunID, canonical.RunID, "", ""),
-		OccurredAt: time.Now().UTC(),
-	})
-	if err != nil {
-		return CommittedDeploymentRunCreation{}, fmt.Errorf("prepare deployment root construction: %w", err)
+	var root runtimepipeline.FlowInstanceActivationPlan
+	if live == nil {
+		root, err = eb.templateInstancePlanner.PrepareFlowInstanceActivation(ctx, runtimepipeline.FlowInstanceActivationRequest{
+			Context: events.DeliveryContextFromContext(ctx), ContractBundle: eb.semanticSource,
+			Instance:   runtimeflowidentity.Stored(eb.semanticSource, semanticview.RootExecutionFlowID(eb.semanticSource), canonical.RunID, canonical.RunID, "", ""),
+			OccurredAt: time.Now().UTC(),
+		})
+		if err != nil {
+			return CommittedDeploymentRunCreation{}, fmt.Errorf("prepare deployment root construction: %w", err)
+		}
 	}
-	committed, commitErr := owner.CommitDeploymentRunCreation(ctx, DeploymentRunCreationCommand{RunCreation: canonical, Idempotency: request, Root: FlowInstanceActivationCommand{Plan: root}})
+	committed, commitErr := owner.CommitDeploymentRunCreation(ctx, DeploymentRunCreationCommand{RunCreation: canonical, PublicationID: canonical.PublicationID, LiveRun: live, Idempotency: request, Root: FlowInstanceActivationCommand{Plan: root}})
 	validationErr := durabledata.ValidateRunCreationReceiptForCommand(committed.Record, canonical)
 	if !committed.Acknowledged {
 		return committed, errors.Join(commitErr, validationErr, errors.New("deployment run creation commit was not acknowledged"))

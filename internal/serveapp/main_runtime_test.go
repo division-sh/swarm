@@ -1829,22 +1829,13 @@ type servedConversationForkSource struct {
 
 func runServedConversationForkLifecycleProof(t *testing.T, rt servedConversationForkProofRuntime) {
 	t.Helper()
-	initial := requireServedEventPublishRPCResult(t, rt.Endpoint, map[string]any{
-		"event_name":      "external.observed",
-		"bundle_hash":     rt.BundleHash,
-		"payload":         map[string]any{},
-		"idempotency_key": "issue-1997-" + rt.Backend + "-source-run",
-	})
+	initial := servedEventPublishRPCResult{RunID: requireServedLiveLandingRunID(t, rt.Endpoint, rt.BundleHash, ".")}
 	if initial.NewRunCreated || initial.RunID == "" {
 		t.Fatalf("%s conversation fork source run = %#v", rt.Backend, initial)
 	}
-	// Empty delivery queues do not join committed source-agent activation.
-	rt.Probe.RequireEventPersisted(initial.EventID)
-	waitServedRunDeliveryQuiescence(t, rt.ReadRunDeliveries, initial.RunID)
 	ready := requireServedEventPublishRPCResult(t, rt.Endpoint, map[string]any{
 		"event_name":      "fork.source_message",
 		"run_id":          initial.RunID,
-		"source_event_id": initial.EventID,
 		"payload":         map[string]any{"note": "materialize source agent"},
 		"idempotency_key": "issue-1997-" + rt.Backend + "-source-agent-readiness",
 	})

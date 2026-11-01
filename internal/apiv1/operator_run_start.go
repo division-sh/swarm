@@ -63,10 +63,11 @@ func runStartConfigured(opts RunStartHandlerOptions) bool {
 
 func executeRunStart(ctx context.Context, req Request, opts EventPublicationOptions, now time.Time) (any, error) {
 	if _, rows := req.Params["data"]; rows {
-		return nil, NewApplicationError(string(durabledata.CodeRunDataImmutable), false, map[string]any{
-			"operation": "run.start", "reason": "live_run_rows_binding_unavailable",
-			"message": "run start cannot publish rows into a live run with immutable data bindings",
-		})
+		_, hasEvent := req.Params["event_name"]
+		_, hasPayload := req.Params["payload"]
+		if !hasEvent && !hasPayload {
+			return executeLiveRunRows(ctx, req, opts, now)
+		}
 	}
 	cfg := eventPublicationConfig{
 		sourceAgent:                    func(Request) string { return "api.v1" },
@@ -87,7 +88,7 @@ func executeRunStart(ctx context.Context, req Request, opts EventPublicationOpti
 	}
 	completion, _, err := executeOperatorEventPublication(ctx, req, opts, now, cfg)
 	if err != nil {
-		return nil, runStartIdempotencyError(err)
+		return nil, publicationApplicationError("", runStartIdempotencyError(err))
 	}
 	return recordedPublicCompletionResult(completion)
 }

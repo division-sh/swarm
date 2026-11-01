@@ -413,7 +413,7 @@ func loadFanOutEvaluation(ctx context.Context, db *sql.DB, postgres bool, resour
 		if bundleErr != nil {
 			return input, bundleErr
 		}
-		source, sourceErr := resourceData.LoadPinnedSource(ctx, intent.Request.Key.RunID, bundleHash, intent.Source.Declaration)
+		source, sourceErr := resourceData.LoadFeedSource(ctx, intent.Request.Key.RunID, bundleHash, intent.Request.Key.DeploymentFeedID, intent.Source.Declaration)
 		if sourceErr != nil {
 			return input, sourceErr
 		}

@@ -172,8 +172,8 @@ func recordDeploymentRunFeedFactsTx(ctx context.Context, tx *sql.Tx, recorder de
 		rows, err := tx.QueryContext(ctx, `SELECT CAST(deployment_feed_id AS TEXT),bundle_hash,
 			source_resource_version_id,deployment_schema_digest,cardinality
 			FROM fan_out_intents WHERE run_id=$1 AND origin_kind='deployment'
-			AND source_resource_flow_path=$2 AND source_resource_event_name=$3`,
-			feed.RunID, feed.Declaration.FlowPath, feed.Declaration.EventName)
+			AND source_resource_flow_path=$2 AND source_resource_event_name=$3 AND deployment_feed_id=$4`,
+			feed.RunID, feed.Declaration.FlowPath, feed.Declaration.EventName, feed.PublicationID())
 		if err != nil {
 			return fmt.Errorf("read created deployment feed: %w", err)
 		}
@@ -211,6 +211,15 @@ func recordDeploymentRunFeedFactsTx(ctx context.Context, tx *sql.Tx, recorder de
 		}
 		refs = append(refs, ref)
 	}
+	if feeds[0].Publication != "" {
+		ordinary, ok := recorder.(interface {
+			AddFacts(string, ...runforkrevision.FactRef) error
+		})
+		if !ok {
+			return fmt.Errorf("rows publication requires its ordinary revision owner")
+		}
+		return ordinary.AddFacts(runID, refs...)
+	}
 	return recorder.AddRunStartFacts(ctx, runID, refs...)
 }
 
@@ -222,11 +231,12 @@ func deploymentRunCompletion(record runtimedata.RunCreationOperationRecord) (api
 		return apiidempotency.Completion{}, fmt.Errorf("rejected run creation has no success completion")
 	}
 	response, err := canonicaljson.Bytes(struct {
+		PublicationID     string                  `json:"publication_id,omitempty"`
 		RunID             string                  `json:"run_id"`
 		Status            string                  `json:"status"`
 		DataBinding       runtimedata.DataBinding `json:"data_binding"`
 		DeploymentFeedIDs []string                `json:"deployment_feed_ids"`
-	}{RunID: record.Summary.RunID, Status: record.Summary.Status, DataBinding: record.Binding, DeploymentFeedIDs: record.DeploymentFeedIDs()})
+	}{PublicationID: record.Summary.PublicationID, RunID: record.Summary.RunID, Status: record.Summary.Status, DataBinding: record.Binding, DeploymentFeedIDs: record.DeploymentFeedIDs()})
 	if err != nil {
 		return apiidempotency.Completion{}, err
 	}
@@ -255,13 +265,72 @@ func acknowledgeDeploymentRunCreation(result runtimebus.CommittedDeploymentRunCr
 	return result
 }
 
+func validateDeploymentFeedCommand(input runtimebus.DeploymentRunCreationCommand, command runtimedata.RunCreationCommand) error {
+	if input.PublicationID != command.PublicationID {
+		return fmt.Errorf("rows publication identity differs from its canonical request")
+	}
+	if input.PublicationID == "" {
+		if input.LiveRun != nil {
+			return fmt.Errorf("deployment run creation cannot consume a live selection")
+		}
+		return validateDeploymentRoot(input.Root, command)
+	}
+	if input.LiveRun == nil || input.LiveRun.Scope.Validate() != nil || input.LiveRun.RunID != command.RunID || input.LiveRun.Source.BundleHash() != command.BundleHash || input.Root.Plan.Identity.InstanceID != "" {
+		return fmt.Errorf("rows publication requires its exact live selection and no run creation")
+	}
+	return nil
+}
+
+func commitDeploymentFeedsTx(ctx context.Context, attempt *mutationprotocol.Attempt, owner *storedurabledata.Owner, writer deploymentRunCreationWriter, command runtimedata.RunCreationCommand, input runtimebus.DeploymentRunCreationCommand, fact runtimecorrelation.SourceArtifactFact, replay, postgres bool, ensureScenario func(context.Context, *sql.Tx, string, time.Time) error) (runtimebus.CommittedDeploymentRunCreation, error) {
+	if input.PublicationID == "" {
+		return commitDeploymentRunCreationTx(ctx, attempt, owner, writer, command, input.Root, fact, replay, ensureScenario)
+	}
+	var result runtimebus.CommittedDeploymentRunCreation
+	err := attempt.WithSQL(ctx, func(ctx context.Context, tx *sql.Tx) error {
+		plan, found, err := storedurabledata.FindFeedPublicationTx(owner, ctx, tx, command, input.PublicationID)
+		if err != nil {
+			return err
+		}
+		if found {
+			result.Record, result.Replay = plan.Record(), true
+			return nil
+		}
+		if replay {
+			return fmt.Errorf("cached rows completion has no retained publication")
+		}
+		if err := requireAPIEventLiveRunTx(ctx, tx, input.LiveRun, postgres); err != nil {
+			return err
+		}
+		plan, err = storedurabledata.PrepareFeedPublicationTx(owner, ctx, tx, command, input.PublicationID)
+		if err != nil {
+			return err
+		}
+		if plan.Failed() {
+			result.Record = plan.Record()
+			return nil
+		}
+		if err := storedurabledata.CommitRunCreationImportsTx(owner, ctx, tx, &plan); err != nil {
+			return err
+		}
+		result.Record, err = storedurabledata.CompleteRunCreationTx(owner, ctx, tx, &plan, "", "live")
+		if err != nil {
+			return err
+		}
+		if err := commitRunCreationFeedsTx(ctx, tx, &plan, writer); err != nil {
+			return err
+		}
+		return recordDeploymentRunFeedFactsTx(ctx, tx, attempt, plan.DeploymentFeeds())
+	})
+	return result, err
+}
+
 func (s *EventPostgresOwner) CommitDeploymentRunCreation(ctx context.Context, input runtimebus.DeploymentRunCreationCommand) (result runtimebus.CommittedDeploymentRunCreation, err error) {
 	request := input.Idempotency
 	command, fact, err := validateDeploymentRunCreation(ctx, input.RunCreation, request)
 	if err != nil {
 		return result, err
 	}
-	if err := validateDeploymentRoot(input.Root, command); err != nil {
+	if err := validateDeploymentFeedCommand(input, command); err != nil {
 		return result, err
 	}
 	var lease *storeapiidempotency.PostgresRequestLease
@@ -278,8 +347,16 @@ func (s *EventPostgresOwner) CommitDeploymentRunCreation(ctx context.Context, in
 	}
 	cachedCompletion, cachedReplay := lease.Replay()
 	outcome := runPostgresEventMutationResult(ctx, s, true, func(ctx context.Context, attempt *mutationprotocol.Attempt) (runtimebus.CommittedDeploymentRunCreation, error) {
-		result, err := commitDeploymentRunCreationTx(ctx, attempt, s.durableData, s, command, input.Root, fact, cachedReplay, storescenarioexecution.EnsurePostgresFromContext)
-		if err != nil || result.Record.Summary.Outcome != "created" {
+		result, err := commitDeploymentFeedsTx(ctx, attempt, s.durableData, s, command, input, fact, cachedReplay, true, storescenarioexecution.EnsurePostgresFromContext)
+		if err != nil {
+			return result, err
+		}
+		if result.Record.Summary.Outcome != "created" {
+			if input.PublicationID != "" && !result.Replay {
+				err = attempt.WithSQL(ctx, func(ctx context.Context, tx *sql.Tx) error {
+					return storedurabledata.StoreFeedPublicationCompletionTx(s.durableData, ctx, tx, input.PublicationID, request, apiidempotency.Completion{})
+				})
+			}
 			return result, err
 		}
 		if cachedReplay {
@@ -291,6 +368,13 @@ func (s *EventPostgresOwner) CommitDeploymentRunCreation(ctx context.Context, in
 			return result, err
 		}
 		result.Completion = completion
+		if input.PublicationID != "" && !result.Replay {
+			if err := attempt.WithSQL(ctx, func(ctx context.Context, tx *sql.Tx) error {
+				return storedurabledata.StoreFeedPublicationCompletionTx(s.durableData, ctx, tx, input.PublicationID, request, completion)
+			}); err != nil {
+				return result, err
+			}
+		}
 		if lease == nil {
 			return result, nil
 		}
@@ -314,7 +398,7 @@ func (s *EventSQLiteOwner) CommitDeploymentRunCreation(ctx context.Context, inpu
 	if err != nil {
 		return result, err
 	}
-	if err := validateDeploymentRoot(input.Root, command); err != nil {
+	if err := validateDeploymentFeedCommand(input, command); err != nil {
 		return result, err
 	}
 	var lease *storeapiidempotency.SQLiteRequestLease
@@ -327,8 +411,16 @@ func (s *EventSQLiteOwner) CommitDeploymentRunCreation(ctx context.Context, inpu
 	}
 	cachedCompletion, cachedReplay := lease.Replay()
 	outcome := runSQLiteEventMutationResult(ctx, s, "sqlite deployment run creation", true, func(ctx context.Context, attempt *mutationprotocol.Attempt) (runtimebus.CommittedDeploymentRunCreation, error) {
-		result, err := commitDeploymentRunCreationTx(ctx, attempt, s.durableData, s, command, input.Root, fact, cachedReplay, storescenarioexecution.EnsureSQLiteFromContext)
-		if err != nil || result.Record.Summary.Outcome != "created" {
+		result, err := commitDeploymentFeedsTx(ctx, attempt, s.durableData, s, command, input, fact, cachedReplay, false, storescenarioexecution.EnsureSQLiteFromContext)
+		if err != nil {
+			return result, err
+		}
+		if result.Record.Summary.Outcome != "created" {
+			if input.PublicationID != "" && !result.Replay {
+				err = attempt.WithSQL(ctx, func(ctx context.Context, tx *sql.Tx) error {
+					return storedurabledata.StoreFeedPublicationCompletionTx(s.durableData, ctx, tx, input.PublicationID, request, apiidempotency.Completion{})
+				})
+			}
 			return result, err
 		}
 		if cachedReplay {
@@ -340,6 +432,13 @@ func (s *EventSQLiteOwner) CommitDeploymentRunCreation(ctx context.Context, inpu
 			return result, err
 		}
 		result.Completion = completion
+		if input.PublicationID != "" && !result.Replay {
+			if err := attempt.WithSQL(ctx, func(ctx context.Context, tx *sql.Tx) error {
+				return storedurabledata.StoreFeedPublicationCompletionTx(s.durableData, ctx, tx, input.PublicationID, request, completion)
+			}); err != nil {
+				return result, err
+			}
+		}
 		if lease == nil {
 			return result, nil
 		}

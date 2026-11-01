@@ -398,8 +398,14 @@ func (b DataBinding) Validate() error {
 }
 
 func (s RunCreationOperationSummary) Validate() error {
-	if s.Kind != "run_creation" {
-		return fmt.Errorf("run-creation summary kind must be run_creation")
+	if s.PublicationID == "" {
+		if s.Kind != "run_creation" {
+			return fmt.Errorf("run-creation summary kind must be run_creation")
+		}
+	} else if s.Kind != "rows_publication" {
+		return fmt.Errorf("rows publication summary kind must be rows_publication")
+	} else if err := validateCanonicalUUID(s.PublicationID, "publication_id"); err != nil {
+		return err
 	}
 	if err := validateCanonicalUUID(s.RunID, "run_id"); err != nil {
 		return err
@@ -608,7 +614,7 @@ func (r RunCreationOperationRecord) ValidateForCommand(command RunCreationComman
 	if err := r.Validate(); err != nil {
 		return err
 	}
-	if r.Summary.RunID != canonical.RunID || r.Summary.BundleHash != canonical.BundleHash || r.Summary.ImportCount != len(canonical.Data.Imports) {
+	if r.Summary.PublicationID != canonical.PublicationID || r.Summary.RunID != canonical.RunID || r.Summary.BundleHash != canonical.BundleHash || r.Summary.ImportCount != len(canonical.Data.Imports) {
 		return fmt.Errorf("run-creation summary contradicts its canonical request")
 	}
 	if r.Summary.Outcome == "created" {
