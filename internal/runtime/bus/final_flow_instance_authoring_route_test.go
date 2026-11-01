@@ -121,7 +121,7 @@ func TestEventBusFinalFlowInstanceAuthoringFixture_RenamedConnectRoutePersistsRe
 	if err != nil {
 		t.Fatalf("post-publish planSubscribedRoutePlan: %v", err)
 	}
-	if routePlan.AuthorityState != RoutePlanAuthorityCanonicalMatched || routePlan.AuthorityOwner != routePlanSourceConnectRoutePlan {
+	if routePlan.AuthorityState != RoutePlanAuthorityCanonicalMatched || routePlan.AuthorityOwner != routeIntentProducerConnectRoutePlan {
 		t.Fatalf("post-publish route plan authority = %q/%q, want matched connect route plan", routePlan.AuthorityState, routePlan.AuthorityOwner)
 	}
 

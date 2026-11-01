@@ -27,7 +27,7 @@ func TestTerminalTargetDiagnosticRequiresExactBlockedConnectionEvidence(t *testi
 	if err != nil {
 		t.Fatal(err)
 	}
-	plan := RoutePlan{AuthorityOwner: routePlanSourceConnectRoutePlan, AuthorityState: RoutePlanAuthorityCanonicalFailedClosed,
+	plan := RoutePlan{AuthorityOwner: routeIntentProducerConnectRoutePlan, AuthorityState: RoutePlanAuthorityCanonicalFailedClosed,
 		TargetFailure: pinrouting.FailureTargetUnreachableTerminated, ConnectEvaluation: ledger}
 	if !plan.authorizesTerminalTargetDiagnostic(event) {
 		t.Fatal("exact terminal diagnostic refused")
@@ -38,6 +38,8 @@ func TestTerminalTargetDiagnosticRequiresExactBlockedConnectionEvidence(t *testi
 	}{
 		{"failure code alone", func(p *RoutePlan) { p.ConnectEvaluation = events.ConnectEvaluationLedger{} }},
 		{"wrong owner", func(p *RoutePlan) { p.AuthorityOwner = 0 }},
+		{"internal carrier", func(p *RoutePlan) { p.AuthorityOwner = routeIntentProducerInternalTargetCarrier }},
+		{"internal route", func(p *RoutePlan) { p.AuthorityOwner = routeIntentProducerInternalTargetRoute }},
 		{"wrong disposition", func(p *RoutePlan) { p.AuthorityState = RoutePlanAuthorityCanonicalMatched }},
 		{"different failure", func(p *RoutePlan) { p.TargetFailure = pinrouting.FailureTargetNotSubscribed }},
 	} {
@@ -82,8 +84,31 @@ func TestRoutePlanDeliveryIntentsCarryTypedProducer(t *testing.T) {
 	if intent.Producer != routeIntentProducerConnectRoutePlan {
 		t.Fatalf("intent producer = %q, want %q", routeIntentProducerCode(intent.Producer), routeIntentProducerCode(routeIntentProducerConnectRoutePlan))
 	}
-	if intent.Producer.Source() != routePlanSourceConnectRoutePlan || intent.Producer.Reason() != routePlanReasonLoweredConnectRoutePlan {
-		t.Fatalf("intent producer source/reason = %s/%s, want connect route plan/lowered connect", intent.Producer.Source().code(), intent.Producer.Reason().code())
+	for _, test := range []struct {
+		producer routeIntentProducer
+		value    uint8
+		code     string
+	}{
+		{routeIntentProducerAgentPolicy, 1, "agent_policy/matched_agent_subscription"},
+		{routeIntentProducerDirectPolicy, 2, "direct_policy/direct_publish"},
+		{routeIntentProducerInternalTargetCarrier, 3, "internal_target_route/internal_carrier"},
+		{routeIntentProducerInternalTargetRoute, 4, "internal_target_route/route_table_node"},
+		{routeIntentProducerConcreteNodeRoute, 5, "concrete_node_route/route_table_node"},
+		{routeIntentProducerRootNodeRoute, 7, "root_node_route/route_table_node"},
+		{routeIntentProducerRecipientMaterializer, 8, "recipient_plan_materializer/materialized_route"},
+		{routeIntentProducerConnectRoutePlan, 9, "connect_route_plan/lowered_connect_route_plan"},
+	} {
+		if uint8(test.producer) != test.value || routeIntentProducerCode(test.producer) != test.code {
+			t.Fatalf("producer value/code = %d/%q, want %d/%q", test.producer, routeIntentProducerCode(test.producer), test.value, test.code)
+		}
+		if got := (RoutePlan{AuthorityOwner: test.producer}).Normalized().AuthorityOwner; got != test.producer {
+			t.Fatalf("normalized producer owner = %d, want %d", got, test.producer)
+		}
+	}
+	for _, unknown := range []routeIntentProducer{0, 6, 255} {
+		if !unknown.Empty() || routeIntentProducerCode(unknown) != "" || (RoutePlan{AuthorityOwner: unknown}).Normalized().AuthorityOwner != routeIntentProducerUnknown {
+			t.Fatalf("unknown or retired producer %d acquired authority", unknown)
+		}
 	}
 }
 

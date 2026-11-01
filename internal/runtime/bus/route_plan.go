@@ -13,9 +13,6 @@ import (
 	runtimereplycontext "github.com/division-sh/swarm/internal/runtime/replycontext"
 )
 
-type routePlanSource uint8
-type routePlanReason uint8
-
 // Consumers receive the planner's typed refusal, not a generic target-detail
 // string. Caller diagnostics do not change the canonical failure taxonomy.
 func (p PublishRecipientPlan) TargetFailureError(component, operation string, attributes map[string]any) error {
@@ -44,65 +41,6 @@ func onlyNoHandlerRefusals(err error) bool {
 		typed, ok := branch.(*runtimefailures.Error)
 		return ok && typed.Failure.Class == runtimefailures.ClassUnexpectedArrival && typed.Failure.Detail.Code == "no_route"
 	})
-}
-
-const (
-	routePlanSourceAgentPolicy routePlanSource = iota + 1
-	routePlanSourceDirectPolicy
-	routePlanSourceInternalTarget
-	routePlanSourceConcreteNodeRoute
-	routePlanSourceRootNodeRoute routePlanSource = iota + 2 // Keep retired slot 5 unassigned.
-	routePlanSourceRecipientMaterializer
-	routePlanSourceConnectRoutePlan
-)
-
-const (
-	routePlanReasonMatchedAgentSubscription routePlanReason = iota + 1
-	routePlanReasonDirectPublish
-	routePlanReasonInternalCarrier
-	routePlanReasonRouteTableNode
-	routePlanReasonMaterializedRoute
-	routePlanReasonLoweredConnectRoutePlan
-)
-
-func (s routePlanSource) code() string {
-	switch s {
-	case routePlanSourceAgentPolicy:
-		return "agent_policy"
-	case routePlanSourceDirectPolicy:
-		return "direct_policy"
-	case routePlanSourceInternalTarget:
-		return "internal_target_route"
-	case routePlanSourceConcreteNodeRoute:
-		return "concrete_node_route"
-	case routePlanSourceRootNodeRoute:
-		return "root_node_route"
-	case routePlanSourceRecipientMaterializer:
-		return "recipient_plan_materializer"
-	case routePlanSourceConnectRoutePlan:
-		return "connect_route_plan"
-	default:
-		return ""
-	}
-}
-
-func (r routePlanReason) code() string {
-	switch r {
-	case routePlanReasonMatchedAgentSubscription:
-		return "matched_agent_subscription"
-	case routePlanReasonDirectPublish:
-		return "direct_publish"
-	case routePlanReasonInternalCarrier:
-		return "internal_carrier"
-	case routePlanReasonRouteTableNode:
-		return "route_table_node"
-	case routePlanReasonMaterializedRoute:
-		return "materialized_route"
-	case routePlanReasonLoweredConnectRoutePlan:
-		return "lowered_connect_route_plan"
-	default:
-		return ""
-	}
 }
 
 type routeIntentProducer uint8
@@ -135,63 +73,31 @@ func (p routeIntentProducer) Normalized() routeIntentProducer {
 	}
 }
 
-func (p routeIntentProducer) Source() routePlanSource {
-	switch p.Normalized() {
-	case routeIntentProducerAgentPolicy:
-		return routePlanSourceAgentPolicy
-	case routeIntentProducerDirectPolicy:
-		return routePlanSourceDirectPolicy
-	case routeIntentProducerInternalTargetCarrier, routeIntentProducerInternalTargetRoute:
-		return routePlanSourceInternalTarget
-	case routeIntentProducerConcreteNodeRoute:
-		return routePlanSourceConcreteNodeRoute
-	case routeIntentProducerRootNodeRoute:
-		return routePlanSourceRootNodeRoute
-	case routeIntentProducerRecipientMaterializer:
-		return routePlanSourceRecipientMaterializer
-	case routeIntentProducerConnectRoutePlan:
-		return routePlanSourceConnectRoutePlan
-	default:
-		return 0
-	}
-}
-
-func (p routeIntentProducer) Reason() routePlanReason {
-	switch p.Normalized() {
-	case routeIntentProducerAgentPolicy:
-		return routePlanReasonMatchedAgentSubscription
-	case routeIntentProducerDirectPolicy:
-		return routePlanReasonDirectPublish
-	case routeIntentProducerInternalTargetCarrier:
-		return routePlanReasonInternalCarrier
-	case routeIntentProducerInternalTargetRoute,
-		routeIntentProducerConcreteNodeRoute,
-		routeIntentProducerRootNodeRoute:
-		return routePlanReasonRouteTableNode
-	case routeIntentProducerRecipientMaterializer:
-		return routePlanReasonMaterializedRoute
-	case routeIntentProducerConnectRoutePlan:
-		return routePlanReasonLoweredConnectRoutePlan
-	default:
-		return 0
-	}
-}
-
 func (p routeIntentProducer) Empty() bool {
 	return p.Normalized() == routeIntentProducerUnknown
 }
 
 func routeIntentProducerCode(p routeIntentProducer) string {
-	p = p.Normalized()
-	source := p.Source()
-	reason := p.Reason()
-	if source == 0 {
-		return reason.code()
+	switch p.Normalized() {
+	case routeIntentProducerAgentPolicy:
+		return "agent_policy/matched_agent_subscription"
+	case routeIntentProducerDirectPolicy:
+		return "direct_policy/direct_publish"
+	case routeIntentProducerInternalTargetCarrier:
+		return "internal_target_route/internal_carrier"
+	case routeIntentProducerInternalTargetRoute:
+		return "internal_target_route/route_table_node"
+	case routeIntentProducerConcreteNodeRoute:
+		return "concrete_node_route/route_table_node"
+	case routeIntentProducerRootNodeRoute:
+		return "root_node_route/route_table_node"
+	case routeIntentProducerRecipientMaterializer:
+		return "recipient_plan_materializer/materialized_route"
+	case routeIntentProducerConnectRoutePlan:
+		return "connect_route_plan/lowered_connect_route_plan"
+	default:
+		return ""
 	}
-	if reason == 0 {
-		return source.code()
-	}
-	return source.code() + "/" + reason.code()
 }
 
 type RoutePlanAuthorityState uint8
@@ -211,7 +117,7 @@ type RoutePlan struct {
 	Event                    events.Event
 	ConnectEvaluation        events.ConnectEvaluationLedger
 	AuthorityState           RoutePlanAuthorityState
-	AuthorityOwner           routePlanSource
+	AuthorityOwner           routeIntentProducer
 	LiveRecipients           []RoutePlanLiveRecipient
 	DeliveryIntents          []RoutePlanDeliveryIntent
 	RoutedRecipients         []Subscriber
@@ -360,7 +266,7 @@ func newRoutePlan(evt events.Event) RoutePlan {
 
 func (p RoutePlan) Normalized() RoutePlan {
 	p.AuthorityState = normalizeRoutePlanAuthorityState(p.AuthorityState)
-	p.AuthorityOwner = normalizeRoutePlanSource(p.AuthorityOwner)
+	p.AuthorityOwner = p.AuthorityOwner.Normalized()
 	p.LiveRecipients = normalizeRoutePlanLiveRecipients(p.LiveRecipients)
 	p.DeliveryIntents = normalizeRoutePlanDeliveryIntents(p.DeliveryIntents)
 	p.RoutedRecipients = append([]Subscriber(nil), p.RoutedRecipients...)
@@ -401,7 +307,7 @@ func (p *RoutePlan) MarkCanonicalRouteMatched(producer routeIntentProducer) {
 		return
 	}
 	p.AuthorityState = RoutePlanAuthorityCanonicalMatched
-	p.AuthorityOwner = producer.Source()
+	p.AuthorityOwner = producer.Normalized()
 }
 
 func (p *RoutePlan) MarkCanonicalRouteFailedClosed(producer routeIntentProducer, failure runtimepinrouting.TargetFailure) {
@@ -409,7 +315,7 @@ func (p *RoutePlan) MarkCanonicalRouteFailedClosed(producer routeIntentProducer,
 		return
 	}
 	p.AuthorityState = RoutePlanAuthorityCanonicalFailedClosed
-	p.AuthorityOwner = producer.Source()
+	p.AuthorityOwner = producer.Normalized()
 	p.TargetFailure = failure
 	p.LiveRecipients = nil
 	p.DeliveryIntents = nil
@@ -423,7 +329,7 @@ func (p *RoutePlan) MarkLowerPrecedenceRouteProduction(producer routeIntentProdu
 	}
 	p.AuthorityState = RoutePlanAuthorityLowerPrecedence
 	if p.AuthorityOwner == 0 {
-		p.AuthorityOwner = producer.Source()
+		p.AuthorityOwner = producer.Normalized()
 	}
 }
 
@@ -770,17 +676,6 @@ func normalizeRoutePlanAuthorityState(state RoutePlanAuthorityState) RoutePlanAu
 		return RoutePlanAuthorityLowerPrecedence
 	default:
 		return RoutePlanAuthorityNoCanonicalMatch
-	}
-}
-
-func normalizeRoutePlanSource(source routePlanSource) routePlanSource {
-	switch source {
-	case routePlanSourceAgentPolicy, routePlanSourceDirectPolicy, routePlanSourceInternalTarget,
-		routePlanSourceConcreteNodeRoute, routePlanSourceRootNodeRoute,
-		routePlanSourceRecipientMaterializer, routePlanSourceConnectRoutePlan:
-		return source
-	default:
-		return 0
 	}
 }
 

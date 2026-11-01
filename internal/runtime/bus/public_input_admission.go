@@ -313,7 +313,7 @@ func requirePublicInputRoutePlan(ctx context.Context, routePlan RoutePlan) error
 	if !routePlan.TargetFailure.Empty() {
 		return fmt.Errorf("public input endpoint %s.%s is not routable: %s", admission.flowID, admission.pinName, routePlan.TargetFailure.Code())
 	}
-	if !routePlan.CanonicalRouteOwnerMatched() || routePlan.AuthorityOwner != routePlanSourceConnectRoutePlan {
+	if !routePlan.CanonicalRouteOwnerMatched() || routePlan.AuthorityOwner != routeIntentProducerConnectRoutePlan {
 		return fmt.Errorf("public input endpoint %s.%s did not select the canonical connect route owner", admission.flowID, admission.pinName)
 	}
 	if len(routePlan.DeliveryRoutes()) == 0 {
