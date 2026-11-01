@@ -83,7 +83,7 @@ func roleScopedEntityToolSchemaEntriesForActor(source semanticview.Source, actor
 func roleScopedEntityToolSchemaEntry(contract entityruntime.Contract, spec roleScopedEntityToolSpec) builtinToolDraft {
 	entry := builtinToolDraft{
 		Category:        "entity_persistence",
-		Description:     roleScopedEntityToolDescription(spec),
+		Description:     roleScopedEntityToolDescription(contract, spec),
 		InputSchema:     ObjectSchema(map[string]any{}),
 		GeneratedSchema: true,
 	}
@@ -172,19 +172,24 @@ func roleScopedEntityWholeReadOutputSchema(contract entityruntime.Contract) map[
 	return ObjectSchema(fieldProps)
 }
 
-func roleScopedEntityToolDescription(spec roleScopedEntityToolSpec) string {
+func roleScopedEntityToolDescription(contract entityruntime.Contract, spec roleScopedEntityToolSpec) string {
+	var description string
 	switch spec.Kind {
 	case roleScopedEntityToolReadWhole:
-		return fmt.Sprintf("Read the current turn %s entity. The target entity is resolved from the trigger event; no entity_id is accepted.", spec.EntityType)
+		description = fmt.Sprintf("Read the fields of this %s", spec.EntityType)
 	case roleScopedEntityToolReadField:
-		return fmt.Sprintf("Read %s from the current turn %s entity. The target entity is resolved from the trigger event; no entity_id is accepted.", spec.Field, spec.EntityType)
+		description = fmt.Sprintf("Read %s from this %s", spec.Field, spec.EntityType)
 	case roleScopedEntityToolSaveField:
-		return fmt.Sprintf("Save %s on the current turn %s entity. Omitted op or set replaces the whole value; append preserves duplicate list elements; update replaces an existing zero-based list index in fresh current state; set with key replaces a typed map entry. Only schema-declared operations are accepted. The target entity is resolved from the trigger event; no entity_id is accepted.", spec.Field, spec.EntityType)
+		description = fmt.Sprintf("Save %s on this %s", spec.Field, spec.EntityType)
 	case roleScopedEntityToolUpdatePath:
-		return fmt.Sprintf("Update %s.%s on the current turn %s entity. The target entity is resolved from the trigger event; no entity_id is accepted.", spec.Field, spec.Subpath, spec.EntityType)
+		description = fmt.Sprintf("Update %s.%s on this %s", spec.Field, spec.Subpath, spec.EntityType)
 	default:
 		return "Role-scoped entity tool."
 	}
+	if contract.Entity.Description != "" {
+		description += "\n" + contract.Entity.Description
+	}
+	return description
 }
 
 func roleScopedEntityToolSpecsForActor(source semanticview.Source, actor models.AgentConfig, contract entityruntime.Contract) map[string]roleScopedEntityToolSpec {
