@@ -812,7 +812,7 @@ func TestDeliveryPlanner_ComposesRoutingPolicyAndManifest(t *testing.T) {
 		if intent.Recipient.IsAgent() && intent.Recipient.LocalID() == "observer" && intent.Producer == routeIntentProducerOrdinary {
 			sawObserverAgent = true
 		}
-		if intent.Recipient.IsNode() && intent.Recipient.LocalID() == "worker" && intent.Producer == routeIntentProducerRootNodeRoute {
+		if intent.Recipient.IsNode() && intent.Recipient.LocalID() == "worker" && intent.Producer == routeIntentProducerOrdinary {
 			sawWorkerNode = true
 		}
 	}
@@ -873,7 +873,7 @@ func TestDeliveryPlanner_DoesNotDeadLetterExactlyTargetedRootWorkflowNodeSubscri
 		t.Fatalf("route plan delivery intents = %d, want %d", got, want)
 	}
 	intent := plan.DeliveryIntents[0]
-	if intent.Producer != routeIntentProducerInternalTargetRoute {
+	if intent.Producer != routeIntentProducerOrdinary {
 		t.Fatalf("route plan delivery intent = %#v, want internal targeted route-table node authority", intent)
 	}
 }
@@ -1029,7 +1029,7 @@ func TestDeliveryPlanner_ExpandsTargetSetForInternalWorkflowRecipient(t *testing
 	}
 	var semanticNodeRoutes int
 	for _, intent := range plan.DeliveryIntents {
-		if intent.Producer == routeIntentProducerInternalTargetRoute && (intent.Recipient.LocalID() == "child-a-listener" || intent.Recipient.LocalID() == "child-b-listener") {
+		if intent.Producer == routeIntentProducerOrdinary && (intent.Recipient.LocalID() == "child-a-listener" || intent.Recipient.LocalID() == "child-b-listener") {
 			semanticNodeRoutes++
 		}
 	}
@@ -1431,7 +1431,7 @@ func TestDeliveryPlanner_NoTargetRootLocalEventWithFlowInstanceUsesRootNodeRoute
 		t.Fatalf("route plan delivery intents = %d, want %d", got, want)
 	}
 	intent := plan.DeliveryIntents[0]
-	if intent.Producer != routeIntentProducerRootNodeRoute {
+	if intent.Producer != routeIntentProducerOrdinary {
 		t.Fatalf("route plan delivery intent = %#v, want root route-table node source", intent)
 	}
 }
@@ -1534,8 +1534,8 @@ func TestDeliveryPlanner_StaticRootSameInstanceRouteUsesSelectedRunOwner(t *test
 	if len(plan.DeliveryIntents) != 1 {
 		t.Fatalf("delivery intents = %#v, want one exact concrete-node intent", plan.DeliveryIntents)
 	}
-	if got := plan.DeliveryIntents[0].Producer; got != routeIntentProducerRootNodeRoute {
-		t.Fatalf("delivery intent producer = %d, want %d", got, routeIntentProducerRootNodeRoute)
+	if got := plan.DeliveryIntents[0].Producer; got != routeIntentProducerOrdinary {
+		t.Fatalf("delivery intent producer = %d, want %d", got, routeIntentProducerOrdinary)
 	}
 }
 

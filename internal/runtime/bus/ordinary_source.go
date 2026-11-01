@@ -217,9 +217,9 @@ func (s ordinaryPublicationSource) nodeIntents(source semanticview.Source, local
 			})
 		}
 	}
-	out := routePlanDeliveryIntentsFromRoutes(rootRoutes, routeIntentProducerRootNodeRoute)
+	out := routePlanDeliveryIntentsFromRoutes(rootRoutes, routeIntentProducerOrdinary)
 	out = append(out, routePlanDeliveryIntentsFromRoutes(concreteRoutes, routeIntentProducerConcreteNodeRoute)...)
-	return append(out, routePlanDeliveryIntentsFromRoutes(normalizePlannedDeliveryRoutes(targeted), routeIntentProducerInternalTargetRoute)...)
+	return append(out, routePlanDeliveryIntentsFromRoutes(normalizePlannedDeliveryRoutes(targeted), routeIntentProducerOrdinary)...)
 }
 
 func (s ordinaryPublicationSource) localNodeRoutes(source semanticview.Source, evt events.Event, routed []Subscriber) ([]plannedDeliveryRoute, []plannedDeliveryRoute) {
