@@ -333,6 +333,9 @@ func (p *activityLineageProofStore) RequireRunForkSelectedContractExecutionSettl
 			defer p.update(ctx, `UPDATE runs SET bundle_hash=$1 WHERE run_id=$2`, state.BundleHash, req.ForkRunID)
 			copy := req
 			copy.Refusal = "rooted execution context does not match the exact run source root"
+			if p.h.sqlite != nil {
+				copy.Refusal = "selected recovery binding changed"
+			}
 			p.requireRejected(t, ctx, copy)
 		})
 	}
