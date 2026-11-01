@@ -140,11 +140,12 @@ func providerResumeDecisionRecordedTx(ctx context.Context, tx *sql.Tx, sqlite bo
 	rows, err := tx.QueryContext(ctx, query+`JOIN event_delivery_attempts prior ON prior.delivery_id=a.origin_delivery_id
 		AND prior.claim_version=$2 AND prior.claim_token=$3
 		WHERE a.origin_delivery_id=$1 AND a.origin_claim_version=$2+1 AND o.effect_kind='provider_turn'
+		AND a.authority_evidence->'provider_call_journal'->'call'->>'predecessor_attempt_id'=$7
 		AND a.origin_run_id=$4 AND a.origin_route_identity=$5 AND a.origin_subscriber_id=$6 AND a.origin_subscriber_type='agent'
 		AND prior.closure_kind='settled' AND prior.open_marker=FALSE AND prior.completed_at IS NOT NULL
 		AND prior.outcome='retry_scheduled' AND prior.reason_code='effect_recovery_outcome_unconfirmed'
 		AND a.state='settled' AND o.state='settled' LIMIT 2`, recovered.OriginDeliveryID, recovered.OriginClaimVersion, recovered.OriginClaimToken,
-		recovered.OriginRunID, recovered.OriginRouteIdentity, recovered.OriginSubscriber)
+		recovered.OriginRunID, recovered.OriginRouteIdentity, recovered.OriginSubscriber, recovered.AttemptID)
 	if err != nil {
 		return false, err
 	}

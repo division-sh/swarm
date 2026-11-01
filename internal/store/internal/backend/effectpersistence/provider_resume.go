@@ -261,6 +261,9 @@ func loadProviderCallResumeTx(ctx context.Context, tx *sql.Tx, postgres bool, re
 		(req.Memory.Enabled && req.SessionID != journal.Call.SessionID) {
 		return result, fmt.Errorf("provider resume current source, actor or session contradicts its predecessor")
 	}
+	if completed, err := providerResumeDecisionRecordedTx(ctx, tx, !postgres, recovered, *journal, now); err != nil || completed {
+		return result, err
+	}
 	parent, err := providerResumeParentTx(ctx, tx, postgres, recovered, frame, now)
 	if err != nil {
 		return result, err
