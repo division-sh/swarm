@@ -22,14 +22,8 @@ func replayOpenAICompatibleToolRound(request *openAICompatibleRequest, session *
 		return err
 	}
 	projection := prior.Projection
-	if call.frame.Turn.Kind != agentframe.TurnToolContinuation ||
-		(projection.Memory.Enabled && projection.SessionID != session.ID) || projection.Identity.Normalize() != session.MemoryIdentity.Normalize() ||
-		projection.Memory != session.Memory || projection.TurnCount != session.TurnCount ||
-		projection.FrameID == "" || projection.FrameID != call.frame.Turn.ParentFrameID ||
-		len(session.Messages) != len(projection.Messages) ||
-		!round.Surface.MatchesActor(session.MemoryIdentity) || round.Surface.Authority.SessionID != session.ID ||
-		round.Surface.RuntimeMode != call.provider.RuntimeMode || round.Surface.Provider != call.provider.Provider || round.Surface.Transport != call.provider.Transport {
-		return fmt.Errorf("openai-compatible tool continuation predecessor differs from acquired session/frame")
+	if err := requireOpenAICompatibleRoundSession(session, call, projection); err != nil {
+		return err
 	}
 	if successor, ok := round.ToolContinuation(); ok &&
 		(successor.ParentFrameID() != call.frame.Turn.ParentFrameID || !bytes.Equal(successor.ToolResult(), call.frame.Turn.ToolResult)) {
@@ -61,5 +55,19 @@ func replayOpenAICompatibleToolRound(request *openAICompatibleRequest, session *
 	assistant.Role = "assistant"
 	request.Messages = append(previousRequest.Messages, assistant)
 	request.Messages = append(request.Messages, toOpenAICompatibleMessages(call.message)...)
+	return nil
+}
+
+func requireOpenAICompatibleRoundSession(session *Session, call *managedProviderCall, projection completionProjection) error {
+	surface := call.toolRound.Surface
+	if call.frame.Turn.Kind != agentframe.TurnToolContinuation ||
+		(projection.Memory.Enabled && projection.SessionID != session.ID) || projection.Identity.Normalize() != session.MemoryIdentity.Normalize() ||
+		projection.Memory != session.Memory || projection.TurnCount != session.TurnCount ||
+		projection.FrameID == "" || projection.FrameID != call.frame.Turn.ParentFrameID ||
+		len(session.Messages) != len(projection.Messages) ||
+		!surface.MatchesActor(session.MemoryIdentity) || surface.Authority.SessionID != session.ID ||
+		surface.RuntimeMode != call.provider.RuntimeMode || surface.Provider != call.provider.Provider || surface.Transport != call.provider.Transport {
+		return fmt.Errorf("openai-compatible tool continuation predecessor differs from acquired session/frame")
+	}
 	return nil
 }
