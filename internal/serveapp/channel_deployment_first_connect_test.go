@@ -84,14 +84,13 @@ func TestChannelConnectWhatsAppRegistersAccountBothStores(t *testing.T) {
 							default:
 							}
 						}
-						if checkpoint && view.Paired && !view.Connected && result.Operation.Phase == channelonboarding.PhaseActivatingProvider {
+						if checkpoint && view.Paired && !view.Connected && result.Operation.Phase == channelonboarding.PhaseActivatingProvider && pendingCheckpoint.CompareAndSwap(false, true) {
 							peer.mu.Lock()
 							beforeEnd := peer.connections == 1 && peer.disconnected == 0
 							peer.mu.Unlock()
 							if !beforeEnd {
 								t.Error("first pending checkpoint did not precede stream end")
 							}
-							pendingCheckpoint.Store(true)
 							release.Do(func() { close(streamEnd) })
 						}
 					}
