@@ -1282,12 +1282,15 @@ func (s *postgresPipelineObligationStore) MarkDecisionProcessed(ctx context.Cont
 		if err != nil {
 			return struct{}{}, err
 		}
+		if err := postgresDeliveryAdapter.CommitPipelineHandoff(txctx, attempt, claim.EventID()); err != nil {
+			return struct{}{}, err
+		}
 		if runID != "" {
 			if _, err := attempt.RequestCompletion(txctx, s.candidateRequests, runID, nil); err != nil {
 				return struct{}{}, err
 			}
 		}
-		return struct{}{}, postgresDeliveryAdapter.CommitPipelineHandoff(txctx, attempt, claim.EventID())
+		return struct{}{}, nil
 	})
 	if !outcome.Acknowledged() {
 		return runtimepipelineobligation.SettlementOutcome{}, pipelineObligationMutationError(outcome)
@@ -1333,12 +1336,15 @@ func (s *sqlitePipelineObligationStore) MarkDecisionProcessed(ctx context.Contex
 		if err != nil {
 			return struct{}{}, err
 		}
+		if err := sqliteDeliveryAdapter.CommitPipelineHandoff(txctx, attempt, claim.EventID()); err != nil {
+			return struct{}{}, err
+		}
 		if runID != "" {
 			if _, err := attempt.RequestCompletion(txctx, s.candidateRequests, runID, nil); err != nil {
 				return struct{}{}, err
 			}
 		}
-		return struct{}{}, sqliteDeliveryAdapter.CommitPipelineHandoff(txctx, attempt, claim.EventID())
+		return struct{}{}, nil
 	})
 	if !outcome.Acknowledged() {
 		return runtimepipelineobligation.SettlementOutcome{}, pipelineObligationMutationError(outcome)
