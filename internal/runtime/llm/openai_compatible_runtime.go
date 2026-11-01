@@ -527,6 +527,11 @@ func (r *OpenAICompatibleRuntime) sendRequest(ctx context.Context, payload []byt
 	if err := attempt.MarkResponseObserved(heartbeatCtx, dispatch.evidence); !dispatch.retainCommittedMutation(err, runtimeeffects.MutationObservation) {
 		return body, openAICompatibleResponse{}, dispatch, finishCompletionDispatchHeartbeat(dispatch, heartbeat, err)
 	}
+	if httpResp.StatusCode >= 400 && httpResp.StatusCode < 500 {
+		dispatch.state = runtimeeffects.StateTerminalFailure
+		err = providerStatusFailure("openai_compatible", httpResp.StatusCode, body)
+		return body, openAICompatibleResponse{}, dispatch, finishCompletionDispatchHeartbeat(dispatch, heartbeat, err)
+	}
 
 	var parsed openAICompatibleResponse
 	if err := json.Unmarshal(body, &parsed); err != nil {
@@ -534,7 +539,7 @@ func (r *OpenAICompatibleRuntime) sendRequest(ctx context.Context, payload []byt
 		return body, openAICompatibleResponse{}, dispatch, finishCompletionDispatchHeartbeat(dispatch, heartbeat, err)
 	}
 	if httpResp.StatusCode >= 300 {
-		err = runtimefailures.Wrap(runtimefailures.ClassOutcomeUncertain, "provider_http_status_effect_outcome_unconfirmed", "openai-compatible-adapter", "send_request", map[string]any{"status": httpResp.StatusCode}, providerStatusFailure("openai_compatible", httpResp.StatusCode))
+		err = runtimefailures.Wrap(runtimefailures.ClassOutcomeUncertain, "provider_http_status_effect_outcome_unconfirmed", "openai-compatible-adapter", "send_request", map[string]any{"status": httpResp.StatusCode}, providerStatusFailure("openai_compatible", httpResp.StatusCode, body))
 		return body, parsed, dispatch, finishCompletionDispatchHeartbeat(dispatch, heartbeat, err)
 	}
 	if parsed.Error.Message != "" {
@@ -686,7 +691,7 @@ type openAICompatibleRequest struct {
 
 type openAICompatibleMessage struct {
 	Role       string                     `json:"role"`
-	Content    string                     `json:"content,omitempty"`
+	Content    string                     `json:"content"`
 	ToolCallID string                     `json:"tool_call_id,omitempty"`
 	ToolCalls  []openAICompatibleToolCall `json:"tool_calls,omitempty"`
 }

@@ -523,6 +523,11 @@ func (r *OpenAIResponsesRuntime) sendRequest(ctx context.Context, payload []byte
 	if err := attempt.MarkResponseObserved(heartbeatCtx, dispatch.evidence); !dispatch.retainCommittedMutation(err, runtimeeffects.MutationObservation) {
 		return body, openAIResponsesResponse{}, dispatch, finishCompletionDispatchHeartbeat(dispatch, heartbeat, err)
 	}
+	if httpResp.StatusCode >= 400 && httpResp.StatusCode < 500 {
+		dispatch.state = runtimeeffects.StateTerminalFailure
+		err = providerStatusFailure("openai_responses", httpResp.StatusCode, body)
+		return body, openAIResponsesResponse{}, dispatch, finishCompletionDispatchHeartbeat(dispatch, heartbeat, err)
+	}
 
 	var parsed openAIResponsesResponse
 	if err := json.Unmarshal(body, &parsed); err != nil {
@@ -530,7 +535,7 @@ func (r *OpenAIResponsesRuntime) sendRequest(ctx context.Context, payload []byte
 		return body, openAIResponsesResponse{}, dispatch, finishCompletionDispatchHeartbeat(dispatch, heartbeat, err)
 	}
 	if httpResp.StatusCode >= 300 {
-		err = runtimefailures.Wrap(runtimefailures.ClassOutcomeUncertain, "provider_http_status_effect_outcome_unconfirmed", "openai-responses-adapter", "send_request", map[string]any{"status": httpResp.StatusCode}, providerStatusFailure("openai_responses", httpResp.StatusCode))
+		err = runtimefailures.Wrap(runtimefailures.ClassOutcomeUncertain, "provider_http_status_effect_outcome_unconfirmed", "openai-responses-adapter", "send_request", map[string]any{"status": httpResp.StatusCode}, providerStatusFailure("openai_responses", httpResp.StatusCode, body))
 		return body, parsed, dispatch, finishCompletionDispatchHeartbeat(dispatch, heartbeat, err)
 	}
 	if parsed.Error.Message != "" {
