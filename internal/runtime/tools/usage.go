@@ -19,7 +19,7 @@ var builtinToolUsageHints = map[string]string{
 	"get_entity":        "Read one existing entity by entity_id. Use flow_instance only as the owning-flow guard/address when needed; it must match the entity's owning flow root or instance. Returns envelope fields plus declared entity fields.",
 	"save_entity_field": "Write exactly one delivered writable field on an entity owned by your current flow. Do not write upstream/root/source entities from triggering events. Use only field names from this tool's enum/session writable-path summary. Value must match the declared field shape; lists require arrays and objects require objects.",
 	"query_entities":    "Read/query entity_state rows. entity_type, select, group_by, and filter paths must use delivered enum/declared scalar or enum leaf names. filter is CEL, so equality is ==, strings are quoted, and assignment = is invalid.",
-	"search_entities":   "Search entity_state rows with object field filters. entity_type and filter keys must use delivered declared field names for the target entity contract. Use query_entities when you need CEL, select, or group_by.",
+	"search_entities":   "Search entity_state rows with object field filters. entity_type and filter keys must use delivered declared field names for the target entity contract.",
 	"query_metrics":     "Aggregate entity_state rows. metric must be one of the delivered enum values. field and group_by must use delivered scalar or enum selector names. filter is CEL, so equality is == and strings are quoted.",
 	"read_flow_data":    "Read only data admitted for this actor and run. Use static_file with a delivered static_id, resource_row with one structured declaration and its key or position, or resource_rows with one structured declaration and a bounded page. Resource reads use the run-pinned version; continue only with the returned cursor. Do not provide filenames or host paths, select latest versions, or use this tool for mutable artifacts.",
 }
@@ -28,10 +28,8 @@ var nativeFallbackUsageHints = map[string]string{
 	"bash":       "Use only for local workspace commands. Provide command as a string and timeout_seconds when needed. Docker-backed bash exposes /workspace, /data, and /opt/swarm/source as OS paths; trusted host bash is full host-user shell execution from the workspace backing directory. Use relative paths for workspace files; absolute paths follow the host deployment namespace and OS permissions. Do not use for workflow event emission or entity persistence.",
 	"web_search": "Use for external web research only. Provide a concise query and max_results when needed. Do not use it to read Swarm entity state; use entity tools for that.",
 	"read_file":  "Read files by exact path from the workspace or mounted read-only data/contracts paths. Do not use for entity_state reads.",
-	"write_file": "Write files only within the agent workspace. Do not use file writes as a substitute for emit_* event publication or save_entity_field persistence.",
+	"write_file": "Write files only within the agent workspace. Do not use file writes as a substitute for workflow event publication or entity persistence.",
 }
-
-var emitToolUsageHint = "Call this emit_* tool only to publish the named workflow event. Provide concrete JSON payload values matching the input schema. Do not include envelope-owned fields unless the schema declares them. Arguments are concrete payload values, not workflow expressions."
 
 func runtimeOwnedToolUsage(name string) string {
 	name = strings.TrimSpace(name)
@@ -45,10 +43,6 @@ func runtimeOwnedToolUsage(name string) string {
 		return usage
 	}
 	return ""
-}
-
-func EmitToolUsage() string {
-	return emitToolUsageHint
 }
 
 func DescriptionWithUsage(description, usage string) string {
@@ -124,27 +118,11 @@ func validateEmitToolUsageHintCoverage(source semanticview.Source) []UsageHintFi
 	}
 	for _, actor := range actors {
 		for _, def := range registry.GenerateEmitToolsForActor(actor, nil) {
-			usage := strings.TrimSpace(def.Usage)
-			if usage == "" {
+			if strings.TrimSpace(def.Description) == "" {
 				findings = append(findings, UsageHintFinding{
 					ToolName: def.Name,
 					Severity: "error",
-					Message:  fmt.Sprintf("generated platform-owned emit tool %s is missing the shared usage hint", def.Name),
-				})
-				continue
-			}
-			if strings.Contains(strings.ToLower(usage), "cel") {
-				findings = append(findings, UsageHintFinding{
-					ToolName: def.Name,
-					Severity: "error",
-					Message:  fmt.Sprintf("generated platform-owned emit tool %s usage hint must not instruct agent-facing CEL arguments", def.Name),
-				})
-			}
-			if runeLen(usage) > maxUsageHintRunes {
-				findings = append(findings, UsageHintFinding{
-					ToolName: def.Name,
-					Severity: "lint",
-					Message:  fmt.Sprintf("generated emit tool %s usage hint is over %d characters; keep provider-facing usage concise", def.Name, maxUsageHintRunes),
+					Message:  fmt.Sprintf("generated emit tool %s is missing its model-facing description", def.Name),
 				})
 			}
 		}

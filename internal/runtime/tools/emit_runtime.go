@@ -102,8 +102,7 @@ func (r *EmitRegistry) GenerateEmitToolsForActor(actor models.AgentConfig, warn 
 			schema = closeGeneratedEmitSchema(schema)
 			tools = append(tools, llm.ToolDefinition{
 				Name:            toolName,
-				Description:     schema.Description,
-				Usage:           EmitToolUsage(),
+				Description:     fmt.Sprintf("Send a %s event", eventType),
 				Schema:          schema.Schema,
 				GeneratedSchema: true,
 			})

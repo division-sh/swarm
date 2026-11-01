@@ -171,8 +171,8 @@ func managedHITLToolDescriptors() []hitlToolDescriptor {
 	return []hitlToolDescriptor{
 		{
 			name:        NotifyHumanToolName,
-			description: "Sends an informational notice to the human operator. Does NOT request approval and does not pause the flow - to ask for a decision that gates the flow, use ask_human.",
-			usage:       "Use for an informational operator notice only. Provide summary and optional context. The flow continues without waiting for a reply; use ask_human when a human verdict must gate the flow.",
+			description: "Send a notice to the human operator. The conversation continues without waiting for a reply.",
+			usage:       "Provide a summary and optional context for the notice.",
 			grant:       hitlGrantUniversal,
 			draft:       notifyHumanContractSchema,
 		},
