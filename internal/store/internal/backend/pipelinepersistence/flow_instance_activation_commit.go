@@ -34,6 +34,23 @@ func commitFlowInstanceActivations(
 	committed := make([]runtimepipeline.CommittedFlowInstanceActivation, 0, len(plans))
 	seen := make(map[string]struct{}, len(plans))
 	err := attempt.WithSQL(ctx, func(ctx context.Context, tx *sql.Tx) error {
+		if postgres {
+			for _, plan := range plans {
+				if err := plan.Validate(); err != nil {
+					return err
+				}
+				if err := requirePostgresRunActive(ctx, tx, plan.Readiness.RunID); err != nil {
+					return err
+				}
+			}
+			owners, err := workflowActivationLockOwners(nil, plans)
+			if err != nil {
+				return err
+			}
+			if err := lockWorkflowInstancesTx(ctx, tx, true, owners); err != nil {
+				return err
+			}
+		}
 		for index, plan := range plans {
 			if err := plan.Validate(); err != nil {
 				return err
@@ -199,10 +216,6 @@ func commitFlowInstanceActivation(
 	if postgres {
 		if err := requirePostgresRunActive(ctx, tx, record.Identity.RunID); err != nil {
 			return false, runtimepipeline.CommittedWorkflowLifecycleMutation{}, err
-		}
-		lockIdentity := fmt.Sprintf("%d:%s%s", len(record.Identity.RunID), record.Identity.RunID, record.Identity.Route.InstancePath)
-		if _, err := tx.ExecContext(ctx, `SELECT pg_advisory_xact_lock(hashtextextended($1, 0))`, lockIdentity); err != nil {
-			return false, runtimepipeline.CommittedWorkflowLifecycleMutation{}, fmt.Errorf("lock flow activation route: %w", err)
 		}
 	} else if err := requireSQLiteRunActive(ctx, tx, record.Identity.RunID); err != nil {
 		return false, runtimepipeline.CommittedWorkflowLifecycleMutation{}, err

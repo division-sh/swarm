@@ -41,7 +41,25 @@ func commitDecisionCardOperation(
 	outcome := run(ctx, func(txctx context.Context, attempt *mutationprotocol.Attempt) (runtimepipeline.CommittedDecisionCardMutation, error) {
 		result := runtimepipeline.CommittedDecisionCardMutation{Kind: command.Mutation.Kind()}
 		err := attempt.WithSQL(txctx, func(txctx context.Context, tx *sql.Tx) error {
-			if err := admitDecisionCardAnchorTx(txctx, tx, attempt, decisions, command.Mutation, postgres); err != nil {
+			var owners []runtimeflowidentity.RunScopedFlowInstance
+			if command.GateState != nil {
+				owners = append(owners, command.GateState.Identity)
+			}
+			for _, value := range []runtimeengine.DurablePublicationPlan{command.Publication, command.ForcedDeferralPublication} {
+				if value == nil {
+					continue
+				}
+				plan, ok := value.(runtimebus.EnginePublicationPlan)
+				if !ok {
+					return fmt.Errorf("decision-card publication has unexpected type %T", value)
+				}
+				var err error
+				owners, err = workflowPublicationLockOwners(owners, plan.PublicationCommand())
+				if err != nil {
+					return err
+				}
+			}
+			if err := admitDecisionCardAnchorTx(txctx, tx, attempt, decisions, command.Mutation, postgres, owners); err != nil {
 				return err
 			}
 			var selected runtimeengine.DurablePublicationPlan
@@ -151,7 +169,7 @@ func commitDecisionCardOperation(
 	return result, errors.Join(outcome.Err(), result.Validate(), store.publishCardChanges(acknowledged, result.ChannelCardsChanged))
 }
 
-func admitDecisionCardAnchorTx(ctx context.Context, tx *sql.Tx, attempt *mutationprotocol.Attempt, decisions decisionCardMutationTxOwner, mutation runtimepipeline.DecisionCardMutation, postgres bool) error {
+func admitDecisionCardAnchorTx(ctx context.Context, tx *sql.Tx, attempt *mutationprotocol.Attempt, decisions decisionCardMutationTxOwner, mutation runtimepipeline.DecisionCardMutation, postgres bool, owners []runtimeflowidentity.RunScopedFlowInstance) error {
 	var cardID string
 	switch mutation.Kind() {
 	case runtimepipeline.DecisionCardMutationDecide:
@@ -178,10 +196,14 @@ func admitDecisionCardAnchorTx(ctx context.Context, tx *sql.Tx, attempt *mutatio
 		return err
 	}
 	if card.Anchor.Kind() != decisioncard.AnchorKindStageGate {
-		return nil
+		return lockWorkflowInstancesTx(ctx, tx, postgres, owners)
 	}
 	anchor, err := card.Anchor.StageGate()
 	if err != nil {
+		return err
+	}
+	owners = append(owners, runtimeflowidentity.RunScopedFlowInstance{RunID: card.RunID, Route: anchor.Route})
+	if err := lockWorkflowInstancesTx(ctx, tx, postgres, owners); err != nil {
 		return err
 	}
 	query := sqliteWorkflowInstanceSelect + ` WHERE fi.run_id = ? AND fi.entity_id = ? AND fi.instance_path = ?`
