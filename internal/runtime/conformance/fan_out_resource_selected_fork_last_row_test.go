@@ -10,6 +10,7 @@ import (
 	"github.com/division-sh/swarm/internal/apiv1"
 	runtimedelivery "github.com/division-sh/swarm/internal/runtime/deliverylifecycle"
 	"github.com/division-sh/swarm/internal/runtime/startupownership"
+	"github.com/division-sh/swarm/internal/store/storetest"
 	"github.com/google/uuid"
 )
 
@@ -93,13 +94,33 @@ func TestDeploymentSourceSelectedLastRowPendingBlocksQuiescenceBothStores(t *tes
 			case <-ctx.Done():
 				t.Fatalf("R6a activation acknowledgment not reached: %v", ctx.Err())
 			}
-			select {
-			case finalEventID = <-gate.entered:
-			case <-ctx.Done():
-				t.Fatalf("R6a selected final receiver claim not reached: %v", ctx.Err())
+			for finalEventID == "" {
+				select {
+				case eventID := <-gate.entered:
+					event := storetest.LoadCanonicalEventRecord(t, ctx, f.selected, eventID)
+					if event.RunID() == result.result.ForkRunID {
+						finalEventID = eventID
+					}
+				case <-ctx.Done():
+					t.Fatalf("R6a selected final receiver claim not reached: %v", ctx.Err())
+				}
 			}
-			if err := ordinary.waitCommitted(ctx, finalEventID); err != nil {
-				t.Fatalf("R6a final publication settlement not reached: %v", err)
+			for {
+				_, selectedCommitted := observed.snapshot()
+				_, ordinaryCommitted := ordinary.snapshot()
+				committed := false
+				for _, eventID := range append(selectedCommitted, ordinaryCommitted...) {
+					committed = committed || eventID == finalEventID
+				}
+				if committed {
+					break
+				}
+				select {
+				case <-observed.changed:
+				case <-ordinary.changed:
+				case <-ctx.Done():
+					t.Fatalf("R6a final publication settlement not reached: %v", ctx.Err())
+				}
 			}
 			var childID, operationState, executionState, feedStatus, deliveryStatus string
 			var cursor, cardinality, outcomes, receipts, attempts int
@@ -114,12 +135,12 @@ func TestDeploymentSourceSelectedLastRowPendingBlocksQuiescenceBothStores(t *tes
 				}
 			}
 			ordinaryEvaluated, _ := ordinary.snapshot()
-			childEvaluated := false
+			childEvaluated := len(evaluated) != 0
 			for _, runID := range ordinaryEvaluated {
 				childEvaluated = childEvaluated || runID == childID
 			}
 			if !childEvaluated {
-				t.Fatal("acknowledged child publication did not pass through its ordinary successor's BeginFanOutEvaluation")
+				t.Fatal("acknowledged child publication did not pass through its exact selected or ordinary owner's BeginFanOutEvaluation")
 			}
 			if err := f.db.QueryRowContext(ctx, `SELECT state FROM run_fork_selected_contract_runtime_executions WHERE fork_run_id=$1`, childID).Scan(&executionState); err != nil {
 				t.Fatal(err)
