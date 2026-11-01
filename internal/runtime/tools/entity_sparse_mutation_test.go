@@ -523,7 +523,7 @@ writer:
 			}
 			assertSparseToolContinuation(t, whole, fields)
 			if _, err := exec.Execute(ctx, "read_state_label", map[string]any{}); err == nil {
-				t.Fatal("unassigned typed field read returned a fabricated value")
+				t.Fatal("retired per-field read remained callable")
 			}
 			for _, tc := range []struct {
 				name  string

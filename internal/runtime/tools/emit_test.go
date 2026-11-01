@@ -62,11 +62,8 @@ func TestGenerateEmitToolsForActor_RequiresExplicitDeclarationPermission(t *test
 	tools := registry.GenerateEmitToolsForActor(actor, nil)
 	for _, def := range tools {
 		if def.Name == "emit_scan_requested" {
-			if strings.TrimSpace(def.Usage) == "" {
-				t.Fatal("emit_scan_requested usage hint is empty")
-			}
-			if strings.Contains(strings.ToLower(def.Usage), "cel") {
-				t.Fatalf("emit usage should not mention CEL: %q", def.Usage)
+			if got := llm.DeliveredToolDescription(def); got != "Send a scan.requested event" {
+				t.Fatalf("declared emit model description = %q", got)
 			}
 			schema := def.Schema.(map[string]any)
 			if err := ValidatePayloadAgainstSchema(schema, map[string]any{
