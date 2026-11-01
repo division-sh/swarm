@@ -135,15 +135,17 @@ func writeProviderEvidenceSource(t *testing.T, cell string) string {
 }
 
 func providerEvidenceReply(request llmapi.Request, cell string) (llmapi.Reply, error) {
+	const reasoning = "synthetic evidence reasoning"
 	if cell == "refusal" {
 		return llmapi.Reply{StatusCode: http.StatusBadRequest, ErrorBody: `{"error":{"message":"synthetic request shape refused"}}`}, nil
 	}
 	var body struct {
 		Messages []struct {
-			Role    string `json:"role"`
-			Content string `json:"content"`
-			CallID  string `json:"tool_call_id"`
-			Calls   []struct {
+			Role      string `json:"role"`
+			Content   string `json:"content"`
+			CallID    string `json:"tool_call_id"`
+			Reasoning string `json:"reasoning_content"`
+			Calls     []struct {
 				ID string `json:"id"`
 			} `json:"tool_calls"`
 		} `json:"messages"`
@@ -177,6 +179,9 @@ func providerEvidenceReply(request llmapi.Request, cell string) (llmapi.Reply, e
 			linked = map[string]bool{}
 			for _, call := range message.Calls {
 				linked[call.ID] = true
+				if call.ID == "synthetic-read" && message.Reasoning != reasoning {
+					return llmapi.Reply{StatusCode: http.StatusBadRequest, ErrorBody: `{"error":{"message":"synthetic strict provider: thinking tool round requires reasoning_content"}}`}, nil
+				}
 			}
 		}
 		if message.Role == "tool" && !linked[message.CallID] {
@@ -197,7 +202,7 @@ func providerEvidenceReply(request llmapi.Request, cell string) (llmapi.Reply, e
 		for _, tool := range body.Tools {
 			if ids := tool.Function.Parameters.Properties["static_id"].Enum; tool.Function.Name == "read_flow_data" && len(ids) == 1 {
 				args, _ := json.Marshal(map[string]any{"kind": "static_file", "static_id": ids[0]})
-				return llmapi.Reply{ID: "synthetic-read", Model: "deepseek-flash", InputTokens: 1, OutputTokens: 1, Tools: []llmapi.ToolCall{{ID: "synthetic-read", Name: "read_flow_data", Arguments: args}}}, nil
+				return llmapi.Reply{ID: "synthetic-read", Model: "deepseek-flash", Reasoning: reasoning, InputTokens: 1, OutputTokens: 1, Tools: []llmapi.ToolCall{{ID: "synthetic-read", Name: "read_flow_data", Arguments: args}}}, nil
 			}
 		}
 		return llmapi.Reply{}, fmt.Errorf("read-only evidence tool absent")
