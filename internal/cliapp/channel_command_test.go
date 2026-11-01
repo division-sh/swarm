@@ -62,7 +62,7 @@ func TestOperatorChannelCLIUsesAuthenticatedAPIAndExactSelectors(t *testing.T) {
 			writeDeploymentAccountStatus(&out, channelonboarding.AccountStatus{Provider: "whatsapp", Account: "+15550100123", State: "registered", Linked: linked})
 			want := "run swarm channel connect whatsapp"
 			if linked {
-				want = "set operator_account in a flow's policy.yaml; Telegram receives after a serve restart, WhatsApp receives live"
+				want = "set operator_account in a flow's policy.yaml; Telegram and WhatsApp receive live"
 			}
 			if !strings.Contains(out.String(), "idle") || !strings.Contains(out.String(), want) {
 				t.Fatal("idle account omitted the linking or flow step", linked, out.String())

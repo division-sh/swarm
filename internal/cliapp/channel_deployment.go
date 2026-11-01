@@ -385,7 +385,7 @@ func (c *DeploymentChannelControl) ConsumeWebhookClaim(ctx context.Context, acco
 	if consumed, err := c.registeredOperatorInput(ctx, account, credential, admit, current, plans); consumed || err != nil {
 		return consumed, err
 	}
-	return c.session.ConsumeWebhookClaim(ctx, account, credential, admit, current)
+	return c.session.ConsumeWebhookClaim(ctx, account, credential, admit, current, plans...)
 }
 
 func (c *DeploymentChannelControl) registeredOperatorInput(ctx context.Context, account channelonboarding.AccountReference, credential func(channelonboarding.CredentialAdmission) bool, admit func() (providertriggers.Delivery, error), current func() bool, plans []packs.SatisfactionPlan) (bool, error) {
@@ -566,7 +566,7 @@ func writeDeploymentAccountStatus(w io.Writer, status channelonboarding.AccountS
 		role = "held by " + status.Holders[0].Flow
 	} else if len(status.Holders) == 0 {
 		if status.Linked {
-			role += " (set operator_account in a flow's policy.yaml; Telegram receives after a serve restart, WhatsApp receives live)"
+			role += " (set operator_account in a flow's policy.yaml; Telegram and WhatsApp receive live)"
 		} else {
 			role += " (run swarm channel connect " + cliSanitizeOneLineValue(status.Provider) + ")"
 		}
