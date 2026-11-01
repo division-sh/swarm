@@ -144,7 +144,7 @@ func TestServeLifecyclePresenterConciseReadinessUsesTypedFacts(t *testing.T) {
 		t.Fatalf("credential facts were key-deduplicated, repeated, or fabricated:\n%s", text)
 	}
 	for _, state := range []string{"none", "stopped", "refused", "live"} {
-		for _, scope := range []string{"exact", "provider", "bundle", "flow", "unlinked", "recovery", "invalid", "http"} {
+		for _, scope := range []string{"exact", "base", "provider", "bundle", "flow", "unlinked", "recovery", "credentials", "invalid", "http"} {
 			t.Run(state+"/"+scope, func(t *testing.T) {
 				bundle, enabled := "bundle-v2:sha256:"+strings.Repeat("a", 64), false
 				subject := packs.Subject{
@@ -162,6 +162,8 @@ func TestServeLifecyclePresenterConciseReadinessUsesTypedFacts(t *testing.T) {
 					Holders: []channelonboarding.AccountHolder{{BundleHash: bundle, Flow: "frontdesk"}}}
 				registrations := 0
 				switch scope {
+				case "base":
+					subject.TriggerAdmission.BindingBlockReason = ""
 				case "provider":
 					account.Provider = "telegram"
 				case "bundle":
@@ -173,6 +175,8 @@ func TestServeLifecyclePresenterConciseReadinessUsesTypedFacts(t *testing.T) {
 				case "recovery":
 					subject.TriggerAdmission.BindingBlockReason = "recovery_required"
 					subject.TriggerAdmission.RecoveryOperationID, subject.TriggerAdmission.RecoveryCommand = "recovery-operation", "swarm channel connect whatsapp"
+				case "credentials":
+					subject.TriggerAdmission.BindingBlockReason = "credentials_absent"
 				case "invalid":
 					subject.TriggerAdmission.RequestAuthentication = "HMAC_SHA256"
 				case "http":
@@ -192,7 +196,7 @@ func TestServeLifecyclePresenterConciseReadinessUsesTypedFacts(t *testing.T) {
 				}})
 				text := output.String()
 				wantWarning := registrations == 0 && (state != "live" || scope == "unlinked")
-				wantCapability := state != "live" || scope != "exact" && scope != "http"
+				wantCapability := state != "live" || scope != "exact" && scope != "base" && scope != "http"
 				if strings.Contains(text, "No channels connected yet") != wantWarning || strings.Contains(text, "  capability ") != wantCapability {
 					t.Fatalf("warning=%t capability=%t expected:\n%s", wantWarning, wantCapability, text)
 				}
