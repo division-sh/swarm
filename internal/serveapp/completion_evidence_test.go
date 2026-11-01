@@ -539,12 +539,17 @@ func proveCompletion2270ServedSelected(t *testing.T, rt completion2270ServedProo
 
 func buildCompletion2270CLIImage(t *testing.T) string {
 	t.Helper()
+	return buildCompletion2270CLIImageWithProgram(t, completion2270CLIProgram)
+}
+
+func buildCompletion2270CLIImageWithProgram(t *testing.T, program string) string {
+	t.Helper()
 	base, err := exec.Command("docker", "image", "inspect", "--format", "{{.Id}}", "swarm-workspace:latest").CombinedOutput()
 	if err != nil {
 		t.Fatalf("inspect protocol-proof base image: %v: %s", err, base)
 	}
 	root, image := t.TempDir(), "swarm-completion-proof:"+uuid.NewString()
-	if err := os.WriteFile(filepath.Join(root, "completion-proof-cli"), []byte(completion2270CLIProgram), 0o755); err != nil {
+	if err := os.WriteFile(filepath.Join(root, "completion-proof-cli"), []byte(program), 0o755); err != nil {
 		t.Fatal(err)
 	}
 	if err := os.WriteFile(filepath.Join(root, completion2270InvocationFile), nil, 0o600); err != nil {
