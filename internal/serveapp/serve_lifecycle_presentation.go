@@ -816,7 +816,7 @@ func (p *serveLifecyclePresenter) writeStandingIngressLocked(facts []serveLifecy
 
 func serveSessionAdmissionObserved(fact serveLifecycleIngressFact, accounts []channelonboarding.AccountStatus) bool {
 	if !sessionIngressFact(fact) || fact.Subject.Status != packs.StatusNotReady ||
-		fact.Subject.TriggerAdmission.BindingBlockReason != string(runtimerunlifecycle.StandingBindingSessionRequired) {
+		fact.Subject.TriggerAdmission.BindingBlockReason != "" && fact.Subject.TriggerAdmission.BindingBlockReason != string(runtimerunlifecycle.StandingBindingSessionRequired) {
 		return false
 	}
 	if _, err := packs.NormalizeSubjects([]packs.Subject{fact.Subject}); err != nil {
