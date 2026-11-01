@@ -1933,9 +1933,6 @@ func buildRuntimeComposition(ctx context.Context, req runtimeCompositionRequest)
 			presenter.fail(22, "public_ingress", err)
 			return 1
 		}
-		if len(initialRegistrationPairs) == 0 {
-			presenter.recordNoConnectedChannels()
-		}
 	}
 	if opts.TestRuntimeReadyHook != nil && rt != nil {
 		opts.TestRuntimeReadyHook(rt)
@@ -1982,6 +1979,9 @@ func buildRuntimeComposition(ctx context.Context, req runtimeCompositionRequest)
 	if err != nil {
 		presenter.fail(22, "channel_registration", err)
 		return 1
+	}
+	if publicIngressEnabled {
+		presenter.recordNoConnectedChannels(len(initialRegistrationPairs), accountRows)
 	}
 	if opts.TestBeforeReadinessCommit != nil {
 		if err := opts.TestBeforeReadinessCommit(); err != nil {

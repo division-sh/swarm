@@ -339,6 +339,15 @@ func TestChannelConnectWhatsAppRegistersAccountBothStores(t *testing.T) {
 func requireOfflinePairedWhatsAppServiceRoundTrip(t *testing.T, opts cliapp.ServeOptions, peer *serveNativeProtocolPeer, registered channelonboarding.Operation) {
 	t.Helper()
 	enableChannelOnboardingRecoveryOnStartup(t, opts.ConfigPath)
+	publicListener := reserveChannelOnboardingListener(t)
+	opts.PublicWebhookListen, opts.PublicWebhookListener = publicListener.Addr().String(), publicListener
+	publicTarget, err := url.Parse("http://" + opts.PublicWebhookListen)
+	if err != nil {
+		t.Fatal(err)
+	}
+	publicOrigin := httptest.NewTLSServer(httputil.NewSingleHostReverseProxy(publicTarget))
+	t.Cleanup(publicOrigin.Close)
+	opts.PublicWebhookBaseURL = publicOrigin.URL
 	source := t.TempDir()
 	copyReleaseFixtureTree(t, opts.SourceRoot, source)
 	opts.SourceRoot = source
@@ -408,6 +417,15 @@ service-probe:
 		t.Fatal("service mock did not receive the authored first send")
 	}
 	requireServedNativeActivityResult(t, endpoint, sent.ID, customer.String(), outgoing, false)
+	bootOutput := process.outputString()
+	for _, stale := range []string{"NOT READY · SESSION_ACCOUNT · session admission required", "No channels connected yet"} {
+		if strings.Contains(bootOutput, stale) {
+			t.Errorf("successful WhatsApp send retained stale boot message %q:\n%s", stale, bootOutput)
+		}
+	}
+	if !strings.Contains(bootOutput, "WhatsApp "+registered.AccountReference+" (.): connected") {
+		t.Errorf("boot omitted the connected WhatsApp account:\n%s", bootOutput)
+	}
 	const incomingID = "OFFLINE_PAIRED_FIRST_BUSINESS_REPLY"
 	const incomingText = "The customer's first reply after the successful send"
 	peer.sendEncryptedFrame(sender.EncryptReply(t, incomingText, incomingID, sent.ID, outgoing))
