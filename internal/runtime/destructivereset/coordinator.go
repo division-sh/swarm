@@ -37,6 +37,7 @@ func (c *Coordinator) Execute(ctx context.Context, req Request) (out ExecutionRe
 	defer func() { retErr = errors.Join(retErr, lease.Release(context.WithoutCancel(ctx))) }()
 
 	var operation Operation
+	var runtimeReset RuntimeReset
 	if !req.DryRun {
 		previous, err := c.Operations.LookupResetOperation(ctx, req)
 		if err != nil {
@@ -45,11 +46,10 @@ func (c *Coordinator) Execute(ctx context.Context, req Request) (out ExecutionRe
 		if previous != nil {
 			operation = *previous
 		} else {
-			req.SourceProjections, err = c.RuntimeContexts.ResetSourceProjections(ctx)
-			if err != nil {
-				return ExecutionResult{}, err
+			operation, runtimeReset, err = c.RuntimeContexts.AdmitResetOperation(ctx, req, c.Operations)
+			if runtimeReset != nil {
+				defer runtimeReset.Release()
 			}
-			operation, err = c.Operations.AdmitResetOperation(ctx, req)
 			if err != nil {
 				return ExecutionResult{}, err
 			}
@@ -62,7 +62,7 @@ func (c *Coordinator) Execute(ctx context.Context, req Request) (out ExecutionRe
 		}
 		req = operation.Request
 	}
-	return c.continueOperation(ctx, req, operation)
+	return c.continueOperation(ctx, req, operation, runtimeReset)
 }
 
 // RecoverPending settles unfinished reset obligations independently of historical
@@ -150,9 +150,8 @@ func (c *Coordinator) acquire(ctx context.Context) (LockLease, error) {
 	return lease, nil
 }
 
-func (c *Coordinator) continueOperation(ctx context.Context, req Request, operation Operation) (ExecutionResult, error) {
-	var runtimeReset RuntimeReset
-	if !req.DryRun {
+func (c *Coordinator) continueOperation(ctx context.Context, req Request, operation Operation, runtimeReset RuntimeReset) (ExecutionResult, error) {
+	if !req.DryRun && runtimeReset == nil {
 		var err error
 		runtimeReset, err = c.RuntimeContexts.BeginDestructiveReset(ctx, req.OperationID)
 		if err != nil {
