@@ -224,27 +224,7 @@ func loadProviderCallResumeTx(ctx context.Context, tx *sql.Tx, postgres bool, re
 		req.Origin.Kind != runtimeeffects.CompletionOriginDelivery || req.Origin.Validate() != nil || req.SessionID == "" {
 		return result, fmt.Errorf("provider resume requires fresh execution, claim and session admission")
 	}
-	query := sqliteCompletionRecoverySelect
-	if postgres {
-		query = postgresCompletionRecoverySelect
-	}
-	query += `JOIN event_delivery_attempts prior ON prior.delivery_id=a.origin_delivery_id
-		AND prior.claim_version=a.origin_claim_version AND prior.claim_token=a.origin_claim_token
-		WHERE o.effect_kind='provider_turn' AND a.state='outcome_uncertain' AND o.state='outcome_uncertain'
-		AND a.origin_kind='delivery' AND CAST(a.origin_delivery_id AS TEXT)=$1 AND CAST(a.origin_run_id AS TEXT)=$2
-		AND a.origin_route_identity=$3 AND a.origin_subscriber_type=$4 AND a.origin_subscriber_id=$5
-		AND prior.closure_kind='settled' AND prior.open_marker=FALSE AND prior.completed_at IS NOT NULL
-		AND prior.outcome='retry_scheduled' AND prior.reason_code='effect_recovery_outcome_unconfirmed'
-		AND a.origin_claim_version=$6-1 LIMIT 2`
-	if postgres {
-		query += ` FOR UPDATE OF o,a`
-	}
-	claim := req.Origin.Delivery
-	rows, err := tx.QueryContext(ctx, query, claim.DeliveryID(), claim.RunID(), claim.RouteIdentity(), string(claim.SubscriberClass()), claim.SubscriberID(), claim.Version())
-	if err != nil {
-		return result, err
-	}
-	candidates, err := scanCompletionRecoveryAttempts(rows)
+	candidates, err := loadProviderResumePredecessorsTx(ctx, tx, postgres, req.Origin.Delivery)
 	if err != nil || len(candidates) == 0 {
 		return result, err
 	}
@@ -292,6 +272,29 @@ func loadProviderCallResumeTx(ctx context.Context, tx *sql.Tx, postgres bool, re
 		return result, err
 	}
 	return providerCallRecoveryResult{recovery: runtimeeffects.ProviderCallRecovery{Journal: *journal, Frame: frame, Parent: parent}, found: true}, nil
+}
+
+func loadProviderResumePredecessorsTx(ctx context.Context, tx *sql.Tx, postgres bool, claim runtimedelivery.Claim) ([]completionRecoveryAttempt, error) {
+	query := sqliteCompletionRecoverySelect
+	if postgres {
+		query = postgresCompletionRecoverySelect
+	}
+	query += `JOIN event_delivery_attempts prior ON prior.delivery_id=a.origin_delivery_id
+		AND prior.claim_version=a.origin_claim_version AND prior.claim_token=a.origin_claim_token
+		WHERE o.effect_kind='provider_turn' AND a.state='outcome_uncertain' AND o.state='outcome_uncertain'
+		AND a.origin_kind='delivery' AND CAST(a.origin_delivery_id AS TEXT)=$1 AND CAST(a.origin_run_id AS TEXT)=$2
+		AND a.origin_route_identity=$3 AND a.origin_subscriber_type=$4 AND a.origin_subscriber_id=$5
+		AND prior.closure_kind='settled' AND prior.open_marker=FALSE AND prior.completed_at IS NOT NULL
+		AND prior.outcome='retry_scheduled' AND prior.reason_code='effect_recovery_outcome_unconfirmed'
+		AND a.origin_claim_version=$6-1 LIMIT 2`
+	if postgres {
+		query += ` FOR UPDATE OF o,a`
+	}
+	rows, err := tx.QueryContext(ctx, query, claim.DeliveryID(), claim.RunID(), claim.RouteIdentity(), string(claim.SubscriberClass()), claim.SubscriberID(), claim.Version())
+	if err != nil {
+		return nil, err
+	}
+	return scanCompletionRecoveryAttempts(rows)
 }
 
 func providerResumeParentTx(ctx context.Context, tx *sql.Tx, postgres bool, recovered completionRecoveryAttempt, frame agentframe.Frame, now time.Time) (*runtimeeffects.CompletionContinuationSnapshot, error) {

@@ -393,18 +393,7 @@ func (c *Conversation) continueManagedProviderCall(ctx context.Context, draft ag
 	if err != nil {
 		return nil, err
 	}
-	call.resume = resume
-	if resume != nil && resume.Parent != nil {
-		call.toolRound = resume.Parent
-	} else if draft.Kind == agentframe.TurnToolContinuation && previous != nil {
-		if previous.completionHandle != nil {
-			if round, ok := previous.completionHandle.CompletionContinuation(); ok {
-				call.toolRound = &round
-			}
-		} else if previous.completionDispatch != nil {
-			call.selectedToolRound = previous
-		}
-	}
+	bindManagedProviderPredecessor(call, previous, resume)
 	runtime, ok := c.runtime.(ManagedSessionRuntime)
 	if !ok {
 		return nil, runtimefailures.New(runtimefailures.ClassLifecycleConflict, "managed_runtime_boundary_missing", "llm-conversation", "dispatch_turn", nil)
@@ -437,6 +426,21 @@ func (c *Conversation) continueManagedProviderCall(ctx context.Context, draft ag
 		c.lastFrameID = frame.FrameID
 	}
 	return resp, nil
+}
+
+func bindManagedProviderPredecessor(call *managedProviderCall, previous *Response, resume *runtimeeffects.ProviderCallRecovery) {
+	call.resume = resume
+	if resume != nil && resume.Parent != nil {
+		call.toolRound = resume.Parent
+	} else if call.frame.Turn.Kind == agentframe.TurnToolContinuation && previous != nil {
+		if previous.completionHandle != nil {
+			if round, ok := previous.completionHandle.CompletionContinuation(); ok {
+				call.toolRound = &round
+			}
+		} else if previous.completionDispatch != nil {
+			call.selectedToolRound = previous
+		}
+	}
 }
 
 func (c *Conversation) continueForkChatOnce(ctx context.Context, msg Message) (*Response, error) {
