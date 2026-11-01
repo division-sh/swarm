@@ -63,13 +63,13 @@ type firstConnectPairingObserver struct {
 	cliapp.ChannelRegistrationSession
 	principal operatorchannel.Principal
 	observe   func(channelonboarding.Result, bool)
-	afterRead func(channelonboarding.PairingReadback, error)
+	afterRead func(context.Context, channelonboarding.Operation, channelonboarding.PairingReadback, error)
 }
 
 func (s firstConnectPairingObserver) ReadSessionPairing(ctx context.Context, op channelonboarding.Operation, principal operatorchannel.Principal) (channelonboarding.PairingReadback, error) {
 	view, err := s.ChannelRegistrationSession.ReadSessionPairing(ctx, op, principal)
 	if s.afterRead != nil {
-		s.afterRead(view, err)
+		s.afterRead(ctx, op, view, err)
 	}
 	if err == nil {
 		s.observe(channelonboarding.Result{Operation: op, Pairing: &view}, false)
@@ -129,9 +129,24 @@ func TestChannelConnectWhatsAppRegistersAccountBothStores(t *testing.T) {
 						return nil, err
 					}
 					return firstConnectPairingObserver{ChannelRegistrationSession: session, principal: options.Principal, observe: observe,
-						afterRead: func(view channelonboarding.PairingReadback, err error) {
-							if gate := pairSuccessGate.Load(); gate != nil && (err != nil || view.Paired) {
+						afterRead: func(ctx context.Context, op channelonboarding.Operation, view channelonboarding.PairingReadback, err error) {
+							gate := pairSuccessGate.Load()
+							if gate == nil {
+								return
+							}
+							if err != nil || view.Paired {
 								gate.complete()
+								return
+							}
+							select {
+							case <-gate.held:
+								// This read-only native owner observes the explicit handoff;
+								// it cannot reconnect, change pairing, or admit an account.
+								native := session.(*deploymentChannelSession).connection
+								if reusable, checkErr := native.CheckSessionReuse(ctx, op); checkErr == nil && !reusable {
+									gate.complete()
+								}
+							default:
 							}
 						}}, nil
 				}
