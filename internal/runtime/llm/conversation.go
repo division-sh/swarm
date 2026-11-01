@@ -394,7 +394,9 @@ func (c *Conversation) continueManagedProviderCall(ctx context.Context, draft ag
 		return nil, err
 	}
 	call.resume = resume
-	if draft.Kind == agentframe.TurnToolContinuation && previous != nil {
+	if resume != nil && resume.Parent != nil {
+		call.toolRound = resume.Parent
+	} else if draft.Kind == agentframe.TurnToolContinuation && previous != nil {
 		if previous.completionHandle != nil {
 			if round, ok := previous.completionHandle.CompletionContinuation(); ok {
 				call.toolRound = &round

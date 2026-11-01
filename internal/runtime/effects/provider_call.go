@@ -59,6 +59,7 @@ type ProviderCallJournal struct {
 type ProviderCallRecovery struct {
 	Journal ProviderCallJournal
 	Frame   agentframe.Frame
+	Parent  *CompletionContinuationSnapshot
 }
 
 type ProviderCallResumeStore interface {
