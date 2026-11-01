@@ -23,7 +23,7 @@ func TestPublishRecipientActualRetainsHandlerEventAndExactAgent(t *testing.T) {
 	second.Handler = second.Handler.ForEvent("second.requested")
 	identity := agentidentitytest.RootRuntime(t, "worker", "owner-a")
 	other := agentidentitytest.RootRuntime(t, "worker", "owner-b")
-	agent := RoutePlanDeliveryIntent{Recipient: events.MustAgentDeliveryRecipient("worker"), AgentIdentity: identity, Persist: true, Producer: routeIntentProducerAgentPolicy}
+	agent := RoutePlanDeliveryIntent{Recipient: events.MustAgentDeliveryRecipient("worker"), AgentIdentity: identity, Persist: true, Producer: routeIntentProducerOrdinary}
 	otherAgent := agent
 	otherAgent.AgentIdentity = other
 	plan := RoutePlan{DeliveryIntents: []RoutePlanDeliveryIntent{first, second, agent, otherAgent}}

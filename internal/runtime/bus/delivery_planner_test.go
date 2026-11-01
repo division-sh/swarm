@@ -451,7 +451,7 @@ func TestDeliveryRecipientPolicy_BindsOnlyConstructedStaticDeclarations(t *testi
 			if !route.Initialization.FlowLifecycle() || route.Initialization.ConstructionTarget().Route() != target {
 				t.Fatalf("selector did not preserve independent exact construction authority: %+v", route)
 			}
-			if err := routePlanFromManifest(evt, manifest, routeIntentProducerAgentPolicy).ValidatePersistentDeliveries(); err != nil {
+			if err := routePlanFromManifest(evt, manifest).ValidatePersistentDeliveries(); err != nil {
 				t.Fatalf("validate constructed static route plan: %v", err)
 			}
 		})
@@ -809,7 +809,7 @@ func TestDeliveryPlanner_ComposesRoutingPolicyAndManifest(t *testing.T) {
 	}
 	var sawObserverAgent, sawWorkerNode bool
 	for _, intent := range plan.DeliveryIntents {
-		if intent.Recipient.IsAgent() && intent.Recipient.LocalID() == "observer" && intent.Producer == routeIntentProducerAgentPolicy {
+		if intent.Recipient.IsAgent() && intent.Recipient.LocalID() == "observer" && intent.Producer == routeIntentProducerOrdinary {
 			sawObserverAgent = true
 		}
 		if intent.Recipient.IsNode() && intent.Recipient.LocalID() == "worker" && intent.Producer == routeIntentProducerRootNodeRoute {
@@ -1535,7 +1535,7 @@ func TestDeliveryPlanner_StaticRootSameInstanceRouteUsesSelectedRunOwner(t *test
 		t.Fatalf("delivery intents = %#v, want one exact concrete-node intent", plan.DeliveryIntents)
 	}
 	if got := plan.DeliveryIntents[0].Producer; got != routeIntentProducerRootNodeRoute {
-		t.Fatalf("delivery intent producer = %s, want root_node_route", routeIntentProducerCode(got))
+		t.Fatalf("delivery intent producer = %d, want %d", got, routeIntentProducerRootNodeRoute)
 	}
 }
 

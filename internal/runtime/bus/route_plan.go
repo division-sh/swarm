@@ -46,26 +46,22 @@ func onlyNoHandlerRefusals(err error) bool {
 type routeIntentProducer uint8
 
 const (
-	routeIntentProducerUnknown routeIntentProducer = iota
-	routeIntentProducerAgentPolicy
-	routeIntentProducerDirectPolicy
-	routeIntentProducerInternalTargetCarrier
-	routeIntentProducerInternalTargetRoute
-	routeIntentProducerConcreteNodeRoute
-	routeIntentProducerRootNodeRoute routeIntentProducer = iota + 1 // Keep retired slot 6 unassigned.
-	routeIntentProducerRecipientMaterializer
-	routeIntentProducerConnectRoutePlan
+	routeIntentProducerUnknown               routeIntentProducer = 0
+	routeIntentProducerOrdinary              routeIntentProducer = 1
+	routeIntentProducerInternalTargetCarrier routeIntentProducer = 3
+	routeIntentProducerInternalTargetRoute   routeIntentProducer = 4
+	routeIntentProducerConcreteNodeRoute     routeIntentProducer = 5
+	routeIntentProducerRootNodeRoute         routeIntentProducer = 7
+	routeIntentProducerConnectRoutePlan      routeIntentProducer = 9
 )
 
 func (p routeIntentProducer) Normalized() routeIntentProducer {
 	switch p {
-	case routeIntentProducerAgentPolicy,
-		routeIntentProducerDirectPolicy,
+	case routeIntentProducerOrdinary,
 		routeIntentProducerInternalTargetCarrier,
 		routeIntentProducerInternalTargetRoute,
 		routeIntentProducerConcreteNodeRoute,
 		routeIntentProducerRootNodeRoute,
-		routeIntentProducerRecipientMaterializer,
 		routeIntentProducerConnectRoutePlan:
 		return p
 	default:
@@ -75,29 +71,6 @@ func (p routeIntentProducer) Normalized() routeIntentProducer {
 
 func (p routeIntentProducer) Empty() bool {
 	return p.Normalized() == routeIntentProducerUnknown
-}
-
-func routeIntentProducerCode(p routeIntentProducer) string {
-	switch p.Normalized() {
-	case routeIntentProducerAgentPolicy:
-		return "agent_policy/matched_agent_subscription"
-	case routeIntentProducerDirectPolicy:
-		return "direct_policy/direct_publish"
-	case routeIntentProducerInternalTargetCarrier:
-		return "internal_target_route/internal_carrier"
-	case routeIntentProducerInternalTargetRoute:
-		return "internal_target_route/route_table_node"
-	case routeIntentProducerConcreteNodeRoute:
-		return "concrete_node_route/route_table_node"
-	case routeIntentProducerRootNodeRoute:
-		return "root_node_route/route_table_node"
-	case routeIntentProducerRecipientMaterializer:
-		return "recipient_plan_materializer/materialized_route"
-	case routeIntentProducerConnectRoutePlan:
-		return "connect_route_plan/lowered_connect_route_plan"
-	default:
-		return ""
-	}
 }
 
 // RoutePlan is the EventBus-owned publish-time route authority. It records the
@@ -322,12 +295,12 @@ func (p *RoutePlan) MarkCanonicalRouteFailedClosed(producer routeIntentProducer,
 	p.SubscribedRecipients = nil
 }
 
-func (p *RoutePlan) recordOrdinaryRouteProducer(producer routeIntentProducer) {
+func (p *RoutePlan) recordOrdinaryRouteProducer() {
 	if p == nil || p.CanonicalRouteOwnerMatched() {
 		return
 	}
 	if p.AuthorityOwner == 0 {
-		p.AuthorityOwner = producer.Normalized()
+		p.AuthorityOwner = routeIntentProducerOrdinary
 	}
 }
 
@@ -556,7 +529,7 @@ func routePlanLiveRecipientsFromManifest(manifest deliveryRecipientManifest) []R
 	return normalizeRoutePlanLiveRecipients(out)
 }
 
-func routePlanDeliveryIntentsFromAdmittedRoutes(routes []events.DeliveryRoute, producer routeIntentProducer) []RoutePlanDeliveryIntent {
+func routePlanDeliveryIntentsFromAdmittedRoutes(routes []events.DeliveryRoute) []RoutePlanDeliveryIntent {
 	routes = events.NormalizeDeliveryRoutes(routes)
 	if len(routes) == 0 {
 		return nil
@@ -572,7 +545,7 @@ func routePlanDeliveryIntentsFromAdmittedRoutes(routes []events.DeliveryRoute, p
 			Context:           route.Context,
 			PayloadProjection: route.PayloadProjection,
 			ConnectClaim:      route.ConnectClaim,
-			Producer:          producer,
+			Producer:          routeIntentProducerOrdinary,
 			Persist:           true,
 		})
 	}
@@ -636,10 +609,10 @@ func deliveryRouteLiveRecipients(routes []events.DeliveryRoute) []RoutePlanLiveR
 	return normalizeRoutePlanLiveRecipients(out)
 }
 
-func routePlanFromManifest(evt events.Event, manifest deliveryRecipientManifest, producer routeIntentProducer) RoutePlan {
+func routePlanFromManifest(evt events.Event, manifest deliveryRecipientManifest) RoutePlan {
 	plan := newRoutePlan(evt)
 	plan.AddLiveRecipients(routePlanLiveRecipientsFromManifest(manifest)...)
-	intents := routePlanDeliveryIntentsFromAdmittedRoutes(manifest.DeliveryRoutes, producer)
+	intents := routePlanDeliveryIntentsFromAdmittedRoutes(manifest.DeliveryRoutes)
 	for index := range intents {
 		if admission, ok := manifest.AgentLifecycles[intents[index].AgentIdentity.Normalize()]; ok {
 			intents[index].AgentLifecycle = admission
@@ -648,7 +621,7 @@ func routePlanFromManifest(evt events.Event, manifest deliveryRecipientManifest,
 	plan.AddDeliveryIntents(intents...)
 	plan.TargetFailure = manifest.TargetFailure
 	if len(plan.LiveRecipients) > 0 || len(plan.DeliveryIntents) > 0 || !plan.TargetFailure.Empty() {
-		plan.recordOrdinaryRouteProducer(producer)
+		plan.recordOrdinaryRouteProducer()
 	}
 	return plan.Normalized()
 }

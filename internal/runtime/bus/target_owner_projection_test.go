@@ -297,7 +297,7 @@ func TestExplicitAgentTargetConsumesExactTargetOwner(t *testing.T) {
 	event := eventtest.ExistingRunRootIngress(eventtest.UUID("explicit-agent-publication"), "work.ready", "operator", "", nil, 0, agentIdentity.RunID, events.EventEnvelope{}, time.Now().UTC())
 	plan := RoutePlan{Event: event, DeliveryIntents: []RoutePlanDeliveryIntent{{
 		Recipient: events.MustAgentDeliveryRecipient("reviewer"), AgentIdentity: agentIdentity,
-		TargetBlueprint: target, Producer: routeIntentProducerAgentPolicy, Persist: true,
+		TargetBlueprint: target, Producer: routeIntentProducerOrdinary, Persist: true,
 	}}}.Normalized()
 
 	resolved, err := projection.resolveRoutePlan(plan)
@@ -311,7 +311,7 @@ func TestExplicitAgentTargetConsumesExactTargetOwner(t *testing.T) {
 
 	untargeted := RoutePlan{Event: event, DeliveryIntents: []RoutePlanDeliveryIntent{{
 		Recipient: events.MustAgentDeliveryRecipient("reviewer"), AgentIdentity: agentIdentity,
-		Producer: routeIntentProducerDirectPolicy, Persist: true,
+		Producer: routeIntentProducerOrdinary, Persist: true,
 	}}}.Normalized()
 	resolved, err = projection.resolveRoutePlan(untargeted)
 	if err != nil {
@@ -467,8 +467,8 @@ func TestSameFlowAgentPolicyDerivesExactSelectedRunOwners(t *testing.T) {
 	plan := RoutePlan{
 		Event: eventtest.RunCreatingRootIngress(eventtest.UUID("same-flow-agent-publication"), "work.ready", "", "", nil, 0, runID, "", events.EventEnvelope{}, time.Time{}),
 		DeliveryIntents: []RoutePlanDeliveryIntent{
-			{Recipient: events.MustAgentDeliveryRecipient("root-reviewer"), AgentIdentity: rootIdentity, Producer: routeIntentProducerAgentPolicy, Persist: true},
-			{Recipient: events.MustAgentDeliveryRecipient("nested-reviewer"), AgentIdentity: nestedIdentity, Producer: routeIntentProducerAgentPolicy, Persist: true},
+			{Recipient: events.MustAgentDeliveryRecipient("root-reviewer"), AgentIdentity: rootIdentity, Producer: routeIntentProducerOrdinary, Persist: true},
+			{Recipient: events.MustAgentDeliveryRecipient("nested-reviewer"), AgentIdentity: nestedIdentity, Producer: routeIntentProducerOrdinary, Persist: true},
 		},
 	}
 
@@ -513,7 +513,7 @@ func TestSameFlowRuntimeCreatedAgentDoesNotConsumeSelectedOwner(t *testing.T) {
 		Event: eventtest.RunCreatingRootIngress(eventtest.UUID("same-flow-runtime-publication"), "work.ready", "", "", nil, 0, runID, "", events.EventEnvelope{}, time.Time{}),
 		DeliveryIntents: []RoutePlanDeliveryIntent{{
 			Recipient: events.MustAgentDeliveryRecipient("workflow-runtime"), AgentIdentity: identity,
-			Producer: routeIntentProducerAgentPolicy, Persist: true,
+			Producer: routeIntentProducerOrdinary, Persist: true,
 		}},
 	}
 
@@ -557,7 +557,7 @@ func TestRuntimeCreatedTargetlessIgnoresNativeAndProspectiveConstruction(t *test
 				} else {
 					projection.context, projection.instances = admittedAgentConstructionFixture(t, source, runID)
 				}
-				intent := RoutePlanDeliveryIntent{Recipient: events.MustAgentDeliveryRecipient(identity.AgentID()), AgentIdentity: identity, Producer: routeIntentProducerAgentPolicy, Persist: true}
+				intent := RoutePlanDeliveryIntent{Recipient: events.MustAgentDeliveryRecipient(identity.AgentID()), AgentIdentity: identity, Producer: routeIntentProducerOrdinary, Persist: true}
 				resolved, err := projection.resolveRoutePlan(RoutePlan{Event: event, DeliveryIntents: []RoutePlanDeliveryIntent{intent}})
 				if err != nil {
 					t.Fatal(err)
@@ -607,8 +607,8 @@ func TestSameFlowDeclaredEntitylessAgentsDoNotInheritSelectedNodeOwners(t *testi
 	plan := RoutePlan{
 		Event: eventtest.RunCreatingRootIngress(eventtest.UUID("same-flow-entityless-publication"), "work.ready", "", "", nil, 0, runID, "", events.EventEnvelope{}, time.Time{}),
 		DeliveryIntents: []RoutePlanDeliveryIntent{
-			{Recipient: events.MustAgentDeliveryRecipient("root-reviewer"), AgentIdentity: rootIdentity, Producer: routeIntentProducerAgentPolicy, Persist: true},
-			{Recipient: events.MustAgentDeliveryRecipient("nested-reviewer"), AgentIdentity: nestedIdentity, Producer: routeIntentProducerAgentPolicy, Persist: true},
+			{Recipient: events.MustAgentDeliveryRecipient("root-reviewer"), AgentIdentity: rootIdentity, Producer: routeIntentProducerOrdinary, Persist: true},
+			{Recipient: events.MustAgentDeliveryRecipient("nested-reviewer"), AgentIdentity: nestedIdentity, Producer: routeIntentProducerOrdinary, Persist: true},
 		},
 	}
 
@@ -667,7 +667,7 @@ func TestSameFlowRootAgentOwnerContradictionFailsClosed(t *testing.T) {
 		DeliveryIntents: []RoutePlanDeliveryIntent{{
 			Recipient: events.MustAgentDeliveryRecipient("reviewer"), AgentIdentity: identity,
 			TargetBlueprint: events.RouteIdentity{FlowID: semanticview.RootExecutionFlowID(source), FlowInstance: runID, EntityID: eventtest.UUID("foreign-agent-owner")},
-			Producer:        routeIntentProducerAgentPolicy, Persist: true,
+			Producer:        routeIntentProducerOrdinary, Persist: true,
 		}},
 	}
 
@@ -773,7 +773,7 @@ func TestAdmittedTypedTargetOwnerRemainsAuthoritative(t *testing.T) {
 	owner := events.MustExistingEntityTarget(target)
 	plan := RoutePlan{Event: eventtest.ExistingRunRootIngress(eventtest.UUID("admitted-agent-publication"), "work.ready", "operator", "", nil, 0, agentIdentity.RunID, events.EventEnvelope{}, time.Now().UTC()), DeliveryIntents: []RoutePlanDeliveryIntent{{
 		Recipient: events.MustAgentDeliveryRecipient("reviewer"), AgentIdentity: agentIdentity,
-		TargetBlueprint: target, TargetOwnership: owner, Producer: routeIntentProducerDirectPolicy, Persist: true,
+		TargetBlueprint: target, TargetOwnership: owner, Producer: routeIntentProducerOrdinary, Persist: true,
 	}}}.Normalized()
 
 	resolved, err := (publicationTargetOwnerEvidence{required: true}).resolveRoutePlan(plan)

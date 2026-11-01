@@ -384,7 +384,7 @@ func (p deliveryPlanner) planIndependentPubsubBranch(ctx context.Context, evt ev
 	if err != nil {
 		return RoutePlan{}, err
 	}
-	routePlan := routePlanFromManifest(localEvent, manifest, routeIntentProducerAgentPolicy)
+	routePlan := routePlanFromManifest(localEvent, manifest)
 	routePlan.ordinarySource = source
 	routePlan.AddDeliveryIntents(source.nodeIntents(p.recipientPolicy.semanticSource, localEvent, evt, routing.RoutedRecipients)...)
 	extraDetail := cloneAnyMap(routing.ExtraDetail)
@@ -578,7 +578,7 @@ func (p deliveryPlanner) PlanDirect(ctx context.Context, evt events.Event, recip
 	if err := rejectAmbiguousDirectManifest(requested, manifest.LiveRecipients); err != nil {
 		return RoutePlan{}, err
 	}
-	routePlan = routePlanFromManifest(evt, manifest, routeIntentProducerDirectPolicy)
+	routePlan = routePlanFromManifest(evt, manifest)
 	routePlan.ExtraDetail = map[string]any{
 		"direct":                     true,
 		"requested_recipients":       append([]string(nil), requested...),
@@ -636,8 +636,8 @@ func (p deliveryPlanner) PlanExactDirect(ctx context.Context, evt events.Event, 
 	if len(missing) > 0 {
 		return RoutePlan{}, &exactDirectRecipientsUnavailableError{identities: missing}
 	}
-	routePlan = routePlanFromManifest(evt, manifest, routeIntentProducerDirectPolicy)
-	routePlan.DeliveryIntents = routePlanDeliveryIntentsFromAdmittedRoutes(routes, routeIntentProducerDirectPolicy)
+	routePlan = routePlanFromManifest(evt, manifest)
+	routePlan.DeliveryIntents = routePlanDeliveryIntentsFromAdmittedRoutes(routes)
 	routePlan.ExtraDetail = map[string]any{
 		"direct":                true,
 		"exact_routes":          true,

@@ -703,7 +703,7 @@ func (eb *EventBus) prepareClosedPublication(ctx context.Context, publication ev
 			}
 			routePlan := routePlanFromManifest(evt, deliveryRecipientManifest{
 				DeliveryRoutes: durable.DeliveryRoutes,
-			}, routeIntentProducerRecipientMaterializer)
+			})
 			routePlan.ConnectEvaluation = durable.Settlement.Ledger()
 			prepared := PreparedPublish{
 				Event: evt, admitted: admitted, plan: routePlan,
@@ -2403,8 +2403,8 @@ func (eb *EventBus) materializePublishRecipientPlanWithPlanner(ctx context.Conte
 	if len(routes) == 0 {
 		return routePlan, nil
 	}
-	routePlan.recordOrdinaryRouteProducer(routeIntentProducerRecipientMaterializer)
-	routePlan.AddDeliveryIntents(routePlanDeliveryIntentsFromRoutes(routes, routeIntentProducerRecipientMaterializer)...)
+	routePlan.recordOrdinaryRouteProducer()
+	routePlan.AddDeliveryIntents(routePlanDeliveryIntentsFromRoutes(routes, routeIntentProducerOrdinary)...)
 	projection, err := planner.materializedPublicationTargetOwners(ctx, evt, &routePlan)
 	if err != nil {
 		return RoutePlan{}, err
@@ -2842,7 +2842,7 @@ func (eb *EventBus) CheckPublishRecipientPlan(ctx context.Context, evt events.Ev
 			if err := verifier.VerifyPreparedPublishEventIdentity(admitted, durable); err != nil {
 				return PublishRecipientPlan{}, err
 			}
-			plan := routePlanFromManifest(evt, deliveryRecipientManifest{DeliveryRoutes: durable.DeliveryRoutes}, routeIntentProducerRecipientMaterializer)
+			plan := routePlanFromManifest(evt, deliveryRecipientManifest{DeliveryRoutes: durable.DeliveryRoutes})
 			plan.ConnectEvaluation = durable.Settlement.Ledger()
 			result := eb.publishRecipientPlan(evt, plan)
 			result.canonicalAuthority = true
