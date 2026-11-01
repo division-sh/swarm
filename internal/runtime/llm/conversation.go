@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"maps"
 	"strings"
 
 	"github.com/division-sh/swarm/internal/events"
@@ -96,6 +97,10 @@ func NewManagedConversation(seed agentframe.SessionSeed, taskID string, tools []
 	if err != nil {
 		return nil, err
 	}
+	if seed.Content != "" && len(seed.ContentPrograms) == 0 {
+		return nil, fmt.Errorf("managed content requires its captured input programs")
+	}
+	seed.ContentPrograms = maps.Clone(seed.ContentPrograms)
 	conversation := newConversation(seed.AgentIdentity.AgentID(), taskID, systemPrompt, tools, memory, maxTurns, runtime)
 	conversation.kind = conversationManaged
 	conversation.seed = &seed
@@ -380,6 +385,11 @@ func (c *Conversation) continueManagedToolRound(ctx context.Context, draft agent
 	if err != nil {
 		return nil, err
 	}
+	message, err := renderManagedMessage(frame, *c.seed, draft.Event)
+	if err != nil {
+		return nil, err
+	}
+	call.rendered = &message
 	if draft.Kind == agentframe.TurnToolContinuation && previous != nil {
 		if previous.completionHandle != nil {
 			if round, ok := previous.completionHandle.CompletionContinuation(); ok {
@@ -580,8 +590,10 @@ func (c *Conversation) executeToolResponse(ctx context.Context, response *Respon
 	}
 	ctx = c.withToolCapabilities(ctx)
 	results := make([]map[string]any, 0, len(calls))
+	providerContents := make([]string, 0, len(calls))
 	executed := make([]executedToolCall, 0, len(calls))
 	for callIndex, tc := range calls {
+		var providerContent string
 		terminal := toolIsTerminalInContext(ctx, tc.Name)
 		callIdentity := completionToolCallIdentity(c.TurnCount, callIndex, tc)
 		callCtx := runtimeeffects.WithLogicalOperationIdentitySegment(ctx, callIdentity)
@@ -603,6 +615,11 @@ func (c *Conversation) executeToolResponse(ctx context.Context, response *Respon
 			} else {
 				entry["ok"] = true
 				entry["result"] = projected
+				content, contentErr := renderToolOutput(out, terminal)
+				if contentErr != nil {
+					return "", executed, contentErr
+				}
+				providerContent = content
 			}
 		}
 		if err != nil {
@@ -618,8 +635,14 @@ func (c *Conversation) executeToolResponse(ctx context.Context, response *Respon
 				return "", executed, runtimefailures.Wrap(runtimefailures.ClassInternalFailure, "tool_failure_envelope_encode_failed", "llm-conversation", "deliver_tool_result", map[string]any{"tool": strings.TrimSpace(tc.Name)}, valueErr)
 			}
 			entry["failure"] = failureValue
+			content, contentErr := renderToolFailure(failure)
+			if contentErr != nil {
+				return "", executed, contentErr
+			}
+			providerContent = content
 		}
 		results = append(results, entry)
+		providerContents = append(providerContents, providerContent)
 		executed = append(executed, executedToolCall{
 			Name:     strings.TrimSpace(tc.Name),
 			OK:       err == nil,
@@ -643,6 +666,10 @@ func (c *Conversation) executeToolResponse(ctx context.Context, response *Respon
 			"actual":     len(b),
 			"limit":      toolRelayMessageLimit(calls),
 		})
+	}
+	b, err = attachProviderToolContents(results, providerContents, toolRelayMessageLimit(calls))
+	if err != nil {
+		return "", executed, err
 	}
 	return strings.TrimSpace(string(b)), executed, nil
 }

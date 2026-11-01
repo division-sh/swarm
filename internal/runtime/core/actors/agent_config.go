@@ -13,6 +13,7 @@ import (
 	"github.com/division-sh/swarm/internal/runtime/core/timeridentity"
 	runtimeeffects "github.com/division-sh/swarm/internal/runtime/effects"
 	"github.com/division-sh/swarm/internal/runtime/mockperformance"
+	"github.com/google/cel-go/cel"
 )
 
 type NativeToolConfig struct {
@@ -71,6 +72,8 @@ type AgentConfig struct {
 	Memory               agentmemory.Plan                 `json:"memory"`
 	Mock                 mockperformance.Performance      `json:"mock,omitempty"`
 	Intent               runtimeagentintent.Resolved      `json:"intent"`
+	Content              string                           `json:"content,omitempty"`
+	ContentPrograms      map[string]cel.Program           `json:"-"`
 	Prompt               runtimeagentintent.DerivedPrompt `json:"-"`
 	MaxTurnsPerTask      int                              `json:"max_turns_per_task,omitempty"`
 	TurnTimeout          *timeridentity.TurnTimeout       `json:"turn_timeout,omitempty"`

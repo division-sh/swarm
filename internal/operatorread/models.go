@@ -96,9 +96,17 @@ type OperatorPublicConversationTurn struct {
 }
 
 type OperatorPublicConversationTurnDetail struct {
-	Session OperatorConversationSummary    `json:"session"`
-	Turn    OperatorPublicConversationTurn `json:"turn"`
-	Frame   OperatorConversationFrameFacts `json:"frame"`
+	Session           OperatorConversationSummary    `json:"session"`
+	Turn              OperatorPublicConversationTurn `json:"turn"`
+	Frame             OperatorConversationFrameFacts `json:"frame"`
+	ProviderRendering *OperatorProviderRendering     `json:"provider_rendering,omitempty"`
+}
+
+type OperatorProviderRendering struct {
+	Status string          `json:"status"`
+	Source string          `json:"source"`
+	Input  json.RawMessage `json:"input,omitempty"`
+	Tools  json.RawMessage `json:"tools,omitempty"`
 }
 
 type OperatorConversationFrameFacts struct {
