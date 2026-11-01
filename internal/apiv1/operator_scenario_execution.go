@@ -16,8 +16,8 @@ import (
 	"github.com/google/uuid"
 )
 
-func bindPrivateScenarioPublicationScope(ctx context.Context, opts EventPublicationOptions, params eventPublicationParams, identity bundleIdentityParam) (context.Context, EventPublicationOptions, eventPublicationParams, bool, error) {
-	if !scenarioexecution.HasPrivateHostScope(ctx) || params.RunID == "" {
+func bindPrivateScenarioPublicationScope(ctx context.Context, opts EventPublicationOptions, params eventPublicationParams, identity bundleIdentityParam, rootInput bool) (context.Context, EventPublicationOptions, eventPublicationParams, bool, error) {
+	if !rootInput || !scenarioexecution.HasPrivateHostScope(ctx) || params.RunID == "" {
 		return ctx, opts, params, false, nil
 	}
 	ctx, opts, params, err := resolveEventPublicationBundleScope(ctx, opts, params, identity, eventPublicationConfig{requireExistingExplicitRun: true})

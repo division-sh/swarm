@@ -6,9 +6,12 @@ import (
 	"testing"
 
 	"github.com/division-sh/swarm/internal/durabledata"
+	"github.com/division-sh/swarm/internal/operatorread"
 	runtimecorrelation "github.com/division-sh/swarm/internal/runtime/correlation"
 	"github.com/division-sh/swarm/internal/runtime/executionposture"
+	"github.com/division-sh/swarm/internal/runtime/runlifecycle"
 	"github.com/division-sh/swarm/internal/runtime/scenarioexecution"
+	"github.com/google/uuid"
 )
 
 type scenarioExecutionProfileReaderStub struct {
@@ -62,6 +65,41 @@ func TestScenarioExecutionRejectsPersistedRuntimeMismatchBeforePublication(t *te
 	if !found || got.Digest() != profile.Digest() {
 		t.Fatalf("admitted profile found=%v digest=%q", found, got.Digest())
 	}
+
+	t.Run("private_host_scope", func(t *testing.T) {
+		ctx, err := scenarioexecution.WithPrivateHostScope(admitted, uuid.NewString())
+		if err != nil {
+			t.Fatal(err)
+		}
+		ctx = runtimecorrelation.WithSourceArtifactFact(ctx, fact)
+		runID := uuid.NewString()
+		ctx, err = scenarioexecution.WithPrivateRunScope(ctx, runID, ".")
+		if err != nil {
+			t.Fatal(err)
+		}
+		reader := &fakeRunReadStore{headers: map[string]operatorread.RunHeader{
+			runID:     {RunID: runID},
+			"foreign": {RunID: "foreign", FlowPath: ".", Status: "live"},
+		}}
+		for _, tc := range []struct{ status, reason string }{
+			{"paused", "all_runs_paused"}, {"completed", "all_runs_ended"}, {"running", "live_run_changed"},
+		} {
+			reader.headers[runID] = operatorread.RunHeader{RunID: runID, Status: tc.status}
+			err := eventPublicationNoLiveRun(ctx, reader, runlifecycle.LiveRunScope{FlowPath: "."}, "work.requested")
+			app, ok := err.(*ApplicationError)
+			if !ok || app.Code != EventPublishRejectedCode {
+				t.Fatalf("private %s refusal = %#v", tc.status, err)
+			}
+			details, _ := app.Details.(map[string]any)
+			if details["reason"] != tc.reason || (tc.status == "paused" && details["run_id"] != runID) {
+				t.Fatalf("private %s refusal escaped its own run: %#v", tc.status, details)
+			}
+		}
+		_, _, _, private, err := bindPrivateScenarioPublicationScope(ctx, EventPublicationOptions{Runs: reader}, eventPublicationParams{RunID: runID}, bundleIdentityParam{}, false)
+		if err != nil || private || reader.headerReads != 0 {
+			t.Fatalf("later explicit publication acquired live selection: private=%v reads=%d err=%v", private, reader.headerReads, err)
+		}
+	})
 }
 
 func TestRunCreationSemanticIdentityIncludesScenarioSelector(t *testing.T) {

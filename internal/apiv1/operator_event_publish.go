@@ -227,11 +227,11 @@ func executeOperatorEventPublication(
 		if err != nil {
 			return apiidempotency.Completion{}, err
 		}
-		ctx, selectedOpts, params, privateScenario, err := bindPrivateScenarioPublicationScope(ctx, opts, params, bundleIdentity)
+		ctx, selectedOpts, params, privateScenario, err := bindPrivateScenarioPublicationScope(ctx, opts, params, bundleIdentity, cfg.rootInputOnly)
 		if err != nil {
 			return apiidempotency.Completion{}, err
 		}
-		if cfg.rootInputOnly || !params.RunIDProvided || privateScenario {
+		if cfg.rootInputOnly || !params.RunIDProvided {
 			params, err = selectEventPublicationLiveRun(ctx, selectedOpts, params, bundleIdentity.BundleHash)
 			if err != nil {
 				return apiidempotency.Completion{}, err
