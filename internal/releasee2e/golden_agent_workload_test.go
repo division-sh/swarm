@@ -1363,9 +1363,11 @@ func readGoldenCompletionCandidate(ctx context.Context, db *sql.DB, runID string
 		dueAt  sql.NullTime
 	)
 	if err := db.QueryRowContext(ctx, `
-		SELECT LOWER(status), completion_revision, completion_due_at
-		FROM runs
-		WHERE run_id = $1::uuid
+		SELECT LOWER(r.status), COALESCE(request.revision,0), CASE WHEN consumed.run_id IS NULL THEN request.due_at ELSE NULL END
+		FROM runs r LEFT JOIN run_completion_evidence request ON request.run_id=r.run_id AND request.record_kind='request'
+		AND request.revision=(SELECT MAX(revision) FROM run_completion_evidence WHERE run_id=r.run_id AND record_kind='request')
+		LEFT JOIN run_completion_evidence consumed ON consumed.run_id=request.run_id AND consumed.revision=request.revision AND consumed.record_kind='clear'
+		WHERE r.run_id=$1::uuid
 	`, runID).Scan(&result.Status, &result.Revision, &dueAt); err != nil {
 		return goldenCompletionCandidate{}, err
 	}

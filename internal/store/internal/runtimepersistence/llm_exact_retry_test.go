@@ -149,7 +149,8 @@ func TestLLMSQLiteResetBusyRetryPreservesExactSummary(t *testing.T) {
 		t.Run(phase, func(t *testing.T) {
 			path := filepath.Join(t.TempDir(), "reset.db")
 			store := newBootstrappedSQLiteRuntimeStoreForPath(t, path)
-			s := exactFactStore{db: store.backend.ConstructionHandle(), selected: store}
+			ctx := originalStoreFixtureContext(t, testAuthorActivityContext(), store)
+			s := exactFactStore{ctx: ctx, db: store.backend.ConstructionHandle(), selected: store}
 			f := newLLMResetFixture(t, s)
 			terminal := llmTerminalSnapshot(t, s, f.terminal)
 			var submitted []runlifecycle.Candidate
@@ -161,7 +162,6 @@ func TestLLMSQLiteResetBusyRetryPreservesExactSummary(t *testing.T) {
 				t.Fatal(err)
 			}
 			defer restore()
-			ctx := originalStoreFixtureContext(t, testAuthorActivityContext(), store)
 			summary, err := owner.ResetAll(ctx, sessions.ResetMetadata{Source: "exact-reset"})
 			if err != nil {
 				t.Fatal(err)

@@ -446,11 +446,7 @@ func newPartialAttachmentOriginal(t *testing.T, ctx context.Context, selected ga
 			t.Error(err)
 		}
 	})
-	ctx, err = startupownership.WithProcessMutationAuthority(ctx, process)
-	if err != nil {
-		t.Fatal(err)
-	}
-	return ctx, process
+	return nativeOriginalProcessContextFixture(t, ctx, process), process
 }
 
 func newPartialAttachmentManager(t *testing.T, ctx context.Context, selected gateRecoveryStoreCase, process startupownership.ProcessCapability, source semanticview.Source, pc *pipeline.PipelineCoordinator, bus *runtimebus.EventBus, factory manager.AgentFactory) (*manager.AgentManager, startupownership.LiveGenerationGrant, func()) {
@@ -622,6 +618,7 @@ func provePartialAttachmentShutdownRestart(t *testing.T, ctx context.Context, se
 	releaseProcess()
 	deadline, _ := ctx.Deadline()
 	fact, _ := correlation.SourceArtifactFactFromContext(ctx)
+	replacePipelineExternalWorkOccurrenceForSource(t, fact, pipelineExternalTestWorkOwnerForSource(t, fact))
 	nextContext, cancel := context.WithDeadline(withLiveGateExecution(correlation.WithRunID(testAuthorActivityContextForSource(t, context.Background(), fact), event.RunID())), deadline)
 	defer cancel()
 	ctx, original := newPartialAttachmentOriginal(t, nextContext, selected)

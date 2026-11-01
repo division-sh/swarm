@@ -10,9 +10,6 @@ import (
 	"testing"
 	"time"
 
-	"github.com/division-sh/swarm/internal/runtime/core/processbinding"
-	worklifetime "github.com/division-sh/swarm/internal/runtime/core/worklifetime"
-	"github.com/division-sh/swarm/internal/store/internal/backend/generationauthority"
 	"github.com/division-sh/swarm/internal/store/internal/backend/runforkrevision"
 	"github.com/division-sh/swarm/internal/store/internal/backend/transactiontest"
 	"github.com/google/uuid"
@@ -24,25 +21,10 @@ func TestRunForkExactFactsSQLiteBusyRetryGeneratedIDs(t *testing.T) {
 			path := filepath.Join(t.TempDir(), "retry.db")
 			store := newBootstrappedSQLiteRuntimeStoreForPath(t, path)
 			db := store.backend.ConstructionHandle()
-			db.SetMaxOpenConns(1)
+			// Retain the original ownership proof plus one workload connection.
+			db.SetMaxOpenConns(2)
 			db.SetMaxIdleConns(1)
-			ctx := storeTestWorkContext(t, testAuthorActivityContext())
-			var original processbinding.LeaseStamp
-			acquired, err := store.backend.RunProcessAcquisitionOutcome(ctx, func(ctx context.Context, tx *sql.Tx) error {
-				var err error
-				original, err = generationauthority.AdvanceProcessGeneration(ctx, tx, processbinding.LeaseIdentity{
-					LeaseID: uuid.NewString(), OwnerID: "native-statement-fixture", BootID: uuid.NewString(),
-					RuntimeInstanceID: authorActivityTestRuntimeInstanceID, Backend: processbinding.SQLiteLeaseBackend,
-				}, true)
-				return err
-			})
-			if err != nil || !acquired {
-				t.Fatalf("acquire original statement process: committed=%v err=%v", acquired, err)
-			}
-			process, _ := worklifetime.ProcessFromContext(ctx)
-			if err := process.BindOriginalProcess(original); err != nil {
-				t.Fatal(err)
-			}
+			ctx := originalStoreFixtureContext(t, testAuthorActivityContext(), store)
 			s := exactFactStore{ctx: ctx, db: db, selected: store}
 			f := newExactFactFixture(t, s)
 			exactTransaction(t, s, func(ctx context.Context, tx *sql.Tx) {

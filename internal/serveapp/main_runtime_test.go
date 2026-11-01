@@ -1587,7 +1587,11 @@ func runServedRunForkBackendProof(t *testing.T, backend servedparity.Backend) {
 	deadline := time.Now().Add(servedProofPollDeadline)
 	for {
 		var candidateSettled bool
-		if err := rt.DB.QueryRow(`SELECT completion_due_at IS NULL FROM runs WHERE run_id=$1`, fork.ForkRunID).Scan(&candidateSettled); err != nil {
+		if err := rt.DB.QueryRow(`SELECT CASE WHEN consumed.run_id IS NULL THEN request.due_at ELSE NULL END IS NULL
+			FROM runs r LEFT JOIN run_completion_evidence request ON request.run_id=r.run_id AND request.record_kind='request'
+			AND request.revision=(SELECT MAX(revision) FROM run_completion_evidence WHERE run_id=r.run_id AND record_kind='request')
+			LEFT JOIN run_completion_evidence consumed ON consumed.run_id=request.run_id AND consumed.revision=request.revision AND consumed.record_kind='clear'
+			WHERE r.run_id=$1`, fork.ForkRunID).Scan(&candidateSettled); err != nil {
 			t.Fatal(err)
 		}
 		if candidateSettled {
@@ -5597,7 +5601,11 @@ func servedEventPublishDebugQuery(t *testing.T, db *sql.DB, backend, scope, runI
 	case "postgres":
 		switch scope {
 		case "runs":
-			sqlText = `SELECT status, completion_revision, COALESCE(completion_due_at::text, ''), bundle_hash FROM runs WHERE run_id = $1::uuid`
+			sqlText = `SELECT r.status, COALESCE(request.revision,0), COALESCE((CASE WHEN consumed.run_id IS NULL THEN request.due_at ELSE NULL END)::text, ''), r.bundle_hash
+				FROM runs r LEFT JOIN run_completion_evidence request ON request.run_id=r.run_id AND request.record_kind='request'
+				AND request.revision=(SELECT MAX(revision) FROM run_completion_evidence WHERE run_id=r.run_id AND record_kind='request')
+				LEFT JOIN run_completion_evidence consumed ON consumed.run_id=request.run_id AND consumed.revision=request.revision AND consumed.record_kind='clear'
+				WHERE r.run_id=$1::uuid`
 		case "entity_state":
 			sqlText = `SELECT entity_id::text, flow_instance, entity_type, fields::text FROM entity_state WHERE run_id = $1::uuid ORDER BY created_at, entity_id LIMIT 5`
 		case "flow_instances":
@@ -5622,7 +5630,11 @@ func servedEventPublishDebugQuery(t *testing.T, db *sql.DB, backend, scope, runI
 	case "sqlite":
 		switch scope {
 		case "runs":
-			sqlText = `SELECT status, completion_revision, COALESCE(completion_due_at, ''), bundle_hash FROM runs WHERE run_id = ?`
+			sqlText = `SELECT r.status, COALESCE(request.revision,0), COALESCE(CASE WHEN consumed.run_id IS NULL THEN request.due_at ELSE NULL END, ''), r.bundle_hash
+				FROM runs r LEFT JOIN run_completion_evidence request ON request.run_id=r.run_id AND request.record_kind='request'
+				AND request.revision=(SELECT MAX(revision) FROM run_completion_evidence WHERE run_id=r.run_id AND record_kind='request')
+				LEFT JOIN run_completion_evidence consumed ON consumed.run_id=request.run_id AND consumed.revision=request.revision AND consumed.record_kind='clear'
+				WHERE r.run_id=?`
 		case "entity_state":
 			sqlText = `SELECT entity_id, flow_instance, entity_type, fields FROM entity_state WHERE run_id = ? ORDER BY created_at, entity_id LIMIT 5`
 		case "flow_instances":

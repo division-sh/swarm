@@ -1362,6 +1362,7 @@ func TestSQLiteRuntimeStoreAPIIdempotencySerializesAcrossSamePathHandles(t *test
 	dbPath := filepath.Join(t.TempDir(), ".swarm", "dev.db")
 	storeA := newBootstrappedSQLiteRuntimeStoreForPath(t, dbPath)
 	storeB := newBootstrappedSQLiteRuntimeStoreForPath(t, dbPath)
+	ctx = originalStoreFixtureContext(t, ctx, storeA)
 	req := apiidempotency.Request{
 		Method:         "event.publish",
 		Actor:          apiidempotency.BearerActor("token-1"),

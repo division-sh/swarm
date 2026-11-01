@@ -21,6 +21,7 @@ func VerifySystemNodePredecessorCannotCommitAfterGenerationAdvanceForTest(t *tes
 	for _, backend := range []string{"sqlite", "postgres"} {
 		t.Run(backend, func(t *testing.T) {
 			source := loadWorkflowTempSource(t, map[string]string{
+				"manifest.yaml": "version: 1.0.0\nplatform_version: \">=0.7.0 <0.8.0\"\n",
 				"schema.yaml":   "name: generation-node\nstages:\n  queued: {}\n  done: {final: true}\n",
 				"entities.yaml": "work:\n  status: {type: text, initial: pending}\n",
 				"events.yaml":   "source.evt:\n  status: text\nnode.completed:\n",

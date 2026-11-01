@@ -6,6 +6,7 @@ import (
 	"errors"
 	"fmt"
 	"path/filepath"
+	"strings"
 	"sync"
 	"sync/atomic"
 	"testing"
@@ -13,7 +14,18 @@ import (
 )
 
 func TestSQLiteRuntimeStore_PrivateMutationRetriesBusy(t *testing.T) {
-	store, lockStore := newSQLiteRuntimeMutationBusyStores(t, time.Millisecond)
+	busySeen := make(chan struct{})
+	var closeBusy sync.Once
+	var armed atomic.Bool
+	var attempts atomic.Int32
+	store, lockStore := newSQLiteRuntimeMutationBusyStores(t, time.Millisecond, func(query string, err error) {
+		if armed.Load() && strings.TrimSpace(query) == "UPDATE runtime_process_generation SET generation = generation WHERE singleton_id = 1" {
+			attempts.Add(1)
+			if sqliteRuntimeMutationBusyError(err) {
+				closeBusy.Do(func() { close(busySeen) })
+			}
+		}
+	})
 	ctx, cancel := context.WithTimeout(originalStoreFixtureContext(t, storeTestWorkContext(t, testAuthorActivityContext()), store), 2*time.Second)
 	defer cancel()
 
@@ -31,21 +43,14 @@ func TestSQLiteRuntimeStore_PrivateMutationRetriesBusy(t *testing.T) {
 		t.Fatalf("acquire sqlite write lock: %v", err)
 	}
 
-	busySeen := make(chan struct{})
-	var closeBusy sync.Once
-	var attempts int32
+	armed.Store(true)
 	done := make(chan error, 1)
 	go func() {
 		done <- store.runRuntimeMutation(ctx, "sqlite runtime mutation proof", func(txctx context.Context, tx *sql.Tx) error {
 			if tx == nil {
 				return errors.New("runtime mutation transaction is required")
 			}
-			atomic.AddInt32(&attempts, 1)
-			err := writeRuntimeMutationTestMarker(txctx, tx)
-			if sqliteRuntimeMutationBusyError(err) {
-				closeBusy.Do(func() { close(busySeen) })
-			}
-			return err
+			return writeRuntimeMutationTestMarker(txctx, tx)
 		})
 	}()
 
@@ -67,13 +72,19 @@ func TestSQLiteRuntimeStore_PrivateMutationRetriesBusy(t *testing.T) {
 	case <-ctx.Done():
 		t.Fatalf("wait for retried runtime mutation: %v", ctx.Err())
 	}
-	if got := atomic.LoadInt32(&attempts); got < 2 {
+	if got := attempts.Load(); got < 2 {
 		t.Fatalf("attempts = %d, want retry after busy", got)
 	}
 }
 
 func TestSQLiteRuntimeStore_PrivateMutationStopsRetryOnContextDeadline(t *testing.T) {
-	store, lockStore := newSQLiteRuntimeMutationBusyStores(t, time.Millisecond)
+	var armed atomic.Bool
+	var busyAttempts atomic.Int32
+	store, lockStore := newSQLiteRuntimeMutationBusyStores(t, time.Millisecond, func(query string, err error) {
+		if armed.Load() && strings.TrimSpace(query) == "UPDATE runtime_process_generation SET generation = generation WHERE singleton_id = 1" && sqliteRuntimeMutationBusyError(err) {
+			busyAttempts.Add(1)
+		}
+	})
 	baseCtx := originalStoreFixtureContext(t, testAuthorActivityContext(), store)
 
 	lockTx, err := lockStore.backend.ConstructionHandle().BeginTx(baseCtx, nil)
@@ -92,15 +103,14 @@ func TestSQLiteRuntimeStore_PrivateMutationStopsRetryOnContextDeadline(t *testin
 	// cost leaves no starvation window before the first retry attempt (#1658).
 	ctx, cancel := context.WithTimeout(baseCtx, sqliteRuntimeMutationRetryBudget/20)
 	defer cancel()
-	var attempts int32
+	armed.Store(true)
 	err = store.runRuntimeMutation(ctx, "sqlite runtime mutation deadline proof", func(txctx context.Context, tx *sql.Tx) error {
-		atomic.AddInt32(&attempts, 1)
 		return writeRuntimeMutationTestMarker(txctx, tx)
 	})
 	if !errors.Is(err, context.DeadlineExceeded) {
 		t.Fatalf("RunRuntimeMutation error = %v, want context deadline", err)
 	}
-	if got := atomic.LoadInt32(&attempts); got == 0 {
+	if got := busyAttempts.Load(); got == 0 {
 		t.Fatal("expected at least one busy attempt before context deadline")
 	}
 }
@@ -133,10 +143,16 @@ func TestSQLiteRuntimeStore_PrivateMutationContextDeadlineCapsDriverBusyTimeout(
 	}
 }
 
-func newSQLiteRuntimeMutationBusyStores(t *testing.T, busyTimeout time.Duration) (*SQLiteRuntimeStore, *SQLiteRuntimeStore) {
+func newSQLiteRuntimeMutationBusyStores(t *testing.T, busyTimeout time.Duration, observe ...func(string, error)) (*SQLiteRuntimeStore, *SQLiteRuntimeStore) {
 	t.Helper()
 	path := filepath.Join(t.TempDir(), "runtime.db")
-	store := newBootstrappedSQLiteRuntimeStoreForPath(t, path)
+	var store *SQLiteRuntimeStore
+	if len(observe) == 0 {
+		store = newBootstrappedSQLiteRuntimeStoreForPath(t, path)
+	} else {
+		fixture, _ := openPipelineCrashStore(t, "sqlite", path, diagnosticSQLConnector{Connector: diagnosticSQLiteConnector{path: path}, execResult: observe[0]})
+		store = fixture.store.(*SQLiteRuntimeStore)
+	}
 	lockStore := newBootstrappedSQLiteRuntimeStoreForPath(t, path)
 	for _, db := range []*sql.DB{store.backend.ConstructionHandle(), lockStore.backend.ConstructionHandle()} {
 		if _, err := db.ExecContext(testAuthorActivityContext(), fmt.Sprintf("PRAGMA busy_timeout = %d", int(busyTimeout/time.Millisecond))); err != nil {
