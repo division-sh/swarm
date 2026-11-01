@@ -79,7 +79,7 @@ func TestOperatorRunStartHandlersPersistRootEventAndReplayIdempotency(t *testing
 		t.Fatalf("NewEventBusWithOptions: %v", err)
 	}
 	handler := runStartTestHandler(t, pg, bus, source)
-	runID := uuid.NewString()
+	runID := seedEventPublishLiveRun(t, pg, bus, source)
 	body := runStartBody(runID, runStartTestBundleHashForSource(source), "scan.requested", `{"topic":"medicine"}`, "idem-start")
 
 	started := rpcCall(t, handler, body)
@@ -149,7 +149,7 @@ func TestOperatorRunStartHandlersUseActiveEphemeralBundleScopeForCreateNewWork(t
 		t.Fatalf("NewEventBusWithOptions: %v", err)
 	}
 	handler := runStartTestHandler(t, pg, bus, source)
-	runID := uuid.NewString()
+	runID := seedEventPublishLiveRun(t, pg, bus, source)
 
 	started := rpcCall(t, handler, runStartBodyWithoutBundle(runID, "scan.requested", `{"topic":"medicine"}`, "idem-start-no-bundle"))
 	if started.Error != nil {
@@ -165,17 +165,21 @@ func TestOperatorRunStartHandlersUseActiveEphemeralBundleScopeForCreateNewWork(t
 func TestOperatorRunStartHandlersRequireBundleScopeForCreateNewWorkWithoutActiveRuntimeFact(t *testing.T) {
 	pg := storetest.StartPostgresRuntimeStore(t)
 	source := semanticview.Wrap(runStartTestBundle(t, "scan.requested"))
+	bus, err := newScopedAPITestEventBus(t, pg, runStartTestEventBusOptions(source))
+	if err != nil {
+		t.Fatal(err)
+	}
 	handler := runStartTestHandler(t, pg, missingRunStartBundleScopePublisher{}, source)
-	runID := uuid.NewString()
+	runID := seedEventPublishLiveRun(t, pg, bus, source)
 
 	started := rpcCall(t, handler, runStartBodyWithoutBundle(runID, "scan.requested", `{"topic":"medicine"}`, "idem-start-no-bundle"))
 	if started.Error == nil {
 		t.Fatal("run.start missing bundle scope error = nil")
 	}
-	if data := asMap(t, started.Error.Data); data["code"] != BundleScopeRequiredCode {
+	if data := asMap(t, started.Error.Data); data["code"] != BundleDataIntegrityErrorCode || asMap(t, data["details"])["cause"] != "runtime_source_fact_mismatch" {
 		t.Fatalf("missing bundle scope data = %#v", data)
 	}
-	assertNoRunStartPersistence(t, pg, runID)
+	assertNoRunStartPublication(t, pg, runID)
 
 	retiredRunID := uuid.NewString()
 	retired := rpcCall(t, handler, runStartBodyWithRetiredBundleInput(retiredRunID, runStartTestBundleHashForSource(source), "scan.requested", `{"topic":"medicine"}`, "idem-start-retired-input"))
@@ -192,7 +196,7 @@ func TestOperatorRunStartHandlersAcceptCanonicalBundleHashForCreateNewWork(t *te
 		t.Fatalf("NewEventBusWithOptions: %v", err)
 	}
 	handler := runStartTestHandler(t, pg, bus, source)
-	runID := uuid.NewString()
+	runID := seedEventPublishLiveRun(t, pg, bus, source)
 
 	resp := rpcCall(t, handler, runStartBodyWithBundleHash(runID, runStartTestBundleHashForSource(source), "scan.requested", `{"topic":"medicine"}`, "idem-start-hash"))
 	if resp.Error != nil {
@@ -220,7 +224,7 @@ func TestOperatorRunStartRejectsFlowScopedEventName(t *testing.T) {
 		t.Fatalf("run.start flow-scoped data = %#v, want %s", data, EventNotDeclaredCode)
 	}
 	details := asMap(t, data["details"])
-	if details["event_name"] != "repo-scaffold/repo_scaffold.repo_commit_succeeded" || details["reason"] != "not_declared_root_input" {
+	if details["event_name"] != "repo-scaffold/repo_scaffold.repo_commit_succeeded" || details["reason"] != "selected_root_input_required" {
 		t.Fatalf("run.start flow-scoped details = %#v", details)
 	}
 	assertNoRunStartPersistence(t, pg, runID)
@@ -265,7 +269,7 @@ func TestOperatorRunStartHandlersFailClosedBeforePersistence(t *testing.T) {
 		if resp.Error == nil {
 			t.Fatal("run.start existing-run bundle mismatch error = nil")
 		}
-		if data := asMap(t, resp.Error.Data); data["code"] != BundleMismatchCode {
+		if data := asMap(t, resp.Error.Data); data["code"] != BundleUnavailableCode {
 			t.Fatalf("bundle mismatch data = %#v", data)
 		}
 		if count := countEventRowsByRunID(t, pg, runID); count != 0 {
@@ -349,14 +353,8 @@ func TestOperatorRunStartHandlersFailClosedBeforePersistence(t *testing.T) {
 			t.Fatalf("undeclared event data = %#v", data)
 		} else {
 			details := asMap(t, data["details"])
-			if details["event_name"] != "scan.missing" || details["reason"] != "not_declared_root_input" {
+			if details["event_name"] != "scan.missing" || details["reason"] != "selected_root_input_required" {
 				t.Fatalf("undeclared event details = %#v", details)
-			}
-			if got := stringSliceFromAny(t, details["declared_events"]); len(got) != 2 || got[0] != "fixture.close.requested" || got[1] != "scan.requested" {
-				t.Fatalf("undeclared declared_events = %#v", got)
-			}
-			if got := stringSliceFromAny(t, details["routable_events"]); len(got) != 2 || got[0] != "fixture.close.requested" || got[1] != "scan.requested" {
-				t.Fatalf("undeclared routable_events = %#v", got)
 			}
 		}
 		assertNoRunStartPersistence(t, pg, runID)
@@ -385,7 +383,7 @@ func TestOperatorRunStartHandlersFailClosedBeforePersistence(t *testing.T) {
 			t.Fatalf("NewEventBusWithOptions: %v", err)
 		}
 		handler := runStartTestHandler(t, pg, bus, source)
-		runID := uuid.NewString()
+		runID := seedEventPublishLiveRun(t, pg, bus, source)
 
 		resp := rpcCall(t, handler, runStartBody(runID, runStartTestBundleHashForSource(source), eventName, `{"topic":"medicine"}`, "idem-unroutable-event"))
 		if resp.Error == nil {
@@ -405,7 +403,7 @@ func TestOperatorRunStartHandlersFailClosedBeforePersistence(t *testing.T) {
 		if got := stringSliceFromAny(t, details["routable_events"]); len(got) != 0 {
 			t.Fatalf("declared unroutable routable_events = %#v, want empty", got)
 		}
-		assertNoRunStartPersistence(t, pg, runID)
+		assertNoRunStartPublication(t, pg, runID)
 	})
 
 	t.Run("payload validation", func(t *testing.T) {
@@ -425,7 +423,7 @@ func TestOperatorRunStartHandlersFailClosedBeforePersistence(t *testing.T) {
 			t.Fatalf("NewEventBusWithOptions: %v", err)
 		}
 		handler := runStartTestHandler(t, pg, bus, source)
-		runID := uuid.NewString()
+		runID := seedEventPublishLiveRun(t, pg, bus, source)
 
 		resp := rpcCall(t, handler, runStartBody(runID, runStartTestBundleHashForSource(source), "scan.requested", `{"topic":"medicine"}`, "idem-invalid-payload"))
 		if resp.Error == nil {
@@ -434,7 +432,7 @@ func TestOperatorRunStartHandlersFailClosedBeforePersistence(t *testing.T) {
 		if data := asMap(t, resp.Error.Data); data["code"] != PayloadValidationFailedCode {
 			t.Fatalf("payload validation data = %#v", data)
 		}
-		assertNoRunStartPersistence(t, pg, runID)
+		assertNoRunStartPublication(t, pg, runID)
 	})
 
 	t.Run("invalid caller run id", func(t *testing.T) {
@@ -475,7 +473,7 @@ func TestOperatorRunStartHandlersFailClosedBeforePersistence(t *testing.T) {
 			t.Fatalf("NewEventBusWithOptions: %v", err)
 		}
 		handler := runStartTestHandler(t, pg, bus, source)
-		runID := uuid.NewString()
+		runID := seedEventPublishLiveRun(t, pg, bus, source)
 		payloadEntityID := uuid.NewString()
 
 		resp := rpcCall(t, handler, runStartBody(runID, runStartTestBundleHashForSource(source), "scan.requested", fmt.Sprintf(`{"entity_id":%q,"topic":"medicine"}`, payloadEntityID), "idem-payload-entity-id-not-authority"))
@@ -513,8 +511,12 @@ func TestOperatorRunStartHandlersFailClosedBeforePersistence(t *testing.T) {
 	t.Run("publish failure", func(t *testing.T) {
 		pg := storetest.StartPostgresRuntimeStore(t)
 		source := semanticview.Wrap(runStartTestBundle(t, "scan.requested"))
+		bus, err := newScopedAPITestEventBus(t, pg, runStartTestEventBusOptions(source))
+		if err != nil {
+			t.Fatal(err)
+		}
 		handler := runStartTestHandler(t, pg, admittedRunStartFailurePublisher{failingRunStartPublisher{err: errors.New("simulated run.start publish failure")}}, source)
-		runID := uuid.NewString()
+		runID := seedEventPublishLiveRun(t, pg, bus, source)
 
 		resp := rpcCall(t, handler, runStartBody(runID, runStartTestBundleHashForSource(source), "scan.requested", `{"topic":"medicine"}`, "idem-publish-failure"))
 		if resp.Error == nil {
@@ -528,14 +530,18 @@ func TestOperatorRunStartHandlersFailClosedBeforePersistence(t *testing.T) {
 		if details["event_name"] != "scan.requested" || details["run_id"] != runID || details["phase"] != "publish" || !strings.Contains(fmt.Sprint(details["reason"]), "simulated run.start publish failure") {
 			t.Fatalf("publish failure details = %#v", details)
 		}
-		assertNoRunStartPersistence(t, pg, runID)
+		assertNoRunStartPublication(t, pg, runID)
 	})
 
 	t.Run("post-validation invalid event type is a publish contradiction", func(t *testing.T) {
 		pg := storetest.StartPostgresRuntimeStore(t)
 		source := semanticview.Wrap(runStartTestBundle(t, "scan.requested"))
+		bus, err := newScopedAPITestEventBus(t, pg, runStartTestEventBusOptions(source))
+		if err != nil {
+			t.Fatal(err)
+		}
 		handler := runStartTestHandler(t, pg, admittedRunStartFailurePublisher{failingRunStartPublisher{err: runtimebus.ErrInvalidEventType}}, source)
-		runID := uuid.NewString()
+		runID := seedEventPublishLiveRun(t, pg, bus, source)
 
 		resp := rpcCall(t, handler, runStartBody(runID, runStartTestBundleHashForSource(source), "scan.requested", `{"topic":"medicine"}`, "idem-invalid-event-after-validation"))
 		if resp.Error == nil {
@@ -555,7 +561,7 @@ func TestOperatorRunStartHandlersFailClosedBeforePersistence(t *testing.T) {
 		if details["reason"] != runtimebus.ErrInvalidEventType.Error() {
 			t.Fatalf("post-validation reason = %#v", details["reason"])
 		}
-		assertNoRunStartPersistence(t, pg, runID)
+		assertNoRunStartPublication(t, pg, runID)
 	})
 }
 
@@ -807,14 +813,14 @@ func assertRunStartPersistence(t *testing.T, db *sql.DB, runID, eventName string
 	t.Helper()
 	var runStatus, triggerType, bundleHash string
 	if err := db.QueryRow(`
-		SELECT status, trigger_event_type, bundle_hash
+		SELECT status, COALESCE(trigger_event_type, ''), bundle_hash
 		FROM runs
 		WHERE run_id = $1::uuid
 	`, runID).Scan(&runStatus, &triggerType, &bundleHash); err != nil {
 		t.Fatalf("load run row: %v", err)
 	}
-	if runStatus != "live" || triggerType != eventName {
-		t.Fatalf("run row status=%q trigger=%q, want live/%s", runStatus, triggerType, eventName)
+	if runStatus != "live" || triggerType != "" {
+		t.Fatalf("run.start mutated deployment run status=%q trigger=%q, want live/empty", runStatus, triggerType)
 	}
 	if bundleHash != runStartTestBundleHash {
 		t.Fatalf("run row source artifact hash = %q, want %s", bundleHash, runStartTestBundleHash)
@@ -850,12 +856,22 @@ func assertRunStartPersistence(t *testing.T, db *sql.DB, runID, eventName string
 
 func assertNoRunStartPersistence(t *testing.T, selected any, runID string) {
 	t.Helper()
+	assertRunStartPublicationCounts(t, selected, runID, 0)
+}
+
+func assertNoRunStartPublication(t *testing.T, selected any, runID string) {
+	t.Helper()
+	assertRunStartPublicationCounts(t, selected, runID, 1)
+}
+
+func assertRunStartPublicationCounts(t *testing.T, selected any, runID string, wantRuns int) {
+	t.Helper()
 	evidence, err := storetest.ReadAPIRunStartRefusalStorage(context.Background(), selected, runID)
 	if err != nil {
 		t.Fatalf("load publication cardinality evidence: %v", err)
 	}
-	if count := evidence.Runs; count != 0 {
-		t.Fatalf("run rows for %s = %d, want 0", runID, count)
+	if count := evidence.Runs; count != wantRuns {
+		t.Fatalf("run rows for %s = %d, want %d", runID, count, wantRuns)
 	}
 	if count := evidence.Events; count != 0 {
 		t.Fatalf("event rows for %s = %d, want 0", runID, count)

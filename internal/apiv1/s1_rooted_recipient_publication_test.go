@@ -120,6 +120,9 @@ func TestS1RootedRunStartRecipientPreviewPublicCreationAndReplayBothStores(t *te
 				if err != nil {
 					t.Fatal(err)
 				}
+				if phase == "initial" {
+					seedEventPublishLiveRunID(t, selected, bus, source, runID)
+				}
 				handler := eventPublishTestHandlerWithStores(t, selected, selected, selected, bus, source)
 				response := rpcCall(t, handler, body)
 				if response.Error != nil {
