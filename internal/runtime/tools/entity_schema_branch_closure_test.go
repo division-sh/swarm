@@ -42,7 +42,7 @@ func TestEntityOperationSchemaClosurePreservesMapsAndBranchPresence(t *testing.T
 	}
 }
 
-func TestRoleScopedEntityWholeReadSchemaPreservesNullableLifecycle(t *testing.T) {
+func TestRoleScopedEntityWholeReadSchemaPreservesDeclaredFieldClosure(t *testing.T) {
 	contract := entityruntime.Contract{EntityType: "case", Entity: runtimecontracts.EntityContract{
 		Fields: map[string]runtimecontracts.EntityFieldDecl{"current_state": {Type: "text"}},
 	}}
@@ -67,16 +67,15 @@ func TestRoleScopedEntityWholeReadSchemaPreservesNullableLifecycle(t *testing.T)
 		}{
 			{"staged", "queued", true, true},
 			{"actual unknown", "unknown", true, true},
-			{"absent named stage", nil, true, true},
-			{"missing stage key", nil, false, false},
+			{"null is not authored text", nil, true, false},
+			{"unassigned declared field", nil, false, true},
 			{"integer", int64(1), true, false},
 			{"boolean", false, true, false},
 			{"object", map[string]any{}, true, false},
 			{"list", []any{}, true, false},
 		} {
 			t.Run(tc.name, func(t *testing.T) {
-				row := map[string]any{"entity_id": "entity", "flow_instance": "review/one", "entity_type": "case",
-					"fields": map[string]any{"current_state": "business"}}
+				row := map[string]any{}
 				if tc.present {
 					row["current_state"] = tc.stage
 				}
@@ -88,11 +87,10 @@ func TestRoleScopedEntityWholeReadSchemaPreservesNullableLifecycle(t *testing.T)
 				}
 			})
 		}
-		for _, extra := range []string{"bookkeeping", "loops", "undeclared"} {
-			row := map[string]any{"entity_id": "entity", "flow_instance": "review/one", "entity_type": "case",
-				"current_state": nil, "fields": map[string]any{}, extra: nil}
+		for _, extra := range []string{"entity_id", "flow_instance", "entity_type", "fields", "bookkeeping", "loops", "undeclared"} {
+			row := map[string]any{"current_state": "business", extra: nil}
 			if err := admitted.Validate(row); err == nil {
-				t.Fatalf("nullable stage admitted extra output key %s", extra)
+				t.Fatalf("declared field admitted extra output key %s", extra)
 			}
 		}
 	}
