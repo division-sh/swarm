@@ -23,6 +23,7 @@ import (
 	"go.mau.fi/whatsmeow/proto/waWa6"
 	"go.mau.fi/whatsmeow/socket"
 	"go.mau.fi/whatsmeow/types"
+	waLog "go.mau.fi/whatsmeow/util/log"
 )
 
 // Only the external TLS/Noise peer is replaced. RunServe constructs the real
@@ -61,6 +62,55 @@ type serveNativeProtocolPeer struct {
 	loginHandoffRelease <-chan struct{}
 	nextLogin           *servedNativeLoginGate
 	rejectNextLogin     bool
+	pairSuccessGate     *servedPairSuccessGate
+}
+
+type servedPairSuccessGate struct {
+	ctx         context.Context
+	held        chan struct{}
+	release     chan struct{}
+	heldOnce    sync.Once
+	releaseOnce sync.Once
+}
+
+func (g *servedPairSuccessGate) complete() {
+	g.releaseOnce.Do(func() { close(g.release) })
+}
+
+type servedPairSuccessLogger struct {
+	waLog.Logger
+	gate *servedPairSuccessGate
+}
+
+func (l servedPairSuccessLogger) Infof(message string, args ...any) {
+	if message == "Successfully paired %s" {
+		// The pinned SDK logs after the signed acknowledgement, immediately
+		// before dispatching PairSuccess. Hold only this permitted schedule.
+		l.gate.heldOnce.Do(func() { close(l.gate.held) })
+		select {
+		case <-l.gate.release:
+		case <-l.gate.ctx.Done():
+		}
+	}
+	l.Logger.Infof(message, args...)
+}
+
+func (p *serveNativeProtocolPeer) holdPairSuccess(t *testing.T) *servedPairSuccessGate {
+	t.Helper()
+	gate := &servedPairSuccessGate{ctx: p.ctx, held: make(chan struct{}), release: make(chan struct{})}
+	previous := waLog.Noop
+	waLog.Noop = servedPairSuccessLogger{Logger: previous, gate: gate}
+	p.mu.Lock()
+	p.pairSuccessGate = gate
+	p.mu.Unlock()
+	t.Cleanup(func() {
+		gate.complete()
+		p.mu.Lock()
+		p.pairSuccessGate = nil
+		p.mu.Unlock()
+		waLog.Noop = previous
+	})
+	return gate
 }
 
 type servedNativeLoginGate struct {
@@ -281,6 +331,7 @@ func (p *serveNativeProtocolPeer) serve(wire *whatsappfixture.Transport) {
 			p.mu.Lock()
 			loginHandoff := p.loginHandoff
 			loginRelease := p.loginHandoffRelease
+			pairSuccessGate := p.pairSuccessGate
 			p.mu.Unlock()
 			if loginHandoff {
 				if loginRelease != nil {
@@ -289,6 +340,14 @@ func (p *serveNativeProtocolPeer) serve(wire *whatsappfixture.Transport) {
 					case <-p.ctx.Done():
 						return
 					}
+				}
+				if pairSuccessGate != nil {
+					select {
+					case <-pairSuccessGate.held:
+					case <-p.ctx.Done():
+						return
+					}
+					p.t.Log("provider sends 515 after signed acknowledgement with PairSuccess dispatch held")
 				}
 				if err := wire.Send(p.ctx, waBinary.Node{Tag: "stream:error", Attrs: waBinary.Attrs{"code": "515"}}); err != nil {
 					p.t.Error(err)

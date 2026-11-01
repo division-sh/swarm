@@ -63,10 +63,14 @@ type firstConnectPairingObserver struct {
 	cliapp.ChannelRegistrationSession
 	principal operatorchannel.Principal
 	observe   func(channelonboarding.Result, bool)
+	afterRead func(channelonboarding.PairingReadback, error)
 }
 
 func (s firstConnectPairingObserver) ReadSessionPairing(ctx context.Context, op channelonboarding.Operation, principal operatorchannel.Principal) (channelonboarding.PairingReadback, error) {
 	view, err := s.ChannelRegistrationSession.ReadSessionPairing(ctx, op, principal)
+	if s.afterRead != nil {
+		s.afterRead(view, err)
+	}
 	if err == nil {
 		s.observe(channelonboarding.Result{Operation: op, Pairing: &view}, false)
 	}
@@ -98,6 +102,7 @@ func TestChannelConnectWhatsAppRegistersAccountBothStores(t *testing.T) {
 				var release sync.Once
 				t.Cleanup(func() { release.Do(func() { close(streamEnd) }) })
 				qr := make(chan channelonboarding.Result, 1)
+				var pairSuccessGate atomic.Pointer[servedPairSuccessGate]
 				var pendingCheckpoint atomic.Bool
 				observe := func(result channelonboarding.Result, checkpoint bool) {
 					if view := result.Pairing; view != nil {
@@ -123,7 +128,12 @@ func TestChannelConnectWhatsAppRegistersAccountBothStores(t *testing.T) {
 					if err != nil {
 						return nil, err
 					}
-					return firstConnectPairingObserver{ChannelRegistrationSession: session, principal: options.Principal, observe: observe}, nil
+					return firstConnectPairingObserver{ChannelRegistrationSession: session, principal: options.Principal, observe: observe,
+						afterRead: func(view channelonboarding.PairingReadback, err error) {
+							if gate := pairSuccessGate.Load(); gate != nil && (err != nil || view.Paired) {
+								gate.complete()
+							}
+						}}, nil
 				}
 				opts := cliapp.DefaultServeOptions()
 				opts.SourceRoot = filepath.Join(repoRootForTest(), "internal/serveapp/testdata/whatsapp-session-reply")
@@ -261,84 +271,99 @@ func TestChannelConnectWhatsAppRegistersAccountBothStores(t *testing.T) {
 				}
 				if !serving {
 					requireOfflinePairedWhatsAppServiceRoundTrip(t, opts, peer, op)
-					t.Run("phone_unlink_reverify", func(t *testing.T) {
-						peer.mu.Lock()
-						peer.rejectNextLogin = true
-						peer.mu.Unlock()
-						process := startServeRuntimeTestProcess(t, opts)
-						if code, exited := process.waitForExit(5 * time.Second); !exited || code != 1 || serveOutputIsReady(process.outputString()) {
-							t.Fatalf("revoked account did not refuse startup: exit=%d exited=%t\n%s", code, exited, process.outputString())
+					for _, earlyReconnect := range []bool{false, true} {
+						name := "phone_unlink_reverify"
+						if earlyReconnect {
+							name = "provider_515_before_pair_success"
 						}
-						select {
-						case <-qr:
-						default:
-						}
-						ctx, cancel := context.WithTimeout(t.Context(), 20*time.Second)
-						login := &servedNativeLoginGate{held: make(chan struct{}), release: make(chan bool, 1)}
-						peer.mu.Lock()
-						peer.rejectNextLogin, peer.nextLogin = true, login
-						peer.mu.Unlock()
-						reverify := func(ctx context.Context, options cliapp.ChannelRegistrationOptions) (cliapp.ChannelRegistrationSession, error) {
-							reads := &firstConnectLoginRead{OperationStore: options.Operations, login: login, invocation: ctx}
-							options.Operations = reads
-							session, err := factory(ctx, options)
-							if err != nil {
-								return session, err
+						t.Run(name, func(t *testing.T) {
+							var heldPairSuccess *servedPairSuccessGate
+							if earlyReconnect {
+								heldPairSuccess = peer.holdPairSuccess(t)
 							}
-							native := session.(firstConnectPairingObserver).ChannelRegistrationSession.(*deploymentChannelSession)
-							reads.opened = func() bool { return native.connection != nil }
-							return session, nil
-						}
-						out, errOut := &lockedBuffer{}, &lockedBuffer{}
-						done := make(chan int, 1)
-						joined := false
-						defer func() {
+							peer.mu.Lock()
+							peer.rejectNextLogin = true
+							peer.mu.Unlock()
+							process := startServeRuntimeTestProcess(t, opts)
+							if code, exited := process.waitForExit(5 * time.Second); !exited || code != 1 || serveOutputIsReady(process.outputString()) {
+								t.Fatalf("revoked account did not refuse startup: exit=%d exited=%t\n%s", code, exited, process.outputString())
+							}
 							select {
-							case login.release <- false:
+							case <-qr:
 							default:
 							}
-							cancel()
-							if !joined {
-								<-done
+							ctx, cancel := context.WithTimeout(t.Context(), 20*time.Second)
+							login := &servedNativeLoginGate{held: make(chan struct{}), release: make(chan bool, 1)}
+							peer.mu.Lock()
+							peer.rejectNextLogin, peer.nextLogin = true, login
+							peer.mu.Unlock()
+							reverify := func(ctx context.Context, options cliapp.ChannelRegistrationOptions) (cliapp.ChannelRegistrationSession, error) {
+								reads := &firstConnectLoginRead{OperationStore: options.Operations, login: login, invocation: ctx}
+								options.Operations = reads
+								session, err := factory(ctx, options)
+								if err != nil {
+									return session, err
+								}
+								native := session.(firstConnectPairingObserver).ChannelRegistrationSession.(*deploymentChannelSession)
+								reads.opened = func() bool { return native.connection != nil }
+								return session, nil
 							}
-						}()
-						go func() {
-							done <- cliapp.Execute(ctx, []string{"--config", opts.ConfigPath, "channel", "connect", "whatsapp", op.AccountReference, "--yes"}, out, errOut, nil, nil, reverify)
-						}()
-						var replacement channelonboarding.Result
-						select {
-						case replacement = <-qr:
-						case code := <-done:
-							joined = true
-							t.Fatalf("revoked-account reverify exited before relink QR: exit=%d err=%s", code, errOut.String())
-						case <-ctx.Done():
-							t.Fatal("revoked-account reverify did not offer relink")
-						}
-						if replacement.Operation.OperationID == op.OperationID || replacement.Operation.SessionConnectionID == pairing.Operation.SessionConnectionID ||
-							replacement.Operation.AccountConfirmed || replacement.Pairing.Paired || !strings.Contains(out.String(), "Account was logged out from the phone. Link it again:") {
-							t.Fatal("revoked account retained approval or missed exact relink")
-						}
-						peer.pair(replacement.Pairing.Code)
-						select {
-						case code := <-done:
-							joined = true
-							if code != 0 {
-								t.Fatalf("public same-account relink exit=%d err=%s", code, errOut.String())
+							out, errOut := &lockedBuffer{}, &lockedBuffer{}
+							done := make(chan int, 1)
+							joined := false
+							defer func() {
+								select {
+								case login.release <- false:
+								default:
+								}
+								cancel()
+								if !joined {
+									<-done
+								}
+							}()
+							go func() {
+								done <- cliapp.Execute(ctx, []string{"--config", opts.ConfigPath, "channel", "connect", "whatsapp", op.AccountReference, "--yes"}, out, errOut, nil, nil, reverify)
+							}()
+							var replacement channelonboarding.Result
+							select {
+							case replacement = <-qr:
+							case code := <-done:
+								joined = true
+								t.Fatalf("revoked-account reverify exited before relink QR: exit=%d err=%s", code, errOut.String())
+							case <-ctx.Done():
+								t.Fatal("revoked-account reverify did not offer relink")
 							}
-						case <-ctx.Done():
-							t.Fatal("public same-account relink did not register")
-						}
-						var listed, listErr bytes.Buffer
-						if code := cliapp.Execute(ctx, []string{"--config", opts.ConfigPath, "channel", "list", "--json"}, &listed, &listErr, nil, nil, factory); code != 0 ||
-							json.Unmarshal(listed.Bytes(), &listing) != nil || len(listing.Accounts) != 1 {
-							t.Fatalf("relinked public account-list exit=%d err=%s", code, listErr.String())
-						}
-						current := listing.Accounts[0].Operation
-						if current.OperationID != replacement.Operation.OperationID ||
-							current.AccountReference != op.AccountReference || !current.AccountConfirmed || current.Phase != channelonboarding.PhaseSucceeded || current.IdentityOperationID != "" {
-							t.Fatal("relink did not register exactly the same approved account under its fresh reservation")
-						}
-					})
+							if replacement.Operation.OperationID == op.OperationID || replacement.Operation.SessionConnectionID == pairing.Operation.SessionConnectionID ||
+								replacement.Operation.AccountConfirmed || replacement.Pairing.Paired || !strings.Contains(out.String(), "Account was logged out from the phone. Link it again:") {
+								t.Fatal("revoked account retained approval or missed exact relink")
+							}
+							if earlyReconnect {
+								pairSuccessGate.Store(heldPairSuccess)
+								t.Cleanup(func() { pairSuccessGate.Store(nil) })
+							}
+							peer.pair(replacement.Pairing.Code)
+							select {
+							case code := <-done:
+								joined = true
+								if code != 0 {
+									t.Fatalf("public same-account relink exit=%d err=%s", code, errOut.String())
+								}
+							case <-ctx.Done():
+								t.Fatal("public same-account relink did not register")
+							}
+							var listed, listErr bytes.Buffer
+							if code := cliapp.Execute(ctx, []string{"--config", opts.ConfigPath, "channel", "list", "--json"}, &listed, &listErr, nil, nil, factory); code != 0 ||
+								json.Unmarshal(listed.Bytes(), &listing) != nil || len(listing.Accounts) != 1 {
+								t.Fatalf("relinked public account-list exit=%d err=%s", code, listErr.String())
+							}
+							current := listing.Accounts[0].Operation
+							if current.OperationID != replacement.Operation.OperationID ||
+								current.AccountReference != op.AccountReference || !current.AccountConfirmed || current.Phase != channelonboarding.PhaseSucceeded || current.IdentityOperationID != "" {
+								t.Fatal("relink did not register exactly the same approved account under its fresh reservation")
+							}
+							op = current
+						})
+					}
 				}
 			})
 		}
