@@ -1527,6 +1527,7 @@ type AgentRegistryEntry struct {
 	Role                   string                      `yaml:"role"`
 	Intent                 runtimeagentintent.Source   `yaml:"intent" json:"intent"`
 	ResolvedIntent         runtimeagentintent.Resolved `yaml:"-" json:"resolved_intent"`
+	Content                string                      `yaml:"content" json:"content,omitempty"`
 	Writes                 AgentWriteGrant             `yaml:"writes"`
 	Permissions            []string                    `yaml:"permissions" json:"permissions,omitempty"`
 	PermissionsBundle      string                      `yaml:"permissions_bundle" json:"permissions_bundle,omitempty"`
@@ -1560,6 +1561,7 @@ var agentRegistryEntryFieldOptions = map[string]struct{}{
 	"role":               {},
 	"intent":             {},
 	"writes":             {},
+	"content":            {},
 	"permissions":        {},
 	"permissions_bundle": {},
 	"workspace_class":    {},

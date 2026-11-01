@@ -553,7 +553,7 @@ func openAIResponsesURL(baseURL string) string {
 
 func toOpenAIResponsesInputItems(m Message) []any {
 	role := strings.ToLower(strings.TrimSpace(m.Role))
-	content := strings.TrimSpace(m.Content)
+	content := m.Content
 	switch role {
 	case "assistant":
 		items := make([]any, 0, 1+len(m.ToolCalls))
@@ -577,6 +577,8 @@ func toOpenAIResponsesInputItems(m Message) []any {
 			return nil
 		}
 		return []any{openAIResponsesMessageInput{Role: "system", Content: content}}
+	case "user":
+		return []any{openAIResponsesMessageInput{Role: "user", Content: content}}
 	default:
 		if content == "" {
 			return nil
