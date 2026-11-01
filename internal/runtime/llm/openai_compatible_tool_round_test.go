@@ -1,6 +1,7 @@
 package llm
 
 import (
+	"context"
 	"encoding/json"
 	"reflect"
 	"testing"
@@ -8,16 +9,33 @@ import (
 
 	"github.com/division-sh/swarm/internal/runtime/agentframe"
 	"github.com/division-sh/swarm/internal/runtime/core/managedcapabilities"
+	"github.com/division-sh/swarm/internal/runtime/core/managedexecution"
 	runtimedelivery "github.com/division-sh/swarm/internal/runtime/deliverylifecycle"
 	runtimeeffects "github.com/division-sh/swarm/internal/runtime/effects"
 	"github.com/division-sh/swarm/internal/runtime/effects/effecttest"
+	llmselection "github.com/division-sh/swarm/internal/runtime/llm/selection"
+	"github.com/division-sh/swarm/internal/testutil/sourceartifactfixture"
 	"github.com/google/uuid"
 )
 
 func TestOpenAICompatibleToolRoundReplaysAdmittedRecoveryWithoutChangingMemory(t *testing.T) {
+	t.Run("selected_invocation", func(t *testing.T) {
+		ctx, request, session, call := selectedCompatibleToolRoundFixture(t)
+		before := providerSchemaJSON(t, session)
+		if err := replayOpenAICompatibleToolRound(ctx, &request, session, &call); err != nil {
+			t.Fatal(err)
+		}
+		if len(request.Messages) != 5 || string(request.Messages[3].ReasoningContent) != `"private reasoning"` ||
+			len(request.Messages[3].ToolCalls) != 1 || request.Messages[3].ToolCalls[0].ID != "current-call" || request.Messages[4].ToolCallID != "current-call" {
+			t.Fatalf("selected invocation lost its exact provider round: %+v", request.Messages)
+		}
+		if providerSchemaJSON(t, session) != before || call.toolRound != nil || call.selectedToolRound.completionHandle != nil {
+			t.Fatal("selected replay changed memory or acquired normal recovery authority")
+		}
+	})
 	request, session, call := compatibleToolRoundFixture(t)
 	before := providerSchemaJSON(t, session)
-	if err := replayOpenAICompatibleToolRound(&request, session, &call); err != nil {
+	if err := replayOpenAICompatibleToolRound(context.Background(), &request, session, &call); err != nil {
 		t.Fatal(err)
 	}
 	if len(request.Messages) != 5 {
@@ -49,6 +67,46 @@ func TestOpenAICompatibleToolRoundReplaysAdmittedRecoveryWithoutChangingMemory(t
 }
 
 func TestOpenAICompatibleToolRoundRefusesMismatchedPredecessors(t *testing.T) {
+	for _, test := range []struct {
+		name string
+		edit func(*Response, *Session, *managedProviderCall)
+	}{
+		{"acknowledgement", func(r *Response, _ *Session, _ *managedProviderCall) { r.completionAttempt = nil }},
+		{"request_fingerprint", func(r *Response, _ *Session, _ *managedProviderCall) { r.completionDispatch.request = []byte(`{}`) }},
+		{"attempt", func(r *Response, _ *Session, _ *managedProviderCall) {
+			attempt := *r.completionAttempt
+			attempt.AttemptID = uuid.NewString()
+			r.completionAttempt = &attempt
+		}},
+		{"execution", func(r *Response, _ *Session, _ *managedProviderCall) {
+			attempt := *r.completionAttempt
+			attempt.Authority.SelectedFork.ExecutionID = uuid.NewString()
+			r.completionAttempt = &attempt
+		}},
+		{"fork", func(r *Response, _ *Session, _ *managedProviderCall) {
+			changed := *r.CapabilitySurface
+			changed.Authority.RunID = uuid.NewString()
+			r.CapabilitySurface = &changed
+		}},
+		{"session", func(_ *Response, s *Session, _ *managedProviderCall) { s.ID = uuid.NewString() }},
+		{"parent", func(_ *Response, _ *Session, c *managedProviderCall) { c.frame.Turn.ParentFrameID = "foreign" }},
+		{"provider", func(_ *Response, _ *Session, c *managedProviderCall) { c.provider.Provider = "foreign" }},
+		{"normal_recovery", func(_ *Response, _ *Session, c *managedProviderCall) {
+			c.toolRound = &runtimeeffects.CompletionContinuationSnapshot{}
+		}},
+	} {
+		t.Run("selected/"+test.name, func(t *testing.T) {
+			ctx, request, session, call := selectedCompatibleToolRoundFixture(t)
+			test.edit(call.selectedToolRound, session, &call)
+			before := providerSchemaJSON(t, request)
+			if err := replayOpenAICompatibleToolRound(ctx, &request, session, &call); err == nil {
+				t.Fatal("mismatched selected predecessor reached request dispatch")
+			}
+			if providerSchemaJSON(t, request) != before {
+				t.Fatal("refused selected replay changed its request")
+			}
+		})
+	}
 	for _, test := range []struct {
 		name string
 		edit func(*openAICompatibleRequest, *Session, *managedProviderCall)
@@ -85,7 +143,7 @@ func TestOpenAICompatibleToolRoundRefusesMismatchedPredecessors(t *testing.T) {
 			request, session, call := compatibleToolRoundFixture(t)
 			test.edit(&request, session, &call)
 			before := providerSchemaJSON(t, request)
-			if err := replayOpenAICompatibleToolRound(&request, session, &call); err == nil {
+			if err := replayOpenAICompatibleToolRound(context.Background(), &request, session, &call); err == nil {
 				t.Fatal("mismatched predecessor was accepted")
 			}
 			if providerSchemaJSON(t, request) != before {
@@ -93,6 +151,62 @@ func TestOpenAICompatibleToolRoundRefusesMismatchedPredecessors(t *testing.T) {
 			}
 		})
 	}
+}
+
+func selectedCompatibleToolRoundFixture(t *testing.T) (context.Context, openAICompatibleRequest, *Session, managedProviderCall) {
+	t.Helper()
+	request, session, call := compatibleToolRoundFixture(t)
+	prior, err := completionContinuationForPayload(call.toolRound.Payload, "openai_compatible")
+	if err != nil {
+		t.Fatal(err)
+	}
+	harness := effecttest.New()
+	executionID := uuid.NewString()
+	authority := runtimeeffects.Authority{Kind: runtimeeffects.AuthoritySelectedContractFork, ID: executionID,
+		SelectedFork: runtimeeffects.SelectedContractForkAuthority{ExecutionID: executionID, ForkRunID: session.MemoryIdentity.RunID, Generation: 1,
+			AdmissionFingerprint: "admission", ContainerPlanFingerprint: "container", ActorCensusFingerprint: "actors", EffectiveConfigFingerprint: "config"},
+		Target: runtimeeffects.UsageTarget{Kind: runtimeeffects.UsageTargetAgentTurn, ID: uuid.NewString(), RunID: session.MemoryIdentity.RunID,
+			AgentID: session.AgentID, AgentIdentity: session.MemoryIdentity, SessionID: session.ID, Memory: session.Memory, FlowInstance: session.MemoryIdentity.FlowInstance()},
+		CompletionRequest: prior.Usage.Evidence.Request, ExecutionOwner: "selected-round-test", LeaseExpiresAt: time.Now().Add(time.Minute), FenceGeneration: 1, ExecutionMode: runtimeeffects.ExecutionModeLive}
+	admission, err := managedexecution.New(managedexecution.KindSelectedContractFork, executionID, 1, session.MemoryIdentity.RunID, "actors", sourceartifactfixture.BundleHash, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	surface, err := managedcapabilities.New(managedcapabilities.Plan{ActorIdentity: session.MemoryIdentity,
+		RuntimeMode: call.provider.RuntimeMode, Provider: call.provider.Provider, Transport: call.provider.Transport, ProviderContract: "selected-round-test",
+		Authority: managedcapabilities.Authority{Kind: managedcapabilities.AuthorityProviderTurn, ID: authority.Target.ID,
+			ExecutionKind: managedcapabilities.ExecutionSelectedContractFork, ExecutionAuthorityID: executionID, RunID: session.MemoryIdentity.RunID,
+			SessionID: session.ID, TurnOrdinal: session.TurnCount}, CreatedAt: time.Now()})
+	if err != nil {
+		t.Fatal(err)
+	}
+	ctx := managedexecution.WithAdmission(runtimeeffects.WithAuthority(managedEffectHarnessContext(t, harness, "selected-round"), authority), admission)
+	ctx = managedcapabilities.WithContext(ctx, surface)
+	profile, _ := llmselection.ResolveActiveBackend(llmselection.BackendOpenAICompatible)
+	ctx = withEffectTestRequest(t, ctx, profile, llmselection.ResolvedModel{ModelAlias: "regular", ConcreteModel: "model"})
+	surface, _ = managedcapabilities.FromContext(ctx)
+	probe := &acknowledgedForkChatCompletionProbe{&committedCleanupCompletionProbe{Harness: harness}}
+	ctx = runtimeeffects.WithController(ctx, liveTestCompletionController(probe, probe, probe, probe))
+	frame := managedProviderCallForEffectTest(t, ctx).frame
+	handle, err := runtimeeffects.BeginManagedCompletion(ctx, "openai_compatible", call.toolRound.Request, frame, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	dispatch := newCompletionDispatch(handle, runtimeeffects.StateSettled)
+	dispatch.request = append([]byte(nil), call.toolRound.Request...)
+	dispatch.requestFingerprint = runtimeeffects.Fingerprint(dispatch.request)
+	dispatch.markProviderInvocationStarted()
+	projection := prior.Projection
+	projection.FrameID = frame.FrameID
+	projection.Messages = append([]Message(nil), projection.Messages[:len(projection.Messages)-1]...)
+	dispatch.projection = &projection
+	response := prior.Response
+	attempt := handle.Attempt()
+	response.completionAttempt, response.completionDispatch, response.CapabilitySurface = &attempt, dispatch, &surface
+	response.ToolOutputAuthority = &ToolOutputAuthority{ProviderOperationID: attempt.OperationID, SettledAt: time.Now()}
+	call.toolRound, call.selectedToolRound = nil, &response
+	call.provider, call.frame.Turn.ParentFrameID = frame.Session.Provider, frame.FrameID
+	return ctx, request, session, call
 }
 
 func compatibleToolRoundFixture(t *testing.T) (openAICompatibleRequest, *Session, managedProviderCall) {

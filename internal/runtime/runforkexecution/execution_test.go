@@ -1446,7 +1446,7 @@ func TestSelectedContractForkProviderTurnsUseCanonicalExecutionFrames(t *testing
 		},
 		{
 			name: "openai_compatible", backend: llmselection.BackendOpenAICompatible, credentialEnv: llmselection.OpenAICompatibleCredentialEnv, adapter: "openai_compatible", model: "gpt-selected-fork",
-			initial:      `{"model":"gpt-selected-fork","choices":[{"message":{"role":"assistant","tool_calls":[{"id":"lookup-1","type":"function","function":{"name":"lookup_data","arguments":"{\"query\":\"status\"}"}}]}}],"usage":{"prompt_tokens":11,"completion_tokens":3,"total_tokens":14}}`,
+			initial:      `{"model":"gpt-selected-fork","choices":[{"message":{"role":"assistant","reasoning_content":"Read selected status before completing.","tool_calls":[{"id":"lookup-1","type":"function","function":{"name":"lookup_data","arguments":"{\"query\":\"status\"}"}}]}}],"usage":{"prompt_tokens":11,"completion_tokens":3,"total_tokens":14}}`,
 			continuation: `{"model":"gpt-selected-fork","choices":[{"message":{"role":"assistant","content":"completed","tool_calls":[{"id":"emit-1","type":"function","function":{"name":"emit_task_completed","arguments":"{}"}}]}}],"usage":{"prompt_tokens":13,"completion_tokens":4,"total_tokens":17}}`,
 		},
 		{
@@ -1497,6 +1497,9 @@ func TestSelectedContractForkProviderTurnsUseCanonicalExecutionFrames(t *testing
 				if ordinal == 2 {
 					wantKind = `"kind":"tool_continuation"`
 					response = tc.continuation
+					if tc.backend == llmselection.BackendOpenAICompatible {
+						requireSelectedCompatibleToolRound(t, request)
+					}
 				}
 				if ordinal > 2 || !jsonValueContains(request, wantKind) {
 					t.Errorf("%s provider request %d omits %s frame: %s", tc.name, ordinal, wantKind, requestJSON)
@@ -1604,6 +1607,21 @@ func TestSelectedContractForkProviderTurnsUseCanonicalExecutionFrames(t *testing
 			}
 			assertSelectedForkProviderCapabilityEvidence(t, ctx, db, result, tc.adapter, 2)
 		})
+	}
+}
+
+func requireSelectedCompatibleToolRound(t *testing.T, request map[string]any) {
+	t.Helper()
+	messages, _ := request["messages"].([]any)
+	if len(messages) < 2 {
+		t.Fatal("selected continuation lost its assistant/tool round")
+	}
+	assistant, _ := messages[len(messages)-2].(map[string]any)
+	tool, _ := messages[len(messages)-1].(map[string]any)
+	calls, _ := assistant["tool_calls"].([]any)
+	if assistant["role"] != "assistant" || assistant["content"] != "" || assistant["reasoning_content"] != "Read selected status before completing." ||
+		len(calls) != 1 || !jsonValueContains(calls[0], "lookup-1") || !jsonValueContains(calls[0], "lookup_data") || tool["role"] != "tool" || tool["tool_call_id"] != "lookup-1" {
+		t.Fatalf("selected continuation lost its exact assistant call/reasoning before the result: %+v", messages)
 	}
 }
 

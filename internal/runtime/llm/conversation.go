@@ -380,9 +380,13 @@ func (c *Conversation) continueManagedToolRound(ctx context.Context, draft agent
 	if err != nil {
 		return nil, err
 	}
-	if draft.Kind == agentframe.TurnToolContinuation && previous != nil && previous.completionHandle != nil {
-		if round, ok := previous.completionHandle.CompletionContinuation(); ok {
-			call.toolRound = &round
+	if draft.Kind == agentframe.TurnToolContinuation && previous != nil {
+		if previous.completionHandle != nil {
+			if round, ok := previous.completionHandle.CompletionContinuation(); ok {
+				call.toolRound = &round
+			}
+		} else if previous.completionDispatch != nil {
+			call.selectedToolRound = previous
 		}
 	}
 	runtime, ok := c.runtime.(ManagedSessionRuntime)

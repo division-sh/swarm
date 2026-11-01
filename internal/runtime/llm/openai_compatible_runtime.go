@@ -258,7 +258,7 @@ func (r *OpenAICompatibleRuntime) continueSession(ctx context.Context, s *Sessio
 		return nil, err
 	}
 	if managed != nil && managed.frame.Turn.Kind == agentframe.TurnToolContinuation {
-		if err := replayOpenAICompatibleToolRound(&reqBody, s, managed); err != nil {
+		if err := replayOpenAICompatibleToolRound(ctx, &reqBody, s, managed); err != nil {
 			return nil, err
 		}
 	}
@@ -385,6 +385,9 @@ func (r *OpenAICompatibleRuntime) continueSession(ctx context.Context, s *Sessio
 	if err := requireCurrentProviderProjection(handoffCtx, s.AgentID); err != nil {
 		return nil, errors.Join(settlementErr, err)
 	}
+	if managed != nil && resp.completionAttempt != nil && resp.completionAttempt.Authority.Kind == runtimeeffects.AuthoritySelectedContractFork {
+		resp.completionDispatch = dispatch
+	}
 	projected, err := projectCompletionContinuation(handoffCtx, dispatch, s, &resp)
 	if err != nil && !committedCompletionCleanup(&resp, err) {
 		return nil, errors.Join(settlementErr, err)
@@ -499,6 +502,7 @@ func (r *OpenAICompatibleRuntime) sendRequest(ctx context.Context, payload []byt
 	}
 	dispatch := newCompletionDispatch(attempt, runtimeeffects.StateOutcomeUncertain)
 	dispatch.request = append([]byte(nil), payload...)
+	dispatch.requestFingerprint = runtimeeffects.Fingerprint(payload)
 	heartbeatCtx, heartbeat, err := startCompletionAttemptHeartbeat(ctx, attempt)
 	if err != nil {
 		dispatch.state = runtimeeffects.StateTerminalFailure
