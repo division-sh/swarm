@@ -279,7 +279,7 @@ func startSlackManagedConnectorBusAndCoordinator(t *testing.T, backend slackMana
 			}
 			return []runtimebus.EventInterceptor{pc}
 		},
-	}, "inbound.github.Raw.issue_comment", "inbound.github.Raw.issues", "inbound.telegram.Raw")
+	}, "inbound.github.raw.issue_comment", "inbound.github.raw.issues", "inbound.telegram.raw")
 	if err != nil {
 		t.Fatalf("%s NewEventBusWithOptions: %v", backend.name, err)
 	}
