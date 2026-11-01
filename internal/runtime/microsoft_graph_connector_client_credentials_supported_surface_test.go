@@ -4,11 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
-	"io"
-	"net/http"
-	"net/http/httptest"
 	"strings"
-	"sync/atomic"
 	"testing"
 	"time"
 
@@ -19,6 +15,7 @@ import (
 	runtimepipeline "github.com/division-sh/swarm/internal/runtime/pipeline"
 	"github.com/division-sh/swarm/internal/store/storetest"
 	"github.com/division-sh/swarm/internal/testutil"
+	"github.com/division-sh/swarm/internal/testutil/connectorapi"
 )
 
 func TestMicrosoftGraphClientCredentialsConnectorPackRoundTripThroughActivityJournal(t *testing.T) {
@@ -72,19 +69,15 @@ func TestMicrosoftGraphClientCredentialsConnectorPackRoundTripThroughActivityJou
 	})
 }
 
-type microsoftGraphConnectorCall struct {
-	auth string
-	body map[string]any
-	raw  string
-}
+type microsoftGraphConnectorCall = connectorapi.Call
 
 func runMicrosoftGraphClientCredentialsConnectorSurface(t *testing.T, backend slackManagedConnectorBackend) {
 	t.Helper()
 	fake := newFakeMicrosoftGraphConnectorServer(t)
-	defer fake.server.Close()
+	defer fake.Server.Close()
 
-	managedStore := runtimemanagedcredentials.NewMemoryStore(microsoftGraphClientCredentialsRecord(fake.server.URL, "expired-token", time.Now().Add(-time.Hour)))
-	source := microsoftGraphConnectorSource(t, fake.server.URL, backend.flowInstance)
+	managedStore := runtimemanagedcredentials.NewMemoryStore(microsoftGraphClientCredentialsRecord(fake.Server.URL, "expired-token", time.Now().Add(-time.Hour)))
+	source := microsoftGraphConnectorSource(t, fake.Server.URL, backend.flowInstance)
 	backend.source = source
 	backend.ctx, backend.inboundTarget = seedCapturedProviderTarget(t, backend.ctx, backend.inboundStore, source, backend.runID, backend.entityID, backend.flowInstance, "customer-a", "telegram", "telegram-secret", "microsoft-graph-client-credentials-observer")
 	bus, pc := startSlackManagedConnectorBusAndCoordinator(t, backend, source, managedStore)
@@ -99,14 +92,14 @@ func runMicrosoftGraphClientCredentialsConnectorSurface(t *testing.T, backend sl
 		t.Fatalf("%s first activity attempt status = %q failure=%#v, want succeeded", backend.name, firstAttempt.Status, firstAttempt.Failure)
 	}
 	firstCall := fake.requireSideEffectCall(t, backend.name, "client_credentials refresh-before-use")
-	if firstCall.auth != "Bearer graph-fresh-token" {
-		t.Fatalf("%s first Graph auth = %q, want Bearer graph-fresh-token", backend.name, firstCall.auth)
+	if firstCall.Auth != "Bearer graph-fresh-token" {
+		t.Fatalf("%s first Graph auth = %q, want Bearer graph-fresh-token", backend.name, firstCall.Auth)
 	}
-	if got := microsoftGraphConnectorString(firstCall.body["message"]); !strings.Contains(got, "send first mail") || !strings.Contains(got, "recipient@example.com") {
-		t.Fatalf("%s first Graph message = %#v, want subject/body/recipient from activity input", backend.name, firstCall.body["message"])
+	if got := microsoftGraphConnectorString(firstCall.Body["message"]); !strings.Contains(got, "send first mail") || !strings.Contains(got, "recipient@example.com") {
+		t.Fatalf("%s first Graph message = %#v, want subject/body/recipient from activity input", backend.name, firstCall.Body["message"])
 	}
-	if recipients := microsoftGraphMessageRecipients(firstCall.body); len(recipients) != 1 {
-		t.Fatalf("%s first Graph toRecipients = %#v, want one JSON array recipient", backend.name, microsoftGraphMessageValue(firstCall.body, "toRecipients"))
+	if recipients := microsoftGraphMessageRecipients(firstCall.Body); len(recipients) != 1 {
+		t.Fatalf("%s first Graph toRecipients = %#v, want one JSON array recipient", backend.name, microsoftGraphMessageValue(firstCall.Body, "toRecipients"))
 	}
 	requireSlackManagedConnectorResultEventEventually(t, backend, firstAttempt.ResultEventID, firstAttempt.ResultEventType)
 	if got := fake.tokenRequestCount(); got != 1 {
@@ -123,8 +116,8 @@ func runMicrosoftGraphClientCredentialsConnectorSurface(t *testing.T, backend sl
 		t.Fatalf("%s second activity attempt status = %q failure=%#v, want succeeded", backend.name, secondAttempt.Status, secondAttempt.Failure)
 	}
 	secondCall := fake.requireSideEffectCall(t, backend.name, "client_credentials re-acquire-on-401")
-	if secondCall.auth != "Bearer graph-after-401-token" {
-		t.Fatalf("%s second Graph auth = %q, want Bearer graph-after-401-token", backend.name, secondCall.auth)
+	if secondCall.Auth != "Bearer graph-after-401-token" {
+		t.Fatalf("%s second Graph auth = %q, want Bearer graph-after-401-token", backend.name, secondCall.Auth)
 	}
 	if got := fake.tokenRequestCount(); got != 2 {
 		t.Fatalf("%s client_credentials token requests after 401 = %d, want 2", backend.name, got)
@@ -160,10 +153,10 @@ func runMicrosoftGraphClientCredentialsConnectorSurface(t *testing.T, backend sl
 	waitForMicrosoftGraphFailureEventsForSource(t, backend, rateLimitInboundEventID, 1, "429")
 
 	assertMicrosoftGraphManagedCredentialFailureBeforeDispatch(t, backend, fake, "missing credential", "323456792", runtimemanagedcredentials.NewMemoryStore())
-	unconnected := microsoftGraphClientCredentialsRecord(fake.server.URL, "", time.Now().Add(time.Hour))
+	unconnected := microsoftGraphClientCredentialsRecord(fake.Server.URL, "", time.Now().Add(time.Hour))
 	unconnected.Status = runtimemanagedcredentials.StatusUnconnected
 	assertMicrosoftGraphManagedCredentialFailureBeforeDispatch(t, backend, fake, "unconnected credential", "323456793", runtimemanagedcredentials.NewMemoryStore(unconnected))
-	scopeInsufficient := microsoftGraphClientCredentialsRecord(fake.server.URL, "scope-mismatch-token", time.Now().Add(time.Hour))
+	scopeInsufficient := microsoftGraphClientCredentialsRecord(fake.Server.URL, "scope-mismatch-token", time.Now().Add(time.Hour))
 	scopeInsufficient.Scopes = []string{"Mail.Send"}
 	assertMicrosoftGraphManagedCredentialFailureBeforeDispatch(t, backend, fake, "scope-insufficient credential", "323456794", runtimemanagedcredentials.NewMemoryStore(scopeInsufficient))
 
@@ -173,116 +166,17 @@ func runMicrosoftGraphClientCredentialsConnectorSurface(t *testing.T, backend sl
 	}
 }
 
-type fakeMicrosoftGraphConnectorServer struct {
-	server        *httptest.Server
-	tokenCalls    atomic.Int64
-	graphCalls    atomic.Int64
-	refreshTokens []string
-	sideEffects   chan microsoftGraphConnectorCall
-}
+type fakeMicrosoftGraphConnectorServer struct{ *connectorapi.MicrosoftGraph }
 
 func newFakeMicrosoftGraphConnectorServer(t *testing.T) *fakeMicrosoftGraphConnectorServer {
 	t.Helper()
-	fake := &fakeMicrosoftGraphConnectorServer{sideEffects: make(chan microsoftGraphConnectorCall, 8)}
-	mux := http.NewServeMux()
-	mux.HandleFunc("/tenant/oauth2/v2.0/token", func(w http.ResponseWriter, r *http.Request) {
-		if r.Method != http.MethodPost {
-			http.Error(w, "bad method", http.StatusMethodNotAllowed)
-			return
-		}
-		if got := r.Header.Get("Content-Type"); !strings.HasPrefix(got, "application/x-www-form-urlencoded") {
-			http.Error(w, "bad content type", http.StatusBadRequest)
-			return
-		}
-		if err := r.ParseForm(); err != nil {
-			http.Error(w, err.Error(), http.StatusBadRequest)
-			return
-		}
-		if got := r.Form.Get("grant_type"); got != "client_credentials" {
-			http.Error(w, "unexpected grant_type "+got, http.StatusBadRequest)
-			return
-		}
-		if got := r.Form.Get("client_id"); got != "graph-client" {
-			http.Error(w, "unexpected client_id", http.StatusBadRequest)
-			return
-		}
-		if got := r.Form.Get("client_secret"); got != "graph-client-secret" {
-			http.Error(w, "unexpected client_secret", http.StatusBadRequest)
-			return
-		}
-		if got := r.Form.Get("scope"); got != "https://graph.microsoft.com/.default" {
-			http.Error(w, "unexpected scope "+got, http.StatusBadRequest)
-			return
-		}
-		if refresh := strings.TrimSpace(r.Form.Get("refresh_token")); refresh != "" {
-			fake.refreshTokens = append(fake.refreshTokens, refresh)
-			http.Error(w, "client_credentials must not send refresh_token", http.StatusBadRequest)
-			return
-		}
-		call := fake.tokenCalls.Add(1)
-		access := "graph-fresh-token"
-		if call >= 2 {
-			access = "graph-after-401-token"
-		}
-		_ = json.NewEncoder(w).Encode(map[string]any{
-			"access_token": access,
-			"token_type":   "Bearer",
-			"expires_in":   3600,
-		})
-	})
-	mux.HandleFunc("/v1.0/users/user@example.com/sendMail", func(w http.ResponseWriter, r *http.Request) {
-		call := fake.graphCalls.Add(1)
-		raw, err := io.ReadAll(r.Body)
-		if err != nil {
-			http.Error(w, err.Error(), http.StatusInternalServerError)
-			return
-		}
-		if r.Method != http.MethodPost {
-			http.Error(w, "bad method", http.StatusMethodNotAllowed)
-			return
-		}
-		var body map[string]any
-		if err := json.Unmarshal(raw, &body); err != nil {
-			http.Error(w, err.Error(), http.StatusBadRequest)
-			return
-		}
-		if recipients := microsoftGraphMessageRecipients(body); len(recipients) != 1 {
-			http.Error(w, "toRecipients must be a JSON array", http.StatusBadRequest)
-			return
-		}
-		auth := r.Header.Get("Authorization")
-		subject := microsoftGraphMessageSubject(body)
-		if auth == "Bearer graph-fresh-token" && subject == "needs 401 refresh" {
-			w.WriteHeader(http.StatusUnauthorized)
-			_ = json.NewEncoder(w).Encode(map[string]any{"error": map[string]any{"code": "InvalidAuthenticationToken", "message": "token expired"}})
-			return
-		}
-		if auth != "Bearer graph-fresh-token" && auth != "Bearer graph-after-401-token" {
-			w.WriteHeader(http.StatusUnauthorized)
-			_ = json.NewEncoder(w).Encode(map[string]any{"error": map[string]any{"code": "InvalidAuthenticationToken", "message": "bad token"}})
-			return
-		}
-		if subject == "provider 429 fixture" {
-			w.Header().Set("Retry-After", "1")
-			w.WriteHeader(http.StatusTooManyRequests)
-			_ = json.NewEncoder(w).Encode(map[string]any{"error": map[string]any{"code": "TooManyRequests", "message": "slow down"}})
-			return
-		}
-		if call < 1 {
-			http.Error(w, "unreachable", http.StatusInternalServerError)
-			return
-		}
-		fake.sideEffects <- microsoftGraphConnectorCall{auth: auth, body: body, raw: string(raw)}
-		w.WriteHeader(http.StatusAccepted)
-	})
-	fake.server = httptest.NewServer(mux)
-	return fake
+	return &fakeMicrosoftGraphConnectorServer{connectorapi.NewMicrosoftGraph(t)}
 }
 
 func (f *fakeMicrosoftGraphConnectorServer) requireSideEffectCall(t *testing.T, backend, context string) microsoftGraphConnectorCall {
 	t.Helper()
 	select {
-	case call := <-f.sideEffects:
+	case call := <-f.SideEffects:
 		return call
 	case <-time.After(20 * time.Second):
 		t.Fatalf("%s %s: timed out waiting for fake Microsoft Graph side effect (token_requests=%d provider_requests=%d)", backend, context, f.tokenRequestCount(), f.providerHTTPRequestCount())
@@ -293,22 +187,22 @@ func (f *fakeMicrosoftGraphConnectorServer) requireSideEffectCall(t *testing.T, 
 func (f *fakeMicrosoftGraphConnectorServer) requireNoSideEffectCall(t *testing.T, backend, context string) {
 	t.Helper()
 	select {
-	case call := <-f.sideEffects:
-		t.Fatalf("%s %s: unexpected fake Microsoft Graph side effect: auth=%s body=%s", backend, context, call.auth, call.raw)
+	case call := <-f.SideEffects:
+		t.Fatalf("%s %s: unexpected fake Microsoft Graph side effect: auth=%s body=%s", backend, context, call.Auth, call.Raw)
 	default:
 	}
 }
 
 func (f *fakeMicrosoftGraphConnectorServer) tokenRequestCount() int {
-	return int(f.tokenCalls.Load())
+	return int(f.TokenCalls.Load())
 }
 
 func (f *fakeMicrosoftGraphConnectorServer) providerHTTPRequestCount() int {
-	return int(f.graphCalls.Load())
+	return int(f.Calls.Load())
 }
 
 func (f *fakeMicrosoftGraphConnectorServer) refreshTokenValues() []string {
-	return append([]string(nil), f.refreshTokens...)
+	return append([]string(nil), f.RefreshTokens...)
 }
 
 func microsoftGraphClientCredentialsRecord(baseURL, accessToken string, expiresAt time.Time) runtimemanagedcredentials.Record {

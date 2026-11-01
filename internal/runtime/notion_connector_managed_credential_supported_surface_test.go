@@ -4,11 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
-	"io"
-	"net/http"
-	"net/http/httptest"
 	"strings"
-	"sync/atomic"
 	"testing"
 	"time"
 
@@ -19,6 +15,7 @@ import (
 	runtimepipeline "github.com/division-sh/swarm/internal/runtime/pipeline"
 	"github.com/division-sh/swarm/internal/store/storetest"
 	"github.com/division-sh/swarm/internal/testutil"
+	"github.com/division-sh/swarm/internal/testutil/connectorapi"
 )
 
 func TestNotionManagedCredentialConnectorPackRoundTripThroughActivityJournal(t *testing.T) {
@@ -72,22 +69,18 @@ func TestNotionManagedCredentialConnectorPackRoundTripThroughActivityJournal(t *
 	})
 }
 
-type notionManagedConnectorCall struct {
-	auth string
-	body map[string]any
-	raw  string
-}
+type notionManagedConnectorCall = connectorapi.Call
 
 func runNotionManagedCredentialConnectorSurface(t *testing.T, backend slackManagedConnectorBackend) {
 	t.Helper()
 	fake := newFakeNotionManagedConnectorServer(t)
-	defer fake.server.Close()
+	defer fake.Server.Close()
 
 	managedStore := runtimemanagedcredentials.NewMemoryStore(runtimemanagedcredentials.Record{
 		Key:          "notion.notion_oauth",
 		Provider:     "notion",
 		GrantType:    runtimemanagedcredentials.GrantAuthorizationCode,
-		TokenURL:     fake.server.URL + "/v1/oauth/token",
+		TokenURL:     fake.Server.URL + "/v1/oauth/token",
 		ClientID:     "notion-client",
 		ClientSecret: "notion-secret",
 		GrantModel:   managedcredentialmodel.GrantModelWorkspace,
@@ -103,7 +96,7 @@ func runNotionManagedCredentialConnectorSurface(t *testing.T, backend slackManag
 		Status:       runtimemanagedcredentials.StatusConnected,
 		ExpiresAt:    time.Now().Add(-time.Hour),
 	})
-	source := notionManagedConnectorSource(t, fake.server.URL, backend.flowInstance)
+	source := notionManagedConnectorSource(t, fake.Server.URL, backend.flowInstance)
 	backend.source = source
 	backend.ctx, backend.inboundTarget = seedCapturedProviderTarget(t, backend.ctx, backend.inboundStore, source, backend.runID, backend.entityID, backend.flowInstance, "customer-a", "telegram", "telegram-secret", "notion-managed-credential-observer")
 	bus, pc := startSlackManagedConnectorBusAndCoordinator(t, backend, source, managedStore)
@@ -118,11 +111,11 @@ func runNotionManagedCredentialConnectorSurface(t *testing.T, backend slackManag
 		t.Fatalf("%s first activity attempt status = %q failure=%#v, want succeeded", backend.name, firstAttempt.Status, firstAttempt.Failure)
 	}
 	firstCall := fake.requireSideEffectCall(t, backend.name, "refresh-before-use")
-	if firstCall.auth != "Bearer fresh-token" {
-		t.Fatalf("%s first Notion auth = %q, want Bearer fresh-token", backend.name, firstCall.auth)
+	if firstCall.Auth != "Bearer fresh-token" {
+		t.Fatalf("%s first Notion auth = %q, want Bearer fresh-token", backend.name, firstCall.Auth)
 	}
-	if got := notionManagedConnectorString(firstCall.body["children"]); !strings.Contains(got, "hello from swarm") {
-		t.Fatalf("%s first Notion children = %#v, want static block body", backend.name, firstCall.body["children"])
+	if got := notionManagedConnectorString(firstCall.Body["children"]); !strings.Contains(got, "hello from swarm") {
+		t.Fatalf("%s first Notion children = %#v, want static block body", backend.name, firstCall.Body["children"])
 	}
 	requireSlackManagedConnectorResultEventEventually(t, backend, firstAttempt.ResultEventID, firstAttempt.ResultEventType)
 	if got := fake.refreshCount(); got != 1 {
@@ -136,8 +129,8 @@ func runNotionManagedCredentialConnectorSurface(t *testing.T, backend slackManag
 		t.Fatalf("%s second activity attempt status = %q failure=%#v, want succeeded", backend.name, secondAttempt.Status, secondAttempt.Failure)
 	}
 	secondCall := fake.requireSideEffectCall(t, backend.name, "refresh-on-401")
-	if secondCall.auth != "Bearer after-401-token" {
-		t.Fatalf("%s second Notion auth = %q, want Bearer after-401-token", backend.name, secondCall.auth)
+	if secondCall.Auth != "Bearer after-401-token" {
+		t.Fatalf("%s second Notion auth = %q, want Bearer after-401-token", backend.name, secondCall.Auth)
 	}
 	if got := fake.refreshCount(); got != 2 {
 		t.Fatalf("%s token refreshes after 401 = %d, want 2", backend.name, got)
@@ -174,126 +167,24 @@ func runNotionManagedCredentialConnectorSurface(t *testing.T, backend slackManag
 		t.Fatalf("%s 429 failure events = %d, want 1", backend.name, got)
 	}
 
-	assertNotionManagedConnectorMissingCredential(t, backend, fake.server.URL)
+	assertNotionManagedConnectorMissingCredential(t, backend, fake.Server.URL)
 	_ = pc
 	for _, secret := range []string{"expired-token", "fresh-token", "after-401-token", "refresh-secret", "rotated-refresh", "after-401-refresh", "notion-secret"} {
 		assertSlackManagedConnectorNoStoredSecret(t, backend, secret)
 	}
 }
 
-type fakeNotionManagedConnectorServer struct {
-	server      *httptest.Server
-	tokenCalls  atomic.Int64
-	notionCalls atomic.Int64
-	sideEffects chan notionManagedConnectorCall
-}
+type fakeNotionManagedConnectorServer struct{ *connectorapi.Notion }
 
 func newFakeNotionManagedConnectorServer(t *testing.T) *fakeNotionManagedConnectorServer {
 	t.Helper()
-	fake := &fakeNotionManagedConnectorServer{sideEffects: make(chan notionManagedConnectorCall, 8)}
-	mux := http.NewServeMux()
-	mux.HandleFunc("/v1/oauth/token", func(w http.ResponseWriter, r *http.Request) {
-		user, pass, ok := r.BasicAuth()
-		if !ok || user != "notion-client" || pass != "notion-secret" {
-			http.Error(w, "bad basic auth", http.StatusUnauthorized)
-			return
-		}
-		if got := r.Header.Get("Notion-Version"); got != "2026-03-11" {
-			http.Error(w, "missing Notion-Version", http.StatusBadRequest)
-			return
-		}
-		if got := r.Header.Get("Content-Type"); !strings.HasPrefix(got, "application/json") {
-			http.Error(w, "bad content type", http.StatusBadRequest)
-			return
-		}
-		var body map[string]string
-		if err := json.NewDecoder(r.Body).Decode(&body); err != nil {
-			http.Error(w, err.Error(), http.StatusBadRequest)
-			return
-		}
-		if body["grant_type"] != "refresh_token" {
-			http.Error(w, "unexpected grant_type "+body["grant_type"], http.StatusBadRequest)
-			return
-		}
-		call := fake.tokenCalls.Add(1)
-		wantRefresh := "refresh-secret"
-		access := "fresh-token"
-		refresh := "rotated-refresh"
-		if call >= 2 {
-			wantRefresh = "rotated-refresh"
-			access = "after-401-token"
-			refresh = "after-401-refresh"
-		}
-		if body["refresh_token"] != wantRefresh {
-			http.Error(w, "unexpected refresh token", http.StatusBadRequest)
-			return
-		}
-		for _, forbidden := range []string{"client_id", "client_secret"} {
-			if body[forbidden] != "" {
-				http.Error(w, "body carried "+forbidden, http.StatusBadRequest)
-				return
-			}
-		}
-		_ = json.NewEncoder(w).Encode(map[string]any{
-			"access_token":  access,
-			"refresh_token": refresh,
-			"token_type":    "Bearer",
-			"expires_in":    3600,
-		})
-	})
-	mux.HandleFunc("/v1/blocks/block-123/children", func(w http.ResponseWriter, r *http.Request) {
-		call := fake.notionCalls.Add(1)
-		raw, err := io.ReadAll(r.Body)
-		if err != nil {
-			http.Error(w, err.Error(), http.StatusInternalServerError)
-			return
-		}
-		if r.Method != http.MethodPatch {
-			http.Error(w, "bad method", http.StatusMethodNotAllowed)
-			return
-		}
-		if got := r.Header.Get("Notion-Version"); got != "2026-03-11" {
-			http.Error(w, "missing Notion-Version", http.StatusBadRequest)
-			return
-		}
-		var body map[string]any
-		if err := json.Unmarshal(raw, &body); err != nil {
-			http.Error(w, err.Error(), http.StatusBadRequest)
-			return
-		}
-		auth := r.Header.Get("Authorization")
-		if call == 2 && auth == "Bearer fresh-token" {
-			w.WriteHeader(http.StatusUnauthorized)
-			_ = json.NewEncoder(w).Encode(map[string]any{"object": "error", "status": 401, "code": "unauthorized", "message": "token expired"})
-			return
-		}
-		if call == 4 {
-			w.WriteHeader(http.StatusTooManyRequests)
-			w.Header().Set("Retry-After", "1")
-			_ = json.NewEncoder(w).Encode(map[string]any{"object": "error", "status": 429, "code": "rate_limited", "message": "slow down"})
-			return
-		}
-		if auth != "Bearer fresh-token" && auth != "Bearer after-401-token" {
-			w.WriteHeader(http.StatusUnauthorized)
-			_ = json.NewEncoder(w).Encode(map[string]any{"object": "error", "status": 401, "code": "unauthorized", "message": "bad token"})
-			return
-		}
-		fake.sideEffects <- notionManagedConnectorCall{auth: auth, body: body, raw: string(raw)}
-		_ = json.NewEncoder(w).Encode(map[string]any{
-			"object": "list",
-			"results": []map[string]any{
-				{"object": "block", "id": "child-1"},
-			},
-		})
-	})
-	fake.server = httptest.NewServer(mux)
-	return fake
+	return &fakeNotionManagedConnectorServer{connectorapi.NewNotion(t)}
 }
 
 func (f *fakeNotionManagedConnectorServer) requireSideEffectCall(t *testing.T, backend, context string) notionManagedConnectorCall {
 	t.Helper()
 	select {
-	case call := <-f.sideEffects:
+	case call := <-f.SideEffects:
 		return call
 	case <-time.After(connectorSupportedSurfaceAsyncTimeout):
 		t.Fatalf("%s %s: timed out waiting for fake Notion side effect", backend, context)
@@ -304,18 +195,18 @@ func (f *fakeNotionManagedConnectorServer) requireSideEffectCall(t *testing.T, b
 func (f *fakeNotionManagedConnectorServer) requireNoSideEffectCall(t *testing.T, backend, context string) {
 	t.Helper()
 	select {
-	case call := <-f.sideEffects:
-		t.Fatalf("%s %s: unexpected fake Notion side effect: auth=%s body=%s", backend, context, call.auth, call.raw)
+	case call := <-f.SideEffects:
+		t.Fatalf("%s %s: unexpected fake Notion side effect: auth=%s body=%s", backend, context, call.Auth, call.Raw)
 	default:
 	}
 }
 
 func (f *fakeNotionManagedConnectorServer) refreshCount() int {
-	return int(f.tokenCalls.Load())
+	return int(f.TokenCalls.Load())
 }
 
 func (f *fakeNotionManagedConnectorServer) providerHTTPRequestCount() int {
-	return int(f.notionCalls.Load())
+	return int(f.Calls.Load())
 }
 
 func assertNotionManagedConnectorMissingCredential(t *testing.T, backend slackManagedConnectorBackend, baseURL string) {
