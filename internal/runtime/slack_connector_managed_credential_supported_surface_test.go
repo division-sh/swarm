@@ -5,10 +5,8 @@ import (
 	"database/sql"
 	"encoding/json"
 	"fmt"
-	"io"
 	"net/http"
 	"net/http/httptest"
-	"sync/atomic"
 	"testing"
 	"time"
 
@@ -26,6 +24,7 @@ import (
 	"github.com/division-sh/swarm/internal/runtime/semanticview"
 	"github.com/division-sh/swarm/internal/store/storetest"
 	"github.com/division-sh/swarm/internal/testutil"
+	"github.com/division-sh/swarm/internal/testutil/connectorapi"
 )
 
 func TestSlackManagedCredentialConnectorPackRoundTripThroughActivityJournal(t *testing.T) {
@@ -98,11 +97,7 @@ type slackManagedConnectorBackend struct {
 	sqlite           bool
 }
 
-type slackManagedConnectorCall struct {
-	auth string
-	body map[string]any
-	raw  string
-}
+type slackManagedConnectorCall = connectorapi.Call
 
 type runtimeTestActivityAttemptReader interface {
 	LoadActivityAttempt(context.Context, string) (runtimepipeline.ActivityAttemptRecord, bool, error)
@@ -111,13 +106,13 @@ type runtimeTestActivityAttemptReader interface {
 func runSlackManagedCredentialConnectorSurface(t *testing.T, backend slackManagedConnectorBackend) {
 	t.Helper()
 	fake := newFakeSlackManagedConnectorServer(t)
-	defer fake.server.Close()
+	defer fake.Server.Close()
 
 	managedStore := runtimemanagedcredentials.NewMemoryStore(runtimemanagedcredentials.Record{
 		Key:          "slack.slack_oauth",
 		Provider:     "slack",
 		GrantType:    runtimemanagedcredentials.GrantAuthorizationCodePKCE,
-		TokenURL:     fake.server.URL + "/oauth.v2.access",
+		TokenURL:     fake.Server.URL + "/oauth.v2.access",
 		ClientID:     "client-id",
 		ClientSecret: "client-secret",
 		Scopes:       []string{"chat:write"},
@@ -126,7 +121,7 @@ func runSlackManagedCredentialConnectorSurface(t *testing.T, backend slackManage
 		Status:       runtimemanagedcredentials.StatusConnected,
 		ExpiresAt:    time.Now().Add(-time.Hour),
 	})
-	source := slackManagedConnectorSource(t, fake.server.URL, backend.flowInstance)
+	source := slackManagedConnectorSource(t, fake.Server.URL, backend.flowInstance)
 	backend.source = source
 	backend.ctx, backend.inboundTarget = seedCapturedProviderTarget(t, backend.ctx, backend.inboundStore, source, backend.runID, backend.entityID, backend.flowInstance, "customer-a", "telegram", "telegram-secret", "slack-managed-credential-observer")
 	bus, pc := startSlackManagedConnectorBusAndCoordinator(t, backend, source, managedStore)
@@ -141,14 +136,14 @@ func runSlackManagedCredentialConnectorSurface(t *testing.T, backend slackManage
 		t.Fatalf("%s first activity attempt status = %q failure=%#v, want succeeded", backend.name, firstAttempt.Status, firstAttempt.Failure)
 	}
 	firstCall := fake.requireSideEffectCall(t, backend.name, "refresh-before-use")
-	if firstCall.auth != "Bearer fresh-token" {
-		t.Fatalf("%s first Slack auth = %q, want Bearer fresh-token", backend.name, firstCall.auth)
+	if firstCall.Auth != "Bearer fresh-token" {
+		t.Fatalf("%s first Slack auth = %q, want Bearer fresh-token", backend.name, firstCall.Auth)
 	}
-	if got := slackManagedConnectorString(firstCall.body["channel"]); got != "C123" {
-		t.Fatalf("%s first Slack channel = %#v, want C123", backend.name, firstCall.body["channel"])
+	if got := slackManagedConnectorString(firstCall.Body["channel"]); got != "C123" {
+		t.Fatalf("%s first Slack channel = %#v, want C123", backend.name, firstCall.Body["channel"])
 	}
-	if got := slackManagedConnectorString(firstCall.body["text"]); got != "hello from telegram" {
-		t.Fatalf("%s first Slack text = %#v, want inbound text", backend.name, firstCall.body["text"])
+	if got := slackManagedConnectorString(firstCall.Body["text"]); got != "hello from telegram" {
+		t.Fatalf("%s first Slack text = %#v, want inbound text", backend.name, firstCall.Body["text"])
 	}
 	requireSlackManagedConnectorResultEventEventually(t, backend, firstAttempt.ResultEventID, firstAttempt.ResultEventType)
 	if got := fake.refreshCount(); got != 1 {
@@ -162,8 +157,8 @@ func runSlackManagedCredentialConnectorSurface(t *testing.T, backend slackManage
 		t.Fatalf("%s second activity attempt status = %q failure=%#v, want succeeded", backend.name, secondAttempt.Status, secondAttempt.Failure)
 	}
 	secondCall := fake.requireSideEffectCall(t, backend.name, "refresh-on-401")
-	if secondCall.auth != "Bearer after-401-token" {
-		t.Fatalf("%s second Slack auth = %q, want Bearer after-401-token", backend.name, secondCall.auth)
+	if secondCall.Auth != "Bearer after-401-token" {
+		t.Fatalf("%s second Slack auth = %q, want Bearer after-401-token", backend.name, secondCall.Auth)
 	}
 	if got := fake.refreshCount(); got != 2 {
 		t.Fatalf("%s token refreshes after 401 = %d, want 2", backend.name, got)
@@ -200,90 +195,18 @@ func runSlackManagedCredentialConnectorSurface(t *testing.T, backend slackManage
 		t.Fatalf("%s Slack HTTP requests after ok:false = %d, want 4", backend.name, got)
 	}
 
-	assertSlackManagedConnectorMissingCredential(t, backend, fake.server.URL)
+	assertSlackManagedConnectorMissingCredential(t, backend, fake.Server.URL)
 	_ = pc
 	for _, secret := range []string{"expired-token", "fresh-token", "after-401-token", "refresh-secret", "client-secret"} {
 		assertSlackManagedConnectorNoStoredSecret(t, backend, secret)
 	}
 }
 
-type fakeSlackManagedConnectorServer struct {
-	server      *httptest.Server
-	tokenCalls  atomic.Int64
-	slackCalls  atomic.Int64
-	sideEffects chan slackManagedConnectorCall
-}
+type fakeSlackManagedConnectorServer struct{ *connectorapi.Slack }
 
 func newFakeSlackManagedConnectorServer(t *testing.T) *fakeSlackManagedConnectorServer {
 	t.Helper()
-	fake := &fakeSlackManagedConnectorServer{sideEffects: make(chan slackManagedConnectorCall, 8)}
-	mux := http.NewServeMux()
-	mux.HandleFunc("/oauth.v2.access", func(w http.ResponseWriter, r *http.Request) {
-		if err := r.ParseForm(); err != nil {
-			http.Error(w, err.Error(), http.StatusBadRequest)
-			return
-		}
-		if got := r.Form.Get("grant_type"); got != "refresh_token" {
-			http.Error(w, "unexpected grant_type "+got, http.StatusBadRequest)
-			return
-		}
-		if got := r.Form.Get("refresh_token"); got != "refresh-secret" {
-			http.Error(w, "unexpected refresh token", http.StatusBadRequest)
-			return
-		}
-		call := fake.tokenCalls.Add(1)
-		token := "fresh-token"
-		if call >= 2 {
-			token = "after-401-token"
-		}
-		_ = json.NewEncoder(w).Encode(map[string]any{
-			"access_token":  token,
-			"refresh_token": "refresh-secret",
-			"token_type":    "Bearer",
-			"expires_in":    3600,
-			"scope":         "chat:write",
-		})
-	})
-	mux.HandleFunc("/api/chat.postMessage", func(w http.ResponseWriter, r *http.Request) {
-		fake.slackCalls.Add(1)
-		raw, err := io.ReadAll(r.Body)
-		if err != nil {
-			http.Error(w, err.Error(), http.StatusInternalServerError)
-			return
-		}
-		var body map[string]any
-		if err := json.Unmarshal(raw, &body); err != nil {
-			http.Error(w, err.Error(), http.StatusBadRequest)
-			return
-		}
-		auth := r.Header.Get("Authorization")
-		text := slackManagedConnectorString(body["text"])
-		if auth == "Bearer fresh-token" && text == "needs 401 refresh" {
-			w.WriteHeader(http.StatusUnauthorized)
-			_ = json.NewEncoder(w).Encode(map[string]any{"ok": false, "error": "token_expired"})
-			return
-		}
-		if auth != "Bearer fresh-token" && auth != "Bearer after-401-token" {
-			w.WriteHeader(http.StatusUnauthorized)
-			_ = json.NewEncoder(w).Encode(map[string]any{"ok": false, "error": "bad_token"})
-			return
-		}
-		if text == "provider ok false" {
-			_ = json.NewEncoder(w).Encode(map[string]any{"ok": false, "error": "channel_not_found"})
-			return
-		}
-		call := slackManagedConnectorCall{auth: auth, body: body, raw: string(raw)}
-		fake.sideEffects <- call
-		_ = json.NewEncoder(w).Encode(map[string]any{
-			"ok":      true,
-			"channel": body["channel"],
-			"message": map[string]any{
-				"text": body["text"],
-			},
-		})
-	})
-	fake.server = httptest.NewServer(mux)
-	return fake
+	return &fakeSlackManagedConnectorServer{connectorapi.NewSlack(t)}
 }
 
 func (f *fakeSlackManagedConnectorServer) requireSideEffectCall(t *testing.T, backend, context string) slackManagedConnectorCall {
@@ -291,7 +214,7 @@ func (f *fakeSlackManagedConnectorServer) requireSideEffectCall(t *testing.T, ba
 	timer := time.NewTimer(connectorSupportedSurfaceAsyncTimeout)
 	defer timer.Stop()
 	select {
-	case call := <-f.sideEffects:
+	case call := <-f.SideEffects:
 		return call
 	case <-timer.C:
 		t.Fatalf("%s %s: timed out waiting for fake Slack side effect", backend, context)
@@ -302,18 +225,18 @@ func (f *fakeSlackManagedConnectorServer) requireSideEffectCall(t *testing.T, ba
 func (f *fakeSlackManagedConnectorServer) requireNoSideEffectCall(t *testing.T, backend, context string) {
 	t.Helper()
 	select {
-	case call := <-f.sideEffects:
-		t.Fatalf("%s %s: unexpected fake Slack side effect: auth=%s body=%s", backend, context, call.auth, call.raw)
+	case call := <-f.SideEffects:
+		t.Fatalf("%s %s: unexpected fake Slack side effect: auth=%s body=%s", backend, context, call.Auth, call.Raw)
 	default:
 	}
 }
 
 func (f *fakeSlackManagedConnectorServer) refreshCount() int {
-	return int(f.tokenCalls.Load())
+	return int(f.TokenCalls.Load())
 }
 
 func (f *fakeSlackManagedConnectorServer) providerHTTPRequestCount() int {
-	return int(f.slackCalls.Load())
+	return int(f.Calls.Load())
 }
 
 func publishTelegramMessageToSlack(t *testing.T, backend slackManagedConnectorBackend, bus *runtimebus.EventBus, gateway *runtimepkg.InboundGateway, webhookPath, updateID, text string) {
@@ -356,7 +279,7 @@ func startSlackManagedConnectorBusAndCoordinator(t *testing.T, backend slackMana
 			}
 			return []runtimebus.EventInterceptor{pc}
 		},
-	}, "inbound.github.raw.issue_comment", "inbound.github.raw.issues", "inbound.telegram.raw")
+	}, "inbound.github.Raw.issue_comment", "inbound.github.Raw.issues", "inbound.telegram.Raw")
 	if err != nil {
 		t.Fatalf("%s NewEventBusWithOptions: %v", backend.name, err)
 	}
