@@ -91,6 +91,21 @@ func lockWorkflowPublicationFootprintTx(ctx context.Context, tx *sql.Tx, postgre
 	if !postgres {
 		return nil
 	}
+	footprint, err := collectWorkflowPublicationFootprint(owners, publications)
+	if err != nil {
+		return err
+	}
+	return acquireWorkflowPublicationFootprintTx(ctx, tx, footprint)
+}
+
+type preparedWorkflowPublicationFootprint struct {
+	ordered  []flowidentity.RunScopedFlowInstance
+	strong   map[flowidentity.RunScopedFlowInstance]bool
+	ready    map[flowidentity.RunScopedFlowInstance]bool
+	creating map[string]bool
+}
+
+func collectWorkflowPublicationFootprint(owners []flowidentity.RunScopedFlowInstance, publications []runtimebus.PublicationCommand) (preparedWorkflowPublicationFootprint, error) {
 	strong := make(map[flowidentity.RunScopedFlowInstance]bool)
 	ready := make(map[flowidentity.RunScopedFlowInstance]bool)
 	creating := make(map[string]bool)
@@ -110,19 +125,19 @@ func lockWorkflowPublicationFootprintTx(ctx context.Context, tx *sql.Tx, postgre
 		publication.StageFeedback = nil
 		writeOwners, err := workflowPublicationLockOwners(nil, publication)
 		if err != nil {
-			return err
+			return preparedWorkflowPublicationFootprint{}, err
 		}
 		for _, owner := range writeOwners {
 			strong[owner] = true
 		}
 		activationOwners, err := workflowActivationLockOwners(nil, publication.Activations)
 		if err != nil {
-			return err
+			return preparedWorkflowPublicationFootprint{}, err
 		}
 		if creation := publication.DynamicFlowCreation; creation != nil {
 			plan, err := creation.Plan.Normalized()
 			if err != nil {
-				return err
+				return preparedWorkflowPublicationFootprint{}, err
 			}
 			activationOwners = append(activationOwners, flowidentity.RunScopedFlowInstance{RunID: plan.RunID, Route: plan.Identity.Route()})
 		}
@@ -133,13 +148,18 @@ func lockWorkflowPublicationFootprintTx(ctx context.Context, tx *sql.Tx, postgre
 	ordered := make([]flowidentity.RunScopedFlowInstance, 0, len(strong))
 	for owner := range strong {
 		if err := owner.Validate(); err != nil {
-			return fmt.Errorf("prepared workflow footprint %v: %w", owner, err)
+			return preparedWorkflowPublicationFootprint{}, fmt.Errorf("prepared workflow footprint %v: %w", owner, err)
 		}
 		ordered = append(ordered, owner)
 	}
 	sort.Slice(ordered, func(i, j int) bool {
 		return workflowInstanceLockKey(ordered[i]) < workflowInstanceLockKey(ordered[j])
 	})
+	return preparedWorkflowPublicationFootprint{ordered: ordered, strong: strong, ready: ready, creating: creating}, nil
+}
+
+func acquireWorkflowPublicationFootprintTx(ctx context.Context, tx *sql.Tx, footprint preparedWorkflowPublicationFootprint) error {
+	ordered, strong, ready, creating := footprint.ordered, footprint.strong, footprint.ready, footprint.creating
 	runIDs := make([]string, 0, len(ordered))
 	seen := make(map[string]bool)
 	for _, owner := range ordered {

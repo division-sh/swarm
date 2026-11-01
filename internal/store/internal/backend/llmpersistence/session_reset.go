@@ -53,41 +53,13 @@ func resetSessionsTx(ctx context.Context, tx *sql.Tx, postgres bool, attempt *mu
 	}
 	var summary runtimesessions.ResetSummary
 	for _, d := range captured {
-		query := `SELECT CAST(run_id AS TEXT), agent_id, flow_instance, status FROM agent_sessions
-			WHERE session_id=$1 AND status IN ('active','suspended')`
-		if postgres {
-			query += ` FOR UPDATE`
-		}
-		var runID, agentID, flowInstance string
-		err := tx.QueryRowContext(ctx, query, d.SessionID).Scan(&runID, &agentID, &flowInstance, &d.PreviousStatus)
-		if errors.Is(err, sql.ErrNoRows) {
-			continue
-		}
+		reset, changed, err := resetCapturedSessionTx(ctx, tx, postgres, attempt, d, source, now)
 		if err != nil {
 			return runtimesessions.ResetSummary{}, err
 		}
-		if runID != d.RunID || agentID != d.AgentID || flowInstance != d.FlowInstance {
-			return runtimesessions.ResetSummary{}, fmt.Errorf("reset session %s changed its admitted run footprint", d.SessionID)
+		if changed {
+			summary.OrphanedSessions = append(summary.OrphanedSessions, reset)
 		}
-		d.TerminationReason, d.TerminationDetail = runtimesessions.TerminationReasonOrphaned.String(), source
-		result, err := tx.ExecContext(ctx, `UPDATE agent_sessions
-			SET status='terminated', termination_reason='orphaned', termination_detail=NULLIF($1,''),
-			terminated_at=COALESCE(terminated_at,$2), lease_holder=NULL, lease_grant_id=NULL, lease_expires_at=NULL, updated_at=$2
-			WHERE session_id=$3 AND run_id=$4 AND status IN ('active','suspended')`, source, now, d.SessionID, d.RunID)
-		if err != nil {
-			return runtimesessions.ResetSummary{}, err
-		}
-		changed, err := result.RowsAffected()
-		if err != nil {
-			return runtimesessions.ResetSummary{}, err
-		}
-		if changed != 1 {
-			return runtimesessions.ResetSummary{}, fmt.Errorf("reset session %s lost its locked row: %d", d.SessionID, changed)
-		}
-		if err := addAgentSessionFacts(attempt, d.RunID, d.SessionID); err != nil {
-			return runtimesessions.ResetSummary{}, err
-		}
-		summary.OrphanedSessions = append(summary.OrphanedSessions, d)
 	}
 	clear(seen)
 	for _, d := range summary.OrphanedSessions {
@@ -100,4 +72,42 @@ func resetSessionsTx(ctx context.Context, tx *sql.Tx, postgres bool, attempt *mu
 		}
 	}
 	return summary, nil
+}
+
+func resetCapturedSessionTx(ctx context.Context, tx *sql.Tx, postgres bool, attempt *mutationprotocol.Attempt, d runtimesessions.ResetDisposition, source string, now time.Time) (runtimesessions.ResetDisposition, bool, error) {
+	query := `SELECT CAST(run_id AS TEXT), agent_id, flow_instance, status FROM agent_sessions
+			WHERE session_id=$1 AND status IN ('active','suspended')`
+	if postgres {
+		query += ` FOR UPDATE`
+	}
+	var runID, agentID, flowInstance string
+	err := tx.QueryRowContext(ctx, query, d.SessionID).Scan(&runID, &agentID, &flowInstance, &d.PreviousStatus)
+	if errors.Is(err, sql.ErrNoRows) {
+		return runtimesessions.ResetDisposition{}, false, nil
+	}
+	if err != nil {
+		return runtimesessions.ResetDisposition{}, false, err
+	}
+	if runID != d.RunID || agentID != d.AgentID || flowInstance != d.FlowInstance {
+		return runtimesessions.ResetDisposition{}, false, fmt.Errorf("reset session %s changed its admitted run footprint", d.SessionID)
+	}
+	d.TerminationReason, d.TerminationDetail = runtimesessions.TerminationReasonOrphaned.String(), source
+	result, err := tx.ExecContext(ctx, `UPDATE agent_sessions
+			SET status='terminated', termination_reason='orphaned', termination_detail=NULLIF($1,''),
+			terminated_at=COALESCE(terminated_at,$2), lease_holder=NULL, lease_grant_id=NULL, lease_expires_at=NULL, updated_at=$2
+			WHERE session_id=$3 AND run_id=$4 AND status IN ('active','suspended')`, source, now, d.SessionID, d.RunID)
+	if err != nil {
+		return runtimesessions.ResetDisposition{}, false, err
+	}
+	changed, err := result.RowsAffected()
+	if err != nil {
+		return runtimesessions.ResetDisposition{}, false, err
+	}
+	if changed != 1 {
+		return runtimesessions.ResetDisposition{}, false, fmt.Errorf("reset session %s lost its locked row: %d", d.SessionID, changed)
+	}
+	if err := addAgentSessionFacts(attempt, d.RunID, d.SessionID); err != nil {
+		return runtimesessions.ResetDisposition{}, false, err
+	}
+	return d, true, nil
 }

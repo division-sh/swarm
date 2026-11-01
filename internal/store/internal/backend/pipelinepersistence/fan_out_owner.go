@@ -699,16 +699,9 @@ func commitFanOutChunk(
 	if err := command.Validate(); err != nil {
 		return runtimepipeline.CommittedFanOutChunk{}, err
 	}
-	var publications []runtimebus.PublicationCommand
-	for _, outcome := range command.Outcomes {
-		if outcome.Publication == nil {
-			continue
-		}
-		plan, ok := outcome.Publication.(runtimebus.EnginePublicationPlan)
-		if !ok {
-			return runtimepipeline.CommittedFanOutChunk{}, fmt.Errorf("fan-out publication has unexpected type %T", outcome.Publication)
-		}
-		publications = append(publications, plan.PublicationCommand())
+	publications, err := fanOutChunkPublications(command)
+	if err != nil {
+		return runtimepipeline.CommittedFanOutChunk{}, err
 	}
 	result := runtimepipeline.CommittedFanOutChunk{Publications: make([]runtimeengine.CommittedDurablePublication, 0, len(command.Outcomes))}
 	outcome := run(ctx, func(txctx context.Context, attempt *mutationprotocol.Attempt) (runtimepipeline.CommittedFanOutChunk, error) {
@@ -891,6 +884,21 @@ func commitFanOutChunk(
 	// Keep post-commit failures out of the runtime's mutation retry path.
 	result.PostCommitFailure = err
 	return result, nil
+}
+
+func fanOutChunkPublications(command runtimepipeline.FanOutChunkCommand) ([]runtimebus.PublicationCommand, error) {
+	var publications []runtimebus.PublicationCommand
+	for _, outcome := range command.Outcomes {
+		if outcome.Publication == nil {
+			continue
+		}
+		plan, ok := outcome.Publication.(runtimebus.EnginePublicationPlan)
+		if !ok {
+			return nil, fmt.Errorf("fan-out publication has unexpected type %T", outcome.Publication)
+		}
+		publications = append(publications, plan.PublicationCommand())
+	}
+	return publications, nil
 }
 
 func nullableText(raw string) any {

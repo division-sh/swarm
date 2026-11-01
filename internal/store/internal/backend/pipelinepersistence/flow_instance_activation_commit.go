@@ -48,27 +48,37 @@ func commitFlowInstanceActivations(
 			}
 		}
 		for index, plan := range plans {
-			if err := plan.Validate(); err != nil {
-				return err
-			}
-			initial, err := attempt.BeginInitialRunConstruction(ctx, plan.Readiness.RunID, plan.Identity, plan.CreatingInput.EventID)
+			result, err := commitFlowInstanceActivationPlan(ctx, tx, attempt, store, postgres, plan, index, seen, occurrence)
 			if err != nil {
 				return err
-			}
-			result, err := commitFlowConstructionTree(ctx, tx, attempt, store, postgres, plan, true, seen, occurrence)
-			if err != nil {
-				return fmt.Errorf("commit flow activation %d: %w", index, err)
-			}
-			if initial {
-				if err := attempt.EndInitialRunProjection(ctx, plan.Readiness.RunID); err != nil {
-					return err
-				}
 			}
 			committed = append(committed, result)
 		}
 		return nil
 	})
 	return committed, err
+}
+
+func commitFlowInstanceActivationPlan(ctx context.Context, tx *sql.Tx, attempt *mutationprotocol.Attempt, store eventCommitTxStore, postgres bool,
+	plan runtimepipeline.FlowInstanceActivationPlan, index int, seen map[string]struct{}, occurrence *privatemutationlog.ConstructionOccurrence,
+) (runtimepipeline.CommittedFlowInstanceActivation, error) {
+	if err := plan.Validate(); err != nil {
+		return runtimepipeline.CommittedFlowInstanceActivation{}, err
+	}
+	initial, err := attempt.BeginInitialRunConstruction(ctx, plan.Readiness.RunID, plan.Identity, plan.CreatingInput.EventID)
+	if err != nil {
+		return runtimepipeline.CommittedFlowInstanceActivation{}, err
+	}
+	result, err := commitFlowConstructionTree(ctx, tx, attempt, store, postgres, plan, true, seen, occurrence)
+	if err != nil {
+		return runtimepipeline.CommittedFlowInstanceActivation{}, fmt.Errorf("commit flow activation %d: %w", index, err)
+	}
+	if initial {
+		if err := attempt.EndInitialRunProjection(ctx, plan.Readiness.RunID); err != nil {
+			return runtimepipeline.CommittedFlowInstanceActivation{}, err
+		}
+	}
+	return result, nil
 }
 
 func commitFlowConstructionTree(ctx context.Context, tx *sql.Tx, attempt *mutationprotocol.Attempt, store eventCommitTxStore, postgres bool,
