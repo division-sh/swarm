@@ -88,7 +88,8 @@ func (c APIEventPublicationCommand) Validate() error {
 		if err := live.Scope.Validate(); err != nil {
 			return err
 		}
-		if c.Idempotency.Method != "event.publish" || c.RunCreation != nil || live.RunID != c.Publication.Commit.Event.Event().RunID() ||
+		if (c.Idempotency.Method != "event.publish" && c.Idempotency.Method != "run.start") ||
+			c.RunCreation != nil || live.RunID != c.Publication.Commit.Event.Event().RunID() ||
 			!c.Publication.HasAuthorScope || live.Source.BundleHash() != c.Publication.AuthorScope.BundleHash {
 			return fmt.Errorf("live publication selection does not match its event and source")
 		}
