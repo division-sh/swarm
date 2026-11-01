@@ -46,7 +46,7 @@ func TestProviderMemorySurvivesAdmittedBundleUpgradeBothStores(t *testing.T) {
 					configureCompletion2270PostgresFixture(t)
 					opts.StoreMode, opts.StoreModeSet = "postgres", true
 				}
-				text := fmt.Sprintf("runtime:\n  recovery_on_startup: true\n%sllm:\n  backend: %s\n  session:\n    lock_ttl: 10s\n    rotate_after_turns: 40\n    rotate_on_parse_failures: 3\n", storeConfig, profile)
+				text := fmt.Sprintf("runtime:\n  recovery_on_startup: true\n%sllm:\n  backend: %s\n  models:\n    memory-old: {%s: memory-old}\n    memory-new: {%s: memory-new}\n  session:\n    lock_ttl: 10s\n    rotate_after_turns: 40\n    rotate_on_parse_failures: 3\n", storeConfig, profile, profile, profile)
 				var provider *llmapi.Server
 				if profile == "claude_cli" {
 					if os.Getenv("SWARM_TEST_WORKSPACE_MCP_DOCKER") != "1" {
