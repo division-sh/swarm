@@ -6,6 +6,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"net"
 	"net/http"
 	"net/http/httptest"
 	"os"
@@ -630,7 +631,7 @@ func TestOperatorChannelProviderCredentialRotationSelectedStoreParity(t *testing
 					if err != nil {
 						t.Fatal(err)
 					}
-					_, resetBindings, err := resetService.Bootstrap(ctx, now.Add(7*time.Second))
+					_, resetBindings, err := resetService.Bootstrap(resetFixture.ctx, now.Add(7*time.Second))
 					if err != nil {
 						t.Fatal(err)
 					}
@@ -984,7 +985,7 @@ func TestOperatorChannelRetainedLifecycleProjectionSelectedStoreParity(t *testin
 			if !ok {
 				t.Fatalf("selected store %T lacks API idempotency", fixture.store)
 			}
-			server := newOperatorChannelSupportedSurfaceServer(t, service, idempotency, principal.ID, operatorChannelSupportedSurfaceToken)
+			server := newOperatorChannelSupportedSurfaceServer(t, fixture.ctx, service, idempotency, principal.ID, operatorChannelSupportedSurfaceToken)
 			if err := service.ReplaceInterfaces([]operatorchannel.InterfaceIdentity{successorIdentity}); err != nil {
 				t.Fatal(err)
 			}
@@ -1109,7 +1110,7 @@ func runOperatorChannelSupportedSurface(t *testing.T, backend servedparity.Backe
 		t.Fatalf("selected store %T lacks API idempotency", fixture.store)
 	}
 
-	server := newOperatorChannelSupportedSurfaceServer(t, service, idempotency, principal.ID, operatorChannelSupportedSurfaceToken)
+	server := newOperatorChannelSupportedSurfaceServer(t, fixture.ctx, service, idempotency, principal.ID, operatorChannelSupportedSurfaceToken)
 	list := operatorChannelSupportedSurfaceList(t, server.URL, operatorChannelSupportedSurfaceToken)
 	if list.PrincipalID != principal.ID || len(list.Channels) != 1 || list.Channels[0].Identity.Interface.Selector != identity.Selector {
 		t.Fatalf("%s initial channel.list = %#v", backend, list)
@@ -1186,7 +1187,7 @@ func runOperatorChannelSupportedSurface(t *testing.T, backend servedparity.Backe
 		}
 	}
 
-	rotated := newOperatorChannelSupportedSurfaceServer(t, service, idempotency, principal.ID, "rotated-token")
+	rotated := newOperatorChannelSupportedSurfaceServer(t, fixture.ctx, service, idempotency, principal.ID, "rotated-token")
 	rotatedList := operatorChannelSupportedSurfaceList(t, rotated.URL, "rotated-token")
 	if rotatedList.PrincipalID != principal.ID || rotatedList.Channels[0].Identity.BindingRevision != bindingRevision {
 		t.Fatalf("%s token rotation changed principal or binding: %#v", backend, rotatedList)
@@ -1303,7 +1304,7 @@ func operatorChannelBackendName(backend servedparity.Backend) string {
 	return "sqlite"
 }
 
-func newOperatorChannelSupportedSurfaceServer(t *testing.T, service *operatorchannel.Service, idempotency apiv1.APIIdempotencyStore, principalID, token string) *httptest.Server {
+func newOperatorChannelSupportedSurfaceServer(t *testing.T, original context.Context, service *operatorchannel.Service, idempotency apiv1.APIIdempotencyStore, principalID, token string) *httptest.Server {
 	t.Helper()
 	registry, err := apiv1.LoadRegistry(filepath.Join(selectedStoreAbstractionRepoRoot(t), "platform-spec.yaml"))
 	if err != nil {
@@ -1319,7 +1320,9 @@ func newOperatorChannelSupportedSurfaceServer(t *testing.T, service *operatorcha
 	if err != nil {
 		t.Fatal(err)
 	}
-	server := httptest.NewServer(handler)
+	server := httptest.NewUnstartedServer(handler)
+	server.Config.BaseContext = func(net.Listener) context.Context { return original }
+	server.Start()
 	t.Cleanup(server.Close)
 	return server
 }

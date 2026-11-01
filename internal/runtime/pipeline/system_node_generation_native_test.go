@@ -22,7 +22,7 @@ func VerifySystemNodePredecessorCannotCommitAfterGenerationAdvanceForTest(t *tes
 		t.Run(backend, func(t *testing.T) {
 			source := loadWorkflowTempSource(t, map[string]string{
 				"manifest.yaml": "version: 1.0.0\nplatform_version: \">=0.7.0 <0.8.0\"\n",
-				"schema.yaml":   "name: generation-node\nstages:\n  queued: {}\n  done: {final: true}\n",
+				"schema.yaml":   "stages:\n  queued: {}\n  done: {final: true}\n",
 				"entities.yaml": "work:\n  status: {type: text, initial: pending}\n",
 				"events.yaml":   "source.evt:\n  status: text\nnode.completed:\n",
 				"nodes.yaml":    "writer:\n  execution_type: system_node\n  subscribes_to: [source.evt]\n  event_handlers:\n    source.evt:\n      data_accumulation:\n        writes: [status]\n      advances_to: done\n      emit: node.completed\n",

@@ -118,10 +118,6 @@ func newLLMRetryOwner(t *testing.T, store *SQLiteRuntimeStore, blocker *sql.Tx, 
 			}
 			return result, err
 		}
-		if phase == "commit" && calls == perAttempt {
-			_, err := tx.ExecContext(ctx, `UPDATE llm_retry_probe.retry_lock SET value=2 WHERE id=1`)
-			return result, err
-		}
 		return result, nil
 	}}
 	owner, err := llmpersistence.NewSQLite(store.backend, store.requireCurrentSchema, probe, store.runLifecycleCandidates, store.now)
