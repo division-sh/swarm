@@ -49,6 +49,7 @@ func TestReleaseEndpointHandoffConsumerCensus(t *testing.T) {
 		"TestClaudeCLIPaidAgenticLifecycleFromReleaseBinaryDefaults": 1, // Optional live foreground --api-port/default MCP contract.
 		"TestRunStartForegroundObserverOverflowFromReleaseBinary":    1, // Foreground --api-port with blocked stdout observer.
 		"TestStandingRootTreePublicRestartAndResetBothStores":        1, // Native public webhook listener requires an explicit nonzero address.
+		"TestEmbeddedConnectorPublicJourneysBothStores":              1, // Native public webhook listener requires an explicit nonzero address.
 	}
 	files, err := filepath.Glob(filepath.Join(releaseE2ERepoRoot(t), "internal/releasee2e/*_test.go"))
 	if err != nil {
