@@ -55,8 +55,10 @@ func TestServedMailboxCursorRetainedRestartParity(t *testing.T) {
 			firstProcess := startServeRuntimeTestProcess(t, opts)
 			firstProcess.waitForReadyLine()
 			endpoint := "http://" + serveRuntimeAPIListenerFromOutput(t, firstProcess.outputString()) + "/v1/rpc"
+			pauseServedLandingForCreation(t, endpoint, bundle, ".")
 			for i := 0; i < 3; i++ {
-				published := requireServedEventPublishRPCResult(t, endpoint, map[string]any{"event_name": "review.requested", "bundle_hash": bundle, "payload": map[string]any{"item_id": uuid.NewString()}, "idempotency_key": uuid.NewString()})
+				var published servedEventPublishRPCResult
+				requireServedJSONRPCResult(t, endpoint, "run.start", map[string]any{"event_name": "review.requested", "bundle_hash": bundle, "payload": map[string]any{"item_id": uuid.NewString()}, "idempotency_key": uuid.NewString()}, &published)
 				waitServedRunDeliveryQuiescence(t, deliveryReader, published.RunID)
 				requireServedOKJSONRPC(t, endpoint, "run.pause", map[string]any{"run_id": published.RunID, "idempotency_key": "cursor-pause-" + published.RunID})
 			}

@@ -29,7 +29,23 @@ func (r *PendingRecovery) SourceSet() (agenttopology.SourceSetPlan, error) {
 	if r == nil || r.operation.Request.IncludeSourceArtifacts || r.operation.SourceSet == nil {
 		return agenttopology.NewSourceSetPlan(nil, nil)
 	}
-	return agenttopology.NewSourceSetPlan(r.operation.SourceSet.Sources, r.operation.SourceSet.Agents)
+	plan, err := agenttopology.NewSourceSetPlan(r.operation.SourceSet.Sources, r.operation.SourceSet.Agents)
+	if err != nil {
+		return agenttopology.SourceSetPlan{}, err
+	}
+	if len(plan.Sources) == 0 || (len(plan.Sources) == 1 && len(r.operation.Request.SourceProjections) == 0) {
+		return plan, nil
+	}
+	if len(r.operation.Request.SourceProjections) != 1 {
+		return agenttopology.SourceSetPlan{}, errors.New("reset recovery requires one captured loaded bundle")
+	}
+	loadedHash := r.operation.Request.SourceProjections[0].Cleanup.BundleHash
+	for _, source := range plan.Sources {
+		if source.BundleHash == loadedHash {
+			return agenttopology.NewSourceSetPlan([]agenttopology.SourceCoordinate{source}, plan.Agents)
+		}
+	}
+	return agenttopology.SourceSetPlan{}, errors.New("reset recovery loaded bundle is absent from its admitted source set")
 }
 
 func (r *PendingRecovery) Complete(ctx context.Context) error {
