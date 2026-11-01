@@ -35,6 +35,28 @@ func PrepareExternalEffectResult(ctx context.Context, result effects.Settlement,
 	return context.WithValue(ctx, externalEffectResultKey{}, &externalEffectResult{request: result, authority: authority, original: original, originalErr: originalErr}), nil
 }
 
+// ExternalEffectResultRetryContext is called only after the native retry owner
+// has proved rollback and joined cleanup. Acceptance never survives that attempt.
+func ExternalEffectResultRetryContext(parent, failed context.Context, tx *sql.Tx) (context.Context, error) {
+	result, present := parent.Value(externalEffectResultKey{}).(*externalEffectResult)
+	if !present || result.attempt.Load() == nil {
+		return parent, nil
+	}
+	scope, _ := failed.Value(transactionKey{}).(*transaction)
+	if scope == nil || result.attempt.Load() != scope {
+		return nil, errors.New("external effect retry differs from its rolled-back native transaction")
+	}
+	scope.Lock()
+	defer scope.Unlock()
+	if !scope.active || scope.tx != tx {
+		return nil, errors.New("external effect retry requires its exact native transaction")
+	}
+	return context.WithValue(parent, externalEffectResultKey{}, &externalEffectResult{
+		request: result.request, authority: result.authority,
+		original: result.original, originalErr: result.originalErr,
+	}), nil
+}
+
 func admitExternalEffectResultTx(ctx context.Context, tx *sql.Tx, sqlite bool, result *externalEffectResult) error {
 	scope, _ := ctx.Value(transactionKey{}).(*transaction)
 	if scope == nil || (!result.attempt.CompareAndSwap(nil, scope) && result.attempt.Load() != scope) {

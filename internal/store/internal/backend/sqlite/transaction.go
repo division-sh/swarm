@@ -125,9 +125,10 @@ func (b *Backend) runTransactionOutcome(ctx context.Context, label string, acqui
 			return false, err
 		}
 		permitWait := time.Since(permitStarted)
+		retryContext := ctx
 		committed, err := func() (bool, error) {
 			defer b.releaseMutation()
-			return b.runTransactionOnceOutcome(attemptCtx, nil, permitWait, acquisition, operation)
+			return b.runTransactionOnceOutcome(attemptCtx, nil, permitWait, acquisition, &retryContext, operation)
 		}()
 		attemptErr := attemptCtx.Err()
 		cancelAttempt()
@@ -155,6 +156,7 @@ func (b *Backend) runTransactionOutcome(ctx context.Context, label string, acqui
 			return false, err
 		}
 
+		ctx = retryContext
 		lastBusy = err
 		if recoveryDeadline.IsZero() {
 			recoveryDeadline = time.Now().Add(mutationRetryBudget)
@@ -296,11 +298,11 @@ func waitMutationBackoff(ctx context.Context, deadline time.Time, delay time.Dur
 }
 
 func (b *Backend) runTransactionOnce(ctx context.Context, opts *sql.TxOptions, operation func(context.Context, *sql.Tx) error) (err error) {
-	_, err = b.runTransactionOnceOutcome(ctx, opts, 0, false, operation)
+	_, err = b.runTransactionOnceOutcome(ctx, opts, 0, false, nil, operation)
 	return err
 }
 
-func (b *Backend) runTransactionOnceOutcome(ctx context.Context, opts *sql.TxOptions, permitWait time.Duration, acquisition bool, operation func(context.Context, *sql.Tx) error) (committed bool, err error) {
+func (b *Backend) runTransactionOnceOutcome(ctx context.Context, opts *sql.TxOptions, permitWait time.Duration, acquisition bool, retryContext *context.Context, operation func(context.Context, *sql.Tx) error) (committed bool, err error) {
 	write := opts == nil || !opts.ReadOnly
 	if err := ctx.Err(); err != nil {
 		return false, cancellationBeforeConnection(ctx, err, write)
@@ -338,6 +340,15 @@ func (b *Backend) runTransactionOnceOutcome(ctx context.Context, opts *sql.TxOpt
 			// unwinds. No recover here: the original panic remains authoritative.
 			slog.Error("sqlite transaction cleanup failed", "error", finalized.err)
 			err = &transactionTerminationError{errors.Join(err, finalized.err)}
+		}
+		var terminal *transactionTerminationError
+		if retryContext != nil && !commitAttempted && finalized.rolledBack && finalized.connectionJoined && finalized.err == nil && !errors.As(err, &terminal) && mutationBusyError(err) {
+			next, retryErr := generationauthority.ExternalEffectResultRetryContext(*retryContext, ctx, tx)
+			if retryErr != nil {
+				err = &transactionTerminationError{errors.Join(err, retryErr)}
+			} else {
+				*retryContext = next
+			}
 		}
 		err = finalized.cancellation(ctx, err, write, !beginAttempted, commitAttempted)
 		probe.RecordCleanup(time.Since(cleanupStarted))
