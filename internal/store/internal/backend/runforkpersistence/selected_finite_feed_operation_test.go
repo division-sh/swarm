@@ -16,7 +16,9 @@ func TestSelectedFiniteFeedRecoveryPinsMatchDurableFeedInventoryBothStores(t *te
 			for _, ddl := range []string{
 				`CREATE TABLE runs (run_id TEXT PRIMARY KEY,status TEXT NOT NULL)`,
 				`CREATE TABLE resource_version_pins (run_id TEXT,flow_path TEXT,event_name TEXT,schema_digest TEXT,version_id TEXT,selection TEXT)`,
-				`CREATE TABLE fan_out_intents (run_id TEXT,origin_kind TEXT,source_resource_flow_path TEXT,source_resource_event_name TEXT,source_resource_version_id TEXT,deployment_schema_digest TEXT,bundle_hash TEXT)`,
+				`CREATE TABLE fan_out_intents (run_id TEXT,origin_kind TEXT,source_resource_flow_path TEXT,source_resource_event_name TEXT,source_resource_version_id TEXT,deployment_schema_digest TEXT,bundle_hash TEXT,deployment_feed_id TEXT DEFAULT '')`,
+				`CREATE TABLE resource_feed_publications (publication_id TEXT,run_id TEXT)`,
+				`CREATE TABLE resource_feed_publication_members (publication_id TEXT,deployment_feed_id TEXT,flow_path TEXT,event_name TEXT,version_id TEXT,schema_digest TEXT)`,
 			} {
 				if _, err := db.Exec(ddl); err != nil {
 					t.Fatal(err)
@@ -47,7 +49,7 @@ func TestSelectedFiniteFeedRecoveryPinsMatchDurableFeedInventoryBothStores(t *te
 					t.Fatalf("eventless child invented a feed pin: pins=%+v err=%v", pins, err)
 				}
 			})
-			if _, err := db.Exec(`INSERT INTO fan_out_intents VALUES ($1,'deployment','.','root.ready',$2,$3,$4)`, runID, version, schema, bundle); err != nil {
+			if _, err := db.Exec(`INSERT INTO fan_out_intents (run_id,origin_kind,source_resource_flow_path,source_resource_event_name,source_resource_version_id,deployment_schema_digest,bundle_hash) VALUES ($1,'deployment','.','root.ready',$2,$3,$4)`, runID, version, schema, bundle); err != nil {
 				t.Fatal(err)
 			}
 			read(false)

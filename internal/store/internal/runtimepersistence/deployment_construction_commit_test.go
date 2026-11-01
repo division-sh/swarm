@@ -16,6 +16,7 @@ import (
 	"github.com/division-sh/swarm/internal/runtime/core/flowidentity"
 	"github.com/division-sh/swarm/internal/runtime/correlation"
 	"github.com/division-sh/swarm/internal/runtime/pipeline"
+	"github.com/division-sh/swarm/internal/runtime/runfork"
 	"github.com/division-sh/swarm/internal/runtime/runlifecycle"
 	"github.com/division-sh/swarm/internal/runtime/semanticview"
 	"github.com/division-sh/swarm/internal/sourceartifact"
@@ -196,6 +197,28 @@ func TestDeploymentConstructionNativeCommitBothStores(t *testing.T) {
 					Declaration: ref, VersionID: firstSource.VersionID, ExpectedHead: durabledata.VersionHead(latest.VersionID)})
 				if err != nil || pruned.Outcome != "refused_pinned" {
 					t.Fatalf("later publication dropped old publication retention: %+v err=%v", pruned, err)
+				}
+				planner := selected.(interface {
+					PlanRunFork(context.Context, runfork.RunForkPlanRequest) (runfork.RunForkPlan, error)
+				})
+				firstCut, err := planner.PlanRunFork(ctx, runfork.RunForkPlanRequest{SourceRunID: runID, PublicationID: publicationID})
+				if err != nil || firstCut.ForkPoint.Kind != runfork.RunForkPointStateRevision || firstCut.ForkPoint.EventID != "" {
+					t.Fatalf("publication did not retain its native non-event cut: %+v err=%v", firstCut.ForkPoint, err)
+				}
+				laterCut, err := planner.PlanRunFork(ctx, runfork.RunForkPlanRequest{SourceRunID: runID, PublicationID: next.PublicationID})
+				if err != nil || laterCut.ForkPoint.Revision <= firstCut.ForkPoint.Revision {
+					t.Fatalf("distinct publications aliased their revision: %+v/%+v err=%v", firstCut.ForkPoint, laterCut.ForkPoint, err)
+				}
+				seenFirst, seenLater := false, false
+				for _, obligation := range firstCut.FanOutObligations {
+					seenFirst = seenFirst || obligation.Intent.Request.Key.DeploymentFeedID == feedID
+					seenLater = seenLater || obligation.Intent.Request.Key.DeploymentFeedID == later.Record.DeploymentFeedIDs()[0]
+				}
+				if !seenFirst || seenLater {
+					t.Fatalf("publication cut lost exact historical membership: first=%t later=%t", seenFirst, seenLater)
+				}
+				if _, err := planner.PlanRunFork(ctx, runfork.RunForkPlanRequest{SourceRunID: uuid.NewString(), PublicationID: publicationID}); err == nil {
+					t.Fatal("foreign publication admitted as this run's fork cut")
 				}
 			})
 		}

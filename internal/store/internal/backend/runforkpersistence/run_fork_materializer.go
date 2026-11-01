@@ -166,7 +166,7 @@ func (s *RunForkPostgresOwner) MaterializeRunFork(ctx context.Context, req runfo
 			if err != nil {
 				return err
 			}
-			if err := requireForkResourceSourcePinAgreement(plan, pins); err != nil {
+			if err := requireForkResourceSourcePinAgreement(ctx, tx, s.durableData, plan, pins); err != nil {
 				return err
 			}
 			if sourceProfiled {
@@ -336,7 +336,7 @@ func (s *RunForkSQLiteOwner) MaterializeRunFork(ctx context.Context, req runfork
 			if err != nil {
 				return err
 			}
-			if err := requireForkResourceSourcePinAgreement(plan, pins); err != nil {
+			if err := requireForkResourceSourcePinAgreement(txctx, tx, s.durableData, plan, pins); err != nil {
 				return err
 			}
 			if sourceProfiled {

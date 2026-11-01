@@ -40283,6 +40283,11 @@ api_specification:
         description: Optional inclusive fork-point event in source_run_id, mutually exclusive with at_start=true. Without either selector the canonical store resolves state_revision at the committed run_fork_revision_heads head for every source origin; retries reuse the permanent resolved point. No event is synthesized for this cut.
         schema:
           $ref: '#/components/schemas/OpaqueId'
+      - name: publication_id
+        required: false
+        description: Exact rows-publication group or event publication in source_run_id, mutually exclusive with the other cut selectors. Rows select their atomic feed-insertion revision, preserving earlier publications and their exact versions rather than the current resource head.
+        schema:
+          $ref: '#/components/schemas/OpaqueId'
       - name: at_start
         required: false
         description: Select the one immutable original start, exclusive of its creating ingress. Event evidence is absent from this point; any real first-turn intention remains a separate immutable origin/schema reference. Mutually exclusive with fork_event_id, including an explicitly empty or null value.

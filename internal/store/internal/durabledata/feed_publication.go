@@ -150,6 +150,26 @@ func (o *Owner) LoadFeedPublication(ctx context.Context, publicationID string) (
 	return record, err
 }
 
+func ReadFeedPublicationTx(o *Owner, ctx context.Context, tx *sql.Tx, publicationID string) (runtimedata.RunCreationOperationRecord, bool, error) {
+	if o == nil || tx == nil {
+		return runtimedata.RunCreationOperationRecord{}, false, fmt.Errorf("publication read requires its native data transaction")
+	}
+	var raw []byte
+	err := tx.QueryRowContext(ctx, o.query(`SELECT request_json FROM resource_feed_publications WHERE publication_id=%s`, 1), publicationID).Scan(&raw)
+	if errors.Is(err, sql.ErrNoRows) {
+		return runtimedata.RunCreationOperationRecord{}, false, nil
+	}
+	if err != nil {
+		return runtimedata.RunCreationOperationRecord{}, false, err
+	}
+	var command runtimedata.RunCreationCommand
+	if err := json.Unmarshal(raw, &command); err != nil {
+		return runtimedata.RunCreationOperationRecord{}, false, err
+	}
+	plan, found, err := FindFeedPublicationTx(o, ctx, tx, command, publicationID)
+	return plan.Record(), found, err
+}
+
 func RequireFeedSourceTx(ctx context.Context, o *Owner, tx *sql.Tx, runID, bundleHash, feedID string, ref runtimedata.DeclarationRef) (runtimedata.PinnedSource, error) {
 	if o == nil || tx == nil {
 		return runtimedata.PinnedSource{}, fmt.Errorf("feed source requires its native data transaction")

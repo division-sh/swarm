@@ -14,45 +14,26 @@ import (
 )
 
 func requireExactMaterializedRunForkDeploymentFeeds(ctx context.Context, tx *sql.Tx, postgres bool, forkRunID, targetBundleHash string, data *storedurabledata.Owner, plan runfork.RunForkPlan, pins []runtimedata.Pin) error {
+	projections, err := projectRunForkDeploymentFeeds(ctx, tx, data, forkRunID, targetBundleHash, plan, pins, true)
+	if err != nil {
+		return err
+	}
 	var count int
 	if err := tx.QueryRowContext(ctx, `SELECT COUNT(*) FROM fan_out_intents WHERE run_id=$1 AND origin_kind='deployment'`, forkRunID).Scan(&count); err != nil {
 		return fmt.Errorf("count fork deployment feeds: %w", err)
 	}
-	if count != len(pins) {
-		return fmt.Errorf("fork has %d deployment feeds, want %d exact child pins", count, len(pins))
+	if count != len(projections) {
+		return fmt.Errorf("fork has %d deployment feeds, want %d exact child bindings", count, len(projections))
 	}
 	if len(pins) != 0 && data == nil {
 		return fmt.Errorf("fork deployment readback requires selected durable-data owner")
 	}
-	sourceByDeclaration := make(map[runtimedata.DeclarationRef]runfork.RunForkFanOutObligation)
-	for _, obligation := range plan.FanOutObligations {
-		if obligation.Intent.Request.Deployment == nil {
-			continue
-		}
-		declaration := obligation.Intent.Source.Declaration
-		if _, duplicate := sourceByDeclaration[declaration]; duplicate {
-			return fmt.Errorf("fork source has duplicate deployment feed for %s", declaration.Key())
-		}
-		sourceByDeclaration[declaration] = obligation
-	}
-	for _, pin := range pins {
-		if pin.RunID != forkRunID {
-			return fmt.Errorf("fork deployment pin belongs to another run")
-		}
-		target, err := storedurabledata.RequirePinnedSourceTx(ctx, data, tx, forkRunID, targetBundleHash, pin.Declaration)
-		if err != nil {
-			return err
-		}
-		if target.VersionID != pin.VersionID || target.SchemaDigest != pin.SchemaDigest {
-			return fmt.Errorf("fork deployment pin metadata changed for %s", pin.Declaration.Key())
-		}
-		key, err := loadRunForkChildDeploymentFeedKeyTx(ctx, tx, forkRunID, pin.Declaration)
-		if err != nil {
-			return err
-		}
+	for _, projection := range projections {
+		target := projection.target
+		key := fanoutobligation.IntentKey{RunID: forkRunID, DeploymentFeedID: projection.feed.PublicationID()}
 		var carriage forkDeploymentCarriage
-		if source, present := sourceByDeclaration[pin.Declaration]; present {
-			carriage, err = projectForkDeploymentCarriage(source, target)
+		if projection.source != nil {
+			carriage, err = projectForkDeploymentCarriage(*projection.source, target)
 		} else {
 			carriage, err = freshForkDeploymentCarriage(target)
 		}

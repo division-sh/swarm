@@ -677,8 +677,10 @@ func selectedForkRecoveryPinsTx(ctx context.Context, tx *sql.Tx, forkRunID, bund
 	rows, err := tx.QueryContext(ctx, `SELECT p.run_id,r.status,p.flow_path,p.event_name,p.schema_digest,p.version_id,p.selection,
 		i.source_resource_version_id,i.deployment_schema_digest,i.bundle_hash
 		FROM resource_version_pins p JOIN runs r ON r.run_id=p.run_id
-		LEFT JOIN fan_out_intents i ON i.run_id=p.run_id AND i.origin_kind='deployment'
-			AND i.source_resource_flow_path=p.flow_path AND i.source_resource_event_name=p.event_name
+		LEFT JOIN (SELECT DISTINCT run_id,source_resource_flow_path,source_resource_event_name,
+			source_resource_version_id,deployment_schema_digest,bundle_hash FROM fan_out_intents WHERE origin_kind='deployment') i
+			ON i.run_id=p.run_id AND i.source_resource_flow_path=p.flow_path AND i.source_resource_event_name=p.event_name
+			AND i.source_resource_version_id=p.version_id
 		WHERE p.run_id=$1 ORDER BY p.flow_path,p.event_name`, forkRunID)
 	if err != nil {
 		return nil, fmt.Errorf("load selected recovery pins: %w", err)
@@ -707,11 +709,16 @@ func selectedForkRecoveryPinsTx(ctx context.Context, tx *sql.Tx, forkRunID, bund
 		return nil, fmt.Errorf("read selected recovery pins: %w", err)
 	}
 	var feeds int
-	if err := tx.QueryRowContext(ctx, `SELECT COUNT(*) FROM fan_out_intents WHERE run_id=$1 AND origin_kind='deployment'`, forkRunID).Scan(&feeds); err != nil {
+	if err := tx.QueryRowContext(ctx, `SELECT COUNT(*) FROM fan_out_intents i WHERE run_id=$1 AND origin_kind='deployment'
+		AND NOT EXISTS (SELECT 1 FROM resource_version_pins p WHERE p.run_id=i.run_id AND p.flow_path=i.source_resource_flow_path
+			AND p.event_name=i.source_resource_event_name AND p.version_id=i.source_resource_version_id AND p.schema_digest=i.deployment_schema_digest)
+		AND NOT EXISTS (SELECT 1 FROM resource_feed_publication_members m JOIN resource_feed_publications p ON p.publication_id=m.publication_id
+			WHERE p.run_id=i.run_id AND m.deployment_feed_id=i.deployment_feed_id AND m.flow_path=i.source_resource_flow_path
+			AND m.event_name=i.source_resource_event_name AND m.version_id=i.source_resource_version_id AND m.schema_digest=i.deployment_schema_digest)`, forkRunID).Scan(&feeds); err != nil {
 		return nil, fmt.Errorf("count selected deployment feeds for pins: %w", err)
 	}
-	if feeds != len(pins) {
-		return nil, fmt.Errorf("selected recovery pin count %d conflicts with %d admitted feeds", len(pins), feeds)
+	if feeds != 0 {
+		return nil, fmt.Errorf("selected recovery has %d deployment feeds without their exact binding", feeds)
 	}
 	return pins, nil
 }

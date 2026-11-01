@@ -215,7 +215,7 @@ func executeRunFork(ctx context.Context, req Request, opts RunForkHandlerOptions
 			return nil, runForkError(params.SourceRunID, params.ForkEventID, err)
 		}
 		if found {
-			if stored.Request.SourceRunID != params.SourceRunID || stored.Request.ForkEventID != params.ForkEventID || stored.Request.AtStart != params.AtStart {
+			if stored.Request.SourceRunID != params.SourceRunID || stored.Request.ForkEventID != params.ForkEventID || stored.Request.PublicationID != params.PublicationID || stored.Request.AtStart != params.AtStart {
 				return nil, runForkError(params.SourceRunID, params.ForkEventID, fmt.Errorf("durable fork operation disagrees with request coordinates"))
 			}
 			if stored.Status == runfork.ForkOperationActivated {
@@ -269,7 +269,7 @@ func executeRunFork(ctx context.Context, req Request, opts RunForkHandlerOptions
 		operation = runfork.ForkOperationRequest{
 			OperationID: uuid.NewString(), Actor: actorKey, IdempotencyKey: params.IdempotencyKey,
 			TransportHash: req.RequestHash, SourceRunID: params.SourceRunID, ForkEventID: params.ForkEventID,
-			AtStart:          params.AtStart,
+			AtStart: params.AtStart, PublicationID: params.PublicationID,
 			TargetBundleHash: targetBundleHash, TargetRootReference: targetRoot,
 			ContractSelection: selection, DataPinOverrides: params.DataPinOverrides,
 		}
@@ -392,6 +392,7 @@ func validateRunForkExecutionResult(result RunForkExecutionResult) error {
 type runForkParams struct {
 	SourceRunID      string
 	ForkEventID      string
+	PublicationID    string
 	AtStart          bool
 	BundleHash       string
 	DataPinOverrides []durabledata.ExplicitPin
@@ -418,6 +419,13 @@ func runForkParamsFromRequest(params map[string]any) (runForkParams, error) {
 	if err != nil {
 		return runForkParams{}, err
 	}
+	publicationID, _, err := optionalUUIDParam(params, "publication_id")
+	if err != nil {
+		return runForkParams{}, err
+	}
+	if publicationID != "" && (atStart || forkEventID != "") {
+		return runForkParams{}, NewInvalidParamsError(map[string]any{"field": "publication_id", "reason": "publication, start and event selectors are mutually exclusive"})
+	}
 	bundleHash, _, err := optionalStringParam(params, "bundle_hash")
 	if err != nil {
 		return runForkParams{}, err
@@ -436,10 +444,11 @@ func runForkParamsFromRequest(params map[string]any) (runForkParams, error) {
 		return runForkParams{}, err
 	}
 	return runForkParams{
-		SourceRunID: sourceRunID,
-		ForkEventID: forkEventID,
-		AtStart:     atStart,
-		BundleHash:  bundleHash,
+		SourceRunID:   sourceRunID,
+		ForkEventID:   forkEventID,
+		PublicationID: publicationID,
+		AtStart:       atStart,
+		BundleHash:    bundleHash,
 
 		DataPinOverrides: dataPinOverrides,
 		IdempotencyKey:   idempotencyKey,

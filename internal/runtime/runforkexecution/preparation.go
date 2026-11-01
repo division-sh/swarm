@@ -260,6 +260,9 @@ func (o SelectedContractExecutionOwner) prepareWithOperation(ctx context.Context
 		At:          strings.TrimSpace(req.At),
 		AtStart:     req.AtStart,
 	}
+	if req.ForkOperation != nil {
+		planRequest.PublicationID = req.ForkOperation.PublicationID
+	}
 	if req.ForkOperation != nil && req.ForkOperation.ResolvedPoint != nil {
 		planRequest.ResolvedPoint = req.ForkOperation.ResolvedPoint
 	}

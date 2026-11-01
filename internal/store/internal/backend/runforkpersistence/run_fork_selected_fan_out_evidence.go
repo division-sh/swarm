@@ -170,7 +170,7 @@ func selectedForkFanOutContinuationTx(ctx context.Context, tx *sql.Tx, childRun 
 			if pending.SourceEventID != sourceEvent {
 				continue
 			}
-			key, err := loadRunForkChildDeploymentFeedKeyTx(ctx, tx, childRun, obligation.Intent.Source.Declaration)
+			key, err := loadRunForkChildDeploymentFeedKeyTx(ctx, tx, childRun, obligation.Intent.Source.Declaration, obligation.Intent.Request.Key.DeploymentFeedID)
 			if err != nil {
 				return key, runfork.RunForkFanOutPendingReplay{}, false, err
 			}
