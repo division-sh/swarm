@@ -2560,14 +2560,6 @@ func (eb *EventBus) recordPublishDiagnostic(ctx context.Context, evt events.Even
 	})
 }
 
-func (eb *EventBus) planDirectRoutePlan(ctx context.Context, evt events.Event, recipients []string) (RoutePlan, error) {
-	plan, err := eb.deliveryPlanner.PlanDirect(ctx, evt, recipients)
-	if err != nil {
-		return RoutePlan{}, err
-	}
-	return plan.WithDefaultDeliveryContext(events.DeliveryContextFromContext(ctx)), nil
-}
-
 // planExactDirectRoutePlan uses current policy only to resolve live recipient
 // capabilities. The supplied routes remain the sole persistence and delivery
 // authority for target, context, and payload projection facts.

@@ -1347,31 +1347,6 @@ func (pc *PipelineCoordinator) publish(ctx context.Context, eventType, entityID 
 	return nil
 }
 
-func (pc *PipelineCoordinator) publishDirect(ctx context.Context, eventType, entityID string, payload map[string]any, recipients []string) error {
-	if pc == nil {
-		return nil
-	}
-	recipients = uniqueStrings(recipients)
-	if len(recipients) == 0 {
-		return pc.publish(ctx, eventType, entityID, payload)
-	}
-	flowInstance := strings.Trim(strings.TrimSpace(asString(payload["flow_instance"])), "/")
-	inbound, ok := runtimecorrelation.InboundEventFromContext(ctx)
-	if !ok {
-		return fmt.Errorf("pipeline direct runtime diagnostic %q requires an inbound event", strings.TrimSpace(eventType))
-	}
-	emitted, err := newPipelineRuntimeDiagnostic(events.LineageFromEvent(inbound), eventType, entityID, flowInstance, payload)
-	if err != nil {
-		return err
-	}
-	if pc.bus != nil {
-		if err := pc.bus.PublishDirect(ctx, emitted, recipients); err != nil {
-			return err
-		}
-	}
-	return nil
-}
-
 func newPipelineRuntimeDiagnostic(lineage events.EventLineage, eventType, entityID, flowInstance string, payload map[string]any) (events.Event, error) {
 	return events.NewCausalRuntimeDiagnosticEvent(events.CausalRuntimeEventInput{Facts: events.EventFacts{
 		ID: uuid.NewString(), Type: events.EventType(strings.TrimSpace(eventType)),

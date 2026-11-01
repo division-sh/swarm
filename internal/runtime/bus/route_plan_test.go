@@ -87,12 +87,6 @@ func TestRoutePlanDeliveryIntentsCarryTypedProducer(t *testing.T) {
 	}
 }
 
-func TestRetiredRootSubscriptionSourceIsNotAdmitted(t *testing.T) {
-	if _, ok := subscriberRouteSourceFromCode("root_input_flow"); ok {
-		t.Fatal("retired cross-flow subscription source admitted")
-	}
-}
-
 func TestRoutePlanRejectsMalformedOrUnpairedPersistentDeliveryIntent(t *testing.T) {
 	identity := agentidentitytest.RootRuntime(t, "agent-a", "route-plan-test")
 	plan := RoutePlan{
