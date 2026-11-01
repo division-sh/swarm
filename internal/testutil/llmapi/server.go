@@ -38,6 +38,7 @@ type Reply struct {
 	ID           string
 	Model        string
 	Text         string
+	Reasoning    string
 	TextID       string
 	Tools        []ToolCall
 	InputTokens  int
@@ -164,6 +165,9 @@ func encodeReply(protocol Protocol, reply Reply) map[string]any {
 		response["usage"] = map[string]int{"input_tokens": reply.InputTokens, "output_tokens": reply.OutputTokens}
 	case OpenAICompatible:
 		message := map[string]any{"role": "assistant", "content": reply.Text}
+		if reply.Reasoning != "" {
+			message["reasoning_content"] = reply.Reasoning
+		}
 		reason := "stop"
 		if len(reply.Tools) != 0 {
 			calls := []any{}
