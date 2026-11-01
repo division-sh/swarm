@@ -109,11 +109,11 @@ func newServedBoundaryFixtureLifetime(t *testing.T, backend, sourceRoot string) 
 
 func createServedBoundaryWaitingRun(t *testing.T, rt servedBoundaryFixture, suffix string) (string, string) {
 	t.Helper()
-	result := requireServedRunStartRPCResult(t, rt.Endpoint, map[string]any{
+	result := requireServedEventPublishRPCResult(t, rt.Endpoint, map[string]any{
 		"event_name": "item.received", "bundle_hash": rt.BundleHash,
 		"payload": map[string]any{"item_id": suffix}, "idempotency_key": "issue-1864-" + rt.Backend + "-" + suffix,
 	})
-	if result.Status != "live" || result.RunID == "" || result.EventID == "" {
+	if !result.NewRunCreated || result.RunID == "" || result.EventID == "" {
 		t.Fatalf("%s control seed = %+v, want new run", rt.Backend, result)
 	}
 	node := identitytest.RootNode(t, "item-handler").Key()

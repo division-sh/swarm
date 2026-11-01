@@ -18,7 +18,7 @@ func TestServedSelectionProcessCutsBothStores(t *testing.T) {
 			t.Run(backend+"/"+cut, func(t *testing.T) {
 				start, ready, _ := mailboxCompletionProcessHarnessWithSelectionCut(t, backend, canonicalrouting.CopySelectionRetry(t), cut)
 				first, rt := start(true)
-				seed := requireServedRunStartRPCResult(t, rt.Endpoint, map[string]any{"event_name": "seed", "bundle_hash": rt.BundleHash, "payload": map[string]any{}, "idempotency_key": "seed"})
+				seed := requireServedEventPublishRPCResult(t, rt.Endpoint, map[string]any{"event_name": "seed", "bundle_hash": rt.BundleHash, "payload": map[string]any{}, "idempotency_key": "seed"})
 				waitServedRunDeliveryQuiescence(t, rt.ReadRunDeliveries, seed.RunID)
 				params := map[string]any{"event_name": "select", "run_id": seed.RunID, "source_event_id": seed.EventID, "payload": map[string]any{}, "idempotency_key": "selection-crash"}
 				raw, err := json.Marshal(map[string]any{"jsonrpc": "2.0", "id": "selection", "method": "event.publish", "params": params})

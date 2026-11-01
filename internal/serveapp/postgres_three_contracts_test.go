@@ -103,7 +103,7 @@ func TestServePostgresLossAndRestartFromDurableState(t *testing.T) {
 			serve := startServeRuntimeTestProcess(t, opts)
 			serve.waitForReadyLine()
 			endpoint := "http://" + serveRuntimeAPIListenerFromOutput(t, serve.outputString()) + "/v1/rpc"
-			initial := requireServedRunStartRPCResult(t, endpoint, map[string]any{"event_name": "item.received", "bundle_hash": servedEventPublishFixtureBundleHash(t, root), "payload": map[string]any{"item_id": "durable-before-loss"}, "idempotency_key": "2444-before-loss"})
+			initial := requireServedEventPublishRPCResult(t, endpoint, map[string]any{"event_name": "item.received", "bundle_hash": servedEventPublishFixtureBundleHash(t, root), "payload": map[string]any{"item_id": "durable-before-loss"}, "idempotency_key": "2444-before-loss"})
 			entityID := requireServedEventPublishEntityState(t, observer, "postgres", initial.RunID, "", "waiting")
 			requireServedEntityReadback(t, endpoint, initial.RunID, entityID, "waiting")
 			var beforeAuthority string

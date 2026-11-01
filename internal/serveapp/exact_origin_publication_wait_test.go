@@ -170,7 +170,7 @@ func TestExactOriginPublicationWaitHeldDiagnosticBothStores(t *testing.T) {
 			t.Cleanup(unblock)
 			entered := make(chan string, 1)
 			rt.Runtime.Bus.SetLoggerHook(&exactOriginDiagnosticHold{logger: rt.Runtime.Logger, eventType: "parent.seeded", entered: entered, release: release})
-			seed := requireServedRunStartRPCResult(t, rt.Endpoint, map[string]any{"event_name": "parent.seeded", "bundle_hash": rt.BundleHash, "payload": map[string]any{"work_id": "exact-origin"}, "idempotency_key": "exact-origin-seed"})
+			seed := requireServedEventPublishRPCResult(t, rt.Endpoint, map[string]any{"event_name": "parent.seeded", "bundle_hash": rt.BundleHash, "payload": map[string]any{"work_id": "exact-origin"}, "idempotency_key": "exact-origin-seed"})
 			cut, cancelCut := context.WithTimeout(t.Context(), servedEventPublishLifecycleProbeWaitTimeout)
 			defer cancelCut()
 			select {

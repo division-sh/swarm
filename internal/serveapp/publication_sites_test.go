@@ -39,8 +39,7 @@ func TestServedPublicationDirectRestartBothStores(t *testing.T) {
 				name := "direct.requested"
 				params := map[string]any{"event_name": name, "bundle_hash": rt.BundleHash,
 					"payload": map[string]any{"case_id": "alpha", "choice": 1, "items": []string{}}, "idempotency_key": "publication-restart-seed"}
-				var published servedEventPublishRPCResult
-				requireServedJSONRPCResult(t, rt.Endpoint, "run.start", params, &published)
+				published := requireServedEventPublishRPCResult(t, rt.Endpoint, params)
 				waitPublicationSiteCompletion(t, rt, published.RunID)
 				want := map[string][]int{"alpha/result.direct": {1}}
 				requirePublicationSiteReadback(t, rt, published.RunID, mode, want, true)
@@ -50,8 +49,7 @@ func TestServedPublicationDirectRestartBothStores(t *testing.T) {
 				setServeRuntimeRecovery(t, opts.ConfigPath, false, true)
 				second, rt := start()
 				requirePublicationSiteReadback(t, rt, published.RunID, mode, want, true)
-				var duplicate servedEventPublishRPCResult
-				requireServedJSONRPCResult(t, rt.Endpoint, "run.start", params, &duplicate)
+				duplicate := requireServedEventPublishRPCResult(t, rt.Endpoint, params)
 				if duplicate.EventID != published.EventID || duplicate.RunID != published.RunID {
 					t.Fatalf("restart changed idempotent ingress: %+v -> %+v", published, duplicate)
 				}
@@ -130,23 +128,19 @@ func proveServedPublicationSites(t *testing.T, textValues bool, selectedFamilies
 								}
 								params["payload"].(map[string]any)["items"] = textItems
 							}
-							method := "event.publish"
 							if runID == "" {
 								params["bundle_hash"] = rt.BundleHash
-								method = "run.start"
 							} else {
 								params["run_id"] = runID
 							}
-							var published servedEventPublishRPCResult
-							requireServedJSONRPCResult(t, rt.Endpoint, method, params, &published)
+							published := requireServedEventPublishRPCResult(t, rt.Endpoint, params)
 							runID = published.RunID
 							waitPublicationSiteCompletion(t, rt, runID)
 							waitPublicationSiteFanOut(t, rt, runID)
 							key := caseID + "/result." + family
 							want[key] = append(want[key], values...)
 							requirePublicationSiteReadback(t, rt, runID, mode, want, textValues)
-							var duplicate servedEventPublishRPCResult
-							requireServedJSONRPCResult(t, rt.Endpoint, method, params, &duplicate)
+							duplicate := requireServedEventPublishRPCResult(t, rt.Endpoint, params)
 							if duplicate.EventID != published.EventID || duplicate.RunID != runID {
 								t.Fatalf("duplicate changed ingress: %+v -> %+v", published, duplicate)
 							}

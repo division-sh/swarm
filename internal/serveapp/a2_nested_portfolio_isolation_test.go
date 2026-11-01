@@ -31,9 +31,6 @@ func TestA2NestedPortfolioSamePeriodAndMemberIsolationBothStores(t *testing.T) {
 				defer func() {
 					t.Logf("M34 publication returned: event=%v key=%v elapsed=%s failed=%t", params["event_name"], params["idempotency_key"], time.Since(started), t.Failed())
 				}()
-				if _, existing := params["run_id"]; !existing {
-					return requireServedRunStartRPCResult(t, rt.Endpoint, params)
-				}
 				return requireServedEventPublishRPCResult(t, rt.Endpoint, params)
 			}
 			const periodKey = "same-period"

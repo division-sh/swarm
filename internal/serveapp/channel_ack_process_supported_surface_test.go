@@ -24,7 +24,7 @@ func TestChannelActionAcknowledgmentAbruptProcessDeathPublicJourney(t *testing.T
 				first := startChannelOnboardingCrashServeProcess(t, h.opts, h.telegram.URL)
 				h.endpoint = first.endpoint(t)
 				waitChannelDeliverySendsSettled(t, db, backend)
-				seed := requireServedRunStartRPCResult(t, h.rpcEndpoint(), map[string]any{
+				seed := requireServedEventPublishRPCResult(t, h.rpcEndpoint(), map[string]any{
 					"event_name": "work.requested", "bundle_hash": hash, "payload": map[string]any{"seed": true},
 					"idempotency_key": "ack-crash-seed",
 				})

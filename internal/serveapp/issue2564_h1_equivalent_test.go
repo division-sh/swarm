@@ -58,7 +58,7 @@ func TestIssue2564ServedH1ReconstructedEquivalentBothStores(t *testing.T) {
 					"event_name": "hub.start", "bundle_hash": rt.BundleHash,
 					"payload": map[string]any{"hub_id": "h01"}, "idempotency_key": "h1-start-h01",
 				})
-				if seed.Status != "live" || seed.RunID == "" {
+				if !seed.NewRunCreated || seed.RunID == "" {
 					t.Fatalf("normal served run/construction missing: %+v", seed)
 				}
 				// Start requests, and hence actual first provider turns, are concurrent.
@@ -353,11 +353,7 @@ func (p *issue2564H1Provider) assert(t *testing.T, want int) map[string]issue256
 // qualification deadline instead of borrowing short budgets from small fixtures.
 func issue2564H1Publish(t *testing.T, ctx context.Context, endpoint string, params map[string]any) servedEventPublishRPCResult {
 	t.Helper()
-	method := "event.publish"
-	if _, existing := params["run_id"]; !existing {
-		method = "run.start"
-	}
-	body, err := json.Marshal(map[string]any{"jsonrpc": "2.0", "id": params["idempotency_key"], "method": method, "params": params})
+	body, err := json.Marshal(map[string]any{"jsonrpc": "2.0", "id": params["idempotency_key"], "method": "event.publish", "params": params})
 	if err != nil {
 		t.Fatal(err)
 	}

@@ -154,7 +154,7 @@ func proveSelectedForkPublicChangedTargetExecutionBothStores(t *testing.T, optio
 			if err != nil {
 				t.Fatal(err)
 			}
-			seed := requireServedRunStartRPCResult(t, rt.Endpoint, map[string]any{
+			seed := requireServedEventPublishRPCResult(t, rt.Endpoint, map[string]any{
 				"event_name": "start.seeded", "bundle_hash": rt.BundleHash,
 				"payload": map[string]any{"token": "receiver-proof"}, "idempotency_key": "public-selected-seed",
 			})

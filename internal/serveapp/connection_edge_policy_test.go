@@ -32,7 +32,7 @@ func TestEdgeOwnedConnectionPoliciesSharingInputBothStores(t *testing.T) {
 				}
 				_, start := lifecycleRestartHarness(t, backend, root)
 				process, rt := start()
-				seed := requireServedRunStartRPCResult(t, rt.Endpoint, map[string]any{
+				seed := requireServedEventPublishRPCResult(t, rt.Endpoint, map[string]any{
 					"event_name": "work.requested", "bundle_hash": rt.BundleHash, "idempotency_key": "edge-create",
 					"payload": map[string]any{"creation_id": "fresh-one", "reuse_id": "shared"},
 				})

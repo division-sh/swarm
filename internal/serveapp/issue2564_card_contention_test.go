@@ -38,8 +38,7 @@ func TestIssue2564DecisionCardReevaluatesSameLeaseAfterRealCASLossBothStores(t *
 					t.Errorf("serve stop=%d", code)
 				}
 			})
-			var seed servedEventPublishRPCResult
-			requireServedJSONRPCResult(t, rt.Endpoint, "run.start", map[string]any{"event_name": "work.requested", "bundle_hash": rt.BundleHash, "payload": map[string]any{"seed": true}, "idempotency_key": "matrix-seed-" + uuid.NewString()}, &seed)
+			seed := requireServedEventPublishRPCResult(t, rt.Endpoint, map[string]any{"event_name": "work.requested", "bundle_hash": rt.BundleHash, "payload": map[string]any{"seed": true}, "idempotency_key": "matrix-seed-" + uuid.NewString()})
 			rt.waitEntityStage(t, seed.RunID, "", "review")
 			rt.waitDeliveries(t, seed.RunID)
 			if rt.Runtime == nil {

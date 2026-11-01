@@ -61,7 +61,7 @@ func TestServedGeneratedActivityPublicationBothStores(t *testing.T) {
 							exhausted.Store(outcome == "exhausted")
 							params := map[string]any{"event_name": inputName, "bundle_hash": rt.BundleHash,
 								"payload": map[string]any{"case_id": "alpha", "message": "exact-provider-input"}, "idempotency_key": "activity-seed-" + outcome}
-							seed := requireServedRunStartRPCResult(t, rt.Endpoint, params)
+							seed := requireServedEventPublishRPCResult(t, rt.Endpoint, params)
 							defer func() {
 								if !t.Failed() {
 									return
@@ -143,7 +143,7 @@ func TestServedGeneratedActivityPublicationBothStores(t *testing.T) {
 					_, rt = start()
 					for _, row := range completed {
 						t.Run("restart/"+row.outcome, func(t *testing.T) {
-							duplicate := requireServedRunStartRPCResult(t, rt.Endpoint, row.params)
+							duplicate := requireServedEventPublishRPCResult(t, rt.Endpoint, row.params)
 							if duplicate.EventID != row.seedID || duplicate.RunID != row.runID {
 								t.Fatal("restart reminted activity ingress")
 							}

@@ -36,7 +36,6 @@ func TestMaterializingSenderReachesExistingRequiredReceiverBothStores(t *testing
 			}
 			t.Run(string(backend)+"/"+name, func(t *testing.T) {
 				rt := startServedTestSetupEntitiesProofRuntimeFromSource(t, backend, canonicalrouting.CopyMaterializingSenderExistingReceiver(t, required))
-				seedServedPublicationLiveRun(t, rt)
 				seed := requireServedEventPublishRPCResult(t, rt.Endpoint, map[string]any{"event_name": "start", "bundle_hash": rt.BundleHash, "payload": map[string]any{"case_id": "exact"}, "idempotency_key": "seed"})
 				waitServedRunDeliveryQuiescence(t, rt.ReadRunDeliveries, seed.RunID)
 				var count int
@@ -63,7 +62,6 @@ func TestProspectiveReceiverUpdatesAndCompanionRepairBothStores(t *testing.T) {
 					requireProspectiveMissingHeaderRefusal(t, backend)
 				}
 				rt, _, restart := newRetainedMailboxCompletionRuntime(t, backend, canonicalrouting.CopyMaterializingSenderExistingReceiver(t, true))
-				seedServedPublicationLiveRun(t, rt)
 				seed := requireServedEventPublishRPCResult(t, rt.Endpoint, map[string]any{"event_name": "start", "bundle_hash": rt.BundleHash, "payload": map[string]any{"case_id": "first"}, "idempotency_key": "seed"})
 				waitServedRunDeliveryQuiescence(t, rt.ReadRunDeliveries, seed.RunID)
 				var entityID, instance string
@@ -215,7 +213,6 @@ func TestProspectiveTerminalReceiverRefusesWithoutMutationOrPublicationBothStore
 	for _, backend := range servedparity.RequiredBackends {
 		t.Run(string(backend), func(t *testing.T) {
 			rt := startServedTestSetupEntitiesProofRuntimeFromSource(t, backend, canonicalrouting.CopyProspectiveTerminalSender(t))
-			seedServedPublicationLiveRun(t, rt)
 			seed := requireServedEventPublishRPCResult(t, rt.Endpoint, map[string]any{"event_name": "start", "bundle_hash": rt.BundleHash, "payload": map[string]any{"case_id": "terminal"}, "idempotency_key": "seed"})
 			waitServedRunDeliveryQuiescence(t, rt.ReadRunDeliveries, seed.RunID)
 			var states, publications, failed int

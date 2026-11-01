@@ -28,12 +28,16 @@ func TestDeclaredClockBindingRequiresDeploymentSelection(t *testing.T) {
 				SourceArtifactFact: sourceartifactfixture.FactFor(bundle.SourceArtifact), EnableDeclaredClockBinding: enabled,
 			}}
 			candidates, err := rt.PlanLiveFlowScopes()
+			if err != nil || len(candidates) != len(source.FlowScopes()) {
+				t.Fatalf("nested=%t enabled=%t live scopes=%+v err=%v", nested, enabled, candidates, err)
+			}
+			plans, err := rt.standingTargetPlans()
 			want := 0
 			if enabled {
 				want = 1
 			}
-			if err != nil || len(candidates) != want {
-				t.Fatalf("nested=%t enabled=%t standing candidates=%+v err=%v", nested, enabled, candidates, err)
+			if err != nil || len(plans) != want {
+				t.Fatalf("nested=%t enabled=%t standing plans=%+v err=%v", nested, enabled, plans, err)
 			}
 			if !enabled {
 				if err := rt.ArmDeclaredFlowClocks(t.Context(), []StandingActivation{{FlowPath: "."}}); err != nil {

@@ -115,7 +115,7 @@ func issue642NewlyArmedSelectedTimer(t *testing.T, backend, delay string) {
 	if !ok {
 		t.Fatalf("served selected store lacks canonical new-arm readers: %T", rt.selected)
 	}
-	seed := requireServedRunStartRPCResult(t, rt.Endpoint, map[string]any{
+	seed := requireServedEventPublishRPCResult(t, rt.Endpoint, map[string]any{
 		"event_name": "timer.scheduled", "bundle_hash": rt.BundleHash,
 		"payload": map[string]any{}, "idempotency_key": "issue642-new-arm-source",
 	})

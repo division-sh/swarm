@@ -60,7 +60,7 @@ func TestIssue2564H2AcknowledgmentPrecedesAdmissionObservationBothStores(t *test
 			rt := issue2564H2Fixture{Endpoint: served.Endpoint, Backend: backend, BundleHash: served.BundleHash, selected: reader}
 			ctx, cancel := context.WithTimeout(t.Context(), servedProofPollDeadline)
 			defer cancel()
-			seed := requireServedRunStartRPCResult(t, rt.Endpoint, map[string]any{
+			seed := requireServedEventPublishRPCResult(t, rt.Endpoint, map[string]any{
 				"event_name": "hub.start", "bundle_hash": rt.BundleHash, "payload": map[string]any{"hub_id": "h05"}, "idempotency_key": "observation-start",
 			})
 			rt.waitDeliveries(t, seed.RunID)
