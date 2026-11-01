@@ -100,15 +100,6 @@ func routeIntentProducerCode(p routeIntentProducer) string {
 	}
 }
 
-type RoutePlanAuthorityState uint8
-
-const (
-	RoutePlanAuthorityNoCanonicalMatch RoutePlanAuthorityState = iota
-	RoutePlanAuthorityCanonicalMatched
-	RoutePlanAuthorityCanonicalFailedClosed
-	RoutePlanAuthorityLowerPrecedence
-)
-
 // RoutePlan is the EventBus-owned publish-time route authority. It records the
 // typed delivery intents that should be persisted and the live dispatch
 // recipients that remain only projections/consumers of that authority.
@@ -116,7 +107,7 @@ type RoutePlan struct {
 	ordinarySource           ordinaryPublicationSource
 	Event                    events.Event
 	ConnectEvaluation        events.ConnectEvaluationLedger
-	AuthorityState           RoutePlanAuthorityState
+	canonicalAdmission       bool
 	AuthorityOwner           routeIntentProducer
 	LiveRecipients           []RoutePlanLiveRecipient
 	DeliveryIntents          []RoutePlanDeliveryIntent
@@ -261,11 +252,10 @@ func normalizePlannedDeliveryRoutes(in []plannedDeliveryRoute) []plannedDelivery
 
 func newRoutePlan(evt events.Event) RoutePlan {
 	ledger, _ := events.NewConnectEvaluationLedger(nil)
-	return RoutePlan{Event: evt, AuthorityState: RoutePlanAuthorityNoCanonicalMatch, ConnectEvaluation: ledger}
+	return RoutePlan{Event: evt, ConnectEvaluation: ledger}
 }
 
 func (p RoutePlan) Normalized() RoutePlan {
-	p.AuthorityState = normalizeRoutePlanAuthorityState(p.AuthorityState)
 	p.AuthorityOwner = p.AuthorityOwner.Normalized()
 	p.LiveRecipients = normalizeRoutePlanLiveRecipients(p.LiveRecipients)
 	p.DeliveryIntents = normalizeRoutePlanDeliveryIntents(p.DeliveryIntents)
@@ -285,10 +275,7 @@ func (p RoutePlan) Normalized() RoutePlan {
 		evt := *p.CycleEscalation
 		p.CycleEscalation = &evt
 	}
-	if p.AuthorityState == RoutePlanAuthorityCanonicalMatched && !p.TargetFailure.Empty() {
-		p.AuthorityState = RoutePlanAuthorityCanonicalFailedClosed
-	}
-	if p.AuthorityState == RoutePlanAuthorityCanonicalFailedClosed {
+	if p.canonicalAdmission && !p.TargetFailure.Empty() {
 		p.LiveRecipients = nil
 		p.DeliveryIntents = nil
 		p.RoutedRecipients = nil
@@ -306,7 +293,7 @@ func (p *RoutePlan) MarkCanonicalRouteMatched(producer routeIntentProducer) {
 	if p == nil {
 		return
 	}
-	p.AuthorityState = RoutePlanAuthorityCanonicalMatched
+	p.canonicalAdmission = true
 	p.AuthorityOwner = producer.Normalized()
 }
 
@@ -314,7 +301,7 @@ func (p *RoutePlan) MarkCanonicalRouteFailedClosed(producer routeIntentProducer,
 	if p == nil {
 		return
 	}
-	p.AuthorityState = RoutePlanAuthorityCanonicalFailedClosed
+	p.canonicalAdmission = true
 	p.AuthorityOwner = producer.Normalized()
 	p.TargetFailure = failure
 	p.LiveRecipients = nil
@@ -323,32 +310,17 @@ func (p *RoutePlan) MarkCanonicalRouteFailedClosed(producer routeIntentProducer,
 	p.SubscribedRecipients = nil
 }
 
-func (p *RoutePlan) MarkLowerPrecedenceRouteProduction(producer routeIntentProducer) {
+func (p *RoutePlan) recordOrdinaryRouteProducer(producer routeIntentProducer) {
 	if p == nil || p.CanonicalRouteOwnerMatched() {
 		return
 	}
-	p.AuthorityState = RoutePlanAuthorityLowerPrecedence
 	if p.AuthorityOwner == 0 {
 		p.AuthorityOwner = producer.Normalized()
 	}
 }
 
 func (p RoutePlan) CanonicalRouteOwnerMatched() bool {
-	switch normalizeRoutePlanAuthorityState(p.AuthorityState) {
-	case RoutePlanAuthorityCanonicalMatched, RoutePlanAuthorityCanonicalFailedClosed:
-		return true
-	default:
-		return false
-	}
-}
-
-func (p RoutePlan) AllowsLowerPrecedenceRouteProduction() bool {
-	switch normalizeRoutePlanAuthorityState(p.AuthorityState) {
-	case RoutePlanAuthorityNoCanonicalMatch, RoutePlanAuthorityLowerPrecedence:
-		return true
-	default:
-		return false
-	}
+	return p.canonicalAdmission
 }
 
 func (p PublishRecipientPlan) UsesCanonicalRouteAuthority() bool {
@@ -661,22 +633,9 @@ func routePlanFromManifest(evt events.Event, manifest deliveryRecipientManifest,
 	plan.AddDeliveryIntents(intents...)
 	plan.TargetFailure = manifest.TargetFailure
 	if len(plan.LiveRecipients) > 0 || len(plan.DeliveryIntents) > 0 || !plan.TargetFailure.Empty() {
-		plan.MarkLowerPrecedenceRouteProduction(producer)
+		plan.recordOrdinaryRouteProducer(producer)
 	}
 	return plan.Normalized()
-}
-
-func normalizeRoutePlanAuthorityState(state RoutePlanAuthorityState) RoutePlanAuthorityState {
-	switch state {
-	case RoutePlanAuthorityCanonicalMatched:
-		return RoutePlanAuthorityCanonicalMatched
-	case RoutePlanAuthorityCanonicalFailedClosed:
-		return RoutePlanAuthorityCanonicalFailedClosed
-	case RoutePlanAuthorityLowerPrecedence:
-		return RoutePlanAuthorityLowerPrecedence
-	default:
-		return RoutePlanAuthorityNoCanonicalMatch
-	}
 }
 
 type liveRecipientKey struct {
