@@ -124,6 +124,24 @@ type providerCallRecoveryResult struct {
 	found    bool
 }
 
+func providerResumeRetryBaseTx(ctx context.Context, tx *sql.Tx, attempt runtimeeffects.Attempt, now time.Time) (time.Duration, error) {
+	target := attempt.Authority.Target
+	if !target.Memory.Enabled {
+		return 0, nil
+	}
+	var expiry conversationForkTimeValue
+	err := tx.QueryRowContext(ctx, `SELECT lease_expires_at FROM agent_sessions
+		WHERE session_id=$1 AND run_id=$2 AND lease_grant_id=$3 AND lease_holder=$4 AND status='active'`,
+		target.SessionID, target.RunID, attempt.SessionGrantID, attempt.SessionLockOwner).Scan(&expiry)
+	if errors.Is(err, sql.ErrNoRows) {
+		return 0, nil
+	}
+	if err != nil {
+		return 0, err
+	}
+	return max(0, expiry.Time.Sub(now)), nil
+}
+
 func completionJournalBodyFingerprint(raw, fingerprint, operationID, attemptID string) (string, error) {
 	if !strings.HasPrefix(fingerprint, runtimeeffects.ProviderCallJournalVersion+":") {
 		return fingerprint, nil
@@ -272,6 +290,12 @@ func loadProviderCallResumeTx(ctx context.Context, tx *sql.Tx, postgres bool, re
 	parent, err := providerResumeParentTx(ctx, tx, postgres, recovered, frame, now)
 	if err != nil {
 		return result, err
+	}
+	if parent != nil && req.Authority.Kind == runtimeeffects.AuthorityNormalAgent {
+		parent.Surface, err = parent.Surface.ProjectNormalContinuation(req.ExecutionAuthorityID, req.SessionID)
+		if err != nil {
+			return result, err
+		}
 	}
 	return providerCallRecoveryResult{recovery: runtimeeffects.ProviderCallRecovery{Journal: *journal, Frame: frame, Parent: parent}, found: true}, nil
 }

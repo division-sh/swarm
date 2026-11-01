@@ -76,11 +76,14 @@ func TestCompletionProviderHeadSettlementPostgres(t *testing.T) {
 func TestCompletionOperationOwnsExactAgentFrameSQLite(t *testing.T) {
 	store := newBootstrappedSQLiteRuntimeStoreForTest(t)
 	proveCompletionOperationOwnsExactAgentFrame(t, newCompletionSettlementFixture(t, store, store.backend.ConstructionHandle(), true))
+	proveProviderCallResultJournal(t, newCompletionSettlementFixture(t, store, store.backend.ConstructionHandle(), true))
 }
 
 func TestCompletionOperationOwnsExactAgentFramePostgres(t *testing.T) {
 	_, db, _ := testutil.StartPostgres(t)
-	proveCompletionOperationOwnsExactAgentFrame(t, newCompletionSettlementFixture(t, admitTestPostgresStore(t, db), db, false))
+	store := admitTestPostgresStore(t, db)
+	proveCompletionOperationOwnsExactAgentFrame(t, newCompletionSettlementFixture(t, store, db, false))
+	proveProviderCallResultJournal(t, newCompletionSettlementFixture(t, store, db, false))
 }
 
 func proveCompletionOperationOwnsExactAgentFrame(t *testing.T, fixture completionSettlementFixture) {
