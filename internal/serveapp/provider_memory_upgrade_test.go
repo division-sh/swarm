@@ -228,7 +228,8 @@ if (!startup) {
 	program = strings.Replace(program,
 		"fs.writeFileSync(directory + '/' + session + '.jsonl', JSON.stringify({type: 'assistant', sessionId: session}) + '\\n');",
 		`const parent = flags.get('--resume');
-  const retained = parent ? fs.readFileSync(directory + '/' + parent + '.jsonl', 'utf8') : '';
+  const retained = parent ? fs.readFileSync(directory + '/' + parent + '.jsonl', 'utf8').trim().split('\n')
+    .map(line => JSON.stringify({...JSON.parse(line), sessionId: session})).join('\n') + '\n' : '';
   fs.writeFileSync(directory + '/' + session + '.jsonl', retained + JSON.stringify({type: 'assistant', sessionId: session, input}) + '\n');`, 1)
 	image := buildCompletion2270CLIImageWithProgram(t, program)
 	*text += fmt.Sprintf("  claude_cli:\n    command: completion-proof-cli\n    output_format: stream-json\nworkspace:\n  image: %s\n", image)
