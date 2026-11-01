@@ -226,8 +226,15 @@ func (p *serveNativeProtocolPeer) serve(wire *whatsappfixture.Transport) {
 		if rejectLogin {
 			if err := wire.Send(p.ctx, waBinary.Node{Tag: "failure", Attrs: waBinary.Attrs{"reason": "401"}}); err != nil {
 				p.t.Error(err)
+				return
 			}
-			return
+			// Let the SDK observe rejection and close, rather than racing it with
+			// a peer-side network disconnect that can discard queued frames.
+			for {
+				if _, err := wire.Read(p.ctx); err != nil {
+					return
+				}
+			}
 		}
 		if err := p.success(wire); err != nil {
 			p.t.Error(err)
@@ -285,8 +292,15 @@ func (p *serveNativeProtocolPeer) serve(wire *whatsappfixture.Transport) {
 				}
 				if err := wire.Send(p.ctx, waBinary.Node{Tag: "stream:error", Attrs: waBinary.Attrs{"code": "515"}}); err != nil {
 					p.t.Error(err)
+					return
 				}
-				return
+				// The explicit resume must observe the handoff before it joins this
+				// socket; do not race the frame with an unrelated peer disconnect.
+				for {
+					if _, err := wire.Read(p.ctx); err != nil {
+						return
+					}
+				}
 			}
 			if err := p.success(wire); err != nil {
 				p.t.Error(err)

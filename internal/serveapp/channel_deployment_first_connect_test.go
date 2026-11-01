@@ -36,18 +36,22 @@ type firstConnectCheckpointKey struct{}
 
 type firstConnectLoginRead struct {
 	channelonboarding.OperationStore
-	login *servedNativeLoginGate
-	once  sync.Once
+	login      *servedNativeLoginGate
+	invocation context.Context
+	opened     func() bool
+	once       sync.Once
 }
 
 func (s *firstConnectLoginRead) GetChannelOnboarding(ctx context.Context, id string) (channelonboarding.Operation, error) {
 	op, err := s.OperationStore.GetChannelOnboarding(ctx, id)
-	if err == nil {
+	// Constructor reads have no connection; Connect reads use a leased context.
+	// Only the confirmed resume's invocation read releases the login response.
+	if err == nil && ctx == s.invocation && s.opened() {
 		select {
 		case <-s.login.held:
-			// The next native currentness read is after transport connect returns.
 			s.once.Do(func() { s.login.release <- true })
-		default:
+		case <-ctx.Done():
+			return op, context.Cause(ctx)
 		}
 	}
 	return op, err
@@ -275,8 +279,15 @@ func TestChannelConnectWhatsAppRegistersAccountBothStores(t *testing.T) {
 						peer.rejectNextLogin, peer.nextLogin = true, login
 						peer.mu.Unlock()
 						reverify := func(ctx context.Context, options cliapp.ChannelRegistrationOptions) (cliapp.ChannelRegistrationSession, error) {
-							options.Operations = &firstConnectLoginRead{OperationStore: options.Operations, login: login}
-							return factory(ctx, options)
+							reads := &firstConnectLoginRead{OperationStore: options.Operations, login: login, invocation: ctx}
+							options.Operations = reads
+							session, err := factory(ctx, options)
+							if err != nil {
+								return session, err
+							}
+							native := session.(firstConnectPairingObserver).ChannelRegistrationSession.(*deploymentChannelSession)
+							reads.opened = func() bool { return native.connection != nil }
+							return session, nil
 						}
 						out, errOut := &lockedBuffer{}, &lockedBuffer{}
 						done := make(chan int, 1)
