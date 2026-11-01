@@ -15,22 +15,14 @@ import (
 	"time"
 
 	"github.com/division-sh/swarm/internal/operatorread"
+	"github.com/division-sh/swarm/internal/runtime/core/eventidentity"
+	"github.com/division-sh/swarm/internal/runtime/core/identitytest"
 	runtimecredentials "github.com/division-sh/swarm/internal/runtime/credentials"
 	runtimefailures "github.com/division-sh/swarm/internal/runtime/failures"
 	"github.com/division-sh/swarm/internal/servedparity"
 	"github.com/division-sh/swarm/internal/testutil/llmapi"
 	"gopkg.in/yaml.v3"
 )
-
-func TestProviderOpenAICompatibleEvidenceJourneys(t *testing.T) {
-	for _, backend := range servedparity.RequiredBackends {
-		t.Run(string(backend), func(t *testing.T) {
-			for _, cell := range realModelCells {
-				t.Run(cell, func(t *testing.T) { runProviderEvidenceJourney(t, backend, cell, false) })
-			}
-		})
-	}
-}
 
 func runProviderEvidenceJourney(t *testing.T, backend servedparity.Backend, cell string, live bool) {
 	t.Helper()
@@ -46,9 +38,12 @@ func runProviderEvidenceJourney(t *testing.T, backend servedparity.Backend, cell
 	h.opts.SourceRoot = writeProviderEvidenceSource(t, cell)
 	h.opts.TestLLMRuntime = nil
 	h.opts.Verbose = false
-	h.opts.ErrorOutput = io.Discard
-	t.Setenv(realModelSHAEnv, "")
-	t.Setenv(realModelCellsEnv, "")
+	if live {
+		h.opts.ErrorOutput = io.Discard
+	}
+	unsetEnvForTest(t, realModelSHAEnv)
+	unsetEnvForTest(t, realModelCellsEnv)
+	unsetEnvForTest(t, realModelTransportEnv)
 	baseURL := "https://api.deepseek.com"
 	if live {
 		t.Setenv("SWARM_CREDENTIALS_FILE", credentialPath)
@@ -89,7 +84,7 @@ func runProviderEvidenceJourney(t *testing.T, backend servedparity.Backend, cell
 			t.Fatal("evidence conversation changed its run")
 		}
 		runID = published.RunID
-		session, refusal := waitProviderEvidenceTurn(t, h, runID, sequence, observation, cell == "refusal")
+		session, refusal := waitProviderEvidenceTurn(t, h, runID, published.EventID, observation, cell == "refusal")
 		if sessionID != "" && sessionID != session {
 			t.Fatal("evidence conversation changed its session")
 		}
@@ -97,7 +92,7 @@ func runProviderEvidenceJourney(t *testing.T, backend servedparity.Backend, cell
 		if refusal {
 			return
 		}
-		requireProviderEvidenceOutput(t, h, runID, sequence)
+		requireProviderEvidenceOutput(t, h, runID, published.EventID, sequence)
 	}
 	if cell == "refusal" {
 		t.Log("boundary=request_refusal outcome=NOT_EXERCISED (provider accepted the journey)")
@@ -119,7 +114,7 @@ func writeProviderEvidenceSource(t *testing.T, cell string) string {
 	write("manifest.yaml", manifest)
 	write("events.yaml", map[string]any{"evidence.requested": map[string]any{"conversation": "string", "sequence": "integer"}})
 	write("schema.yaml", map[string]any{"pins": map[string]any{"inputs": []string{"evidence.requested", "evidence.completed"}}, "connect": []map[string]any{
-		{"event": "evidence.requested", "from": ".", "to": "worker"}, {"event": "evidence.completed", "from": "worker", "to": "."},
+		{"event": "evidence.requested", "from": ".", "to": "worker", "resolution": "select-or-create"}, {"event": "evidence.completed", "from": "worker", "to": "."},
 	}})
 	write("nodes.yaml", map[string]any{"observer": map[string]any{"execution_type": "system_node", "event_handlers": map[string]any{
 		"evidence.completed": map[string]any{"guard": map[string]any{"id": "observe", "check": true}},
@@ -147,6 +142,10 @@ func providerEvidenceReply(request llmapi.Request, cell string) (llmapi.Reply, e
 		Messages []struct {
 			Role    string `json:"role"`
 			Content string `json:"content"`
+			CallID  string `json:"tool_call_id"`
+			Calls   []struct {
+				ID string `json:"id"`
+			} `json:"tool_calls"`
 		} `json:"messages"`
 		Tools []struct {
 			Function struct {
@@ -163,7 +162,17 @@ func providerEvidenceReply(request llmapi.Request, cell string) (llmapi.Reply, e
 		return llmapi.Reply{}, fmt.Errorf("invalid synthetic request")
 	}
 	sequence := 0
+	linked := map[string]bool{}
 	for _, message := range body.Messages {
+		if message.Role == "assistant" {
+			linked = map[string]bool{}
+			for _, call := range message.Calls {
+				linked[call.ID] = true
+			}
+		}
+		if message.Role == "tool" && !linked[message.CallID] {
+			return llmapi.Reply{StatusCode: http.StatusBadRequest, ErrorBody: `{"error":{"message":"synthetic strict provider: orphaned tool message"}}`}, nil
+		}
 		var frame struct {
 			Event struct {
 				Payload struct {
@@ -184,12 +193,22 @@ func providerEvidenceReply(request llmapi.Request, cell string) (llmapi.Reply, e
 		}
 		return llmapi.Reply{}, fmt.Errorf("read-only evidence tool absent")
 	}
+	if sequence == 0 {
+		return llmapi.Reply{}, fmt.Errorf("synthetic initial frame lost its sequence")
+	}
+	found := false
+	for _, tool := range body.Tools {
+		found = found || tool.Function.Name == "emit_evidence_completed"
+	}
+	if !found {
+		return llmapi.Reply{}, fmt.Errorf("authored evidence emit tool absent")
+	}
 	args, _ := json.Marshal(map[string]any{"sequence": sequence})
 	return llmapi.Reply{ID: fmt.Sprintf("synthetic-%d", request.Number), Model: "deepseek-flash", InputTokens: 1, OutputTokens: 1,
 		Tools: []llmapi.ToolCall{{ID: fmt.Sprintf("emit-%d", request.Number), Name: "emit_evidence_completed", Arguments: args}}}, nil
 }
 
-func waitProviderEvidenceTurn(t *testing.T, h *channelOnboardingE2EHarness, runID string, want int, observation *providerEvidenceObservation, refusal bool) (string, bool) {
+func waitProviderEvidenceTurn(t *testing.T, h *channelOnboardingE2EHarness, runID, inputID string, observation *providerEvidenceObservation, refusal bool) (string, bool) {
 	t.Helper()
 	deadline := time.Now().Add(3 * time.Minute)
 	for time.Now().Before(deadline) {
@@ -205,8 +224,12 @@ func waitProviderEvidenceTurn(t *testing.T, h *channelOnboardingE2EHarness, runI
 			session := sessions.Conversations[0].SessionID
 			var turns operatorread.OperatorConversationTurnListResult
 			requireServedJSONRPCResult(t, h.rpcEndpoint(), "conversation.list_turns", map[string]any{"session_id": session}, &turns)
-			if len(turns.Turns) >= want {
-				turn := turns.Turns[want-1]
+			matched := 0
+			for _, turn := range turns.Turns {
+				if turn.TriggerEventID != inputID {
+					continue
+				}
+				matched++
 				if turn.Failure != nil {
 					if refusal && body != "" && turn.Failure.Class == runtimefailures.ClassConnectorFailure && !turn.Failure.Retryable && turn.Failure.Detail.Attributes["response_body"] == body {
 						t.Log("boundary=request_refusal outcome=EXERCISED permanent=true body_preserved=true")
@@ -217,6 +240,10 @@ func waitProviderEvidenceTurn(t *testing.T, h *channelOnboardingE2EHarness, runI
 				if !turn.ParseOK {
 					t.Fatal("provider journey did not parse")
 				}
+			}
+			var input operatorread.OperatorEventFull
+			requireServedJSONRPCResult(t, h.rpcEndpoint(), "event.get", map[string]any{"event_id": inputID}, &input)
+			if matched > 0 && len(input.Deliveries) == 1 && input.Deliveries[0].Status == "delivered" {
 				return session, false
 			}
 		}
@@ -226,35 +253,65 @@ func waitProviderEvidenceTurn(t *testing.T, h *channelOnboardingE2EHarness, runI
 	return "", false
 }
 
-func requireProviderEvidenceOutput(t *testing.T, h *channelOnboardingE2EHarness, runID string, sequence int) {
+func requireProviderEvidenceOutput(t *testing.T, h *channelOnboardingE2EHarness, runID, inputID string, sequence int) {
 	t.Helper()
+	var input operatorread.OperatorEventFull
+	requireServedJSONRPCResult(t, h.rpcEndpoint(), "event.get", map[string]any{"event_id": inputID}, &input)
+	if input.EventID != inputID || input.RunID != runID || input.EventName != "evidence.requested" || len(input.Deliveries) != 1 || input.Deliveries[0].Target.FlowID != "worker" || input.Deliveries[0].Target.FlowInstance == "" {
+		t.Fatal("evidence input lost its exact constructed receiver")
+	}
+	eventName := eventidentity.ExternalizeForFlow(input.Deliveries[0].Target.FlowInstance, []string{"evidence.completed"}, "evidence.completed")
 	deadline := time.Now().Add(15 * time.Second)
+	var last operatorread.OperatorEventListResult
+	observer := identitytest.RootNode(t, "observer").Key()
 	for time.Now().Before(deadline) {
 		var page operatorread.OperatorEventListResult
-		requireServedJSONRPCResult(t, h.rpcEndpoint(), "event.list", map[string]any{"filter": map[string]any{"run_id": runID, "event_name": "worker/evidence.completed"}, "limit": 100}, &page)
+		requireServedJSONRPCResult(t, h.rpcEndpoint(), "event.list", map[string]any{"filter": map[string]any{"run_id": runID, "event_name": eventName}, "limit": 100}, &page)
+		last = page
+		matches := 0
+		settled := true
 		for _, event := range page.Events {
-			if event.Payload["sequence"] == float64(sequence) && len(event.Deliveries) == 1 && event.Deliveries[0].Status == "delivered" && len(event.DeadLetters) == 0 {
-				return
+			if event.Payload["sequence"] == float64(sequence) {
+				matches++
+				if len(event.Deliveries) != 1 || event.Deliveries[0].SubscriberID != observer || event.Deliveries[0].Status != "delivered" || len(event.DeadLetters) != 0 {
+					settled = false
+				}
 			}
 		}
+		if matches > 1 {
+			t.Fatal("evidence output was emitted more than once")
+		}
+		if matches == 1 && settled {
+			return
+		}
 		time.Sleep(20 * time.Millisecond)
+	}
+	for _, event := range last.Events {
+		statuses := []string{}
+		for _, delivery := range event.Deliveries {
+			statuses = append(statuses, delivery.Status)
+		}
+		t.Logf("evidence output observation: event=%s sequence_type=%T deliveries=%v dead_letters=%d", event.EventName, event.Payload["sequence"], statuses, len(event.DeadLetters))
 	}
 	t.Fatal("authored evidence output did not settle at its observer")
 }
 
 type providerEvidenceObservation struct {
-	mu                    sync.Mutex
-	base                  http.RoundTripper
-	live                  bool
-	requests              int
-	input, output         int64
-	empty, tools, toolAck bool
-	reasoning             bool
-	reasoningAck          bool
-	readCalls             map[string][32]byte
-	cost                  map[string]float64
-	refusal               string
-	inconclusive          bool
+	mu                        sync.Mutex
+	base                      http.RoundTripper
+	live                      bool
+	requests                  int
+	toolMessages, orphanTools int
+	input, output             int64
+	empty, tools, toolAck     bool
+	emptyAck                  bool
+	reasoning                 bool
+	readReasoning             bool
+	reasoningAck              bool
+	readCalls                 map[string][32]byte
+	cost                      map[string]float64
+	refusal                   string
+	inconclusive              bool
 }
 
 func (o *providerEvidenceObservation) RoundTrip(request *http.Request) (*http.Response, error) {
@@ -306,9 +363,10 @@ func (o *providerEvidenceObservation) RoundTrip(request *http.Request) (*http.Re
 func (o *providerEvidenceObservation) observeRequest(body io.Reader) {
 	var request struct {
 		Messages []struct {
-			Role      string `json:"role"`
-			CallID    string `json:"tool_call_id"`
-			Reasoning string `json:"reasoning_content"`
+			Role      string  `json:"role"`
+			CallID    string  `json:"tool_call_id"`
+			Reasoning string  `json:"reasoning_content"`
+			Content   *string `json:"content"`
 			Calls     []struct {
 				ID string `json:"id"`
 			} `json:"tool_calls"`
@@ -323,15 +381,22 @@ func (o *providerEvidenceObservation) observeRequest(body io.Reader) {
 	reasoning := map[string][32]byte{}
 	for _, message := range request.Messages {
 		if message.Role == "assistant" {
+			o.emptyAck = o.emptyAck || (o.empty && message.Content != nil && *message.Content == "")
 			linked = map[string]bool{}
 			for _, call := range message.Calls {
 				linked[call.ID] = true
 				reasoning[call.ID] = sha256.Sum256([]byte(message.Reasoning))
 			}
 		}
-		if expected, found := o.readCalls[message.CallID]; found && message.Role == "tool" && linked[message.CallID] {
-			o.toolAck = true
-			o.reasoningAck = o.reasoningAck || (o.reasoning && expected == reasoning[message.CallID])
+		if message.Role == "tool" {
+			o.toolMessages++
+			if !linked[message.CallID] {
+				o.orphanTools++
+			}
+			if expected, found := o.readCalls[message.CallID]; found && linked[message.CallID] {
+				o.toolAck = true
+				o.reasoningAck = o.reasoningAck || (o.readReasoning && expected == reasoning[message.CallID])
+			}
 		}
 	}
 }
@@ -361,7 +426,7 @@ func (o *providerEvidenceObservation) observe(status int, body []byte) {
 	o.output += output
 	for _, field := range []string{"cost", "total_cost", "cost_usd"} {
 		var cost float64
-		if json.Unmarshal(parsed.Usage[field], &cost) == nil && cost >= 0 {
+		if raw := parsed.Usage[field]; len(raw) != 0 && string(raw) != "null" && json.Unmarshal(raw, &cost) == nil && cost >= 0 {
 			if o.cost == nil {
 				o.cost = map[string]float64{}
 			}
@@ -370,8 +435,6 @@ func (o *providerEvidenceObservation) observe(status int, body []byte) {
 	}
 	for _, choice := range parsed.Choices {
 		o.empty = o.empty || string(choice.Message["content"]) == `""`
-		o.tools = o.tools || len(choice.Message["tool_calls"]) > 2
-		o.reasoning = o.reasoning || len(choice.Message["reasoning_content"]) > 2
 		var calls []struct {
 			ID       string `json:"id"`
 			Function struct {
@@ -381,8 +444,11 @@ func (o *providerEvidenceObservation) observe(status int, body []byte) {
 		var reasoning string
 		_ = json.Unmarshal(choice.Message["reasoning_content"], &reasoning)
 		_ = json.Unmarshal(choice.Message["tool_calls"], &calls)
+		o.reasoning = o.reasoning || reasoning != ""
 		for _, call := range calls {
+			o.tools = o.tools || (call.ID != "" && call.Function.Name != "")
 			if call.Function.Name == "read_flow_data" {
+				o.readReasoning = o.readReasoning || reasoning != ""
 				if o.readCalls == nil {
 					o.readCalls = map[string][32]byte{}
 				}
@@ -396,13 +462,13 @@ func (o *providerEvidenceObservation) requireShape(t *testing.T, cell string) {
 	t.Helper()
 	o.mu.Lock()
 	defer o.mu.Unlock()
-	if cell == "empty_content" && !o.empty {
+	if cell == "empty_content" && !o.emptyAck {
 		t.Log("boundary=empty_content outcome=NOT_EXERCISED")
 	}
-	if cell == "tool_round" && !o.reasoning {
+	if cell == "tool_round" && !o.readReasoning {
 		t.Log("boundary=reasoning_content outcome=NOT_EXERCISED")
 	}
-	if cell == "tool_round" && (!o.toolAck || (o.reasoning && !o.reasoningAck)) {
+	if cell == "tool_round" && (!o.toolAck || (o.readReasoning && !o.reasoningAck)) {
 		t.Fatal("read-only tool continuation lost its exact call identity or observed reasoning")
 	}
 	if !o.tools {
@@ -422,5 +488,5 @@ func (o *providerEvidenceObservation) summary() string {
 		encoded, _ := json.Marshal(o.cost)
 		cost = string(encoded)
 	}
-	return fmt.Sprintf("provider_evidence live=%t requests=%d input_tokens=%d output_tokens=%d provider_usage_cost=%s", o.live, o.requests, o.input, o.output, cost)
+	return fmt.Sprintf("provider_evidence live=%t requests=%d input_tokens=%d output_tokens=%d provider_usage_cost=%s tool_messages=%d orphan_tool_messages=%d", o.live, o.requests, o.input, o.output, cost, o.toolMessages, o.orphanTools)
 }

@@ -168,8 +168,12 @@ key or deprecated API-key environment variable. Missing selection, a mismatched
 or dirty checkout, CI, and missing credentials produce an explicit clean skip,
 without a provider call or mock fallback. The model is `deepseek-flash`.
 
-The same synthetic served agent journeys run against the provider double in
-`TestProviderOpenAICompatibleEvidenceJourneys`. Live evidence uses the real adapter
+To explicitly select the strict provider double, also set
+`SWARM_REAL_MODEL_EVIDENCE_TRANSPORT=mock` on that same command. It uses the same
+journey body and does not read the live credential. This is an explicit transport
+selection, never a missing-key fallback. Both modes of this new diagnostic suite
+remain advisory; the existing deterministic test roots stay required and unchanged.
+Live evidence uses the real adapter
 and authenticated business input/readback; it makes no real channel sends. Each
 cell runs serially on both stores, with at most six HTTP completion requests
 including continuations and a three-minute completion wait per input. These are
