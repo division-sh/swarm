@@ -83,13 +83,10 @@ metadata: metadata
 		t.Fatalf("read_review_subject should not accept selector/entity_id input, got schema %#v", readSchema)
 	}
 
-	metadataSchema := defByName["read_state_metadata"]
-	if metadataSchema == nil {
-		t.Fatalf("expected read_review_subject_metadata definition, got %v", toolDefinitionNames(defs))
-	}
-	metadataProps, _ := metadataSchema["properties"].(map[string]any)
-	if len(metadataProps) != 0 {
-		t.Fatalf("read_review_subject_metadata should not accept selector/entity_id input, got schema %#v", metadataSchema)
+	for name := range defByName {
+		if strings.HasPrefix(name, "read_state_") {
+			t.Fatalf("per-field read remained visible: %s", name)
+		}
 	}
 }
 
