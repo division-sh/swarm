@@ -411,35 +411,8 @@ func recoverSelectedForkTx(ctx context.Context, tx *sql.Tx, owner selectedRecove
 		}
 		canceled = append(canceled, committed)
 	}
-	disposition, eligible, err := selectedRecoveryContinuationDisposition(snapshot.State, record)
-	if err != nil {
-		return result, err
-	}
-	if eligible && !pending && len(req.Cancellations) == 0 {
-		ready, err := owner.CanResumeSelectedProviderEffectsTx(ctx, attempt, result.ExecutionID, req.Effects)
-		if err != nil {
-			return result, err
-		}
-		if ready {
-			result.Disposition = disposition
-			if err := retireSelectedRecoveryPredecessorTx(ctx, tx, result, state, req.Effects.Now()); err != nil {
-				return result, err
-			}
-			effects, err := owner.RecoverSelectedForkEffectsTx(ctx, attempt, result.ExecutionID, req.Effects)
-			if err != nil {
-				return result, err
-			}
-			plan, err := planSelectedRecoveryTx(ctx, tx, snapshot, record, sqlite, true)
-			if err != nil {
-				return result, err
-			}
-			if plan.Disposition != disposition {
-				return result, fmt.Errorf("selected provider retry settlement did not establish its exact continuation")
-			}
-			result = plan.SelectedForkRecoveryResult
-			result.Effects = effects
-			return result, nil
-		}
+	if resumed, ready, err := resumeSelectedProviderForkTx(ctx, tx, owner, attempt, snapshot, req, sqlite, record, pending); err != nil || ready {
+		return resumed, err
 	}
 	plan, err := planSelectedRecoveryTx(ctx, tx, snapshot, record, sqlite, true)
 	if err != nil {
@@ -461,6 +434,36 @@ func recoverSelectedForkTx(ctx context.Context, tx *sql.Tx, owner selectedRecove
 		return result, err
 	}
 	return recoverFailedSelectedForkTx(ctx, tx, owner, attempt, snapshot, req, sqlite, record, plan, result, changes)
+}
+
+func resumeSelectedProviderForkTx(ctx context.Context, tx *sql.Tx, owner selectedRecoveryTxOwner, attempt *mutationprotocol.Attempt, snapshot runlifecycle.Snapshot, req runcontrol.SelectedForkRecoveryRequest, sqlite bool, record selectedRecoveryRecord, pending bool) (runfork.SelectedForkRecoveryResult, bool, error) {
+	result := record.SelectedForkRecoveryResult
+	disposition, eligible, err := selectedRecoveryContinuationDisposition(snapshot.State, record)
+	if err != nil || !eligible || pending || len(req.Cancellations) != 0 {
+		return result, false, err
+	}
+	ready, err := owner.CanResumeSelectedProviderEffectsTx(ctx, attempt, result.ExecutionID, req.Effects)
+	if err != nil || !ready {
+		return result, false, err
+	}
+	result.Disposition = disposition
+	if err := retireSelectedRecoveryPredecessorTx(ctx, tx, result, record.state, req.Effects.Now()); err != nil {
+		return result, false, err
+	}
+	effects, err := owner.RecoverSelectedForkEffectsTx(ctx, attempt, result.ExecutionID, req.Effects)
+	if err != nil {
+		return result, false, err
+	}
+	plan, err := planSelectedRecoveryTx(ctx, tx, snapshot, record, sqlite, true)
+	if err != nil {
+		return result, false, err
+	}
+	if plan.Disposition != disposition {
+		return result, false, fmt.Errorf("selected provider retry settlement did not establish its exact continuation")
+	}
+	result = plan.SelectedForkRecoveryResult
+	result.Effects = effects
+	return result, true, nil
 }
 
 func recoverFailedSelectedForkTx(ctx context.Context, tx *sql.Tx, owner selectedRecoveryTxOwner, attempt *mutationprotocol.Attempt, snapshot runlifecycle.Snapshot, req runcontrol.SelectedForkRecoveryRequest, sqlite bool, record, plan selectedRecoveryRecord, result runfork.SelectedForkRecoveryResult, changes *privaterunlifecycle.ChannelCardChanges) (runfork.SelectedForkRecoveryResult, error) {
