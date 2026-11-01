@@ -576,7 +576,7 @@ func routeMaterializationNodeSource(t *testing.T, flowID, nodeBody string) seman
 		"schema.yaml":             "stages: []\n",
 		flowID + "/manifest.yaml": "version: 1.0.0\nplatform_version: '*'\n",
 		flowID + "/schema.yaml":   "stages: []\ninstance: instance_key\n",
-		flowID + "/entities.yaml": "work:\n  instance_key: {type: text, _unused_reason: fixture instance identity}\n",
+		flowID + "/state.yaml":    "instance_key: text\n",
 		flowID + "/events.yaml":   "task.started:\n",
 		flowID + "/nodes.yaml":    "materialized-node:\n  execution_type: system_node\n" + nodeBody,
 	}))
@@ -593,7 +593,7 @@ func routeMaterializationConfigVarBundle(t *testing.T, publicName, subscription 
 		"schema.yaml":             "stages: []\n",
 		"operating/manifest.yaml": "version: 1.0.0\nplatform_version: '*'\n",
 		"operating/schema.yaml":   "stages: []\ninstance: instance_key\npins:\n  inputs: [opco.product_initialization_requested]\n",
-		"operating/entities.yaml": "work:\n  instance_key: {type: text, _unused_reason: fixture instance identity}\n",
+		"operating/state.yaml":    "instance_key: text\n",
 		"operating/events.yaml":   "opco.product_initialization_requested:\n",
 		"operating/agents.yaml":   agent,
 	})
@@ -840,7 +840,7 @@ func TestDeriveRouteTable_NestedTemplateInstancesBindSemanticScopeKey(t *testing
 		"child/schema.yaml":              "stages: []\n",
 		"child/grandchild/manifest.yaml": "version: 1.0.0\nplatform_version: '*'\n",
 		"child/grandchild/schema.yaml":   "stages: []\ninstance: instance_key\n",
-		"child/grandchild/entities.yaml": "work:\n  instance_key: {type: text, _unused_reason: fixture instance identity}\n",
+		"child/grandchild/state.yaml":    "instance_key: text\n",
 		"child/grandchild/events.yaml":   "micro.started:\n",
 		"child/grandchild/nodes.yaml":    "worker:\n  execution_type: system_node\n  subscribes_to: [micro.started]\n  produces: [micro.started]\n",
 	})

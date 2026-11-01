@@ -332,7 +332,7 @@ func writeReleaseObserverOverflowFixture(t *testing.T, repo, root string, eventC
 	flowRoot := filepath.Join(root, "contracts", "worker")
 	writeReleaseFile(t, filepath.Join(flowRoot, "manifest.yaml"), "version: 1.0.0\nplatform_version: '*'\n")
 	writeReleaseFile(t, filepath.Join(flowRoot, "state.yaml"), "requests: [text]\n")
-	writeReleaseFile(t, filepath.Join(flowRoot, "events.yaml"), "agent.requested:\n  request: {type: \"[text]?\"}\nagent.completed:\n  flow_result: text?\ncompletion.item:\n  request: text?\n")
+	writeReleaseFile(t, filepath.Join(flowRoot, "events.yaml"), "agent.requested:\n  request: {type: \"[text]?\"}\nagent.completed:\n  flow_result: text?\ncompletion.item:\n  request: text\n")
 	writeReleaseFile(t, filepath.Join(flowRoot, "schema.yaml"), "stages:\n  pending: {}\n  active: {}\n  done:\n    final: true\npins:\n  inputs:\n    - task.assigned\n")
 	writeReleaseFile(t, filepath.Join(flowRoot, "nodes.yaml"), fmt.Sprintf(`intake:
   execution_type: system_node

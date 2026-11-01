@@ -181,7 +181,7 @@ func issue2564PreparedHandoff(t *testing.T) (*EventBus, PreparedPublish, *issue2
 		"nodes.yaml":            "handoff-node:\n  execution_type: system_node\n  subscribes_to: [custom.receiver_projection]\n  event_handlers:\n    custom.receiver_projection: {}\n",
 		"workers/manifest.yaml": "version: 1.0.0\nplatform_version: '*'\n",
 		"workers/schema.yaml":   "instance: item_id\nstages: []\n",
-		"workers/entities.yaml": "worker_state:\n  item_id: {type: text}\n",
+		"workers/state.yaml":    "item_id: text\n",
 	}))
 	owner := &issue2564HandoffPipelineOwner{terminalReleasePipelineOwner: newTerminalReleasePipelineOwner(), settled: make(chan struct{})}
 	bus, err := newScopedTestEventBus(InMemoryEventStore{}, EventBusOptions{PipelineObligations: owner, ContractBundle: source})

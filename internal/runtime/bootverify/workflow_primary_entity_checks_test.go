@@ -28,6 +28,7 @@ name: text
 
 func TestRun_AllowsFieldlessStagedStaticFlow(t *testing.T) {
 	root := t.TempDir()
+	writeBootverifyFixtureFile(t, filepath.Join(root, "manifest.yaml"), "version: 1.0.0\nplatform_version: '*'\n")
 	writeBootverifyFixtureFile(t, filepath.Join(root, "schema.yaml"), `stages:
   pending: {}
   done: {final: true}

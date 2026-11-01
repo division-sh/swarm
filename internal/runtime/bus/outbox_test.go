@@ -1231,7 +1231,7 @@ func TestEngineOutboxSubscribedIntentConsumesCanonicalMaterializedRoutePlan(t *t
 		"schema.yaml":          "stages: []\n",
 		"review/manifest.yaml": "version: 1.0.0\nplatform_version: '*'\n",
 		"review/schema.yaml":   "stages: []\ninstance: instance_key\n",
-		"review/entities.yaml": "work:\n  instance_key: {type: text, _unused_reason: fixture instance identity}\n",
+		"review/state.yaml":    "instance_key: text\n",
 		"review/events.yaml":   "task.started:\n",
 		"review/nodes.yaml":    "target-node:\n  execution_type: system_node\n  event_handlers:\n    task.started: {}\n",
 	})

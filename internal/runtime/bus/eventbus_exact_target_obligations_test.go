@@ -23,7 +23,7 @@ func TestEventBusExactTargetObligationMatrix(t *testing.T) {
 		"events.yaml":          "test.work:\n",
 		"review/manifest.yaml": "version: 1.0.0\nplatform_version: '*'\n",
 		"review/schema.yaml":   "instance: item_id\nstages: []\n",
-		"review/entities.yaml": "review_state:\n  item_id: {type: text}\n",
+		"review/state.yaml":    "item_id: text\n",
 		"review/events.yaml":   "test.work:\n",
 	}))
 	dispatchModes := []string{"direct", "subscribed_outbox", "committed_replay"}

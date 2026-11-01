@@ -422,7 +422,7 @@ func targetOwnerArcFixture(
 		}
 		if test.sourceKind == targetOwnerArcTemplate {
 			files[test.sourcePath+"/schema.yaml"] += "instance: instance_key\n"
-			files[test.sourcePath+"/entities.yaml"] = "work:\n  instance_key: {type: text, _unused_reason: fixture instance identity}\n"
+			files[test.sourcePath+"/state.yaml"] = "instance_key: text\n"
 		}
 		owner := connectRoutePlanFixtureLCA(test.sourcePath, test.receiverPath)
 		ownerSchema := "schema.yaml"

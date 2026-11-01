@@ -56,10 +56,10 @@ func (b *WorkflowContractBundle) ResolveFlowOperatorAccount(flowID string) (Flow
 		}
 	} else {
 		if inPolicy && inState {
-			return absent, fmt.Errorf("flow %s operator_account occurs in both policy.yaml and entities.yaml; keep exactly one", flowID)
+			return absent, fmt.Errorf("flow %s operator_account occurs in both policy.yaml and state.yaml; keep exactly one", flowID)
 		}
 		if !inPolicy && !inState {
-			return absent, fmt.Errorf("flow %s requires operator_account: use instance: operator_account for a keyed flow, policy.yaml for one number, or a declared entities.yaml field for a dynamic keyless flow", flowID)
+			return absent, fmt.Errorf("flow %s requires operator_account: use instance: operator_account for a keyed flow, policy.yaml for one number, or a declared state.yaml field for a dynamic keyless flow", flowID)
 		}
 		if inPolicy {
 			value, text := policy.Value.(string)
@@ -81,7 +81,7 @@ func (b *WorkflowContractBundle) ResolveFlowOperatorAccount(flowID string) (Flow
 		}
 		resolved, err := (CatalogTypeReference{Type: field.Type, Catalog: primary.Types}).Resolve()
 		if !inState || err != nil || resolved.Kind != CatalogTypeText || field.IsOptional {
-			return absent, fmt.Errorf("flow %s entities.yaml operator_account must be a required text field", flowID)
+			return absent, fmt.Errorf("flow %s state.yaml operator_account must be a required text field", flowID)
 		}
 	}
 	return selection, nil
