@@ -46,17 +46,17 @@ func TestPublicPublicationCompletionBoundaryBothStores(t *testing.T) {
 			case <-time.After(10 * time.Second):
 				select {
 				case response := <-done:
-					t.Logf("publication response before readiness cut: error=%v rpc=%s result=%s", response.err, response.rpcError, response.result)
+					t.Logf("publication response before claim settlement cut: error=%v rpc=%s result=%s", response.err, response.rpcError, response.result)
 				default:
-					t.Log("publication response still pending at readiness timeout")
+					t.Log("publication response still pending at claim settlement timeout")
 				}
-				t.Fatal("owned readiness cut not reached")
+				t.Fatal("exact post-ACK claim settlement cut not reached")
 			}
 			probe.mu.Lock()
 			request, native, committed := probe.request, probe.native, probe.committed
 			probe.mu.Unlock()
 			if !committed.Acknowledged {
-				t.Fatal("readiness cut lacks exact native COMMIT acknowledgment")
+				t.Fatal("claim settlement cut lacks exact native COMMIT acknowledgment")
 			}
 			if count := probe.process.PublicCompletionCount(); count != 1 {
 				t.Fatalf("held consequence released its reservation: %d", count)
@@ -67,12 +67,12 @@ func TestPublicPublicationCompletionBoundaryBothStores(t *testing.T) {
 			}
 			result := <-done
 			if result.err != nil || result.rpcError != nil || !bytes.Equal(result.result, stored.Response) {
-				t.Fatalf("recorded completion did not return while readiness was held: %+v stored=%s", result, stored.Response)
+				t.Fatalf("recorded completion did not return while its claim was held: %+v stored=%s", result, stored.Response)
 			}
 			cancel()
 			replay := publicationAuditHTTP(t.Context(), endpoint, publicationAuditParams(hash, "audit1930-held"))
 			if replay.err != nil || replay.rpcError != nil || len(replay.result) == 0 {
-				t.Fatalf("same-key replay while readiness held: %+v", replay)
+				t.Fatalf("same-key replay while its claim was held: %+v", replay)
 			}
 			probe.mu.Lock()
 			calls := probe.commits
@@ -360,35 +360,34 @@ connect:
 }
 
 type publicationCompletionAudit struct {
-	mu                  sync.Mutex
-	native              runtimebus.APIEventPublicationCommitOwner
-	workflow            pipeline.WorkflowPersistenceOwner
-	obligations         pipelineobligation.Store
-	plan                pipeline.DynamicFlowRuntimeReadinessPlan
-	process             *worklifetime.Process
-	request             apiidempotency.Request
-	committed           runtimebus.CommittedAPIEventPublication
-	deployment          *runtimebus.CommittedDeploymentRunCreation
-	deployments         int
-	heldRuns            map[string]pipeline.DynamicFlowRuntimeReadinessPlan
-	commits             int
-	run                 string
-	eventID             string
-	hold                bool
-	resultFault         string
-	holdRelease         bool
-	entered             chan struct{}
-	release             chan struct{}
-	claimDisposed       chan struct{}
-	claimDisposeOnce    sync.Once
-	claimDisposeCount   int
-	claimReleaseCount   int
-	claimDisposeError   error
-	enterOnce           sync.Once
-	releaseOnce         sync.Once
-	beforeCommit        func(context.Context)
-	afterCommit         func(context.Context, bool)
-	holdBeforeReadiness bool
+	mu                sync.Mutex
+	native            runtimebus.APIEventPublicationCommitOwner
+	workflow          pipeline.WorkflowPersistenceOwner
+	obligations       pipelineobligation.Store
+	receiver          flowidentity.RunScopedFlowInstance
+	receiverEntityID  string
+	process           *worklifetime.Process
+	request           apiidempotency.Request
+	committed         runtimebus.CommittedAPIEventPublication
+	deployment        *runtimebus.CommittedDeploymentRunCreation
+	deployments       int
+	commits           int
+	run               string
+	eventID           string
+	hold              bool
+	resultFault       string
+	holdRelease       bool
+	entered           chan struct{}
+	release           chan struct{}
+	claimDisposed     chan struct{}
+	claimDisposeOnce  sync.Once
+	claimDisposeCount int
+	claimReleaseCount int
+	claimDisposeError error
+	enterOnce         sync.Once
+	releaseOnce       sync.Once
+	beforeCommit      func(context.Context)
+	afterCommit       func(context.Context, bool)
 }
 
 func installPublicationCompletionAudit(t *testing.T, hold bool) *publicationCompletionAudit {
@@ -402,7 +401,6 @@ func installPublicationCompletionAudit(t *testing.T, hold bool) *publicationComp
 		}
 		p.native = native
 		projected.deps.EventStore = &publicationAuditPublication{publicationAuditStore: native, probe: p}
-		projected.deps.WorkflowPersistence = pipeline.NewWorkflowPersistence(&publicationAuditReadiness{WorkflowPersistenceOwner: native, probe: p})
 		preflight, ok := projected.deps.PipelineObligations.(pipelineobligation.ResumeAdmissionPreflighter)
 		if !ok {
 			panic("audit requires the native pending-work preflight owner")
@@ -430,6 +428,15 @@ func (p *publicationCompletionAudit) commit(ctx context.Context, native runtimeb
 	p.process, _ = worklifetime.ProcessFromContext(ctx)
 	p.run = command.Publication.Commit.Event.Event().RunID()
 	p.eventID = command.Publication.Commit.Event.Event().ID()
+	// Shutdown observes its root; the single-receiver fixture observes that child.
+	for _, route := range command.Publication.Commit.DeliveryRoutes {
+		target := route.Target.Route()
+		if len(command.Publication.Commit.DeliveryRoutes) == 1 || target.FlowInstance == p.run {
+			p.receiver = flowidentity.RunScopedFlowInstance{RunID: p.run, Route: flowidentity.StoredRoute(target.FlowID, "", target.FlowInstance)}
+			p.receiverEntityID = target.EntityID
+			break
+		}
+	}
 	fault := p.resultFault
 	p.mu.Unlock()
 	if p.afterCommit != nil {
@@ -480,76 +487,34 @@ func (p *publicationCompletionAudit) observeDeployment(ctx context.Context, comm
 	p.request = command.Idempotency
 	p.process, _ = worklifetime.ProcessFromContext(ctx)
 	p.run = command.RunCreation.RunID
-	if p.heldRuns != nil && result.Acknowledged && !result.Replay {
-		p.heldRuns[p.run] = pipeline.DynamicFlowRuntimeReadinessPlan{}
-	}
 }
 
-type publicationAuditReadiness struct {
-	pipeline.WorkflowPersistenceOwner
-	probe *publicationCompletionAudit
-}
-
-func (s *publicationAuditReadiness) LoadDynamicFlowRuntimeReadiness(ctx context.Context, runID string, route flowidentity.Route) (pipeline.DynamicFlowRuntimeReadiness, bool, error) {
-	s.probe.mu.Lock()
-	acknowledged := s.probe.committed.Acknowledged || s.probe.deployment != nil && s.probe.deployment.Acknowledged
-	hold := s.probe.holdBeforeReadiness && acknowledged && runID == s.probe.run
-	s.probe.mu.Unlock()
-	if hold {
-		s.probe.enterOnce.Do(func() { close(s.probe.entered) })
-		select {
-		case <-s.probe.release:
-		case <-ctx.Done():
-		}
+func requirePublicationCompletionReadiness(t *testing.T, p *publicationCompletionAudit) pipeline.DynamicFlowRuntimeReadiness {
+	t.Helper()
+	p.mu.Lock()
+	workflow, receiver, entityID := p.workflow, p.receiver, p.receiverEntityID
+	p.mu.Unlock()
+	if err := receiver.Validate(); err != nil {
+		t.Fatalf("publication has no exact committed receiver: %v", err)
 	}
-	return s.WorkflowPersistenceOwner.LoadDynamicFlowRuntimeReadiness(ctx, runID, route)
-}
-
-func (s *publicationAuditReadiness) BeginDynamicFlowRuntimeActivation(ctx context.Context, request pipeline.DynamicFlowRuntimeActivationRequest) (pipeline.DynamicFlowRuntimeActivationAdmissionResult, error) {
-	s.probe.mu.Lock()
-	acknowledged := s.probe.committed.Acknowledged || s.probe.deployment != nil && s.probe.deployment.Acknowledged
-	hold := s.probe.hold && acknowledged && request.Plan().RunID == s.probe.run
-	if s.probe.heldRuns != nil {
-		_, admitted := s.probe.heldRuns[request.Plan().RunID]
-		hold = s.probe.hold && admitted
-		if admitted {
-			s.probe.heldRuns[request.Plan().RunID] = request.Plan()
-		}
+	readiness, found, err := workflow.LoadDynamicFlowRuntimeReadiness(t.Context(), receiver.RunID, receiver.Route)
+	if err != nil || !found || readiness.Plan.RunID != receiver.RunID || readiness.Plan.Identity.Route() != receiver.Route || readiness.Plan.Identity.EntityID != entityID {
+		t.Fatalf("exact committed receiver readiness: receiver=%+v entity=%s found=%t readiness=%+v err=%v", receiver, entityID, found, readiness, err)
 	}
-	if acknowledged && request.Plan().RunID == s.probe.run && s.probe.plan.RunID == "" {
-		s.probe.plan = request.Plan()
-	}
-	s.probe.mu.Unlock()
-	if hold {
-		s.probe.enterOnce.Do(func() { close(s.probe.entered) })
-		select {
-		case <-s.probe.release:
-		case <-ctx.Done():
-		}
-	}
-	return s.WorkflowPersistenceOwner.BeginDynamicFlowRuntimeActivation(ctx, request)
+	return readiness
 }
 
 func waitPublicationCompletionDisposition(t *testing.T, p *publicationCompletionAudit) {
 	t.Helper()
 	p.mu.Lock()
-	native, committed, workflow, process := p.native, p.committed, p.workflow, p.process
+	native, committed, process := p.native, p.committed, p.process
 	runID := p.run
 	p.mu.Unlock()
 	deadline := time.Now().Add(20 * time.Second)
 	for {
-		p.mu.Lock()
-		plan := p.plan
-		p.mu.Unlock()
 		evidence := storetest.ReadSemanticEventFixtureEvidence(t, t.Context(), native, runID, committed.Completion.ResourceID)
-		ready := false
-		if plan.RunID != "" {
-			readiness, found, err := workflow.LoadDynamicFlowRuntimeReadiness(t.Context(), runID, plan.Identity.Route())
-			if err != nil || !found {
-				t.Fatalf("exact readiness readback: found=%t err=%v", found, err)
-			}
-			ready = readiness.Phase == pipeline.FlowAttachmentReady
-		}
+		readiness := requirePublicationCompletionReadiness(t, p)
+		ready := readiness.Phase == pipeline.FlowAttachmentReady
 		if evidence.PipelineReceiptCount == 1 && evidence.PipelineReceiptOutcome == "success" && evidence.PipelineReceiptFailure == nil && ready && process != nil && process.PublicCompletionCount() == 0 {
 			if !evidence.RecordFound || evidence.CommittedScope == "" {
 				t.Fatal("settlement lost the exact committed publication")
@@ -557,7 +522,7 @@ func waitPublicationCompletionDisposition(t *testing.T, p *publicationCompletion
 			return
 		}
 		if time.Now().After(deadline) {
-			t.Fatalf("accepted publication did not settle after readiness release: %+v", evidence)
+			t.Fatalf("accepted publication did not settle after claim release: %+v", evidence)
 		}
 		time.Sleep(20 * time.Millisecond)
 	}
