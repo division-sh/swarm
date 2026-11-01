@@ -27,7 +27,6 @@ func pipelineRuntimeFailure(err error, component, operation string) *runtimefail
 
 type Bus interface {
 	Publish(ctx context.Context, evt events.Event) error
-	PublishDirect(ctx context.Context, evt events.Event, recipients []string) error
 	ResolveSubscribedRecipients(eventType string) []string
 	LogRuntime(ctx context.Context, entry RuntimeLogEntry) error
 	EngineDispatcher() runtimeengine.PostCommitDispatcher
@@ -217,26 +216,6 @@ func processWarn(component string, format string, args ...any) {
 		return
 	}
 	diaglog.ProcessLog("warn", component, msg)
-}
-
-func uniqueStrings(in []string) []string {
-	if len(in) <= 1 {
-		return in
-	}
-	set := make(map[string]struct{}, len(in))
-	out := make([]string, 0, len(in))
-	for _, v := range in {
-		v = strings.TrimSpace(v)
-		if v == "" {
-			continue
-		}
-		if _, ok := set[v]; ok {
-			continue
-		}
-		set[v] = struct{}{}
-		out = append(out, v)
-	}
-	return out
 }
 
 func asInt(v any) int {

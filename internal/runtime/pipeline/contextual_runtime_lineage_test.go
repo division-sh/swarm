@@ -16,16 +16,10 @@ import (
 type contextualLineagePipelineBus struct {
 	noopPipelineBus
 	published []events.Event
-	direct    []events.Event
 }
 
 func (b *contextualLineagePipelineBus) Publish(_ context.Context, event events.Event) error {
 	b.published = append(b.published, event)
-	return nil
-}
-
-func (b *contextualLineagePipelineBus) PublishDirect(_ context.Context, event events.Event, _ []string) error {
-	b.direct = append(b.direct, event)
 	return nil
 }
 
@@ -43,9 +37,6 @@ func TestPipelineRuntimeDiagnosticsPreserveExactContextualLineage(t *testing.T) 
 	if err := coordinator.publish(ctx, "platform.dead_letter", "", map[string]any{}); err != nil {
 		t.Fatalf("publish contextual diagnostic: %v", err)
 	}
-	if err := coordinator.publishDirect(ctx, "platform.dead_letter", "", map[string]any{}, []string{"agent-a"}); err != nil {
-		t.Fatalf("publish direct contextual diagnostic: %v", err)
-	}
 	collector := []events.Event{}
 	emissions := &pipelineEmissionPlan{}
 	coordinator.recordInterceptedEmitDeadLetters(ctx, parent, "node-a", &handlerExecutionOutcome{InterceptedEmits: []runtimeengine.EmitIntent{{
@@ -59,7 +50,6 @@ func TestPipelineRuntimeDiagnosticsPreserveExactContextualLineage(t *testing.T) 
 		event events.Event
 	}{
 		{name: "normal", event: bus.published[0]},
-		{name: "direct", event: bus.direct[0]},
 		{name: "intercepted", event: collector[0]},
 	}
 	for _, manifestation := range manifestations {
