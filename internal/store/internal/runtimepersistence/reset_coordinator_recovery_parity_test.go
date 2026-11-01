@@ -15,8 +15,9 @@ import (
 
 func (*resetReceiptLifecycle) SettleResources(context.Context) error { return nil }
 
-func (*resetReceiptLifecycle) ResetSourceProjections(context.Context) ([]destructivereset.SourceProjection, error) {
-	return nil, nil
+func (*resetReceiptLifecycle) AdmitResetOperation(ctx context.Context, req destructivereset.Request, operations destructivereset.OperationStore) (destructivereset.Operation, destructivereset.RuntimeReset, error) {
+	operation, err := operations.AdmitResetOperation(ctx, req)
+	return operation, nil, err
 }
 
 func TestResetCoordinatorContinuesDurableReceiptsBothStores(t *testing.T) {
