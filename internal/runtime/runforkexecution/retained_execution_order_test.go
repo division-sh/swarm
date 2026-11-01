@@ -465,7 +465,7 @@ func proveRetainedAcknowledgment(t *testing.T, fault string) {
 				if err != nil {
 					t.Fatal(err)
 				}
-				for _, table := range []string{"entity_state", "entity_mutations", "event_delivery_attempts"} {
+				for _, table := range []string{"entity_state", "event_delivery_attempts", "event_delivery_handler_rule_selections"} {
 					if !reflect.DeepEqual(childBefore[table], childAfter[table]) {
 						t.Fatalf("failed continuation startup changed %s: before=%+v after=%+v", table, childBefore[table], childAfter[table])
 					}
