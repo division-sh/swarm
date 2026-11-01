@@ -181,6 +181,46 @@ func TestProviderRealModelEvidenceSelection(t *testing.T) {
 			t.Fatal("observation changed response close")
 		}
 	})
+	t.Run("empty_content_replay", func(t *testing.T) {
+		const empty = `{"choices":[{"message":{"content":"","tool_calls":[{"id":"empty-1","function":{"name":"emit_evidence_completed"}}]}}]}`
+		const preserved = `{"messages":[{"role":"assistant","content":"","tool_calls":[{"id":"empty-1"}]}]}`
+		for _, test := range []struct {
+			name, response, replay, want string
+		}{
+			{"absent", strings.Replace(empty, `"content":""`, `"content":"synthetic"`, 1), `{"messages":[{"role":"assistant","content":"synthetic","tool_calls":[{"id":"empty-1"}]}]}`, "NOT_EXERCISED"},
+			{"preserved", empty, preserved, "EXERCISED"},
+			{"dropped_message", empty, `{"messages":[{"role":"user","content":"synthetic next turn"}]}`, "FAIL"},
+			{"dropped_content", empty, `{"messages":[{"role":"assistant","tool_calls":[{"id":"empty-1"}]}]}`, "FAIL"},
+			{"null_content", empty, `{"messages":[{"role":"assistant","content":null,"tool_calls":[{"id":"empty-1"}]}]}`, "FAIL"},
+			{"final_only", empty, "", "NOT_EXERCISED"},
+		} {
+			t.Run(test.name, func(t *testing.T) {
+				o := &providerEvidenceObservation{}
+				o.observe(200, []byte(test.response))
+				if test.replay != "" {
+					o.observeRequest(strings.NewReader(test.replay))
+				}
+				if got := o.emptyReplayOutcome(); got != test.want {
+					t.Fatalf("empty-content replay outcome=%s want=%s", got, test.want)
+				}
+			})
+		}
+		t.Run("older_empty_cannot_mask_loss", func(t *testing.T) {
+			o := &providerEvidenceObservation{}
+			o.observe(200, []byte(empty))
+			o.observeRequest(strings.NewReader(preserved))
+			o.observe(200, []byte(strings.Replace(empty, "empty-1", "empty-2", 1)))
+			o.observeRequest(strings.NewReader(preserved))
+			if got := o.emptyReplayOutcome(); got != "FAIL" {
+				t.Fatalf("later lost message was masked by earlier preservation: %s", got)
+			}
+			o.observe(200, []byte(empty))
+			o.observeRequest(strings.NewReader(`{"messages":[{"role":"assistant","content":"","tool_calls":[{"id":"empty-1"}]},{"role":"assistant","content":"","tool_calls":[{"id":"empty-1"}]}]}`))
+			if got := o.emptyReplayOutcome(); got != "FAIL" {
+				t.Fatalf("later preservation cleared earlier loss: %s", got)
+			}
+		})
+	})
 	t.Run("unobserved_tool_round_is_not_exercised", func(t *testing.T) {
 		o := &providerEvidenceObservation{tools: true}
 		o.requireShape(t, "tool_round")
