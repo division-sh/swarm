@@ -56,6 +56,23 @@ func TestSelectedDeploymentFeedAgreementUsesFixedSourceDeclarations(t *testing.T
 	if err := validateSelectedDeploymentFeedAgreement(runfork.RunForkPlan{}, nil, nil, forkRun, bundle); err != nil {
 		t.Fatalf("event-only fork acquired deployment work: %v", err)
 	}
+	t.Run("two_publications_one_declaration", func(t *testing.T) {
+		other := selectedDeploymentFeedRequest(forkRun, first, "f", 2)
+		other.Key.DeploymentFeedID = uuid.NewString()
+		bound := selectedDeploymentSourcesForTest(childFirst, other)
+		bound[0].PublicationID, bound[1].PublicationID = childFirst.Key.DeploymentFeedID, other.Key.DeploymentFeedID
+		sameDeclaration := plan
+		sameDeclaration.FanOutObligations = append([]runfork.RunForkFanOutObligation(nil), plan.FanOutObligations...)
+		sameDeclaration.FanOutObligations[1].Intent.Request = sourceFirst
+		sameDeclaration.FanOutObligations[1].Intent.Request.Key.DeploymentFeedID = uuid.NewString()
+		if err := validateSelectedDeploymentFeedAgreement(sameDeclaration, []fanoutobligation.IntentRequest{childFirst, other}, bound, forkRun, bundle); err != nil {
+			t.Fatalf("exact distinct publication identities collapsed: %v", err)
+		}
+		bound[1].PublicationID = bound[0].PublicationID
+		if err := validateSelectedDeploymentFeedAgreement(sameDeclaration, []fanoutobligation.IntentRequest{childFirst, other}, bound, forkRun, bundle); err == nil {
+			t.Fatal("foreign publication binding accepted as another feed")
+		}
+	})
 
 	for _, tc := range []struct {
 		name  string
@@ -139,7 +156,7 @@ type selectedDeploymentPinReaderForTest struct {
 	calls  int
 }
 
-func (r *selectedDeploymentPinReaderForTest) LoadPinnedSource(_ context.Context, runID, bundle string, ref durabledata.DeclarationRef) (durabledata.PinnedSource, error) {
+func (r *selectedDeploymentPinReaderForTest) LoadFeedSource(_ context.Context, runID, bundle, _ string, ref durabledata.DeclarationRef) (durabledata.PinnedSource, error) {
 	r.runID, r.bundle, r.ref = runID, bundle, ref
 	r.calls++
 	return r.source, r.err
@@ -172,7 +189,7 @@ func TestSelectedDeploymentPinnedSourcesKeepNativeChildAuthority(t *testing.T) {
 					LoadedSource: LoadedSelectedContractSource{SourceArtifactFact: testEphemeralSourceArtifactFact(feed.Deployment.BundleHash)}},
 				ports: &selectedContractExecutionPorts{deploymentFanOut: reader},
 			}
-			got, err := container.selectedDeploymentPinnedSources(context.Background())
+			got, err := container.selectedDeploymentPinnedSources(context.Background(), []fanoutobligation.Intent{{Request: feed, Source: feed.Source}})
 			if change == "exact" {
 				if err != nil || len(got) != 1 || got[0] != source {
 					t.Fatalf("exact canonical pin projection: sources=%+v err=%v", got, err)

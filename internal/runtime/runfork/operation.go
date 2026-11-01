@@ -21,6 +21,7 @@ type ForkOperationRequest struct {
 	TransportHash       string                                `json:"transport_hash"`
 	SourceRunID         string                                `json:"source_run_id"`
 	ForkEventID         string                                `json:"fork_event_id"`
+	PublicationID       string                                `json:"publication_id,omitempty"`
 	AtStart             bool                                  `json:"at_start,omitempty"`
 	ResolvedPoint       *RunForkPoint                         `json:"resolved_point,omitempty"`
 	TargetBundleHash    string                                `json:"target_bundle_hash"`
@@ -31,6 +32,12 @@ type ForkOperationRequest struct {
 }
 
 func (r ForkOperationRequest) Canonical() (ForkOperationRequest, string, error) {
+	if r.PublicationID != "" {
+		id, err := uuid.Parse(r.PublicationID)
+		if err != nil || id == uuid.Nil || id.String() != r.PublicationID || r.AtStart || r.ForkEventID != "" {
+			return ForkOperationRequest{}, "", fmt.Errorf("fork publication requires one canonical UUID and no other cut selector")
+		}
+	}
 	if r.AtStart && r.ForkEventID != "" {
 		return ForkOperationRequest{}, "", fmt.Errorf("fork operation start and event selectors are mutually exclusive")
 	}
@@ -53,8 +60,15 @@ func (r ForkOperationRequest) Canonical() (ForkOperationRequest, string, error) 
 		if r.AtStart != (r.ResolvedPoint.Kind == RunForkPointRunStart) {
 			return ForkOperationRequest{}, "", fmt.Errorf("fork operation resolved point disagrees with start selector")
 		}
-		if r.ResolvedPoint.Input != r.ForkEventID || (r.ForkEventID != "" && r.ResolvedPoint.EventID != r.ForkEventID) {
+		selector := r.ForkEventID
+		if r.PublicationID != "" && r.ResolvedPoint.Kind == RunForkPointEvent {
+			selector = r.PublicationID
+		}
+		if r.ResolvedPoint.Input != selector || (selector != "" && r.ResolvedPoint.EventID != selector) {
 			return ForkOperationRequest{}, "", fmt.Errorf("fork operation resolved point disagrees with original event selector")
+		}
+		if r.PublicationID != "" && r.ResolvedPoint.Kind != RunForkPointStateRevision && r.ResolvedPoint.Kind != RunForkPointEvent {
+			return ForkOperationRequest{}, "", fmt.Errorf("rows publication requires its committed state revision")
 		}
 	}
 	if strings.TrimSpace(r.Actor) == "" || strings.TrimSpace(r.TransportHash) == "" || strings.TrimSpace(r.TargetBundleHash) == "" {
@@ -87,13 +101,14 @@ func (r ForkOperationRequest) Canonical() (ForkOperationRequest, string, error) 
 	semantic := struct {
 		SourceRunID         string                                `json:"source_run_id"`
 		ForkEventID         string                                `json:"fork_event_id"`
+		PublicationID       string                                `json:"publication_id,omitempty"`
 		AtStart             bool                                  `json:"at_start,omitempty"`
 		TargetBundleHash    string                                `json:"target_bundle_hash"`
 		TargetRootReference sourceartifact.RootAdmissionReference `json:"target_root_reference"`
 		AllowSourceFreeze   bool                                  `json:"allow_source_freeze"`
 		ContractSelection   RunForkContractSelection              `json:"contract_selection"`
 		DataPinOverrides    []durabledata.ExplicitPin             `json:"data_pin_overrides"`
-	}{r.SourceRunID, r.ForkEventID, r.AtStart, r.TargetBundleHash, r.TargetRootReference, r.AllowSourceFreeze, r.ContractSelection, r.DataPinOverrides}
+	}{r.SourceRunID, r.ForkEventID, r.PublicationID, r.AtStart, r.TargetBundleHash, r.TargetRootReference, r.AllowSourceFreeze, r.ContractSelection, r.DataPinOverrides}
 	hash, err := canonicaljson.Hash(semantic)
 	if err != nil {
 		return ForkOperationRequest{}, "", err

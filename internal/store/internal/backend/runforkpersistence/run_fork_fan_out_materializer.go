@@ -71,7 +71,7 @@ func freshForkDeploymentCarriage(target runtimedata.PinnedSource) (forkDeploymen
 	return forkDeploymentCarriage{status: status}, nil
 }
 
-func requireForkResourceSourcePinAgreement(plan runfork.RunForkPlan, pins []runtimedata.Pin) error {
+func requireForkResourceSourcePinAgreement(ctx context.Context, tx *sql.Tx, data *storedurabledata.Owner, plan runfork.RunForkPlan, pins []runtimedata.Pin) error {
 	byDeclaration := make(map[runtimedata.DeclarationRef]runtimedata.VersionID, len(pins))
 	for _, pin := range pins {
 		if _, duplicate := byDeclaration[pin.Declaration]; duplicate {
@@ -88,7 +88,13 @@ func requireForkResourceSourcePinAgreement(plan runfork.RunForkPlan, pins []runt
 			return fmt.Errorf("fork resource source %s has no deployment origin", source.Declaration.Key())
 		}
 		if _, pinned := byDeclaration[source.Declaration]; !pinned {
-			return fmt.Errorf("fork deployment feed requires child pin for %s", source.Declaration.Key())
+			if data == nil || tx == nil {
+				return fmt.Errorf("fork deployment feed requires child pin for %s", source.Declaration.Key())
+			}
+			pinned, err := storedurabledata.RequireFeedSourceTx(ctx, data, tx, plan.SourceRunID, obligation.Intent.Request.Deployment.BundleHash, obligation.Intent.Request.Key.DeploymentFeedID, source.Declaration)
+			if err != nil || pinned.PublicationID == "" || pinned.VersionID != source.VersionID {
+				return fmt.Errorf("fork deployment feed lacks its exact publication pin: %w", err)
+			}
 		}
 	}
 	return nil
@@ -509,41 +515,18 @@ func materializeRunForkDeploymentFeeds(ctx context.Context, tx *sql.Tx, postgres
 	if len(pins) != 0 && (writer == nil || data == nil) {
 		return 0, fmt.Errorf("fork deployment feed requires selected pipeline and durable-data owners")
 	}
-	sourceByDeclaration := make(map[runtimedata.DeclarationRef]runfork.RunForkFanOutObligation)
-	for _, obligation := range plan.FanOutObligations {
-		if obligation.Intent.Request.Deployment == nil {
-			continue
-		}
-		ref := obligation.Intent.Source.Declaration
-		if _, duplicate := sourceByDeclaration[ref]; duplicate {
-			return 0, fmt.Errorf("fork source has duplicate deployment feed for %s", ref.Key())
-		}
-		sourceByDeclaration[ref] = obligation
+	projections, err := projectRunForkDeploymentFeeds(ctx, tx, data, forkRunID, targetBundleHash, plan, pins, false)
+	if err != nil {
+		return 0, err
 	}
-	for _, pin := range pins {
-		if pin.RunID != forkRunID {
-			return 0, fmt.Errorf("fork deployment pin belongs to another run")
-		}
-		target, err := storedurabledata.RequirePinnedSourceTx(ctx, data, tx, forkRunID, targetBundleHash, pin.Declaration)
-		if err != nil {
-			return 0, err
-		}
-		if target.VersionID != pin.VersionID || target.SchemaDigest != pin.SchemaDigest {
-			return 0, fmt.Errorf("fork deployment target contradicts exact child pin for %s", pin.Declaration.Key())
-		}
-		feed := runtimedata.DeploymentFeed{
-			RunID: forkRunID, BundleHash: targetBundleHash, Declaration: target.Declaration,
-			VersionID: target.VersionID, SchemaDigest: target.SchemaDigest, RowCount: uint64(target.RowCount),
-		}
+	for _, projection := range projections {
+		feed, target := projection.feed, projection.target
 		if err := writer.CreateDeploymentFeedTx(ctx, tx, feed); err != nil {
 			return 0, err
 		}
-		key, err := loadRunForkChildDeploymentFeedKeyTx(ctx, tx, forkRunID, target.Declaration)
-		if err != nil {
-			return 0, err
-		}
-		if source, present := sourceByDeclaration[target.Declaration]; present {
-			carriage, err := projectForkDeploymentCarriage(source, target)
+		key := fanoutobligation.IntentKey{RunID: forkRunID, DeploymentFeedID: feed.PublicationID()}
+		if projection.source != nil {
+			carriage, err := projectForkDeploymentCarriage(*projection.source, target)
 			if err != nil {
 				return 0, err
 			}
@@ -586,7 +569,7 @@ func materializeRunForkDeploymentFeeds(ctx context.Context, tx *sql.Tx, postgres
 			return 0, err
 		}
 	}
-	return len(pins), nil
+	return len(projections), nil
 }
 
 func carryRunForkDeploymentFeedPrefixTx(ctx context.Context, tx *sql.Tx, key fanoutobligation.IntentKey, carriage forkDeploymentCarriage) error {
@@ -607,10 +590,18 @@ func carryRunForkDeploymentFeedPrefixTx(ctx context.Context, tx *sql.Tx, key fan
 	return nil
 }
 
-func loadRunForkChildDeploymentFeedKeyTx(ctx context.Context, tx *sql.Tx, runID string, declaration runtimedata.DeclarationRef) (fanoutobligation.IntentKey, error) {
+func loadRunForkChildDeploymentFeedKeyTx(ctx context.Context, tx *sql.Tx, runID string, declaration runtimedata.DeclarationRef, sourceFeedID string) (fanoutobligation.IntentKey, error) {
+	feed := runtimedata.DeploymentFeed{RunID: runID, Declaration: declaration}
+	var publicationID string
+	err := tx.QueryRowContext(ctx, `SELECT publication_id FROM resource_feed_publication_members WHERE deployment_feed_id=$1`, sourceFeedID).Scan(&publicationID)
+	if err == nil {
+		feed.Publication = runtimedata.ForkRowsPublicationID(runID, publicationID)
+	} else if err != sql.ErrNoRows {
+		return fanoutobligation.IntentKey{}, err
+	}
 	rows, err := tx.QueryContext(ctx, `SELECT CAST(deployment_feed_id AS TEXT) FROM fan_out_intents
-		WHERE run_id=$1 AND origin_kind='deployment' AND source_resource_flow_path=$2 AND source_resource_event_name=$3`,
-		runID, declaration.FlowPath, declaration.EventName)
+		WHERE run_id=$1 AND origin_kind='deployment' AND source_resource_flow_path=$2 AND source_resource_event_name=$3 AND deployment_feed_id=$4`,
+		runID, declaration.FlowPath, declaration.EventName, feed.PublicationID())
 	if err != nil {
 		return fanoutobligation.IntentKey{}, err
 	}
