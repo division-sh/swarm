@@ -284,18 +284,12 @@ func loadProviderCallResumeTx(ctx context.Context, tx *sql.Tx, postgres bool, re
 	}
 	same, err := agentidentity.Equal(identity, frame.Session.AgentIdentity)
 	if err != nil || !same || journal.SourceHash != bundleHash || req.Memory != journal.Call.Memory ||
-		(req.Memory.Enabled && req.SessionID != journal.Call.SessionID) || req.Authority.Kind != attempt.Authority.Kind {
+		(req.Memory.Enabled && req.SessionID != journal.Call.SessionID) {
 		return result, fmt.Errorf("provider resume current source, actor or session contradicts its predecessor")
 	}
 	parent, err := providerResumeParentTx(ctx, tx, postgres, recovered, frame, now)
 	if err != nil {
 		return result, err
-	}
-	if parent != nil && req.Authority.Kind == runtimeeffects.AuthorityNormalAgent {
-		parent.Surface, err = parent.Surface.ProjectNormalContinuation(req.ExecutionAuthorityID, req.SessionID)
-		if err != nil {
-			return result, err
-		}
 	}
 	return providerCallRecoveryResult{recovery: runtimeeffects.ProviderCallRecovery{Journal: *journal, Frame: frame, Parent: parent}, found: true}, nil
 }
