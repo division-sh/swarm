@@ -34,6 +34,25 @@ import (
 
 type firstConnectCheckpointKey struct{}
 
+type firstConnectLoginRead struct {
+	channelonboarding.OperationStore
+	login *servedNativeLoginGate
+	once  sync.Once
+}
+
+func (s *firstConnectLoginRead) GetChannelOnboarding(ctx context.Context, id string) (channelonboarding.Operation, error) {
+	op, err := s.OperationStore.GetChannelOnboarding(ctx, id)
+	if err == nil {
+		select {
+		case <-s.login.held:
+			// The next native currentness read is after transport connect returns.
+			s.once.Do(func() { s.login.release <- true })
+		default:
+		}
+	}
+	return op, err
+}
+
 // This adapter only observes the existing invocation-owned session. It returns
 // the original native results, without supplying pairing or account authority.
 type firstConnectPairingObserver struct {
@@ -238,6 +257,77 @@ func TestChannelConnectWhatsAppRegistersAccountBothStores(t *testing.T) {
 				}
 				if !serving {
 					requireOfflinePairedWhatsAppServiceRoundTrip(t, opts, peer, op)
+					t.Run("phone_unlink_reverify", func(t *testing.T) {
+						peer.mu.Lock()
+						peer.rejectNextLogin = true
+						peer.mu.Unlock()
+						process := startServeRuntimeTestProcess(t, opts)
+						if code, exited := process.waitForExit(5 * time.Second); !exited || code != 1 || serveOutputIsReady(process.outputString()) {
+							t.Fatalf("revoked account did not refuse startup: exit=%d exited=%t\n%s", code, exited, process.outputString())
+						}
+						select {
+						case <-qr:
+						default:
+						}
+						ctx, cancel := context.WithTimeout(t.Context(), 20*time.Second)
+						login := &servedNativeLoginGate{held: make(chan struct{}), release: make(chan bool, 1)}
+						peer.mu.Lock()
+						peer.rejectNextLogin, peer.nextLogin = true, login
+						peer.mu.Unlock()
+						reverify := func(ctx context.Context, options cliapp.ChannelRegistrationOptions) (cliapp.ChannelRegistrationSession, error) {
+							options.Operations = &firstConnectLoginRead{OperationStore: options.Operations, login: login}
+							return factory(ctx, options)
+						}
+						out, errOut := &lockedBuffer{}, &lockedBuffer{}
+						done := make(chan int, 1)
+						joined := false
+						defer func() {
+							select {
+							case login.release <- false:
+							default:
+							}
+							cancel()
+							if !joined {
+								<-done
+							}
+						}()
+						go func() {
+							done <- cliapp.Execute(ctx, []string{"--config", opts.ConfigPath, "channel", "connect", "whatsapp", op.AccountReference, "--yes"}, out, errOut, nil, nil, reverify)
+						}()
+						var replacement channelonboarding.Result
+						select {
+						case replacement = <-qr:
+						case code := <-done:
+							joined = true
+							t.Fatalf("revoked-account reverify exited before relink QR: exit=%d err=%s", code, errOut.String())
+						case <-ctx.Done():
+							t.Fatal("revoked-account reverify did not offer relink")
+						}
+						if replacement.Operation.OperationID == op.OperationID || replacement.Operation.SessionConnectionID == pairing.Operation.SessionConnectionID ||
+							replacement.Operation.AccountConfirmed || replacement.Pairing.Paired || !strings.Contains(out.String(), "Account was logged out from the phone. Link it again:") {
+							t.Fatal("revoked account retained approval or missed exact relink")
+						}
+						peer.pair(replacement.Pairing.Code)
+						select {
+						case code := <-done:
+							joined = true
+							if code != 0 {
+								t.Fatalf("public same-account relink exit=%d err=%s", code, errOut.String())
+							}
+						case <-ctx.Done():
+							t.Fatal("public same-account relink did not register")
+						}
+						var listed, listErr bytes.Buffer
+						if code := cliapp.Execute(ctx, []string{"--config", opts.ConfigPath, "channel", "list", "--json"}, &listed, &listErr, nil, nil, factory); code != 0 ||
+							json.Unmarshal(listed.Bytes(), &listing) != nil || len(listing.Accounts) != 1 {
+							t.Fatalf("relinked public account-list exit=%d err=%s", code, listErr.String())
+						}
+						current := listing.Accounts[0].Operation
+						if current.OperationID != replacement.Operation.OperationID ||
+							current.AccountReference != op.AccountReference || !current.AccountConfirmed || current.Phase != channelonboarding.PhaseSucceeded || current.IdentityOperationID != "" {
+							t.Fatal("relink did not register exactly the same approved account under its fresh reservation")
+						}
+					})
 				}
 			})
 		}
