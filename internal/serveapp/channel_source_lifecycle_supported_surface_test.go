@@ -9,6 +9,7 @@ import (
 	"net/http"
 	"os"
 	"path/filepath"
+	"slices"
 	"strings"
 	"testing"
 	"time"
@@ -498,6 +499,15 @@ func runRegisteredCLISourceLifecycle(t *testing.T, h *channelOnboardingE2EHarnes
 			}
 		} else if publish.Error != nil {
 			t.Fatal(publish.Error)
+		}
+		if !clear {
+			callback, signing, _ := h.provider.Registration()
+			if names := postChannelTelegramUpdate(t, callback, signing, map[string]any{
+				"update_id": 978101, "message": map[string]any{"message_id": 978101, "from": map[string]any{"id": 2001},
+					"chat": map[string]any{"id": 2001, "type": "private"}, "text": "customer after retained reset"},
+			}); !slices.Contains(names, "inbound.telegram.text_message") {
+				t.Fatalf("fresh policy-backed holder lost customer ingress after reset: %v", names)
+			}
 		}
 		h.stop(t)
 		h.start(t)
