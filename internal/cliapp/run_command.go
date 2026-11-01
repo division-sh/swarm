@@ -159,9 +159,8 @@ func newRunCommand(root InvocationRoot, rootOpts rootCommandOptions) *cobra.Comm
 	opts := runCommandOptions{apiOptions: rootOpts}
 	cmd := &cobra.Command{
 		Use:   "start [directory]",
-		Short: "Start a workflow run on a running runtime, or reattach to one.",
+		Short: "Publish into a served flow's live run, or reattach to one.",
 		Example: `  swarm run start --event <event-name> --payload payload.json
-  swarm run start --data records.loaded=records.jsonl
   swarm run start --reattach <run-id>`,
 		Args: argcount.MaximumNArgs(1),
 		RunE: func(cmd *cobra.Command, args []string) error {
@@ -186,7 +185,7 @@ func newRunCommand(root InvocationRoot, rootOpts rootCommandOptions) *cobra.Comm
 			return runRunCommand(cmd.Context(), root, cmd.OutOrStdout(), cmd.ErrOrStderr(), runOpts)
 		},
 	}
-	cmd.Flags().StringVar(&opts.eventName, "event", "", "Declared event name to publish as the run trigger")
+	cmd.Flags().StringVar(&opts.eventName, "event", "", "Declared input event to publish into the flow's live run")
 	cmd.Flags().StringVar(&opts.payloadPath, "payload", "", "Path to JSON object payload file")
 	cmd.Flags().StringVar(&opts.connectURL, "connect", "", "Existing Swarm API base URL")
 	bindCLIAPITokenFileFlag(cmd, &opts.apiOptions)
@@ -194,11 +193,11 @@ func newRunCommand(root InvocationRoot, rootOpts rootCommandOptions) *cobra.Comm
 	cmd.Flags().DurationVar(&opts.timeout, "timeout", defaultRunCommandTimeout, "Maximum time to follow after publication; 0 waits indefinitely; expiry never cancels work")
 	cmd.Flags().StringVar(&opts.reattachRunID, "reattach", "", "Existing run id to reattach to")
 	cmd.Flags().StringVar(&opts.configPath, "config", "", deploymentConfigFlagHelp)
-	cmd.Flags().StringArrayVar(&opts.dataImports, "data", nil, "Fused immutable data import and pin: name=file.jsonl (repeatable)")
-	cmd.Flags().StringArrayVar(&opts.dataPins, "pin", nil, "Exact data version pin: name@head, name@vN, or name@ResourceVersionID (repeatable)")
+	cmd.Flags().StringArrayVar(&opts.dataImports, "data", nil, "Rows input: name=file.jsonl (currently refused for immutable live-run bindings)")
+	cmd.Flags().StringArrayVar(&opts.dataPins, "pin", nil, "Data version: name@head, name@vN, or name@ResourceVersionID (currently refused for immutable live-run bindings)")
 	cmd.Flags().StringVar(&opts.idempotencyKey, "idempotency-key", "", "Optional idempotency key for run.start")
 	_ = cmd.Flags().MarkHidden("idempotency-key")
-	cmd.Flags().StringVar(&opts.runID, "run-id", "", "Optional caller-provided run id for run.start")
+	cmd.Flags().StringVar(&opts.runID, "run-id", "", "Optional expected live run id; never creates a run")
 	cmd.Flags().IntVar(&opts.apiPort, "api-port", 0, "API port of the running serve to target")
 	return cmd
 }
@@ -227,6 +226,11 @@ func runRunCommand(ctx context.Context, root InvocationRoot, out, errOut io.Writ
 
 	if strings.TrimSpace(opts.reattachRunID) != "" {
 		return runReattachCommand(ctx, out, errOut, opts, wsEndpoint)
+	}
+	if len(opts.dataImports) > 0 || len(opts.dataPins) > 0 {
+		writeCLIAPIError(errOut, durabledata.NewDomainError(durabledata.CodeRunDataImmutable,
+			"run start cannot publish rows into a live run with immutable data bindings"))
+		return commandExitError{code: cliExitConflict}
 	}
 
 	var payload map[string]any
@@ -1182,6 +1186,8 @@ func runCommandErrorExitCode(err error) int {
 			"UNSUPPORTED_BUNDLE_HASH",
 			"EVENT_NOT_DECLARED",
 			"EVENT_PUBLISH_FAILED",
+			"EVENT_PUBLISH_REJECTED",
+			"RUN_DATA_IMMUTABLE",
 			"PAYLOAD_VALIDATION_FAILED",
 			"IDEMPOTENCY_CONFLICT",
 		},

@@ -143,6 +143,7 @@ func (e scenarioTestValidationError) Unwrap() error {
 
 type scenarioRunner struct {
 	client                  *cliAPIClient
+	startScenario           func(context.Context, map[string]any) (string, error)
 	bundle                  *runtimecontracts.WorkflowContractBundle
 	source                  semanticview.Source
 	bundleHash              string
@@ -335,6 +336,7 @@ func runScenarioTestCommand(ctx context.Context, RepoRoot string, out, errOut io
 			return err
 		}
 		runner.client = client
+		runner.startScenario = endpoint.StartScenario
 		for _, plan := range plans {
 			if err := runner.runDerivedPlan(sessionCtx, plan); err != nil {
 				return err
@@ -1166,6 +1168,18 @@ func (r scenarioRunner) runPublishStep(ctx context.Context, file scenarioTestFil
 		}
 	}
 	if state.RunID == "" {
+		if r.startScenario == nil {
+			return fmt.Errorf("private scenario start is unavailable")
+		}
+		runID, err := r.startScenario(ctx, params)
+		if err != nil {
+			return err
+		}
+		if strings.TrimSpace(runID) == "" {
+			return fmt.Errorf("private scenario start returned no run")
+		}
+		state.RunID = runID
+		params["run_id"] = runID
 		return r.startPublicationRun(ctx, state, params)
 	}
 	var result eventPublishResult

@@ -15,6 +15,7 @@ import (
 	runtimemutationlog "github.com/division-sh/swarm/internal/runtime/mutationlog"
 	runtimepipeline "github.com/division-sh/swarm/internal/runtime/pipeline"
 	runtimerunlifecycle "github.com/division-sh/swarm/internal/runtime/runlifecycle"
+	"github.com/division-sh/swarm/internal/runtime/scenarioexecution"
 	"github.com/division-sh/swarm/internal/runtime/workflowexpr"
 	privatemutationlog "github.com/division-sh/swarm/internal/store/internal/backend/mutationlog"
 	"github.com/division-sh/swarm/internal/store/internal/backend/mutationprotocol"
@@ -30,7 +31,7 @@ func (s *PipelinePostgresOwner) CommitScenarioSetup(ctx context.Context, command
 	if s == nil || s.backend == nil {
 		return runtimepipeline.ScenarioSetupResult{}, fmt.Errorf("postgres scenario setup store is required")
 	}
-	req, err := normalizeScenarioSetupRequest(command.Setup)
+	req, err := normalizeScenarioSetupRequest(ctx, command.Setup)
 	if err != nil {
 		return runtimepipeline.ScenarioSetupResult{}, err
 	}
@@ -54,7 +55,7 @@ func (s *PipelinePostgresOwner) CommitScenarioSetup(ctx context.Context, command
 				return fmt.Errorf("postgres scenario setup requires exact rooted source admission")
 			}
 			disposition, err := s.RunLifecyclePostgresOwner.CreateRunTx(txctx, attempt, runtimerunlifecycle.CreateRequest{
-				RunID: req.RunID, Origin: runtimerunlifecycle.ScenarioSetupRunOrigin(),
+				RunID: req.RunID, Origin: req.Origin,
 				Source: fact, RootAdmission: root, StartedAt: req.CreatedAt,
 			})
 			if err != nil {
@@ -145,7 +146,7 @@ func (s *PipelineSQLiteOwner) CommitScenarioSetup(ctx context.Context, command r
 	if s == nil || s.backend == nil {
 		return runtimepipeline.ScenarioSetupResult{}, fmt.Errorf("sqlite scenario setup store is required")
 	}
-	req, err := normalizeScenarioSetupRequest(command.Setup)
+	req, err := normalizeScenarioSetupRequest(ctx, command.Setup)
 	if err != nil {
 		return runtimepipeline.ScenarioSetupResult{}, err
 	}
@@ -169,7 +170,7 @@ func (s *PipelineSQLiteOwner) CommitScenarioSetup(ctx context.Context, command r
 				return fmt.Errorf("sqlite scenario setup requires exact rooted source admission")
 			}
 			disposition, err := s.RunLifecycleSQLiteOwner.CreateRunTx(txctx, attempt, runtimerunlifecycle.CreateRequest{
-				RunID: req.RunID, Origin: runtimerunlifecycle.ScenarioSetupRunOrigin(),
+				RunID: req.RunID, Origin: req.Origin,
 				Source: fact, RootAdmission: root, StartedAt: req.CreatedAt,
 			})
 			if err != nil {
@@ -328,10 +329,25 @@ func requireScenarioImportWithoutHeader(ctx context.Context, tx *sql.Tx, runID s
 	return nil
 }
 
-func normalizeScenarioSetupRequest(req runtimepipeline.ScenarioSetupRequest) (runtimepipeline.ScenarioSetupRequest, error) {
+func normalizeScenarioSetupRequest(ctx context.Context, req runtimepipeline.ScenarioSetupRequest) (runtimepipeline.ScenarioSetupRequest, error) {
 	req.RunID = nullUUIDString(req.RunID)
 	if req.RunID == "" {
 		return runtimepipeline.ScenarioSetupRequest{}, fmt.Errorf("run_id must be uuid")
+	}
+	if req.Origin.Kind() == "" {
+		req.Origin = runtimerunlifecycle.ScenarioSetupRunOrigin()
+	} else {
+		scope, scoped := scenarioexecution.PrivateRunScopeFromContext(ctx)
+		profileDigest := ""
+		if req.ScenarioExecutionProfile != nil {
+			profileDigest = req.ScenarioExecutionProfile.Digest()
+		}
+		if !scoped || scope.RunID != req.RunID || scope.ProfileDigest != profileDigest || req.Origin.Kind() != runtimerunlifecycle.OriginEvent {
+			return runtimepipeline.ScenarioSetupRequest{}, fmt.Errorf("scenario input origin requires its private start owner")
+		}
+		if err := req.Origin.Validate(); err != nil {
+			return runtimepipeline.ScenarioSetupRequest{}, err
+		}
 	}
 	if req.CreatedAt.IsZero() {
 		req.CreatedAt = time.Now().UTC()
@@ -339,7 +355,14 @@ func normalizeScenarioSetupRequest(req runtimepipeline.ScenarioSetupRequest) (ru
 		req.CreatedAt = req.CreatedAt.UTC()
 	}
 	if len(req.Entities) == 0 {
-		return runtimepipeline.ScenarioSetupRequest{}, fmt.Errorf("entities is required")
+		scope, scoped := scenarioexecution.PrivateRunScopeFromContext(ctx)
+		profileDigest := ""
+		if req.ScenarioExecutionProfile != nil {
+			profileDigest = req.ScenarioExecutionProfile.Digest()
+		}
+		if !scoped || scope.RunID != req.RunID || scope.ProfileDigest != profileDigest {
+			return runtimepipeline.ScenarioSetupRequest{}, fmt.Errorf("entities is required outside a private scenario start")
+		}
 	}
 	aliases := map[string]struct{}{}
 	ids := map[string]struct{}{}
