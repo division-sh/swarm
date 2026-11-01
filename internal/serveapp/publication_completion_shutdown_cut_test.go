@@ -74,6 +74,7 @@ func provePublicCompletionAcknowledgedShutdownCut(t *testing.T, backend servedpa
 	rt := <-runtimes
 	var identity apiv1.RuntimeIdentityResult
 	requireServedJSONRPCResult(t, h.rpcEndpoint(), "runtime.identity", map[string]any{}, &identity)
+	pauseServedLandingForCreation(t, h.rpcEndpoint(), identity.SourceArtifacts[0].BundleHash, ".")
 	params := map[string]any{
 		"bundle_hash": identity.SourceArtifacts[0].BundleHash, "run_id": uuid.NewString(), "idempotency_key": uuid.NewString(),
 		"data": map[string]any{"imports": []any{map[string]any{

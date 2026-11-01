@@ -32,6 +32,7 @@ func TestRunServeRuntimeDevScratchPersistsExactBundleAndRunSource(t *testing.T) 
 		t.Fatalf("runtime identity = %#v, want one source artifact", identity)
 	}
 	bundleHash := identity.SourceArtifacts[0].BundleHash
+	pauseServedLandingForCreation(t, endpoint+"/v1/rpc", bundleHash, ".")
 	var started struct {
 		RunID string `json:"run_id"`
 	}
@@ -76,6 +77,7 @@ func TestRunServeRuntimeDevScratchRunForkLifecycleSQLite(t *testing.T) {
 	if len(identity.SourceArtifacts) != 1 {
 		t.Fatalf("runtime identity = %#v, want one source", identity)
 	}
+	pauseServedLandingForCreation(t, endpoint, identity.SourceArtifacts[0].BundleHash, ".")
 	var started struct {
 		RunID string `json:"run_id"`
 	}
@@ -169,7 +171,7 @@ func TestRunServeRuntimeDevScratchNextInvocationHasNoPredecessor(t *testing.T) {
 	var firstIdentity apiv1.RuntimeIdentityResult
 	requireServedJSONRPCResult(t, firstEndpoint+"/v1/rpc", "runtime.identity", map[string]any{}, &firstIdentity)
 	firstHash := firstIdentity.SourceArtifacts[0].BundleHash
-	firstStanding := requireSingleServedStandingRun(t, firstEndpoint+"/v1/rpc", firstHash)
+	firstStanding := requireSingleServedStandingRun(t, firstEndpoint+"/v1/rpc", firstHash, "fulfillment")
 	firstHistory := requireServedStandingHistory(t, firstEndpoint+"/v1/rpc", firstStanding.RunID)
 	if code := first.stop(); code != 0 {
 		t.Fatalf("first dev scratch process exit code = %d\n%s", code, first.outputString())
@@ -197,7 +199,7 @@ func TestRunServeRuntimeDevScratchNextInvocationHasNoPredecessor(t *testing.T) {
 	if secondHash == firstHash {
 		t.Fatalf("second identity = %#v, want new source artifact replacing %s", secondIdentity, firstHash)
 	}
-	secondStanding := requireSingleServedStandingRun(t, secondEndpoint+"/v1/rpc", secondHash)
+	secondStanding := requireSingleServedStandingRun(t, secondEndpoint+"/v1/rpc", secondHash, "fulfillment")
 	if secondStanding.RunID == firstStanding.RunID || !secondStanding.Origin.Equal(firstStanding.Origin) || secondStanding.FlowPath != firstStanding.FlowPath {
 		t.Fatalf("fresh dev run = %#v, want fresh identity for the same deployment flow as %#v", secondStanding, firstStanding)
 	}
@@ -251,7 +253,7 @@ func promoteDevScratchFixtureToStanding(t *testing.T, sourceRoot string) {
 	}
 }
 
-func requireSingleServedStandingRun(t *testing.T, endpoint, bundleHash string) operatorread.RunHeader {
+func requireSingleServedStandingRun(t *testing.T, endpoint, bundleHash, flowPath string) operatorread.RunHeader {
 	t.Helper()
 	var result struct {
 		Runs []operatorread.RunHeader `json:"runs"`
@@ -259,12 +261,12 @@ func requireSingleServedStandingRun(t *testing.T, endpoint, bundleHash string) o
 	requireServedJSONRPCResult(t, endpoint, "run.list", map[string]any{"bundle_hash": bundleHash, "limit": 500}, &result)
 	var standing []operatorread.RunHeader
 	for _, run := range result.Runs {
-		if run.Origin.Kind() == runtimerunlifecycle.OriginDeployment {
+		if run.BundleHash == bundleHash && run.FlowPath == flowPath && run.Origin.Kind() == runtimerunlifecycle.OriginDeployment {
 			standing = append(standing, run)
 		}
 	}
 	if len(standing) != 1 {
-		t.Fatalf("run.list for bundle %s returned %d standing runs, want one: %#v", bundleHash, len(standing), result.Runs)
+		t.Fatalf("run.list for bundle %s flow %s returned %d standing runs, want one: %#v", bundleHash, flowPath, len(standing), result.Runs)
 	}
 	return standing[0]
 }

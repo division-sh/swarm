@@ -57,6 +57,7 @@ func TestPublicFeedOnlyInvalidAcknowledgedResultBothStores(t *testing.T) {
 			if len(identity.SourceArtifacts) != 1 {
 				t.Fatalf("initial source selection: %+v", identity)
 			}
+			pauseServedLandingForCreation(t, h.rpcEndpoint(), identity.SourceArtifacts[0].BundleHash, ".")
 			params := map[string]any{
 				"bundle_hash": identity.SourceArtifacts[0].BundleHash, "run_id": uuid.NewString(), "idempotency_key": uuid.NewString(),
 				"data": map[string]any{"imports": []any{map[string]any{
