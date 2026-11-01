@@ -32,6 +32,22 @@ func commitWorkflowTimerOccurrence(
 	outcome := run(ctx, func(txctx context.Context, attempt *mutationprotocol.Attempt) (runtimepipeline.CommittedWorkflowTimerOccurrence, error) {
 		result := runtimepipeline.CommittedWorkflowTimerOccurrence{}
 		err := attempt.WithSQL(txctx, func(txctx context.Context, tx *sql.Tx) error {
+			var err error
+			if postgres {
+				err = requirePostgresRunActive(txctx, tx, command.Activation.RunID)
+			} else {
+				err = requireSQLiteRunActive(txctx, tx, command.Activation.RunID)
+			}
+			if errors.Is(err, runtimerunlifecycle.ErrRunNotActive) {
+				result.Outcome = runtimepipeline.WorkflowTimerOccurrenceTerminal
+				return nil
+			}
+			if err != nil {
+				return err
+			}
+			if err := store.LockWorkflowPublicationTx(txctx, tx, plan.PublicationCommand()); err != nil {
+				return err
+			}
 			activation, found, err := loadWorkflowEngineTimerActivation(txctx, tx, postgres, command.Activation.Ref)
 			if err != nil {
 				return err
@@ -43,19 +59,6 @@ func commitWorkflowTimerOccurrence(
 			if !sameWorkflowEngineTimerActivation(activation, command.Activation) || activation.Ref != command.Occurrence.Activation {
 				return fmt.Errorf("workflow timer occurrence persisted coordinate changed before commit")
 			}
-			if postgres {
-				err = requirePostgresRunActive(txctx, tx, activation.RunID)
-			} else {
-				err = requireSQLiteRunActive(txctx, tx, activation.RunID)
-			}
-			if errors.Is(err, runtimerunlifecycle.ErrRunNotActive) {
-				result.Outcome = runtimepipeline.WorkflowTimerOccurrenceTerminal
-				return nil
-			}
-			if err != nil {
-				return err
-			}
-
 			committed, err := store.commitPublicationTx(txctx, attempt, plan.PublicationCommand())
 			if err != nil {
 				return fmt.Errorf("commit workflow timer publication: %w", err)

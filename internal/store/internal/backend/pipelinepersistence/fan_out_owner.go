@@ -699,6 +699,17 @@ func commitFanOutChunk(
 	if err := command.Validate(); err != nil {
 		return runtimepipeline.CommittedFanOutChunk{}, err
 	}
+	var publications []runtimebus.PublicationCommand
+	for _, outcome := range command.Outcomes {
+		if outcome.Publication == nil {
+			continue
+		}
+		plan, ok := outcome.Publication.(runtimebus.EnginePublicationPlan)
+		if !ok {
+			return runtimepipeline.CommittedFanOutChunk{}, fmt.Errorf("fan-out publication has unexpected type %T", outcome.Publication)
+		}
+		publications = append(publications, plan.PublicationCommand())
+	}
 	result := runtimepipeline.CommittedFanOutChunk{Publications: make([]runtimeengine.CommittedDurablePublication, 0, len(command.Outcomes))}
 	outcome := run(ctx, func(txctx context.Context, attempt *mutationprotocol.Attempt) (runtimepipeline.CommittedFanOutChunk, error) {
 		result = runtimepipeline.CommittedFanOutChunk{Publications: make([]runtimeengine.CommittedDurablePublication, 0, len(command.Outcomes))}
@@ -712,6 +723,9 @@ func commitFanOutChunk(
 					}
 				}
 			}()
+			if err := lockWorkflowPublicationFootprintTx(txctx, tx, postgres, nil, publications); err != nil {
+				return err
+			}
 			intent, err := lockClaimedFanOutIntent(txctx, tx, postgres, command.Claim, observeNow)
 			if err != nil {
 				return err

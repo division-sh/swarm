@@ -138,10 +138,6 @@ func (s *RunLifecyclePostgresOwner) WriteCompletionCandidateTx(
 		result, err = requestPostgresCompletionCandidateTx(ctx, tx, runID, dueAt, false, &selectedNow)
 		return err
 	})
-	if err != nil || result.Disposition != runtimerunlifecycle.CandidateRetainedLive {
-		return result, err
-	}
-	result.GenericScheduleActivations, err = s.pipeline.AdvanceFanOutDeliveryBarriersTx(ctx, attempt, runID, selectedNow)
 	return result, err
 }
 
@@ -157,10 +153,6 @@ func (s *RunLifecycleSQLiteOwner) WriteCompletionCandidateTx(
 		result, err = requestSQLiteCompletionCandidateTx(ctx, tx, runID, dueAt, selectedNow, false)
 		return err
 	})
-	if err != nil || result.Disposition != runtimerunlifecycle.CandidateRetainedLive {
-		return result, err
-	}
-	result.GenericScheduleActivations, err = s.pipeline.AdvanceFanOutDeliveryBarriersTx(ctx, attempt, runID, selectedNow)
 	return result, err
 }
 
@@ -480,31 +472,20 @@ func (s *RunLifecyclePostgresOwner) executeCompletionCandidateTx(
 		if catalog.Empty() {
 			return runtimerunlifecycle.CompletionResult{}, errors.New("normal run completion requires terminal catalog")
 		}
-		barrierActivations, err := s.pipeline.AdvanceFanOutDeliveryBarriersTx(ctx, attempt, candidate.RunID, selectedNow)
-		if err != nil {
-			return runtimerunlifecycle.CompletionResult{}, fmt.Errorf("advance fan-out delivery barriers: %w", err)
-		}
 		allowEmptyEntities := snapshot.Origin.Kind() == runtimerunlifecycle.OriginDeployment
 		pending, wake, err := s.pendingPostgresRunCompletionWork(ctx, tx, candidate.RunID, selectedNow, catalog, allowEmptyEntities)
 		if err != nil {
 			return runtimerunlifecycle.CompletionResult{}, err
 		}
 		if pending {
-			result, err := s.finishBlockedPostgresCandidate(ctx, tx, candidate, wake)
-			result.GenericScheduleActivations = barrierActivations
-			return result, err
+			return s.finishBlockedPostgresCandidate(ctx, tx, candidate, wake)
 		}
 		summaries, err := s.loadPostgresRunCompletionOwnerSummaries(ctx, tx, candidate.RunID, selectedNow, catalog)
 		if err != nil {
 			return runtimerunlifecycle.CompletionResult{}, err
 		}
 		if summaries.blocksCompletion(allowEmptyEntities) {
-			result, err := s.finishBlockedPostgresCandidate(ctx, tx, candidate, optionalWake(summaries.Sessions.NextExpiry))
-			result.GenericScheduleActivations = barrierActivations
-			return result, err
-		}
-		if len(barrierActivations) != 0 {
-			return runtimerunlifecycle.CompletionResult{}, errors.New("new fan-out barrier completion did not block run completion")
+			return s.finishBlockedPostgresCandidate(ctx, tx, candidate, optionalWake(summaries.Sessions.NextExpiry))
 		}
 	}
 	if _, _, err := s.completeRunTx(ctx, tx, attempt, candidate.RunID, selectedNow, changes); err != nil {
@@ -622,31 +603,20 @@ func (s *RunLifecycleSQLiteOwner) executeCompletionCandidateTx(
 		if catalog.Empty() {
 			return runtimerunlifecycle.CompletionResult{}, errors.New("normal run completion requires terminal catalog")
 		}
-		barrierActivations, err := s.pipeline.AdvanceFanOutDeliveryBarriersTx(ctx, attempt, candidate.RunID, selectedNow)
-		if err != nil {
-			return runtimerunlifecycle.CompletionResult{}, fmt.Errorf("advance sqlite fan-out delivery barriers: %w", err)
-		}
 		allowEmptyEntities := snapshot.Origin.Kind() == runtimerunlifecycle.OriginDeployment
 		pending, wake, err := s.pendingSQLiteRunCompletionWork(ctx, tx, candidate.RunID, selectedNow, catalog, allowEmptyEntities)
 		if err != nil {
 			return runtimerunlifecycle.CompletionResult{}, err
 		}
 		if pending {
-			result, err := s.finishBlockedSQLiteCandidate(ctx, tx, candidate, wake, selectedNow)
-			result.GenericScheduleActivations = barrierActivations
-			return result, err
+			return s.finishBlockedSQLiteCandidate(ctx, tx, candidate, wake, selectedNow)
 		}
 		summaries, err := s.loadSQLiteRunCompletionOwnerSummaries(ctx, tx, candidate.RunID, selectedNow, catalog)
 		if err != nil {
 			return runtimerunlifecycle.CompletionResult{}, err
 		}
 		if summaries.blocksCompletion(allowEmptyEntities) {
-			result, err := s.finishBlockedSQLiteCandidate(ctx, tx, candidate, optionalWake(summaries.Sessions.NextExpiry), selectedNow)
-			result.GenericScheduleActivations = barrierActivations
-			return result, err
-		}
-		if len(barrierActivations) != 0 {
-			return runtimerunlifecycle.CompletionResult{}, errors.New("new sqlite fan-out barrier completion did not block run completion")
+			return s.finishBlockedSQLiteCandidate(ctx, tx, candidate, optionalWake(summaries.Sessions.NextExpiry), selectedNow)
 		}
 	}
 	if _, _, err := s.completeRunTx(ctx, tx, attempt, candidate.RunID, selectedNow, changes); err != nil {

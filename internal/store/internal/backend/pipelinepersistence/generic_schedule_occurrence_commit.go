@@ -43,6 +43,9 @@ func commitGenericScheduleOccurrence(
 			if err := store.RequireRunExecutionTx(txctx, tx, command.Activation.Command.RunID); err != nil {
 				return err
 			}
+			if err := store.LockWorkflowPublicationTx(txctx, tx, plan.PublicationCommand()); err != nil {
+				return err
+			}
 			acceptedAt, err := stampAcceptedAt(txctx, tx)
 			if err != nil {
 				return fmt.Errorf("stamp generic schedule occurrence acceptance: %w", err)

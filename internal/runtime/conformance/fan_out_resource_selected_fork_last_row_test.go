@@ -26,7 +26,7 @@ func TestDeploymentSourceSelectedLastRowPendingBlocksQuiescenceBothStores(t *tes
 			f := selectedDeploymentResourceFixtureWithDelivery(t, backend, "root", nil, func(owner runtimedelivery.Store) runtimedelivery.Store {
 				gate.Store = owner
 				return gate
-			}, decorate)
+			}, nil)
 			server := f.operatorServer(t)
 			start := func(name string, rows []byte) string {
 				t.Helper()

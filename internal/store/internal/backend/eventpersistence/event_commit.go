@@ -643,9 +643,11 @@ func commitValidatedPublicationSQL(
 		if _, err := store.RequireActiveSourceTx(ctx, tx, request.Event.Event().RunID()); err != nil {
 			return runtimebus.CommittedPublication{}, err
 		}
-		if err := store.LockWorkflowPublicationTx(ctx, tx, command); err != nil {
-			return runtimebus.CommittedPublication{}, err
-		}
+	}
+	if err := store.LockWorkflowPublicationTx(ctx, tx, command); err != nil {
+		return runtimebus.CommittedPublication{}, err
+	}
+	if command.DynamicFlowCreation != nil {
 		creationAlreadyCommitted, err = store.PrepareDynamicFlowCreationOccurrenceCommitTx(ctx, tx, *command.DynamicFlowCreation)
 		if err != nil {
 			return runtimebus.CommittedPublication{}, err
@@ -662,9 +664,6 @@ func commitValidatedPublicationSQL(
 		return runtimebus.CommittedPublication{}, err
 	}
 	result := runtimebus.CommittedPublication{AppendOutcome: outcome}
-	if err := store.LockWorkflowPublicationTx(ctx, tx, command); err != nil {
-		return runtimebus.CommittedPublication{}, err
-	}
 	if command.StageFeedback != nil {
 		receipt, err := store.CaptureWorkflowPublicationStageTx(ctx, tx, request.Event.Event(), *command.StageFeedback, outcome == runtimebus.EventAppendExactDuplicate)
 		if err != nil {

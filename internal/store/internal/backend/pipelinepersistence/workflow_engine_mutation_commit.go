@@ -503,17 +503,15 @@ func commitWorkflowEngineMutation(
 				}
 			}
 			owners := []flowidentity.RunScopedFlowInstance{command.State.Identity}
+			publications := make([]runtimebus.PublicationCommand, 0, len(command.Publications))
 			for index, value := range command.Publications {
 				plan, ok := value.(runtimebus.EnginePublicationPlan)
 				if !ok {
 					return fmt.Errorf("workflow engine publication %d has unexpected type %T", index, value)
 				}
-				owners, err = workflowPublicationLockOwners(owners, plan.PublicationCommand())
-				if err != nil {
-					return err
-				}
+				publications = append(publications, plan.PublicationCommand())
 			}
-			if err := lockWorkflowInstancesTx(txctx, tx, postgres, owners); err != nil {
+			if err := lockWorkflowPublicationFootprintTx(txctx, tx, postgres, owners, publications); err != nil {
 				return err
 			}
 			if !command.State.Transition.PreservesState() {

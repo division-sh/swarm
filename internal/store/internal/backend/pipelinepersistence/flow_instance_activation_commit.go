@@ -43,11 +43,7 @@ func commitFlowInstanceActivations(
 					return err
 				}
 			}
-			owners, err := workflowActivationLockOwners(nil, plans)
-			if err != nil {
-				return err
-			}
-			if err := lockWorkflowInstancesTx(ctx, tx, true, owners); err != nil {
+			if err := lockWorkflowPublicationFootprintTx(ctx, tx, true, nil, []runtimebus.PublicationCommand{{Activations: plans}}); err != nil {
 				return err
 			}
 		}

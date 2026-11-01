@@ -36,7 +36,6 @@ import (
 	runtimerunlifecycle "github.com/division-sh/swarm/internal/runtime/runlifecycle"
 	"github.com/division-sh/swarm/internal/runtime/semanticview"
 	"github.com/division-sh/swarm/internal/runtime/startupownership"
-	"github.com/division-sh/swarm/internal/store/internal/backend/mutationprotocol"
 	runforkrevision "github.com/division-sh/swarm/internal/store/internal/backend/runforkrevision"
 	"github.com/division-sh/swarm/internal/testutil/sourceartifactfixture"
 	"github.com/google/uuid"
@@ -302,6 +301,7 @@ func TestFanOutDeliveryBarrierCandidateReturnsExactPostCommitScheduleActivationO
 				if got, err := lifecycle.RequestCompletionCandidate(ctx, runtimerunlifecycle.ImmediateCandidate(fixture.runID)); err != nil || got != runtimerunlifecycle.CandidateRetainedLive {
 					t.Fatalf("live closed fold=%s/%v", got, err)
 				}
+				advanceFanOutBarriersForTest(t, ctx, owner.(storeTestDurableEventBusStore), fixture.runID, base.Add(time.Second))
 				schedules := owner.(runtimegenericschedule.Store)
 				active, err := schedules.ListActiveGenericScheduleActivations(ctx)
 				if err != nil || len(active) != 1 {
@@ -456,7 +456,11 @@ func TestFanOutDeliveryBarrierCompletionAndSupersessionWinnerMatrixOnBothStores(
 				summary := fanoutbarrier.Summary{Total: 0}
 				activationID := mustFanOutBarrierScheduleActivationID(t, ctx, db, fixture)
 
-				occurrenceID := runtimegenericschedule.OccurrenceEventID(activationID, base.Add(time.Second))
+				persisted, found, err := owner.(runtimegenericschedule.Store).LoadGenericScheduleActivation(ctx, activationID)
+				if err != nil || !found {
+					t.Fatalf("load barrier activation: found=%v err=%v", found, err)
+				}
+				occurrenceID := runtimegenericschedule.OccurrenceEventID(activationID, persisted.CurrentDueAt)
 				occurrence := fanOutBarrierChildEventWithID(t, fixture, occurrenceID, 700, base.Add(2*time.Second))
 				if err := commitSemanticEventFixtureWithRoutes(ctx, selected, occurrence, []events.DeliveryRoute{route}); err != nil {
 					t.Fatal(err)
@@ -608,23 +612,17 @@ func TestFanOutDeliveryBarrierConcurrentCandidatesCloseExactlyOnceOnBothStores(t
 				}
 				t.Logf("LIVE_FOLD pending_members=%d request_elapsed=%s", len(claims), time.Since(foldStarted))
 				var foldElapsed time.Duration
-				if err := runSelectedFixtureMutation(ctx, selected, "measure pending live barrier fold", func(txctx context.Context, attempt *mutationprotocol.Attempt) error {
-					started := time.Now()
-					var activations []runtimerunlifecycle.CommittedGenericScheduleActivation
-					var err error
-					switch store := selected.(type) {
-					case *PostgresStore:
-						activations, err = store.pipelinePostgresOwner.AdvanceFanOutDeliveryBarriersTx(txctx, attempt, fixture.runID, base.Add(4*time.Second))
-					case *SQLiteRuntimeStore:
-						activations, err = store.pipelineSQLiteOwner.AdvanceFanOutDeliveryBarriersTx(txctx, attempt, fixture.runID, base.Add(4*time.Second))
-					}
-					foldElapsed = time.Since(started)
-					if err == nil && len(activations) != 0 {
-						return fmt.Errorf("pending live fold admitted %d activations", len(activations))
-					}
-					return err
-				}); err != nil {
+				advanceStarted := time.Now()
+				activations, err := owner.AdvanceFanOutBarriers(ctx, fanoutobligation.IntentKey{
+					RunID: fixture.runID, TriggeringDeliveryID: fixture.deliveryID,
+					ElementRef: runtimecontracts.FanOutElementRef{FlowPath: fixture.flowPath, Family: "fan_out", SemanticPath: fixture.semanticPath},
+				})
+				foldElapsed = time.Since(advanceStarted)
+				if err != nil {
 					t.Fatal(err)
+				}
+				if len(activations) != 0 {
+					t.Fatalf("pending live fold admitted %d activations", len(activations))
 				}
 				t.Logf("LIVE_FOLD pending_members=%d advance_elapsed=%s", len(claims), foldElapsed)
 				assertFanOutBarrierState(t, ctx, db, fixture.runID, fixture.deliveryID, fixture.semanticPath, fanoutbarrier.StatusArmed, nil, "")
@@ -656,6 +654,7 @@ func TestFanOutDeliveryBarrierConcurrentCandidatesCloseExactlyOnceOnBothStores(t
 					}
 				}
 				want := fanoutbarrier.Summary{Total: 2, Succeeded: 2}
+				advanceFanOutBarriersForTest(t, ctx, selected, fixture.runID, base.Add(5*time.Second))
 				assertFanOutBarrierState(t, ctx, db, fixture.runID, fixture.deliveryID, fixture.semanticPath, fanoutbarrier.StatusClosedPending, &want, handle.TaskID())
 				assertFanOutBarrierTimerCount(t, ctx, db, fixture.runID, 1)
 				var status string
@@ -1216,18 +1215,36 @@ func advanceFanOutBarriersForTest(t *testing.T, ctx context.Context, selected st
 }
 
 func advanceFanOutBarriersAttempt(ctx context.Context, selected storeTestDurableEventBusStore, runID string, at time.Time) error {
-	return runSelectedFixtureMutation(ctx, selected, "fan-out barrier candidate proof", func(txctx context.Context, attempt *mutationprotocol.Attempt) error {
-		switch store := selected.(type) {
-		case *PostgresStore:
-			_, err := store.pipelinePostgresOwner.AdvanceFanOutDeliveryBarriersTx(txctx, attempt, runID, at)
-			return err
-		case *SQLiteRuntimeStore:
-			_, err := store.pipelineSQLiteOwner.AdvanceFanOutDeliveryBarriersTx(txctx, attempt, runID, at)
-			return err
-		default:
-			return fmt.Errorf("unsupported fan-out barrier store %T", selected)
+	var db *sql.DB
+	switch store := selected.(type) {
+	case *PostgresStore:
+		db = store.backend.ConstructionHandle()
+	case *SQLiteRuntimeStore:
+		db = store.backend.ConstructionHandle()
+	default:
+		return fmt.Errorf("unsupported fan-out barrier store %T", selected)
+	}
+	rows, err := db.QueryContext(ctx, `SELECT triggering_delivery_id,flow_path,declaration_family,semantic_path FROM fan_out_obligation_barriers WHERE run_id=$1 ORDER BY triggering_delivery_id,flow_path,declaration_family,semantic_path`, runID)
+	if err != nil {
+		return err
+	}
+	var keys []fanoutobligation.IntentKey
+	for rows.Next() {
+		key := fanoutobligation.IntentKey{RunID: runID}
+		if err := rows.Scan(&key.TriggeringDeliveryID, &key.ElementRef.FlowPath, &key.ElementRef.Family, &key.ElementRef.SemanticPath); err != nil {
+			return errors.Join(err, rows.Close())
 		}
-	})
+		keys = append(keys, key)
+	}
+	if err := errors.Join(rows.Err(), rows.Close()); err != nil {
+		return err
+	}
+	for _, key := range keys {
+		if _, err := selected.(selectedFanOutOwner).AdvanceFanOutBarriers(ctx, key); err != nil {
+			return err
+		}
+	}
+	return nil
 }
 
 func assertFanOutBarrierState(t *testing.T, ctx context.Context, db *sql.DB, runID, triggeringDeliveryID, semanticPath string, wantStatus fanoutbarrier.Status, wantSummary *fanoutbarrier.Summary, wantSchedule string) {
