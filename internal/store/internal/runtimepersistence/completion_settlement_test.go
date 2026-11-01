@@ -63,11 +63,13 @@ type completionSettlementFixture struct {
 func TestCompletionProviderHeadSettlementSQLite(t *testing.T) {
 	store := newBootstrappedSQLiteRuntimeStoreForTest(t)
 	proveCompletionProviderHeadSettlement(t, newCompletionSettlementFixture(t, store, store.backend.ConstructionHandle(), true))
+	proveClaudeBackingOrigin(t, newCompletionSettlementFixture(t, store, store.backend.ConstructionHandle(), true))
 }
 
 func TestCompletionProviderHeadSettlementPostgres(t *testing.T) {
 	_, db, _ := testutil.StartPostgres(t)
 	proveCompletionProviderHeadSettlement(t, newCompletionSettlementFixture(t, admitTestPostgresStore(t, db), db, false))
+	proveClaudeBackingOrigin(t, newCompletionSettlementFixture(t, admitTestPostgresStore(t, db), db, false))
 }
 
 func TestCompletionOperationOwnsExactAgentFrameSQLite(t *testing.T) {

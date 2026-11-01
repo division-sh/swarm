@@ -134,6 +134,12 @@ func TestProviderMemorySurvivesAdmittedBundleUpgradeBothStores(t *testing.T) {
 				if provider != nil && len(provider.Requests()) != 2 {
 					t.Fatalf("provider requests=%d, want exactly two turns", len(provider.Requests()))
 				}
+				if profile == "claude_cli" {
+					lastEventID = publishUpgradeMemoryTurn(t, endpoint, seed.RunID, seed.EventID, 3, probe)
+					if current := requireProviderMemoryTurns(t, endpoint, seed.RunID, 3); current != session {
+						t.Fatalf("successor-source head lost retained memory: before=%s after=%s", session, current)
+					}
+				}
 			})
 		}
 	}

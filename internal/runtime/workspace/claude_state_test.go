@@ -11,6 +11,7 @@ import (
 	"github.com/division-sh/swarm/internal/runtime/agentmemory"
 	runtimecontracts "github.com/division-sh/swarm/internal/runtime/contracts"
 	"github.com/division-sh/swarm/internal/runtime/core/actors"
+	"github.com/division-sh/swarm/internal/runtime/core/agentidentity"
 	"github.com/division-sh/swarm/internal/runtime/core/agentidentitytest"
 	"github.com/division-sh/swarm/internal/runtime/correlation"
 	"github.com/division-sh/swarm/internal/runtime/deliverylifecycle"
@@ -19,6 +20,19 @@ import (
 	"github.com/division-sh/swarm/internal/runtime/semanticview"
 	"github.com/google/uuid"
 )
+
+type retainedClaudeBackingForTest struct {
+	*effecttest.Harness
+	identity              agentidentity.Identity
+	session, head, origin string
+}
+
+func (s *retainedClaudeBackingForTest) ClaudeBackingOrigin(_ context.Context, identity agentidentity.Identity, session, head string) (string, error) {
+	if identity != s.identity || session != s.session || head != s.head {
+		return "", fmt.Errorf("foreign retained provider backing")
+	}
+	return s.origin, nil
+}
 
 func TestClaudeStateNamespace(t *testing.T) {
 	actor := agentidentitytest.DeclaredForRun(t, uuid.NewString(), "actor", "agents.yaml", "flow", "instance", "flow/instance")
@@ -143,6 +157,9 @@ func TestClaudeStateDockerRetentionAndRefusal(t *testing.T) {
 		t.Fatal(err)
 	}
 	head := uuid.NewString()
+	ctx = effects.WithController(ctx, effects.NewController(&retainedClaudeBackingForTest{
+		Harness: effecttest.New(), identity: actor.Identity, session: request.session, head: head, origin: first.BundleHash(),
+	}))
 	seed := `const fs=require('fs');const [root,cwd,head]=process.argv.slice(1);const p=root+'/projects/'+cwd.replace(/[^a-zA-Z0-9]/g,'-');fs.mkdirSync(p,{recursive:true});fs.writeFileSync(p+'/'+head+'.jsonl',JSON.stringify({type:'user',sessionId:head,uuid:'44444444-4444-4444-8444-444444444444',parentUuid:null,isSidechain:false,cwd,version:'2.1.87',timestamp:'2026-09-08T00:00:00Z',message:{role:'user',content:'offline synthetic retained context'}})+'\n');`
 	if _, err := m1.RunDocker(ctx, "exec", a.Container, "node", "-e", seed, ClaudeStateDirectory, a.Workdir, head); err != nil {
 		t.Fatal(err)
