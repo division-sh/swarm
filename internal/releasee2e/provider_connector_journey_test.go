@@ -22,10 +22,7 @@ import (
 	"testing"
 	"time"
 
-	"github.com/division-sh/swarm/internal/operatorread"
-	"github.com/division-sh/swarm/internal/packartifact"
 	"github.com/division-sh/swarm/internal/testutil/connectorapi"
-	"github.com/division-sh/swarm/internal/testutil/packfixture"
 	"gopkg.in/yaml.v3"
 )
 
@@ -50,7 +47,6 @@ func TestEmbeddedConnectorPublicJourneysBothStores(t *testing.T) {
 			t.Cleanup(github.Server.Close)
 			endpoints := map[string]string{"slack": slack.Server.URL, "notion": notion.Server.URL, "microsoft_graph": graph.Server.URL, "github": github.Server.URL}
 			source := filepath.Join(base, "connectors")
-			writeConnectorPublicSource(t, source, endpoints, github.Fixture.Input)
 			store := goldenSQLiteStore(base)
 			if backend == "postgres" {
 				store = goldenPostgresStore(t, dsn)
@@ -72,6 +68,7 @@ func TestEmbeddedConnectorPublicJourneysBothStores(t *testing.T) {
 				}
 				return result.output
 			}
+			writeConnectorPublicSource(t, source, endpoints, github.Fixture.Input, command)
 			connectPublicConnectorCode(t, command, "slack.slack_oauth", "slack", slack.Server.URL+"/oauth.v2.access", "slack-client", "slack-secret", "--scope", "chat:write")
 			connectPublicConnectorCode(t, command, "notion.notion_oauth", "notion", notion.Server.URL+"/v1/oauth/token", "notion-client", "notion-secret", "--grant-model", "workspace_grant", "--token-client-auth", "basic", "--token-body", "json", "--token-header", "Notion-Version=2026-03-11")
 			command("graph-client-secret\n", "connections", "connect", "microsoft_graph.microsoft_graph_app", "--grant", "client_credentials", "--provider", "microsoft_graph", "--token-url", graph.Server.URL+"/tenant/oauth2/v2.0/token", "--client-id", "graph-client", "--client-secret-stdin", "--scope", "https://graph.microsoft.com/.default", "--json")
@@ -110,7 +107,12 @@ func TestEmbeddedConnectorPublicJourneysBothStores(t *testing.T) {
 			hash := goldenServedBundleHash(t, process.rpc, "live")
 			runID := ""
 			var listed struct {
-				Runs []operatorread.RunHeader `json:"runs"`
+				Runs []struct {
+					RunID      string `json:"run_id"`
+					BundleHash string `json:"bundle_hash"`
+					FlowPath   string `json:"flow_path"`
+					Status     string `json:"status"`
+				} `json:"runs"`
 			}
 			if err := process.rpc.call(ctx, "run.list", map[string]any{"bundle_hash": hash, "limit": 100}, &listed); err != nil {
 				t.Fatal(err)
@@ -349,7 +351,7 @@ func connectorEventIDs(events []goldenEvent) []string {
 	return ids
 }
 
-func writeConnectorPublicSource(t *testing.T, root string, endpoints map[string]string, githubInput map[string]any) {
+func writeConnectorPublicSource(t *testing.T, root string, endpoints map[string]string, githubInput map[string]any, command func(string, ...string) string) {
 	t.Helper()
 	writeReleaseFile(t, filepath.Join(root, "manifest.yaml"), "version: 1.0.0\nplatform_version: '*'\n")
 	writeReleaseFile(t, filepath.Join(root, "schema.yaml"), "stages: []\npins:\n  inputs: [slack.requested, notion.requested, microsoft_graph.requested, github.requested, inbound.github.issue_opened]\n")
@@ -379,14 +381,11 @@ func writeConnectorPublicSource(t *testing.T, root string, endpoints map[string]
 		"microsoft_graph": {"send_mail", map[string]any{"user_id": literal("user@example.com"), "to_recipients": []any{map[string]any{"emailAddress": map[string]any{"address": literal("recipient@example.com")}}}, "subject": "payload.text", "content": "payload.text"}},
 		"github":          {"create_issue", githubValues},
 	}
-	embedded := packfixture.EmbeddedBase(t)
 	origins := map[string]string{"slack": "https://slack.com", "notion": "https://api.notion.com", "microsoft_graph": "https://graph.microsoft.com", "github": "https://api.github.com"}
 	for provider, activity := range activities {
 		inputs[provider+".requested"] = map[string]any{"text": "text"}
 		nodes[provider+"-worker"] = map[string]any{"execution_type": "system_node", "subscribes_to": []string{provider + ".requested"}, "event_handlers": map[string]any{provider + ".requested": map[string]any{"activity": map[string]any{"id": "send_" + provider, "tool": provider + "." + activity.tool, "input": activity.input}}}}
-		if _, err := packartifact.ImportEmbeddedPack(root, provider, embedded); err != nil {
-			t.Fatal(err)
-		}
+		command("", "import", provider, root, "--json")
 		path := filepath.Join(root, provider, "connector.yaml")
 		raw, err := os.ReadFile(path)
 		if err != nil {

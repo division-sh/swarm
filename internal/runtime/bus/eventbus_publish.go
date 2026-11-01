@@ -2176,11 +2176,11 @@ func (eb *EventBus) withAuthorActivityEventDescriptor(ctx context.Context, evt e
 	}
 	if !proof.HasSchema {
 		publication, authenticated := authenticatedProviderPublicationForEvent(ctx, evt)
-		if !authenticated || publication.kind != runtimeprovideroutput.KindRaw {
+		if !authenticated || publication.kind != runtimeprovideroutput.KindRaw || !publication.hasRuntimeConsumer {
 			return ctx, nil
 		}
-		// Dynamic raw names need no authored consumer, but still require the
-		// exact authenticated output seal before acquiring story metadata.
+		// A consumed delivery's dynamic raw companion needs its exact output
+		// seal for story metadata, not a fabricated authored raw consumer.
 		if err := publication.admission.ValidateOutput(scope.BundleHash, publication.provider, publication.ordinal, publication.count, evt, publication.kind, runtimeprovideroutput.Authorization{}); err != nil {
 			return ctx, fmt.Errorf("raw publication metadata: %w", err)
 		}

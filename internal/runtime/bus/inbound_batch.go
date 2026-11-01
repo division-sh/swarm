@@ -51,14 +51,15 @@ func (eb *EventBus) PrepareInboundEvidence(ctx context.Context, event events.Eve
 type authenticatedProviderPublicationKey struct{}
 
 type authenticatedProviderPublication struct {
-	eventID   string
-	source    events.RouteIdentity
-	provider  string
-	kind      runtimeprovideroutput.Kind
-	account   string
-	admission providertriggers.PublicationAdmission
-	ordinal   int
-	count     int
+	eventID            string
+	source             events.RouteIdentity
+	provider           string
+	kind               runtimeprovideroutput.Kind
+	account            string
+	admission          providertriggers.PublicationAdmission
+	ordinal            int
+	count              int
+	hasRuntimeConsumer bool
 }
 
 func authenticatedProviderPublicationForEvent(ctx context.Context, event events.Event) (authenticatedProviderPublication, bool) {
@@ -217,10 +218,12 @@ func (eb *EventBus) PrepareInboundDeliveryBatch(ctx context.Context, batch Inbou
 	if err != nil {
 		return InboundDeliveryPlan{}, err
 	}
+	hasRuntimeConsumer := false
 	for index, item := range validated.Events {
 		if err := validated.Admission.ValidateOutput(eb.sourceArtifactFact.BundleHash(), validated.Provider, index, len(validated.Events), item.Event, item.Kind, item.Authorization); err != nil {
 			return InboundDeliveryPlan{}, err
 		}
+		hasRuntimeConsumer = hasRuntimeConsumer || runtimepinrouting.ClassifyRoutingSourceOutputConsumer(eb.semanticSource, string(item.Event.Type()), item.Event.RoutingSource()).HasRuntimeConsumer()
 	}
 	plan := InboundDeliveryPlan{admission: validated.Admission, events: append([]InboundDeliveryEvent(nil), validated.Events...)}
 	activationOwners := make(map[runtimeflowidentity.Route]int)
@@ -236,6 +239,7 @@ func (eb *EventBus) PrepareInboundDeliveryBatch(ctx context.Context, batch Inbou
 			eventID: item.Event.ID(), source: item.Event.RoutingSource().Route(), kind: item.Kind,
 			provider: validated.Provider, account: validated.Admission.OperatorAccount(),
 			admission: validated.Admission, ordinal: index, count: len(validated.Events),
+			hasRuntimeConsumer: hasRuntimeConsumer,
 		})
 		if item.Kind == runtimeprovideroutput.KindRaw {
 			itemCtx = withoutProviderOutputAuthorization(itemCtx)
