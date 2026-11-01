@@ -203,7 +203,10 @@ func selectedCompatibleToolRoundFixture(t *testing.T) (context.Context, openAICo
 	response := prior.Response
 	attempt := handle.Attempt()
 	response.completionAttempt, response.completionDispatch, response.CapabilitySurface = &attempt, dispatch, &surface
-	response.ToolOutputAuthority = &ToolOutputAuthority{ProviderOperationID: attempt.OperationID, SettledAt: time.Now()}
+	response.ToolOutputAuthority = &ToolOutputAuthority{ProviderOperationID: attempt.OperationID, SettledAt: time.Now().UTC().Truncate(time.Microsecond)}
+	if err := response.ToolOutputAuthority.Validate(); err != nil {
+		t.Fatal(err)
+	}
 	call.toolRound, call.selectedToolRound = nil, &response
 	call.provider, call.frame.Turn.ParentFrameID = frame.Session.Provider, frame.FrameID
 	return ctx, request, session, call
