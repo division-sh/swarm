@@ -46,7 +46,6 @@ type Bus interface {
 	ProjectLifecycleDiagnostic(context.Context, diaglog.LifecycleDiagnostic) error
 	AdmitSourceArtifactFact(context.Context) (context.Context, error)
 	Publish(ctx context.Context, evt events.Event) error
-	PublishDirect(ctx context.Context, evt events.Event, recipients []string) error
 	SweepPipelineObligations(ctx context.Context, limit int) (runtimepipelineobligation.SweepResult, error)
 	PipelineWorkPresence(context.Context) (runtimepipelineobligation.GlobalWorkPresence, error)
 	Store() runtimebus.EventStore

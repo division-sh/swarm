@@ -51,19 +51,6 @@ const (
 	subscriberRouteSourceConnectRoutePlan
 )
 
-func subscriberRouteSourceFromCode(code string) (subscriberRouteSource, bool) {
-	switch strings.TrimSpace(code) {
-	case "subscription":
-		return subscriberRouteSourceSubscription, true
-	case "pin_auto_wire":
-		return subscriberRouteSourcePinAutoWire, true
-	case "connect_route_plan":
-		return subscriberRouteSourceConnectRoutePlan, true
-	default:
-		return 0, false
-	}
-}
-
 func (s subscriberRouteSource) code() string {
 	switch s {
 	case subscriberRouteSourceSubscription:

@@ -51,8 +51,7 @@ const (
 	routePlanSourceDirectPolicy
 	routePlanSourceInternalTarget
 	routePlanSourceConcreteNodeRoute
-	routePlanSourceScopedNodeRoute
-	routePlanSourceRootNodeRoute
+	routePlanSourceRootNodeRoute routePlanSource = iota + 2 // Keep retired slot 5 unassigned.
 	routePlanSourceRecipientMaterializer
 	routePlanSourceConnectRoutePlan
 )
@@ -76,8 +75,6 @@ func (s routePlanSource) code() string {
 		return "internal_target_route"
 	case routePlanSourceConcreteNodeRoute:
 		return "concrete_node_route"
-	case routePlanSourceScopedNodeRoute:
-		return "scoped_node_route"
 	case routePlanSourceRootNodeRoute:
 		return "root_node_route"
 	case routePlanSourceRecipientMaterializer:
@@ -117,8 +114,7 @@ const (
 	routeIntentProducerInternalTargetCarrier
 	routeIntentProducerInternalTargetRoute
 	routeIntentProducerConcreteNodeRoute
-	routeIntentProducerScopedNodeRoute
-	routeIntentProducerRootNodeRoute
+	routeIntentProducerRootNodeRoute routeIntentProducer = iota + 1 // Keep retired slot 6 unassigned.
 	routeIntentProducerRecipientMaterializer
 	routeIntentProducerConnectRoutePlan
 )
@@ -130,7 +126,6 @@ func (p routeIntentProducer) Normalized() routeIntentProducer {
 		routeIntentProducerInternalTargetCarrier,
 		routeIntentProducerInternalTargetRoute,
 		routeIntentProducerConcreteNodeRoute,
-		routeIntentProducerScopedNodeRoute,
 		routeIntentProducerRootNodeRoute,
 		routeIntentProducerRecipientMaterializer,
 		routeIntentProducerConnectRoutePlan:
@@ -150,8 +145,6 @@ func (p routeIntentProducer) Source() routePlanSource {
 		return routePlanSourceInternalTarget
 	case routeIntentProducerConcreteNodeRoute:
 		return routePlanSourceConcreteNodeRoute
-	case routeIntentProducerScopedNodeRoute:
-		return routePlanSourceScopedNodeRoute
 	case routeIntentProducerRootNodeRoute:
 		return routePlanSourceRootNodeRoute
 	case routeIntentProducerRecipientMaterializer:
@@ -173,7 +166,6 @@ func (p routeIntentProducer) Reason() routePlanReason {
 		return routePlanReasonInternalCarrier
 	case routeIntentProducerInternalTargetRoute,
 		routeIntentProducerConcreteNodeRoute,
-		routeIntentProducerScopedNodeRoute,
 		routeIntentProducerRootNodeRoute:
 		return routePlanReasonRouteTableNode
 	case routeIntentProducerRecipientMaterializer:
@@ -784,7 +776,7 @@ func normalizeRoutePlanAuthorityState(state RoutePlanAuthorityState) RoutePlanAu
 func normalizeRoutePlanSource(source routePlanSource) routePlanSource {
 	switch source {
 	case routePlanSourceAgentPolicy, routePlanSourceDirectPolicy, routePlanSourceInternalTarget,
-		routePlanSourceConcreteNodeRoute, routePlanSourceScopedNodeRoute, routePlanSourceRootNodeRoute,
+		routePlanSourceConcreteNodeRoute, routePlanSourceRootNodeRoute,
 		routePlanSourceRecipientMaterializer, routePlanSourceConnectRoutePlan:
 		return source
 	default:

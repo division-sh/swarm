@@ -57,8 +57,6 @@ type previewBus struct{}
 
 func (previewBus) Publish(context.Context, events.Event) error { return nil }
 
-func (previewBus) PublishDirect(context.Context, events.Event, []string) error { return nil }
-
 func (previewBus) ResolveSubscribedRecipients(string) []string { return nil }
 
 func (previewBus) LogRuntime(context.Context, RuntimeLogEntry) error { return nil }
