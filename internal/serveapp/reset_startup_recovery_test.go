@@ -53,7 +53,7 @@ func TestServedResetPendingStartupUsesAdmittedSourcesBothStores(t *testing.T) {
 					captured := captureSelectedResetSupervisor(t)
 					endpoint, stop := startResetRecoveryServedBoot(t, opts)
 					previousSupervisor := <-captured
-					initial := requireServedRunStartRPCResult(t, endpoint, map[string]any{
+					initial := requireServedEventPublishRPCResult(t, endpoint, map[string]any{
 						"event_name": "item.received", "bundle_hash": hash,
 						"payload": map[string]any{"item_id": "predecessor"}, "idempotency_key": uuid.NewString(),
 					})

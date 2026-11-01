@@ -44,10 +44,10 @@ func TestServedReceiverAgentBusinessNamespaceBothStores(t *testing.T) {
 			first.mu.Unlock()
 			values := canonicalrouting.ReceiverAgentCollisionValues()
 			params := map[string]any{"event_name": "work.requested", "bundle_hash": rt.BundleHash, "idempotency_key": "collision-create", "payload": map[string]any{"account_id": "business-account", "values": values}}
-			seed := requireServedRunStartRPCResult(t, rt.Endpoint, params)
+			seed := requireServedEventPublishRPCResult(t, rt.Endpoint, params)
 			want := map[string]any{"account_id": "business-account", "values": canonicalrouting.ReceiverAgentCollisionValues()}
 			before := requireServedReceiverAgentCollision(t, rt, seed.RunID, want, 1)
-			duplicate := requireServedRunStartRPCResult(t, rt.Endpoint, params)
+			duplicate := requireServedEventPublishRPCResult(t, rt.Endpoint, params)
 			if duplicate.RunID != seed.RunID || duplicate.EventID != seed.EventID {
 				t.Fatal("duplicate reminted creation")
 			}

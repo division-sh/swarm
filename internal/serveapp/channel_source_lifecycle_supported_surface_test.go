@@ -66,7 +66,7 @@ func TestChannelSourceLifecyclePublicJourney(t *testing.T) {
 				}
 				standingCard := waitChannelAnchorCard(t, db, standingRun, decisioncard.AnchorKindStageGate, "chat")
 				waitChannelAnchorReceipt(t, db, standingCard)
-				seed := requireServedRunStartRPCResult(t, h.rpcEndpoint(), map[string]any{
+				seed := requireServedEventPublishRPCResult(t, h.rpcEndpoint(), map[string]any{
 					"event_name": "work.requested", "bundle_hash": hash, "payload": map[string]any{"seed": true},
 					"idempotency_key": "source-lifecycle-seed",
 				})
@@ -269,7 +269,7 @@ func TestChannelSourceLifecyclePublicJourney(t *testing.T) {
 						if err := db.QueryRow(`SELECT source_blob FROM source_artifacts WHERE bundle_hash=$1`, hash).Scan(&retained); err != nil || !bytes.Equal(retained, originalSource) {
 							t.Fatalf("retained reset changed source bytes: %v", err)
 						}
-						later := requireServedRunStartRPCResult(t, h.rpcEndpoint(), map[string]any{
+						later := requireServedEventPublishRPCResult(t, h.rpcEndpoint(), map[string]any{
 							"event_name": "work.requested", "bundle_hash": hash, "payload": map[string]any{"seed": true}, "idempotency_key": uuid.NewString(),
 						})
 						if later.RunID == seed.RunID {
@@ -393,7 +393,7 @@ func TestChannelSourceLifecyclePublicJourney(t *testing.T) {
 					requireServedOKJSONRPC(t, h.rpcEndpoint(), "run.pause", map[string]any{
 						"run_id": fork.ForkRunID, "idempotency_key": "selected-source-pause-before-ordinary",
 					})
-					ordinary := requireServedRunStartRPCResult(t, h.rpcEndpoint(), map[string]any{
+					ordinary := requireServedEventPublishRPCResult(t, h.rpcEndpoint(), map[string]any{
 						"event_name": "work.requested", "bundle_hash": hash, "payload": map[string]any{"seed": true}, "idempotency_key": uuid.NewString(),
 					})
 					ordinaryCard := waitChannelAnchorCard(t, db, ordinary.RunID, decisioncard.AnchorKindStageGate, "chat/reviews")
@@ -434,7 +434,7 @@ func TestChannelSourceLifecyclePublicJourney(t *testing.T) {
 
 func runRegisteredCLISourceLifecycle(t *testing.T, h *channelOnboardingE2EHarness, sourceReader *sourceArtifactReader, hash, operation string, receiverReader receiverProofStateReader, deliveryReader servedRunDeliveryReader) {
 	t.Helper()
-	seed := requireServedRunStartRPCResult(t, h.rpcEndpoint(), map[string]any{
+	seed := requireServedEventPublishRPCResult(t, h.rpcEndpoint(), map[string]any{
 		"event_name": "work.requested", "bundle_hash": hash, "payload": map[string]any{"seed": true}, "idempotency_key": "cli-source-seed",
 	})
 	card := waitChannelPublicCard(t, h, seed.RunID, decisioncard.AnchorKindStageGate, "chat/reviews")

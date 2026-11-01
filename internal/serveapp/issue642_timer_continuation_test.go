@@ -92,7 +92,7 @@ func issue642RetainedOrdinaryTimerFork(t *testing.T, backend string, selectedDel
 	if !ok {
 		t.Fatalf("selected serve store lacks canonical timer/fork readers: %T", rt.selected)
 	}
-	seed := requireServedRunStartRPCResult(t, rt.Endpoint, map[string]any{
+	seed := requireServedEventPublishRPCResult(t, rt.Endpoint, map[string]any{
 		"event_name": "timer.scheduled", "bundle_hash": rt.BundleHash,
 		"payload": map[string]any{}, "idempotency_key": "issue642-timer-arm",
 	})

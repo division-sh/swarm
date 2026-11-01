@@ -169,7 +169,7 @@ func TestServedForkConnectedRecipientAuthorityOnBothStores(t *testing.T) {
 			t.Cleanup(func() { projectRuntimePersistenceForServe = previous })
 			publication := newExactOriginPublicationProbe(t)
 			rt := startServedLiveFlowProofRuntimeFromSource(t, backend, canonicalrouting.CopyForkDeliveryRouteEvidence(t))
-			seed := requireServedRunStartRPCResult(t, rt.Endpoint, map[string]any{
+			seed := requireServedEventPublishRPCResult(t, rt.Endpoint, map[string]any{
 				"event_name": "parent.seeded", "bundle_hash": rt.BundleHash,
 				"payload": map[string]any{"work_id": "fork-recipient-authority"}, "idempotency_key": "recipient-seed",
 			})

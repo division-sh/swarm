@@ -512,14 +512,22 @@ func (rt *Runtime) PlanStandingTargets() ([]StandingTarget, error) {
 }
 
 func (rt *Runtime) PlanLiveFlowScopes() ([]runtimestanding.LiveRunScope, error) {
-	plans, err := rt.standingTargetPlans()
-	if err != nil {
-		return nil, err
+	if rt == nil || rt.Options.WorkflowModule == nil {
+		return nil, fmt.Errorf("runtime workflow module is required")
 	}
-	out := make([]runtimestanding.LiveRunScope, 0, len(plans))
-	for _, plan := range plans {
-		out = append(out, runtimestanding.LiveRunScope{FlowPath: plan.declaration.FlowPath})
+	if err := rt.Options.SourceArtifactFact.Validate(); err != nil {
+		return nil, fmt.Errorf("live flow bundle source fact: %w", err)
 	}
+	source := rt.Options.WorkflowModule.SemanticSource()
+	if source == nil {
+		return nil, fmt.Errorf("live flow planning requires a semantic source")
+	}
+	flows := source.FlowScopes()
+	out := make([]runtimestanding.LiveRunScope, 0, len(flows))
+	for _, flow := range flows {
+		out = append(out, runtimestanding.LiveRunScope{FlowPath: runtimeflowidentity.ScopeKey(source, flow.ID)})
+	}
+	sort.Slice(out, func(i, j int) bool { return out[i].FlowPath < out[j].FlowPath })
 	return out, nil
 }
 

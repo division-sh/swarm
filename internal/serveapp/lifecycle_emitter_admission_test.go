@@ -129,7 +129,7 @@ func TestServedLifecycleEmitterPublicInputAdmissionNoMutation(t *testing.T) {
 							t.Fatalf("rejected %s stored %d idempotency completions", key.method, n)
 						}
 					}
-					started := requireServedRunStartRPCResult(t, rt.Endpoint, map[string]any{
+					started := requireServedEventPublishRPCResult(t, rt.Endpoint, map[string]any{
 						"bundle_hash": rt.BundleHash, "event_name": "work.requested", "payload": map[string]any{"seed": true}, "idempotency_key": "lifecycle-valid-ingress",
 					})
 					requireServedEventPublishEntityState(t, rt.DB, rt.Backend, started.RunID, "", tc.state)

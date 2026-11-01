@@ -20,11 +20,11 @@ func TestA2PortfolioPublicIndependentArrivalAdmissionBothStores(t *testing.T) {
 			captureSelectedRuntimePersistence(t, func(p serveRuntimePersistence) { selected = p })
 			process, rt := start()
 			rt = a2PortfolioReadbackRuntime(t, process, rt, selected)
-			setup := requireServedRunStartRPCResult(t, rt.Endpoint, map[string]any{
+			setup := requireServedEventPublishRPCResult(t, rt.Endpoint, map[string]any{
 				"bundle_hash": rt.BundleHash, "event_name": "portfolio.setup", "idempotency_key": "a2-admission-setup",
 				"payload": map[string]any{"portfolio_id": "portfolio-one", "period_id": "period-one", "expected_operating_ids": []string{"op-a", "op-b"}},
 			})
-			if setup.Status != "live" || setup.RunID == "" || setup.EventID == "" {
+			if !setup.NewRunCreated || setup.RunID == "" || setup.EventID == "" {
 				t.Fatalf("public setup did not create a run: %+v", setup)
 			}
 			waitServedRunDeliveryQuiescence(t, rt.ReadRunDeliveries, setup.RunID)

@@ -55,7 +55,7 @@ func testServedJoinWriterCompletedHistoryRefusal(t *testing.T, separateCheckpoin
 				t.Fatal(err)
 			}
 			rt := startServedTestSetupEntitiesProofRuntimeFromSource(t, backend, root)
-			started := requireServedRunStartRPCResult(t, rt.Endpoint, map[string]any{
+			started := requireServedEventPublishRPCResult(t, rt.Endpoint, map[string]any{
 				"event_name": "work.requested", "bundle_hash": rt.BundleHash,
 				"payload": map[string]any{"token": "member-one"}, "idempotency_key": "retained-join-start",
 			})
