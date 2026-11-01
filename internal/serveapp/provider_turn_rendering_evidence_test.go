@@ -109,7 +109,10 @@ func runTurnRenderingJourney(t *testing.T, backend servedparity.Backend, cell st
 	}
 	configureProviderJourneyLLM(t, h.opts.ConfigPath, "openai_compatible", baseURL, "deepseek-flash")
 	observation := &providerEvidenceObservation{base: http.DefaultTransport, live: live}
-	recorder := &turnRenderingRecorder{base: observation, sourceSHA: os.Getenv(realModelSHAEnv)}
+	recorder := &turnRenderingRecorder{base: observation, sourceSHA: os.Getenv(realModelSHAEnv), evidenceDir: os.Getenv("SWARM_RENDERING_EVIDENCE_DIR")}
+	for _, key := range []string{realModelSHAEnv, realModelCellsEnv, realModelTransportEnv, "SWARM_RENDERING_EVIDENCE_DIR"} {
+		unsetEnvForTest(t, key)
+	}
 	http.DefaultTransport = recorder
 	t.Cleanup(func() { http.DefaultTransport = observation.base })
 	t.Cleanup(func() {
@@ -282,11 +285,12 @@ type turnRenderingWire struct {
 // Capture bodies only, after ordinary opt-in admission. Headers (including
 // authorization) and transport addresses never enter an evidence receipt.
 type turnRenderingRecorder struct {
-	base       *providerEvidenceObservation
-	mu         sync.Mutex
-	pairs      []turnRenderingWire
-	eventTimes map[string]string
-	sourceSHA  string
+	base        *providerEvidenceObservation
+	mu          sync.Mutex
+	pairs       []turnRenderingWire
+	eventTimes  map[string]string
+	sourceSHA   string
+	evidenceDir string
 }
 
 func (r *turnRenderingRecorder) RoundTrip(request *http.Request) (*http.Response, error) {
@@ -516,6 +520,10 @@ func (r *turnRenderingRecorder) reportMarkup(t *testing.T) {
 	t.Helper()
 	r.mu.Lock()
 	defer r.mu.Unlock()
+	if len(r.pairs) == 0 {
+		t.Log("synthetic_markup=NOT_EXERCISED requests=0; setup failed before provider")
+		return
+	}
 	leaked := false
 	for _, pair := range r.pairs {
 		var response struct {
@@ -541,7 +549,7 @@ func (r *turnRenderingRecorder) reportMarkup(t *testing.T) {
 
 func (r *turnRenderingRecorder) save(t *testing.T, backend servedparity.Backend, cell string) {
 	t.Helper()
-	dir := os.Getenv("SWARM_RENDERING_EVIDENCE_DIR")
+	dir := r.evidenceDir
 	if dir == "" {
 		t.Error("live synthetic raw evidence directory not selected")
 		return
