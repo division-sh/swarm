@@ -16820,6 +16820,7 @@ platform_tables:
         - entity_mutations
         - entity_state
         - run_event_counts
+        - run_completion_evidence
         - workflow_instance_initial_materializations
         - workflow_publication_stage_receipts
         - workflow_handler_stage_receipts
