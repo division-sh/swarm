@@ -28,17 +28,18 @@ import (
 )
 
 type completionDispatch struct {
-	handle             *runtimeeffects.Handle
-	state              runtimeeffects.State
-	mutationErr        error
-	callerCtx          context.Context
-	evidence           map[string]any
-	providerModel      llmselection.ResolvedModel
-	invocation         completionProviderInvocation
-	request            []byte
-	requestFingerprint string
-	projection         *completionProjection
-	continuation       json.RawMessage
+	handle              *runtimeeffects.Handle
+	state               runtimeeffects.State
+	mutationErr         error
+	callerCtx           context.Context
+	evidence            map[string]any
+	providerModel       llmselection.ResolvedModel
+	invocation          completionProviderInvocation
+	request             []byte
+	requestFingerprint  string
+	responseFingerprint string
+	projection          *completionProjection
+	continuation        json.RawMessage
 }
 
 type completionProviderInvocation uint8

@@ -1,6 +1,7 @@
 package llm
 
 import (
+	"bytes"
 	"context"
 	"encoding/json"
 	"reflect"
@@ -73,6 +74,9 @@ func TestOpenAICompatibleToolRoundRefusesMismatchedPredecessors(t *testing.T) {
 	}{
 		{"acknowledgement", func(r *Response, _ *Session, _ *managedProviderCall) { r.completionAttempt = nil }},
 		{"request_fingerprint", func(r *Response, _ *Session, _ *managedProviderCall) { r.completionDispatch.request = []byte(`{}`) }},
+		{"response_fingerprint", func(r *Response, _ *Session, _ *managedProviderCall) {
+			r.Raw = bytes.ReplaceAll(r.Raw, []byte("private reasoning"), []byte("foreign reasoning"))
+		}},
 		{"attempt", func(r *Response, _ *Session, _ *managedProviderCall) {
 			attempt := *r.completionAttempt
 			attempt.AttemptID = uuid.NewString()
@@ -195,6 +199,7 @@ func selectedCompatibleToolRoundFixture(t *testing.T) (context.Context, openAICo
 	dispatch := newCompletionDispatch(handle, runtimeeffects.StateSettled)
 	dispatch.request = append([]byte(nil), call.toolRound.Request...)
 	dispatch.requestFingerprint = runtimeeffects.Fingerprint(dispatch.request)
+	dispatch.responseFingerprint = runtimeeffects.Fingerprint(prior.Response.Raw)
 	dispatch.markProviderInvocationStarted()
 	projection := prior.Projection
 	projection.FrameID = frame.FrameID
