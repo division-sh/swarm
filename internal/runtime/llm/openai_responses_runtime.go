@@ -481,7 +481,16 @@ func (r *OpenAIResponsesRuntime) sendRequest(ctx context.Context, payload []byte
 	}
 	req.Header.Set("content-type", "application/json")
 	req.Header.Set("authorization", "Bearer "+r.credentialCache.snapshot())
-	attempt, err := beginManagedHTTPProviderCall(ctx, "openai_responses", payload, req, managed)
+	var attempt *runtimeeffects.Handle
+	if managed != nil {
+		call, callErr := managedHTTPProviderCall(payload, req, managed)
+		if callErr != nil {
+			return nil, openAIResponsesResponse{}, nil, callErr
+		}
+		attempt, err = runtimeeffects.BeginManagedProviderCall(ctx, "openai_responses", managed.frame, call)
+	} else {
+		attempt, err = runtimeeffects.BeginCompletion(ctx, "openai_responses", payload, nil)
+	}
 	if err != nil {
 		return nil, openAIResponsesResponse{}, nil, err
 	}

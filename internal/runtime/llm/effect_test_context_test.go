@@ -118,6 +118,11 @@ func managedEffectHarnessContext(t testing.TB, harness *effecttest.Harness, iden
 	if !ok {
 		t.Fatal("managed effect test context requires capability surface")
 	}
+	profile, err := llmselection.ResolveProviderContractProfile(surface.RuntimeMode, surface.Provider, surface.Transport)
+	if err != nil {
+		t.Fatal(err)
+	}
+	ctx = withEffectTestRequest(t, ctx, profile, llmselection.ResolvedModel{ModelAlias: "regular", ConcreteModel: "effect-test-model"})
 	mode, ok := runtimeeffects.ExecutionModeFromContext(ctx)
 	if !ok {
 		mode = runtimeeffects.ExecutionModeLive
@@ -169,7 +174,28 @@ func managedProviderCallForEffectTest(t testing.TB, ctx context.Context) *manage
 	if err != nil {
 		t.Fatalf("complete effect-test frame: %v", err)
 	}
-	return &managedProviderCall{frame: frame, provider: frame.Session.Provider}
+	role, content, err := frame.ProviderInput()
+	if err != nil {
+		t.Fatal(err)
+	}
+	call := &managedProviderCall{frame: frame, provider: frame.Session.Provider, message: Message{Role: role, Content: content}}
+	profile, err := llmselection.ResolveProviderContractProfile(surface.RuntimeMode, surface.Provider, surface.Transport)
+	if err != nil {
+		t.Fatal(err)
+	}
+	contract, err := ProviderContractForProfile(profile)
+	if err != nil {
+		t.Fatal(err)
+	}
+	authority, ok := runtimeeffects.CompletionAuthorityFromContext(ctx)
+	if !ok {
+		t.Fatal("effect test requires completion authority")
+	}
+	session := &Session{ID: surface.Authority.SessionID, TurnCount: surface.Authority.TurnOrdinal - 1, Memory: authority.Target.Memory}
+	if err := freezeManagedProviderInput(session, call, contract); err != nil {
+		t.Fatal(err)
+	}
+	return call
 }
 
 type effectTestRequestKey struct{}
@@ -184,8 +210,12 @@ func withEffectTestRequest(t testing.TB, ctx context.Context, profile llmselecti
 	for _, tool := range old.Tools {
 		tools = append(tools, managedcapabilities.PlannedTool{Name: tool.Name, DefinitionHash: tool.DefinitionHash, Capability: tool.Capability, Bindings: tool.Bindings})
 	}
+	contract, err := ProviderContractForProfile(profile)
+	if err != nil {
+		t.Fatal(err)
+	}
 	surface, err := managedcapabilities.New(managedcapabilities.Plan{ActorIdentity: old.ActorIdentity, ActorPlan: old.ActorPlan,
-		RuntimeMode: profile.RuntimeMode, Provider: profile.Provider, Transport: profile.Transport, ProviderContract: old.ProviderContract,
+		RuntimeMode: profile.RuntimeMode, Provider: profile.Provider, Transport: profile.Transport, ProviderContract: hashJSON(contract),
 		Authority: old.Authority, Tools: tools, CreatedAt: old.CreatedAt})
 	if err != nil {
 		t.Fatal(err)

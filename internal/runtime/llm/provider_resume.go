@@ -36,12 +36,9 @@ func freezeManagedProviderInput(session *Session, call *managedProviderCall, con
 	return nil
 }
 
-func beginManagedHTTPProviderCall(ctx context.Context, adapter string, payload []byte, request *http.Request, managed *managedProviderCall) (*runtimeeffects.Handle, error) {
-	if managed == nil {
-		return runtimeeffects.BeginCompletion(ctx, adapter, payload, nil)
-	}
+func managedHTTPProviderCall(payload []byte, request *http.Request, managed *managedProviderCall) (runtimeeffects.ProviderCall, error) {
 	if managed.frozen == nil {
-		return nil, fmt.Errorf("managed HTTP provider call requires frozen input")
+		return runtimeeffects.ProviderCall{}, fmt.Errorf("managed HTTP provider call requires frozen input")
 	}
 	call := *managed.frozen
 	headers := make(map[string]string)
@@ -51,7 +48,7 @@ func beginManagedHTTPProviderCall(ctx context.Context, adapter string, payload [
 			continue
 		}
 		if len(values) != 1 {
-			return nil, fmt.Errorf("provider call semantic header must have one exact value")
+			return runtimeeffects.ProviderCall{}, fmt.Errorf("provider call semantic header must have one exact value")
 		}
 		headers[name] = values[0]
 	}
@@ -59,14 +56,14 @@ func beginManagedHTTPProviderCall(ctx context.Context, adapter string, payload [
 	if managed.resume != nil {
 		fingerprint, err := call.Request.Fingerprint()
 		if err != nil {
-			return nil, err
+			return runtimeeffects.ProviderCall{}, err
 		}
 		previous, err := managed.resume.Journal.Call.Request.Fingerprint()
 		if err != nil || previous != fingerprint {
-			return nil, fmt.Errorf("provider resume rendering differs from its recorded request")
+			return runtimeeffects.ProviderCall{}, fmt.Errorf("provider resume rendering differs from its recorded request")
 		}
 	}
-	return runtimeeffects.BeginManagedProviderCall(ctx, adapter, managed.frame, call)
+	return call, nil
 }
 
 func (c *Conversation) recoverInterruptedProviderCall(ctx context.Context, previous *Response) (*Response, bool, error) {

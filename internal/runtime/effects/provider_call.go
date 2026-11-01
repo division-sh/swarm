@@ -178,9 +178,22 @@ func (c ProviderCall) Validate(authority Authority, req AuthorizeRequest) error 
 	return nil
 }
 
+func (j ProviderCallJournal) ValidateRequestBinding(operationID, attemptID, fingerprint string) error {
+	bound, err := j.Call.Request.Fingerprint()
+	if err != nil {
+		return err
+	}
+	if j.Version != ProviderCallJournalVersion || j.OperationID != operationID || j.AttemptID != attemptID || bound != fingerprint {
+		return fmt.Errorf("provider call journal contradicts its physical request")
+	}
+	return nil
+}
+
 func (j ProviderCallJournal) Validate(authority Authority, req AuthorizeRequest) error {
-	if j.Version != ProviderCallJournalVersion || j.OperationID != req.OperationID || j.AttemptID != req.AttemptID ||
-		j.Adapter != req.Adapter || j.TargetKind != authority.Target.Kind || j.TargetID != authority.Target.ID ||
+	if err := j.ValidateRequestBinding(req.OperationID, req.AttemptID, req.RequestFingerprint); err != nil {
+		return err
+	}
+	if j.Adapter != req.Adapter || j.TargetKind != authority.Target.Kind || j.TargetID != authority.Target.ID ||
 		j.TargetOrdinal != authority.Target.Ordinal || req.AgentFrame == nil || req.CapabilitySurface == nil ||
 		j.SourceHash != req.AgentFrame.Session.SourceArtifact.Hash || j.FrameID != req.AgentFrame.FrameID ||
 		j.SurfaceID != req.CapabilitySurface.ID || j.SurfaceHash != req.CapabilitySurface.IntegrityHash {
