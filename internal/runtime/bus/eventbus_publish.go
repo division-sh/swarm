@@ -18,6 +18,7 @@ import (
 	"github.com/division-sh/swarm/internal/runtime/core/eventreceiver"
 	runtimeflowidentity "github.com/division-sh/swarm/internal/runtime/core/flowidentity"
 	runtimepinrouting "github.com/division-sh/swarm/internal/runtime/core/pinrouting"
+	runtimeprovideroutput "github.com/division-sh/swarm/internal/runtime/core/provideroutput"
 	worklifetime "github.com/division-sh/swarm/internal/runtime/core/worklifetime"
 	runtimecorrelation "github.com/division-sh/swarm/internal/runtime/correlation"
 	runtimedeadletters "github.com/division-sh/swarm/internal/runtime/deadletters"
@@ -2174,7 +2175,15 @@ func (eb *EventBus) withAuthorActivityEventDescriptor(ctx context.Context, evt e
 		}
 	}
 	if !proof.HasSchema {
-		return ctx, nil
+		publication, authenticated := authenticatedProviderPublicationForEvent(ctx, evt)
+		if !authenticated || publication.kind != runtimeprovideroutput.KindRaw {
+			return ctx, nil
+		}
+		// Dynamic raw names need no authored consumer, but still require the
+		// exact authenticated output seal before acquiring story metadata.
+		if err := publication.admission.ValidateOutput(scope.BundleHash, publication.provider, publication.ordinal, publication.count, evt, publication.kind, runtimeprovideroutput.Authorization{}); err != nil {
+			return ctx, fmt.Errorf("raw publication metadata: %w", err)
+		}
 	}
 	disposition := runtimeauthoractivity.StoryDifferent
 	if proof.IsAuthored(eb.semanticSource) {
