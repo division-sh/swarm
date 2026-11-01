@@ -39890,7 +39890,7 @@ api_specification:
             additionalProperties: true
         - name: run_id
           required: false
-          description: Existing nonterminal run to inject into; if omitted, runtime allocates and starts a new run.
+          description: Existing nonterminal run to inject into; if omitted, select the input's unique live flow run without creating or reviving a run.
           schema:
             $ref: '#/components/schemas/OpaqueId'
         - name: source_event_id
@@ -40150,6 +40150,11 @@ api_specification:
           description: Caller-provided ID; if omitted, runtime assigns.
           schema:
             $ref: '#/components/schemas/OpaqueId'
+        - name: scenario_execution
+          required: false
+          description: Exact immutable scenario profile selection, admitted with the newly created mock-only scenario run. Existing runs cannot acquire or change a profile.
+          schema:
+            $ref: '#/components/schemas/ScenarioExecutionSelector'
         - name: data
           required: false
           description: Exact fused imports and explicit version pins consumed by the method-neutral run-creation operation.
