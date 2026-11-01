@@ -1592,7 +1592,7 @@ func TestDeliveryPlanner_ExactSameInstanceTargetUsesCompiledReceiverMode(t *test
 				routeSource:  subscriberRouteSourceSubscription,
 			}
 
-			intents := routedExactSameInstanceNoTargetNodeDeliveryIntents(source, evt, []Subscriber{subscriber})
+			intents := (ordinaryPublicationSource{}).nodeIntents(source, evt, evt, []Subscriber{subscriber})
 			if len(intents) != 1 {
 				t.Fatalf("delivery intents = %#v, want one", intents)
 			}

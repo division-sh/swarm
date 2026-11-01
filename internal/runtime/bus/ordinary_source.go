@@ -5,6 +5,7 @@ import (
 	"strings"
 
 	"github.com/division-sh/swarm/internal/events"
+	runtimecontracts "github.com/division-sh/swarm/internal/runtime/contracts"
 	runtimeflowidentity "github.com/division-sh/swarm/internal/runtime/core/flowidentity"
 	"github.com/division-sh/swarm/internal/runtime/pipeline"
 	"github.com/division-sh/swarm/internal/runtime/semanticview"
@@ -198,22 +199,73 @@ func (s ordinaryPublicationSource) includesCandidate(candidate deliveryRecipient
 	return identity.Validate() == nil && s.ownsAgent(identity.FlowInstance())
 }
 
-func (s ordinaryPublicationSource) localNodeIntents(source semanticview.Source, evt events.Event, routed []Subscriber) []RoutePlanDeliveryIntent {
-	if s.declarationOnly {
-		return nil
-	}
-	if s.route.Empty() {
-		out := routedRootNodeDeliveryIntentsForNoTargetEvent(source, evt, routed)
-		return append(out, routedExactSameInstanceNoTargetNodeDeliveryIntents(source, evt, routed)...)
-	}
-	if len(eventDeliveryTargetRoutes(evt)) > 0 {
-		return nil
-	}
-	var out []plannedDeliveryRoute
-	for _, subscriber := range routed {
-		if subscriber.Recipient.IsNode() && s.includesSubscriber(subscriber) {
-			out = append(out, plannedDeliveryRoute{Recipient: subscriber.Recipient, Target: s.route, Handler: routedSubscriberTargetHandler(subscriber, evt.Type())})
+func (s ordinaryPublicationSource) nodeIntents(source semanticview.Source, localEvent, originalEvent events.Event, routed []Subscriber) []RoutePlanDeliveryIntent {
+	rootRoutes, concreteRoutes := s.localNodeRoutes(source, localEvent, routed)
+	var targeted []plannedDeliveryRoute
+	for _, target := range eventDeliveryTargetRoutes(originalEvent) {
+		target = target.Normalized()
+		if target.Empty() {
+			continue
+		}
+		for _, subscriber := range routed {
+			if !subscriber.Recipient.IsNode() || !routeMatchesInternalSubscriber(target, subscriber, rootExecutionCoordinate(source, originalEvent.RunID())) {
+				continue
+			}
+			targeted = append(targeted, plannedDeliveryRoute{
+				Recipient: subscriber.Recipient, Target: target,
+				Handler: routedSubscriberTargetHandler(subscriber, originalEvent.Type()),
+			})
 		}
 	}
-	return routePlanDeliveryIntentsFromRoutes(out, routeIntentProducerConcreteNodeRoute)
+	out := routePlanDeliveryIntentsFromRoutes(rootRoutes, routeIntentProducerRootNodeRoute)
+	out = append(out, routePlanDeliveryIntentsFromRoutes(concreteRoutes, routeIntentProducerConcreteNodeRoute)...)
+	return append(out, routePlanDeliveryIntentsFromRoutes(normalizePlannedDeliveryRoutes(targeted), routeIntentProducerInternalTargetRoute)...)
+}
+
+func (s ordinaryPublicationSource) localNodeRoutes(source semanticview.Source, evt events.Event, routed []Subscriber) ([]plannedDeliveryRoute, []plannedDeliveryRoute) {
+	if s.declarationOnly || len(routed) == 0 || len(eventDeliveryTargetRoutes(evt)) > 0 {
+		return nil, nil
+	}
+	var root semanticview.RootExecutionCoordinate
+	if s.route.Empty() {
+		if admitted, err := semanticview.AdmitRootExecutionCoordinate(source, evt.RunID()); err == nil {
+			root = admitted
+		}
+	}
+	var rootRoutes, concreteRoutes []plannedDeliveryRoute
+	for _, subscriber := range routed {
+		if !subscriber.Recipient.IsNode() {
+			continue
+		}
+		route := plannedDeliveryRoute{Recipient: subscriber.Recipient, Handler: routedSubscriberTargetHandler(subscriber, evt.Type())}
+		if !s.route.Empty() {
+			if s.includesSubscriber(subscriber) {
+				route.Target = s.route
+				concreteRoutes = append(concreteRoutes, route)
+			}
+			continue
+		}
+		if routedRootNodeMatchesNoTargetEvent(evt, subscriber, root) {
+			route.Target = events.RouteIdentity{FlowID: root.FlowID(), FlowInstance: root.RunID()}
+			rootRoutes = append(rootRoutes, route)
+		}
+		if exactEventFlowInstance(evt) != "" && routedNodeMatchesConcreteFlowInstanceEvent(evt, subscriber) {
+			route.Target = sameInstanceNodeTarget(source, evt, subscriber)
+			concreteRoutes = append(concreteRoutes, route)
+		}
+	}
+	return rootRoutes, concreteRoutes
+}
+
+func sameInstanceNodeTarget(source semanticview.Source, evt events.Event, subscriber Subscriber) events.RouteIdentity {
+	instance := exactEventFlowInstance(evt)
+	if node, ok := subscriber.Recipient.Node(); ok && source != nil {
+		if scope, found := source.FlowScopeByID(node.FlowPath()); found {
+			switch strings.ToLower(strings.TrimSpace(scope.Mode)) {
+			case runtimecontracts.FlowModeStatic:
+				instance = strings.Trim(strings.TrimSpace(subscriber.Path), "/")
+			}
+		}
+	}
+	return events.RouteIdentity{FlowInstance: instance}.Normalized()
 }

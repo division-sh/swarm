@@ -179,7 +179,7 @@ func TestIndexedPubsubRootUsesGenerationCoordinate(t *testing.T) {
 			t.Fatalf("root subscriber borrowed a declaration or foreign coordinate: %+v", subscriber)
 		}
 	}
-	intents := routedRootNodeDeliveryIntentsForNoTargetEvent(source, event, subscribers)
+	intents := (ordinaryPublicationSource{}).nodeIntents(source, event, event, subscribers)
 	if len(intents) != len(subscribers) {
 		t.Fatalf("native root lost its ordinary delivery authority: subscribers=%+v intents=%+v", subscribers, intents)
 	}
@@ -191,7 +191,7 @@ func TestIndexedPubsubRootUsesGenerationCoordinate(t *testing.T) {
 	for _, path := range []string{eventtest.UUID("other-root-run"), "private-child"} {
 		foreign := subscribers[0]
 		foreign.Path = path
-		if intents := routedRootNodeDeliveryIntentsForNoTargetEvent(source, event, []Subscriber{foreign}); len(intents) != 0 {
+		if intents := (ordinaryPublicationSource{}).nodeIntents(source, event, event, []Subscriber{foreign}); len(intents) != 0 {
 			t.Fatalf("foreign root coordinate obtained delivery authority: %+v", intents)
 		}
 	}
@@ -249,7 +249,7 @@ func TestIndexedPubsubDeploymentFeedUsesConstructedRoot(t *testing.T) {
 	if len(reader.requested) != 2 || len(reader.requested[1].Coordinates()) != 1 || reader.requested[1].Coordinates()[0].Key() != reader.observations[0].Owner().Key() {
 		t.Fatalf("root feed escaped its exact native lookup: %+v", reader.requested)
 	}
-	intents := publication.localNodeIntents(source, event, subscribers)
+	intents := publication.nodeIntents(source, event, event, subscribers)
 	if len(intents) != 1 || intents[0].TargetBlueprint.FlowID != "." || intents[0].TargetBlueprint.FlowInstance != event.RunID() || event.RoutingSource() != feed {
 		t.Fatalf("root feed changed receiver or declaration source: intents=%+v source=%+v", intents, event.RoutingSource())
 	}
