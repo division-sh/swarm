@@ -256,8 +256,8 @@ func runCanonicalTelegramAgentLiveSelection(t *testing.T, backend string) {
 			t.Fatalf("channel list exposed private credential evidence: %s", &listOut)
 		}
 	}
-	if registrations, deliveries := native.Counts(); registrations != 0 || deliveries != 0 {
-		t.Fatalf("fresh Telegram connect bypassed required restart: registrations=%d deliveries=%d", registrations, deliveries)
+	if registrations, deliveries := native.Counts(); registrations != 1 || deliveries != 0 {
+		t.Fatalf("fresh Telegram connect did not register the held account without customer delivery: registrations=%d deliveries=%d", registrations, deliveries)
 	}
 	if code := first.stop(); code != 0 {
 		t.Fatalf("pre-restart serve exit = %d\n%s", code, first.outputString())
