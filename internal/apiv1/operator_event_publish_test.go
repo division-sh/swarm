@@ -610,7 +610,7 @@ func TestOperatorEventPublishRootEventNameWinsOverFlowLeafAliases(t *testing.T) 
 	if err != nil || header.Status != "live" || header.BundleHash != runStartTestBundleHashForSource(source) || header.Origin.Kind() != storerunlifecycle.OriginDeployment {
 		t.Fatalf("selected run changed its original source/origin: %+v, %v", header, err)
 	}
-	assertPostgresEventPublishRows(t, db, runID, eventID, "cli-publish:"+actorTokenID(testToken))
+	assertEventPublishPersistence(t, db, runID, eventID, "item.received", "cli-publish:"+actorTokenID(testToken), runStartTestBundleHashForSource(source))
 }
 
 func TestOperatorEventPublishFlowScopedEventNameFailuresFailClosed(t *testing.T) {
@@ -2854,14 +2854,14 @@ func assertEventPublishPersistence(t *testing.T, db *sql.DB, runID, eventID, eve
 	t.Helper()
 	var runStatus, triggerType, triggerID, bundleHash string
 	if err := db.QueryRow(`
-		SELECT status, trigger_event_type, trigger_event_id::text, bundle_hash
+		SELECT status, COALESCE(trigger_event_type, ''), COALESCE(trigger_event_id::text, ''), bundle_hash
 		FROM runs
 		WHERE run_id = $1::uuid
 	`, runID).Scan(&runStatus, &triggerType, &triggerID, &bundleHash); err != nil {
 		t.Fatalf("load event.publish run row: %v", err)
 	}
-	if runStatus != "live" || triggerType != eventName || triggerID != eventID {
-		t.Fatalf("run row status=%q trigger=%q/%q, want live/%s/%s", runStatus, triggerType, triggerID, eventName, eventID)
+	if runStatus != "live" || triggerType != "" || triggerID != "" {
+		t.Fatalf("run row status=%q trigger=%q/%q, want live with no creation trigger from publication %s", runStatus, triggerType, triggerID, eventName)
 	}
 	if bundleHash != expectedBundleHash {
 		t.Fatalf("run row source artifact hash = %q, want %s", bundleHash, expectedBundleHash)
