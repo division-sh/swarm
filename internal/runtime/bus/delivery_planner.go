@@ -285,7 +285,7 @@ func (p deliveryPlanner) planRecipients(ctx context.Context, evt events.Event) (
 		ctx = withPublicationTargetOwners(ctx, projection)
 		connectPlan.ActivationPlans = append(rootPlans, connectPlan.ActivationPlans...)
 		routePlan = routePlanFromConnectRouteDispatch(evt, connectPlan)
-		if routePlan.CanonicalRouteOwnerMatched() && !routePlan.TargetFailure.Empty() {
+		if routePlan.canonicalRouteFailedClosed() {
 			localPlan, localErr := p.planIndependentPubsubBranch(ctx, evt, true)
 			if localErr != nil {
 				return RoutePlan{}, localErr

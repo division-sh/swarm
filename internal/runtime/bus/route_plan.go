@@ -275,7 +275,7 @@ func (p RoutePlan) Normalized() RoutePlan {
 		evt := *p.CycleEscalation
 		p.CycleEscalation = &evt
 	}
-	if p.canonicalAdmission && !p.TargetFailure.Empty() {
+	if p.canonicalRouteFailedClosed() {
 		p.LiveRecipients = nil
 		p.DeliveryIntents = nil
 		p.RoutedRecipients = nil
@@ -321,6 +321,10 @@ func (p *RoutePlan) recordOrdinaryRouteProducer(producer routeIntentProducer) {
 
 func (p RoutePlan) CanonicalRouteOwnerMatched() bool {
 	return p.canonicalAdmission
+}
+
+func (p RoutePlan) canonicalRouteFailedClosed() bool {
+	return p.canonicalAdmission && !p.TargetFailure.Empty()
 }
 
 func (p PublishRecipientPlan) UsesCanonicalRouteAuthority() bool {
