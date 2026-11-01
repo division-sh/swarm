@@ -254,14 +254,18 @@ func TestSettledProviderResponseContinuationAdvancesExactActiveTurnPostgres(t *t
 
 func TestCompletionResponseSuccessorCheckpointMatrixSQLite(t *testing.T) {
 	store := newBootstrappedSQLiteRuntimeStoreForTest(t)
-	proveCompletionToolResultConsumption(t, newCompletionSettlementFixture(t, store, store.backend.ConstructionHandle(), true))
+	t.Run("terminal_result", func(t *testing.T) {
+		proveCompletionToolResultConsumption(t, newCompletionSettlementFixture(t, store, store.backend.ConstructionHandle(), true))
+	})
 	proveCompletionResponseSuccessorCheckpointMatrix(t, store, store.backend.ConstructionHandle(), true)
 }
 
 func TestCompletionResponseSuccessorCheckpointMatrixPostgres(t *testing.T) {
 	_, db, _ := testutil.StartPostgres(t)
 	store := admitTestPostgresStore(t, db)
-	proveCompletionToolResultConsumption(t, newCompletionSettlementFixture(t, store, db, false))
+	t.Run("terminal_result", func(t *testing.T) {
+		proveCompletionToolResultConsumption(t, newCompletionSettlementFixture(t, store, db, false))
+	})
 	proveCompletionResponseSuccessorCheckpointMatrix(t, store, db, false)
 }
 
