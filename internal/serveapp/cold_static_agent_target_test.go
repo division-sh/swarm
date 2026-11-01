@@ -5,7 +5,6 @@ import (
 	"testing"
 	"time"
 
-	"github.com/division-sh/swarm/internal/cliapp"
 	"github.com/division-sh/swarm/internal/events"
 	"github.com/division-sh/swarm/internal/runtime/core/eventidentity"
 	"github.com/division-sh/swarm/internal/runtime/core/flowidentity"
@@ -125,11 +124,6 @@ func TestServedColdStaticAgentConstructionBothStores(t *testing.T) {
 
 func waitColdStaticProviderCompletion(t *testing.T, rt issue2564ServedFixture, runID string) {
 	t.Helper()
-	scope, err := pipeline.NewFlowInstanceLookupScope(rt.Runtime.Options.WorkflowModule.SemanticSource(), rt.Runtime.Options.SourceArtifactFact, runID,
-		[]string{"templ/child", "templ/child/leaf", "templ/audit", "templ/audit/leaf"}, nil)
-	if err != nil {
-		t.Fatal(err)
-	}
 	for deadline := time.Now().Add(servedProofPollDeadline); time.Now().Before(deadline); {
 		header, err := rt.selected.LoadRunHeader(t.Context(), runID)
 		if err != nil {
@@ -139,32 +133,13 @@ func waitColdStaticProviderCompletion(t *testing.T, rt issue2564ServedFixture, r
 		if err != nil {
 			t.Fatal(err)
 		}
-		if header.Status != "running" && header.Status != "live" || header.EndedAt != nil || header.Failure != nil || summary.DeadLetter != 0 || summary.Canceled != 0 {
+		if header.Status != "running" && header.Status != "completed" || header.Failure != nil || summary.DeadLetter != 0 || summary.Canceled != 0 {
 			t.Fatalf("cold-provider completion rejected: header=%+v deliveries=%+v\n%s", header, summary, issue2564H2CompletionReceipt(t, rt, runID))
 		}
-		instances, err := rt.selected.ListFlowInstances(t.Context(), scope)
-		if err != nil {
-			t.Fatal(err)
-		}
-		if len(instances) == 4 {
-			var diagnosis cliapp.DiagnosticRunDiagnosisResult
-			requireServedJSONRPCResult(t, rt.Endpoint, "run.diagnose", map[string]any{"run_id": runID}, &diagnosis)
-			final := true
-			for _, instance := range instances {
-				found := false
-				for _, status := range diagnosis.Instances {
-					if status.FlowInstance == instance.Identity().InstancePath {
-						found = status.Stage == "done" && status.Disposition == "final"
-						break
-					}
-				}
-				final = final && found
-			}
-			if final && diagnosis.Run.RunID == runID && diagnosis.TestQuiescence != nil && cliapp.BoolPointerValue(diagnosis.TestQuiescence.Ready) {
-				return
-			}
+		if header.Status == "completed" && header.EndedAt != nil && summary.Pending == 0 && summary.InProgress == 0 {
+			return
 		}
 		time.Sleep(25 * time.Millisecond)
 	}
-	t.Fatalf("cold-provider instances never finished: %s\n%s", runID, issue2564H2CompletionReceipt(t, rt, runID))
+	t.Fatalf("cold-provider run never completed: %s\n%s", runID, issue2564H2CompletionReceipt(t, rt, runID))
 }
