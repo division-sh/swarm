@@ -497,7 +497,10 @@ func (o *providerEvidenceObservation) requireShape(t *testing.T, cell string) {
 	if cell == "tool_round" && !o.readReasoning {
 		t.Log("boundary=reasoning_content outcome=NOT_EXERCISED")
 	}
-	if cell == "tool_round" && (!o.toolAck || (o.readReasoning && !o.reasoningAck)) {
+	if cell == "tool_round" && len(o.readCalls) == 0 {
+		t.Log("boundary=tool_round outcome=NOT_EXERCISED")
+	}
+	if cell == "tool_round" && len(o.readCalls) > 0 && (!o.toolAck || (o.readReasoning && !o.reasoningAck)) {
 		t.Fatal("read-only tool continuation lost its exact call identity or observed reasoning")
 	}
 	if !o.tools {

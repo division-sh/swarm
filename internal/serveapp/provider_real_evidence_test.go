@@ -181,4 +181,8 @@ func TestProviderRealModelEvidenceSelection(t *testing.T) {
 			t.Fatal("observation changed response close")
 		}
 	})
+	t.Run("unobserved_tool_round_is_not_exercised", func(t *testing.T) {
+		o := &providerEvidenceObservation{tools: true}
+		o.requireShape(t, "tool_round")
+	})
 }
