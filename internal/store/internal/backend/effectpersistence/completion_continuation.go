@@ -243,7 +243,7 @@ func scanCompletionContinuationRows(rows *sql.Rows) ([]completionContinuationRow
 			return nil, errors.New("settled completion continuation is missing authorized_at")
 		}
 		row.authorizedAt = authorizedAt.Time
-		fingerprint, err := completionJournalBodyFingerprint(row.authorityEvidence, row.requestFingerprint, row.operationID, row.attemptID)
+		fingerprint, err := runtimeeffects.CompletionJournalBodyFingerprint(row.authorityEvidence, row.requestFingerprint, row.operationID, row.attemptID)
 		if err != nil {
 			return nil, err
 		}
@@ -331,7 +331,7 @@ type lockedCompletionContinuation struct {
 
 func admitSettledCompletionContinuation(ctx context.Context, attempt runtimeeffects.Attempt, row lockedCompletionContinuation, surfaceRaw string) (runtimeeffects.Attempt, error) {
 	var err error
-	row.requestFingerprint, err = completionJournalBodyFingerprint(row.authorityEvidence, row.requestFingerprint, attempt.OperationID, attempt.AttemptID)
+	row.requestFingerprint, err = runtimeeffects.CompletionJournalBodyFingerprint(row.authorityEvidence, row.requestFingerprint, attempt.OperationID, attempt.AttemptID)
 	if err != nil {
 		return runtimeeffects.Attempt{}, err
 	}
@@ -724,7 +724,7 @@ func (s *EffectSQLiteOwner) lockCompletionContinuationSQLite(ctx context.Context
 }
 
 func validateLockedCompletionContinuation(ctx context.Context, attempt runtimeeffects.Attempt, row lockedCompletionContinuation, surfaceRaw string) (lockedCompletionContinuation, error) {
-	fingerprint, err := completionJournalBodyFingerprint(row.authorityEvidence, row.requestFingerprint, attempt.OperationID, attempt.AttemptID)
+	fingerprint, err := runtimeeffects.CompletionJournalBodyFingerprint(row.authorityEvidence, row.requestFingerprint, attempt.OperationID, attempt.AttemptID)
 	if err != nil {
 		return lockedCompletionContinuation{}, err
 	}
