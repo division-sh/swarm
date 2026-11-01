@@ -9,9 +9,13 @@ import (
 
 func (*recordingResetLifecycle) SettleResources(context.Context) error { return nil }
 
-func (l *recordingResetLifecycle) ResetSourceProjections(context.Context) ([]SourceProjection, error) {
+func (l *recordingResetLifecycle) AdmitResetOperation(ctx context.Context, req Request, operations OperationStore) (Operation, RuntimeReset, error) {
 	l.sourceReads++
-	return nil, l.sourceError
+	if l.sourceError != nil {
+		return Operation{}, nil, l.sourceError
+	}
+	operation, err := operations.AdmitResetOperation(ctx, req)
+	return operation, nil, err
 }
 
 func TestCoordinatorReconstructsOnlyAfterKnownSafeBoundary(t *testing.T) {
