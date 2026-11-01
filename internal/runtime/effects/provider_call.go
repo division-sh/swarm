@@ -1,6 +1,7 @@
 package effects
 
 import (
+	"context"
 	"encoding/json"
 	"fmt"
 	"net/http"
@@ -56,6 +57,11 @@ type ProviderCallJournal struct {
 type ProviderCallRecovery struct {
 	Journal ProviderCallJournal
 	Frame   agentframe.Frame
+}
+
+func BeginManagedProviderCall(ctx context.Context, adapter string, frame agentframe.Frame, call ProviderCall) (*Handle, error) {
+	call.TurnTimeout = turnTimeoutFromContext(ctx)
+	return beginCompletion(ctx, adapter, call.Request.Body, &frame, nil, &call)
 }
 
 func (r ProviderCallRequest) Fingerprint() (string, error) {
@@ -188,6 +194,11 @@ func (j ProviderCallJournal) ReadOnly(surface managedcapabilities.Surface) bool 
 }
 
 func newProviderCallJournal(authority Authority, req AuthorizeRequest) (ProviderCallJournal, error) {
+	operation, err := uuid.Parse(req.OperationID)
+	wantAttempt, attemptErr := AttemptID(req.OperationID, 1)
+	if err != nil || operation == uuid.Nil || operation.String() != req.OperationID || attemptErr != nil || wantAttempt != req.AttemptID {
+		return ProviderCallJournal{}, fmt.Errorf("provider call journal requires native initial-attempt identities")
+	}
 	j := ProviderCallJournal{Version: ProviderCallJournalVersion, OperationID: req.OperationID, AttemptID: req.AttemptID,
 		Adapter: req.Adapter, TargetKind: authority.Target.Kind, TargetID: authority.Target.ID, TargetOrdinal: authority.Target.Ordinal,
 		Call: *req.ProviderCall}
