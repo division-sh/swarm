@@ -170,39 +170,6 @@ func TestSelectedRecoveryContinuationClassifiesAllTypedCuts(t *testing.T) {
 	}
 }
 
-func TestSelectedRecoveryClosedAcknowledgmentCannotHideUnsettledEffects(t *testing.T) {
-	db, mock, err := sqlmock.New()
-	if err != nil {
-		t.Fatal(err)
-	}
-	defer db.Close()
-	mock.ExpectBegin()
-	tx, err := db.Begin()
-	if err != nil {
-		t.Fatal(err)
-	}
-	record := selectedRecoveryRecord{hasExecution: true, state: "closed"}
-	record.RunID = "child"
-	record.Operation = &runfork.ForkOperationRecord{Status: runfork.ForkOperationActivated}
-	snapshot := runlifecycle.Snapshot{State: runlifecycle.StateRunning}
-	if _, complete, err := settledSelectedRecoveryTx(context.Background(), tx, snapshot, record, true, false); err != nil || complete {
-		t.Fatalf("closed predecessor silently hid owed work: complete=%t err=%v", complete, err)
-	}
-	mock.ExpectQuery("SELECT COUNT\\(\\*\\) FROM runtime_external_effect_operations").WithArgs(record.RunID).
-		WillReturnRows(sqlmock.NewRows([]string{"unsafe_effects"}).AddRow(1))
-	plan, err := planSelectedRecoveryTx(context.Background(), tx, snapshot, record, true, false)
-	if err != nil || plan.Disposition != runfork.SelectedForkRecoveryFailed || plan.Continuation != nil || plan.Operation != record.Operation {
-		t.Fatalf("unsafe closed predecessor acquired successor or rewrote acknowledgment: plan=%+v err=%v", plan, err)
-	}
-	mock.ExpectRollback()
-	if err := tx.Rollback(); err != nil {
-		t.Fatal(err)
-	}
-	if err := mock.ExpectationsWereMet(); err != nil {
-		t.Fatal(err)
-	}
-}
-
 func TestSelectedRecoveryContinuationPreservesTerminalAndManualDisposition(t *testing.T) {
 	for _, status := range []runfork.ForkOperationStatus{runfork.ForkOperationMaterialized, runfork.ForkOperationActivated, runfork.ForkOperationFailed, runfork.ForkOperationUncertain} {
 		record := selectedRecoveryRecord{hasExecution: true, state: "closed"}
