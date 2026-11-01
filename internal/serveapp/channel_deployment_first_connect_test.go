@@ -406,9 +406,42 @@ service-probe:
 	if len(pending) != 1 || pending[0].Request != nil || pending[0].Event.EventID != retainedID || pending[0].Event.Scope.PublicationBinding.RunID != runID {
 		t.Fatal("service mock interruption did not retain the exact original reply without a publication request")
 	}
+	failure := sessioncapture.CallbackFailure{ConnectionID: registered.SessionConnectionID, OccurrenceID: pending[0].Event.OccurrenceID, Reason: "capture_failed"}
+	readOfflinePairedWhatsAppCaptures(t, opts, registered, failure)
+	// A completed Noise handshake is not a logged-in account. Hold only the
+	// service's login response; never alter the client's fence or admission.
+	login := &servedNativeLoginGate{held: make(chan struct{}), release: make(chan bool, 1)}
+	t.Cleanup(func() {
+		select {
+		case login.release <- false:
+		default:
+		}
+	})
+	peer.mu.Lock()
+	peer.nextLogin = login
+	peer.mu.Unlock()
 	process = startServeRuntimeTestProcess(t, opts)
+	select {
+	case <-login.held:
+	case <-time.After(5 * time.Second):
+		t.Fatal("post-fence boot did not reach the genuine SDK login response")
+	}
+	code, refused := process.waitForExit(5 * time.Second)
+	login.release <- !refused
+	if refused {
+		output := process.outputString()
+		if code != 1 || !strings.Contains(output, "serve failed \u00b7 channel onboarding \u00b7 WhatsApp client occurrence is fenced") || serveOutputIsReady(output) {
+			t.Fatalf("post-fence boot failed at a different seat: exit=%d\n%s", code, output)
+		}
+		t.Errorf("FIRST post-fence boot refused a new login-pending occurrence: exit=%d\n%s", code, output)
+		if rows := readOfflinePairedWhatsAppCaptures(t, opts, registered, failure); len(rows) != 1 || rows[0].Event.EventID != retainedID || rows[0].Request != nil {
+			t.Fatal("refused boot changed the retained reply or historical failure evidence")
+		}
+		process = startServeRuntimeTestProcess(t, opts)
+	}
 	process.waitForReadyLine()
 	peer.awaitPostLogin()
+	t.Logf("post-fence boot outcome: first_refused=%t current_ready=true", refused)
 	select {
 	case reply := <-peer.sent:
 		if reply.To.ToNonAD() != customer && reply.To.ToNonAD() != customerLID || reply.Body.GetConversation() != retainedText || reply.ID == "" {
@@ -420,12 +453,12 @@ service-probe:
 	if code := process.stop(); code != 0 {
 		t.Errorf("service mock restarted serve shutdown exit=%d", code)
 	}
-	if pending := readOfflinePairedWhatsAppCaptures(t, opts, registered); len(pending) != 0 {
+	if pending := readOfflinePairedWhatsAppCaptures(t, opts, registered, failure); len(pending) != 0 {
 		t.Fatal("first fixed boot left the acknowledged reply in private capture")
 	}
 }
 
-func readOfflinePairedWhatsAppCaptures(t *testing.T, opts cliapp.ServeOptions, registered channelonboarding.Operation) []sessioncapture.PendingCapture {
+func readOfflinePairedWhatsAppCaptures(t *testing.T, opts cliapp.ServeOptions, registered channelonboarding.Operation, failures ...sessioncapture.CallbackFailure) []sessioncapture.PendingCapture {
 	t.Helper()
 	paths, err := filepath.Glob(filepath.Join(opts.SwarmDir, "*", "provider.db"))
 	if err != nil || len(paths) != 1 {
@@ -436,6 +469,12 @@ func readOfflinePairedWhatsAppCaptures(t *testing.T, opts cliapp.ServeOptions, r
 		t.Fatal(err)
 	}
 	defer fixture.Close()
+	for _, failure := range failures {
+		count, err := fixture.CallbackFailureCount(t.Context(), failure.ConnectionID, failure.OccurrenceID, failure.Reason)
+		if err != nil || count != 1 {
+			t.Fatalf("historical callback failure changed: count=%d err=%v", count, err)
+		}
+	}
 	spool, err := owner.Captures(t.Context(), filepath.Base(filepath.Dir(paths[0])))
 	if err != nil {
 		t.Fatal(err)
