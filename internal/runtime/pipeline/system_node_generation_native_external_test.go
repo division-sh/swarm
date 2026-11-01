@@ -26,7 +26,9 @@ func TestSystemNodePredecessorCannotCommitAfterGenerationAdvanceBothStores(t *te
 		if err := original.Release(ctx); err != nil {
 			t.Fatal(err)
 		}
-		successor, err := selected.AcquireProcessCapability(ctx, startupownership.AcquireRequest{
+		acquireCtx, cancel := context.WithTimeout(t.Context(), 5*time.Second)
+		defer cancel()
+		successor, err := selected.AcquireProcessCapability(acquireCtx, startupownership.AcquireRequest{
 			OwnerID: "system-node-successor", BootID: uuid.NewString(), RuntimeInstanceID: authorActivityTestRuntimeInstanceID,
 		})
 		if err != nil {
