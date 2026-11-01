@@ -124,7 +124,7 @@ func TestSelectedForkSupplementalReceiverAcquisitionWithoutPostRevisionEmissionB
 			t.Run(string(backend)+"/"+tc.name, func(t *testing.T) {
 				publication := newExactOriginPublicationProbe(t)
 				rt := startServedLiveFlowProofRuntimeFromSource(t, backend, canonicalrouting.CopyForkReceiverAcquisitionWithoutFinishedEmission(t, tc.policy))
-				seed := requireServedRunStartRPCResult(t, rt.Endpoint, map[string]any{"event_name": "start.seeded", "bundle_hash": rt.BundleHash, "payload": map[string]any{"token": "receiver-proof"}, "idempotency_key": "acquisition-seed"})
+				seed := requireServedEventPublishRPCResult(t, rt.Endpoint, map[string]any{"event_name": "start.seeded", "bundle_hash": rt.BundleHash, "payload": map[string]any{"token": "receiver-proof"}, "idempotency_key": "acquisition-seed"})
 				var rootEventOwner any = rt.SQLite
 				if rt.Postgres != nil {
 					rootEventOwner = rt.Postgres

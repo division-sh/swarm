@@ -305,12 +305,7 @@ func requireProviderAliasRootConnection(t *testing.T, rt servedWorkspaceProofRun
 		if runID != "" {
 			params["run_id"] = runID
 		}
-		var published servedEventPublishRPCResult
-		if runID == "" {
-			published = requireServedRunStartRPCResult(t, rt.Endpoint, params)
-		} else {
-			published = requireServedEventPublishRPCResult(t, rt.Endpoint, params)
-		}
+		published := requireServedEventPublishRPCResult(t, rt.Endpoint, params)
 		runID = published.RunID
 		requireProviderAliasDeliveries(t, rt, published.EventID, ".", name, receiver, false, false, false)
 		// A public root event must not borrow the provider's authenticated

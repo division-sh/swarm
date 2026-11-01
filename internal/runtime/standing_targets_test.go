@@ -29,12 +29,22 @@ func TestDeriveStandingTargets_OrdinaryRootInputCreatesNoStandingTarget(t *testi
 	if len(declarations) != 0 {
 		t.Fatalf("standing targets = %#v, want none", declarations)
 	}
+	rt := &Runtime{Options: RuntimeOptions{
+		WorkflowModule:     semanticOnlyWorkflowRuntime{source: semanticview.Wrap(bundle)},
+		SourceArtifactFact: sourceartifactfixture.FactFor(bundle.SourceArtifact),
+	}}
+	candidates, err := rt.PlanLiveFlowScopes()
+	if err != nil || len(candidates) != 1 || candidates[0].FlowPath != "." {
+		t.Fatalf("ordinary root live scope=%+v err=%v", candidates, err)
+	}
 }
 
 func TestA9NoProducerCannotRetain(t *testing.T) {
 	bundle, rooted, _ := loadS1EffectiveProviderScope(t, map[string][]byte{
-		"manifest.yaml": []byte("version: 1.0.0\nplatform_version: '*'\n"),
-		"schema.yaml":   []byte("stages: []\n"),
+		"manifest.yaml":       []byte("version: 1.0.0\nplatform_version: '*'\n"),
+		"schema.yaml":         []byte("stages: []\n"),
+		"child/manifest.yaml": []byte("version: 1.0.0\nplatform_version: '*'\n"),
+		"child/schema.yaml":   []byte("stages: []\n"),
 	})
 	source := semanticview.Wrap(bundle)
 	providers, err := packadmission.AdmitProviderSource(rooted, bundle.Platform)
@@ -58,8 +68,8 @@ func TestA9NoProducerCannotRetain(t *testing.T) {
 		t.Fatalf("source without a producer declared a standing service: %+v err=%v", declarations, err)
 	}
 	candidates, err := rt.PlanLiveFlowScopes()
-	if err != nil || len(candidates) != 0 {
-		t.Fatalf("source without a producer manufactured retention: %+v err=%v", candidates, err)
+	if err != nil || len(candidates) != 2 || candidates[0].FlowPath != "." || candidates[1].FlowPath != "child" {
+		t.Fatalf("source without a producer lost its live run scope: %+v err=%v", candidates, err)
 	}
 }
 

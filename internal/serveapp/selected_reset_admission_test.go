@@ -50,7 +50,7 @@ func TestSelectedResetPreparationAdmissionOrderBothStores(t *testing.T) {
 					rt := startServedControlProofRuntime(t, backend)
 					supervisor := <-supervisors
 					predecessor := supervisor.selected
-					seed := requireServedRunStartRPCResult(t, rt.Endpoint, map[string]any{
+					seed := requireServedEventPublishRPCResult(t, rt.Endpoint, map[string]any{
 						"event_name": "item.received", "bundle_hash": rt.BundleHash,
 						"payload": map[string]any{"item_id": "reset-preparation"}, "idempotency_key": "seed",
 					})

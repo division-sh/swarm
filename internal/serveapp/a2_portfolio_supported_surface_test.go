@@ -38,8 +38,8 @@ func TestA2PortfolioSupportedStreamSurfaceBothStores(t *testing.T) {
 				"bundle_hash": rt.BundleHash, "event_name": "operating.report.triggered",
 				"payload": map[string]any{"period_id": "2026-Q1", "revenue": 100}, "idempotency_key": "a2-stream-q1",
 			}
-			first := requireServedRunStartRPCResult(t, rt.Endpoint, params)
-			if first.Status != "live" || first.RunID == "" || first.EventID == "" {
+			first := requireServedEventPublishRPCResult(t, rt.Endpoint, params)
+			if !first.NewRunCreated || first.RunID == "" || first.EventID == "" {
 				t.Fatalf("root stream ingress did not create a run: %+v", first)
 			}
 			waitServedRunDeliveryQuiescence(t, rt.ReadRunDeliveries, first.RunID)
@@ -71,7 +71,7 @@ func TestA2PortfolioSupportedStreamSurfaceBothStores(t *testing.T) {
 				t.Fatal("actual same-store stream reconstruction changed period state or reused the predecessor runtime")
 			}
 			t.Log("actual same-store normal serve restart: both stream periods preserved through public readback")
-			replay := requireServedRunStartRPCResult(t, rt.Endpoint, params)
+			replay := requireServedEventPublishRPCResult(t, rt.Endpoint, params)
 			if replay.EventID != first.EventID || replay.RunID != first.RunID {
 				t.Fatalf("same-idempotency stream publication changed identity: first=%+v replay=%+v", first, replay)
 			}
@@ -100,11 +100,11 @@ func TestA2PortfolioSupportedFiniteJoinSurfaceBothStores(t *testing.T) {
 			captureSelectedRuntimePersistence(t, func(p serveRuntimePersistence) { selected = p })
 			process, rt := start()
 			rt = a2PortfolioReadbackRuntime(t, process, rt, selected)
-			setup := requireServedRunStartRPCResult(t, rt.Endpoint, map[string]any{
+			setup := requireServedEventPublishRPCResult(t, rt.Endpoint, map[string]any{
 				"bundle_hash": rt.BundleHash, "event_name": "portfolio.setup", "idempotency_key": "a2-join-q1",
 				"payload": map[string]any{"portfolio_id": "portfolio-one", "period_id": "2026-Q1", "expected_operating_ids": []string{"op-a", "op-b"}},
 			})
-			if setup.Status != "live" || setup.RunID == "" || setup.EventID == "" {
+			if !setup.NewRunCreated || setup.RunID == "" || setup.EventID == "" {
 				t.Fatalf("root join setup did not create a run: %+v", setup)
 			}
 			waitServedRunDeliveryQuiescence(t, rt.ReadRunDeliveries, setup.RunID)
@@ -409,7 +409,7 @@ func requireA2PortfolioOperatingCreation(t *testing.T, rt servedControlProofRunt
 	t.Helper()
 	input := requireA2PortfolioEvent(t, rt, trigger.EventID, trigger.RunID, "operating.report.triggered", payload)
 	ingress := operatorread.OperatorDeliveryTarget{Kind: "existing_entity", FlowID: "ingress", FlowInstance: "ingress", EntityID: flowidentity.EntityID("ingress")}
-	if trigger.Status == "live" {
+	if trigger.NewRunCreated {
 		ingress.Kind = "materializing_entity"
 	}
 	requireA2PortfolioDeliveryTarget(t, input, "ingress", "ingress-node", ingress)

@@ -26,12 +26,11 @@ func TestPausedAcceptedTimerAndDecisionPublicBothStores(t *testing.T) {
 				rt := startServedLiveFlowProofRuntimeFromSource(t, backend, root)
 				supervisor := <-captured
 				rt.Contexts = supervisor.runtimeContexts
-				var created servedEventPublishRPCResult
-				requireServedJSONRPCResult(t, rt.Endpoint, "run.start", map[string]any{
+				created := requireServedEventPublishRPCResult(t, rt.Endpoint, map[string]any{
 					"event_name": "work.requested", "bundle_hash": rt.BundleHash,
 					"payload": map[string]any{"seed": true}, "idempotency_key": "paused-accepted-" + family,
-				}, &created)
-				if created.RunID == "" || created.EventID == "" {
+				})
+				if created.NewRunCreated || created.RunID == "" || created.EventID == "" {
 					t.Fatalf("create review run = %+v", created)
 				}
 				t.Cleanup(func() {

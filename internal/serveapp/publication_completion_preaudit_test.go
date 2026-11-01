@@ -355,7 +355,6 @@ connect:
 	if len(identity.SourceArtifacts) != 1 {
 		t.Fatalf("publication completion requires one admitted source: %+v", identity)
 	}
-	seedOwnedPublicationLiveRun(t, servedTestProcessRuntime(t, h.process), identity.SourceArtifacts[0].BundleHash, owner)
 	return h, identity.SourceArtifacts[0].BundleHash
 }
 

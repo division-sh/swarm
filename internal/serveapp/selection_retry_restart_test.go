@@ -56,7 +56,7 @@ func TestServedSelectionRetryAndRestartBothStores(t *testing.T) {
 				}
 				t.Cleanup(func() { projectRuntimePersistenceForServe = previous })
 				rt, _, restart := newRetainedMailboxCompletionRuntime(t, backend, canonicalrouting.CopySelectionRetry(t))
-				seed := requireServedRunStartRPCResult(t, rt.Endpoint, map[string]any{"event_name": "seed", "bundle_hash": rt.BundleHash, "payload": map[string]any{}, "idempotency_key": "selection-seed"})
+				seed := requireServedEventPublishRPCResult(t, rt.Endpoint, map[string]any{"event_name": "seed", "bundle_hash": rt.BundleHash, "payload": map[string]any{}, "idempotency_key": "selection-seed"})
 				waitServedRunDeliveryQuiescence(t, rt.ReadRunDeliveries, seed.RunID)
 				enabled.Store(faulted)
 				params := map[string]any{"event_name": "select", "run_id": seed.RunID, "source_event_id": seed.EventID, "payload": map[string]any{}, "idempotency_key": "selection-request"}

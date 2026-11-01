@@ -51,7 +51,7 @@ func issue642StagedTimerCorruption(t *testing.T, backend string, fault storetest
 	if !ok {
 		t.Fatalf("missing canonical timer readers: %T", rt.selected)
 	}
-	seed := requireServedRunStartRPCResult(t, rt.Endpoint, map[string]any{
+	seed := requireServedEventPublishRPCResult(t, rt.Endpoint, map[string]any{
 		"event_name": "timer.scheduled", "bundle_hash": rt.BundleHash, "payload": map[string]any{}, "idempotency_key": "issue642-staged-corruption",
 	})
 	marker := issue642TimerContinuationMarker(t, rt, seed.RunID)

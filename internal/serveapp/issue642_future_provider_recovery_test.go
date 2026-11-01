@@ -224,7 +224,7 @@ func TestIssue642FutureProviderRecoveryProcessHelper(t *testing.T) {
 	})
 	emit("ready")
 	if mode == "crash" {
-		response := requestServedJSONRPCWithTimeout(t, rt.Endpoint, "run.start", map[string]any{
+		response := requestServedJSONRPCWithTimeout(t, rt.Endpoint, "event.publish", map[string]any{
 			"event_name": "start.requested", "bundle_hash": rt.BundleHash,
 			"payload": map[string]any{"work_id": "one"}, "idempotency_key": "future-recovery-source",
 		}, 30*time.Second)

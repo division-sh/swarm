@@ -54,11 +54,10 @@ func TestResetProcessDeathRecoversBeforeSourceAdmissionBothStores(t *testing.T) 
 					}
 					first := startServedCrashProcess(t, "TestResetCrashServeProcessHelper", append(environment, "SWARM_TEST_RESET_RECOVER=0"))
 					endpoint := first.endpoint(t) + "/v1/rpc"
-					var initial servedEventPublishRPCResult
-					requireServedJSONRPCResult(t, endpoint, "run.start", map[string]any{
+					initial := requireServedEventPublishRPCResult(t, endpoint, map[string]any{
 						"event_name": "item.received", "bundle_hash": hash,
 						"payload": map[string]any{"item_id": "before-process-death"}, "idempotency_key": uuid.NewString(),
-					}, &initial)
+					})
 					params := map[string]any{"include_source_artifacts": clear, "idempotency_key": uuid.NewString()}
 					if response := requestServedJSONRPC(t, endpoint, "runtime.nuke", params); response.Error == nil {
 						t.Fatal("reset receipt fault was not reached")
@@ -132,9 +131,7 @@ func TestResetProcessDeathRecoversBeforeSourceAdmissionBothStores(t *testing.T) 
 							t.Fatalf("cleared startup re-admitted execution: %+v", response.Error)
 						}
 					} else {
-						var started servedEventPublishRPCResult
-						requireServedJSONRPCResult(t, endpoint, "run.start", publish, &started)
-						later = started.RunID
+						later = requireServedEventPublishRPCResult(t, endpoint, publish).RunID
 					}
 					for i := 0; i < 2; i++ {
 						if response := requestServedJSONRPC(t, endpoint, "runtime.nuke", params); response.Error != nil {

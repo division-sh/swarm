@@ -240,7 +240,7 @@ func TestServedMailboxCompletionInsertRollbackAndRestartBothStores(t *testing.T)
 		t.Run(backend, func(t *testing.T) {
 			opts, start := gateCompletionHarness(t, backend, canonicalrouting.CopyGateCompletionDiagnostic(t))
 			first, rt := start()
-			seed := requireServedRunStartRPCResult(t, rt.Endpoint, map[string]any{"event_name": "work.requested", "bundle_hash": rt.BundleHash, "payload": map[string]any{"seed": true}, "idempotency_key": "completion-seed"})
+			seed := requireServedEventPublishRPCResult(t, rt.Endpoint, map[string]any{"event_name": "work.requested", "bundle_hash": rt.BundleHash, "payload": map[string]any{"seed": true}, "idempotency_key": "completion-seed"})
 			entityID := requireServedEventPublishEntityState(t, rt.DB, backend, seed.RunID, "", "review")
 			waitServedRunDeliveryQuiescence(t, rt.ReadRunDeliveries, seed.RunID)
 			var cardID, hash string
