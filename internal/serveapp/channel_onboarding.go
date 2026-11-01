@@ -264,8 +264,9 @@ func compileServeRegisteredChannelActivations(contexts []runtime.BundleContext, 
 	return activations, nil
 }
 
-// Startup admits the complete set; explicit registration/holder mutations admit
-// only their account. Observation and reconciliation never refresh credentials.
+// Startup and post-release lifecycle admission inspect current holders;
+// registration/field mutations admit only their account. Observation and
+// reconciliation never refresh credentials.
 func admitServeRegisteredWebhookCredentials(ctx context.Context, manager *runtime.RuntimeContextManager, store channelonboarding.Store, selected ...channelonboarding.AccountReference) error {
 	scoped, ok := store.(interface {
 		DeploymentChannelOperations() channelonboarding.OperationStore
