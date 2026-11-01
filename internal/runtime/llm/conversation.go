@@ -232,7 +232,7 @@ func (c *Conversation) stepManaged(ctx context.Context, draft agentframe.TurnDra
 				return nil, runtimefailures.New(runtimefailures.ClassLifecycleConflict, "managed_causal_event_missing", "llm-conversation", "resume_tool_continuation", nil)
 			}
 			prior := resp.completionCleanupDiagnostics
-			resp, err = c.continueManagedToolRound(ctx, resp.completionSuccessor.Draft(*c.causalEvent), resp)
+			resp, err = c.continueManagedProviderCall(ctx, resp.completionSuccessor.Draft(*c.causalEvent), resp, nil)
 			if resp != nil {
 				resp.completionCleanupDiagnostics = errors.Join(prior, resp.completionCleanupDiagnostics)
 			}
@@ -345,11 +345,7 @@ func (c *Conversation) ensureSession(ctx context.Context) error {
 }
 
 func (c *Conversation) continueManagedOnce(ctx context.Context, draft agentframe.TurnDraft) (*Response, error) {
-	return c.continueManagedToolRound(ctx, draft, nil)
-}
-
-func (c *Conversation) continueManagedToolRound(ctx context.Context, draft agentframe.TurnDraft, previous *Response) (*Response, error) {
-	return c.continueManagedProviderCall(ctx, draft, previous, nil)
+	return c.continueManagedProviderCall(ctx, draft, nil, nil)
 }
 
 func (c *Conversation) continueManagedProviderCall(ctx context.Context, draft agentframe.TurnDraft, previous *Response, resume *runtimeeffects.ProviderCallRecovery) (*Response, error) {
@@ -560,7 +556,7 @@ func (c *Conversation) resolveToolCalls(ctx context.Context, initial *Response) 
 			if c.causalEvent == nil {
 				return nil, runtimefailures.New(runtimefailures.ClassLifecycleConflict, "managed_causal_event_missing", "llm-conversation", "continue_tool_round", nil)
 			}
-			next, err = c.continueManagedToolRound(ctx, successor.Draft(*c.causalEvent), resp)
+			next, err = c.continueManagedProviderCall(ctx, successor.Draft(*c.causalEvent), resp, nil)
 		} else {
 			next, err = c.continueForkChatOnce(ctx, toolMsg)
 		}
