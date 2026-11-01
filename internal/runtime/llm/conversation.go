@@ -389,7 +389,7 @@ func (c *Conversation) continueManagedProviderCall(ctx context.Context, draft ag
 	if err != nil {
 		return nil, err
 	}
-	bindManagedProviderPredecessor(call, previous, resume)
+	bindManagedProviderPredecessor(&call, previous, resume)
 	runtime, ok := c.runtime.(ManagedSessionRuntime)
 	if !ok {
 		return nil, runtimefailures.New(runtimefailures.ClassLifecycleConflict, "managed_runtime_boundary_missing", "llm-conversation", "dispatch_turn", nil)
@@ -424,7 +424,7 @@ func (c *Conversation) continueManagedProviderCall(ctx context.Context, draft ag
 	return resp, nil
 }
 
-func bindManagedProviderPredecessor(call *managedProviderCall, previous *Response, resume *runtimeeffects.ProviderCallRecovery) {
+func bindManagedProviderPredecessor(call *ManagedCall, previous *Response, resume *runtimeeffects.ProviderCallRecovery) {
 	call.resume = resume
 	if resume != nil && resume.Parent != nil {
 		call.toolRound = resume.Parent
