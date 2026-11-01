@@ -367,11 +367,7 @@ func recoverSelectedForkTx(ctx context.Context, tx *sql.Tx, owner selectedRecove
 		if len(req.Cancellations) != 0 {
 			return result, fmt.Errorf("selected cancellation recovery lacks predecessor execution")
 		}
-		if result.Disposition == runfork.SelectedForkRecoveryResume {
-			plan, err := planSelectedRecoveryTx(ctx, tx, snapshot, record, sqlite, true)
-			return plan.SelectedForkRecoveryResult, err
-		}
-		return result, nil
+		return planUnexecutedSelectedRecoveryTx(ctx, tx, snapshot, record, sqlite)
 	}
 	preparation, state := record.preparation, record.state
 	pending, err := owner.HasSelectedCanceledOriginsTx(ctx, attempt, result.ExecutionID)
@@ -434,6 +430,14 @@ func recoverSelectedForkTx(ctx context.Context, tx *sql.Tx, owner selectedRecove
 		return result, err
 	}
 	return recoverFailedSelectedForkTx(ctx, tx, owner, attempt, snapshot, req, sqlite, record, plan, result, changes)
+}
+
+func planUnexecutedSelectedRecoveryTx(ctx context.Context, tx *sql.Tx, snapshot runlifecycle.Snapshot, record selectedRecoveryRecord, sqlite bool) (runfork.SelectedForkRecoveryResult, error) {
+	if record.Disposition == runfork.SelectedForkRecoveryResume {
+		plan, err := planSelectedRecoveryTx(ctx, tx, snapshot, record, sqlite, true)
+		return plan.SelectedForkRecoveryResult, err
+	}
+	return record.SelectedForkRecoveryResult, nil
 }
 
 func resumeSelectedProviderForkTx(ctx context.Context, tx *sql.Tx, owner selectedRecoveryTxOwner, attempt *mutationprotocol.Attempt, snapshot runlifecycle.Snapshot, req runcontrol.SelectedForkRecoveryRequest, sqlite bool, record selectedRecoveryRecord, pending bool) (runfork.SelectedForkRecoveryResult, bool, error) {
