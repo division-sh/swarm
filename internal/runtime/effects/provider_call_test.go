@@ -38,6 +38,10 @@ func proveProviderCallJournalBinding(t *testing.T, ctx context.Context, req Auth
 	if err != nil {
 		t.Fatal(err)
 	}
+	handle, err := BeginManagedProviderCall(managedcapabilities.WithContext(ctx, surface), req.Adapter, frame, *req.ProviderCall)
+	if err != nil || !handle.Attempt().AuthorizationAcknowledged {
+		t.Fatalf("exact frozen provider input was not acknowledged: %v", err)
+	}
 	raw, err := EncodeAttemptAuthorityEvidence(authority, req)
 	if err != nil {
 		t.Fatal(err)

@@ -1121,14 +1121,14 @@ func managedEffectCapabilitySurface(ctx context.Context, authority Authority) (m
 }
 
 func BeginCompletion(ctx context.Context, adapter string, request []byte, lineage map[string]string) (*Handle, error) {
-	return beginCompletion(ctx, adapter, request, nil, lineage)
+	return beginCompletion(ctx, adapter, request, nil, lineage, nil)
 }
 
 func BeginManagedCompletion(ctx context.Context, adapter string, request []byte, frame agentframe.Frame, lineage map[string]string) (*Handle, error) {
-	return beginCompletion(ctx, adapter, request, &frame, lineage)
+	return beginCompletion(ctx, adapter, request, &frame, lineage, nil)
 }
 
-func beginCompletion(ctx context.Context, adapter string, request []byte, frame *agentframe.Frame, lineage map[string]string) (*Handle, error) {
+func beginCompletion(ctx context.Context, adapter string, request []byte, frame *agentframe.Frame, lineage map[string]string, call *ProviderCall) (*Handle, error) {
 	if err := admitExecutionMode(ctx, adapter); err != nil {
 		return nil, err
 	}
@@ -1169,9 +1169,16 @@ func beginCompletion(ctx context.Context, adapter string, request []byte, frame 
 	if err != nil {
 		return nil, err
 	}
+	fingerprint := Fingerprint(request)
+	if call != nil {
+		fingerprint, err = call.Request.Fingerprint()
+		if err != nil {
+			return nil, err
+		}
+	}
 	attempt, err := controller.Authorize(ctx, AuthorizeRequest{
-		OperationID: operationID, Adapter: adapter, RequestFingerprint: Fingerprint(request),
-		CapabilitySurface: capabilitySurface, AgentFrame: frame, Origin: origin, Lineage: lineage,
+		OperationID: operationID, Adapter: adapter, RequestFingerprint: fingerprint,
+		CapabilitySurface: capabilitySurface, AgentFrame: frame, ProviderCall: call, Origin: origin, Lineage: lineage,
 		SessionGrantID: sessionGrantFromContext(ctx).GrantID, SessionLockOwner: sessionGrantFromContext(ctx).LockOwner,
 	})
 	return authorizedHandle(controller, attempt, err)
@@ -1599,6 +1606,11 @@ func (c *Controller) Authorize(ctx context.Context, req AuthorizeRequest) (Attem
 			return Attempt{}, requestErr
 		}
 		req.CompletionRequest = authority.CompletionRequest
+		if req.ProviderCall != nil {
+			if err := req.ProviderCall.Validate(authority, req); err != nil {
+				return Attempt{}, runtimefailures.Wrap(runtimefailures.ClassLifecycleConflict, "provider_call_journal_invalid", "external-effects", "authorize_attempt", nil, err)
+			}
+		}
 	} else if registration.Kind == KindProviderStartupProbe {
 		if req.AgentFrame != nil || req.CapabilitySurface == nil || !StartupProbeSurfaceMatchesAuthority(*req.CapabilitySurface, authority) {
 			return Attempt{}, runtimefailures.New(runtimefailures.ClassLifecycleConflict, "startup_probe_authority_invalid", "external-effects", "authorize_attempt", map[string]any{"adapter": req.Adapter})
