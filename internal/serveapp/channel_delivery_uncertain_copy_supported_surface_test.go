@@ -30,7 +30,7 @@ func TestChannelDeliveryUncertainCopyAuthorityPublicJourney(t *testing.T) {
 			t.Run(string(backend)+"/"+schedule, func(t *testing.T) {
 				withSummary := schedule == "applied_after_completion"
 				h, db, bundleHash := startChannelAnchorJourney(t, backend, "uncertain-copy-token", withSummary)
-				seed := requireServedRunStartRPCResult(t, h.rpcEndpoint(), map[string]any{
+				seed := requireServedEventPublishRPCResult(t, h.rpcEndpoint(), map[string]any{
 					"event_name": "work.requested", "bundle_hash": bundleHash,
 					"payload": map[string]any{"seed": true}, "idempotency_key": "uncertain-copy-seed",
 				})

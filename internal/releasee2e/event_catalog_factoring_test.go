@@ -70,7 +70,7 @@ func TestEventCatalogFactoringRefinedPublicationBothStores(t *testing.T) {
 			var published struct {
 				RunID string `json:"run_id"`
 			}
-			if err := process.rpc.call(ctx, "run.start", map[string]any{"bundle_hash": hash, "event_name": "task.requested", "payload": payload, "idempotency_key": "refined-valid"}, &published); err != nil || published.RunID == "" {
+			if err := process.rpc.call(ctx, "event.publish", map[string]any{"bundle_hash": hash, "event_name": "task.requested", "payload": payload, "emitter": "releasee2e", "idempotency_key": "refined-valid"}, &published); err != nil || published.RunID == "" {
 				t.Fatalf("valid refined publication: %+v %v", published, err)
 			}
 			waitForGoldenTerminalRun(t, process, store, published.RunID, 30*time.Second)
@@ -85,7 +85,7 @@ func TestEventCatalogFactoringRefinedPublicationBothStores(t *testing.T) {
 			}
 			for index, invalid := range []map[string]any{{"id": "XX"}, {"id": "x"}, {"id": "toooolong"}, {"note": "missing id"}} {
 				var result json.RawMessage
-				if err := process.rpc.call(ctx, "run.start", map[string]any{"bundle_hash": hash, "event_name": "task.requested", "payload": invalid, "idempotency_key": "refused-" + strconv.Itoa(index)}, &result); err == nil || !strings.Contains(err.Error(), "PAYLOAD_VALIDATION_FAILED") {
+				if err := process.rpc.call(ctx, "event.publish", map[string]any{"bundle_hash": hash, "event_name": "task.requested", "payload": invalid, "emitter": "releasee2e", "idempotency_key": "refused-" + strconv.Itoa(index)}, &result); err == nil || !strings.Contains(err.Error(), "PAYLOAD_VALIDATION_FAILED") {
 					t.Fatalf("invalid refined publication did not reach payload refusal: %v %s %v", invalid, result, err)
 				}
 			}

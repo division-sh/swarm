@@ -49,7 +49,7 @@ func issue642FutureProviderContinuesFromEmptyCatalog(t *testing.T, backend, root
 			t.Errorf("keyed-provider native shutdown=%d\n%s", code, process.outputString())
 		}
 	})
-	response := requestServedJSONRPCWithTimeout(t, rt.Endpoint, "run.start", map[string]any{
+	response := requestServedJSONRPCWithTimeout(t, rt.Endpoint, "event.publish", map[string]any{
 		"event_name": "start.requested", "bundle_hash": rt.BundleHash, "payload": map[string]any{"work_id": "one"},
 		"idempotency_key": "future-keyed-provider-source",
 	}, 30*time.Second)

@@ -14,7 +14,7 @@ func TestReceiverCompositionEntitylessRootExportBothStores(t *testing.T) {
 	for _, backend := range []servedparity.Backend{servedparity.BackendDefaultSQLite, servedparity.BackendExplicitPostgres} {
 		t.Run(string(backend), func(t *testing.T) {
 			rt := startServedTestSetupEntitiesProofRuntimeFromSource(t, backend, canonicalrouting.CopyReceiverEntitylessRootExport(t))
-			published := requireServedRunStartRPCResult(t, rt.Endpoint, map[string]any{"event_name": "work.requested", "bundle_hash": rt.BundleHash, "payload": map[string]any{"seed": true}, "idempotency_key": "external-onward"})
+			published := requireServedEventPublishRPCResult(t, rt.Endpoint, map[string]any{"event_name": "work.requested", "bundle_hash": rt.BundleHash, "payload": map[string]any{"seed": true}, "idempotency_key": "external-onward"})
 			waitServedRunDeliveryQuiescence(t, rt.ReadRunDeliveries, published.RunID)
 			var eventID, rawSource string
 			if err := rt.DB.QueryRow(`SELECT event_id,CAST(source_route AS TEXT) FROM events WHERE run_id=$1 AND event_name='child.finished'`, published.RunID).Scan(&eventID, &rawSource); err != nil {

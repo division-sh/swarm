@@ -21,11 +21,10 @@ func TestPublicPublicationSixHubOriginalDeadlineBothStores(t *testing.T) {
 					t.Error(err)
 				}
 			})
-			var seed servedEventPublishRPCResult
-			requireServedJSONRPCResult(t, rt.Endpoint, "run.start", map[string]any{
+			seed := requireServedEventPublishRPCResult(t, rt.Endpoint, map[string]any{
 				"event_name": "hub.start", "bundle_hash": rt.BundleHash,
 				"payload": map[string]any{"hub_id": "h01"}, "idempotency_key": "q6-hub-1",
-			}, &seed)
+			})
 			starts := map[string]bool{seed.EventID: true}
 			for hub := 2; hub <= 6; hub++ {
 				params := map[string]any{"event_name": "hub.start", "run_id": seed.RunID, "source_event_id": seed.EventID,

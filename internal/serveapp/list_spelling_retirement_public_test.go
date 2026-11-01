@@ -42,11 +42,10 @@ func TestListSpellingRetirementPublicBothStores(t *testing.T) {
 			defer func() { process.stop() }()
 			endpoint := "http://" + serveRuntimeAPIListenerFromOutput(t, process.outputString()) + "/v1/rpc"
 			item := map[string]any{"name": "one", "tags": []any{"a", "b"}}
-			var seed servedEventPublishRPCResult
-			requireServedJSONRPCResult(t, endpoint, "run.start", map[string]any{
+			seed := requireServedEventPublishRPCResult(t, endpoint, map[string]any{
 				"event_name": "proof.append", "bundle_hash": servedEventPublishFixtureBundleHash(t, root),
 				"payload": item, "idempotency_key": "list-first",
-			}, &seed)
+			})
 			entityID := waitListRetirementFields(t, endpoint, seed.RunID, []any{item})
 			if code := process.stop(); code != 0 {
 				t.Fatalf("first owner stop=%d", code)

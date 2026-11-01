@@ -46,7 +46,7 @@ func TestReceiverCompositionMixedAgentBothStores(t *testing.T) {
 			}
 			endpoint, runtime := startOwnedMockLifecycleFollowUpRuntime(t, opts)
 			bundle := servedEventPublishFixtureBundleHash(t, root)
-			seed := requireServedRunStartRPCResult(t, endpoint, map[string]any{"event_name": "work.seeded", "bundle_hash": bundle, "payload": map[string]any{"seed": true}, "idempotency_key": "mixed-agent-seed"})
+			seed := requireServedEventPublishRPCResult(t, endpoint, map[string]any{"event_name": "work.seeded", "bundle_hash": bundle, "payload": map[string]any{"seed": true}, "idempotency_key": "mixed-agent-seed"})
 			requireServedEventPublishEntityState(t, db, backend, seed.RunID, flowidentity.EntityID("sink"), "active")
 			waitServedRunDeliveryQuiescence(t, deliveryReader, seed.RunID)
 			var childID, parentID string

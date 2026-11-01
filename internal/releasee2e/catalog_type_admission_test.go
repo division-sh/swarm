@@ -134,7 +134,7 @@ func TestCatalogTypeAdmissionPublicRestartBothStores(t *testing.T) {
 			var published struct {
 				RunID string `json:"run_id"`
 			}
-			if err := process.rpc.call(ctx, "run.start", map[string]any{"bundle_hash": hash, "event_name": "task.requested", "payload": payload, "idempotency_key": "admission-valid"}, &published); err != nil || published.RunID == "" {
+			if err := process.rpc.call(ctx, "event.publish", map[string]any{"bundle_hash": hash, "event_name": "task.requested", "payload": payload, "emitter": "releasee2e", "idempotency_key": "admission-valid"}, &published); err != nil || published.RunID == "" {
 				t.Fatalf("public typed ingress: %+v %v", published, err)
 			}
 			waitForGoldenTerminalRun(t, process, store, published.RunID, 30*time.Second)
@@ -301,7 +301,7 @@ func TestCatalogTypeAdmissionTemplateRoutingBothStores(t *testing.T) {
 			var published struct {
 				RunID string `json:"run_id"`
 			}
-			if err := process.rpc.call(ctx, "run.start", map[string]any{"bundle_hash": goldenServedBundleHash(t, process.rpc, "live"), "event_name": "account.requested", "payload": map[string]any{"account_id": "alias-key"}, "idempotency_key": "template-alias"}, &published); err != nil || published.RunID == "" {
+			if err := process.rpc.call(ctx, "event.publish", map[string]any{"bundle_hash": goldenServedBundleHash(t, process.rpc, "live"), "event_name": "account.requested", "payload": map[string]any{"account_id": "alias-key"}, "emitter": "releasee2e", "idempotency_key": "template-alias"}, &published); err != nil || published.RunID == "" {
 				t.Fatalf("public template ingress: %+v %v", published, err)
 			}
 			var routed goldenEvent

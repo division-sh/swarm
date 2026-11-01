@@ -98,7 +98,6 @@ func proveActivitySemanticResultExecutionParity(t *testing.T, mock bool) {
 				t.Fatal(err)
 			}
 			rt, restart := startSemanticNumericRuntime(t, backend, root, mock)
-			seedServedPublicationLiveRun(t, rt)
 			key := uuid.NewString()
 			first := semanticNumericRPC(t, rt.Endpoint, "http", semanticNumericRequest(rt.BundleHash, "event.publish", "", key, "7"))
 			if first.Error != nil {

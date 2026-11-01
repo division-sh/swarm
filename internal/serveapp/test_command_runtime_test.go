@@ -526,7 +526,6 @@ func startPublicInputRollbackRuntime(t *testing.T, backend servedparity.Backend)
 	sourceRoot := writePublicTelegramMockApprovalScenarioFixture(t)
 	bundleHash := servedEventPublishFixtureBundleHash(t, sourceRoot)
 	var db *sql.DB
-	var fixtureOwner storetest.RunFixtureStore
 	opts := cliapp.ServeOptions{
 		SourceRoot: sourceRoot, APIListenAddr: "127.0.0.1:0", MCPListenAddr: "127.0.0.1:0",
 		SelfCheck: true, Verbose: true,
@@ -540,27 +539,23 @@ func startPublicInputRollbackRuntime(t *testing.T, backend servedparity.Backend)
 			stores, err := oldBuildStores(ctx, selection, cfg)
 			if err == nil {
 				db = selectedStoreDatabaseForTest(t, stores)
-				fixtureOwner, _ = stores.RuntimeDeps().EventStore.(storetest.RunFixtureStore)
 			}
 			return stores, err
 		}
 		t.Cleanup(func() { buildStoresForServe = oldBuildStores })
 		opts.ConfigPath = writeMockAgentRuntimeConfig(t, storebackend.BackendSQLite.String(), filepath.Join(t.TempDir(), "public-input-rollback.sqlite"))
 	case servedparity.BackendExplicitPostgres:
-		var pg *store.PostgresStore
-		_, db, pg = installServeRuntimeEmptyPostgresTestStores(t, func() cliapp.ServeWorkspaceLifecycle { return serveRuntimeWorkspaceStub{} })
-		fixtureOwner = pg
+		_, db, _ = installServeRuntimeEmptyPostgresTestStores(t, func() cliapp.ServeWorkspaceLifecycle { return serveRuntimeWorkspaceStub{} })
 		opts.ConfigPath = writeMockAgentRuntimeConfig(t, storebackend.BackendPostgres.String(), "")
 		opts.StoreMode = storebackend.BackendPostgres.String()
 		opts.StoreModeSet = true
 	default:
 		t.Fatalf("unsupported backend %q", backend)
 	}
-	endpoint, rt := startOwnedMockLifecycleFollowUpRuntime(t, opts)
+	endpoint, _ := startOwnedMockLifecycleFollowUpRuntime(t, opts)
 	if db == nil {
 		t.Fatalf("%s selected database is required", backend)
 	}
-	seedOwnedPublicationLiveRun(t, rt, bundleHash, fixtureOwner)
 	return endpoint, db, bundleHash
 }
 

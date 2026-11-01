@@ -93,7 +93,7 @@ func issue2564H2FinalEntryCompletion(t *testing.T, backend string, acceptedTimer
 			t.Errorf("final-entry serve shutdown exit=%d\n%s", code, process.outputString())
 		}
 	})
-	seed := requireServedRunStartRPCResult(t, rt.Endpoint, map[string]any{
+	seed := requireServedEventPublishRPCResult(t, rt.Endpoint, map[string]any{
 		"event_name": "overlap.start", "bundle_hash": rt.BundleHash,
 		"payload": map[string]any{"case_id": "ordering"}, "idempotency_key": "ordering-start",
 	})

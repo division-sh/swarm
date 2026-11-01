@@ -44,7 +44,7 @@ func runLifecycleRootForkPolicy(t *testing.T) {
 			root := canonicalrouting.CopyLifecycleForkSource(t, false)
 			publication := newExactOriginPublicationProbe(t)
 			rt := startServedLiveFlowProofRuntimeFromSource(t, backend, root)
-			seed := requireServedRunStartRPCResult(t, rt.Endpoint, map[string]any{"event_name": "work.requested", "bundle_hash": rt.BundleHash, "payload": map[string]any{"seed": true}, "idempotency_key": "fork-seed"})
+			seed := requireServedEventPublishRPCResult(t, rt.Endpoint, map[string]any{"event_name": "work.requested", "bundle_hash": rt.BundleHash, "payload": map[string]any{"seed": true}, "idempotency_key": "fork-seed"})
 			var rootEventOwner any = rt.SQLite
 			if rt.Postgres != nil {
 				rootEventOwner = rt.Postgres

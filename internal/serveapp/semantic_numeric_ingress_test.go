@@ -17,7 +17,6 @@ import (
 	"github.com/division-sh/swarm/internal/runtime/testfixtures/canonicalrouting"
 	"github.com/division-sh/swarm/internal/runtime/workflowexpr"
 	"github.com/division-sh/swarm/internal/servedparity"
-	"github.com/division-sh/swarm/internal/store/storetest"
 	"github.com/google/uuid"
 	"github.com/gorilla/websocket"
 )
@@ -31,7 +30,6 @@ func TestServedSemanticNumericIdempotencyReplay(t *testing.T) {
 			stubServeRuntimeWorkspaceLifecycle(t)
 			opts := cliapp.ServeOptions{SourceRoot: root, APIListenAddr: "127.0.0.1:0", MCPListenAddr: "127.0.0.1:0", SelfCheck: true, TestOutboxSweeperConfig: servedEventPublishProofOutboxSweeperConfig()}
 			var db *sql.DB
-			var owner storetest.RunFixtureStore
 			if backend == servedparity.BackendExplicitPostgres {
 				_, db, _ = installServeRuntimeEmptyPostgresTestStores(t, func() cliapp.ServeWorkspaceLifecycle { return serveRuntimeWorkspaceStub{} })
 				opts.ConfigPath = writeServeRuntimeTestConfig(t)
@@ -40,10 +38,7 @@ func TestServedSemanticNumericIdempotencyReplay(t *testing.T) {
 			} else {
 				opts.ConfigPath = writeStoreBackendRuntimeConfig(t, "sqlite", filepath.Join(t.TempDir(), "semantic.db"))
 			}
-			captureSelectedRuntimePersistence(t, func(p serveRuntimePersistence) {
-				db, _, _ = selectedRuntimeStoreForTest(t, p)
-				owner, _ = p.deps.EventStore.(storetest.RunFixtureStore)
-			})
+			captureSelectedRuntimePersistence(t, func(p serveRuntimePersistence) { db, _, _ = selectedRuntimeStoreForTest(t, p) })
 			start := func() (*serveRuntimeTestProcess, string) {
 				p := startServeRuntimeTestProcess(t, opts)
 				p.waitForReadyLine()
@@ -57,9 +52,6 @@ func TestServedSemanticNumericIdempotencyReplay(t *testing.T) {
 			var cases []replayCase
 			for _, method := range []string{"event.publish", "run.start"} {
 				for _, transport := range []string{"http"} {
-					if method == "event.publish" {
-						seedOwnedPublicationLiveRun(t, servedTestProcessRuntime(t, process), bundleHash, owner)
-					}
 					c := replayCase{method: method, transport: transport, run: uuid.NewString(), key: uuid.NewString()}
 					body := semanticNumericRequest(bundleHash, c.method, c.run, c.key, "7")
 					resp := semanticNumericRPC(t, endpoint, c.transport, body)

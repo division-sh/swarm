@@ -78,7 +78,7 @@ func TestIssue642ServedPublishedBarrierReachesFinalConsumerBothStores(t *testing
 			}
 			phase, cancel := context.WithTimeout(t.Context(), 30*time.Second)
 			defer cancel()
-			seed := requireServedRunStartRPCResult(t, rt.Endpoint, map[string]any{"event_name": "start.seeded", "bundle_hash": rt.BundleHash,
+			seed := requireServedEventPublishRPCResult(t, rt.Endpoint, map[string]any{"event_name": "start.seeded", "bundle_hash": rt.BundleHash,
 				"payload": map[string]any{"token": "seed"}, "idempotency_key": "served-published-barrier-seed"})
 			requireIssue2564LiveRootMode(t, rt, seed.RunID, seed.EventID)
 			issue2564H2CompletionWaitReceipt(t, rt, seed.RunID, seed.EventID)

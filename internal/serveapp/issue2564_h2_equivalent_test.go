@@ -559,7 +559,7 @@ func TestIssue2564H2FixedCutTimerPrefixBothStores(t *testing.T) {
 					t.Error(err)
 				}
 			})
-			seed := requireServedRunStartRPCResult(t, rt.Endpoint, map[string]any{"event_name": "hub.start", "bundle_hash": rt.BundleHash, "payload": map[string]any{"hub_id": "h01"}, "idempotency_key": "q6-hub-1"})
+			seed := requireServedEventPublishRPCResult(t, rt.Endpoint, map[string]any{"event_name": "hub.start", "bundle_hash": rt.BundleHash, "payload": map[string]any{"hub_id": "h01"}, "idempotency_key": "q6-hub-1"})
 			// One real keyed hub isolates cut preservation from the separate
 			// six-hub 900/600-submission pressure journey below.
 			waitProgress := func(previous int) issue2564H2Snapshot {
@@ -1076,7 +1076,7 @@ func TestIssue2564ReconstructedEquivalentH2BothStores(t *testing.T) {
 						t.Logf("H2 first process raw output:\n%s", first.output.String())
 					}
 				})
-				seed := requireServedRunStartRPCResult(t, rt.Endpoint, map[string]any{"event_name": "hub.start", "bundle_hash": rt.BundleHash, "payload": map[string]any{"hub_id": "h01"}, "idempotency_key": "h2-start-1"})
+				seed := requireServedEventPublishRPCResult(t, rt.Endpoint, map[string]any{"event_name": "hub.start", "bundle_hash": rt.BundleHash, "payload": map[string]any{"hub_id": "h01"}, "idempotency_key": "h2-start-1"})
 				for hub := 2; hub <= 6; hub++ {
 					requireServedEventPublishRPCResult(t, rt.Endpoint, map[string]any{"event_name": "hub.start", "run_id": seed.RunID, "source_event_id": seed.EventID, "payload": map[string]any{"hub_id": fmt.Sprintf("h%02d", hub)}, "idempotency_key": fmt.Sprintf("h2-start-%d", hub)})
 				}
@@ -1239,7 +1239,7 @@ func TestIssue2564H2WorkloadObservationPortsBothStores(t *testing.T) {
 			start, _, _ := issue2564H2Harness(t, backend, issue2564H2Source(t))
 			first, rt := start(false)
 			// This exercises observation ports only, not an H2 pressure qualification.
-			seed := requireServedRunStartRPCResult(t, rt.Endpoint, map[string]any{
+			seed := requireServedEventPublishRPCResult(t, rt.Endpoint, map[string]any{
 				"event_name": "hub.start", "bundle_hash": rt.BundleHash,
 				"payload": map[string]any{"hub_id": "h01"}, "idempotency_key": "h2-start-1",
 			})

@@ -56,7 +56,7 @@ func issue642RetainedRecurringTimerFork(t *testing.T, backend string) {
 	if !ok {
 		t.Fatalf("served selected store lacks canonical recurring timer/fork readers: %T", rt.selected)
 	}
-	seed := requireServedRunStartRPCResult(t, rt.Endpoint, map[string]any{
+	seed := requireServedEventPublishRPCResult(t, rt.Endpoint, map[string]any{
 		"event_name": "timer.scheduled", "bundle_hash": rt.BundleHash,
 		"payload": map[string]any{}, "idempotency_key": "issue642-recurring-source-arm",
 	})

@@ -25,7 +25,7 @@ func TestIssue642FutureKeyedProviderReusesConstructedInstanceBothStores(t *testi
 					t.Errorf("reused-provider shutdown=%d\n%s", code, process.outputString())
 				}
 			})
-			response := requestServedJSONRPCWithTimeout(t, rt.Endpoint, "run.start", map[string]any{
+			response := requestServedJSONRPCWithTimeout(t, rt.Endpoint, "event.publish", map[string]any{
 				"event_name": "start.requested", "bundle_hash": rt.BundleHash,
 				"payload": map[string]any{"work_id": "one"}, "idempotency_key": "future-provider-reuse-source",
 			}, 30*time.Second)
