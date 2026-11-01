@@ -14,8 +14,9 @@ import (
 	"github.com/google/uuid"
 )
 
-func (*countingAdministrativeResetLifecycle) ResetSourceProjections(context.Context) ([]destructivereset.SourceProjection, error) {
-	return nil, nil
+func (*countingAdministrativeResetLifecycle) AdmitResetOperation(ctx context.Context, req destructivereset.Request, operations destructivereset.OperationStore) (destructivereset.Operation, destructivereset.RuntimeReset, error) {
+	operation, err := operations.AdmitResetOperation(ctx, req)
+	return operation, nil, err
 }
 
 func TestRuntimeNukeDurableReplaySurvivesAPICompletionLossAndExpiration(t *testing.T) {
