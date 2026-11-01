@@ -29,6 +29,7 @@ import (
 	"github.com/division-sh/swarm/internal/runtime/executionposture"
 	"github.com/division-sh/swarm/internal/runtime/lifecycleprobe"
 	runtimepublicingress "github.com/division-sh/swarm/internal/runtime/publicingress"
+	"github.com/division-sh/swarm/internal/runtime/scenarioexecution"
 	"github.com/division-sh/swarm/internal/store/devscratch"
 	"github.com/division-sh/swarm/internal/store/storetest"
 	"github.com/google/uuid"
@@ -143,6 +144,13 @@ func runOwnedLifecycle(ctx context.Context, root, retainedRoot string, opts clia
 	runtimeID := uuid.NewString()
 	ctx = runtimecorrelation.WithRuntimeInstanceID(ctx, runtimeID)
 	ctx = runtimeauthoractivity.WithScope(ctx, runtimeauthoractivity.RuntimeScope(runtimeID))
+	if posture == executionposture.MockOnly {
+		scoped, err := scenarioexecution.WithPrivateHostScope(ctx, runtimeID)
+		if err != nil {
+			return 1, err
+		}
+		ctx = scoped
+	}
 	configResult, err := cliapp.LoadRuntimeConfigWithOptions(cliapp.RuntimeConfigLoadOptions{RepoRoot: root, ExplicitPath: opts.ConfigPath})
 	if err != nil {
 		return 1, err
@@ -405,11 +413,27 @@ func startOwnedLifecycleFollowUpRuntime(t *testing.T, opts cliapp.ServeOptions, 
 
 // Retained persistence proofs inject their parent-owned H session explicitly.
 // This is not a public connected-test option or T command-lifetime proof.
-func executeScenarioInOwnedLifecycle(t *testing.T, root string, args []string, endpoint string, out, errOut io.Writer) int {
+func executeScenarioInOwnedLifecycle(t *testing.T, root string, args []string, endpoint string, out, errOut io.Writer, runtimes ...*runtimepkg.Runtime) int {
 	t.Helper()
 	t.Log("proof_surface=H scenario protocol on parent-owned lifecycle; not public private-test lifetime")
+	if len(runtimes) != 1 || runtimes[0] == nil {
+		t.Fatal("owned scenario requires its original runtime start owner")
+	}
+	rt := runtimes[0]
 	return executeCLIFromWithRunners(context.Background(), root, args, out, errOut, nil,
 		func(ctx context.Context, _ cliapp.TestSessionRequest, execute func(context.Context, cliapp.TestSessionEndpoint) error) error {
-			return execute(ctx, cliapp.TestSessionEndpoint{APIServer: strings.TrimSuffix(endpoint, "/v1/rpc"), Token: apiv1.DefaultLoopbackAPIToken})
+			return execute(ctx, cliapp.TestSessionEndpoint{APIServer: strings.TrimSuffix(endpoint, "/v1/rpc"), Token: apiv1.DefaultLoopbackAPIToken,
+				StartScenario: func(ctx context.Context, params map[string]any) (string, error) {
+					ctx, err := scenarioexecution.WithPrivateHostScope(ctx, rt.Options.RuntimeInstanceID)
+					if err != nil {
+						return "", err
+					}
+					return apiv1.StartPrivateScenario(ctx, apiv1.EventPublicationOptions{
+						ExecutionPosture: rt.ExecutionPosture, Source: rt.Options.WorkflowModule.SemanticSource(),
+						Acknowledged: rt.Bus, SourceArtifact: rt.Bus, RecipientPlans: rt.Bus,
+						EffectiveSourceIdentity: rt.EffectiveSourceIdentity, ScenarioProfileCatalog: rt.ScenarioProfileCatalog,
+					}, params, time.Now().UTC())
+				},
+			})
 		})
 }

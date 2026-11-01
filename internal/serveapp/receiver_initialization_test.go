@@ -73,6 +73,7 @@ func requireTypedReceiverInitializationCases(t *testing.T, rt servedControlProof
 			}
 		})
 	}
+	var lastRunID string
 	for _, tc := range []struct {
 		name, values string
 		config       map[string]any
@@ -92,7 +93,15 @@ func requireTypedReceiverInitializationCases(t *testing.T, rt servedControlProof
 		t.Run(tc.name, func(t *testing.T) {
 			account := "account-" + tc.name
 			params := receiverInitializationPublishParams(rt, tc.name, account, tc.values)
-			seed := requireServedEventPublishRPCResult(t, rt.Endpoint, params)
+			var seed servedEventPublishRPCResult
+			method := "event.publish"
+			if lastRunID == "" {
+				seed = requireServedEventPublishRPCResult(t, rt.Endpoint, params)
+			} else {
+				method = "run.start"
+				requireServedJSONRPCResult(t, rt.Endpoint, method, params, &seed)
+			}
+			lastRunID = seed.RunID
 			waitPublicationSiteCompletion(t, rt, seed.RunID)
 			if tc.name == "optional_null_normalized" {
 				var public operatorread.OperatorEventFull
@@ -110,7 +119,8 @@ func requireTypedReceiverInitializationCases(t *testing.T, rt servedControlProof
 			waitOrigin(t, seed)
 			before := readServedForkRecipientSourceDomain(t, rt, seed.RunID)
 			companions := readForkReceiverCompanions(t, rt, seed.RunID)
-			duplicate := requireServedEventPublishRPCResult(t, rt.Endpoint, params)
+			var duplicate servedEventPublishRPCResult
+			requireServedJSONRPCResult(t, rt.Endpoint, method, params, &duplicate)
 			if duplicate.EventID != seed.EventID || duplicate.RunID != seed.RunID || !reflect.DeepEqual(before, readServedForkRecipientSourceDomain(t, rt, seed.RunID)) || !reflect.DeepEqual(companions, readForkReceiverCompanions(t, rt, seed.RunID)) {
 				t.Fatal("duplicate creation changed occurrence or execution history")
 			}
@@ -126,13 +136,14 @@ func requireTypedReceiverInitializationCases(t *testing.T, rt servedControlProof
 					t.Fatal("reuse changed receiver or run identity")
 				}
 			}
-			requireServedOKJSONRPC(t, rt.Endpoint, "run.pause", map[string]any{
-				"run_id": seed.RunID, "idempotency_key": "typed-init-pause-" + tc.name,
-			})
 		})
+	}
+	if lastRunID == "" {
+		t.Fatal("receiver cases did not establish their intended run")
 	}
 	t.Run("wrong_integer_at_ingress", func(t *testing.T) {
 		params := receiverInitializationPublishParams(rt, "wrong-integer", "wrong-integer", `{"count":"3","active":true,"label":"kept","attributes":{}}`)
+		params["run_id"] = lastRunID
 		err := requireServedJSONRPCError(t, rt.Endpoint, "event.publish", params)
 		if err.Data["code"] != apiv1.PayloadValidationFailedCode {
 			t.Fatalf("wrong integer admission error=%+v", err)
@@ -154,7 +165,24 @@ func receiverInitializationPublishParams(rt servedControlProofRuntime, key, acco
 
 func requireServedReceiverInitialization(t *testing.T, rt servedControlProofRuntime, seed servedEventPublishRPCResult, want map[string]any, executions int) (string, string) {
 	t.Helper()
-	record, receiver := requireSingleReceiverTargetState(t, rt.ReceiverStateReader, seed.RunID, "account")
+	var eventID string
+	if err := rt.DB.QueryRow(`SELECT event_id FROM events WHERE run_id=$1 AND event_name='work.ready' AND source_event_id=$2`, seed.RunID, seed.EventID).Scan(&eventID); err != nil {
+		t.Fatal(err)
+	}
+	var event operatorread.OperatorEventFull
+	requireServedJSONRPCResult(t, rt.Endpoint, "event.get", map[string]any{"event_id": eventID}, &event)
+	node, err := identity.ParseExecutableNode("account", "collector")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if event.EventID != eventID || event.EventName != "work.ready" || event.RunID != seed.RunID || event.SourceEventID != seed.EventID || event.Payload["account_id"] != want["account_id"] || len(event.Deliveries) != 1 {
+		t.Fatalf("initialization publication identity/recipients=%+v", event)
+	}
+	delivery := event.Deliveries[0]
+	if delivery.SubscriberType != "node" || delivery.SubscriberID != node.Key() || delivery.Status != "delivered" || delivery.Target.FlowInstance == "" || delivery.Target.EntityID == "" {
+		t.Fatalf("initialization exact delivery owner=%+v", delivery)
+	}
+	record, receiver := requireReceiverTargetState(t, rt.ReceiverStateReader, seed.RunID, "account", delivery.Target.FlowInstance, delivery.Target.EntityID)
 	path, entityID, raw := receiver.StorageRef, receiver.EntityID, record.Lifecycle.Config
 	var config map[string]any
 	if err := canonicaljson.DecodePreservingNumberLexemes(raw, &config); err != nil {
@@ -189,20 +217,6 @@ func requireServedReceiverInitialization(t *testing.T, rt servedControlProofRunt
 	if entity.Entity.EntityID != entityID || entity.Entity.RunID != seed.RunID || !reflect.DeepEqual(entity.Fields, map[string]any{"account_id": want["account_id"], "processed_count": float64(executions), "values": publicValues}) {
 		t.Fatalf("receiver public business state=%+v; supplied values must have the declared state owner", entity)
 	}
-	var eventID string
-	if err := rt.DB.QueryRow(`SELECT event_id FROM events WHERE run_id=$1 AND event_name='work.ready' AND source_event_id=$2`, seed.RunID, seed.EventID).Scan(&eventID); err != nil {
-		t.Fatal(err)
-	}
-	var event operatorread.OperatorEventFull
-	requireServedJSONRPCResult(t, rt.Endpoint, "event.get", map[string]any{"event_id": eventID}, &event)
-	node, err := identity.ParseExecutableNode("account", "collector")
-	if err != nil {
-		t.Fatal(err)
-	}
-	if event.EventID != eventID || event.EventName != "work.ready" || event.RunID != seed.RunID || event.SourceEventID != seed.EventID || event.Payload["account_id"] != want["account_id"] || len(event.Deliveries) != 1 {
-		t.Fatalf("initialization publication identity/recipients=%+v", event)
-	}
-	delivery := event.Deliveries[0]
 	if delivery.SubscriberType != "node" || delivery.SubscriberID != node.Key() || delivery.Status != "delivered" || delivery.Target.FlowInstance != path || delivery.Target.EntityID != entityID {
 		t.Fatalf("initialization exact delivery owner=%+v", delivery)
 	}

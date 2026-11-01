@@ -624,7 +624,7 @@ func TestRunServeRuntimeJoinFailureReachesAPIAndCLI(t *testing.T) {
 		"payload":         map[string]any{"expected": []any{"a"}, "dispatch_id": "dispatch-1"},
 		"idempotency_key": "join-failure-run-" + uuid.NewString(),
 	})
-	if !initial.NewRunCreated || initial.RunID == "" || initial.EventID == "" {
+	if initial.NewRunCreated || initial.RunID == "" || initial.EventID == "" {
 		t.Fatalf("join failure initial run = %#v", initial)
 	}
 	waitServedEventPublishDeliveryStatusCountForRun(t, db, "postgres", initial.RunID, initial.EventID, "node", identitytest.RootNode(t, "starter").Key(), "delivered", 1)
@@ -1532,8 +1532,8 @@ func runServedRunForkBackendProof(t *testing.T, backend servedparity.Backend) {
 		"payload":         map[string]any{"item_id": "selected-store-fork"},
 		"idempotency_key": "issue-2361-" + rt.Backend + "-source",
 	})
-	if !started.NewRunCreated || strings.TrimSpace(started.RunID) == "" || strings.TrimSpace(started.EventID) == "" {
-		t.Fatalf("initial event.publish result = %#v, want a new run and event", started)
+	if started.NewRunCreated || strings.TrimSpace(started.RunID) == "" || strings.TrimSpace(started.EventID) == "" {
+		t.Fatalf("initial event.publish result = %#v, want the existing live run and a new event", started)
 	}
 	waitForServedEventPublishNodeDeliveryLifecycleForNode(t, rt.DB, rt.Backend, started.RunID, started.EventID, identitytest.RootNode(t, "item-handler").Key(), rt.Probe)
 	var published struct {
@@ -1699,7 +1699,7 @@ func runServedConversationForkBackendProof(t *testing.T, backend servedparity.Ba
 	runServedConversationForkLifecycleProof(t, rt)
 }
 
-func startServedConversationForkProofRuntime(t *testing.T, backend servedparity.Backend) servedConversationForkProofRuntime {
+func startServedConversationForkProofRuntime(t *testing.T, backend servedparity.Backend, startup ...func(cliapp.ServeOptions) (string, *runtimepkg.Runtime)) servedConversationForkProofRuntime {
 	t.Helper()
 	var deliveryReader servedRunDeliveryReader
 	captureSelectedRuntimePersistence(t, func(p serveRuntimePersistence) { deliveryReader = p.deps.DeliveryStore.SummarizeRun })
@@ -1755,7 +1755,13 @@ func startServedConversationForkProofRuntime(t *testing.T, backend servedparity.
 		probe := lifecycletest.New(t, lifecycletest.WithTimeout(servedEventPublishLifecycleProbeWaitTimeout))
 		opts.TestLifecycleProbe = probe
 		opts.TestLLMRuntime = servedOpenAICompatibleNoopLLMRuntime{}
-		endpoint, rt := startServedEventPublishFollowUpRuntime(t, opts)
+		var endpoint string
+		var rt *runtimepkg.Runtime
+		if len(startup) == 0 {
+			endpoint, rt = startServedEventPublishFollowUpRuntime(t, opts)
+		} else {
+			endpoint, rt = startup[0](opts)
+		}
 		if servedDB == nil {
 			t.Fatal("served conversation fork SQLDB is required")
 		}
@@ -1829,22 +1835,13 @@ type servedConversationForkSource struct {
 
 func runServedConversationForkLifecycleProof(t *testing.T, rt servedConversationForkProofRuntime) {
 	t.Helper()
-	initial := requireServedEventPublishRPCResult(t, rt.Endpoint, map[string]any{
-		"event_name":      "external.observed",
-		"bundle_hash":     rt.BundleHash,
-		"payload":         map[string]any{},
-		"idempotency_key": "issue-1997-" + rt.Backend + "-source-run",
-	})
-	if !initial.NewRunCreated || initial.RunID == "" {
+	initial := servedEventPublishRPCResult{RunID: requireServedLiveLandingRunID(t, rt.Endpoint, rt.BundleHash, ".")}
+	if initial.NewRunCreated || initial.RunID == "" {
 		t.Fatalf("%s conversation fork source run = %#v", rt.Backend, initial)
 	}
-	// Empty delivery queues do not join committed source-agent activation.
-	rt.Probe.RequireEventPersisted(initial.EventID)
-	waitServedRunDeliveryQuiescence(t, rt.ReadRunDeliveries, initial.RunID)
 	ready := requireServedEventPublishRPCResult(t, rt.Endpoint, map[string]any{
 		"event_name":      "fork.source_message",
 		"run_id":          initial.RunID,
-		"source_event_id": initial.EventID,
 		"payload":         map[string]any{"note": "materialize source agent"},
 		"idempotency_key": "issue-1997-" + rt.Backend + "-source-agent-readiness",
 	})
@@ -2548,6 +2545,7 @@ func runServedRunControlLifecycleProof(t *testing.T, rt servedControlProofRuntim
 
 func runServedRuntimeIngressControlLifecycleProof(t *testing.T, rt servedControlProofRuntime) {
 	t.Helper()
+	runID := requireServedLiveLandingRunID(t, rt.Endpoint, rt.BundleHash, ".")
 	keyPrefix := "issue-1864-" + rt.Backend + "-" + uuid.NewString()
 	pauseKey := keyPrefix + "-runtime-pause"
 	requireServedOKJSONRPC(t, rt.Endpoint, "runtime.pause", map[string]any{
@@ -2565,17 +2563,6 @@ func runServedRuntimeIngressControlLifecycleProof(t *testing.T, rt servedControl
 		t.Fatalf("%s duplicate runtime.pause data = %#v, want %s", rt.Backend, duplicatePause.Data, apiv1.RuntimeAlreadyPausedCode)
 	}
 
-	queued := requireServedEventPublishRPCResult(t, rt.Endpoint, map[string]any{
-		"event_name":      "external.observed",
-		"bundle_hash":     rt.BundleHash,
-		"payload":         map[string]any{},
-		"idempotency_key": keyPrefix + "-runtime-queued",
-	})
-	if !queued.NewRunCreated || queued.RunID == "" || queued.EventID == "" {
-		t.Fatalf("%s runtime-paused event.publish result = %#v, want new queued run", rt.Backend, queued)
-	}
-	requireNoServedReceiptOutcomeDuring(t, rt.DB, rt.Backend, queued.EventID, "platform", "pipeline", "success", 250*time.Millisecond)
-
 	resumeKey := keyPrefix + "-runtime-resume"
 	requireServedOKJSONRPC(t, rt.Endpoint, "runtime.resume", map[string]any{
 		"idempotency_key": resumeKey,
@@ -2592,9 +2579,8 @@ func runServedRuntimeIngressControlLifecycleProof(t *testing.T, rt servedControl
 		t.Fatalf("%s duplicate runtime.resume data = %#v, want %s", rt.Backend, duplicateResume.Data, apiv1.RuntimeNotPausedCode)
 	}
 
-	waitServedEventPublishReceiptOutcomeCount(t, rt.DB, rt.Backend, queued.EventID, "platform", "pipeline", "success", 1)
-	requireServedRunStatus(t, rt.Endpoint, queued.RunID, "live")
-	requireServedParitySettlementPostconditions(t, rt.Endpoint, rt.DB, rt.Backend, queued.RunID, servedparity.MustScenario(servedparity.ScenarioRuntimeResumeIngressLifecycle))
+	requireServedRunStatus(t, rt.Endpoint, runID, "live")
+	requireServedParitySettlementPostconditions(t, rt.Endpoint, rt.DB, rt.Backend, runID, servedparity.MustScenario(servedparity.ScenarioRuntimeResumeIngressLifecycle))
 }
 
 type servedDecisionCardFixture struct {
@@ -2785,11 +2771,16 @@ func requireServedMailboxSubscription(t *testing.T, endpoint, cardID string) {
 			Result       map[string]any `json:"result"`
 		} `json:"params"`
 	}
-	if err := conn.ReadJSON(&notification); err != nil {
-		t.Fatalf("read mailbox subscription notification: %v", err)
-	}
-	if notification.Method != "rpc.subscription" || notification.Params.Subscription != response.Result.SubscriptionID || notification.Params.Result["card_id"] != cardID {
-		t.Fatalf("mailbox subscription notification = %#v", notification)
+	for {
+		if err := conn.ReadJSON(&notification); err != nil {
+			t.Fatalf("read mailbox subscription notification for %s: %v", cardID, err)
+		}
+		if notification.Method != "rpc.subscription" || notification.Params.Subscription != response.Result.SubscriptionID {
+			t.Fatalf("mailbox subscription notification = %#v", notification)
+		}
+		if notification.Params.Result["card_id"] == cardID {
+			return
+		}
 	}
 }
 
@@ -3239,8 +3230,8 @@ func runServedCreateCarryProjectionProof(t *testing.T, endpoint string, db *sql.
 		"payload":         map[string]any{"candidate": "candidate-1"},
 		"idempotency_key": "issue-2025-" + backend,
 	})
-	if !root.NewRunCreated || root.RunID == "" || root.EventID == "" {
-		t.Fatalf("%s create carry root result = %#v, want new run", backend, root)
+	if root.NewRunCreated || root.RunID == "" || root.EventID == "" {
+		t.Fatalf("%s create carry root result = %#v, want the existing live run", backend, root)
 	}
 	requestedEventID := waitServedEventPublishEventID(t, db, backend, root.RunID, "producer/validation.requested")
 
@@ -3405,8 +3396,8 @@ func runServedDynamicAutoEmitProof(t *testing.T, endpoint string, db *sql.DB, ba
 		"payload":         map[string]any{"owner": "operator"},
 		"idempotency_key": "issue-1384-" + backend + "-bootstrap",
 	})
-	if !bootstrap.NewRunCreated || bootstrap.EventID == "" || bootstrap.RunID == "" {
-		t.Fatalf("bootstrap event.publish result = %#v, want new run and event id", bootstrap)
+	if bootstrap.NewRunCreated || bootstrap.EventID == "" || bootstrap.RunID == "" {
+		t.Fatalf("bootstrap event.publish result = %#v, want existing live run and event id", bootstrap)
 	}
 	runID := bootstrap.RunID
 	parentEntityID := requireServedEventPublishEntityState(t, db, backend, runID, "", "waiting")
@@ -3535,8 +3526,8 @@ func createServedControlWaitingRun(t *testing.T, rt servedControlProofRuntime, s
 		"payload":         map[string]any{"item_id": suffix},
 		"idempotency_key": "issue-1864-" + rt.Backend + "-" + suffix,
 	})
-	if !result.NewRunCreated || result.RunID == "" || result.EventID == "" {
-		t.Fatalf("%s control seed event.publish result = %#v, want new run", rt.Backend, result)
+	if result.NewRunCreated || result.RunID == "" || result.EventID == "" {
+		t.Fatalf("%s control seed event.publish result = %#v, want the existing live run", rt.Backend, result)
 	}
 	waitForServedEventPublishNodeDeliveryLifecycleForNode(t, rt.DB, rt.Backend, result.RunID, result.EventID, identitytest.RootNode(t, "item-handler").Key(), rt.Probe)
 	entityID = requireServedEventPublishEntityState(t, rt.DB, rt.Backend, result.RunID, "", "waiting")
@@ -4877,8 +4868,8 @@ func runServedEventPublishFollowUpProof(t *testing.T, endpoint string, db *sql.D
 	initial := parseServedEventPublishOutput(t, initialStdout)
 	runID := initial["run_id"]
 	initialEventID := initial["event_id"]
-	if initial["new_run_created"] != "true" || initial["deliveries"] == "0" || runID == "" || initialEventID == "" {
-		t.Fatalf("initial event publish fields = %#v, want new run with delivery", initial)
+	if initial["new_run_created"] != "false" || initial["deliveries"] == "0" || runID == "" || initialEventID == "" {
+		t.Fatalf("initial event publish fields = %#v, want existing live run with delivery", initial)
 	}
 	if got := servedEventPublishRowCount(t, db, backend, "runs", runID, ""); got != 1 {
 		t.Fatalf("%s runs for initial run = %d, want 1", backend, got)
@@ -4998,8 +4989,8 @@ func runServedEventPublishTargetRouteProof(t *testing.T, endpoint string, db *sq
 	bootstrap := parseServedEventPublishOutput(t, bootstrapStdout)
 	runID := bootstrap["run_id"]
 	bootstrapEventID := bootstrap["event_id"]
-	if bootstrap["new_run_created"] != "true" || bootstrap["deliveries"] == "0" || runID == "" || bootstrapEventID == "" {
-		t.Fatalf("bootstrap target-route event publish fields = %#v, want new run with delivery", bootstrap)
+	if bootstrap["new_run_created"] != "false" || bootstrap["deliveries"] == "0" || runID == "" || bootstrapEventID == "" {
+		t.Fatalf("bootstrap target-route event publish fields = %#v, want existing live run with delivery", bootstrap)
 	}
 	requireServedEventPublishEntityState(t, db, backend, runID, "", "waiting")
 
@@ -5078,8 +5069,8 @@ func runServedEventPublishActiveLoadProof(
 	})
 	runID := initial.RunID
 	initialEventID := initial.EventID
-	if !initial.NewRunCreated || runID == "" || initialEventID == "" {
-		t.Fatalf("%s initial event.publish result = %#v, want new run", backend, initial)
+	if initial.NewRunCreated || runID == "" || initialEventID == "" {
+		t.Fatalf("%s initial event.publish result = %#v, want existing live run", backend, initial)
 	}
 	waitForServedEventPublishNodeDeliveryLifecycleForNode(t, db, backend, runID, initialEventID, identitytest.RootNode(t, "item-handler").Key(), probe)
 	entityID := requireServedEventPublishEntityState(t, db, backend, runID, "", "waiting")

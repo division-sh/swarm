@@ -39,6 +39,7 @@ func TestFiniteRunStartPayloadAdmissionPrecedesEligibilityBothStores(t *testing.
 				t.Fatal(err)
 			}
 			handler := eventPublishTestHandlerWithStores(t, fixture.primary, fixture.primary, fixture.primary, bus, source)
+			runID := seedEventPublishLiveRun(t, fixture.primary, bus, source)
 			ref, err := durabledata.ParseDeclarationRef(".", "scan.requested")
 			if err != nil {
 				t.Fatal(err)
@@ -61,7 +62,7 @@ func TestFiniteRunStartPayloadAdmissionPrecedesEligibilityBothStores(t *testing.
 						payload["topic"] = malformed.value
 					}
 					params := map[string]any{
-						"run_id": uuid.NewString(), "bundle_hash": runStartTestBundleHashForSource(source),
+						"run_id": runID, "bundle_hash": runStartTestBundleHashForSource(source),
 						"event_name": "scan.requested", "payload": payload, "idempotency_key": uuid.NewString(),
 					}
 					if withData {
@@ -81,6 +82,7 @@ func TestFiniteRunStartPayloadAdmissionPrecedesEligibilityBothStores(t *testing.
 					}
 				}
 			}
+			pauseAPITestLiveRun(t, bus, fixture.primary, runID)
 		}
 	})
 }
@@ -93,6 +95,7 @@ func TestFiniteRunStartDoesNotVetoOrdinaryServicePublicationBothStores(t *testin
 			t.Fatal(err)
 		}
 		handler := eventPublishTestHandlerWithStores(t, fixture.primary, fixture.primary, fixture.primary, bus, source)
+		seedEventPublishLiveRun(t, fixture.primary, bus, source)
 		created := rpcCall(t, handler, eventPublishBodyWithBundleHash("", runStartTestBundleHashForSource(source), "scan.requested", `{"topic":"service"}`, "", uuid.NewString()))
 		if created.Error != nil {
 			t.Fatalf("ordinary service publication gained a finite-start veto: %#v", created)
@@ -116,7 +119,7 @@ func TestFiniteRunStartReceiptReplayAndConflictBothStores(t *testing.T) {
 			t.Fatal(err)
 		}
 		handler := eventPublishTestHandlerWithStores(t, fixture.primary, fixture.primary, fixture.primary, bus, source)
-		runID, key := uuid.NewString(), uuid.NewString()
+		runID, key := seedEventPublishLiveRun(t, fixture.primary, bus, source), uuid.NewString()
 		body := runStartBodyWithBundleHash(runID, runStartTestBundleHashForSource(source), "scan.requested", `{"topic":"finite"}`, key)
 		first := rpcCall(t, handler, body)
 		if first.Error != nil {

@@ -1,9 +1,12 @@
 package serveapp
 
 import (
+	"fmt"
+	"strings"
 	"testing"
 	"time"
 
+	"github.com/division-sh/swarm/internal/apiv1"
 	runtimepkg "github.com/division-sh/swarm/internal/runtime"
 	"github.com/division-sh/swarm/internal/runtime/decisioncard"
 	"github.com/division-sh/swarm/internal/runtime/testfixtures/canonicalrouting"
@@ -27,7 +30,7 @@ func TestPausedAcceptedTimerAndDecisionPublicBothStores(t *testing.T) {
 					"event_name": "work.requested", "bundle_hash": rt.BundleHash,
 					"payload": map[string]any{"seed": true}, "idempotency_key": "paused-accepted-" + family,
 				})
-				if !created.NewRunCreated || created.RunID == "" || created.EventID == "" {
+				if created.NewRunCreated || created.RunID == "" || created.EventID == "" {
 					t.Fatalf("create review run = %+v", created)
 				}
 				t.Cleanup(func() {
@@ -78,7 +81,23 @@ func TestPausedAcceptedTimerAndDecisionPublicBothStores(t *testing.T) {
 					params := map[string]any{"card_id": listed.Items[0].Card.ID, "verdict": "approve", "observed_content_hash": detail.Card.Hash, "idempotency_key": "paused-verdict"}
 					if family == "decision_unloaded" {
 						response := requestServedJSONRPC(t, rt.Endpoint, "mailbox.decide", params)
-						t.Logf("R12 paused/unloaded card answer: result=%s error=%+v", response.Result, response.Error)
+						if response.Error == nil || response.Error.Data["code"] != apiv1.BundleUnavailableCode {
+							t.Fatalf("paused unloaded card refusal = %+v", response)
+						}
+						details, _ := response.Error.Data["details"].(map[string]any)
+						if details["cause"] != runtimepkg.RuntimeContextCauseUnloaded || !strings.Contains(fmt.Sprint(details["message"]), "swarm run continue "+created.RunID) {
+							t.Fatalf("paused unloaded card guidance = %#v", details)
+						}
+						var retained struct {
+							Card struct {
+								Status string `json:"status"`
+								Hash   string `json:"card_content_hash"`
+							} `json:"decision_card"`
+						}
+						requireServedJSONRPCResult(t, rt.Endpoint, "mailbox.get", map[string]any{"mailbox_id": listed.Items[0].Card.ID}, &retained)
+						if retained.Card.Status != decisioncard.StatusPending || retained.Card.Hash != detail.Card.Hash {
+							t.Fatalf("refused card changed: %+v", retained)
+						}
 						requireServedRunStatus(t, rt.Endpoint, created.RunID, "paused")
 						return
 					}

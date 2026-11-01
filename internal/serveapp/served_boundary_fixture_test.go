@@ -11,12 +11,19 @@ import (
 	"github.com/division-sh/swarm/internal/config"
 	"github.com/division-sh/swarm/internal/operatorread"
 	runtimepkg "github.com/division-sh/swarm/internal/runtime"
+	"github.com/division-sh/swarm/internal/runtime/core/flowidentity"
 	"github.com/division-sh/swarm/internal/runtime/core/identitytest"
+	"github.com/division-sh/swarm/internal/runtime/correlation"
+	"github.com/division-sh/swarm/internal/runtime/effects"
 	"github.com/division-sh/swarm/internal/runtime/lifecycleprobe/lifecycletest"
+	"github.com/division-sh/swarm/internal/runtime/pipeline"
+	"github.com/division-sh/swarm/internal/runtime/runlifecycle"
+	"github.com/division-sh/swarm/internal/runtime/semanticview"
 	storebackend "github.com/division-sh/swarm/internal/store/backendselection"
 	storeselected "github.com/division-sh/swarm/internal/store/selected"
 	"github.com/division-sh/swarm/internal/store/storetest"
 	"github.com/division-sh/swarm/internal/testutil"
+	"github.com/google/uuid"
 )
 
 type servedBoundaryFixture struct {
@@ -25,6 +32,67 @@ type servedBoundaryFixture struct {
 	Runtime                       *runtimepkg.Runtime
 	Probe                         *lifecycletest.Probe
 	ReceiverStateReader           receiverProofStateReader
+}
+
+func seedServedPublicationRun(t *testing.T, rt *runtimepkg.Runtime) string {
+	t.Helper()
+	source := rt.Pipeline.SemanticSource()
+	bundle, found := semanticview.Bundle(source)
+	if !found || bundle.SourceArtifact == nil {
+		t.Fatal("publication setup requires its admitted source artifact")
+	}
+	owner, ok := rt.Bus.Store().(storetest.RunFixtureStore)
+	if !ok {
+		t.Fatalf("publication setup lacks native run owner: %T", rt.Bus.Store())
+	}
+	runID := uuid.NewString()
+	ctx := effects.WithExecutionMode(correlation.WithRunID(servedRuntimeProofAuthorActivityContext(t, rt, rt.Options.SourceArtifactFact.BundleHash()), runID), rt.ExecutionPosture.RootMode())
+	storetest.RequireRun(t, ctx, owner, storetest.RunFixture{Origin: storetest.ScenarioSetupOrigin(), RunID: runID, Artifact: bundle.SourceArtifact})
+	plan, err := rt.Manager.PrepareFlowInstanceActivation(ctx, pipeline.FlowInstanceActivationRequest{
+		ContractBundle: source, OccurredAt: time.Now().UTC(),
+		Instance: flowidentity.Stored(source, semanticview.RootExecutionFlowID(source), runID, runID, runID, ""),
+	})
+	if err != nil {
+		t.Fatalf("prepare publication setup: %v", err)
+	}
+	committed, err := rt.Bus.CommitFlowInstanceActivation(ctx, plan)
+	if err != nil || !committed.Acknowledged || !committed.Created {
+		t.Fatalf("commit publication setup: acknowledged=%t created=%t err=%v", committed.Acknowledged, committed.Created, err)
+	}
+	if err := rt.Manager.FinalizeCommittedFlowInstanceActivation(ctx, committed); err != nil {
+		t.Fatalf("finalize publication setup: %v", err)
+	}
+	return runID
+}
+
+func pauseServedLandingForCreation(t *testing.T, endpoint, bundleHash, flowPath string) string {
+	t.Helper()
+	runID := requireServedLiveLandingRunID(t, endpoint, bundleHash, flowPath)
+	requireServedOKJSONRPC(t, endpoint, "run.pause", map[string]any{"run_id": runID, "idempotency_key": "creation-fixture-pause-" + runID})
+	requireServedRunStatus(t, endpoint, runID, "paused")
+	return runID
+}
+
+func requireServedLiveLandingRunID(t *testing.T, endpoint, bundleHash, flowPath string) string {
+	t.Helper()
+	var result struct {
+		Runs []operatorread.RunHeader `json:"runs"`
+	}
+	requireServedJSONRPCResult(t, endpoint, "run.list", map[string]any{"bundle_hash": bundleHash, "limit": 500}, &result)
+	var runID string
+	for _, run := range result.Runs {
+		if run.BundleHash != bundleHash || run.FlowPath != flowPath || run.Status != "live" || run.Origin.Kind() != runlifecycle.OriginDeployment {
+			continue
+		}
+		if runID != "" {
+			t.Fatalf("flow %s has multiple live deployment landings: %+v", flowPath, result.Runs)
+		}
+		runID = run.RunID
+	}
+	if runID == "" {
+		t.Fatalf("flow %s lacks its live deployment landing: %+v", flowPath, result.Runs)
+	}
+	return runID
 }
 
 func startServedBoundaryFixture(t *testing.T, backend, sourceRoot string) (*serveRuntimeTestProcess, servedBoundaryFixture) {
@@ -113,8 +181,8 @@ func createServedBoundaryWaitingRun(t *testing.T, rt servedBoundaryFixture, suff
 		"event_name": "item.received", "bundle_hash": rt.BundleHash,
 		"payload": map[string]any{"item_id": suffix}, "idempotency_key": "issue-1864-" + rt.Backend + "-" + suffix,
 	})
-	if !result.NewRunCreated || result.RunID == "" || result.EventID == "" {
-		t.Fatalf("%s control seed = %+v, want new run", rt.Backend, result)
+	if result.NewRunCreated || result.RunID == "" || result.EventID == "" {
+		t.Fatalf("%s control seed = %+v, want the existing live run", rt.Backend, result)
 	}
 	node := identitytest.RootNode(t, "item-handler").Key()
 	rt.Probe.RequireNodePending(result.EventID, node)

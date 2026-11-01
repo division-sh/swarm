@@ -6,7 +6,9 @@ import (
 	"strings"
 
 	"github.com/division-sh/swarm/internal/events"
+	"github.com/division-sh/swarm/internal/runtime/core/flowidentity"
 	runtimepinrouting "github.com/division-sh/swarm/internal/runtime/core/pinrouting"
+	"github.com/division-sh/swarm/internal/runtime/runlifecycle"
 	"github.com/division-sh/swarm/internal/runtime/semanticview"
 )
 
@@ -51,6 +53,20 @@ type APIEventPublicationEndpoint struct {
 	flowID      string
 	eventType   events.EventType
 	publicInput semanticview.AuthoredEventEndpoint
+	liveRun     *runlifecycle.LiveRun
+}
+
+// ForLiveRun retains an omitted-run selection for native commit revalidation.
+func (e APIEventPublicationEndpoint) ForLiveRun(source semanticview.Source, live runlifecycle.LiveRun) (APIEventPublicationEndpoint, error) {
+	if e.kind != apiEventPublicationEndpointRootInput || live.RunID == "" ||
+		live.Scope.FlowPath != flowidentity.ScopeKey(source, ".") {
+		return APIEventPublicationEndpoint{}, fmt.Errorf("live publication must name its public input's flow")
+	}
+	if err := live.Source.Validate(); err != nil {
+		return APIEventPublicationEndpoint{}, err
+	}
+	e.liveRun = &live
+	return e, nil
 }
 
 type APIEventPublicationEndpointReadback struct {

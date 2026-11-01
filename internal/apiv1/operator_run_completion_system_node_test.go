@@ -62,6 +62,7 @@ func TestOperatorRunCompletionSystemNodeFlowConvergesSupportedSurfaces(t *testin
 	}))
 
 	runID := "11111111-1111-4111-8111-111111111111"
+	seedEventPublishLiveRunID(t, pg, bus, source, runID)
 	started := rpcCall(t, handler, runStartBody(runID, bundleHash, "flow.started", `{"topic":"supported-surfaces"}`, "idem-system-node-run"))
 	if started.Error != nil {
 		t.Fatalf("run.start error = %#v", started.Error)
@@ -81,7 +82,7 @@ func TestOperatorRunCompletionSystemNodeFlowConvergesSupportedSurfaces(t *testin
 		return full.Entity.CurrentState != nil && *full.Entity.CurrentState == "done" && settled.Ready && lifecycleExecutor.ActiveCandidates() == 0, nil
 	})
 
-	eventID := triggerEventIDForRun(t, db, runID)
+	eventID := stringValue(t, asMap(t, started.Result)["event_id"], "event_id")
 	pipelineNodeID := identitytest.FlowNode(t, "discovery", "pipeline").Key()
 	assertPipelineReceiptSucceeded(t, db, eventID)
 	assertSystemNodeOutcomePersisted(t, db, eventID, pipelineNodeID)

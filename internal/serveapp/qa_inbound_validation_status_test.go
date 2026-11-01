@@ -95,11 +95,10 @@ normalized_events:
 				}
 			})
 			rt := servedTestProcessRuntime(t, process)
-			statuses, err := readServedLandingRuns(t.Context(), rt)
-			if err != nil || len(statuses) != 1 || statuses[0].State != "live" || inbound == nil {
-				t.Fatalf("exact standing ingress fixture: statuses=%+v inbound=%t err=%v", statuses, inbound != nil, err)
+			standing := requireServedLandingRun(t, rt, ".")
+			if standing.State != "live" || inbound == nil {
+				t.Fatalf("exact standing ingress fixture: landing=%+v inbound=%t", standing, inbound != nil)
 			}
-			standing := statuses[0]
 			before, err := rt.Pipeline.ListWorkflowInstances(t.Context(), standing.RunID)
 			if err != nil {
 				t.Fatal(err)

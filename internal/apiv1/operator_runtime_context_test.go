@@ -57,6 +57,7 @@ var (
 func TestOperatorRuntimeContextManagerRoutesCreateNewWorkToSelectedBundle(t *testing.T) {
 	fixture := newOperatorRuntimeContextFixture(t)
 	handler := fixture.handler(t)
+	seedEventPublishLiveRun(t, fixture.pg, fixture.busB, fixture.sourceB)
 
 	published := rpcCallWithPlainRequestContext(t, handler, eventPublishBodyWithBundleHash("", runtimeContextTestBundleHashB, "triage.requested", `{"topic":"context-b"}`, "", "idem-context-publish"))
 	if published.Error != nil {
@@ -76,7 +77,7 @@ func TestOperatorRuntimeContextManagerRoutesCreateNewWorkToSelectedBundle(t *tes
 	fixture.probeA.requireNone(t, "primary context selected bundle route")
 
 	pauseAPITestLiveRun(t, fixture.busB, fixture.pg, publishedRunID)
-	runID := uuid.NewString()
+	runID := seedEventPublishLiveRun(t, fixture.pg, fixture.busB, fixture.sourceB)
 	started := rpcCallWithPlainRequestContext(t, handler, runStartBodyWithBundleHash(runID, runtimeContextTestBundleHashB, "triage.requested", `{"topic":"context-b-start"}`, "idem-context-start"))
 	if started.Error != nil {
 		t.Fatalf("run.start error = %#v", started.Error)
@@ -90,6 +91,7 @@ func TestOperatorRuntimeContextManagerRoutesCreateNewWorkToSelectedBundle(t *tes
 func TestOperatorEventPublishIdempotencyReplayDoesNotRequireLoadedRuntimeContext(t *testing.T) {
 	fixture := newOperatorRuntimeContextFixture(t)
 	handler := fixture.handler(t)
+	seedEventPublishLiveRun(t, fixture.pg, fixture.busB, fixture.sourceB)
 	body := eventPublishBodyWithBundleHash("", runtimeContextTestBundleHashB, "triage.requested", `{"topic":"replay-after-unload"}`, "", "idem-context-replay-after-unload")
 
 	first := rpcCallWithPlainRequestContext(t, handler, body)
@@ -219,7 +221,13 @@ func TestOperatorRuntimeContextManagerRejectsExistingRunUnavailableSourceStates(
 			}
 			for _, call := range calls {
 				resp := rpcCallWithPlainRequestContext(t, handler, call.body)
-				assertRuntimeContextBundleError(t, resp, call.method, tt.wantCode, tt.wantCause)
+				if call.method == "run.start" {
+					if resp.Error == nil || asMap(t, resp.Error.Data)["code"] != EventPublishRejectedCode || asMap(t, asMap(t, resp.Error.Data)["details"])["reason"] != "no_run_yet" {
+						t.Fatalf("run.start without a live run = %#v", resp.Error)
+					}
+				} else {
+					assertRuntimeContextBundleError(t, resp, call.method, tt.wantCode, tt.wantCause)
+				}
 				if got := countEventRowsByRunID(t, fixture.pg, runID); got != 0 {
 					t.Fatalf("%s event rows for unavailable run = %d, want 0", call.method, got)
 				}
@@ -254,7 +262,13 @@ func TestOperatorRuntimeContextManagerRejectsExistingRunRequestedHashMismatch(t 
 			seedRuntimeContextRunBundle(t, fixture.pg, runID, runtimeContextTestBundleHashB, fixture.admissionB)
 
 			resp := rpcCallWithPlainRequestContext(t, handler, tt.body(runID))
-			assertRuntimeContextBundleError(t, resp, tt.method, BundleMismatchCode, "")
+			if tt.method == "run.start" {
+				if resp.Error == nil || asMap(t, resp.Error.Data)["code"] != EventNotDeclaredCode || asMap(t, asMap(t, resp.Error.Data)["details"])["reason"] != "selected_root_input_required" {
+					t.Fatalf("run.start with a foreign root input = %#v", resp.Error)
+				}
+			} else {
+				assertRuntimeContextBundleError(t, resp, tt.method, BundleMismatchCode, "")
+			}
 			if got := countEventRowsByRunID(t, fixture.pg, runID); got != 0 {
 				t.Fatalf("%s event rows for mismatched run = %d, want 0", tt.method, got)
 			}

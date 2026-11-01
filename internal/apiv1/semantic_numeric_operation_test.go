@@ -56,13 +56,13 @@ func TestPublicOperationSemanticCarrierParity(t *testing.T) {
 			}
 			for _, method := range []string{"event.publish", "run.start"} {
 				t.Run(method, func(t *testing.T) {
-					var liveRunID string
+					liveRunID := seedEventPublishLiveRun(t, selected, bus, source)
 					defer func() {
 						if liveRunID != "" {
 							pauseAPITestLiveRun(t, bus, selected, liveRunID)
 						}
 					}()
-					key, run := uuid.NewString(), uuid.NewString()
+					key, run := uuid.NewString(), liveRunID
 					request := func(value any) Request {
 						params := map[string]any{"event_name": "scan.requested", "bundle_hash": runStartTestBundleHashForSource(source), "idempotency_key": key,
 							"payload": map[string]any{"value": value, "nested": []any{value, 7.5}}}

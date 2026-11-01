@@ -39,6 +39,17 @@ func (pc *PipelineCoordinator) ReconcileFlowRun(ctx context.Context, scope runli
 	return owner.ReconcileFlowRun(ctx, scope, source)
 }
 
+func (pc *PipelineCoordinator) LoadLiveRun(ctx context.Context, scope runlifecycle.LiveRunScope) (runlifecycle.LiveRun, bool, error) {
+	if pc == nil || pc.workflowStore == nil {
+		return runlifecycle.LiveRun{}, false, fmt.Errorf("live flow read requires workflow persistence")
+	}
+	owner, ok := pc.workflowStore.runLifecycle.(runlifecycle.LiveRunReader)
+	if !ok {
+		return runlifecycle.LiveRun{}, false, fmt.Errorf("live flow read requires its native run owner")
+	}
+	return owner.LoadLiveRun(ctx, scope)
+}
+
 func (s *workflowInstanceStore) LoadRunLiveScope(ctx context.Context, runID string) (runlifecycle.LiveRunScope, error) {
 	owner, ok := s.runLifecycle.(runlifecycle.FlowScopeReader)
 	if !ok {

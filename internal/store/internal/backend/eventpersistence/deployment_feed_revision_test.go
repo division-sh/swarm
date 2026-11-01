@@ -59,7 +59,7 @@ func TestDeploymentRunCreationRecordsExactFeedFactsBothStores(t *testing.T) {
 					VersionID:    durabledata.VersionID("resource-version-v1:sha256:" + strings.Repeat("d", 64)),
 					SchemaDigest: durabledata.SchemaDigest("resource-schema-v1:sha256:" + strings.Repeat("e", 64)), RowCount: 0},
 			}
-			ids := []string{uuid.NewString(), uuid.NewString()}
+			ids := []string{feeds[0].PublicationID(), feeds[1].PublicationID()}
 			ctx := context.Background()
 			tx, err := db.BeginTx(ctx, nil)
 			if err != nil {
@@ -95,15 +95,15 @@ func TestDeploymentRunCreationRecordsExactFeedFactsBothStores(t *testing.T) {
 				t.Fatal("feeds from different runs were accepted as one revision")
 			}
 			if _, err := tx.ExecContext(ctx, `INSERT INTO fan_out_intents VALUES ($1,'deployment',$2,$3,$4,$5,$6,$7,$8)`,
-				runID, uuid.NewString(), bundle, feeds[0].Declaration.FlowPath, feeds[0].Declaration.EventName,
-				string(feeds[0].VersionID), string(feeds[0].SchemaDigest), feeds[0].RowCount); err != nil {
+				runID, ids[0], bundle, feeds[0].Declaration.FlowPath, feeds[0].Declaration.EventName,
+				"duplicate", string(feeds[0].SchemaDigest), feeds[0].RowCount); err != nil {
 				t.Fatal(err)
 			}
 			if err := recordDeploymentRunFeedFactsTx(ctx, tx, &deploymentFactRecorder{}, feeds); err == nil {
 				t.Fatal("ambiguous canonical feed rows were accepted")
 			}
-			if _, err := tx.ExecContext(ctx, `DELETE FROM fan_out_intents WHERE deployment_feed_id<>$1 AND source_resource_flow_path=$2`,
-				ids[0], feeds[0].Declaration.FlowPath); err != nil {
+			if _, err := tx.ExecContext(ctx, `DELETE FROM fan_out_intents WHERE deployment_feed_id=$1 AND source_resource_version_id=$2`,
+				ids[0], "duplicate"); err != nil {
 				t.Fatal(err)
 			}
 			if _, err := tx.ExecContext(ctx, `UPDATE fan_out_intents SET source_resource_version_id='other' WHERE deployment_feed_id=$1`, ids[0]); err != nil {

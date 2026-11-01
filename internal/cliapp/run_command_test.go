@@ -20,6 +20,7 @@ import (
 	runtimeengine "github.com/division-sh/swarm/internal/runtime/engine"
 	runtimefailures "github.com/division-sh/swarm/internal/runtime/failures"
 	"github.com/division-sh/swarm/internal/runtime/fanoutobligation"
+	"github.com/google/uuid"
 	"github.com/gorilla/websocket"
 )
 
@@ -206,7 +207,7 @@ func TestRunCommandHelpShowsDataFlag(t *testing.T) {
 	if code != 0 {
 		t.Fatalf("run --help code = %d stderr=%s stdout=%s", code, stderr.String(), stdout.String())
 	}
-	for _, want := range []string{"--data", "Fused immutable data import", "--pin", "Exact data version pin", "--timeout", "10m0s", "0 waits indefinitely"} {
+	for _, want := range []string{"--data", "Publish rows into the live run", "--pin", "Publish a data version", "--timeout", "10m0s", "0 waits indefinitely"} {
 		if !strings.Contains(stdout.String(), want) {
 			t.Fatalf("run help missing %q:\n%s", want, stdout.String())
 		}
@@ -272,7 +273,7 @@ func TestConnectedFeedOnlyRunStartSendsNoInitialEvent(t *testing.T) {
 			declaration := map[string]any{"flow_path": ".", "event": "records.loaded"}
 			versionID := "resource-version-v1:sha256:bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb"
 			feedID := "00000000-0000-4000-8000-000000000001"
-			var runID string
+			runID := uuid.NewString()
 			server, calls, wsRequests := newRunCommandServer(t, runCommandServerOptions{
 				rpcResponder: func(req jsonRPCRequest, _ int) map[string]any {
 					switch req.Method {
@@ -299,10 +300,9 @@ func TestConnectedFeedOnlyRunStartSendsNoInitialEvent(t *testing.T) {
 							t.Fatal("feed-only run.start sent payload")
 						}
 						data, ok := req.Params["data"].(map[string]any)
-						if req.Params["run_id"] == "" || !ok || len(data[tc.field].([]any)) != 1 {
-							t.Fatalf("feed-only run.start omitted durable run identity or %s: %#v", tc.field, req.Params)
+						if req.Params["run_id"] != nil || req.Params["idempotency_key"] == "" || !ok || len(data[tc.field].([]any)) != 1 {
+							t.Fatalf("rows publication invented a run or omitted retry identity/%s: %#v", tc.field, req.Params)
 						}
-						runID = req.Params["run_id"].(string)
 						result := runStartCommandResult(runID, "completed")
 						result["deployment_feed_ids"] = []string{feedID}
 						return result

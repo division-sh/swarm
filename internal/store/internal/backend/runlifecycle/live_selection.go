@@ -11,6 +11,7 @@ import (
 	runtimecorrelation "github.com/division-sh/swarm/internal/runtime/correlation"
 	runtimeruncontrol "github.com/division-sh/swarm/internal/runtime/runcontrol"
 	runtimerunlifecycle "github.com/division-sh/swarm/internal/runtime/runlifecycle"
+	"github.com/division-sh/swarm/internal/runtime/scenarioexecution"
 	"github.com/division-sh/swarm/internal/store/internal/backend/mutationprotocol"
 	"github.com/lib/pq"
 	"modernc.org/sqlite"
@@ -97,8 +98,22 @@ func loadLiveRun(ctx context.Context, q rowQueryer, scope runtimerunlifecycle.Li
 	}
 	result := runtimerunlifecycle.LiveRun{Scope: scope}
 	var bundleHash string
-	err := q.QueryRowContext(ctx, `SELECT run_id,bundle_hash FROM runs
-		WHERE flow_path=$1 AND status='live'`, scope.FlowPath).Scan(&result.RunID, &bundleHash)
+	var err error
+	if scenarioexecution.HasPrivateRunScope(ctx) {
+		selected, ok := scenarioexecution.PrivateRunScopeFromContext(ctx)
+		if !ok || selected.FlowPath != scope.FlowPath {
+			return result, false, fmt.Errorf("private scenario live selection requires its exact run scope")
+		}
+		err = q.QueryRowContext(ctx, `SELECT r.run_id,r.bundle_hash FROM runs r
+			LEFT JOIN run_scenario_execution_profiles p ON p.run_id=r.run_id
+			WHERE r.run_id=$1 AND r.status='running' AND COALESCE(p.profile_id,'')=$2
+			AND COALESCE(p.profile_digest,'')=$3 AND COALESCE(p.effective_source_digest,'')=$4
+			AND r.bundle_hash=$5`, selected.RunID, selected.ProfileID, selected.ProfileDigest,
+			selected.EffectiveSourceDigest, selected.Source.BundleHash()).Scan(&result.RunID, &bundleHash)
+	} else {
+		err = q.QueryRowContext(ctx, `SELECT run_id,bundle_hash FROM runs
+			WHERE flow_path=$1 AND status='live'`, scope.FlowPath).Scan(&result.RunID, &bundleHash)
+	}
 	if errors.Is(err, sql.ErrNoRows) {
 		return runtimerunlifecycle.LiveRun{}, false, nil
 	}
@@ -124,27 +139,47 @@ func liveScopeForRun(ctx context.Context, q rowQueryer, runID string) (runtimeru
 // LiveRunForTargetTx uses the same flow selector as SelectLiveRunTx, then locks
 // that predecessor before its accepted-work fence is inspected by activation.
 func LiveRunForTargetTx(ctx context.Context, tx *sql.Tx, runID string, postgres bool) (runtimerunlifecycle.LiveRun, bool, error) {
-	scope, err := liveScopeForRun(ctx, tx, runID)
+	var scope runtimerunlifecycle.LiveRunScope
+	var err error
+	expectedState := runtimerunlifecycle.StateLive
+	privateScenario := scenarioexecution.HasPrivateRunScope(ctx)
+	if privateScenario {
+		selected, ok := scenarioexecution.PrivateRunScopeFromContext(ctx)
+		if !ok || selected.RunID != runID {
+			return runtimerunlifecycle.LiveRun{}, false, fmt.Errorf("private scenario handoff requires its exact run scope")
+		}
+		scope.FlowPath, expectedState = selected.FlowPath, runtimerunlifecycle.StateRunning
+	} else {
+		scope, err = liveScopeForRun(ctx, tx, runID)
+	}
 	if err != nil {
 		return runtimerunlifecycle.LiveRun{}, false, err
 	}
 	if err := scope.Validate(); err != nil {
 		return runtimerunlifecycle.LiveRun{}, false, err
 	}
-	live, found, err := loadLiveRun(ctx, tx, scope)
-	if err != nil || !found {
-		return live, found, err
+	var live runtimerunlifecycle.LiveRun
+	if !privateScenario {
+		var found bool
+		live, found, err = loadLiveRun(ctx, tx, scope)
+		if err != nil || !found {
+			return live, found, err
+		}
+		runID = live.RunID
 	}
 	query := `SELECT status FROM runs WHERE run_id=$1`
 	if postgres {
 		query += ` FOR UPDATE`
 	}
 	var status string
-	if err := tx.QueryRowContext(ctx, query, live.RunID).Scan(&status); err != nil {
+	if err := tx.QueryRowContext(ctx, query, runID).Scan(&status); err != nil {
 		return live, false, err
 	}
-	if status != string(runtimerunlifecycle.StateLive) {
-		return live, false, errors.New("live predecessor changed before its handoff fence")
+	if status != string(expectedState) {
+		return live, false, runtimerunlifecycle.ErrLiveRunChanged
+	}
+	if privateScenario {
+		return loadLiveRun(ctx, tx, scope)
 	}
 	return live, true, nil
 }

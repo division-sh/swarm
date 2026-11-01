@@ -267,7 +267,8 @@ func TestDurableDataRunLifecycleAcrossSelectedStores(t *testing.T) {
 
 		var ordinaryRunID string
 		t.Run("ordinary declaration does not imply a pin", func(t *testing.T) {
-			response := rpcCall(t, handler, dataRunEventPublishBody("", "ordinary-no-data", nil))
+			ordinaryRunID = seedEventPublishLiveRunID(t, fixture.primary, bus, source, uuid.NewString())
+			response := rpcCall(t, handler, runStartBody("", runStartTestBundleHashForSource(source), "scan.requested", `{"topic":"trigger"}`, "ordinary-no-data"))
 			if response.Error != nil {
 				t.Fatalf("ordinary event.publish: %#v", response.Error)
 			}
@@ -278,13 +279,16 @@ func TestDurableDataRunLifecycleAcrossSelectedStores(t *testing.T) {
 				t.Fatalf("ordinary data binding = %#v", binding)
 			}
 			receipt, err := fixture.reconstructed.LoadDataRunCreationOperation(ctx, runID)
-			if err != nil || receipt.Summary.PinCount != 0 || receipt.Summary.ImportCount != 0 || receipt.Binding.State != "none" {
+			var missing *durabledata.DomainError
+			if !errors.As(err, &missing) || missing.Code != durabledata.CodeOperationMissing || len(receipt.Evidence.RunBinding) != 0 {
 				t.Fatalf("ordinary reconstructed receipt = %#v, %v", receipt, err)
 			}
 		})
 
 		t.Run("existing run rejects data before any mutation", func(t *testing.T) {
-			for _, method := range []string{"run.start", "event.publish"} {
+			// run.start now publishes a new rows binding; only the unchanged
+			// explicit event.publish creation arm retains this refusal.
+			for _, method := range []string{"event.publish"} {
 				t.Run(method, func(t *testing.T) {
 					sourceID := uuid.NewString()
 					data := map[string]any{

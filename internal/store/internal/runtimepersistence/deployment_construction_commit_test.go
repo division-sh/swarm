@@ -16,8 +16,11 @@ import (
 	"github.com/division-sh/swarm/internal/runtime/core/flowidentity"
 	"github.com/division-sh/swarm/internal/runtime/correlation"
 	"github.com/division-sh/swarm/internal/runtime/pipeline"
+	"github.com/division-sh/swarm/internal/runtime/runfork"
+	"github.com/division-sh/swarm/internal/runtime/runlifecycle"
 	"github.com/division-sh/swarm/internal/runtime/semanticview"
 	"github.com/division-sh/swarm/internal/sourceartifact"
+	storedurabledata "github.com/division-sh/swarm/internal/store/internal/durabledata"
 	"github.com/google/uuid"
 )
 
@@ -115,6 +118,128 @@ func TestDeploymentConstructionNativeCommitBothStores(t *testing.T) {
 				var occurrences int
 				if err := db.QueryRowContext(ctx, `SELECT COUNT(*) FROM events WHERE run_id=$1`, runID).Scan(&occurrences); err != nil || occurrences != 0 {
 					t.Fatalf("feed-only creation fabricated an event: %d err=%v", occurrences, err)
+				}
+				live, found, err := selected.(runlifecycle.LiveRunReader).LoadLiveRun(ctx, runlifecycle.LiveRunScope{FlowPath: "."})
+				if err != nil || !found || live.RunID != runID {
+					t.Fatalf("rows publication requires the original live run: %+v %t %v", live, found, err)
+				}
+				publicationID, sourceID := uuid.NewString(), uuid.NewString()
+				rows := runtimebus.DeploymentRunCreationCommand{
+					PublicationID: publicationID, LiveRun: &live, Idempotency: command.Idempotency,
+					RunCreation: durabledata.RunCreationCommand{PublicationID: publicationID, RunID: runID, Actor: "operator", BundleHash: catalog.BundleHash,
+						Data: durabledata.RunCreationDataEnvelope{Imports: []durabledata.FusedImport{{Declaration: ref,
+							SourceInvocationID: sourceID, ExpectedHead: durabledata.VersionHead(imported.Candidate.VersionID),
+							InputFormat: "jsonl", Input: []byte("{\"body\":\"week-3\"}\n")}}}},
+				}
+				connector.arm(func(tx driver.Tx) error {
+					if commit {
+						return errors.Join(fault, tx.Commit())
+					}
+					return errors.Join(fault, tx.Rollback())
+				})
+				published, err := owner.CommitDeploymentRunCreation(ctx, rows)
+				if published.Acknowledged || !errors.Is(err, fault) {
+					t.Fatalf("rows publication fabricated commit acknowledgement: %+v err=%v", published, err)
+				}
+				var bound int
+				if err := db.QueryRowContext(ctx, `SELECT COUNT(*) FROM resource_feed_publication_members WHERE publication_id=$1`, publicationID).Scan(&bound); err != nil || bound != want {
+					t.Fatalf("rows publication physical cut left partial bindings: %d want=%d err=%v", bound, want, err)
+				}
+				published, err = owner.CommitDeploymentRunCreation(ctx, rows)
+				if err != nil || !published.Acknowledged || published.Replay != commit || len(published.Activations) != 0 || published.Record.Summary.PublicationID != publicationID || published.Record.Summary.Kind != "rows_publication" {
+					t.Fatalf("publish week-3 rows into existing run: %+v err=%v", published, err)
+				}
+				if replay, err := owner.CommitDeploymentRunCreation(ctx, rows); err != nil || !replay.Acknowledged || !replay.Replay || !reflect.DeepEqual(replay.Record, published.Record) {
+					t.Fatalf("rows publication lost its exact permanent replay: %+v err=%v", replay, err)
+				}
+				var runs, feeds, pins int
+				if err := db.QueryRowContext(ctx, `SELECT COUNT(*) FROM runs WHERE run_id=$1`, runID).Scan(&runs); err != nil || runs != 1 {
+					t.Fatalf("rows publication created or replaced a run: %d err=%v", runs, err)
+				}
+				if err := db.QueryRowContext(ctx, `SELECT COUNT(*) FROM fan_out_intents WHERE run_id=$1`, runID).Scan(&feeds); err != nil || feeds != 2 {
+					t.Fatalf("rows publication replaced an earlier feed: %d err=%v", feeds, err)
+				}
+				if err := db.QueryRowContext(ctx, `SELECT COUNT(*) FROM resource_version_pins WHERE run_id=$1 AND version_id=$2`, runID, imported.Candidate.VersionID).Scan(&pins); err != nil || pins != 1 {
+					t.Fatalf("rows publication replaced the original immutable pin: %d err=%v", pins, err)
+				}
+				var resourceOwner *storedurabledata.Owner
+				switch selected := selected.(type) {
+				case *SQLiteRuntimeStore:
+					resourceOwner = selected.durableDataOwner
+				case *PostgresStore:
+					resourceOwner = selected.durableDataOwner
+				}
+				feedID := published.Record.DeploymentFeedIDs()[0]
+				firstSource, err := resourceOwner.LoadFeedSource(ctx, runID, catalog.BundleHash, feedID, ref)
+				if err != nil || firstSource.VersionID == imported.Candidate.VersionID {
+					t.Fatalf("new rows did not retain their own version: %+v err=%v", firstSource, err)
+				}
+				next := rows
+				next.PublicationID = uuid.NewString()
+				next.RunCreation.PublicationID = next.PublicationID
+				next.RunCreation.Data.Imports = append([]durabledata.FusedImport(nil), rows.RunCreation.Data.Imports...)
+				next.RunCreation.Data.Imports[0].SourceInvocationID = uuid.NewString()
+				next.RunCreation.Data.Imports[0].ExpectedHead = durabledata.VersionHead(firstSource.VersionID)
+				next.RunCreation.Data.Imports[0].Input = []byte("{\"body\":\"week-5\"}\n")
+				later, err := owner.CommitDeploymentRunCreation(ctx, next)
+				if err != nil || !later.Acknowledged || later.Replay || later.Record.Summary.RunID != runID {
+					t.Fatalf("later publication into same live run: %+v err=%v", later, err)
+				}
+				values, err := resourceOwner.LoadPinnedRowsRange(ctx, runID, catalog.BundleHash, firstSource, 0, 1)
+				if err != nil || len(values) != 1 || values[0].(map[string]any)["body"] != "week-3" {
+					t.Fatalf("later publication changed retained week-3 bytes: %+v err=%v", values, err)
+				}
+				latest, err := resourceOwner.LoadFeedSource(ctx, runID, catalog.BundleHash, later.Record.DeploymentFeedIDs()[0], ref)
+				if err != nil {
+					t.Fatal(err)
+				}
+				pruned, err := resourceOwner.Prune(ctx, durabledata.PruneCommand{PruneInvocationID: uuid.NewString(), Actor: "operator",
+					Declaration: ref, VersionID: firstSource.VersionID, ExpectedHead: durabledata.VersionHead(latest.VersionID)})
+				if err != nil || pruned.Outcome != "refused_pinned" {
+					t.Fatalf("later publication dropped old publication retention: %+v err=%v", pruned, err)
+				}
+				planner := selected.(interface {
+					PlanRunFork(context.Context, runfork.RunForkPlanRequest) (runfork.RunForkPlan, error)
+				})
+				firstCut, err := planner.PlanRunFork(ctx, runfork.RunForkPlanRequest{SourceRunID: runID, PublicationID: publicationID})
+				if err != nil || firstCut.ForkPoint.Kind != runfork.RunForkPointStateRevision || firstCut.ForkPoint.EventID != "" {
+					t.Fatalf("publication did not retain its native non-event cut: %+v err=%v", firstCut.ForkPoint, err)
+				}
+				laterCut, err := planner.PlanRunFork(ctx, runfork.RunForkPlanRequest{SourceRunID: runID, PublicationID: next.PublicationID})
+				if err != nil || laterCut.ForkPoint.Revision <= firstCut.ForkPoint.Revision {
+					t.Fatalf("distinct publications aliased their revision: %+v/%+v err=%v", firstCut.ForkPoint, laterCut.ForkPoint, err)
+				}
+				seenFirst, seenLater := false, false
+				for _, obligation := range firstCut.FanOutObligations {
+					seenFirst = seenFirst || obligation.Intent.Request.Key.DeploymentFeedID == feedID
+					seenLater = seenLater || obligation.Intent.Request.Key.DeploymentFeedID == later.Record.DeploymentFeedIDs()[0]
+				}
+				if !seenFirst || seenLater {
+					t.Fatalf("publication cut lost exact historical membership: first=%t later=%t", seenFirst, seenLater)
+				}
+				if _, err := planner.PlanRunFork(ctx, runfork.RunForkPlanRequest{SourceRunID: uuid.NewString(), PublicationID: publicationID}); err == nil {
+					t.Fatal("foreign publication admitted as this run's fork cut")
+				}
+				forkOwner := selected.(interface {
+					LoadRunRootedSource(context.Context, string) (sourceartifact.RootedSource, error)
+					MaterializeRunFork(context.Context, runfork.RunForkMaterializeRequest) (runfork.RunForkMaterialization, error)
+				})
+				rooted, err := forkOwner.LoadRunRootedSource(ctx, runID)
+				if err != nil {
+					t.Fatal(err)
+				}
+				fork, err := forkOwner.MaterializeRunFork(ctx, runfork.RunForkMaterializeRequest{SourceRunID: runID,
+					RootAdmission: rooted.Admission(), OriginalLoopCarriage: originalCarriageForRun(t, selected, runID)})
+				if err != nil {
+					t.Fatalf("fork mixed legacy and publication feeds: %v", err)
+				}
+				legacyFeed := durabledata.DeploymentFeed{RunID: fork.ForkRunID, Declaration: ref}
+				legacySource, err := resourceOwner.LoadFeedSource(ctx, fork.ForkRunID, catalog.BundleHash, legacyFeed.PublicationID(), ref)
+				if err != nil || legacySource.VersionID != imported.Candidate.VersionID {
+					t.Fatalf("fork lost legacy pin beside publication feeds: %+v err=%v", legacySource, err)
+				}
+				if _, err := resourceOwner.LoadFeedSource(ctx, fork.ForkRunID, catalog.BundleHash, uuid.NewString(), ref); err == nil {
+					t.Fatal("fork admitted a missing publication as its legacy feed")
 				}
 			})
 		}

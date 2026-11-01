@@ -62,6 +62,23 @@ func TestForkOperationRunStartHashAndResolvedRetry(t *testing.T) {
 	if err := json.Unmarshal(raw, &retry); err != nil || retry.Validate() != nil || !retry.Request.AtStart || *retry.Request.ResolvedPoint != point {
 		t.Fatalf("durable retry lost original start: %+v, %v", retry, err)
 	}
+	publication := request
+	publication.AtStart, publication.ResolvedPoint, publication.PublicationID = false, nil, uuid.NewString()
+	_, publicationHash, err := publication.Canonical()
+	if err != nil || publicationHash == latestHash || publicationHash == startHash {
+		t.Fatalf("publication did not bind its own selector: %s %v", publicationHash, err)
+	}
+	bound, err := publication.BindResolvedPoint(RunForkPoint{Kind: RunForkPointStateRevision, Revision: 9})
+	if err != nil {
+		t.Fatal(err)
+	}
+	_, boundHash, err := bound.Canonical()
+	if err != nil || boundHash != publicationHash {
+		t.Fatalf("resolved publication changed semantic request: %s/%s %v", boundHash, publicationHash, err)
+	}
+	if _, err := bound.BindResolvedPoint(RunForkPoint{Kind: RunForkPointStateRevision, Revision: 10}); err == nil {
+		t.Fatal("publication retry changed its permanent cut")
+	}
 	retry.Status = ForkOperationActivated
 	retry.Result = &ForkOperationResult{
 		SourceRunID: request.SourceRunID, SourceRunStatus: "running", ForkRunID: retry.ForkRunID,

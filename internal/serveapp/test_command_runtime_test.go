@@ -64,6 +64,21 @@ func TestSwarmTestPrivateSQLiteNoLiveLLMProof(t *testing.T) {
 		t.Run(tc.name, func(t *testing.T) {
 			root := canonicalrouting.CopyKeyedRootRawIngress(t)
 			writeWorkflowValidationFixtureFile(t, filepath.Join(root, "schema.yaml"), "instance: provider_event_id\nstages: []\npins: {inputs: [inbound.partner.raw, inbound.partner.message]}\n")
+			writeWorkflowValidationFixtureFile(t, filepath.Join(root, "nodes.yaml"), `receiver:
+  execution_type: system_node
+  subscribes_to: [inbound.partner.raw, inbound.partner.message]
+  event_handlers:
+    inbound.partner.raw:
+      data_accumulation:
+        source_event: inbound.partner.raw
+        writes:
+          - {target_field: processed_count, value: entity.processed_count + 1}
+    inbound.partner.message:
+      data_accumulation:
+        source_event: inbound.partner.message
+        writes:
+          - {target_field: processed_count, value: entity.processed_count + 1}
+`)
 			writeWorkflowValidationFixtureFile(t, filepath.Join(root, "partner/manifest.yaml"), "version: 1.0.0\nplatform_version: '*'\ncapabilities: {can: {emit_events: [raw, message], verify_secret: webhook_signing_secret}, cannot: [execute code]}\n")
 			writeWorkflowValidationFixtureFile(t, filepath.Join(root, "partner/trigger.yaml"), `transport: webhook
 payload_object_required: true
@@ -193,7 +208,7 @@ expect:
 				} {
 					var stdout, stderr bytes.Buffer
 					commandArgs := append(append([]string(nil), args...), "--config", configPath)
-					if code := executeScenarioInOwnedLifecycle(t, repoRootForTest(), commandArgs, endpoint, &stdout, &stderr); code != 0 {
+					if code := executeScenarioInOwnedLifecycle(t, repoRootForTest(), commandArgs, endpoint, &stdout, &stderr, servedTestProcessRuntime(t, process)); code != 0 {
 						t.Fatalf("%s command %v code=%d stdout=%s stderr=%s", name, args, code, stdout.String(), stderr.String())
 					}
 					if !strings.Contains(stdout.String(), "swarm test ok: scenarios=1") {
@@ -591,8 +606,9 @@ func requirePublicInputRollbackNoResidue(t *testing.T, db *sql.DB, backend serve
 		label string
 		sql   string
 		args  []any
+		want  int
 	}{
-		{label: "run", sql: `SELECT COUNT(*) FROM runs WHERE run_id = ?`, args: []any{runID}},
+		{label: "pre-existing live run", sql: `SELECT COUNT(*) FROM runs WHERE run_id = ?`, args: []any{runID}, want: 1},
 		{label: "flow instance", sql: `SELECT COUNT(*) FROM flow_instances WHERE flow_template = 'telegram-chat'`},
 		{label: "entity", sql: `SELECT COUNT(*) FROM entity_state WHERE run_id = ?`, args: []any{runID}},
 		{label: "construction receipt", sql: `SELECT COUNT(*) FROM workflow_instance_initial_materializations WHERE run_id = ?`, args: []any{runID}},
@@ -610,8 +626,8 @@ func requirePublicInputRollbackNoResidue(t *testing.T, db *sql.DB, backend serve
 		if err := db.QueryRowContext(context.Background(), statement, query.args...).Scan(&count); err != nil {
 			t.Fatalf("%s count %s rollback rows: %v", backend, query.label, err)
 		}
-		if count != 0 {
-			t.Fatalf("%s %s rows after public-input rollback = %d, want 0", backend, query.label, count)
+		if count != query.want {
+			t.Fatalf("%s %s rows after public-input rollback = %d, want %d", backend, query.label, count, query.want)
 		}
 	}
 	if got := servedEventPublishAPIIdempotencyCount(t, db, servedBackendLabel(backend), "event.publish", idempotencyKey); got != 0 {
@@ -683,7 +699,7 @@ func runServedPublicMockApprovalBackendProof(t *testing.T, backend servedparity.
 	}, &verifyOut, &verifyErr, nil); code != 0 {
 		t.Fatalf("%s verify code = %d stderr=%s stdout=%s", backend, code, verifyErr.String(), verifyOut.String())
 	}
-	endpoint, _ := startOwnedMockLifecycleFollowUpRuntime(t, opts)
+	endpoint, scenarioRuntime := startOwnedMockLifecycleFollowUpRuntime(t, opts)
 	requireSchemaOnlyProviderTriggerHasNoWebhookRoute(t, strings.TrimSuffix(endpoint, "/v1/rpc"))
 
 	var stdout, stderr bytes.Buffer
@@ -695,7 +711,7 @@ func runServedPublicMockApprovalBackendProof(t *testing.T, backend servedparity.
 		"--timeout", "45s",
 		"--poll-interval", "25ms",
 		scenario,
-	}, endpoint, &stdout, &stderr)
+	}, endpoint, &stdout, &stderr, scenarioRuntime)
 	if code != 0 {
 		t.Fatalf("%s code = %d stderr=%s stdout=%s", backend, code, stderr.String(), stdout.String())
 	}
@@ -880,7 +896,7 @@ expect: {events: [fulfillment.requested], no_dead_letters: true}
 	if authored {
 		args = []string{"test", sourceRoot, "tests/authored.yaml", "--config", configPath, "--timeout", "20s", "--poll-interval", "25ms"}
 	}
-	code := executeScenarioInOwnedLifecycle(t, repoRootForTest(), args, endpoint, &stdout, &stderr)
+	code := executeScenarioInOwnedLifecycle(t, repoRootForTest(), args, endpoint, &stdout, &stderr, rt)
 	if code != 0 {
 		t.Fatalf("%s derived scenario code=%d stdout=%s stderr=%s", backend, code, stdout.String(), stderr.String())
 	}
@@ -942,7 +958,7 @@ expect: {events: [fulfillment.requested], no_dead_letters: true}
 		stderr.Reset()
 		if code := executeScenarioInOwnedLifecycle(t, repoRootForTest(), []string{
 			"test", sourceRoot, "tests/fixtures-scenario.yaml", "--config", configPath, "--timeout", "20s", "--poll-interval", "25ms",
-		}, endpoint, &stdout, &stderr); code != 0 {
+		}, endpoint, &stdout, &stderr, rt); code != 0 {
 			t.Fatalf("%s fixture command code=%d stdout=%s stderr=%s", backend, code, stdout.String(), stderr.String())
 		}
 		var listed struct {
@@ -1288,7 +1304,7 @@ func runServedGeneratedInputFixtureBackendProof(t *testing.T, backend servedpari
 		"--timeout", "20s",
 		"--poll-interval", "25ms",
 		scenario,
-	}, endpoint, &stdout, &stderr)
+	}, endpoint, &stdout, &stderr, rt)
 	if code != 0 {
 		t.Fatalf("%s code = %d stderr=%s stdout=%s", backend, code, stderr.String(), stdout.String())
 	}
@@ -1582,7 +1598,7 @@ func TestInternalLifecycleScenariosPreserveCanonicalRoutingPathsSQLite(t *testin
 					return nil
 				}
 			}
-			endpoint, _ := startOwnedMockLifecycleFollowUpRuntime(t, options)
+			endpoint, scenarioRuntime := startOwnedMockLifecycleFollowUpRuntime(t, options)
 
 			var stdout, stderr bytes.Buffer
 			code := executeScenarioInOwnedLifecycle(t, repoRootForTest(), []string{
@@ -1590,7 +1606,7 @@ func TestInternalLifecycleScenariosPreserveCanonicalRoutingPathsSQLite(t *testin
 				"--config", configPath,
 				"--timeout", "20s",
 				"--poll-interval", "25ms",
-			}, endpoint, &stdout, &stderr)
+			}, endpoint, &stdout, &stderr, scenarioRuntime)
 			observedReplyContext := ""
 			select {
 			case observedReplyContext = <-replyContextObserved:

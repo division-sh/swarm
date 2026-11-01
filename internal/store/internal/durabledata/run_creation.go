@@ -17,6 +17,7 @@ import (
 // existing selected-store event transaction. Its internals are deliberately
 // opaque outside this owner package.
 type RunCreationPlan struct {
+	publicationID  string
 	command        runtimedata.RunCreationCommand
 	requestHash    string
 	requestJSON    []byte
@@ -67,6 +68,9 @@ func PrepareRunCreationTx(o *Owner, ctx context.Context, tx *sql.Tx, command run
 	if err != nil {
 		return RunCreationPlan{}, err
 	}
+	if canonical.PublicationID != "" {
+		return PrepareFeedPublicationTx(o, ctx, tx, canonical, canonical.PublicationID)
+	}
 	if replay, found, err := o.loadRunCreationReceiptTx(ctx, tx, canonical.RunID, hash); err != nil {
 		return RunCreationPlan{}, err
 	} else if found {
@@ -81,35 +85,22 @@ func PrepareRunCreationTx(o *Owner, ctx context.Context, tx *sql.Tx, command run
 		return RunCreationPlan{}, runtimedata.NewDomainError(runtimedata.CodeRunDataImmutable, "run %s already exists and cannot acquire run-creation data", canonical.RunID)
 	}
 
+	return prepareRunDataTx(o, ctx, tx, canonical, hash, requestJSON, "")
+}
+
+func prepareRunDataTx(o *Owner, ctx context.Context, tx *sql.Tx, canonical runtimedata.RunCreationCommand, hash string, requestJSON []byte, publicationID string) (RunCreationPlan, error) {
 	var declarations []runtimedata.Declaration
+	var err error
 	if len(canonical.Data.Imports) > 0 || len(canonical.Data.Pins) > 0 {
 		declarations, err = o.loadBundleDeclarationsTx(ctx, tx, canonical.BundleHash)
 		if err != nil {
 			return RunCreationPlan{}, err
 		}
 	}
-	plan := RunCreationPlan{command: canonical, requestHash: hash, requestJSON: requestJSON}
-	imports := make(map[string]runtimedata.FusedImport, len(canonical.Data.Imports))
-	for _, item := range canonical.Data.Imports {
-		imports[item.Declaration.Key()] = item
-	}
-	explicit := make(map[string]runtimedata.ExplicitPin, len(canonical.Data.Pins))
-	for _, item := range canonical.Data.Pins {
-		explicit[item.Declaration.Key()] = item
-	}
-	known := make(map[string]runtimedata.Declaration, len(declarations))
-	for _, declaration := range declarations {
-		known[declaration.Ref.Key()] = declaration
-	}
-	for key := range imports {
-		if _, ok := known[key]; !ok {
-			return RunCreationPlan{}, runtimedata.NewDomainError(runtimedata.CodePinConflict, "fused import selects declaration %s outside exact bundle", key)
-		}
-	}
-	for key := range explicit {
-		if _, ok := known[key]; !ok {
-			return RunCreationPlan{}, runtimedata.NewDomainError(runtimedata.CodePinConflict, "explicit pin selects declaration %s outside exact bundle", key)
-		}
+	plan := RunCreationPlan{command: canonical, requestHash: hash, requestJSON: requestJSON, publicationID: publicationID}
+	known, err := runDataDeclarations(canonical.Data, declarations)
+	if err != nil {
+		return RunCreationPlan{}, err
 	}
 
 	validationRejected := false
@@ -184,6 +175,7 @@ func PrepareRunCreationTx(o *Owner, ctx context.Context, tx *sql.Tx, command run
 		})
 		plan.feeds = append(plan.feeds, runtimedata.DeploymentFeed{
 			RunID: canonical.RunID, BundleHash: canonical.BundleHash, Declaration: declaration.Ref,
+			Publication:  publicationID,
 			SchemaDigest: declaration.SchemaDigest, VersionID: version.VersionID, RowCount: version.Manifest.RowCount,
 		})
 	}
@@ -194,6 +186,7 @@ func PrepareRunCreationTx(o *Owner, ctx context.Context, tx *sql.Tx, command run
 		})
 		plan.feeds = append(plan.feeds, runtimedata.DeploymentFeed{
 			RunID: canonical.RunID, BundleHash: canonical.BundleHash, Declaration: evaluation.command.Declaration,
+			Publication:        publicationID,
 			SourceInvocationID: evaluation.command.SourceInvocationID,
 			SchemaDigest:       evaluation.declaration.SchemaDigest, VersionID: evaluation.compiled.VersionID,
 			RowCount: evaluation.compiled.Manifest.RowCount,
@@ -204,6 +197,32 @@ func PrepareRunCreationTx(o *Owner, ctx context.Context, tx *sql.Tx, command run
 		return runtimedata.CompareDeclarationRef(plan.feeds[i].Declaration, plan.feeds[j].Declaration) < 0
 	})
 	return plan, nil
+}
+
+func runDataDeclarations(data runtimedata.RunCreationDataEnvelope, declarations []runtimedata.Declaration) (map[string]runtimedata.Declaration, error) {
+	imports := make(map[string]runtimedata.FusedImport, len(data.Imports))
+	for _, item := range data.Imports {
+		imports[item.Declaration.Key()] = item
+	}
+	explicit := make(map[string]runtimedata.ExplicitPin, len(data.Pins))
+	for _, item := range data.Pins {
+		explicit[item.Declaration.Key()] = item
+	}
+	known := make(map[string]runtimedata.Declaration, len(declarations))
+	for _, declaration := range declarations {
+		known[declaration.Ref.Key()] = declaration
+	}
+	for key := range imports {
+		if _, ok := known[key]; !ok {
+			return nil, runtimedata.NewDomainError(runtimedata.CodePinConflict, "fused import selects declaration %s outside exact bundle", key)
+		}
+	}
+	for key := range explicit {
+		if _, ok := known[key]; !ok {
+			return nil, runtimedata.NewDomainError(runtimedata.CodePinConflict, "explicit pin selects declaration %s outside exact bundle", key)
+		}
+	}
+	return known, nil
 }
 
 func (o *Owner) rejectRunCreationTx(ctx context.Context, tx *sql.Tx, plan RunCreationPlan, outcome string, rejection runtimedata.RunCreationRejection) (RunCreationPlan, error) {
@@ -222,6 +241,14 @@ func (o *Owner) rejectRunCreationTx(ctx context.Context, tx *sql.Tx, plan RunCre
 				SourceInvocationID: source.command.SourceInvocationID, Defect: defect,
 			})
 		}
+	}
+	if plan.publicationID != "" {
+		record.Summary.Kind, record.Summary.PublicationID = "rows_publication", plan.publicationID
+		if err := o.insertFeedPublicationTx(ctx, tx, plan, record); err != nil {
+			return RunCreationPlan{}, err
+		}
+		plan.record, plan.failed = record, true
+		return plan, nil
 	}
 	if err := o.insertRunCreationReceiptTx(ctx, tx, plan, record); err != nil {
 		return RunCreationPlan{}, err
@@ -312,6 +339,9 @@ func CompleteRunCreationTx(o *Owner, ctx context.Context, tx *sql.Tx, plan *RunC
 		plan.pins[index].RunState = status
 	}
 	for _, pin := range plan.pins {
+		if plan.publicationID != "" {
+			continue
+		}
 		if _, err := tx.ExecContext(ctx, o.query(`
 			INSERT INTO resource_version_pins
 			(run_id, flow_path, event_name, schema_digest, version_id, selection, pinned_at)
@@ -348,6 +378,14 @@ func CompleteRunCreationTx(o *Owner, ctx context.Context, tx *sql.Tx, plan *RunC
 		},
 		Binding:  binding,
 		Evidence: runtimedata.RunCreationEvidence{RunBinding: items},
+	}
+	if plan.publicationID != "" {
+		record.Summary.Kind, record.Summary.PublicationID = "rows_publication", plan.publicationID
+		if err := o.insertFeedPublicationTx(ctx, tx, *plan, record); err != nil {
+			return runtimedata.RunCreationOperationRecord{}, err
+		}
+		plan.record = record
+		return record, nil
 	}
 	if err := o.insertRunCreationReceiptTx(ctx, tx, *plan, record); err != nil {
 		return runtimedata.RunCreationOperationRecord{}, err

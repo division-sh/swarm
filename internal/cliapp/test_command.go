@@ -143,6 +143,7 @@ func (e scenarioTestValidationError) Unwrap() error {
 
 type scenarioRunner struct {
 	client                  *cliAPIClient
+	startScenario           func(context.Context, map[string]any) (string, error)
 	bundle                  *runtimecontracts.WorkflowContractBundle
 	source                  semanticview.Source
 	bundleHash              string
@@ -335,6 +336,7 @@ func runScenarioTestCommand(ctx context.Context, RepoRoot string, out, errOut io
 			return err
 		}
 		runner.client = client
+		runner.startScenario = endpoint.StartScenario
 		for _, plan := range plans {
 			if err := runner.runDerivedPlan(sessionCtx, plan); err != nil {
 				return err
@@ -1165,12 +1167,43 @@ func (r scenarioRunner) runPublishStep(ctx context.Context, file scenarioTestFil
 			"entity_id":     targetEntityText,
 		}
 	}
+	if state.RunID == "" {
+		return r.startPublicationRun(ctx, state, params)
+	}
 	var result eventPublishResult
 	if err := r.client.call(ctx, eventPublishMethod, params, &result); err != nil {
 		return err
 	}
 	if err := validateEventPublishResult(result); err != nil {
 		return err
+	}
+	state.RunID = result.RunID
+	state.LastEventID = result.EventID
+	return nil
+}
+
+func (r scenarioRunner) startPublicationRun(ctx context.Context, state *scenarioRunState, params map[string]any) error {
+	if r.startScenario == nil {
+		return fmt.Errorf("private scenario start is unavailable")
+	}
+	runID, err := r.startScenario(ctx, params)
+	if err != nil {
+		return err
+	}
+	if strings.TrimSpace(runID) == "" {
+		return fmt.Errorf("private scenario start returned no run")
+	}
+	state.RunID = runID
+	params["run_id"] = runID
+	var result runStartResult
+	if err := r.client.call(ctx, "run.start", params, &result); err != nil {
+		return err
+	}
+	if err := validateRunStartResult(result); err != nil {
+		return err
+	}
+	if strings.TrimSpace(result.EventID) == "" {
+		return fmt.Errorf("malformed run.start result: event_id is required for a scenario publication")
 	}
 	state.RunID = result.RunID
 	state.LastEventID = result.EventID

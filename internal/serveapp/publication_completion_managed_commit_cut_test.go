@@ -16,6 +16,7 @@ import (
 	"github.com/division-sh/swarm/internal/runtime/core/worklifetime"
 	runtimedelivery "github.com/division-sh/swarm/internal/runtime/deliverylifecycle"
 	"github.com/division-sh/swarm/internal/runtime/pipeline"
+	"github.com/division-sh/swarm/internal/runtime/semanticview"
 	"github.com/division-sh/swarm/internal/runtime/testfixtures/canonicalrouting"
 	"github.com/division-sh/swarm/internal/servedparity"
 	"github.com/division-sh/swarm/internal/store/storetest"
@@ -74,8 +75,13 @@ func provePublicCompletionManagedCommitCut(t *testing.T, backend servedparity.Ba
 	var identity apiv1.RuntimeIdentityResult
 	requireServedJSONRPCResult(t, h.rpcEndpoint(), "runtime.identity", map[string]any{}, &identity)
 	hash := identity.SourceArtifacts[0].BundleHash
+	selectedRunID := requireServedLiveLandingRunID(t, h.rpcEndpoint(), hash, ".")
+	if method == "event.publish" {
+		pauseServedLandingForCreation(t, h.rpcEndpoint(), hash, ".")
+		selectedRunID = uuid.NewString()
+	}
 	params := map[string]any{
-		"bundle_hash": hash, "run_id": uuid.NewString(), "idempotency_key": uuid.NewString(),
+		"bundle_hash": hash, "run_id": selectedRunID, "idempotency_key": uuid.NewString(),
 		"data": map[string]any{"imports": []any{map[string]any{
 			"source_invocation_id": uuid.NewString(), "declaration": map[string]any{"flow_path": ".", "event": "scan.requested"},
 			"expected_head": map[string]any{"state": "absent"}, "input": map[string]any{"format": "jsonl", "content_base64": ""},
@@ -103,19 +109,33 @@ func provePublicCompletionManagedCommitCut(t *testing.T, backend servedparity.Ba
 	var activation pipeline.CommittedFlowInstanceActivation
 	completion := probe.committed.Completion.Response
 	if eventBacked {
-		activation = probe.committed.Publication.Activations[0]
+		if method == "event.publish" {
+			activation = probe.committed.Publication.Activations[0]
+		} else {
+			for _, activated := range probe.committed.Publication.Activations {
+				if activated.Created && activated.Plan.Identity.TemplateID == semanticview.RootExecutionFlowID(rt.Options.WorkflowModule.SemanticSource()) {
+					t.Error("live run publication repeated root construction")
+				}
+			}
+		}
 	} else {
-		activation = probe.deployment.Activations[0]
+		if len(probe.deployment.Activations) != 0 {
+			t.Error("rows publication repeated root construction")
+		}
 		completion = probe.deployment.Completion.Response
 	}
 	probe.mu.Unlock()
 	stored, found, err := native.LookupAPIEventPublication(t.Context(), request)
-	if err != nil || !found || process.PublicCompletionCount() != 1 || !activation.Acknowledged || !bytes.Equal(completion, stored.Response) {
+	if err != nil || !found || process.PublicCompletionCount() != 1 || method == "event.publish" && !activation.Acknowledged || !bytes.Equal(completion, stored.Response) {
 		t.Fatalf("held native ACK lacks durable outcome/ownership: found=%t err=%v", found, err)
 	}
-	plan := activation.Plan
-	flow := flowidentity.RunScopedFlowInstance{RunID: plan.Readiness.RunID, Route: plan.Identity.Route()}
-	construction, err := storetest.ReadReceiverConstructionPublication(t.Context(), native, flow, plan.Identity.EntityID)
+	source := rt.Options.WorkflowModule.SemanticSource()
+	instance, err := flowidentity.StandingForGeneration(source, semanticview.RootExecutionFlowID(source), runID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	flow := flowidentity.RunScopedFlowInstance{RunID: runID, Route: instance.Route()}
+	construction, err := storetest.ReadReceiverConstructionPublication(t.Context(), native, flow, instance.EntityID)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -202,7 +222,7 @@ func provePublicCompletionManagedCommitCut(t *testing.T, backend servedparity.Ba
 	if err != nil || beforeReplay != afterReplay {
 		t.Fatalf("recorded ACK replay repeated a consequence: before=%+v after=%+v err=%v", beforeReplay, afterReplay, err)
 	}
-	afterConstruction, err := storetest.ReadReceiverConstructionPublication(t.Context(), native, flow, plan.Identity.EntityID)
+	afterConstruction, err := storetest.ReadReceiverConstructionPublication(t.Context(), native, flow, instance.EntityID)
 	if err != nil || !reflect.DeepEqual(construction, afterConstruction) {
 		t.Fatalf("managed restart changed immutable construction: before=%+v after=%+v err=%v", construction, afterConstruction, err)
 	}
@@ -221,7 +241,7 @@ func provePublicCompletionManagedCommitCut(t *testing.T, backend servedparity.Ba
 	if result.Run.RunID != runID || result.Run.Status != "live" || result.Run.EndedAt != nil || result.Run.ControlReason != "" {
 		t.Fatalf("managed shutdown ended the retained live flow: %+v", result.Run)
 	}
-	readiness, found, err := workflow.LoadDynamicFlowRuntimeReadiness(t.Context(), runID, plan.Identity.Route())
+	readiness, found, err := workflow.LoadDynamicFlowRuntimeReadiness(t.Context(), runID, instance.Route())
 	if err != nil || !found || readiness.Phase != pipeline.FlowAttachmentReady {
 		t.Fatalf("managed restart did not recover exact attachment: found=%t readiness=%+v err=%v", found, readiness, err)
 	}

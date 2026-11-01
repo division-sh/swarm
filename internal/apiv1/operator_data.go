@@ -8,6 +8,7 @@ import (
 	"encoding/hex"
 	"encoding/json"
 	"errors"
+	"fmt"
 	"strconv"
 	"strings"
 
@@ -143,7 +144,7 @@ func executeDataShow(ctx context.Context, req Request, store DurableDataStore) (
 	case "versions", "version", "rows", "row", "export_chunk", "provenance", "pins", "head_history":
 		return executeDataShowResource(ctx, req.Params, store, view)
 	case "operation":
-		return executeDataShowOperation(ctx, req.Params, store)
+		return executeDataShowOperation(ctx, req.Params, store, req.ActorTokenID)
 	default:
 		return nil, NewInvalidParamsError(map[string]any{"field": "view", "reason": "unsupported data.show view"})
 	}
@@ -424,7 +425,7 @@ func selectDataShowRow(raw any, version durabledata.Version, rows []durabledata.
 	return nil, NewApplicationError(string(durabledata.CodeVersionMissing), false, map[string]any{"key": key, "version_id": version.VersionID})
 }
 
-func executeDataShowOperation(ctx context.Context, params map[string]any, store DurableDataStore) (any, error) {
+func executeDataShowOperation(ctx context.Context, params map[string]any, store DurableDataStore, actor ...string) (any, error) {
 	detail, err := dataString(params["detail"], "detail")
 	if err != nil {
 		return nil, err
@@ -444,7 +445,7 @@ func executeDataShowOperation(ctx context.Context, params map[string]any, store 
 	if err != nil {
 		return nil, err
 	}
-	if detail == "request_binding" && kind != "run_creation" {
+	if detail == "request_binding" && kind != "run_creation" && kind != "rows_publication" {
 		return nil, NewInvalidParamsError(map[string]any{"field": "detail", "reason": "incompatible operation detail"})
 	}
 	switch kind {
@@ -454,8 +455,10 @@ func executeDataShowOperation(ctx context.Context, params map[string]any, store 
 		return executeDataShowPruneOperation(ctx, params, store, ref, detail)
 	case "run_creation":
 		return executeDataShowRunCreationOperation(ctx, params, store, ref, detail)
+	case "rows_publication":
+		return executeDataShowRowsPublication(ctx, params, store, ref, detail, actor)
 	default:
-		return nil, NewInvalidParamsError(map[string]any{"field": "operation_ref.kind", "reason": "must be source, prune, or run_creation"})
+		return nil, NewInvalidParamsError(map[string]any{"field": "operation_ref.kind", "reason": "must be source, prune, run_creation, or rows_publication"})
 	}
 }
 
@@ -551,11 +554,15 @@ func executeDataShowRunCreationOperation(ctx context.Context, params map[string]
 	if err != nil {
 		return nil, err
 	}
+	record, err := store.LoadDataRunCreationOperation(ctx, runID)
+	if err != nil {
+		return nil, dataApplicationError(err)
+	}
+	return dataShowRunBindingRecord(params, record, runID, detail)
+}
+
+func dataShowRunBindingRecord(params map[string]any, record durabledata.RunCreationOperationRecord, runID, detail string) (any, error) {
 	if detail == "request_binding" {
-		record, err := store.LoadDataRunCreationOperation(ctx, runID)
-		if err != nil {
-			return nil, dataApplicationError(err)
-		}
 		if record.RequestBinding == nil {
 			return nil, NewApplicationError(string(durabledata.CodeIntegrity), false, map[string]any{"operation": runID, "reason": "request binding is absent"})
 		}
@@ -564,15 +571,11 @@ func executeDataShowRunCreationOperation(ctx context.Context, params map[string]
 		}
 		return *record.RequestBinding, nil
 	}
-	record, err := store.LoadDataRunCreationOperation(ctx, runID)
-	if err != nil {
-		return nil, dataApplicationError(err)
-	}
 	if err := record.Validate(); err != nil {
 		return nil, NewApplicationError(string(durabledata.CodeIntegrity), false, map[string]any{"operation": runID, "reason": err.Error()})
 	}
 	if detail == "summary" {
-		return durabledata.OperationSummary{Kind: "run_creation", RunCreation: &record.Summary}, nil
+		return durabledata.OperationSummary{Kind: record.Summary.Kind, RunCreation: &record.Summary}, nil
 	}
 	page, err := dataPage(params["page"])
 	if err != nil {
@@ -580,14 +583,52 @@ func executeDataShowRunCreationOperation(ctx context.Context, params map[string]
 	}
 	switch detail {
 	case "child_evaluations":
-		return pageDataItems(record.Evidence.ChildEvaluations, page, dataCursorFingerprint("run_creation", runID, detail))
+		return pageDataItems(record.Evidence.ChildEvaluations, page, dataCursorFingerprint(record.Summary.Kind, runID, detail))
 	case "child_defects":
-		return pageDataItems(record.Evidence.ChildDefects, page, dataCursorFingerprint("run_creation", runID, detail))
+		return pageDataItems(record.Evidence.ChildDefects, page, dataCursorFingerprint(record.Summary.Kind, runID, detail))
 	case "run_binding":
-		return pageDataItems(record.Evidence.RunBinding, page, dataCursorFingerprint("run_creation", runID, detail))
+		return pageDataItems(record.Evidence.RunBinding, page, dataCursorFingerprint(record.Summary.Kind, runID, detail))
 	default:
 		return nil, NewInvalidParamsError(map[string]any{"field": "detail", "reason": "incompatible run-creation operation detail"})
 	}
+}
+
+func executeDataShowRowsPublication(ctx context.Context, params map[string]any, store DurableDataStore, ref map[string]any, detail string, actor []string) (any, error) {
+	publicationID, hasID, err := optionalStringParam(ref, "publication_id")
+	if err != nil {
+		return nil, err
+	}
+	key, hasKey, err := optionalStringParam(ref, "idempotency_key")
+	if err != nil || hasKey == hasID {
+		return nil, NewInvalidParamsError(map[string]any{"field": "operation_ref", "reason": "select exactly one publication_id or idempotency_key"})
+	}
+	selector := "publication_id"
+	if hasKey {
+		selector = "idempotency_key"
+	}
+	if err := exactDataParams(ref, "kind", selector); err != nil {
+		return nil, err
+	}
+	if hasKey {
+		if key == "" || len(actor) == 0 || actor[0] == "" {
+			return nil, NewInvalidParamsError(map[string]any{"field": "operation_ref", "reason": "rows replay requires the calling actor"})
+		}
+		publicationID = durabledata.RowsPublicationID(actor[0], key)
+	}
+	if _, err := canonicalDataUUID(publicationID, "operation_ref.publication_id"); err != nil {
+		return nil, err
+	}
+	reader, ok := store.(interface {
+		LoadDataRowsPublicationOperation(context.Context, string) (durabledata.RunCreationOperationRecord, error)
+	})
+	if !ok {
+		return nil, fmt.Errorf("rows publication readback requires its native data owner")
+	}
+	record, err := reader.LoadDataRowsPublicationOperation(ctx, publicationID)
+	if err != nil {
+		return nil, dataApplicationError(err)
+	}
+	return dataShowRunBindingRecord(params, record, publicationID, detail)
 }
 
 func validateResolvedDataVersionSummary(summary durabledata.VersionSummary, ref durabledata.DeclarationRef, selector durabledata.VersionSelector) error {

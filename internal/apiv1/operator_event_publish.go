@@ -72,14 +72,17 @@ type eventPublicationParams struct {
 	TargetRoute            events.RouteIdentity
 	TargetRouteSet         bool
 	APIEventEndpoint       *runtimebus.APIEventPublicationEndpoint
+	LiveRun                *runtimerunlifecycle.LiveRun
 	RunID                  string
 	SourceEventID          string
 	IdempotencyKey         string
 	Emitter                string
 	NewRunCreated          bool
+	RootIngress            bool
 	RunIDProvided          bool
 	ScenarioExecution      *scenarioexecution.Selector
 	Data                   durabledata.RunCreationDataEnvelope
+	PublicationID          string
 	DataPresent            bool
 }
 
@@ -225,15 +228,29 @@ func executeOperatorEventPublication(
 		if err != nil {
 			return apiidempotency.Completion{}, err
 		}
-		selectedOpts := opts
+		ctx, selectedOpts, params, privateScenario, err := bindPrivateScenarioPublicationScope(ctx, opts, params, bundleIdentity, cfg.rootInputOnly)
+		if err != nil {
+			return apiidempotency.Completion{}, err
+		}
+		if cfg.rootInputOnly || !params.RunIDProvided {
+			params, err = selectEventPublicationLiveRun(ctx, selectedOpts, params, bundleIdentity.BundleHash)
+			if err != nil {
+				return apiidempotency.Completion{}, err
+			}
+		}
 		ctx, selectedOpts, params, err = resolveEventPublicationBundleScope(ctx, opts, params, bundleIdentity, cfg)
 		if err != nil {
 			return apiidempotency.Completion{}, err
 		}
-		if params.DataPresent && !params.NewRunCreated {
+		if cfg.rootInputOnly && !params.PayloadEntityIDPresent && params.EntityID == "" {
+			params.EntityID = params.RunID
+		}
+		if params.DataPresent && !params.NewRunCreated && !cfg.rootInputOnly {
 			return apiidempotency.Completion{}, NewApplicationError(string(durabledata.CodeRunDataImmutable), false, map[string]any{"run_id": params.RunID})
 		}
 		if req.Method == "run.start" && params.DataPresent {
+			params.PublicationID = rowsPublicationID(req, idempotency)
+			params.EventID = uuid.NewSHA1(uuid.NameSpaceOID, []byte("swarm.rows-publication.event.v1\x00"+params.PublicationID)).String()
 			if _, err := admitRunStartDeploymentFeeds(selectedOpts.Source, params.Data); err != nil {
 				return apiidempotency.Completion{}, err
 			}
@@ -252,16 +269,28 @@ func executeOperatorEventPublication(
 			return apiidempotency.Completion{}, err
 		}
 		params.EventName = resolvedEventName
+		if privateScenario && cfg.rootInputOnly {
+			params, err = bindScenarioFirstPublicationEvent(ctx, selectedOpts, params)
+			if err != nil {
+				return apiidempotency.Completion{}, err
+			}
+		}
 		endpoint, err := runtimebus.NewRootInputAPIEventPublicationEndpoint(selectedOpts.Source, resolvedEventName)
 		if err != nil {
 			return apiidempotency.Completion{}, err
+		}
+		if params.LiveRun != nil {
+			endpoint, err = endpoint.ForLiveRun(selectedOpts.Source, *params.LiveRun)
+			if err != nil {
+				return apiidempotency.Completion{}, err
+			}
 		}
 		params.APIEventEndpoint = &endpoint
 		params, err = validateEventPublication(ctx, selectedOpts, params, cfg)
 		if err != nil {
 			return apiidempotency.Completion{}, err
 		}
-		if cfg.rootInputOnly && params.NewRunCreated {
+		if cfg.rootInputOnly {
 			if _, err := checkEventPublicationRecipientPlan(ctx, selectedOpts, params, cfg); err != nil {
 				return apiidempotency.Completion{}, err
 			}
@@ -280,7 +309,7 @@ func executeOperatorEventPublication(
 				return apiidempotency.Completion{}, errors.New("event.publish requires atomic selected-store publication and API completion")
 			}
 			var runCreation *durabledata.RunCreationCommand
-			if params.NewRunCreated {
+			if params.NewRunCreated || params.DataPresent {
 				semanticRequest, semanticErr := runCreationInitialEvent(params)
 				if semanticErr != nil {
 					return apiidempotency.Completion{}, semanticErr
@@ -288,6 +317,9 @@ func executeOperatorEventPublication(
 				command := durabledata.RunCreationCommand{
 					RunID: params.RunID, Actor: req.ActorTokenID, BundleHash: params.SourceArtifactFact.BundleHash(),
 					EventID: params.EventID, InitialEvent: semanticRequest, Data: params.Data,
+				}
+				if !params.NewRunCreated {
+					command.PublicationID = params.PublicationID
 				}
 				runCreation = &command
 			}
@@ -317,6 +349,25 @@ func executeOperatorEventPublication(
 		return completion, atomicReplay, err
 	}
 	return opts.Idempotency.WithAPIIdempotency(ctx, idempotency, execute)
+}
+
+func bindScenarioFirstPublicationEvent(ctx context.Context, opts EventPublicationOptions, params eventPublicationParams) (eventPublicationParams, error) {
+	header, err := opts.Runs.LoadRunHeader(ctx, params.RunID)
+	if err != nil {
+		return params, err
+	}
+	if header.Origin.Kind() == runtimerunlifecycle.OriginEvent {
+		_, err := opts.Observability.LoadOperatorEvent(ctx, header.Origin.EventID())
+		if errors.Is(err, operatorread.ErrEventNotFound) {
+			if header.Origin.EventType() != params.EventName {
+				return params, fmt.Errorf("scenario first publication differs from its admitted input")
+			}
+			params.EventID = header.Origin.EventID()
+		} else if err != nil {
+			return params, err
+		}
+	}
+	return params, nil
 }
 
 func eventPublicationCompletion(ctx context.Context, opts EventPublicationOptions, params eventPublicationParams, cfg eventPublicationConfig) (apiidempotency.Completion, error) {
@@ -387,18 +438,17 @@ func eventPublicationParamsFromRequest(req Request, cfg eventPublicationConfig) 
 		return eventPublicationParams{}, bundleIdentityParam{}, NewInvalidParamsError(map[string]any{"field": "run_id", "reason": "is required when target is provided"})
 	}
 	newRun := false
-	if runID == "" {
-		runID = uuid.NewString()
-		newRun = true
-	} else if parsed, err := uuid.Parse(runID); err != nil {
-		return eventPublicationParams{}, bundleIdentityParam{}, NewInvalidParamsError(map[string]any{"field": "run_id", "reason": "must be a UUID"})
-	} else {
+	if runID != "" {
+		parsed, err := uuid.Parse(runID)
+		if err != nil {
+			return eventPublicationParams{}, bundleIdentityParam{}, NewInvalidParamsError(map[string]any{"field": "run_id", "reason": "must be a UUID"})
+		}
 		runID = parsed.String()
 	}
-	if runIDProvided && (cfg.rootInputOnly || dataPresent) {
+	if runIDProvided && dataPresent && !cfg.rootInputOnly {
 		newRun = true
 	}
-	if dataPresent && !runIDProvided {
+	if dataPresent && !runIDProvided && !cfg.rootInputOnly {
 		return eventPublicationParams{}, bundleIdentityParam{}, NewInvalidParamsError(map[string]any{"field": "run_id", "reason": "is required for data-bearing create-new publication"})
 	}
 	payload, payloadEntityIDPresent, err := eventPublicationPayload(req.Params)
@@ -440,6 +490,7 @@ func eventPublicationParamsFromRequest(req Request, cfg eventPublicationConfig) 
 		IdempotencyKey:         idempotencyKey,
 		Emitter:                emitter,
 		NewRunCreated:          newRun,
+		RootIngress:            cfg.rootInputOnly,
 		RunIDProvided:          runIDProvided,
 		ScenarioExecution:      scenarioSelector,
 		Data:                   data,
@@ -663,6 +714,9 @@ func eventPublicationEvent(params eventPublicationParams, createdAt time.Time, p
 	}
 	if params.NewRunCreated {
 		return events.NewRunCreatingRootIngressEvent(events.RunCreatingRootIngressEventInput{Facts: facts, RunID: params.RunID})
+	}
+	if params.RootIngress {
+		return events.NewExistingRunRootIngressEvent(events.ExistingRunRootIngressEventInput{Facts: facts, RunID: params.RunID})
 	}
 	var provenance *events.OperatorReferenceProvenance
 	if sourceEventID := strings.TrimSpace(params.SourceEventID); sourceEventID != "" {

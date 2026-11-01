@@ -38,7 +38,8 @@ func TestOperatorEventPublishAgentHeaderSelectorsBothStores(t *testing.T) {
 			}
 			handler := eventPublishTestHandlerWithStores(t, selected, selected, selected, bus, source)
 			hash := runStartTestBundleHashForSource(source)
-			initial := rpcCall(t, handler, eventPublishBody("", hash, "work.requested", `{}`, "", "selector-initial"))
+			seedEventPublishLiveRun(t, selected, bus, source)
+			initial := rpcCall(t, handler, runStartBody("", hash, "work.requested", `{}`, "selector-initial"))
 			if initial.Error != nil {
 				t.Fatalf("construct genuine public run/tree: %#v", initial.Error)
 			}

@@ -15,6 +15,7 @@ import (
 	"github.com/division-sh/swarm/internal/runtime/runfork"
 	"github.com/division-sh/swarm/internal/runtime/semanticview"
 	runforkrevision "github.com/division-sh/swarm/internal/store/internal/backend/runforkrevision"
+	storedurabledata "github.com/division-sh/swarm/internal/store/internal/durabledata"
 	"github.com/google/uuid"
 )
 
@@ -63,7 +64,7 @@ func (s *RunForkPostgresOwner) PlanRunFork(ctx context.Context, req runfork.RunF
 		return runfork.RunForkPlan{}, fmt.Errorf("begin run fork revision snapshot: %w", err)
 	}
 	defer func() { _ = tx.Rollback() }()
-	return planRunForkSnapshotWithActivityOrigins(ctx, tx, req, runforkrevision.ValidateCompletePostgres, resolveRunForkRevisionPoint, s.ReadPresentSourceTx, true)
+	return planRunForkSnapshotWithActivityOrigins(ctx, tx, req, runforkrevision.ValidateCompletePostgres, resolveRunForkRevisionPoint, s.ReadPresentSourceTx, true, s.durableData)
 }
 
 func (s *RunForkSQLiteOwner) PlanRunFork(ctx context.Context, req runfork.RunForkPlanRequest) (runfork.RunForkPlan, error) {
@@ -76,7 +77,7 @@ func (s *RunForkSQLiteOwner) PlanRunFork(ctx context.Context, req runfork.RunFor
 	var plan runfork.RunForkPlan
 	err := s.backend.RunReadTransaction(ctx, func(txctx context.Context, tx *sql.Tx) error {
 		var err error
-		plan, err = planRunForkSnapshotWithActivityOrigins(txctx, tx, req, runforkrevision.ValidateCompleteSQLite, resolveSQLiteRunForkRevisionPoint, s.ReadPresentSourceTx, false)
+		plan, err = planRunForkSnapshotWithActivityOrigins(txctx, tx, req, runforkrevision.ValidateCompleteSQLite, resolveSQLiteRunForkRevisionPoint, s.ReadPresentSourceTx, false, s.durableData)
 		return err
 	})
 	return plan, err
@@ -92,8 +93,9 @@ func planRunForkSnapshot(
 	validate runForkRevisionValidator,
 	resolve runForkRevisionPointResolver,
 	postgres bool,
+	data ...*storedurabledata.Owner,
 ) (runfork.RunForkPlan, error) {
-	return planRunForkSnapshotWithActivityOrigins(ctx, tx, req, validate, resolve, nil, postgres)
+	return planRunForkSnapshotWithActivityOrigins(ctx, tx, req, validate, resolve, nil, postgres, data...)
 }
 
 // Readback-only callers retain their ordinary plan. Preparation additionally
@@ -106,6 +108,7 @@ func planRunForkSnapshotWithActivityOrigins(
 	resolve runForkRevisionPointResolver,
 	sourceAt func(context.Context, *sql.Tx, string) (correlation.SourceArtifactFact, error),
 	postgres bool,
+	data ...*storedurabledata.Owner,
 ) (runfork.RunForkPlan, error) {
 	runID := strings.TrimSpace(req.SourceRunID)
 	if runID == "" {
@@ -117,6 +120,20 @@ func planRunForkSnapshotWithActivityOrigins(
 	at := strings.TrimSpace(req.At)
 	if req.AtStart && at != "" {
 		return runfork.RunForkPlan{}, fmt.Errorf("start and event fork selectors are mutually exclusive")
+	}
+	if req.PublicationID != "" {
+		if req.AtStart || at != "" && at != req.PublicationID || len(data) != 1 {
+			return runfork.RunForkPlan{}, fmt.Errorf("publication cut requires its exact data owner and no other selector")
+		}
+		point, err := resolveRunForkPublicationPoint(ctx, tx, data[0], runID, req.PublicationID, resolve)
+		if err != nil {
+			return runfork.RunForkPlan{}, err
+		}
+		if req.ResolvedPoint != nil && !req.ResolvedPoint.SameIdentity(point) {
+			return runfork.RunForkPlan{}, fmt.Errorf("publication differs from its retained fork cut")
+		}
+		req.ResolvedPoint = &point
+		at = point.Input
 	}
 	if req.ResolvedPoint != nil {
 		if err := req.ResolvedPoint.Validate(); err != nil {

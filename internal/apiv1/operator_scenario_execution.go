@@ -5,10 +5,111 @@ import (
 	"context"
 	"fmt"
 	"strings"
+	"time"
 
+	"github.com/division-sh/swarm/internal/runtime/core/flowidentity"
 	"github.com/division-sh/swarm/internal/runtime/executionposture"
+	"github.com/division-sh/swarm/internal/runtime/pipeline"
+	"github.com/division-sh/swarm/internal/runtime/runlifecycle"
 	"github.com/division-sh/swarm/internal/runtime/scenarioexecution"
+	"github.com/division-sh/swarm/internal/runtime/semanticview"
+	"github.com/google/uuid"
 )
+
+func bindPrivateScenarioPublicationScope(ctx context.Context, opts EventPublicationOptions, params eventPublicationParams, identity bundleIdentityParam, rootInput bool) (context.Context, EventPublicationOptions, eventPublicationParams, bool, error) {
+	if !rootInput || !scenarioexecution.HasPrivateHostScope(ctx) || params.RunID == "" {
+		return ctx, opts, params, false, nil
+	}
+	ctx, opts, params, err := resolveEventPublicationBundleScope(ctx, opts, params, identity, eventPublicationConfig{requireExistingExplicitRun: true})
+	if err != nil {
+		return ctx, opts, params, false, err
+	}
+	ctx, err = admitScenarioExecutionSelector(ctx, opts, params.RunID, false, params.ScenarioExecution)
+	if err != nil {
+		return ctx, opts, params, false, err
+	}
+	header, err := opts.Runs.LoadRunHeader(ctx, params.RunID)
+	if err != nil || header.Origin.Kind() == runlifecycle.OriginDeployment {
+		return ctx, opts, params, false, err
+	}
+	ctx, err = scenarioexecution.WithPrivateRunScope(ctx, params.RunID, flowidentity.ScopeKey(opts.Source, semanticview.RootExecutionFlowID(opts.Source)))
+	return ctx, opts, params, err == nil, err
+}
+
+// StartPrivateScenario is handed directly to swarm test by its private host.
+// It is deliberately absent from the public RPC method registry.
+func StartPrivateScenario(ctx context.Context, opts EventPublicationOptions, input map[string]any, now time.Time) (string, error) {
+	if !scenarioexecution.HasPrivateHostScope(ctx) {
+		return "", fmt.Errorf("scenario start requires its private test host")
+	}
+	ctx, uses := beginRuntimeUseCollection(ctx)
+	defer uses.done()
+	params := make(map[string]any, len(input)+1)
+	for key, value := range input {
+		params[key] = value
+	}
+	if stringParam(params, "run_id") != "" {
+		return "", fmt.Errorf("scenario start requires an empty run context")
+	}
+	params["run_id"] = uuid.NewString()
+	cfg := eventPublicationConfig{
+		sourceAgent:   func(Request) string { return "api.v1" },
+		rootInputOnly: true, injectRunIDEntityIDWhenMissing: true,
+	}
+	publication, identity, err := eventPublicationParamsFromRequest(Request{Method: "test.scenario.start", Params: params}, cfg)
+	if err != nil {
+		return "", err
+	}
+	if publication.DataPresent {
+		return "", fmt.Errorf("scenario start does not admit run data bindings")
+	}
+	// This UUID was minted by the private start, not supplied by a public caller.
+	publication.RunIDProvided = false
+	ctx, opts, publication, err = resolveEventPublicationBundleScope(ctx, opts, publication, identity, cfg)
+	if err != nil {
+		return "", err
+	}
+	ctx, err = admitScenarioExecutionSelector(ctx, opts, publication.RunID, true, publication.ScenarioExecution)
+	if err != nil {
+		return "", err
+	}
+	profile, admitted := scenarioexecution.AdmittedProfileFromContext(ctx)
+	publication.EventName, err = resolveEventPublicationEventName(opts.Source, publication.EventName)
+	if err != nil {
+		return "", err
+	}
+	if _, err := validateEventPublication(ctx, opts, publication, cfg); err != nil {
+		return "", err
+	}
+	if _, err := checkEventPublicationRecipientPlan(ctx, opts, publication, cfg); err != nil {
+		return "", err
+	}
+	ctx, err = scenarioexecution.WithPrivateRunScope(ctx, publication.RunID, flowidentity.ScopeKey(opts.Source, semanticview.RootExecutionFlowID(opts.Source)))
+	if err != nil {
+		return "", err
+	}
+	owner, ok := opts.Acknowledged.(TestSetupStore)
+	if !ok || owner == nil {
+		return "", fmt.Errorf("scenario start requires its native setup owner")
+	}
+	initialEventID := uuid.NewSHA1(uuid.NameSpaceOID, []byte("swarm.run.initial-event.v1\x00"+publication.RunID)).String()
+	origin, err := runlifecycle.EventRunOrigin(initialEventID, publication.EventName)
+	if err != nil {
+		return "", err
+	}
+	request := pipeline.ScenarioSetupRequest{RunID: publication.RunID, CreatedAt: now, Origin: origin}
+	if admitted {
+		request.ScenarioExecutionProfile = &profile
+	}
+	result, err := owner.SetupScenarioEntities(ctx, request)
+	if err != nil {
+		return "", err
+	}
+	if !result.Acknowledged || result.RunID != publication.RunID {
+		return "", fmt.Errorf("scenario start did not acknowledge its exact run")
+	}
+	return result.RunID, nil
+}
 
 func scenarioExecutionSelectorParam(params map[string]any) (*scenarioexecution.Selector, error) {
 	raw, ok := params["scenario_execution"]

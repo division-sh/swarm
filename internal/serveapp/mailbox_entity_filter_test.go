@@ -36,15 +36,24 @@ func startServedMailboxEntityFilterProof(t *testing.T, backend servedparity.Back
 		writeChannelOnboardingLiveToolCredentials(t, credentialPath)
 		return canonicalrouting.CopyMailboxEntityFilter(t)
 	})
+	createdRuns := map[string]bool{}
 	var runs, entities, events []string
 	for i := 0; i < 3; i++ {
-		published := requireServedEventPublishRPCResult(t, rt.Endpoint, map[string]any{
+		runID := seedServedPublicationRun(t, rt.Runtime)
+		var published struct {
+			RunID   string `json:"run_id"`
+			EventID string `json:"event_id"`
+			Status  string `json:"status"`
+		}
+		requireServedJSONRPCResult(t, rt.Endpoint, "event.publish", map[string]any{
+			"run_id":     runID,
 			"event_name": "review.requested", "bundle_hash": rt.BundleHash,
 			"payload": map[string]any{"item_id": uuid.NewString()}, "idempotency_key": uuid.NewString(),
-		})
-		if !published.NewRunCreated || published.RunID == "" || published.EventID == "" {
-			t.Fatalf("event.publish = %+v, want new run", published)
+		}, &published)
+		if published.RunID != runID || published.EventID == "" || createdRuns[published.RunID] {
+			t.Fatalf("event.publish = %+v, want exact setup run %s", published, runID)
 		}
+		createdRuns[published.RunID] = true
 		waitForServedEventPublishNodeDeliveryLifecycleForNode(t, rt.DB, rt.Backend, published.RunID, published.EventID, identitytest.RootNode(t, "reviewer").Key(), rt.Probe)
 		entities = append(entities, requireServedEventPublishEntityState(t, rt.DB, rt.Backend, published.RunID, "", "waiting"))
 		runs = append(runs, published.RunID)

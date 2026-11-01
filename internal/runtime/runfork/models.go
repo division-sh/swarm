@@ -267,6 +267,7 @@ const (
 
 type RunForkPlanRequest struct {
 	SourceRunID   string
+	PublicationID string
 	At            string
 	AtStart       bool `json:"at_start,omitempty"`
 	ResolvedPoint *RunForkPoint

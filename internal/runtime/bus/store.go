@@ -23,6 +23,7 @@ import (
 	runtimepipelineobligation "github.com/division-sh/swarm/internal/runtime/pipelineobligation"
 	runtimereplycontext "github.com/division-sh/swarm/internal/runtime/replycontext"
 	"github.com/division-sh/swarm/internal/runtime/runfork"
+	"github.com/division-sh/swarm/internal/runtime/runlifecycle"
 )
 
 var (
@@ -56,9 +57,11 @@ type DeploymentRunCreationCommitOwner interface {
 }
 
 type DeploymentRunCreationCommand struct {
-	RunCreation durabledata.RunCreationCommand
-	Idempotency apiidempotency.Request
-	Root        FlowInstanceActivationCommand
+	RunCreation   durabledata.RunCreationCommand
+	PublicationID string
+	LiveRun       *runlifecycle.LiveRun
+	Idempotency   apiidempotency.Request
+	Root          FlowInstanceActivationCommand
 }
 
 type CommittedDeploymentRunCreation struct {
@@ -74,17 +77,41 @@ type APIEventPublicationCommand struct {
 	Idempotency apiidempotency.Request
 	Completion  apiidempotency.Completion
 	RunCreation *durabledata.RunCreationCommand
+	LiveRun     *runlifecycle.LiveRun
 }
+
+var ErrAPIEventLiveRunChanged = runlifecycle.ErrLiveRunChanged
 
 func (c APIEventPublicationCommand) Validate() error {
 	if err := c.Publication.Validate(); err != nil {
 		return err
 	}
+	if err := c.validateLiveRunSelection(); err != nil {
+		return err
+	}
+	return c.validateCompletion()
+}
+
+func (c APIEventPublicationCommand) validateLiveRunSelection() error {
+	if live := c.LiveRun; live != nil {
+		if err := live.Scope.Validate(); err != nil {
+			return err
+		}
+		if (c.Idempotency.Method != "event.publish" && c.Idempotency.Method != "run.start") ||
+			(c.RunCreation != nil && c.RunCreation.PublicationID == "") || live.RunID != c.Publication.Commit.Event.Event().RunID() ||
+			!c.Publication.HasAuthorScope || live.Source.BundleHash() != c.Publication.AuthorScope.BundleHash {
+			return fmt.Errorf("live publication selection does not match its event and source")
+		}
+	}
+	return nil
+}
+
+func (c APIEventPublicationCommand) validateCompletion() error {
 	if method := strings.TrimSpace(c.Idempotency.Method); method != "event.publish" && method != "run.start" {
 		return fmt.Errorf("API event publication requires event.publish or run.start method authority")
 	}
 	expectedResourceID := strings.TrimSpace(c.Publication.Commit.Event.ID())
-	if strings.TrimSpace(c.Idempotency.Method) == "run.start" && c.RunCreation != nil {
+	if strings.TrimSpace(c.Idempotency.Method) == "run.start" && c.RunCreation != nil && c.RunCreation.PublicationID == "" {
 		expectedResourceID = strings.TrimSpace(c.RunCreation.RunID)
 	}
 	if strings.TrimSpace(c.Completion.ResourceID) != expectedResourceID {
@@ -98,8 +125,14 @@ func (c APIEventPublicationCommand) Validate() error {
 		return fmt.Errorf("API event publication actor token and request hash are required for idempotency")
 	}
 	creating := c.Publication.Commit.Event.RunDisposition() == events.AdmittedRunCreateAuthorized
-	if creating != (c.RunCreation != nil) {
+	if creating != (c.RunCreation != nil && c.RunCreation.PublicationID == "") {
 		return fmt.Errorf("API create-new-run publication and durable run-creation command must be present together")
+	}
+	if c.RunCreation != nil && c.RunCreation.PublicationID != "" && (c.LiveRun == nil || c.Idempotency.Method != "run.start" || c.RunCreation.RunID != c.LiveRun.RunID) {
+		return fmt.Errorf("rows publication requires exact existing-run run.start authority")
+	}
+	if c.RunCreation != nil && c.RunCreation.PublicationID != "" && (c.RunCreation.Actor != c.Idempotency.Actor.ID || c.RunCreation.EventID != c.Publication.Commit.Event.ID()) {
+		return fmt.Errorf("rows publication differs from its exact actor or event")
 	}
 	return nil
 }

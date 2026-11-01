@@ -9,6 +9,7 @@ import (
 
 	"github.com/division-sh/swarm/internal/cliapp"
 	"github.com/division-sh/swarm/internal/config"
+	runtimepkg "github.com/division-sh/swarm/internal/runtime"
 	"github.com/division-sh/swarm/internal/runtime/testfixtures/canonicalrouting"
 	"github.com/division-sh/swarm/internal/store"
 	storebackend "github.com/division-sh/swarm/internal/store/backendselection"
@@ -29,6 +30,8 @@ func TestServedMailboxCursorRetainedRestartParity(t *testing.T) {
 			unsetStoreSelectorEnv(t)
 			stubServeRuntimeWorkspaceLifecycle(t)
 			opts := cliapp.ServeOptions{SourceRoot: root, APIListenAddr: "127.0.0.1:0", MCPListenAddr: "127.0.0.1:0", SelfCheck: true, Verbose: true, TestOutboxSweeperConfig: servedEventPublishProofOutboxSweeperConfig()}
+			var runtime *runtimepkg.Runtime
+			opts.TestRuntimeReadyHook = func(rt *runtimepkg.Runtime) { runtime = rt }
 			var db *sql.DB
 			var deliveryReader servedRunDeliveryReader
 			captureSelectedRuntimePersistence(t, func(p serveRuntimePersistence) { deliveryReader = p.deps.DeliveryStore.SummarizeRun })
@@ -56,7 +59,9 @@ func TestServedMailboxCursorRetainedRestartParity(t *testing.T) {
 			firstProcess.waitForReadyLine()
 			endpoint := "http://" + serveRuntimeAPIListenerFromOutput(t, firstProcess.outputString()) + "/v1/rpc"
 			for i := 0; i < 3; i++ {
-				published := requireServedEventPublishRPCResult(t, endpoint, map[string]any{"event_name": "review.requested", "bundle_hash": bundle, "payload": map[string]any{"item_id": uuid.NewString()}, "idempotency_key": uuid.NewString()})
+				runID := seedServedPublicationRun(t, runtime)
+				var published servedEventPublishRPCResult
+				requireServedJSONRPCResult(t, endpoint, "event.publish", map[string]any{"run_id": runID, "event_name": "review.requested", "bundle_hash": bundle, "payload": map[string]any{"item_id": uuid.NewString()}, "idempotency_key": uuid.NewString()}, &published)
 				waitServedRunDeliveryQuiescence(t, deliveryReader, published.RunID)
 				requireServedOKJSONRPC(t, endpoint, "run.pause", map[string]any{"run_id": published.RunID, "idempotency_key": "cursor-pause-" + published.RunID})
 			}

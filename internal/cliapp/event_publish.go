@@ -85,7 +85,7 @@ func newEventPublishCommand(opts rootCommandOptions) *cobra.Command {
 		},
 	}
 	cmd.Flags().StringVar(&publishOpts.payloadJSON, "payload-json", "", "Required JSON object payload")
-	cmd.Flags().StringVar(&publishOpts.runID, "run-id", "", "Optional existing nonterminal run id to inject into")
+	cmd.Flags().StringVar(&publishOpts.runID, "run-id", "", "Optional existing nonterminal run id (default: the flow's live run)")
 	cmd.Flags().StringVar(&publishOpts.sourceEventID, "source-event-id", "", "Optional same-run parent event id for checkpoint lineage")
 	cmd.Flags().StringVar(&publishOpts.targetFlowInstance, "target-flow-instance", "", "Optional existing-run receiver target flow instance")
 	cmd.Flags().StringVar(&publishOpts.targetEntityID, "target-entity-id", "", "Optional existing-run receiver target entity id")
@@ -109,12 +109,11 @@ func runEventPublishCommand(ctx context.Context, out, errOut io.Writer, args []s
 		return commandExitError{code: eventPublishErrorExitCode(err)}
 	}
 	if _, existingRun := params["run_id"]; !existingRun {
-		health, err := runCommandHealth(ctx, client)
+		_, err := runCommandHealth(ctx, client)
 		if err != nil {
 			writeCLIAPIError(errOut, err)
 			return commandExitError{code: eventPublishErrorExitCode(err)}
 		}
-		params["bundle_hash"] = health.Bundle.BundleHash
 	}
 
 	var result eventPublishResult
@@ -334,6 +333,7 @@ func eventPublishErrorExitCode(err error) int {
 			"UNSUPPORTED_BUNDLE_HASH",
 			"EVENT_NOT_DECLARED",
 			"EVENT_PUBLISH_FAILED",
+			"EVENT_PUBLISH_REJECTED",
 			"PAYLOAD_VALIDATION_FAILED",
 			"RUN_ALREADY_TERMINAL",
 			"IDEMPOTENCY_CONFLICT",

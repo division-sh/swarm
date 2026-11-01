@@ -568,7 +568,7 @@ func buildRunDataEnvelope(ctx context.Context, root InvocationRoot, client *cliA
 		if importBytes > durabledata.MaxDecodedImportBytes {
 			return nil, fmt.Errorf("fused data imports have %d decoded bytes across %d declarations; aggregate limit is %d bytes", importBytes, len(groupKeys), durabledata.MaxDecodedImportBytes)
 		}
-		childID := uuid.NewSHA1(uuid.NameSpaceOID, []byte("swarm.cli.fused-data.v1\x00"+runID+"\x00"+key)).String()
+		childID := uuid.NewString()
 		importItems = append(importItems, map[string]any{
 			"source_invocation_id": childID,
 			"declaration":          group.declaration.Declaration,

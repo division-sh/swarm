@@ -10,7 +10,6 @@ import (
 	"github.com/division-sh/swarm/internal/apiidempotency"
 	"github.com/division-sh/swarm/internal/apiv1"
 	runtimebus "github.com/division-sh/swarm/internal/runtime/bus"
-	"github.com/division-sh/swarm/internal/runtime/pipeline"
 	"github.com/division-sh/swarm/internal/runtime/pipelineobligation"
 	"github.com/division-sh/swarm/internal/runtime/testfixtures/canonicalrouting"
 	"github.com/division-sh/swarm/internal/servedparity"
@@ -45,8 +44,14 @@ func (p *publicationCompletionAudit) corruptDeployment(result runtimebus.Committ
 func TestPublicFeedOnlyInvalidAcknowledgedResultBothStores(t *testing.T) {
 	for _, backend := range servedparity.RequiredBackends {
 		t.Run(string(backend), func(t *testing.T) {
-			probe := installPublicationCompletionAudit(t, true)
+			probe := installPublicationCompletionAudit(t, false)
 			probe.resultFault = "deployment"
+			probe.afterCommit = func(_ context.Context, acknowledged bool) {
+				if acknowledged {
+					probe.enterOnce.Do(func() { close(probe.entered) })
+					<-probe.release
+				}
+			}
 			defer probe.releaseOnce.Do(func() { close(probe.release) })
 			h := newChannelOnboardingE2EHarness(t, backend, false)
 			h.opts.SourceRoot = canonicalrouting.CopyPublicCompletionFeedOnlyActivation(t)
@@ -57,48 +62,44 @@ func TestPublicFeedOnlyInvalidAcknowledgedResultBothStores(t *testing.T) {
 			if len(identity.SourceArtifacts) != 1 {
 				t.Fatalf("initial source selection: %+v", identity)
 			}
+			runID := requireServedLiveLandingRunID(t, h.rpcEndpoint(), identity.SourceArtifacts[0].BundleHash, ".")
 			params := map[string]any{
-				"bundle_hash": identity.SourceArtifacts[0].BundleHash, "run_id": uuid.NewString(), "idempotency_key": uuid.NewString(),
+				"bundle_hash": identity.SourceArtifacts[0].BundleHash, "run_id": runID, "idempotency_key": uuid.NewString(),
 				"data": map[string]any{"imports": []any{map[string]any{
 					"source_invocation_id": uuid.NewString(), "declaration": map[string]any{"flow_path": ".", "event": "scan.requested"},
 					"expected_head": map[string]any{"state": "absent"}, "input": map[string]any{"format": "jsonl", "content_base64": ""},
 				}}, "pins": []any{}},
 			}
-			first := publicationCompletionHTTPMethod(t.Context(), h.rpcEndpoint(), "run.start", params)
-			if first.err != nil || len(first.rpcError) == 0 || len(first.result) != 0 {
-				t.Fatalf("invalid deployment result was not refused: error=%v rpc=%s result=%s", first.err, first.rpcError, first.result)
-			}
+			response := make(chan publicationAuditHTTPResult, 1)
+			go func() { response <- publicationCompletionHTTPMethod(t.Context(), h.rpcEndpoint(), "run.start", params) }()
 			select {
 			case <-probe.entered:
 			case <-time.After(10 * time.Second):
-				t.Fatal("acknowledged deployment lost its activation responsibility")
+				t.Fatal("acknowledged rows publication lost its completion responsibility")
 			}
 			probe.mu.Lock()
-			process, native, request, committed, plan, workflow := probe.process, probe.native, probe.request, probe.deployment, probe.plan, probe.workflow
+			process, native, request, committed := probe.process, probe.native, probe.request, probe.deployment
 			probe.mu.Unlock()
 			if committed == nil || !committed.Acknowledged || process.PublicCompletionCount() != 1 {
-				t.Fatal("invalid returned summary disposed acknowledged deployment early")
+				t.Fatal("invalid returned summary disposed acknowledged publication early")
 			}
 			stored, found, err := native.LookupAPIEventPublication(t.Context(), request)
 			if err != nil || !found || !bytes.Equal(stored.Response, committed.Completion.Response) {
 				t.Fatalf("deployment fault altered original completion: found=%t err=%v", found, err)
 			}
+			probe.releaseOnce.Do(func() { close(probe.release) })
+			first := <-response
+			if first.err != nil || len(first.rpcError) == 0 || len(first.result) != 0 {
+				t.Fatalf("invalid deployment result was not refused: error=%v rpc=%s result=%s", first.err, first.rpcError, first.result)
+			}
 			replay := publicationCompletionHTTPMethod(t.Context(), h.rpcEndpoint(), "run.start", params)
 			if replay.err != nil || len(replay.rpcError) != 0 || !bytes.Equal(replay.result, stored.Response) {
 				t.Fatalf("held deployment replay changed native outcome: %+v", replay)
 			}
-			probe.releaseOnce.Do(func() { close(probe.release) })
 			deadline := time.Now().Add(20 * time.Second)
-			for {
-				readiness, found, err := workflow.LoadDynamicFlowRuntimeReadiness(t.Context(), plan.RunID, plan.Identity.Route())
-				if err != nil || !found {
-					t.Fatalf("original deployment readiness: found=%t err=%v", found, err)
-				}
-				if readiness.Phase == pipeline.FlowAttachmentReady && process.PublicCompletionCount() == 0 {
-					break
-				}
+			for process.PublicCompletionCount() != 0 {
 				if time.Now().After(deadline) {
-					t.Fatalf("deployment did not finish its exact activation: %+v", readiness)
+					t.Fatal("publication did not finish its exact completion")
 				}
 				time.Sleep(20 * time.Millisecond)
 			}
@@ -133,6 +134,17 @@ func (s *publicationAuditPipelineRelease) Release(ctx context.Context, claim pip
 }
 
 func (s *publicationAuditPipelineRelease) Settle(ctx context.Context, claim pipelineobligation.Claim, disposition pipelineobligation.Disposition) (pipelineobligation.SettlementOutcome, error) {
+	// Existing receivers need no fresh activation; retain the exact ACK claim.
+	s.probe.mu.Lock()
+	hold := s.probe.hold && s.probe.committed.Acknowledged && claim.EventID() == s.probe.eventID
+	s.probe.mu.Unlock()
+	if hold {
+		s.probe.enterOnce.Do(func() { close(s.probe.entered) })
+		select {
+		case <-s.probe.release:
+		case <-ctx.Done():
+		}
+	}
 	outcome, err := s.Store.Settle(ctx, claim, disposition)
 	if outcome.Committed() {
 		s.recordClaimDisposition(claim, err, false)
@@ -195,9 +207,6 @@ func TestPublicPublicationInvalidAcknowledgedResultBothStores(t *testing.T) {
 				}
 				probe.mu.Lock()
 				probe.resultFault, probe.hold, probe.holdRelease = "", false, false
-				if probe.plan.RunID == "" && len(committed.Publication.Activations) != 0 {
-					probe.plan = committed.Publication.Activations[0].Plan.Readiness
-				}
 				probe.mu.Unlock()
 				h.start(t)
 				waitPublicationCompletionDisposition(t, probe)

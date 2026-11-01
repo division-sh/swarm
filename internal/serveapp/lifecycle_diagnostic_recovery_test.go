@@ -78,27 +78,50 @@ func TestLifecycleDiagnosticServedCrashRecoveryAndResetBothStores(t *testing.T) 
 				"SWARM_TEST_DIAGNOSTIC_SOURCE=" + source, "SWARM_TEST_DIAGNOSTIC_STORE=" + storeMode, "TMPDIR=" + temporary}
 			first := startServedCrashProcess(t, "TestLifecycleDiagnosticServeProcessHelper", append(env, "SWARM_TEST_DIAGNOSTIC_FAIL=1"))
 			proof := servedControlProofRuntime{Endpoint: first.endpoint(t) + "/v1/rpc", DB: db, Backend: backendName, BundleHash: hash}
-			initial := requireServedEventPublishRPCResult(t, proof.Endpoint, map[string]any{
-				"event_name": "item.received", "bundle_hash": hash,
-				"payload": map[string]any{"item_id": "diagnostic-recovery"}, "idempotency_key": uuid.NewString(),
-			})
-			requireServedEventPublishEntityState(t, db, backendName, initial.RunID, "", "waiting")
-			publishServedLiveAgentHoldEvent(t, proof, initial.RunID, initial.EventID, "before-crash")
-			var restarted servedAgentRestartProofResult
-			requireServedJSONRPCResult(t, proof.Endpoint, "agent.restart", map[string]any{
-				"run_id": initial.RunID, "agent_id": "load-agent", "idempotency_key": uuid.NewString(),
-			}, &restarted)
-			if !restarted.OK {
-				t.Fatal("diagnostic outage changed committed restart success")
+			bootRunID := requireServedLiveLandingRunID(t, proof.Endpoint, hash, ".")
+			var bootReceipts, pending map[string]map[string]any
+			var initial servedEventPublishRPCResult
+			for phase := 0; phase < 2; phase++ {
+				receipts := readServedLifecycleDiagnosticReceipts(t, db, bootRunID)
+				if phase == 1 {
+					pending = receipts
+					break
+				}
+				bootReceipts = receipts
+				for id, receipt := range bootReceipts {
+					if receipt == nil {
+						t.Fatalf("boot readiness preceded diagnostic %s settlement", id)
+					}
+				}
+				initial = requireServedEventPublishRPCResult(t, proof.Endpoint, map[string]any{
+					"event_name": "item.received", "bundle_hash": hash,
+					"payload": map[string]any{"item_id": "diagnostic-recovery"}, "idempotency_key": uuid.NewString(),
+				})
+				requireServedEventPublishEntityState(t, db, backendName, initial.RunID, "", "waiting")
+				publishServedLiveAgentHoldEvent(t, proof, initial.RunID, initial.EventID, "before-crash")
+				var restarted servedAgentRestartProofResult
+				requireServedJSONRPCResult(t, proof.Endpoint, "agent.restart", map[string]any{
+					"run_id": initial.RunID, "agent_id": "load-agent", "idempotency_key": uuid.NewString(),
+				}, &restarted)
+				if !restarted.OK {
+					t.Fatal("diagnostic outage changed committed restart success")
+				}
+				// Join provider work before crashing: only diagnostic projection
+				// remains intentionally unfinished, not a provider attempt.
+				publishServedLiveAgentHoldEvent(t, proof, initial.RunID, initial.EventID, "after-restart")
 			}
-			// Join provider work before crashing: the only intentionally unfinished
-			// operation is diagnostic projection, not an ambiguous provider attempt.
-			publishServedLiveAgentHoldEvent(t, proof, initial.RunID, initial.EventID, "after-restart")
-			pending := readServedLifecycleDiagnosticReceipts(t, db, initial.RunID)
-			if len(pending) == 0 {
+			if initial.RunID != bootRunID || len(pending) <= len(bootReceipts) {
 				t.Fatal("real lifecycle operations produced no pending diagnostics")
 			}
+			for id, original := range bootReceipts {
+				if receipt, found := pending[id]; !found || !reflect.DeepEqual(original, receipt) {
+					t.Fatalf("diagnostic outage lost or changed boot receipt %s", id)
+				}
+			}
 			for id, receipt := range pending {
+				if _, existed := bootReceipts[id]; existed {
+					continue
+				}
 				if receipt != nil {
 					t.Fatalf("faulted diagnostic %s was acknowledged", id)
 				}

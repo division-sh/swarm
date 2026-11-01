@@ -23,7 +23,7 @@ func TestPublicCompletionAcknowledgedShutdownBeforeFinalizationBothStores(t *tes
 	for _, backend := range servedparity.RequiredBackends {
 		for _, method := range []string{"event.publish", "run.start"} {
 			t.Run(string(backend)+"/"+method, func(t *testing.T) {
-				provePublicCompletionAcknowledgedShutdownCut(t, backend, method, false, false, false)
+				provePublicCompletionAcknowledgedShutdownCut(t, backend, method, false, false)
 			})
 		}
 	}
@@ -40,25 +40,21 @@ func TestPublicCompletionAcknowledgedFenceRecoveryBothStores(t *testing.T) {
 func runPublicCompletionShutdownVariants(t *testing.T, abandon, fence bool) {
 	t.Helper()
 	for _, backend := range servedparity.RequiredBackends {
-		for _, variant := range []struct {
-			name, method string
-			eventBacked  bool
-		}{
-			{"event.publish", "event.publish", true},
-			{"run.start/event-backed", "run.start", true},
-			{"run.start/feed-only", "run.start", false},
-		} {
-			t.Run(string(backend)+"/"+variant.name, func(t *testing.T) {
-				provePublicCompletionAcknowledgedShutdownCut(t, backend, variant.method, variant.eventBacked, abandon, fence)
+		for _, method := range []string{"event.publish", "run.start"} {
+			name := method
+			if method == "run.start" {
+				name += "/event-backed"
+			}
+			t.Run(string(backend)+"/"+name, func(t *testing.T) {
+				provePublicCompletionAcknowledgedShutdownCut(t, backend, method, abandon, fence)
 			})
 		}
 	}
 }
 
-func provePublicCompletionAcknowledgedShutdownCut(t *testing.T, backend servedparity.Backend, method string, eventBacked, abandon, fence bool) {
+func provePublicCompletionAcknowledgedShutdownCut(t *testing.T, backend servedparity.Backend, method string, abandon, fence bool) {
 	t.Helper()
-	probe := installPublicationCompletionAudit(t, false)
-	probe.holdBeforeReadiness = true
+	probe := installPublicationCompletionAudit(t, true)
 	defer probe.releaseOnce.Do(func() { close(probe.release) })
 	h := newChannelOnboardingE2EHarness(t, backend, false)
 	if !abandon {
@@ -74,15 +70,10 @@ func provePublicCompletionAcknowledgedShutdownCut(t *testing.T, backend servedpa
 	rt := <-runtimes
 	var identity apiv1.RuntimeIdentityResult
 	requireServedJSONRPCResult(t, h.rpcEndpoint(), "runtime.identity", map[string]any{}, &identity)
+	runID := requireServedLiveLandingRunID(t, h.rpcEndpoint(), identity.SourceArtifacts[0].BundleHash, ".")
 	params := map[string]any{
-		"bundle_hash": identity.SourceArtifacts[0].BundleHash, "run_id": uuid.NewString(), "idempotency_key": uuid.NewString(),
-		"data": map[string]any{"imports": []any{map[string]any{
-			"source_invocation_id": uuid.NewString(), "declaration": map[string]any{"flow_path": ".", "event": "scan.requested"},
-			"expected_head": map[string]any{"state": "absent"}, "input": map[string]any{"format": "jsonl", "content_base64": ""},
-		}}, "pins": []any{}},
-	}
-	if method == "event.publish" || eventBacked {
-		params["event_name"], params["payload"] = "scan.requested", map[string]any{"topic": "shutdown-cut"}
+		"bundle_hash": identity.SourceArtifacts[0].BundleHash, "run_id": runID, "idempotency_key": uuid.NewString(),
+		"event_name": "scan.requested", "payload": map[string]any{"topic": "shutdown-cut"},
 	}
 	first := publicationCompletionHTTPMethod(t.Context(), h.rpcEndpoint(), method, params)
 	if first.err != nil || first.rpcError != nil {
@@ -91,22 +82,17 @@ func provePublicCompletionAcknowledgedShutdownCut(t *testing.T, backend servedpa
 	select {
 	case <-probe.entered:
 	case <-time.After(10 * time.Second):
-		t.Fatal("accepted publication did not reach pre-Manager readiness cut")
+		t.Fatal("accepted publication did not reach its exact claim settlement cut")
 	}
 	probe.mu.Lock()
 	native, request, process := probe.native, probe.request, probe.process
-	var activation pipeline.CommittedFlowInstanceActivation
-	if method == "event.publish" || eventBacked {
-		activation = probe.committed.Publication.Activations[0]
-	} else {
-		activation = probe.deployment.Activations[0]
-	}
+	acknowledged := probe.committed.Acknowledged
 	probe.mu.Unlock()
-	if !activation.Acknowledged || process.PublicCompletionCount() != 1 {
+	if !acknowledged || process.PublicCompletionCount() != 1 {
 		t.Fatal("held finalization lacks its native ACK and exact reservation")
 	}
-	plan := activation.Plan
-	flow := flowidentity.RunScopedFlowInstance{RunID: plan.Readiness.RunID, Route: plan.Identity.Route()}
+	plan := requirePublicationCompletionReadiness(t, probe).Plan
+	flow := flowidentity.RunScopedFlowInstance{RunID: plan.RunID, Route: plan.Identity.Route()}
 	before, err := storetest.ReadReceiverConstructionPublication(t.Context(), native, flow, plan.Identity.EntityID)
 	if err != nil {
 		t.Fatal(err)
@@ -120,28 +106,25 @@ func provePublicCompletionAcknowledgedShutdownCut(t *testing.T, backend servedpa
 		// live. The refusal must preserve durable work, not masquerade as success.
 		rt.CloseAdmission()
 		probe.releaseOnce.Do(func() { close(probe.release) })
-		if method == "event.publish" || eventBacked {
-			select {
-			case <-probe.claimDisposed:
-			case <-time.After(10 * time.Second):
-				t.Fatal("fenced publication did not settle or release its exact native claim")
-			}
-			probe.mu.Lock()
-			count, disposeErr := probe.claimDisposeCount, probe.claimDisposeError
-			probe.mu.Unlock()
-			if count != 1 || disposeErr != nil {
-				t.Fatalf("fenced publication claim disposition: count=%d err=%v", count, disposeErr)
-			}
+		select {
+		case <-probe.claimDisposed:
+		case <-time.After(10 * time.Second):
+			t.Fatal("fenced publication did not settle or release its exact native claim")
+		}
+		probe.mu.Lock()
+		count, disposeErr := probe.claimDisposeCount, probe.claimDisposeError
+		probe.mu.Unlock()
+		if count != 1 || disposeErr != nil {
+			t.Fatalf("fenced publication claim disposition: count=%d err=%v", count, disposeErr)
 		}
 	}
-	// Real serving shutdown fences and retires its dependency set. This cut is
-	// before readiness acquires a Manager lease, not inside an admitted attempt.
+	// Serving retirement must join the exact acknowledged publication claim.
 	h.stop(t)
 	if _, err := rt.WorkOccurrence().RetireAndWait(t.Context()); err != nil || process.PublicCompletionCount() != 0 {
 		t.Fatalf("serving retirement left accepted ownership: count=%d err=%v", process.PublicCompletionCount(), err)
 	}
 	probe.mu.Lock()
-	probe.holdBeforeReadiness = false
+	probe.hold = false
 	probe.mu.Unlock()
 	h.start(t)
 	restarted := <-runtimes
@@ -179,26 +162,26 @@ func provePublicCompletionAcknowledgedShutdownCut(t *testing.T, backend servedpa
 	if err != nil || !reflect.DeepEqual(before, after) {
 		t.Fatalf("restart/replay changed immutable construction: before=%+v after=%+v err=%v", before, after, err)
 	}
-	readiness, found, err := workflow.LoadDynamicFlowRuntimeReadiness(t.Context(), plan.Readiness.RunID, plan.Identity.Route())
+	readiness, found, err := workflow.LoadDynamicFlowRuntimeReadiness(t.Context(), plan.RunID, plan.Identity.Route())
 	if err != nil || !found || readiness.Phase != pipeline.FlowAttachmentReady {
 		t.Fatalf("authorized startup did not recover exact attachment: found=%t readiness=%+v err=%v", found, readiness, err)
 	}
 	var result struct {
 		Run operatorread.RunHeader `json:"run"`
 	}
-	requireServedJSONRPCResult(t, h.rpcEndpoint(), "run.get", map[string]any{"run_id": plan.Readiness.RunID}, &result)
-	if result.Run.RunID != plan.Readiness.RunID || result.Run.Status != "live" || result.Run.ControlReason != "" || result.Run.EndedAt != nil {
+	requireServedJSONRPCResult(t, h.rpcEndpoint(), "run.get", map[string]any{"run_id": plan.RunID}, &result)
+	if result.Run.RunID != plan.RunID || result.Run.Status != "live" || result.Run.ControlReason != "" || result.Run.EndedAt != nil {
 		t.Fatalf("restart ended the retained live flow: %+v", result.Run)
 	}
-	pending, err := obligations.SummarizeRun(t.Context(), plan.Readiness.RunID)
+	pending, err := obligations.SummarizeRun(t.Context(), plan.RunID)
 	if err != nil || pending.HasOpenWork() {
 		t.Fatalf("recovery left publication unsettled: summary=%+v err=%v", pending, err)
 	}
-	deliveries, err := storetest.ReadServedRunDeliverySummary(t.Context(), native, plan.Readiness.RunID)
+	deliveries, err := storetest.ReadServedRunDeliverySummary(t.Context(), native, plan.RunID)
 	if err != nil || deliveries.Pending != 0 || deliveries.InProgress != 0 || deliveries.RetryScheduled != 0 || len(deliveries.ActiveDeliveryIDs) != 0 {
 		t.Fatalf("recovery retains live deliveries: summary=%+v err=%v", deliveries, err)
 	}
-	if method == "event.publish" || eventBacked {
+	{
 		probe.mu.Lock()
 		eventID := probe.eventID
 		probe.mu.Unlock()
@@ -208,7 +191,7 @@ func provePublicCompletionAcknowledgedShutdownCut(t *testing.T, backend servedpa
 				t.Fatalf("native ACK lost exact event identity: %+v err=%v", response, err)
 			}
 		}
-		evidence := storetest.ReadSemanticEventFixtureEvidence(t, t.Context(), native, plan.Readiness.RunID, eventID)
+		evidence := storetest.ReadSemanticEventFixtureEvidence(t, t.Context(), native, plan.RunID, eventID)
 		if !evidence.RecordFound || evidence.PipelineReceiptCount != 1 || evidence.PipelineReceiptOutcome != "success" || evidence.PipelineReceiptFailure != nil {
 			t.Fatalf("recovery lost or duplicated exact event settlement: %+v", evidence)
 		}

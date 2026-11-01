@@ -37,11 +37,13 @@ func TestReleaseCompiledLifecycleJourneysBothStores(t *testing.T) {
 				if gate {
 					prefix = "outer/inner/"
 				}
-				seed := requireServedEventPublishRPCResult(t, rt.Endpoint, map[string]any{
+				seedParams := map[string]any{
 					"event_name": "work.requested", "bundle_hash": rt.BundleHash,
 					"payload": map[string]any{"seed": true}, "idempotency_key": "release-seed",
-				})
+				}
+				seed := servedEventPublishRPCResult{RunID: requireServedLiveLandingRunID(t, rt.Endpoint, rt.BundleHash, ".")}
 				if gate {
+					seed = requireServedEventPublishRPCResult(t, rt.Endpoint, seedParams)
 					entityID := requireServedEventPublishEntityState(t, rt.DB, rt.Backend, seed.RunID, "", "review")
 					params := lifecycleGateDecisionParams(t, rt, seed.RunID, "approve")
 					var decision map[string]any
@@ -74,7 +76,7 @@ func TestReleaseCompiledLifecycleJourneysBothStores(t *testing.T) {
 				entityID := requireServedEventPublishEntityState(t, rt.DB, rt.Backend, seed.RunID, seed.RunID, "waiting")
 				publish := func(event, key string, payload map[string]any) servedEventPublishRPCResult {
 					return requireServedEventPublishRPCResult(t, rt.Endpoint, map[string]any{
-						"event_name": event, "run_id": seed.RunID, "source_event_id": seed.EventID,
+						"event_name": event, "run_id": seed.RunID,
 						"payload": payload, "idempotency_key": key,
 					})
 				}

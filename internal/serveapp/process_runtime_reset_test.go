@@ -2,6 +2,7 @@ package serveapp
 
 import (
 	"context"
+	"errors"
 	"os"
 	"path/filepath"
 	"sync/atomic"
@@ -11,6 +12,22 @@ import (
 	"github.com/division-sh/swarm/internal/sourceartifact"
 	"github.com/google/uuid"
 )
+
+type resetAdmissionProbe struct {
+	destructivereset.OperationStore
+	supervisor *processLifecycleSupervisor
+	request    destructivereset.Request
+	err        error
+}
+
+func (p *resetAdmissionProbe) AdmitResetOperation(_ context.Context, req destructivereset.Request) (destructivereset.Operation, error) {
+	if p.supervisor.operationMu.TryLock() {
+		p.supervisor.operationMu.Unlock()
+		return destructivereset.Operation{}, errors.New("reset capture was not serialized through admission")
+	}
+	p.request = req
+	return destructivereset.Operation{Request: req, Response: &destructivereset.ExecutionResult{}}, p.err
+}
 
 func TestResetConvergedOperationRetryDoesNotWithdrawSuccessor(t *testing.T) {
 	id := uuid.NewString()
@@ -82,6 +99,24 @@ func TestResetInventoryExcludesForeignAndSuccessorProjections(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
+	s.resetting = true
+	s.resetRequests = []serveRuntimeBundleContextRequest{{}}
+	admission := &resetAdmissionProbe{supervisor: s}
+	if _, _, err := s.AdmitResetOperation(context.Background(), destructivereset.Request{OperationID: uuid.NewString()}, admission); err != nil {
+		t.Fatal(err)
+	}
+	if len(admission.request.SourceProjections) != 1 || admission.request.SourceProjections[0].Cleanup != intent {
+		t.Fatalf("reset admission lost its serialized source: %+v", admission.request.SourceProjections)
+	}
+	failure := errors.New("native reset admission failed")
+	admission.err = failure
+	if _, _, err := s.AdmitResetOperation(context.Background(), admission.request, admission); !errors.Is(err, failure) {
+		t.Fatalf("reset admission lost independent failure: %v", err)
+	}
+	if !s.operationMu.TryLock() {
+		t.Fatal("failed reset admission retained lifecycle serialization")
+	}
+	s.operationMu.Unlock()
 	var stopped []string
 	s.resetContexts = nil
 	s.resetStartup = true

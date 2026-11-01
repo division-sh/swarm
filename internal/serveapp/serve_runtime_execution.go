@@ -46,14 +46,7 @@ func buildServeRuntimeExecution(stores *storeselected.Owner, req selectedAPICapa
 		return nil, err
 	}
 	idempotency, deps := stores.Idempotency(), stores.RuntimeDeps()
-	publication := apiv1.EventPublicationOptions{
-		ExecutionPosture: rt.ExecutionPosture,
-		Idempotency:      idempotency, Events: rt.Bus, Acknowledged: rt.Bus, RecipientPlans: rt.Bus, SourceArtifact: rt.Bus,
-		Runs: caps.Runs, Entities: caps.Entities, Observability: caps.Observability,
-		RunBundleContext: caps.RunBundleContext, RuntimeContexts: caps.RuntimeContexts,
-		SelectedForkControls: caps.SelectedForkControls,
-		Source:               req.Source, Bundle: primary.bootIdentity, ScenarioExecutionProfiles: stores.ScenarioExecutionProfiles(),
-	}
+	publication := serveRuntimePublicationOptions(stores, caps, primary)
 	handlers := apiv1.MergeOperatorHandlers(
 		apiv1.OperatorAgentControlHandlers(apiv1.AgentControlHandlerOptions{Controller: processDynamicAgentControl{supervisor: req.RuntimeSupervisor}, Idempotency: idempotency, RuntimeContexts: caps.RuntimeContexts, SelectedForkControls: caps.SelectedForkControls}),
 		apiv1.OperatorAgentFrameHandlers(apiv1.AgentFrameHandlerOptions{Effective: rt.Manager, SourceArtifacts: stores.SourceArtifactStore(), Source: primary.loaded.bundle.SourceArtifact}),
@@ -81,6 +74,18 @@ func buildServeRuntimeExecution(stores *storeselected.Owner, req selectedAPICapa
 		}
 	}
 	return handlers, nil
+}
+
+func serveRuntimePublicationOptions(stores *storeselected.Owner, caps selectedAPICapabilities, primary serveRuntimeBundleContext) apiv1.EventPublicationOptions {
+	rt := primary.runtime
+	return apiv1.EventPublicationOptions{
+		ExecutionPosture: rt.ExecutionPosture,
+		Idempotency:      stores.Idempotency(), Events: rt.Bus, Acknowledged: rt.Bus, RecipientPlans: rt.Bus, SourceArtifact: rt.Bus,
+		Runs: caps.Runs, LiveRuns: stores.LiveRuns(), Entities: caps.Entities, Observability: caps.Observability,
+		RunBundleContext: caps.RunBundleContext, RuntimeContexts: caps.RuntimeContexts,
+		SelectedForkControls: caps.SelectedForkControls,
+		Source:               primary.loaded.source, Bundle: primary.bootIdentity, ScenarioExecutionProfiles: stores.ScenarioExecutionProfiles(),
+	}
 }
 
 func (s *processLifecycleSupervisor) executionDispatch() map[string]apiv1.MethodHandler {

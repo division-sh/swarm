@@ -45,7 +45,25 @@ type serveRuntimeReset struct {
 	release     sync.Once
 }
 
-func (s *processLifecycleSupervisor) ResetSourceProjections(ctx context.Context) ([]destructivereset.SourceProjection, error) {
+func (s *processLifecycleSupervisor) AdmitResetOperation(ctx context.Context, req destructivereset.Request, operations destructivereset.OperationStore) (destructivereset.Operation, destructivereset.RuntimeReset, error) {
+	// Retain the replacement lock through admission and entry into reset fencing.
+	s.operationMu.Lock()
+	projections, err := s.resetSourceProjections(ctx)
+	if err != nil {
+		s.operationMu.Unlock()
+		return destructivereset.Operation{}, nil, err
+	}
+	req.SourceProjections = projections
+	operation, err := operations.AdmitResetOperation(ctx, req)
+	if err != nil || operation.Response != nil {
+		s.operationMu.Unlock()
+		return operation, nil, err
+	}
+	reset, err := s.beginDestructiveResetLocked(ctx, operation.Request.OperationID)
+	return operation, reset, err
+}
+
+func (s *processLifecycleSupervisor) resetSourceProjections(ctx context.Context) ([]destructivereset.SourceProjection, error) {
 	if err := ctx.Err(); err != nil {
 		return nil, err
 	}
@@ -72,10 +90,15 @@ func (s *processLifecycleSupervisor) BeginDestructiveReset(ctx context.Context, 
 	if s == nil {
 		return nil, errors.New("reset requires process lifecycle supervisor")
 	}
+	s.operationMu.Lock()
+	return s.beginDestructiveResetLocked(ctx, operationID)
+}
+
+func (s *processLifecycleSupervisor) beginDestructiveResetLocked(ctx context.Context, operationID string) (destructivereset.RuntimeReset, error) {
 	if id, err := uuid.Parse(operationID); err != nil || id == uuid.Nil || id.String() != operationID {
+		s.operationMu.Unlock()
 		return nil, errors.New("reset requires its canonical durable operation ID")
 	}
-	s.operationMu.Lock()
 	if err := ctx.Err(); err != nil {
 		s.operationMu.Unlock()
 		return nil, err

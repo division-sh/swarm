@@ -7,16 +7,67 @@ import (
 	"reflect"
 	"testing"
 
+	"github.com/division-sh/swarm/internal/runtime/agenttopology"
+	"github.com/division-sh/swarm/internal/sourceartifact"
+	"github.com/division-sh/swarm/internal/testutil/sourceartifactfixture"
 	"github.com/google/uuid"
 )
 
 func (*recoveryResetLifecycle) SettleResources(context.Context) error { return nil }
 
-func (*recoveryResetLifecycle) ResetSourceProjections(context.Context) ([]SourceProjection, error) {
-	return nil, nil
+func (*recoveryResetLifecycle) AdmitResetOperation(ctx context.Context, req Request, operations OperationStore) (Operation, RuntimeReset, error) {
+	operation, err := operations.AdmitResetOperation(ctx, req)
+	return operation, nil, err
 }
 
 func TestCoordinatorPendingRecoveryUsesOnlyUncommittedPhases(t *testing.T) {
+	t.Run("one_loaded_source", func(t *testing.T) {
+		operation, projection := allocationOperation(t)
+		members := map[string][]byte{}
+		for _, entry := range sourceartifactfixture.Artifact().Entries() {
+			members[entry.Label()] = entry.Bytes()
+		}
+		members["global/schema.yaml"] = append(members["global/schema.yaml"], []byte("\n# retained paused source\n")...)
+		artifact, err := sourceartifact.AdmitMembers(members)
+		if err != nil {
+			t.Fatal(err)
+		}
+		paused, _ := sourceartifactfixture.Rooted(t, "paused", artifact)
+		coordinate, err := agenttopology.NewSourceCoordinate(paused.Admission())
+		if err != nil {
+			t.Fatal(err)
+		}
+		saved, err := agenttopology.NewSourceSetPlan(append(operation.SourceSet.Sources, coordinate), operation.SourceSet.Agents)
+		if err != nil {
+			t.Fatal(err)
+		}
+		operation.SourceSet = &saved
+		operation.Request.SourceProjections = []SourceProjection{projection}
+		before, err := json.Marshal(operation)
+		if err != nil {
+			t.Fatal(err)
+		}
+		recovery := &PendingRecovery{operation: operation}
+		selected, err := recovery.SourceSet()
+		if err != nil || len(selected.Sources) != 1 || selected.Sources[0].BundleHash != projection.Cleanup.BundleHash || !reflect.DeepEqual(selected.Agents, saved.Agents) {
+			t.Fatalf("reset reconstruction changed the captured source/agents: %+v, %v", selected, err)
+		}
+		after, err := json.Marshal(recovery.operation)
+		if err != nil || string(before) != string(after) {
+			t.Fatalf("reconstruction rewrote immutable reset evidence: %v", err)
+		}
+		for _, projections := range [][]SourceProjection{nil, {projection, projection}} {
+			recovery.operation.Request.SourceProjections = projections
+			if _, err := recovery.SourceSet(); err == nil {
+				t.Fatal("missing/ambiguous loaded-source capture was accepted")
+			}
+		}
+		recovery.operation.Request.SourceProjections = []SourceProjection{projection}
+		recovery.operation.Request.SourceProjections[0].Cleanup.BundleHash = "bundle-v2:sha256:ffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffff"
+		if _, err := recovery.SourceSet(); err == nil {
+			t.Fatal("foreign loaded source was accepted")
+		}
+	})
 	for _, phase := range []OperationPhase{PhaseAdmitted, PhasePlanned, PhaseQuiesced, PhaseCleanupCommitted, PhaseContainersSettled} {
 		for _, retain := range []bool{false, true} {
 			name := string(phase) + "/clear"

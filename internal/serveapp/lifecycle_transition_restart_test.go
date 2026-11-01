@@ -14,6 +14,7 @@ import (
 	"github.com/division-sh/swarm/internal/config"
 	"github.com/division-sh/swarm/internal/events"
 	"github.com/division-sh/swarm/internal/operatorread"
+	runtimepkg "github.com/division-sh/swarm/internal/runtime"
 	"github.com/division-sh/swarm/internal/runtime/loopruntime"
 	"github.com/division-sh/swarm/internal/runtime/testfixtures/canonicalrouting"
 	"github.com/division-sh/swarm/internal/store"
@@ -57,7 +58,15 @@ func lifecycleRestartHarness(t *testing.T, backend, root string, readinessBudget
 		opts.StoreMode, opts.StoreModeSet = "postgres", true
 	}
 	return opts, func() (*serveRuntimeTestProcess, servedControlProofRuntime) {
-		process := startServeRuntimeTestProcess(t, *opts)
+		var runtime *runtimepkg.Runtime
+		startOptions := *opts
+		startOptions.TestRuntimeReadyHook = func(rt *runtimepkg.Runtime) {
+			runtime = rt
+			if opts.TestRuntimeReadyHook != nil {
+				opts.TestRuntimeReadyHook(rt)
+			}
+		}
+		process := startServeRuntimeTestProcess(t, startOptions)
 		if len(readinessBudget) == 0 {
 			process.waitForReadyLine()
 		} else {
@@ -77,7 +86,7 @@ func lifecycleRestartHarness(t *testing.T, backend, root string, readinessBudget
 			}
 		}
 		endpoint := "http://" + serveRuntimeAPIListenerFromOutput(t, process.outputString()) + "/v1/rpc"
-		return process, servedControlProofRuntime{ReadRunDeliveries: deliveryReader, Endpoint: endpoint, DB: db, Backend: backend, BundleHash: servedEventPublishFixtureBundleHash(t, opts.SourceRoot), ReceiverStateReader: receiverReader}
+		return process, servedControlProofRuntime{ReadRunDeliveries: deliveryReader, Endpoint: endpoint, DB: db, Backend: backend, BundleHash: servedEventPublishFixtureBundleHash(t, opts.SourceRoot), ReceiverStateReader: receiverReader, Runtime: runtime}
 	}
 }
 

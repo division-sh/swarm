@@ -20,6 +20,14 @@ func (s *SQLiteRuntimeStore) LoadPinnedSource(ctx context.Context, runID, bundle
 	return s.durableDataOwner.LoadPinnedSource(ctx, runID, bundleHash, ref)
 }
 
+func (s *PostgresStore) LoadFeedSource(ctx context.Context, runID, bundleHash, feedID string, ref runtimedata.DeclarationRef) (runtimedata.PinnedSource, error) {
+	return s.durableDataOwner.LoadFeedSource(ctx, runID, bundleHash, feedID, ref)
+}
+
+func (s *SQLiteRuntimeStore) LoadFeedSource(ctx context.Context, runID, bundleHash, feedID string, ref runtimedata.DeclarationRef) (runtimedata.PinnedSource, error) {
+	return s.durableDataOwner.LoadFeedSource(ctx, runID, bundleHash, feedID, ref)
+}
+
 func (s *PostgresStore) LoadPinnedRowsRange(ctx context.Context, runID, bundleHash string, source runtimedata.PinnedSource, start, end int) ([]any, error) {
 	return s.durableDataOwner.LoadPinnedRowsRange(ctx, runID, bundleHash, source, start, end)
 }
@@ -244,6 +252,14 @@ func (s *PostgresStore) LoadDataRunCreationOperation(ctx context.Context, runID 
 
 func (s *SQLiteRuntimeStore) LoadDataRunCreationOperation(ctx context.Context, runID string) (runtimedata.RunCreationOperationRecord, error) {
 	return s.durableDataOwner.LoadRunCreationOperation(ctx, runID)
+}
+
+func (s *PostgresStore) LoadDataRowsPublicationOperation(ctx context.Context, publicationID string) (runtimedata.RunCreationOperationRecord, error) {
+	return s.durableDataOwner.LoadFeedPublication(ctx, publicationID)
+}
+
+func (s *SQLiteRuntimeStore) LoadDataRowsPublicationOperation(ctx context.Context, publicationID string) (runtimedata.RunCreationOperationRecord, error) {
+	return s.durableDataOwner.LoadFeedPublication(ctx, publicationID)
 }
 
 func (s *PostgresStore) LoadRunResourceAccess(ctx context.Context, runID string, declarations []runtimedata.DeclarationRef) ([]runtimedata.ResourceAccessItem, error) {

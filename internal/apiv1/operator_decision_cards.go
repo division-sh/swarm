@@ -12,6 +12,7 @@ import (
 
 	"github.com/division-sh/swarm/internal/apiidempotency"
 	"github.com/division-sh/swarm/internal/mailbox"
+	runtimepkg "github.com/division-sh/swarm/internal/runtime"
 	"github.com/division-sh/swarm/internal/runtime/canonicaljson"
 	decisioncard "github.com/division-sh/swarm/internal/runtime/decisioncard"
 	runtimepipeline "github.com/division-sh/swarm/internal/runtime/pipeline"
@@ -338,7 +339,7 @@ func executeIdempotentDecisionCardMutation(ctx context.Context, req Request, opt
 		var selected selectedRuntimeContext
 		ctx, selected, err = runtimeBundleContextByHash(ctx, opts.RuntimeContexts, card.BundleHash, card.RunID)
 		if err != nil {
-			return nil, err
+			return nil, pausedDecisionCardSourceError(ctx, opts, card, err)
 		}
 		if selected.Runtime == nil || selected.Runtime.Pipeline == nil || selected.Runtime.Bus == nil {
 			return nil, fmt.Errorf("decision card owners are required for the selected runtime")
@@ -361,6 +362,25 @@ func executeIdempotentDecisionCardMutation(ctx context.Context, req Request, opt
 		return nil, decisionCardAPIError(cardID, err)
 	}
 	return decisionCardMutationResponse(cardID, response, replayed)
+}
+
+func pausedDecisionCardSourceError(ctx context.Context, opts DecisionCardHandlerOptions, card decisioncard.Card, err error) error {
+	var unavailable *ApplicationError
+	if !errors.As(err, &unavailable) || unavailable.Code != BundleUnavailableCode {
+		return err
+	}
+	lookup, availability, readErr := opts.RuntimeContexts.LookupRunStatus(ctx, card.RunID)
+	if readErr != nil || availability.RunID != card.RunID || availability.BundleHash != card.BundleHash ||
+		availability.Status != "paused" || !availability.Available() || lookup.State != runtimepkg.RuntimeContextStateUnloaded {
+		return err
+	}
+	if lookup.Cause != runtimepkg.RuntimeContextCauseNotLoaded && lookup.Cause != runtimepkg.RuntimeContextCauseUnloaded {
+		return err
+	}
+	if details, ok := unavailable.Details.(map[string]any); ok {
+		details["message"] = fmt.Sprintf("run %s is paused; run `swarm run continue %s` to load its source before deciding this card", card.RunID, card.RunID)
+	}
+	return err
 }
 
 func decisionCardMutationResponse(cardID string, response []byte, replayed bool) (any, error) {

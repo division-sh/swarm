@@ -36,6 +36,10 @@ func RequirePinnedSourceTx(ctx context.Context, o *Owner, tx *sql.Tx, runID, bun
 }
 
 func (o *Owner) pinnedSourceTx(ctx context.Context, tx *sql.Tx, runID, bundleHash string, ref runtimedata.DeclarationRef) (runtimedata.PinnedSource, error) {
+	return o.publicationSourceTx(ctx, tx, runID, bundleHash, ref, "")
+}
+
+func (o *Owner) publicationSourceTx(ctx context.Context, tx *sql.Tx, runID, bundleHash string, ref runtimedata.DeclarationRef, publicationID string) (runtimedata.PinnedSource, error) {
 	if err := ref.Validate(); err != nil {
 		return runtimedata.PinnedSource{}, err
 	}
@@ -63,10 +67,16 @@ func (o *Owner) pinnedSourceTx(ctx context.Context, tx *sql.Tx, runID, bundleHas
 	}
 	var pinDigest runtimedata.SchemaDigest
 	var versionID runtimedata.VersionID
-	err = tx.QueryRowContext(ctx, o.query(`
-		SELECT schema_digest, version_id FROM resource_version_pins
-		WHERE run_id=%s AND flow_path=%s AND event_name=%s
-	`, 3), runID, ref.FlowPath, ref.EventName).Scan(&pinDigest, &versionID)
+	if publicationID == "" {
+		err = tx.QueryRowContext(ctx, o.query(`SELECT schema_digest,version_id FROM resource_version_pins
+			WHERE run_id=%s AND flow_path=%s AND event_name=%s`, 3), runID, ref.FlowPath, ref.EventName).Scan(&pinDigest, &versionID)
+	} else {
+		err = tx.QueryRowContext(ctx, o.query(`SELECT m.schema_digest,m.version_id FROM resource_feed_publication_members m
+			JOIN resource_feed_publications p ON p.publication_id=m.publication_id
+			JOIN runs r ON r.run_id=p.run_id
+			WHERE p.run_id=%s AND m.flow_path=%s AND m.event_name=%s AND m.deployment_feed_id=%s AND m.version_id IS NOT NULL`, 4),
+			runID, ref.FlowPath, ref.EventName, publicationID).Scan(&pinDigest, &versionID)
+	}
 	if errors.Is(err, sql.ErrNoRows) {
 		return runtimedata.PinnedSource{}, runtimedata.NewDomainError(runtimedata.CodeAccessDenied, "run %s has no exact pin for resource %s", runID, ref.Key())
 	}
@@ -108,7 +118,7 @@ func (o *Owner) pinnedSourceTx(ctx context.Context, tx *sql.Tx, runID, bundleHas
 		!bytes.Equal(versionSchema, bundleSchema) {
 		return runtimedata.PinnedSource{}, runtimedata.NewDomainError(runtimedata.CodeIntegrity, "resource source metadata disagrees with exact bundle, pin or version for %s", ref.Key())
 	}
-	return runtimedata.PinnedSource{Declaration: ref, VersionID: versionID, SchemaDigest: versionDigest, RowCount: rowCount}, nil
+	return runtimedata.PinnedSource{PublicationID: publicationID, Declaration: ref, VersionID: versionID, SchemaDigest: versionDigest, RowCount: rowCount}, nil
 }
 
 // LoadPinnedRowsRange returns a bounded result but currently reads the whole
@@ -123,7 +133,7 @@ func (o *Owner) LoadPinnedRowsRange(ctx context.Context, runID, bundleHash strin
 	}
 	var items []any
 	err := o.runReadTransaction(ctx, func(ctx context.Context, tx *sql.Tx) error {
-		current, err := o.pinnedSourceTx(ctx, tx, runID, bundleHash, want.Declaration)
+		current, err := o.publicationSourceTx(ctx, tx, runID, bundleHash, want.Declaration, want.PublicationID)
 		if err != nil {
 			return err
 		}

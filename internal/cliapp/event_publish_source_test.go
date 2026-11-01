@@ -35,14 +35,10 @@ func Test2376EventPublishDerivesExactRuntimeSource(t *testing.T) {
 					t.Error(req.Method)
 					return
 				}
-				if condition == "existing" {
-					if _, present := req.Params["bundle_hash"]; present {
-						t.Error("existing run rebound to health source")
-					}
-				} else if req.Params["bundle_hash"] != hash {
-					t.Errorf("new work lacked exact runtime source: %v", req.Params)
+				if _, present := req.Params["bundle_hash"]; present {
+					t.Error("run selection rebound to health source")
 				}
-				writeJSONRPCResult(t, w, req.ID, eventPublishTestResult(condition != "existing"))
+				writeJSONRPCResult(t, w, req.ID, eventPublishTestResult(false))
 			}))
 			defer server.Close()
 			args := []string{"event", "publish", "work.requested", "--payload-json", `{}`}

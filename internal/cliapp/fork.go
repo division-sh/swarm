@@ -15,7 +15,7 @@ import (
 
 const (
 	runForkMethod       = "run.fork"
-	runForkCommandShape = "swarm run fork <source-run-id> [--source <directory>] [--at-start | --publication <event-id>] [--pin <name@vN|ResourceVersionID>] [--idempotency-key <key>]"
+	runForkCommandShape = "swarm run fork <source-run-id> [--source <directory>] [--at-start | --publication <publication-id>] [--pin <name@vN|ResourceVersionID>] [--idempotency-key <key>]"
 )
 
 type forkCommandOptions struct {
@@ -75,7 +75,7 @@ func newForkCommand(opts rootCommandOptions) *cobra.Command {
 	argcount.SetDiscoveryHint(cmd, "List run ids with `swarm run list`.")
 	cmd.Flags().StringVar(&forkOpts.source, "source", "", "Select a target source directory already served into the selected store; defaults to the source run")
 	cmd.Flags().StringVar(&forkOpts.atEvent, "at-event", "", "Fork at this source event id")
-	cmd.Flags().StringVar(&forkOpts.publication, "publication", "", "Re-apply this source event publication's inputs")
+	cmd.Flags().StringVar(&forkOpts.publication, "publication", "", "Re-apply this source rows or event publication's inputs")
 	cmd.Flags().BoolVar(&forkOpts.atStart, "at-start", false, "Fork at the original committed run start, before creating ingress; mutually exclusive with --at-event")
 	cmd.Flags().StringArrayVar(&forkOpts.pins, "pin", nil, "Exact data version override: name@vN or name@ResourceVersionID (repeatable)")
 	cmd.Flags().StringVar(&forkOpts.idempotencyKey, "idempotency-key", "", "Optional idempotency key for retry-safe fork creation")
@@ -159,11 +159,11 @@ func (opts forkCommandOptions) params(rawSourceRunID string) (map[string]any, er
 		if opts.atStart || opts.atStartSet || opts.atEvent != "" || opts.atEventSet {
 			return nil, fmt.Errorf("--publication, --at-start and --at-event are mutually exclusive")
 		}
-		publication, err := validateRunForkUUIDValue("--publication event id", opts.publication)
+		publication, err := validateRunForkUUIDValue("--publication id", opts.publication)
 		if err != nil {
 			return nil, err
 		}
-		params["fork_event_id"] = publication
+		params["publication_id"] = publication
 	}
 	if (opts.atStartSet || opts.atStart) && (opts.atEventSet || opts.atEvent != "") {
 		return nil, fmt.Errorf("--at-start and --at-event are mutually exclusive")
