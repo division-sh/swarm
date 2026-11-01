@@ -807,7 +807,7 @@ func runGoldenAgentWorkload(t *testing.T, binaryPath, root string, store goldenS
 		}
 		process = start()
 		recoveryStarted := time.Now()
-		replayed = replayGoldenInterruptedTurns(t, process, runID, runDeadline, binaryPath, projectRoot, env)
+		replayed = replayGoldenInterruptedTurns(t, process, store, runID, runDeadline, binaryPath, projectRoot, env)
 		completionBudget -= time.Since(recoveryStarted)
 	}
 	waitForGoldenTerminalRun(t, process, store, runID, completionBudget)
@@ -1141,7 +1141,7 @@ func waitForGoldenCrashCheckpoint(t *testing.T, process *releaseServeProcess, st
 				log.stringField("parent_event_id") == "" || log.stringField("source") == "" || log.stringField("agent_id") == "" {
 				continue
 			}
-			if ready, err := stopAtGoldenLaunchedCrashCut(ctx, process, store, runID); err != nil || !ready {
+			if ready, err := stopAtGoldenLaunchedCrashCut(t, ctx, process, store, runID); err != nil || !ready {
 				return false, err
 			}
 			selected = log
@@ -1158,16 +1158,34 @@ func waitForGoldenCrashCheckpoint(t *testing.T, process *releaseServeProcess, st
 	return selected
 }
 
-func stopAtGoldenLaunchedCrashCut(ctx context.Context, process *releaseServeProcess, store goldenStoreSelection, runID string) (bool, error) {
+func stopAtGoldenLaunchedCrashCut(t *testing.T, ctx context.Context, process *releaseServeProcess, store goldenStoreSelection, runID string) (bool, error) {
+	t.Helper()
 	if err := process.cmd.Process.Signal(syscall.SIGSTOP); err != nil {
 		return false, err
 	}
+	observed, readErr := readGoldenCrashObservation(ctx, process, store, runID)
+	if readErr == nil && observed.Active > 0 && observed.Launched == observed.Active {
+		evidence, _ := json.Marshal(observed)
+		t.Logf("forced-kill stopped-cut observation run=%s: %s", runID, evidence)
+		return true, nil
+	}
+	resumeErr := process.cmd.Process.Signal(syscall.SIGCONT)
+	return false, errors.Join(readErr, resumeErr)
+}
+
+type goldenCrashObservation struct {
+	Active, Launched int
+	ObservedAt       time.Time
+	Storage          json.RawMessage
+}
+
+func readGoldenCrashObservation(ctx context.Context, process *releaseServeProcess, store goldenStoreSelection, runID string) (goldenCrashObservation, error) {
 	location := store.inspectionSQLitePath
 	if store.name == "postgres" {
 		location = store.inspectionPostgresDSN
 	}
 	request, readErr := json.Marshal(struct{ Backend, Location, RunID string }{store.name, location, runID})
-	var observed struct{ Active, Launched int }
+	var observed goldenCrashObservation
 	if readErr == nil {
 		command := exec.CommandContext(ctx, process.cmd.Path, "-test.run=^TestOwnedMockLifecycleProcessEntry$")
 		command.Dir = process.cmd.Dir
@@ -1178,11 +1196,7 @@ func stopAtGoldenLaunchedCrashCut(ctx context.Context, process *releaseServeProc
 			readErr = json.Unmarshal(output, &observed)
 		}
 	}
-	if readErr == nil && observed.Active > 0 && observed.Launched == observed.Active {
-		return true, nil
-	}
-	resumeErr := process.cmd.Process.Signal(syscall.SIGCONT)
-	return false, errors.Join(readErr, resumeErr)
+	return observed, readErr
 }
 
 func goldenActiveWork(quiescence goldenQuiescence) int {
@@ -1199,10 +1213,22 @@ type goldenRecoveryFailure struct {
 	} `json:"detail"`
 }
 
-func replayGoldenInterruptedTurns(t *testing.T, process *releaseServeProcess, runID string, deadline time.Duration, binary, project string, env []string) map[string]goldenEvent {
+func replayGoldenInterruptedTurns(t *testing.T, process *releaseServeProcess, store goldenStoreSelection, runID string, deadline time.Duration, binary, project string, env []string) map[string]goldenEvent {
 	t.Helper()
 	ctx, cancel := context.WithTimeout(context.Background(), deadline)
 	defer cancel()
+	defer func() {
+		if !t.Failed() {
+			return
+		}
+		observed, err := readGoldenCrashObservation(ctx, process, store, runID)
+		if err != nil {
+			t.Logf("forced-kill post-recovery observation run=%s unavailable: %v", runID, err)
+			return
+		}
+		evidence, _ := json.Marshal(observed)
+		t.Logf("forced-kill post-recovery observation run=%s: %s", runID, evidence)
+	}()
 	var diagnosis goldenDiagnosis
 	if err := pollReleaseCondition(ctx, 10*time.Millisecond, func() (bool, error) {
 		if err := process.rpc.call(ctx, "run.diagnose", map[string]any{"run_id": runID}, &diagnosis); err != nil {

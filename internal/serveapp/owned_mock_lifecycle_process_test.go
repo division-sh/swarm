@@ -98,7 +98,8 @@ func TestOwnedMockLifecycleProcessEntry(t *testing.T) {
 }
 
 // The existing compiled child keeps native inspection outside releasee2e.
-// Only fixed scalar evidence crosses back; the child never admits a runtime.
+// Only run-scoped identity/state/timing evidence crosses back; the child never
+// admits a runtime.
 func observeGoldenCrashCut(ctx context.Context, raw string, out io.Writer) (retErr error) {
 	var request struct{ Backend, Location, RunID string }
 	if err := json.Unmarshal([]byte(raw), &request); err != nil {
@@ -110,14 +111,20 @@ func observeGoldenCrashCut(ctx context.Context, raw string, out io.Writer) (retE
 	}
 	defer func() { retErr = errors.Join(retErr, inspection.Close()) }()
 	var observed storetest.ManagedTurnEffectStorage
+	var observedAt time.Time
 	err = inspection.InspectSnapshot(ctx, func(scoped context.Context) (err error) {
 		observed, err = storetest.ReadManagedTurnEffectStorage(scoped, inspection, request.RunID, "")
+		observedAt = time.Now().UTC()
 		return err
 	})
 	if err != nil {
 		return err
 	}
-	return json.NewEncoder(out).Encode(struct{ Active, Launched int }{observed.ActiveProviderAttempts, observed.LaunchedCandidateWorkAttempts})
+	return json.NewEncoder(out).Encode(struct {
+		Active, Launched int
+		ObservedAt       time.Time
+		Storage          storetest.ManagedTurnEffectStorage
+	}{observed.ActiveProviderAttempts, observed.LaunchedCandidateWorkAttempts, observedAt, observed})
 }
 
 // The test caller owns source selection and explicit execution posture. Retained
