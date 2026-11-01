@@ -198,6 +198,17 @@ func TestInterruptedReadOnlyProviderTurnResumesOnlyInterruptedCallBothStores(t *
 								endpoint = second.endpoint(t) + "/v1/rpc"
 							}
 							requireProviderResumeDelivery(t, endpoint, business.EventID, provider, original, &toolCalls, exhaust, wantCalls, wantTools)
+							if memory {
+								var conversations operatorread.OperatorConversationListResult
+								requireServedJSONRPCResult(t, endpoint, "conversation.list", map[string]any{"run_id": business.RunID, "agent_id": "load-agent", "flow_instance": "hold"}, &conversations)
+								wantTurns := 2
+								if exhaust {
+									wantTurns = 1
+								}
+								if len(conversations.Conversations) != 1 || conversations.Conversations[0].TurnCount != wantTurns {
+									t.Fatalf("recovery changed the logical conversation cursor: %+v", conversations)
+								}
+							}
 							if err := second.stop(); err != nil {
 								t.Fatal(err)
 							}
