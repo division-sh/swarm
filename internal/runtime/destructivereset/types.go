@@ -313,7 +313,7 @@ type ContainerStopper interface {
 }
 
 type RuntimeContextLifecycle interface {
-	ResetSourceProjections(context.Context) ([]SourceProjection, error)
+	AdmitResetOperation(context.Context, Request, OperationStore) (Operation, RuntimeReset, error)
 	BeginDestructiveReset(context.Context, string) (RuntimeReset, error)
 }
 

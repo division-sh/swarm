@@ -10,8 +10,9 @@ import (
 
 func (testRuntimeReset) SettleResources(context.Context) error { return nil }
 
-func (runtimeContextQuiescerFunc) ResetSourceProjections(context.Context) ([]SourceProjection, error) {
-	return nil, nil
+func (runtimeContextQuiescerFunc) AdmitResetOperation(ctx context.Context, req Request, operations OperationStore) (Operation, RuntimeReset, error) {
+	operation, err := operations.AdmitResetOperation(ctx, req)
+	return operation, nil, err
 }
 
 func TestCoordinatorExecutesNamedResetWorkflowUnderOneLease(t *testing.T) {
