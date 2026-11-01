@@ -604,7 +604,8 @@ func decodeSourceReceipt(id, storedHash string, requestJSON, evaluationJSON, res
 
 func (o *Owner) sourceInvocationReserved(ctx context.Context, tx *sql.Tx, id string) (bool, error) {
 	var marker int
-	err := tx.QueryRowContext(ctx, o.query(`SELECT 1 FROM resource_run_creation_child_reservations WHERE source_invocation_id = %s`, 1), id).Scan(&marker)
+	err := tx.QueryRowContext(ctx, o.query(`SELECT 1 FROM resource_run_creation_child_reservations WHERE source_invocation_id = %s
+		UNION ALL SELECT 1 FROM resource_feed_publication_members WHERE source_invocation_id = %s LIMIT 1`, 2), id, id).Scan(&marker)
 	if errors.Is(err, sql.ErrNoRows) {
 		return false, nil
 	}
@@ -1076,7 +1077,7 @@ func (o *Owner) ListPins(ctx context.Context, versionID runtimedata.VersionID, a
 		ref := runtimedata.DeclarationRef{FlowPath: packageKey, EventName: eventName}
 		query := `
 			SELECT p.run_id, r.status, p.flow_path, p.event_name, p.schema_digest, p.version_id, p.selection
-			FROM resource_version_pins p JOIN runs r ON r.run_id = p.run_id
+			FROM (` + retainedResourcePins + `) p JOIN runs r ON r.run_id = p.run_id
 			WHERE p.version_id = %s`
 		args := []any{versionID}
 		if afterRunID != "" {
@@ -1687,7 +1688,7 @@ func (o *Owner) Prune(ctx context.Context, command runtimedata.PruneCommand) (ru
 func (o *Owner) loadPins(ctx context.Context, tx *sql.Tx, versionID runtimedata.VersionID) ([]runtimedata.Pin, error) {
 	rows, err := tx.QueryContext(ctx, o.query(`
 		SELECT p.run_id, r.status, p.flow_path, p.event_name, p.schema_digest, p.version_id, p.selection
-		FROM resource_version_pins p JOIN runs r ON r.run_id = p.run_id
+		FROM (`+retainedResourcePins+`) p JOIN runs r ON r.run_id = p.run_id
 		WHERE p.version_id = %s ORDER BY p.run_id
 	`, 1), versionID)
 	if err != nil {

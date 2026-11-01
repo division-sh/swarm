@@ -334,15 +334,14 @@ func (s *EventPostgresOwner) LookupAPIEventPublication(ctx context.Context, requ
 	if err != nil {
 		return apiidempotency.Completion{}, false, err
 	}
-	defer func() {
-		if releaseErr := lease.Release(ctx); releaseErr != nil {
-			completion = apiidempotency.Completion{}
-			replay = false
-			err = errors.Join(err, fmt.Errorf("release API event publication lookup authority: %w", releaseErr))
-		}
-	}()
 	completion, replay = lease.Replay()
-	return completion, replay, nil
+	if err := lease.Release(ctx); err != nil {
+		return apiidempotency.Completion{}, false, fmt.Errorf("release API event publication lookup authority: %w", err)
+	}
+	if replay {
+		return completion, true, nil
+	}
+	return s.durableData.LookupFeedPublicationCompletion(ctx, request)
 }
 
 func (s *EventSQLiteOwner) LookupAPIEventPublication(ctx context.Context, request apiidempotency.Request) (apiidempotency.Completion, bool, error) {
@@ -356,9 +355,12 @@ func (s *EventSQLiteOwner) LookupAPIEventPublication(ctx context.Context, reques
 	if err != nil {
 		return apiidempotency.Completion{}, false, err
 	}
-	defer lease.Release()
 	completion, replay := lease.Replay()
-	return completion, replay, nil
+	lease.Release()
+	if replay {
+		return completion, true, nil
+	}
+	return s.durableData.LookupFeedPublicationCompletion(ctx, request)
 }
 
 func (s *EventPostgresOwner) CommitAPIEventPublication(ctx context.Context, command runtimebus.APIEventPublicationCommand) (result runtimebus.CommittedAPIEventPublication, err error) {
@@ -415,6 +417,9 @@ func (s *EventPostgresOwner) CommitAPIEventPublication(ctx context.Context, comm
 				}
 				if prepared.Failed() {
 					result = runtimebus.CommittedAPIEventPublication{RunCreation: &record}
+					if command.RunCreation.PublicationID != "" {
+						return storedurabledata.StoreFeedPublicationCompletionTx(s.durableData, txctx, tx, command.RunCreation.PublicationID, command.Idempotency, apiidempotency.Completion{})
+					}
 					return nil
 				}
 				if commitErr := storedurabledata.CommitRunCreationImportsTx(s.durableData, txctx, tx, plan); commitErr != nil {
@@ -451,6 +456,11 @@ func (s *EventPostgresOwner) CommitAPIEventPublication(ctx context.Context, comm
 				}
 				result.Completion = completion
 				result.RunCreation = &record
+				if command.RunCreation.PublicationID != "" {
+					if err := storedurabledata.StoreFeedPublicationCompletionTx(s.durableData, txctx, tx, command.RunCreation.PublicationID, command.Idempotency, completion); err != nil {
+						return err
+					}
+				}
 			}
 			if lease != nil {
 				return storeapiidempotency.StorePostgresCompletionTx(txctx, lease, tx, result.Completion)
@@ -519,6 +529,9 @@ func (s *EventSQLiteOwner) CommitAPIEventPublication(ctx context.Context, comman
 				}
 				if prepared.Failed() {
 					result = runtimebus.CommittedAPIEventPublication{RunCreation: &record}
+					if command.RunCreation.PublicationID != "" {
+						return storedurabledata.StoreFeedPublicationCompletionTx(s.durableData, txctx, tx, command.RunCreation.PublicationID, command.Idempotency, apiidempotency.Completion{})
+					}
 					return nil
 				}
 				if commitErr := storedurabledata.CommitRunCreationImportsTx(s.durableData, txctx, tx, plan); commitErr != nil {
@@ -555,6 +568,11 @@ func (s *EventSQLiteOwner) CommitAPIEventPublication(ctx context.Context, comman
 				}
 				result.Completion = completion
 				result.RunCreation = &record
+				if command.RunCreation.PublicationID != "" {
+					if err := storedurabledata.StoreFeedPublicationCompletionTx(s.durableData, txctx, tx, command.RunCreation.PublicationID, command.Idempotency, completion); err != nil {
+						return err
+					}
+				}
 			}
 			if lease != nil {
 				return storeapiidempotency.StoreSQLiteCompletionTx(txctx, lease, tx, result.Completion)
@@ -586,6 +604,9 @@ func bindRunCreationCompletion(completion apiidempotency.Completion, record runt
 	}
 	response["data_binding"] = record.Binding
 	response["deployment_feed_ids"] = record.DeploymentFeedIDs()
+	if record.Summary.PublicationID != "" {
+		response["publication_id"] = record.Summary.PublicationID
+	}
 	raw, err := canonicaljson.Bytes(response)
 	if err != nil {
 		return apiidempotency.Completion{}, err

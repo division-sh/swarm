@@ -186,8 +186,10 @@ func platformTableOrder(name string) int {
 		return 5
 	case "runs":
 		return 5
-	case "resource_version_pins", "resource_head_history", "resource_run_creation_child_evaluations":
+	case "resource_version_pins", "resource_head_history", "resource_run_creation_child_evaluations", "resource_feed_publications":
 		return 6
+	case "resource_feed_publication_members":
+		return 7
 	case "run_scenario_execution_profiles":
 		return 6
 	case "author_activity_order":
