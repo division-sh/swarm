@@ -103,6 +103,7 @@ func testStaleLearnedIngressRecoveryRequiredBothStores(t *testing.T, completed b
 					if targets, err := rt.PlanStandingTargets(); err != nil || len(targets) != 0 {
 						t.Fatalf("recovery published executable targets = %#v, %v", targets, err)
 					}
+					waitForInboundAdmissionServeOutput(t, h.process, "RECOVERY REQUIRED ingress")
 					output := h.process.outputString()
 					remedy := "swarm channel resume " + begun.Operation.OperationID
 					if completed {
