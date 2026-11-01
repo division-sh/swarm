@@ -433,6 +433,10 @@ type DeploymentFeed struct {
 	RowCount           uint64         `json:"row_count"`
 }
 
+func ForkRowsPublicationID(forkRunID, sourcePublicationID string) string {
+	return uuid.NewSHA1(uuid.MustParse(forkRunID), []byte("rows-fork:"+sourcePublicationID)).String()
+}
+
 // PublicationID distinguishes imports into the same run and declaration.
 // Explicit pins retain their existing run/declaration identity.
 func (f DeploymentFeed) PublicationID() string {

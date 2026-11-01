@@ -119,14 +119,16 @@ func requireMaterializedRunForkSnapshot(ctx context.Context, tx *sql.Tx, postgre
 	if err != nil {
 		return runfork.RunForkMaterialization{}, err
 	}
-	if err := requireForkResourceSourcePinAgreement(plan, pins); err != nil {
+	if err := requireForkResourceSourcePinAgreement(ctx, tx, data, plan, pins); err != nil {
 		return runfork.RunForkMaterialization{}, err
 	}
 	if err := requireExactMaterializedRunForkFanOut(ctx, tx, postgres, false, forkRunID, plan, refs, req.OriginalLoopCarriage, identity.SourceArtifactFact.BundleHash(), data, pins); err != nil {
 		return runfork.RunForkMaterialization{}, err
 	}
 	materialization.DataPins = pins
-	materialization.MaterializedFanOutCount = len(plan.FanOutObligations) - countRunForkSourceDeploymentFeeds(plan) + len(pins)
+	if err := tx.QueryRowContext(ctx, `SELECT COUNT(*) FROM fan_out_intents WHERE run_id=$1`, forkRunID).Scan(&materialization.MaterializedFanOutCount); err != nil {
+		return runfork.RunForkMaterialization{}, err
+	}
 	return materialization, nil
 }
 

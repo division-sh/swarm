@@ -35,7 +35,7 @@ import (
 
 type SelectedDeploymentFanOutStore interface {
 	ListSelectedDeploymentFeeds(context.Context, startupownership.GrantEvidence) ([]fanoutobligation.Intent, error)
-	LoadPinnedSource(context.Context, string, string, durabledata.DeclarationRef) (durabledata.PinnedSource, error)
+	LoadFeedSource(context.Context, string, string, string, durabledata.DeclarationRef) (durabledata.PinnedSource, error)
 }
 
 // SelectedContractForkLifecycle owns planning, materialization, activation,

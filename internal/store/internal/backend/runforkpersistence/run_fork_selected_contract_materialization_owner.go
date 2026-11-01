@@ -138,6 +138,9 @@ func materializeRunForkForSelectedContractExecution(ctx context.Context, req run
 			SourceRunID: sourceRunID, At: strings.TrimSpace(req.At), ResolvedPoint: &point,
 			AtStart: point.Kind == runfork.RunForkPointRunStart,
 		}
+		if forkOperation != nil {
+			planRequest.PublicationID = forkOperation.PublicationID
+		}
 		plan, err := port.plan(txctx, tx, planRequest)
 		if err != nil {
 			return err
@@ -271,7 +274,7 @@ func materializeRunForkForSelectedContractExecution(ctx context.Context, req run
 			if err != nil {
 				return err
 			}
-			if err := requireForkResourceSourcePinAgreement(plan, pins); err != nil {
+			if err := requireForkResourceSourcePinAgreement(txctx, tx, port.durableData, plan, pins); err != nil {
 				return err
 			}
 			if err := requireExactMaterializedRunForkFanOut(txctx, tx, port.postgres, port.postgres, forkRunID, plan, fanOutPlanRefs, req.OriginalLoopCarriage, identity.SourceArtifactFact.BundleHash(), port.durableData, pins); err != nil {
@@ -291,7 +294,9 @@ func materializeRunForkForSelectedContractExecution(ctx context.Context, req run
 				return err
 			}
 			existing.DataPins = pins
-			existing.MaterializedFanOutCount = len(plan.FanOutObligations) - countRunForkSourceDeploymentFeeds(plan) + len(pins)
+			if err := tx.QueryRowContext(txctx, `SELECT COUNT(*) FROM fan_out_intents WHERE run_id=$1`, forkRunID).Scan(&existing.MaterializedFanOutCount); err != nil {
+				return err
+			}
 			if err := validateRunForkSelectedContractRouteRecoveryAtActivation(txctx, tx, routeRecovery); err != nil {
 				return err
 			}
@@ -327,7 +332,7 @@ func materializeRunForkForSelectedContractExecution(ctx context.Context, req run
 		if err != nil {
 			return err
 		}
-		if err := requireForkResourceSourcePinAgreement(plan, pins); err != nil {
+		if err := requireForkResourceSourcePinAgreement(txctx, tx, port.durableData, plan, pins); err != nil {
 			return err
 		}
 		if sourceProfiled {
@@ -577,7 +582,7 @@ func postgresRunForkSelectedContractMaterializationPort(s *RunForkPostgresOwner)
 			return result.Acknowledged(), result.Err()
 		},
 		plan: func(ctx context.Context, tx *sql.Tx, req runfork.RunForkPlanRequest) (runfork.RunForkPlan, error) {
-			return planRunForkSnapshot(ctx, tx, req, runforkrevision.ValidateCompletePostgres, resolveRunForkRevisionPoint, true)
+			return planRunForkSnapshot(ctx, tx, req, runforkrevision.ValidateCompletePostgres, resolveRunForkRevisionPoint, true, s.durableData)
 		},
 		deliveries: postgresDeliveryAdapter,
 		loadSource: func(ctx context.Context, tx *sql.Tx, runID string) (runtimecorrelation.SourceArtifactFact, error) {
@@ -622,7 +627,7 @@ func sqliteRunForkSelectedContractMaterializationPort(s *RunForkSQLiteOwner) run
 			return result.Acknowledged(), result.Err()
 		},
 		plan: func(ctx context.Context, tx *sql.Tx, req runfork.RunForkPlanRequest) (runfork.RunForkPlan, error) {
-			return planRunForkSnapshot(ctx, tx, req, runforkrevision.ValidateCompleteSQLite, resolveSQLiteRunForkRevisionPoint, false)
+			return planRunForkSnapshot(ctx, tx, req, runforkrevision.ValidateCompleteSQLite, resolveSQLiteRunForkRevisionPoint, false, s.durableData)
 		},
 		deliveries: sqliteDeliveryAdapter,
 		loadSource: func(ctx context.Context, tx *sql.Tx, runID string) (runtimecorrelation.SourceArtifactFact, error) {
