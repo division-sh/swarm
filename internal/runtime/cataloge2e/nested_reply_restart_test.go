@@ -157,6 +157,7 @@ func restartNestedReplyChild(t *testing.T, h *runtimeHarness, staged runfork.Run
 	}
 	after, err := storetest.ReadSelectedForkApplicationStorageSnapshot(ctx, selected)
 	if err != nil || !reflect.DeepEqual(snapshot, after) {
+		logNestedReplySnapshotDelta(t, snapshot, after)
 		t.Fatalf("nested recovery inspection changed persistent state: %v", err)
 	}
 	owner := constructCatalogSelectedExecutionOwner(t, reopened, nil)
@@ -186,4 +187,32 @@ func restartNestedReplyChild(t *testing.T, h *runtimeHarness, staged runfork.Run
 		t.Fatalf("nested successor lost its exact activation acknowledgment: %+v error=%v", ack, err)
 	}
 	return reopened, owner
+}
+
+func logNestedReplySnapshotDelta(t testing.TB, before, after map[string]storetest.SelectedForkStorageTableSnapshot) {
+	t.Helper()
+	for table, previous := range before {
+		current, found := after[table]
+		if found && reflect.DeepEqual(previous, current) {
+			continue
+		}
+		t.Logf("nested inspection table=%s exists_after=%t columns_before=%v columns_after=%v", table, found, previous.Columns, current.Columns)
+		delta := make(map[string]int)
+		for _, row := range previous.Rows {
+			delta[row]--
+		}
+		for _, row := range current.Rows {
+			delta[row]++
+		}
+		for row, change := range delta {
+			if change != 0 {
+				t.Logf("nested inspection table=%s row_delta=%+d row=%s", table, change, row)
+			}
+		}
+	}
+	for table, current := range after {
+		if _, found := before[table]; !found {
+			t.Logf("nested inspection added table=%s columns=%v rows=%v", table, current.Columns, current.Rows)
+		}
+	}
 }
