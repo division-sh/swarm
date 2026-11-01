@@ -515,6 +515,9 @@ func (s *EffectPostgresOwner) AuthorizeExternalAttempt(ctx context.Context, auth
 			if err := s.validateProviderOrigin(ctx, tx, authority, req); err != nil {
 				return err
 			}
+			if err := requireProviderResumeParentTx(ctx, tx, true, authority, req); err != nil {
+				return err
+			}
 			if err := requireAttemptSessionGrant(ctx, tx, true, authority, req); err != nil {
 				return err
 			}
@@ -682,6 +685,9 @@ func (s *EffectSQLiteOwner) AuthorizeExternalAttempt(ctx context.Context, author
 				return err
 			}
 			if err := s.validateProviderOrigin(txctx, tx, authority, req); err != nil {
+				return err
+			}
+			if err := requireProviderResumeParentTx(txctx, tx, false, authority, req); err != nil {
 				return err
 			}
 			if err := requireAttemptSessionGrant(txctx, tx, false, authority, req); err != nil {
@@ -1578,6 +1584,10 @@ func insertExternalAttemptPostgres(ctx context.Context, tx *sql.Tx, authority ru
 	}
 	lineage, _ := json.Marshal(req.Lineage)
 	authorityEvidence, _ := json.Marshal(authority.Evidence())
+	attemptEvidence, err := runtimeeffects.EncodeAttemptAuthorityEvidence(authority, req)
+	if err != nil {
+		return runtimeeffects.Attempt{}, err
+	}
 	capabilitySurfaceID, capabilityPlan, err := persistManagedCapabilitySurfacePostgres(ctx, tx, req.CapabilitySurface)
 	if err != nil {
 		return runtimeeffects.Attempt{}, err
@@ -1590,7 +1600,7 @@ func insertExternalAttemptPostgres(ctx context.Context, tx *sql.Tx, authority ru
 		authority.ExecutionOwner, authority.LeaseExpiresAt.UTC(), authority.FenceGeneration,
 		string(authority.Target.Kind), authority.Target.ID, authority.Target.Ordinal, capabilitySurfaceID}
 	attemptArgs = append(attemptArgs, completionOriginValues(req.Origin)...)
-	attemptArgs = append(attemptArgs, req.Now.UTC(), req.SessionGrantID, req.SessionLockOwner, string(authorityEvidence))
+	attemptArgs = append(attemptArgs, req.Now.UTC(), req.SessionGrantID, req.SessionLockOwner, string(attemptEvidence))
 	if _, err := tx.ExecContext(ctx, `
 		INSERT INTO runtime_external_effect_operations (
 			operation_id, effect_kind, effect_class, execution_mode, bundle_hash, authority_kind, authority_id,
@@ -1635,6 +1645,10 @@ func insertExternalAttemptSQLiteTx(ctx context.Context, tx *sql.Tx, authority ru
 	}
 	lineage, _ := json.Marshal(req.Lineage)
 	authorityEvidence, _ := json.Marshal(authority.Evidence())
+	attemptEvidence, err := runtimeeffects.EncodeAttemptAuthorityEvidence(authority, req)
+	if err != nil {
+		return runtimeeffects.Attempt{}, err
+	}
 	capabilitySurfaceID, capabilityPlan, err := persistManagedCapabilitySurfaceSQLite(ctx, tx, req.CapabilitySurface)
 	if err != nil {
 		return runtimeeffects.Attempt{}, err
@@ -1647,7 +1661,7 @@ func insertExternalAttemptSQLiteTx(ctx context.Context, tx *sql.Tx, authority ru
 		authority.ExecutionOwner, authority.LeaseExpiresAt.UTC(), authority.FenceGeneration,
 		string(authority.Target.Kind), authority.Target.ID, authority.Target.Ordinal, capabilitySurfaceID}
 	attemptArgs = append(attemptArgs, completionOriginValues(req.Origin)...)
-	attemptArgs = append(attemptArgs, req.Now.UTC(), req.Now.UTC(), req.SessionGrantID, req.SessionLockOwner, string(authorityEvidence))
+	attemptArgs = append(attemptArgs, req.Now.UTC(), req.Now.UTC(), req.SessionGrantID, req.SessionLockOwner, string(attemptEvidence))
 	if _, err := tx.ExecContext(ctx, `
 		INSERT INTO runtime_external_effect_operations (
 			operation_id, effect_kind, effect_class, execution_mode, bundle_hash, authority_kind, authority_id,

@@ -32,6 +32,7 @@ import (
 type selectedRecoveryTxOwner interface {
 	MarkTerminalTx(context.Context, *mutationprotocol.Attempt, runlifecycle.TerminalRequest, *privaterunlifecycle.ChannelCardChanges) (runlifecycle.Snapshot, runlifecycle.MutationDisposition, error)
 	RecoverSelectedForkEffectsTx(context.Context, *mutationprotocol.Attempt, string, runtimeeffects.RecoveryRequest) (runtimeeffects.RecoverySummary, error)
+	CanResumeSelectedProviderEffectsTx(context.Context, *mutationprotocol.Attempt, string, runtimeeffects.RecoveryRequest) (bool, error)
 	HasSelectedCanceledOriginsTx(context.Context, *mutationprotocol.Attempt, string) (bool, error)
 	ListSelectedCanceledTurnRecoveriesTx(context.Context, *mutationprotocol.Attempt, string, runtimeeffects.RecoveryRequest) ([]runtimeeffects.TurnExecutionResult, error)
 	CommitSelectedCanceledTurnRecoveryTx(context.Context, *mutationprotocol.Attempt, string, runtimeeffects.CanceledTurnCommand) (runtimeeffects.CanceledTurnCommit, error)
@@ -410,6 +411,36 @@ func recoverSelectedForkTx(ctx context.Context, tx *sql.Tx, owner selectedRecove
 		}
 		canceled = append(canceled, committed)
 	}
+	disposition, eligible, err := selectedRecoveryContinuationDisposition(snapshot.State, record)
+	if err != nil {
+		return result, err
+	}
+	if eligible && !pending && len(req.Cancellations) == 0 {
+		ready, err := owner.CanResumeSelectedProviderEffectsTx(ctx, attempt, result.ExecutionID, req.Effects)
+		if err != nil {
+			return result, err
+		}
+		if ready {
+			result.Disposition = disposition
+			if err := retireSelectedRecoveryPredecessorTx(ctx, tx, result, state, req.Effects.Now()); err != nil {
+				return result, err
+			}
+			effects, err := owner.RecoverSelectedForkEffectsTx(ctx, attempt, result.ExecutionID, req.Effects)
+			if err != nil {
+				return result, err
+			}
+			plan, err := planSelectedRecoveryTx(ctx, tx, snapshot, record, sqlite, true)
+			if err != nil {
+				return result, err
+			}
+			if plan.Disposition != disposition {
+				return result, fmt.Errorf("selected provider retry settlement did not establish its exact continuation")
+			}
+			result = plan.SelectedForkRecoveryResult
+			result.Effects = effects
+			return result, nil
+		}
+	}
 	plan, err := planSelectedRecoveryTx(ctx, tx, snapshot, record, sqlite, true)
 	if err != nil {
 		return result, err
@@ -547,6 +578,12 @@ func planSelectedRecoveryTx(ctx context.Context, tx *sql.Tx, snapshot runlifecyc
 			settled, err = selectedForkRecoveryEffectsSettledTx(ctx, tx, result.RunID)
 			if err != nil {
 				return result, err
+			}
+			if !settled {
+				settled, err = storeeffects.SelectedProviderEffectsSettledTx(ctx, tx, result.RunID, sqlite)
+				if err != nil {
+					return result, err
+				}
 			}
 		}
 		if settled {

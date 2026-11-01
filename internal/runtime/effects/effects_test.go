@@ -783,6 +783,7 @@ func TestManagedAgentFramePrelaunchBindingAcceptsExactNormalAndSelectedAuthority
 			if len(probe.authorizations) != 1 || probe.launches != 1 {
 				t.Fatalf("exact %s frame authorizations=%d launches=%d, want 1/1", origin, len(probe.authorizations), probe.launches)
 			}
+			proveProviderCallJournalBinding(t, ctx, probe.authorizations[0])
 		})
 	}
 }

@@ -273,6 +273,7 @@ type AuthorizeRequest struct {
 	RequestFingerprint string
 	CapabilitySurface  *managedcapabilities.Surface
 	AgentFrame         *agentframe.Frame
+	ProviderCall       *ProviderCall
 	Origin             CompletionOrigin
 	Lineage            map[string]string
 	Now                time.Time

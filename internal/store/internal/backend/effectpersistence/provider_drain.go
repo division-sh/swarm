@@ -462,13 +462,14 @@ func settleProviderDrainRecovery(
 	postgres bool,
 	delivery providerDrainDeliveryOwner,
 	directives providerDrainDirectiveOwner,
+	disposition runtimedelivery.FailureDisposition,
 ) (*runtimeeffects.ProviderDrainFinalization, error) {
 	cancellation, err := observeCanceledProviderOrigin(ctx, tx, postgres, attempt, delivery, directives)
 	if err != nil {
 		return nil, err
 	}
 	if cancellation.disposition == providerOriginNotCanceled {
-		if err := settleProviderDrainOriginRecovery(ctx, mutation, settlement, permit.Origin, delivery, directives); err != nil {
+		if err := settleProviderDrainOriginRecovery(ctx, mutation, settlement, permit.Origin, delivery, directives, disposition); err != nil {
 			return nil, err
 		}
 	}
@@ -542,6 +543,7 @@ func settleProviderDrainOriginRecovery(
 	origin runtimeeffects.CompletionOrigin,
 	delivery providerDrainDeliveryOwner,
 	directives providerDrainDirectiveOwner,
+	disposition runtimedelivery.FailureDisposition,
 ) error {
 	if settlement.Settlement.State == runtimeeffects.StateSettled || settlement.Settlement.Failure == nil {
 		return fmt.Errorf("provider drain recovery requires a failed or uncertain completion settlement")
@@ -564,7 +566,7 @@ func settleProviderDrainOriginRecovery(
 		reason = code
 	}
 	return delivery.SettleProviderOriginRecoveryFailureTx(ctx, mutation, origin.Delivery, runtimedelivery.Settlement{
-		Disposition:   runtimedelivery.FailureDeadLetter,
+		Disposition:   disposition,
 		ReasonCode:    reason,
 		Failure:       settlement.Settlement.Failure,
 		Duration:      duration,

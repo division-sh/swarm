@@ -12,6 +12,7 @@ import (
 	"github.com/division-sh/swarm/internal/runtime/agentmemory"
 	runtimeauthoractivity "github.com/division-sh/swarm/internal/runtime/authoractivity"
 	"github.com/division-sh/swarm/internal/runtime/core/agentidentity"
+	runtimedelivery "github.com/division-sh/swarm/internal/runtime/deliverylifecycle"
 	runtimeeffects "github.com/division-sh/swarm/internal/runtime/effects"
 	"github.com/division-sh/swarm/internal/runtime/executionmode"
 	runtimefailures "github.com/division-sh/swarm/internal/runtime/failures"
@@ -116,24 +117,7 @@ func loadCompletionRecoveryAttemptsPostgres(ctx context.Context, tx *sql.Tx, now
 		return nil, err
 	}
 	args = append([]any{now, selectedExecutionID}, args...)
-	rows, err := tx.QueryContext(ctx, `
-		SELECT o.operation_id::text,a.attempt_id::text,o.authority_kind,o.authority_id,a.authority_evidence::text,o.agent_frame_bytes,
-		       o.execution_mode,a.execution_mode,
-		       a.adapter,a.transport,a.state,a.usage_target_kind,a.usage_target_id::text,COALESCE(a.target_ordinal,0),
-		       COALESCE(a.capability_surface_id::text,''),COALESCE(s.surface::text,''),
-		       a.execution_owner,a.fence_generation,a.lease_expires_at,COALESCE(a.session_grant_id,''),COALESCE(a.session_lock_owner,''),
-		       COALESCE(o.agent_run_id::text,''),COALESCE(o.lineage->>'run_id',''),
-		       COALESCE(o.agent_id,''),COALESCE(o.agent_name_owner,''),COALESCE(o.agent_name_source,''),
-		       COALESCE(o.agent_route_presence,''),COALESCE(o.flow_scope_key,''),COALESCE(o.flow_instance_id,''),COALESCE(o.flow_instance,''),
-		       COALESCE(o.runtime_epoch,0),COALESCE(o.generation,0),
-		       COALESCE(a.origin_kind,''),COALESCE(a.origin_delivery_id::text,''),COALESCE(a.origin_run_id::text,''),COALESCE(a.origin_route_identity,''),
-		       COALESCE(a.origin_claim_token::text,''),COALESCE(a.origin_claim_version,0),COALESCE(a.origin_subscriber_id,''),
-		       COALESCE(a.origin_directive_operation_id::text,''),COALESCE(a.origin_directive_owner_id,''),
-		       s.execution_kind,s.execution_authority_id,s.run_id,s.selected_execution_id,s.selected_fork_run_id
-		FROM runtime_external_effect_operations o
-		JOIN runtime_external_effect_attempts a ON a.operation_id=o.operation_id
-		LEFT JOIN managed_agent_capability_surfaces s ON s.surface_id=a.capability_surface_id
-		`+storeagent.CompletionRecoveryAgentJoinSQL()+`
+	rows, err := tx.QueryContext(ctx, postgresCompletionRecoverySelect+storeagent.CompletionRecoveryAgentJoinSQL()+`
 		WHERE o.effect_kind='provider_turn' AND a.usage_target_kind IS NOT NULL
 		  AND a.state IN ('authorized','launched','response_observed')
 		  AND ((o.authority_kind='selected_contract_fork' AND o.selected_execution_id::text=$2) OR
@@ -174,24 +158,7 @@ func loadCompletionRecoveryAttemptsSQLite(ctx context.Context, tx *sql.Tx, now t
 		return nil, err
 	}
 	args = append([]any{selectedExecutionID, selectedExecutionID, now}, args...)
-	rows, err := tx.QueryContext(ctx, `
-		SELECT o.operation_id,a.attempt_id,o.authority_kind,o.authority_id,a.authority_evidence,o.agent_frame_bytes,
-		       o.execution_mode,a.execution_mode,
-		       a.adapter,a.transport,a.state,a.usage_target_kind,a.usage_target_id,COALESCE(a.target_ordinal,0),
-		       COALESCE(a.capability_surface_id,''),COALESCE(s.surface,''),
-		       a.execution_owner,a.fence_generation,a.lease_expires_at,COALESCE(a.session_grant_id,''),COALESCE(a.session_lock_owner,''),
-		       COALESCE(o.agent_run_id,''),COALESCE(json_extract(o.lineage,'$.run_id'),''),
-		       COALESCE(o.agent_id,''),COALESCE(o.agent_name_owner,''),COALESCE(o.agent_name_source,''),
-		       COALESCE(o.agent_route_presence,''),COALESCE(o.flow_scope_key,''),COALESCE(o.flow_instance_id,''),COALESCE(o.flow_instance,''),
-		       COALESCE(o.runtime_epoch,0),COALESCE(o.generation,0),
-		       COALESCE(a.origin_kind,''),COALESCE(a.origin_delivery_id,''),COALESCE(a.origin_run_id,''),COALESCE(a.origin_route_identity,''),
-		       COALESCE(a.origin_claim_token,''),COALESCE(a.origin_claim_version,0),COALESCE(a.origin_subscriber_id,''),
-		       COALESCE(a.origin_directive_operation_id,''),COALESCE(a.origin_directive_owner_id,''),
-		       s.execution_kind,s.execution_authority_id,s.run_id,s.selected_execution_id,s.selected_fork_run_id
-		FROM runtime_external_effect_operations o
-		JOIN runtime_external_effect_attempts a ON a.operation_id=o.operation_id
-		LEFT JOIN managed_agent_capability_surfaces s ON s.surface_id=a.capability_surface_id
-		`+storeagent.CompletionRecoveryAgentJoinSQL()+`
+	rows, err := tx.QueryContext(ctx, sqliteCompletionRecoverySelect+storeagent.CompletionRecoveryAgentJoinSQL()+`
 		WHERE o.effect_kind='provider_turn' AND a.usage_target_kind IS NOT NULL
 		  AND a.state IN ('authorized','launched','response_observed')
 		  AND ((o.authority_kind='selected_contract_fork' AND o.selected_execution_id=?) OR
@@ -425,6 +392,10 @@ func reconcileCompletionAttempts(ctx context.Context, tx *sql.Tx, postgresLLM *s
 				return runtimeeffects.RecoverySummary{}, err
 			}
 		}
+		disposition, err := providerRecoveryDisposition(ctx, tx, postgres, recovered, attempt, resolution.Expired, now)
+		if err != nil {
+			return runtimeeffects.RecoverySummary{}, err
+		}
 		projectCurrent := resolution.Kind == completionSettlementCurrent
 		if projectCurrent && !prelaunch {
 			projectCurrent, err = completionSessionGrantCurrent(ctx, tx, postgres, attempt, now)
@@ -481,14 +452,14 @@ func reconcileCompletionAttempts(ctx context.Context, tx *sql.Tx, postgresLLM *s
 				return runtimeeffects.RecoverySummary{}, err
 			}
 		}
-		// Selected recovery owns whole-run terminalization after effect settlement;
-		// its fenced predecessor cannot use executable delivery settlement rights.
-		if attempt.Authority.Kind == runtimeeffects.AuthorityNormalAgent {
+		// Selected retries use the same boot-owned recovery settlement after its
+		// predecessor fence. Nonresumable selected work keeps whole-run termination.
+		if attempt.Authority.Kind == runtimeeffects.AuthorityNormalAgent || disposition == runtimedelivery.FailureRetry {
 			if resolution.Kind == completionSettlementDrained {
-				if _, err := settleProviderDrainRecovery(ctx, tx, mutation, attempt, settlement, resolution.Drain, resolution.Expired, postgres, delivery, directives); err != nil {
+				if _, err := settleProviderDrainRecovery(ctx, tx, mutation, attempt, settlement, resolution.Drain, resolution.Expired, postgres, delivery, directives, disposition); err != nil {
 					return runtimeeffects.RecoverySummary{}, err
 				}
-			} else if err := settleProviderDrainOriginRecovery(ctx, mutation, settlement, attempt.Origin, delivery, directives); err != nil {
+			} else if err := settleProviderDrainOriginRecovery(ctx, mutation, settlement, attempt.Origin, delivery, directives, disposition); err != nil {
 				return runtimeeffects.RecoverySummary{}, err
 			}
 		}
