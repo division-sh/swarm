@@ -174,13 +174,12 @@ func TestInterruptedReadOnlyProviderTurnResumesOnlyInterruptedCallBothStores(t *
 								t.Fatal(err)
 							}
 							unblock()
-							second := startServedCrashProcess(t, "TestInterruptedReadOnlyProviderTurnResumesOnlyInterruptedCallBothStores", environment)
+							second := startServedCrashProcessBeforeReadiness(t, "TestInterruptedReadOnlyProviderTurnResumesOnlyInterruptedCallBothStores", environment)
 							t.Cleanup(func() {
 								if t.Failed() {
 									t.Logf("restart process:\n%s", second.output.String())
 								}
 							})
-							endpoint = second.endpoint(t) + "/v1/rpc"
 							if exhaust {
 								select {
 								case replacement := <-interrupted:
@@ -195,8 +194,8 @@ func TestInterruptedReadOnlyProviderTurnResumesOnlyInterruptedCallBothStores(t *
 								}
 								unblockRetry()
 								second = startServedCrashProcess(t, "TestInterruptedReadOnlyProviderTurnResumesOnlyInterruptedCallBothStores", environment)
-								endpoint = second.endpoint(t) + "/v1/rpc"
 							}
+							endpoint = second.endpoint(t) + "/v1/rpc"
 							requireProviderResumeDelivery(t, endpoint, business.EventID, provider, original, &toolCalls, exhaust, wantCalls, wantTools)
 							if memory {
 								var conversations operatorread.OperatorConversationListResult
