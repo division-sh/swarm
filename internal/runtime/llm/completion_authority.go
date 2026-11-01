@@ -758,7 +758,7 @@ func settleCompletionTurnWithProviderHead(ctx context.Context, dispatch *complet
 		}
 		response.ToolOutputAuthority = &authority
 		attempt := dispatch.handle.Attempt()
-		if attempt.Authority.Kind == runtimeeffects.AuthorityNormalAgent && attempt.Origin.Kind == runtimeeffects.CompletionOriginDelivery {
+		if (attempt.Authority.Kind == runtimeeffects.AuthorityNormalAgent || attempt.Authority.Kind == runtimeeffects.AuthoritySelectedContractFork) && attempt.Origin.Kind == runtimeeffects.CompletionOriginDelivery {
 			if dispatch.projection == nil || len(bytes.TrimSpace(dispatch.request)) == 0 {
 				return runtimeeffects.CompletionSettlementResult{}, runtimefailures.New(runtimefailures.ClassLifecycleConflict, "completion_projection_input_missing", "llm-completion-authority", "settle_completion", map[string]any{"attempt_id": attempt.AttemptID})
 			}

@@ -15,8 +15,10 @@ import (
 	"github.com/division-sh/swarm/internal/runtime/core/managedexecution"
 	runtimedelivery "github.com/division-sh/swarm/internal/runtime/deliverylifecycle"
 	runtimeeffects "github.com/division-sh/swarm/internal/runtime/effects"
+	runtimellm "github.com/division-sh/swarm/internal/runtime/llm"
 	storemanagedcapability "github.com/division-sh/swarm/internal/store/internal/backend/managedcapability"
 	"github.com/division-sh/swarm/internal/store/internal/backend/mutationprotocol"
+	"github.com/google/uuid"
 )
 
 // Legacy or incomplete provenance retains terminal recovery. Only the exact
@@ -268,7 +270,73 @@ func loadProviderCallResumeTx(ctx context.Context, tx *sql.Tx, postgres bool, re
 		(req.Memory.Enabled && req.SessionID != journal.Call.SessionID) || req.Authority.Kind != attempt.Authority.Kind {
 		return result, fmt.Errorf("provider resume current source, actor or session contradicts its predecessor")
 	}
-	return providerCallRecoveryResult{recovery: runtimeeffects.ProviderCallRecovery{Journal: *journal, Frame: frame}, found: true}, nil
+	parent, err := providerResumeParentTx(ctx, tx, postgres, recovered, frame, now)
+	if err != nil {
+		return result, err
+	}
+	return providerCallRecoveryResult{recovery: runtimeeffects.ProviderCallRecovery{Journal: *journal, Frame: frame, Parent: parent}, found: true}, nil
+}
+
+func providerResumeParentTx(ctx context.Context, tx *sql.Tx, postgres bool, recovered completionRecoveryAttempt, frame agentframe.Frame, now time.Time) (*runtimeeffects.CompletionContinuationSnapshot, error) {
+	if frame.Turn.Kind != agentframe.TurnToolContinuation {
+		return nil, nil
+	}
+	parentID, err := uuid.Parse(strings.TrimPrefix(frame.Turn.ParentFrameID, "agent-frame:v1:"))
+	if err != nil || parentID == uuid.Nil {
+		return nil, fmt.Errorf("provider resume parent frame identity is invalid")
+	}
+	query := sqliteCompletionRecoverySelect
+	if postgres {
+		query = postgresCompletionRecoverySelect
+	}
+	rows, err := tx.QueryContext(ctx, query+`WHERE a.usage_target_id=$1 AND a.origin_delivery_id=$2 AND a.origin_run_id=$3
+		AND a.origin_route_identity=$4 AND a.origin_claim_version=$5 AND a.origin_claim_token=$6
+		AND a.origin_subscriber_id=$7 AND a.origin_subscriber_type='agent' AND o.effect_kind='provider_turn'
+		AND a.state='settled' AND o.state='settled' LIMIT 2`, parentID.String(), recovered.OriginDeliveryID, recovered.OriginRunID,
+		recovered.OriginRouteIdentity, recovered.OriginClaimVersion, recovered.OriginClaimToken, recovered.OriginSubscriber)
+	if err != nil {
+		return nil, err
+	}
+	parents, err := scanCompletionRecoveryAttempts(rows)
+	if err != nil {
+		return nil, err
+	}
+	if len(parents) != 1 {
+		return nil, fmt.Errorf("provider resume requires one exact settled parent")
+	}
+	parent := parents[0]
+	attempt, _, err := completionRecoverySettlement(parent, runtimeeffects.StateSettled, nil, now)
+	if err != nil {
+		return nil, err
+	}
+	journal, err := validatedProviderCallJournalTx(ctx, tx, postgres, parent, attempt)
+	if err != nil {
+		return nil, err
+	}
+	if journal == nil || journal.FrameID != frame.Turn.ParentFrameID || parent.Adapter != recovered.Adapter {
+		return nil, fmt.Errorf("provider resume parent journal is missing or contradictory")
+	}
+	var raw string
+	if err := tx.QueryRowContext(ctx, `SELECT CAST(evidence AS TEXT) FROM runtime_external_effect_attempts WHERE attempt_id=$1`, parent.AttemptID).Scan(&raw); err != nil {
+		return nil, err
+	}
+	payload, err := runtimeeffects.ReadCompletionContinuationPayload(json.RawMessage(raw), runtimeeffects.Fingerprint(journal.Call.Request.Body))
+	if err != nil {
+		return nil, err
+	}
+	continuation, err := agentframe.NewToolContinuation(frame.Turn.ParentFrameID, frame.Turn.ToolResult)
+	if err != nil {
+		return nil, err
+	}
+	if err := runtimellm.ValidateCompletionToolContinuation(payload, recovered.Adapter, continuation); err != nil {
+		return nil, err
+	}
+	surface, err := storemanagedcapability.DecodeStored([]byte(parent.CapabilitySurface), parent.CapabilityProjection)
+	if err != nil {
+		return nil, err
+	}
+	return &runtimeeffects.CompletionContinuationSnapshot{Request: append([]byte(nil), journal.Call.Request.Body...), Payload: payload,
+		Surface: surface, Phase: runtimeeffects.CompletionProjectionResponseConsumed}, nil
 }
 
 func requireProviderResumeParentTx(ctx context.Context, tx *sql.Tx, postgres bool, authority runtimeeffects.Authority, req runtimeeffects.AuthorizeRequest) error {

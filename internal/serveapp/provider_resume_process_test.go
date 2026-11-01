@@ -119,7 +119,10 @@ func TestInterruptedReadOnlyProviderTurnResumesOnlyInterruptedCallBothStores(t *
 				select {
 				case original = <-interrupted:
 				case <-time.After(servedEventPublishLifecycleProbeWaitTimeout):
-					t.Fatalf("actual noninitial provider request not reached\n%s", first.output.String())
+					var event operatorread.OperatorEventFull
+					requireServedJSONRPCResult(t, endpoint, "event.get", map[string]any{"event_id": business.EventID}, &event)
+					raw, _ := json.Marshal(event)
+					t.Fatalf("actual noninitial provider request not reached: provider_calls=%d settled_tool_calls=%d event=%s\n%s", len(provider.Requests()), toolCalls.Load(), raw, first.output.String())
 				}
 				if err := first.kill(); err != nil {
 					t.Fatal(err)
