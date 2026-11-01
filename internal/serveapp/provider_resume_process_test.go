@@ -52,14 +52,18 @@ func TestInterruptedReadOnlyProviderTurnResumesOnlyInterruptedCallBothStores(t *
 							tool := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 								var input struct{ Message string }
 								if r.Method != http.MethodPost || r.URL.Path != "/marker" ||
-									json.NewDecoder(r.Body).Decode(&input) != nil || input.Message != "only once" {
+									json.NewDecoder(r.Body).Decode(&input) != nil || (input.Message != "only once" && input.Message != "after resume") {
 									t.Error("authored tool received a different request")
 									http.Error(w, "wrong tool request", http.StatusBadRequest)
 									return
 								}
 								toolCalls.Add(1)
 								w.Header().Set("Content-Type", "application/json")
-								_ = json.NewEncoder(w).Encode(map[string]string{"receipt": "settled-marker-1"})
+								receipt := "settled-marker-1"
+								if input.Message == "after resume" {
+									receipt = "settled-marker-after-resume"
+								}
+								_ = json.NewEncoder(w).Encode(map[string]string{"receipt": receipt})
 							}))
 							t.Cleanup(tool.Close)
 							source := writeProviderResumeSource(t, tool.URL+"/marker", memory)
@@ -74,6 +78,11 @@ func TestInterruptedReadOnlyProviderTurnResumesOnlyInterruptedCallBothStores(t *
 							wantCalls, wantTools := 3, int32(1)
 							if selected {
 								wantCalls, wantTools = 5, 2
+							}
+							settledBeforeResume := wantTools
+							if !exhaust {
+								wantCalls++
+								wantTools++
 							}
 							provider := llmapi.New(t, llmapi.Protocol(profile), path, "resume-key", func(request llmapi.Request) (llmapi.Reply, error) {
 								reply := llmapi.Reply{ID: fmt.Sprintf("provider-resume-%d", request.Number), Model: "resume-model",
@@ -92,7 +101,7 @@ func TestInterruptedReadOnlyProviderTurnResumesOnlyInterruptedCallBothStores(t *
 								case 1:
 									reply.Tools = []llmapi.ToolCall{{ID: "marker-call", OutputID: "marker-output", Name: "record_marker", Arguments: json.RawMessage(`{"message":"only once"}`)}}
 								case 2:
-									if toolCalls.Load() != wantTools || !bytes.Contains(request.Body, []byte("settled-marker-1")) {
+									if toolCalls.Load() != settledBeforeResume || !bytes.Contains(request.Body, []byte("settled-marker-1")) {
 										return llmapi.Reply{}, fmt.Errorf("second provider call lacks its settled authored tool result")
 									}
 									interrupted <- request
@@ -106,7 +115,12 @@ func TestInterruptedReadOnlyProviderTurnResumesOnlyInterruptedCallBothStores(t *
 										<-retryRelease
 										return llmapi.Reply{StatusCode: http.StatusServiceUnavailable}, nil
 									}
-									reply.Text = "resumed exact interrupted call"
+									reply.Tools = []llmapi.ToolCall{{ID: "after-resume-call", OutputID: "after-resume-output", Name: "record_marker", Arguments: json.RawMessage(`{"message":"after resume"}`)}}
+								case 4:
+									if toolCalls.Load() != wantTools || !bytes.Contains(request.Body, []byte("settled-marker-after-resume")) {
+										return llmapi.Reply{}, fmt.Errorf("ordinary provider continuation lacks the new settled tool result")
+									}
+									reply.Text = "continued after recovered call"
 								default:
 									return llmapi.Reply{}, fmt.Errorf("unexpected provider redispatch %d", request.Number)
 								}
@@ -200,7 +214,7 @@ func TestInterruptedReadOnlyProviderTurnResumesOnlyInterruptedCallBothStores(t *
 							if memory {
 								var conversations operatorread.OperatorConversationListResult
 								requireServedJSONRPCResult(t, endpoint, "conversation.list", map[string]any{"run_id": business.RunID, "agent_id": "load-agent", "flow_instance": "hold"}, &conversations)
-								wantTurns := 2
+								wantTurns := 3
 								if exhaust {
 									wantTurns = 1
 								}
@@ -317,7 +331,7 @@ func requireProviderResumeDelivery(t *testing.T, endpoint, eventID string, provi
 					t.Fatal("interrupted replacement completed without consuming the shared retry budget")
 				}
 				requests := provider.Requests()
-				if len(requests) != wantCalls || toolCalls.Load() != wantTools || (len(original.Body) != 0 && !bytes.Equal(requests[wantCalls-1].Body, original.Body)) {
+				if len(requests) != wantCalls || toolCalls.Load() != wantTools || (len(original.Body) != 0 && !bytes.Equal(requests[original.Number].Body, original.Body)) {
 					t.Fatalf("resume replayed work or changed interrupted request: provider_calls=%d settled_tool_calls=%d", len(requests), toolCalls.Load())
 				}
 				if !strings.Contains(string(requests[wantCalls-1].Body), "settled-marker-1") {
