@@ -218,10 +218,10 @@ func writeTurnRenderingSource(t *testing.T, cell string) string {
 	t.Helper()
 	root := writeProviderEvidenceSource(t, "memory")
 	files := map[string]string{
-		"events.yaml":          "evidence.started: {conversation: string, sequence: integer, text: string}\nevidence.requested: {conversation: string, sequence: integer, text: string}\n",
-		"schema.yaml":          "pins:\n  inputs: [evidence.started, evidence.requested, evidence.completed]\nconnect:\n  - {event: evidence.requested, from: '.', to: worker, resolution: select-or-create}\n  - {event: evidence.completed, from: worker, to: '.'}\n",
-		"nodes.yaml":           "speaker:\n  execution_type: system_node\n  event_handlers:\n    evidence.started:\n      emit:\n        event: evidence.requested\n        fields: {conversation: payload.conversation, sequence: payload.sequence, text: payload.text}\nobserver:\n  execution_type: system_node\n  event_handlers:\n    evidence.completed:\n      guard: {id: observe, check: true}\n",
-		"worker/entities.yaml": "evidence:\n  conversation: string\n  note: {type: string, initial: synthetic declared note}\n",
+		"events.yaml":       "evidence.started: {conversation: string, sequence: integer, text: string}\nevidence.requested: {conversation: string, sequence: integer, text: string}\n",
+		"schema.yaml":       "pins:\n  inputs: [evidence.started, evidence.requested, evidence.completed]\nconnect:\n  - {event: evidence.requested, from: '.', to: worker, resolution: select-or-create}\n  - {event: evidence.completed, from: worker, to: '.'}\n",
+		"nodes.yaml":        "speaker:\n  execution_type: system_node\n  event_handlers:\n    evidence.started:\n      emit:\n        event: evidence.requested\n        fields: {conversation: payload.conversation, sequence: payload.sequence, text: payload.text}\nobserver:\n  execution_type: system_node\n  event_handlers:\n    evidence.completed:\n      guard: {id: observe, check: true}\n",
+		"worker/state.yaml": "conversation: text\nnote: 'synthetic declared note'\n",
 	}
 	intent := "For each user input call emit_evidence_completed once with sequence 1 for synthetic turn 1 and sequence 2 for synthetic turn 2. Produce no prose."
 	extra := ""
@@ -234,9 +234,9 @@ func writeTurnRenderingSource(t *testing.T, cell string) string {
 		extra = "  flow_data_access: [evidence.txt]\n"
 		intent = "For synthetic turn 1, first try read_flow_data with kind static_file and static_id missing, then read the allowed evidence.txt using its exact static_id from the tool schema, then emit_evidence_completed with sequence 1. For synthetic turn 2 emit sequence 2. Produce no prose."
 	case "read", "long":
-		intent = "Read the evidence entity with read_evidence before each emit_evidence_completed. Its explicitly declared fields are conversation and note; use no row metadata. Copy the current sequence into the emission. Produce no prose."
+		intent = "Read the declared state with read_state before each emit_evidence_completed. Its explicitly declared fields are conversation and note; use no row metadata. Copy the current sequence into the emission. Produce no prose."
 		if cell == "long" {
-			files["worker/entities.yaml"] = "evidence:\n  conversation: string\n  note: {type: string, initial: " + fmt.Sprintf("%q", "HEAD"+strings.Repeat("synthetic declared output ", 900)+"TAIL") + "}\n"
+			files["worker/state.yaml"] = "conversation: text\nnote: " + fmt.Sprintf("%q", "HEAD"+strings.Repeat("synthetic declared output ", 900)+"TAIL") + "\n"
 		}
 	case "environment":
 		extra = "  native_tools: {file_io: true}\n"
@@ -383,7 +383,7 @@ func turnRenderingReply(request llmapi.Request, cell string) (llmapi.Reply, erro
 		args = map[string]any{}
 	}
 	if (cell == "read" || cell == "long") && results == 0 {
-		name = "read_evidence"
+		name = "read_state"
 		args = map[string]any{}
 	}
 	if cell == "results" && sequence == 1 {
