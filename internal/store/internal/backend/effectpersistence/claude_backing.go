@@ -74,7 +74,7 @@ func readClaudeBackingOrigin(ctx context.Context, read func(context.Context, fun
 		for rows.Next() {
 			var id, bundle string
 			var request, frame []byte
-			var matches bool
+			var matches sql.NullBool
 			if err := rows.Scan(&id, &bundle, &request, &frame, &matches); err != nil {
 				return err
 			}
@@ -82,7 +82,7 @@ func readClaudeBackingOrigin(ctx context.Context, read func(context.Context, fun
 				Parent *string `json:"provider_session_id"`
 			}
 			stored, decodeErr := agentframe.DecodeDurable(frame)
-			if !matches || decodeErr != nil || stored.Session.AgentIdentity.Normalize() != identity.Normalize() ||
+			if !matches.Valid || !matches.Bool || decodeErr != nil || stored.Session.AgentIdentity.Normalize() != identity.Normalize() ||
 				stored.Session.SourceArtifact.Hash != bundle || !json.Valid(request) || json.Unmarshal(request, &input) != nil || input.Parent == nil {
 				continue
 			}

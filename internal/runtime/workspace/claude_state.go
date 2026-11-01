@@ -101,6 +101,17 @@ func (r ClaudeStateRequest) key(bundleHash string) (string, error) {
 	return "swarm-claude-state-v1-" + hex.EncodeToString(digest.Sum(nil)), nil
 }
 
+func (r ClaudeStateRequest) retainedKey(ctx context.Context, head, current string) (string, error) {
+	if !r.Reusable() || head == "" {
+		return current, nil
+	}
+	origin, err := effects.ClaudeBackingOrigin(ctx, r.identity, r.session, head)
+	if err != nil {
+		return "", err
+	}
+	return r.key(origin)
+}
+
 // ClaudeState is a checked, invocation-bound view of workspace-owned private backing.
 // Releasing it always removes the disposable execution container, never reusable files.
 type ClaudeState interface {
@@ -159,15 +170,9 @@ func (m *DockerManager) ResolveClaudeWorkspace(ctx context.Context, actor actors
 	if source, ok := correlation.SourceArtifactFactFromContext(ctx); ok && source.BundleHash() != m.cfg.BundleHash {
 		return nil, fmt.Errorf("Claude state source does not match the admitted workspace")
 	}
-	if request.Reusable() && confirmedHead != "" {
-		origin, err := effects.ClaudeBackingOrigin(ctx, request.identity, request.session, confirmedHead)
-		if err != nil {
-			return nil, err
-		}
-		key, err = request.key(origin)
-		if err != nil {
-			return nil, err
-		}
+	key, err = request.retainedKey(ctx, confirmedHead, key)
+	if err != nil {
+		return nil, err
 	}
 	if request.kind == "fork" {
 		return m.resolveClaudeForkWorkspace(ctx, actor, key, confirmedHead)
