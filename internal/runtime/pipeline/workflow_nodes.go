@@ -11,7 +11,6 @@ import (
 	"github.com/division-sh/swarm/internal/runtime/core/eventidentity"
 	runtimeflowidentity "github.com/division-sh/swarm/internal/runtime/core/flowidentity"
 	runtimeidentity "github.com/division-sh/swarm/internal/runtime/core/identity"
-	runtimepinrouting "github.com/division-sh/swarm/internal/runtime/core/pinrouting"
 	runtimepipelineobligation "github.com/division-sh/swarm/internal/runtime/pipelineobligation"
 	"github.com/division-sh/swarm/internal/runtime/semanticview"
 )
@@ -262,30 +261,17 @@ func workflowNodeSubscriptionAliases(source semanticview.Source, node runtimeide
 		}
 		out = append(out, value)
 	}
-	flowID := node.FlowPath()
 	if admission.Pattern() {
 		for _, pattern := range admission.RoutePatterns() {
 			appendAlias(pattern)
 		}
 		return out, nil
 	}
-	if source.FlowHasInputEvent(flowID, admission.LocalEvent()) {
-		for _, pattern := range runtimepinrouting.ResolveFlowInputProducer(source, flowID, admission.LocalEvent()).AutoWireResolution().Patterns {
-			appendAlias(pattern)
-		}
-	}
 	for _, pattern := range admission.RoutePatterns() {
 		appendAlias(pattern)
 	}
 	appendAlias(admission.LocalEvent())
 	return out, nil
-}
-
-func workflowFlowInputProducerAliases(source semanticview.Source, targetFlowID, eventType string) []string {
-	if source == nil {
-		return nil
-	}
-	return append([]string{}, runtimepinrouting.ResolveFlowInputProducer(source, targetFlowID, eventType).AutoWireResolution().Patterns...)
 }
 
 func workflowNodeTimerIDs(timers []runtimecontracts.WorkflowTimerContract) []string {

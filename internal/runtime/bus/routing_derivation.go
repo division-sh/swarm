@@ -46,17 +46,14 @@ func independentPubsubSubscriber(s Subscriber) bool {
 type subscriberRouteSource uint8
 
 const (
-	subscriberRouteSourceSubscription subscriberRouteSource = iota + 1
-	subscriberRouteSourcePinAutoWire
-	subscriberRouteSourceConnectRoutePlan
+	subscriberRouteSourceSubscription     subscriberRouteSource = 1
+	subscriberRouteSourceConnectRoutePlan subscriberRouteSource = 3 // Keep retired slot 2 unassigned.
 )
 
 func (s subscriberRouteSource) code() string {
 	switch s {
 	case subscriberRouteSourceSubscription:
 		return "subscription"
-	case subscriberRouteSourcePinAutoWire:
-		return "pin_auto_wire"
 	case subscriberRouteSourceConnectRoutePlan:
 		return "connect_route_plan"
 	default:
@@ -70,7 +67,6 @@ type RouteTable struct {
 	connectDefinitions  map[string][]runtimepinrouting.ConnectRecipientRegistration
 	staticAgentPlans    map[agentidentity.Plan]struct{}
 	connectGraph        runtimepinrouting.CompiledConnectGraph
-	inputProducers      runtimepinrouting.FlowInputProducerResolver
 	compiledSourceReady bool
 }
 
@@ -89,9 +85,8 @@ type routeSubscriberTemplate struct {
 }
 
 type routeSubscriberTemplatePattern struct {
-	raw        string
-	admission  semanticview.AuthoredSubscriptionAdmission
-	inputEvent bool
+	raw       string
+	admission semanticview.AuthoredSubscriptionAdmission
 }
 
 type subscriberKind uint8
@@ -130,7 +125,6 @@ func deriveRouteTableWithInputProducers(source semanticview.Source, graph runtim
 		connectDefinitions:  make(map[string][]runtimepinrouting.ConnectRecipientRegistration),
 		staticAgentPlans:    make(map[agentidentity.Plan]struct{}),
 		connectGraph:        graph,
-		inputProducers:      inputProducers,
 		compiledSourceReady: true,
 	}
 	if source == nil {
@@ -399,7 +393,6 @@ func routeSubscriberPatterns(source semanticview.Source, kind subscriberKind, sc
 		}
 		compiled = append(compiled, routeSubscriberTemplatePattern{
 			raw: pattern, admission: admission,
-			inputEvent: !admission.Pattern() && scope.ID != "" && source.FlowHasInputEvent(scope.ID, admission.LocalEvent()),
 		})
 	}
 	return compiled, nil
@@ -435,13 +428,7 @@ func routeExecutableNodeDeclarations(source semanticview.Source, flowPath string
 	return out, nil
 }
 
-func routeProjectAdmittedSubscriberPatterns(admission semanticview.AuthoredSubscriptionAdmission, flowID, routePath string, inputEvent bool, inputProducers runtimepinrouting.FlowInputProducerResolver) []routeResolvedPattern {
-	if inputEvent {
-		patterns := routeInputProducerPatterns(inputProducers.Resolve(flowID, admission.LocalEvent()).AutoWireResolution())
-		if len(patterns) > 0 {
-			return patterns
-		}
-	}
+func routeProjectAdmittedSubscriberPatterns(admission semanticview.AuthoredSubscriptionAdmission, routePath string) []routeResolvedPattern {
 	out := make([]routeResolvedPattern, 0, len(admission.RoutePatterns()))
 	for _, pattern := range admission.RoutePatternsAt(routePath) {
 		out = append(out, routeResolvedPattern{
@@ -467,21 +454,6 @@ func routeClassifyAuthoredSubscription(source semanticview.Source, kind subscrib
 		InputEvents:  inputEvents,
 		Authored:     raw,
 	})
-}
-
-func routeInputProducerPatterns(resolution runtimecontracts.FlowInputAutoWireResolution) []routeResolvedPattern {
-	out := make([]routeResolvedPattern, 0, len(resolution.Patterns))
-	for _, pattern := range resolution.Patterns {
-		pattern = eventidentity.Normalize(pattern)
-		if pattern == "" {
-			continue
-		}
-		out = append(out, routeResolvedPattern{
-			EventPattern: pattern,
-			routeSource:  subscriberRouteSourcePinAutoWire,
-		})
-	}
-	return out
 }
 
 type resolvedSubscriberRoleIdentity struct {

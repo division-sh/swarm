@@ -19,51 +19,6 @@ import (
 	"github.com/division-sh/swarm/internal/runtime/testfixtures/canonicalrouting"
 )
 
-func TestWorkflowFlowInputProducerAliases_DoNotInferSiblingProducerAlias(t *testing.T) {
-	producer := runtimecontracts.FlowContractView{
-		Paths: runtimecontracts.FlowContractPaths{FlowPath: "producer"},
-		Schema: runtimecontracts.FlowSchemaDocument{
-			Pins: runtimecontracts.FlowPins{
-				Outputs: runtimecontracts.FlowOutputPins{EventPins: []runtimecontracts.FlowOutputEventPin{{Event: "scan.requested"}}},
-			},
-		},
-		Path: "producer",
-	}
-	discovery := runtimecontracts.FlowContractView{
-		Paths: runtimecontracts.FlowContractPaths{FlowPath: "discovery"},
-		Schema: runtimecontracts.FlowSchemaDocument{
-			Pins: runtimecontracts.FlowPins{
-				Inputs: runtimecontracts.FlowInputPins{EventPins: []runtimecontracts.FlowInputEventPin{{Event: "scan.requested"}}},
-			},
-		},
-		Path: "discovery",
-		Nodes: map[string]runtimecontracts.SystemNodeContract{
-			"scan-orchestrator": {
-				SubscribesTo: []string{"scan.requested"},
-			},
-		},
-	}
-	root := runtimecontracts.FlowContractView{Children: []runtimecontracts.FlowContractView{producer, discovery}}
-	bundle := &runtimecontracts.WorkflowContractBundle{
-		FlowSchemas: map[string]runtimecontracts.FlowSchemaDocument{"producer": producer.Schema, "discovery": discovery.Schema},
-		FlowTree: flowmodel.Tree[runtimecontracts.FlowContractView]{
-			Root: &root,
-			ByID: map[string]*runtimecontracts.FlowContractView{
-				"producer":  &root.Children[0],
-				"discovery": &root.Children[1],
-			},
-		},
-	}
-	if err := runtimecontracts.CompileWorkflowSemantics(bundle); err != nil {
-		t.Fatalf("compile exact input identity semantics: %v", err)
-	}
-
-	aliases := workflowFlowInputProducerAliases(semanticview.Wrap(bundle), "discovery", "scan.requested")
-	if len(aliases) != 0 {
-		t.Fatalf("aliases = %#v, want none for retired sibling auto-wire", aliases)
-	}
-}
-
 func TestWorkflowHandlerDoesNotUseAnotherFlowDeclaration(t *testing.T) {
 	root := runtimecontracts.FlowContractView{
 		Path:  ".",
@@ -97,58 +52,6 @@ func TestWorkflowHandlerDoesNotUseAnotherFlowDeclaration(t *testing.T) {
 	resolution := workflowNodeEventHandlerResolutionForEventType(semanticview.Wrap(bundle), pipelineFlowPathNode(t, "child", "listener"), "task.done")
 	if resolution.Matched {
 		t.Fatalf("child handler = %#v, want no handler from another flow's event declaration", resolution)
-	}
-}
-
-func TestWorkflowFlowInputProducerAliases_DoNotAutoWireCrossFlowInputPinsToProducerScopedEvent(t *testing.T) {
-	scoring := runtimecontracts.FlowContractView{
-		Paths: runtimecontracts.FlowContractPaths{FlowPath: "scoring"},
-		Schema: runtimecontracts.FlowSchemaDocument{
-			Pins: runtimecontracts.FlowPins{
-				Outputs: runtimecontracts.FlowOutputPins{EventPins: []runtimecontracts.FlowOutputEventPin{{Event: "vertical.shortlisted"}}},
-			},
-		},
-		Path: "scoring",
-	}
-	validation := runtimecontracts.FlowContractView{
-		Paths: runtimecontracts.FlowContractPaths{FlowPath: "validation"},
-		Schema: runtimecontracts.FlowSchemaDocument{
-			Pins: runtimecontracts.FlowPins{
-				Inputs: runtimecontracts.FlowInputPins{EventPins: []runtimecontracts.FlowInputEventPin{{Event: "vertical.shortlisted"}}},
-			},
-		},
-		Path: "validation",
-		Nodes: map[string]runtimecontracts.SystemNodeContract{
-			"validation-orchestrator": {
-				SubscribesTo: []string{"vertical.shortlisted"},
-			},
-		},
-	}
-	root := runtimecontracts.FlowContractView{Children: []runtimecontracts.FlowContractView{scoring, validation}}
-	bundle := &runtimecontracts.WorkflowContractBundle{
-		FlowSchemas: map[string]runtimecontracts.FlowSchemaDocument{"scoring": scoring.Schema, "validation": validation.Schema},
-		FlowTree: flowmodel.Tree[runtimecontracts.FlowContractView]{
-			Root: &root,
-			ByID: map[string]*runtimecontracts.FlowContractView{
-				"scoring":    &root.Children[0],
-				"validation": &root.Children[1],
-			},
-		},
-	}
-	if err := runtimecontracts.CompileWorkflowSemantics(bundle); err != nil {
-		t.Fatalf("compile cross-flow exact input semantics: %v", err)
-	}
-
-	aliases := workflowFlowInputProducerAliases(semanticview.Wrap(bundle), "validation", "vertical.shortlisted")
-	if len(aliases) != 0 {
-		t.Fatalf("aliases = %#v, want none for retired sibling auto-wire", aliases)
-	}
-}
-
-func TestWorkflowFlowInputProducerAliases_UnconnectedPrivatePinAddsNoAlias(t *testing.T) {
-	source := loadNamesOnlyPipelineSource(t, canonicalrouting.WritePublicTemplateInputRoute(t))
-	if aliases := workflowFlowInputProducerAliases(source, "operating", "opco.product_initialization_requested"); len(aliases) != 0 {
-		t.Fatalf("producer aliases = %#v, want none without a connection", aliases)
 	}
 }
 
