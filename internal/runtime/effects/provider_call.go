@@ -75,7 +75,7 @@ func (c *Controller) LoadProviderCallResume(ctx context.Context, sessionID strin
 	if !ok || c == nil {
 		return ProviderCallRecovery{}, false, fmt.Errorf("provider resume requires current completion authority")
 	}
-	store, ok := c.completionStore.(ProviderCallResumeStore)
+	store, ok := c.store.(ProviderCallResumeStore)
 	if !ok {
 		return ProviderCallRecovery{}, false, fmt.Errorf("provider resume owner is not bound")
 	}

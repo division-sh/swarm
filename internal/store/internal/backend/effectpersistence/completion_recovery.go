@@ -396,6 +396,13 @@ func reconcileCompletionAttempts(ctx context.Context, tx *sql.Tx, postgresLLM *s
 		if err != nil {
 			return runtimeeffects.RecoverySummary{}, err
 		}
+		var retryBase time.Duration
+		if disposition == runtimedelivery.FailureRetry {
+			retryBase, err = providerResumeRetryBaseTx(ctx, tx, attempt, now)
+			if err != nil {
+				return runtimeeffects.RecoverySummary{}, err
+			}
+		}
 		projectCurrent := resolution.Kind == completionSettlementCurrent
 		if projectCurrent && !prelaunch {
 			projectCurrent, err = completionSessionGrantCurrent(ctx, tx, postgres, attempt, now)
@@ -456,10 +463,10 @@ func reconcileCompletionAttempts(ctx context.Context, tx *sql.Tx, postgresLLM *s
 		// predecessor fence. Nonresumable selected work keeps whole-run termination.
 		if attempt.Authority.Kind == runtimeeffects.AuthorityNormalAgent || disposition == runtimedelivery.FailureRetry {
 			if resolution.Kind == completionSettlementDrained {
-				if _, err := settleProviderDrainRecovery(ctx, tx, mutation, attempt, settlement, resolution.Drain, resolution.Expired, postgres, delivery, directives, disposition); err != nil {
+				if _, err := settleProviderDrainRecovery(ctx, tx, mutation, attempt, settlement, resolution.Drain, resolution.Expired, postgres, delivery, directives, disposition, retryBase); err != nil {
 					return runtimeeffects.RecoverySummary{}, err
 				}
-			} else if err := settleProviderDrainOriginRecovery(ctx, mutation, settlement, attempt.Origin, delivery, directives, disposition); err != nil {
+			} else if err := settleProviderDrainOriginRecovery(ctx, mutation, settlement, attempt.Origin, delivery, directives, disposition, retryBase); err != nil {
 				return runtimeeffects.RecoverySummary{}, err
 			}
 		}
