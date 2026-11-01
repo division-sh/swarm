@@ -1478,6 +1478,7 @@ func TestSelectedContractForkProviderTurnsUseCanonicalExecutionFrames(t *testing
 			processCapability := selectedContractTestProcessCapability(t, ctx, pg)
 
 			var cfg *config.Config
+			sourceRunID := uuid.NewString()
 			var providerCalls atomic.Int32
 			provider := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 				ordinal := providerCalls.Add(1)
@@ -1492,17 +1493,17 @@ func TestSelectedContractForkProviderTurnsUseCanonicalExecutionFrames(t *testing
 				if !jsonValueContains(request, "emit_task_completed") || !jsonValueContains(request, "lookup_data") || !jsonValueContains(request, "notify_human") {
 					t.Errorf("%s provider request omits exact delivered tools: %s", tc.name, requestJSON)
 				}
-				wantKind := `"kind":"initial"`
+				wantContent := fmt.Sprintf(`{"entity_id":%q}`, sourceRunID)
 				response := tc.initial
 				if ordinal == 2 {
-					wantKind = `"kind":"tool_continuation"`
+					wantContent = `{"status":"ready"}`
 					response = tc.continuation
 					if tc.backend == llmselection.BackendOpenAICompatible {
 						requireSelectedCompatibleToolRound(t, request)
 					}
 				}
-				if ordinal > 2 || !jsonValueContains(request, wantKind) {
-					t.Errorf("%s provider request %d omits %s frame: %s", tc.name, ordinal, wantKind, requestJSON)
+				if ordinal > 2 || !jsonValueContains(request, wantContent) || strings.Contains(string(requestJSON), "payload_bytes_base64") {
+					t.Errorf("%s provider request %d lost exact rendered input %s: %s", tc.name, ordinal, wantContent, requestJSON)
 				}
 				if ordinal == 1 {
 					cfg.LLM.Models = llmselection.ModelAliases{
@@ -1533,7 +1534,6 @@ func TestSelectedContractForkProviderTurnsUseCanonicalExecutionFrames(t *testing
 			}
 			cfg = selectedForkAPIProviderConfig(tc.backend, tc.model, provider.URL)
 
-			sourceRunID := uuid.NewString()
 			entityID := sourceRunID
 			sourceEventID := uuid.NewString()
 			at := time.Unix(1700002203, 0).UTC()
