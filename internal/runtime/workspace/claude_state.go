@@ -15,6 +15,7 @@ import (
 	"github.com/division-sh/swarm/internal/runtime/core/agentidentity"
 	"github.com/division-sh/swarm/internal/runtime/correlation"
 	"github.com/division-sh/swarm/internal/runtime/deliverylifecycle"
+	"github.com/division-sh/swarm/internal/runtime/effects"
 	"github.com/division-sh/swarm/internal/sourceartifact"
 	"github.com/google/uuid"
 )
@@ -157,6 +158,16 @@ func (m *DockerManager) ResolveClaudeWorkspace(ctx context.Context, actor actors
 	}
 	if source, ok := correlation.SourceArtifactFactFromContext(ctx); ok && source.BundleHash() != m.cfg.BundleHash {
 		return nil, fmt.Errorf("Claude state source does not match the admitted workspace")
+	}
+	if request.Reusable() && confirmedHead != "" {
+		origin, err := effects.ClaudeBackingOrigin(ctx, request.identity, request.session, confirmedHead)
+		if err != nil {
+			return nil, err
+		}
+		key, err = request.key(origin)
+		if err != nil {
+			return nil, err
+		}
 	}
 	if request.kind == "fork" {
 		return m.resolveClaudeForkWorkspace(ctx, actor, key, confirmedHead)
