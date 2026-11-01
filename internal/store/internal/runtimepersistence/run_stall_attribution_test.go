@@ -128,7 +128,7 @@ func TestRunStallAttributionAfterCompletionBothStores(t *testing.T) {
 							}
 						}
 						if phase == "consumed" || phase == "reclaimed" {
-							if err := handle.ConsumeCompletionResponse(ctx, nil); err != nil {
+							if err := handle.ConsumeCompletionResponse(ctx, nil, nil); err != nil {
 								t.Fatal(err)
 							}
 						}

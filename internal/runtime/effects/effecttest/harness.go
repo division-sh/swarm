@@ -276,7 +276,7 @@ func (*Harness) ProjectCompletionConversation(context.Context, runtimeeffects.At
 	return nil
 }
 
-func (*Harness) ConsumeCompletionResponse(context.Context, runtimeeffects.Attempt, *agentframe.ToolContinuation) error {
+func (*Harness) ConsumeCompletionResponse(context.Context, runtimeeffects.Attempt, *agentframe.ToolContinuation, *agentframe.ToolContinuation) error {
 	return nil
 }
 

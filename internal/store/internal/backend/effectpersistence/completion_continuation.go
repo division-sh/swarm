@@ -526,7 +526,7 @@ func completionConversationRecord(projection runtimeeffects.CompletionConversati
 	}, nil
 }
 
-func (s *EffectPostgresOwner) ConsumeCompletionResponse(ctx context.Context, attempt runtimeeffects.Attempt, successor *agentframe.ToolContinuation) error {
+func (s *EffectPostgresOwner) ConsumeCompletionResponse(ctx context.Context, attempt runtimeeffects.Attempt, successor, terminalResult *agentframe.ToolContinuation) error {
 	if err := s.requireCurrent(); err != nil {
 		return err
 	}
@@ -539,6 +539,17 @@ func (s *EffectPostgresOwner) ConsumeCompletionResponse(ctx context.Context, att
 			successorRaw, err := validateCompletionSuccessor(attempt, successor)
 			if err != nil {
 				return err
+			}
+			if terminalResult != nil {
+				record, err := consumedToolResultConversation(attempt, locked, successor, *terminalResult)
+				if err != nil {
+					return err
+				}
+				if record.Memory.Enabled {
+					if err := s.llm.ConsumeCompletionConversationTx(txctx, mutation, record); err != nil {
+						return err
+					}
+				}
 			}
 			if locked.phase == runtimeeffects.CompletionProjectionResponseConsumed {
 				return requireMatchingCompletionSuccessor(locked.successor, successor)
@@ -554,7 +565,7 @@ func (s *EffectPostgresOwner) ConsumeCompletionResponse(ctx context.Context, att
 	return effectMutationError(result.Acknowledged(), result.Err(), runtimeeffects.MutationProjection, attempt)
 }
 
-func (s *EffectSQLiteOwner) ConsumeCompletionResponse(ctx context.Context, attempt runtimeeffects.Attempt, successor *agentframe.ToolContinuation) error {
+func (s *EffectSQLiteOwner) ConsumeCompletionResponse(ctx context.Context, attempt runtimeeffects.Attempt, successor, terminalResult *agentframe.ToolContinuation) error {
 	if err := s.requireCurrent(); err != nil {
 		return err
 	}
@@ -568,6 +579,17 @@ func (s *EffectSQLiteOwner) ConsumeCompletionResponse(ctx context.Context, attem
 			if err != nil {
 				return err
 			}
+			if terminalResult != nil {
+				record, err := consumedToolResultConversation(attempt, locked, successor, *terminalResult)
+				if err != nil {
+					return err
+				}
+				if record.Memory.Enabled {
+					if err := s.llm.ConsumeCompletionConversationTx(txctx, mutation, record, time.Now().UTC()); err != nil {
+						return err
+					}
+				}
+			}
 			if locked.phase == runtimeeffects.CompletionProjectionResponseConsumed {
 				return requireMatchingCompletionSuccessor(locked.successor, successor)
 			}
@@ -580,6 +602,21 @@ func (s *EffectSQLiteOwner) ConsumeCompletionResponse(ctx context.Context, attem
 		return struct{}{}, err
 	})
 	return effectMutationError(result.Acknowledged(), result.Err(), runtimeeffects.MutationProjection, attempt)
+}
+
+func consumedToolResultConversation(attempt runtimeeffects.Attempt, locked lockedCompletionContinuation, successor *agentframe.ToolContinuation, result agentframe.ToolContinuation) (runtimellm.ConversationRecord, error) {
+	if successor != nil || (locked.phase != runtimeeffects.CompletionProjectionConversationProjected && locked.phase != runtimeeffects.CompletionProjectionResponseConsumed) {
+		return runtimellm.ConversationRecord{}, errors.New("terminal tool results require a projected response without a successor")
+	}
+	admitted, err := runtimeeffects.AdmitCompletionContinuation(attempt, json.RawMessage(locked.evidence), locked.requestFingerprint, locked.surface, locked.phase, json.RawMessage(locked.successor))
+	if err != nil {
+		return runtimellm.ConversationRecord{}, err
+	}
+	snapshot, ok := admitted.CompletionContinuation()
+	if !ok {
+		return runtimellm.ConversationRecord{}, errors.New("terminal tool results require exact immutable completion evidence")
+	}
+	return runtimellm.CompletionToolResultConversation(snapshot.Payload, attempt.Adapter, result)
 }
 
 func validateCompletionSuccessor(attempt runtimeeffects.Attempt, successor *agentframe.ToolContinuation) (any, error) {

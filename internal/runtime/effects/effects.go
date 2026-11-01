@@ -568,7 +568,7 @@ type CompletionConversationProjection struct {
 type CompletionContinuationStore interface {
 	RecoverCompletionContinuation(context.Context, CompletionContinuationRequest) (Attempt, bool, error)
 	ProjectCompletionConversation(context.Context, Attempt, CompletionConversationProjection) error
-	ConsumeCompletionResponse(context.Context, Attempt, *agentframe.ToolContinuation) error
+	ConsumeCompletionResponse(context.Context, Attempt, *agentframe.ToolContinuation, *agentframe.ToolContinuation) error
 }
 
 type CompletionHeartbeatStore interface {
@@ -1466,11 +1466,11 @@ func (h *Handle) ProjectCompletionConversation(ctx context.Context, projection C
 	return reportPostCommitMutation(h.controller.completionContinuationStore.ProjectCompletionConversation(context.WithoutCancel(ctx), h.attempt, projection))
 }
 
-func (h *Handle) ConsumeCompletionResponse(ctx context.Context, successor *agentframe.ToolContinuation) error {
+func (h *Handle) ConsumeCompletionResponse(ctx context.Context, successor, terminalResult *agentframe.ToolContinuation) error {
 	if h == nil || h.controller == nil || h.controller.completionContinuationStore == nil {
 		return runtimefailures.New(runtimefailures.ClassDependencyUnavailable, "completion_continuation_store_missing", "external-effects", "consume_completion", nil)
 	}
-	return reportPostCommitMutation(h.controller.completionContinuationStore.ConsumeCompletionResponse(context.WithoutCancel(ctx), h.attempt, successor))
+	return reportPostCommitMutation(h.controller.completionContinuationStore.ConsumeCompletionResponse(context.WithoutCancel(ctx), h.attempt, successor, terminalResult))
 }
 
 func (h *Handle) Fail(ctx context.Context, state State, class runtimefailures.Class, code, component, operation string, attributes map[string]any, cause error) error {

@@ -59,8 +59,8 @@ func (s credentialCacheActorEffects) RecoverCompletionContinuation(ctx context.C
 func (s credentialCacheActorEffects) ProjectCompletionConversation(ctx context.Context, a runtimeeffects.Attempt, p runtimeeffects.CompletionConversationProjection) error {
 	return s.actor(a.Token.AgentID).ProjectCompletionConversation(ctx, a, p)
 }
-func (s credentialCacheActorEffects) ConsumeCompletionResponse(ctx context.Context, a runtimeeffects.Attempt, continuation *agentframe.ToolContinuation) error {
-	return s.actor(a.Token.AgentID).ConsumeCompletionResponse(ctx, a, continuation)
+func (s credentialCacheActorEffects) ConsumeCompletionResponse(ctx context.Context, a runtimeeffects.Attempt, continuation, terminalResult *agentframe.ToolContinuation) error {
+	return s.actor(a.Token.AgentID).ConsumeCompletionResponse(ctx, a, continuation, terminalResult)
 }
 func (s credentialCacheActorEffects) ProjectCommittedCompletionSpend(ctx context.Context, p runtimeeffects.CompletionSpendProjection) {
 	token, _ := runtimeeffects.LifecycleTokenFromContext(ctx)

@@ -202,15 +202,56 @@ func validateCompletionContinuation(continuation completionContinuationEnvelope,
 }
 
 func ValidateCompletionToolContinuation(payload json.RawMessage, adapter string, successor agentframe.ToolContinuation) error {
+	_, err := completionForToolContinuation(payload, adapter, successor)
+	return err
+}
+
+func completionForToolContinuation(payload json.RawMessage, adapter string, successor agentframe.ToolContinuation) (*completionContinuationEnvelope, error) {
 	continuation, err := completionContinuationForPayload(payload, adapter)
 	if err != nil {
-		return err
+		return nil, err
 	}
 	if continuation == nil || successor.Validate() != nil || strings.TrimSpace(continuation.Projection.FrameID) == "" ||
 		successor.ParentFrameID() != strings.TrimSpace(continuation.Projection.FrameID) {
-		return runtimefailures.New(runtimefailures.ClassLifecycleConflict, "completion_successor_frame_mismatch", "llm-completion-authority", "consume_completion", map[string]any{"adapter": strings.TrimSpace(adapter)})
+		return nil, runtimefailures.New(runtimefailures.ClassLifecycleConflict, "completion_successor_frame_mismatch", "llm-completion-authority", "consume_completion", map[string]any{"adapter": strings.TrimSpace(adapter)})
 	}
-	return nil
+	return continuation, nil
+}
+
+// CompletionToolResultConversation appends actual tool output to the immutable
+// projected turn without adding a provider turn or inventing a successor.
+func CompletionToolResultConversation(payload json.RawMessage, adapter string, result agentframe.ToolContinuation) (ConversationRecord, error) {
+	continuation, err := completionForToolContinuation(payload, adapter, result)
+	if err != nil {
+		return ConversationRecord{}, err
+	}
+	var entries []struct {
+		CallID  string          `json:"tool_call_id"`
+		Name    string          `json:"name"`
+		OK      *bool           `json:"ok"`
+		Result  json.RawMessage `json:"result"`
+		Failure json.RawMessage `json:"failure"`
+	}
+	if err := json.Unmarshal(result.ToolResult(), &entries); err != nil {
+		return ConversationRecord{}, err
+	}
+	calls := continuation.Response.ToolCalls
+	if len(calls) == 0 || len(entries) != len(calls) {
+		return ConversationRecord{}, fmt.Errorf("completion tool results do not cover the exact assistant calls")
+	}
+	for i, call := range calls {
+		if entries[i].CallID != call.ID || entries[i].Name != call.Name || entries[i].OK == nil {
+			return ConversationRecord{}, fmt.Errorf("completion tool result %d differs from its assistant call", i)
+		}
+		if (*entries[i].OK && (len(entries[i].Result) == 0 || len(entries[i].Failure) != 0)) ||
+			(!*entries[i].OK && (len(entries[i].Failure) == 0 || len(entries[i].Result) != 0)) {
+			return ConversationRecord{}, fmt.Errorf("completion tool result %d lacks its actual outcome", i)
+		}
+	}
+	projection := continuation.Projection
+	messages := append(append([]Message(nil), projection.Messages...), Message{Role: "tool", Content: string(result.ToolResult())})
+	return ConversationRecord{SessionID: projection.SessionID, AgentID: projection.Identity.AgentID(), Identity: projection.Identity,
+		Memory: projection.Memory, Messages: messages, TurnCount: projection.TurnCount, Status: "active"}, nil
 }
 
 func recoverCompletionContinuation(ctx context.Context, controller *runtimeeffects.Controller, registry sessions.Registry, lockOwner string, session *Session, adapter string) (*Response, bool, error) {
@@ -325,11 +366,11 @@ func projectCompletionContinuation(ctx context.Context, dispatch *completionDisp
 	return true, projectionErr
 }
 
-func consumeCompletionContinuation(ctx context.Context, response *Response, successor *agentframe.ToolContinuation) error {
+func consumeCompletionContinuation(ctx context.Context, response *Response, successor, terminalResult *agentframe.ToolContinuation) error {
 	if response == nil || response.completionHandle == nil {
 		return nil
 	}
-	err := response.completionHandle.ConsumeCompletionResponse(ctx, successor)
+	err := response.completionHandle.ConsumeCompletionResponse(ctx, successor, terminalResult)
 	if err != nil {
 		attempt := response.completionHandle.Attempt()
 		if response.completionAttempt == nil || response.completionAttempt.OperationID != attempt.OperationID || response.completionAttempt.AttemptID != attempt.AttemptID ||

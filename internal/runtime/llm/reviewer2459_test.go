@@ -43,8 +43,8 @@ func (p *reviewer2459ProjectionProbe) ProjectCompletionConversation(ctx context.
 	return committed
 }
 
-func (p *reviewer2459ProjectionProbe) ConsumeCompletionResponse(ctx context.Context, a runtimeeffects.Attempt, successor *agentframe.ToolContinuation) error {
-	p.settledContinuationProbe.ConsumeCompletionResponse(ctx, a, successor)
+func (p *reviewer2459ProjectionProbe) ConsumeCompletionResponse(ctx context.Context, a runtimeeffects.Attempt, successor, terminalResult *agentframe.ToolContinuation) error {
+	p.settledContinuationProbe.ConsumeCompletionResponse(ctx, a, successor, terminalResult)
 	if p.consumeFault != nil {
 		if p.consumeForeign {
 			a.AttemptID = uuid.NewString()
@@ -350,7 +350,7 @@ func TestReviewer2459RecoveryProjectionAcknowledgedErrorKeepsResponse(t *testing
 	if len(probe.projections) != 1 || probe.projections[0].ExpectedTurnCount != 0 || probe.projections[0].TurnCount != 1 || probe.projections[0].SessionID != session.ID {
 		t.Fatalf("canonical projection calls=%#v", probe.projections)
 	}
-	if err := consumeCompletionContinuation(ctx, response, nil); err != nil {
+	if err := consumeCompletionContinuation(ctx, response, nil, nil); err != nil {
 		t.Fatal(err)
 	}
 	if probe.consumed != 1 {
@@ -371,7 +371,7 @@ func TestReviewer2459RecoveryProjectionAcknowledgedErrorKeepsResponse(t *testing
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			probe.consumeIndependent, probe.consumeForeign, probe.consumePhase = tc.independent, tc.foreign, tc.phase
-			consumeErr := consumeCompletionContinuation(ctx, response, nil)
+			consumeErr := consumeCompletionContinuation(ctx, response, nil, nil)
 			if consumeErr == nil {
 				t.Fatal("unacknowledged consumption was accepted")
 			}

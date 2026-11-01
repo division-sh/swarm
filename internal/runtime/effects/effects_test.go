@@ -163,7 +163,7 @@ func (*completionStoreProbe) ProjectCompletionConversation(context.Context, Atte
 	return nil
 }
 
-func (*completionStoreProbe) ConsumeCompletionResponse(context.Context, Attempt, *agentframe.ToolContinuation) error {
+func (*completionStoreProbe) ConsumeCompletionResponse(context.Context, Attempt, *agentframe.ToolContinuation, *agentframe.ToolContinuation) error {
 	return nil
 }
 

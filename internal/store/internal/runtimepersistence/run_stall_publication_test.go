@@ -247,7 +247,7 @@ func proveRunStallPublicationEvidence(t *testing.T, adapter, scope, phase string
 				}
 			}
 		}
-		if err := handle.ConsumeCompletionResponse(ctx, nil); err != nil {
+		if err := handle.ConsumeCompletionResponse(ctx, nil, nil); err != nil {
 			t.Fatal(err)
 		}
 		wantFailureCode := ""
