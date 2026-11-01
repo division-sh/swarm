@@ -1227,7 +1227,7 @@ func runOperatorChannelSupportedSurface(t *testing.T, backend servedparity.Backe
 	if err != nil {
 		t.Fatal(err)
 	}
-	recoveredPrincipal, recoveredBindings, err := recoveredService.Bootstrap(fixture.ctx, now.Add(10*time.Minute))
+	recoveredPrincipal, recoveredBindings, err := recoveredService.Bootstrap(recoveredFixture.ctx, now.Add(10*time.Minute))
 	if err != nil {
 		t.Fatal(err)
 	}
