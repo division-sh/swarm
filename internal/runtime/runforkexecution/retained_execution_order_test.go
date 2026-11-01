@@ -12,6 +12,7 @@ import (
 	"time"
 
 	"github.com/division-sh/swarm/internal/runtime/bus"
+	"github.com/division-sh/swarm/internal/runtime/core/activityidentity"
 	"github.com/division-sh/swarm/internal/runtime/correlation"
 	runtimecredentials "github.com/division-sh/swarm/internal/runtime/credentials"
 	"github.com/division-sh/swarm/internal/runtime/deliverylifecycle"
@@ -295,6 +296,14 @@ func proveRetainedAcknowledgment(t *testing.T, fault string) {
 			owner.ports.fork, owner.ports.replay = probe, probe
 			request.Owner = owner
 			attachment := q1StageBranchPointComponent(t, ctx, request)
+			var childBefore map[string]storetest.SelectedForkStorageTableSnapshot
+			if fault == "continuation" {
+				var err error
+				childBefore, err = storetest.ReadSelectedForkSourceDomain(ctx, selected, attachment.materialized.ForkRunID)
+				if err != nil {
+					t.Fatal(err)
+				}
+			}
 			if err := owner.retainPrepared(attachment.prepared); err != nil {
 				t.Fatal(err)
 			}
@@ -440,9 +449,31 @@ func proveRetainedAcknowledgment(t *testing.T, fault string) {
 			if err != nil || found || !reflect.DeepEqual(record, after) {
 				t.Fatalf("private failure fabricated an acknowledged creation: %+v %v", after, err)
 			}
+			wantInputs := 0
+			if fault == "continuation" {
+				wantInputs = 1
+				inputID := activityidentity.ForkLineageEventID(result.Materialization.ForkRunID, request.At)
+				input := storetest.LoadCanonicalEventRecord(t, wait, selected, inputID)
+				source := storetest.LoadCanonicalEventRecord(t, wait, selected, request.At)
+				lineage, retained := input.SelectedForkLineage()
+				if !retained || lineage.SourceRunID() != sourceID || lineage.SourceEventID() != request.At ||
+					input.RunID() != result.Materialization.ForkRunID || input.Type() != source.Type() ||
+					input.ExecutionMode() != source.ExecutionMode() || !reflect.DeepEqual(input.Payload(), source.Payload()) {
+					t.Fatalf("failed startup lost its exact committed input: %+v lineage=%+v", input, lineage)
+				}
+				childAfter, err := storetest.ReadSelectedForkSourceDomain(wait, selected, result.Materialization.ForkRunID)
+				if err != nil {
+					t.Fatal(err)
+				}
+				for _, table := range []string{"entity_state", "entity_mutations", "event_delivery_attempts"} {
+					if !reflect.DeepEqual(childBefore[table], childAfter[table]) {
+						t.Fatalf("failed continuation startup dispatched child work in %s", table)
+					}
+				}
+			}
 			cardinality, err := storetest.ReadLifecycleEventCardinality(wait, selected, result.Materialization.ForkRunID, "item.received")
-			if err != nil || cardinality != 0 {
-				t.Fatalf("failed publication leaked or duplicated business events: count=%d %v", cardinality, err)
+			if err != nil || cardinality != wantInputs {
+				t.Fatalf("failed startup input conservation: count=%d want=%d %v", cardinality, wantInputs, err)
 			}
 			sourceAfter, err := storetest.ReadSelectedForkSourceDomain(wait, selected, sourceID)
 			if err != nil || !reflect.DeepEqual(sourceBefore, sourceAfter) {
