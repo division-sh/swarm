@@ -1064,7 +1064,7 @@ units:
   serveapp-other:
     packages:
       - github.com/division-sh/swarm/internal/serveapp
-    run: '^Test([ABD-H].*|2376.*)$'
+    run: '^Test([ABD-H].*|2376.*|InterruptedReadOnlyProviderTurnResumesOnlyInterruptedCallBothStores)$'
     required_children:
       TestAudit2277ForkDurableResultBypassesGenericCompletionBothStores: [default_sqlite, explicit_postgres]
       TestExactOriginPublicationWaitHeldDiagnosticBothStores: [default_sqlite, explicit_postgres]
