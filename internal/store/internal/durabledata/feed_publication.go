@@ -10,6 +10,7 @@ import (
 
 	"github.com/division-sh/swarm/internal/apiidempotency"
 	runtimedata "github.com/division-sh/swarm/internal/durabledata"
+	"github.com/division-sh/swarm/internal/runtime/runlifecycle"
 	"github.com/google/uuid"
 )
 
@@ -191,6 +192,16 @@ func RequireFeedSourceTx(ctx context.Context, o *Owner, tx *sql.Tx, runID, bundl
 		return runtimedata.PinnedSource{}, err
 	}
 	if publications != 0 {
+		legacy := runtimedata.DeploymentFeed{RunID: runID, Declaration: ref}
+		if feedID == legacy.PublicationID() {
+			var origin runlifecycle.OriginKind
+			if err := tx.QueryRowContext(ctx, o.query(`SELECT origin_kind FROM runs WHERE run_id=%s`, 1), runID).Scan(&origin); err != nil {
+				return runtimedata.PinnedSource{}, err
+			}
+			if origin == runlifecycle.OriginForkMaterialization {
+				return o.pinnedSourceTx(ctx, tx, runID, bundleHash, ref)
+			}
+		}
 		var request, summary, binding, evidence []byte
 		var hash string
 		err := tx.QueryRowContext(ctx, o.query(`SELECT request_hash,request_json,summary_json,binding_json,evidence_json

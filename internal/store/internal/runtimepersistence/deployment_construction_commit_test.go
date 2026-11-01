@@ -220,6 +220,27 @@ func TestDeploymentConstructionNativeCommitBothStores(t *testing.T) {
 				if _, err := planner.PlanRunFork(ctx, runfork.RunForkPlanRequest{SourceRunID: uuid.NewString(), PublicationID: publicationID}); err == nil {
 					t.Fatal("foreign publication admitted as this run's fork cut")
 				}
+				forkOwner := selected.(interface {
+					LoadRunRootedSource(context.Context, string) (sourceartifact.RootedSource, error)
+					MaterializeRunFork(context.Context, runfork.RunForkMaterializeRequest) (runfork.RunForkMaterialization, error)
+				})
+				rooted, err := forkOwner.LoadRunRootedSource(ctx, runID)
+				if err != nil {
+					t.Fatal(err)
+				}
+				fork, err := forkOwner.MaterializeRunFork(ctx, runfork.RunForkMaterializeRequest{SourceRunID: runID,
+					RootAdmission: rooted.Admission(), OriginalLoopCarriage: originalCarriageForRun(t, selected, runID)})
+				if err != nil {
+					t.Fatalf("fork mixed legacy and publication feeds: %v", err)
+				}
+				legacyFeed := durabledata.DeploymentFeed{RunID: fork.ForkRunID, Declaration: ref}
+				legacySource, err := resourceOwner.LoadFeedSource(ctx, fork.ForkRunID, catalog.BundleHash, legacyFeed.PublicationID(), ref)
+				if err != nil || legacySource.VersionID != imported.Candidate.VersionID {
+					t.Fatalf("fork lost legacy pin beside publication feeds: %+v err=%v", legacySource, err)
+				}
+				if _, err := resourceOwner.LoadFeedSource(ctx, fork.ForkRunID, catalog.BundleHash, uuid.NewString(), ref); err == nil {
+					t.Fatal("fork admitted a missing publication as its legacy feed")
+				}
 			})
 		}
 	}
