@@ -988,7 +988,11 @@ func recoverServeSelectedForkContexts(ctx context.Context, capabilities selected
 	return err
 }
 
-func buildRuntimeComposition(ctx context.Context, req runtimeCompositionRequest) (exitCode int) {
+func buildRuntimeComposition(ctx context.Context, req runtimeCompositionRequest) int {
+	return buildRuntimeHost(ctx, req, reconcileServeFlowRuns)
+}
+
+func buildRuntimeHost(ctx context.Context, req runtimeCompositionRequest, reconcileFlows func(context.Context, runtimerunlifecycle.FlowRunOwner, []serveRuntimeBundleContext) error) (exitCode int) {
 	repo, opts, cfgResult := req.Repo, req.Options, req.Config
 	publicListener := opts.PublicWebhookListener
 	defer func() {
@@ -1510,8 +1514,8 @@ func buildRuntimeComposition(ctx context.Context, req runtimeCompositionRequest)
 			return exitCode
 		}
 	}
-	if rt != nil {
-		if err := reconcileServeFlowRuns(ctx, rt.Pipeline, runtimeContexts); err != nil {
+	if rt != nil && reconcileFlows != nil {
+		if err := reconcileFlows(ctx, rt.Pipeline, runtimeContexts); err != nil {
 			presenter.fail(5, "runtime_context", err)
 			return 1
 		}

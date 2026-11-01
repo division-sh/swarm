@@ -1165,12 +1165,31 @@ func (r scenarioRunner) runPublishStep(ctx context.Context, file scenarioTestFil
 			"entity_id":     targetEntityText,
 		}
 	}
+	if state.RunID == "" {
+		return r.startPublicationRun(ctx, state, params)
+	}
 	var result eventPublishResult
 	if err := r.client.call(ctx, eventPublishMethod, params, &result); err != nil {
 		return err
 	}
 	if err := validateEventPublishResult(result); err != nil {
 		return err
+	}
+	state.RunID = result.RunID
+	state.LastEventID = result.EventID
+	return nil
+}
+
+func (r scenarioRunner) startPublicationRun(ctx context.Context, state *scenarioRunState, params map[string]any) error {
+	var result runStartResult
+	if err := r.client.call(ctx, "run.start", params, &result); err != nil {
+		return err
+	}
+	if err := validateRunStartResult(result); err != nil {
+		return err
+	}
+	if strings.TrimSpace(result.EventID) == "" {
+		return fmt.Errorf("malformed run.start result: event_id is required for a scenario publication")
 	}
 	state.RunID = result.RunID
 	state.LastEventID = result.EventID
