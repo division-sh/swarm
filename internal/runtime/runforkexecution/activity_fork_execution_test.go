@@ -524,8 +524,7 @@ connect:
   - {event: review.retry, from: ., to: flow_a}
   - {event: review.close, from: ., to: flow_a}
 `,
-		"events.yaml":   "review.requested:\n  revision_id: text\nreview.start:\nreview.retry:\n  revision_id: text\nreview.close:\n  revision_id: text\n",
-		"entities.yaml": "root: {}\n",
+		"events.yaml": "review.requested:\n  revision_id: text\nreview.start:\nreview.retry:\n  revision_id: text\nreview.close:\n  revision_id: text\n",
 		"flow_a/schema.yaml": `stages:
   pending: {}
   review: {}

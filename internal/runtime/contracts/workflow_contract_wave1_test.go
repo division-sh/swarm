@@ -353,7 +353,7 @@ func TestWorkflowContractBundleResolveFlowTemplateInstance_UsesScalarIdentity(t 
 		{name: "policy before provider emission", policy: "+15550100"},
 		{name: "dynamic state before provider emission", stateType: "text"},
 		{name: "missing account", want: "requires operator_account"},
-		{name: "policy and state", policy: "+15550100", stateType: "text", want: "both policy.yaml and entities.yaml"},
+		{name: "policy and state", policy: "+15550100", stateType: "text", want: "both policy.yaml and state.yaml"},
 		{name: "key and policy", key: "operator_account", stateType: "text", policy: "+15550100", want: "both schema.yaml instance and policy.yaml"},
 		{name: "another key", key: "other", stateType: "text", want: "must be operator_account"},
 		{name: "nontext policy", policy: true, want: "nonempty account string"},
@@ -370,7 +370,7 @@ func TestWorkflowContractBundleResolveFlowTemplateInstance_UsesScalarIdentity(t 
 			}
 			candidate := &WorkflowContractBundle{
 				RootSchema:   schema,
-				RootEntities: EntityContractsDocument{"account": {Fields: fields}},
+				RootEntities: EntityContractsDocument{stateEntityType: {Fields: fields}},
 				Policy:       PolicyDocument{Values: map[string]PolicyValue{}},
 			}
 			if cell.policy != nil {

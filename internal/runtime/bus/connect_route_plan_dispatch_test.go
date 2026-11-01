@@ -183,7 +183,7 @@ func TestConnectRoutePlanEventConsumersEnforceProducerMode(t *testing.T) {
 			}
 			if tc.mode == runtimecontracts.FlowModeTemplate {
 				files["producer/schema.yaml"] += "instance: instance_key\n"
-				files["producer/entities.yaml"] = "work:\n  instance_key: {type: text, _unused_reason: fixture instance identity}\n"
+				files["producer/state.yaml"] = "instance_key: text\n"
 			}
 			source := semanticview.Wrap(loadTargetRouteTempBundle(t, files))
 			graph := runtimepinrouting.CompileConnectGraph(source)
@@ -775,7 +775,7 @@ func connectReceiverPinCollisionSource(t *testing.T, producerMode string, rootRe
 	}
 	if producerMode == runtimecontracts.FlowModeTemplate {
 		files["producer/schema.yaml"] += "instance: instance_key\n"
-		files["producer/entities.yaml"] = "work:\n  instance_key: {type: text, _unused_reason: fixture instance identity}\n"
+		files["producer/state.yaml"] = "instance_key: text\n"
 	}
 	receiverPrefix := "consumer"
 	if rootReceiver {

@@ -101,13 +101,16 @@ func TestStateDeclarationRetainedStyleAndLiteralAdmission(t *testing.T) {
 	t.Run("retained_flow_binding", func(t *testing.T) {
 		root := t.TempDir()
 		for file, body := range map[string]string{
-			"schema.yaml":           "stages: {done: {final: true}}\n",
-			"types.yaml":            "types:\n  Profile:\n    name: text\n",
-			"state.yaml":            "profile: Profile\nready: false\n",
-			"child/schema.yaml":     "stages: {done: {final: true}}\n",
-			"child/types.yaml":      "types:\n  Local:\n    count: integer\n",
-			"child/state.yaml":      "profile: Profile\nlocal: Local\n",
-			"stateless/schema.yaml": "stages: {done: {final: true}}\n",
+			"manifest.yaml":           "version: 1.0.0\nplatform_version: '*'\n",
+			"schema.yaml":             "stages: {done: {final: true}}\n",
+			"types.yaml":              "types:\n  Profile:\n    name: text\n",
+			"state.yaml":              "profile: Profile\nready: false\n",
+			"child/manifest.yaml":     "version: 1.0.0\nplatform_version: '*'\n",
+			"child/schema.yaml":       "stages: {done: {final: true}}\n",
+			"child/types.yaml":        "types:\n  Local:\n    count: integer\n",
+			"child/state.yaml":        "profile: Profile\nlocal: Local\n",
+			"stateless/manifest.yaml": "version: 1.0.0\nplatform_version: '*'\n",
+			"stateless/schema.yaml":   "stages: {done: {final: true}}\n",
 		} {
 			writeFixtureFile(t, filepath.Join(root, file), body)
 		}

@@ -554,6 +554,13 @@ pins:
 	writeClosedVariantFile(t, root, prefix+"events.yaml", events)
 	writeClosedVariantFile(t, root, prefix+"nodes.yaml", nodes)
 	writeClosedVariantFile(t, root, prefix+"state.yaml", "result: text\n")
+	for _, name := range []string{"manifest.yaml", "trigger.yaml", "connector.yaml", "channel.yaml"} {
+		body, err := os.ReadFile(filepath.Join(RepoRoot(t), "packs/providers/telegram", name))
+		if err != nil {
+			t.Fatal(err)
+		}
+		writeClosedVariantFile(t, root, "telegram/"+name, string(body))
+	}
 	return root
 }
 

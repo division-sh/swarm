@@ -249,19 +249,19 @@ func TestQ10OperatorAndAgentLifecycleReadbackBothStores(t *testing.T) {
 				{"numeric fields retain numeric comparison", entityquery.Predicate{Field: "score", Op: ">", Value: int64(2)}, 1},
 			} {
 				t.Run(tc.name, func(t *testing.T) {
-					count, err := counter.CountWorkflowEntities(ctx, entityquery.Request{RunID: runID, Source: source, Contract: contract, Predicate: tc.predicate})
+					count, err := counter.CountWorkflowEntities(ctx, entityquery.Request{RunID: runID, FlowID: "nostage", Source: source, Contract: contract, Predicate: tc.predicate})
 					if err != nil || count != tc.want {
 						t.Fatalf("handler count = %d, want %d: %v", count, tc.want, err)
 					}
 				})
 			}
-			_, err = counter.CountWorkflowEntities(ctx, entityquery.Request{RunID: runID, Source: source, Contract: contract,
+			_, err = counter.CountWorkflowEntities(ctx, entityquery.Request{RunID: runID, FlowID: "nostage", Source: source, Contract: contract,
 				Predicate: entityquery.Predicate{Field: "current_state", Op: ">", Value: "unknown"}})
 			var nullComparison *entityquery.NullComparisonError
 			if !errors.As(err, &nullComparison) {
 				t.Fatalf("ordered absent stage must fail typed, not compare a sentinel: %v", err)
 			}
-			if _, err := counter.CountWorkflowEntities(ctx, entityquery.Request{RunID: runID, Source: source, Contract: contract,
+			if _, err := counter.CountWorkflowEntities(ctx, entityquery.Request{RunID: runID, FlowID: "nostage", Source: source, Contract: contract,
 				Predicate: entityquery.Predicate{Field: "current_state", Op: "==", Value: nil}}); err == nil {
 				t.Fatal("handler query must retain its non-null RHS grammar")
 			}

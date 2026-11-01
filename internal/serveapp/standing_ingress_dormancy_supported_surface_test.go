@@ -345,7 +345,7 @@ func testDormantIngressDoesNotWaiveIndependentOutboundCredential(t *testing.T) {
 	unsetEnvForTest(t, "TELEGRAM_BOT_TOKEN")
 	unsetEnvForTest(t, "telegram.telegram_bot_token")
 	root := writeStandingTelegramServeFixture(t, "http://127.0.0.1:1")
-	for _, file := range []string{"agents.yaml", "events.yaml", "state.yaml"} {
+	for _, file := range []string{"agents.yaml", "events.yaml"} {
 		if err := os.Remove(filepath.Join(root, "telegram-chat", file)); err != nil {
 			t.Fatal(err)
 		}

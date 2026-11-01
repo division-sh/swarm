@@ -31,15 +31,14 @@ func TestAuthenticatedAccountSelectsOnlyItsConstructedHolder(t *testing.T) {
 			}
 			flows := []string{"fixed", "keyed", "dynamic"}
 			members := map[string][]byte{"manifest.yaml": []byte("version: 1.0.0\nplatform_version: '*'\n"),
-				"schema.yaml": []byte("stages:\n  active: {}\n"), "entities.yaml": []byte("root_state: {}\n")}
+				"schema.yaml": []byte("stages:\n  active: {}\n")}
 			for index, flow := range flows {
 				members[flow+"/manifest.yaml"] = []byte("version: 1.0.0\nplatform_version: '*'\n")
 				members[flow+"/schema.yaml"] = []byte("stages:\n  active: {}\npins:\n  inputs: [inbound." + provider + "." + eventName + "]\n")
-				members[flow+"/entities.yaml"] = []byte("desk_state: {}\n")
 				if flow == "fixed" {
 					members[flow+"/policy.yaml"] = []byte(fmt.Sprintf("operator_account: %q\n", accounts[index]))
 				} else {
-					members[flow+"/entities.yaml"] = []byte("desk_state:\n  operator_account: text\n")
+					members[flow+"/state.yaml"] = []byte("operator_account: text\n")
 					if flow == "keyed" {
 						members[flow+"/schema.yaml"] = append(members[flow+"/schema.yaml"], []byte("instance: operator_account\n")...)
 					}

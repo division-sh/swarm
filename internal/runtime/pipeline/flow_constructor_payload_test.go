@@ -141,7 +141,7 @@ func TestFlowInstanceKeyRequiresScalarAdmissionBeforeFormatting(t *testing.T) {
 		members := map[string]string{
 			"manifest.yaml": "version: 1.0.0\nplatform_version: '*'\n",
 			"schema.yaml":   "instance: operator_account\nstages:\n  active: {}\npins:\n  inputs: [account.created, inbound.whatsapp.message]\n",
-			"entities.yaml": "account_state:\n  operator_account: text\n",
+			"state.yaml":    "operator_account: text\n",
 			"events.yaml":   "account.created:\n  operator_account: text\n",
 		}
 		for _, role := range []string{"manifest", "trigger", "connector", "channel"} {
