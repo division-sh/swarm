@@ -312,7 +312,10 @@ func (am *AgentManager) retireRemovedStaticTopology(
 	if err != nil {
 		return err
 	}
-	subordinate, planHash, err := normalizedLifecycleSubordinate(reconfigureSessionMutationPlan(current.Config, current.Config))
+	subordinate, planHash, err := normalizedLifecycleSubordinate(runtimesessions.LifecycleMutationPlan{
+		Action: runtimesessions.LifecycleMutationTerminateCurrentSet, TerminationReason: runtimesessions.TerminationReasonNormal,
+		TerminationDetail: "agent_static_source_retired",
+	})
 	if err != nil {
 		return err
 	}
@@ -1180,7 +1183,10 @@ func (am *AgentManager) commitStaticTopologyReconciliation(ctx context.Context, 
 		operationKind = "teardown"
 		targetPhase = AgentLifecycleTerminated
 		targetAgent = nil
-		plan = reconfigureSessionMutationPlan(current.Config, current.Config)
+		plan = runtimesessions.LifecycleMutationPlan{
+			Action: runtimesessions.LifecycleMutationTerminateCurrentSet, TerminationReason: runtimesessions.TerminationReasonNormal,
+			TerminationDetail: "agent_static_topology_removed",
+		}
 	} else if expectedGeneration > 0 {
 		plan = reconfigureSessionMutationPlan(current.Config, desired.Config)
 	}

@@ -381,9 +381,6 @@ func (r *ClaudeCLIRuntime) claudeContinuationArgs(s *Session, childSessionID, co
 		}
 		args = appendClaudePrintModeArgs(args, r.cfg)
 		args = append(args, permissionModeArgs()...)
-		if strings.TrimSpace(s.SystemPrompt) != "" {
-			args = append(args, "--system-prompt", s.SystemPrompt)
-		}
 		args = append(args, "--tools", toolProjection.builtinSelectionArg())
 		args = append(args, "--allowedTools", toolProjection.permissionAdmissionArg())
 		if mcpEnabled {
@@ -404,6 +401,9 @@ func (r *ClaudeCLIRuntime) claudeContinuationArgs(s *Session, childSessionID, co
 		if mcpEnabled {
 			args = append(args, "--mcp-config", mcpConfig, "--strict-mcp-config")
 		}
+	}
+	if strings.TrimSpace(s.SystemPrompt) != "" {
+		args = append(args, "--system-prompt", s.SystemPrompt)
 	}
 	if completionModel != "" {
 		args = append(args, "--model", completionModel)
