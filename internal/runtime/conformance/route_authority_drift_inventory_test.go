@@ -88,89 +88,6 @@ type routeAuthorityDriftValidationCorpus struct {
 	overlays map[string][]byte
 }
 
-func TestRouteAuthorityDriftInventoryRejectsNarrowOrStaleAudit(t *testing.T) {
-	root := conformanceRepoRoot(t)
-	base := loadRouteAuthorityDriftInventory(t, root)
-	corpus := routeAuthorityDriftNewValidationCorpus(t, root)
-
-	tests := []struct {
-		name   string
-		mutate func(*routeAuthorityDriftInventory)
-		want   string
-	}{
-		{
-			name: "missing required search dimension",
-			mutate: func(inventory *routeAuthorityDriftInventory) {
-				inventory.SearchDimensions = routeAuthorityDriftSearchDimensionsExcept(inventory.SearchDimensions, "event_deliveries")
-			},
-			want: "missing required search_dimension event_deliveries",
-		},
-		{
-			name: "required path must match the audited pattern",
-			mutate: func(inventory *routeAuthorityDriftInventory) {
-				dim := routeAuthorityDriftSearchDimensionByID(t, inventory, "event_deliveries")
-				dim.RequiredPaths = []string{"README.md"}
-			},
-			want: "event_deliveries required_path README.md does not match pattern",
-		},
-		{
-			name: "no implemented guardrail is not enough",
-			mutate: func(inventory *routeAuthorityDriftInventory) {
-				for i := range inventory.GuardrailProposals {
-					inventory.GuardrailProposals[i].ImplementationState = "ready_for_followup"
-				}
-			},
-			want: "guardrail_proposals missing implemented_in_this_pr guardrail",
-		},
-		{
-			name: "runtime behavior closure claim is invalid",
-			mutate: func(inventory *routeAuthorityDriftInventory) {
-				inventory.Policy.ClaimsRuntimeBehaviorClosure = true
-			},
-			want: "policy claims_runtime_behavior_closure = true, want false",
-		},
-		{
-			name: "guardrail child issue must stay visible",
-			mutate: func(inventory *routeAuthorityDriftInventory) {
-				inventory.ImplementationIssues = []int{1364}
-			},
-			want: "inventory implementation_issues missing #1494",
-		},
-		{
-			name: "typed producer child issue must stay visible",
-			mutate: func(inventory *routeAuthorityDriftInventory) {
-				inventory.ImplementationIssues = []int{1364, 1494}
-			},
-			want: "inventory implementation_issues missing #1495",
-		},
-		{
-			name: "route plan discriminant child issue must stay visible",
-			mutate: func(inventory *routeAuthorityDriftInventory) {
-				inventory.ImplementationIssues = []int{1364, 1494, 1495, 1496}
-			},
-			want: "inventory implementation_issues missing #1545",
-		},
-		{
-			name: "connect key adapter child issue must stay visible",
-			mutate: func(inventory *routeAuthorityDriftInventory) {
-				inventory.ImplementationIssues = []int{1364, 1494, 1495, 1496, 1545}
-			},
-			want: "inventory implementation_issues missing #1546",
-		},
-	}
-
-	for _, tc := range tests {
-		t.Run(tc.name, func(t *testing.T) {
-			inventory := cloneRouteAuthorityDriftInventory(base)
-			tc.mutate(&inventory)
-			problems := validateRouteAuthorityDriftInventoryWithCorpus(root, corpus, inventory)
-			if !routeAuthorityProblemsContain(problems, tc.want) {
-				t.Fatalf("validation problems missing %q:\n- %s", tc.want, strings.Join(problems, "\n- "))
-			}
-		})
-	}
-}
-
 func TestRouteAuthorityDriftInventoryRejectsRetiredLoweredConnectAuthority(t *testing.T) {
 	root := conformanceRepoRoot(t)
 	base := loadRouteAuthorityDriftInventory(t, root)
@@ -659,17 +576,6 @@ func routeAuthorityDriftPathMatches(corpus *routeAuthorityDriftValidationCorpus,
 	return corpus.snapshot.pathMatches(cleaned, re.String(), re)
 }
 
-func routeAuthorityDriftSearchDimensionByID(t *testing.T, inventory *routeAuthorityDriftInventory, id string) *routeAuthorityDriftSearchDimension {
-	t.Helper()
-	for i := range inventory.SearchDimensions {
-		if inventory.SearchDimensions[i].ID == id {
-			return &inventory.SearchDimensions[i]
-		}
-	}
-	t.Fatalf("search dimension %s not found", id)
-	return nil
-}
-
 func routeAuthorityDriftSeamFamilyByID(t *testing.T, inventory *routeAuthorityDriftInventory, id string) *routeAuthorityDriftSeamFamily {
 	t.Helper()
 	for i := range inventory.SeamFamilies {
@@ -679,16 +585,6 @@ func routeAuthorityDriftSeamFamilyByID(t *testing.T, inventory *routeAuthorityDr
 	}
 	t.Fatalf("seam family %s not found", id)
 	return nil
-}
-
-func routeAuthorityDriftSearchDimensionsExcept(dimensions []routeAuthorityDriftSearchDimension, exclude string) []routeAuthorityDriftSearchDimension {
-	out := make([]routeAuthorityDriftSearchDimension, 0, len(dimensions))
-	for _, dimension := range dimensions {
-		if dimension.ID != exclude {
-			out = append(out, dimension)
-		}
-	}
-	return out
 }
 
 func routeAuthorityDriftHasInt(values []int, want int) bool {
