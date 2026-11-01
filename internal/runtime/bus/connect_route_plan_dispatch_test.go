@@ -4042,9 +4042,7 @@ func TestRoutePlanCanonicalFailClosedDropsExecutableRoutes(t *testing.T) {
 
 	routePlan := newRoutePlan(evt)
 	routePlan.MarkCanonicalRouteFailedClosed(routeIntentProducerConnectRoutePlan, runtimepinrouting.FailureTargetNotSubscribed)
-	routePlan.AddLiveRecipients(RoutePlanLiveRecipient{Recipient: events.MustNodeDeliveryRecipient(testRootNode(t, "bogus-node")), PersistAsDelivery: true,
-		Producer: routeIntentProducerRecipientMaterializer,
-	})
+	routePlan.AddLiveRecipients(RoutePlanLiveRecipient{Recipient: events.MustNodeDeliveryRecipient(testRootNode(t, "bogus-node")), PersistAsDelivery: true})
 	routePlan.AddDeliveryIntents(RoutePlanDeliveryIntent{Recipient: events.MustNodeDeliveryRecipient(testRootNode(t, "bogus-node")), TargetBlueprint: events.RouteIdentity{FlowID: "bogus", FlowInstance: "bogus", EntityID: "bogus"},
 		Producer: routeIntentProducerRecipientMaterializer,
 		Persist:  true,

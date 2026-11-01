@@ -783,26 +783,15 @@ func normalizeDeliveryRecipientCandidates(in []deliveryRecipientCandidate) []del
 		}
 		if idx, ok := indexByKey[key]; ok {
 			out[idx].PersistAsDelivery = out[idx].PersistAsDelivery || candidate.PersistAsDelivery
-			out[idx] = mergeDeliveryRecipientAuthority(out[idx], candidate)
+			out[idx].LiveAuthority, out[idx].AgentRoute = mergeLiveRecipientAuthority(
+				out[idx].LiveAuthority, out[idx].AgentRoute, candidate.LiveAuthority, candidate.AgentRoute,
+			)
 			continue
 		}
 		indexByKey[key] = len(out)
 		out = append(out, candidate)
 	}
 	return out
-}
-
-func mergeDeliveryRecipientAuthority(current, candidate deliveryRecipientCandidate) deliveryRecipientCandidate {
-	if current.LiveAuthority.Normalized() == liveRecipientAuthorityIdentity || candidate.LiveAuthority.Normalized() == liveRecipientAuthorityIdentity {
-		current.LiveAuthority = liveRecipientAuthorityIdentity
-		current.AgentRoute = nil
-		return current
-	}
-	current.LiveAuthority = liveRecipientAuthorityAgentRoute
-	if current.AgentRoute == nil {
-		current.AgentRoute = candidate.AgentRoute
-	}
-	return current
 }
 
 func routedSubscriberCandidates(runID string, in []Subscriber) []deliveryRecipientCandidate {
