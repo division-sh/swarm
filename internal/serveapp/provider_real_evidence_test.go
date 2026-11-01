@@ -146,7 +146,7 @@ func TestProviderRealModelEvidenceSelection(t *testing.T) {
 		o := &providerEvidenceObservation{}
 		o.observe(200, []byte(`{"choices":[{"message":{"content":"","reasoning_content":"synthetic-private-reasoning","tool_calls":[{"id":"read-1","function":{"name":"read_flow_data"}}]}}],"usage":{"prompt_tokens":17,"completion_tokens":3,"cost":0.125}}`))
 		o.observeRequest(strings.NewReader(`{"messages":[{"role":"assistant","content":"","reasoning_content":"synthetic-private-reasoning","tool_calls":[{"id":"read-1"}]},{"role":"tool","tool_call_id":"read-1","content":"synthetic tool result"}]}`))
-		if !o.empty || !o.toolAck || !o.reasoningAck || o.input != 17 || o.output != 3 || o.cost["cost"] != 0.125 {
+		if !o.empty || !o.toolAck || !o.reasoningAck || o.input != 17 || o.output != 3 || o.usageResponses != 1 || o.cost["cost"] != 0.125 {
 			t.Fatal("observation lost exact shape, continuation or usage facts")
 		}
 		o.observe(400, []byte("synthetic-private-provider-error"))
@@ -160,6 +160,13 @@ func TestProviderRealModelEvidenceSelection(t *testing.T) {
 		o.observe(200, []byte(`{"usage":{"cost_usd":null}}`))
 		if _, present := o.cost["cost_usd"]; present {
 			t.Fatal("null provider cost became a zero-cost claim")
+		}
+		missing := &providerEvidenceObservation{}
+		missing.observe(400, []byte(`{"error":{"message":"synthetic refusal"}}`))
+		missing.observe(200, []byte(`{"usage":{"prompt_tokens":null,"completion_tokens":null}}`))
+		missing.observe(200, []byte(`{"usage":{"prompt_tokens":"unknown","completion_tokens":3}}`))
+		if summary := missing.summary(); !strings.Contains(summary, "usage=NOT_REPORTED") || strings.Contains(summary, "input_tokens=0") {
+			t.Fatal("absent provider usage became a zero-token claim")
 		}
 	})
 	t.Run("observation_body_is_transparent", func(t *testing.T) {

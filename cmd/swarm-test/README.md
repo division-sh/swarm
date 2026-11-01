@@ -186,7 +186,9 @@ usage/cost fields. A missing empty-content/reasoning/refusal shape is
 decision is inferred. `refusal` observes a real rejection if one occurs; it does
 not manufacture one by changing the real request or credential. Provider bodies
 are compared privately for preservation, never printed. Cost fields retain their
-provider names/units; absent cost is `NOT_REPORTED`, not zero or an estimate.
+provider names/units; absent usage or cost is `NOT_REPORTED`, not zero or an estimate.
+Token totals include only responses that reported both token fields; their count
+is reported separately from attempted completion requests.
 Report all first-full-run tokens and available cost to the orchestrator for the
 user. Do not publish credentials, account details, raw reasoning/responses,
 unrestricted provider errors, private paths or the private host's name.

@@ -312,6 +312,7 @@ type providerEvidenceObservation struct {
 	requests                  int
 	toolMessages, orphanTools int
 	input, output             int64
+	usageResponses            int
 	empty, tools, toolAck     bool
 	emptyAck                  bool
 	reasoning                 bool
@@ -444,11 +445,14 @@ func (o *providerEvidenceObservation) observe(status int, body []byte) {
 	if json.Unmarshal(body, &parsed) != nil {
 		return
 	}
-	var input, output int64
-	_ = json.Unmarshal(parsed.Usage["prompt_tokens"], &input)
-	_ = json.Unmarshal(parsed.Usage["completion_tokens"], &output)
-	o.input += input
-	o.output += output
+	var input, output *int64
+	inputErr := json.Unmarshal(parsed.Usage["prompt_tokens"], &input)
+	outputErr := json.Unmarshal(parsed.Usage["completion_tokens"], &output)
+	if inputErr == nil && outputErr == nil && input != nil && output != nil && *input >= 0 && *output >= 0 {
+		o.input += *input
+		o.output += *output
+		o.usageResponses++
+	}
 	for _, field := range []string{"cost", "total_cost", "cost_usd"} {
 		var cost float64
 		if raw := parsed.Usage[field]; len(raw) != 0 && string(raw) != "null" && json.Unmarshal(raw, &cost) == nil && cost >= 0 {
@@ -513,5 +517,9 @@ func (o *providerEvidenceObservation) summary() string {
 		encoded, _ := json.Marshal(o.cost)
 		cost = string(encoded)
 	}
-	return fmt.Sprintf("provider_evidence live=%t requests=%d input_tokens=%d output_tokens=%d provider_usage_cost=%s tool_messages=%d orphan_tool_messages=%d", o.live, o.requests, o.input, o.output, cost, o.toolMessages, o.orphanTools)
+	usage := "NOT_REPORTED"
+	if o.usageResponses > 0 {
+		usage = fmt.Sprintf("responses=%d input_tokens=%d output_tokens=%d", o.usageResponses, o.input, o.output)
+	}
+	return fmt.Sprintf("provider_evidence live=%t requests=%d usage=%s provider_usage_cost=%s tool_messages=%d orphan_tool_messages=%d", o.live, o.requests, usage, cost, o.toolMessages, o.orphanTools)
 }
