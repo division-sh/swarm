@@ -765,6 +765,10 @@ func (s *PostgresStore) LoadProposedEffectContinuation(ctx context.Context, card
 	return s.decisionPostgresOwner.LoadProposedEffectContinuation(ctx, cardID)
 }
 
+func (s *PostgresStore) LoadProviderCallResume(ctx context.Context, req effects.CompletionContinuationRequest) (effects.ProviderCallRecovery, bool, error) {
+	return s.effectPostgresOwner.LoadProviderCallResume(ctx, req)
+}
+
 func (s *PostgresStore) LoadRecordedActivityResult(ctx context.Context, request activityresult.Query) (activityresult.Record, bool, error) {
 	return s.activityResultPostgresOwner.LoadRecordedActivityResult(ctx, request)
 }
@@ -1983,6 +1987,10 @@ func (s *SQLiteRuntimeStore) LoadPreparedPublishEvent(ctx context.Context, event
 
 func (s *SQLiteRuntimeStore) LoadProposedEffectContinuation(ctx context.Context, cardID string) (decisioncard.ProposedEffectContinuation, error) {
 	return s.decisionSQLiteOwner.LoadProposedEffectContinuation(ctx, cardID)
+}
+
+func (s *SQLiteRuntimeStore) LoadProviderCallResume(ctx context.Context, req effects.CompletionContinuationRequest) (effects.ProviderCallRecovery, bool, error) {
+	return s.effectSQLiteOwner.LoadProviderCallResume(ctx, req)
 }
 
 func (s *SQLiteRuntimeStore) LoadRecordedActivityResult(ctx context.Context, request activityresult.Query) (activityresult.Record, bool, error) {

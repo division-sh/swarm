@@ -11,7 +11,9 @@ import (
 	"github.com/division-sh/swarm/internal/runtime/agentframe"
 	"github.com/division-sh/swarm/internal/runtime/agentmemory"
 	"github.com/division-sh/swarm/internal/runtime/core/managedcapabilities"
+	"github.com/division-sh/swarm/internal/runtime/core/managedexecution"
 	"github.com/division-sh/swarm/internal/runtime/core/timeridentity"
+	"github.com/division-sh/swarm/internal/runtime/deliverylifecycle"
 	"github.com/google/uuid"
 )
 
@@ -57,6 +59,35 @@ type ProviderCallJournal struct {
 type ProviderCallRecovery struct {
 	Journal ProviderCallJournal
 	Frame   agentframe.Frame
+}
+
+type ProviderCallResumeStore interface {
+	LoadProviderCallResume(context.Context, CompletionContinuationRequest) (ProviderCallRecovery, bool, error)
+}
+
+func (c *Controller) LoadProviderCallResume(ctx context.Context, sessionID string, memory agentmemory.Plan) (ProviderCallRecovery, bool, error) {
+	claim, ok := deliverylifecycle.ClaimFromContext(ctx)
+	if !ok || claim.Version() <= 1 {
+		return ProviderCallRecovery{}, false, nil
+	}
+	authority, ok := completionAuthorityFromContext(ctx)
+	if !ok || c == nil {
+		return ProviderCallRecovery{}, false, fmt.Errorf("provider resume requires current completion authority")
+	}
+	store, ok := c.completionStore.(ProviderCallResumeStore)
+	if !ok {
+		return ProviderCallRecovery{}, false, fmt.Errorf("provider resume owner is not bound")
+	}
+	admission, ok := managedexecution.FromContext(ctx)
+	if !ok {
+		return ProviderCallRecovery{}, false, fmt.Errorf("provider resume requires current managed execution")
+	}
+	origin, err := DeliveryCompletionOrigin(claim)
+	if err != nil {
+		return ProviderCallRecovery{}, false, err
+	}
+	return store.LoadProviderCallResume(ctx, CompletionContinuationRequest{Authority: authority, Origin: origin,
+		ExecutionAuthorityID: admission.ExecutionAuthorityID, SessionID: sessionID, Memory: memory})
 }
 
 func BeginManagedProviderCall(ctx context.Context, adapter string, frame agentframe.Frame, call ProviderCall) (*Handle, error) {

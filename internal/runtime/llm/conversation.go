@@ -219,7 +219,13 @@ func (c *Conversation) stepManaged(ctx context.Context, draft agentframe.TurnDra
 		recordCompletionCleanup(resp, err)
 		err = nil
 	}
-	if found {
+	resumed, resumeFound, resumeErr := c.recoverInterruptedProviderCall(ctx, resp)
+	if resumeErr != nil {
+		return resumed, resumeErr
+	}
+	if resumeFound {
+		resp, err = resumed, nil
+	} else if found {
 		c.adoptRecoveredCompletion(resp)
 		if resp.completionSuccessor != nil {
 			if c.causalEvent == nil {
@@ -343,6 +349,10 @@ func (c *Conversation) continueManagedOnce(ctx context.Context, draft agentframe
 }
 
 func (c *Conversation) continueManagedToolRound(ctx context.Context, draft agentframe.TurnDraft, previous *Response) (*Response, error) {
+	return c.continueManagedProviderCall(ctx, draft, previous, nil)
+}
+
+func (c *Conversation) continueManagedProviderCall(ctx context.Context, draft agentframe.TurnDraft, previous *Response, resume *runtimeeffects.ProviderCallRecovery) (*Response, error) {
 	if c.TurnCount >= c.MaxTurns {
 		return nil, runtimefailures.New(runtimefailures.ClassBudgetExhausted, "agent_turn_budget_exhausted", "llm-conversation", "continue", map[string]any{
 			"budget_kind": "agent_turns",
@@ -351,6 +361,9 @@ func (c *Conversation) continueManagedToolRound(ctx context.Context, draft agent
 		})
 	}
 	turnCtx := runtimeeffects.WithLogicalOperationIdentitySegment(ctx, fmt.Sprintf("provider_turn:%d", c.TurnCount+1))
+	if resume != nil {
+		turnCtx = runtimeeffects.WithLogicalOperationIdentitySegment(turnCtx, "provider_resume:"+resume.Journal.AttemptID)
+	}
 	if !managedAgentExecutionContext(turnCtx) {
 		return nil, runtimefailures.New(runtimefailures.ClassLifecycleConflict, "managed_execution_authority_missing", "llm-conversation", "prepare_turn", nil)
 	}
@@ -380,6 +393,7 @@ func (c *Conversation) continueManagedToolRound(ctx context.Context, draft agent
 	if err != nil {
 		return nil, err
 	}
+	call.resume = resume
 	if draft.Kind == agentframe.TurnToolContinuation && previous != nil {
 		if previous.completionHandle != nil {
 			if round, ok := previous.completionHandle.CompletionContinuation(); ok {

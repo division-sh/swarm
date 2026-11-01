@@ -211,6 +211,9 @@ func (r *AnthropicAPIRuntime) continueSession(ctx context.Context, s *Session, m
 	if err := requireManagedAcquiredBase(ctx, s, previousTurnCount, managed); err != nil {
 		return nil, releasePreProviderSessionLease(ctx, r.sessions, lease, s.AgentID, r.events, err)
 	}
+	if err := freezeManagedProviderInput(s, managed, r.ProviderContract()); err != nil {
+		return nil, releasePreProviderSessionLease(ctx, r.sessions, lease, s.AgentID, r.events, err)
+	}
 	if resolved.Enabled() {
 		defer func() { retErr = releaseCompletedSessionLease(ctx, r.sessions, lease, s.AgentID, r.events, retErr) }()
 		var cancelLease context.CancelFunc
@@ -476,12 +479,7 @@ func (r *AnthropicAPIRuntime) sendRequest(ctx context.Context, payload []byte, m
 	req.Header.Set("content-type", "application/json")
 	req.Header.Set("x-api-key", r.credentialCache.snapshot())
 	req.Header.Set("anthropic-version", "2023-06-01")
-	var attempt *runtimeeffects.Handle
-	if managed == nil {
-		attempt, err = runtimeeffects.BeginCompletion(ctx, "anthropic_api", payload, nil)
-	} else {
-		attempt, err = runtimeeffects.BeginManagedCompletion(ctx, "anthropic_api", payload, managed.frame, nil)
-	}
+	attempt, err := beginManagedHTTPProviderCall(ctx, "anthropic_api", payload, req, managed)
 	if err != nil {
 		return nil, anthropicResponse{}, nil, err
 	}

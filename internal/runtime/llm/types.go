@@ -240,6 +240,7 @@ type ManagedCall struct {
 	frame             agentframe.Frame
 	toolRound         *runtimeeffects.CompletionContinuationSnapshot
 	selectedToolRound *Response
+	resume            *runtimeeffects.ProviderCallRecovery
 }
 
 func newManagedCall(frame agentframe.Frame) (ManagedCall, error) {
@@ -322,6 +323,8 @@ type managedProviderCall struct {
 	frame             agentframe.Frame
 	toolRound         *runtimeeffects.CompletionContinuationSnapshot
 	selectedToolRound *Response
+	resume            *runtimeeffects.ProviderCallRecovery
+	frozen            *runtimeeffects.ProviderCall
 }
 
 func validateManagedProviderCall(ctx context.Context, session *Session, call ManagedCall, contract ProviderContract) (managedProviderCall, error) {
@@ -339,7 +342,7 @@ func validateManagedProviderCall(ctx context.Context, session *Session, call Man
 	if provider.RuntimeMode != contract.RuntimeMode || provider.Provider != contract.Provider || provider.Transport != string(contract.Transport) {
 		return managedProviderCall{}, fmt.Errorf("managed call frame provider contract does not match adapter")
 	}
-	return managedProviderCall{message: message, provider: provider, frame: call.Frame(), toolRound: call.toolRound, selectedToolRound: call.selectedToolRound}, nil
+	return managedProviderCall{message: message, provider: provider, frame: call.Frame(), toolRound: call.toolRound, selectedToolRound: call.selectedToolRound, resume: call.resume}, nil
 }
 
 func (c managedProviderCall) resolvedModel(profile llmselection.Profile) (llmselection.ResolvedModel, error) {

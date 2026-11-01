@@ -7,6 +7,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"strings"
 	"time"
 
 	"github.com/division-sh/swarm/internal/runtime/agentframe"
@@ -119,6 +120,24 @@ func providerRecoveryDisposition(ctx context.Context, tx *sql.Tx, postgres bool,
 type providerCallRecoveryResult struct {
 	recovery runtimeeffects.ProviderCallRecovery
 	found    bool
+}
+
+func completionJournalBodyFingerprint(raw, fingerprint, operationID, attemptID string) (string, error) {
+	if !strings.HasPrefix(fingerprint, runtimeeffects.ProviderCallJournalVersion+":") {
+		return fingerprint, nil
+	}
+	var evidence struct {
+		Journal *runtimeeffects.ProviderCallJournal `json:"provider_call_journal"`
+	}
+	if json.Unmarshal([]byte(raw), &evidence) != nil || evidence.Journal == nil {
+		return "", fmt.Errorf("completion request journal is missing")
+	}
+	j := evidence.Journal
+	bound, err := j.Call.Request.Fingerprint()
+	if err != nil || bound != fingerprint || j.Version != runtimeeffects.ProviderCallJournalVersion || j.OperationID != operationID || j.AttemptID != attemptID {
+		return "", fmt.Errorf("completion request journal contradicts its physical attempt")
+	}
+	return runtimeeffects.Fingerprint(j.Call.Request.Body), nil
 }
 
 func (s *EffectPostgresOwner) LoadProviderCallResume(ctx context.Context, req runtimeeffects.CompletionContinuationRequest) (runtimeeffects.ProviderCallRecovery, bool, error) {
