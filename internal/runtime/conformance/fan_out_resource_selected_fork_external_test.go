@@ -497,6 +497,11 @@ func TestSelectedDeploymentExternalEffectRecoveryBothStores(t *testing.T) {
 					t.Fatalf("effect cut lacks its exact durable operation: %+v found=%t err=%v", recorded, found, err)
 				}
 				operationID, childID := recorded.Request.OperationID, recorded.ForkRunID
+				t.Cleanup(func() {
+					if t.Failed() {
+						logSelectedDeploymentForkFailure(t, f.selected, childID)
+					}
+				})
 				if stage.name == "settled" {
 					var failed, pending int
 					if err := f.db.QueryRowContext(f.ctx, `SELECT COUNT(*) FROM event_deliveries WHERE run_id=$1 AND status='dead_letter'`, childID).Scan(&failed); err != nil {
@@ -546,6 +551,7 @@ func TestSelectedDeploymentExternalEffectRecoveryBothStores(t *testing.T) {
 				f.ctx = testAuthorActivityContextForBundle(context.Background(), f.runtime.sourceArtifactFact)
 				f.topology = newNotifyAllChildrenProcessTopology(t, f.ctx, f.selected, f.source)
 				f.ctx = originalConformanceFixtureContext(t, f.ctx, f.selected)
+				f.ordinaryProviderCredentials = f.forkAgents.ProviderCredentials
 				f.boot(t)
 				f.runtime.fanOutServing.Close()
 				restarted, recovered := deploymentForkOwner(t, f)
@@ -562,9 +568,15 @@ func TestSelectedDeploymentExternalEffectRecoveryBothStores(t *testing.T) {
 				result, retryErr := deploymentForkRPC(t, f.ctx, restartedServer, params)
 				t.Logf("R5 %s retry result=%+v error=%s", stage.name, result, retryErr)
 				replay, replayErr := deploymentForkRPC(t, f.ctx, restartedServer, params)
-				if stage.name == "settled" {
-					if len(retryErr) != 0 || len(replayErr) != 0 || result.ForkRunID != childID || !reflect.DeepEqual(result, replay) {
-						t.Fatalf("R5 replay changed the real post-settlement ACK: first=%+v replay=%+v retry_error=%s replay_error=%s", result, replay, retryErr, replayErr)
+				replayedOperation, found, err := operations.LoadForkOperationByID(f.ctx, operationID)
+				if err != nil || !found || replayedOperation.Validate() != nil || replayedOperation.ForkRunID != childID ||
+					replayedOperation.BindingID != beforeRecovery.BindingID || replayedOperation.SemanticHash != beforeRecovery.SemanticHash ||
+					!reflect.DeepEqual(replayedOperation.Request, beforeRecovery.Request) {
+					t.Fatalf("R5 %s replay changed its durable child/request: %+v err=%v", stage.name, replayedOperation, err)
+				}
+				if stage.name != "authorized" {
+					if len(retryErr) != 0 || len(replayErr) != 0 || result.ForkRunID != childID || !reflect.DeepEqual(result, replay) || replayedOperation.Status != runfork.ForkOperationActivated {
+						t.Fatalf("R5 %s replay changed the recovered ACK: first=%+v replay=%+v retry_error=%s replay_error=%s", stage.name, result, replay, retryErr, replayErr)
 					}
 				} else {
 					for _, raw := range []json.RawMessage{retryErr, replayErr} {
@@ -578,36 +590,52 @@ func TestSelectedDeploymentExternalEffectRecoveryBothStores(t *testing.T) {
 					if !reflect.DeepEqual(result, apiv1.RunForkExecutionResult{}) || !reflect.DeepEqual(replay, apiv1.RunForkExecutionResult{}) {
 						t.Fatal("R5 failed operation fabricated an activation ACK")
 					}
-					recoveredOperation, found, err := operations.LoadForkOperationByID(f.ctx, operationID)
-					if err != nil || !found || recoveredOperation.Validate() != nil ||
-						(recoveredOperation.Status != runfork.ForkOperationFailed && recoveredOperation.Status != runfork.ForkOperationUncertain) ||
-						recoveredOperation.ForkRunID != childID || recoveredOperation.BindingID != beforeRecovery.BindingID ||
-						recoveredOperation.SemanticHash != beforeRecovery.SemanticHash || !reflect.DeepEqual(recoveredOperation.Request, beforeRecovery.Request) {
-						t.Fatalf("R5 failed replay changed its durable child/outcome: %+v err=%v", recoveredOperation, err)
+					if replayedOperation.Status != runfork.ForkOperationFailed && replayedOperation.Status != runfork.ForkOperationUncertain {
+						t.Fatalf("R5 failed replay changed its durable outcome: %+v", replayedOperation)
 					}
-					if len(recovered) != 1 || recovered[0].RunID != childID || !reflect.DeepEqual(recovered[0].Operation, &recoveredOperation) {
-						t.Fatalf("R5 retries changed the exact native recovery outcome: recovered=%+v replayed=%+v", recovered, recoveredOperation)
+					if len(recovered) != 1 || recovered[0].RunID != childID || !reflect.DeepEqual(recovered[0].Operation, &replayedOperation) {
+						t.Fatalf("R5 retries changed the exact native recovery outcome: recovered=%+v replayed=%+v", recovered, replayedOperation)
 					}
 				}
-				if got := calls.Load(); got != stage.providerCalls {
-					t.Fatalf("R5 %s redispatched provider: calls=%d want %d", stage.name, got, stage.providerCalls)
+				wantCalls, wantAttempts := stage.providerCalls, 1
+				if stage.name == "response_observed" {
+					// The observed response was not settled; only its journaled
+					// read-only request may be reissued under fresh authority.
+					wantCalls++
+					wantAttempts++
+					waitNotifyAllChildrenAgentDeliveryStatus(t, f.ctx, f.selected, childID,
+						interrupted.Authority.Target.AgentID, interrupted.Authority.Target.FlowInstance, "delivered")
+				}
+				if got := calls.Load(); got != wantCalls {
+					t.Fatalf("R5 %s provider calls=%d want %d", stage.name, got, wantCalls)
 				}
 				post := selectedExternalAttempts(t, f, childID)
-				if len(post) != 1 || post[0].AttemptID != interrupted.AttemptID {
-					t.Fatalf("R5 %s reminted external effect attempt: %+v", stage.name, post)
+				if len(post) != wantAttempts {
+					t.Fatalf("R5 %s external effect attempts=%+v want %d", stage.name, post, wantAttempts)
+				}
+				var original, replacement selectedExternalAttempt
+				for _, attempt := range post {
+					if attempt.AttemptID == interrupted.AttemptID {
+						original = attempt
+					} else {
+						replacement = attempt
+					}
+				}
+				if original.AttemptID == "" {
+					t.Fatalf("R5 %s lost its original physical attempt: %+v", stage.name, post)
 				}
 				switch stage.name {
 				case "authorized":
-					if post[0].State != effects.StateTerminalFailure {
-						t.Fatalf("R5 authorized prelaunch must fail without dispatch: state=%s retry=%+v error=%s", post[0].State, result, retryErr)
+					if original.State != effects.StateTerminalFailure {
+						t.Fatalf("R5 authorized prelaunch must fail without dispatch: state=%s retry=%+v error=%s", original.State, result, retryErr)
 					}
 				case "response_observed":
-					if post[0].State != effects.StateOutcomeUncertain {
-						t.Fatalf("R5 observed response must report uncertainty without redispatch: state=%s retry=%+v error=%s", post[0].State, result, retryErr)
+					if original.State != effects.StateOutcomeUncertain || replacement.State != effects.StateSettled || replacement.OperationID == original.OperationID {
+						t.Fatalf("R5 observed response must retain uncertainty and settle one new operation: original=%+v replacement=%+v", original, replacement)
 					}
 				case "settled":
-					if post[0].State != effects.StateSettled || len(retryErr) != 0 || result.ForkRunID != childID {
-						t.Fatalf("R5 settled response must resume committed turn: state=%s retry=%+v error=%s", post[0].State, result, retryErr)
+					if original.State != effects.StateSettled || len(retryErr) != 0 || result.ForkRunID != childID {
+						t.Fatalf("R5 settled response must resume committed turn: state=%s retry=%+v error=%s", original.State, result, retryErr)
 					}
 				}
 			})
