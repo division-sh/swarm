@@ -105,7 +105,8 @@ func requireSelectedRoundCompletion(ctx context.Context, previous *Response, dis
 		previous.completionAttempt.OperationID != attempt.OperationID || previous.completionAttempt.AttemptID != attempt.AttemptID ||
 		previous.completionAttempt.Authority.Kind != attempt.Authority.Kind || previous.completionAttempt.Authority.SelectedFork != attempt.Authority.SelectedFork ||
 		previous.ToolOutputAuthority.Validate() != nil || previous.ToolOutputAuthority.ProviderOperationID != attempt.OperationID ||
-		dispatch.requestFingerprint == "" || runtimeeffects.Fingerprint(dispatch.request) != dispatch.requestFingerprint {
+		dispatch.requestFingerprint == "" || runtimeeffects.Fingerprint(dispatch.request) != dispatch.requestFingerprint ||
+		dispatch.responseFingerprint == "" || runtimeeffects.Fingerprint(previous.Raw) != dispatch.responseFingerprint {
 		return fmt.Errorf("selected openai-compatible predecessor lacks exact committed request/response")
 	}
 	return nil
@@ -119,6 +120,7 @@ func requireSelectedRoundSession(session *Session, call *managedProviderCall, pr
 		return fmt.Errorf("selected openai-compatible predecessor differs from acquired session/frame")
 	}
 	if surface == nil || surface.Validate() != nil || !surface.MatchesActor(session.MemoryIdentity) ||
+		projection.FrameID != "agent-frame:v1:"+surface.Authority.ID ||
 		surface.Authority.ExecutionKind != managedcapabilities.ExecutionSelectedContractFork || surface.Authority.ExecutionAuthorityID != selected.ExecutionID ||
 		surface.Authority.RunID != selected.ForkRunID || surface.Authority.SessionID != session.ID || surface.Authority.TurnOrdinal != session.TurnCount ||
 		surface.RuntimeMode != call.provider.RuntimeMode || surface.Provider != call.provider.Provider || surface.Transport != call.provider.Transport {

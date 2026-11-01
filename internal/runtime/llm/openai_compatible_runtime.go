@@ -386,6 +386,7 @@ func (r *OpenAICompatibleRuntime) continueSession(ctx context.Context, s *Sessio
 		return nil, errors.Join(settlementErr, err)
 	}
 	if managed != nil && resp.completionAttempt != nil && resp.completionAttempt.Authority.Kind == runtimeeffects.AuthoritySelectedContractFork {
+		dispatch.responseFingerprint = runtimeeffects.Fingerprint(rawResp)
 		resp.completionDispatch = dispatch
 	}
 	projected, err := projectCompletionContinuation(handoffCtx, dispatch, s, &resp)
