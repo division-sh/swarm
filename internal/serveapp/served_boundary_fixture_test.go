@@ -113,8 +113,8 @@ func createServedBoundaryWaitingRun(t *testing.T, rt servedBoundaryFixture, suff
 		"event_name": "item.received", "bundle_hash": rt.BundleHash,
 		"payload": map[string]any{"item_id": suffix}, "idempotency_key": "issue-1864-" + rt.Backend + "-" + suffix,
 	})
-	if !result.NewRunCreated || result.RunID == "" || result.EventID == "" {
-		t.Fatalf("%s control seed = %+v, want new run", rt.Backend, result)
+	if result.NewRunCreated || result.RunID == "" || result.EventID == "" {
+		t.Fatalf("%s control seed = %+v, want the existing live run", rt.Backend, result)
 	}
 	node := identitytest.RootNode(t, "item-handler").Key()
 	rt.Probe.RequireNodePending(result.EventID, node)
