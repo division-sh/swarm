@@ -273,15 +273,26 @@ func (c *deploymentChannelSession) BootstrapSession(ctx context.Context, op chan
 func (c *deploymentChannelSession) ResumeSession(ctx context.Context, op channelonboarding.Operation, candidate channelonboarding.Candidate) error {
 	if c.connection != nil {
 		reusable, err := c.connection.CheckSessionReuse(ctx, op)
-		if err != nil || reusable {
+		if err != nil {
 			return err
 		}
-		if err := c.connection.Close(ctx); err != nil {
-			return err
+		if !reusable {
+			if err := c.connection.Close(ctx); err != nil {
+				return err
+			}
+			c.connection = nil
 		}
-		c.connection = nil
 	}
-	return c.BootstrapSession(ctx, op, candidate)
+	if c.connection == nil {
+		if err := c.BootstrapSession(ctx, op, candidate); err != nil {
+			return err
+		}
+	}
+	if op.Provider == "whatsapp" && op.AccountConfirmed {
+		// Boot publication requires the retained account, not only its socket.
+		return c.connection.AwaitSessionAccount(ctx)
+	}
+	return nil
 }
 func (c *deploymentChannelSession) AwaitSessionBootstrap(ctx context.Context, op channelonboarding.Operation) error {
 	if op.Provider == "telegram" {
