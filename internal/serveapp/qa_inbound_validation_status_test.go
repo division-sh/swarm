@@ -32,7 +32,7 @@ func TestQAInboundTypedValidationReturnsPermanentHTTPErrorBothStores(t *testing.
 			backend := fixture.backend
 			root := canonicalrouting.CopyKeyedRootRawIngress(t)
 			writeStandingCandidateFile(t, filepath.Join(root, "schema.yaml"), "instance: provider_event_id\nstages: []\npins:\n  inputs: [inbound.partner.raw, inbound.partner.account_opened]\n")
-			writeStandingCandidateFile(t, filepath.Join(root, "nodes.yaml"), "receiver:\n  execution_type: system_node\n  subscribes_to: [inbound.partner.account_opened]\n  event_handlers:\n    inbound.partner.account_opened:\n      data_accumulation:\n        source_event: inbound.partner.account_opened\n        writes: [{target_field: processed_count, value: entity.processed_count + 1}]\n")
+			writeStandingCandidateFile(t, filepath.Join(root, "nodes.yaml"), "receiver:\n  execution_type: system_node\n  subscribes_to: [inbound.partner.account_opened]\n  event_handlers:\n    inbound.partner.account_opened:\n      data_accumulation:\n        source_event: inbound.partner.account_opened\n        writes: [{target_field: processed_count, value: state.processed_count + 1}]\n")
 			writeWorkflowValidationFixtureFile(t, filepath.Join(root, "partner/manifest.yaml"), "version: 1.0.0\nplatform_version: '*'\ncapabilities:\n  can:\n    emit_events: [raw, account_opened]\n    verify_secret: webhook_signing_secret\n  cannot: [execute code]\n")
 			writeWorkflowValidationFixtureFile(t, filepath.Join(root, "partner/trigger.yaml"), `transport: webhook
 payload_object_required: true

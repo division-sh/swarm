@@ -176,7 +176,7 @@ func deliveryPlannerHandlerSource(t testing.TB, requireEntity bool) semanticview
 			switch fixture.flowID {
 			case "parent", "child-a", "child-b", "worker", "operating":
 				schema += "instance: instance_key\n"
-				members[prefix+"entities.yaml"] = []byte("work:\n  instance_key: {type: text, _unused_reason: delivery planner instance key}\n")
+				members[prefix+"state.yaml"] = []byte("instance_key: text\n")
 			}
 			members[prefix+"schema.yaml"] = []byte(schema)
 		}

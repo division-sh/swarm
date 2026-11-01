@@ -99,13 +99,12 @@ func boundedStandingConnectorSource(t *testing.T, provider, baseURL, inputs, nod
 		"schema.yaml":                            "stages: []\n",
 		boundedProviderFlowID + "/manifest.yaml": manifest,
 		boundedProviderFlowID + "/schema.yaml":   "stages:\n  active: {}\npins:\n  inputs: " + inputs + "\n",
-		boundedProviderFlowID + "/entities.yaml": "bounded_entity: {}\n",
 	}
 	if nodes != "" {
 		files[boundedProviderFlowID+"/nodes.yaml"] = nodes
 	}
 	if len(additionalRoles) != 0 {
-		files[boundedProviderFlowID+"/entities.yaml"] = "bounded_entity:\n  operator_account: {type: text, initial: ''}\n"
+		files[boundedProviderFlowID+"/state.yaml"] = "operator_account: \"\"\n"
 	}
 	providers := []string{provider}
 	if provider != "telegram" && provider != "github" {

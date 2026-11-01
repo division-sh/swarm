@@ -43,7 +43,7 @@ func TestProviderConnectRejectsAuthoritativeSourceTypeMismatch(t *testing.T) {
 	if source != nil || err == nil {
 		t.Fatalf("projection = %v/%v, want no source and a type blocker", source, err)
 	}
-	if message := err.Error(); !strings.Contains(message, "compiled connection input binding failed:") || !strings.Contains(message, "key_types_incompatible: resolution source payload.chat_id type integer is incompatible with receiver entity.chat_id type text") {
+	if message := err.Error(); !strings.Contains(message, "compiled connection input binding failed:") || !strings.Contains(message, "key_types_incompatible: resolution source payload.chat_id type integer is incompatible with receiver state.chat_id type text") {
 		t.Fatalf("projection error = %q, want exact source/receiver type incompatibility", message)
 	}
 }
