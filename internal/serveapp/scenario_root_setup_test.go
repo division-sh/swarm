@@ -44,7 +44,7 @@ steps:
 				code := executeScenarioInOwnedLifecycle(t, repoRootForTest(), []string{
 					"test", root, tc.label, "--config", configPath,
 					"--timeout", "20s", "--poll-interval", "10ms",
-				}, rt.Endpoint, &stdout, &stderr)
+				}, rt.Endpoint, &stdout, &stderr, rt.Runtime)
 				if tc.wantError == "" && code != 0 {
 					t.Fatalf("%s: code=%d stderr=%s stdout=%s", tc.label, code, stderr.String(), stdout.String())
 				}

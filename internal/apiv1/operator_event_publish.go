@@ -78,6 +78,7 @@ type eventPublicationParams struct {
 	IdempotencyKey         string
 	Emitter                string
 	NewRunCreated          bool
+	RootIngress            bool
 	RunIDProvided          bool
 	ScenarioExecution      *scenarioexecution.Selector
 	Data                   durabledata.RunCreationDataEnvelope
@@ -227,8 +228,30 @@ func executeOperatorEventPublication(
 			return apiidempotency.Completion{}, err
 		}
 		selectedOpts := opts
-		if cfg.rootInputOnly || !params.RunIDProvided {
-			params, err = selectEventPublicationLiveRun(ctx, opts, params, bundleIdentity.BundleHash)
+		privateScenario := false
+		if scenarioexecution.HasPrivateHostScope(ctx) && params.RunID != "" {
+			ctx, selectedOpts, params, err = resolveEventPublicationBundleScope(ctx, opts, params, bundleIdentity, eventPublicationConfig{requireExistingExplicitRun: true})
+			if err != nil {
+				return apiidempotency.Completion{}, err
+			}
+			ctx, err = admitScenarioExecutionSelector(ctx, selectedOpts, params.RunID, false, params.ScenarioExecution)
+			if err != nil {
+				return apiidempotency.Completion{}, err
+			}
+			header, err := selectedOpts.Runs.LoadRunHeader(ctx, params.RunID)
+			if err != nil {
+				return apiidempotency.Completion{}, err
+			}
+			if header.Origin.Kind() != runtimerunlifecycle.OriginDeployment {
+				ctx, err = scenarioexecution.WithPrivateRunScope(ctx, params.RunID, runtimeflowidentity.ScopeKey(selectedOpts.Source, semanticview.RootExecutionFlowID(selectedOpts.Source)))
+				if err != nil {
+					return apiidempotency.Completion{}, err
+				}
+				privateScenario = true
+			}
+		}
+		if cfg.rootInputOnly || !params.RunIDProvided || privateScenario {
+			params, err = selectEventPublicationLiveRun(ctx, selectedOpts, params, bundleIdentity.BundleHash)
 			if err != nil {
 				return apiidempotency.Completion{}, err
 			}
@@ -236,6 +259,9 @@ func executeOperatorEventPublication(
 		ctx, selectedOpts, params, err = resolveEventPublicationBundleScope(ctx, opts, params, bundleIdentity, cfg)
 		if err != nil {
 			return apiidempotency.Completion{}, err
+		}
+		if cfg.rootInputOnly && !params.PayloadEntityIDPresent && params.EntityID == "" {
+			params.EntityID = params.RunID
 		}
 		if params.DataPresent && !params.NewRunCreated {
 			return apiidempotency.Completion{}, NewApplicationError(string(durabledata.CodeRunDataImmutable), false, map[string]any{"run_id": params.RunID})
@@ -259,6 +285,23 @@ func executeOperatorEventPublication(
 			return apiidempotency.Completion{}, err
 		}
 		params.EventName = resolvedEventName
+		if privateScenario && cfg.rootInputOnly {
+			header, err := selectedOpts.Runs.LoadRunHeader(ctx, params.RunID)
+			if err != nil {
+				return apiidempotency.Completion{}, err
+			}
+			if header.Origin.Kind() == runtimerunlifecycle.OriginEvent {
+				_, err := selectedOpts.Observability.LoadOperatorEvent(ctx, header.Origin.EventID())
+				if errors.Is(err, operatorread.ErrEventNotFound) {
+					if header.Origin.EventType() != params.EventName {
+						return apiidempotency.Completion{}, fmt.Errorf("scenario first publication differs from its admitted input")
+					}
+					params.EventID = header.Origin.EventID()
+				} else if err != nil {
+					return apiidempotency.Completion{}, err
+				}
+			}
+		}
 		endpoint, err := runtimebus.NewRootInputAPIEventPublicationEndpoint(selectedOpts.Source, resolvedEventName)
 		if err != nil {
 			return apiidempotency.Completion{}, err
@@ -274,7 +317,7 @@ func executeOperatorEventPublication(
 		if err != nil {
 			return apiidempotency.Completion{}, err
 		}
-		if cfg.rootInputOnly && params.NewRunCreated {
+		if cfg.rootInputOnly {
 			if _, err := checkEventPublicationRecipientPlan(ctx, selectedOpts, params, cfg); err != nil {
 				return apiidempotency.Completion{}, err
 			}
@@ -452,6 +495,7 @@ func eventPublicationParamsFromRequest(req Request, cfg eventPublicationConfig) 
 		IdempotencyKey:         idempotencyKey,
 		Emitter:                emitter,
 		NewRunCreated:          newRun,
+		RootIngress:            cfg.rootInputOnly,
 		RunIDProvided:          runIDProvided,
 		ScenarioExecution:      scenarioSelector,
 		Data:                   data,
@@ -676,6 +720,9 @@ func eventPublicationEvent(params eventPublicationParams, createdAt time.Time, p
 	if params.NewRunCreated {
 		return events.NewRunCreatingRootIngressEvent(events.RunCreatingRootIngressEventInput{Facts: facts, RunID: params.RunID})
 	}
+	if params.RootIngress {
+		return events.NewExistingRunRootIngressEvent(events.ExistingRunRootIngressEventInput{Facts: facts, RunID: params.RunID})
+	}
 	var provenance *events.OperatorReferenceProvenance
 	if sourceEventID := strings.TrimSpace(params.SourceEventID); sourceEventID != "" {
 		provenance, err := events.NewOperatorReferenceProvenance(sourceEventID)
@@ -721,6 +768,9 @@ func validateEventPublication(ctx context.Context, opts EventPublicationOptions,
 			}},
 			"event_name": params.EventName,
 		})
+	}
+	if cfg.rootInputOnly {
+		return params, nil
 	}
 	if cfg.requireExistingExplicitRun && !params.NewRunCreated {
 		runs, err := requireRunReadStore(opts.Runs)
