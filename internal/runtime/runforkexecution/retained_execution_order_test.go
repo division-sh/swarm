@@ -500,9 +500,13 @@ func proveRetainedAcknowledgment(t *testing.T, fault string) {
 						}
 					}
 					open := string(row["open_marker"].Value)
+					sideEffects, err := row["side_effects"].Text()
+					if err != nil || sideEffects != "null" {
+						t.Fatalf("startup retirement recorded handler effects: %q %v", sideEffects, err)
+					}
 					if (open != "false" && open != "0") || string(row["claim_version"].Value) != "1" || string(row["completed_at"].Value) == "null" ||
 						string(row["current_delivery_id"].Value) != "null" || string(row["active_session_id"].Value) != "null" ||
-						string(row["side_effects"].Value) != "null" || string(row["duration_ms"].Value) != "0" {
+						string(row["duration_ms"].Value) != "0" {
 						t.Fatalf("startup retirement contained executing or dispatched work: %+v", row)
 					}
 				}
