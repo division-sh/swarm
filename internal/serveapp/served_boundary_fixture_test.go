@@ -30,6 +30,14 @@ type servedBoundaryFixture struct {
 
 func pauseServedLandingForCreation(t *testing.T, endpoint, bundleHash, flowPath string) string {
 	t.Helper()
+	runID := requireServedLiveLandingRunID(t, endpoint, bundleHash, flowPath)
+	requireServedOKJSONRPC(t, endpoint, "run.pause", map[string]any{"run_id": runID, "idempotency_key": "creation-fixture-pause-" + runID})
+	requireServedRunStatus(t, endpoint, runID, "paused")
+	return runID
+}
+
+func requireServedLiveLandingRunID(t *testing.T, endpoint, bundleHash, flowPath string) string {
+	t.Helper()
 	var result struct {
 		Runs []operatorread.RunHeader `json:"runs"`
 	}
@@ -47,8 +55,6 @@ func pauseServedLandingForCreation(t *testing.T, endpoint, bundleHash, flowPath 
 	if runID == "" {
 		t.Fatalf("flow %s lacks its live deployment landing: %+v", flowPath, result.Runs)
 	}
-	requireServedOKJSONRPC(t, endpoint, "run.pause", map[string]any{"run_id": runID, "idempotency_key": "creation-fixture-pause-" + runID})
-	requireServedRunStatus(t, endpoint, runID, "paused")
 	return runID
 }
 
