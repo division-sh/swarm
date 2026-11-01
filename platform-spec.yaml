@@ -10351,9 +10351,8 @@ engine:
     - id: platform_tool_usage_hints
       severity: hard_invalidity
       scope: per-tool
-      trigger: A platform-owned delivered tool or generated emit tool lacks the shared provider-facing usage hint, the
-        generated emit usage hint instructs CEL/expression arguments instead of concrete payload values, or a delivered
-        tool usage hint exceeds the provider-facing lint limit.
+      trigger: A platform-owned delivered tool lacks its shared provider-facing usage hint, a generated emit tool lacks
+        its model-facing description, or a delivered platform-tool usage hint exceeds the provider-facing lint limit.
       when: boot-only
     - id: generated_tool_schema_closure
       severity: hard_invalidity
@@ -10986,9 +10985,24 @@ tool_model:
       entries are hard invalidity under the tool_resolution boot check. Unresolvable MCP-backed entries that can become visible
       or callable for an agent turn fail closed per required_mcp_tool_availability and MUST NOT be delivered from a
       declared prefix or authored handler_type:mcp schema without exact discovered catalog proof.
-    usage_hints: Provider-facing tool definitions for platform-owned delivered tools and generated emit tools MUST include
-      the shared platform usage guidance. Generated emit tool usage guidance MUST describe concrete JSON payload arguments,
-      not CEL or workflow expression arguments. Boot verification reports this through platform_tool_usage_hints.
+    usage_hints: Provider-facing platform-tool definitions carry their own model-facing usage guidance. Built-in descriptions
+      and guidance describe only their own operation and never recommend a different tool. Generated event/entity tools
+      use the generated_descriptions rule, not authoring protocol appended as a Usage section. Boot verification reports
+      absent platform guidance or generated emit descriptions through platform_tool_usage_hints.
+    generated_descriptions: >-
+      A generated read description is `Read the fields of this <entity>`; a generated emit description is
+      `Send a <event> event`. Append the admitted entity or event author's optional description line as written.
+      Descriptions are delivered in the provider's tools field, never restated in the authored system prompt.
+      The universal notice description is `Send a notice to the human operator. The conversation continues without
+      waiting for a reply.` Tool-list tests check the assembled description, including usage guidance, against the
+      actor's actual grant so an unavailable tool is never recommended.
+    authoring_guidance: >-
+      Declare the event's business payload and the entity's business fields in their contracts. Describe business meaning
+      in the optional declaration description, not runtime protocol in agent intent. At execution, tool arguments are
+      concrete JSON values matching the delivered schema, not CEL/workflow expressions. Envelope fields are owned by
+      the runtime unless explicitly declared as business payload. Current-entity reads accept no entity selector;
+      write grants and the current inbound context are enforced by the runtime. Save/update operation semantics remain
+      defined by the generated write schemas and persistence owner; prompt prose cannot widen grants or bypass validation.
     generated_schema_closure: Generated platform-owned emit/entity tool schemas MUST be recursively closed, explicitly
       declare required properties, reject undeclared required properties, and declare non-empty enums. Named records and
       argument objects reject unknown properties; declared maps preserve typed value and key constraints. Generated entity
