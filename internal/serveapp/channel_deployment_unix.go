@@ -289,8 +289,9 @@ func (c *deploymentChannelSession) ResumeSession(ctx context.Context, op channel
 		}
 	}
 	if op.Provider == "whatsapp" && op.AccountConfirmed {
-		// Boot publication requires the retained account, not only its socket.
-		return c.connection.AwaitSessionAccount(ctx)
+		// Wait for login while preserving observed revocation for re-verification.
+		_, err := c.connection.VerifyDeploymentRegistration(ctx, op)
+		return err
 	}
 	return nil
 }
