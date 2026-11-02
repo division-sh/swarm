@@ -63,9 +63,8 @@ stages:
   review: {}
   done: {final: true}
   exhausted: {final: true}
-pins:
-  inputs:
-    - items.ready
+inputs:
+  - items.ready
 `
 	events := "items.ready:\n  items: [text]\nitems.child:\n  value: text\nbatch.completed:\n  total: integer\n"
 	nodes := `fan-out-source:

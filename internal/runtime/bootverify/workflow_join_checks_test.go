@@ -84,16 +84,15 @@ func TestRun_ValidatesStagedJoinContract(t *testing.T) {
 			h.Join.OnComplete.Emit.Fields["results"] = runtimecontracts.CELExpression(`join.results.exists(r, r > 1)`)
 		}, wantError: "no matching overload"},
 		{name: "outcome preserves enum result", mutate: func(h *runtimecontracts.SystemNodeEventHandler, bundle *runtimecontracts.WorkflowContractBundle) {
-			bundle.RootTypes = runtimecontracts.TypeCatalogDocument{Enums: map[string]runtimecontracts.EnumTypeDecl{"Decision": {Values: []string{"accept", "reject"}, Default: "accept"}}}
+			bundle.RootTypes = runtimecontracts.TypeCatalogDocument{Enums: map[string]runtimecontracts.EnumTypeDecl{"Decision": {Values: []string{"accept", "reject"}}}}
 			event := bundle.Events["item.completed"]
 			event.Payload.Properties["result"] = runtimecontracts.EventFieldSpec{Type: "Decision"}
 			bundle.Events["item.completed"] = event
 			h.Join.OnComplete.Emit.Fields["results"] = runtimecontracts.CELExpression(`join.results.exists(r, r > 1)`)
 		}, wantError: "no matching overload"},
 		{name: "outcome preserves scalar alias result", mutate: func(h *runtimecontracts.SystemNodeEventHandler, bundle *runtimecontracts.WorkflowContractBundle) {
-			bundle.RootTypes = runtimecontracts.TypeCatalogDocument{Scalars: map[string]runtimecontracts.ScalarTypeDecl{"Score": {Base: "integer"}}}
 			event := bundle.Events["item.completed"]
-			event.Payload.Properties["result"] = runtimecontracts.EventFieldSpec{Type: "Score"}
+			event.Payload.Properties["result"] = runtimecontracts.EventFieldSpec{Type: "integer"}
 			bundle.Events["item.completed"] = event
 			h.Join.OnComplete.Emit.Fields["results"] = runtimecontracts.CELExpression(`join.results.exists(r, r.startsWith("1"))`)
 		}, wantError: "no matching overload"},

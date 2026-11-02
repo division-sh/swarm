@@ -3032,107 +3032,50 @@ emit:
 	}
 }
 
-// Historical test names remain in the proof census; current admission never
-// proposes a member-order-derived default or a codemod.
-func TestEnumTypeDeclDecode_RetiresSequenceFormWithTeachingCodemod(t *testing.T) {
+func TestEnumTypeDeclDecode_PreservesQuotedMembers(t *testing.T) {
 	var decl EnumTypeDecl
-	err := decodeNodeTestYAML([]byte(`[low, medium, high]`), &decl)
-	if err == nil || !strings.Contains(err.Error(), "must be a mapping") || strings.Contains(err.Error(), "default: low") {
-		t.Fatalf("sequence form error = %v, want current mapping-form rejection without an inferred default", err)
+	if err := decodeNodeTestYAML([]byte(`['low', "medium", 'high']`), &decl); err != nil {
+		t.Fatalf("quoted enum members rejected: %v", err)
 	}
-}
-
-func TestEnumTypeDeclDecode_RetiresScalarShorthandWithTeachingCodemod(t *testing.T) {
-	var decl EnumTypeDecl
-	err := decodeNodeTestYAML([]byte(`fast`), &decl)
-	if err == nil || !strings.Contains(err.Error(), "must be a mapping") || strings.Contains(err.Error(), "default: fast") {
-		t.Fatalf("scalar shorthand error = %v, want current mapping-form rejection without an inferred default", err)
-	}
-}
-
-func TestEnumTypeDeclDecode_RejectsDuplicateKeys(t *testing.T) {
-	var decl EnumTypeDecl
-	err := decodeNodeTestYAML([]byte("values: [low, high]\ndefault: low\ndefault: high\n"), &decl)
-	if err == nil || !strings.Contains(err.Error(), `duplicate effective YAML key "default"`) {
-		t.Fatalf("duplicate key error = %v, want duplicate-key rejection", err)
-	}
-}
-
-func TestEnumTypeDeclDecode_UnknownFieldListsValidOptions(t *testing.T) {
-	var decl EnumTypeDecl
-	err := decodeNodeTestYAML([]byte("values: [low, high]\ndefualt: low\n"), &decl)
-	if err == nil {
-		t.Fatal("unknown enum field accepted")
-	}
-	diagnostic, ok := AsLoaderDiagnostic(err)
-	if !ok {
-		t.Fatalf("unknown field error = %T %v, want LoaderDiagnostic", err, err)
-	}
-	if diagnostic.Code != "contract_loader.undefined_field" || !strings.Contains(diagnostic.Problem, "defualt") {
-		t.Fatalf("diagnostic = %#v", diagnostic)
-	}
-	options := strings.Join(diagnostic.ValidOptions, ",")
-	if !strings.Contains(options, "values") || !strings.Contains(options, "default") {
-		t.Fatalf("valid options = %v, want values and default", diagnostic.ValidOptions)
-	}
-}
-
-func TestEnumTypeDeclDecode_RequiresDefault(t *testing.T) {
-	var decl EnumTypeDecl
-	err := decodeNodeTestYAML([]byte("values: [low, medium, high]\n"), &decl)
-	if err == nil || !strings.Contains(err.Error(), "requires an explicit default member") || strings.Contains(err.Error(), "default: low") {
-		t.Fatalf("missing default error = %v, want explicit-default rejection without an inferred default", err)
-	}
-}
-
-func TestEnumTypeDeclDecode_RejectsNonMemberDefaultNamingMembers(t *testing.T) {
-	var decl EnumTypeDecl
-	err := decodeNodeTestYAML([]byte("values: [low, medium, high]\ndefault: urgent\n"), &decl)
-	if err == nil || !strings.Contains(err.Error(), `default "urgent" is not a declared member`) || !strings.Contains(err.Error(), "low, medium, high") {
-		t.Fatalf("non-member default error = %v, want error naming the declared members", err)
-	}
-}
-
-func TestEnumTypeDeclDecode_AcceptsCanonicalMappingForm(t *testing.T) {
-	var decl EnumTypeDecl
-	if err := decodeNodeTestYAML([]byte("values: [low, medium, high]\ndefault: medium\n"), &decl); err != nil {
-		t.Fatalf("canonical mapping form rejected: %v", err)
-	}
-	if !reflect.DeepEqual(decl.Values, []string{"low", "medium", "high"}) || decl.Default != "medium" {
+	if !reflect.DeepEqual(decl.Values, []string{"low", "medium", "high"}) {
 		t.Fatalf("decoded enum = %#v", decl)
 	}
 }
 
-func TestEnumTypeDeclDecode_EmptyScalarShorthandRequiresMappingForm(t *testing.T) {
-	var decl EnumTypeDecl
-	err := decodeNodeTestYAML([]byte(`""`), &decl)
-	if err == nil || !strings.Contains(err.Error(), "must be a mapping") {
-		t.Fatalf("empty scalar shorthand error = %v, want mapping-form guidance", err)
-	}
-}
-
-func TestEnumTypeDeclDecode_NonScalarDefaultGetsAuthorMessage(t *testing.T) {
-	var decl EnumTypeDecl
-	err := decodeNodeTestYAML([]byte("values: [low, high]\ndefault: [low]\n"), &decl)
-	if err == nil || !strings.Contains(err.Error(), "default must be a scalar member") {
-		t.Fatalf("non-scalar default error = %v, want author-facing scalar-member message", err)
-	}
-	if strings.Contains(err.Error(), "kind") {
-		t.Fatalf("non-scalar default leaked an internal yaml kind: %v", err)
+func TestEnumTypeDeclDecode_RejectsInvalidMembers(t *testing.T) {
+	for _, tc := range []struct{ source, want string }{
+		{`[]`, "at least one"},
+		{`['low', 'low']`, `repeats member "low"`},
+		{`[low, high]`, "quote them"},
+		{`[text]`, "declares no list types"},
+		{`['low', 1]`, "quote them"},
+		{`[true]`, "quote them"},
+		{`[['low']]`, "quote them"},
+		{`fast`, "sequence of quoted text literals"},
+		{`""`, "sequence of quoted text literals"},
+		{"values: ['low']\ndefault: low\n", "initial values in state.yaml"},
+	} {
+		t.Run(tc.source, func(t *testing.T) {
+			var decl EnumTypeDecl
+			err := decodeNodeTestYAML([]byte(tc.source), &decl)
+			if err == nil || !strings.Contains(err.Error(), tc.want) {
+				t.Fatalf("decode %s: %v, want %s", tc.source, err, tc.want)
+			}
+		})
 	}
 }
 
 func TestTypeCatalogDecode_RejectsNullEnumEntry(t *testing.T) {
 	var catalog TypeCatalogDocument
-	err := decodeNodeTestYAML([]byte("enums:\n  Mode:\n"), &catalog)
-	if err == nil || !strings.Contains(err.Error(), `enum Mode is declared without values`) {
+	err := decodeNodeTestYAML([]byte("Mode:\n"), &catalog)
+	if err == nil || !strings.Contains(err.Error(), `record mapping or an enum sequence`) {
 		t.Fatalf("null enum entry error = %v, want load-time teaching rejection", err)
 	}
 }
 
 func TestTypeCatalogDecode_RejectsEmptyEnumKey(t *testing.T) {
 	var catalog TypeCatalogDocument
-	err := decodeNodeTestYAML([]byte("enums:\n  \"\":\n    values: [low]\n    default: low\n"), &catalog)
+	err := decodeNodeTestYAML([]byte("\"\": ['low']\n"), &catalog)
 	if err == nil || !strings.Contains(err.Error(), "empty name") {
 		t.Fatalf("empty enum key error = %v, want empty-name rejection", err)
 	}
@@ -3140,16 +3083,8 @@ func TestTypeCatalogDecode_RejectsEmptyEnumKey(t *testing.T) {
 
 func TestTypeCatalogDecode_RejectsWhitespacePaddedEnumKey(t *testing.T) {
 	var catalog TypeCatalogDocument
-	err := decodeNodeTestYAML([]byte("enums:\n  \" Mode\":\n    values: [low]\n    default: low\n"), &catalog)
+	err := decodeNodeTestYAML([]byte("\" Mode\": ['low']\n"), &catalog)
 	if err == nil || !strings.Contains(err.Error(), "surrounding whitespace") {
 		t.Fatalf("whitespace-padded enum key error = %v, want whitespace rejection", err)
-	}
-}
-
-func TestEnumTypeDeclValidate_SharedInvariantNondeterministicFree(t *testing.T) {
-	var catalog TypeCatalogDocument
-	err := decodeNodeTestYAML([]byte("enums:\n  zebra:\n  alpha:\n    values: [low]\n    default: low\n"), &catalog)
-	if err == nil || !strings.Contains(err.Error(), "enum zebra is declared without values") {
-		t.Fatalf("multi-enum validation error = %v, want sorted deterministic first error naming zebra", err)
 	}
 }

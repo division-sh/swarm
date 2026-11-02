@@ -1652,12 +1652,8 @@ func TestHandleEmitTool_AllowsDeclaredTemplateIDBusinessPayload(t *testing.T) {
 func TestHandleEmitTool_AllowsValidWave1EventPayloadTypes(t *testing.T) {
 	bundle := &runtimecontracts.WorkflowContractBundle{
 		RootTypes: runtimecontracts.TypeCatalogDocument{
-			Scalars: map[string]runtimecontracts.ScalarTypeDecl{
-				"TraceID": {Base: "uuid"},
-				"Label":   {Base: "text"},
-			},
 			Enums: map[string]runtimecontracts.EnumTypeDecl{
-				"Mode": {Values: []string{"fast", "deep"}, Default: "fast"},
+				"Mode": {Values: []string{"fast", "deep"}},
 			},
 			Types: map[string]runtimecontracts.NamedTypeDecl{
 				"ScanDetails": {
@@ -1674,8 +1670,8 @@ func TestHandleEmitTool_AllowsValidWave1EventPayloadTypes(t *testing.T) {
 					Properties: map[string]runtimecontracts.EventFieldSpec{
 						"mode":     {Type: "Mode"},
 						"details":  {Type: "ScanDetails"},
-						"labels":   {Type: "[Label]"},
-						"trace_id": {Type: "TraceID"},
+						"labels":   {Type: "[text]"},
+						"trace_id": {Type: "uuid"},
 					},
 					Required: []string{"mode", "details", "labels", "trace_id"},
 				},
@@ -1751,8 +1747,8 @@ func TestHandleEmitTool_ResolvesDuplicateLeafScopedSchemasThroughActor(t *testin
 	bundle := &runtimecontracts.WorkflowContractBundle{
 		RootTypes: runtimecontracts.TypeCatalogDocument{
 			Enums: map[string]runtimecontracts.EnumTypeDecl{
-				"ReviewPriority":     {Values: []string{"urgent"}, Default: "urgent"},
-				"ValidationPriority": {Values: []string{"low"}, Default: "low"},
+				"ReviewPriority":     {Values: []string{"urgent"}},
+				"ValidationPriority": {Values: []string{"low"}},
 			},
 			Types: map[string]runtimecontracts.NamedTypeDecl{
 				"ReviewRequest": {

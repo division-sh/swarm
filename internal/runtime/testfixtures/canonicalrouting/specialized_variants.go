@@ -15,16 +15,15 @@ func CopyOutputModeVerify(t testing.TB) string {
 	t.Helper()
 	root := CopyExample(t, RootIngress)
 
-	writeClosedVariantFile(t, root, "schema.yaml", "# fixture: output-mode-verify\npins:\n  inputs:\n    - task.assigned\n  outputs:\n    - task.assigned\nconnect:\n  - {event: task.assigned, from: ., to: child}\n")
+	writeClosedVariantFile(t, root, "schema.yaml", "# fixture: output-mode-verify\ninputs:\n  - task.assigned\noutputs:\n  - task.assigned\nconnect:\n  - {event: task.assigned, from: ., to: child}\n")
 	removeClosedVariantFiles(t, root, "nodes.yaml", "events.yaml", "state.yaml")
 	writeClosedVariantFile(t, root, "events.yaml", "task.assigned:\n")
 	writeLegacyInstanceFlow(t, root, "child", `# fixture: child
 stages:
   idle: {}
   done: {final: true}
-pins:
-  inputs:
-    - task.assigned
+inputs:
+  - task.assigned
 `, "", `priority: 0
 `, `reader:
   task.assigned:
@@ -47,9 +46,8 @@ func CopyManagedNativeLifecycle(t testing.TB, agentID string) string {
 
 	writeClosedVariantFile(t, root, "schema.yaml", `# fixture: managed-native-lifecycle
 stages: []
-pins:
-  inputs:
-    - task.requested
+inputs:
+  - task.requested
 `)
 	writeClosedVariantFile(t, root, "agents.yaml", fmt.Sprintf(`%s:
   type: stub
@@ -77,13 +75,12 @@ func CopyDescribeStageGraph(t testing.TB) string {
 	t.Helper()
 	root := CopyExample(t, RootIngress)
 
-	writeClosedVariantFile(t, root, "schema.yaml", "# fixture: stage-graph\npins:\n  inputs:\n    - ticket.opened\n    - ticket.closed\n  outputs:\n    - ticket.opened\n    - ticket.closed\nconnect:\n  - {event: ticket.opened, from: ., to: support}\n  - {event: ticket.closed, from: ., to: support}\n")
+	writeClosedVariantFile(t, root, "schema.yaml", "# fixture: stage-graph\ninputs:\n  - ticket.opened\n  - ticket.closed\noutputs:\n  - ticket.opened\n  - ticket.closed\nconnect:\n  - {event: ticket.opened, from: ., to: support}\n  - {event: ticket.closed, from: ., to: support}\n")
 	removeClosedVariantFiles(t, root, "nodes.yaml", "events.yaml", "state.yaml")
 	writeLegacyInstanceFlow(t, root, "support", `# fixture: support
-pins:
-  inputs:
-    - ticket.opened
-    - ticket.closed
+inputs:
+  - ticket.opened
+  - ticket.closed
 stages:
   waiting: {}
   active:
@@ -149,19 +146,18 @@ func CopyInboundAdmissionPolicyMatrix(t testing.TB) string {
 		"schema.yaml": "stages: []\n# fixture: inbound-admission-policy-matrix\n",
 		"matrix/schema.yaml": `# fixture: matrix
 stages: []
-pins:
-  inputs:
-    - inbound.telegram.raw
-    - inbound.telegram.text_message
-    - inbound.intercom.raw
-    - inbound.stripe.raw
-    - inbound.twilio.raw
-    - inbound.shopify.raw
-    - inbound.typeform.raw
-    - inbound.acme_public.raw
-    - inbound.partner_auth.raw
-    - inbound.partner_open.raw
-    - inbound.partner_ack.raw
+inputs:
+  - inbound.telegram.raw
+  - inbound.telegram.text_message
+  - inbound.intercom.raw
+  - inbound.stripe.raw
+  - inbound.twilio.raw
+  - inbound.shopify.raw
+  - inbound.typeform.raw
+  - inbound.acme_public.raw
+  - inbound.partner_auth.raw
+  - inbound.partner_open.raw
+  - inbound.partner_ack.raw
 `,
 		"matrix/state.yaml":  "service_id: \"standing\"\n",
 		"matrix/policy.yaml": "operator_account: '420079'\n",
@@ -209,10 +205,9 @@ func CopyServedTestSetup(t testing.TB) string {
 stages:
   waiting: {}
   done: {final: true}
-pins:
-  inputs:
-    - widget.started
-    - widget.scored
+inputs:
+  - widget.started
+  - widget.scored
 `)
 	writeClosedVariantFile(t, root, "state.yaml", "score: integer\n")
 	writeClosedVariantFile(t, root, "events.yaml", `widget.scored:
@@ -260,7 +255,7 @@ func CopyFirstFlowTutorial(t testing.TB) string {
 	t.Helper()
 	root := CopyExample(t, RootIngress)
 
-	writeClosedVariantFile(t, root, "schema.yaml", "# fixture: ticket-flow\nstages:\n  open: {}\n  assigned: {}\n  resolved: {final: true}\npins:\n  inputs:\n    - ticket.classified\n")
+	writeClosedVariantFile(t, root, "schema.yaml", "# fixture: ticket-flow\nstages:\n  open: {}\n  assigned: {}\n  resolved: {final: true}\ninputs:\n  - ticket.classified\n")
 	writeClosedVariantFile(t, root, "state.yaml", `category: ""
 priority: ""
 resolution: ""
@@ -297,7 +292,7 @@ func CopyAgentSlugAdmission(t testing.TB, workflowName, agentKey, agentID string
 	root := CopyExample(t, RootIngress)
 	removeClosedVariantFiles(t, root, "nodes.yaml", "state.yaml")
 
-	writeClosedVariantFile(t, root, "schema.yaml", "stages: []\npins:\n  inputs:\n    - agent.requested\n")
+	writeClosedVariantFile(t, root, "schema.yaml", "stages: []\ninputs:\n  - agent.requested\n")
 	writeClosedVariantFile(t, root, "events.yaml", "agent.requested:\n")
 	identity := ""
 	if agentID != agentKey {
@@ -312,7 +307,7 @@ func CopyVerifyMissingPin(t testing.TB) string {
 	t.Helper()
 	root := CopyExample(t, ParentConnect)
 
-	writeClosedVariantFile(t, root, "schema.yaml", "# fixture: verify-missing-pin-warning\nstages:\n  pending: {}\n  done: {final: true}\npins:\n  inputs:\n    - task.requested\n")
+	writeClosedVariantFile(t, root, "schema.yaml", "# fixture: verify-missing-pin-warning\nstages:\n  pending: {}\n  done: {final: true}\ninputs:\n  - task.requested\n")
 	writeClosedVariantFile(t, root, "events.yaml", "task.requested:\ntask.completed:\nchild/task.assigned:\nchild/task.result:\n")
 	writeClosedVariantFile(t, root, "nodes.yaml", `dispatcher:
   task.requested:
@@ -322,7 +317,7 @@ func CopyVerifyMissingPin(t testing.TB) string {
     emit:
       event: task.completed
 `)
-	writeLegacyInstanceFlow(t, root, "child", "# fixture: child\nstages:\n  idle: {}\n  working: {}\n  done: {final: true}\npins:\n  inputs:\n    - task.assigned\n    - task.feedback\n", "task.assigned:\ntask.feedback:\n  comment: string\ntask.result:\n", "", `worker:
+	writeLegacyInstanceFlow(t, root, "child", "# fixture: child\nstages:\n  idle: {}\n  working: {}\n  done: {final: true}\ninputs:\n  - task.assigned\n  - task.feedback\n", "task.assigned:\ntask.feedback:\n  comment: string\ntask.result:\n", "", `worker:
   task.assigned:
     advances_to: working
   task.feedback:
@@ -338,7 +333,7 @@ func CopyRunForkTarget(t testing.TB) string {
 	root := CopyExample(t, RootIngress)
 	removeClosedVariantFiles(t, root, "state.yaml")
 
-	writeClosedVariantFile(t, root, "schema.yaml", "stages:\n  pending: {}\n  done: {final: true}\npins:\n  inputs:\n    - task.requested\n")
+	writeClosedVariantFile(t, root, "schema.yaml", "stages:\n  pending: {}\n  done: {final: true}\ninputs:\n  - task.requested\n")
 	writeClosedVariantFile(t, root, "nodes.yaml", "test-node:\n  task.requested:\n    advances_to: done\n")
 	writeClosedVariantFile(t, root, "events.yaml", "task.requested:\n")
 	return root

@@ -64,12 +64,11 @@ func TestRun_AllowsDeclaredNodeStateNamedType(t *testing.T) {
 
 func TestRun_AllowsDeclaredNodeStateScalarAndEnumRefs(t *testing.T) {
 	bundle := nodeStateSchemaTypingBundle()
-	bundle.RootTypes.Scalars["ScoreID"] = runtimecontracts.ScalarTypeDecl{Base: "text"}
-	bundle.RootTypes.Enums["ScoreStatus"] = runtimecontracts.EnumTypeDecl{Values: []string{"ready", "done"}, Default: "ready"}
+	bundle.RootTypes.Enums["ScoreStatus"] = runtimecontracts.EnumTypeDecl{Values: []string{"ready", "done"}}
 	bundle.Nodes["scoring-node"] = runtimecontracts.SystemNodeContract{
 		StateTable: "scoring_state",
 		StateSchema: runtimecontracts.NodeStateSchema{Fields: []runtimecontracts.NodeStateField{
-			{Name: "score_id", Type: "ScoreID"},
+			{Name: "score_id", Type: "text"},
 			{Name: "score_status", Type: "ScoreStatus"},
 		}},
 	}
@@ -88,8 +87,7 @@ func nodeStateSchemaTypingBundle() *runtimecontracts.WorkflowContractBundle {
 	return &runtimecontracts.WorkflowContractBundle{
 		Nodes: map[string]runtimecontracts.SystemNodeContract{},
 		RootTypes: runtimecontracts.TypeCatalogDocument{
-			Scalars: map[string]runtimecontracts.ScalarTypeDecl{},
-			Enums:   map[string]runtimecontracts.EnumTypeDecl{},
+			Enums: map[string]runtimecontracts.EnumTypeDecl{},
 			Types: map[string]runtimecontracts.NamedTypeDecl{
 				"DimensionScore": {
 					Fields: map[string]runtimecontracts.TypeFieldSpec{

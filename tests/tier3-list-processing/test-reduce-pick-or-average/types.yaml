@@ -1,3 +1,2 @@
-types:
-  Score:
-    score: integer
+Score:
+  score: integer

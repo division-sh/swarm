@@ -26,6 +26,9 @@ func projectStateContract(root yamlsource.Value, types TypeCatalogDocument) (Ent
 	}
 	state := EntityContract{Fields: map[string]EntityFieldDecl{}}
 	for _, field := range fields {
+		if field.Name == "_description" {
+			return EntityContract{}, nodeValueError(field.Value, fmt.Errorf("_description is not a key; use a YAML comment"))
+		}
 		if field.Name == "" || field.Name != strings.TrimSpace(field.Name) {
 			return EntityContract{}, fmt.Errorf("state field %q must be nonempty without surrounding whitespace", field.Name)
 		}

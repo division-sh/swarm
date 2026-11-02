@@ -449,12 +449,11 @@ func TestJoinExpressionTypeCheckingMatchesRuntimeContext(t *testing.T) {
 
 func TestJoinExpressionTypeCheckingPreservesCatalogTypes(t *testing.T) {
 	catalog := runtimecontracts.TypeCatalogDocument{
-		Scalars: map[string]runtimecontracts.ScalarTypeDecl{"Score": {Base: "integer"}},
-		Enums:   map[string]runtimecontracts.EnumTypeDecl{"Decision": {Values: []string{"accept", "reject"}, Default: "accept"}},
+		Enums: map[string]runtimecontracts.EnumTypeDecl{"Decision": {Values: []string{"accept", "reject"}}},
 		Types: map[string]runtimecontracts.NamedTypeDecl{
 			"JoinResult": {Fields: map[string]runtimecontracts.TypeFieldSpec{
 				"value": {Type: "text"},
-				"score": {Type: "Score"},
+				"score": {Type: "integer"},
 			}},
 		},
 	}
@@ -470,10 +469,10 @@ func TestJoinExpressionTypeCheckingPreservesCatalogTypes(t *testing.T) {
 		{name: "nested scalar alias field", resultType: "JoinResult", expression: `join.results.exists(r, r.score > 1)`},
 		{name: "enum equality", resultType: "Decision", expression: `join.results.exists(r, r == "accept")`},
 		{name: "enum numeric operator", resultType: "Decision", expression: `join.results.exists(r, r > 1)`, wantErr: true},
-		{name: "scalar alias", resultType: "Score", expression: `join.results.exists(r, r > 1)`},
-		{name: "scalar alias mismatch", resultType: "Score", expression: `join.results.exists(r, r.startsWith("1"))`, wantErr: true},
-		{name: "list", resultType: "[Score]", expression: `join.results.exists(r, r.exists(v, v > 1))`},
-		{name: "map", resultType: "map[text]Score", expression: `join.results.exists(r, r[?"a"].orValue(0) > 1)`},
+		{name: "scalar", resultType: "integer", expression: `join.results.exists(r, r > 1)`},
+		{name: "scalar mismatch", resultType: "integer", expression: `join.results.exists(r, r.startsWith("1"))`, wantErr: true},
+		{name: "list", resultType: "[integer]", expression: `join.results.exists(r, r.exists(v, v > 1))`},
+		{name: "map", resultType: "map[text]integer", expression: `join.results.exists(r, r[?"a"].orValue(0) > 1)`},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			err := ValidateValueExpressionWithOptions(tc.expression, ValueExpressionOptions{

@@ -38,9 +38,6 @@ func resolveCatalogTypeReference(typeRef string, catalog TypeCatalogDocument, re
 	if keyRef, valueRef, ok := parseWave1MapTypeRef(typeRef); ok {
 		return resolveCatalogMapType(keyRef, valueRef, catalog, resolving)
 	}
-	if scalar, ok := catalog.Scalars[typeRef]; ok {
-		return resolveCatalogScalarAlias(typeRef, scalar, catalog, resolving)
-	}
 	if _, ok := catalog.Enums[typeRef]; ok {
 		return ResolvedCatalogType{Kind: CatalogTypeText, Name: typeRef}, nil
 	}
@@ -71,19 +68,6 @@ func resolveCatalogMapType(keyRef, valueRef string, catalog TypeCatalogDocument,
 		return ResolvedCatalogType{}, err
 	}
 	return ResolvedCatalogType{Kind: CatalogTypeMap, Key: &key, Value: &value}, nil
-}
-
-func resolveCatalogScalarAlias(typeRef string, scalar ScalarTypeDecl, catalog TypeCatalogDocument, resolving map[string]struct{}) (ResolvedCatalogType, error) {
-	base := strings.TrimSpace(scalar.Base)
-	if base == "" {
-		return ResolvedCatalogType{}, catalogReferenceError(fmt.Sprintf("catalog scalar %q has empty base", typeRef))
-	}
-	if _, cycle := resolving[typeRef]; cycle {
-		return ResolvedCatalogType{}, catalogReferenceError(fmt.Sprintf("catalog scalar alias cycle at %s", typeRef))
-	}
-	resolving[typeRef] = struct{}{}
-	defer delete(resolving, typeRef)
-	return resolveCatalogTypeReference(base, catalog, resolving)
 }
 
 func resolveCatalogNamedType(typeRef string, named NamedTypeDecl, catalog TypeCatalogDocument, resolving map[string]struct{}) (ResolvedCatalogType, error) {

@@ -203,7 +203,7 @@ func loadWorkflowFlowDeclarations(bundle *WorkflowContractBundle) (map[string]Fl
 		if source.Schema != "" {
 			bundle.FlowSchemas[source.FlowPath] = schema
 		}
-		if len(flowTypes.Scalars) > 0 || len(flowTypes.Enums) > 0 || len(flowTypes.Types) > 0 {
+		if len(flowTypes.Enums) > 0 || len(flowTypes.Types) > 0 {
 			bundle.flowTypes[source.FlowPath] = flowTypes
 		}
 		if len(flowEntities) > 0 {

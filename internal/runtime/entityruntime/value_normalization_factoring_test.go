@@ -61,8 +61,7 @@ func TestEntityValueFactoringPresenceAndErrorPhases(t *testing.T) {
 
 func TestEntityValueFactoringScalarRepresentations(t *testing.T) {
 	catalog := c.TypeCatalogDocument{
-		Scalars: map[string]c.ScalarTypeDecl{"Label": {Base: "text"}},
-		Enums:   map[string]c.EnumTypeDecl{"Status": {Values: []string{"open", "closed"}, Default: "open"}},
+		Enums: map[string]c.EnumTypeDecl{"Status": {Values: []string{"open", "closed"}}},
 	}
 	instant := time.Date(2026, 1, 2, 1, 4, 5, 0, time.UTC)
 	for _, tc := range []struct {
@@ -71,7 +70,6 @@ func TestEntityValueFactoringScalarRepresentations(t *testing.T) {
 		failure     string
 	}{
 		{"text", "text", "  exact  ", "  exact  ", ""},
-		{"alias", "Label", "  exact  ", "  exact  ", ""},
 		{"integer", "integer", float64(7), int64(7), ""},
 		{"fraction", "integer", 7.5, nil, "must be integer"},
 		{"numeric_integer", "numeric", int64(7), int64(7), ""},
@@ -150,7 +148,7 @@ func TestEntityValueFactoringContainersAndDetachment(t *testing.T) {
 func TestEntityValueFactoringMapKeysAndContainedConsumer(t *testing.T) {
 	contract := Contract{
 		Entity: c.EntityContract{Fields: map[string]c.EntityFieldDecl{"items": {Type: "map[Status]integer"}}},
-		Types:  c.TypeCatalogDocument{Enums: map[string]c.EnumTypeDecl{"Status": {Values: []string{"open", "closed"}, Default: "open"}}},
+		Types:  c.TypeCatalogDocument{Enums: map[string]c.EnumTypeDecl{"Status": {Values: []string{"open", "closed"}}}},
 	}
 	got, err := NormalizeFieldValue(contract, "items", map[string]any{" open ": 1})
 	requireValueFactoringResult(t, got, map[string]any{"open": int64(1)}, err)

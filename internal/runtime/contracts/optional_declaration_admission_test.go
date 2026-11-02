@@ -72,10 +72,10 @@ func optionalDeclarationRoleTestCases() []optionalDeclarationRoleTestCase {
 			},
 		},
 		{
-			name: "types", fileName: "types.yaml", valid: "types:\n  Item: {}\n", merged: "<<: &catalog\n  types:\n    Item: {}\n", blank: "types:\n  \"\": {}\n", collide: "types:\n  Item: {}\n  \" Item \": {}\n",
+			name: "types", fileName: "types.yaml", valid: "Item: {}\n", merged: "<<: &catalog\n  Item: {}\n", blank: "\"\": {}\n", collide: "Item: {}\n\" Item \": {}\n",
 			load: func(path string) (int, error) {
 				value, err := loadOptionalTypeDeclarations(path)
-				return len(value.Scalars) + len(value.Enums) + len(value.Types), err
+				return len(value.Enums) + len(value.Types), err
 			},
 		},
 	}

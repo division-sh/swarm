@@ -1,6 +1,7 @@
 package contracts
 
 import (
+	"slices"
 	"strings"
 	"testing"
 
@@ -197,11 +198,8 @@ func TestLoadWorkflowContractBundle_LoadsWave1TypeAndEntityDocuments(t *testing.
 	writeFixtureFile(t, root+"/scoring/manifest.yaml", "version: 1.0.0\nplatform_version: '*'\n")
 	writeFixtureFile(t, root+"/schema.yaml", "stages: []\n# fixture: wave1-bundle\n")
 	writeFixtureFile(t, root+"/types.yaml", `
-scalars:
-  URL: text
-types:
-  Brand:
-    name: text
+Brand:
+  name: text
 `)
 	writeFixtureFile(t, root+"/events.yaml", `
 root.ready:
@@ -212,16 +210,14 @@ root.ready:
 stages:
   discovered: {}
   shortlisted: {final: true}
-pins:
-  inputs:
-    - root.ready
-  outputs:
-    - vertical.shortlisted
+inputs:
+  - root.ready
+outputs:
+  - vertical.shortlisted
 `)
 	writeFixtureFile(t, root+"/scoring/types.yaml", `
-types:
-  ScoreBreakdown:
-    total: numeric
+ScoreBreakdown:
+  total: numeric
 `)
 	writeFixtureFile(t, root+"/scoring/state.yaml", `
 name: text
@@ -242,9 +238,6 @@ vertical.shortlisted:
 	}
 
 	rootTypes := bundle.RootTypeCatalog()
-	if got := rootTypes.Scalars["URL"].Base; got != "text" {
-		t.Fatalf("RootTypeCatalog().Scalars[URL] = %q", got)
-	}
 	if _, ok := rootTypes.Types["Brand"]; !ok {
 		t.Fatal("expected root Brand type")
 	}
@@ -607,9 +600,9 @@ func mustTemplateInstanceField(t testing.TB, raw string) TemplateInstanceField {
 
 func TestTypeDiagnosticsUseAuthorFacingVocabulary(t *testing.T) {
 	t.Run("scalar alias", func(t *testing.T) {
-		var scalar ScalarTypeDecl
-		err := decodeNodeTestYAML([]byte("future_scalar\n"), &scalar)
-		if err == nil || !strings.Contains(err.Error(), "supported built-in scalar") {
+		var doc TypeCatalogDocument
+		err := decodeNodeTestYAML([]byte("Label: text\n"), &doc)
+		if err == nil || !strings.Contains(err.Error(), "scalar aliases are not supported") {
 			t.Fatalf("scalar alias error = %v", err)
 		}
 		if strings.Contains(err.Error(), "Wave 1") {
@@ -676,7 +669,7 @@ func TestEventCatalogEntryDecode_AcceptsFlatWave1PayloadGrammar(t *testing.T) {
 vertical_name: text
 composite_score:
   type: numeric
-  description: final score
+  # final score
 `)
 	if err != nil {
 		t.Fatalf("admit event catalog entry: %v", err)
@@ -728,12 +721,11 @@ vertical:
 func TestTypeCatalogDocumentDecode_RejectsInlineObjectField(t *testing.T) {
 	var doc TypeCatalogDocument
 	err := decodeNodeTestYAML([]byte(`
-types:
-  Brand:
-    palette:
-      type: object
-      properties:
-        primary: text
+Brand:
+  palette:
+    type: object
+    properties:
+      primary: text
 `), &doc)
 	if err == nil || !strings.Contains(err.Error(), "is not supported") {
 		t.Fatalf("yaml.Unmarshal error = %v, want RETIRED inline object rejection", err)
@@ -743,14 +735,18 @@ types:
 func TestTypeCatalogDocumentDecode_PreservesNamedFieldOptionalityAndMergedMappings(t *testing.T) {
 	var doc TypeCatalogDocument
 	err := decodeNodeTestYAML([]byte(`
+Contact:
+  <<: &contact_fields
+    email: text?
+  phone: text?
+  name: text
 types:
-  Contact:
-    <<: &contact_fields
-      email: text?
-    phone:
-      type: text?
-      description: Optional phone number.
-    name: text
+  name: text
+scalars:
+  name: text
+enums:
+  name: text
+Status: ['open', "closed"]
 `), &doc)
 	if err != nil {
 		t.Fatalf("yaml.Unmarshal: %v", err)
@@ -771,13 +767,21 @@ types:
 	if _, exists := contact.Fields["<<"]; exists {
 		t.Fatalf("merge pseudo-field leaked into Contact: %#v", contact.Fields)
 	}
+	for _, name := range []string{"types", "scalars", "enums"} {
+		if field := doc.Types[name].Fields["name"]; field.Type != "text" {
+			t.Fatalf("ordinary record %s = %#v", name, doc.Types[name])
+		}
+	}
+	if got := doc.Enums["Status"].Values; !slices.Equal(got, []string{"open", "closed"}) {
+		t.Fatalf("Status members = %#v", got)
+	}
 }
 
 func TestTypeCatalogDocumentDecode_RejectsInvalidOptionalMarkers(t *testing.T) {
 	for _, typeRef := range []string{"text??", "text? ", "[text?]"} {
 		t.Run(typeRef, func(t *testing.T) {
 			var doc TypeCatalogDocument
-			err := decodeNodeTestYAML([]byte("types:\n  Item:\n    value: {type: '"+typeRef+"'}\n"), &doc)
+			err := decodeNodeTestYAML([]byte("Item:\n  value: {type: '"+typeRef+"'}\n"), &doc)
 			if err == nil || !strings.Contains(err.Error(), "optional") {
 				t.Fatalf("yaml.Unmarshal error = %v, want optional-marker rejection", err)
 			}
@@ -806,7 +810,7 @@ func TestCustomContractDocumentsDecodeMergeExpandedMappings(t *testing.T) {
 	}
 
 	var types TypeCatalogDocument
-	if err := decodeNodeTestYAML([]byte("<<: &catalog\n  types:\n    Item: {}\n"), &types); err != nil {
+	if err := decodeNodeTestYAML([]byte("<<: &catalog\n  Item: {}\n"), &types); err != nil {
 		t.Fatalf("yaml.Unmarshal types: %v", err)
 	}
 	if _, ok := types.Types["Item"]; !ok {

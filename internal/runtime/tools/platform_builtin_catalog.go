@@ -691,9 +691,6 @@ func applyEntitySchemaRefinements(schema map[string]any, refinements runtimecont
 
 func deliveryTypeName(contract entityruntime.Contract, typeRef string) string {
 	typeRef = strings.TrimSpace(typeRef)
-	if scalar, ok := contract.Types.Scalars[typeRef]; ok {
-		return strings.TrimSpace(scalar.Base)
-	}
 	return typeRef
 }
 

@@ -1,3 +1,2 @@
-types:
-  DispatchItem:
-    id: text
+DispatchItem:
+  id: text

@@ -10,50 +10,38 @@ import (
 	"github.com/division-sh/swarm/internal/runtime/llm"
 )
 
-func TestEntityOperationCatalogSchemaAliasAndMapKeyParity(t *testing.T) {
-	minLength, maxLength := 2, 4
-	minRank, maxRank := float64(1), float64(3)
-	textRefinement := rc.SchemaRefinements{Pattern: "^[a-z]+$", Length: rc.SchemaLengthRefinement{Min: &minLength, Max: &maxLength}}
+func TestEntityOperationCatalogSchemaTypeAndMapKeyParity(t *testing.T) {
 	catalog := rc.TypeCatalogDocument{
-		Scalars: map[string]rc.ScalarTypeDecl{"Label": {Base: "text"}, "Rank": {Base: "integer"}, "Identifier": {Base: "uuid"}},
-		Enums:   map[string]rc.EnumTypeDecl{"Status": {Values: []string{"open", "closed"}, Default: "open"}},
+		Enums: map[string]rc.EnumTypeDecl{"Status": {Values: []string{"open", "closed"}}},
 		Types: map[string]rc.NamedTypeDecl{"Entry": {Fields: map[string]rc.TypeFieldSpec{
-			"name": {Type: "Label", Refinements: textRefinement},
-			"rank": {Type: "Rank", Refinements: rc.SchemaRefinements{Range: rc.SchemaRangeRefinement{Min: &minRank, Max: &maxRank}}},
-			"note": {Type: "Label", IsOptional: true},
+			"name": {Type: "text"},
+			"rank": {Type: "integer"},
+			"note": {Type: "text", IsOptional: true},
 		}}},
 	}
 	entry := map[string]any{"name": "good", "rank": int64(2)}
-	badPattern := map[string]any{"name": "BAD", "rank": int64(2)}
-	badLength := map[string]any{"name": "a", "rank": int64(2)}
-	badRange := map[string]any{"name": "good", "rank": int64(4)}
 	badRecord := map[string]any{"name": "good", "rank": int64(2), "unknown": "forbidden"}
 	for _, tc := range []struct {
 		name, typeRef string
-		refinements   rc.SchemaRefinements
 		initial       any
 		input         map[string]any
 		valid         bool
 	}{
-		{"json/scalar", "json", rc.SchemaRefinements{}, "before", map[string]any{"value": "after"}, true},
-		{"json/record", "json", rc.SchemaRefinements{}, map[string]any{"old": "kept"}, map[string]any{"value": map[string]any{"arbitrary": map[string]any{"nested": true}}}, true},
-		{"array/dynamic-items", "array", rc.SchemaRefinements{}, []any{"before"}, map[string]any{"value": []any{"after", true, map[string]any{"arbitrary": "value"}, nil}}, true},
-		{"alias/default", "Label", textRefinement, "good", map[string]any{"value": "nice"}, true},
-		{"alias/explicit", "Label", textRefinement, "good", map[string]any{"op": "set", "value": "nice"}, true},
-		{"alias/pattern", "Label", textRefinement, "good", map[string]any{"value": "BAD"}, false},
-		{"alias/length", "Label", textRefinement, "good", map[string]any{"value": "a"}, false},
-		{"list/alias-fields", "[Entry]", rc.SchemaRefinements{}, []any{entry}, map[string]any{"op": "append", "value": entry}, true},
-		{"list/alias-pattern", "[Entry]", rc.SchemaRefinements{}, []any{entry}, map[string]any{"op": "append", "value": badPattern}, false},
-		{"list/alias-range", "[Entry]", rc.SchemaRefinements{}, []any{entry}, map[string]any{"op": "update", "index": int64(0), "value": badRange}, false},
+		{"json/scalar", "json", "before", map[string]any{"value": "after"}, true},
+		{"json/record", "json", map[string]any{"old": "kept"}, map[string]any{"value": map[string]any{"arbitrary": map[string]any{"nested": true}}}, true},
+		{"array/dynamic-items", "array", []any{"before"}, map[string]any{"value": []any{"after", true, map[string]any{"arbitrary": "value"}, nil}}, true},
+		{"text/default", "text", "good", map[string]any{"value": "nice"}, true},
+		{"text/explicit", "text", "good", map[string]any{"op": "set", "value": "nice"}, true},
+		{"list/record-fields", "[Entry]", []any{entry}, map[string]any{"op": "append", "value": entry}, true},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
-			contract := entityruntime.Contract{EntityType: "state", Types: catalog, Entity: rc.EntityContract{Fields: map[string]rc.EntityFieldDecl{"field": {Type: tc.typeRef, Refinements: tc.refinements}}}}
+			contract := entityruntime.Contract{EntityType: "state", Types: catalog, Entity: rc.EntityContract{Fields: map[string]rc.EntityFieldDecl{"field": {Type: tc.typeRef}}}}
 			assertEntityCatalogSchemaRuntimeParity(t, contract, tc.initial, tc.input, tc.valid)
 		})
 	}
-	for _, keyType := range []string{"Label", "Status", "Identifier"} {
-		goodKey := map[string]string{"Label": " business key ", "Status": "open", "Identifier": "d9428888-122b-11e1-b85c-61cd3cbb3210"}[keyType]
-		badKey := map[string]string{"Label": "", "Status": "unknown", "Identifier": "not-a-uuid"}[keyType]
+	for _, keyType := range []string{"text", "Status", "uuid"} {
+		goodKey := map[string]string{"text": " business key ", "Status": "open", "uuid": "d9428888-122b-11e1-b85c-61cd3cbb3210"}[keyType]
+		badKey := map[string]string{"text": "", "Status": "unknown", "uuid": "not-a-uuid"}[keyType]
 		contract := entityruntime.Contract{EntityType: "state", Types: catalog, Entity: rc.EntityContract{Fields: map[string]rc.EntityFieldDecl{"field": {Type: "map[" + keyType + "]Entry"}}}}
 		for _, tc := range []struct {
 			name  string
@@ -64,9 +52,6 @@ func TestEntityOperationCatalogSchemaAliasAndMapKeyParity(t *testing.T) {
 			{"valid", goodKey, entry, true},
 			{"invalid-key", badKey, entry, false},
 			{"empty-key", "", entry, false},
-			{"alias-pattern", goodKey, badPattern, false},
-			{"alias-length", goodKey, badLength, false},
-			{"alias-range", goodKey, badRange, false},
 			{"record-closure", goodKey, badRecord, false},
 		} {
 			for _, mode := range []string{"default", "whole-set", "key-set"} {
@@ -93,7 +78,7 @@ func TestEntityToolLiteralMutationRejectsWholeMapKeyCollisions(t *testing.T) {
 		}
 		contract := entityruntime.Contract{
 			Entity: rc.EntityContract{Fields: map[string]rc.EntityFieldDecl{"field": {Type: "map[" + keyType + "]text"}}},
-			Types:  rc.TypeCatalogDocument{Enums: map[string]rc.EnumTypeDecl{"Status": {Values: []string{"Ready", "Done"}, Default: "Ready"}}},
+			Types:  rc.TypeCatalogDocument{Enums: map[string]rc.EnumTypeDecl{"Status": {Values: []string{"Ready", "Done"}}}},
 		}
 		for _, second := range []string{"first", "different"} {
 			for _, explicit := range []bool{false, true} {

@@ -11,10 +11,9 @@ import (
 
 func admissionTestCatalog() TypeCatalogDocument {
 	return TypeCatalogDocument{
-		Scalars: map[string]ScalarTypeDecl{"Label": {Base: "text"}, "ID": {Base: "uuid"}, "Time": {Base: "timestamp"}},
-		Enums:   map[string]EnumTypeDecl{"Status": {Values: []string{"open", "closed"}, Default: "open"}},
+		Enums: map[string]EnumTypeDecl{"Status": {Values: []string{"open", "closed"}}},
 		Types: map[string]NamedTypeDecl{
-			"Item":  {Fields: map[string]TypeFieldSpec{"name": {Type: "Label"}}},
+			"Item":  {Fields: map[string]TypeFieldSpec{"name": {Type: "text"}}},
 			"Cycle": {Fields: map[string]TypeFieldSpec{"child": {Type: "Cycle"}}},
 			"Left":  {Fields: map[string]TypeFieldSpec{"right": {Type: "[Right]"}}},
 			"Right": {Fields: map[string]TypeFieldSpec{"left": {Type: "map[text]Left"}}},
@@ -23,7 +22,7 @@ func admissionTestCatalog() TypeCatalogDocument {
 }
 
 func TestCatalogAdmissionRejectsInvalidReferences(t *testing.T) {
-	for _, ref := range []string{"", "Missing", "[Missing]", "map[text]Missing", "Item[]", "[]Item", "[Item[]]", "map[text][]Item", "Cycle", "[Left]", "map[integer]Item", "map[numeric]Item", "map[boolean]Item"} {
+	for _, ref := range []string{"", "Missing", "[Missing]", "[[Missing]]", "map[text]Missing", "map[Missing]integer", "map[text][Missing]", "Item[]", "[]Item", "[Item[]]", "map[text][]Item", "Cycle", "[Left]", "map[integer]Item", "map[numeric]Item", "map[boolean]Item"} {
 		t.Run(ref, func(t *testing.T) {
 			_, err := (CatalogTypeReference{Type: ref, Catalog: admissionTestCatalog()}).Resolve()
 			if err == nil {
@@ -79,12 +78,12 @@ func TestCatalogAdmissionNodeListTeaching(t *testing.T) {
 
 func TestCatalogAdmissionScopedSourcesRejectInvalidPresence(t *testing.T) {
 	for _, tc := range []struct{ name, file, source string }{
-		{"unused_self", "types.yaml", "types:\n  Cycle:\n    child: Cycle\n"},
-		{"unused_mutual", "child/types.yaml", "types:\n  Left:\n    right: [Right]\n  Right:\n    left: map[text]Left\n"},
-		{"unused_missing", "types.yaml", "types:\n  Unused:\n    child: Missing\n"},
+		{"unused_self", "types.yaml", "Cycle:\n  child: Cycle\n"},
+		{"unused_mutual", "child/types.yaml", "Left:\n  right: [Right]\nRight:\n  left: map[text]Left\n"},
+		{"unused_missing", "types.yaml", "Unused:\n  child: Missing\n"},
 		{"unused_entity", "child/state.yaml", "child: Missing\n"},
 		{"unused_event", "child/events.yaml", "test.ready:\n  child: Missing\n"},
-		{"suffix", "types.yaml", "types:\n  Unused:\n    child: text[]\n"},
+		{"suffix", "types.yaml", "Unused:\n  child: text[]\n"},
 		{"prefix", "state.yaml", "child: {type: '[]text', indexed: true}\n"},
 		{"integer_key", "events.yaml", "test.ready:\n  child: map[integer]text\n"},
 	} {
@@ -111,16 +110,16 @@ func TestCatalogAdmissionScopedSourcesRejectInvalidPresence(t *testing.T) {
 func TestCatalogAdmissionConsumersPreserveDomains(t *testing.T) {
 	types := admissionTestCatalog()
 	primary := PrimaryEntityContract{Types: types, Contract: EntityContract{Fields: map[string]EntityFieldDecl{
-		"labels": {Type: "[Label]"}, "items": {Type: "map[Label]Item"},
+		"labels": {Type: "[text]"}, "items": {Type: "map[text]Item"},
 	}}}
 	contained, err := SingletonContainedFields(primary)
 	if err != nil || len(contained) != 2 {
-		t.Fatalf("text alias collections: %v, %v", contained, err)
+		t.Fatalf("text collections: %v, %v", contained, err)
 	}
-	if got := templateInstanceFieldLeafKind(primary, "Label"); got != "scalar" {
-		t.Fatalf("text alias template identity = %q", got)
+	if got := templateInstanceFieldLeafKind(primary, "text"); got != "scalar" {
+		t.Fatalf("text template identity = %q", got)
 	}
-	for _, ref := range []string{"[Item]", "map[Label]Item", "map[uuid]Item", "map[ID]Item", "map[Status]Item", "[map[text]Item]", "map[text][Item]"} {
+	for _, ref := range []string{"[Item]", "map[text]Item", "map[uuid]Item", "map[Status]Item", "[map[text]Item]", "map[text][Item]"} {
 		t.Run(ref, func(t *testing.T) {
 			if _, err := (CatalogTypeReference{Type: ref, Catalog: types}).Resolve(); err != nil {
 				t.Fatal(err)
@@ -134,9 +133,9 @@ func TestCatalogAdmissionConsumersPreserveDomains(t *testing.T) {
 		ref    string
 		schema map[string]any
 	}{
-		{"Label", map[string]any{"type": "string"}},
-		{"ID", map[string]any{"type": "string", "format": "uuid"}},
-		{"Time", map[string]any{"type": "string", "format": "date-time"}},
+		{"text", map[string]any{"type": "string"}},
+		{"uuid", map[string]any{"type": "string", "format": "uuid"}},
+		{"timestamp", map[string]any{"type": "string", "format": "date-time"}},
 		{"Status", map[string]any{"type": "string", "enum": []any{"open", "closed"}}},
 	} {
 		if got := eventSchemaForResolvedType(tc.ref, types, map[string]struct{}{}); !reflect.DeepEqual(got, tc.schema) {
@@ -146,7 +145,7 @@ func TestCatalogAdmissionConsumersPreserveDomains(t *testing.T) {
 		if err != nil {
 			t.Fatal(err)
 		}
-		if got := compiledFileTextField(ResolvedCatalogField{TypeRef: tc.ref, Type: resolved}, types); got != (tc.ref == "Label") {
+		if got := compiledFileTextField(ResolvedCatalogField{TypeRef: tc.ref, Type: resolved}, types); got != (tc.ref == "text") {
 			t.Fatalf("file-text domain %s = %v", tc.ref, got)
 		}
 	}
@@ -162,11 +161,6 @@ func TestCatalogAdmissionComparableDomainsRequireResolvedEvidence(t *testing.T) 
 			t.Errorf("invalid equality reference %q classified as %q", ref, got)
 		}
 	}
-	for _, pair := range [][2]string{{"Label", "text"}, {"ID", "uuid"}, {"Time", "timestamp"}, {"[Label]", "[text]"}, {"map[Label]Item", "map[text]Item"}} {
-		if left, right := schemaRefinementComparableType(types, pair[0]), schemaRefinementComparableType(types, pair[1]); left == "" || left != right {
-			t.Errorf("equivalent domains %v differ: %q %q", pair, left, right)
-		}
-	}
 	for _, pair := range [][2]string{{"text", "uuid"}, {"text", "Status"}, {"text", "timestamp"}, {"integer", "numeric"}, {"json", "object"}} {
 		if schemaRefinementComparableType(types, pair[0]) == schemaRefinementComparableType(types, pair[1]) {
 			t.Errorf("distinct domains %v collapsed", pair)
@@ -180,11 +174,11 @@ func TestCatalogAdmissionSharedDAGAndAuthoredAliasPolicy(t *testing.T) {
 		"child/manifest.yaml": "version: 1.0.0\nplatform_version: '*'\n",
 		"manifest.yaml":       "version: 1.0.0\nplatform_version: '*'\n",
 		"schema.yaml":         "# fixture: dag\nstages: {done: {final: true}}\n",
-		"types.yaml":          "scalars:\n  Label: text\n  ID: uuid\n  Time: timestamp\nenums:\n  Status: {values: [open, closed], default: open}\ntypes:\n  Leaf:\n    value: Label\n  Pair:\n    first: Leaf\n    second: Leaf?\n  Nested:\n    pairs: [Pair]\n    lookup: map[Label]Pair\n",
+		"types.yaml":          "Status: ['open', 'closed']\nLeaf:\n  value: text\nPair:\n  first: Leaf\n  second: Leaf?\nNested:\n  pairs: [Pair]\n  lookup: map[text]Pair\n",
 		"state.yaml":          "state: Nested\n",
 		"child/schema.yaml":   "# fixture: child\ninstance: id\nstages: {done: {final: true}}\n",
-		"child/state.yaml":    "id: Label\nitems: map[Label]Pair\n",
-		"child/events.yaml":   "test.ready:\n  items: [Pair]\n  keys: map[Status]ID\n  stamp: Time\n",
+		"child/state.yaml":    "id: text\nitems: map[text]Pair\n",
+		"child/events.yaml":   "test.ready:\n  items: [Pair]\n  keys: map[Status]uuid\n  stamp: timestamp\n",
 	} {
 		writeFixtureFile(t, filepath.Join(root, name), source)
 	}
@@ -201,11 +195,11 @@ func TestCatalogAdmissionSharedDAGAndAuthoredAliasPolicy(t *testing.T) {
 		t.Fatal(err)
 	}
 	if fields, err := SingletonContainedFields(primary); err != nil || len(fields) != 1 {
-		t.Fatalf("acyclic repeated names or text aliases lost: %v %v", fields, err)
+		t.Fatalf("acyclic repeated names or text domains lost: %v %v", fields, err)
 	}
-	writeFixtureFile(t, filepath.Join(root, "types.yaml"), "scalars:\n  Label: text\n  Chain: Label\n")
-	if _, err := LoadWorkflowContractBundleWithOverrides(repo, root, DefaultPlatformSpecFile(repo)); err == nil || !strings.Contains(err.Error(), "supported built-in scalar") {
-		t.Fatalf("authored alias-chain restriction changed: %v", err)
+	writeFixtureFile(t, filepath.Join(root, "types.yaml"), "Label: text\n")
+	if _, err := LoadWorkflowContractBundleWithOverrides(repo, root, DefaultPlatformSpecFile(repo)); err == nil || !strings.Contains(err.Error(), "scalar aliases are not supported") {
+		t.Fatalf("authored scalar alias was admitted: %v", err)
 	}
 }
 
@@ -228,7 +222,7 @@ func TestCatalogAdmissionCompiledEventRefusals(t *testing.T) {
 
 func TestCatalogAdmissionTextFamilyMapKeys(t *testing.T) {
 	types := admissionTestCatalog()
-	for _, key := range []string{"text", "Label", "Status", "uuid", "ID"} {
+	for _, key := range []string{"text", "Status", "uuid"} {
 		resolved, err := (CatalogTypeReference{Type: "map[" + key + "]Item", Catalog: types}).Resolve()
 		if err != nil || resolved.Key == nil || resolved.Key.Kind != CatalogTypeText {
 			t.Fatalf("text-family key %s lost: %+v %v", key, resolved, err)
@@ -236,11 +230,11 @@ func TestCatalogAdmissionTextFamilyMapKeys(t *testing.T) {
 		if key == "Status" && resolved.Key.Name != "Status" {
 			t.Fatal("enum identity erased")
 		}
-		if (key == "uuid" || key == "ID") && resolved.Key.Format != "uuid" {
+		if key == "uuid" && resolved.Key.Format != "uuid" {
 			t.Fatal("UUID validation format erased")
 		}
 	}
-	for _, key := range []string{"integer", "numeric", "boolean", "timestamp", "Time", "json", "array", "Item"} {
+	for _, key := range []string{"integer", "numeric", "boolean", "timestamp", "json", "array", "Item"} {
 		resolved, err := (CatalogTypeReference{Type: "map[" + key + "]Item", Catalog: types}).Resolve()
 		if err == nil || resolved.Kind != "" || !strings.Contains(err.Error(), "map keys must be text, enum or uuid") {
 			t.Errorf("invalid map key %s gained authority or lost teaching error: %+v %v", key, resolved, err)
@@ -284,8 +278,8 @@ func TestCatalogAdmissionDurableTextPolicy(t *testing.T) {
 	root := t.TempDir()
 	writeFixtureFile(t, filepath.Join(root, "manifest.yaml"), "version: 1.0.0\nplatform_version: '*'\n")
 	writeFixtureFile(t, filepath.Join(root, "schema.yaml"), "stages: []\n# fixture: import-domains\n")
-	writeFixtureFile(t, filepath.Join(root, "types.yaml"), "scalars:\n  Label: text\n  ID: uuid\n  Time: timestamp\nenums:\n  Status: {values: [open, closed], default: open}\n")
-	writeFixtureFile(t, filepath.Join(root, "events.yaml"), "item.ready:\n  label: {type: Label, pattern: '^valid', length: {min: 5}}\n  identity: ID\n  stamp: Time?\n  status: Status\n  labels: [Label]\n")
+	writeFixtureFile(t, filepath.Join(root, "types.yaml"), "Status: ['open', 'closed']\n")
+	writeFixtureFile(t, filepath.Join(root, "events.yaml"), "item.ready:\n  label: text\n  identity: uuid\n  stamp: timestamp?\n  status: Status\n  labels: [text]\n")
 	repo := repoRootForContractsTest(t)
 	bundle, err := LoadWorkflowContractBundleWithOverrides(repo, root, DefaultPlatformSpecFile(repo))
 	if err != nil {
@@ -301,44 +295,5 @@ func TestCatalogAdmissionDurableTextPolicy(t *testing.T) {
 	}
 	if !reflect.DeepEqual(seen, map[string]bool{"label": true, "identity": false, "stamp": false, "status": false, "labels": false}) {
 		t.Fatalf("compiled file-text eligibility erased declared domains: %v", seen)
-	}
-}
-
-func TestCatalogAdmissionRefinementPolicy(t *testing.T) {
-	types := admissionTestCatalog()
-	types.Enums["OtherStatus"] = EnumTypeDecl{Values: []string{"open", "closed"}, Default: "open"}
-	for _, tc := range []struct {
-		name, left, right string
-		accepted          bool
-	}{
-		{"text_alias", "Label", "text", true},
-		{"uuid_alias", "ID", "uuid", true},
-		{"time_alias", "Time", "timestamp", true},
-		{"same_enum", "Status", "Status", true},
-		{"different_enum", "Status", "OtherStatus", false},
-		{"enum_text", "Status", "text", false},
-		{"uuid_text", "ID", "text", false},
-		{"integer_numeric", "integer", "numeric", false},
-	} {
-		t.Run(tc.name, func(t *testing.T) {
-			errs := validateSchemaRefinementFields("declared fields", types, map[string]schemaRefinementField{
-				"left":  {Name: "left", TypeRef: tc.left, Refinements: SchemaRefinements{EqualTo: "right"}},
-				"right": {Name: "right", TypeRef: tc.right},
-			})
-			if (len(errs) == 0) != tc.accepted {
-				t.Fatalf("same-declared equality %s vs %s: %v", tc.left, tc.right, errs)
-			}
-		})
-	}
-	for _, tc := range []struct {
-		ref      string
-		accepted bool
-	}{
-		{"Label", true}, {"[Label]", false}, {"integer", false}, {"Time", false},
-	} {
-		errs := validateSchemaRefinementFields("pattern", types, map[string]schemaRefinementField{"value": {Name: "value", TypeRef: tc.ref, Refinements: SchemaRefinements{Pattern: "^valid"}}})
-		if (len(errs) == 0) != tc.accepted {
-			t.Fatalf("pattern eligibility %s: %v", tc.ref, errs)
-		}
 	}
 }

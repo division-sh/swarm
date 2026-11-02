@@ -1,7 +1,3 @@
-enums:
-  Mode:
-    values: [safe, fast]
-    default: safe
-types:
-  Details:
-    count: integer
+Mode: ["safe", "fast"]
+Details:
+  count: integer

@@ -430,9 +430,6 @@ func TestEventSchemaRegistryFromBundle_PreservesWave1TypeMeaning(t *testing.T) {
 	}
 	bundle := &WorkflowContractBundle{
 		RootTypes: TypeCatalogDocument{
-			Scalars: map[string]ScalarTypeDecl{
-				"URL": {Base: "text"},
-			},
 			Types: map[string]NamedTypeDecl{
 				"ScanDetails": {
 					Fields: map[string]TypeFieldSpec{
@@ -447,7 +444,7 @@ func TestEventSchemaRegistryFromBundle_PreservesWave1TypeMeaning(t *testing.T) {
 				Payload: EventPayloadSpec{
 					Properties: map[string]EventFieldSpec{
 						"details":    {Type: "ScanDetails"},
-						"urls":       {Type: "[URL]"},
+						"urls":       {Type: "[text]"},
 						"trace_id":   {Type: "uuid"},
 						"started_at": {Type: "timestamp"},
 					},
@@ -477,7 +474,7 @@ func TestEventSchemaRegistryFromBundle_PreservesWave1TypeMeaning(t *testing.T) {
 		flowTypes: map[string]TypeCatalogDocument{
 			"review": {
 				Enums: map[string]EnumTypeDecl{
-					"Mode": {Values: []string{"fast", "deep"}, Default: "fast"},
+					"Mode": {Values: []string{"fast", "deep"}},
 				},
 			},
 		},
@@ -570,7 +567,7 @@ func TestEventSchemaForFlowEvent_UsesDeclaringFlowTypeCatalogForOverride(t *test
 	bundle := &WorkflowContractBundle{
 		RootTypes: TypeCatalogDocument{
 			Enums: map[string]EnumTypeDecl{
-				"Priority": {Values: []string{"low"}, Default: "low"},
+				"Priority": {Values: []string{"low"}},
 			},
 		},
 		FlowTree: FlowTree{
@@ -582,7 +579,7 @@ func TestEventSchemaForFlowEvent_UsesDeclaringFlowTypeCatalogForOverride(t *test
 		flowTypes: map[string]TypeCatalogDocument{
 			"review": {
 				Enums: map[string]EnumTypeDecl{
-					"Priority": {Values: []string{"urgent"}, Default: "urgent"},
+					"Priority": {Values: []string{"urgent"}},
 				},
 			},
 		},
