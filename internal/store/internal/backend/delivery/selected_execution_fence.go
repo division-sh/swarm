@@ -3,7 +3,9 @@ package delivery
 import (
 	"context"
 	"database/sql"
+	"errors"
 	"fmt"
+	"time"
 
 	"github.com/division-sh/swarm/internal/runtime/deliverylifecycle"
 )
@@ -11,27 +13,28 @@ import (
 // A selected delivery authority is executable only while its exact selected
 // execution still owns the admitted binding and a live store lease.
 func (a *Adapter) selectedExecutionCurrent(ctx context.Context, tx *sql.Tx, authority deliverylifecycle.ExecutionAuthority) (bool, error) {
-	return a.selectedExecutionCurrentWithLock(ctx, tx, authority, true)
+	current, _, err := a.selectedExecutionCurrentWithLock(ctx, tx, authority, true)
+	return current, err
 }
 
 func (a *Adapter) selectedExecutionCurrentRead(ctx context.Context, tx *sql.Tx, authority deliverylifecycle.ExecutionAuthority) (bool, error) {
-	return a.selectedExecutionCurrentWithLock(ctx, tx, authority, false)
+	current, _, err := a.selectedExecutionCurrentWithLock(ctx, tx, authority, false)
+	return current, err
 }
 
-func (a *Adapter) selectedExecutionCurrentWithLock(ctx context.Context, tx *sql.Tx, authority deliverylifecycle.ExecutionAuthority, lock bool) (bool, error) {
+func (a *Adapter) selectedExecutionCurrentWithLock(ctx context.Context, tx *sql.Tx, authority deliverylifecycle.ExecutionAuthority, lock bool) (bool, time.Time, error) {
 	if authority.Kind() != deliverylifecycle.ExecutionAuthoritySelectedContractFork {
-		return true, nil
+		return true, time.Time{}, nil
 	}
 	if tx == nil {
-		return false, fmt.Errorf("selected delivery execution fence requires a transaction")
+		return false, time.Time{}, fmt.Errorf("selected delivery execution fence requires a transaction")
 	}
 	now, err := a.databaseNow(ctx, tx)
 	if err != nil {
-		return false, err
+		return false, time.Time{}, err
 	}
 	query := `
-		SELECT EXISTS (
-			SELECT 1
+		SELECT execution.lease_expires_at
 			FROM run_fork_selected_contract_runtime_executions AS execution
 			JOIN run_fork_selected_contract_bindings AS binding
 			  ON binding.binding_id = execution.binding_id
@@ -48,11 +51,13 @@ func (a *Adapter) selectedExecutionCurrentWithLock(ctx context.Context, tx *sql.
 	if lock && a.dialect == DialectPostgres {
 		query += ` FOR SHARE OF execution, binding`
 	}
-	query += `)`
-	var current bool
-	err = tx.QueryRowContext(ctx, query, authority.ExecutionID(), authority.ForkRunID(), authority.Generation(), authority.SourceArtifact().BundleHash(), now).Scan(&current)
-	if err != nil {
-		return false, fmt.Errorf("verify selected delivery execution fence: %w", err)
+	var expiresAt time.Time
+	err = tx.QueryRowContext(ctx, query, authority.ExecutionID(), authority.ForkRunID(), authority.Generation(), authority.SourceArtifact().BundleHash(), now).Scan(&expiresAt)
+	if errors.Is(err, sql.ErrNoRows) {
+		return false, time.Time{}, nil
 	}
-	return current, nil
+	if err != nil {
+		return false, time.Time{}, fmt.Errorf("verify selected delivery execution fence: %w", err)
+	}
+	return true, expiresAt, nil
 }
