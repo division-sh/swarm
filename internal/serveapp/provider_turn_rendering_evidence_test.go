@@ -239,7 +239,7 @@ func writeTurnRenderingSource(t *testing.T, cell string) string {
 	files := map[string]string{
 		"events.yaml":       "evidence.started: {conversation: string, sequence: integer, text: string}\nevidence.requested: {conversation: string, sequence: integer, text: string}\n",
 		"schema.yaml":       "pins:\n  inputs: [evidence.started, evidence.requested, evidence.completed]\nconnect:\n  - {event: evidence.requested, from: '.', to: worker, resolution: select-or-create}\n  - {event: evidence.completed, from: worker, to: '.'}\n",
-		"nodes.yaml":        "speaker:\n  execution_type: system_node\n  event_handlers:\n    evidence.started:\n      emit:\n        event: evidence.requested\n        fields: {conversation: payload.conversation, sequence: payload.sequence, text: payload.text}\nobserver:\n  execution_type: system_node\n  event_handlers:\n    evidence.completed:\n      guard: {id: observe, check: true}\n",
+		"nodes.yaml":        "speaker:\n  evidence.started:\n    emit:\n      event: evidence.requested\n      fields: {conversation: payload.conversation, sequence: payload.sequence, text: payload.text}\nobserver:\n  evidence.completed:\n    guard: true\n",
 		"worker/state.yaml": "conversation: text\nnote: 'synthetic declared note'\n",
 	}
 	intent := "For each user input call emit_evidence_completed once with sequence 1 for synthetic turn 1 and sequence 2 for synthetic turn 2. Produce no prose."
