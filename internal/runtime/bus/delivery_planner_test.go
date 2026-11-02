@@ -359,11 +359,12 @@ func TestDeliveryRecipientPolicy_FiltersExplicitAgentScopeIntoManifest(t *testin
 	if err != nil {
 		t.Fatalf("Evaluate: %v", err)
 	}
-	if got, want := len(manifest.Recipients), 2; got != want {
+	recipients := deliveryRecipientIDs(manifest.LiveRecipients)
+	if got, want := len(recipients), 2; got != want {
 		t.Fatalf("recipient count = %d, want %d", got, want)
 	}
-	if manifest.Recipients[0] != "entity-agent" || manifest.Recipients[1] != "shared-agent" {
-		t.Fatalf("recipients = %#v, want [entity-agent shared-agent]", manifest.Recipients)
+	if recipients[0] != "entity-agent" || recipients[1] != "shared-agent" {
+		t.Fatalf("recipients = %#v, want [entity-agent shared-agent]", recipients)
 	}
 	if len(manifest.PersistedRecipients) != 2 || manifest.PersistedRecipients[0] != "entity-agent" || manifest.PersistedRecipients[1] != "shared-agent" {
 		t.Fatalf("persisted recipients = %#v, want [entity-agent shared-agent]", manifest.PersistedRecipients)
@@ -386,8 +387,9 @@ func TestDeliveryRecipientPolicy_KeepsInternalSubscribersLiveOnlyUnderDescriptor
 	if err != nil {
 		t.Fatalf("Evaluate: %v", err)
 	}
-	if len(manifest.Recipients) != 3 || manifest.Recipients[0] != "workflow-runtime" || manifest.Recipients[1] != "node:scan-orchestrator" || manifest.Recipients[2] != "agent-a" {
-		t.Fatalf("recipients = %#v, want [workflow-runtime node:scan-orchestrator agent-a]", manifest.Recipients)
+	recipients := deliveryRecipientIDs(manifest.LiveRecipients)
+	if len(recipients) != 3 || recipients[0] != "workflow-runtime" || recipients[1] != "node:scan-orchestrator" || recipients[2] != "agent-a" {
+		t.Fatalf("recipients = %#v, want [workflow-runtime node:scan-orchestrator agent-a]", recipients)
 	}
 	if len(manifest.PersistedRecipients) != 1 || manifest.PersistedRecipients[0] != "agent-a" {
 		t.Fatalf("persisted recipients = %#v, want [agent-a]", manifest.PersistedRecipients)

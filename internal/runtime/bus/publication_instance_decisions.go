@@ -9,6 +9,14 @@ import (
 	"github.com/division-sh/swarm/internal/runtime/pipeline"
 )
 
+func workflowInstanceTargetAvailability(instance pipeline.WorkflowInstance) pipeline.DeliveryTargetAvailability {
+	stage := ""
+	if instance.StageDefined {
+		stage = instance.CurrentState
+	}
+	return pipeline.NewDeliveryTargetAvailability(stage, instance.Status, !instance.TerminatedAt.IsZero())
+}
+
 // Inventory narrows immutable coordinates. Only this exact read binds a
 // mutable decision to the live preparation owner; neither escapes in a route.
 func (p publicationTargetOwnerEvidence) decisionObservation(listed pipeline.FlowInstanceObservation) (pipeline.FlowInstanceObservation, error) {
@@ -71,11 +79,7 @@ func (p publicationTargetOwnerEvidence) decisionTargetCandidate(descriptor pipel
 	if err != nil {
 		return descriptor, err
 	}
-	stage := ""
-	if instance.StageDefined {
-		stage = instance.CurrentState
-	}
-	descriptor.Availability = pipeline.NewDeliveryTargetAvailability(stage, instance.Status, !instance.TerminatedAt.IsZero())
+	descriptor.Availability = workflowInstanceTargetAvailability(instance)
 	return descriptor, nil
 }
 

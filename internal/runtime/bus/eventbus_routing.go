@@ -411,15 +411,11 @@ func (eb *EventBus) targetOwnerCandidates(ctx context.Context) ([]runtimepipelin
 			return nil, true, err
 		}
 		identity := observed.Identity()
-		stage := ""
-		if instance.StageDefined {
-			stage = instance.CurrentState
-		}
 		owners = append(owners, runtimepipeline.DeliveryTargetOwnerCandidate{
 			Route: events.RouteIdentity{FlowID: identity.TemplateID,
 				EntityID:     identity.EntityID,
 				FlowInstance: identity.InstancePath},
-			Availability: runtimepipeline.NewDeliveryTargetAvailability(stage, instance.Status, !instance.TerminatedAt.IsZero()),
+			Availability: workflowInstanceTargetAvailability(instance),
 		})
 	}
 	return owners, true, nil

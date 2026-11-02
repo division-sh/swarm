@@ -46,11 +46,7 @@ func (r connectRoutePlanResolver) explicitReceiverTerminated(ctx context.Context
 	if instance.Status == "terminated" || !instance.TerminatedAt.IsZero() {
 		return pipeline.StandingConstructionIsKeyless(r.lifecycle.source, instance.WorkflowName)
 	}
-	stage := ""
-	if instance.StageDefined {
-		stage = instance.CurrentState
-	}
-	err = pipeline.NewDeliveryTargetAvailability(stage, instance.Status, false).Validate(r.lifecycle.source, instance.WorkflowName)
+	err = workflowInstanceTargetAvailability(instance).Validate(r.lifecycle.source, instance.WorkflowName)
 	var terminal *pipeline.NoHandlerError
 	if errors.As(err, &terminal) {
 		terminal.FlowInstance = instance.StorageRef
@@ -84,11 +80,7 @@ func (r connectRoutePlanResolver) replyOriginAvailable(ctx context.Context, runI
 	if instance.Status == "terminated" {
 		return false, nil
 	}
-	stage := ""
-	if instance.StageDefined {
-		stage = instance.CurrentState
-	}
-	err = pipeline.NewDeliveryTargetAvailability(stage, instance.Status, !instance.TerminatedAt.IsZero()).Validate(r.lifecycle.source, instance.WorkflowName)
+	err = workflowInstanceTargetAvailability(instance).Validate(r.lifecycle.source, instance.WorkflowName)
 	var terminal *pipeline.NoHandlerError
 	if errors.As(err, &terminal) {
 		return false, nil
