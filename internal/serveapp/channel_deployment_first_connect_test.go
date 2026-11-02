@@ -46,7 +46,8 @@ func (s *firstConnectLoginRead) GetChannelOnboarding(ctx context.Context, id str
 	op, err := s.OperationStore.GetChannelOnboarding(ctx, id)
 	// Constructor reads have no connection; Connect reads use a leased context.
 	// Only the confirmed resume's invocation read releases the login response.
-	if err == nil && ctx == s.invocation && s.opened() {
+	// Attribution can wrap the invocation without changing its cancellation.
+	if err == nil && ctx.Done() == s.invocation.Done() && s.opened() {
 		select {
 		case <-s.login.held:
 			s.once.Do(func() { s.login.release <- true })
