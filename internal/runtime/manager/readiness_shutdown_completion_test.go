@@ -253,7 +253,11 @@ func TestReadinessShutdownCompletionKeepsStrictAdmissionAndIndependentFailures(t
 			}
 			shutdownDone := make(chan error, 1)
 			if shutdown {
-				go func() { shutdownDone <- am.ShutdownWithOptions(ShutdownOptions{Grace: 5 * time.Second}) }()
+				grace := 5 * time.Second
+				if verificationCtx != nil {
+					grace = 100 * time.Millisecond
+				}
+				go func() { shutdownDone <- am.ShutdownWithOptions(ShutdownOptions{Grace: grace}) }()
 				waitForManagerShuttingDown(t, am)
 				if verificationCtx != nil {
 					select {

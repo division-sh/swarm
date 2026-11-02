@@ -175,21 +175,25 @@ func TestProviderGracefulStopAndStandbyHandoffBothStores(t *testing.T) {
 					}
 					business.EventID = listEvents.Events[0].EventID
 				}
-				spec.APIPort = freeReleaseTCPPort(t)
 				standby := startReleaseServe(t, spec)
-				standbyURL := fmt.Sprintf("http://127.0.0.1:%d/readyz", spec.APIPort)
 				for {
-					request, err := http.NewRequestWithContext(ctx, http.MethodGet, standbyURL, nil)
+					address, err := releaseAPIListener(standby.output.String())
 					if err != nil {
 						t.Fatal(err)
 					}
-					response, err := http.DefaultClient.Do(request)
-					if err == nil {
-						response.Body.Close()
-						if response.StatusCode != http.StatusServiceUnavailable {
-							t.Fatalf("standby ready before holder exit: HTTP %d", response.StatusCode)
+					if address != "" {
+						request, err := http.NewRequestWithContext(ctx, http.MethodGet, "http://"+address+"/readyz", nil)
+						if err != nil {
+							t.Fatal(err)
 						}
-						break
+						response, err := http.DefaultClient.Do(request)
+						if err == nil {
+							response.Body.Close()
+							if response.StatusCode != http.StatusServiceUnavailable {
+								t.Fatalf("standby ready before holder exit: HTTP %d", response.StatusCode)
+							}
+							break
+						}
 					}
 					select {
 					case <-ctx.Done():
