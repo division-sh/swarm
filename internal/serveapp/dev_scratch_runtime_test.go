@@ -165,6 +165,9 @@ func TestRunServeRuntimeDevScratchNextInvocationHasNoPredecessor(t *testing.T) {
 
 	first := startServeRuntimeTestProcessAtRepo(t, repo, opts)
 	first.waitForReadyLine()
+	if !strings.Contains(first.outputString(), "scratch store") || !strings.Contains(first.outputString(), "retained store "+durablePath+" is not used") {
+		t.Fatalf("dev omitted the selected scratch or bypassed retained store:\n%s", first.outputString())
+	}
 	firstEndpoint := "http://" + serveRuntimeAPIListenerFromOutput(t, first.outputString())
 	var firstIdentity apiv1.RuntimeIdentityResult
 	requireServedJSONRPCResult(t, firstEndpoint+"/v1/rpc", "runtime.identity", map[string]any{}, &firstIdentity)
