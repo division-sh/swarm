@@ -703,6 +703,54 @@ func (m *ManagerWorkOccurrence) WaitForQuiescence(ctx context.Context) error {
 	return nil
 }
 
+// Candidate settlement continues the exact accepted manager and companion
+// leases, rather than opening new work after either occurrence is fenced.
+func (m *ManagerWorkOccurrence) BeginAcceptedDescendant(ctx context.Context) (*Lease, error) {
+	if m == nil || m.manager == nil {
+		return nil, errors.New("manager work occurrence is required")
+	}
+	if ctx == nil {
+		ctx = context.Background()
+	}
+	ancestor, _ := ctx.Value(acceptedLeaseContextKey{}).(*Lease)
+	if ancestor == nil || ancestor.gate != m.manager.occurrence.gate {
+		return m.Begin(ctx)
+	}
+	if (ancestor.parent == nil) != (m.companion == nil) {
+		return m.Begin(ctx)
+	}
+	childCtx := ctx
+	var companionLease *Lease
+	if m.companion != nil {
+		companion, ok := m.companion.(interface {
+			BeginAcceptedDescendant(context.Context) (*Lease, error)
+		})
+		if !ok || ancestor.parent == nil {
+			return m.Begin(ctx)
+		}
+		originalCompanion, _ := OccurrenceFromContext(ancestor.parent.Context())
+		if originalCompanion != m.companion {
+			return m.Begin(ctx)
+		}
+		var err error
+		companionLease, err = companion.BeginAcceptedDescendant(CarryAcceptedLease(ctx, ancestor.parent.Context()))
+		if err != nil {
+			return nil, err
+		}
+		childCtx = CarryAcceptedLease(companionLease.Context(), ctx)
+	}
+	lease, err := m.manager.occurrence.gate.beginAcceptedDescendant(childCtx)
+	if err != nil {
+		if companionLease != nil {
+			_ = companionLease.Done()
+		}
+		return nil, err
+	}
+	lease.parent = companionLease
+	lease.ctx = WithOccurrence(lease.Context(), m)
+	return lease, nil
+}
+
 func (m *ManagerWorkOccurrence) NewRoute(ctx context.Context, identity RouteIdentity) (*RouteOccurrence, error) {
 	if m == nil || m.manager == nil {
 		return nil, errors.New("manager work occurrence is required")
@@ -726,6 +774,32 @@ func (m *ManagerRunOccurrence) Fence() error {
 		return errors.New("manager run occurrence is required")
 	}
 	return m.occurrence.fence()
+}
+
+// DrainForShutdown never treats owner cancellation as quiescence: the caller
+// must then cancel its loops and join all retained work through retirement.
+func (m *ManagerRunOccurrence) DrainForShutdown(ctx context.Context) error {
+	if ctx == nil {
+		ctx = context.Background()
+	}
+	if err := m.Fence(); err != nil {
+		return err
+	}
+	g := m.occurrence.gate
+	g.mu.Lock()
+	active, drained := g.activeTransient, g.transientDrained
+	g.mu.Unlock()
+	if active == 0 {
+		return nil
+	}
+	select {
+	case <-drained:
+		return nil
+	case <-g.ctx.Done():
+		return ErrRetired
+	case <-ctx.Done():
+		return ctx.Err()
+	}
 }
 
 func (m *ManagerRunOccurrence) Retire() {
@@ -1061,6 +1135,13 @@ func (s *SelectedForkOccurrence) Retire() {
 	if s != nil {
 		s.occurrence.retire()
 	}
+}
+
+func (s *SelectedForkOccurrence) Fence() error {
+	if s == nil {
+		return errors.New("selected-fork occurrence is required")
+	}
+	return s.occurrence.fence()
 }
 
 func (s *SelectedForkOccurrence) Identity() SelectedForkIdentity {

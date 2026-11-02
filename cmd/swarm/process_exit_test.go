@@ -41,7 +41,7 @@ func TestServingStopDeadlineExitsProcessWithoutFakingJoin(t *testing.T) {
 				}
 			} else {
 				var exit *exec.ExitError
-				if !errors.As(err, &exit) || exit.ExitCode() != 1 || strings.Contains(string(output), "joined\n") {
+				if !errors.As(err, &exit) || exit.ExitCode() != 1 || strings.Contains(string(output), "joined\n") || !strings.Contains(string(output), "shutdown incomplete: grace expired") {
 					t.Fatalf("stuck process reported join or survived: %v: %s", err, output)
 				}
 			}

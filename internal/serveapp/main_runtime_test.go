@@ -6452,16 +6452,15 @@ func TestRunLocalRuntimeFreshEmptyPostgresBootstrapsSchemaBeforeDevAbandon(t *te
 		return serveRuntimeWorkspaceStub{}
 	})
 	serve := startServeRuntimeTestProcess(t, cliapp.ServeOptions{
-		ConfigPath:        writeServeRuntimeTestConfig(t),
-		SourceRoot:        filepath.Join("tests", "tier8-boot-verification", "test-boot-success"),
-		StoreMode:         "postgres",
-		APIListenAddr:     "127.0.0.1:0",
-		MCPListenAddr:     "127.0.0.1:0",
-		SelfCheck:         true,
-		Dev:               true,
-		LocalRun:          true,
-		AbandonActiveRuns: true,
-		Verbose:           true,
+		ConfigPath:    writeServeRuntimeTestConfig(t),
+		SourceRoot:    filepath.Join("tests", "tier8-boot-verification", "test-boot-success"),
+		StoreMode:     "postgres",
+		APIListenAddr: "127.0.0.1:0",
+		MCPListenAddr: "127.0.0.1:0",
+		SelfCheck:     true,
+		Dev:           true,
+		LocalRun:      true,
+		Verbose:       true,
 	})
 
 	serve.waitForReadyLine()
@@ -6867,15 +6866,14 @@ func runServeRuntimeFreshEmptySQLiteBootsWithAbandon(t *testing.T, dev bool) {
 	unsetStoreSelectorEnv(t)
 	sqlitePath := filepath.Join(t.TempDir(), ".swarm", "dev.db")
 	serve := startServeRuntimeTestProcess(t, cliapp.ServeOptions{
-		ConfigPath:        writeStoreBackendRuntimeConfig(t, storebackend.BackendSQLite.String(), sqlitePath),
-		SourceRoot:        filepath.Join("tests", "tier8-boot-verification", "test-boot-success"),
-		APIListenAddr:     "127.0.0.1:0",
-		MCPListenAddr:     "127.0.0.1:0",
-		SelfCheck:         true,
-		Dev:               dev,
-		LocalRun:          dev,
-		AbandonActiveRuns: true,
-		Verbose:           true,
+		ConfigPath:    writeStoreBackendRuntimeConfig(t, storebackend.BackendSQLite.String(), sqlitePath),
+		SourceRoot:    filepath.Join("tests", "tier8-boot-verification", "test-boot-success"),
+		APIListenAddr: "127.0.0.1:0",
+		MCPListenAddr: "127.0.0.1:0",
+		SelfCheck:     true,
+		Dev:           dev,
+		LocalRun:      dev,
+		Verbose:       true,
 	})
 
 	serve.waitForReadyLine()

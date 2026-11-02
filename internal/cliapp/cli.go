@@ -357,7 +357,12 @@ func newServeCommand(ctx context.Context, root InvocationRoot, runServe ServeRun
 	cmd.Flags().DurationVar(&opts.ShutdownGrace, "shutdown-grace", opts.ShutdownGrace, "Time to wait for in-flight work to drain after shutdown starts")
 	cmd.Flags().BoolVar(&opts.SelfCheck, "self-check", opts.SelfCheck, "Run runtime self-check during boot")
 	cmd.Flags().BoolVar(&opts.Dev, "dev", opts.Dev, "Enable local development lifecycle: replace local scratch state and use concise boot output")
-	cmd.Flags().BoolVar(&opts.AbandonActiveRuns, "abandon-active-runs", opts.AbandonActiveRuns, "Cancel active runs and quiesce recoverable work before startup recovery")
+	cmd.SetFlagErrorFunc(func(_ *cobra.Command, err error) error {
+		if err.Error() == "unknown flag: --abandon-active-runs" {
+			return fmt.Errorf("%w; use `swarm control stop --all` against the running serve", err)
+		}
+		return err
+	})
 	cmd.Flags().BoolVarP(&opts.Verbose, "verbose", "v", opts.Verbose, "Render the canonical serve boot sequence after startup succeeds or fails")
 	cmd.Flags().BoolVar(&opts.NoFeed, "no-feed", opts.NoFeed, "Disable the development author story feed after readiness")
 	cmd.Flags().BoolVar(&opts.NoColor, "no-color", opts.NoColor, "Disable ANSI color in human-readable serve output")

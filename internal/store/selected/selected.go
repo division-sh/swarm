@@ -242,6 +242,10 @@ func (o RunFork) RetireSelectedContexts(ctx context.Context) error {
 	return o.executionOwner.RetireSelectedContexts(ctx)
 }
 
+func (o RunFork) DrainSelectedContexts(ctx context.Context) error {
+	return o.executionOwner.DrainSelectedContexts(ctx)
+}
+
 func (o RunFork) RecoverSelectedForkContexts(ctx context.Context, req effects.RecoveryRequest, environment runtimerunforkexecution.SelectedForkRecoveryEnvironment) ([]runfork.SelectedForkRecoveryResult, error) {
 	return o.executionOwner.RecoverSelectedForkContexts(ctx, req, environment)
 }
