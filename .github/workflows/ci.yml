@@ -675,6 +675,23 @@ jobs:
         run: go test ./internal/cliapp ./internal/sourceartifact -run '^(TestSourceRootSelectionAliasMatrix|TestStaticDataCatalogInvocationInvariance|TestResolveCLISourcePlatformSpecPaths.*|TestCLIContractPathResolutionIgnoresLegacyContractsDir|TestRunCommandLocalForegroundConsumesServeOwnerAndV1API|TestStartLocalRunServeConsumesPositionalSourceOwner|TestAdmissionLinksDoNotChangeWithSelectedRootSpelling|TestAdmitDirectoryRejectsIncludedSymlinkBeforeClassification|TestExcludedNameIsNeverOpened)$' -count=1
       - name: Prove shipped dev and non-dev SQLite serve
         run: go test ./internal/releasee2e -run '^TestGoldenSQLitePossessionServeJourney$' -count=1 -v
+      - name: Checkout exact source for Darwin helper proof
+        uses: actions/checkout@v4
+        with:
+          repository: ${{ github.event.pull_request.head.repo.full_name || github.repository }}
+          ref: ${{ github.event.pull_request.head.sha || github.sha }}
+      - name: Prove Darwin hard-kill helper lifetime at exact head
+        env:
+          PROOF_SHA: ${{ github.event.pull_request.head.sha || github.sha }}
+        run: |
+          set -euo pipefail
+          test "$(uname -s)" = Darwin
+          test "$(go env GOOS)" = darwin
+          test "$(git rev-parse HEAD)" = "$PROOF_SHA"
+          printf 'Darwin hard-kill helper proof: source=%s arch=%s\n' "$PROOF_SHA" "$(go env GOARCH)"
+          go test ./internal/testutil/testprocess -run '^TestParentDeathTerminatesHelperAndCeasesWritesBeforeRemoval$/^false$/^kill$' -count=1 -timeout=30s -v | tee "$RUNNER_TEMP/darwin-testprocess-hard-kill.log"
+          grep -Fq -- '--- PASS: TestParentDeathTerminatesHelperAndCeasesWritesBeforeRemoval/false/kill (' "$RUNNER_TEMP/darwin-testprocess-hard-kill.log"
+          printf 'Darwin hard-kill helper proof PASS at `%s`.\n' "$PROOF_SHA" >> "$GITHUB_STEP_SUMMARY"
 
   # Native unused analysis is cadence-only; PR/push product proofs stay independent.
   # Explicit branch dispatch also qualifies this path before a placement change lands.

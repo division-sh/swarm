@@ -16,6 +16,7 @@ import (
 
 // Controls are outside the policy payload to avoid a self-referential digest.
 const debtExcludedFixtureCollectorTo = "261b4a7ce9d04da1c3fbe831f21379f5e6f8f49563bacfe1ff010c184cd02916"
+const debtTestProcessCollectorTo = "439bcc9c17492fb3097bdc8ef46f9c44a13890f85ed0e60a3f63a353dc9d9d5f"
 
 func debtExcludedFixtureControlSource(t *testing.T, path, source string) *ast.File {
 	t.Helper()
@@ -29,7 +30,7 @@ func debtExcludedFixtureControlSource(t *testing.T, path, source string) *ast.Fi
 func TestPersistenceAuthorityDebtReviewedExcludedExactDelta(t *testing.T) {
 	root := persistenceAuthorityRepoRoot(t)
 	classified := 0
-	for _, path := range []string{"internal/serveapp/issue642_future_provider_test.go", "internal/serveapp/lifecycle_template_race_enabled_test.go"} {
+	for _, path := range []string{"internal/serveapp/issue642_future_provider_test.go", "internal/serveapp/lifecycle_template_race_enabled_test.go", "internal/testutil/testprocess/process_darwin.go"} {
 		data, err := os.ReadFile(filepath.Join(root, path))
 		if err != nil {
 			t.Fatal(err)
@@ -46,6 +47,11 @@ func TestPersistenceAuthorityDebtReviewedExcludedExactDelta(t *testing.T) {
 				continue
 			}
 			classified++
+			raw := finding
+			raw.RawSQL = true
+			if got := debtClassifyReviewedExcludedFixtures(t, []authorityFinding{raw}); len(got) != 1 || got[0] != raw {
+				t.Fatal("reviewed declaration suppressed raw authority")
+			}
 			after[i].Kind = finding.Kind
 			if after[i] != finding {
 				t.Fatal("classification changed an identity or its context")
@@ -55,14 +61,14 @@ func TestPersistenceAuthorityDebtReviewedExcludedExactDelta(t *testing.T) {
 			t.Fatal("restored historical findings no longer enter the ratchet")
 		}
 	}
-	if classified != 3 {
-		t.Fatalf("classified %d declarations, want exactly three", classified)
+	if classified != 6 {
+		t.Fatalf("classified %d declarations, want three retained and three Darwin", classified)
 	}
 }
 
 func TestPersistenceAuthorityDebtReviewedExcludedHostileContexts(t *testing.T) {
 	root := persistenceAuthorityRepoRoot(t)
-	for _, path := range []string{"internal/serveapp/issue642_future_provider_test.go", "internal/serveapp/lifecycle_template_race_enabled_test.go"} {
+	for _, path := range []string{"internal/serveapp/issue642_future_provider_test.go", "internal/serveapp/lifecycle_template_race_enabled_test.go", "internal/testutil/testprocess/process_darwin.go"} {
 		data, err := os.ReadFile(filepath.Join(root, path))
 		if err != nil {
 			t.Fatal(err)
@@ -71,9 +77,13 @@ func TestPersistenceAuthorityDebtReviewedExcludedHostileContexts(t *testing.T) {
 			t.Run(filepath.Base(path)+"/"+mutation, func(t *testing.T) {
 				candidate, source := path, string(data)
 				provider := strings.Contains(path, "future_provider")
+				darwin := strings.HasSuffix(path, "process_darwin.go")
 				want := 1
 				if provider {
 					want = 2
+				}
+				if darwin {
+					want = 3
 				}
 				uncertain := 0
 				switch mutation {
@@ -81,8 +91,19 @@ func TestPersistenceAuthorityDebtReviewedExcludedHostileContexts(t *testing.T) {
 					if provider {
 						source = strings.Replace(source, `"idempotency_key": "future-provider-start-cut"`, `"allow_source_freeze": true, "idempotency_key": "future-provider-start-cut"`, 1)
 					}
+					if darwin {
+						source = strings.Replace(source, "return startWatched(command, owner)", "return command.Start()", 1)
+						want--
+						uncertain = 1
+					}
 				case "body", "helper-body":
-					if provider {
+					if darwin {
+						if mutation == "helper-body" {
+							source = strings.Replace(source, "return nil }", "return errors.New(\"unreviewed\") }", 1)
+						} else {
+							source = strings.Replace(source, "info.Proc.P_pid != int32(pid)", "info.Proc.P_pid == int32(pid)", 1)
+						}
+					} else if provider {
 						if mutation == "helper-body" {
 							source = strings.Replace(source, "25 * time.Millisecond", "26 * time.Millisecond", 1)
 						} else {
@@ -94,7 +115,13 @@ func TestPersistenceAuthorityDebtReviewedExcludedHostileContexts(t *testing.T) {
 					want--
 					uncertain = 1
 				case "binding", "import-alias":
-					if provider {
+					if darwin {
+						binding := `"example.invalid/unix"`
+						if mutation == "import-alias" {
+							binding = `foreign "golang.org/x/sys/unix"`
+						}
+						source = strings.Replace(source, `"golang.org/x/sys/unix"`, binding, 1)
+					} else if provider {
 						binding := `"example.invalid/storetest"`
 						if mutation == "import-alias" {
 							binding = `foreign "github.com/division-sh/swarm/internal/store/storetest"`
@@ -105,7 +132,11 @@ func TestPersistenceAuthorityDebtReviewedExcludedHostileContexts(t *testing.T) {
 					}
 					uncertain, want = want, 0
 				case "tag":
-					source = strings.Replace(source, "//go:build ", "//go:build foreign && ", 1)
+					if darwin {
+						source = "//go:build darwin && foreign\n\n" + source
+					} else {
+						source = strings.Replace(source, "//go:build ", "//go:build foreign && ", 1)
+					}
 					uncertain, want = want, 0
 				case "foreign-path":
 					candidate += ".foreign"
@@ -114,6 +145,9 @@ func TestPersistenceAuthorityDebtReviewedExcludedHostileContexts(t *testing.T) {
 					name := "lifecycleTemplateRaceBuild"
 					if provider {
 						name = "TestIssue642FutureProviderConstructsAfterEmptyCatalogBothStores"
+					}
+					if darwin {
+						name = "startNative"
 					}
 					source = strings.Replace(source, name, name+"Foreign", 1)
 					want--
