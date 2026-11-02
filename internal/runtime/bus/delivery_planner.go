@@ -1221,7 +1221,11 @@ func resolvedSelectedRunRootIntentMatchesSubscriber(
 	target events.RouteIdentity,
 ) bool {
 	// Root static routing uses its semantic path while ownership resolves to the selected run ID.
-	if intent.Producer != routeIntentProducerConcreteNodeRoute {
+	owner := intent.TargetOwnership
+	node, present := intent.Recipient.Node()
+	if owner.Empty() || owner.Validate() != nil || owner.Route() != target ||
+		!key.root.Matches(target.FlowID, target.FlowInstance) || key.handler.Empty() ||
+		!present || !node.Equal(subscriber.handlerNode) {
 		return false
 	}
 	handlerFlowID := subscriber.handlerNode.FlowPath()

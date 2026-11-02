@@ -39,7 +39,6 @@ func TestTerminalTargetDiagnosticRequiresExactBlockedConnectionEvidence(t *testi
 		{"failure code alone", func(p *RoutePlan) { p.ConnectEvaluation = events.ConnectEvaluationLedger{} }},
 		{"wrong owner", func(p *RoutePlan) { p.AuthorityOwner = 0 }},
 		{"ordinary owner", func(p *RoutePlan) { p.AuthorityOwner = routeIntentProducerOrdinary }},
-		{"concrete owner", func(p *RoutePlan) { p.AuthorityOwner = routeIntentProducerConcreteNodeRoute }},
 		{"missing canonical admission", func(p *RoutePlan) { p.canonicalAdmission = false }},
 		{"different failure", func(p *RoutePlan) { p.TargetFailure = pinrouting.FailureTargetNotSubscribed }},
 	} {
@@ -89,7 +88,6 @@ func TestRoutePlanDeliveryIntentsCarryTypedProducer(t *testing.T) {
 		value    uint8
 	}{
 		{routeIntentProducerOrdinary, 1},
-		{routeIntentProducerConcreteNodeRoute, 5},
 		{routeIntentProducerConnectRoutePlan, 9},
 	} {
 		if uint8(test.producer) != test.value {
@@ -103,7 +101,7 @@ func TestRoutePlanDeliveryIntentsCarryTypedProducer(t *testing.T) {
 			t.Fatalf("producer %d alone established canonical admission", test.producer)
 		}
 	}
-	for _, unknown := range []routeIntentProducer{0, 2, 3, 4, 6, 7, 8, 255} {
+	for _, unknown := range []routeIntentProducer{0, 2, 3, 4, 5, 6, 7, 8, 255} {
 		if !unknown.Empty() || (RoutePlan{AuthorityOwner: unknown}).Normalized().AuthorityOwner != routeIntentProducerUnknown {
 			t.Fatalf("unknown or retired producer %d acquired authority", unknown)
 		}

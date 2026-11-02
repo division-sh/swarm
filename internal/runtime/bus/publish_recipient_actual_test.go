@@ -17,7 +17,7 @@ func TestPublishRecipientActualRetainsHandlerEventAndExactAgent(t *testing.T) {
 	first := RoutePlanDeliveryIntent{
 		Recipient: events.MustNodeDeliveryRecipient(node), TargetOwnership: owner,
 		Handler: runtimepipeline.MustDeliveryTargetHandler(node).ForEvent("first.requested"),
-		Persist: true, Producer: routeIntentProducerConcreteNodeRoute,
+		Persist: true, Producer: routeIntentProducerOrdinary,
 	}
 	second := first
 	second.Handler = second.Handler.ForEvent("second.requested")
@@ -58,7 +58,7 @@ func TestPublishRecipientActualRejectsMalformedIntentWithoutDroppingIt(t *testin
 		Recipient:       events.MustNodeDeliveryRecipient(node),
 		TargetOwnership: events.MustEntitylessReceiverTarget(events.RouteIdentity{FlowID: "review", FlowInstance: "review/one"}),
 		Handler:         runtimepipeline.MustDeliveryTargetHandler(node).ForEvent("work.requested"),
-		Persist:         true, Producer: routeIntentProducerConcreteNodeRoute,
+		Persist:         true, Producer: routeIntentProducerOrdinary,
 	}
 	for _, tc := range []struct {
 		name   string
@@ -150,7 +150,7 @@ func TestPublishRecipientActualRejectsCompetingProducerBeforeDedup(t *testing.T)
 		t.Fatalf("valid compiled connect control rejected: actuals=%#v, err=%v", actuals, err)
 	}
 	invalid := valid
-	invalid.Producer = routeIntentProducerConcreteNodeRoute
+	invalid.Producer = routeIntentProducerOrdinary
 	if _, err := (RoutePlan{DeliveryIntents: []RoutePlanDeliveryIntent{invalid}}).recipientActuals(); err == nil {
 		t.Fatal("standalone local producer with connect authority was accepted")
 	}
