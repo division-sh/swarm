@@ -118,7 +118,7 @@ func (c testOperatorCapabilities) publication() EventPublicationOptions {
 		Now:              c.Now, Idempotency: c.Idempotency, Events: c.Events, Acknowledged: acknowledged,
 		RecipientPlans: recipientPlans, SourceArtifact: bundleSource,
 		Runs: c.Runs, LiveRuns: liveRuns, Entities: c.Entities, Observability: c.Observability,
-		Instances: instances,
+		Instances:        instances,
 		RunBundleContext: c.RunBundleContext, RuntimeContexts: c.RuntimeContexts,
 		Source: c.Source, Bundle: c.Bundle,
 		SelectedForkControls: c.SelectedForkControls,
