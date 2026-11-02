@@ -21,9 +21,14 @@ import (
 
 func TestRunServeSourceArtifactIntegrityRejectsBeforeReadinessBothStores(t *testing.T) {
 	for _, backend := range []string{"sqlite", "postgres"} {
-		for _, condition := range []string{"missing", "corrupt", "hash mismatch"} {
+		for _, condition := range []string{"missing", "corrupt", "hash mismatch", "project default"} {
+			if backend == "postgres" && condition == "project default" {
+				continue
+			}
 			t.Run(backend+"/"+condition, func(t *testing.T) {
 				ctx := context.Background()
+				repo := repoRootForTest()
+				sourceRoot := filepath.Join("tests", "tier8-boot-verification", "test-boot-success")
 				var db *sql.DB
 				var artifacts interface {
 					EnsureSourceArtifact(context.Context, *sourceartifact.AdmittedSourceArtifact) (sourceartifact.EnsureResult, error)
@@ -40,6 +45,20 @@ func TestRunServeSourceArtifactIntegrityRejectsBeforeReadinessBothStores(t *test
 					isolateCLIAPIConfigEnv(t)
 					sqlitePath = filepath.Join(t.TempDir(), "runtime.db")
 					configPath = writeStoreBackendRuntimeConfig(t, "sqlite", sqlitePath)
+					if condition == "project default" {
+						repo = t.TempDir()
+						sourceRoot = repo
+						sqlitePath = filepath.Join(repo, ".swarm", "stores", "dev.db")
+						configPath = writeStoreBackendRuntimeConfig(t, "", "")
+						if err := os.MkdirAll(filepath.Dir(sqlitePath), 0o700); err != nil {
+							t.Fatal(err)
+						}
+						for name, body := range map[string]string{"manifest.yaml": "version: 1.0.0\nplatform_version: '*'\n", "schema.yaml": "# current project, not the missing historical source\nstages: []\n"} {
+							if err := os.WriteFile(filepath.Join(repo, name), []byte(body), 0o600); err != nil {
+								t.Fatal(err)
+							}
+						}
+					}
 					selected, err := store.NewSQLiteRuntimeStore(sqlitePath)
 					if err != nil {
 						t.Fatal(err)
@@ -91,7 +110,7 @@ func TestRunServeSourceArtifactIntegrityRejectsBeforeReadinessBothStores(t *test
 				}
 				// Deliberately corrupt a valid historical record after canonical admission.
 				// Serve loads a different authored source and must not repair this one.
-				if condition == "missing" {
+				if condition == "missing" || condition == "project default" {
 					_, err = db.ExecContext(ctx, "DELETE FROM source_artifacts WHERE bundle_hash = "+placeholder, artifact.BundleHash())
 				} else {
 					blob := []byte{0}
@@ -124,15 +143,15 @@ func TestRunServeSourceArtifactIntegrityRejectsBeforeReadinessBothStores(t *test
 				}
 				var out lockedBuffer
 				published := false
-				code := runFrom(ctx, repoRootForTest(), cliapp.ServeOptions{
-					ConfigPath: configPath, SourceRoot: filepath.Join("tests", "tier8-boot-verification", "test-boot-success"),
+				code := runFrom(ctx, repo, cliapp.ServeOptions{
+					ConfigPath: configPath, SourceRoot: sourceRoot,
 					StoreMode: backend, StoreModeSet: true,
 					APIListenAddr: "127.0.0.1:0", MCPListenAddr: "127.0.0.1:0", SelfCheck: true,
 					Output: &out, TestLLMRuntime: servedNoopLLMRuntime{},
 					TestRuntimeContextsReadyHook: func(*runtime.RuntimeContextManager) { published = true },
 				})
 				wantCode := 3
-				if condition == "missing" {
+				if condition == "missing" || condition == "project default" {
 					wantCode = serveExitDataIntegrity
 				}
 				if code != wantCode || published || strings.Contains(out.String(), "ready in ") {
@@ -144,12 +163,18 @@ func TestRunServeSourceArtifactIntegrityRejectsBeforeReadinessBothStores(t *test
 				for _, want := range []string{
 					"ERROR: startup recovery refused",
 					"step 5 (startup recovery)",
-					"store status --store '" + backend + "' --config '" + configPath + "'",
 					"doctor --config '" + configPath + "'",
 				} {
 					if !strings.Contains(out.String(), want) {
 						t.Fatalf("recovery diagnostic missing %q:\n%s", want, out.String())
 					}
+				}
+				if condition == "project default" {
+					if strings.Contains(out.String(), "store status") || !strings.Contains(out.String(), sqlitePath) {
+						t.Fatalf("default-store refusal advertised another database or lost the actual path:\n%s", out.String())
+					}
+				} else if !strings.Contains(out.String(), "store status --store '"+backend+"' --config '"+configPath+"'") {
+					t.Fatalf("reproducible store inspection lost its configuration:\n%s", out.String())
 				}
 				if backend == "sqlite" {
 					selected, err := store.NewSQLiteRuntimeStore(sqlitePath)
