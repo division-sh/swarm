@@ -1300,6 +1300,21 @@ func (m *RuntimeContextManager) LoadedContexts() []BundleContext {
 	return out
 }
 
+// CloseFreshDispatch acts on owned runtimes; LoadedContexts exposes metadata,
+// not the execution capabilities needed to seal them.
+func (m *RuntimeContextManager) CloseFreshDispatch() {
+	if m == nil {
+		return
+	}
+	m.mu.RLock()
+	defer m.mu.RUnlock()
+	for _, entry := range m.contexts {
+		if runtimeContextEntryLoaded(entry) {
+			entry.runtime.CloseFreshDispatch()
+		}
+	}
+}
+
 func (m *RuntimeContextManager) ChannelActivationPublication(bundleHash string, publicationGeneration uint64) (channelonboarding.ChannelActivationPublication, bool, error) {
 	lease, current, err := m.AcquireChannelActivationPublication(bundleHash, publicationGeneration)
 	if err != nil || !current {
