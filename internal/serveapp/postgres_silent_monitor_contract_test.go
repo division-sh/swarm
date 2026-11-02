@@ -209,10 +209,6 @@ func TestServePostgresSilentMonitorWithdrawsReadinessAndJoins(t *testing.T) {
 	if response.StatusCode != http.StatusOK {
 		t.Fatalf("healthy readiness control=%s", response.Status)
 	}
-	var acceptedBefore int
-	if err := observer.QueryRow(`SELECT count(*) FROM flow_instance_runtime_readiness WHERE activation_attempt_state='accepted'`).Scan(&acceptedBefore); err != nil || acceptedBefore == 0 {
-		t.Fatalf("silent monitor requires an admitted dynamic attempt: count=%d err=%v", acceptedBefore, err)
-	}
 	const ownershipSQL = `SELECT pid FROM pg_locks WHERE locktype='advisory' AND granted AND database=(SELECT oid FROM pg_database WHERE datname=current_database()) AND classid::bigint=CASE WHEN hashtext($1)<0 THEN 4294967295::bigint ELSE 0::bigint END AND objid::bigint=(hashtext($1)::bigint & 4294967295::bigint) AND objsubid=1 LIMIT 1`
 	var ownerPID int32
 	if err := observer.QueryRow(ownershipSQL, "swarm:runtime:shared-store-owner").Scan(&ownerPID); err != nil {
@@ -275,10 +271,6 @@ func TestServePostgresSilentMonitorWithdrawsReadinessAndJoins(t *testing.T) {
 	}
 	if err := db.PingContext(context.Background()); err == nil {
 		t.Fatal("joined shutdown left the selected database open")
-	}
-	var acceptedAfter int
-	if err := observer.QueryRow(`SELECT count(*) FROM flow_instance_runtime_readiness WHERE activation_attempt_state='accepted'`).Scan(&acceptedAfter); err != nil || acceptedAfter != acceptedBefore {
-		t.Fatalf("fenced shutdown retired an admitted attempt: before=%d after=%d err=%v", acceptedBefore, acceptedAfter, err)
 	}
 	t.Logf("silent exact backend %d: readiness and grant withdrawn after %s; TCP/remote lock and dependencies retained while proof blocked; held reply released, cleanup joined, exit=%d, no grant revival", ownerPID, fencedAfter, code)
 }

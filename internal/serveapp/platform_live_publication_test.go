@@ -6,7 +6,6 @@ import (
 	"os"
 	"path/filepath"
 	"regexp"
-	"strings"
 	"testing"
 	"time"
 
@@ -177,9 +176,13 @@ func testRunlessPlatformLivePublication(t *testing.T, backend string) {
 	if err != nil || !found || len(remaining.DeliveryRoutes) != 1 || remaining.DeliveryRoutes[0].Context.RunID != runs["."] {
 		t.Fatal("no-run outcome lost the other flow's live delivery", found, remaining.DeliveryRoutes, err)
 	}
-	db, _, _ := selectedRuntimeStoreForTest(t, persistence)
-	var failure string
-	if err := db.QueryRowContext(ctx, `SELECT CAST(failure AS TEXT) FROM dead_letters WHERE original_event_id=$1`, missing.ID()).Scan(&failure); err != nil || !strings.Contains(failure, "target_unreachable_terminated") {
-		t.Fatal("no-run subscriber lost its typed dead letter", failure, err)
+	var recorded operatorread.OperatorEventFull
+	requireServedJSONRPCResult(t, fixture.Endpoint, "event.get", map[string]any{"event_id": missing.ID()}, &recorded)
+	deadLettered := false
+	for _, letter := range recorded.DeadLetters {
+		deadLettered = deadLettered || letter.Failure.Detail.Code == "target_unreachable_terminated"
+	}
+	if !deadLettered {
+		t.Fatal("no-run subscriber lost its typed dead letter", recorded.DeadLetters)
 	}
 }

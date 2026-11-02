@@ -1132,6 +1132,11 @@ func debtValidateCollectorIdentity(base, current string, trusted, head authority
 	if base == current && trusted.Collector == current && head.Collector == current {
 		return nil
 	}
+	if base == debtCatalogRuntimeRowsLandedCollectorTo && trusted.Collector == base &&
+		current == debtR77PrivateBridgeCollectorTo && reviewedTransition == current && head.Collector == current &&
+		debtSitesEqual(head.Sites, trusted.Sites) {
+		return nil // #2881: exact collector continuation; no baseline or permission change.
+	}
 	if base == debtW4ComparisonCollectorTo && trusted.Collector == base &&
 		current == debtCatalogRuntimeRowsLandedCollectorTo && reviewedTransition == current && head.Collector == current &&
 		debtSitesEqual(head.Sites, trusted.Sites) {
