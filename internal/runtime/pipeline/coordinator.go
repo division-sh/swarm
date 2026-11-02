@@ -788,6 +788,13 @@ func (pc *PipelineCoordinator) executeNodeHandlerPlanResultWithEmissionPlan(ctx 
 	}
 	claimOwned = claimed
 	recoveryClaim := claimed
+	if owner, ok := pc.workOwner.(*worklifetime.RuntimeOccurrence); !claimed && ok {
+		lease, err := owner.BeginDispatch(ctx)
+		if err != nil {
+			return false, runtimepipelineobligation.Continue(), err
+		}
+		defer func() { resultErr = errors.Join(resultErr, lease.Done()) }()
+	}
 	var admissionRenewal runtimedelivery.ClaimCommit
 	for {
 		if !claimed {

@@ -1236,6 +1236,15 @@ func (c *agentLifecycleCoordinator) beginWork(ctx context.Context, companion wor
 	return c.runOwner.Begin(ctx, companion)
 }
 
+func (c *agentLifecycleCoordinator) beginDeliveryWork(ctx context.Context, companion worklifetime.Occurrence) (*worklifetime.Lease, error) {
+	c.workMu.Lock()
+	defer c.workMu.Unlock()
+	if err := c.ensureRunAuthoritiesLocked(nil, nil); err != nil {
+		return nil, err
+	}
+	return c.runOwner.BeginDispatch(ctx, companion)
+}
+
 func (c *agentLifecycleCoordinator) beginStandingWork(ctx context.Context) (*worklifetime.Lease, error) {
 	if c == nil {
 		return nil, errors.New("agent lifecycle coordinator is required")

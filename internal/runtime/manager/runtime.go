@@ -1860,8 +1860,13 @@ func (am *AgentManager) launchExecutionLoop(parent context.Context, execution *a
 							if am.shutdownAdmissionClosed() {
 								return true
 							}
-							eventWork, err := am.lifecycle.beginWork(executionLease.Context, eventWorkOwner)
+							eventWork, err := am.lifecycle.beginDeliveryWork(executionLease.Context, eventWorkOwner)
 							if err != nil {
+								if errors.Is(err, worklifetime.ErrDispatchClosed) {
+									// Keep lifecycle readiness for the accepted handoff;
+									// ordinary transition fences retain their own exit path.
+									<-executionCtx.Done()
+								}
 								return true
 							}
 							defer func() { _ = eventWork.Done() }()

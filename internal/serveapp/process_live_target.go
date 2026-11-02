@@ -109,6 +109,12 @@ func (s *processLifecycleSupervisor) acquireLiveTargetRuntimeLocked(ctx context.
 	if err := candidate.runtime.InstallStartupGrant(grant); err != nil {
 		return nil, err
 	}
+	s.mu.RLock()
+	stopping := s.stopping
+	s.mu.RUnlock()
+	if stopping {
+		candidate.runtime.CloseFreshDispatch()
+	}
 	// Startup MCP uses only the candidate's exact private startup token. Normal
 	// traffic still acquires the manager and cannot select this occurrence yet.
 	s.mu.Lock()

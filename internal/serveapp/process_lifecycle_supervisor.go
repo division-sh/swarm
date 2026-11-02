@@ -165,6 +165,16 @@ func (s *processLifecycleSupervisor) ShutdownProcessWithOptions(ctx context.Cont
 	if selected != nil {
 		selectedErr = selected.SealSelectedContexts()
 	}
+	s.mu.RLock()
+	manager, current := s.runtimeContexts, s.currentRT
+	s.mu.RUnlock()
+	if manager != nil {
+		for _, loaded := range manager.LoadedContexts() {
+			loaded.Runtime.CloseFreshDispatch()
+		}
+	} else if current != nil {
+		current.CloseFreshDispatch()
+	}
 	s.operationMu.Unlock()
 	drainCtx, cancelDrain := context.WithTimeout(ctx, grace)
 	defer cancelDrain()

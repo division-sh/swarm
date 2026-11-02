@@ -94,6 +94,7 @@ type Scheduler struct {
 	tasks               map[string]*scheduledTask
 	draining            map[*scheduledTask]struct{}
 	stopped             bool
+	dispatchClosed      bool
 	owner               worklifetime.Occurrence
 	startupRelease      chan struct{}
 }
@@ -234,6 +235,9 @@ func (s *Scheduler) registerProjection(ctx context.Context, projection scheduled
 		if key == "" {
 			return errors.New("scheduled projection identity is required")
 		}
+		if s.dispatchClosed {
+			return nil
+		}
 		owner := s.owner
 		if contextual, ok := worklifetime.OccurrenceFromContext(ctx); ok {
 			owner = contextual
@@ -254,7 +258,7 @@ func (s *Scheduler) registerProjection(ctx context.Context, projection scheduled
 		s.tasks[key] = task
 		return nil
 	}()
-	if err != nil {
+	if err != nil || task == nil {
 		return err
 	}
 	s.startTask(key, task)
@@ -461,6 +465,17 @@ func (s *Scheduler) Stop() {
 		return
 	}
 	s.stopped = true
+	for key, task := range s.tasks {
+		s.retireTaskLocked(key, task)
+	}
+}
+
+// CloseDispatch withdraws local idle waits but permits accepted handoff
+// reconciliation to leave durable timer arms for the next serving process.
+func (s *Scheduler) CloseDispatch() {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	s.dispatchClosed = true
 	for key, task := range s.tasks {
 		s.retireTaskLocked(key, task)
 	}
