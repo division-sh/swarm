@@ -182,7 +182,7 @@ func TestRunServeSourceArtifactIntegrityRejectsBeforeReadinessBothStores(t *test
 						}
 					}
 					binaryDir := t.TempDir()
-					build := exec.Command("go", "build", "-o", filepath.Join(binaryDir, "swarm"), "./cmd/swarm")
+					build := exec.Command("go", "build", "-modcacherw", "-o", filepath.Join(binaryDir, "swarm"), "./cmd/swarm")
 					build.Dir = repoRootForTest()
 					if output, err := build.CombinedOutput(); err != nil {
 						t.Fatalf("build public CLI: %v\n%s", err, output)
