@@ -1,19 +1,23 @@
 import json
 
 
-def _event_messages(messages):
-    events = []
+def _event_payloads(messages):
+    payloads = []
     for message in messages:
         if message.get("role") != "user":
             continue
         try:
-            frame = json.loads(message.get("content") or "{}")
+            payload = json.loads(message.get("content") or "{}")
         except (TypeError, ValueError):
             continue
-        event = frame.get("event")
-        if isinstance(event, dict):
-            events.append(event)
-    return events
+        if not isinstance(payload, dict):
+            continue
+        # Retained turns keep the rendering originally sent.
+        if payload.get("kind") == "initial" and isinstance(payload.get("event"), dict):
+            payload = payload["event"].get("payload")
+        if isinstance(payload, dict) and "text" in payload:
+            payloads.append(payload)
+    return payloads
 
 
 def handle(input):
@@ -24,10 +28,9 @@ def handle(input):
             "usage": {"input_tokens": 12, "output_tokens": 4},
         }
 
-    events = _event_messages(messages)
-    event = events[-1] if events else {}
-    payload = event.get("payload") or {}
-    turn = len(events)
+    payloads = _event_payloads(messages)
+    payload = payloads[-1] if payloads else {}
+    turn = len(payloads)
     return {
         "calls": [{
             "name": "emit_telegram_reply_requested",

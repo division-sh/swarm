@@ -591,12 +591,12 @@ func toOpenAICompatibleMessages(m Message) []openAICompatibleMessage {
 		}
 		return []openAICompatibleMessage{{Role: "system", Content: content}}
 	case "user":
-		return []openAICompatibleMessage{{Role: "user", Content: content, Name: m.Name}}
+		return []openAICompatibleMessage{{Role: "user", Content: content}}
 	default:
 		if content == "" {
 			return nil
 		}
-		return []openAICompatibleMessage{{Role: "user", Content: content, Name: m.Name}}
+		return []openAICompatibleMessage{{Role: "user", Content: content}}
 	}
 }
 
@@ -705,7 +705,6 @@ type openAICompatibleRequest struct {
 type openAICompatibleMessage struct {
 	Role             string                     `json:"role"`
 	Content          string                     `json:"content"`
-	Name             string                     `json:"name,omitempty"`
 	ToolCallID       string                     `json:"tool_call_id,omitempty"`
 	ToolCalls        []openAICompatibleToolCall `json:"tool_calls,omitempty"`
 	ReasoningContent json.RawMessage            `json:"reasoning_content,omitempty"`

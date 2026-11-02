@@ -14314,8 +14314,9 @@ agent_execution_frame:
       Per #2886 (6564806104), the provider copy is distinct from the complete private frame. Initial user content
       defaults to the event payload JSON. The optional agents.yaml content expression uses the existing expression
       language and exact admitted input schema; strings are sent verbatim and other JSON values as JSON. event.at
-      is the operator-visible admitted event time in UTC seconds. Chat Completions user name is the exact producing
-      node declaration name, never an encoded identity or guessed anonymous participant. No request-level user is sent.
+      is the operator-visible admitted event time in UTC seconds. Per the amendment at 6566441948, event.producer
+      is the exact producing node declaration name, available only to an authored content projection, never an
+      encoded identity or guessed anonymous participant. No user-frame name or request-level user is sent on any provider.
       Event/run/entity/instance/parent IDs, scope, routing/provenance, base64 payload and unresolved lifecycle blocks
       are not provider content. Old stored messages retain their recorded rendering; declaration changes affect new turns only.
     tool_result_rendering: >
