@@ -73,11 +73,20 @@ func projectSystemNodeValue(value yamlsource.Value) (SystemNodeContract, error) 
 		if err != nil {
 			return SystemNodeContract{}, nodeFieldProjectionError("timers", timers, err)
 		}
+		seen := make(map[string]yamlsource.Location, len(items))
 		for _, item := range items {
 			timer, err := projectNodeTimerValue(item)
 			if err != nil {
 				return SystemNodeContract{}, err
 			}
+			event := strings.TrimSpace(timer.Event)
+			if previous, duplicate := seen[event]; duplicate {
+				diagnostic := NewDeclarationNameCollisionDiagnostic("node timer event", event, previous, item.IntroductionLocation())
+				diagnostic.Location.YAMLPath = item.SemanticPath()
+				diagnostic.Remediation = "Use distinct events for timers within one node; delay and start_on do not change timer identity."
+				return SystemNodeContract{}, diagnostic
+			}
+			seen[event] = item.IntroductionLocation()
 			out.Timers = append(out.Timers, timer)
 		}
 	}

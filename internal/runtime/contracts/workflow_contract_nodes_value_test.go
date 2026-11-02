@@ -85,6 +85,34 @@ func TestProjectNodeTimerValuePreservesNestedCoordinates(t *testing.T) {
 	if err == nil || !strings.Contains(err.Error(), "nodes.yaml:3:") || !strings.Contains(err.Error(), "delay_seconds") {
 		t.Fatalf("expected source-located retired timer field, got %v", err)
 	}
+	for _, event := range []string{"retry", " retry "} {
+		t.Run("duplicate/"+event, func(t *testing.T) {
+			source, err := yamlsource.Load([]byte("node:\n  timers:\n    - {event: retry, delay: 1m, start_on: first}\n    - {event: \"" + event + "\", delay: 2m, start_on: second}\n"))
+			if err != nil {
+				t.Fatal(err)
+			}
+			_, err = projectNodeDeclarationsValue(source.Document("nodes.yaml").Root())
+			diagnostic, ok := AsLoaderDiagnostic(err)
+			if !ok || diagnostic.Code != "contract_loader.declaration_name_collision" || diagnostic.Location.File != "nodes.yaml" || diagnostic.Location.Line != 4 || !strings.Contains(err.Error(), "nodes.yaml:3:") || !strings.Contains(err.Error(), "retry") {
+				t.Fatalf("expected typed duplicate-event refusal at both declarations, got %v", err)
+			}
+		})
+	}
+	t.Run("distinct nodes", func(t *testing.T) {
+		source, err := yamlsource.Load([]byte("left:\n  timers: [{event: retry, delay: 1m}]\nright:\n  timers: [{event: retry, delay: 2m}]\n"))
+		if err != nil {
+			t.Fatal(err)
+		}
+		nodes, err := projectNodeDeclarationsValue(source.Document("nodes.yaml").Root())
+		if err != nil {
+			t.Fatal(err)
+		}
+		bundle := &WorkflowContractBundle{Nodes: nodes}
+		timers := deriveWorkflowSemanticTimers(bundle)
+		if len(timers) != 2 || timers[0].SemanticKey() == timers[1].SemanticKey() || timers[0].Delay == timers[1].Delay {
+			t.Fatalf("same event on distinct nodes lost a schedule: %#v", timers)
+		}
+	})
 }
 
 func TestProjectNodeEmitValuePreservesR2AndRetiredRouting(t *testing.T) {
