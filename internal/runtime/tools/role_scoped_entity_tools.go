@@ -82,7 +82,7 @@ func roleScopedEntityToolSchemaEntriesForActor(source semanticview.Source, actor
 func roleScopedEntityToolSchemaEntry(contract entityruntime.Contract, spec roleScopedEntityToolSpec) builtinToolDraft {
 	entry := builtinToolDraft{
 		Category:        "entity_persistence",
-		Description:     roleScopedEntityToolDescription(contract, spec),
+		Description:     roleScopedEntityToolDescription(spec),
 		InputSchema:     ObjectSchema(map[string]any{}),
 		GeneratedSchema: true,
 	}
@@ -167,22 +167,17 @@ func roleScopedEntityWholeReadOutputSchema(contract entityruntime.Contract) map[
 	return ObjectSchema(fieldProps)
 }
 
-func roleScopedEntityToolDescription(contract entityruntime.Contract, spec roleScopedEntityToolSpec) string {
-	var description string
+func roleScopedEntityToolDescription(spec roleScopedEntityToolSpec) string {
 	switch spec.Kind {
 	case roleScopedEntityToolReadWhole:
-		description = fmt.Sprintf("Read the fields of this %s", spec.EntityType)
+		return fmt.Sprintf("Read the fields of this %s", spec.EntityType)
 	case roleScopedEntityToolSaveField:
-		description = fmt.Sprintf("Save %s on this %s", spec.Field, spec.EntityType)
+		return fmt.Sprintf("Save %s on this %s", spec.Field, spec.EntityType)
 	case roleScopedEntityToolUpdatePath:
-		description = fmt.Sprintf("Update %s.%s on this %s", spec.Field, spec.Subpath, spec.EntityType)
+		return fmt.Sprintf("Update %s.%s on this %s", spec.Field, spec.Subpath, spec.EntityType)
 	default:
 		return "Role-scoped entity tool."
 	}
-	if contract.Entity.Description != "" {
-		description += "\n" + contract.Entity.Description
-	}
-	return description
 }
 
 func roleScopedEntityToolSpecsForActor(source semanticview.Source, actor models.AgentConfig, contract entityruntime.Contract) map[string]roleScopedEntityToolSpec {

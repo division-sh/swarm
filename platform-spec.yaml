@@ -10920,14 +10920,14 @@ tool_model:
       absent platform guidance or generated emit descriptions through platform_tool_usage_hints.
     generated_descriptions: >-
       A generated read description is `Read the fields of this <entity>`; a generated emit description is
-      `Send a <event> event`. Append the admitted entity or event author's optional description line as written.
+      `Send a <event> event`. Generated descriptions contain the verb line only; no author-provided suffix is delivered.
       Descriptions are delivered in the provider's tools field, never restated in the authored system prompt.
       The universal notice description is `Send a notice to the human operator. The conversation continues without
       waiting for a reply.` Tool-list tests check the assembled description, including usage guidance, against the
       actor's actual grant so an unavailable tool is never recommended.
     authoring_guidance: >-
-      Declare the event's business payload and the entity's business fields in their contracts. Describe business meaning
-      in the optional declaration description, not runtime protocol in agent intent. At execution, tool arguments are
+      Declare the event's business payload and the entity's business fields in their contracts. Keep runtime protocol
+      out of agent intent; pack-author rules belong in the existing authoring guide. Generated emit arguments are
       concrete JSON values matching the delivered schema, not CEL/workflow expressions. Envelope fields are owned by
       the runtime unless explicitly declared as business payload. Current-entity reads accept no entity selector;
       write grants and the current inbound context are enforced by the runtime. Save/update operation semantics remain
