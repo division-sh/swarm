@@ -100,6 +100,10 @@ func releaseE2EImportAllowed(file, name, alias string) bool {
 		(name == "github.com/division-sh/swarm/internal/testutil/connectorapi" || name == "github.com/division-sh/swarm/internal/testutil/llmapi" || name == "github.com/division-sh/swarm/internal/testutil/mcpapi") {
 		return true
 	}
+	if file == "provider_stop_handoff_test.go" && alias == "" &&
+		(name == "github.com/division-sh/swarm/internal/testutil/llmapi" || name == "github.com/division-sh/swarm/internal/runtime/testfixtures/canonicalrouting") {
+		return true
+	}
 	if name == "github.com/division-sh/swarm/internal/testpostgres" && alias == "" &&
 		(file == "golden_agent_workload_test.go" || file == "postgres_capacity_admission_test.go") {
 		return true
@@ -150,6 +154,12 @@ func TestReleaseE2EImportBoundaryRejectsRuntimeAndUnscopedPlanning(t *testing.T)
 		{"external_integrations_journey_test.go", "github.com/division-sh/swarm/internal/testutil/mcpapi/other", "", false},
 		{"external_integrations_journey_test.go", "github.com/division-sh/swarm/internal/testutil/mcpapiother", "", false},
 		{"other_test.go", "github.com/division-sh/swarm/internal/testutil/mcpapi", "", false},
+		{"provider_stop_handoff_test.go", "github.com/division-sh/swarm/internal/testutil/llmapi", "", true},
+		{"provider_stop_handoff_test.go", "github.com/division-sh/swarm/internal/runtime/testfixtures/canonicalrouting", "", true},
+		{"other_test.go", "github.com/division-sh/swarm/internal/testutil/llmapi", "", false},
+		{"provider_stop_handoff_test.go", "github.com/division-sh/swarm/internal/operatorread", "", false},
+		{"provider_stop_handoff_test.go", "github.com/division-sh/swarm/internal/testutil/llmapi", ".", false},
+		{"provider_stop_handoff_test.go", "github.com/division-sh/swarm/internal/testutil/llmapi/other", "", false},
 	} {
 		t.Run(tc.file+"/"+tc.name+"/"+tc.alias, func(t *testing.T) {
 			if got := releaseE2EImportAllowed(tc.file, tc.name, tc.alias); got != tc.allowed {
