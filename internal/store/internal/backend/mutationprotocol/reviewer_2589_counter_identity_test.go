@@ -23,10 +23,12 @@ func TestReviewer2589CounterReadUsesPhysicalRunIdentity(t *testing.T) {
 			}
 			var count int
 			err := attempt.WithSQL(ctx, func(ctx context.Context, tx *sql.Tx) error {
-				if err := FlushEventCountBeforeRead(ctx, tx, readID); err != nil {
+				if err := tx.QueryRowContext(ctx, `SELECT event_count FROM run_event_counts WHERE run_id=$1`, readID).Scan(&count); err != nil {
 					return err
 				}
-				return tx.QueryRowContext(ctx, `SELECT event_count FROM runs WHERE run_id=$1`, readID).Scan(&count)
+				var err error
+				count, err = EventCountForRead(ctx, tx, readID, count)
+				return err
 			})
 			return count, err
 		})

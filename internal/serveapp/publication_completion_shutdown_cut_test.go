@@ -91,7 +91,7 @@ func provePublicCompletionAcknowledgedShutdownCut(t *testing.T, backend servedpa
 	if err != nil {
 		t.Fatal(err)
 	}
-	stored, found, err := native.LookupAPIEventPublication(t.Context(), request)
+	stored, found, err := native.LookupAPIEventPublication(probe.readbackContext(t), request)
 	if err != nil || !found || !bytes.Equal(first.result, stored.Response) {
 		t.Fatalf("native completion at held ACK: found=%t err=%v first=%s stored=%s", found, err, first.result, stored.Response)
 	}
@@ -167,7 +167,8 @@ func provePublicCompletionAcknowledgedShutdownCut(t *testing.T, backend servedpa
 	if result.Run.RunID != plan.RunID || result.Run.Status != "live" || result.Run.ControlReason != "" || result.Run.EndedAt != nil {
 		t.Fatalf("restart ended the retained live flow: %+v", result.Run)
 	}
-	pending, err := obligations.SummarizeRun(t.Context(), plan.RunID)
+	waitIssue2564LiveRunSettlement(t, issue2564ServedFixture{Endpoint: h.rpcEndpoint()}, plan.RunID)
+	pending, err := obligations.SummarizeRun(probe.readbackContext(t), plan.RunID)
 	if err != nil || pending.HasOpenWork() {
 		t.Fatalf("recovery left publication unsettled: summary=%+v err=%v", pending, err)
 	}

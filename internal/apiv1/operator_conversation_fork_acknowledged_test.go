@@ -195,7 +195,7 @@ func TestForkChatAPIRejectsResponseWithoutCompletionAcknowledgement(t *testing.T
 	lifecycle := &fakeConversationForkLifecycleStore{prepareResult: prepared}
 	handler := testHandler(t, Options{
 		AuthTokens: []string{testToken},
-		Handlers: testOperatorHandlers(testOperatorCapabilities{
+		Handlers: testOperatorHandlers(t, testOperatorCapabilities{
 			ConversationForkLifecycle: lifecycle,
 			ForkChatExecutor:          unacknowledgedResponseForkExecutor{err: errors.New("provider failed before commit")},
 			Idempotency:               newMutatingProbeIdempotencyStore(),

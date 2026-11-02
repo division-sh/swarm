@@ -92,7 +92,7 @@ func TestCrossFlowConstructedTargetOwnershipRoundTripOnBothBackends(t *testing.T
 				t.Fatal("source and receiver owner fixtures must remain distinguishable")
 			}
 
-			first, err := newScopedTestEventBus(selected, runtimebus.EventBusOptions{ContractBundle: source})
+			first, err := newNativeScopedTestEventBus(t, selected, runtimebus.EventBusOptions{ContractBundle: source})
 			if err != nil {
 				t.Fatalf("create first EventBus: %v", err)
 			}
@@ -110,7 +110,7 @@ func TestCrossFlowConstructedTargetOwnershipRoundTripOnBothBackends(t *testing.T
 			persisted := requireDurableTargetOwnerRoutes(t, ctx, selected, eventID, wantOwner)
 			beforeDuplicate := requireDurableTargetOwnerPublicProjection(t, ctx, selected, eventID, wantOwner)
 
-			restarted, err := newScopedTestEventBus(selected, runtimebus.EventBusOptions{ContractBundle: source})
+			restarted, err := newNativeScopedTestEventBus(t, selected, runtimebus.EventBusOptions{ContractBundle: source})
 			if err != nil {
 				t.Fatalf("create restarted EventBus: %v", err)
 			}
@@ -198,15 +198,18 @@ func TestCrossFlowConstructedTargetOwnershipRoundTripOnBothBackends(t *testing.T
 
 func newTargetOwnerParityStore(t *testing.T, backend string, ctx context.Context) targetOwnerParityStore {
 	t.Helper()
+	var selected targetOwnerParityStore
 	switch backend {
 	case "sqlite":
-		return storetest.StartSQLiteRuntimeStoreWithContext(t, ctx)
+		selected = storetest.StartSQLiteRuntimeStoreWithContext(t, ctx)
 	case "postgres":
-		return storetest.StartPostgresRuntimeStore(t)
+		selected = storetest.StartPostgresRuntimeStore(t)
 	default:
 		t.Fatalf("unsupported backend %q", backend)
 		return nil
 	}
+	nativeBusProcessContext(t, ctx, selected)
+	return selected
 }
 
 func assertDurableTargetOwnerRoute(t *testing.T, route events.DeliveryRoute, want events.DeliveryTargetOwnership) {

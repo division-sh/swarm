@@ -19,7 +19,7 @@ func TestForkRecordedActivityGenerationEvidenceBothStores(t *testing.T) {
 				t.Run(field, func(t *testing.T) {
 					child, event, record := seedActivityEvidenceReuse(fixtureTest, fixture, backend.name == "postgres", false, "succeeded", 2)
 					store := fixture.store.(selectedActivityProjectionStore)
-					original := originalActivityCarriageAtPoint(t, store, event.RunID(), child.ForkPoint)
+					original := originalActivityCarriageAtPoint(t, store, event.RunID(), child.ForkPoint, ctx)
 					column, value := field, any("")
 					switch field {
 					case "unchanged":

@@ -2,11 +2,10 @@ package apiv1
 
 import (
 	"context"
-	"testing"
-
 	"github.com/division-sh/swarm/internal/runtime/destructivereset"
 	"github.com/division-sh/swarm/internal/runtime/startupownership"
 	"github.com/google/uuid"
+	"testing"
 )
 
 func (emptyAdministrativeResetLifecycle) SettleResources(context.Context) error { return nil }

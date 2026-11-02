@@ -258,7 +258,7 @@ func openForkJoinNativeFixture(t *testing.T, dialect string) *forkJoinNativeFixt
 func forkJoinNativeRunContext(t *testing.T, f *forkJoinNativeFixture, runID string) context.Context {
 	t.Helper()
 	fact := sourceartifactfixture.Fact()
-	ctx := correlation.WithRunID(correlation.WithSourceArtifactFact(t.Context(), fact), runID)
+	ctx := correlation.WithRunID(correlation.WithSourceArtifactFact(f.original, fact), runID)
 	ctx = authoractivity.WithScope(ctx, authoractivity.BundleScope("00000000-0000-4000-8000-000000000001", fact.BundleHash()))
 	ctx = startupownership.CarryMutationAuthority(ctx, f.original)
 	rooted, _ := sourceartifactfixture.Rooted(t, "fixture", sourceartifactfixture.Artifact())

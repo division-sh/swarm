@@ -23,7 +23,6 @@ func TestServedTypedReceiverInitializationBothStores(t *testing.T) {
 			defer unblock()
 			hold := &exactOriginDiagnosticHold{eventType: "work.requested", entered: make(chan string, 1), release: release}
 			_, start := lifecycleRestartHarness(t, backend, canonicalrouting.CopyServedReceiverInitialization(t))
-			completion := installReceiverCompletionBoundary(t)
 			process, rt := start()
 			runtime := servedTestProcessRuntime(t, process)
 			hold.logger = runtime.Logger
@@ -33,7 +32,7 @@ func TestServedTypedReceiverInitializationBothStores(t *testing.T) {
 				t.Helper()
 				if first {
 					first = false
-					requireReceiverInitializationHeldOrigin(t, rt.ReceiverStateReader, rt.Endpoint, probe, hold, seed, unblock, completion, rt.BundleHash)
+					requireReceiverInitializationHeldOrigin(t, rt.ReceiverStateReader, rt.Endpoint, probe, hold, seed, unblock)
 				}
 				if err := waitExactOriginPublications(t.Context(), probe, seed.EventID); err != nil {
 					t.Fatal(err)

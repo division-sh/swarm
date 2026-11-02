@@ -66,6 +66,7 @@ func (l *recordingChannelOnboardingLifecycle) Retry(_ context.Context, input cha
 
 func TestChannelOnboardingAPIContractEvidence(t *testing.T) {
 	selected := storetest.StartSQLiteRuntimeStore(t)
+	ctx := apiTestOriginalProcessContext(t, context.Background(), selected)
 	proofs, err := operatorchannel.NewFileProofStore(t.TempDir())
 	if err != nil {
 		t.Fatal(err)
@@ -79,7 +80,7 @@ func TestChannelOnboardingAPIContractEvidence(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	principal, _, err := channels.Bootstrap(context.Background(), time.Date(2026, 8, 25, 12, 0, 0, 0, time.UTC))
+	principal, _, err := channels.Bootstrap(ctx, time.Date(2026, 8, 25, 12, 0, 0, 0, time.UTC))
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -107,6 +108,7 @@ func TestChannelOnboardingAPIContractEvidence(t *testing.T) {
 		}
 	}
 	handler := testHandler(t, Options{AuthTokens: []string{testToken}, OperatorPrincipalID: principal.ID, Handlers: handlers})
+	bindAPITestHandlerOriginalProcess(t, handler, ctx)
 
 	unauthorized := httptest.NewRecorder()
 	handler.ServeHTTP(unauthorized, httptest.NewRequest(http.MethodPost, "/v1/rpc", strings.NewReader(`{"jsonrpc":"2.0","id":"auth","method":"channel.onboarding_get","params":{"operation_id":"`+operationID+`"}}`)))

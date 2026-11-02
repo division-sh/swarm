@@ -25,7 +25,7 @@ func TestSelectedRecoveryCurrentPredecessorIsNotAbandonedBothStores(t *testing.T
 			t.Run(backend+"/"+state, func(t *testing.T) {
 				store, db, sqlite := selectedForkDiscardTestStore(t, backend)
 				fixture := newSelectedCompletionFixture(t, store, db, sqlite)
-				ctx := testAuthorActivityContext()
+				ctx := fixture.ctx
 				issued, err := store.IssueRunForkSelectedContractRuntimeExecution(ctx, fixture.request)
 				if err != nil {
 					t.Fatal(err)

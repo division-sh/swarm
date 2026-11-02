@@ -16,11 +16,10 @@ import (
 	"github.com/google/uuid"
 )
 
-func proveChannelReplyTransfer(t *testing.T, selected selectedChannelDeliveryTestStore,
+func proveChannelReplyTransfer(t *testing.T, ctx context.Context, selected selectedChannelDeliveryTestStore,
 	runTx func(func(context.Context, *sql.Tx) error) error, current func(runtimeeffects.Authority) bool,
 	template runtimeeffects.Authority, text operatorchannel.InboundText, control render.Action, postgres bool) {
 	t.Helper()
-	ctx := context.Background()
 	store := selected.(render.Store)
 	text.PublicationID, text.ProviderEventID, text.MessageReference = uuid.NewString(), uuid.NewString(), "human-reply"
 	text.EntryReference, text.EntryAddress = "", ""

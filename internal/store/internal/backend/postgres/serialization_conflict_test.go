@@ -20,7 +20,7 @@ func TestPostgresSerializationConflictRequiresCleanNativeSettlement(t *testing.T
 			}
 			t.Run(fmt.Sprintf("retained=%t/%s", retained, scenario), func(t *testing.T) {
 				b, p := newExitProbe(t)
-				ctx, cancel := context.WithCancel(context.Background())
+				ctx, cancel := context.WithCancel(p.original)
 				defer cancel()
 				cleanup := errors.New("independent settlement failure")
 				var session *SessionAuthority

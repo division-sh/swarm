@@ -96,7 +96,7 @@ func MaterializeForkPinsTx(
 		} else {
 			continue
 		}
-		version, found, err := o.loadStoredVersion(ctx, tx, declaration.Ref, versionID)
+		version, found, err := o.loadStoredVersion(ctx, tx, declaration.Ref, versionID, true)
 		if err != nil {
 			return nil, err
 		}
@@ -195,7 +195,7 @@ func (o *Owner) validateRunPinSetTx(ctx context.Context, tx *sql.Tx, runID strin
 		default:
 			return runtimedata.NewDomainError(runtimedata.CodeIntegrity, "run %s pin aggregate has invalid selection %q", runID, pin.Selection)
 		}
-		version, found, err := o.loadStoredVersion(ctx, tx, declaration.Ref, pin.VersionID)
+		version, found, err := o.loadStoredVersion(ctx, tx, declaration.Ref, pin.VersionID, true)
 		if err != nil {
 			return err
 		}

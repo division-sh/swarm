@@ -26,7 +26,7 @@ func TestMailboxCompletionAdmissionAndTTLBothStores(t *testing.T) {
 	for _, backend := range []string{"sqlite", "postgres"} {
 		t.Run(backend, func(t *testing.T) {
 			selected, _ := decisionCardTestStore(t, backend)
-			ctx := testAuthorActivityContext()
+			ctx := originalStoreFixtureContext(t, testAuthorActivityContext(), selected)
 			principal, err := selected.(interface {
 				EnsureOperatorPrincipal(context.Context, time.Time) (operatorchannel.Principal, error)
 			}).EnsureOperatorPrincipal(ctx, time.Now())

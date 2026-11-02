@@ -141,6 +141,7 @@ func TestIssue2589NativeAdmissionFrameIsolationBothStores(t *testing.T) {
 			ctx := originalStoreFixtureContext(t, testAuthorActivityContext(), opened.store)
 			runs := []string{uuid.NewString(), uuid.NewString()}
 			for _, runID := range runs {
+				ctx = originalStoreFixtureContext(t, ctx, opened.store)
 				requireRunningRunForTest(t, ctx, opened.store, runID, time.Now().UTC())
 			}
 			active := func(ctx context.Context, tx *sql.Tx, runID string) error {

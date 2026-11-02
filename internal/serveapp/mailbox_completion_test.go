@@ -230,7 +230,7 @@ func gateCompletionHarness(t *testing.T, backend, root string) (*cliapp.ServeOpt
 	return opts, func() (*serveRuntimeTestProcess, servedControlProofRuntime) {
 		p := startServeRuntimeTestProcess(t, *opts)
 		p.waitForReadyLine()
-		return p, servedControlProofRuntime{ReadRunDeliveries: deliveryReader, Endpoint: "http://" + serveRuntimeAPIListenerFromOutput(t, p.outputString()) + "/v1/rpc", DB: db, Backend: backend, BundleHash: servedEventPublishFixtureBundleHash(t, root), Postgres: selectedPG, SQLite: selectedSQLite}
+		return p, servedControlProofRuntime{ReadRunDeliveries: deliveryReader, Endpoint: "http://" + serveRuntimeAPIListenerFromOutput(t, p.outputString()) + "/v1/rpc", DB: db, Backend: backend, BundleHash: servedEventPublishFixtureBundleHash(t, root), Runtime: servedTestProcessRuntime(t, p), Postgres: selectedPG, SQLite: selectedSQLite}
 	}
 }
 

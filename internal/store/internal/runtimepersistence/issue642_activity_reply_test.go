@@ -37,7 +37,7 @@ func TestIssue642RecordedActivityRetainsChildReplyBothStores(t *testing.T) {
 						if inherited[0].ID == sourceReply.ID || inherited[0].RunID != child.ForkRunID || inherited[0].State != replycontext.StateOpen || inherited[0].SourceRunID != sourceReply.SourceRunID || inherited[0].SourceRequestEventID != sourceReply.SourceRequestEventID {
 							t.Fatalf("child context lost original evidence or cut ownership: %+v", inherited[0])
 						}
-						loaded, err := owner.LoadRunForkSelectedContractSourceEvents(ctx, event.RunID(), child.ForkRunID, []string{event.ID()}, originalActivityCarriageAtPoint(t, owner, event.RunID(), child.ForkPoint), originalRootAdmissionForRun(t, owner, event.RunID()))
+						loaded, err := owner.LoadRunForkSelectedContractSourceEvents(ctx, event.RunID(), child.ForkRunID, []string{event.ID()}, originalActivityCarriageAtPoint(t, owner, event.RunID(), child.ForkPoint, ctx), originalRootAdmissionForRun(t, owner, event.RunID()))
 						if err != nil || len(loaded) != 1 {
 							t.Fatalf("project activity source: count=%d error=%v", len(loaded), err)
 						}

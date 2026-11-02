@@ -59,6 +59,17 @@ func (b *Backend) RunAdmittedTransactionOutcome(ctx context.Context, label strin
 // RunTransactionOutcome keeps acknowledged COMMIT separate from later cleanup
 // errors. False is not evidence that an uncertain COMMIT rolled back.
 func (b *Backend) RunTransactionOutcome(ctx context.Context, label string, operation func(context.Context, *sql.Tx) error) (bool, error) {
+	return b.runTransactionOutcome(ctx, label, false, operation)
+}
+
+// RunProcessAcquisitionOutcome is the named pre-authority entrance. The
+// startup owner holds SQLite construction possession; the native writer and
+// generation fence remain held through this transaction's physical settlement.
+func (b *Backend) RunProcessAcquisitionOutcome(ctx context.Context, operation func(context.Context, *sql.Tx) error) (bool, error) {
+	return b.runTransactionOutcome(ctx, "acquire runtime process capability", true, operation)
+}
+
+func (b *Backend) runTransactionOutcome(ctx context.Context, label string, acquisition bool, operation func(context.Context, *sql.Tx) error) (bool, error) {
 	if err := b.refuseInspectionMutation(ctx); err != nil {
 		return false, err
 	}
@@ -114,9 +125,10 @@ func (b *Backend) RunTransactionOutcome(ctx context.Context, label string, opera
 			return false, err
 		}
 		permitWait := time.Since(permitStarted)
+		retryContext := ctx
 		committed, err := func() (bool, error) {
 			defer b.releaseMutation()
-			return b.runTransactionOnceOutcome(attemptCtx, nil, permitWait, operation)
+			return b.runTransactionOnceOutcome(attemptCtx, nil, permitWait, acquisition, &retryContext, operation)
 		}()
 		attemptErr := attemptCtx.Err()
 		cancelAttempt()
@@ -144,6 +156,7 @@ func (b *Backend) RunTransactionOutcome(ctx context.Context, label string, opera
 			return false, err
 		}
 
+		ctx = retryContext
 		lastBusy = err
 		if recoveryDeadline.IsZero() {
 			recoveryDeadline = time.Now().Add(mutationRetryBudget)
@@ -285,11 +298,11 @@ func waitMutationBackoff(ctx context.Context, deadline time.Time, delay time.Dur
 }
 
 func (b *Backend) runTransactionOnce(ctx context.Context, opts *sql.TxOptions, operation func(context.Context, *sql.Tx) error) (err error) {
-	_, err = b.runTransactionOnceOutcome(ctx, opts, 0, operation)
+	_, err = b.runTransactionOnceOutcome(ctx, opts, 0, false, nil, operation)
 	return err
 }
 
-func (b *Backend) runTransactionOnceOutcome(ctx context.Context, opts *sql.TxOptions, permitWait time.Duration, operation func(context.Context, *sql.Tx) error) (committed bool, err error) {
+func (b *Backend) runTransactionOnceOutcome(ctx context.Context, opts *sql.TxOptions, permitWait time.Duration, acquisition bool, retryContext *context.Context, operation func(context.Context, *sql.Tx) error) (committed bool, err error) {
 	write := opts == nil || !opts.ReadOnly
 	if err := ctx.Err(); err != nil {
 		return false, cancellationBeforeConnection(ctx, err, write)
@@ -306,6 +319,8 @@ func (b *Backend) runTransactionOnceOutcome(ctx context.Context, opts *sql.TxOpt
 	var rollbackDone <-chan error
 	releaseOrdering := func() {}
 	defer func() { releaseOrdering() }()
+	releaseGeneration := func() {}
+	defer func() { releaseGeneration() }()
 	discard := false
 	probe := b.testTransactions.Begin(opts != nil && opts.ReadOnly, false)
 	defer func() { probe.Finish(err) }()
@@ -325,6 +340,15 @@ func (b *Backend) runTransactionOnceOutcome(ctx context.Context, opts *sql.TxOpt
 			// unwinds. No recover here: the original panic remains authoritative.
 			slog.Error("sqlite transaction cleanup failed", "error", finalized.err)
 			err = &transactionTerminationError{errors.Join(err, finalized.err)}
+		}
+		var terminal *transactionTerminationError
+		if retryContext != nil && err != nil && !commitAttempted && finalized.rolledBack && finalized.connectionJoined && finalized.err == nil && !errors.As(err, &terminal) && mutationBusyError(err) {
+			next, retryErr := generationauthority.ExternalEffectResultRetryContext(*retryContext, ctx, tx)
+			if retryErr != nil {
+				err = &transactionTerminationError{errors.Join(err, retryErr)}
+			} else {
+				*retryContext = next
+			}
 		}
 		err = finalized.cancellation(ctx, err, write, !beginAttempted, commitAttempted)
 		probe.RecordCleanup(time.Since(cleanupStarted))
@@ -354,6 +378,7 @@ func (b *Backend) runTransactionOnceOutcome(ctx context.Context, opts *sql.TxOpt
 		stopRollback = context.AfterFunc(ctx, func() { done <- rollbackTx.Rollback() })
 	}
 	ctx, releaseOrdering = authoractivity.BindTransaction(ctx, ctx, tx, authoractivity.DialectSQLite)
+	ctx, releaseGeneration = generationauthority.BindTransaction(ctx, ctx, tx, true, opts != nil && opts.ReadOnly)
 	ctx = transactiontest.WithAttempt(ctx, probe)
 	admittedCtx, retireAdmission, admissionErr := admitOptionalMutationTx(ctx, tx, opts)
 	if admissionErr != nil {
@@ -363,6 +388,16 @@ func (b *Backend) runTransactionOnceOutcome(ctx context.Context, opts *sql.TxOpt
 	defer retireAdmission()
 	if err = ctx.Err(); err != nil {
 		return false, err
+	}
+	if write {
+		if acquisition {
+			err = generationauthority.FenceGenerationChange(ctx, tx, true)
+		} else {
+			err = generationauthority.AdmitTransaction(ctx, tx, true)
+		}
+		if err != nil {
+			return false, err
+		}
 	}
 	if err = operation(ctx, tx); err != nil {
 		return false, err

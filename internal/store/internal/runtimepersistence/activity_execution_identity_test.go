@@ -64,7 +64,7 @@ func TestActivitySettlementKeepsOriginalNativeIdentityBothStores(t *testing.T) {
 							} else if failure, ok := runtimefailures.EnvelopeFromError(err); !ok || failure.Class != runtimefailures.ClassConflictingDuplicate {
 								t.Fatalf("wrong identity refusal: %v", err)
 							}
-							loaded, found, err := journal.LoadActivityAttempt(testAuthorActivityContext(), original.RequestEventID)
+							loaded, found, err := journal.LoadActivityAttempt(fixture.originalContext(testAuthorActivityContext()), original.RequestEventID)
 							if err != nil || !found || !reflect.DeepEqual(loaded, original) {
 								t.Fatalf("refused callback changed original receipt: %+v found=%t err=%v", loaded, found, err)
 							}

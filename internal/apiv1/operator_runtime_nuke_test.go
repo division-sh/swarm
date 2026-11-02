@@ -21,7 +21,7 @@ func TestOperatorRuntimeNukeDryRunUsesDestructiveResetOwners(t *testing.T) {
 	fixture := newOperatorRuntimeContextFixture(t)
 	handler := testHandler(t, Options{
 		AuthTokens: []string{testToken},
-		Handlers: testOperatorHandlers(testOperatorCapabilities{
+		Handlers: testOperatorHandlers(t, testOperatorCapabilities{
 			Now:              func() time.Time { return now },
 			Ready:            func() bool { return true },
 			Database:         fakePinger{},
@@ -65,7 +65,7 @@ func TestOperatorRuntimeNukeUsesDistinctOperationIdentityPerLogicalRequest(t *te
 	idempotency := newRecordingAPIIdempotencyStore()
 	handler := testHandler(t, Options{
 		AuthTokens: []string{testToken},
-		Handlers: testOperatorHandlers(testOperatorCapabilities{
+		Handlers: testOperatorHandlers(t, testOperatorCapabilities{
 			Ready: func() bool { return true }, Database: fakePinger{},
 			Idempotency: idempotency, ResetCoordinator: owners,
 		}),
@@ -98,7 +98,7 @@ func TestOperatorRuntimeNukeApplyReportsPartialFailureAndIdempotency(t *testing.
 	idempotency := newRecordingAPIIdempotencyStore()
 	handler := testHandler(t, Options{
 		AuthTokens: []string{testToken},
-		Handlers: testOperatorHandlers(testOperatorCapabilities{
+		Handlers: testOperatorHandlers(t, testOperatorCapabilities{
 			Now:              func() time.Time { return now },
 			Ready:            func() bool { return true },
 			Database:         fakePinger{},
@@ -147,7 +147,7 @@ func TestOperatorRuntimeNukeIncludeSourceArtifactsDeactivatesLoadedRuntimeContex
 	owners.runtimeContexts = fixture.manager
 	handler := testHandler(t, Options{
 		AuthTokens: []string{testToken},
-		Handlers: testOperatorHandlers(testOperatorCapabilities{
+		Handlers: testOperatorHandlers(t, testOperatorCapabilities{
 			Now:              func() time.Time { return now },
 			Ready:            func() bool { return true },
 			Database:         fakePinger{},
@@ -173,7 +173,7 @@ func TestOperatorRuntimeNukeIncludeSourceArtifactsPartialFailureDeactivatesLoade
 	owners.runtimeContexts = fixture.manager
 	handler := testHandler(t, Options{
 		AuthTokens: []string{testToken},
-		Handlers: testOperatorHandlers(testOperatorCapabilities{
+		Handlers: testOperatorHandlers(t, testOperatorCapabilities{
 			Now:              func() time.Time { return now },
 			Ready:            func() bool { return true },
 			Database:         fakePinger{},
@@ -201,7 +201,7 @@ func TestOperatorRuntimeNukeIncludeSourceArtifactsPartialFailureDeactivatesLoade
 	replayOwners := newRecordingRuntimeNukeOwners()
 	replayHandler := testHandler(t, Options{
 		AuthTokens: []string{testToken},
-		Handlers: testOperatorHandlers(testOperatorCapabilities{
+		Handlers: testOperatorHandlers(t, testOperatorCapabilities{
 			Now:              func() time.Time { return now },
 			Ready:            func() bool { return true },
 			Database:         fakePinger{},
@@ -247,7 +247,7 @@ func TestOperatorRuntimeNukeExcludeSourceArtifactsStillQuiescesRuntimeContexts(t
 	owners.runtimeContexts = fixture.manager
 	handler := testHandler(t, Options{
 		AuthTokens: []string{testToken},
-		Handlers: testOperatorHandlers(testOperatorCapabilities{
+		Handlers: testOperatorHandlers(t, testOperatorCapabilities{
 			Now:              func() time.Time { return now },
 			Ready:            func() bool { return true },
 			Database:         fakePinger{},
@@ -268,7 +268,7 @@ func TestOperatorRuntimeNukeAuthFailureDoesNotTouchResetOwners(t *testing.T) {
 	owners := newRecordingRuntimeNukeOwners()
 	handler := testHandler(t, Options{
 		AuthTokens: []string{testToken},
-		Handlers: testOperatorHandlers(testOperatorCapabilities{
+		Handlers: testOperatorHandlers(t, testOperatorCapabilities{
 			Ready:            func() bool { return true },
 			Database:         fakePinger{},
 			Idempotency:      newRecordingAPIIdempotencyStore(),
@@ -299,7 +299,7 @@ func TestOperatorRuntimeNukeOperationInProgressFailsClosed(t *testing.T) {
 	owners.planErr = destructivereset.ErrOperationInProgress
 	handler := testHandler(t, Options{
 		AuthTokens: []string{testToken},
-		Handlers: testOperatorHandlers(testOperatorCapabilities{
+		Handlers: testOperatorHandlers(t, testOperatorCapabilities{
 			Ready:            func() bool { return true },
 			Database:         fakePinger{},
 			Idempotency:      newRecordingAPIIdempotencyStore(),

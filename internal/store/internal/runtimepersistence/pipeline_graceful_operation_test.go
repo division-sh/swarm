@@ -13,7 +13,6 @@ import (
 
 	worklifetime "github.com/division-sh/swarm/internal/runtime/core/worklifetime"
 	obligation "github.com/division-sh/swarm/internal/runtime/pipelineobligation"
-	runlifecycle "github.com/division-sh/swarm/internal/runtime/runlifecycle"
 	authoractivityfixture "github.com/division-sh/swarm/internal/store/testutil/authoractivityfixture"
 	"github.com/division-sh/swarm/internal/testutil"
 	"github.com/google/uuid"
@@ -155,7 +154,7 @@ func TestPipelineGracefulClaimReadCancellation(t *testing.T) {
 			fixture, store, probe := openPipelineGracefulFixture(t)
 			base := originalStoreFixtureContext(t, testAuthorActivityContext(), store)
 			runID := uuid.NewString()
-			seedAuthorActivityReceiptRun(t, fixture, base, runID)
+			base = seedAuthorActivityReceiptRun(t, fixture, base, runID)
 			eventID := commitPipelineParityEvent(t, base, store, runID, time.Now().UTC())
 			if phase == "native_notice" {
 				for _, statement := range []string{
@@ -218,7 +217,7 @@ func TestPipelineGracefulParentFenceDrainsCanceledWait(t *testing.T) {
 	fixture.db.SetMaxOpenConns(2)
 	base := originalStoreFixtureContext(t, testAuthorActivityContext(), store)
 	runID := uuid.NewString()
-	seedAuthorActivityReceiptRun(t, fixture, base, runID)
+	base = seedAuthorActivityReceiptRun(t, fixture, base, runID)
 	eventID := commitPipelineParityEvent(t, base, store, runID, time.Now().UTC())
 	holder, err := fixture.db.Conn(base)
 	if err != nil {
@@ -287,31 +286,17 @@ func TestPipelineGracefulParentFenceDrainsCanceledWait(t *testing.T) {
 	}
 }
 
-type pipelineGracefulSink struct {
-	submits, cancels atomic.Int32
-	failure          error
-}
-
-func (s *pipelineGracefulSink) ReserveCompletionCandidate(context.Context) (runlifecycle.CandidateAdmission, error) {
-	return s, nil
-}
-func (s *pipelineGracefulSink) Submit(runlifecycle.Candidate) error {
-	s.submits.Add(1)
-	return s.failure
-}
-func (s *pipelineGracefulSink) Cancel() error { s.cancels.Add(1); return nil }
-
 func TestPipelineGracefulWriteOutcome(t *testing.T) {
 	for _, method := range []string{"settle", "mark_decision"} {
-		for _, phase := range []string{"success", "cancel_entry", "cancel_work", "cancel_commit_admitted", "independent_work", "panic", "endtx", "release", "handoff", "combined", "release_handoff", "commit_refused", "commit_ack_lost"} {
-			if method == "mark_decision" && (phase == "release" || phase == "release_handoff") {
+		for _, phase := range []string{"success", "cancel_entry", "cancel_work", "cancel_commit_admitted", "independent_work", "panic", "endtx", "release", "commit_refused", "commit_ack_lost"} {
+			if method == "mark_decision" && phase == "release" {
 				continue
 			}
 			t.Run(method+"/"+phase, func(t *testing.T) {
 				fixture, store, probe := openPipelineGracefulFixture(t)
 				base := originalStoreFixtureContext(t, testAuthorActivityContext(), store)
 				runID := uuid.NewString()
-				seedAuthorActivityReceiptRun(t, fixture, base, runID)
+				base = seedAuthorActivityReceiptRun(t, fixture, base, runID)
 				eventID := commitPipelineParityEvent(t, base, store, runID, time.Now().UTC())
 				purpose := obligation.PurposeRecovery
 				if method == "mark_decision" {
@@ -333,26 +318,16 @@ func TestPipelineGracefulWriteOutcome(t *testing.T) {
 				primary := errors.New("independent pipeline operation failure")
 				cleanup := errors.New("independent pipeline EndTx failure")
 				release := errors.New("independent pipeline release failure")
-				handoff := errors.New("independent pipeline handoff failure")
-				if phase == "endtx" || phase == "combined" {
+				if phase == "endtx" {
 					session.SetEndTxErrorForTest(func() error { return cleanup })
 				}
-				if phase == "release" || phase == "release_handoff" {
+				if phase == "release" {
 					lease.SetReleaseSessionForTest(func() error { return errors.Join(session.Release(), release) })
 				}
 				process := worklifetime.NewProcess()
 				occurrence := newRunLifecycleExecutorOccurrence(t, process)
 				base = worklifetime.WithRuntimeOccurrence(base, occurrence)
-				sink := &pipelineGracefulSink{}
-				if phase == "handoff" || phase == "combined" || phase == "release_handoff" {
-					sink.failure = handoff
-				}
-				registration, err := store.RegisterCompletionCandidateSink(base, runlifecycle.CandidateScope{BundleHash: runLifecycleCandidateParityBundleHash}, sink)
-				if err != nil {
-					t.Fatal(err)
-				}
 				t.Cleanup(func() {
-					registration.Release()
 					retireRunLifecycleExecutorOccurrence(t, occurrence)
 					retireRunLifecycleProcess(t, process)
 				})
@@ -399,7 +374,7 @@ func TestPipelineGracefulWriteOutcome(t *testing.T) {
 				}()
 				probe.set(nil)
 				session.SetEndTxErrorForTest(nil)
-				committed := phase == "success" || phase == "cancel_commit_admitted" || phase == "endtx" || phase == "release" || phase == "handoff" || phase == "combined" || phase == "release_handoff"
+				committed := phase == "success" || phase == "cancel_commit_admitted" || phase == "endtx" || phase == "release"
 				if outcome.Committed() != committed || outcome.DeliveryHandoffCommitted() != committed {
 					t.Fatalf("commit evidence=%#v, want committed=%v, err=%v", outcome, committed, err)
 				}
@@ -412,24 +387,14 @@ func TestPipelineGracefulWriteOutcome(t *testing.T) {
 				if (phase == "independent_work" || phase == "commit_refused" || phase == "commit_ack_lost") && !errors.Is(err, primary) {
 					t.Fatalf("lost primary error: %v", err)
 				}
-				if (phase == "endtx" || phase == "combined") && !errors.Is(err, cleanup) {
+				if phase == "endtx" && !errors.Is(err, cleanup) {
 					t.Fatalf("lost EndTx error: %v", err)
 				}
-				if (phase == "release" || phase == "release_handoff") && !errors.Is(err, release) {
+				if phase == "release" && !errors.Is(err, release) {
 					t.Fatalf("lost release error: %v", err)
-				}
-				if (phase == "handoff" || phase == "combined" || phase == "release_handoff") && !errors.Is(err, handoff) {
-					t.Fatalf("lost handoff error: %v", err)
 				}
 				if (phase == "success" || phase == "cancel_commit_admitted") && err != nil {
 					t.Fatalf("acknowledged commit relabeled: %v", err)
-				}
-				wantSubmits := int32(0)
-				if committed {
-					wantSubmits = 1
-				}
-				if sink.submits.Load() != wantSubmits {
-					t.Fatalf("handoff submissions=%d, want %d", sink.submits.Load(), wantSubmits)
 				}
 				count, _, _ := readExactPipelineReceipt(t, context.Background(), fixture, eventID)
 				persisted := committed || phase == "commit_ack_lost"
@@ -470,7 +435,7 @@ func TestPipelineGracefulCanceledAdmissionBothStores(t *testing.T) {
 			store := fixture.store.(pipelineObligationParityStore)
 			base := originalStoreFixtureContext(t, testAuthorActivityContext(), fixture.store)
 			runID := uuid.NewString()
-			seedAuthorActivityReceiptRun(t, fixture, base, runID)
+			base = seedAuthorActivityReceiptRun(t, fixture, base, runID)
 			eventID := commitPipelineParityEvent(t, base, store, runID, time.Now().UTC())
 			ctx, cancel := context.WithCancel(base)
 			cancel()

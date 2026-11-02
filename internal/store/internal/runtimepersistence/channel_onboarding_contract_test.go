@@ -30,9 +30,9 @@ func TestChannelOnboardingSelectedStoreContractParity(t *testing.T) {
 				t.Cleanup(cleanup)
 				store = admitTestPostgresStore(t, db)
 			}
+			ctx := originalStoreFixtureContext(t, context.Background(), store)
 			runChannelOnboardingStoreContract(t, store)
 			t.Run("deployment_scope", func(t *testing.T) {
-				ctx := context.Background()
 				now := time.Now().UTC()
 				principal, err := store.(operatorchannel.Store).EnsureOperatorPrincipal(ctx, now)
 				if err != nil {
@@ -102,7 +102,7 @@ func TestChannelOnboardingCredentialStaleParentResetSelectedStoreParity(t *testi
 			rig := newBoundHandoffRig(t, openChannelOnboardingConfirmationFixture(t, backend))
 			begun := rig.start(t, channelonboarding.VerbConnect, "original-token", false)
 			parent := rig.parent(t, begun.Operation.OperationID)
-			ctx := context.Background()
+			ctx := rig.fixture.ctx
 			if _, err := rig.fixture.store.AdvanceChannelOnboarding(ctx, channelonboarding.AdvanceRequest{
 				OperationID: parent.OperationID, ExpectedRevision: parent.Revision, Phase: channelonboarding.PhasePreparing,
 				ReplaceCredentialAdmissions: true, Now: rig.now,
@@ -122,7 +122,7 @@ func TestChannelOnboardingCredentialStaleRecoverySelectedStoreParity(t *testing.
 	for _, backend := range []string{"sqlite", "postgres"} {
 		t.Run(backend, func(t *testing.T) {
 			rig := newBoundHandoffRig(t, openChannelOnboardingConfirmationFixture(t, backend))
-			ctx := context.Background()
+			ctx := rig.fixture.ctx
 			begun := rig.start(t, channelonboarding.VerbConnect, "original-token", false)
 			claimed := rig.claim(t, begun, "account-a")
 			if err := rig.file.Set(ctx, claimed.ProviderAuthority.Credential.Key, "rotated-token"); err != nil {
@@ -161,6 +161,7 @@ func TestRetiredPreparingOnboardingReleasesUncheckpointedCredentialSelectedStore
 				selected = admitTestPostgresStore(t, db)
 			}
 			ctx := context.Background()
+			ctx = originalStoreFixtureContext(t, ctx, selected)
 			now := time.Date(2026, 8, 27, 14, 15, 0, 0, time.UTC)
 			principal, err := selected.(operatorchannel.Store).EnsureOperatorPrincipal(ctx, now)
 			if err != nil {
@@ -239,6 +240,7 @@ func TestFailedOnboardingFenceRejectsCredentialReadmissionSelectedStoreParity(t 
 				selected = admitTestPostgresStore(t, db)
 			}
 			ctx := context.Background()
+			ctx = originalStoreFixtureContext(t, ctx, selected)
 			now := time.Date(2026, 8, 30, 23, 0, 0, 0, time.UTC)
 			principal, err := selected.(operatorchannel.Store).EnsureOperatorPrincipal(ctx, now)
 			if err != nil {
@@ -393,6 +395,7 @@ func TestChannelRebindPublicationRetiresEverySiblingActivationForInterface(t *te
 				selected = admitTestPostgresStore(t, db)
 			}
 			ctx := context.Background()
+			ctx = originalStoreFixtureContext(t, ctx, selected)
 			now := time.Date(2026, 8, 27, 2, 0, 0, 0, time.UTC)
 			principal, err := selected.(operatorchannel.Store).EnsureOperatorPrincipal(ctx, now)
 			if err != nil {
@@ -433,7 +436,7 @@ func TestChannelRebindPublicationRetiresEverySiblingActivationForInterface(t *te
 
 func publishChannelOnboardingTestActivation(t *testing.T, selected channelonboarding.Store, request channelonboarding.StartRequest, bindingRevision int64, now time.Time) (channelonboarding.Operation, channelonboarding.ConnectedChannelActivation) {
 	t.Helper()
-	ctx := context.Background()
+	ctx := originalStoreFixtureContext(t, context.Background(), selected)
 	op, err := selected.ReserveChannelOnboarding(ctx, request)
 	if err != nil {
 		t.Fatal(err)
@@ -485,7 +488,7 @@ func publishChannelOnboardingTestActivation(t *testing.T, selected channelonboar
 
 func runChannelOnboardingStoreContract(t *testing.T, store channelonboarding.Store) {
 	t.Helper()
-	ctx := context.Background()
+	ctx := originalStoreFixtureContext(t, context.Background(), store)
 	now := time.Date(2026, 8, 25, 12, 0, 0, 0, time.UTC)
 	principal, err := store.(operatorchannel.Store).EnsureOperatorPrincipal(ctx, now)
 	if err != nil {

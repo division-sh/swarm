@@ -140,7 +140,7 @@ func TestCompletionBudgetRecoveryProjectionParity(t *testing.T) {
 
 			source := semanticview.Wrap(firstBundle)
 			otherSource := semanticview.Wrap(secondBundle)
-			bus, err := newScopedTestEventBus(t, selected, runtimebus.EventBusOptions{ContractBundle: source, SourceArtifactFact: firstFact,
+			bus, err := newRuntimeTestEventBusWithOptions(t, selected, runtimebus.EventBusOptions{ContractBundle: source, SourceArtifactFact: firstFact,
 				MutationContext: func(input context.Context) (context.Context, error) {
 					if !runtimestartupownership.HasMutationAuthority(input) {
 						input = runtimestartupownership.CarryMutationAuthority(input, ctx)
@@ -148,7 +148,7 @@ func TestCompletionBudgetRecoveryProjectionParity(t *testing.T) {
 					_, err := runtimestartupownership.CaptureMutationAuthority(input)
 					return input, err
 				},
-			})
+			}, ctx)
 			if err != nil {
 				t.Fatalf("NewEventBus: %v", err)
 			}

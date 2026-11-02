@@ -18,7 +18,7 @@ func TestResetTransportCacheStoragePreservesAllKeysActorsAndExpiryBothStores(t *
 	for _, backend := range []string{"sqlite", "postgres"} {
 		t.Run(backend, func(t *testing.T) {
 			selected, _, _ := selectedForkDiscardTestStore(t, backend)
-			ctx := testAuthorActivityContext()
+			ctx := originalStoreFixtureContext(t, testAuthorActivityContext(), selected)
 			owner := selected.(apiv1.APIIdempotencyStore)
 			now := time.Now().UTC()
 			for _, row := range []struct{ method, actor, key string }{

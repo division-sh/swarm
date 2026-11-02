@@ -19,7 +19,7 @@ func TestPinnedAuthoredMutationStoragePreservesExactSourceAndPhysicalBytesBothSt
 			ctx, runID, otherRun := testAuthorActivityContext(), uuid.NewString(), uuid.NewString()
 			ctx = originalStoreFixtureContext(t, ctx, fixture.store)
 			for _, run := range []string{runID, otherRun} {
-				seedAuthorActivityReceiptRun(t, fixture, ctx, run)
+				ctx = seedAuthorActivityReceiptRun(t, fixture, ctx, run)
 			}
 			source := fanoutobligation.SourceRef{Kind: fanoutobligation.SourceEntityField, RunID: runID, EntityID: uuid.NewString(), MutationID: uuid.NewString(), Field: "items"}
 			otherMutation, nullMutation, privateMutation := uuid.NewString(), uuid.NewString(), uuid.NewString()
@@ -103,6 +103,7 @@ func TestPinnedAuthoredMutationStorageRejectsInvalidAuthorityAndUnavailableEvide
 	for _, backend := range eventRecordContractBackends() {
 		t.Run(backend.name, func(t *testing.T) {
 			fixture := backend.open(t)
+			original := originalStoreFixtureContext(t, testAuthorActivityContext(), fixture.store)
 			for _, wrong := range []fanoutobligation.SourceRef{
 				{},
 				{Kind: fanoutobligation.SourceEventPayloadField, EventID: uuid.NewString(), Field: "items"},
@@ -117,7 +118,7 @@ func TestPinnedAuthoredMutationStorageRejectsInvalidAuthorityAndUnavailableEvide
 			}
 			rename := func(from, to string) {
 				t.Helper()
-				if err := runUnrevisionedEventFixtureTransactionForTest(testAuthorActivityContext(), fixture.store, func(ctx context.Context, tx *sql.Tx) error {
+				if err := runUnrevisionedEventFixtureTransactionForTest(original, fixture.store, func(ctx context.Context, tx *sql.Tx) error {
 					_, err := tx.ExecContext(ctx, "ALTER TABLE "+from+" RENAME TO "+to)
 					return err
 				}); err != nil {

@@ -112,7 +112,7 @@ func TestWorkflowNodeNoopSettlementAtomicBothStores(t *testing.T) {
 						table, action = "event_delivery_attempts", "UPDATE OF lease_expires_at"
 					}
 					if failure == "completion" {
-						table, action = "runs", "UPDATE OF completion_revision"
+						table, action = "run_completion_evidence", "INSERT"
 					}
 					install := []string{"CREATE TRIGGER noop_cut BEFORE " + action + " ON " + table + " BEGIN SELECT RAISE(ABORT,'node_noop_cut'); END"}
 					remove = []string{"DROP TRIGGER noop_cut"}

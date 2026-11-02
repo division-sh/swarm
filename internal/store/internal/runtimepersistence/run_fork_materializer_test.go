@@ -941,6 +941,7 @@ type execContextDB interface {
 func seedActivationReadySourceRun(t *testing.T, ctx context.Context, db *sql.DB, sourceRunID, entityID, eventID string, at time.Time) {
 	t.Helper()
 	selected := newPostgresStoreWithBackend(mustPostgresBackend(db))
+	ctx = originalStoreFixtureContext(t, ctx, selected)
 	requireRunFixtureForTest(t, ctx, selected, semanticRunFixture{Origin: semanticScenarioSetupRunOriginForTest(), RunID: sourceRunID, StartedAt: at.Add(-time.Minute), BundleHash: authorActivityTestBundleHash})
 	commitPreparedWorkflowAggregateFixture(t, ctx, selected, sourceRunID, activationReadySourceInstance(entityID, at), at)
 	seedActivationReadySourceState(t, ctx, db, sourceRunID, entityID, eventID, at)

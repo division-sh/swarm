@@ -39,6 +39,7 @@ func TestChannelOnboardingSelectionReadOnlyHTTPBothStores(t *testing.T) {
 			} else {
 				selected = storetest.StartPostgresRuntimeStore(t)
 			}
+			ctx := apiTestOriginalProcessContext(t, context.Background(), selected)
 			identity := operatorchannel.InterfaceIdentity{InterfaceRef: operatorchannel.InterfaceHITLChannelV2,
 				ChannelPackID: "provider.telegram.hitl_channel", ChannelPackVersion: "1.0.0",
 				ChannelManifestHash: "sha256:" + strings.Repeat("a", 64), SemanticGeneration: "selection-contract"}.Normalized()
@@ -50,7 +51,7 @@ func TestChannelOnboardingSelectionReadOnlyHTTPBothStores(t *testing.T) {
 			if err != nil {
 				t.Fatal(err)
 			}
-			principal, _, err := channels.Bootstrap(context.Background(), time.Now())
+			principal, _, err := channels.Bootstrap(ctx, time.Now())
 			if err != nil {
 				t.Fatal(err)
 			}
@@ -87,6 +88,7 @@ func TestChannelOnboardingSelectionReadOnlyHTTPBothStores(t *testing.T) {
 			}
 			handler := testHandler(t, Options{AuthTokens: []string{testToken}, OperatorPrincipalID: principal.ID,
 				Handlers: ChannelOnboardingHandlers(ChannelOnboardingHandlerOptions{Onboarding: service, Channels: channels})})
+			bindAPITestHandlerOriginalProcess(t, handler, ctx)
 			body := `{"jsonrpc":"2.0","id":"select","method":"channel.onboarding_select","params":{"verb":"reconnect","provider":"telegram"}}`
 			unauthorized := httptest.NewRecorder()
 			handler.ServeHTTP(unauthorized, httptest.NewRequest(http.MethodPost, "/v1/rpc", strings.NewReader(body)))

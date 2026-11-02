@@ -78,13 +78,13 @@ func (s dataShowCorruptStore) LoadDataPruneOperation(ctx context.Context, id str
 
 func TestDataShowCorruptReadFamilyAcrossSelectedStores(t *testing.T) {
 	forEachDataRunLifecycleStore(t, func(t *testing.T, fixture dataRunLifecycleFixture) {
-		ctx := context.Background()
+		ctx := apiTestOriginalProcessContext(t, context.Background(), fixture.primary)
 		catalog, ref := dataHTTPProbeCatalog(t)
 		if _, err := fixture.primary.EnsureSourceArtifactWithData(ctx, dataProbeSourceArtifact, catalog); err != nil {
 			t.Fatal(err)
 		}
-		first := dataShowSource(t, fixture.primary, dataProbeBundleHash, ref, durabledata.AbsentHead(), "import", "{\"slug\":\"alpha\"}\n")
-		second := dataShowSource(t, fixture.primary, dataProbeBundleHash, ref, first.Head.After, "import", "{\"slug\":\"beta\"}\n")
+		first := dataShowSource(t, ctx, fixture.primary, dataProbeBundleHash, ref, durabledata.AbsentHead(), "import", "{\"slug\":\"alpha\"}\n")
+		second := dataShowSource(t, ctx, fixture.primary, dataProbeBundleHash, ref, first.Head.After, "import", "{\"slug\":\"beta\"}\n")
 		prune, err := fixture.primary.PruneDataResource(ctx, durabledata.PruneCommand{PruneInvocationID: uuid.NewString(), Actor: "operator", Declaration: ref, VersionID: first.Candidate.VersionID, ExpectedHead: second.Head.After})
 		if err != nil {
 			t.Fatal(err)
@@ -94,6 +94,7 @@ func TestDataShowCorruptReadFamilyAcrossSelectedStores(t *testing.T) {
 				corrupt := dataShowCorruptStore{DurableDataStore: fixture.reconstructed, arm: arm}
 				trace := &dataShowTraceStore{DurableDataStore: corrupt}
 				handler := testHandler(t, Options{AuthTokens: []string{testToken}, Handlers: OperatorDataHandlers(DataHandlerOptions{Store: trace})})
+				bindAPITestHandlerOriginalProcess(t, handler, ctx)
 				params := dataShowResourceParams(arm)
 				if arm == "import_shape" {
 					params = map[string]any{"view": arm, "bundle_hash": dataProbeBundleHash, "declaration": dataRunDeclaration(ref), "schema_digest": first.SchemaDigest}
@@ -126,6 +127,7 @@ func TestDataShowCorruptReadFamilyAcrossSelectedStores(t *testing.T) {
 			t.Fatal(err)
 		}
 		handler := testHandler(t, Options{AuthTokens: []string{testToken}, Handlers: OperatorDataHandlers(DataHandlerOptions{Store: fixture.reconstructed})})
+		bindAPITestHandlerOriginalProcess(t, handler, ctx)
 		_, response, _ := callReadOnlyProbeRPC(t, handler, "data.show", dataShowResourceParams("rows"), "Bearer "+testToken)
 		if response.Error == nil || asMap(t, response.Error.Data)["code"] != string(durabledata.CodeIntegrity) {
 			t.Fatalf("stored corruption accepted: %#v", response)

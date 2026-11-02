@@ -20,6 +20,7 @@ import (
 	"github.com/division-sh/swarm/internal/sourceartifact"
 	"github.com/division-sh/swarm/internal/store/selected/selectedtest"
 	"github.com/division-sh/swarm/internal/store/storetest"
+	"github.com/division-sh/swarm/internal/store/testutil/agentfixture"
 	"github.com/division-sh/swarm/internal/testutil/sourceartifactfixture"
 	"github.com/google/uuid"
 	"testing"
@@ -46,10 +47,14 @@ func openExactHandoffNative(t *testing.T, backend string, selectedExecution bool
 	var authority deliverylifecycle.ExecutionAuthority
 	fixture := runtimebus.ExactHandoffNativeFixtureForTest{Store: owner}
 	if !selectedExecution {
-		ctx = originalEventBusFixtureContext(t, ctx, owner)
+		ctx = nativeBusProcessContext(t, ctx, owner)
 	}
 	if selectedExecution {
-		execution := selectedtest.OpenSelectedDeliveryExecution(t, ctx, owner)
+		original, err := agentfixture.ProcessCapability(t, ctx, owner)
+		if err != nil {
+			t.Fatal(err)
+		}
+		execution := selectedtest.OpenSelectedDeliveryExecution(t, ctx, owner, original)
 		ctx, authority = execution.Context, execution.Authority
 		fixture.Source = execution.SemanticSource
 		fixture.SelectedEvent, fixture.SelectedRoute = execution.SelectedEvent, execution.SelectedRoute

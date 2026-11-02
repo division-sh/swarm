@@ -69,7 +69,9 @@ func (c *postgresBootstrapExitConn) BeginTx(ctx context.Context, opts driver.TxO
 }
 
 func (c *postgresBootstrapExitConn) ExecContext(ctx context.Context, query string, args []driver.NamedValue) (driver.Result, error) {
-	if ctx.Done() != nil {
+	admission := strings.Join(strings.Fields(query), " ")
+	if ctx.Done() != nil && admission != "SELECT pg_advisory_xact_lock(1398231629, 1)" &&
+		admission != "UPDATE runtime_process_generation SET generation = generation WHERE singleton_id = 1" {
 		return nil, errors.New("bootstrap Exec used caller-cancellable SQL context")
 	}
 	result, err := c.Conn.(driver.ExecerContext).ExecContext(ctx, query, args)
@@ -90,7 +92,8 @@ func (c *postgresBootstrapExitConn) ExecContext(ctx context.Context, query strin
 }
 
 func (c *postgresBootstrapExitConn) QueryContext(ctx context.Context, query string, args []driver.NamedValue) (driver.Rows, error) {
-	if ctx.Done() != nil {
+	admission := strings.Join(strings.Fields(query), " ")
+	if ctx.Done() != nil && admission != "SELECT generation, CAST(lease_id AS TEXT), owner_id, CAST(boot_id AS TEXT), CAST(runtime_instance_id AS TEXT), backend FROM runtime_process_generation WHERE singleton_id = 1 FOR UPDATE" {
 		return nil, errors.New("bootstrap Query used caller-cancellable SQL context")
 	}
 	return c.Conn.(driver.QueryerContext).QueryContext(ctx, query, args)
@@ -168,7 +171,7 @@ func TestPostgresRetainedGenerationCommitDisposition(t *testing.T) {
 			control.phase = phase
 			var provisional processbinding.LeaseStamp
 			refusal := errors.New("injected generation rollback")
-			committed, err := lease.RunTransactionOutcome(ctx, func(txctx context.Context, tx *sql.Tx) error {
+			committed, err := lease.RunProcessAcquisitionOutcome(ctx, func(txctx context.Context, tx *sql.Tx) error {
 				var err error
 				provisional, err = generationauthority.AdvanceProcessGeneration(txctx, tx, identity, false)
 				if err != nil {
@@ -247,7 +250,7 @@ func TestPostgresRetainedGenerationCommitDisposition(t *testing.T) {
 			}()
 			identity.LeaseID, identity.BootID = uuid.NewString(), uuid.NewString()
 			var successor processbinding.LeaseStamp
-			committed, err = peer.RunTransactionOutcome(context.Background(), func(txctx context.Context, tx *sql.Tx) error {
+			committed, err = peer.RunProcessAcquisitionOutcome(context.Background(), func(txctx context.Context, tx *sql.Tx) error {
 				var err error
 				successor, err = generationauthority.AdvanceProcessGeneration(txctx, tx, identity, false)
 				return err

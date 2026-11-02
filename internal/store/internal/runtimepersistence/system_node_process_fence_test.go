@@ -31,7 +31,14 @@ func TestSystemNodeMutationRejectsPredecessorAfterProcessCutoverBothStores(t *te
 			for _, entrance := range entrances {
 				for _, cut := range []string{"current", "successor", "retired_grant", "missing", "foreign_store"} {
 					t.Run(backend+"/"+operation.name+"/"+entrance+"/"+cut, func(t *testing.T) {
-						proveSystemNodeProcessCutover(t, backend, operation.mode, entrance, cut)
+						if cut == "foreign_store" {
+							foreign, _ := constructWorkflowMutationFixture(t, backend, "system-node-process-fence", time.Now().UTC().Add(-time.Minute).Truncate(time.Microsecond))
+							t.Run("predecessor", func(t *testing.T) {
+								proveSystemNodeProcessCutover(t, backend, operation.mode, entrance, cut, foreign.grant)
+							})
+							return
+						}
+						proveSystemNodeProcessCutover(t, backend, operation.mode, entrance, cut, nil)
 					})
 				}
 			}
@@ -39,7 +46,7 @@ func TestSystemNodeMutationRejectsPredecessorAfterProcessCutoverBothStores(t *te
 	}
 }
 
-func proveSystemNodeProcessCutover(t *testing.T, backend string, mode mutationprotocol.Evidence, entrance, cut string) {
+func proveSystemNodeProcessCutover(t *testing.T, backend string, mode mutationprotocol.Evidence, entrance, cut string, foreign startupownership.GenerationGrant) {
 	t.Helper()
 	at := time.Now().UTC().Add(-time.Minute).Truncate(time.Microsecond)
 	flowID := "system-node-process-fence"
@@ -112,8 +119,7 @@ func proveSystemNodeProcessCutover(t *testing.T, backend string, mode mutationpr
 	case "missing":
 		ctx = context.Background()
 	case "foreign_store":
-		foreign, _ := constructWorkflowMutationFixture(t, backend, flowID, at)
-		ctx, err = startupownership.WithRuntimeMutationAuthority(context.Background(), foreign.grant)
+		ctx, err = startupownership.WithRuntimeMutationAuthority(context.Background(), foreign)
 		if err != nil {
 			t.Fatal(err)
 		}

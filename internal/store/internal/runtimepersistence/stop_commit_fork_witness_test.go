@@ -103,7 +103,7 @@ func (w *stopCommitForkWitness) decode(query string, args []driver.NamedValue) (
 	if source != w.expected.SourceRunID {
 		return stopCommitForkInsert{}, false, nil
 	}
-	const columns = "insert into runs ( run_id, status, origin_kind, forked_from_run_id, forked_from_point_kind, forked_from_revision, forked_from_event_id, event_count, started_at, bundle_hash, source_root_directory, flow_path ) select "
+	const columns = "insert into runs ( run_id, status, origin_kind, forked_from_run_id, forked_from_point_kind, forked_from_revision, forked_from_event_id, started_at, bundle_hash, source_root_directory, flow_path ) select "
 	wantArgs := 10
 	if strings.HasSuffix(query, "from runs where run_id=?") {
 		wantArgs = 11

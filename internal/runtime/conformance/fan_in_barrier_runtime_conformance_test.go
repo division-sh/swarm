@@ -434,6 +434,10 @@ func testFanInSingletonRoutePersistsExactSelectedOwnerOnBothBackends(t *testing.
 			backend, db := tc.setup(t)
 			runID := uuid.NewString()
 			ctx := runtimecorrelation.WithRunID(testAuthorActivityContextForBundle(context.Background(), conformanceSourceArtifactFact(t, source)), runID)
+			ctx, err := agentfixture.ProcessContext(t, worklifetime.WithProcess(runtimecorrelation.WithRuntimeInstanceID(ctx, authorActivityTestRuntimeInstanceID), conformanceTestProcessOwner(t)), backend)
+			if err != nil {
+				t.Fatal(err)
+			}
 			seedFanInBarrierRun(t, ctx, backend, source, runID)
 			selectedOwner := eventtest.UUID("fan-in-selected-owner-" + tc.name)
 			selectedTarget := events.RouteIdentity{
@@ -778,7 +782,7 @@ func newFanInBarrierRuntime(t *testing.T, backend fanInBarrierConformanceStore, 
 
 func newFanInBarrierRuntimeForSource(t *testing.T, backend fanInBarrierConformanceStore, source semanticview.Source, fact runtimecorrelation.SourceArtifactFact, runtimeGeneration uint64) fanInBarrierRuntime {
 	t.Helper()
-	baseCtx := testAuthorActivityContextForBundle(context.Background(), fact)
+	baseCtx := worklifetime.WithProcess(testAuthorActivityContextForBundle(context.Background(), fact), conformanceTestProcessOwner(t))
 	workflowPersistence := runtimepipeline.NewWorkflowPersistence(backend)
 	if sqliteStore, ok := backend.(*store.SQLiteRuntimeStore); ok {
 		workflowPersistence = runtimepipeline.NewWorkflowPersistence(sqliteStore)

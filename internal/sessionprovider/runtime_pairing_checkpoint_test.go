@@ -12,6 +12,7 @@ import (
 	"github.com/division-sh/swarm/internal/channelonboarding"
 	"github.com/division-sh/swarm/internal/operatorchannel"
 	"github.com/division-sh/swarm/internal/runtime/core/worklifetime"
+	"github.com/division-sh/swarm/internal/runtime/startupownership"
 	"github.com/division-sh/swarm/internal/sessionprovider/authority"
 	"github.com/google/uuid"
 	"go.mau.fi/whatsmeow/proto/waE2E"
@@ -114,8 +115,12 @@ func TestWhatsAppReservedPairingCheckpointBothStores(t *testing.T) {
 			}
 			t.Run(label, func(t *testing.T) {
 				f := newRuntimeBootstrapFixture(t, backend)
-				ctx := f.peer.ctx // No runtime occurrence or source fact is carried.
-				process := worklifetime.NewProcess()
+				ctx := startupownership.CarryMutationAuthority(f.peer.ctx, f.ctx) // No runtime occurrence or source fact is carried.
+				process, found := worklifetime.ProcessFromContext(f.ctx)
+				if !found {
+					t.Fatal("deployment fixture lost its original process work owner")
+				}
+				ctx = worklifetime.WithProcess(ctx, process)
 				operations := f.store.(interface {
 					DeploymentChannelOperations() channelonboarding.OperationStore
 				}).DeploymentChannelOperations()
@@ -147,11 +152,9 @@ func TestWhatsAppReservedPairingCheckpointBothStores(t *testing.T) {
 					t.Fatal(err)
 				}
 				t.Cleanup(func() {
-					if err := f.connection.Close(context.Background()); err != nil {
-						t.Error(err)
-					}
-					process.Retire()
-					if _, err := process.Join(context.Background()); err != nil {
+					closeCtx, cancel := context.WithTimeout(context.WithoutCancel(ctx), 5*time.Second)
+					defer cancel()
+					if err := f.connection.Close(closeCtx); err != nil {
 						t.Error(err)
 					}
 				})
@@ -197,7 +200,7 @@ func TestWhatsAppReservedPairingCheckpointBothStores(t *testing.T) {
 					t.Fatal("deployment pairing granted runtime execution")
 				}
 				account := pairedBootstrapStateFixture(t, f, op, types.NewJID("15550100123", types.DefaultUserServer))
-				ctx = f.peer.ctx
+				ctx = worklifetime.WithProcess(startupownership.CarryMutationAuthority(f.peer.ctx, ctx), process)
 				f.connection, err = OpenDeploymentConnection(ctx, opts)
 				if err != nil {
 					t.Fatal(err)

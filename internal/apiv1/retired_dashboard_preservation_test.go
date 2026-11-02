@@ -41,6 +41,7 @@ func TestCanonicalEventReadbackOverridesConflictingReceiptsBothStores(t *testing
 	withNativeObservabilityStores(t, func(t *testing.T, ctx context.Context, selected observabilityFixtureStore) {
 		runID, eventID, entityID := uuid.NewString(), uuid.NewString(), uuid.NewString()
 		fixture := storetest.RunFixture{Origin: storetest.ScenarioSetupOrigin(), RunID: runID}
+		ctx = apiTestOriginalProcessContext(t, ctx, selected)
 		storetest.RequireRun(t, ctx, selected, fixture)
 		event := eventtest.ExistingRunRootIngress(eventID, "task.completed", "runtime", "", []byte(`{"entity_id":"business-only"}`), 0, runID,
 			events.EventEnvelope{EntityID: entityID, Scope: events.EventScopeEntity}, time.Now().UTC())
@@ -110,7 +111,7 @@ func TestCanonicalEventReadbackOverridesConflictingReceiptsBothStores(t *testing
 			t.Fatalf("event list: %#v, %v", page, err)
 		}
 		assertEvent(page.Events[0])
-		handler := testHandler(t, Options{AuthTokens: []string{testToken}, Handlers: testOperatorHandlers(testOperatorCapabilities{Observability: selected})})
+		handler := testHandler(t, Options{AuthTokens: []string{testToken}, Handlers: testOperatorHandlers(t, testOperatorCapabilities{Observability: selected})})
 		for _, method := range []string{"event.get", "event.list"} {
 			params := fmt.Sprintf(`{"event_id":%q}`, eventID)
 			if method == "event.list" {
@@ -254,7 +255,7 @@ func TestRetiredDashboardObservabilityAssertionsThroughV1BothStores(t *testing.T
 		if err != nil || len(absent.Incidents) != 0 {
 			t.Fatalf("prose is not failure: %#v, %v", absent, err)
 		}
-		handler := testHandler(t, Options{AuthTokens: []string{testToken}, Handlers: testOperatorHandlers(testOperatorCapabilities{Observability: selected})})
+		handler := testHandler(t, Options{AuthTokens: []string{testToken}, Handlers: testOperatorHandlers(t, testOperatorCapabilities{Observability: selected})})
 		for _, cell := range []struct {
 			component, code string
 			count           int
@@ -343,7 +344,7 @@ func TestCanonicalObservabilityCorruptionRefusesBothStores(t *testing.T) {
 				if err == nil || !strings.Contains(err.Error(), cell.message) {
 					t.Fatalf("canonical refusal: %v, want %s", err, cell.message)
 				}
-				handler := testHandler(t, Options{AuthTokens: []string{testToken}, Handlers: testOperatorHandlers(testOperatorCapabilities{Observability: selected})})
+				handler := testHandler(t, Options{AuthTokens: []string{testToken}, Handlers: testOperatorHandlers(t, testOperatorCapabilities{Observability: selected})})
 				response := rpcCall(t, handler, fmt.Sprintf(`{"jsonrpc":"2.0","id":"corrupt","method":%q,"params":{"limit":10}}`, cell.method))
 				if response.Error == nil {
 					t.Fatalf("corrupt API read returned success: %#v", response.Result)

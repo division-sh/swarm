@@ -133,18 +133,19 @@ func TestNotifyExecutionStorageRefusesRawCancelledClosedAndUnavailableOwnersBoth
 	for _, backend := range eventRecordContractBackends() {
 		t.Run(backend.name, func(t *testing.T) {
 			fixture := backend.open(t)
+			setupCtx := originalStoreFixtureContext(t, testAuthorActivityContext(), fixture.store)
 			ctx, cancel := context.WithCancel(context.Background())
 			cancel()
 			refuse(t, ctx, fixture.store)
 			for _, reader := range readers {
-				if err := runUnrevisionedEventFixtureTransactionForTest(context.Background(), fixture.store, func(ctx context.Context, tx *sql.Tx) error {
+				if err := runUnrevisionedEventFixtureTransactionForTest(setupCtx, fixture.store, func(ctx context.Context, tx *sql.Tx) error {
 					_, err := tx.ExecContext(ctx, "ALTER TABLE "+reader.table+" RENAME TO unavailable_notify_observation")
 					return err
 				}); err != nil {
 					t.Fatal(err)
 				}
 				got, readErr := reader.read(context.Background(), fixture.store)
-				if err := runUnrevisionedEventFixtureTransactionForTest(context.Background(), fixture.store, func(ctx context.Context, tx *sql.Tx) error {
+				if err := runUnrevisionedEventFixtureTransactionForTest(setupCtx, fixture.store, func(ctx context.Context, tx *sql.Tx) error {
 					_, err := tx.ExecContext(ctx, "ALTER TABLE unavailable_notify_observation RENAME TO "+reader.table)
 					return err
 				}); err != nil {
@@ -214,17 +215,18 @@ func TestNotifyAgentDeliveryStatusRefusesRawCancelledClosedAndUnavailableOwnersB
 	for _, backend := range eventRecordContractBackends() {
 		t.Run(backend.name, func(t *testing.T) {
 			fixture := backend.open(t)
+			setupCtx := originalStoreFixtureContext(t, testAuthorActivityContext(), fixture.store)
 			cancelled, cancel := context.WithCancel(context.Background())
 			cancel()
 			refuse(t, cancelled, fixture.store)
-			if err := runUnrevisionedEventFixtureTransactionForTest(context.Background(), fixture.store, func(ctx context.Context, tx *sql.Tx) error {
+			if err := runUnrevisionedEventFixtureTransactionForTest(setupCtx, fixture.store, func(ctx context.Context, tx *sql.Tx) error {
 				_, err := tx.ExecContext(ctx, "ALTER TABLE event_deliveries RENAME TO unavailable_notify_observation")
 				return err
 			}); err != nil {
 				t.Fatal(err)
 			}
 			refuse(t, context.Background(), fixture.store)
-			if err := runUnrevisionedEventFixtureTransactionForTest(context.Background(), fixture.store, func(ctx context.Context, tx *sql.Tx) error {
+			if err := runUnrevisionedEventFixtureTransactionForTest(setupCtx, fixture.store, func(ctx context.Context, tx *sql.Tx) error {
 				_, err := tx.ExecContext(ctx, "ALTER TABLE unavailable_notify_observation RENAME TO event_deliveries")
 				return err
 			}); err != nil {
