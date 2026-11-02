@@ -6,20 +6,22 @@ import (
 	"io"
 	"net/http"
 	"net/http/httptest"
+	"net/url"
 	"sync/atomic"
 	"testing"
 )
 
 type Slack struct {
-	Server      *httptest.Server
-	TokenCalls  atomic.Int64
-	Calls       atomic.Int64
-	SideEffects chan Call
+	Server        *httptest.Server
+	TokenCalls    atomic.Int64
+	Calls         atomic.Int64
+	SideEffects   chan Call
+	TokenRequests chan url.Values
 }
 
 func NewSlack(t testing.TB) *Slack {
 	t.Helper()
-	fake := &Slack{SideEffects: make(chan Call, 8)}
+	fake := &Slack{SideEffects: make(chan Call, 8), TokenRequests: make(chan url.Values, 8)}
 	mux := http.NewServeMux()
 	mux.HandleFunc("/oauth.v2.access", func(w http.ResponseWriter, r *http.Request) {
 		if err := r.ParseForm(); err != nil {
@@ -39,6 +41,7 @@ func NewSlack(t testing.TB) *Slack {
 			http.Error(w, "unexpected refresh token", http.StatusBadRequest)
 			return
 		}
+		fake.TokenRequests <- r.PostForm
 		call := fake.TokenCalls.Add(1)
 		token := "fresh-token"
 		if call >= 2 {
