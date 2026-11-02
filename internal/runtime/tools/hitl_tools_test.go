@@ -36,6 +36,9 @@ func TestManagedHITLProjectionOwnsDefinitionsGrantsAndExecution(t *testing.T) {
 	if notify.Description != "Send a notice to the human operator. The conversation continues without waiting for a reply." {
 		t.Fatalf("notify_human description = %q", notify.Description)
 	}
+	if delivered := llm.DeliveredToolDescription(notify); delivered != notify.Description || notify.Usage != "" {
+		t.Fatalf("notify_human delivered description = %q, usage = %q", delivered, notify.Usage)
+	}
 	for _, descriptor := range managedHITLToolDescriptors() {
 		if _, granted := withoutPermission[descriptor.name]; !granted && strings.Contains(llm.DeliveredToolDescription(notify), descriptor.name) {
 			t.Fatalf("notice description recommends ungranted tool %s", descriptor.name)

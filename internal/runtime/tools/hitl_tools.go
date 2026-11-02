@@ -172,7 +172,6 @@ func managedHITLToolDescriptors() []hitlToolDescriptor {
 		{
 			name:        NotifyHumanToolName,
 			description: "Send a notice to the human operator. The conversation continues without waiting for a reply.",
-			usage:       "Provide a summary and optional context for the notice.",
 			grant:       hitlGrantUniversal,
 			draft:       notifyHumanContractSchema,
 		},

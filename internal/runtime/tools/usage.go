@@ -77,7 +77,7 @@ func ValidateUsageHintCoverage(source semanticview.Source, discovered map[string
 		usage := entry.Usage()
 		switch entry.Handler() {
 		case runtimecontracts.ToolHandlerPlatformBuiltin:
-			if usage == "" {
+			if usage == "" && name != NotifyHumanToolName {
 				findings = append(findings, UsageHintFinding{
 					ToolName: name,
 					Severity: "error",

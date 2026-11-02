@@ -252,7 +252,7 @@ func TestRoleScopedEntityTools_SQLiteCurrentEntityPersistence(t *testing.T) {
 	actor = entityToolFixtureActor(t, fixture.source, actor, entityToolTestRunID, "validation", "validation/inst-1")
 	entityID := seedImportedEntityForToolTest(t, ctx, map[string]any{
 		"flow_instance": "validation/inst-1",
-		"fields":        map[string]any{"status": "open", "business_brief": map[string]any{"summary": "before", "confidence": int64(1)}},
+		"fields":        map[string]any{"fixture_key": "inst-1", "status": "open", "business_brief": map[string]any{"summary": "before", "confidence": int64(1)}},
 	})
 	if changed, err := storetest.SetWorkflowProjectionPlatformBookkeeping(ctx, sqliteStore, entityToolTestRunID, "validation/inst-1"); err != nil || changed != 1 {
 		t.Fatalf("inject sqlite role-scoped header bookkeeping: rows=%d err=%v", changed, err)
@@ -293,10 +293,13 @@ func TestRoleScopedEntityTools_SQLiteCurrentEntityPersistence(t *testing.T) {
 	if err != nil {
 		t.Fatalf("sqlite read_validation_case with hostile bookkeeping: %v", err)
 	}
-	for _, field := range []string{"bookkeeping", "entity_id", "flow_instance", "entity_type", "current_state", "fields", "revision"} {
+	for _, field := range []string{"fixture_key", "bookkeeping", "entity_id", "flow_instance", "entity_type", "current_state", "fields", "revision"} {
 		if _, exists := whole.(map[string]any)[field]; exists {
 			t.Fatalf("sqlite role-scoped read exposed platform field %s: %#v", field, whole)
 		}
+	}
+	if key := persistedEntityField(t, ctx, entityID, "fixture_key"); key != `"inst-1"` {
+		t.Fatalf("sqlite read projection changed the stored instance key: %s", key)
 	}
 	if brief, ok := whole.(map[string]any)["business_brief"].(map[string]any); !ok || brief["summary"] != "after" {
 		t.Fatalf("sqlite whole read lost declared current fields: %#v", whole)

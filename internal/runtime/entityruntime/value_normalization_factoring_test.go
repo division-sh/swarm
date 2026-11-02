@@ -261,6 +261,11 @@ func TestEntityValueFactoringProjectionAndCloning(t *testing.T) {
 	}
 	input := map[string]any{"value": map[string]any{"nested": []any{"original"}}, "run_id": "retained", "count": float64(2)}
 	declared := DeclaredValues(contract, input)
+	for _, provided := range []map[string]any{{"value": nil, "count": int64(0)}, {"count": int64(0)}, {}} {
+		if got := DeclaredValues(contract, provided); !reflect.DeepEqual(got, provided) {
+			t.Fatalf("declared projection changed null, zero or omission: %#v -> %#v", provided, got)
+		}
+	}
 	if _, ok := declared["run_id"]; ok {
 		t.Fatal("undeclared metadata acquired entity authority")
 	}

@@ -19,6 +19,11 @@ func TestValidateUsageHintCoverage_RejectsMissingPlatformOwnedHint(t *testing.T)
 
 	findings := ValidateUsageHintCoverage(semanticview.Wrap(&runtimecontracts.WorkflowContractBundle{}), nil)
 	for _, finding := range findings {
+		if finding.ToolName == NotifyHumanToolName {
+			t.Fatalf("exact-sentence notice requires no usage hint: %#v", finding)
+		}
+	}
+	for _, finding := range findings {
 		if finding.ToolName == "query_entities" && finding.Severity == "error" && strings.Contains(finding.Message, "missing a usage hint") {
 			return
 		}

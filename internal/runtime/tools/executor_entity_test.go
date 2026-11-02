@@ -742,6 +742,7 @@ func TestRoleScopedEntityTools_CurrentEntityBindingAndBypassRejection(t *testing
 	foreignID := uuid.NewString()
 	fixture := ctx.Value(entityToolImportFixtureKey{}).(entityToolImportFixture)
 	owner := constructEntityToolFixture(t, ctx, fixture.selected, fixture.pipeline, fixture.source, "validation", "validation/inst-1", currentID, "queued", map[string]any{
+		"fixture_key":    "inst-1",
 		"status":         "open",
 		"business_brief": map[string]any{"summary": "before", "confidence": 1},
 	}, time.Now().UTC())
@@ -781,10 +782,13 @@ func TestRoleScopedEntityTools_CurrentEntityBindingAndBypassRejection(t *testing
 	if err != nil {
 		t.Fatalf("read_state with hostile bookkeeping: %v", err)
 	}
-	for _, field := range []string{"bookkeeping", "entity_id", "flow_instance", "entity_type", "current_state", "fields", "revision"} {
+	for _, field := range []string{"fixture_key", "bookkeeping", "entity_id", "flow_instance", "entity_type", "current_state", "fields", "revision"} {
 		if _, exists := whole.(map[string]any)[field]; exists {
 			t.Fatalf("role-scoped read exposed platform field %s: %#v", field, whole)
 		}
+	}
+	if key := persistedEntityField(t, ctx, currentID, "fixture_key"); key != `"inst-1"` {
+		t.Fatalf("read projection changed the stored instance key: %s", key)
 	}
 	if brief, ok := whole.(map[string]any)["business_brief"].(map[string]any); !ok || brief["summary"] != "after" {
 		t.Fatalf("whole read lost declared current fields: %#v", whole)

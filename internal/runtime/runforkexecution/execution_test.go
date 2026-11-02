@@ -1932,7 +1932,7 @@ expected_notify_schema = {
     "required": ["summary"],
     "additionalProperties": False,
 }
-expected_notify_description = "Send a notice to the human operator. The conversation continues without waiting for a reply.\n\nUsage:\nProvide a summary and optional context for the notice."
+expected_notify_description = "Send a notice to the human operator. The conversation continues without waiting for a reply."
 if notify is None or notify.get("description") != expected_notify_description or notify.get("inputSchema") != expected_notify_schema:
     raise SystemExit(f"selected-fork notify_human mismatch: {notify!r}")
 expected_schema = {

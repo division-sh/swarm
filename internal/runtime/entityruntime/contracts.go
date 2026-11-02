@@ -266,6 +266,18 @@ func rootFlowContractApplies(bundle *runtimecontracts.WorkflowContractBundle, fl
 	return flowID == rootName
 }
 
+// InstanceField projects the owning flow's admitted identity selector.
+func InstanceField(contract Contract) string {
+	if contract.source == nil {
+		return ""
+	}
+	schema, found := contract.source.FlowSchemaByID(contract.FlowID)
+	if !found {
+		return ""
+	}
+	return schema.Instance.Path()
+}
+
 func FieldNames(contract Contract) []string {
 	if len(contract.Entity.Fields) == 0 {
 		return nil
