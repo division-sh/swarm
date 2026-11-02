@@ -781,7 +781,7 @@ func c4RunCreationCrashChild(t *testing.T) {
 		}
 	case "deployment":
 		var command bus.DeploymentRunCreationCommand
-		ctx, command = c4DeploymentStartCommand(t, fixture.store, true)
+		ctx, command, _ = c4DeploymentStartCommand(t, fixture.store, true)
 		record.RunID, record.BundleHash, record.At = command.RunCreation.RunID, command.RunCreation.BundleHash, command.Root.Plan.OccurredAt
 		record.EventID, record.Deployment = "", &command
 		create = func() {
@@ -970,7 +970,7 @@ func TestC4F35DeploymentStartNativeCommitAccountingBothStores(t *testing.T) {
 			}
 			t.Run(backend+"/"+name, func(t *testing.T) {
 				selected, db, connector := newP16RaceStore(t, backend)
-				ctx, command := c4DeploymentStartCommand(t, selected, false)
+				ctx, command, _ := c4DeploymentStartCommand(t, selected, false)
 				root, present, err := correlation.RootAdmissionFromContext(ctx)
 				if err != nil || !present {
 					t.Fatalf("deployment creation requires its captured root: present=%t err=%v", present, err)
@@ -1221,7 +1221,7 @@ func TestC4F35StandingStartNativeCommitAccountingBothStores(t *testing.T) {
 	}
 }
 
-func c4DeploymentStartCommand(t *testing.T, selected any, withTimer bool) (context.Context, bus.DeploymentRunCreationCommand) {
+func c4DeploymentStartCommand(t *testing.T, selected any, withTimer bool) (context.Context, bus.DeploymentRunCreationCommand, receiverConfigActivationFixture) {
 	t.Helper()
 	files := map[string]string{
 		"schema.yaml": "pins:\n  outputs:\n    - records.ready\n",
@@ -1275,5 +1275,5 @@ func c4DeploymentStartCommand(t *testing.T, selected any, withTimer bool) (conte
 		Idempotency: apiidempotency.Request{Method: "run.start", Actor: apiidempotency.BearerActor("operator"), Now: at, TTL: time.Hour},
 		Root:        bus.FlowInstanceActivationCommand{Plan: plan},
 	}
-	return ctx, command
+	return ctx, command, f
 }
