@@ -61,7 +61,7 @@ func (eb *EventBus) planPlatformLivePublication(ctx context.Context, event event
 			}
 		}
 	}
-	combined := routePlanFromManifest(event, deliveryRecipientManifest{LiveRecipients: internal}, routeIntentProducerAgentPolicy)
+	combined := routePlanFromManifest(event, deliveryRecipientManifest{LiveRecipients: internal})
 	for _, flow := range ordered {
 		scope := runlifecycle.LiveRunScope{FlowPath: flowidentity.ScopeKey(eb.semanticSource, flow)}
 		live, found, err := eb.durable.LiveRuns.LoadLiveRun(ctx, scope)
