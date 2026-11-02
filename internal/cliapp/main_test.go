@@ -248,12 +248,12 @@ func TestCLI_ServeOwnsRuntimeStartupFlags(t *testing.T) {
 	if code != 0 {
 		t.Fatalf("serve help code = %d stderr=%s stdout=%s", code, stderr.String(), stdout.String())
 	}
-	for _, want := range []string{"Start the Swarm runtime", "[directory]", "--config", "--backend", "openai_responses", "--workspace-backend", "--api-listen-addr", "API, WebSocket, health, and readiness routes", "--mcp-listen-addr", "MCP and tools routes", "--store", "--self-check", "--dev", "--abandon-active-runs", "--shutdown-grace", "--verbose"} {
+	for _, want := range []string{"Start the Swarm runtime", "[directory]", "--config", "--backend", "openai_responses", "--workspace-backend", "--api-listen-addr", "API, WebSocket, health, and readiness routes", "--mcp-listen-addr", "MCP and tools routes", "--store", "--self-check", "--dev", "--shutdown-grace", "--verbose"} {
 		if !strings.Contains(stdout.String(), want) {
 			t.Fatalf("serve help missing %q:\n%s", want, stdout.String())
 		}
 	}
-	for _, notWant := range []string{"--platform-spec", "--health-addr", "unified serve listener", "--api-port", "--mcp-port", "--api ", "--no-api", "--mcp ", "--no-mcp", "--log-level", "--require-bundle-match", "--no-require-bundle-match"} {
+	for _, notWant := range []string{"--platform-spec", "--health-addr", "unified serve listener", "--api-port", "--mcp-port", "--api ", "--no-api", "--mcp ", "--no-mcp", "--log-level", "--require-bundle-match", "--no-require-bundle-match", "--abandon-active-runs"} {
 		if strings.Contains(stdout.String(), notWant) {
 			t.Fatalf("serve help exposed unpromoted listener/topology flag %q:\n%s", notWant, stdout.String())
 		}
@@ -701,9 +701,6 @@ func TestCLI_ServeDevFlagComposesClosedServeOwners(t *testing.T) {
 	if !captured.Dev {
 		t.Fatal("serve dev = false, want true")
 	}
-	if captured.AbandonActiveRuns {
-		t.Fatal("serve abandon active runs = true, want fresh-epoch dev to preserve explicit direct-abandon authority")
-	}
 	if captured.Verbose {
 		t.Fatal("serve verbose = true, want dev and presentation verbosity to remain independent")
 	}
@@ -749,49 +746,6 @@ func TestCLI_ServeRejectsRetiredBundleMatchFlagsBeforeOwner(t *testing.T) {
 				t.Fatalf("serve owner was called for retired flag %s", flag)
 			}
 		})
-	}
-}
-
-func TestPlatformSpecServeDevModeCompositionPromoted(t *testing.T) {
-	spec := loadServeDevModeSpec(t)
-	if !strings.Contains(spec.ImplementedBy, "#830") || !strings.Contains(spec.ImplementedBy, "#2010") {
-		t.Fatalf("dev mode implemented_by = %q, want #830/#2010 migration", spec.ImplementedBy)
-	}
-	if strings.TrimSpace(spec.Flag) != "--dev" {
-		t.Fatalf("dev mode flag = %q, want --dev", spec.Flag)
-	}
-	for _, want := range []string{
-		"`--abandon-active-runs`",
-		"without setting `--verbose`",
-	} {
-		if !stringSliceContains(spec.Composition, want) {
-			t.Fatalf("dev mode composition missing %q: %#v", want, spec.Composition)
-		}
-	}
-	for _, want := range []string{"internal/cliapp", "devscratch.EpochAuthority", "internal/serveapp"} {
-		if !strings.Contains(spec.Owner, want) {
-			t.Fatalf("dev mode owner missing %q:\n%s", want, spec.Owner)
-		}
-	}
-	for _, retired := range []string{"entity-container cleanup", "containeridentity", "bundle-match"} {
-		if strings.Contains(spec.Owner, retired) || stringSliceContains(spec.Composition, retired) {
-			t.Fatalf("dev mode retains retired %q seam: owner=%q composition=%#v", retired, spec.Owner, spec.Composition)
-		}
-	}
-	for _, want := range []string{"--dev --verbose", "not redundant"} {
-		if !stringSliceContains(spec.ConflictRules, want) {
-			t.Fatalf("dev mode conflict rules missing %q: %#v", want, spec.ConflictRules)
-		}
-	}
-	for _, want := range []string{"runtime shutdown admission", "source-projection owner", "before releasing the projection filesystem"} {
-		if !strings.Contains(spec.ShutdownOrdering, want) {
-			t.Fatalf("dev mode shutdown ordering missing %q:\n%s", want, spec.ShutdownOrdering)
-		}
-	}
-	for _, want := range []string{"no entity-workspace container cleanup", "`kind=entity`", "no compatibility or migration", "Destructive reset"} {
-		if !strings.Contains(spec.EntityCleanupRetirement, want) {
-			t.Fatalf("dev mode entity cleanup retirement missing %q:\n%s", want, spec.EntityCleanupRetirement)
-		}
 	}
 }
 
@@ -2452,21 +2406,24 @@ func TestCLI_ServeVerboseFlagConsumesServeOwner(t *testing.T) {
 	}
 }
 
-func TestCLI_ServeAbandonActiveRunsFlagConsumesServeOwner(t *testing.T) {
-	var captured ServeOptions
-	opts := defaultRootCommandOptions()
-	opts.runServe = func(_ context.Context, _ InvocationRoot, serveOpts ServeOptions) int {
-		captured = serveOpts
-		return 0
-	}
-
-	var stdout, stderr bytes.Buffer
-	code := executeRootCommandWithOptions(context.Background(), t.TempDir(), []string{"serve", ".", "--abandon-active-runs"}, &stdout, &stderr, opts)
-	if code != 0 {
-		t.Fatalf("serve code = %d stderr=%s stdout=%s", code, stderr.String(), stdout.String())
-	}
-	if !captured.AbandonActiveRuns {
-		t.Fatalf("serve abandon active runs = false, want true")
+func TestCLI_ServeRejectsAbandonActiveRunsBeforeOwner(t *testing.T) {
+	for _, flag := range []string{"--abandon-active-runs", "--abandon-active-runs=false"} {
+		t.Run(flag, func(t *testing.T) {
+			var called bool
+			opts := defaultRootCommandOptions()
+			opts.runServe = func(context.Context, InvocationRoot, ServeOptions) int {
+				called = true
+				return 0
+			}
+			var stdout, stderr bytes.Buffer
+			code := executeRootCommandWithOptions(context.Background(), t.TempDir(), []string{"serve", ".", flag}, &stdout, &stderr, opts)
+			if code != CLIExitValidation || !strings.Contains(stderr.String(), "swarm control stop --all") {
+				t.Fatalf("serve %s code=%d stderr=%s, want refusal naming stop command", flag, code, stderr.String())
+			}
+			if called {
+				t.Fatal("retired option reached the serve owner")
+			}
+		})
 	}
 }
 
@@ -3779,17 +3736,6 @@ func TestSummarizeServeSchemaPlansZeroPlans(t *testing.T) {
 	}
 }
 
-type serveDevModeSpec struct {
-	ImplementedBy           string   `yaml:"implemented_by"`
-	Flag                    string   `yaml:"flag"`
-	Owner                   string   `yaml:"owner"`
-	Composition             []string `yaml:"composition"`
-	ConflictRules           []string `yaml:"conflict_rules"`
-	ShutdownOrdering        string   `yaml:"shutdown_ordering"`
-	EntityCleanupRetirement string   `yaml:"entity_cleanup_retirement"`
-	SiblingBoundaries       string   `yaml:"sibling_boundaries"`
-}
-
 type serveUnifiedListenerSpec struct {
 	ImplementedBy string `yaml:"implemented_by"`
 	SupersededBy  string `yaml:"superseded_by"`
@@ -3911,24 +3857,6 @@ type cliAPIConnectionAuthConfigSpec struct {
 	} `yaml:"serve_listener_env_config_boundary"`
 	SplitSiblings            []string `yaml:"split_siblings"`
 	ImplementationBoundaries []string `yaml:"implementation_boundaries"`
-}
-
-func loadServeDevModeSpec(t *testing.T) serveDevModeSpec {
-	t.Helper()
-	var spec struct {
-		CLISpecification struct {
-			CommandCatalog struct {
-				Serve struct {
-					DevMode serveDevModeSpec `yaml:"dev_mode_lifecycle_composition"`
-				} `yaml:"serve"`
-			} `yaml:"command_catalog"`
-		} `yaml:"cli_specification"`
-	}
-	decodeAuthoritativeYAMLFileForTest(t, filepath.Join(RepoRoot(), defaultPlatformSpecPath), &spec)
-	if strings.TrimSpace(spec.CLISpecification.CommandCatalog.Serve.DevMode.Flag) == "" {
-		t.Fatal("platform spec missing serve dev_mode_lifecycle_composition")
-	}
-	return spec.CLISpecification.CommandCatalog.Serve.DevMode
 }
 
 func loadServeUnifiedListenerSpec(t *testing.T) serveUnifiedListenerSpec {

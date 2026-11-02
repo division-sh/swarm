@@ -48,10 +48,14 @@ func ProveNativeShutdown_DrainsInFlightWorkBeforeCancellingLoopContext(t *testin
 			case started <- struct{}{}:
 			default:
 			}
-			<-ctx.Done()
-			ctxErrCh <- ctx.Err()
-			<-release
-			return nil, ctx.Err()
+			select {
+			case <-ctx.Done():
+				ctxErrCh <- ctx.Err()
+				<-release
+				return nil, ctx.Err()
+			case <-release:
+				return nil, nil
+			}
 		},
 	}
 
@@ -96,16 +100,7 @@ func ProveNativeShutdown_DrainsInFlightWorkBeforeCancellingLoopContext(t *testin
 
 	select {
 	case err := <-ctxErrCh:
-		if err == nil {
-			t.Fatal("OnEvent context was not canceled during generation retirement")
-		}
-	case <-time.After(time.Second):
-		t.Fatal("timed out waiting for generation cancellation")
-	}
-
-	select {
-	case err := <-shutdownErrCh:
-		t.Fatalf("Shutdown returned before canceled work completed: %v", err)
+		t.Fatalf("accepted work was canceled before shutdown grace expired: %v", err)
 	case <-time.After(50 * time.Millisecond):
 	}
 	unblock()
@@ -236,7 +231,6 @@ func ProveNativeShutdown_DoesNotStartQueuedWorkAfterDrainBegins(t *testing.T, ne
 				case firstStarted <- struct{}{}:
 				default:
 				}
-				<-ctx.Done()
 				<-releaseFirst
 				return nil, ctx.Err()
 			}
@@ -328,7 +322,6 @@ func ProveNativeShutdown_DoesNotAllowRunToReplaceActiveRunContextDuringDrain(t *
 			case firstStarted <- struct{}{}:
 			default:
 			}
-			<-ctx.Done()
 			<-releaseFirst
 			return nil, ctx.Err()
 		},

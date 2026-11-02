@@ -67,7 +67,7 @@ func runChannelConnectTelegramFirstUserJourney(t *testing.T, backend servedparit
 		SourceRoot: sourceRoot, APIListenAddr: "127.0.0.1:0", MCPListenAddr: "127.0.0.1:0",
 		PublicWebhookBaseURL: "https://hooks.channel-onboarding.test", PublicWebhookListen: publicListen,
 		PublicWebhookListener: publicListener,
-		SelfCheck:             true, AbandonActiveRuns: true, Verbose: true,
+		SelfCheck:             true, Verbose: true,
 		WorkspaceBackend: "host", WorkspaceBackendSet: true, TestLLMRuntime: telegramPhraseBotLLMRuntime{},
 	}
 	switch backend {
@@ -595,7 +595,6 @@ func TestChannelOnboardingCrashServeProcessHelper(t *testing.T) {
 	opts.WorkspaceBackend = "host"
 	opts.WorkspaceBackendSet = true
 	opts.SelfCheck = true
-	opts.AbandonActiveRuns = os.Getenv("TEST_CHANNEL_ONBOARDING_RETAIN_RUNS") != "1"
 	opts.Verbose = true
 	opts.Output = os.Stdout
 	opts.ErrorOutput = os.Stderr

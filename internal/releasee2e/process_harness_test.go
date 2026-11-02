@@ -371,12 +371,16 @@ func (p *releaseServeProcess) killAndWait(timeout time.Duration) error {
 }
 
 func (p *releaseServeProcess) stopAndWait(timeout time.Duration) error {
+	return p.signalAndWait(os.Interrupt, timeout)
+}
+
+func (p *releaseServeProcess) signalAndWait(signal os.Signal, timeout time.Duration) error {
 	select {
 	case <-p.exited:
 		return p.waitError()
 	default:
 	}
-	if err := p.cmd.Process.Signal(os.Interrupt); err != nil {
+	if err := p.cmd.Process.Signal(signal); err != nil {
 		select {
 		case <-p.exited:
 			return p.waitError()

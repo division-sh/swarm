@@ -42,7 +42,6 @@ type ServeOptions struct {
 	ProcessStop                      func() // Actual serving stop notification to the outer process owner.
 	Dev                              bool
 	SelfCheck                        bool
-	AbandonActiveRuns                bool
 	Verbose                          bool
 	NoFeed                           bool
 	NoColor                          bool

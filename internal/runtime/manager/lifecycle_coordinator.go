@@ -1284,6 +1284,21 @@ func (c *agentLifecycleCoordinator) retireWorkAdmission() bool {
 	return c.retireWorkAdmissionAs(false)
 }
 
+func (c *agentLifecycleCoordinator) drainShutdownWork(ctx context.Context) error {
+	c.workMu.Lock()
+	owner := c.runOwner
+	c.workMu.Unlock()
+	if owner == nil {
+		return nil
+	}
+	if err := owner.DrainForShutdown(ctx); err != nil {
+		return err
+	}
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	return c.terminalErr
+}
+
 func (c *agentLifecycleCoordinator) retireWorkAdmissionAs(shutdown bool) bool {
 	c.workMu.Lock()
 	defer c.workMu.Unlock()
@@ -1300,6 +1315,10 @@ func (c *agentLifecycleCoordinator) retireWorkAdmissionAs(shutdown bool) bool {
 }
 
 func (c *agentLifecycleCoordinator) requestShutdownTransition() *runtimeLifecycleTransition {
+	return c.prepareShutdownTransition(false)
+}
+
+func (c *agentLifecycleCoordinator) prepareShutdownTransition(drain bool) *runtimeLifecycleTransition {
 	if c == nil {
 		return nil
 	}
@@ -1308,20 +1327,24 @@ func (c *agentLifecycleCoordinator) requestShutdownTransition() *runtimeLifecycl
 	var transition *runtimeLifecycleTransition
 	switch c.phase {
 	case runtimeLifecycleRunning:
-		c.retireWorkAdmissionAs(true)
 		transition = newRuntimeLifecycleTransition(runtimeLifecycleTransitionShutdown)
 		c.transition = transition
 		c.phase = runtimeLifecycleShuttingDown
-		cancel = c.cancelRun
 	case runtimeLifecycleShuttingDown, runtimeLifecycleResetting:
 		transition = c.transition
 	case runtimeLifecycleStopped:
-		if c.retireWorkAdmissionAs(true) {
+		c.workMu.Lock()
+		hasRunOwner := c.runOwner != nil
+		c.workMu.Unlock()
+		if hasRunOwner {
 			transition = newRuntimeLifecycleTransition(runtimeLifecycleTransitionShutdown)
 			c.transition = transition
 			c.phase = runtimeLifecycleShuttingDown
-			cancel = c.cancelRun
 		}
+	}
+	if !drain && transition != nil && transition.kind == runtimeLifecycleTransitionShutdown {
+		c.retireWorkAdmissionAs(true)
+		cancel = c.cancelRun
 	}
 	c.mu.Unlock()
 	if cancel != nil {

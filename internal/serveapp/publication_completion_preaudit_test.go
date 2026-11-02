@@ -341,7 +341,6 @@ connect:
 		}
 	}
 	h.opts.SourceRoot = root
-	h.opts.AbandonActiveRuns = false
 	h.start(t)
 	t.Cleanup(func() { h.stop(t) })
 	var identity apiv1.RuntimeIdentityResult

@@ -371,7 +371,6 @@ func startChannelAnchorJourneyWithDraftTTL(t *testing.T, backend servedparity.Ba
 func startChannelAnchorPublicJourney(t *testing.T, backend servedparity.Backend, token string, withSummary bool, draftTTL time.Duration, configure func(*cliapp.ServeOptions)) (*channelOnboardingE2EHarness, string) {
 	t.Helper()
 	h := newChannelOnboardingE2EHarness(t, backend, true)
-	h.opts.AbandonActiveRuns = false
 	writeChannelAnchorJourneySource(t, h.opts.SourceRoot, withSummary)
 	h.opts.SourceRoot = nestChannelAnchorJourneyHolder(t, h.opts.SourceRoot, withSummary)
 	h.opts.TestLLMRuntime = channelAnchorLLMRuntime{}
