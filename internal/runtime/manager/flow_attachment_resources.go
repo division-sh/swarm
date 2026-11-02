@@ -297,49 +297,56 @@ func (am *AgentManager) verifyDynamicFlowAgents(
 		)
 	}
 	for _, rec := range expected {
-		identity, err := rec.Config.ConcreteIdentity()
-		if err != nil {
+		if err := am.verifyDynamicFlowAgent(ctx, rec, topology, persistedByIdentity, processByIdentity); err != nil {
 			return err
 		}
-		expectedRevision, err := lifecycleConfigRevision(rec)
-		if err != nil {
-			return err
-		}
-		process, ok := processByIdentity[identity]
-		if !ok {
-			return fmt.Errorf("declared agent %s is not process-ready", identity.Description())
-		}
-		processRevision, err := lifecycleConfigRevision(PersistedAgent{Config: process})
-		if err != nil {
-			return err
-		}
-		stored, ok := persistedByIdentity[identity]
-		if !ok {
-			return fmt.Errorf("declared agent %s is not durably registered", identity.Description())
-		}
-		storedRevision, err := lifecycleConfigRevision(stored)
-		if err != nil {
-			return err
-		}
-		if am.testBeforeDynamicFlowAgentReadiness != nil {
-			am.testBeforeDynamicFlowAgentReadiness()
-		}
-		acceptedReadiness, err := am.acceptedReadinessRegistration(ctx, identity)
-		if err != nil {
-			return err
-		}
-		readiness, err := am.lifecycle.executableReadinessForAccepted(ctx, identity, acceptedReadiness)
-		if err != nil {
-			return fmt.Errorf("declared agent %s executable readiness: %w", identity.Description(), err)
-		}
-		if processRevision != expectedRevision || storedRevision != expectedRevision ||
-			!readiness.State.Topology.Equal(topology) || !stored.Topology.Equal(topology) {
-			return fmt.Errorf(
-				"declared agent %s readiness facts mismatch: expected_revision=%s process_revision=%s stored_revision=%s process_topology_equal=%t stored_topology_equal=%t",
-				identity.Description(), expectedRevision, processRevision, storedRevision,
-				readiness.State.Topology.Equal(topology), stored.Topology.Equal(topology),
-			)
-		}
+	}
+	return nil
+}
+
+func (am *AgentManager) verifyDynamicFlowAgent(ctx context.Context, rec PersistedAgent, topology runtimeagenttopology.Admission, persistedByIdentity map[runtimeagentidentity.Identity]PersistedAgent, processByIdentity map[runtimeagentidentity.Identity]models.AgentConfig) error {
+	identity, err := rec.Config.ConcreteIdentity()
+	if err != nil {
+		return err
+	}
+	expectedRevision, err := lifecycleConfigRevision(rec)
+	if err != nil {
+		return err
+	}
+	process, ok := processByIdentity[identity]
+	if !ok {
+		return fmt.Errorf("declared agent %s is not process-ready", identity.Description())
+	}
+	processRevision, err := lifecycleConfigRevision(PersistedAgent{Config: process})
+	if err != nil {
+		return err
+	}
+	stored, ok := persistedByIdentity[identity]
+	if !ok {
+		return fmt.Errorf("declared agent %s is not durably registered", identity.Description())
+	}
+	storedRevision, err := lifecycleConfigRevision(stored)
+	if err != nil {
+		return err
+	}
+	if am.testBeforeDynamicFlowAgentReadiness != nil {
+		am.testBeforeDynamicFlowAgentReadiness()
+	}
+	acceptedReadiness, err := am.acceptedReadinessRegistration(ctx, identity)
+	if err != nil {
+		return err
+	}
+	readiness, err := am.lifecycle.executableReadinessForAccepted(ctx, identity, acceptedReadiness)
+	if err != nil {
+		return fmt.Errorf("declared agent %s executable readiness: %w", identity.Description(), err)
+	}
+	if processRevision != expectedRevision || storedRevision != expectedRevision ||
+		!readiness.State.Topology.Equal(topology) || !stored.Topology.Equal(topology) {
+		return fmt.Errorf(
+			"declared agent %s readiness facts mismatch: expected_revision=%s process_revision=%s stored_revision=%s process_topology_equal=%t stored_topology_equal=%t",
+			identity.Description(), expectedRevision, processRevision, storedRevision,
+			readiness.State.Topology.Equal(topology), stored.Topology.Equal(topology),
+		)
 	}
 	return nil
 }
