@@ -218,12 +218,13 @@ func (eb *EventBus) PrepareInboundDeliveryBatch(ctx context.Context, batch Inbou
 	if err != nil {
 		return InboundDeliveryPlan{}, err
 	}
+	outputConsumers := runtimepinrouting.NewOutputConsumerResolver(eb.semanticSource)
 	hasRuntimeConsumer := false
 	for index, item := range validated.Events {
 		if err := validated.Admission.ValidateOutput(eb.sourceArtifactFact.BundleHash(), validated.Provider, index, len(validated.Events), item.Event, item.Kind, item.Authorization); err != nil {
 			return InboundDeliveryPlan{}, err
 		}
-		hasRuntimeConsumer = hasRuntimeConsumer || runtimepinrouting.ClassifyRoutingSourceOutputConsumer(eb.semanticSource, string(item.Event.Type()), item.Event.RoutingSource()).HasRuntimeConsumer()
+		hasRuntimeConsumer = hasRuntimeConsumer || outputConsumers.Classify(string(item.Event.Type()), item.Event.RoutingSource()).HasRuntimeConsumer()
 	}
 	plan := InboundDeliveryPlan{admission: validated.Admission, events: append([]InboundDeliveryEvent(nil), validated.Events...)}
 	activationOwners := make(map[runtimeflowidentity.Route]int)
@@ -258,9 +259,10 @@ func (eb *EventBus) PrepareInboundDeliveryBatch(ctx context.Context, batch Inbou
 		if err != nil {
 			return release(err)
 		}
-		rawSettlement := eb.admitProviderRawSettlement(validated, index, admitted.Event())
+		rawSettlement := eb.admitProviderRawSettlement(validated, index, admitted.Event(), outputConsumers)
 		prepared, command, err := eb.prepareClosedPublication(preparedCtx, eventBusCommitPublishPlan{
 			bus: eb, event: admitted.Event(), admitted: admitted, providerRawSettlement: rawSettlement, runProposal: runProposal,
+			outputConsumers: outputConsumers,
 		})
 		if err != nil {
 			return release(err)
@@ -302,7 +304,7 @@ func (eb *EventBus) previewInboundConstructions(ctx context.Context, runID strin
 	return ctx, nil
 }
 
-func (eb *EventBus) admitProviderRawSettlement(batch InboundDeliveryBatch, ordinal int, evt events.Event) providerRawSettlementAdmission {
+func (eb *EventBus) admitProviderRawSettlement(batch InboundDeliveryBatch, ordinal int, evt events.Event, outputConsumers *runtimepinrouting.OutputConsumerResolver) providerRawSettlementAdmission {
 	if eb == nil || eb.semanticSource == nil || ordinal < 0 || ordinal >= len(batch.Events) {
 		return providerRawSettlementAdmission{}
 	}
@@ -318,7 +320,7 @@ func (eb *EventBus) admitProviderRawSettlement(batch InboundDeliveryBatch, ordin
 	if sourceRoute.FlowID == "" || sourceRoute.EntityID != "" || sourceRoute.FlowInstance != "" || evt.HasTargetRoute() || len(evt.TargetRoutes()) != 0 {
 		return providerRawSettlementAdmission{}
 	}
-	if runtimepinrouting.ClassifyRoutingSourceOutputConsumer(eb.semanticSource, string(evt.Type()), source).HasRuntimeConsumer() {
+	if outputConsumers.Classify(string(evt.Type()), source).HasRuntimeConsumer() {
 		return providerRawSettlementAdmission{}
 	}
 	return providerRawSettlementAdmission{eventID: evt.ID(), source: sourceRoute}

@@ -24,9 +24,6 @@ func TestMixedPubsubConnectAuthorityStructuralGuard(t *testing.T) {
 	}
 	files := parseBusProductionFiles(t)
 	requiredCalls := map[string]map[string]bool{
-		"appendUniqueSubscriber": {
-			"resolvedSubscriberRoleKey": false,
-		},
 		"dedupeSubscribers": {
 			"resolvedSubscriberRoleKey": false,
 		},

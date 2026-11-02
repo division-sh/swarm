@@ -317,7 +317,7 @@ func TestProviderRawSettlementAdmissionRequiresCompleteInboundAuthority(t *testi
 	}
 	exactBus := &EventBus{semanticSource: source, sourceArtifactFact: fact}
 
-	admission := exactBus.admitProviderRawSettlement(batch, 0, exactEvent)
+	admission := exactBus.admitProviderRawSettlement(batch, 0, exactEvent, runtimepinrouting.NewOutputConsumerResolver(exactBus.semanticSource))
 	liveNoSubscriber := RoutePlan{ordinarySource: ordinaryPublicationSource{route: events.RouteIdentity{
 		FlowID: "telegram-ingress", FlowInstance: exactTarget.FlowInstance, EntityID: entityID,
 	}}}
@@ -354,7 +354,7 @@ func TestProviderRawSettlementAdmissionRequiresCompleteInboundAuthority(t *testi
 			candidate := batch
 			candidate.Events = append([]InboundDeliveryEvent(nil), batch.Events...)
 			candidate.Events[0].Kind = tc.kind
-			got := tc.bus.admitProviderRawSettlement(candidate, 0, tc.event)
+			got := tc.bus.admitProviderRawSettlement(candidate, 0, tc.event, runtimepinrouting.NewOutputConsumerResolver(tc.bus.semanticSource))
 			if got.authorizes(tc.event, tc.event, tc.plan) {
 				t.Fatal("partial or hostile facts minted deliberate provider raw settlement")
 			}

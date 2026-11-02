@@ -237,24 +237,6 @@ func (rt *RouteTable) staticAgentDeclarationPlans() map[agentidentity.Plan]struc
 	return maps.Clone(rt.staticAgentPlans)
 }
 
-func projectSubscriberEvents(subscribers []Subscriber, eventType string) []Subscriber {
-	if len(subscribers) == 0 {
-		return nil
-	}
-	out := make([]Subscriber, 0, len(subscribers))
-	for _, subscriber := range subscribers {
-		if subscriber.Recipient.IsNode() && subscriber.subscription.Admitted() && subscriber.subscription.Pattern() {
-			local, matched := subscriber.subscription.LocalEventAt(subscriber.Path, eventType)
-			if !matched {
-				continue
-			}
-			subscriber.LocalizedEvent = local
-		}
-		out = appendUniqueSubscriber(out, subscriber)
-	}
-	return out
-}
-
 func connectRecipientSubscribers(evaluation runtimepinrouting.ConnectRecipientEvaluation) []Subscriber {
 	recipients := evaluation.Recipients()
 	out := make([]Subscriber, 0, len(recipients))
@@ -453,18 +435,6 @@ func resolvedSubscriberRoleKey(subscriber Subscriber) resolvedSubscriberRoleIden
 		connectHandler: subscriber.connectHandler,
 		targetHandler:  subscriber.targetHandler,
 	}
-}
-
-func appendUniqueSubscriber(in []Subscriber, subscriber Subscriber) []Subscriber {
-	key := resolvedSubscriberRoleKey(subscriber)
-	for idx := range in {
-		if resolvedSubscriberRoleKey(in[idx]) != key {
-			continue
-		}
-		in[idx].MatchPattern = strongestSubscriberMatchEvidence(in[idx].MatchPattern, subscriber.MatchPattern)
-		return in
-	}
-	return append(in, subscriber)
 }
 
 func strongestSubscriberMatchEvidence(left, right string) string {
