@@ -66,9 +66,8 @@ func writeJoinRetirementSource(t *testing.T, owner, body string) string {
 		stages = "stages:\n  awaiting: {}\n  done: {final: true}\n  failed: {final: true}\n"
 	}
 	writeBootverifyFixtureFile(t, filepath.Join(root, "manifest.yaml"), "version: 1.0.0\nplatform_version: '*'\n")
-	writeBootverifyFixtureFile(t, filepath.Join(root, "schema.yaml"), "# fixture: join-retirement\n"+stages+`pins:
-  inputs:
-    - item.reported
+	writeBootverifyFixtureFile(t, filepath.Join(root, "schema.yaml"), "# fixture: join-retirement\n"+stages+`inputs:
+  - item.reported
 `)
 	// Business fields with these names remain legal; only the retired
 	// execution-grammar fields are rejected.

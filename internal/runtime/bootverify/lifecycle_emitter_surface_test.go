@@ -29,7 +29,7 @@ func TestRun_ProviderTransportEntityIDDoesNotElectCanonicalPrimary(t *testing.T)
 		"manifest.yaml":        "version: 1.0.0\nplatform_version: '*'\n",
 		"schema.yaml":          "stages: []\n",
 		"matrix/manifest.yaml": "version: 1.0.0\nplatform_version: '*'\n",
-		"matrix/schema.yaml":   "stages: []\npins: {inputs: [inbound.telegram.raw, inbound.intercom.raw]}\n",
+		"matrix/schema.yaml":   "stages: []\ninputs: [inbound.telegram.raw, inbound.intercom.raw]\n",
 		"matrix/state.yaml":    "service_id: \"standing\"\n",
 		"matrix/nodes.yaml": `matrix-sink:
   inbound.telegram.raw:

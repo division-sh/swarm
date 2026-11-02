@@ -43,7 +43,7 @@ func TestS1EventRunFixturesRetainExplicitRootBothStores(t *testing.T) {
 			sourceartifactfixture.RequireArtifact(t, ctx, selected, rooted.Artifact())
 			foreignArtifact, err := sourceartifact.AdmitMembers(map[string][]byte{
 				"manifest.yaml": []byte("version: 1.0.0\nplatform_version: '*'\n"),
-				"schema.yaml":   []byte("required_agents: []\n"),
+				"schema.yaml":   []byte("stages: []\n# foreign source\n"),
 			})
 			if err != nil {
 				t.Fatal(err)

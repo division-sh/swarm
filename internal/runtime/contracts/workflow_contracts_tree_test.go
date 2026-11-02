@@ -533,8 +533,7 @@ func writeLayer3FlowTreeFixture(t *testing.T) string {
 	writeFixtureFile(t, filepath.Join(root, "parent", "child", "manifest.yaml"), "version: 1.0.0\nplatform_version: '*'\n")
 	writeFixtureFile(t, filepath.Join(root, "schema.yaml"), `
 # fixture: root-platform
-required_agents:
-  - role: root-agent
+stages: []
 `)
 	writeFixtureFile(t, filepath.Join(root, "policy.yaml"), `
 root_policy: root

@@ -78,7 +78,7 @@ func TestSelectedConstructedActorProjectionCompleteCensus(t *testing.T) {
 			for _, flow := range []string{"templ/child", "templ/child/leaf", "templ/audit", "templ/audit/leaf"} {
 				for name, body := range map[string]string{
 					"manifest.yaml": "version: 1.0.0\nplatform_version: '*'\n",
-					"schema.yaml":   "stages:\n  active: {}\n  done: {final: true}\npins:\n  inputs:\n    - work.ready\nrequired_agents:\n  - role: worker\n    subscribes_to: [work.ready]\n",
+					"schema.yaml":   "stages:\n  active: {}\n  done: {final: true}\ninputs:\n  - work.ready\n",
 					"events.yaml":   "work.ready:\nwork.done:\n",
 					"agents.yaml":   "worker:\n  model: regular\n  intent:\n    inline: Consume the exact selected input.\n  subscriptions: [work.ready]\n",
 					"nodes.yaml":    "sink:\n  work.ready:\n    advances_to: done\n    emit:\n      event: work.done\n",
@@ -124,7 +124,7 @@ func TestSelectedConstructedActorProjectionCompleteCensus(t *testing.T) {
 							t.Fatalf("fixture construction %s: %v", child.InstancePath, err)
 						}
 						if len(source.FlowRequiredAgents(flow)) != 1 {
-							t.Fatal("fixture lost its declared/required duplicate")
+							t.Fatal("fixture lost its scoped required declaration")
 						}
 						owner, _ := semanticview.AgentDeclarationOwner(source, flow, "worker")
 						declared, err := agentidentity.DeclaredName("worker", owner)

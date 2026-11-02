@@ -13,7 +13,7 @@ func TestS1ContractLoaderExactSourcePath(t *testing.T) {
 	repo := repoRootForContractsTest(t)
 	for _, name := range []string{" shop-a", "shop-a ", "shop-a\t", "shop-a\n"} {
 		root := filepath.Join(parent, name)
-		writeBundleIdentityFile(t, filepath.Join(root, "schema.yaml"), "required_agents: []\n")
+		writeBundleIdentityFile(t, filepath.Join(root, "schema.yaml"), "stages: []\n")
 		bundle, err := LoadWorkflowContractBundleWithOverrides(repo, root, DefaultPlatformSpecFile(repo))
 		if err == nil || bundle != nil || !strings.Contains(err.Error(), "rename it") {
 			t.Errorf("executable loader selected a different sibling: root=%q bundle=%v err=%v", root, bundle, err)

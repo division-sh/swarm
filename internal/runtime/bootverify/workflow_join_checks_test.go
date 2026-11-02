@@ -198,9 +198,8 @@ func TestRun_JoinValidationPreservesDuplicateScopedNodeIDs(t *testing.T) {
   active: {}
   done: {}
   failed: {}
-pins:
-  inputs:
-    - item.received
+inputs:
+  - item.received
 `,
 	)
 	writeBootverifyFixtureFile(t, filepath.Join(root, "a", "state.yaml"), `expected: [text]
