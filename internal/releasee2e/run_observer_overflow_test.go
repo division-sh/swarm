@@ -346,8 +346,7 @@ func writeReleaseObserverOverflowFixture(t *testing.T, repo, root string, eventC
 
 worker-completion:
   agent.completed:
-    guard:
-      check: instance.stage == 'active'
+    guard: instance.stage == 'active'
     fan_out:
       items_from: state.requests
       as: completed_request

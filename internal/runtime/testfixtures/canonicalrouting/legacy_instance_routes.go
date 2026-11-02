@@ -77,7 +77,7 @@ func CopyTemplateInstanceRoute(t testing.TB, opts TemplateInstanceRouteOptions) 
 		if opts.SecondPin == TemplateInstanceSecondPinDistinctEvent {
 			secondConnect += "    rename: deploy.audited\n"
 			secondEvent = "deploy.audited"
-			secondHandler = "    " + secondEvent + ": {}\n"
+			secondHandler = "  " + secondEvent + ": {}\n"
 		} else if opts.SecondPin != TemplateInstanceSecondPinSameEvent {
 			t.Fatalf("unsupported template instance second pin %d", opts.SecondPin)
 		}

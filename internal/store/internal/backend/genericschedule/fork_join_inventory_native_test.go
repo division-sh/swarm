@@ -34,7 +34,7 @@ func TestForkJoinNativeExpectedRowEvidenceIsNotInventoryBothStores(t *testing.T)
 				t.Run(flow, func(t *testing.T) {
 					ctx, request := forkJoinNativeRequest(t, f, flow, false, false)
 					wanted := forkJoinInventoryMaterialize(t, f, ctx, request)
-					extraRequest := forkJoinInventoryAdditionalRequest(t, f, ctx, request, "unexpected-join")
+					extraRequest := forkJoinInventoryAdditionalRequest(t, f, ctx, request, "unexpected.completed")
 					extra := forkJoinInventoryMaterialize(t, f, ctx, extraRequest)
 					actual, found, err := f.generic.LoadGenericScheduleActivation(ctx, wanted.ID)
 					if err != nil || !found {
@@ -91,7 +91,7 @@ func TestForkJoinNativeInventoryBothStores(t *testing.T) {
 						forkJoinInventoryRequireRows(t, forkJoinInventoryRead(t, f, reader, ctx, request.Child.RunID))
 						wanted := forkJoinInventoryMaterialize(t, f, ctx, request)
 						forkJoinInventoryRequireRows(t, forkJoinInventoryRead(t, f, reader, ctx, request.Child.RunID), wanted)
-						extraRequest := forkJoinInventoryAdditionalRequest(t, f, ctx, request, "unexpected-join")
+						extraRequest := forkJoinInventoryAdditionalRequest(t, f, ctx, request, "unexpected.completed")
 						extra := forkJoinInventoryMaterialize(t, f, ctx, extraRequest)
 						rows := forkJoinInventoryRead(t, f, reader, ctx, request.Child.RunID)
 						forkJoinInventoryRequireRows(t, rows, wanted, extra)
@@ -179,9 +179,9 @@ func forkJoinInventoryRequireRows(t *testing.T, actual []runtimegenericschedule.
 	}
 }
 
-func forkJoinInventoryAdditionalRequest(t *testing.T, f *forkJoinNativeFixture, ctx context.Context, base storegenericschedule.ForkJoinRequest, joinID string) storegenericschedule.ForkJoinRequest {
+func forkJoinInventoryAdditionalRequest(t *testing.T, f *forkJoinNativeFixture, ctx context.Context, base storegenericschedule.ForkJoinRequest, handlerEvent string) storegenericschedule.ForkJoinRequest {
 	t.Helper()
-	command := forkJoinInventoryChangeDeclaration(t, base.Source.Command, joinID)
+	command := forkJoinInventoryChangeDeclaration(t, base.Source.Command, handlerEvent)
 	sourceCtx := correlation.WithRunID(ctx, base.Source.Command.RunID)
 	admission, err := f.generic.AdmitGenericScheduleOutcome(sourceCtx, command)
 	if err != nil || !admission.Acknowledged || admission.Result.Outcome != runtimegenericschedule.AdmissionCreated {
@@ -189,7 +189,7 @@ func forkJoinInventoryAdditionalRequest(t *testing.T, f *forkJoinNativeFixture, 
 	}
 	request := base
 	request.Source = admission.Result.Activation
-	request.Child = forkJoinInventoryChangeDeclaration(t, base.Child, joinID)
+	request.Child = forkJoinInventoryChangeDeclaration(t, base.Child, handlerEvent)
 	request.BornAt = runtimerunlifecycle.CanonicalTimestamp(time.Now().UTC())
 	if request.BornAt.Before(request.Source.AdmittedAt) {
 		request.BornAt = request.Source.AdmittedAt
@@ -200,13 +200,13 @@ func forkJoinInventoryAdditionalRequest(t *testing.T, f *forkJoinNativeFixture, 
 	return request
 }
 
-func forkJoinInventoryChangeDeclaration(t *testing.T, command runtimegenericschedule.AdmissionCommand, joinID string) runtimegenericschedule.AdmissionCommand {
+func forkJoinInventoryChangeDeclaration(t *testing.T, command runtimegenericschedule.AdmissionCommand, handlerEvent string) runtimegenericschedule.AdmissionCommand {
 	t.Helper()
 	handle, ref, valid := timeridentity.ParseJoinHandle(command.Payload.Interface().(map[string]any))
 	if !valid {
 		t.Fatal("additional schedule lost its typed arrival handle")
 	}
-	declaration, err := timeridentity.NewJoinRef(ref.Node(), ref.HandlerEvent(), ref.Stage())
+	declaration, err := timeridentity.NewJoinRef(ref.Node(), handlerEvent, ref.Stage())
 	if err != nil {
 		t.Fatal(err)
 	}

@@ -51,6 +51,7 @@ func CopyRootInputFeed(t testing.TB, kind DeploymentFeedRoot) string {
 		files["schema.yaml"] = "stages: {done: {final: true}}\npins:\n  outputs: [item.registered]\nconnect:\n  - {event: item.registered, from: ., to: registry, resolution: create}\n"
 	case DeploymentFeedPrivateRoot:
 		files["schema.yaml"] = "stages: {done: {final: true}}\n"
+		files["registry/events.yaml"] = "item.registered:\n  key: item_id\n  item_id: text\n"
 	default:
 		t.Fatalf("unknown deployment feed root %d", kind)
 	}

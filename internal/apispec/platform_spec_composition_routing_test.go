@@ -372,8 +372,8 @@ func TestPlatformSpecE1aRetirementCloseoutIsCanonicalOnly(t *testing.T) {
 	assertScalarContains(t, mustMappingValue(t, subscriptionBoundary, "inter_flow_delivery"), "parent connect")
 	assertScalarContains(t, mustMappingValue(t, subscriptionBoundary, "wildcard_observation"), "slash-free and flow-local")
 	assertScalarContains(t, mustMappingValue(t, subscriptionBoundary, "wildcard_observation"), "nearest-LCA connect")
-	assertScalarContains(t, mustYAMLPath(t, crossFlow, "contract_authoring_rules", "subscribes_to"), "already-normalized same-scope identity")
-	assertScalarContains(t, mustYAMLPath(t, crossFlow, "contract_authoring_rules", "subscribes_to"), "Cross-boundary slash-qualified and full-URI exact values are invalid")
+	assertScalarContains(t, mustYAMLPath(t, crossFlow, "contract_authoring_rules", "subscriptions"), "already-normalized same-scope identity")
+	assertScalarContains(t, mustYAMLPath(t, crossFlow, "contract_authoring_rules", "subscriptions"), "Cross-boundary slash-qualified and full-URI exact values are invalid")
 	assertScalarContains(t, mustYAMLPath(t, crossFlow, "contract_authoring_rules", "timer_event_references"), "Always local exact names")
 
 	referenceModel := mustYAMLPath(t, root, "engine", "uri_addressing")
@@ -457,7 +457,7 @@ func TestPlatformSpecExecutableNodeIdentityIsExactAndCanonicalOnly(t *testing.T)
 		assertScalarContains(t, rule, fragment)
 	}
 	nodeFields := mustYAMLPath(t, root, "handler_specification", "node_specification", "node_fields")
-	assertScalarContains(t, mustMappingValue(t, nodeFields, "admission_rule"), "the map key is the identity.")
+	assertScalarContains(t, mustMappingValue(t, nodeFields, "admission_rule"), "The node map key owns identity.")
 	assertScalarContains(t, mustYAMLPath(t, nodeFields, "effective_semantics", "id"), "YAML map key only")
 	optional := mustMappingValue(t, nodeFields, "optional")
 	for i := 0; i+1 < len(optional.Content); i += 2 {

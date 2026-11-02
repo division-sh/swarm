@@ -251,8 +251,8 @@ func addCanonicalTelegramApprovalOverlay(t testing.TB, sourceRoot string) {
 	if err != nil {
 		t.Fatalf("read canonical Telegram nodes: %v", err)
 	}
-	old := "        tool: telegram.send_message\n        input:\n"
-	replacement := "        tool: telegram.send_message\n        approval: {decision: send_telegram_message}\n        input:\n"
+	old := "      tool: telegram.send_message\n      input:\n"
+	replacement := "      tool: telegram.send_message\n      approval: {decision: send_telegram_message}\n      input:\n"
 	if !strings.Contains(string(body), old) {
 		t.Fatalf("canonical Telegram responder shape changed:\n%s", body)
 	}

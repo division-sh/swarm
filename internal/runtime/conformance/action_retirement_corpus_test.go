@@ -18,6 +18,7 @@ import (
 
 	"github.com/division-sh/swarm/internal/checkoutsource"
 	"github.com/division-sh/swarm/internal/runtime/contracts"
+	"github.com/division-sh/swarm/internal/runtime/core/eventidentity"
 	yaml "gopkg.in/yaml.v3"
 )
 
@@ -175,8 +176,12 @@ func actionRetirementAuthoredFields(raw []byte) ([]string, error) {
 			continue
 		}
 		for j := 0; j+1 < len(node.Content); j += 2 {
-			switch node.Content[j].Value {
+			key := node.Content[j].Value
+			switch key {
 			case "timers", "state_table", "state_schema", "gate_state":
+				continue
+			}
+			if !eventidentity.IsCanonicalName(key) && !eventidentity.IsCanonicalPattern(key) {
 				continue
 			}
 			handler(node.Content[j+1])
@@ -194,6 +199,7 @@ func TestActionRetirementCorpusScannerPreservesHomonymsAndRejectsAliases(t *test
 		{"worker: {timers: [{action: expire}], request: {activity: {id: run, tool: run, input: {action: payload.action}}, rules: {action: {else: true, emit: done}}}}", false},
 		{"worker: {timers: [{action: expire}], request: {activity: {id: run, tool: run, input: {action: payload.action}}, rules: [{when: payload.action == 'ready', emit: done}]}}", false},
 		{"template: {request: {emit: done}}\naction: {}", false},
+		{"types: {AuditEntry: {ref: text, action: text}}", false},
 		{"worker: {request: {action: null}}", true},
 		{"action: new_unknown_action", true},
 		{"request: {on_complete: [{action: ''}]}", true},

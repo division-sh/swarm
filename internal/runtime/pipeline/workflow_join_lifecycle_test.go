@@ -968,15 +968,14 @@ join-node:
 		files["orders/schema.yaml"] = strings.Replace(files["orders/schema.yaml"], "  awaiting: {}", "  awaiting: {}\n  reviewing: {}", 1)
 		files["orders/events.yaml"] += "review.requested:\napproval.completed:\n  member_id: text\n  result: ItemResult\n"
 		files["orders/nodes.yaml"] = strings.Replace(files["orders/nodes.yaml"], "  manual.abort:", "  review.requested:\n    advances_to: reviewing\n  manual.abort:", 1)
-		files["orders/nodes.yaml"] = strings.Replace(files["orders/nodes.yaml"], "id: awaiting", "id: shared", 1)
-		files["orders/nodes.yaml"] += `    approval.completed:
-      join:
-        stage: reviewing
-        members: {from: state.expected, by: payload.member_id}
-        output: payload.result
-        on_complete: {advances_to: ready}
-        deadline: {after: 1h, from: stage_entry}
-        on_deadline: {advances_to: attention}
+		files["orders/nodes.yaml"] += `  approval.completed:
+    join:
+      stage: reviewing
+      members: {from: state.expected, by: payload.member_id}
+      output: payload.result
+      on_complete: {advances_to: ready}
+      deadline: {after: 1h, from: stage_entry}
+      on_deadline: {advances_to: attention}
 `
 	}
 	if loop != "" {

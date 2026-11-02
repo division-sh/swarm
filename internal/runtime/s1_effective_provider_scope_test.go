@@ -7,6 +7,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/division-sh/swarm/internal/packadmission"
 	runtimecontracts "github.com/division-sh/swarm/internal/runtime/contracts"
 	runtimeidentity "github.com/division-sh/swarm/internal/runtime/core/identity"
 	"github.com/division-sh/swarm/internal/runtime/semanticview"
@@ -46,7 +47,7 @@ func loadS1EffectiveProviderScope(t *testing.T, members map[string][]byte) (*run
 		t.Fatal(err)
 	}
 	rooted, directory := sourceartifactfixture.Rooted(t, "scoped-provider-shop", artifact)
-	bundle, err := runtimecontracts.LoadWorkflowContractBundleFromRootedSource(canonicalrouting.RepoRoot(t), rooted, "", runtimecontracts.WorkflowContractLoadOptions{})
+	bundle, err := runtimecontracts.LoadWorkflowContractBundleFromRootedSource(canonicalrouting.RepoRoot(t), rooted, "", runtimecontracts.WorkflowContractLoadOptions{AdmitPackInventory: packadmission.AdmitInventory})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -208,7 +209,18 @@ func TestS1EffectiveProviderDirectoryScopeRefusesPartialRoleAndAuthoredNamespace
 			} else {
 				members["sibling/tools.yaml"] = []byte("team-bot.invented:\n  handler_type: http\n  http: {method: GET, url: 'https://foreign.example.test'}\n")
 			}
-			bundle, rooted, _ := loadS1EffectiveProviderScope(t, members)
+			artifact, err := sourceartifact.AdmitMembers(members)
+			if err != nil {
+				t.Fatal(err)
+			}
+			rooted, _ := sourceartifactfixture.Rooted(t, "scoped-provider-shop", artifact)
+			bundle, err := runtimecontracts.LoadWorkflowContractBundleFromRootedSource(canonicalrouting.RepoRoot(t), rooted, "", runtimecontracts.WorkflowContractLoadOptions{AdmitPackInventory: packadmission.AdmitInventory})
+			if err != nil {
+				if name == "bad sibling role" && strings.Contains(err.Error(), "sibling/team-bot/trigger.yaml") {
+					return
+				}
+				t.Fatalf("directory admission lost its exact refusal: %v", err)
+			}
 			projection, err := AdmitEffectiveSourceProjection(EffectiveSourceProjectionRequest{
 				Source: semanticview.Wrap(bundle), SourceArtifactFact: sourceartifactfixture.FactFor(rooted.Artifact()),
 			})

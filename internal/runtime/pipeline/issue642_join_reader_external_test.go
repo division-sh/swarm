@@ -98,7 +98,7 @@ func issue642NewJoinReaderFixture(t *testing.T, selected gateRecoveryStoreCase, 
 	files["events.yaml"] += "reader.cut:\npoll.tick:\n"
 	if scenario.deadline {
 		files["nodes.yaml"] = strings.Replace(files["nodes.yaml"], "      output: payload.result\n", "      output: payload.result\n      deadline: {after: 1h, from: stage_entry}\n", 1)
-		files["nodes.yaml"] += "        on_deadline: {advances_to: ready}\n"
+		files["nodes.yaml"] += "      on_deadline: {advances_to: ready}\n"
 	}
 	if scenario.emptyList {
 		files["state.yaml"] += "members_list: [text]\n"
@@ -109,7 +109,7 @@ func issue642NewJoinReaderFixture(t *testing.T, selected gateRecoveryStoreCase, 
 		files["schema.yaml"] = strings.Replace(files["schema.yaml"], "  awaiting: {}\n", "  awaiting: {}\n  aborted: {}\n", 1)
 		files["schema.yaml"] += "    - manual.abort\n"
 		files["events.yaml"] += "manual.abort:\n"
-		files["nodes.yaml"] += "    manual.abort:\n      advances_to: aborted\n"
+		files["nodes.yaml"] += "  manual.abort:\n    advances_to: aborted\n"
 		subscriptions = append(subscriptions, "manual.abort")
 	}
 	if scenario.noJoin {

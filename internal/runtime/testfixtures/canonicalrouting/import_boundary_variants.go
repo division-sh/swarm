@@ -73,8 +73,7 @@ pins:
 	writeBootverifyFixtureFile(t, filepath.Join(root, "events.yaml"), rootEvents)
 	writeBootverifyFixtureFile(t, filepath.Join(root, "nodes.yaml"), `
 parent-listener:
-`+parentSubscription+`]
-  parent.lead_enriched: {}
+  `+parentSubscription+`: {}
 `)
 
 	writeBootverifyFixtureFile(t, filepath.Join(root, "worker", "schema.yaml"), `stages: []

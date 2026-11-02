@@ -179,7 +179,7 @@ func VerifyNativeWorkflowTimerLifecyclePreservesSiblingFlowDeclarationsAcrossRes
 					t.Fatalf("active sibling timers = %#v, want two", active)
 				}
 				byDeclaration := workflowTimerActivationsByDeclaration(active)
-				for _, key := range []string{workflowTimerNodeDeclarationKey(first, "same"), workflowTimerNodeDeclarationKey(second, "same")} {
+				for _, key := range []string{workflowTimerNodeDeclarationKey(first, "shared.timer.a"), workflowTimerNodeDeclarationKey(second, "shared.timer.b")} {
 					if activation, ok := byDeclaration[key]; !ok || activation.Ref.ActivationID == "" {
 						t.Fatalf("sibling timer %q = %#v, want exact durable activation", key, activation)
 					}
@@ -391,17 +391,18 @@ func VerifyNativeWorkflowTimerLifecycleReconcilesInitialDeclarationRevisionOnBot
 				t.Fatalf("source B timer rows all/active = %d/%d, want 5/3: %#v", len(allRows), len(activeRows), allRows)
 			}
 			activeByDeclaration := workflowTimerActivationsByDeclaration(activeRows)
-			keepKey := workflowTimerStageDeclarationKey(".", "waiting.keep")
-			changedKey := workflowTimerStageDeclarationKey(".", "waiting.changed")
-			removedKey := workflowTimerStageDeclarationKey(".", "waiting.removed")
-			addedKey := workflowTimerStageDeclarationKey(".", "waiting.added")
+			keepKey := workflowTimerStageDeclarationKey(".", "waiting.timer.keep")
+			priorChangedKey := workflowTimerStageDeclarationKey(".", "waiting.timer.changed.v1")
+			changedKey := workflowTimerStageDeclarationKey(".", "waiting.timer.changed.v2")
+			removedKey := workflowTimerStageDeclarationKey(".", "waiting.timer.removed")
+			addedKey := workflowTimerStageDeclarationKey(".", "waiting.timer.added")
 			if activeByDeclaration[keepKey].Ref != sourceAByDeclaration[keepKey].Ref {
 				t.Fatal("unchanged declaration did not preserve its exact activation")
 			}
 			if _, found := activeByDeclaration[removedKey]; found {
 				t.Fatal("removed declaration remains active")
 			}
-			if activeByDeclaration[changedKey].Ref == sourceAByDeclaration[changedKey].Ref {
+			if activeByDeclaration[changedKey].Ref == sourceAByDeclaration[priorChangedKey].Ref {
 				t.Fatal("changed declaration reused its stale activation identity")
 			}
 			if activeByDeclaration[addedKey].Ref.ActivationID == "" {
@@ -411,7 +412,7 @@ func VerifyNativeWorkflowTimerLifecycleReconcilesInitialDeclarationRevisionOnBot
 				!activeByDeclaration[changedKey].FireAt.Equal(createdAt.Add(2*time.Hour)) {
 				t.Fatalf("changed declaration facts = %#v", activeByDeclaration[changedKey])
 			}
-			for _, declaration := range []string{changedKey, removedKey} {
+			for _, declaration := range []string{priorChangedKey, removedKey} {
 				old := sourceAByDeclaration[declaration]
 				persisted := loadWorkflowTimerOwnerActivation(t, store, ctx, old.Ref.ActivationID)
 				if persisted.Status != workflowTimerStatusCancelled {
@@ -423,7 +424,7 @@ func VerifyNativeWorkflowTimerLifecycleReconcilesInitialDeclarationRevisionOnBot
 				return active == 3 && draining == 0
 			}, "source B replacement wakeups")
 
-			stale := sourceAByDeclaration[changedKey]
+			stale := sourceAByDeclaration[priorChangedKey]
 			if err := projection.ReconcileWakeup(ctx, stale.Ref); err != nil {
 				t.Fatalf("retire stale source A wakeup: %v", err)
 			}
@@ -527,10 +528,10 @@ func VerifyNativeWorkflowTimerLifecycleReconcilesProgressedInitialDeclarationsPr
 			}
 			activeByDeclaration := workflowTimerActivationsByDeclaration(activeRows)
 			timerNode := pipelineNode(t, "", "timer-owner")
-			keepKey := workflowTimerNodeDeclarationKey(timerNode, "waiting.keep")
-			changedKey := workflowTimerNodeDeclarationKey(timerNode, "waiting.changed")
-			removedKey := workflowTimerNodeDeclarationKey(timerNode, "waiting.removed")
-			addedKey := workflowTimerNodeDeclarationKey(timerNode, "waiting.added")
+			keepKey := workflowTimerNodeDeclarationKey(timerNode, "timer-owner.timer.keep")
+			changedKey := workflowTimerNodeDeclarationKey(timerNode, "timer-owner.timer.changed.v1")
+			removedKey := workflowTimerNodeDeclarationKey(timerNode, "timer-owner.timer.removed")
+			addedKey := workflowTimerNodeDeclarationKey(timerNode, "timer-owner.timer.added")
 			if activeByDeclaration[keepKey].Ref != sourceAByDeclaration[keepKey].Ref {
 				t.Fatal("unchanged progressed declaration did not preserve its exact activation")
 			}
@@ -921,7 +922,7 @@ func VerifyNativeWorkflowTimerLifecycleReactivatesOnlyOnLaterStageEntryOnBothSto
 			files := workflowTimerOwnerSourceFiles()
 			files["schema.yaml"] = "stages:\n  waiting:\n    timers:\n      - {after: 1h, emit: timer.timeout}\n  done: {}\n"
 			files["events.yaml"] += "work.noted:\n"
-			files["nodes.yaml"] += "    work.noted: {}\n"
+			files["nodes.yaml"] += "  work.noted: {}\n"
 			bundle := loadWorkflowTempBundle(t, files)
 			fixture, pc, ctx, _, entityID, first := nativeWorkflowTimerSourceActivationForTest(t, tc.name, bundle, time.Now().Add(-2*time.Hour), false, executionmode.Live, open)
 			store := pc.workflowStore
@@ -975,7 +976,7 @@ func VerifyNativeWorkflowTimerLifecycleEventOnlyHandlerDoesNotReplayStateEntryOn
 				t.Fatal(err)
 			}
 			active := listWorkflowTimerOwnerActivations(t, store, ctx, entityID, true)
-			stateEntryKey := workflowTimerStageDeclarationKey(".", "waiting.state_entry")
+			stateEntryKey := workflowTimerStageDeclarationKey(".", "waiting.timer.state_entry")
 			if len(active) != 1 || active[0].Ref.DeclarationKey != stateEntryKey {
 				t.Fatalf("initial active timers = %#v, want %s", active, stateEntryKey)
 			}
@@ -1018,7 +1019,7 @@ func VerifyNativeWorkflowTimerLifecycleEventOnlyHandlerDoesNotReplayStateEntryOn
 			if persistedStateTimer.Ref != stateTimer.Ref || persistedStateTimer.Status != workflowTimerStatusActive {
 				t.Fatalf("state-entry timer after event-only handlers = %#v, want original active activation %#v", persistedStateTimer, stateTimer.Ref)
 			}
-			eventArmedKey := workflowTimerNodeDeclarationKey(pipelineNode(t, ".", "observer"), "waiting.event_armed")
+			eventArmedKey := workflowTimerNodeDeclarationKey(pipelineNode(t, ".", "observer"), "observer.timer.event_armed")
 			if got := activationByDeclaration[eventArmedKey].Status; got != workflowTimerStatusActive {
 				t.Fatalf("event-armed timer status = %q, want active without state-trigger cancellation", got)
 			}
@@ -1074,7 +1075,7 @@ func VerifyNativeWorkflowTimerLifecycleReconcilesOnlyHandledOutcomesOnBothStores
 			}
 			declarations := func(id string) []WorkflowTimerActivation {
 				t.Helper()
-				declarationKey := workflowTimerNodeDeclarationKey(pipelineNode(t, ".", "observer"), id)
+				declarationKey := workflowTimerNodeDeclarationKey(pipelineNode(t, ".", "observer"), "observer.timer."+id)
 				all := listWorkflowTimerOwnerActivations(t, store, ctx, entityID, false)
 				matched := make([]WorkflowTimerActivation, 0, 1)
 				for _, activation := range all {
@@ -1103,13 +1104,6 @@ func VerifyNativeWorkflowTimerLifecycleReconcilesOnlyHandledOutcomesOnBothStores
 				t.Fatalf("guard reject created timer: %#v", matched)
 			}
 			assertOneStatus("reject.target", workflowTimerStatusActive)
-
-			execute("discard.target", nil, true)
-			execute("guard.discard", nil, false)
-			if matched := declarations("discard.start"); len(matched) != 0 {
-				t.Fatalf("guard discard created timer: %#v", matched)
-			}
-			assertOneStatus("discard.target", workflowTimerStatusActive)
 
 			execute("dedup.event", []byte(`{"item_id":"item-1"}`), true)
 			assertOneStatus("dedup.start", workflowTimerStatusActive)
@@ -1249,7 +1243,7 @@ func VerifyNativeWorkflowTimerLifecycleInitialAndEventEntrancesDoNotDuplicateOnB
 		t.Run(tc.name, func(t *testing.T) {
 			files := workflowTimerOwnerSourceFiles()
 			files["events.yaml"] += "work.created:\n"
-			files["nodes.yaml"] += "    work.created: {}\n  timers:\n    - {id: waiting.timeout, event: timer.timeout, start_on: 'event:work.created', delay: 1h}\n"
+			files["nodes.yaml"] += "  work.created: {}\n  timers:\n    - {event: timer.timeout, start_on: 'event:work.created', delay: 1h}\n"
 			bundle := loadWorkflowTempBundle(t, files)
 			fixture, pc, ctx := nativePilotPipelineForTest(t, tc.name, bundle, open)
 			store := pc.workflowStore
@@ -2339,7 +2333,7 @@ func workflowTimerOwnerBundle(t *testing.T, recurring bool) *runtimecontracts.Wo
 func workflowTimerOwnerBundleWithDelay(t *testing.T, recurring bool, delay string) *runtimecontracts.WorkflowContractBundle {
 	t.Helper()
 	files := workflowTimerOwnerSourceFiles()
-	files["schema.yaml"] = fmt.Sprintf("stages:\n  waiting:\n    timers:\n      - {id: waiting.timeout, after: %q, emit: timer.timeout}\n  done: {}\n", delay)
+	files["schema.yaml"] = fmt.Sprintf("stages:\n  waiting:\n    timers:\n      - {after: %q, emit: timer.timeout}\n  done: {}\n", delay)
 	bundle := loadWorkflowTempBundle(t, files)
 	// Recurrence is a scheduler variant, not a different transition declaration.
 	bundle.Semantics.Timers[0].Recurring = recurring
@@ -2362,11 +2356,11 @@ func workflowTimerOwnerSourceFiles() map[string]string {
 
 func workflowTimerSourceRevisionBundle(t *testing.T, revised bool) *runtimecontracts.WorkflowContractBundle {
 	t.Helper()
-	timers := "      - {id: waiting.keep, after: 1h, emit: timer.keep}\n"
+	timers := "      - {after: 1h, emit: timer.keep}\n"
 	if revised {
-		timers += "      - {id: waiting.changed, after: 2h, emit: timer.changed.v2}\n      - {id: waiting.added, after: 30m, emit: timer.added}\n"
+		timers += "      - {after: 2h, emit: timer.changed.v2}\n      - {after: 30m, emit: timer.added}\n"
 	} else {
-		timers += "      - {id: waiting.changed, after: 1h, emit: timer.changed.v1}\n      - {id: waiting.removed, after: 1h, emit: timer.removed}\n"
+		timers += "      - {after: 1h, emit: timer.changed.v1}\n      - {after: 1h, emit: timer.removed}\n"
 	}
 	return loadWorkflowTempBundle(t, map[string]string{
 		"manifest.yaml": "version: 1.0.0\nplatform_version: \">=0.7.0 <0.8.0\"\n",
@@ -2395,9 +2389,9 @@ func workflowTimerProgressedSourceRevisionBundle(t *testing.T, revised bool) *ru
 	files["events.yaml"] += "timer.keep:\ntimer.changed.v1:\ntimer.changed.v2:\ntimer.removed:\ntimer.added:\n"
 	files["nodes.yaml"] += "  timers:\n    - {event: timer.keep, start_on: 'state:waiting', delay: 1h}\n"
 	if revised {
-		files["nodes.yaml"] += "    - {id: waiting.changed, event: timer.changed.v2, start_on: 'state:waiting', delay: 2h}\n    - {id: waiting.added, event: timer.added, start_on: 'state:waiting', delay: 30m}\n"
+		files["nodes.yaml"] += "    - {event: timer.changed.v2, start_on: 'state:waiting', delay: 2h}\n    - {event: timer.added, start_on: 'state:waiting', delay: 30m}\n"
 	} else {
-		files["nodes.yaml"] += "    - {id: waiting.changed, event: timer.changed.v1, start_on: 'state:waiting', delay: 1h}\n    - {id: waiting.removed, event: timer.removed, start_on: 'state:waiting', delay: 1h}\n"
+		files["nodes.yaml"] += "    - {event: timer.changed.v1, start_on: 'state:waiting', delay: 1h}\n    - {event: timer.removed, start_on: 'state:waiting', delay: 1h}\n"
 	}
 	return loadWorkflowTempBundle(t, files)
 }
@@ -2423,9 +2417,9 @@ func workflowTimerFlowScopedBundle(t *testing.T) *runtimecontracts.WorkflowContr
 			armEvent = "timer.arm"
 		}
 		files[path+"manifest.yaml"] = "version: 1.0.0\nplatform_version: \">=0.7.0 <0.8.0\"\n"
-		files[path+"schema.yaml"] = fmt.Sprintf("stages:\n  waiting:\n    timers:\n      - {id: initial.local, after: 2h, emit: %s.initial}\n", prefix)
+		files[path+"schema.yaml"] = fmt.Sprintf("stages:\n  waiting:\n    timers:\n      - {after: 2h, emit: %s.initial}\n", prefix)
 		files[path+"events.yaml"] = fmt.Sprintf("timer.arm:\n%s.initial:\n%s.event:\n", prefix, prefix)
-		files[path+"nodes.yaml"] = fmt.Sprintf("timer-owner:\n  timers:\n    - {id: event.local, event: %s.event, start_on: 'event:%s', delay: 2h}\n  timer.arm: {}\n", prefix, armEvent)
+		files[path+"nodes.yaml"] = fmt.Sprintf("timer-owner:\n  timers:\n    - {event: %s.event, start_on: 'event:%s', delay: 2h}\n  timer.arm: {}\n", prefix, armEvent)
 	}
 	return loadWorkflowTempBundle(t, files)
 }
@@ -2466,14 +2460,12 @@ func workflowTimerHandledOutcomeBundle(t *testing.T) *runtimecontracts.WorkflowC
 	return loadWorkflowTempBundle(t, map[string]string{
 		"manifest.yaml": "version: 1.0.0\nplatform_version: \">=0.7.0 <0.8.0\"\n",
 		"schema.yaml":   "stages:\n  waiting: {}\n",
-		"events.yaml":   "accepted.start:\naccepted.cancel:\nreject.target:\nguard.reject:\ndiscard.target:\nguard.discard:\ndedup.reset:\ndedup.target:\ndedup.event:\n  item_id: text\ntimer.accepted:\ntimer.reject.start:\ntimer.reject.target:\ntimer.discard.start:\ntimer.discard.target:\ntimer.dedup.start:\ntimer.dedup.target:\n",
+		"events.yaml":   "accepted.start:\naccepted.cancel:\nreject.target:\nguard.reject:\ndedup.reset:\ndedup.target:\ndedup.event:\n  item_id: text\ntimer.accepted:\ntimer.reject.start:\ntimer.reject.target:\ntimer.dedup.start:\ntimer.dedup.target:\n",
 		"nodes.yaml": `observer:
   timers:
     - {event: timer.accepted, start_on: 'event:accepted.start', cancel_on: 'event:accepted.cancel', delay: 1h}
     - {event: timer.reject.start, start_on: 'event:guard.reject', delay: 1h}
     - {event: timer.reject.target, start_on: 'event:reject.target', cancel_on: 'event:guard.reject', delay: 1h}
-    - {event: timer.discard.start, start_on: 'event:guard.discard', delay: 1h}
-    - {event: timer.discard.target, start_on: 'event:discard.target', cancel_on: 'event:guard.discard', delay: 1h}
     - {event: timer.dedup.start, start_on: 'event:dedup.event', cancel_on: 'event:dedup.reset', delay: 1h}
     - {event: timer.dedup.target, start_on: 'event:dedup.target', cancel_on: 'event:dedup.event', delay: 1h}
   accepted.start: {}
@@ -2481,10 +2473,6 @@ func workflowTimerHandledOutcomeBundle(t *testing.T) *runtimecontracts.WorkflowC
   reject.target: {}
   guard.reject:
     guard: false
-  discard.target: {}
-  guard.discard:
-    rules:
-      - when: false
   dedup.event:
     accumulate: {into: items, from: payload, key: payload.item_id}
   dedup.reset: {}

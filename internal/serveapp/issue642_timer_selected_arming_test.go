@@ -14,6 +14,7 @@ import (
 	"github.com/division-sh/swarm/internal/apiv1"
 	"github.com/division-sh/swarm/internal/events"
 	"github.com/division-sh/swarm/internal/operatorread"
+	"github.com/division-sh/swarm/internal/runtime/core/identitytest"
 	"github.com/division-sh/swarm/internal/runtime/core/timeridentity"
 	"github.com/division-sh/swarm/internal/runtime/pipeline"
 	"github.com/division-sh/swarm/internal/runtime/runfork"
@@ -59,7 +60,7 @@ func TestIssue642NewlyArmedTimerUsesSelectedDelayAndEffectBothStores(t *testing.
 func issue642NewArmTarget(t *testing.T, delay string) string {
 	t.Helper()
 	root := issue642TimerContinuationSource(t)
-	for name, count := range map[string]int{"nodes.yaml": 3, "events.yaml": 1, "schema.yaml": 2} {
+	for name, count := range map[string]int{"nodes.yaml": 2, "events.yaml": 1, "schema.yaml": 2} {
 		path := filepath.Join(root, name)
 		body, err := os.ReadFile(path)
 		if err != nil || strings.Count(string(body), "timer.check") != count {
@@ -214,8 +215,9 @@ func issue642RequireNewSelectedArm(t *testing.T, rt issue2564ServedFixture, read
 	if err := actual.Validate(); err != nil {
 		t.Fatal(err)
 	}
+	selectedDeclaration := "node:" + identitytest.RootNode(t, "test-node").Key() + ":test-node.timer.selected_check"
 	if actual.RunID != completed.RunID || actual.EntityID != completed.RunID || actual.Route != issue642TimerContinuationRoot(t, completed.RunID).Route ||
-		actual.Ref.Cause != timeridentity.WorkflowTimerActivationCauseEvent || actual.Ref.DeclarationKey != source.Ref.DeclarationKey ||
+		actual.Ref.Cause != timeridentity.WorkflowTimerActivationCauseEvent || actual.Ref.DeclarationKey != selectedDeclaration || actual.Ref.DeclarationKey == source.Ref.DeclarationKey ||
 		actual.Ref.DeclarationRevision == source.Ref.DeclarationRevision || actual.Ref.Generation != source.Ref.Generation ||
 		actual.OwnerAgent != source.OwnerAgent || actual.EventType != "timer.selected_check" || actual.Recurring || actual.RecurrenceInterval != 0 {
 		t.Fatalf("new arm lost its exact selected declaration/effect/root owner: source=%+v child=%+v", source, actual)

@@ -101,7 +101,7 @@ func entitylessScatterGatherFixture(t *testing.T) string {
 			return err
 		}
 		if rel == "nodes.yaml" {
-			const stateful = "      data_accumulation:\n        writes:\n          - {source_field: batch_id, target_field: batch_id}\n"
+			const stateful = "    data_accumulation:\n      writes:\n        - {source_field: batch_id, target_field: batch_id}\n"
 			if strings.Count(string(body), stateful) != 1 {
 				t.Fatal("scatter fixture no longer has one source entity mutation")
 			}
