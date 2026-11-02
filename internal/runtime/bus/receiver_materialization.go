@@ -59,22 +59,3 @@ func flowReceiverInitialization(plan RoutePlan, target events.DeliveryTargetOwne
 	}
 	return events.ReceiverInitialization{}, false, nil
 }
-
-func completeReceiverInitializations(plan *RoutePlan) error {
-	for index := range plan.DeliveryIntents {
-		intent := &plan.DeliveryIntents[index]
-		if !intent.TargetOwnership.MaterializingEntity() || !intent.Initialization.Empty() {
-			continue
-		}
-		if supplier, found, err := flowReceiverInitialization(*plan, intent.TargetOwnership); err != nil {
-			return err
-		} else if found {
-			intent.Initialization = supplier
-			continue
-		}
-		if intent.Initialization.Empty() {
-			return fmt.Errorf("future receiver has no admitted initialization supplier")
-		}
-	}
-	return nil
-}

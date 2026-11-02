@@ -70,13 +70,12 @@ func (r connectRoutePlanResolver) pubsubInstanceData(ctx context.Context, scope 
 			return nil, err
 		}
 	} else {
-		observations, err := r.indexedInstances(ctx, scope)
+		observations, err := r.indexedObservations(ctx, scope)
 		if err != nil {
 			return nil, err
 		}
-		for _, instance := range observations {
-			owner := flowidentity.RunScopedFlowInstance{RunID: scope.RunID(), Route: instance.Route()}
-			instances[owner.Key()] = instance
+		for _, observed := range observations {
+			instances[observed.Owner().Key()] = observed.Identity()
 		}
 	}
 	proposals, err := r.prospectiveConnectInstances(ctx, scope.RunID(), scope.SourceFact())
@@ -135,18 +134,6 @@ func pubsubScopeIncludes(scope pipeline.FlowInstanceLookupScope, owner flowident
 		}
 	}
 	return false
-}
-
-func (r connectRoutePlanResolver) indexedInstances(ctx context.Context, scope pipeline.FlowInstanceLookupScope) ([]flowidentity.Instance, error) {
-	observations, err := r.indexedObservations(ctx, scope)
-	if err != nil {
-		return nil, err
-	}
-	instances := make([]flowidentity.Instance, 0, len(observations))
-	for _, observed := range observations {
-		instances = append(instances, observed.Identity())
-	}
-	return instances, nil
 }
 
 func (r connectRoutePlanResolver) indexedObservations(ctx context.Context, scope pipeline.FlowInstanceLookupScope) ([]pipeline.FlowInstanceObservation, error) {
