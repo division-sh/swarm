@@ -464,7 +464,7 @@ func TestPersistenceAuthorityDebtRunFixtureCollectorTransitionIsPinned(t *testin
 		})
 	}
 	t.Run("w1-comparison-metadata-only", func(t *testing.T) {
-		for _, edge := range [][2]string{{debtCompletedSelectedFixturePinCollectorTo, debtW1ComparisonCollectorTo}, {debtW3LandedFixtureCollectorTo, debtW1RebasedComparisonCollectorTo}, {debtW1RebasedComparisonCollectorTo, debtSourceLoaderCollectorTo}, {debtS1CollectorTo, debtProviderSourceCollectorTo}, {debtProviderSourceCollectorTo, debtS3AccountCollectorTo}, {debtS3AccountCollectorTo, debtDeploymentHandlerLandedCollectorTo}, {debtDeploymentHandlerLandedCollectorTo, debtRetiredSourceFreezeCollectorTo}, {debtW4ComparisonCollectorTo, debtCatalogRuntimeRowsLandedCollectorTo}} {
+		for _, edge := range [][2]string{{debtCompletedSelectedFixturePinCollectorTo, debtW1ComparisonCollectorTo}, {debtW3LandedFixtureCollectorTo, debtW1RebasedComparisonCollectorTo}, {debtW1RebasedComparisonCollectorTo, debtSourceLoaderCollectorTo}, {debtS1CollectorTo, debtProviderSourceCollectorTo}, {debtProviderSourceCollectorTo, debtS3AccountCollectorTo}, {debtS3AccountCollectorTo, debtDeploymentHandlerLandedCollectorTo}, {debtDeploymentHandlerLandedCollectorTo, debtRetiredSourceFreezeCollectorTo}, {debtW4ComparisonCollectorTo, debtCatalogRuntimeRowsLandedCollectorTo}, {debtCatalogRuntimeRowsLandedCollectorTo, debtTestProcessCollectorTo}} {
 			t.Run(edge[0], func(t *testing.T) {
 				for _, mutation := range []string{"exact", "foreign-base", "trusted-collector", "foreign-current", "head-collector", "unreviewed", "foreign-review", "reverse", "bootstrap", "remove-site", "add-site", "multiplicity", "replace-site"} {
 					t.Run(mutation, func(t *testing.T) {
