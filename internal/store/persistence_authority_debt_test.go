@@ -1107,6 +1107,11 @@ func debtValidateCollectorIdentity(base, current string, trusted, head authority
 		debtSitesEqual(head.Sites, trusted.Sites) {
 		return nil // Exact landed deployment-handler correspondence; counted sites and baseline are unchanged.
 	}
+	if base == debtCatalogRuntimeRowsLandedCollectorTo && trusted.Collector == base &&
+		current == debtS2OriginalContextCollectorTo && reviewedTransition == current && head.Collector == current &&
+		debtSitesEqual(head.Sites, trusted.Sites) {
+		return nil // #2794/6508200313: same selected uses and native original; unchanged debt sites.
+	}
 	if base == debtS1CollectorTo && trusted.Collector == base &&
 		current == debtProviderSourceCollectorTo && reviewedTransition == current && head.Collector == current &&
 		debtSitesEqual(head.Sites, trusted.Sites) {

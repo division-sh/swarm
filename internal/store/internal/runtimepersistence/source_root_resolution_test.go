@@ -18,7 +18,7 @@ func TestS1UnboundHashRootAmbiguityBothStores(t *testing.T) {
 			if !present {
 				t.Fatal("selected source owner has no bounded unbound-root resolution")
 			}
-			ctx := context.Background()
+			ctx := originalStoreFixtureContext(t, context.Background(), selected)
 			sourceA, _ := admittedRootForStorage(t, "shop-a")
 			sourceB, _ := admittedRootForStorage(t, "shop-b")
 			hash := sourceA.Admission().BundleHash()

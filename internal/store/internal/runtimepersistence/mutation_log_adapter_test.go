@@ -61,9 +61,10 @@ func TestMutationLogPrivateAdapterRequiresExactActiveRunSource(t *testing.T) {
 			t.Cleanup(cleanup)
 			selected := admitTestPostgresStore(t, db)
 			runID := uuid.NewString()
-			sourceartifactfixture.RequireArtifact(t, testAuthorActivityContext(), selected, artifactA)
+			original := originalStoreFixtureContext(t, testAuthorActivityContext(), selected)
+			sourceartifactfixture.RequireArtifact(t, original, selected, artifactA)
 			if tc.contextHash == bundleB {
-				sourceartifactfixture.RequireArtifact(t, testAuthorActivityContext(), selected, artifactB)
+				sourceartifactfixture.RequireArtifact(t, original, selected, artifactB)
 			}
 			if tc.seedRun {
 				requireRunFixtureForTest(t, originalStoreFixtureContext(t, testAuthorActivityContextForBundle(bundleA), selected), selected, semanticRunFixture{

@@ -33,6 +33,7 @@ func TestMailboxCompletionAcrossSelectedStoreHandlesBothStores(t *testing.T) {
 				path := filepath.Join(t.TempDir(), "two-handles.sqlite")
 				for i := range 2 {
 					s := newBootstrappedSQLiteRuntimeStoreForPath(t, path)
+					ctx = originalStoreFixtureContext(t, ctx, s)
 					p, err := s.EnsureOperatorPrincipal(ctx, time.Now())
 					if err != nil {
 						t.Fatal(err)
@@ -67,6 +68,7 @@ func TestMailboxCompletionAcrossSelectedStoreHandlesBothStores(t *testing.T) {
 					}
 					t.Cleanup(func() { _ = db.Close() })
 					s := admitTestPostgresStore(t, db)
+					ctx = originalStoreFixtureContext(t, ctx, s)
 					p, err := s.EnsureOperatorPrincipal(ctx, time.Now())
 					if err != nil {
 						t.Fatal(err)

@@ -49,6 +49,10 @@ func applySourceSetUpgrade(ctx context.Context, req agenttopology.SourceSetCommi
 }
 
 func (s *postgresSession) commitBundleUpgrade(ctx context.Context, req agenttopology.SourceSetCommitRequest) (agenttopology.SourceSetCommitResult, error) {
+	ctx, err := s.mutationContext(ctx, true)
+	if err != nil {
+		return agenttopology.SourceSetCommitResult{}, err
+	}
 	commit := mutationprotocol.RunRetainedPostgres(ctx, s.lease.Session(), mutationprotocol.Story, mutationprotocol.Ordinary, nil, s.owner.lifecycleCandidates, func(ctx context.Context, attempt *mutationprotocol.Attempt) (result agenttopology.SourceSetCommitResult, err error) {
 		err = attempt.WithSQL(ctx, func(ctx context.Context, tx *sql.Tx) error {
 			result, err = commitSourceSetTx(ctx, tx, req, false, sourceSetUpgrade{attempt: attempt, owner: s.owner.fanOutPipeline})
@@ -61,6 +65,10 @@ func (s *postgresSession) commitBundleUpgrade(ctx context.Context, req agenttopo
 }
 
 func (s *sqliteSession) commitBundleUpgrade(ctx context.Context, req agenttopology.SourceSetCommitRequest) (agenttopology.SourceSetCommitResult, error) {
+	ctx, err := s.mutationContext(ctx, true)
+	if err != nil {
+		return agenttopology.SourceSetCommitResult{}, err
+	}
 	commit := mutationprotocol.RunSQLite(ctx, s.owner.backend, "upgrade admitted run bundles", mutationprotocol.Story, mutationprotocol.Ordinary, nil, s.owner.lifecycleCandidates, func(ctx context.Context, attempt *mutationprotocol.Attempt) (result agenttopology.SourceSetCommitResult, err error) {
 		err = attempt.WithSQL(ctx, func(ctx context.Context, tx *sql.Tx) error {
 			result, err = commitSourceSetTx(ctx, tx, req, true, sourceSetUpgrade{attempt: attempt, owner: s.owner.fanOutPipeline})

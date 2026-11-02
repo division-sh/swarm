@@ -61,7 +61,13 @@ func (b *Backend) RunTransactionWithOptions(ctx context.Context, opts *sql.TxOpt
 }
 
 func (b *Backend) RunTransactionWithOptionsOutcome(ctx context.Context, opts *sql.TxOptions, operation func(context.Context, *sql.Tx) error) (bool, error) {
-	return b.runTransactionOutcome(ctx, opts, true, operation)
+	return b.runTransactionOutcome(ctx, opts, true, false, operation)
+}
+
+// RunSchemaBootstrapOutcome is the schema owner's construction entrance. It
+// cannot require the process singleton which that same operation creates.
+func (b *Backend) RunSchemaBootstrapOutcome(ctx context.Context, operation func(context.Context, *sql.Tx) error) (bool, error) {
+	return b.runTransactionOutcome(ctx, nil, true, true, operation)
 }
 
 // RunAdmittedTransactionOutcome is the runtime-write entrance. Construction and
@@ -80,7 +86,7 @@ func (b *Backend) RunAdmittedTransactionWithOptionsOutcome(ctx context.Context, 
 	if err != nil {
 		return false, cancellationBeforeMutationAdmission(ctx, err)
 	}
-	return b.runTransactionOutcome(original, opts, true, operation)
+	return b.runTransactionOutcome(original, opts, true, false, operation)
 }
 
 // RunReadTransaction owns one caller-scoped, transactionally consistent read.
@@ -96,11 +102,11 @@ func (b *Backend) RunReadTransaction(ctx context.Context, operation func(context
 		}
 		return errors.Join(operation(b.inspectionSQLContext(ctx), tx), ctx.Err())
 	}
-	_, err := b.runTransactionOutcome(ctx, &sql.TxOptions{Isolation: sql.LevelRepeatableRead, ReadOnly: true}, false, operation)
+	_, err := b.runTransactionOutcome(ctx, &sql.TxOptions{Isolation: sql.LevelRepeatableRead, ReadOnly: true}, false, false, operation)
 	return err
 }
 
-func (b *Backend) runTransactionOutcome(ctx context.Context, opts *sql.TxOptions, drain bool, operation func(context.Context, *sql.Tx) error) (committed bool, err error) {
+func (b *Backend) runTransactionOutcome(ctx context.Context, opts *sql.TxOptions, drain, construction bool, operation func(context.Context, *sql.Tx) error) (committed bool, err error) {
 	if err := b.refuseInspectionMutation(ctx); err != nil {
 		return false, err
 	}
@@ -138,6 +144,8 @@ func (b *Backend) runTransactionOutcome(ctx context.Context, opts *sql.TxOptions
 	var tx *sql.Tx
 	releaseOrdering := func() {}
 	defer func() { releaseOrdering() }()
+	releaseGeneration := func() {}
+	defer func() { releaseGeneration() }()
 	var stopReadRollback func() bool
 	var readRollbackDone <-chan error
 	probe := b.testTransactions.Begin(opts != nil && opts.ReadOnly, false)
@@ -215,6 +223,7 @@ func (b *Backend) runTransactionOutcome(ctx context.Context, opts *sql.TxOptions
 	}
 	probe.Begun()
 	sqlCtx, releaseOrdering = authoractivity.BindTransaction(ctx, sqlCtx, tx, authoractivity.DialectPostgres)
+	sqlCtx, releaseGeneration = generationauthority.BindTransaction(ctx, sqlCtx, tx, false, opts != nil && opts.ReadOnly)
 	if !drain {
 		readTx := tx
 		done := make(chan error, 1)
@@ -227,7 +236,7 @@ func (b *Backend) runTransactionOutcome(ctx context.Context, opts *sql.TxOptions
 	}
 	sqlCtx = transactiontest.WithAttempt(sqlCtx, probe)
 	var retireAdmission func()
-	sqlCtx, retireAdmission, err = admitOptionalMutationTx(sqlCtx, tx, opts, drain)
+	sqlCtx, retireAdmission, err = admitOptionalMutationTx(sqlCtx, tx, opts, drain, construction)
 	if err != nil {
 		serializationConflict = exactSerializationConflict(err)
 		return false, err
@@ -268,11 +277,25 @@ func prepareOptionalMutationAdmission(ctx context.Context, opts *sql.TxOptions, 
 	return ctx, nil
 }
 
-func admitOptionalMutationTx(ctx context.Context, tx *sql.Tx, opts *sql.TxOptions, drain bool) (context.Context, func(), error) {
-	if drain && (opts == nil || !opts.ReadOnly) && runtimeownership.HasMutationAuthority(ctx) {
-		return generationauthority.AdmitMutationTx(ctx, tx, false)
+func admitOptionalMutationTx(ctx context.Context, tx *sql.Tx, opts *sql.TxOptions, drain, construction bool) (context.Context, func(), error) {
+	retire := func() {}
+	if !drain || (opts != nil && opts.ReadOnly) {
+		return ctx, retire, nil
 	}
-	return ctx, func() {}, nil
+	var err error
+	if runtimeownership.HasMutationAuthority(ctx) {
+		ctx, retire, err = generationauthority.AdmitMutationTx(ctx, tx, false)
+		if err != nil {
+			return nil, nil, err
+		}
+	}
+	if !construction {
+		if err := generationauthority.AdmitTransaction(ctx, tx, false); err != nil {
+			retire()
+			return nil, nil, err
+		}
+	}
+	return ctx, retire, nil
 }
 
 func joinTransactionRollback(tx *sql.Tx, stopReadRollback func() bool, readRollbackDone <-chan error, probe *transactiontest.Attempt) error {

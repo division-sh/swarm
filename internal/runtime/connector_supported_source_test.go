@@ -28,6 +28,7 @@ func seedCapturedProviderTarget(t *testing.T, ctx context.Context, persistence r
 		t.Fatal(err)
 	}
 	ctx = runtimecorrelation.WithRootAdmission(runtimecorrelation.WithSourceArtifactFact(ctx, sourceartifactfixture.FactFor(rooted.Artifact())), rooted.Admission())
+	ctx = originalRuntimeFixtureContext(t, ctx, persistence)
 	var target runtimepkg.InboundTarget
 	switch selected := persistence.(type) {
 	case *store.PostgresStore:

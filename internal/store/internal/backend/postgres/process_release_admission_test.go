@@ -14,8 +14,9 @@ import (
 func TestPostgresProcessReleaseAdmissionAndDisposition(t *testing.T) {
 	for _, phase := range []string{"healthy", "cancel_before", "cancel_queued", "cancel_admitted", "unlock_error", "not_owned", "close_error"} {
 		t.Run(phase, func(t *testing.T) {
-			_, db, _ := testutil.StartPostgres(t)
-			ctx, cancel := context.WithCancel(context.Background())
+			dsn, db, _ := testutil.StartPostgres(t)
+			original := originalProcessContext(t, dsn)
+			ctx, cancel := context.WithCancel(original)
 			defer cancel()
 			lease, acquired, err := AcquireAdvisoryLockLease(ctx, db, "process-release-admission")
 			if err != nil || !acquired {
@@ -57,7 +58,7 @@ func TestPostgresProcessReleaseAdmissionAndDisposition(t *testing.T) {
 				entered, resume := make(chan struct{}), make(chan struct{})
 				transaction := make(chan error, 1)
 				go func() {
-					transaction <- lease.RunTransaction(context.Background(), func(context.Context, *sql.Tx) error {
+					transaction <- lease.RunTransaction(original, func(context.Context, *sql.Tx) error {
 						close(entered)
 						<-resume
 						return nil

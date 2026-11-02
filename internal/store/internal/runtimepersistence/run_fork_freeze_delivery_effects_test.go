@@ -28,7 +28,7 @@ func TestForkSourceDeliveryEffectMatrixBothStores(t *testing.T) {
 				ctx := testAuthorActivityContext()
 				ctx = originalStoreFixtureContext(t, ctx, fixture.store)
 				runID := uuid.NewString()
-				seedAuthorActivityReceiptRun(t, fixture, ctx, runID)
+				ctx = seedAuthorActivityReceiptRun(t, fixture, ctx, runID)
 				store := fixture.store.(interface {
 					deliverylifecycle.Store
 					runlifecycle.OperationOwner

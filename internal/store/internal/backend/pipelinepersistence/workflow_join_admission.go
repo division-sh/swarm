@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"sort"
 
+	"github.com/division-sh/swarm/internal/runtime/core/flowidentity"
 	"github.com/division-sh/swarm/internal/runtime/failures"
 	"github.com/division-sh/swarm/internal/runtime/pipeline"
 	storeentity "github.com/division-sh/swarm/internal/store/internal/backend/entityruntime"
@@ -21,6 +22,13 @@ func (s *PipelineSQLiteOwner) RequireWorkflowJoinAdmissionTx(ctx context.Context
 }
 
 func requireWorkflowJoinAdmissionTx(ctx context.Context, tx *sql.Tx, fences []pipeline.WorkflowJoinAdmissionFence, postgres bool) error {
+	owners := make([]flowidentity.RunScopedFlowInstance, 0, len(fences))
+	for _, fence := range fences {
+		owners = append(owners, fence.Owner)
+	}
+	if err := lockWorkflowInstancesTx(ctx, tx, postgres, owners); err != nil {
+		return err
+	}
 	ordered := append([]pipeline.WorkflowJoinAdmissionFence(nil), fences...)
 	sort.Slice(ordered, func(i, j int) bool {
 		left, right := ordered[i], ordered[j]
@@ -29,13 +37,6 @@ func requireWorkflowJoinAdmissionTx(ctx context.Context, tx *sql.Tx, fences []pi
 	for _, fence := range ordered {
 		if err := fence.Validate(); err != nil {
 			return err
-		}
-		if postgres {
-			// Share the constructor's lock so absence cannot race an initial arm.
-			lock := fmt.Sprintf("%d:%s%s", len(fence.Owner.RunID), fence.Owner.RunID, fence.Owner.Route.InstancePath)
-			if _, err := tx.ExecContext(ctx, `SELECT pg_advisory_xact_lock(hashtextextended($1, 0))`, lock); err != nil {
-				return err
-			}
 		}
 		header, found, err := workflowheader.LoadForMutation(ctx, tx, postgres, fence.Owner.RunID, fence.EntityID, fence.Owner.Route.InstancePath)
 		if err != nil {

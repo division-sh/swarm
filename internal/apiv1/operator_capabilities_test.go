@@ -1,8 +1,10 @@
 package apiv1
 
 import (
+	"context"
 	"fmt"
 	"sync"
+	"testing"
 	"time"
 
 	"github.com/division-sh/swarm/internal/runtime"
@@ -12,11 +14,14 @@ import (
 	"github.com/division-sh/swarm/internal/runtime/executionposture"
 	"github.com/division-sh/swarm/internal/runtime/pipeline"
 	"github.com/division-sh/swarm/internal/runtime/semanticview"
+	"github.com/division-sh/swarm/internal/runtime/startupownership"
+	"github.com/division-sh/swarm/internal/store/testutil/agentfixture"
 )
 
 // testOperatorCapabilities is fixture assembly only. Production registration
 // must use the exact family option types in operator_capabilities.go.
 type testOperatorCapabilities struct {
+	OriginalContext           context.Context
 	ExecutionPosture          executionposture.Posture
 	Now                       func() time.Time
 	Ready                     func() bool
@@ -144,10 +149,11 @@ func (c testOperatorCapabilities) decisionCards() DecisionCardHandlerOptions {
 	}
 }
 
-func testOperatorHandlers(c testOperatorCapabilities) map[string]MethodHandler {
+func testOperatorHandlers(t testing.TB, c testOperatorCapabilities) map[string]MethodHandler {
+	t.Helper()
 	agents, _ := c.AgentConversations.(AgentReadStore)
 	conversations, _ := c.AgentConversations.(ConversationReadStore)
-	return MergeOperatorHandlers(
+	handlers := MergeOperatorHandlers(
 		OperatorHealthHandlers(HealthHandlerOptions{ExecutionPosture: c.posture(), Now: c.Now, Ready: c.Ready, Database: c.Database, Publication: c.runtimePublication()}),
 		OperatorRuntimeIdentityHandlers(RuntimeIdentityHandlerOptions{Identity: c.RuntimeIdentity, Publication: c.runtimePublication()}),
 		OperatorRunReadHandlers(RunReadHandlerOptions{Runs: c.Runs}),
@@ -168,6 +174,29 @@ func testOperatorHandlers(c testOperatorCapabilities) map[string]MethodHandler {
 		OperatorConversationForkHandlers(ConversationForkHandlerOptions{ExecutionPosture: c.posture(), Now: c.Now, Reads: c.ConversationForks, Lifecycle: c.ConversationForkLifecycle, Chat: c.ForkChatExecutor, Idempotency: c.Idempotency}),
 		OperatorAgentControlHandlers(AgentControlHandlerOptions{Now: c.Now, Controller: c.AgentControl, Idempotency: c.Idempotency, RuntimeContexts: c.RuntimeContexts, SelectedForkControls: c.SelectedForkControls}),
 	)
+	if selected, native := c.Idempotency.(agentfixture.Store); native && c.RuntimeContexts == nil {
+		original := c.OriginalContext
+		if original == nil {
+			original = context.Background()
+		}
+		original, err := agentfixture.ProcessContext(t, original, selected)
+		if err != nil {
+			t.Fatal(err)
+		}
+		for name, handler := range handlers {
+			handlers[name] = func(ctx context.Context, request Request) (any, error) {
+				if !startupownership.HasMutationAuthority(ctx) {
+					ctx = startupownership.CarryMutationAuthority(ctx, original)
+				}
+				ctx, err := agentfixture.ProcessContext(t, ctx, selected)
+				if err != nil {
+					return nil, err
+				}
+				return handler(ctx, request)
+			}
+		}
+	}
+	return handlers
 }
 
 func testOperatorSubscriptions(c testOperatorCapabilities, overrides ...SubscriptionRuntimeOptions) *SubscriptionRuntime {

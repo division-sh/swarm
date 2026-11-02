@@ -111,7 +111,7 @@ func verifyPublishedBarrierCompletionFailure(t *testing.T, ctx context.Context, 
 		t.Fatal(ctx.Err())
 	}
 	barrier, err := storetest.ReadExactFanOutBarrier(ctx, selected.RuntimeDeps().DeliveryStore, key)
-	if err != nil || barrier.Status != fanoutbarrier.StatusClosedPending || barrier.Summary == nil || *barrier.Summary != (fanoutbarrier.Summary{Total: 1, Succeeded: 1}) ||
+	if err != nil || barrier.Status != fanoutbarrier.StatusOutcomeDeadLettered || barrier.Summary == nil || *barrier.Summary != (fanoutbarrier.Summary{Total: 1, Succeeded: 1}) ||
 		barrier.TransferredOccurrence == nil || barrier.ScheduleActivationID != "" || barrier.TransferredOccurrence.Publication.EventID != observed.id || barrier.TransferredOccurrence.Publication.SourceEventID != original.id {
 		t.Fatalf("completion failure lost its pre-ACK summary/lineage or rearmed a timer: %+v err=%v", barrier, err)
 	}

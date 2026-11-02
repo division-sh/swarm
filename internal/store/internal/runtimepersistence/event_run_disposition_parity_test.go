@@ -101,7 +101,7 @@ func TestExistingRunEventClassesNeverCreateOrReopenRunsParity(t *testing.T) {
 					fixture := backend.open(t)
 					ctx := originalStoreFixtureContext(t, testAuthorActivityContext(), fixture.store)
 					in := newRunDispositionFixtureInput()
-					seedAuthorActivityReceiptRun(t, fixture, ctx, in.RunID)
+					ctx = seedAuthorActivityReceiptRun(t, fixture, ctx, in.RunID)
 					if test.needsSameRunParent {
 						seedRunDispositionParent(t, fixture, ctx, in.RunID, in.ParentID, in.OccurredAt.Add(-time.Second))
 					}
@@ -119,7 +119,7 @@ func TestExistingRunEventClassesNeverCreateOrReopenRunsParity(t *testing.T) {
 						fixture := backend.open(t)
 						ctx := originalStoreFixtureContext(t, testAuthorActivityContext(), fixture.store)
 						in := newRunDispositionFixtureInput()
-						seedAuthorActivityReceiptRun(t, fixture, ctx, in.RunID)
+						ctx = seedAuthorActivityReceiptRun(t, fixture, ctx, in.RunID)
 						if test.needsSameRunParent {
 							seedRunDispositionParent(t, fixture, ctx, in.RunID, in.ParentID, in.OccurredAt.Add(-time.Second))
 						}
@@ -213,7 +213,7 @@ func TestRunCreatingRootRejectsTerminalRunParity(t *testing.T) {
 			sourceartifactfixture.RequireArtifact(t, ctx, fixture.store.(sourceartifactfixture.Writer), rooted.Artifact())
 			ctx = runtimecorrelation.WithRootAdmission(ctx, rooted.Admission())
 			in := newRunDispositionFixtureInput()
-			seedAuthorActivityReceiptRun(t, fixture, ctx, in.RunID)
+			ctx = seedAuthorActivityReceiptRun(t, fixture, ctx, in.RunID)
 			setRunDispositionFixtureStatus(t, fixture, ctx, in.RunID, "completed")
 			before := eventMutationSurfaceCounts(t, fixture.db, ctx)
 			event := eventtest.RunCreatingRootIngress(in.EventID, "test.root", "ingress", "", json.RawMessage(`{}`), 0, in.RunID, "", events.EventEnvelope{}, in.OccurredAt)
@@ -241,7 +241,7 @@ func TestDirectiveOperationRequiresExistingExactRunAuthorityParity(t *testing.T)
 			requireDefaultSourceArtifactForTest(t, ctx, fixture.store)
 			store := fixture.store.(runtimeagentcontrol.DirectiveOperationStore)
 			req := newRunDispositionDirectiveRequest(t)
-			seedAuthorActivityReceiptRun(t, fixture, ctx, req.Operation.ResolvedRunID)
+			ctx = seedAuthorActivityReceiptRun(t, fixture, ctx, req.Operation.ResolvedRunID)
 			seedTestAgentRow(
 				t,
 				ctx,

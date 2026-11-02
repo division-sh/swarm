@@ -44,6 +44,8 @@ func TestRuntimeLogPredicateBoundariesBothStores(t *testing.T) {
 			ctxA = originalStoreFixtureContext(t, ctxA, selected)
 			ctxB = originalStoreFixtureContext(t, ctxB, selected)
 			runA, runB, entity := uuid.NewString(), uuid.NewString(), uuid.NewString()
+			ctxA = originalStoreFixtureContext(t, ctxA, selected)
+			ctxB = originalStoreFixtureContext(t, ctxB, selected)
 			requireRunFixtureForTest(t, ctxA, selected, semanticRunFixture{Origin: semanticScenarioSetupRunOriginForTest(), RunID: runA, Artifact: artifactA, StartedAt: base.Add(-time.Minute)})
 			requireRunFixtureForTest(t, ctxB, selected, semanticRunFixture{Origin: semanticScenarioSetupRunOriginForTest(), RunID: runB, Artifact: artifactB, StartedAt: base.Add(-time.Minute)})
 			id := func(n int) string { return fmt.Sprintf("00000000-0000-0000-0000-%012d", n) }

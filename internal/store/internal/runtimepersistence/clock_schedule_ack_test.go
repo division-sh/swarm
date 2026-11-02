@@ -17,6 +17,7 @@ import (
 	"github.com/division-sh/swarm/internal/runtime/executionposture"
 	"github.com/division-sh/swarm/internal/runtime/genericschedule"
 	"github.com/division-sh/swarm/internal/runtime/semanticvalue"
+	"github.com/division-sh/swarm/internal/runtime/startupownership"
 	"github.com/google/uuid"
 )
 
@@ -51,6 +52,11 @@ func TestInstanceClockSchedulerConsumesCommittedReceiptBothStores(t *testing.T) 
 					options.RuntimeInstanceID = scope.RuntimeInstanceID
 				}
 				registerTestAuthorActivityCatalogForContext(t, selected.(testAuthorActivityCatalogRegistrar), catalogContext)
+				options.MutationContext = func(work context.Context) (context.Context, error) {
+					work = startupownership.CarryMutationAuthority(work, ctx)
+					_, err := startupownership.CaptureMutationAuthority(work)
+					return work, err
+				}
 				publisher, err := newStoreTestEventBus(t, selected.(storeTestDurableEventBusStore), options)
 				if err != nil {
 					t.Fatal(err)
@@ -134,11 +140,20 @@ func (s *clockAdmissionReceiptFault) AdmitGenericScheduleOutcome(ctx context.Con
 func clockAcknowledgmentContext(t *testing.T, ctx context.Context) context.Context {
 	t.Helper()
 	process := worklifetime.NewProcess()
+	original, err := startupownership.CaptureMutationAuthority(ctx)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := process.BindOriginalProcess(original.ProcessAuthority().LeaseStamp()); err != nil {
+		t.Fatal(err)
+	}
 	fact, ok := correlation.SourceArtifactFactFromContext(ctx)
 	if !ok {
 		t.Fatal("clock receipt proof requires its admitted source")
 	}
-	runtime, err := process.NewRuntime(ctx, worklifetime.RuntimeIdentity{RuntimeInstanceID: uuid.NewString(), BundleHash: fact.BundleHash()})
+	ctx = correlation.WithRuntimeInstanceID(ctx, original.ProcessAuthority().RuntimeInstanceID)
+	ctx = authoractivity.WithScope(ctx, authoractivity.BundleScope(original.ProcessAuthority().RuntimeInstanceID, fact.BundleHash()))
+	runtime, err := process.NewRuntime(ctx, worklifetime.RuntimeIdentity{RuntimeInstanceID: original.ProcessAuthority().RuntimeInstanceID, BundleHash: fact.BundleHash()})
 	if err != nil {
 		t.Fatal(err)
 	}

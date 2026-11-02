@@ -1,7 +1,6 @@
 package channelonboarding_test
 
 import (
-	"context"
 	"errors"
 	"strings"
 	"testing"
@@ -14,22 +13,26 @@ import (
 	"github.com/google/uuid"
 )
 
-func sessionReservation(t *testing.T, principal string, now time.Time) domain.StartRequest {
+func sessionReservation(t *testing.T, f callbackLockFixture, now time.Time) domain.StartRequest {
 	t.Helper()
+	original, err := f.logout.process.Evidence()
+	if err != nil {
+		t.Fatal(err)
+	}
 	plan, err := plangeneration.FromCanonicalValue(map[string]string{"session": "account-admission"})
 	if err != nil {
 		t.Fatal(err)
 	}
 	id := uuid.NewString()
 	return domain.StartRequest{
-		OperationID: id, RequestKeyHash: id, RequestHash: id, PrincipalID: principal,
+		OperationID: id, RequestKeyHash: id, RequestHash: id, PrincipalID: f.principal,
 		Verb: domain.VerbConnect, Provider: "whatsapp",
 		Interface: operatorchannel.InterfaceIdentity{InterfaceRef: operatorchannel.InterfaceHITLChannelV2,
 			ChannelPackID: "provider.whatsapp.hitl_channel", ChannelPackVersion: "0.1.0",
 			ChannelManifestHash: "sha256:session-manifest", SemanticGeneration: "sha256:session-plan"},
 		Coordinate: domain.ChannelRuntimeContextCoordinate{BundleHash: sourceartifactfixture.BundleHash,
 			BundleIdentity: "session-proof", PackInventoryGeneration: "sha256:session-inventory",
-			RuntimeInstanceID: uuid.NewString(), ContextPublicationGeneration: 1, PlanGeneration: plan},
+			RuntimeInstanceID: original.RuntimeInstanceID, ContextPublicationGeneration: 1, PlanGeneration: plan},
 		TargetSelector: "ingress:reception:whatsapp", Posture: domain.ActivationSessionConnection,
 		Ceremony: domain.CeremonyAuthenticatedTextChallenge, RequestedAt: now,
 	}
@@ -39,19 +42,19 @@ func TestSessionDeclarationReservesWithoutCredentialsOrBusinessTargetBothStores(
 	for _, backend := range []string{"sqlite", "postgres"} {
 		t.Run(backend, func(t *testing.T) {
 			f := newCallbackLockFixture(t, backend)
-			request := sessionReservation(t, f.principal, time.Now().UTC())
-			op, err := f.selected.ReserveChannelOnboarding(context.Background(), request)
+			request := sessionReservation(t, f, time.Now().UTC())
+			op, err := f.selected.ReserveChannelOnboarding(f.ctx, request)
 			if err != nil || op.Phase != domain.PhasePreparing || len(op.CredentialReservations) != 0 ||
 				op.IdentityOperationID != "" || op.ActivationRevision != 0 {
 				t.Fatalf("declaration-only reservation = %+v, %v", op, err)
 			}
-			again, err := f.selected.ReserveChannelOnboarding(context.Background(), request)
+			again, err := f.selected.ReserveChannelOnboarding(f.ctx, request)
 			if err != nil || again.OperationID != op.OperationID || again.Revision != op.Revision {
 				t.Fatalf("exact reservation retry = %+v, %v", again, err)
 			}
 			request.OperationID, request.RequestKeyHash = uuid.NewString(), uuid.NewString()
 			request.Posture = domain.ActivationWebhookRegistration
-			if _, err := f.selected.ReserveChannelOnboarding(context.Background(), request); !errors.Is(err, domain.ErrInvalidRequest) {
+			if _, err := f.selected.ReserveChannelOnboarding(f.ctx, request); !errors.Is(err, domain.ErrInvalidRequest) {
 				t.Fatalf("webhook accepted a credential waiver: %v", err)
 			}
 		})
@@ -62,8 +65,8 @@ func TestSessionConnectionReservationPrecedesPairingBothStores(t *testing.T) {
 	for _, backend := range []string{"sqlite", "postgres"} {
 		t.Run(backend, func(t *testing.T) {
 			f := newCallbackLockFixture(t, backend)
-			request := sessionReservation(t, f.principal, time.Now().UTC())
-			op, err := f.selected.ReserveChannelOnboarding(context.Background(), request)
+			request := sessionReservation(t, f, time.Now().UTC())
+			op, err := f.selected.ReserveChannelOnboarding(f.ctx, request)
 			if err != nil {
 				t.Fatal(err)
 			}
@@ -72,12 +75,12 @@ func TestSessionConnectionReservationPrecedesPairingBothStores(t *testing.T) {
 			}
 			for range 3 {
 				request.OperationID = uuid.NewString()
-				again, err := f.selected.ReserveChannelOnboarding(context.Background(), request)
+				again, err := f.selected.ReserveChannelOnboarding(f.ctx, request)
 				if err != nil || again.SessionConnectionID != op.SessionConnectionID || again.OperationID != op.OperationID {
 					t.Fatal("request replay changed reserved connection identity", err)
 				}
 			}
-			readback, err := f.selected.GetChannelOnboarding(context.Background(), op.OperationID)
+			readback, err := f.selected.GetChannelOnboarding(f.ctx, op.OperationID)
 			if err != nil || readback.SessionConnectionID != op.SessionConnectionID ||
 				readback.SessionAccount != (operatorchannel.SessionAccountAdmission{}) || readback.ActivationRevision != 0 {
 				t.Fatal("reservation manufactured account or executable authority", err)
@@ -90,8 +93,8 @@ func TestSessionAccountEvidencePersistenceAndRevisionFencesBothStores(t *testing
 	for _, backend := range []string{"sqlite", "postgres"} {
 		t.Run(backend, func(t *testing.T) {
 			f := newCallbackLockFixture(t, backend)
-			ctx, now := context.Background(), time.Now().UTC()
-			op, err := f.selected.ReserveChannelOnboarding(ctx, sessionReservation(t, f.principal, now))
+			ctx, now := f.ctx, time.Now().UTC()
+			op, err := f.selected.ReserveChannelOnboarding(ctx, sessionReservation(t, f, now))
 			if err != nil {
 				t.Fatal(err)
 			}

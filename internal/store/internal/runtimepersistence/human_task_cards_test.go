@@ -4,11 +4,12 @@ import (
 	"context"
 	"errors"
 	"fmt"
-	"github.com/division-sh/swarm/internal/runtime/testfixtures/decisioncardtest"
 	"strings"
 	"sync"
 	"testing"
 	"time"
+
+	"github.com/division-sh/swarm/internal/runtime/testfixtures/decisioncardtest"
 
 	"github.com/division-sh/swarm/internal/events"
 	runtimecontracts "github.com/division-sh/swarm/internal/runtime/contracts"
@@ -22,7 +23,7 @@ func TestHumanTaskDecisionAndBudgetLifecycleParity(t *testing.T) {
 	for _, backend := range []string{"sqlite", "postgres"} {
 		backend := backend
 		t.Run(backend, func(t *testing.T) {
-			ctx := testAuthorActivityContext()
+			ctx := storeTestWorkContext(t, testAuthorActivityContext())
 			cardStore, runID := decisionCardTestStore(t, backend)
 			ctx = originalStoreFixtureContext(t, ctx, cardStore)
 			humanStore := cardStore.(decisioncard.HumanTaskStore)
@@ -89,7 +90,7 @@ func TestHumanTaskDecisionAndBudgetLifecycleParity(t *testing.T) {
 func TestHumanTaskMutationsRejectForeignRequesterOwnerBeforeStateChange(t *testing.T) {
 	for _, backend := range []string{"sqlite", "postgres"} {
 		t.Run(backend, func(t *testing.T) {
-			ctx := testAuthorActivityContext()
+			ctx := storeTestWorkContext(t, testAuthorActivityContext())
 			cardStore, runID := decisionCardTestStore(t, backend)
 			ctx = originalStoreFixtureContext(t, ctx, cardStore)
 			humanStore := cardStore.(decisioncard.HumanTaskStore)
@@ -240,7 +241,7 @@ func TestNormalRunCompletionRequiresSettledHumanTasksParity(t *testing.T) {
 }
 
 func TestPostgresHumanTaskWeeklyBudgetSerializesConcurrentApprovals(t *testing.T) {
-	ctx := testAuthorActivityContext()
+	ctx := storeTestWorkContext(t, testAuthorActivityContext())
 	cardStore, runID := decisionCardTestStore(t, "postgres")
 	ctx = originalStoreFixtureContext(t, ctx, cardStore)
 	humanStore := cardStore.(decisioncard.HumanTaskStore)
@@ -335,7 +336,7 @@ func TestHumanTaskExpiryAndRunSupersessionParity(t *testing.T) {
 	for _, backend := range []string{"sqlite", "postgres"} {
 		backend := backend
 		t.Run(backend, func(t *testing.T) {
-			ctx := testAuthorActivityContext()
+			ctx := storeTestWorkContext(t, testAuthorActivityContext())
 			cardStore, runID := decisionCardTestStore(t, backend)
 			ctx = originalStoreFixtureContext(t, ctx, cardStore)
 			humanStore := cardStore.(decisioncard.HumanTaskStore)

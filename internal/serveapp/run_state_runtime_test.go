@@ -38,7 +38,6 @@ import (
 	"github.com/division-sh/swarm/internal/store/testutil/agentfixture"
 	"github.com/division-sh/swarm/internal/testutil"
 	"github.com/division-sh/swarm/internal/testutil/sourceartifactfixture"
-	"github.com/division-sh/swarm/internal/testutil/stagecatalogfixture"
 	"github.com/google/uuid"
 )
 
@@ -107,8 +106,12 @@ func runStatusAgentConfig(t *testing.T, source semanticview.Source, runID, agent
 	return resolved.Actor
 }
 
-func runStatusAuthorActivityContext(source runtimecorrelation.SourceArtifactFact) context.Context {
-	ctx := runtimecorrelation.WithRuntimeInstanceID(context.Background(), runStatusTestRuntimeInstanceID)
+func runStatusAuthorActivityContext(source runtimecorrelation.SourceArtifactFact, originals ...context.Context) context.Context {
+	ctx := context.Background()
+	if len(originals) > 0 {
+		ctx = originals[0]
+	}
+	ctx = runtimecorrelation.WithRuntimeInstanceID(ctx, runStatusTestRuntimeInstanceID)
 	ctx = runtimecorrelation.WithSourceArtifactFact(ctx, source)
 	return runtimeauthoractivity.WithScope(ctx, runtimeauthoractivity.BundleScope(runStatusTestRuntimeInstanceID, source.BundleHash()))
 }
@@ -138,13 +141,15 @@ func newRunStatusEventBus(t *testing.T, pg *store.PostgresStore, runID string, w
 	workflow := runtimepipeline.NewWorkflowPersistence(pg)
 	source := runStatusSubscriptionSource(t, withAgent)
 	bundle, _ := semanticview.Bundle(source)
-	sourceFact := sourceartifactfixture.RequireArtifact(t, context.Background(), pg, bundle.SourceArtifact)
-	workOwner := newSupervisorTestRuntimeOccurrence(t, sourceFact.BundleHash())
+	sourceFact := sourceartifactfixture.FactFor(bundle.SourceArtifact)
+	process := newSupervisorTestProcessOwner(t)
+	original := serveFixtureProcessContext(t, worklifetime.WithProcess(runStatusAuthorActivityContext(sourceFact), process), pg)
+	sourceartifactfixture.RequireArtifact(t, original, pg, bundle.SourceArtifact)
+	workOwner := newSupervisorTestRuntimeOccurrence(t, sourceFact.BundleHash(), original)
 	authority, err := runtimedelivery.NewNormalExecutionAuthority(sourceFact, runStatusTestRuntimeInstanceID, 1)
 	if err != nil {
 		t.Fatalf("construct run status delivery authority: %v", err)
 	}
-	original := serveFixtureProcessContext(t, runStatusAuthorActivityContext(sourceFact), pg)
 	capability, err := agentfixture.ProcessCapability(t, original, pg)
 	if err != nil {
 		t.Fatal(err)
@@ -315,25 +320,6 @@ func startRunStatusReceiverDeliveries(t *testing.T, pg interface {
 	})
 }
 
-func markRunStatusCompleted(t *testing.T, pg *store.PostgresStore, source runtimecorrelation.SourceArtifactFact, eventID string) {
-	t.Helper()
-	var runID, bundleHash string
-	if err := storetest.DatabaseForTest(pg).QueryRowContext(runStatusAuthorActivityContext(source), `
-		SELECT r.run_id::text, r.bundle_hash
-		FROM events e
-		JOIN runs r ON r.run_id = e.run_id
-		WHERE e.event_id = $1::uuid
-	`, eventID).Scan(&runID, &bundleHash); err != nil {
-		t.Fatalf("load completion candidate identity: %v", err)
-	}
-	if _, err := storetest.ExecuteRunCompletionCandidate(
-		serveFixtureProcessContext(t, runStatusAuthorActivityContext(source), pg), pg, bundleHash, runID,
-		stagecatalogfixture.NewFinalCatalog([]string{"ready"}, map[string][]string{".": {"ready"}}),
-	); err != nil {
-		t.Fatalf("execute normal run completion candidate: %v", err)
-	}
-}
-
 func TestCLI_ServeRetiredPlatformSpecWritesOnlyStderr(t *testing.T) {
 	isolateCLIAPIConfigEnv(t)
 	var stdout, stderr bytes.Buffer
@@ -390,39 +376,6 @@ func waitRunStatusEventSettlement(t *testing.T, db *sql.DB, runID string, wantEv
 	}
 }
 
-func TestRunState_UsesDurableCompletedRunState(t *testing.T) {
-	_, db, _ := testutil.StartPostgres(t)
-	pg := storetest.AdmitPostgresRuntimeStore(t, db)
-	runID := uuid.NewString()
-	eb, _, source, _ := newRunStatusEventBus(t, pg, runID, false)
-	registerRunStatusEventCatalog(t, pg, source)
-	entityID := runID
-	eventID := publishRunStatusExistingRootEvent(t, eb, source, runID, entityID)
-	markRunStatusCompleted(t, pg, source, eventID)
-
-	ctx := context.Background()
-	deadline := time.Now().Add(2 * time.Second)
-	var endedAt sql.NullTime
-	for {
-		var status string
-		err := db.QueryRowContext(ctx, `
-			SELECT COALESCE(status, ''), ended_at
-			FROM runs
-			WHERE run_id = $1::uuid
-		`, runID).Scan(&status, &endedAt)
-		if err == nil && status == "completed" && endedAt.Valid {
-			break
-		}
-		if time.Now().After(deadline) {
-			t.Fatalf("run %s did not reach durable completed state: last err=%v", runID, err)
-		}
-		time.Sleep(10 * time.Millisecond)
-	}
-	if endedAt.Time.IsZero() {
-		t.Fatal("expected durable ended_at for completed run")
-	}
-}
-
 func TestRunState_KeepsSupportedRunRunningUntilManagerWorkSettles(t *testing.T) {
 	_, db, _ := testutil.StartPostgres(t)
 	pg := storetest.AdmitPostgresRuntimeStore(t, db)
@@ -462,7 +415,7 @@ func TestRunState_KeepsSupportedRunRunningUntilManagerWorkSettles(t *testing.T) 
 	defer func() { _ = am.Shutdown() }()
 
 	entityID := runID
-	eventID := publishRunStatusExistingRootEvent(t, eb, source, runID, entityID)
+	publishRunStatusExistingRootEvent(t, eb, source, runID, entityID)
 
 	select {
 	case <-agentStarted:
@@ -478,7 +431,7 @@ func TestRunState_KeepsSupportedRunRunningUntilManagerWorkSettles(t *testing.T) 
 		activeDeliveries int
 	)
 	if err := db.QueryRowContext(ctx, `
-		SELECT COALESCE(status, ''), event_count,
+		SELECT COALESCE(status, ''), (SELECT c.event_count FROM run_event_counts c WHERE c.run_id = runs.run_id),
 		       (SELECT COUNT(*) FROM flow_instances WHERE run_id = runs.run_id)
 		FROM runs
 		WHERE run_id = $1::uuid
@@ -512,21 +465,20 @@ func TestRunState_KeepsSupportedRunRunningUntilManagerWorkSettles(t *testing.T) 
 
 	close(releaseAgent)
 	waitRunStatusEventSettlement(t, db, runID, 2)
-	markRunStatusCompleted(t, pg, source, eventID)
 
 	deadline := time.Now().Add(3 * time.Second)
 	for {
 		err := db.QueryRowContext(ctx, `
-			SELECT COALESCE(status, ''), event_count,
+			SELECT COALESCE(status, ''), (SELECT c.event_count FROM run_event_counts c WHERE c.run_id = runs.run_id),
 			       (SELECT COUNT(*) FROM flow_instances WHERE run_id = runs.run_id)
 			FROM runs
 			WHERE run_id = $1::uuid
 		`, runID).Scan(&status, &eventCount, &instanceCount)
-		if err == nil && status == "completed" {
+		if err == nil && status == "running" {
 			break
 		}
 		if time.Now().After(deadline) {
-			t.Fatalf("run %s did not reach coherent completed state: last err=%v status=%q event_count=%d instances=%d", runID, err, status, eventCount, instanceCount)
+			t.Fatalf("settled run %s lost coherent running state: last err=%v status=%q event_count=%d instances=%d", runID, err, status, eventCount, instanceCount)
 		}
 		time.Sleep(10 * time.Millisecond)
 	}
@@ -589,7 +541,7 @@ func TestRunState_PreservesRunningTruthWhileManagerWorkIsActive(t *testing.T) {
 	defer func() { _ = am.Shutdown() }()
 
 	entityID := runID
-	eventID := publishRunStatusExistingRootEvent(t, eb, source, runID, entityID)
+	publishRunStatusExistingRootEvent(t, eb, source, runID, entityID)
 
 	select {
 	case <-agentStarted:
@@ -634,7 +586,6 @@ func TestRunState_PreservesRunningTruthWhileManagerWorkIsActive(t *testing.T) {
 	}
 	close(releaseAgent)
 	waitRunStatusEventSettlement(t, db, runID, 2)
-	markRunStatusCompleted(t, pg, source, eventID)
 
 	deadline := time.Now().Add(3 * time.Second)
 	for {
@@ -643,11 +594,11 @@ func TestRunState_PreservesRunningTruthWhileManagerWorkIsActive(t *testing.T) {
 			FROM runs
 			WHERE run_id = $1::uuid
 		`, runID).Scan(&status, &endedAt)
-		if err == nil && status == "completed" && endedAt.Valid {
+		if err == nil && status == "running" && !endedAt.Valid {
 			break
 		}
 		if time.Now().After(deadline) {
-			t.Fatalf("run %s did not reach coherent completed state after release: last err=%v status=%q ended_at_valid=%v", runID, err, status, endedAt.Valid)
+			t.Fatalf("run %s lost its running state after release: last err=%v status=%q ended_at_valid=%v", runID, err, status, endedAt.Valid)
 		}
 		time.Sleep(10 * time.Millisecond)
 	}

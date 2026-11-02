@@ -130,7 +130,7 @@ func TestServedSemanticNumericScenarioModes(t *testing.T) {
 				if out["fraction"] != fraction+0.5 {
 					t.Fatalf("fraction input=%#v output=%#v", in, out)
 				}
-				requireServedRunStatus(t, rt.Endpoint, run, "completed")
+				requireServedRunStatus(t, rt.Endpoint, run, "running")
 				waitServedRunDeliveryQuiescence(t, rt.ReadRunDeliveries, run)
 			})
 		}

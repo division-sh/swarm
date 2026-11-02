@@ -699,6 +699,10 @@ func commitFanOutChunk(
 	if err := command.Validate(); err != nil {
 		return runtimepipeline.CommittedFanOutChunk{}, err
 	}
+	publications, collectionErr := fanOutChunkPublications(command)
+	if collectionErr != nil {
+		return runtimepipeline.CommittedFanOutChunk{}, collectionErr
+	}
 	result := runtimepipeline.CommittedFanOutChunk{Publications: make([]runtimeengine.CommittedDurablePublication, 0, len(command.Outcomes))}
 	outcome := run(ctx, func(txctx context.Context, attempt *mutationprotocol.Attempt) (runtimepipeline.CommittedFanOutChunk, error) {
 		result = runtimepipeline.CommittedFanOutChunk{Publications: make([]runtimeengine.CommittedDurablePublication, 0, len(command.Outcomes))}
@@ -712,6 +716,9 @@ func commitFanOutChunk(
 					}
 				}
 			}()
+			if err := lockWorkflowPublicationFootprintTx(txctx, tx, postgres, nil, publications); err != nil {
+				return err
+			}
 			intent, err := lockClaimedFanOutIntent(txctx, tx, postgres, command.Claim, observeNow)
 			if err != nil {
 				return err
@@ -877,6 +884,21 @@ func commitFanOutChunk(
 	// Keep post-commit failures out of the runtime's mutation retry path.
 	result.PostCommitFailure = err
 	return result, nil
+}
+
+func fanOutChunkPublications(command runtimepipeline.FanOutChunkCommand) ([]runtimebus.PublicationCommand, error) {
+	var publications []runtimebus.PublicationCommand
+	for _, outcome := range command.Outcomes {
+		if outcome.Publication == nil {
+			continue
+		}
+		plan, ok := outcome.Publication.(runtimebus.EnginePublicationPlan)
+		if !ok {
+			return nil, fmt.Errorf("fan-out publication has unexpected type %T", outcome.Publication)
+		}
+		publications = append(publications, plan.PublicationCommand())
+	}
+	return publications, nil
 }
 
 func nullableText(raw string) any {
@@ -1103,6 +1125,12 @@ func cancelRunFanOut(ctx context.Context, postgres bool, effects interface {
 func (s *PipelinePostgresOwner) CancelRunFanOut(ctx context.Context, runID, reason string, at time.Time) error {
 	outcome := mutationprotocol.RunPostgres(ctx, s.backend, mutationprotocol.Story, mutationprotocol.Ordinary, nil, nil, func(txctx context.Context, attempt *mutationprotocol.Attempt) (struct{}, error) {
 		return struct{}{}, attempt.WithSQL(txctx, func(txctx context.Context, tx *sql.Tx) error {
+			if _, err := mutationprotocol.RunRowLock(txctx, tx, runID, true); err != nil {
+				return err
+			}
+			if _, err := s.RequirePresentSourceTx(txctx, tx, runID); err != nil {
+				return err
+			}
 			return cancelRunFanOut(txctx, true, attempt, tx, runID, reason, at)
 		})
 	})
@@ -1112,6 +1140,12 @@ func (s *PipelinePostgresOwner) CancelRunFanOut(ctx context.Context, runID, reas
 func (s *PipelineSQLiteOwner) CancelRunFanOut(ctx context.Context, runID, reason string, at time.Time) error {
 	outcome := mutationprotocol.RunSQLite(ctx, s.backend, "cancel run fan-out", mutationprotocol.Story, mutationprotocol.Ordinary, nil, nil, func(txctx context.Context, attempt *mutationprotocol.Attempt) (struct{}, error) {
 		return struct{}{}, attempt.WithSQL(txctx, func(txctx context.Context, tx *sql.Tx) error {
+			if _, err := mutationprotocol.RunRowLock(txctx, tx, runID, true); err != nil {
+				return err
+			}
+			if _, err := s.RequirePresentSourceTx(txctx, tx, runID); err != nil {
+				return err
+			}
 			return cancelRunFanOut(txctx, false, attempt, tx, runID, reason, at)
 		})
 	})

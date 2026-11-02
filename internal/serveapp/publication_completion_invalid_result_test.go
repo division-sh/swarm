@@ -79,7 +79,7 @@ func TestPublicFeedOnlyInvalidAcknowledgedResultBothStores(t *testing.T) {
 			if committed == nil || !committed.Acknowledged || process.PublicCompletionCount() != 1 {
 				t.Fatal("invalid returned summary disposed acknowledged deployment early")
 			}
-			stored, found, err := native.LookupAPIEventPublication(t.Context(), request)
+			stored, found, err := native.LookupAPIEventPublication(probe.readbackContext(t), request)
 			if err != nil || !found || !bytes.Equal(stored.Response, committed.Completion.Response) {
 				t.Fatalf("deployment fault altered original completion: found=%t err=%v", found, err)
 			}
@@ -177,7 +177,7 @@ func TestPublicPublicationInvalidAcknowledgedResultBothStores(t *testing.T) {
 				if !committed.Acknowledged || process.PublicCompletionCount() != 1 {
 					t.Fatalf("invalid projection lost real ACK responsibility: ack=%t capacity=%d", committed.Acknowledged, process.PublicCompletionCount())
 				}
-				stored, found, err := native.LookupAPIEventPublication(t.Context(), request)
+				stored, found, err := native.LookupAPIEventPublication(probe.readbackContext(t), request)
 				if err != nil || !found || !bytes.Equal(stored.Response, committed.Completion.Response) {
 					t.Fatalf("projection fault altered native completion: found=%t err=%v", found, err)
 				}

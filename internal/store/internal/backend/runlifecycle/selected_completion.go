@@ -118,13 +118,13 @@ func listCompletionCandidatesTx(ctx context.Context, tx *sql.Tx, postgres bool, 
 }
 
 func completionCandidatesQuery(postgres bool, scope runtimerunlifecycle.CandidateScope, cursor runtimerunlifecycle.CandidateCursor, limit int) (string, []any) {
-	query := `SELECT r.run_id, r.bundle_hash, r.completion_revision, r.completion_due_at, COALESCE(b.fork_run_id, '')
-		FROM runs r LEFT JOIN run_fork_selected_contract_bindings b ON b.fork_run_id = r.run_id
-		WHERE r.bundle_hash = ? AND r.completion_due_at IS NOT NULL AND r.status = 'running' AND r.run_id > ?`
+	query := `SELECT r.run_id, r.bundle_hash, c.revision, ` + completionEvidenceDue + `, COALESCE(b.fork_run_id, '')
+		FROM runs r ` + completionEvidenceJoin + ` LEFT JOIN run_fork_selected_contract_bindings b ON b.fork_run_id = r.run_id
+		WHERE r.bundle_hash = ? AND ` + completionEvidenceDue + ` IS NOT NULL AND r.status = 'running' AND r.run_id > ?`
 	if postgres {
-		query = `SELECT r.run_id::text, r.bundle_hash, r.completion_revision, r.completion_due_at, COALESCE(b.fork_run_id::text, '')
-			FROM runs r LEFT JOIN run_fork_selected_contract_bindings b ON b.fork_run_id = r.run_id
-			WHERE r.bundle_hash = $1 AND r.completion_due_at IS NOT NULL AND r.status = 'running' AND r.run_id::text > $2`
+		query = `SELECT r.run_id::text, r.bundle_hash, c.revision, ` + completionEvidenceDue + `, COALESCE(b.fork_run_id::text, '')
+			FROM runs r ` + completionEvidenceJoin + ` LEFT JOIN run_fork_selected_contract_bindings b ON b.fork_run_id = r.run_id
+			WHERE r.bundle_hash = $1 AND ` + completionEvidenceDue + ` IS NOT NULL AND r.status = 'running' AND r.run_id::text > $2`
 	}
 	args := []any{strings.TrimSpace(scope.BundleHash), strings.TrimSpace(cursor.RunID)}
 	if scope.SelectedForkRunID == "" {

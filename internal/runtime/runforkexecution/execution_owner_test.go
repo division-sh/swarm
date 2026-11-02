@@ -144,6 +144,10 @@ func selectedForkBoundOwnerForTest(t testing.TB, selected startupownership.Store
 func selectedForkBoundOwnerWithProcessForTest(t testing.TB, selected startupownership.Store, capability startupownership.ProcessCapability, construct func() SelectedContractExecutionOwner) SelectedContractExecutionOwner {
 	t.Helper()
 	ctx := runForkTestContext(t)
+	ctx, err := startupownership.WithProcessMutationAuthority(ctx, capability)
+	if err != nil {
+		t.Fatal(err)
+	}
 	value, _ := runForkTestWorkFixtures.Load(t)
 	fixture := value.(*runForkTestWorkFixture)
 	fixture.mu.Lock()
