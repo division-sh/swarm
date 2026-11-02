@@ -1109,31 +1109,20 @@ func validateRoutedNodeDeliveryAuthority(source semanticview.Source, evt events.
 		return nil
 	}
 	hasExplicitTargets := len(eventDeliveryTargetRoutes(evt)) > 0
-	authorized := make(map[routedSubscriberAuthorityKey]struct{}, len(plan.DeliveryIntents))
+	root := rootExecutionCoordinate(source, evt.RunID())
 	for _, subscriber := range routed {
-		if !subscriber.Recipient.IsNode() {
+		if !subscriber.Recipient.IsNode() || hasExplicitTargets || subscriber.routeSource != subscriberRouteSourceSubscription {
 			continue
 		}
-		key := newRoutedSubscriberAuthorityKey(source, evt, subscriber)
+		handler := routedSubscriberTargetHandler(subscriber, evt.Type())
+		authorized := false
 		for _, intent := range plan.DeliveryIntents {
-			if !routePlanIntentAuthorizesRoutedSubscriber(intent, key, subscriber) {
-				continue
+			if routePlanIntentAuthorizesRoutedSubscriber(intent, subscriber, root, handler) {
+				authorized = true
+				break
 			}
-			authorized[key] = struct{}{}
 		}
-	}
-	for _, subscriber := range routed {
-		if !subscriber.Recipient.IsNode() {
-			continue
-		}
-		key := newRoutedSubscriberAuthorityKey(source, evt, subscriber)
-		if hasExplicitTargets {
-			continue
-		}
-		if subscriber.routeSource != subscriberRouteSourceSubscription {
-			continue
-		}
-		if _, ok := authorized[key]; ok {
+		if authorized {
 			continue
 		}
 		return fmt.Errorf(
@@ -1144,56 +1133,39 @@ func validateRoutedNodeDeliveryAuthority(source semanticview.Source, evt events.
 	return nil
 }
 
-type routedSubscriberAuthorityKey struct {
-	recipient   events.DeliveryRecipient
-	path        string
-	routeSource subscriberRouteSource
-	handler     runtimepipeline.DeliveryTargetHandler
-	root        semanticview.RootExecutionCoordinate
-}
-
-func newRoutedSubscriberAuthorityKey(source semanticview.Source, evt events.Event, subscriber Subscriber) routedSubscriberAuthorityKey {
-	return routedSubscriberAuthorityKey{
-		recipient:   subscriber.Recipient,
-		path:        strings.Trim(strings.TrimSpace(subscriber.Path), "/"),
-		routeSource: subscriber.routeSource,
-		handler:     routedSubscriberTargetHandler(subscriber, evt.Type()),
-		root:        rootExecutionCoordinate(source, evt.RunID()),
-	}
-}
-
 func routePlanIntentAuthorizesRoutedSubscriber(
 	intent RoutePlanDeliveryIntent,
-	key routedSubscriberAuthorityKey,
 	subscriber Subscriber,
+	root semanticview.RootExecutionCoordinate,
+	handler runtimepipeline.DeliveryTargetHandler,
 ) bool {
-	if !intent.Recipient.IsNode() || intent.Recipient != key.recipient || !intent.Handler.Equal(key.handler) {
+	if !intent.Recipient.IsNode() || intent.Recipient != subscriber.Recipient || !intent.Handler.Equal(handler) {
 		return false
 	}
-	if key.path == "" {
+	if strings.Trim(strings.TrimSpace(subscriber.Path), "/") == "" {
 		return true
 	}
 	target := intent.TargetBlueprint.Normalized()
 	if target.Empty() {
 		target = intent.TargetOwnership.Route().Normalized()
 	}
-	if routeMatchesInternalSubscriber(target, subscriber, key.root) {
+	if routeMatchesInternalSubscriber(target, subscriber, root) {
 		return true
 	}
-	return resolvedSelectedRunRootIntentMatchesSubscriber(intent, key, subscriber, target)
+	return resolvedSelectedRunRootIntentMatchesSubscriber(intent, subscriber, root, target)
 }
 
 func resolvedSelectedRunRootIntentMatchesSubscriber(
 	intent RoutePlanDeliveryIntent,
-	key routedSubscriberAuthorityKey,
 	subscriber Subscriber,
+	root semanticview.RootExecutionCoordinate,
 	target events.RouteIdentity,
 ) bool {
 	// Root static routing uses its semantic path while ownership resolves to the selected run ID.
 	owner := intent.TargetOwnership
 	node, present := intent.Recipient.Node()
 	if owner.Empty() || owner.Validate() != nil || owner.Route() != target ||
-		!key.root.Matches(target.FlowID, target.FlowInstance) || key.handler.Empty() ||
+		!root.Matches(target.FlowID, target.FlowInstance) || intent.Handler.Empty() ||
 		!present || !node.Equal(subscriber.handlerNode) {
 		return false
 	}
@@ -1201,8 +1173,8 @@ func resolvedSelectedRunRootIntentMatchesSubscriber(
 	if handlerFlowID == "" {
 		handlerFlowID = target.FlowID
 	}
-	return handlerFlowID != "" && key.path == handlerFlowID &&
-		key.handler.Node().Equal(subscriber.handlerNode) && target.FlowID == handlerFlowID
+	return handlerFlowID != "" && strings.Trim(strings.TrimSpace(subscriber.Path), "/") == handlerFlowID &&
+		intent.Handler.Node().Equal(subscriber.handlerNode) && target.FlowID == handlerFlowID
 }
 
 func eventTargetsRoutedSubscriber(source semanticview.Source, evt events.Event, subscriber Subscriber) bool {
