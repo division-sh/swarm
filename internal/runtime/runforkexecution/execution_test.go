@@ -1947,7 +1947,7 @@ expected_schema = {
     "required": ["fork_result"],
     "additionalProperties": False,
 }
-expected_description = "Send a worker/task.completed event"
+expected_description = "Send a task.completed event"
 if emit is None or emit.get("description") != expected_description or emit.get("inputSchema") != expected_schema:
     raise SystemExit(f"selected-fork flow emit mismatch: {emit!r}")
 call = {
