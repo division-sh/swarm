@@ -11,6 +11,7 @@ import (
 	"time"
 
 	"github.com/division-sh/swarm/internal/testpostgres"
+	"github.com/division-sh/swarm/internal/testutil/testprocess"
 )
 
 func TestParseTestArgs(t *testing.T) {
@@ -73,15 +74,16 @@ func TestSwarmTestSettlementTimeoutFailsClosed(t *testing.T) {
 	release := filepath.Join(root, "descendant-release")
 	finished := filepath.Join(root, "descendant-finished")
 	goBin := filepath.Join(root, "go")
-	script := precompileFixtureGoHeader() + `
-(
+	payload := `#!/bin/sh
   trap '' INT TERM HUP
   touch "$SWARM_TEST_TIMEOUT_DESCENDANT_STARTED"
   while [ ! -f "$SWARM_TEST_TIMEOUT_DESCENDANT_RELEASE" ]; do sleep .01; done
   touch "$SWARM_TEST_TIMEOUT_DESCENDANT_FINISHED"
-) &
-exit 0
 `
+	if err := testprocess.WriteBoundScript(goBin+".descendant", "#!/bin/sh", payload); err != nil {
+		t.Fatal(err)
+	}
+	script := precompileFixtureGoHeader() + "\n\"$0.descendant\" &\nexit 0\n"
 	if err := os.WriteFile(goBin, []byte(script), 0o700); err != nil {
 		t.Fatal(err)
 	}

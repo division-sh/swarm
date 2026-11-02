@@ -38,7 +38,7 @@ func TestCompletionWorkersBoundedAndJoined(t *testing.T) {
 				"  while [ ! -f \"$WORKER_ROOT/started-two\" ]; do sleep .01; done\n  exit 7\nfi\n" +
 				"while [ ! -f \"$WORKER_ROOT/release\" ]; do sleep .01; done\n" +
 				"touch \"$WORKER_ROOT/joined-$unit\"\n"
-			if err := os.WriteFile(worker, []byte(script), 0700); err != nil {
+			if err := testprocess.WriteBoundScript(worker, "#!/bin/sh", script); err != nil {
 				t.Fatal(err)
 			}
 			plan := testplanning.RunPlan{HeadSHA: "head", Digest: "plan", Profile: testplanning.ProfileFull}
@@ -178,7 +178,7 @@ func TestCompletionMultiworkerSignals(t *testing.T) {
 		t.Run(row.name, func(t *testing.T) {
 			root := t.TempDir()
 			script := "#!/bin/sh\nset -eu\nunit=\"$3\"\ntrap 'touch \"$SWARM_COMPLETION_SIGNAL_FIXTURE/joined-$unit\"; exit 130' INT TERM\ntouch \"$SWARM_COMPLETION_SIGNAL_FIXTURE/started-$unit\"\nwhile :; do sleep .01; done\n"
-			if err := os.WriteFile(filepath.Join(root, "worker"), []byte(script), 0700); err != nil {
+			if err := testprocess.WriteBoundScript(filepath.Join(root, "worker"), "#!/bin/sh", script); err != nil {
 				t.Fatal(err)
 			}
 			command := exec.Command(os.Args[0], "-test.run=^TestCompletionMultiworkerSignals$")
@@ -291,7 +291,7 @@ func TestCompletionParentDeathRetainsWorkerDescendants(t *testing.T) {
 		}
 	})
 	script := "#!/bin/sh\nset -eu\nexport SWARM_COMPLETION_DEATH_UNIT=\"$3\"\nexec \"$SWARM_COMPLETION_DEATH_BINARY\" -test.run=^TestCompletionParentDeathRetainsWorkerDescendants$\n"
-	if err := os.WriteFile(filepath.Join(root, "worker"), []byte(script), 0700); err != nil {
+	if err := testprocess.WriteBoundScript(filepath.Join(root, "worker"), "#!/bin/sh", script, owner); err != nil {
 		t.Fatal(err)
 	}
 	parent = exec.Command(os.Args[0], "-test.run=^TestCompletionParentDeathRetainsWorkerDescendants$")

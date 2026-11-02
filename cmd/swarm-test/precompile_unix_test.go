@@ -191,9 +191,14 @@ func TestPrecompileSignalJoinsCompilerBeforeAnyAdmission(t *testing.T) {
 	runner, repo := buildSignalTestRunner(t)
 	for _, sig := range []syscall.Signal{syscall.SIGINT, syscall.SIGTERM} {
 		t.Run(sig.String(), func(t *testing.T) {
-			root, state := precompileRunnerFixture(t, `printf '%s\n' "$$" > "$PRECOMPILE_PROBE/pid.tmp"
+			warm := filepath.Join(t.TempDir(), "compiler")
+			if err := testprocess.WriteBoundScript(warm, "#!/bin/sh", `#!/bin/sh
+printf '%s\n' "$$" > "$PRECOMPILE_PROBE/pid.tmp"
 mv "$PRECOMPILE_PROBE/pid.tmp" "$PRECOMPILE_PROBE/pid"
-while :; do sleep 1; done`)
+while :; do sleep 1; done`); err != nil {
+				t.Fatal(err)
+			}
+			root, state := precompileRunnerFixture(t, fmt.Sprintf("exec %q \"$@\"", warm))
 			command := exec.Command(runner, "--", "./fixture", "-count=1")
 			command.Dir = repo
 			command.Env = os.Environ()

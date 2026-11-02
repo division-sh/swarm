@@ -67,8 +67,12 @@ func TestRunCompletionDoesNotUnlockSurvivingDescendant(t *testing.T) {
 	release := filepath.Join(root, "descendant-release")
 	admission := testRunAdmission(filepath.Join(root, "state"), nil)
 	lease := acquireTestRun(t, admission, context.Background(), "owner", 1)
-	script := `sh -c 'touch "$1"; while [ ! -f "$2" ]; do sleep .01; done' descendant "$1" "$2" >/dev/null 2>&1 &`
-	child := exec.Command("sh", "-c", script, "supervisor-child", started, release)
+	payload := filepath.Join(root, "descendant")
+	if err := testprocess.WriteBoundScript(payload, "#!/bin/sh", `#!/bin/sh
+touch "$1"; while [ ! -f "$2" ]; do sleep .01; done`); err != nil {
+		t.Fatal(err)
+	}
+	child := exec.Command("sh", "-c", `"$1" "$2" "$3" >/dev/null 2>&1 &`, "supervisor-child", payload, started, release)
 	if err := lease.InheritTo(child); err != nil {
 		t.Fatal(err)
 	}
@@ -103,7 +107,12 @@ func TestRunJoinDoesNotBlockOtherCapacitySlotOrQueuedCancellation(t *testing.T) 
 	release := filepath.Join(root, "descendant-release")
 	admission := testRunAdmission(filepath.Join(root, "state"), nil)
 	settling := acquireTestRun(t, admission, context.Background(), "settling", 2)
-	child := exec.Command("sh", "-c", `sh -c 'touch "$1"; while [ ! -f "$2" ]; do sleep .01; done' descendant "$1" "$2" >/dev/null 2>&1 &`, "supervisor-child", started, release)
+	payload := filepath.Join(root, "descendant")
+	if err := testprocess.WriteBoundScript(payload, "#!/bin/sh", `#!/bin/sh
+touch "$1"; while [ ! -f "$2" ]; do sleep .01; done`); err != nil {
+		t.Fatal(err)
+	}
+	child := exec.Command("sh", "-c", `"$1" "$2" "$3" >/dev/null 2>&1 &`, "supervisor-child", payload, started, release)
 	if err := settling.InheritTo(child); err != nil {
 		t.Fatal(err)
 	}

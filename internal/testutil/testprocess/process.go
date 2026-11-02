@@ -11,7 +11,9 @@ import (
 	"io"
 	"os"
 	"os/exec"
+	"path/filepath"
 	"strconv"
+	"strings"
 	"syscall"
 	"time"
 
@@ -27,13 +29,14 @@ type Lifetime struct {
 const bootstrapEnv = "SWARM_TEST_PROCESS_BOOTSTRAP"
 
 type bootstrap struct {
-	Watch  bool
-	Owner  Lifetime
-	Target int
-	Ready  int
-	Status int
-	Path   string
-	Args   []string
+	Watch       bool
+	Owner       Lifetime
+	Target      int
+	Ready       int
+	Status      int
+	Path        string
+	Args        []string
+	ForwardArgs bool
 }
 
 // Current captures the process that owns a helper's lifetime.
@@ -67,6 +70,38 @@ func StartFor(command *exec.Cmd, owner Lifetime) error {
 	return startWatched(command, owner)
 }
 
+// WriteBoundScript binds an indirectly launched fixture payload, not its runner.
+// Prefix may pass naturally completing branches through before guarded exec.
+func WriteBoundScript(path, prefix, body string, outer ...Lifetime) error {
+	if !filepath.IsAbs(path) {
+		return errors.New("test payload path must be absolute")
+	}
+	owner, err := Current()
+	if err != nil {
+		return err
+	}
+	if len(outer) > 1 {
+		return errors.New("test payload requires one lifetime owner")
+	}
+	if len(outer) == 1 {
+		owner = outer[0]
+	}
+	if !owner.Alive() {
+		return errors.New("test payload lifetime owner is not current")
+	}
+	executable, err := os.Executable()
+	if err != nil {
+		return err
+	}
+	if err := os.WriteFile(path+".payload", []byte(body), 0700); err != nil {
+		return err
+	}
+	config := bootstrap{Owner: owner, Status: -1, Path: path + ".payload", ForwardArgs: true}
+	assignment := bootstrapEnvironment(nil, config)[0]
+	quoted := "'" + strings.ReplaceAll(executable, "'", "'\\''") + "'"
+	return os.WriteFile(path, []byte(prefix+"\n"+assignment+" exec "+quoted+" \"$@\"\n"), 0700)
+}
+
 func init() {
 	raw := os.Getenv(bootstrapEnv)
 	if raw == "" {
@@ -80,6 +115,9 @@ func init() {
 	if config.Watch {
 		watch(config)
 		os.Exit(0)
+	}
+	if config.ForwardArgs {
+		config.Args = append([]string{config.Path}, os.Args[1:]...)
 	}
 	execute(config)
 	os.Exit(125)
@@ -205,13 +243,18 @@ func startWatched(command *exec.Cmd, owner Lifetime) error {
 }
 
 func execute(config bootstrap) {
-	status := os.NewFile(uintptr(config.Status), "test-helper-exec-status")
-	if status == nil {
-		return
+	var status *os.File
+	if config.Status >= 3 {
+		status = os.NewFile(uintptr(config.Status), "test-helper-exec-status")
+		defer status.Close()
+		syscall.CloseOnExec(config.Status)
 	}
-	defer status.Close()
-	syscall.CloseOnExec(config.Status)
-	executable, err := os.Executable()
+	files, closeFiles, err := inheritedFiles(nil)
+	var executable string
+	if err == nil {
+		defer closeFiles()
+		executable, err = os.Executable()
+	}
 	if err == nil && config.Owner.Alive() {
 		var read, write *os.File
 		read, write, err = os.Pipe()
@@ -223,7 +266,7 @@ func execute(config bootstrap) {
 			// lifetime guard must survive it without changing the payload's group.
 			guard.SysProcAttr = &syscall.SysProcAttr{Setpgid: true}
 			guard.Env = bootstrapEnvironment(os.Environ(), bootstrap{Watch: true, Owner: config.Owner, Target: os.Getpid(), Ready: 3})
-			guard.ExtraFiles = make([]*os.File, config.Status-2)
+			guard.ExtraFiles = make([]*os.File, len(files)+1)
 			guard.ExtraFiles[0] = write
 			// Only the readiness descriptor is inherited. Payload listeners,
 			// leases, stdio and exec-status cannot be retained by the guard.
@@ -240,12 +283,19 @@ func execute(config bootstrap) {
 			}
 		}
 	}
+	if err == nil {
+		err = syscall.ECHILD
+	}
 	code := syscall.ECHILD
 	var errno syscall.Errno
 	if errors.As(err, &errno) {
 		code = errno
 	}
-	_, _ = fmt.Fprint(status, int(code))
+	if status != nil {
+		_, _ = fmt.Fprint(status, int(code))
+	} else {
+		_, _ = fmt.Fprintf(os.Stderr, "test payload exec failed: %v\n", err)
+	}
 }
 
 func watch(config bootstrap) {
