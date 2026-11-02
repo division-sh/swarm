@@ -36,7 +36,7 @@ func CopyManagedEmitPublication(t testing.TB, mode string) string {
 		if sibling {
 			kind, value, role = "boolean", "True", "sibling-writer"
 		}
-		input := "    - work.requested\n"
+		input := "  - work.requested\n"
 		modeDecl := ""
 		if mode == "template" && !sibling {
 			modeDecl = "instance: case_id\n"
@@ -44,12 +44,12 @@ func CopyManagedEmitPublication(t testing.TB, mode string) string {
 		if sibling {
 			input = strings.ReplaceAll(input, "work.requested", "sibling.requested")
 		}
-		schema := "stages: []\n# fixture: emit-proof\n" + modeDecl + "pins:\n  inputs:\n" + input
+		schema := "stages: []\n# fixture: emit-proof\n" + modeDecl + "inputs:\n" + input
 		extraEvent, extraOutput, extraEmit := "", "", ""
 		if sibling {
-			extraEvent, extraOutput, extraEmit = "foreign.only:\n", "  outputs:\n    - work.ack\n", ", foreign.only"
+			extraEvent, extraOutput, extraEmit = "foreign.only:\n", "outputs:\n  - work.ack\n", ", foreign.only"
 		} else if scope != "." {
-			extraOutput = "  outputs: [work.ack]\n"
+			extraOutput = "outputs: [work.ack]\n"
 		}
 		writeClosedVariantFile(t, root, filepath.Join(flow, "manifest.yaml"), "version: 1.0.0\nplatform_version: '*'\n")
 		writeClosedVariantFile(t, root, filepath.Join(flow, "schema.yaml"), schema+extraOutput)

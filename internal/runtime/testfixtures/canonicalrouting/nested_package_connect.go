@@ -16,9 +16,8 @@ func CopyNestedFlowConnect(t testing.TB) string {
 		"schema.yaml": "stages: []\n# fixture: nested-flow-connect\n",
 
 		"child/schema.yaml": `# fixture: child
-pins:
-  inputs:
-    - micro.done
+inputs:
+  - micro.done
 connect:
   - event: micro.done
     from: grandchild
@@ -29,9 +28,8 @@ connect:
 `,
 
 		"child/grandchild/schema.yaml": `# fixture: grandchild
-pins:
-  outputs:
-    - micro.done
+outputs:
+  - micro.done
 `,
 		"child/grandchild/events.yaml": "micro.done:\n",
 	}

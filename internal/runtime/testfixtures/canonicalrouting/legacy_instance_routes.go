@@ -82,7 +82,7 @@ func CopyTemplateInstanceRoute(t testing.TB, opts TemplateInstanceRouteOptions) 
 			t.Fatalf("unsupported template instance second pin %d", opts.SecondPin)
 		}
 		secondConnect += "    resolution: " + mode + resolutionFrom + "\n"
-		secondPin = "    - " + secondEvent + "\n"
+		secondPin = "  - " + secondEvent + "\n"
 	}
 
 	writeClosedVariantFile(t, root, "schema.yaml", `# fixture: template-instance-route
@@ -93,9 +93,8 @@ connect:
     resolution: `+mode+resolutionFrom+"\n"+secondConnect)
 	removeClosedVariantFiles(t, root, "producer/nodes.yaml", "producer/agents.yaml")
 	writeLegacyInstanceFlow(t, root, "producer", `# fixture: producer
-pins:
-  outputs:
-    - deploy.done
+outputs:
+  - deploy.done
 `, "deploy.done:\n  key: "+producerField+"\n  "+producerField+": string\n", "", "")
 
 	consumerNodes := "consumer-node:\n  deploy.done: {}\n" + secondHandler
@@ -118,9 +117,8 @@ pins:
 	removeClosedVariantFiles(t, root, "consumer/nodes.yaml", "consumer/agents.yaml")
 	writeLegacyInstanceFlow(t, root, "consumer", `# fixture: consumer
 instance: vertical_id
-pins:
-  inputs:
-    - deploy.done
+inputs:
+  - deploy.done
 `+secondPin,
 		"",
 		"vertical_id: string\n",
@@ -139,11 +137,10 @@ func CopyStaticAndTemplateAgentRoute(t testing.TB) string {
 		Mode: TemplateInstanceRouteSelect, Consumer: TemplateInstanceAgentConsumer,
 	})
 	writeClosedVariantFile(t, root, "flows/producer/schema.yaml", `# fixture: producer
-pins:
-  inputs:
-    - deploy.requested
-  outputs:
-    - deploy.done
+inputs:
+  - deploy.requested
+outputs:
+  - deploy.done
 `)
 	writeClosedVariantFile(t, root, "flows/producer/events.yaml", `deploy.requested:
   vertical_id: string

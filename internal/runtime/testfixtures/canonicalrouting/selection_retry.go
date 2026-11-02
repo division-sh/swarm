@@ -11,12 +11,11 @@ func CopySelectionRetry(t testing.TB) string {
 stages:
   queued: {}
   done: {final: true}
-pins:
-  inputs:
-    - seed
-    - select
-  outputs:
-    - ack
+inputs:
+  - seed
+  - select
+outputs:
+  - ack
 `)
 	writeClosedVariantFile(t, root, "state.yaml", "marker: text\n")
 	writeClosedVariantFile(t, root, "events.yaml", `seed:

@@ -12,9 +12,8 @@ func CopyAncestorEventWithoutReceiverMembership(t testing.TB) string {
 
 	writeClosedVariantFile(t, root, "manifest.yaml", "version: 1.0.0\nplatform_version: '*'\n")
 	writeClosedVariantFile(t, root, "schema.yaml", `# fixture: root
-pins:
-  inputs:
-    - root.started
+inputs:
+  - root.started
 `)
 	writeClosedVariantFile(t, root, "events.yaml", "root.started:\n")
 	writeClosedVariantFile(t, root, "child/manifest.yaml", "version: 1.0.0\nplatform_version: '*'\n")

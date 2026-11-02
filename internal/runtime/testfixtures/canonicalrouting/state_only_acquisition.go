@@ -22,7 +22,7 @@ func CopyStateOnlyAcquisition(t testing.TB, workflowName string, modes map[strin
 		}
 	}
 	sort.Strings(keyedParents)
-	rootSchema := "# fixture: " + workflowName + "\npins:\n  inputs: [test.node_emitted.selector, test.node_emitted.upserter]\n"
+	rootSchema := "# fixture: " + workflowName + "\ninputs: [test.node_emitted.selector, test.node_emitted.upserter]\n"
 	if len(keyedParents) != 0 {
 		rootSchema = strings.Replace(rootSchema, "inputs: [test.node_emitted.selector, test.node_emitted.upserter]", "inputs: [test.node_emitted.selector, test.node_emitted.upserter, test.fixture_parent.construct]", 1)
 	}
@@ -84,9 +84,9 @@ func writeStateOnlyAcquisitionFlow(t testing.TB, root, workflowName, rootSchema,
 			schema += "instance: instance_key\n"
 		}
 		if path == targetFlow {
-			schema += "pins:\n  inputs:\n    - test.node_emitted.selector\n    - test.node_emitted.upserter\n"
+			schema += "inputs:\n  - test.node_emitted.selector\n  - test.node_emitted.upserter\n"
 		} else if parentConstructor {
-			schema += "pins:\n  inputs: [test.fixture_parent.construct, test.node_emitted.selector, test.node_emitted.upserter]\n"
+			schema += "inputs: [test.fixture_parent.construct, test.node_emitted.selector, test.node_emitted.upserter]\n"
 		}
 	}
 	writeClosedVariantFile(t, root, filepath.ToSlash(filepath.Join(path, "schema.yaml")), schema)

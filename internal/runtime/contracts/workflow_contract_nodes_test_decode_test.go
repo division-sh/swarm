@@ -94,8 +94,6 @@ func decodeNodeTestYAML(body []byte, target any) error {
 	switch out := target.(type) {
 	case *FlowConnect:
 		envelope, project = canonicalrouting.SchemaConnectParserEnvelope, func(s FlowSchemaDocument) { *out = s.Connect[0] }
-	case *FlowPins:
-		envelope, project = canonicalrouting.SchemaPinsParserEnvelope, func(s FlowSchemaDocument) { *out = s.Pins }
 	case *FlowInputPins:
 		envelope, project = canonicalrouting.SchemaInputPinsParserEnvelope, func(s FlowSchemaDocument) { *out = s.Pins.Inputs }
 	case *FlowOutputPins:

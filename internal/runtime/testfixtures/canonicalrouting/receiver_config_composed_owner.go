@@ -10,7 +10,7 @@ func CopyReceiverConfigComposedOwner(t testing.TB) string {
 	for name, content := range map[string]string{
 		"manifest.yaml":        "version: 1.0.0\nplatform_version: '*'\n",
 		"review/manifest.yaml": "version: 1.0.0\nplatform_version: '*'\n",
-		"schema.yaml":          "# fixture: typed-owner-matrix\nstages:\n  pending: {}\n  review: {}\n  done: {}\npins:\n  outputs:\n    - items.child\nconnect:\n  - {event: items.child, from: ., to: review, resolution: select-or-create}\n",
+		"schema.yaml":          "# fixture: typed-owner-matrix\nstages:\n  pending: {}\n  review: {}\n  done: {}\noutputs:\n  - items.child\nconnect:\n  - {event: items.child, from: ., to: review, resolution: select-or-create}\n",
 		"state.yaml":           "account_id: string\nhandled: boolean\n",
 		"events.yaml":          "request:\nitems.ready:\n  items: [string]\nitems.child:\n  request_id: string\n  label: string\n  nested: json\n",
 		"nodes.yaml": `fan-out-source:
@@ -34,9 +34,8 @@ func CopyReceiverConfigComposedOwner(t testing.TB) string {
 instance: request_id
 stages:
   pending: {}
-pins:
-  inputs:
-    - items.child
+inputs:
+  - items.child
 `,
 		"review/state.yaml":  "request_id: string\nlabel: text\nnested: json\nenabled: true\n",
 		"review/events.yaml": "task.started:\n",

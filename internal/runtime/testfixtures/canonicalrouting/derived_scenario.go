@@ -23,11 +23,10 @@ func writeNovelDerivedScenarioBundle(t testing.TB, rootInput bool) string {
 		rootSchema = `
 # fixture: derived-novel-flow
 stages: {done: {final: true}}
-pins:
-  inputs:
-    - fulfillment.requested
-  outputs:
-    - fulfillment.requested
+inputs:
+  - fulfillment.requested
+outputs:
+  - fulfillment.requested
 connect:
   - {event: fulfillment.requested, from: ., to: fulfillment}
 `
@@ -42,9 +41,8 @@ fulfillment.requested:
 
 		"schema.yaml": rootSchema,
 		"fulfillment/schema.yaml": `# fixture: fulfillment
-pins:
-  inputs:
-    - fulfillment.requested
+inputs:
+  - fulfillment.requested
 `,
 		"fulfillment/events.yaml": `
 fulfillment.requested:
@@ -58,7 +56,7 @@ complete-request:
 	if rootEvents != "" {
 		files["events.yaml"] = rootEvents
 		delete(files, "fulfillment/events.yaml")
-		files["fulfillment/schema.yaml"] = "# fixture: fulfillment\nstages: {pending: {}, done: {final: true}}\npins:\n  inputs: [fulfillment.requested]\n"
+		files["fulfillment/schema.yaml"] = "# fixture: fulfillment\nstages: {pending: {}, done: {final: true}}\ninputs: [fulfillment.requested]\n"
 		files["fulfillment/nodes.yaml"] = "complete-request:\n  fulfillment.requested: {advances_to: done}\n"
 	}
 	for relative, body := range files {

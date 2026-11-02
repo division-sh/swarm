@@ -48,13 +48,12 @@ loops:
     revision_field: revision_id
     max_attempts: 3
     escape: {advances_to: exhausted}
-pins:
-  inputs:
-    - work.requested
-    - review.retry
-    - review.closed
-  outputs:
-    - join.observed
+inputs:
+  - work.requested
+  - review.retry
+  - review.closed
+outputs:
+  - join.observed
 `,
 		"state.yaml": `members: [text]
 window: text

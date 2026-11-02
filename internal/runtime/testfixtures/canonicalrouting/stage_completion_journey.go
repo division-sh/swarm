@@ -12,20 +12,19 @@ func CopyStageCompletionJourney(t testing.TB) string {
 		"schema.yaml": `stages:
   active: {}
   done: {final: true}
-pins:
-  inputs:
-    - flow.started
-    - flow.finish
-  outputs:
-    - flow.started
-    - flow.finish
+inputs:
+  - flow.started
+  - flow.finish
+outputs:
+  - flow.started
+  - flow.finish
 connect:
   - {event: flow.started, from: ., to: discovery}
   - {event: flow.finish, from: ., to: discovery}
 `,
 		"events.yaml":           "flow.started:\n  topic:\n    type: string?\nflow.finish:\n  topic:\n    type: string?\n",
 		"nodes.yaml":            "root-completion:\n  flow.finish:\n    advances_to: done\n",
-		"discovery/schema.yaml": "# fixture: discovery\nstages:\n  ready: {}\n  Ready:\n    final: true\npins:\n  inputs:\n    - flow.started\n    - flow.finish\n",
+		"discovery/schema.yaml": "# fixture: discovery\nstages:\n  ready: {}\n  Ready:\n    final: true\ninputs:\n  - flow.started\n  - flow.finish\n",
 		"discovery/nodes.yaml":  "pipeline:\n  flow.started: {}\n  flow.finish:\n    advances_to: Ready\n",
 	} {
 		writeClosedVariantFile(t, root, path, contents)

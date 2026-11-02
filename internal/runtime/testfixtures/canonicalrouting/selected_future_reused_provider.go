@@ -11,9 +11,8 @@ func CopySelectedFutureReusedProviderInput(t testing.TB) string {
 		"schema.yaml": `stages:
   pending: {}
   done: {final: true}
-pins:
-  inputs: [start.requested, work.progress, work.finished]
-  outputs: [work.assigned]
+inputs: [start.requested, work.progress, work.finished]
+outputs: [work.assigned]
 connect:
   - {event: work.assigned, from: ., to: work, resolution: select-or-create}
   - {event: work.progress, from: work, to: .}
@@ -46,11 +45,8 @@ work.assigned:
 stages:
   pending: {}
   done: {final: true}
-pins:
-  inputs: [work.assigned]
-  outputs: [work.progress, work.finished]
-required_agents:
-  - {role: worker, subscribes_to: [work.assigned]}
+inputs: [work.assigned]
+outputs: [work.progress, work.finished]
 `,
 
 		"work/events.yaml": `work.progress:

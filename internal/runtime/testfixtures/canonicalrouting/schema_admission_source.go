@@ -3,11 +3,9 @@ package canonicalrouting
 // Closed parser fixtures exercise schema families, not a runnable topology.
 const SchemaAdmissionCompleteRoot = `instance: work_id
 connect: [{event: work.requested, from: source, to: worker, rename: work.received, resolution: create, key_from: event.id}]
-pins:
-  inputs:
-    - work.requested
-  outputs: [work.completed]
-required_agents: [{role: worker, subscribes_to: [], emits: [work.completed], description: ''}]
+inputs:
+  - work.requested
+outputs: [work.completed]
 auto_emit_on_create: {event: work.started}
 stages:
   waiting:
@@ -35,21 +33,18 @@ stages:
     description: *label
     timers: [{after: 1s, emit: work.expired}]
   done: {final: true}
-pins:
-  inputs: [work.requested]
-  outputs: [work.completed]
+inputs: [work.requested]
+outputs: [work.completed]
 `
 
 const (
 	SchemaConnectParserEnvelope    = "connect:\n  -"
-	SchemaPinsParserEnvelope       = "pins:"
-	SchemaInputPinsParserEnvelope  = "pins:\n  inputs:"
-	SchemaOutputPinsParserEnvelope = "pins:\n  outputs:"
+	SchemaInputPinsParserEnvelope  = "inputs:"
+	SchemaOutputPinsParserEnvelope = "outputs:"
 )
 
-const SchemaProviderReferenceAdmission = `pins:
-  inputs: [inbound.telegram.message]
-  outputs: [inbound.telegram.message]
+const SchemaProviderReferenceAdmission = `inputs: [inbound.telegram.message]
+outputs: [inbound.telegram.message]
 connect:
   - {event: inbound.telegram.message, from: ., to: child, resolution: select}
 `

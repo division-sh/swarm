@@ -12,11 +12,10 @@ func CopyReplayInitializedReceivers(t testing.TB) string {
 	root := t.TempDir()
 	writeClosedVariantFile(t, root, "manifest.yaml", "version: 1.0.0\nplatform_version: '*'\n")
 	writeClosedVariantFile(t, root, "schema.yaml", `# fixture: replay-initialized-receivers
-pins:
-  inputs:
-    - start
-  outputs:
-    - work.ready
+inputs:
+  - start
+outputs:
+  - work.ready
 connect:
   - {event: work.ready, from: ., to: left}
   - {event: work.ready, from: ., to: right}
@@ -25,7 +24,7 @@ connect:
 	writeClosedVariantFile(t, root, "nodes.yaml", "source:\n  start:\n    emit: work.ready\n")
 	for _, flow := range []string{"left", "right"} {
 		writeClosedVariantFile(t, root, flow+"/manifest.yaml", "version: 1.0.0\nplatform_version: '*'\n")
-		writeClosedVariantFile(t, root, flow+"/schema.yaml", fmt.Sprintf("# fixture: %s\nstages:\n  active: {}\n  done: {final: true}\npins:\n  inputs: [work.ready]\n", flow))
+		writeClosedVariantFile(t, root, flow+"/schema.yaml", fmt.Sprintf("# fixture: %s\nstages:\n  active: {}\n  done: {final: true}\ninputs: [work.ready]\n", flow))
 		removeClosedVariantFiles(t, root, flow+"/state.yaml")
 		writeClosedVariantFile(t, root, flow+"/nodes.yaml", "initialize:\n  work.ready: {}\n")
 		writeClosedVariantFile(t, root, flow+"/agents.yaml", "worker:\n  model: regular\n  intent: {inline: Observe initialized work.}\n  subscriptions: [work.ready]\n")

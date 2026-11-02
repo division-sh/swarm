@@ -22,9 +22,8 @@ func copySelectedFutureProviderInput(t testing.TB, minted bool) string {
 	schema := `stages:
   pending: {}
   done: {final: true}
-pins:
-  inputs: [start.requested, work.finished]
-  outputs: [work.assigned]
+inputs: [start.requested, work.finished]
+outputs: [work.assigned]
 connect:
   - {event: work.assigned, from: ., to: work, resolution: select-or-create}
   - {event: work.finished, from: work, to: .}
@@ -34,11 +33,8 @@ connect:
 stages:
   pending: {}
   done: {final: true}
-pins:
-  inputs: [work.assigned]
-  outputs: [work.finished]
-required_agents:
-  - {role: worker, subscribes_to: [work.assigned]}
+inputs: [work.assigned]
+outputs: [work.finished]
 `
 
 	workEntity := `work_id: text
@@ -48,9 +44,8 @@ result: text
 		schema = `stages:
   pending: {}
   done: {final: true}
-pins:
-  inputs: [start.requested, work.finished]
-  outputs: [work.assigned]
+inputs: [start.requested, work.finished]
+outputs: [work.assigned]
 connect:
   - {event: work.assigned, from: ., to: work, resolution: create, key_from: generated.uuid}
   - {event: work.finished, from: work, to: .}
@@ -60,11 +55,8 @@ connect:
 stages:
   pending: {}
   done: {final: true}
-pins:
-  inputs: [work.assigned]
-  outputs: [work.finished]
-required_agents:
-  - {role: worker, subscribes_to: [work.assigned]}
+inputs: [work.assigned]
+outputs: [work.finished]
 `
 
 		workEntity = `case_id: text
