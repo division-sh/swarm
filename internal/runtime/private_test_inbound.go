@@ -49,19 +49,8 @@ func (g *InboundGateway) PublishPrivateTestProviderOutput(ctx context.Context, c
 	if err != nil {
 		return "", true, err
 	}
-	fingerprintBytes, err := canonicaljson.Bytes(payload)
+	request, err := privateTestInboundRequest(publicationID, markerEventID, admission.Provider(), providerEventID, flowPath, runID, payload, now)
 	if err != nil {
-		return "", true, err
-	}
-	request := runtimeinbound.Request{
-		PublicationID: publicationID, MarkerEventID: markerEventID,
-		Provider: admission.Provider(), ProviderEventID: providerEventID,
-		RequestFingerprint: strings.TrimPrefix(canonicaljson.HashBytes(fingerprintBytes), "sha256:"), RequestProjectionVersion: runtimeinbound.RequestSemanticProjectionVersion,
-		FlowPath: flowPath, TargetAlias: "private-test", ResolvedRunID: runID,
-		AcknowledgementMode: runtimeinbound.AcknowledgementAfterPublish, OriginalReceivedAt: now.UTC(),
-		OriginalUserAgent: "swarm-test", OriginalTransportMetadata: []byte(`{"test_host":true}`),
-	}
-	if err := request.Validate(); err != nil {
 		return "", true, err
 	}
 	pubCtx, err := g.bus.AdmitSourceArtifactFact(runtimebus.WithCurrentRuntimeEpoch(ctx))
@@ -97,17 +86,9 @@ func (g *InboundGateway) PublishPrivateTestProviderOutput(ctx context.Context, c
 	abandon := func(cause error) (string, bool, error) {
 		return "", true, errors.Join(cause, g.bus.AbandonInboundDeliveryPlan(context.WithoutCancel(pubCtx), plan))
 	}
-	prepared := plan.PreparedPublications()
-	finalization := runtimeinbound.Finalization{EvidenceEvent: evidence, Events: make([]runtimeinbound.EventFinalization, len(prepared))}
-	for index := range prepared {
-		manifest, _, _, err := runtimeinbound.CanonicalRecipientManifest(prepared[index].DeliveryRoutes())
-		if err != nil {
-			return abandon(err)
-		}
-		finalization.Events[index] = runtimeinbound.EventFinalization{
-			Ordinal: index, Event: prepared[index].Event, Kind: items[index].Kind,
-			Authorization: items[index].Authorization, RecipientManifest: manifest,
-		}
+	finalization := runtimeinbound.Finalization{EvidenceEvent: evidence}
+	if err := fillPrivateTestInboundFinalization(&finalization, plan, items); err != nil {
+		return abandon(err)
 	}
 	committed, commitErr := g.store.CommitInboundPublication(pubCtx, runtimeinbound.CommitCommand{
 		Admission: admission, Request: request, Finalization: finalization, Publications: plan.CommitCommands(),
@@ -124,7 +105,7 @@ func (g *InboundGateway) PublishPrivateTestProviderOutput(ctx context.Context, c
 		}
 		return ids[1], true, commitErr
 	}
-	prepared, err = g.bus.ApplyInboundDeliveryCommit(pubCtx, plan, committed.Publications)
+	prepared, err := g.bus.ApplyInboundDeliveryCommit(pubCtx, plan, committed.Publications)
 	if err != nil {
 		return abandon(errors.Join(commitErr, err))
 	}
@@ -134,4 +115,36 @@ func (g *InboundGateway) PublishPrivateTestProviderOutput(ctx context.Context, c
 		}
 	}
 	return ids[1], true, commitErr
+}
+
+func privateTestInboundRequest(publicationID, markerEventID, provider, providerEventID, flowPath, runID string, payload map[string]any, now time.Time) (runtimeinbound.Request, error) {
+	fingerprintBytes, err := canonicaljson.Bytes(payload)
+	if err != nil {
+		return runtimeinbound.Request{}, err
+	}
+	request := runtimeinbound.Request{
+		PublicationID: publicationID, MarkerEventID: markerEventID,
+		Provider: provider, ProviderEventID: providerEventID,
+		RequestFingerprint: strings.TrimPrefix(canonicaljson.HashBytes(fingerprintBytes), "sha256:"), RequestProjectionVersion: runtimeinbound.RequestSemanticProjectionVersion,
+		FlowPath: flowPath, TargetAlias: "private-test", ResolvedRunID: runID,
+		AcknowledgementMode: runtimeinbound.AcknowledgementAfterPublish, OriginalReceivedAt: now.UTC(),
+		OriginalUserAgent: "swarm-test", OriginalTransportMetadata: []byte(`{"test_host":true}`),
+	}
+	return request, request.Validate()
+}
+
+func fillPrivateTestInboundFinalization(finalization *runtimeinbound.Finalization, plan runtimebus.InboundDeliveryPlan, items []runtimebus.InboundDeliveryEvent) error {
+	prepared := plan.PreparedPublications()
+	finalization.Events = make([]runtimeinbound.EventFinalization, len(prepared))
+	for index := range prepared {
+		manifest, _, _, err := runtimeinbound.CanonicalRecipientManifest(prepared[index].DeliveryRoutes())
+		if err != nil {
+			return err
+		}
+		finalization.Events[index] = runtimeinbound.EventFinalization{
+			Ordinal: index, Event: prepared[index].Event, Kind: items[index].Kind,
+			Authorization: items[index].Authorization, RecipientManifest: manifest,
+		}
+	}
+	return nil
 }
