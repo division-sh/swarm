@@ -423,7 +423,7 @@ func postConnectorSlackWebhook(t *testing.T, process *releaseServeProcess, origi
 		}
 		unchanged(before, 4)
 	}
-	var receipt struct {
+	type slackPublicationReceipt struct {
 		Status          string   `json:"status"`
 		RunID           string   `json:"run_id"`
 		FlowPath        string   `json:"flow_path"`
@@ -434,6 +434,7 @@ func postConnectorSlackWebhook(t *testing.T, process *releaseServeProcess, origi
 		EventIDs        []string `json:"event_ids"`
 		EventNames      []string `json:"event_names"`
 	}
+	var receipt slackPublicationReceipt
 	status, response, _ := post(body, time.Now(), "slack-webhook-secret")
 	if status != http.StatusAccepted || json.Unmarshal([]byte(response), &receipt) != nil || receipt.Status != "accepted" || receipt.RunID != runID || receipt.FlowPath != "." || receipt.Provider != "slack" || receipt.ProviderEventID != "signed-slack-delivery" || receipt.ProviderType != "message" || receipt.PublicationID == "" || len(receipt.EventIDs) != 1 || receipt.EventIDs[0] == "" || !reflect.DeepEqual(receipt.EventNames, []string{"inbound.slack.message"}) {
 		t.Fatalf("Slack signed callback HTTP=%d receipt=%s", status, response)
@@ -470,8 +471,7 @@ func postConnectorSlackWebhook(t *testing.T, process *releaseServeProcess, origi
 	}
 	before = snapshot()
 	status, response, _ = post(body, time.Now(), "slack-webhook-secret")
-	duplicate := receipt
-	duplicate.EventIDs, duplicate.EventNames = nil, nil
+	var duplicate slackPublicationReceipt
 	if status != http.StatusOK || json.Unmarshal([]byte(response), &duplicate) != nil || duplicate.Status != "duplicate" {
 		t.Fatalf("Slack replay HTTP=%d receipt=%s", status, response)
 	}
