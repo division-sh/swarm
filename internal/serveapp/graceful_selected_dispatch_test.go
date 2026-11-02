@@ -93,10 +93,10 @@ func TestOrdinaryDispatchStopsBeforeSelectedHandoffBothStores(t *testing.T) {
 							connect.Content = append(connect.Content, value(map[string]any{"event": "item.arm", "from": ".", "to": "hold"}))
 						} else {
 							stages := lookup(doc.Content[0], "stages")
-							stages.Content = append(stages.Content, value("armed"), value(map[string]any{"timers": []any{map[string]any{"id": "stop.window", "after": "5s", "advances_to": "waiting"}}}))
+							stages.Content = append(stages.Content, value("armed"), value(map[string]any{"timers": []any{map[string]any{"after": "5s", "advances_to": "waiting"}}}))
 						}
 					case "hold/nodes.yaml":
-						handlers := lookup(doc.Content[0], "owner", "event_handlers")
+						handlers := lookup(doc.Content[0], "owner")
 						handlers.Content = append(handlers.Content, value("item.arm"), value(map[string]any{"advances_to": "armed"}))
 					case "events.yaml":
 						doc.Content[0].Content = append(doc.Content[0].Content, value("item.arm"), value(map[string]any{"note": "text"}))
@@ -292,7 +292,7 @@ func TestSelectedForkIdleTimerDoesNotHoldProcessDrainBothStores(t *testing.T) {
 			if err != nil {
 				t.Fatal(err)
 			}
-			body = []byte(strings.Replace(string(body), "  active: {}", "  active:\n    timers:\n      - {id: selected.idle, after: 1h, advances_to: done}", 1))
+			body = []byte(strings.Replace(string(body), "  active: {}", "  active:\n    timers:\n      - {after: 1h, advances_to: done}", 1))
 			if err := os.WriteFile(path, body, 0o600); err != nil {
 				t.Fatal(err)
 			}
