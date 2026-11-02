@@ -39,9 +39,7 @@ printf '%s\n' "$SWARM_TEST_POSTGRES_DSN" > "$SWARM_TEST_PROCESS_PREFIX.dsn"
 touch "$SWARM_TEST_PROCESS_PREFIX.started"
 while [ ! -f "$SWARM_TEST_PROCESS_PREFIX.release" ]; do sleep .02; done
 `
-	if err := os.WriteFile(filepath.Join(root, "go"), []byte(stub), 0o700); err != nil {
-		t.Fatal(err)
-	}
+	writeRegistryGoFixture(t, filepath.Join(root, "go"), stub)
 	first := startNamespaceProcess(t, repo, root, runner, docker)
 	second := startNamespaceProcess(t, repo, root, runner, docker)
 	left, right := requireNamespaceProcessRecord(t, first), requireNamespaceProcessRecord(t, second)

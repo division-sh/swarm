@@ -353,4 +353,7 @@ func proveWatchedExec(t *testing.T, implicit bool) {
 	if err := StartFor(exec.Command(os.Args[0]), owner); err == nil {
 		t.Fatal("different process occurrence adopted as lifetime owner")
 	}
+	if err := WriteBoundScript(filepath.Join(root, "stale-script"), "#!/bin/sh", "exit 0", owner); err == nil {
+		t.Fatal("script adopted a different lifetime occurrence")
+	}
 }

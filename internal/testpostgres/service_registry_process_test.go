@@ -163,15 +163,17 @@ func TestServiceCloseTimeoutRetainsDescendantAuthorityForReconciliation(t *testi
 	started := filepath.Join(root, "descendant-started")
 	release := filepath.Join(root, "descendant-release")
 	finished := filepath.Join(root, "descendant-finished")
-	script := `
-(
+	payload := filepath.Join(root, "descendant")
+	script := `#!/bin/sh
   trap '' INT TERM HUP
   touch "$1"
   while [ ! -f "$2" ]; do sleep .01; done
   touch "$3"
-) &
 `
-	child := exec.Command("sh", "-c", script, "service-child", started, release, finished)
+	if err := testprocess.WriteBoundScript(payload, "#!/bin/sh", script); err != nil {
+		t.Fatal(err)
+	}
+	child := exec.Command("sh", "-c", `"$1" "$2" "$3" "$4" &`, "service-child", payload, started, release, finished)
 	if err := service.InheritLeaseTo(child); err != nil {
 		t.Fatal(err)
 	}
@@ -247,9 +249,7 @@ func proveDockerRunnerAdmission(t *testing.T, capacity int) {
 		t.Fatalf("build runner: %v\n%s", err, output)
 	}
 	goBin := filepath.Join(root, "go")
-	if err := os.WriteFile(goBin, []byte(registryFixtureGoHeader()+"test \"$1\" = test\nprintf '%s\\n' \"$SWARM_TEST_POSTGRES_DSN\" > \"$SWARM_TEST_PROCESS_PREFIX.dsn\"\ntouch \"$SWARM_TEST_PROCESS_PREFIX.started\"\nwhile [ ! -f \"$SWARM_TEST_PROCESS_PREFIX.release\" ]; do sleep .02; done\n"), 0o700); err != nil {
-		t.Fatal(err)
-	}
+	writeRegistryGoFixture(t, goBin, registryFixtureGoHeader()+"test \"$1\" = test\nprintf '%s\\n' \"$SWARM_TEST_POSTGRES_DSN\" > \"$SWARM_TEST_PROCESS_PREFIX.dsn\"\ntouch \"$SWARM_TEST_PROCESS_PREFIX.started\"\nwhile [ ! -f \"$SWARM_TEST_PROCESS_PREFIX.release\" ]; do sleep .02; done\n")
 	stateHome := filepath.Join(root, "state-home")
 	stateRoot := filepath.Join(stateHome, "swarm", "test-postgres")
 	cpu, memory := hostResourceBudget()
@@ -410,7 +410,7 @@ func TestSwarmTestJoinsDescendantAuthorityBeforeSettlement(t *testing.T) {
 	goBin := filepath.Join(root, "go")
 	fixture := registryFixtureGoHeader() + `
 test "$1" = test
-"$SWARM_TEST_DESCENDANT_HELPER" -test.run='^TestSwarmTestDescendantProcessFixture$' >/dev/null 2>&1 &
+"${0%/*}/descendant" >/dev/null 2>&1 &
 case "$SWARM_TEST_DESCENDANT_MODE" in
   normal_success|normal_failure)
     while [ ! -f "$SWARM_TEST_TOP_RELEASE" ]; do sleep .02; done
@@ -432,7 +432,8 @@ case "$SWARM_TEST_DESCENDANT_MODE" in
     ;;
 esac
 `
-	if err := os.WriteFile(goBin, []byte(fixture), 0o700); err != nil {
+	writeRegistryGoFixture(t, goBin, fixture)
+	if err := testprocess.WriteBoundScript(filepath.Join(root, "descendant"), "#!/bin/sh", "#!/bin/sh\nexec \"$SWARM_TEST_DESCENDANT_HELPER\" -test.run='^TestSwarmTestDescendantProcessFixture$'\n"); err != nil {
 		t.Fatal(err)
 	}
 
@@ -716,6 +717,13 @@ func registryFixtureGoHeader() string {
 	return fmt.Sprintf("#!/bin/sh\nset -eu\nif [ \"$1\" = env ]; then exec %q \"$@\"; fi\nif [ \"${2-}\" = -exec=/bin/true ]; then exit 0; fi\n", filepath.Join(runtime.GOROOT(), "bin", "go"))
 }
 
+func writeRegistryGoFixture(t *testing.T, path, body string) {
+	t.Helper()
+	if err := testprocess.WriteBoundScript(path, registryFixtureGoHeader(), body); err != nil {
+		t.Fatal(err)
+	}
+}
+
 func TestSwarmTestDescendantProcessFixture(t *testing.T) {
 	mode := os.Getenv("SWARM_TEST_DESCENDANT_MODE")
 	if mode == "" {
@@ -892,7 +900,7 @@ if args[0] == "rm":
 print("unsupported fake docker command: " + " ".join(args), file=sys.stderr)
 sys.exit(2)
 `, python, state)
-	if err := os.WriteFile(path, []byte(script), 0o700); err != nil {
+	if err := testprocess.WriteBoundScript(path, "#!/bin/sh\nif [ \"${1-}\" != create ]; then exec \"$0.payload\" \"$@\"; fi", script); err != nil {
 		t.Fatal(err)
 	}
 }
