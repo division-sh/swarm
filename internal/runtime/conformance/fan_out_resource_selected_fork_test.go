@@ -191,7 +191,7 @@ func deploymentForkServerAt(t *testing.T, f *deploymentResourceFixture, owner ru
 	})
 	handler, err := apiv1.NewHandler(apiv1.Options{
 		AuthTokens:       []string{apiv1.DefaultLoopbackAPIToken},
-		ProcessWorkOwner: conformanceTestProcessOwner(t),
+		ProcessWorkOwner: f.topology.process,
 		Handlers:         methods,
 	})
 	if err != nil {
@@ -395,7 +395,7 @@ func deploymentForkOwnerWithExecutor(t *testing.T, f *deploymentResourceFixture,
 			t.Fatal(err)
 		}
 	}
-	if err := owner.BindSelectedProcess(f.ctx, conformanceTestProcessOwner(t), f.topology.capability); err != nil {
+	if err := owner.BindSelectedProcess(f.ctx, f.topology.process, f.topology.capability); err != nil {
 		t.Fatal(err)
 	}
 	artifacts, ok := f.selected.(runforkexecution.SourceArtifactSelectedContractSourceStore)

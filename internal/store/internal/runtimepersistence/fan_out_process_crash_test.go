@@ -406,6 +406,7 @@ func runFanOutCrashChild(t *testing.T, mode string) {
 		t.Fatal(err)
 	}
 	ctx = authoractivity.WithScope(ctx, authoractivity.BundleScope(grant.RuntimeInstanceID, fact.BundleHash()))
+	ctx = correlation.WithRuntimeInstanceID(ctx, grant.RuntimeInstanceID)
 	ctx, err = startupownership.WithRuntimeMutationAuthority(ctx, liveGrant)
 	if err != nil {
 		t.Fatal(err)

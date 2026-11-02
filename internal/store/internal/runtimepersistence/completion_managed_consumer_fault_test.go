@@ -38,11 +38,19 @@ import (
 type managedProjectionPostCommitFaultStore struct {
 	completionSettlementTestStore
 	runtimeeffects.CompletionContinuationStore
-	faultAttempt string
-	projectCalls int
-	faults       int
-	joined       bool
-	independent  bool
+	faultAttempt  string
+	projectCalls  int
+	faults        int
+	joined        bool
+	independent   bool
+	settlementErr error
+}
+
+func (s *managedProjectionPostCommitFaultStore) SettleExternalAttempt(ctx context.Context, settlement runtimeeffects.Settlement) error {
+	if err := s.completionSettlementTestStore.SettleExternalAttempt(ctx, settlement); err != nil {
+		return err
+	}
+	return runtimeeffects.NewPostCommitMutationError(runtimeeffects.MutationSettlement, runtimeeffects.Attempt{OperationID: settlement.OperationID, AttemptID: settlement.AttemptID}, s.settlementErr)
 }
 
 type blockedProviderNoTools struct{}

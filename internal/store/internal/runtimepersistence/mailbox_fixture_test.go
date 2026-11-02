@@ -141,7 +141,7 @@ func TestMailboxRequesterFixtureTransactionBothStores(t *testing.T) {
 				case <-time.After(5 * time.Second):
 					t.Fatal("contending selected writer did not acquire row")
 				}
-				blocked, cancel := context.WithTimeout(context.Background(), 50*time.Millisecond)
+				blocked, cancel := context.WithTimeout(ctx, 50*time.Millisecond)
 				defer cancel()
 				// Admitted PostgreSQL SQL drains before cancellation rejects commit.
 				// Release the real lock after cancellation, then join both owners.

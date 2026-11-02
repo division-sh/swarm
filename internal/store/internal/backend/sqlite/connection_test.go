@@ -33,6 +33,7 @@ func proveNativeRollbackWitness(t *testing.T) {
 
 type rollbackWitnessSpy struct {
 	nativeRollbackConnection
+	path               string
 	rollbacks, commits atomic.Int32
 	rollbackErr        error
 	commitErr          error
@@ -73,7 +74,8 @@ func (t *rollbackWitnessSpyTx) Commit() error {
 
 func openRollbackWitnessTest(t *testing.T) (*sql.DB, *rollbackConnection, *rollbackWitnessSpy) {
 	t.Helper()
-	db, err := OpenDatabase("file:" + filepath.Join(t.TempDir(), "native.db") + "?_pragma=foreign_keys(1)")
+	path := "file:" + filepath.Join(t.TempDir(), "native.db")
+	db, err := OpenDatabase(path + "?_pragma=foreign_keys(1)")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -91,7 +93,7 @@ func openRollbackWitnessTest(t *testing.T) (*sql.DB, *rollbackConnection, *rollb
 		if !ok {
 			return fmt.Errorf("constructor bypassed rollback ownership: %T", raw)
 		}
-		spy = &rollbackWitnessSpy{nativeRollbackConnection: owned.native}
+		spy = &rollbackWitnessSpy{nativeRollbackConnection: owned.native, path: path}
 		owned.native = spy
 		return nil
 	}); err != nil {
@@ -121,12 +123,9 @@ func proveInterruptedNativeRollback(t *testing.T, prepared, callbackError bool) 
 			runtime.Gosched()
 		}
 	})
-	b, err := New(db)
-	if err != nil {
-		t.Fatal(err)
-	}
+	b := originalTransactionTestBackend(t, db, spy.path)
 	primary := errors.New("independent interrupted callback error")
-	err = b.RunTransaction(ctx, "interrupted native write", func(ctx context.Context, tx *sql.Tx) error {
+	err := b.RunTransaction(ctx, "interrupted native write", func(ctx context.Context, tx *sql.Tx) error {
 		if _, err := tx.ExecContext(ctx, "UPDATE saved SET value=17"); err != nil {
 			return err
 		}
@@ -468,10 +467,7 @@ func proveRollbackExitErrors(t *testing.T) {
 			}
 			ctx, cancel := context.WithCancel(context.Background())
 			defer cancel()
-			b, err := New(db)
-			if err != nil {
-				t.Fatal(err)
-			}
+			b := originalTransactionTestBackend(t, db, spy.path)
 			if name == "rollback" {
 				spy.rollbackErr = primary
 			} else {

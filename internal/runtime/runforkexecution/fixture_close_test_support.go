@@ -57,10 +57,10 @@ func (o SelectedContractExecutionOwner) PublishSelectedFixtureCloseForTest(calle
 	if err != nil {
 		return result, err
 	}
+	defer use.cancel()
 	released := false
 	defer func() {
 		if !released {
-			use.cancel()
 			finalErr = errors.Join(finalErr, use.lease.Done())
 		}
 	}()
@@ -87,16 +87,11 @@ func (o SelectedContractExecutionOwner) PublishSelectedFixtureCloseForTest(calle
 	publishErr := use.bus.PublishAndWait(use.ctx, event)
 	cleanupErr := use.lease.Done()
 	released = true
-	use.cancel()
 	if err := errors.Join(publishErr, cleanupErr); err != nil {
 		return result, err
 	}
-	// Terminal completion joins the retained occurrence, so release this input
-	// before waiting for its existing owner to finish the authored close.
-	select {
-	case <-caller.Done():
-		return result, context.Cause(caller)
-	case <-use.entry.done:
+	if err := use.bus.WaitForQuiescence(use.ctx); err != nil {
+		return result, err
 	}
 	ports.contexts.mu.Lock()
 	closeErr := use.entry.err

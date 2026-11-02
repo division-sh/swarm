@@ -1,6 +1,7 @@
 package runtimepersistence
 
 import (
+	"context"
 	"encoding/json"
 	"sort"
 	"strconv"
@@ -228,6 +229,12 @@ func TestSQLiteRuntimeStoreConversationForkLifecycleParity(t *testing.T) {
 
 func seedSQLiteConversationForkSource(t *testing.T, s *SQLiteRuntimeStore, base time.Time, historical ...*contracts.WorkflowContractBundle) conversationForkSourceFixture {
 	t.Helper()
+	ctx := originalStoreFixtureContext(t, testAuthorActivityContext(), s)
+	return seedSQLiteConversationForkSourceWithContext(t, ctx, s, base, historical...)
+}
+
+func seedSQLiteConversationForkSourceWithContext(t *testing.T, ctx context.Context, s *SQLiteRuntimeStore, base time.Time, historical ...*contracts.WorkflowContractBundle) conversationForkSourceFixture {
+	t.Helper()
 	source := conversationForkSourceFixture{
 		runID:      uuid.NewString(),
 		bundleHash: authorActivityTestBundleHash,
@@ -248,7 +255,7 @@ func seedSQLiteConversationForkSource(t *testing.T, s *SQLiteRuntimeStore, base 
 		source.bundleHash = run.Artifact.BundleHash()
 		run.BundleHash = source.bundleHash
 	}
-	ctx := originalStoreFixtureContext(t, testAuthorActivityContextForBundle(source.bundleHash), s)
+	ctx = originalStoreFixtureContext(t, ctx, s)
 	requireRunFixtureForTest(t, ctx, s, run)
 	identity := mustTestAgentIdentityForRun(source.runID, source.agentID, conversationForkSourceFlowInstance)
 	fields, err := identity.StorageFields()

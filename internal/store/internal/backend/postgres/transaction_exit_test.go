@@ -11,11 +11,15 @@ import (
 	"testing"
 	"time"
 
+	"github.com/division-sh/swarm/internal/runtime/core/processbinding"
+	"github.com/division-sh/swarm/internal/store/internal/backend/generationauthority"
 	"github.com/division-sh/swarm/internal/testutil"
+	"github.com/google/uuid"
 )
 
 // Observe real driver transaction exits; barriers never fabricate query success.
 type exitProbeConnector struct {
+	original                         context.Context
 	driver                           driver.Driver
 	dsn                              string
 	rollbackEntered, rollbackRelease chan struct{}
@@ -99,8 +103,8 @@ type callbackDeadlineContext struct{ context.Context }
 
 func (c callbackDeadlineContext) Err() error { return context.Cause(c.Context) }
 
-func newCallbackDeadlineContext() (context.Context, func()) {
-	ctx, expire := context.WithCancelCause(context.Background())
+func newCallbackDeadlineContext(parent context.Context) (context.Context, func()) {
+	ctx, expire := context.WithCancelCause(parent)
 	return callbackDeadlineContext{ctx}, func() { expire(context.DeadlineExceeded) }
 }
 
@@ -128,7 +132,7 @@ func (t *exitProbeTx) Rollback() error {
 func newExitProbe(t *testing.T) (*Backend, *exitProbeConnector) {
 	t.Helper()
 	dsn, original, _ := testutil.StartPostgres(t)
-	p := &exitProbeConnector{driver: original.Driver(), dsn: dsn, closedSignal: make(chan struct{}), rollbackDone: make(chan struct{})}
+	p := &exitProbeConnector{driver: original.Driver(), dsn: dsn, closedSignal: make(chan struct{}), rollbackDone: make(chan struct{}), original: originalProcessContext(t, dsn)}
 	db := sql.OpenDB(p)
 	db.SetMaxOpenConns(1)
 	t.Cleanup(func() { _ = db.Close() })
@@ -137,6 +141,49 @@ func newExitProbe(t *testing.T) (*Backend, *exitProbeConnector) {
 		t.Fatal(err)
 	}
 	return b, p
+}
+
+func originalProcessContext(t *testing.T, dsn string) context.Context {
+	t.Helper()
+	db, err := sql.Open("postgres", dsn)
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() {
+		if err := db.Close(); err != nil {
+			t.Error(err)
+		}
+	})
+	backend, err := New(db)
+	if err != nil {
+		t.Fatal(err)
+	}
+	ctx := context.Background()
+	lease, err := AcquireBlockingAdvisoryLockLease(ctx, backend, "native-transaction-proof-process")
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() {
+		if err := lease.Release(context.Background()); err != nil {
+			t.Error(err)
+		}
+	})
+	var stamp processbinding.LeaseStamp
+	ack, err := lease.RunProcessAcquisitionOutcome(ctx, func(txctx context.Context, tx *sql.Tx) error {
+		var err error
+		stamp, err = generationauthority.AdvanceProcessGeneration(txctx, tx, processbinding.LeaseIdentity{
+			LeaseID: uuid.NewString(), OwnerID: "native-transaction-proof", BootID: uuid.NewString(), RuntimeInstanceID: uuid.NewString(), Backend: processbinding.PostgresLeaseBackend,
+		}, false)
+		return err
+	})
+	if err != nil || !ack {
+		t.Fatalf("original process acquisition: acknowledged=%v err=%v", ack, err)
+	}
+	ctx, err = generationauthority.MutationContext(ctx, stamp, false)
+	if err != nil {
+		t.Fatal(err)
+	}
+	return ctx
 }
 
 func TestPostgresTransactionSoleErrorIdentity(t *testing.T) {
@@ -153,7 +200,7 @@ func TestPostgresTransactionSoleErrorIdentity(t *testing.T) {
 					run = b.RunReadTransaction
 				}
 				calls := 0
-				err := run(context.Background(), func(context.Context, *sql.Tx) error {
+				err := run(p.original, func(context.Context, *sql.Tx) error {
 					calls++
 					return sentinel
 				})
@@ -199,10 +246,10 @@ func TestPostgresTransactionCancellationRollbackOrders(t *testing.T) {
 						var once sync.Once
 						release := func() { once.Do(func() { close(p.rollbackRelease) }) }
 						defer release()
-						ctx, cancel := context.WithCancel(context.Background())
+						ctx, cancel := context.WithCancel(p.original)
 						if deadline {
 							cancel()
-							ctx, cancel = newCallbackDeadlineContext()
+							ctx, cancel = newCallbackDeadlineContext(p.original)
 						}
 						defer cancel()
 						primary := errors.New("independent callback failure")
@@ -272,7 +319,7 @@ func TestPostgresTransactionCancellationRollbackOrders(t *testing.T) {
 						if !callbackFailure && comparisonErr != ctx.Err() {
 							t.Fatalf("manufactured transaction failure: %v", err)
 						}
-						next, stop := context.WithTimeout(context.Background(), time.Second)
+						next, stop := context.WithTimeout(p.original, time.Second)
 						defer stop()
 						if err := b.db.PingContext(next); err != nil {
 							t.Fatal(err)
@@ -286,8 +333,8 @@ func TestPostgresTransactionCancellationRollbackOrders(t *testing.T) {
 
 func TestPostgresTransactionPanicAndFailureExits(t *testing.T) {
 	t.Run("foreign native cancellation receipt", func(t *testing.T) {
-		b, _ := newExitProbe(t)
-		ctx, cancel := context.WithCancel(context.Background())
+		b, p := newExitProbe(t)
+		ctx, cancel := context.WithCancel(p.original)
 		cancel()
 		_, foreign := b.RunTransactionOutcome(ctx, func(context.Context, *sql.Tx) error {
 			t.Fatal("cancelled callback entered")
@@ -297,7 +344,7 @@ func TestPostgresTransactionPanicAndFailureExits(t *testing.T) {
 			t.Fatalf("missing native before-entry control: %v", foreign)
 		}
 		for _, cancelOuter := range []bool{false, true} {
-			ctx, cancel := context.WithCancel(context.Background())
+			ctx, cancel := context.WithCancel(p.original)
 			_, err := b.RunTransactionOutcome(ctx, func(context.Context, *sql.Tx) error {
 				if cancelOuter {
 					cancel()
@@ -317,7 +364,7 @@ func TestPostgresTransactionPanicAndFailureExits(t *testing.T) {
 				if _, err := b.db.Exec("CREATE TABLE exit_probe (n integer NOT NULL); INSERT INTO exit_probe VALUES (0)"); err != nil {
 					t.Fatal(err)
 				}
-				ctx, cancel := context.WithCancel(context.Background())
+				ctx, cancel := context.WithCancel(p.original)
 				defer cancel()
 				primary, cleanup, commit := errors.New("primary"), errors.New("rollback failure"), errors.New("actual commit failure")
 				if scenario == "rollback_failure" || scenario == "panic_rollback_failure" {
@@ -389,7 +436,7 @@ func TestPostgresTransactionPanicAndFailureExits(t *testing.T) {
 						t.Fatal(err)
 					}
 				}
-				next, stop := context.WithTimeout(context.Background(), time.Second)
+				next, stop := context.WithTimeout(p.original, time.Second)
 				defer stop()
 				if err := b.db.PingContext(next); err != nil {
 					t.Fatal(err)
@@ -411,7 +458,8 @@ func TestPostgresTransactionPanicAndFailureExits(t *testing.T) {
 }
 
 func TestRetainedPostgresPanicPreservesPossessionAndNextOperation(t *testing.T) {
-	_, db, _ := testutil.StartPostgres(t)
+	dsn, db, _ := testutil.StartPostgres(t)
+	original := originalProcessContext(t, dsn)
 	db.SetMaxOpenConns(1)
 	conn, err := db.Conn(context.Background())
 	if err != nil {
@@ -429,7 +477,7 @@ func TestRetainedPostgresPanicPreservesPossessionAndNextOperation(t *testing.T) 
 				t.Error("panic changed")
 			}
 		}()
-		_ = RunAuthorityTransaction(context.Background(), a, func(context.Context, *sql.Tx) error { panic(primary) })
+		_ = RunAuthorityTransaction(original, a, func(context.Context, *sql.Tx) error { panic(primary) })
 	}()
 	a.mu.Lock()
 	active := a.activeTx != nil
@@ -437,7 +485,7 @@ func TestRetainedPostgresPanicPreservesPossessionAndNextOperation(t *testing.T) 
 	if active {
 		t.Fatal("transaction ownership retained")
 	}
-	ctx, cancel := context.WithTimeout(context.Background(), time.Second)
+	ctx, cancel := context.WithTimeout(original, time.Second)
 	defer cancel()
 	if err := RunAuthorityTransaction(ctx, a, func(ctx context.Context, tx *sql.Tx) error {
 		var held bool
@@ -469,10 +517,10 @@ func TestRetainedPostgresTransactionExitMatrix(t *testing.T) {
 			if _, err := conn.ExecContext(context.Background(), "SELECT pg_advisory_lock(2442)"); err != nil {
 				t.Fatal(err)
 			}
-			ctx, cancel := context.WithCancel(context.Background())
+			ctx, cancel := context.WithCancel(p.original)
 			if scenario == "deadline" {
 				cancel()
-				ctx, cancel = newCallbackDeadlineContext()
+				ctx, cancel = newCallbackDeadlineContext(p.original)
 			}
 			defer cancel()
 			primary := errors.New("independent retained callback")
@@ -543,7 +591,7 @@ func TestRetainedPostgresTransactionExitMatrix(t *testing.T) {
 			if closed != unsafe {
 				t.Fatalf("session closed=%t unsafe=%t", closed, unsafe)
 			}
-			next, stop := context.WithTimeout(context.Background(), time.Second)
+			next, stop := context.WithTimeout(p.original, time.Second)
 			defer stop()
 			if !unsafe {
 				if err := RunAuthorityTransaction(next, a, func(ctx context.Context, tx *sql.Tx) error {
@@ -587,7 +635,7 @@ func TestPostgresTransactionAdmissionExits(t *testing.T) {
 		for _, scenario := range []string{"empty", "canceled", "begin_failure", "closed"} {
 			t.Run(fmt.Sprintf("retained=%t/%s", retained, scenario), func(t *testing.T) {
 				b, p := newExitProbe(t)
-				ctx, cancel := context.WithCancel(context.Background())
+				ctx, cancel := context.WithCancel(p.original)
 				defer cancel()
 				primary := errors.New("begin failure")
 				var a *SessionAuthority
@@ -654,7 +702,7 @@ func TestPostgresTransactionAdmissionExits(t *testing.T) {
 				}
 				if scenario != "closed" {
 					p.beginFailure = nil
-					ctx, stop := context.WithTimeout(context.Background(), time.Second)
+					ctx, stop := context.WithTimeout(p.original, time.Second)
 					defer stop()
 					if err := b.db.PingContext(ctx); err != nil {
 						t.Fatal(err)

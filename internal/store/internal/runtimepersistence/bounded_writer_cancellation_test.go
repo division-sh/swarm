@@ -87,7 +87,7 @@ func TestBoundedPostgresWritersCancelBeforeCommit(t *testing.T) {
 							return err
 						}
 					case "mailbox_notify":
-						invoke = noticeAcknowledgmentFixture(t, pg, item.ID)
+						invoke = noticeAcknowledgmentFixture(t, base, pg, item.ID)
 					case "mailbox_expire":
 						invoke = func(ctx context.Context) error {
 							items, err := pg.ExpireMailboxItems(ctx, 20)
@@ -99,6 +99,7 @@ func TestBoundedPostgresWritersCancelBeforeCommit(t *testing.T) {
 					}
 				case strings.HasPrefix(name, "quiescence") || name == "reset_cleanup":
 					runID := uuid.NewString()
+					base = originalStoreFixtureContext(t, base, pg)
 					requireRunFixtureForTest(t, base, pg, semanticRunFixture{Origin: semanticScenarioSetupRunOriginForTest(), RunID: runID, StartedAt: now.Add(-time.Hour)})
 					table, event = "runs", "UPDATE"
 					observe = `SELECT COALESCE(string_agg(status, ',' ORDER BY run_id), '') FROM runs`

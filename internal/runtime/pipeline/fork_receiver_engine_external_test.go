@@ -811,12 +811,22 @@ func startForkEngineRuntimeOwnerAt(t *testing.T, backend, root string, probe lif
 	ctx := runtimecorrelation.WithRuntimeInstanceID(context.Background(), runtimeID)
 	ctx = runtimecorrelation.WithSourceArtifactFact(ctx, fact)
 	ctx = runtimeauthoractivity.WithScope(ctx, runtimeauthoractivity.BundleScope(runtimeID, fact.BundleHash()))
+	process := worklifetime.NewProcess()
+	capability, err := selected.StartupOwnership().AcquireProcessCapability(ctx, startupownership.AcquireRequest{OwnerID: "fork-engine-test", BootID: uuid.NewString(), RuntimeInstanceID: runtimeID})
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() {
+		if err := capability.Release(context.Background()); err != nil {
+			t.Error(err)
+		}
+	})
+	ctx = nativeOriginalProcessContextFixture(t, worklifetime.WithProcess(ctx, process), capability)
 	storetest.RequireBundleDataCatalog(t, ctx, selected.SourceArtifactWriter(), bundle)
 	cfgResult, err := cliapp.LoadRuntimeConfigWithOptions(cliapp.RuntimeConfigLoadOptions{RepoRoot: repo, ExplicitPath: configPath})
 	if err != nil {
 		t.Fatal(err)
 	}
-	process := worklifetime.NewProcess()
 	catalog, _, err := providertriggers.NewCatalogSnapshotFromInventory(bundle.PackInventory, bundle.Platform.Platform.Version)
 	if err != nil {
 		t.Fatal(err)
@@ -829,10 +839,6 @@ func startForkEngineRuntimeOwnerAt(t *testing.T, backend, root string, probe lif
 	deps.Config = cfgResult.Config
 	deps.Options = swarmruntime.RuntimeOptions{ExecutionPosture: executionposture.Live, WorkflowModule: module, SourceArtifactFact: fact, RuntimeInstanceID: runtimeID, ProcessWorkOwner: process, ProviderTriggerCatalog: catalog, ProviderCredentials: credentials, TestLifecycleProbe: probe}
 	rt, err := swarmruntime.NewRuntime(ctx, deps)
-	if err != nil {
-		t.Fatal(err)
-	}
-	capability, err := selected.StartupOwnership().AcquireProcessCapability(ctx, startupownership.AcquireRequest{OwnerID: "fork-engine-test", BootID: uuid.NewString(), RuntimeInstanceID: runtimeID})
 	if err != nil {
 		t.Fatal(err)
 	}

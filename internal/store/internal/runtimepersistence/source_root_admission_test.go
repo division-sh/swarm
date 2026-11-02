@@ -42,6 +42,7 @@ func TestS1RootAdmissionCommitUncertaintyBothStores(t *testing.T) {
 					source, _ := admittedRootForStorage(t, "shop-a")
 					ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
 					defer cancel()
+					ctx = originalStoreFixtureContext(t, ctx, owner)
 					ensure := func() (sourceartifact.RootedEnsureResult, error) {
 						if withData {
 							return selected.EnsureRootedSourceWithData(ctx, source, durabledata.Catalog{BundleHash: source.Admission().BundleHash()})
@@ -119,7 +120,7 @@ func TestS1RootAdmissionRetainedOwnerBothStores(t *testing.T) {
 	for _, backend := range []string{"sqlite", "postgres"} {
 		t.Run(backend, func(t *testing.T) {
 			selected := selectedRootAdmissionStore(t, backend)
-			ctx := context.Background()
+			ctx := originalStoreFixtureContext(t, context.Background(), selected)
 			sourceA, rootA := admittedRootForStorage(t, "shop-a")
 			sourceB, rootB := admittedRootForStorage(t, "shop-b")
 			if sourceA.Artifact().BundleHash() != sourceB.Artifact().BundleHash() || sourceA.Admission().Equal(sourceB.Admission()) {
@@ -170,7 +171,8 @@ func TestS1RootAdmissionCancellationBothStores(t *testing.T) {
 		t.Run(backend, func(t *testing.T) {
 			selected := selectedRootAdmissionStore(t, backend)
 			source, _ := admittedRootForStorage(t, "shop-a")
-			ctx, cancel := context.WithCancel(context.Background())
+			original := originalStoreFixtureContext(t, context.Background(), selected)
+			ctx, cancel := context.WithCancel(original)
 			cancel()
 			if _, err := selected.EnsureRootedSource(ctx, source); !errors.Is(err, context.Canceled) {
 				t.Fatalf("canceled root was admitted: %v", err)
@@ -178,13 +180,13 @@ func TestS1RootAdmissionCancellationBothStores(t *testing.T) {
 			if _, err := selected.GetSourceArtifact(context.Background(), source.Admission().BundleHash()); !errors.Is(err, sourceartifact.ErrNotFound) {
 				t.Fatalf("canceled source content persisted: %v", err)
 			}
-			if _, err := selected.EnsureRootedSource(context.Background(), source); err != nil {
+			if _, err := selected.EnsureRootedSource(original, source); err != nil {
 				t.Fatal(err)
 			}
 			if _, err := selected.GetRootedSource(ctx, source.Admission().Reference()); !errors.Is(err, context.Canceled) {
 				t.Fatalf("canceled read disclosed root evidence: %v", err)
 			}
-			if _, err := selected.EnsureRootedSource(context.Background(), sourceartifact.RootedSource{}); !errors.Is(err, sourceartifact.ErrRootAdmissionMissing) {
+			if _, err := selected.EnsureRootedSource(original, sourceartifact.RootedSource{}); !errors.Is(err, sourceartifact.ErrRootAdmissionMissing) {
 				t.Fatalf("zero root evidence persisted: %v", err)
 			}
 		})
@@ -196,7 +198,7 @@ func TestS1RootAdmissionCatalogFailureRollsBackBothStores(t *testing.T) {
 		t.Run(backend, func(t *testing.T) {
 			selected := selectedRootAdmissionStore(t, backend)
 			source, _ := admittedRootForStorage(t, "shop-a")
-			ctx := context.Background()
+			ctx := originalStoreFixtureContext(t, context.Background(), selected)
 			invalid := durabledata.Catalog{
 				BundleHash: source.Admission().BundleHash(), Declarations: []durabledata.Declaration{{}},
 			}

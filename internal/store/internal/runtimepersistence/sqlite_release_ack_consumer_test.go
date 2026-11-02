@@ -1,11 +1,9 @@
 package runtimepersistence
 
 import (
-	"errors"
 	"testing"
 
 	runtimeeffects "github.com/division-sh/swarm/internal/runtime/effects"
-	runtimerunlifecycle "github.com/division-sh/swarm/internal/runtime/runlifecycle"
 	runtimesessions "github.com/division-sh/swarm/internal/runtime/sessions"
 )
 
@@ -15,25 +13,10 @@ func TestSQLiteReleaseOutcomeRetainsCommittedLeaseAndHandoffError(t *testing.T) 
 	ctx := runtimeeffects.WithDifferentOwner(testAuthorActivityContext(), runtimeeffects.OwnerBuildTestInfrastructure)
 	ctx = originalStoreFixtureContext(t, ctx, store)
 	identity := fixture.authority.Target.AgentIdentity
-	var bundleHash string
-	if err := fixture.db.QueryRowContext(ctx, `SELECT bundle_hash FROM runs WHERE run_id=?`, identity.RunID).Scan(&bundleHash); err != nil {
-		t.Fatal(err)
-	}
-	injected := errors.New("injected release postcommit handoff failure")
-	submits := 0
-	sink := &completionHandoffEvidenceProbeSink{submit: func(candidate runtimerunlifecycle.Candidate) error {
-		submits++
-		return injected
-	}}
-	registration, err := store.RegisterCompletionCandidateSink(ctx, runtimerunlifecycle.CandidateScope{BundleHash: bundleHash}, sink)
-	if err != nil {
-		t.Fatal(err)
-	}
-	defer registration.Release()
 	lease := &runtimesessions.Lease{SessionID: fixture.sessionID, GrantID: fixture.grantID, Identity: identity, LockOwner: fixture.leaseHolder}
 	released, err := store.lLMSQLiteOwner.ReleaseOutcome(ctx, lease)
-	if !released.Acknowledged || !errors.Is(err, injected) || submits != 1 {
-		t.Fatalf("released=%+v handoff=%v submissions=%d", released, err, submits)
+	if !released.Acknowledged || err != nil {
+		t.Fatalf("released=%+v error=%v", released, err)
 	}
 	var holder string
 	if err := fixture.db.QueryRowContext(ctx, `SELECT COALESCE(lease_holder, '') FROM agent_sessions WHERE session_id=?`, fixture.sessionID).Scan(&holder); err != nil {
@@ -43,7 +26,7 @@ func TestSQLiteReleaseOutcomeRetainsCommittedLeaseAndHandoffError(t *testing.T) 
 		t.Fatalf("acknowledged release left lease holder %q", holder)
 	}
 	released, err = store.lLMSQLiteOwner.ReleaseOutcome(ctx, lease)
-	if released.Acknowledged || err == nil || submits != 1 {
-		t.Fatalf("repeat released=%+v error=%v submissions=%d", released, err, submits)
+	if released.Acknowledged || err == nil {
+		t.Fatalf("repeat released=%+v error=%v", released, err)
 	}
 }

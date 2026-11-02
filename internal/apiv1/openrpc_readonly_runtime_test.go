@@ -969,7 +969,7 @@ func readOnlyProbeCompletionEvidence(t *testing.T, profileID, model string) *run
 
 func newReadOnlyRuntimeProbeHandler(t *testing.T, opts testOperatorCapabilities) (*Handler, map[string]int) {
 	t.Helper()
-	allHandlers := testOperatorHandlers(opts)
+	allHandlers := testOperatorHandlers(t, opts)
 	calls := map[string]int{}
 	handlers := map[string]MethodHandler{}
 	for _, methodName := range approvedReadOnlyHTTPRuntimeMethods() {

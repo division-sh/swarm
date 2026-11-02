@@ -35,12 +35,13 @@ func TestEventBusPublish_ConnectRoutePlanPersistsCreatedAgentBeforeLiveCarrier(t
 					Origin: storetest.ScenarioSetupOrigin(), RunID: "99999999-9999-9999-9999-999999999999",
 					Artifact: bundle.SourceArtifact, StartedAt: time.Now().UTC(),
 				})
-				eventBus, err := newScopedTestEventBus(selected, runtimebus.EventBusOptions{ContractBundle: source})
+				eventBus, err := newNativeScopedTestEventBus(t, selected, runtimebus.EventBusOptions{ContractBundle: source})
 				if err != nil {
 					t.Fatal(err)
 				}
 				workflow := newEventBusWorkflowCoordinator(eventBus, selected, newFixtureWorkflowModule(t, bundle))
 				process := worklifetime.NewProcess()
+				ctx = nativeBusProcessContext(t, worklifetime.WithProcess(ctx, process), selected)
 				owner, err := process.NewRuntime(ctx, worklifetime.RuntimeIdentity{
 					RuntimeInstanceID: authorActivityTestRuntimeInstanceID, BundleHash: testSourceArtifactFact(source).BundleHash(),
 				})

@@ -171,7 +171,7 @@ func TestAuthorityAcquisitionGracefulCancellation(t *testing.T) {
 }
 
 func TestAuthorityAcquisitionWaitsForTransactionAndRechecksAdmission(t *testing.T) {
-	b, _ := newExitProbe(t)
+	b, probe := newExitProbe(t)
 	parent, held, err := AcquireAdvisoryLockLease(context.Background(), b.db, "acquisition-wait-parent")
 	if err != nil || !held {
 		t.Fatalf("parent held=%t: %v", held, err)
@@ -185,7 +185,7 @@ func TestAuthorityAcquisitionWaitsForTransactionAndRechecksAdmission(t *testing.
 	entered, finish := make(chan struct{}), make(chan struct{})
 	txDone := make(chan error, 1)
 	go func() {
-		txDone <- RunAuthorityTransaction(context.Background(), session, func(ctx context.Context, tx *sql.Tx) error {
+		txDone <- RunAuthorityTransaction(probe.original, session, func(ctx context.Context, tx *sql.Tx) error {
 			var n int
 			if err := tx.QueryRowContext(ctx, "SELECT 1").Scan(&n); err != nil {
 				return err

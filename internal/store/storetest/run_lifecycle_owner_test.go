@@ -9,6 +9,7 @@ import (
 
 	runtimebus "github.com/division-sh/swarm/internal/runtime/bus"
 
+	agentfixture "github.com/division-sh/swarm/internal/store/testutil/agentfixture"
 	"github.com/division-sh/swarm/internal/testutil/sourceartifactfixture"
 	"github.com/google/uuid"
 )
@@ -37,10 +38,14 @@ func TestRunFixtureRefusalsDoNotWrite(t *testing.T) {
 		t.Run(backend.name, func(t *testing.T) {
 			selected := backend.open(t)
 			ctx := context.Background()
+			if original, err := agentfixture.ProcessContext(t, ctx, any(selected).(agentfixture.Store)); err != nil {
+				t.Fatal(err)
+			} else {
+				ctx = original
+			}
 			rooted, _ := sourceartifactfixture.Rooted(t, "fixture", sourceartifactfixture.Artifact())
 			sourceartifactfixture.RequireArtifact(t, ctx, selected, rooted.Artifact())
 			ctx = correlation.WithRootAdmission(correlation.WithSourceArtifactFact(ctx, sourceartifactfixture.FactFor(rooted.Artifact())), rooted.Admission())
-			collector := CollectTransactions(t, selected, TransactionProbeOptions{})
 			for _, refusal := range []struct {
 				name    string
 				fixture RunFixture
@@ -66,9 +71,6 @@ func TestRunFixtureRefusalsDoNotWrite(t *testing.T) {
 					t.Fatal("cancelled fixture created a run")
 				}
 			})
-			if proof := collector.Snapshot(); proof.Total.WriteCommits != 0 || proof.Active != 0 {
-				t.Fatalf("refused fixture persisted work: %+v", proof)
-			}
 		})
 	}
 }

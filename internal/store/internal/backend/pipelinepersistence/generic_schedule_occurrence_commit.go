@@ -43,6 +43,9 @@ func commitGenericScheduleOccurrence(
 			if err := store.RequireRunExecutionTx(txctx, tx, command.Activation.Command.RunID); err != nil {
 				return err
 			}
+			if err := store.LockWorkflowPublicationTx(txctx, tx, plan.PublicationCommand()); err != nil {
+				return err
+			}
 			acceptedAt, err := stampAcceptedAt(txctx, tx)
 			if err != nil {
 				return fmt.Errorf("stamp generic schedule occurrence acceptance: %w", err)
@@ -129,11 +132,6 @@ func commitGenericScheduleOccurrence(
 			}
 			if err := attempt.AddFact(next.Command.RunID, privaterunforkrevision.FamilyTimers, next.ID); err != nil {
 				return err
-			}
-			if next.Status == runtimegenericschedule.StatusFired && next.Command.RunID != "" {
-				if _, err := attempt.RequestCompletion(txctx, candidateWriter, next.Command.RunID, nil); err != nil {
-					return err
-				}
 			}
 			result = runtimegenericschedule.CommitResult{Outcome: outcome, Next: next, Publication: evidence}
 			return nil

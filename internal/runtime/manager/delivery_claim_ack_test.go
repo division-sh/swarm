@@ -10,6 +10,7 @@ import (
 	"github.com/division-sh/swarm/internal/events/eventtest"
 	runtimebus "github.com/division-sh/swarm/internal/runtime/bus"
 	runtimeactors "github.com/division-sh/swarm/internal/runtime/core/actors"
+	"github.com/division-sh/swarm/internal/runtime/core/worklifetime"
 	runtimedelivery "github.com/division-sh/swarm/internal/runtime/deliverylifecycle"
 	runtimefailures "github.com/division-sh/swarm/internal/runtime/failures"
 	"github.com/division-sh/swarm/internal/runtime/lifecycleprobe/lifecycletest"
@@ -21,6 +22,10 @@ type faultedManagerClaimStore struct {
 	acknowledged bool
 	fault        error
 	injected     atomic.Bool
+}
+
+func (s *faultedManagerClaimStore) managerTestOriginalProcess() *worklifetime.Process {
+	return managerTestOriginalProcessFromStore(s.Store)
 }
 
 func (s *faultedManagerClaimStore) managerTestDeliveryAuthority() runtimedelivery.ExecutionAuthority {

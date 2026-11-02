@@ -320,7 +320,7 @@ func loadDynamicFlowRuntimeReadiness(ctx context.Context, queryer dynamicFlowRea
 		JOIN runs AS run ON run.run_id = readiness.run_id
 		WHERE readiness.run_id = $1::uuid AND readiness.instance_path = $2`
 	if lock {
-		query += ` FOR UPDATE OF readiness, instance, run`
+		query += ` FOR UPDATE OF readiness, instance FOR SHARE OF run`
 	}
 	if !postgres {
 		query = `

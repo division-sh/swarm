@@ -63,7 +63,7 @@ func TestOperatorRunStopDoesNotReplayCommittedTransitionAfterReconciliationFailu
 		t.Run(tc.name, func(t *testing.T) {
 			pg, _ := storetest.StartPostgresRuntimeStoreWithReopen(t)
 			controller := &committedStopRecoveryProbe{recovery: runtimeruncontrol.PostCommitRecovery{Disposition: tc.disposition, Err: errors.New(tc.diagnostic)}}
-			handler := testHandler(t, Options{AuthTokens: []string{testToken}, Handlers: OperatorRunControlHandlers(RunControlHandlerOptions{Idempotency: pg, Controller: controller})})
+			handler := testHandlerWithOriginalContext(t, Options{AuthTokens: []string{testToken}, Handlers: OperatorRunControlHandlers(RunControlHandlerOptions{Idempotency: pg, Controller: controller})}, apiTestOriginalProcessContext(t, context.Background(), pg))
 			runID := uuid.NewString()
 			body := runControlBody("run.stop", runID, "committed-stop-recovery")
 			for attempt := 0; attempt < 2; attempt++ {
@@ -101,7 +101,7 @@ func TestOperatorRunControlHandlersUseCanonicalOwnerAndIdempotency(t *testing.T)
 	ctx := admittedAPITestBusContext(t, context.Background(), bus)
 	handler := testHandlerWithOriginalContext(t, Options{
 		AuthTokens: []string{testToken},
-		Handlers: testOperatorHandlers(testOperatorCapabilities{
+		Handlers: testOperatorHandlers(t, testOperatorCapabilities{
 			Now:         func() time.Time { return time.Date(2026, 5, 11, 12, 0, 0, 0, time.UTC) },
 			Ready:       func() bool { return true },
 			Database:    fakePinger{},
@@ -110,6 +110,7 @@ func TestOperatorRunControlHandlersUseCanonicalOwnerAndIdempotency(t *testing.T)
 		}),
 	}, ctx)
 	runID := uuid.NewString()
+	ctx = apiTestOriginalProcessContext(t, ctx, pg)
 	storetest.RequireRun(t, ctx, pg, storetest.RunFixture{Origin: storetest.ScenarioSetupOrigin(),
 		RunID: runID, BundleHash: authorActivityTestSourceArtifactFact.BundleHash(),
 		StartedAt: time.Date(2026, 5, 11, 11, 0, 0, 0, time.UTC),
@@ -196,7 +197,7 @@ func TestOperatorRunControlHandlersTypedResourceErrors(t *testing.T) {
 	controller := runtimeruncontrol.NewController(pg, bus, runtimeruncontrol.Options{})
 	bus.SetRunDispatchGate(controller)
 	ctx := admittedAPITestBusContext(t, context.Background(), bus)
-	handler := testHandlerWithOriginalContext(t, Options{AuthTokens: []string{testToken}, Handlers: testOperatorHandlers(testOperatorCapabilities{Idempotency: pg, RunControl: controller})}, ctx)
+	handler := testHandlerWithOriginalContext(t, Options{AuthTokens: []string{testToken}, Handlers: testOperatorHandlers(t, testOperatorCapabilities{Idempotency: pg, RunControl: controller})}, ctx)
 	missingRunID := uuid.NewString()
 	for _, method := range []string{"run.stop", "run.pause", "run.continue"} {
 		resp := rpcCall(t, handler, runControlBody(method, missingRunID, ""))

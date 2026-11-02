@@ -36,7 +36,7 @@ func TestHandlerWebSocketHealthSubscribeAndUnsubscribe(t *testing.T) {
 	}
 	handler := testHandler(t, Options{
 		AuthTokens:    []string{testToken},
-		Handlers:      testOperatorHandlers(readOpts),
+		Handlers:      testOperatorHandlers(t, readOpts),
 		Subscriptions: testOperatorSubscriptions(readOpts, SubscriptionRuntimeOptions{HealthInterval: time.Hour, QueueSize: 4}),
 	})
 
@@ -119,7 +119,7 @@ func TestRuntimeIdentityAndHealthReadCurrentPublicationPerObservation(t *testing
 	}
 	handler := testHandler(t, Options{
 		AuthTokens:    []string{testToken},
-		Handlers:      testOperatorHandlers(capabilities),
+		Handlers:      testOperatorHandlers(t, capabilities),
 		Subscriptions: testOperatorSubscriptions(capabilities, SubscriptionRuntimeOptions{HealthInterval: 10 * time.Millisecond}),
 	})
 
@@ -328,7 +328,7 @@ func TestHandlerWebSocketEventSubscribeUsesOwnerFilterAndReplay(t *testing.T) {
 func TestEventListFilterValidationCoversListAndSubscribe(t *testing.T) {
 	handler := testHandler(t, Options{
 		AuthTokens: []string{testToken},
-		Handlers: testOperatorHandlers(testOperatorCapabilities{
+		Handlers: testOperatorHandlers(t, testOperatorCapabilities{
 			Observability: &fakeObservabilityReadStore{},
 		}),
 		Subscriptions: testOperatorSubscriptions(testOperatorCapabilities{

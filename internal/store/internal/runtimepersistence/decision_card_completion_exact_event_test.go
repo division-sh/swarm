@@ -31,7 +31,7 @@ func TestNormalRunCompletionRequiresExactDecisionOutcomeEventIDParity(t *testing
 		for _, testCase := range testCases {
 			backend, testCase := backend, testCase
 			t.Run(backend+"/"+testCase.name, func(t *testing.T) {
-				ctx := testAuthorActivityContext()
+				ctx := storeTestWorkContext(t, testAuthorActivityContext())
 				cards, runID := decisionCardTestStore(t, backend)
 				ctx = originalStoreFixtureContext(t, ctx, cards)
 				db, postgres := decisionCardStoreDB(t, cards)

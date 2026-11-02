@@ -115,7 +115,7 @@ func TestRunStopDrainsRecoveryBeforeMutationAndRequiredPublicationBothStores(t *
 				stopBus := f.bus
 				if separateBus {
 					var err error
-					stopBus, err = newScopedTestEventBus(f.store, runtimebus.EventBusOptions{ContractBundle: f.source})
+					stopBus, err = newScopedTestEventBus(t, f.store, runtimebus.EventBusOptions{ContractBundle: f.source})
 					if err != nil {
 						t.Fatal(err)
 					}

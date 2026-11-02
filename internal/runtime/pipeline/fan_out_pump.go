@@ -15,6 +15,7 @@ import (
 	runtimefailures "github.com/division-sh/swarm/internal/runtime/failures"
 	"github.com/division-sh/swarm/internal/runtime/fanoutobligation"
 	runtimepipelineobligation "github.com/division-sh/swarm/internal/runtime/pipelineobligation"
+	runtimerunlifecycle "github.com/division-sh/swarm/internal/runtime/runlifecycle"
 )
 
 const fanOutClaimLease = 30 * time.Second
@@ -63,7 +64,31 @@ func (pc *PipelineCoordinator) ServeFanOutCandidate(ctx context.Context, owner F
 		return FanOutTurnResult{}, err
 	}
 	disposition, err := pc.claimAndServeFanOutTurn(ctx, owner, &candidate, time.Now().UTC())
+	if disposition == fanOutTurnCommitted || disposition == fanOutTurnExhausted {
+		activations, advanceErr := owner.AdvanceFanOutBarriers(ctx, candidate)
+		err = errors.Join(err, advanceErr, pc.reconcileFanOutBarrierSchedules(ctx, activations))
+	}
 	return FanOutTurnResult{Refill: disposition.refill()}, err
+}
+
+func (pc *PipelineCoordinator) ReconcileSelectedFanOutBarriers(ctx context.Context, owner SelectedFanOutObligationOwner) error {
+	activations, err := owner.ReconcileFanOutBarriers(ctx)
+	return errors.Join(err, pc.reconcileFanOutBarrierSchedules(ctx, activations))
+}
+
+func (pc *PipelineCoordinator) reconcileFanOutBarrierSchedules(ctx context.Context, activations []runtimerunlifecycle.CommittedGenericScheduleActivation) (err error) {
+	for _, activation := range activations {
+		if validationErr := activation.Validate(); validationErr != nil {
+			err = errors.Join(err, validationErr)
+			continue
+		}
+		if pc.genericSchedules == nil {
+			err = errors.Join(err, errors.New("committed fan-out barrier requires the generic schedule owner"))
+			continue
+		}
+		err = errors.Join(err, pc.reconcileCommittedGenericSchedule(ctx, activation.ID()))
+	}
+	return err
 }
 
 func (pc *PipelineCoordinator) claimAndServeFanOutTurn(ctx context.Context, owner FanOutObligationOwner, candidate *fanoutobligation.IntentKey, now time.Time) (disposition fanOutTurnDisposition, turnErr error) {

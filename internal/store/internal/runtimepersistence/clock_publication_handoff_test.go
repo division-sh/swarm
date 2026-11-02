@@ -14,12 +14,14 @@ import (
 	"github.com/division-sh/swarm/internal/runtime/executionmode"
 	"github.com/division-sh/swarm/internal/runtime/genericschedule"
 	"github.com/division-sh/swarm/internal/runtime/semanticvalue"
+	"github.com/division-sh/swarm/internal/runtime/startupownership"
 )
 
 func TestInstanceClockHandoffRequiresAcknowledgmentAndExactBusBothStores(t *testing.T) {
 	for _, backend := range selectedScheduleStoreCases() {
 		t.Run(backend.name, func(t *testing.T) {
-			selected, _, ctx := backend.open(t)
+			selected, _, seed := backend.open(t)
+			ctx := clockAcknowledgmentContext(t, seed)
 			runID := correlation.RunIDFromContext(ctx)
 			catalogContext := testAuthorActivityContext()
 			var options bus.EventBusOptions
@@ -28,6 +30,11 @@ func TestInstanceClockHandoffRequiresAcknowledgmentAndExactBusBothStores(t *test
 				options.RuntimeInstanceID = scope.RuntimeInstanceID
 			}
 			registerTestAuthorActivityCatalogForContext(t, selected.(testAuthorActivityCatalogRegistrar), catalogContext)
+			options.MutationContext = func(work context.Context) (context.Context, error) {
+				work = startupownership.CarryMutationAuthority(work, ctx)
+				_, err := startupownership.CaptureMutationAuthority(work)
+				return work, err
+			}
 			publisher, err := newStoreTestEventBus(t, selected.(storeTestDurableEventBusStore), options)
 			if err != nil {
 				t.Fatal(err)

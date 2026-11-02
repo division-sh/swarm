@@ -57,7 +57,6 @@ func TestClaimHeartbeatRealStoreAcknowledgedCleanupParity(t *testing.T) {
 			source := sourceartifactfixture.Fact()
 			ctx := runtimecorrelation.WithSourceArtifactFact(context.Background(), source)
 			rooted, _ := sourceartifactfixture.Rooted(t, "fixture", sourceartifactfixture.Artifact())
-			sourceartifactfixture.RequireArtifact(t, ctx, selected, rooted.Artifact())
 			ctx = runtimecorrelation.WithRootAdmission(ctx, rooted.Admission())
 			ctx = runtimeauthoractivity.WithScope(ctx, runtimeauthoractivity.BundleScope(uuid.NewString(), source.BundleHash()))
 			processCapability, err := agentfixture.ProcessCapability(t, ctx, selected.(agentfixture.Store))
@@ -66,6 +65,9 @@ func TestClaimHeartbeatRealStoreAcknowledgedCleanupParity(t *testing.T) {
 			}
 			ctx, err = startupownership.WithProcessMutationAuthority(ctx, processCapability)
 			if err != nil {
+				t.Fatal(err)
+			}
+			if _, err := selected.(sourceartifactfixture.RootedWriter).EnsureRootedSource(ctx, rooted); err != nil {
 				t.Fatal(err)
 			}
 			runID := uuid.NewString()

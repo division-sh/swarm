@@ -26,7 +26,7 @@ func TestHandlerSelectionStoragePreservesExactColumnsAndScopesBothStores(t *test
 			var exact events.Event
 			want := make(map[string]HandlerSelectionStorageEvidence)
 			for _, run := range []string{runID, otherRun} {
-				seedAuthorActivityReceiptRun(t, fixture, ctx, run)
+				ctx = seedAuthorActivityReceiptRun(t, fixture, ctx, run)
 				event := eventtest.PersistedProjection(uuid.NewString(), "selection.storage", "gateway", "", []byte(`{}`), 0, run, "", events.EventEnvelope{}, time.Now().UTC())
 				if run == runID {
 					exact = event
@@ -145,6 +145,7 @@ func TestHandlerSelectionStorageRejectsUnavailableAndInvalidOwners(t *testing.T)
 	for _, backend := range eventRecordContractBackends() {
 		t.Run(backend.name, func(t *testing.T) {
 			fixture := backend.open(t)
+			ctx := originalStoreFixtureContext(t, ctx, fixture.store)
 			for _, invalid := range []string{"", "invalid", uuid.Nil.String()} {
 				if got, err := ReadHandlerSelectionStorageForTest(ctx, fixture.store, invalid); err == nil || got != nil {
 					t.Fatalf("invalid identity returned evidence: %#v %v", got, err)

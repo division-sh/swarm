@@ -40,8 +40,8 @@ func TestB17MixedNestedDependencyCapacityOneBothStores(t *testing.T) {
 			releaseReturn := sync.OnceFunc(func() { close(releaseLastReturn) })
 			t.Cleanup(releaseReturn)
 			var accountReturns atomic.Int32
-			probe.beforeReturn = func(key fanoutobligation.IntentKey) {
-				if key.ElementRef.FlowPath == "account" && accountReturns.Add(1) == 2 {
+			probe.beforeReturn = func(receipt nestedServingReceipt) {
+				if receipt.Key.ElementRef.FlowPath == "account" && !receipt.CommittedAt.IsZero() && accountReturns.Add(1) == 2 {
 					close(lastReturnHeld)
 					<-releaseLastReturn
 				}
@@ -68,7 +68,7 @@ func TestB17MixedNestedDependencyCapacityOneBothStores(t *testing.T) {
 
 			accounts := []string{"sibling-b", "sibling-a"}
 			publishNotifyAllChildrenRunCreatingEvent(t, ctx, rt, source, runID, "portfolio.opened", map[string]any{"portfolio_id": "portfolio-main"})
-			publishNotifyAllChildrenEvent(t, ctx, rt, source, runID, "portfolio.accounts.register.requested", map[string]any{"portfolio_id": "portfolio-main", "account_ids": accounts})
+			registrationID := publishNotifyAllChildrenEvent(t, ctx, rt, source, runID, "portfolio.accounts.register.requested", map[string]any{"portfolio_id": "portfolio-main", "account_ids": accounts})
 			waitNotifyAllChildrenRuntime(t, rt, runID)
 			before := probe.snapshot()
 			probe.armPostCommitHold(t)
@@ -126,27 +126,34 @@ func TestB17MixedNestedDependencyCapacityOneBothStores(t *testing.T) {
 			}
 			// Durable publication precedes caller return; consume its exact receipt
 			// rather than treating commit visibility as a drained serving permit.
-			wantReturns := before.Started + 3
 			pending := probe.snapshot()
-			if pending.Active != 1 || pending.PeakActive != 1 || pending.Started != wantReturns || pending.Returned != wantReturns-1 {
-				t.Fatalf("incorrect committed pre-return cut: %+v", pending)
+			if pending.Active != 1 || pending.PeakActive != 1 || pending.Started != pending.Returned+1 || pending.SuccessfulCommits != before.SuccessfulCommits+3 || pending.FirstError != nil {
+				t.Fatalf("incorrect committed pre-return cut: %+v before=%+v", pending, before)
 			}
-			receipts := make([]nestedServingReceipt, 0, wantReturns)
-			returnDeadline := time.NewTimer(5 * time.Second)
-			defer returnDeadline.Stop()
-			for i := 0; i < wantReturns; i++ {
-				if i == wantReturns-1 {
-					releaseReturn()
-				}
-				select {
-				case receipt := <-probe.receipts:
-					receipts = append(receipts, receipt)
-				case <-returnDeadline.C:
-					t.Fatalf("exact serving return receipts=%d, want %d: %+v", len(receipts), wantReturns, probe.snapshot())
+			receipts := make([]nestedServingReceipt, 0, pending.Started)
+			drainReturns := func() {
+				t.Helper()
+				deadline := time.NewTimer(5 * time.Second)
+				defer deadline.Stop()
+				for {
+					counts := probe.snapshot()
+					if counts.Active == 0 && counts.Started == counts.Returned && len(receipts) == counts.Returned {
+						return
+					}
+					if len(receipts) == pending.Returned {
+						releaseReturn()
+					}
+					select {
+					case receipt := <-probe.receipts:
+						receipts = append(receipts, receipt)
+					case <-deadline.C:
+						t.Fatalf("serving returns did not drain: receipts=%d counters=%+v", len(receipts), probe.snapshot())
+					}
 				}
 			}
+			drainReturns()
 			counts := probe.snapshot()
-			if counts.Active != 0 || counts.PeakActive != 1 || counts.Started != before.Started+3 || counts.Returned != counts.Started || counts.Carriers != 0 {
+			if counts.Active != 0 || counts.PeakActive != 1 || counts.Returned != counts.Started || counts.Carriers != 0 || counts.FirstError != nil {
 				t.Fatalf("nested mixed execution escaped the sole serving permit: %+v", counts)
 			}
 			var intents, owed int
@@ -242,6 +249,35 @@ func TestB17MixedNestedDependencyCapacityOneBothStores(t *testing.T) {
 			summary, err := rt.selected.FanOutRunSummary(ctx, runID, time.Now().UTC())
 			if err != nil || summary.BlocksCompletion() || summary.BarrierTerminal != 3 {
 				t.Fatalf("mixed nested final obligation summary: %+v err=%v", summary, err)
+			}
+			drainReturns()
+			assertNestedServingDrained(t, probe)
+			expected := map[string]int{registrationID: len(accounts), notifyID: len(accounts), parents[0].ID: 2, parents[1].ID: 2}
+			committed := make(map[fanoutobligation.IntentKey]bool, len(expected))
+			seen := make(map[string]bool, len(expected))
+			for _, receipt := range receipts {
+				if receipt.Err != nil || receipt.Key.RunID != runID {
+					t.Fatalf("serving return failed or crossed its run: %+v", receipt)
+				}
+				if receipt.CommittedAt.IsZero() {
+					if receipt.Publications != 0 || receipt.ParentEvent != "" || !receipt.LoadedAt.IsZero() || !receipt.GroupAt.IsZero() || !receipt.GroupReturnedAt.IsZero() || receipt.Result.Refill {
+						t.Fatalf("extra return was not a canonical non-committing turn: %+v", receipt)
+					}
+					continue
+				}
+				publications, found := expected[receipt.ParentEvent]
+				if !found || seen[receipt.ParentEvent] || committed[receipt.Key] || receipt.Publications != publications {
+					t.Fatalf("unknown or duplicate committed serving identity: %+v", receipt)
+				}
+				seen[receipt.ParentEvent], committed[receipt.Key] = true, true
+			}
+			if len(seen) != len(expected) {
+				t.Fatalf("missing committed serving identities: seen=%v want=%v", seen, expected)
+			}
+			for _, receipt := range receipts {
+				if !committed[receipt.Key] {
+					t.Fatalf("extra return named an unknown intent: %+v", receipt)
+				}
 			}
 			t.Log("B17: exact predecessor flushed before real nested node dispatch; two mixed node/agent parents, four real task effects, three direct barriers, capacity one drained")
 		})

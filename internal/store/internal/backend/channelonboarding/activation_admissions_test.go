@@ -66,9 +66,9 @@ func TestActivationAdmissionSerializationPreservesFrozenEvidence(t *testing.T) {
 func TestActivationPublicationInsertConflictPreservesFrozenEvidenceBothStores(t *testing.T) {
 	for _, backend := range []string{"sqlite", "postgres"} {
 		t.Run(backend, func(t *testing.T) {
-			r, principal, _ := publicationLockFixture(t, backend)
+			r, principal, _, ctx := publicationLockFixture(t, backend)
 			signal := &render.ReconcileSignal{}
-			subscription, err := signal.Subscribe(context.Background())
+			subscription, err := signal.Subscribe(ctx)
 			if err != nil {
 				t.Fatal(err)
 			}
@@ -84,8 +84,8 @@ func TestActivationPublicationInsertConflictPreservesFrozenEvidenceBothStores(t 
 			if err != nil {
 				t.Fatal(err)
 			}
-			ctx, now := context.Background(), time.Now().UTC()
-			predecessor := preparePublication(t, r, principal, domain.VerbConnect, now)
+			ctx, now := ctx, time.Now().UTC()
+			predecessor := preparePublication(t, ctx, r, principal, domain.VerbConnect, now)
 			op, previous, err := publishActivation(ctx, r, publicationRequest(predecessor, now))
 			if err != nil {
 				t.Fatal(err)
@@ -96,7 +96,7 @@ func TestActivationPublicationInsertConflictPreservesFrozenEvidenceBothStores(t 
 					t.Fatal(err)
 				}
 			}
-			successor := preparePublication(t, r, principal, domain.VerbReconnect, now.Add(time.Minute))
+			successor := preparePublication(t, ctx, r, principal, domain.VerbReconnect, now.Add(time.Minute))
 			before, valid := signal.Mark()
 			if !valid {
 				t.Fatal("initial publication has no acknowledged notification")

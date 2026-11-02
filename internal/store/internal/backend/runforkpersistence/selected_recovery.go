@@ -146,6 +146,9 @@ func (s *RunForkSQLiteOwner) RecoverSelectedFork(ctx context.Context, req runcon
 		changes = privaterunlifecycle.ChannelCardChanges{}
 		var recovered runfork.SelectedForkRecoveryResult
 		err := attempt.WithSQL(txctx, func(txctx context.Context, tx *sql.Tx) error {
+			if _, err := mutationprotocol.RunRowLock(txctx, tx, req.Entry.Binding.ForkRunID, true); err != nil {
+				return err
+			}
 			if err := admitSelectedRecoveryTx(txctx, tx, req, true); err != nil {
 				return err
 			}

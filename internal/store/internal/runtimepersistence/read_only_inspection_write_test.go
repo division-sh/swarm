@@ -14,6 +14,7 @@ func TestSQLiteInspectionWriteControlAttemptsRealCreation(t *testing.T) {
 		}
 	}
 	writer, _ := decisionCardTestStore(t, "sqlite")
+	ctx = originalStoreFixtureContext(t, testAuthorActivityContext(), writer)
 	if err := AttemptSQLiteInspectionTableCreationForTest(ctx, writer); err != nil {
 		t.Fatal(err)
 	}

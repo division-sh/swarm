@@ -91,9 +91,15 @@ func conformanceTestProcessOwner(t testing.TB) *worklifetime.Process {
 	return process
 }
 
-func conformanceTestRuntimeOccurrence(t testing.TB, bundleHash string) *worklifetime.RuntimeOccurrence {
+func conformanceTestRuntimeOccurrence(t testing.TB, bundleHash string, processes ...*worklifetime.Process) *worklifetime.RuntimeOccurrence {
 	t.Helper()
-	owner, err := conformanceTestProcessOwner(t).NewRuntime(context.Background(), worklifetime.RuntimeIdentity{
+	var process *worklifetime.Process
+	if len(processes) != 0 {
+		process = processes[0]
+	} else {
+		process = conformanceTestProcessOwner(t)
+	}
+	owner, err := process.NewRuntime(context.Background(), worklifetime.RuntimeIdentity{
 		RuntimeInstanceID: authorActivityTestRuntimeInstanceID,
 		BundleHash:        strings.TrimSpace(bundleHash),
 	})

@@ -61,6 +61,7 @@ func TestS1ZeroAgentStartupRefusesOtherRootBothStores(t *testing.T) {
 				selected = storetest.StartPostgresRuntimeStore(t)
 			}
 			ctx := testAuthorActivityContextForBundle(context.Background(), sourceartifactfixture.FactFor(first.Artifact()))
+			ctx = originalConformanceFixtureContext(t, ctx, selected)
 			storetest.RequireBundleDataCatalog(t, ctx, selected.(storetest.RootedDataCatalogStore), other)
 			storetest.RequireBundleDataCatalog(t, ctx, selected.(storetest.RootedDataCatalogStore), spareCompiled)
 			module := conformanceLoadedWorkflowModule{source: semanticview.Wrap(compiled)}

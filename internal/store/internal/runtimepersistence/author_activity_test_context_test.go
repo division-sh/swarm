@@ -42,9 +42,27 @@ const authorActivityTestBundleHash = sourceartifactfixture.BundleHash
 
 func originalStoreFixtureContext(t testing.TB, ctx context.Context, selected any) context.Context {
 	t.Helper()
+	if !startupownership.HasMutationAuthority(ctx) {
+		if _, found := runtimecorrelation.RuntimeInstanceIDFromContext(ctx); !found {
+			runtimeID := authorActivityTestRuntimeInstanceID
+			if scope, present := runtimeauthoractivity.ScopeFromContext(ctx); present {
+				runtimeID = scope.RuntimeInstanceID
+			}
+			ctx = runtimecorrelation.WithRuntimeInstanceID(ctx, runtimeID)
+		}
+	}
+	if _, found := worklifetime.ProcessFromContext(ctx); !found {
+		ctx = storeTestWorkContext(t, ctx)
+	}
 	if startupownership.HasMutationAuthority(ctx) {
-		if _, err := startupownership.CaptureMutationAuthority(ctx); err != nil {
+		original, err := startupownership.CaptureMutationAuthority(ctx)
+		if err != nil {
 			t.Fatal(err)
+		}
+		if process, found := worklifetime.ProcessFromContext(ctx); found {
+			if err := process.BindOriginalProcess(original.ProcessAuthority().LeaseStamp()); err != nil {
+				t.Fatal(err)
+			}
 		}
 		return ctx
 	}
@@ -52,11 +70,7 @@ func originalStoreFixtureContext(t testing.TB, ctx context.Context, selected any
 	if !ok {
 		t.Fatalf("original fixture context requires its selected lifecycle owner: %T", selected)
 	}
-	process, err := agentfixture.ProcessCapability(t, ctx, store)
-	if err != nil {
-		t.Fatal(err)
-	}
-	ctx, err = startupownership.WithProcessMutationAuthority(ctx, process)
+	ctx, err := agentfixture.ProcessContext(t, ctx, store)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -72,7 +86,25 @@ type storeTestWorkFixture struct {
 
 var storeTestWorkFixtures sync.Map
 
-func storeTestWorkOwner(t *testing.T, contexts ...context.Context) *worklifetime.RuntimeOccurrence {
+func retireStoreTestWorkFixture(t testing.TB) {
+	t.Helper()
+	existing, found := storeTestWorkFixtures.LoadAndDelete(t)
+	if !found {
+		return
+	}
+	fixture := existing.(*storeTestWorkFixture)
+	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+	defer cancel()
+	if _, err := fixture.runtime.RetireAndWait(ctx); err != nil {
+		t.Fatal(err)
+	}
+	fixture.process.Retire()
+	if _, err := fixture.process.Join(ctx); err != nil {
+		t.Fatal(err)
+	}
+}
+
+func storeTestWorkOwner(t testing.TB, contexts ...context.Context) *worklifetime.RuntimeOccurrence {
 	t.Helper()
 	if existing, ok := storeTestWorkFixtures.Load(t); ok {
 		return existing.(*storeTestWorkFixture).runtime
@@ -116,9 +148,11 @@ func storeTestWorkOwner(t *testing.T, contexts ...context.Context) *worklifetime
 	return owner
 }
 
-func storeTestWorkContext(t *testing.T, ctx context.Context) context.Context {
+func storeTestWorkContext(t testing.TB, ctx context.Context) context.Context {
 	t.Helper()
-	return worklifetime.WithOccurrence(ctx, storeTestWorkOwner(t, ctx))
+	owner := storeTestWorkOwner(t, ctx)
+	fixture, _ := storeTestWorkFixtures.Load(t)
+	return worklifetime.WithProcess(worklifetime.WithOccurrence(ctx, owner), fixture.(*storeTestWorkFixture).process)
 }
 
 func ownStoreTestAgentManager(t *testing.T, manager *runtimemanager.AgentManager) *runtimemanager.AgentManager {
@@ -157,8 +191,26 @@ func newStoreTestEventBus(t *testing.T, store storeTestDurableEventBusStore, opt
 	if opts.CarryMutationContext == nil {
 		opts.CarryMutationContext = startupownership.CarryMutationAuthority
 	}
+	if opts.RuntimeInstanceID == "" {
+		opts.RuntimeInstanceID = authorActivityTestRuntimeInstanceID
+	}
+	setupCtx := runtimecorrelation.WithRuntimeInstanceID(testAuthorActivityContext(), opts.RuntimeInstanceID)
+	setupBundle := authorActivityTestBundleHash
+	if opts.SourceArtifactFact.Validate() == nil {
+		setupBundle = opts.SourceArtifactFact.BundleHash()
+		setupCtx = runtimecorrelation.WithSourceArtifactFact(setupCtx, opts.SourceArtifactFact)
+	}
+	setupCtx = runtimeauthoractivity.WithScope(setupCtx, runtimeauthoractivity.BundleScope(opts.RuntimeInstanceID, setupBundle))
+	if opts.MutationContext != nil {
+		var err error
+		setupCtx, err = opts.MutationContext(setupCtx)
+		if err != nil {
+			return nil, err
+		}
+	}
+	setupCtx = originalStoreFixtureContext(t, setupCtx, store)
 	if opts.MutationContext == nil {
-		original := originalStoreFixtureContext(t, testAuthorActivityContext(), store)
+		original := setupCtx
 		opts.MutationContext = func(ctx context.Context) (context.Context, error) {
 			if !startupownership.HasMutationAuthority(ctx) {
 				ctx = startupownership.CarryMutationAuthority(ctx, original)
@@ -171,9 +223,9 @@ func newStoreTestEventBus(t *testing.T, store storeTestDurableEventBusStore, opt
 		opts.ExecutionPosture = executionposture.Live
 	}
 	if opts.SourceArtifactFact.Validate() != nil {
-		opts.SourceArtifactFact = sourceartifactfixture.Require(t, context.Background(), store)
+		opts.SourceArtifactFact = sourceartifactfixture.Require(t, setupCtx, store)
 	} else if opts.SourceArtifactFact.BundleHash() == sourceartifactfixture.BundleHash {
-		sourceartifactfixture.Require(t, context.Background(), store)
+		sourceartifactfixture.Require(t, setupCtx, store)
 	}
 	if opts.ContractBundle == nil && opts.SourceArtifactFact.BundleHash() == sourceartifactfixture.BundleHash {
 		repo := runtimepipeline.WorkflowRepoRoot()
@@ -183,9 +235,6 @@ func newStoreTestEventBus(t *testing.T, store storeTestDurableEventBusStore, opt
 			return nil, err
 		}
 		opts.ContractBundle = semanticview.Wrap(bundle)
-	}
-	if opts.RuntimeInstanceID == "" {
-		opts.RuntimeInstanceID = authorActivityTestRuntimeInstanceID
 	}
 	if opts.WorkOwner == nil {
 		opts.WorkOwner = storeTestWorkOwner(t)
@@ -244,6 +293,7 @@ func requireDefaultSourceArtifactForTest(t testing.TB, ctx context.Context, sele
 	if !ok {
 		t.Fatalf("default source artifact fixture requires rooted source writer, got %T", selected)
 	}
+	ctx = originalStoreFixtureContext(t, ctx, selected)
 	rooted, _ := sourceartifactfixture.Rooted(t, "fixture", sourceartifactfixture.Artifact())
 	ctx = runtimecorrelation.WithRootAdmission(ctx, rooted.Admission())
 	if _, err := writer.EnsureRootedSource(ctx, rooted); err != nil {
@@ -264,6 +314,7 @@ func testAuthorActivityContextForBundle(bundleHash string) context.Context {
 		mustStoreTestSourceArtifactFact(bundleHash),
 	)
 	ctx = runtimeeffects.WithExecutionMode(ctx, runtimeeffects.ExecutionModeLive)
+	ctx = runtimecorrelation.WithRuntimeInstanceID(ctx, authorActivityTestRuntimeInstanceID)
 	return runtimeauthoractivity.WithScope(ctx, runtimeauthoractivity.BundleScope(
 		authorActivityTestRuntimeInstanceID,
 		bundleHash,
@@ -361,7 +412,7 @@ func registerTestAuthorActivityCatalogForContext(t *testing.T, target testAuthor
 		"task.canonical_entity", "task.dead", "task.dead_letter", "task.delivered", "task.failed", "task.failed.new", "task.failed.old", "task.in_progress", "task.other", "task.other_agent", "task.payload_only", "task.pending",
 		"trace.event_only", "trace.failed", "trace.late_delivered", "trace.second_delivered", "trace.task_audit", "trace.tie",
 		"test.delivery_receipt", "test.delivery_requested", "test.direct_dead_letter", "test.event", "test.receipts.typed_identity", "test.started", "test.terminal_admission", "test.terminal_delivery",
-		"atomic.selected", "atomic.source", "batch.contract", "duplicate.base", "test.node_emitted",
+		"atomic.selected", "atomic.source", "batch.contract", "duplicate.base", "global/test.node_emitted", "test.node_emitted",
 		"trace.visible", "validation/validation.package_ready", "workflow.executable",
 	}
 	sort.Strings(eventTypes)
@@ -370,7 +421,7 @@ func registerTestAuthorActivityCatalogForContext(t *testing.T, target testAuthor
 		descriptor := runtimeauthoractivity.EventDescriptor{EventType: eventType, Disposition: runtimeauthoractivity.StoryDifferent}
 		if eventType == "test.delivery_receipt" {
 			descriptor.Disposition = runtimeauthoractivity.StoryAuthored
-		} else if eventType == "test.node_emitted" || eventType == "atomic.selected" {
+		} else if eventType == "test.node_emitted" || eventType == "global/test.node_emitted" || eventType == "atomic.selected" {
 			descriptor.Disposition = runtimeauthoractivity.StoryAuthored
 		}
 		descriptors = append(descriptors, descriptor)

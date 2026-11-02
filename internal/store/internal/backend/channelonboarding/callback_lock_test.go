@@ -18,9 +18,11 @@ import (
 	render "github.com/division-sh/swarm/internal/runtime/channeldelivery"
 	"github.com/division-sh/swarm/internal/runtime/channelnative"
 	runtimecontracts "github.com/division-sh/swarm/internal/runtime/contracts"
+	"github.com/division-sh/swarm/internal/runtime/correlation"
 	credentials "github.com/division-sh/swarm/internal/runtime/credentials"
 	runtimeeffects "github.com/division-sh/swarm/internal/runtime/effects"
 	"github.com/division-sh/swarm/internal/runtime/plangeneration"
+	"github.com/division-sh/swarm/internal/store/backendselection"
 	"github.com/division-sh/swarm/internal/store/internal/backend/channeldelivery"
 	onboardingowner "github.com/division-sh/swarm/internal/store/internal/backend/channelonboarding"
 	"github.com/division-sh/swarm/internal/store/internal/backend/effectpersistence"
@@ -28,6 +30,8 @@ import (
 	postgresbackend "github.com/division-sh/swarm/internal/store/internal/backend/postgres"
 	sqlitebackend "github.com/division-sh/swarm/internal/store/internal/backend/sqlite"
 	"github.com/division-sh/swarm/internal/store/internal/schemastore"
+	"github.com/division-sh/swarm/internal/store/selected/selectedtest"
+	"github.com/division-sh/swarm/internal/store/testutil/agentfixture"
 	"github.com/division-sh/swarm/internal/testutil"
 	"github.com/google/uuid"
 )
@@ -45,14 +49,14 @@ func TestChannelCallbackPublicationLockOrderBothStores(t *testing.T) {
 				f := newCallbackLockFixture(t, backend)
 				now := time.Date(2026, 10, 6, 12, 0, 0, 0, time.UTC)
 				predecessor := f.prepare(t, domain.VerbConnect, now)
-				_, activation, err := f.selected.PublishConnectedChannelActivation(context.Background(), publishCallbackRequest(predecessor, now))
+				_, activation, err := f.selected.PublishConnectedChannelActivation(f.ctx, publishCallbackRequest(predecessor, now))
 				if err != nil {
 					t.Fatal(err)
 				}
 				f.bind(t, predecessor, now)
 				f.finish(t, predecessor.OperationID, now)
 				action, _ := f.chooser(t, predecessor, activation, now)
-				if err := f.run(context.Background(), func(ctx context.Context, tx *sql.Tx) error {
+				if err := f.run(f.ctx, func(ctx context.Context, tx *sql.Tx) error {
 					resolved, found, err := channeldelivery.ResolveActionFactTx(ctx, tx, action.ActionFact, f.postgres)
 					if err != nil {
 						return err
@@ -65,7 +69,7 @@ func TestChannelCallbackPublicationLockOrderBothStores(t *testing.T) {
 					t.Fatal(err)
 				}
 				successor := f.prepare(t, verb, now.Add(time.Minute))
-				ctx, cancel := context.WithTimeout(context.Background(), 15*time.Second)
+				ctx, cancel := context.WithTimeout(f.ctx, 15*time.Second)
 				defer cancel()
 				var release sync.Once
 				unblock := func() { release.Do(func() { close(f.probe.release) }) }
@@ -117,11 +121,11 @@ func TestChannelCallbackPublicationLockOrderBothStores(t *testing.T) {
 				if !principalFirst {
 					t.Error("callback locked activation before principal")
 				}
-				current, err := f.selected.ListCurrentConnectedChannelActivations(context.Background())
+				current, err := f.selected.ListCurrentConnectedChannelActivations(f.ctx)
 				if err != nil || len(current) != 1 || current[0].ActivationID != request.ActivationID || current[0].Revision != activation.Revision+1 {
 					t.Fatalf("exact successor = %#v, err=%v", current, err)
 				}
-				if err := f.run(context.Background(), func(ctx context.Context, tx *sql.Tx) error {
+				if err := f.run(f.ctx, func(ctx context.Context, tx *sql.Tx) error {
 					state, err := channeldelivery.RequireActionIntentTx(ctx, tx, action, f.postgres, false)
 					if err == nil && state != "pending" {
 						return fmt.Errorf("refused callback mutated its intent: %s", state)
@@ -148,14 +152,14 @@ func proveChangedActionDiscovery(t *testing.T) {
 			f := newCallbackLockFixture(t, "postgres")
 			now := time.Date(2026, 10, 6, 12, 0, 0, 0, time.UTC)
 			op := f.prepare(t, domain.VerbConnect, now)
-			_, activation, err := f.selected.PublishConnectedChannelActivation(context.Background(), publishCallbackRequest(op, now))
+			_, activation, err := f.selected.PublishConnectedChannelActivation(f.ctx, publishCallbackRequest(op, now))
 			if err != nil {
 				t.Fatal(err)
 			}
 			f.bind(t, op, now)
 			f.finish(t, op.OperationID, now)
 			action, _ := f.chooser(t, op, activation, now)
-			if err := f.run(context.Background(), func(ctx context.Context, tx *sql.Tx) error {
+			if err := f.run(f.ctx, func(ctx context.Context, tx *sql.Tx) error {
 				resolved, found, err := channeldelivery.ResolveActionFactTx(ctx, tx, action.ActionFact, true)
 				if err == nil && (!found || !resolved.CurrentRender || resolved.ActivationID != activation.ActivationID) {
 					return fmt.Errorf("discovery control is not exact-current")
@@ -165,7 +169,7 @@ func proveChangedActionDiscovery(t *testing.T) {
 				t.Fatal(err)
 			}
 			cut := &callbackDiscoveryCut{parent: op.OperationID, ready: make(chan struct{}), release: make(chan struct{})}
-			ctx, cancel := context.WithTimeout(context.Background(), 15*time.Second)
+			ctx, cancel := context.WithTimeout(f.ctx, 15*time.Second)
 			defer cancel()
 			var release sync.Once
 			unblock := func() { release.Do(func() { close(cut.release) }) }
@@ -251,7 +255,7 @@ func TestChannelActionMutationFencesAndReadOnlyPreviewsBothStores(t *testing.T) 
 				f := newCallbackLockFixture(t, backend)
 				now := time.Date(2026, 10, 6, 12, 0, 0, 0, time.UTC)
 				op := f.prepare(t, domain.VerbConnect, now)
-				_, activation, err := f.selected.PublishConnectedChannelActivation(context.Background(), publishCallbackRequest(op, now))
+				_, activation, err := f.selected.PublishConnectedChannelActivation(f.ctx, publishCallbackRequest(op, now))
 				if err != nil {
 					t.Fatal(err)
 				}
@@ -260,7 +264,7 @@ func TestChannelActionMutationFencesAndReadOnlyPreviewsBothStores(t *testing.T) 
 				action, _ := f.chooser(t, op, activation, now)
 				for _, lock := range []bool{false, true} {
 					observed := make(chan bool, 1)
-					ctx := context.WithValue(context.Background(), callbackOrderObservation{}, callbackOrderProbe{observed: observed, mutation: lock})
+					ctx := context.WithValue(f.ctx, callbackOrderObservation{}, callbackOrderProbe{observed: observed, mutation: lock})
 					queries := &neutralQueryObservation{}
 					ctx = context.WithValue(ctx, neutralLockOrderObservation{}, queries)
 					err := f.run(ctx, func(ctx context.Context, tx *sql.Tx) error {
@@ -323,7 +327,7 @@ func TestNeutralChannelMutationPrincipalFirstBothStores(t *testing.T) {
 				f := newCallbackLockFixture(t, backend)
 				now := time.Date(2026, 10, 6, 12, 0, 0, 0, time.UTC)
 				op := f.prepare(t, domain.VerbConnect, now)
-				_, activation, err := f.selected.PublishConnectedChannelActivation(context.Background(), publishCallbackRequest(op, now))
+				_, activation, err := f.selected.PublishConnectedChannelActivation(f.ctx, publishCallbackRequest(op, now))
 				if err != nil {
 					t.Fatal(err)
 				}
@@ -340,7 +344,7 @@ func TestNeutralChannelMutationPrincipalFirstBothStores(t *testing.T) {
 					text.EntryReference = render.TextReplyInboxReference
 				}
 				var entry render.ResolvedInboxEntry
-				if err := f.run(context.Background(), func(ctx context.Context, tx *sql.Tx) error {
+				if err := f.run(f.ctx, func(ctx context.Context, tx *sql.Tx) error {
 					if err := channeldelivery.InsertTextIntentTx(ctx, tx, text, now, f.postgres); err != nil {
 						return err
 					}
@@ -357,7 +361,7 @@ func TestNeutralChannelMutationPrincipalFirstBothStores(t *testing.T) {
 					t.Fatal(err)
 				}
 				queries := &neutralQueryObservation{}
-				ctx := context.WithValue(context.Background(), neutralLockOrderObservation{}, queries)
+				ctx := context.WithValue(f.ctx, neutralLockOrderObservation{}, queries)
 				if err := f.run(ctx, func(ctx context.Context, tx *sql.Tx) error {
 					switch path {
 					case "quoted_control":
@@ -395,6 +399,10 @@ func TestNeutralChannelMutationPrincipalFirstBothStores(t *testing.T) {
 						continue
 					}
 					trimmed := strings.TrimSpace(query)
+					if trimmed == "UPDATE runtime_process_generation SET generation = generation WHERE singleton_id = 1" {
+						// SQLite writer possession is an authority fence, not channel-domain work.
+						continue
+					}
 					if strings.Contains(query, "FOR UPDATE") || strings.HasPrefix(trimmed, "INSERT ") || strings.HasPrefix(trimmed, "UPDATE ") || strings.HasPrefix(trimmed, "DELETE ") {
 						mutation = true
 						if !principal {
@@ -417,7 +425,7 @@ func TestNativeInboxAttachmentPublicationLockOrderBothStores(t *testing.T) {
 				f := newCallbackLockFixture(t, backend)
 				now := time.Date(2026, 10, 6, 12, 0, 0, 0, time.UTC)
 				predecessor := f.prepare(t, domain.VerbConnect, now)
-				_, activation, err := f.selected.PublishConnectedChannelActivation(context.Background(), publishCallbackRequest(predecessor, now))
+				_, activation, err := f.selected.PublishConnectedChannelActivation(f.ctx, publishCallbackRequest(predecessor, now))
 				if err != nil {
 					t.Fatal(err)
 				}
@@ -439,7 +447,7 @@ func TestNativeInboxAttachmentPublicationLockOrderBothStores(t *testing.T) {
 					proveNativeInboxParentOrder(t, f, admission, activation, now)
 				})
 				successor := f.prepare(t, verb, now.Add(time.Minute))
-				ctx, cancel := context.WithTimeout(context.Background(), 15*time.Second)
+				ctx, cancel := context.WithTimeout(f.ctx, 15*time.Second)
 				defer cancel()
 				var release sync.Once
 				unblock := func() { release.Do(func() { close(f.probe.release) }) }
@@ -495,7 +503,7 @@ func TestNativeInboxAttachmentPublicationLockOrderBothStores(t *testing.T) {
 				if !principalFirst {
 					t.Error("native attachment locked activation before principal")
 				}
-				current, err := f.selected.ListCurrentConnectedChannelActivations(context.Background())
+				current, err := f.selected.ListCurrentConnectedChannelActivations(f.ctx)
 				if err != nil || len(current) != 1 || current[0].ActivationID != request.ActivationID {
 					t.Fatalf("successor: %#v, %v", current, err)
 				}
@@ -510,7 +518,7 @@ func proveNativeInboxParentOrder(t *testing.T, f callbackLockFixture, admission 
 	for _, owner := range []string{"attachment", "effect", "qualification"} {
 		t.Run(owner, func(t *testing.T) {
 			observation := &neutralQueryObservation{}
-			ctx := context.WithValue(context.Background(), neutralLockOrderObservation{}, observation)
+			ctx := context.WithValue(f.ctx, neutralLockOrderObservation{}, observation)
 			err := f.run(ctx, func(ctx context.Context, tx *sql.Tx) error {
 				switch owner {
 				case "attachment":
@@ -699,6 +707,7 @@ type callbackSelectedOwners struct {
 	callbackIdentityStore
 }
 type callbackLockFixture struct {
+	ctx       context.Context
 	selected  callbackSelected
 	run       func(context.Context, func(context.Context, *sql.Tx) error) error
 	settle    func(context.Context, *sql.Tx, operatorchannel.InboundClaim, time.Time) (operatorchannel.ClaimSettlement, error)
@@ -769,7 +778,29 @@ func newCallbackLockFixture(t *testing.T, backend string) callbackLockFixture {
 			return b.RunTransaction(ctx, "callback publication proof", fn)
 		}
 	}
-	p, err := f.selected.EnsureOperatorPrincipal(context.Background(), time.Now().UTC())
+	scope := backendselection.Selection{Backend: backendselection.BackendPostgres}
+	if !f.postgres {
+		scope = backendselection.Selection{Backend: backendselection.BackendSQLite, SQLitePath: strings.Split(strings.TrimPrefix(f.probe.dsn, "file:"), "?")[0]}
+	}
+	selected, err := selectedtest.OpenProcessLeaseFixture(t.Context(), scope, f.probe.dsn)
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() {
+		if err := selected.Close(); err != nil {
+			t.Error(err)
+		}
+	})
+	bootstrapCallbackSchema(t, selected)
+	f.ctx, err = agentfixture.ProcessContext(t, correlation.WithRuntimeInstanceID(t.Context(), "d0df13de-f14d-44cb-b180-17d7b812da2a"), selected.Store.(agentfixture.Store))
+	if err != nil {
+		t.Fatal(err)
+	}
+	f.logout.process, err = agentfixture.ProcessCapability(t, f.ctx, selected.Store.(agentfixture.Store))
+	if err != nil {
+		t.Fatal(err)
+	}
+	p, err := f.selected.EnsureOperatorPrincipal(f.ctx, time.Now().UTC())
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -799,7 +830,7 @@ func (f callbackLockFixture) prepare(t *testing.T, verb domain.Verb, now time.Ti
 		t.Fatal(err)
 	}
 	id := uuid.NewString()
-	op, err := f.selected.ReserveChannelOnboarding(context.Background(), domain.StartRequest{
+	op, err := f.selected.ReserveChannelOnboarding(f.ctx, domain.StartRequest{
 		OperationID: id, PrincipalID: f.principal, RequestKeyHash: id, RequestHash: id, Verb: verb, Provider: "telegram",
 		Interface:      operatorchannel.InterfaceIdentity{InterfaceRef: operatorchannel.InterfaceHITLChannelV2, ChannelPackID: "provider.telegram.hitl_channel", ChannelPackVersion: "0.1.0", ChannelManifestHash: "sha256:manifest", SemanticGeneration: "sha256:plan"},
 		Coordinate:     domain.ChannelRuntimeContextCoordinate{BundleHash: "bundle-v2:sha256:" + strings.Repeat("a", 64), BundleIdentity: "callback-test", PackInventoryGeneration: "sha256:inventory", RuntimeInstanceID: "d0df13de-f14d-44cb-b180-17d7b812da2a", ContextPublicationGeneration: 1, PlanGeneration: generation},
@@ -822,7 +853,7 @@ func (f callbackLockFixture) prepare(t *testing.T, verb domain.Verb, now time.Ti
 		if phase == domain.PhaseAwaitingOperatorConfirmation || phase == domain.PhasePublishingActivation {
 			req.BindingRevision = 1
 		}
-		op, err = f.selected.AdvanceChannelOnboarding(context.Background(), req)
+		op, err = f.selected.AdvanceChannelOnboarding(f.ctx, req)
 		if err != nil {
 			t.Fatal(err)
 		}
@@ -837,13 +868,13 @@ func publishCallbackRequest(op domain.Operation, now time.Time) domain.PublishAc
 }
 func (f callbackLockFixture) bind(t *testing.T, op domain.Operation, now time.Time) {
 	t.Helper()
-	binding, err := f.selected.BeginChannelBinding(context.Background(), operatorchannel.BeginRequest{OperationID: op.IdentityOperationID, Kind: operatorchannel.OperationConnect, PrincipalID: f.principal, Interface: op.Interface, RequestKeyHash: op.IdentityOperationID, RequestHash: op.IdentityOperationID, ProviderAuthority: operatorchannel.ProviderAuthority{Kind: operatorchannel.ProviderAuthorityCredential, Credential: callbackCredential()}, RequestedAt: now, ExpiresAt: now.Add(operatorchannel.DefaultChallengeTTL)})
+	binding, err := f.selected.BeginChannelBinding(f.ctx, operatorchannel.BeginRequest{OperationID: op.IdentityOperationID, Kind: operatorchannel.OperationConnect, PrincipalID: f.principal, Interface: op.Interface, RequestKeyHash: op.IdentityOperationID, RequestHash: op.IdentityOperationID, ProviderAuthority: operatorchannel.ProviderAuthority{Kind: operatorchannel.ProviderAuthorityCredential, Credential: callbackCredential()}, RequestedAt: now, ExpiresAt: now.Add(operatorchannel.DefaultChallengeTTL)})
 	if err != nil {
 		t.Fatal(err)
 	}
 	claim := operatorchannel.InboundClaim{TextFact: operatorchannel.TextFact{Interface: op.Interface, ExternalAccountRef: "account", ConversationRef: "callback-chat", ConversationScope: operatorchannel.ConversationScopeDirect, Text: binding.Challenge, MessageReference: `{"id":1}`}, Provider: "telegram", ProviderEventID: uuid.NewString(), PublicationID: uuid.NewString(), ProviderAuthorization: "verified-pack", Challenge: binding.Challenge}
 	var claimed operatorchannel.ClaimSettlement
-	err = f.run(context.Background(), func(ctx context.Context, tx *sql.Tx) error {
+	err = f.run(f.ctx, func(ctx context.Context, tx *sql.Tx) error {
 		var err error
 		claimed, err = f.settle(ctx, tx, claim, now)
 		return err
@@ -851,19 +882,19 @@ func (f callbackLockFixture) bind(t *testing.T, op domain.Operation, now time.Ti
 	if err != nil {
 		t.Fatal(err)
 	}
-	_, _, err = f.selected.ConfirmChannelBinding(context.Background(), operatorchannel.ConfirmRequest{OperationID: binding.OperationID, PrincipalID: f.principal, ExpectedRevision: claimed.Operation.Revision, Approve: true, ProviderAuthorityCurrent: true, ConfirmedAt: now})
+	_, _, err = f.selected.ConfirmChannelBinding(f.ctx, operatorchannel.ConfirmRequest{OperationID: binding.OperationID, PrincipalID: f.principal, ExpectedRevision: claimed.Operation.Revision, Approve: true, ProviderAuthorityCurrent: true, ConfirmedAt: now})
 	if err != nil {
 		t.Fatal(err)
 	}
 }
 func (f callbackLockFixture) finish(t *testing.T, id string, now time.Time) {
 	t.Helper()
-	op, err := f.selected.GetChannelOnboarding(context.Background(), id)
+	op, err := f.selected.GetChannelOnboarding(f.ctx, id)
 	if err != nil {
 		t.Fatalf("operation: %v", err)
 	}
 	for _, phase := range []domain.Phase{domain.PhasePromotingRegistration, domain.PhaseRetiringPredecessor, domain.PhaseDeliveringConfirmation, domain.PhaseSucceeded} {
-		op, err = f.selected.AdvanceChannelOnboarding(context.Background(), domain.AdvanceRequest{OperationID: op.OperationID, ExpectedRevision: op.Revision, Phase: phase, Now: now})
+		op, err = f.selected.AdvanceChannelOnboarding(f.ctx, domain.AdvanceRequest{OperationID: op.OperationID, ExpectedRevision: op.Revision, Phase: phase, Now: now})
 		if err != nil {
 			t.Fatal(err)
 		}
@@ -882,7 +913,7 @@ func (f callbackLockFixture) chooser(t *testing.T, op domain.Operation, activati
 	}
 	deliveryID, renderID, effectID, attemptID, surfaceID := uuid.NewString(), uuid.NewString(), uuid.NewString(), uuid.NewString(), uuid.NewString()
 	var actions []render.Action
-	err = f.run(context.Background(), func(ctx context.Context, tx *sql.Tx) error {
+	err = f.run(f.ctx, func(ctx context.Context, tx *sql.Tx) error {
 		// These rows qualify native relational locking, not effect settlement. The
 		// supported card/effect journey is independently retained in the public tests.
 		queries := []struct {
@@ -926,7 +957,7 @@ func (f callbackLockFixture) chooser(t *testing.T, op domain.Operation, activati
 		t.Fatal(err)
 	}
 	action := operatorchannel.InboundAction{ActionFact: operatorchannel.ActionFact{Kind: operatorchannel.ActionSourceCallback, Interface: op.Interface, ExternalAccountRef: "account", ConversationRef: "callback-chat", ConversationScope: operatorchannel.ConversationScopeDirect, MessageReference: `{"id":91}`, InteractionRef: "callback-lock", Token: actions[0].Token}, Provider: "telegram", ProviderEventID: uuid.NewString(), PublicationID: uuid.NewString(), ProviderAuthorization: "verified-pack"}
-	if err := f.run(context.Background(), func(ctx context.Context, tx *sql.Tx) error {
+	if err := f.run(f.ctx, func(ctx context.Context, tx *sql.Tx) error {
 		return channeldelivery.InsertActionIntentTx(ctx, tx, action, now, f.postgres)
 	}); err != nil {
 		t.Fatal(err)

@@ -13,6 +13,7 @@ func TestWorkflowActivityAttemptStatusDiagnosticDiscardsPartialRowsBothStores(t 
 	for _, backend := range eventRecordContractBackends() {
 		t.Run(backend.name, func(t *testing.T) {
 			fixture, ctx := backend.open(t), testAuthorActivityContext()
+			ctx = originalStoreFixtureContext(t, ctx, fixture.store)
 			if err := runUnrevisionedEventFixtureTransactionForTest(ctx, fixture.store, func(ctx context.Context, tx *sql.Tx) error {
 				for _, statement := range []string{
 					`ALTER TABLE activity_attempts RENAME TO saved_activity_status_diagnostic`,

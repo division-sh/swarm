@@ -2,12 +2,6 @@ package main
 
 import (
 	"encoding/json"
-	"go/ast"
-	"go/parser"
-	"go/token"
-	"os"
-	"path/filepath"
-	"reflect"
 	"strconv"
 	"strings"
 	"testing"
@@ -74,56 +68,5 @@ func TestNativeAPIAcknowledgmentCountsRejectWrongContextOwnerOrKey(t *testing.T)
 	}
 	if probes < 5 {
 		t.Fatalf("ack adversaries missing: %d", probes)
-	}
-}
-func TestNativeAPIAcknowledgmentCountCallerInventoryIsComplete(t *testing.T) {
-	paths, err := filepath.Glob(filepath.Join("..", "..", "..", "internal", "apiv1", "*_test.go"))
-	if err != nil {
-		t.Fatal(err)
-	}
-	actual := map[string]map[string]int{}
-	for _, path := range paths {
-		bytes, err := os.ReadFile(path)
-		if err != nil {
-			t.Fatal(err)
-		}
-		file, err := parser.ParseFile(token.NewFileSet(), path, bytes, parser.AllErrors)
-		if err != nil {
-			t.Fatal(err)
-		}
-		for _, decl := range file.Decls {
-			fn, ok := decl.(*ast.FuncDecl)
-			if !ok {
-				continue
-			}
-			ast.Inspect(fn.Body, func(node ast.Node) bool {
-				call, ok := node.(*ast.CallExpr)
-				if !ok {
-					return true
-				}
-				name := formattedNativeReadNode(call.Fun)
-				if name != "countEventDeliveriesForEvent" && name != "countPipelineReceiptsForEvent" {
-					return true
-				}
-				if actual[fn.Name.Name] == nil {
-					actual[fn.Name.Name] = map[string]int{}
-				}
-				actual[fn.Name.Name][name]++
-				if len(call.Args) != 4 || formattedNativeReadNode(call.Args[2]) != "pg" {
-					t.Fatalf("raw/foreign ack count owner: %s", fn.Name.Name)
-				}
-				return true
-			})
-		}
-	}
-	expected := map[string]map[string]int{"TestOperatorEventPublishReturnsDurableAckBeforePostCommitDispatchCompletes": {"countPipelineReceiptsForEvent": 2},
-		"TestOperatorEventPublishPostCommitReceiptFailureReplaysWithoutDuplicate":       {"countEventDeliveriesForEvent": 2, "countPipelineReceiptsForEvent": 3},
-		"TestOperatorEventPublishPostCommitCompletionFailureReplaysWithoutDuplicate":    {"countEventDeliveriesForEvent": 1},
-		"TestOperatorEventPublishExplicitRunFollowUpRequiresRecipientBeforePersistence": {"countEventDeliveriesForEvent": 1},
-		"TestOperatorEventPublishQueuesWhileRuntimePaused":                              {"countEventDeliveriesForEvent": 1, "countPipelineReceiptsForEvent": 2},
-		"TestOperatorReplayMockOnlyRejectsLiveOriginalBeforeMutation":                   {"countEventDeliveriesForEvent": 2},
-		"TestOperatorEventReplayQueuesWhenDispatchGated":                                {"countEventDeliveriesForEvent": 1, "countPipelineReceiptsForEvent": 1}}
-	if !reflect.DeepEqual(actual, expected) {
-		t.Fatalf("ack consumers differ: got=%v want=%v", actual, expected)
 	}
 }

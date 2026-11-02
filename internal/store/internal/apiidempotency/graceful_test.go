@@ -18,13 +18,14 @@ import (
 func TestAPIIdempotencyGracefulSQLBoundaries(t *testing.T) {
 	for _, phase := range []string{"before_admission", "purge", "completion", "external_callback"} {
 		t.Run(phase, func(t *testing.T) {
-			_, db, cleanup := testutil.StartPostgres(t)
+			dsn, db, cleanup := testutil.StartPostgres(t)
 			t.Cleanup(cleanup)
+			original := statementOriginalContext(t, dsn)
 			db.SetMaxOpenConns(1)
 			if _, err := db.Exec(`CREATE TABLE IF NOT EXISTS api_idempotency(method TEXT NOT NULL, actor_kind TEXT NOT NULL, actor_id TEXT NOT NULL, idempotency_key TEXT NOT NULL, request_hash TEXT NOT NULL, resource_id TEXT NOT NULL, response JSON NOT NULL, created_at TIMESTAMPTZ NOT NULL, expires_at TIMESTAMPTZ NOT NULL, PRIMARY KEY(method,actor_kind,actor_id,idempotency_key))`); err != nil {
 				t.Fatal(err)
 			}
-			ctx, cancel := context.WithCancel(context.Background())
+			ctx, cancel := context.WithCancel(original)
 			defer cancel()
 			conn, err := db.Conn(context.Background())
 			if err != nil {
@@ -107,7 +108,7 @@ func TestAPIIdempotencyGracefulSQLBoundaries(t *testing.T) {
 					t.Fatal(err)
 				}
 			}
-			lease, err := AcquirePostgresRequest(context.Background(), owner, req)
+			lease, err := AcquirePostgresRequest(original, owner, req)
 			if err != nil {
 				t.Fatalf("successor acquisition: %v", err)
 			}
@@ -121,6 +122,7 @@ func TestAPIIdempotencyGracefulSQLBoundaries(t *testing.T) {
 func TestAPIIdempotencyContendedAdmissionCancellation(t *testing.T) {
 	dsn, observer, cleanup := testutil.StartPostgres(t)
 	t.Cleanup(cleanup)
+	original := statementOriginalContext(t, dsn)
 	if _, err := observer.Exec(`CREATE TABLE IF NOT EXISTS api_idempotency(method TEXT NOT NULL, actor_kind TEXT NOT NULL, actor_id TEXT NOT NULL, idempotency_key TEXT NOT NULL, request_hash TEXT NOT NULL, resource_id TEXT NOT NULL, response JSON NOT NULL, created_at TIMESTAMPTZ NOT NULL, expires_at TIMESTAMPTZ NOT NULL, PRIMARY KEY(method,actor_kind,actor_id,idempotency_key))`); err != nil {
 		t.Fatal(err)
 	}
@@ -154,7 +156,7 @@ func TestAPIIdempotencyContendedAdmissionCancellation(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	ctx, cancel := context.WithCancel(context.Background())
+	ctx, cancel := context.WithCancel(original)
 	defer cancel()
 	done := make(chan error, 1)
 	executed := false
@@ -202,7 +204,7 @@ func TestAPIIdempotencyContendedAdmissionCancellation(t *testing.T) {
 	if nextPID == waiterPID {
 		t.Fatal("interrupted ungranted waiter was returned to pool")
 	}
-	lease, err := AcquirePostgresRequest(context.Background(), owner, req)
+	lease, err := AcquirePostgresRequest(original, owner, req)
 	if err != nil {
 		t.Fatal(err)
 	}

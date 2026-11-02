@@ -14,6 +14,7 @@ import (
 	runtimepipeline "github.com/division-sh/swarm/internal/runtime/pipeline"
 	"github.com/division-sh/swarm/internal/runtime/semanticview"
 	"github.com/division-sh/swarm/internal/store/storetest"
+	"github.com/division-sh/swarm/internal/store/testutil/agentfixture"
 	"github.com/division-sh/swarm/internal/testutil/flowactivationfixture"
 )
 
@@ -29,6 +30,13 @@ func nativeInboundTransportIndex(t testing.TB, source semanticview.Source, targe
 	}
 	fact := runtimeTestSourceArtifactFact(t, source)
 	selected := storetest.StartSQLiteRuntimeStore(t)
+	ctx := runtimecorrelation.WithSourceArtifactFact(context.Background(), fact)
+	ctx = runtimeauthoractivity.WithScope(ctx, runtimeauthoractivity.BundleScope(authorActivityTestRuntimeInstanceID, fact.BundleHash()))
+	ctx = effects.WithExecutionMode(ctx, executionmode.Live)
+	ctx, err := agentfixture.ProcessContext(t, ctx, selected)
+	if err != nil {
+		t.Fatal(err)
+	}
 	seen := make(map[string]bool)
 	for _, target := range targets {
 		ctx := runtimecorrelation.WithRunID(runtimecorrelation.WithSourceArtifactFact(context.Background(), fact), target.RunID)

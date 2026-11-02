@@ -41,7 +41,7 @@ func TestChannelOnboardingBoundBeforeParentCheckpointSelectedStoreParity(t *test
 func runBoundHandoff(t *testing.T, fixture channelOnboardingConfirmationFixture, verb channelonboarding.Verb, publishing, proof, restored, recovery bool) {
 	t.Helper()
 	rig := newBoundHandoffRig(t, fixture)
-	ctx := context.Background()
+	ctx := fixture.ctx
 	account := "account-a"
 	if verb != channelonboarding.VerbConnect {
 		prior := rig.start(t, channelonboarding.VerbConnect, "predecessor-token", proof)
@@ -209,7 +209,7 @@ func newBoundHandoffRig(t *testing.T, fixture channelOnboardingConfirmationFixtu
 	if err != nil {
 		t.Fatal(err)
 	}
-	if _, _, err := rig.identities.Bootstrap(context.Background(), rig.now); err != nil {
+	if _, _, err := rig.identities.Bootstrap(fixture.ctx, rig.now); err != nil {
 		t.Fatal(err)
 	}
 	readiness := retiredOnboardingReadiness{candidate: &candidate}
@@ -239,7 +239,7 @@ func newBoundHandoffRig(t *testing.T, fixture channelOnboardingConfirmationFixtu
 
 func (r *boundHandoffRig) start(t *testing.T, verb channelonboarding.Verb, credential string, proof bool) channelonboarding.Result {
 	t.Helper()
-	result, err := r.service.Start(context.Background(), channelonboarding.StartInput{Verb: verb, Selection: channelonboarding.CandidateSelection{Provider: "telegram"}, ProviderCredential: credential, SaveProof: proof})
+	result, err := r.service.Start(r.fixture.ctx, channelonboarding.StartInput{Verb: verb, Selection: channelonboarding.CandidateSelection{Provider: "telegram"}, ProviderCredential: credential, SaveProof: proof})
 	if err != nil || result.IdentityOperation == nil {
 		t.Fatalf("start: %#v, %v", result, err)
 	}
@@ -249,7 +249,7 @@ func (r *boundHandoffRig) start(t *testing.T, verb channelonboarding.Verb, crede
 func (r *boundHandoffRig) confirm(t *testing.T, begun channelonboarding.Result, account string) operatorchannel.Operation {
 	t.Helper()
 	claimed := r.claim(t, begun, account)
-	bound, _, err := r.service.ConfirmIdentity(context.Background(), claimed.OperationID, claimed.Revision, true, r.now)
+	bound, _, err := r.service.ConfirmIdentity(r.fixture.ctx, claimed.OperationID, claimed.Revision, true, r.now)
 	if err != nil || bound.State != operatorchannel.StateBound {
 		t.Fatalf("confirm: %#v, %v", bound, err)
 	}
@@ -258,7 +258,7 @@ func (r *boundHandoffRig) confirm(t *testing.T, begun channelonboarding.Result, 
 
 func (r *boundHandoffRig) claim(t *testing.T, begun channelonboarding.Result, account string) operatorchannel.Operation {
 	t.Helper()
-	ctx := context.Background()
+	ctx := r.fixture.ctx
 	claim := operatorChannelContractClaim(*begun.IdentityOperation, operatorchannel.ConversationScopeDirect, account, "conversation-"+account, uuid.NewString())
 	settled, err := r.fixture.settle(ctx, claim, r.now)
 	if err != nil || settled.Operation.State != operatorchannel.StateAwaitingConfirmation {
@@ -273,7 +273,7 @@ func (r *boundHandoffRig) claim(t *testing.T, begun channelonboarding.Result, ac
 
 func (r *boundHandoffRig) parent(t *testing.T, id string) channelonboarding.Operation {
 	t.Helper()
-	op, err := r.fixture.store.GetChannelOnboarding(context.Background(), id)
+	op, err := r.fixture.store.GetChannelOnboarding(r.fixture.ctx, id)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -282,7 +282,7 @@ func (r *boundHandoffRig) parent(t *testing.T, id string) channelonboarding.Oper
 
 func (r *boundHandoffRig) complete(t *testing.T, id string) {
 	t.Helper()
-	result, err := r.service.Retry(context.Background(), channelonboarding.RetryInput{OperationID: id})
+	result, err := r.service.Retry(r.fixture.ctx, channelonboarding.RetryInput{OperationID: id})
 	if err != nil || result.Operation.Phase != channelonboarding.PhaseSucceeded {
 		t.Fatalf("eventual completion: %#v, %v", result, err)
 	}

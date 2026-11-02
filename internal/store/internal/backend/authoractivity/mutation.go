@@ -39,7 +39,7 @@ func Begin(ctx context.Context, tx *sql.Tx, dialect Dialect) (*Mutation, error) 
 		return nil, fmt.Errorf("author activity dialect %q is not supported", dialect)
 	}
 	mutation := &Mutation{tx: tx, dialect: dialect, drafts: make([]runtimeauthoractivity.Draft, 0, 4)}
-	if err := mutation.lock(ctx, true); err != nil {
+	if err := mutation.reserve(ctx); err != nil {
 		return nil, err
 	}
 	return mutation, nil
@@ -76,6 +76,9 @@ func (m *Mutation) Finalize(ctx context.Context) error {
 		return fmt.Errorf("author activity mutation was already finalized")
 	}
 	m.finalized = true
+	if err := m.lock(ctx); err != nil {
+		return err
+	}
 	unique := make([]runtimeauthoractivity.Draft, 0, len(m.drafts))
 	byDedup := make(map[string]runtimeauthoractivity.Draft, len(m.drafts))
 	for _, draft := range m.drafts {
@@ -154,7 +157,7 @@ func FenceMutationOrder(ctx context.Context, tx *sql.Tx, dialect Dialect) error 
 	if tx == nil || (dialect != DialectPostgres && dialect != DialectSQLite) {
 		return fmt.Errorf("mutation order requires a transaction and supported dialect")
 	}
-	return (&Mutation{tx: tx, dialect: dialect}).lock(ctx, false)
+	return (&Mutation{tx: tx, dialect: dialect}).lock(ctx)
 }
 
 func (m *Mutation) updateLast(ctx context.Context, last int64) error {

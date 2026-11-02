@@ -142,14 +142,9 @@ func (s *EffectPostgresOwner) SettleCompletion(ctx context.Context, attempt runt
 				}
 			}
 			if changed && strings.TrimSpace(attempt.Authority.Target.RunID) != "" {
-				terminal, err := externalEffectRunTerminal(txctx, tx, true, attempt.Authority.Target.RunID)
+				_, err := externalEffectRunTerminal(txctx, tx, true, attempt.Authority.Target.RunID)
 				if err != nil {
 					return err
-				}
-				if !terminal {
-					if _, err := mutation.RequestCompletion(txctx, s.lifecycle, attempt.Authority.Target.RunID, nil); err != nil {
-						return err
-					}
 				}
 			}
 			if err := recordExternalEffectStory(txctx, mutation, externalEffectStorySourceFromAttempt(attempt), attemptSettlement.Settlement.State, attemptSettlement.Settlement.Failure, attemptSettlement.Now.UTC()); err != nil {
@@ -293,14 +288,9 @@ func (s *EffectSQLiteOwner) SettleCompletion(ctx context.Context, attempt runtim
 				}
 			}
 			if changed && strings.TrimSpace(attempt.Authority.Target.RunID) != "" {
-				terminal, err := externalEffectRunTerminal(txctx, tx, false, attempt.Authority.Target.RunID)
+				_, err := externalEffectRunTerminal(txctx, tx, false, attempt.Authority.Target.RunID)
 				if err != nil {
 					return err
-				}
-				if !terminal {
-					if _, err := mutation.RequestCompletion(txctx, s.lifecycle, attempt.Authority.Target.RunID, nil); err != nil {
-						return err
-					}
 				}
 			}
 			if err := recordExternalEffectStory(txctx, mutation, externalEffectStorySourceFromAttempt(attempt), attemptSettlement.Settlement.State, attemptSettlement.Settlement.Failure, attemptSettlement.Now.UTC()); err != nil {

@@ -11,10 +11,7 @@ import (
 	runtimeauthoractivity "github.com/division-sh/swarm/internal/runtime/authoractivity"
 	privateauthoractivity "github.com/division-sh/swarm/internal/store/internal/backend/authoractivity"
 	authoractivityadapter "github.com/division-sh/swarm/internal/store/internal/backend/authoractivity/readadapter"
-	postgresbackend "github.com/division-sh/swarm/internal/store/internal/backend/postgres"
-	sqlitebackend "github.com/division-sh/swarm/internal/store/internal/backend/sqlite"
 	authoractivityfixture "github.com/division-sh/swarm/internal/store/testutil/authoractivityfixture"
-	"github.com/division-sh/swarm/internal/testutil"
 	"github.com/google/uuid"
 )
 
@@ -87,6 +84,7 @@ func TestAuthorActivityExactRuntimeBundleScopeFilterParity(t *testing.T) {
 
 type authorActivityAdapterFixture struct {
 	name        string
+	store       any
 	db          *sql.DB
 	dialect     authoractivityfixture.Dialect
 	readDialect authoractivityadapter.Dialect
@@ -95,12 +93,11 @@ type authorActivityAdapterFixture struct {
 
 func authorActivityAdapterFixtures(t *testing.T) []authorActivityAdapterFixture {
 	t.Helper()
-	sqlite := openAuthorActivityAdapterDB(t)
-	_, postgres, cleanup := testutil.StartPostgres(t)
-	t.Cleanup(cleanup)
+	sqlite := openSQLiteAuthorActivityReceiptFixture(t)
+	postgres := openPostgresAuthorActivityReceiptFixture(t)
 	return []authorActivityAdapterFixture{
-		{name: "sqlite", db: sqlite, dialect: authoractivityfixture.DialectSQLite, readDialect: authoractivityadapter.DialectSQLite, runtimeID: uuid.NewString()},
-		{name: "postgres", db: postgres, dialect: authoractivityfixture.DialectPostgres, readDialect: authoractivityadapter.DialectPostgres, runtimeID: uuid.NewString()},
+		{name: "sqlite", store: sqlite.store, db: sqlite.db, dialect: sqlite.dialect, readDialect: authoractivityadapter.DialectSQLite, runtimeID: uuid.NewString()},
+		{name: "postgres", store: postgres.store, db: postgres.db, dialect: postgres.dialect, readDialect: authoractivityadapter.DialectPostgres, runtimeID: uuid.NewString()},
 	}
 }
 
@@ -128,18 +125,11 @@ func runAuthorActivityFixture(t *testing.T, fixture authorActivityAdapterFixture
 		}
 		return write(ctx, story)
 	}
-	if fixture.dialect == authoractivityfixture.DialectPostgres {
-		backend, err := postgresbackend.New(fixture.db)
-		if err != nil {
-			t.Fatal(err)
-		}
-		return backend.RunTransaction(context.Background(), operation)
+	ctx := originalStoreFixtureContext(t, testAuthorActivityContext(), fixture.store)
+	if store, ok := fixture.store.(*PostgresStore); ok {
+		return store.backend.RunTransaction(ctx, operation)
 	}
-	backend, err := sqlitebackend.New(fixture.db)
-	if err != nil {
-		t.Fatal(err)
-	}
-	return backend.RunTransaction(context.Background(), "author activity fixture", operation)
+	return fixture.store.(*SQLiteRuntimeStore).backend.RunTransaction(ctx, "author activity fixture", operation)
 }
 
 func authorActivityInboundDraft(identity string, at time.Time, scope runtimeauthoractivity.Scope) runtimeauthoractivity.Draft {

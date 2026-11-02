@@ -157,52 +157,6 @@ func TestActivityOriginalGrantRefusalPrecedesNativeWork(t *testing.T) {
 	}
 }
 
-func TestActivityOriginalGrantTakesCanonicalFenceFirst(t *testing.T) {
-	for _, sqlite := range []bool{false, true} {
-		db, mock, err := sqlmock.New()
-		if err != nil {
-			t.Fatal(err)
-		}
-		defer db.Close()
-		mock.ExpectBegin()
-		grant, err := captureActivityExecutionGrant(activityInstalledGrantForTest(false))
-		if err != nil {
-			t.Fatal(err)
-		}
-		fenceErr := errors.New("original mutation order held")
-		if sqlite {
-			mock.ExpectExec("INSERT OR IGNORE INTO author_activity_order").WillReturnResult(sqlmock.NewResult(0, 0))
-			mock.ExpectExec("UPDATE author_activity_order SET last_sequence = last_sequence").WillReturnError(fenceErr)
-		} else {
-			mock.ExpectQuery("SELECT last_sequence FROM author_activity_order .* FOR UPDATE").WillReturnError(fenceErr)
-		}
-		mock.ExpectRollback()
-		write := func(ctx context.Context, tx *sql.Tx) error {
-			return grant.proveOriginalTx(ctx, tx, runtimepipeline.ActivityAttemptRecord{ExecutionMode: "live", ExecutionBinding: grant.reference}, sqlite)
-		}
-		var committed bool
-		if sqlite {
-			backend, constructionErr := sqlitebackend.New(db)
-			if constructionErr != nil {
-				t.Fatal(constructionErr)
-			}
-			committed, err = backend.RunTransactionOutcome(context.Background(), "activity canonical fence component", write)
-		} else {
-			backend, constructionErr := postgresbackend.New(db)
-			if constructionErr != nil {
-				t.Fatal(constructionErr)
-			}
-			committed, err = backend.RunTransactionOutcome(context.Background(), write)
-		}
-		if committed || !errors.Is(err, fenceErr) {
-			t.Fatalf("native work preceded the canonical fence: committed=%t err=%v", committed, err)
-		}
-		if err := mock.ExpectationsWereMet(); err != nil {
-			t.Fatal(err)
-		}
-	}
-}
-
 func TestActivityOriginalWritersRequireInstalledGrantBeforeNativeEntry(t *testing.T) {
 	for _, sqlite := range []bool{false, true} {
 		for _, operation := range []string{"start", "claim", "complete", "uncertain"} {

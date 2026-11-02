@@ -41,6 +41,10 @@ func prepareNativeFenceAuthority(t *testing.T, dsn string) context.Context {
 			t.Error(err)
 		}
 	})
+	ctx, err = startupownership.WithProcessMutationAuthority(ctx, process)
+	if err != nil {
+		t.Fatal(err)
+	}
 	rooted, _ := sourceartifactfixture.Rooted(t, "fence", sourceartifactfixture.Artifact())
 	if _, err := selected.EnsureRootedSource(ctx, rooted); err != nil {
 		t.Fatal(err)

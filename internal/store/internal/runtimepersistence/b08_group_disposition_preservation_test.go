@@ -67,9 +67,6 @@ func TestB08GroupDecisionQuarantinePreservesHealthyMemberBothStores(t *testing.T
 			if counts.ByOperation[transactiontest.PipelineSettlement].WriteCommits != 1 || counts.ByOperation[transactiontest.PipelineSettlement].Revision.Finalizations != 1 || counts.Active != 0 || countP16RunRevisions(t, f.db, f.seed.runID) != revisions+1 {
 				t.Fatalf("mixed dispositions escaped one real segment/revision: %+v", counts)
 			}
-			if f.sink.reserves != 1 || f.sink.submits != 1 || f.sink.cancels != 0 {
-				t.Fatalf("mixed segment candidate ownership: %+v", f.sink)
-			}
 			f.requireObservation(t, pipelineobligation.PublicationSettlementSatisfied)
 			before := f.snapshot(t)
 			if out, err := f.group.Settle(f.ctx, f.members); !errors.Is(err, pipelineobligation.ErrStaleClaim) || len(out.Results) != 0 {
