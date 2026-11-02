@@ -51,13 +51,17 @@ func (a *Adapter) selectedExecutionCurrentWithLock(ctx context.Context, tx *sql.
 	if lock && a.dialect == DialectPostgres {
 		query += ` FOR SHARE OF execution, binding`
 	}
-	var expiresAt time.Time
-	err = tx.QueryRowContext(ctx, query, authority.ExecutionID(), authority.ForkRunID(), authority.Generation(), authority.SourceArtifact().BundleHash(), now).Scan(&expiresAt)
+	var rawExpiresAt any
+	err = tx.QueryRowContext(ctx, query, authority.ExecutionID(), authority.ForkRunID(), authority.Generation(), authority.SourceArtifact().BundleHash(), now).Scan(&rawExpiresAt)
 	if errors.Is(err, sql.ErrNoRows) {
 		return false, time.Time{}, nil
 	}
 	if err != nil {
 		return false, time.Time{}, fmt.Errorf("verify selected delivery execution fence: %w", err)
 	}
-	return true, expiresAt, nil
+	expiresAt, present, err := parseNullableTime(rawExpiresAt)
+	if err != nil {
+		return false, time.Time{}, fmt.Errorf("read selected delivery execution lease: %w", err)
+	}
+	return present, expiresAt, nil
 }
