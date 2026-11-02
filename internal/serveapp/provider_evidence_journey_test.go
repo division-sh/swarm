@@ -121,7 +121,7 @@ func writeProviderEvidenceSource(t *testing.T, cell string) string {
 	}}})
 	write("worker/manifest.yaml", manifest)
 	write("worker/schema.yaml", map[string]any{"instance": "conversation", "pins": map[string]any{"inputs": []string{"evidence.requested"}, "outputs": []string{"evidence.completed"}}})
-	write("worker/entities.yaml", map[string]any{"evidence": map[string]any{"conversation": "string"}})
+	write("worker/state.yaml", map[string]any{"conversation": "text"})
 	write("worker/events.yaml", map[string]any{"evidence.completed": map[string]any{"sequence": "integer"}})
 	agent := map[string]any{"role": "evidence", "model": "regular", "memory": true, "subscriptions": []string{"evidence.requested"}, "emit_events": []string{"evidence.completed"},
 		"intent": map[string]any{"inline": "For each event call emit_evidence_completed exactly once, copying sequence from the current event. Use only that tool and produce no prose."}}
