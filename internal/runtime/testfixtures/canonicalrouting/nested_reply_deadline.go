@@ -113,21 +113,21 @@ func CopyTwoOpenFanOutReplyDeadlines(t testing.TB) string {
 }
 
 func nestedDeadlineReturn(input, output string, account bool) string {
-	fields := "              request_id: \"same-business-key\"\n              result: \"approved\"\n"
+	fields := "            request_id: \"same-business-key\"\n            result: \"approved\"\n"
 	if account {
-		fields = "              account_id: \"same-account\"\n" + fields
+		fields = "            account_id: \"same-account\"\n" + fields
 	}
-	return "    " + input + `:
-      join:
-        stage: waiting
-        members: {from: state.expected, by: payload.request_id}
-        output: payload.result
-        deadline: {after: 1h, from: stage_entry}
-        on_complete:
-          advances_to: ready
-          emit:
-            event: ` + output + `
-            fields:
-` + fields + `        on_deadline: {advances_to: attention}
+	return "  " + input + `:
+    join:
+      stage: waiting
+      members: {from: state.expected, by: payload.request_id}
+      output: payload.result
+      deadline: {after: 1h, from: stage_entry}
+      on_complete:
+        advances_to: ready
+        emit:
+          event: ` + output + `
+          fields:
+` + fields + `      on_deadline: {advances_to: attention}
 `
 }

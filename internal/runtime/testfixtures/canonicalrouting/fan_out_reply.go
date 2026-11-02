@@ -17,8 +17,8 @@ func CopyPublishedFanOutReply(t testing.TB) string {
 		"provider.requested:\n  account_id: text\n  request_id: text\n",
 		"provider.requested:\n  account_id: text\n  request_id: text\n  items: [text]\n")
 	applyClosedReplacement(t, filepath.Join(root, "nodes.yaml"),
-		"          account_id: payload.account_id\n          request_id: payload.request_id\n",
-		"          account_id: payload.account_id\n          request_id: payload.request_id\n          items: payload.items\n")
+		"        account_id: payload.account_id\n        request_id: payload.request_id\n",
+		"        account_id: payload.account_id\n        request_id: payload.request_id\n        items: payload.items\n")
 	writeClosedVariantFile(t, root, "provider/manifest.yaml", "version: 1.0.0\nplatform_version: '*'\n")
 	writeClosedVariantFile(t, root, "provider/schema.yaml", `pins:
   inputs: [provider.requested]

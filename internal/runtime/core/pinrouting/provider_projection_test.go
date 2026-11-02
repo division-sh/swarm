@@ -4,6 +4,7 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/division-sh/swarm/internal/packadmission"
 	runtimepkg "github.com/division-sh/swarm/internal/runtime"
 	runtimecontracts "github.com/division-sh/swarm/internal/runtime/contracts"
 	"github.com/division-sh/swarm/internal/runtime/core/pinrouting"
@@ -133,7 +134,7 @@ func assertTargetFreeSchemaRoles(t testing.TB, plan pinrouting.ConnectRoutePlan)
 func targetFreeProviderSource(t testing.TB, root string) (semanticview.Source, error) {
 	t.Helper()
 	repo := canonicalrouting.RepoRoot(t)
-	bundle, err := runtimecontracts.LoadWorkflowContractBundleWithOverrides(repo, root, runtimecontracts.DefaultPlatformSpecFile(repo))
+	bundle, err := runtimecontracts.LoadWorkflowContractBundleWithOptions(repo, root, runtimecontracts.DefaultPlatformSpecFile(repo), runtimecontracts.WorkflowContractLoadOptions{AdmitPackInventory: packadmission.AdmitInventory})
 	if err != nil {
 		t.Fatalf("load captured provider fixture: %v", err)
 	}

@@ -677,7 +677,7 @@ func loadInboundRawSettlementSource(t testing.TB, admitted, withConsumer bool) s
 		}
 	}
 	repo := canonicalrouting.RepoRoot(t)
-	bundle, err := runtimecontracts.LoadWorkflowContractBundleWithOverrides(repo, root, runtimecontracts.DefaultPlatformSpecFile(repo))
+	bundle, err := runtimecontracts.LoadWorkflowContractBundleWithOptions(repo, root, runtimecontracts.DefaultPlatformSpecFile(repo), runtimecontracts.WorkflowContractLoadOptions{AdmitPackInventory: packadmission.AdmitInventory})
 	if err != nil {
 		t.Fatal(err)
 	}

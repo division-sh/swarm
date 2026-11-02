@@ -14,6 +14,13 @@ import (
 
 func TestPrivateOutputConsumerRelationSurvivesOnlyWhileConnectionExists(t *testing.T) {
 	root := canonicalrouting.CopyExample(t, canonicalrouting.ParentConnect)
+	// This proof varies the schema-owned relation, not a handler declaration.
+	if err := os.Remove(filepath.Join(root, "consumer", "nodes.yaml")); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.Remove(filepath.Join(root, "producer", "nodes.yaml")); err != nil {
+		t.Fatal(err)
+	}
 	schemaPath := filepath.Join(root, "schema.yaml")
 	original, err := os.ReadFile(schemaPath)
 	if err != nil {

@@ -316,7 +316,7 @@ func forkJoinOccurrenceNativeFutureTimeout(t *testing.T, f *forkJoinNativeFixtur
 	if !ok {
 		t.Fatal("future child timeout lacks its canonical typed arrival reference")
 	}
-	declaration, err := timeridentity.NewJoinRef(sourceRef.Node(), sourceRef.HandlerEvent(), sourceRef.Stage())
+	declaration, err := timeridentity.NewJoinRef(sourceRef.Node(), "future.completed", sourceRef.Stage())
 	if err != nil {
 		t.Fatal(err)
 	}

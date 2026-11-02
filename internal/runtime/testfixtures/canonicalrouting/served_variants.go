@@ -344,7 +344,7 @@ pins:
 connect:
   - {event: opco.create_requested, from: ., to: operating, resolution: create}
 `)
-	applyClosedReplacement(t, filepath.Join(root, "nodes.yaml"), "      advances_to: processed\n", "      advances_to: waiting\n")
+	applyClosedReplacement(t, filepath.Join(root, "nodes.yaml"), "    advances_to: processed\n", "    advances_to: waiting\n")
 	writeClosedVariantFile(t, root, "state.yaml", "owner: text\n")
 	applyClosedReplacement(t, filepath.Join(root, "events.yaml"), `item.processed:
   item_id: text?

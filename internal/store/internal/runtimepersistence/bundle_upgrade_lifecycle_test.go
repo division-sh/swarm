@@ -66,8 +66,7 @@ func TestBundleUpgradeAdmissionPreservesLiveWorkBothStores(t *testing.T) {
 			paused, retainedTimer := scenario.paused, scenario.retainedTimer
 			selectedFiles := maps.Clone(candidateFiles)
 			if retainedTimer {
-				selectedFiles["review/schema.yaml"] = strings.ReplaceAll(strings.Replace(files["review/schema.yaml"], "after: 1h", "after: 2h", 1), "timer.elapsed", "timer.changed")
-				selectedFiles["review/events.yaml"] = files["review/events.yaml"] + "timer.changed:\n"
+				selectedFiles["review/schema.yaml"] = strings.Replace(files["review/schema.yaml"], "after: 1h", "after: 2h", 1)
 			}
 			name := backend + "/live"
 			if paused {

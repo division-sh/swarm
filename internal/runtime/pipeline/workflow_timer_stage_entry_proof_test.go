@@ -51,10 +51,10 @@ func newStageTimerEntryVariantProof(t *testing.T, backend, delay, action string,
 		"schema.yaml": fmt.Sprintf(`stages:
   s1:
     timers:
-      - {id: s1_to_s2, after: %s, %s}
+      - {after: %s, %s}
   s2:
     timers:
-      - {id: s2_to_s1, after: %s, %s}
+      - {after: %s, %s}
 `, delay, left, delay, right),
 		"state.yaml":  "marker: text\n",
 		"events.yaml": "enter.s1:\nenter.s2:\nnote:\nobserved:\n",

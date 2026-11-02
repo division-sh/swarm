@@ -45,13 +45,13 @@ func TestServedWhatsAppOrderedInputRestartBothStores(t *testing.T) {
 				"payload": map[string]any{"detail": "Native ordered input"}, "idempotency_key": "native-ordered-input"})
 			cardID := waitServedNativePendingCard(t, endpoint)
 			card := awaitServedNativeInputMessage(t, peer, "\nReference: "+cardID+"\n")
-			if !strings.Contains(card.Body.GetConversation(), "Action: reject") {
+			if !strings.Contains(card.Body.GetConversation(), "Action: Reject") {
 				t.Fatal("real stage gate did not expose its input-bearing outcome", card.Body.GetConversation())
 			}
 			peer.reply("reject", "NATIVE_INPUT_BEGIN", card)
-			first := awaitServedNativeInputMessage(t, peer, "Input: reason (text) required")
+			first := awaitServedNativeInputMessage(t, peer, "Input: Reason (text) required")
 			peer.reply("private-native-reason", "NATIVE_INPUT_PARTIAL", first)
-			second := awaitServedNativeInputMessage(t, peer, "Input: count (integer) required")
+			second := awaitServedNativeInputMessage(t, peer, "Input: Count (integer) required")
 			requireServedNativeInputCard(t, endpoint, cardID, false)
 			if err := process.stop(); err != nil {
 				t.Fatal("pending native input did not join before restart", err, process.output.String())
@@ -84,7 +84,7 @@ func TestServedWhatsAppOrderedInputRestartBothStores(t *testing.T) {
 			waitTextReplyIntent(t, reader, query, "teaching")
 			requireServedNativeInputCard(t, endpoint, cardID, false)
 			peer.reply("27", "NATIVE_INPUT_COUNT", second)
-			optional := awaitServedNativeInputMessage(t, peer, "Input: note (text)")
+			optional := awaitServedNativeInputMessage(t, peer, "Input: Note (text)")
 			peer.reply("Skip field", "NATIVE_INPUT_FINAL_SKIP", optional)
 			decided := waitServedNativeInputDecision(t, endpoint, cardID)
 			peer.reply("Skip field", "NATIVE_INPUT_FINAL_REPEAT", optional)

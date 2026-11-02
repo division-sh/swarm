@@ -43,9 +43,9 @@ func TestServedWhatsAppIdentityRebindRejectsPendingInputBothStores(t *testing.T)
 			cardID := waitServedNativePendingCard(t, endpoint)
 			card := awaitServedNativeInputMessage(t, peer, "\nReference: "+cardID+"\n")
 			peer.reply("reject", "REBIND_INPUT_BEGIN", card)
-			first := awaitServedNativeInputMessage(t, peer, "Input: reason (text) required")
+			first := awaitServedNativeInputMessage(t, peer, "Input: Reason (text) required")
 			peer.reply("private-native-reason", "REBIND_INPUT_PARTIAL", first)
-			oldPrompt := awaitServedNativeInputMessage(t, peer, "Input: count (integer) required")
+			oldPrompt := awaitServedNativeInputMessage(t, peer, "Input: Count (integer) required")
 			requireServedNativeInputCard(t, endpoint, cardID, false)
 
 			// The existing principal explicitly admits a fresh signed session and

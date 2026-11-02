@@ -64,7 +64,7 @@ func TestServedCompiledTransitionSelectedCarrierEvidenceOnBothStores(t *testing.
 								if flow == "" {
 									flow = "."
 								}
-								guards := []string{handler + "_choice", handler + "_nonempty"}
+								guards := []string{"payload.choice in ['alpha', 'beta'] && payload.choice != ''"}
 								selection := record.Evidence.RuleSelection()
 								index := 0
 								if choice == "beta" {

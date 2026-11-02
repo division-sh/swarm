@@ -442,7 +442,7 @@ func compareRetainedJoinActivations(first, repeated []joinruntime.Activation) er
 func TestRetainedJoinComparisonRequiresExactUniqueActivations(t *testing.T) {
 	at := time.Date(2026, 10, 15, 0, 0, 0, 0, time.UTC)
 	makeActivation := func(id string) joinruntime.Activation {
-		ref, err := timeridentity.NewJoinRef(identitytest.RootNode(t, "join"), "item.done", "review")
+		ref, err := timeridentity.NewJoinRef(identitytest.RootNode(t, id), "item.done", "review")
 		if err != nil {
 			t.Fatal(err)
 		}

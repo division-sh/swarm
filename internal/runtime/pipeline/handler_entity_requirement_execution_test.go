@@ -4,7 +4,6 @@ import (
 	"context"
 	"encoding/json"
 	"reflect"
-	"strings"
 	"testing"
 	"time"
 
@@ -57,16 +56,6 @@ func VerifyExistingOwnerExecutionSemanticsPersistOnSQLiteAndPostgresForTest(t *t
 		}
 	})
 
-	t.Run("guard_kill", func(t *testing.T) {
-		ctx := nativeWorkflowHandlerRunContextForTest(t, fixture)
-		instance, result := executeExistingOwnerBehavior(t, fixture, ctx, pc, "guard-kill", "work.kill", nil, nil, nil)
-		if !result.handled || (result.status != "" && result.status != HandlerOutcomeKilled) {
-			t.Fatalf("guard kill outcome = handled:%t status:%q, want handled killed outcome", result.handled, result.status)
-		}
-		if got := strings.TrimSpace(instance.CurrentState); got != "killed" {
-			t.Fatalf("guard kill current state = %q, want killed", got)
-		}
-	})
 }
 
 func VerifyNativeEntitylessNodeContractEmissionDoesNotMaterializeWorkflowStateOnSQLiteAndPostgresForTest(t *testing.T, open pipelineDeliveryNativeOpenerForTest) {

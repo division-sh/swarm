@@ -296,7 +296,7 @@ func newA2CanonicalAccumulatorProof(t *testing.T, selected gateRecoveryStoreCase
 		case "types.yaml":
 			document["types"].(map[string]any)["NumericInput"].(map[string]any)["note"] = "text?"
 		case "nodes.yaml":
-			handler := document["numeric"].(map[string]any)["event_handlers"].(map[string]any)["numeric.requested"].(map[string]any)
+			handler := document["numeric"].(map[string]any)["numeric.requested"].(map[string]any)
 			handler["accumulate"] = map[string]any{"into": "items", "from": "payload", "key": "payload.id"}
 			handler["data_accumulation"] = map[string]any{"writes": []any{map[string]any{"target_field": "score", "value": "payload.value"}}}
 		}
