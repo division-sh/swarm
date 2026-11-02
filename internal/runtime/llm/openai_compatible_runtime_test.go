@@ -163,8 +163,24 @@ func TestAnthropicManagedRequestEncodesCanonicalExecutionFrame(t *testing.T) {
 			if req.Model != "test-model" {
 				t.Fatalf("second request model = %q, want sealed frame model", req.Model)
 			}
-			if !anthropicRequestHasFrame(req.Messages, `{"answer":"ok"}`) {
-				t.Fatalf("second request does not contain canonical continuation frame: %#v", req.Messages)
+			if len(req.Messages) != 3 || req.Messages[1].Role != "assistant" || req.Messages[2].Role != "user" {
+				t.Fatalf("second request lost its exact assistant/result round: %#v", req.Messages)
+			}
+			assistant, err := json.Marshal(req.Messages[1].Content)
+			if err != nil {
+				t.Fatal(err)
+			}
+			var uses []anthropicToolUseBlock
+			if err := json.Unmarshal(assistant, &uses); err != nil || len(uses) != 1 || uses[0].Type != "tool_use" || uses[0].ID != "call_1" || uses[0].Name != "notify_human" {
+				t.Fatalf("second request lost its stored provider call: %s err=%v", assistant, err)
+			}
+			result, err := json.Marshal(req.Messages[2].Content)
+			if err != nil {
+				t.Fatal(err)
+			}
+			var results []anthropicToolResultBlock
+			if err := json.Unmarshal(result, &results); err != nil || len(results) != 1 || results[0].Type != "tool_result" || results[0].ToolUseID != "call_1" || results[0].Content != `{"answer":"ok"}` {
+				t.Fatalf("second request does not contain canonical continuation frame: %s err=%v", result, err)
 			}
 			_, _ = w.Write([]byte(`{"model":"claude-test","usage":{"input_tokens":9,"output_tokens":2},"content":[{"type":"text","text":"done"}]}`))
 		default:
