@@ -79,11 +79,10 @@ work.finished:
 def handle(input):
     usage = {"input_tokens": 1, "output_tokens": 1}
     if input["round"] == 1:
-        frame = {}
+        payload = {}
         for message in input["messages"]:
             if message["role"] == "user":
-                frame = json.loads(message["content"])
-        payload = frame["event"]["payload"]
+                payload = json.loads(message["content"])
         arguments = {"work_id": payload["work_id"]}
         if payload["sequence"] == 1:
             name = "emit_work_progress"
