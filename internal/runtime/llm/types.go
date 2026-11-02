@@ -47,7 +47,6 @@ func DescriptionWithUsage(description, usage string) string {
 type Message struct {
 	Role           string     `json:"role"`
 	Content        string     `json:"content"`
-	Name           string     `json:"name,omitempty"`
 	RuntimeContext string     `json:"runtime_context,omitempty"`
 	ToolCalls      []ToolCall `json:"tool_calls,omitempty"`
 }
