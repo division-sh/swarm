@@ -74,6 +74,13 @@ type attachmentActivationVerificationWorkflow struct {
 }
 
 func (w *attachmentActivationVerificationWorkflow) VerifyDynamicFlowRuntimeActivationAttempt(ctx context.Context, attempt pipeline.DynamicFlowRuntimeActivationAttempt) error {
+	row, found, err := w.LoadDynamicFlowRuntimeReadiness(ctx, attempt.RunID(), flowidentity.RouteForInstancePath(attempt.InstancePath()))
+	if err != nil || !found || row.AttemptOrdinal != attempt.Ordinal() {
+		return errors.Join(err, errors.New("verification cut requires the exact admitted attempt"))
+	}
+	if !row.Phase.Includes(pipeline.FlowAttachmentAgentsRegistered) {
+		return w.PipelineCoordinator.VerifyDynamicFlowRuntimeActivationAttempt(ctx, attempt)
+	}
 	if err := w.owner.inject("activation_verification", false); err != nil {
 		return err
 	}

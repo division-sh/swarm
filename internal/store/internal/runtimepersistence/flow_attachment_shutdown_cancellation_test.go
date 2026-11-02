@@ -55,12 +55,19 @@ func (w *attachmentShutdownProgressWorkflow) AdvanceFlowAttachment(ctx context.C
 }
 
 func (w *attachmentShutdownProgressWorkflow) VerifyDynamicFlowRuntimeActivationAttempt(ctx context.Context, attempt pipeline.DynamicFlowRuntimeActivationAttempt) error {
-	if !w.verification || !w.enabled.CompareAndSwap(true, false) {
+	if !w.verification {
+		return w.PipelineCoordinator.VerifyDynamicFlowRuntimeActivationAttempt(ctx, attempt)
+	}
+	row, found, err := w.LoadDynamicFlowRuntimeReadiness(ctx, attempt.RunID(), flowidentity.RouteForInstancePath(attempt.InstancePath()))
+	if err != nil || !found || row.AttemptOrdinal != attempt.Ordinal() {
+		return errors.Join(err, errors.New("verification cut requires the exact admitted attempt"))
+	}
+	if !row.Phase.Includes(pipeline.FlowAttachmentAgentsRegistered) || !w.enabled.CompareAndSwap(true, false) {
 		return w.PipelineCoordinator.VerifyDynamicFlowRuntimeActivationAttempt(ctx, attempt)
 	}
 	w.entered <- ctx
 	<-w.release
-	err := w.PipelineCoordinator.VerifyDynamicFlowRuntimeActivationAttempt(ctx, attempt)
+	err = w.PipelineCoordinator.VerifyDynamicFlowRuntimeActivationAttempt(ctx, attempt)
 	w.observed <- attachmentShutdownProgressObservation{err: err}
 	return err
 }
