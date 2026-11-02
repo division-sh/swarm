@@ -10,7 +10,9 @@ import (
 	"os"
 	"path/filepath"
 	"reflect"
+	"regexp"
 	"strings"
+	"sync/atomic"
 	"testing"
 	"time"
 
@@ -31,7 +33,32 @@ func TestExternalMCPPublicJourneyBothStores(t *testing.T) {
 			started := time.Now()
 			base := filepath.Join(root, backend)
 			remote := mcpapi.New(t, "synthetic-mcp-secret")
-			model := llmapi.New(t, llmapi.OpenAICompatible, "/v1/chat/completions", "synthetic-llm-secret", externalMCPJourneyReply)
+			var rejections, inferences atomic.Int64
+			model := llmapi.New(t, llmapi.OpenAICompatible, "/v1/chat/completions", "synthetic-llm-secret", func(request llmapi.Request) (llmapi.Reply, error) {
+				reply, err := externalMCPJourneyReply(request)
+				if reply.StatusCode >= 300 {
+					rejections.Add(1)
+					t.Logf("mock provider refused request before inference: HTTP %d %s", reply.StatusCode, reply.ErrorBody)
+				} else if err == nil {
+					inferences.Add(1)
+				}
+				return reply, err
+			})
+			t.Cleanup(func() {
+				if rejections.Load() == 0 {
+					return
+				}
+				calls := 0
+				for _, call := range remote.Calls() {
+					if call.Method == "tools/call" {
+						calls++
+					}
+				}
+				t.Logf("provider refusal evidence: rejections=%d inferences=%d MCP executions=%d", rejections.Load(), inferences.Load(), calls)
+				if inferences.Load() != 0 || calls != 0 {
+					t.Error("rejected provider request reached inference or MCP execution")
+				}
+			})
 			store := goldenSQLiteStore(base)
 			if backend == "postgres" {
 				store = goldenPostgresStore(t, dsn)
@@ -118,7 +145,16 @@ func externalMCPJourneyReply(request llmapi.Request) (llmapi.Reply, error) {
 		return llmapi.Reply{}, err
 	}
 	names := map[string]bool{}
-	for _, tool := range body.Tools {
+	validName := regexp.MustCompile(`^[a-zA-Z0-9_-]+$`)
+	for index, tool := range body.Tools {
+		if !validName.MatchString(tool.Function.Name) {
+			message := fmt.Sprintf("Invalid 'tools[%d].function.name': string does not match pattern. Expected a string that matches the pattern '^[a-zA-Z0-9_-]+$'.", index)
+			failure, err := json.Marshal(map[string]any{"error": map[string]any{"message": message, "type": "invalid_request_error", "param": nil, "code": "invalid_request_error"}})
+			if err != nil {
+				return llmapi.Reply{}, err
+			}
+			return llmapi.Reply{StatusCode: 400, ErrorBody: string(failure)}, nil
+		}
 		names[tool.Function.Name] = true
 	}
 	if !names["partner.ping"] || !names["emit_external_completed"] {
