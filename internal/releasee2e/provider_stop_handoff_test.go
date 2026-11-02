@@ -12,7 +12,6 @@ import (
 	"testing"
 	"time"
 
-	"github.com/division-sh/swarm/internal/operatorread"
 	"github.com/division-sh/swarm/internal/runtime/testfixtures/canonicalrouting"
 	"github.com/division-sh/swarm/internal/testutil/llmapi"
 	"gopkg.in/yaml.v3"
@@ -102,7 +101,7 @@ func TestProviderGracefulStopAndStandbyHandoffBothStores(t *testing.T) {
 				}
 				if cut.selected {
 					for {
-						var event operatorread.OperatorEventFull
+						var event goldenEvent
 						if err := first.rpc.call(ctx, "event.get", map[string]any{"event_id": business.EventID}, &event); err != nil {
 							t.Fatal(err)
 						}
@@ -145,21 +144,28 @@ func TestProviderGracefulStopAndStandbyHandoffBothStores(t *testing.T) {
 				}
 				if cut.selected {
 					var list struct {
-						Runs []operatorread.RunHeader `json:"runs"`
+						Runs []struct {
+							RunID  string `json:"run_id"`
+							Origin struct {
+								SourceRunID string `json:"source_run_id"`
+							} `json:"origin"`
+						} `json:"runs"`
 					}
 					if err := first.rpc.call(ctx, "run.list", map[string]any{}, &list); err != nil {
 						t.Fatal(err)
 					}
 					business.RunID = ""
 					for _, run := range list.Runs {
-						if run.Origin.SourceRunID() == seed.RunID {
+						if run.Origin.SourceRunID == seed.RunID {
 							if business.RunID != "" {
 								t.Fatal("more than one selected child")
 							}
 							business.RunID = run.RunID
 						}
 					}
-					var listEvents operatorread.OperatorEventListResult
+					var listEvents struct {
+						Events []goldenEvent `json:"events"`
+					}
 					if err := first.rpc.call(ctx, "event.list", map[string]any{"filter": map[string]any{
 						"run_id": business.RunID, "event_name": "item.agent_hold"}, "limit": 100}, &listEvents); err != nil {
 						t.Fatal(err)
@@ -214,7 +220,7 @@ func TestProviderGracefulStopAndStandbyHandoffBothStores(t *testing.T) {
 					t.Fatalf("handoff readiness: %v; provider requests=%d\nholder:\n%s\nstandby:\n%s", err, len(provider.Requests()), first.output.String(), standby.output.String())
 				}
 				for {
-					var event operatorread.OperatorEventFull
+					var event goldenEvent
 					if err := standby.rpc.call(ctx, "event.get", map[string]any{"event_id": business.EventID}, &event); err != nil {
 						t.Fatal(err)
 					}
@@ -250,7 +256,11 @@ func TestProviderGracefulStopAndStandbyHandoffBothStores(t *testing.T) {
 				}
 				if cut.selected {
 					var readback struct {
-						Run operatorread.RunHeader `json:"run"`
+						Run struct {
+							RunID   string         `json:"run_id"`
+							Status  string         `json:"status"`
+							Failure map[string]any `json:"failure"`
+						} `json:"run"`
 					}
 					if err := standby.rpc.call(ctx, "run.get", map[string]any{"run_id": business.RunID}, &readback); err != nil {
 						t.Fatal(err)
