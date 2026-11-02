@@ -248,6 +248,17 @@ func TestProviderGracefulStopAndStandbyHandoffBothStores(t *testing.T) {
 					case <-time.After(10 * time.Millisecond):
 					}
 				}
+				if cut.selected {
+					var readback struct {
+						Run operatorread.RunHeader `json:"run"`
+					}
+					if err := standby.rpc.call(ctx, "run.get", map[string]any{"run_id": business.RunID}, &readback); err != nil {
+						t.Fatal(err)
+					}
+					if readback.Run.RunID != business.RunID || readback.Run.Status == "failed" || readback.Run.Status == "cancelled" || readback.Run.Failure != nil {
+						t.Fatalf("selected handoff did not preserve its accepted child: %+v", readback.Run)
+					}
+				}
 				if err := standby.stopAndWait(5 * time.Second); err != nil {
 					t.Fatal(err)
 				}

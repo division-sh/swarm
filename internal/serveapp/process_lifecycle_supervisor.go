@@ -27,6 +27,7 @@ type processLifecycleSupervisor struct {
 	shutdownOptions   runtime.ShutdownOptions
 	shutdownRuntime   func(context.Context, *runtime.Runtime, runtime.ShutdownOptions) error
 	operationMu       sync.Mutex
+	shutdownMu        sync.Mutex
 
 	mu                          sync.RWMutex
 	currentRT                   *runtime.Runtime
@@ -34,6 +35,7 @@ type processLifecycleSupervisor struct {
 	runtimeContexts             *runtime.RuntimeContextManager
 	execution                   map[string]apiv1.MethodHandler
 	resetting                   bool
+	stopping                    bool
 	apiReady                    bool
 	resetContexts               []serveRuntimeBundleContext
 	resetContextsManaged        bool
@@ -119,6 +121,9 @@ func (s *processLifecycleSupervisor) acquireCurrentRuntime(ctx context.Context) 
 	}
 	s.mu.RLock()
 	defer s.mu.RUnlock()
+	if s.stopping {
+		return nil, worklifetime.ErrAdmissionFenced
+	}
 	if s.resetting {
 		return nil, errors.New("runtime reset has not converged")
 	}
@@ -141,23 +146,40 @@ func (s *processLifecycleSupervisor) ShutdownProcessWithOptions(ctx context.Cont
 	if s == nil {
 		return nil
 	}
-	s.operationMu.Lock()
-	defer s.operationMu.Unlock()
-	s.mu.Lock()
-	s.apiReady = false
-	if s.ready != nil {
-		s.ready.Store(false)
-	}
-	manager := s.runtimeContexts
-	current := s.currentRT
-	s.mu.Unlock()
+	s.shutdownMu.Lock()
+	defer s.shutdownMu.Unlock()
 	grace, err := runtimemanager.ResolveShutdownGrace(opts.Grace)
 	if err != nil {
 		return err
 	}
+	s.operationMu.Lock()
+	s.mu.Lock()
+	s.stopping = true
+	s.apiReady = false
+	if s.ready != nil {
+		s.ready.Store(false)
+	}
+	selected := s.selected
+	s.mu.Unlock()
+	var selectedErr error
+	if selected != nil {
+		selectedErr = selected.SealSelectedContexts()
+	}
+	s.operationMu.Unlock()
 	drainCtx, cancelDrain := context.WithTimeout(ctx, grace)
 	defer cancelDrain()
 	deadline, _ := drainCtx.Deadline()
+	// Accepted selected orchestration may still need its exact ordinary target.
+	// Keep that dependency alive, without holding the lock its handoff acquires.
+	if selected != nil {
+		selectedErr = errors.Join(selectedErr, selected.DrainSelectedContexts(drainCtx))
+		selectedErr = errors.Join(selectedErr, selected.RetireSelectedContexts(context.WithoutCancel(ctx)))
+	}
+	s.operationMu.Lock()
+	defer s.operationMu.Unlock()
+	s.mu.RLock()
+	manager, current := s.runtimeContexts, s.currentRT
+	s.mu.RUnlock()
 	if manager != nil {
 		for _, loaded := range manager.LoadedContexts() {
 			loaded.Runtime.CloseAdmission()
@@ -165,11 +187,6 @@ func (s *processLifecycleSupervisor) ShutdownProcessWithOptions(ctx context.Cont
 	} else if current != nil {
 		current.CloseAdmission()
 	}
-	var selectedErr error
-	if s.selected != nil {
-		selectedErr = s.selected.DrainSelectedContexts(drainCtx)
-	}
-	selectedErr = errors.Join(selectedErr, s.retireSelectedContextsLocked(context.WithoutCancel(ctx)))
 	opts.Grace = remainingServeShutdownGrace(grace, deadline)
 	shutdownErr := selectedErr
 	var terminalErr error
@@ -219,6 +236,8 @@ func (s *processLifecycleSupervisor) ShutdownProcessWithOptions(ctx context.Cont
 // Final store release consults the supervisor, not a captured family from boot.
 // A failed candidate remains selected here until its join succeeds.
 func (s *processLifecycleSupervisor) RetireSelectedContexts(ctx context.Context) error {
+	s.shutdownMu.Lock()
+	defer s.shutdownMu.Unlock()
 	s.operationMu.Lock()
 	defer s.operationMu.Unlock()
 	return s.retireSelectedContextsLocked(ctx)

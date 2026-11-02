@@ -315,7 +315,8 @@ func TestReadinessShutdownCompletionKeepsStrictAdmissionAndIndependentFailures(t
 				}
 			case mode == "before_verification_read" || strings.HasPrefix(mode, "attempt_") || mode == "timer_projection" || mode == "timer_projection_mixed" || mode == "progress_cancellation":
 				key := dynamicFlowRuntimeReadinessKey{runID: req.TriggerEvent.RunID(), instancePath: req.Instance.InstancePath}
-				if shutdownErr != nil || !isReadinessShutdownCompletion(attempt.err, key, attempt) {
+				graceExpired := verificationCtx != nil
+				if graceExpired && !errors.Is(shutdownErr, context.DeadlineExceeded) || !graceExpired && shutdownErr != nil || !isReadinessShutdownCompletion(attempt.err, key, attempt) {
 					t.Fatalf("owned read cancellation became terminal: attempt=%v shutdown=%v", attempt.err, shutdownErr)
 				}
 			default:

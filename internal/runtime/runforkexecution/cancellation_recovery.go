@@ -106,14 +106,14 @@ func (o SelectedContractExecutionOwner) beginSelectedCancellationInspection(ctx 
 	contexts.mu.Lock()
 	reserved := contexts.entries[reservation]
 	requestRecovery := reserved != nil && !reserved.retiring && reserved.recoveryReserved && reserved.binding == request.Entry.Binding
-	if contexts.retired || (!contexts.recovering && !requestRecovery) || contexts.process != op.process {
+	if contexts.retired || contexts.draining || (!contexts.recovering && !requestRecovery) || contexts.process != op.process {
 		contexts.mu.Unlock()
 		return p, errors.Join(errors.New("selected cancellation inspection lost startup ownership"), op.Finish())
 	}
 	if contexts.entries == nil {
 		contexts.entries = make(map[*selectedContractOperation]*selectedForkContext)
 	}
-	contexts.entries[op] = &selectedForkContext{operation: op, binding: request.Entry.Binding, done: make(chan struct{})}
+	contexts.entries[op] = &selectedForkContext{operation: op, binding: request.Entry.Binding, done: make(chan struct{}), orchestrationDone: make(chan struct{})}
 	contexts.mu.Unlock()
 	fact, ok := correlation.SourceArtifactFactFromContext(ctx)
 	if !ok || fact.BundleHash() != request.Entry.BundleHash {
