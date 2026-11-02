@@ -27,6 +27,16 @@ const (
 
 func TestSwarmTestSignalTerminatesProcessTreeAndPreservesResult(t *testing.T) {
 	if os.Getenv(signalFixtureEnv) == "1" {
+		bounded := false
+		for _, argument := range os.Args[1:] {
+			if raw, ok := strings.CutPrefix(argument, "-test.timeout="); ok {
+				limit, err := time.ParseDuration(raw)
+				bounded = err == nil && limit > 0
+			}
+		}
+		if !bounded {
+			t.Fatal("real go test child lacks its independent timeout")
+		}
 		pidPath := os.Getenv(signalFixturePIDEnv)
 		if err := publishSignalFixturePID(pidPath, os.Getpid(), nil); err != nil {
 			t.Fatal(err)
