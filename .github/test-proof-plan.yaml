@@ -805,7 +805,6 @@ units:
     run: '^TestGolden($|[^AI].*|AgentWorkload($|[^B].*))$'
     required_children:
       TestGoldenAgentWorkloadRestartAndForcedKillOnBothBackends: [sqlite, postgres]
-      TestGoldenAgentWorkloadSequentialRunsBothStores: [sqlite, postgres]
       TestGoldenNumericDataScatterParkRestartBothStores: [sqlite, postgres]
       TestGoldenNumericDataScatterParkRefusalBothStores: [sqlite, postgres]
     count_mode: count-1

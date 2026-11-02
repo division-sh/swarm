@@ -21,6 +21,7 @@ import (
 	"path/filepath"
 	"runtime"
 	"sort"
+	"strconv"
 	"strings"
 	"syscall"
 	"testing"
@@ -1180,9 +1181,11 @@ target:
 			return invocation, fmt.Errorf("Claude provider directory is not isolated")
 		}
 	}
-	if len(env) != wantEnv || env["SWARM_TOOL_GATEWAY_URL"] != releaseE2ERawMCPURL ||
-		env["CLAUDE_CODE_OAUTH_TOKEN"] != releaseE2EOAuthToken {
+	if len(env) != wantEnv || env["CLAUDE_CODE_OAUTH_TOKEN"] != releaseE2EOAuthToken {
 		return invocation, fmt.Errorf("Claude Docker exec environment is incomplete or invalid")
+	}
+	if _, err := hostReachableMCPURL(env["SWARM_TOOL_GATEWAY_URL"]); err != nil {
+		return invocation, err
 	}
 	if len(invocation.commandArgs) == 0 || invocation.commandArgs[0] != "claude" {
 		return invocation, fmt.Errorf("Docker exec command is not the configured Claude CLI")
@@ -1225,6 +1228,9 @@ target:
 	rawMCPURL, hostMCPURL, headers, err := validateReleaseMCPConfig(dockerOptionValue(invocation.commandArgs, "--mcp-config"))
 	if err != nil {
 		return invocation, err
+	}
+	if rawMCPURL != env["SWARM_TOOL_GATEWAY_URL"] {
+		return invocation, fmt.Errorf("Claude gateway environment and MCP configuration disagree")
 	}
 	invocation.rawMCPURL = rawMCPURL
 	invocation.hostMCPURL = hostMCPURL
@@ -1757,16 +1763,18 @@ func hostReachableMCPURL(raw string) (string, error) {
 	if err != nil {
 		return "", err
 	}
+	port, portErr := strconv.Atoi(parsed.Port())
 	if parsed.Scheme != "http" ||
 		parsed.Hostname() != "host.docker.internal" ||
-		parsed.Port() != "8082" ||
+		portErr != nil || port < 1 || port > 65535 ||
+		(port != 8082 && os.Getenv(releaseResourceReadEnv) != "1") ||
 		parsed.Path != "/mcp" ||
 		parsed.RawQuery != "" ||
 		parsed.Fragment != "" ||
 		parsed.User != nil {
 		return "", fmt.Errorf("runtime MCP URL %q is not the default container-reachable endpoint", raw)
 	}
-	return releaseE2EHostMCPURL, nil
+	return fmt.Sprintf("http://127.0.0.1:%d/mcp", port), nil
 }
 
 func splitAllowedTools(raw string) []string {

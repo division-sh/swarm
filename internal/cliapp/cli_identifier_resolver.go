@@ -118,7 +118,12 @@ func cliIdentifierCandidates(ctx context.Context, client *cliAPIClient, policy c
 			return nil, err
 		}
 		out := make([]cliIdentifierCandidate, 0, len(result.Agents))
+		seen := make(map[string]struct{}, len(result.Agents))
 		for _, agent := range result.Agents {
+			if _, found := seen[agent.AgentID]; found {
+				continue
+			}
+			seen[agent.AgentID] = struct{}{}
 			out = append(out, cliIdentifierCandidate{ID: agent.AgentID, Status: agent.Status, StatusFamily: cliHumanCodeAgentStatus})
 		}
 		return out, nil

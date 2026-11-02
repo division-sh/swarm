@@ -107,7 +107,7 @@ func TestClaudeResourceReadSupportedServeRestart(t *testing.T) {
 				"source_run_id": landing.RunID, "bundle_hash": hash, "idempotency_key": "resource-read-pinned-fixture",
 				"data_pin_overrides": []any{map[string]any{"declaration": declaration, "version_id": imported.Candidate.VersionID}},
 			}, &fork); err != nil || fork.RunID == "" || fork.RunID == landing.RunID || len(fork.Pins) != 1 || fork.Pins[0].VersionID != imported.Candidate.VersionID {
-				t.Fatalf("public creation-pin fork: %+v error=%v\n%s", fork, err, process.output.String())
+				t.Fatalf("public creation-pin fork: %+v error=%v\n%s\n%s", fork, err, process.output.String(), fakeDockerLogText(t, fakeRoot))
 			}
 			runID := fork.RunID
 			payload, err := os.ReadFile(filepath.Join(root, "payload.json"))
