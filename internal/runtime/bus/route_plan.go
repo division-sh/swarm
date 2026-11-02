@@ -485,19 +485,6 @@ func routePlanLiveRecipientsFromManifest(manifest deliveryRecipientManifest) []R
 		persisted[recipient] = struct{}{}
 	}
 	candidates := normalizeDeliveryRecipientCandidates(manifest.LiveRecipients)
-	if len(candidates) == 0 {
-		for _, recipient := range uniqueStrings(manifest.Recipients) {
-			_, persist := persisted[recipient]
-			if persist {
-				continue
-			}
-			candidates = append(candidates, deliveryRecipientCandidate{
-				ID:                recipient,
-				PersistAsDelivery: false,
-				LiveAuthority:     liveRecipientAuthorityIdentity,
-			})
-		}
-	}
 	out := make([]RoutePlanLiveRecipient, 0, len(candidates))
 	for _, candidate := range candidates {
 		recipient := candidate.ID

@@ -159,11 +159,7 @@ func (p deliveryPlanner) validateRootConstructionReuse(ctx context.Context, even
 	if err != nil {
 		return err
 	}
-	stage := ""
-	if instance.StageDefined {
-		stage = instance.CurrentState
-	}
-	if err := pipeline.NewDeliveryTargetAvailability(stage, instance.Status, !instance.TerminatedAt.IsZero()).Validate(p.recipientPolicy.semanticSource, observed.Identity().TemplateID); err != nil {
+	if err := workflowInstanceTargetAvailability(instance).Validate(p.recipientPolicy.semanticSource, observed.Identity().TemplateID); err != nil {
 		if refusal, ok := err.(*pipeline.NoHandlerError); ok {
 			refusal.FlowInstance = instance.StorageRef
 		}

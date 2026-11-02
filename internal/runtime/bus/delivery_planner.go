@@ -110,7 +110,6 @@ func (r deliveryRouteResolver) resolve(ctx context.Context, evt events.Event, so
 
 type deliveryRecipientManifest struct {
 	LiveRecipients      []deliveryRecipientCandidate
-	Recipients          []string
 	PersistedRecipients []string
 	DeliveryRoutes      []events.DeliveryRoute
 	TargetFailure       runtimepinrouting.TargetFailure
@@ -153,12 +152,11 @@ func (p deliveryRecipientPolicy) evaluate(ctx context.Context, evt events.Event,
 		}
 		manifest := deliveryRecipientManifest{
 			LiveRecipients:      liveRecipients,
-			Recipients:          deliveryRecipientIDs(recipients),
 			PersistedRecipients: deliveryRecipientIDs(persistedRecipients),
 			DeliveryRoutes:      routes,
 			AgentLifecycles:     agentLifecycleAdmissionsForCandidates(persistedRecipients),
 		}
-		if targetDescriptorsOK && len(eventDeliveryTargetRoutes(evt)) > 0 && len(manifest.Recipients) == 0 {
+		if targetDescriptorsOK && len(eventDeliveryTargetRoutes(evt)) > 0 && len(deliveryRecipientIDs(manifest.LiveRecipients)) == 0 {
 			manifest.TargetFailure = targetDeliveryFailure(evt, targetDescriptors, nil)
 		}
 		return manifest, nil
@@ -553,7 +551,7 @@ func (p deliveryPlanner) PlanDirect(ctx context.Context, evt events.Event, recip
 		"requested_recipients":       append([]string(nil), requested...),
 		"requested_recipients_count": len(requested),
 	}
-	if filtered := filteredRecipients(requested, manifest.Recipients); len(filtered) > 0 {
+	if filtered := filteredRecipients(requested, deliveryRecipientIDs(manifest.LiveRecipients)); len(filtered) > 0 {
 		routePlan.ExtraDetail["filtered_out_recipients"] = filtered
 		routePlan.ExtraDetail["filtered_out_recipients_count"] = len(filtered)
 	}
@@ -638,7 +636,6 @@ func exactDirectRecipientManifest(
 	persisted := persistedDeliveryRecipientCandidates(recipients)
 	return deliveryRecipientManifest{
 		LiveRecipients:      recipients,
-		Recipients:          deliveryRecipientIDs(recipients),
 		PersistedRecipients: deliveryRecipientIDs(persisted),
 	}
 }
@@ -950,14 +947,12 @@ func filterDeliveryRecipientCandidates(
 	if implicitLocal {
 		eventEntityID = localSource.route.EntityID
 	}
-	allowed := make([]string, 0, len(recipients))
 	allowedCandidates := make([]deliveryRecipientCandidate, 0, len(recipients))
 	persisted := make([]string, 0, len(recipients))
 	deliveryRoutes := make([]events.DeliveryRoute, 0, len(recipients))
 	root := rootExecutionCoordinate(source, evt.RunID())
 	for _, recipient := range recipients {
 		if !recipient.PersistAsDelivery {
-			allowed = append(allowed, recipient.ID)
 			allowedCandidates = append(allowedCandidates, recipient)
 			continue
 		}
@@ -1000,7 +995,6 @@ func filterDeliveryRecipientCandidates(
 			if constructing {
 				scoped.AgentLifecycle = agentLifecycleAdmissionMaterializingFlow
 			}
-			allowed = append(allowed, scoped.ID)
 			allowedCandidates = append(allowedCandidates, scoped)
 			persisted = append(persisted, scoped.ID)
 			admitted, err := projection.admitAgentTarget(evt, RoutePlanDeliveryIntent{
@@ -1016,7 +1010,6 @@ func filterDeliveryRecipientCandidates(
 	persisted = uniqueStrings(persisted)
 	manifest := deliveryRecipientManifest{
 		LiveRecipients:      normalizeDeliveryRecipientCandidates(allowedCandidates),
-		Recipients:          uniqueStrings(allowed),
 		PersistedRecipients: persisted,
 		DeliveryRoutes:      events.NormalizeDeliveryRoutes(deliveryRoutes),
 		AgentLifecycles:     agentLifecycleAdmissionsForCandidates(allowedCandidates),
