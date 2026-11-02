@@ -4221,9 +4221,9 @@ func TestRoutePlanNormalizationPreservesAuthorityState(t *testing.T) {
 	if ordinary.CanonicalRouteOwnerMatched() || ordinary.AuthorityOwner != routeIntentProducerOrdinary {
 		t.Fatalf("ordinary production lost first-owner recording or acquired admission: %+v", ordinary)
 	}
-	retained := RoutePlan{AuthorityOwner: routeIntentProducerConcreteNodeRoute}
+	retained := RoutePlan{AuthorityOwner: routeIntentProducerConnectRoutePlan}
 	retained.recordOrdinaryRouteProducer()
-	if retained.AuthorityOwner != routeIntentProducerConcreteNodeRoute || retained.CanonicalRouteOwnerMatched() {
+	if retained.AuthorityOwner != routeIntentProducerConnectRoutePlan || retained.CanonicalRouteOwnerMatched() {
 		t.Fatalf("ordinary recording replaced an existing owner or acquired admission: %+v", retained)
 	}
 	routePlan.recordOrdinaryRouteProducer()

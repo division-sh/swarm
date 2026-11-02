@@ -1165,8 +1165,8 @@ func TestDeliveryPlanner_NoTargetConcreteRoutedNodePersistsSemanticNodeRoute(t *
 		t.Fatalf("route plan delivery intents = %d, want %d", got, want)
 	}
 	intent := plan.DeliveryIntents[0]
-	if intent.Producer != routeIntentProducerConcreteNodeRoute {
-		t.Fatalf("route plan delivery intent = %#v, want concrete route-table semantic node source", intent)
+	if intent.Producer != routeIntentProducerOrdinary {
+		t.Fatalf("route plan delivery intent = %#v, want ordinary route-table semantic node source", intent)
 	}
 }
 
@@ -1536,6 +1536,63 @@ func TestDeliveryPlanner_StaticRootSameInstanceRouteUsesSelectedRunOwner(t *test
 	}
 	if got := plan.DeliveryIntents[0].Producer; got != routeIntentProducerOrdinary {
 		t.Fatalf("delivery intent producer = %d, want %d", got, routeIntentProducerOrdinary)
+	}
+	intent := plan.DeliveryIntents[0]
+	subscriber := Subscriber{Recipient: intent.Recipient, Path: want.FlowID, handlerNode: intent.Handler.Node(), targetHandler: intent.Handler}
+	key := newRoutedSubscriberAuthorityKey(planner.recipientPolicy.semanticSource, plan.Event, subscriber)
+	if !resolvedSelectedRunRootIntentMatchesSubscriber(intent, key, subscriber, want) {
+		t.Fatal("exact selected-root receipt refused its admitted node and handler")
+	}
+	otherNode := testRootNode(t, "other-node")
+	for _, test := range []struct {
+		name   string
+		change func(*RoutePlanDeliveryIntent, *routedSubscriberAuthorityKey)
+	}{
+		{"missing receipt", func(i *RoutePlanDeliveryIntent, _ *routedSubscriberAuthorityKey) {
+			i.TargetOwnership = events.DeliveryTargetOwnership{}
+		}},
+		{"foreign receipt", func(i *RoutePlanDeliveryIntent, _ *routedSubscriberAuthorityKey) {
+			foreign := want
+			foreign.EntityID = eventtest.UUID("foreign-root-owner")
+			i.TargetOwnership = events.MustExistingEntityTarget(foreign)
+		}},
+		{"wrong run", func(i *RoutePlanDeliveryIntent, _ *routedSubscriberAuthorityKey) {
+			i.TargetBlueprint.FlowInstance = eventtest.UUID("foreign-root-run")
+			i.TargetOwnership = events.MustExistingEntityTarget(i.TargetBlueprint)
+		}},
+		{"wrong flow", func(i *RoutePlanDeliveryIntent, _ *routedSubscriberAuthorityKey) {
+			i.TargetBlueprint.FlowID = "foreign"
+			i.TargetOwnership = events.MustExistingEntityTarget(i.TargetBlueprint)
+		}},
+		{"missing root admission", func(_ *RoutePlanDeliveryIntent, k *routedSubscriberAuthorityKey) {
+			k.root = semanticview.RootExecutionCoordinate{}
+		}},
+		{"wrong node", func(i *RoutePlanDeliveryIntent, k *routedSubscriberAuthorityKey) {
+			i.Recipient = events.MustNodeDeliveryRecipient(otherNode)
+			k.recipient = i.Recipient
+		}},
+		{"missing handler", func(_ *RoutePlanDeliveryIntent, k *routedSubscriberAuthorityKey) {
+			k.handler = runtimepipeline.DeliveryTargetHandler{}
+		}},
+		{"wrong semantic path", func(_ *RoutePlanDeliveryIntent, k *routedSubscriberAuthorityKey) { k.path = "foreign" }},
+	} {
+		t.Run(test.name, func(t *testing.T) {
+			changed, changedKey := intent, key
+			test.change(&changed, &changedKey)
+			if resolvedSelectedRunRootIntentMatchesSubscriber(changed, changedKey, subscriber, changed.TargetBlueprint) {
+				t.Fatal("selected-root exception accepted mismatched authority")
+			}
+		})
+	}
+	changed := intent
+	changed.Recipient = events.MustNodeDeliveryRecipient(otherNode)
+	if routePlanIntentAuthorizesRoutedSubscriber(changed, key, subscriber) {
+		t.Fatal("outer node-recipient fence was bypassed")
+	}
+	changed = intent
+	changed.Handler = changed.Handler.ForEvent("foreign.event")
+	if routePlanIntentAuthorizesRoutedSubscriber(changed, key, subscriber) {
+		t.Fatal("outer localized-handler fence was bypassed")
 	}
 }
 

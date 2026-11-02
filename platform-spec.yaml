@@ -2360,7 +2360,6 @@ contract_formats:
           canonical_code_owner: internal/runtime/bus.routeIntentProducer
           producers:
           - ordinary
-          - concrete_node_route
           - connect_route_plan
           rule: |
             EventBus RoutePlan producer identity MUST be represented by a closed
@@ -2374,9 +2373,12 @@ contract_formats:
             not by itself create delivery authority, override
             the canonical-admission decision, or permit lower-precedence repair after a
             canonical matched or canonical failed-closed route decision.
-            Subscription, direct, recipient-materializer, join, explicit-target
-            and root-node paths share the ordinary internal producer role;
-            concrete-node and connect roles retain their distinct typed identities.
+            Subscription, direct, recipient-materializer, join, explicit-target,
+            root-node and concrete-node paths share the ordinary internal producer
+            role; the compiled connect role retains its distinct typed identity.
+            A selected-root semantic-path exception requires valid exact target
+            ownership, the current root flow/run coordinate and matching node
+            and localized handler, never a producer tag alone.
             Account-unclaimed refusal still explicitly marks canonical admission
             and typed failure and clears all executable projections; an ordinary
             producer identity alone grants no canonical admission.

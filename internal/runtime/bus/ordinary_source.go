@@ -218,7 +218,7 @@ func (s ordinaryPublicationSource) nodeIntents(source semanticview.Source, local
 		}
 	}
 	out := routePlanDeliveryIntentsFromRoutes(rootRoutes, routeIntentProducerOrdinary)
-	out = append(out, routePlanDeliveryIntentsFromRoutes(concreteRoutes, routeIntentProducerConcreteNodeRoute)...)
+	out = append(out, routePlanDeliveryIntentsFromRoutes(concreteRoutes, routeIntentProducerOrdinary)...)
 	return append(out, routePlanDeliveryIntentsFromRoutes(normalizePlannedDeliveryRoutes(targeted), routeIntentProducerOrdinary)...)
 }
 
