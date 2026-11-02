@@ -32,7 +32,8 @@ func TestServedCompiledTransitionSelectedCarrierEvidenceOnBothStores(t *testing.
 					for _, choice := range []string{"alpha", "beta"} {
 						t.Run(handler+"/"+choice, func(t *testing.T) {
 							key := handler + "/" + choice
-							seed := requireServedEventPublishRPCResult(t, rt.Endpoint, map[string]any{"event_name": "work.seeded", "bundle_hash": rt.BundleHash, "payload": map[string]any{"seed": true}, "idempotency_key": key + "/seed"})
+							runID := seedServedPublicationRun(t, rt.Runtime)
+							seed := requireServedEventPublishRPCResult(t, rt.Endpoint, map[string]any{"event_name": "work.seeded", "run_id": runID, "bundle_hash": rt.BundleHash, "payload": map[string]any{"seed": true}, "idempotency_key": key + "/seed"})
 							var rootEventOwner any = rt.SQLite
 							if rt.Postgres != nil {
 								rootEventOwner = rt.Postgres
@@ -94,7 +95,7 @@ func TestServedCompiledTransitionSelectedCarrierEvidenceOnBothStores(t *testing.
 							if duplicate.EventID != selected.EventID || lifecycleStoredSnapshot(t, rt, seed.RunID) != before {
 								t.Fatal("duplicate changed selected transition")
 							}
-							requireServedOKJSONRPC(t, rt.Endpoint, "run.pause", map[string]any{"run_id": seed.RunID, "idempotency_key": key + "/pause"})
+							requireServedRunStatus(t, rt.Endpoint, seed.RunID, "completed")
 						})
 					}
 				}
