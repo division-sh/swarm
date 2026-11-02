@@ -111,7 +111,7 @@ func runGeneratedToolEvidence(t *testing.T, backend servedparity.Backend, cell, 
 				return llmapi.Reply{ID: "synthetic-markup", Model: "deepseek-flash", Text: "We open at nine. </tool_call>"}, nil
 			}
 			if cell == "argument_free" && request.Number == 1 {
-				return llmapi.Reply{ID: "synthetic-read", Model: "deepseek-flash", Tools: []llmapi.ToolCall{{ID: "synthetic-read", Name: "read_evidence", Arguments: json.RawMessage(`{}`)}}}, nil
+				return llmapi.Reply{ID: "synthetic-read", Model: "deepseek-flash", Tools: []llmapi.ToolCall{{ID: "synthetic-read", Name: "read_state", Arguments: json.RawMessage(`{}`)}}}, nil
 			}
 			arguments, _ := json.Marshal(map[string]any{"sequence": 1, "value": generatedToolEvidenceValue(cell)})
 			return llmapi.Reply{ID: "synthetic-report", Model: "deepseek-flash", Tools: []llmapi.ToolCall{{ID: "synthetic-report", Name: "emit_evidence_completed", Arguments: arguments}}}, nil
@@ -356,9 +356,7 @@ func writeGeneratedToolEvidenceSource(t *testing.T, cell string) string {
 		valueType = []string{"string"}
 	}
 	write("worker/events.yaml", map[string]any{"evidence.completed": map[string]any{"sequence": "integer", "value": valueType}})
-	write("worker/entities.yaml", map[string]any{"evidence": map[string]any{
-		"_description": "The title is the business summary.", "conversation": "string", "title": map[string]any{"type": "string", "initial": "synthetic value"},
-	}})
+	writeWorkflowValidationFixtureFile(t, filepath.Join(root, "worker/state.yaml"), "conversation: text\ntitle: \"synthetic value\"\n")
 	write("worker/agents.yaml", map[string]any{"witness": map[string]any{
 		"role": "evidence", "model": "regular", "memory": true, "subscriptions": []string{"evidence.requested"}, "emit_events": []string{"evidence.completed"},
 		"intent": map[string]any{"inline": "Resolve the synthetic task and publish evidence.completed with the requested sequence and value. For a record-reading task, inspect the current evidence record first."},
@@ -451,13 +449,13 @@ func (r *generatedToolEvidenceRecorder) requireSurface(t *testing.T, cell string
 			if strings.Contains(tool.Function.Description, "ask_human") {
 				t.Error("delivered description names ungranted ask_human")
 			}
-			if strings.HasPrefix(tool.Function.Name, "read_evidence_") {
+			if strings.HasPrefix(tool.Function.Name, "read_state_") {
 				t.Error("per-field read remains on the generated surface")
 			}
-			if tool.Function.Name == "read_evidence" && tool.Function.Description != "Read the fields of this evidence\nThe title is the business summary." {
-				t.Error("read description does not preserve its model-facing verb and author line")
+			if tool.Function.Name == "read_state" && tool.Function.Description != "Read the fields of this state" {
+				t.Error("read description does not preserve its model-facing verb and state name")
 			}
-			if tool.Function.Name == "read_evidence" {
+			if tool.Function.Name == "read_state" {
 				_, present := tool.Function.Parameters["properties"]
 				properties, ok := tool.Function.Parameters["properties"].(map[string]any)
 				if (present && (!ok || len(properties) != 0)) || tool.Function.Parameters["type"] != "object" || tool.Function.Parameters["additionalProperties"] != false {
@@ -506,7 +504,7 @@ func (r *generatedToolEvidenceRecorder) requireSurface(t *testing.T, cell string
 			if !granted || runtimetools.ValidatePayloadAgainstSchema(schema, arguments) != nil {
 				t.Fatal("provider returned an ungranted call or invalid argument shape")
 			}
-			read = read || call.Function.Name == "read_evidence"
+			read = read || call.Function.Name == "read_state"
 			emitted = emitted || call.Function.Name == "emit_evidence_completed"
 		}
 	}
