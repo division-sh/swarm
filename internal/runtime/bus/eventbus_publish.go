@@ -2348,7 +2348,7 @@ func (eb *EventBus) planSubscribedRoutePlanWithPlanner(ctx context.Context, evt 
 	var plan RoutePlan
 	err = eb.withPublicationInstancePlanning(ctx, evt, planner, func(ctx context.Context, bounded deliveryPlanner) error {
 		var err error
-		plan, err = bounded.planForRecipientMaterialization(ctx, evt)
+		plan, err = bounded.planRecipients(ctx, evt)
 		return err
 	})
 	if err != nil {

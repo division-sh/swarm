@@ -91,6 +91,32 @@ var deliveryPlannerHandlerFixtures = map[string]deliveryPlannerHandlerFixture{
 	"grandchild-worker":      {flowID: "child/grandchild", path: "child/grandchild", event: "micro.started"},
 }
 
+func newDeliveryPlanner(routeResolver deliveryRouteResolver, recipientPolicy deliveryRecipientPolicy, connectPlanners ...connectRoutePlanResolver) deliveryPlanner {
+	planner := deliveryPlanner{
+		routeResolver:   routeResolver,
+		recipientPolicy: recipientPolicy,
+	}
+	if len(connectPlanners) > 0 {
+		planner.connectPlanner = connectPlanners[0]
+	}
+	planner.recipientPolicy.instances = planner.connectPlanner.lifecycle.index
+	return planner
+}
+
+func (p deliveryPlanner) Plan(ctx context.Context, evt events.Event) (RoutePlan, error) {
+	if err := validateEventRootTargetCoordinates(p.recipientPolicy.semanticSource, evt); err != nil {
+		return RoutePlan{}, err
+	}
+	plan, err := p.planRecipients(ctx, evt)
+	if err != nil {
+		return RoutePlan{}, err
+	}
+	if err := validateRoutedNodeDeliveryAuthority(p.recipientPolicy.semanticSource, evt, plan.RoutedRecipients, plan); err != nil {
+		return RoutePlan{}, err
+	}
+	return plan, nil
+}
+
 func newDeliveryPlannerWithHandlers(t testing.TB, resolver deliveryRouteResolver, policy deliveryRecipientPolicy, connectPlanners ...connectRoutePlanResolver) deliveryPlanner {
 	t.Helper()
 	source := deliveryPlannerHandlerSource(t, policy.requireTargetOwners)

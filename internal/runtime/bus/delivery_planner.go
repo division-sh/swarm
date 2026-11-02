@@ -187,45 +187,14 @@ type deliveryPlanner struct {
 	preparedOwners  *publicationTargetOwnerEvidence
 }
 
-func newDeliveryPlanner(routeResolver deliveryRouteResolver, recipientPolicy deliveryRecipientPolicy, connectPlanners ...connectRoutePlanResolver) deliveryPlanner {
-	planner := deliveryPlanner{
-		routeResolver:   routeResolver,
-		recipientPolicy: recipientPolicy,
-	}
-	if len(connectPlanners) > 0 {
-		planner.connectPlanner = connectPlanners[0]
-	}
-	planner.recipientPolicy.instances = planner.connectPlanner.lifecycle.index
-	return planner
-}
-
-func (p deliveryPlanner) Plan(ctx context.Context, evt events.Event) (RoutePlan, error) {
-	if err := validateEventRootTargetCoordinates(p.recipientPolicy.semanticSource, evt); err != nil {
-		return RoutePlan{}, err
-	}
-	plan, err := p.planForRecipientMaterialization(ctx, evt)
-	if err != nil {
-		return RoutePlan{}, err
-	}
-	if err := validateRoutedNodeDeliveryAuthority(p.recipientPolicy.semanticSource, evt, plan.RoutedRecipients, plan); err != nil {
-		return RoutePlan{}, err
-	}
-	return plan, nil
-}
-
-// planForRecipientMaterialization returns a provisional plan; publish callers
+// planRecipients returns a provisional plan; publish callers
 // must validate routed-node authority after adding materialized delivery intents.
-func (p deliveryPlanner) planForRecipientMaterialization(ctx context.Context, evt events.Event) (RoutePlan, error) {
+func (p deliveryPlanner) planRecipients(ctx context.Context, evt events.Event) (RoutePlan, error) {
 	routePlan := newRoutePlan(evt)
 	if evt.Type() == events.EventType("platform.runtime_log") {
 		return routePlan, nil
 	}
-	return p.planRecipients(ctx, evt)
-}
-
-func (p deliveryPlanner) planRecipients(ctx context.Context, evt events.Event) (RoutePlan, error) {
 	p.recipientPolicy.instances = p.connectPlanner.lifecycle.index
-	routePlan := newRoutePlan(evt)
 	ctx = runtimecorrelation.WithInboundEvent(ctx, evt)
 	ctx = withConnectRoutePlanPreview(ctx)
 	rootPlans, err := p.prepareRootConstruction(ctx, evt)
@@ -735,22 +704,22 @@ func cloneAnyMap(in map[string]any) map[string]any {
 }
 
 func (eb *EventBus) newEventBusDeliveryPlanner() deliveryPlanner {
-	planner := newDeliveryPlanner(
-		deliveryRouteResolver{
+	return deliveryPlanner{
+		routeResolver: deliveryRouteResolver{
 			resolveRoutedSubscribers:            eb.connectRoutePlanner.resolvePubsubSubscribers,
 			resolveSubscribedRecipients:         eb.resolveSubscribedRecipientsForPlanning,
 			resolveRoutedNodeInternalRecipients: eb.resolveInternalRecipientsForRoutedNodePlanning,
 			describeSubscribersForEvent:         eb.describeSubscribersForEvent,
 		},
-		deliveryRecipientPolicy{
+		recipientPolicy: deliveryRecipientPolicy{
 			loadActiveAgentDescriptors: eb.activeAgentDescriptors,
 			loadTargetOwnerCandidates:  eb.targetOwnerCandidates,
 			semanticSource:             eb.semanticSource,
 			requireTargetOwners:        !eb.ephemeral,
+			instances:                  eb.connectRoutePlanner.lifecycle.index,
 		},
-		eb.connectRoutePlanner,
-	)
-	return planner
+		connectPlanner: eb.connectRoutePlanner,
+	}
 }
 
 func normalizeDeliveryRecipientCandidates(in []deliveryRecipientCandidate) []deliveryRecipientCandidate {
