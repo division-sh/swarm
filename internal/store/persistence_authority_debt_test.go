@@ -1137,6 +1137,11 @@ func debtValidateCollectorIdentity(base, current string, trusted, head authority
 		debtSitesEqual(head.Sites, trusted.Sites) {
 		return nil // #2903/6584235489: exact Darwin classification; baseline sites are unchanged.
 	}
+	if base == debtTestProcessCollectorTo && trusted.Collector == base &&
+		current == debtR77PrivateBridgeCollectorTo && reviewedTransition == current && head.Collector == current &&
+		debtSitesEqual(head.Sites, trusted.Sites) {
+		return nil // #2881: exact collector continuation; no baseline or permission change.
+	}
 	if base == debtW4ComparisonCollectorTo && trusted.Collector == base &&
 		current == debtCatalogRuntimeRowsLandedCollectorTo && reviewedTransition == current && head.Collector == current &&
 		debtSitesEqual(head.Sites, trusted.Sites) {
