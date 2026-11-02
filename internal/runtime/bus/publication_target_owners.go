@@ -254,9 +254,6 @@ func (p publicationTargetOwnerEvidence) resolveRoutePlan(plan RoutePlan) (RouteP
 	if err := p.bindReceiverMaterializations(&plan); err != nil {
 		return RoutePlan{}, err
 	}
-	if err := completeReceiverInitializations(&plan); err != nil {
-		return RoutePlan{}, err
-	}
 	if err := validateConnectIntentReceivers(plan, p.source); err != nil {
 		return RoutePlan{}, err
 	}
