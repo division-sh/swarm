@@ -789,7 +789,7 @@ func (pc *PipelineCoordinator) executeNodeHandlerPlanResultWithEmissionPlan(ctx 
 	claimOwned = claimed
 	recoveryClaim := claimed
 	if owner, ok := pc.workOwner.(*worklifetime.RuntimeOccurrence); !claimed && ok {
-		lease, err := owner.BeginDispatch(ctx)
+		lease, err := owner.BeginContinuationDispatch(ctx)
 		if err != nil {
 			return false, runtimepipelineobligation.Continue(), err
 		}

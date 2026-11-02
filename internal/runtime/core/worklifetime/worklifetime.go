@@ -108,6 +108,9 @@ func (g *gate) beginAcceptedDescendant(parent context.Context, dispatch bool) (*
 	if ancestor.settled || ancestor.gate != g {
 		return g.beginOwned(parent, true, nil, false, dispatch)
 	}
+	// A standing scanner cannot start fresh work after dispatch closes. A live
+	// transient parent already owns its firing/publication and its descendants.
+	dispatch = dispatch && !ancestor.transient
 	return g.beginOwned(parent, true, ancestor, false, dispatch)
 }
 
@@ -971,8 +974,8 @@ func (r *RuntimeOccurrence) BeginDispatch(ctx context.Context) (*Lease, error) {
 	return r.occurrence.gate.beginOwned(WithOccurrence(WithProcess(ctx, r.process), r), true, nil, false, true)
 }
 
-// BeginContinuationDispatch seals fresh readiness scans, without withdrawing
-// the separate accepted-publication handoff from its existing ancestor.
+// BeginContinuationDispatch seals fresh scans, while preserving descendants of
+// an exact live transient parent such as an already-firing timer callback.
 func (r *RuntimeOccurrence) BeginContinuationDispatch(ctx context.Context) (*Lease, error) {
 	if r == nil {
 		return nil, errors.New("runtime occurrence is required")
