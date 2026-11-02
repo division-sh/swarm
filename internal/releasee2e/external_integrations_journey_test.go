@@ -178,6 +178,15 @@ func runExternalMCPPublicJourneyBothStores(t *testing.T, unknownName bool) {
 					t.Fatalf("checked serve shutdown left owned stdio helpers before cleanup: %v %v", live, err)
 				}
 			}
+			finalCalls := 0
+			for _, call := range remoteCalls() {
+				if call.Method == "tools/call" {
+					finalCalls++
+				}
+			}
+			if finalCalls != wantCalls || len(model.Requests()) != 2 {
+				t.Fatalf("joined shutdown observed late MCP/model work: calls=%d requests=%d", finalCalls, len(model.Requests()))
+			}
 			requireConnectorSecretsAbsent(t, process.output.String(), secrets)
 			t.Logf("real binary MCP discovery/agent/external-call/public-result; backend=%s transport=%s; elapsed=%s (shared build excluded)", backend, transport, time.Since(started))
 		})
