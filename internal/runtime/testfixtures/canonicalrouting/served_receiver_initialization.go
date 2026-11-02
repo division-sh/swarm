@@ -11,21 +11,19 @@ func CopyServedReceiverInitialization(t testing.TB) string {
 		"account/manifest.yaml": "version: 1.0.0\nplatform_version: '*'\n",
 		"manifest.yaml":         "version: 1.0.0\nplatform_version: '*'\n",
 		"schema.yaml": `# fixture: served-receiver-initialization
-pins:
-  inputs:
-    - work.requested
-  outputs:
-    - work.ready
+inputs:
+  - work.requested
+outputs:
+  - work.ready
 connect:
   - {event: work.ready, from: ., to: account, resolution: select-or-create}
 `,
-		"types.yaml": `types:
-  InitializationValues:
-    count: integer?
-    label: text?
-    ratio: numeric?
-    active: boolean?
-    attributes: json?
+		"types.yaml": `InitializationValues:
+  count: integer?
+  label: text?
+  ratio: numeric?
+  active: boolean?
+  attributes: json?
 `,
 		"events.yaml": `work.requested:
   account_id: text
@@ -45,9 +43,8 @@ work.ready:
 `,
 		"account/schema.yaml": `# fixture: account
 instance: account_id
-pins:
-  inputs:
-    - work.ready
+inputs:
+  - work.ready
 `,
 		"account/state.yaml": `account_id: text
 values: InitializationValues

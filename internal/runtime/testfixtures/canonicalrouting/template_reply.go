@@ -44,7 +44,7 @@ func CopyTemplateReplyWithInertFrom(t testing.TB) string {
 	t.Helper()
 	root := CopyExample(t, TemplateReply)
 	applyClosedReplacement(t, filepath.Join(root, "requester", "schema.yaml"),
-		"    - provider.replied", "    - {event: provider.replied, from: payload.ignored}")
+		"  - provider.replied", "  - {event: provider.replied, from: payload.ignored}")
 	return root
 }
 

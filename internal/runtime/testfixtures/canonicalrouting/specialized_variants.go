@@ -345,7 +345,7 @@ func CopyScenarioSetup(t testing.TB) string {
 	removeInheritedScenarios(t, root)
 	removeClosedVariantFiles(t, root, "state.yaml", "events.yaml", "nodes.yaml")
 
-	writeClosedVariantFile(t, root, "schema.yaml", "# fixture: scenario-setup-fixture\nstages:\n  waiting: {}\n  ready: {final: true}\npins:\n  inputs:\n    - opco.product_review_requested\n")
+	writeClosedVariantFile(t, root, "schema.yaml", "# fixture: scenario-setup-fixture\nstages:\n  waiting: {}\n  ready: {final: true}\ninputs:\n  - opco.product_review_requested\n")
 	writeClosedVariantFile(t, root, "events.yaml", "opco.product_review_requested:\n  product_id: text\n  note: text\n")
 	writeClosedVariantFile(t, root, "state.yaml", "product_id: \"\"\nnote: text\n")
 	writeClosedVariantFile(t, root, "nodes.yaml", `reviewer:
@@ -387,7 +387,7 @@ func CopyScenarioRootSetup(t testing.TB) string {
 	removeInheritedScenarios(t, root)
 
 	writeClosedVariantFile(t, root, "manifest.yaml", "version: 1.0.0\nplatform_version: '*'\n")
-	writeClosedVariantFile(t, root, "schema.yaml", "# fixture: scenario-root-setup-fixture\nstages:\n  waiting: {}\n  done: {final: true}\npins:\n  inputs:\n    - widget.scored\n")
+	writeClosedVariantFile(t, root, "schema.yaml", "# fixture: scenario-root-setup-fixture\nstages:\n  waiting: {}\n  done: {final: true}\ninputs:\n  - widget.scored\n")
 	writeClosedVariantFile(t, root, "events.yaml", "widget.scored:\n  delta: integer\n")
 	writeClosedVariantFile(t, root, "tests/root-setup.yaml", `# fixture: root setup and expectation
 setup:
@@ -421,7 +421,7 @@ func CopyInputPinExternalScope(t testing.TB) string {
 	removeClosedVariantFiles(t, root, "events.yaml", "nodes.yaml", "state.yaml")
 
 	writeClosedVariantFile(t, root, "schema.yaml", "stages: []\n# fixture: input-pin-external-scope\n")
-	writeLegacyInstanceFlow(t, root, "external_consumer", "# fixture: external_consumer\nstages:\n  idle: {}\n  done: {final: true}\npins:\n  inputs:\n    - event: ticket.ready\n      source: external\n", "ticket.ready:\n  entity_id: string\n", "", "")
-	writeLegacyInstanceFlow(t, root, "plain_consumer", "# fixture: plain_consumer\nstages:\n  idle: {}\n  done: {final: true}\npins:\n  inputs:\n    - ticket.ready\n", "ticket.ready:\n  entity_id: string\n", "", "")
+	writeLegacyInstanceFlow(t, root, "external_consumer", "# fixture: external_consumer\nstages:\n  idle: {}\n  done: {final: true}\ninputs:\n  - event: ticket.ready\n    source: external\n", "ticket.ready:\n  entity_id: string\n", "", "")
+	writeLegacyInstanceFlow(t, root, "plain_consumer", "# fixture: plain_consumer\nstages:\n  idle: {}\n  done: {final: true}\ninputs:\n  - ticket.ready\n", "ticket.ready:\n  entity_id: string\n", "", "")
 	return root
 }

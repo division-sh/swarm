@@ -31,11 +31,10 @@ func CopyReceiverInitializationGeometry(t testing.TB) string {
 		"worker/manifest.yaml":      "version: 1.0.0\nplatform_version: '*'\n",
 		"manifest.yaml":             "version: 1.0.0\nplatform_version: '*'\n",
 		"schema.yaml": `# fixture: receiver-initialization-geometry
-pins:
-  inputs:
-    - work.requested
-  outputs:
-    - worker.requested
+inputs:
+  - work.requested
+outputs:
+  - worker.requested
 connect:
   - {event: worker.requested, from: ., to: worker, resolution: select-or-create}
 `,
@@ -61,11 +60,10 @@ worker.requested:
 instance: worker_id
 auto_emit_on_create:
   event: worker.ready
-pins:
-  inputs:
-    - worker.requested
-  outputs:
-    - leaf.requested
+inputs:
+  - worker.requested
+outputs:
+  - leaf.requested
 connect:
   - {event: leaf.requested, from: ., to: leaf, resolution: select-or-create}
 `,
@@ -98,9 +96,8 @@ count: integer
 instance: worker_id
 auto_emit_on_create:
   event: leaf.ready
-pins:
-  inputs:
-    - leaf.requested
+inputs:
+  - leaf.requested
 `,
 		"worker/leaf/events.yaml": `leaf.ready:
   worker_id: text

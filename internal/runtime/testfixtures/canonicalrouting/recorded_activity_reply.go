@@ -15,9 +15,8 @@ func CopyRecordedActivityReply(t testing.TB, providerURL string) string {
   waiting: {}
   working: {}
   done: {final: true}
-pins:
-  inputs: [provider.requested]
-  outputs: [provider.replied]
+inputs: [provider.requested]
+outputs: [provider.replied]
 `,
 	)
 	removeClosedVariantFiles(t, root, "provider/state.yaml")

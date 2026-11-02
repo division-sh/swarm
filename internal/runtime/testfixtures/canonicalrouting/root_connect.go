@@ -35,9 +35,8 @@ platform_version: ">=0.7.0 <0.8.0"
 `,
 		"operating/manifest.yaml": "version: 1.0.0\nplatform_version: '>=0.7.0 <0.8.0'\n",
 		"operating/schema.yaml": `instance: operating_id
-pins:
-  inputs:
-    - opco.product_initialization_requested
+inputs:
+  - opco.product_initialization_requested
 `,
 		"operating/state.yaml": `operating_id: uuid
 `,
@@ -63,9 +62,8 @@ func WriteFinitePublicTemplateInputRoute(t testing.TB) string {
 	writeClosedVariantFile(t, root, "schema.yaml", `stages:
   waiting: {}
   done: {final: true}
-pins:
-  inputs:
-    - bootstrap.requested
+inputs:
+  - bootstrap.requested
 `)
 	writeClosedVariantFile(t, root, "nodes.yaml", `bootstrap-node:
   bootstrap.requested:

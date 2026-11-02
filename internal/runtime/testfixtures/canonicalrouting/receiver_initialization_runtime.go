@@ -9,9 +9,8 @@ func CopyTemplateInstanceEmpireStyle(t testing.TB) string {
 		"manifest.yaml":           "version: 1.0.0\nplatform_version: '*'\n",
 		"operating/manifest.yaml": "version: 1.0.0\nplatform_version: '*'\n",
 		"schema.yaml": `# fixture: test
-pins:
-  outputs:
-    - opco.spinup_created
+outputs:
+  - opco.spinup_created
 connect:
   - event: opco.spinup_created
     from: .
@@ -36,9 +35,8 @@ opco.spinup_created:
 `,
 		"operating/schema.yaml": `# fixture: operating
 instance: instance_id
-pins:
-  inputs:
-    - opco.spinup_created
+inputs:
+  - opco.spinup_created
 stages:
   initializing: {}
   ready: {final: true}
@@ -73,9 +71,8 @@ func CopyTemplateInstanceActivationConfigSubscriber(t testing.TB) string {
 		"manifest.yaml":           "version: 1.0.0\nplatform_version: '*'\n",
 		"operating/manifest.yaml": "version: 1.0.0\nplatform_version: '*'\n",
 		"schema.yaml": `# fixture: test
-pins:
-  outputs:
-    - opco.spinup_created
+outputs:
+  - opco.spinup_created
 connect:
   - event: opco.spinup_created
     from: .
@@ -100,9 +97,8 @@ opco.spinup_created:
 `,
 		"operating/schema.yaml": `# fixture: operating
 instance: instance_id
-pins:
-  inputs:
-    - opco.spinup_created
+inputs:
+  - opco.spinup_created
 stages:
   initializing: {}
   ready: {final: true}
