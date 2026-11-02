@@ -31,10 +31,14 @@ func TestSelectedDeliveryExecutionFenceBothStores(t *testing.T) {
 				t.Cleanup(func() { _ = db.Close() })
 				adapter, _ = NewAdapter(DialectSQLite)
 			}
+			leaseType := "TIMESTAMP"
+			if backend == "sqlite" {
+				leaseType = "TEXT"
+			}
 			for _, ddl := range []string{
 				`CREATE TABLE runs (run_id TEXT PRIMARY KEY, bundle_hash TEXT NOT NULL)`,
 				`CREATE TABLE run_fork_selected_contract_bindings (binding_id TEXT PRIMARY KEY, fork_run_id TEXT NOT NULL, mode TEXT NOT NULL, bundle_hash TEXT NOT NULL)`,
-				`CREATE TABLE run_fork_selected_contract_runtime_executions (execution_id TEXT PRIMARY KEY, binding_id TEXT NOT NULL, fork_run_id TEXT NOT NULL, generation BIGINT NOT NULL, state TEXT NOT NULL, lease_expires_at TIMESTAMP)`,
+				`CREATE TABLE run_fork_selected_contract_runtime_executions (execution_id TEXT PRIMARY KEY, binding_id TEXT NOT NULL, fork_run_id TEXT NOT NULL, generation BIGINT NOT NULL, state TEXT NOT NULL, lease_expires_at ` + leaseType + `)`,
 			} {
 				if _, err := db.Exec(ddl); err != nil {
 					t.Fatal(err)
