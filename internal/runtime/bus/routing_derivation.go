@@ -106,13 +106,6 @@ func subscriberRecipient(kind subscriberKind, id string, node runtimeidentity.Ex
 	return events.DeliveryRecipient{}, fmt.Errorf("subscriber kind is required")
 }
 
-type routeResolvedPattern struct {
-	subscription   semanticview.AuthoredSubscriptionAdmission
-	EventPattern   string
-	routeSource    subscriberRouteSource
-	LocalizedEvent string
-}
-
 func DeriveRouteTable(source semanticview.Source) (*RouteTable, error) {
 	graph, inputProducers := runtimepinrouting.CompileConnectGraphWithInputProducerResolver(source)
 	return deriveRouteTableWithInputProducers(source, graph, inputProducers)
@@ -286,13 +279,6 @@ func connectRecipientSubscribers(evaluation runtimepinrouting.ConnectRecipientEv
 	return dedupeSubscribers(out)
 }
 
-func routeApplyResolvedPattern(subscriber Subscriber, resolved routeResolvedPattern) Subscriber {
-	subscriber.subscription = resolved.subscription
-	subscriber.routeSource = resolved.routeSource
-	subscriber.LocalizedEvent = eventidentity.Normalize(resolved.LocalizedEvent)
-	return subscriber
-}
-
 func routeFlowLocalEventSetWithInputProducers(scope semanticview.FlowScope, inputProducers runtimepinrouting.FlowInputProducerResolver) map[string]struct{} {
 	out := routeEventKeys(scope.Events)
 	for _, eventType := range scope.OutputEvents {
@@ -426,19 +412,6 @@ func routeExecutableNodeDeclarations(source semanticview.Source, flowPath string
 	}
 	sort.Slice(out, func(i, j int) bool { return out[i].Key() < out[j].Key() })
 	return out, nil
-}
-
-func routeProjectAdmittedSubscriberPatterns(admission semanticview.AuthoredSubscriptionAdmission, routePath string) []routeResolvedPattern {
-	out := make([]routeResolvedPattern, 0, len(admission.RoutePatterns()))
-	for _, pattern := range admission.RoutePatternsAt(routePath) {
-		out = append(out, routeResolvedPattern{
-			subscription:   admission,
-			EventPattern:   pattern,
-			routeSource:    subscriberRouteSourceSubscription,
-			LocalizedEvent: admission.LocalEvent(),
-		})
-	}
-	return out
 }
 
 func routeClassifyAuthoredSubscription(source semanticview.Source, kind subscriberKind, flowID string, inputEvents []string, basePath string, localEvents map[string]struct{}, raw string) semanticview.AuthoredSubscriptionAdmission {
