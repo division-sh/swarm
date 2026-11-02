@@ -162,7 +162,7 @@ func TestOnlyRootAndStandaloneAdmissionCreateRunsParity(t *testing.T) {
 				}, wantRunDelta: 1},
 				{name: "standalone_runtime", make: func(_ string, at time.Time) events.Event {
 					return eventtest.RuntimeControl(uuid.NewString(), "platform.reset", "runtime", "", json.RawMessage(`{}`), 0, "", "", events.EventEnvelope{}, at)
-				}, wantRunDelta: 1},
+				}},
 				{name: "run_creating_agent_directive", make: func(runID string, at time.Time) events.Event {
 					return eventtest.RunCreatingDiagnosticDirect(uuid.NewString(), events.EventTypePlatformAgentDirective, "runtime", "", json.RawMessage(`{}`), 0, runID, events.EventEnvelope{}, at)
 				}, wantRunDelta: 1},

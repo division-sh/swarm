@@ -29,6 +29,8 @@ func TestProviderGracefulStopAndStandbyHandoffBothStores(t *testing.T) {
 				release := make(chan struct{})
 				unblock := sync.OnceFunc(func() { close(release) })
 				wantCalls := 1
+				var forkDone chan error
+				forkPending := false
 				if cut.selected {
 					wantCalls++
 				}
@@ -95,6 +97,32 @@ func TestProviderGracefulStopAndStandbyHandoffBothStores(t *testing.T) {
 					"bundle_hash": goldenServedBundleHash(t, first.rpc, "live"), "payload": map[string]any{"item_id": "grace"}, "idempotency_key": "stop-seed"}, &seed); err != nil {
 					t.Fatal(err)
 				}
+				if cut.selected {
+					for {
+						var event goldenEvent
+						if err := first.rpc.call(ctx, "event.get", map[string]any{"event_id": seed.EventID}, &event); err != nil {
+							t.Fatal(err)
+						}
+						settled := false
+						for _, delivery := range event.Deliveries {
+							if delivery.SubscriberType != "node" {
+								continue
+							}
+							if delivery.Terminal && delivery.Status != "delivered" {
+								t.Fatalf("source seed did not settle: %+v", delivery)
+							}
+							settled = delivery.Status == "delivered"
+						}
+						if settled {
+							break
+						}
+						select {
+						case <-ctx.Done():
+							t.Fatal("source seed did not complete")
+						case <-time.After(10 * time.Millisecond):
+						}
+					}
+				}
 				if err := first.rpc.call(ctx, "event.publish", map[string]any{"event_name": "item.agent_hold",
 					"run_id": seed.RunID, "source_event_id": seed.EventID, "payload": map[string]any{"note": "grace"}, "idempotency_key": "stop-business"}, &business); err != nil {
 					t.Fatal(err)
@@ -128,19 +156,28 @@ func TestProviderGracefulStopAndStandbyHandoffBothStores(t *testing.T) {
 						t.Fatal(err)
 					}
 					forkCtx, cancelFork := context.WithCancel(ctx)
-					forkDone := make(chan error, 1)
+					forkDone = make(chan error, 1)
+					forkPending = true
 					forkEventID := business.EventID
 					go func() {
 						var result any
 						forkDone <- first.rpc.call(forkCtx, "run.fork", map[string]any{"source_run_id": seed.RunID,
 							"fork_event_id": forkEventID, "idempotency_key": "selected-stop"}, &result)
 					}()
-					defer func() { cancelFork(); <-forkDone }()
+					defer func() {
+						cancelFork()
+						if forkPending {
+							<-forkDone
+						}
+					}()
 				}
 				select {
 				case <-entered:
+				case forkErr := <-forkDone:
+					forkPending = false
+					t.Fatalf("selected fork completed before provider request: %v\n%s", forkErr, first.output.String())
 				case <-ctx.Done():
-					t.Fatal("provider request was not reached")
+					t.Fatalf("provider request was not reached\n%s", first.output.String())
 				}
 				if cut.selected {
 					var list struct {

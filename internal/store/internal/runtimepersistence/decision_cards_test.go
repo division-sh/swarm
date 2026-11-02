@@ -32,7 +32,6 @@ import (
 	authoractivityfixture "github.com/division-sh/swarm/internal/store/testutil/authoractivityfixture"
 	"github.com/division-sh/swarm/internal/testutil"
 	"github.com/division-sh/swarm/internal/testutil/sourceartifactfixture"
-	"github.com/division-sh/swarm/internal/testutil/stagecatalogfixture"
 	"github.com/google/uuid"
 )
 
@@ -840,52 +839,6 @@ func TestNormalRunCompletionDecisionGateAuthorityParity(t *testing.T) {
 			requireCompleteRunForkRevision(t, ctx, decisionCardRevisionFixture(t, cardStore, db), runID)
 		})
 
-	}
-}
-
-func TestStandaloneCompletionCandidatePublishesChangedGateRevisionParity(t *testing.T) {
-	for _, backend := range []struct {
-		name string
-		open func(*testing.T) authorActivityReceiptFixture
-	}{
-		{name: "sqlite", open: openSQLiteAuthorActivityReceiptFixture},
-		{name: "postgres", open: openPostgresAuthorActivityReceiptFixture},
-	} {
-		backend := backend
-		t.Run(backend.name, func(t *testing.T) {
-			fixture := backend.open(t)
-			ctx := requireDefaultSourceArtifactForTest(t, originalStoreFixtureContext(t, testAuthorActivityContext(), fixture.store), fixture.store)
-			eventBus, err := newRunConvergenceEventBus(t, ctx, fixture.store)
-			if err != nil {
-				t.Fatalf("NewEventBus: %v", err)
-			}
-			now := time.Date(2026, 7, 14, 10, 0, 0, 0, time.UTC)
-			event := eventtest.RuntimeControl(uuid.NewString(), "platform.paused", "runtime", "", json.RawMessage(`{}`), 0, "", "", events.EventEnvelope{}, now)
-			if err := eventBus.Publish(ctx, event); err != nil {
-				t.Fatalf("publish standalone completion trigger: %v", err)
-			}
-			_, runID, _, _ := loadRunConvergenceFacts(t, fixture, ctx, event.ID())
-			entityID := uuid.NewString()
-			activation, err := gateruntime.New(runID, "launch/review", entityID, "launch", "awaiting_review", "launch_review", authorActivityTestBundleHash, testGateRoutes(t), "state:awaiting_review", now)
-			if err != nil {
-				t.Fatal(err)
-			}
-			seedDecisionCardGateEntity(t, fixture.db, backend.name == "postgres", runID, entityID, activation, now)
-			setDecisionCardCompletionEntityState(t, fixture.db, backend.name == "postgres", runID, entityID, "done")
-			publishCompleteRunForkRevisionBaseline(t, ctx, fixture.db, backend.name == "postgres", runID)
-			beforeRevision := runForkRevisionHeadForProof(t, ctx, fixture.db, backend.name == "postgres", runID)
-
-			executeStandaloneCompletionCandidateWithCatalog(t, ctx, fixture.store, runID, stagecatalogfixture.NewFinalCatalog(
-				nil, map[string][]string{"launch/review": {"done"}},
-			))
-			if got := loadDecisionCardGateActivation(t, fixture.db, backend.name == "postgres", runID, entityID); got.Status != gateruntime.StatusSuperseded || got.SupersededReason != "run_completed" {
-				t.Fatalf("standalone completion gate activation = %#v, want run_completed supersession", got)
-			}
-			if afterRevision := runForkRevisionHeadForProof(t, ctx, fixture.db, backend.name == "postgres", runID); afterRevision != beforeRevision+1 {
-				t.Fatalf("changed-gate completion revision = %d, want %d", afterRevision, beforeRevision+1)
-			}
-			requireCompleteRunForkRevision(t, ctx, fixture, runID)
-		})
 	}
 }
 

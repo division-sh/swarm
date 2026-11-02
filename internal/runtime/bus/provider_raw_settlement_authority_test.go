@@ -7,6 +7,7 @@ import (
 	"io/fs"
 	"os"
 	"path/filepath"
+	"sort"
 	"strings"
 	"testing"
 
@@ -49,22 +50,30 @@ func TestProviderRawSettlementAuthorityRemainsInboundOnly(t *testing.T) {
 		if err != nil {
 			return err
 		}
-		ast.Inspect(parsed, func(node ast.Node) bool {
-			call, ok := node.(*ast.CallExpr)
+		for _, declaration := range parsed.Decls {
+			function, ok := declaration.(*ast.FuncDecl)
 			if !ok {
+				continue
+			}
+			ast.Inspect(function.Body, func(node ast.Node) bool {
+				call, ok := node.(*ast.CallExpr)
+				if !ok {
+					return true
+				}
+				selector, ok := call.Fun.(*ast.SelectorExpr)
+				if ok && selector.Sel.Name == "PrepareInboundDeliveryBatch" {
+					callers = append(callers, filepath.Clean(path)+"::"+function.Name.Name)
+				}
 				return true
-			}
-			selector, ok := call.Fun.(*ast.SelectorExpr)
-			if ok && selector.Sel.Name == "PrepareInboundDeliveryBatch" {
-				callers = append(callers, filepath.Clean(path))
-			}
-			return true
-		})
+			})
+		}
 		return nil
 	}); err != nil {
 		t.Fatalf("scan runtime production callers: %v", err)
 	}
-	if len(callers) != 1 || callers[0] != filepath.Clean("../inbound.go") {
-		t.Fatalf("PrepareInboundDeliveryBatch production callers = %#v, want only internal/runtime/inbound.go", callers)
+	sort.Strings(callers)
+	want := []string{"../inbound.go::prepareInboundDeliveryBatch", "../private_test_inbound.go::PublishPrivateTestProviderOutput"}
+	if len(callers) != len(want) || strings.Join(callers, "\n") != strings.Join(want, "\n") {
+		t.Fatalf("PrepareInboundDeliveryBatch production callers = %#v, want exact inbound and private-test issuers %#v", callers, want)
 	}
 }

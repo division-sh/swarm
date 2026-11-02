@@ -763,39 +763,77 @@ waiting:
 func waitServedNativeCardBeforeRestart(t *testing.T, endpoint string, peer *serveNativeProtocolPeer, reader storetest.ChannelObservation, runID string) servedNativeMessage {
 	t.Helper()
 	cardID := waitServedNativePendingCard(t, endpoint, runID)
-	var sent servedNativeMessage
-	select {
-	case sent = <-peer.sent:
-	case <-time.After(5 * time.Second):
-		t.Fatal("native card was not delivered before ordinary restart", cardID)
-	}
-	if !strings.HasPrefix(sent.Body.GetConversation(), "Retire service\n") ||
-		!strings.Contains(sent.Body.GetConversation(), "\nReference: "+cardID) {
-		plans, err := reader.ListCurrentChannelDeliveryPlans(context.Background(), "", 200)
-		t.Fatal("native initial card differs from the exact declared retirement gate", cardID, sent.ID, sent.Body.String(), plans, err)
-	}
-	deadline := time.Now().Add(5 * time.Second)
-	for time.Now().Before(deadline) {
-		plans, err := reader.ListCurrentChannelDeliveryPlans(context.Background(), "", 200)
-		if err != nil {
-			t.Fatal(err)
+	deadline := time.NewTimer(5 * time.Second)
+	defer deadline.Stop()
+	otherCardSeen := false
+	for {
+		var sent servedNativeMessage
+		select {
+		case sent = <-peer.sent:
+		case <-deadline.C:
+			t.Fatal("native card was not delivered before ordinary restart", cardID)
 		}
-		for _, plan := range plans {
-			if plan.SourceKind != "card" || plan.SourceID != cardID || plan.State != "sent" {
+		var page struct {
+			Items []struct {
+				Kind string `json:"kind"`
+				Card struct {
+					ID    string `json:"card_id"`
+					RunID string `json:"run_id"`
+				} `json:"decision_card"`
+			} `json:"items"`
+		}
+		requireServedJSONRPCResult(t, endpoint, "mailbox.list", map[string]any{"status": "pending", "limit": 200}, &page)
+		sourceID := ""
+		for _, item := range page.Items {
+			if item.Kind != "decision_card" || !strings.Contains(sent.Body.GetConversation(), "\nReference: "+item.Card.ID) {
 				continue
 			}
-			receipt, found, err := reader.GetCurrentChannelSentReceipt(context.Background(), plan.DeliveryID, plan.CurrentReceiptID)
+			if !strings.HasPrefix(sent.Body.GetConversation(), "Retire service\n") || sourceID != "" {
+				t.Fatal("native card does not match one exact public retirement gate", sent.Body.String(), page)
+			}
+			sourceID = item.Card.ID
+			if sourceID != cardID {
+				if item.Card.RunID == runID || otherCardSeen {
+					t.Fatal("duplicate or ambiguous native retirement card", sent.Body.String(), page)
+				}
+				otherCardSeen = true
+			}
+		}
+		if sourceID == "" {
+			t.Fatal("native card has no exact public retirement gate", sent.Body.String(), page)
+		}
+		for {
+			plans, err := reader.ListCurrentChannelDeliveryPlans(context.Background(), "", 200)
 			if err != nil {
 				t.Fatal(err)
 			}
-			if found && receipt.DeliveryReference == sent.ID && receipt.RenderID == plan.CurrentRenderID {
-				return sent
+			settled := false
+			for _, plan := range plans {
+				if plan.SourceKind != "card" || plan.SourceID != sourceID || plan.State != "sent" {
+					continue
+				}
+				receipt, found, err := reader.GetCurrentChannelSentReceipt(context.Background(), plan.DeliveryID, plan.CurrentReceiptID)
+				if err != nil {
+					t.Fatal(err)
+				}
+				settled = found && receipt.DeliveryReference == sent.ID && receipt.RenderID == plan.CurrentRenderID
+				if settled {
+					break
+				}
+			}
+			if settled {
+				break
+			}
+			select {
+			case <-deadline.C:
+				t.Fatal("native card has no exact settled receipt before ordinary restart", sourceID, sent.ID)
+			case <-time.After(10 * time.Millisecond):
 			}
 		}
-		time.Sleep(10 * time.Millisecond)
+		if sourceID == cardID {
+			return sent
+		}
 	}
-	t.Fatal("native card has no exact settled receipt before ordinary restart", cardID, sent.ID)
-	return servedNativeMessage{}
 }
 
 func requireServedNativeQuotedRetirement(t *testing.T, endpoint string, peer *serveNativeProtocolPeer,

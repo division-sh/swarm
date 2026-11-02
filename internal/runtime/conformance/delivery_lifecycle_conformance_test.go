@@ -1279,6 +1279,10 @@ func assertDeliverySchemaRejectsDisconnectedFacts(t *testing.T, ctx context.Cont
 		`UPDATE event_deliveries SET run_id = $1::uuid WHERE delivery_id = $2::uuid`,
 		`UPDATE event_deliveries SET run_id = ? WHERE delivery_id = ?`,
 		[]any{other.RunID(), proof.DeliveryID()})
+	assertDeliverySQLRejected(t, backend, "event-side run mismatch",
+		`UPDATE events SET run_id = $1::uuid WHERE event_id = $2::uuid`,
+		`UPDATE events SET run_id = ? WHERE event_id = ?`,
+		[]any{other.RunID(), event.ID()})
 
 	missingAttemptEvent := deliveryLifecycleEvent("schema-missing-attempt-" + backend.name)
 	missingAttemptRoute := deliveryLifecycleConformanceRoute(t, missingAttemptEvent.RunID(), "agent", "schema-agent-"+backend.name)

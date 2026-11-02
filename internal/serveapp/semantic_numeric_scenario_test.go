@@ -24,6 +24,7 @@ func TestServedSemanticNumericScenarioModes(t *testing.T) {
 				isolateCLIAPIConfigEnv(t)
 				root := canonicalrouting.WriteNovelDerivedScenarioBundleWithRootInput(t)
 				canonicalrouting.InstallNovelNumericScenarioLifecycle(t, root)
+				admitNovelDerivedExistingRunRoot(t, root)
 				files := map[string]string{}
 				scenario := "name: numeric " + mode + "\n"
 				switch mode {

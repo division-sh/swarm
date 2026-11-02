@@ -11,6 +11,7 @@ import (
 
 	"github.com/division-sh/swarm/internal/events"
 	"github.com/division-sh/swarm/internal/events/eventtest"
+	runtimebus "github.com/division-sh/swarm/internal/runtime/bus"
 	runtimebustest "github.com/division-sh/swarm/internal/runtime/bus/bustest"
 	worklifetime "github.com/division-sh/swarm/internal/runtime/core/worklifetime"
 	runtimecorrelation "github.com/division-sh/swarm/internal/runtime/correlation"
@@ -451,6 +452,9 @@ func TestRunLifecycleServedDeliverySameRevisionHandoffParity(t *testing.T) {
 			fixture := backend.open(t)
 			registrar := fixture.store.(runtimerunlifecycle.CandidateRegistrar)
 			ctx := originalStoreFixtureContext(t, testAuthorActivityContext(), fixture.store)
+			rooted, _ := sourceartifactfixture.Rooted(t, "fixture", sourceartifactfixture.Artifact())
+			sourceartifactfixture.RequireArtifact(t, ctx, fixture.store.(sourceartifactfixture.Writer), rooted.Artifact())
+			ctx = runtimecorrelation.WithRootAdmission(ctx, rooted.Admission())
 			process := worklifetime.NewProcess()
 			occurrence := newRunLifecycleExecutorOccurrence(t, process)
 			runtimeCtx := worklifetime.WithRuntimeOccurrence(ctx, occurrence)
@@ -483,10 +487,7 @@ func TestRunLifecycleServedDeliverySameRevisionHandoffParity(t *testing.T) {
 				t.Fatalf("start candidate executor: %v", err)
 			}
 
-			eventBus, err := newRunConvergenceEventBus(t, ctx, fixture.store)
-			if err != nil {
-				t.Fatalf("create EventBus: %v", err)
-			}
+			runID := uuid.NewString()
 			candidate := eventtest.RuntimeControl(
 				uuid.NewString(),
 				"platform.boot",
@@ -494,43 +495,36 @@ func TestRunLifecycleServedDeliverySameRevisionHandoffParity(t *testing.T) {
 				"",
 				json.RawMessage(`{}`),
 				0,
-				"",
+				runID,
 				"",
 				events.EventEnvelope{},
 				time.Date(2025, 7, 29, 12, 0, 0, 0, time.UTC),
 			)
 			admitted, err := events.AdmitForPublish(candidate, events.AdmissionOptions{RequirePersistentUUIDIdentity: true})
 			if err != nil {
-				t.Fatalf("admit standalone event: %v", err)
+				t.Fatalf("admit run-scoped event: %v", err)
 			}
 			event := admitted.Event()
-			runID := event.RunID()
 			agentID := "candidate-handoff-served-agent"
 			agentIdentity := runtimebustest.IdentityForRun(t, runID, agentID, "")
-			requireRunFixtureForTest(t, runtimeCtx, fixture.store, semanticRunFixture{
-				Origin: semanticEventRunOriginForTest(t, event.ID(), string(event.Type())),
-				RunID:  runID, StartedAt: event.CreatedAt(),
-			})
+			root := eventtest.RunCreatingRootIngress(uuid.NewString(), "test.trigger", "ingress", "", json.RawMessage(`{}`), 0, runID, "", events.EventEnvelope{}, event.CreatedAt().Add(-time.Second))
+			if err := commitSemanticEventFixture(runtimeCtx, fixture.store, root); err != nil {
+				t.Fatalf("commit admitted run root: %v", err)
+			}
 			seedStandaloneConvergenceAgent(t, fixture.store, runtimeCtx, agentIdentity)
-			delivery := runtimebustest.SubscribeForRun(t, eventBus, runID, agentID, event.Type())
-			defer runtimebustest.UnsubscribeIdentity(eventBus, agentIdentity)
-			if err := eventBus.Publish(runtimeCtx, event); err != nil {
-				t.Fatalf("publish routed standalone event: %v", err)
-			}
-			awaitRunLifecycleSignal(t, intercept.firstStarted, "pre-settlement candidate execution")
-			var delivered events.Event
-			select {
-			case local := <-delivery:
-				delivered = local.Event()
-				_ = local.Complete()
-			case <-time.After(5 * time.Second):
-				t.Fatal("timed out waiting for routed standalone delivery")
-			}
 			route := events.DeliveryRoute{
 				Recipient:     events.MustAgentDeliveryRecipient(agentID),
 				AgentIdentity: agentIdentity,
 			}
-			claimed, err := claimDeliveryFixture(runtimeCtx, fixture.store, delivered, route)
+			owner := fixture.store.(runtimerunlifecycle.OperationOwner)
+			if disposition, err := owner.RequestCompletionCandidate(runtimeCtx, runtimerunlifecycle.ImmediateCandidate(runID)); err != nil || disposition != runtimerunlifecycle.CandidateRequested {
+				t.Fatalf("request pre-settlement candidate = %s/%v", disposition, err)
+			}
+			awaitRunLifecycleSignal(t, intercept.firstStarted, "pre-settlement candidate execution")
+			if outcome, err := commitAdmittedSemanticEventFixtureOutcome(runtimeCtx, fixture.store, admitted, []events.DeliveryRoute{route}, runtimepipelineobligation.ScopeSubscribed); err != nil || outcome != runtimebus.EventAppendInserted {
+				t.Fatalf("commit routed run-scoped event = %v/%v", outcome, err)
+			}
+			claimed, err := claimDeliveryFixture(runtimeCtx, fixture.store, event, route)
 			if err != nil {
 				t.Fatalf("claim routed standalone delivery: %v", err)
 			}
@@ -547,15 +541,15 @@ func TestRunLifecycleServedDeliverySameRevisionHandoffParity(t *testing.T) {
 			awaitRunLifecycleSignal(t, intercept.secondExecuted, "post-settlement candidate execution")
 			stateDeadline := time.Now().Add(5 * time.Second)
 			for {
-				snapshot, loadErr := fixture.store.(runLifecycleCandidateParityStore).LoadRunLifecycleSnapshot(context.Background(), delivered.RunID())
-				if loadErr == nil && snapshot.Status == string(runtimerunlifecycle.StateCompleted) {
+				snapshot, loadErr := fixture.store.(runLifecycleCandidateParityStore).LoadRunLifecycleSnapshot(context.Background(), event.RunID())
+				if loadErr == nil && snapshot.Status == string(runtimerunlifecycle.StateRunning) {
 					break
 				}
 				if time.Now().After(stateDeadline) {
 					intercept.mu.Lock()
 					results := append([]runtimerunlifecycle.CompletionResult(nil), intercept.results...)
 					intercept.mu.Unlock()
-					t.Fatalf("served run state = %#v/%v, want completed; candidate results = %#v", snapshot, loadErr, results)
+					t.Fatalf("served run state = %#v/%v, want running; candidate results = %#v", snapshot, loadErr, results)
 				}
 				runtime.Gosched()
 			}

@@ -36,6 +36,14 @@ func BootstrapFreshPostgres(ctx context.Context, tx *sql.Tx, plans []TableDDL, s
 			return fmt.Errorf("install postgres forward-reference constraint: %w", err)
 		}
 	}
+	for _, plan := range plans {
+		if plan.TableName == "event_deliveries" {
+			if err := InstallPostgresDeliveryRunIdentity(ctx, tx); err != nil {
+				return err
+			}
+			break
+		}
+	}
 	if _, err := tx.ExecContext(ctx, `INSERT INTO runtime_store_metadata (id, swarm_version, platform_version, created_at, entity_presence_model) VALUES (1, $1, $2, $3, $4)`, swarmVersion, platformVersion, createdAt.UTC(), EntityPresenceModel); err != nil {
 		return fmt.Errorf("stamp fresh postgres store origin: %w", err)
 	}

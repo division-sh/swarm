@@ -202,6 +202,11 @@ func executeSQLitePlans(ctx context.Context, conn *sql.Conn, plans []SchemaTable
 				return fmt.Errorf("create sqlite %s table %s: %w", plan.SchemaKind, plan.TableName, err)
 			}
 		}
+		if plan.SchemaKind == "platform_spec" && plan.TableName == "event_deliveries" {
+			if err := platformschema.InstallSQLiteDeliveryRunIdentity(ctx, conn); err != nil {
+				return err
+			}
+		}
 	}
 	return nil
 }

@@ -99,14 +99,65 @@ func testDurableDataInvocation(t *testing.T, shard int) {
 			}
 			config := filepath.Join(base, "swarm.yaml")
 			writeReleaseFile(t, config, goldenRuntimeConfig(store))
-			token := filepath.Join(base, "api-token")
-			writeReleaseFile(t, token, goldenAPIToken+"\n")
 			env := goldenProcessEnv(t, base, store.passwordEnv, 0)
-			assertGoldenProcessHasNoExternalExecutables(t, env)
 			cells := staticDataInvocationCells(shard, base)
 			foreignProven := false
 			for _, cell := range cells {
 				t.Run(cell.name, func(t *testing.T) {
+					caseNumber := 0
+					readInFreshStore := func(foreign string) map[string]map[string]any {
+						caseNumber++
+						caseBase := filepath.Join(base, fmt.Sprintf("read-%s-%d", cell.name, caseNumber))
+						if err := os.MkdirAll(caseBase, 0o755); err != nil {
+							t.Fatal(err)
+						}
+						caseStore := goldenSQLiteStore(caseBase)
+						if backend == "postgres" {
+							caseStore = goldenPostgresStore(t, dsn)
+						}
+						caseConfig := filepath.Join(caseBase, "swarm.yaml")
+						writeReleaseFile(t, caseConfig, goldenRuntimeConfig(caseStore))
+						caseToken := filepath.Join(caseBase, "api-token")
+						writeReleaseFile(t, caseToken, goldenAPIToken+"\n")
+						caseEnv := goldenProcessEnv(t, caseBase, caseStore.passwordEnv, 0)
+						assertGoldenProcessHasNoExternalExecutables(t, caseEnv)
+						serveStarted := time.Now()
+						process := startReleaseServe(t, releaseProcessSpec{
+							InternalMockLifecycleBinary: lifecycleBinary,
+							BinaryPath:                  binary, WorkingDir: cell.cwd, Source: cell.operand, ConfigPath: caseConfig,
+							Store: backend, APIPort: 0, TokenFile: caseToken, Token: goldenAPIToken, Env: caseEnv,
+						})
+						ctx, cancel := context.WithTimeout(context.Background(), goldenStartupTimeout)
+						defer cancel()
+						if err := process.waitReady(ctx); err != nil {
+							t.Fatal(err)
+						}
+						t.Logf("invocation serve ready after %s", time.Since(serveStarted))
+						hash := goldenServedBundleHash(t, process.rpc, "mock_only")
+						var identity struct {
+							SourceArtifacts []struct {
+								BundleHash string `json:"bundle_hash"`
+							} `json:"source_artifacts"`
+						}
+						if err := process.rpc.call(ctx, "runtime.identity", map[string]any{}, &identity); err != nil {
+							t.Fatal(err)
+						}
+						if len(identity.SourceArtifacts) != 1 || identity.SourceArtifacts[0].BundleHash != hash {
+							t.Fatalf("runtime.identity differs from health: %#v", identity)
+						}
+						if hash != wantHash {
+							t.Fatalf("hash = %s, want %s", hash, wantHash)
+						}
+						readStarted := time.Now()
+						observed := runStaticDataRead(t, process, hash, fmt.Sprintf("%s-%d", cell.name, caseNumber), foreign)
+						t.Logf("invocation admitted static-data read after %s", time.Since(readStarted))
+						stopStarted := time.Now()
+						if err := process.stopAndWait(10 * time.Second); err != nil {
+							t.Fatalf("stop: %v\n%s", err, process.output.String())
+						}
+						t.Logf("invocation shutdown=%s process wall=%s user=%s system=%s", time.Since(stopStarted), time.Since(serveStarted), process.cmd.ProcessState.UserTime(), process.cmd.ProcessState.SystemTime())
+						return observed
+					}
 					args := []string{"verify", "--config", config, "--portable", "--json"}
 					if cell.operand != "" {
 						args = append(args, cell.operand)
@@ -118,36 +169,7 @@ func testDurableDataInvocation(t *testing.T, shard int) {
 					if err := json.Unmarshal([]byte(verified.output), &result); verified.err != nil || err != nil || !result.OK {
 						t.Fatalf("verify: %v; decode: %v\n%s", verified.err, err, verified.output)
 					}
-					serveStarted := time.Now()
-					process := startReleaseServe(t, releaseProcessSpec{
-						InternalMockLifecycleBinary: lifecycleBinary,
-						BinaryPath:                  binary, WorkingDir: cell.cwd, Source: cell.operand, ConfigPath: config,
-						Store: backend, APIPort: 0, TokenFile: token, Token: goldenAPIToken, Env: env,
-					})
-					ctx, cancel := context.WithTimeout(context.Background(), goldenStartupTimeout)
-					defer cancel()
-					if err := process.waitReady(ctx); err != nil {
-						t.Fatal(err)
-					}
-					t.Logf("invocation serve ready after %s", time.Since(serveStarted))
-					hash := goldenServedBundleHash(t, process.rpc, "mock_only")
-					var identity struct {
-						SourceArtifacts []struct {
-							BundleHash string `json:"bundle_hash"`
-						} `json:"source_artifacts"`
-					}
-					if err := process.rpc.call(ctx, "runtime.identity", map[string]any{}, &identity); err != nil {
-						t.Fatal(err)
-					}
-					if len(identity.SourceArtifacts) != 1 || identity.SourceArtifacts[0].BundleHash != hash {
-						t.Fatalf("runtime.identity differs from health: %#v", identity)
-					}
-					if hash != wantHash {
-						t.Fatalf("hash = %s, want %s", hash, wantHash)
-					}
-					readStarted := time.Now()
-					observed := runStaticDataRead(t, process, hash, cell.name, "")
-					t.Logf("invocation admitted static-data read after %s", time.Since(readStarted))
+					observed := readInFreshStore("")
 					wantReadback := expected.Readback
 					if !reflect.DeepEqual(observed, wantReadback) {
 						t.Fatalf("readback differs: %#v; baseline %#v", observed, wantReadback)
@@ -157,18 +179,13 @@ func testDurableDataInvocation(t *testing.T, shard int) {
 					// select that identical artifact; prove it once per selected store.
 					if shard == 0 && !foreignProven {
 						foreign := observed["registry/child.completed"]["static_id"].(string)
-						runStaticDataRead(t, process, hash, cell.name+"-foreign", foreign)
-						healthy := runStaticDataRead(t, process, hash, cell.name+"-healthy", "")
+						readInFreshStore(foreign)
+						healthy := readInFreshStore("")
 						if !reflect.DeepEqual(healthy, wantReadback) {
 							t.Fatalf("own-ID healthy read after foreign denial differs: %#v", healthy)
 						}
 						foreignProven = true
 					}
-					stopStarted := time.Now()
-					if err := process.stopAndWait(10 * time.Second); err != nil {
-						t.Fatalf("stop: %v\n%s", err, process.output.String())
-					}
-					t.Logf("invocation shutdown=%s process wall=%s user=%s system=%s", time.Since(stopStarted), time.Since(serveStarted), process.cmd.ProcessState.UserTime(), process.cmd.ProcessState.SystemTime())
 				})
 			}
 			// Every geometry also rejects a referenced file that no longer exists.
@@ -256,6 +273,7 @@ func runStaticDataRead(t *testing.T, process *releaseServeProcess, hash, key, fo
 	t.Helper()
 	ctx, cancel := context.WithTimeout(context.Background(), goldenRunDeadline)
 	defer cancel()
+	selected := waitForFullLifecycleStandingRun(t, process.rpc, hash, "")
 	var admitted struct {
 		RunID  string `json:"run_id"`
 		NewRun bool   `json:"new_run_created"`
@@ -265,8 +283,8 @@ func runStaticDataRead(t *testing.T, process *releaseServeProcess, hash, key, fo
 	}, &admitted); err != nil {
 		t.Fatal(err)
 	}
-	if admitted.RunID == "" || !admitted.NewRun {
-		t.Fatalf("run admission: %#v", admitted)
+	if admitted.RunID != selected.RunID || admitted.NewRun {
+		t.Fatalf("publication must use the selected existing run: admitted=%#v selected=%#v", admitted, selected)
 	}
 	observed := map[string]map[string]any{}
 	var last goldenDiagnosis
@@ -296,7 +314,7 @@ func runStaticDataRead(t *testing.T, process *releaseServeProcess, hash, key, fo
 			diagnosis, _ := json.Marshal(last)
 			return false, fmt.Errorf("run failed: %s", diagnosis)
 		}
-		return len(observed) == 2 && last.Run.Status == "completed" && last.TestQuiescence.Ready, nil
+		return len(observed) == 2 && last.Run.Status == "live" && last.TestQuiescence.Ready, nil
 	})
 	if err != nil {
 		diagnosis, _ := json.Marshal(last)
@@ -368,12 +386,6 @@ func runStaticDataRead(t *testing.T, process *releaseServeProcess, hash, key, fo
 		// This public envelope is not a discriminating schema-rejection oracle.
 		// tools.TestStaticDataInvocationMockRequestsExactForeignID executes this
 		// same admitted mock and proves its exact call and generated-schema error.
-		var stopped struct {
-			OK bool `json:"ok"`
-		}
-		if err := process.rpc.call(ctx, "run.stop", map[string]any{"run_id": admitted.RunID, "idempotency_key": key + "-stop"}, &stopped); err != nil || !stopped.OK {
-			t.Fatalf("stop negative-control run: %v %#v", err, stopped)
-		}
 		return observed
 	}
 	root, child := observed["read.completed"], observed["registry/child.completed"]

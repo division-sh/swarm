@@ -245,7 +245,14 @@ func (a *Adapter) commitInitialTx(ctx context.Context, tx *sql.Tx, attempt *muta
 	}
 	routes = events.NormalizeDeliveryRoutes(routes)
 	var publication events.Event
-	if len(routes) != 0 {
+	needsPublication := runID == "" && len(routes) != 0
+	for _, route := range routes {
+		if !route.Initialization.Empty() || (route.Recipient.IsAgent() && route.Target.MaterializingEntity()) {
+			needsPublication = true
+			break
+		}
+	}
+	if needsPublication {
 		var err error
 		publication, err = a.materializationEvent(ctx, tx, eventID)
 		if err != nil {

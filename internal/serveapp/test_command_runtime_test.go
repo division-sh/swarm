@@ -63,21 +63,19 @@ func TestSwarmTestPrivateSQLiteNoLiveLLMProof(t *testing.T) {
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			root := canonicalrouting.CopyKeyedRootRawIngress(t)
-			writeWorkflowValidationFixtureFile(t, filepath.Join(root, "schema.yaml"), "instance: provider_event_id\nstages: []\npins: {inputs: [inbound.partner.raw, inbound.partner.message]}\n")
+			writeWorkflowValidationFixtureFile(t, filepath.Join(root, "schema.yaml"), "stages: []\npins: {inputs: [inbound.partner.raw, inbound.partner.message]}\n")
+			writeWorkflowValidationFixtureFile(t, filepath.Join(root, "state.yaml"), "processed_count: 0\n")
 			writeWorkflowValidationFixtureFile(t, filepath.Join(root, "nodes.yaml"), `receiver:
-  execution_type: system_node
-  subscribes_to: [inbound.partner.raw, inbound.partner.message]
-  event_handlers:
-    inbound.partner.raw:
-      data_accumulation:
-        source_event: inbound.partner.raw
-        writes:
-          - {target_field: processed_count, value: entity.processed_count + 1}
-    inbound.partner.message:
-      data_accumulation:
-        source_event: inbound.partner.message
-        writes:
-          - {target_field: processed_count, value: entity.processed_count + 1}
+  inbound.partner.raw:
+    data_accumulation:
+      source_event: inbound.partner.raw
+      writes:
+        - {target_field: processed_count, value: state.processed_count + 1}
+  inbound.partner.message:
+    data_accumulation:
+      source_event: inbound.partner.message
+      writes:
+        - {target_field: processed_count, value: state.processed_count + 1}
 `)
 			writeWorkflowValidationFixtureFile(t, filepath.Join(root, "partner/manifest.yaml"), "version: 1.0.0\nplatform_version: '*'\ncapabilities: {can: {emit_events: [raw, message], verify_secret: webhook_signing_secret}, cannot: [execute code]}\n")
 			writeWorkflowValidationFixtureFile(t, filepath.Join(root, "partner/trigger.yaml"), `transport: webhook
@@ -157,6 +155,7 @@ func TestInternalLifecycleScenarioConsumesAdmittedSourceAcrossSupportedBackendsA
 				t.Setenv("TELEGRAM_BOT_TOKEN", "")
 				t.Setenv("SWARM_CREDENTIALS_FILE", filepath.Join(t.TempDir(), "credentials.json"))
 				sourceRoot := canonicalrouting.WriteNovelDerivedScenarioBundleWithRootInput(t)
+				admitNovelDerivedExistingRunRoot(t, sourceRoot)
 				testsDir := filepath.Join(sourceRoot, "tests")
 				if err := os.MkdirAll(testsDir, 0o755); err != nil {
 					t.Fatalf("create authored scenario directory: %v", err)
@@ -229,6 +228,16 @@ func TestServeDoesNotExposeRetiredProjectReloadSurface(t *testing.T) {
 	t.Setenv("TELEGRAM_BOT_TOKEN", "")
 	t.Setenv("SWARM_CREDENTIALS_FILE", filepath.Join(t.TempDir(), "credentials.json"))
 	sourceRoot := canonicalrouting.WriteNovelDerivedScenarioBundleWithRootInput(t)
+	schemaPath := filepath.Join(sourceRoot, "schema.yaml")
+	schema, err := os.ReadFile(schemaPath)
+	if err != nil {
+		t.Fatal(err)
+	}
+	waiting := strings.Replace(string(schema), "stages: {done: {final: true}}", "stages: {waiting: {}}", 1)
+	if waiting == string(schema) {
+		t.Fatal("changed-source fixture has no birth-only terminal root stage")
+	}
+	writeWorkflowValidationFixtureFile(t, schemaPath, waiting)
 	testsDir := filepath.Join(sourceRoot, "tests")
 	if err := os.MkdirAll(testsDir, 0o755); err != nil {
 		t.Fatalf("create authored scenario directory: %v", err)
@@ -773,6 +782,18 @@ func runServedDerivedScenarioBackendProof(t *testing.T, backend servedparity.Bac
 	runServedDerivedScenarioProof(t, backend, false)
 }
 
+func admitNovelDerivedExistingRunRoot(t *testing.T, root string) {
+	t.Helper()
+	writeWorkflowValidationFixtureFile(t, filepath.Join(root, "schema.yaml"), `stages: {waiting: {}, done: {final: true}}
+pins:
+  inputs: [fulfillment.requested]
+  outputs: [fulfillment.requested]
+connect:
+  - {event: fulfillment.requested, from: ., to: fulfillment}
+`)
+	writeWorkflowValidationFixtureFile(t, filepath.Join(root, "nodes.yaml"), "request:\n  fulfillment.requested: {advances_to: done}\n")
+}
+
 func runServedDerivedScenarioProof(t *testing.T, backend servedparity.Backend, authored bool) {
 	t.Helper()
 	isolateCLIAPIConfigEnv(t)
@@ -785,6 +806,10 @@ func runServedDerivedScenarioProof(t *testing.T, backend servedparity.Backend, a
 	sourceRoot := canonicalrouting.WriteNovelDerivedScenarioBundleWithRootInput(t)
 	if authored {
 		canonicalrouting.InstallNovelAuthoredScenarioLifecycle(t, sourceRoot)
+	} else {
+		admitNovelDerivedExistingRunRoot(t, sourceRoot)
+	}
+	if authored {
 		writeWorkflowValidationFixtureFile(t, filepath.Join(sourceRoot, "tests", "authored.yaml"), `
 name: authored-stage-profile
 seed: recorded

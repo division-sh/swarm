@@ -409,6 +409,7 @@ func allowedTransitionBoundaryUses() map[string]int {
 		"internal/runtime/bus.EventBus.beginReceiverDispatch::call internal/runtime/correlation.WithInboundEvent":                                     1,
 		"internal/runtime/bus.deliveryPlanner.materializedPublicationTargetOwners::call internal/runtime/correlation.WithInboundEvent":                1,
 		"internal/runtime/bus.EventBus.receiverRouteContext::call internal/runtime/correlation.WithInboundEvent":                                      1,
+		"internal/runtime/bus.EventBus.runNodeDeliveryRouteInterceptors::call internal/runtime/correlation.WithInboundEvent":                          1, // #2881: exact delivery-local projection of a run-less platform event.
 		"internal/runtime/bus.InboundEventFromContext::call internal/runtime/correlation.InboundEventFromContext":                                     1,
 		"internal/runtime/bus.WithInboundEvent::call internal/runtime/correlation.WithInboundEvent":                                                   1,
 		"internal/runtime/bus.connectRoutePlanResolver.Plan::call internal/runtime/correlation.WithInboundEvent":                                      1,

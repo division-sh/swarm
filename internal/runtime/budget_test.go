@@ -14,6 +14,7 @@ import (
 	"github.com/division-sh/swarm/internal/events"
 	"github.com/division-sh/swarm/internal/events/eventtest"
 	"github.com/division-sh/swarm/internal/runtime/budgetspend"
+	runtimebus "github.com/division-sh/swarm/internal/runtime/bus"
 	runtimecontracts "github.com/division-sh/swarm/internal/runtime/contracts"
 	"github.com/division-sh/swarm/internal/runtime/core/agentidentitytest"
 	runtimecorrelation "github.com/division-sh/swarm/internal/runtime/correlation"
@@ -99,7 +100,9 @@ func TestBudgetRecoveryUsesEachRunsSelectedStageSource(t *testing.T) {
 		{RunID: "run-b", EntityID: entityA, RootReference: rootB.Admission().Reference(), Stage: "fresh"},
 	}}
 	eventStore := &bootSelfCheckDescriptorStore{}
-	bus, err := newRuntimeTestEventBus(t, eventStore)
+	bus, err := newRuntimeTestEventBusWithOptions(t, eventStore, runtimebus.EventBusOptions{
+		ContractBundle: sourceA, SourceArtifactFact: sourceartifactfixture.FactFor(rootA.Artifact()),
+	})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -115,7 +118,8 @@ func TestBudgetRecoveryUsesEachRunsSelectedStageSource(t *testing.T) {
 			return sourceB, nil
 		},
 	})
-	if err := tracker.ProjectRecoveryBudgetState(testAuthorActivityContext(context.Background())); err != nil {
+	ctx := testAuthorActivityContextForBundle(context.Background(), rootA.Artifact().BundleHash())
+	if err := tracker.ProjectRecoveryBudgetState(ctx); err != nil {
 		t.Fatal(err)
 	}
 	if loads != 1 || tracker.CurrentState("entity", entityA) != "emergency" || tracker.CurrentState("entity", entityB) != "emergency" || tracker.CurrentState("entity", terminalB) != "ok" {
@@ -126,7 +130,7 @@ func TestBudgetRecoveryUsesEachRunsSelectedStageSource(t *testing.T) {
 	}
 	bundleA.SourceArtifact = rootB.Artifact()
 	store.sumQueries = nil
-	if err := tracker.ProjectRecoveryBudgetState(testAuthorActivityContext(context.Background())); err == nil {
+	if err := tracker.ProjectRecoveryBudgetState(ctx); err == nil {
 		t.Fatal("current runtime source with foreign artifact was accepted")
 	}
 	if len(store.sumQueries) != 0 {
@@ -269,23 +273,19 @@ func TestBudgetTracker_RecordSpendNormalizesThroughBudgetSpendOwner(t *testing.T
 func TestBudgetTrackerProjectsCommittedCompletionIntoThresholdEventAndEmergencyState(t *testing.T) {
 	store := &budgetSpendStoreCapture{sum: 0.95}
 	eventStore := &bootSelfCheckDescriptorStore{}
-	bus, err := newRuntimeTestEventBus(t, eventStore)
+	root, source := loadRootedBudgetSource(t, "budget-committed", "stages:\n  active: {}\n")
+	bus, err := newRuntimeTestEventBusWithOptions(t, eventStore, runtimebus.EventBusOptions{
+		ContractBundle: source, SourceArtifactFact: sourceartifactfixture.FactFor(root.Artifact()),
+	})
 	if err != nil {
 		t.Fatalf("NewEventBus: %v", err)
 	}
 	mailbox := &budgetMailboxCapture{}
-	source := semanticview.Wrap(&runtimecontracts.WorkflowContractBundle{
-		Policy: runtimecontracts.PolicyDocument{Values: map[string]runtimecontracts.PolicyValue{
-			"budget_warning_percent":   {Value: 50},
-			"budget_throttle_percent":  {Value: 75},
-			"budget_emergency_percent": {Value: 90},
-		}},
-	})
 	tracker := NewBudgetTracker(store, bus, &config.Config{Extensions: map[string]any{
 		"budget": map[string]any{"system_monthly_cap": 1},
 	}}, mailbox, nil, source, executionposture.Live, BudgetRecoveryStageSources{})
 
-	tracker.ProjectCommittedCompletionSpend(testAuthorActivityContext(context.Background()), runtimeeffects.CompletionSpendProjection{AttemptID: "attempt-1"})
+	tracker.ProjectCommittedCompletionSpend(testAuthorActivityContextForBundle(context.Background(), root.Artifact().BundleHash()), runtimeeffects.CompletionSpendProjection{AttemptID: "attempt-1"})
 	events := eventStore.appendedEvents()
 	if len(events) != 1 || string(events[0].Type()) != "platform.budget_threshold_crossed" {
 		t.Fatalf("events = %#v, want one platform.budget_threshold_crossed", events)
@@ -349,7 +349,9 @@ func TestBudgetTrackerProjectsRecoveryScopesBeforeAllRunTargetsWithoutRunContext
 		},
 	}
 	eventStore := &bootSelfCheckDescriptorStore{}
-	bus, err := newRuntimeTestEventBus(t, eventStore)
+	bus, err := newRuntimeTestEventBusWithOptions(t, eventStore, runtimebus.EventBusOptions{
+		ContractBundle: source, SourceArtifactFact: sourceartifactfixture.FactFor(root.Artifact()),
+	})
 	if err != nil {
 		t.Fatalf("NewEventBus: %v", err)
 	}
@@ -361,7 +363,8 @@ func TestBudgetTrackerProjectsRecoveryScopesBeforeAllRunTargetsWithoutRunContext
 		},
 	}}, nil, nil, source, executionposture.Live, BudgetRecoveryStageSources{})
 
-	if err := tracker.ProjectRecoveryBudgetState(testAuthorActivityContext(context.Background())); err != nil {
+	ctx := testAuthorActivityContextForBundle(context.Background(), root.Artifact().BundleHash())
+	if err := tracker.ProjectRecoveryBudgetState(ctx); err != nil {
 		t.Fatalf("ProjectRecoveryBudgetState: %v", err)
 	}
 	wantCalls := []string{
@@ -381,7 +384,7 @@ func TestBudgetTrackerProjectsRecoveryScopesBeforeAllRunTargetsWithoutRunContext
 		t.Fatalf("threshold events = %d, want system, global, and two entity transitions", got)
 	}
 
-	if err := tracker.ProjectRecoveryBudgetState(testAuthorActivityContext(context.Background())); err != nil {
+	if err := tracker.ProjectRecoveryBudgetState(ctx); err != nil {
 		t.Fatalf("second ProjectRecoveryBudgetState: %v", err)
 	}
 	if got := len(eventStore.appendedEvents()); got != 4 {

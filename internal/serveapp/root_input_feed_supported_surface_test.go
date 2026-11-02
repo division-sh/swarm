@@ -39,6 +39,10 @@ func TestServedRootInputFeedsExecuteAndSettleBothStores(t *testing.T) {
 							"input":         map[string]any{"format": "jsonl", "content_base64": base64.StdEncoding.EncodeToString([]byte(tc.rows))},
 						}}, "pins": []any{}},
 					}
+					if tc.kind == canonicalrouting.DeploymentFeedKeyedRoot {
+						params["event_name"] = "account.opened"
+						params["payload"] = map[string]any{"account_id": "account"}
+					}
 					first := publicationCompletionHTTPMethod(t.Context(), rt.Endpoint, "run.start", params)
 					if first.err != nil || len(first.rpcError) != 0 {
 						t.Fatalf("root input run.start: transport=%v rpc=%s", first.err, first.rpcError)
