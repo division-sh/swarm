@@ -497,21 +497,25 @@ func TestBuildShowsRootPrimaryEntity(t *testing.T) {
 	}
 }
 
-func TestBuildShowsRequiredAgentProvenance(t *testing.T) {
-	view := mustBuild(t, loadAuthoringAgentProvenanceSource(t, true), nil)
+func TestBuildShowsRequiredAgentDeclarations(t *testing.T) {
+	view := mustBuild(t, loadAuthoringAgentProvenanceSource(t), nil)
 
-	if view.Root.RequiredAgents.Source != runtimecontracts.RequiredAgentSourceInferred ||
-		len(view.Root.RequiredAgents.Agents) != 1 ||
+	if len(view.Root.RequiredAgents.Agents) != 1 ||
 		view.Root.RequiredAgents.Agents[0].Role != "root-agent" ||
-		view.Root.RequiredAgents.Agents[0].Source != runtimecontracts.RequiredAgentSourceInferred {
-		t.Fatalf("root required_agents view = %#v, want inferred root-agent", view.Root.RequiredAgents)
+		!strings.HasSuffix(view.Root.RequiredAgents.Agents[0].SourceFile, "agents.yaml") {
+		t.Fatalf("root required_agents view = %#v, want declared root-agent", view.Root.RequiredAgents)
 	}
 	analysis := flowByID(t, view, "analysis")
-	if analysis.RequiredAgents.Source != runtimecontracts.RequiredAgentSourceExplicit {
-		t.Fatalf("flow required_agents source = %q, want explicit", analysis.RequiredAgents.Source)
+	if len(analysis.RequiredAgents.Agents) != 1 || analysis.RequiredAgents.Agents[0].Role != "analyzer" ||
+		!strings.HasSuffix(analysis.RequiredAgents.Agents[0].SourceFile, "analysis/agents.yaml") {
+		t.Fatalf("flow required_agents agents = %#v, want scoped analyzer", analysis.RequiredAgents.Agents)
 	}
-	if len(analysis.RequiredAgents.Agents) != 0 {
-		t.Fatalf("flow required_agents agents = %#v, want explicit empty boundary", analysis.RequiredAgents.Agents)
+	encoded, err := json.Marshal(view.Root.RequiredAgents)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if strings.Contains(string(encoded), `"source":`) || strings.Contains(string(encoded), "inferred") || strings.Contains(string(encoded), "explicit") {
+		t.Fatalf("required agent readback retained retired provenance: %s", encoded)
 	}
 }
 
@@ -840,7 +844,7 @@ func TestBuildStageGraphShowsBoundedLoopBackEdgeAndEscape(t *testing.T) {
 }
 
 func TestBuildShowsEffectiveAgentPlatformDefaultProvenance(t *testing.T) {
-	view := mustBuild(t, loadAuthoringAgentProvenanceSource(t, false), nil)
+	view := mustBuild(t, loadAuthoringAgentProvenanceSource(t), nil)
 
 	rootAgent := agentByID(t, view.Root.Agents, "root-agent")
 	assertDefaultedAgentField(t, rootAgent, "type", runtimecontracts.DefaultAgentType)
@@ -1256,7 +1260,7 @@ func loadRootPrimaryEntitySource(t testing.TB) semanticview.Source {
 	return semanticview.Wrap(bundle)
 }
 
-func loadAuthoringAgentProvenanceSource(t testing.TB, explicitFlowRequiredAgents bool) semanticview.Source {
+func loadAuthoringAgentProvenanceSource(t testing.TB) semanticview.Source {
 	t.Helper()
 	root := t.TempDir()
 
@@ -1270,13 +1274,9 @@ root-agent:
   subscriptions: [root.requested]
   emit_events: [root.done]
 `)
-	flowSchema := "stages: []\n"
-	if explicitFlowRequiredAgents {
-		flowSchema += "required_agents: []\n"
-	}
 	flowRoot := filepath.Join(root, "analysis")
 	writeAuthoringViewTestFile(t, filepath.Join(flowRoot, "manifest.yaml"), "version: 1.0.0\nplatform_version: '*'\n")
-	writeAuthoringViewTestFile(t, filepath.Join(flowRoot, "schema.yaml"), flowSchema)
+	writeAuthoringViewTestFile(t, filepath.Join(flowRoot, "schema.yaml"), "stages: []\n")
 	writeAuthoringViewTestFile(t, filepath.Join(flowRoot, "agents.yaml"), `
 analyzer:
   role: analyzer

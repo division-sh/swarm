@@ -86,7 +86,6 @@ var stableHardInvalidityRemediation = map[string]string{
 	"primary_entity_validation":               "Declare a valid primary entity or remove the stateful surface that requires one.",
 	"intent_resolution":                       "Declare exactly one valid intent: source on the agent and resolve it before boot.",
 	"reply_lineage_missing":                   "Add the required reply lineage metadata or remove the reply-mode handler contract.",
-	"required_agents_match":                   "Update required agent declarations so subscriptions and emitted events match the contract topology.",
 	"required_mcp_tool_availability":          "Expose the required MCP tool from the configured server or update the agent tool requirement.",
 	"semantic_drift_payload_completeness":     "Populate every required payload field for emitted events or update the event schema to match the emitted payload.",
 	"single_node_per_event":                   "Ensure only one system node owns the exact event handler or split the event ownership.",

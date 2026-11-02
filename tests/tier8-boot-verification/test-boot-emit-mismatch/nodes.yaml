@@ -1,3 +1,0 @@
-worker-node:
-  task.requested:
-    advances_to: done

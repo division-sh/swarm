@@ -1995,45 +1995,6 @@ delay: 7d
 	}
 }
 
-func TestFlowSchemaDocumentDecode_PreservesRequiredAgentSubscribesTo(t *testing.T) {
-	var schema FlowSchemaDocument
-	if err := decodeNodeTestYAML([]byte(`
-# fixture: worker
-required_agents:
-  - role: analyst
-    subscribes_to: [task.requested]
-    emits: [task.completed]
-`), &schema); err != nil {
-		t.Fatalf("yaml.Unmarshal: %v", err)
-	}
-	if len(schema.RequiredAgents) != 1 || len(schema.RequiredAgents[0].SubscribesTo) != 1 || schema.RequiredAgents[0].SubscribesTo[0] != "task.requested" {
-		t.Fatalf("RequiredAgents = %#v, want canonical required-agent subscribes_to", schema.RequiredAgents)
-	}
-}
-
-func TestFlowSchemaDocumentDecode_TracksRequiredAgentsPresence(t *testing.T) {
-	tests := []struct {
-		name     string
-		yamlText string
-		declared bool
-	}{
-		{name: "omitted", yamlText: "stages: []\n# fixture: worker\n", declared: false},
-		{name: "explicit empty", yamlText: "# fixture: worker\nrequired_agents: []\n", declared: true},
-		{name: "explicit entries", yamlText: "# fixture: worker\nrequired_agents:\n  - role: analyst\n", declared: true},
-	}
-	for _, tc := range tests {
-		t.Run(tc.name, func(t *testing.T) {
-			var schema FlowSchemaDocument
-			if err := decodeNodeTestYAML([]byte(tc.yamlText), &schema); err != nil {
-				t.Fatalf("yaml.Unmarshal: %v", err)
-			}
-			if schema.RequiredAgentsDeclared != tc.declared {
-				t.Fatalf("RequiredAgentsDeclared = %v, want %v", schema.RequiredAgentsDeclared, tc.declared)
-			}
-		})
-	}
-}
-
 func TestEntityContractsAdmission_PreservesZeroAndFalseInitialValue(t *testing.T) {
 	var schema EntityContractsDocument
 	if err := decodeNodeTestYAML([]byte(`

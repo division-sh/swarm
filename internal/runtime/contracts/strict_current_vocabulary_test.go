@@ -74,7 +74,7 @@ func TestRetiredOutputPinOptionMapsRejectPresenceAndMerges(t *testing.T) {
 					if merged {
 						member = "<<: {" + member + "}"
 					}
-					_, err := admitSchemaFragment("pins: {outputs: [{event: work.ready, " + member + "}]}\n")
+					_, err := admitSchemaFragment("outputs: [{event: work.ready, " + member + "}]\n")
 					if err == nil || !strings.Contains(err.Error(), "must be a scalar text") || !strings.Contains(err.Error(), `outputs"][0]`) || !strings.Contains(err.Error(), "schema.yaml:") {
 						t.Fatalf("retired output mapping bypassed scalar admission: %v", err)
 					}
@@ -93,7 +93,7 @@ func TestRetiredInputPinOptionMapsRejectPresenceAndMerges(t *testing.T) {
 					if merged {
 						member = "<<: {" + member + "}"
 					}
-					_, err := admitSchemaFragment("pins: {inputs: [{event: work.ready, " + member + "}]}\n")
+					_, err := admitSchemaFragment("inputs: [{event: work.ready, " + member + "}]\n")
 					if err == nil || !strings.Contains(err.Error(), "must be a scalar text") || !strings.Contains(err.Error(), `["inputs"][0]`) || !strings.Contains(err.Error(), "schema.yaml:") {
 						t.Fatalf("retired input mapping bypassed scalar admission: %v", err)
 					}

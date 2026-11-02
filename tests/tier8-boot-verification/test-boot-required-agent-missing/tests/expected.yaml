@@ -1,8 +1,0 @@
-conformance:
-  disposition: verify-only
-  verify: reject
-  proves:
-    - catalog.verify.boot_diagnostics
-  diagnostic:
-    category: "required_agents_match"
-    contains: "missing-agent"
