@@ -17,6 +17,7 @@ import (
 	"github.com/division-sh/swarm/internal/store/devscratch"
 	storeselected "github.com/division-sh/swarm/internal/store/selected"
 	"github.com/division-sh/swarm/internal/store/selected/selectedtest"
+	"github.com/division-sh/swarm/internal/testutil/testprocess"
 )
 
 const (
@@ -392,7 +393,7 @@ func startEpochHelper(t *testing.T, root, mode string) *epochHelper {
 	}
 	var stderr strings.Builder
 	cmd.Stderr = &stderr
-	if err := cmd.Start(); err != nil {
+	if err := testprocess.Start(cmd); err != nil {
 		t.Fatal(err)
 	}
 	helper := &epochHelper{cmd: cmd}

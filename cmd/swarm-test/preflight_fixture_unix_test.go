@@ -4,6 +4,7 @@ package main
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
 	"fmt"
 	"os"
@@ -13,6 +14,8 @@ import (
 	"strings"
 	"testing"
 	"time"
+
+	"github.com/division-sh/swarm/internal/testutil/testprocess"
 )
 
 type preflightFixture struct {
@@ -27,6 +30,19 @@ type preflightFixture struct {
 
 func preflightFixtureCommand() []string {
 	return []string{os.Args[0], "-test.v", "-test.run=^TestPreflightCommandJoinsCancellationAndRefusesIncompleteExecution$"}
+}
+
+func setPreflightFixtureOwner(t *testing.T) {
+	t.Helper()
+	owner, err := testprocess.Current()
+	if err != nil {
+		t.Fatal(err)
+	}
+	raw, err := json.Marshal(owner)
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Setenv("SWARM_TEST_PREFLIGHT_OUTER_OWNER", string(raw))
 }
 
 func provePreflightTerminalOutcomes(t *testing.T) {
@@ -127,6 +143,7 @@ func provePreflightEarlyCleanup(t *testing.T, repo string) {
 
 func startPreflightFixture(t *testing.T, parent context.Context, mode string, args []string) *preflightFixture {
 	t.Helper()
+	setPreflightFixtureOwner(t)
 	root, err := os.MkdirTemp("", "swarm-preflight-fixture-")
 	if err != nil {
 		t.Fatal(err)

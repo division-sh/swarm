@@ -25,6 +25,8 @@ import (
 	"syscall"
 	"testing"
 	"time"
+
+	"github.com/division-sh/swarm/internal/testutil/testprocess"
 )
 
 const (
@@ -1468,7 +1470,7 @@ func fakeDockerWorker(root string, args []string) int {
 	}
 	defer stdin.Close()
 	command.Stdout, command.Stderr = os.Stdout, os.Stderr
-	if err := command.Start(); err != nil {
+	if err := testprocess.Start(command); err != nil {
 		return fakeDockerUnexpected(root, args, "native worker process failed")
 	}
 	joined := make(chan struct{})

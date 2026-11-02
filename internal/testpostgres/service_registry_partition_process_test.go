@@ -10,6 +10,8 @@ import (
 	"runtime"
 	"testing"
 	"time"
+
+	"github.com/division-sh/swarm/internal/testutil/testprocess"
 )
 
 func proveIndependentRegistryProcesses(t *testing.T) {
@@ -95,7 +97,7 @@ func startNamespaceProcess(t *testing.T, repo, binRoot, runner, docker string) *
 	p.command.Dir = repo
 	p.command.Env = descendantSettlementEnvironment(os.Environ(), binRoot, stateHome, false, "SWARM_TEST_PROCESS_PREFIX="+p.prefix)
 	p.command.Stdout, p.command.Stderr = log, log
-	if err := p.command.Start(); err != nil {
+	if err := testprocess.Start(p.command); err != nil {
 		_ = log.Close()
 		t.Fatal(err)
 	}

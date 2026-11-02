@@ -28,6 +28,7 @@ import (
 	"github.com/division-sh/swarm/internal/store/selected/selectedtest"
 	"github.com/division-sh/swarm/internal/testpostgres"
 	"github.com/division-sh/swarm/internal/testutil"
+	"github.com/division-sh/swarm/internal/testutil/testprocess"
 )
 
 type servingExitRequest struct {
@@ -144,7 +145,7 @@ func TestServingInternalAndExternalStopKeepLeaseUntilJoinOrDeathBothStores(t *te
 					if err != nil {
 						t.Fatal(err)
 					}
-					if err := cmd.Start(); err != nil {
+					if err := testprocess.Start(cmd); err != nil {
 						t.Fatal(err)
 					}
 					ended := make(chan error, 1)

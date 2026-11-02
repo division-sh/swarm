@@ -18,6 +18,8 @@ import (
 	"syscall"
 	"testing"
 	"time"
+
+	"github.com/division-sh/swarm/internal/testutil/testprocess"
 )
 
 func TestClaudeCLIManagedLifecycleFromReleaseBinaryDefaults(t *testing.T) {
@@ -109,7 +111,7 @@ func TestClaudeCLIManagedLifecycleFromReleaseBinaryDefaults(t *testing.T) {
 	cmd.Env = env
 	cmd.Stdout = runOutput
 	cmd.Stderr = runOutput
-	if err := cmd.Start(); err != nil {
+	if err := testprocess.Start(cmd); err != nil {
 		t.Fatalf("start release foreground run: %v", err)
 	}
 	waitDone := make(chan error, 1)

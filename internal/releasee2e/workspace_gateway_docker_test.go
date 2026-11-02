@@ -18,6 +18,8 @@ import (
 	"syscall"
 	"testing"
 	"time"
+
+	"github.com/division-sh/swarm/internal/testutil/testprocess"
 )
 
 const realDockerProxyArgument = "--test-real-workspace-docker-proxy"
@@ -105,7 +107,7 @@ func runWorkspaceDockerProxy(args []string) int {
 			return 2
 		}
 		defer stdout.Close()
-		if cmd.Start() != nil {
+		if testprocess.Start(cmd) != nil {
 			return 2
 		}
 		joined := make(chan struct{})
@@ -577,7 +579,7 @@ func startWorkspacePrivateStoreObserver(t *testing.T, binary, root string) func(
 	if err != nil {
 		t.Fatal(err)
 	}
-	if err := cmd.Start(); err != nil {
+	if err := testprocess.Start(cmd); err != nil {
 		t.Fatal(err)
 	}
 	type joinedResult struct {

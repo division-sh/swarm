@@ -26,6 +26,7 @@ import (
 	"github.com/division-sh/swarm/internal/runtime/runlifecycle"
 	"github.com/division-sh/swarm/internal/runtime/startupownership"
 	"github.com/division-sh/swarm/internal/store/storetest"
+	"github.com/division-sh/swarm/internal/testutil/testprocess"
 	"github.com/google/uuid"
 )
 
@@ -78,7 +79,7 @@ func killSelectedForkAtCheckpoint(t *testing.T, backend, dsn, cut string) select
 		t.Fatal(err)
 	}
 	defer input.Close()
-	if err := cmd.Start(); err != nil {
+	if err := testprocess.Start(cmd); err != nil {
 		t.Fatal(err)
 	}
 	writer.Close()
