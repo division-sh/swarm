@@ -365,10 +365,11 @@ func asStringForConversationTest(value any) string {
 }
 
 type relayRuntime struct {
-	relayPath string
-	relayErr  error
-	toolName  string
-	raw       []byte
+	relayPath   string
+	relayChunks []string
+	relayErr    error
+	toolName    string
+	raw         []byte
 }
 
 func (r *relayRuntime) StartSession(_ context.Context, agentID, _ string, _ []ToolDefinition) (*Session, error) {
@@ -387,6 +388,7 @@ func (r *relayRuntime) PersistOversizedToolResultRelay(_ context.Context, _ *Ses
 	}
 	return toolResultRelayRef{
 		Path:       r.relayPath,
+		Chunks:     r.relayChunks,
 		ReadTool:   "read_file",
 		Format:     "json",
 		Visibility: "workspace_mount",
@@ -910,7 +912,7 @@ func TestConversation_ExecuteToolCalls_PreservesLargeReadFileResultOnSupportedRe
 }
 
 func TestConversation_ExecuteToolCalls_RelaysOversizedResultsForHelperRuntime(t *testing.T) {
-	huge := strings.Repeat("x", maxToolResultBytes+1024)
+	huge := "HEAD" + strings.Repeat("x", maxToolResultBytes+1024) + "TAIL"
 	rt := &relayRuntime{relayPath: "/workspace/.swarm/tool-results/sess-relay/sql-execute-1.json"}
 	tools := []ToolDefinition{{Name: "sql_execute"}, {Name: "read_file"}}
 	c := newTestConversation("a1", "t1", "sys", tools, testMemory(), 4, rt)
@@ -918,7 +920,7 @@ func TestConversation_ExecuteToolCalls_RelaysOversizedResultsForHelperRuntime(t 
 	c.SetToolExecutor(largeToolExec{payload: map[string]any{"blob": huge}})
 
 	ctx := models.WithActor(context.Background(), models.AgentConfig{ExecutionMode: "live", ID: "a1"})
-	raw, _, _ := c.executeToolCalls(ctx, []ToolCall{{Name: "sql_execute", Arguments: map[string]any{"query": "select 1"}}})
+	raw, _, _ := c.executeToolCalls(ctx, []ToolCall{{ID: "sql-1", Name: "sql_execute", Arguments: map[string]any{"query": "select 1"}}})
 	var arr []map[string]any
 	if err := json.Unmarshal([]byte(raw), &arr); err != nil {
 		t.Fatalf("unmarshal tool payload: %v", err)
@@ -943,6 +945,33 @@ func TestConversation_ExecuteToolCalls_RelaysOversizedResultsForHelperRuntime(t 
 	if strings.Contains(string(rt.raw), "...(truncated)") {
 		t.Fatalf("relay payload should keep full raw json, got %q", string(rt.raw))
 	}
+	provider := providerToolResults(raw)
+	if len(provider) != 1 || provider[0].CallID != "sql-1" || !strings.Contains(provider[0].Payload, rt.relayPath) || !strings.Contains(provider[0].Payload, "read_file") || !strings.Contains(provider[0].Payload, "HEAD") || !strings.Contains(provider[0].Payload, "TAIL") || !strings.Contains(provider[0].Payload, "[... tool output truncated ...]") {
+		t.Fatalf("provider lost relay retrieval instructions or head/tail: %#v", provider)
+	}
+	if len(raw) > maxToolMessageBytes || len(provider[0].Payload) > maxToolResultBytes {
+		t.Fatal("relay rendering exceeded existing budgets")
+	}
+	t.Run("chunked batch", func(t *testing.T) {
+		rt.relayChunks = []string{"/workspace/synthetic-1.json", "/workspace/synthetic-2.json"}
+		calls := make([]ToolCall, 8)
+		for i := range calls {
+			calls[i] = ToolCall{ID: fmt.Sprintf("sql-%d", i), Name: "sql_execute", Arguments: map[string]any{"query": "select 1"}}
+		}
+		raw, _, err := c.executeToolCalls(ctx, calls)
+		if err != nil || len(raw) > maxToolMessageBytes {
+			t.Fatalf("chunked relay batch bytes=%d err=%v", len(raw), err)
+		}
+		provider := providerToolResults(raw)
+		if len(provider) != len(calls) {
+			t.Fatalf("provider results=%d, want %d", len(provider), len(calls))
+		}
+		for i, result := range provider {
+			if result.CallID != calls[i].ID || !strings.Contains(result.Payload, `"chunks":["/workspace/synthetic-1.json","/workspace/synthetic-2.json"]`) || strings.Contains(result.Payload, rt.relayPath) || !strings.Contains(result.Payload, "HEAD") || !strings.Contains(result.Payload, "TAIL") || len(result.Payload) >= maxToolResultBytes {
+				t.Fatalf("batch result %d lost ordered chunks or was not batch-limited", i)
+			}
+		}
+	})
 }
 
 func TestConversation_ExecuteToolCalls_SuppressesRuntimeReadFileFollowUpWithoutReadFileSurface(t *testing.T) {
