@@ -41,10 +41,10 @@ func TestRouteTableMixedRolesPreserveFullSubscriberIdentity(t *testing.T) {
 
 	var got []Subscriber
 	for _, subscriber := range variants {
-		got = appendUniqueSubscriber(got, subscriber)
+		got = dedupeSubscribers(append(got, subscriber))
 	}
 	if len(got) != len(variants) {
-		t.Fatalf("appendUniqueSubscriber retained %d roles, want %d: %#v", len(got), len(variants), got)
+		t.Fatalf("incremental reduction retained %d roles, want %d: %#v", len(got), len(variants), got)
 	}
 	if deduped := dedupeSubscribers(variants); len(deduped) != len(variants) {
 		t.Fatalf("dedupeSubscribers retained %d roles, want %d: %#v", len(deduped), len(variants), deduped)
@@ -78,7 +78,7 @@ func TestRouteTableMixedRolesExactWildcardConstruction(t *testing.T) {
 			first.MatchPattern = tc.first
 			last := base
 			last.MatchPattern = tc.last
-			got := appendUniqueSubscriber(appendUniqueSubscriber(nil, first), last)
+			got := dedupeSubscribers([]Subscriber{first, last})
 			if len(got) != 1 {
 				t.Fatalf("roles = %#v, want one behavioral role", got)
 			}
@@ -109,7 +109,7 @@ func TestPubsubProjectionPreservesDistinctHandlerRoles(t *testing.T) {
 			t.Fatalf("distinct handler roles collapsed: %+v", got)
 		}
 		for _, role := range roles {
-			got = appendUniqueSubscriber(got, role)
+			got = dedupeSubscribers(append(got, role))
 		}
 		if len(got) != 2 {
 			t.Fatalf("equal roles were not idempotent: %+v", got)

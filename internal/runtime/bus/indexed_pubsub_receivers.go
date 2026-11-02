@@ -58,11 +58,9 @@ func (r connectRoutePlanResolver) resolvePubsubSubscribers(ctx context.Context, 
 		if err != nil {
 			return nil, err
 		}
-		for _, subscriber := range bound {
-			out = appendUniqueSubscriber(out, subscriber)
-		}
+		out = append(out, bound...)
 	}
-	return out, nil
+	return dedupeSubscribers(out), nil
 }
 
 func (r connectRoutePlanResolver) pubsubInstanceData(ctx context.Context, scope pipeline.FlowInstanceLookupScope) (map[string]flowidentity.Instance, error) {
@@ -262,7 +260,14 @@ func (rt *RouteTable) matchPubsubDefinition(declaration routeFlowTemplate, subsc
 			bound.routeSource = subscriberRouteSourceSubscription
 			bound.LocalizedEvent = eventidentity.Normalize(pattern.admission.LocalEvent())
 			bound.MatchPattern = eventPattern
-			out = append(out, projectSubscriberEvents([]Subscriber{bound}, key)...)
+			if bound.Recipient.IsNode() && bound.subscription.Admitted() && bound.subscription.Pattern() {
+				local, matched := bound.subscription.LocalEventAt(bound.Path, key)
+				if !matched {
+					continue
+				}
+				bound.LocalizedEvent = local
+			}
+			out = append(out, bound)
 		}
 	}
 	return out
