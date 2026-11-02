@@ -180,9 +180,16 @@ func requireMCPJourneyWireInspection(t *testing.T, ctx context.Context, process 
 	if len(conversations) != 1 {
 		t.Fatalf("public MCP conversation count=%d, want 1", len(conversations))
 	}
-	turns := listGoldenTurns(t, ctx, process.rpc, conversations[0].SessionID)
-	if len(turns) != 2 {
-		t.Fatalf("public MCP turn count=%d, want 2", len(turns))
+	var page struct {
+		Conversation goldenConversation `json:"conversation"`
+		Turns        []goldenTurn       `json:"turns"`
+		NextCursor   string             `json:"next_cursor"`
+	}
+	if err := process.rpc.call(ctx, "conversation.list_turns", map[string]any{"session_id": conversations[0].SessionID, "limit": 10}, &page); err != nil {
+		t.Fatal(err)
+	}
+	if page.Conversation.SessionID != conversations[0].SessionID || page.Conversation.TurnCount != 2 || len(page.Turns) != 2 || page.NextCursor != "" {
+		t.Fatalf("public MCP turn page=%+v, want exactly both turns", page)
 	}
 	var sent struct {
 		Tools []any `json:"tools"`
@@ -190,7 +197,7 @@ func requireMCPJourneyWireInspection(t *testing.T, ctx context.Context, process 
 	if err := json.Unmarshal(actual, &sent); err != nil {
 		t.Fatal(err)
 	}
-	for _, turn := range turns {
+	for _, turn := range page.Turns {
 		var detail struct {
 			ProviderRendering struct {
 				Status string `json:"status"`
