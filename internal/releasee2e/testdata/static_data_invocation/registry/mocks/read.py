@@ -10,7 +10,7 @@ def handle(input):
         return {"calls": [{"name": "read_flow_data", "arguments": {
             "kind": "static_file", "static_id": own_id,
         }}]}
-    result = json.loads(input["tool_results"][-1]["content"])["tool_result"][0]
+    result = json.loads(input["tool_results"][-1]["content"])[0]
     assert result["ok"], result
     value = result["result"]
     return {"calls": [{"name": "emit_child_completed", "arguments": {
