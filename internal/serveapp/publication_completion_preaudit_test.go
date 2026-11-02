@@ -345,10 +345,6 @@ connect:
 		}
 	}
 	h.opts.SourceRoot = root
-	var owner storetest.RunFixtureStore
-	captureSelectedRuntimePersistence(t, func(p serveRuntimePersistence) {
-		owner, _ = p.deps.EventStore.(storetest.RunFixtureStore)
-	})
 	h.start(t)
 	t.Cleanup(func() { h.stop(t) })
 	var identity apiv1.RuntimeIdentityResult
