@@ -20,7 +20,7 @@ import (
 
 // The C4 timer family has no agents or providers. Its post-materialization
 // assertions still require a real admitted ordinary runtime and live handoff.
-func c4LiveTimerRuntime(t *testing.T, ctx context.Context, selected any, loaded runforkexecution.LoadedSelectedContractSource, capability startupownership.ProcessCapability) (*runtimepkg.Runtime, *runtimepkg.RuntimeContextManager) {
+func c4LiveTimerRuntime(t *testing.T, ctx context.Context, selected any, loaded runforkexecution.LoadedSelectedContractSource, capability startupownership.ProcessCapability) (*runtimepkg.Runtime, *runtimepkg.RuntimeContextManager, context.Context) {
 	t.Helper()
 	value, _ := storeTestWorkFixtures.Load(t)
 	work := value.(*storeTestWorkFixture)
@@ -79,8 +79,7 @@ func c4LiveTimerRuntime(t *testing.T, ctx context.Context, selected any, loaded 
 	if err != nil {
 		t.Fatal(err)
 	}
-	// The construction fixture owns a different generation. Start the real
-	// runtime from the same process, not by replacing that fixture's custody.
+	// The construction generation has retired; retain its process for this runtime.
 	ctx, err = startupownership.WithProcessMutationAuthority(worklifetime.WithProcess(context.Background(), work.process), capability)
 	if err != nil {
 		t.Fatal(err)
@@ -148,5 +147,5 @@ func c4LiveTimerRuntime(t *testing.T, ctx context.Context, selected any, loaded 
 	if err := use.Done(); err != nil {
 		t.Fatal(err)
 	}
-	return rt, contexts
+	return rt, contexts, ctx
 }

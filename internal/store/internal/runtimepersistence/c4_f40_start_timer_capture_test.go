@@ -23,7 +23,7 @@ func TestC4F40RealCreationStartTimerCaptureBothStores(t *testing.T) {
 	for _, backend := range []string{"sqlite", "postgres"} {
 		t.Run(backend, func(t *testing.T) {
 			selected, _, _ := newP16RaceStore(t, backend)
-			ctx, command := c4DeploymentStartCommand(t, selected, true)
+			ctx, command, _ := c4DeploymentStartCommand(t, selected, true)
 			if len(command.Root.Plan.Lifecycle.Timers) != 1 {
 				t.Fatalf("real root plan omitted its initial timer: %+v", command.Root.Plan.Lifecycle)
 			}
