@@ -177,6 +177,11 @@ func (s *processLifecycleSupervisor) ShutdownProcessWithOptions(ctx context.Cont
 	}
 	s.operationMu.Lock()
 	defer s.operationMu.Unlock()
+	opts.Grace = remainingServeShutdownGrace(grace, deadline)
+	return s.shutdownDependentRuntimesLocked(ctx, opts, selectedErr)
+}
+
+func (s *processLifecycleSupervisor) shutdownDependentRuntimesLocked(ctx context.Context, opts runtime.ShutdownOptions, shutdownErr error) error {
 	s.mu.RLock()
 	manager, current := s.runtimeContexts, s.currentRT
 	s.mu.RUnlock()
@@ -187,8 +192,6 @@ func (s *processLifecycleSupervisor) ShutdownProcessWithOptions(ctx context.Cont
 	} else if current != nil {
 		current.CloseAdmission()
 	}
-	opts.Grace = remainingServeShutdownGrace(grace, deadline)
-	shutdownErr := selectedErr
 	var terminalErr error
 	if s.processCapability != nil {
 		if result, terminal := s.processCapability.TerminalResult(); terminal && result.Cause != runtimestartupownership.TerminalReleased {
