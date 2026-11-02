@@ -199,6 +199,28 @@ func TestEventDeliveryProjectionCannotPersist(t *testing.T) {
 	if !strings.Contains(string(delivery.Event().Payload()), `"chat_id":"123"`) || delivery.Event().DeliveryContext().ReplyContextID() != "reply-1" {
 		t.Fatalf("delivery view = %s / %#v", delivery.Event().Payload(), delivery.Event().DeliveryContext())
 	}
+	platform, err := NewStandaloneRuntimeControlEvent(StandaloneRuntimeEventInput{Facts: EventFacts{
+		ID: "7cf8708d-477a-462e-bb41-42dd4874f597", Type: "platform.boot",
+		Producer: ProducerClaim{Type: EventProducerPlatform, ID: "runtime"},
+		Payload:  []byte(`{"boot":"one"}`), ExecutionMode: executionmode.Live,
+		RoutingSource: NewPlatformControlRoutingSource(),
+	}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, runID := range []string{"2c5ae718-cfc6-4d48-81d4-fe773f7d3c07", "2aee5e0a-59ed-475c-96b5-13ac449b9b23"} {
+		view, err := NewDeliveryEvent(platform, DeliveryRoute{Context: DeliveryContext{RunID: runID}})
+		if err != nil {
+			t.Fatal(err)
+		}
+		if view.Event().RunID() != runID || view.JournalEvent().RunID() != "" || view.Event().ID() != platform.ID() ||
+			string(view.JournalEvent().Payload()) != string(platform.Payload()) || view.Event().ParentEventID() != "" {
+			t.Fatal("delivery execution changed its platform occurrence", view.Event(), view.JournalEvent())
+		}
+		if _, err := NewDeliveryEvent(event, DeliveryRoute{Context: DeliveryContext{RunID: runID}}); err == nil {
+			t.Fatal("a delivery borrowed a run for a non-platform publication")
+		}
+	}
 }
 
 func TestDeliveryPayloadProjectionPreservesNumericKinds(t *testing.T) {

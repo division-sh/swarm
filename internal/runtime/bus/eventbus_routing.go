@@ -142,6 +142,13 @@ func (h *internalSubscriptionHandle) send(ctx context.Context, evt events.Event,
 	if owner == nil {
 		return agentRouteSendInactive, returnDeliveryContinuation(ctx, continuation)
 	}
+	if evt.IsRunlessPlatformPublication() && handoff.Context.RunID != "" {
+		projection, err := events.NewDeliveryEvent(evt, handoff)
+		if err != nil {
+			return agentRouteSendInactive, errors.Join(err, returnDeliveryContinuation(ctx, continuation))
+		}
+		evt = projection.Event()
+	}
 	deliveryCtx, closeDeliveryCtx, err := h.bus.receiverRouteContext(ctx, evt, handoff)
 	if err != nil {
 		return agentRouteSendInactive, errors.Join(err, returnDeliveryContinuation(ctx, continuation))
@@ -256,6 +263,13 @@ func (r *agentRouteHandle) send(ctx context.Context, evt events.Event, handoff e
 	r.mu.RUnlock()
 	if !active {
 		return agentRouteSendInactive, returnDeliveryContinuation(ctx, continuation)
+	}
+	if evt.IsRunlessPlatformPublication() && handoff.Context.RunID != "" {
+		projection, err := events.NewDeliveryEvent(evt, handoff)
+		if err != nil {
+			return agentRouteSendInactive, errors.Join(err, returnDeliveryContinuation(ctx, continuation))
+		}
+		evt = projection.Event()
 	}
 	deliveryCtx, closeDeliveryCtx, err := r.bus.receiverRouteContext(ctx, evt, handoff)
 	if err != nil {

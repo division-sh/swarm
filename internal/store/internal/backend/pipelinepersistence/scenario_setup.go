@@ -295,6 +295,9 @@ func validateScenarioConstruction(ctx context.Context, req runtimepipeline.Scena
 		}
 		return []runtimepipeline.FlowInstanceActivationPlan{plan}, nil
 	}
+	if len(req.Entities) == 0 && matchesPrivateScenarioStart(ctx, req) {
+		return []runtimepipeline.FlowInstanceActivationPlan{plan}, nil
+	}
 	return nil, fmt.Errorf("scenario construction has no exact root seed")
 }
 

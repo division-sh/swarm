@@ -137,6 +137,12 @@ type DeliveryEvent struct {
 }
 
 func NewDeliveryEvent(event Event, route DeliveryRoute) (DeliveryEvent, error) {
+	if err := route.Context.Validate(); err != nil {
+		return DeliveryEvent{}, err
+	}
+	if runID := route.Context.RunID; runID != "" && runID != event.RunID() && !event.IsRunlessPlatformPublication() {
+		return DeliveryEvent{}, fmt.Errorf("delivery run crosses its publication")
+	}
 	projection, err := route.PayloadProjection.Canonical()
 	if err != nil {
 		return DeliveryEvent{}, err
@@ -159,6 +165,10 @@ func NewDeliveryEvent(event Event, route DeliveryRoute) (DeliveryEvent, error) {
 		}
 	}
 	view := event.Clone()
+	if route.Context.RunID != "" && event.IsRunlessPlatformPublication() {
+		view.runID = route.Context.RunID
+		view.runtimeIntent = runtimeLineageRunScoped
+	}
 	view.payload = clonePayload(payload)
 	view.deliveryContext = route.Context.Normalized()
 	target := route.Target.Route()

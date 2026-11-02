@@ -116,7 +116,7 @@ func admitPersistableEvent(event Event, options AdmissionOptions) (AdmittedEvent
 		if err := validateRuntimeLineageIntent(admitted); err != nil {
 			return AdmittedEvent{}, err
 		}
-		if admitted.runtimeIntent == runtimeLineageStandalone && admitted.RunID() == "" {
+		if admitted.runtimeIntent == runtimeLineageStandalone && admitted.RunID() == "" && admitted.ProducerType() != EventProducerPlatform {
 			admitted.runID = uuid.NewString()
 		}
 	case EventAdmissionDiagnosticDirect:
@@ -153,6 +153,9 @@ func freshRunDisposition(event Event) (AdmittedRunDisposition, error) {
 	case EventAdmissionRuntimeControl, EventAdmissionRuntimeDiagnostic:
 		switch event.runtimeIntent {
 		case runtimeLineageStandalone:
+			if event.IsRunlessPlatformPublication() {
+				return AdmittedRunless, nil
+			}
 			return AdmittedRunCreateAuthorized, nil
 		case runtimeLineageCausal, runtimeLineageRunScoped:
 			return AdmittedRunRequireActive, nil

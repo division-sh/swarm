@@ -60,10 +60,7 @@ func (a *Adapter) materializationReady(ctx context.Context, q queryer, record de
 	if err != nil {
 		return false, err
 	}
-	if err := record.Route.Initialization.ValidateEvent(event); err != nil {
-		return false, err
-	}
-	if err := record.Route.Initialization.ValidateRoute(record.Route); err != nil {
+	if err := events.ValidateReceiverMaterializations(event, []events.DeliveryRoute{record.Route}); err != nil {
 		return false, err
 	}
 	return a.materializedReceiverExecutionReady(ctx, q, record, claimTx)

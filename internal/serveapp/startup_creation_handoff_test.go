@@ -91,6 +91,9 @@ func (b *startupCreationDiagnostics) evidence(t *testing.T, eventID string) {
 
 func TestComposedStartupCreationPublicationHandoffOnBothStores(t *testing.T) {
 	for _, backend := range []string{"sqlite", "postgres"} {
+		t.Run(backend+"/runless_platform_live", func(t *testing.T) {
+			testRunlessPlatformLivePublication(t, backend)
+		})
 		for _, scenario := range []string{"startup_recovery", "ordinary_async", "recovery_disabled", "unknown_dispatch_mode"} {
 			t.Run(backend+"/"+scenario, func(t *testing.T) {
 				ctx, cancel := context.WithCancel(context.Background())

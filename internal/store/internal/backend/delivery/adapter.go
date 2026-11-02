@@ -244,18 +244,36 @@ func (a *Adapter) commitInitialTx(ctx context.Context, tx *sql.Tx, attempt *muta
 		return nil, err
 	}
 	routes = events.NormalizeDeliveryRoutes(routes)
+	var publication events.Event
+	if len(routes) != 0 {
+		var err error
+		publication, err = a.materializationEvent(ctx, tx, eventID)
+		if err != nil {
+			return nil, err
+		}
+		if runID == "" && !publication.IsRunlessPlatformPublication() {
+			return nil, fmt.Errorf("run-less executable delivery requires its platform publication")
+		}
+		if runID != publication.RunID() {
+			return nil, fmt.Errorf("delivery run contradicts its immutable publication")
+		}
+	}
 	for _, route := range routes {
 		if route.Initialization.Empty() && !(route.Recipient.IsAgent() && route.Target.MaterializingEntity()) {
 			continue
 		}
-		event, err := a.materializationEvent(ctx, tx, eventID)
+		deliveryEvent, err := events.NewDeliveryEvent(publication, route)
 		if err != nil {
 			return nil, err
 		}
-		if event.RunID() != runID {
+		expectedRun := runID
+		if publication.IsRunlessPlatformPublication() {
+			expectedRun = route.Context.RunID
+		}
+		if deliveryEvent.Event().RunID() != expectedRun {
 			return nil, fmt.Errorf("receiver materialization run contradicts publication")
 		}
-		if err := events.ValidateReceiverMaterializations(event, routes); err != nil {
+		if err := events.ValidateReceiverMaterializations(publication, routes); err != nil {
 			return nil, err
 		}
 		break
@@ -268,7 +286,14 @@ func (a *Adapter) commitInitialTx(ctx context.Context, tx *sql.Tx, attempt *muta
 	}
 	proofs := make([]DurableHandoffProof, 0, len(routes))
 	for _, route := range routes {
-		obligation, err := NewObligation(eventID, runID, route, authority)
+		deliveryRun := runID
+		if publication.IsRunlessPlatformPublication() {
+			deliveryRun = route.Context.RunID
+		}
+		if route.Context.RunID != "" && route.Context.RunID != deliveryRun {
+			return nil, fmt.Errorf("delivery run contradicts its publication")
+		}
+		obligation, err := NewObligation(eventID, deliveryRun, route, authority)
 		if err != nil {
 			return nil, err
 		}
@@ -1061,12 +1086,28 @@ func (a *Adapter) RunIDExact(ctx context.Context, q queryer, event events.Event,
 	if err != nil {
 		return "", err
 	}
-	query := `SELECT d.run_id::text FROM event_deliveries d JOIN events e ON e.event_id = d.event_id AND e.run_id = d.run_id WHERE d.delivery_id = $1::uuid`
+	query := `SELECT d.run_id::text FROM event_deliveries d JOIN events e ON e.event_id = d.event_id
+		AND (e.run_id = d.run_id OR (e.run_id IS NULL AND e.event_class IN ('runtime_control','runtime_diagnostic')
+		AND e.produced_by_type = 'platform' AND e.source_event_id IS NULL AND d.run_id = NULLIF($2,'')::uuid)) WHERE d.delivery_id = $1::uuid`
 	if a.dialect == DialectSQLite {
-		query = `SELECT d.run_id FROM event_deliveries d JOIN events e ON e.event_id = d.event_id AND e.run_id = d.run_id WHERE d.delivery_id = ?`
+		query = `SELECT d.run_id FROM event_deliveries d JOIN events e ON e.event_id = d.event_id
+			AND (e.run_id = d.run_id OR (e.run_id IS NULL AND e.event_class IN ('runtime_control','runtime_diagnostic')
+			AND e.produced_by_type = 'platform' AND e.source_event_id IS NULL AND d.run_id = NULLIF(?2,''))) WHERE d.delivery_id = ?1`
+	}
+	selectedRun := ""
+	if event.IsRunlessPlatformPublication() {
+		if route.Context.RunID == "" {
+			return "", fmt.Errorf("platform delivery has no selected execution run")
+		}
+	}
+	if route.Context.RunID != "" {
+		if event.RunID() != route.Context.RunID && !event.IsRunlessPlatformPublication() {
+			return "", fmt.Errorf("delivery run crosses its publication")
+		}
+		selectedRun = route.Context.RunID
 	}
 	var runID string
-	if err := q.QueryRowContext(ctx, query, deliveryID).Scan(&runID); err != nil {
+	if err := q.QueryRowContext(ctx, query, deliveryID, selectedRun).Scan(&runID); err != nil {
 		if errors.Is(err, sql.ErrNoRows) {
 			return "", ErrNotFound
 		}
@@ -3263,7 +3304,9 @@ func (a *Adapter) selectRecordWithPrefix(prefix string) string {
 				d.started_at, d.settled_at, d.created_at, d.updated_at,
 				e.event_name, COALESCE(e.entity_id, ''), COALESCE(e.flow_instance, ''), COALESCE(r.bundle_hash, ''),
 				CAST(s.delivery_id AS TEXT), s.selection_context, s.disposition, s.flow_path, s.declaration_family, s.semantic_path, s.display_label
-			FROM event_deliveries d JOIN events e ON e.event_id = d.event_id AND e.run_id = d.run_id
+			FROM event_deliveries d JOIN events e ON e.event_id = d.event_id
+			AND (e.run_id = d.run_id OR (e.run_id IS NULL AND e.event_class IN ('runtime_control','runtime_diagnostic')
+			AND e.produced_by_type = 'platform' AND e.source_event_id IS NULL AND json_extract(d.delivery_context,'$.run_id') = d.run_id))
 			LEFT JOIN event_delivery_attempts current_attempt
 			  ON current_attempt.delivery_id = d.delivery_id
 			 AND current_attempt.claim_version = d.current_attempt_version
@@ -3287,7 +3330,9 @@ func (a *Adapter) selectRecordWithPrefix(prefix string) string {
 			d.started_at, d.settled_at, d.created_at, d.updated_at,
 			e.event_name, COALESCE(e.entity_id::text, ''), COALESCE(e.flow_instance, ''), COALESCE(r.bundle_hash, ''),
 			CAST(s.delivery_id AS TEXT), s.selection_context, s.disposition, s.flow_path, s.declaration_family, s.semantic_path, s.display_label
-		FROM event_deliveries d JOIN events e ON e.event_id = d.event_id AND e.run_id = d.run_id
+		FROM event_deliveries d JOIN events e ON e.event_id = d.event_id
+		AND (e.run_id = d.run_id OR (e.run_id IS NULL AND e.event_class IN ('runtime_control','runtime_diagnostic')
+		AND e.produced_by_type = 'platform' AND e.source_event_id IS NULL AND d.delivery_context->>'run_id' = d.run_id::text))
 		LEFT JOIN event_delivery_attempts current_attempt
 		  ON current_attempt.delivery_id = d.delivery_id
 		 AND current_attempt.claim_version = d.current_attempt_version
@@ -3387,6 +3432,9 @@ func (a *Adapter) scanRecord(row scanner) (deliveryRecord, error) {
 	)
 	if err != nil {
 		return deliveryRecord{}, fmt.Errorf("%w: persisted delivery route: %v", ErrConflict, err)
+	}
+	if record.Route.Context.RunID != "" && record.Route.Context.RunID != record.RunID {
+		return deliveryRecord{}, fmt.Errorf("%w: delivery context has a foreign execution run", ErrConflict)
 	}
 	derived, err := record.Route.Identity()
 	if !record.Route.Initialization.Empty() {

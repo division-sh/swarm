@@ -10,6 +10,7 @@ import (
 	"github.com/division-sh/swarm/internal/runtime/correlation"
 	"github.com/division-sh/swarm/internal/runtime/effects"
 	"github.com/division-sh/swarm/internal/runtime/pipeline"
+	"github.com/division-sh/swarm/internal/runtime/scenarioexecution"
 	"github.com/division-sh/swarm/internal/runtime/semanticview"
 )
 
@@ -55,6 +56,23 @@ func (eb *EventBus) SetupScenarioEntities(ctx context.Context, request pipeline.
 	}
 	ctx = effects.WithExecutionMode(ctx, mode)
 	command := ScenarioSetupCommand{Setup: request}
+	if len(request.Entities) == 0 && scenarioexecution.HasPrivateRunScope(ctx) {
+		flowID := semanticview.RootExecutionFlowID(eb.semanticSource)
+		keyless, err := pipeline.StandingConstructionIsKeyless(eb.semanticSource, flowID)
+		if err != nil {
+			return pipeline.ScenarioSetupResult{}, err
+		}
+		if keyless {
+			plan, err := eb.templateInstancePlanner.PrepareFlowInstanceActivation(ctx, pipeline.FlowInstanceActivationRequest{
+				ContractBundle: eb.semanticSource, OccurredAt: request.CreatedAt,
+				Instance: flowidentity.Stored(eb.semanticSource, flowID, request.RunID, request.RunID, "", ""),
+			})
+			if err != nil {
+				return pipeline.ScenarioSetupResult{}, fmt.Errorf("prepare private scenario startup construction: %w", err)
+			}
+			command.Activations = append(command.Activations, FlowInstanceActivationCommand{Plan: plan})
+		}
+	}
 	for _, seed := range request.Entities {
 		path := strings.Trim(seed.FlowInstance, "/")
 		if seed.EntityID != request.RunID || (path != "" && path != request.RunID) {

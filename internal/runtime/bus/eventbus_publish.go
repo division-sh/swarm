@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"sort"
 	"strings"
 	"time"
 
@@ -660,6 +661,32 @@ func (eb *EventBus) finalizeCommittedAgentReadiness(ctx context.Context, event e
 	eb.mu.RUnlock()
 	if finalizer == nil {
 		return errors.New("committed agent readiness finalizer is unavailable")
+	}
+	if event.IsRunlessPlatformPublication() {
+		byRun := make(map[string][]events.DeliveryRoute)
+		for _, route := range routes {
+			if route.Recipient.IsAgent() {
+				if route.Context.RunID == "" {
+					return errors.New("platform agent delivery requires its selected execution run")
+				}
+				byRun[route.Context.RunID] = append(byRun[route.Context.RunID], route)
+			}
+		}
+		order := make([]string, 0, len(byRun))
+		for runID := range byRun {
+			order = append(order, runID)
+		}
+		sort.Strings(order)
+		for _, runID := range order {
+			projection, err := events.NewDeliveryEvent(event, events.DeliveryRoute{Context: events.DeliveryContext{RunID: runID}})
+			if err != nil {
+				return err
+			}
+			if err := finalizer.FinalizeCommittedAgentReadiness(withoutEventPublicationAdmission(runtimecorrelation.WithRunID(ctx, runID)), projection.Event(), byRun[runID]); err != nil {
+				return fmt.Errorf("finalize platform agent readiness for event %s: %w", event.ID(), err)
+			}
+		}
+		return nil
 	}
 	if err := finalizer.FinalizeCommittedAgentReadiness(withoutEventPublicationAdmission(ctx), event, routes); err != nil {
 		return fmt.Errorf("finalize committed agent readiness for event %s: %w", event.ID(), err)
@@ -1756,6 +1783,18 @@ func (eb *EventBus) completeCommittedPublishDispatch(ctx context.Context, evt ev
 	purpose := pipelinePublishPurpose(evt)
 	decision := classifyPipelineDispatch(interception.Outcome, err, false, purpose, pipelineDispatchPublishInterceptors)
 	if decision.action != pipelineDispatchContinue {
+		if evt.IsRunlessPlatformPublication() && interception.EventPassthrough {
+			var internal []RoutePlanLiveRecipient
+			for _, recipient := range inboundPlan.LiveRecipients {
+				if recipient.isInternal() {
+					internal = append(internal, recipient)
+				}
+			}
+			if len(internal) != 0 {
+				_, dispatchErr := eb.dispatchLiveRecipientsWithRoutes(workCtx, evt, internal, nil)
+				err = errors.Join(err, dispatchErr)
+			}
+		}
 		return errors.Join(err, eb.applyCommittedPublishDecision(ctx, publicationClaim, decision))
 	}
 	postCommitErr := err
@@ -1766,6 +1805,14 @@ func (eb *EventBus) completeCommittedPublishDispatch(ctx context.Context, evt ev
 		deliveryRoutes := inboundPlan.liveDispatchDeliveryRoutes()
 		if !interception.NodePassthrough {
 			liveRecipients = nonCollidingAgentRecipientsAfterNodeConsume(liveRecipients, deliveryRoutes)
+			if evt.IsRunlessPlatformPublication() {
+				for _, recipient := range inboundPlan.LiveRecipients {
+					if recipient.isInternal() {
+						liveRecipients = append(liveRecipients, recipient)
+					}
+				}
+				liveRecipients = normalizeRoutePlanLiveRecipients(liveRecipients)
+			}
 			deliveryRoutes = agentDeliveryRoutesForLiveRecipients(deliveryRoutes, liveRecipients)
 		}
 		recipients := routePlanLiveRecipientIDs(liveRecipients)
@@ -2045,6 +2092,10 @@ func (eb *EventBus) runNodeDeliveryRouteInterceptors(ctx context.Context, evt ev
 		}
 		routeCtx := events.WithDeliveryContext(ctx, route.Context)
 		routeCtx = runtimedelivery.WithRoute(routeCtx, route)
+		if evt.IsRunlessPlatformPublication() && route.Context.RunID != "" {
+			routeCtx = runtimecorrelation.WithRunID(routeCtx, route.Context.RunID)
+			routeCtx = runtimecorrelation.WithInboundEvent(routeCtx, projected.Event())
+		}
 		if scope, ok := deliveryDispatchFromContext(ctx, evt); ok {
 			e, err := scope.entry(evt, route)
 			if err != nil {
@@ -2356,6 +2407,9 @@ func (eb *EventBus) planSubscribedRoutePlanWithPlanner(ctx context.Context, evt 
 	ctx = runtimecorrelation.WithInboundEvent(ctx, evt)
 	if err := eb.authorizePublishRecipientPlanning(ctx, evt); err != nil {
 		return RoutePlan{}, err
+	}
+	if evt.IsRunlessPlatformPublication() && eb.semanticSource != nil {
+		return eb.planPlatformLivePublication(ctx, evt, recordDiagnostic, planner)
 	}
 	if err := validateEventRootTargetCoordinates(eb.semanticSource, evt); err != nil {
 		return RoutePlan{}, err

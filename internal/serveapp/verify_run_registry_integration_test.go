@@ -24,7 +24,6 @@ import (
 	"github.com/division-sh/swarm/internal/runtime/testfixtures/canonicalrouting"
 	"github.com/division-sh/swarm/internal/store/storetest"
 	"github.com/division-sh/swarm/internal/testutil"
-	"github.com/google/uuid"
 )
 
 type registryProofCompany struct {
@@ -56,7 +55,7 @@ func TestVerifyRunJobflowRegistryIntegrationBothStores(t *testing.T) {
 			})
 			process.waitForReadyLine()
 			endpoint := "http://" + serveRuntimeAPIListenerFromOutput(t, process.outputString()) + "/v1/rpc"
-			runID := uuid.NewString()
+			runID := requireServedLiveLandingRunID(t, endpoint, servedEventPublishFixtureBundleHash(t, root), ".")
 			copies := storetest.CollectTransactions(t, selected, storetest.TransactionProbeOptions{})
 			out, errOut, code := registryProofCLI(t, "run", "start", "--connect", strings.TrimSuffix(endpoint, "/v1/rpc"),
 				"--run-id", runID, "--data", "company.registered="+filepath.Join(root, "data/companies.jsonl"), "--no-follow")
