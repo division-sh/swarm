@@ -92,6 +92,13 @@ func releaseE2EImportAllowed(file, name, alias string) bool {
 	if !strings.Contains(name, "github.com/division-sh/swarm") {
 		return true
 	}
+	// Process lifetime support grants no in-process product execution.
+	if name == "github.com/division-sh/swarm/internal/testutil/testprocess" && alias == "" {
+		switch file {
+		case "process_harness_test.go", "docker_helper_test.go", "lifecycle_test.go", "run_observer_overflow_test.go", "workspace_gateway_docker_test.go":
+			return true
+		}
+	}
 	// Concrete HTTP doubles contain no in-process Swarm execution owners.
 	if file == "provider_connector_journey_test.go" && name == "github.com/division-sh/swarm/internal/testutil/connectorapi" && alias == "" {
 		return true
@@ -122,6 +129,16 @@ func TestReleaseE2EImportBoundaryRejectsRuntimeAndUnscopedPlanning(t *testing.T)
 		file, name, alias string
 		allowed           bool
 	}{
+		{"process_harness_test.go", "github.com/division-sh/swarm/internal/testutil/testprocess", "", true},
+		{"docker_helper_test.go", "github.com/division-sh/swarm/internal/testutil/testprocess", "", true},
+		{"lifecycle_test.go", "github.com/division-sh/swarm/internal/testutil/testprocess", "", true},
+		{"run_observer_overflow_test.go", "github.com/division-sh/swarm/internal/testutil/testprocess", "", true},
+		{"workspace_gateway_docker_test.go", "github.com/division-sh/swarm/internal/testutil/testprocess", "", true},
+		{"other_test.go", "github.com/division-sh/swarm/internal/testutil/testprocess", "", false},
+		{"process_harness_test.go", "github.com/division-sh/swarm/internal/testutil/testprocess", ".", false},
+		{"process_harness_test.go", "github.com/division-sh/swarm/internal/testutil/testprocess", "other", false},
+		{"process_harness_test.go", "github.com/division-sh/swarm/internal/testutil/testprocess/subpackage", "", false},
+		{"process_harness_test.go", "github.com/division-sh/swarm/internal/testutil/testprocessother", "", false},
 		{"process_harness_test.go", "github.com/division-sh/swarm/internal/testplanning", "", true},
 		{"golden_agent_workload_test.go", "github.com/division-sh/swarm/internal/testplanning", "", true},
 		{"other_test.go", "github.com/division-sh/swarm/internal/testplanning", "", false},
