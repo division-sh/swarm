@@ -36,7 +36,7 @@ func TestVerifyPossessionPublicFormatsAndPortableBothStores(t *testing.T) {
 			if err != nil {
 				t.Fatal(err)
 			}
-			schema, err := SchemaBootstrapRequest(bundle.Platform, plans.Platform, plans.State)
+			schema, err := SchemaBootstrapRequest(bundle.Platform, plans.Platform)
 			if err != nil {
 				t.Fatal(err)
 			}

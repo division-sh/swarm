@@ -251,6 +251,10 @@ func (pc *PipelineCoordinator) executeNodeContractHandler(
 		pc.recordInterceptedEmitDeadLetters(ctx, triggerCtx.Event, node.Key(), handlerOutcomeFromExecutionResult(result), emissionPlanWhen(collectDiagnosticEmissions, diagnostics))
 	}
 	handled := runtimeengine.IsHandledOutcome(result.Status)
+	// A keyed resend owns its delivery without committing handler work.
+	if result.Status == runtimeengine.OutcomeDiscarded && len(result.ExecutedSteps) > 0 && result.ExecutedSteps[len(result.ExecutedSteps)-1] == runtimeengine.StepAccumulate {
+		handled = true
+	}
 	if result.Status == runtimeengine.OutcomeUnknown {
 		return contractHandlerExecutionResult{
 			Committed:            result.Committed,

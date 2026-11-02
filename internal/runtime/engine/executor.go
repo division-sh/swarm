@@ -67,22 +67,21 @@ const (
 
 var OrderedSteps = []Step{
 	StepLoop,
-	StepQuery,
-	StepClearGates,
 	StepGuard,
 	StepJoin,
 	StepAccumulate,
+	StepQuery,
 	StepFilter,
 	StepGroupBy,
 	StepReduce,
 	StepCount,
 	StepCompute,
+	StepDataWrites,
 	StepFanOut,
 	StepOnComplete,
 	StepRules,
 	StepAdvancesTo,
 	StepSetsGate,
-	StepDataWrites,
 	StepTransform,
 	StepEmits,
 	StepActivity,
@@ -108,8 +107,6 @@ type executionFrame struct {
 	ruleIndex                 int
 	loopEscaped               bool
 	payload                   map[string]any
-	accumulatorBucketRef      timeridentity.AccumulatorBucketRef
-	hasAccumulatorBucketRef   bool
 	topLevelDataAccumulation  runtimecontracts.WorkflowDataAccumulation
 	topLevelDataWritesApplied bool
 	ruleDataWritesApplied     bool
@@ -121,7 +118,7 @@ type executionFrame struct {
 	collectionPlan            runtimecontracts.WorkflowHandlerCollectionPlan
 	joinLoopGeneration        attemptgeneration.Generation
 	entityMutations           *entityruntime.MutationPlan
-	discardedJoin             bool
+	discarded                 bool
 }
 
 type handlerRuleSource string
@@ -523,10 +520,9 @@ func (e *Executor) Execute(ctx context.Context, req ExecutionRequest) (Execution
 					SetExecutionFailure(&result, err, "runtime.engine", "compute_replay_trace")
 					return err
 				}
-				if frame.discardedJoin {
-					// An obsolete join occurrence has no accepted state effect. Its exact
-					// claim still settles through the coordinator's no-op outcome path;
-					// committing an unchanged snapshot would mutate the new entry's revision.
+				if frame.discarded {
+					// The exact claim settles through the coordinator's no-op path.
+					// No earlier join/loop candidate may commit on a discarded arrival.
 					result = frame.result
 					return nil
 				}
@@ -704,7 +700,7 @@ func (e *Executor) runSteps(frame *executionFrame) error {
 		}
 		frame.result.ExecutedSteps = append(frame.result.ExecutedSteps, step)
 		if stop {
-			frame.discardedJoin = step == StepJoin && frame.result.Status == OutcomeDiscarded
+			frame.discarded = frame.result.Status == OutcomeDiscarded
 			frame.resolveNonRuleObservation()
 			return nil
 		}
@@ -1148,38 +1144,24 @@ func (e *Executor) stepAccumulate(frame *executionFrame) (bool, error) {
 	if err != nil {
 		return false, err
 	}
-	bucketRef, matched, err := e.resolveAccumulatorBucketRef(frame, spec)
-	if err != nil {
-		return false, err
-	}
-	if !matched {
-		return false, nil
-	}
-	acc, ok := loadAccumulatorForBucket(frame.state.State, bucketRef)
-	if !ok {
-		acc = &Accumulator{}
-	}
-	deliveryID := ""
-	if claim, ok := runtimedelivery.ClaimFromContext(frame.ctx); ok {
-		deliveryID = claim.DeliveryID()
-	}
-	var duplicate bool
-	if frame.req.Preview {
-		duplicate, err = acc.Preview(spec, frame.payload)
-	} else {
-		duplicate, err = acc.Admit(spec, frame.payload, deliveryID)
-	}
+	acc := runtimeaccumulator.Load(frame.state.State.StateCarrier.Fields[spec.Target])
+	duplicate, err := acc.Admit(spec, frame.payload)
 	if err != nil {
 		return false, err
 	}
 	if duplicate {
 		frame.result.Status = OutcomeDiscarded
+		frame.result.StateMutation = StateMutation{}
+		frame.result.NextState = ""
+		frame.result.EmitIntents = nil
+		frame.result.ActivityIntents = nil
+		frame.result.ActivityRequestIntents = nil
+		frame.result.DeadLetterIntents = nil
+		frame.result.ActionsExecuted = nil
+		frame.result.LoopTrace = nil
 		return true, nil
 	}
-	storeAccumulatorForBucket(&frame.state.State, bucketRef, acc)
-	frame.result.StateMutation.SetStateBuckets(frame.state.State.StateCarrier.StateBuckets)
-	frame.state.Accumulated = accumulatorExpressionValue(acc)
-	return false, nil
+	return false, e.applyDataAccumulation(frame, runtimecontracts.WorkflowDataAccumulation{Writes: []runtimecontracts.WorkflowDataWrite{{TargetField: spec.Target, Value: runtimecontracts.LiteralExpression(acc.Items)}}})
 }
 
 func (e *Executor) stepFilter(frame *executionFrame) error {
@@ -1332,14 +1314,10 @@ func (e *Executor) executeComputeSpec(frame *executionFrame, spec *runtimecontra
 	if effectiveErr != nil {
 		return effectiveErr
 	}
-	bucketRef, matched, bucketErr := e.resolveAccumulatorBucketRef(frame, accumulateSpec)
-	if bucketErr != nil {
-		return bucketErr
+	acc := &Accumulator{}
+	if accumulateSpec != nil {
+		acc = runtimeaccumulator.Load(frame.state.State.StateCarrier.Fields[accumulateSpec.Target])
 	}
-	if !matched {
-		return nil
-	}
-	acc, _ := loadAccumulatorForBucket(frame.state.State, bucketRef)
 	if err := acc.Err(); err != nil {
 		return err
 	}
@@ -1850,27 +1828,12 @@ func (e *Executor) stepFanOut(frame *executionFrame) (bool, error) {
 		}
 		return plan.SemanticEvidence().ProjectSource(itemsValue)
 	}
-	var items []any
-	var err error
-	if !plan.SourceAfterWrites {
-		items, err = resolveItems()
-		if err != nil {
-			return false, err
-		}
-		frame.state.FanOut = map[string]any{}
-		frame.state.SetFanOut("count", len(items))
-	}
-	if err := e.stepDataWrites(frame); err != nil {
+	items, err := resolveItems()
+	if err != nil {
 		return false, err
 	}
-	if plan.SourceAfterWrites {
-		items, err = resolveItems()
-		if err != nil {
-			return false, err
-		}
-		frame.state.FanOut = map[string]any{}
-		frame.state.SetFanOut("count", len(items))
-	}
+	frame.state.FanOut = map[string]any{}
+	frame.state.SetFanOut("count", len(items))
 	frame.result.FanOutCount = len(items)
 	limit := plan.MaxItems
 	if frame.result.FanOutCount > limit {
@@ -2074,12 +2037,15 @@ func (e *Executor) stepOnComplete(frame *executionFrame) error {
 		if err := e.applyRule(frame, rule); err != nil {
 			return err
 		}
+		if rule.Compute != nil {
+			if err := e.executeComputeSpec(frame, rule.Compute); err != nil {
+				return err
+			}
+		}
 		if _, err := e.stepFanOut(frame); err != nil {
 			return err
 		}
-		if rule.Compute != nil {
-			return e.stepCompute(frame)
-		}
+		return e.applyDataAccumulation(frame, rule.DataAccumulation)
 	}
 	return nil
 }
@@ -2099,12 +2065,15 @@ func (e *Executor) stepRules(frame *executionFrame) error {
 		if err := e.applyRule(frame, rule); err != nil {
 			return err
 		}
+		if rule.Compute != nil {
+			if err := e.executeComputeSpec(frame, rule.Compute); err != nil {
+				return err
+			}
+		}
 		if _, err := e.stepFanOut(frame); err != nil {
 			return err
 		}
-		if rule.Compute != nil {
-			return e.stepCompute(frame)
-		}
+		return e.applyDataAccumulation(frame, rule.DataAccumulation)
 	}
 	return nil
 }
@@ -2167,18 +2136,17 @@ func (e *Executor) stepSetsGate(frame *executionFrame) error {
 }
 
 func (e *Executor) stepDataWrites(frame *executionFrame) error {
-	ruleHasWrites := frame.rule != nil && (frame.rule.DataAccumulation.HasWrites() || strings.TrimSpace(frame.rule.DataAccumulation.SourceEvent) != "")
-	if ruleHasWrites && !frame.ruleDataWritesApplied {
-		if err := e.applyDataAccumulation(frame, frame.rule.DataAccumulation); err != nil {
-			return err
-		}
-		frame.ruleDataWritesApplied = true
-	}
 	if (frame.topLevelDataAccumulation.HasWrites() || strings.TrimSpace(frame.topLevelDataAccumulation.SourceEvent) != "") && !frame.topLevelDataWritesApplied {
 		if err := e.applyDataAccumulation(frame, frame.topLevelDataAccumulation); err != nil {
 			return err
 		}
 		frame.topLevelDataWritesApplied = true
+	}
+	if frame.rule != nil && !frame.ruleDataWritesApplied && (frame.ruleSource == handlerRuleSourceJoinOnComplete || frame.ruleSource == handlerRuleSourceJoinTimeout) {
+		if err := e.applyDataAccumulation(frame, frame.rule.DataAccumulation); err != nil {
+			return err
+		}
+		frame.ruleDataWritesApplied = true
 	}
 	return nil
 }
@@ -2342,29 +2310,6 @@ func (e *Executor) joinPlan(req ExecutionRequest) (runtimecontracts.WorkflowJoin
 		return runtimecontracts.WorkflowJoinPlan{}, false
 	}
 	return semanticview.WorkflowJoinPlanForRef(e.deps.Source, req.JoinDeclaration)
-}
-
-func (e *Executor) resolveAccumulatorBucketRef(frame *executionFrame, spec *runtimecontracts.AccumulateSpec) (timeridentity.AccumulatorBucketRef, bool, error) {
-	if frame == nil {
-		return timeridentity.AccumulatorBucketRef{}, false, nil
-	}
-	if frame.hasAccumulatorBucketRef {
-		return frame.accumulatorBucketRef, true, nil
-	}
-	bucketRef := handlerAccumulatorBucketRef(frame.req)
-	if frame.loopActivation != nil {
-		generation := frame.loopActivation.Generation()
-		if !generation.Valid() {
-			return timeridentity.AccumulatorBucketRef{}, false, failures.New(failures.ClassLifecycleConflict, "accumulator_scope_invalid", "accumulator", "admit", nil)
-		}
-		bucketRef = timeridentity.NewAccumulatorBucketRefForGeneration(frame.req.Node, string(handlerAccumulatorEventType(frame.req)), generation)
-	}
-	if !bucketRef.Valid() {
-		return timeridentity.AccumulatorBucketRef{}, false, failures.New(failures.ClassLifecycleConflict, "accumulator_scope_invalid", "accumulator", "admit", nil)
-	}
-	frame.accumulatorBucketRef = bucketRef
-	frame.hasAccumulatorBucketRef = true
-	return bucketRef, true, nil
 }
 
 func (e *Executor) effectiveAccumulatorSpec(frame *executionFrame, spec *runtimecontracts.AccumulateSpec) (*runtimecontracts.AccumulateSpec, error) {
@@ -2560,11 +2505,7 @@ func (e *Executor) stepClear(frame *executionFrame) error {
 		}
 		switch target {
 		case "accumulator_state":
-			if frame.req.Node.Valid() {
-				if bucket, ok := frame.state.State.StateBucket(frame.req.Node.Key()); ok {
-					delete(bucket.Raw(), handlerAccumulatorBucketKey)
-				}
-			}
+			return fmt.Errorf("accumulator_state is retired; the declared state list is the buffer and only loop repeat resets it")
 		case "pending_dedup":
 			return fmt.Errorf("clear target pending_dedup is unsupported")
 		default:

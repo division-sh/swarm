@@ -227,6 +227,5 @@ func (recordingSchemaBootstrapper) BootstrapSchema(context.Context, store.Schema
 
 func (c *capturingSchemaBootstrapper) BootstrapSchema(_ context.Context, request store.SchemaBootstrapRequest) error {
 	c.plans = append([]store.SchemaTableDDL{}, request.PlatformPlans...)
-	c.plans = append(c.plans, request.StatePlans...)
 	return nil
 }

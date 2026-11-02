@@ -8,6 +8,3 @@ test-node:
     advances_to: done
     emit:
       event: item.categorized
-  state_schema:
-    fields:
-      category: string

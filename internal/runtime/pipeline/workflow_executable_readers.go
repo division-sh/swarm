@@ -60,12 +60,8 @@ var systemNodeEventHandlerExecutableReaderCensus = map[string]handlerExecutableR
 	"Rules": func(out *[]WorkflowExecutableReader, ctx executableReaderContext, handler runtimecontracts.SystemNodeEventHandler) {
 		appendRulesExecutableReaders(out, ctx, "rules", handler.Rules)
 	},
-	"Accumulate": func(out *[]WorkflowExecutableReader, _ executableReaderContext, handler runtimecontracts.SystemNodeEventHandler) {
-		if handler.Accumulate != nil {
-			appendExecutableReader(out, "accumulate.from", handler.Accumulate.From, WorkflowEntityFieldLifecycleAccumulate)
-			appendExecutableReader(out, "accumulate.key", handler.Accumulate.Key, WorkflowEntityFieldLifecycleAccumulate)
-		}
-	},
+	// Both accumulator slots are literal field names, not expressions.
+	"Accumulate": noHandlerExecutableReaders,
 	"Join": func(out *[]WorkflowExecutableReader, ctx executableReaderContext, handler runtimecontracts.SystemNodeEventHandler) {
 		appendJoinExecutableReaders(out, ctx, handler.Join)
 	},

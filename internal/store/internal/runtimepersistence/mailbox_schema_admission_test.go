@@ -96,7 +96,6 @@ VALUES ('mailbox.decide','old-token','key','hash','card','{"original":true}','20
 						t.Fatal(err)
 					}
 				}
-				current.StatePlans = generatedProbeStatePlans()
 				var incompatible *SchemaCompatibilityError
 				if err := bootstrap(ctx, current); !errors.As(err, &incompatible) {
 					t.Fatalf("old actor schema admission = %v", err)
@@ -109,7 +108,6 @@ VALUES ('mailbox.decide','old-token','key','hash','card','{"original":true}','20
 				if err := runtimeProbe(); err == nil || !strings.Contains(err.Error(), "schema is unaccepted") {
 					t.Fatalf("runtime admitted rejected store: %v", err)
 				}
-				assertSchemaTableExists(t, dialect, db, "generated_probe_state", false)
 				var count int
 				if err := db.QueryRow(`SELECT COUNT(*) FROM api_idempotency WHERE actor_token_id='old-token' AND request_hash='hash' AND resource_id='card'`).Scan(&count); err != nil {
 					t.Fatal(err)

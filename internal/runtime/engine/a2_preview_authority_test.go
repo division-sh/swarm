@@ -5,9 +5,8 @@ import (
 	"reflect"
 	"testing"
 
-	"github.com/division-sh/swarm/internal/events"
+	runtimeaccumulator "github.com/division-sh/swarm/internal/runtime/accumulator"
 	"github.com/division-sh/swarm/internal/runtime/contracts"
-	"github.com/division-sh/swarm/internal/runtime/failures"
 	"github.com/division-sh/swarm/internal/runtime/semanticview"
 )
 
@@ -47,9 +46,11 @@ func TestA2PreviewEvaluatesTransitionWithoutDurableOccurrence(t *testing.T) {
 	}
 }
 
-func TestA2PreviewEvaluatesUnkeyedArrivalWithoutDeliveryEvidence(t *testing.T) {
+func TestA2PreviewEvaluatesAppendWithoutDeliveryEvidence(t *testing.T) {
 	executor, repo := a2AccumulatorExecutor(t)
 	request := a2AccumulatorRequest(t, "", `{"id":"item","marker":"hypothetical"}`, "preview-only")
+	request.Handler.Accumulate = nil
+	request.Handler.DataAccumulation.Writes = append(request.Handler.DataAccumulation.Writes, contracts.WorkflowDataWrite{Operation: contracts.WorkflowDataOperationAppend, TargetRef: "state.items", Value: contracts.ExpressionValue{Kind: contracts.ExpressionKindCEL, CEL: "payload"}})
 	request.Preview = true
 	before := repo.snapshot
 	result, err := executor.ExecuteSemanticFixture(context.Background(), request)
@@ -57,17 +58,11 @@ func TestA2PreviewEvaluatesUnkeyedArrivalWithoutDeliveryEvidence(t *testing.T) {
 		t.Fatalf("preview=%#v err=%v", result, err)
 	}
 	preview := StateSnapshot{StateCarrier: result.StateMutation.StateCarrier}
-	acc, found := loadAccumulator(preview, request.Node, events.EventType(request.HandlerEventKey))
-	if !found || len(acc.Items) != 1 || len(acc.Deliveries) != 0 || len(acc.Received) != 0 || acc.Items[0]["marker"] != "hypothetical" {
+	acc := runtimeaccumulator.Load(preview.StateCarrier.Fields["items"])
+	if acc.Err() != nil || len(acc.Items) != 1 || acc.Items[0]["marker"] != "hypothetical" {
 		t.Fatalf("preview invented or omitted arrival evidence: %#v", acc)
 	}
 	if !reflect.DeepEqual(repo.snapshot, before) {
 		t.Fatal("preview changed the persisted snapshot")
-	}
-	request.Preview = false
-	_, err = executor.ExecuteSemanticFixture(context.Background(), request)
-	requireAccumulatorFailure(t, err, failures.ClassLifecycleConflict)
-	if !reflect.DeepEqual(repo.snapshot, before) {
-		t.Fatal("unclaimed execution changed the persisted snapshot")
 	}
 }

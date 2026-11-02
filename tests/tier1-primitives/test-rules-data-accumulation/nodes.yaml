@@ -5,6 +5,3 @@ test-node:
         data_accumulation:
           writes:
             - value
-  state_schema:
-    fields:
-      value: integer

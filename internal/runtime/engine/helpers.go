@@ -11,14 +11,10 @@ import (
 	"github.com/division-sh/swarm/internal/events"
 	runtimeaccumulator "github.com/division-sh/swarm/internal/runtime/accumulator"
 	runtimecontracts "github.com/division-sh/swarm/internal/runtime/contracts"
-	"github.com/division-sh/swarm/internal/runtime/core/identity"
 	"github.com/division-sh/swarm/internal/runtime/core/paths"
-	"github.com/division-sh/swarm/internal/runtime/core/timeridentity"
 	"github.com/division-sh/swarm/internal/runtime/core/values"
 	"github.com/division-sh/swarm/internal/runtime/workflowexpr"
 )
-
-const handlerAccumulatorBucketKey = "handler_accumulators"
 
 type Accumulator = runtimeaccumulator.State
 
@@ -210,93 +206,12 @@ func nextChainDepth(current, max int) (int, error) {
 	return next, nil
 }
 
-func accumulatorBucketRef(node identity.ExecutableNode, eventType events.EventType) timeridentity.AccumulatorBucketRef {
-	return timeridentity.NewAccumulatorBucketRef(node, string(eventType))
-}
-
 func handlerAccumulatorEventType(req ExecutionRequest) events.EventType {
 	eventType := strings.TrimSpace(req.HandlerEventKey)
 	if eventType == "" {
 		eventType = strings.TrimSpace(string(req.Event.Type()))
 	}
 	return events.EventType(eventType)
-}
-
-func handlerAccumulatorBucketRef(req ExecutionRequest) timeridentity.AccumulatorBucketRef {
-	return accumulatorBucketRef(req.Node, handlerAccumulatorEventType(req))
-}
-
-func loadAccumulator(state StateSnapshot, node identity.ExecutableNode, eventType events.EventType) (*Accumulator, bool) {
-	return loadAccumulatorForBucket(state, accumulatorBucketRef(node, eventType))
-}
-
-func loadAccumulatorForBucket(state StateSnapshot, bucketRef timeridentity.AccumulatorBucketRef) (*Accumulator, bool) {
-	bucketRef = bucketRef.Normalize()
-	if !bucketRef.Valid() {
-		return nil, false
-	}
-	bucket, ok := state.StateBucket(bucketRef.Node.Key())
-	if !ok {
-		return nil, false
-	}
-	rawAccumulators, ok := bucket.Map(handlerAccumulatorBucketKey)
-	if !ok {
-		return nil, false
-	}
-	raw, ok := rawAccumulators.Map(bucketRef.Key())
-	if !ok {
-		return nil, false
-	}
-	return runtimeaccumulator.Load(raw.Raw()), true
-}
-
-func storeAccumulator(state *StateSnapshot, node identity.ExecutableNode, eventType events.EventType, acc *Accumulator) {
-	storeAccumulatorForBucket(state, accumulatorBucketRef(node, eventType), acc)
-}
-
-func storeAccumulatorForBucket(state *StateSnapshot, bucketRef timeridentity.AccumulatorBucketRef, acc *Accumulator) {
-	bucketRef = bucketRef.Normalize()
-	if state == nil || acc == nil || !bucketRef.Valid() {
-		return
-	}
-	bucket := state.EnsureStateBucket(bucketRef.Node.Key())
-	accumulators := bucket.EnsureMap(handlerAccumulatorBucketKey)
-	received := map[string]any{}
-	keys := make([]string, 0, len(acc.Received))
-	for key := range acc.Received {
-		keys = append(keys, key)
-	}
-	sort.Strings(keys)
-	for _, key := range keys {
-		received[key] = acc.Received[key]
-	}
-	deliveries := map[string]any{}
-	for key, hash := range acc.Deliveries {
-		deliveries[key] = hash
-	}
-	items := make([]map[string]any, 0, len(acc.Items))
-	for _, item := range acc.Items {
-		items = append(items, cloneStringAnyMap(item))
-	}
-	accumulators.Set(bucketRef.Key(), map[string]any{
-		"received":   received,
-		"deliveries": deliveries,
-		"items":      items,
-	})
-}
-
-func accumulatorExpressionValue(acc *Accumulator) map[string]any {
-	if acc == nil {
-		return map[string]any{}
-	}
-	items := make([]any, 0, len(acc.Items))
-	for _, item := range acc.Items {
-		items = append(items, cloneStringAnyMap(item))
-	}
-	return map[string]any{
-		"items":          items,
-		"received_count": len(acc.Items),
-	}
 }
 
 func accumulatorItemFields(item map[string]any) map[string]any {

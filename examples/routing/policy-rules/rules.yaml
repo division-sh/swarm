@@ -1,11 +1,3 @@
-review:
-  classes:
-    hard: {disposition: review.reported}
-  rules:
-    - id: R1
-      class: hard
-      text: Compare the supplied numbers.
-      params: {limit: 3}
 matches:
   classes:
     invalid: {disposition: work.rejected}

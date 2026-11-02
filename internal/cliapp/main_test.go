@@ -3470,42 +3470,6 @@ func TestRunVerifyCommand_UsesUnifiedRuntimeConfigModelAliases(t *testing.T) {
 	}
 }
 
-func TestRunVerifyCommand_FailsForPseudoStateSchemaTypes(t *testing.T) {
-	root := t.TempDir()
-
-	writeWorkflowValidationFixtureFile(t, filepath.Join(root, "manifest.yaml"), "version: 1.0.0\nplatform_version: '*'\n")
-	writeWorkflowValidationFixtureFile(t, filepath.Join(root, "schema.yaml"), `stages: []
-`)
-	writeWorkflowValidationFixtureFile(t, filepath.Join(root, "nodes.yaml"), `
-accumulator:
-  state_schema:
-    fields:
-      dimensions_received: dimension score receipts keyed by dimension name
-`)
-
-	var buf bytes.Buffer
-	code := runVerifyCommandWithContractsForTest(t, context.Background(), RepoRoot(), root, &buf)
-	if code == 0 {
-		t.Fatalf("expected non-zero exit code, output = %q", buf.String())
-	}
-	if out := buf.String(); !strings.Contains(out, "state_schema field type") {
-		t.Fatalf("unexpected output = %q", out)
-	}
-}
-
-func TestRunVerifyCommand_AllowsCanonicalStateSchemaFloat(t *testing.T) {
-	root := canonicalrouting.CopyVerifyStateSchemaFloat(t)
-
-	var buf bytes.Buffer
-	code := runVerifyCommandWithContractsForTest(t, context.Background(), RepoRoot(), root, &buf)
-	if code != 0 {
-		t.Fatalf("runVerifyCommand exit code = %d, output = %q", code, buf.String())
-	}
-	if out := buf.String(); !strings.Contains(out, "verify ok: source=") {
-		t.Fatalf("verify output missing success marker:\n%s", out)
-	}
-}
-
 func TestRunVerifyCommand_AllowsOpenStreamAccumulatorWithRootInput(t *testing.T) {
 	t.Setenv("SWARM_BOOT_WARNINGS_FATAL", "false")
 
@@ -3975,7 +3939,7 @@ func TestExecutionValidation_CreateEntityAccumulatePreemptsDynamicComputeWarning
 	}
 	handler := node.EventHandlers[eventType]
 	handler.CreateEntity = true
-	handler.Accumulate = &runtimecontracts.AccumulateSpec{Into: "items"}
+	handler.Accumulate = &runtimecontracts.AccumulateSpec{Target: "items", Key: "id"}
 	handler.Compute = &runtimecontracts.ComputeSpec{
 		Operation: runtimecontracts.ComputeOpCount,
 		StoreAs:   "state.composite_score",

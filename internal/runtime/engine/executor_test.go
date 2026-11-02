@@ -19,6 +19,7 @@ import (
 
 	"github.com/division-sh/swarm/internal/events"
 	"github.com/division-sh/swarm/internal/events/eventtest"
+	runtimeaccumulator "github.com/division-sh/swarm/internal/runtime/accumulator"
 	"github.com/division-sh/swarm/internal/runtime/computemodule"
 	runtimecontracts "github.com/division-sh/swarm/internal/runtime/contracts"
 	"github.com/division-sh/swarm/internal/runtime/core/attemptgeneration"
@@ -1463,11 +1464,9 @@ func TestExecutor_UnsupportedConditionIsExactFailedEvaluation(t *testing.T) {
 	}
 }
 
-func TestExecutor_AccumulatorBucketUsesMatchedHandlerEventKeyForScopedConcreteEvents(t *testing.T) {
+func TestExecutor_AccumulatorUsesMatchedHandlerEventKeyForScopedConcreteEvents(t *testing.T) {
 	exec, err := NewExecutor(RuntimeDependencies{
-		Source: sourceWithFixtureStages(sourceWithEvents("operating", map[string]runtimecontracts.EventCatalogEntry{
-			"component.scaffolded": requiredEventPayload(map[string]runtimecontracts.EventFieldSpec{"component_id": {Type: "text"}}),
-		}), "operating", "pending", "pending"),
+		Source:        sourceWithFixtureStages(scopedComponentAccumulatorSource(t), "operating", "pending", "pending"),
 		StateRepo:     stubStateRepo{},
 		MutationOwner: stubMutationOwner{},
 		Locker:        stubLocker{},
@@ -1477,8 +1476,7 @@ func TestExecutor_AccumulatorBucketUsesMatchedHandlerEventKeyForScopedConcreteEv
 	}
 	handler := runtimecontracts.SystemNodeEventHandler{
 		Accumulate: &runtimecontracts.AccumulateSpec{
-			Key:     "payload.component_id",
-			KeyPath: runtimecontracts.RefExpression("payload.component_id").RefPath,
+			Target: "items", Key: "component_id",
 		},
 	}
 	lifecycleNode := testFlowExecutableNode(t, "operating", "lifecycle-orchestrator")
@@ -1504,13 +1502,13 @@ func TestExecutor_AccumulatorBucketUsesMatchedHandlerEventKeyForScopedConcreteEv
 		State:           firstState,
 	})
 	if err != nil {
-		t.Fatalf("first Execute error: %v", err)
+		t.Fatalf("first Execute error: %v; cause: %v", err, errors.Unwrap(err))
 	}
-	firstAccumulator, ok := loadAccumulatorForBucket(StateSnapshot{StateCarrier: first.StateMutation.StateCarrier}, accumulatorBucketRef(lifecycleNode, "component.scaffolded"))
-	if !ok || len(firstAccumulator.Items) != 1 {
+	firstAccumulator := runtimeaccumulator.Load(first.StateMutation.StateCarrier.Fields["items"])
+	if firstAccumulator.Err() != nil || len(firstAccumulator.Items) != 1 {
 		t.Fatalf("first stream accumulator = %#v, want one item", firstAccumulator)
 	}
-	secondState := testStateSnapshot("pending", map[string]any{}, nil, first.StateMutation.StateCarrier.StateBuckets)
+	secondState := testStateSnapshot("pending", first.StateMutation.StateCarrier.Fields, nil, first.StateMutation.StateCarrier.StateBuckets)
 	second, err := exec.ExecuteSemanticFixture(context.Background(), ExecutionRequest{
 		EntityID: "entity-1",
 		Node:     lifecycleNode,
@@ -1535,9 +1533,9 @@ func TestExecutor_AccumulatorBucketUsesMatchedHandlerEventKeyForScopedConcreteEv
 		t.Fatalf("second Execute error: %v", err)
 	}
 	state := StateSnapshot{StateCarrier: second.StateMutation.StateCarrier}
-	acc, ok := loadAccumulatorForBucket(state, accumulatorBucketRef(lifecycleNode, "component.scaffolded"))
-	if !ok {
-		t.Fatalf("logical accumulator bucket missing: %#v", second.StateMutation.StateCarrier.StateBuckets)
+	acc := runtimeaccumulator.Load(state.StateCarrier.Fields["items"])
+	if acc.Err() != nil {
+		t.Fatal(acc.Err())
 	}
 	if got := len(acc.Items); got != 2 {
 		t.Fatalf("accumulator items = %d, want 2", got)
@@ -1545,11 +1543,8 @@ func TestExecutor_AccumulatorBucketUsesMatchedHandlerEventKeyForScopedConcreteEv
 	if !reflect.DeepEqual(acc.Items, []map[string]any{{"component_id": "a"}, {"component_id": "b"}}) {
 		t.Fatalf("accumulator must preserve business payloads without transport decoration: %#v", acc.Items)
 	}
-	if _, ok := loadAccumulatorForBucket(state, accumulatorBucketRef(lifecycleNode, "component-scaffold/a/component.scaffolded")); ok {
-		t.Fatalf("first concrete event bucket survived: %#v", second.StateMutation.StateCarrier.StateBuckets)
-	}
-	if _, ok := loadAccumulatorForBucket(state, accumulatorBucketRef(lifecycleNode, "component-scaffold/b/component.scaffolded")); ok {
-		t.Fatalf("second concrete event bucket survived: %#v", second.StateMutation.StateCarrier.StateBuckets)
+	if len(second.StateMutation.StateCarrier.StateBuckets) != 0 {
+		t.Fatalf("ordinary state list created private buckets: %#v", second.StateMutation.StateCarrier.StateBuckets)
 	}
 }
 
@@ -1861,22 +1856,10 @@ func newEngineTestJoinActivation(node identity.ExecutableNode, handlerEvent stri
 	return joinruntime.NewActivation(ref, members, spec.Members.Count, armedAt, fireAt)
 }
 
-func TestExecutor_ComputeReadsAccumulatorByMatchedHandlerEventKey(t *testing.T) {
-	state := testStateSnapshot("pending", map[string]any{}, nil, map[string]map[string]any{})
+func TestExecutor_ComputeReadsDeclaredAccumulatorListForMatchedHandler(t *testing.T) {
+	state := testStateSnapshot("pending", map[string]any{"items": []any{map[string]any{"component_id": "a"}}}, nil, map[string]map[string]any{})
 	lifecycleNode := testFlowExecutableNode(t, "operating", "lifecycle-orchestrator")
-	accumulator := &Accumulator{}
-	for _, key := range []string{"a", "b"} {
-		if _, err := accumulator.Admit(&runtimecontracts.AccumulateSpec{Key: "payload.component_id"}, map[string]any{"component_id": key}, ""); err != nil {
-			t.Fatal(err)
-		}
-	}
-	storeAccumulator(&state, lifecycleNode, "component.scaffolded", accumulator)
-	source := semanticview.Wrap(&runtimecontracts.WorkflowContractBundle{
-		Semantics: runtimecontracts.WorkflowSemanticView{Name: "operating"},
-		RootEntities: runtimecontracts.EntityContractsDocument{
-			"state": {Fields: map[string]runtimecontracts.EntityFieldDecl{"component_count": {Type: "integer"}}},
-		},
-	})
+	source := scopedComponentAccumulatorSource(t)
 	exec, err := NewExecutor(RuntimeDependencies{
 		Source:        sourceWithFixtureStages(source, "operating", "pending", "pending"),
 		StateRepo:     sparseSnapshotRepo{snapshot: state},
@@ -1904,6 +1887,7 @@ func TestExecutor_ComputeReadsAccumulatorByMatchedHandlerEventKey(t *testing.T) 
 
 		HandlerEventKey: "component.scaffolded",
 		Handler: runtimecontracts.SystemNodeEventHandler{
+			Accumulate: &runtimecontracts.AccumulateSpec{Target: "items", Key: "component_id"},
 			Compute: &runtimecontracts.ComputeSpec{
 				Operation: runtimecontracts.ComputeOpCount,
 				StoreAs:   "state.component_count",
@@ -3146,11 +3130,6 @@ func TestExecutor_ListPrimitivesMutateState(t *testing.T) {
 		}, nil, map[string]map[string]any{}),
 	}
 	node := testRootExecutableNode(t, "node-1")
-	seedAccumulator := &Accumulator{}
-	if _, err := seedAccumulator.Admit(nil, map[string]any{"seed": true}, "seed"); err != nil {
-		t.Fatal(err)
-	}
-	storeAccumulator(&initial, node, "items.submitted", seedAccumulator)
 	repo.snapshot = &initial
 
 	result, err := exec.ExecuteSemanticFixture(context.Background(), ExecutionRequest{
@@ -3177,9 +3156,6 @@ func TestExecutor_ListPrimitivesMutateState(t *testing.T) {
 				Condition: "item.active == true",
 				StoreAs:   "state.active_count",
 			},
-			Clear: &runtimecontracts.ClearSpec{
-				Targets: []string{"accumulator_state"},
-			},
 			DataAccumulation: runtimecontracts.WorkflowDataAccumulation{Writes: []runtimecontracts.WorkflowDataWrite{{Operation: "clear", TargetRef: "state.dedup_key"}}},
 			AdvancesTo:       "done",
 		},
@@ -3200,11 +3176,6 @@ func TestExecutor_ListPrimitivesMutateState(t *testing.T) {
 	}
 	if _, ok := repo.mutation.Fields["dedup_key"]; ok {
 		t.Fatalf("expected dedup_key to be cleared, metadata=%#v", repo.mutation.Fields)
-	}
-	if nodeBucket, ok := repo.mutation.StateBuckets[node.Key()]; ok {
-		if _, ok := nodeBucket[handlerAccumulatorBucketKey]; ok {
-			t.Fatalf("expected accumulator state to be cleared, state_buckets=%#v", repo.mutation.StateBuckets)
-		}
 	}
 	if result.NextState != "done" {
 		t.Fatalf("NextState = %q, want done", result.NextState)
@@ -6651,54 +6622,6 @@ func TestExecutor_ClearRemovesNestedEntityLeaf(t *testing.T) {
 	}
 	if got := analysis["report_count"]; got != int64(2) {
 		t.Fatalf("analysis.report_count = %#v, want 2", got)
-	}
-}
-
-func TestExecutor_PrivateResetPreservesBusinessFields(t *testing.T) {
-	source := stubSourceWithRootEntityContract()
-	bundle, _ := semanticview.Bundle(source)
-	for name, field := range map[string]runtimecontracts.EntityFieldDecl{
-		"dedup_key": {Type: "text"}, "accumulated_total": {Type: "integer"}, "received_items": {Type: "[text]"},
-	} {
-		bundle.RootEntities["state"].Fields[name] = field
-	}
-	node := testRootExecutableNode(t, "node-1")
-	initial := testStateSnapshot("pending", map[string]any{
-		"dedup_key": "dup-1", "accumulated_total": 5, "received_items": []any{"a"},
-	}, nil, map[string]map[string]any{
-		node.Key(): {handlerAccumulatorBucketKey: map[string]any{"items": []any{"a"}}},
-	})
-	exec, err := NewExecutor(RuntimeDependencies{
-		Source:        sourceWithFixtureStages(source, ".", "pending", "pending"),
-		StateRepo:     sparseSnapshotRepo{snapshot: initial},
-		MutationOwner: stubMutationOwner{},
-		Locker:        stubLocker{},
-	}, nil)
-	if err != nil {
-		t.Fatalf("NewExecutor error: %v", err)
-	}
-	result, err := exec.ExecuteSemanticFixture(context.Background(), ExecutionRequest{
-		EntityID: "entity-1",
-		Node:     node,
-		Event:    eventtest.RunCreatingRootIngress("evt-1", "task.completed", "", "", json.RawMessage(`{}`), 0, "", "", events.EventEnvelope{}, time.Time{}),
-		Handler: runtimecontracts.SystemNodeEventHandler{
-			Clear: &runtimecontracts.ClearSpec{Targets: []string{"accumulator_state"}},
-		},
-		State: initial,
-	})
-	if err != nil {
-		t.Fatalf("Execute error: %v", err)
-	}
-	if got := result.StateMutation.Fields["dedup_key"]; got != "dup-1" {
-		t.Fatalf("private reset changed dedup_key: %#v", result.StateMutation.Fields)
-	}
-	if got := result.StateMutation.Fields["received_items"]; !reflect.DeepEqual(got, []any{"a"}) {
-		t.Fatalf("private reset changed received_items: %#v", result.StateMutation.Fields)
-	}
-	if nodeBucket, ok := result.StateMutation.StateBuckets[node.Key()]; ok {
-		if _, ok := nodeBucket[handlerAccumulatorBucketKey]; ok {
-			t.Fatalf("expected accumulator bucket to be cleared, state_buckets=%#v", result.StateMutation.StateBuckets)
-		}
 	}
 }
 

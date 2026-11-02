@@ -324,10 +324,6 @@ func TestFlowBackedAgentConsumersUseOwningFlowInsteadOfStorageScopeKind(t *testi
 	if len(staticData) != 1 || staticData[0].RelativePath != "exclusions.yaml" {
 		t.Fatalf("flow-data static projection = %#v", staticData)
 	}
-	entry, flowID, ok := criteriaAgentContractDeclaration(source, actor)
-	if !ok || flowID != "support" || entry.Role != "factory_cto" {
-		t.Fatalf("criteria declaration = entry %#v flow %q ok %v", entry, flowID, ok)
-	}
 	entity, ok := entityruntime.ResolveForActor(source, actor)
 	if !ok || entity.FlowID != "support" || entity.EntityType != "state" {
 		t.Fatalf("entity contract = %#v ok %v", entity, ok)

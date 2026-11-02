@@ -124,9 +124,6 @@ type checkerContext struct {
 	stateReachabilityLoaded   bool
 	stateReachabilityFindings []Finding
 
-	nodeStateSchemaLoaded   bool
-	nodeStateSchemaFindings []Finding
-
 	accumulatorSafetyLoaded   bool
 	accumulatorSafetyFindings []Finding
 
@@ -204,7 +201,6 @@ var bootCheckRegistry = []Check{
 	{ID: "condition_policy_alignment", Mode: CheckSource, Severity: "error", Run: checkConditionPolicyAlignment},
 	{ID: "state_machine_coherence", Mode: CheckSource, Severity: "error", Run: checkStateMachineCoherence},
 	{ID: "semantic_drift_unreachable_state", Mode: CheckSource, Severity: "warning", Run: checkSemanticDriftUnreachableState},
-	{ID: "node_state_schema_typed_counterpart", Mode: CheckSource, Severity: SeverityHardInvalidity, Run: checkNodeStateSchemaTypedCounterpart},
 	{ID: "accumulator_handler_isolation", Mode: CheckSource, Severity: SeverityHardInvalidity, Run: checkAccumulatorHandlerIsolation},
 	{ID: "accumulator_input_producer_path", Mode: CheckSource, Severity: SeverityHardInvalidity, Run: checkAccumulatorInputProducerPath},
 	{ID: "handler_field_compliance", Mode: CheckSource, Severity: "error", Run: checkHandlerFieldCompliance},
@@ -346,11 +342,8 @@ func (c *checkerContext) appendAgentModelAliasFindings(findings []Finding, agent
 	return findings
 }
 
-func checkPayloadFieldCoverage(c *checkerContext) []Finding  { return c.payloadFieldCoverage() }
-func checkStateMachineCoherence(c *checkerContext) []Finding { return c.stateMachineCoherence() }
-func checkNodeStateSchemaTypedCounterpart(c *checkerContext) []Finding {
-	return c.nodeStateSchemaTypedCounterpart()
-}
+func checkPayloadFieldCoverage(c *checkerContext) []Finding       { return c.payloadFieldCoverage() }
+func checkStateMachineCoherence(c *checkerContext) []Finding      { return c.stateMachineCoherence() }
 func checkIntentResolution(c *checkerContext) []Finding           { return c.intentResolution() }
 func checkInvalidFieldDetection(c *checkerContext) []Finding      { return c.invalidFieldDetection() }
 func checkPolicyConflictDetection(c *checkerContext) []Finding    { return c.policyConflicts() }

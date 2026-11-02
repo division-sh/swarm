@@ -9,17 +9,11 @@ import (
 func TestDeclarationConsumersRejectRoleOnlyActor(t *testing.T) {
 	source, _ := loadFlowDataToolSource(t)
 	exact := flowDataActor()
-	if _, flow, ok := criteriaAgentContractDeclaration(source, exact); !ok || flow != "support" {
-		t.Fatalf("exact criteria declaration missing: %q %v", flow, ok)
-	}
 	if root := actorFlowOwnershipRoot(source, exact); root != "support" {
 		t.Fatalf("exact write owner = %q", root)
 	}
 	for _, id := range []string{"unknown", "", "factory-cto"} {
 		actor := models.AgentConfig{ID: id, Role: exact.Role, FlowID: exact.FlowID, FlowPath: exact.FlowPath}
-		if _, _, ok := criteriaAgentContractDeclaration(source, actor); ok {
-			t.Errorf("unknown/retired actor %q borrowed criteria declaration", id)
-		}
 		if root := actorFlowOwnershipRoot(source, actor); root != "" {
 			t.Errorf("unknown/retired actor %q borrowed write owner %q", id, root)
 		}

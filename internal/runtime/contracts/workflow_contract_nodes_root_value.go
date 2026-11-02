@@ -50,6 +50,8 @@ func projectSystemNodeValue(value yamlsource.Value) (SystemNodeContract, error) 
 	var handlers []yamlsource.MappingField
 	for _, entry := range entries {
 		switch entry.Name {
+		case "state_table", "state_schema":
+			return SystemNodeContract{}, nodeValueError(entry.Value, fmt.Errorf("%s is not a node field; state is declared in state.yaml", entry.Name))
 		case "execution_type", "subscribes_to", "produces", "event_handlers":
 			diagnostic := NewUndefinedFieldDiagnostic("node", entry.Name, systemNodeContractFields, entry)
 			diagnostic.Remediation += " Handlers are written directly under the node, keyed by event name; a node receives exactly the events it handles and produces the events they emit."
@@ -62,12 +64,6 @@ func projectSystemNodeValue(value yamlsource.Value) (SystemNodeContract, error) 
 		}
 	}
 	var out SystemNodeContract
-	if state, present := fields["state_table"]; present {
-		out.StateTable, err = nodeValueText(state, "node.state_table")
-		if err != nil {
-			return SystemNodeContract{}, nodeFieldProjectionError("state_table", state, err)
-		}
-	}
 	if timers, present := fields["timers"]; present {
 		items, err := timers.Sequence()
 		if err != nil {
@@ -88,12 +84,6 @@ func projectSystemNodeValue(value yamlsource.Value) (SystemNodeContract, error) 
 			}
 			seen[event] = item.IntroductionLocation()
 			out.Timers = append(out.Timers, timer)
-		}
-	}
-	if state, present := fields["state_schema"]; present {
-		out.StateSchema, err = projectNodeStateSchemaValue(state)
-		if err != nil {
-			return SystemNodeContract{}, nodeFieldProjectionError("state_schema", state, err)
 		}
 	}
 	if gates, present := fields["gate_state"]; present {

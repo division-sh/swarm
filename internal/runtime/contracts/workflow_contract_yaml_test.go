@@ -1893,11 +1893,6 @@ func TestW2LoaderRejectsResolutionFromOutsideInstanceSelectionModes(t *testing.T
 func TestSystemNodeContractDecode_PreservesSupportedTopLevelFields(t *testing.T) {
 	var node SystemNodeContract
 	if err := decodeNodeTestYAML([]byte(`
-state_table: worker_state
-state_schema:
-  fields:
-    count:
-      type: integer
 timers:
   - event: timer.task.timeout
     delay: 1m
@@ -1908,14 +1903,8 @@ task.requested:
 `), &node); err != nil {
 		t.Fatalf("yaml.Unmarshal: %v", err)
 	}
-	if got, want := strings.TrimSpace(node.StateTable), "worker_state"; got != want {
-		t.Fatalf("StateTable = %q, want %q", got, want)
-	}
 	if _, ok := node.EventHandlers["task.requested"]; !ok {
 		t.Fatalf("task.requested handler missing: %#v", node.EventHandlers)
-	}
-	if len(node.StateSchema.Fields) != 1 {
-		t.Fatalf("StateSchema fields = %#v, want one field", node.StateSchema.Fields)
 	}
 }
 
@@ -2547,7 +2536,7 @@ fields:
 func TestAccumulateSpecDecode_RejectsUnknownFieldWithCanonicalOptions(t *testing.T) {
 	var spec AccumulateSpec
 	err := decodeNodeTestYAML([]byte(`
-into: entity.items
+target: items
 source: payload.items
 `), &spec)
 	if err == nil {
@@ -2560,7 +2549,7 @@ source: payload.items
 	if got := diagnostic.Problem; got != `accumulate field "source" is not supported.` {
 		t.Fatalf("diagnostic problem = %q, want unknown accumulate field problem", got)
 	}
-	want := []string{"description", "from", "into", "key"}
+	want := []string{"key", "target"}
 	if !reflect.DeepEqual(diagnostic.ValidOptions, want) {
 		t.Fatalf("diagnostic valid options = %#v, want %#v", diagnostic.ValidOptions, want)
 	}
@@ -2877,23 +2866,19 @@ indexed: true
 	}
 }
 
-func TestAccumulateSpecDecode_PreservesDescriptionAndRejectsUnknownField(t *testing.T) {
+func TestAccumulateSpecDecode_PreservesTargetKeyAndRejectsUnknownField(t *testing.T) {
 	var spec AccumulateSpec
 	if err := decodeNodeTestYAML([]byte(`
-into: dimensions_received
-description: all dimension receipts have arrived
-key: payload.dimension
+target: dimensions_received
+key: dimension
 `), &spec); err != nil {
 		t.Fatalf("yaml.Unmarshal: %v", err)
 	}
-	if got := spec.Into; got != "dimensions_received" {
-		t.Fatalf("Into = %q", got)
+	if got := spec.Target; got != "dimensions_received" {
+		t.Fatalf("Target = %q", got)
 	}
-	if got := spec.Description; got != "all dimension receipts have arrived" {
-		t.Fatalf("Description = %q", got)
-	}
-	if spec.Key != "payload.dimension" || spec.KeyPath.Root != paths.RootPayload || len(spec.KeyPath.Segments) != 1 || spec.KeyPath.Segments[0] != "dimension" {
-		t.Fatalf("authored accumulator key = %q/%#v, want payload.dimension", spec.Key, spec.KeyPath)
+	if spec.Key != "dimension" {
+		t.Fatalf("authored accumulator key = %q, want dimension", spec.Key)
 	}
 
 	err := decodeNodeTestYAML([]byte(`
@@ -2906,7 +2891,7 @@ legacy_buffer: dimensions_received
 	if !ok {
 		t.Fatalf("yaml.Unmarshal error = %T %v, want LoaderDiagnostic", err, err)
 	}
-	if !containsString(diagnostic.ValidOptions, "into") || containsString(diagnostic.ValidOptions, "on_complete") {
+	if !reflect.DeepEqual(diagnostic.ValidOptions, []string{"key", "target"}) {
 		t.Fatalf("diagnostic valid options = %#v, want accumulate options", diagnostic.ValidOptions)
 	}
 }
@@ -2915,7 +2900,7 @@ func TestAccumulateSpecDecodeRejectsRetiredFiniteBarrierFields(t *testing.T) {
 	for _, field := range []string{"expected_from", "completion", "threshold", "timeout_ms", "on_complete", "on_timeout", "window", "dedup_by"} {
 		t.Run(field, func(t *testing.T) {
 			var spec AccumulateSpec
-			err := decodeNodeTestYAML([]byte("into: items\n"+field+": retired\n"), &spec)
+			err := decodeNodeTestYAML([]byte("target: items\nkey: id\n"+field+": retired\n"), &spec)
 			if err == nil || !strings.Contains(err.Error(), `accumulate field "`+field+`" is not supported`) {
 				t.Fatalf("yaml.Unmarshal error = %v, want retired field rejection", err)
 			}

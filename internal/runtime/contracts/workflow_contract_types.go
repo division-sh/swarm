@@ -299,14 +299,15 @@ func (r HandlerRuleEntry) DeclarationIdentity() (runtimeidentity.DeclarationIden
 }
 
 type WorkflowLoopPlan struct {
-	FlowID        string
-	ID            string
-	RevisionField string
-	MaxAttempts   LoopAttemptLimit
-	Escape        LoopEscapeSpec
-	EntryStage    string
-	RegionStages  []string
-	Operations    []WorkflowLoopOperationPlan
+	FlowID          string
+	ID              string
+	RevisionField   string
+	MaxAttempts     LoopAttemptLimit
+	Escape          LoopEscapeSpec
+	EntryStage      string
+	RegionStages    []string
+	Operations      []WorkflowLoopOperationPlan
+	CollectedFields []string
 }
 
 type WorkflowGatePlan struct {
@@ -459,11 +460,8 @@ type GuardSpec struct {
 	Check string `yaml:"-"`
 }
 type AccumulateSpec struct {
-	Into        string     `yaml:"into"`
-	From        string     `yaml:"from"`
-	Description string     `yaml:"description"`
-	Key         string     `yaml:"key"`
-	KeyPath     paths.Path `yaml:"-"`
+	Target string `yaml:"target"`
+	Key    string `yaml:"key"`
 }
 type ComputeSpec struct {
 	Operation   ComputeOperation       `yaml:"operation"`
@@ -734,19 +732,10 @@ type EntitySchemaField struct {
 	Nullable    bool   `yaml:"nullable"`
 	Description string `yaml:"description"`
 }
-type NodeStateSchema struct {
-	Description string           `yaml:"description"`
-	Fields      []NodeStateField `yaml:"fields"`
-}
 type NodeGateStateSchema struct {
 	Description string          `yaml:"description"`
 	Gates       []NodeGateField `yaml:"gates"`
 	Storage     string          `yaml:"storage"`
-}
-type NodeStateField struct {
-	Name    string `yaml:"name"`
-	Type    string `yaml:"type"`
-	Default any    `yaml:"default"`
 }
 type NodeGateField struct {
 	Name        string `yaml:"name"`
@@ -756,10 +745,7 @@ type RulesDocument = flowmodel.RulesDocument
 type RuleSet = flowmodel.RuleSet
 type PolicyDocument = flowmodel.PolicyDocument
 type PolicyValue = flowmodel.PolicyValue
-type PolicyCriteriaSet = flowmodel.PolicyCriteriaSet
-type PolicyCriteriaClass = flowmodel.PolicyCriteriaClass
-type PolicyCriteriaRule = flowmodel.PolicyCriteriaRule
-type PolicyCriteriaParam = flowmodel.PolicyCriteriaParam
+type PolicyValidationParam = flowmodel.PolicyValidationParam
 type PolicyValidationSet = flowmodel.PolicyValidationSet
 type PolicyValidationClass = flowmodel.PolicyValidationClass
 type PolicyValidationRule = flowmodel.PolicyValidationRule
@@ -842,12 +828,7 @@ type EventFieldSpec struct {
 	Type        string            `yaml:"type"`
 	Description string            `yaml:"description"`
 	Refinements SchemaRefinements `yaml:"-"`
-	Citation    CriteriaCitation  `yaml:"citation"`
 	ExactSchema *ToolInputSchema  `yaml:"-" json:"-"`
-}
-type CriteriaCitation struct {
-	Criteria       string   `yaml:"criteria"`
-	AllowedClasses []string `yaml:"allowed_classes"`
 }
 type SchemaLengthRefinement struct {
 	Min *int `yaml:"min"`
@@ -1335,11 +1316,9 @@ func cloneEmitSpec(spec EmitSpec) EmitSpec {
 type SystemNodeContract struct {
 	Description      string                            `yaml:"description"`
 	Implementation   string                            `yaml:"-"`
-	StateTable       string                            `yaml:"state_table"`
 	IdempotencyTable string                            `yaml:"-"`
 	Timers           []WorkflowTimerContract           `yaml:"timers"`
 	EventHandlers    map[string]SystemNodeEventHandler `yaml:"-"`
-	StateSchema      NodeStateSchema                   `yaml:"state_schema"`
 	GateState        NodeGateStateSchema               `yaml:"gate_state"`
 }
 type SystemNodeEventHandler struct {
@@ -1404,7 +1383,6 @@ type AgentRegistryEntry struct {
 	NativeTools            map[string]any              `yaml:"native_tools"`
 	FlowDataAccess         []string                    `yaml:"flow_data_access" json:"flow_data_access,omitempty"`
 	DataAccess             []DurableDataAccessRef      `yaml:"data_access" json:"data_access,omitempty"`
-	Criteria               []string                    `yaml:"criteria" json:"criteria,omitempty"`
 	EmitEvents             []string                    `yaml:"emit_events"`
 	Implementation         string                      `yaml:"implementation"`
 	AuthoredFields         map[string]bool             `yaml:"-" json:"-"`
@@ -1433,7 +1411,6 @@ var agentRegistryEntryFieldOptions = map[string]struct{}{
 	"native_tools":       {},
 	"flow_data_access":   {},
 	"data_access":        {},
-	"criteria":           {},
 	"emit_events":        {},
 	"implementation":     {},
 }

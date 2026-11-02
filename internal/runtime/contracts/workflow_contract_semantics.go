@@ -211,6 +211,9 @@ func populateWorkflowSemantics(bundle *WorkflowContractBundle) error {
 	bundle.Semantics = semantics
 	populateEventSchemaOwnershipIndex(bundle)
 	bundle.connectionInputs = CompileConnectionInputs(bundle, bundle)
+	if err := bundle.validateAccumulatorWriters(); err != nil {
+		return err
+	}
 	return nil
 }
 
@@ -285,6 +288,9 @@ func deriveWorkflowLoopPlans(bundle *WorkflowContractBundle, transitions []Handl
 				Emit:         cloneEmitSpec(transition.Emit),
 			}
 			plans[idx].Operations = append(plans[idx].Operations, operation)
+			if operation.Kind == LoopOperationAdmit && transition.Accumulate != nil {
+				plans[idx].CollectedFields = appendIfMissingString(plans[idx].CollectedFields, transition.Accumulate.Target)
+			}
 			if operation.Kind == LoopOperationStart && plans[idx].EntryStage == "" {
 				plans[idx].EntryStage = operation.AdvancesTo
 			}

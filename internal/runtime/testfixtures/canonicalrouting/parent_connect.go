@@ -5,6 +5,15 @@ import (
 	"testing"
 )
 
+func CopyParentConnectAccumulator(t testing.TB) string {
+	t.Helper()
+	root := CopyExample(t, ParentConnect)
+	writeClosedVariantFile(t, root, "producer/events.yaml", "work.ready:\n  work_id: text\n")
+	writeClosedVariantFile(t, root, "consumer/types.yaml", "Work:\n  work_id: text\n")
+	writeClosedVariantFile(t, root, "consumer/state.yaml", "items: [Work]\n")
+	return root
+}
+
 // CopyParentConnectRequiredAgent derives the one closed agent-authority
 // specialization from the checked-in parent-connect route. The agent's
 // subscription and output declarations are fixed here rather than accepted as

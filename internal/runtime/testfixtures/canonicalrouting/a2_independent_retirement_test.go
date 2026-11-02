@@ -12,31 +12,17 @@ import (
 )
 
 func TestA2IndependentForkAccumulatorProducerAdmitsAuthoredKey(t *testing.T) {
-	for _, clearOnAdmit := range []bool{false, true} {
-		name := "retained"
-		if clearOnAdmit {
-			name = "explicit clear"
-		}
-		t.Run(name, func(t *testing.T) {
-			bundle := loadA2IndependentProducer(t, CopyForkLoopAccumulator(t, clearOnAdmit))
-			node := identitytest.FlowNode(t, "review", "controller")
-			handler := bundle.FlowTree.ByPath["review"].Nodes["controller"].EventHandlers["review.requested"]
-			if handler.Accumulate == nil || handler.Accumulate.Key != "payload.token" || handler.Accumulate.Into != "reviews" || handler.Accumulate.From != "payload" {
-				t.Fatalf("generated keyed accumulation changed: %#v", handler.Accumulate)
-			}
-			if handler.Loop == nil || handler.Loop.Admit != "revision" || handler.Loop.From != "working" || handler.AdvancesTo != "reviewing" {
-				t.Fatalf("generated admission lost loop generation or business transition: %#v", handler)
-			}
-			if (handler.Clear != nil) != clearOnAdmit {
-				t.Fatalf("explicit clear choice changed: %#v", handler.Clear)
-			}
-			if clearOnAdmit && (len(handler.Clear.Targets) != 1 || handler.Clear.Targets[0] != "accumulator_state") {
-				t.Fatalf("explicit clear target changed: %#v", handler.Clear)
-			}
-			if err := accumulator.ValidateSpecForHandler(semanticview.Wrap(bundle), node, "review.requested", handler.Accumulate); err != nil {
-				t.Fatalf("generated key lacks catalog admission: %v", err)
-			}
-		})
+	bundle := loadA2IndependentProducer(t, CopyForkLoopAccumulator(t))
+	node := identitytest.FlowNode(t, "review", "controller")
+	handler := bundle.FlowTree.ByPath["review"].Nodes["controller"].EventHandlers["review.requested"]
+	if handler.Accumulate == nil || handler.Accumulate.Key != "token" || handler.Accumulate.Target != "reviews" {
+		t.Fatalf("generated keyed accumulation changed: %#v", handler.Accumulate)
+	}
+	if handler.Loop == nil || handler.Loop.Admit != "revision" || handler.Loop.From != "working" || handler.AdvancesTo != "reviewing" {
+		t.Fatalf("generated admission lost loop generation or business transition: %#v", handler)
+	}
+	if err := accumulator.ValidateSpecForHandler(semanticview.Wrap(bundle), node, "review.requested", handler.Accumulate); err != nil {
+		t.Fatalf("generated key lacks catalog admission: %v", err)
 	}
 }
 

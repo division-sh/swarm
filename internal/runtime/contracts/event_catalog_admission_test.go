@@ -133,6 +133,53 @@ func TestEventCatalogAdmissionRetainsAliasValues(t *testing.T) {
 	if !found || location.Line != 3 {
 		t.Fatalf("alias provenance line = %d, want authored alias use on line 3", location.Line)
 	}
+	catalog := TypeCatalogDocument{Types: map[string]NamedTypeDecl{
+		"Record": {Fields: map[string]TypeFieldSpec{"id": {Type: "uuid"}, "note": {Type: "text", IsOptional: true}}},
+		"Other":  {Fields: map[string]TypeFieldSpec{"id": {Type: "uuid"}}},
+	}, Enums: map[string]EnumTypeDecl{"Status": {Values: []string{"open"}}}}
+	for _, body := range []string{"_embed: [Record]\n", "_embed: &records [Record]\n"} {
+		snapshot, err := yamlsource.Load([]byte("test.event:\n  " + strings.ReplaceAll(strings.TrimSuffix(body, "\n"), "\n", "\n  ") + "\n"))
+		if err != nil {
+			t.Fatal(err)
+		}
+		entries, err := admitEventCatalogDocument(snapshot.Document("events.yaml"), catalog)
+		if err != nil {
+			t.Fatal(err)
+		}
+		payload := entries["test.event"].Payload
+		if len(payload.Properties) != 2 || payload.Properties["id"].Type != "uuid" || payload.Properties["note"].Type != "text" || !slices.Equal(payload.Required, []string{"id"}) {
+			t.Fatalf("embedded types/optionality changed: %#v", payload)
+		}
+		stateSource, err := yamlsource.Load([]byte(body))
+		if err != nil {
+			t.Fatal(err)
+		}
+		state, err := projectStateContract(stateSource.Document("state.yaml").Root(), catalog)
+		if err != nil || len(state.Fields) != 2 || state.Fields["id"].Type != "uuid" || !state.Fields["note"].IsOptional {
+			t.Fatalf("state/event embedded semantics differ: %#v (%v)", state, err)
+		}
+	}
+	for _, body := range []string{"_embed: [Record, Record]\n", "_embed: [Record, Other]\n", "_embed: [Record]\nid: text\n", "_embed: [Status]\n", "_embed: [missing]\n", "_embed: []\n", "_embed: Record\n", "_embed: null\n"} {
+		for _, family := range []string{"state", "event"} {
+			t.Run(family+"_"+body, func(t *testing.T) {
+				snapshot, err := yamlsource.Load([]byte(body))
+				if err != nil {
+					t.Fatal(err)
+				}
+				if family == "state" {
+					_, err = projectStateContract(snapshot.Document("state.yaml").Root(), catalog)
+				} else {
+					snapshot, err = yamlsource.Load([]byte("test.event:\n  " + strings.ReplaceAll(strings.TrimSuffix(body, "\n"), "\n", "\n  ") + "\n"))
+					if err == nil {
+						_, err = admitEventCatalogDocument(snapshot.Document("events.yaml"), catalog)
+					}
+				}
+				if err == nil || !strings.Contains(err.Error(), family+"s.yaml:") && !strings.Contains(err.Error(), "state.yaml:") {
+					t.Fatalf("embedding must refuse with authored location: %v", err)
+				}
+			})
+		}
+	}
 }
 
 func TestEventCatalogAdmissionRetainsAliasAndMergeIntroductionLocations(t *testing.T) {

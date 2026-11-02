@@ -222,8 +222,15 @@ func ValidateJoinHandlerIsolation(handler SystemNodeEventHandler) error {
 }
 
 func ValidateAccumulateHandlerIsolation(handler SystemNodeEventHandler) error {
-	if handler.Accumulate == nil || len(handler.OnComplete) == 0 {
+	if handler.Accumulate == nil || handler.Loop == nil {
 		return nil
 	}
-	return fmt.Errorf("handler.accumulate is open stream collection and cannot be combined with handler.on_complete; use same-arrival compute, filter, reduce, count, or rules, or use handler.join for finite completion")
+	kind, _, err := handler.Loop.Operation()
+	if err != nil {
+		return err
+	}
+	if kind == LoopOperationRepeat || kind == LoopOperationClose {
+		return fmt.Errorf("accumulate on a loop %s handler is refused; collect on the admitting handlers", kind)
+	}
+	return nil
 }

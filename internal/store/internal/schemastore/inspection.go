@@ -10,10 +10,10 @@ import (
 // SchemaInspection distinguishes a compatible read surface from preparation
 // that normal boot still owns. Inspection never creates or alters tables.
 type SchemaInspection struct {
-	Target             string
-	Fresh              bool
-	Origin             *RuntimeStoreOrigin
-	MissingStateTables []string
+	Target                  string
+	Fresh                   bool
+	Origin                  *RuntimeStoreOrigin
+	MissingDeploymentTables []string
 }
 
 func (s *Postgres) InspectSchema(ctx context.Context, request SchemaBootstrapRequest) (SchemaInspection, error) {
@@ -78,20 +78,20 @@ func inspectSchemaPreparation(ctx context.Context, q schemaQueryer, request Sche
 	if report.State != schemaStateFresh && report.State != schemaStateCompatible {
 		return SchemaInspection{}, fmt.Errorf("unknown %s schema compatibility state %q", dialect, report.State)
 	}
-	missing, err := inspectStatePlans(ctx, q, append(append([]SchemaTableDDL(nil), request.StatePlans...), request.deploymentPlans...), dialect, diagnostic)
+	missing, err := inspectDeploymentPlans(ctx, q, request.deploymentPlans, dialect, diagnostic)
 	if err != nil {
 		return SchemaInspection{}, err
 	}
 	result := SchemaInspection{Target: target, Fresh: report.State == schemaStateFresh, Origin: report.Origin}
 	for _, plan := range missing {
-		result.MissingStateTables = append(result.MissingStateTables, plan.TableName)
+		result.MissingDeploymentTables = append(result.MissingDeploymentTables, plan.TableName)
 	}
-	sort.Strings(result.MissingStateTables)
+	sort.Strings(result.MissingDeploymentTables)
 	return result, nil
 }
 
 // Boot consumes this same read decision before executing only the missing DDL.
-func inspectStatePlans(ctx context.Context, q schemaQueryer, plans []SchemaTableDDL, dialect SchemaDialect, diagnostic schemaCompatibilityDiagnostic) ([]SchemaTableDDL, error) {
+func inspectDeploymentPlans(ctx context.Context, q schemaQueryer, plans []SchemaTableDDL, dialect SchemaDialect, diagnostic schemaCompatibilityDiagnostic) ([]SchemaTableDDL, error) {
 	var tables map[string]struct{}
 	var err error
 	switch dialect {

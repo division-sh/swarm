@@ -4400,7 +4400,7 @@ func TestRun_RejectsCreateEntityAccumulateWhenDynamicComputeProofWouldOtherwiseW
 	bundle := loadWave1ExpressionFixtureBundle(t)
 	flowID, nodeID, eventType, handler := firstFlowHandlerInFlowView(t, bundle)
 	handler.CreateEntity = true
-	handler.Accumulate = &runtimecontracts.AccumulateSpec{Into: "items"}
+	handler.Accumulate = &runtimecontracts.AccumulateSpec{Target: "items", Key: "id"}
 	handler.Compute = &runtimecontracts.ComputeSpec{
 		Operation: runtimecontracts.ComputeOpCount,
 		StoreAs:   "state.composite_score",
@@ -4418,7 +4418,7 @@ func TestRun_RejectsCreateEntityAccumulateWithoutFiniteCompletionSemantics(t *te
 	bundle := loadWave1ExpressionFixtureBundle(t)
 	flowID, nodeID, eventType, handler := firstFlowHandlerInFlowView(t, bundle)
 	handler.CreateEntity = true
-	handler.Accumulate = &runtimecontracts.AccumulateSpec{Into: "items"}
+	handler.Accumulate = &runtimecontracts.AccumulateSpec{Target: "items", Key: "id"}
 	handler.Compute = &runtimecontracts.ComputeSpec{
 		Operation: runtimecontracts.ComputeOpCount,
 		StoreAs:   "state.composite_score",
@@ -5273,14 +5273,14 @@ func TestRun_ConnectedInputSatisfiesTimerTriggerProducerProof(t *testing.T) {
 }
 
 func TestRun_AccumulatorRequiresGenuineConnectedProducer(t *testing.T) {
-	bundle := loadNamesOnlyBootverifyBundle(t, canonicalrouting.ExampleRoot(t, canonicalrouting.ParentConnect))
+	bundle := loadNamesOnlyBootverifyBundle(t, canonicalrouting.CopyParentConnectAccumulator(t))
 	consumer, ok := bundle.FlowViewByID("consumer")
 	if !ok {
 		t.Fatal("consumer flow missing")
 	}
 	node := consumer.Nodes["consumer-node"]
 	handler := node.EventHandlers["work.ready"]
-	handler.Accumulate = &runtimecontracts.AccumulateSpec{Into: "items", From: "payload"}
+	handler.Accumulate = &runtimecontracts.AccumulateSpec{Target: "items", Key: "work_id"}
 	writeFlowHandler(t, bundle, "consumer", "consumer-node", "work.ready", handler)
 	report := Run(context.Background(), semanticview.Wrap(bundle), Options{})
 	if reportContains(report.Errors(), "accumulator_input_producer_path", "work.ready") {

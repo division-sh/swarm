@@ -94,9 +94,9 @@ func TestCanonicalRetirementBundleAdmission(t *testing.T) {
 			if _, err := LoadWorkflowContractBundleWithOverrides(repoRoot, root, platformSpec); err == nil || !contractErrorContains(err, tc.want) {
 				t.Fatalf("retired bundle admission error = %v, want %q", err, tc.want)
 			} else if tc.file == "schema.yaml" {
-				path := `["pins"]["inputs"][0]`
+				path := `["inputs"][0]`
 				if tc.output {
-					path = `["pins"]["outputs"][0]`
+					path = `["outputs"][0]`
 				}
 				if !strings.Contains(err.Error(), path) || !strings.Contains(err.Error(), "schema.yaml:4:") {
 					t.Fatalf("pin shape refusal lost its exact source: %v", err)

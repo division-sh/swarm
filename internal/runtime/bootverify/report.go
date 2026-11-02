@@ -76,7 +76,6 @@ var stableHardInvalidityRemediation = map[string]string{
 	"invalid_field_detection":                 "Remove unsupported fields or replace them with the promoted contract field supported by the spec.",
 	"managed_credential_state":                "Configure the required managed credential or remove the dependency that requires it.",
 	"native_tools_valid":                      "Fix the native tool declaration so it references a supported runtime tool surface.",
-	"node_state_schema_typed_counterpart":     "Add the typed node-state counterpart required by the schema or remove the unsupported jsonb-only state field.",
 	"payload_field_coverage":                  "Populate every required emitted payload field or make the target event schema optional where appropriate.",
 	"platform_tool_usage_hints":               "Remove retired or unsupported tool references; they cannot be enabled by usage hints. For supported tools, fix the required platform usage hints.",
 	"platform_namespace_violation":            "Rename authored business fields away from platform-reserved namespace roots.",

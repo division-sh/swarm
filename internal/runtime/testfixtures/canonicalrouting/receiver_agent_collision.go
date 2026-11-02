@@ -10,7 +10,7 @@ import (
 // ReceiverAgentCollisionValues are inert business data, never actor authority.
 func ReceiverAgentCollisionValues() map[string]any {
 	values := map[string]any{}
-	for _, name := range strings.Fields("type mode model model_tier llm_backend resolved_llm_backend resolved_model resolved_llm_provider resolved_llm_transport conversation_mode session_scope session_scope_authority memory max_turns_per_task subscriptions emit_events tools permissions native_tools workspace_class manager_fallback flow_path flow_id flow_instance flow_data_access budget_envelope execution_mode mock intent criteria entity_id parent_agent_id") {
+	for _, name := range strings.Fields("type mode model model_tier llm_backend resolved_llm_backend resolved_model resolved_llm_provider resolved_llm_transport conversation_mode session_scope session_scope_authority memory max_turns_per_task subscriptions emit_events tools permissions native_tools workspace_class manager_fallback flow_path flow_id flow_instance flow_data_access budget_envelope execution_mode mock intent entity_id parent_agent_id") {
 		values[name] = "business-" + name
 	}
 	values["constraints"] = map[string]any{"memory": "business-memory", "mode": "business-mode", "max_turns_per_task": 999}

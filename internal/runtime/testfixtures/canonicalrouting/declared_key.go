@@ -41,12 +41,11 @@ stages:
 inputs:
   - work.keyed
 `, instanceField))
-	writeClosedVariantFile(t, root, "review/state.yaml", "receiver_id: {type: text, indexed: true}\naccount_id: {type: text, indexed: true}\nowner: text\n")
+	writeClosedVariantFile(t, root, "review/state.yaml", "receiver_id: {type: text, indexed: true}\naccount_id: {type: text, indexed: true}\nowner: text\nitems: [json]\n")
 	writeClosedVariantFile(t, root, "review/nodes.yaml", `key-consumer:
   work.keyed:
-    accumulate:
-      into: items
-      from: payload
+    data_accumulation:
+      writes: [{op: append, target: state.items, value: payload}]
 `)
 	return root
 }

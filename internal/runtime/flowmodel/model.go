@@ -10,27 +10,11 @@ type PolicyValue struct {
 	Value any
 }
 
-func (v PolicyValue) MarshalYAML() (any, error)            { return v.Value, nil }
-func (p PolicyCriteriaParam) MarshalYAML() (any, error)    { return p.Value, nil }
-func (p PolicyCriteriaParam) MarshalJSON() ([]byte, error) { return json.Marshal(p.Value) }
+func (v PolicyValue) MarshalYAML() (any, error)              { return v.Value, nil }
+func (p PolicyValidationParam) MarshalYAML() (any, error)    { return p.Value, nil }
+func (p PolicyValidationParam) MarshalJSON() ([]byte, error) { return json.Marshal(p.Value) }
 
-type PolicyCriteriaSet struct {
-	Classes map[string]PolicyCriteriaClass `yaml:"classes" json:"classes"`
-	Rules   []PolicyCriteriaRule           `yaml:"rules" json:"rules"`
-}
-
-type PolicyCriteriaClass struct {
-	Disposition string `yaml:"disposition" json:"disposition"`
-}
-
-type PolicyCriteriaRule struct {
-	ID     string                         `yaml:"id" json:"id"`
-	Class  string                         `yaml:"class" json:"class"`
-	Text   string                         `yaml:"text" json:"text"`
-	Params map[string]PolicyCriteriaParam `yaml:"params" json:"params,omitempty"`
-}
-
-type PolicyCriteriaParam struct {
+type PolicyValidationParam struct {
 	Value any
 }
 
@@ -45,12 +29,12 @@ type PolicyValidationClass struct {
 }
 
 type PolicyValidationRule struct {
-	ID           string                         `yaml:"id" json:"id"`
-	Class        string                         `yaml:"class" json:"class"`
-	Text         string                         `yaml:"text" json:"text"`
-	Params       map[string]PolicyCriteriaParam `yaml:"params" json:"params,omitempty"`
-	PinCandidate *bool                          `yaml:"pin_candidate" json:"pin_candidate"`
-	Check        PolicyValidationCheck          `yaml:"check" json:"check"`
+	ID           string                           `yaml:"id" json:"id"`
+	Class        string                           `yaml:"class" json:"class"`
+	Text         string                           `yaml:"text" json:"text"`
+	Params       map[string]PolicyValidationParam `yaml:"params" json:"params,omitempty"`
+	PinCandidate *bool                            `yaml:"pin_candidate" json:"pin_candidate"`
+	Check        PolicyValidationCheck            `yaml:"check" json:"check"`
 }
 
 type PolicyValidationCheck struct {

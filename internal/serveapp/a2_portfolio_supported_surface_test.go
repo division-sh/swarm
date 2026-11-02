@@ -453,23 +453,12 @@ func requireA2PortfolioStreamChain(t *testing.T, rt servedControlProofRuntime, t
 	reported := requireA2PortfolioEmission(t, rt, trigger.RunID, operating.Entity.FlowInstance+"/operating.reported", requested.EventID, payload)
 	portfolio := requireA2PortfolioKeyedEntity(t, rt, trigger.RunID, "portfolio", "period_id", period)
 	requireA2PortfolioDelivery(t, reported, "portfolio", "portfolio-collector", portfolio, "materializing_entity")
-	wantFields := map[string]any{"period_id": period, "last_revenue": float64(revenue), "reports": map[string]any{requested.EventID: payload}}
+	wantFields := map[string]any{"period_id": period, "last_revenue": float64(revenue), "reports": map[string]any{requested.EventID: payload}, "operating_reports": []any{payload}}
 	if !reflect.DeepEqual(portfolio.Fields, wantFields) {
 		t.Fatalf("exact period-keyed stream fields: %#v, want %#v", portfolio.Fields, wantFields)
 	}
-	node := identitytest.FlowNode(t, "portfolio", "portfolio-collector")
-	carrier, err := engine.StateCarrierFromPersisted(portfolio.Fields, portfolio.Bookkeeping, portfolio.Gates, portfolio.Accumulated)
-	if err != nil {
-		t.Fatal(err)
-	}
-	buckets, _ := carrier.StateBuckets[node.Key()]["handler_accumulators"].(map[string]any)
-	key := timeridentity.NewAccumulatorBucketRef(node, "operating.reported").Key()
-	raw, ok := buckets[key].(map[string]any)
-	if !ok || len(buckets) != 1 {
-		t.Fatalf("exact public stream accumulator identity: %#v, want %s", buckets, key)
-	}
-	state := accumulator.Load(raw)
-	if state.Err() != nil || len(state.Received) != 1 || state.Received[requested.EventID] == "" || len(state.Deliveries) != 0 || !reflect.DeepEqual(state.Items, []map[string]any{payload}) {
+	state := accumulator.Load(portfolio.Fields["operating_reports"])
+	if state.Err() != nil || !reflect.DeepEqual(state.Items, []map[string]any{payload}) {
 		t.Fatalf("ordinary public stream accumulation: %+v err=%v", state, state.Err())
 	}
 	return portfolio, reported

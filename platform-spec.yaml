@@ -3038,9 +3038,6 @@ type_system:
           min: 0
           max: 100
         equal_to: sibling_field
-        citation:                 # event payload fields only
-          criteria: feasibility_exclusions
-          allowed_classes: [hard, soft]
         _unused_reason: Reason    # entities only; verify suppression for E1
         _unused_reader_reason: Reason # entities only; reader lint suppression for external/operator readout
     optional_record_edge: |
@@ -3310,109 +3307,20 @@ rule_set_contracts:
   implementation_slice: '#2303'
   location: flow rules.yaml
   owner: admitted RulesDocument single scoped namespace
-  resolution: Walk ancestors and replace each complete same-name declaration with the nearest one, then check agent or machine variant. A nearer wrong-kind declaration rejects the reference; it never falls back to an ancestor of the requested kind.
-  variants:
-    agent: classes and ordered rules containing id, class, text and optional params
-    machine: classes, nonempty typed inputs and ordered rules additionally requiring explicit boolean pin_candidate and equal-only check
+  resolution: Walk ancestors and replace each complete same-name declaration with the nearest one. Every declaration is a machine validation set; malformed nearer declarations refuse rather than falling back to an ancestor.
+  shape: classes, nonempty typed inputs and ordered rules containing id, class, text, optional params, explicit boolean pin_candidate and equal-only check
   admission:
   - Rule-set, class and input names retain the existing exact declaration-name grammar; unrestricted policy keys do not change that grammar.
   - Every nested mapping is closed. Required text is nonempty text, not coercible numeric data. classes and rules are nonempty.
-  - Presence of inputs, check or pin_candidate selects the machine obligations. Partial or null machine fields are invalid, never downgraded to the agent variant.
+  - Nonempty typed inputs, check and explicit pin_candidate are required. Partial or null machine fields are invalid. Agent-judged criteria sets are retired.
   - Parameters are omitted or a mapping of inert text, boolean, integer or finite numeric scalars. Empty text is valid; null and containers are invalid. Existing policy scalar reference semantics are unchanged.
   - Alias and merge expansion consumes the same admission and document-wide bounds. Duplicate local declarations, duplicate rule IDs and undeclared classes fail closed.
-criteria_contracts:
-  status: merge_bearing_runtime_behavior
-  implementation_slice: '#1717'
-  description: |
-    Flow-local agent-judged criteria are stable-ID rule sets declared as a
-    agent variant in the owning flow's flat `rules.yaml`. Criteria
-    are contract artifacts, not prompt prose, generic policy scalar values,
-    flow `data/` files, or `read_flow_data` conventions.
-  rule_declaration:
-    location: flow rules.yaml
-    owner: nearest scoped RuleSet agent variant
-    shape: |
-      <set_name>:
-        classes:
-          <class_name>:
-            disposition: <event_name-or-none>
-        rules:
-          - id: <stable-never-reused-id>
-            class: <declared-class>
-            text: <human-readable rule>
-            params:
-              <name>: <typed-scalar-or-policy-scalar-ref>
-    rules:
-    - Agent rule sets are closed declarations in rules.yaml, never extracted from policy values or agent intent.
-    - Criteria sets are flow-local, including the selected root FlowNode `.`. Project-shared packs, team packs, and
-      marketplace distribution are not implemented; there is no separate project criteria scope.
-    - Rule IDs are stable and never reused within a set. Historical events cite the bundle/contract version active when
-      emitted; this slice does not add a separate criteria-versioning subsystem.
-    - Each set MUST declare at least one class, every class MUST have a disposition, every rule MUST have id/class/text,
-      every rule class MUST be declared, and duplicate rule IDs fail static validation.
-    - Parameters are inert typed scalar literals or references to sibling scalar policy values using `policy.<key>`.
-      Criteria parameters are not CEL, predicates, machine-evaluated checks, or a general expression language.
-  agent_references:
-    field: criteria
-    location: flow-scoped agents.yaml entries
-    syntax: 'criteria: [feasibility_exclusions]'
-    rules:
-    - Agent criteria refs are short set names resolved against the agent's owning scoped rules.yaml namespace. Dotted paths,
-      path separators, duplicates, empty refs, and unresolved refs fail static validation.
-    - Selected-root agents resolve criteria against the root FlowNode's rules.yaml, under the same resolution rules as child agents.
-  delivery:
-    generated_context: |
-      Agents that declare criteria receive a deterministic generated "Contract Criteria" prompt/context section rendered from
-      the resolved contract. The generated section is the only PR1 delivery path and is tested as stable so later prompt-frame
-      generation (#1718) can absorb it without changing behavior.
-    forbidden_bypasses:
-    - generic policy or agent-intent interpolation
-    - extraction of rule authority from literal policy values
-    - flow `data/` files
-    - '`read_flow_data`'
-    - intent-local hardcoded criteria IDs as authority
-    fail_closed: Runtime inability to deliver an otherwise valid referenced set fails closed before agent judgment proceeds.
-  event_citations:
-    field_metadata: |
-      Event payload fields may declare citation metadata:
-
-      cites:
-        type: text       # or an explicit scalar type reference '[text]'
-        citation:
-          criteria: feasibility_exclusions
-          allowed_classes: [hard]
-    type_rule: Citation fields must be text/string or list-of-text/list-of-string.
-    compatibility_rule: |
-      PR1 uses explicit `allowed_classes` on each citation field. The end-state may derive allowed classes from the
-      class-to-disposition mapping, but until that is promoted, missing `allowed_classes` is invalid.
-    emit_boundary: |
-      Generated emit tools validate criteria citations after ordinary payload schema validation and before publish. Unknown IDs,
-      agent-undeclared criteria sets, unresolved sets, wrong citation value shape, and class-incompatible IDs fail in-turn with
-      a non-retryable typed corrective runtime error (`criteria_citation_validation_failed`) and publish zero events.
-    multi_citation: Both single `text` citation fields and list citation fields are supported in this slice.
-  static_verification:
-    checks:
-    - typed agent rule-set shape
-    - flow-local placement
-    - unique stable IDs within a set
-    - class declaration and disposition completeness
-    - inert parameter scalar/ref validation
-    - agent criteria references
-    - event citation field type and allowed class metadata
-    - emitted-event citation fields consumed only by agents that declare the referenced criteria set
-  split_boundaries:
-  - '#1714 machine-evaluated validation rows consume this stable-ID rule grammar as the machine variant with a different
-    evaluator.'
-  - '#1718 prompt-frame generation may absorb the deterministic criteria section later; #1717 does not ship the full frame
-    generator.'
-  - Structured predicates, criteria packs, team packs, CLI/editor UX, and criteria evaluation harnesses are separate gates.
 policy_validation_contracts:
   status: merge_bearing_runtime_behavior
   implementation_slice: '#1714'
   description: |
     Flow-local machine-evaluated validation sets are stable-ID rule sets
-    declared as the machine variant in the owning flow's flat
-    `rules.yaml`. They share the criteria artifact family but use the
+    declared in the owning flow's flat `rules.yaml`. They use the
     platform machine evaluator, not agent judgment. Validation rows bind
     turn-scoped computed facts only; they do not route, emit, advance state,
     persist data, call tools, read files, run CEL, or execute code.
@@ -3445,7 +3353,7 @@ policy_validation_contracts:
       validation rows themselves do not emit or route.
     - 'Every rule MUST declare id/class/text, every rule class MUST be declared, every rule MUST explicitly declare
       `pin_candidate: true|false`, and duplicate rule IDs fail static validation.'
-    - Rule parameters, when present, follow `criteria_contracts` inert scalar/ref rules. They are not expressions and are
+    - Rule parameters, when present, are inert text, boolean, integer or finite numeric scalars, or references to sibling scalar policy values using `policy.<key>`. Empty text is valid; null and containers refuse. They are not expressions and are
       not consumed by the Slice B equal-only evaluator.
   evaluator:
     supported_checks:
@@ -5519,17 +5427,16 @@ handler_specification:
       description: Top-level fields on a system node declaration.
       handlers: Every non-reserved key is an event name mapped directly to its handler declaration. Empty mappings are explicit no-op consumers.
       optional:
-        state_schema: map — fields the node persists per entity (accumulator state)
-        state_table: string — table name for node state persistence
         timers: legacy/kernel timer declarations (see timer_model). Staged lifecycle
           timer authoring for flows using `stages:` is owned by
           `stages.<stage>.timers`, not node-level state timers.
         gate_state: map — gate field definitions for this node (boolean flags on entity)
       admission_rule: >-
-        The closed reserved fields are timers, state_schema, gate_state and state_table. All other keys must be declared
+        The closed reserved fields are timers and gate_state. All other keys must be declared
         exact event names or supported flow-local wildcard patterns matching a declared event. The node map key owns
         identity. execution_type, subscribes_to, produces and event_handlers fail on presence; no metadata union or
-        compatibility container exists. Undeclared or misspelled handler keys fail complete bundle admission.
+        compatibility container exists. state_table and state_schema fail on presence; declare state in state.yaml.
+        Undeclared or misspelled handler keys fail complete bundle admission.
       effective_semantics:
         id: YAML map key only, scoped by the existing declaration identity. No authored override or template spelling.
         execution_type: system_node
@@ -6730,9 +6637,8 @@ engine:
         is specifically on leaving terminal states, not on backward movement in general. Revision loops, reset-to-earlier-state,
         and similar patterns are valid.
     entity_field_resolution:
-      description: entity.X resolves against declared entities.yaml fields and node-local state; no manifest-owned entity schema exists.
-    state_schema_scoping: state_schema fields are node-scoped in storage. In CEL, entity.X reads the current handler node
-      state. Cross-node state reads are not supported — use events to pass data between nodes.
+      description: state.X resolves against the selected flow instance's declared state.yaml fields. Nodes in that flow
+        share that instance state; neither a node-local schema nor a manifest-owned entity schema exists.
   accumulation_engine:
     description: The accumulation engine owns instance-scoped stream admission, not finite membership or closure.
     canonical_contract: handler_specification.handler_fields.accumulate
@@ -6988,8 +6894,8 @@ engine:
         rules:
         - SQLite schema bootstrap must be file-backed and must not silently use an in-memory database.
         - SQLite bootstrap must create parent directories for the selected path when the schema owner opens the database.
-        - SQLite DDL must cover every current platform_tables.tables entry plus generated node-state tables unless a gate
-          explicitly records a named deferral. Normal runtime boot must not create product-specific typed entity tables.
+        - SQLite DDL must cover every current platform_tables.tables entry. Normal runtime boot must not create generated
+          node-state tables or product-specific typed entity tables.
         - SQLite DDL must be rendered from the normalized schema plan subset. The renderer must explicitly classify each
           supported Postgres-authored construct it accepts, including UUID defaults, timestamp defaults, JSON text storage,
           text-array storage, partial indexes, expression indexes, and check predicates.
@@ -6997,7 +6903,6 @@ engine:
           heuristic free-form SQL rewriting.
     covered_schema_inputs:
     - platform_tables.tables
-    - generated node-state tables from system node state_schema
     schema_admission:
       owner: private backend store state with unaccepted and current variants
       rule: >
@@ -8723,8 +8628,7 @@ engine:
         → tool: emit_score_dimension_complete'
       behavior: |
         Each emit tool accepts a payload object matching the event's schema in events.yaml. The platform validates
-        the payload, validates any criteria_contracts.event_citations metadata against the actor's declared criteria sets,
-        attaches sender context, and publishes the event.
+        the payload, attaches sender context, and publishes the event.
         For pin-declared output events, generated agent emit tools MUST consume the same publish-time RoutePlan
         authority as node/system emits. If EventBus preflight reports a canonical lowered parent-connect route
         decision, the tool MUST admit the event to Publish so that EventBus persists and dispatches the typed
@@ -8849,21 +8753,6 @@ engine:
         shared_owner: Verify, boot, runtime tool generation, runtime execution, MCP/tool visibility, and diagnostics must
           consume the same flow-data path/scoping resolver.
         boot_check: flow_data_access_validation
-    criteria:
-      description: Optional flow-scoped agent contract field. Declares the scoped rules.yaml agent sets that are
-        delivered to the agent as deterministic generated context and that the agent may cite in generated emit tools.
-      contract_field:
-        field: criteria
-        type: array of short set names
-        location: Flow-local agent declaration in agents.yaml, including the selected root FlowNode `.`.
-        default: omitted or empty means no generated criteria context and no criteria citation authority.
-        example: "criteria:\n  - feasibility_exclusions"
-      validation:
-        boot_check: criteria_contract_validation
-        refs: Each item must be a short non-empty set name resolving to an agent variant in the declaring flow's scoped rules.yaml namespace.
-          Dotted paths and filesystem-like paths are invalid.
-        generated_delivery: Referenced sets are rendered through criteria_contracts.delivery; criteria are not granted by
-          tools, flow_data_access, agent-intent interpolation, or generic policy reads.
     native_tools:
       description: Optional agent contract field. Declares which host-level capabilities the agent may use. Default all false
         (omitted = no native capabilities). The native_tools field is the sole authorization gate — no separate permission
@@ -10249,7 +10138,7 @@ engine:
       scope: contract
       trigger: A declaration uses an unsupported or malformed field in a fail-closed contract surface. This includes node
         retired node fields, undeclared direct handler keys, malformed reserved node fields
-        (state_schema, state_table, timers, gate_state), and malformed external tool-provider dispatch
+        (timers, gate_state), and malformed external tool-provider dispatch
         rate-limit declarations on HTTP tools, MCP servers, or policy.web_search_provider.
       when: boot-only
     - id: policy_conflict_detection
@@ -14116,29 +14005,22 @@ agent_intent_model:
       only as a non-executable lifecycle identity for immediate fenced teardown or replacement; that path constructs no
       provider agent and installs no subscriptions.
     derived_system_prompt: >
-      The derived system prompt is an internal, non-serializable runtime carrier constructed from the exact resolved intent
-      plus separately owned contract criteria. It is never a selected-store field or authored string. Runtime rejects a
-      missing carrier, an intent-identity mismatch, or criteria references that differ from the selected declaration. The
-      canonical provider-prompt assembly appends the separately owned generated environment context exactly once when
-      constructing the provider-visible system prompt; normal execution and startup preflight consume that same assembly.
-      This step does not mutate or replace the resolved intent artifact or durable criteria references. Persisted
+      The derived system prompt is an internal, non-serializable runtime carrier containing the exact resolved intent.
+      It is never a selected-store field or separately authored string. Runtime rejects a missing carrier, an
+      intent-identity mismatch, or any text differing from the exact resolved intent. The canonical provider-prompt
+      assembly preserves those bytes; generated environment facts use their separately owned conversation frame.
+      This step does not mutate or replace the resolved intent artifact. Persisted
       `derived_system_prompt` is unsupported and fails closed rather than being migrated or accepted.
     event_invariance: Event payload shape, payload mode, date, entity state, workspace class, shard parent, runtime backend,
       and execution mode never select or mutate authored intent content or identity.
     provider_boundary: API, CLI, OpenAI-compatible, Responses, mock, and startup-probe adapters receive the exact text emitted
       by the canonical ProviderPrompt assembly; provider adapters never resolve agent intent or append generated context.
-  contract_criteria_assembly:
-    owner: criteria_contracts.delivery
-    rule: >
-      Authored criteria references remain outside intent identity. Materialization may append the exact contract-owned
-      criteria section only when runtime references, if supplied, equal the authored set; runtime-only or mismatched refs fail
-      closed.
   environment_postamble:
     rule: >
       Per #2886 (6564806104), generated environment facts are never appended to the authored system prompt.
       After exact session acquisition, a callable workspace execution grant supplies one runtime-tagged user frame
       at the beginning of a new conversation. Restored history is not prepended or reprojected. An agent with no
-      execution grant receives no environment frame. This does not alter authored intent/criteria identity or grant authority.
+      execution grant receives no environment frame. This does not alter authored intent identity or grant authority.
     required_content:
       - '[swarm:environment]'
       - 'Workspace: /workspace (read-write)'
@@ -14211,16 +14093,12 @@ agent_execution_frame:
     - complete concrete agent identity
     - role and authored flow identity
     - resolved business-intent artifact and identity
-    - canonical criteria references plus criteria identity bound to the bundle
-    - canonical provider-visible system prompt assembled from intent and criteria only
+    - canonical provider-visible system prompt containing the exact resolved intent
     - resolved runtime mode, provider, transport, and the paired authored model alias plus concrete model when selected
     provider_model_selection: >
       `model_alias` is the exact canonical authored alias and `model` is its resolved concrete provider model. They are
       either both absent or both present; managed execution supplies both. Surrounding-whitespace aliases/models and
       one-sided selections fail closed before frame completion.
-    criteria_identity: >
-      `agent-criteria:v1:sha256:<64 lowercase hex>` over deterministic compact JSON containing the admitted bundle hash and
-      canonical criteria references. Runtime-only, reordered, duplicated, or mismatched criteria fail closed.
   turn_context:
     closed_kinds: [initial, tool_continuation, board_directive, remediation]
     admitted_event: >
@@ -21578,16 +21456,10 @@ platform_tables:
     fresh_bootstrap: >
       Fresh platform creation is backend-serialized and atomically commits the complete platform schema plus exactly one
       immutable runtime_store_metadata row. Failed or concurrent creation cannot leave a successful stamp over partial DDL.
-    generated_node_state: >
-      Contract-generated node-state tables are classified only after platform acceptance. Missing tables may be created;
-      existing incompatible tables fail before node-state mutation through the same typed backend-specific compatibility
-      diagnostic, including selected-store target, running and stored origin evidence, exact drift, and fresh-store remediation.
   test_bootstrap:
-    description: Normal runtime/test bootstrap creates only platform tables plus generated node-state tables.
+    description: Normal runtime/test bootstrap creates only platform tables.
     sources:
       platform_tables: All tables from platform_tables.tables in platform-spec.yaml. Always created.
-      node_state_tables: Generated from node state_schema in the flow contracts loaded for the test. Optional — only if the
-        test uses generated node-local state tables.
     generic_store_tests: Generic store tests (postgres_smoke_test.go, etc.) bootstrap using platform_tables only. They create
       entities in entity_state, events in events, sessions in agent_sessions. No product contracts needed. No legacy SQL files.
       No migrations/ directory.
@@ -35711,7 +35583,7 @@ api_specification:
           session_contract:
             type: object
             additionalProperties: false
-            required: [bundle_hash, agent_id, authored_flow, agent_identity, intent, criteria, provider, provider_prompt]
+            required: [bundle_hash, agent_id, authored_flow, agent_identity, intent, provider, provider_prompt]
             properties:
               bundle_hash:
                 type: string
@@ -35732,13 +35604,6 @@ api_specification:
                   content: {type: string, minLength: 1}
                   content_hash: {type: string, pattern: '^sha256:[a-f0-9]{64}$'}
                   identity: {type: string, pattern: '^agent-intent:v1:sha256:[a-f0-9]{64}$'}
-              criteria:
-                type: object
-                additionalProperties: false
-                required: [references, identity]
-                properties:
-                  references: {type: array, items: {type: string}}
-                  identity: {type: string, pattern: '^agent-criteria:v1:sha256:[a-f0-9]{64}$'}
               provider: {$ref: '#/components/schemas/AgentFrameProviderPresence'}
               provider_prompt: {type: string, minLength: 1}
               content_projection: {type: string}

@@ -1,3 +1,6 @@
 item_id: string
 status: string
 priority: string
+processed_items: [json]
+intake_ready: false
+needs_revision: false

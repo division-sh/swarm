@@ -1,3 +1,4 @@
 period_id: text
 reports: map[text]json
 last_revenue: integer
+operating_reports: [OperatingReport]

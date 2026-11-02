@@ -4,7 +4,6 @@ import (
 	"strings"
 	"testing"
 
-	runtimeflowmodel "github.com/division-sh/swarm/internal/runtime/flowmodel"
 	"golang.org/x/text/unicode/norm"
 )
 
@@ -118,24 +117,21 @@ func TestResolvedIntentValidateRejectsImpossiblePersistedFactsBeforeHashIdentity
 	}
 }
 
-func TestContractCriteriaPromptRejectsArbitraryRenderedSuffix(t *testing.T) {
+func TestIntentOnlyPromptRejectsArbitraryRenderedSuffix(t *testing.T) {
 	intent, err := Resolve(SourceInline, "inline", "agents.yaml#agents.reviewer.intent", "Review the proposal.")
 	if err != nil {
 		t.Fatal(err)
 	}
-	prompt, err := ContractCriteriaPrompt(intent, []string{"quality"}, map[string]runtimeflowmodel.PolicyCriteriaSet{
-		"quality": {
-			Classes: map[string]runtimeflowmodel.PolicyCriteriaClass{"hard": {Disposition: "reject"}},
-			Rules: []runtimeflowmodel.PolicyCriteriaRule{{
-				ID: "QUALITY-01", Class: "hard", Text: "Reject incomplete proposals.",
-			}},
-		},
-	})
+	prompt, err := IntentOnlyPrompt(intent)
 	if err != nil {
 		t.Fatal(err)
 	}
 	prompt.text += "\nArbitrary unowned suffix."
-	if err := prompt.Validate(intent, []string{"quality"}); err == nil || !strings.Contains(err.Error(), "rendering is not canonical") {
-		t.Fatalf("Validate error = %v, want arbitrary criteria suffix rejection", err)
+	if err := prompt.Validate(intent); err == nil || !strings.Contains(err.Error(), "rendering is not canonical") {
+		t.Fatalf("Validate error = %v, want arbitrary suffix rejection", err)
+	}
+	prompt.digest = derivedPromptDigest(intent.Identity, prompt.text)
+	if err := prompt.Validate(intent); err == nil {
+		t.Fatal("rehashed arbitrary suffix escaped exact intent binding")
 	}
 }

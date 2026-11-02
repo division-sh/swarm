@@ -71,46 +71,19 @@ func projectRuleSetValue(value yamlsource.Value) (RuleSet, error) {
 	if err != nil || len(rows) == 0 {
 		return RuleSet{}, fmt.Errorf("rules must be a nonempty sequence at %s", value.Location())
 	}
-	_, machine := fields["inputs"]
-	for _, row := range rows {
-		keys, err := row.Mapping()
-		if err != nil {
-			return RuleSet{}, err
-		}
-		for _, key := range keys {
-			if key.Name == "check" || key.Name == "pin_candidate" {
-				machine = true
-			}
-		}
+	inputs, err := projectRuleInputsValue(fields["inputs"])
+	if err != nil {
+		return RuleSet{}, fmt.Errorf("agent criteria sets are retired; machine validation requires typed inputs and check rows: %w", err)
 	}
-	var inputs map[string]string
-	if machine {
-		inputs, err = projectRuleInputsValue(fields["inputs"])
-		if err != nil {
-			return RuleSet{}, err
-		}
-	}
-	var agentRows []PolicyCriteriaRule
 	var machineRows []PolicyValidationRule
 	for _, row := range rows {
-		rule, err := projectRuleRowValue(row, machine)
+		rule, err := projectRuleRowValue(row)
 		if err != nil {
 			return RuleSet{}, nodeValueError(row, err)
 		}
-		if machine {
-			machineRows = append(machineRows, rule)
-		} else {
-			agentRows = append(agentRows, PolicyCriteriaRule{ID: rule.ID, Class: rule.Class, Text: rule.Text, Params: rule.Params})
-		}
+		machineRows = append(machineRows, rule)
 	}
-	if !machine {
-		return RuleSet{Criteria: &PolicyCriteriaSet{Classes: classes, Rules: agentRows}}, nil
-	}
-	machineClasses := make(map[string]PolicyValidationClass, len(classes))
-	for name, class := range classes {
-		machineClasses[name] = PolicyValidationClass{Disposition: class.Disposition}
-	}
-	return RuleSet{Validation: &PolicyValidationSet{Classes: machineClasses, Inputs: inputs, Rules: machineRows}}, nil
+	return RuleSet{Validation: &PolicyValidationSet{Classes: classes, Inputs: inputs, Rules: machineRows}}, nil
 }
 
 func projectRuleInputsValue(value yamlsource.Value) (map[string]string, error) {
@@ -132,7 +105,7 @@ func projectRuleInputsValue(value yamlsource.Value) (map[string]string, error) {
 	return inputs, nil
 }
 
-func projectRuleClassesValue(value yamlsource.Value) (map[string]PolicyCriteriaClass, error) {
+func projectRuleClassesValue(value yamlsource.Value) (map[string]PolicyValidationClass, error) {
 	fields, err := uniqueYAMLMappingFields(value, "rule classes")
 	if err != nil || len(fields) == 0 {
 		return nil, fmt.Errorf("classes must be a nonempty mapping at %s", value.Location())
@@ -140,7 +113,7 @@ func projectRuleClassesValue(value yamlsource.Value) (map[string]PolicyCriteriaC
 	if err := validateExactDeclarationNames(fields, "rule class"); err != nil {
 		return nil, err
 	}
-	out := make(map[string]PolicyCriteriaClass, len(fields))
+	out := make(map[string]PolicyValidationClass, len(fields))
 	for _, field := range fields {
 		properties, err := nodeValueFields(field.Value, "rule class", map[string]struct{}{"disposition": {}})
 		if err != nil {
@@ -150,17 +123,13 @@ func projectRuleClassesValue(value yamlsource.Value) (map[string]PolicyCriteriaC
 		if err != nil {
 			return nil, err
 		}
-		out[field.Name] = PolicyCriteriaClass{Disposition: disposition}
+		out[field.Name] = PolicyValidationClass{Disposition: disposition}
 	}
 	return out, nil
 }
 
-func projectRuleRowValue(value yamlsource.Value, machine bool) (PolicyValidationRule, error) {
-	allowed := map[string]struct{}{"id": {}, "class": {}, "text": {}, "params": {}}
-	if machine {
-		allowed["check"] = struct{}{}
-		allowed["pin_candidate"] = struct{}{}
-	}
+func projectRuleRowValue(value yamlsource.Value) (PolicyValidationRule, error) {
+	allowed := map[string]struct{}{"id": {}, "class": {}, "text": {}, "params": {}, "check": {}, "pin_candidate": {}}
 	fields, err := nodeValueFields(value, "rule", allowed)
 	if err != nil {
 		return PolicyValidationRule{}, err
@@ -180,7 +149,7 @@ func projectRuleRowValue(value yamlsource.Value, machine bool) (PolicyValidation
 		if err := validateExactDeclarationNames(entries, "rule param"); err != nil {
 			return out, err
 		}
-		out.Params = make(map[string]PolicyCriteriaParam, len(entries))
+		out.Params = make(map[string]PolicyValidationParam, len(entries))
 		for _, entry := range entries {
 			if entry.Value.Presence() != yamlsource.PresenceScalar && entry.Value.Presence() != yamlsource.PresenceEmptyScalar {
 				return out, nodeValueError(entry.Value, fmt.Errorf("rule parameter must be an inert scalar"))
@@ -189,14 +158,11 @@ func projectRuleRowValue(value yamlsource.Value, machine bool) (PolicyValidation
 			if err := entry.Value.Project(&literal); err != nil {
 				return out, err
 			}
-			if !criteriaParamScalar(literal) {
+			if !validationParamScalar(literal) {
 				return out, nodeValueError(entry.Value, fmt.Errorf("rule parameter must be an inert finite scalar"))
 			}
-			out.Params[entry.Name] = PolicyCriteriaParam{Value: literal}
+			out.Params[entry.Name] = PolicyValidationParam{Value: literal}
 		}
-	}
-	if !machine {
-		return out, nil
 	}
 	candidate, present := fields["pin_candidate"]
 	if !present {

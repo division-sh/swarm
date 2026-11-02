@@ -13,7 +13,6 @@ import (
 	runtimeagentidentity "github.com/division-sh/swarm/internal/runtime/core/agentidentity"
 	"github.com/division-sh/swarm/internal/runtime/core/timeridentity"
 	runtimeeffects "github.com/division-sh/swarm/internal/runtime/effects"
-	runtimeflowmodel "github.com/division-sh/swarm/internal/runtime/flowmodel"
 )
 
 func TestPersistedAgentProjectionRoundTripsExactIntentArtifact(t *testing.T) {
@@ -35,9 +34,6 @@ func TestPersistedAgentProjectionRoundTripsExactIntentArtifact(t *testing.T) {
 	}
 	if !hydrated.Prompt.Empty() {
 		t.Fatal("hydration restored a persisted derived prompt instead of requiring canonical reconstruction")
-	}
-	if !reflect.DeepEqual(hydrated.Criteria, cfg.Criteria) {
-		t.Fatalf("hydrated criteria = %#v, want %#v", hydrated.Criteria, cfg.Criteria)
 	}
 }
 
@@ -271,12 +267,7 @@ func persistedIntentTestAgent(t testing.TB) runtimeactors.AgentConfig {
 	if err != nil {
 		t.Fatal(err)
 	}
-	prompt, err := runtimeagentintent.ContractCriteriaPrompt(intent, []string{"quality"}, map[string]runtimeflowmodel.PolicyCriteriaSet{
-		"quality": {
-			Classes: map[string]runtimeflowmodel.PolicyCriteriaClass{"hard": {Disposition: "reject"}},
-			Rules:   []runtimeflowmodel.PolicyCriteriaRule{{ID: "QUALITY-01", Class: "hard", Text: "Require exact quality."}},
-		},
-	})
+	prompt, err := runtimeagentintent.IntentOnlyPrompt(intent)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -292,7 +283,6 @@ func persistedIntentTestAgent(t testing.TB) runtimeactors.AgentConfig {
 		Memory:             agentmemory.Plan{Enabled: false},
 		Intent:             intent,
 		Prompt:             prompt,
-		Criteria:           []string{"quality"},
 		Config:             json.RawMessage(`{}`),
 	}
 }

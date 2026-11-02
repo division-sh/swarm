@@ -250,6 +250,11 @@ func roleScopedWritableFields(source semanticview.Source, actor models.AgentConf
 		}
 	}
 	out := make([]string, 0, len(seen))
+	for _, transition := range source.DerivedHandlerTransitions() {
+		if transition.Node.FlowPath() == contract.FlowID && transition.Accumulate != nil {
+			delete(seen, transition.Accumulate.Target)
+		}
+	}
 	for field := range seen {
 		out = append(out, field)
 	}

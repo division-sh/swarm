@@ -74,57 +74,6 @@ func TestResolvePolicyByID_WalksAncestorChain(t *testing.T) {
 	}
 }
 
-func TestResolveRulesByID_MergesCriteriaAlongAncestorChain(t *testing.T) {
-	root := &testNode{
-		ID: "root", Rules: RulesDocument{"root_set": {Criteria: &PolicyCriteriaSet{
-			Classes: map[string]PolicyCriteriaClass{"hard": {Disposition: "root.blocked"}},
-			Rules:   []PolicyCriteriaRule{{ID: "ROOT-1", Class: "hard", Text: "Root rule."}},
-		}},
-			"shared": {Criteria: &PolicyCriteriaSet{
-				Classes: map[string]PolicyCriteriaClass{"soft": {Disposition: "root.revise"}},
-				Rules:   []PolicyCriteriaRule{{ID: "ROOT-SHARED", Class: "soft", Text: "Root shared."}},
-			}}}, Children: []testNode{{
-			ID: "child", Rules: RulesDocument{"child_set": {Criteria: &PolicyCriteriaSet{
-				Classes: map[string]PolicyCriteriaClass{"allow": {Disposition: "none"}},
-				Rules:   []PolicyCriteriaRule{{ID: "CHILD-1", Class: "allow", Text: "Child rule."}},
-			}},
-				"shared": {Criteria: &PolicyCriteriaSet{
-					Classes: map[string]PolicyCriteriaClass{"hard": {Disposition: "child.blocked"}},
-					Rules:   []PolicyCriteriaRule{{ID: "CHILD-SHARED", Class: "hard", Text: "Child shared."}},
-				}}},
-		}},
-	}
-	tree := Tree[testNode]{
-		Root: root,
-		ByID: map[string]*testNode{
-			"root":  root,
-			"child": &root.Children[0],
-		},
-	}
-	base := RulesDocument{"base_set": {Criteria: &PolicyCriteriaSet{
-		Classes: map[string]PolicyCriteriaClass{"soft": {Disposition: "base.revise"}},
-		Rules:   []PolicyCriteriaRule{{ID: "BASE-1", Class: "soft", Text: "Base rule."}},
-	}}}
-
-	got := ResolveRulesByID(
-		base,
-		tree,
-		"child",
-		func(node *testNode) string { return node.ID },
-		func(node *testNode) RulesDocument { return node.Rules },
-		testChildren,
-	)
-
-	for _, name := range []string{"base_set", "root_set", "child_set", "shared"} {
-		if _, ok := got.Criteria(name); !ok {
-			t.Fatalf("merged criteria missing %q: %#v", name, got.CriteriaSets())
-		}
-	}
-	if gotID := got["shared"].Criteria.Rules[0].ID; gotID != "CHILD-SHARED" {
-		t.Fatalf("shared criteria rule = %q, want child override", gotID)
-	}
-}
-
 func TestResolveRulesByID_MergesValidationAlongAncestorChain(t *testing.T) {
 	falseValue := false
 	trueValue := true

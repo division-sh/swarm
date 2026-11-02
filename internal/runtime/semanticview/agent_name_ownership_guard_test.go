@@ -321,8 +321,6 @@ func agentNameGuardRawAgentScopeMapAllowed(path, enclosing string) bool {
 	allowed := map[string]struct{}{
 		"internal/runtime/contracts/agent_registry_resolution.go::bundleAgentRecords":                       {},
 		"internal/runtime/contracts/agent_intent_resolution.go::materializeAgentIntents":                    {},
-		"internal/runtime/contracts/criteria_validation.go::validateAgentCriteriaCitationConsumption":       {},
-		"internal/runtime/contracts/criteria_validation.go::validateAgentCriteriaReferences":                {},
 		"internal/runtime/contracts/mock_performance_loading.go::materializeAgentMockPerformances":          {},
 		"internal/runtime/contracts/workflow_contract_accessors.go::(*WorkflowContractBundle).AgentEntries": {},
 		"internal/runtime/contracts/workflow_contract_accessors.go::(*WorkflowContractBundle).AgentEntry":   {},
@@ -392,14 +390,12 @@ func agentNameGuardAgentMapRangeAllowed(path, enclosing string) bool {
 	// coordinate, or ignore it while inspecting non-identity entry fields. Any
 	// new range over the wire map must be classified here or consume a name plan.
 	allowed := map[string]struct{}{
-		"internal/runtime/contracts/agent_intent_resolution.go::materializeAgentIntents":              {},
-		"internal/runtime/contracts/criteria_validation.go::validateAgentCriteriaCitationConsumption": {},
-		"internal/runtime/contracts/criteria_validation.go::validateAgentCriteriaReferences":          {},
-		"internal/runtime/contracts/mock_performance_loading.go::materializeAgentMockPerformances":    {},
-		"internal/runtime/contracts/workflow_contract_effective.go::EffectiveAgentRegistryEntries":    {},
-		"internal/runtime/contracts/workflow_contract_merging.go::mergeAgentContracts":                {},
-		"internal/runtime/semanticviewtest/source.go::WrapRootAgents":                                 {},
-		"internal/runtime/tools/emit_runtime.go::NewEmitRegistry":                                     {},
+		"internal/runtime/contracts/agent_intent_resolution.go::materializeAgentIntents":           {},
+		"internal/runtime/contracts/mock_performance_loading.go::materializeAgentMockPerformances": {},
+		"internal/runtime/contracts/workflow_contract_effective.go::EffectiveAgentRegistryEntries": {},
+		"internal/runtime/contracts/workflow_contract_merging.go::mergeAgentContracts":             {},
+		"internal/runtime/semanticviewtest/source.go::WrapRootAgents":                              {},
+		"internal/runtime/tools/emit_runtime.go::NewEmitRegistry":                                  {},
 	}
 	_, ok := allowed[path+"::"+enclosing]
 	return ok

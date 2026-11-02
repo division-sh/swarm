@@ -102,7 +102,8 @@ func writeStateOnlyAcquisitionFlow(t testing.TB, root, workflowName, rootSchema,
 	}
 	nodes := `selector:
   test.node_emitted.selector:
-    accumulate: {into: items, from: payload}
+    data_accumulation:
+      writes: [{op: append, target: state.items, value: payload}]
 upserter:
   test.node_emitted.upserter: {}
 `
