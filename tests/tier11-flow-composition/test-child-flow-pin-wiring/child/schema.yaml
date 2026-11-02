@@ -2,8 +2,7 @@
 stages:
   idle: {}
   completed: {final: true}
-pins:
-  inputs:
-    - work.requested
-  outputs:
-    - work.completed
+inputs:
+  - work.requested
+outputs:
+  - work.completed

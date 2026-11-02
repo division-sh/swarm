@@ -2,12 +2,11 @@
 stages:
   pending: {}
   done: {final: true}
-pins:
-  inputs:
-    - task.completed
-  outputs:
-    - task.logged
-    - task.record
+inputs:
+  - task.completed
+outputs:
+  - task.logged
+  - task.record
 connect:
   - event: task.record
     from: .

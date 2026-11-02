@@ -3,7 +3,6 @@ instance: worker_id
 stages:
   ready: {}
   done: {final: true}
-pins:
-  inputs:
-    - spawn.done
-    - task.assign
+inputs:
+  - spawn.done
+  - task.assign

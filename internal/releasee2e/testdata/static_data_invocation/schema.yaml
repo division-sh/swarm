@@ -4,12 +4,11 @@ stages:
   reading: {}
   child_reading: {}
   complete: {final: true}
-pins:
-  inputs:
-    - read.requested
-    - child.completed
-  outputs:
-    - child.requested
+inputs:
+  - read.requested
+  - child.completed
+outputs:
+  - child.requested
 connect:
   - {event: child.requested, from: ., to: registry, resolution: select-or-create}
   - {event: child.completed, from: registry, to: .}

@@ -3,9 +3,8 @@ stages:
   pending: {}
   active: {}
   done: {final: true}
-pins:
-  inputs:
-    - task.assigned
-    - task.finished
-  outputs:
-    - records.loaded
+inputs:
+  - task.assigned
+  - task.finished
+outputs:
+  - records.loaded

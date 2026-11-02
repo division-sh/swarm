@@ -2,10 +2,9 @@
 stages:
   waiting: {}
   completed: {final: true}
-pins:
-  inputs:
-    - work.begin
-    - task.done
+inputs:
+  - work.begin
+  - task.done
 connect:
   - event: task.done
     from: grandchild

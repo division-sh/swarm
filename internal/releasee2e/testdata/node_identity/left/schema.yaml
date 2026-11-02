@@ -3,7 +3,6 @@ stages:
   pending: {}
   working: {}
   done: {final: true}
-pins:
-  inputs:
-    - entry.left
-    - work.routed
+inputs:
+  - entry.left
+  - work.routed

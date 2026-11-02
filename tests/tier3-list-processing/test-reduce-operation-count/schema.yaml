@@ -1,8 +1,7 @@
 stages:
   pending: {}
   done: {final: true}
-pins:
-  inputs:
-    - batch.submitted
-  outputs:
-    - batch.counted
+inputs:
+  - batch.submitted
+outputs:
+  - batch.counted

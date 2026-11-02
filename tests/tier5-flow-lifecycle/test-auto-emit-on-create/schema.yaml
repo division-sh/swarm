@@ -1,11 +1,10 @@
 stages:
   idle: {}
   spawned: {final: true}
-pins:
-  inputs:
-    - flow.created
-  outputs:
-    - worker.requested
+inputs:
+  - flow.created
+outputs:
+  - worker.requested
 connect:
   - event: worker.requested
     from: .

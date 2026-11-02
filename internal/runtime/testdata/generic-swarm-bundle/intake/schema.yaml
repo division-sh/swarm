@@ -4,19 +4,7 @@ stages:
   collecting: {}
   ready: {}
   rejected: {final: true}
-pins:
-  inputs:
-    - item.created
-    - item.processed
-    - item.rejected
-required_agents:
-  - role: control-plane
-    subscribes_to:
-      - item.review_requested
-    emits:
-      - item.created
-  - role: worker
-    subscribes_to:
-      - item.processed
-    emits:
-      - item.processed
+inputs:
+  - item.created
+  - item.processed
+  - item.rejected

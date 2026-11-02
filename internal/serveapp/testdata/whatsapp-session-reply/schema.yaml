@@ -7,9 +7,8 @@ stages:
           advances_to: done
   done:
     final: true
-pins:
-  inputs:
-    - inbound.whatsapp.raw
-    - inbound.whatsapp.message
-  outputs:
-    - inbound.whatsapp.message
+inputs:
+  - inbound.whatsapp.raw
+  - inbound.whatsapp.message
+outputs:
+  - inbound.whatsapp.message

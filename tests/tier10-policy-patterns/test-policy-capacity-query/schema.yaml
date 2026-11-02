@@ -1,8 +1,7 @@
 stages:
   queued: {}
   active: {final: true}
-pins:
-  inputs:
-    - slot.requested
-  outputs:
-    - slot.granted
+inputs:
+  - slot.requested
+outputs:
+  - slot.granted

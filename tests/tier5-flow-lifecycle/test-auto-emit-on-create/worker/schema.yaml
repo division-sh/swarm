@@ -9,7 +9,6 @@ stages:
   done: {final: true}
 auto_emit_on_create:
   event: auto.started
-pins:
-  inputs:
-    - worker.requested
-    - auto.started
+inputs:
+  - worker.requested
+  - auto.started

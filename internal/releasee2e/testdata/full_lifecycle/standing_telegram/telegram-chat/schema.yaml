@@ -1,6 +1,5 @@
 # fixture: telegram-chat
 instance: conversation_reference
 stages: []
-pins:
-  inputs:
-    - inbound.telegram.text_message
+inputs:
+  - inbound.telegram.text_message

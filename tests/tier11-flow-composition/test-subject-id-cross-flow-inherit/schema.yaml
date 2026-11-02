@@ -1,8 +1,7 @@
 stages:
   ready: {}
   dispatched: {final: true}
-pins:
-  inputs:
-    - item.discovered
-  outputs:
-    - item.dispatched
+inputs:
+  - item.discovered
+outputs:
+  - item.dispatched

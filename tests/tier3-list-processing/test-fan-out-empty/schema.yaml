@@ -1,8 +1,7 @@
 stages:
   pending: {}
   scanning: {final: true}
-pins:
-  inputs:
-    - batch.submitted
-  outputs:
-    - item.assigned
+inputs:
+  - batch.submitted
+outputs:
+  - item.assigned

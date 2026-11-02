@@ -3,8 +3,7 @@ stages:
   waiting: {}
   working: {}
   processed: {final: true}
-pins:
-  inputs:
-    - alpha.start
-  outputs:
-    - alpha.complete
+inputs:
+  - alpha.start
+outputs:
+  - alpha.complete

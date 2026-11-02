@@ -2,9 +2,8 @@ stages:
   pending: {}
   processing: {}
   done: {final: true}
-pins:
-  inputs:
-    - cycle.ping
-  outputs:
-    - cycle.ping
-    - cycle.pong
+inputs:
+  - cycle.ping
+outputs:
+  - cycle.ping
+  - cycle.pong

@@ -1,8 +1,7 @@
 stages:
   active: {}
   cleared: {final: true}
-pins:
-  inputs:
-    - state.reset_requested
-  outputs:
-    - state.reset_completed
+inputs:
+  - state.reset_requested
+outputs:
+  - state.reset_completed

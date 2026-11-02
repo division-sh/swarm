@@ -3,8 +3,7 @@ stages:
   pending: {}
   active: {}
   complete: {final: true}
-pins:
-  inputs:
-    - scout.requested
-  outputs:
-    - scout.completed
+inputs:
+  - scout.requested
+outputs:
+  - scout.completed

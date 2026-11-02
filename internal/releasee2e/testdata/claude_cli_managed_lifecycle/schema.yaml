@@ -1,11 +1,10 @@
 # fixture: claude-cli-release-lifecycle
 stages: []
-pins:
-  inputs:
-    - task.assigned
-  outputs:
-    - task.assigned
-    - agent.completed
+inputs:
+  - task.assigned
+outputs:
+  - task.assigned
+  - agent.completed
 connect:
   - event: task.assigned
     from: .

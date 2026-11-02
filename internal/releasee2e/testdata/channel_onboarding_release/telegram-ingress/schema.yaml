@@ -1,5 +1,4 @@
-pins:
-  inputs:
-    - inbound.telegram.raw
-  outputs:
-    - inbound.telegram.text_message
+inputs:
+  - inbound.telegram.raw
+outputs:
+  - inbound.telegram.text_message
