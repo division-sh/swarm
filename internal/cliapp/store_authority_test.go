@@ -73,32 +73,52 @@ func TestStoreStatusReadsSelectedStoreOwnershipWithoutContextInference(t *testin
 }
 
 func TestStoreStatusReadsCurrentSQLiteStoreWithoutMutationBootstrap(t *testing.T) {
-	unsetStoreSelectorEnv(t)
-	path := filepath.Join(t.TempDir(), "selected.db")
-	configPath := writeStoreAuthorityConfig(t, path)
-	bootstrapStoreAuthoritySQLite(t, configPath, path, "durable-status-owner")
-	before, err := os.Stat(path)
-	if err != nil {
-		t.Fatal(err)
-	}
-	coordinate, err := os.Stat(path + ".possession")
-	if err != nil {
-		t.Fatal(err)
-	}
-	stdout, stderr, code := runStoreAuthorityCommand(t, configPath, "status")
-	if code != 0 || stderr != "" || stdout != "Project owner: selected-store lease is available (last admitted generation 1, owner durable-status-owner).\n" {
-		t.Fatalf("read-only status: code=%d stdout=%q stderr=%q", code, stdout, stderr)
-	}
-	after, err := os.Stat(path)
-	if err != nil {
-		t.Fatal(err)
-	}
-	if before.Size() != after.Size() || !before.ModTime().Equal(after.ModTime()) {
-		t.Fatalf("status mutated selected database: before=%#v after=%#v", before, after)
-	}
-	afterCoordinate, err := os.Stat(path + ".possession")
-	if err != nil || !os.SameFile(coordinate, afterCoordinate) {
-		t.Fatalf("status replaced possession coordinate: %v", err)
+	for _, projectDefault := range []bool{false, true} {
+		t.Run(fmt.Sprintf("project_default_%t", projectDefault), func(t *testing.T) {
+			unsetStoreSelectorEnv(t)
+			repo := RepoRoot()
+			path := filepath.Join(t.TempDir(), "selected.db")
+			configPath := writeStoreAuthorityConfig(t, path)
+			if projectDefault {
+				repo = t.TempDir()
+				path = filepath.Join(repo, ".swarm", "stores", "dev.db")
+				configPath = writeStoreAuthorityConfig(t, "")
+				stdout, stderr, code := runStoreAuthorityCommandFrom(t, repo, configPath, "sqlite", "status")
+				if code != 0 || stderr != "" || !strings.Contains(stdout, "has not been created") {
+					t.Fatalf("absent project store: code=%d stdout=%q stderr=%q", code, stdout, stderr)
+				}
+				if _, err := os.Stat(filepath.Dir(path)); !errors.Is(err, os.ErrNotExist) {
+					t.Fatalf("status created the absent project store parent: %v", err)
+				}
+				if err := os.MkdirAll(filepath.Dir(path), 0o700); err != nil {
+					t.Fatal(err)
+				}
+			}
+			bootstrapStoreAuthoritySQLite(t, configPath, path, "durable-status-owner", repo)
+			before, err := os.Stat(path)
+			if err != nil {
+				t.Fatal(err)
+			}
+			coordinate, err := os.Stat(path + ".possession")
+			if err != nil {
+				t.Fatal(err)
+			}
+			stdout, stderr, code := runStoreAuthorityCommandFrom(t, repo, configPath, "sqlite", "status")
+			if code != 0 || stderr != "" || stdout != "Project owner: selected-store lease is available (last admitted generation 1, owner durable-status-owner).\n" {
+				t.Fatalf("read-only status: code=%d stdout=%q stderr=%q", code, stdout, stderr)
+			}
+			after, err := os.Stat(path)
+			if err != nil {
+				t.Fatal(err)
+			}
+			if before.Size() != after.Size() || !before.ModTime().Equal(after.ModTime()) {
+				t.Fatalf("status mutated selected database: before=%#v after=%#v", before, after)
+			}
+			afterCoordinate, err := os.Stat(path + ".possession")
+			if err != nil || !os.SameFile(coordinate, afterCoordinate) {
+				t.Fatalf("status replaced possession coordinate: %v", err)
+			}
+		})
 	}
 }
 
@@ -265,16 +285,24 @@ func runStoreAuthorityCommand(t *testing.T, configPath string, args ...string) (
 }
 
 func runStoreAuthorityCommandWithStore(t *testing.T, configPath, backend string, args ...string) (string, string, int) {
+	return runStoreAuthorityCommandFrom(t, RepoRoot(), configPath, backend, args...)
+}
+
+func runStoreAuthorityCommandFrom(t *testing.T, repo, configPath, backend string, args ...string) (string, string, int) {
 	t.Helper()
 	commandArgs := append([]string{"store"}, args...)
 	commandArgs = append(commandArgs, "--config", configPath, "--store", backend)
 	var stdout, stderr bytes.Buffer
-	code := executeRootCommandWithOptions(context.Background(), RepoRoot(), commandArgs, &stdout, &stderr, defaultRootCommandOptions())
+	code := executeRootCommandWithOptions(context.Background(), repo, commandArgs, &stdout, &stderr, defaultRootCommandOptions())
 	return stdout.String(), stderr.String(), code
 }
 
-func bootstrapStoreAuthoritySQLite(t *testing.T, configPath, sqlitePath, ownerID string) {
+func bootstrapStoreAuthoritySQLite(t *testing.T, configPath, sqlitePath, ownerID string, invocationRoots ...string) {
 	t.Helper()
+	repo := RepoRoot()
+	if len(invocationRoots) != 0 {
+		repo = invocationRoots[0]
+	}
 	paths, err := ResolveCLISourcePaths(RepoRoot(), CLISourcePathOptions{
 		ConfigPath: configPath,
 		SourceRoot: filepath.Join(RepoRoot(), "tests", "tier8-boot-verification", "test-boot-success"),
@@ -317,7 +345,7 @@ func bootstrapStoreAuthoritySQLite(t *testing.T, configPath, sqlitePath, ownerID
 	if err != nil {
 		t.Fatal(err)
 	}
-	stdout, stderr, code := runStoreAuthorityCommand(t, configPath, "status")
+	stdout, stderr, code := runStoreAuthorityCommandFrom(t, repo, configPath, "sqlite", "status")
 	if code != 0 || stderr != "" || stdout != fmt.Sprintf("Project owner: selected-store lease is held (last admitted generation 1, owner %s).\n", ownerID) {
 		t.Fatalf("held SQLite store status = code:%d stdout:%q stderr:%q", code, stdout, stderr)
 	}
@@ -336,6 +364,10 @@ func bootstrapStoreAuthoritySQLite(t *testing.T, configPath, sqlitePath, ownerID
 func writeStoreAuthorityConfig(t *testing.T, sqlitePath string) string {
 	t.Helper()
 	path := filepath.Join(t.TempDir(), "swarm.yaml")
-	writeRuntimeConfigText(t, path, fmt.Sprintf("store:\n  backend: sqlite\n  sqlite:\n    path: %q\n", sqlitePath))
+	body := "store:\n  backend: sqlite\n"
+	if sqlitePath != "" {
+		body += fmt.Sprintf("  sqlite:\n    path: %q\n", sqlitePath)
+	}
+	writeRuntimeConfigText(t, path, body)
 	return path
 }
