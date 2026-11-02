@@ -11,7 +11,9 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/division-sh/swarm/internal/cliapp"
 	runtimecredentials "github.com/division-sh/swarm/internal/runtime/credentials"
+	"github.com/division-sh/swarm/internal/runtime/decisioncard"
 	"github.com/division-sh/swarm/internal/runtime/testfixtures/canonicalrouting"
 	"github.com/division-sh/swarm/internal/servedparity"
 	"github.com/division-sh/swarm/internal/testutil/llmapi"
@@ -142,6 +144,112 @@ func TestChannelOneBotAnthropicToolRound(t *testing.T) {
 			requireReceptionistReplies(t, h, map[string]string{reply: "2001"})
 			if len(provider.Requests()) != 2 {
 				t.Fatalf("Anthropic requests=%d, want one exact non-emit round", len(provider.Requests()))
+			}
+		})
+	}
+}
+
+func TestAnthropicHumanTaskObservationBothStores(t *testing.T) {
+	for _, backend := range servedparity.RequiredBackends {
+		t.Run(string(backend), func(t *testing.T) {
+			denyProviderJourneyExternalNetwork(t)
+			observed := make(chan string, 1)
+			provider := llmapi.New(t, llmapi.Anthropic, "/v1/messages", "human-task-key", func(request llmapi.Request) (llmapi.Reply, error) {
+				var body struct {
+					Model    string                  `json:"model"`
+					Messages []anthropicRoundMessage `json:"messages"`
+				}
+				if err := json.Unmarshal(request.Body, &body); err != nil {
+					return llmapi.Reply{}, err
+				}
+				uses, results, err := anthropicRoundBlocks(body.Messages)
+				if err != nil {
+					return llmapi.Reply{}, err
+				}
+				reply := llmapi.Reply{Model: body.Model, InputTokens: 10, OutputTokens: 2, TotalTokens: 12}
+				switch request.Number {
+				case 1:
+					reply.Tools = []llmapi.ToolCall{{ID: "human-request", Name: "ask_human", Arguments: json.RawMessage(`{"scope":"flow","category":"review","description":"Review this synthetic work."}`)}}
+				case 2:
+					if len(uses) != 1 || len(results) != 1 || uses[0].ID != "human-request" || results[0].ToolUseID != uses[0].ID {
+						return llmapi.Reply{}, fmt.Errorf("human request lost its linked tool round")
+					}
+					reply.Text = "Waiting for the human decision."
+				case 3:
+					if len(uses) != 1 || len(results) != 1 {
+						return llmapi.Reply{}, fmt.Errorf("human outcome invented a provider call or result id")
+					}
+					var cardID string
+					for _, message := range body.Messages {
+						var text string
+						if message.Role != "user" || json.Unmarshal(message.Content, &text) != nil || !strings.HasPrefix(text, "Tool result:\n") {
+							continue
+						}
+						var entry struct {
+							Name       string          `json:"name"`
+							OK         bool            `json:"ok"`
+							ToolCallID json.RawMessage `json:"tool_call_id"`
+							Result     struct {
+								CardID string `json:"card_id"`
+								Event  string `json:"event"`
+							} `json:"result"`
+						}
+						if err := json.Unmarshal([]byte(strings.TrimPrefix(text, "Tool result:\n")), &entry); err != nil || entry.Name != "ask_human" || !entry.OK || entry.Result.CardID == "" || entry.Result.Event != "human_task.approved" || len(entry.ToolCallID) != 0 || cardID != "" {
+							return llmapi.Reply{}, fmt.Errorf("human observation lost its exact ID-less outcome: %s", text)
+						}
+						cardID = entry.Result.CardID
+					}
+					if cardID == "" {
+						return llmapi.Reply{}, fmt.Errorf("human approval observation is absent")
+					}
+					observed <- cardID
+					reply.Text = "Observed the approved human task."
+				default:
+					return llmapi.Reply{}, fmt.Errorf("unexpected human-task provider request %d", request.Number)
+				}
+				return reply, nil
+			})
+			redirectExternalHosts(t, map[string]string{"api.anthropic.com": provider.URL})
+			h, hash := startChannelAnchorPublicJourney(t, backend, "bot-token", false, 0, func(opts *cliapp.ServeOptions) {
+				opts.TestLLMRuntime = nil
+				credentials, err := runtimecredentials.NewFileStore(os.Getenv("SWARM_CREDENTIALS_FILE"))
+				if err != nil {
+					t.Fatal(err)
+				}
+				if err := credentials.Set(context.Background(), "ANTHROPIC_API_KEY", "human-task-key"); err != nil {
+					t.Fatal(err)
+				}
+			})
+			seed := requireServedEventPublishRPCResult(t, h.rpcEndpoint(), map[string]any{
+				"event_name": "observer.requested", "bundle_hash": hash,
+				"payload": map[string]any{"seed": true}, "idempotency_key": "anthropic-human-request",
+			})
+			cardID := waitChannelPublicCard(t, h, seed.RunID, decisioncard.AnchorKindHumanTask, "chat/observers")
+			sessionID := requireProviderMemoryTurns(t, h.rpcEndpoint(), seed.RunID, 2)
+			var item struct {
+				Card struct {
+					ContentHash string `json:"card_content_hash"`
+				} `json:"decision_card"`
+			}
+			requireServedJSONRPCResult(t, h.rpcEndpoint(), "mailbox.get", map[string]any{"mailbox_id": cardID}, &item)
+			var result map[string]any
+			requireServedJSONRPCResult(t, h.rpcEndpoint(), "mailbox.decide", map[string]any{
+				"card_id": cardID, "verdict": "approve", "observed_content_hash": item.Card.ContentHash,
+				"idempotency_key": "anthropic-human-approve",
+			}, &result)
+			if current := requireProviderMemoryTurns(t, h.rpcEndpoint(), seed.RunID, 3); current != sessionID {
+				t.Fatalf("human outcome replaced the conversation: %s != %s", current, sessionID)
+			}
+			select {
+			case got := <-observed:
+				if got != cardID {
+					t.Fatalf("model observed card %s, want %s", got, cardID)
+				}
+			default:
+				t.Fatal("human outcome did not reach the model")
+			}
+			if got := len(provider.Requests()); got != 3 {
+				t.Fatalf("human-task provider requests=%d, want 3", got)
 			}
 		})
 	}
