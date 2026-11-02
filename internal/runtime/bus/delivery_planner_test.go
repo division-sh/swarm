@@ -62,7 +62,7 @@ func testSelectedOwnerPolicy(owners ...runtimepipeline.DeliveryTargetOwnerCandid
 
 func existingOwnerHandlerFixture() runtimecontracts.SystemNodeEventHandler {
 	return runtimecontracts.SystemNodeEventHandler{Guard: &runtimecontracts.GuardSpec{
-		ID: "selected_owner", Check: `instance.id != ""`,
+		Check: `instance.id != ""`,
 	}}
 }
 
@@ -209,12 +209,10 @@ func deliveryPlannerHandlerSource(t testing.TB, requireEntity bool) semanticview
 		handler := map[string]any{}
 		if requireEntity {
 			guard := existingOwnerHandlerFixture().Guard
-			handler["guard"] = map[string]string{"id": guard.ID, "check": guard.Check}
+			handler["guard"] = guard.Check
 		}
 		nodes[prefix][nodeID] = map[string]any{
-			"execution_type": "system_node",
-			"subscribes_to":  []string{fixture.event},
-			"event_handlers": map[string]any{fixture.event: handler},
+			fixture.event: handler,
 		}
 		events[prefix][fixture.event] = &yaml.Node{Kind: yaml.ScalarNode, Tag: "!!null"}
 	}

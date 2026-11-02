@@ -1,13 +1,9 @@
 test-node:
-  execution_type: system_node
-  subscribes_to: [item.evaluated]
-  produces: [item.passed]
-  event_handlers:
-    item.evaluated:
-      on_complete:
-        - condition: payload.score >= 70
-          emit:
-            event: item.passed
-          advances_to: passed
-        -
-          advances_to: failed
+  item.evaluated:
+    on_complete:
+      - condition: payload.score >= 70
+        emit:
+          event: item.passed
+        advances_to: passed
+      -
+        advances_to: failed

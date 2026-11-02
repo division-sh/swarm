@@ -109,7 +109,7 @@ ack: {mode: durable_before_dispatch}
 				handlers[event] = map[string]any{}
 			}
 			for name, document := range map[string]any{
-				"nodes.yaml": map[string]any{"observer": map[string]any{"execution_type": "system_node", "subscribes_to": events, "event_handlers": handlers}},
+				"nodes.yaml": map[string]any{"observer": handlers},
 			} {
 				raw, err := yaml.Marshal(document)
 				if err != nil {

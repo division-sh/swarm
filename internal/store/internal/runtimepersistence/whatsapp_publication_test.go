@@ -77,7 +77,7 @@ ack: {mode: durable_before_dispatch}
 			}
 			options := completeWorkflowTestCoordinatorOptions(runtimepipeline.NewWorkflowPersistence(store), store)
 			options.SourceArtifactFact = fact
-			options.Module = sqliteFlowActivationWorkflowModule{source: componentSource, guards: runtimepipeline.NewContractGuardRegistry(componentSource)}
+			options.Module = sqliteFlowActivationWorkflowModule{source: componentSource}
 			workflow := runtimepipeline.NewPipelineCoordinatorWithOptions(workflowTestBus{}, options)
 			if workflow == nil {
 				t.Fatal("publication component requires its source-bound workflow owner")

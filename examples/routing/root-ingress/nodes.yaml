@@ -1,17 +1,10 @@
 item-handler:
-  execution_type: system_node
-  subscribes_to: [item.received]
-  produces: [item.processed]
-  event_handlers:
-    item.received:
-      advances_to: processed
-      emit:
-        event: item.processed
-        fields:
-          item_id: payload.item_id
+  item.received:
+    advances_to: processed
+    emit:
+      event: item.processed
+      fields:
+        item_id: payload.item_id
 item-observer:
-  execution_type: system_node
-  subscribes_to: [item.processed]
-  event_handlers:
-    item.processed:
-      advances_to: done
+  item.processed:
+    advances_to: done

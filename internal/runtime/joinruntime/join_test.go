@@ -15,14 +15,14 @@ func TestActivationKeyIsolatesLoopGenerations(t *testing.T) {
 	first := attemptgeneration.Generation{LoopID: "revision", ActivationID: "activation", RevisionField: "revision_id", RevisionID: "rev-1", Attempt: 1}
 	second := first
 	second.RevisionID, second.Attempt = "rev-2", 2
-	if left, right := ActivationKey(testJoinRef(t, "", "items", "review", "node", "item.done", "entry", first)), ActivationKey(testJoinRef(t, "", "items", "review", "node", "item.done", "entry", second)); left == right || left == "" || right == "" {
+	if left, right := ActivationKey(testJoinRef(t, "", "review", "node", "item.done", "entry", first)), ActivationKey(testJoinRef(t, "", "review", "node", "item.done", "entry", second)); left == right || left == "" || right == "" {
 		t.Fatalf("generation keys collide: %q %q", left, right)
 	}
 }
 
 func TestActivationOrdersResultsByMembershipAndClassifiesDuplicates(t *testing.T) {
 	now := time.Date(2026, 7, 10, 12, 0, 0, 0, time.UTC)
-	activation, err := NewActivation(testJoinRef(t, "", "line_items", "awaiting", "node", "item.done", "dispatch-1", attemptgeneration.Generation{}), []string{"a", "b"}, nil, now, now.Add(time.Hour))
+	activation, err := NewActivation(testJoinRef(t, "", "awaiting", "node", "item.done", "dispatch-1", attemptgeneration.Generation{}), []string{"a", "b"}, nil, now, now.Add(time.Hour))
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -52,7 +52,7 @@ func TestActivationOrdersResultsByMembershipAndClassifiesDuplicates(t *testing.T
 
 func TestA2ArrivalContextFieldsMatchRuntimeProjection(t *testing.T) {
 	at := time.Now().UTC()
-	activation, err := NewActivation(testJoinRef(t, "", "join", "awaiting", "node", "item.done", "entry", attemptgeneration.Generation{}), []string{"a"}, nil, at, time.Time{})
+	activation, err := NewActivation(testJoinRef(t, "", "awaiting", "node", "item.done", "entry", attemptgeneration.Generation{}), []string{"a"}, nil, at, time.Time{})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -73,7 +73,7 @@ func TestA2ArrivalContextFieldsMatchRuntimeProjection(t *testing.T) {
 
 func TestActivationPersistsThroughTypedStateBuckets(t *testing.T) {
 	now := time.Date(2026, 7, 10, 12, 0, 0, 0, time.UTC)
-	activation, err := NewActivation(testJoinRef(t, "", "join", "awaiting", "node", "item.done", "", attemptgeneration.Generation{}), []string{}, nil, now, now.Add(time.Hour))
+	activation, err := NewActivation(testJoinRef(t, "", "awaiting", "node", "item.done", "", attemptgeneration.Generation{}), []string{}, nil, now, now.Add(time.Hour))
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -93,7 +93,7 @@ func TestActivationPersistsThroughTypedStateBuckets(t *testing.T) {
 
 func TestEmptyCompletionAdmissionEvidenceIsIndependentOfLifecycle(t *testing.T) {
 	at := time.Now().UTC()
-	ref := testJoinRef(t, "", "join", "awaiting", "node", "item.done", "entry", attemptgeneration.Generation{})
+	ref := testJoinRef(t, "", "awaiting", "node", "item.done", "entry", attemptgeneration.Generation{})
 	activation, err := NewActivation(ref, nil, nil, at, at.Add(time.Hour))
 	if err != nil {
 		t.Fatal(err)
@@ -135,7 +135,7 @@ func TestEmptyCompletionAdmissionEvidenceIsIndependentOfLifecycle(t *testing.T) 
 
 func TestA2JoinOutputRoundTripPreservesAdmittedNumberKinds(t *testing.T) {
 	now := time.Now().UTC()
-	activation, err := NewActivation(testJoinRef(t, "", "join", "awaiting", "node", "item.done", "entry", attemptgeneration.Generation{}), []string{"a"}, nil, now, time.Time{})
+	activation, err := NewActivation(testJoinRef(t, "", "awaiting", "node", "item.done", "entry", attemptgeneration.Generation{}), []string{"a"}, nil, now, time.Time{})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -166,7 +166,7 @@ func TestA2JoinOutputRoundTripPreservesAdmittedNumberKinds(t *testing.T) {
 func TestJoinActivationPersistsTypedDeclarationHandle(t *testing.T) {
 	generation := attemptgeneration.Generation{LoopID: "revision", ActivationID: "activation", RevisionField: "revision_id", RevisionID: "rev-2", Attempt: 2}
 	now := time.Date(2026, 8, 14, 12, 0, 0, 0, time.UTC)
-	activation, err := NewActivation(testJoinRef(t, "", "shared", "awaiting", "join-node", "item.completed", "entry-1", generation), []string{"a"}, nil, now, now.Add(time.Hour))
+	activation, err := NewActivation(testJoinRef(t, "", "awaiting", "join-node", "item.completed", "entry-1", generation), []string{"a"}, nil, now, now.Add(time.Hour))
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -198,7 +198,7 @@ func TestJoinActivationRejectsRetiredFlatIdentityRows(t *testing.T) {
 	now := time.Date(2026, 8, 14, 12, 0, 0, 0, time.UTC)
 	for _, retired := range []string{"flow_id", "join_id", "timer_task_id", "loop_generation"} {
 		t.Run(retired, func(t *testing.T) {
-			activation, err := NewActivation(testJoinRef(t, "", "shared", "awaiting", "join-node", "item.completed", "", attemptgeneration.Generation{}), []string{"a"}, nil, now, now.Add(time.Hour))
+			activation, err := NewActivation(testJoinRef(t, "", "awaiting", "join-node", "item.completed", "", attemptgeneration.Generation{}), []string{"a"}, nil, now, now.Add(time.Hour))
 			if err != nil {
 				t.Fatal(err)
 			}
@@ -222,7 +222,7 @@ func TestJoinActivationRejectsRetiredFlatIdentityRows(t *testing.T) {
 func TestNewActivationRejectsInvalidMembership(t *testing.T) {
 	now := time.Now().UTC()
 	for _, members := range [][]string{{""}, {"a", "a"}} {
-		if _, err := NewActivation(testJoinRef(t, "", "join", "awaiting", "node", "item.done", "", attemptgeneration.Generation{}), members, nil, now, now.Add(time.Hour)); err == nil {
+		if _, err := NewActivation(testJoinRef(t, "", "awaiting", "node", "item.done", "", attemptgeneration.Generation{}), members, nil, now, now.Add(time.Hour)); err == nil {
 			t.Fatalf("members %#v accepted", members)
 		}
 	}
@@ -232,7 +232,7 @@ func TestA2JoinLoadAndListRejectContradictoryBucketOwnership(t *testing.T) {
 	for _, corruption := range []string{"node", "key", "bucket_shape"} {
 		t.Run(corruption, func(t *testing.T) {
 			at := time.Now().UTC()
-			activation, err := NewActivation(testJoinRef(t, "", "join", "awaiting", "node", "item.done", "entry", attemptgeneration.Generation{}), []string{"a"}, nil, at, time.Time{})
+			activation, err := NewActivation(testJoinRef(t, "", "awaiting", "node", "item.done", "entry", attemptgeneration.Generation{}), []string{"a"}, nil, at, time.Time{})
 			if err != nil {
 				t.Fatal(err)
 			}
@@ -280,8 +280,8 @@ func TestA2JoinLoadAndListRejectContradictoryBucketOwnership(t *testing.T) {
 }
 
 func TestActivationKeyIncludesStageIdentity(t *testing.T) {
-	awaiting := ActivationKey(testJoinRef(t, "", "shared", "awaiting", "node", "item.done", "entry-1", attemptgeneration.Generation{}))
-	reviewing := ActivationKey(testJoinRef(t, "", "shared", "reviewing", "node", "item.done", "entry-1", attemptgeneration.Generation{}))
+	awaiting := ActivationKey(testJoinRef(t, "", "awaiting", "node", "item.done", "entry-1", attemptgeneration.Generation{}))
+	reviewing := ActivationKey(testJoinRef(t, "", "reviewing", "node", "item.done", "entry-1", attemptgeneration.Generation{}))
 	if awaiting == "" || reviewing == "" || awaiting == reviewing {
 		t.Fatalf("activation keys = awaiting:%q reviewing:%q, want distinct stage-scoped identities", awaiting, reviewing)
 	}
@@ -290,7 +290,7 @@ func TestActivationKeyIncludesStageIdentity(t *testing.T) {
 func TestA2CountUsesExactContributorIdentityAndLexicalOrder(t *testing.T) {
 	now := time.Now().UTC()
 	count := 2
-	activation, err := NewActivation(testJoinRef(t, "", "join", "awaiting", "node", "item.done", "", attemptgeneration.Generation{}), nil, &count, now, now.Add(time.Hour))
+	activation, err := NewActivation(testJoinRef(t, "", "awaiting", "node", "item.done", "", attemptgeneration.Generation{}), nil, &count, now, now.Add(time.Hour))
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -314,13 +314,13 @@ func TestA2CountUsesExactContributorIdentityAndLexicalOrder(t *testing.T) {
 	}
 }
 
-func testJoinRef(t *testing.T, flowID, joinID, stage, nodeID, handlerEvent, occurrence string, generation attemptgeneration.Generation) timeridentity.JoinRef {
+func testJoinRef(t *testing.T, flowID, stage, nodeID, handlerEvent, occurrence string, generation attemptgeneration.Generation) timeridentity.JoinRef {
 	t.Helper()
 	node := identitytest.RootNode(t, nodeID)
 	if flowID != "" {
 		node = identitytest.FlowNode(t, flowID, nodeID)
 	}
-	ref, err := timeridentity.NewJoinRef(node, handlerEvent, stage, joinID)
+	ref, err := timeridentity.NewJoinRef(node, handlerEvent, stage)
 	if err != nil {
 		t.Fatal(err)
 	}

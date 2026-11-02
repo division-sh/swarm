@@ -73,10 +73,7 @@ spent_usd: 0
 		t.Fatalf("unsupported static retirement handler %d", handler)
 	}
 	writeClosedVariantFile(t, root, "treasury/nodes.yaml", `treasury-node:
-  execution_type: system_node
-  subscribes_to: [opco.spend_requested]
-  event_handlers:
-    opco.spend_requested:
+  opco.spend_requested:
 `+body)
 	return root
 }
@@ -118,26 +115,19 @@ subject.observed:
 	switch handler {
 	case RootStaticMaterialize:
 		nodes = `root-writer:
-  execution_type: system_node
-  subscribes_to: [subject.created]
-  event_handlers:
-    subject.created:
-      data_accumulation:
-        writes:
-          - source_field: display_name
-            target_field: display_name
+  subject.created:
+    data_accumulation:
+      writes:
+        - source_field: display_name
+          target_field: display_name
 `
 	case RootStaticObserve:
 		nodes = `root-observer:
-  execution_type: system_node
-  subscribes_to: [subject.created]
-  produces: [subject.observed]
-  event_handlers:
-    subject.created:
-      emit:
-        event: subject.observed
-        fields:
-          display_name: payload.display_name
+  subject.created:
+    emit:
+      event: subject.observed
+      fields:
+        display_name: payload.display_name
 `
 	default:
 		t.Fatalf("unsupported root static handler variant %d", handler)
@@ -189,44 +179,32 @@ fork.probe:
   marker: text
 `,
 		"nodes.yaml": `starter:
-  execution_type: system_node
-  subscribes_to: [order.started]
-  event_handlers:
-    order.started:
-      data_accumulation:
-        source_event: order.started
-        writes:
-          - {source_field: expected, target_field: expected}
-          - {source_field: dispatch_id, target_field: dispatch_id}
-      advances_to: dispatching
+  order.started:
+    data_accumulation:
+      source_event: order.started
+      writes:
+        - {source_field: expected, target_field: expected}
+        - {source_field: dispatch_id, target_field: dispatch_id}
+    advances_to: dispatching
 dispatcher:
-  execution_type: system_node
-  subscribes_to: [order.dispatched]
-  event_handlers:
-    order.dispatched:
-      guard: {check: instance.stage == 'dispatching'}
-      advances_to: awaiting
+  order.dispatched:
+    guard: instance.stage == 'dispatching'
+    advances_to: awaiting
 join-node:
-  execution_type: system_node
-  subscribes_to: [item.completed]
-  event_handlers:
-    item.completed:
-      join:
-        stage: awaiting
-        members: {from: state.expected, by: payload.member_id}
-        output: payload.result
-        on_complete: {advances_to: ready}
-        deadline: {after: 1h, from: stage_entry}
-        on_deadline: {advances_to: attention}
+  item.completed:
+    join:
+      stage: awaiting
+      members: {from: state.expected, by: payload.member_id}
+      output: payload.result
+      on_complete: {advances_to: ready}
+      deadline: {after: 1h, from: stage_entry}
+      on_deadline: {advances_to: attention}
 fork-probe:
-  execution_type: system_node
-  subscribes_to: [fork.probe]
-  event_handlers:
-    fork.probe:
-      data_accumulation:
-        source_event: fork.probe
-        writes:
-          - {source_field: marker, target_field: probe}
+  fork.probe:
+    data_accumulation:
+      source_event: fork.probe
+      writes:
+        - {source_field: marker, target_field: probe}
 `,
 	}
 	for name, source := range files {
@@ -250,7 +228,7 @@ stages:
 `,
 		"events.yaml": "scan.requested:\n  topic: text\n",
 		"state.yaml":  "topic: text\n",
-		"nodes.yaml":  "scan-orchestrator:\n  execution_type: system_node\n  subscribes_to: [scan.requested]\n",
+		"nodes.yaml":  "scan-orchestrator:\n  scan.requested: {}\n",
 		"operating/schema.yaml": `# fixture: operating
 stages:
   initializing: {}
@@ -267,14 +245,11 @@ review_scores: map[text]integer
 		"operating/types.yaml":  "types:\n  Brief:\n    summary: text\n  Feature:\n    name: text\n",
 		"operating/events.yaml": "opco.product_review_requested:\n  note: text\n",
 		"operating/nodes.yaml": `reviewer:
-  execution_type: system_node
-  subscribes_to: [opco.product_review_requested]
   gate_state:
     gates: [review_ready]
-  event_handlers:
-    opco.product_review_requested:
-      sets_gate: review_ready
-      advances_to: ready
+  opco.product_review_requested:
+    sets_gate: review_ready
+    advances_to: ready
 `,
 		"secondary/schema.yaml": "# fixture: secondary\nstages:\n  open: {}\n  closed: {final: true}\n",
 		"secondary/state.yaml":  "ticket_id: text\n",
@@ -310,7 +285,7 @@ pins:
     - deploy.done
 `,
 		"consumer/state.yaml": "vertical_id: string\n",
-		"consumer/nodes.yaml": "consumer-node:\n  execution_type: system_node\n  event_handlers:\n    deploy.done: {}\n",
+		"consumer/nodes.yaml": "consumer-node:\n  deploy.done: {}\n",
 	}
 	for name, source := range files {
 		writeClosedVariantFile(t, root, name, source)
@@ -342,27 +317,19 @@ opco.create_requested:
   product_id: string
 `,
 		"nodes.yaml": `approval-router:
-  execution_type: system_node
-  subscribes_to: [approval.completed]
-  produces: [opco.spinup_requested]
-  event_handlers:
-    approval.completed:
-      emit:
-        event: opco.spinup_requested
-        fields:
-          instance_id: payload.instance_id
-          product_id: payload.product_id
+  approval.completed:
+    emit:
+      event: opco.spinup_requested
+      fields:
+        instance_id: payload.instance_id
+        product_id: payload.product_id
 portfolio-node:
-  execution_type: system_node
-  subscribes_to: [opco.spinup_requested]
-  produces: [opco.create_requested]
-  event_handlers:
-    opco.spinup_requested:
-      emit:
-        event: opco.create_requested
-        fields:
-          instance_id: payload.instance_id
-          product_id: payload.product_id
+  opco.spinup_requested:
+    emit:
+      event: opco.create_requested
+      fields:
+        instance_id: payload.instance_id
+        product_id: payload.product_id
 `,
 		"operating/schema.yaml": `# fixture: operating
 instance: instance_id
@@ -383,17 +350,13 @@ component_scaffold.spawn_requested:
   product_id: string
 `,
 		"operating/nodes.yaml": `lifecycle-orchestrator:
-  execution_type: system_node
-  subscribes_to: [opco.create_requested, opco.product_initialization_requested]
-  produces: [component_scaffold.spawn_requested]
-  event_handlers:
-    opco.create_requested: {}
-    opco.product_initialization_requested:
-      advances_to: ready
-      emit:
-        event: component_scaffold.spawn_requested
-        fields:
-          product_id: payload.product_id
+  opco.create_requested: {}
+  opco.product_initialization_requested:
+    advances_to: ready
+    emit:
+      event: component_scaffold.spawn_requested
+      fields:
+        product_id: payload.product_id
 `,
 	}
 	for name, source := range files {
@@ -408,7 +371,7 @@ func CopyProviderRollback(t testing.TB, withHandler bool) string {
 	removeClosedVariantFiles(t, root, "events.yaml")
 	nodes := ""
 	if withHandler {
-		nodes = "consumer-node:\n  execution_type: system_node\n  event_handlers:\n    inbound.telegram.text_message: {}\n"
+		nodes = "consumer-node:\n  inbound.telegram.text_message: {}\n"
 	}
 	files := map[string]string{
 		"consumer/manifest.yaml": "version: 1.0.0\nplatform_version: '*'\n",

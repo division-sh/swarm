@@ -91,7 +91,6 @@ func (c *checkerContext) checkHandlerPolicyExpressions(check func(string, string
 		}
 		policy := c.source.ResolvedPolicyForExecutableNode(node)
 		for event, handler := range c.source.ExecutableNodeEventHandlers(node) {
-			c.checkGuardPolicySelector(node, handler.Guard)
 			payload, _ := executablePayloadStructuralType(c.source, node, event)
 			entity, _ := semanticview.ResolveEntityStructuralType(c.source, node.FlowPath())
 			for _, reader := range c.entityAssignmentReaders(node, event, handler) {
@@ -105,25 +104,6 @@ func (c *checkerContext) checkHandlerPolicyExpressions(check func(string, string
 				check(reader.Expression, node.Key()+" handler "+event+" "+reader.Kind, policy, options, &reader)
 			}
 		}
-	}
-}
-
-func (c *checkerContext) checkGuardPolicySelector(node runtimeidentity.ExecutableNode, guard *runtimecontracts.GuardSpec) {
-	if guard == nil || strings.TrimSpace(guard.PolicyRef) == "" {
-		return
-	}
-	for _, entry := range guard.EffectiveChecks() {
-		if entry.EffectiveIdentity() != "state_in_phase" {
-			continue
-		}
-		if _, ok := semanticview.PolicyValueForFlow(c.source, node.FlowPath(), guard.PolicyRef); ok {
-			continue
-		}
-		c.conditionPolicyFindings = append(c.conditionPolicyFindings, Finding{
-			CheckID: "condition_policy_alignment", Severity: SeverityHardInvalidity,
-			Message: "state_in_phase guard references undeclared policy selector " + guard.PolicyRef, Location: node.Key(),
-			Remediation: "Declare the selected policy value in this flow or an ancestor, or correct guard.policy_ref.",
-		})
 	}
 }
 

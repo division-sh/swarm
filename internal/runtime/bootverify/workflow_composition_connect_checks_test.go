@@ -415,7 +415,14 @@ func TestRun_FailsClosedForInvalidParentCompositionConnect(t *testing.T) {
 	for _, tc := range tests {
 		t.Run(tc.name, func(t *testing.T) {
 			root := writeCompositionConnectBootverifyFixture(t, tc.variant)
-			bundle := loadFixtureBundleAt(t, repoRootForBootverifyTest(t), root, runtimecontracts.DefaultPlatformSpecFile(repoRootForBootverifyTest(t)))
+			repo := repoRootForBootverifyTest(t)
+			bundle, err := runtimecontracts.LoadWorkflowContractBundleWithOverrides(repo, root, runtimecontracts.DefaultPlatformSpecFile(repo))
+			if err != nil {
+				if bundle != nil || !strings.Contains(err.Error(), `handler "deploy.completed"`) || !strings.Contains(err.Error(), "undeclared event") {
+					t.Fatalf("invalid composition failed for an unrelated cause: %v", err)
+				}
+				return
+			}
 
 			report := Run(context.Background(), semanticview.Wrap(bundle), Options{})
 
@@ -465,20 +472,6 @@ func TestRun_CheckedInChildReturnDoesNotExposeRootInput(t *testing.T) {
 	}
 }
 
-func TestRun_RejectsUnconnectedInputDespiteUnambiguousSiblingSchemas(t *testing.T) {
-	root := writeCompositionConnectAmbiguityFixture(t)
-	bundle := loadFixtureBundleAt(t, repoRootForBootverifyTest(t), root, runtimecontracts.DefaultPlatformSpecFile(repoRootForBootverifyTest(t)))
-
-	report := Run(context.Background(), semanticview.Wrap(bundle), Options{})
-
-	if reportContains(report.Errors(), "composition_connect_validation", "") {
-		t.Fatalf("unexpected composition_connect_validation error: %#v", report.Errors())
-	}
-	if !reportContains(report.Errors(), "input_pin_wiring", "ticket.ready") {
-		t.Fatalf("sibling schemas without a compiled edge supplied input authority: %#v", report.Errors())
-	}
-}
-
 func TestRun_TreatsParentCompositionConnectAsEventTopologyProof(t *testing.T) {
 	root := writeCompositionConnectTopologyFixture(t)
 	bundle := loadFixtureBundleAt(t, repoRootForBootverifyTest(t), root, runtimecontracts.DefaultPlatformSpecFile(repoRootForBootverifyTest(t)))
@@ -509,11 +502,6 @@ func writeCompositionConnectBootverifyFixture(t *testing.T, variant canonicalrou
 func writeCompositionConnectTopologyFixture(t *testing.T) string {
 	t.Helper()
 	return canonicalrouting.CopyCompositionConnectTopology(t)
-}
-
-func writeCompositionConnectAmbiguityFixture(t *testing.T) string {
-	t.Helper()
-	return canonicalrouting.CopyCompositionConnectAmbiguity(t)
 }
 
 func writeRootCompositionConnectBootverifyFixture(t *testing.T) string {

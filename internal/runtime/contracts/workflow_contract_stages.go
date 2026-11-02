@@ -20,13 +20,11 @@ type FlowStageDeclaration struct {
 
 type FlowStageGateDeclaration struct {
 	Decision string                                     `yaml:"decision"`
-	Title    string                                     `yaml:"title"`
 	Context  map[string]ExpressionValue                 `yaml:"context"`
 	Outcomes map[string]FlowStageGateOutcomeDeclaration `yaml:"outcomes"`
 }
 
 type FlowStageGateOutcomeDeclaration struct {
-	Label      string                            `yaml:"label"`
 	Input      map[string]WorkflowGateInputField `yaml:"input"`
 	InputOrder []string                          `yaml:"-"`
 	AdvancesTo string                            `yaml:"advances_to"`
@@ -34,7 +32,7 @@ type FlowStageGateOutcomeDeclaration struct {
 }
 
 type FlowStageTimerDeclaration struct {
-	ID         string `yaml:"id"`
+	ID         string `yaml:"-"`
 	After      string `yaml:"after"`
 	Emit       string `yaml:"emit"`
 	AdvancesTo string `yaml:"advances_to"`
@@ -48,7 +46,6 @@ var stageDeclarationFieldOptions = map[string]struct{}{
 }
 
 var stageTimerFieldOptions = map[string]struct{}{
-	"id":          {},
 	"after":       {},
 	"emit":        {},
 	"advances_to": {},
@@ -56,13 +53,11 @@ var stageTimerFieldOptions = map[string]struct{}{
 
 var stageGateFieldOptions = map[string]struct{}{
 	"decision": {},
-	"title":    {},
 	"context":  {},
 	"outcomes": {},
 }
 
 var stageGateOutcomeFieldOptions = map[string]struct{}{
-	"label":       {},
 	"input":       {},
 	"advances_to": {},
 	"emit":        {},
@@ -71,7 +66,6 @@ var stageGateOutcomeFieldOptions = map[string]struct{}{
 var stageGateInputFieldOptions = map[string]struct{}{
 	"type":     {},
 	"required": {},
-	"label":    {},
 }
 
 func (d FlowStageDeclarations) GatePlans(flowID string) []WorkflowGatePlan {
@@ -84,17 +78,18 @@ func (d FlowStageDeclarations) GatePlans(flowID string) []WorkflowGatePlan {
 			FlowID:   strings.TrimSpace(flowID),
 			Stage:    strings.TrimSpace(stage.ID),
 			Decision: strings.TrimSpace(stage.Gate.Decision),
-			Title:    strings.TrimSpace(stage.Gate.Title),
+			Title:    HumanizeWorkflowKey(stage.Gate.Decision),
 			Context:  cloneExpressionValueMap(stage.Gate.Context),
 			Outcomes: map[string]WorkflowGateOutcomePlan{},
 		}
 		for verdict, outcome := range stage.Gate.Outcomes {
 			input := make(map[string]WorkflowGateInputField, len(outcome.Input))
 			for name, field := range outcome.Input {
+				field.Label = HumanizeWorkflowKey(name)
 				input[strings.TrimSpace(name)] = field
 			}
 			plan.Outcomes[strings.TrimSpace(verdict)] = WorkflowGateOutcomePlan{
-				Verdict: strings.TrimSpace(verdict), Label: strings.TrimSpace(outcome.Label), Input: input,
+				Verdict: strings.TrimSpace(verdict), Label: HumanizeWorkflowKey(verdict), Input: input,
 				InputOrder: append([]string(nil), outcome.InputOrder...),
 				AdvancesTo: strings.TrimSpace(outcome.AdvancesTo), Emit: cloneEmitSpec(outcome.Emit),
 			}
@@ -104,7 +99,16 @@ func (d FlowStageDeclarations) GatePlans(flowID string) []WorkflowGatePlan {
 	return out
 }
 
-func (s *FlowStageDeclaration) normalizeTimerIDs() error {
+// HumanizeWorkflowKey owns the presentation of identifier-derived decision copy.
+func HumanizeWorkflowKey(value string) string {
+	value = strings.TrimSpace(strings.ReplaceAll(value, "_", " "))
+	if value == "" {
+		return "Decision"
+	}
+	return strings.ToUpper(value[:1]) + value[1:]
+}
+
+func (s *FlowStageDeclaration) deriveTimerIDs() error {
 	if s == nil || len(s.Timers) == 0 {
 		return nil
 	}
@@ -118,40 +122,19 @@ func (s *FlowStageDeclaration) normalizeTimerIDs() error {
 		if strings.TrimSpace(timer.Emit) == "" && strings.TrimSpace(timer.AdvancesTo) == "" {
 			return fmt.Errorf("timer row %d must declare emit and/or advances_to", i)
 		}
-		if strings.TrimSpace(timer.ID) == "" {
-			timer.ID = timer.defaultID(stageID)
-		}
-		timer.ID = strings.TrimSpace(timer.ID)
+		timer.ID = timer.derivedID(stageID)
 		if timer.ID == "" {
 			return fmt.Errorf("timer row %d could not derive stable id", i)
 		}
 		if _, ok := seen[timer.ID]; ok {
-			return fmt.Errorf("timers contains duplicate id %q; add explicit id values to disambiguate", timer.ID)
+			return fmt.Errorf("stages.%s.timers has two rows targeting %q; use distinct events", stageID, strings.TrimPrefix(timer.ID, stageID+"."))
 		}
 		seen[timer.ID] = struct{}{}
 	}
 	return nil
 }
 
-func validateStageTimerIDNamespace(stages []FlowStageDeclaration) error {
-	seen := map[string]string{}
-	for _, stage := range stages {
-		stageID := strings.TrimSpace(stage.ID)
-		for _, timer := range stage.Timers {
-			id := strings.TrimSpace(timer.ID)
-			if id == "" {
-				continue
-			}
-			if previousStage, ok := seen[id]; ok {
-				return fmt.Errorf("stage timer id %q is declared in both stage %q and stage %q; timer ids must be unique within a flow", id, previousStage, stageID)
-			}
-			seen[id] = stageID
-		}
-	}
-	return nil
-}
-
-func (t FlowStageTimerDeclaration) defaultID(stageID string) string {
+func (t FlowStageTimerDeclaration) derivedID(stageID string) string {
 	stageID = strings.TrimSpace(stageID)
 	target := strings.TrimSpace(t.AdvancesTo)
 	if target == "" {

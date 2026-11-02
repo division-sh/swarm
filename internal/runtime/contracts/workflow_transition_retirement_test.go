@@ -5,18 +5,6 @@ import (
 	"testing"
 )
 
-func TestCompiledTransitionRetiredOwnershipRejectsPresence(t *testing.T) {
-	for _, value := range []string{"[old-edge]", "[]", "null", "{}", "false", "''"} {
-		t.Run(value, func(t *testing.T) {
-			var node SystemNodeContract
-			err := decodeNodeTestYAML([]byte("owned_transitions: "+value+"\nevent_handlers: {}\n"), &node)
-			if err == nil || !strings.Contains(err.Error(), "is not supported") || !strings.Contains(err.Error(), "owned_transitions") {
-				t.Fatalf("retired ownership presence accepted: %v", err)
-			}
-		})
-	}
-}
-
 func TestCompiledTransitionJoinOutcomeActionsRemainUnsupported(t *testing.T) {
 	for _, outcome := range []string{"on_complete: {action: {id: noop}}", "on_deadline: {action: {id: noop}}"} {
 		t.Run(outcome, func(t *testing.T) {

@@ -92,11 +92,11 @@ func staticAPIEventPublicationSource(t *testing.T) semanticview.Source {
 		"child/manifest.yaml":   "version: 1.0.0\nplatform_version: '*'\n",
 		"child/schema.yaml":     "stages: []\n",
 		"child/events.yaml":     "work.requested:\n",
-		"child/nodes.yaml":      "child-worker:\n  execution_type: system_node\n  subscribes_to: [work.requested]\n  event_handlers:\n    work.requested: {}\n",
+		"child/nodes.yaml":      "child-worker:\n  work.requested: {}\n",
 		"sibling/manifest.yaml": "version: 1.0.0\nplatform_version: '*'\n",
 		"sibling/schema.yaml":   "stages: []\n",
 		"sibling/events.yaml":   "work.requested:\n",
-		"sibling/nodes.yaml":    "sibling-worker:\n  execution_type: system_node\n  subscribes_to: [work.requested]\n  event_handlers:\n    work.requested: {}\n",
+		"sibling/nodes.yaml":    "sibling-worker:\n  work.requested: {}\n",
 	}))
 }
 

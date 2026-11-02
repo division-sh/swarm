@@ -16,6 +16,14 @@ func projectNodeActivityValue(value yamlsource.Value) (ActivitySpec, error) {
 		return ActivitySpec{}, err
 	}
 	var out ActivitySpec
+	id, present := fields["id"]
+	if !present {
+		return ActivitySpec{}, nodeValueError(value, fmt.Errorf("activity.id is required; declare an explicit activity.id naming its result events"))
+	}
+	scalar, err := id.Scalar()
+	if err != nil || scalar.Tag != "!!str" || strings.TrimSpace(scalar.Value) == "" {
+		return ActivitySpec{}, nodeValueError(id, fmt.Errorf("activity.id must be non-empty text"))
+	}
 	if err := nodeValueTexts(fields, map[string]*string{"id": &out.ID, "tool": &out.Tool}, true); err != nil {
 		return ActivitySpec{}, err
 	}
@@ -48,109 +56,12 @@ func projectNodeActivityValue(value yamlsource.Value) (ActivitySpec, error) {
 }
 
 func projectNodeGuardValue(value yamlsource.Value) (*GuardSpec, error) {
-	if value.Presence() == yamlsource.PresenceNull {
-		return nil, nil
-	}
-	if value.Presence() != yamlsource.PresenceMapping && value.Presence() != yamlsource.PresenceEmptyMapping {
-		return nil, fmt.Errorf("DIALECT-GUARD: guard at %s must be {id, check}, got %s", value.Location(), value.Presence())
-	}
-	fields, err := nodeValueFields(value, "guard", map[string]struct{}{
-		"id": {}, "check": {}, "checks": {}, "policy_ref": {}, "on_fail": {},
-	})
+	check, err := projectNodeScalarExpression(value, "guard", true)
 	if err != nil {
-		return nil, err
+		return nil, fmt.Errorf("DIALECT-GUARD: %w; write guard: <condition>, joining conditions with &&. A false guard records rejection; use rules rows to terminate or emit", err)
 	}
-	out := &GuardSpec{}
-	if err := nodeValueTexts(fields, map[string]*string{
-		"id": &out.ID, "policy_ref": &out.PolicyRef,
-	}, true); err != nil {
-		return nil, err
+	if strings.TrimSpace(check) == "" {
+		return nil, fmt.Errorf("guard at %s requires a scalar boolean expression", value.Location())
 	}
-	if check, present := fields["check"]; present {
-		out.Check, err = projectNodeScalarExpression(check, "guard.check", true)
-		if err != nil {
-			return nil, err
-		}
-	}
-	if checks, present := fields["checks"]; present {
-		out.Checks, err = projectNodeGuardChecksValue(checks)
-		if err != nil {
-			return nil, err
-		}
-	}
-	if onFail, present := fields["on_fail"]; present {
-		out.OnFail, out.OnFailSpec, err = projectNodeGuardOnFailValue(onFail)
-		if err != nil {
-			return nil, err
-		}
-	}
-	if out.ID == "" && out.Check == "" && len(out.Checks) == 0 && out.OnFail == "" && out.PolicyRef == "" {
-		return nil, nil
-	}
-	return out, nil
-}
-
-func projectNodeGuardChecksValue(value yamlsource.Value) ([]GuardCheck, error) {
-	items, err := value.Sequence()
-	if err != nil {
-		return nil, err
-	}
-	var out []GuardCheck
-	for _, item := range items {
-		fields, err := nodeValueFields(item, "guard.checks", map[string]struct{}{"id": {}, "check": {}})
-		if err != nil {
-			return nil, err
-		}
-		var check GuardCheck
-		if err := nodeValueTexts(fields, map[string]*string{"id": &check.ID}, false); err != nil {
-			return nil, err
-		}
-		if expression, present := fields["check"]; present {
-			check.Check, err = projectNodeScalarExpression(expression, "guard.checks.check", true)
-			if err != nil {
-				return nil, err
-			}
-		}
-		out = append(out, check)
-	}
-	return out, nil
-}
-
-func projectNodeGuardOnFailValue(value yamlsource.Value) (string, GuardFailureSpec, error) {
-	switch value.Presence() {
-	case yamlsource.PresenceNull:
-		return "", GuardFailureSpec{}, nil
-	case yamlsource.PresenceScalar, yamlsource.PresenceEmptyScalar:
-		text, err := nodeValueText(value, "guard.on_fail")
-		return strings.TrimSpace(text), GuardFailureSpec{}, err
-	case yamlsource.PresenceMapping, yamlsource.PresenceEmptyMapping:
-		fields, err := nodeValueFields(value, "guard.on_fail", guardOnFailFieldOptions)
-		if err != nil {
-			return "", GuardFailureSpec{}, err
-		}
-		escalation, present := fields["escalate"]
-		if !present {
-			return "", GuardFailureSpec{}, fmt.Errorf("guard.on_fail object form requires escalate at %s", value.Location())
-		}
-		emit, err := projectNodeGuardEscalationValue(escalation)
-		if err != nil {
-			return "", GuardFailureSpec{}, err
-		}
-		return "escalate:" + strings.TrimSpace(emit.Event), GuardFailureSpec{
-			Action: GuardFailureActionEscalate, Escalation: cloneEmitSpec(emit), AuthoredMapping: true,
-		}, nil
-	default:
-		return "", GuardFailureSpec{}, fmt.Errorf("guard.on_fail at %s must be a scalar or mapping", value.Location())
-	}
-}
-
-func projectNodeGuardEscalationValue(value yamlsource.Value) (EmitSpec, error) {
-	if value.Presence() != yamlsource.PresenceMapping && value.Presence() != yamlsource.PresenceEmptyMapping {
-		return EmitSpec{}, fmt.Errorf("guard.on_fail.escalate must be a mapping at %s", value.Location())
-	}
-	fields, err := nodeValueFields(value, "guard.on_fail.escalate", guardOnFailEscalateFieldOptions)
-	if err != nil {
-		return EmitSpec{}, err
-	}
-	return projectNodeEmitFields(fields, "guard.on_fail.escalate")
+	return &GuardSpec{Check: check}, nil
 }

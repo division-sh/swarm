@@ -28,15 +28,14 @@ func transitionMutationSource(t *testing.T) semanticview.Source {
 		"state.yaml":    "marker: text\n",
 		"events.yaml":   "advance:\nforeign:\n",
 		"nodes.yaml": `router:
-  event_handlers:
-    advance:
-      advances_to: done
-      rules:
-        - {when: true}
-    foreign:
-      advances_to: other
-      rules:
-        - {when: true}
+  advance:
+    advances_to: done
+    rules:
+      - {when: true}
+  foreign:
+    advances_to: other
+    rules:
+      - {when: true}
 `,
 	})
 }

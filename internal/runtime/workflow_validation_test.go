@@ -255,7 +255,7 @@ func TestValidateWorkflowContractSurface_DurableActivityFailsClosedForMCPTool(t 
 		"scanner": {
 			EventHandlers: map[string]runtimecontracts.SystemNodeEventHandler{
 				"source.requested": {
-					Activity: runtimecontracts.ActivitySpec{Tool: "mcp_source_scrape"},
+					Activity: runtimecontracts.ActivitySpec{ID: "scanner_source_requested_mcp_source_scrape", Tool: "mcp_source_scrape"},
 				},
 			},
 		},
@@ -365,6 +365,7 @@ func TestValidateWorkflowContractSurface_SlackManagedCredentialProviderConnector
 			EventHandlers: map[string]runtimecontracts.SystemNodeEventHandler{
 				"inbound.telegram": {
 					Activity: runtimecontracts.ActivitySpec{
+						ID:   "responder_inbound_telegram_slack_post_message",
 						Tool: "slack.post_message",
 						Input: map[string]runtimecontracts.ExpressionValue{
 							"channel": runtimecontracts.CELExpression(`"C123"`),
@@ -462,7 +463,7 @@ func TestValidateWorkflowContractSurface_DurableActivityResultEventsRejectGenera
 	if err != nil {
 		t.Fatal(err)
 	}
-	duplicate := "\nother:\n  execution_type: system_node\n  subscribes_to: [activity.requested]\n  event_handlers:\n    activity.requested:\n      activity:\n        id: send\n        tool: send\n        input: {message: payload.message}\n"
+	duplicate := "\nother:\n  activity.requested:\n    activity:\n      id: send\n      tool: send\n      input: {message: payload.message}\n"
 	if err := os.WriteFile(path, append(raw, []byte(duplicate)...), 0600); err != nil {
 		t.Fatal(err)
 	}

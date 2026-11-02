@@ -191,10 +191,7 @@ func explicitRequiredAgentFacts(required []FlowRequiredAgent, sourceFile string)
 	return out
 }
 
-func EffectiveSystemNodeExecutionType(node SystemNodeContract) string {
-	if executionType := strings.TrimSpace(node.ExecutionType); executionType != "" {
-		return executionType
-	}
+func EffectiveSystemNodeExecutionType(SystemNodeContract) string {
 	return SystemNodeExecutionType
 }
 
@@ -209,7 +206,7 @@ func IsIntrinsicWorkflowRuntimeEvent(eventType string) bool {
 
 func EffectiveSystemNodeSubscriptions(node SystemNodeContract) []string {
 	seen := make(map[string]struct{})
-	out := make([]string, 0, len(node.SubscribesTo)+len(node.EventHandlers)+1)
+	out := make([]string, 0, len(node.EventHandlers)+1)
 	appendSubscription := func(value string) {
 		value = eventidentity.Normalize(value)
 		if value == "" {
@@ -220,9 +217,6 @@ func EffectiveSystemNodeSubscriptions(node SystemNodeContract) []string {
 		}
 		seen[value] = struct{}{}
 		out = append(out, value)
-	}
-	for _, eventType := range node.SubscribesTo {
-		appendSubscription(eventType)
 	}
 	for eventType := range node.EventHandlers {
 		appendSubscription(eventType)
@@ -252,6 +246,12 @@ func EffectiveSystemNodeProduces(bundle *WorkflowContractBundle, owner runtimeid
 			if _, ok := seen[emitted]; ok {
 				continue
 			}
+			seen[emitted] = struct{}{}
+			out = append(out, emitted)
+		}
+	}
+	for _, emitted := range bundle.GeneratedActivityEventsForExecutableNode(owner) {
+		if _, exists := seen[emitted]; !exists {
 			seen[emitted] = struct{}{}
 			out = append(out, emitted)
 		}

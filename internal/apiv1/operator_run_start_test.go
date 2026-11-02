@@ -373,7 +373,7 @@ func TestOperatorRunStartHandlersFailClosedBeforePersistence(t *testing.T) {
 		members["schema.yaml"] = []byte("stages: []\npins:\n  inputs: [scan.unroutable_requested, fixture.close.requested]\n  outputs: [scan.unroutable_requested]\n")
 		members["discovery/schema.yaml"] = []byte("stages: []\npins:\n  inputs: [scan.other_requested]\n")
 		members["discovery/events.yaml"] = []byte("scan.other_requested:\n")
-		members["discovery/nodes.yaml"] = []byte("scan-orchestrator:\n  execution_type: system_node\n  subscribes_to: [scan.other_requested]\n")
+		members["discovery/nodes.yaml"] = []byte("scan-orchestrator:\n  scan.other_requested: {}\n")
 		artifact, err := sourceartifact.AdmitMembers(members)
 		if err != nil {
 			t.Fatal(err)
@@ -908,11 +908,8 @@ connect:
 `, eventName, eventName, eventName)),
 		"events.yaml": []byte(fmt.Sprintf("%s:\n  topic: text\nfixture.close.requested:\n", eventName)),
 		"nodes.yaml": []byte(`run-owner:
-  execution_type: system_node
-  subscribes_to: [fixture.close.requested]
-  event_handlers:
-    fixture.close.requested:
-      advances_to: done
+  fixture.close.requested:
+    advances_to: done
 `),
 		"discovery/manifest.yaml": []byte("version: 1.0.0\nplatform_version: '*'\n"),
 		"discovery/schema.yaml": []byte(fmt.Sprintf(`stages:
@@ -922,12 +919,9 @@ pins:
   inputs: [%s]
 `, eventName)),
 		"discovery/nodes.yaml": []byte(fmt.Sprintf(`scan-orchestrator:
-  execution_type: system_node
-  subscribes_to: [%s]
-  event_handlers:
-    %s:
-      advances_to: done
-`, eventName, eventName)),
+  %s:
+    advances_to: done
+`, eventName)),
 	})
 	if err != nil {
 		panic(err)

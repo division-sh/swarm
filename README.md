@@ -65,16 +65,13 @@ A handler is declared in YAML. The engine reads it and executes it. No product-s
 ```yaml
 # nodes.yaml
 ticket-orchestrator:
-  event_handlers:
-    ticket.validated:
-      guard:
-        check: "entity.priority in ['high', 'urgent']"
-        on_fail: discard
-      data_accumulation:
-        writes: [order_summary, validation_context]
-      sets_gate: g1_validation
-      advances_to: processing
-      emit: work.assigned
+  ticket.validated:
+    guard: state.priority in ['high', 'urgent']
+    data_accumulation:
+      writes: [order_summary, validation_context]
+    sets_gate: g1_validation
+    advances_to: processing
+    emit: work.assigned
 ```
 
 Execution order is fixed by the dependency graph:

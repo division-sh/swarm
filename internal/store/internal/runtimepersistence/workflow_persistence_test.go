@@ -65,7 +65,6 @@ func (workflowTestModule) SemanticSource() semanticview.Source {
 	})
 }
 func (workflowTestModule) WorkflowNodes() []runtimepipeline.WorkflowNode { return nil }
-func (workflowTestModule) GuardRegistry() runtimepipeline.GuardRegistry  { return nil }
 
 func newPostgresWorkflowTestCoordinator(
 	t *testing.T,

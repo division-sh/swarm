@@ -46,7 +46,7 @@ func TestKeyedRootInputAdmissionConsumesDeclarationsBeforeConstruction(t *testin
 		"schema.yaml":   "instance: provider_event_id\nstages: []\npins: {inputs: [account.opened]}\n",
 		"events.yaml":   "account.opened:\n  provider: text\n  provider_event_id: text\n  provider_event_type: text\n  data: json\n",
 		"state.yaml":    "provider_event_id: text\n",
-		"nodes.yaml":    "receiver:\n  execution_type: system_node\n  event_handlers:\n    account.opened: {}\n",
+		"nodes.yaml":    "receiver:\n  account.opened: {}\n",
 	} {
 		if err := os.WriteFile(filepath.Join(root, label), []byte(body), 0o600); err != nil {
 			t.Fatal(err)
@@ -95,9 +95,7 @@ func TestValidateInputEventsRejectsDeclaredUnroutableRootInput(t *testing.T) {
 	flow := &bundle.FlowTree.Root.Children[0]
 	flow.Schema.Pins.Inputs.EventPins = nil
 	flow.Events = map[string]runtimecontracts.EventCatalogEntry{"scan.other_requested": {}}
-	flow.Nodes["scan-orchestrator"] = runtimecontracts.SystemNodeContract{
-		SubscribesTo: []string{"scan.other_requested"},
-	}
+	flow.Nodes["scan-orchestrator"] = runtimecontracts.SystemNodeContract{EventHandlers: map[string]runtimecontracts.SystemNodeEventHandler{"scan.other_requested": {}}}
 	bundle.FlowTree.ByID["discovery"] = flow
 	bundle.FlowSchemas["discovery"] = flow.Schema
 	bundle.FlowTree.Root.Nodes = nil
@@ -178,9 +176,7 @@ func rootInputTestBundle(t testing.TB, eventName string) *runtimecontracts.Workf
 			},
 		},
 		Nodes: map[string]runtimecontracts.SystemNodeContract{
-			"scan-orchestrator": {
-				SubscribesTo: []string{eventName},
-			},
+			"scan-orchestrator": {EventHandlers: map[string]runtimecontracts.SystemNodeEventHandler{eventName: {}}},
 		},
 	}
 	root := runtimecontracts.FlowContractView{

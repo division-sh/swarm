@@ -126,7 +126,7 @@ func testRegistration(t *testing.T) Registration {
 	ref, err := timeridentity.NewFanOutDeliveryJoinRef(
 		identitytest.FlowNode(t, "worker", "producer"),
 		"batch.requested",
-		"all-items-delivered",
+
 		declaration,
 		"bundle-v2:sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
 		"sha256:bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb",

@@ -123,11 +123,11 @@ func TestMixedPubsubConnectCompositionNodeAgentConnect(t *testing.T) {
 		"producer/manifest.yaml": "version: 1.0.0\nplatform_version: '*'\n",
 		"producer/schema.yaml":   "stages: []\npins:\n  outputs: [deploy.done]\n",
 		"producer/events.yaml":   "deploy.done:\n",
-		"producer/nodes.yaml":    "producer-local:\n  execution_type: system_node\n  subscribes_to: [deploy.done]\n  event_handlers:\n    deploy.done:\n      guard:\n        id: selected_owner\n        check: _entity.id != \"\"\n",
+		"producer/nodes.yaml":    "producer-local:\n  deploy.done:\n    guard: _entity.id != \"\"\n",
 		"producer/agents.yaml":   "producer-agent:\n  intent: {inline: 'Observe deployment completion.'}\n  subscriptions: [deploy.done]\n",
 		"consumer/manifest.yaml": "version: 1.0.0\nplatform_version: '*'\n",
 		"consumer/schema.yaml":   "stages: []\npins:\n  inputs: [deploy.accepted]\n",
-		"consumer/nodes.yaml":    "consumer-node:\n  execution_type: system_node\n  event_handlers:\n    deploy.accepted:\n      guard:\n        id: selected_owner\n        check: _entity.id != \"\"\n",
+		"consumer/nodes.yaml":    "consumer-node:\n  deploy.accepted:\n    guard: _entity.id != \"\"\n",
 	}))
 	owners := mixedStaticOwners(t, source, "producer", "consumer")
 	store := newTargetRouteMemoryStore()
@@ -241,31 +241,24 @@ func mixedFanoutToFanoutSource(t *testing.T, reverse bool) semanticview.Source {
 		"producer/manifest.yaml": "version: 1.0.0\nplatform_version: '*'\n",
 		"producer/schema.yaml":   "stages: []\npins:\n  outputs: [branch.ready]\n",
 		"producer/events.yaml":   "branch.ready:\n",
-		"producer/nodes.yaml":    "producer-local:\n  execution_type: system_node\n  subscribes_to: [branch.ready]\n  event_handlers:\n    branch.ready:\n      guard:\n        id: selected_owner\n        check: _entity.id != \"\"\n",
+		"producer/nodes.yaml":    "producer-local:\n  branch.ready:\n    guard: _entity.id != \"\"\n",
 	}
 	for _, id := range []string{"left", "right"} {
 		files[id+"/manifest.yaml"] = "version: 1.0.0\nplatform_version: '*'\n"
 		files[id+"/schema.yaml"] = "stages: []\npins:\n  inputs: [branch.accepted]\n  outputs: [branch.done]\n"
 		files[id+"/events.yaml"] = "branch.done:\n"
 		files[id+"/nodes.yaml"] = fmt.Sprintf(`%s-receiver:
-  execution_type: system_node
-  event_handlers:
-    branch.accepted:
-      guard: {id: selected_owner, check: _entity.id != ""}
+  branch.accepted:
+    guard: _entity.id != ""
 %s-local:
-  execution_type: system_node
-  subscribes_to: [branch.done]
-  event_handlers:
-    branch.done:
-      guard: {id: selected_owner, check: _entity.id != ""}
+  branch.done:
+    guard: _entity.id != ""
 `, id, id)
 		files[id+"-sink/manifest.yaml"] = "version: 1.0.0\nplatform_version: '*'\n"
 		files[id+"-sink/schema.yaml"] = "stages: []\npins:\n  inputs: [branch.final]\n"
 		files[id+"-sink/nodes.yaml"] = fmt.Sprintf(`%s-sink-node:
-  execution_type: system_node
-  event_handlers:
-    branch.final:
-      guard: {id: selected_owner, check: _entity.id != ""}
+  branch.final:
+    guard: _entity.id != ""
 `, id)
 	}
 	return semanticview.Wrap(loadTargetRouteTempBundle(t, files))

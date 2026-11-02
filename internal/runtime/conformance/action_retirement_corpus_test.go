@@ -156,14 +156,11 @@ func actionRetirementAuthoredFields(raw []byte) ([]string, error) {
 	}
 	// Go fixture constructors also carry node-body and handler fragments.
 	nodes := []*yaml.Node{root}
-	rootIsNodeMap := false
+	rootIsNodeMap := len(root.Content) != 0
 	for i := 1; i < len(root.Content); i += 2 {
 		candidate := resolve(root.Content[i])
 		if candidate == nil || candidate.Kind != yaml.MappingNode {
-			continue
-		}
-		for j := 0; j+1 < len(candidate.Content); j += 2 {
-			rootIsNodeMap = rootIsNodeMap || candidate.Content[j].Value == "event_handlers"
+			rootIsNodeMap = false
 		}
 	}
 	for i := 0; i+1 < len(root.Content); i += 2 {
@@ -178,16 +175,11 @@ func actionRetirementAuthoredFields(raw []byte) ([]string, error) {
 			continue
 		}
 		for j := 0; j+1 < len(node.Content); j += 2 {
-			if node.Content[j].Value != "event_handlers" {
+			switch node.Content[j].Value {
+			case "timers", "state_table", "state_schema", "gate_state":
 				continue
 			}
-			handlers := resolve(node.Content[j+1])
-			if handlers == nil || handlers.Kind != yaml.MappingNode {
-				continue
-			}
-			for k := 1; k < len(handlers.Content); k += 2 {
-				handler(handlers.Content[k])
-			}
+			handler(node.Content[j+1])
 		}
 	}
 	sort.Strings(found)
@@ -199,15 +191,15 @@ func TestActionRetirementCorpusScannerPreservesHomonymsAndRejectsAliases(t *test
 		raw  string
 		want bool
 	}{
-		{"worker: {timers: [{action: expire}], event_handlers: {request: {activity: {tool: run, input: {action: payload.action}}, rules: {action: {else: true, emit: done}}}}}", false},
-		{"worker: {timers: [{action: expire}], event_handlers: {request: {activity: {tool: run, input: {action: payload.action}}, rules: [{when: payload.action == 'ready', emit: done}]}}}", false},
-		{"template: {event_handlers: {request: {emit: done}}}\naction: {event_handlers: {}}", false},
-		{"worker: {event_handlers: {request: {action: null}}}", true},
+		{"worker: {timers: [{action: expire}], request: {activity: {id: run, tool: run, input: {action: payload.action}}, rules: {action: {else: true, emit: done}}}}", false},
+		{"worker: {timers: [{action: expire}], request: {activity: {id: run, tool: run, input: {action: payload.action}}, rules: [{when: payload.action == 'ready', emit: done}]}}", false},
+		{"template: {request: {emit: done}}\naction: {}", false},
+		{"worker: {request: {action: null}}", true},
 		{"action: new_unknown_action", true},
-		{"event_handlers: {request: {on_complete: [{action: ''}]}}", true},
-		{"old: &old {config_from: {}}\nworker: {event_handlers: {request: {rules: [*old]}}}", true},
-		{"worker: {event_handlers: {request: {join: {timeout: {instance_id_from: ''}}}}}", true},
-		{"worker: {event_handlers: {request: {<<: [{evidence_target: null}]}}}", true},
+		{"request: {on_complete: [{action: ''}]}", true},
+		{"old: &old {config_from: {}}\nworker: {request: {rules: [*old]}}", true},
+		{"worker: {request: {join: {timeout: {instance_id_from: ''}}}}", true},
+		{"worker: {request: {<<: [{evidence_target: null}]}}", true},
 	} {
 		got, err := actionRetirementAuthoredFields([]byte(test.raw))
 		if err != nil || (len(got) != 0) != test.want {
@@ -218,8 +210,8 @@ func TestActionRetirementCorpusScannerPreservesHomonymsAndRejectsAliases(t *test
 
 func TestActionRetirementCorpusScannerRejectsTruncatedFragments(t *testing.T) {
 	for _, raw := range []string{
-		"    previous.event:\n      emit: done\nworker:\n  event_handlers:\n    request:\n      action: create_flow_instance\n",
-		"worker: {}\n---\nworker: {event_handlers: {request: {action: unknown}}}\n",
+		"  previous.event:\n    emit: done\nworker:\n  request:\n    action: create_flow_instance\n",
+		"worker: {}\n---\nworker: {request: {action: unknown}}\n",
 	} {
 		if _, err := actionRetirementAuthoredFields([]byte(raw)); err == nil {
 			t.Fatalf("scanner silently ignored trailing authored content: %s", raw)

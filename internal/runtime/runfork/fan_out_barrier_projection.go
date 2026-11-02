@@ -33,7 +33,7 @@ func ProjectFanOutBarrierRegistration(source fanoutbarrier.Registration, childRu
 	if err != nil {
 		return fanoutbarrier.Registration{}, err
 	}
-	childRef, err := timeridentity.NewFanOutDeliveryJoinRef(ref.Node(), ref.HandlerEvent(), ref.JoinID(), declaration, selected.BundleHash, selected.SemanticDigest)
+	childRef, err := timeridentity.NewFanOutDeliveryJoinRef(ref.Node(), ref.HandlerEvent(), declaration, selected.BundleHash, selected.SemanticDigest)
 	if err != nil {
 		return fanoutbarrier.Registration{}, err
 	}

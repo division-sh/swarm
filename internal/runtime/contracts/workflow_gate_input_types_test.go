@@ -13,7 +13,6 @@ func TestWorkflowGateAuthoredInputOrderSurvivesPlanLowering(t *testing.T) {
     decision: approve
     outcomes:
       approve:
-        label: Review
         input:
           zeta: {type: text, required: true}
           alpha: {type: integer, required: true}

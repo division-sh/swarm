@@ -48,7 +48,7 @@ func TestA2ReplyOriginRetainsItsExactJoinObligation(t *testing.T) {
 
 func a2ReplyOriginRecord(t *testing.T) Record {
 	t.Helper()
-	declaration, err := timeridentity.NewJoinRef(identitytest.FlowNode(t, "collector", "join"), "item.done", "collecting", "items")
+	declaration, err := timeridentity.NewJoinRef(identitytest.FlowNode(t, "collector", "join"), "item.done", "collecting")
 	if err != nil {
 		t.Fatal(err)
 	}

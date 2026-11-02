@@ -110,7 +110,7 @@ func VerifyMutationFreeAcceptedEventTimersBothStoresForTest(t *testing.T, factor
 						"manifest.yaml": "version: 1.0.0\nplatform_version: \">=0.7.0 <0.8.0\"\n",
 						"schema.yaml":   "stages:\n  waiting: {}\n",
 						"events.yaml":   "timer.arm:\ntimer.cancel:\ntimer.elapsed:\nwork.noted:\n",
-						"nodes.yaml":    "observer:\n  execution_type: system_node\n  event_handlers:\n    timer.arm: {}\n    timer.cancel: {}\n    work.noted: {}\n  timers:\n    - {id: event.timeout, event: timer.elapsed, start_on: 'event:timer.arm', cancel_on: 'event:timer.cancel', delay: 1h}\n",
+						"nodes.yaml":    "observer:\n  timer.arm: {}\n  timer.cancel: {}\n  work.noted: {}\n  timers:\n    - {event: timer.elapsed, start_on: 'event:timer.arm', cancel_on: 'event:timer.cancel', delay: 1h}\n",
 					}
 					entityType := ""
 					values := map[string]any{}

@@ -54,22 +54,16 @@ pins:
 		entities := ""
 		nodes := `
 shared-node:
-  execution_type: system_node
-  subscribes_to: [item.received]
-  event_handlers:
-    item.received: {}
+  item.received: {}
 `
 		if flowID == "a" {
 			entities = "items: [text]\n"
 			nodes = `
 shared-node:
-  execution_type: system_node
-  subscribes_to: [item.received]
-  event_handlers:
-    item.received:
-      data_accumulation:
-        writes:
-          - {source_field: items, target_field: items}
+  item.received:
+    data_accumulation:
+      writes:
+        - {source_field: items, target_field: items}
 `
 		}
 		if entities != "" {
@@ -130,19 +124,16 @@ lead.observed:
 `)
 	nodes := `
 coordinator-indexer:
-  execution_type: system_node
-  subscribes_to: [lead.observed]
-  event_handlers:
-    lead.observed:
-      data_accumulation:
-        writes:
+  lead.observed:
+    data_accumulation:
+      writes:
 ` + singletonCoordinatorWritesYAML(t, variant)
 	if variant == SingletonCoordinatorPilotDemandProjection {
-		nodes += `      fan_out:
-        items_from: state.audit_log
-        as: entry
-        identity: entry.ref
-        emit: lead.observed
+		nodes += `    fan_out:
+      items_from: state.audit_log
+      as: entry
+      identity: entry.ref
+      emit: lead.observed
 `
 	}
 	writeSingletonCoordinatorFile(t, root, "coordinator/nodes.yaml", nodes)
@@ -166,17 +157,14 @@ pins:
 	removeClosedVariantFiles(t, root, "coordinator/state.yaml")
 	writeSingletonCoordinatorFile(t, root, "coordinator/nodes.yaml", `
 coordinator-node:
-  execution_type: system_node
-  subscribes_to: [job.received]
-  event_handlers:
-    job.received:
-      join:
-        stage: active
-        members: {count: 1, by: payload.vertical_id}
-        output: payload.job
-        on_complete: {advances_to: done}
-        deadline: {after: 1h, from: stage_entry}
-        on_deadline: {advances_to: failed}
+  job.received:
+    join:
+      stage: active
+      members: {count: 1, by: payload.vertical_id}
+      output: payload.job
+      on_complete: {advances_to: done}
+      deadline: {after: 1h, from: stage_entry}
+      on_deadline: {advances_to: failed}
 `)
 }
 

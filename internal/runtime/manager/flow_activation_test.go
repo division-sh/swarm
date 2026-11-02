@@ -1476,7 +1476,7 @@ func testFlowRouteRevisionBundle(t *testing.T, nodeEvent string) *runtimecontrac
 	t.Helper()
 	return testFlowBundle(t, "", func(root string) {
 		writeFlowActivationFixtureFile(t, filepath.Join(root, "review/events.yaml"), "task.started:\n  instance_key: text\ntask.revised:\n")
-		writeFlowActivationFixtureFile(t, filepath.Join(root, "review/nodes.yaml"), fmt.Sprintf("route-observer:\n  execution_type: system_node\n  subscribes_to: [%s]\n", nodeEvent))
+		writeFlowActivationFixtureFile(t, filepath.Join(root, "review/nodes.yaml"), fmt.Sprintf("route-observer:\n  %s: {}\n", nodeEvent))
 	})
 }
 

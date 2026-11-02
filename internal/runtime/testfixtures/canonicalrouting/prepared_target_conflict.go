@@ -13,18 +13,11 @@ func WritePreparedTargetConflict(t testing.TB) string {
 		"schema.yaml":          "pins:\n  inputs: [prepared.aggregate.corruption, test.work]\n",
 		"events.yaml":          "prepared.aggregate.corruption:\ntest.work:\n",
 		"nodes.yaml": `validator-one:
-  execution_type: system_node
-  subscribes_to: [prepared.aggregate.corruption]
-  event_handlers:
-    prepared.aggregate.corruption: {}
+  prepared.aggregate.corruption: {}
 validator-two:
-  execution_type: system_node
-  subscribes_to: [prepared.aggregate.corruption]
+  prepared.aggregate.corruption: {}
 validator:
-  execution_type: system_node
-  subscribes_to: [test.work]
-  event_handlers:
-    test.work: {}
+  test.work: {}
 `,
 		"review/schema.yaml": "instance: instance_key\n",
 		"review/state.yaml":  "instance_key: text\n",

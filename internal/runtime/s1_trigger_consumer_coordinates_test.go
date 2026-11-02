@@ -18,7 +18,7 @@ func s1TriggerConsumerSource(t *testing.T) semanticview.Source {
 	const event = "inbound.team-bot.text_message"
 	for _, prefix := range []string{"", "sibling/"} {
 		members[prefix+"schema.yaml"] = []byte(fmt.Sprintf("stages: []\npins:\n  inputs: [%s]\n  outputs: [%s]\n", event, event))
-		members[prefix+"nodes.yaml"] = []byte(fmt.Sprintf("listener:\n  execution_type: system_node\n  subscribes_to: [%s]\n  event_handlers:\n    %s: {guard: {check: true}}\n", event, event))
+		members[prefix+"nodes.yaml"] = []byte(fmt.Sprintf("listener:\n  %s: {guard: true}\n", event))
 	}
 	bundle, rooted, _ := loadS1EffectiveProviderScope(t, members)
 	projection, err := AdmitEffectiveSourceProjection(EffectiveSourceProjectionRequest{Source: semanticview.Wrap(bundle), SourceArtifactFact: sourceartifactfixture.FactFor(rooted.Artifact())})

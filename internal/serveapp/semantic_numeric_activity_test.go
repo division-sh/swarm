@@ -43,14 +43,11 @@ func proveActivitySemanticResultExecutionParity(t *testing.T, mock bool) {
 			numeric = strings.ReplaceAll(numeric, "payload.value", "payload.result.value")
 			numeric = strings.ReplaceAll(numeric, "payload.nested", "payload.result.nested")
 			numeric += `requester:
-  execution_type: system_node
-  subscribes_to: [numeric.requested]
-  event_handlers:
-    numeric.requested:
-      activity:
-        id: fetch
-        tool: numeric_provider
-        input: {}
+  numeric.requested:
+    activity:
+      id: fetch
+      tool: numeric_provider
+      input: {}
 `
 			if mock {
 				numeric = strings.ReplaceAll(numeric, "tool: numeric_provider", "tool: numeric.fetch")

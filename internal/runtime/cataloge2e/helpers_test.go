@@ -80,7 +80,6 @@ func newFixtureWorkflowModule(bundle *runtimecontracts.WorkflowContractBundle) (
 	return &fixtureWorkflowModule{
 		source:        source,
 		workflowNodes: workflowNodes,
-		guardRegistry: runtimepipeline.NewContractGuardRegistry(source),
 	}, nil
 }
 
@@ -134,7 +133,6 @@ func strictCatalogFixtureStartupPolicy() catalogFixtureStartupPolicy {
 type fixtureWorkflowModule struct {
 	source        semanticview.Source
 	workflowNodes []runtimepipeline.WorkflowNode
-	guardRegistry runtimepipeline.GuardRegistry
 }
 
 func (m *fixtureWorkflowModule) SemanticSource() semanticview.Source {
@@ -145,8 +143,4 @@ func (m *fixtureWorkflowModule) WorkflowNodes() []runtimepipeline.WorkflowNode {
 	out := make([]runtimepipeline.WorkflowNode, 0, len(m.workflowNodes))
 	out = append(out, m.workflowNodes...)
 	return out
-}
-
-func (m *fixtureWorkflowModule) GuardRegistry() runtimepipeline.GuardRegistry {
-	return m.guardRegistry
 }

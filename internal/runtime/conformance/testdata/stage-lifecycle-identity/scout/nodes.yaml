@@ -1,26 +1,23 @@
 scout-coordinator:
-  execution_type: system_node
-  subscribes_to: [scout.setup, scout.member.done]
-  event_handlers:
-    scout.setup:
-      data_accumulation:
-        writes:
-          - source_field: member_ids
-            target_field: member_ids
-          - source_field: batch_id
-            target_field: batch_id
-      advances_to: review
-    scout.member.done:
-      join:
-        stage: awaiting
-        members:
-          from: state.member_ids
-          by: payload.member_id
-        output: payload.value
-        on_complete:
-          advances_to: complete
-        deadline:
-          after: 10m
-          from: stage_entry
-        on_deadline:
-          advances_to: timed_out
+  scout.setup:
+    data_accumulation:
+      writes:
+        - source_field: member_ids
+          target_field: member_ids
+        - source_field: batch_id
+          target_field: batch_id
+    advances_to: review
+  scout.member.done:
+    join:
+      stage: awaiting
+      members:
+        from: state.member_ids
+        by: payload.member_id
+      output: payload.value
+      on_complete:
+        advances_to: complete
+      deadline:
+        after: 10m
+        from: stage_entry
+      on_deadline:
+        advances_to: timed_out

@@ -1,7 +1,3 @@
 beta-node:
-  execution_type: system_node
-  subscribes_to: [trigger.beta]
-  produces: []
-  event_handlers:
-    trigger.beta:
-      advances_to: done
+  trigger.beta:
+    advances_to: done

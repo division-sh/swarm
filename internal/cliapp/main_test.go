@@ -3083,9 +3083,9 @@ func TestRunVerifyCommandFormatsSchemaLoaderDiagnostics(t *testing.T) {
 			schema: "stages: []\npins: {inputs: [z.request, a.request]}\n",
 			files: map[string]string{
 				"events.yaml": "z.request: {chat_id: text, text: text}\na.request: {chat_id: text, text: text}\n",
-				"nodes.yaml":  "sender:\n  execution_type: system_node\n  subscribes_to: [z.request, a.request]\n  event_handlers:\n    z.request: {activity: {id: send_reply, tool: telegram.send_message, input: {chat_id: payload.chat_id, text: payload.text}}}\n    a.request: {activity: {id: send_reply, tool: telegram.send_message, input: {chat_id: payload.chat_id, text: payload.text}}}\n",
+				"nodes.yaml":  "sender:\n  z.request: {activity: {id: send_reply, tool: telegram.send_message, input: {chat_id: payload.chat_id, text: payload.text}}}\n  a.request: {activity: {id: send_reply, tool: telegram.send_message, input: {chat_id: payload.chat_id, text: payload.text}}}\n",
 			},
-			wants:    []string{`duplicate activity id "send_reply"`, "nodes.yaml:6:", `handlers "sender/z.request" and "sender/a.request"`, "give each activity in this flow a unique id"},
+			wants:    []string{`duplicate activity id "send_reply"`, "nodes.yaml:3:30", `handlers "sender/z.request" and "sender/a.request"`, "give each activity in this flow a unique id"},
 			notWants: []string{"provider connector pack import failed", "multiple declaration owners"},
 		},
 		{
@@ -3093,9 +3093,9 @@ func TestRunVerifyCommandFormatsSchemaLoaderDiagnostics(t *testing.T) {
 			schema: "stages: []\npins: {inputs: [z.request, a.request]}\n",
 			files: map[string]string{
 				"events.yaml": "z.request: {chat_id: text, text: text}\na.request: {chat_id: text, text: text}\n",
-				"nodes.yaml":  "sender:\n  execution_type: system_node\n  subscribes_to: [z.request, a.request]\n  event_handlers: {z.request: {activity: {id: send_reply, tool: telegram.send_message, input: {chat_id: payload.chat_id, text: payload.text}}}, a.request: {activity: {id: send_reply, tool: telegram.send_message, input: {chat_id: payload.chat_id, text: payload.text}}}}\n",
+				"nodes.yaml":  "sender: {z.request: {activity: {id: send_reply, tool: telegram.send_message, input: {chat_id: payload.chat_id, text: payload.text}}}, a.request: {activity: {id: send_reply, tool: telegram.send_message, input: {chat_id: payload.chat_id, text: payload.text}}}}\n",
 			},
-			wants:    []string{`duplicate activity id "send_reply"`, "nodes.yaml:4:172", `handlers "sender/z.request" and "sender/a.request"`},
+			wants:    []string{`duplicate activity id "send_reply"`, "nodes.yaml:1:162", `handlers "sender/z.request" and "sender/a.request"`},
 			notWants: []string{"provider connector pack import failed", "multiple declaration owners"},
 		},
 	}
@@ -3336,7 +3336,7 @@ func TestRunVerifyCommandRejectsAncestorEventNameWithoutReceiverLocalDeclaration
 	if !strings.Contains(stdout.String(), "admission validation failed; startup execution not performed") {
 		t.Fatalf("verify stdout omitted the failed admission ledger: %q", stdout.String())
 	}
-	for _, want := range []string{"receiver-local event", "input pin", "nearest common ancestor schema.yaml", "root.started"} {
+	for _, want := range []string{"undeclared event", "declare the event in this flow or bind its producer-owned input", "root.started"} {
 		if !strings.Contains(stderr.String(), want) {
 			t.Fatalf("verify stderr missing %q:\n%s", want, stderr.String())
 		}
@@ -3431,8 +3431,7 @@ func writeVerifyBootTimerCommandFixture(t *testing.T, cancelOn string) string {
 timer.reminder:
 `)
 	timerBlock := `
-    - id: reminder
-      owner: support-node
+    - owner: support-node
       event: timer.reminder
       delay: 1m
       start_on: boot
@@ -3442,12 +3441,9 @@ timer.reminder:
 	}
 	writeWorkflowValidationFixtureFile(t, filepath.Join(root, "nodes.yaml"), `
 support-node:
-  execution_type: system_node
-  subscribes_to: [timer.reminder]
   timers:
-`+timerBlock+`  event_handlers:
-    timer.reminder:
-      advances_to: done
+`+timerBlock+`  timer.reminder:
+    advances_to: done
 `)
 	return root
 }
@@ -3525,7 +3521,6 @@ func TestRunVerifyCommand_FailsForPseudoStateSchemaTypes(t *testing.T) {
 `)
 	writeWorkflowValidationFixtureFile(t, filepath.Join(root, "nodes.yaml"), `
 accumulator:
-  execution_type: system_node
   state_schema:
     fields:
       dimensions_received: dimension score receipts keyed by dimension name
@@ -3622,14 +3617,11 @@ item.arrived:
 `)
 	writeWorkflowValidationFixtureFile(t, filepath.Join(root, "nodes.yaml"), `
 accumulator:
-  execution_type: system_node
-  subscribes_to: [item.arrived]
-  event_handlers:
-    item.arrived:
-      accumulate:
-        into: items
-        from: payload
-      advances_to: done
+  item.arrived:
+    accumulate:
+      into: items
+      from: payload
+    advances_to: done
 `)
 	return root
 }
@@ -4100,7 +4092,7 @@ func TestExecutionValidation_EmittedPayloadCompletenessReturnsWarningSurface(t *
 		},
 		Nodes: map[string]runtimecontracts.SystemNodeContract{
 			"dispatcher": {
-				SubscribesTo: []string{"scan.corpus_dispatch"},
+
 				EventHandlers: map[string]runtimecontracts.SystemNodeEventHandler{
 					"scan.corpus_dispatch": {
 						Emit: runtimecontracts.EmitSpec{Event: "market_research.scan_assigned"},
@@ -4151,30 +4143,6 @@ func TestExecutionValidation_EmittedPayloadCompletenessReturnsWarningSurface(t *
 	}
 	if strings.Contains(err.Error(), "definitely missing") {
 		t.Fatalf("validateExecutionFixture error = %v, want approved warning wording only", err)
-	}
-}
-
-func TestExecutionValidation_InputPinProducerPathReturnsHardInvaliditySurface(t *testing.T) {
-	t.Setenv("SWARM_BOOT_WARNINGS_FATAL", "true")
-
-	err := validateExecutionFixture(context.Background(), semanticview.Wrap(loadWorkflowValidationBundleAt(t, writeVerifyMissingPinWarningFixture(t))), executionposture.Live)
-	if err == nil {
-		t.Fatal("validateExecutionFixture error = nil, want hard invalidity from missing producer path")
-	}
-	for _, want := range []string{
-		"no accepted producer source was found in the authored bundle",
-		"Selected-root public input: not found",
-		"Admitted provider ingress: not found",
-		"Parent connect: not found",
-		"Platform source: not found",
-		"Internal topology producer: not found",
-	} {
-		if !strings.Contains(err.Error(), want) {
-			t.Fatalf("validateExecutionFixture error = %v, want substring %q", err, want)
-		}
-	}
-	if strings.Contains(err.Error(), "harness") {
-		t.Fatalf("missing producer diagnostic retained retired harness authority: %v", err)
 	}
 }
 
@@ -4246,7 +4214,7 @@ func TestExecutionValidation_CreateEntityAccumulateReturnsBootError(t *testing.T
 	var stdout, stderr bytes.Buffer
 	code := executeRootCommandWithOptions(context.Background(), RepoRoot(), []string{"verify", filepath.Join(RepoRoot(), "tests", "tier8-boot-verification", "test-boot-create-entity-plus-accumulate")}, &stdout, &stderr, defaultRootCommandOptions())
 	if code != 2 || !strings.Contains(stderr.String(), `ERROR: handler field "create_entity" is not supported.`) ||
-		!strings.Contains(stderr.String(), `Location: nodes.yaml:$["test-node"]["event_handlers"]["task.started"]["create_entity"]`) ||
+		!strings.Contains(stderr.String(), `Location: nodes.yaml:$["test-node"]["task.started"]["create_entity"]`) ||
 		!strings.Contains(stderr.String(), "Valid options:") {
 		t.Fatalf("public verify code=%d stdout=%s stderr=%s, want current-vocabulary loader refusal", code, &stdout, &stderr)
 	}

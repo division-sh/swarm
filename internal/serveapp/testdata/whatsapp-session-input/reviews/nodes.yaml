@@ -1,9 +1,6 @@
 requester:
-  execution_type: system_node
-  subscribes_to: [work.requested]
-  event_handlers:
-    work.requested:
-      data_accumulation:
-        writes:
-          - {target_field: detail, value: payload.detail}
-      advances_to: review
+  work.requested:
+    data_accumulation:
+      writes:
+        - {target_field: detail, value: payload.detail}
+    advances_to: review

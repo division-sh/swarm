@@ -73,16 +73,14 @@ func listRetirementPublicSource() map[string]string {
 		"state.yaml":  "entries: [ProbeItem]\n",
 		"events.yaml": "proof.append:\n  name: text\n  tags: [text]\nproof.finish:\n",
 		"nodes.yaml": `collector:
-  execution_type: system_node
-  event_handlers:
-    proof.append:
-      data_accumulation:
-        writes:
-          - op: append
-            target: state.entries
-            value: payload
-    proof.finish:
-      advances_to: done
+  proof.append:
+    data_accumulation:
+      writes:
+        - op: append
+          target: state.entries
+          value: payload
+  proof.finish:
+    advances_to: done
 `, "manifest.yaml": "version: 1.0.0\nplatform_version: '*'\n",
 	}
 }

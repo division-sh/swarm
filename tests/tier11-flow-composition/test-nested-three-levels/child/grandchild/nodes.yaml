@@ -1,9 +1,5 @@
 grandchild-worker:
-  execution_type: system_node
-  subscribes_to: [micro.start]
-  produces: [micro.done]
-  event_handlers:
-    micro.start:
-      advances_to: finished
-      emit:
-        event: micro.done
+  micro.start:
+    advances_to: finished
+    emit:
+      event: micro.done

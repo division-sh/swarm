@@ -108,13 +108,8 @@ func TestPublicationDiagnosticDoesNotInventReceiverLocalIdentity(t *testing.T) {
 	write("validation/state.yaml", "review_id: text\n")
 	write("validation/events.yaml", "thing.reviewed:\n  review_id: text\n")
 	write("validation/nodes.yaml", `entity-writer:
-  execution_type: system_node
-  subscribes_to: [thing.reviewed]
-  event_handlers:
-    thing.reviewed:
-      guard:
-        id: selected_owner
-        check: instance.id != ""
+  thing.reviewed:
+    guard: instance.id != ""
 `)
 	eb := &EventBus{semanticSource: loadConnectRoutePlanCanonicalSource(t, root)}
 	subscriber := Subscriber{

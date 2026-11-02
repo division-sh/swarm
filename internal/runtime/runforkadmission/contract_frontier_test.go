@@ -661,9 +661,7 @@ func testContractFrontierSource(nodeID string) semanticview.Source {
 		},
 		Path: "consumer",
 		Nodes: map[string]runtimecontracts.SystemNodeContract{
-			nodeID: {
-				SubscribesTo: []string{"scan.requested"},
-			},
+			nodeID: {EventHandlers: map[string]runtimecontracts.SystemNodeEventHandler{"scan.requested": {}}},
 		},
 		Events: map[string]runtimecontracts.EventCatalogEntry{"scan.requested": {}},
 	}
@@ -708,7 +706,7 @@ func testContractFrontierTemplateSource(t testing.TB) semanticview.Source {
 		"schema.yaml":        "stages: []\n",
 		"review/schema.yaml": "instance: instance_key\n",
 		"review/events.yaml": "task.started:\n",
-		"review/nodes.yaml":  "reviewer:\n  execution_type: system_node\n  subscribes_to: [task.started]\n  produces: [task.started]\n", "manifest.yaml": "version: 1.0.0\nplatform_version: '*'\n", "review/manifest.yaml": "version: 1.0.0\nplatform_version: '*'\n",
+		"review/nodes.yaml":  "reviewer:\n  task.started: {}\n", "manifest.yaml": "version: 1.0.0\nplatform_version: '*'\n", "review/manifest.yaml": "version: 1.0.0\nplatform_version: '*'\n",
 	} {
 		if err := os.WriteFile(filepath.Join(root, path), []byte(body), 0600); err != nil {
 			t.Fatal(err)
@@ -777,9 +775,7 @@ func testContractFrontierConnectSource(t testing.TB, producerMode string) semant
 		},
 		Path: "consumer",
 		Nodes: map[string]runtimecontracts.SystemNodeContract{
-			"consumer-node": {
-				SubscribesTo: []string{"scan.requested"},
-			},
+			"consumer-node": {EventHandlers: map[string]runtimecontracts.SystemNodeEventHandler{"scan.requested": {}}},
 		},
 		Events: map[string]runtimecontracts.EventCatalogEntry{"scan.requested": {}},
 	}

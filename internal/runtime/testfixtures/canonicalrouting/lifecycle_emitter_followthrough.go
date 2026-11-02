@@ -46,13 +46,13 @@ func CopyLifecycleEmitterCompetingExit(t testing.TB, timer bool) string {
 	schema := lifecycleStaticRead(t, root, "schema.yaml")
 	schema = strings.Replace(schema, "  done: {final: true}", "  done: {final: true}\n  cancelled: {final: true}", 1)
 	nodes := lifecycleStaticRead(t, root, "nodes.yaml")
-	nodes = strings.Replace(nodes, "    work.completed:\n", "    work.completed:\n      guard: {id: approved_stage, check: instance.stage == 'approved'}\n", 1)
+	nodes = strings.Replace(nodes, "  work.completed:\n", "  work.completed:\n    guard: instance.stage == 'approved'\n", 1)
 	if timer {
-		schema = strings.Replace(schema, "  review:\n", "  review:\n    timers:\n      - {id: review_expired, after: 2s, advances_to: cancelled}\n", 1)
+		schema = strings.Replace(schema, "  review:\n", "  review:\n    timers:\n      - {after: 2s, advances_to: cancelled}\n", 1)
 	} else {
 		schema += "    - work.cancelled\n"
 		writeClosedVariantFile(t, root, "events.yaml", lifecycleStaticRead(t, root, "events.yaml")+"work.cancelled:\n  seed: boolean\n")
-		nodes += "canceller:\n  execution_type: system_node\n  subscribes_to: [work.cancelled]\n  event_handlers:\n    work.cancelled:\n      guard: {id: review_stage, check: instance.stage == 'review'}\n      advances_to: cancelled\n"
+		nodes += "canceller:\n  work.cancelled:\n    guard: instance.stage == 'review'\n    advances_to: cancelled\n"
 	}
 	writeClosedVariantFile(t, root, "schema.yaml", schema)
 	writeClosedVariantFile(t, root, "nodes.yaml", nodes)

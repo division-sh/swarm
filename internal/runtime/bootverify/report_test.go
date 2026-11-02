@@ -775,15 +775,11 @@ func TestRun_DoesNotWarnWhenDeclaredEventHasAcceptedActiveRoleCarrier(t *testing
 				name: "dead-event-schema-same-flow-handler",
 				flows: map[string]deadEventSchemaFlowFiles{
 					"support": {
-						events: "ticket.ready:\n",
+						events: "start:\nticket.ready:\n",
 						nodes: `
 support-node:
-  execution_type: system_node
-  subscribes_to:
-    - start
-  event_handlers:
-    start:
-      emit: ticket.ready
+  start:
+    emit: ticket.ready
 `,
 					},
 				},
@@ -797,11 +793,7 @@ support-node:
 				rootEvents: "ticket.ready:\n",
 				rootNodes: `
 root-node:
-  execution_type: system_node
-  subscribes_to:
-    - ticket.ready
-  event_handlers:
-    ticket.ready: {}
+  ticket.ready: {}
 `,
 			},
 		},
@@ -832,10 +824,8 @@ root-node:
 						events: "ticket.ready:\nstart.signal:\n",
 						nodes: `
 timer-owner:
-  execution_type: system_node
   timers:
-    - id: reminder
-      owner: timer-owner
+    - owner: timer-owner
       event: ticket.ready
       start_on: event:start.signal
       cancel_on: event:ticket.ready
@@ -854,16 +844,12 @@ timer-owner:
 						events: "ticket.ready:\nstart:\n  items: [json]\n",
 						nodes: `
 fanout-node:
-  execution_type: system_node
-  subscribes_to:
-    - start
-  event_handlers:
-    start:
-      fan_out:
-        items_from: payload.items
-        as: ticket
-        identity: ticket.id
-        emit: ticket.ready
+  start:
+    fan_out:
+      items_from: payload.items
+      as: ticket
+      identity: ticket.id
+      emit: ticket.ready
 `,
 					},
 				},
@@ -916,34 +902,6 @@ stages:
 	}
 }
 
-func TestRun_DoesNotTreatCrossFlowQualifiedSubscriptionAsDeadEventLiveness(t *testing.T) {
-	root := writeDeadEventSchemaFixture(t, deadEventSchemaFixtureOptions{
-		name: "dead-event-schema-cross-flow-qualified",
-		flows: map[string]deadEventSchemaFlowFiles{
-			"producer": {
-				events: "ticket.ready:\n",
-			},
-			"consumer": {
-				nodes: `
-consumer-node:
-  execution_type: system_node
-  subscribes_to:
-    - producer/ticket.ready
-  event_handlers:
-    producer/ticket.ready: {}
-`,
-			},
-		},
-	})
-	bundle := loadFixtureBundleAt(t, repoRootForBootverifyTest(t), root, runtimecontracts.DefaultPlatformSpecFile(repoRootForBootverifyTest(t)))
-
-	report := Run(context.Background(), semanticviewtest.WrapRootAgents(bundle), Options{})
-
-	if !reportContains(report.Warnings(), "semantic_drift_dead_event_schema", "producer/ticket.ready") {
-		t.Fatalf("retired cross-flow exact subscription incorrectly kept declaration alive: %#v", report.Warnings())
-	}
-}
-
 func TestRun_TreatsScopedLocalWildcardAsSameFlowDeadEventLiveness(t *testing.T) {
 	root := writeDeadEventSchemaFixture(t, deadEventSchemaFixtureOptions{
 		name: "dead-event-schema-local-wildcard",
@@ -952,11 +910,7 @@ func TestRun_TreatsScopedLocalWildcardAsSameFlowDeadEventLiveness(t *testing.T) 
 				events: "ticket.ready:\n",
 				nodes: `
 consumer-node:
-  execution_type: system_node
-  subscribes_to:
-    - ticket.*
-  event_handlers:
-    ticket.*: {}
+  ticket.*: {}
 `,
 			},
 			"sibling": {
@@ -987,11 +941,7 @@ func TestRun_DoesNotUseSameLocalNameAcrossFlowsByCoincidenceForDeadEventSchema(t
 				events: "task.completed:\n",
 				nodes: `
 beta-node:
-  execution_type: system_node
-  subscribes_to:
-    - task.completed
-  event_handlers:
-    task.completed: {}
+  task.completed: {}
 `,
 			},
 		},
@@ -1005,32 +955,6 @@ beta-node:
 	}
 	if reportContains(report.Warnings(), "semantic_drift_dead_event_schema", "beta/task.completed") {
 		t.Fatalf("unexpected semantic_drift_dead_event_schema warning for beta/task.completed, got %#v", report.Warnings())
-	}
-}
-
-func TestRun_DoesNotUseRootLocalReferenceAsProofForChildFlowDeadEventSchema(t *testing.T) {
-	root := writeDeadEventSchemaFixture(t, deadEventSchemaFixtureOptions{
-		name: "dead-event-schema-root-local-child-flow",
-		rootNodes: `
-root-node:
-  execution_type: system_node
-  subscribes_to:
-    - ticket.ready
-  event_handlers:
-    ticket.ready: {}
-`,
-		flows: map[string]deadEventSchemaFlowFiles{
-			"scoring": {
-				events: "ticket.ready:\n",
-			},
-		},
-	})
-	bundle := loadFixtureBundleAt(t, repoRootForBootverifyTest(t), root, runtimecontracts.DefaultPlatformSpecFile(repoRootForBootverifyTest(t)))
-
-	report := Run(context.Background(), semanticview.Wrap(bundle), Options{})
-
-	if !reportContains(report.Warnings(), "semantic_drift_dead_event_schema", "scoring/ticket.ready") {
-		t.Fatalf("expected semantic_drift_dead_event_schema warning for scoring/ticket.ready, got %#v", report.Warnings())
 	}
 }
 
@@ -1067,7 +991,7 @@ func TestRun_RootExportNeedsNoInternalConsumer(t *testing.T) {
 		},
 		Nodes: map[string]runtimecontracts.SystemNodeContract{
 			"producer": {
-				SubscribesTo: []string{"task.start"},
+
 				EventHandlers: map[string]runtimecontracts.SystemNodeEventHandler{
 					"task.start": {
 						Emit: runtimecontracts.EmitSpec{Event: "task.done"},
@@ -1097,7 +1021,7 @@ func TestRun_WarnsForSubscriptionWithoutProducer(t *testing.T) {
 	writeBootverifyFixtureFile(t, filepath.Join(root, "manifest.yaml"), "version: 1.0.0\nplatform_version: '*'\n")
 	writeBootverifyFixtureFile(t, filepath.Join(root, "schema.yaml"), "stages: []\n")
 	writeBootverifyFixtureFile(t, filepath.Join(root, "events.yaml"), "task.requested:\n")
-	writeBootverifyFixtureFile(t, filepath.Join(root, "nodes.yaml"), "consumer:\n  execution_type: system_node\n  subscribes_to: [task.requested]\n  event_handlers:\n    task.requested: {}\n")
+	writeBootverifyFixtureFile(t, filepath.Join(root, "nodes.yaml"), "consumer:\n  task.requested: {}\n")
 	repo := repoRootForBootverifyTest(t)
 	bundle := loadFixtureBundleAt(t, repo, root, runtimecontracts.DefaultPlatformSpecFile(repo))
 	report := Run(context.Background(), semanticview.Wrap(bundle), Options{})
@@ -1120,7 +1044,7 @@ func TestRun_DoesNotWarnForPlatformEmittedEventCatalogSubscription(t *testing.T)
 			eventType: "mailbox.card_decided",
 			nodeID:    "approval-handler",
 			node: runtimecontracts.SystemNodeContract{
-				SubscribesTo: []string{"mailbox.card_decided"},
+
 				EventHandlers: map[string]runtimecontracts.SystemNodeEventHandler{
 					"mailbox.card_decided": {},
 				},
@@ -1145,7 +1069,7 @@ payload:
 			eventType: "platform.paused",
 			nodeID:    "pause-handler",
 			node: runtimecontracts.SystemNodeContract{
-				SubscribesTo: []string{"platform.paused"},
+
 				EventHandlers: map[string]runtimecontracts.SystemNodeEventHandler{
 					"platform.paused": {},
 				},
@@ -1642,10 +1566,7 @@ func TestRun_MapsEmptyEventPayloadSchemaConditionRefsToNamedError(t *testing.T) 
 		{
 			name: "guard checks",
 			handler: runtimecontracts.SystemNodeEventHandler{
-				Guard: &runtimecontracts.GuardSpec{Checks: []runtimecontracts.GuardCheck{{
-					ID:    "missing",
-					Check: `payload.missing == "x"`,
-				}}},
+				Guard: &runtimecontracts.GuardSpec{Check: "(payload.missing == \"x\")"},
 			},
 		},
 		{
@@ -1696,9 +1617,7 @@ func TestRun_MapsEmptyEventPayloadSchemaConditionRefsToNamedError(t *testing.T) 
 				},
 				Nodes: map[string]runtimecontracts.SystemNodeContract{
 					"complete-task": {
-						ExecutionType: "system_node",
-						SubscribesTo:  []string{"task.requested"},
-						Produces:      []string{"task.completed"},
+
 						EventHandlers: map[string]runtimecontracts.SystemNodeEventHandler{
 							"task.requested": handler,
 						},
@@ -1734,9 +1653,7 @@ func TestRun_DoesNotMapMissingEventSchemaToConditionPayloadAlignment(t *testing.
 		},
 		Nodes: map[string]runtimecontracts.SystemNodeContract{
 			"complete-task": {
-				ExecutionType: "system_node",
-				SubscribesTo:  []string{"task.requested"},
-				Produces:      []string{"task.completed"},
+
 				EventHandlers: map[string]runtimecontracts.SystemNodeEventHandler{
 					"task.requested": {
 						Guard:      &runtimecontracts.GuardSpec{Check: `payload.missing == "x"`},
@@ -1773,7 +1690,7 @@ func TestRun_AllowsNestedConditionPayloadReferenceWithinEventPayloadSchema(t *te
 		},
 		Nodes: map[string]runtimecontracts.SystemNodeContract{
 			"complete-task": {
-				ExecutionType: runtimecontracts.SystemNodeExecutionType,
+
 				EventHandlers: map[string]runtimecontracts.SystemNodeEventHandler{
 					"task.requested": {Guard: &runtimecontracts.GuardSpec{Check: `payload.task.id != ""`}},
 				},
@@ -2200,29 +2117,6 @@ func TestRun_RejectsRetiredCreateEntityBeforeAccumulateValidation(t *testing.T) 
 	}
 }
 
-func TestRun_MapsInvalidFieldDetectionToNamedError(t *testing.T) {
-	bundle := &runtimecontracts.WorkflowContractBundle{
-		Platform:    runtimecontracts.PlatformSpecDocument{},
-		FlowSchemas: map[string]runtimecontracts.FlowSchemaDocument{},
-		Events:      map[string]runtimecontracts.EventCatalogEntry{},
-		Nodes:       map[string]runtimecontracts.SystemNodeContract{},
-		Tools:       map[string]runtimecontracts.ToolSchemaEntry{},
-	}
-	bundle.Nodes["missing-type"] = runtimecontracts.SystemNodeContract{}
-	bundle.Platform.Platform.Name = "Swarm Platform"
-	bundle.Platform.Platform.Version = "1.0.0"
-	source := semanticview.Wrap(bundle)
-
-	report := Run(context.Background(), source, Options{})
-
-	if !report.HasErrors() {
-		t.Fatalf("expected error report, got %#v", report.Findings)
-	}
-	if !reportContains(report.Errors(), "invalid_field_detection", "") {
-		t.Fatalf("expected invalid_field_detection error, got %#v", report.Errors())
-	}
-}
-
 func TestRun_DefaultsOmittedAgentMemoryButKeepsModelExplicit(t *testing.T) {
 	root := writeAgentMemoryValidationFixture(t, `
 root-defaulted:
@@ -2368,27 +2262,6 @@ entity-agent:
 	}
 }
 
-func TestRun_MapsHandlerFieldComplianceToNamedError(t *testing.T) {
-	bundle := loadTier8FixtureBundle(t, "test-boot-success")
-	node, eventType, handler, ok := firstBundleHandler(bundle)
-	if !ok {
-		t.Fatal("expected at least one handler")
-	}
-	handler.Guard = &runtimecontracts.GuardSpec{ID: "empty.guard"}
-	bundle.Semantics.GuardByID["empty.guard"] = runtimecontracts.GuardActionEntry{ID: "empty.guard"}
-	writeBundleHandler(t, bundle, node, eventType, handler)
-	source := semanticview.Wrap(bundle)
-
-	report := Run(context.Background(), source, Options{})
-
-	if !report.HasErrors() {
-		t.Fatalf("expected error report, got %#v", report.Findings)
-	}
-	if !reportContains(report.Errors(), "handler_field_compliance", "guard empty.guard has no executable runtime implementation") {
-		t.Fatalf("expected handler_field_compliance error, got %#v", report.Errors())
-	}
-}
-
 func TestRun_MapsSelfEmitToEventCycleDetection(t *testing.T) {
 	source := loadTier8Fixture(t, "test-boot-self-emit")
 
@@ -2418,15 +2291,13 @@ func TestRun_MapsSelfEmitToEventCycleDetectionForFlowLocalHandlers(t *testing.T)
 func TestRun_ReportsSemanticModelMultiHopEventCycle(t *testing.T) {
 	bundle := &runtimecontracts.WorkflowContractBundle{Nodes: map[string]runtimecontracts.SystemNodeContract{
 		"node-a": {
-			SubscribesTo: []string{"task.a"},
-			Produces:     []string{"task.b"},
+
 			EventHandlers: map[string]runtimecontracts.SystemNodeEventHandler{
 				"task.a": {Emit: runtimecontracts.EmitSpec{Event: "task.b"}},
 			},
 		},
 		"node-b": {
-			SubscribesTo: []string{"task.b"},
-			Produces:     []string{"task.a"},
+
 			EventHandlers: map[string]runtimecontracts.SystemNodeEventHandler{
 				"task.b": {Emit: runtimecontracts.EmitSpec{Event: "task.a"}},
 			},
@@ -2454,55 +2325,6 @@ func TestRun_MapsBareConditionToConditionExpressionValidation(t *testing.T) {
 	}
 	if !reportContains(report.Errors(), "condition_expression_validation", "missing required prefix") {
 		t.Fatalf("expected condition_expression_validation error, got %#v", report.Errors())
-	}
-}
-
-func TestRun_RejectsUnsupportedGuardOnFail(t *testing.T) {
-	source := semanticview.Wrap(&runtimecontracts.WorkflowContractBundle{
-		Nodes: map[string]runtimecontracts.SystemNodeContract{
-			"test-node": {
-				EventHandlers: map[string]runtimecontracts.SystemNodeEventHandler{
-					"item.received": {
-						Guard: &runtimecontracts.GuardSpec{
-							Check:  "instance.id != null",
-							OnFail: "explode",
-						},
-					},
-				},
-			},
-		},
-	})
-
-	report := Run(context.Background(), source, Options{})
-
-	if !reportContains(report.Errors(), "condition_expression_validation", `unsupported guard on_fail action "explode"`) {
-		t.Fatalf("expected unsupported on_fail error, got %#v", report.Errors())
-	}
-}
-
-func TestRun_RejectsGuardEscalateObjectMissingEvent(t *testing.T) {
-	source := semanticview.Wrap(&runtimecontracts.WorkflowContractBundle{
-		Nodes: map[string]runtimecontracts.SystemNodeContract{
-			"test-node": {
-				EventHandlers: map[string]runtimecontracts.SystemNodeEventHandler{
-					"item.received": {
-						Guard: &runtimecontracts.GuardSpec{
-							Check: "instance.id != null",
-							OnFailSpec: runtimecontracts.GuardFailureSpec{
-								Action:          runtimecontracts.GuardFailureActionEscalate,
-								AuthoredMapping: true,
-							},
-						},
-					},
-				},
-			},
-		},
-	})
-
-	report := Run(context.Background(), source, Options{})
-
-	if !reportContains(report.Errors(), "condition_expression_validation", "guard on_fail escalate requires event type") {
-		t.Fatalf("expected missing guard escalation event error, got %#v", report.Errors())
 	}
 }
 
@@ -2632,7 +2454,7 @@ func schemaBoundActivityInputValueSource(value runtimecontracts.ExpressionValue,
 		Nodes: map[string]runtimecontracts.SystemNodeContract{
 			"worker": {
 				EventHandlers: map[string]runtimecontracts.SystemNodeEventHandler{
-					"work.received": {Activity: runtimecontracts.ActivitySpec{Tool: "notify", Input: map[string]runtimecontracts.ExpressionValue{
+					"work.received": {Activity: runtimecontracts.ActivitySpec{ID: "worker_work_received_notify", Tool: "notify", Input: map[string]runtimecontracts.ExpressionValue{
 						"value": value,
 					}}},
 				},
@@ -3053,84 +2875,6 @@ func TestRun_DoesNotRequireWebSearchFallbackPolicyForNativeTools(t *testing.T) {
 		if strings.Contains(finding.Message, "web_search_provider") {
 			t.Fatalf("unexpected fallback policy error: %#v", report.Errors())
 		}
-	}
-}
-
-func TestRun_MapsProducesDriftToNamedWarning(t *testing.T) {
-	source := loadTier8Fixture(t, "test-boot-produces-drift")
-
-	report := Run(context.Background(), source, Options{})
-
-	if report.HasErrors() {
-		t.Fatalf("expected warning-only report, got errors: %#v", report.Errors())
-	}
-	if !reportContains(report.Warnings(), "produces_drift", "outside produces list") {
-		t.Fatalf("expected produces_drift warning, got %#v", report.Warnings())
-	}
-}
-
-func TestRun_DoesNotWarnForProducesDriftWhenDeclaredEventsMatchEmits(t *testing.T) {
-	report := Run(context.Background(), semanticview.Wrap(bootverifyDeclarationDriftBundle()), Options{})
-
-	if reportContains(report.Warnings(), "produces_drift", "outside produces list") {
-		t.Fatalf("unexpected produces_drift warning for matching declaration/emission, got %#v", report.Warnings())
-	}
-}
-
-func TestRun_DoesNotWarnForProducesDriftWhenProducesOmitted(t *testing.T) {
-	bundle := bootverifyDeclarationDriftBundle()
-	node := bundle.Nodes["producer"]
-	node.Produces = nil
-	bundle.Nodes["producer"] = node
-
-	report := Run(context.Background(), semanticview.Wrap(bundle), Options{})
-
-	if reportContains(report.Warnings(), "produces_drift", "outside produces list") {
-		t.Fatalf("unexpected produces_drift warning for omitted produces, got %#v", report.Warnings())
-	}
-	if reportContains(report.Warnings(), "phantom_produces", "no handler emits") {
-		t.Fatalf("unexpected phantom_produces warning for omitted produces, got %#v", report.Warnings())
-	}
-}
-
-func TestRun_ExplicitEmptyProducesRemainsAssertion(t *testing.T) {
-	bundle := bootverifyDeclarationDriftBundle()
-	node := bundle.Nodes["producer"]
-	node.Produces = []string{}
-	bundle.Nodes["producer"] = node
-
-	report := Run(context.Background(), semanticview.Wrap(bundle), Options{})
-
-	if !reportContains(report.Warnings(), "produces_drift", "outside produces list") {
-		t.Fatalf("expected produces_drift warning for explicit empty produces assertion, got %#v", report.Warnings())
-	}
-}
-
-func TestRun_MapsPhantomProducesToNamedWarning(t *testing.T) {
-	bundle := bootverifyDeclarationDriftBundle()
-	bundle.Nodes["producer"] = runtimecontracts.SystemNodeContract{
-		Produces: []string{"task.done", "task.unused"},
-		EventHandlers: map[string]runtimecontracts.SystemNodeEventHandler{
-			"task.start": {Emit: runtimecontracts.EmitSpec{Event: "task.done"}},
-		},
-		SubscribesTo: []string{"task.start"},
-	}
-
-	report := Run(context.Background(), compileBootverifyRootSource(bundle), Options{})
-
-	if report.HasErrors() {
-		t.Fatalf("expected warning-only report, got errors: %#v", report.Errors())
-	}
-	if !reportContains(report.Warnings(), "phantom_produces", "task.unused") {
-		t.Fatalf("expected phantom_produces warning, got %#v", report.Warnings())
-	}
-}
-
-func TestRun_DoesNotWarnForPhantomProducesWhenDeclaredEventsMatchEmits(t *testing.T) {
-	report := Run(context.Background(), semanticview.Wrap(bootverifyDeclarationDriftBundle()), Options{})
-
-	if reportContains(report.Warnings(), "phantom_produces", "no handler emits") {
-		t.Fatalf("unexpected phantom_produces warning for matching declaration/emission, got %#v", report.Warnings())
 	}
 }
 
@@ -3679,26 +3423,6 @@ func TestRun_ErrorsForFanOutEmitSitePayloadDrift(t *testing.T) {
 	}
 }
 
-func TestRun_ErrorsForGuardEscalatePayloadDrift(t *testing.T) {
-	bundle := loadFixtureBundle(t, filepath.Join("tests", "tier1-primitives", "test-guard-escalate"))
-	entry := bootverifyFlowEvent(t, bundle, ".", "check.escalated")
-	if entry.Payload.Properties == nil {
-		entry.Payload.Properties = map[string]runtimecontracts.EventFieldSpec{}
-	}
-	entry.Payload.Properties["reason"] = runtimecontracts.EventFieldSpec{Type: "string"}
-	entry.Payload.Required = []string{"reason"}
-	setBootverifyFlowEvent(t, bundle, ".", "check.escalated", entry)
-
-	report := Run(context.Background(), semanticview.Wrap(bundle), Options{})
-
-	if !reportContains(report.Errors(), "semantic_drift_payload_completeness", "guard.on_fail.escalate") {
-		t.Fatalf("expected guard escalation payload completeness error, got %#v", report.Errors())
-	}
-	if !reportContains(report.Errors(), "semantic_drift_payload_completeness", "reason is not statically provable") {
-		t.Fatalf("expected missing reason error for guard escalation emit, got %#v", report.Errors())
-	}
-}
-
 func TestRun_DoesNotWarnWhenGuardEscalateObjectFieldsCoverRequiredPayload(t *testing.T) {
 	bundle := loadFixtureBundle(t, filepath.Join("tests", "tier1-primitives", "test-guard-escalate"))
 	entry := bootverifyFlowEvent(t, bundle, ".", "check.escalated")
@@ -3719,7 +3443,7 @@ func TestRun_DoesNotWarnWhenGuardEscalateObjectFieldsCoverRequiredPayload(t *tes
 
 	report := Run(context.Background(), semanticview.Wrap(bundle), Options{})
 
-	if reportContains(report.Errors(), "semantic_drift_payload_completeness", "guard.on_fail.escalate") {
+	if reportContains(report.Errors(), "semantic_drift_payload_completeness", "rules[1]") {
 		t.Fatalf("unexpected guard escalation payload completeness error, got %#v", report.Errors())
 	}
 }
@@ -3743,7 +3467,7 @@ func TestRun_ErrorsWhenGuardEscalateObjectFieldsMissRequiredPayload(t *testing.T
 
 	report := Run(context.Background(), semanticview.Wrap(bundle), Options{})
 
-	if !reportContains(report.Errors(), "semantic_drift_payload_completeness", "guard.on_fail.escalate") {
+	if !reportContains(report.Errors(), "semantic_drift_payload_completeness", "rules[1]") {
 		t.Fatalf("expected guard escalation payload completeness error, got %#v", report.Errors())
 	}
 	if !reportContains(report.Errors(), "semantic_drift_payload_completeness", "reason is not statically provable") {
@@ -3765,7 +3489,7 @@ func TestRun_ErrorsWhenGuardEscalateObjectFieldsAuthorEnvelopeOwnedField(t *test
 
 	report := Run(context.Background(), semanticview.Wrap(bundle), Options{})
 
-	if !reportContains(report.Errors(), "semantic_drift_payload_completeness", "guard.on_fail.escalate") {
+	if !reportContains(report.Errors(), "semantic_drift_payload_completeness", "rules[1]") {
 		t.Fatalf("expected guard escalation envelope-owned field error, got %#v", report.Errors())
 	}
 	if !reportContains(report.Errors(), "semantic_drift_payload_completeness", "authors envelope-owned field entity_id in emit.fields") {
@@ -3785,7 +3509,7 @@ func TestRun_ErrorsForGuardEscalateWhenRequiredPayloadContainsEnvelopeOwnedField
 
 	report := Run(context.Background(), semanticview.Wrap(bundle), Options{})
 
-	if !reportContains(report.Errors(), "semantic_drift_payload_completeness", "guard.on_fail.escalate") {
+	if !reportContains(report.Errors(), "semantic_drift_payload_completeness", "rules[1]") {
 		t.Fatalf("expected payload completeness error for guard escalation event schema that still requires envelope-owned payload fields, got %#v", report.Errors())
 	}
 	if !reportContains(report.Errors(), "semantic_drift_payload_completeness", "entity_id is not statically provable") {
@@ -3808,14 +3532,10 @@ func setGuardEscalationForBootverifyTest(bundle *runtimecontracts.WorkflowContra
 		handler = record.Entry.EventHandlers["check.requested"]
 		break
 	}
-	if !owner.Valid() || handler.Guard == nil {
-		panic("canonical test-node guard declaration not found")
+	if !owner.Valid() || len(handler.Rules) == 0 {
+		panic("canonical test-node conditional row not found")
 	}
-	handler.Guard.OnFail = "escalate:" + emit.Event
-	handler.Guard.OnFailSpec = runtimecontracts.GuardFailureSpec{
-		Action:     runtimecontracts.GuardFailureActionEscalate,
-		Escalation: emit,
-	}
+	handler.Rules[len(handler.Rules)-1].Emit = emit
 	writeBundleHandler(nil, bundle, owner, "check.requested", handler)
 }
 
@@ -3993,7 +3713,7 @@ func TestRun_RootInputDoesNotImplicitlySubscribeSameNamedChild(t *testing.T) {
 	writeBootverifyFixtureFile(t, filepath.Join(root, "child", "manifest.yaml"), "version: 1.0.0\nplatform_version: '*'\n")
 	writeBootverifyFixtureFile(t, filepath.Join(root, "child", "schema.yaml"), "pins:\n  inputs:\n    - work.started\n")
 	writeBootverifyFixtureFile(t, filepath.Join(root, "child", "events.yaml"), "work.started: {value: text}\n")
-	writeBootverifyFixtureFile(t, filepath.Join(root, "child", "nodes.yaml"), "observer:\n  execution_type: system_node\n  subscribes_to: [work.started]\n  event_handlers:\n    work.started: {}\n")
+	writeBootverifyFixtureFile(t, filepath.Join(root, "child", "nodes.yaml"), "observer:\n  work.started: {}\n")
 	repo := repoRootForBootverifyTest(t)
 	bundle := loadFixtureBundleAt(t, repo, root, runtimecontracts.DefaultPlatformSpecFile(repo))
 	report := Run(context.Background(), semanticview.Wrap(bundle), Options{})
@@ -4038,37 +3758,6 @@ func TestRun_DoesNotErrorForSameFlowTimerInputProducerPath(t *testing.T) {
 
 	if reportContains(report.Errors(), "input_pin_wiring", "task.feedback") {
 		t.Fatalf("unexpected input_pin_wiring error for same-flow timer proof, got %#v", report.Errors())
-	}
-}
-
-func TestRun_DoesNotUseEventMetadataAsInputProducerPathProof(t *testing.T) {
-	t.Parallel()
-
-	cases := []struct {
-		name   string
-		mutate func(*runtimecontracts.WorkflowContractBundle)
-	}{
-		{
-			name: "produces only",
-			mutate: func(bundle *runtimecontracts.WorkflowContractBundle) {
-				node := bundle.Nodes["dispatcher"]
-				node.Produces = append(node.Produces, "child/task.feedback")
-				bundle.Nodes["dispatcher"] = node
-			},
-		},
-	}
-
-	for _, tc := range cases {
-		t.Run(tc.name, func(t *testing.T) {
-			bundle := loadTier8FixtureBundle(t, "test-boot-missing-pin")
-			tc.mutate(bundle)
-
-			report := Run(context.Background(), semanticview.Wrap(bundle), Options{})
-
-			if !reportContains(report.Errors(), "input_pin_wiring", "task.feedback") {
-				t.Fatalf("expected input_pin_wiring error for %s, got %#v", tc.name, report.Errors())
-			}
-		})
 	}
 }
 
@@ -4130,9 +3819,8 @@ func TestRun_RejectsAbsoluteSiblingQualifiedSubscription(t *testing.T) {
 		Path:  "consumer",
 		Nodes: map[string]runtimecontracts.SystemNodeContract{
 			"listener": {
-				SubscribesTo:     []string{"producer/task.done"},
-				EventHandlers:    map[string]runtimecontracts.SystemNodeEventHandler{"producer/task.done": {}},
-				ProducesDeclared: true,
+
+				EventHandlers: map[string]runtimecontracts.SystemNodeEventHandler{"producer/task.done": {}},
 			},
 		},
 	}
@@ -4160,7 +3848,6 @@ func TestRun_ExactSubscriptionAdmissionPreservesOnlySameScopeAgentException(t *t
 	}{
 		{name: "node same scope", kind: "node", authored: "child/task.done", wantInvalid: true},
 		{name: "node unresolved", kind: "node", authored: "missing/task.done", wantInvalid: true},
-		{name: "node generated subscription", kind: "generated", authored: "child/task.done", wantInvalid: true},
 		{name: "agent same scope", kind: "agent", authored: "child/task.done", wantInvalid: false},
 		{name: "agent unresolved", kind: "agent", authored: "missing/task.done", wantInvalid: true},
 		{name: "agent descendant", kind: "agent", authored: "child/grandchild/task.done", wantInvalid: true},
@@ -4179,7 +3866,7 @@ func TestRun_ExactSubscriptionAdmissionPreservesOnlySameScopeAgentException(t *t
 				}
 			case "generated":
 				child.Nodes = map[string]runtimecontracts.SystemNodeContract{
-					"listener": {SubscribesTo: []string{tc.authored}},
+					"listener": {EventHandlers: map[string]runtimecontracts.SystemNodeEventHandler{tc.authored: {}}},
 				}
 			case "agent":
 				child.Agents = map[string]runtimecontracts.AgentRegistryEntry{
@@ -5041,14 +4728,11 @@ func TestRun_ProviderEvidenceDoesNotHidePublicCallerSelectedEntityID(t *testing.
 func TestRun_AllowsCanonicalImplicitMaterializationForStatefulStaticInputPinHandlers(t *testing.T) {
 	root := writeSelectEntityInputPinFixture(t, `
 treasury-node:
-  execution_type: system_node
-  subscribes_to: [opco.spend_requested]
-  event_handlers:
-    opco.spend_requested:
-      data_accumulation:
-        writes:
-          - source_field: amount_usd
-            target_field: spent_usd
+  opco.spend_requested:
+    data_accumulation:
+      writes:
+        - source_field: amount_usd
+          target_field: spent_usd
 `)
 	bundle := loadFixtureBundleAt(t, repoRootForBootverifyTest(t), root, runtimecontracts.DefaultPlatformSpecFile(repoRootForBootverifyTest(t)))
 
@@ -5113,17 +4797,14 @@ func TestRun_RejectsRootDefaultStaticInputPinMaterializationWithRequiredEntityID
 func TestRun_RejectsSelectEntityForStatefulStaticInputPinHandlers(t *testing.T) {
 	root := writeSelectEntityInputPinFixture(t, `
 treasury-node:
-  execution_type: system_node
-  subscribes_to: [opco.spend_requested]
-  event_handlers:
-    opco.spend_requested:
-      select_entity:
-        by:
-          vertical_id: payload.vertical_id
-      data_accumulation:
-        writes:
-          - source_field: amount_usd
-            target_field: spent_usd
+  opco.spend_requested:
+    select_entity:
+      by:
+        vertical_id: payload.vertical_id
+    data_accumulation:
+      writes:
+        - source_field: amount_usd
+          target_field: spent_usd
 `)
 	assertRetiredReceiverSelectorRejected(t, root)
 }
@@ -5131,17 +4812,14 @@ treasury-node:
 func TestRun_RejectsSelectOrCreateEntityForStatefulStaticInputPinHandlers(t *testing.T) {
 	root := writeSelectEntityInputPinFixture(t, `
 treasury-node:
-  execution_type: system_node
-  subscribes_to: [opco.spend_requested]
-  event_handlers:
-    opco.spend_requested:
-      select_or_create_entity:
-        by:
-          vertical_id: payload.vertical_id
-      data_accumulation:
-        writes:
-          - source_field: amount_usd
-            target_field: spent_usd
+  opco.spend_requested:
+    select_or_create_entity:
+      by:
+        vertical_id: payload.vertical_id
+    data_accumulation:
+      writes:
+        - source_field: amount_usd
+          target_field: spent_usd
 `)
 	assertRetiredReceiverSelectorRejected(t, root)
 }
@@ -5149,13 +4827,10 @@ treasury-node:
 func TestRun_RejectsSelectEntityWithSourceEnvelopeAuthority(t *testing.T) {
 	root := writeSelectEntityInputPinFixture(t, `
 treasury-node:
-  execution_type: system_node
-  subscribes_to: [opco.spend_requested]
-  event_handlers:
-    opco.spend_requested:
-      select_entity:
-        by:
-          vertical_id: payload.entity_id
+  opco.spend_requested:
+    select_entity:
+      by:
+        vertical_id: payload.entity_id
 `)
 	assertRetiredReceiverSelectorRejected(t, root)
 }
@@ -5163,13 +4838,10 @@ treasury-node:
 func TestRun_RejectsSelectOrCreateEntityWithSourceEnvelopeAuthority(t *testing.T) {
 	root := writeSelectEntityInputPinFixture(t, `
 treasury-node:
-  execution_type: system_node
-  subscribes_to: [opco.spend_requested]
-  event_handlers:
-    opco.spend_requested:
-      select_or_create_entity:
-        by:
-          vertical_id: payload.entity_id
+  opco.spend_requested:
+    select_or_create_entity:
+      by:
+        vertical_id: payload.entity_id
 `)
 	assertRetiredReceiverSelectorRejected(t, root)
 }
@@ -5177,13 +4849,10 @@ treasury-node:
 func TestRun_RejectsSelectEntityWithEnvelopeTargetField(t *testing.T) {
 	root := writeSelectEntityInputPinFixture(t, `
 treasury-node:
-  execution_type: system_node
-  subscribes_to: [opco.spend_requested]
-  event_handlers:
-    opco.spend_requested:
-      select_entity:
-        by:
-          entity_id: payload.vertical_id
+  opco.spend_requested:
+    select_entity:
+      by:
+        entity_id: payload.vertical_id
 `)
 	assertRetiredReceiverSelectorRejected(t, root)
 }
@@ -5255,13 +4924,10 @@ func TestRun_RejectsPlatformEntityStoreAsWriteTarget(t *testing.T) {
 func TestRun_RejectsSelectOrCreateEntityWithUndeclaredPayloadRef(t *testing.T) {
 	root := writeSelectEntityInputPinFixture(t, `
 treasury-node:
-  execution_type: system_node
-  subscribes_to: [opco.spend_requested]
-  event_handlers:
-    opco.spend_requested:
-      select_or_create_entity:
-        by:
-          vertical_id: payload.missing_vertical_id
+  opco.spend_requested:
+    select_or_create_entity:
+      by:
+        vertical_id: payload.missing_vertical_id
 `)
 	assertRetiredReceiverSelectorRejected(t, root)
 }
@@ -5269,13 +4935,10 @@ treasury-node:
 func TestRun_RejectsSelectEntityWithUndeclaredPayloadRef(t *testing.T) {
 	root := writeSelectEntityInputPinFixture(t, `
 treasury-node:
-  execution_type: system_node
-  subscribes_to: [opco.spend_requested]
-  event_handlers:
-    opco.spend_requested:
-      select_entity:
-        by:
-          vertical_id: payload.missing_vertical_id
+  opco.spend_requested:
+    select_entity:
+      by:
+        vertical_id: payload.missing_vertical_id
 `)
 	assertRetiredReceiverSelectorRejected(t, root)
 }
@@ -5283,14 +4946,11 @@ treasury-node:
 func TestRun_RejectsSelectEntityWithCreateEntity(t *testing.T) {
 	root := writeSelectEntityInputPinFixture(t, `
 treasury-node:
-  execution_type: system_node
-  subscribes_to: [opco.spend_requested]
-  event_handlers:
-    opco.spend_requested:
-      create_entity: true
-      select_entity:
-        by:
-          vertical_id: payload.vertical_id
+  opco.spend_requested:
+    create_entity: true
+    select_entity:
+      by:
+        vertical_id: payload.vertical_id
 `)
 	assertRetiredReceiverSelectorRejected(t, root)
 }
@@ -5298,14 +4958,11 @@ treasury-node:
 func TestRun_RejectsSelectOrCreateEntityWithCreateEntity(t *testing.T) {
 	root := writeSelectEntityInputPinFixture(t, `
 treasury-node:
-  execution_type: system_node
-  subscribes_to: [opco.spend_requested]
-  event_handlers:
-    opco.spend_requested:
-      create_entity: true
-      select_or_create_entity:
-        by:
-          vertical_id: payload.vertical_id
+  opco.spend_requested:
+    create_entity: true
+    select_or_create_entity:
+      by:
+        vertical_id: payload.vertical_id
 `)
 	assertRetiredReceiverSelectorRejected(t, root)
 }
@@ -5313,16 +4970,13 @@ treasury-node:
 func TestRun_RejectsSelectEntityWithSelectOrCreateEntity(t *testing.T) {
 	root := writeSelectEntityInputPinFixture(t, `
 treasury-node:
-  execution_type: system_node
-  subscribes_to: [opco.spend_requested]
-  event_handlers:
-    opco.spend_requested:
-      select_entity:
-        by:
-          vertical_id: payload.vertical_id
-      select_or_create_entity:
-        by:
-          vertical_id: payload.vertical_id
+  opco.spend_requested:
+    select_entity:
+      by:
+        vertical_id: payload.vertical_id
+    select_or_create_entity:
+      by:
+        vertical_id: payload.vertical_id
 `)
 	assertRetiredReceiverSelectorRejected(t, root)
 }
@@ -5393,17 +5047,6 @@ func TestRun_AllowsDistinctExplicitBoundarySources(t *testing.T) {
 
 	if reportContains(report.Errors(), "input_pin_wiring", "task.feedback") {
 		t.Fatalf("distinct explicit sources were rejected, got %#v", report.Errors())
-	}
-}
-
-func TestRun_RejectsUnconnectedInputDespiteQualifiedSubscription(t *testing.T) {
-	root := writeCrossFlowPinAmbiguityFixture(t, true)
-	bundle := loadFixtureBundleAt(t, repoRootForBootverifyTest(t), root, runtimecontracts.DefaultPlatformSpecFile(repoRootForBootverifyTest(t)))
-
-	report := Run(context.Background(), semanticview.Wrap(bundle), Options{})
-
-	if !reportContains(report.Errors(), "input_pin_wiring", "ticket.ready") {
-		t.Fatalf("qualified subscription supplied authority without a connection: %#v", report.Errors())
 	}
 }
 
@@ -5558,31 +5201,17 @@ func TestFlowEventExistsDoesNotUseAnotherFlowDeclaration(t *testing.T) {
 	}
 }
 
-func TestRun_ReportsMissingSemanticHandlerForOwnedRuntimeEvent(t *testing.T) {
-	bundle := bootverifyTransitionRuntimeOwnershipBundle()
-	node := bundle.Nodes["dispatcher"]
-	node.SubscribesTo = append(node.SubscribesTo, "ticket.opened")
-	bundle.Nodes["dispatcher"] = node
-
-	report := Run(context.Background(), semanticview.Wrap(bundle), Options{})
-
-	if !reportContains(report.Errors(), "event_runtime_wiring_validation", "on node flow . node dispatcher has no matching executable handler") {
-		t.Fatalf("expected event_runtime_wiring_validation error, got %#v", report.Errors())
-	}
-}
-
 func TestRun_ReportsMissingRuntimeExecutorForOwnedRuntimeEvent(t *testing.T) {
 	bundle := bootverifyTransitionRuntimeOwnershipBundle()
 	root, ok := bundle.FlowViewByID(".")
 	if !ok || root == nil {
 		t.Fatal("root flow missing")
 	}
-	root.Nodes["idle-owner"] = runtimecontracts.SystemNodeContract{SubscribesTo: []string{"ticket.audit"}}
+	root.Nodes["idle-owner"] = runtimecontracts.SystemNodeContract{EventHandlers: map[string]runtimecontracts.SystemNodeEventHandler{"ticket.audit": {}}}
 
 	report := Run(context.Background(), semanticview.Wrap(bundle), Options{})
-
-	if !reportContains(report.Errors(), "handler_field_compliance", "event ticket.audit on node flow . node idle-owner has no runtime executor") {
-		t.Fatalf("expected handler_field_compliance runtime executor error, got %#v", report.Errors())
+	if !reportContains(report.Errors(), "event_runtime_wiring_validation", "event ticket.audit on node flow . node idle-owner has no matching executable handler") {
+		t.Fatalf("expected runtime wiring executor error, got %#v", report.Errors())
 	}
 }
 
@@ -6316,9 +5945,9 @@ ticket.ready:
 `)
 	}
 
-	subscription := "ticket.ready"
+	handlerEvent := "ticket.ready"
 	if scoped {
-		subscription = "producer_a/ticket.ready"
+		handlerEvent = "producer_a/ticket.ready"
 	}
 	writeBootverifyFixtureFile(t, filepath.Join(root, "consumer", "manifest.yaml"), "version: 1.0.0\nplatform_version: '*'\n")
 	writeBootverifyFixtureFile(t, filepath.Join(root, "consumer", "schema.yaml"), `stages:
@@ -6339,13 +5968,9 @@ consumer.started:
 `)
 	writeBootverifyFixtureFile(t, filepath.Join(root, "consumer", "nodes.yaml"), `
 consumer-node:
-  execution_type: system_node
-  subscribes_to:
-    - `+subscription+`
-  event_handlers:
-    ticket.ready:
-      advances_to: done
-      emit: consumer.started
+  `+handlerEvent+`:
+    advances_to: done
+    emit: consumer.started
 `)
 
 	return root
@@ -6387,14 +6012,9 @@ ticket.closed:
 `)
 	writeBootverifyFixtureFile(t, filepath.Join(root, "support", "nodes.yaml"), fmt.Sprintf(`
 support-node:
-  execution_type: system_node
-  subscribes_to:
-    - ticket.opened
-    - ticket.closed
-  event_handlers:
-    ticket.opened:
-      advances_to: active
-    ticket.closed:
+  ticket.opened:
+    advances_to: active
+  ticket.closed:
 %s
 `, closedHandler))
 
@@ -6430,15 +6050,10 @@ ticket.closed:
 `)
 	writeBootverifyFixtureFile(t, filepath.Join(root, "support", "nodes.yaml"), `
 support-node:
-  execution_type: system_node
-  subscribes_to:
-    - ticket.opened
-    - ticket.closed
-  event_handlers:
-    ticket.opened:
-      advances_to: active
-    ticket.closed:
-      advances_to: done
+  ticket.opened:
+    advances_to: active
+  ticket.closed:
+    advances_to: done
 `)
 
 	return root
@@ -6479,13 +6094,9 @@ task.assigned:
 `)
 	writeBootverifyFixtureFile(t, filepath.Join(root, "child", "nodes.yaml"), `
 reader:
-  execution_type: system_node
-  subscribes_to: [task.assigned]
-  event_handlers:
-    task.assigned:
-      guard:
-        check: state.priority >= 0
-      advances_to: done
+  task.assigned:
+    guard: state.priority >= 0
+    advances_to: done
 `)
 
 	return root
@@ -6556,7 +6167,7 @@ func bootverifyTransitionRuntimeOwnershipBundle() *runtimecontracts.WorkflowCont
 				"ticket.created": {
 					AdvancesTo: "opened",
 					Emit:       runtimecontracts.EmitSpec{Event: "ticket.opened"},
-					Guard:      &runtimecontracts.GuardSpec{ID: "allow_ticket"},
+					Guard:      &runtimecontracts.GuardSpec{Check: "true"},
 				},
 			},
 		},
@@ -6588,12 +6199,6 @@ func bootverifyTransitionRuntimeOwnershipBundle() *runtimecontracts.WorkflowCont
 				".": runtimecontracts.BuildWorkflowStageTopology(".", "created", []string{"created", "opened"}, []string{"opened"},
 					[]runtimecontracts.HandlerTransitionSemantic{{Node: dispatcher, EventType: "ticket.created", AdvancesTo: "opened"}}, nil, nil),
 			},
-			GuardByID: map[string]runtimecontracts.GuardActionEntry{
-				"allow_ticket": {
-					ID:    "allow_ticket",
-					Check: "true",
-				},
-			},
 			NodeHandlers: map[string]map[string]runtimecontracts.SystemNodeEventHandler{
 				dispatcher.Key(): nodes["dispatcher"].EventHandlers,
 			},
@@ -6624,8 +6229,7 @@ func bootverifyDeclarationDriftBundle() *runtimecontracts.WorkflowContractBundle
 		},
 		Nodes: map[string]runtimecontracts.SystemNodeContract{
 			"producer": {
-				SubscribesTo: []string{"task.start"},
-				Produces:     []string{"task.done"},
+
 				EventHandlers: map[string]runtimecontracts.SystemNodeEventHandler{
 					"task.start": {Emit: runtimecontracts.EmitSpec{Event: "task.done"}},
 				},
@@ -6663,7 +6267,7 @@ func bootverifyPayloadCompletenessBundle() *runtimecontracts.WorkflowContractBun
 		},
 		Nodes: map[string]runtimecontracts.SystemNodeContract{
 			"dispatcher": {
-				SubscribesTo: []string{"scan.corpus_dispatch"},
+
 				EventHandlers: map[string]runtimecontracts.SystemNodeEventHandler{
 					"scan.corpus_dispatch": {
 						Emit: runtimecontracts.EmitSpec{Event: "market_research.scan_assigned"},
@@ -6780,9 +6384,8 @@ func gateSchemaValidationBundle(t testing.TB, gateState runtimecontracts.NodeGat
 		eventType = "task.requested"
 	)
 	node := runtimecontracts.SystemNodeContract{
-		ExecutionType: "system_node",
-		SubscribesTo:  []string{eventType},
-		GateState:     gateState,
+
+		GateState: gateState,
 		EventHandlers: map[string]runtimecontracts.SystemNodeEventHandler{
 			eventType: handler,
 		},
@@ -7127,8 +6730,6 @@ func addProjectHandler(t *testing.T, bundle *runtimecontracts.WorkflowContractBu
 	t.Helper()
 	if bundle.FlowTree.Root == nil {
 		node := runtimecontracts.SystemNodeContract{}
-		node.ExecutionType = "system_node"
-		node.SubscribesTo = []string{eventType}
 		if node.EventHandlers == nil {
 			node.EventHandlers = map[string]runtimecontracts.SystemNodeEventHandler{}
 		}
@@ -7143,8 +6744,6 @@ func addProjectHandler(t *testing.T, bundle *runtimecontracts.WorkflowContractBu
 		bundle.FlowTree.Root.Nodes = map[string]runtimecontracts.SystemNodeContract{}
 	}
 	node := bundle.FlowTree.Root.Nodes[nodeID]
-	node.ExecutionType = "system_node"
-	node.SubscribesTo = append(node.SubscribesTo, eventType)
 	if node.EventHandlers == nil {
 		node.EventHandlers = map[string]runtimecontracts.SystemNodeEventHandler{}
 	}

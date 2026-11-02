@@ -56,7 +56,7 @@ func a2ForkJoinRef(t *testing.T, entry timeridentity.StageEntryRef, generation a
 	if err != nil {
 		t.Fatal(err)
 	}
-	ref, err := timeridentity.NewJoinRef(node, "result", entry.Stage, "join")
+	ref, err := timeridentity.NewJoinRef(node, "result", entry.Stage)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -214,7 +214,7 @@ func TestA2ForkEntryProjectionPreservesExactOldClosedArm(t *testing.T) {
 				if err != nil {
 					t.Fatal(err)
 				}
-				ref, err := timeridentity.NewJoinRef(node, "result", "draft", "join")
+				ref, err := timeridentity.NewJoinRef(node, "result", "draft")
 				if err != nil {
 					t.Fatal(err)
 				}

@@ -1,25 +1,17 @@
 orchestrator:
-  execution_type: system_node
-  subscribes_to: [spawn.requested]
-  produces: [worker.requested]
-  event_handlers:
-    spawn.requested:
-      emit:
-        event: worker.requested
-        fields:
-          worker_id: payload.worker_id
-          task_label: payload.task_label
-      advances_to: spawned
+  spawn.requested:
+    emit:
+      event: worker.requested
+      fields:
+        worker_id: payload.worker_id
+        task_label: payload.task_label
+    advances_to: spawned
 
 assigner:
-  execution_type: system_node
-  subscribes_to: [assign.requested]
-  produces: [work.assign]
-  event_handlers:
-    assign.requested:
-      emit:
-        event: work.assign
-        fields:
-          worker_id: payload.worker_id
-          task_label: payload.task_label
-      advances_to: done
+  assign.requested:
+    emit:
+      event: work.assign
+      fields:
+        worker_id: payload.worker_id
+        task_label: payload.task_label
+    advances_to: done

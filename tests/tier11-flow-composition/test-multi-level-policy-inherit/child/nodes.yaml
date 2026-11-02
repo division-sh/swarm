@@ -1,7 +1,3 @@
 child-node:
-  execution_type: system_node
-  subscribes_to: [child.check]
-  produces: []
-  event_handlers:
-    child.check:
-      advances_to: done
+  child.check:
+    advances_to: done

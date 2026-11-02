@@ -395,7 +395,7 @@ func deliveryTargetNestedOwnershipSource(t *testing.T) semanticview.Source {
 		"review/schema.yaml":         "instance: instance_key\nstages:\n  active: {}\n  done: {final: true}\n",
 		"review/state.yaml":          "instance_key: text\n",
 		"review/events.yaml":         "work.ready:\n",
-		"review/nodes.yaml":          "existing:\n  execution_type: system_node\n  subscribes_to: [work.ready]\n  event_handlers:\n    work.ready:\n      advances_to: done\n",
+		"review/nodes.yaml":          "existing:\n  work.ready:\n    advances_to: done\n",
 		"review/child/manifest.yaml": "version: 1.0.0\nplatform_version: \">=0.7.0 <0.8.0\"\n",
 		"review/child/schema.yaml":   "stages:\n  active: {}\n  done: {final: true}\n",
 		"review/child/state.yaml":    "marker: text\n",

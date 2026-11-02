@@ -39,7 +39,7 @@ func VerifyNativeAuthoredRuleReceiverPreparationRetryBothStoresForTest(t *testin
 					"schema.yaml":   "stages:\n  queued: {}\n  done: {final: true}\n",
 
 					"events.yaml": "source.evt:\n",
-					"nodes.yaml":  "node-a:\n  execution_type: system_node\n  subscribes_to: [source.evt]\n  event_handlers:\n    source.evt:\n      rules:\n        - when: |-\n                  true\n          advances_to: done\n",
+					"nodes.yaml":  "node-a:\n  source.evt:\n    rules:\n      - when: |-\n                true\n        advances_to: done\n",
 				})
 				module := handlerTestWorkflowModuleWithBundle(bundle, ".", "node-a").(*previewWorkflowModule)
 				node := pipelineNode(t, ".", "node-a")

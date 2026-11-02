@@ -10,7 +10,7 @@ func CopyMailboxNoticeCompletion(t testing.TB) string {
 	t.Helper()
 	root := CopyMailboxCompletionMatrix(t)
 	applyClosedReplacement(t, filepath.Join(root, "observers/schema.yaml"), "    - observer.requested\n", "    - observer.requested\n    - notice.requested\n")
-	applyClosedReplacement(t, filepath.Join(root, "observers/nodes.yaml"), "    observer.requested: {}\n", "    observer.requested: {}\n    notice.requested: {}\n")
+	applyClosedReplacement(t, filepath.Join(root, "observers/nodes.yaml"), "  observer.requested: {}\n", "  observer.requested: {}\n  notice.requested: {}\n")
 	applyClosedReplacement(t, filepath.Join(root, "schema.yaml"), "    - observer.requested\n", "    - observer.requested\n    - notice.requested\n")
 	applyClosedReplacement(t, filepath.Join(root, "schema.yaml"), "  outputs: [observer.requested]\nconnect:\n", "  outputs: [observer.requested, notice.requested]\nconnect:\n")
 	applyClosedReplacement(t, filepath.Join(root, "schema.yaml"), "  - {event: observer.requested, from: ., to: observers}\n", "  - {event: observer.requested, from: ., to: observers}\n  - {event: notice.requested, from: ., to: observers}\n")
@@ -34,23 +34,17 @@ func CopyMailboxCompletionMatrix(t testing.TB) string {
 		t.Fatal(err)
 	}
 	writeClosedVariantFile(t, root, "nodes.yaml", string(nodes)+`effect-requester:
-  execution_type: system_node
-  subscribes_to: [effect.requested]
-  event_handlers:
-    effect.requested:
-      activity:
-        id: telegram_send_message
-        tool: telegram.send_message
-        approval: {decision: send_telegram_message}
-        input:
-          account: "420079"
-          chat_id: "42"
-          text: "review"
+  effect.requested:
+    activity:
+      id: telegram_send_message
+      tool: telegram.send_message
+      approval: {decision: send_telegram_message}
+      input:
+        account: "420079"
+        chat_id: "42"
+        text: "review"
 effect-revision:
-  execution_type: system_node
-  subscribes_to: [telegram_send_message.revision_requested]
-  event_handlers:
-    telegram_send_message.revision_requested: {}
+  telegram_send_message.revision_requested: {}
 `)
 	writeClosedVariantFile(t, root, "observers/manifest.yaml", "version: 1.0.0\nplatform_version: '*'\n")
 	writeClosedVariantFile(t, root, "observers/schema.yaml", `# fixture: observers
@@ -60,10 +54,7 @@ pins:
     - observer.requested
 `)
 	writeClosedVariantFile(t, root, "observers/nodes.yaml", `start:
-  execution_type: system_node
-  subscribes_to: [observer.requested]
-  event_handlers:
-    observer.requested: {}
+  observer.requested: {}
 `)
 	writeClosedVariantFile(t, root, "observers/agents.yaml", `observer:
   role: observer
@@ -107,7 +98,7 @@ func CopyHumanTaskOwnership(t testing.TB, mode string) string {
 	switch mode {
 	case "singleton":
 	case "static":
-		applyClosedReplacement(t, filepath.Join(root, "observers/nodes.yaml"), "    observer.requested: {}\n", "    observer.requested:\n      emit:\n        event: observer.started\n        fields: {seed: payload.seed, deadline_at: payload.deadline_at}\n")
+		applyClosedReplacement(t, filepath.Join(root, "observers/nodes.yaml"), "  observer.requested: {}\n", "  observer.requested:\n    emit:\n      event: observer.started\n      fields: {seed: payload.seed, deadline_at: payload.deadline_at}\n")
 		writeClosedVariantFile(t, root, "observers/events.yaml", "observer.started:\n  seed: boolean\n  deadline_at: text\n")
 		applyClosedReplacement(t, filepath.Join(root, "observers/agents.yaml"), "subscriptions: [observer.requested,", "subscriptions: [observer.started,")
 		applyClosedReplacement(t, filepath.Join(root, "observers/agents.yaml"), "endsWith(\"observer.requested\")", "endsWith(\"observer.started\")")
@@ -141,14 +132,10 @@ func CopyHumanTaskOwnership(t testing.TB, mode string) string {
 		for name, suffix := range map[string]string{
 			"events.yaml": "observer.seed:\n  case_id: text\n",
 			"nodes.yaml": `human-template-launcher:
-  execution_type: system_node
-  subscribes_to: [observer.seed]
-  produces: [observer.requested]
-  event_handlers:
-    observer.seed:
-      emit:
-        event: observer.requested
-        fields: {case_id: payload.case_id, seed: true}
+  observer.seed:
+    emit:
+      event: observer.requested
+      fields: {case_id: payload.case_id, seed: true}
 `,
 		} {
 			parent, err := os.ReadFile(filepath.Join(root, name))

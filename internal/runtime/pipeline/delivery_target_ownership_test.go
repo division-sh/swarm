@@ -234,7 +234,7 @@ func TestClassifyDeliveryTargetOwnershipProjectsRootHandlerOntoSelectedRun(t *te
 		Events: map[string]runtimecontracts.EventCatalogEntry{"timer.cancel": {}},
 		Nodes: map[string]runtimecontracts.SystemNodeContract{
 			"controller": {
-				SubscribesTo: []string{"timer.cancel"},
+
 				EventHandlers: map[string]runtimecontracts.SystemNodeEventHandler{
 					"timer.cancel": {AdvancesTo: "done"},
 				},
@@ -691,7 +691,7 @@ func mustDeliveryTargetTemplateField(t testing.TB) runtimecontracts.TemplateInst
 
 func deliveryTargetOwnershipEventNode(id, eventType string, handler runtimecontracts.SystemNodeEventHandler) runtimecontracts.SystemNodeContract {
 	return runtimecontracts.SystemNodeContract{
-		SubscribesTo:  []string{eventType},
+
 		EventHandlers: map[string]runtimecontracts.SystemNodeEventHandler{eventType: handler},
 	}
 }

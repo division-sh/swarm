@@ -242,7 +242,7 @@ func verifyS1ScopedActivityDispatch(t *testing.T, open func(*testing.T, semantic
 		files[flow+"/manifest.yaml"] = "version: 1.0.0\nplatform_version: \">=0.7.0 <0.8.0\"\n"
 		files[flow+"/schema.yaml"] = "stages: []\n"
 		files[flow+"/events.yaml"] = "request:\n"
-		files[flow+"/nodes.yaml"] = fmt.Sprintf("scanner:\n  execution_type: system_node\n  subscribes_to: [request]\n  event_handlers:\n    request:\n      activity: {id: send, tool: %s, input: {}}\n", toolID)
+		files[flow+"/nodes.yaml"] = fmt.Sprintf("scanner:\n  request:\n    activity: {id: send, tool: %s, input: {}}\n", toolID)
 		tool := fmt.Sprintf("provider_write:\n  handler_type: http\n  input_schema: {type: object, additionalProperties: false}\n  output_schema:\n    type: object\n    required: [origin]\n    properties: {origin: {type: string, enum: [%s]}}\n  http: {method: POST, url: %q}\n", flow, server.URL+"/"+flow)
 		if !directory {
 			files[flow+"/tools.yaml"] = tool

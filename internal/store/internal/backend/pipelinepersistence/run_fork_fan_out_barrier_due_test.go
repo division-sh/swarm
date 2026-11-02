@@ -117,7 +117,7 @@ func runForkBarrierDueFixture(t *testing.T) (fanoutbarrier.Barrier, genericsched
 		t.Fatal(err)
 	}
 	plan := contracts.FanOutPlanRef{BundleHash: "bundle-v2:sha256:" + strings.Repeat("1", 64), ElementRef: element, SemanticDigest: "sha256:" + strings.Repeat("2", 64)}
-	ref, err := timeridentity.NewFanOutDeliveryJoinRef(node, "items.ready", "joined", declaration, plan.BundleHash, plan.SemanticDigest)
+	ref, err := timeridentity.NewFanOutDeliveryJoinRef(node, "items.ready", declaration, plan.BundleHash, plan.SemanticDigest)
 	if err != nil {
 		t.Fatal(err)
 	}

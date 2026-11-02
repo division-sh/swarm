@@ -2,7 +2,6 @@ package contracts
 
 import (
 	"fmt"
-	"regexp"
 	"strings"
 
 	"github.com/division-sh/swarm/internal/runtime/core/paths"
@@ -10,10 +9,7 @@ import (
 
 const JoinDeadlineFromStageEntry = "stage_entry"
 
-var joinIDPattern = regexp.MustCompile(`^[A-Za-z_][A-Za-z0-9_.-]*$`)
-
 type JoinSpec struct {
-	ID              string            `yaml:"id"`
 	Stage           string            `yaml:"stage"`
 	Members         JoinMembersSpec   `yaml:"members"`
 	Output          string            `yaml:"output"`
@@ -57,7 +53,6 @@ type JoinDeadlineSpec struct {
 }
 
 var joinFieldOptions = map[string]struct{}{
-	"id":          {},
 	"stage":       {},
 	"members":     {},
 	"output":      {},
@@ -86,13 +81,6 @@ var joinOutcomeFieldOptions = map[string]struct{}{
 	"advances_to":       {},
 }
 
-func (s JoinSpec) EffectiveID() string {
-	if id := strings.TrimSpace(s.ID); id != "" {
-		return id
-	}
-	return strings.TrimSpace(s.Stage)
-}
-
 func (s JoinSpec) Mode() WorkflowJoinMode {
 	if s.Members.FromFanOut || s.Members.fromFanOutFound {
 		return WorkflowJoinModeFanOutDelivery
@@ -108,9 +96,6 @@ func (s JoinSpec) IsFanOutDeliveryBarrier() bool {
 }
 
 func (s JoinSpec) ValidateAuthoredShape() error {
-	if id := s.EffectiveID(); id == "" || !joinIDPattern.MatchString(id) {
-		return fmt.Errorf("join.id must be a simple stable identifier (defaults to stage for arrival joins)")
-	}
 	if s.Mode() != WorkflowJoinModeFanOutDelivery {
 		return s.validateArrivalShape()
 	}
@@ -167,9 +152,6 @@ func (s JoinSpec) validateArrivalClosure() error {
 func (s JoinSpec) validateFanOutShape() error {
 	if !s.Members.FromFanOut {
 		return fmt.Errorf("fan-out delivery join requires join.members.from_fan_out: true")
-	}
-	if strings.TrimSpace(s.ID) == "" {
-		return fmt.Errorf("fan-out delivery join requires explicit join.id")
 	}
 	if !s.OnCompleteFound || joinOutcomeEmpty(s.OnComplete) {
 		return fmt.Errorf("fan-out delivery join requires non-empty on_complete")

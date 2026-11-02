@@ -1,14 +1,13 @@
 activity-node:
-  event_handlers:
-    request:
-      activity:
-        id: send
-        tool: send
-        input:
-          message: payload.message
-    send.succeeded:
-      rules:
-        - when: payload.result != null
-    send.failed:
-      rules:
-        - when: payload.failure != null
+  request:
+    activity:
+      id: send
+      tool: send
+      input:
+        message: payload.message
+  send.succeeded:
+    rules:
+      - when: payload.result != null
+  send.failed:
+    rules:
+      - when: payload.failure != null

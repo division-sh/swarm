@@ -582,7 +582,7 @@ func (r connectRoutePlanResolver) materializeReplyResponse(ctx context.Context, 
 				}
 			}
 			for _, joinPlan := range runtimepipeline.WorkflowJoinAdmissionPlans(r.lifecycle.source, node, returnEvent) {
-				declaration, err := timeridentity.NewJoinRef(joinPlan.Node, joinPlan.HandlerEvent, joinPlan.Spec.Stage, joinPlan.Spec.EffectiveID())
+				declaration, err := timeridentity.NewJoinRef(joinPlan.Node, joinPlan.HandlerEvent, joinPlan.Spec.Stage)
 				if err != nil {
 					return nil, nil, nil, 0, nil, err
 				}

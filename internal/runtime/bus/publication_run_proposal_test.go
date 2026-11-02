@@ -77,7 +77,7 @@ func TestRunCreatingRecipientPreviewSharesProposalWithOrdinaryConsumers(t *testi
 		"manifest.yaml": "version: 1.0.0\nplatform_version: '*'\n",
 		"schema.yaml":   "pins:\n  inputs: [task.requested]\n  outputs: [task.requested]\n",
 		"events.yaml":   "task.requested:\n",
-		"nodes.yaml":    "worker:\n  execution_type: system_node\n  subscribes_to: [task.requested]\n  event_handlers:\n    task.requested:\n      guard: {id: admitted, check: true}\n",
+		"nodes.yaml":    "worker:\n  task.requested:\n    guard: true\n",
 	}))
 	missing := &runlifecycle.RunNotFoundError{RunID: busInternalTestRunID}
 	independent := errors.New("independent run observation failure")

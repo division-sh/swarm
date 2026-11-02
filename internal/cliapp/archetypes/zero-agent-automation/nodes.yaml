@@ -1,11 +1,8 @@
 send-notification:
-  execution_type: system_node
-  subscribes_to: [automation.requested]
-  event_handlers:
-    automation.requested:
-      activity:
-        id: send_notification
-        tool: telegram.send_message
-        input:
-          chat_id: payload.chat_id
-          text: payload.text
+  automation.requested:
+    activity:
+      id: send_notification
+      tool: telegram.send_message
+      input:
+        chat_id: payload.chat_id
+        text: payload.text

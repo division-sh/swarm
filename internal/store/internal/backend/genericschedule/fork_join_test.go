@@ -199,7 +199,7 @@ func TestForkJoinRequestRejectsSelfConsistentForeignEvidence(t *testing.T) {
 			}},
 			{"child_join_declaration", func(t *testing.T, r *ForkJoinRequest) {
 				_, ref := forkJoinCommandHandle(t, r.Child)
-				declaration, err := timeridentity.NewJoinRef(ref.Node(), ref.HandlerEvent(), ref.Stage(), "different-join")
+				declaration, err := timeridentity.NewJoinRef(ref.Node(), ref.HandlerEvent(), ref.Stage())
 				if err != nil {
 					t.Fatal(err)
 				}
@@ -207,7 +207,7 @@ func TestForkJoinRequestRejectsSelfConsistentForeignEvidence(t *testing.T) {
 			}},
 			{"child_handler_declaration", func(t *testing.T, r *ForkJoinRequest) {
 				_, ref := forkJoinCommandHandle(t, r.Child)
-				declaration, err := timeridentity.NewJoinRef(ref.Node(), "other.completed", ref.Stage(), ref.JoinID())
+				declaration, err := timeridentity.NewJoinRef(ref.Node(), "other.completed", ref.Stage())
 				if err != nil {
 					t.Fatal(err)
 				}
@@ -217,7 +217,7 @@ func TestForkJoinRequestRejectsSelfConsistentForeignEvidence(t *testing.T) {
 				_, ref := forkJoinCommandHandle(t, r.Child)
 				entry := ref.StageEntry()
 				entry.Stage = "other-stage"
-				declaration, err := timeridentity.NewJoinRef(ref.Node(), ref.HandlerEvent(), entry.Stage, ref.JoinID())
+				declaration, err := timeridentity.NewJoinRef(ref.Node(), ref.HandlerEvent(), entry.Stage)
 				if err != nil {
 					t.Fatal(err)
 				}
@@ -229,7 +229,7 @@ func TestForkJoinRequestRejectsSelfConsistentForeignEvidence(t *testing.T) {
 				if flow != "." {
 					node = identitytest.FlowNode(t, flow, "other-join-node")
 				}
-				declaration, err := timeridentity.NewJoinRef(node, ref.HandlerEvent(), ref.Stage(), ref.JoinID())
+				declaration, err := timeridentity.NewJoinRef(node, ref.HandlerEvent(), ref.Stage())
 				if err != nil {
 					t.Fatal(err)
 				}
@@ -442,7 +442,7 @@ func forkJoinRequestFixture(t *testing.T, flow string, timeout, cancelled, inher
 	if inherited {
 		entry.OriginRunID = uuid.NewString()
 	}
-	ref, err := timeridentity.NewJoinRef(node, "item.completed", "awaiting", "shared")
+	ref, err := timeridentity.NewJoinRef(node, "item.completed", "awaiting")
 	if err != nil {
 		t.Fatal(err)
 	}

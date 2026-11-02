@@ -11,10 +11,9 @@ import (
 )
 
 type swarmWorkflowModule struct {
-	bundle        *runtimecontracts.WorkflowContractBundle
-	source        semanticview.Source
-	nodes         []runtimepipeline.WorkflowNode
-	guardRegistry runtimepipeline.GuardRegistry
+	bundle *runtimecontracts.WorkflowContractBundle
+	source semanticview.Source
+	nodes  []runtimepipeline.WorkflowNode
 }
 
 func NewSwarmWorkflowModule(RepoRoot, sourceRoot string) (runtimepipeline.WorkflowModule, *runtimecontracts.WorkflowContractBundle, error) {
@@ -98,10 +97,9 @@ func NewSwarmWorkflowModuleForBundle(bundle *runtimecontracts.WorkflowContractBu
 		return nil, nil, err
 	}
 	return &swarmWorkflowModule{
-		bundle:        bundle,
-		source:        source,
-		nodes:         nodes,
-		guardRegistry: runtimepipeline.NewContractGuardRegistry(source),
+		bundle: bundle,
+		source: source,
+		nodes:  nodes,
 	}, source, nil
 }
 
@@ -109,4 +107,3 @@ func (m *swarmWorkflowModule) SemanticSource() semanticview.Source { return m.so
 func (m *swarmWorkflowModule) WorkflowNodes() []runtimepipeline.WorkflowNode {
 	return append([]runtimepipeline.WorkflowNode(nil), m.nodes...)
 }
-func (m *swarmWorkflowModule) GuardRegistry() runtimepipeline.GuardRegistry { return m.guardRegistry }

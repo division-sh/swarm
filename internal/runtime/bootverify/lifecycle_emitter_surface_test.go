@@ -32,15 +32,12 @@ func TestRun_ProviderTransportEntityIDDoesNotElectCanonicalPrimary(t *testing.T)
 		"matrix/schema.yaml":   "stages: []\npins: {inputs: [inbound.telegram.raw, inbound.intercom.raw]}\n",
 		"matrix/state.yaml":    "service_id: \"standing\"\n",
 		"matrix/nodes.yaml": `matrix-sink:
-  execution_type: system_node
-  subscribes_to: [inbound.telegram.raw, inbound.intercom.raw]
-  event_handlers:
-    inbound.telegram.raw:
-      data_accumulation:
-        writes: [{target_field: service_id, value: "standing"}]
-    inbound.intercom.raw:
-      data_accumulation:
-        writes: [{target_field: service_id, value: "standing"}]
+  inbound.telegram.raw:
+    data_accumulation:
+      writes: [{target_field: service_id, value: "standing"}]
+  inbound.intercom.raw:
+    data_accumulation:
+      writes: [{target_field: service_id, value: "standing"}]
 `,
 		"matrix/telegram/manifest.yaml": "version: 1.0.0\nplatform_version: '*'\ncapabilities: {can: {emit_events: [raw], verify_secret: webhook_signing_secret}, cannot: [bypass journal]}\n",
 		"matrix/telegram/trigger.yaml":  "transport: webhook\nsecret: {required: true}\nsignature: {type: token_equality, header: X-Telegram-Token}\ndelivery_id: {json_path: $.update_id, required: true}\nevent_type: {literal: update, required: true}\nevent_name: {literal: raw}\n",
@@ -181,7 +178,16 @@ func TestCompiledLifecycleEmitterInvalidPlansRejectedByValidationSurface(t *test
 		{"loop_missing_field", "loop_validation", "revision_id", canonicalrouting.LifecycleStaticLoopMissingField},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
-			source := lifecycleSurfaceSource(t, canonicalrouting.CopyLifecycleEmitterStatic(t, tc.variant))
+			root := canonicalrouting.CopyLifecycleEmitterStatic(t, tc.variant)
+			if tc.variant == canonicalrouting.LifecycleStaticLoopWrongFlow {
+				repo := canonicalrouting.RepoRoot(t)
+				bundle, err := runtimecontracts.LoadWorkflowContractBundleWithOverrides(repo, root, runtimecontracts.DefaultPlatformSpecFile(repo))
+				if bundle != nil || err == nil || !strings.Contains(err.Error(), `handler "loop.escaped"`) || !strings.Contains(err.Error(), "undeclared event") {
+					t.Fatalf("foreign event acquired receiver admission: %v, %v", bundle != nil, err)
+				}
+				return
+			}
+			source := lifecycleSurfaceSource(t, root)
 			_, err := runtime.ValidateWorkflowContractSurface(context.Background(), source, runtime.WorkflowContractValidationOptions{ExecutionPosture: executionposture.Live, FatalBootWarnings: true, StrictEmitSchemas: true})
 			if err == nil || !strings.Contains(err.Error(), tc.check) || !strings.Contains(err.Error(), tc.detail) {
 				t.Fatalf("invalid lifecycle plan reached validation success: %v", err)

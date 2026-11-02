@@ -12,11 +12,11 @@ func terminalOwnershipSource(t *testing.T) semanticview.Source {
 	return loadWorkflowTempSource(t, map[string]string{
 		"manifest.yaml":       "version: 1.0.0\nplatform_version: \">=0.7.0 <0.8.0\"\n",
 		"schema.yaml":         "stages:\n  ready: {}\n  done: {}\n  reopened: {}\n",
-		"nodes.yaml":          "reopener:\n  execution_type: system_node\n  subscribes_to: [task.reopen_requested]\n  event_handlers:\n    task.reopen_requested:\n      advances_to: reopened\n",
+		"nodes.yaml":          "reopener:\n  task.reopen_requested:\n    advances_to: reopened\n",
 		"events.yaml":         "task.reopen_requested:\n",
 		"child/manifest.yaml": "version: 1.0.0\nplatform_version: \">=0.7.0 <0.8.0\"\n",
 		"child/schema.yaml":   "stages:\n  ready: {}\n  done: {final: true}\n  reopened: {}\n  child_only: {}\n",
-		"child/nodes.yaml":    "reopener:\n  execution_type: system_node\n  subscribes_to: [task.reopen_requested]\n  event_handlers:\n    task.reopen_requested:\n      advances_to: reopened\n",
+		"child/nodes.yaml":    "reopener:\n  task.reopen_requested:\n    advances_to: reopened\n",
 		"child/events.yaml":   "task.reopen_requested:\n",
 	})
 }

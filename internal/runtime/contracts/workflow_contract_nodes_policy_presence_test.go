@@ -104,7 +104,7 @@ func TestW4NestedExpressionFieldPresence(t *testing.T) {
 					} else {
 						body = "event: task.done\nfields: {}\n"
 						if slot == "activity.input" {
-							body = "tool: notify\ninput: {}\n"
+							body = "id: notify\ntool: notify\ninput: {}\n"
 						}
 						if shape.name != "missing" {
 							body = strings.Replace(body, "{}", "{value: "+shape.value+"}", 1)

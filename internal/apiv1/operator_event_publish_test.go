@@ -1385,8 +1385,7 @@ func TestOperatorEventPublishMissingTemplateInputFailsClosedBeforeLowerPrecedenc
 					}
 					bundle.FlowTree.Root.Children[0].Schema = bundle.FlowSchemas["operating"]
 					consumer := runtimecontracts.SystemNodeContract{
-						ExecutionType: "system_node",
-						SubscribesTo:  []string{"review.requested"},
+
 						EventHandlers: map[string]runtimecontracts.SystemNodeEventHandler{"review.requested": {}},
 					}
 					bundle.FlowTree.Root.Children[0].Nodes = map[string]runtimecontracts.SystemNodeContract{"lower-precedence-consumer": consumer}
@@ -2515,7 +2514,7 @@ func flowScopedEventPublishBundle(t testing.TB, eventsByFlow map[string]string) 
 		members[flow+"/manifest.yaml"] = []byte("version: 1.0.0\nplatform_version: '*'\n")
 		members[flow+"/schema.yaml"] = []byte("stages: []\n")
 		members[flow+"/events.yaml"] = []byte(event + ":\n  topic: text\n")
-		members[flow+"/nodes.yaml"] = []byte(fmt.Sprintf("%s:\n  execution_type: system_node\n  subscribes_to: [%s]\n  event_handlers:\n    %s: {}\n", node, event, event))
+		members[flow+"/nodes.yaml"] = []byte(fmt.Sprintf("%s:\n  %s: {}\n", node, event))
 	}
 	artifact, err := sourceartifact.AdmitMembers(members)
 	if err != nil {
@@ -2530,7 +2529,7 @@ func eventPublishFollowUpTestBundle(t testing.TB) *runtimecontracts.WorkflowCont
 		"manifest.yaml": []byte("version: 1.0.0\nplatform_version: '*'\n"),
 		"schema.yaml":   []byte("stages: []\npins:\n  inputs: [scan.requested, scan.followup, scan.unhandled]\n"),
 		"events.yaml":   []byte("scan.requested:\n  topic: text\nscan.followup:\n  topic: text\nscan.unhandled:\n  topic: text\n"),
-		"nodes.yaml":    []byte("scan-orchestrator:\n  execution_type: system_node\n  subscribes_to: [scan.requested, scan.followup]\n  event_handlers:\n    scan.requested: {}\n    scan.followup: {}\n"),
+		"nodes.yaml":    []byte("scan-orchestrator:\n  scan.requested: {}\n  scan.followup: {}\n"),
 	})
 	if err != nil {
 		t.Fatal(err)
@@ -2606,7 +2605,7 @@ func eventPublishTemplateInputTestBundle(t testing.TB, eventName string, authore
 	if authoredRoot {
 		members["schema.yaml"] = []byte(fmt.Sprintf("stages: []\npins:\n  inputs: [%s]\n", eventName))
 		members["events.yaml"] = []byte(eventName + ":\n  topic: text\n  entity_id: uuid?\n")
-		members["nodes.yaml"] = []byte(fmt.Sprintf("root-orchestrator:\n  execution_type: system_node\n  subscribes_to: [%s]\n  event_handlers:\n    %s: {}\n", eventName, eventName))
+		members["nodes.yaml"] = []byte(fmt.Sprintf("root-orchestrator:\n  %s: {}\n", eventName))
 	}
 	artifact, err := sourceartifact.AdmitMembers(members)
 	if err != nil {

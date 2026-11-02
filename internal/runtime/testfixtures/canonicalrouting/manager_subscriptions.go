@@ -11,10 +11,7 @@ func WriteManagerSubscriptionAdmission(t testing.TB) string {
 		"schema.yaml": "pins:\n  inputs: [root.ready]\n",
 		"events.yaml": "root.ready:\n",
 		"nodes.yaml": `root-observer:
-  execution_type: system_node
-  subscribes_to: [root.ready]
-  event_handlers:
-    root.ready: {}
+  root.ready: {}
 `,
 		"review/schema.yaml": "instance: review_id\npins:\n  inputs: [task.ready]\n",
 		"review/state.yaml":  "review_id: text\n",

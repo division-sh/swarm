@@ -253,7 +253,7 @@ func writeProviderSearchJourneySource(t *testing.T, customURL string) string {
 		inputs = append(inputs, input, output)
 		events[input] = map[string]any{"query": "string"}
 		connections = append(connections, map[string]any{"event": input, "from": ".", "to": name}, map[string]any{"event": output, "from": name, "to": "."})
-		handlers[output] = map[string]any{"guard": map[string]any{"id": "observe_" + name, "check": true}}
+		handlers[output] = map[string]any{"guard": true}
 		write(name+"/manifest.yaml", manifest)
 		write(name+"/events.yaml", map[string]any{output: map[string]any{"title": "string", "url": "string", "snippet": "string"}})
 		write(name+"/schema.yaml", map[string]any{"pins": map[string]any{"inputs": []string{input}, "outputs": []string{output}}})
@@ -271,6 +271,6 @@ func writeProviderSearchJourneySource(t *testing.T, customURL string) string {
 	}
 	write("events.yaml", events)
 	write("schema.yaml", map[string]any{"pins": map[string]any{"inputs": inputs}, "connect": connections})
-	write("nodes.yaml", map[string]any{"observer": map[string]any{"execution_type": "system_node", "event_handlers": handlers}})
+	write("nodes.yaml", map[string]any{"observer": handlers})
 	return root
 }

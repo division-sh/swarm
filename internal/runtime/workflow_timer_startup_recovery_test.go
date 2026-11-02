@@ -1114,7 +1114,7 @@ func (workflowTimerStartupLLM) ProviderContract() llm.ProviderContract {
 func workflowTimerStartupRecoveryBundleWithDelay(t *testing.T, delay string) *runtimecontracts.WorkflowContractBundle {
 	t.Helper()
 	bundle := loadRuntimeTempBundle(t, map[string]string{
-		"schema.yaml": "pins:\n  inputs: [generic.tick]\nstages:\n  waiting:\n    timers:\n      - id: timeout\n        after: " + delay + "\n        advances_to: done\n  done:\n    final: true\n",
+		"schema.yaml": "pins:\n  inputs: [generic.tick]\nstages:\n  waiting:\n    timers:\n      - after: " + delay + "\n        advances_to: done\n  done:\n    final: true\n",
 
 		"events.yaml": "generic.tick:\n", "manifest.yaml": "version: 1.0.0\nplatform_version: '*'\n",
 	})

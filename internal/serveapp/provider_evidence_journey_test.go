@@ -116,9 +116,9 @@ func writeProviderEvidenceSource(t *testing.T, cell string) string {
 	write("schema.yaml", map[string]any{"pins": map[string]any{"inputs": []string{"evidence.requested", "evidence.completed"}}, "connect": []map[string]any{
 		{"event": "evidence.requested", "from": ".", "to": "worker", "resolution": "select-or-create"}, {"event": "evidence.completed", "from": "worker", "to": "."},
 	}})
-	write("nodes.yaml", map[string]any{"observer": map[string]any{"execution_type": "system_node", "event_handlers": map[string]any{
-		"evidence.completed": map[string]any{"guard": map[string]any{"id": "observe", "check": true}},
-	}}})
+	write("nodes.yaml", map[string]any{"observer": map[string]any{
+		"evidence.completed": map[string]any{"guard": true},
+	}})
 	write("worker/manifest.yaml", manifest)
 	write("worker/schema.yaml", map[string]any{"instance": "conversation", "pins": map[string]any{"inputs": []string{"evidence.requested"}, "outputs": []string{"evidence.completed"}}})
 	write("worker/state.yaml", map[string]any{"conversation": "text"})

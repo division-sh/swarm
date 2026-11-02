@@ -39,13 +39,13 @@ func projectSchemaStagesValue(value yamlsource.Value) (FlowStageDeclarations, er
 			for _, item := range items {
 				row, err := schemaValueFields(item, "stage timer", stageTimerFieldOptions, true)
 				if err != nil {
-					return out, err
+					return out, fmt.Errorf("DIALECT-TIMER: %w; timer identity derives from its stage and target", err)
 				}
 				var timer FlowStageTimerDeclaration
 				if err := schemaValueRequiredTexts(item, row, map[string]*string{"after": &timer.After}); err != nil {
 					return out, err
 				}
-				if err := schemaValueTexts(row, map[string]*string{"id": &timer.ID, "emit": &timer.Emit, "advances_to": &timer.AdvancesTo}, true); err != nil {
+				if err := schemaValueTexts(row, map[string]*string{"emit": &timer.Emit, "advances_to": &timer.AdvancesTo}, true); err != nil {
 					return out, err
 				}
 				stage.Timers = append(stage.Timers, timer)
@@ -60,13 +60,10 @@ func projectSchemaStagesValue(value yamlsource.Value) (FlowStageDeclarations, er
 		if stage.Final && len(stage.Timers) != 0 {
 			return out, nodeValueError(members["timers"], fmt.Errorf("final stage %q cannot own executable timers", stage.ID))
 		}
-		if err := stage.normalizeTimerIDs(); err != nil {
+		if err := stage.deriveTimerIDs(); err != nil {
 			return out, nodeValueError(field.Value, err)
 		}
 		out.Entries = append(out.Entries, stage)
-	}
-	if err := validateStageTimerIDNamespace(out.Entries); err != nil {
-		return out, nodeValueError(value, err)
 	}
 	return out, nil
 }
@@ -74,13 +71,10 @@ func projectSchemaStagesValue(value yamlsource.Value) (FlowStageDeclarations, er
 func projectSchemaGateValue(value yamlsource.Value) (*FlowStageGateDeclaration, error) {
 	fields, err := schemaValueFields(value, "stage gate", stageGateFieldOptions, true)
 	if err != nil {
-		return nil, err
+		return nil, fmt.Errorf("DIALECT-GATE: %w; gate presentation derives from its decision, verdict and input keys", err)
 	}
 	out := &FlowStageGateDeclaration{}
 	if err := schemaValueRequiredTexts(value, fields, map[string]*string{"decision": &out.Decision}); err != nil {
-		return nil, err
-	}
-	if err := schemaValueTexts(fields, map[string]*string{"title": &out.Title}, false); err != nil {
 		return nil, err
 	}
 	if context, present := fields["context"]; present {
@@ -104,13 +98,10 @@ func projectSchemaGateValue(value yamlsource.Value) (*FlowStageGateDeclaration, 
 	for _, row := range rows {
 		members, err := schemaValueFields(row.Value, "stage gate outcome", stageGateOutcomeFieldOptions, true)
 		if err != nil {
-			return nil, err
+			return nil, fmt.Errorf("DIALECT-GATE: %w; outcome presentation derives from its verdict key", err)
 		}
 		var outcome FlowStageGateOutcomeDeclaration
 		if err := schemaValueRequiredTexts(row.Value, members, map[string]*string{"advances_to": &outcome.AdvancesTo}); err != nil {
-			return nil, err
-		}
-		if err := schemaValueTexts(members, map[string]*string{"label": &outcome.Label}, false); err != nil {
 			return nil, err
 		}
 		if emit, present := members["emit"]; present {
@@ -140,7 +131,7 @@ func projectSchemaGateInputValue(value yamlsource.Value) (map[string]WorkflowGat
 	for _, row := range rows {
 		fields, err := schemaValueFields(row.Value, "stage gate input field", stageGateInputFieldOptions, true)
 		if err != nil {
-			return nil, nil, err
+			return nil, nil, fmt.Errorf("DIALECT-GATE: %w; input presentation derives from its field key", err)
 		}
 		var field WorkflowGateInputField
 		if err := schemaValueRequiredTexts(row.Value, fields, map[string]*string{"type": &field.Type}); err != nil {
@@ -149,9 +140,6 @@ func projectSchemaGateInputValue(value yamlsource.Value) (map[string]WorkflowGat
 		field.Type, err = NormalizeWorkflowGateInputType(field.Type)
 		if err != nil {
 			return nil, nil, nodeValueError(row.Value, err)
-		}
-		if err := schemaValueTexts(fields, map[string]*string{"label": &field.Label}, false); err != nil {
-			return nil, nil, err
 		}
 		if required, present := fields["required"]; present {
 			field.Required, err = schemaValueBool(required, "gate input required")

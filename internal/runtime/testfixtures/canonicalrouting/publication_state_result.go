@@ -57,34 +57,27 @@ result.rejected:
 	}
 	writeClosedVariantFile(t, root, prefix+"events.yaml", eventSchemas)
 	local := `local:
-  execution_type: system_node
-  subscribes_to: [result.accepted, result.rejected]
-  event_handlers:
-    result.accepted:
-      guard: {id: accepted, check: payload.result_kind == 'accepted'}
-    result.rejected:
-      guard: {id: rejected, check: payload.result_kind == 'rejected'}
+  result.accepted:
+    guard: payload.result_kind == 'accepted'
+  result.rejected:
+    guard: payload.result_kind == 'rejected'
 `
 	writeClosedVariantFile(t, root, prefix+"nodes.yaml", `writer:
-  execution_type: system_node
-  subscribes_to: [document.requested]
-  produces: [result.accepted, result.rejected]
-  event_handlers:
-    document.requested:
-      data_accumulation:
-        writes:
-          - {source_field: request_id, target_field: request_id}
-          - {source_field: content, target_field: content}
-          - {source_field: result_kind, target_field: result_kind}
-      rules:
-        - when: payload.result_kind == 'accepted'
-          emit:
-            event: result.accepted
-            fields: {request_id: state.request_id, content: state.content, result_kind: state.result_kind}
-        - when: payload.result_kind == 'rejected'
-          emit:
-            event: result.rejected
-            fields: {request_id: state.request_id, content: state.content, result_kind: state.result_kind}
+  document.requested:
+    data_accumulation:
+      writes:
+        - {source_field: request_id, target_field: request_id}
+        - {source_field: content, target_field: content}
+        - {source_field: result_kind, target_field: result_kind}
+    rules:
+      - when: payload.result_kind == 'accepted'
+        emit:
+          event: result.accepted
+          fields: {request_id: state.request_id, content: state.content, result_kind: state.result_kind}
+      - when: payload.result_kind == 'rejected'
+        emit:
+          event: result.rejected
+          fields: {request_id: state.request_id, content: state.content, result_kind: state.result_kind}
 `+local)
 	writeClosedVariantFile(t, root, "sink/manifest.yaml", "version: 1.0.0\nplatform_version: '*'\n")
 	writeClosedVariantFile(t, root, "sink/schema.yaml", "# fixture: sink\npins:\n  inputs:\n    - result.accepted\n    - result.rejected\n")

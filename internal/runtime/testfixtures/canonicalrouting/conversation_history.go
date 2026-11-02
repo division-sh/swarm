@@ -9,7 +9,7 @@ func ConversationForkConstructionDocuments() map[string]string {
 		"flow/manifest.yaml": "version: 1.0.0\nplatform_version: '*'\n",
 		"flow/schema.yaml":   "instance: name\nstages:\n  draft: {}\n  after: {}\npins:\n  inputs: [conversation.created]\n",
 		"flow/state.yaml":    "name: text\ncurrent_state: text?\ngates: json?\naccumulator: json?\nbookkeeping: json?\n",
-		"flow/nodes.yaml":    "advance:\n  execution_type: system_node\n  event_handlers:\n    conversation.created:\n      advances_to: after\n", "manifest.yaml": "version: 1.0.0\nplatform_version: '*'\n",
+		"flow/nodes.yaml":    "advance:\n  conversation.created:\n    advances_to: after\n", "manifest.yaml": "version: 1.0.0\nplatform_version: '*'\n",
 	}
 }
 

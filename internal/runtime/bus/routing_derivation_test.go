@@ -80,7 +80,7 @@ func TestKeylessConstructionIndexUsesExactRunOwners(t *testing.T) {
 }
 
 func TestEventBusFlowInstanceTemplateDerivesSubscriptionsFromHandlerKeys(t *testing.T) {
-	source := routeMaterializationNodeSource(t, "review", "  event_handlers:\n    task.started:\n      emit:\n        event: task.started\n")
+	source := routeMaterializationNodeSource(t, "review", "  task.started:\n    emit:\n      event: task.started\n")
 	eb, err := newScopedTestEventBus(&routePersistenceTestStore{}, runtimebus.EventBusOptions{ContractBundle: source})
 	if err != nil {
 		t.Fatalf("NewEventBus: %v", err)
@@ -243,10 +243,8 @@ pins:
 	write(filepath.Join(root, "orders", "events.yaml"), "root.start:\naddon_a.start:\naddon_b.start:\n")
 	write(filepath.Join(root, "orders", "nodes.yaml"), `
 shared:
-  execution_type: system_node
-  event_handlers:
-    root.start:
-      advances_to: done
+  root.start:
+    advances_to: done
 `)
 	for _, name := range []string{"addon-a", "addon-b"} {
 		dir := filepath.Join(root, "orders", name)
@@ -256,10 +254,8 @@ shared:
 		write(filepath.Join(dir, "events.yaml"), eventName+".start:\n")
 		write(filepath.Join(dir, "nodes.yaml"), `
 shared:
-  execution_type: system_node
-  event_handlers:
-    `+eventName+`.start:
-      advances_to: done
+  `+eventName+`.start:
+    advances_to: done
 `)
 	}
 	bundle, err := runtimecontracts.LoadWorkflowContractBundleWithOverrides(repoRoot, root, runtimecontracts.DefaultPlatformSpecFile(repoRoot))
@@ -310,7 +306,7 @@ func exactSubscriptionRouteSource(t *testing.T, nodeSubscription string, agentSu
 		"child/manifest.yaml": "version: 1.0.0\nplatform_version: '*'\n",
 		"child/schema.yaml":   "stages: []\n",
 		"child/events.yaml":   "task.done:\n",
-		"child/nodes.yaml":    fmt.Sprintf("listener:\n  execution_type: system_node\n  subscribes_to: [%q]\n  event_handlers:\n    %q: {}\n", nodeSubscription, nodeSubscription),
+		"child/nodes.yaml":    fmt.Sprintf("listener:\n  %q: {}\n", nodeSubscription),
 	}
 	if len(agentSubscriptions) > 0 {
 		files["child/agents.yaml"] = "observer:\n  intent: {inline: 'Observe task completion.'}\n  subscriptions: [" + strings.Join(agentSubscriptions, ", ") + "]\n"
@@ -350,7 +346,7 @@ func (s *routePersistenceTestStore) RunRuntimeMutationContext(ctx context.Contex
 
 func TestEventBusCompiledFlowInstanceBindingDoesNotRewritePersistence(t *testing.T) {
 	store := &routePersistenceTestStore{}
-	source := routeMaterializationNodeSource(t, "review", "  produces: [task.started]\n  subscribes_to: [task.started]\n")
+	source := routeMaterializationNodeSource(t, "review", "  task.started: {}\n")
 	instance := runtimebus.ConstructedFlowInstanceIdentityFixture(source, "review", "inst-1", eventBusTestRunID)
 	observed := runtimebus.AdmittedFlowInstanceObservationFixture(t, source, eventBusTestRunID, instance, "acct-1")
 	index := runtimebus.FlowInstanceIndexFixture(observed)
@@ -372,7 +368,7 @@ func TestEventBusCompiledFlowInstanceBindingDoesNotRewritePersistence(t *testing
 
 func TestCompiledFlowInstanceBindingRejectsUnknownCanonicalTemplateWithoutMutation(t *testing.T) {
 	store := &routePersistenceTestStore{}
-	source := routeMaterializationNodeSource(t, "known", "  subscribes_to: [task.started]\n")
+	source := routeMaterializationNodeSource(t, "known", "  task.started: {}\n")
 	instance := runtimebus.ConstructedFlowInstanceIdentityFixture(source, "known", "inst-1", eventBusTestRunID)
 	observed := runtimebus.AdmittedFlowInstanceObservationFixture(t, source, eventBusTestRunID, instance, "acct-1")
 	index := runtimebus.FlowInstanceIndexFixture(observed)
@@ -397,7 +393,7 @@ func TestCompiledFlowInstanceBindingRejectsUnknownCanonicalTemplateWithoutMutati
 }
 
 func TestIndexedFlowInstanceBindingRejectsCrossedExactOwners(t *testing.T) {
-	source := routeMaterializationNodeSource(t, "review", "  subscribes_to: [task.started]\n")
+	source := routeMaterializationNodeSource(t, "review", "  task.started: {}\n")
 	instance := runtimebus.ConstructedFlowInstanceIdentityFixture(source, "review", "stored-one", eventBusTestRunID)
 	instance.EntityID = eventtest.UUID("non-derived-stored-review")
 	observed := runtimebus.AdmittedFlowInstanceObservationFixture(t, source, eventBusTestRunID, instance, "acct-1")
@@ -578,7 +574,7 @@ func routeMaterializationNodeSource(t *testing.T, flowID, nodeBody string) seman
 		flowID + "/schema.yaml":   "stages: []\ninstance: instance_key\n",
 		flowID + "/state.yaml":    "instance_key: text\n",
 		flowID + "/events.yaml":   "task.started:\n",
-		flowID + "/nodes.yaml":    "materialized-node:\n  execution_type: system_node\n" + nodeBody,
+		flowID + "/nodes.yaml":    "materialized-node:\n" + nodeBody,
 	}))
 }
 
@@ -681,7 +677,7 @@ func TestDeriveRouteTable_HandlerOnlyInputPinsDoNotAutoWireFromProducerOutput(t 
 		"consumer/manifest.yaml": "version: 1.0.0\nplatform_version: '*'\n",
 		"consumer/schema.yaml":   "stages: []\npins:\n  inputs: [scan.requested]\n",
 		"consumer/events.yaml":   "scan.requested:\n",
-		"consumer/nodes.yaml":    "consumer-node:\n  execution_type: system_node\n  event_handlers:\n    scan.requested: {}\n",
+		"consumer/nodes.yaml":    "consumer-node:\n  scan.requested: {}\n",
 	})
 	rt, err := runtimebus.DeriveRouteTable(semanticview.Wrap(bundle))
 	if err != nil {
@@ -842,7 +838,7 @@ func TestDeriveRouteTable_NestedTemplateInstancesBindSemanticScopeKey(t *testing
 		"child/grandchild/schema.yaml":   "stages: []\ninstance: instance_key\n",
 		"child/grandchild/state.yaml":    "instance_key: text\n",
 		"child/grandchild/events.yaml":   "micro.started:\n",
-		"child/grandchild/nodes.yaml":    "worker:\n  execution_type: system_node\n  subscribes_to: [micro.started]\n  produces: [micro.started]\n",
+		"child/grandchild/nodes.yaml":    "worker:\n  micro.started: {}\n",
 	})
 	source := semanticview.Wrap(bundle)
 	rt, err := runtimebus.DeriveRouteTable(source)

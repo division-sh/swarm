@@ -204,7 +204,6 @@ type runForkRevisionFanOutFact struct {
 	BarrierTargetFlowPath        string          `json:"barrier_target_flow_path"`
 	BarrierTargetNodeID          string          `json:"barrier_target_node_id"`
 	BarrierHandlerEvent          string          `json:"barrier_handler_event"`
-	BarrierJoinID                string          `json:"barrier_join_id"`
 	BarrierRouteScopeKey         string          `json:"barrier_route_scope_key"`
 	BarrierRouteInstanceID       string          `json:"barrier_route_instance_id"`
 	BarrierRouteInstancePath     string          `json:"barrier_route_instance_path"`

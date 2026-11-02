@@ -1,6 +1,7 @@
 package contracts
 
 import (
+	"errors"
 	"os"
 	"path/filepath"
 	"reflect"
@@ -11,7 +12,7 @@ import (
 	"github.com/division-sh/swarm/internal/sourceartifact"
 )
 
-const retiredNodeID = `node field "id" is not supported.`
+const nodeIDHandlerShapeError = `event handler "id":`
 
 func TestNodeMapKeyIdentityAcrossRecordSources(t *testing.T) {
 	scoped := &WorkflowContractBundle{scopedNodes: map[string]SystemNodeContract{}, scopedNodeSources: map[string]ContractItemSource{}}
@@ -66,23 +67,20 @@ func TestNodeMapKeyIdentityAcrossRecordSources(t *testing.T) {
 }
 
 func TestNodeIDRetirementPreservesIndependentIDs(t *testing.T) {
-	const body = `execution_type: system_node
-subscribes_to: [task.requested, task.extra]
-produces: [task.completed]
-timers:
-  - {id: reminder, event: timer.reminder, delay: 1m}
-event_handlers:
-  task.requested:
-    activity: {id: send, tool: provider.send, input: {message: payload.message}}
+	const body = `timers:
+  - {event: timer.reminder, delay: 1m}
+task.requested:
+  activity: {id: send, tool: provider.send, input: {message: payload.message}}
+task.extra: {}
 `
 	var node SystemNodeContract
 	if err := decodeNodeTestYAML([]byte(body), &node); err != nil {
 		t.Fatal(err)
 	}
-	if node.ExecutionType != "system_node" || !reflect.DeepEqual(node.SubscribesTo, []string{"task.requested", "task.extra"}) || !reflect.DeepEqual(node.Produces, []string{"task.completed"}) || node.Timers[0].ID != "reminder" || node.EventHandlers["task.requested"].Activity.ID != "send" {
+	if !reflect.DeepEqual(EffectiveSystemNodeSubscriptions(node), []string{"task.extra", "task.requested"}) || len(node.Timers) != 1 || node.Timers[0].Event != "timer.reminder" || node.EventHandlers["task.requested"].Activity.ID != "send" {
 		t.Fatalf("independent node behavior changed: %#v", node)
 	}
-	if err := decodeNodeTestYAML([]byte("id: worker\n"+body), &node); err == nil || !strings.Contains(err.Error(), retiredNodeID) {
+	if err := decodeNodeTestYAML([]byte("id: worker\n"+body), &node); err == nil || !strings.Contains(err.Error(), nodeIDHandlerShapeError) || !strings.Contains(err.Error(), "must be a mapping, got scalar") {
 		t.Fatalf("node ID accepted alongside legitimate IDs: %v", err)
 	}
 }
@@ -98,13 +96,17 @@ func TestNodeIdentityAdmissionAndArtifactReconstruction(t *testing.T) {
 					writeFixtureFile(t, filepath.Join(root, path, "schema.yaml"), "stages: []\n# fixture: worker-flow\n")
 				}
 				file := filepath.Join(root, scope, "nodes.yaml")
-				writeFixtureFile(t, file, "worker:\n  id: "+value+"\n  event_handlers: {}\n")
-				if _, err := loadOptionalNodeDeclarations(file); err == nil || !strings.Contains(err.Error(), retiredNodeID) {
+				writeFixtureFile(t, file, "worker:\n  id: "+value+"\n")
+				nodes, err := loadOptionalNodeDeclarations(file)
+				if value == "{}" {
+					if err != nil || len(nodes["worker"].EventHandlers) != 1 {
+						t.Fatalf("id event projection: %v", err)
+					}
+				} else if err == nil || !strings.Contains(err.Error(), nodeIDHandlerShapeError) {
 					t.Fatalf("file helper: %v", err)
 				}
-				if bundle, err := LoadWorkflowContractBundleWithOverrides(repo, root, DefaultPlatformSpecFile(repo)); bundle != nil || err == nil || !strings.Contains(err.Error(), retiredNodeID) || !strings.Contains(err.Error(), "nodes.yaml") {
-					t.Fatalf("directory admission: bundle=%v error=%v", bundle, err)
-				}
+				bundle, err := LoadWorkflowContractBundleWithOverrides(repo, root, DefaultPlatformSpecFile(repo))
+				requireNodeIdentitySourceRefusal(t, bundle, err, value)
 				artifact, err := sourceartifact.AdmitDirectory(root)
 				if err != nil {
 					t.Fatal(err)
@@ -116,18 +118,18 @@ func TestNodeIdentityAdmissionAndArtifactReconstruction(t *testing.T) {
 				if err := os.RemoveAll(root); err != nil {
 					t.Fatal(err)
 				}
-				if bundle, err := LoadWorkflowContractBundleFromRootedSource(repo, capturedCompilerSource(t, artifact, decoded), DefaultPlatformSpecFile(repo), WorkflowContractLoadOptions{}); bundle != nil || err == nil || !strings.Contains(err.Error(), retiredNodeID) {
-					t.Fatalf("reconstructed retired artifact: bundle=%v error=%v", bundle, err)
-				}
+				bundle, err = LoadWorkflowContractBundleFromRootedSource(repo, capturedCompilerSource(t, artifact, decoded), DefaultPlatformSpecFile(repo), WorkflowContractLoadOptions{})
+				requireNodeIdentitySourceRefusal(t, bundle, err, value)
 			})
 		}
 	}
-	t.Run("map identities survive source deletion", func(t *testing.T) {
+	t.Run("map identities and a declared id event survive source deletion", func(t *testing.T) {
 		root := t.TempDir()
 		for _, path := range []string{".", "left", "right", "left/nested"} {
 			writeFixtureFile(t, filepath.Join(root, path, "manifest.yaml"), "version: 1.0.0\nplatform_version: '*'\n")
 			writeFixtureFile(t, filepath.Join(root, path, "schema.yaml"), "stages: []\n# fixture: worker-flow\n")
-			writeFixtureFile(t, filepath.Join(root, path, "nodes.yaml"), "worker:\n  event_handlers: {}\n")
+			writeFixtureFile(t, filepath.Join(root, path, "events.yaml"), "id:\ntask.requested:\n")
+			writeFixtureFile(t, filepath.Join(root, path, "nodes.yaml"), "worker:\n  id: {}\n  task.requested: {}\n")
 		}
 		artifact, err := sourceartifact.AdmitDirectory(root)
 		if err != nil {
@@ -157,6 +159,10 @@ func TestNodeIdentityAdmissionAndArtifactReconstruction(t *testing.T) {
 			if err != nil || ref.NodeID() != "worker" || keys[ref.Key()] {
 				t.Fatalf("scoped identity: %v %v", ref, err)
 			}
+			if _, ok := record.Entry.EventHandlers["id"]; !ok || len(record.Entry.EventHandlers) != 2 ||
+				!reflect.DeepEqual(EffectiveSystemNodeSubscriptions(record.Entry), []string{"id", "task.requested"}) {
+				t.Fatalf("declared id event became node metadata or disappeared from its exact scope: %#v", record)
+			}
 			keys[ref.Key()] = true
 		}
 		if len(keys) != 4 {
@@ -165,33 +171,52 @@ func TestNodeIdentityAdmissionAndArtifactReconstruction(t *testing.T) {
 	})
 }
 
+func requireNodeIdentitySourceRefusal(t testing.TB, bundle *WorkflowContractBundle, err error, value string) {
+	t.Helper()
+	if bundle != nil || err == nil || !strings.Contains(err.Error(), "nodes.yaml:2:") {
+		t.Fatalf("node identity source did not fail at its authored key: bundle=%v error=%v", bundle != nil, err)
+	}
+	if value == "{}" {
+		if !errors.Is(err, ErrInvalidField) || !strings.Contains(err.Error(), `handler "id"`) || !strings.Contains(err.Error(), "undeclared event") {
+			t.Fatalf("undeclared id event acquired node-metadata authority: %v", err)
+		}
+		return
+	}
+	if !strings.Contains(err.Error(), nodeIDHandlerShapeError) || !strings.Contains(err.Error(), "must be a mapping") {
+		t.Fatalf("scalar/sequence node identity did not fail handler-shape admission: %v", err)
+	}
+}
+
 func TestSystemNodeContractRejectsRetiredIDOnPresence(t *testing.T) {
+	repo := contractRepoRoot(t)
 	for _, value := range []string{"worker", "other", "worker-{instance_id}", `""`, "null", "42", "true", "{}", "[]"} {
 		t.Run(value, func(t *testing.T) {
-			var nodes map[string]SystemNodeContract
-			err := decodeNodeTestYAML([]byte("worker:\n  id: "+value+"\n  event_handlers: {}\n"), &nodes)
-			if err == nil || !strings.Contains(err.Error(), retiredNodeID) {
-				t.Fatalf("node.id %s: got %v, want %s", value, err, retiredNodeID)
-			}
+			root := t.TempDir()
+			writeFixtureFile(t, filepath.Join(root, "manifest.yaml"), "version: 1.0.0\nplatform_version: '*'\n")
+			writeFixtureFile(t, filepath.Join(root, "schema.yaml"), "stages: []\n")
+			writeFixtureFile(t, filepath.Join(root, "events.yaml"), "task.requested:\n")
+			writeFixtureFile(t, filepath.Join(root, "nodes.yaml"), "worker:\n  id: "+value+"\n  task.requested: {}\n")
+			bundle, err := LoadWorkflowContractBundleWithOverrides(repo, root, DefaultPlatformSpecFile(repo))
+			requireNodeIdentitySourceRefusal(t, bundle, err, value)
 		})
 	}
 	t.Run("whole node alias", func(t *testing.T) {
 		var node SystemNodeContract
-		err := decodeNodeTestMember([]byte("definition: &node\n  id: worker\n  event_handlers: {}\nnode: *node\n"), "node", &node)
-		if err == nil || !strings.Contains(err.Error(), retiredNodeID) {
+		err := decodeNodeTestMember([]byte("definition: &node\n  id: worker\nnode: *node\n"), "node", &node)
+		if err == nil || !strings.Contains(err.Error(), nodeIDHandlerShapeError) {
 			t.Fatalf("alias: %v", err)
 		}
 	})
 	t.Run("merged retired id remains rejected", func(t *testing.T) {
 		var node SystemNodeContract
-		err := decodeNodeTestMember([]byte("definition: &fields\n  id: worker\nnode:\n  <<: *fields\n  event_handlers: {}\n"), "node", &node)
-		if err == nil || !strings.Contains(err.Error(), retiredNodeID) {
+		err := decodeNodeTestMember([]byte("definition: &fields\n  id: worker\nnode:\n  <<: *fields\n"), "node", &node)
+		if err == nil || !strings.Contains(err.Error(), nodeIDHandlerShapeError) {
 			t.Fatalf("merged node.id must be rejected: %v", err)
 		}
 	})
 	t.Run("omitted", func(t *testing.T) {
 		var nodes map[string]SystemNodeContract
-		if err := decodeNodeTestYAML([]byte("worker:\n  event_handlers: {}\n"), &nodes); err != nil {
+		if err := decodeNodeTestYAML([]byte("worker:\n  {}\n"), &nodes); err != nil {
 			t.Fatal(err)
 		}
 	})

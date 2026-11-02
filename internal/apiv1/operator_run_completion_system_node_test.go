@@ -165,7 +165,6 @@ func runCompletionTerminalCatalog(source semanticview.Source) runtimerunlifecycl
 type runCompletionSystemNodeModule struct {
 	source semanticview.Source
 	nodes  []runtimepipeline.WorkflowNode
-	guards runtimepipeline.GuardRegistry
 }
 
 func newRunCompletionSystemNodeModule(t *testing.T, source semanticview.Source) runtimepipeline.WorkflowModule {
@@ -177,7 +176,6 @@ func newRunCompletionSystemNodeModule(t *testing.T, source semanticview.Source) 
 	return runCompletionSystemNodeModule{
 		source: source,
 		nodes:  nodes,
-		guards: runtimepipeline.NewContractGuardRegistry(source),
 	}
 }
 
@@ -187,10 +185,6 @@ func (m runCompletionSystemNodeModule) SemanticSource() semanticview.Source {
 
 func (m runCompletionSystemNodeModule) WorkflowNodes() []runtimepipeline.WorkflowNode {
 	return append([]runtimepipeline.WorkflowNode(nil), m.nodes...)
-}
-
-func (m runCompletionSystemNodeModule) GuardRegistry() runtimepipeline.GuardRegistry {
-	return m.guards
 }
 
 func triggerEventIDForRun(t *testing.T, db *sql.DB, runID string) string {

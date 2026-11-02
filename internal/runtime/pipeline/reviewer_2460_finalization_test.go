@@ -158,7 +158,7 @@ func VerifyNativeCommittedAttemptFailureNotificationKeepsRetryContinuationBothSt
 				"schema.yaml":   "stages:\n  queued: {}\n  done: {final: true}\n",
 
 				"events.yaml": "source.evt:\nsource.done:\n",
-				"nodes.yaml":  "node-a:\n  execution_type: system_node\n  subscribes_to: [source.evt]\n  event_handlers:\n    source.evt:\n      advances_to: done\n      emit: {event: source.done}\n",
+				"nodes.yaml":  "node-a:\n  source.evt:\n    advances_to: done\n    emit: {event: source.done}\n",
 			})
 			module := handlerTestWorkflowModuleWithBundle(bundle, ".", "node-a").(*previewWorkflowModule)
 			module.workflowNodes = []WorkflowNode{{Node: pipelineNode(t, ".", "node-a"),
@@ -218,7 +218,7 @@ func VerifyNativeReview2460HandlerCompletedPanicReleasesCommittedContinuationBot
 				"schema.yaml":   "stages:\n  queued: {}\n  done: {final: true}\n",
 
 				"events.yaml": "source.evt:\nsource.done:\n",
-				"nodes.yaml":  "node-a:\n  execution_type: system_node\n  subscribes_to: [source.evt]\n  event_handlers:\n    source.evt:\n      advances_to: done\n      emit: {event: source.done}\n",
+				"nodes.yaml":  "node-a:\n  source.evt:\n    advances_to: done\n    emit: {event: source.done}\n",
 			})
 			module := handlerTestWorkflowModuleWithBundle(bundle, ".", "node-a").(*previewWorkflowModule)
 			module.workflowNodes = []WorkflowNode{{Node: pipelineNode(t, ".", "node-a"),

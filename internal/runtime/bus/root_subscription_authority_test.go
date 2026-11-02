@@ -26,7 +26,7 @@ func TestRootInputSourceLoadedConsumerCardinality(t *testing.T) {
 							schema += "  - {event: thing.created, from: ., to: " + child + "}\n"
 						}
 					}
-					node := "observer:\n  execution_type: system_node\n  subscribes_to: [thing.created]\n  event_handlers:\n    thing.created:\n      guard: {id: admit, check: true}\n"
+					node := "observer:\n  thing.created:\n    guard: true\n"
 					files := map[string]string{
 						"manifest.yaml": "version: 1.0.0\nplatform_version: '*'\n",
 						"schema.yaml":   schema,

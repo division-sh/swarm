@@ -253,7 +253,6 @@ func publishTelegramMessageToSlack(t *testing.T, backend slackManagedConnectorBa
 type slackManagedConnectorModule struct {
 	source semanticview.Source
 	nodes  []runtimepipeline.WorkflowNode
-	guards runtimepipeline.GuardRegistry
 }
 
 func (m slackManagedConnectorModule) SemanticSource() semanticview.Source {
@@ -262,10 +261,6 @@ func (m slackManagedConnectorModule) SemanticSource() semanticview.Source {
 
 func (m slackManagedConnectorModule) WorkflowNodes() []runtimepipeline.WorkflowNode {
 	return append([]runtimepipeline.WorkflowNode(nil), m.nodes...)
-}
-
-func (m slackManagedConnectorModule) GuardRegistry() runtimepipeline.GuardRegistry {
-	return m.guards
 }
 
 func startSlackManagedConnectorBusAndCoordinator(t *testing.T, backend slackManagedConnectorBackend, source semanticview.Source, managedStore runtimemanagedcredentials.Store) (*runtimebus.EventBus, *runtimepipeline.PipelineCoordinator) {
@@ -290,7 +285,6 @@ func startSlackManagedConnectorBusAndCoordinator(t *testing.T, backend slackMana
 	module := slackManagedConnectorModule{
 		source: source,
 		nodes:  nodes,
-		guards: runtimepipeline.NewContractGuardRegistry(source),
 	}
 	pc = newExternalRuntimeTestActivityCoordinator(t, bus, backend.eventStore, runtimepipeline.PipelineCoordinatorOptions{
 		SourceArtifactFact:  runtimeTestSourceArtifactFact(t, source),

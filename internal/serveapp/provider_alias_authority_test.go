@@ -499,9 +499,9 @@ func writeProviderAliasAuthorityFixture(t *testing.T, scenario providerAliasScen
 	}
 	root := filepath.Join(t.TempDir(), rootName)
 	names := []string{"inbound.telegram.raw", "inbound.telegram.text_message", "inbound.telegram.callback_action"}
-	nodes := "observer:\n  execution_type: system_node\n  subscribes_to: [" + strings.Join(names, ", ") + "]\n  event_handlers:\n"
+	nodes := "observer:\n"
 	for _, name := range names {
-		nodes += "    " + name + ":\n      guard: {id: admit, check: true}\n"
+		nodes += "  " + name + ":\n    guard: true\n"
 	}
 	pins := "pins:\n  inputs: [" + strings.Join(names, ", ") + "]\n"
 	rootSchema := "# fixture: provider-authority\nconnect:\n"
@@ -514,8 +514,7 @@ func writeProviderAliasAuthorityFixture(t *testing.T, scenario providerAliasScen
 			rootSchema += "  - {event: " + name + ", from: ., to: " + scenario.alphaReceiver + "}\n"
 		}
 	}
-	rootNodes := strings.Replace(nodes, "subscribes_to: ["+strings.Join(names, ", ")+"]", "subscribes_to: ["+strings.Join(names[1:], ", ")+"]", 1)
-	rootNodes = strings.Replace(rootNodes, "    inbound.telegram.raw:\n      guard: {id: admit, check: true}\n", "", 1)
+	rootNodes := strings.Replace(nodes, "  "+names[0]+":\n    guard: true\n", "", 1)
 	if scenario.publicConnected {
 		rootNodes = strings.ReplaceAll(strings.ReplaceAll(rootNodes, names[1], "public.text_message"), names[2], "public.callback_action")
 	}
@@ -558,9 +557,9 @@ func writeProviderAliasAuthorityFixture(t *testing.T, scenario providerAliasScen
 		if hasReceiver {
 			files[alias+"-receiver/schema.yaml"] += "pins:\n  inputs: [" + strings.Join(receiverNames, ", ") + "]\n"
 		}
-		receiverNodes := "observer:\n  execution_type: system_node\n  subscribes_to: [" + strings.Join(receiverNames, ", ") + "]\n  event_handlers:\n"
+		receiverNodes := "observer:\n"
 		for _, name := range receiverNames {
-			receiverNodes += "    " + name + ":\n      guard: {id: admit, check: true}\n"
+			receiverNodes += "  " + name + ":\n    guard: true\n"
 		}
 		if hasReceiver {
 			files[alias+"-receiver/nodes.yaml"] = receiverNodes

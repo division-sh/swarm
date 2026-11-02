@@ -652,7 +652,6 @@ func assertEventBusTerminalRunRefusal(
 type fixtureWorkflowModule struct {
 	source        semanticview.Source
 	workflowNodes []runtimepipeline.WorkflowNode
-	guardRegistry runtimepipeline.GuardRegistry
 }
 
 func (m *fixtureWorkflowModule) SemanticSource() semanticview.Source {
@@ -661,10 +660,6 @@ func (m *fixtureWorkflowModule) SemanticSource() semanticview.Source {
 
 func (m *fixtureWorkflowModule) WorkflowNodes() []runtimepipeline.WorkflowNode {
 	return append([]runtimepipeline.WorkflowNode(nil), m.workflowNodes...)
-}
-
-func (m *fixtureWorkflowModule) GuardRegistry() runtimepipeline.GuardRegistry {
-	return m.guardRegistry
 }
 
 func newFixtureWorkflowModule(t *testing.T, bundle *runtimecontracts.WorkflowContractBundle) runtimepipeline.WorkflowModule {
@@ -677,7 +672,6 @@ func newFixtureWorkflowModule(t *testing.T, bundle *runtimecontracts.WorkflowCon
 	return &fixtureWorkflowModule{
 		source:        source,
 		workflowNodes: workflowNodes,
-		guardRegistry: runtimepipeline.NewContractGuardRegistry(source),
 	}
 }
 
@@ -4095,11 +4089,11 @@ func mixedNodeRouteWorkflowModule(t *testing.T) (runtimepipeline.WorkflowModule,
 		"manifest.yaml":       "version: 1.0.0\nplatform_version: '*'\n",
 		"schema.yaml":         "stages:\n  active: {}\n",
 		"events.yaml":         "route.start:\n",
-		"nodes.yaml":          "project-observer:\n  execution_type: system_node\n  event_handlers:\n    route.start:\n      guard:\n        id: selected_owner\n        check: instance.id != \"\"\n",
+		"nodes.yaml":          "project-observer:\n  route.start:\n    guard: instance.id != \"\"\n",
 		"child/manifest.yaml": "version: 1.0.0\nplatform_version: '*'\n",
 		"child/schema.yaml":   "stages:\n  active: {}\npins:\n  inputs: [route.start]\n",
 		"child/events.yaml":   "route.start:\n",
-		"child/nodes.yaml":    "child-intake:\n  execution_type: system_node\n  event_handlers:\n    route.start:\n      guard:\n        id: selected_owner\n        check: instance.id != \"\"\n",
+		"child/nodes.yaml":    "child-intake:\n  route.start:\n    guard: instance.id != \"\"\n",
 	})
 	source := semanticview.Wrap(bundle)
 	return &fixtureWorkflowModule{
@@ -4114,7 +4108,6 @@ func mixedNodeRouteWorkflowModule(t *testing.T) (runtimepipeline.WorkflowModule,
 				Subscriptions: []events.EventType{"route.start"},
 			},
 		},
-		guardRegistry: runtimepipeline.NewContractGuardRegistry(source),
 	}, bundle
 }
 
@@ -4695,7 +4688,7 @@ func TestEventBusPublish_RecordsNestedTemplateInstanceLocalizedEvent(t *testing.
 		"child/grandchild/schema.yaml":   "instance: instance_key\n",
 		"child/grandchild/state.yaml":    "instance_key: text\n",
 		"child/grandchild/events.yaml":   "micro.done:\n",
-		"child/grandchild/nodes.yaml":    "worker:\n  execution_type: system_node\n  subscribes_to: [micro.done]\n  event_handlers:\n    micro.done: {}\n",
+		"child/grandchild/nodes.yaml":    "worker:\n  micro.done: {}\n",
 	})
 	source := semanticview.Wrap(bundle)
 	var observations []runtimepipeline.FlowInstanceObservation

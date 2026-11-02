@@ -36,10 +36,10 @@ func lifecycleStateFixtureForTest(t *testing.T, flowID, from, to string, eventTy
 	}
 	files[prefix+"manifest.yaml"] = "version: 1.0.0\nplatform_version: \">=0.7.0 <0.8.0\"\n"
 	files[prefix+"schema.yaml"] = fmt.Sprintf("stages:\n  %s: {}\n  %s: {}\n", from, to)
-	nodes := "lifecycle-owner:\n  execution_type: system_node\n  event_handlers:\n"
+	nodes := "lifecycle-owner:\n"
 	for _, eventType := range eventTypes {
 		files[prefix+"events.yaml"] += eventType + ":\n"
-		nodes += fmt.Sprintf("    %s: {advances_to: %s}\n", eventType, to)
+		nodes += fmt.Sprintf("  %s: {advances_to: %s}\n", eventType, to)
 	}
 	files[prefix+"nodes.yaml"] = nodes
 	return loadWorkflowTempBundle(t, files)
