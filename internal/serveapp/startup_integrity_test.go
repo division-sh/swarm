@@ -192,7 +192,7 @@ func TestRunServeSourceArtifactIntegrityRejectsBeforeReadinessBothStores(t *test
 						t.Fatal(err)
 					}
 					inspect := exec.Command("sh", "-c", command)
-					inspect.Env = append(os.Environ(), "PATH="+binaryDir+string(os.PathListSeparator)+os.Getenv("PATH"))
+					inspect.Env = append(releaseProviderTriggerProcessEnv(), "PATH="+binaryDir+string(os.PathListSeparator)+os.Getenv("PATH"))
 					if output, err := inspect.CombinedOutput(); err != nil || !strings.Contains(string(output), "selected-store lease is available") || !strings.Contains(string(output), "last admitted generation") {
 						t.Fatalf("emitted command did not inspect the real project store: %v\n%s", err, output)
 					}
