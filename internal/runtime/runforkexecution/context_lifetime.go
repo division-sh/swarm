@@ -7,6 +7,7 @@ import (
 	"sync"
 
 	"github.com/division-sh/swarm/internal/runtime/core/worklifetime"
+	"github.com/division-sh/swarm/internal/runtime/pipeline"
 	"github.com/division-sh/swarm/internal/runtime/runfork"
 	"github.com/division-sh/swarm/internal/runtime/startupownership"
 	"github.com/division-sh/swarm/internal/sourceartifact"
@@ -32,6 +33,7 @@ type selectedForkContext struct {
 	operation           *selectedContractOperation
 	binding             runfork.RunForkSelectedContractBinding
 	retained            *PreparedSelectedFork
+	scheduler           *pipeline.Scheduler
 	retiring            bool
 	recoveryReserved    bool
 	done                chan struct{}
@@ -301,7 +303,27 @@ func (o SelectedContractExecutionOwner) SealSelectedContexts() error {
 	}
 	ports.contexts.mu.Lock()
 	ports.contexts.draining = true
+	for _, entry := range ports.contexts.entries {
+		if entry.scheduler != nil {
+			entry.scheduler.CloseDispatch()
+		}
+	}
 	ports.contexts.mu.Unlock()
+	return nil
+}
+
+func (o SelectedContractExecutionOwner) bindSelectedScheduler(operation *selectedContractOperation, scheduler *pipeline.Scheduler) error {
+	contexts := o.ports.contexts
+	contexts.mu.Lock()
+	defer contexts.mu.Unlock()
+	entry := contexts.entries[operation]
+	if contexts.retired || entry == nil || entry.retiring || entry.scheduler != nil {
+		return worklifetime.ErrRetired
+	}
+	entry.scheduler = scheduler
+	if contexts.draining {
+		scheduler.CloseDispatch()
+	}
 	return nil
 }
 
@@ -338,6 +360,9 @@ func (o SelectedContractExecutionOwner) DrainSelectedContexts(ctx context.Contex
 	contexts.draining = true
 	entries := make([]*selectedForkContext, 0, len(contexts.entries))
 	for _, entry := range contexts.entries {
+		if entry.scheduler != nil {
+			entry.scheduler.CloseDispatch()
+		}
 		entries = append(entries, entry)
 	}
 	contexts.mu.Unlock()

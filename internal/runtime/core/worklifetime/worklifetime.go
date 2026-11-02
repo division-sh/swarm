@@ -95,20 +95,20 @@ func (g *gate) beginClass(parent context.Context, transient bool) (*Lease, error
 	return g.beginWithParent(parent, transient, nil)
 }
 
-func (g *gate) beginAcceptedDescendant(parent context.Context) (*Lease, error) {
+func (g *gate) beginAcceptedDescendant(parent context.Context, dispatch bool) (*Lease, error) {
 	if parent == nil {
 		parent = context.Background()
 	}
 	ancestor, _ := parent.Value(acceptedLeaseContextKey{}).(*Lease)
 	if ancestor == nil {
-		return g.begin(parent)
+		return g.beginOwned(parent, true, nil, false, dispatch)
 	}
 	ancestor.mu.Lock()
 	defer ancestor.mu.Unlock()
 	if ancestor.settled || ancestor.gate != g {
-		return g.begin(parent)
+		return g.beginOwned(parent, true, nil, false, dispatch)
 	}
-	return g.beginWithParent(parent, true, ancestor)
+	return g.beginOwned(parent, true, ancestor, false, dispatch)
 }
 
 func (g *gate) beginWithParent(parent context.Context, transient bool, ancestor *Lease) (*Lease, error) {
@@ -759,7 +759,7 @@ func (m *ManagerWorkOccurrence) BeginAcceptedDescendant(ctx context.Context) (*L
 		}
 		childCtx = CarryAcceptedLease(companionLease.Context(), ctx)
 	}
-	lease, err := m.manager.occurrence.gate.beginAcceptedDescendant(childCtx)
+	lease, err := m.manager.occurrence.gate.beginAcceptedDescendant(childCtx, false)
 	if err != nil {
 		if companionLease != nil {
 			_ = companionLease.Done()
@@ -971,13 +971,22 @@ func (r *RuntimeOccurrence) BeginDispatch(ctx context.Context) (*Lease, error) {
 	return r.occurrence.gate.beginOwned(WithOccurrence(WithProcess(ctx, r.process), r), true, nil, false, true)
 }
 
+// BeginContinuationDispatch seals fresh readiness scans, without withdrawing
+// the separate accepted-publication handoff from its existing ancestor.
+func (r *RuntimeOccurrence) BeginContinuationDispatch(ctx context.Context) (*Lease, error) {
+	if r == nil {
+		return nil, errors.New("runtime occurrence is required")
+	}
+	return r.occurrence.gate.beginAcceptedDescendant(WithOccurrence(WithProcess(ctx, r.process), r), true)
+}
+
 // BeginAcceptedDescendant preserves already-admitted work through a shutdown
 // fence, but only when its context carries a live lease from this occurrence.
 func (r *RuntimeOccurrence) BeginAcceptedDescendant(ctx context.Context) (*Lease, error) {
 	if r == nil {
 		return nil, errors.New("runtime occurrence is required")
 	}
-	return r.occurrence.gate.beginAcceptedDescendant(WithOccurrence(WithProcess(ctx, r.process), r))
+	return r.occurrence.gate.beginAcceptedDescendant(WithOccurrence(WithProcess(ctx, r.process), r), false)
 }
 
 func (r *RuntimeOccurrence) BeginStanding(ctx context.Context) (*Lease, error) {
@@ -1158,7 +1167,7 @@ func (s *SelectedForkOccurrence) BeginAcceptedDescendant(ctx context.Context) (*
 	if s == nil {
 		return nil, errors.New("selected-fork occurrence is required")
 	}
-	return s.occurrence.gate.beginAcceptedDescendant(WithOccurrence(WithProcess(ctx, s.process), s))
+	return s.occurrence.gate.beginAcceptedDescendant(WithOccurrence(WithProcess(ctx, s.process), s), false)
 }
 
 func (s *SelectedForkOccurrence) BeginStanding(ctx context.Context) (*Lease, error) {

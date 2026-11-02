@@ -401,6 +401,9 @@ func (c *selectedContractForkLocalRuntimeContainer) PrepareAttachment(ctx contex
 		return err
 	}
 	scheduler := runtimepipeline.NewSchedulerWithWorkOwner(forkOwner)
+	if err := req.Owner.bindSelectedScheduler(req.Operation, scheduler); err != nil {
+		return err
+	}
 	if err := scheduler.PrepareStartup(); err != nil {
 		return err
 	}
