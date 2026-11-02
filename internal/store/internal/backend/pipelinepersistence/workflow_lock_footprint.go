@@ -12,7 +12,6 @@ import (
 	"github.com/division-sh/swarm/internal/runtime/core/flowidentity"
 	"github.com/division-sh/swarm/internal/runtime/pipeline"
 	"github.com/division-sh/swarm/internal/store/internal/backend/runlifecycle/sourceadmission"
-	"github.com/division-sh/swarm/internal/store/internal/workflowheader"
 )
 
 func workflowActivationLockOwners(owners []flowidentity.RunScopedFlowInstance, plans []pipeline.FlowInstanceActivationPlan) ([]flowidentity.RunScopedFlowInstance, error) {
@@ -179,7 +178,9 @@ func acquireWorkflowPublicationFootprintTx(ctx context.Context, tx *sql.Tx, foot
 	}
 	for _, owner := range ordered {
 		if strong[owner] {
-			if _, _, err := workflowheader.LoadForMutation(ctx, tx, true, owner.RunID, "", owner.Route.InstancePath); err != nil {
+			var id string
+			err := tx.QueryRowContext(ctx, `SELECT entity_id FROM flow_instances WHERE run_id=$1::uuid AND instance_path=$2 FOR UPDATE`, owner.RunID, owner.Route.InstancePath).Scan(&id)
+			if err != nil && !errors.Is(err, sql.ErrNoRows) {
 				return fmt.Errorf("lock prepared workflow header %v: %w", owner, err)
 			}
 		} else {
