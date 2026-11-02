@@ -35,10 +35,11 @@ import (
 
 type forkBarrierCompletionProbe struct {
 	*lifecycleprobe.Probe
-	claimed   chan forkEngineObservation
-	claimOnce sync.Once
-	mu        sync.Mutex
-	history   []lifecycleprobe.Signal
+	claimed                 chan forkEngineObservation
+	completed               chan forkEngineObservation
+	claimOnce, completeOnce sync.Once
+	mu                      sync.Mutex
+	history                 []lifecycleprobe.Signal
 }
 
 func (p *forkBarrierCompletionProbe) NotifyLifecycle(ctx context.Context, signal lifecycleprobe.Signal) {
@@ -48,6 +49,9 @@ func (p *forkBarrierCompletionProbe) NotifyLifecycle(ctx context.Context, signal
 	p.mu.Unlock()
 	if signal.Kind == lifecycleprobe.DeliveryStatusChanged && signal.EventType == "producer/work.ready" && signal.Status == "in_progress" {
 		p.claimOnce.Do(func() { p.claimed <- forkEngineObservation{ctx: ctx, id: signal.EventID} })
+	}
+	if signal.Kind == lifecycleprobe.DeliveryStatusChanged && signal.EventType == "producer/batch.completed" && signal.Status == "delivered" {
+		p.completeOnce.Do(func() { p.completed <- forkEngineObservation{ctx: ctx, id: signal.EventID} })
 	}
 }
 
@@ -172,7 +176,7 @@ func TestIssue642FanOutBarrierFrontierBothStores(t *testing.T) {
 				if err != nil {
 					t.Fatal(err)
 				}
-				probe := &forkBarrierCompletionProbe{Probe: lifecycleprobe.New(), claimed: make(chan forkEngineObservation, 1)}
+				probe := &forkBarrierCompletionProbe{Probe: lifecycleprobe.New(), claimed: make(chan forkEngineObservation, 1), completed: make(chan forkEngineObservation, 1)}
 				executionRequest := runforkexecution.SelectedContractExecutionRequest{
 					SourceRunID: runID, At: cutID, ExpectedBundleHash: rt.Options.SourceArtifactFact.BundleHash(),
 					SourceLoader:      runforkexecution.SourceArtifactSelectedContractSourceLoader{RepoRoot: repo, Store: selected.SourceArtifactStore()},
@@ -215,7 +219,7 @@ func TestIssue642FanOutBarrierFrontierBothStores(t *testing.T) {
 				}
 				var completed forkEngineObservation
 				select {
-				case completed = <-sourceProbe.completed:
+				case completed = <-probe.completed:
 				case <-phase.Done():
 					t.Fatal(phase.Err())
 				}
@@ -223,7 +227,7 @@ func TestIssue642FanOutBarrierFrontierBothStores(t *testing.T) {
 				if !finalClaimed || finalClaim.RunID() != proof.ForkRunID {
 					t.Fatal("barrier outcome reused another run's delivery")
 				}
-				final, err := sourceProbe.history.Wait(phase, lifecycleprobe.Signal{Kind: lifecycleprobe.DeliveryStatusChanged,
+				final, err := probe.Wait(phase, lifecycleprobe.Signal{Kind: lifecycleprobe.DeliveryStatusChanged,
 					EventID: completed.id, EventType: "producer/batch.completed", SubscriberType: "node", SubscriberID: finalConsumer.Key(), Status: "delivered"})
 				if err != nil {
 					probe.mu.Lock()

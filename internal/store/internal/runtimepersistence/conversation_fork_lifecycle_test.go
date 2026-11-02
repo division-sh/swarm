@@ -604,6 +604,16 @@ const conversationForkSourceFlowInstance = "review"
 
 func seedConversationForkSource(t *testing.T, db *sql.DB, base time.Time, prepared *PostgresStore, historical ...*contracts.WorkflowContractBundle) conversationForkSourceFixture {
 	t.Helper()
+	store := prepared
+	if store == nil {
+		store = admitTestPostgresStore(t, db)
+	}
+	ctx := originalStoreFixtureContext(t, testAuthorActivityContext(), store)
+	return seedConversationForkSourceWithContext(t, ctx, store, db, base, historical...)
+}
+
+func seedConversationForkSourceWithContext(t *testing.T, ctx context.Context, store *PostgresStore, db *sql.DB, base time.Time, historical ...*contracts.WorkflowContractBundle) conversationForkSourceFixture {
+	t.Helper()
 	source := conversationForkSourceFixture{
 		runID:      uuid.NewString(),
 		bundleHash: authorActivityTestBundleHash,
@@ -622,11 +632,10 @@ func seedConversationForkSource(t *testing.T, db *sql.DB, base time.Time, prepar
 		source.bundleHash = run.Artifact.BundleHash()
 		run.BundleHash = source.bundleHash
 	}
-	store := prepared
 	if store == nil {
-		store = admitTestPostgresStore(t, db)
+		t.Fatal("conversation source fixture requires its original selected owner")
 	}
-	ctx := originalStoreFixtureContext(t, testAuthorActivityContextForBundle(source.bundleHash), store)
+	ctx = originalStoreFixtureContext(t, ctx, store)
 	requireRunFixtureForTest(t, ctx, store, run)
 	identity := mustTestAgentIdentityForRun(source.runID, source.agentID, conversationForkSourceFlowInstance)
 	fields, err := identity.StorageFields()

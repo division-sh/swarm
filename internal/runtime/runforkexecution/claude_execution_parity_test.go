@@ -28,6 +28,7 @@ func seedSelectedClaudeExecutionSource(t *testing.T, ctx context.Context, select
 
 func seedSelectedAgentExecutionSource(t *testing.T, ctx context.Context, selected startupownership.Store, loaded LoadedSelectedContractSource, runID, eventID string, at time.Time, mode executionmode.Mode) {
 	t.Helper()
+	ctx = nativeRunForkTestContext(t, ctx, selected)
 	artifact := selectedExecutionSourceArtifact(t, loaded.SourceArtifactFact.BundleHash())
 	fixture := storetest.RunFixture{
 		RunID: runID, Origin: storetest.ScenarioSetupOrigin(),

@@ -34,28 +34,51 @@ func commitFlowInstanceActivations(
 	committed := make([]runtimepipeline.CommittedFlowInstanceActivation, 0, len(plans))
 	seen := make(map[string]struct{}, len(plans))
 	err := attempt.WithSQL(ctx, func(ctx context.Context, tx *sql.Tx) error {
-		for index, plan := range plans {
-			if err := plan.Validate(); err != nil {
-				return err
-			}
-			initial, err := attempt.BeginInitialRunConstruction(ctx, plan.Readiness.RunID, plan.Identity, plan.CreatingInput.EventID)
-			if err != nil {
-				return err
-			}
-			result, err := commitFlowConstructionTree(ctx, tx, attempt, store, postgres, plan, true, seen, occurrence)
-			if err != nil {
-				return fmt.Errorf("commit flow activation %d: %w", index, err)
-			}
-			if initial {
-				if err := attempt.EndInitialRunProjection(ctx, plan.Readiness.RunID); err != nil {
+		if postgres {
+			for _, plan := range plans {
+				if err := plan.Validate(); err != nil {
 					return err
 				}
+				if err := requirePostgresRunActive(ctx, tx, plan.Readiness.RunID); err != nil {
+					return err
+				}
+			}
+			if err := lockWorkflowPublicationFootprintTx(ctx, tx, true, nil, []runtimebus.PublicationCommand{{Activations: plans}}); err != nil {
+				return err
+			}
+		}
+		for index, plan := range plans {
+			result, err := commitFlowInstanceActivationPlan(ctx, tx, attempt, store, postgres, plan, index, seen, occurrence)
+			if err != nil {
+				return err
 			}
 			committed = append(committed, result)
 		}
 		return nil
 	})
 	return committed, err
+}
+
+func commitFlowInstanceActivationPlan(ctx context.Context, tx *sql.Tx, attempt *mutationprotocol.Attempt, store eventCommitTxStore, postgres bool,
+	plan runtimepipeline.FlowInstanceActivationPlan, index int, seen map[string]struct{}, occurrence *privatemutationlog.ConstructionOccurrence,
+) (runtimepipeline.CommittedFlowInstanceActivation, error) {
+	if err := plan.Validate(); err != nil {
+		return runtimepipeline.CommittedFlowInstanceActivation{}, err
+	}
+	initial, err := attempt.BeginInitialRunConstruction(ctx, plan.Readiness.RunID, plan.Identity, plan.CreatingInput.EventID)
+	if err != nil {
+		return runtimepipeline.CommittedFlowInstanceActivation{}, err
+	}
+	result, err := commitFlowConstructionTree(ctx, tx, attempt, store, postgres, plan, true, seen, occurrence)
+	if err != nil {
+		return runtimepipeline.CommittedFlowInstanceActivation{}, fmt.Errorf("commit flow activation %d: %w", index, err)
+	}
+	if initial {
+		if err := attempt.EndInitialRunProjection(ctx, plan.Readiness.RunID); err != nil {
+			return runtimepipeline.CommittedFlowInstanceActivation{}, err
+		}
+	}
+	return result, nil
 }
 
 func commitFlowConstructionTree(ctx context.Context, tx *sql.Tx, attempt *mutationprotocol.Attempt, store eventCommitTxStore, postgres bool,
@@ -199,10 +222,6 @@ func commitFlowInstanceActivation(
 	if postgres {
 		if err := requirePostgresRunActive(ctx, tx, record.Identity.RunID); err != nil {
 			return false, runtimepipeline.CommittedWorkflowLifecycleMutation{}, err
-		}
-		lockIdentity := fmt.Sprintf("%d:%s%s", len(record.Identity.RunID), record.Identity.RunID, record.Identity.Route.InstancePath)
-		if _, err := tx.ExecContext(ctx, `SELECT pg_advisory_xact_lock(hashtextextended($1, 0))`, lockIdentity); err != nil {
-			return false, runtimepipeline.CommittedWorkflowLifecycleMutation{}, fmt.Errorf("lock flow activation route: %w", err)
 		}
 	} else if err := requireSQLiteRunActive(ctx, tx, record.Identity.RunID); err != nil {
 		return false, runtimepipeline.CommittedWorkflowLifecycleMutation{}, err

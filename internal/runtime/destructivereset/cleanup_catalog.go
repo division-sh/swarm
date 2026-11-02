@@ -103,6 +103,8 @@ func DefaultPlatformCleanupCatalog() []CleanupCatalogEntry {
 		{Table: "workflow_publication_stage_receipts", TableKind: CleanupTableKindPlatform, Classification: CleanupDeleteByRunID, PredicateOwner: "workflow_publication_stage_receipts.run_id", DeleteOrderGroup: 1},
 		{Table: "workflow_handler_stage_receipts", TableKind: CleanupTableKindPlatform, Classification: CleanupDeleteByRunID, PredicateOwner: "workflow_handler_stage_receipts.run_id", DeleteOrderGroup: 1},
 		{Table: "entity_state", TableKind: CleanupTableKindPlatform, Classification: CleanupDeleteByRunID, PredicateOwner: "entity_state.run_id", DeleteOrderGroup: 3},
+		{Table: "run_event_counts", TableKind: CleanupTableKindPlatform, Classification: CleanupDeleteByRunID, PredicateOwner: "run_event_counts.run_id", DeleteOrderGroup: 3},
+		{Table: "run_completion_evidence", TableKind: CleanupTableKindPlatform, Classification: CleanupDeleteByRunID, PredicateOwner: "run_completion_evidence.run_id", DeleteOrderGroup: 3},
 		{Table: "flow_instance_runtime_readiness", TableKind: CleanupTableKindPlatform, Classification: CleanupDeleteByRunID, PredicateOwner: "flow_instance_runtime_readiness.run_id", DeleteOrderGroup: 3},
 		{Table: "timers", TableKind: CleanupTableKindPlatform, Classification: CleanupDeleteMixedRowPolicy, PredicateOwner: "timers.run_id|forked_from_run_id|forked_from_event_id -> events.run_id", DeleteOrderGroup: 3},
 		{Table: "run_control_state", TableKind: CleanupTableKindPlatform, Classification: CleanupDeleteByRunID, PredicateOwner: "run_control_state.run_id", DeleteOrderGroup: 3},

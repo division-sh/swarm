@@ -58,9 +58,6 @@ func TestPostgresLLMExactRevisionFactsUseStoredUUIDCoordinates(t *testing.T) {
 	}
 	runtimeID := uuid.NewString()
 	setupCtx := authoractivity.WithScope(ctx, authoractivity.BundleScope(runtimeID, sourceartifactfixture.BundleHash))
-	if _, err := selected.EnsureSourceArtifact(setupCtx, sourceartifactfixture.Artifact()); err != nil {
-		t.Fatal(err)
-	}
 	process, err := selected.AcquireProcessCapability(setupCtx, startupownership.AcquireRequest{
 		OwnerID: "llm-coordinate-fixture", BootID: uuid.NewString(), RuntimeInstanceID: runtimeID,
 	})

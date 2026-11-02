@@ -27,8 +27,9 @@ const diagnosticEventInsertSQL = "insert into events"
 
 type diagnosticSQLConnector struct {
 	driver.Connector
-	afterExec func(context.Context, string) error
-	begin     func()
+	afterExec  func(context.Context, string) error
+	execResult func(string, error)
+	begin      func()
 }
 
 func (c diagnosticSQLConnector) Connect(ctx context.Context) (driver.Conn, error) {
@@ -36,7 +37,7 @@ func (c diagnosticSQLConnector) Connect(ctx context.Context) (driver.Conn, error
 	if err != nil {
 		return nil, err
 	}
-	return diagnosticSQLConn{Conn: conn, afterExec: c.afterExec, begin: c.begin}, nil
+	return diagnosticSQLConn{Conn: conn, afterExec: c.afterExec, execResult: c.execResult, begin: c.begin}, nil
 }
 
 type diagnosticSQLiteConnector struct{ path string }
@@ -48,8 +49,9 @@ func (diagnosticSQLiteConnector) Driver() driver.Driver { return &sqlite.Driver{
 
 type diagnosticSQLConn struct {
 	driver.Conn
-	afterExec func(context.Context, string) error
-	begin     func()
+	afterExec  func(context.Context, string) error
+	execResult func(string, error)
+	begin      func()
 }
 
 func (c diagnosticSQLConn) ResetSession(ctx context.Context) error {
@@ -73,6 +75,9 @@ func (c diagnosticSQLConn) BeginTx(ctx context.Context, options driver.TxOptions
 }
 func (c diagnosticSQLConn) ExecContext(ctx context.Context, query string, args []driver.NamedValue) (driver.Result, error) {
 	result, err := c.Conn.(driver.ExecerContext).ExecContext(ctx, query, args)
+	if c.execResult != nil {
+		c.execResult(query, err)
+	}
 	if err == nil && c.afterExec != nil {
 		err = c.afterExec(ctx, query)
 	}

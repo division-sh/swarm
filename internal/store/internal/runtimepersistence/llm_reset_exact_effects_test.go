@@ -188,6 +188,18 @@ func TestLLMResetExactSessionsAndRollbackBothStores(t *testing.T) {
 		reset := s.selected.(interface {
 			ResetAll(context.Context, sessions.ResetMetadata) (sessions.ResetSummary, error)
 		})
+		if refused, err := reset.ResetAll(context.Background(), sessions.ResetMetadata{Source: "exact-reset"}); err == nil || len(refused.OrphanedSessions) != 0 {
+			t.Fatalf("unattributed reset must refuse without a summary: summary=%+v err=%v", refused, err)
+		}
+		assertLLMResetHistory(t, s, f, false)
+		assertGrant(lease.GrantID)
+		cancelled, cancel := context.WithCancel(ctx)
+		cancel()
+		if refused, err := reset.ResetAll(cancelled, sessions.ResetMetadata{Source: "exact-reset"}); err == nil || len(refused.OrphanedSessions) != 0 {
+			t.Fatalf("cancelled reset must refuse without a summary: summary=%+v err=%v", refused, err)
+		}
+		assertLLMResetHistory(t, s, f, false)
+		assertGrant(lease.GrantID)
 		if s.postgres {
 			if _, err := s.db.Exec(`CREATE FUNCTION fail_llm_reset_revision() RETURNS trigger LANGUAGE plpgsql AS $$
 				BEGIN RAISE EXCEPTION 'injected reset revision failure'; END $$`); err != nil {

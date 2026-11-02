@@ -77,12 +77,13 @@ func TestS1ServeIngestRetainsExactRootBothStores(t *testing.T) {
 	for _, backend := range []string{"sqlite", "postgres"} {
 		t.Run(backend, func(t *testing.T) {
 			selected := openStandingRuntimeContextStore(t, backend, "s1-rooted-ingest")
+			ctx := serveFixtureProcessContext(t, context.Background(), selected.RuntimeDeps().EventStore)
 			bundle := loadWorkflowValidationFixtureBundle(t, "examples/routing/root-ingress")
 			rooted, err := bundle.RootedSource()
 			if err != nil {
 				t.Fatal(err)
 			}
-			fact, err := prepareServeSourceArtifact(context.Background(), selected.SourceArtifactWriter(), bundle)
+			fact, err := prepareServeSourceArtifact(ctx, selected.SourceArtifactWriter(), bundle)
 			if err != nil || fact.BundleHash() != rooted.Artifact().BundleHash() {
 				t.Fatalf("publish exact rooted serve source: %+v, %v", fact, err)
 			}
@@ -90,7 +91,7 @@ func TestS1ServeIngestRetainsExactRootBothStores(t *testing.T) {
 			if err != nil || !retained.Admission().Equal(rooted.Admission()) || !bytes.Equal(retained.Artifact().LogicalBlob(), rooted.Artifact().LogicalBlob()) {
 				t.Fatalf("serve ingest lost retained root/content: %+v, %v", retained.Admission().Reference(), err)
 			}
-			if _, err := prepareServeSourceArtifact(context.Background(), selected.SourceArtifactWriter(), bundle); err != nil {
+			if _, err := prepareServeSourceArtifact(ctx, selected.SourceArtifactWriter(), bundle); err != nil {
 				t.Fatalf("exact repeated rooted ingest: %v", err)
 			}
 		})

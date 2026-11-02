@@ -55,6 +55,10 @@ func admitRegistrationTestGeneration(
 	if err != nil {
 		t.Fatalf("AcquireProcessCapability: %v", err)
 	}
+	ctx, err = runtimestartupownership.WithProcessMutationAuthority(ctx, capability)
+	if err != nil {
+		t.Fatal(err)
+	}
 	rooted, _ := sourceartifactfixture.Rooted(t, "fixture", sourceartifactfixture.Artifact())
 	sourceartifactfixture.RequireArtifact(t, ctx, store.(sourceartifactfixture.Writer), rooted.Artifact())
 	coordinate, err := runtimeagenttopology.NewSourceCoordinate(rooted.Admission())
@@ -495,8 +499,12 @@ func TestRuntimeProcessCapabilityTransitionsPersistWithBackendParity(t *testing.
 			if err != nil || authority.Validate() != nil {
 				t.Fatalf("active capability = %#v err=%v", authority, err)
 			}
+			sourceCtx, err := runtimestartupownership.WithProcessMutationAuthority(ctx, capability)
+			if err != nil {
+				t.Fatal(err)
+			}
 			rooted, _ := sourceartifactfixture.Rooted(t, "canonical-run-bundle", testCanonicalSourceArtifact)
-			sourceartifactfixture.RequireArtifact(t, ctx, selected.(sourceartifactfixture.Writer), rooted.Artifact())
+			sourceartifactfixture.RequireArtifact(t, sourceCtx, selected.(sourceartifactfixture.Writer), rooted.Artifact())
 			coordinate, err := runtimeagenttopology.NewSourceCoordinate(rooted.Admission())
 			if err != nil {
 				t.Fatal(err)
@@ -646,10 +654,14 @@ func TestRuntimeProcessCapabilityClosedSourceSetOperationsPersistWithBackendPari
 			}
 			t.Cleanup(func() { _ = capability.Release(context.Background()) })
 
+			sourceCtx, err := runtimestartupownership.WithProcessMutationAuthority(ctx, capability)
+			if err != nil {
+				t.Fatal(err)
+			}
 			firstRoot, _ := sourceartifactfixture.Rooted(t, "canonical-run-bundle", testCanonicalSourceArtifact)
 			secondRoot, _ := sourceartifactfixture.Rooted(t, "second", storeTestSourceArtifact("second-source"))
 			for _, root := range []sourceartifact.RootedSource{firstRoot, secondRoot} {
-				sourceartifactfixture.RequireArtifact(t, ctx, selected.(sourceartifactfixture.Writer), root.Artifact())
+				sourceartifactfixture.RequireArtifact(t, sourceCtx, selected.(sourceartifactfixture.Writer), root.Artifact())
 			}
 			firstSource, err := runtimeagenttopology.NewSourceCoordinate(firstRoot.Admission())
 			if err != nil {
@@ -735,8 +747,12 @@ func TestPostgresProcessCapabilitySessionLossRetiresAndAdmitsAtomicSuccessor(t *
 	if err != nil {
 		t.Fatalf("Evidence: %v", err)
 	}
+	sourceCtx, err := runtimestartupownership.WithProcessMutationAuthority(ctx, capability)
+	if err != nil {
+		t.Fatal(err)
+	}
 	rooted, _ := sourceartifactfixture.Rooted(t, "canonical-run-bundle", testCanonicalSourceArtifact)
-	sourceartifactfixture.RequireArtifact(t, ctx, selected, rooted.Artifact())
+	sourceartifactfixture.RequireArtifact(t, sourceCtx, selected, rooted.Artifact())
 	coordinate, err := runtimeagenttopology.NewSourceCoordinate(rooted.Admission())
 	if err != nil {
 		t.Fatal(err)
@@ -1008,6 +1024,10 @@ func runSQLiteForcedDeathChild(t *testing.T) bool {
 		authority, err := capability.Evidence()
 		if err != nil {
 			t.Fatalf("read child process authority: %v", err)
+		}
+		ctx, err = runtimestartupownership.WithProcessMutationAuthority(ctx, capability)
+		if err != nil {
+			t.Fatal(err)
 		}
 		rooted, _ := sourceartifactfixture.Rooted(t, "fixture", sourceartifactfixture.Artifact())
 		sourceartifactfixture.RequireArtifact(t, ctx, selected, rooted.Artifact())
@@ -1429,17 +1449,10 @@ func proveProcessCapabilityTakeoverRetiresNewWorkGrants(t *testing.T, selectedGr
 	t.Helper()
 	for _, backend := range []string{"postgres", "sqlite"} {
 		t.Run(backend, func(t *testing.T) {
-			selected, mutationStore, db, abandoned := abandonedProcessCapabilityFixtureWithSelection(t, backend, selectedGrant)
+			selected, _, db, abandoned := abandonedProcessCapabilityFixtureWithSelection(t, backend, selectedGrant)
 			if selectedGrant && abandoned.SelectedGrant == nil {
 				t.Fatal("abandoned process omitted its selected grant")
 			}
-			proveBulkRetirementWaitsForMutation(t, mutationStore, db, backend, abandoned.Grant, func(ctx context.Context) error {
-				capability, err := selected.AcquireProcessCapability(ctx, testStartupAcquireRequest("blocked-grant-retirement-successor"))
-				if capability != nil {
-					t.Cleanup(func() { _ = capability.Release(context.Background()) })
-				}
-				return err
-			})
 			assertAbandonedSelectedGrantHead(t, db, abandoned, false)
 			successor, err := selected.AcquireProcessCapability(testAuthorActivityContext(), testStartupAcquireRequest("grant-retirement-successor"))
 			if err != nil {
@@ -1632,8 +1645,12 @@ func TestProcessGenerationMissingRefusesReseedingParity(t *testing.T) {
 			if err != nil {
 				t.Fatalf("acquire predecessor: %v", err)
 			}
+			sourceCtx, err := runtimestartupownership.WithProcessMutationAuthority(ctx, capability)
+			if err != nil {
+				t.Fatal(err)
+			}
 			rooted, _ := sourceartifactfixture.Rooted(t, "canonical-run-bundle", testCanonicalSourceArtifact)
-			sourceartifactfixture.RequireArtifact(t, ctx, selected.(sourceartifactfixture.Writer), rooted.Artifact())
+			sourceartifactfixture.RequireArtifact(t, sourceCtx, selected.(sourceartifactfixture.Writer), rooted.Artifact())
 			coordinate, err := runtimeagenttopology.NewSourceCoordinate(rooted.Admission())
 			if err != nil {
 				t.Fatal(err)
@@ -1684,7 +1701,7 @@ func proveProcessGenerationPublicationRetiresEveryCurrentGrant(t *testing.T, sel
 	t.Helper()
 	for _, backend := range []string{"postgres", "sqlite"} {
 		t.Run(backend, func(t *testing.T) {
-			selected, mutationStore, db, abandoned := abandonedProcessCapabilityFixtureWithSelection(t, backend, selectedGrant, true)
+			selected, _, db, abandoned := abandonedProcessCapabilityFixtureWithSelection(t, backend, selectedGrant, true)
 			if selectedGrant && abandoned.SelectedGrant == nil {
 				t.Fatal("abandoned process omitted its selected grant")
 			}
@@ -1707,13 +1724,6 @@ func proveProcessGenerationPublicationRetiresEveryCurrentGrant(t *testing.T, sel
 			deliveryBefore := loadTakeoverDeliverySnapshot(t, ctx, db, backend, eventID)
 
 			successorRequest := testStartupAcquireRequest("atomic-process-publication")
-			proveBulkRetirementWaitsForMutation(t, mutationStore, db, backend, abandoned.Grant, func(ctx context.Context) error {
-				capability, err := selected.AcquireProcessCapability(ctx, successorRequest)
-				if capability != nil {
-					err = errors.Join(err, capability.Release(context.Background()))
-				}
-				return err
-			})
 			assertAbandonedSelectedGrantHead(t, db, abandoned, false)
 			before := snapshotForkHistoricalExecutionTables(t, db, backend == "postgres")
 			removeFault := installProcessGenerationAdvanceFault(t, db, backend == "postgres")

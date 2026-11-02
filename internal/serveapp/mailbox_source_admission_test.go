@@ -33,7 +33,7 @@ func TestMailboxSourceAdmissionBeforeReplayAndAtCommitBothStores(t *testing.T) {
 							installed := false
 							restore := func() {
 								if installed {
-									if err := storetest.SwapMailboxRunSource(context.Background(), selectedMailboxFixtureStore(rt), f.base.RunID, unavailable, rt.BundleHash); err != nil {
+									if err := storetest.SwapMailboxRunSource(f.ctx, selectedMailboxFixtureStore(rt), f.base.RunID, unavailable, rt.BundleHash); err != nil {
 										t.Error(err)
 										return
 									}

@@ -25,8 +25,7 @@ type issue2564RunStopOutcome struct {
 }
 
 // Hold the exact run-authority row independently. NOWAIT distinguishes a header
-// acquired by the waiting writer without fabricating a normal-stop deadlock;
-// Story mutations also consume the existing global historical-order fence.
+// acquired by the waiting writer without fabricating a normal-stop deadlock.
 func TestIssue2564M24RunAuthorityPrecedesHeaderLockPostgres(t *testing.T) {
 	backend := eventRecordContractBackend{name: "postgres", open: openPostgresAuthorActivityReceiptFixture}
 	f := newConstructedGateFixtureForFields(t, backend, true, false)
@@ -47,7 +46,8 @@ func TestIssue2564M24RunAuthorityPrecedesHeaderLockPostgres(t *testing.T) {
 	if err := holder.QueryRowContext(ctx, `SELECT pg_backend_pid()`).Scan(&holderPID); err != nil {
 		t.Fatal(err)
 	}
-	if err := requirePostgresRunActive(ctx, holder, f.runID); err != nil {
+	var locked int
+	if err := holder.QueryRowContext(ctx, `SELECT 1 FROM runs WHERE run_id=$1::uuid FOR UPDATE`, f.runID).Scan(&locked); err != nil {
 		t.Fatal(err)
 	}
 	done := make(chan issue2564RunStopOutcome, 1)
@@ -317,7 +317,7 @@ func issue2564AwaitRunStopSQLWait(t *testing.T, ctx context.Context, db *sql.DB,
 
 func issue2564RunLockQuery(query string) bool {
 	query = strings.ToUpper(strings.Join(strings.Fields(query), " "))
-	return strings.Contains(query, "FROM RUNS") && strings.Contains(query, "FOR UPDATE") && !strings.Contains(query, "FLOW_INSTANCES")
+	return strings.Contains(query, "FROM RUNS") && (strings.Contains(query, "FOR SHARE") || strings.Contains(query, "FOR UPDATE")) && !strings.Contains(query, "FLOW_INSTANCES")
 }
 
 func issue2564AwaitRunStopBarrier(t *testing.T, ctx context.Context, db *sql.DB, barrier *forkContentionBarrier, done chan issue2564RunStopOutcome) int {

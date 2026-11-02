@@ -61,7 +61,7 @@ func TestEmptyPayloadReadersRefuseMissingPrunedAndContradictoryBothStores(t *tes
 				{"payload_digest", `UPDATE resource_versions SET canonical_jsonl = $1`, []any{[]byte("{\"value\":\"unexpected\"}\n")}, "payload failed immutable verification"},
 			} {
 				t.Run(test.name, func(t *testing.T) {
-					owner, db, _ := pinnedTestOwner(t, backend, compiled)
+					owner, db, nativeSQLite := pinnedTestOwner(t, backend, compiled)
 					if _, err := db.Exec(test.query, test.args...); err != nil {
 						t.Fatal(err)
 					}
@@ -84,7 +84,8 @@ func TestEmptyPayloadReadersRefuseMissingPrunedAndContradictoryBothStores(t *tes
 						}
 					}
 					if test.name == "sql_null" || test.name == "tombstone_with_empty_payload" {
-						err := owner.runTransaction(context.Background(), func(ctx context.Context, tx *sql.Tx) error {
+						original := pinnedTestOriginalContext(t, db, nativeSQLite)
+						err := owner.runTransaction(original, func(ctx context.Context, tx *sql.Tx) error {
 							_, err := owner.persistVersion(ctx, tx, compiled, runtimedata.Declaration{CanonicalSchema: compiled.CanonicalSchema}, runtimedata.SourceCommand{}, time.Now().UTC())
 							return err
 						})

@@ -166,6 +166,7 @@ func TestResetRetainedCleanupScopeAndRollbackBothStores(t *testing.T) {
 				sourceartifactfixture.RequireArtifact(t, ctx, backend.store.(sourceartifactfixture.Writer), artifact)
 				seedRun := func(id string) {
 					t.Helper()
+					ctx = originalStoreFixtureContext(t, ctx, backend.store)
 					requireRunFixtureForTest(t, ctx, backend.store, semanticRunFixture{RunID: id, BundleHash: artifact.BundleHash(), Origin: semanticScenarioSetupRunOriginForTest()})
 				}
 				runID := uuid.NewString()

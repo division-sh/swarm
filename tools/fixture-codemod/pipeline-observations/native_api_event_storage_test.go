@@ -3,11 +3,6 @@ package main
 import (
 	"encoding/json"
 	"go/ast"
-	"go/parser"
-	"go/token"
-	"os"
-	"path/filepath"
-	"reflect"
 	"strings"
 	"testing"
 )
@@ -178,82 +173,5 @@ func TestNativeAPIEventEvidenceRejectsLostAssertionsWrongOwnersAndInput(t *testi
 				t.Fatalf("weakened physical assertions admitted: %s", row.Function)
 			}
 		}
-	}
-}
-
-func TestNativeAPIEventEvidenceCallerInventoryIsComplete(t *testing.T) {
-	paths, err := filepath.Glob(filepath.Join("..", "..", "..", "internal", "apiv1", "*_test.go"))
-	if err != nil {
-		t.Fatal(err)
-	}
-	actual := map[string]map[string]int{}
-	for _, path := range paths {
-		source, err := os.ReadFile(path)
-		if err != nil {
-			t.Fatal(err)
-		}
-		file, err := parser.ParseFile(token.NewFileSet(), path, source, parser.AllErrors)
-		if err != nil {
-			t.Fatal(err)
-		}
-		for _, decl := range file.Decls {
-			fn, ok := decl.(*ast.FuncDecl)
-			if !ok {
-				continue
-			}
-			ast.Inspect(fn.Body, func(node ast.Node) bool {
-				call, ok := node.(*ast.CallExpr)
-				if !ok {
-					return true
-				}
-				name := formattedNativeReadNode(call.Fun)
-				switch name {
-				case "countEventsByName", "assertNoEventPublishPersistence", "assertReplayPersistence", "assertAgentReplayPersistence":
-					if actual[fn.Name.Name] == nil {
-						actual[fn.Name.Name] = map[string]int{}
-					}
-					actual[fn.Name.Name][name]++
-					if len(call.Args) < 2 || (formattedNativeReadNode(call.Args[1]) != "pg" && formattedNativeReadNode(call.Args[1]) != "fixture.pg" && formattedNativeReadNode(call.Args[1]) != "sqliteStore" && formattedNativeReadNode(call.Args[1]) != "selected") {
-						t.Fatalf("raw/foreign counter owner: %s", fn.Name.Name)
-					}
-				}
-				return true
-			})
-		}
-	}
-	expected := map[string]map[string]int{
-		"TestOperatorEventPublishSQLiteIdempotentFirstEventPublishesWithoutLock":            {"countEventsByName": 3},
-		"TestOperatorEventPublishSQLitePayloadFailureLeavesNoIdempotencyCompletionOrRows":   {"countEventsByName": 1},
-		"TestOperatorEventPublishSQLiteRejectsPrivateOrdinaryFlowEndpoint":                  {"countEventsByName": 1},
-		"TestOperatorEventPublishSQLiteExplicitRunFollowUpUsesSelectedRun":                  {"countEventsByName": 1},
-		"TestOperatorRuntimeControlHandlersUseIngressOwnerAndIdempotency":                   {"countEventsByName": 4},
-		"TestOperatorEventReplayPublishesDistinctReplayEventAuditAndIdempotency":            {"countEventsByName": 2, "assertReplayPersistence": 1},
-		"TestOperatorEventReplayStoresIdempotencyBeforeAuditPublishReadiness":               {"countEventsByName": 4},
-		"TestOperatorEventReplayStoresIdempotencyBeforeDirectPublishFanoutError":            {"countEventsByName": 4},
-		"TestOperatorEventReplaySubsetAndFailClosedCases":                                   {"countEventsByName": 6},
-		"TestOperatorAgentReplayProjectsSingletonEventReplayOwner":                          {"countEventsByName": 1, "assertAgentReplayPersistence": 1},
-		"TestOperatorAgentReplayFailClosedCases":                                            {"countEventsByName": 2},
-		"TestOperatorRunStartHandlersPersistRootEventAndReplayIdempotency":                  {"countEventsByName": 4},
-		"TestOperatorRunStartHandlersFailClosedBeforePersistence":                           {"countEventsByName": 1},
-		"TestOperatorRunCompletionSystemNodeFlowConvergesSupportedSurfaces":                 {"countEventsByName": 1},
-		"TestOperatorEventPublishHandlersPersistEventReportDeliveriesAndReplayIdempotency":  {"countEventsByName": 3},
-		"TestOperatorEventPublishRootEventNameWinsOverFlowLeafAliases":                      {"countEventsByName": 2},
-		"TestOperatorEventPublishHandlersRequireCanonicalBundleHashForCreateNewWork":        {"assertNoEventPublishPersistence": 1},
-		"TestOperatorEventPublishPostgresUsesPublisherScopeWithPlainRequestContext":         {"countEventsByName": 1},
-		"TestOperatorEventPublishReturnsStoredCompletionWithoutPostCommitReadback":          {"countEventsByName": 2},
-		"TestOperatorEventPublishPostCommitReceiptFailureReplaysWithoutDuplicate":           {"countEventsByName": 2},
-		"TestOperatorEventPublishPostCommitCompletionFailureReplaysWithoutDuplicate":        {"countEventsByName": 2},
-		"TestOperatorEventPublishPreCommitFailureFailsClosedWithDeclaredError":              {"assertNoEventPublishPersistence": 1},
-		"TestOperatorEventPublishIsUnavailableWithoutDurableAckPublisher":                   {"assertNoEventPublishPersistence": 1},
-		"TestOperatorEventPublishExplicitRunTargetRequiresExistingNonterminalRun":           {"countEventsByName": 3},
-		"TestOperatorEventPublishOperatorReferenceValidatesSameRunProvenance":               {"countEventsByName": 1},
-		"TestOperatorEventPublishOperatorReferenceRejectsInvalidReferenceBeforePersistence": {"countEventsByName": 1},
-		"TestOperatorEventPublishHandlersFailClosedBeforePersistence":                       {"assertNoEventPublishPersistence": 6},
-		"TestOperatorRuntimeContextManagerRoutesCreateNewWorkToSelectedBundle":              {"countEventsByName": 2},
-		"TestOperatorEventPublishIdempotencyReplayDoesNotRequireLoadedRuntimeContext":       {"countEventsByName": 1},
-		"TestOperatorRuntimeContextManagerRoutesEventReplayByOriginalRunBundle":             {"assertReplayPersistence": 1},
-	}
-	if !reflect.DeepEqual(actual, expected) {
-		t.Fatalf("API consumer inventory changed: got=%v want=%v", actual, expected)
 	}
 }

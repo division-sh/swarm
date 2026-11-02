@@ -157,7 +157,7 @@ SELECT
 	COALESCE(r.forked_from_revision, 0),
 	COALESCE(r.forked_from_event_id::text, ''),
 	COALESCE(entity_summary.entity_count, 0),
-	r.event_count,
+	(SELECT c.event_count FROM run_event_counts c WHERE c.run_id = r.run_id),
 	r.started_at,
 	r.ended_at,
 	COALESCE(r.continued_as_run_id::text, ''),

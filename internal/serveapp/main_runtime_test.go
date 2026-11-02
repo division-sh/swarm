@@ -121,18 +121,11 @@ func releaseServeTestAgentFixtureCapability(t testing.TB, selected storetest.Age
 
 func serveFixtureProcessContext(t testing.TB, ctx context.Context, selected any) context.Context {
 	t.Helper()
-	if runtimestartupownership.HasMutationAuthority(ctx) {
-		return ctx
-	}
 	store, ok := selected.(agentfixture.Store)
 	if !ok {
 		t.Fatalf("serve fixture requires its native lifecycle owner: %T", selected)
 	}
-	process, err := agentfixture.ProcessCapability(t, ctx, store)
-	if err != nil {
-		t.Fatal(err)
-	}
-	ctx, err = runtimestartupownership.WithProcessMutationAuthority(ctx, process)
+	ctx, err := agentfixture.ProcessContext(t, ctx, store)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -683,6 +676,7 @@ func startServedJoinProofRuntime(t *testing.T) (string, *sql.DB, string, *runtim
 	_, db, pg := installServeRuntimePostgresTestStores(t, func() cliapp.ServeWorkspaceLifecycle {
 		return serveRuntimeWorkspaceStub{}
 	})
+	storetest.BootstrapPostgresRuntimeStore(t, pg)
 	root := canonicalrouting.CopyServedJoinProof(t)
 	repo := repoRootForTest()
 	_, bundle, err := cliapp.NewSwarmWorkflowModule(repo, root)
@@ -693,9 +687,10 @@ func startServedJoinProofRuntime(t *testing.T) (string, *sql.DB, string, *runtim
 	if err != nil {
 		t.Fatalf("project served join durable data: %v", err)
 	}
-	if _, err := pg.EnsureSourceArtifactWithData(context.Background(), bundle.SourceArtifact, catalog); err != nil {
+	if _, err := pg.EnsureSourceArtifactWithData(serveFixtureProcessContext(t, context.Background(), pg), bundle.SourceArtifact, catalog); err != nil {
 		t.Fatalf("persist served join source: %v", err)
 	}
+	releaseServeTestAgentFixtureCapability(t, pg)
 	bundleHash := bundle.SourceArtifact.BundleHash()
 	endpoint, rt := startServedEventPublishFollowUpRuntime(t, cliapp.ServeOptions{
 		ConfigPath:              writeServeRuntimeTestConfig(t),
@@ -1270,6 +1265,7 @@ func TestServedParityHarnessConversationForkLifecycle(t *testing.T) {
 }
 
 type servedControlProofRuntime struct {
+	ProcessCapability   runtimestartupownership.ProcessCapability
 	Endpoint            string
 	DB                  *sql.DB
 	Backend             string
@@ -1589,7 +1585,11 @@ func runServedRunForkBackendProof(t *testing.T, backend servedparity.Backend) {
 	deadline := time.Now().Add(servedProofPollDeadline)
 	for {
 		var candidateSettled bool
-		if err := rt.DB.QueryRow(`SELECT completion_due_at IS NULL FROM runs WHERE run_id=$1`, fork.ForkRunID).Scan(&candidateSettled); err != nil {
+		if err := rt.DB.QueryRow(`SELECT CASE WHEN consumed.run_id IS NULL THEN request.due_at ELSE NULL END IS NULL
+			FROM runs r LEFT JOIN run_completion_evidence request ON request.run_id=r.run_id AND request.record_kind='request'
+			AND request.revision=(SELECT MAX(revision) FROM run_completion_evidence WHERE run_id=r.run_id AND record_kind='request')
+			LEFT JOIN run_completion_evidence consumed ON consumed.run_id=request.run_id AND consumed.revision=request.revision AND consumed.record_kind='clear'
+			WHERE r.run_id=$1`, fork.ForkRunID).Scan(&candidateSettled); err != nil {
 			t.Fatal(err)
 		}
 		if candidateSettled {
@@ -5592,7 +5592,11 @@ func servedEventPublishDebugQuery(t *testing.T, db *sql.DB, backend, scope, runI
 	case "postgres":
 		switch scope {
 		case "runs":
-			sqlText = `SELECT status, completion_revision, COALESCE(completion_due_at::text, ''), bundle_hash FROM runs WHERE run_id = $1::uuid`
+			sqlText = `SELECT r.status, COALESCE(request.revision,0), COALESCE((CASE WHEN consumed.run_id IS NULL THEN request.due_at ELSE NULL END)::text, ''), r.bundle_hash
+				FROM runs r LEFT JOIN run_completion_evidence request ON request.run_id=r.run_id AND request.record_kind='request'
+				AND request.revision=(SELECT MAX(revision) FROM run_completion_evidence WHERE run_id=r.run_id AND record_kind='request')
+				LEFT JOIN run_completion_evidence consumed ON consumed.run_id=request.run_id AND consumed.revision=request.revision AND consumed.record_kind='clear'
+				WHERE r.run_id=$1::uuid`
 		case "entity_state":
 			sqlText = `SELECT entity_id::text, flow_instance, entity_type, fields::text FROM entity_state WHERE run_id = $1::uuid ORDER BY created_at, entity_id LIMIT 5`
 		case "flow_instances":
@@ -5617,7 +5621,11 @@ func servedEventPublishDebugQuery(t *testing.T, db *sql.DB, backend, scope, runI
 	case "sqlite":
 		switch scope {
 		case "runs":
-			sqlText = `SELECT status, completion_revision, COALESCE(completion_due_at, ''), bundle_hash FROM runs WHERE run_id = ?`
+			sqlText = `SELECT r.status, COALESCE(request.revision,0), COALESCE(CASE WHEN consumed.run_id IS NULL THEN request.due_at ELSE NULL END, ''), r.bundle_hash
+				FROM runs r LEFT JOIN run_completion_evidence request ON request.run_id=r.run_id AND request.record_kind='request'
+				AND request.revision=(SELECT MAX(revision) FROM run_completion_evidence WHERE run_id=r.run_id AND record_kind='request')
+				LEFT JOIN run_completion_evidence consumed ON consumed.run_id=request.run_id AND consumed.revision=request.revision AND consumed.record_kind='clear'
+				WHERE r.run_id=?`
 		case "entity_state":
 			sqlText = `SELECT entity_id, flow_instance, entity_type, fields FROM entity_state WHERE run_id = ? ORDER BY created_at, entity_id LIMIT 5`
 		case "flow_instances":
@@ -6936,10 +6944,11 @@ func Test2376DirectoryBootUsesExactSelectedStoreSource(t *testing.T) {
 					t.Fatalf("open SQLite selected store: %v", err)
 				}
 				bootstrapSQLiteSchemaForTest(t, context.Background(), selected, plans)
-				if _, err := selected.EnsureSourceArtifactWithData(context.Background(), bundle.SourceArtifact, catalog); err != nil {
+				if _, err := selected.EnsureSourceArtifactWithData(serveFixtureProcessContext(t, context.Background(), selected), bundle.SourceArtifact, catalog); err != nil {
 					_ = selected.Close()
 					t.Fatalf("persist SQLite source artifact: %v", err)
 				}
+				releaseServeTestAgentFixtureCapability(t, selected)
 				if err := selected.Close(); err != nil {
 					t.Fatalf("close seeded SQLite selected store: %v", err)
 				}
@@ -6947,10 +6956,12 @@ func Test2376DirectoryBootUsesExactSelectedStoreSource(t *testing.T) {
 				_, _, selected := installServeRuntimePostgresTestStores(t, func() cliapp.ServeWorkspaceLifecycle {
 					return serveRuntimeWorkspaceStub{bundleScopes: &workspaceBundleScopes}
 				})
+				storetest.BootstrapPostgresRuntimeStore(t, selected)
 				opts.ConfigPath = writeStoreBackendRuntimeConfig(t, backend.String(), "")
-				if _, err := selected.EnsureSourceArtifactWithData(context.Background(), bundle.SourceArtifact, catalog); err != nil {
+				if _, err := selected.EnsureSourceArtifactWithData(serveFixtureProcessContext(t, context.Background(), selected), bundle.SourceArtifact, catalog); err != nil {
 					t.Fatalf("persist PostgreSQL source artifact: %v", err)
 				}
+				releaseServeTestAgentFixtureCapability(t, selected)
 			default:
 				t.Fatalf("unsupported selected store %q", backend)
 			}

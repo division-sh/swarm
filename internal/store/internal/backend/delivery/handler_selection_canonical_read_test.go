@@ -11,10 +11,15 @@ import (
 	"testing"
 	"time"
 
+	"github.com/division-sh/swarm/internal/runtime/contracts"
 	"github.com/division-sh/swarm/internal/runtime/core/handlerselection"
 	"github.com/division-sh/swarm/internal/runtime/core/identity"
+	"github.com/division-sh/swarm/internal/runtime/core/processbinding"
 	"github.com/division-sh/swarm/internal/runtime/deliverylifecycle"
+	"github.com/division-sh/swarm/internal/store/internal/backend/generationauthority"
 	sqlitebackend "github.com/division-sh/swarm/internal/store/internal/backend/sqlite"
+	"github.com/division-sh/swarm/internal/store/internal/schemastore"
+	"github.com/division-sh/swarm/internal/store/platformschema"
 	"github.com/division-sh/swarm/internal/testutil"
 	"github.com/google/uuid"
 	"github.com/lib/pq"
@@ -23,10 +28,12 @@ import (
 
 // This observes physical SQL at the native driver, not adapter invocations.
 type selectionSQLProbe struct {
+	originalContext  context.Context
 	mu               sync.Mutex
 	selects, inserts int
 	commitFailure    func(error)
 	rollbackComplete func(error)
+	writerResult     func(error)
 }
 
 func (p *selectionSQLProbe) observe(query string) {
@@ -81,7 +88,16 @@ func (c *selectionConn) QueryContext(ctx context.Context, query string, args []d
 }
 func (c *selectionConn) ExecContext(ctx context.Context, query string, args []driver.NamedValue) (driver.Result, error) {
 	c.probe.observe(query)
-	return c.Conn.(driver.ExecerContext).ExecContext(ctx, query, args)
+	result, err := c.Conn.(driver.ExecerContext).ExecContext(ctx, query, args)
+	if strings.TrimSpace(query) == "UPDATE runtime_process_generation SET generation = generation WHERE singleton_id = 1" {
+		c.probe.mu.Lock()
+		hook := c.probe.writerResult
+		c.probe.mu.Unlock()
+		if hook != nil {
+			hook(err)
+		}
+	}
+	return result, err
 }
 func (c *selectionConn) BeginTx(ctx context.Context, opts driver.TxOptions) (driver.Tx, error) {
 	tx, err := c.Conn.(driver.ConnBeginTx).BeginTx(ctx, opts)
@@ -135,7 +151,7 @@ func selectionWriterFixture(t *testing.T, backend string) (*sql.DB, *Adapter, *s
 	} else {
 		connector = selectionSQLiteConnector{dsn: "file:" + filepath.Join(t.TempDir(), "selection.db") + "?_pragma=busy_timeout(1000)"}
 	}
-	probe := &selectionSQLProbe{}
+	probe := &selectionSQLProbe{originalContext: context.Background()}
 	db := sql.OpenDB(selectionConnector{Connector: connector, probe: probe})
 	t.Cleanup(func() { _ = db.Close() })
 	_, err := db.Exec(`CREATE TABLE event_delivery_handler_rule_selections (
@@ -148,6 +164,52 @@ func selectionWriterFixture(t *testing.T, backend string) (*sql.DB, *Adapter, *s
 	dialect := DialectSQLite
 	if backend == "postgres" {
 		dialect = DialectPostgres
+	} else {
+		spec, err := contracts.LoadPlatformSpecDocument(filepath.Join("..", "..", "..", "..", "..", "platform-spec.yaml"))
+		if err != nil {
+			t.Fatal(err)
+		}
+		plans, err := platformschema.GeneratePlatformTableDDLs(spec)
+		if err != nil {
+			t.Fatal(err)
+		}
+		for _, plan := range plans {
+			if plan.TableName != "runtime_process_generation" {
+				continue
+			}
+			statements, err := schemastore.SQLiteStatementsForPlan(plan)
+			if err != nil {
+				t.Fatal(err)
+			}
+			for _, statement := range statements {
+				if _, err := db.ExecContext(probe.originalContext, statement); err != nil {
+					t.Fatal(err)
+				}
+			}
+		}
+		if err := platformschema.SeedFreshProcessGeneration(probe.originalContext, db, plans); err != nil {
+			t.Fatal(err)
+		}
+		owner, err := sqlitebackend.New(db)
+		if err != nil {
+			t.Fatal(err)
+		}
+		var original processbinding.LeaseStamp
+		acknowledged, err := owner.RunProcessAcquisitionOutcome(probe.originalContext, func(ctx context.Context, tx *sql.Tx) error {
+			var err error
+			original, err = generationauthority.AdvanceProcessGeneration(ctx, tx, processbinding.LeaseIdentity{
+				LeaseID: uuid.NewString(), OwnerID: "selection-native-fixture", BootID: uuid.NewString(),
+				RuntimeInstanceID: uuid.NewString(), Backend: processbinding.SQLiteLeaseBackend,
+			}, true)
+			return err
+		})
+		if err != nil || !acknowledged {
+			t.Fatalf("acquire original selection fixture: acknowledged=%v err=%v", acknowledged, err)
+		}
+		probe.originalContext, err = generationauthority.MutationContext(probe.originalContext, original, false)
+		if err != nil {
+			t.Fatal(err)
+		}
 	}
 	return db, &Adapter{dialect: dialect}, probe
 }
@@ -298,7 +360,7 @@ func TestHandlerSelectionCanonicalReadConcurrentBothStores(t *testing.T) {
 			}
 			t.Run(backend+"/"+name, func(t *testing.T) {
 				db, a, probe := selectionWriterFixture(t, backend)
-				ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+				ctx, cancel := context.WithTimeout(probe.originalContext, 10*time.Second)
 				defer cancel()
 				id := uuid.NewString()
 				fact := selectionFact(t, "first")
@@ -315,23 +377,28 @@ func TestHandlerSelectionCanonicalReadConcurrentBothStores(t *testing.T) {
 					other = selectionFact(t, "second")
 				}
 				done := make(chan error, 1)
-				released := make(chan struct{})
 				busy := make(chan error, 1)
 				type rollbackEvidence struct{ rollback, heldCommit error }
 				rolledBack := make(chan rollbackEvidence, 1)
+				var nativeWrites []error
 				pid := make(chan int, 1)
-				var releaseOnce, rollbackOnce sync.Once
+				var rollbackOnce sync.Once
 				joined := false
 				defer func() {
 					cancel()
 					_ = tx.Rollback()
-					releaseOnce.Do(func() { close(released) })
 					if !joined {
 						<-done
 					}
 				}()
 				if backend == "sqlite" {
 					probe.mu.Lock()
+					probe.writerResult = func(err error) {
+						nativeWrites = append(nativeWrites, err)
+						if len(nativeWrites) == 1 {
+							busy <- err
+						}
+					}
 					probe.rollbackComplete = func(err error) {
 						rollbackOnce.Do(func() {
 							evidence := rollbackEvidence{rollback: err}
@@ -339,16 +406,12 @@ func TestHandlerSelectionCanonicalReadConcurrentBothStores(t *testing.T) {
 							// retry owner starts its budget, not on observer scheduling.
 							if err == nil {
 								evidence.heldCommit = tx.Commit()
-								if evidence.heldCommit == nil {
-									releaseOnce.Do(func() { close(released) })
-								}
 							}
 							rolledBack <- evidence
 						})
 					}
 					probe.mu.Unlock()
 				}
-				attempts := 0
 				type attemptSQL struct{ selects, inserts int }
 				var calls []attemptSQL
 				go func() {
@@ -359,21 +422,10 @@ func TestHandlerSelectionCanonicalReadConcurrentBothStores(t *testing.T) {
 							return
 						}
 						done <- owner.RunTransaction(ctx, "handler selection insert contention", func(ctx context.Context, contender *sql.Tx) error {
-							attempts++
-							if attempts > 1 {
-								select {
-								case <-released:
-								case <-ctx.Done():
-									return ctx.Err()
-								}
-							}
 							beforeSelects, beforeInserts := probe.counts()
 							err := a.persistHandlerRuleSelectionSQL(ctx, contender, id, other)
 							afterSelects, afterInserts := probe.counts()
 							calls = append(calls, attemptSQL{afterSelects - beforeSelects, afterInserts - beforeInserts})
-							if attempts == 1 {
-								busy <- err
-							}
 							return err
 						})
 						return
@@ -390,7 +442,6 @@ func TestHandlerSelectionCanonicalReadConcurrentBothStores(t *testing.T) {
 						return
 					}
 					pid <- backendPID
-					attempts++
 					beforeSelects, beforeInserts := probe.counts()
 					err = a.persistHandlerRuleSelectionSQL(ctx, contender, id, other)
 					afterSelects, afterInserts := probe.counts()
@@ -445,7 +496,6 @@ func TestHandlerSelectionCanonicalReadConcurrentBothStores(t *testing.T) {
 					if err := tx.Commit(); err != nil {
 						t.Fatal(err)
 					}
-					releaseOnce.Do(func() { close(released) })
 				}
 				if !joined {
 					err = <-done
@@ -461,16 +511,17 @@ func TestHandlerSelectionCanonicalReadConcurrentBothStores(t *testing.T) {
 					}
 				}
 				selects, inserts := probe.counts()
-				wantAttempts, wantInserts := 1, 2
+				wantInserts := 2
 				if backend == "sqlite" {
-					wantAttempts, wantInserts = 2, 3
-					if len(calls) != 2 || calls[0] != (attemptSQL{0, 1}) || calls[1] != (attemptSQL{1, 1}) {
-						t.Fatalf("native contention per-attempt SQL: %+v", calls)
+					// BUSY occurs at the native generation writer before selection SQL.
+					if len(nativeWrites) != 2 || nativeWrites[1] != nil {
+						t.Fatalf("native writer BUSY/retry results: %v", nativeWrites)
 					}
-				} else if len(calls) != 1 || calls[0] != (attemptSQL{1, 1}) {
-					t.Fatalf("native PostgreSQL contention SQL: %+v", calls)
 				}
-				if attempts != wantAttempts || selects != 2 || inserts != wantInserts {
+				if len(calls) != 1 || calls[0] != (attemptSQL{1, 1}) {
+					t.Fatalf("canonical contention SQL: %+v", calls)
+				}
+				if selects != 2 || inserts != wantInserts {
 					t.Fatalf("concurrent SQL selects=%d inserts=%d", selects, inserts)
 				}
 				readTx, err := db.BeginTx(ctx, nil)
@@ -560,7 +611,7 @@ func TestHandlerSelectionCanonicalReadSQLiteHeldRawWriter(t *testing.T) {
 
 func TestHandlerSelectionCanonicalReadSQLiteNativeBusyRetry(t *testing.T) {
 	db, a, probe := selectionWriterFixture(t, "sqlite")
-	ctx := context.Background()
+	ctx := probe.originalContext
 	// DELETE journal permits the writer but a native reader blocks COMMIT.
 	if _, err := db.Exec(`PRAGMA journal_mode=DELETE`); err != nil {
 		t.Fatal(err)

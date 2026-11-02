@@ -522,7 +522,8 @@ func loadRunExecutionBindingModeTx(ctx context.Context, tx *sql.Tx, runID string
 		LEFT JOIN run_fork_selected_contract_bindings AS binding ON binding.fork_run_id=run.run_id
 		WHERE run.run_id=$1`
 	if !sqlite && lock {
-		query += ` FOR UPDATE OF run`
+		// This proof does not mutate the run or upgrade shared admission.
+		query += ` FOR SHARE OF run`
 	}
 	var hash string
 	var bindingID sql.NullString
@@ -692,7 +693,7 @@ func loadSelectedForkGrantExecutionModeTx(ctx context.Context, tx *sql.Tx, bindi
 	} else {
 		query += ` AND execution.lease_expires_at > CURRENT_TIMESTAMP`
 		if lock {
-			query += ` FOR UPDATE OF execution, binding, run`
+			query += ` FOR SHARE OF execution, binding, run`
 		}
 	}
 	row := selectedForkGrantExecutionRow{Binding: startupownership.SelectedForkGrantBinding{ExecutionID: binding.ExecutionID}}

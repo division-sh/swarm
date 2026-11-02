@@ -665,7 +665,7 @@ func TestOperatorReadHandlersExposeHealthAndRunReadMethods(t *testing.T) {
 	}
 	handler := testHandler(t, Options{
 		AuthTokens: []string{testToken},
-		Handlers: testOperatorHandlers(testOperatorCapabilities{
+		Handlers: testOperatorHandlers(t, testOperatorCapabilities{
 			ExecutionPosture: executionposture.MockOnly,
 			Now:              func() time.Time { return now },
 			Ready:            func() bool { return true },
@@ -823,7 +823,7 @@ func TestOperatorReadHandlersExposeHealthAndRunReadMethods(t *testing.T) {
 func TestOperatorReadHandlersRunNotFoundAndRunStartStaysUnavailable(t *testing.T) {
 	handler := testHandler(t, Options{
 		AuthTokens: []string{testToken},
-		Handlers: testOperatorHandlers(testOperatorCapabilities{
+		Handlers: testOperatorHandlers(t, testOperatorCapabilities{
 			Ready:    func() bool { return true },
 			Database: fakePinger{err: nil},
 			Runs: &fakeRunReadStore{
@@ -858,7 +858,7 @@ func TestOperatorReadHandlersRunNotFoundAndRunStartStaysUnavailable(t *testing.T
 func TestOperatorReadHandlersRunListRejectsInvalidFilters(t *testing.T) {
 	handler := testHandler(t, Options{
 		AuthTokens: []string{testToken},
-		Handlers: testOperatorHandlers(testOperatorCapabilities{
+		Handlers: testOperatorHandlers(t, testOperatorCapabilities{
 			Ready:    func() bool { return true },
 			Database: fakePinger{err: nil},
 			Runs: &fakeRunReadStore{

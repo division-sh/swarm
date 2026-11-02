@@ -46,7 +46,7 @@ func TestCatalogTypeDetachmentRetainedArtifactBothStores(t *testing.T) {
 				t.Fatal(err)
 			}
 			captured := sourceartifactfixture.CapturedRoot(t, initial.SourceArtifact)
-			if _, err := selected.EnsureRootedSource(ctx, captured); err != nil {
+			if _, err := selected.EnsureRootedSource(toolFixtureProcessContext(t, ctx, selected), captured); err != nil {
 				t.Fatal(err)
 			}
 			if err := selected.Close(); err != nil {

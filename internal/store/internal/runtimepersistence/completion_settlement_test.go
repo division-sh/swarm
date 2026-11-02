@@ -831,9 +831,6 @@ func TestCompletionOriginalGrantFencesLaunchAndSettlementBothStores(t *testing.T
 		t.Run(phase, func(t *testing.T) {
 			eachExactFactStore(t, func(t *testing.T, selected exactFactStore) {
 				store := selected.selected.(completionSettlementTestStore)
-				if selected.postgres {
-					store = admitTestPostgresStore(t, selected.db)
-				}
 				fixture := newCompletionSettlementFixture(t, store, selected.db, !selected.postgres)
 				ctx := runtimeeffects.WithLogicalOperationIdentity(fixture.context, "exact-session-grant:"+phase)
 				ctx = withManagedCompletionTestSurface(t, ctx, fixture.authority, "claude_cli")
@@ -859,7 +856,7 @@ func TestCompletionOriginalGrantFencesLaunchAndSettlementBothStores(t *testing.T
 				beforeRevision := snapshotRotationTableRows(t, acquireCtx, selected.db, revisionQuery, identity.RunID)
 				if phase == "prelaunch" {
 					beforeAttempt := snapshotRotationTableRows(t, acquireCtx, selected.db, `SELECT * FROM runtime_external_effect_attempts WHERE attempt_id=$1`, handle.Attempt().AttemptID)
-					beforeCandidate := snapshotRotationTableRows(t, acquireCtx, selected.db, `SELECT completion_due_at,completion_revision FROM runs WHERE run_id=$1`, identity.RunID)
+					beforeCandidate := snapshotRotationTableRows(t, acquireCtx, selected.db, `SELECT revision,record_kind,due_at FROM run_completion_evidence WHERE run_id=$1 ORDER BY revision,record_kind`, identity.RunID)
 					if err := handle.MarkLaunched(ctx); err == nil {
 						t.Fatal("stale grant crossed launch boundary")
 					}
@@ -872,7 +869,7 @@ func TestCompletionOriginalGrantFencesLaunchAndSettlementBothStores(t *testing.T
 					if after := snapshotRotationTableRows(t, acquireCtx, selected.db, `SELECT * FROM runtime_external_effect_attempts WHERE attempt_id=$1`, handle.Attempt().AttemptID); !reflect.DeepEqual(beforeAttempt, after) {
 						t.Fatalf("prelaunch refusal changed attempt: before=%v after=%v", beforeAttempt, after)
 					}
-					if after := snapshotRotationTableRows(t, acquireCtx, selected.db, `SELECT completion_due_at,completion_revision FROM runs WHERE run_id=$1`, identity.RunID); !reflect.DeepEqual(beforeCandidate, after) {
+					if after := snapshotRotationTableRows(t, acquireCtx, selected.db, `SELECT revision,record_kind,due_at FROM run_completion_evidence WHERE run_id=$1 ORDER BY revision,record_kind`, identity.RunID); !reflect.DeepEqual(beforeCandidate, after) {
 						t.Fatalf("prelaunch refusal changed candidate: before=%v after=%v", beforeCandidate, after)
 					}
 				} else if phase == "launched" {
@@ -911,9 +908,6 @@ func TestCompletionOriginalGrantFencesLaunchAndSettlementBothStores(t *testing.T
 func TestCompletionLaunchChecksGrantExpiryAfterSessionLockBothStores(t *testing.T) {
 	eachExactFactStore(t, func(t *testing.T, selected exactFactStore) {
 		store := selected.selected.(completionSettlementTestStore)
-		if selected.postgres {
-			store = admitTestPostgresStore(t, selected.db)
-		}
 		fixture := newCompletionSettlementFixture(t, store, selected.db, !selected.postgres)
 		ctx := runtimeeffects.WithLogicalOperationIdentity(fixture.context, "grant-expiry-after-lock")
 		ctx = withManagedCompletionTestSurface(t, ctx, fixture.authority, "claude_cli")
@@ -923,7 +917,7 @@ func TestCompletionLaunchChecksGrantExpiryAfterSessionLockBothStores(t *testing.
 		}
 		readCtx := runtimeeffects.WithDifferentOwner(fixture.original, runtimeeffects.OwnerBuildTestInfrastructure)
 		attemptQuery := `SELECT * FROM runtime_external_effect_attempts WHERE attempt_id=$1`
-		candidateQuery := `SELECT completion_due_at,completion_revision FROM runs WHERE run_id=$1`
+		candidateQuery := `SELECT revision,record_kind,due_at FROM run_completion_evidence WHERE run_id=$1 ORDER BY revision,record_kind`
 		sessionQuery := `SELECT conversation,turn_count,runtime_state,lease_grant_id,status FROM agent_sessions WHERE run_id=$1 ORDER BY session_id`
 		revisionQuery := `SELECT * FROM run_fork_fact_revisions WHERE run_id=$1 AND family='agent_sessions' ORDER BY revision,fact_key`
 		beforeAttempt := snapshotRotationTableRows(t, readCtx, selected.db, attemptQuery, handle.Attempt().AttemptID)
@@ -978,9 +972,6 @@ func TestCompletionLaunchChecksGrantExpiryAfterSessionLockBothStores(t *testing.
 func TestCompletionSettlementChecksGrantExpiryAfterSessionLockBothStores(t *testing.T) {
 	eachExactFactStore(t, func(t *testing.T, selected exactFactStore) {
 		store := selected.selected.(completionSettlementTestStore)
-		if selected.postgres {
-			store = admitTestPostgresStore(t, selected.db)
-		}
 		fixture := newCompletionSettlementFixture(t, store, selected.db, !selected.postgres)
 		ctx := runtimeeffects.WithLogicalOperationIdentity(fixture.context, "grant-expiry-settlement-after-lock")
 		ctx = withManagedCompletionTestSurface(t, ctx, fixture.authority, "claude_cli")
@@ -1042,9 +1033,6 @@ func TestCompletionSettlementChecksGrantExpiryAfterSessionLockBothStores(t *test
 func TestCompletionOriginalGrantFencesProjectionButRecoveredGrantContinuesBothStores(t *testing.T) {
 	eachExactFactStore(t, func(t *testing.T, selected exactFactStore) {
 		store := selected.selected.(completionSettlementTestStore)
-		if selected.postgres {
-			store = admitTestPostgresStore(t, selected.db)
-		}
 		fixture := newCompletionSettlementFixture(t, store, selected.db, !selected.postgres)
 		ctx := runtimeeffects.WithLifecycleToken(fixture.context, fixture.authority.Normal)
 		ctx = runtimeeffects.WithLogicalOperationIdentity(ctx, "original-projection-grant")
@@ -1118,9 +1106,6 @@ func TestCompletionOriginalGrantFencesProjectionButRecoveredGrantContinuesBothSt
 func TestCompletionProjectionChecksGrantExpiryAfterSessionLockBothStores(t *testing.T) {
 	eachExactFactStore(t, func(t *testing.T, selected exactFactStore) {
 		store := selected.selected.(completionSettlementTestStore)
-		if selected.postgres {
-			store = admitTestPostgresStore(t, selected.db)
-		}
 		fixture := newCompletionSettlementFixture(t, store, selected.db, !selected.postgres)
 		ctx := runtimeeffects.WithLifecycleToken(fixture.context, fixture.authority.Normal)
 		ctx = runtimeeffects.WithLogicalOperationIdentity(ctx, "grant-expiry-projection-after-lock")
@@ -1541,24 +1526,30 @@ func proveCompletionProviderHeadStaleAuthorityCannotSettle(t *testing.T, fixture
 	requireCompletionSettlementRows(t, fixture, handle.Attempt().AttemptID, settlement.AgentTurn.TurnID, runtimeeffects.StateResponseObserved, 0, 1)
 }
 
-func newCompletionSettlementFixture(t *testing.T, store completionSettlementTestStore, db *sql.DB, sqlite bool) completionSettlementFixture {
-	return newCompletionSettlementFixtureWithMemory(t, store, db, sqlite, agentmemory.Plan{Enabled: true})
+func newCompletionSettlementFixture(t *testing.T, store completionSettlementTestStore, db *sql.DB, sqlite bool, held ...context.Context) completionSettlementFixture {
+	return newCompletionSettlementFixtureWithMemory(t, store, db, sqlite, agentmemory.Plan{Enabled: true}, held...)
 }
 
-func newCompletionSettlementFixtureWithMemory(t *testing.T, store completionSettlementTestStore, db *sql.DB, sqlite bool, memory agentmemory.Plan) completionSettlementFixture {
-	return newCompletionSettlementFixtureForFlow(t, store, db, sqlite, memory, "global")
+func newCompletionSettlementFixtureWithMemory(t *testing.T, store completionSettlementTestStore, db *sql.DB, sqlite bool, memory agentmemory.Plan, held ...context.Context) completionSettlementFixture {
+	return newCompletionSettlementFixtureForFlow(t, store, db, sqlite, memory, "global", held...)
 }
 
-func newCompletionSettlementFixtureForFlow(t *testing.T, store completionSettlementTestStore, db *sql.DB, sqlite bool, memory agentmemory.Plan, flowInstance string) completionSettlementFixture {
+func newCompletionSettlementFixtureForFlow(t *testing.T, store completionSettlementTestStore, db *sql.DB, sqlite bool, memory agentmemory.Plan, flowInstance string, held ...context.Context) completionSettlementFixture {
 	t.Helper()
 	return newCompletionSettlementFixtureWithActor(t, store, db, sqlite, memory, flowInstance, runtimeactors.AgentConfig{
 		ExecutionMode: "live", LLMBackend: "claude_cli", ResolvedLLMBackend: "claude_cli",
-	})
+	}, held...)
 }
 
-func newCompletionSettlementFixtureWithActor(t *testing.T, store completionSettlementTestStore, db *sql.DB, sqlite bool, memory agentmemory.Plan, flowInstance string, actor runtimeactors.AgentConfig) completionSettlementFixture {
+func newCompletionSettlementFixtureWithActor(t *testing.T, store completionSettlementTestStore, db *sql.DB, sqlite bool, memory agentmemory.Plan, flowInstance string, actor runtimeactors.AgentConfig, held ...context.Context) completionSettlementFixture {
 	t.Helper()
 	ctx := testAuthorActivityContext()
+	if len(held) > 1 {
+		t.Fatal("completion fixture requires at most one held original context")
+	}
+	if len(held) == 1 {
+		ctx = held[0]
+	}
 	ctx = originalStoreFixtureContext(t, ctx, store)
 	now := time.Now().UTC()
 	agentID := "completion-settlement-agent"
@@ -1648,6 +1639,8 @@ func (f completionSettlementFixture) contextFor(authority runtimeeffects.Authori
 	ctx := runtimeeffects.WithController(runtimeeffects.WithAuthority(f.original, authority), newCompletionControllerForTest(f.store))
 	if authority.Target.Memory.Enabled {
 		ctx = runtimeeffects.WithSessionGrant(ctx, runtimeeffects.SessionGrant{SessionID: f.sessionID, GrantID: f.grantID, LockOwner: f.leaseHolder})
+	} else {
+		ctx = runtimeeffects.WithSessionGrant(ctx, runtimeeffects.SessionGrant{})
 	}
 	return runtimedelivery.WithClaim(ctx, f.origin)
 }

@@ -95,14 +95,14 @@ func newSessionPublicationFixture(t *testing.T, backend string) *sessionPublicat
 		f.location = testutil.StartPostgresDSN(t)
 		f.selected, _ = storetest.StartPostgresRuntimeStoreWithReopen(t, f.location)
 	}
-	source := sourceartifactfixture.Require(t, context.Background(), f.selected)
-	rooted, _ := sourceartifactfixture.Rooted(t, "session-business", sourceartifactfixture.Artifact())
-	if _, err := f.selected.EnsureRootedSource(context.Background(), rooted); err != nil {
-		t.Fatal(err)
-	}
 	runtimeID := uuid.NewString()
 	process := worklifetime.NewProcess()
-	owner, err := process.NewRuntime(context.Background(), worklifetime.RuntimeIdentity{RuntimeInstanceID: runtimeID, BundleHash: source.BundleHash()})
+	ctx, err := agentfixture.ProcessContext(t, worklifetime.WithProcess(runtimecorrelation.WithRuntimeInstanceID(context.Background(), runtimeID), process), f.selected.(agentfixture.Store))
+	if err != nil {
+		t.Fatal(err)
+	}
+	source := sourceartifactfixture.Require(t, ctx, f.selected)
+	owner, err := process.NewRuntime(ctx, worklifetime.RuntimeIdentity{RuntimeInstanceID: runtimeID, BundleHash: source.BundleHash()})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -117,7 +117,11 @@ func newSessionPublicationFixture(t *testing.T, backend string) *sessionPublicat
 			t.Error(err)
 		}
 	})
-	f.ctx = runtimecorrelation.WithRootAdmission(runtimecorrelation.WithSourceArtifactFact(context.Background(), source), rooted.Admission())
+	rooted, _ := sourceartifactfixture.Rooted(t, "session-business", sourceartifactfixture.Artifact())
+	if _, err := f.selected.EnsureRootedSource(ctx, rooted); err != nil {
+		t.Fatal(err)
+	}
+	f.ctx = runtimecorrelation.WithRootAdmission(runtimecorrelation.WithSourceArtifactFact(ctx, source), rooted.Admission())
 	f.ctx = runtimeauthoractivity.WithScope(f.ctx, runtimeauthoractivity.BundleScope(runtimeID, source.BundleHash()))
 	f.ctx = worklifetime.WithOccurrence(f.ctx, owner)
 	f.ctx = runtimecorrelation.WithRuntimeInstanceID(f.ctx, runtimeID)

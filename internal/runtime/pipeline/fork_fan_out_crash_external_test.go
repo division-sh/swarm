@@ -131,6 +131,7 @@ func TestIssue642MixedFanOutCrashRestartBothStores(t *testing.T) {
 				if err != nil {
 					t.Fatal(err)
 				}
+				ctx = nativeOriginalProcessContextFixture(t, ctx, capability)
 				family, ok := selected.RunFork()
 				if !ok {
 					t.Fatal("restart requires the canonical selected fork owner")

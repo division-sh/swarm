@@ -232,6 +232,9 @@ func initializeFanOutReadbackTestDB(t *testing.T, db *sql.DB, backend string) {
 			ordinal INTEGER NOT NULL, outcome_kind TEXT NOT NULL, event_id TEXT, source_event_id TEXT, inherited_disposition TEXT, failure TEXT, created_at TIMESTAMP NOT NULL,
 			UNIQUE (run_id,triggering_delivery_id,flow_path,declaration_family,semantic_path,ordinal),
 			UNIQUE (run_id,deployment_feed_id,ordinal))`,
+		`CREATE TABLE fan_out_obligation_barriers (
+			run_id TEXT NOT NULL, triggering_delivery_id TEXT NOT NULL, flow_path TEXT NOT NULL,
+			declaration_family TEXT NOT NULL, semantic_path TEXT NOT NULL, status TEXT NOT NULL)`,
 	}
 	if backend == "postgres" {
 		statements[1] = strings.ReplaceAll(statements[1], "event_id TEXT", "event_id UUID")

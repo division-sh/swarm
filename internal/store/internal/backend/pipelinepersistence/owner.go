@@ -45,6 +45,7 @@ type EventCommitOwner interface {
 }
 
 type eventCommitTxStore interface {
+	LockWorkflowPublicationTx(context.Context, *sql.Tx, runtimebus.PublicationCommand) error
 	publishCardChanges(bool, bool) error
 	RequireActiveSourceTx(context.Context, *sql.Tx, string) (runtimecorrelation.SourceArtifactFact, error)
 	resourceSourceOwner() *storedurabledata.Owner

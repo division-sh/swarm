@@ -2,6 +2,7 @@ package pipeline_test
 
 import (
 	"context"
+	"errors"
 	"sort"
 	"strings"
 	"sync"
@@ -32,24 +33,14 @@ const authorActivityTestRuntimeInstanceID = "11111111-1111-1111-1111-11111111111
 
 func originalPipelineFixtureContext(t testing.TB, ctx context.Context, selected any) context.Context {
 	t.Helper()
-	if startupownership.HasMutationAuthority(ctx) {
-		if _, err := startupownership.CaptureMutationAuthority(ctx); err != nil {
-			t.Fatal(err)
-		}
-		return ctx
-	}
-	if _, present := runtimecorrelation.RuntimeInstanceIDFromContext(ctx); !present {
+	if _, present := runtimecorrelation.RuntimeInstanceIDFromContext(ctx); !present && !startupownership.HasMutationAuthority(ctx) {
 		scope, found := runtimeauthoractivity.ScopeFromContext(ctx)
 		if !found || scope.RuntimeInstanceID == "" {
 			t.Fatal("pipeline fixture requires its declared runtime before process acquisition")
 		}
 		ctx = runtimecorrelation.WithRuntimeInstanceID(ctx, scope.RuntimeInstanceID)
 	}
-	process, err := agentfixture.ProcessCapability(t, ctx, selected.(agentfixture.Store))
-	if err != nil {
-		t.Fatal(err)
-	}
-	ctx, err = startupownership.WithProcessMutationAuthority(ctx, process)
+	ctx, err := agentfixture.ProcessContext(t, ctx, selected.(agentfixture.Store))
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -129,19 +120,23 @@ func replacePipelineExternalWorkOccurrenceForSource(t *testing.T, fact runtimeco
 	identity := worklifetime.RuntimeIdentity{RuntimeInstanceID: authorActivityTestRuntimeInstanceID, BundleHash: fact.BundleHash()}
 	join, cancel := context.WithTimeout(context.Background(), 5*time.Second)
 	defer cancel()
-	if _, err := predecessor.RetireAndWait(join); err != nil {
+	fixture.mu.Lock()
+	if fixture.runtimes[identity] != predecessor {
+		fixture.mu.Unlock()
+		t.Fatal("native reopen cannot replace another runtime occurrence")
+	}
+	fixture.mu.Unlock()
+	if err := fixture.retireAndWait(join); err != nil {
 		t.Fatal(err)
 	}
 	fixture.mu.Lock()
 	defer fixture.mu.Unlock()
-	if fixture.runtimes[identity] != predecessor {
-		t.Fatal("native reopen cannot replace another runtime occurrence")
-	}
+	fixture.process = worklifetime.NewProcess()
 	next, err := fixture.process.NewRuntime(context.Background(), identity)
 	if err != nil {
 		t.Fatal(err)
 	}
-	fixture.runtimes[identity] = next
+	fixture.runtimes = map[worklifetime.RuntimeIdentity]*worklifetime.RuntimeOccurrence{identity: next}
 }
 
 func (f *pipelineExternalTestWorkFixture) retireAndWait(ctx context.Context) error {
@@ -169,11 +164,70 @@ func testAuthorActivityContext(t *testing.T, ctx context.Context) context.Contex
 func testAuthorActivityContextForSource(t *testing.T, ctx context.Context, fact runtimecorrelation.SourceArtifactFact) context.Context {
 	t.Helper()
 	ctx = worklifetime.WithOccurrence(ctx, pipelineExternalTestWorkOwnerForSource(t, fact))
+	fixture, _ := pipelineExternalTestWorkFixtures.Load(t)
+	ctx = worklifetime.WithProcess(ctx, fixture.(*pipelineExternalTestWorkFixture).process)
 	ctx = runtimecorrelation.WithSourceArtifactFact(ctx, fact)
 	return runtimeauthoractivity.WithScope(ctx, runtimeauthoractivity.BundleScope(
 		authorActivityTestRuntimeInstanceID,
 		fact.BundleHash(),
 	))
+}
+
+func nativeProcessContextFixture(t *testing.T, ctx context.Context, selected any) context.Context {
+	t.Helper()
+	if startupownership.HasMutationAuthority(ctx) {
+		original, err := startupownership.CaptureMutationAuthority(ctx)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if process, found := worklifetime.ProcessFromContext(ctx); found {
+			if err := process.BindOriginalProcess(original.ProcessAuthority().LeaseStamp()); err != nil {
+				t.Fatal(err)
+			}
+		}
+		return ctx
+	}
+	if _, found := runtimecorrelation.RuntimeInstanceIDFromContext(ctx); !found {
+		scope, scoped := runtimeauthoractivity.ScopeFromContext(ctx)
+		if !scoped || scope.RuntimeInstanceID == "" {
+			t.Fatal("native fixture requires its original runtime attribution")
+		}
+		ctx = runtimecorrelation.WithRuntimeInstanceID(ctx, scope.RuntimeInstanceID)
+	}
+	store, ok := selected.(agentfixture.Store)
+	if !ok {
+		t.Fatalf("native fixture requires its process acquisition owner, got %T", selected)
+	}
+	if process, found := worklifetime.ProcessFromContext(ctx); found {
+		if _, bound := process.OriginalProcess(); bound {
+			return ctx
+		}
+	}
+	capability, err := agentfixture.ProcessCapability(t, ctx, store)
+	if err != nil {
+		t.Fatal(err)
+	}
+	return nativeOriginalProcessContextFixture(t, ctx, capability)
+}
+
+func nativeOriginalProcessContextFixture(t *testing.T, ctx context.Context, capability startupownership.ProcessCapability) context.Context {
+	t.Helper()
+	ctx, err := startupownership.WithProcessMutationAuthority(ctx, capability)
+	if err != nil {
+		t.Fatal(err)
+	}
+	original, err := capability.Evidence()
+	if err != nil {
+		t.Fatal(err)
+	}
+	process, ok := worklifetime.ProcessFromContext(ctx)
+	if !ok {
+		t.Fatal("native fixture requires its original process work owner")
+	}
+	if err := process.BindOriginalProcess(original.LeaseStamp()); err != nil {
+		t.Fatal(err)
+	}
+	return ctx
 }
 
 type testAuthorActivityCatalogRegistrar interface {
@@ -223,6 +277,26 @@ func newScopedTestEventBus(t *testing.T, eventStore scopedTestDurableStore, opts
 	}
 	if opts.WorkOwner == nil {
 		opts.WorkOwner = pipelineExternalTestWorkOwnerForSource(t, opts.SourceArtifactFact)
+	}
+	admitted, err := opts.WorkOwner.Begin(context.Background())
+	if err != nil {
+		return nil, err
+	}
+	process, found := worklifetime.ProcessFromContext(admitted.Context())
+	if !found {
+		return nil, errors.Join(errors.New("native bus fixture requires its process work owner"), admitted.Done())
+	}
+	if _, bound := process.OriginalProcess(); !bound {
+		ctx := runtimecorrelation.WithRuntimeInstanceID(admitted.Context(), opts.RuntimeInstanceID)
+		ctx = runtimeauthoractivity.WithScope(ctx, runtimeauthoractivity.BundleScope(opts.RuntimeInstanceID, opts.SourceArtifactFact.BundleHash()))
+		ctx, err = opts.MutationContext(ctx)
+		if err != nil {
+			return nil, errors.Join(err, admitted.Done())
+		}
+		nativeProcessContextFixture(t, ctx, eventStore)
+	}
+	if err := admitted.Done(); err != nil {
+		return nil, err
 	}
 	if !opts.ReceiverExecution.Configured() {
 		opts.ReceiverExecution = eventreceiver.NormalExecution()

@@ -228,6 +228,9 @@ func TestDisplacedHTTPActivityRecoveryRoutesSiblingBundlesBothStores(t *testing.
 			if err != nil || len(summary.Results) != 2 || calls.Load() != 2 {
 				t.Fatalf("runtime-scoped sibling recovery lost once-only results: count=%d calls=%d err=%v", len(summary.Results), calls.Load(), err)
 			}
+			replacePipelineExternalWorkOccurrenceForSource(t, first.fact, pipelineExternalTestWorkOwnerForSource(t, first.fact))
+			publicationCtx := testAuthorActivityContextForSource(t, context.Background(), first.fact)
+			publicationCtx = nativeOriginalProcessContextFixture(t, publicationCtx, successor)
 			for _, recovered := range summary.Results {
 				proveRecoveredActivitySibling(t, selected, cells, successorRequest.RuntimeInstanceID, recovered, successor)
 			}

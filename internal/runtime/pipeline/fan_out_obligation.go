@@ -13,6 +13,7 @@ import (
 	runtimefailures "github.com/division-sh/swarm/internal/runtime/failures"
 	"github.com/division-sh/swarm/internal/runtime/fanoutobligation"
 	runtimepipelineobligation "github.com/division-sh/swarm/internal/runtime/pipelineobligation"
+	runtimerunlifecycle "github.com/division-sh/swarm/internal/runtime/runlifecycle"
 )
 
 type FanOutClaimRequest struct {
@@ -189,6 +190,7 @@ func (i FanOutEvaluationInput) Validate(intent fanoutobligation.Intent) error {
 
 type FanOutObligationOwner interface {
 	FanOutSummaryOwner
+	AdvanceFanOutBarriers(context.Context, fanoutobligation.IntentKey) ([]runtimerunlifecycle.CommittedGenericScheduleActivation, error)
 	BeginFanOutEvaluation(context.Context, fanoutobligation.Claim, func(FanOutEvaluationInput) error) (FanOutEvaluationInput, runtimepipelineobligation.PublicationGroup, error)
 	BeginFanOutPublicationGroup(context.Context, fanoutobligation.Claim) (runtimepipelineobligation.PublicationGroup, error)
 	ClaimFanOutIntent(context.Context, FanOutClaimRequest) (fanoutobligation.Intent, fanoutobligation.Claim, bool, error)
@@ -198,6 +200,11 @@ type FanOutObligationOwner interface {
 	ReleaseFanOutRetryable(context.Context, FanOutRetryableRelease) (FanOutClaimSettlement, error)
 	BlockFanOutClaim(context.Context, FanOutBlockRequest) (FanOutClaimSettlement, error)
 	CancelRunFanOut(context.Context, string, string, time.Time) error
+}
+
+type SelectedFanOutObligationOwner interface {
+	FanOutObligationOwner
+	ReconcileFanOutBarriers(context.Context) ([]runtimerunlifecycle.CommittedGenericScheduleActivation, error)
 }
 
 // Evaluation-load failures retain the pump's blocking disposition independently

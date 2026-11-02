@@ -63,9 +63,9 @@ ack: {mode: durable_before_dispatch}
 				t.Fatal(err)
 			}
 			rooted, _ := sourceartifactfixture.Rooted(t, "whatsapp-publication", artifact)
-			fact := sourceartifactfixture.RequireArtifact(t, context.Background(), store, artifact)
-			ctx := runtimecorrelation.WithSourceArtifactFact(testAuthorActivityContextForBundle(fact.BundleHash()), fact)
-			ctx = originalStoreFixtureContext(t, ctx, f.store)
+			ctx := originalStoreFixtureContext(t, testAuthorActivityContextForBundle(artifact.BundleHash()), f.store)
+			fact := sourceartifactfixture.RequireArtifact(t, ctx, store, artifact)
+			ctx = runtimecorrelation.WithSourceArtifactFact(ctx, fact)
 			ctx = runtimecorrelation.WithRootAdmission(ctx, rooted.Admission())
 			if _, err := f.store.(rootedSourceStore).EnsureRootedSource(ctx, rooted); err != nil {
 				t.Fatal(err)

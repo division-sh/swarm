@@ -21,7 +21,7 @@ func TestChannelOnboardingEarlyResetCleanupSelectedStoreParity(t *testing.T) {
 				t.Run(backend+"/"+entry+"/"+fault, func(t *testing.T) {
 					rig := newBoundHandoffRig(t, fixture)
 					before, candidate := checkpointEarlyOnboardingAdmissions(t, rig)
-					ctx := context.Background()
+					ctx := fixture.ctx
 					if entry != "preflight_rejected" {
 						if err := rig.file.Set(ctx, before.CredentialAdmissions[0].StoreKey, "successor-value"); err != nil {
 							t.Fatal(err)
@@ -103,7 +103,7 @@ func TestChannelOnboardingEarlyResetSelectedStoreFences(t *testing.T) {
 					t.Run(backend+"/"+entry+"/"+timing+"/"+change, func(t *testing.T) {
 						rig := newBoundHandoffRig(t, fixture)
 						before, candidate := checkpointEarlyOnboardingAdmissions(t, rig)
-						ctx := context.Background()
+						ctx := fixture.ctx
 						if entry != "preflight_rejected" {
 							if err := rig.file.Set(ctx, before.CredentialAdmissions[0].StoreKey, "successor-value"); err != nil {
 								t.Fatal(err)
@@ -112,7 +112,7 @@ func TestChannelOnboardingEarlyResetSelectedStoreFences(t *testing.T) {
 						var winner channelonboarding.Operation
 						advance := func() {
 							if change == "retired" {
-								retireChannelOnboardingParent(t, fixture.store, before, rig.now)
+								retireChannelOnboardingParent(t, fixture.ctx, fixture.store, before, rig.now)
 							} else {
 								phase := before.Phase
 								if change == "phase_advanced" {
@@ -176,7 +176,7 @@ func TestChannelOnboardingEarlyResetPreservesInheritedAndObservedEvidence(t *tes
 		for _, entry := range []string{"credential_stale", "preflight_rejected", "local_reconciliation"} {
 			t.Run(backend+"/"+entry, func(t *testing.T) {
 				rig := newBoundHandoffRig(t, fixture)
-				ctx := context.Background()
+				ctx := fixture.ctx
 				begun := rig.start(t, channelonboarding.VerbConnect, "original-token", false)
 				bound := rig.confirm(t, begun, "account-a")
 				if err := rig.file.Set(ctx, bound.ProviderAuthority.Credential.Key, "bound-rotation"); err != nil {
@@ -254,7 +254,7 @@ func TestChannelOnboardingEarlyResetPreservesInheritedAndObservedEvidence(t *tes
 
 func checkpointEarlyOnboardingAdmissions(t *testing.T, rig *boundHandoffRig) (channelonboarding.Operation, channelonboarding.Candidate) {
 	t.Helper()
-	ctx := context.Background()
+	ctx := rig.fixture.ctx
 	known, err := rig.fixture.store.ListChannelOnboardingOperations(ctx)
 	if err != nil {
 		t.Fatal(err)
@@ -296,7 +296,7 @@ func checkpointEarlyOnboardingAdmissions(t *testing.T, rig *boundHandoffRig) (ch
 
 func getEarlyResetCandidate(t *testing.T, rig *boundHandoffRig, op channelonboarding.Operation) channelonboarding.Candidate {
 	t.Helper()
-	result, err := rig.service.Get(context.Background(), op.OperationID)
+	result, err := rig.service.Get(rig.fixture.ctx, op.OperationID)
 	if err != nil || result.Candidate == nil {
 		t.Fatalf("candidate = %#v %v", result, err)
 	}
@@ -305,7 +305,7 @@ func getEarlyResetCandidate(t *testing.T, rig *boundHandoffRig, op channelonboar
 
 func checkpointEarlyWrittenAdmissions(t *testing.T, rig *boundHandoffRig, op channelonboarding.Operation) channelonboarding.Operation {
 	t.Helper()
-	ctx := context.Background()
+	ctx := rig.fixture.ctx
 	writer, err := channelonboarding.NewCredentialWriter(rig.file)
 	if err != nil {
 		t.Fatal(err)

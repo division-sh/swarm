@@ -25,6 +25,7 @@ import (
 	"github.com/division-sh/swarm/internal/store"
 	storebackend "github.com/division-sh/swarm/internal/store/backendselection"
 	"github.com/division-sh/swarm/internal/store/selected"
+	"github.com/google/uuid"
 )
 
 // DeploymentChannelControl owns one attempt. The durable operation owner holds
@@ -34,6 +35,7 @@ type DeploymentChannelControl struct {
 	store           *selected.Owner
 	service         *channelonboarding.Service
 	process         *worklifetime.Process
+	capability      startupownership.ProcessCapability
 	session         ChannelRegistrationSession
 	expectedAccount string
 	provider        string
@@ -130,8 +132,29 @@ func openDeploymentChannelClient(ctx context.Context, provider string, opts root
 		if err := c.bootstrapRegistrationSchema(ctx, spec); err != nil {
 			return nil, err
 		}
+		c.capability, err = c.store.StartupOwnership().AcquireProcessCapability(ctx, startupownership.AcquireRequest{OwnerID: "deployment-channel-registration", BootID: uuid.NewString(), RuntimeInstanceID: uuid.NewString()})
+		if err != nil {
+			return nil, err
+		}
+		original, err := c.capability.Evidence()
+		if err != nil {
+			return nil, err
+		}
+		if err := c.process.BindOriginalProcess(original.LeaseStamp()); err != nil {
+			return nil, err
+		}
 	}
 	return c, c.initializeRegistration(ctx, directory.Path, loaded.Config.Channels.HITL, candidate, projection.ProviderTriggers, opts)
+}
+
+func (c *DeploymentChannelControl) registrationContext(ctx context.Context) (context.Context, error) {
+	if c.capability == nil {
+		return ctx, nil
+	}
+	if process, found := worklifetime.ProcessFromContext(ctx); found && process != c.process {
+		return nil, errors.New("channel registration cannot replace its original process work owner")
+	}
+	return startupownership.WithProcessMutationAuthority(worklifetime.WithProcess(ctx, c.process), c.capability)
 }
 
 func (c *DeploymentChannelControl) bootstrapRegistrationSchema(ctx context.Context, spec runtimecontracts.PlatformSpecDocument) error {
@@ -198,6 +221,10 @@ func openDeploymentChannelStore(ctx context.Context, provider string, opts rootC
 }
 
 func (c *DeploymentChannelControl) initializeRegistration(ctx context.Context, directory string, hitl *channelonboarding.AccountReference, candidate channelonboarding.Candidate, triggers *providertriggers.CatalogSnapshot, opts rootCommandOptions) error {
+	ctx, err := c.registrationContext(ctx)
+	if err != nil {
+		return err
+	}
 	owner, provider := c.store, c.provider
 	credentialStore, err := CredentialFileStore()
 	if err != nil {
@@ -266,8 +293,11 @@ func (c *DeploymentChannelControl) call(ctx context.Context, method string, para
 		}
 		return c.remote.call(ctx, method, params, target)
 	}
+	ctx, err := c.registrationContext(ctx)
+	if err != nil {
+		return err
+	}
 	var result any
-	var err error
 	switch method {
 	case "channel.onboarding_select", "channel.onboarding_start":
 		expected := c.expectedAccount
@@ -339,7 +369,10 @@ func (c *DeploymentChannelControl) Close(ctx context.Context) error {
 	if c.remote != nil {
 		return nil
 	}
-	var err error
+	ctx, err := c.registrationContext(ctx)
+	if err != nil {
+		return err
+	}
 	if c.session != nil {
 		err = c.session.Close(ctx)
 	}
@@ -350,6 +383,9 @@ func (c *DeploymentChannelControl) Close(ctx context.Context) error {
 	_, joined := c.process.Join(ctx)
 	if joined != nil {
 		return errors.Join(err, joined)
+	}
+	if c.capability != nil {
+		err = errors.Join(err, c.capability.Release(ctx))
 	}
 	return errors.Join(err, c.store.CloseUnactivated())
 }
@@ -385,6 +421,10 @@ func (c *DeploymentChannelControl) AccountStatus(ctx context.Context, ref channe
 func (c *DeploymentChannelControl) ConsumeWebhookClaim(ctx context.Context, account channelonboarding.AccountReference, credential func(channelonboarding.CredentialAdmission) bool, admit func() (providertriggers.Delivery, error), claim func(providertriggers.InboundAdmissionPlan) (providertriggers.Delivery, error), current func() bool, plans ...packs.SatisfactionPlan) (bool, error) {
 	c.mu.Lock()
 	defer c.mu.Unlock()
+	ctx, err := c.registrationContext(ctx)
+	if err != nil {
+		return false, err
+	}
 	if consumed, err := c.registeredOperatorInput(ctx, account, credential, admit, current, plans); consumed || err != nil {
 		return consumed, err
 	}
