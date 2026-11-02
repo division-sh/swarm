@@ -58,7 +58,7 @@ func TestEmbeddedConnectorPublicJourneysBothStores(t *testing.T) {
 			env := append(goldenProcessEnv(t, base, store.passwordEnv, 0),
 				"SWARM_MANAGED_CREDENTIALS_FILE="+filepath.Join(base, "managed-credentials.json"),
 				"SWARM_CREDENTIALS_FILE="+filepath.Join(base, "credentials.json"))
-			secrets := []string{"slack-secret", "notion-secret", "graph-client-secret", "fresh-token", "after-401-token", "graph-fresh-token", "graph-after-401-token", "refresh-secret", "rotated-refresh", "after-401-refresh", "fixture-github-installation-token", "connector-webhook-secret", github.PrivateKey}
+			secrets := []string{"slack-secret", "notion-secret", "graph-client-secret", "fresh-token", "after-401-token", "graph-fresh-token", "graph-after-401-token", "refresh-secret", "rotated-refresh", "after-401-refresh", "fixture-github-installation-token", "connector-webhook-secret", "slack-webhook-secret", github.PrivateKey}
 			command := func(input string, args ...string) string {
 				t.Helper()
 				result := runReleaseCommand(t, goldenStartupTimeout, base, env, input, binary, append([]string{"--config", config}, args...)...)
@@ -74,6 +74,7 @@ func TestEmbeddedConnectorPublicJourneysBothStores(t *testing.T) {
 			command("graph-client-secret\n", "connections", "connect", "microsoft_graph.microsoft_graph_app", "--grant", "client_credentials", "--provider", "microsoft_graph", "--token-url", graph.Server.URL+"/tenant/oauth2/v2.0/token", "--client-id", "graph-client", "--client-secret-stdin", "--scope", "https://graph.microsoft.com/.default", "--json")
 			command(github.PrivateKey, "connections", "connect", "github.github_app", "--grant", "github_app_installation", "--provider", "github", "--api-base-url", github.Server.URL, "--client-id", "github-app-client-id", "--installation-id", "1001", "--private-key-stdin", "--json")
 			command("connector-webhook-secret\n", "secrets", "set", "github.webhook_signing_secret", "--stdin")
+			command("slack-webhook-secret\n", "secrets", "set", "slack.webhook_signing_secret", "--stdin")
 			for _, key := range []string{"slack.slack_oauth", "notion.notion_oauth", "microsoft_graph.microsoft_graph_app", "github.github_app"} {
 				var status struct {
 					Connections []struct {
@@ -156,6 +157,7 @@ func TestEmbeddedConnectorPublicJourneysBothStores(t *testing.T) {
 				if slack.Calls.Load() != 4 || slack.TokenCalls.Load() != 2 || len(slack.SideEffects) != 0 {
 					t.Fatal("Slack lost exact success/401-refresh/provider-error accounting")
 				}
+				postConnectorSlackWebhook(t, process, publicOrigin.URL, publicOrigin.Client(), runID, slack, secrets)
 			})
 			t.Run("notion", func(t *testing.T) {
 				publish(t, "notion", "first block", "succeeded", 1)
@@ -349,6 +351,122 @@ func postConnectorGitHubWebhook(t *testing.T, process *releaseServeProcess, orig
 	}
 }
 
+func postConnectorSlackWebhook(t *testing.T, process *releaseServeProcess, origin string, client *http.Client, runID string, slack *connectorapi.Slack, secrets []string) {
+	t.Helper()
+	client.Timeout = 5 * time.Second
+	post := func(body []byte, timestamp time.Time, secret string) (int, string, string) {
+		t.Helper()
+		request, err := http.NewRequestWithContext(t.Context(), http.MethodPost, origin+"/webhooks/connectors/slack", bytes.NewReader(body))
+		if err != nil {
+			t.Fatal(err)
+		}
+		stamp := fmt.Sprint(timestamp.Unix())
+		request.Header.Set("Content-Type", "application/json")
+		request.Header.Set("User-Agent", "slack-signed-journey")
+		request.Header.Set("X-Slack-Request-Timestamp", stamp)
+		if secret != "" {
+			mac := hmac.New(sha256.New, []byte(secret))
+			_, _ = mac.Write([]byte("v0:" + stamp + ":"))
+			_, _ = mac.Write(body)
+			request.Header.Set("X-Slack-Signature", "v0="+hex.EncodeToString(mac.Sum(nil)))
+		}
+		response, err := client.Do(request)
+		if err != nil {
+			t.Fatal(err)
+		}
+		defer response.Body.Close()
+		raw, err := io.ReadAll(response.Body)
+		if err != nil {
+			t.Fatal(err)
+		}
+		requireConnectorSecretsAbsent(t, string(raw), secrets)
+		return response.StatusCode, string(raw), response.Header.Get("Content-Type")
+	}
+	snapshot := func() []goldenEvent {
+		t.Helper()
+		events, err := listGoldenEvents(t.Context(), process.rpc, runID)
+		if err != nil {
+			t.Fatal(err)
+		}
+		return events
+	}
+	unchanged := func(before []goldenEvent, calls int64) {
+		t.Helper()
+		beforeIDs, afterIDs := connectorPublishedEventIDs(before), connectorPublishedEventIDs(snapshot())
+		if !reflect.DeepEqual(beforeIDs, afterIDs) {
+			t.Fatalf("Slack control changed publication IDs: before=%v after=%v", beforeIDs, afterIDs)
+		}
+		if got := slack.Calls.Load(); got != calls {
+			t.Fatalf("Slack control changed provider call count: got=%d want=%d", got, calls)
+		}
+		if slack.TokenCalls.Load() != 2 || len(slack.SideEffects) != 0 {
+			t.Fatal("Slack control changed token exchanges or left an extra effect")
+		}
+	}
+	before := snapshot()
+	challenge := []byte(`{"type":"url_verification","challenge":"signed-slack-challenge"}`)
+	if status, body, contentType := post(challenge, time.Now(), "slack-webhook-secret"); status != http.StatusOK || body != "signed-slack-challenge" || contentType != "text/plain; charset=utf-8" {
+		t.Fatalf("Slack challenge HTTP=%d content-type=%q body=%q", status, contentType, body)
+	}
+	unchanged(before, 4)
+	body := []byte(`{"type":"event_callback","event_id":"signed-slack-delivery","token":"redacted-slack-token","event":{"type":"message","channel":"C-INBOUND","text":"signed Slack callback","user":"U-SYNTHETIC"}}`)
+	for _, control := range []struct {
+		name, secret string
+		timestamp    time.Time
+	}{
+		{"missing-signature", "", time.Now()},
+		{"bad-signature", "wrong-signing-key", time.Now()},
+		{"stale-timestamp", "slack-webhook-secret", time.Now().Add(-10 * time.Minute)},
+	} {
+		if status, response, _ := post(body, control.timestamp, control.secret); status != http.StatusUnauthorized {
+			t.Fatalf("Slack %s HTTP=%d: %s", control.name, status, response)
+		}
+		unchanged(before, 4)
+	}
+	var receipt struct {
+		Status          string   `json:"status"`
+		RunID           string   `json:"run_id"`
+		FlowPath        string   `json:"flow_path"`
+		Provider        string   `json:"provider"`
+		ProviderEventID string   `json:"provider_event_id"`
+		ProviderType    string   `json:"provider_event_type"`
+		PublicationID   string   `json:"publication_id"`
+		EventIDs        []string `json:"event_ids"`
+		EventNames      []string `json:"event_names"`
+	}
+	status, response, _ := post(body, time.Now(), "slack-webhook-secret")
+	if status != http.StatusAccepted || json.Unmarshal([]byte(response), &receipt) != nil || receipt.Status != "accepted" || receipt.RunID != runID || receipt.FlowPath != "." || receipt.Provider != "slack" || receipt.ProviderEventID != "signed-slack-delivery" || receipt.ProviderType != "message" || receipt.PublicationID == "" || len(receipt.EventIDs) != 1 || receipt.EventIDs[0] == "" || !reflect.DeepEqual(receipt.EventNames, []string{"inbound.slack.message"}) {
+		t.Fatalf("Slack signed callback HTTP=%d receipt=%s", status, response)
+	}
+	result := waitConnectorPublicResult(t, process, runID, "send_slack_webhook.succeeded", 1, append(secrets, "redacted-slack-token"))
+	requireConnectorCall(t, slack.SideEffects, "POST", "/api/chat.postMessage", "Bearer after-401-token", map[string]any{"channel": "C-INBOUND", "text": "signed Slack callback"})
+	var published []goldenEvent
+	for _, event := range snapshot() {
+		if event.EventName == "inbound.slack.message" {
+			published = append(published, event)
+		}
+	}
+	if len(published) != 1 || published[0].EventID != receipt.EventIDs[0] || published[0].RunID != runID || result.SourceEventID != published[0].EventID {
+		t.Fatalf("Slack publication/result identity mismatch: publications=%+v result=%+v", published, result)
+	}
+	input := published[0]
+	wantBody := map[string]any{"type": "event_callback", "event_id": "signed-slack-delivery", "event": map[string]any{"type": "message", "channel": "C-INBOUND", "text": "signed Slack callback", "user": "U-SYNTHETIC"}}
+	if input.Payload["provider"] != "slack" || input.Payload["provider_event_id"] != "signed-slack-delivery" || input.Payload["provider_delivery_id"] != "signed-slack-delivery" || input.Payload["provider_event_type"] != "message" || !reflect.DeepEqual(input.Payload["payload"], wantBody) || len(input.Deliveries) != 1 || !input.Deliveries[0].Terminal || input.Deliveries[0].Target.FlowID != "." {
+		t.Fatalf("Slack admitted payload/route mismatch: %+v", input)
+	}
+	before = snapshot()
+	status, response, _ = post(body, time.Now(), "slack-webhook-secret")
+	duplicate := receipt
+	if status != http.StatusOK || json.Unmarshal([]byte(response), &duplicate) != nil || duplicate.Status != "duplicate" {
+		t.Fatalf("Slack replay HTTP=%d receipt=%s", status, response)
+	}
+	receipt.Status = "duplicate"
+	if !reflect.DeepEqual(receipt, duplicate) {
+		t.Fatalf("Slack replay changed original receipt: original=%+v replay=%+v", receipt, duplicate)
+	}
+	unchanged(before, 5)
+}
+
 func connectorPublishedEventIDs(events []goldenEvent) []string {
 	ids := make([]string, 0, len(events))
 	for _, event := range events {
@@ -383,7 +501,7 @@ func TestEmbeddedConnectorPublicationSnapshotRetainsEveryNonDiagnosticEvent(t *t
 func writeConnectorPublicSource(t *testing.T, root string, endpoints map[string]string, githubInput map[string]any, command func(string, ...string) string) {
 	t.Helper()
 	writeReleaseFile(t, filepath.Join(root, "manifest.yaml"), "version: 1.0.0\nplatform_version: '*'\n")
-	writeReleaseFile(t, filepath.Join(root, "schema.yaml"), "stages: []\npins:\n  inputs: [slack.requested, notion.requested, microsoft_graph.requested, github.requested, inbound.github.issue_opened]\n")
+	writeReleaseFile(t, filepath.Join(root, "schema.yaml"), "stages: []\npins:\n  inputs: [slack.requested, notion.requested, microsoft_graph.requested, github.requested, inbound.github.issue_opened, inbound.slack.message]\n")
 	inputs := map[string]any{}
 	nodes := map[string]any{}
 	literal := func(value any) *yaml.Node {
@@ -438,6 +556,7 @@ func writeConnectorPublicSource(t *testing.T, root string, endpoints map[string]
 		writeReleaseFile(t, path, string(raw))
 	}
 	nodes["github-webhook-worker"] = map[string]any{"inbound.github.issue_opened": map[string]any{"activity": map[string]any{"id": "send_github_webhook", "tool": "github.create_issue", "input": githubValues}}}
+	nodes["slack-webhook-worker"] = map[string]any{"inbound.slack.message": map[string]any{"activity": map[string]any{"id": "send_slack_webhook", "tool": "slack.post_message", "input": map[string]any{"channel": "payload.payload.event.channel", "text": "payload.payload.event.text"}}}}
 	for path, document := range map[string]any{"events.yaml": inputs, "nodes.yaml": nodes} {
 		raw, err := yaml.Marshal(document)
 		if err != nil {
