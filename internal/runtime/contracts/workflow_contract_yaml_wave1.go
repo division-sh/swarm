@@ -42,11 +42,6 @@ var typeMetadataFieldOptions = map[string]struct{}{
 	"_description": {},
 }
 
-var entityMetadataFieldOptions = map[string]struct{}{
-	"_description": {},
-	"_owner":       {},
-}
-
 var schemaLengthRefinementFieldOptions = map[string]struct{}{
 	"min": {},
 	"max": {},
