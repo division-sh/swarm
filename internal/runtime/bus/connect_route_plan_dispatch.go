@@ -70,19 +70,6 @@ type connectRoutePlanDispatch struct {
 	unavailableReceiverError error
 }
 
-func newConnectRoutePlanResolver(source semanticview.Source, routeTable *RouteTable, planner runtimepipeline.FlowInstanceActivationPlanner, index runtimepipeline.FlowInstanceIndexReader, replyStore runtimereplycontext.Store) connectRoutePlanResolver {
-	if source == nil {
-		return connectRoutePlanResolver{routeTable: routeTable, replyStore: replyStore}
-	}
-	graph := runtimepinrouting.CompileConnectGraph(source)
-	return connectRoutePlanResolver{
-		routeTable: routeTable,
-		graph:      graph,
-		lifecycle:  connectInstanceSelector{source: source, plan: planner, index: index},
-		replyStore: replyStore,
-	}
-}
-
 func (r connectRoutePlanResolver) Plan(ctx context.Context, evt events.Event) (connectRoutePlanDispatch, error) {
 	if evt.RoutingSource().Kind() == events.RoutingSourceDeploymentFeed {
 		if _, err := runtimepinrouting.AdmitDeploymentFeedDeclaration(r.lifecycle.source, evt.Type(), evt.RoutingSource()); err != nil {
