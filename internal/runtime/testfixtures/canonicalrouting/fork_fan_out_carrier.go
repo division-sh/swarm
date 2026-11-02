@@ -132,7 +132,7 @@ func CopyNumericForkFanOutCarrier(t testing.TB, resourceRows bool) string {
 	root := CopyForkFanOutCarrier(t, false, false)
 	writeClosedVariantFile(t, root, "state.yaml", "integer: 0\ndecimal: 0.0\n")
 	if resourceRows {
-		writeClosedVariantFile(t, root, "types.yaml", "types:\n  ResourceRow:\n    slug: text\n    score: integer\n")
+		writeClosedVariantFile(t, root, "types.yaml", "ResourceRow:\n  slug: text\n  score: integer\n")
 		writeClosedVariantFile(t, root, "events.yaml", "items.ready:\n  items: [ResourceRow]\nitems.child:\n  value: text\n  integer_result: integer\n  double_result: numeric\n")
 		writeClosedVariantFile(t, root, "nodes.yaml", `fan-out-source:
   items.ready:

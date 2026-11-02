@@ -77,9 +77,8 @@ pins:
   member_id: text
   result: JoinResult
 `
-	joinTypes := `types:
-  JoinResult:
-    value: text
+	joinTypes := `JoinResult:
+  value: text
 `
 	joinNodes := `join-node:
   item.completed:

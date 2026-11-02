@@ -99,9 +99,8 @@ func CopyNotifyAllChildren(t testing.TB, opts NotifyAllChildrenOptions) string {
 	}
 	if opts.ObjectMembership {
 		applyClosedReplacement(t, ownerEntities, "account_ids: [text]\n", "account_ids: [AccountRef]\n")
-		writeClosedVariantFile(t, root, filepath.ToSlash(filepath.Join(NotifyAllChildrenOwnerFlowID, "types.yaml")), `types:
-  AccountRef:
-    account_id: text
+		writeClosedVariantFile(t, root, filepath.ToSlash(filepath.Join(NotifyAllChildrenOwnerFlowID, "types.yaml")), `AccountRef:
+  account_id: text
 `)
 		applyClosedReplacement(t, ownerNodes, "          account_id: account_id\n", "          account_id: account_id.account_id\n")
 	}
@@ -177,12 +176,11 @@ portfolio.notify.completed:
 	if opts.NumericRegistrationRows {
 		// Keep row fields addressable under the compiled structural-type contract.
 		// gem_score is deliberately JSON so hostile values reach emitted-schema admission.
-		writeClosedVariantFile(t, root, "types.yaml", `types:
-  NumericAccount:
-    account_id: text
-    eng_roles: integer
-    gem_score: json
-    external_id: text?
+		writeClosedVariantFile(t, root, "types.yaml", `NumericAccount:
+  account_id: text
+  eng_roles: integer
+  gem_score: json
+  external_id: text?
 `)
 		applyClosedReplacement(t, filepath.Join(root, "events.yaml"), `portfolio.opened:
   portfolio_id: text

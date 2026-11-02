@@ -540,7 +540,7 @@ func TestFlowConnectDecodeRejectsRetiredUsingInstanceOnPresence(t *testing.T) {
 
 func TestFlowSchemaDocumentDecode_PreservesClosedInputPinSourceEnum(t *testing.T) {
 	var doc FlowSchemaDocument
-	if err := decodeNodeTestYAML([]byte("pins: {inputs: [work.requested]}"), &doc); err != nil {
+	if err := decodeNodeTestYAML([]byte("inputs: [work.requested]"), &doc); err != nil {
 		t.Fatal(err)
 	}
 	if doc.Pins.Inputs.EventPins[0].Event != "work.requested" {
@@ -548,7 +548,7 @@ func TestFlowSchemaDocumentDecode_PreservesClosedInputPinSourceEnum(t *testing.T
 	}
 	for _, source := range []string{"harness", "external", "null", "{}", "[]", "''"} {
 		var invalid FlowSchemaDocument
-		err := decodeNodeTestYAML([]byte("pins: {inputs: [{event: work.requested, source: "+source+"}]}"), &invalid)
+		err := decodeNodeTestYAML([]byte("inputs: [{event: work.requested, source: "+source+"}]"), &invalid)
 		if err == nil || !strings.Contains(err.Error(), `must be a scalar text`) {
 			t.Fatalf("source %s: %v", source, err)
 		}
@@ -630,10 +630,9 @@ func TestFlowSchemaDocumentDecode_RejectsUnsupportedOutputPinFields(t *testing.T
 	var doc FlowSchemaDocument
 	err := decodeNodeTestYAML([]byte(`
 # fixture: invalid-output-pins
-pins:
-  outputs:
-    - event: deploy.done
-      unknown: nope
+outputs:
+  - event: deploy.done
+    unknown: nope
 `), &doc)
 	if err == nil || !strings.Contains(err.Error(), "scalar text") || !strings.Contains(err.Error(), `["outputs"][0]`) {
 		t.Fatalf("yaml.Unmarshal error = %v, want names-only output shape rejection", err)
@@ -642,7 +641,7 @@ pins:
 
 func TestFlowSchemaDocumentDecode_PreservesClosedOutputPinSinkEnum(t *testing.T) {
 	var doc FlowSchemaDocument
-	if err := decodeNodeTestYAML([]byte("pins: {outputs: [work.completed]}"), &doc); err != nil {
+	if err := decodeNodeTestYAML([]byte("outputs: [work.completed]"), &doc); err != nil {
 		t.Fatal(err)
 	}
 	if doc.Pins.Outputs.EventPins[0].Event != "work.completed" {
@@ -650,7 +649,7 @@ func TestFlowSchemaDocumentDecode_PreservesClosedOutputPinSinkEnum(t *testing.T)
 	}
 	for _, sink := range []string{"harness", "external", "null", "{}", "[]", "''"} {
 		var invalid FlowSchemaDocument
-		err := decodeNodeTestYAML([]byte("pins: {outputs: [{event: work.completed, sink: "+sink+"}]}"), &invalid)
+		err := decodeNodeTestYAML([]byte("outputs: [{event: work.completed, sink: "+sink+"}]"), &invalid)
 		if err == nil {
 			t.Fatalf("retired output mapping accepted: sink=%s", sink)
 		}
@@ -1775,8 +1774,8 @@ func TestW2RejectsAuthoredPinName(t *testing.T) {
 		raw  string
 		want string
 	}{
-		{name: "input", raw: "pins:\n  inputs:\n    - name: work_requested\n      event: work.requested\n", want: `must be a scalar text`},
-		{name: "output", raw: "pins:\n  outputs:\n    - name: work_completed\n      event: work.completed\n", want: "must be a scalar text"},
+		{name: "input", raw: "inputs:\n  - name: work_requested\n    event: work.requested\n", want: `must be a scalar text`},
+		{name: "output", raw: "outputs:\n  - name: work_completed\n    event: work.completed\n", want: "must be a scalar text"},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			var schema FlowSchemaDocument
@@ -1794,12 +1793,12 @@ func TestW2RejectsRetiredPinMetadataAndNonLocalEvents(t *testing.T) {
 		raw  string
 		want string
 	}{
-		{name: "input carries", raw: "pins:\n  inputs:\n    - event: work.requested\n      carries:\n        work_id: {from: payload.work_id, type: string, optional: true, convert: text}\n", want: `must be a scalar text`},
-		{name: "output key", raw: "pins:\n  outputs:\n    - event: work.completed\n      key: work_id\n", want: "must be a scalar text"},
-		{name: "output carries", raw: "pins:\n  outputs:\n    - event: work.completed\n      carries: [work_id]\n", want: "must be a scalar text"},
-		{name: "qualified input", raw: "pins:\n  inputs: [producer/work.requested]\n", want: "exact local canonical event identity"},
-		{name: "wildcard input", raw: "pins:\n  inputs: ['work.*']\n", want: "exact local canonical event identity"},
-		{name: "qualified output", raw: "pins:\n  outputs: [consumer/work.completed]\n", want: "exact local canonical event identity"},
+		{name: "input carries", raw: "inputs:\n  - event: work.requested\n    carries:\n      work_id: {from: payload.work_id, type: string, optional: true, convert: text}\n", want: `must be a scalar text`},
+		{name: "output key", raw: "outputs:\n  - event: work.completed\n    key: work_id\n", want: "must be a scalar text"},
+		{name: "output carries", raw: "outputs:\n  - event: work.completed\n    carries: [work_id]\n", want: "must be a scalar text"},
+		{name: "qualified input", raw: "inputs: [producer/work.requested]\n", want: "exact local canonical event identity"},
+		{name: "wildcard input", raw: "inputs: ['work.*']\n", want: "exact local canonical event identity"},
+		{name: "qualified output", raw: "outputs: [consumer/work.completed]\n", want: "exact local canonical event identity"},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			var schema FlowSchemaDocument
@@ -1817,20 +1816,17 @@ func TestW2RejectsNullEmptyAndRedundantPinForms(t *testing.T) {
 		raw  string
 		want string
 	}{
-		{name: "null pins", raw: "pins: null\n", want: "mapping, got null"},
-		{name: "empty pins", raw: "pins: {}\n", want: "pins must be a non-empty mapping"},
-		{name: "null inputs", raw: "pins:\n  inputs: null\n", want: "is null, want sequence"},
-		{name: "empty outputs", raw: "pins:\n  outputs: {}\n", want: "is empty_mapping, want sequence"},
-		{name: "retired input wrapper", raw: "pins:\n  inputs:\n    events: [work.requested]\n", want: "is mapping, want sequence"},
-		{name: "retired output wrapper", raw: "pins:\n  outputs:\n    events: [work.completed]\n", want: "is mapping, want sequence"},
-		{name: "empty output list", raw: "pins:\n  outputs: []\n", want: "non-empty sequence"},
-		{name: "optionless input mapping", raw: "pins:\n  inputs:\n    - event: work.requested\n", want: "must be a scalar text"},
-		{name: "optionless output mapping", raw: "pins:\n  outputs:\n    - event: work.completed\n", want: "must be a scalar text"},
-		{name: "duplicate event", raw: "pins:\n  inputs: [work.requested, work.requested]\n", want: "declared more than once"},
-		{name: "retired read grant", raw: "pins:\n  inputs:\n    reads: [entity.status, entity.status]\n", want: "is mapping, want sequence"},
-		{name: "retired write grant", raw: "pins:\n  outputs:\n    writes: [{field: entity.status}]\n", want: "is mapping, want sequence"},
-		{name: "unknown pin direction", raw: "pins:\n  ingress:\n    events: [work.requested]\n", want: "is not supported"},
-		{name: "unknown input field", raw: "pins:\n  inputs:\n    - event: work.requested\n      aliases: [work.requested]\n", want: `must be a scalar text`},
+		{name: "null inputs", raw: "inputs: null\n", want: "is null, want sequence"},
+		{name: "empty outputs", raw: "outputs: {}\n", want: "is empty_mapping, want sequence"},
+		{name: "retired input wrapper", raw: "inputs:\n  events: [work.requested]\n", want: "is mapping, want sequence"},
+		{name: "retired output wrapper", raw: "outputs:\n  events: [work.completed]\n", want: "is mapping, want sequence"},
+		{name: "empty output list", raw: "outputs: []\n", want: "non-empty sequence"},
+		{name: "optionless input mapping", raw: "inputs:\n  - event: work.requested\n", want: "must be a scalar text"},
+		{name: "optionless output mapping", raw: "outputs:\n  - event: work.completed\n", want: "must be a scalar text"},
+		{name: "duplicate event", raw: "inputs: [work.requested, work.requested]\n", want: "declared more than once"},
+		{name: "retired read grant", raw: "inputs:\n  reads: [entity.status, entity.status]\n", want: "is mapping, want sequence"},
+		{name: "retired write grant", raw: "outputs:\n  writes: [{field: entity.status}]\n", want: "is mapping, want sequence"},
+		{name: "unknown input field", raw: "inputs:\n  - event: work.requested\n    aliases: [work.requested]\n", want: `must be a scalar text`},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			var schema FlowSchemaDocument

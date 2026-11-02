@@ -160,9 +160,8 @@ inputs:
 dispatch_id: text
 probe: text
 `,
-		"types.yaml": `types:
-  JoinResult:
-    ok: boolean
+		"types.yaml": `JoinResult:
+  ok: boolean
 `,
 		"events.yaml": `order.started:
   expected: [text]
@@ -239,7 +238,7 @@ business_brief: Brief
 feature_list: [Feature]
 review_scores: map[text]integer
 `,
-		"operating/types.yaml":  "types:\n  Brief:\n    summary: text\n  Feature:\n    name: text\n",
+		"operating/types.yaml":  "Brief:\n  summary: text\nFeature:\n  name: text\n",
 		"operating/events.yaml": "opco.product_review_requested:\n  note: text\n",
 		"operating/nodes.yaml": `reviewer:
   gate_state:

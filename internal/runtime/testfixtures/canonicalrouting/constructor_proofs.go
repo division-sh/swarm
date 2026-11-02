@@ -9,7 +9,7 @@ func CopyOperatorKeyedConstructor(t testing.TB, connected bool) string {
 	root := t.TempDir()
 	files := map[string]string{
 		"manifest.yaml": "version: 1.0.0\nplatform_version: '*'\n",
-		"schema.yaml":   "# fixture: factory\ninstance: thing_id\npins:\n  inputs:\n    - thing.created\n",
+		"schema.yaml":   "# fixture: factory\ninstance: thing_id\ninputs:\n  - thing.created\n",
 		"state.yaml":    "thing_id: text\n",
 		"events.yaml":   "thing.created:\n  thing_id: text\n  entity_id: uuid?\n  amount: integer\n",
 		"nodes.yaml":    "thing-writer:\n  thing.created: {}\n",
@@ -19,13 +19,13 @@ func CopyOperatorKeyedConstructor(t testing.TB, connected bool) string {
 			"factory/manifest.yaml": "version: 1.0.0\nplatform_version: '*'\n",
 			"manifest.yaml":         "version: 1.0.0\nplatform_version: '*'\n",
 			"shadow/manifest.yaml":  "version: 1.0.0\nplatform_version: '*'\n",
-			"schema.yaml":           "# fixture: factory\npins:\n  inputs:\n    - thing.requested\n    - note.requested\n  outputs:\n    - thing.requested\nconnect:\n  - {event: thing.requested, from: ., to: factory, rename: thing.created, resolution: create, key_from: event.id}\n",
+			"schema.yaml":           "# fixture: factory\ninputs:\n  - thing.requested\n  - note.requested\noutputs:\n  - thing.requested\nconnect:\n  - {event: thing.requested, from: ., to: factory, rename: thing.created, resolution: create, key_from: event.id}\n",
 			"events.yaml":           "thing.requested:\n  entity_id: uuid?\n  amount: integer\nnote.requested:\n  entity_id: uuid?\n  amount: integer\n",
 			"nodes.yaml":            "observer:\n  thing.requested: {}\n  note.requested: {}\n",
-			"factory/schema.yaml":   "# fixture: factory\ninstance: thing_id\npins:\n  inputs:\n    - thing.created\n",
+			"factory/schema.yaml":   "# fixture: factory\ninstance: thing_id\ninputs:\n  - thing.created\n",
 			"factory/state.yaml":    "thing_id: text\n",
 			"factory/nodes.yaml":    "thing-writer:\n  thing.created: {}\n",
-			"shadow/schema.yaml":    "# fixture: shadow\ninstance: thing_id\npins:\n  inputs:\n    - note.requested\n",
+			"shadow/schema.yaml":    "# fixture: shadow\ninstance: thing_id\ninputs:\n  - note.requested\n",
 			"shadow/state.yaml":     "thing_id: text\n",
 			"shadow/events.yaml":    "note.requested:\n  thing_id: text\n  entity_id: uuid?\n  amount: integer\n",
 			"shadow/nodes.yaml":     "shadow-writer:\n  note.requested: {}\n",
@@ -45,7 +45,7 @@ func CopyFlowConstructorSupply(t testing.TB, fields, payload, handler, catalog s
 	}
 	writeClosedVariantFile(t, root, "producer/events.yaml", "deploy.done:\n  vertical_id: text\n"+payload)
 	writeClosedVariantFile(t, root, "consumer/state.yaml", "vertical_id: text\n"+fields)
-	writeClosedVariantFile(t, root, "consumer/schema.yaml", "# fixture: consumer\ninstance: vertical_id\nstages:\n  initial: {}\n  done: {final: true}\npins:\n  inputs:\n    - deploy.done\n")
+	writeClosedVariantFile(t, root, "consumer/schema.yaml", "# fixture: consumer\ninstance: vertical_id\nstages:\n  initial: {}\n  done: {final: true}\ninputs:\n  - deploy.done\n")
 	if handler != "" {
 		writeClosedVariantFile(t, root, "consumer/nodes.yaml", "consumer-node:\n  deploy.done:\n"+handler)
 	}
@@ -70,9 +70,9 @@ func CopyFlowConstructorCandidates(t testing.TB, mode TemplateInstanceRouteMode,
 	if staged {
 		stages = "stages:\n  initial: {}\n  done: {final: true}\n"
 	}
-	writeClosedVariantFile(t, root, "producer/schema.yaml", "# fixture: producer\npins:\n  outputs:\n    - deploy.done\n    - deploy.empty\n")
+	writeClosedVariantFile(t, root, "producer/schema.yaml", "# fixture: producer\noutputs:\n  - deploy.done\n  - deploy.empty\n")
 	writeClosedVariantFile(t, root, "producer/events.yaml", "deploy.done:\n  vertical_id: text\n  brief: text\ndeploy.empty:\n  vertical_id: text\n")
-	writeClosedVariantFile(t, root, "consumer/schema.yaml", "# fixture: consumer\ninstance: vertical_id\n"+stages+"pins:\n  inputs: [deploy.done, deploy.empty]\n")
+	writeClosedVariantFile(t, root, "consumer/schema.yaml", "# fixture: consumer\ninstance: vertical_id\n"+stages+"inputs: [deploy.done, deploy.empty]\n")
 	writeClosedVariantFile(t, root, "consumer/state.yaml", "vertical_id: text\nbrief: text\n")
 	writeClosedVariantFile(t, root, "consumer/nodes.yaml", "consumer-node:\n  deploy.done:\n    guard: state.brief != ''\n  deploy.empty:\n    guard: state.brief != ''\n")
 	writeClosedVariantFile(t, root, "schema.yaml", "# fixture: constructor-connection-policy\nconnect:\n  - {event: deploy.done, from: producer, to: consumer, resolution: create}\n  - {event: deploy.empty, from: producer, to: consumer, resolution: "+policy+"}\n")
@@ -82,7 +82,7 @@ func CopyFlowConstructorCandidates(t testing.TB, mode TemplateInstanceRouteMode,
 func CopyFlowConstructorNestedPresence(t testing.TB, member, read string) string {
 	t.Helper()
 	root := CopyTemplateInstanceRoute(t, TemplateInstanceRouteOptions{Mode: TemplateInstanceRouteCreate})
-	catalog := "types:\n  Brief:\n    detail: " + member + "\n"
+	catalog := "Brief:\n  detail: " + member + "\n"
 	writeClosedVariantFile(t, root, "consumer/types.yaml", catalog)
 	writeClosedVariantFile(t, root, "producer/types.yaml", catalog)
 	writeClosedVariantFile(t, root, "producer/events.yaml", "deploy.done:\n  vertical_id: text\n  brief: Brief\n")

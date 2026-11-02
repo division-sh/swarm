@@ -16,7 +16,7 @@ func CopyForkLoopAccumulator(t testing.TB, clearOnAdmit bool) string {
 	if clearOnAdmit {
 		applyClosedReplacement(t, nodes, "  review.requested:\n    accumulate:", "  review.requested:\n    clear: {targets: [accumulator_state]}\n    accumulate:")
 	}
-	writeClosedVariantFile(t, root, "review/types.yaml", "types:\n  Review:\n    revision_id: text\n    token: text\n")
+	writeClosedVariantFile(t, root, "review/types.yaml", "Review:\n  revision_id: text\n  token: text\n")
 	return root
 }
 
