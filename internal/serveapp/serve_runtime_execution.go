@@ -102,9 +102,13 @@ func (s *processLifecycleSupervisor) executionDispatch() map[string]apiv1.Method
 		handlers[method] = func(ctx context.Context, req apiv1.Request) (any, error) {
 			s.mu.RLock()
 			handler := s.execution[method]
-			if s.resetting || handler == nil {
+			if s.resetting || s.stopping || handler == nil {
+				cause := runtime.RuntimeContextCauseReset
+				if s.stopping {
+					cause = runtime.RuntimeContextCauseUnavailable
+				}
 				s.mu.RUnlock()
-				return nil, apiv1.NewApplicationError(apiv1.BundleUnavailableCode, false, map[string]any{"cause": runtime.RuntimeContextCauseReset})
+				return nil, apiv1.NewApplicationError(apiv1.BundleUnavailableCode, false, map[string]any{"cause": cause})
 			}
 			s.mu.RUnlock()
 			return handler(ctx, req)
@@ -127,9 +131,13 @@ var serveRuntimeExecutionMethods = []string{
 func (s *processLifecycleSupervisor) bindPrimaryExecution(expected *runtime.Runtime, handler apiv1.MethodHandler) apiv1.MethodHandler {
 	return func(ctx context.Context, req apiv1.Request) (any, error) {
 		s.mu.RLock()
-		if s.resetting || s.currentRT != expected || s.runtimeContexts == nil {
+		if s.resetting || s.stopping || s.currentRT != expected || s.runtimeContexts == nil {
+			cause := runtime.RuntimeContextCauseReset
+			if s.stopping {
+				cause = runtime.RuntimeContextCauseUnavailable
+			}
 			s.mu.RUnlock()
-			return nil, apiv1.NewApplicationError(apiv1.BundleUnavailableCode, false, map[string]any{"cause": runtime.RuntimeContextCauseReset})
+			return nil, apiv1.NewApplicationError(apiv1.BundleUnavailableCode, false, map[string]any{"cause": cause})
 		}
 		use, _, err := s.runtimeContexts.AcquireBundleHash(ctx, s.currentSourceArtifactFact.BundleHash())
 		s.mu.RUnlock()

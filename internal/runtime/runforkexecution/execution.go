@@ -101,6 +101,11 @@ func executeSelectedContractRunFork(ctx context.Context, req SelectedContractExe
 	if err != nil {
 		return SelectedContractExecutionResult{Owner: runfork.RunForkSelectedContractExecutionOwner}, err
 	}
+	finishOrchestration, err := req.Owner.beginSelectedOrchestration(prepared)
+	if err != nil {
+		return SelectedContractExecutionResult{Owner: runfork.RunForkSelectedContractExecutionOwner}, errors.Join(err, req.Owner.completePreparation(prepared))
+	}
+	defer finishOrchestration()
 	if err := admitSelectedDeploymentRevisionFrontier(prepared.plan, prepared.frontier); err != nil {
 		return SelectedContractExecutionResult{Owner: runfork.RunForkSelectedContractExecutionOwner}, errors.Join(err, req.Owner.completePreparation(prepared))
 	}

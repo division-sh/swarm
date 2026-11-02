@@ -25,6 +25,17 @@ func (s *processLifecycleSupervisor) acquireLiveTargetRuntime(ctx context.Contex
 	}
 	s.operationMu.Lock()
 	defer s.operationMu.Unlock()
+	s.mu.RLock()
+	stopping, selected := s.stopping, s.selected
+	s.mu.RUnlock()
+	if stopping {
+		if selected == nil {
+			return nil, errors.New("live target is not an accepted shutdown handoff")
+		}
+		if err := selected.RequireAcceptedLiveHandoff(ctx, reference); err != nil {
+			return nil, err
+		}
+	}
 	return s.acquireLiveTargetRuntimeLocked(ctx, reference)
 }
 
