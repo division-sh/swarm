@@ -131,7 +131,11 @@ func TestRunServeSourceArtifactIntegrityRejectsBeforeReadinessBothStores(t *test
 					Output: &out, TestLLMRuntime: servedNoopLLMRuntime{},
 					TestRuntimeContextsReadyHook: func(*runtime.RuntimeContextManager) { published = true },
 				})
-				if code != serveExitDataIntegrity || published || strings.Contains(out.String(), "ready in ") {
+				wantCode := 3
+				if condition == "missing" {
+					wantCode = serveExitDataIntegrity
+				}
+				if code != wantCode || published || strings.Contains(out.String(), "ready in ") {
 					t.Fatalf("invalid historical source reached readiness: code=%d published=%v\n%s", code, published, out.String())
 				}
 				if !strings.Contains(out.String(), runID) || !strings.Contains(out.String(), artifact.BundleHash()) {

@@ -518,6 +518,11 @@ func TestServeLifecyclePresenterJoinsEarlyFailureAndCleanupOnce(t *testing.T) {
 		t.Run(name, func(t *testing.T) {
 			var stdout, stderr bytes.Buffer
 			presenter := newServeLifecyclePresenter(cliapp.ServeOptions{Output: &stdout, ErrorOutput: &stderr})
+			presenter.recordStartupContext(runtimeCompositionRequest{
+				Repo: "/project's $work", Config: cliapp.RuntimeConfigLoadResult{Path: "/project/config's.yaml"},
+				SwarmDir:       cliapp.CLISwarmDirResolution{Path: "/state"},
+				StoreSelection: storebackend.Selection{Backend: storebackend.BackendSQLite, SQLitePathSource: storebackend.SourceSwarmDirDefault},
+			})
 			presenter.fail(4, name, errors.New("bundle validation failed"))
 			presenter.cleanupFailure("bundle source cleanup", errors.New("remove bundle tempdir"))
 			presenter.cleanupFailure("store shutdown", errors.New("close journal"))
@@ -538,6 +543,13 @@ func TestServeLifecyclePresenterJoinsEarlyFailureAndCleanupOnce(t *testing.T) {
 			}
 			if stdout.Len() != 0 {
 				t.Fatalf("joined failure contaminated stdout: %q", stdout.String())
+			}
+			if name == "startup_recovery" {
+				if !strings.Contains(text, "cd '/project'\\''s $work'") || !strings.Contains(text, "doctor --config '/project/config'\\''s.yaml'") || strings.Contains(text, "store status") {
+					t.Fatalf("recovery diagnostics changed selectors/quoting or invented a borrowed-store selector:\n%s", text)
+				}
+			} else if strings.Contains(text, "doctor --config") {
+				t.Fatalf("unrelated failure was labelled recovery:\n%s", text)
 			}
 		})
 	}
