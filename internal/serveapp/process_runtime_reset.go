@@ -76,6 +76,13 @@ func (s *processLifecycleSupervisor) BeginDestructiveReset(ctx context.Context, 
 		return nil, errors.New("reset requires its canonical durable operation ID")
 	}
 	s.operationMu.Lock()
+	s.mu.RLock()
+	stopping := s.stopping
+	s.mu.RUnlock()
+	if stopping {
+		s.operationMu.Unlock()
+		return nil, errors.New("reset cannot overtake process shutdown")
+	}
 	if err := ctx.Err(); err != nil {
 		s.operationMu.Unlock()
 		return nil, err

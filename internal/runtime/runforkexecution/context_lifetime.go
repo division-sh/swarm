@@ -9,6 +9,7 @@ import (
 	"github.com/division-sh/swarm/internal/runtime/core/worklifetime"
 	"github.com/division-sh/swarm/internal/runtime/runfork"
 	"github.com/division-sh/swarm/internal/runtime/startupownership"
+	"github.com/division-sh/swarm/internal/sourceartifact"
 )
 
 // The inventory belongs to one selected execution owner, not a global task
@@ -17,6 +18,7 @@ import (
 type selectedForkContexts struct {
 	mu         sync.Mutex
 	retired    bool
+	draining   bool
 	recovered  bool
 	recovering bool
 	entries    map[*selectedContractOperation]*selectedForkContext
@@ -27,14 +29,17 @@ type selectedForkContexts struct {
 }
 
 type selectedForkContext struct {
-	operation        *selectedContractOperation
-	binding          runfork.RunForkSelectedContractBinding
-	retained         *PreparedSelectedFork
-	retiring         bool
-	recoveryReserved bool
-	done             chan struct{}
-	closed           bool
-	err              error
+	operation           *selectedContractOperation
+	binding             runfork.RunForkSelectedContractBinding
+	retained            *PreparedSelectedFork
+	retiring            bool
+	recoveryReserved    bool
+	done                chan struct{}
+	orchestrationDone   chan struct{}
+	orchestrationJoined bool
+	orchestrating       bool
+	closed              bool
+	err                 error
 }
 
 func (o SelectedContractExecutionOwner) beginPreparation(ctx context.Context) (*selectedContractOperation, error) {
@@ -49,7 +54,7 @@ func (o SelectedContractExecutionOwner) beginPreparation(ctx context.Context) (*
 	contexts := ports.contexts
 	contexts.mu.Lock()
 	defer contexts.mu.Unlock()
-	if contexts.retired {
+	if contexts.retired || contexts.draining {
 		return nil, errors.Join(worklifetime.ErrRetired, op.Finish())
 	}
 	if contexts.process == nil || !contexts.recovered || contexts.process != op.process {
@@ -58,7 +63,7 @@ func (o SelectedContractExecutionOwner) beginPreparation(ctx context.Context) (*
 	if contexts.entries == nil {
 		contexts.entries = make(map[*selectedContractOperation]*selectedForkContext)
 	}
-	contexts.entries[op] = &selectedForkContext{operation: op, done: make(chan struct{})}
+	contexts.entries[op] = &selectedForkContext{operation: op, done: make(chan struct{}), orchestrationDone: make(chan struct{})}
 	return op, nil
 }
 
@@ -161,6 +166,34 @@ func (o SelectedContractExecutionOwner) retainPrepared(p *PreparedSelectedFork) 
 	return nil
 }
 
+func (o SelectedContractExecutionOwner) beginSelectedOrchestration(p *PreparedSelectedFork) (func(), error) {
+	contexts := o.ports.contexts
+	contexts.mu.Lock()
+	entry := contexts.entries[p.operation]
+	if entry == nil || entry.closed || entry.retiring || entry.orchestrating {
+		contexts.mu.Unlock()
+		return nil, worklifetime.ErrRetired
+	}
+	entry.orchestrating = true
+	contexts.mu.Unlock()
+	return func() {
+		contexts.mu.Lock()
+		defer contexts.mu.Unlock()
+		entry.orchestrating = false
+		entry.finishOrchestration()
+		if entry.closed && entry.retained == nil {
+			delete(contexts.entries, p.operation)
+		}
+	}, nil
+}
+
+func (entry *selectedForkContext) finishOrchestration() {
+	if entry.orchestrationDone != nil && !entry.orchestrationJoined {
+		entry.orchestrationJoined = true
+		close(entry.orchestrationDone)
+	}
+}
+
 func (o SelectedContractExecutionOwner) completePreparation(p *PreparedSelectedFork) error {
 	contexts := o.ports.contexts
 	contexts.mu.Lock()
@@ -182,6 +215,9 @@ func (o SelectedContractExecutionOwner) recordPreparationCleanupPending(p *Prepa
 	contexts.mu.Lock()
 	defer contexts.mu.Unlock()
 	if entry := contexts.entries[p.operation]; entry != nil {
+		if !entry.orchestrating {
+			entry.finishOrchestration()
+		}
 		// Wake the current retirement attempt with failure, but keep the exact
 		// preparation and process possession available for explicit cleanup retry.
 		entry.retained, entry.err = p, err
@@ -197,13 +233,17 @@ func (o SelectedContractExecutionOwner) recordPreparationClosed(operation *selec
 	contexts.mu.Lock()
 	defer contexts.mu.Unlock()
 	if entry := contexts.entries[operation]; entry != nil {
+		entry.retained = nil
 		entry.err = err
 		contexts.cleanupErr = errors.Join(contexts.cleanupErr, err)
 		if !entry.closed {
 			entry.closed = true
 			close(entry.done)
 		}
-		delete(contexts.entries, operation)
+		if !entry.orchestrating {
+			entry.finishOrchestration()
+			delete(contexts.entries, operation)
+		}
 	}
 }
 
@@ -253,8 +293,41 @@ func (o SelectedContractExecutionOwner) RequireResetPredecessor(ctx context.Cont
 	return o.RetireSelectedContexts(ctx)
 }
 
-// DrainSelectedContexts fences preparation and finite selected work without
-// cancelling the accepted operations that still own their result settlement.
+// SealSelectedContexts closes new preparation without cancelling admitted work.
+func (o SelectedContractExecutionOwner) SealSelectedContexts() error {
+	ports, err := o.require()
+	if err != nil {
+		return err
+	}
+	ports.contexts.mu.Lock()
+	ports.contexts.draining = true
+	ports.contexts.mu.Unlock()
+	return nil
+}
+
+// RequireAcceptedLiveHandoff admits only the exact operation and target already
+// registered before the process sealed selected preparation.
+func (o SelectedContractExecutionOwner) RequireAcceptedLiveHandoff(ctx context.Context, reference sourceartifact.RootAdmissionReference) error {
+	ports, err := o.require()
+	if err != nil {
+		return err
+	}
+	if err := ctx.Err(); err != nil {
+		return err
+	}
+	op, _ := ctx.Value(selectedOperationContextKey{}).(*selectedContractOperation)
+	contexts := ports.contexts
+	contexts.mu.Lock()
+	defer contexts.mu.Unlock()
+	entry := contexts.entries[op]
+	if !contexts.draining || contexts.retired || op == nil || entry == nil || entry.closed || entry.retiring || op.process != contexts.process || entry.binding.TargetRootReference != reference {
+		return worklifetime.ErrAdmissionFenced
+	}
+	return reference.Validate()
+}
+
+// DrainSelectedContexts joins finite work and its existing orchestration before
+// retirement can dispose the selected runtime or its ordinary handoff target.
 func (o SelectedContractExecutionOwner) DrainSelectedContexts(ctx context.Context) error {
 	ports, err := o.require()
 	if err != nil {
@@ -262,7 +335,7 @@ func (o SelectedContractExecutionOwner) DrainSelectedContexts(ctx context.Contex
 	}
 	contexts := ports.contexts
 	contexts.mu.Lock()
-	contexts.retired = true
+	contexts.draining = true
 	entries := make([]*selectedForkContext, 0, len(contexts.entries))
 	for _, entry := range contexts.entries {
 		entries = append(entries, entry)
@@ -281,15 +354,18 @@ func (o SelectedContractExecutionOwner) DrainSelectedContexts(ctx context.Contex
 		}
 	}
 	for index, entry := range entries {
-		if selected[index] == nil {
-			select {
-			case <-entry.done:
-			case <-ctx.Done():
-				return errors.Join(drainErr, ctx.Err())
-			}
-			continue
+		if selected[index] != nil {
+			drainErr = errors.Join(drainErr, selected[index].WaitForQuiescence(ctx))
 		}
-		drainErr = errors.Join(drainErr, selected[index].WaitForQuiescence(ctx))
+		joined := entry.orchestrationDone
+		if joined == nil {
+			joined = entry.done
+		}
+		select {
+		case <-joined:
+		case <-ctx.Done():
+			return errors.Join(drainErr, ctx.Err())
+		}
 	}
 	return drainErr
 }

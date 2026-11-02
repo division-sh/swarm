@@ -84,7 +84,6 @@ func newBlockedManagerLifecycleFixture(t *testing.T, managerBus Bus, eventBus *r
 			case started <- struct{}{}:
 			default:
 			}
-			<-ctx.Done()
 			<-release
 			return nil, ctx.Err()
 		},

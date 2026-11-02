@@ -246,6 +246,14 @@ func (o RunFork) DrainSelectedContexts(ctx context.Context) error {
 	return o.executionOwner.DrainSelectedContexts(ctx)
 }
 
+func (o RunFork) SealSelectedContexts() error {
+	return o.executionOwner.SealSelectedContexts()
+}
+
+func (o RunFork) RequireAcceptedLiveHandoff(ctx context.Context, reference sourceartifact.RootAdmissionReference) error {
+	return o.executionOwner.RequireAcceptedLiveHandoff(ctx, reference)
+}
+
 func (o RunFork) RecoverSelectedForkContexts(ctx context.Context, req effects.RecoveryRequest, environment runtimerunforkexecution.SelectedForkRecoveryEnvironment) ([]runfork.SelectedForkRecoveryResult, error) {
 	return o.executionOwner.RecoverSelectedForkContexts(ctx, req, environment)
 }
