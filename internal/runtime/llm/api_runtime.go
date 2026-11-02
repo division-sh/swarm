@@ -498,14 +498,23 @@ func toAnthropicMessage(m Message) (anthropicMessage, bool, error) {
 	case "tool":
 		results := providerToolResults(content)
 		if len(results) == 0 {
-			return anthropicMessage{}, false, fmt.Errorf("anthropic stored tool result has no linked provider call")
+			return anthropicMessage{Role: "user", Content: "Tool result:\n" + content}, content != "", nil
 		}
-		blocks := make([]anthropicToolResultBlock, 0, len(results))
+		blocks := make([]any, 0, len(results))
+		var observations []anthropicTextBlock
 		for _, result := range results {
 			if result.CallID == "" {
-				return anthropicMessage{}, false, fmt.Errorf("anthropic stored tool_result has no tool_use_id")
+				observations = append(observations, anthropicTextBlock{Type: "text", Text: "Tool result:\n" + result.Payload})
+				continue
 			}
 			blocks = append(blocks, anthropicToolResultBlock{Type: "tool_result", ToolUseID: result.CallID, Content: result.Payload})
+		}
+		if len(blocks) == 0 && len(observations) == 1 {
+			return anthropicMessage{Role: "user", Content: observations[0].Text}, true, nil
+		}
+		// Anthropic requires native result blocks before observation text.
+		for _, observation := range observations {
+			blocks = append(blocks, observation)
 		}
 		return anthropicMessage{Role: "user", Content: blocks}, true, nil
 	default:

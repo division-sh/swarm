@@ -61,8 +61,7 @@ func TestAnthropicToolReplayRefusesMissingIDsWithoutGuessing(t *testing.T) {
 		want    string
 	}{
 		{"assistant", Message{Role: "assistant", ToolCalls: []ToolCall{{Name: "inspect"}}}, "has no provider id"},
-		{"tool_result", Message{Role: "tool", Content: `[{"ok":true,"result":"value"}]`}, "has no tool_use_id"},
-		{"unframed_text", Message{Role: "tool", Content: "tool result without a call"}, "has no linked provider call"},
+		{"assistant_whitespace_id", Message{Role: "assistant", ToolCalls: []ToolCall{{ID: " \t ", Name: "inspect"}}}, "has no provider id"},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			_, err := (&AnthropicAPIRuntime{}).buildRequest(&Session{Messages: []Message{{Role: "user", Content: "initial"}}}, tc.message, "model")
