@@ -1062,6 +1062,7 @@ func buildRuntimeComposition(ctx context.Context, req runtimeCompositionRequest)
 		scratchAuthority = nil
 	}
 	presenter.recordStore(storeSelection)
+	presenter.recordStartupContext(req)
 	runtimePersistence := projectRuntimePersistenceForServe(stores)
 	closeUnactivatedStore := true
 	defer func() {
