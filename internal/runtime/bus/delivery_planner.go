@@ -109,11 +109,10 @@ func (r deliveryRouteResolver) resolve(ctx context.Context, evt events.Event, so
 }
 
 type deliveryRecipientManifest struct {
-	LiveRecipients      []deliveryRecipientCandidate
-	PersistedRecipients []string
-	DeliveryRoutes      []events.DeliveryRoute
-	TargetFailure       runtimepinrouting.TargetFailure
-	AgentLifecycles     map[agentidentity.Identity]agentLifecycleAdmission
+	LiveRecipients  []deliveryRecipientCandidate
+	DeliveryRoutes  []events.DeliveryRoute
+	TargetFailure   runtimepinrouting.TargetFailure
+	AgentLifecycles map[agentidentity.Identity]agentLifecycleAdmission
 }
 
 type deliveryRecipientPolicy struct {
@@ -151,10 +150,9 @@ func (p deliveryRecipientPolicy) evaluate(ctx context.Context, evt events.Event,
 			return deliveryRecipientManifest{}, err
 		}
 		manifest := deliveryRecipientManifest{
-			LiveRecipients:      liveRecipients,
-			PersistedRecipients: deliveryRecipientIDs(persistedRecipients),
-			DeliveryRoutes:      routes,
-			AgentLifecycles:     agentLifecycleAdmissionsForCandidates(persistedRecipients),
+			LiveRecipients:  liveRecipients,
+			DeliveryRoutes:  routes,
+			AgentLifecycles: agentLifecycleAdmissionsForCandidates(persistedRecipients),
 		}
 		if targetDescriptorsOK && len(eventDeliveryTargetRoutes(evt)) > 0 && len(deliveryRecipientIDs(manifest.LiveRecipients)) == 0 {
 			manifest.TargetFailure = targetDeliveryFailure(evt, targetDescriptors, nil)
@@ -633,10 +631,8 @@ func exactDirectRecipientManifest(
 		}
 		recipients = normalizeDeliveryRecipientCandidates(available)
 	}
-	persisted := persistedDeliveryRecipientCandidates(recipients)
 	return deliveryRecipientManifest{
-		LiveRecipients:      recipients,
-		PersistedRecipients: deliveryRecipientIDs(persisted),
+		LiveRecipients: recipients,
 	}
 }
 
@@ -948,7 +944,6 @@ func filterDeliveryRecipientCandidates(
 		eventEntityID = localSource.route.EntityID
 	}
 	allowedCandidates := make([]deliveryRecipientCandidate, 0, len(recipients))
-	persisted := make([]string, 0, len(recipients))
 	deliveryRoutes := make([]events.DeliveryRoute, 0, len(recipients))
 	root := rootExecutionCoordinate(source, evt.RunID())
 	for _, recipient := range recipients {
@@ -996,7 +991,6 @@ func filterDeliveryRecipientCandidates(
 				scoped.AgentLifecycle = agentLifecycleAdmissionMaterializingFlow
 			}
 			allowedCandidates = append(allowedCandidates, scoped)
-			persisted = append(persisted, scoped.ID)
 			admitted, err := projection.admitAgentTarget(evt, RoutePlanDeliveryIntent{
 				Recipient: events.MustAgentDeliveryRecipient(scoped.ID), AgentIdentity: scoped.AgentIdentity,
 				TargetBlueprint: target, AgentLifecycle: scoped.AgentLifecycle,
@@ -1007,12 +1001,10 @@ func filterDeliveryRecipientCandidates(
 			deliveryRoutes = append(deliveryRoutes, admitted.deliveryRoute())
 		}
 	}
-	persisted = uniqueStrings(persisted)
 	manifest := deliveryRecipientManifest{
-		LiveRecipients:      normalizeDeliveryRecipientCandidates(allowedCandidates),
-		PersistedRecipients: persisted,
-		DeliveryRoutes:      events.NormalizeDeliveryRoutes(deliveryRoutes),
-		AgentLifecycles:     agentLifecycleAdmissionsForCandidates(allowedCandidates),
+		LiveRecipients:  normalizeDeliveryRecipientCandidates(allowedCandidates),
+		DeliveryRoutes:  events.NormalizeDeliveryRoutes(deliveryRoutes),
+		AgentLifecycles: agentLifecycleAdmissionsForCandidates(allowedCandidates),
 	}
 	if len(targets) > 0 && len(manifest.LiveRecipients) == 0 {
 		manifest.TargetFailure = targetDeliveryFailure(evt, targetDescriptors, descriptors)

@@ -7,7 +7,6 @@ import (
 	"github.com/division-sh/swarm/internal/events"
 	"github.com/division-sh/swarm/internal/runtime/canonicaljson"
 	"github.com/division-sh/swarm/internal/runtime/contracts"
-	"github.com/division-sh/swarm/internal/runtime/core/flowidentity"
 	"github.com/division-sh/swarm/internal/runtime/core/pinrouting"
 	"github.com/division-sh/swarm/internal/runtime/correlation"
 	"github.com/division-sh/swarm/internal/runtime/pipeline"
@@ -39,15 +38,10 @@ type connectInstanceSelection struct {
 	SourceEventID            string
 	receiver                 pinrouting.ConnectRoutePlanEndpoint
 	mode                     contracts.FlowInputResolutionMode
-	identity                 flowidentity.Instance
 	unavailableReceiverError error
 }
 
-func (s connectInstanceSelection) Empty() bool               { return s.receiver.Readback().FlowID == "" }
-func (s connectInstanceSelection) Route() flowidentity.Route { return s.identity.Route() }
-func (s connectInstanceSelection) InstanceID() string        { return s.identity.InstanceID }
-func (s connectInstanceSelection) InstancePath() string      { return s.identity.InstancePath }
-func (s connectInstanceSelection) EntityID() string          { return s.identity.EntityID }
+func (s connectInstanceSelection) Empty() bool { return s.receiver.Readback().FlowID == "" }
 func (s connectInstanceSelection) ActivationVariables() map[string]string {
 	if s.Activation == nil {
 		return nil
@@ -74,9 +68,10 @@ func (s connectInstanceSelection) Detail() map[string]any {
 	for _, key := range s.KeyMaterial {
 		keys = append(keys, map[string]string{"field": key.Field.Path(), "value": key.Value})
 	}
+	instance := s.Identity()
 	return map[string]any{
 		"action": s.ActionCode(), "receiver_flow": s.receiver.Readback().FlowID,
-		"instance_id": s.InstanceID(), "instance_path": s.InstancePath(), "entity_id": s.EntityID(),
+		"instance_id": instance.InstanceID, "instance_path": instance.InstancePath, "entity_id": instance.EntityID,
 		"key_digest": s.KeyDigest, "key_material": keys, "source_event_id": s.SourceEventID,
 	}
 }
@@ -141,8 +136,9 @@ func (o connectInstanceSelector) Materialize(ctx context.Context, event events.E
 		}
 		return pinrouting.ConnectRoutePlanMaterialization{}, connectInstanceSelection{}, true, err
 	}
-	selection.FlowInstanceSelection, selection.identity = selected, selected.Identity()
-	route := plan.ReceiverRoute(selection.InstancePath(), selection.EntityID())
+	selection.FlowInstanceSelection = selected
+	instance := selected.Identity()
+	route := plan.ReceiverRoute(instance.InstancePath, instance.EntityID)
 	switch plan.TargetKind() {
 	case pinrouting.ConnectTargetKindTarget:
 		return pinrouting.ConnectRoutePlanMaterialization{Target: route}, selection, true, nil

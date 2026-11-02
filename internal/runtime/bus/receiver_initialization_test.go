@@ -147,7 +147,11 @@ func TestReceiverInitializationEventBusAdmissionAndReuse(t *testing.T) {
 }
 
 func TestReceiverInitializationPreviewUsesOnlyPreparedActivationVariables(t *testing.T) {
-	decision := connectInstanceSelection{identity: flowidentity.Instance{InstanceID: "must-not-derive", EntityID: "must-not-derive"}}
+	source := loadConnectRoutePlanCanonicalSource(t, canonicalrouting.CopyReceiverInitialization(t))
+	instance := ConstructedFlowInstanceIdentityFixture(source, "account", "must-not-derive", busInternalTestRunID)
+	decision := connectInstanceSelection{FlowInstanceSelection: runtimepipeline.FlowInstanceSelection{
+		Observation: constructionIndexObservation(t, source, busInternalTestRunID, instance, "acct-1"),
+	}}
 	if got := decision.ActivationVariables(); got != nil {
 		t.Fatalf("unprepared decision synthesized activation variables: %#v", got)
 	}

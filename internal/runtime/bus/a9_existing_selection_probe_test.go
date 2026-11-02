@@ -36,7 +36,7 @@ func TestA9TriageExistingSelectionUsesStoredConstructionAndEdgeKey(t *testing.T)
 	owner := connectInstanceSelector{source: source, index: constructionIndexTestReader{observations: []pipeline.FlowInstanceObservation{constructionIndexObservation(t, source, busInternalTestRunID, root, ""), constructionIndexObservation(t, source, busInternalTestRunID, stored, "left")}}}
 	materialized, selected, _, err := owner.Materialize(withConnectRoutePlanPreview(constructionIndexContext(t, source)), event, plan,
 		map[string]string{"payload.parent_key": "left", "payload.leaf_key": "same"})
-	if err != nil || !materialized.Failure.Empty() || selected.identity != stored {
+	if err != nil || !materialized.Failure.Empty() || selected.Identity() != stored {
 		t.Fatalf("per-edge key failed to reuse admitted stored construction: failure=%v selection=%+v want=%+v err=%v", materialized.Failure, selected, stored, err)
 	}
 }
@@ -120,7 +120,7 @@ func TestA9StoredReceiverSelectionPreservesIdentityAndChecksKeys(t *testing.T) {
 				map[string]string{"payload.account_id": "acct-1"})
 			if test.name == "select ambiguous" || test.name == "reuse ambiguous" || test.name == "select missing key" {
 				var corruption *pipeline.FlowInstanceConstructionCorruption
-				if !errors.As(err, &corruption) || selected.identity != (flowidentity.Instance{}) {
+				if !errors.As(err, &corruption) || selected.Identity() != (flowidentity.Instance{}) {
 					t.Fatalf("duplicate selector was not corruption: %+v %v", selected, err)
 				}
 				return
@@ -128,7 +128,7 @@ func TestA9StoredReceiverSelectionPreservesIdentityAndChecksKeys(t *testing.T) {
 			if err != nil || !handled || materialized.Failure != test.failure {
 				t.Fatalf("stored selection: %+v selected=%+v handled=%t err=%v", materialized, selected, handled, err)
 			}
-			if test.failure.Empty() && (selected.identity != stored[0] || selected.Activation != nil || materialized.Target.EntityID != stored[0].EntityID) {
+			if test.failure.Empty() && (selected.Identity() != stored[0] || selected.Activation != nil || materialized.Target.EntityID != stored[0].EntityID) {
 				t.Fatalf("selection recomputed or reactivated stored identity: %+v want=%+v", selected, stored[0])
 			}
 		})
@@ -173,7 +173,7 @@ func TestA9StoredLeafSelectionExcludesOtherStructuralParents(t *testing.T) {
 	event := eventtest.ExistingRunRootIngress(eventtest.UUID("parent-exclusion"), "start", "test", "", []byte(`{"parent_key":"left","leaf_key":"same-business-key"}`), 0, busInternalTestRunID, events.EventEnvelope{}, time.Now().UTC())
 	owner := connectInstanceSelector{source: source, index: indexReader}
 	materialized, selected, _, err := owner.Materialize(ctx, event, plan, map[string]string{"payload.leaf_key": "same-business-key"})
-	if err != nil || !materialized.Failure.Empty() || selected.identity != leaves[0] || materialized.Target.FlowInstance == leaves[1].InstancePath {
+	if err != nil || !materialized.Failure.Empty() || selected.Identity() != leaves[0] || materialized.Target.FlowInstance == leaves[1].InstancePath {
 		t.Fatalf("same key under another parent changed selection: %+v selected=%+v err=%v", materialized, selected, err)
 	}
 }

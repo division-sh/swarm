@@ -366,8 +366,9 @@ func TestDeliveryRecipientPolicy_FiltersExplicitAgentScopeIntoManifest(t *testin
 	if recipients[0] != "entity-agent" || recipients[1] != "shared-agent" {
 		t.Fatalf("recipients = %#v, want [entity-agent shared-agent]", recipients)
 	}
-	if len(manifest.PersistedRecipients) != 2 || manifest.PersistedRecipients[0] != "entity-agent" || manifest.PersistedRecipients[1] != "shared-agent" {
-		t.Fatalf("persisted recipients = %#v, want [entity-agent shared-agent]", manifest.PersistedRecipients)
+	persisted := deliveryRecipientIDs(persistedDeliveryRecipientCandidates(manifest.LiveRecipients))
+	if len(persisted) != 2 || persisted[0] != "entity-agent" || persisted[1] != "shared-agent" {
+		t.Fatalf("persisted recipients = %#v, want [entity-agent shared-agent]", persisted)
 	}
 }
 
@@ -391,8 +392,9 @@ func TestDeliveryRecipientPolicy_KeepsInternalSubscribersLiveOnlyUnderDescriptor
 	if len(recipients) != 3 || recipients[0] != "workflow-runtime" || recipients[1] != "node:scan-orchestrator" || recipients[2] != "agent-a" {
 		t.Fatalf("recipients = %#v, want [workflow-runtime node:scan-orchestrator agent-a]", recipients)
 	}
-	if len(manifest.PersistedRecipients) != 1 || manifest.PersistedRecipients[0] != "agent-a" {
-		t.Fatalf("persisted recipients = %#v, want [agent-a]", manifest.PersistedRecipients)
+	persisted := deliveryRecipientIDs(persistedDeliveryRecipientCandidates(manifest.LiveRecipients))
+	if len(persisted) != 1 || persisted[0] != "agent-a" {
+		t.Fatalf("persisted recipients = %#v, want [agent-a]", persisted)
 	}
 }
 
@@ -463,7 +465,7 @@ func TestDeliveryRecipientPolicy_BindsOnlyConstructedStaticDeclarations(t *testi
 				t.Fatalf("declaration route granted independent agent construction: %+v", manifest.AgentLifecycles)
 			}
 			if test.want == 0 {
-				if len(manifest.PersistedRecipients) != 0 {
+				if len(deliveryRecipientIDs(persistedDeliveryRecipientCandidates(manifest.LiveRecipients))) != 0 {
 					t.Fatalf("unconstructed declaration persisted recipients: %+v", manifest)
 				}
 				return
@@ -552,8 +554,8 @@ func TestDeliveryRecipientPolicy_TargetedEventFailsWhenTargetInstanceIsGone(t *t
 	if manifest.TargetFailure != runtimepinrouting.FailureTargetUnreachableTerminated {
 		t.Fatalf("target failure = %q, want %q", manifest.TargetFailure, runtimepinrouting.FailureTargetUnreachableTerminated)
 	}
-	if len(manifest.PersistedRecipients) != 0 {
-		t.Fatalf("persisted recipients = %#v, want none", manifest.PersistedRecipients)
+	if persisted := deliveryRecipientIDs(persistedDeliveryRecipientCandidates(manifest.LiveRecipients)); len(persisted) != 0 {
+		t.Fatalf("persisted recipients = %#v, want none", persisted)
 	}
 }
 
@@ -582,8 +584,8 @@ func TestDeliveryRecipientPolicy_TargetedEventFailsWhenTargetDoesNotSubscribe(t 
 	if manifest.TargetFailure != runtimepinrouting.FailureTargetNotSubscribed {
 		t.Fatalf("target failure = %q, want %q", manifest.TargetFailure, runtimepinrouting.FailureTargetNotSubscribed)
 	}
-	if len(manifest.PersistedRecipients) != 0 {
-		t.Fatalf("persisted recipients = %#v, want none", manifest.PersistedRecipients)
+	if persisted := deliveryRecipientIDs(persistedDeliveryRecipientCandidates(manifest.LiveRecipients)); len(persisted) != 0 {
+		t.Fatalf("persisted recipients = %#v, want none", persisted)
 	}
 }
 

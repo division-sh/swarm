@@ -57,7 +57,7 @@ func TestConnectSelectionPreservesJoinedLookupFailure(t *testing.T) {
 			selector := connectInstanceSelector{source: source, index: constructionIndexTestReader{observations: []pipeline.FlowInstanceObservation{rootObservation}, selectionErr: test.err}}
 			event := eventtest.ExistingRunRootIngress(eventtest.UUID(test.name), "producer/account.ready", "test", "", []byte(`{"account_id":"acct-1"}`), 0, busInternalTestRunID, events.EventEnvelope{}, time.Now().UTC())
 			materialized, selection, handled, err := selector.Materialize(constructionIndexContext(t, source), event, plan, map[string]string{"payload.account_id": "acct-1"})
-			if !handled || selection.identity != (flowidentity.Instance{}) {
+			if !handled || selection.Identity() != (flowidentity.Instance{}) {
 				t.Fatalf("failed selection became a receiver: %+v %t", selection, handled)
 			}
 			if test.mapped {
