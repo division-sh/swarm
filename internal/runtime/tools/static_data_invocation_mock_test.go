@@ -70,9 +70,7 @@ func TestStaticDataInvocationMockRequestsExactForeignID(t *testing.T) {
 		{"foreign", string(child[0].StaticID), string(child[0].StaticID)},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
-			frame, err := json.Marshal(map[string]any{"event": map[string]any{
-				"type": "read.work", "payload": map[string]any{"foreign_id": tc.foreign},
-			}})
+			frame, err := json.Marshal(map[string]any{"foreign_id": tc.foreign})
 			if err != nil {
 				t.Fatal(err)
 			}
