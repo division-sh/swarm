@@ -166,7 +166,7 @@ func TestAnthropicHumanTaskObservationBothStores(t *testing.T) {
 				if err != nil {
 					return llmapi.Reply{}, err
 				}
-				reply := llmapi.Reply{Model: body.Model, InputTokens: 10, OutputTokens: 2, TotalTokens: 12}
+				reply := llmapi.Reply{ID: fmt.Sprintf("human-response-%d", request.Number), Model: body.Model, InputTokens: 10, OutputTokens: 2, TotalTokens: 12}
 				switch request.Number {
 				case 1:
 					reply.Tools = []llmapi.ToolCall{{ID: "human-request", Name: "ask_human", Arguments: json.RawMessage(`{"scope":"flow","category":"review","description":"Review this synthetic work."}`)}}
