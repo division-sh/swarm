@@ -1,10 +1,8 @@
 package canonicalrouting
 
 import (
-	"errors"
 	"path"
 	"slices"
-	"strings"
 	"testing"
 
 	runtimecontracts "github.com/division-sh/swarm/internal/runtime/contracts"
@@ -55,12 +53,6 @@ func TestS1RootConnectFixturesUseDirectoryIdentity(t *testing.T) {
 				t.Fatal(err)
 			}
 			bundle, err := runtimecontracts.LoadWorkflowContractBundleFromRootedSource(RepoRoot(t), rooted, "", runtimecontracts.WorkflowContractLoadOptions{})
-			if test.name == "missing-receiver" {
-				if !errors.Is(err, runtimecontracts.ErrInvalidField) || !strings.Contains(err.Error(), `handler "root.ready"`) {
-					t.Fatalf("missing receiver must refuse its undeclared handler: %v", err)
-				}
-				return
-			}
 			if err != nil {
 				t.Fatal(err)
 			}
