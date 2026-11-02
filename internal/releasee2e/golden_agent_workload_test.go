@@ -810,7 +810,7 @@ func runGoldenAgentWorkload(t *testing.T, binaryPath, root string, store goldenS
 		replayed = replayGoldenInterruptedTurns(t, process, runID, runDeadline, binaryPath, projectRoot, env)
 		completionBudget -= time.Since(recoveryStarted)
 	}
-	waitForGoldenTerminalRun(t, process, store, runID, completionBudget)
+	waitForGoldenTerminalRun(t, process, store, runID, completionBudget, len(replayed))
 	firstEvidence := assertGoldenPublicProof(t, process.rpc, runID, restart, options.candidateIDs, preRestartRuntimeLog, []string{runID}, replayed)
 	assertGoldenRunHasNoDrift(t, binaryPath, projectRoot, contractsOperand, configOperand, env, runID)
 	if options.repeatSequential {
@@ -818,7 +818,7 @@ func runGoldenAgentWorkload(t *testing.T, binaryPath, root string, store goldenS
 		if secondRunID == runID {
 			t.Fatal("second ingress reused the first run")
 		}
-		waitForGoldenTerminalRun(t, process, store, secondRunID, options.runDeadline)
+		waitForGoldenTerminalRun(t, process, store, secondRunID, options.runDeadline, 0)
 		retainedRunIDs := []string{runID, secondRunID}
 		secondEvidence := assertGoldenPublicProof(t, process.rpc, secondRunID, false, options.candidateIDs, nil, retainedRunIDs, nil)
 		if firstEvidence.Scout.RunID == secondEvidence.Scout.RunID {
@@ -1044,6 +1044,7 @@ func goldenPublishIngress(t *testing.T, rpc *releaseRPCClient, bundleHash string
 
 func goldenPublishIngressWithKey(t *testing.T, rpc *releaseRPCClient, bundleHash string, candidateIDs []string, idempotencyKey string) string {
 	t.Helper()
+	landing := waitForFullLifecycleStandingRun(t, rpc, bundleHash, "")
 	var result struct {
 		EventID       string `json:"event_id"`
 		RunID         string `json:"run_id"`
@@ -1060,8 +1061,8 @@ func goldenPublishIngressWithKey(t *testing.T, rpc *releaseRPCClient, bundleHash
 	}, &result); err != nil {
 		t.Fatal(err)
 	}
-	if result.EventID == "" || result.RunID == "" || !result.NewRunCreated {
-		t.Fatalf("event.publish result = %#v, want a new durable run", result)
+	if result.EventID == "" || result.RunID != landing.RunID || result.NewRunCreated {
+		t.Fatalf("event.publish result = %#v, want existing live run %s", result, landing.RunID)
 	}
 	return result.RunID
 }
@@ -1123,7 +1124,7 @@ func waitForGoldenCrashCheckpoint(t *testing.T, process *releaseServeProcess, st
 		if err := rpc.call(ctx, "run.diagnose", map[string]any{"run_id": runID}, &last); err != nil {
 			return false, err
 		}
-		if last.Run.Status != "running" || last.TestQuiescence.Ready || goldenActiveWork(last.TestQuiescence) == 0 {
+		if last.Run.Status != "live" || last.TestQuiescence.Ready || goldenActiveWork(last.TestQuiescence) == 0 {
 			return false, nil
 		}
 		var result struct {
@@ -1262,15 +1263,19 @@ func replayGoldenInterruptedTurns(t *testing.T, process *releaseServeProcess, ru
 		}
 		replayed[replayID] = event
 	}
-	if len(replayed) != len(diagnosis.FailedDeliveries) || (len(replayed) > 0 && diagnosis.Run.Status != "running") {
+	if len(replayed) != len(diagnosis.FailedDeliveries) || (len(replayed) > 0 && diagnosis.Run.Status != "live") {
 		t.Fatalf("recovery diagnosis differs from the replayed dead letters: %#v / %#v", diagnosis, replayed)
 	}
 	t.Logf("forced-kill recovery: %d interrupted turns dead-lettered and explicitly replayed", len(replayed))
 	return replayed
 }
 
-func waitForGoldenTerminalRun(t *testing.T, process *releaseServeProcess, store goldenStoreSelection, runID string, deadline time.Duration) {
+func waitForGoldenTerminalRun(t *testing.T, process *releaseServeProcess, store goldenStoreSelection, runID string, deadline time.Duration, retainedFailureCount ...int) {
 	t.Helper()
+	expectedFailedDeliveries := 0
+	if len(retainedFailureCount) != 0 {
+		expectedFailedDeliveries = retainedFailureCount[0]
+	}
 	rpc := process.rpc
 	ctx, cancel := context.WithTimeout(context.Background(), deadline)
 	defer cancel()
@@ -1283,7 +1288,7 @@ func waitForGoldenTerminalRun(t *testing.T, process *releaseServeProcess, store 
 			return false, err
 		}
 		last = result.Run
-		if last.Status == "live" && !process.internalLifecycle {
+		if last.Status == "live" {
 			var diagnosis goldenDiagnosis
 			if err := rpc.call(ctx, "run.diagnose", map[string]any{"run_id": runID}, &diagnosis); err != nil {
 				return false, err
@@ -1298,7 +1303,7 @@ func waitForGoldenTerminalRun(t *testing.T, process *releaseServeProcess, store 
 				}
 				finals++
 			}
-			return finals > 0 && diagnosis.TestQuiescence.Ready && goldenActiveWork(diagnosis.TestQuiescence) == 0 && len(diagnosis.FailedDeliveries) == 0, nil
+			return finals > 0 && diagnosis.TestQuiescence.Ready && goldenActiveWork(diagnosis.TestQuiescence) == 0 && len(diagnosis.FailedDeliveries) == expectedFailedDeliveries, nil
 		}
 		switch last.Status {
 		case "completed":
@@ -1523,8 +1528,8 @@ func assertGoldenPublicProof(t *testing.T, rpc *releaseRPCClient, runID string, 
 	if err := rpc.call(ctx, "run.diagnose", map[string]any{"run_id": runID}, &diagnosis); err != nil {
 		t.Fatal(err)
 	}
-	if diagnosis.Run.RunID != runID || diagnosis.Run.Status != "completed" || !diagnosis.TestQuiescence.Ready || goldenActiveWork(diagnosis.TestQuiescence) != 0 || len(diagnosis.FailedDeliveries) != len(replayed) {
-		t.Fatalf("run.diagnose = %#v, want completed, quiescent, and exactly %d retained recovery failures (restarted=%t)", diagnosis, len(replayed), restarted)
+	if diagnosis.Run.RunID != runID || diagnosis.Run.Status != "live" || !diagnosis.TestQuiescence.Ready || goldenActiveWork(diagnosis.TestQuiescence) != 0 || len(diagnosis.FailedDeliveries) != len(replayed) {
+		t.Fatalf("run.diagnose = %#v, want live, quiescent, and exactly %d retained recovery failures (restarted=%t)", diagnosis, len(replayed), restarted)
 	}
 	if restarted {
 		assertGoldenRestartedRuntimeLog(t, ctx, rpc, runID, preRestartRuntimeLog)
@@ -1858,6 +1863,12 @@ func goldenRetainedAgentExpectations(t *testing.T, ctx context.Context, rpc *rel
 	if !seen[runID] {
 		t.Fatalf("retained agent proof omits current run %s: %v", runID, retainedRunIDs)
 	}
+	scout := waitForFullLifecycleStandingRun(t, rpc, goldenServedBundleHash(t, rpc, "mock_only"), "", "scout")
+	if !seen[scout.RunID] {
+		expected = append(expected, goldenRetainedAgentExpectation{runID: scout.RunID, summary: goldenAgentSummary{
+			AgentID: "scout-worker", Role: "golden_scout", FlowInstance: "scout", ExecutionMode: "mock", Status: "idle",
+		}})
+	}
 	return expected
 }
 
@@ -2111,7 +2122,7 @@ func assertGoldenRoutePayloads(t *testing.T, events []goldenEvent, entities gold
 	payloadCandidateIDs := goldenPayloadCandidateIDs(candidateIDs)
 	search := goldenSingleNamedEvent(t, events, "search.requested")
 	assertGoldenExactPayload(t, search, map[string]any{"query": "golden workload", "candidate_ids": payloadCandidateIDs})
-	assertGoldenSingleDelivery(t, search, "node", "search-intake", "materializing_entity", ".", entities.root)
+	assertGoldenSingleDelivery(t, search, "node", "search-intake", "existing_entity", ".", entities.root)
 
 	scoutRequested := goldenSingleNamedEvent(t, events, "scout.requested")
 	assertGoldenExactPayload(t, scoutRequested, map[string]any{"query": "golden workload", "candidate_ids": payloadCandidateIDs})

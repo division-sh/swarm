@@ -18,7 +18,6 @@ import (
 )
 
 func TestRunStartForegroundObserverOverflowFromReleaseBinary(t *testing.T) {
-	const runID = "00000000-0000-4000-8000-000000002156"
 	repo := releaseE2ERepoRoot(t)
 	releaseRoot := t.TempDir()
 	releaseRoot, err := filepath.EvalSymlinks(releaseRoot)
@@ -27,6 +26,8 @@ func TestRunStartForegroundObserverOverflowFromReleaseBinary(t *testing.T) {
 	}
 	binaryPath := buildReleaseBinary(t, releaseRoot)
 	writeReleaseObserverOverflowFixture(t, repo, releaseRoot, 24)
+	apiTokenFile := filepath.Join(releaseRoot, "api-token")
+	writeReleaseFile(t, apiTokenFile, goldenAPIToken+"\n")
 
 	releaseLock := acquireReleaseMCPPortLock(t)
 	defer releaseLock()
@@ -68,17 +69,20 @@ func TestRunStartForegroundObserverOverflowFromReleaseBinary(t *testing.T) {
 	process := startReleaseServe(t, releaseProcessSpec{
 		BinaryPath: binaryPath, WorkingDir: releaseRoot, Source: contracts,
 		APIPort: apiPort, MCPListenPort: 8082, Env: env,
+		TokenFile: apiTokenFile, Token: goldenAPIToken,
 		WorkspaceBackend: "docker", ShutdownGrace: goldenShutdownGrace,
 	})
 	if err := process.waitReady(ctx); err != nil {
 		t.Fatal(err)
 	}
+	runID := waitForFullLifecycleStandingRun(t, process.rpc, "", "").RunID
 	cmd := exec.CommandContext(
 		ctx,
 		binaryPath,
 		"run", "start",
 		contracts,
 		"--api-port", fmt.Sprint(apiPort),
+		"--api-token-file", apiTokenFile,
 		"--event", "task.assigned",
 		"--payload", filepath.Join(releaseRoot, "payload.json"),
 		"--run-id", runID,

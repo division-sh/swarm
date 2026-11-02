@@ -10,8 +10,6 @@ import (
 	"strings"
 	"testing"
 	"time"
-
-	"github.com/google/uuid"
 )
 
 func TestGoldenNumericDataScatterParkRefusalBothStores(t *testing.T) {
@@ -51,6 +49,7 @@ func TestGoldenNumericDataScatterParkRefusalBothStores(t *testing.T) {
 				t.Fatal(err)
 			}
 			hash := goldenServedBundleHash(t, p.rpc, "mock_only")
+			runID := waitForFullLifecycleStandingRun(t, p.rpc, hash, "").RunID
 			before := captureNumericRefusalInventory(t, ctx, p.rpc, hash)
 			data, err := os.ReadFile(filepath.Join(project, "contracts/data/items.jsonl"))
 			if err != nil {
@@ -85,20 +84,23 @@ func TestGoldenNumericDataScatterParkRefusalBothStores(t *testing.T) {
 					candidate := append(bytes.Join(lines[:99], []byte("\n")), '\n')
 					candidate = append(candidate, mutated...)
 					writeReleaseFile(t, filepath.Join(project, "bad.jsonl"), string(candidate)+"\n")
-					runID := uuid.NewString()
+					publicationKey := "numeric-refusal-" + defect
 					result := runReleaseCommand(t, goldenStartupTimeout, project, env, "", binary,
 						"run", "start", "--connect", p.apiBase,
-						"--run-id", runID, "--idempotency-key", "numeric-refusal-"+runID,
+						"--run-id", runID, "--idempotency-key", publicationKey,
 						"--data", "item.registered=bad.jsonl", "--no-follow")
 					if result.err == nil || !strings.Contains(result.output, "RUN_DATA_REJECTED") {
 						t.Fatalf("whole-input row-100 refusal: %v\n%s", result.err, result.output)
 					}
-					assertNumericRow100Defect(t, ctx, p.rpc, runID, defect)
-					var missing any
-					for _, method := range []string{"run.get", "run.fan_out.list"} {
-						if err := p.rpc.call(ctx, method, map[string]any{"run_id": runID}, &missing); err == nil || !strings.Contains(err.Error(), "RUN_NOT_FOUND") {
-							t.Fatalf("rejected input created %s domain: result=%+v error=%v", method, missing, err)
-						}
+					assertNumericRow100Defect(t, ctx, p.rpc, publicationKey, defect)
+					var feeds struct {
+						Items []json.RawMessage `json:"items"`
+					}
+					if err := p.rpc.call(ctx, "run.fan_out.list", map[string]any{"run_id": runID}, &feeds); err != nil || len(feeds.Items) != 0 {
+						t.Fatalf("rejected input created feed work: result=%+v error=%v", feeds, err)
+					}
+					if events, err := listGoldenEvents(ctx, p.rpc, runID); err != nil || len(events) != 0 {
+						t.Fatalf("rejected input published business work: events=%+v error=%v", events, err)
 					}
 					if got := captureNumericRefusalInventory(t, ctx, p.rpc, hash); !reflect.DeepEqual(got, before) {
 						t.Fatalf("rejected %s changed public version/head/run facts: before=%s after=%s", defect, before, got)
@@ -112,7 +114,7 @@ func TestGoldenNumericDataScatterParkRefusalBothStores(t *testing.T) {
 	}
 }
 
-func assertNumericRow100Defect(t *testing.T, ctx context.Context, rpc *releaseRPCClient, runID, defect string) {
+func assertNumericRow100Defect(t *testing.T, ctx context.Context, rpc *releaseRPCClient, publicationKey, defect string) {
 	t.Helper()
 	var page struct {
 		Items []struct {
@@ -125,7 +127,7 @@ func assertNumericRow100Defect(t *testing.T, ctx context.Context, rpc *releaseRP
 		} `json:"continuation"`
 	}
 	if err := rpc.call(ctx, "data.show", map[string]any{
-		"view": "operation", "detail": "child_defects", "operation_ref": map[string]any{"kind": "run_creation", "run_id": runID},
+		"view": "operation", "detail": "child_defects", "operation_ref": map[string]any{"kind": "rows_publication", "idempotency_key": publicationKey},
 		"page": map[string]any{"limit": 100},
 	}, &page); err != nil {
 		t.Fatal(err)
@@ -140,7 +142,7 @@ func assertNumericRow100Defect(t *testing.T, ctx context.Context, rpc *releaseRP
 		} `json:"continuation"`
 	}
 	if err := rpc.call(ctx, "data.show", map[string]any{
-		"view": "operation", "detail": "run_binding", "operation_ref": map[string]any{"kind": "run_creation", "run_id": runID},
+		"view": "operation", "detail": "run_binding", "operation_ref": map[string]any{"kind": "rows_publication", "idempotency_key": publicationKey},
 		"page": map[string]any{"limit": 100},
 	}, &binding); err != nil {
 		t.Fatal(err)

@@ -41,7 +41,7 @@ func TestDeclaredClockNestedBinaryDeliveryBothStores(t *testing.T) {
 				t.Fatalf("nested binary clock startup: %v\n%s", err, process.output.String())
 			}
 			hash := goldenServedBundleHash(t, process.rpc, "live")
-			standing := waitForFullLifecycleStandingRun(t, process.rpc, hash, "")
+			standing := waitForFullLifecycleStandingRun(t, process.rpc, hash, "", "clock")
 			clocks := readPublicClockRun(t, process, standing.RunID).ClockSchedules
 			if len(clocks) != 1 || clocks[0]["flow_id"] != "clock" || clocks[0]["flow_instance"] != "clock" || clocks[0]["emit"] != "clock/poll.tick" {
 				t.Fatalf("nested binary clock publication coordinate=%+v", clocks)
@@ -147,15 +147,6 @@ func TestDeclaredClockFiniteAndPublicReadbackBothStores(t *testing.T) {
 			clockEvent := waitPublicClockEvent(t, process, standing.RunID)
 			assertFullEventPayloadReadback(t, process, clockEvent, binary, root, config, "api-token", env)
 			pauseFullLifecycleRun(t, process.rpc, standing.RunID)
-			connectedID := uuid.NewString()
-			connected := runReleaseCommand(t, goldenStartupTimeout, root, env, "", binary,
-				"run", "start", "--connect", process.apiBase, "--event", "start.requested", "--payload", "payload.json",
-				"--run-id", connectedID, "--no-follow")
-			if connected.err != nil {
-				t.Fatalf("connected finite clock run: %v\n%s", connected.err, connected.output)
-			}
-			waitForGoldenTerminalRun(t, process, goldenStoreSelection{name: backend}, connectedID, goldenStartupTimeout)
-			assertClocklessRun(t, process, connectedID)
 			parked := readPublicClockRun(t, process, standing.RunID)
 			if parked.Status != "paused" || len(parked.ClockSchedules) != 1 || parked.ClockSchedules[0]["activation_id"] != clock[0]["activation_id"] {
 				t.Fatalf("public parked clock lost durable identity: %+v", parked)
@@ -183,7 +174,7 @@ func TestDeclaredClockFiniteAndPublicReadbackBothStores(t *testing.T) {
 			if err := restarted.stopAndWait(goldenShutdownGrace); err != nil {
 				t.Fatalf("parked clock restart shutdown: %v\n%s", err, restarted.output.String())
 			}
-			t.Log("proof_surface=real binary verify/describe/private scenario/no-serve refusal/serve/connected finite run; parked HTTP+CLI clock inventory and HTTP+WebSocket+CLI occurrence readback; no external executor, provider or SQL test access")
+			t.Log("proof_surface=real binary verify/describe/private scenario/no-serve refusal/serve; parked HTTP+CLI clock inventory and HTTP+WebSocket+CLI occurrence readback; no external executor, provider or SQL test access")
 		})
 	}
 }
@@ -199,25 +190,6 @@ func readPublicClockRun(t *testing.T, process *releaseServeProcess, runID string
 		t.Fatalf("public clock run header: %+v err=%v", result, err)
 	}
 	return result.Run
-}
-
-func assertClocklessRun(t *testing.T, process *releaseServeProcess, runID string) {
-	t.Helper()
-	header := readPublicClockRun(t, process, runID)
-	if header.Status != "live" || len(header.ClockSchedules) != 0 {
-		t.Fatalf("connected execution acquired a deployment clock: %+v", header)
-	}
-	ctx, cancel := context.WithTimeout(t.Context(), goldenStartupTimeout)
-	defer cancel()
-	events, err := listGoldenEvents(ctx, process.rpc, runID)
-	if err != nil {
-		t.Fatal(err)
-	}
-	for _, event := range events {
-		if event.EventName == "poll.tick" {
-			t.Fatalf("finite execution published a clock occurrence: %+v", event)
-		}
-	}
 }
 
 func assertClockScheduleContinuation(t *testing.T, before, after []map[string]any) {

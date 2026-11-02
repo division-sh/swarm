@@ -44,16 +44,16 @@ func runLifecycleRootForkPolicy(t *testing.T) {
 			root := canonicalrouting.CopyLifecycleForkSource(t, false)
 			publication := newExactOriginPublicationProbe(t)
 			rt := startServedLiveFlowProofRuntimeFromSource(t, backend, root)
-			seed := requireServedEventPublishRPCResult(t, rt.Endpoint, map[string]any{"event_name": "work.requested", "bundle_hash": rt.BundleHash, "payload": map[string]any{"seed": true}, "idempotency_key": "fork-seed"})
+			seed := servedEventPublishRPCResult{RunID: requireServedBootConstructedRun(t, rt.Endpoint, rt.BundleHash, rt.Runtime)}
 			var rootEventOwner any = rt.SQLite
 			if rt.Postgres != nil {
 				rootEventOwner = rt.Postgres
 			}
-			requireServedLiveRootMode(t, rt.Runtime.ExecutionPosture, storetest.LoadCanonicalEventRecord(t, t.Context(), rootEventOwner, seed.EventID), seed.RunID)
-			origins := []string{seed.EventID}
 			entityID := requireServedEventPublishEntityState(t, rt.DB, rt.Backend, seed.RunID, seed.RunID, "waiting")
-			loopStart := requireServedEventPublishRPCResult(t, rt.Endpoint, map[string]any{"event_name": "loop.start", "run_id": seed.RunID, "source_event_id": seed.EventID, "payload": map[string]any{"seed": true}, "idempotency_key": "fork-loop-start"})
-			origins = append(origins, loopStart.EventID)
+			loopStart := requireServedEventPublishRPCResult(t, rt.Endpoint, map[string]any{"event_name": "loop.start", "run_id": seed.RunID, "payload": map[string]any{"seed": true}, "idempotency_key": "fork-loop-start"})
+			seed.EventID = loopStart.EventID
+			requireServedLiveRootMode(t, rt.Runtime.ExecutionPosture, storetest.LoadCanonicalEventRecord(t, t.Context(), rootEventOwner, loopStart.EventID), seed.RunID)
+			origins := []string{loopStart.EventID}
 			requireServedEventPublishEntityState(t, rt.DB, rt.Backend, seed.RunID, entityID, "drafting")
 			waitServedRunDeliveryQuiescence(t, rt.ReadRunDeliveries, seed.RunID)
 			requireServedOKJSONRPC(t, rt.Endpoint, "run.pause", map[string]any{"run_id": seed.RunID, "idempotency_key": "fork-pause"})

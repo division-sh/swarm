@@ -14,10 +14,18 @@ import (
 	"testing"
 	"time"
 
+	"github.com/division-sh/swarm/internal/apiidempotency"
 	"github.com/division-sh/swarm/internal/apiv1"
 	"github.com/division-sh/swarm/internal/cliapp"
 	"github.com/division-sh/swarm/internal/config"
 	"github.com/division-sh/swarm/internal/durabledata"
+	"github.com/division-sh/swarm/internal/events"
+	"github.com/division-sh/swarm/internal/events/eventtest"
+	"github.com/division-sh/swarm/internal/runtime/bus"
+	"github.com/division-sh/swarm/internal/runtime/core/flowidentity"
+	"github.com/division-sh/swarm/internal/runtime/correlation"
+	"github.com/division-sh/swarm/internal/runtime/effects"
+	"github.com/division-sh/swarm/internal/runtime/pipeline"
 	"github.com/division-sh/swarm/internal/runtime/semanticview"
 	"github.com/division-sh/swarm/internal/runtime/testfixtures/canonicalrouting"
 	"github.com/division-sh/swarm/internal/sourceartifact"
@@ -236,14 +244,14 @@ func Test2376ForkSourceAndPinsFollowSourceRunBothStores(t *testing.T) {
 			opts, start := lifecycleRestartHarness(t, backend, rootC)
 			c, selectedC := start()
 			hashC := selectedC.BundleHash
-			retainedC := requireServedEventPublishRPCResult(t, selectedC.Endpoint, map[string]any{
-				"event_name": "work.requested", "bundle_hash": hashC,
-				"payload": map[string]any{"seed": true}, "idempotency_key": "2376-retained-target-c",
-			})
+			liveC := requireServedLiveLandingRunID(t, selectedC.Endpoint, hashC, ".")
+			requireServedOKJSONRPC(t, selectedC.Endpoint, "run.pause", map[string]any{"run_id": liveC, "idempotency_key": "2376-pause-live-c"})
+			retainedC := publish2376CreationRootedFixture(t, selectedC, "2376-retained-target-c", nil)
 			waitServedRunDeliveryQuiescence(t, selectedC.ReadRunDeliveries, retainedC.RunID)
 			requireServedOKJSONRPC(t, selectedC.Endpoint, "run.pause", map[string]any{
 				"run_id": retainedC.RunID, "idempotency_key": "2376-pause-target-c",
 			})
+			requireServedOKJSONRPC(t, selectedC.Endpoint, "run.continue", map[string]any{"run_id": liveC, "idempotency_key": "2376-continue-live-c"})
 			if code := c.stop(); code != 0 {
 				t.Fatalf("C stop=%d", code)
 			}
@@ -285,23 +293,20 @@ func Test2376ForkSourceAndPinsFollowSourceRunBothStores(t *testing.T) {
 			}
 			type parent struct{ runID, frontierID string }
 			parents := make(map[string]parent)
+			liveA := requireServedLiveLandingRunID(t, selectedA.Endpoint, hashA, ".")
 			for _, name := range []string{"default", "pin", "explicit", "missing", "contradictory"} {
-				var seed servedEventPublishRPCResult
+				var pins []durabledata.ExplicitPin
+				key := "2376-" + name
+				requireServedOKJSONRPC(t, selectedA.Endpoint, "run.pause", map[string]any{"run_id": liveA, "idempotency_key": "2376-pause-live-a-" + name})
 				if name == "pin" {
-					seed.RunID = uuid.NewString()
-					var out, errOut bytes.Buffer
-					code := executeCLIFrom(context.Background(), t.TempDir(), []string{"run", "start", "--connect", strings.TrimSuffix(selectedA.Endpoint, "/v1/rpc"), "--pin", "work.requested@v1", "--run-id", seed.RunID, "--idempotency-key", "2376-pin-parent", "--no-follow"}, &out, &errOut, nil)
-					if code != 0 {
-						t.Fatalf("data parent start=%d %s / %s", code, &out, &errOut)
+					ref, err := durabledata.ParseDeclarationRef(".", "work.requested")
+					if err != nil {
+						t.Fatal(err)
 					}
-				} else {
-					out, errOut, code := runServedCLICommand(t, selectedA.Endpoint, []string{"event", "publish", "work.requested", "--payload-json", `{"seed":true}`, "--idempotency-key", "2376-" + name})
-					if code != 0 {
-						t.Fatalf("publish=%d %s / %s", code, out, errOut)
-					}
-					published := parseServedEventPublishOutput(t, out)
-					seed = servedEventPublishRPCResult{RunID: published["run_id"], EventID: published["event_id"]}
+					pins = []durabledata.ExplicitPin{{Declaration: ref, VersionID: imported.Candidate.VersionID}}
+					key = "2376-pin-parent"
 				}
+				seed := publish2376CreationRootedFixture(t, selectedA, key, pins)
 				var exact string
 				if err := selectedA.DB.QueryRow("SELECT bundle_hash FROM runs WHERE run_id=$1", seed.RunID).Scan(&exact); err != nil || exact != hashA {
 					t.Fatalf("new-work source=%s want=%s: %v", exact, hashA, err)
@@ -314,6 +319,7 @@ func Test2376ForkSourceAndPinsFollowSourceRunBothStores(t *testing.T) {
 					}
 				}
 				requireServedOKJSONRPC(t, selectedA.Endpoint, "run.pause", map[string]any{"run_id": seed.RunID, "idempotency_key": "pause-" + name})
+				requireServedOKJSONRPC(t, selectedA.Endpoint, "run.continue", map[string]any{"run_id": liveA, "idempotency_key": "2376-continue-live-a-" + name})
 				frontier := requireServedEventPublishRPCResult(t, selectedA.Endpoint, map[string]any{"event_name": "work.observed", "run_id": seed.RunID, "source_event_id": seed.EventID, "payload": map[string]any{"seed": true}, "idempotency_key": "frontier-" + name})
 				parents[name] = parent{seed.RunID, frontier.EventID}
 			}
@@ -424,6 +430,62 @@ func (p sourceForkErrorProbe) ExecuteRunFork(ctx context.Context, req apiv1.RunF
 		p.t.Logf("selected fork refused: %v", err)
 	}
 	return result, err
+}
+
+func publish2376CreationRootedFixture(t *testing.T, rt servedControlProofRuntime, key string, pins []durabledata.ExplicitPin) servedEventPublishRPCResult {
+	t.Helper()
+	runID, eventID := uuid.NewString(), uuid.NewString()
+	source := rt.Runtime.Pipeline.SemanticSource()
+	bundle, ok := semanticview.Bundle(source)
+	if !ok {
+		t.Fatal("creation fixture requires its compiled rooted bundle")
+	}
+	rooted, err := bundle.RootedSource()
+	if err != nil {
+		t.Fatal(err)
+	}
+	ctx := effects.WithExecutionMode(correlation.WithRootAdmission(correlation.WithRunID(servedControlProofAuthorActivityContext(t, rt), runID), rooted.Admission()), rt.Runtime.ExecutionPosture.RootMode())
+	request := apiidempotency.Request{Method: "event.publish", Actor: apiidempotency.BearerActor("2376-fixture"), IdempotencyKey: key, RequestHash: "2376-" + eventID}
+	if len(pins) != 0 {
+		plan, err := rt.Runtime.Manager.PrepareFlowInstanceActivation(ctx, pipeline.FlowInstanceActivationRequest{
+			ContractBundle: source, OccurredAt: time.Now().UTC(), Instance: flowidentity.Stored(source, semanticview.RootExecutionFlowID(source), runID, runID, runID, ""),
+		})
+		if err != nil {
+			t.Fatal(err)
+		}
+		request.Method, request.Now, request.TTL = "run.start", plan.OccurredAt, time.Hour
+		command := bus.DeploymentRunCreationCommand{
+			RunCreation: durabledata.RunCreationCommand{RunID: runID, Actor: "2376-fixture", BundleHash: rt.BundleHash, Data: durabledata.RunCreationDataEnvelope{Pins: pins}},
+			Idempotency: request, Root: bus.FlowInstanceActivationCommand{Plan: plan},
+		}
+		committed, err := rt.Runtime.Bus.Store().(bus.DeploymentRunCreationCommitOwner).CommitDeploymentRunCreation(ctx, command)
+		if err != nil || !committed.Acknowledged || committed.Replay {
+			t.Fatalf("native creation-pinned source fixture: result=%+v err=%v", committed, err)
+		}
+		for _, activation := range committed.Activations {
+			if err := rt.Runtime.Manager.FinalizeCommittedFlowInstanceActivation(ctx, activation); err != nil {
+				t.Fatal(err)
+			}
+		}
+		return servedEventPublishRPCResult{RunID: runID, NewRunCreated: true}
+	}
+	endpoint, err := bus.NewOrdinaryFlowAPIEventPublicationEndpoint(source, semanticview.RootExecutionFlowID(source), "work.requested")
+	if err != nil {
+		t.Fatal(err)
+	}
+	payload := json.RawMessage(`{"seed":true}`)
+	event := eventtest.RunCreatingRootIngressWithMode(eventID, "work.requested", "api.v1", "", payload, 0, runID, "", events.EventEnvelope{}, time.Now().UTC(), rt.Runtime.ExecutionPosture.RootMode())
+	initial, err := json.Marshal(map[string]any{"event_name": event.Type(), "payload": payload, "emitter": "api.v1", "entity_id": "", "flow_instance": "", "source_event_id": ""})
+	if err != nil {
+		t.Fatal(err)
+	}
+	completion := apiidempotency.Completion{ResourceID: eventID, Response: json.RawMessage(`{"event_id":"` + eventID + `"}`)}
+	creation := durabledata.RunCreationCommand{RunID: runID, Actor: "2376-fixture", BundleHash: rt.BundleHash, EventID: eventID, InitialEvent: initial, Data: durabledata.RunCreationDataEnvelope{Pins: pins}}
+	result, replay, err := rt.Runtime.Bus.PublishAPIEventWithRunCreationAcknowledged(ctx, event, &endpoint, request, completion, &creation)
+	if err != nil || replay || result.ResourceID != eventID {
+		t.Fatalf("native creation-rooted source fixture: result=%+v replay=%t err=%v", result, replay, err)
+	}
+	return servedEventPublishRPCResult{RunID: runID, EventID: eventID, NewRunCreated: true}
 }
 
 func write2376SourceFile(t *testing.T, root, label, body string) {

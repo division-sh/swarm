@@ -110,7 +110,7 @@ func TestChannelDeliveryRealAnchorProducersPublicJourney(t *testing.T) {
 						flowInstance = "chat/observers"
 					}
 					seed := requireServedEventPublishRPCResult(t, h.rpcEndpoint(), map[string]any{
-						"event_name": "work.requested", "bundle_hash": bundleHash,
+						"event_name": "work.requested", "bundle_hash": bundleHash, "run_id": seedServedPublicationRun(t, h.runtime),
 						"payload": map[string]any{"seed": true}, "idempotency_key": "channel-anchor-" + string(kind),
 					})
 					gateID := waitChannelPublicCard(t, h, seed.RunID, decisioncard.AnchorKindStageGate, "chat/reviews")
@@ -271,7 +271,7 @@ func TestChannelDeliveryReconciliationActivityDispatchPublicJourney(t *testing.T
 			})
 			reader := openChannelAnchorObservation(t, h)
 			seed := requireServedEventPublishRPCResult(t, h.rpcEndpoint(), map[string]any{
-				"event_name": "work.requested", "bundle_hash": hash,
+				"event_name": "work.requested", "bundle_hash": hash, "run_id": seedServedPublicationRun(t, h.runtime),
 				"payload": map[string]any{"seed": true}, "idempotency_key": "isolated-activity-wake",
 			})
 			requireServedEventPublishRPCResult(t, h.rpcEndpoint(), map[string]any{
@@ -420,7 +420,7 @@ func startChannelAnchorPublicJourney(t *testing.T, backend servedparity.Backend,
 	}
 	if withSummary {
 		notice := requireServedEventPublishRPCResult(t, h.rpcEndpoint(), map[string]any{
-			"event_name": "notice.requested", "bundle_hash": identity.SourceArtifacts[0].BundleHash,
+			"event_name": "notice.requested", "bundle_hash": identity.SourceArtifacts[0].BundleHash, "run_id": seedServedPublicationRun(t, h.runtime),
 			"payload": map[string]any{"seed": true}, "idempotency_key": "uncertainty-summary-notice",
 		})
 		onlyPublicChannelNoticeID(t, h.rpcEndpoint(), "")

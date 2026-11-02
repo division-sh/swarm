@@ -75,7 +75,7 @@ func TestChannelDeliveryAbruptProcessDeathPublicJourney(t *testing.T) {
 					t.Cleanup(release)
 				}
 				seed := requireServedEventPublishRPCResult(t, h.rpcEndpoint(), map[string]any{
-					"event_name": "work.requested", "bundle_hash": hash,
+					"event_name": "work.requested", "bundle_hash": hash, "run_id": seedServedPublicationRun(t, h.runtime),
 					"payload": map[string]any{"seed": true}, "idempotency_key": "delivery-crash-seed",
 				})
 				seedRunID = seed.RunID

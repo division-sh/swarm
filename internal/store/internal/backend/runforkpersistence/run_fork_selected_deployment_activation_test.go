@@ -4,6 +4,8 @@ import (
 	"context"
 	"testing"
 
+	"github.com/division-sh/swarm/internal/runtime/runfork"
+	"github.com/division-sh/swarm/internal/runtime/runlifecycle"
 	"github.com/google/uuid"
 )
 
@@ -22,6 +24,26 @@ func TestSelectedForkExecutedCountUsesDurableOriginsBothStores(t *testing.T) {
 			}
 			ctx := context.Background()
 			runID, feedID := uuid.NewString(), uuid.NewString()
+			source := runlifecycle.Snapshot{RunID: runID, Origin: runlifecycle.DeploymentRunOrigin()}
+			empty := runfork.RunForkPlan{SourceRunID: runID, ForkPoint: runfork.RunForkPoint{Kind: runfork.RunForkPointRunStart, Revision: 1}}
+			if !selectedEmptyDeploymentStart(source, empty) {
+				t.Fatal("exact empty deployment start was not recognized")
+			}
+			nonStart := empty
+			nonStart.ForkPoint.Kind = runfork.RunForkPointStateRevision
+			withInput := empty
+			withInput.StartFirstTurn = &runfork.InputPublication{}
+			withWork := empty
+			withWork.PendingWorkCount = 1
+			for _, invalid := range []runfork.RunForkPlan{nonStart, withInput, withWork} {
+				if selectedEmptyDeploymentStart(source, invalid) {
+					t.Fatal("nonempty or non-start cut was accepted as an empty deployment start", invalid)
+				}
+			}
+			source.Origin = runlifecycle.ScenarioSetupRunOrigin()
+			if selectedEmptyDeploymentStart(source, empty) {
+				t.Fatal("another origin was accepted as an empty deployment start")
+			}
 			tx, err := db.BeginTx(ctx, nil)
 			if err != nil {
 				t.Fatal(err)

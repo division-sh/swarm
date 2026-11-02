@@ -224,17 +224,8 @@ func TestIssue642FutureProviderRecoveryProcessHelper(t *testing.T) {
 	})
 	emit("ready")
 	if mode == "crash" {
-		response := requestServedJSONRPCWithTimeout(t, rt.Endpoint, "event.publish", map[string]any{
-			"event_name": "start.requested", "bundle_hash": rt.BundleHash,
-			"payload": map[string]any{"work_id": "one"}, "idempotency_key": "future-recovery-source",
-		}, 30*time.Second)
-		if response.Error != nil {
-			t.Fatalf("native source prefix: %+v", response.Error)
-		}
-		var seed servedEventPublishRPCResult
-		if err := json.Unmarshal(response.Result, &seed); err != nil {
-			t.Fatal(err)
-		}
+		pauseServedLandingForCreation(t, rt.Endpoint, rt.BundleHash, ".")
+		seed := seedServedRunCreatingEvent(t, rt.Runtime, "start.requested", json.RawMessage(`{"work_id":"one"}`), "future-recovery-source")
 		requireIssue2564LiveRootMode(t, rt, seed.RunID, seed.EventID)
 		ctx, cancel := context.WithTimeout(t.Context(), 30*time.Second)
 		err := issue642WaitRecoveryBusiness(ctx, rt, seed.RunID)

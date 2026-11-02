@@ -937,6 +937,7 @@ func (m postgresRunLifecycleMutation) ReviseSource(
 	if rows, rowsErr := result.RowsAffected(); rowsErr != nil || rows != 1 {
 		return "", errors.Join(fmt.Errorf("revise PostgreSQL run lifecycle source affected %d rows", rows), rowsErr)
 	}
+	ctx = runtimecorrelation.WithRootAdmission(runtimecorrelation.WithSourceArtifactFact(ctx, request.Source), request.RootAdmission)
 	if err := mutationprotocol.InvalidateActiveRunSource(ctx, m.tx, request.RunID); err != nil {
 		return "", err
 	}
@@ -983,6 +984,7 @@ func (m sqliteRunLifecycleMutation) ReviseSource(
 	if rows, rowsErr := result.RowsAffected(); rowsErr != nil || rows != 1 {
 		return "", errors.Join(fmt.Errorf("revise SQLite run lifecycle source affected %d rows", rows), rowsErr)
 	}
+	ctx = runtimecorrelation.WithRootAdmission(runtimecorrelation.WithSourceArtifactFact(ctx, request.Source), request.RootAdmission)
 	if err := mutationprotocol.InvalidateActiveRunSource(ctx, m.tx, request.RunID); err != nil {
 		return "", err
 	}

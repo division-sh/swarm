@@ -10,6 +10,7 @@ import (
 	"encoding/json"
 	"os"
 	"path/filepath"
+	"reflect"
 	"strings"
 	"testing"
 	"time"
@@ -95,6 +96,12 @@ func TestPayloadlessEventPublicPersistenceJourneyBothStores(t *testing.T) {
 			}
 			initialRun := publish("payloadless-initial")
 			pauseFullLifecycleRun(t, process.rpc, initialRun)
+			readCtx, readCancel := context.WithTimeout(context.Background(), 10*time.Second)
+			beforeRestart, err := listGoldenEvents(readCtx, process.rpc, initialRun)
+			readCancel()
+			if err != nil {
+				t.Fatal(err)
+			}
 			if err := process.stopAndWait(10 * time.Second); err != nil {
 				t.Fatal(err)
 			}
@@ -110,9 +117,13 @@ func TestPayloadlessEventPublicPersistenceJourneyBothStores(t *testing.T) {
 				t.Fatal("same-tree directory restart changed the persisted logical source blob")
 			}
 			waitForFullLifecycleRunStatus(t, process.rpc, initialRun, "paused")
-			if restartedRun := publish("payloadless-restarted"); restartedRun == initialRun {
-				t.Fatal("post-restart ingress reused the initial run")
+			readCtx, readCancel = context.WithTimeout(context.Background(), 10*time.Second)
+			afterRestart, err := listGoldenEvents(readCtx, process.rpc, initialRun)
+			readCancel()
+			if err != nil || !reflect.DeepEqual(beforeRestart, afterRestart) {
+				t.Fatalf("exact payload-less event/settlement restart readback: before=%+v after=%+v error=%v", beforeRestart, afterRestart, err)
 			}
+			assertGoldenExactPayload(t, goldenSingleNamedEvent(t, afterRestart, "task.requested"), map[string]any{})
 			if err := process.stopAndWait(10 * time.Second); err != nil {
 				t.Fatal(err)
 			}

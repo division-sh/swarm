@@ -234,12 +234,17 @@ func TestServedCompiledTransitionRestartOnBothStores(t *testing.T) {
 					return ctx.Err()
 				}
 				first, rt := start()
-				seed := requireServedEventPublishRPCResult(t, rt.Endpoint, map[string]any{"event_name": "work.requested", "bundle_hash": rt.BundleHash, "payload": map[string]any{"seed": true}, "idempotency_key": "restart-seed"})
+				seed := servedEventPublishRPCResult{RunID: requireServedBootConstructedRun(t, rt.Endpoint, rt.BundleHash, rt.Runtime)}
 				entityID := requireServedEventPublishEntityState(t, rt.DB, rt.Backend, seed.RunID, seed.RunID, "waiting")
 				params := func(event, key string, payload map[string]any) map[string]any {
-					return map[string]any{"event_name": event, "run_id": seed.RunID, "source_event_id": seed.EventID, "payload": payload, "idempotency_key": key}
+					params := map[string]any{"event_name": event, "run_id": seed.RunID, "payload": payload, "idempotency_key": key}
+					if seed.EventID != "" {
+						params["source_event_id"] = seed.EventID
+					}
+					return params
 				}
 				started := requireServedEventPublishRPCResult(t, rt.Endpoint, params("loop.start", "restart-start", map[string]any{"seed": true}))
+				seed.EventID = started.EventID
 				requireServedEventPublishEntityState(t, rt.DB, rt.Backend, seed.RunID, entityID, "drafting")
 				requireLifecycleCurrentTransition(t, readLifecycleTransitionHistory(t, rt.ReceiverStateReader, seed.RunID, entityID), started.EventID, "waiting", "drafting")
 				var capParams map[string]any

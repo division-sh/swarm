@@ -117,12 +117,13 @@ func TestDurableDataOperationAggregatePublicRestartBothStores(t *testing.T) {
 			ctx, cancel := context.WithTimeout(context.Background(), goldenRunDeadline)
 			defer cancel()
 			operations, sources := createReceiptRestartSources(t, ctx, p.rpc, hash, rows)
+			liveRun := waitForFullLifecycleStandingRun(t, p.rpc, hash, "").RunID
 			createdID, rejectedID := uuid.NewString(), uuid.NewString()
 			create := func(id, path string, accepted bool) {
 				result := runReleaseCommand(t, goldenStartupTimeout, project, env, "", binary,
-					"run", "start", "--connect", p.apiBase, "--run-id", id,
+					"run", "start", "--connect", p.apiBase, "--run-id", liveRun,
 					"--idempotency-key", "receipt-"+id, "--data", "item.registered="+path, "--no-follow")
-				if accepted && (result.err != nil || !strings.Contains(result.output, "run_id="+id)) {
+				if accepted && (result.err != nil || !strings.Contains(result.output, "run_id="+liveRun)) {
 					t.Fatalf("compiled creation/reconstruction: %v\n%s", result.err, result.output)
 				}
 				if !accepted && (result.err == nil || !strings.Contains(result.output, "RUN_DATA_REJECTED")) {
@@ -132,7 +133,7 @@ func TestDurableDataOperationAggregatePublicRestartBothStores(t *testing.T) {
 			create(createdID, "input.jsonl", true)
 			create(rejectedID, "invalid.jsonl", false)
 			for _, id := range []string{createdID, rejectedID} {
-				operations = append(operations, receiptRestartRef("run_creation", id))
+				operations = append(operations, receiptRestartRef("rows_publication", "receipt-"+id))
 			}
 			// The source owner advances the head after CLI creation. Replay must
 			// reconstruct the original request, not substitute this newer head.
@@ -158,7 +159,7 @@ func TestDurableDataOperationAggregatePublicRestartBothStores(t *testing.T) {
 			if after := captureReceiptRestartOperations(t, ctx, p.rpc, operations); !reflect.DeepEqual(before, after) {
 				t.Fatalf("rematerialization changed permanent receipts: before=%s after=%s", before, after)
 			}
-			assertReceiptRestartBinding(t, before, createdID, rejectedID)
+			assertReceiptRestartBinding(t, before, liveRun)
 			assertReceiptRestartAuth(t, ctx, p.rpc, operations[0])
 			if err := p.stopAndWait(goldenShutdownGrace); err != nil {
 				t.Fatalf("retained host shutdown: %v\n%s", err, p.output.String())
@@ -203,7 +204,7 @@ func receiptRestartDeclaration() map[string]any {
 }
 
 func receiptRestartRef(kind, id string) map[string]any {
-	field := map[string]string{"source": "source_invocation_id", "prune": "prune_invocation_id", "run_creation": "run_id"}[kind]
+	field := map[string]string{"source": "source_invocation_id", "prune": "prune_invocation_id", "run_creation": "run_id", "rows_publication": "idempotency_key"}[kind]
 	return map[string]any{"kind": kind, field: id}
 }
 
@@ -252,7 +253,7 @@ func createReceiptRestartPrunes(t *testing.T, ctx context.Context, rpc *releaseR
 			} `json:"pin"`
 		} `json:"items"`
 	}
-	readReceiptRestartDetail(t, ctx, rpc, receiptRestartRef("run_creation", runID), "run_binding", &binding)
+	readReceiptRestartDetail(t, ctx, rpc, receiptRestartRef("rows_publication", "receipt-"+runID), "run_binding", &binding)
 	if len(binding.Items) != 2 || binding.Items[0].Pin == nil {
 		t.Fatalf("created run must retain exact pin/import group: %+v", binding)
 	}
@@ -307,7 +308,7 @@ func captureReceiptRestartOperations(t *testing.T, ctx context.Context, rpc *rel
 		switch ref["kind"] {
 		case "source":
 			details = append(details, "defects", "delta_added", "delta_removed", "delta_changed")
-		case "run_creation":
+		case "run_creation", "rows_publication":
 			details = append(details, "request_binding", "child_evaluations", "child_defects", "run_binding")
 		case "prune":
 			if summary.Prune.Defects != nil {
@@ -348,7 +349,7 @@ func replayReceiptRestartPrunes(t *testing.T, ctx context.Context, rpc *releaseR
 	}
 }
 
-func assertReceiptRestartBinding(t *testing.T, records map[string]json.RawMessage, createdID, rejectedID string) {
+func assertReceiptRestartBinding(t *testing.T, records map[string]json.RawMessage, runID string) {
 	t.Helper()
 	found := map[string]bool{}
 	for key, raw := range records {
@@ -356,18 +357,19 @@ func assertReceiptRestartBinding(t *testing.T, records map[string]json.RawMessag
 			continue
 		}
 		var binding struct {
-			RunID   string            `json:"run_id"`
-			Imports []json.RawMessage `json:"imports"`
+			RunID       string            `json:"run_id"`
+			RequestHash string            `json:"request_hash"`
+			Imports     []json.RawMessage `json:"imports"`
 		}
-		if err := json.Unmarshal(raw, &binding); err != nil || len(binding.Imports) != 1 || (binding.RunID != createdID && binding.RunID != rejectedID) {
+		if err := json.Unmarshal(raw, &binding); err != nil || len(binding.Imports) != 1 || binding.RunID != runID || binding.RequestHash == "" || found[binding.RequestHash] {
 			t.Fatalf("exact permanent request binding: %s error=%v", raw, err)
 		}
 		if strings.Contains(string(raw), "content_base64") || strings.Contains(string(raw), "actor") || strings.Contains(string(raw), "unknown") {
 			t.Fatalf("request binding leaked payload or actor: %s", raw)
 		}
-		found[binding.RunID] = true
+		found[binding.RequestHash] = true
 	}
-	if !found[createdID] || !found[rejectedID] {
+	if len(found) != 2 {
 		t.Fatalf("missing created/rejected permanent request bindings: %+v", found)
 	}
 }

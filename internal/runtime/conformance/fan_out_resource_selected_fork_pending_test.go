@@ -5,14 +5,13 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
-	"os"
-	"path/filepath"
 	"reflect"
 	"sync"
 	"sync/atomic"
 	"testing"
 	"time"
 
+	"github.com/division-sh/swarm/internal/durabledata"
 	"github.com/division-sh/swarm/internal/events"
 	runtimebus "github.com/division-sh/swarm/internal/runtime/bus"
 	runtimedelivery "github.com/division-sh/swarm/internal/runtime/deliverylifecycle"
@@ -197,23 +196,23 @@ func TestDeploymentSourceFixedTPendingReceiverAndChangedPinBothStores(t *testing
 					return &selectedDeploymentSettlementExecutor{FanOutExecutor: executor, observed: observed}
 				})
 				t.Cleanup(func() { gate.held.Store(false) })
-				server := f.operatorServer(t)
-				start := func(name string, rows []byte) string {
+				start := func(rows []byte, expected durabledata.ExpectedHead) string {
 					t.Helper()
-					path := filepath.Join(t.TempDir(), name+".jsonl")
-					if err := os.WriteFile(path, rows, 0o600); err != nil {
+					ref, err := durabledata.ParseDeclarationRef(".", selectedDeploymentEvent)
+					if err != nil {
 						t.Fatal(err)
 					}
-					return startDeploymentResourceRun(t, f, server, "--data", selectedDeploymentEvent+"="+path)
+					return createDeploymentResourceFixtureRun(t, f, durabledata.RunCreationDataEnvelope{Imports: []durabledata.FusedImport{{SourceInvocationID: uuid.NewString(), Declaration: ref, ExpectedHead: expected, InputFormat: "jsonl", Input: rows}}})
 				}
 				oldRows := []byte("{\"account_id\":\"old\",\"document\":{\"version\":1}}\n")
 				newRows := []byte("{\"account_id\":\"new\",\"document\":{\"version\":2}}\n")
 				newVersion := selectedDeploymentVersion(t, f, newRows)
-				wantVersion := selectedDeploymentVersion(t, f, oldRows)
+				oldVersion := selectedDeploymentVersion(t, f, oldRows)
+				wantVersion := oldVersion
 				if changedPin {
 					wantVersion = newVersion
 				}
-				sourceRunID := start("old", oldRows)
+				sourceRunID := start(oldRows, durabledata.AbsentHead())
 				pointEventID := waitDeploymentForkRowEvent(t, f.ctx, f.selected, sourceRunID, f.runtime.fanOutServing.Wake)
 				waitCtx, cancelWait := context.WithTimeout(f.ctx, 10*time.Second)
 				defer cancelWait()
@@ -239,7 +238,7 @@ func TestDeploymentSourceFixedTPendingReceiverAndChangedPinBothStores(t *testing
 				t.Logf("R3b exact T: delivery=%s status=%s receipt=%d handoff=%t attempts=%d deferred_claims=%d", deliveryID, deliveryStatus, pipelineReceipts, handoffStamped, attempts, gate.deferred.Load())
 				if changedPin {
 					pauseDeploymentFixtureRun(t, f, sourceRunID)
-					_ = start("new", newRows)
+					_ = start(newRows, durabledata.VersionHead(oldVersion.VersionID))
 				}
 				var rollback *selectedDeploymentRollbackPublication
 				var replayOwner runforkexecution.SelectedContractReplayPersistence
@@ -307,7 +306,7 @@ func TestDeploymentSourceFixedTPendingReceiverAndChangedPinBothStores(t *testing
 						}
 					}
 				}
-				page := selectedDeploymentPublicEvents(t, f.ctx, server, result.ForkRunID)
+				page := selectedDeploymentPublicEvents(t, f.ctx, f.operatorServer(t), result.ForkRunID)
 				wantRows := [][]byte{oldRows}
 				if changedPin {
 					wantRows = append(wantRows, newRows)

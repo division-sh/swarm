@@ -21,10 +21,7 @@ import (
 )
 
 func TestClaudeCLIManagedLifecycleFromReleaseBinaryDefaults(t *testing.T) {
-	const (
-		runID    = "98eb3399-f6bb-48a6-a3e2-8d3feaf85083"
-		apiToken = "release-e2e-api-token"
-	)
+	const apiToken = "release-e2e-api-token"
 	repo := releaseE2ERepoRoot(t)
 	releaseRoot := t.TempDir()
 	binaryPath := buildReleaseBinary(t, releaseRoot)
@@ -92,6 +89,7 @@ func TestClaudeCLIManagedLifecycleFromReleaseBinaryDefaults(t *testing.T) {
 	if err := process.waitReady(runCtx); err != nil {
 		t.Fatal(err)
 	}
+	runID := waitForFullLifecycleStandingRun(t, process.rpc, "", "").RunID
 	runOutputPath := filepath.Join(releaseRoot, "run-output.log")
 	runOutput, err := os.Create(runOutputPath)
 	if err != nil {
@@ -514,16 +512,16 @@ func assertReleaseProjectionWorkspacesReleased(t *testing.T, root string, record
 			if !ok {
 				continue
 			}
-			if prior := created[kind]; prior != "" && prior != name {
-				t.Fatalf("projection workspace kind %q changed identity within one process: %q then %q", kind, prior, name)
+			if prior := created[name]; prior != "" && prior != kind {
+				t.Fatalf("projection workspace %q changed kind within one process: %q then %q", name, prior, kind)
 			}
 			if processScope == "" {
 				processScope = scope
 			} else if scope != processScope {
 				t.Fatalf("projection workspace %q scope = %q, want shared process scope %q", name, scope, processScope)
 			}
-			created[kind] = name
-			createdCount[kind]++
+			created[name] = kind
+			createdCount[name]++
 			for index := 0; index+1 < len(record.Args); index++ {
 				if record.Args[index] != "-v" {
 					continue
@@ -554,12 +552,17 @@ func assertReleaseProjectionWorkspacesReleased(t *testing.T, root string, record
 		}
 	}
 	for _, kind := range []string{"scaffold", "system", "agent"} {
-		name := created[kind]
-		if name == "" {
+		found := false
+		for _, actualKind := range created {
+			found = found || actualKind == kind
+		}
+		if !found {
 			t.Fatalf("projection workspace kind %q was not created; records=%#v", kind, records)
 		}
-		if removed[name] != createdCount[kind] {
-			t.Fatalf("projection workspace %q create/removal counts = %d/%d, want exact teardown after every lifecycle", name, createdCount[kind], removed[name])
+	}
+	for name, count := range createdCount {
+		if removed[name] != count {
+			t.Fatalf("projection workspace %q create/removal counts = %d/%d, want exact teardown after every lifecycle", name, count, removed[name])
 		}
 	}
 	for name, count := range providerCreated {

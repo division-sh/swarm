@@ -26,7 +26,7 @@ func TestServedColdStaticAgentConstructionBothStores(t *testing.T) {
 				}
 			})
 			params := map[string]any{
-				"event_name": "task.assigned", "bundle_hash": rt.BundleHash,
+				"event_name": "task.assigned", "bundle_hash": rt.BundleHash, "run_id": seedServedPublicationRun(t, rt.Runtime),
 				"payload": map[string]any{"work_id": "one"}, "idempotency_key": "future-provider-source",
 			}
 			response := requestServedJSONRPCWithTimeout(t, rt.Endpoint, "event.publish", params, 30*time.Second)

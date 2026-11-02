@@ -38,7 +38,7 @@ func TestServedColdStaticAgentRestartBothStores(t *testing.T) {
 				}
 			})
 			params := map[string]any{
-				"event_name": "task.assigned", "bundle_hash": served.BundleHash,
+				"event_name": "task.assigned", "bundle_hash": served.BundleHash, "run_id": seedServedPublicationRun(t, served.Runtime),
 				"payload": map[string]any{"work_id": "restart"}, "idempotency_key": "cold-static-restart",
 			}
 			body, err := json.Marshal(map[string]any{"jsonrpc": "2.0", "id": "cold-restart", "method": "event.publish", "params": params})

@@ -55,7 +55,7 @@ func TestIssue2394ServedReporterTransactionCensusBothStores(t *testing.T) {
 					t.Logf("served output:\n%s", process.outputString())
 				}
 			})
-			runID := uuid.NewString()
+			runID := requireServedLiveLandingRunID(t, rt.Endpoint, rt.BundleHash, ".")
 			portfolio := "transaction-census"
 			var started struct {
 				RunID string `json:"run_id"`
@@ -167,7 +167,7 @@ func runIssue2394OriginalReporterHTTP(t *testing.T, transactionOptions storetest
 					t.Logf("served output:\n%s", process.outputString())
 				}
 			})
-			runID := uuid.NewString()
+			runID := requireServedLiveLandingRunID(t, rt.Endpoint, rt.BundleHash, ".")
 			const portfolio = "portfolio-numeric-valid"
 			var started struct {
 				RunID string `json:"run_id"`

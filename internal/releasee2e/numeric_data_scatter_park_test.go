@@ -72,7 +72,7 @@ func TestGoldenNumericDataScatterParkRestartBothStores(t *testing.T) {
 				return p
 			}
 			p := start(context.Background())
-			runID := uuid.NewString()
+			runID := waitForFullLifecycleStandingRun(t, p.rpc, "", "").RunID
 			issued := time.Now()
 			goldenServedBundleHash(t, p.rpc, "mock_only")
 			create := func(parent context.Context) releaseCommandResult {
@@ -215,7 +215,7 @@ func TestGoldenNumericDataScatterParkRestartBothStores(t *testing.T) {
 				t.Fatalf("numeric intake convergence: %v\n%s", err, p.output.String())
 			}
 			entities := assertNumericFeedPublic(t, ctx, p.rpc, runID, expected, corpus)
-			creation := readNumericCreationReceipt(t, ctx, p.rpc, runID)
+			publication := readNumericPublicationReceipt(t, ctx, p.rpc, "numeric-"+runID)
 			settled := captureFullLifecycleEvidence(t, p.rpc, runID)
 			closed, err := readNumericFeed(ctx, p.rpc, runID)
 			if err != nil {
@@ -249,7 +249,7 @@ func TestGoldenNumericDataScatterParkRestartBothStores(t *testing.T) {
 			if replayed.err != nil || !strings.Contains(replayed.output, "run_id="+runID+" ") {
 				t.Fatalf("permanent creation retry after process loss: err=%v before=%s after=%s", replayed.err, result.output, replayed.output)
 			}
-			if got := readNumericCreationReceipt(t, ctx, p.rpc, runID); !reflect.DeepEqual(got, creation) {
+			if got := readNumericPublicationReceipt(t, ctx, p.rpc, "numeric-"+runID); !reflect.DeepEqual(got, publication) {
 				t.Fatal("permanent creation receipt changed on retry")
 			}
 			if got := assertNumericFeedPublic(t, ctx, p.rpc, runID, expected, corpus); !reflect.DeepEqual(got, entities) {

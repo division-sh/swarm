@@ -19,6 +19,7 @@ import (
 	"github.com/division-sh/swarm/internal/channelonboarding"
 	"github.com/division-sh/swarm/internal/cliapp"
 	"github.com/division-sh/swarm/internal/operatorchannel"
+	runtimepkg "github.com/division-sh/swarm/internal/runtime"
 	"github.com/division-sh/swarm/internal/servedparity"
 	"github.com/division-sh/swarm/internal/testutil"
 	"github.com/division-sh/swarm/internal/testutil/telegramapi"
@@ -357,6 +358,7 @@ type channelOnboardingE2EHarness struct {
 	storeDSN       string
 	endpoint       string
 	process        *serveRuntimeTestProcess
+	runtime        *runtimepkg.Runtime
 }
 
 func newChannelOnboardingE2EHarness(t *testing.T, backend servedparity.Backend, publicIngress bool) *channelOnboardingE2EHarness {
@@ -404,7 +406,15 @@ func newChannelOnboardingE2EHarness(t *testing.T, backend servedparity.Backend, 
 
 func (h *channelOnboardingE2EHarness) start(t *testing.T) {
 	t.Helper()
-	h.process = startServeRuntimeTestProcess(t, h.opts)
+	opts := h.opts
+	ready := opts.TestRuntimeReadyHook
+	opts.TestRuntimeReadyHook = func(rt *runtimepkg.Runtime) {
+		h.runtime = rt
+		if ready != nil {
+			ready(rt)
+		}
+	}
+	h.process = startServeRuntimeTestProcess(t, opts)
 	h.process.waitForReadyLine()
 	h.endpoint = "http://" + serveRuntimeAPIListenerFromOutput(t, h.process.outputString())
 }

@@ -440,7 +440,13 @@ func TestRootConnectedTemplatePublicationRollbackIsAtomicAcrossSelectedStores(t 
 	for _, backend := range servedparity.RequiredBackends {
 		backend := backend
 		t.Run(string(backend), func(t *testing.T) {
-			endpoint, db, bundleHash := startPublicInputRollbackRuntime(t, backend)
+			endpoint, db, bundleHash, rt := startPublicInputRollbackRuntime(t, backend)
+			landing := requireServedLiveLandingRunID(t, endpoint, bundleHash, ".")
+			before := readServedForkRecipientSourceDomain(t, servedControlProofRuntime{DB: db}, landing)
+			construction, err := storetest.ReadReceiverConstructionStorage(t.Context(), rt.Bus.Store(), landing, landing, landing, "")
+			if err != nil {
+				t.Fatal(err)
+			}
 			claim := testsql.EventCorruptionClaim{
 				Invariant: "public_input.selected_store_atomicity",
 				Reason:    "prove root-connected private template lifecycle and publication facts roll back on late delivery failure",
@@ -477,7 +483,10 @@ func TestRootConnectedTemplatePublicationRollbackIsAtomicAcrossSelectedStores(t 
 			}
 			requirePublicInputFailureCause(t, rpcErr, "injected delivery route persistence failure")
 			eventID, runID := publicInputFailureIdentity(t, rpcErr)
-			requirePublicInputRollbackNoResidue(t, db, backend, idempotencyKey, eventID, runID)
+			if runID != landing {
+				t.Fatalf("refusal selected another run: got=%s want=%s", runID, landing)
+			}
+			requirePublicInputRollbackNoResidue(t, db, backend, idempotencyKey, eventID, runID, rt, before, construction)
 		})
 	}
 }
@@ -506,7 +515,13 @@ func TestRootConnectedTemplatePublicationRollsBackAfterDeliveryAndCompletionAcro
 		for _, stage := range stages {
 			backend, stage := backend, stage
 			t.Run(string(backend)+"/"+stage.name, func(t *testing.T) {
-				endpoint, db, bundleHash := startPublicInputRollbackRuntime(t, backend)
+				endpoint, db, bundleHash, rt := startPublicInputRollbackRuntime(t, backend)
+				landing := requireServedLiveLandingRunID(t, endpoint, bundleHash, ".")
+				before := readServedForkRecipientSourceDomain(t, servedControlProofRuntime{DB: db}, landing)
+				construction, err := storetest.ReadReceiverConstructionStorage(t.Context(), rt.Bus.Store(), landing, landing, landing, "")
+				if err != nil {
+					t.Fatal(err)
+				}
 				claim := testsql.EventCorruptionClaim{Invariant: "public_input.selected_store_atomicity", Reason: "prove rollback at " + stage.name + " after prior publication facts exist"}
 				stage.install(t, context.Background(), db, claim, "telegram-chat", backend)
 				idempotencyKey := "public-input-" + stage.name + "-" + string(backend)
@@ -524,13 +539,16 @@ func TestRootConnectedTemplatePublicationRollsBackAfterDeliveryAndCompletionAcro
 				}
 				requirePublicInputFailureCause(t, rpcErr, cause)
 				eventID, runID := publicInputFailureIdentity(t, rpcErr)
-				requirePublicInputRollbackNoResidue(t, db, backend, idempotencyKey, eventID, runID)
+				if runID != landing {
+					t.Fatalf("refusal selected another run: got=%s want=%s", runID, landing)
+				}
+				requirePublicInputRollbackNoResidue(t, db, backend, idempotencyKey, eventID, runID, rt, before, construction)
 			})
 		}
 	}
 }
 
-func startPublicInputRollbackRuntime(t *testing.T, backend servedparity.Backend) (string, *sql.DB, string) {
+func startPublicInputRollbackRuntime(t *testing.T, backend servedparity.Backend) (string, *sql.DB, string, *runtimepkg.Runtime) {
 	t.Helper()
 	isolateCLIAPIConfigEnv(t)
 	unsetStoreSelectorEnv(t)
@@ -567,11 +585,11 @@ func startPublicInputRollbackRuntime(t *testing.T, backend servedparity.Backend)
 	default:
 		t.Fatalf("unsupported backend %q", backend)
 	}
-	endpoint, _ := startOwnedMockLifecycleFollowUpRuntime(t, opts)
+	endpoint, rt := startOwnedMockLifecycleFollowUpRuntime(t, opts)
 	if db == nil {
 		t.Fatalf("%s selected database is required", backend)
 	}
-	return endpoint, db, bundleHash
+	return endpoint, db, bundleHash, rt
 }
 
 func publicInputFailureIdentity(t *testing.T, rpcErr *servedJSONRPCError) (string, string) {
@@ -600,8 +618,15 @@ func requirePublicInputFailureCause(t *testing.T, rpcErr *servedJSONRPCError, ex
 	}
 }
 
-func requirePublicInputRollbackNoResidue(t *testing.T, db *sql.DB, backend servedparity.Backend, idempotencyKey, eventID, runID string) {
+func requirePublicInputRollbackNoResidue(t *testing.T, db *sql.DB, backend servedparity.Backend, idempotencyKey, eventID, runID string, rt *runtimepkg.Runtime, before map[string][]string, construction storetest.ReceiverConstructionStorage) {
 	t.Helper()
+	if after := readServedForkRecipientSourceDomain(t, servedControlProofRuntime{DB: db}, runID); !reflect.DeepEqual(before, after) {
+		t.Fatalf("refused publication changed the exact pre-existing run domain: before=%v after=%v", before, after)
+	}
+	after, err := storetest.ReadReceiverConstructionStorage(t.Context(), rt.Bus.Store(), runID, runID, runID, "")
+	if err != nil || !reflect.DeepEqual(construction, after) {
+		t.Fatalf("refused publication changed the exact boot construction: before=%+v after=%+v err=%v", construction, after, err)
+	}
 	queries := []struct {
 		label string
 		sql   string
@@ -610,9 +635,9 @@ func requirePublicInputRollbackNoResidue(t *testing.T, db *sql.DB, backend serve
 	}{
 		{label: "pre-existing live run", sql: `SELECT COUNT(*) FROM runs WHERE run_id = ?`, args: []any{runID}, want: 1},
 		{label: "flow instance", sql: `SELECT COUNT(*) FROM flow_instances WHERE flow_template = 'telegram-chat'`},
-		{label: "entity", sql: `SELECT COUNT(*) FROM entity_state WHERE run_id = ?`, args: []any{runID}},
-		{label: "construction receipt", sql: `SELECT COUNT(*) FROM workflow_instance_initial_materializations WHERE run_id = ?`, args: []any{runID}},
-		{label: "desired attachment", sql: `SELECT COUNT(*) FROM flow_instance_runtime_readiness WHERE run_id = ?`, args: []any{runID}},
+		{label: "new entity", sql: `SELECT COUNT(*) FROM entity_state WHERE run_id = ? AND flow_instance <> CAST(run_id AS TEXT)`, args: []any{runID}},
+		{label: "new construction receipt", sql: `SELECT COUNT(*) FROM workflow_instance_initial_materializations WHERE run_id = ? AND instance_path <> CAST(run_id AS TEXT)`, args: []any{runID}},
+		{label: "new desired attachment", sql: `SELECT COUNT(*) FROM flow_instance_runtime_readiness WHERE run_id = ? AND instance_path <> CAST(run_id AS TEXT)`, args: []any{runID}},
 		{label: "event", sql: `SELECT COUNT(*) FROM events WHERE event_id = ?`, args: []any{eventID}},
 		{label: "delivery", sql: `SELECT COUNT(*) FROM event_deliveries WHERE event_id = ?`, args: []any{eventID}},
 		{label: "replay scope", sql: `SELECT COUNT(*) FROM committed_replay_scopes WHERE event_id = ?`, args: []any{eventID}},
@@ -1703,6 +1728,7 @@ name: empire-style deterministic routing
 steps:
   - publish: item.received
     idempotency_key: ${scenario.sha40("empire-cost-router")}
+    emitter: scenario-first-emitter
     payload:
       from: fixtures/item-received.yaml
       set:

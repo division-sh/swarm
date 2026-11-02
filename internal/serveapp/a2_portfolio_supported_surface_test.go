@@ -38,9 +38,10 @@ func TestA2PortfolioSupportedStreamSurfaceBothStores(t *testing.T) {
 				"bundle_hash": rt.BundleHash, "event_name": "operating.report.triggered",
 				"payload": map[string]any{"period_id": "2026-Q1", "revenue": 100}, "idempotency_key": "a2-stream-q1",
 			}
+			landing := requireServedLiveLandingRunID(t, rt.Endpoint, rt.BundleHash, ".")
 			first := requireServedEventPublishRPCResult(t, rt.Endpoint, params)
-			if !first.NewRunCreated || first.RunID == "" || first.EventID == "" {
-				t.Fatalf("root stream ingress did not create a run: %+v", first)
+			if first.NewRunCreated || first.RunID != landing || first.EventID == "" {
+				t.Fatalf("root stream ingress lost its live run: %+v", first)
 			}
 			waitServedRunDeliveryQuiescence(t, rt.ReadRunDeliveries, first.RunID)
 			q1, firstReport := requireA2PortfolioStreamChain(t, rt, first, "2026-Q1", 100)
@@ -100,12 +101,13 @@ func TestA2PortfolioSupportedFiniteJoinSurfaceBothStores(t *testing.T) {
 			captureSelectedRuntimePersistence(t, func(p serveRuntimePersistence) { selected = p })
 			process, rt := start()
 			rt = a2PortfolioReadbackRuntime(t, process, rt, selected)
+			landing := requireServedLiveLandingRunID(t, rt.Endpoint, rt.BundleHash, ".")
 			setup := requireServedEventPublishRPCResult(t, rt.Endpoint, map[string]any{
 				"bundle_hash": rt.BundleHash, "event_name": "portfolio.setup", "idempotency_key": "a2-join-q1",
 				"payload": map[string]any{"portfolio_id": "portfolio-one", "period_id": "2026-Q1", "expected_operating_ids": []string{"op-a", "op-b"}},
 			})
-			if !setup.NewRunCreated || setup.RunID == "" || setup.EventID == "" {
-				t.Fatalf("root join setup did not create a run: %+v", setup)
+			if setup.NewRunCreated || setup.RunID != landing || setup.EventID == "" {
+				t.Fatalf("root join setup lost its live run: %+v", setup)
 			}
 			waitServedRunDeliveryQuiescence(t, rt.ReadRunDeliveries, setup.RunID)
 			parent := requireA2PortfolioKeyedEntity(t, rt, setup.RunID, "portfolio", "portfolio_id", "portfolio-one")

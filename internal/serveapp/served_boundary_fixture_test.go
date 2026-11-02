@@ -2,15 +2,21 @@ package serveapp
 
 import (
 	"context"
+	"encoding/json"
 	"path/filepath"
 	"runtime"
 	"testing"
 	"time"
 
+	"github.com/division-sh/swarm/internal/apiidempotency"
 	"github.com/division-sh/swarm/internal/cliapp"
 	"github.com/division-sh/swarm/internal/config"
+	"github.com/division-sh/swarm/internal/durabledata"
+	"github.com/division-sh/swarm/internal/events"
+	"github.com/division-sh/swarm/internal/events/eventtest"
 	"github.com/division-sh/swarm/internal/operatorread"
 	runtimepkg "github.com/division-sh/swarm/internal/runtime"
+	"github.com/division-sh/swarm/internal/runtime/bus"
 	"github.com/division-sh/swarm/internal/runtime/core/flowidentity"
 	"github.com/division-sh/swarm/internal/runtime/core/identitytest"
 	"github.com/division-sh/swarm/internal/runtime/correlation"
@@ -32,6 +38,38 @@ type servedBoundaryFixture struct {
 	Runtime                       *runtimepkg.Runtime
 	Probe                         *lifecycletest.Probe
 	ReceiverStateReader           receiverProofStateReader
+}
+
+func seedServedRunCreatingEvent(t *testing.T, rt *runtimepkg.Runtime, eventName string, payload json.RawMessage, key string) servedEventPublishRPCResult {
+	t.Helper()
+	source := rt.Pipeline.SemanticSource()
+	bundle, ok := semanticview.Bundle(source)
+	if !ok {
+		t.Fatal("creation fixture requires its compiled rooted bundle")
+	}
+	rooted, err := bundle.RootedSource()
+	if err != nil {
+		t.Fatal(err)
+	}
+	runID, eventID := uuid.NewString(), uuid.NewString()
+	ctx := correlation.WithRootAdmission(correlation.WithRunID(servedRuntimeProofAuthorActivityContext(t, rt, rooted.Admission().BundleHash()), runID), rooted.Admission())
+	endpoint, err := bus.NewOrdinaryFlowAPIEventPublicationEndpoint(source, semanticview.RootExecutionFlowID(source), eventName)
+	if err != nil {
+		t.Fatal(err)
+	}
+	event := eventtest.RunCreatingRootIngressWithMode(eventID, events.EventType(eventName), "api.v1", "", payload, 0, runID, "", events.EventEnvelope{}, time.Now().UTC(), rt.ExecutionPosture.RootMode())
+	initial, err := json.Marshal(map[string]any{"event_name": event.Type(), "payload": payload, "emitter": "api.v1", "entity_id": "", "flow_instance": "", "source_event_id": ""})
+	if err != nil {
+		t.Fatal(err)
+	}
+	request := apiidempotency.Request{Method: "event.publish", Actor: apiidempotency.BearerActor("served-fixture"), IdempotencyKey: key, RequestHash: "served-fixture-" + eventID}
+	completion := apiidempotency.Completion{ResourceID: eventID, Response: json.RawMessage(`{"event_id":"` + eventID + `"}`)}
+	creation := durabledata.RunCreationCommand{RunID: runID, Actor: "served-fixture", BundleHash: rooted.Admission().BundleHash(), EventID: eventID, InitialEvent: initial}
+	result, replay, err := rt.Bus.PublishAPIEventWithRunCreationAcknowledged(ctx, event, &endpoint, request, completion, &creation)
+	if err != nil || replay || result.ResourceID != eventID {
+		t.Fatalf("native first-turn fixture: result=%+v replay=%t err=%v", result, replay, err)
+	}
+	return servedEventPublishRPCResult{RunID: runID, EventID: eventID, NewRunCreated: true}
 }
 
 func seedServedPublicationRun(t *testing.T, rt *runtimepkg.Runtime) string {
@@ -91,6 +129,20 @@ func requireServedLiveLandingRunID(t *testing.T, endpoint, bundleHash, flowPath 
 	}
 	if runID == "" {
 		t.Fatalf("flow %s lacks its live deployment landing: %+v", flowPath, result.Runs)
+	}
+	return runID
+}
+
+func requireServedBootConstructedRun(t *testing.T, endpoint, bundleHash string, rt *runtimepkg.Runtime) string {
+	t.Helper()
+	runID := requireServedLiveLandingRunID(t, endpoint, bundleHash, ".")
+	owner, err := flowidentity.NewRunScopedFlowInstance(runID, flowidentity.StoredRoute(".", "", runID))
+	if err != nil {
+		t.Fatal(err)
+	}
+	receipt, err := storetest.ReadReceiverConstructionPublication(t.Context(), rt.Bus.Store(), owner, runID)
+	if err != nil || receipt.Identity.InstancePath != runID || receipt.Identity.EntityID != runID || receipt.BundleHash != bundleHash || receipt.CreatingInput != (pipeline.FlowConstructionInput{}) {
+		t.Fatalf("boot root lost its exact source, identity or empty construction origin: receipt=%+v err=%v", receipt, err)
 	}
 	return runID
 }

@@ -34,16 +34,16 @@ func TestServedLifecycleEmitterLoopEscapeJourney(t *testing.T) {
 					t.Logf("terminal delivery failure: %s", failure)
 				}
 			}()
-			started := requireServedEventPublishRPCResult(t, rt.Endpoint, map[string]any{
-				"event_name": "work.requested", "bundle_hash": rt.BundleHash, "payload": map[string]any{"seed": true}, "idempotency_key": "loop-create",
-			})
+			started := servedEventPublishRPCResult{RunID: requireServedBootConstructedRun(t, rt.Endpoint, rt.BundleHash, rt.Runtime)}
 			entityID := requireServedEventPublishEntityState(t, rt.DB, rt.Backend, started.RunID, started.RunID, "waiting")
 			publish := func(event, key string, payload map[string]any) servedEventPublishRPCResult {
-				return requireServedEventPublishRPCResult(t, rt.Endpoint, map[string]any{
-					"event_name": event, "run_id": started.RunID, "source_event_id": started.EventID, "payload": payload, "idempotency_key": key,
-				})
+				params := map[string]any{"event_name": event, "run_id": started.RunID, "payload": payload, "idempotency_key": key}
+				if started.EventID != "" {
+					params["source_event_id"] = started.EventID
+				}
+				return requireServedEventPublishRPCResult(t, rt.Endpoint, params)
 			}
-			publish("loop.start", "loop-start", map[string]any{"seed": true})
+			started.EventID = publish("loop.start", "loop-start", map[string]any{"seed": true}).EventID
 			requireServedEventPublishEntityState(t, rt.DB, rt.Backend, started.RunID, entityID, "drafting")
 			first := readLifecycleLoop(t, rt, started.RunID, entityID)
 			if first.Attempt != 1 || first.MaxAttempts != 2 || first.Status != loopruntime.StatusOpen {

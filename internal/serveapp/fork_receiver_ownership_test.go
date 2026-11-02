@@ -634,7 +634,7 @@ func runForkReceiverOwnershipJourney(t *testing.T, backend servedparity.Backend,
 	t.Logf("source success reached: run=%s frontier=%s receivers=%d", seed.RunID, frontier, len(receivers))
 	requireServedOKJSONRPC(t, rt.Endpoint, "run.pause", map[string]any{"run_id": seed.RunID, "idempotency_key": "ownership-source-pause"})
 	if option.nested {
-		siblingSeed := requireServedEventPublishRPCResult(t, rt.Endpoint, map[string]any{"event_name": seedName, "bundle_hash": rt.BundleHash,
+		siblingSeed := requireServedEventPublishRPCResult(t, rt.Endpoint, map[string]any{"event_name": seedName, "bundle_hash": rt.BundleHash, "run_id": seedServedPublicationRun(t, rt.Runtime),
 			"payload": map[string]any{"token": "receiver-proof"}, "idempotency_key": "ownership-sibling-seed"})
 		waitServedRunDeliveryQuiescence(t, rt.ReadRunDeliveries, siblingSeed.RunID)
 		waitForkReceiverSourceCompletion(t, rt, siblingSeed.RunID)

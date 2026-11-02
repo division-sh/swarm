@@ -16866,6 +16866,8 @@ platform_tables:
         - resource_run_creation_operations
         - resource_run_creation_child_reservations
         - resource_run_creation_child_evaluations
+        - resource_feed_publications
+        - resource_feed_publication_members
         - author_activity_order
         - api_idempotency
         - runtime_ingress_state

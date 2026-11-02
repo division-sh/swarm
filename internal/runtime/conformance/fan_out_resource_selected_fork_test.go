@@ -547,7 +547,9 @@ func assertSelectedDeploymentRowSet(t *testing.T, f *deploymentResourceFixture, 
 	}()
 	waitNotifyAllChildrenRuntimeWithin(t, f.runtime, runID, 3*time.Minute)
 	var pin, intentVersion string
-	if err := f.db.QueryRowContext(f.ctx, `SELECT version_id FROM resource_version_pins WHERE run_id=$1 AND flow_path='.' AND event_name='root.ready'`, runID).Scan(&pin); err != nil {
+	if err := f.db.QueryRowContext(f.ctx, `SELECT MIN(CAST(m.version_id AS TEXT)) FROM resource_feed_publication_members m
+		JOIN resource_feed_publications p ON p.publication_id=m.publication_id
+		WHERE p.run_id=$1 AND m.flow_path='.' AND m.event_name='root.ready' HAVING COUNT(*)=1`, runID).Scan(&pin); err != nil {
 		t.Fatal(err)
 	}
 	if err := f.db.QueryRowContext(f.ctx, `SELECT source_resource_version_id FROM fan_out_intents WHERE run_id=$1`, runID).Scan(&intentVersion); err != nil {
@@ -956,7 +958,9 @@ func TestDeploymentSourceDynamicReceiverSelectedForkRefusesWithoutMutation(t *te
 			f.runtime.fanOutServing.Wake()
 			changedRunID := start("changed", "changed")
 			var changedVersion string
-			if err := f.db.QueryRowContext(f.ctx, `SELECT version_id FROM resource_version_pins WHERE run_id=$1 AND flow_path='.' AND event_name='root.ready'`, changedRunID).Scan(&changedVersion); err != nil {
+			if err := f.db.QueryRowContext(f.ctx, `SELECT MIN(CAST(m.version_id AS TEXT)) FROM resource_feed_publication_members m
+				JOIN resource_feed_publications p ON p.publication_id=m.publication_id
+				WHERE p.run_id=$1 AND m.flow_path='.' AND m.event_name='root.ready' HAVING COUNT(*)=1`, changedRunID).Scan(&changedVersion); err != nil {
 				t.Fatal(err)
 			}
 			owner, _ := deploymentForkOwner(t, f)

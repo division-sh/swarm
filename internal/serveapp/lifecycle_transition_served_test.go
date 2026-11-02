@@ -238,8 +238,7 @@ func TestServedCompiledLoopEscapeSuppressesOrdinaryRepeatOnBothStores(t *testing
 			})
 			var finish servedEventPublishRPCResult
 			var staleAdmitEventID string
-			started := requireServedEventPublishRPCResult(t, rt.Endpoint, map[string]any{"event_name": "work.requested", "bundle_hash": rt.BundleHash, "payload": map[string]any{"seed": true}, "idempotency_key": "create"})
-			requireIssue2564LiveRootMode(t, rt, started.RunID, started.EventID)
+			started := servedEventPublishRPCResult{RunID: requireServedBootConstructedRun(t, rt.Endpoint, rt.BundleHash, rt.Runtime)}
 			entityID := rt.waitEntityStage(t, started.RunID, started.RunID, "waiting")
 			currentHistory := func() []pipeline.WorkflowTransitionRecord {
 				return decodeLifecycleTransitionHistory(t, storetest.ObserveWriterFlow(t, context.Background(), rt.selected, started.RunID, entityID).Config)
@@ -324,9 +323,15 @@ func TestServedCompiledLoopEscapeSuppressesOrdinaryRepeatOnBothStores(t *testing
 				t.Fatalf("other deliveries did not settle with only observer held: %#v", last)
 			}
 			publish := func(event, key string, payload map[string]any) servedEventPublishRPCResult {
-				return requireServedEventPublishRPCResult(t, rt.Endpoint, map[string]any{"event_name": event, "run_id": started.RunID, "source_event_id": started.EventID, "payload": payload, "idempotency_key": key})
+				params := map[string]any{"event_name": event, "run_id": started.RunID, "payload": payload, "idempotency_key": key}
+				if started.EventID != "" {
+					params["source_event_id"] = started.EventID
+				}
+				return requireServedEventPublishRPCResult(t, rt.Endpoint, params)
 			}
 			loopStart := publish("loop.start", "start", map[string]any{"seed": true})
+			started.EventID = loopStart.EventID
+			requireIssue2564LiveRootMode(t, rt, started.RunID, loopStart.EventID)
 			rt.waitEntityStage(t, started.RunID, entityID, "drafting")
 			requireLifecycleCurrentTransition(t, currentHistory(), loopStart.EventID, "waiting", "drafting")
 			first := readLoop()

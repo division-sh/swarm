@@ -29,9 +29,15 @@ import (
 	"github.com/division-sh/swarm/internal/operatorread"
 	"github.com/division-sh/swarm/internal/runtime/bus"
 	"github.com/division-sh/swarm/internal/runtime/contracts"
+	"github.com/division-sh/swarm/internal/runtime/core/flowidentity"
+	"github.com/division-sh/swarm/internal/runtime/correlation"
+	"github.com/division-sh/swarm/internal/runtime/effects"
 	"github.com/division-sh/swarm/internal/runtime/executionmode"
+	"github.com/division-sh/swarm/internal/runtime/pipeline"
+	"github.com/division-sh/swarm/internal/runtime/runlifecycle"
 	"github.com/division-sh/swarm/internal/runtime/semanticview"
 	"github.com/division-sh/swarm/internal/runtime/testfixtures/notifyallchildren"
+	"github.com/division-sh/swarm/internal/store/storetest"
 	"github.com/division-sh/swarm/internal/testpostgres"
 	"github.com/google/uuid"
 )
@@ -190,7 +196,8 @@ func (f *deploymentResourceFixture) operatorServer(t *testing.T) *httptest.Serve
 		ExecutionPosture: f.runtime.posture,
 		Idempotency:      idempotency, Events: f.runtime.bus, Acknowledged: deploymentRunStartDiagnostic{EventBus: f.runtime.bus, t: t},
 		SourceArtifact: f.runtime.bus, RunBundleContext: contextOwner, RecipientPlans: f.runtime.bus, Runs: runs, Observability: observability,
-		Source: f.source, Bundle: identity,
+		LiveRuns: f.selected.(runlifecycle.LiveRunReader),
+		Source:   f.source, Bundle: identity,
 	}
 	methods := apiv1.MergeOperatorHandlers(
 		apiv1.OperatorRunStartHandlers(apiv1.RunStartHandlerOptions{Publication: publication}),
@@ -216,9 +223,15 @@ func (f *deploymentResourceFixture) operatorServer(t *testing.T) *httptest.Serve
 func startDeploymentResourceRun(t *testing.T, f *deploymentResourceFixture, server *httptest.Server, flag string, value string) string {
 	t.Helper()
 	runID := uuid.NewString()
+	selector, _, _ := strings.Cut(value, "=")
+	flowPath := "."
+	if index := strings.LastIndex(selector, "/"); index >= 0 {
+		flowPath = selector[:index]
+	}
+	prepareDeploymentRowsFixtureRun(t, f, runID, flowPath)
 	var stdout, stderr bytes.Buffer
 	args := []string{"run", "start", "--connect", server.URL,
-		"--run-id", runID,
+		"--run-id", runID, "--idempotency-key", runID,
 		flag, value, "--no-follow"}
 	if code := cliapp.Execute(f.ctx, args, &stdout, &stderr, nil, nil); code != 0 {
 		t.Fatalf("operator %v: code=%d stderr=%s stdout=%s", args, code, stderr.String(), stdout.String())
@@ -227,6 +240,55 @@ func startDeploymentResourceRun(t *testing.T, f *deploymentResourceFixture, serv
 		t.Fatalf("run.start returned wrong identity: %s", stdout.String())
 	}
 	return runID
+}
+
+func createDeploymentResourceFixtureRun(t *testing.T, f *deploymentResourceFixture, data durabledata.RunCreationDataEnvelope) string {
+	t.Helper()
+	runID := uuid.NewString()
+	ctx := correlation.WithRootAdmission(effects.WithExecutionMode(correlation.WithRunID(f.ctx, runID), f.runtime.posture.RootMode()), notifyAllChildrenRootedSource(t, f.source).Admission())
+	plan, err := f.runtime.manager.PrepareFlowInstanceActivation(ctx, pipeline.FlowInstanceActivationRequest{
+		ContractBundle: f.source, OccurredAt: time.Now().UTC(), Instance: flowidentity.Stored(f.source, semanticview.RootExecutionFlowID(f.source), runID, runID, runID, ""),
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	command := bus.DeploymentRunCreationCommand{
+		RunCreation: durabledata.RunCreationCommand{RunID: runID, Actor: "deployment-fixture", BundleHash: f.runtime.sourceArtifactFact.BundleHash(), Data: data},
+		Idempotency: apiidempotency.Request{Method: "run.start", Actor: apiidempotency.BearerActor("deployment-fixture"), Now: plan.OccurredAt, TTL: time.Hour},
+		Root:        bus.FlowInstanceActivationCommand{Plan: plan},
+	}
+	committed, err := f.selected.(bus.DeploymentRunCreationCommitOwner).CommitDeploymentRunCreation(ctx, command)
+	if err != nil || !committed.Acknowledged || committed.Replay || committed.Record.Summary.Outcome != "created" {
+		t.Fatalf("native creation-rooted deployment fixture: result=%+v err=%v", committed, err)
+	}
+	for _, activation := range committed.Activations {
+		if err := f.runtime.manager.FinalizeCommittedFlowInstanceActivation(ctx, activation); err != nil {
+			t.Fatal(err)
+		}
+	}
+	return runID
+}
+
+func prepareDeploymentRowsFixtureRun(t *testing.T, f *deploymentResourceFixture, runID, flowPath string) {
+	t.Helper()
+	bundle, ok := semanticview.Bundle(f.source)
+	if !ok {
+		t.Fatal("rows fixture requires its admitted bundle")
+	}
+	storetest.RequireRun(t, f.ctx, f.selected.(storetest.RunFixtureStore), storetest.RunFixture{
+		RunID: runID, Origin: runlifecycle.DeploymentRunOrigin(), Artifact: bundle.SourceArtifact,
+		LiveScope: runlifecycle.LiveRunScope{FlowPath: flowPath},
+	})
+	instance, err := flowidentity.StandingForGeneration(f.source, semanticview.RootExecutionFlowID(f.source), runID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	ctx := effects.WithExecutionMode(correlation.WithRunID(f.ctx, runID), f.runtime.posture.RootMode())
+	if _, err := f.runtime.manager.EnsureFlowInstance(ctx, pipeline.FlowInstanceActivationRequest{
+		ContractBundle: f.source, Instance: instance, OccurredAt: time.Now().UTC(),
+	}); err != nil {
+		t.Fatalf("prepare existing rows fixture run: %v", err)
+	}
 }
 
 func deploymentResourcePublicEvents(t *testing.T, ctx context.Context, server *httptest.Server, runID, cursor string) operatorread.OperatorEventListResult {
@@ -331,7 +393,9 @@ func assertDeploymentResourceRows(t *testing.T, f *deploymentResourceFixture, se
 		t.Fatalf("deployment source did not settle through real receivers: intents=%d committed=%d events=%d deliveries=%d delivery_statuses=%v pipeline_receipts=%d routes=%d children=%d delivered=%d want=%d", intents, committed, events, deliveries, deliveryStatuses, receipts, routes, children, delivered, len(compiled.Rows))
 	}
 	var pinnedVersion, intentVersion string
-	if err := f.db.QueryRowContext(ctx, `SELECT version_id FROM resource_version_pins WHERE run_id=$1 AND flow_path='portfolio' AND event_name='portfolio/account.registered'`, runID).Scan(&pinnedVersion); err != nil {
+	if err := f.db.QueryRowContext(ctx, `SELECT MIN(CAST(m.version_id AS TEXT)) FROM resource_feed_publication_members m
+		JOIN resource_feed_publications p ON p.publication_id=m.publication_id
+		WHERE p.run_id=$1 AND m.flow_path='portfolio' AND m.event_name='portfolio/account.registered' HAVING COUNT(*)=1`, runID).Scan(&pinnedVersion); err != nil {
 		t.Fatalf("load exact run pin: %v", err)
 	}
 	if err := f.db.QueryRowContext(ctx, `SELECT source_resource_version_id FROM fan_out_intents WHERE run_id=$1`, runID).Scan(&intentVersion); err != nil {

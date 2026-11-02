@@ -64,12 +64,13 @@ func TestA2JoinPublicProjectionAgreementBothStores(t *testing.T) {
 				}
 			}
 			process, rt := start()
+			landing := requireServedLiveLandingRunID(t, rt.Endpoint, rt.BundleHash, ".")
 			opened := requireServedEventPublishRPCResult(t, rt.Endpoint, map[string]any{
 				"bundle_hash": rt.BundleHash, "event_name": "order.started", "idempotency_key": "a2-m37-start",
 				"payload": map[string]any{"dispatch_id": "dispatch-m37", "expected": []string{"op-a", "op-b"}},
 			})
-			if !opened.NewRunCreated || opened.RunID == "" || opened.EventID == "" {
-				t.Fatalf("supported root ingress did not create the join run: %+v", opened)
+			if opened.NewRunCreated || opened.RunID != landing || opened.EventID == "" {
+				t.Fatalf("supported root ingress lost the exact join run: %+v", opened)
 			}
 			a2WaitJoinPublicRun(t, rt, opened.RunID, "live", 0, true)
 			created := requireA2PortfolioEntity(t, rt, opened.RunID, opened.RunID)
@@ -77,7 +78,7 @@ func TestA2JoinPublicProjectionAgreementBothStores(t *testing.T) {
 				t.Fatalf("actual root creation did not enter dispatching: %+v", created)
 			}
 			requireA2PortfolioDelivery(t, requireA2PortfolioEvent(t, rt, opened.EventID, opened.RunID, "order.started",
-				map[string]any{"dispatch_id": "dispatch-m37", "expected": []any{"op-a", "op-b"}}), ".", "starter", created, "materializing_entity")
+				map[string]any{"dispatch_id": "dispatch-m37", "expected": []any{"op-a", "op-b"}}), ".", "starter", created, "existing_entity")
 			dispatched := requireServedEventPublishRPCResult(t, rt.Endpoint, map[string]any{
 				"run_id": opened.RunID, "event_name": "order.dispatched", "source_event_id": opened.EventID,
 				"payload": map[string]any{}, "idempotency_key": "a2-m37-dispatch",

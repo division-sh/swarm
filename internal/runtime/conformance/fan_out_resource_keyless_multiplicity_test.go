@@ -51,7 +51,7 @@ func TestDeploymentSourceKeylessEqualRowsPreserveMultiplicityBothStores(t *testi
 			waitNotifyAllChildrenRuntimeWithin(t, f.runtime, runID, 30*time.Second)
 
 			var pin string
-			if err := f.db.QueryRowContext(f.ctx, `SELECT version_id FROM resource_version_pins WHERE run_id=$1 AND flow_path='.' AND event_name='root.ready'`, runID).Scan(&pin); err != nil {
+			if err := f.db.QueryRowContext(f.ctx, `SELECT MIN(CAST(m.version_id AS TEXT)) FROM resource_feed_publication_members m JOIN resource_feed_publications p ON p.publication_id=m.publication_id WHERE p.run_id=$1 AND m.flow_path='.' AND m.event_name='root.ready' HAVING COUNT(*)=1`, runID).Scan(&pin); err != nil {
 				t.Fatal(err)
 			}
 			if pin != string(version.VersionID) {

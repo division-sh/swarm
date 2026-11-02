@@ -6,7 +6,6 @@ import (
 	"testing"
 
 	"github.com/division-sh/swarm/internal/apiv1"
-	"github.com/division-sh/swarm/internal/durabledata"
 	"github.com/division-sh/swarm/internal/events"
 	"github.com/division-sh/swarm/internal/runtime/testfixtures/canonicalrouting"
 	"github.com/division-sh/swarm/internal/servedparity"
@@ -19,19 +18,16 @@ func TestServedForkRootSourceIngressBothStores(t *testing.T) {
 			publication := newExactOriginPublicationProbe(t)
 			rt := startServedLiveFlowProofRuntimeFromSource(t, backend, canonicalrouting.CopyRootIngressServedFollowUp(t))
 			var started struct {
-				RunID string `json:"run_id"`
+				RunID   string `json:"run_id"`
+				EventID string `json:"event_id"`
 			}
 			requireServedJSONRPCResult(t, rt.Endpoint, "run.start", map[string]any{
 				"bundle_hash": rt.BundleHash, "event_name": "item.received", "payload": map[string]any{"item_id": "ordinary-start"},
 			}, &started)
-			var receipt durabledata.OperationSummary
-			requireServedJSONRPCResult(t, rt.Endpoint, "data.show", map[string]any{
-				"view": "operation", "detail": "summary", "operation_ref": map[string]any{"kind": "run_creation", "run_id": started.RunID},
-			}, &receipt)
-			if receipt.RunCreation == nil || receipt.RunCreation.RunID != started.RunID || receipt.RunCreation.Outcome != "created" || receipt.RunCreation.EventID == "" {
-				t.Fatal("run.start lacks exact acknowledged initial publication evidence")
+			if started.RunID == "" || started.EventID == "" {
+				t.Fatal("run.start lacks exact acknowledged publication identity")
 			}
-			initialEventID := receipt.RunCreation.EventID
+			initialEventID := started.EventID
 			var rootEventOwner any = rt.SQLite
 			if rt.Postgres != nil {
 				rootEventOwner = rt.Postgres

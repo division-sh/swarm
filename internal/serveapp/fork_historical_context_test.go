@@ -58,11 +58,14 @@ func TestRunForkHistoricalIdentityPublicExecutionBothStores(t *testing.T) {
 			sourceRoute := requireForkReceiverBusinessMutation(t, rt, seed.RunID, frontier, sourceRows["consumer"].ID)
 			var paused map[string]any
 			requireServedJSONRPCResult(t, rt.Endpoint, "run.pause", map[string]any{"run_id": seed.RunID}, &paused)
-			var sibling servedEventPublishRPCResult
-			requireServedJSONRPCResult(t, rt.Endpoint, "run.start", map[string]any{
-				"event_name": "start.seeded", "bundle_hash": rt.BundleHash,
+			siblingRunID := seedServedPublicationRun(t, rt.Runtime)
+			sibling := requireServedEventPublishRPCResult(t, rt.Endpoint, map[string]any{
+				"event_name": "start.seeded", "bundle_hash": rt.BundleHash, "run_id": siblingRunID,
 				"payload": map[string]any{"token": "receiver-proof"}, "idempotency_key": "historical-context-sibling",
-			}, &sibling)
+			})
+			if sibling.RunID != siblingRunID || sibling.NewRunCreated {
+				t.Fatal("sibling publication escaped its exact native fixture run", sibling)
+			}
 			waitForkReceiverSourceCompletion(t, rt, sibling.RunID)
 			if err := waitExactOriginPublications(t.Context(), publication, seed.EventID, started.EventID, sibling.EventID); err != nil {
 				t.Fatal(err)

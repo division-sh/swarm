@@ -24,7 +24,7 @@ import (
 const scenarioInitialEventID = "00000000-0000-4000-8000-000000000001"
 
 func scenarioStartedRunResult() map[string]any {
-	result := runStartCommandResult(testPublishedRunID, "live")
+	result := eventPublishTestResult(false)
 	result["event_id"] = scenarioInitialEventID
 	return result
 }
@@ -35,9 +35,13 @@ func scenarioProtocolTestOptions(server *httptest.Server) rootCommandOptions {
 	opts := defaultRootCommandOptions()
 	opts.httpClient = server.Client()
 	opts.runTest = func(ctx context.Context, _ TestSessionRequest, run func(context.Context, TestSessionEndpoint) error) error {
-		return run(ctx, TestSessionEndpoint{APIServer: server.URL, Token: "test-token"})
+		return run(ctx, TestSessionEndpoint{APIServer: server.URL, Token: "test-token", StartScenario: scenarioProtocolStart})
 	}
 	return opts
+}
+
+func scenarioProtocolStart(context.Context, map[string]any) (string, error) {
+	return testPublishedRunID, nil
 }
 
 func TestSwarmTestRunsScenarioThroughPublicRPC(t *testing.T) {
@@ -64,14 +68,14 @@ func TestSwarmTestRunsScenarioThroughPublicRPC(t *testing.T) {
 		switch req.Method {
 		case "runtime.identity":
 			writeScenarioRuntimeIdentity(t, w, req.ID, bundleHash)
-		case "run.start", eventPublishMethod:
+		case eventPublishMethod:
 			publishCalls++
 			switch publishCalls {
 			case 1:
-				if req.Method != "run.start" {
+				if req.Method != eventPublishMethod {
 					t.Fatalf("first scenario publication method = %q", req.Method)
 				}
-				if req.Params["event_name"] != "item.received" || req.Params["bundle_hash"] != bundleHash || req.Params["idempotency_key"] != scenarioSHA40("empire-cost-router") {
+				if req.Params["event_name"] != "item.received" || req.Params["bundle_hash"] != bundleHash || req.Params["idempotency_key"] != scenarioSHA40("empire-cost-router") || req.Params["emitter"] != "scenario-first-emitter" || req.Params["run_id"] != testPublishedRunID {
 					t.Fatalf("event.publish initial params = %#v", req.Params)
 				}
 				payload, ok := req.Params["payload"].(map[string]any)
@@ -141,7 +145,7 @@ func TestSwarmTestRunsScenarioThroughPublicRPC(t *testing.T) {
 	}
 	assertScenarioTestMethods(t, calls, []string{
 		"runtime.identity",
-		"run.start",
+		eventPublishMethod,
 		"run.diagnose",
 		eventPublishMethod,
 		"run.diagnose",
@@ -410,7 +414,7 @@ func TestSwarmTestRunsCatalogSmokeCompanionVisibleBehavior(t *testing.T) {
 		switch req.Method {
 		case "runtime.identity":
 			writeScenarioRuntimeIdentity(t, w, req.ID, bundleHash)
-		case "run.start":
+		case eventPublishMethod:
 			if req.Params["event_name"] != "item.received" || req.Params["bundle_hash"] != bundleHash {
 				t.Fatalf("event.publish params = %#v", req.Params)
 			}
@@ -462,7 +466,7 @@ func TestSwarmTestRunsCatalogSmokeCompanionVisibleBehavior(t *testing.T) {
 	}
 	assertScenarioTestMethods(t, calls, []string{
 		"runtime.identity",
-		"run.start",
+		eventPublishMethod,
 		"run.diagnose",
 		"run.diagnose",
 		"run.trace",
@@ -653,7 +657,7 @@ func assertSwarmTestScenarioThroughPublicRPC(t *testing.T, sourceRoot string, do
 				})
 			}
 			writeJSONRPCResult(t, w, req.ID, map[string]any{"run_id": runID, "entities": resultRows})
-		case "run.start", eventPublishMethod:
+		case eventPublishMethod:
 			if publishCalls >= len(doc.Steps) {
 				t.Fatalf("unexpected extra event.publish params = %#v", req.Params)
 			}
@@ -661,9 +665,6 @@ func assertSwarmTestScenarioThroughPublicRPC(t *testing.T, sourceRoot string, do
 			publishCalls++
 			eventID := fmt.Sprintf("00000000-0000-4000-8000-%012d", publishCalls)
 			wantMethod := eventPublishMethod
-			if len(doc.Setup.Entities) == 0 && publishCalls == 1 {
-				wantMethod = "run.start"
-			}
 			if req.Method != wantMethod {
 				t.Fatalf("publication method = %q, want %q", req.Method, wantMethod)
 			}
@@ -675,8 +676,8 @@ func assertSwarmTestScenarioThroughPublicRPC(t *testing.T, sourceRoot string, do
 					t.Fatalf("event.publish[%d] run_id = %#v, want setup run %s; params=%#v", publishCalls, req.Params["run_id"], activeRunID, req.Params)
 				}
 			} else if publishCalls == 1 {
-				if _, ok := req.Params["run_id"]; ok {
-					t.Fatalf("first event.publish unexpectedly sent run_id: %#v", req.Params)
+				if req.Params["run_id"] != activeRunID {
+					t.Fatalf("first publication run_id = %#v, want private scenario run %s", req.Params["run_id"], activeRunID)
 				}
 				if _, ok := req.Params["source_event_id"]; ok && step.SourceEventID == nil {
 					t.Fatalf("first event.publish unexpectedly sent source_event_id: %#v", req.Params)
@@ -724,10 +725,7 @@ func assertSwarmTestScenarioThroughPublicRPC(t *testing.T, sourceRoot string, do
 			} else if _, ok := req.Params["emitter"]; ok {
 				t.Fatalf("event.publish unexpectedly sent emitter: %#v", req.Params)
 			}
-			result := eventPublishTestResult(len(doc.Setup.Entities) == 0 && publishCalls == 1)
-			if req.Method == "run.start" {
-				result = runStartCommandResult(activeRunID, "live")
-			}
+			result := eventPublishTestResult(false)
 			result["event_id"] = eventID
 			result["run_id"] = activeRunID
 			if source, ok := req.Params["source_event_id"].(string); ok {
@@ -800,7 +798,7 @@ func assertSwarmTestScenarioThroughPublicRPC(t *testing.T, sourceRoot string, do
 	if _, err := scenarioTestSourceArtifactFact(context.Background(), client, bundleHash); err != nil {
 		t.Fatal(err)
 	}
-	runner := scenarioRunner{client: client, bundle: bundle, source: semanticview.Wrap(bundle), bundleHash: bundleHash, sourceRoot: sourceRoot, timeout: 2 * time.Second, pollInterval: 10 * time.Millisecond, out: &stdout}
+	runner := scenarioRunner{client: client, bundle: bundle, source: semanticview.Wrap(bundle), bundleHash: bundleHash, sourceRoot: sourceRoot, timeout: 2 * time.Second, pollInterval: 10 * time.Millisecond, out: &stdout, startScenario: scenarioProtocolStart}
 	for _, file := range files {
 		prepared, err := runner.prepareScenario(file)
 		if err != nil {
@@ -815,12 +813,8 @@ func assertSwarmTestScenarioThroughPublicRPC(t *testing.T, sourceRoot string, do
 	if len(doc.Setup.Entities) > 0 {
 		wantMethods = append(wantMethods, scenarioTestSetupEntitiesMethod)
 	}
-	for index := range doc.Steps {
-		method := eventPublishMethod
-		if index == 0 && len(doc.Setup.Entities) == 0 {
-			method = "run.start"
-		}
-		wantMethods = append(wantMethods, method, "run.diagnose")
+	for range doc.Steps {
+		wantMethods = append(wantMethods, eventPublishMethod, "run.diagnose")
 	}
 	wantMethods = append(wantMethods, "run.diagnose", "run.trace")
 	if len(doc.Expect.Entities) > 0 {
@@ -1113,7 +1107,7 @@ steps:
 		switch req.Method {
 		case "runtime.identity":
 			writeScenarioRuntimeIdentity(t, w, req.ID, bundleHash)
-		case "run.start":
+		case eventPublishMethod:
 			writeJSONRPCResult(t, w, req.ID, scenarioStartedRunResult())
 		case "run.diagnose":
 			writeJSONRPCResult(t, w, req.ID, scenarioRunDiagnoseTestResult(testPublishedRunID, true))
@@ -1152,7 +1146,7 @@ steps:
 	}
 	assertScenarioTestMethods(t, calls, []string{
 		"runtime.identity",
-		"run.start",
+		eventPublishMethod,
 		"run.diagnose",
 		"mailbox.list",
 		"mailbox.get",
@@ -1205,7 +1199,7 @@ steps:
 				switch req.Method {
 				case "runtime.identity":
 					writeScenarioRuntimeIdentity(t, w, req.ID, bundleHash)
-				case "run.start":
+				case eventPublishMethod:
 					writeJSONRPCResult(t, w, req.ID, scenarioStartedRunResult())
 				case "run.diagnose":
 					writeJSONRPCResult(t, w, req.ID, scenarioRunDiagnoseTestResult(testPublishedRunID, true))
@@ -1245,7 +1239,7 @@ steps:
 				t.Fatalf("code = %d stderr=%s stdout=%s", code, stderr.String(), stdout.String())
 			}
 			assertScenarioTestMethods(t, calls, []string{
-				"runtime.identity", "run.start", "run.diagnose", "mailbox.list", "mailbox.get", action, "run.diagnose", "run.diagnose",
+				"runtime.identity", eventPublishMethod, "run.diagnose", "mailbox.list", "mailbox.get", action, "run.diagnose", "run.diagnose",
 			})
 		})
 	}
@@ -1286,7 +1280,7 @@ steps:
 				switch req.Method {
 				case "runtime.identity":
 					writeScenarioRuntimeIdentity(t, w, req.ID, bundleHash)
-				case "run.start":
+				case eventPublishMethod:
 					writeJSONRPCResult(t, w, req.ID, scenarioStartedRunResult())
 				case "run.diagnose":
 					writeJSONRPCResult(t, w, req.ID, scenarioRunDiagnoseTestResult(testPublishedRunID, true))
@@ -1335,7 +1329,7 @@ steps:
 		switch req.Method {
 		case "runtime.identity":
 			writeScenarioRuntimeIdentity(t, w, req.ID, bundleHash)
-		case "run.start":
+		case eventPublishMethod:
 			writeJSONRPCResult(t, w, req.ID, scenarioStartedRunResult())
 		case "run.diagnose":
 			writeJSONRPCResult(t, w, req.ID, scenarioRunDiagnoseTestResult(testPublishedRunID, true))
@@ -1584,6 +1578,7 @@ name: empire-style deterministic routing
 steps:
   - publish: item.received
     idempotency_key: ${scenario.sha40("empire-cost-router")}
+    emitter: scenario-first-emitter
     payload:
       from: fixtures/item-received.yaml
       set:

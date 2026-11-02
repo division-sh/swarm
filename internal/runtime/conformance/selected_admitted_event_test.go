@@ -1,7 +1,6 @@
 package conformance
 
 import (
-	"bytes"
 	"context"
 	"os"
 	"path/filepath"
@@ -11,7 +10,6 @@ import (
 	"time"
 
 	"github.com/division-sh/swarm/internal/apiv1"
-	"github.com/division-sh/swarm/internal/cliapp"
 	"github.com/division-sh/swarm/internal/events"
 	"github.com/division-sh/swarm/internal/events/eventtest"
 	"github.com/division-sh/swarm/internal/runtime/contracts"
@@ -112,14 +110,9 @@ func issue2655EventSource(t *testing.T, backend string) (*deploymentResourceFixt
 	f.runtime.fanOutServing.Close()
 	server := f.operatorServer(t)
 	sourceRun := uuid.NewString()
-	payloadPath := filepath.Join(t.TempDir(), "event.json")
-	if err := os.WriteFile(payloadPath, []byte(`{"account_id":"event-source","document":{}}`), 0o600); err != nil {
-		t.Fatal(err)
-	}
-	var stdout, stderr bytes.Buffer
-	args := []string{"run", "start", "--connect", server.URL, "--run-id", sourceRun, "--event", selectedDeploymentEvent, "--payload", payloadPath, "--no-follow"}
-	if code := cliapp.Execute(f.ctx, args, &stdout, &stderr, nil, nil); code != 0 {
-		t.Fatalf("create the real event-origin source: code=%d stderr=%s stdout=%s", code, stderr.String(), stdout.String())
+	event := eventtest.RunCreatingRootIngressWithMode(uuid.NewString(), events.EventType(selectedDeploymentEvent), "event-source-fixture", "", []byte(`{"account_id":"event-source","document":{}}`), 0, sourceRun, "", events.EventEnvelope{}, time.Now().UTC(), f.runtime.posture.RootMode())
+	if err := f.runtime.bus.PublishAcknowledged(f.ctx, event); err != nil {
+		t.Fatalf("create the exact native event-origin source: %v", err)
 	}
 	issue2655WaitEventSource(t, f, sourceRun)
 	page := deploymentResourcePublicEventsByName(t, f.ctx, server, sourceRun, selectedDeploymentEvent, "")

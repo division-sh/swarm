@@ -1195,15 +1195,15 @@ func (r scenarioRunner) startPublicationRun(ctx context.Context, state *scenario
 	}
 	state.RunID = runID
 	params["run_id"] = runID
-	var result runStartResult
-	if err := r.client.call(ctx, "run.start", params, &result); err != nil {
+	var result eventPublishResult
+	if err := r.client.call(ctx, eventPublishMethod, params, &result); err != nil {
 		return err
 	}
-	if err := validateRunStartResult(result); err != nil {
+	if err := validateEventPublishResult(result); err != nil {
 		return err
 	}
-	if strings.TrimSpace(result.EventID) == "" {
-		return fmt.Errorf("malformed run.start result: event_id is required for a scenario publication")
+	if result.RunID != runID || *result.NewRunCreated {
+		return fmt.Errorf("scenario publication did not retain its exact private run")
 	}
 	state.RunID = result.RunID
 	state.LastEventID = result.EventID

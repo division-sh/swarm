@@ -56,22 +56,21 @@ func TestRequestBindingCompiledRetryBothStores(t *testing.T) {
 				t.Fatal(err)
 			}
 			hash := goldenServedBundleHash(t, p.rpc, "mock_only")
+			liveRun := waitForFullLifecycleStandingRun(t, p.rpc, hash, "").RunID
 			start := func(connect, runID string, operands ...string) releaseCommandResult {
-				args := []string{"run", "start", "--connect", connect, "--run-id", runID,
+				args := []string{"run", "start", "--connect", connect, "--run-id", liveRun,
 					"--idempotency-key", "binding-" + runID, "--no-follow"}
 				return runReleaseCommand(t, goldenStartupTimeout, project, env, "", binary, append(args, operands...)...)
 			}
 			requireCreated := func(t *testing.T, result releaseCommandResult, id string) {
-				if result.err != nil || !strings.Contains(result.output, "run_id="+id) {
+				if result.err != nil || !strings.Contains(result.output, "run_id="+liveRun) {
 					t.Fatalf("compiled request creation/retry: %v\n%s", result.err, result.output)
 				}
 			}
 			importID, pinID := uuid.NewString(), uuid.NewString()
 			requireCreated(t, start(p.apiBase, importID, "--data", "item.registered=input.jsonl"), importID)
-			pauseFullLifecycleRun(t, p.rpc, importID)
 			requireCreated(t, start(p.apiBase, pinID, "--pin", "item.registered@head"), pinID)
-			pauseFullLifecycleRun(t, p.rpc, pinID)
-			refs := []map[string]any{receiptRestartRef("run_creation", importID), receiptRestartRef("run_creation", pinID)}
+			refs := []map[string]any{receiptRestartRef("rows_publication", "binding-"+importID), receiptRestartRef("rows_publication", "binding-"+pinID)}
 			before := captureReceiptRestartOperations(t, ctx, p.rpc, refs)
 			var head receiptRestartVersionSummary
 			if err := p.rpc.call(ctx, "data.show", map[string]any{"view": "version", "declaration": receiptRestartDeclaration(),
@@ -202,7 +201,7 @@ func TestRequestBindingCompiledRetryBothStores(t *testing.T) {
 				}
 				newHead := receiptRestartSource(t, ctx, p.rpc, hash, "import", receiptRestartHead{State: "version", VersionID: current.VersionID}, rows[3]+"\n", "accepted")
 				requireCreated(t, start(p.apiBase, raceID, "--data", "item.registered=input.jsonl"), raceID)
-				raceRefs := []map[string]any{receiptRestartRef("run_creation", raceID)}
+				raceRefs := []map[string]any{receiptRestartRef("rows_publication", "binding-"+raceID)}
 				winner := captureReceiptRestartOperations(t, ctx, p.rpc, raceRefs)
 				var binding struct {
 					Imports []struct {

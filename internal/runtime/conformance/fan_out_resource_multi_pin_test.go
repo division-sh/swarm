@@ -1,20 +1,17 @@
 package conformance
 
 import (
-	"bytes"
 	"net/http/httptest"
 	"os"
 	"path/filepath"
 	"reflect"
-	"strings"
 	"testing"
 	"time"
 
-	"github.com/division-sh/swarm/internal/cliapp"
+	"github.com/division-sh/swarm/internal/durabledata"
 	"github.com/division-sh/swarm/internal/runtime/contracts"
 	"github.com/division-sh/swarm/internal/runtime/semanticview"
 	"github.com/division-sh/swarm/internal/runtime/testfixtures/canonicalrouting"
-	"github.com/google/uuid"
 )
 
 func TestDeploymentSourceTwoPinnedFeedsSettleIndependentlyBothStores(t *testing.T) {
@@ -38,23 +35,22 @@ func TestDeploymentSourceTwoPinnedFeedsSettleIndependentlyBothStores(t *testing.
 				runID := startDeploymentResourceRun(t, f, server, "--data", item.declaration+"="+file)
 				waitNotifyAllChildrenRuntimeWithin(t, f.runtime, runID, 30*time.Second)
 				var version string
-				if err := f.db.QueryRowContext(f.ctx, `SELECT version_id FROM resource_version_pins WHERE run_id=$1 AND flow_path='portfolio' AND event_name=$2`, runID, item.declaration).Scan(&version); err != nil {
+				if err := f.db.QueryRowContext(f.ctx, `SELECT MIN(CAST(m.version_id AS TEXT)) FROM resource_feed_publication_members m JOIN resource_feed_publications p ON p.publication_id=m.publication_id WHERE p.run_id=$1 AND m.flow_path='portfolio' AND m.event_name=$2 HAVING COUNT(*)=1`, runID, item.declaration).Scan(&version); err != nil {
 					t.Fatal(err)
 				}
 				versions[item.declaration] = version
 				pauseDeploymentFixtureRun(t, f, runID)
 			}
 
-			runID := uuid.NewString()
-			args := []string{"run", "start", "--connect", server.URL, "--run-id", runID}
+			var data durabledata.RunCreationDataEnvelope
 			for _, item := range imports {
-				args = append(args, "--pin", item.declaration+"@"+versions[item.declaration])
+				ref, err := durabledata.ParseDeclarationRef("portfolio", item.declaration)
+				if err != nil {
+					t.Fatal(err)
+				}
+				data.Pins = append(data.Pins, durabledata.ExplicitPin{Declaration: ref, VersionID: durabledata.VersionID(versions[item.declaration])})
 			}
-			args = append(args, "--no-follow")
-			var stdout, stderr bytes.Buffer
-			if code := cliapp.Execute(f.ctx, args, &stdout, &stderr, nil, nil); code != 0 || !strings.Contains(stdout.String(), "run_id="+runID) {
-				t.Fatalf("operator two-pin run.start: code=%d stderr=%s stdout=%s", code, stderr.String(), stdout.String())
-			}
+			runID := createDeploymentResourceFixtureRun(t, f, data)
 			waitNotifyAllChildrenRuntimeWithin(t, f.runtime, runID, 30*time.Second)
 			assertTwoDeploymentFeedsSettled(t, f, runID, versions)
 			assertTwoDeploymentPublicEvents(t, f, server, runID)

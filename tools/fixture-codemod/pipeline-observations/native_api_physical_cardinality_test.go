@@ -139,6 +139,9 @@ func TestNativeAPIPhysicalCardinalityCallerInventoryIsComplete(t *testing.T) {
 		}
 	}
 	expected := map[string]map[string]int{
+		"TestEventPublishCanonicalClassAndProvenanceReadbackParity":                               {"countAPIIdempotencyRows": 5, "countAllEventRows": 6, "countAllRunRows": 6},
+		"TestOperatorEventPublishHandlersFailClosedBeforePersistence":                             {"countAPIIdempotencyRows": 1, "countAllEventRows": 1, "countAllRunRows": 1},
+		"TestOperatorEventPublishPreCommitFailureFailsClosedWithDeclaredError":                    {"countAPIIdempotencyRows": 1, "countAllEventRows": 1, "countAllRunRows": 1},
 		"TestOperatorEventPublishSQLiteIdempotentFirstEventPublishesWithoutLock":                  {"countAPIIdempotencyRows": 2},
 		"TestOperatorEventPublishSQLitePayloadFailureLeavesNoIdempotencyCompletionOrRows":         {"countAPIIdempotencyRows": 1, "countAllRunRows": 1},
 		"TestOperatorEventPublishSQLiteRejectsPrivateOrdinaryFlowEndpoint":                        {"countAPIIdempotencyRows": 1, "countAllRunRows": 1},
@@ -154,7 +157,7 @@ func TestNativeAPIPhysicalCardinalityCallerInventoryIsComplete(t *testing.T) {
 		"TestOperatorAgentControlHandlersUseCanonicalOwnerAndIdempotency":                         {"countAPIIdempotencyRows": 1},
 		"TestOperatorAgentSendDirectiveRunTargetErrors":                                           {"countAPIIdempotencyRows": 1},
 		"TestOperatorRunStartHandlersPersistRootEventAndReplayIdempotency":                        {"countAPIIdempotencyRows": 1},
-		"TestOperatorRunStartHandlersFailClosedBeforePersistence":                                 {"countAPIIdempotencyRows": 2, "countAllRunRows": 1, "assertNoRunStartPersistence": 9},
+		"TestOperatorRunStartHandlersFailClosedBeforePersistence":                                 {"countAPIIdempotencyRows": 2, "countAllRunRows": 1, "assertNoRunStartPersistence": 5},
 		"TestOperatorEventPublishHandlersPersistEventReportDeliveriesAndReplayIdempotency":        {"countAPIIdempotencyRows": 1},
 		"TestOperatorEventPublishReturnsDurableAckBeforePostCommitDispatchCompletes":              {"countAPIIdempotencyRows": 1},
 		"TestOperatorEventPublishRejectsPrivateFlowDespiteLiveRecipient":                          {"countAPIIdempotencyRows": 1, "countAllEventRows": 1},
@@ -176,7 +179,7 @@ func TestNativeAPIPhysicalCardinalityCallerInventoryIsComplete(t *testing.T) {
 		"TestOperatorEventReplayStoresIdempotencyBeforeDirectPublishFanoutError":                  {"countAPIIdempotencyRows": 1},
 		"TestOperatorEventReplaySubsetAndFailClosedCases":                                         {"countAPIIdempotencyRows": 2},
 		"TestOperatorAgentReplayProjectsSingletonEventReplayOwner":                                {"countAPIIdempotencyRows": 1},
-		"TestOperatorRunStartHandlersRequireBundleScopeForCreateNewWorkWithoutActiveRuntimeFact":  {"assertNoRunStartPersistence": 2},
+		"TestOperatorRunStartHandlersRequireBundleScopeForCreateNewWorkWithoutActiveRuntimeFact":  {"assertNoRunStartPersistence": 1},
 		"TestOperatorRunStartRejectsFlowScopedEventName":                                          {"assertNoRunStartPersistence": 1}}
 	if !reflect.DeepEqual(actual, expected) {
 		t.Fatalf("physical count callers differ: got=%v want=%v", actual, expected)

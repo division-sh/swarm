@@ -108,7 +108,7 @@ func TestServedLifecycleEmitterPublicInputAdmissionNoMutation(t *testing.T) {
 						"bundle_hash": rt.BundleHash, "event_name": tc.event, "payload": tc.payload, "idempotency_key": "lifecycle-not-ingress",
 					})
 					details, ok := err.Data["details"].(map[string]any)
-					if err.Data["code"] != apiv1.EventNotDeclaredCode || !ok || details["reason"] != "not_declared_root_input" || details["event_name"] != tc.event {
+					if err.Data["code"] != apiv1.EventNotDeclaredCode || !ok || details["reason"] != "selected_root_input_required" || details["event_name"] != tc.event {
 						t.Fatalf("wrong non-ingress rejection: %#v", err)
 					}
 					if got := lifecycleAdmissionDomainCounts(t, rt.DB); !reflect.DeepEqual(got, before) {
@@ -129,10 +129,16 @@ func TestServedLifecycleEmitterPublicInputAdmissionNoMutation(t *testing.T) {
 							t.Fatalf("rejected %s stored %d idempotency completions", key.method, n)
 						}
 					}
-					started := requireServedEventPublishRPCResult(t, rt.Endpoint, map[string]any{
-						"bundle_hash": rt.BundleHash, "event_name": "work.requested", "payload": map[string]any{"seed": true}, "idempotency_key": "lifecycle-valid-ingress",
-					})
-					requireServedEventPublishEntityState(t, rt.DB, rt.Backend, started.RunID, "", tc.state)
+					runID := requireServedBootConstructedRun(t, rt.Endpoint, rt.BundleHash, rt.Runtime)
+					if tc.name == "gate" {
+						started := requireServedEventPublishRPCResult(t, rt.Endpoint, map[string]any{
+							"bundle_hash": rt.BundleHash, "event_name": "work.requested", "run_id": runID, "payload": map[string]any{"seed": true}, "idempotency_key": "lifecycle-valid-ingress",
+						})
+						if started.RunID != runID || started.NewRunCreated {
+							t.Fatal("public ingress escaped its exact live run", started)
+						}
+					}
+					requireServedEventPublishEntityState(t, rt.DB, rt.Backend, runID, "", tc.state)
 				})
 			}
 		})

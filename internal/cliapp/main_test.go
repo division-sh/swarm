@@ -1172,7 +1172,7 @@ func TestSourceFreeCommandsDoNotRequireSourceCheckout(t *testing.T) {
 		{name: "completion", args: []string{"completion", "bash"}, want: "swarm"},
 		{name: "serve help", args: []string{"serve", ".", "--help"}, want: "Start the Swarm runtime"},
 		{name: "verify help", args: []string{"verify", "--help"}, want: "Validate contract files or compare a run's state with its history"},
-		{name: "run help", args: []string{"run", "start", "--help"}, want: "Start a workflow run on a running runtime"},
+		{name: "run help", args: []string{"run", "start", "--help"}, want: "Publish into a served flow's live run, or reattach to one."},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			isolateCLIAPIConfigEnv(t)

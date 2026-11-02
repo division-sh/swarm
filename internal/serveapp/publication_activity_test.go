@@ -59,7 +59,7 @@ func TestServedGeneratedActivityPublicationBothStores(t *testing.T) {
 						t.Run(outcome, func(t *testing.T) {
 							beforeCalls := calls.Load()
 							exhausted.Store(outcome == "exhausted")
-							params := map[string]any{"event_name": inputName, "bundle_hash": rt.BundleHash,
+							params := map[string]any{"event_name": inputName, "bundle_hash": rt.BundleHash, "run_id": seedServedPublicationRun(t, rt.Runtime),
 								"payload": map[string]any{"case_id": "alpha", "message": "exact-provider-input"}, "idempotency_key": "activity-seed-" + outcome}
 							seed := requireServedEventPublishRPCResult(t, rt.Endpoint, params)
 							defer func() {
@@ -129,7 +129,6 @@ func TestServedGeneratedActivityPublicationBothStores(t *testing.T) {
 								t.Fatalf("provider calls=%d want=%d", calls.Load()-beforeCalls, wantCalls)
 							}
 							completed = append(completed, completedCase{outcome: outcome, runID: seed.RunID, seedID: seed.EventID, eventID: eventID, local: local, readback: before, params: params, decisionParams: decisionParams})
-							requireServedOKJSONRPC(t, rt.Endpoint, "run.pause", map[string]any{"run_id": seed.RunID, "idempotency_key": "activity-pause-" + outcome})
 						})
 					}
 					if t.Failed() {

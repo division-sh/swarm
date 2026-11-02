@@ -1,5 +1,5 @@
 # fixture: claude-cli-release-lifecycle
-stages: {done: {final: true}}
+stages: []
 pins:
   inputs:
     - task.assigned

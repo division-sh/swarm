@@ -196,7 +196,7 @@ func TestStandingIngressAdmissionDistinguishesAbsentFromInvalid(t *testing.T) {
 				t.Fatal(err)
 			}
 			candidates, err := rt.PlanLiveFlowScopes()
-			if err != nil || len(candidates) != 1 {
+			if err != nil || len(candidates) != 2 || candidates[0].FlowPath != "." || candidates[1].FlowPath != "coordinator" {
 				t.Fatalf("complete declaration census = %#v, %v", candidates, err)
 			}
 			if state == "valid" {
@@ -339,7 +339,7 @@ func TestStandingRegistrationRequiresEveryCompiledCredentialRole(t *testing.T) {
 				t.Fatal(err)
 			}
 			candidates, err := rt.PlanLiveFlowScopes()
-			if err != nil || len(candidates) != 1 {
+			if err != nil || len(candidates) != 2 || candidates[0].FlowPath != "." || candidates[1].FlowPath != "coordinator" {
 				t.Fatalf("registration enabledness = %#v, %v", candidates, err)
 			}
 			if state == "all_present" {

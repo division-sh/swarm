@@ -43,13 +43,9 @@ func TestIssue642OriginalStartFirstTurnExecutesBothStores(t *testing.T) {
 			process, rt := start()
 			selected := rt.Selected
 			deliveries := selected.RuntimeDeps().DeliveryStore.SummarizeRun
-			var started struct {
-				RunID string `json:"run_id"`
-			}
 			payload := map[string]any{"item_id": "original-first-turn"}
-			requireServedJSONRPCResult(t, rt.Endpoint, "run.start", map[string]any{
-				"bundle_hash": rt.BundleHash, "event_name": "item.received", "payload": payload,
-			}, &started)
+			pauseServedLandingForCreation(t, rt.Endpoint, rt.BundleHash, ".")
+			started := seedServedRunCreatingEvent(t, rt.Runtime, "item.received", json.RawMessage(`{"item_id":"original-first-turn"}`), "original-first-turn-fixture")
 			var receipt durabledata.OperationSummary
 			requireServedJSONRPCResult(t, rt.Endpoint, "data.show", map[string]any{
 				"view": "operation", "detail": "summary", "operation_ref": map[string]any{"kind": "run_creation", "run_id": started.RunID},

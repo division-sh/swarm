@@ -1,18 +1,14 @@
 package conformance
 
 import (
-	"bytes"
 	"context"
 	"encoding/json"
 	"fmt"
-	"os"
-	"path/filepath"
 	"reflect"
-	"strings"
 	"testing"
 	"time"
 
-	"github.com/division-sh/swarm/internal/cliapp"
+	"github.com/division-sh/swarm/internal/durabledata"
 	"github.com/division-sh/swarm/internal/runtime/contracts"
 	"github.com/division-sh/swarm/internal/runtime/runfork"
 	"github.com/division-sh/swarm/internal/runtime/semanticview"
@@ -31,30 +27,24 @@ func TestIssue642MultipleRootFeedsStartForkAndRestartBothStores(t *testing.T) {
 					t.Fatal(err)
 				}
 				f := newDeploymentResourceFixtureWithSource(t, backend, semanticview.Wrap(bundle))
-				server := f.operatorServer(t)
-				source := uuid.NewString()
-				args := []string{"run", "start", "--connect", server.URL, "--run-id", source}
+				var data durabledata.RunCreationDataEnvelope
 				payloads := map[string]string{"root.ready": `{"account_id":"first","document":{"source":"first-version"}}`, "root.other.ready": `{"account_id":"second","document":{"source":"second-version"}}`}
 				wantOutcomes := 2
 				if emptySecond {
 					payloads["root.other.ready"], wantOutcomes = "", 1
 				}
 				for _, event := range []string{"root.ready", "root.other.ready"} {
-					path := filepath.Join(t.TempDir(), "rows.jsonl")
 					var rows []byte
 					if payloads[event] != "" {
 						rows = []byte(payloads[event] + "\n")
 					}
-					if err := os.WriteFile(path, rows, 0o600); err != nil {
+					ref, err := durabledata.ParseDeclarationRef(".", event)
+					if err != nil {
 						t.Fatal(err)
 					}
-					args = append(args, "--data", event+"="+path)
+					data.Imports = append(data.Imports, durabledata.FusedImport{SourceInvocationID: uuid.NewString(), Declaration: ref, ExpectedHead: durabledata.AbsentHead(), InputFormat: "jsonl", Input: rows})
 				}
-				args = append(args, "--no-follow")
-				var stdout, stderr bytes.Buffer
-				if code := cliapp.Execute(f.ctx, args, &stdout, &stderr, nil, nil); code != 0 || !strings.Contains(stdout.String(), "run_id="+source) {
-					t.Fatalf("operator two-root-input run.start: code=%d stderr=%s stdout=%s", code, stderr.String(), stdout.String())
-				}
+				source := createDeploymentResourceFixtureRun(t, f, data)
 				waitNotifyAllChildrenRuntimeWithin(t, f.runtime, source, 30*time.Second)
 				planning := f.selected.(interface {
 					PlanRunFork(context.Context, runfork.RunForkPlanRequest) (runfork.RunForkPlan, error)

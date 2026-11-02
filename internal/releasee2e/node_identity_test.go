@@ -30,133 +30,138 @@ func TestNodeIdentityCanonicalMapKeySQLitePostgres(t *testing.T) {
 	for _, backend := range []string{"sqlite", "postgres"} {
 		t.Run(backend, func(t *testing.T) {
 			t.Parallel()
-			base := filepath.Join(releaseRoot, backend)
-			root := filepath.Join(base, "bundle")
-			copyReleaseTree(t, filepath.Join(releaseE2ERepoRoot(t), "internal/releasee2e/testdata/node_identity"), root)
-			store := goldenSQLiteStore(base)
-			if backend == "postgres" {
-				store = goldenPostgresStore(t, dsn)
-			}
-			config := filepath.Join(base, "swarm.yaml")
-			writeReleaseFile(t, config, goldenRuntimeConfig(store))
-			token := filepath.Join(base, "api-token")
-			writeReleaseFile(t, token, goldenAPIToken+"\n")
-			env := goldenProcessEnv(t, base, store.passwordEnv, 0)
-			assertGoldenProcessHasNoExternalExecutables(t, env)
-			activityRoot := filepath.Join(base, "activity-control")
-			copyReleaseTree(t, filepath.Join(releaseE2ERepoRoot(t), "internal/releasee2e/testdata/node_identity_activity"), activityRoot)
-			// This structural control never dispatches the authored HTTP activity.
-			// The public served proof below uses only system nodes.
-			activity := runReleaseCommand(t, goldenStartupTimeout, base, env, "", binary, "verify", activityRoot, "--config", config, "--portable", "--json")
-			if activity.err != nil {
-				t.Fatalf("legitimate activity ID rejected: %v\n%s", activity.err, activity.output)
-			}
-			verified := runReleaseCommand(t, goldenStartupTimeout, base, env, "", binary, "verify", root, "--config", config, "--portable", "--json")
-			if verified.err != nil {
-				t.Fatalf("verify: %v\n%s", verified.err, verified.output)
-			}
-			graph := runReleaseCommand(t, goldenStartupTimeout, base, env, "", binary, "describe", root, "--graph", "--config", config)
-			if graph.err != nil || !strings.Contains(graph.output, "entry.root") {
-				t.Fatalf("graph: %v\n%s", graph.err, graph.output)
-			}
-			for _, scope := range nodeIdentityScopes {
-				if !strings.Contains(graph.output, scope.Key) {
-					t.Fatalf("graph omits scoped node %s:\n%s", scope.Key, graph.output)
-				}
-			}
-			start := func() *releaseServeProcess {
-				p := startReleaseServe(t, releaseProcessSpec{BinaryPath: binary, WorkingDir: base, Source: root, ConfigPath: config, Store: backend, APIPort: 0, TokenFile: token, Token: goldenAPIToken, Env: env})
-				ctx, cancel := context.WithTimeout(context.Background(), goldenStartupTimeout)
-				defer cancel()
-				if err := p.waitReady(ctx); err != nil {
-					t.Fatal(err)
-				}
-				return p
-			}
-			process := start()
-			hash := goldenServedBundleHash(t, process.rpc, "live")
-			assertSelectedRootRejectsPrivatePublication(t, process, hash, binary, base, config, token, env,
-				map[string]any{"marker": "must-not-create"}, "left/entry.left", "right/entry.right", "left/nested/entry.nested", "work.routed")
-			persisted := map[string][]goldenEvent{}
-			persistedEntities := map[string][]goldenEntitySummary{}
 			for _, scope := range []string{".", "left", "right", "left/nested"} {
-				run, events := executeNodeIdentityWork(t, process, hash, scope, "before-"+scope)
-				persisted[run] = events
-				ctx, cancel := context.WithTimeout(context.Background(), goldenRunDeadline)
-				entities, err := readGoldenEntities(ctx, process.rpc, run)
-				cancel()
-				if err != nil {
-					t.Fatal(err)
-				}
-				assertNodeIdentityConstructedTree(t, entities, run, scope)
-				persistedEntities[run] = entities
-				for _, event := range events {
-					if event.EventName == "entry.root" {
-						assertFullEventPayloadReadback(t, process, event, binary, base, config, token, env)
+				t.Run(scope, func(t *testing.T) {
+					base := filepath.Join(releaseRoot, backend, strings.ReplaceAll(scope, "/", "_"))
+					root := filepath.Join(base, "bundle")
+					copyReleaseTree(t, filepath.Join(releaseE2ERepoRoot(t), "internal/releasee2e/testdata/node_identity"), root)
+					store := goldenSQLiteStore(base)
+					if backend == "postgres" {
+						store = goldenPostgresStore(t, dsn)
 					}
-				}
-			}
-			if err := process.stopAndWait(10 * time.Second); err != nil {
-				t.Fatal(err)
-			}
-			// Default admission observes the real boot-created store and released
-			// process coordinate; the following startup must acquire them again.
-			assertReleaseDeploymentAdmission(t, runReleaseCommand(t, goldenStartupTimeout, base, env, "", binary,
-				"verify", root, "--config", config, "--json"))
-			process = start()
-			if goldenServedBundleHash(t, process.rpc, "live") != hash {
-				t.Fatal("restart changed selected artifact")
-			}
-			assertSelectedRootRejectsPrivatePublication(t, process, hash, binary, base, config, token, env,
-				map[string]any{"marker": "must-not-create"}, "left/entry.left", "right/entry.right", "left/nested/entry.nested", "work.routed")
-			ctx, cancel := context.WithTimeout(context.Background(), goldenRunDeadline)
-			defer cancel()
-			for run, want := range persisted {
-				got, err := listGoldenEvents(ctx, process.rpc, run)
-				if err != nil || !reflect.DeepEqual(got, want) {
-					t.Fatalf("restart readback: %v\nwant %#v\ngot %#v", err, want, got)
-				}
-				entities, err := readGoldenEntities(ctx, process.rpc, run)
-				if err != nil || !reflect.DeepEqual(entities, persistedEntities[run]) {
-					t.Fatalf("restart changed the complete constructed tree: %v\nwant %#v\ngot %#v", err, persistedEntities[run], entities)
-				}
-				for _, event := range got {
-					if event.EventName == "entry.root" {
-						assertFullEventPayloadReadback(t, process, event, binary, base, config, token, env)
+					config := filepath.Join(base, "swarm.yaml")
+					writeReleaseFile(t, config, goldenRuntimeConfig(store))
+					token := filepath.Join(base, "api-token")
+					writeReleaseFile(t, token, goldenAPIToken+"\n")
+					env := goldenProcessEnv(t, base, store.passwordEnv, 0)
+					assertGoldenProcessHasNoExternalExecutables(t, env)
+					activityRoot := filepath.Join(base, "activity-control")
+					copyReleaseTree(t, filepath.Join(releaseE2ERepoRoot(t), "internal/releasee2e/testdata/node_identity_activity"), activityRoot)
+					// This structural control never dispatches the authored HTTP activity.
+					// The public served proof below uses only system nodes.
+					activity := runReleaseCommand(t, goldenStartupTimeout, base, env, "", binary, "verify", activityRoot, "--config", config, "--portable", "--json")
+					if activity.err != nil {
+						t.Fatalf("legitimate activity ID rejected: %v\n%s", activity.err, activity.output)
 					}
-				}
-			}
-			for _, scope := range []string{".", "left", "right", "left/nested"} {
-				_, events := executeNodeIdentityWork(t, process, hash, scope, "after-"+scope)
-				for _, event := range events {
-					if !strings.HasSuffix(event.EventName, "work.processed") {
-						continue
+					verified := runReleaseCommand(t, goldenStartupTimeout, base, env, "", binary, "verify", root, "--config", config, "--portable", "--json")
+					if verified.err != nil {
+						t.Fatalf("verify: %v\n%s", verified.err, verified.output)
 					}
-					read := runReleaseCommand(t, goldenStartupTimeout, base, env, "", binary, "event", "view", event.EventID, "--config", config, "--api-server", process.apiBase, "--api-token-file", token)
-					if read.err != nil || !strings.Contains(read.output, event.EventID) || !strings.Contains(read.output, "node/"+nodeIdentityScopes[scope].Key) {
-						t.Fatalf("CLI readback: %v\n%s", read.err, read.output)
+					graph := runReleaseCommand(t, goldenStartupTimeout, base, env, "", binary, "describe", root, "--graph", "--config", config)
+					if graph.err != nil || !strings.Contains(graph.output, "entry.root") {
+						t.Fatalf("graph: %v\n%s", graph.err, graph.output)
 					}
-				}
-			}
-			if err := process.stopAndWait(10 * time.Second); err != nil {
-				t.Fatal(err)
-			}
-			for _, scope := range []string{".", "left/nested"} {
-				file := filepath.Join(root, scope, "nodes.yaml")
-				original, err := os.ReadFile(file)
-				if err != nil {
-					t.Fatal(err)
-				}
-				for _, value := range []string{"worker", "other", "worker-{instance_id}", `""`, "null"} {
-					writeReleaseFile(t, file, strings.Replace(string(original), "worker:\n", "worker:\n  id: "+value+"\n", 1))
-					for _, command := range []string{"verify", "serve"} {
-						result := runReleaseCommand(t, goldenStartupTimeout, base, env, "", binary, command, root, "--config", config)
-						if result.err == nil || !strings.Contains(result.output, "node field \"id\" is not supported") || !strings.Contains(result.output, "nodes.yaml") {
-							t.Fatalf("%s %s %s: %v\n%s", scope, value, command, result.err, result.output)
+					for _, scope := range nodeIdentityScopes {
+						if !strings.Contains(graph.output, scope.Key) {
+							t.Fatalf("graph omits scoped node %s:\n%s", scope.Key, graph.output)
 						}
 					}
-				}
-				writeReleaseFile(t, file, string(original))
+					start := func() *releaseServeProcess {
+						p := startReleaseServe(t, releaseProcessSpec{BinaryPath: binary, WorkingDir: base, Source: root, ConfigPath: config, Store: backend, APIPort: 0, TokenFile: token, Token: goldenAPIToken, Env: env})
+						ctx, cancel := context.WithTimeout(context.Background(), goldenStartupTimeout)
+						defer cancel()
+						if err := p.waitReady(ctx); err != nil {
+							t.Fatal(err)
+						}
+						return p
+					}
+					process := start()
+					hash := goldenServedBundleHash(t, process.rpc, "live")
+					assertSelectedRootRejectsPrivatePublication(t, process, hash, binary, base, config, token, env,
+						map[string]any{"marker": "must-not-create"}, "left/entry.left", "right/entry.right", "left/nested/entry.nested", "work.routed")
+					persisted := map[string][]goldenEvent{}
+					persistedEntities := map[string][]goldenEntitySummary{}
+					{
+						run, events := executeNodeIdentityWork(t, process, hash, scope, "before-"+scope)
+						persisted[run] = events
+						ctx, cancel := context.WithTimeout(context.Background(), goldenRunDeadline)
+						entities, err := readGoldenEntities(ctx, process.rpc, run)
+						cancel()
+						if err != nil {
+							t.Fatal(err)
+						}
+						assertNodeIdentityConstructedTree(t, entities, run, scope)
+						persistedEntities[run] = entities
+						for _, event := range events {
+							if event.EventName == "entry.root" {
+								assertFullEventPayloadReadback(t, process, event, binary, base, config, token, env)
+							}
+						}
+					}
+					if err := process.stopAndWait(10 * time.Second); err != nil {
+						t.Fatal(err)
+					}
+					// Default admission observes the real boot-created store and released
+					// process coordinate; the following startup must acquire them again.
+					assertReleaseDeploymentAdmission(t, runReleaseCommand(t, goldenStartupTimeout, base, env, "", binary,
+						"verify", root, "--config", config, "--json"))
+					process = start()
+					if goldenServedBundleHash(t, process.rpc, "live") != hash {
+						t.Fatal("restart changed selected artifact")
+					}
+					assertSelectedRootRejectsPrivatePublication(t, process, hash, binary, base, config, token, env,
+						map[string]any{"marker": "must-not-create"}, "left/entry.left", "right/entry.right", "left/nested/entry.nested", "work.routed")
+					ctx, cancel := context.WithTimeout(context.Background(), goldenRunDeadline)
+					defer cancel()
+					for run, want := range persisted {
+						got, err := listGoldenEvents(ctx, process.rpc, run)
+						if err != nil || !reflect.DeepEqual(got, want) {
+							t.Fatalf("restart readback: %v\nwant %#v\ngot %#v", err, want, got)
+						}
+						entities, err := readGoldenEntities(ctx, process.rpc, run)
+						if err != nil || !reflect.DeepEqual(entities, persistedEntities[run]) {
+							t.Fatalf("restart changed the complete constructed tree: %v\nwant %#v\ngot %#v", err, persistedEntities[run], entities)
+						}
+						for _, event := range got {
+							if event.EventName == "entry.root" {
+								assertFullEventPayloadReadback(t, process, event, binary, base, config, token, env)
+							}
+						}
+					}
+					for _, events := range persisted {
+						for _, event := range events {
+							if !strings.HasSuffix(event.EventName, "work.processed") {
+								continue
+							}
+							read := runReleaseCommand(t, goldenStartupTimeout, base, env, "", binary, "event", "view", event.EventID, "--config", config, "--api-server", process.apiBase, "--api-token-file", token)
+							if read.err != nil || !strings.Contains(read.output, event.EventID) || !strings.Contains(read.output, "node/"+nodeIdentityScopes[scope].Key) {
+								t.Fatalf("CLI readback: %v\n%s", read.err, read.output)
+							}
+						}
+					}
+					if err := process.stopAndWait(10 * time.Second); err != nil {
+						t.Fatal(err)
+					}
+					if scope == "." {
+						for _, scope := range []string{".", "left/nested"} {
+							file := filepath.Join(root, scope, "nodes.yaml")
+							original, err := os.ReadFile(file)
+							if err != nil {
+								t.Fatal(err)
+							}
+							for _, value := range []string{"worker", "other", "worker-{instance_id}", `""`, "null"} {
+								writeReleaseFile(t, file, strings.Replace(string(original), "worker:\n", "worker:\n  id: "+value+"\n", 1))
+								for _, command := range []string{"verify", "serve"} {
+									result := runReleaseCommand(t, goldenStartupTimeout, base, env, "", binary, command, root, "--config", config)
+									if result.err == nil || !strings.Contains(result.output, "node field \"id\" is not supported") || !strings.Contains(result.output, "nodes.yaml") {
+										t.Fatalf("%s %s %s: %v\n%s", scope, value, command, result.err, result.output)
+									}
+								}
+							}
+							writeReleaseFile(t, file, string(original))
+						}
+					}
+				})
 			}
 		})
 	}

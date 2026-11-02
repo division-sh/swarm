@@ -33,7 +33,7 @@ func TestIssue2394ServedOneSecondCommitPreservesTwoFullChunksBothStores(t *testi
 					t.Logf("served output:\n%s", process.outputString())
 				}
 			})
-			runID, portfolio := uuid.NewString(), "one-second-preservation"
+			runID, portfolio := requireServedLiveLandingRunID(t, rt.Endpoint, rt.BundleHash, "."), "one-second-preservation"
 			var started struct {
 				RunID string `json:"run_id"`
 			}

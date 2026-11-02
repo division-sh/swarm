@@ -52,10 +52,11 @@ func TestA2MapRecipeSupportedSurfaceBothStores(t *testing.T) {
 				{"zero_map", map[string][]int64{}, []string{}, [][]int64{}},
 			} {
 				t.Run(tc.name, func(t *testing.T) {
-					params := map[string]any{"bundle_hash": rt.BundleHash, "event_name": "batch.ready", "payload": map[string]any{"items": tc.items}, "idempotency_key": "a2-map-recipe-" + tc.name}
+					runID := seedServedPublicationRun(t, rt.Runtime)
+					params := map[string]any{"bundle_hash": rt.BundleHash, "run_id": runID, "event_name": "batch.ready", "payload": map[string]any{"items": tc.items}, "idempotency_key": "a2-map-recipe-" + tc.name}
 					opened := requireServedEventPublishRPCResult(t, rt.Endpoint, params)
-					if !opened.NewRunCreated || opened.RunID == "" || opened.EventID == "" {
-						t.Fatalf("root map ingress did not create a real run: %+v", opened)
+					if opened.NewRunCreated || opened.RunID != runID || opened.EventID == "" {
+						t.Fatalf("root map ingress escaped its exact native setup: %+v", opened)
 					}
 					waitServedRunDeliveryQuiescence(t, rt.ReadRunDeliveries, opened.RunID)
 					waitA2PortfolioComplete(t, rt, opened.RunID, opened.RunID)
@@ -68,7 +69,7 @@ func TestA2MapRecipeSupportedSurfaceBothStores(t *testing.T) {
 					if err := json.Unmarshal(raw, &payload); err != nil {
 						t.Fatal(err)
 					}
-					requireA2PortfolioDelivery(t, requireA2PortfolioEvent(t, rt, opened.EventID, opened.RunID, "batch.ready", payload), ".", "scatter", entity, "materializing_entity")
+					requireA2PortfolioDelivery(t, requireA2PortfolioEvent(t, rt, opened.EventID, opened.RunID, "batch.ready", payload), ".", "scatter", entity, "existing_entity")
 					requests := requireA2PortfolioEvents(t, rt, opened.RunID, "item.requested")
 					if len(requests) != len(tc.members) {
 						t.Fatalf("map key fan-out count=%d want=%d", len(requests), len(tc.members))
@@ -120,9 +121,7 @@ func TestA2MapRecipeSupportedSurfaceBothStores(t *testing.T) {
 					events := requireA2MapRecipeHealthyEvents(t, rt, opened.RunID)
 					batches = append(batches, retainedBatch{opened, params, tc.items, tc.members, tc.results, entity, arm, workers, events})
 					t.Logf("root HTTP batch -> post-write map entry -> %d actual keyed workers -> ordinary root reports -> one fired continuation; members=%v ordered_results=%v", len(workers), arm.Members, tc.results)
-					requireServedOKJSONRPC(t, rt.Endpoint, "run.pause", map[string]any{
-						"run_id": opened.RunID, "idempotency_key": "a2-map-recipe-pause-" + tc.name,
-					})
+					requireServedRunStatus(t, rt.Endpoint, opened.RunID, "completed")
 				})
 			}
 			predecessor := rt.Runtime.Options.RuntimeInstanceID
