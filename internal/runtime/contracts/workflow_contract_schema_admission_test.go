@@ -76,7 +76,7 @@ func TestSchemaAdmissionRetiredPresence(t *testing.T) {
 }
 
 func TestSchemaAdmissionRootAndMarkerlessPosture(t *testing.T) {
-	for _, source := range []string{"required_agents: []\n", "stages: []\n", "stages: []\nrequired_agents: []\n"} {
+	for _, source := range []string{"connect: []\n", "stages: []\n", "stages: []\nconnect: []\n"} {
 		bundle, err := loadSchemaFragment(t, source)
 		if err != nil {
 			t.Fatal(err)
@@ -262,7 +262,7 @@ func TestSchemaAdmissionAliasesMergesAndDerivedProvenance(t *testing.T) {
 		t.Fatal(err)
 	}
 	for _, source := range []string{
-		"required_agents: [{role: &r worker, description: *r}, {role: other, description: *r}]\n",
+		"inputs: [&event work.requested, work.done]\noutputs: [*event]\n",
 		"stages: {waiting: &s {}, Waiting: {<<: *s}}\n",
 	} {
 		if _, err := admitSchemaFragment(source); err != nil {
