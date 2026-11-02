@@ -18,6 +18,8 @@ import (
 	"syscall"
 	"testing"
 	"time"
+
+	"github.com/division-sh/swarm/internal/testutil/testprocess"
 )
 
 func TestServiceCreatorKeepsCapturedImageAuthority(t *testing.T) {
@@ -110,7 +112,7 @@ func TestCreatorFenceSurvivesRunnerDeathUntilTerminalHandoff(t *testing.T) {
 		defer out.Close()
 		run.Stdout, run.Stderr = out, out
 	}
-	if err := run.Start(); err != nil {
+	if err := testprocess.Start(run); err != nil {
 		t.Fatal(err)
 	}
 	waitForPath(t, filepath.Join(dockerState, "create-started"), 20*time.Second)
@@ -317,7 +319,7 @@ func proveDockerRunnerAdmission(t *testing.T, capacity int) {
 		}
 		defer logFile.Close()
 		command.Stdout, command.Stderr = logFile, logFile
-		if err := command.Start(); err != nil {
+		if err := testprocess.Start(command); err != nil {
 			t.Fatal(err)
 		}
 		commands = append(commands, command)
@@ -492,7 +494,7 @@ esac
 						"SWARM_TEST_TOP_RELEASE="+topRelease,
 					)
 					command.Stdout, command.Stderr = logFile, logFile
-					if err := command.Start(); err != nil {
+					if err := testprocess.Start(command); err != nil {
 						_ = logFile.Close()
 						t.Fatal(err)
 					}

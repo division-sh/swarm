@@ -36,6 +36,7 @@ import (
 	storeselected "github.com/division-sh/swarm/internal/store/selected"
 	"github.com/division-sh/swarm/internal/store/storetest"
 	"github.com/division-sh/swarm/internal/testutil"
+	"github.com/division-sh/swarm/internal/testutil/testprocess"
 	"github.com/google/uuid"
 )
 
@@ -324,7 +325,7 @@ func killSelectedReceiverAtClaim(t *testing.T, helper string, environment []stri
 		t.Fatal(err)
 	}
 	defer input.Close()
-	if err := cmd.Start(); err != nil {
+	if err := testprocess.Start(cmd); err != nil {
 		t.Fatal(err)
 	}
 	writer.Close()

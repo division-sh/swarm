@@ -4,6 +4,7 @@ package main
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
 	"fmt"
 	"os"
@@ -15,6 +16,7 @@ import (
 	"time"
 
 	"github.com/division-sh/swarm/internal/testpostgres"
+	"github.com/division-sh/swarm/internal/testutil/testprocess"
 )
 
 // Extracted from agent-g's fixture repair in befb39402; retain every acquired
@@ -146,7 +148,15 @@ func TestCompletionFixtureEarlyCleanupPreservesReleaseEvidence(t *testing.T) {
 				}
 			})
 			child := exec.Command(os.Args[0], "-test.run=^TestCompletionParentDeathRetainsWorkerDescendants$", "-test.v")
-			child.Env = append(os.Environ(), "SWARM_COMPLETION_DEATH_TEST_ROOT="+fixtureRoot, "SWARM_COMPLETION_DEATH_INTERRUPT="+mode)
+			owner, err := testprocess.Current()
+			if err != nil {
+				t.Fatal(err)
+			}
+			ownerJSON, err := json.Marshal(owner)
+			if err != nil {
+				t.Fatal(err)
+			}
+			child.Env = append(os.Environ(), "SWARM_COMPLETION_DEATH_TEST_ROOT="+fixtureRoot, "SWARM_COMPLETION_DEATH_INTERRUPT="+mode, "SWARM_COMPLETION_OUTER_OWNER="+string(ownerJSON))
 			if mode == "delayed_descendant" {
 				child.Env = append(child.Env, "SWARM_COMPLETION_DEATH_DELAY_UNIT=two")
 			}

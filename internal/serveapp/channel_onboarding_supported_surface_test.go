@@ -4,6 +4,7 @@ import (
 	"context"
 	"database/sql"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"io"
 	"net"
@@ -26,6 +27,7 @@ import (
 	"github.com/division-sh/swarm/internal/testpostgres"
 	"github.com/division-sh/swarm/internal/testutil"
 	"github.com/division-sh/swarm/internal/testutil/telegramapi"
+	"github.com/division-sh/swarm/internal/testutil/testprocess"
 	"gopkg.in/yaml.v3"
 )
 
@@ -483,7 +485,7 @@ func startServedCrashProcessBeforeReadiness(t *testing.T, helper string, environ
 	cmd.ExtraFiles = files
 	cmd.Stdout = output
 	cmd.Stderr = output
-	if err := cmd.Start(); err != nil {
+	if err := testprocess.Start(cmd); err != nil {
 		t.Fatalf("start channel onboarding crash process: %v", err)
 	}
 	process := &channelOnboardingCrashServeProcess{cmd: cmd, output: output, exited: make(chan struct{})}
@@ -494,7 +496,16 @@ func startServedCrashProcessBeforeReadiness(t *testing.T, helper string, environ
 		process.waitMu.Unlock()
 		close(process.exited)
 	}()
-	t.Cleanup(func() { _ = process.stop() })
+	t.Cleanup(func() {
+		select {
+		case <-process.exited: // Abrupt exits are asserted by their owning journey.
+			return
+		default:
+		}
+		if err := process.stop(); err != nil {
+			t.Errorf("serve helper cleanup: %v\n%s", err, output.String())
+		}
+	})
 	return process
 }
 
@@ -553,7 +564,7 @@ func (p *channelOnboardingCrashServeProcess) stop() error {
 		case <-p.exited:
 			return p.waitError()
 		default:
-			return err
+			return errors.Join(err, p.kill())
 		}
 	}
 	timer := time.NewTimer(serveRuntimeStopTimeout)
@@ -562,7 +573,7 @@ func (p *channelOnboardingCrashServeProcess) stop() error {
 	case <-p.exited:
 		return p.waitError()
 	case <-timer.C:
-		return fmt.Errorf("channel onboarding process did not stop after interrupt")
+		return errors.Join(fmt.Errorf("channel onboarding process did not stop after interrupt"), p.kill())
 	}
 }
 

@@ -17,6 +17,7 @@ import (
 
 	postgresbackend "github.com/division-sh/swarm/internal/store/internal/backend/postgres"
 	"github.com/division-sh/swarm/internal/testutil"
+	"github.com/division-sh/swarm/internal/testutil/testprocess"
 	"github.com/lib/pq"
 )
 
@@ -174,7 +175,7 @@ func testPossessionObservationExternalProcessReleaseAndCrash(t *testing.T, backe
 				}
 				var diagnostic bytes.Buffer
 				cmd.Stderr = &diagnostic
-				if err := cmd.Start(); err != nil {
+				if err := testprocess.Start(cmd); err != nil {
 					t.Fatal(err)
 				}
 				joined := false

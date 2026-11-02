@@ -21,6 +21,7 @@ import (
 	"time"
 
 	"github.com/division-sh/swarm/internal/testplanning"
+	"github.com/division-sh/swarm/internal/testutil/testprocess"
 )
 
 func buildReleaseBinary(t *testing.T, outputRoot string) string {
@@ -213,7 +214,11 @@ func startReleaseServe(t *testing.T, options releaseProcessSpec) *releaseServePr
 	cmd.Env = env
 	cmd.Stdout = output
 	cmd.Stderr = output
-	if err := cmd.Start(); err != nil {
+	start := testprocess.Start
+	if options.InternalMockLifecycleBinary != "" {
+		start = (*exec.Cmd).Start // This child owns its explicit 10m test timeout.
+	}
+	if err := start(cmd); err != nil {
 		t.Fatalf("start release serve: %v", err)
 	}
 	process := &releaseServeProcess{

@@ -5,6 +5,7 @@ package main
 import (
 	"bytes"
 	"context"
+	"encoding/json"
 	"errors"
 	"fmt"
 	"go/ast"
@@ -26,6 +27,7 @@ import (
 
 	"github.com/division-sh/swarm/internal/testplanning"
 	"github.com/division-sh/swarm/internal/testpostgres"
+	"github.com/division-sh/swarm/internal/testutil/testprocess"
 )
 
 func TestPreflightCurrentSourceUsesAllFiniteOwners(t *testing.T) {
@@ -648,7 +650,11 @@ func runPreflightSurvivorFixture(t *testing.T, mode string) {
 	}
 	defer devnull.Close()
 	child.Stdout, child.Stderr = devnull, devnull
-	if err := child.Start(); err != nil {
+	var owner testprocess.Lifetime
+	if err := json.Unmarshal([]byte(os.Getenv("SWARM_TEST_PREFLIGHT_OUTER_OWNER")), &owner); err != nil {
+		t.Fatal(err)
+	}
+	if err := testprocess.StartFor(child, owner); err != nil {
 		t.Fatal(err)
 	}
 	waitForSignalFixturePID(t, os.Getenv(signalFixturePIDEnv))

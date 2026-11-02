@@ -14,6 +14,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/division-sh/swarm/internal/testutil/testprocess"
 	"golang.org/x/sys/unix"
 )
 
@@ -102,7 +103,7 @@ func TestRunStartForegroundObserverOverflowFromReleaseBinary(t *testing.T) {
 	cmd.Stdout = stdoutWriter
 	stderr := newReleaseSignalBuffer("\"reason_code\":\"queue_overflow\"")
 	cmd.Stderr = stderr
-	if err := cmd.Start(); err != nil {
+	if err := testprocess.Start(cmd); err != nil {
 		t.Fatal(err)
 	}
 	type stdoutResult struct {
