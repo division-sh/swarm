@@ -313,7 +313,7 @@ func postConnectorGitHubWebhook(t *testing.T, process *releaseServeProcess, orig
 	if err != nil {
 		t.Fatalf("hostile GitHub delivery event read failed: %v", err)
 	}
-	beforeIDs, afterIDs := connectorEventIDs(before), connectorEventIDs(after)
+	beforeIDs, afterIDs := connectorPublishedEventIDs(before), connectorPublishedEventIDs(after)
 	if !reflect.DeepEqual(beforeIDs, afterIDs) {
 		t.Fatalf("hostile GitHub delivery changed event IDs: before=%v after=%v", beforeIDs, afterIDs)
 	}
@@ -344,18 +344,40 @@ func postConnectorGitHubWebhook(t *testing.T, process *releaseServeProcess, orig
 		t.Fatalf("duplicate GitHub delivery HTTP=%d: %s", status, response)
 	}
 	after, err = listGoldenEvents(t.Context(), process.rpc, runID)
-	if err != nil || !reflect.DeepEqual(connectorEventIDs(before), connectorEventIDs(after)) || github.Calls.Load() != 2 {
+	if err != nil || !reflect.DeepEqual(connectorPublishedEventIDs(before), connectorPublishedEventIDs(after)) || github.Calls.Load() != 2 {
 		t.Fatal("duplicate GitHub delivery repeated publication or provider effect")
 	}
 }
 
-func connectorEventIDs(events []goldenEvent) []string {
+func connectorPublishedEventIDs(events []goldenEvent) []string {
 	ids := make([]string, 0, len(events))
 	for _, event := range events {
+		// Diagnostic persistence can finish after its legitimate activity result.
+		if event.EventName == "platform.runtime_log" {
+			continue
+		}
 		ids = append(ids, event.EventID)
 	}
 	slices.Sort(ids)
 	return ids
+}
+
+func TestEmbeddedConnectorPublicationSnapshotRetainsEveryNonDiagnosticEvent(t *testing.T) {
+	events := []goldenEvent{
+		{EventID: "diagnostic", EventName: "platform.runtime_log"},
+		{EventID: "raw", EventName: "inbound.github.raw.issues"},
+		{EventID: "normalized", EventName: "inbound.github.issue_opened"},
+		{EventID: "activity", EventName: "platform.activity_requested"},
+		{EventID: "business", EventName: "send_github.succeeded"},
+		{EventID: "similar-name", EventName: "platform.runtime_log.unexpected"},
+	}
+	want := []string{"activity", "business", "normalized", "raw", "similar-name"}
+	if got := connectorPublishedEventIDs(events); !reflect.DeepEqual(got, want) {
+		t.Fatalf("publication IDs=%v, want %v", got, want)
+	}
+	if got := connectorPublishedEventIDs(append(events, goldenEvent{EventID: "hostile", EventName: "inbound.github.raw.issues"})); reflect.DeepEqual(got, want) {
+		t.Fatal("snapshot comparison hid an additional raw publication")
+	}
 }
 
 func writeConnectorPublicSource(t *testing.T, root string, endpoints map[string]string, githubInput map[string]any, command func(string, ...string) string) {
