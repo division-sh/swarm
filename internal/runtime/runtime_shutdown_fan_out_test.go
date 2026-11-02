@@ -119,13 +119,20 @@ func VerifyRuntimeShutdownFanOutCommittedTurnKeepsDependenciesLiveForTest(t *tes
 	// A real running manager is an independent dependency, not part of the
 	// registration's finite-turn join. Its accepted handler must stay live.
 	started, canceled := make(chan struct{}), make(chan struct{})
+	releaseHandler := make(chan struct{})
+	var handlerReleaseOnce sync.Once
+	finishHandler := func() { handlerReleaseOnce.Do(func() { close(releaseHandler) }) }
 	agent := runtimeShutdownTestAgent{
 		id: "agent-1", subscriptions: []events.EventType{"test.in"},
 		onEvent: func(ctx context.Context, _ events.Event) ([]events.Event, error) {
 			close(started)
-			<-ctx.Done()
-			close(canceled)
-			return nil, ctx.Err()
+			select {
+			case <-releaseHandler:
+				return nil, nil
+			case <-ctx.Done():
+				close(canceled)
+				return nil, ctx.Err()
+			}
 		},
 	}
 	lifecycle, roles := runtimeTestEphemeralManagerRows(t)
@@ -150,7 +157,7 @@ func VerifyRuntimeShutdownFanOutCommittedTurnKeepsDependenciesLiveForTest(t *tes
 	if err := rt.Manager.Run(managedExecutionTestContext(t, ctx)); err != nil {
 		t.Fatal(err)
 	}
-	t.Cleanup(func() { _ = rt.Manager.Shutdown() })
+	t.Cleanup(func() { finishHandler(); _ = rt.Manager.Shutdown() })
 	managerEvent := eventtest.ExistingRunRootIngress(eventtest.UUID("fan-out-shutdown-manager"),
 		"test.in", "tester", "", []byte(`{}`), 0, agentidentitytest.DefaultRunID, events.EventEnvelope{}, time.Now().UTC())
 	managerEvent = fixture.PublishDelivery(fixture.Context, managerEvent, []events.DeliveryRoute{{
@@ -284,8 +291,13 @@ func VerifyRuntimeShutdownFanOutCommittedTurnKeepsDependenciesLiveForTest(t *tes
 	assertShutdownFanOutPending(t, shutdown)
 	releaseCompletion()
 	awaitShutdownFanOut(t, completion.completed, "completion commit")
+	select {
+	case <-canceled:
+		t.Fatal("manager canceled accepted handler before its graceful release")
+	default:
+	}
+	finishHandler()
 	receiveShutdownFanOut(t, shutdown, "runtime shutdown")
-	awaitShutdownFanOut(t, canceled, "manager retirement")
 	awaitShutdownFanOut(t, grant.Done(), "generation retirement")
 	if rt.workOccurrence.ActiveCount() != 0 {
 		t.Fatalf("shutdown leaked runtime work: active=%d", rt.workOccurrence.ActiveCount())

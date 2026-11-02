@@ -22,6 +22,8 @@ func TestServedColdStaticAgentRestartBothStores(t *testing.T) {
 	for _, backend := range []string{"sqlite", "postgres"} {
 		t.Run(backend, func(t *testing.T) {
 			opts, start := issue2564ServeHarness(t, backend, canonicalrouting.CopySelectedFutureProviderInput(t), true)
+			shutdownGrace := opts.ShutdownGrace
+			opts.ShutdownGrace = 100 * time.Millisecond
 			reached := make(chan string, 4)
 			opts.TestWorkflowNodeHandlerStartHook = func(ctx context.Context, _ string, event events.Event) error {
 				if !strings.HasSuffix(string(event.Type()), "/work.finish") {
@@ -32,11 +34,6 @@ func TestServedColdStaticAgentRestartBothStores(t *testing.T) {
 				return ctx.Err()
 			}
 			first, served := start()
-			t.Cleanup(func() {
-				if code := first.stop(); code != 0 {
-					t.Errorf("cold source cleanup=%d\n%s", code, first.outputString())
-				}
-			})
 			params := map[string]any{
 				"event_name": "task.assigned", "bundle_hash": served.BundleHash,
 				"payload": map[string]any{"work_id": "restart"}, "idempotency_key": "cold-static-restart",
@@ -114,10 +111,11 @@ func TestServedColdStaticAgentRestartBothStores(t *testing.T) {
 			if requestErr != nil && !errors.Is(requestErr, context.Canceled) {
 				t.Fatalf("initial publication failed before the intentional lost acknowledgment: %v", requestErr)
 			}
-			if code := first.stop(); code != 0 {
-				t.Fatalf("pending source cleanup=%d\n%s", code, first.outputString())
+			if code := first.stop(); code != 1 || !strings.Contains(first.outputString(), "runtime ingress admission drain timed out") || !strings.Contains(first.outputString(), "context deadline exceeded") {
+				t.Fatalf("held source did not report grace-expiry incomplete shutdown: exit=%d\n%s", code, first.outputString())
 			}
 			opts.TestWorkflowNodeHandlerStartHook = nil
+			opts.ShutdownGrace = shutdownGrace
 			second, recovered := start()
 			t.Cleanup(func() {
 				if code := second.stop(); code != 0 {

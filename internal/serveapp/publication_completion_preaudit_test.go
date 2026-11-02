@@ -10,6 +10,7 @@ import (
 	"net/http"
 	"os"
 	"path/filepath"
+	"strings"
 	"sync"
 	"testing"
 	"time"
@@ -241,7 +242,12 @@ func TestPublicPublicationRetirementRecoveryBothStores(t *testing.T) {
 			if err != nil || !found || !bytes.Equal(first.result, stored.Response) || process.PublicCompletionCount() != 1 {
 				t.Fatalf("held exact responsibility: found=%t err=%v count=%d", found, err, process.PublicCompletionCount())
 			}
-			h.stop(t)
+			stopped := h.process
+			code := stopped.stop()
+			h.process = nil
+			if code != 1 || !strings.Contains(stopped.outputString(), "agent manager shutdown drain timed out") || !strings.Contains(stopped.outputString(), "context deadline exceeded") {
+				t.Fatalf("held responsibility did not report grace-expiry incomplete shutdown: exit=%d\n%s", code, stopped.outputString())
+			}
 			if count := process.PublicCompletionCount(); count != 0 {
 				t.Fatalf("served shutdown released dependencies before responsibility joined: %d", count)
 			}
