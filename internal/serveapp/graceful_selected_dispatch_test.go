@@ -283,7 +283,7 @@ func TestOrdinaryDispatchStopsBeforeSelectedHandoffBothStores(t *testing.T) {
 	}
 }
 
-func TestSelectedIdleTimerDoesNotHoldProcessDrainBothStores(t *testing.T) {
+func TestSelectedForkIdleTimerDoesNotHoldProcessDrainBothStores(t *testing.T) {
 	for _, backend := range servedparity.RequiredBackends {
 		t.Run(string(backend), func(t *testing.T) {
 			root := canonicalrouting.CopyRootIngressServedSessionCleanup(t)
