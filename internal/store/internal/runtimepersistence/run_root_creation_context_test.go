@@ -142,6 +142,28 @@ func TestS1RunCreationChecksSuppliedRootContextBothStores(t *testing.T) {
 				t.Fatalf("genuine caller root could not reconcile its live run: %+v, %v", reconciled, err)
 			}
 			requireRunRoot(t, correct, selected, reconciled.RunID, sourceB)
+			incomingArtifact, err := sourceartifact.AdmitMembers(map[string][]byte{
+				"manifest.yaml": []byte("version: 1.0.0\nplatform_version: '*'\n"),
+				"nodes.yaml":    []byte("incoming: {type: procedure}\n"),
+			})
+			if err != nil {
+				t.Fatal(err)
+			}
+			incoming, _ := sourceartifactfixture.Rooted(t, "create-upgrade", incomingArtifact)
+			incomingFact := sourceartifactfixture.FactFor(incoming.Artifact())
+			incomingContext := runtimecorrelation.WithRootAdmission(runtimecorrelation.WithSourceArtifactFact(ctx, incomingFact), incoming.Admission())
+			if _, err := selected.EnsureRootedSource(incomingContext, incoming); err != nil {
+				t.Fatal(err)
+			}
+			upgraded, err := live.ReconcileFlowRun(incomingContext, runlifecycle.LiveRunScope{FlowPath: "."}, incomingFact)
+			if err != nil || upgraded.Created || upgraded.RunID != reconciled.RunID || upgraded.CommittedMutation != runlifecycle.MutationApplied {
+				t.Fatalf("incoming root could not revise its exact retained landing: %+v, %v", upgraded, err)
+			}
+			requireRunRoot(t, incomingContext, selected, reconciled.RunID, incoming)
+			replayed, err := live.ReconcileFlowRun(incomingContext, runlifecycle.LiveRunScope{FlowPath: "."}, incomingFact)
+			if err != nil || replayed.RunID != upgraded.RunID || replayed.Created || replayed.CommittedMutation != runlifecycle.MutationExactNoop {
+				t.Fatalf("exact incoming-root replay mutated the landing: %+v, %v", replayed, err)
+			}
 		})
 	}
 }

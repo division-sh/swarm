@@ -252,14 +252,14 @@ func inspectNumericFeedTimers(t *testing.T, ctx context.Context, binary, project
 	return byEntity
 }
 
-func readNumericCreationReceipt(t *testing.T, ctx context.Context, rpc *releaseRPCClient, runID string) map[string]json.RawMessage {
+func readNumericPublicationReceipt(t *testing.T, ctx context.Context, rpc *releaseRPCClient, publicationKey string) map[string]json.RawMessage {
 	t.Helper()
 	result := map[string]json.RawMessage{}
 	for _, detail := range []string{"summary", "request_binding", "run_binding"} {
 		var record json.RawMessage
 		params := map[string]any{
 			"view": "operation", "detail": detail,
-			"operation_ref": map[string]any{"kind": "run_creation", "run_id": runID},
+			"operation_ref": map[string]any{"kind": "rows_publication", "idempotency_key": publicationKey},
 		}
 		if detail == "run_binding" {
 			params["page"] = map[string]any{"limit": 10}
@@ -268,7 +268,7 @@ func readNumericCreationReceipt(t *testing.T, ctx context.Context, rpc *releaseR
 			t.Fatal(err)
 		}
 		if len(record) == 0 || bytes.Equal(record, []byte("null")) {
-			t.Fatalf("missing permanent %s creation evidence", detail)
+			t.Fatalf("missing permanent %s publication evidence", detail)
 		}
 		result[detail] = record
 	}

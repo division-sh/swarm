@@ -49,17 +49,8 @@ func issue642FutureProviderContinuesFromEmptyCatalog(t *testing.T, backend, root
 			t.Errorf("keyed-provider native shutdown=%d\n%s", code, process.outputString())
 		}
 	})
-	response := requestServedJSONRPCWithTimeout(t, rt.Endpoint, "event.publish", map[string]any{
-		"event_name": "start.requested", "bundle_hash": rt.BundleHash, "payload": map[string]any{"work_id": "one"},
-		"idempotency_key": "future-keyed-provider-source",
-	}, 30*time.Second)
-	if response.Error != nil {
-		t.Fatalf("keyed-provider creating input: %+v", response.Error)
-	}
-	var seed servedEventPublishRPCResult
-	if err := json.Unmarshal(response.Result, &seed); err != nil {
-		t.Fatal(err)
-	}
+	pauseServedLandingForCreation(t, rt.Endpoint, rt.BundleHash, ".")
+	seed := seedServedRunCreatingEvent(t, rt.Runtime, "start.requested", json.RawMessage(`{"work_id":"one"}`), "future-keyed-provider-source")
 	requireIssue2564LiveRootMode(t, rt, seed.RunID, seed.EventID)
 	issue642WaitKeyedProviderCompletion(t, rt, seed.RunID)
 	rt.waitDeliveries(t, seed.RunID)

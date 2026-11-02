@@ -103,9 +103,6 @@ func activateRunForkForSelectedContractExecution(ctx context.Context, req runfor
 		if err != nil {
 			return err
 		}
-		if err := requireSelectedForkMaterializedWorkTx(txctx, tx, lineage.ForkRunID, len(lineage.EntityIDs)); err != nil {
-			return err
-		}
 		binding, err := loadRunForkSelectedContractBinding(txctx, tx, lineage.ForkRunID)
 		if err != nil {
 			if errors.Is(err, sql.ErrNoRows) {
@@ -135,6 +132,11 @@ func activateRunForkForSelectedContractExecution(ctx context.Context, req runfor
 		}
 		lineage.ForkPoint = plan.ForkPoint
 		result.ForkPoint = plan.ForkPoint
+		if !selectedEmptyDeploymentStart(sourceSnapshot, plan) {
+			if err := requireSelectedForkMaterializedWorkTx(txctx, tx, lineage.ForkRunID, len(lineage.EntityIDs)); err != nil {
+				return err
+			}
+		}
 		result.ReplayResumeAdmission, err = runfork.RunForkSelectedContractReplayResumeAdmission(plan)
 		if err != nil {
 			return err
@@ -399,6 +401,18 @@ func selectedDeploymentFeedPresentTx(ctx context.Context, tx *sql.Tx, runID stri
 	var present bool
 	err := tx.QueryRowContext(ctx, `SELECT EXISTS (SELECT 1 FROM fan_out_intents WHERE run_id=$1 AND origin_kind='deployment')`, runID).Scan(&present)
 	return present, err
+}
+
+func selectedEmptyDeploymentStart(source runtimerunlifecycle.Snapshot, plan runfork.RunForkPlan) bool {
+	if len(plan.WorkflowTimers)+len(plan.JoinSchedules)+len(plan.OneShotSchedules)+len(plan.ReplyContexts) != 0 {
+		return false
+	}
+	return source.Origin.Kind() == runtimerunlifecycle.OriginDeployment &&
+		plan.SourceRunID == source.RunID && plan.ForkPoint.Kind == runfork.RunForkPointRunStart &&
+		plan.StartFirstTurn == nil && plan.EventCountAtFork == 0 &&
+		plan.ReconstructedEntityCount == 0 && len(plan.Entities) == 0 &&
+		plan.PendingWorkCount == 0 && len(plan.PendingWork) == 0 &&
+		plan.FanOutObligationCount == 0 && len(plan.FanOutObligations) == 0
 }
 
 func requireSelectedForkMaterializedWorkTx(ctx context.Context, tx *sql.Tx, runID string, constructedCount int) error {

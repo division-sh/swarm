@@ -18,7 +18,7 @@ func TestChannelDeliveryHumanTemporalReceiptPublicJourney(t *testing.T) {
 			t.Run(string(backend)+"/"+transition, func(t *testing.T) {
 				h, db, bundleHash := startChannelAnchorJourney(t, backend, "temporal-token", false)
 				seed := requireServedEventPublishRPCResult(t, h.rpcEndpoint(), map[string]any{
-					"event_name": "work.requested", "bundle_hash": bundleHash,
+					"event_name": "work.requested", "bundle_hash": bundleHash, "run_id": seedServedPublicationRun(t, h.runtime),
 					"payload": map[string]any{"seed": true}, "idempotency_key": "temporal-seed",
 				})
 				gate := waitChannelAnchorCard(t, db, seed.RunID, decisioncard.AnchorKindStageGate, "chat/reviews")

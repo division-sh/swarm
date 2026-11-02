@@ -299,7 +299,7 @@ func TestStandingLearnedAuthorityCredentialMatrix(t *testing.T) {
 				}
 				if state == "healthy_same_service_sibling" {
 					candidates, err := rt.PlanLiveFlowScopes()
-					if err != nil || len(candidates) != 1 || targets[0].Provider != "partner" {
+					if err != nil || len(candidates) != 2 || candidates[0].FlowPath != "." || candidates[1].FlowPath != "coordinator" || targets[0].Provider != "partner" {
 						t.Fatalf("independent sibling retention = %#v, %#v, %v", targets, candidates, err)
 					}
 					contextDef := rootedContextForSource(t, source, rooted)
