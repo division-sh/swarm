@@ -20,28 +20,25 @@ instance: item_id
 stages:
   active: {}
   done: {final: true}
-pins:
-  outputs:
-    - work.ready
+outputs:
+  - work.ready
 `, "work.ready:\n  item_id: text\n", "item_id: text\n", "")
 	writeLegacyInstanceFlow(t, root, "other", `# fixture: other
 instance: item_id
 stages:
   active: {}
   done: {final: true}
-pins:
-  outputs:
-    - other.ready
+outputs:
+  - other.ready
 `, "other.ready:\n  item_id: text\n", "item_id: text\n", "")
 	writeLegacyInstanceFlow(t, root, "observer", `# fixture: observer
 instance: item_id
 stages:
   active: {}
   done: {final: true}
-pins:
-  inputs:
-    - work.ready
-    - other.ready
+inputs:
+  - work.ready
+  - other.ready
 `, "", "item_id: text\n", `observe:
   work.ready: {}
   other.ready: {}
@@ -57,8 +54,7 @@ func CopyConstructibleObserverDependencies(t testing.TB) string {
 	writeClosedVariantFile(t, root, "schema.yaml", `stages:
   active: {}
   done: {final: true}
-pins:
-  inputs: [producer.create, other.create, observer.create]
+inputs: [producer.create, other.create, observer.create]
 connect:
   - {event: work.ready, from: producer, to: observer, resolution: select}
   - {event: other.ready, from: other, to: observer, resolution: select}
@@ -82,9 +78,9 @@ observer.create:
 			if flow == "other" {
 				local = "other.ready"
 			}
-			outputs = "  outputs: [" + local + "]\n"
+			outputs = "outputs: [" + local + "]\n"
 		}
-		schema := "# fixture: " + flow + "\ninstance: item_id\nstages:\n  active: {}\n  done: {final: true}\npins:\n  inputs: " + inputs + "\n" + outputs
+		schema := "# fixture: " + flow + "\ninstance: item_id\nstages:\n  active: {}\n  done: {final: true}\ninputs: " + inputs + "\n" + outputs
 		events := ""
 		if local != "" {
 			events += local + ":\n  item_id: text\n"
@@ -105,8 +101,7 @@ func CopyExecutableObserverDependencies(t testing.TB) string {
 	root := CopyConstructibleObserverDependencies(t)
 	writeClosedVariantFile(t, root, "schema.yaml", `stages:
   active: {}
-pins:
-  inputs: [producer.create, other.create, observer.create, producer.fire, other.fire, observer.stop]
+inputs: [producer.create, other.create, observer.create, producer.fire, other.fire, observer.stop]
 connect:
   - {event: work.ready, from: producer, to: observer, resolution: select}
   - {event: other.ready, from: other, to: observer, resolution: select}

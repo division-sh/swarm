@@ -114,7 +114,7 @@ func CopyLifecycleEmitterStatic(t testing.TB, variant LifecycleEmitterStaticVari
 		if variant == LifecycleStaticMixedOutput {
 			schema += "connect:\n  - {event: work.completed, from: ., to: sink}\n"
 			writeClosedVariantFile(t, root, "sink/manifest.yaml", "version: 1.0.0\nplatform_version: '*'\n")
-			writeClosedVariantFile(t, root, "sink/schema.yaml", "# fixture: sink\npins:\n  inputs:\n    - work.completed\n")
+			writeClosedVariantFile(t, root, "sink/schema.yaml", "# fixture: sink\ninputs:\n  - work.completed\n")
 			writeClosedVariantFile(t, root, "sink/nodes.yaml", "collector:\n  work.completed: {}\n")
 		}
 	case LifecycleStaticActorCollision:
@@ -158,7 +158,7 @@ func CopyLifecycleEmitterStatic(t testing.TB, variant LifecycleEmitterStaticVari
 	case LifecycleStaticLoopBadCap:
 		schema = strings.Replace(schema, "max_attempts: 2", "max_attempts: 0", 1)
 	case LifecycleStaticTwoLoopsShared:
-		declaration := schema[strings.Index(schema, "  revision:\n"):strings.Index(schema, "pins:\n")]
+		declaration := schema[strings.Index(schema, "  revision:\n"):strings.Index(schema, "inputs:\n")]
 		second := strings.NewReplacer("  revision:\n", "  second:\n", "revision_id", "second_revision_id").Replace(declaration)
 		// Both sites share an event schema but carry their own required revision
 		// field from the active loop, never from the other loop's state.

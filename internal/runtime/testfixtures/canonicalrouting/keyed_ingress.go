@@ -15,8 +15,7 @@ func CopyKeyedRootRawIngress(t testing.TB) string {
 		"schema.yaml": `# fixture: keyed-shop
 instance: provider_event_id
 stages: []
-pins:
-  inputs: [inbound.partner.raw]
+inputs: [inbound.partner.raw]
 `,
 		"partner/manifest.yaml": "version: 1.0.0\nplatform_version: '*'\ncapabilities: {can: {emit_events: [raw], verify_secret: webhook_signing_secret}, cannot: [execute code]}\n",
 		"partner/trigger.yaml":  "transport: webhook\npayload_object_required: true\nsecret: {required: true}\nsignature: {type: hmac_sha256, header: X-Signature, prefix: 'sha256=', signed_payload: raw_body}\ndelivery_id: {json_path: $.delivery_id, required: true}\nevent_type: {literal: update, required: true}\nevent_name: {literal: raw}\n",
@@ -60,7 +59,7 @@ func CopyKeyedRootTelegramIngress(t testing.TB) string {
 	writeClosedVariantFile(t, root, "schema.yaml", `# fixture: keyed-chat
 instance: conversation_reference
 stages: []
-pins: {inputs: [inbound.telegram.raw, inbound.telegram.text_message]}
+inputs: [inbound.telegram.raw, inbound.telegram.text_message]
 `)
 	trigger, err := os.ReadFile(filepath.Join(RepoRoot(t), "packs/providers/telegram/trigger.yaml"))
 	if err != nil {
@@ -102,17 +101,17 @@ func CopyNestedKeyedConnectionSelection(t testing.TB) string {
 		"parent/middle/leaf/manifest.yaml": "version: 1.0.0\nplatform_version: '*'\n",
 		"parent/middle/manifest.yaml":      "version: 1.0.0\nplatform_version: '*'\n",
 		"schema.yaml": `# fixture: nested-construction
-pins: {inputs: [start]}
+inputs: [start]
 connect:
   - {event: start, from: ., to: parent, resolution: select-or-create, key_from: payload.parent_key}
   - {event: start, from: ., to: parent/middle/leaf, resolution: select-or-create, key_from: payload.leaf_key}
 `,
 		"events.yaml":                    "start:\n  parent_key: text\n  leaf_key: text\n",
-		"parent/schema.yaml":             "# fixture: parent\ninstance: id\npins: {inputs: [start]}\n",
+		"parent/schema.yaml":             "# fixture: parent\ninstance: id\ninputs: [start]\n",
 		"parent/state.yaml":              "id: text\n",
 		"parent/nodes.yaml":              "receiver:\n  start:\n    guard: payload.parent_key != ''\n",
 		"parent/middle/schema.yaml":      "stages: []\n# fixture: middle\n",
-		"parent/middle/leaf/schema.yaml": "# fixture: leaf\ninstance: id\npins: {inputs: [start]}\n",
+		"parent/middle/leaf/schema.yaml": "# fixture: leaf\ninstance: id\ninputs: [start]\n",
 		"parent/middle/leaf/state.yaml":  "id: text\n",
 		"parent/middle/leaf/nodes.yaml":  "receiver:\n  start:\n    guard: payload.leaf_key != ''\n",
 	} {
@@ -135,7 +134,7 @@ func CopyConnectionAncestorCandidates(t testing.TB, dependentEvent string, compe
 `
 	if competing {
 		edges += "  - {event: start, from: ., to: parent, rename: alternate, resolution: select-or-create, key_from: payload.leaf_key}\n"
-		writeClosedVariantFile(t, root, "parent/schema.yaml", "# fixture: parent\ninstance: id\npins: {inputs: [start, alternate]}\n")
+		writeClosedVariantFile(t, root, "parent/schema.yaml", "# fixture: parent\ninstance: id\ninputs: [start, alternate]\n")
 		writeClosedVariantFile(t, root, "parent/nodes.yaml", "receiver:\n  start:\n    guard: payload.parent_key != ''\n  alternate:\n    guard: payload.leaf_key != ''\n")
 	}
 	rename := ""
@@ -146,9 +145,9 @@ func CopyConnectionAncestorCandidates(t testing.TB, dependentEvent string, compe
 	for label, body := range map[string]string{
 		"manifest.yaml":        "version: 1.0.0\nplatform_version: '*'\n",
 		"worker/manifest.yaml": "version: 1.0.0\nplatform_version: '*'\n",
-		"schema.yaml":          "# fixture: construction-candidates\npins: {inputs: [start, other]}\nconnect:\n" + edges,
+		"schema.yaml":          "# fixture: construction-candidates\ninputs: [start, other]\nconnect:\n" + edges,
 		"events.yaml":          "start:\n  parent_key: text\n  leaf_key: text\nother:\n  parent_key: text\n  leaf_key: text\n",
-		"worker/schema.yaml":   "# fixture: worker\ninstance: id\npins: {inputs: [start]}\n",
+		"worker/schema.yaml":   "# fixture: worker\ninstance: id\ninputs: [start]\n",
 		"worker/state.yaml":    "id: text\n",
 		"worker/nodes.yaml":    "receiver:\n  start:\n    guard: payload.leaf_key != ''\n",
 	} {
@@ -169,18 +168,18 @@ func CopyNestedKeyedRawIngress(t testing.TB) string {
 		"parent/middle/manifest.yaml":      "version: 1.0.0\nplatform_version: '*'\n",
 		"schema.yaml": `# fixture: nested-shop
 stages: []
-pins: {inputs: [inbound.partner.raw]}
+inputs: [inbound.partner.raw]
 connect:
   - {event: inbound.partner.raw, from: ., to: parent, resolution: select-or-create, key_from: payload.provider_event_id}
   - {event: inbound.partner.raw, from: ., to: parent/middle/leaf, resolution: select-or-create, key_from: payload.provider}
 `,
 		"partner/manifest.yaml":          "version: 1.0.0\nplatform_version: '*'\ncapabilities: {can: {emit_events: [raw], verify_secret: webhook_signing_secret}, cannot: [execute code]}\n",
 		"partner/trigger.yaml":           "transport: webhook\npayload_object_required: true\nsecret: {required: true}\nsignature: {type: hmac_sha256, header: X-Signature, prefix: 'sha256=', signed_payload: raw_body}\ndelivery_id: {json_path: $.delivery_id, required: true}\nevent_type: {literal: update, required: true}\nevent_name: {literal: raw}\n",
-		"parent/schema.yaml":             "# fixture: parent\ninstance: id\nstages: []\npins: {inputs: [inbound.partner.raw]}\n",
+		"parent/schema.yaml":             "# fixture: parent\ninstance: id\nstages: []\ninputs: [inbound.partner.raw]\n",
 		"parent/state.yaml":              "id: text\nseen: 0\n",
 		"parent/nodes.yaml":              "receiver:\n  inbound.partner.raw:\n    data_accumulation:\n      source_event: inbound.partner.raw\n      writes: [{target_field: seen, value: state.seen + 1}]\n",
 		"parent/middle/schema.yaml":      "stages: []\n# fixture: middle\n",
-		"parent/middle/leaf/schema.yaml": "# fixture: leaf\ninstance: id\nstages: []\npins: {inputs: [inbound.partner.raw]}\n",
+		"parent/middle/leaf/schema.yaml": "# fixture: leaf\ninstance: id\nstages: []\ninputs: [inbound.partner.raw]\n",
 		"parent/middle/leaf/state.yaml":  "id: text\nseen: 0\n",
 		"parent/middle/leaf/nodes.yaml":  "receiver:\n  inbound.partner.raw:\n    data_accumulation:\n      source_event: inbound.partner.raw\n      writes: [{target_field: seen, value: state.seen + 1}]\n",
 	} {

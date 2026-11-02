@@ -25,9 +25,9 @@ func CopyPipelineConnectedDeliveryCollision(t testing.TB) string {
 	writeClosedVariantFile(t, root, "receiver/manifest.yaml", "version: 1.0.0\nplatform_version: '*'\n")
 	writeClosedVariantFile(t, root, "schema.yaml", "# fixture: connected-collision\nconnect:\n  - {event: deploy.done, from: producer, to: receiver, rename: deploy.accepted}\n  - {event: deploy.done, from: producer, to: receiver, rename: deploy.audited}\n")
 	removeClosedVariantFiles(t, root, "state.yaml")
-	writeClosedVariantFile(t, root, "producer/schema.yaml", "# fixture: producer\npins:\n  outputs: [deploy.done]\n")
+	writeClosedVariantFile(t, root, "producer/schema.yaml", "# fixture: producer\noutputs: [deploy.done]\n")
 	writeClosedVariantFile(t, root, "producer/events.yaml", "deploy.done:\n")
-	writeClosedVariantFile(t, root, "receiver/schema.yaml", "# fixture: receiver\npins:\n  inputs: [deploy.accepted, deploy.audited]\n")
+	writeClosedVariantFile(t, root, "receiver/schema.yaml", "# fixture: receiver\ninputs: [deploy.accepted, deploy.audited]\n")
 	writeClosedVariantFile(t, root, "receiver/nodes.yaml", "receiver-node:\n  deploy.accepted: {}\n  deploy.audited: {}\n")
 	return root
 }

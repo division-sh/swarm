@@ -23,7 +23,7 @@ func CopyCompleteEventDispatch(t testing.TB) string {
 connect:
   - {event: custom.replay.checked, from: source-flow, to: '.'}
 `)
-	writeClosedVariantFile(t, root, "source-flow/schema.yaml", "# fixture: source-flow\ninstance: instance_key\npins:\n  outputs: [custom.replay.checked]\n")
+	writeClosedVariantFile(t, root, "source-flow/schema.yaml", "# fixture: source-flow\ninstance: instance_key\noutputs: [custom.replay.checked]\n")
 	writeClosedVariantFile(t, root, "source-flow/events.yaml", "custom.replay.checked:\n  task_id: string\n  text: string\n")
 	writeClosedVariantFile(t, root, "source-flow/state.yaml", "instance_key: string\n")
 	return root

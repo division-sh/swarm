@@ -10,17 +10,16 @@ import (
 func CopyForkReceiverRecordedConfig(t testing.TB) string {
 	t.Helper()
 	root := CopyServedReceiverInitialization(t)
-	applyClosedReplacement(t, filepath.Join(root, "account/schema.yaml"), "    - work.ready\n", `    - work.ready
+	applyClosedReplacement(t, filepath.Join(root, "account/schema.yaml"), "  - work.ready\n", `  - work.ready
 auto_emit_on_create:
   event: account.initialized
 `)
-	writeClosedVariantFile(t, root, "types.yaml", `types:
-  InitializationValues:
-    count: integer
-    label: text
-    ratio: numeric
-    active: boolean
-    attributes: json
+	writeClosedVariantFile(t, root, "types.yaml", `InitializationValues:
+  count: integer
+  label: text
+  ratio: numeric
+  active: boolean
+  attributes: json
 `)
 	writeClosedVariantFile(t, root, "events.yaml", `work.requested:
   account_id: text

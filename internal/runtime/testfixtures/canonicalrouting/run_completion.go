@@ -13,11 +13,10 @@ topic: string
 	writeClosedVariantFile(t, root, "schema.yaml", `stages:
   active: {}
   done: {final: true}
-pins:
-  inputs:
-    - flow.started
-  outputs:
-    - flow.started
+inputs:
+  - flow.started
+outputs:
+  - flow.started
 connect:
   - event: flow.started
     from: .
@@ -32,9 +31,8 @@ root-completion:
 stages:
   active: {}
   done: {final: true}
-pins:
-  inputs:
-    - flow.started
+inputs:
+  - flow.started
 `)
 	writeClosedVariantFile(t, root, "events.yaml", `
 flow.started:

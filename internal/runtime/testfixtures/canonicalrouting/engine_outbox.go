@@ -7,9 +7,8 @@ func CopyEngineOutboxPublication(t testing.TB) string {
 	root := t.TempDir()
 	writeClosedVariantFile(t, root, "manifest.yaml", "version: 1.0.0\nplatform_version: '*'\n")
 	writeClosedVariantFile(t, root, "schema.yaml", `# fixture: engine-outbox-publication
-pins:
-  inputs: [custom.emitted, custom.followup, custom.snapshot, custom.claimed, custom.conflicting]
-  outputs: [custom.emitted, custom.followup, custom.snapshot, custom.claimed, custom.conflicting]
+inputs: [custom.emitted, custom.followup, custom.snapshot, custom.claimed, custom.conflicting]
+outputs: [custom.emitted, custom.followup, custom.snapshot, custom.claimed, custom.conflicting]
 `)
 	writeClosedVariantFile(t, root, "events.yaml", "custom.emitted:\ncustom.followup:\ncustom.snapshot:\ncustom.claimed:\ncustom.conflicting:\n")
 	return root

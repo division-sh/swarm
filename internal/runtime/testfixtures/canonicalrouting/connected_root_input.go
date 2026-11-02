@@ -8,8 +8,8 @@ func CopyConnectedRootInput(t testing.TB) string {
 	root := t.TempDir()
 	writeClosedVariantFile(t, root, "manifest.yaml", "version: 1.0.0\nplatform_version: '*'\n")
 	writeClosedVariantFile(t, root, "producer/manifest.yaml", "version: 1.0.0\nplatform_version: '*'\n")
-	writeClosedVariantFile(t, root, "schema.yaml", "# fixture: root-input\npins:\n  inputs:\n    - work.ready\nconnect:\n  - {event: work.ready, from: producer, to: .}\n")
-	writeClosedVariantFile(t, root, "producer/schema.yaml", "# fixture: producer\npins:\n  outputs:\n    - work.ready\n")
+	writeClosedVariantFile(t, root, "schema.yaml", "# fixture: root-input\ninputs:\n  - work.ready\nconnect:\n  - {event: work.ready, from: producer, to: .}\n")
+	writeClosedVariantFile(t, root, "producer/schema.yaml", "# fixture: producer\noutputs:\n  - work.ready\n")
 	writeClosedVariantFile(t, root, "producer/events.yaml", "work.ready:\n  value: text\n")
 	return root
 }

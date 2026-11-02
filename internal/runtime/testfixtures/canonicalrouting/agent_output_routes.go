@@ -18,10 +18,10 @@ func CopyStaticAgentOutputConnect(t testing.TB) string {
 		"manifest.yaml":          "version: 1.0.0\nplatform_version: '*'\n",
 		"producer/manifest.yaml": "version: 1.0.0\nplatform_version: '*'\n",
 		"schema.yaml":            "# fixture: static-agent-output\nconnect:\n  - {event: deploy.done, from: producer, to: consumer, rename: deploy.completed}\n",
-		"producer/schema.yaml":   "# fixture: producer\npins:\n  outputs: [deploy.done]\n",
+		"producer/schema.yaml":   "# fixture: producer\noutputs: [deploy.done]\n",
 		"producer/events.yaml":   "deploy.done:\n",
 		"producer/agents.yaml":   "producer-agent:\n  model: regular\n  intent: {inline: Report deployment completion.}\n  emit_events: [deploy.done]\n",
-		"consumer/schema.yaml":   "# fixture: consumer\npins:\n  inputs: [deploy.completed]\n",
+		"consumer/schema.yaml":   "# fixture: consumer\ninputs: [deploy.completed]\n",
 		"consumer/nodes.yaml":    "consumer-node:\n  deploy.completed:\n    guard: true\n",
 	} {
 		writeClosedVariantFile(t, root, path, body)
