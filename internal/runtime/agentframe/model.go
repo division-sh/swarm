@@ -493,6 +493,9 @@ func renderProviderInput(turn TurnContext) (ProviderInput, error) {
 		return ProviderInput{Role: "tool", Content: string(turn.ToolResult)}, nil
 	}
 	if turn.Directive != nil {
+		if turn.Remediation != nil {
+			return ProviderInput{Role: "user", Content: turn.Remediation.Reason + ": " + turn.Directive.Text}, nil
+		}
 		return ProviderInput{Role: "user", Content: turn.Directive.Text}, nil
 	}
 	return ProviderInput{Role: "user", Content: string(turn.Event.Payload)}, nil
