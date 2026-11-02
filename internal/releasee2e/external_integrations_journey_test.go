@@ -2,10 +2,12 @@ package releasee2e
 
 import (
 	"context"
+	"crypto/rand"
 	"crypto/sha256"
 	"encoding/base64"
 	"encoding/json"
 	"fmt"
+	"io"
 	"net/url"
 	"os"
 	"path/filepath"
@@ -20,6 +22,8 @@ import (
 	"github.com/division-sh/swarm/internal/testutil/llmapi"
 	"github.com/division-sh/swarm/internal/testutil/mcpapi"
 )
+
+const externalMCPStdioArgument = "release-e2e-mcp-stdio"
 
 func TestExternalMCPPublicJourneyBothStores(t *testing.T) {
 	runExternalMCPPublicJourneyBothStores(t, false)
@@ -37,13 +41,18 @@ func runExternalMCPPublicJourneyBothStores(t *testing.T, unknownName bool) {
 	}
 	root := goldenReleaseRoot(t)
 	binary := buildReleaseBinary(t, root)
-	for _, backend := range []string{"sqlite", "postgres"} {
-		t.Run(backend, func(t *testing.T) {
+	for _, cell := range [][2]string{{"sqlite", "http"}, {"sqlite", "stdio"}, {"postgres", "http"}, {"postgres", "stdio"}} {
+		t.Run(cell[0]+"/"+cell[1], func(t *testing.T) {
+			backend, transport := cell[0], cell[1]
 			started := time.Now()
-			base := filepath.Join(root, backend)
-			remote := mcpapi.New(t, "synthetic-mcp-secret")
+			base := filepath.Join(root, backend, transport)
+			receipt := rand.Text()
+			policy, remoteCalls := externalMCPJourneyTransport(t, base, transport, receipt)
 			var rejections, inferences atomic.Int64
 			model := llmapi.New(t, llmapi.OpenAICompatible, "/v1/chat/completions", "synthetic-llm-secret", func(request llmapi.Request) (llmapi.Reply, error) {
+				if request.Number == 1 && strings.Contains(string(request.Body), receipt) {
+					return llmapi.Reply{}, fmt.Errorf("hidden MCP receipt leaked before tool execution")
+				}
 				respond := externalMCPJourneyReply
 				if unknownName {
 					respond = externalMCPUnknownNameReply
@@ -62,7 +71,7 @@ func runExternalMCPPublicJourneyBothStores(t *testing.T, unknownName bool) {
 					return
 				}
 				calls := 0
-				for _, call := range remote.Calls() {
+				for _, call := range remoteCalls() {
 					if call.Method == "tools/call" {
 						calls++
 					}
@@ -78,7 +87,7 @@ func runExternalMCPPublicJourneyBothStores(t *testing.T, unknownName bool) {
 			}
 			source, config := filepath.Join(base, "source"), filepath.Join(base, "swarm.yaml")
 			writeReleaseFile(t, config, strings.Replace(goldenRuntimeConfig(store), "  backend: claude_cli\n", fmt.Sprintf("  backend: openai_compatible\n  openai_compatible:\n    base_url: %q\n  models:\n    regular: {openai_compatible: fixture-model}\n", model.URL), 1))
-			writeExternalMCPJourneySource(t, source, remote.URL)
+			writeExternalMCPJourneySource(t, source, policy)
 			token := filepath.Join(base, "api-token")
 			writeReleaseFile(t, token, goldenAPIToken+"\n")
 			env := append(goldenProcessEnv(t, base, store.passwordEnv, 0), "SWARM_CREDENTIALS_FILE="+filepath.Join(base, "credentials.json"))
@@ -96,7 +105,7 @@ func runExternalMCPPublicJourneyBothStores(t *testing.T, unknownName bool) {
 			if err := process.waitReady(ctx); err != nil {
 				t.Fatalf("public MCP serve: %v\n%s", err, process.output.String())
 			}
-			before := remote.Calls()
+			before := remoteCalls()
 			if len(before) == 0 {
 				t.Fatal("serve did not discover the external MCP server")
 			}
@@ -105,25 +114,35 @@ func runExternalMCPPublicJourneyBothStores(t *testing.T, unknownName bool) {
 					t.Fatalf("discovery invoked execution method %s", call.Method)
 				}
 			}
+			if transport == "stdio" {
+				live, err := liveFakeDockerProcesses(filepath.Join(base, "stdio"))
+				if err != nil || len(live) == 0 {
+					t.Fatalf("stdio discovery has no owned live helper: %v %v", live, err)
+				}
+			}
 			hash := goldenServedBundleHash(t, process.rpc, "live")
-			var published struct {
+			type publication struct {
 				RunID   string `json:"run_id"`
 				EventID string `json:"event_id"`
 			}
-			if err := process.rpc.call(ctx, "event.publish", map[string]any{"bundle_hash": hash, "event_name": "external.requested", "payload": map[string]any{"text": "synthetic MCP request"}, "idempotency_key": "external-mcp-once"}, &published); err != nil || published.RunID == "" || published.EventID == "" {
+			var published publication
+			input := map[string]any{"bundle_hash": hash, "event_name": "external.requested", "payload": map[string]any{"text": "synthetic MCP request"}, "idempotency_key": "external-mcp-once"}
+			if err := process.rpc.call(ctx, "event.publish", input, &published); err != nil || published.RunID == "" || published.EventID == "" {
 				t.Fatalf("public MCP input failed: %v", err)
 			}
 			completed := waitConnectorPublicResult(t, process, published.RunID, "external.completed", 1, secrets)
 			wantText, wantCalls := "synthetic MCP request", 1
+			wantReceipt := receipt
 			if unknownName {
 				wantText, wantCalls = "provider name refused", 0
+				wantReceipt = ""
 			}
-			if completed.Payload["text"] != wantText {
+			if completed.Payload["text"] != wantText || completed.Payload["receipt"] != wantReceipt {
 				t.Fatalf("public result lost external MCP value: %#v", completed.Payload)
 			}
 			calls := 0
-			for _, call := range remote.Calls() {
-				if call.Auth != "Bearer synthetic-mcp-secret" {
+			for _, call := range remoteCalls() {
+				if transport == "http" && call.Auth != "Bearer synthetic-mcp-secret" {
 					t.Fatal("MCP discovery or invocation lost the bound credential")
 				}
 				if call.Method == "tools/call" {
@@ -137,13 +156,89 @@ func runExternalMCPPublicJourneyBothStores(t *testing.T, unknownName bool) {
 				t.Fatalf("MCP calls/model requests=%d/%d, want %d/2", calls, len(model.Requests()), wantCalls)
 			}
 			requireMCPJourneyWireInspection(t, ctx, process, published.RunID, model.Requests()[0].Body)
+			if !unknownName {
+				beforeReplay := remoteCalls()
+				var replay publication
+				if err := process.rpc.call(ctx, "event.publish", input, &replay); err != nil || replay != published {
+					t.Fatalf("MCP public replay changed input identity: %+v want %+v: %v", replay, published, err)
+				}
+				if replayed := waitConnectorPublicResult(t, process, published.RunID, "external.completed", 1, secrets); replayed.EventID != completed.EventID {
+					t.Fatal("MCP replay replaced its public completion")
+				}
+				if count := len(model.Requests()); count != 2 || !reflect.DeepEqual(remoteCalls(), beforeReplay) {
+					t.Fatalf("MCP replay repeated model or remote work: model requests=%d", count)
+				}
+			}
 			if err := process.stopAndWait(10 * time.Second); err != nil {
 				t.Fatal(err)
 			}
+			if transport == "stdio" {
+				live, err := liveFakeDockerProcesses(filepath.Join(base, "stdio"))
+				if err != nil || len(live) != 0 {
+					t.Fatalf("checked serve shutdown left owned stdio helpers before cleanup: %v %v", live, err)
+				}
+			}
 			requireConnectorSecretsAbsent(t, process.output.String(), secrets)
-			t.Logf("real binary MCP discovery/agent/external-call/public-result; backend=%s; elapsed=%s (shared build excluded)", backend, time.Since(started))
+			t.Logf("real binary MCP discovery/agent/external-call/public-result; backend=%s transport=%s; elapsed=%s (shared build excluded)", backend, transport, time.Since(started))
 		})
 	}
+}
+
+func externalMCPJourneyTransport(t *testing.T, base, transport, receipt string) (string, func() []mcpapi.Call) {
+	t.Helper()
+	if transport == "http" {
+		remote := mcpapi.New(t, "synthetic-mcp-secret", receipt)
+		return fmt.Sprintf("mcp_servers:\n  configured:\n    transport: http\n    url: %q\n    prefix: partner\n    credentials_key: MCP_FIXTURE_KEY\n", remote.URL), remote.Calls
+	}
+	command, err := os.Executable()
+	if err != nil {
+		t.Fatal(err)
+	}
+	root := filepath.Join(base, "stdio")
+	return fmt.Sprintf("mcp_servers:\n  configured:\n    transport: stdio\n    command: %q\n    args: [%q, %q, %q]\n    prefix: partner\n", command, externalMCPStdioArgument, root, receipt), func() []mcpapi.Call {
+		paths, err := filepath.Glob(filepath.Join(root, "calls-*.jsonl"))
+		if err != nil {
+			t.Fatal(err)
+		}
+		var calls []mcpapi.Call
+		for _, path := range paths {
+			raw, err := os.ReadFile(path)
+			if err != nil {
+				t.Fatal(err)
+			}
+			decoder := json.NewDecoder(strings.NewReader(string(raw)))
+			for {
+				var call mcpapi.Call
+				if err := decoder.Decode(&call); err == io.EOF {
+					break
+				} else if err != nil {
+					t.Fatal(err)
+				}
+				calls = append(calls, call)
+			}
+		}
+		return calls
+	}
+}
+
+func runExternalMCPStdioFixture(args []string) int {
+	if len(args) != 2 {
+		return 91
+	}
+	end, err := beginFakeDockerActivity(args[0])
+	if err != nil {
+		return 92
+	}
+	defer end()
+	file, err := os.OpenFile(filepath.Join(args[0], fmt.Sprintf("calls-%d.jsonl", os.Getpid())), os.O_CREATE|os.O_APPEND|os.O_WRONLY, 0o600)
+	if err != nil {
+		return 93
+	}
+	defer file.Close()
+	if err := mcpapi.ServeStdio(os.Stdin, os.Stdout, args[1], func(call mcpapi.Call) error { return json.NewEncoder(file).Encode(call) }); err != nil {
+		return 94
+	}
+	return 0
 }
 
 func externalMCPUnknownNameReply(request llmapi.Request) (llmapi.Reply, error) {
@@ -168,7 +263,7 @@ func externalMCPUnknownNameReply(request llmapi.Request) (llmapi.Reply, error) {
 	for _, message := range body.Messages {
 		if request.Number == 2 && message.Role == "tool" && message.CallID == "mcp-call" && strings.HasPrefix(message.Content, "error: tool_not_offered:") {
 			return llmapi.Reply{ID: "refusal-observed", Model: "fixture-model", InputTokens: 10, OutputTokens: 5, TotalTokens: 15,
-				Tools: []llmapi.ToolCall{{ID: "emit-refusal", Name: "emit_external_completed", Arguments: json.RawMessage(`{"text":"provider name refused"}`)}}}, nil
+				Tools: []llmapi.ToolCall{{ID: "emit-refusal", Name: "emit_external_completed", Arguments: json.RawMessage(`{"text":"provider name refused","receipt":""}`)}}}, nil
 		}
 	}
 	return llmapi.Reply{}, fmt.Errorf("model did not receive the exact tool_not_offered failed-call result")
@@ -225,6 +320,13 @@ func externalMCPJourneyReply(request llmapi.Request) (llmapi.Reply, error) {
 			Role    string `json:"role"`
 			Content string `json:"content"`
 			CallID  string `json:"tool_call_id"`
+			Calls   []struct {
+				ID       string `json:"id"`
+				Function struct {
+					Name      string `json:"name"`
+					Arguments string `json:"arguments"`
+				} `json:"function"`
+			} `json:"tool_calls"`
 		} `json:"messages"`
 	}
 	if err := json.Unmarshal(request.Body, &body); err != nil {
@@ -259,34 +361,51 @@ func externalMCPJourneyReply(request llmapi.Request) (llmapi.Reply, error) {
 		reply.Tools = []llmapi.ToolCall{{ID: "mcp-call", Name: "partner_ping", Arguments: json.RawMessage(`{"text":"synthetic MCP request"}`)}}
 	case 2:
 		found := false
+		linked := false
+		receipt := ""
 		for _, message := range body.Messages {
+			if message.Role == "assistant" && len(message.Calls) == 1 && message.Calls[0].ID == "mcp-call" && message.Calls[0].Function.Name == "partner_ping" {
+				var arguments map[string]any
+				if err := json.Unmarshal([]byte(message.Calls[0].Function.Arguments), &arguments); err != nil || !reflect.DeepEqual(arguments, map[string]any{"text": "synthetic MCP request"}) {
+					return reply, fmt.Errorf("model continuation lost the original assistant call arguments")
+				}
+				linked = true
+			}
 			if message.Role != "tool" || message.CallID != "mcp-call" {
 				continue
+			}
+			if !linked {
+				return reply, fmt.Errorf("model continuation has an orphan result before its assistant call")
 			}
 			var value map[string]any
 			if err := json.Unmarshal([]byte(message.Content), &value); err != nil || value["ok"] != true || value["echo"] != "synthetic MCP request" {
 				return reply, fmt.Errorf("model continuation lost the structured MCP result")
 			}
+			receipt, _ = value["receipt"].(string)
 			found = true
 		}
-		if !found {
+		if !found || !linked || receipt == "" {
 			return reply, fmt.Errorf("model continuation lost the MCP call ID")
 		}
-		reply.Tools = []llmapi.ToolCall{{ID: "emit-call", Name: "emit_external_completed", Arguments: json.RawMessage(`{"text":"synthetic MCP request"}`)}}
+		arguments, err := json.Marshal(map[string]any{"text": "synthetic MCP request", "receipt": receipt})
+		if err != nil {
+			return reply, err
+		}
+		reply.Tools = []llmapi.ToolCall{{ID: "emit-call", Name: "emit_external_completed", Arguments: arguments}}
 	default:
 		return reply, fmt.Errorf("unexpected model request %d", request.Number)
 	}
 	return reply, nil
 }
 
-func writeExternalMCPJourneySource(t *testing.T, root, endpoint string) {
+func writeExternalMCPJourneySource(t *testing.T, root, policy string) {
 	t.Helper()
 	for path, body := range map[string]string{
 		"manifest.yaml": "version: 1.0.0\nplatform_version: '*'\n",
 		"schema.yaml":   "stages: []\npins:\n  inputs: [external.requested, external.completed]\n",
-		"events.yaml":   "external.requested: {text: string}\nexternal.completed: {text: string}\n",
-		"policy.yaml":   fmt.Sprintf("mcp_servers:\n  configured:\n    transport: http\n    url: %q\n    prefix: partner\n    credentials_key: MCP_FIXTURE_KEY\n", endpoint),
-		"agents.yaml":   "worker:\n  role: integration\n  model: regular\n  subscriptions: [external.requested]\n  tools: [partner.ping]\n  emit_events: [external.completed]\n  intent:\n    inline: 'Call partner.ping with the current input text, then emit_external_completed with the exact echo returned by that tool. Do not invent the result or produce prose.'\n",
+		"events.yaml":   "external.requested: {text: string}\nexternal.completed: {text: string, receipt: string}\n",
+		"policy.yaml":   policy,
+		"agents.yaml":   "worker:\n  role: integration\n  model: regular\n  subscriptions: [external.requested]\n  tools: [partner.ping]\n  emit_events: [external.completed]\n  intent:\n    inline: 'Call partner.ping with the current input text, then emit_external_completed with text set to its exact echo and receipt set to its exact receipt. Learn the receipt only from the tool result. Do not invent the result or produce prose.'\n",
 		"nodes.yaml":    "observer:\n  external.completed:\n    guard: true\n",
 	} {
 		writeReleaseFile(t, filepath.Join(root, path), body)

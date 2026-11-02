@@ -112,6 +112,9 @@ type fakeClaudeInvocation struct {
 }
 
 func TestMain(m *testing.M) {
+	if len(os.Args) > 1 && os.Args[1] == externalMCPStdioArgument {
+		os.Exit(runExternalMCPStdioFixture(os.Args[2:]))
+	}
 	if len(os.Args) > 1 && os.Args[1] == realDockerProxyArgument {
 		os.Exit(runWorkspaceDockerProxy(os.Args[2:]))
 	}
