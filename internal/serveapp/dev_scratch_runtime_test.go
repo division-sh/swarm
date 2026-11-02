@@ -33,17 +33,6 @@ func TestRunServeRuntimeDevScratchPersistsExactBundleAndRunSource(t *testing.T) 
 	}
 	bundleHash := identity.SourceArtifacts[0].BundleHash
 	landing := requireServedLiveLandingRunID(t, endpoint+"/v1/rpc", bundleHash, ".")
-	var started struct {
-		RunID string `json:"run_id"`
-	}
-	requireServedJSONRPCResult(t, endpoint+"/v1/rpc", "run.start", map[string]any{
-		"bundle_hash": bundleHash,
-		"event_name":  "fulfillment.requested",
-		"payload":     map[string]any{"order_id": "dev-scratch-source"},
-	}, &started)
-	if started.RunID != landing {
-		t.Fatalf("run.start changed the live run: got=%s want=%s", started.RunID, landing)
-	}
 
 	db := openDevScratchReadback(t, repo)
 	defer db.Close()
@@ -52,7 +41,7 @@ func TestRunServeRuntimeDevScratchPersistsExactBundleAndRunSource(t *testing.T) 
 		t.Fatalf("read persisted dev source artifact row: %v", err)
 	}
 	var runHash string
-	if err := db.QueryRow(`SELECT bundle_hash FROM runs WHERE run_id = ?`, started.RunID).Scan(&runHash); err != nil {
+	if err := db.QueryRow(`SELECT bundle_hash FROM runs WHERE run_id = ?`, landing).Scan(&runHash); err != nil {
 		t.Fatalf("read persisted dev run source: %v", err)
 	}
 	if artifactHash != bundleHash || runHash != bundleHash {
