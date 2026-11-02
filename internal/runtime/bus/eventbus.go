@@ -950,7 +950,7 @@ func (p *preparedAgentRoute) Publish() error {
 		if eventType == "" {
 			continue
 		}
-		eb.subscriptions[key] = AppendUniqueEventType(eb.subscriptions[key], eventType)
+		eb.subscriptions[key] = appendUniqueEventType(eb.subscriptions[key], eventType)
 		if eb.channels[eventType] == nil {
 			eb.channels[eventType] = make(map[subscriberKey]chan *LocalDelivery)
 		}
@@ -1114,7 +1114,7 @@ func (eb *EventBus) SubscribeInternal(ctx context.Context, subscriberID string, 
 			if eventType == "" {
 				continue
 			}
-			eb.subscriptions[key] = AppendUniqueEventType(eb.subscriptions[key], eventType)
+			eb.subscriptions[key] = appendUniqueEventType(eb.subscriptions[key], eventType)
 			if eb.channels[eventType] == nil {
 				eb.channels[eventType] = make(map[subscriberKey]chan *LocalDelivery)
 			}

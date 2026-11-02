@@ -254,7 +254,7 @@ func (rt *RouteTable) matchPubsubDefinition(declaration routeFlowTemplate, subsc
 	var out []Subscriber
 	for _, resolved := range routeProjectAdmittedSubscriberPatterns(pattern.admission, subscriber.Path) {
 		for _, key := range keys {
-			if !RouteMatches(resolved.EventPattern, key) || pattern.admission.Pattern() && !pubsubPatternEventDeclared(pattern, declaration, subscriber.Path, key) {
+			if !routeMatches(resolved.EventPattern, key) || pattern.admission.Pattern() && !pubsubPatternEventDeclared(pattern, declaration, subscriber.Path, key) {
 				continue
 			}
 			bound := routeApplyResolvedPattern(subscriber, resolved)

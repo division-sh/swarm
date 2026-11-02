@@ -10,6 +10,7 @@ import (
 
 	"github.com/division-sh/swarm/internal/events"
 	"github.com/division-sh/swarm/internal/runtime/core/agentidentity"
+	"github.com/division-sh/swarm/internal/runtime/core/eventidentity"
 	runtimeidentity "github.com/division-sh/swarm/internal/runtime/core/identity"
 	worklifetime "github.com/division-sh/swarm/internal/runtime/core/worklifetime"
 	runtimecorrelation "github.com/division-sh/swarm/internal/runtime/correlation"
@@ -1272,15 +1273,43 @@ func (eb *EventBus) ResolveSubscribedRecipients(eventType string) []string {
 }
 
 func routeMatches(pattern, eventType string) bool {
-	return RouteMatches(pattern, eventType)
+	return eventidentity.MatchPattern(pattern, eventType)
 }
 
 func isValidEventTypeName(raw string) bool {
-	return IsValidEventTypeName(raw)
+	return eventidentity.IsValidName(raw)
+}
+
+func appendUniqueEventType(in []events.EventType, v events.EventType) []events.EventType {
+	if v == "" {
+		return in
+	}
+	for _, x := range in {
+		if x == v {
+			return in
+		}
+	}
+	return append(in, v)
 }
 
 func uniqueStrings(in []string) []string {
-	return UniqueStrings(in)
+	if len(in) <= 1 {
+		return in
+	}
+	set := make(map[string]struct{}, len(in))
+	out := make([]string, 0, len(in))
+	for _, v := range in {
+		v = strings.TrimSpace(v)
+		if v == "" {
+			continue
+		}
+		if _, ok := set[v]; ok {
+			continue
+		}
+		set[v] = struct{}{}
+		out = append(out, v)
+	}
+	return out
 }
 
 func dedupeSubscribers(in []Subscriber) []Subscriber {
