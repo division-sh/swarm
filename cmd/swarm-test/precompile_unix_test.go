@@ -19,6 +19,7 @@ import (
 	"time"
 
 	"github.com/division-sh/swarm/internal/testpostgres"
+	"github.com/division-sh/swarm/internal/testutil/testprocess"
 )
 
 func precompileRunnerFixture(t *testing.T, warm string) (string, string) {
@@ -202,7 +203,7 @@ while :; do sleep 1; done`)
 			}
 			defer log.Close()
 			command.Stdout, command.Stderr = log, log
-			if err := command.Start(); err != nil {
+			if err := testprocess.Start(command); err != nil {
 				t.Fatal(err)
 			}
 			t.Cleanup(func() {
@@ -230,6 +231,7 @@ while :; do sleep 1; done`)
 func TestPrecompileUnresolvedDescendantRefusesAdmission(t *testing.T) {
 	for _, mode := range []string{"survivor-success", "survivor-fail"} {
 		t.Run(mode, func(t *testing.T) {
+			setPreflightFixtureOwner(t)
 			binary, err := os.Executable()
 			if err != nil {
 				t.Fatal(err)

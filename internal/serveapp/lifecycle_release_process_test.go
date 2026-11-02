@@ -14,6 +14,7 @@ import (
 	"github.com/division-sh/swarm/internal/servedparity"
 	"github.com/division-sh/swarm/internal/store/storetest"
 	"github.com/division-sh/swarm/internal/testutil"
+	"github.com/division-sh/swarm/internal/testutil/testprocess"
 )
 
 func TestReleaseCompiledLifecycleJourneysBothStores(t *testing.T) {
@@ -182,7 +183,7 @@ func startReleaseServeEndpoint(t *testing.T, binary string, backend servedparity
 	cmd := exec.Command(binary, args...)
 	output := &lockedBuffer{}
 	cmd.Dir, cmd.Env, cmd.Stdout, cmd.Stderr = repoRootForTest(), env, output, output
-	if err := cmd.Start(); err != nil {
+	if err := testprocess.Start(cmd); err != nil {
 		t.Fatal(err)
 	}
 	process := &channelOnboardingCrashServeProcess{cmd: cmd, output: output, exited: make(chan struct{})}

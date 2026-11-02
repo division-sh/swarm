@@ -4,12 +4,15 @@ package testpostgres
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
 	"os"
 	"os/exec"
 	"path/filepath"
 	"testing"
 	"time"
+
+	"github.com/division-sh/swarm/internal/testutil/testprocess"
 )
 
 func TestRunSlotSurvivesSupervisorDeathUntilChildExit(t *testing.T) {
@@ -20,12 +23,21 @@ func TestRunSlotSurvivesSupervisorDeathUntilChildExit(t *testing.T) {
 	root := t.TempDir()
 	started := filepath.Join(root, "child-started")
 	release := filepath.Join(root, "child-release")
+	lifetime, err := testprocess.Current()
+	if err != nil {
+		t.Fatal(err)
+	}
+	ownerJSON, err := json.Marshal(lifetime)
+	if err != nil {
+		t.Fatal(err)
+	}
 	owner := exec.Command(os.Args[0], "-test.run=^TestRunSlotSurvivesSupervisorDeathUntilChildExit$")
 	owner.Env = append(os.Environ(),
 		"SWARM_RUN_LEASE_OWNER_FIXTURE=1",
 		"SWARM_RUN_LEASE_STATE="+filepath.Join(root, "state"),
 		"SWARM_RUN_LEASE_STARTED="+started,
 		"SWARM_RUN_LEASE_RELEASE="+release,
+		"SWARM_RUN_LEASE_OUTER_OWNER="+string(ownerJSON),
 	)
 	if output, err := owner.CombinedOutput(); err != nil {
 		t.Fatalf("lease owner fixture: %v\n%s", err, output)
@@ -171,7 +183,11 @@ func runLeaseOwnerFixture() {
 	if err := lease.InheritTo(child); err != nil {
 		os.Exit(3)
 	}
-	if err := child.Start(); err != nil {
+	var owner testprocess.Lifetime
+	if err := json.Unmarshal([]byte(os.Getenv("SWARM_RUN_LEASE_OUTER_OWNER")), &owner); err != nil {
+		os.Exit(4)
+	}
+	if err := testprocess.StartFor(child, owner); err != nil {
 		os.Exit(4)
 	}
 	waitForPathProcess(started, 2*time.Second)

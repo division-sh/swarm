@@ -15,6 +15,7 @@ import (
 	"time"
 
 	"github.com/division-sh/swarm/internal/store/storetest"
+	"github.com/division-sh/swarm/internal/testutil/testprocess"
 )
 
 func TestWorkspaceObserverRejectsAbsentAmbiguousAndInvalidStores(t *testing.T) {
@@ -141,7 +142,7 @@ func TestWorkspaceObserverCompiledChildProtocol(t *testing.T) {
 			if err != nil {
 				t.Fatal(err)
 			}
-			if err := cmd.Start(); err != nil {
+			if err := testprocess.Start(cmd); err != nil {
 				t.Fatal(err)
 			}
 			defer func() {

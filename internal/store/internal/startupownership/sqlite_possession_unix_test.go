@@ -15,6 +15,7 @@ import (
 	"time"
 
 	runtimestartupownership "github.com/division-sh/swarm/internal/runtime/startupownership"
+	"github.com/division-sh/swarm/internal/testutil/testprocess"
 	"golang.org/x/sys/unix"
 	_ "modernc.org/sqlite"
 )
@@ -348,7 +349,7 @@ func TestSQLitePossessionSubprocessContentionAndSIGKILLReclaim(t *testing.T) {
 	var childOutput bytes.Buffer
 	cmd.Stdout = &childOutput
 	cmd.Stderr = &childOutput
-	if err := cmd.Start(); err != nil {
+	if err := testprocess.Start(cmd); err != nil {
 		t.Fatalf("start possession child: %v", err)
 	}
 	childExited := false

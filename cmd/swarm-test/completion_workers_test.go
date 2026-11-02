@@ -18,6 +18,7 @@ import (
 
 	"github.com/division-sh/swarm/internal/testplanning"
 	"github.com/division-sh/swarm/internal/testpostgres"
+	"github.com/division-sh/swarm/internal/testutil/testprocess"
 )
 
 func TestCompletionWorkersBoundedAndJoined(t *testing.T) {
@@ -182,7 +183,7 @@ func TestCompletionMultiworkerSignals(t *testing.T) {
 			}
 			command := exec.Command(os.Args[0], "-test.run=^TestCompletionMultiworkerSignals$")
 			command.Env = append(os.Environ(), "SWARM_COMPLETION_SIGNAL_FIXTURE="+root)
-			if err := command.Start(); err != nil {
+			if err := testprocess.Start(command); err != nil {
 				t.Fatal(err)
 			}
 			t.Cleanup(func() {
@@ -234,7 +235,11 @@ func TestCompletionParentDeathRetainsWorkerDescendants(t *testing.T) {
 			if err := lease.InheritTo(child); err != nil {
 				t.Fatal(err)
 			}
-			if err := child.Start(); err != nil {
+			var owner testprocess.Lifetime
+			if err := json.Unmarshal([]byte(os.Getenv("SWARM_COMPLETION_OUTER_OWNER")), &owner); err != nil {
+				t.Fatal(err)
+			}
+			if err := testprocess.StartFor(child, owner); err != nil {
 				t.Fatal(err)
 			}
 			if err := publishSignalFixturePID(filepath.Join(root, "worker-"+unit), os.Getpid(), nil); err != nil {
@@ -264,6 +269,19 @@ func TestCompletionParentDeathRetainsWorkerDescendants(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
+	owner, err := testprocess.Current()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if retained := os.Getenv("SWARM_COMPLETION_OUTER_OWNER"); retained != "" {
+		if err := json.Unmarshal([]byte(retained), &owner); err != nil {
+			t.Fatal(err)
+		}
+	}
+	ownerJSON, err := json.Marshal(owner)
+	if err != nil {
+		t.Fatal(err)
+	}
 	var parent *exec.Cmd
 	t.Cleanup(func() {
 		ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
@@ -277,11 +295,11 @@ func TestCompletionParentDeathRetainsWorkerDescendants(t *testing.T) {
 		t.Fatal(err)
 	}
 	parent = exec.Command(os.Args[0], "-test.run=^TestCompletionParentDeathRetainsWorkerDescendants$")
-	parent.Env = append(os.Environ(), fixture+"="+root, "SWARM_COMPLETION_DEATH_BINARY="+os.Args[0])
+	parent.Env = append(os.Environ(), fixture+"="+root, "SWARM_COMPLETION_DEATH_BINARY="+os.Args[0], "SWARM_COMPLETION_OUTER_OWNER="+string(ownerJSON))
 	if err := prepareChildProcessTree(parent); err != nil {
 		t.Fatal(err)
 	}
-	if err := parent.Start(); err != nil {
+	if err := testprocess.Start(parent); err != nil {
 		t.Fatal(err)
 	}
 	var workers []int

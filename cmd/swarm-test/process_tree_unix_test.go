@@ -16,6 +16,7 @@ import (
 	"time"
 
 	"github.com/division-sh/swarm/internal/testpostgres"
+	"github.com/division-sh/swarm/internal/testutil/testprocess"
 )
 
 const (
@@ -48,7 +49,7 @@ func TestSwarmTestSignalTerminatesProcessTreeAndPreservesResult(t *testing.T) {
 			command.Dir = repoRoot
 			command.Env = signalTestEnvironment(os.Environ(), stateHome,
 				signalFixtureEnv+"=1", signalFixturePIDEnv+"="+pidPath)
-			if err := command.Start(); err != nil {
+			if err := testprocess.Start(command); err != nil {
 				t.Fatal(err)
 			}
 			t.Cleanup(func() {
@@ -94,7 +95,7 @@ func TestSwarmTestQueuedSignalResultAndTicketCleanup(t *testing.T) {
 			command.Dir = repoRoot
 			command.Env = signalTestEnvironment(os.Environ(), stateHome)
 			command.Stdout, command.Stderr = logFile, logFile
-			if err := command.Start(); err != nil {
+			if err := testprocess.Start(command); err != nil {
 				t.Fatal(err)
 			}
 			waitForSignalQueueOutput(t, logPath)
