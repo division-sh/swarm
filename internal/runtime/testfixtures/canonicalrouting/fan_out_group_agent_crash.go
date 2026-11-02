@@ -9,7 +9,7 @@ func CopyFanOutGroupAgentCrash(t testing.TB) string {
 	root := CopyForkFanOutCarrier(t, false, false)
 	writeClosedVariantFile(t, root, "agents.yaml", `item-worker:
   role: item_worker
-  intent: {inline: Emit the processed value and exact request event identity.}
+  intent: {inline: Emit the processed value.}
   model: regular
   subscriptions: [items.child]
   emit_events: [items.processed]
@@ -17,7 +17,7 @@ func CopyFanOutGroupAgentCrash(t testing.TB) string {
     kind: python
     module: mocks/item-worker.py
 `)
-	writeClosedVariantFile(t, root, "events.yaml", "items.ready:\n  items: [text]\nitems.child:\n  value: text\nitems.processed:\n  value: text\n  request_event_id: text\nbatch.completed:\n  total: integer\n")
+	writeClosedVariantFile(t, root, "events.yaml", "items.ready:\n  items: [text]\nitems.child:\n  value: text\nitems.processed:\n  value: text\nbatch.completed:\n  total: integer\n")
 	writeClosedVariantFile(t, root, "state.yaml", "processed_value: text\naccount_id: \"preserved\"\nhandled: false\n")
 	writeClosedVariantFile(t, root, "nodes.yaml", `fan-out-source:
   execution_type: system_node
@@ -44,13 +44,12 @@ result-consumer:
 	writeClosedVariantFile(t, root, "mocks/item-worker.py", `import json
 
 def handle(input):
-    frame = {}
+    payload = {}
     for message in input["messages"]:
         if message["role"] == "user":
-            frame = json.loads(message["content"])
+            payload = json.loads(message["content"])
     if input["round"] == 1:
-        event = frame["event"]
-        return {"calls": [{"name": "emit_items_processed", "arguments": {"value": event["payload"]["value"], "request_event_id": event["id"]}}], "usage": {"input_tokens": 1, "output_tokens": 1}}
+        return {"calls": [{"name": "emit_items_processed", "arguments": {"value": payload["value"]}}], "usage": {"input_tokens": 1, "output_tokens": 1}}
     return {"text": "Processed exact item.", "usage": {"input_tokens": 1, "output_tokens": 1}}
 `)
 	return root

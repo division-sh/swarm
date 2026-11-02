@@ -538,8 +538,8 @@ func assertPublicationGroupAgentEffects(t *testing.T, ctx context.Context, fixtu
 		}
 		matched := false
 		for ordinal, request := range ids {
-			if view.Payload["request_event_id"] == request {
-				if seen[ordinal] || view.Payload["value"] != fmt.Sprintf("item-%03d", ordinal) || view.SourceEventID != request {
+			if view.SourceEventID == request {
+				if seen[ordinal] || view.Payload["value"] != fmt.Sprintf("item-%03d", ordinal) {
 					t.Fatalf("duplicate/wrong agent result: %+v", view)
 				}
 				seen[ordinal], matched = true, true
