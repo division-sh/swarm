@@ -170,11 +170,28 @@ func (c selectedContractForkLocalRuntimeContainer) activateLive(p *PreparedSelec
 	if err := runtime.startExecution(c.attachment.ctx, c.attachment.pipeline, c.diagnostics, p.recoveryFromExecutionID != ""); err != nil {
 		return out, err
 	}
-	continuations, err := deliverycontinuation.NewSelected(c.ports.busDurable.DeliveryLifecycle, c.attachment.deliveryAuthority, p.operation.selected, runtime.bus, func(_ context.Context, cause error) { c.attachment.cancel(cause) })
+	reconcile, err := c.selectedBarrierReconciler()
+	if err != nil {
+		return out, err
+	}
+	continuations, err := deliverycontinuation.NewSelected(c.ports.busDurable.DeliveryLifecycle, c.attachment.deliveryAuthority, p.operation.selected, runtime.bus, func(_ context.Context, cause error) { c.attachment.cancel(cause) }, reconcile)
 	if err != nil {
 		return out, err
 	}
 	if err := runtime.bus.SetDeliveryContinuationOwner(continuations); err != nil {
+		return out, err
+	}
+	if err := c.admitSelectedDeploymentFeeds(c.attachment.ctx); err != nil {
+		return out, err
+	}
+	// Bind fixed-cut ordinals before the first barrier reconciliation.
+	inputs, err := c.commitSelectedInputs()
+	defer func() {
+		for _, input := range inputs {
+			finalErr = errors.Join(finalErr, runtime.bus.AbandonPreparedPublish(context.WithoutCancel(input.ctx), input.prepared))
+		}
+	}()
+	if err != nil {
 		return out, err
 	}
 	if err := continuations.Start(c.attachment.ctx); err != nil {
@@ -184,15 +201,6 @@ func (c selectedContractForkLocalRuntimeContainer) activateLive(p *PreparedSelec
 	defer func() { finalErr = errors.Join(finalErr, retireContinuations()) }()
 	recovered := p.recoveryFromExecutionID != ""
 	if err := c.restoreLiveSelectedWork(continuations, recovered); err != nil {
-		return out, err
-	}
-	inputs, err := c.commitSelectedInputs()
-	defer func() {
-		for _, input := range inputs {
-			finalErr = errors.Join(finalErr, runtime.bus.AbandonPreparedPublish(context.WithoutCancel(input.ctx), input.prepared))
-		}
-	}()
-	if err != nil {
 		return out, err
 	}
 	if !recovered {
@@ -335,9 +343,6 @@ func (c selectedContractForkLocalRuntimeContainer) restoreLiveSelectedWork(conti
 		return err
 	}
 	if err := c.attachment.runtime.genericSchedules.ReconcileRunWakeups(ctx, c.req.ForkRunID); err != nil {
-		return err
-	}
-	if err := c.admitSelectedDeploymentFeeds(ctx); err != nil {
 		return err
 	}
 	// Recovered handlers may await already-owed fan-out or an original deadline.

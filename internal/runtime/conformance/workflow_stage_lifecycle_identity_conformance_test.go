@@ -345,6 +345,7 @@ func newStageLifecycleIdentityRuntime(t *testing.T, selected any, module conform
 		t.Fatalf("stage lifecycle store %T does not persist source artifacts", selected)
 	}
 	runtimeCtx := testAuthorActivityContextForBundle(context.Background(), sourceArtifactFact)
+	runtimeCtx = originalConformanceFixtureContext(t, runtimeCtx, selected)
 	storetest.RequireBundleDataCatalog(t, runtimeCtx, catalogStore, bundle)
 	cfg := &config.Config{
 		LLM:     config.LLMConfig{Backend: "anthropic"},

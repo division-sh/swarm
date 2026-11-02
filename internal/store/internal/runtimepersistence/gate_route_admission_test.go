@@ -38,6 +38,7 @@ func TestGateRouteAdmissionPrivateAdapterParity(t *testing.T) {
 			runningRunID := uuid.NewString()
 			pausedRunID := uuid.NewString()
 			now := time.Now().UTC()
+			ctx = originalStoreFixtureContext(t, ctx, fixtureStore)
 			requireRunningRunForTest(t, ctx, fixtureStore, runningRunID, now)
 			requirePausedRunForTest(t, ctx, fixtureStore, pausedRunID, now)
 

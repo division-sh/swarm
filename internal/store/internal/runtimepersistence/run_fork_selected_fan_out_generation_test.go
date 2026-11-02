@@ -109,14 +109,15 @@ func admitSelectedForkNativePhaseForTest(t *testing.T, ctx context.Context, fixt
 	grant := selectedFixtureGrantForAuthority(t, ctx, selectedCompletionFixture{
 		process: process, store: store, forkRun: child.ForkRunID, request: issue,
 	}, issued, authority)
+	cleanupCtx := context.WithoutCancel(ctx)
 	t.Cleanup(func() {
-		if err := grant.Retire(context.Background()); err != nil {
+		if err := grant.Retire(cleanupCtx); err != nil {
 			t.Error(err)
 		}
-		if err := store.QuiesceRunForkSelectedContractRuntimeExecution(context.Background(), authority); err != nil {
+		if err := store.QuiesceRunForkSelectedContractRuntimeExecution(cleanupCtx, authority); err != nil {
 			t.Error(err)
 		}
-		if _, err := store.CloseRunForkSelectedContractRuntimeExecution(context.Background(), issued.ExecutionID); err != nil {
+		if _, err := store.CloseRunForkSelectedContractRuntimeExecution(cleanupCtx, issued.ExecutionID); err != nil {
 			t.Error(err)
 		}
 	})
@@ -384,7 +385,9 @@ func consumeSelectedForkFanOutEmissions(t *testing.T, fixture authorActivityRece
 	if expectedFailure != "" && fenced != len(emissions) {
 		t.Fatalf("historical failure accounting lost committed ordinals: fenced=%d committed=%d", fenced, len(emissions))
 	}
-	advanceFanOutBarriersForTest(t, ctx, selected, intent.Request.Key.RunID, time.Now().UTC())
+	if _, err := owner.AdvanceFanOutBarriers(ctx, intent.Request.Key); err != nil {
+		t.Fatal(err)
+	}
 	wantStatus := fanoutbarrier.StatusClosedPending
 	wantSummary := &fanoutbarrier.Summary{Total: len(emissions), Succeeded: len(emissions)}
 	wantSchedule := handle.TaskID()

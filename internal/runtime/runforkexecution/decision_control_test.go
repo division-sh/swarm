@@ -109,7 +109,7 @@ func TestSelectedDecisionControlJoinsOnlyOwnRetainedOccurrence(t *testing.T) {
 		}
 	})
 	owned := worklifetime.WithOccurrence(managedexecution.WithAdmission(ctx, admission), occurrence)
-	runtime := &selectedContractAgentRuntime{controlContext: owned, timerLifecycle: &pipeline.PipelineCoordinator{}}
+	runtime := &selectedContractAgentRuntime{controlContext: owned, cleanupContext: owned, timerLifecycle: &pipeline.PipelineCoordinator{}}
 	entry := &selectedForkContext{binding: binding, retained: &PreparedSelectedFork{retainedRuntime: runtime}}
 	contexts := &selectedForkContexts{recovered: true, entries: map[*selectedContractOperation]*selectedForkContext{{}: entry}}
 	owner := SelectedContractExecutionOwner{ports: &selectedContractExecutionPorts{contexts: contexts}}

@@ -39,7 +39,8 @@ func TestPersistedAgentReadinessFieldsBothStores(t *testing.T) {
 			if err != nil {
 				t.Fatal(err)
 			}
-			ctx := requireDefaultSourceArtifactForTest(t, testAuthorActivityContext(), selected)
+			ctx := originalStoreFixtureContext(t, testAuthorActivityContext(), selected)
+			ctx = requireDefaultSourceArtifactForTest(t, ctx, selected)
 			if err := agentfixture.UpsertStatic(t, ctx, selected, manager.PersistedAgent{Config: cfg, Status: "active"}); err != nil {
 				t.Fatal(err)
 			}

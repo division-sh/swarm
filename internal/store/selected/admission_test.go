@@ -25,6 +25,7 @@ import (
 	storebackend "github.com/division-sh/swarm/internal/store/backendselection"
 	storeconstruction "github.com/division-sh/swarm/internal/store/construction"
 	"github.com/division-sh/swarm/internal/store/internal/backend/generationauthority"
+	"github.com/division-sh/swarm/internal/store/testutil/agentfixture"
 	"github.com/division-sh/swarm/internal/testutil"
 	"github.com/division-sh/swarm/internal/testutil/sourceartifactfixture"
 )
@@ -112,11 +113,23 @@ func TestAdmissionInspectionRealReadScopeBothStores(t *testing.T) {
 			if err := bootstrap.BootstrapSchema(ctx, request); err != nil {
 				t.Fatal(err)
 			}
+			freshStamp, err := generationauthority.ReadProcessGeneration(ctx, db, backend == storebackend.BackendSQLite)
+			if err != nil || freshStamp.Generation != 0 {
+				t.Fatalf("fresh inspection acquired process authority: %+v err=%v", freshStamp, err)
+			}
 			writer, ok := bootstrap.(sourceartifactfixture.RootedWriter)
 			if !ok {
 				t.Fatal("native bootstrap fixture does not retain its rooted source owner")
 			}
-			if _, err := writer.EnsureRootedSource(ctx, rooted); err != nil {
+			original, err := agentfixture.ProcessContext(t, ctx, bootstrap.(agentfixture.Store))
+			if err != nil {
+				t.Fatal(err)
+			}
+			if _, err := writer.EnsureRootedSource(original, rooted); err != nil {
+				t.Fatal(err)
+			}
+			beforeInspection, err := generationauthority.ReadProcessGeneration(ctx, db, backend == storebackend.BackendSQLite)
+			if err != nil {
 				t.Fatal(err)
 			}
 			var retained *AdmissionSnapshot
@@ -234,8 +247,8 @@ func TestAdmissionInspectionRealReadScopeBothStores(t *testing.T) {
 			if err != nil {
 				t.Fatal(err)
 			}
-			if stamp.Generation != 0 {
-				t.Fatal("read inspection acquired process authority")
+			if stamp != beforeInspection {
+				t.Fatal("read inspection changed the fixture's original process authority")
 			}
 		})
 	}

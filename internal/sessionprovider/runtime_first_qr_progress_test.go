@@ -17,6 +17,7 @@ import (
 	"github.com/division-sh/swarm/internal/channelonboarding"
 	"github.com/division-sh/swarm/internal/cliapp"
 	"github.com/division-sh/swarm/internal/operatorchannel"
+	"github.com/division-sh/swarm/internal/runtime/core/worklifetime"
 	waBinary "go.mau.fi/whatsmeow/binary"
 	"go.mau.fi/whatsmeow/types/events"
 )
@@ -31,8 +32,13 @@ func TestWhatsAppHeldFirstQRPublicCLIProgressBothStores(t *testing.T) {
 			t.Setenv("XDG_CONFIG_HOME", t.TempDir())
 			f := newRuntimeBootstrapFixture(t, backend)
 			const token = "held-first-qr-test-token"
+			process, found := worklifetime.ProcessFromContext(f.ctx)
+			if !found {
+				t.Fatal("held-first-QR fixture lost its retained original process")
+			}
 			handler, err := apiv1.NewHandler(apiv1.Options{
-				AuthTokens: []string{token}, OperatorPrincipalID: f.principal.ID,
+				ProcessWorkOwner: process,
+				AuthTokens:       []string{token}, OperatorPrincipalID: f.principal.ID,
 				Handlers: apiv1.ChannelOnboardingHandlers(apiv1.ChannelOnboardingHandlerOptions{Onboarding: f.service, Channels: f.channels})})
 			if err != nil {
 				t.Fatal(err)

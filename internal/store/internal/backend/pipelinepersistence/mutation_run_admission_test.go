@@ -23,16 +23,16 @@ func VerifyMissingMutationRunForTest(t *testing.T, initial bool, prepare Stateme
 	t.Helper()
 	db, location := openFanOutReadbackTestDB(t, "sqlite")
 	_, original := materializeSQLiteStatementRuns(t, db, location, false, prepare)
+	backend, err := sqlitebackend.New(db)
+	if err != nil {
+		t.Fatal(err)
+	}
 	for _, ddl := range []string{
 		`CREATE TABLE entity_mutations (mutation_id TEXT PRIMARY KEY)`,
 	} {
 		if _, err := db.Exec(ddl); err != nil {
 			t.Fatal(err)
 		}
-	}
-	backend, err := sqlitebackend.New(db)
-	if err != nil {
-		t.Fatal(err)
 	}
 	store := &PipelineSQLiteOwner{RunLifecycleSQLiteOwner: &runlifecycle.RunLifecycleSQLiteOwner{}}
 	ctx := runtimecorrelation.WithRunID(original, uuid.NewString())

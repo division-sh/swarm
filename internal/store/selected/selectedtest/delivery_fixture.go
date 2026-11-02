@@ -71,6 +71,13 @@ func OpenSelectedDeliveryExecution(t *testing.T, ctx context.Context, owner Sele
 	process := worklifetime.NewProcess()
 	ctx = worklifetime.WithProcess(ctx, process)
 	ctx, capability, runtimeID := selectedDeliveryOriginal(t, ctx, owner, runtimeID, original)
+	evidence, err := capability.Evidence()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := process.BindOriginalProcess(evidence.LeaseStamp()); err != nil {
+		t.Fatal(err)
+	}
 	source := sourceartifactfixture.RequireArtifact(t, ctx, owner, bundle.SourceArtifact)
 	ctx = correlation.WithSourceArtifactFact(ctx, source)
 	ctx = authoractivity.WithScope(ctx, authoractivity.BundleScope(runtimeID, source.BundleHash()))

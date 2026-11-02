@@ -20,11 +20,11 @@ func TestReviewerTransactionPanicCleanup(t *testing.T) {
 			ctx, cancel := context.WithCancel(context.Background())
 			defer cancel()
 			marker := errors.New("callback panic")
+			var panicValue any
+			var transactionErr error
 			func() {
 				defer func() {
-					if recover() != marker {
-						t.Error("panic not preserved")
-					}
+					panicValue = recover()
 				}()
 				callback := func(ctx context.Context, tx *sql.Tx) error {
 					var value int
@@ -34,11 +34,17 @@ func TestReviewerTransactionPanicCleanup(t *testing.T) {
 					panic(marker)
 				}
 				if read {
-					_ = b.RunReadTransaction(ctx, callback)
+					transactionErr = b.RunReadTransaction(ctx, callback)
 				} else {
-					_ = b.RunTransaction(ctx, "panic", callback)
+					transactionErr = b.RunTransaction(ctx, "panic", callback)
 				}
 			}()
+			if transactionErr != nil {
+				t.Fatalf("transaction refused before intended panic: %v", transactionErr)
+			}
+			if panicValue != marker {
+				t.Fatalf("panic not preserved: got %v, want %v", panicValue, marker)
+			}
 			next, stop := context.WithTimeout(context.Background(), 100*time.Millisecond)
 			defer stop()
 			var value int

@@ -21,7 +21,7 @@ func TestDiagnosticDirectNamedCommitSubtypeIsolationParity(t *testing.T) {
 			ctx := testAuthorActivityContext()
 			ctx = originalStoreFixtureContext(t, ctx, fixture.store)
 			runID := uuid.NewString()
-			seedAuthorActivityReceiptRun(t, fixture, ctx, runID)
+			ctx = seedAuthorActivityReceiptRun(t, fixture, ctx, runID)
 
 			for _, positive := range []struct {
 				name      string

@@ -141,6 +141,7 @@ func TestWorkflowTimerCauseReplayReopenAndIsolationBothStores(t *testing.T) {
 				if err := closeStore(); err != nil {
 					t.Fatal(err)
 				}
+				replacePipelineExternalWorkOccurrenceForSource(t, fact, pipelineExternalTestWorkOwnerForSource(t, fact))
 				selected = reopen()
 				ctx = originalPipelineFixtureContext(t, withLiveGateExecution(correlation.WithRunID(testAuthorActivityContextForSource(t, context.Background(), fact), runID)), selected)
 				pc, admitAttachment, _ = build()

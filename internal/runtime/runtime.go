@@ -397,6 +397,9 @@ func (rt *Runtime) InstallStartupGrant(grant runtimestartupownership.LiveGenerat
 	if evidence.BundleHash != rt.Options.SourceArtifactFact.BundleHash() || evidence.RuntimeInstanceID != strings.TrimSpace(rt.Options.RuntimeInstanceID) {
 		return fmt.Errorf("runtime generation grant does not match runtime source coordinate")
 	}
+	if err := runtimestartupownership.BindProcessWorkOwner(rt.Options.ProcessWorkOwner, grant); err != nil {
+		return err
+	}
 	plan, err := grant.SourceSetPlan(context.Background())
 	if err != nil {
 		return fmt.Errorf("load generation source-set plan: %w", err)
@@ -1332,7 +1335,8 @@ func newRuntime(ctx context.Context, deps RuntimeDeps) (*Runtime, error) {
 		}
 		rt.GenericSchedules = genericSchedules
 	}
-	if candidateOwner := runtimeDeps.RunLifecycleCandidates; candidateOwner != nil {
+	// Only isolated MockOnly execution retains finite test-run completion.
+	if candidateOwner := runtimeDeps.RunLifecycleCandidates; rt.ExecutionPosture == executionposture.MockOnly && candidateOwner != nil {
 		if runLifecycleRequiresGenericSchedules(source) && rt.GenericSchedules == nil {
 			return nil, fmt.Errorf("workflow run lifecycle completion executor requires the generic schedule lifecycle")
 		}
@@ -1352,7 +1356,7 @@ func newRuntime(ctx context.Context, deps RuntimeDeps) (*Runtime, error) {
 			return nil, fmt.Errorf("build run lifecycle completion executor: %w", err)
 		}
 		rt.runLifecycleExecutor = executor
-	} else if runtimeDeps.WorkflowPersistence.Configured() {
+	} else if rt.ExecutionPosture == executionposture.MockOnly && runtimeDeps.WorkflowPersistence.Configured() {
 		return nil, fmt.Errorf("selected runtime store run lifecycle candidate owner is required")
 	}
 	if runtimeDeps.WorkflowPersistence.Valid() {
@@ -1636,7 +1640,9 @@ func newRuntime(ctx context.Context, deps RuntimeDeps) (*Runtime, error) {
 	if runtimeDeps.InboundStore != nil {
 		rt.InboundGateway = NewInboundGateway(rt.Bus, rt.Logger, rt.shutdownAdmissionClosed, boot.ExecutionPosture, runtimeDeps.InboundStore)
 		rt.InboundGateway.SetChannelPlans(opts.ChannelPlans)
-		rt.InboundGateway.SetAdmissionGuard(rt.shutdownGate.BeginContext)
+		rt.InboundGateway.SetAdmissionGuard(func(ctx context.Context) (context.Context, func(), bool) {
+			return rt.shutdownGate.BeginContext(worklifetime.WithProcess(ctx, rt.Options.ProcessWorkOwner))
+		})
 		rt.InboundGateway.SetRuntimeIngress(rt.RuntimeIngress)
 		rt.InboundGateway.SetCredentialAdmission(rt.AdmitInboundCredentials)
 	}
@@ -1798,11 +1804,7 @@ func (rt *Runtime) prepareStartLocked(ctx context.Context) (*PreparedStartup, er
 	rt.lifecycleMu.Unlock()
 	if rt.runLifecycleExecutor != nil {
 		scope := runtimerunlifecycle.CandidateScope{BundleHash: rt.Options.SourceArtifactFact.BundleHash()}
-		registration, err := rt.runLifecycleCandidates.RegisterCompletionCandidateSink(
-			startCtx,
-			scope,
-			rt.runLifecycleExecutor,
-		)
+		registration, err := rt.runLifecycleCandidates.RegisterCompletionCandidateSink(startCtx, scope, rt.runLifecycleExecutor)
 		if err != nil {
 			return nil, fmt.Errorf("register run lifecycle completion executor: %w", err)
 		}
@@ -2335,13 +2337,9 @@ func (rt *Runtime) stopWithGraceLocked(grace time.Duration) error {
 		}
 	}
 	if rt.runLifecycleExecutor != nil {
-		// Retire may return an early settlement diagnostic; only the final
-		// join below reports it. The drain deadline remains a separate failure.
 		if err := rt.runLifecycleExecutor.Retire(drainCtx); err != nil && drainCtx.Err() != nil {
-			shutdownErr = errors.Join(
-				shutdownErr,
-				fmt.Errorf("run lifecycle executor retirement timed out after %s: %w", grace, context.Cause(drainCtx)),
-			)
+			shutdownErr = errors.Join(shutdownErr,
+				fmt.Errorf("run lifecycle executor retirement timed out after %s: %w", grace, context.Cause(drainCtx)))
 		}
 	}
 	if rt.Manager != nil {

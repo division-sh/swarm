@@ -19,6 +19,37 @@ type activeRunSource struct {
 
 type activeRunSources map[string]activeRunSource
 
+// RunRowLock selects the initial SQL lock strength. A lifecycle writer cannot
+// upgrade a shared admission held by this same native attempt.
+func RunRowLock(ctx context.Context, tx *sql.Tx, runID string, exclusive bool) (bool, error) {
+	attempt, err := runAdmissionAttempt(ctx, tx)
+	if err != nil {
+		return false, err
+	}
+	if attempt == nil {
+		if exclusive {
+			return false, errors.New("exclusive run admission requires a native mutation attempt")
+		}
+		return false, nil
+	}
+	key, valid := physicalRunKey(attempt.dialect, runID)
+	if !valid {
+		// Leave malformed identities to the existing native SQL validation.
+		return exclusive, nil
+	}
+	if prior, seen := attempt.runLocks[key]; seen {
+		if exclusive && !prior {
+			return false, errors.New("run lifecycle change requires initially exclusive admission")
+		}
+		return prior, nil
+	}
+	if attempt.runLocks == nil {
+		attempt.runLocks = make(map[string]bool)
+	}
+	attempt.runLocks[key] = exclusive
+	return exclusive, nil
+}
+
 func runAdmissionAttempt(ctx context.Context, tx *sql.Tx) (*Attempt, error) {
 	if ctx == nil {
 		return nil, errors.New("run admission context is required")

@@ -109,7 +109,7 @@ func provePublicCompletionManagedCommitCut(t *testing.T, backend servedparity.Ba
 		completion = probe.deployment.Completion.Response
 	}
 	probe.mu.Unlock()
-	stored, found, err := native.LookupAPIEventPublication(t.Context(), request)
+	stored, found, err := native.LookupAPIEventPublication(probe.readbackContext(t), request)
 	if err != nil || !found || process.PublicCompletionCount() != 1 || !activation.Acknowledged || !bytes.Equal(completion, stored.Response) {
 		t.Fatalf("held native ACK lacks durable outcome/ownership: found=%t err=%v", found, err)
 	}
@@ -193,7 +193,6 @@ func provePublicCompletionManagedCommitCut(t *testing.T, backend servedparity.Ba
 	}
 	probe.mu.Lock()
 	native, calls, obligations, workflow, eventID := probe.native, probe.commits+probe.deployments, probe.obligations, probe.workflow, probe.eventID
-	disposals, releases, disposeErr := probe.claimDisposeCount, probe.claimReleaseCount, probe.claimDisposeError
 	probe.mu.Unlock()
 	if calls != 1 {
 		t.Fatalf("managed restart repeated native COMMIT: %d", calls)
@@ -225,6 +224,7 @@ func provePublicCompletionManagedCommitCut(t *testing.T, backend servedparity.Ba
 	if err != nil || !found || readiness.Phase != pipeline.FlowAttachmentReady {
 		t.Fatalf("managed restart did not recover exact attachment: found=%t readiness=%+v err=%v", found, readiness, err)
 	}
+	waitIssue2564LiveRunSettlement(t, issue2564ServedFixture{Endpoint: h.rpcEndpoint()}, runID)
 	open, err := obligations.SummarizeRun(t.Context(), runID)
 	if err != nil || open.HasOpenWork() {
 		t.Fatalf("managed recovery left publication unsettled: %+v err=%v", open, err)
@@ -237,6 +237,9 @@ func provePublicCompletionManagedCommitCut(t *testing.T, backend servedparity.Ba
 		t.Fatal("feed-only start fabricated a delivery handoff")
 	}
 	if eventBacked {
+		probe.mu.Lock()
+		disposals, releases, disposeErr := probe.claimDisposeCount, probe.claimReleaseCount, probe.claimDisposeError
+		probe.mu.Unlock()
 		if releases != firstReleases || disposals != firstReleases+1 || disposeErr != nil {
 			t.Fatalf("managed recovery lost exact native claim settlement: count=%d releases=%d original_releases=%d err=%v", disposals, releases, firstReleases, disposeErr)
 		}

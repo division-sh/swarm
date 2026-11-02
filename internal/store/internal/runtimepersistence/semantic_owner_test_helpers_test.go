@@ -24,7 +24,6 @@ import (
 	storepipeline "github.com/division-sh/swarm/internal/store/internal/backend/pipelinepersistence"
 	storerunfork "github.com/division-sh/swarm/internal/store/internal/backend/runforkpersistence"
 	storerunlifecycle "github.com/division-sh/swarm/internal/store/internal/backend/runlifecycle"
-	storerunstate "github.com/division-sh/swarm/internal/store/internal/backend/runstate"
 	storeoperatorsurface "github.com/division-sh/swarm/internal/store/internal/operatorsurface"
 	runlifecyclefixture "github.com/division-sh/swarm/internal/testutil/runlifecyclefixture"
 )
@@ -44,7 +43,6 @@ type runForkActivityRequestPayload = storerunfork.RunForkActivityRequestPayload
 type runForkGateActivationBinding = storerunfork.RunForkGateActivationBinding
 type runForkEntityProjection = runfork.EntityProjection
 type runCompletionOwnerSummaries = storerunlifecycle.RunCompletionOwnerSummaries
-type terminalRunMutation = storerunlifecycle.TerminalRunMutation
 type standaloneRuntimePlatformRunRecord = storerunlifecycle.StandaloneRuntimePlatformRunRecord
 type conversationForkTimeValue = storerunfork.ConversationForkTimeValue
 type completionRecoveryAttempt = storeeffect.CompletionRecoveryAttempt
@@ -101,10 +99,6 @@ func mustTestDeliveryAdapter(dialect storedelivery.Dialect) *storedelivery.Adapt
 		panic(err)
 	}
 	return adapter
-}
-
-func requirePostgresRunActive(ctx context.Context, tx *sql.Tx, runID string) error {
-	return storerunstate.RequirePostgresActiveTx(ctx, tx, runID)
 }
 
 func requestPostgresCompletionCandidateTx(ctx context.Context, tx *sql.Tx, runID string, dueAt *time.Time, force bool) (runtimerunlifecycle.CandidateRequestResult, error) {

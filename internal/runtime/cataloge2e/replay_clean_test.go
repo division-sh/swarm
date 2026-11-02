@@ -20,6 +20,7 @@ import (
 
 	runtimecontracts "github.com/division-sh/swarm/internal/runtime/contracts"
 	runtimefailures "github.com/division-sh/swarm/internal/runtime/failures"
+	"github.com/division-sh/swarm/internal/runtime/runlifecycle"
 	"github.com/division-sh/swarm/internal/store/storetest"
 	"github.com/division-sh/swarm/internal/testcatalog"
 	"github.com/division-sh/swarm/internal/testutil/replayconformance"
@@ -342,6 +343,25 @@ func executeCatalogTranscript(t *testing.T, fixture testcatalog.Fixture, backend
 		switch group.barrierBefore.Kind {
 		case "":
 		case catalogBarrierRunTerminal:
+			classifier, err := runtimecontracts.NewWorkflowStageClassifier(h.bundle.Semantics.StageTopologies["."], h.bundle.Semantics.StageTopologies)
+			if err != nil {
+				t.Fatalf("compile finite transcript stage classifier: %v", err)
+			}
+			catalog, err := runlifecycle.NewCompiledFinalCatalog(classifier)
+			if err != nil {
+				t.Fatalf("admit finite transcript final catalog: %v", err)
+			}
+			var selected runlifecycle.CandidateStore = h.pg
+			if h.pg == nil {
+				selected = h.sqlite
+			}
+			// This is an explicit finite component step after the prior group's quiescence.
+			ctx, cancel := context.WithTimeout(h.ctx, catalogRuntimePublishTimeout)
+			result, err := storetest.ExecuteRunCompletionCandidate(ctx, selected, transcript.bundleHash, transcript.runID, catalog)
+			cancel()
+			if err != nil || !result.Committed || result.Outcome != runlifecycle.OutcomeTerminallyEligible {
+				t.Fatalf("execute finite transcript completion: result=%+v err=%v", result, err)
+			}
 			h.waitForRunTerminal(catalogRuntimePublishTimeout)
 		case catalogBarrierAutomaticEventCount:
 			h.waitForCatalogAutomaticEventCount(group.barrierBefore.Event, group.barrierBefore.Minimum, catalogRuntimePublishTimeout)

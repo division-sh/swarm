@@ -43,6 +43,8 @@ func TestRuntimeIncidentFiltersAndGroupingOnBothStores(t *testing.T) {
 			ctxA = originalStoreFixtureContext(t, ctxA, selected)
 			ctxB = originalStoreFixtureContext(t, ctxB, selected)
 			runA, runB := uuid.NewString(), uuid.NewString()
+			ctxA = originalStoreFixtureContext(t, ctxA, selected)
+			ctxB = originalStoreFixtureContext(t, ctxB, selected)
 			requireRunFixtureForTest(t, ctxA, selected, semanticRunFixture{Origin: semanticScenarioSetupRunOriginForTest(), RunID: runA, Artifact: artifactA, StartedAt: base.Add(-48 * time.Hour)})
 			requireRunFixtureForTest(t, ctxB, selected, semanticRunFixture{Origin: semanticScenarioSetupRunOriginForTest(), RunID: runB, Artifact: artifactB, StartedAt: base.Add(-48 * time.Hour)})
 			insertRecord := func(run, code, component, level string, at time.Time) string {

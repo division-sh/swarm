@@ -212,14 +212,14 @@ func newProposedEffectMailboxHandler(
 	runBundleContext, _ := persistence.(RunBundleContextStore)
 	principal, err := persistence.(interface {
 		EnsureOperatorPrincipal(context.Context, time.Time) (operatorchannel.Principal, error)
-	}).EnsureOperatorPrincipal(context.Background(), time.Now().UTC())
+	}).EnsureOperatorPrincipal(apiTestOriginalProcessContext(t, context.Background(), persistence), time.Now().UTC())
 	if err != nil {
 		t.Fatal(err)
 	}
 	handler := testHandler(t, Options{
 		AuthTokens:          []string{testToken},
 		OperatorPrincipalID: principal.ID,
-		Handlers: testOperatorHandlers(testOperatorCapabilities{
+		Handlers: testOperatorHandlers(t, testOperatorCapabilities{
 			Now: func() time.Time { return time.Now().UTC() }, Ready: func() bool { return true }, Database: fakePinger{},
 			Runs: runs, Observability: observability, Idempotency: idempotency, Events: bus, Source: source,
 			RunBundleContext: runBundleContext, Mailbox: mailbox, DecisionCards: cards, DecisionAuthority: coordinator,

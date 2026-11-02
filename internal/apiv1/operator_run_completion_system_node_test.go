@@ -16,13 +16,12 @@ import (
 	"github.com/division-sh/swarm/internal/runtime/core/flowidentity"
 	"github.com/division-sh/swarm/internal/runtime/core/identitytest"
 	runtimepipeline "github.com/division-sh/swarm/internal/runtime/pipeline"
-	runtimerunlifecycle "github.com/division-sh/swarm/internal/runtime/runlifecycle"
+
 	"github.com/division-sh/swarm/internal/runtime/semanticview"
 	"github.com/division-sh/swarm/internal/runtime/testfixtures/canonicalrouting"
-	"github.com/division-sh/swarm/internal/store"
+
 	"github.com/division-sh/swarm/internal/store/storetest"
 	"github.com/division-sh/swarm/internal/testutil"
-	"github.com/division-sh/swarm/internal/testutil/stagecatalogfixture"
 )
 
 func TestOperatorRunCompletionSystemNodeFlowConvergesSupportedSurfaces(t *testing.T) {
@@ -48,7 +47,6 @@ func TestOperatorRunCompletionSystemNodeFlowConvergesSupportedSurfaces(t *testin
 	if err != nil {
 		t.Fatalf("NewEventBusWithOptions: %v", err)
 	}
-	lifecycleExecutor := startAPIRunLifecycleExecutor(t, pg, source, bundleHash)
 	handler := eventPublishTestHandler(t, pg, bus, source)
 
 	module := newRunCompletionSystemNodeModule(t, source)
@@ -80,7 +78,7 @@ func TestOperatorRunCompletionSystemNodeFlowConvergesSupportedSurfaces(t *testin
 		if err != nil {
 			return false, err
 		}
-		return found && instance.StageDefined && instance.CurrentState == "done" && settled.Ready && lifecycleExecutor.ActiveCandidates() == 0, nil
+		return found && instance.StageDefined && instance.CurrentState == "done" && settled.Ready, nil
 	})
 
 	eventID := triggerEventIDForRun(t, db, runID)
@@ -106,60 +104,8 @@ func TestOperatorRunCompletionSystemNodeFlowConvergesSupportedSurfaces(t *testin
 		t.Fatalf("run.diagnose lost the live run: %#v", diagnosisRun)
 	}
 	if count := countEventsByName(t, pg, "flow.started"); count != 1 {
-		t.Fatalf("flow.started event count after terminal publish = %d, want 1", count)
+		t.Fatalf("flow.started event count after instance finish = %d, want 1", count)
 	}
-}
-
-func startAPIRunLifecycleExecutor(
-	t *testing.T,
-	pg *store.PostgresStore,
-	source semanticview.Source,
-	bundleHash string,
-) *runtimerunlifecycle.Executor {
-	t.Helper()
-	scope := runtimerunlifecycle.CandidateScope{BundleHash: bundleHash}
-	occurrence := newAPITestRuntimeWorkOccurrence(t, authorActivityTestRuntimeInstanceID, bundleHash)
-	executor, err := runtimerunlifecycle.NewExecutor(
-		pg,
-		scope,
-		runCompletionTerminalCatalog(source),
-		occurrence,
-		runtimerunlifecycle.ExecutorOptions{},
-	)
-	if err != nil {
-		t.Fatalf("NewExecutor: %v", err)
-	}
-	registration, err := pg.RegisterCompletionCandidateSink(context.Background(), scope, executor)
-	if err != nil {
-		t.Fatalf("RegisterCompletionCandidateSink: %v", err)
-	}
-	if err := executor.Start(context.Background()); err != nil {
-		registration.Release()
-		t.Fatalf("start completion candidate executor: %v", err)
-	}
-	t.Cleanup(func() {
-		if err := executor.Retire(context.Background()); err != nil {
-			t.Errorf("retire completion candidate executor: %v", err)
-		}
-		registration.Release()
-	})
-	return executor
-}
-
-func runCompletionTerminalCatalog(source semanticview.Source) runtimerunlifecycle.FinalCatalog {
-	flows := make(map[string][]string)
-	for flowID := range source.FlowSchemaEntries() {
-		states := source.FlowFinalStages(flowID)
-		flows[flowID] = states
-		flows[source.FlowPath(flowID)] = states
-	}
-	for _, scope := range source.FlowScopes() {
-		states := source.FlowFinalStages(scope.ID)
-		flows[scope.ID] = states
-		flows[scope.Path] = states
-		flows[scope.OwningFlowID] = states
-	}
-	return stagecatalogfixture.NewFinalCatalog(source.FlowFinalStages(semanticview.RootExecutionFlowID(source)), flows)
 }
 
 type runCompletionSystemNodeModule struct {

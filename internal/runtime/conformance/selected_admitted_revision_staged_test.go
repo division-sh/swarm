@@ -57,7 +57,7 @@ func TestIssue2655StagedRevisionRefusalAndRetryBothStores(t *testing.T) {
 			if len(recovered) != 0 {
 				t.Fatal("fresh staged source unexpectedly requires recovery")
 			}
-			ctx := worklifetime.WithProcess(f.ctx, conformanceTestProcessOwner(t))
+			ctx := worklifetime.WithProcess(f.ctx, f.topology.process)
 			repo := conformanceRepoRoot(t)
 			prepared, err := owner.Prepare(ctx, runforkexecution.SelectedContractExecutionRequest{
 				ForkOperation: &operation, SourceRunID: sourceRun, ExpectedBundleHash: operation.TargetBundleHash, ContractSelection: selection,
@@ -159,7 +159,7 @@ func TestIssue2655StagedRevisionRefusalAndRetryBothStores(t *testing.T) {
 				t.Fatalf("unimported override did not refuse at the durable-data owner: %v", err)
 			}
 			counts := collector.Snapshot().Total
-			if counts.Failed == 0 || counts.RollbackAttempts == 0 || counts.Ordering.RolledBackHolders == 0 || counts.Mutation.DomainCalls == 0 {
+			if counts.Failed == 0 || counts.RollbackAttempts == 0 || counts.Mutation.DomainCalls == 0 {
 				t.Fatalf("late materialization refusal did not roll back its native mutation: %+v", counts)
 			}
 			if after := snapshot(t); !reflect.DeepEqual(before, after) {

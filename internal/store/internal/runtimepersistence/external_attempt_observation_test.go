@@ -19,6 +19,7 @@ func TestExternalAttemptStorageUsesOriginalReadOwnerAndFailsClosedBothStores(t *
 		for _, cut := range []string{"empty", "cancelled", "closed", "unavailable"} {
 			t.Run(backend.name+"/"+cut, func(t *testing.T) {
 				f, ctx := backend.open(t), testAuthorActivityContext()
+				ctx = originalStoreFixtureContext(t, ctx, f.store)
 				probe, restore, err := InstallTransactionProbeForTest(f.store, transactiontest.Options{})
 				if err != nil {
 					t.Fatal(err)

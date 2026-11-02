@@ -61,13 +61,6 @@ const (
 	claudeAttemptProofRuntimeID                  = "77777777-7777-4777-8777-777777777777"
 )
 
-func claudeAttemptProofContext(source runtimecorrelation.SourceArtifactFact) context.Context {
-	return runtimeauthoractivity.WithScope(context.Background(), runtimeauthoractivity.BundleScope(
-		claudeAttemptProofRuntimeID,
-		source.BundleHash(),
-	))
-}
-
 type claudeAttemptProofSurface struct {
 	name           string
 	memory         bool
@@ -84,6 +77,7 @@ func defaultClaudeAttemptProofSurface() claudeAttemptProofSurface {
 }
 
 type claudeAttemptProofStore interface {
+	sourceartifactfixture.RootedWriter
 	storetest.DurableDataCatalogStore
 	runtimepipeline.FlowConstructionPublicationReader
 	runtimebus.EventStore
@@ -213,6 +207,13 @@ func (b claudeAttemptProofBackend) context() context.Context {
 		return b.original
 	}
 	return runtimecorrelation.WithRootAdmission(runtimecorrelation.WithSourceArtifactFact(claudeAttemptProofContext(b.source), b.source), b.root)
+}
+
+func claudeAttemptProofContext(source runtimecorrelation.SourceArtifactFact) context.Context {
+	return runtimeauthoractivity.WithScope(context.Background(), runtimeauthoractivity.BundleScope(
+		claudeAttemptProofRuntimeID,
+		source.BundleHash(),
+	))
 }
 
 type claudeAttemptProofSpendProjection struct{}
@@ -641,10 +642,14 @@ func newClaudeAttemptProofBackend(t *testing.T, name string) claudeAttemptProofB
 	if err != nil {
 		t.Fatal(err)
 	}
-	backend.source = sourceartifactfixture.RequireArtifact(t, context.Background(), backend.store, rooted.Artifact())
+	backend.source = sourceartifactfixture.FactFor(rooted.Artifact())
 	backend.root, backend.semantic = rooted.Admission(), semanticview.Wrap(bundle)
 	backend.fixture = backend.store
 	backend.original = serveFixtureProcessContext(t, backend.context(), backend.store)
+	backend.source = sourceartifactfixture.RequireArtifact(t, backend.original, backend.store, rooted.Artifact())
+	if _, err := backend.store.EnsureRootedSource(backend.original, rooted); err != nil {
+		t.Fatal(err)
+	}
 	process, err := agentfixture.ProcessCapability(t, backend.original, backend.store)
 	if err != nil {
 		t.Fatal(err)

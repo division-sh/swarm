@@ -9,6 +9,8 @@ import (
 
 	"github.com/division-sh/swarm/internal/channelonboarding"
 	"github.com/division-sh/swarm/internal/operatorchannel"
+	runtimecorrelation "github.com/division-sh/swarm/internal/runtime/correlation"
+	"github.com/division-sh/swarm/internal/store/testutil/agentfixture"
 	"github.com/division-sh/swarm/internal/testutil"
 	"github.com/google/uuid"
 )
@@ -19,6 +21,7 @@ type channelOnboardingConfirmationStore interface {
 }
 
 type channelOnboardingConfirmationFixture struct {
+	ctx    context.Context
 	store  channelOnboardingConfirmationStore
 	settle func(context.Context, operatorchannel.InboundClaim, time.Time) (operatorchannel.ClaimSettlement, error)
 }
@@ -27,12 +30,12 @@ func TestOperatorChannelConfirmationRequiresActiveOwningOnboardingParentSelected
 	for _, backend := range []string{"sqlite", "postgres"} {
 		t.Run(backend, func(t *testing.T) {
 			fixture := openChannelOnboardingConfirmationFixture(t, backend)
-			ctx := context.Background()
+			ctx := fixture.ctx
 			now := time.Date(2026, 8, 31, 18, 0, 0, 0, time.UTC)
 
 			t.Run("retired parent rejects nonterminal child without mutation", func(t *testing.T) {
 				parent, child := prepareChannelOnboardingConfirmation(t, fixture, "retired-parent", now)
-				retireChannelOnboardingParent(t, fixture.store, parent, now.Add(5*time.Second))
+				retireChannelOnboardingParent(t, fixture.ctx, fixture.store, parent, now.Add(5*time.Second))
 
 				confirmed, binding, err := fixture.store.ConfirmChannelBinding(ctx, operatorchannel.ConfirmRequest{
 					OperationID: child.OperationID, PrincipalID: child.PrincipalID, ExpectedRevision: child.Revision,
@@ -79,7 +82,7 @@ func TestOperatorChannelConfirmationRequiresActiveOwningOnboardingParentSelected
 				if err != nil || confirmed.State != operatorchannel.StateBound || binding.Status != operatorchannel.BindingCurrent {
 					t.Fatalf("initial confirmation = op:%#v binding:%#v err:%v", confirmed, binding, err)
 				}
-				retireChannelOnboardingParent(t, fixture.store, parent, now.Add(126*time.Second))
+				retireChannelOnboardingParent(t, fixture.ctx, fixture.store, parent, now.Add(126*time.Second))
 
 				replayed, replayedBinding, err := fixture.store.ConfirmChannelBinding(ctx, operatorchannel.ConfirmRequest{
 					OperationID: child.OperationID, PrincipalID: child.PrincipalID, ExpectedRevision: child.Revision,
@@ -98,7 +101,12 @@ func openChannelOnboardingConfirmationFixture(t *testing.T, backend string) chan
 	switch backend {
 	case "sqlite":
 		selected := newBootstrappedSQLiteRuntimeStoreForTest(t)
+		ctx, err := agentfixture.ProcessContext(t, runtimecorrelation.WithRuntimeInstanceID(context.Background(), authorActivityTestRuntimeInstanceID), selected)
+		if err != nil {
+			t.Fatal(err)
+		}
 		return channelOnboardingConfirmationFixture{
+			ctx:   ctx,
 			store: selected,
 			settle: func(ctx context.Context, claim operatorchannel.InboundClaim, now time.Time) (operatorchannel.ClaimSettlement, error) {
 				var result operatorchannel.ClaimSettlement
@@ -114,7 +122,12 @@ func openChannelOnboardingConfirmationFixture(t *testing.T, backend string) chan
 		_, db, cleanup := testutil.StartPostgres(t)
 		t.Cleanup(cleanup)
 		selected := admitTestPostgresStore(t, db)
+		ctx, err := agentfixture.ProcessContext(t, runtimecorrelation.WithRuntimeInstanceID(context.Background(), authorActivityTestRuntimeInstanceID), selected)
+		if err != nil {
+			t.Fatal(err)
+		}
 		return channelOnboardingConfirmationFixture{
+			ctx:   ctx,
 			store: selected,
 			settle: func(ctx context.Context, claim operatorchannel.InboundClaim, now time.Time) (operatorchannel.ClaimSettlement, error) {
 				tx, err := db.BeginTx(ctx, nil)
@@ -137,7 +150,7 @@ func openChannelOnboardingConfirmationFixture(t *testing.T, backend string) chan
 
 func prepareChannelOnboardingConfirmation(t *testing.T, fixture channelOnboardingConfirmationFixture, suffix string, now time.Time) (channelonboarding.Operation, operatorchannel.Operation) {
 	t.Helper()
-	ctx := context.Background()
+	ctx := fixture.ctx
 	principal, err := fixture.store.EnsureOperatorPrincipal(ctx, now)
 	if err != nil {
 		t.Fatal(err)
@@ -205,9 +218,8 @@ func prepareChannelOnboardingConfirmation(t *testing.T, fixture channelOnboardin
 	return parent, settlement.Operation
 }
 
-func retireChannelOnboardingParent(t *testing.T, store channelOnboardingConfirmationStore, parent channelonboarding.Operation, now time.Time) {
+func retireChannelOnboardingParent(t *testing.T, ctx context.Context, store channelOnboardingConfirmationStore, parent channelonboarding.Operation, now time.Time) {
 	t.Helper()
-	ctx := context.Background()
 	teardown, err := store.ReserveChannelTeardown(ctx, channelonboarding.ReserveTeardownRequest{
 		TeardownID: uuid.NewString(), RequestKeyHash: "confirmation-retire-key-" + parent.OperationID,
 		RequestHash: "confirmation-retire-input-" + parent.OperationID, Kind: channelonboarding.TeardownContextRetirement,

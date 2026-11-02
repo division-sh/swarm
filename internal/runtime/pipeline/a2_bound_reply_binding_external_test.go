@@ -132,7 +132,7 @@ func testA2BoundReplyJourney(t *testing.T, corruptEntryField, siblingFlow string
 				Mode: "template", RuntimeReadiness: &readiness, CurrentState: "awaiting", EntityType: "state",
 				Fields: map[string]any{"order_id": key, "expected": []any{"a", "b"}},
 			}, now)
-			markGateRecoveryTopologyReadyFixture(t, selected, readiness, now)
+			markGateRecoveryTopologyReadyFixture(t, ctx, selected, readiness, now)
 			requireIndexedConstructionFixture(t, ctx, selected.persistence, source, runID, constructed.Identity)
 			load := func() runtimepipeline.WorkflowInstance {
 				t.Helper()
@@ -196,7 +196,7 @@ func testA2BoundReplyJourney(t *testing.T, corruptEntryField, siblingFlow string
 					Mode: "template", RuntimeReadiness: &siblingReadiness, CurrentState: "awaiting", EntityType: "state",
 					Fields: map[string]any{"order_id": siblingKey, "expected": []any{"a", "b"}},
 				}, now)
-				markGateRecoveryTopologyReadyFixture(t, selected, siblingReadiness, now)
+				markGateRecoveryTopologyReadyFixture(t, ctx, selected, siblingReadiness, now)
 				requireIndexedConstructionFixture(t, ctx, selected.persistence, source, runID, siblingConstruction.Identity)
 				loadSibling = func() runtimepipeline.WorkflowInstance {
 					t.Helper()

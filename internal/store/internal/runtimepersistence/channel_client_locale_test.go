@@ -1,7 +1,6 @@
 package runtimepersistence
 
 import (
-	"context"
 	"errors"
 	"testing"
 
@@ -17,7 +16,7 @@ func TestChannelClientLocaleOwnsIndependentSelectedStoreRevision(t *testing.T) {
 			rig.confirm(t, begun, "account-a")
 			rig.complete(t, begun.Operation.OperationID)
 			original := rig.parent(t, begun.Operation.OperationID)
-			ctx := context.Background()
+			ctx := rig.fixture.ctx
 			request := channelonboarding.SetClientLocaleRequest{OperationID: original.OperationID,
 				PrincipalID: original.PrincipalID, ExpectedRevision: original.ClientLocaleRevision, Language: "fr", Now: rig.now}
 			changed, err := rig.fixture.store.SetChannelClientLocale(ctx, request)
