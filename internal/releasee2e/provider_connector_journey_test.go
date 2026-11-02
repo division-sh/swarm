@@ -310,8 +310,15 @@ func postConnectorGitHubWebhook(t *testing.T, process *releaseServeProcess, orig
 		t.Fatalf("hostile GitHub signature HTTP=%d", status)
 	}
 	after, err := listGoldenEvents(t.Context(), process.rpc, runID)
-	if err != nil || !reflect.DeepEqual(connectorEventIDs(before), connectorEventIDs(after)) || github.Calls.Load() != 1 {
-		t.Fatal("hostile GitHub delivery published or caused an external effect")
+	if err != nil {
+		t.Fatalf("hostile GitHub delivery event read failed: %v", err)
+	}
+	beforeIDs, afterIDs := connectorEventIDs(before), connectorEventIDs(after)
+	if !reflect.DeepEqual(beforeIDs, afterIDs) {
+		t.Fatalf("hostile GitHub delivery changed event IDs: before=%v after=%v", beforeIDs, afterIDs)
+	}
+	if calls := github.Calls.Load(); calls != 1 {
+		t.Fatalf("hostile GitHub delivery changed provider call count: got=%d want=1", calls)
 	}
 	if status, response := post("catalog-delivery", "connector-webhook-secret"); status != http.StatusAccepted {
 		var logs struct {
