@@ -45,12 +45,12 @@ func issue642RemovedTimerTarget(t *testing.T, final bool) string {
 		t.Fatal(err)
 	}
 	if final {
-		const checkedHandler = "    timer.check:\n      advances_to: checked\n"
+		const checkedHandler = "  timer.check:\n    advances_to: checked\n"
 		terminalNodes := strings.Replace(string(nodes), declaration, "", 1)
 		if strings.Count(terminalNodes, checkedHandler) != 1 {
 			t.Fatal("selected final-stage fixture lost its original check handler")
 		}
-		if err := os.WriteFile(path, []byte(strings.Replace(terminalNodes, checkedHandler, "    timer.check: {}\n", 1)), 0o600); err != nil {
+		if err := os.WriteFile(path, []byte(strings.Replace(terminalNodes, checkedHandler, "  timer.check: {}\n", 1)), 0o600); err != nil {
 			t.Fatal(err)
 		}
 		path := filepath.Join(root, "schema.yaml")

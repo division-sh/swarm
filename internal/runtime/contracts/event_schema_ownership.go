@@ -418,7 +418,11 @@ func (b *WorkflowContractBundle) executableNodeHandlerEventDeclared(ref runtimei
 				return true
 			}
 			for _, row := range eventSchemaOwnershipRowsForReceiver(b, ref.FlowPath()) {
-				if !eventidentity.MatchPattern(eventType, row.receiverEvent) || !b.FlowHasInputEvent(ref.FlowPath(), row.receiverEvent) || !b.FlowHasOutputEvent(row.producerFlowID, row.producerEvent) {
+				if !eventidentity.MatchPattern(eventType, row.receiverEvent) || !b.FlowHasInputEvent(ref.FlowPath(), row.receiverEvent) {
+					continue
+				}
+				ownerInput := row.producerEndpoint == "." && row.producerFlowID == row.ownerFlowPath && b.FlowHasInputEvent(row.producerFlowID, row.producerEvent)
+				if !b.FlowHasOutputEvent(row.producerFlowID, row.producerEvent) && !ownerInput {
 					continue
 				}
 				if provider.DeclaresFlowProviderTriggerEvent(rooted, row.producerFlowID, row.producerEvent) {
