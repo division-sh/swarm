@@ -36,7 +36,6 @@ func TestTier8BootCatalogFixtures_RealRuntimeBoot(t *testing.T) {
 		canonicalrouting.ArtifactID("tests/tier8-boot-verification/test-boot-deprecated-field"),
 		canonicalrouting.ArtifactID("tests/tier8-boot-verification/test-boot-dialect-dual"),
 		canonicalrouting.ArtifactID("tests/tier8-boot-verification/test-boot-dialect-guard"),
-		canonicalrouting.ArtifactID("tests/tier8-boot-verification/test-boot-emit-mismatch"),
 		canonicalrouting.ArtifactID("tests/tier8-boot-verification/test-boot-event-cycle"),
 		canonicalrouting.ArtifactID("tests/tier8-boot-verification/test-boot-event-no-consumer"),
 		canonicalrouting.ArtifactID("tests/tier8-boot-verification/test-boot-event-no-producer"),
@@ -56,7 +55,6 @@ func TestTier8BootCatalogFixtures_RealRuntimeBoot(t *testing.T) {
 		canonicalrouting.ArtifactID("tests/tier8-boot-verification/test-boot-prompt-ref"),
 		canonicalrouting.ArtifactID("tests/tier8-boot-verification/test-boot-prompt-ref-stub"),
 		canonicalrouting.ArtifactID("tests/tier8-boot-verification/test-boot-prompt-stub"),
-		canonicalrouting.ArtifactID("tests/tier8-boot-verification/test-boot-required-agent-missing"),
 		canonicalrouting.ArtifactID("tests/tier8-boot-verification/test-boot-self-emit"),
 		canonicalrouting.ArtifactID("tests/tier8-boot-verification/test-boot-state-machine-invalid"),
 		canonicalrouting.ArtifactID("tests/tier8-boot-verification/test-boot-state-machine-unreachable"),
@@ -65,8 +63,8 @@ func TestTier8BootCatalogFixtures_RealRuntimeBoot(t *testing.T) {
 		canonicalrouting.ArtifactID("tests/tier8-boot-verification/test-platform-mailbox-event-subscription"),
 	)
 	fixtures := catalogInventory(t).Select("catalog.verify.boot_diagnostics", testcatalog.DispositionVerifyOnly)
-	if len(fixtures) != 36 {
-		t.Fatalf("boot diagnostic fixtures = %d, want 36", len(fixtures))
+	if len(fixtures) != 34 {
+		t.Fatalf("boot diagnostic fixtures = %d, want 34", len(fixtures))
 	}
 	for _, fixture := range fixtures {
 		fixtureName, fixtureRoot := fixture.Name, fixture.Root

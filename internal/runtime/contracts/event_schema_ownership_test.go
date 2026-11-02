@@ -107,9 +107,9 @@ func TestConnectedOutputBindingCompilesProducerSchemaIntoReceiverPin(t *testing.
 		for _, flow := range []string{".", "producer", "consumer"} {
 			writeFixtureFile(t, filepath.Join(root, flow, "manifest.yaml"), "version: 1.0.0\nplatform_version: '*'\n")
 		}
-		writeFixtureFile(t, filepath.Join(root, "schema.yaml"), "pins: {inputs: [root_received]}\nconnect:\n  - {event: work.ready, from: producer, to: consumer, rename: received}\n  - {event: work.ready, from: producer, to: ., rename: root_received}\n")
-		writeFixtureFile(t, filepath.Join(root, "producer/schema.yaml"), "pins: {outputs: [work.ready]}\n")
-		writeFixtureFile(t, filepath.Join(root, "consumer/schema.yaml"), "pins: {inputs: [received]}\n")
+		writeFixtureFile(t, filepath.Join(root, "schema.yaml"), "inputs: [root_received]\nconnect:\n  - {event: work.ready, from: producer, to: consumer, rename: received}\n  - {event: work.ready, from: producer, to: ., rename: root_received}\n")
+		writeFixtureFile(t, filepath.Join(root, "producer/schema.yaml"), "outputs: [work.ready]\n")
+		writeFixtureFile(t, filepath.Join(root, "consumer/schema.yaml"), "inputs: [received]\n")
 		bundle, err := LoadWorkflowContractBundleWithOverrides(repo, root, DefaultPlatformSpecFile(repo))
 		if err != nil {
 			t.Fatal(err)
@@ -487,9 +487,9 @@ func TestConnectedEventSchemaOwnershipRejectsDistinctProducersIndependentOfConne
 		}
 		writeFixtureFile(t, filepath.Join(root, "schema.yaml"), "connect:\n  - {event: work.ready, from: producer-a, to: consumer}\n  - {event: work.ready, from: producer-b, to: consumer}\n")
 		for _, flow := range []string{"producer-a", "producer-b"} {
-			writeFixtureFile(t, filepath.Join(root, flow, "schema.yaml"), "pins: {outputs: [work.ready]}\n")
+			writeFixtureFile(t, filepath.Join(root, flow, "schema.yaml"), "outputs: [work.ready]\n")
 		}
-		writeFixtureFile(t, filepath.Join(root, "consumer/schema.yaml"), "pins: {inputs: [work.ready]}\n")
+		writeFixtureFile(t, filepath.Join(root, "consumer/schema.yaml"), "inputs: [work.ready]\n")
 		repo := repoRootForContractsTest(t)
 		if _, err := LoadWorkflowContractBundleWithOverrides(repo, root, DefaultPlatformSpecFile(repo)); err == nil || !strings.Contains(err.Error(), "ambiguous connected producer ownership") {
 			t.Fatalf("unbound distinct producers did not refuse before schema selection: %v", err)
@@ -542,7 +542,7 @@ func TestConnectedEventSchemaOwnershipRejectsDistinctProducersIndependentOfConne
 	writeFixtureFile(t, filepath.Join(root, "schema.yaml"), "stages: []\n")
 	writeFixtureFile(t, filepath.Join(root, "manifest.yaml"), "version: 1.0.0\nplatform_version: '*'\n")
 	writeFixtureFile(t, filepath.Join(root, "consumer", "manifest.yaml"), "version: 1.0.0\nplatform_version: '*'\n")
-	writeFixtureFile(t, filepath.Join(root, "consumer", "schema.yaml"), "pins:\n  inputs: [work.ready]\n")
+	writeFixtureFile(t, filepath.Join(root, "consumer", "schema.yaml"), "inputs: [work.ready]\n")
 	for endpoint, fieldType := range map[string]string{"producer-a": "text", "producer-b": "uuid"} {
 		writeFixtureFile(t, filepath.Join(root, endpoint, "manifest.yaml"), "version: 1.0.0\nplatform_version: '*'\n")
 		writeFixtureFile(t, filepath.Join(root, endpoint, "events.yaml"), "work.ready:\n  value: "+fieldType+"\n")

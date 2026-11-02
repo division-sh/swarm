@@ -56,25 +56,6 @@ func TestTimerValidationRejectsLegacyStateTimerInStagesFlow(t *testing.T) {
 	}
 }
 
-func TestTimerFireEventRequiredAgentFulfillmentIsNotExecutableConsumer(t *testing.T) {
-	entry := runtimecontracts.EventCatalogEntry{}
-	bundle := &runtimecontracts.WorkflowContractBundle{
-		RootSchema: &runtimecontracts.FlowSchemaDocument{
-			Pins: runtimecontracts.FlowPins{Outputs: runtimecontracts.FlowOutputPins{EventPins: []runtimecontracts.FlowOutputEventPin{{Event: "timer.legacy_sla"}}}},
-			RequiredAgents: []runtimecontracts.FlowRequiredAgent{{
-				Role:         "worker",
-				SubscribesTo: []string{"timer.reminder"},
-			}},
-		},
-		Events: map[string]runtimecontracts.EventCatalogEntry{"timer.reminder": entry},
-	}
-	source := semanticview.Wrap(bundle)
-	ref := semanticview.ResolveFlowEventProof(source, "", "timer.reminder")
-	if timerFireEventHasConsumer(source, ref) {
-		t.Fatal("required-agent fulfillment evidence became executable timer route authority")
-	}
-}
-
 func stageTimerValidationFindings(timer runtimecontracts.WorkflowTimerContract) []Finding {
 	source := semanticview.Wrap(stageTimerValidationBundle(timer))
 	return checkTimerValidation(newCheckerContext(context.Background(), source, Options{}))

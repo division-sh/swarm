@@ -228,17 +228,13 @@ type ApprovalPointView struct {
 }
 
 type RequiredAgentsView struct {
-	Source     string              `json:"source"`
-	SourceFile string              `json:"source_file,omitempty"`
-	Agents     []RequiredAgentView `json:"agents"`
+	Agents []RequiredAgentView `json:"agents"`
 }
 
 type RequiredAgentView struct {
 	Role         string   `json:"role"`
 	SubscribesTo []string `json:"subscribes_to,omitempty"`
 	Emits        []string `json:"emits,omitempty"`
-	Description  string   `json:"description,omitempty"`
-	Source       string   `json:"source"`
 	SourceFile   string   `json:"source_file,omitempty"`
 }
 
@@ -461,11 +457,11 @@ func buildRoot(source semanticview.Source, bundle *runtimecontracts.WorkflowCont
 			Entities: strings.TrimSpace(rootFlow.Paths.EntitiesFile),
 			Agents:   strings.TrimSpace(rootFlow.Paths.AgentsFile),
 		},
-		Agents: agents,
+		Agents:         agents,
+		RequiredAgents: requiredAgentsView(bundle.RootRequiredAgentFacts()),
 	}
 	if bundle.RootSchema != nil {
 		out.Constructors = constructorViews(source, ".")
-		out.RequiredAgents = requiredAgentsView(*bundle.RootSchema, bundle.RootRequiredAgentFacts(), rootFlow.Paths.SchemaFile, rootFlow.Paths.AgentsFile)
 	}
 	if len(bundle.RootEntities) == 0 {
 		return out, nil
@@ -498,23 +494,18 @@ func buildFlows(source semanticview.Source, bundle *runtimecontracts.WorkflowCon
 			return nil, err
 		}
 		item := FlowView{
-			Constructors: constructorViews(source, flowID),
-			ID:           flowID,
-			Path:         flowID,
-			Mode:         strings.TrimSpace(schema.EffectiveMode()),
-			SourceFiles:  flowSourceFiles(flow),
-			Events:       eventViews(flow.Events),
-			Agents:       agents,
-			Policy:       policyValues(source.ResolvedPolicyForFlow(flowID)),
-			Rules:        source.ResolvedRulesForFlow(flowID),
-			RequiredAgents: requiredAgentsView(
-				schema,
-				bundle.FlowRequiredAgentFacts(flowID),
-				flow.Paths.SchemaFile,
-				flow.Paths.AgentsFile,
-			),
-			InputPins:  inputPinViews(source, flowID, source.FlowInputEventPins(flowID)),
-			OutputPins: outputPinViews(source, flowID, source.FlowOutputEventPins(flowID)),
+			Constructors:   constructorViews(source, flowID),
+			ID:             flowID,
+			Path:           flowID,
+			Mode:           strings.TrimSpace(schema.EffectiveMode()),
+			SourceFiles:    flowSourceFiles(flow),
+			Events:         eventViews(flow.Events),
+			Agents:         agents,
+			Policy:         policyValues(source.ResolvedPolicyForFlow(flowID)),
+			Rules:          source.ResolvedRulesForFlow(flowID),
+			RequiredAgents: requiredAgentsView(bundle.FlowRequiredAgentFacts(flowID)),
+			InputPins:      inputPinViews(source, flowID, source.FlowInputEventPins(flowID)),
+			OutputPins:     outputPinViews(source, flowID, source.FlowOutputEventPins(flowID)),
 		}
 		item.Ingress = standingIngressView(rootInputs, flowID)
 		if entities, _ := bundle.FlowEntityContractsByID(flowID); len(entities) != 0 {
@@ -995,33 +986,15 @@ func policyValues(policy runtimecontracts.PolicyDocument) map[string]any {
 	return values
 }
 
-func requiredAgentsView(schema runtimecontracts.FlowSchemaDocument, facts []runtimecontracts.RequiredAgentFact, schemaFile, agentsFile string) RequiredAgentsView {
-	source := runtimecontracts.RequiredAgentSourceInferred
-	sourceFile := strings.TrimSpace(agentsFile)
-	if runtimecontracts.RequiredAgentsDeclared(schema) {
-		source = runtimecontracts.RequiredAgentSourceExplicit
-		sourceFile = strings.TrimSpace(schemaFile)
-	} else if len(facts) > 0 {
-		sourceFile = strings.TrimSpace(facts[0].SourceFile)
-		for _, fact := range facts[1:] {
-			if strings.TrimSpace(fact.SourceFile) != sourceFile {
-				sourceFile = ""
-				break
-			}
-		}
-	}
+func requiredAgentsView(facts []runtimecontracts.RequiredAgentFact) RequiredAgentsView {
 	out := RequiredAgentsView{
-		Source:     source,
-		SourceFile: sourceFile,
-		Agents:     make([]RequiredAgentView, 0, len(facts)),
+		Agents: make([]RequiredAgentView, 0, len(facts)),
 	}
 	for _, fact := range facts {
 		out.Agents = append(out.Agents, RequiredAgentView{
 			Role:         strings.TrimSpace(fact.Role),
 			SubscribesTo: normalizedStrings(fact.SubscribesTo),
 			Emits:        normalizedStrings(fact.Emits),
-			Description:  strings.TrimSpace(fact.Description),
-			Source:       strings.TrimSpace(fact.Source),
 			SourceFile:   strings.TrimSpace(fact.SourceFile),
 		})
 	}

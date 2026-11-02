@@ -82,7 +82,6 @@ func TestStructuralCheckPurposeCensus(t *testing.T) {
 		"node_state_schema_typed_counterpart":     "structural",
 		"accumulator_handler_isolation":           "structural",
 		"accumulator_input_producer_path":         "structural",
-		"required_agents_match":                   "structural",
 		"handler_field_compliance":                "structural",
 		policySheetLookupCheckID:                  "structural",
 		policySheetValidationCheckID:              "structural",

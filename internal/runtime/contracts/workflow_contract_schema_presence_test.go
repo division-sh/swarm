@@ -10,16 +10,15 @@ import (
 // M/N/E/S/O/P/Z/Q denote missing/null/empty-text/scalar/empty-map/map/empty-list/list.
 func TestSchemaAdmissionFieldPresenceMatrix(t *testing.T) {
 	type row struct{ path, template, key, scalar, object, list, admit string }
-	root := "stages: []\nrequired_agents: []\n%s\n"
+	root := "stages: []\nconnect: []\n%s\n"
 	stage := "stages:\n  waiting:\n    final: false\n    description: ''\n    %s\n  done: {final: true}\n"
 	gate := "stages:\n  waiting:\n    gate:\n      decision: approval\n      outcomes: {approve: {advances_to: done}}\n      %s\n"
 	outcome := "stages:\n  waiting:\n    gate:\n      decision: approval\n      outcomes:\n        approve:\n          advances_to: done\n          %s\n"
 	input := "stages:\n  waiting:\n    gate:\n      decision: approval\n      outcomes:\n        approve:\n          advances_to: done\n          input:\n            note:\n              type: text\n              %s\n"
 	timer := "stages:\n  waiting:\n    timers:\n      - after: 1s\n        emit: work.expired\n        advances_to: done\n        %s\n"
 	loop := "loops:\n  revision:\n    revision_field: revision\n    max_attempts: 3\n    escape: {advances_to: done}\n    %s\n"
-	required := "required_agents:\n  - role: worker\n    %s\n"
 	connect := "connect:\n  - event: work.requested\n    from: source\n    to: worker\n    %s\n"
-	outputPin := "pins:\n  outputs:\n    - event: work.completed\n      %s\n"
+	outputPin := "outputs:\n  - event: work.completed\n    %s\n"
 	rows := []row{
 		{"mode", root, "mode", "static", "", "", "M"},
 		{"instance", root, "instance", "work_id", "", "", "MS"},
@@ -46,11 +45,7 @@ func TestSchemaAdmissionFieldPresenceMatrix(t *testing.T) {
 		{"loop.revision_field", loop, "revision_field", "revision", "", "", "S"},
 		{"loop.max_attempts", loop, "max_attempts", "10", "", "", "S"},
 		{"loop.escape", loop, "escape", "x", "{advances_to: done}", "", "P"},
-		{"required_agents", root, "required_agents", "x", "", "[{role: worker}]", "MZQ"},
-		{"required.role", required, "role", "worker", "", "", "S"},
-		{"required.description", required, "description", "Worker", "", "", "MES"},
-		{"required.subscribes_to", required, "subscribes_to", "x", "", "[work.requested]", "MZQ"},
-		{"required.emits", required, "emits", "x", "", "[work.completed]", "MZQ"},
+		{"retired.required_agents", root, "required_agents", "x", "", "[{role: worker}]", "M"},
 		{"retired.instance_variables", root, "instance_variables", "x", "{variables: {note: text}}", "[text]", "M"},
 		{"auto_emit", root, "auto_emit_on_create", "x", "{event: work.started}", "", "MP"},
 		{"auto_emit.event", "auto_emit_on_create:\n  description: Start\n  %s\n", "event", "work.started", "", "", "S"},
@@ -64,13 +59,13 @@ func TestSchemaAdmissionFieldPresenceMatrix(t *testing.T) {
 		{"connect.replies_to", connect, "replies_to", "work.sent", "", "", "MS"},
 		{"connect.correlation_key", strings.ReplaceAll(connect, "    %s", "    replies_to: work.sent\n    %s"), "correlation_key", "work_id", "", "", "MS"},
 		{"connect.key_from", strings.ReplaceAll(connect, "    %s", "    resolution: create\n    %s"), "key_from", "event.id", "", "", "MS"},
-		{"pins", root, "pins", "x", "{inputs: [work.requested]}", "", "MP"},
-		{"pins.inputs", "pins:\n  outputs: [work.completed]\n  %s\n", "inputs", "x", "{events: [work.requested]}", "[work.requested]", "MQ"},
-		{"pins.outputs", "pins:\n  inputs: [work.requested]\n  %s\n", "outputs", "x", "{events: [work.completed]}", "[work.completed]", "MQ"},
-		{"retired.pins.inputs.events", "pins:\n  inputs:\n    %s\n", "events", "x", "", "[work.requested]", ""},
-		{"retired.pins.outputs.events", "pins:\n  outputs:\n    %s\n", "events", "x", "", "[work.completed]", ""},
-		{"retired.pins.inputs.reads", "pins:\n  inputs:\n    events: [work.requested]\n    %s\n", "reads", "x", "", "[note]", ""},
-		{"retired.pins.outputs.writes", "pins:\n  outputs:\n    events: [work.completed]\n    %s\n", "writes", "x", "", "[note]", ""},
+		{"retired.pins", root, "pins", "x", "{inputs: [work.requested]}", "", "M"},
+		{"inputs", "outputs: [work.completed]\n%s\n", "inputs", "x", "{events: [work.requested]}", "[work.requested]", "MQ"},
+		{"outputs", "inputs: [work.requested]\n%s\n", "outputs", "x", "{events: [work.completed]}", "[work.completed]", "MQ"},
+		{"retired.inputs.events", "inputs:\n  %s\n", "events", "x", "", "[work.requested]", ""},
+		{"retired.outputs.events", "outputs:\n  %s\n", "events", "x", "", "[work.completed]", ""},
+		{"retired.inputs.reads", "inputs:\n  events: [work.requested]\n  %s\n", "reads", "x", "", "[note]", ""},
+		{"retired.outputs.writes", "outputs:\n  events: [work.completed]\n  %s\n", "writes", "x", "", "[note]", ""},
 		{"retired.outputPin.event", outputPin, "event", "work.completed", "", "", ""},
 		{"retired.outputPin.sink", outputPin, "sink", "harness", "", "", ""},
 	}
@@ -153,7 +148,7 @@ func TestSchemaAdmissionResolutionPresenceDoesNotBypassMode(t *testing.T) {
 		for _, key := range []string{"from", "aggregation", "window", "dedup_by", "singleton", "replies_to", "correlation_key"} {
 			t.Run(mode+"/"+key, func(t *testing.T) {
 				for _, raw := range []string{"null", "''", "{}", "[]"} {
-					source := "pins: {inputs: [{event: work.requested, resolution: {mode: " + mode + ", " + key + ": " + raw + "}}]}\n"
+					source := "inputs: [{event: work.requested, resolution: {mode: " + mode + ", " + key + ": " + raw + "}}]\n"
 					if _, err := admitSchemaFragment(source); err == nil {
 						t.Fatalf("mode %s admitted explicit invalid %s=%s", mode, key, raw)
 					}
@@ -171,7 +166,7 @@ func TestSchemaAdmissionResolutionPresenceDoesNotBypassMode(t *testing.T) {
 				if key == "replies_to" {
 					value = "work.requested"
 				}
-				_, err := admitSchemaFragment("pins: {inputs: [{event: work.requested, resolution: {mode: " + mode + ", " + key + ": " + value + "}}]}\n")
+				_, err := admitSchemaFragment("inputs: [{event: work.requested, resolution: {mode: " + mode + ", " + key + ": " + value + "}}]\n")
 				if err == nil || !strings.Contains(err.Error(), `must be a scalar text, got mapping`) || !strings.Contains(err.Error(), `["inputs"][0]`) {
 					t.Fatalf("retired pin mode %s %s was not rejected: %v", mode, key, err)
 				}

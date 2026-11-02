@@ -55,9 +55,6 @@ func populateWorkflowSemantics(bundle *WorkflowContractBundle) error {
 		flowOutputEventPins:    map[string][]CompiledFlowOutputPin{},
 		flowIngressAliases:     ingressAliases,
 		CompositionConnects:    compositionConnects,
-		FlowAgents:             map[string][]FlowRequiredAgent{},
-		RootAgentFacts:         nil,
-		FlowAgentFacts:         map[string][]RequiredAgentFact{},
 		EffectiveNodes:         map[string]SystemNodeEffectiveSemantics{},
 		NodeHandlers:           map[string]map[string]SystemNodeEventHandler{},
 		EventOwners:            map[string][]string{},
@@ -78,7 +75,6 @@ func populateWorkflowSemantics(bundle *WorkflowContractBundle) error {
 	if err := loadDurableDataDeclarations(bundle); err != nil {
 		return err
 	}
-	semantics.RootAgentFacts = bundle.RootRequiredAgentFacts()
 	if bundle.RootSchema != nil {
 		var err error
 		rootSchemaFile := ""
@@ -117,9 +113,6 @@ func populateWorkflowSemantics(bundle *WorkflowContractBundle) error {
 		if err != nil {
 			return fmt.Errorf("compile flow %s output pins: %w", flowID, err)
 		}
-		facts := bundle.FlowRequiredAgentFacts(flowID)
-		semantics.FlowAgentFacts[flowID] = facts
-		semantics.FlowAgents[flowID] = FlowRequiredAgentsFromFacts(facts)
 	}
 	if failures := bundle.PrepareFanOutPlans(); len(failures) != 0 {
 		return fmt.Errorf("compile fan_out: %s", failures[0].Error())

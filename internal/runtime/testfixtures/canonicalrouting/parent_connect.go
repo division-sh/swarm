@@ -12,13 +12,6 @@ import (
 func CopyParentConnectRequiredAgent(t testing.TB) string {
 	t.Helper()
 	root := CopyExample(t, ParentConnect)
-	applyClosedReplacement(t, filepath.Join(root, "producer", "schema.yaml"), "pins:\n", `required_agents:
-  - role: analyzer
-    subscribes_to: [work.requested]
-    emits: [producer/work.ready]
-    description: Analyzes work before delivery
-pins:
-`)
 	writeClosedVariantFile(t, root, "producer/agents.yaml", `analyzer:
   intent: {inline: "Analyze work before delivery."}
   model: regular
