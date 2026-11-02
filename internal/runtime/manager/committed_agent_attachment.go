@@ -96,10 +96,6 @@ func readinessPlanOwnsAgent(plan pipeline.DynamicFlowRuntimeReadinessPlan, ident
 	return false
 }
 
-func (am *AgentManager) installingAgentAttachment(identity agentidentity.Identity) (dynamicFlowRuntimeReadinessKey, *dynamicFlowActiveAttempt, *dynamicFlowRuntimeReadinessAttempt, pipeline.DynamicFlowRuntimeActivationAttempt, string) {
-	return am.agentAttachment(identity, nil)
-}
-
 func (am *AgentManager) agentAttachment(identity agentidentity.Identity, required *dynamicFlowRuntimeReadinessAttempt) (dynamicFlowRuntimeReadinessKey, *dynamicFlowActiveAttempt, *dynamicFlowRuntimeReadinessAttempt, pipeline.DynamicFlowRuntimeActivationAttempt, string) {
 	am.dynamicFlowReadinessMu.Lock()
 	defer am.dynamicFlowReadinessMu.Unlock()
