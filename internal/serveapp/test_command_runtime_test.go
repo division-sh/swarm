@@ -442,7 +442,10 @@ func TestRootConnectedTemplatePublicationRollbackIsAtomicAcrossSelectedStores(t 
 		t.Run(string(backend), func(t *testing.T) {
 			endpoint, db, bundleHash, rt := startPublicInputRollbackRuntime(t, backend)
 			landing := requireServedLiveLandingRunID(t, endpoint, bundleHash, ".")
-			before := readServedForkRecipientSourceDomain(t, servedControlProofRuntime{DB: db}, landing)
+			before, err := storetest.ReadSelectedForkSourceDomain(t.Context(), rt.Bus.Store(), landing)
+			if err != nil {
+				t.Fatal(err)
+			}
 			construction, err := storetest.ReadReceiverConstructionStorage(t.Context(), rt.Bus.Store(), landing, landing, landing, "")
 			if err != nil {
 				t.Fatal(err)
@@ -517,7 +520,10 @@ func TestRootConnectedTemplatePublicationRollsBackAfterDeliveryAndCompletionAcro
 			t.Run(string(backend)+"/"+stage.name, func(t *testing.T) {
 				endpoint, db, bundleHash, rt := startPublicInputRollbackRuntime(t, backend)
 				landing := requireServedLiveLandingRunID(t, endpoint, bundleHash, ".")
-				before := readServedForkRecipientSourceDomain(t, servedControlProofRuntime{DB: db}, landing)
+				before, err := storetest.ReadSelectedForkSourceDomain(t.Context(), rt.Bus.Store(), landing)
+				if err != nil {
+					t.Fatal(err)
+				}
 				construction, err := storetest.ReadReceiverConstructionStorage(t.Context(), rt.Bus.Store(), landing, landing, landing, "")
 				if err != nil {
 					t.Fatal(err)
@@ -618,10 +624,11 @@ func requirePublicInputFailureCause(t *testing.T, rpcErr *servedJSONRPCError, ex
 	}
 }
 
-func requirePublicInputRollbackNoResidue(t *testing.T, db *sql.DB, backend servedparity.Backend, idempotencyKey, eventID, runID string, rt *runtimepkg.Runtime, before map[string][]string, construction storetest.ReceiverConstructionStorage) {
+func requirePublicInputRollbackNoResidue(t *testing.T, db *sql.DB, backend servedparity.Backend, idempotencyKey, eventID, runID string, rt *runtimepkg.Runtime, before map[string]storetest.SelectedForkStorageTableSnapshot, construction storetest.ReceiverConstructionStorage) {
 	t.Helper()
-	if after := readServedForkRecipientSourceDomain(t, servedControlProofRuntime{DB: db}, runID); !reflect.DeepEqual(before, after) {
-		t.Fatalf("refused publication changed the exact pre-existing run domain: before=%v after=%v", before, after)
+	afterDomain, err := storetest.ReadSelectedForkSourceDomain(t.Context(), rt.Bus.Store(), runID)
+	if err != nil || !reflect.DeepEqual(before, afterDomain) {
+		t.Fatalf("refused publication changed the exact pre-existing run domain: before=%v after=%v err=%v", before, afterDomain, err)
 	}
 	after, err := storetest.ReadReceiverConstructionStorage(t.Context(), rt.Bus.Store(), runID, runID, runID, "")
 	if err != nil || !reflect.DeepEqual(construction, after) {

@@ -299,10 +299,12 @@ func debtW1RunObservationSignatureTransitions() [10][2]authorityDebtSite {
 func debtRunFixtureSignatureComparisons(actual, head, base, source map[string]authorityDebtSite) (map[string]authorityDebtSite, map[string]authorityDebtSite, map[string]authorityDebtSite, []string) {
 	runFixtures, selectedFixtures := debtRunFixtureSignatureTransitions(), debtSelectedFixtureSignatureTransitions()
 	w1Fixtures := debtW1RunObservationSignatureTransitions()
+	rollbackFixtures := debtLiveRollbackSignatureTransitions()
 	pairs := runFixtures[:]
 	forwardOnly := len(pairs)
 	pairs = append(pairs, debtDeploymentHandlerSignatureTransition(), debtSelectedBindingRootArgumentTransition())
 	pairs = append(append(pairs, selectedFixtures[:]...), w1Fixtures[:]...)
+	pairs = append(pairs, rollbackFixtures[:]...)
 	for index, pair := range pairs {
 		old, current := pair[0], pair[1]
 		for _, state := range []map[string]authorityDebtSite{actual, head, base, source} {
@@ -332,6 +334,44 @@ func debtRunFixtureSignatureComparisons(actual, head, base, source map[string]au
 		}
 	}
 	return head, base, source, nil
+}
+
+// #2881/6567159073: five existing fixture calls retain their native owner.
+func debtLiveRollbackSignatureTransitions() [5][2]authorityDebtSite {
+	const prefix = "github.com/division-sh/swarm/internal/"
+	const backend = prefix + "servedparity.Backend"
+	const runtime = "*" + prefix + "runtime.Runtime"
+	const snapshot = "map[string]" + prefix + "store/storetest.SelectedForkStorageTableSnapshot"
+	const construction = prefix + "store/storetest.ReceiverConstructionStorage"
+	const startOld = "func=func(t *testing.T, backend " + backend + ") (string, *database/sql.DB, string)|recv=<nil>|arg=*testing.T|arg=" + backend + "|results=(string,*database/sql.DB,string)"
+	const startCurrent = "func=func(t *testing.T, backend " + backend + ") (string, *database/sql.DB, string, " + runtime + ")|recv=<nil>|arg=*testing.T|arg=" + backend + "|results=(string,*database/sql.DB,string," + runtime + ")"
+	const checkOld = "func=func(t *testing.T, db *database/sql.DB, backend " + backend + ", idempotencyKey string, eventID string, runID string)|recv=<nil>|arg=*testing.T|arg=*database/sql.DB|arg=" + backend + "|arg=string|arg=string|arg=string|results=()"
+	const checkCurrent = "func=func(t *testing.T, db *database/sql.DB, backend " + backend + ", idempotencyKey string, eventID string, runID string, rt " + runtime + ", before " + snapshot + ", construction " + construction + ")|recv=<nil>|arg=*testing.T|arg=*database/sql.DB|arg=" + backend + "|arg=string|arg=string|arg=string|arg=" + runtime + "|arg=" + snapshot + "|arg=" + construction + "|results=()"
+	var pairs [5][2]authorityDebtSite
+	for index, declaration := range [3]string{
+		"TestRootConnectedTemplatePublicationAcknowledgmentLossBothStores",
+		"TestRootConnectedTemplatePublicationRollbackIsAtomicAcrossSelectedStores",
+		"TestRootConnectedTemplatePublicationRollsBackAfterDeliveryAndCompletionAcrossSelectedStores",
+	} {
+		file := "internal/serveapp/test_command_runtime_test.go"
+		if index == 0 {
+			file = "internal/serveapp/root_publication_ack_loss_test.go"
+		}
+		old := authorityDebtSite{Kind: "raw-operation", File: file, Declaration: declaration,
+			Operation: "call:" + prefix + "serveapp.startPublicInputRollbackRuntime", Resolved: startOld,
+			Family: "lifecycle", Replacement: "selected run lifecycle/candidate/source owner and bounded lifecycle observation", Multiplicity: 1}
+		current := old
+		current.Resolved = startCurrent
+		pairs[index] = [2]authorityDebtSite{old, current}
+		if index == 0 {
+			continue
+		}
+		old.Operation, old.Resolved = "call:"+prefix+"serveapp.requirePublicInputRollbackNoResidue", checkOld
+		current = old
+		current.Resolved = checkCurrent
+		pairs[index+2] = [2]authorityDebtSite{old, current}
+	}
+	return pairs
 }
 
 // #2764/6498334917 preserves this counted, build-excluded nil-only stub.

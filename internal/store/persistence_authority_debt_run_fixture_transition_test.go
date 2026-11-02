@@ -23,7 +23,7 @@ const debtSourceLoaderCollectorTo = "2b1b5a1147e3733dbc57049a2515c05f0b0103e595a
 const debtProviderSourceCollectorTo = "e30b8d1d122008c82a16d1b85f04d24e72c125f44fba0fa4a0d6b8de3f8eeacb"
 const debtDeploymentHandlerLandedCollectorTo = "7e349138dacce1f6893971fe8e012c21ac27710b95b721dbbd5afe720b792b72"
 const debtRetiredSourceFreezeCollectorTo = "ae3603d66950e48dcee170a6a962982f6420cb8e5d2f40362dc210af029162ec"
-const debtR52LiveFixtureCollectorTo = "bc5af7849399da33128c7dbf659acbefc4d78570fccb8890d33f620f008e577b"
+const debtR52LiveFixtureCollectorTo = "a2ec4884aba6f3258d74e3cfe0bd68bf6ccc907828fac40d18d1775ce7d4d878"
 
 // #2727/6388897450: source-pin validation for an already-landed composed endpoint.
 const debtSelectedFixtureLandedCollectorTo = "1b48c6bd1c1b6d6100ee6df74bb9fe3d239372befa4c8f96f02243602fa9f646"
@@ -39,6 +39,36 @@ func debtRunFixtureTransitionStates() (map[string]authorityDebtSite, map[string]
 
 func TestPersistenceAuthorityDebtRunFixtureSignatureTransitionIsExact(t *testing.T) {
 	old, current := debtRunFixtureTransitionStates()
+	t.Run("live-rollback-signatures", func(t *testing.T) {
+		before, after := debtControlSet(), debtControlSet()
+		pairs := debtLiveRollbackSignatureTransitions()
+		for _, pair := range pairs {
+			before[pair[0].identity()], after[pair[1].identity()] = pair[0], pair[1]
+		}
+		if len(before) != 5 || len(after) != 5 || authorityDebtCount(before) != 5 || authorityDebtCount(after) != 5 {
+			t.Fatal("rollback signatures must preserve five distinct count-one sites")
+		}
+		originalBefore, originalAfter := maps.Clone(before), maps.Clone(after)
+		for _, source := range []map[string]authorityDebtSite{before, after} {
+			for _, head := range []map[string]authorityDebtSite{before, after} {
+				if failures := authorityDebtRatchet(after, head, before, source); len(failures) != 0 {
+					t.Fatal(failures)
+				}
+			}
+		}
+		if !maps.Equal(before, originalBefore) || !maps.Equal(after, originalAfter) {
+			t.Fatal("rollback signature comparison mutated its inputs")
+		}
+		if failures := authorityDebtRatchet(before, before, after, after); len(failures) == 0 {
+			t.Fatal("reverse rollback signature correspondence admitted")
+		}
+		for _, pair := range pairs {
+			t.Run(pair[0].Declaration+"/"+pair[0].Operation, func(t *testing.T) {
+				debtRunFixtureSignatureHostileControls(t, pair, before, after, false)
+				debtRunFixtureSignatureHostileControls(t, pair, before, after, true)
+			})
+		}
+	})
 	t.Run("w1-exact-run-observations", func(t *testing.T) {
 		before, after := debtControlSet(), debtControlSet()
 		pairs := debtW1RunObservationSignatureTransitions()
