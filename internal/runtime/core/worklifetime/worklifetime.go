@@ -607,6 +607,13 @@ func (m *ManagerRunOccurrence) Begin(ctx context.Context, companion Occurrence) 
 
 // BeginDispatch retains ordinary runtime admission before starting a delivery.
 func (m *ManagerRunOccurrence) BeginDispatch(ctx context.Context, companion Occurrence) (*Lease, error) {
+	companion = normalizeManagerCompanion(m, companion)
+	if companion == nil && m != nil && m.occurrence != nil && m.occurrence.parentLease != nil {
+		parent, _ := OccurrenceFromContext(m.occurrence.parentLease.Context())
+		if runtime, ok := parent.(*RuntimeOccurrence); ok {
+			companion = runtime
+		}
+	}
 	return m.beginClass(ctx, companion, false, true)
 }
 
