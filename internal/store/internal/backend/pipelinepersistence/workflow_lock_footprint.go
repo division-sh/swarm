@@ -179,9 +179,16 @@ func acquireWorkflowPublicationFootprintTx(ctx context.Context, tx *sql.Tx, foot
 	for _, owner := range ordered {
 		if strong[owner] {
 			var id string
-			err := tx.QueryRowContext(ctx, `SELECT entity_id FROM flow_instances WHERE run_id=$1::uuid AND instance_path=$2 FOR UPDATE`, owner.RunID, owner.Route.InstancePath).Scan(&id)
+			var entityType sql.NullString
+			err := tx.QueryRowContext(ctx, `SELECT entity_id, entity_type FROM flow_instances WHERE run_id=$1::uuid AND instance_path=$2 FOR UPDATE`, owner.RunID, owner.Route.InstancePath).Scan(&id, &entityType)
 			if err != nil && !errors.Is(err, sql.ErrNoRows) {
 				return fmt.Errorf("lock prepared workflow header %v: %w", owner, err)
+			}
+			if err == nil && entityType.Valid {
+				err := tx.QueryRowContext(ctx, `SELECT entity_id FROM entity_state WHERE run_id=$1 AND entity_id=$2 AND flow_instance=$3 AND entity_type=$4 FOR UPDATE`, owner.RunID, id, owner.Route.InstancePath, entityType.String).Scan(&id)
+				if err != nil && !errors.Is(err, sql.ErrNoRows) {
+					return fmt.Errorf("lock prepared workflow fields %v: %w", owner, err)
+				}
 			}
 		} else {
 			var id string
