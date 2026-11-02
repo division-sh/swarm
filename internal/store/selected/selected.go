@@ -368,7 +368,7 @@ func composePostgres(selected *private.PostgresStore) (*Owner, error) {
 				ConstructionPublications: workflow,
 				EmitFeedback:             selected,
 				ScenarioSetup:            selected,
-				ReplyContext:             selected, RunLifecycle: selected, LiveRuns: selected, DeliveryLifecycle: selected,
+				ReplyContext:             selected, RunLifecycle: selected, LiveRuns: selected, LandingRuns: selected, DeliveryLifecycle: selected,
 
 				ActiveAgents:          selected,
 				PreparedEvents:        selected,
@@ -425,7 +425,7 @@ func composeSQLite(selected *private.SQLiteRuntimeStore) (*Owner, error) {
 				ConstructionPublications: workflow,
 				EmitFeedback:             selected,
 				ScenarioSetup:            selected,
-				ReplyContext:             selected, RunLifecycle: selected, LiveRuns: selected, DeliveryLifecycle: selected,
+				ReplyContext:             selected, RunLifecycle: selected, LiveRuns: selected, LandingRuns: selected, DeliveryLifecycle: selected,
 
 				ActiveAgents:          selected,
 				PreparedEvents:        selected,
@@ -488,7 +488,7 @@ func newPostgresRunFork(selected *private.PostgresStore, workflow runtimepipelin
 		Instances:                workflow,
 		ConstructionPublications: workflow,
 		EmitFeedback:             selected,
-		ReplyContext:             selected, RunLifecycle: selected, LiveRuns: selected, DeliveryLifecycle: selected,
+		ReplyContext:             selected, RunLifecycle: selected, LiveRuns: selected, LandingRuns: selected, DeliveryLifecycle: selected,
 
 		ActiveAgents: selected,
 
@@ -511,7 +511,7 @@ func newSQLiteRunFork(selected *private.SQLiteRuntimeStore, workflow runtimepipe
 		Instances:                workflow,
 		ConstructionPublications: workflow,
 		EmitFeedback:             selected,
-		ReplyContext:             selected, RunLifecycle: selected, LiveRuns: selected, DeliveryLifecycle: selected,
+		ReplyContext:             selected, RunLifecycle: selected, LiveRuns: selected, LandingRuns: selected, DeliveryLifecycle: selected,
 
 		ActiveAgents: selected,
 

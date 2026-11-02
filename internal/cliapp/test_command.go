@@ -145,6 +145,7 @@ func (e scenarioTestValidationError) Unwrap() error {
 type scenarioRunner struct {
 	client                  *cliAPIClient
 	startScenario           func(context.Context, map[string]any) (string, error)
+	publishProviderInput    func(context.Context, map[string]any) (TestProviderPublication, bool, error)
 	bundle                  *runtimecontracts.WorkflowContractBundle
 	source                  semanticview.Source
 	bundleHash              string
@@ -338,6 +339,7 @@ func runScenarioTestCommand(ctx context.Context, RepoRoot string, out, errOut io
 		}
 		runner.client = client
 		runner.startScenario = endpoint.StartScenario
+		runner.publishProviderInput = endpoint.PublishProviderInput
 		for _, plan := range plans {
 			if err := runner.runDerivedPlan(sessionCtx, plan); err != nil {
 				return err
@@ -1174,6 +1176,9 @@ func (r scenarioRunner) runPublishStep(ctx context.Context, file scenarioTestFil
 	if state.RunID == "" {
 		return r.startPublicationRun(ctx, state, params)
 	}
+	if handled, err := r.publishPrivateProviderInput(ctx, state, params); handled || err != nil {
+		return err
+	}
 	var result eventPublishResult
 	if err := r.client.call(ctx, eventPublishMethod, params, &result); err != nil {
 		return err
@@ -1199,6 +1204,9 @@ func (r scenarioRunner) startPublicationRun(ctx context.Context, state *scenario
 	}
 	state.RunID = runID
 	params["run_id"] = runID
+	if handled, err := r.publishPrivateProviderInput(ctx, state, params); handled || err != nil {
+		return err
+	}
 	var result eventPublishResult
 	if err := r.client.call(ctx, eventPublishMethod, params, &result); err != nil {
 		return err
@@ -1212,6 +1220,21 @@ func (r scenarioRunner) startPublicationRun(ctx context.Context, state *scenario
 	state.RunID = result.RunID
 	state.LastEventID = result.EventID
 	return nil
+}
+
+func (r scenarioRunner) publishPrivateProviderInput(ctx context.Context, state *scenarioRunState, params map[string]any) (bool, error) {
+	if r.publishProviderInput == nil {
+		return false, nil
+	}
+	result, handled, err := r.publishProviderInput(ctx, params)
+	if err != nil || !handled {
+		return handled, err
+	}
+	if result.RunID != state.RunID || strings.TrimSpace(result.EventID) == "" {
+		return true, fmt.Errorf("private provider publication did not retain its exact scenario run and event")
+	}
+	state.LastEventID = result.EventID
+	return true, nil
 }
 
 func (r scenarioRunner) scenarioExecutionParams() map[string]any {

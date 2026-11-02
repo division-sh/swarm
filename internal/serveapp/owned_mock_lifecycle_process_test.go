@@ -22,6 +22,7 @@ import (
 	"github.com/division-sh/swarm/internal/cliapp"
 	"github.com/division-sh/swarm/internal/packadmission"
 	"github.com/division-sh/swarm/internal/packartifact"
+	"github.com/division-sh/swarm/internal/providertriggers"
 	runtimepkg "github.com/division-sh/swarm/internal/runtime"
 	runtimeauthoractivity "github.com/division-sh/swarm/internal/runtime/authoractivity"
 	runtimecontracts "github.com/division-sh/swarm/internal/runtime/contracts"
@@ -30,6 +31,7 @@ import (
 	"github.com/division-sh/swarm/internal/runtime/lifecycleprobe"
 	runtimepublicingress "github.com/division-sh/swarm/internal/runtime/publicingress"
 	"github.com/division-sh/swarm/internal/runtime/scenarioexecution"
+	"github.com/division-sh/swarm/internal/runtime/semanticview"
 	"github.com/division-sh/swarm/internal/store/devscratch"
 	"github.com/division-sh/swarm/internal/store/storetest"
 	"github.com/google/uuid"
@@ -427,6 +429,10 @@ func executeScenarioInOwnedLifecycle(t *testing.T, root string, args []string, e
 		t.Fatal("owned scenario requires its original runtime start owner")
 	}
 	rt := runtimes[0]
+	ownedRuns := map[string]struct{}{}
+	var ownedMu sync.Mutex
+	source := rt.Options.WorkflowModule.SemanticSource()
+	bundle, _ := semanticview.Bundle(source)
 	return executeCLIFromWithRunners(context.Background(), root, args, out, errOut, nil,
 		func(ctx context.Context, _ cliapp.TestSessionRequest, execute func(context.Context, cliapp.TestSessionEndpoint) error) error {
 			return execute(ctx, cliapp.TestSessionEndpoint{APIServer: strings.TrimSuffix(endpoint, "/v1/rpc"), Token: apiv1.DefaultLoopbackAPIToken,
@@ -435,11 +441,71 @@ func executeScenarioInOwnedLifecycle(t *testing.T, root string, args []string, e
 					if err != nil {
 						return "", err
 					}
-					return apiv1.StartPrivateScenario(ctx, apiv1.EventPublicationOptions{
-						ExecutionPosture: rt.ExecutionPosture, Source: rt.Options.WorkflowModule.SemanticSource(),
+					var output *providertriggers.PublicationAdmission
+					if eventName, _ := params["event_name"].(string); strings.HasPrefix(eventName, "inbound.") {
+						payload, ok := params["payload"].(map[string]any)
+						if !ok {
+							return "", fmt.Errorf("private provider input requires an object payload")
+						}
+						_, admission, handled, err := rt.Options.ProviderTriggerCatalog.IssuePrivateTestPublication(ctx, rt.Options.SourceArtifactFact.BundleHash(), ".", uuid.NewString(), eventName, privateTestOperatorAccount(bundle, payload), payload, time.Now().UTC())
+						if err != nil {
+							return "", err
+						}
+						if handled {
+							output = &admission
+						}
+					}
+					runID, err := apiv1.StartPrivateScenario(ctx, apiv1.EventPublicationOptions{
+						ExecutionPosture: rt.ExecutionPosture, Source: source,
+						Bundle:       runtimecontracts.BundleIdentity{BundleHash: rt.Options.SourceArtifactFact.BundleHash()},
 						Acknowledged: rt.Bus, SourceArtifact: rt.Bus, RecipientPlans: rt.Bus,
 						EffectiveSourceIdentity: rt.EffectiveSourceIdentity, ScenarioProfileCatalog: rt.ScenarioProfileCatalog,
-					}, params, time.Now().UTC())
+					}, params, time.Now().UTC(), output)
+					if err == nil {
+						ownedMu.Lock()
+						ownedRuns[runID] = struct{}{}
+						ownedMu.Unlock()
+					}
+					return runID, err
+				},
+				PublishProviderInput: func(ctx context.Context, params map[string]any) (cliapp.TestProviderPublication, bool, error) {
+					var empty cliapp.TestProviderPublication
+					eventName, _ := params["event_name"].(string)
+					if !strings.HasPrefix(eventName, "inbound.") {
+						return empty, false, nil
+					}
+					runID, _ := params["run_id"].(string)
+					ownedMu.Lock()
+					_, owned := ownedRuns[runID]
+					ownedMu.Unlock()
+					if !owned {
+						return empty, true, fmt.Errorf("private provider input requires this test host's scenario run")
+					}
+					payload, ok := params["payload"].(map[string]any)
+					if !ok {
+						return empty, true, fmt.Errorf("private provider input requires an object payload")
+					}
+					ctx, err := scenarioexecution.WithPrivateHostScope(ctx, rt.Options.RuntimeInstanceID)
+					if err != nil {
+						return empty, true, err
+					}
+					if raw, ok := params["scenario_execution"].(map[string]any); ok {
+						selector := scenarioexecution.Selector{
+							ProfileID: fmt.Sprint(raw["profile_id"]), ProfileDigest: fmt.Sprint(raw["profile_digest"]),
+							EffectiveSourceDigest: fmt.Sprint(raw["effective_source_digest"]),
+						}
+						profile, err := rt.ScenarioProfileCatalog.Resolve(selector)
+						if err != nil {
+							return empty, true, err
+						}
+						ctx, err = scenarioexecution.WithAdmittedProfile(ctx, profile)
+						if err != nil {
+							return empty, true, err
+						}
+					}
+					key, _ := params["idempotency_key"].(string)
+					eventID, handled, err := rt.InboundGateway.PublishPrivateTestProviderOutput(ctx, rt.Options.ProviderTriggerCatalog, rt.Options.SourceArtifactFact.BundleHash(), ".", runID, eventName, privateTestOperatorAccount(bundle, payload), payload, key, time.Now().UTC())
+					return cliapp.TestProviderPublication{EventID: eventID, RunID: runID}, handled, err
 				},
 			})
 		})

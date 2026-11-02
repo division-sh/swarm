@@ -9,11 +9,25 @@ import (
 	"github.com/division-sh/swarm/internal/packs"
 	"github.com/division-sh/swarm/internal/runtime/correlation"
 	inbound "github.com/division-sh/swarm/internal/runtime/inboundpublication"
+	"github.com/division-sh/swarm/internal/runtime/scenarioexecution"
 	"github.com/division-sh/swarm/internal/store/internal/backend/channelonboarding"
+	storerunlifecycle "github.com/division-sh/swarm/internal/store/internal/backend/runlifecycle"
 )
 
 func admitInboundLandingRunTx(ctx context.Context, tx *sql.Tx, postgres bool, command inbound.CommitCommand) error {
 	request := command.Request.Normalized()
+	if scenarioexecution.HasPrivateRunScope(ctx) {
+		live, found, err := storerunlifecycle.LiveRunForTargetTx(ctx, tx, request.ResolvedRunID, postgres)
+		source, supplied := correlation.SourceArtifactFactFromContext(ctx)
+		if err != nil {
+			return fmt.Errorf("select private inbound run: %w", err)
+		}
+		if !found || !supplied || live.RunID != request.ResolvedRunID ||
+			live.Scope.FlowPath != request.FlowPath || !live.Source.Matches(source) {
+			return fmt.Errorf("stale, foreign or unavailable private inbound run")
+		}
+		return nil
+	}
 	query := `SELECT run_id,bundle_hash,status FROM runs WHERE flow_path=$1 AND landing_run=TRUE`
 	if postgres {
 		query += ` FOR UPDATE`

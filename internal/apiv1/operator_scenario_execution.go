@@ -7,6 +7,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/division-sh/swarm/internal/providertriggers"
 	"github.com/division-sh/swarm/internal/runtime/core/flowidentity"
 	"github.com/division-sh/swarm/internal/runtime/executionposture"
 	"github.com/division-sh/swarm/internal/runtime/pipeline"
@@ -38,7 +39,7 @@ func bindPrivateScenarioPublicationScope(ctx context.Context, opts EventPublicat
 
 // StartPrivateScenario is handed directly to swarm test by its private host.
 // It is deliberately absent from the public RPC method registry.
-func StartPrivateScenario(ctx context.Context, opts EventPublicationOptions, input map[string]any, now time.Time) (string, error) {
+func StartPrivateScenario(ctx context.Context, opts EventPublicationOptions, input map[string]any, now time.Time, privateOutput *providertriggers.PublicationAdmission) (string, error) {
 	if !scenarioexecution.HasPrivateHostScope(ctx) {
 		return "", fmt.Errorf("scenario start requires its private test host")
 	}
@@ -81,7 +82,11 @@ func StartPrivateScenario(ctx context.Context, opts EventPublicationOptions, inp
 	if _, err := validateEventPublication(ctx, opts, publication, cfg); err != nil {
 		return "", err
 	}
-	if _, err := checkEventPublicationRecipientPlan(ctx, opts, publication, cfg); err != nil {
+	if privateOutput != nil {
+		if privateOutput.SourceBundleHash() != opts.Bundle.BundleHash || !privateOutput.PrivateTestOutputMatches(publication.EventName, publication.Payload) {
+			return "", fmt.Errorf("private scenario input changed its verified provider output")
+		}
+	} else if _, err := checkEventPublicationRecipientPlan(ctx, opts, publication, cfg); err != nil {
 		return "", err
 	}
 	ctx, err = scenarioexecution.WithPrivateRunScope(ctx, publication.RunID, flowidentity.ScopeKey(opts.Source, semanticview.RootExecutionFlowID(opts.Source)))
@@ -109,6 +114,33 @@ func StartPrivateScenario(ctx context.Context, opts EventPublicationOptions, inp
 		return "", fmt.Errorf("scenario start did not acknowledge its exact run")
 	}
 	return result.RunID, nil
+}
+
+// AdmitPrivateProviderScenarioRun reuses the scenario's persisted profile
+// admission before its private inbound publication selects the same run.
+func AdmitPrivateProviderScenarioRun(ctx context.Context, opts EventPublicationOptions, runID string, params map[string]any) (context.Context, func(), error) {
+	if !scenarioexecution.HasPrivateHostScope(ctx) {
+		return ctx, nil, fmt.Errorf("private provider input requires its test host")
+	}
+	if stringParam(params, "run_id") != runID {
+		return ctx, nil, fmt.Errorf("private provider input changed its scenario run")
+	}
+	ctx, uses := beginRuntimeUseCollection(ctx)
+	parsed, identity, err := eventPublicationParamsFromRequest(Request{Method: "event.publish", Params: params}, eventPublicationConfig{requireExistingExplicitRun: true})
+	if err != nil {
+		uses.done()
+		return ctx, nil, err
+	}
+	ctx, _, _, bound, err := bindPrivateScenarioPublicationScope(ctx, opts, parsed, identity, true)
+	if err != nil {
+		uses.done()
+		return ctx, nil, err
+	}
+	if !bound {
+		uses.done()
+		return ctx, nil, fmt.Errorf("private provider input requires its exact scenario scope")
+	}
+	return ctx, uses.done, nil
 }
 
 func scenarioExecutionSelectorParam(params map[string]any) (*scenarioexecution.Selector, error) {

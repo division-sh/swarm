@@ -3228,6 +3228,9 @@ func targetDeliveryFailureRecord(evt events.Event, plan RoutePlan, failure runti
 		"persisted_recipients": plan.PersistedRecipientIDs(),
 		"delivery_routes":      plan.DeliveryRoutes(),
 	}
+	if paths, ok := plan.ExtraDetail["unavailable_flow_paths"]; ok {
+		detail["unavailable_flow_paths"] = paths
+	}
 	canonical := canonicalTargetDeliveryFailure(failure, "eventbus", "resolve_delivery_target", detail)
 	if onlyNoHandlerRefusals(plan.unavailableReceiverError) {
 		canonical = runtimefailures.FromError(plan.unavailableReceiverError, "eventbus", "resolve_delivery_target")
