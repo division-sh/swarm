@@ -44,9 +44,12 @@ func TestTemplateSubscriptionProjectionMatchesFreshAdmission(t *testing.T) {
 						if !admission.Admitted() {
 							t.Fatal(admission.Message())
 						}
+						if !reflect.DeepEqual(pattern.admission, admission) {
+							t.Fatalf("%s %s: compiled admission = %#v, fresh admission = %#v", path, pattern.raw, pattern.admission, admission)
+						}
 						for _, instancePath := range []string{path + "/first", path + "/second"} {
-							want := routeProjectAdmittedSubscriberPatterns(admission, instancePath)
-							got := routeProjectAdmittedSubscriberPatterns(pattern.admission, instancePath)
+							want := admission.RoutePatternsAt(instancePath)
+							got := pattern.admission.RoutePatternsAt(instancePath)
 							if !reflect.DeepEqual(got, want) {
 								t.Fatalf("%s %s %s: compiled projection = %#v, fresh admission = %#v", path, pattern.raw, instancePath, got, want)
 							}

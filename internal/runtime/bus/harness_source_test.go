@@ -38,13 +38,21 @@ func TestRouteResolveSubscriberPatterns_PrivatePinKeepsOrdinarySubscription(t *t
 	if !admission.Admitted() {
 		t.Fatal(admission.Message())
 	}
-	patterns := routeProjectAdmittedSubscriberPatterns(admission, scope.Path)
+	patterns := admission.RoutePatternsAt(scope.Path)
 	if len(patterns) == 0 {
 		t.Fatal("ordinary authored subscription did not resolve")
 	}
-	for _, pattern := range patterns {
-		if pattern.routeSource != subscriberRouteSourceSubscription {
-			t.Fatalf("resolved pattern = %#v, want ordinary subscription only", pattern)
+	table := derivedRouteTableFixture(t, source)
+	subscribers, err := table.PubsubDeclarationDefinitions(scope.ID, patterns)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(subscribers) == 0 {
+		t.Fatal("ordinary authored subscription did not bind a native receiver")
+	}
+	for _, subscriber := range subscribers {
+		if subscriber.routeSource != subscriberRouteSourceSubscription {
+			t.Fatalf("bound subscriber = %#v, want ordinary subscription only", subscriber)
 		}
 	}
 }
