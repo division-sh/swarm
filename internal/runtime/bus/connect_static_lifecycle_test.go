@@ -1,7 +1,6 @@
 package bus
 
 import (
-	"reflect"
 	"testing"
 
 	"github.com/division-sh/swarm/internal/events"
@@ -12,34 +11,13 @@ import (
 	"github.com/google/uuid"
 )
 
-func TestConnectStaticDeclarationPlansDoNotDependOnInstanceRoutes(t *testing.T) {
-	source := loadConnectRoutePlanCanonicalSource(t, canonicalrouting.CopyReceiverMixedAgent(t))
-	table, err := DeriveRouteTable(source)
-	if err != nil {
-		t.Fatal(err)
-	}
-	want := table.staticAgentDeclarationPlans()
-	if len(want) != 1 {
-		t.Fatalf("static declaration plans = %d, want 1", len(want))
-	}
-	if got := table.staticAgentDeclarationPlans(); !reflect.DeepEqual(got, want) {
-		t.Fatalf("repeated compiled declarations changed: got=%+v want=%+v", got, want)
-	}
-	for plan := range want {
-		delete(want, plan)
-	}
-	if got := table.staticAgentDeclarationPlans(); len(got) != 1 {
-		t.Fatalf("caller mutated compiled declaration plans: %+v", got)
-	}
-}
-
 func TestConnectPendingAgentConsumesExactStaticDeclaration(t *testing.T) {
 	source := loadConnectRoutePlanCanonicalSource(t, canonicalrouting.CopyReceiverMixedAgent(t))
 	table, err := DeriveRouteTable(source)
 	if err != nil {
 		t.Fatal(err)
 	}
-	static := table.staticAgentDeclarationPlans()
+	static := table.staticAgentPlans
 	if len(static) != 1 {
 		t.Fatalf("static declaration plans = %d, want 1", len(static))
 	}
@@ -93,5 +71,8 @@ func TestConnectPendingAgentConsumesExactStaticDeclaration(t *testing.T) {
 				t.Fatalf("existing target admission = %v, lifecycle=%v", err, test.want)
 			}
 		})
+	}
+	if _, present := table.staticAgentPlans[agent]; !present || len(table.staticAgentPlans) != 1 {
+		t.Fatalf("lifecycle classification mutated frozen declaration plans: %+v", table.staticAgentPlans)
 	}
 }

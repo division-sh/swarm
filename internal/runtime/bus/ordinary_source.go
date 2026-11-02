@@ -201,7 +201,7 @@ func (s ordinaryPublicationSource) includesCandidate(candidate deliveryRecipient
 
 func (s ordinaryPublicationSource) nodeIntents(source semanticview.Source, localEvent, originalEvent events.Event, routed []Subscriber) []RoutePlanDeliveryIntent {
 	rootRoutes, concreteRoutes := s.localNodeRoutes(source, localEvent, routed)
-	var targeted []plannedDeliveryRoute
+	var targeted []DeliveryRouteBlueprint
 	for _, target := range eventDeliveryTargetRoutes(originalEvent) {
 		target = target.Normalized()
 		if target.Empty() {
@@ -211,7 +211,7 @@ func (s ordinaryPublicationSource) nodeIntents(source semanticview.Source, local
 			if !subscriber.Recipient.IsNode() || !routeMatchesInternalSubscriber(target, subscriber, rootExecutionCoordinate(source, originalEvent.RunID())) {
 				continue
 			}
-			targeted = append(targeted, plannedDeliveryRoute{
+			targeted = append(targeted, DeliveryRouteBlueprint{
 				Recipient: subscriber.Recipient, Target: target,
 				Handler: routedSubscriberTargetHandler(subscriber, originalEvent.Type()),
 			})
@@ -222,7 +222,7 @@ func (s ordinaryPublicationSource) nodeIntents(source semanticview.Source, local
 	return append(out, routePlanDeliveryIntentsFromRoutes(normalizePlannedDeliveryRoutes(targeted), routeIntentProducerOrdinary)...)
 }
 
-func (s ordinaryPublicationSource) localNodeRoutes(source semanticview.Source, evt events.Event, routed []Subscriber) ([]plannedDeliveryRoute, []plannedDeliveryRoute) {
+func (s ordinaryPublicationSource) localNodeRoutes(source semanticview.Source, evt events.Event, routed []Subscriber) ([]DeliveryRouteBlueprint, []DeliveryRouteBlueprint) {
 	if s.declarationOnly || len(routed) == 0 || len(eventDeliveryTargetRoutes(evt)) > 0 {
 		return nil, nil
 	}
@@ -232,12 +232,12 @@ func (s ordinaryPublicationSource) localNodeRoutes(source semanticview.Source, e
 			root = admitted
 		}
 	}
-	var rootRoutes, concreteRoutes []plannedDeliveryRoute
+	var rootRoutes, concreteRoutes []DeliveryRouteBlueprint
 	for _, subscriber := range routed {
 		if !subscriber.Recipient.IsNode() {
 			continue
 		}
-		route := plannedDeliveryRoute{Recipient: subscriber.Recipient, Handler: routedSubscriberTargetHandler(subscriber, evt.Type())}
+		route := DeliveryRouteBlueprint{Recipient: subscriber.Recipient, Handler: routedSubscriberTargetHandler(subscriber, evt.Type())}
 		if !s.route.Empty() {
 			if s.includesSubscriber(subscriber) {
 				route.Target = s.route
