@@ -23,9 +23,8 @@ func WritePublicTemplateInputRoute(t testing.TB) string {
 		"manifest.yaml": `version: "1.0.0"
 platform_version: ">=0.7.0 <0.8.0"
 `,
-		"schema.yaml": `pins:
-  inputs:
-    - bootstrap.requested
+		"schema.yaml": `inputs:
+  - bootstrap.requested
 `,
 		"events.yaml": `bootstrap.requested:
   topic: text?
@@ -86,21 +85,20 @@ platform_version: ">=0.7.0 <0.8.0"
 	rootInput := ""
 	rootNodes := ""
 	if emit != RootConnectNoEmitter {
-		rootInput = "  inputs: [root.start]\n"
+		rootInput = "inputs: [root.start]\n"
 		emitBody := "      emit:\n        event: root.ready\n        fields:\n          entity_id: payload.entity_id\n"
 		if emit != RootConnectCanonicalEmit {
 			t.Fatalf("unsupported root connect emitter %d", emit)
 		}
 		rootNodes = "root-node:\n  root.start:\n" + emitBody
 	}
-	writeClosedVariantFile(t, root, "schema.yaml", "pins:\n"+rootInput+"  outputs: [root.ready]\nconnect:\n  - event: root.ready\n    from: .\n    to: consumer\n")
+	writeClosedVariantFile(t, root, "schema.yaml", rootInput+"outputs: [root.ready]\nconnect:\n  - event: root.ready\n    from: .\n    to: consumer\n")
 	writeClosedVariantFile(t, root, "events.yaml", "root.start:\n  entity_id: text\nroot.ready:\n  entity_id: text\n")
 	if rootNodes != "" {
 		writeClosedVariantFile(t, root, "nodes.yaml", rootNodes)
 	}
-	writeLegacyInstanceFlow(t, root, "consumer", `pins:
-  inputs:
-    - root.ready
+	writeLegacyInstanceFlow(t, root, "consumer", `inputs:
+  - root.ready
 `, "", "", `consumer-node:
   root.ready:
     guard: instance.id != ""
@@ -120,7 +118,7 @@ func CopyRootOutputConnectWithChildPublisher(t testing.TB) string {
 	t.Helper()
 	root := CopyRootOutputConnect(t, RootConnectNoEmitter)
 	writeClosedVariantFile(t, root, "child/manifest.yaml", "version: 1.0.0\nplatform_version: '>=0.7.0 <0.8.0'\n")
-	writeClosedVariantFile(t, root, "child/schema.yaml", "pins:\n  outputs: [root.ready]\n")
+	writeClosedVariantFile(t, root, "child/schema.yaml", "outputs: [root.ready]\n")
 	writeClosedVariantFile(t, root, "child/events.yaml", "root.ready:\n  entity_id: text\n")
 	writeClosedVariantFile(t, root, "child/nodes.yaml", `child-node:
   root.ready:
@@ -137,17 +135,15 @@ func CopyRootOutputSingletonConnect(t testing.TB) string {
 	writeClosedVariantFile(t, root, "manifest.yaml", `version: "1.0.0"
 platform_version: ">=0.7.0 <0.8.0"
 `)
-	writeClosedVariantFile(t, root, "schema.yaml", `pins:
-  outputs:
-    - root.ready
+	writeClosedVariantFile(t, root, "schema.yaml", `outputs:
+  - root.ready
 connect:
   - event: root.ready
     from: .
     to: consumer
 `)
-	writeLegacyInstanceFlow(t, root, "consumer", `pins:
-  inputs:
-    - root.ready
+	writeLegacyInstanceFlow(t, root, "consumer", `inputs:
+  - root.ready
 `, "", "", `consumer-node:
   root.ready: {}
 `)
@@ -191,8 +187,7 @@ func copySingletonOutputRootConnect(t testing.TB, scoutPath string) string {
 	writeClosedVariantFile(t, root, "manifest.yaml", `version: "1.0.0"
 platform_version: ">=0.7.0 <0.8.0"
 `)
-	writeClosedVariantFile(t, root, "schema.yaml", fmt.Sprintf(`pins:
-  inputs: [scout.completed]
+	writeClosedVariantFile(t, root, "schema.yaml", fmt.Sprintf(`inputs: [scout.completed]
 connect:
   - event: scout.completed
     from: %s
@@ -202,9 +197,8 @@ connect:
   scout.completed:
     guard: instance.id != ""
 `)
-	writeLegacyInstanceFlow(t, root, scoutPath, `pins:
-  outputs:
-    - scout.completed
+	writeLegacyInstanceFlow(t, root, scoutPath, `outputs:
+  - scout.completed
 `, "scout.completed:\n  proof: string\n", "", "")
 	return root
 }
@@ -219,11 +213,10 @@ func CopyRootSingletonBoomerang(t testing.TB) string {
 	writeClosedVariantFile(t, root, "manifest.yaml", `version: "1.0.0"
 platform_version: ">=0.7.0 <0.8.0"
 `)
-	writeClosedVariantFile(t, root, "schema.yaml", `pins:
-  inputs:
-    - work.pong
-  outputs:
-    - work.ping
+	writeClosedVariantFile(t, root, "schema.yaml", `inputs:
+  - work.pong
+outputs:
+  - work.ping
 connect:
   - event: work.ping
     from: .
@@ -237,11 +230,10 @@ connect:
   work.pong:
     guard: instance.id != ""
 `)
-	writeLegacyInstanceFlow(t, root, "boomerang", `pins:
-  inputs:
-    - work.ping
-  outputs:
-    - work.pong
+	writeLegacyInstanceFlow(t, root, "boomerang", `inputs:
+  - work.ping
+outputs:
+  - work.pong
 `, "work.pong:\n  turn: integer\n", "turn: integer\n", `boomerang-worker:
   work.ping:
     guard: instance.id != ""

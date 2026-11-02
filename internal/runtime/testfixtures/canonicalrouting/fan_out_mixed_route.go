@@ -22,19 +22,17 @@ connect:
   - {event: mixed.multi, from: producer, to: child}
 `,
 		"producer/schema.yaml": `# fixture: producer
-pins:
-  outputs:
-    - mixed.none
-    - mixed.one
-    - mixed.multi
+outputs:
+  - mixed.none
+  - mixed.one
+  - mixed.multi
 `,
 		"producer/events.yaml": "mixed.none:\nmixed.one:\nmixed.multi:\n",
 		"one/schema.yaml": `# fixture: one
 stages:
   active: {}
-pins:
-  inputs:
-    - mixed.one
+inputs:
+  - mixed.one
 `,
 		"one/nodes.yaml": `one-node:
   mixed.one: {}
@@ -42,9 +40,8 @@ pins:
 		"multi-a/schema.yaml": `# fixture: multi-a
 stages:
   active: {}
-pins:
-  inputs:
-    - mixed.multi
+inputs:
+  - mixed.multi
 `,
 		"multi-a/nodes.yaml": `multi-a-node:
   mixed.multi: {}
@@ -52,9 +49,8 @@ pins:
 		"multi-b/schema.yaml": `# fixture: multi-b
 stages:
   active: {}
-pins:
-  inputs:
-    - mixed.multi
+inputs:
+  - mixed.multi
 `,
 		"multi-b/nodes.yaml": `multi-b-node:
   mixed.multi: {}
@@ -62,9 +58,8 @@ pins:
 		"child/schema.yaml": `# fixture: child
 stages:
   active: {}
-pins:
-  inputs:
-    - mixed.multi
+inputs:
+  - mixed.multi
 `,
 		"child/nodes.yaml": `child-node:
   mixed.multi: {}

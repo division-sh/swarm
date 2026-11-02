@@ -22,7 +22,7 @@ func CopyUnavailableConnectionScan(t testing.TB, variant string) string {
 	if variant == "missing_key" || variant == "create" {
 		producerFields = "  instance_key: text\n"
 	}
-	writeClosedVariantFile(t, root, "producer/schema.yaml", "pins:\n  outputs: [work.ready]\n")
+	writeClosedVariantFile(t, root, "producer/schema.yaml", "outputs: [work.ready]\n")
 	writeClosedVariantFile(t, root, "producer/events.yaml", "work.ready:\n"+producerFields)
 	receivers := []string{"aterminal", "bintermediate", "yerror", "zerror"}
 	if variant == "pin_collision" {
@@ -44,7 +44,7 @@ func CopyUnavailableConnectionScan(t testing.TB, variant string) string {
 			}
 			writeClosedVariantFile(t, root, receiver+"/state.yaml", "instance_key: text\n")
 		}
-		writeClosedVariantFile(t, root, receiver+"/schema.yaml", instance+"pins:\n  inputs: ["+strings.Join(inputs, ", ")+"]\n")
+		writeClosedVariantFile(t, root, receiver+"/schema.yaml", instance+"inputs: ["+strings.Join(inputs, ", ")+"]\n")
 		var handlers strings.Builder
 		handlers.WriteString("receiver:\n")
 		for _, input := range inputs {

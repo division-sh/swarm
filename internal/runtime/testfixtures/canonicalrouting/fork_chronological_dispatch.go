@@ -17,11 +17,10 @@ stages:
   pending: {}
   processed: {}
   done: {final: true}
-pins:
-  inputs:
-    - item.received
-  outputs:
-    - item.processed
+inputs:
+  - item.received
+outputs:
+  - item.processed
 `,
 		"events.yaml": "item.received:\n  entity_id: uuid\nitem.processed:\n",
 		"nodes.yaml": `test-node:

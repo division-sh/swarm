@@ -7,7 +7,7 @@ import "testing"
 func ConversationForkConstructionDocuments() map[string]string {
 	return map[string]string{
 		"flow/manifest.yaml": "version: 1.0.0\nplatform_version: '*'\n",
-		"flow/schema.yaml":   "instance: name\nstages:\n  draft: {}\n  after: {}\npins:\n  inputs: [conversation.created]\n",
+		"flow/schema.yaml":   "instance: name\nstages:\n  draft: {}\n  after: {}\ninputs: [conversation.created]\n",
 		"flow/state.yaml":    "name: text\ncurrent_state: text?\ngates: json?\naccumulator: json?\nbookkeeping: json?\n",
 		"flow/nodes.yaml":    "advance:\n  conversation.created:\n    advances_to: after\n", "manifest.yaml": "version: 1.0.0\nplatform_version: '*'\n",
 	}
@@ -18,7 +18,7 @@ func ConversationForkCreatedEventDocument() string {
 }
 
 func ConversationForkHistoryRootDocument() string {
-	return "stages:\n  waiting: {}\npins:\n  inputs: [conversation.created]\n  outputs: [conversation.created]\nconnect:\n  - {event: conversation.created, from: ., to: flow, resolution: create}\n"
+	return "stages:\n  waiting: {}\ninputs: [conversation.created]\noutputs: [conversation.created]\nconnect:\n  - {event: conversation.created, from: ., to: flow, resolution: create}\n"
 }
 
 func CopyConversationForkHistory(t testing.TB) string {

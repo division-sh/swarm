@@ -11,14 +11,13 @@ func CopyRetiredSiblingAutowire(t testing.TB) string {
 	writeClosedVariantFile(t, root, "manifest.yaml", "version: 1.0.0\nplatform_version: '*'\n")
 	writeClosedVariantFile(t, root, "producer/manifest.yaml", "version: 1.0.0\nplatform_version: '*'\n")
 	writeClosedVariantFile(t, root, "schema.yaml", `# fixture: retired-sibling-autowire
-pins:
-  outputs: [scan.requested]
+outputs: [scan.requested]
 connect:
   - {event: scan.requested, from: producer, to: '.'}
 `)
-	writeClosedVariantFile(t, root, "producer/schema.yaml", "# fixture: producer\npins:\n  outputs: [scan.requested]\n")
+	writeClosedVariantFile(t, root, "producer/schema.yaml", "# fixture: producer\noutputs: [scan.requested]\n")
 	writeClosedVariantFile(t, root, "producer/events.yaml", "scan.requested:\n")
-	writeClosedVariantFile(t, root, "discovery/schema.yaml", "# fixture: discovery\npins:\n  inputs: [scan.requested]\n")
+	writeClosedVariantFile(t, root, "discovery/schema.yaml", "# fixture: discovery\ninputs: [scan.requested]\n")
 	writeClosedVariantFile(t, root, "discovery/events.yaml", "scan.requested:\n")
 	writeClosedVariantFile(t, root, "discovery/nodes.yaml", "scan-orchestrator:\n  scan.requested: {}\n")
 	return root

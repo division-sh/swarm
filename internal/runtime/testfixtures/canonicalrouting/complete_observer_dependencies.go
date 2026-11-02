@@ -152,7 +152,7 @@ observer.stop:
 		} else {
 			local = "publisher:\n  item.fired:\n    emit: {event: " + output + ", fields: {item_id: payload.observer_id, marker: payload.marker}}\n"
 		}
-		schema := "# fixture: " + flow + "\ninstance: item_id\n" + stages + "pins:\n  inputs: " + inputs + "\n  outputs: [" + output + "]\n"
+		schema := "# fixture: " + flow + "\ninstance: item_id\n" + stages + "inputs: " + inputs + "\noutputs: [" + output + "]\n"
 		events := output + ":\n  item_id: text\n  marker: text\n"
 		writeLegacyInstanceFlow(t, root, flow, schema, events, "item_id: text\n", nodes+local)
 	}

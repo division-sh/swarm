@@ -8,7 +8,7 @@ func WriteManagerSubscriptionAdmission(t testing.TB) string {
 	t.Helper()
 	root := t.TempDir()
 	for relative, source := range map[string]string{
-		"schema.yaml": "pins:\n  inputs: [root.ready]\n",
+		"schema.yaml": "inputs: [root.ready]\n",
 		"events.yaml": "root.ready:\n",
 		"nodes.yaml": `root-observer:
   root.ready: {}

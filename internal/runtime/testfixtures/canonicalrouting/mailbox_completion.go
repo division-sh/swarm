@@ -49,9 +49,8 @@ effect-revision:
 	writeClosedVariantFile(t, root, "observers/manifest.yaml", "version: 1.0.0\nplatform_version: '*'\n")
 	writeClosedVariantFile(t, root, "observers/schema.yaml", `# fixture: observers
 stages: []
-pins:
-  inputs:
-    - observer.requested
+inputs:
+  - observer.requested
 `)
 	writeClosedVariantFile(t, root, "observers/nodes.yaml", `start:
   observer.requested: {}

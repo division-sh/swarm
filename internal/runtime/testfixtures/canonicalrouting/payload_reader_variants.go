@@ -31,9 +31,9 @@ func CopyLocalWildcardPayload(t testing.TB, variant LocalWildcardPayloadVariant)
 	files := map[string]string{
 		"manifest.yaml":        "version: 1.0.0\nplatform_version: '*'\n",
 		"worker/manifest.yaml": "version: 1.0.0\nplatform_version: '*'\n",
-		"schema.yaml":          "# fixture: wildcard-payload-proof\npins:\n  inputs:\n    - start\n  outputs:\n    - start\nconnect:\n  - {event: start, from: ., to: worker}\n",
+		"schema.yaml":          "# fixture: wildcard-payload-proof\ninputs:\n  - start\noutputs:\n  - start\nconnect:\n  - {event: start, from: ., to: worker}\n",
 		"events.yaml":          "start:\n",
-		"worker/schema.yaml":   "# fixture: worker\npins:\n  inputs:\n    - start\n",
+		"worker/schema.yaml":   "# fixture: worker\ninputs:\n  - start\n",
 		"worker/events.yaml":   "task.done:\n  work_id: text\ntask.failed:\n  work_id: " + secondType + "\n",
 		"worker/nodes.yaml":    "observer:\n  \"" + pattern + "\":\n    rules:\n      - when: payload.work_id != \"\"\n",
 	}
@@ -52,9 +52,9 @@ func CopyScalarFanOutPayloadReader(t testing.TB) string {
 	for path, contents := range map[string]string{
 		"manifest.yaml":         "version: 1.0.0\nplatform_version: '*'\n",
 		"scanner/manifest.yaml": "version: 1.0.0\nplatform_version: '*'\n",
-		"schema.yaml":           "# fixture: scalar-fan-out-proof\npins:\n  inputs:\n    - scan.requested\n  outputs:\n    - scan.requested\nconnect:\n  - {event: scan.requested, from: ., to: scanner}\n",
+		"schema.yaml":           "# fixture: scalar-fan-out-proof\ninputs:\n  - scan.requested\noutputs:\n  - scan.requested\nconnect:\n  - {event: scan.requested, from: ., to: scanner}\n",
 		"events.yaml":           "scan.requested:\n  industries: [text]\n",
-		"scanner/schema.yaml":   "# fixture: scanner\npins:\n  inputs:\n    - scan.requested\n",
+		"scanner/schema.yaml":   "# fixture: scanner\ninputs:\n  - scan.requested\n",
 		"scanner/events.yaml":   "market_research.industry_assigned:\n  industry: text\n  taxonomy_categories: [text]\n",
 		"scanner/nodes.yaml": `scan-orchestrator:
   scan.requested:

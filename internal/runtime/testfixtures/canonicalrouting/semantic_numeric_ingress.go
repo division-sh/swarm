@@ -16,9 +16,8 @@ func CopySemanticNumericIngress(t testing.TB) string {
 stages:
   waiting: {}
   done: {final: true}
-pins:
-  inputs:
-    - numeric.requested
+inputs:
+  - numeric.requested
 `,
 		"events.yaml": `numeric.requested:
   value: integer
