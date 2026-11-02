@@ -6217,34 +6217,6 @@ func bootverifyTransitionRuntimeOwnershipBundle() *runtimecontracts.WorkflowCont
 	return bundle
 }
 
-func bootverifyDeclarationDriftBundle() *runtimecontracts.WorkflowContractBundle {
-	bundle := &runtimecontracts.WorkflowContractBundle{
-		Platform: runtimecontracts.PlatformSpecDocument{},
-		Semantics: runtimecontracts.WorkflowSemanticView{
-			NodeHandlers: map[string]map[string]runtimecontracts.SystemNodeEventHandler{
-				"producer": {
-					"task.start": {Emit: runtimecontracts.EmitSpec{Event: "task.done"}},
-				},
-			},
-		},
-		Nodes: map[string]runtimecontracts.SystemNodeContract{
-			"producer": {
-
-				EventHandlers: map[string]runtimecontracts.SystemNodeEventHandler{
-					"task.start": {Emit: runtimecontracts.EmitSpec{Event: "task.done"}},
-				},
-			},
-		},
-		Events: map[string]runtimecontracts.EventCatalogEntry{
-			"task.start": {},
-			"task.done":  {},
-		},
-	}
-	bundle.Platform.Platform.Name = "test"
-	bundle.Platform.Platform.Version = "1.0.0"
-	return bundle
-}
-
 func bootverifyPayloadCompletenessBundle() *runtimecontracts.WorkflowContractBundle {
 	bundle := &runtimecontracts.WorkflowContractBundle{
 		Platform: runtimecontracts.PlatformSpecDocument{},
