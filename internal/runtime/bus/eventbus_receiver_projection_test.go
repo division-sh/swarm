@@ -327,6 +327,7 @@ func TestDeliveryContinuationDispatchResultNamesExactLiveWakeOwner(t *testing.T)
 			route: events.DeliveryRoute{
 				Recipient:     events.MustAgentDeliveryRecipient("missing-agent"),
 				AgentIdentity: testAgentRouteIdentity(t, "missing-agent", ""),
+				Context:       events.DeliveryContext{RunID: uuid.NewString()},
 			},
 			want:     runtimedeliverycontinuation.DispatchDeferred,
 			wantWake: runtimedeliverycontinuation.DispatchWakeAgentRouteLifecycle,
@@ -375,6 +376,7 @@ func TestDeliveryContinuationDispatchTransfersToExactAgentCarrier(t *testing.T) 
 	route := events.DeliveryRoute{
 		Recipient:     events.MustAgentDeliveryRecipient(agentID),
 		AgentIdentity: testAgentRouteIdentity(t, agentID, ""),
+		Context:       events.DeliveryContext{RunID: uuid.NewString()},
 	}
 	result := eventBus.DispatchDeliveryContinuation(hostilePublisherContext(t), evt, route)
 	if err := result.Validate(); err != nil || result.Disposition() != runtimedeliverycontinuation.DispatchTransferred {

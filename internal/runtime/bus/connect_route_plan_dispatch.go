@@ -46,11 +46,12 @@ func withClosedPublicationPlanning(ctx context.Context) context.Context {
 }
 
 type connectRoutePlanResolver struct {
-	routeTable *RouteTable
-	graph      runtimepinrouting.CompiledConnectGraph
-	loadAgents connectAgentDescriptorLoader
-	lifecycle  connectInstanceSelector
-	replyStore runtimereplycontext.Store
+	publicationFlow string
+	routeTable      *RouteTable
+	graph           runtimepinrouting.CompiledConnectGraph
+	loadAgents      connectAgentDescriptorLoader
+	lifecycle       connectInstanceSelector
+	replyStore      runtimereplycontext.Store
 }
 
 type connectRoutePlanDispatch struct {
@@ -663,6 +664,9 @@ func (r connectRoutePlanResolver) matchedPlans(ctx context.Context, evt events.E
 	out := make([]runtimepinrouting.ConnectRoutePlan, 0, len(candidates))
 	target := explicitRootPublicationTarget(evt)
 	for _, plan := range candidates {
+		if r.publicationFlow != "" && plan.ReceiverEndpoint().Readback().FlowID != r.publicationFlow {
+			continue
+		}
 		if plan.AcceptsReceiverTarget(target, evt.RunID()) && providerOutputAuthorizationMatches(ctx, plan.ProviderOutputAuthorization()) {
 			out = append(out, plan)
 		}
@@ -682,6 +686,9 @@ func (r connectRoutePlanResolver) selectedTargetScope(ctx context.Context, evt e
 		return selectedTargetOwnerLookupScope{}, false, nil
 	}
 	flows := make(map[string]struct{})
+	if r.publicationFlow != "" {
+		flows[r.publicationFlow] = struct{}{}
+	}
 	for _, plan := range r.matchedPlans(ctx, evt) {
 		flows[plan.ReceiverEndpoint().Readback().FlowID] = struct{}{}
 	}

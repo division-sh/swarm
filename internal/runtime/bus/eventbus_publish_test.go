@@ -2,6 +2,7 @@ package bus_test
 
 import (
 	"context"
+	"database/sql"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -3325,22 +3326,17 @@ func TestEventBusPublish_RuntimeOwnedStandalonePlatformRunsConvergeWithoutPersis
 			if err := eb.Publish(ctx, tc.event(tc.eventID, tc.eventType)); err != nil {
 				t.Fatalf("Publish(%s): %v", tc.eventType, err)
 			}
-			executeStandaloneCompletionCandidate(t, ctx, pg, tc.eventID)
-
 			got := requireBusEvent(t, internal, "standalone platform event internal delivery")
-			if got.ID() != tc.eventID {
-				t.Fatalf("internal delivery event_id = %q, want %q", got.ID(), tc.eventID)
+			if got.ID() != tc.eventID || got.RunID() != "" {
+				t.Fatalf("internal delivery identity = %q/%q, want %q without a run", got.ID(), got.RunID(), tc.eventID)
 			}
 
-			runID, runStatus, triggerEventType := loadRunStateForEvent(t, ctx, pg, tc.eventID)
-			if strings.TrimSpace(runID) == "" {
-				t.Fatalf("run_id missing for %s", tc.eventType)
+			journal := storetest.LoadCanonicalEventRecord(t, ctx, pg, tc.eventID)
+			if journal.RunID() != "" || journal.Type() != tc.eventType || !journal.IsRunlessPlatformPublication() {
+				t.Fatalf("platform publication acquired a run or changed its occurrence: %+v", journal)
 			}
-			if runStatus != "completed" {
-				t.Fatalf("run status for %s = %q, want completed", tc.eventType, runStatus)
-			}
-			if triggerEventType != string(tc.eventType) {
-				t.Fatalf("trigger_event_type for %s = %q, want %q", tc.eventType, triggerEventType, tc.eventType)
+			if _, err := storetest.ReadStandaloneRunStorage(ctx, pg, tc.eventID); !errors.Is(err, sql.ErrNoRows) {
+				t.Fatalf("run-less publication retained standalone run storage: %v", err)
 			}
 			if got := countEventDeliveriesForEvent(t, ctx, pg, tc.eventID); got != 0 {
 				t.Fatalf("event_deliveries for %s = %d, want 0", tc.eventType, got)

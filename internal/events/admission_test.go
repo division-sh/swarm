@@ -170,9 +170,9 @@ func TestAdmissionCarriesExactRunDispositionAndReadbackNeverRegainsCreation(t *t
 		{name: "child requires active", build: func() (Event, error) {
 			return NewChildEvent(ChildEventInput{Facts: childFacts(), Lineage: validLineage()})
 		}, want: AdmittedRunRequireActive},
-		{name: "standalone runtime creates", build: func() (Event, error) {
+		{name: "standalone platform occurrence is runless", build: func() (Event, error) {
 			return NewStandaloneRuntimeControlEvent(StandaloneRuntimeEventInput{Facts: runtimeFacts("platform.boot")})
-		}, want: AdmittedRunCreateAuthorized},
+		}, want: AdmittedRunless},
 		{name: "run scoped runtime requires active", build: func() (Event, error) {
 			return NewRunScopedRuntimeControlEvent(RunScopedRuntimeEventInput{Facts: runtimeFacts("platform.paused"), RunID: testRunID})
 		}, want: AdmittedRunRequireActive},
@@ -609,7 +609,7 @@ func TestRoutingSourceConstructorsAdmitEntitylessFlowExecution(t *testing.T) {
 	}
 }
 
-func TestAdmissionRuntimePlatformEventAllocatesStandaloneRun(t *testing.T) {
+func TestAdmissionRuntimePlatformEventRemainsRunless(t *testing.T) {
 	facts := validFactsWithoutIdentity()
 	facts.Type = "platform.boot"
 	facts.Producer = ProducerClaim{Type: EventProducerPlatform, ID: "runtime"}
@@ -620,8 +620,8 @@ func TestAdmissionRuntimePlatformEventAllocatesStandaloneRun(t *testing.T) {
 	if err != nil {
 		t.Fatalf("AdmitForPublish: %v", err)
 	}
-	if admitted.Event().RunID() == "" {
-		t.Fatal("standalone runtime event run_id is empty")
+	if admitted.Event().RunID() != "" || admitted.RunDisposition() != AdmittedRunless {
+		t.Fatalf("standalone platform event acquired a run: %q / %s", admitted.Event().RunID(), admitted.RunDisposition())
 	}
 }
 

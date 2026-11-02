@@ -771,7 +771,8 @@ func waitServedNativeCardBeforeRestart(t *testing.T, endpoint string, peer *serv
 	}
 	if !strings.HasPrefix(sent.Body.GetConversation(), "Retire service\n") ||
 		!strings.Contains(sent.Body.GetConversation(), "\nReference: "+cardID) {
-		t.Fatal("native initial card differs from the exact declared retirement gate", cardID, sent.Body.GetConversation())
+		plans, err := reader.ListCurrentChannelDeliveryPlans(context.Background(), "", 200)
+		t.Fatal("native initial card differs from the exact declared retirement gate", cardID, sent.ID, sent.Body.String(), plans, err)
 	}
 	deadline := time.Now().Add(5 * time.Second)
 	for time.Now().Before(deadline) {

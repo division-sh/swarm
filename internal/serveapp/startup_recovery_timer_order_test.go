@@ -227,10 +227,22 @@ connect:
 					t.Fatal(err)
 				}
 				scopes, err := candidate.runtime.PlanLiveFlowScopes()
-				if err != nil || len(scopes) != 1 {
-					t.Fatal("clock frontier requires one declared live scope", scopes, err)
+				if err != nil {
+					t.Fatal(err)
 				}
-				frontierRun := requireServedLandingRun(t, candidate.runtime, scopes[0].FlowPath).RunID
+				frontierFlow := "."
+				if sourceCase == "child_clock" {
+					frontierFlow = "clock"
+				}
+				frontierPath := flowidentity.ScopeKey(candidate.loaded.source, frontierFlow)
+				declaredFrontier := false
+				for _, scope := range scopes {
+					declaredFrontier = declaredFrontier || scope.FlowPath == frontierPath
+				}
+				if !declaredFrontier {
+					t.Fatal("clock frontier lost its exact authored flow", frontierPath, scopes)
+				}
+				frontierRun := requireServedLandingRun(t, candidate.runtime, frontierPath).RunID
 				proof.WatchType("platform.stage_timer")
 				if !workflowCase {
 					proof.WatchType(barrier.eventType)

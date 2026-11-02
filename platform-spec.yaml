@@ -19362,8 +19362,9 @@ platform_tables:
       description: >-
         Canonical executable event-delivery obligation for agents and system nodes. One row exists per immutable event
         and complete normalized DeliveryRoute identity, including subscriber, target, reply context, and payload projection.
-        route_identity is produced only by events.DeliveryRoute and is unique per event. run_id is structurally coupled
-        to the immutable event rather than trusted as an independent fact. RouteIdentity equality compares all normalized
+        route_identity is produced only by events.DeliveryRoute and is unique per event. run_id matches the immutable
+        event's run, except for a run-less standalone platform publication: each delivery records its subscribing flow's
+        exact live run in delivery_context, revalidated by the native commit owner. RouteIdentity equality compares all normalized
         route fields without inferring or completing missing fields. DeliveryTargetOwnership equality additionally includes
         its closed ownership kind; existing_entity and materializing_entity for the same receiver route are contradictory,
         not distinct executable obligations. Validation keys cross-route ownership and payload-projection agreement by one
@@ -19468,7 +19469,6 @@ platform_tables:
             UNIQUE (event_id, route_identity),
             UNIQUE (delivery_id, current_attempt_version, current_attempt_open),
             UNIQUE (delivery_id, run_id, subscriber_type, subscriber_id, agent_name_owner, agent_name_source, agent_route_presence, agent_flow_scope_key, agent_flow_instance_id, agent_flow_instance_path),
-            FOREIGN KEY (event_id, run_id) REFERENCES events(event_id, run_id),
             CHECK ((subscriber_type = 'agent' AND NULLIF(TRIM(agent_name_owner), '') IS NOT NULL AND agent_name_source IN ('declared', 'runtime_created') AND agent_route_presence IN ('present', 'root') AND ((agent_route_presence = 'present' AND NULLIF(TRIM(agent_flow_scope_key), '') IS NOT NULL AND NULLIF(TRIM(agent_flow_instance_id), '') IS NOT NULL AND NULLIF(TRIM(agent_flow_instance_path), '') IS NOT NULL) OR (agent_route_presence = 'root' AND agent_flow_scope_key = '' AND agent_flow_instance_id = '' AND agent_flow_instance_path = ''))) OR (subscriber_type = 'node' AND agent_name_owner = '' AND agent_name_source = '' AND agent_route_presence = '' AND agent_flow_scope_key = '' AND agent_flow_instance_id = '' AND agent_flow_instance_path = '')),
             FOREIGN KEY (selected_execution_id, selected_fork_run_id, selected_execution_generation) REFERENCES run_fork_selected_contract_runtime_executions(execution_id, fork_run_id, generation),
             CHECK ((execution_authority_kind = 'normal_runtime' AND selected_execution_id IS NULL AND selected_fork_run_id IS NULL AND selected_execution_generation IS NULL) OR (execution_authority_kind = 'selected_contract_fork' AND selected_execution_id IS NOT NULL AND selected_fork_run_id = run_id AND selected_execution_generation = execution_authority_generation AND execution_authority_id = CAST(selected_execution_id AS TEXT))),
