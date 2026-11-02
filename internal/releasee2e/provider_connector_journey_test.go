@@ -441,22 +441,35 @@ func postConnectorSlackWebhook(t *testing.T, process *releaseServeProcess, origi
 	result := waitConnectorPublicResult(t, process, runID, "send_slack_webhook.succeeded", 1, append(secrets, "redacted-slack-token"))
 	requireConnectorCall(t, slack.SideEffects, "POST", "/api/chat.postMessage", "Bearer after-401-token", map[string]any{"channel": "C-INBOUND", "text": "signed-slack-delivery"})
 	var published []goldenEvent
-	for _, event := range snapshot() {
-		if event.EventName == "inbound.slack.message" {
-			published = append(published, event)
+	if err := pollRelease(t.Context(), 15*time.Second, func(ctx context.Context) (bool, error) {
+		events, err := listGoldenEvents(ctx, process.rpc, runID)
+		published = nil
+		for _, event := range events {
+			if event.EventName == "inbound.slack.message" {
+				published = append(published, event)
+			}
 		}
+		return len(published) == 1 && len(published[0].Deliveries) == 1 && published[0].Deliveries[0].Terminal, err
+	}); err != nil {
+		t.Fatalf("Slack callback delivery did not settle: %v publications=%+v", err, published)
 	}
 	if len(published) != 1 || published[0].EventID != receipt.EventIDs[0] || published[0].RunID != runID || result.SourceEventID != published[0].EventID {
 		t.Fatalf("Slack publication/result identity mismatch: publications=%+v result=%+v", published, result)
 	}
 	input := published[0]
-	wantBody := map[string]any{"type": "event_callback", "event_id": "signed-slack-delivery", "event": map[string]any{"type": "message", "channel": "C-INBOUND", "text": "signed Slack callback", "user": "U-SYNTHETIC"}}
-	if input.Payload["provider"] != "slack" || input.Payload["provider_event_id"] != "signed-slack-delivery" || input.Payload["provider_delivery_id"] != "signed-slack-delivery" || input.Payload["provider_event_type"] != "message" || !reflect.DeepEqual(input.Payload["payload"], wantBody) || len(input.Deliveries) != 1 || !input.Deliveries[0].Terminal || input.Deliveries[0].Target.FlowID != "." {
+	wantBody := map[string]any{"type": "event_callback", "event_id": "signed-slack-delivery", "token": "[redacted]", "event": map[string]any{"type": "message", "channel": "C-INBOUND", "text": "signed Slack callback", "user": "U-SYNTHETIC"}}
+	wantHeaders := map[string]any{"slack_event_id": "signed-slack-delivery", "slack_event_type": "message", "user_agent": "slack-signed-journey"}
+	delivery := input.Deliveries[0]
+	if input.Source != "inbound-gateway" || input.ProducerType != "external" || input.ExecutionMode != "live" || input.Payload["provider"] != "slack" || input.Payload["provider_event_id"] != "signed-slack-delivery" || input.Payload["provider_delivery_id"] != "signed-slack-delivery" || input.Payload["provider_event_type"] != "message" || input.Payload["event_type"] != "message" || !reflect.DeepEqual(input.Payload["payload"], wantBody) || !reflect.DeepEqual(input.Payload["headers"], wantHeaders) {
 		t.Fatalf("Slack admitted payload/route mismatch: %+v", input)
+	}
+	if delivery.SubscriberType != "node" || delivery.SubscriberID != "Lg.c2xhY2std2ViaG9vay13b3JrZXI" || delivery.Status != "delivered" || delivery.Target.Kind != "existing_entity" || delivery.Target.FlowID != "." || delivery.Target.FlowInstance != runID || delivery.Target.EntityID != input.EntityID || input.NoDelivery != nil || len(input.DeadLetters) != 0 {
+		t.Fatalf("Slack callback lost its exact subscribed route/settlement: %+v", input)
 	}
 	before = snapshot()
 	status, response, _ = post(body, time.Now(), "slack-webhook-secret")
 	duplicate := receipt
+	duplicate.EventIDs, duplicate.EventNames = nil, nil
 	if status != http.StatusOK || json.Unmarshal([]byte(response), &duplicate) != nil || duplicate.Status != "duplicate" {
 		t.Fatalf("Slack replay HTTP=%d receipt=%s", status, response)
 	}
