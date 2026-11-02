@@ -17,7 +17,7 @@ import (
 )
 
 func (r connectRoutePlanResolver) resolvePubsubSubscribers(ctx context.Context, event events.Event, keys []string, publication ordinaryPublicationSource) ([]Subscriber, error) {
-	if len(keys) == 0 || r.source == nil {
+	if len(keys) == 0 || r.lifecycle.source == nil {
 		return nil, nil
 	}
 	if r.routeTable == nil || !r.routeTable.compiledSourceReady {
@@ -104,19 +104,19 @@ func (r connectRoutePlanResolver) pubsubLookupScope(event events.Event, publicat
 		route = event.RoutingSource().Route()
 	}
 	if event.RoutingSource().Kind() == events.RoutingSourceRoot {
-		route = events.RouteIdentity{FlowID: semanticview.RootExecutionFlowID(r.source), FlowInstance: event.RunID()}
+		route = events.RouteIdentity{FlowID: semanticview.RootExecutionFlowID(r.lifecycle.source), FlowInstance: event.RunID()}
 	}
 	if event.RoutingSource().Kind() == events.RoutingSourceDeploymentFeed {
-		if _, err := pinrouting.AdmitDeploymentFeedDeclaration(r.source, event.Type(), event.RoutingSource()); err != nil {
+		if _, err := pinrouting.AdmitDeploymentFeedDeclaration(r.lifecycle.source, event.Type(), event.RoutingSource()); err != nil {
 			return pipeline.FlowInstanceLookupScope{}, err
 		}
-		if route.FlowID == semanticview.RootExecutionFlowID(r.source) {
+		if route.FlowID == semanticview.RootExecutionFlowID(r.lifecycle.source) {
 			route.FlowInstance = event.RunID()
 		}
 	}
 	var exact []flowidentity.RunScopedFlowInstance
 	if !publication.declarationOnly && route.FlowID != "" && route.FlowInstance != "" {
-		owner, err := flowidentity.NewRunScopedFlowInstance(event.RunID(), flowidentity.StoredRoute(flowidentity.ScopeKey(r.source, route.FlowID), "", route.FlowInstance))
+		owner, err := flowidentity.NewRunScopedFlowInstance(event.RunID(), flowidentity.StoredRoute(flowidentity.ScopeKey(r.lifecycle.source, route.FlowID), "", route.FlowInstance))
 		if err != nil {
 			return pipeline.FlowInstanceLookupScope{}, err
 		}
@@ -124,7 +124,7 @@ func (r connectRoutePlanResolver) pubsubLookupScope(event events.Event, publicat
 			exact = append(exact, owner)
 		}
 	}
-	return pipeline.NewFlowInstanceLookupScope(r.source, fact, event.RunID(), nil, exact)
+	return pipeline.NewFlowInstanceLookupScope(r.lifecycle.source, fact, event.RunID(), nil, exact)
 }
 
 func pubsubScopeIncludes(scope pipeline.FlowInstanceLookupScope, owner flowidentity.RunScopedFlowInstance, flowID string) bool {
