@@ -257,7 +257,7 @@ func writeTurnRenderingSource(t *testing.T, cell string) string {
 		extra = "  flow_data_access: [evidence.txt]\n"
 		intent = "For synthetic turn 1, first try read_flow_data with kind static_file and static_id missing, then read the allowed evidence.txt using its exact static_id from the tool schema, then emit_evidence_completed with sequence 1. For synthetic turn 2 emit sequence 2. Produce no prose."
 	case "read", "long":
-		intent = "Read the declared state with read_state before each emit_evidence_completed. Its explicitly declared fields are conversation and note; use no row metadata. Copy the current sequence into the emission. Produce no prose."
+		intent = "Read the declared state with read_state before each emit_evidence_completed. Use no row metadata. Copy the current sequence into the emission. Produce no prose."
 		if cell == "long" {
 			files["worker/state.yaml"] = "conversation: text\nnote: " + fmt.Sprintf("%q", "HEAD"+strings.Repeat("synthetic declared output ", 900)+"TAIL") + "\n"
 		}
@@ -508,7 +508,7 @@ func (r *turnRenderingRecorder) requireRendering(t *testing.T, cell string) {
 				seenOK = seenOK || message.Content == "ok"
 				seenError = seenError || strings.HasPrefix(message.Content, "error: ")
 				seenLong = seenLong || (strings.Contains(message.Content, "HEAD") && strings.Contains(message.Content, "TAIL") && strings.Contains(message.Content, "[... tool output truncated ...]"))
-				seenRead = seenRead || message.Content == `{"conversation":"synthetic","note":"synthetic declared note"}`
+				seenRead = seenRead || message.Content == `{"note":"synthetic declared note"}`
 				if strings.Contains(message.Content, `"provider_content"`) || strings.Contains(message.Content, `"entity_id"`) || strings.Contains(message.Content, `"current_state"`) {
 					t.Fatal("tool result leaked wrapper or row metadata")
 				}
