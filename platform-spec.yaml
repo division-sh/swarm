@@ -30859,6 +30859,9 @@ cli_specification:
           At the existing startup_recovery failure boundary the heading is `startup recovery refused`, retaining the
           failed step, native reason and identifiers, integrity exit and independent cleanup failures. Suggested read-only
           diagnostics retain the resolved configuration and store selectors; they do not repair or reinterpret recovery.
+          Store status uses the existing resolved source paths before the shared store selector, matching ordinary retained
+          serve's project default. Its project-default recovery hint uses that exact project directory; unsupported borrowed
+          source and dev-scratch status hints remain omitted rather than selecting a different database.
           Dev output names the actual scratch store and the already-resolved retained store it does not use, without
           opening that retained store. Current-holder metadata and interrupted-work summaries are separate contracts.
         projection_boundary: >
