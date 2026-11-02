@@ -89,6 +89,26 @@ func TestRuntimeOccurrenceFencedDescendantRequiresLiveSameOwnerLease(t *testing.
 	if err != nil {
 		t.Fatal(err)
 	}
+	standing, err := owner.BeginStanding(context.Background())
+	if err != nil {
+		t.Fatal(err)
+	}
+	owner.CloseDispatch()
+	for _, ctx := range []context.Context{context.Background(), standing.Context(), foreignLease.Context()} {
+		if _, err := owner.BeginContinuationDispatch(ctx); !errors.Is(err, ErrDispatchClosed) {
+			t.Fatalf("fresh or foreign continuation crossed dispatch seal: %v", err)
+		}
+	}
+	if _, err := owner.BeginDispatch(parent.Context()); !errors.Is(err, ErrDispatchClosed) {
+		t.Fatalf("fresh delivery inherited a publication's admission: %v", err)
+	}
+	accepted, err := owner.BeginContinuationDispatch(parent.Context())
+	if err != nil {
+		t.Fatalf("live firing/publication descendant refused by dispatch seal: %v", err)
+	}
+	if err := errors.Join(accepted.Done(), standing.Done()); err != nil {
+		t.Fatal(err)
+	}
 	if err := owner.Fence(); err != nil {
 		t.Fatal(err)
 	}
