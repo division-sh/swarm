@@ -57,8 +57,8 @@ func TestValidateUsageHintCoverage_GeneratedEmitUsesModelDescription(t *testing.
 	const authorLine = "The title is the business summary."
 	contract := entityruntime.Contract{Entity: runtimecontracts.EntityContract{Description: authorLine}}
 	read := roleScopedEntityToolSpec{Kind: roleScopedEntityToolReadWhole, EntityType: "state"}
-	if got := roleScopedEntityToolDescription(contract, read); got != "Read the fields of this state\n"+authorLine {
-		t.Fatalf("provided description line was not appended unchanged: %q", got)
+	if got := roleScopedEntityToolSchemaEntry(contract, read).Description; got != "Read the fields of this state" {
+		t.Fatalf("generated description is not the verb line only: %q", got)
 	}
 	source := wrapRootAgentBundle(&runtimecontracts.WorkflowContractBundle{
 		Agents: map[string]runtimecontracts.AgentRegistryEntry{
