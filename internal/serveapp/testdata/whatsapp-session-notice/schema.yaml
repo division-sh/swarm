@@ -7,12 +7,11 @@ stages:
           advances_to: done
   done:
     final: true
-pins:
-  inputs:
-    - inbound.whatsapp.raw
-    - notice.requested
-  outputs:
-    - inbound.whatsapp.message
-    - notice.requested
+inputs:
+  - inbound.whatsapp.raw
+  - notice.requested
+outputs:
+  - inbound.whatsapp.message
+  - notice.requested
 connect:
   - {event: notice.requested, from: ., to: notices}

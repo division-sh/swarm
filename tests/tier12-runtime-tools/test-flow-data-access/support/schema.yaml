@@ -1,4 +1,3 @@
 # fixture: support
-pins:
-  inputs:
-    - support.requested
+inputs:
+  - support.requested

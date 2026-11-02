@@ -7,8 +7,7 @@ stages:
   complete: {final: true}
 auto_emit_on_create:
   event: worker.ready
-pins:
-  inputs:
-    - flow.spawned
-  outputs:
-    - worker.ready
+inputs:
+  - flow.spawned
+outputs:
+  - worker.ready

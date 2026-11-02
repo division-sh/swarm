@@ -1,4 +1,3 @@
 stages: []
-pins:
-  inputs: [inbound.whatsapp.message]
-  outputs: [inbound.whatsapp.message]
+inputs: [inbound.whatsapp.message]
+outputs: [inbound.whatsapp.message]

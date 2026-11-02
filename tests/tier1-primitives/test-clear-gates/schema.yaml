@@ -1,6 +1,5 @@
 stages: []
-pins:
-  inputs:
-    - gates.clear_requested
-  outputs:
-    - gates.cleared
+inputs:
+  - gates.clear_requested
+outputs:
+  - gates.cleared

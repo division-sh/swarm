@@ -3,7 +3,6 @@ stages:
   active: {}
   completed: {final: true}
 instance: account_id
-pins:
-  inputs:
-    - account.registered
-    - account.notify.requested
+inputs:
+  - account.registered
+  - account.notify.requested

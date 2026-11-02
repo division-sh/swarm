@@ -15,6 +15,5 @@ stages:
   archived:
     final: true
 instance: item_id
-pins:
-  inputs:
-    - item.registered
+inputs:
+  - item.registered

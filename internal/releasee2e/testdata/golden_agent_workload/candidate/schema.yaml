@@ -4,8 +4,7 @@ stages:
   pending: {}
   active: {}
   complete: {final: true}
-pins:
-  inputs:
-    - candidate.requested
-  outputs:
-    - candidate.completed
+inputs:
+  - candidate.requested
+outputs:
+  - candidate.completed

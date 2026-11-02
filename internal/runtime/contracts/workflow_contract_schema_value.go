@@ -34,8 +34,14 @@ func AdmitFlowSchemaValue(root yamlsource.Value) (FlowSchemaDocument, error) {
 			}
 		case "connect":
 			out.Connect, err = projectSchemaConnectValue(value)
-		case "pins":
-			out.Pins, err = projectSchemaPinsValue(value)
+		case "inputs", "outputs":
+			var pins FlowPins
+			pins, err = projectSchemaPinsValue(value, name)
+			if name == "inputs" {
+				out.Pins.Inputs = pins.Inputs
+			} else {
+				out.Pins.Outputs = pins.Outputs
+			}
 		case "required_agents":
 			out.RequiredAgentsDeclared = true
 			out.RequiredAgents, err = projectSchemaRequiredAgentsValue(value)
@@ -78,7 +84,7 @@ func refuseRetiredFlowSchemaKeys(root yamlsource.Value) error {
 		case "imports":
 			teaching = "imports is not a schema key; use provider directories in this or an enclosing flow, tools <provider>.<tool>, and events inbound.<provider>.<event>"
 		case "ingress":
-			teaching = "ingress is not a schema key; list provider events in pins.inputs on the flow holding the provider directory and raw policy in trigger.yaml; the webhook alias is the flow path, or the root folder for the root flow"
+			teaching = "ingress is not a schema key; list provider events in inputs on the flow holding the provider directory and raw policy in trigger.yaml; the webhook alias is the flow path, or the root folder for the root flow"
 		}
 		if teaching != "" {
 			return nodeValueError(member.Value, fmt.Errorf("%s", teaching))

@@ -1,8 +1,7 @@
 stages:
   accumulating: {}
   cleared: {final: true}
-pins:
-  inputs:
-    - state.clear_requested
-  outputs:
-    - state.cleared
+inputs:
+  - state.clear_requested
+outputs:
+  - state.cleared

@@ -1748,20 +1748,24 @@ func TestFlowPinsDecode_RejectsRetiredScalarPermissions(t *testing.T) {
 }
 
 func TestFlowPinsDecode_PreservesCanonicalScalarEventEntries(t *testing.T) {
-	var schema FlowSchemaDocument
-	if err := decodeNodeTestYAML([]byte(`stages:
+	schema, err := admitSchemaFragment(`stages:
   pending: {}
-pins:
-  inputs: [check.requested]
-  outputs: [check.passed]
-`), &schema); err != nil {
+inputs: [check.requested, check.retried]
+outputs: [check.passed, check.failed]
+`)
+	if err != nil {
 		t.Fatalf("yaml.Unmarshal: %v", err)
 	}
-	if got := schema.Pins.Inputs.EventPins[0].EventType(); got != "check.requested" {
-		t.Fatalf("Inputs.EventPins[0] = %q", got)
+	if len(schema.Pins.Inputs.EventPins) != 2 || schema.Pins.Inputs.EventPins[0].EventType() != "check.requested" || schema.Pins.Inputs.EventPins[1].EventType() != "check.retried" {
+		t.Fatalf("input identities/order changed: %#v", schema.Pins.Inputs.EventPins)
 	}
-	if got := schema.Pins.Outputs.EventPins[0].EventType(); got != "check.passed" {
-		t.Fatalf("Outputs.EventPins[0] = %q", got)
+	if len(schema.Pins.Outputs.EventPins) != 2 || schema.Pins.Outputs.EventPins[0].EventType() != "check.passed" || schema.Pins.Outputs.EventPins[1].EventType() != "check.failed" {
+		t.Fatalf("output identities/order changed: %#v", schema.Pins.Outputs.EventPins)
+	}
+	_, err = admitSchemaFragment("stages: []\npins: {inputs: [check.requested]}\n")
+	diagnostic, ok := AsLoaderDiagnostic(err)
+	if !ok || diagnostic.Location.File != "schema.yaml" || diagnostic.Location.Line != 2 || !strings.Contains(diagnostic.Remediation, "inputs:") || !strings.Contains(diagnostic.Remediation, "outputs:") {
+		t.Fatalf("retired wrapper needs located top-level-port teaching: %v", err)
 	}
 }
 

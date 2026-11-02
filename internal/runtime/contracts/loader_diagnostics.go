@@ -126,6 +126,9 @@ func NewUndefinedFieldDiagnostic(context, key string, allowed map[string]struct{
 	if context == "rule" && (key == "else" || key == "default") {
 		remediation = "DIALECT-RULES-DEFAULT: the handler.rules default branch is the last row written without a predicate."
 	}
+	if context == "schema" && key == "pins" {
+		remediation = "pins is not a schema key; declare inputs: and outputs: at the top level of schema.yaml."
+	}
 	if context == "agent" && (key == "entity_writes" || key == "create") {
 		remediation = "Use writes: all or writes: [field, ...] for fields of this agent's own flow; omit writes: to grant no save or update tools. There is no create arm or cross-flow write grant."
 	}

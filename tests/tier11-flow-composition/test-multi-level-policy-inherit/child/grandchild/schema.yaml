@@ -2,8 +2,7 @@
 stages:
   pending: {}
   approved: {final: true}
-pins:
-  inputs:
-    - grandchild.check
-  outputs:
-    - grandchild.passed
+inputs:
+  - grandchild.check
+outputs:
+  - grandchild.passed

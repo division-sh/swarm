@@ -3,13 +3,12 @@ stages:
   waiting: {}
   delegated: {}
   completed: {final: true}
-pins:
-  inputs:
-    - step.begin
-    - micro.done
-  outputs:
-    - micro.start
-    - micro.relayed
+inputs:
+  - step.begin
+  - micro.done
+outputs:
+  - micro.start
+  - micro.relayed
 connect:
   - event: micro.start
     from: .

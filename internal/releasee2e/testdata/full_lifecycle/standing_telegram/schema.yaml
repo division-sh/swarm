@@ -15,11 +15,10 @@ stages:
   serving: {}
   retired:
     final: true
-pins:
-  inputs:
-    - inbound.telegram.text_message
-  outputs:
-    - inbound.telegram.text_message
+inputs:
+  - inbound.telegram.text_message
+outputs:
+  - inbound.telegram.text_message
 connect:
   - event: inbound.telegram.text_message
     from: .

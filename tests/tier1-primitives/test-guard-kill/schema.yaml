@@ -2,8 +2,7 @@ stages:
   pending: {}
   done: {final: true}
   killed: {final: true}
-pins:
-  inputs:
-    - check.requested
-  outputs:
-    - check.passed
+inputs:
+  - check.requested
+outputs:
+  - check.passed

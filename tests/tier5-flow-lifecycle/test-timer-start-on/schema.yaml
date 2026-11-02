@@ -2,9 +2,8 @@ stages:
   pending: {}
   active: {}
   timed_out: {final: true}
-pins:
-  inputs:
-    - task.started
-    - timer.task_timeout
-  outputs:
-    - task.timed_out
+inputs:
+  - task.started
+  - timer.task_timeout
+outputs:
+  - task.timed_out

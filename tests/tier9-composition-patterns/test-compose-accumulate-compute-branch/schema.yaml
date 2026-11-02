@@ -4,8 +4,7 @@ stages:
   high: {final: true}
   mid: {final: true}
   low: {final: true}
-pins:
-  inputs:
-    - score.submitted
-  outputs:
-    - result.high
+inputs:
+  - score.submitted
+outputs:
+  - result.high

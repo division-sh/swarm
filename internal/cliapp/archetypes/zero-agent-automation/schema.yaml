@@ -1,5 +1,4 @@
 # fixture: automation
 stages: []
-pins:
-  inputs:
-    - automation.requested
+inputs:
+  - automation.requested

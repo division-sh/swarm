@@ -1,7 +1,6 @@
 # fixture: work
 stages:
   ready: {}
-pins:
-  inputs:
-    - work.requested
-    - work.alternate
+inputs:
+  - work.requested
+  - work.alternate

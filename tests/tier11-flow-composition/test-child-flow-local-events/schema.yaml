@@ -1,6 +1,5 @@
 stages:
   idle: {}
   done: {final: true}
-pins:
-  inputs:
-    - parent.trigger
+inputs:
+  - parent.trigger
