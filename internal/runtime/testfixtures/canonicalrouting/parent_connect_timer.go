@@ -12,11 +12,10 @@ stages:
   waiting:
     timers:
       - {after: 40ms, emit: work.ready}
-pins:
-  inputs:
-    - work.requested
-  outputs:
-    - work.ready
+inputs:
+  - work.requested
+outputs:
+  - work.ready
 `)
 	removeClosedVariantFiles(t, root, "producer/state.yaml")
 	return root

@@ -17,7 +17,7 @@ func CopyConstructedGateForkControl(t testing.TB, fields bool) string {
 	root := t.TempDir()
 	files := map[string]string{
 		"manifest.yaml": "version: 1.0.0\nplatform_version: '*'\n",
-		"schema.yaml":   "# fixture: contention-gate\nstages:\n  pending:\n    gate:\n      decision: review\n      outcomes:\n        approve: {advances_to: done}\n  done: {final: true}\npins:\n  inputs:\n    - item.received\n",
+		"schema.yaml":   "# fixture: contention-gate\nstages:\n  pending:\n    gate:\n      decision: review\n      outcomes:\n        approve: {advances_to: done}\n  done: {final: true}\ninputs:\n  - item.received\n",
 		"events.yaml":   "item.received:\n",
 		"nodes.yaml":    "frontier:\n  item.received:\n    guard: true\n",
 	}

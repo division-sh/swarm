@@ -122,13 +122,12 @@ stages:
   waiting: {}
   active: {}
   done: {final: true}
-pins:
-  inputs:
-    - work.closed
-    - child.ready
-    - work.requested
-  outputs:
-    - work.requested
+inputs:
+  - work.closed
+  - child.ready
+  - work.requested
+outputs:
+  - work.requested
 connect:
   - {event: work.requested, from: ., to: child}
   - {event: child.ready, from: child, to: .}
@@ -151,7 +150,7 @@ connect:
   emit_events: []
 `)
 	writeClosedVariantFile(t, root, "prompts/observer.md", "Observe the receiving root state.\n")
-	writeClosedVariantFile(t, root, "child/schema.yaml", "# fixture: child\npins:\n  inputs:\n    - work.requested\n  outputs:\n    - child.ready\n")
+	writeClosedVariantFile(t, root, "child/schema.yaml", "# fixture: child\ninputs:\n  - work.requested\noutputs:\n  - child.ready\n")
 	writeClosedVariantFile(t, root, "child/events.yaml", "child.ready:\n  token: text\n")
 	writeClosedVariantFile(t, root, "child/nodes.yaml", `producer:
   work.requested:
@@ -200,18 +199,17 @@ stages:
   waiting: {}
   active: {}
   done: {final: true}
-pins:
-  inputs:
-    - outer.seeded
-    - outer.requested
-    - outer.closed
-    - receiver.closed
-    - start.closed
-  outputs:
-    - start.seeded
-    - start.requested
-    - receiver.closed
-    - start.closed
+inputs:
+  - outer.seeded
+  - outer.requested
+  - outer.closed
+  - receiver.closed
+  - start.closed
+outputs:
+  - start.seeded
+  - start.requested
+  - receiver.closed
+  - start.closed
 connect:
   - {event: start.seeded, from: ., to: branch}
   - {event: start.requested, from: ., to: branch}
@@ -262,16 +260,16 @@ func CopyForkReceiverOwnership(t testing.TB, receivers []ForkReceiver, entityles
 		seen[receiver.Path] = true
 		rootEdges += fmt.Sprintf("  - {event: work.ready, from: producer, to: %s}\n", receiver.Path)
 		rootEdges += fmt.Sprintf("  - {event: receiver.finished, from: %s, to: ., rename: %s.finished}\n", receiver.Path, receiver.Path)
-		receiptPins += fmt.Sprintf("    - %s.finished\n", receiver.Path)
+		receiptPins += fmt.Sprintf("  - %s.finished\n", receiver.Path)
 		receiptNodes += forkReceiverReceiptObserver(receiver.Path)
 		seeded := receiver.Policy == ForkReceiverOptionalExisting || receiver.Policy == ForkReceiverRequiredExisting
 		if seeded {
 			seedEdges += fmt.Sprintf("  - {event: receiver.seeded, from: ., to: %s}\n", receiver.Path)
 		}
-		pinInputs := "    - work.ready\n"
+		pinInputs := "  - work.ready\n"
 		seedHandler := ""
 		if seeded {
-			pinInputs += "    - receiver.seeded\n"
+			pinInputs += "  - receiver.seeded\n"
 			seedHandler = fmt.Sprintf(`  receiver.seeded:
     advances_to: active
     data_accumulation:
@@ -285,7 +283,7 @@ func CopyForkReceiverOwnership(t testing.TB, receivers []ForkReceiver, entityles
 		if receiver.Policy != ForkReceiverOptionalAbsent {
 			closeEdges += fmt.Sprintf("  - {event: receiver.closed, from: ., to: %s}\n", receiver.Path)
 			stages = "stages:\n  waiting: {}\n  active: {}\n  done: {final: true}\n"
-			pinInputs += "    - receiver.closed\n"
+			pinInputs += "  - receiver.closed\n"
 			seedHandler += "  receiver.closed:\n    advances_to: done\n"
 			entities = "marker: text\n"
 		}
@@ -310,10 +308,9 @@ func CopyForkReceiverOwnership(t testing.TB, receivers []ForkReceiver, entityles
 		writeClosedVariantFile(t, root, receiver.Path+"/manifest.yaml", "version: 1.0.0\nplatform_version: '*'\n")
 		writeClosedVariantFile(t, root, receiver.Path+"/manifest.yaml", "version: 1.0.0\nplatform_version: '*'\n")
 		writeClosedVariantFile(t, root, receiver.Path+"/schema.yaml", fmt.Sprintf(`# fixture: %s
-%spins:
-  inputs:
-%s  outputs:
-    - receiver.finished
+%sinputs:
+%soutputs:
+  - receiver.finished
 `, receiver.Path, stages, pinInputs))
 		if entities != "" {
 			writeClosedVariantFile(t, root, receiver.Path+"/state.yaml", entities)
@@ -328,7 +325,7 @@ func CopyForkReceiverOwnership(t testing.TB, receivers []ForkReceiver, entityles
 	closeEvent := ""
 	if closeEdges != "" {
 		outputs += ", receiver.closed"
-		closeInput = "    - receiver.closed\n"
+		closeInput = "  - receiver.closed\n"
 		closeEvent = "receiver.closed:\n"
 	}
 	if seedEdges != "" {
@@ -341,12 +338,11 @@ stages:
   waiting: {}
   active: {}
   done: {final: true}
-pins:
-  inputs:
-    - start.seeded
-    - start.requested
-    - start.closed
-`+receiptPins+closeInput+`  outputs: [`+outputs+`]
+inputs:
+  - start.seeded
+  - start.requested
+  - start.closed
+`+receiptPins+closeInput+`outputs: [`+outputs+`]
 connect:
 `+rootEdges+seedEdges+closeEdges)
 	writeClosedVariantFile(t, root, "state.yaml", "marker: text\n")
@@ -372,7 +368,7 @@ connect:
 		producerBody = "    advances_to: active\n    data_accumulation:\n      writes:\n        - target_field: marker\n          value: \"producer-owned\"\n"
 		writeClosedVariantFile(t, root, "producer/state.yaml", "marker: text\n")
 	}
-	writeClosedVariantFile(t, root, "producer/schema.yaml", "# fixture: producer\n"+producerStages+"pins:\n  inputs: [work.requested]\n  outputs: [work.ready]\n")
+	writeClosedVariantFile(t, root, "producer/schema.yaml", "# fixture: producer\n"+producerStages+"inputs: [work.requested]\noutputs: [work.ready]\n")
 	writeClosedVariantFile(t, root, "producer/events.yaml", "work.ready:\n  token: text\n")
 	writeClosedVariantFile(t, root, "producer/nodes.yaml", `producer:
   work.requested:

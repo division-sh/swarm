@@ -12,9 +12,8 @@ func CopyReceiverConfigHistory(t testing.TB) string {
 	root := CopyTemplateInstanceRoute(t, TemplateInstanceRouteOptions{Consumer: TemplateInstanceAgentConsumer})
 	writeClosedVariantFile(t, root, "consumer/schema.yaml", `# fixture: consumer
 instance: vertical_id
-pins:
-  inputs:
-    - deploy.done
+inputs:
+  - deploy.done
 `)
 	applyClosedReplacement(t, filepath.Join(root, "consumer/state.yaml"), "vertical_id:", "nested: json?\nstatus: boolean?\nflow_path: json?\nvertical_id:")
 	return root

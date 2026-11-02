@@ -22,15 +22,14 @@ func CopySelectedStoreExecution(t testing.TB) string {
 	writeClosedVariantFile(t, root, "manifest.yaml", "version: 1.0.0\nplatform_version: '*'\n")
 	writeClosedVariantFile(t, root, "selected-state-flow/manifest.yaml", "version: 1.0.0\nplatform_version: '*'\n")
 	writeClosedVariantFile(t, root, "schema.yaml", `# fixture: selected-store-execution
-pins:
-  inputs:
-    - item.received
-    - review.ready
-    - state.seeded
-    - state.closed
-  outputs:
-    - state.seeded
-    - state.closed
+inputs:
+  - item.received
+  - review.ready
+  - state.seeded
+  - state.closed
+outputs:
+  - state.seeded
+  - state.closed
 connect:
   - {from: ., event: state.seeded, to: flow-a/1}
   - {from: ., event: state.closed, to: flow-a/1}
@@ -50,10 +49,9 @@ connect:
 stages:
   pending: {}
   done: {final: true}
-pins:
-  inputs:
-    - state.seeded
-    - state.closed
+inputs:
+  - state.seeded
+  - state.closed
 `)
 		writeClosedVariantFile(t, root, owner+"/state.yaml", "name: text\n")
 		writeClosedVariantFile(t, root, owner+"/nodes.yaml", `state-owner:

@@ -9,14 +9,13 @@ func CopyHandlerRuleSelectionProof(t testing.TB) string {
 	root := CopyExample(t, RootIngress)
 	removeClosedVariantFiles(t, root, "state.yaml")
 	writeClosedVariantFile(t, root, "schema.yaml", `# fixture: handler-rule-selection-proof
-pins:
-  inputs:
-    - rules.selected
-    - rules.fallback
-    - rules.evaluation_failed
-    - complete.selected
-    - complete.no_match
-    - direct
+inputs:
+  - rules.selected
+  - rules.fallback
+  - rules.evaluation_failed
+  - complete.selected
+  - complete.no_match
+  - direct
 `)
 	writeClosedVariantFile(t, root, "events.yaml", `rules.selected:
 rules.fallback:
@@ -67,9 +66,8 @@ stages:
     final: true
   attention:
     final: true
-pins:
-  inputs:
-    - item.completed
+inputs:
+  - item.completed
 `
 	joinEntities := `expected: [text]
 `
@@ -119,9 +117,8 @@ func CopyTemplateOutputRootConnect(t testing.TB) string {
 	removeClosedVariantFiles(t, root, "consumer/nodes.yaml", "consumer/schema.yaml", "consumer/manifest.yaml", "consumer")
 
 	writeClosedVariantFile(t, root, "schema.yaml", `# fixture: root
-pins:
-  inputs:
-    - deploy.done
+inputs:
+  - deploy.done
 connect:
   - event: deploy.done
     from: producer
@@ -134,9 +131,8 @@ connect:
 	removeClosedVariantFiles(t, root, "producer/nodes.yaml", "producer/agents.yaml")
 	writeClosedVariantFile(t, root, "producer/schema.yaml", `# fixture: producer
 instance: producer_id
-pins:
-  outputs:
-    - deploy.done
+outputs:
+  - deploy.done
 `)
 	writeClosedVariantFile(t, root, "producer/events.yaml", "deploy.done:\n")
 	writeClosedVariantFile(t, root, "producer/state.yaml", "producer_id: string\n")

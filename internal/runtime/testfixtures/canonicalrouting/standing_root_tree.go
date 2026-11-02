@@ -12,8 +12,8 @@ import (
 func CopyStandingRootTreePublic(t testing.TB) string {
 	t.Helper()
 	root := t.TempDir()
-	const pins = "pins:\n  inputs:\n    - inbound.telegram.raw\n    - inbound.telegram.text_message\n    - inbound.telegram.callback_action\n"
-	const outputs = "  outputs: [inbound.telegram.text_message, inbound.telegram.callback_action]\n"
+	const inputs = "inputs:\n  - inbound.telegram.raw\n  - inbound.telegram.text_message\n  - inbound.telegram.callback_action\n"
+	const outputs = "outputs: [inbound.telegram.text_message, inbound.telegram.callback_action]\n"
 	const nodes = "observer:\n  inbound.telegram.raw:\n    guard: true\n  inbound.telegram.text_message:\n    guard: true\n  inbound.telegram.callback_action:\n    guard: true\n"
 	files := map[string]string{
 		"alpha-receiver/detail/manifest.yaml": "version: 1.0.0\nplatform_version: '*'\n",
@@ -21,10 +21,10 @@ func CopyStandingRootTreePublic(t testing.TB) string {
 		"beta/manifest.yaml":                  "version: 1.0.0\nplatform_version: '*'\n",
 		"beta-receiver/manifest.yaml":         "version: 1.0.0\nplatform_version: '*'\n",
 		"manifest.yaml":                       "version: 1.0.0\nplatform_version: '*'\n",
-		"schema.yaml":                         "# fixture: standing-root-tree\nstages: []\n" + pins + outputs + "connect:\n    - {event: inbound.telegram.text_message, from: ., to: alpha-receiver}\n    - {event: inbound.telegram.callback_action, from: ., to: alpha-receiver}\n    - {event: inbound.telegram.text_message, from: beta, to: beta-receiver}\n    - {event: inbound.telegram.callback_action, from: beta, to: beta-receiver}\n",
+		"schema.yaml":                         "# fixture: standing-root-tree\nstages: []\n" + inputs + outputs + "connect:\n    - {event: inbound.telegram.text_message, from: ., to: alpha-receiver}\n    - {event: inbound.telegram.callback_action, from: ., to: alpha-receiver}\n    - {event: inbound.telegram.text_message, from: beta, to: beta-receiver}\n    - {event: inbound.telegram.callback_action, from: beta, to: beta-receiver}\n",
 		"nodes.yaml":                          nodes,
 		"policy.yaml":                         "operator_account: '420079'\n",
-		"beta/schema.yaml":                    "# fixture: beta\nstages: []\n" + pins + outputs,
+		"beta/schema.yaml":                    "# fixture: beta\nstages: []\n" + inputs + outputs,
 		"beta/policy.yaml":                    "operator_account: '420080'\n",
 		"beta/nodes.yaml":                     nodes,
 		"alpha-receiver/detail/schema.yaml":   "stages: []\n# fixture: detail\n",

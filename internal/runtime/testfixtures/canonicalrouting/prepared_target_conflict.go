@@ -10,7 +10,7 @@ func WritePreparedTargetConflict(t testing.TB) string {
 	for relative, source := range map[string]string{
 		"manifest.yaml":        "version: 1.0.0\nplatform_version: '*'\n",
 		"review/manifest.yaml": "version: 1.0.0\nplatform_version: '*'\n",
-		"schema.yaml":          "pins:\n  inputs: [prepared.aggregate.corruption, test.work]\n",
+		"schema.yaml":          "inputs: [prepared.aggregate.corruption, test.work]\n",
 		"events.yaml":          "prepared.aggregate.corruption:\ntest.work:\n",
 		"nodes.yaml": `validator-one:
   prepared.aggregate.corruption: {}

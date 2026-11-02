@@ -18,7 +18,7 @@ func CopySelectedInputAgentProbe(t testing.TB) string {
 		}
 		for file, body := range map[string]string{
 			"manifest.yaml": "version: 1.0.0\nplatform_version: '*'\n",
-			"schema.yaml":   "stages: []\n# fixture: selected-input-agent\n" + instance + "pins:\n  inputs:\n    - work.ready\n",
+			"schema.yaml":   "stages: []\n# fixture: selected-input-agent\n" + instance + "inputs:\n  - work.ready\n",
 			"events.yaml":   "work.ready:\n",
 			"agents.yaml":   "worker:\n  model: regular\n  intent:\n    inline: Complete the selected input.\n  subscriptions: [work.ready]\n",
 		} {
@@ -36,9 +36,9 @@ func CopySelectedConstructedAgentInput(t testing.TB) string {
 	for name, body := range map[string]string{
 		"child/manifest.yaml":     "version: 1.0.0\nplatform_version: '*'\n",
 		"manifest.yaml":           "version: 1.0.0\nplatform_version: '*'\n",
-		"schema.yaml":             "# fixture: selected-constructed-input\npins:\n  inputs:\n    - task.assigned\n  outputs:\n    - task.assigned\nconnect:\n  - {event: task.assigned, from: ., to: child}\n",
+		"schema.yaml":             "# fixture: selected-constructed-input\ninputs:\n  - task.assigned\noutputs:\n  - task.assigned\nconnect:\n  - {event: task.assigned, from: ., to: child}\n",
 		"events.yaml":             "task.assigned:\n",
-		"child/schema.yaml":       "# fixture: child\npins:\n  inputs:\n    - task.assigned\n",
+		"child/schema.yaml":       "# fixture: child\ninputs:\n  - task.assigned\n",
 		"child/agents.yaml":       "worker:\n  model: regular\n  intent: prompts/worker.md\n  subscriptions: [task.assigned]\n",
 		"child/prompts/worker.md": "Consume the assigned task.\n",
 	} {
@@ -61,10 +61,10 @@ func copySelectedNestedConstructedAgentInput(t testing.TB, fields, observer bool
 	for name, body := range map[string]string{
 		"manifest.yaml":       "version: 1.0.0\nplatform_version: '*'\n",
 		"templ/manifest.yaml": "version: 1.0.0\nplatform_version: '*'\n",
-		"schema.yaml":         "# fixture: selected-nested-constructed-input\npins:\n  inputs:\n    - task.assigned\n    - construction.started\n  outputs:\n    - task.assigned\nconnect:\n  - {event: task.assigned, from: ., to: templ, resolution: select}\n  - {event: task.assigned, from: ., to: templ/child}\n  - {event: task.assigned, from: ., to: templ/child/leaf}\n  - {event: task.assigned, from: ., to: templ/audit}\n  - {event: task.assigned, from: ., to: templ/audit/leaf}\n",
+		"schema.yaml":         "# fixture: selected-nested-constructed-input\ninputs:\n  - task.assigned\n  - construction.started\noutputs:\n  - task.assigned\nconnect:\n  - {event: task.assigned, from: ., to: templ, resolution: select}\n  - {event: task.assigned, from: ., to: templ/child}\n  - {event: task.assigned, from: ., to: templ/child/leaf}\n  - {event: task.assigned, from: ., to: templ/audit}\n  - {event: task.assigned, from: ., to: templ/audit/leaf}\n",
 		"events.yaml":         "task.assigned:\n  work_id: text\nconstruction.started:\n  work_id: text\n",
 		"nodes.yaml":          "anchor:\n  construction.started: {}\n",
-		"templ/schema.yaml":   "# fixture: templ\ninstance: work_id\nstages:\n  active: {}\n  done: {final: true}\npins:\n  inputs:\n    - task.assigned\n    - construction.started\n",
+		"templ/schema.yaml":   "# fixture: templ\ninstance: work_id\nstages:\n  active: {}\n  done: {final: true}\ninputs:\n  - task.assigned\n  - construction.started\n",
 		"templ/state.yaml":    "work_id: text\n",
 		"templ/events.yaml":   "construction.started:\n  work_id: text\n",
 		"templ/nodes.yaml":    "bootstrap:\n  task.assigned:\n    emit:\n      event: construction.started\n      fields:\n        work_id: payload.work_id\nfinish:\n  construction.started:\n    advances_to: done\n",
@@ -77,7 +77,7 @@ func copySelectedNestedConstructedAgentInput(t testing.TB, fields, observer bool
 				"manifest.yaml": "version: 1.0.0\nplatform_version: '*'\n",
 				"events.yaml":   "work.ready:\n  work_id: text\nwork.finish:\n",
 				"nodes.yaml":    "publish:\n  task.assigned:\n    emit:\n      event: work.ready\n      fields:\n        work_id: payload.work_id\nfinish:\n  work.finish:\n    advances_to: done\n",
-				"schema.yaml":   "# fixture: descendant\nstages:\n  active: {}\n  done: {final: true}\npins:\n  inputs:\n    - task.assigned\nrequired_agents:\n  - role: worker\n    subscribes_to: [work.ready]\n",
+				"schema.yaml":   "# fixture: descendant\nstages:\n  active: {}\n  done: {final: true}\ninputs:\n  - task.assigned\n",
 				"agents.yaml":   "worker:\n  model: regular\n  intent:\n    inline: Consume the exact assigned task.\n  subscriptions: [work.ready]\n  emit_events: [work.finish]\n",
 			} {
 				if name == "agents.yaml" && observer {
@@ -118,6 +118,6 @@ func CopyUnresolvedSelectedForkInput(t testing.TB) string {
 	root := t.TempDir()
 	copyTree(t, filepath.Join(RepoRoot(t), "tests/tier1-primitives/test-emits-multiple"), root)
 	ApplyOverlay(t, root, "events.yaml", "ghost.event:\n")
-	writeClosedVariantFile(t, root, "schema.yaml", "stages:\n  pending: {}\n  done: {final: true}\npins:\n  inputs: [ghost.event]\n  outputs: [item.processed]\n")
+	writeClosedVariantFile(t, root, "schema.yaml", "stages:\n  pending: {}\n  done: {final: true}\ninputs: [ghost.event]\noutputs: [item.processed]\n")
 	return root
 }

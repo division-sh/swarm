@@ -12,7 +12,7 @@ func CopyClockDeployment(t testing.TB, nested bool) string {
 	root := t.TempDir()
 	writeClosedVariantFile(t, root, "manifest.yaml", "version: 1.0.0\nplatform_version: '*'\n")
 	if !nested {
-		writeClosedVariantFile(t, root, "schema.yaml", "# fixture: clock-export\nstages: []\nschedules:\n  poll: {every: 250ms, emit: poll.tick}\npins:\n  outputs: [poll.tick]\n")
+		writeClosedVariantFile(t, root, "schema.yaml", "# fixture: clock-export\nstages: []\nschedules:\n  poll: {every: 250ms, emit: poll.tick}\noutputs: [poll.tick]\n")
 		writeClosedVariantFile(t, root, "events.yaml", "poll.tick:\n")
 		return root
 	}
@@ -36,8 +36,8 @@ func CopyParentConnectClock(t testing.TB, connected bool) string {
 		writeClosedVariantFile(t, root, "consumer/events.yaml", "work.ready:\n")
 	}
 	writeClosedVariantFile(t, root, "schema.yaml", rootSchema)
-	writeClosedVariantFile(t, root, "producer/schema.yaml", "stages: []\nschedules:\n  poll: {every: 5m, emit: work.ready}\npins:\n  outputs: [work.ready]\n")
+	writeClosedVariantFile(t, root, "producer/schema.yaml", "stages: []\nschedules:\n  poll: {every: 5m, emit: work.ready}\noutputs: [work.ready]\n")
 	writeClosedVariantFile(t, root, "producer/events.yaml", "work.ready:\n")
-	writeClosedVariantFile(t, root, "consumer/schema.yaml", "stages: []\npins:\n  inputs: [work.ready]\n")
+	writeClosedVariantFile(t, root, "consumer/schema.yaml", "stages: []\ninputs: [work.ready]\n")
 	return root
 }

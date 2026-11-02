@@ -33,16 +33,15 @@ stages:
   waiting: {}
   active: {}
   done: {final: true}
-pins:
-  inputs:
-    - work.requested
-    - root.closed
-    - review.retry
-    - review.closed
-  outputs:
-    - work.started
-    - review.retry
-    - review.closed
+inputs:
+  - work.requested
+  - root.closed
+  - review.retry
+  - review.closed
+outputs:
+  - work.started
+  - review.retry
+  - review.closed
 connect:
   - {event: work.started, from: ., to: review}
   - {event: review.retry, from: ., to: review}
@@ -70,11 +69,10 @@ loops:
     revision_field: revision_id
     max_attempts: 3
     escape: {advances_to: exhausted}
-pins:
-  inputs:
-    - work.started
-    - review.retry
-    - review.closed
+inputs:
+  - work.started
+  - review.retry
+  - review.closed
 `,
 		"review/state.yaml": "observed_revision: \"\"\nobserved_token: \"\"\n",
 		"review/events.yaml": `review.requested:

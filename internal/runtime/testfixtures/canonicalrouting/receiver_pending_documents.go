@@ -9,9 +9,9 @@ func ActivityTerminalReplayDocuments(t testing.TB) map[string]string {
 	return map[string]string{
 		"manifest.yaml":          "version: 1.0.0\nplatform_version: '*'\n",
 		"research/manifest.yaml": "version: 1.0.0\nplatform_version: '*'\n",
-		"schema.yaml":            "# fixture: activity-journal-proof\nstages: []\npins:\n  inputs: [activity.source]\nconnect:\n  - event: activity.source\n    from: .\n    to: research\n    resolution: create\n",
+		"schema.yaml":            "# fixture: activity-journal-proof\nstages: []\ninputs: [activity.source]\nconnect:\n  - event: activity.source\n    from: .\n    to: research\n    resolution: create\n",
 		"events.yaml":            "activity.source:\n  marker: text\n",
-		"research/schema.yaml":   "# fixture: research\ninstance: marker\nstages: []\npins:\n  inputs: [activity.source]\n",
+		"research/schema.yaml":   "# fixture: research\ninstance: marker\nstages: []\ninputs: [activity.source]\n",
 		"research/state.yaml":    "marker: text\n",
 		"research/nodes.yaml":    "scanner:\n  activity.source: {}\n",
 	}
@@ -23,10 +23,10 @@ func DynamicTopologyStartupDocuments(t testing.TB, label string) map[string]stri
 	t.Helper()
 	return map[string]string{
 		"manifest.yaml":        "version: 1.0.0\nplatform_version: \">=0.7.0 <0.8.0\"\n",
-		"schema.yaml":          "# fixture: startup-preflight\nstages: []\npins:\n  inputs: [spawn.requested]\n  outputs: [worker.requested]\nconnect:\n  - event: worker.requested\n    from: .\n    to: worker\n    resolution: create\n# " + label + "\n",
+		"schema.yaml":          "# fixture: startup-preflight\nstages: []\ninputs: [spawn.requested]\noutputs: [worker.requested]\nconnect:\n  - event: worker.requested\n    from: .\n    to: worker\n    resolution: create\n# " + label + "\n",
 		"events.yaml":          "spawn.requested:\n  worker_id: text\nworker.requested:\n  worker_id: text\n",
 		"nodes.yaml":           "orchestrator:\n  spawn.requested:\n    emit:\n      event: worker.requested\n      fields:\n        worker_id: payload.worker_id\n",
-		"worker/schema.yaml":   "# fixture: worker\ninstance: worker_id\nstages:\n  idle: {}\npins:\n  inputs: [worker.requested]\n",
+		"worker/schema.yaml":   "# fixture: worker\ninstance: worker_id\nstages:\n  idle: {}\ninputs: [worker.requested]\n",
 		"worker/manifest.yaml": "version: 1.0.0\nplatform_version: \">=0.7.0 <0.8.0\"\n",
 		"worker/state.yaml":    "worker_id: text\n",
 		"worker/nodes.yaml":    "task-handler:\n  worker.requested: {}\n",
@@ -40,9 +40,9 @@ func ReceiverPendingExecutionDocuments(t testing.TB) map[string]string {
 	return map[string]string{
 		"manifest.yaml":          "version: 1.0.0\nplatform_version: '*'\n",
 		"review/manifest.yaml":   "version: 1.0.0\nplatform_version: '*'\n",
-		"schema.yaml":            "# fixture: pending-static-actor\npins:\n  inputs: [work.requested]\nconnect:\n  - {event: work.requested, from: ., to: review}\n",
+		"schema.yaml":            "# fixture: pending-static-actor\ninputs: [work.requested]\nconnect:\n  - {event: work.requested, from: ., to: review}\n",
 		"events.yaml":            "work.requested:\n",
-		"review/schema.yaml":     "# fixture: review\nstages:\n  pending: {}\npins:\n  inputs: [work.requested]\n",
+		"review/schema.yaml":     "# fixture: review\nstages:\n  pending: {}\ninputs: [work.requested]\n",
 		"review/agents.yaml":     "worker:\n  model: regular\n  intent: {inline: Acknowledge the exact assigned work.}\n  subscriptions: [work.requested]\n  mock: {kind: python, module: mocks/worker.py}\n",
 		"review/mocks/worker.py": "def handle(input):\n    return {\"text\": \"Acknowledged.\", \"usage\": {\"input_tokens\": 1, \"output_tokens\": 1}}\n",
 	}
@@ -55,9 +55,9 @@ func ReceiverPublicationUncertaintyDocuments(t testing.TB) map[string]string {
 	return map[string]string{
 		"manifest.yaml":        "version: 1.0.0\nplatform_version: '*'\n",
 		"review/manifest.yaml": "version: 1.0.0\nplatform_version: '*'\n",
-		"schema.yaml":          "# fixture: uncertain-static-receiver\npins:\n  inputs: [work.requested]\nconnect:\n  - {event: work.requested, from: ., to: review}\n",
+		"schema.yaml":          "# fixture: uncertain-static-receiver\ninputs: [work.requested]\nconnect:\n  - {event: work.requested, from: ., to: review}\n",
 		"events.yaml":          "work.requested:\n",
-		"review/schema.yaml":   "# fixture: review\nstages:\n  pending: {}\npins:\n  inputs: [work.requested]\n",
+		"review/schema.yaml":   "# fixture: review\nstages:\n  pending: {}\ninputs: [work.requested]\n",
 		"review/agents.yaml":   "worker:\n  model: regular\n  intent: {inline: Review the assigned work.}\n  subscriptions: [work.requested]\n",
 	}
 }

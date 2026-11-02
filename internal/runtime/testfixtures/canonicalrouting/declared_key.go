@@ -18,9 +18,8 @@ func CopyTargetedDeclaredKey(t testing.TB, acquisition string) string {
 	writeClosedVariantFile(t, root, "manifest.yaml", "version: 1.0.0\nplatform_version: '*'\n")
 	writeClosedVariantFile(t, root, "review/manifest.yaml", "version: 1.0.0\nplatform_version: '*'\n")
 	writeClosedVariantFile(t, root, "schema.yaml", fmt.Sprintf(`# fixture: declared-key-execution
-pins:
-  inputs: [work.requested]
-  outputs: [work.keyed]
+inputs: [work.requested]
+outputs: [work.keyed]
 connect:
   - {event: work.keyed, from: ., to: review, resolution: %s}
 `, strings.ReplaceAll(acquisition, "_", "-")))
@@ -39,9 +38,8 @@ instance: %s
 stages:
   active: {}
   done: {final: true}
-pins:
-  inputs:
-    - work.keyed
+inputs:
+  - work.keyed
 `, instanceField))
 	writeClosedVariantFile(t, root, "review/state.yaml", "receiver_id: {type: text, indexed: true}\naccount_id: {type: text, indexed: true}\nowner: text\n")
 	writeClosedVariantFile(t, root, "review/nodes.yaml", `key-consumer:

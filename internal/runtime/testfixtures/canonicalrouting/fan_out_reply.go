@@ -20,9 +20,8 @@ func CopyPublishedFanOutReply(t testing.TB) string {
 		"        account_id: payload.account_id\n        request_id: payload.request_id\n",
 		"        account_id: payload.account_id\n        request_id: payload.request_id\n        items: payload.items\n")
 	writeClosedVariantFile(t, root, "provider/manifest.yaml", "version: 1.0.0\nplatform_version: '*'\n")
-	writeClosedVariantFile(t, root, "provider/schema.yaml", `pins:
-  inputs: [provider.requested]
-  outputs: [provider.replied]
+	writeClosedVariantFile(t, root, "provider/schema.yaml", `inputs: [provider.requested]
+outputs: [provider.replied]
 `,
 	)
 	writeClosedVariantFile(t, root, "provider/events.yaml", `provider.replied:
@@ -94,9 +93,8 @@ func CopyNestedFanOutReply(t testing.TB) string {
     correlation_key: request_id
 `)
 	writeClosedVariantFile(t, root, "provider/manifest.yaml", "version: 1.0.0\nplatform_version: '*'\n")
-	writeClosedVariantFile(t, root, "provider/schema.yaml", `pins:
-  inputs: [provider.requested, t.replied]
-  outputs: [t.requested, provider.replied]
+	writeClosedVariantFile(t, root, "provider/schema.yaml", `inputs: [provider.requested, t.replied]
+outputs: [t.requested, provider.replied]
 `,
 	)
 	writeClosedVariantFile(t, root, "provider/events.yaml", `t.requested:
