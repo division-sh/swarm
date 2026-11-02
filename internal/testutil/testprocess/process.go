@@ -219,6 +219,9 @@ func execute(config bootstrap) {
 			defer read.Close()
 			defer write.Close()
 			guard := exec.Command(executable)
+			// Group cancellation may intentionally leave the payload alive. Its
+			// lifetime guard must survive it without changing the payload's group.
+			guard.SysProcAttr = &syscall.SysProcAttr{Setpgid: true}
 			guard.Env = bootstrapEnvironment(os.Environ(), bootstrap{Watch: true, Owner: config.Owner, Target: os.Getpid(), Ready: 3})
 			guard.ExtraFiles = make([]*os.File, config.Status-2)
 			guard.ExtraFiles[0] = write

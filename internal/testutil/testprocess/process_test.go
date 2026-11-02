@@ -60,6 +60,7 @@ func TestProcessFixture(t *testing.T) {
 	}
 	switch config.Mode {
 	case "outer":
+		signal.Ignore(syscall.SIGINT, syscall.SIGTERM, syscall.SIGHUP)
 		owner, err := Current()
 		if err != nil {
 			t.Fatal(err)
@@ -186,6 +187,9 @@ func TestParentDeathTerminatesHelperAndCeasesWritesBeforeRemoval(t *testing.T) {
 					mode = "outer"
 				}
 				parent := fixtureCommand(t, fixture{Mode: mode, Root: root, Watched: watched})
+				if ending == "nested" {
+					parent.SysProcAttr = &syscall.SysProcAttr{Setpgid: true}
+				}
 				var diagnostics bytes.Buffer
 				parent.Stdout, parent.Stderr = &diagnostics, &diagnostics
 				if ending == "timeout" {
@@ -230,6 +234,13 @@ func TestParentDeathTerminatesHelperAndCeasesWritesBeforeRemoval(t *testing.T) {
 					await(t, func() bool { _, err := os.Stat(filepath.Join(root, "inner-exited")); return err == nil }, "inner parent did not exit while its outer-owned helper survived")
 					if !alive(pid) {
 						t.Fatal("helper was bound to its deliberately exited inner parent")
+					}
+					if err := syscall.Kill(-parent.Process.Pid, syscall.SIGTERM); err != nil {
+						t.Fatal(err)
+					}
+					time.Sleep(100 * time.Millisecond)
+					if !alive(parent.Process.Pid) || !alive(pid) {
+						t.Fatal("group cancellation bypassed intentional survivor fixture")
 					}
 				}
 				if ending == "kill" || ending == "nested" {
