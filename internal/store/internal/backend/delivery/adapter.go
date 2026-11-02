@@ -3387,21 +3387,9 @@ func (a *Adapter) scanRecord(row scanner) (deliveryRecord, error) {
 		return deliveryRecord{}, fmt.Errorf("%w: persisted delivery subscriber class: %v", ErrConflict, err)
 	}
 	record.SubscriberClass = class
-	authorityExecutionIdentity := authorityExecutionID
-	authorityForkRunID := ""
-	if ExecutionAuthorityKind(authorityKind) == ExecutionAuthoritySelectedContractFork {
-		if selectedExecutionID != authorityExecutionID || selectedGeneration != authorityGeneration {
-			return deliveryRecord{}, fmt.Errorf("%w: selected delivery authority projection mismatch", ErrConflict)
-		}
-		authorityExecutionIdentity = selectedExecutionID
-		authorityForkRunID = selectedForkRunID
-	}
-	record.Authority, err = DecodeExecutionAuthority(
-		ExecutionAuthorityKind(authorityKind), authorityBundleHash,
-		authorityExecutionIdentity, authorityForkRunID, authorityGeneration,
-	)
+	record.Authority, err = decodePersistedDeliveryAuthority(authorityKind, authorityBundleHash, authorityExecutionID, selectedExecutionID, selectedForkRunID, authorityGeneration, selectedGeneration)
 	if err != nil {
-		return deliveryRecord{}, fmt.Errorf("%w: persisted delivery execution authority: %v", ErrConflict, err)
+		return deliveryRecord{}, err
 	}
 	record.Status, err = ParseStatus(status)
 	if err != nil {
@@ -3476,6 +3464,23 @@ func (a *Adapter) scanRecord(row scanner) (deliveryRecord, error) {
 		return deliveryRecord{}, err
 	}
 	return record, nil
+}
+
+func decodePersistedDeliveryAuthority(kind, bundleHash, executionID, selectedExecutionID, selectedForkRunID string, generation, selectedGeneration uint64) (ExecutionAuthority, error) {
+	authorityExecutionIdentity := executionID
+	authorityForkRunID := ""
+	if ExecutionAuthorityKind(kind) == ExecutionAuthoritySelectedContractFork {
+		if selectedExecutionID != executionID || selectedGeneration != generation {
+			return ExecutionAuthority{}, fmt.Errorf("%w: selected delivery authority projection mismatch", ErrConflict)
+		}
+		authorityExecutionIdentity = selectedExecutionID
+		authorityForkRunID = selectedForkRunID
+	}
+	authority, err := DecodeExecutionAuthority(ExecutionAuthorityKind(kind), bundleHash, authorityExecutionIdentity, authorityForkRunID, generation)
+	if err != nil {
+		return ExecutionAuthority{}, fmt.Errorf("%w: persisted delivery execution authority: %v", ErrConflict, err)
+	}
+	return authority, nil
 }
 
 func hydrateRecordFinalSelection(selectionID, selectionContext, disposition, flowPath, family, semanticPath, label sql.NullString) (SelectionPresence, error) {
