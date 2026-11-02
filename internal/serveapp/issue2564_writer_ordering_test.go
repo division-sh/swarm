@@ -309,7 +309,7 @@ func (p *issue2564Provider) ServeHTTP(w http.ResponseWriter, req *http.Request) 
 		}
 	}
 	if round > 0 {
-		var results []any
+		var results []issue2564ToolResult
 		if messages, ok := request.Messages.([]any); ok && len(messages) > 0 {
 			results = issue2564ToolResults(messages[len(messages)-1])
 		}
@@ -320,7 +320,10 @@ func (p *issue2564Provider) ServeHTTP(w http.ResponseWriter, req *http.Request) 
 			id := fmt.Sprintf("%s-%d-%d", actor, round-1, i)
 			var result map[string]any
 			if i < len(results) {
-				result, _ = results[i].(map[string]any)
+				if results[i].id != id {
+					admissionErr = fmt.Errorf("generated %s result id=%q, want %q", call.name, results[i].id, id)
+				}
+				result = results[i].value
 			}
 			if result == nil {
 				admissionErr = fmt.Errorf("generated %s call %s not acknowledged in current result batch: %#v", call.name, id, result)
@@ -377,22 +380,36 @@ func issue2564SchemaProperty(value any, name string) bool {
 
 // Anthropic's existing observation translation joins the current outputs as
 // newline-delimited JSON. Do not search an older batch or infer a receipt.
-func issue2564ToolResults(value any) []any {
+type issue2564ToolResult struct {
+	id    string
+	value map[string]any
+}
+
+func issue2564ToolResults(value any) []issue2564ToolResult {
 	message, ok := value.(map[string]any)
 	if !ok || message["role"] != "user" {
 		return nil
 	}
-	content, ok := message["content"].(string)
+	content, ok := message["content"].([]any)
 	if !ok {
 		return nil
 	}
-	var results []any
-	for _, line := range strings.Split(content, "\n") {
-		var result map[string]any
-		if json.Unmarshal([]byte(line), &result) != nil || result == nil {
+	var results []issue2564ToolResult
+	for _, value := range content {
+		block, ok := value.(map[string]any)
+		if !ok || block["type"] != "tool_result" {
 			return nil
 		}
-		results = append(results, result)
+		id, _ := block["tool_use_id"].(string)
+		text, ok := block["content"].(string)
+		if id == "" || !ok {
+			return nil
+		}
+		var result map[string]any
+		if json.Unmarshal([]byte(text), &result) != nil || result == nil {
+			return nil
+		}
+		results = append(results, issue2564ToolResult{id: id, value: result})
 	}
 	return results
 }
