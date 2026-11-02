@@ -2098,8 +2098,14 @@ func buildRuntimeHost(ctx context.Context, req runtimeCompositionRequest, reconc
 		return 1
 	}
 
-	if req.OnReady != nil {
-		err := req.OnReady(ctx, "http://"+apiListener.Addr().String(), serveRuntimePublicationOptions(stores, apiStoreCaps, primaryContext), primaryContext.runtime)
+	return finishRuntimeHost(ctx, req.OnReady != nil, func() error {
+		return req.OnReady(ctx, "http://"+apiListener.Addr().String(), serveRuntimePublicationOptions(stores, apiStoreCaps, primaryContext), primaryContext.runtime)
+	}, ready, presenter, ownershipLoss)
+}
+
+func finishRuntimeHost(ctx context.Context, privateSession bool, runPrivateSession func() error, ready *runtimepublicingress.ReadinessOwner, presenter *serveLifecyclePresenter, ownershipLoss <-chan runtimestartupownership.TerminalResult) int {
+	if privateSession {
+		err := runPrivateSession()
 		ready.Store(false)
 		if err != nil {
 			presenter.runtimeFailure("test_execution", err)
