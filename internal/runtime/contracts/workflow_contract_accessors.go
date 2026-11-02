@@ -903,31 +903,16 @@ func (b *WorkflowContractBundle) FlowRequiredAgentFacts(flowID string) []Require
 	if flowID == "" {
 		return nil
 	}
-	if schema, ok := b.FlowSchemas[flowID]; ok {
-		if RequiredAgentsDeclared(schema) {
-			return explicitRequiredAgentFacts(schema.RequiredAgents, b.flowRequiredAgentSchemaFile(flowID))
-		}
-		return b.inferredRequiredAgentFacts(flowID)
-	}
-	if facts := b.Semantics.FlowAgentFacts[flowID]; len(facts) > 0 {
-		return cloneRequiredAgentFacts(facts)
-	}
-	return explicitRequiredAgentFacts(b.Semantics.FlowAgents[flowID], b.flowRequiredAgentSchemaFile(flowID))
+	return b.declaredRequiredAgentFacts(flowID)
 }
 func (b *WorkflowContractBundle) RootRequiredAgents() []FlowRequiredAgent {
 	return FlowRequiredAgentsFromFacts(b.RootRequiredAgentFacts())
 }
 func (b *WorkflowContractBundle) RootRequiredAgentFacts() []RequiredAgentFact {
-	if b == nil || b.RootSchema == nil {
-		return nil
-	}
-	if RequiredAgentsDeclared(*b.RootSchema) {
-		return explicitRequiredAgentFacts(b.RootSchema.RequiredAgents, b.flowRequiredAgentSchemaFile("."))
-	}
-	return b.inferredRequiredAgentFacts(".")
+	return b.declaredRequiredAgentFacts(".")
 }
 
-func (b *WorkflowContractBundle) inferredRequiredAgentFacts(ownerFlowID string) []RequiredAgentFact {
+func (b *WorkflowContractBundle) declaredRequiredAgentFacts(ownerFlowID string) []RequiredAgentFact {
 	ownerFlowID = strings.TrimSpace(ownerFlowID)
 	if b == nil {
 		return nil
@@ -946,21 +931,10 @@ func (b *WorkflowContractBundle) inferredRequiredAgentFacts(ownerFlowID string) 
 			Role:         role,
 			SubscribesTo: normalizeStrings(record.Entry.Subscriptions),
 			Emits:        record.Entry.ProducedEvents(),
-			Source:       RequiredAgentSourceInferred,
 			SourceFile:   strings.TrimSpace(record.Source.File),
 		})
 	}
 	return out
-}
-func (b *WorkflowContractBundle) flowRequiredAgentSchemaFile(flowID string) string {
-	flowID = strings.TrimSpace(flowID)
-	if b == nil || flowID == "" {
-		return ""
-	}
-	if view, ok := b.FlowViewByID(flowID); ok && view != nil {
-		return strings.TrimSpace(view.Paths.SchemaFile)
-	}
-	return ""
 }
 func (b *WorkflowContractBundle) EventContractSource(eventType string) (ContractItemSource, bool) {
 	if b == nil {

@@ -11,11 +11,6 @@ import (
 )
 
 const (
-	RequiredAgentSourceExplicit = "explicit"
-	RequiredAgentSourceInferred = "inferred"
-)
-
-const (
 	AgentFieldSourceAuthored        = "authored"
 	AgentFieldSourcePlatformDefault = "platform_default"
 	AgentFieldSourceDerived         = "derived"
@@ -134,10 +129,6 @@ func cloneBoolMap(in map[string]bool) map[string]bool {
 	return out
 }
 
-func RequiredAgentsDeclared(schema FlowSchemaDocument) bool {
-	return schema.RequiredAgentsDeclared || len(schema.RequiredAgents) > 0
-}
-
 func FlowRequiredAgentsFromFacts(facts []RequiredAgentFact) []FlowRequiredAgent {
 	if len(facts) == 0 {
 		return nil
@@ -148,44 +139,6 @@ func FlowRequiredAgentsFromFacts(facts []RequiredAgentFact) []FlowRequiredAgent 
 			Role:         strings.TrimSpace(fact.Role),
 			SubscribesTo: normalizeStrings(fact.SubscribesTo),
 			Emits:        normalizeStrings(fact.Emits),
-			Description:  strings.TrimSpace(fact.Description),
-		})
-	}
-	return out
-}
-
-func cloneRequiredAgentFacts(facts []RequiredAgentFact) []RequiredAgentFact {
-	if len(facts) == 0 {
-		return nil
-	}
-	out := make([]RequiredAgentFact, len(facts))
-	for i, fact := range facts {
-		out[i] = RequiredAgentFact{
-			Role:         strings.TrimSpace(fact.Role),
-			SubscribesTo: normalizeStrings(fact.SubscribesTo),
-			Emits:        normalizeStrings(fact.Emits),
-			Description:  strings.TrimSpace(fact.Description),
-			Source:       strings.TrimSpace(fact.Source),
-			SourceFile:   strings.TrimSpace(fact.SourceFile),
-		}
-	}
-	return out
-}
-
-func explicitRequiredAgentFacts(required []FlowRequiredAgent, sourceFile string) []RequiredAgentFact {
-	if len(required) == 0 {
-		return nil
-	}
-	sourceFile = strings.TrimSpace(sourceFile)
-	out := make([]RequiredAgentFact, 0, len(required))
-	for _, requiredAgent := range required {
-		out = append(out, RequiredAgentFact{
-			Role:         strings.TrimSpace(requiredAgent.Role),
-			SubscribesTo: normalizeStrings(requiredAgent.SubscribesTo),
-			Emits:        normalizeStrings(requiredAgent.Emits),
-			Description:  strings.TrimSpace(requiredAgent.Description),
-			Source:       RequiredAgentSourceExplicit,
-			SourceFile:   sourceFile,
 		})
 	}
 	return out

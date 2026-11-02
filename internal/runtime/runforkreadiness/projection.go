@@ -466,13 +466,5 @@ func selectedContractWorkflowStateAgentsEqual(left, right []runfork.RunForkSelec
 }
 
 func StaticAgentBlueprints(source semanticview.Source) ([]runtimemanager.AgentMaterializationBlueprint, error) {
-	staticRecords, err := runtimemanager.StaticAgentMaterializationBlueprints(source)
-	if err != nil {
-		return nil, err
-	}
-	requiredRecords, err := runtimemanager.StaticFlowRequiredAgentMaterializationBlueprints(source)
-	if err != nil {
-		return nil, err
-	}
-	return append(staticRecords, requiredRecords...), nil
+	return runtimemanager.StaticAgentMaterializationBlueprints(source)
 }

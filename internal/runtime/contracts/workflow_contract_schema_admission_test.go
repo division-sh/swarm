@@ -41,7 +41,7 @@ func TestSchemaAdmissionOwnsCompleteRoot(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if schema.Instance.Empty() || len(schema.Connect) != 1 || len(schema.Pins.Inputs.EventPins) != 1 || !schema.RequiredAgentsDeclared || len(schema.RequiredAgents) != 1 || len(schema.StageDeclarations.Entries) != 2 || len(schema.LoopDeclarations.Entries) != 1 {
+	if schema.Instance.Empty() || len(schema.Connect) != 1 || len(schema.Pins.Inputs.EventPins) != 1 || len(schema.StageDeclarations.Entries) != 2 || len(schema.LoopDeclarations.Entries) != 1 {
 		t.Fatalf("nested family lost: %#v", schema)
 	}
 	gate := schema.StageDeclarations.Entries[0].Gate
@@ -54,7 +54,7 @@ func TestSchemaAdmissionOwnsCompleteRoot(t *testing.T) {
 }
 
 func TestSchemaAdmissionRetiredPresence(t *testing.T) {
-	for _, key := range []string{"activation", "initial_state", "states", "terminal_states", "tool_surface", "entity", "namespace_prefix", "namespace_rule", "instance_variables", "name", "imports", "ingress"} {
+	for _, key := range []string{"activation", "initial_state", "states", "terminal_states", "tool_surface", "entity", "namespace_prefix", "namespace_rule", "instance_variables", "name", "imports", "ingress", "pins", "required_agents"} {
 		for _, value := range []string{"null", "''", "false", "x", "{}", "{a: b}", "[]", "[x]"} {
 			t.Run(key+"/"+value, func(t *testing.T) {
 				_, err := loadSchemaFragment(t, "stages: []\n"+key+": "+value+"\n")

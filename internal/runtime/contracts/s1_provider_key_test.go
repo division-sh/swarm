@@ -11,7 +11,7 @@ import (
 
 func TestS1ProviderDirectoryKeySurvivesSchemaReferences(t *testing.T) {
 	const event = "inbound.telegram-sales.message"
-	snapshot, err := yamlsource.Load([]byte(fmt.Sprintf("pins:\n  inputs: [%s]\n  outputs: [%s]\nconnect:\n  - {event: %s, from: ., to: child, resolution: select}\n", event, event, event)))
+	snapshot, err := yamlsource.Load([]byte(fmt.Sprintf("inputs: [%s]\noutputs: [%s]\nconnect:\n  - {event: %s, from: ., to: child, resolution: select}\n", event, event, event)))
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -114,8 +114,8 @@ func TestS1ProviderKeyBoundariesReachEveryReferenceAndSchemaOwner(t *testing.T) 
 			}
 			event := "inbound." + tc.key + ".message"
 			for _, authored := range []struct{ label, body string }{
-				{"input", fmt.Sprintf("pins: {inputs: [%q]}\n", event)},
-				{"output", fmt.Sprintf("pins: {outputs: [%q]}\n", event)},
+				{"input", fmt.Sprintf("inputs: [%q]\n", event)},
+				{"output", fmt.Sprintf("outputs: [%q]\n", event)},
 				{"connect", fmt.Sprintf("connect: [{event: %q, from: ., to: child, resolution: select}]\n", event)},
 				{"rename", fmt.Sprintf("connect: [{event: business.message, from: ., to: child, resolution: select, rename: %q}]\n", event)},
 				{"reply", fmt.Sprintf("connect: [{event: business.reply, from: child, to: ., replies_to: %q}]\n", event)},

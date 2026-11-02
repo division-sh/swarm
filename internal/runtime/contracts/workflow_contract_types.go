@@ -108,9 +108,6 @@ type WorkflowSemanticView struct {
 	flowOutputEventPins    map[string][]CompiledFlowOutputPin
 	flowIngressAliases     map[string]compiledFlowIngressAlias
 	CompositionConnects    []FlowConnect
-	FlowAgents             map[string][]FlowRequiredAgent
-	RootAgentFacts         []RequiredAgentFact
-	FlowAgentFacts         map[string][]RequiredAgentFact
 	EffectiveNodes         map[string]SystemNodeEffectiveSemantics
 	NodeHandlers           map[string]map[string]SystemNodeEventHandler
 	EventOwners            map[string][]string
@@ -1034,18 +1031,16 @@ func (r ScopedNodeRecord) Identity() (runtimeidentity.ExecutableNode, error) {
 }
 
 type FlowSchemaDocument struct {
-	Name                   string                   `yaml:"name"`
-	Ingress                *ProjectFlowIngress      `yaml:"ingress"`
-	Connect                []FlowConnect            `yaml:"connect"`
-	Imports                FlowSchemaImports        `yaml:"imports"`
-	Instance               TemplateInstanceField    `yaml:"instance"`
-	StageDeclarations      FlowStageDeclarations    `yaml:"stages"`
-	LoopDeclarations       FlowLoopDeclarations     `yaml:"loops"`
-	Schedules              map[string]FlowSchedule  `yaml:"schedules"`
-	Pins                   FlowPins                 `yaml:"pins"`
-	RequiredAgents         []FlowRequiredAgent      `yaml:"required_agents"`
-	RequiredAgentsDeclared bool                     `yaml:"-"`
-	AutoEmitOnCreate       AutoEmitOnCreateContract `yaml:"auto_emit_on_create"`
+	Name              string                   `yaml:"name"`
+	Ingress           *ProjectFlowIngress      `yaml:"ingress"`
+	Connect           []FlowConnect            `yaml:"connect"`
+	Imports           FlowSchemaImports        `yaml:"imports"`
+	Instance          TemplateInstanceField    `yaml:"instance"`
+	StageDeclarations FlowStageDeclarations    `yaml:"stages"`
+	LoopDeclarations  FlowLoopDeclarations     `yaml:"loops"`
+	Schedules         map[string]FlowSchedule  `yaml:"schedules"`
+	Pins              FlowPins                 `yaml:"pins"`
+	AutoEmitOnCreate  AutoEmitOnCreateContract `yaml:"auto_emit_on_create"`
 }
 
 // EffectiveMode is derived from the admitted identity declaration, never an
@@ -1170,14 +1165,11 @@ type FlowRequiredAgent struct {
 	Role         string   `yaml:"role"`
 	SubscribesTo []string `yaml:"subscribes_to"`
 	Emits        []string `yaml:"emits"`
-	Description  string   `yaml:"description"`
 }
 type RequiredAgentFact struct {
 	Role         string   `json:"role"`
 	SubscribesTo []string `json:"subscribes_to,omitempty"`
 	Emits        []string `json:"emits,omitempty"`
-	Description  string   `json:"description,omitempty"`
-	Source       string   `json:"source"`
 	SourceFile   string   `json:"source_file,omitempty"`
 }
 type WorkflowStageContract struct {

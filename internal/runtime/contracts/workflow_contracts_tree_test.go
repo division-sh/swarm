@@ -169,7 +169,7 @@ func TestAgentDeclarationRejectsDuplicateEffectiveNames(t *testing.T) {
 	}
 }
 
-func TestWorkflowContractBundleEffectiveRequiredAgentsInferWhenOmitted(t *testing.T) {
+func TestWorkflowContractBundleRequiredAgentsUseScopedDeclarations(t *testing.T) {
 	flowView := &FlowContractView{
 		Paths: FlowContractPaths{FlowPath: "analysis", SchemaFile: "analysis/schema.yaml", AgentsFile: "analysis/agents.yaml"},
 		Path:  "analysis",
@@ -193,10 +193,6 @@ func TestWorkflowContractBundleEffectiveRequiredAgentsInferWhenOmitted(t *testin
 		Children: []FlowContractView{*flowView},
 	}
 	bundle := &WorkflowContractBundle{
-		RootSchema: &FlowSchemaDocument{},
-		FlowSchemas: map[string]FlowSchemaDocument{
-			"analysis": {},
-		},
 		FlowTree: FlowTree{
 			Root:   root,
 			ByPath: map[string]*FlowContractView{".": root, "analysis": &root.Children[0]},
@@ -205,44 +201,19 @@ func TestWorkflowContractBundleEffectiveRequiredAgentsInferWhenOmitted(t *testin
 	}
 
 	rootFacts := bundle.RootRequiredAgentFacts()
-	if len(rootFacts) != 1 || rootFacts[0].Role != "root-agent" || rootFacts[0].Source != RequiredAgentSourceInferred {
-		t.Fatalf("root required agent facts = %#v, want inferred root-agent", rootFacts)
+	if len(rootFacts) != 1 || rootFacts[0].Role != "root-agent" || rootFacts[0].SourceFile != "agents.yaml" {
+		t.Fatalf("root required agent facts = %#v, want declared root-agent", rootFacts)
 	}
 	flowFacts := bundle.FlowRequiredAgentFacts("analysis")
-	if len(flowFacts) != 1 || flowFacts[0].Role != "analyzer" || flowFacts[0].Source != RequiredAgentSourceInferred {
-		t.Fatalf("flow required agent facts = %#v, want inferred analyzer", flowFacts)
+	if len(flowFacts) != 1 || flowFacts[0].Role != "analyzer" || flowFacts[0].SourceFile != "analysis/agents.yaml" {
+		t.Fatalf("flow required agent facts = %#v, want declared analyzer", flowFacts)
 	}
 	if got := bundle.FlowRequiredAgents("analysis"); len(got) != 1 || got[0].SubscribesTo[0] != "analysis.requested" || got[0].Emits[0] != "analysis.done" {
-		t.Fatalf("effective flow required agents = %#v, want inferred subscriptions/emits", got)
+		t.Fatalf("effective flow required agents = %#v, want declared subscriptions/emits", got)
 	}
-}
-
-func TestWorkflowContractBundleEffectiveRequiredAgentsPreserveExplicitEmpty(t *testing.T) {
-	flowView := &FlowContractView{
-		Paths: FlowContractPaths{FlowPath: "analysis", SchemaFile: "analysis/schema.yaml", AgentsFile: "analysis/agents.yaml"},
-		Path:  "analysis",
-		Agents: map[string]AgentRegistryEntry{
-			"analyzer": {Subscriptions: []string{"analysis.requested"}},
-		},
-	}
-	bundle := &WorkflowContractBundle{
-		RootSchema: &FlowSchemaDocument{
-			RequiredAgentsDeclared: true,
-		},
-		Agents: map[string]AgentRegistryEntry{
-			"root-agent": {Subscriptions: []string{"root.requested"}},
-		},
-		FlowSchemas: map[string]FlowSchemaDocument{
-			"analysis": {RequiredAgentsDeclared: true},
-		},
-		FlowTree: FlowTree{Root: flowView, ByPath: map[string]*FlowContractView{"analysis": flowView}, ByID: map[string]*FlowContractView{"analysis": flowView}},
-	}
-
-	if got := bundle.RootRequiredAgents(); len(got) != 0 {
-		t.Fatalf("root required agents = %#v, want explicit empty boundary", got)
-	}
-	if got := bundle.FlowRequiredAgents("analysis"); len(got) != 0 {
-		t.Fatalf("flow required agents = %#v, want explicit empty boundary", got)
+	flowFacts[0].SubscribesTo[0] = "mutated"
+	if got := bundle.FlowRequiredAgents("analysis"); got[0].SubscribesTo[0] != "analysis.requested" {
+		t.Fatalf("derived facts mutated the declaration: %#v", got)
 	}
 }
 
@@ -378,9 +349,8 @@ item_id: string
 stages:
   discovered: {}
   done: {final: true}
-pins:
-  outputs:
-    - vertical.shortlisted
+outputs:
+  - vertical.shortlisted
 `)
 	writeFixtureFile(t, filepath.Join(root, "scoring", "events.yaml"), `
 score.ready:
@@ -397,11 +367,10 @@ scoring-node:
 stages:
   researching: {}
   done: {final: true}
-pins:
-  inputs:
-    - vertical.shortlisted
-  outputs:
-    - validation.started
+inputs:
+  - vertical.shortlisted
+outputs:
+  - validation.started
 `)
 	writeFixtureFile(t, filepath.Join(root, "validation", "events.yaml"), `
 validation.started:
@@ -445,9 +414,8 @@ item_id: string
 stages:
   discovered: {}
   done: {final: true}
-pins:
-  outputs:
-    - vertical.shortlisted
+outputs:
+  - vertical.shortlisted
 `)
 	writeFixtureFile(t, filepath.Join(root, "scoring", "events.yaml"), `
 score.ready:
@@ -464,12 +432,11 @@ scoring-node:
 stages:
   researching: {}
   done: {final: true}
-pins:
-  inputs:
-    - vertical.shortlisted
-  outputs:
-    - validation.rule
-    - validation.started
+inputs:
+  - vertical.shortlisted
+outputs:
+  - validation.rule
+  - validation.started
 `)
 	writeFixtureFile(t, filepath.Join(root, "validation", "events.yaml"), `
 validation.rule:
@@ -528,11 +495,10 @@ status: string
 	writeFixtureFile(t, filepath.Join(root, "schema.yaml"), `stages:
   idle: {}
   done: {final: true}
-pins:
-  inputs:
-    - item.created
-  outputs:
-    - evidence.recorded
+inputs:
+  - item.created
+outputs:
+  - evidence.recorded
 `)
 	writeFixtureFile(t, filepath.Join(root, "agents.yaml"), `
 control-plane:

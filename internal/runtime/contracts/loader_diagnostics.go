@@ -129,6 +129,9 @@ func NewUndefinedFieldDiagnostic(context, key string, allowed map[string]struct{
 	if context == "schema" && key == "pins" {
 		remediation = "pins is not a schema key; declare inputs: and outputs: at the top level of schema.yaml."
 	}
+	if context == "schema" && key == "required_agents" {
+		remediation = "required_agents is not a schema key; every agent declared in agents.yaml is required in its own flow scope."
+	}
 	if context == "agent" && (key == "entity_writes" || key == "create") {
 		remediation = "Use writes: all or writes: [field, ...] for fields of this agent's own flow; omit writes: to grant no save or update tools. There is no create arm or cross-flow write grant."
 	}

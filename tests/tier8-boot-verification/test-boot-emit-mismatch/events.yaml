@@ -1,4 +1,0 @@
-task.requested:
-  task_type: string?
-task.completed:
-  result: string?
